@@ -1,8 +1,8 @@
-Here’s a quick way to exercise both the CLI and the (headless) GUI we have in guideXOSCpp.
+Here’s a quick way to exercise both the CLI and the (headless) GUI we have in guideXOSServer.
 Build and run
-•	Build the C++ project guideXOSCpp (C++14). In Visual Studio: set guideXOSCpp as Startup Project, x64 Debug, Build, then Start Without Debugging. Or use your existing vcxproj.
+•	Build the C++ project guideXOSServer (C++14). In Visual Studio: set guideXOSServer as Startup Project, x64 Debug, Build, then Start Without Debugging. Or use your existing vcxproj.
 •	The binary is an interactive console app (server.cpp has main).
-CLI smoke test (at the guideXOSCpp prompt)
+CLI smoke test (at the guideXOSServer prompt)
 •	mem — shows allocator usage.
 •	alloc 1024 — allocates bytes and prints pointer.
 •	tasks — shows scheduler stats.

@@ -47,7 +47,7 @@ static void help(){
 
 int main(){
     using namespace gxos;
-    Logger::write(LogLevel::Info, "guideXOSCpp server starting...");
+    Logger::write(LogLevel::Info, "guideXOSServer server starting...");
     auto pi = queryPlatform();
     Allocator::init(512ull*1024*1024); // 512MB simulated heap
     Scheduler::init(pi.cpuCount>0? pi.cpuCount:2);
@@ -157,6 +157,6 @@ int main(){
         }
     }
     Scheduler::shutdown();
-    Logger::write(LogLevel::Info, "guideXOSCpp server exiting.");
+    Logger::write(LogLevel::Info, "guideXOSServer server exiting.");
     return 0;
 }

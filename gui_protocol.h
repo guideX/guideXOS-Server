@@ -5,7 +5,7 @@
 #include "ipc.h"
 
 namespace gxos { namespace gui {
-    static const uint32_t kGuiProtocolVersion = 1;
+    static const uint32_t kGuiProtocolVersion = 2;
 
     enum class MsgType : uint32_t {
         MT_None=0,
@@ -31,7 +31,10 @@ namespace gxos { namespace gui {
         // New desktop parity messages
         MT_ShowDesktopToggle=20,   // payload empty
         MT_StateSave=21,           // force save state
-        MT_StateLoad=22            // force reload state (will close existing and load)
+        MT_StateLoad=22,           // force reload state (will close existing and load)
+        MT_DesktopLaunch=23,       // payload: action string
+        MT_DesktopPins=24,         // payload: comma-separated actions or JSON array string (implementation-defined)
+        MT_DesktopWallpaperSet=25  // payload: path string
     };
 
     struct WindowDesc { uint64_t id; std::string title; int w; int h; };

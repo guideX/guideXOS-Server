@@ -1,0 +1,71 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.14.36408.4
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "guideXOSServer", "guideXOSServer.vcxproj", "{CE8E69EE-F8B6-4FA6-A735-9EF2C05327DD}"
+EndProject
+Project("{D954291E-2A0B-460D-934E-DC6B0785DB48}") = "Corlib", "..\guideXOS\Corlib\Corlib.shproj", "{51E1B402-1D4F-4C9B-831C-45C8603353D5}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "guideXOS", "..\guideXOS\guideXOS\guideXOS.csproj", "{78685BEE-D75F-129F-19A3-5B6497D76628}"
+EndProject
+Project("{D954291E-2A0B-460D-934E-DC6B0785DB48}") = "Kernel", "..\guideXOS\Kernel\Kernel.shproj", "{066034BC-37FE-4605-8BDB-C525EC29DBE4}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "guideXOS.Server", "guideXOS.Server", "{02EA681E-C7D8-13C7-8484-4AC65E1B71E8}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "guideXOS.Desktop", "guideXOS.Desktop", "{512F8445-9B35-4EFE-84CE-E7ECC88E9CE7}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Debug|x64 = Debug|x64
+		Debug|x86 = Debug|x86
+		Release|Any CPU = Release|Any CPU
+		Release|x64 = Release|x64
+		Release|x86 = Release|x86
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{CE8E69EE-F8B6-4FA6-A735-9EF2C05327DD}.Debug|Any CPU.ActiveCfg = Debug|x64
+		{CE8E69EE-F8B6-4FA6-A735-9EF2C05327DD}.Debug|Any CPU.Build.0 = Debug|x64
+		{CE8E69EE-F8B6-4FA6-A735-9EF2C05327DD}.Debug|x64.ActiveCfg = Debug|x64
+		{CE8E69EE-F8B6-4FA6-A735-9EF2C05327DD}.Debug|x64.Build.0 = Debug|x64
+		{CE8E69EE-F8B6-4FA6-A735-9EF2C05327DD}.Debug|x86.ActiveCfg = Debug|Win32
+		{CE8E69EE-F8B6-4FA6-A735-9EF2C05327DD}.Debug|x86.Build.0 = Debug|Win32
+		{CE8E69EE-F8B6-4FA6-A735-9EF2C05327DD}.Release|Any CPU.ActiveCfg = Release|x64
+		{CE8E69EE-F8B6-4FA6-A735-9EF2C05327DD}.Release|Any CPU.Build.0 = Release|x64
+		{CE8E69EE-F8B6-4FA6-A735-9EF2C05327DD}.Release|x64.ActiveCfg = Release|x64
+		{CE8E69EE-F8B6-4FA6-A735-9EF2C05327DD}.Release|x64.Build.0 = Release|x64
+		{CE8E69EE-F8B6-4FA6-A735-9EF2C05327DD}.Release|x86.ActiveCfg = Release|Win32
+		{CE8E69EE-F8B6-4FA6-A735-9EF2C05327DD}.Release|x86.Build.0 = Release|Win32
+		{78685BEE-D75F-129F-19A3-5B6497D76628}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{78685BEE-D75F-129F-19A3-5B6497D76628}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{78685BEE-D75F-129F-19A3-5B6497D76628}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{78685BEE-D75F-129F-19A3-5B6497D76628}.Debug|x64.Build.0 = Debug|Any CPU
+		{78685BEE-D75F-129F-19A3-5B6497D76628}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{78685BEE-D75F-129F-19A3-5B6497D76628}.Debug|x86.Build.0 = Debug|Any CPU
+		{78685BEE-D75F-129F-19A3-5B6497D76628}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{78685BEE-D75F-129F-19A3-5B6497D76628}.Release|Any CPU.Build.0 = Release|Any CPU
+		{78685BEE-D75F-129F-19A3-5B6497D76628}.Release|x64.ActiveCfg = Release|Any CPU
+		{78685BEE-D75F-129F-19A3-5B6497D76628}.Release|x64.Build.0 = Release|Any CPU
+		{78685BEE-D75F-129F-19A3-5B6497D76628}.Release|x86.ActiveCfg = Release|Any CPU
+		{78685BEE-D75F-129F-19A3-5B6497D76628}.Release|x86.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{CE8E69EE-F8B6-4FA6-A735-9EF2C05327DD} = {02EA681E-C7D8-13C7-8484-4AC65E1B71E8}
+		{51E1B402-1D4F-4C9B-831C-45C8603353D5} = {512F8445-9B35-4EFE-84CE-E7ECC88E9CE7}
+		{78685BEE-D75F-129F-19A3-5B6497D76628} = {512F8445-9B35-4EFE-84CE-E7ECC88E9CE7}
+		{066034BC-37FE-4605-8BDB-C525EC29DBE4} = {512F8445-9B35-4EFE-84CE-E7ECC88E9CE7}
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {93615F61-90A8-4899-BB05-44ABDA356BEF}
+	EndGlobalSection
+	GlobalSection(SharedMSBuildProjectFiles) = preSolution
+		..\guideXOS\Kernel\Kernel.projitems*{066034bc-37fe-4605-8bdb-c525ec29dbe4}*SharedItemsImports = 13
+		..\guideXOS\Corlib\Corlib.projitems*{51e1b402-1d4f-4c9b-831c-45c8603353d5}*SharedItemsImports = 13
+		..\guideXOS\Corlib\Corlib.projitems*{78685bee-d75f-129f-19a3-5b6497d76628}*SharedItemsImports = 5
+		..\guideXOS\Kernel\Kernel.projitems*{78685bee-d75f-129f-19a3-5b6497d76628}*SharedItemsImports = 5
+	EndGlobalSection
+EndGlobal
