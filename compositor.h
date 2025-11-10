@@ -20,7 +20,11 @@ namespace gxos { namespace gui {
     struct DrawRectItem { int x; int y; int w; int h; uint8_t r; uint8_t g; uint8_t b; };
     enum class WidgetType { Button=1 };
     struct Widget { WidgetType type; int id; int x; int y; int w; int h; std::string text; bool hover=false; bool pressed=false; };
-    struct WinInfo { uint64_t id; std::string title; int x; int y; int w; int h; std::vector<std::string> texts; std::vector<DrawRectItem> rects; std::vector<Widget> widgets; bool minimized{false}; bool maximized{false}; int prevX{0}; int prevY{0}; int prevW{0}; int prevH{0}; bool dirty{true}; int snapState{0}; bool tombstoned{false}; HBITMAP taskbarIcon{nullptr}; };
+    struct WinInfo { uint64_t id; std::string title; int x; int y; int w; int h; std::vector<std::string> texts; std::vector<DrawRectItem> rects; std::vector<Widget> widgets; bool minimized{false}; bool maximized{false}; int prevX{0}; int prevY{0}; int prevW{0}; int prevH{0}; bool dirty{true}; int snapState{0}; bool tombstoned{false}; HBITMAP taskbarIcon{nullptr};
+        // Titlebar button hover/pressed state
+        bool titleBtnCloseHover{false}; bool titleBtnClosePressed{false};
+        bool titleBtnMaxHover{false}; bool titleBtnMaxPressed{false};
+        bool titleBtnMinHover{false}; bool titleBtnMinPressed{false}; };
     struct DesktopItem { std::string label; std::string action; bool pinned{false}; bool selected{false}; };
 
     class Compositor {
@@ -79,5 +83,7 @@ namespace gxos { namespace gui {
         static bool g_showDesktopActive; static std::vector<uint64_t> g_showDesktopMinimized; static uint64_t g_lastClickTicks; static uint64_t g_lastClickWin;
         static bool g_altTabOverlayActive; static uint64_t g_altTabOverlayTicks; static int g_altTabCycleIndex; static bool g_taskbarCycleActive; static int g_taskbarCycleIndex; static bool g_keyboardMoveActive; static bool g_keyboardSizeActive; static int g_kbOrigX; static int g_kbOrigY; static int g_kbOrigW; static int g_kbOrigH;
         static DesktopConfigData g_cfg; static uint64_t g_lastItemClickTicks; static int g_lastItemIndex;
+        // Start menu keyboard/selection state
+        static int g_startMenuSel; static int g_startMenuScroll;
     };
 } }
