@@ -62,15 +62,15 @@ desktop.showconfig
 ## Remaining Work (Phase 5)
 
 ### Priority 2: Taskbar Enhancements
-- [ ] TaskbarMenu (right-click context on taskbar)
-- [ ] WorkspaceManager backend implementation
+- [ ] TaskbarMenu (right-click context on taskbar) - UI pending, backend ready
+- [?] WorkspaceManager backend implementation - COMPLETE
 - [ ] Blur effect rendering for taskbar
 
 ### Priority 3: Start Menu Full Parity
-- [?] "All Programs" alphabetical view
-- [?] Right column shortcuts integration (Computer Files, Console, Recent Docs)
+- [?] "All Programs" alphabetical view - COMPLETE
+- [?] Right column shortcuts integration (Computer Files, Console, Recent Docs) - COMPLETE
 - [ ] Recent Documents popout (placeholder implemented)
-- [?] Power menu (Shutdown button)
+- [?] Power menu (Shutdown button) - COMPLETE
 - [ ] Frame caching for performance
 
 ### Priority 4: Desktop File Integration

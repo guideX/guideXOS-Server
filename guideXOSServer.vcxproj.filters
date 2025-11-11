@@ -127,5 +127,9 @@
     <None Include="PHASE5_COMPLETE.md" />
     <None Include="PHASE5_QUICKREF.md" />
     <None Include="PHASE5_PRIORITY2_STATUS.md" />
+    <None Include="SESSION_PROGRESS.md" />
+    <None Include="PHASE5_FINAL_SUMMARY.md" />
+    <None Include="PHASE5_TESTING_GUIDE.md" />
+    <None Include="PHASE5_FINAL_STATUS.md" />
   </ItemGroup>
 </Project>

@@ -166,10 +166,14 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="PHASE5_COMPLETE.md" />
+    <None Include="PHASE5_FINAL_STATUS.md" />
+    <None Include="PHASE5_FINAL_SUMMARY.md" />
     <None Include="PHASE5_GAPS.md" />
     <None Include="PHASE5_IMPLEMENTATION.md" />
     <None Include="PHASE5_PRIORITY2_STATUS.md" />
     <None Include="PHASE5_QUICKREF.md" />
+    <None Include="PHASE5_TESTING_GUIDE.md" />
+    <None Include="SESSION_PROGRESS.md" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
