@@ -12,6 +12,7 @@
 #include "vfs.h"
 #include "gxm_loader.h"
 #include "desktop_config.h"
+#include "desktop_service.h"
 #include <iostream>
 #include <chrono>
 #include <sstream>
@@ -43,6 +44,7 @@ static void help(){
                  " gui.btn <win> <id> <x> <y> <w> <h> <text> | gui.pop | gui.wlist | gui.activate <id> | gui.min <id>\n"
                  " gxm.load <path> | gxm.sample | gui.save <path> | gui.load <path>\n"
                  " desktop.wallpaper <path> | desktop.launch <action> | desktop.pin <action> | desktop.unpin <action> | desktop.showconfig\n"
+                 " desktop.apps | desktop.pinned | desktop.recent | desktop.pinapp <name> | desktop.pinfile <name> <path>\n"
                  " taskbar.list | taskbar.activate <id> | taskbar.min <id> | taskbar.close <id>\n"
                  " proc.wait <pid> [timeoutMs] | proc.status <pid>\n"
                  " vfs.mkdir <path> | vfs.write <path> <text> | vfs.read <path> | vfs.ls <path>\n"
@@ -54,6 +56,9 @@ int main(){
     auto pi = queryPlatform();
     Allocator::init(512ull*1024*1024); // 512MB simulated heap
     Scheduler::init(pi.cpuCount>0? pi.cpuCount:2);
+
+    // Initialize desktop service
+    gui::DesktopService::LoadState();
 
     // Registerable specs
     std::unordered_map<std::string, ProcessSpec> specs{
@@ -128,7 +133,14 @@ int main(){
         else if (cmd=="desktop.wallpaper"){
             std::string path; iss>>path; if(path.empty()){ std::cout<<"desktop.wallpaper <path>"<<std::endl; continue; } ipc::Message m; m.type=(uint32_t)gui::MsgType::MT_DesktopWallpaperSet; m.data.assign(path.begin(), path.end()); ipc::Bus::publish("gui.input", std::move(m), false); std::cout<<"Desktop wallpaper set request sent: "<<path<<std::endl; }
         else if (cmd=="desktop.launch"){
-            std::string action; std::getline(iss, action); if(action.size()>0 && action[0]==' ') action.erase(0,1); if(action.empty()){ std::cout<<"desktop.launch <action>"<<std::endl; continue; } ipc::Message m; m.type=(uint32_t)gui::MsgType::MT_DesktopLaunch; m.data.assign(action.begin(), action.end()); ipc::Bus::publish("gui.input", std::move(m), false); std::cout<<"Desktop launch requested: "<<action<<std::endl; }
+            std::string action; std::getline(iss, action); if(action.size()>0 && action[0]==' ') action.erase(0,1); if(action.empty()){ std::cout<<"desktop.launch <action>"<<std::endl; continue; }
+            std::string err;
+            if (gui::DesktopService::LaunchApp(action, err)) {
+                std::cout<<"Desktop launch successful: "<<action<<std::endl;
+            } else {
+                std::cout<<"Desktop launch failed: "<<err<<std::endl;
+            }
+        }
         else if (cmd=="desktop.pin" || cmd=="desktop.unpin"){
             std::string action; std::getline(iss, action); if(action.size()>0 && action[0]==' ') action.erase(0,1); if(action.empty()){ std::cout<< (cmd=="desktop.pin"?"desktop.pin <action>":"desktop.unpin <action>") << std::endl; continue; }
             std::vector<std::pair<bool,std::string>> ops; ops.emplace_back(cmd=="desktop.pin", action);
@@ -136,6 +148,42 @@ int main(){
             ipc::Message m; m.type=(uint32_t)gui::MsgType::MT_DesktopPins; m.data.assign(payload.begin(), payload.end()); ipc::Bus::publish("gui.input", std::move(m), false); std::cout<<"Desktop pin/unpin request sent: "<<payload<<std::endl; }
         else if (cmd=="desktop.showconfig"){
             gxos::gui::DesktopConfigData cfg; std::string err; if(!gxos::gui::DesktopConfig::Load("desktop.json", cfg, err)){ std::cout<<"Failed to load desktop.json: "<<err<<std::endl; } else { std::cout<<"Wallpaper: "<<cfg.wallpaperPath<<std::endl; std::cout<<"Pinned:\n"; for(auto &p: cfg.pinned) std::cout<<"  "<<p<<std::endl; std::cout<<"Recent:\n"; for(auto &r: cfg.recent) std::cout<<"  "<<r<<std::endl; }
+        }
+        else if (cmd=="desktop.apps"){
+            auto& apps = gui::DesktopService::GetRegisteredApps();
+            std::cout<<"Registered Applications ("<<apps.size()<<"):"<<std::endl;
+            for(const auto& app : apps) std::cout<<"  "<<app<<std::endl;
+        }
+        else if (cmd=="desktop.pinned"){
+            auto& pinned = gui::DesktopService::GetPinned();
+            std::cout<<"Pinned Items ("<<pinned.size()<<"):"<<std::endl;
+            for(const auto& item : pinned) {
+                std::cout<<"  "<<item.name<<" (";
+                if(item.kind==gui::PinnedKind::App) std::cout<<"App";
+                else if(item.kind==gui::PinnedKind::File) std::cout<<"File: "<<item.path;
+                else std::cout<<"Special";
+                std::cout<<")"<<std::endl;
+            }
+        }
+        else if (cmd=="desktop.recent"){
+            auto& recent = gui::DesktopService::GetRecentPrograms();
+            std::cout<<"Recent Programs ("<<recent.size()<<"):"<<std::endl;
+            for(const auto& prog : recent) std::cout<<"  "<<prog.name<<std::endl;
+            auto& docs = gui::DesktopService::GetRecentDocuments();
+            std::cout<<"Recent Documents ("<<docs.size()<<"):"<<std::endl;
+            for(const auto& doc : docs) std::cout<<"  "<<doc.path<<std::endl;
+        }
+        else if (cmd=="desktop.pinapp"){
+            std::string name; std::getline(iss, name); if(name.size()>0 && name[0]==' ') name.erase(0,1);
+            if(name.empty()){ std::cout<<"desktop.pinapp <name>"<<std::endl; continue; }
+            gui::DesktopService::PinApp(name);
+            std::cout<<"Pinned app: "<<name<<std::endl;
+        }
+        else if (cmd=="desktop.pinfile"){
+            std::string name, path; iss>>name; std::getline(iss, path); if(path.size()>0 && path[0]==' ') path.erase(0,1);
+            if(name.empty() || path.empty()){ std::cout<<"desktop.pinfile <displayName> <path>"<<std::endl; continue; }
+            gui::DesktopService::PinFile(name, path);
+            std::cout<<"Pinned file: "<<name<<" -> "<<path<<std::endl;
         }
         else if (cmd=="taskbar.list"){
             ipc::Message m; m.type=(uint32_t)gui::MsgType::MT_WindowList; ipc::Bus::publish("gui.input", std::move(m), false); std::cout<<"Requested window list (use gui.pop)"<<std::endl; }

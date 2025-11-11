@@ -63,6 +63,9 @@
     <ClInclude Include="desktop_config.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="desktop_service.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="allocator.cpp">
@@ -104,9 +107,16 @@
     <ClCompile Include="icons.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="desktop_service.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <Text Include="TESTS.TXT" />
     <Text Include="ROADMAP.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="PHASE5_GAPS.md" />
+    <None Include="PHASE5_IMPLEMENTATION.md" />
   </ItemGroup>
 </Project>

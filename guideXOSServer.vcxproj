@@ -128,6 +128,7 @@
     <ClInclude Include="compositor.h" />
     <ClInclude Include="console_service.h" />
     <ClInclude Include="desktop_config.h" />
+    <ClInclude Include="desktop_service.h" />
     <ClInclude Include="desktop_state.h" />
     <ClInclude Include="fs.h" />
     <ClInclude Include="gui_protocol.h" />
@@ -145,6 +146,7 @@
     <ClCompile Include="allocator.cpp" />
     <ClCompile Include="compositor.cpp" />
     <ClCompile Include="console_service.cpp" />
+    <ClCompile Include="desktop_service.cpp" />
     <ClCompile Include="desktop_state.cpp" />
     <ClCompile Include="fs.cpp" />
     <ClCompile Include="gxm_loader.cpp" />
@@ -159,6 +161,10 @@
   <ItemGroup>
     <Text Include="ROADMAP.txt" />
     <Text Include="TESTS.TXT" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="PHASE5_GAPS.md" />
+    <None Include="PHASE5_IMPLEMENTATION.md" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
