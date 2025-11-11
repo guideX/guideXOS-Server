@@ -137,6 +137,7 @@
     <ClInclude Include="ipc.h" />
     <ClInclude Include="ipc_bus.h" />
     <ClInclude Include="logger.h" />
+    <ClInclude Include="notepad.h" />
     <ClInclude Include="platform.h" />
     <ClInclude Include="process.h" />
     <ClInclude Include="scheduler.h" />
@@ -154,6 +155,7 @@
     <ClCompile Include="icons.cpp" />
     <ClCompile Include="ipc_bus.cpp" />
     <ClCompile Include="logger.cpp" />
+    <ClCompile Include="notepad.cpp" />
     <ClCompile Include="process.cpp" />
     <ClCompile Include="scheduler.cpp" />
     <ClCompile Include="server.cpp" />
@@ -165,14 +167,22 @@
     <Text Include="TESTS.TXT" />
   </ItemGroup>
   <ItemGroup>
+    <None Include="NEXT_STEPS.md" />
+    <None Include="NOTEPAD_COMPLETE.md" />
+    <None Include="NOTEPAD_READY.md" />
     <None Include="PHASE5_COMPLETE.md" />
+    <None Include="PHASE5_CONTINUATION.md" />
+    <None Include="PHASE5_FINAL_COMPLETE.md" />
     <None Include="PHASE5_FINAL_STATUS.md" />
     <None Include="PHASE5_FINAL_SUMMARY.md" />
     <None Include="PHASE5_GAPS.md" />
     <None Include="PHASE5_IMPLEMENTATION.md" />
+    <None Include="PHASE5_POLISH_COMPLETION.md" />
     <None Include="PHASE5_PRIORITY2_STATUS.md" />
     <None Include="PHASE5_QUICKREF.md" />
     <None Include="PHASE5_TESTING_GUIDE.md" />
+    <None Include="PHASE6_IMPLEMENTATION.md" />
+    <None Include="PHASE6_SESSION1.md" />
     <None Include="SESSION_PROGRESS.md" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

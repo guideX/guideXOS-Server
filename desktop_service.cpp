@@ -1,9 +1,7 @@
 #include "desktop_service.h"
-#include "logger.h"
 #include "desktop_config.h"
-#include "ipc_bus.h"
-#include "gui_protocol.h"
-#include "platform.h"
+#include "logger.h"
+#include "notepad.h"
 #include <algorithm>
 #include <fstream>
 #include <sstream>
@@ -144,11 +142,34 @@ namespace gxos { namespace gui {
         // Add to recent
         AddRecentProgram(name);
 
-        // Publish launch message to compositor
-        ipc::Message m;
-        m.type = (uint32_t)MsgType::MT_DesktopLaunch;
-        m.data.assign(name.begin(), name.end());
-        ipc::Bus::publish("gui.input", std::move(m), false);
+        // Launch the actual application
+        if (name == "Notepad") {
+            apps::Notepad::Launch();
+        }
+        else if (name == "Calculator") {
+            // TODO: Launch Calculator when implemented
+            Logger::write(LogLevel::Info, "Calculator not yet implemented");
+        }
+        else if (name == "Console") {
+            // TODO: Launch Console when implemented
+            Logger::write(LogLevel::Info, "Console not yet implemented");
+        }
+        else if (name == "Paint") {
+            // TODO: Launch Paint when implemented
+            Logger::write(LogLevel::Info, "Paint not yet implemented");
+        }
+        else if (name == "Clock") {
+            // TODO: Launch Clock when implemented
+            Logger::write(LogLevel::Info, "Clock not yet implemented");
+        }
+        else if (name == "TaskManager") {
+            // TODO: Launch TaskManager when implemented
+            Logger::write(LogLevel::Info, "TaskManager not yet implemented");
+        }
+        else {
+            error = "Application launcher not implemented: " + name;
+            return false;
+        }
 
         Logger::write(LogLevel::Info, std::string("Launched app: ") + name);
         return true;

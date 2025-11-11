@@ -69,6 +69,9 @@
     <ClInclude Include="workspace_manager.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="notepad.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="allocator.cpp">
@@ -116,6 +119,9 @@
     <ClCompile Include="workspace_manager.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="notepad.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <Text Include="TESTS.TXT" />
@@ -131,5 +137,13 @@
     <None Include="PHASE5_FINAL_SUMMARY.md" />
     <None Include="PHASE5_TESTING_GUIDE.md" />
     <None Include="PHASE5_FINAL_STATUS.md" />
+    <None Include="PHASE5_FINAL_COMPLETE.md" />
+    <None Include="PHASE5_CONTINUATION.md" />
+    <None Include="NEXT_STEPS.md" />
+    <None Include="PHASE5_POLISH_COMPLETION.md" />
+    <None Include="PHASE6_IMPLEMENTATION.md" />
+    <None Include="PHASE6_SESSION1.md" />
+    <None Include="NOTEPAD_READY.md" />
+    <None Include="NOTEPAD_COMPLETE.md" />
   </ItemGroup>
 </Project>

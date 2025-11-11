@@ -13,6 +13,7 @@
 #include "gxm_loader.h"
 #include "desktop_config.h"
 #include "desktop_service.h"
+#include "notepad.h"
 #include <iostream>
 #include <chrono>
 #include <sstream>
@@ -47,6 +48,7 @@ static void help(){
                  " desktop.apps | desktop.pinned | desktop.recent | desktop.pinapp <name> | desktop.pinfile <name> <path>\n"
                  " taskbar.list | taskbar.activate <id> | taskbar.min <id> | taskbar.close <id>\n"
                  " workspace.switch <n> | workspace.next | workspace.prev | workspace.current\n"
+                 " notepad | notepad <file>\n"
                  " proc.wait <pid> [timeoutMs] | proc.status <pid>\n"
                  " vfs.mkdir <path> | vfs.write <path> <text> | vfs.read <path> | vfs.ls <path>\n"
                  " pbytes | help | quit/exit\n"; }
@@ -222,6 +224,19 @@ int main(){
             m.data.assign(payload.begin(), payload.end()); 
             ipc::Bus::publish("gui.input", std::move(m), false); 
             std::cout<<"Current workspace query sent (use gui.pop)"<<std::endl; 
+        }
+        else if (cmd=="notepad"){
+            std::string filePath; 
+            std::getline(iss, filePath); 
+            if(filePath.size()>0 && filePath[0]==' ') filePath.erase(0,1);
+            
+            uint64_t pid;
+            if(filePath.empty()) {
+                pid = apps::Notepad::Launch();
+            } else {
+                pid = apps::Notepad::LaunchWithFile(filePath);
+            }
+            std::cout<<"Notepad launched, pid="<<pid<<std::endl;
         }
         else {
             std::cout << "Unknown command (help for list)" << std::endl;
