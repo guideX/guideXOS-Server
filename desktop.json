@@ -1,7 +1,7 @@
 {
-  "wallpaper": "\\assets\\Images\\tronporche.png",
+  "wallpaper": "assetsImages\tronporche.png",
   "pinned": [],
-  "recent": [],
+  "recent": ["Console","ComputerFiles"],
   "windows": [
   ]
 }

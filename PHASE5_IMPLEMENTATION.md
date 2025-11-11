@@ -67,10 +67,10 @@ desktop.showconfig
 - [ ] Blur effect rendering for taskbar
 
 ### Priority 3: Start Menu Full Parity
-- [ ] "All Programs" alphabetical view
-- [ ] Right column shortcuts integration (Computer Files, Disk Manager, etc.)
-- [ ] Recent Documents popout
-- [ ] Power menu (Shutdown/Reboot/Log Off buttons)
+- [?] "All Programs" alphabetical view
+- [?] Right column shortcuts integration (Computer Files, Console, Recent Docs)
+- [ ] Recent Documents popout (placeholder implemented)
+- [?] Power menu (Shutdown button)
 - [ ] Frame caching for performance
 
 ### Priority 4: Desktop File Integration

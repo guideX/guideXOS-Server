@@ -163,8 +163,10 @@
     <Text Include="TESTS.TXT" />
   </ItemGroup>
   <ItemGroup>
+    <None Include="PHASE5_COMPLETE.md" />
     <None Include="PHASE5_GAPS.md" />
     <None Include="PHASE5_IMPLEMENTATION.md" />
+    <None Include="PHASE5_QUICKREF.md" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

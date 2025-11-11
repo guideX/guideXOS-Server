@@ -50,6 +50,7 @@ namespace gxos { namespace gui {
         static void saveDesktopConfig();
         static void addRecent(const std::string& act);
         static void refreshDesktopItems();
+        static void refreshAllProgramsList();
 #ifdef _WIN32
         static uint64_t hitTestTaskbarButton(int mx, int my, RECT cr, int taskbarH);
         static void initWindow();
@@ -81,9 +82,12 @@ namespace gxos { namespace gui {
         struct SnapRect { int l; int t; int r; int b; }; static SnapRect g_snapPreviewRect;
 #endif
         static bool g_showDesktopActive; static std::vector<uint64_t> g_showDesktopMinimized; static uint64_t g_lastClickTicks; static uint64_t g_lastClickWin;
-        static bool g_altTabOverlayActive; static uint64_t g_altTabOverlayTicks; static int g_altTabCycleIndex; static bool g_taskbarCycleActive; static int g_taskbarCycleIndex; static bool g_keyboardMoveActive; static bool g_keyboardSizeActive; static int g_kbOrigX; static int g_kbOrigY; static int g_kbOrigW; static int g_kbOrigH;
+        static bool g_altTabOverlayActive; static uint64_t g_altTabOverlayTicks; static int g_altTabCycleIndex;
+        static bool g_taskbarCycleActive; static int g_taskbarCycleIndex; static bool g_keyboardMoveActive; static bool g_keyboardSizeActive; static int g_kbOrigX; static int g_kbOrigY; static int g_kbOrigW; static int g_kbOrigH;
         static DesktopConfigData g_cfg; static uint64_t g_lastItemClickTicks; static int g_lastItemIndex;
         // Start menu keyboard/selection state
         static int g_startMenuSel; static int g_startMenuScroll;
+        static bool g_startMenuAllProgs; // "All Programs" view
+        static std::vector<std::string> g_startMenuAllProgsSorted; // Sorted app names
     };
 } }

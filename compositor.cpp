@@ -46,14 +46,37 @@ namespace gxos { namespace gui {
 
     DesktopConfigData Compositor::g_cfg{}; std::vector<DesktopItem> Compositor::g_items; uint64_t Compositor::g_lastItemClickTicks=0; int Compositor::g_lastItemIndex=-1;
 
-    // start menu selection/scroll
+    // Start menu keyboard/selection state
     int Compositor::g_startMenuSel = 0; int Compositor::g_startMenuScroll = 0;
+    bool Compositor::g_startMenuAllProgs = false; // "All Programs" view toggle
+    std::vector<std::string> Compositor::g_startMenuAllProgsSorted; // Alphabetically sorted app list
 
     static uint64_t nowMs(){ return (uint64_t)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count(); }
     static void publishOut(MsgType type, const std::string& payload){ ipc::Message out; out.type=(uint32_t)type; out.data.assign(payload.begin(), payload.end()); ipc::Bus::publish(kGuiChanOut, std::move(out), false); }
 
     void Compositor::refreshDesktopItems(){ g_items.clear(); // pinned first
         for(const auto& p: g_cfg.pinned){ DesktopItem di; di.label=p; di.action=p; di.pinned=true; g_items.push_back(di);} for(const auto& r: g_cfg.recent){ if(std::find(g_cfg.pinned.begin(), g_cfg.pinned.end(), r)!=g_cfg.pinned.end()) continue; DesktopItem di; di.label=r; di.action=r; di.pinned=false; g_items.push_back(di);} }
+    
+    void Compositor::refreshAllProgramsList(){
+        // Load all registered apps from DesktopService and sort alphabetically
+        g_startMenuAllProgsSorted.clear();
+        // For now, use a default list matching C# implementation
+        g_startMenuAllProgsSorted.push_back("Calculator");
+        g_startMenuAllProgsSorted.push_back("Clock");
+        g_startMenuAllProgsSorted.push_back("Console");
+        g_startMenuAllProgsSorted.push_back("Notepad");
+        g_startMenuAllProgsSorted.push_back("Paint");
+        g_startMenuAllProgsSorted.push_back("TaskManager");
+        // Sort alphabetically (case-insensitive)
+        std::sort(g_startMenuAllProgsSorted.begin(), g_startMenuAllProgsSorted.end(), 
+            [](const std::string& a, const std::string& b) {
+                std::string al = a, bl = b;
+                std::transform(al.begin(), al.end(), al.begin(), ::tolower);
+                std::transform(bl.begin(), bl.end(), bl.begin(), ::tolower);
+                return al < bl;
+            });
+    }
+    
     void Compositor::saveDesktopConfig(){ std::string err; DesktopConfig::Save("desktop.json", g_cfg, err); }
     void Compositor::addRecent(const std::string& act){ auto it=std::find(g_cfg.recent.begin(), g_cfg.recent.end(), act); if(it!=g_cfg.recent.end()) g_cfg.recent.erase(it); g_cfg.recent.insert(g_cfg.recent.begin(), act); if(g_cfg.recent.size()>20) g_cfg.recent.pop_back(); refreshDesktopItems(); saveDesktopConfig(); }
     void Compositor::pinAction(const std::string& act){ if(act.empty()) return; if(std::find(g_cfg.pinned.begin(), g_cfg.pinned.end(), act)==g_cfg.pinned.end()){ g_cfg.pinned.push_back(act); refreshDesktopItems(); saveDesktopConfig(); } }
@@ -124,14 +147,202 @@ namespace gxos { namespace gui {
             RECT startBtn{8,cr.bottom-taskbarH+4,8+32,cr.bottom-4}; HBRUSH sbg=CreateSolidBrush(g_startMenuVisible? RGB(80,110,160):RGB(60,80,100)); FillRect(dc,&startBtn,sbg); DeleteObject(sbg); FrameRect(dc,&startBtn,(HBRUSH)GetStockObject(WHITE_BRUSH)); drawBitmapCentered(dc, g_startBtnBmp, startBtn);
             // Taskbar buttons
             POINT cursor; GetCursorPos(&cursor); ScreenToClient(h,&cursor); int btnX=50; for(uint64_t id: g_z){ auto it=g_windows.find(id); if(it==g_windows.end()) continue; std::string label=it->second.title; SIZE sz; GetTextExtentPoint32A(dc,label.c_str(),(int)label.size(),&sz); int bw=sz.cx+30; RECT br{ btnX, cr.bottom-taskbarH+4, btnX+bw, cr.bottom-4}; bool hover=(cursor.x>=br.left && cursor.x<=br.right && cursor.y>=br.top && cursor.y<=br.bottom); HBRUSH bbg=CreateSolidBrush( hover? RGB(90,130,190): (id==g_focus? RGB(80,110,160):(it->second.minimized? RGB(45,45,55): (it->second.tombstoned? RGB(90,70,40):RGB(70,70,85)))) ); FillRect(dc,&br,bbg); DeleteObject(bbg); FrameRect(dc,&br,(HBRUSH)GetStockObject(WHITE_BRUSH)); RECT iconRect{ br.left+4, br.top+4, br.left+20, br.top+20 }; drawBitmapCentered(dc, it->second.taskbarIcon, iconRect); SetTextColor(dc,RGB(240,240,240)); TextOutA(dc,br.left+24,br.top+10,label.c_str(),(int)label.size()); btnX += bw + 6; }
-            // Start menu popup (pinned + recent)
-            if(g_startMenuVisible){ int smW=260; int maxRows=14; int rowH=20; int smH=maxRows*rowH + 10; RECT sm{ startBtn.left, startBtn.top - smH - 6, startBtn.left+smW, startBtn.top - 6}; if(sm.top<0){ sm.top=4; sm.bottom=sm.top+smH; } g_startMenuRect=sm; HBRUSH mBg=CreateSolidBrush(RGB(45,45,55)); FillRect(dc,&sm,mBg); DeleteObject(mBg); FrameRect(dc,&sm,(HBRUSH)GetStockObject(WHITE_BRUSH)); int y=sm.top+4; HFONT f=(HFONT)GetStockObject(ANSI_VAR_FONT); SelectObject(dc,f); SetBkMode(dc,TRANSPARENT); SetTextColor(dc,RGB(230,230,230)); int row=0; int startIndex = g_startMenuScroll; for(size_t i=startIndex;i<g_items.size() && row<maxRows; ++i){ RECT r{ sm.left+4, y, sm.right-4, y+rowH}; bool isSel = ((int)i==g_startMenuSel); HBRUSH rb=CreateSolidBrush(isSel? RGB(80,100,150):(cursor.x>=r.left && cursor.x<=r.right && cursor.y>=r.top && cursor.y<=r.bottom? RGB(70,90,130):RGB(55,55,70))); FillRect(dc,&r,rb); DeleteObject(rb); std::string txt=(g_items[i].pinned? "* ":"  ")+g_items[i].label; TextOutA(dc,r.left+4,r.top+4,txt.c_str(),(int)txt.size()); y+=rowH; row++; }
+            // Start menu popup (pinned + recent OR all programs)
+            if(g_startMenuVisible){ 
+                int smW=440; // wider to accommodate two columns
+                int maxRows=14; 
+                int rowH=20;
+                int leftColW = 260; // left list column width
+                int rightColW = 160; // right column for shortcuts
+                int smH=maxRows*rowH + 10; 
+                RECT sm{ startBtn.left, startBtn.top - smH - 6, startBtn.left+smW, startBtn.top - 6}; 
+                if(sm.top<0){ sm.top=4; sm.bottom=sm.top+smH; } 
+                g_startMenuRect=sm; 
+                HBRUSH mBg=CreateSolidBrush(RGB(45,45,55)); 
+                FillRect(dc,&sm,mBg); 
+                DeleteObject(mBg); 
+                FrameRect(dc,&sm,(HBRUSH)GetStockObject(WHITE_BRUSH)); 
+                
+                // Left column - Recent/All Programs list
+                int y=sm.top+4; 
+                HFONT f=(HFONT)GetStockObject(ANSI_VAR_FONT); 
+                SelectObject(dc,f); 
+                SetBkMode(dc,TRANSPARENT); 
+                SetTextColor(dc,RGB(230,230,230)); 
+                int row=0; 
+                int startIndex = g_startMenuScroll;
+                
+                if(g_startMenuAllProgs){
+                    // Show all programs alphabetically
+                    for(size_t i=startIndex;i<g_startMenuAllProgsSorted.size() && row<maxRows; ++i){ 
+                        RECT r{ sm.left+4, y, sm.left+leftColW-4, y+rowH}; 
+                        bool isSel = ((int)i==g_startMenuSel); 
+                        HBRUSH rb=CreateSolidBrush(isSel? RGB(80,100,150):(cursor.x>=r.left && cursor.x<=r.right && cursor.y>=r.top && cursor.y<=r.bottom? RGB(70,90,130):RGB(55,55,70))); 
+                        FillRect(dc,&r,rb); 
+                        DeleteObject(rb); 
+                        std::string txt = g_startMenuAllProgsSorted[i];
+                        TextOutA(dc,r.left+4,r.top+4,txt.c_str(),(int)txt.size()); 
+                        y+=rowH; row++; 
+                    }
+                } else {
+                    // Show pinned + recent
+                    for(size_t i=startIndex;i<g_items.size() && row<maxRows; ++i){ 
+                        RECT r{ sm.left+4, y, sm.left+leftColW-4, y+rowH}; 
+                        bool isSel = ((int)i==g_startMenuSel); 
+                        HBRUSH rb=CreateSolidBrush(isSel? RGB(80,100,150):(cursor.x>=r.left && cursor.x<=r.right && cursor.y>=r.top && cursor.y<=r.bottom? RGB(70,90,130):RGB(55,55,70))); 
+                        FillRect(dc,&r,rb); 
+                        DeleteObject(rb); 
+                        std::string txt=(g_items[i].pinned? "* ":"  ")+g_items[i].label; 
+                        TextOutA(dc,r.left+4,r.top+4,txt.c_str(),(int)txt.size()); 
+                        y+=rowH; row++; 
+                    }
+                }
+                
+                // Right column - shortcuts
+                int rcX = sm.left + leftColW + 4;
+                int rcY = sm.top + 6;
+                SetTextColor(dc,RGB(200,200,200));
+                
+                // Computer Files shortcut
+                RECT rcComputer{ rcX, rcY, sm.right-6, rcY+rowH };
+                bool overComp = (cursor.x>=rcComputer.left && cursor.x<=rcComputer.right && cursor.y>=rcComputer.top && cursor.y<=rcComputer.bottom);
+                if(overComp){ HBRUSH hb=CreateSolidBrush(RGB(70,90,130)); FillRect(dc,&rcComputer,hb); DeleteObject(hb); }
+                TextOutA(dc, rcComputer.left+6, rcComputer.top+4, "Computer Files", 14);
+                rcY += rowH + 4;
+                
+                // Console shortcut
+                RECT rcConsole{ rcX, rcY, sm.right-6, rcY+rowH };
+                bool overCon = (cursor.x>=rcConsole.left && cursor.x<=rcConsole.right && cursor.y>=rcConsole.top && cursor.y<=rcConsole.bottom);
+                if(overCon){ HBRUSH hb=CreateSolidBrush(RGB(70,90,130)); FillRect(dc,&rcConsole,hb); DeleteObject(hb); }
+                TextOutA(dc, rcConsole.left+6, rcConsole.top+4, "Console", 7);
+                rcY += rowH + 4;
+                
+                // Recent Documents shortcut
+                RECT rcDocs{ rcX, rcY, sm.right-6, rcY+rowH };
+                bool overDocs = (cursor.x>=rcDocs.left && cursor.x<=rcDocs.right && cursor.y>=rcDocs.top && cursor.y<=rcDocs.bottom);
+                if(overDocs){ HBRUSH hb=CreateSolidBrush(RGB(70,90,130)); FillRect(dc,&rcDocs,hb); DeleteObject(hb); }
+                TextOutA(dc, rcDocs.left+6, rcDocs.top+4, "Recent Docs", 11);
+                
+                // Bottom area - "All Programs" toggle button
+                int btnY = sm.bottom - 30;
+                RECT allProgBtn{ sm.left+6, btnY, sm.left+leftColW-6, btnY+24 };
+                bool overAllProg = (cursor.x>=allProgBtn.left && cursor.x<=allProgBtn.right && cursor.y>=allProgBtn.top && cursor.y<=allProgBtn.bottom);
+                HBRUSH apb = CreateSolidBrush(overAllProg ? RGB(70,80,100) : RGB(60,60,75));
+                FillRect(dc, &allProgBtn, apb); DeleteObject(apb);
+                FrameRect(dc, &allProgBtn, (HBRUSH)GetStockObject(WHITE_BRUSH));
+                const char* btnText = g_startMenuAllProgs ? "< Back" : "All Programs >";
+                TextOutA(dc, allProgBtn.left+8, allProgBtn.top+6, btnText, (int)strlen(btnText));
+                
+                // Power menu area (bottom-right)
+                int shutdownBtnW = 80;
+                int shutdownBtnH = 24;
+                RECT shutdownBtn{ sm.right-shutdownBtnW-30, btnY, sm.right-30, btnY+shutdownBtnH };
+                bool overShutdown = (cursor.x>=shutdownBtn.left && cursor.x<=shutdownBtn.right && cursor.y>=shutdownBtn.top && cursor.y<=shutdownBtn.bottom);
+                HBRUSH sdb = CreateSolidBrush(overShutdown ? RGB(80,40,40) : RGB(60,60,75));
+                FillRect(dc, &shutdownBtn, sdb); DeleteObject(sdb);
+                FrameRect(dc, &shutdownBtn, (HBRUSH)GetStockObject(WHITE_BRUSH));
+                TextOutA(dc, shutdownBtn.left+10, shutdownBtn.top+6, "Shutdown", 8);
             }
             EndPaint(h,&ps); return 0; }
         case WM_LBUTTONDOWN:{ int mx=GET_X_LPARAM(l); int my=GET_Y_LPARAM(l); RECT cr; GetClientRect(h,&cr); int taskbarH=32; RECT startBtn{8,cr.bottom-taskbarH+4,8+32,cr.bottom-4}; // Start button toggle
-            if(mx>=startBtn.left && mx<=startBtn.right && my>=startBtn.top && my<=startBtn.bottom){ g_startMenuVisible=!g_startMenuVisible; if(g_startMenuVisible){ g_startMenuSel=0; g_startMenuScroll=0; } requestRepaint(); return 0; }
+            if(mx>=startBtn.left && mx<=startBtn.right && my>=startBtn.top && my<=startBtn.bottom){ 
+                g_startMenuVisible=!g_startMenuVisible; 
+                if(g_startMenuVisible){ 
+                    g_startMenuSel=0; 
+                    g_startMenuScroll=0;
+                    g_startMenuAllProgs = false; // reset to recent view
+                    refreshAllProgramsList(); // ensure sorted list is ready
+                } 
+                requestRepaint(); 
+                return 0; 
+            }
             // Start menu click
-            if(g_startMenuVisible){ if(mx>=g_startMenuRect.left && mx<=g_startMenuRect.right && my>=g_startMenuRect.top && my<=g_startMenuRect.bottom){ int idx=(my - (g_startMenuRect.top+4))/20 + g_startMenuScroll; if(idx>=0 && idx<(int)g_items.size()){ uint64_t now=nowMs(); if(g_lastItemIndex==idx && (now-g_lastItemClickTicks)<450){ launchAction(g_items[idx].action); g_startMenuVisible=false; } else { g_lastItemIndex=idx; g_lastItemClickTicks=now; } requestRepaint(); return 0; } } else { g_startMenuVisible=false; }
+            if(g_startMenuVisible){ 
+                // Check "All Programs" toggle button
+                int smW=440;
+                int leftColW = 260;
+                int btnY = g_startMenuRect.bottom - 30;
+                RECT allProgBtn{ g_startMenuRect.left+6, btnY, g_startMenuRect.left+leftColW-6, btnY+24 };
+                if(mx>=allProgBtn.left && mx<=allProgBtn.right && my>=allProgBtn.top && my<=allProgBtn.bottom){
+                    g_startMenuAllProgs = !g_startMenuAllProgs;
+                    g_startMenuSel = 0;
+                    g_startMenuScroll = 0;
+                    requestRepaint();
+                    return 0;
+                }
+                
+                // Check Shutdown button
+                int shutdownBtnW = 80;
+                int shutdownBtnH = 24;
+                RECT shutdownBtn{ g_startMenuRect.right-shutdownBtnW-30, btnY, g_startMenuRect.right-30, btnY+shutdownBtnH };
+                if(mx>=shutdownBtn.left && mx<=shutdownBtn.right && my>=shutdownBtn.top && my<=shutdownBtn.bottom){
+                    // Publish shutdown event
+                    Logger::write(LogLevel::Info, "Shutdown requested from Start Menu");
+                    publishOut(MsgType::MT_WidgetEvt, "SHUTDOWN");
+                    g_startMenuVisible = false;
+                    requestRepaint();
+                    return 0;
+                }
+                
+                // Check right column shortcuts
+                int rcX = g_startMenuRect.left + leftColW + 4;
+                int rcY = g_startMenuRect.top + 6;
+                int rowH = 20;
+                
+                // Computer Files
+                RECT rcComputer{ rcX, rcY, g_startMenuRect.right-6, rcY+rowH };
+                if(mx>=rcComputer.left && mx<=rcComputer.right && my>=rcComputer.top && my<=rcComputer.bottom){
+                    launchAction("ComputerFiles");
+                    g_startMenuVisible = false;
+                    requestRepaint();
+                    return 0;
+                }
+                rcY += rowH + 4;
+                
+                // Console
+                RECT rcConsole{ rcX, rcY, g_startMenuRect.right-6, rcY+rowH };
+                if(mx>=rcConsole.left && mx<=rcConsole.right && my>=rcConsole.top && my<=rcConsole.bottom){
+                    launchAction("Console");
+                    g_startMenuVisible = false;
+                    requestRepaint();
+                    return 0;
+                }
+                rcY += rowH + 4;
+                
+                // Recent Documents - just close menu for now
+                RECT rcDocs{ rcX, rcY, g_startMenuRect.right-6, rcY+rowH };
+                if(mx>=rcDocs.left && mx<=rcDocs.right && my>=rcDocs.top && my<=rcDocs.bottom){
+                    Logger::write(LogLevel::Info, "Recent Documents clicked (not implemented)");
+                    // Future: show popout with recent documents
+                    requestRepaint();
+                    return 0;
+                }
+                
+                // List item click
+                int listTop = g_startMenuRect.top+4;
+                int listBottom = btnY - 4; // above buttons
+                if(mx>=g_startMenuRect.left && mx<=g_startMenuRect.left+leftColW && my>=listTop && my<=listBottom){ 
+                    int idx=(my - listTop)/rowH + g_startMenuScroll; 
+                    int itemCount = g_startMenuAllProgs ? (int)g_startMenuAllProgsSorted.size() : (int)g_items.size();
+                    if(idx>=0 && idx<itemCount){ 
+                        uint64_t now=nowMs(); 
+                        if(g_lastItemIndex==idx && (now-g_lastItemClickTicks)<450){ 
+                            // Double-click: launch
+                            std::string action = g_startMenuAllProgs ? g_startMenuAllProgsSorted[idx] : g_items[idx].action;
+                            launchAction(action); 
+                            g_startMenuVisible=false; 
+                        } else { 
+                            // Single click: select
+                            g_lastItemIndex=idx; 
+                            g_lastItemClickTicks=now; 
+                            g_startMenuSel = idx;
+                        } 
+                        requestRepaint(); 
+                        return 0; 
+                    } 
+                } else { 
+                    g_startMenuVisible=false; 
+                }
             }
             // Desktop icon click (selection / double)
             const int margin=16; const int iconW=64; const int iconH=64; const int cellW=iconW+20; const int cellH=iconH+34; int cols=(cr.right-margin*2)/cellW; if(cols<1) cols=1; if(my < cr.bottom-taskbarH){ int col=(mx-margin)/cellW; int row=(my-margin)/cellH; if(col>=0 && row>=0){ int idx=row*cols+col; if(idx>=0 && idx<(int)g_items.size()){ uint64_t now=nowMs(); if(g_lastItemIndex==idx && (now-g_lastItemClickTicks)<450){ launchAction(g_items[idx].action); } else { for(auto &di: g_items) di.selected=false; g_items[idx].selected=true; g_lastItemIndex=idx; g_lastItemClickTicks=now; } requestRepaint(); return 0; } } }
@@ -149,12 +360,44 @@ namespace gxos { namespace gui {
             int key=(int)w;
             // start-menu navigation handled here
             if(g_startMenuVisible){
-                if(key==VK_UP){ if(g_startMenuSel>0) g_startMenuSel--; if(g_startMenuSel<g_startMenuScroll) g_startMenuScroll=g_startMenuSel; requestRepaint(); return 0; }
-                if(key==VK_DOWN){ if((int)g_items.size()>0 && g_startMenuSel<(int)g_items.size()-1) g_startMenuSel++; const int maxRows=14; if(g_startMenuSel>=g_startMenuScroll+maxRows) g_startMenuScroll=g_startMenuSel-maxRows+1; requestRepaint(); return 0; }
-                if(key==VK_RETURN){ if(g_startMenuSel>=0 && g_startMenuSel<(int)g_items.size()){ launchAction(g_items[g_startMenuSel].action); g_startMenuVisible=false; requestRepaint(); } return 0; }
-                if(key==VK_ESCAPE){ g_startMenuVisible=false; requestRepaint(); return 0; }
+                int maxItems = g_startMenuAllProgs ? (int)g_startMenuAllProgsSorted.size() : (int)g_items.size();
+                if(key==VK_UP){ 
+                    if(g_startMenuSel>0) g_startMenuSel--; 
+                    if(g_startMenuSel<g_startMenuScroll) g_startMenuScroll=g_startMenuSel; 
+                    requestRepaint(); 
+                    return 0; 
+                }
+                if(key==VK_DOWN){ 
+                    if(maxItems>0 && g_startMenuSel<maxItems-1) g_startMenuSel++; 
+                    const int maxRows=14; 
+                    if(g_startMenuSel>=g_startMenuScroll+maxRows) g_startMenuScroll=g_startMenuSel-maxRows+1; 
+                    requestRepaint(); 
+                    return 0; 
+                }
+                if(key==VK_RETURN){ 
+                    if(g_startMenuSel>=0 && g_startMenuSel<maxItems){ 
+                        std::string action = g_startMenuAllProgs ? g_startMenuAllProgsSorted[g_startMenuSel] : g_items[g_startMenuSel].action;
+                        launchAction(action); 
+                        g_startMenuVisible=false; 
+                        requestRepaint(); 
+                    } 
+                    return 0; 
+                }
+                if(key==VK_ESCAPE){ 
+                    g_startMenuVisible=false; 
+                    requestRepaint(); 
+                    return 0; 
+                }
+                if(key==VK_TAB){ 
+                    // Toggle between Recent and All Programs
+                    g_startMenuAllProgs = !g_startMenuAllProgs;
+                    g_startMenuSel = 0;
+                    g_startMenuScroll = 0;
+                    requestRepaint();
+                    return 0;
+                }
             }
-            SHORT lwinS=GetKeyState(VK_LWIN); SHORT rwinS=GetKeyState(VK_RWIN); bool winDown=((lwinS|rwinS)&0x8000)!=0; if(winDown && (key=='D'||key=='d')){ std::lock_guard<std::mutex> lk(g_lock); if(!g_showDesktopActive){ g_showDesktopMinimized.clear(); for(uint64_t wid: g_z){ auto it=g_windows.find(wid); if(it!=g_windows.end() && !it->second.minimized){ it->second.minimized=true; it->second.tombstoned=true; g_showDesktopMinimized.push_back(wid);} } g_focus=0; g_showDesktopActive=true; } else { for(uint64_t wid: g_showDesktopMinimized){ auto it=g_windows.find(wid); if(it!=g_windows.end()){ it->second.minimized=false; it->second.tombstoned=false; } } g_showDesktopMinimized.clear(); g_showDesktopActive=false; } requestRepaint(); return 0; }
+
             publishOut(MsgType::MT_InputKey,std::to_string(key)+"|down");
         } break;
         case WM_KEYUP:{ int key=(int)w; publishOut(MsgType::MT_InputKey,std::to_string(key)+"|up"); } break;
@@ -274,14 +517,21 @@ namespace gxos { namespace gui {
 #endif
     }
 
-    int Compositor::main(int argc, char** argv){ Logger::write(LogLevel::Info,"Compositor service started (native window)"); ipc::Bus::ensure(kGuiChanIn); ipc::Bus::ensure(kGuiChanOut);
+    int Compositor::main(int argc, char** argv){ 
+        Logger::write(LogLevel::Info,"Compositor service started (native window)"); 
+        ipc::Bus::ensure(kGuiChanIn); 
+        ipc::Bus::ensure(kGuiChanOut);
 #ifdef _WIN32
         initWindow();
 #endif
         DesktopConfigData cfg; std::string cfgErr; bool cfgOk = DesktopConfig::Load("desktop.json", cfg, cfgErr);
+        g_cfg = cfg; // Store config
+        refreshDesktopItems(); // Populate g_items from pinned/recent
+        refreshAllProgramsList(); // Populate sorted all programs list
 #ifdef _WIN32
         if(cfgOk) loadWallpaper(cfg.wallpaperPath);
 #endif
+
         bool legacyLoaded=false; if(!cfgOk || cfg.windows.empty()){ std::vector<SavedWindow> sw; std::string err; if(DesktopState::Load("desktop.state", sw, err)){ std::lock_guard<std::mutex> lk(g_lock); g_windows.clear(); g_z.clear(); g_focus=0; std::sort(sw.begin(), sw.end(), [](const SavedWindow&a,const SavedWindow&b){ return a.z<b.z; }); for(auto &w: sw){ uint64_t id=s_nextWinId.fetch_add(1); WinInfo wi{ id,w.title,w.x,w.y,w.w,w.h, {}, {}, {}, w.minimized, w.maximized, 0,0,0,0, true, w.snap }; if(wi.maximized){ RECT crL{0,0,1024,768};
 #ifdef _WIN32
                     if(g_hwnd) GetClientRect(g_hwnd,&crL);
