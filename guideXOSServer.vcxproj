@@ -141,6 +141,7 @@
     <ClInclude Include="process.h" />
     <ClInclude Include="scheduler.h" />
     <ClInclude Include="vfs.h" />
+    <ClInclude Include="workspace_manager.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="allocator.cpp" />
@@ -157,6 +158,7 @@
     <ClCompile Include="scheduler.cpp" />
     <ClCompile Include="server.cpp" />
     <ClCompile Include="vfs.cpp" />
+    <ClCompile Include="workspace_manager.cpp" />
   </ItemGroup>
   <ItemGroup>
     <Text Include="ROADMAP.txt" />
@@ -166,6 +168,7 @@
     <None Include="PHASE5_COMPLETE.md" />
     <None Include="PHASE5_GAPS.md" />
     <None Include="PHASE5_IMPLEMENTATION.md" />
+    <None Include="PHASE5_PRIORITY2_STATUS.md" />
     <None Include="PHASE5_QUICKREF.md" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

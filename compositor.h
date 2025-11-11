@@ -89,5 +89,9 @@ namespace gxos { namespace gui {
         static int g_startMenuSel; static int g_startMenuScroll;
         static bool g_startMenuAllProgs; // "All Programs" view
         static std::vector<std::string> g_startMenuAllProgsSorted; // Sorted app names
+        // Taskbar menu state
+        static bool g_taskbarMenuVisible;
+        static RECT g_taskbarMenuRect;
+        static int g_taskbarMenuSel; // selected item index
     };
 } }

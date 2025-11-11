@@ -46,6 +46,7 @@ static void help(){
                  " desktop.wallpaper <path> | desktop.launch <action> | desktop.pin <action> | desktop.unpin <action> | desktop.showconfig\n"
                  " desktop.apps | desktop.pinned | desktop.recent | desktop.pinapp <name> | desktop.pinfile <name> <path>\n"
                  " taskbar.list | taskbar.activate <id> | taskbar.min <id> | taskbar.close <id>\n"
+                 " workspace.switch <n> | workspace.next | workspace.prev | workspace.current\n"
                  " proc.wait <pid> [timeoutMs] | proc.status <pid>\n"
                  " vfs.mkdir <path> | vfs.write <path> <text> | vfs.read <path> | vfs.ls <path>\n"
                  " pbytes | help | quit/exit\n"; }
@@ -193,6 +194,35 @@ int main(){
             std::string idS; iss>>idS; if(idS.empty()){ std::cout<<"taskbar.min <id>"<<std::endl; continue; } ipc::Message m; m.type=(uint32_t)gui::MsgType::MT_Minimize; m.data.assign(idS.begin(), idS.end()); ipc::Bus::publish("gui.input", std::move(m), false); std::cout<<"Minimize sent"<<std::endl; }
         else if (cmd=="taskbar.close"){
             std::string idS; iss>>idS; if(idS.empty()){ std::cout<<"taskbar.close <id>"<<std::endl; continue; } ipc::Message m; m.type=(uint32_t)gui::MsgType::MT_Close; m.data.assign(idS.begin(), idS.end()); ipc::Bus::publish("gui.input", std::move(m), false); std::cout<<"Close requested"<<std::endl; }
+        else if (cmd=="workspace.switch"){
+            int n; if(!(iss>>n)){ std::cout<<"workspace.switch <n>"<<std::endl; continue; }
+            ipc::Message m; m.type=(uint32_t)gui::MsgType::MT_WidgetEvt; 
+            std::string payload = "WS_SWITCH|" + std::to_string(n);
+            m.data.assign(payload.begin(), payload.end()); 
+            ipc::Bus::publish("gui.input", std::move(m), false); 
+            std::cout<<"Workspace switch requested: "<<n<<std::endl; 
+        }
+        else if (cmd=="workspace.next"){
+            ipc::Message m; m.type=(uint32_t)gui::MsgType::MT_WidgetEvt; 
+            std::string payload = "WS_NEXT";
+            m.data.assign(payload.begin(), payload.end()); 
+            ipc::Bus::publish("gui.input", std::move(m), false); 
+            std::cout<<"Next workspace requested"<<std::endl; 
+        }
+        else if (cmd=="workspace.prev"){
+            ipc::Message m; m.type=(uint32_t)gui::MsgType::MT_WidgetEvt; 
+            std::string payload = "WS_PREV";
+            m.data.assign(payload.begin(), payload.end()); 
+            ipc::Bus::publish("gui.input", std::move(m), false); 
+            std::cout<<"Previous workspace requested"<<std::endl; 
+        }
+        else if (cmd=="workspace.current"){
+            ipc::Message m; m.type=(uint32_t)gui::MsgType::MT_WidgetEvt; 
+            std::string payload = "WS_CURRENT";
+            m.data.assign(payload.begin(), payload.end()); 
+            ipc::Bus::publish("gui.input", std::move(m), false); 
+            std::cout<<"Current workspace query sent (use gui.pop)"<<std::endl; 
+        }
         else {
             std::cout << "Unknown command (help for list)" << std::endl;
         }

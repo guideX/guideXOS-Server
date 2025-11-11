@@ -50,6 +50,9 @@ namespace gxos { namespace gui {
     int Compositor::g_startMenuSel = 0; int Compositor::g_startMenuScroll = 0;
     bool Compositor::g_startMenuAllProgs = false; // "All Programs" view toggle
     std::vector<std::string> Compositor::g_startMenuAllProgsSorted; // Alphabetically sorted app list
+    bool Compositor::g_taskbarMenuVisible = false;
+    RECT Compositor::g_taskbarMenuRect{0,0,0,0};
+    int Compositor::g_taskbarMenuSel = 0;
 
     static uint64_t nowMs(){ return (uint64_t)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count(); }
     static void publishOut(MsgType type, const std::string& payload){ ipc::Message out; out.type=(uint32_t)type; out.data.assign(payload.begin(), payload.end()); ipc::Bus::publish(kGuiChanOut, std::move(out), false); }

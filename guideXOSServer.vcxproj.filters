@@ -66,6 +66,9 @@
     <ClInclude Include="desktop_service.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="workspace_manager.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="allocator.cpp">
@@ -110,6 +113,9 @@
     <ClCompile Include="desktop_service.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="workspace_manager.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <Text Include="TESTS.TXT" />
@@ -120,5 +126,6 @@
     <None Include="PHASE5_IMPLEMENTATION.md" />
     <None Include="PHASE5_COMPLETE.md" />
     <None Include="PHASE5_QUICKREF.md" />
+    <None Include="PHASE5_PRIORITY2_STATUS.md" />
   </ItemGroup>
 </Project>
