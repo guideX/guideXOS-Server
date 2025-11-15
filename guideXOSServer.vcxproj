@@ -138,6 +138,7 @@
     <ClInclude Include="ipc_bus.h" />
     <ClInclude Include="logger.h" />
     <ClInclude Include="notepad.h" />
+    <ClInclude Include="notepad_new.h" />
     <ClInclude Include="platform.h" />
     <ClInclude Include="process.h" />
     <ClInclude Include="scheduler.h" />
@@ -167,9 +168,21 @@
     <Text Include="TESTS.TXT" />
   </ItemGroup>
   <ItemGroup>
+    <None Include="CRASH_FIX_SUMMARY.md" />
+    <None Include="DEVELOPMENT_PLAN.md" />
+    <None Include="ITERATOR_DEBUG_FIX.md" />
+    <None Include="ITERATOR_DEBUG_FIX_COMPLETE.md" />
+    <None Include="ITERATOR_FIX_ACTUAL_ROOT_CAUSE.md" />
+    <None Include="ITERATOR_FIX_FINAL.md" />
+    <None Include="ITERATOR_FIX_FINAL_V2.md" />
     <None Include="NEXT_STEPS.md" />
     <None Include="NOTEPAD_COMPLETE.md" />
+    <None Include="NOTEPAD_CRASH_DEBUG.md" />
+    <None Include="NOTEPAD_CRASH_DIAGNOSIS.md" />
+    <None Include="NOTEPAD_CRASH_FIXED.md" />
+    <None Include="NOTEPAD_DIAGNOSTIC_GUIDE.md" />
     <None Include="NOTEPAD_READY.md" />
+    <None Include="NOTEPAD_TEST_GUIDE.md" />
     <None Include="PHASE5_COMPLETE.md" />
     <None Include="PHASE5_CONTINUATION.md" />
     <None Include="PHASE5_FINAL_COMPLETE.md" />
@@ -183,7 +196,11 @@
     <None Include="PHASE5_TESTING_GUIDE.md" />
     <None Include="PHASE6_IMPLEMENTATION.md" />
     <None Include="PHASE6_SESSION1.md" />
+    <None Include="QUICK_FIX_SUMMARY.md" />
     <None Include="SESSION_PROGRESS.md" />
+    <None Include="SESSION_SUMMARY_CURRENT.md" />
+    <None Include="SIMPLE_FIX.md" />
+    <None Include="TEST_NOTEPAD.md" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

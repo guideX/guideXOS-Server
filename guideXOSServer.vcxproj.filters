@@ -72,6 +72,9 @@
     <ClInclude Include="notepad.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="notepad_new.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="allocator.cpp">
@@ -145,5 +148,21 @@
     <None Include="PHASE6_SESSION1.md" />
     <None Include="NOTEPAD_READY.md" />
     <None Include="NOTEPAD_COMPLETE.md" />
+    <None Include="NOTEPAD_CRASH_DEBUG.md" />
+    <None Include="CRASH_FIX_SUMMARY.md" />
+    <None Include="SIMPLE_FIX.md" />
+    <None Include="NOTEPAD_DIAGNOSTIC_GUIDE.md" />
+    <None Include="NOTEPAD_CRASH_FIXED.md" />
+    <None Include="TEST_NOTEPAD.md" />
+    <None Include="NOTEPAD_CRASH_DIAGNOSIS.md" />
+    <None Include="DEVELOPMENT_PLAN.md" />
+    <None Include="NOTEPAD_TEST_GUIDE.md" />
+    <None Include="SESSION_SUMMARY_CURRENT.md" />
+    <None Include="ITERATOR_DEBUG_FIX.md" />
+    <None Include="QUICK_FIX_SUMMARY.md" />
+    <None Include="ITERATOR_DEBUG_FIX_COMPLETE.md" />
+    <None Include="ITERATOR_FIX_FINAL.md" />
+    <None Include="ITERATOR_FIX_FINAL_V2.md" />
+    <None Include="ITERATOR_FIX_ACTUAL_ROOT_CAUSE.md" />
   </ItemGroup>
 </Project>
