@@ -132,6 +132,7 @@
     <ClInclude Include="desktop_config.h" />
     <ClInclude Include="desktop_service.h" />
     <ClInclude Include="desktop_state.h" />
+    <ClInclude Include="file_explorer.h" />
     <ClInclude Include="fs.h" />
     <ClInclude Include="gui_protocol.h" />
     <ClInclude Include="gxm_loader.h" />
@@ -157,6 +158,7 @@
     <ClCompile Include="console_window.cpp" />
     <ClCompile Include="desktop_service.cpp" />
     <ClCompile Include="desktop_state.cpp" />
+    <ClCompile Include="file_explorer.cpp" />
     <ClCompile Include="fs.cpp" />
     <ClCompile Include="gxm_loader.cpp" />
     <ClCompile Include="icons.cpp" />

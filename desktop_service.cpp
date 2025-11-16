@@ -4,6 +4,7 @@
 #include "notepad.h"
 #include "calculator.h"
 #include "console_window.h"
+#include "file_explorer.h"
 #include <algorithm>
 #include <fstream>
 #include <sstream>
@@ -154,6 +155,9 @@ namespace gxos { namespace gui {
         else if (name == "Console") {
             apps::ConsoleWindow::Launch();
         }
+        else if (name == "FileExplorer" || name == "Files") {
+            apps::FileExplorer::Launch();
+        }
         else if (name == "Paint") {
             // TODO: Launch Paint when implemented
             Logger::write(LogLevel::Info, "Paint not yet implemented");
@@ -187,6 +191,7 @@ namespace gxos { namespace gui {
             RegisterApp("Paint", "image");
             RegisterApp("Console", "edit");
             RegisterApp("Notepad", "notepad");
+            RegisterApp("FileExplorer", "folder");
             RegisterApp("TaskManager", "applications");
             return;
         }
@@ -217,6 +222,7 @@ namespace gxos { namespace gui {
         RegisterApp("Paint", "image");
         RegisterApp("Console", "edit");
         RegisterApp("Notepad", "notepad");
+        RegisterApp("FileExplorer", "folder");
         RegisterApp("TaskManager", "applications");
 
         Logger::write(LogLevel::Info, "Desktop state loaded");

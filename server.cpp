@@ -16,6 +16,7 @@
 #include "notepad.h"
 #include "calculator.h"
 #include "console_window.h"
+#include "file_explorer.h"
 #include <iostream>
 #include <chrono>
 #include <sstream>
@@ -53,6 +54,7 @@ static void help(){
                  " notepad | notepad <file>\n"
                  " calculator\n"
                  " console | console.start | console.send <text> | console.pop [timeoutMs]\n"
+                 " files | files <path>\n"
                  " proc.wait <pid> [timeoutMs] | proc.status <pid>\n"
                  " vfs.mkdir <path> | vfs.write <path> <text> | vfs.read <path> | vfs.ls <path>\n"
                  " pbytes | help | quit/exit\n"; }
@@ -249,6 +251,19 @@ int main(){
         else if (cmd=="console"){
             uint64_t pid = apps::ConsoleWindow::Launch();
             std::cout<<"Console window launched, pid="<<pid<<std::endl;
+        }
+        else if (cmd=="files"){
+            std::string startPath;
+            std::getline(iss, startPath);
+            if(startPath.size()>0 && startPath[0]==' ') startPath.erase(0,1);
+            
+            uint64_t pid;
+            if(startPath.empty()) {
+                pid = apps::FileExplorer::Launch();
+            } else {
+                pid = apps::FileExplorer::Launch(startPath);
+            }
+            std::cout<<"File Explorer launched, pid="<<pid<<std::endl;
         }
         else {
             std::cout << "Unknown command (help for list)" << std::endl;

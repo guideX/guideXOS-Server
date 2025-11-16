@@ -87,6 +87,9 @@
     <ClInclude Include="console_window.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="file_explorer.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="allocator.cpp">
@@ -147,6 +150,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="console_window.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="file_explorer.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
