@@ -2,6 +2,8 @@
 #include "desktop_config.h"
 #include "logger.h"
 #include "notepad.h"
+#include "calculator.h"
+#include "console_window.h"
 #include <algorithm>
 #include <fstream>
 #include <sstream>
@@ -147,12 +149,10 @@ namespace gxos { namespace gui {
             apps::Notepad::Launch();
         }
         else if (name == "Calculator") {
-            // TODO: Launch Calculator when implemented
-            Logger::write(LogLevel::Info, "Calculator not yet implemented");
+            apps::Calculator::Launch();
         }
         else if (name == "Console") {
-            // TODO: Launch Console when implemented
-            Logger::write(LogLevel::Info, "Console not yet implemented");
+            apps::ConsoleWindow::Launch();
         }
         else if (name == "Paint") {
             // TODO: Launch Paint when implemented

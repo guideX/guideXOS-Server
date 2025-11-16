@@ -125,8 +125,10 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="allocator.h" />
+    <ClInclude Include="calculator.h" />
     <ClInclude Include="compositor.h" />
     <ClInclude Include="console_service.h" />
+    <ClInclude Include="console_window.h" />
     <ClInclude Include="desktop_config.h" />
     <ClInclude Include="desktop_service.h" />
     <ClInclude Include="desktop_state.h" />
@@ -141,14 +143,18 @@
     <ClInclude Include="notepad_new.h" />
     <ClInclude Include="platform.h" />
     <ClInclude Include="process.h" />
+    <ClInclude Include="save_changes_dialog.h" />
+    <ClInclude Include="save_dialog.h" />
     <ClInclude Include="scheduler.h" />
     <ClInclude Include="vfs.h" />
     <ClInclude Include="workspace_manager.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="allocator.cpp" />
+    <ClCompile Include="calculator.cpp" />
     <ClCompile Include="compositor.cpp" />
     <ClCompile Include="console_service.cpp" />
+    <ClCompile Include="console_window.cpp" />
     <ClCompile Include="desktop_service.cpp" />
     <ClCompile Include="desktop_state.cpp" />
     <ClCompile Include="fs.cpp" />
@@ -158,6 +164,8 @@
     <ClCompile Include="logger.cpp" />
     <ClCompile Include="notepad.cpp" />
     <ClCompile Include="process.cpp" />
+    <ClCompile Include="save_changes_dialog.cpp" />
+    <ClCompile Include="save_dialog.cpp" />
     <ClCompile Include="scheduler.cpp" />
     <ClCompile Include="server.cpp" />
     <ClCompile Include="vfs.cpp" />
@@ -168,6 +176,8 @@
     <Text Include="TESTS.TXT" />
   </ItemGroup>
   <ItemGroup>
+    <None Include="CALCULATOR_COMPLETE.md" />
+    <None Include="CONSOLE_WINDOW_COMPLETE.md" />
     <None Include="CRASH_FIX_SUMMARY.md" />
     <None Include="DEVELOPMENT_PLAN.md" />
     <None Include="ITERATOR_DEBUG_FIX.md" />
@@ -176,11 +186,15 @@
     <None Include="ITERATOR_FIX_FINAL.md" />
     <None Include="ITERATOR_FIX_FINAL_V2.md" />
     <None Include="NEXT_STEPS.md" />
+    <None Include="NOTEPAD_100_PERCENT_COMPLETE.md" />
     <None Include="NOTEPAD_COMPLETE.md" />
     <None Include="NOTEPAD_CRASH_DEBUG.md" />
     <None Include="NOTEPAD_CRASH_DIAGNOSIS.md" />
     <None Include="NOTEPAD_CRASH_FIXED.md" />
     <None Include="NOTEPAD_DIAGNOSTIC_GUIDE.md" />
+    <None Include="NOTEPAD_PARITY_ANALYSIS.md" />
+    <None Include="NOTEPAD_PARITY_PROGRESS.md" />
+    <None Include="NOTEPAD_QUICK_REFERENCE.md" />
     <None Include="NOTEPAD_READY.md" />
     <None Include="NOTEPAD_TEST_GUIDE.md" />
     <None Include="PHASE5_COMPLETE.md" />
@@ -195,8 +209,11 @@
     <None Include="PHASE5_QUICKREF.md" />
     <None Include="PHASE5_TESTING_GUIDE.md" />
     <None Include="PHASE6_IMPLEMENTATION.md" />
+    <None Include="PHASE6_NEXT_STEPS.md" />
+    <None Include="PHASE6_NOTEPAD_COMPLETE.md" />
     <None Include="PHASE6_SESSION1.md" />
     <None Include="QUICK_FIX_SUMMARY.md" />
+    <None Include="SESSION_NOTEPAD_PARITY_COMPLETE.md" />
     <None Include="SESSION_PROGRESS.md" />
     <None Include="SESSION_SUMMARY_CURRENT.md" />
     <None Include="SIMPLE_FIX.md" />

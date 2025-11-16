@@ -14,6 +14,8 @@
 #include "desktop_config.h"
 #include "desktop_service.h"
 #include "notepad.h"
+#include "calculator.h"
+#include "console_window.h"
 #include <iostream>
 #include <chrono>
 #include <sstream>
@@ -49,6 +51,8 @@ static void help(){
                  " taskbar.list | taskbar.activate <id> | taskbar.min <id> | taskbar.close <id>\n"
                  " workspace.switch <n> | workspace.next | workspace.prev | workspace.current\n"
                  " notepad | notepad <file>\n"
+                 " calculator\n"
+                 " console | console.start | console.send <text> | console.pop [timeoutMs]\n"
                  " proc.wait <pid> [timeoutMs] | proc.status <pid>\n"
                  " vfs.mkdir <path> | vfs.write <path> <text> | vfs.read <path> | vfs.ls <path>\n"
                  " pbytes | help | quit/exit\n"; }
@@ -237,6 +241,14 @@ int main(){
                 pid = apps::Notepad::LaunchWithFile(filePath);
             }
             std::cout<<"Notepad launched, pid="<<pid<<std::endl;
+        }
+        else if (cmd=="calculator"){
+            uint64_t pid = apps::Calculator::Launch();
+            std::cout<<"Calculator launched, pid="<<pid<<std::endl;
+        }
+        else if (cmd=="console"){
+            uint64_t pid = apps::ConsoleWindow::Launch();
+            std::cout<<"Console window launched, pid="<<pid<<std::endl;
         }
         else {
             std::cout << "Unknown command (help for list)" << std::endl;

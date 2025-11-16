@@ -8,7 +8,7 @@ namespace gxos { namespace apps {
     
     /// <summary>
     /// Notepad - Simple text editor application
-    /// Features: Multi-line text editing, Open/Save via VFS, Text wrapping, Special characters
+    /// Features: Multi-line text editing, Open/Save via VFS, Text wrapping, Special characters, Dialogs
     /// </summary>
     class Notepad {
     public:
@@ -42,6 +42,7 @@ namespace gxos { namespace apps {
         static void openFile();
         static void saveFile();
         static void saveFileAs();
+        static void closeWithPrompt();  // NEW: Prompt if unsaved changes
         
         // UI operations
         static void toggleWrap();
@@ -66,6 +67,9 @@ namespace gxos { namespace apps {
         static bool s_shiftPressed;
         static bool s_ctrlPressed;
         static bool s_capsLockOn;
+        static int s_lastKeyCode;      // For key debouncing
+        static bool s_keyDown;          // For key debouncing
+        static bool s_pendingClose;     // NEW: For close after dialog
     };
     
 }} // namespace gxos::apps

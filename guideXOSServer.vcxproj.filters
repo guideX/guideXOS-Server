@@ -75,6 +75,18 @@
     <ClInclude Include="notepad_new.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="save_changes_dialog.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="save_dialog.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="calculator.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="console_window.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="allocator.cpp">
@@ -125,6 +137,18 @@
     <ClCompile Include="notepad.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="save_changes_dialog.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="save_dialog.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="calculator.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="console_window.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <Text Include="TESTS.TXT" />
@@ -164,5 +188,14 @@
     <None Include="ITERATOR_FIX_FINAL.md" />
     <None Include="ITERATOR_FIX_FINAL_V2.md" />
     <None Include="ITERATOR_FIX_ACTUAL_ROOT_CAUSE.md" />
+    <None Include="NOTEPAD_PARITY_ANALYSIS.md" />
+    <None Include="NOTEPAD_PARITY_PROGRESS.md" />
+    <None Include="PHASE6_NOTEPAD_COMPLETE.md" />
+    <None Include="SESSION_NOTEPAD_PARITY_COMPLETE.md" />
+    <None Include="NOTEPAD_QUICK_REFERENCE.md" />
+    <None Include="PHASE6_NEXT_STEPS.md" />
+    <None Include="NOTEPAD_100_PERCENT_COMPLETE.md" />
+    <None Include="CALCULATOR_COMPLETE.md" />
+    <None Include="CONSOLE_WINDOW_COMPLETE.md" />
   </ItemGroup>
 </Project>

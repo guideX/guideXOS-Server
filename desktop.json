@@ -1,7 +1,7 @@
 {
   "wallpaper": "assetsImages\tronporche.png",
-  "pinned": [],
-  "recent": ["Notepad","TaskManager","ComputerFiles","Calculator","Console"],
+  "pinned": ["ComputerFiles"],
+  "recent": ["Console","Notepad","Calculator","ComputerFiles","TaskManager"],
   "windows": [
   ]
 }

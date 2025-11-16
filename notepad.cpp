@@ -1,6 +1,10 @@
 #include "notepad.h"
 #include "gui_protocol.h"
 #include "logger.h"
+#include "vfs.h"
+#include "desktop_service.h"
+#include "save_dialog.h"
+#include "save_changes_dialog.h"
 #include <sstream>
 #include <algorithm>
 #include <cctype>
@@ -8,6 +12,7 @@
 namespace gxos { namespace apps {
     
     using namespace gxos::gui;
+    using namespace gxos::dialogs;
     
     // Static member initialization
     uint64_t Notepad::s_windowId = 0;
@@ -21,6 +26,9 @@ namespace gxos { namespace apps {
     bool Notepad::s_shiftPressed = false;
     bool Notepad::s_ctrlPressed = false;
     bool Notepad::s_capsLockOn = false;
+    int Notepad::s_lastKeyCode = 0;
+    bool Notepad::s_keyDown = false;
+    bool Notepad::s_pendingClose = false;
     
     uint64_t Notepad::Launch() {
         ProcessSpec spec{"notepad", Notepad::main};
@@ -134,14 +142,21 @@ namespace gxos { namespace apps {
                         }
                         
                         case MsgType::MT_Close: {
-                            // Window closed
+                            // Window closed - check for unsaved changes
                             std::string payload(msg.data.begin(), msg.data.end());
                             if (!payload.empty()) {
                                 try {
                                     uint64_t closedId = std::stoull(payload);
                                     if (closedId == s_windowId) {
-                                        Logger::write(LogLevel::Info, "Notepad closing...");
-                                        running = false;
+                                        if (s_modified && !s_pendingClose) {
+                                            // Has unsaved changes - show dialog
+                                            Logger::write(LogLevel::Info, "Notepad: Unsaved changes - showing dialog...");
+                                            closeWithPrompt();
+                                        } else {
+                                            // No unsaved changes or already confirmed - close now
+                                            Logger::write(LogLevel::Info, "Notepad closing...");
+                                            running = false;
+                                        }
                                     }
                                 } catch (const std::exception& e) {
                                     Logger::write(LogLevel::Error, std::string("Notepad: Failed to parse close ID: ") + e.what());
@@ -151,13 +166,25 @@ namespace gxos { namespace apps {
                         }
                         
                         case MsgType::MT_InputKey: {
-                            // Improved keyboard input with modifier support
+                            // Improved keyboard input with modifier support and debouncing
                             std::string payload(msg.data.begin(), msg.data.end());
                             size_t sep = payload.find('|');
                             if (sep != std::string::npos && sep > 0) {
                                 try {
                                     int keyCode = std::stoi(payload.substr(0, sep));
                                     std::string action = payload.substr(sep + 1);
+                                    
+                                    // Key debouncing - ignore repeated key down events
+                                    if (action == "down") {
+                                        if (s_keyDown && keyCode == s_lastKeyCode) {
+                                            break; // Ignore repeat
+                                        }
+                                        s_keyDown = true;
+                                        s_lastKeyCode = keyCode;
+                                    } else {
+                                        s_keyDown = false;
+                                        s_lastKeyCode = 0;
+                                    }
                                     
                                     // Track modifier keys
                                     if (keyCode == 16) { // Shift
@@ -174,8 +201,43 @@ namespace gxos { namespace apps {
                                     }
                                     
                                     if (action == "down") {
+                                        // Escape key - future use for dialogs
+                                        if (keyCode == 27) {
+                                            Logger::write(LogLevel::Info, "Notepad: Escape pressed");
+                                            break;
+                                        }
+                                        // Page Up - scroll up
+                                        else if (keyCode == 33) {
+                                            if (s_scrollOffset > 0) {
+                                                s_scrollOffset -= 10;
+                                                if (s_scrollOffset < 0) s_scrollOffset = 0;
+                                                redrawContent();
+                                            }
+                                        }
+                                        // Page Down - scroll down
+                                        else if (keyCode == 34) {
+                                            int maxScroll = (int)s_lines.size() - 25;
+                                            if (maxScroll < 0) maxScroll = 0;
+                                            s_scrollOffset += 10;
+                                            if (s_scrollOffset > maxScroll) s_scrollOffset = maxScroll;
+                                            redrawContent();
+                                        }
+                                        // Home - beginning of line
+                                        else if (keyCode == 36) {
+                                            s_cursorCol = 0;
+                                            redrawContent();
+                                            updateStatusBar();
+                                        }
+                                        // End - end of line
+                                        else if (keyCode == 35) {
+                                            if (s_cursorLine < (int)s_lines.size()) {
+                                                s_cursorCol = (int)s_lines[s_cursorLine].size();
+                                                redrawContent();
+                                                updateStatusBar();
+                                            }
+                                        }
                                         // Tab key - insert 4 spaces
-                                        if (keyCode == 9) {
+                                        else if (keyCode == 9) {
                                             if (s_cursorLine < (int)s_lines.size()) {
                                                 std::string temp = s_lines[s_cursorLine];
                                                 temp.insert(s_cursorCol, "    ");
@@ -222,9 +284,11 @@ namespace gxos { namespace apps {
                                                 std::string remainder = currentLine.substr(s_cursorCol);
                                                 std::string newCurrentLine = currentLine.substr(0, s_cursorCol);
                                                 
+
                                                 // Update current line
                                                 s_lines[s_cursorLine] = newCurrentLine;
                                                 
+
                                                 // Insert new line
                                                 s_lines.insert(s_lines.begin() + s_cursorLine + 1, remainder);
                                                 s_cursorLine++;
@@ -282,6 +346,7 @@ namespace gxos { namespace apps {
                             // Widget event (button click)
                             std::string payload(msg.data.begin(), msg.data.end());
                             
+
                             // Parse: <winId>|<widgetId>|<event>|<value>
                             std::istringstream iss(payload);
                             std::string winIdStr, widgetIdStr, event, value;
@@ -369,21 +434,158 @@ namespace gxos { namespace apps {
     }
     
     void Notepad::openFile() {
-        Logger::write(LogLevel::Info, "Notepad: Open file (not implemented - needs VFS integration)");
+        if (s_filePath.empty()) {
+            Logger::write(LogLevel::Info, "Notepad: Open file - no path specified");
+            return;
+        }
+        
+        std::vector<uint8_t> data;
+        if (!Vfs::instance().readFile(s_filePath, data)) {
+            Logger::write(LogLevel::Error, std::string("Notepad: Failed to read file: ") + s_filePath);
+            return;
+        }
+        
+        Logger::write(LogLevel::Info, std::string("Notepad: Loaded file: ") + s_filePath + " (" + std::to_string(data.size()) + " bytes)");
+        
+        // Parse file content into lines
+        s_lines.clear();
+        std::string currentLine;
+        for (uint8_t byte : data) {
+            if (byte == '\n') {
+                s_lines.push_back(currentLine);
+                currentLine.clear();
+            } else if (byte >= 32 && byte < 127) {
+                // Printable ASCII
+                currentLine += (char)byte;
+            } else if (byte == '\t') {
+                currentLine += "    "; // Convert tabs to 4 spaces
+            }
+            // Ignore other control characters
+        }
+        
+        // Add last line if any
+        if (!currentLine.empty() || s_lines.empty()) {
+            s_lines.push_back(currentLine);
+        }
+        
+        // Reset cursor and state
+        s_cursorLine = 0;
+        s_cursorCol = 0;
+        s_modified = false;
+        s_scrollOffset = 0;
+        
+        // Add to recent documents
+        DesktopService::AddRecentDocument(s_filePath);
+        
+        updateTitle();
+        redrawContent();
+        updateStatusBar();
     }
     
     void Notepad::saveFile() {
         if (s_filePath.empty()) {
             saveFileAs();
-        } else {
-            Logger::write(LogLevel::Info, std::string("Notepad: Saving to ") + s_filePath);
-            s_modified = false;
-            updateTitle();
+            return;
         }
+        
+        // Serialize lines to byte vector
+        std::vector<uint8_t> data;
+        for (size_t i = 0; i < s_lines.size(); i++) {
+            const std::string& line = s_lines[i];
+            for (char ch : line) {
+                data.push_back((uint8_t)ch);
+            }
+            // Add newline after each line except the last
+            if (i < s_lines.size() - 1) {
+                data.push_back((uint8_t)'\n');
+            }
+        }
+        
+        if (!Vfs::instance().writeFile(s_filePath, data)) {
+            Logger::write(LogLevel::Error, std::string("Notepad: Failed to write file: ") + s_filePath);
+            return;
+        }
+        
+        Logger::write(LogLevel::Info, std::string("Notepad: Saved to ") + s_filePath + " (" + std::to_string(data.size()) + " bytes)");
+        s_modified = false;
+        
+        // Add to recent documents
+        DesktopService::AddRecentDocument(s_filePath);
+        
+        updateTitle();
+        updateStatusBar();
     }
     
     void Notepad::saveFileAs() {
-        Logger::write(LogLevel::Info, "Notepad: Save As (not implemented - needs VFS integration)");
+        // Show Save Dialog
+        Logger::write(LogLevel::Info, "Notepad: Opening Save As dialog...");
+        
+        // TODO: Get window position - for now use defaults
+        int ownerX = 100;
+        int ownerY = 100;
+        
+        // Extract just the filename from path if we have one
+        std::string fileName = "untitled.txt";
+        if (!s_filePath.empty()) {
+            size_t lastSlash = s_filePath.find_last_of('/');
+            if (lastSlash != std::string::npos) {
+                fileName = s_filePath.substr(lastSlash + 1);
+            } else {
+                fileName = s_filePath;
+            }
+        }
+        
+        SaveDialog::Show(ownerX, ownerY, "data/", fileName,
+            [](const std::string& path) {
+                // Save callback
+                s_filePath = path;
+                saveFile();
+            }
+        );
+    }
+    
+    void Notepad::closeWithPrompt() {
+        // Show SaveChangesDialog
+        Logger::write(LogLevel::Info, "Notepad: Showing save changes dialog...");
+        
+        // TODO: Get window position - for now use defaults
+        int ownerX = 100;
+        int ownerY = 100;
+        
+        SaveChangesDialog::Show(ownerX, ownerY,
+            []() {
+                // Save clicked
+                Logger::write(LogLevel::Info, "SaveChangesDialog: User chose Save");
+                if (s_filePath.empty()) {
+                    // Need to show SaveDialog first
+                    SaveDialog::Show(100, 100, "data/", "untitled.txt",
+                        [](const std::string& path) {
+                            s_filePath = path;
+                            saveFile();
+                            s_pendingClose = true;
+                            // Window will close after this
+                        }
+                    );
+                } else {
+                    // Save to existing file
+                    saveFile();
+                    s_pendingClose = true;
+                    // Window will close after this
+                }
+            },
+            []() {
+                // Don't Save clicked
+                Logger::write(LogLevel::Info, "SaveChangesDialog: User chose Don't Save");
+                s_pendingClose = true;
+                s_modified = false;  // Clear modified flag so close proceeds
+                // Window will close after this
+            },
+            []() {
+                // Cancel clicked
+                Logger::write(LogLevel::Info, "SaveChangesDialog: User chose Cancel");
+                // Do nothing - window stays open
+            }
+        );
     }
     
     void Notepad::updateTitle() {
@@ -404,47 +606,47 @@ namespace gxos { namespace apps {
     void Notepad::redrawContent() {
         const char* kGuiChanIn = "gui.input";
         
+        // Calculate visible window - support scrolling
+        int visibleLines = 25; // Maximum lines to display
+        int startLine = s_scrollOffset;
+        int endLine = std::min((int)s_lines.size(), startLine + visibleLines);
+        
         // Draw visible lines with cursor indicator
-        for (size_t i = 0; i < s_lines.size() && i < 25; i++) {
+        for (int i = startLine; i < endLine; i++) {
             ipc::Message textMsg;
             textMsg.type = (uint32_t)MsgType::MT_DrawText;
             
             // Build the line text with cursor if needed
             std::string lineText;
-            if ((int)i == s_cursorLine && s_cursorCol <= (int)s_lines[i].size()) {
-                // Use simple string operations - no iterators, no character access
-                const std::string& sourceLine = s_lines[i];
-                
+            const std::string& sourceLine = s_lines[i];
+            
+            // Apply text wrapping if enabled
+            std::string displayLine = sourceLine;
+            if (s_wrapText && displayLine.length() > 80) {
+                // Simple wrapping at 80 characters
+                displayLine = displayLine.substr(0, 80);
+            }
+            
+            if (i == s_cursorLine && s_cursorCol <= (int)sourceLine.size()) {
                 // Build line with cursor using basic string operations
                 if (s_cursorCol == 0) {
-                    // Cursor at start: "|rest"
                     lineText = "|";
-                    lineText += sourceLine;
-                } else if (s_cursorCol >= (int)sourceLine.size()) {
-                    // Cursor at end: "text|"
-                    lineText = sourceLine;
+                    lineText += displayLine;
+                } else if (s_cursorCol >= (int)displayLine.size()) {
+                    lineText = displayLine;
                     lineText += "|";
                 } else {
-                    // Cursor in middle: manually build with + operator
-                    // This avoids substr() which can trigger iterator issues
-                    lineText.reserve(sourceLine.size() + 1);
-                    
-                    // Copy chars before cursor
+                    lineText.reserve(displayLine.size() + 1);
                     for (int j = 0; j < s_cursorCol; j++) {
-                        lineText += sourceLine[j];
+                        lineText += displayLine[j];
                     }
-                    
-                    // Add cursor
                     lineText += '|';
-                    
-                    // Copy chars after cursor
-                    for (size_t j = s_cursorCol; j < sourceLine.size(); j++) {
-                        lineText += sourceLine[j];
+                    for (size_t j = s_cursorCol; j < displayLine.size(); j++) {
+                        lineText += displayLine[j];
                     }
                 }
             } else {
-                // No cursor on this line - direct copy
-                lineText = s_lines[i];
+                lineText = displayLine;
             }
             
             std::ostringstream oss;
@@ -452,6 +654,13 @@ namespace gxos { namespace apps {
             std::string payload = oss.str();
             textMsg.data.assign(payload.begin(), payload.end());
             ipc::Bus::publish(kGuiChanIn, std::move(textMsg), false);
+        }
+        
+        // Ensure cursor scrolls into view
+        if (s_cursorLine < s_scrollOffset) {
+            s_scrollOffset = s_cursorLine;
+        } else if (s_cursorLine >= s_scrollOffset + visibleLines) {
+            s_scrollOffset = s_cursorLine - visibleLines + 1;
         }
     }
     
