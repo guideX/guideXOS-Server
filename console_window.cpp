@@ -34,6 +34,8 @@ namespace gxos { namespace apps {
             s_outputLines.push_back("guideXOS Console");
             s_outputLines.push_back("Type commands and press Enter");
             s_outputLines.push_back("Use Up/Down arrows for command history");
+            s_outputLines.push_back("Press Escape to clear input");
+            s_outputLines.push_back("Type 'help' for available commands");
             s_outputLines.push_back("");
             s_currentInput = "";
             s_commandHistory.clear();

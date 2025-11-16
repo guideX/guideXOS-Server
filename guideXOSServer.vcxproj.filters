@@ -90,6 +90,12 @@
     <ClInclude Include="file_explorer.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="clock.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="task_manager.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="allocator.cpp">
@@ -155,6 +161,12 @@
     <ClCompile Include="file_explorer.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="clock.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="task_manager.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <Text Include="TESTS.TXT" />
@@ -203,5 +215,9 @@
     <None Include="NOTEPAD_100_PERCENT_COMPLETE.md" />
     <None Include="CALCULATOR_COMPLETE.md" />
     <None Include="CONSOLE_WINDOW_COMPLETE.md" />
+    <None Include="Docs\PHASE6_POLISH_PLAN.md" />
+    <None Include="Docs\PHASE6_POLISH_COMPLETE.md" />
+    <None Include="Docs\TASK_MANAGER_COMPLETE.md" />
+    <None Include="Docs\PHASE6_COMPLETE.md" />
   </ItemGroup>
 </Project>

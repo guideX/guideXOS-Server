@@ -5,6 +5,8 @@
 #include "calculator.h"
 #include "console_window.h"
 #include "file_explorer.h"
+#include "clock.h"
+#include "task_manager.h"
 #include <algorithm>
 #include <fstream>
 #include <sstream>
@@ -158,17 +160,15 @@ namespace gxos { namespace gui {
         else if (name == "FileExplorer" || name == "Files") {
             apps::FileExplorer::Launch();
         }
+        else if (name == "Clock") {
+            apps::Clock::Launch();
+        }
+        else if (name == "TaskManager") {
+            apps::TaskManager::Launch();
+        }
         else if (name == "Paint") {
             // TODO: Launch Paint when implemented
             Logger::write(LogLevel::Info, "Paint not yet implemented");
-        }
-        else if (name == "Clock") {
-            // TODO: Launch Clock when implemented
-            Logger::write(LogLevel::Info, "Clock not yet implemented");
-        }
-        else if (name == "TaskManager") {
-            // TODO: Launch TaskManager when implemented
-            Logger::write(LogLevel::Info, "TaskManager not yet implemented");
         }
         else {
             error = "Application launcher not implemented: " + name;

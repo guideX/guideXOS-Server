@@ -201,6 +201,16 @@ namespace gxos { namespace apps {
                                     }
                                     
                                     if (action == "down") {
+                                        // Ctrl+S - Save
+                                        if (s_ctrlPressed && (keyCode == 83 || keyCode == 115)) {
+                                            saveFile();
+                                            break;
+                                        }
+                                        // Ctrl+N - New
+                                        else if (s_ctrlPressed && (keyCode == 78 || keyCode == 110)) {
+                                            newFile();
+                                            break;
+                                        }
                                         // Escape key - future use for dialogs
                                         if (keyCode == 27) {
                                             Logger::write(LogLevel::Info, "Notepad: Escape pressed");
@@ -355,6 +365,7 @@ namespace gxos { namespace apps {
                             std::getline(iss, event, '|');
                             std::getline(iss, value);
                             
+
                             if (!winIdStr.empty() && !widgetIdStr.empty()) {
                                 try {
                                     uint64_t winId = std::stoull(winIdStr);

@@ -17,6 +17,8 @@
 #include "calculator.h"
 #include "console_window.h"
 #include "file_explorer.h"
+#include "clock.h"
+#include "task_manager.h"
 #include <iostream>
 #include <chrono>
 #include <sstream>
@@ -55,6 +57,8 @@ static void help(){
                  " calculator\n"
                  " console | console.start | console.send <text> | console.pop [timeoutMs]\n"
                  " files | files <path>\n"
+                 " clock\n"
+                 " taskmgr\n"
                  " proc.wait <pid> [timeoutMs] | proc.status <pid>\n"
                  " vfs.mkdir <path> | vfs.write <path> <text> | vfs.read <path> | vfs.ls <path>\n"
                  " pbytes | help | quit/exit\n"; }
@@ -264,6 +268,14 @@ int main(){
                 pid = apps::FileExplorer::Launch(startPath);
             }
             std::cout<<"File Explorer launched, pid="<<pid<<std::endl;
+        }
+        else if (cmd=="clock"){
+            uint64_t pid = apps::Clock::Launch();
+            std::cout<<"Clock launched, pid="<<pid<<std::endl;
+        }
+        else if (cmd=="taskmgr"){
+            uint64_t pid = apps::TaskManager::Launch();
+            std::cout<<"Task Manager launched, pid="<<pid<<std::endl;
         }
         else {
             std::cout << "Unknown command (help for list)" << std::endl;

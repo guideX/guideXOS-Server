@@ -126,6 +126,7 @@
   <ItemGroup>
     <ClInclude Include="allocator.h" />
     <ClInclude Include="calculator.h" />
+    <ClInclude Include="clock.h" />
     <ClInclude Include="compositor.h" />
     <ClInclude Include="console_service.h" />
     <ClInclude Include="console_window.h" />
@@ -147,12 +148,14 @@
     <ClInclude Include="save_changes_dialog.h" />
     <ClInclude Include="save_dialog.h" />
     <ClInclude Include="scheduler.h" />
+    <ClInclude Include="task_manager.h" />
     <ClInclude Include="vfs.h" />
     <ClInclude Include="workspace_manager.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="allocator.cpp" />
     <ClCompile Include="calculator.cpp" />
+    <ClCompile Include="clock.cpp" />
     <ClCompile Include="compositor.cpp" />
     <ClCompile Include="console_service.cpp" />
     <ClCompile Include="console_window.cpp" />
@@ -170,6 +173,7 @@
     <ClCompile Include="save_dialog.cpp" />
     <ClCompile Include="scheduler.cpp" />
     <ClCompile Include="server.cpp" />
+    <ClCompile Include="task_manager.cpp" />
     <ClCompile Include="vfs.cpp" />
     <ClCompile Include="workspace_manager.cpp" />
   </ItemGroup>
@@ -182,6 +186,10 @@
     <None Include="CONSOLE_WINDOW_COMPLETE.md" />
     <None Include="CRASH_FIX_SUMMARY.md" />
     <None Include="DEVELOPMENT_PLAN.md" />
+    <None Include="Docs\PHASE6_COMPLETE.md" />
+    <None Include="Docs\PHASE6_POLISH_COMPLETE.md" />
+    <None Include="Docs\PHASE6_POLISH_PLAN.md" />
+    <None Include="Docs\TASK_MANAGER_COMPLETE.md" />
     <None Include="ITERATOR_DEBUG_FIX.md" />
     <None Include="ITERATOR_DEBUG_FIX_COMPLETE.md" />
     <None Include="ITERATOR_FIX_ACTUAL_ROOT_CAUSE.md" />

@@ -389,6 +389,18 @@ namespace gxos { namespace apps {
         int startIndex = s_scrollOffset;
         int endIndex = std::min((int)s_entries.size(), startIndex + visibleCount);
         
+        // If directory is empty, show a message
+        if (s_entries.empty()) {
+            ipc::Message msg;
+            msg.type = (uint32_t)MsgType::MT_DrawText;
+            std::ostringstream oss;
+            oss << s_windowId << "|  (Empty directory)";
+            std::string payload = oss.str();
+            msg.data.assign(payload.begin(), payload.end());
+            ipc::Bus::publish(kGuiChanIn, std::move(msg), false);
+            return;
+        }
+        
         // Draw entries
         for (int i = startIndex; i < endIndex; i++) {
             const VfsEntryInfo& entry = s_entries[i];
