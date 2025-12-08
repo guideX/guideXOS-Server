@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="Source Files">
+      <UniqueIdentifier>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</UniqueIdentifier>
+      <Extensions>cpp;c;cc;cxx;def;odl;idl;hpj;bat;asm;asmx</Extensions>
+    </Filter>
+    <Filter Include="Header Files">
+      <UniqueIdentifier>{93995380-89BD-4b04-88EB-625FBE52EBFB}</UniqueIdentifier>
+      <Extensions>h;hh;hpp;hxx;hm;inl;inc;ipp;xsd</Extensions>
+    </Filter>
+    <Filter Include="Resource Files">
+      <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
+      <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
+    </Filter>
+    <Filter Include="Source Files\Core">
+      <UniqueIdentifier>{8a7c8d9e-1234-5678-9abc-def012345678}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\Architecture">
+      <UniqueIdentifier>{9b8d9e0f-2345-6789-abcd-ef0123456789}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\Architecture\x86">
+      <UniqueIdentifier>{ac9eaf10-3456-789a-bcde-f01234567890}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\Kernel">
+      <UniqueIdentifier>{bd0fb021-4567-89ab-cdef-012345678901}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\Architecture">
+      <UniqueIdentifier>{ce1fc132-5678-9abc-def0-123456789012}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Build Scripts">
+      <UniqueIdentifier>{df2fd243-6789-abcd-ef01-234567890123}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  
+  <ItemGroup>
+    <ClInclude Include="kernel\core\include\kernel\arch.h">
+      <Filter>Header Files\Kernel</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\core\include\kernel\types.h">
+      <Filter>Header Files\Kernel</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\core\include\kernel\vga.h">
+      <Filter>Header Files\Kernel</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\core\include\kernel\version.h">
+      <Filter>Header Files\Kernel</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\arch\x86\include\arch\x86.h">
+      <Filter>Header Files\Architecture</Filter>
+    </ClInclude>
+  </ItemGroup>
+  
+  <ItemGroup>
+    <ClCompile Include="kernel\core\main.cpp">
+      <Filter>Source Files\Core</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\core\vga.cpp">
+      <Filter>Source Files\Core</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\core\arch.cpp">
+      <Filter>Source Files\Core</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\arch\x86\arch.cpp">
+      <Filter>Source Files\Architecture\x86</Filter>
+    </ClCompile>
+  </ItemGroup>
+  
+  <ItemGroup>
+    <None Include="kernel\arch\x86\boot.asm">
+      <Filter>Source Files\Architecture\x86</Filter>
+    </None>
+    <None Include="kernel\arch\x86\linker.ld">
+      <Filter>Source Files\Architecture\x86</Filter>
+    </None>
+    <None Include="kernel\build-x86.bat">
+      <Filter>Build Scripts</Filter>
+    </None>
+    <None Include="kernel\clean.bat">
+      <Filter>Build Scripts</Filter>
+    </None>
+    <None Include="kernel\Makefile">
+      <Filter>Build Scripts</Filter>
+    </None>
+    <None Include="RUN-KERNEL.bat">
+      <Filter>Build Scripts</Filter>
+    </None>
+  </ItemGroup>
+</Project>

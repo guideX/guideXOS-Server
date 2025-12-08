@@ -1,0 +1,18 @@
+# Itanium (IA-64) Architecture Build Configuration
+#
+# Copyright (c) 2024 guideX
+#
+
+# Toolchain
+CXX := ia64-elf-g++
+AS := ia64-elf-as
+LD := ia64-elf-ld
+
+# Architecture-specific flags
+CFLAGS += -m64
+ASFLAGS :=
+LIBS :=
+
+# Target information
+ARCH_BITS := 64
+ARCH_NAME := IA64

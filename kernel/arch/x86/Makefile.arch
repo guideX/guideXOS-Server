@@ -1,0 +1,18 @@
+# x86 Architecture Build Configuration
+#
+# Copyright (c) 2024 guideX
+#
+
+# Toolchain
+CXX := i686-elf-g++
+AS := nasm
+LD := i686-elf-ld
+
+# Architecture-specific flags
+CFLAGS += -m32 -march=i686
+ASFLAGS := -f elf32
+LIBS :=
+
+# Target information
+ARCH_BITS := 32
+ARCH_NAME := x86

@@ -1,0 +1,18 @@
+# ARM Architecture Build Configuration
+#
+# Copyright (c) 2024 guideX
+#
+
+# Toolchain
+CXX := arm-none-eabi-g++
+AS := arm-none-eabi-as
+LD := arm-none-eabi-ld
+
+# Architecture-specific flags
+CFLAGS += -march=armv7-a -mfpu=neon -mfloat-abi=hard
+ASFLAGS := -march=armv7-a
+LIBS :=
+
+# Target information
+ARCH_BITS := 32
+ARCH_NAME := ARM

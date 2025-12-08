@@ -1,0 +1,18 @@
+# SPARC Architecture Build Configuration
+#
+# Copyright (c) 2024 guideX
+#
+
+# Toolchain
+CXX := sparc-elf-g++
+AS := sparc-elf-as
+LD := sparc-elf-ld
+
+# Architecture-specific flags
+CFLAGS += -m32 -mcpu=v8
+ASFLAGS := -Av8
+LIBS :=
+
+# Target information
+ARCH_BITS := 32
+ARCH_NAME := SPARC

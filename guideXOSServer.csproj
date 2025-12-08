@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <!-- Custom target to build C++ kernel before main build -->
+  <Target Name="BuildCppKernel" BeforeTargets="BeforeBuild">
+    <Message Text="Building C++ kernel..." Importance="high" />
+    <Exec Command="cd &quot;$(ProjectDir)kernel&quot; &amp;&amp; call build-x86.bat" 
+          ConsoleToMSBuild="true"
+          ContinueOnError="false" />
+  </Target>
+
+  <!-- Custom target to run QEMU after build (when vm=qemu property is set) -->
+  <Target Name="RunQemu" AfterTargets="Build" Condition="'$(vm)'=='qemu' OR '$(Configuration)'=='QEMU'">
+    <Error Text="Please install QEMU in order to debug guideXOS! https://www.qemu.org/download/#windows" 
+           Condition="!Exists('C:\Program Files\qemu\qemu-system-i386.exe')" />
+    
+    <Message Text="Launching QEMU with C++ kernel..." Importance="high" />
+    
+    <Exec Command="&quot;C:\Program Files\qemu\qemu-system-i386.exe&quot; -kernel &quot;$(ProjectDir)kernel\build\x86\bin\kernel.elf&quot; -m 128M -serial stdio -display gtk -no-reboot -no-shutdown" />
+  </Target>
+
+  <!-- Alternative: Always run QEMU in Debug configuration -->
+  <Target Name="RunQemuDebug" AfterTargets="Build" Condition="'$(Configuration)'=='Debug'">
+    <Message Text="Debug build complete. Run with: dotnet run --property:vm=qemu" Importance="high" />
+  </Target>
+
+</Project>

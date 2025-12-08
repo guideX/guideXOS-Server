@@ -1,0 +1,209 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|Win32">
+      <Configuration>Debug</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|Win32">
+      <Configuration>Release</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="QEMU|Win32">
+      <Configuration>QEMU</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="QEMU with USB|Win32">
+      <Configuration>QEMU with USB</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="QEMU with network|Win32">
+      <Configuration>QEMU with network</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="VMware|Win32">
+      <Configuration>VMware</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="VirtualBox|Win32">
+      <Configuration>VirtualBox</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  
+  <PropertyGroup Label="Globals">
+    <VCProjectVersion>16.0</VCProjectVersion>
+    <ProjectGuid>{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}</ProjectGuid>
+    <Keyword>MakeFileProj</Keyword>
+    <ProjectName>guideXOSKernel</ProjectName>
+  </PropertyGroup>
+  
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
+    <ConfigurationType>Makefile</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+  </PropertyGroup>
+  
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
+    <ConfigurationType>Makefile</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+  </PropertyGroup>
+  
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='QEMU|Win32'" Label="Configuration">
+    <ConfigurationType>Makefile</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+  </PropertyGroup>
+  
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='QEMU with USB|Win32'" Label="Configuration">
+    <ConfigurationType>Makefile</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+  </PropertyGroup>
+  
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='QEMU with network|Win32'" Label="Configuration">
+    <ConfigurationType>Makefile</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+  </PropertyGroup>
+  
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='VMware|Win32'" Label="Configuration">
+    <ConfigurationType>Makefile</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+  </PropertyGroup>
+  
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='VirtualBox|Win32'" Label="Configuration">
+    <ConfigurationType>Makefile</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+  </PropertyGroup>
+  
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  
+  <ImportGroup Label="ExtensionSettings">
+  </ImportGroup>
+  
+  <ImportGroup Label="Shared">
+  </ImportGroup>
+  
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  
+  <PropertyGroup Label="UserMacros" />
+  
+  <!-- Build Commands -->
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+    <NMakeBuildCommandLine>cd kernel &amp;&amp; build-x86.bat</NMakeBuildCommandLine>
+    <NMakeOutput>kernel\build\x86\bin\kernel.elf</NMakeOutput>
+    <NMakeCleanCommandLine>cd kernel &amp;&amp; clean.bat</NMakeCleanCommandLine>
+    <NMakeReBuildCommandLine>cd kernel &amp;&amp; clean.bat &amp;&amp; build-x86.bat</NMakeReBuildCommandLine>
+    <NMakePreprocessorDefinitions>WIN32;_DEBUG;$(NMakePreprocessorDefinitions)</NMakePreprocessorDefinitions>
+    <NMakeIncludeSearchPath>kernel\core\include;kernel\arch\x86\include</NMakeIncludeSearchPath>
+  </PropertyGroup>
+  
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <NMakeBuildCommandLine>cd kernel &amp;&amp; build-x86.bat</NMakeBuildCommandLine>
+    <NMakeOutput>kernel\build\x86\bin\kernel.elf</NMakeOutput>
+    <NMakeCleanCommandLine>cd kernel &amp;&amp; clean.bat</NMakeCleanCommandLine>
+    <NMakeReBuildCommandLine>cd kernel &amp;&amp; clean.bat &amp;&amp; build-x86.bat</NMakeReBuildCommandLine>
+    <NMakePreprocessorDefinitions>WIN32;NDEBUG;$(NMakePreprocessorDefinitions)</NMakePreprocessorDefinitions>
+    <NMakeIncludeSearchPath>kernel\core\include;kernel\arch\x86\include</NMakeIncludeSearchPath>
+  </PropertyGroup>
+  
+  <!-- QEMU Configuration -->
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='QEMU|Win32'">
+    <NMakeBuildCommandLine>cd kernel &amp;&amp; build-x86.bat</NMakeBuildCommandLine>
+    <NMakeOutput>kernel\build\x86\bin\kernel.elf</NMakeOutput>
+    <NMakeCleanCommandLine>cd kernel &amp;&amp; clean.bat</NMakeCleanCommandLine>
+    <NMakeReBuildCommandLine>cd kernel &amp;&amp; clean.bat &amp;&amp; build-x86.bat</NMakeReBuildCommandLine>
+    <LocalDebuggerCommand>C:\Program Files\qemu\qemu-system-i386.exe</LocalDebuggerCommand>
+    <LocalDebuggerCommandArguments>-kernel "$(ProjectDir)kernel\build\x86\bin\kernel.elf" -m 128M -serial stdio -display gtk -no-reboot -no-shutdown</LocalDebuggerCommandArguments>
+    <LocalDebuggerWorkingDirectory>$(ProjectDir)kernel</LocalDebuggerWorkingDirectory>
+    <DebuggerFlavor>WindowsLocalDebugger</DebuggerFlavor>
+    <NMakeIncludeSearchPath>kernel\core\include;kernel\arch\x86\include</NMakeIncludeSearchPath>
+  </PropertyGroup>
+  
+  <!-- QEMU with USB -->
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='QEMU with USB|Win32'">
+    <NMakeBuildCommandLine>cd kernel &amp;&amp; build-x86.bat</NMakeBuildCommandLine>
+    <NMakeOutput>kernel\build\x86\bin\kernel.elf</NMakeOutput>
+    <NMakeCleanCommandLine>cd kernel &amp;&amp; clean.bat</NMakeCleanCommandLine>
+    <NMakeReBuildCommandLine>cd kernel &amp;&amp; clean.bat &amp;&amp; build-x86.bat</NMakeReBuildCommandLine>
+    <LocalDebuggerCommand>C:\Program Files\qemu\qemu-system-i386.exe</LocalDebuggerCommand>
+    <LocalDebuggerCommandArguments>-kernel "$(ProjectDir)kernel\build\x86\bin\kernel.elf" -m 128M -serial stdio -display gtk -machine q35 -device qemu-xhci,id=xhci -device usb-kbd,bus=xhci.0 -device usb-mouse,bus=xhci.0</LocalDebuggerCommandArguments>
+    <LocalDebuggerWorkingDirectory>$(ProjectDir)kernel</LocalDebuggerWorkingDirectory>
+    <DebuggerFlavor>WindowsLocalDebugger</DebuggerFlavor>
+    <NMakeIncludeSearchPath>kernel\core\include;kernel\arch\x86\include</NMakeIncludeSearchPath>
+  </PropertyGroup>
+  
+  <!-- QEMU with network -->
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='QEMU with network|Win32'">
+    <NMakeBuildCommandLine>cd kernel &amp;&amp; build-x86.bat</NMakeBuildCommandLine>
+    <NMakeOutput>kernel\build\x86\bin\kernel.elf</NMakeOutput>
+    <NMakeCleanCommandLine>cd kernel &amp;&amp; clean.bat</NMakeCleanCommandLine>
+    <NMakeReBuildCommandLine>cd kernel &amp;&amp; clean.bat &amp;&amp; build-x86.bat</NMakeReBuildCommandLine>
+    <LocalDebuggerCommand>C:\Program Files\qemu\qemu-system-i386.exe</LocalDebuggerCommand>
+    <LocalDebuggerCommandArguments>-kernel "$(ProjectDir)kernel\build\x86\bin\kernel.elf" -m 128M -serial stdio -display gtk -netdev user,id=net0 -device rtl8139,netdev=net0</LocalDebuggerCommandArguments>
+    <LocalDebuggerWorkingDirectory>$(ProjectDir)kernel</LocalDebuggerWorkingDirectory>
+    <DebuggerFlavor>WindowsLocalDebugger</DebuggerFlavor>
+    <NMakeIncludeSearchPath>kernel\core\include;kernel\arch\x86\include</NMakeIncludeSearchPath>
+  </PropertyGroup>
+  
+  <!-- VMware Configuration -->
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='VMware|Win32'">
+    <NMakeBuildCommandLine>cd kernel &amp;&amp; build-x86.bat</NMakeBuildCommandLine>
+    <NMakeOutput>kernel\build\x86\bin\kernel.elf</NMakeOutput>
+    <NMakeCleanCommandLine>cd kernel &amp;&amp; clean.bat</NMakeCleanCommandLine>
+    <NMakeReBuildCommandLine>cd kernel &amp;&amp; clean.bat &amp;&amp; build-x86.bat</NMakeReBuildCommandLine>
+    <LocalDebuggerCommand>C:\Program Files (x86)\VMware\VMware Player\vmplayer.exe</LocalDebuggerCommand>
+    <LocalDebuggerCommandArguments>"$(ProjectDir)vm\guideXOS.vmx"</LocalDebuggerCommandArguments>
+    <DebuggerFlavor>WindowsLocalDebugger</DebuggerFlavor>
+    <NMakeIncludeSearchPath>kernel\core\include;kernel\arch\x86\include</NMakeIncludeSearchPath>
+  </PropertyGroup>
+  
+  <!-- VirtualBox Configuration -->
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='VirtualBox|Win32'">
+    <NMakeBuildCommandLine>cd kernel &amp;&amp; build-x86.bat</NMakeBuildCommandLine>
+    <NMakeOutput>kernel\build\x86\bin\kernel.elf</NMakeOutput>
+    <NMakeCleanCommandLine>cd kernel &amp;&amp; clean.bat</NMakeCleanCommandLine>
+    <NMakeReBuildCommandLine>cd kernel &amp;&amp; clean.bat &amp;&amp; build-x86.bat</NMakeReBuildCommandLine>
+    <LocalDebuggerCommand>C:\Program Files\Oracle\VirtualBox\VBoxManage.exe</LocalDebuggerCommand>
+    <LocalDebuggerCommandArguments>startvm guideXOS</LocalDebuggerCommandArguments>
+    <DebuggerFlavor>WindowsLocalDebugger</DebuggerFlavor>
+    <NMakeIncludeSearchPath>kernel\core\include;kernel\arch\x86\include</NMakeIncludeSearchPath>
+  </PropertyGroup>
+  
+  <ItemGroup>
+    <ClInclude Include="kernel\arch\x86\include\arch\x86.h" />
+    <ClInclude Include="kernel\core\include\kernel\arch.h" />
+    <ClInclude Include="kernel\core\include\kernel\types.h" />
+    <ClInclude Include="kernel\core\include\kernel\vga.h" />
+    <ClInclude Include="kernel\core\include\kernel\version.h" />
+  </ItemGroup>
+  
+  <ItemGroup>
+    <ClCompile Include="kernel\arch\x86\arch.cpp" />
+    <ClCompile Include="kernel\core\arch.cpp" />
+    <ClCompile Include="kernel\core\main.cpp" />
+    <ClCompile Include="kernel\core\vga.cpp" />
+  </ItemGroup>
+  
+  <ItemGroup>
+    <None Include="kernel\arch\x86\boot.asm" />
+    <None Include="kernel\arch\x86\linker.ld" />
+    <None Include="kernel\build-x86.bat" />
+    <None Include="kernel\clean.bat" />
+    <None Include="kernel\Makefile" />
+    <None Include="RUN-KERNEL.bat" />
+  </ItemGroup>
+  
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  
+  <ImportGroup Label="ExtensionTargets">
+  </ImportGroup>
+</Project>

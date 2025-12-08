@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="Current" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <ShowAllFiles>false</ShowAllFiles>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x86'">
+    <LocalDebuggerCommand>$(SolutionDir)scripts\run-qemu-x86-with-build.bat</LocalDebuggerCommand>
+    <LocalDebuggerWorkingDirectory>$(SolutionDir)</LocalDebuggerWorkingDirectory>
+    <DebuggerFlavor>WindowsLocalDebugger</DebuggerFlavor>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x86'">
+    <LocalDebuggerCommand>$(SolutionDir)scripts\run-qemu-x86-with-build.bat</LocalDebuggerCommand>
+    <LocalDebuggerWorkingDirectory>$(SolutionDir)</LocalDebuggerWorkingDirectory>
+    <DebuggerFlavor>WindowsLocalDebugger</DebuggerFlavor>
+  </PropertyGroup>
+  <ItemGroup>
+    <None Include="kernel\build-x86.bat" />
+    <None Include="kernel\clean.bat" />
+    <None Include="scripts\run-qemu-x86.bat" />
+    <None Include="scripts\run-qemu-x86-with-build.bat" />
+    <None Include="scripts\run-qemu-x86.sh" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="kernel\core\include\kernel\arch.h" />
+    <ClInclude Include="kernel\core\include\kernel\types.h" />
+    <ClInclude Include="kernel\core\include\kernel\vga.h" />
+    <ClInclude Include="kernel\core\include\kernel\version.h" />
+    <ClInclude Include="kernel\arch\x86\include\arch\x86.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="kernel\core\main.cpp" />
+    <ClCompile Include="kernel\core\vga.cpp" />
+    <ClCompile Include="kernel\core\arch.cpp" />
+    <ClCompile Include="kernel\arch\x86\arch.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <CustomBuild Include="kernel\arch\x86\boot.asm">
+      <FileType>Document</FileType>
+    </CustomBuild>
+  </ItemGroup>
+</Project>

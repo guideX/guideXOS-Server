@@ -1,0 +1,31 @@
+{
+  "profiles": {
+    "guideXOSServer": {
+      "commandName": "Project",
+      "environmentVariables": {
+        "DOTNET_ENVIRONMENT": "Development"
+      }
+    },
+    "Build and Run C++ Kernel in QEMU": {
+      "commandName": "Executable",
+      "executablePath": "cmd.exe",
+      "commandLineArgs": "/c \"cd /d \"$(ProjectDir)\" && RUN-KERNEL.bat\"",
+      "workingDirectory": "$(ProjectDir)",
+      "nativeDebugging": false
+    },
+    "QEMU x86 Kernel": {
+      "commandName": "Executable",
+      "executablePath": "C:\\Program Files\\qemu\\qemu-system-i386.exe",
+      "commandLineArgs": "-kernel \"$(ProjectDir)\\kernel\\build\\x86\\bin\\kernel.elf\" -m 128M -serial stdio -display gtk -no-reboot -no-shutdown",
+      "workingDirectory": "$(ProjectDir)\\kernel",
+      "nativeDebugging": false
+    },
+    "QEMU x86 Kernel (Debug)": {
+      "commandName": "Executable",
+      "executablePath": "C:\\Program Files\\qemu\\qemu-system-i386.exe",
+      "commandLineArgs": "-kernel \"$(ProjectDir)\\kernel\\build\\x86\\bin\\kernel.elf\" -m 128M -serial stdio -display gtk -s -S",
+      "workingDirectory": "$(ProjectDir)\\kernel",
+      "nativeDebugging": false
+    }
+  }
+}
