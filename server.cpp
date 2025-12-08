@@ -19,6 +19,7 @@
 #include "file_explorer.h"
 #include "clock.h"
 #include "task_manager.h"
+#include "vnc_server.h"
 #include <iostream>
 #include <chrono>
 #include <sstream>
@@ -61,6 +62,7 @@ static void help(){
                  " taskmgr\n"
                  " proc.wait <pid> [timeoutMs] | proc.status <pid>\n"
                  " vfs.mkdir <path> | vfs.write <path> <text> | vfs.read <path> | vfs.ls <path>\n"
+                 " vnc.start [port] | vnc.stop | vnc.status\n"
                  " pbytes | help | quit/exit\n"; }
 
 int main(){
@@ -276,6 +278,35 @@ int main(){
         else if (cmd=="taskmgr"){
             uint64_t pid = apps::TaskManager::Launch();
             std::cout<<"Task Manager launched, pid="<<pid<<std::endl;
+        }
+        else if (cmd=="vnc.start"){
+            uint16_t port = 5900;
+            iss >> port;
+            if(vnc::VncServer::IsRunning()){
+                std::cout<<"VNC server already running"<<std::endl;
+            } else if(vnc::VncServer::Start(port)){
+                std::cout<<"VNC server started on port "<<port<<std::endl;
+                std::cout<<"Connect from VM with: vnc://localhost:"<<port<<std::endl;
+            } else {
+                std::cout<<"Failed to start VNC server"<<std::endl;
+            }
+        }
+        else if (cmd=="vnc.stop"){
+            if(!vnc::VncServer::IsRunning()){
+                std::cout<<"VNC server not running"<<std::endl;
+            } else {
+                vnc::VncServer::Stop();
+                std::cout<<"VNC server stopped"<<std::endl;
+            }
+        }
+        else if (cmd=="vnc.status"){
+            if(vnc::VncServer::IsRunning()){
+                int clients = vnc::VncServer::GetClientCount();
+                std::cout<<"VNC server is running"<<std::endl;
+                std::cout<<"Connected clients: "<<clients<<std::endl;
+            } else {
+                std::cout<<"VNC server is not running"<<std::endl;
+            }
         }
         else {
             std::cout << "Unknown command (help for list)" << std::endl;

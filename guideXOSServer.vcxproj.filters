@@ -96,6 +96,45 @@
     <ClInclude Include="task_manager.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="kernel\arch\amd64\include\arch\amd64.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\arch\x86\include\arch\x86.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\arch\arm\include\arch\arm.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\arch\sparc\include\arch\sparc.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\arch\ia64\include\arch\ia64.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\core\include\kernel\arch.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\core\include\kernel\version.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\core\include\kernel\vga.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\core\include\kernel\types.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="launchSettings.json">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="vnc_server.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\core\include\kernel\multiboot.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\core\include\kernel\framebuffer.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="allocator.cpp">
@@ -167,57 +206,189 @@
     <ClCompile Include="task_manager.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="kernel\core\main.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\arch\amd64\arch.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\arch\x86\arch.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\arch\arm\arch.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\arch\sparc\arch.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\arch\ia64\arch.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\core\arch.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\core\vga.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="vnc_server.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\core\framebuffer.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <Text Include="TESTS.TXT" />
-    <Text Include="ROADMAP.txt" />
-  </ItemGroup>
-  <ItemGroup>
-    <None Include="PHASE5_GAPS.md" />
-    <None Include="PHASE5_IMPLEMENTATION.md" />
-    <None Include="PHASE5_COMPLETE.md" />
-    <None Include="PHASE5_QUICKREF.md" />
-    <None Include="PHASE5_PRIORITY2_STATUS.md" />
-    <None Include="SESSION_PROGRESS.md" />
-    <None Include="PHASE5_FINAL_SUMMARY.md" />
-    <None Include="PHASE5_TESTING_GUIDE.md" />
-    <None Include="PHASE5_FINAL_STATUS.md" />
-    <None Include="PHASE5_FINAL_COMPLETE.md" />
-    <None Include="PHASE5_CONTINUATION.md" />
-    <None Include="NEXT_STEPS.md" />
-    <None Include="PHASE5_POLISH_COMPLETION.md" />
-    <None Include="PHASE6_IMPLEMENTATION.md" />
-    <None Include="PHASE6_SESSION1.md" />
-    <None Include="NOTEPAD_READY.md" />
-    <None Include="NOTEPAD_COMPLETE.md" />
-    <None Include="NOTEPAD_CRASH_DEBUG.md" />
-    <None Include="CRASH_FIX_SUMMARY.md" />
-    <None Include="SIMPLE_FIX.md" />
-    <None Include="NOTEPAD_DIAGNOSTIC_GUIDE.md" />
-    <None Include="NOTEPAD_CRASH_FIXED.md" />
-    <None Include="TEST_NOTEPAD.md" />
-    <None Include="NOTEPAD_CRASH_DIAGNOSIS.md" />
-    <None Include="DEVELOPMENT_PLAN.md" />
-    <None Include="NOTEPAD_TEST_GUIDE.md" />
-    <None Include="SESSION_SUMMARY_CURRENT.md" />
-    <None Include="ITERATOR_DEBUG_FIX.md" />
-    <None Include="QUICK_FIX_SUMMARY.md" />
-    <None Include="ITERATOR_DEBUG_FIX_COMPLETE.md" />
-    <None Include="ITERATOR_FIX_FINAL.md" />
-    <None Include="ITERATOR_FIX_FINAL_V2.md" />
-    <None Include="ITERATOR_FIX_ACTUAL_ROOT_CAUSE.md" />
-    <None Include="NOTEPAD_PARITY_ANALYSIS.md" />
-    <None Include="NOTEPAD_PARITY_PROGRESS.md" />
-    <None Include="PHASE6_NOTEPAD_COMPLETE.md" />
-    <None Include="SESSION_NOTEPAD_PARITY_COMPLETE.md" />
-    <None Include="NOTEPAD_QUICK_REFERENCE.md" />
-    <None Include="PHASE6_NEXT_STEPS.md" />
-    <None Include="NOTEPAD_100_PERCENT_COMPLETE.md" />
-    <None Include="CALCULATOR_COMPLETE.md" />
-    <None Include="CONSOLE_WINDOW_COMPLETE.md" />
     <None Include="Docs\PHASE6_POLISH_PLAN.md" />
     <None Include="Docs\PHASE6_POLISH_COMPLETE.md" />
     <None Include="Docs\TASK_MANAGER_COMPLETE.md" />
     <None Include="Docs\PHASE6_COMPLETE.md" />
+    <None Include="Docs\PHASE7_PLAN.md" />
+    <None Include="Docs\TestResults\Session1_SmokeTests.md" />
+    <None Include="Docs\PHASE7_QUICKSTART.md" />
+    <None Include="Docs\PHASE7_LAUNCH.md" />
+    <None Include="docs\SIMPLE_FIX.md" />
+    <None Include="docs\SESSION_SUMMARY_CURRENT.md" />
+    <None Include="docs\SESSION_PROGRESS.md" />
+    <None Include="docs\SESSION_NOTEPAD_PARITY_COMPLETE.md" />
+    <None Include="docs\README.md" />
+    <None Include="docs\QUICK_FIX_SUMMARY.md" />
+    <None Include="docs\PHASE6_SESSION1.md" />
+    <None Include="docs\PHASE6_NOTEPAD_COMPLETE.md" />
+    <None Include="docs\PHASE6_NEXT_STEPS.md" />
+    <None Include="docs\PHASE6_IMPLEMENTATION.md" />
+    <None Include="docs\PHASE5_TESTING_GUIDE.md" />
+    <None Include="docs\PHASE5_QUICKREF.md" />
+    <None Include="docs\CALCULATOR_COMPLETE.md" />
+    <None Include="docs\CONSOLE_WINDOW_COMPLETE.md" />
+    <None Include="docs\CRASH_FIX_SUMMARY.md" />
+    <None Include="docs\DEVELOPMENT_PLAN.md" />
+    <None Include="docs\ITERATOR_DEBUG_FIX.md" />
+    <None Include="docs\ITERATOR_DEBUG_FIX_COMPLETE.md" />
+    <None Include="docs\ITERATOR_FIX_ACTUAL_ROOT_CAUSE.md" />
+    <None Include="docs\ITERATOR_FIX_FINAL.md" />
+    <None Include="docs\ITERATOR_FIX_FINAL_V2.md" />
+    <None Include="docs\NEXT_STEPS.md" />
+    <None Include="docs\NOTEPAD_100_PERCENT_COMPLETE.md" />
+    <None Include="docs\NOTEPAD_COMPLETE.md" />
+    <None Include="docs\NOTEPAD_CRASH_DEBUG.md" />
+    <None Include="docs\NOTEPAD_CRASH_DIAGNOSIS.md" />
+    <None Include="docs\NOTEPAD_CRASH_FIXED.md" />
+    <None Include="docs\NOTEPAD_DIAGNOSTIC_GUIDE.md" />
+    <None Include="docs\NOTEPAD_PARITY_ANALYSIS.md" />
+    <None Include="docs\NOTEPAD_PARITY_PROGRESS.md" />
+    <None Include="docs\NOTEPAD_QUICK_REFERENCE.md" />
+    <None Include="docs\NOTEPAD_READY.md" />
+    <None Include="docs\NOTEPAD_TEST_GUIDE.md" />
+    <None Include="docs\PHASE5_COMPLETE.md" />
+    <None Include="docs\PHASE5_CONTINUATION.md" />
+    <None Include="docs\PHASE5_FINAL_COMPLETE.md" />
+    <None Include="docs\PHASE5_FINAL_STATUS.md" />
+    <None Include="docs\PHASE5_FINAL_SUMMARY.md" />
+    <None Include="docs\PHASE5_GAPS.md" />
+    <None Include="docs\PHASE5_IMPLEMENTATION.md" />
+    <None Include="docs\PHASE5_POLISH_COMPLETION.md" />
+    <None Include="docs\PHASE5_PRIORITY2_STATUS.md" />
+    <None Include="docs\TEST_NOTEPAD.md" />
+    <None Include="Docs\TestResults\RapidValidation.md" />
+    <None Include="Docs\PHASE8_PLAN.md" />
+    <None Include="Docs\ROADMAP.md" />
+    <None Include="Docs\PHASE8_SESSION1.md" />
+    <None Include="kernel\arch\amd64\boot.asm">
+      <Filter>Source Files</Filter>
+    </None>
+    <None Include="kernel\arch\x86\boot.asm">
+      <Filter>Source Files</Filter>
+    </None>
+    <None Include="kernel\arch\arm\boot.s" />
+    <None Include="kernel\arch\ia64\boot.s" />
+    <None Include="kernel\arch\sparc\boot.s" />
+    <None Include="kernel\arch\amd64\linker.ld" />
+    <None Include="kernel\arch\x86\linker.ld" />
+    <None Include="kernel\arch\arm\linker.ld" />
+    <None Include="kernel\arch\sparc\linker.ld" />
+    <None Include="kernel\arch\ia64\linker.ld" />
+    <None Include="kernel\Makefile" />
+    <None Include="kernel\arch\amd64\Makefile.arch" />
+    <None Include="kernel\arch\x86\Makefile.arch" />
+    <None Include="kernel\arch\arm\Makefile.arch" />
+    <None Include="kernel\arch\sparc\Makefile.arch" />
+    <None Include="kernel\arch\ia64\Makefile.arch" />
+    <None Include="kernel\README.md" />
+    <None Include="scripts\run-qemu-x86.sh" />
+    <None Include="scripts\run-qemu-x86.bat">
+      <Filter>Source Files</Filter>
+    </None>
+    <None Include="README-BOOT.md" />
+    <None Include="QUICKSTART-QEMU.md" />
+    <None Include="scripts\test-build.sh" />
+    <None Include="scripts\test-build.bat">
+      <Filter>Source Files</Filter>
+    </None>
+    <None Include="IMPLEMENTATION-SUMMARY.md" />
+    <None Include="CHECKLIST.md" />
+    <None Include="START-HERE.md" />
+    <None Include="Makefile" />
+    <None Include="INDEX.md" />
+    <None Include="BOOT-FLOW-DIAGRAM.md" />
+    <None Include="kernel\build-x86.bat">
+      <Filter>Source Files</Filter>
+    </None>
+    <None Include="kernel\clean.bat">
+      <Filter>Source Files</Filter>
+    </None>
+    <None Include="setup-toolchain.bat">
+      <Filter>Source Files</Filter>
+    </None>
+    <None Include="TOOLCHAIN-SETUP.md" />
+    <None Include="diagnose.bat">
+      <Filter>Source Files</Filter>
+    </None>
+    <None Include=".vs\launch.vs.json" />
+    <None Include=".vs\tasks.vs.json" />
+    <None Include="scripts\run-qemu-x86-with-build.bat">
+      <Filter>Source Files</Filter>
+    </None>
+    <None Include="KernelBuild.vcxproj" />
+    <None Include="VS-SETUP.md" />
+    <None Include="VS-QUICK-START.md" />
+    <None Include="RUN-KERNEL.bat">
+      <Filter>Source Files</Filter>
+    </None>
+    <None Include="VS-TOOLS-MENU-SETUP.md" />
+    <None Include="VS-INTEGRATION-FIXED.md" />
+    <None Include="guideXOSServer.csproj" />
+    <None Include="Properties\launchSettings.json" />
+    <None Include="F5-QEMU-SETUP.md" />
+    <None Include="F5-WHATS-NEW.md" />
+    <None Include="LAUNCH-PROFILES-FIX.md" />
+    <None Include="F5-QUICK-FIX.md" />
+    <None Include="guideXOSKernel.vcxproj" />
+    <None Include="guideXOSKernel.vcxproj.filters" />
+    <None Include="NATIVE-CPP-PROJECT.md" />
+    <None Include="SETUP-FINAL.md" />
+    <None Include="COMPLETE-SETUP-SUMMARY.md" />
+    <None Include="QUICK-REFERENCE.md" />
+    <None Include="VNC_SETUP_GUIDE.md" />
+    <None Include="build.bat">
+      <Filter>Source Files</Filter>
+    </None>
+    <None Include="VNC_IMPLEMENTATION_SUMMARY.md" />
+    <None Include="QUICK_START_VNC.md" />
+    <None Include="GUI_FROM_VM_COMPLETE.md" />
+    <None Include="VNC_README.md" />
+    <None Include="VNC_DOCUMENTATION_INDEX.md" />
+    <None Include="FRAMEBUFFER_ARCHITECTURE.md" />
+    <None Include="VNC_REMOTE_BOOT_PLAN.md" />
+    <None Include="scripts\run-qemu-x86-vnc.bat">
+      <Filter>Source Files</Filter>
+    </None>
+    <None Include="scripts\run-qemu-x86-vnc.sh" />
+    <None Include="VNC_REMOTE_BOOT_GUIDE.md" />
+    <None Include="VNC_IMPLEMENTATION_COMPLETE.md" />
+    <None Include="VNC_QUICK_REFERENCE.md" />
+  </ItemGroup>
+  <ItemGroup>
+    <Text Include="ROADMAP.txt" />
+    <Text Include="TESTS.TXT" />
   </ItemGroup>
 </Project>

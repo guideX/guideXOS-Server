@@ -246,6 +246,31 @@ namespace gxos { namespace gui {
                 FrameRect(dc, &shutdownBtn, (HBRUSH)GetStockObject(WHITE_BRUSH));
                 TextOutA(dc, shutdownBtn.left+10, shutdownBtn.top+6, "Shutdown", 8);
             }
+            
+            // Capture framebuffer for VNC if server is running
+            if(vnc::VncServer::IsRunning()) {
+                HDC memDC = CreateCompatibleDC(dc);
+                HBITMAP memBitmap = CreateCompatibleBitmap(dc, cr.right - cr.left, cr.bottom - cr.top);
+                HGDIOBJ oldBitmap = SelectObject(memDC, memBitmap);
+                BitBlt(memDC, 0, 0, cr.right - cr.left, cr.bottom - cr.top, dc, 0, 0, SRCCOPY);
+                
+                BITMAPINFO bmi{};
+                bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+                bmi.bmiHeader.biWidth = cr.right - cr.left;
+                bmi.bmiHeader.biHeight = -(cr.bottom - cr.top); // negative for top-down
+                bmi.bmiHeader.biPlanes = 1;
+                bmi.bmiHeader.biBitCount = 32;
+                bmi.bmiHeader.biCompression = BI_RGB;
+                
+                std::vector<uint8_t> pixels((cr.right - cr.left) * (cr.bottom - cr.top) * 4);
+                GetDIBits(memDC, memBitmap, 0, cr.bottom - cr.top, pixels.data(), &bmi, DIB_RGB_COLORS);
+                vnc::VncServer::UpdateFramebuffer(pixels.data(), cr.right - cr.left, cr.bottom - cr.top, (cr.right - cr.left) * 4);
+                
+                SelectObject(memDC, oldBitmap);
+                DeleteObject(memBitmap);
+                DeleteDC(memDC);
+            }
+            
             EndPaint(h,&ps); return 0; }
         case WM_LBUTTONDOWN:{ int mx=GET_X_LPARAM(l); int my=GET_Y_LPARAM(l); RECT cr; GetClientRect(h,&cr); int taskbarH=32; RECT startBtn{8,cr.bottom-taskbarH+4,8+32,cr.bottom-4}; // Start button toggle
             if(mx>=startBtn.left && mx<=startBtn.right && my>=startBtn.top && my<=startBtn.bottom){ 

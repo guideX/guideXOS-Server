@@ -446,17 +446,24 @@ namespace gxos { namespace apps {
     
     void Notepad::openFile() {
         if (s_filePath.empty()) {
-            Logger::write(LogLevel::Info, "Notepad: Open file - no path specified");
+            Logger::write(LogLevel::Info, "Notepad: Open file - no path specified. Please provide a file path when launching notepad.");
             return;
         }
         
         std::vector<uint8_t> data;
         if (!Vfs::instance().readFile(s_filePath, data)) {
-            Logger::write(LogLevel::Error, std::string("Notepad: Failed to read file: ") + s_filePath);
+            std::ostringstream errorMsg;
+            errorMsg << "Notepad: Failed to read file: " << s_filePath << "\n"
+                     << "Possible reasons:\n"
+                     << "  - File does not exist\n"
+                     << "  - No read permission\n"
+                     << "  - File is in use by another process\n"
+                     << "Suggestion: Check if the file exists and you have permission to read it.";
+            Logger::write(LogLevel::Error, errorMsg.str());
             return;
         }
         
-        Logger::write(LogLevel::Info, std::string("Notepad: Loaded file: ") + s_filePath + " (" + std::to_string(data.size()) + " bytes)");
+        Logger::write(LogLevel::Info, std::string("Notepad: Successfully loaded file: ") + s_filePath + " (" + std::to_string(data.size()) + " bytes)");
         
         // Parse file content into lines
         s_lines.clear();
