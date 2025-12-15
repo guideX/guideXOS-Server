@@ -4,6 +4,12 @@ REM This allows remote viewing from another computer
 REM
 REM Copyright (c) 2024 guideX
 
+REM Save current directory and change to script directory
+pushd %~dp0
+
+REM Go to project root (one level up from scripts)
+cd ..
+
 echo Starting guideXOS Kernel with VNC support...
 echo.
 echo VNC Server will be available on:
@@ -20,7 +26,7 @@ REM Path to QEMU
 set QEMU=C:\Program Files\qemu\qemu-system-i386.exe
 
 REM Path to kernel
-set KERNEL=build\x86\bin\kernel.elf
+set KERNEL=kernel\build\x86\bin\kernel.elf
 
 REM Check if kernel exists
 if not exist "%KERNEL%" (
@@ -28,6 +34,7 @@ if not exist "%KERNEL%" (
     echo Please build the kernel first:
     echo   cd kernel
     echo   build-x86.bat
+    popd
     pause
     exit /b 1
 )
@@ -45,5 +52,9 @@ if errorlevel 1 (
     echo.
     echo Error: QEMU not found or failed to start
     echo Please check QEMU installation path
+    popd
     pause
 )
+
+REM Restore original directory
+popd

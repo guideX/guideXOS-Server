@@ -10,19 +10,8 @@ section .multiboot
 align 4
     ; Multiboot header
     dd 0x1BADB002              ; Magic number
-    dd 0x00000007              ; Flags (bit 0: mem, bit 1: boot device, bit 2: video mode)
-    dd -(0x1BADB002 + 0x00000007)    ; Checksum
-    
-    ; Framebuffer request (for graphical mode)
-    dd 0                       ; header_addr (unused)
-    dd 0                       ; load_addr (unused)
-    dd 0                       ; load_end_addr (unused)
-    dd 0                       ; bss_end_addr (unused)
-    dd 0                       ; entry_addr (unused)
-    dd 0                       ; mode_type (0 = linear graphics)
-    dd 1024                    ; width (requested)
-    dd 768                     ; height (requested)
-    dd 32                      ; depth (32-bit color)
+    dd 0x00000003              ; Flags (bit 0: mem, bit 1: boot device)
+    dd -(0x1BADB002 + 0x00000003)    ; Checksum
 
 section .boot
 global _start

@@ -212,7 +212,7 @@ if %errorlevel% neq 0 (
 echo [OK] main.o created
 
 REM Compile vga.cpp
-echo [3/6] Compiling vga.cpp...
+echo [3/7] Compiling vga.cpp...
 %CXX% %CFLAGS% -c core\vga.cpp -o "%OBJ_DIR%\core\vga.o"
 if %errorlevel% neq 0 (
     echo [ERROR] Failed to compile vga.cpp
@@ -221,8 +221,18 @@ if %errorlevel% neq 0 (
 )
 echo [OK] vga.o created
 
+REM Compile framebuffer.cpp
+echo [4/7] Compiling framebuffer.cpp...
+%CXX% %CFLAGS% -c core\framebuffer.cpp -o "%OBJ_DIR%\core\framebuffer.o"
+if %errorlevel% neq 0 (
+    echo [ERROR] Failed to compile framebuffer.cpp
+    pause
+    exit /b 1
+)
+echo [OK] framebuffer.o created
+
 REM Compile arch.cpp (core)
-echo [4/6] Compiling core arch.cpp...
+echo [5/7] Compiling core arch.cpp...
 %CXX% %CFLAGS% -c core\arch.cpp -o "%OBJ_DIR%\core\arch.o"
 if %errorlevel% neq 0 (
     echo [ERROR] Failed to compile core arch.cpp
@@ -232,7 +242,7 @@ if %errorlevel% neq 0 (
 echo [OK] arch.o (core) created
 
 REM Compile arch.cpp (x86)
-echo [5/6] Compiling x86 arch.cpp...
+echo [6/7] Compiling x86 arch.cpp...
 %CXX% %CFLAGS% -c arch\%ARCH%\arch.cpp -o "%OBJ_DIR%\arch\arch.o"
 if %errorlevel% neq 0 (
     echo [ERROR] Failed to compile x86 arch.cpp
@@ -242,8 +252,8 @@ if %errorlevel% neq 0 (
 echo [OK] arch.o (x86) created
 
 REM Link kernel
-echo [6/6] Linking kernel...
-%LD% %LDFLAGS% -o "%KERNEL%" "%OBJ_DIR%\arch\boot.o" "%OBJ_DIR%\core\main.o" "%OBJ_DIR%\core\vga.o" "%OBJ_DIR%\core\arch.o" "%OBJ_DIR%\arch\arch.o"
+echo [7/7] Linking kernel...
+%LD% %LDFLAGS% -o "%KERNEL%" "%OBJ_DIR%\arch\boot.o" "%OBJ_DIR%\core\main.o" "%OBJ_DIR%\core\vga.o" "%OBJ_DIR%\core\framebuffer.o" "%OBJ_DIR%\core\arch.o" "%OBJ_DIR%\arch\arch.o"
 
 if %errorlevel% neq 0 (
     echo [ERROR] Failed to link kernel

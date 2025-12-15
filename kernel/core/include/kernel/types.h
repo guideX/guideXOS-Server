@@ -30,12 +30,13 @@ typedef unsigned long long uint64_t;
     typedef int32_t  ssize_t;
 #endif
 
-// NULL pointer
+// NULL pointer for C compatibility
 #ifndef NULL
-    #define NULL ((void*)0)
+    #ifdef __cplusplus
+        #define NULL 0
+    #else
+        #define NULL ((void*)0)
+    #endif
 #endif
 
-// nullptr for C++
-#ifndef nullptr
-    #define nullptr NULL
-#endif
+// Note: C++11 and later have nullptr as a keyword, don't redefine it

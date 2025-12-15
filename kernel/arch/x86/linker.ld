@@ -15,14 +15,14 @@ SECTIONS
     
     __kernel_start = .;
     
-    /* Multiboot header (must be first) */
-    .multiboot ALIGN(4K) :
+    /* Multiboot header MUST be in first 8KB and 4-byte aligned */
+    .multiboot : ALIGN(4)
     {
         *(.multiboot)
     }
     
-    /* Boot section */
-    .boot ALIGN(4K) :
+    /* Boot section immediately after multiboot */
+    .boot : ALIGN(4)
     {
         *(.boot)
     }

@@ -72,9 +72,6 @@
     <ClInclude Include="notepad.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="notepad_new.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="save_changes_dialog.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -313,23 +310,16 @@
     <None Include="kernel\arch\arm\Makefile.arch" />
     <None Include="kernel\arch\sparc\Makefile.arch" />
     <None Include="kernel\arch\ia64\Makefile.arch" />
-    <None Include="kernel\README.md" />
+    <None Include="docs\README.md" />
     <None Include="scripts\run-qemu-x86.sh" />
     <None Include="scripts\run-qemu-x86.bat">
       <Filter>Source Files</Filter>
     </None>
-    <None Include="README-BOOT.md" />
-    <None Include="QUICKSTART-QEMU.md" />
     <None Include="scripts\test-build.sh" />
     <None Include="scripts\test-build.bat">
       <Filter>Source Files</Filter>
     </None>
-    <None Include="IMPLEMENTATION-SUMMARY.md" />
-    <None Include="CHECKLIST.md" />
-    <None Include="START-HERE.md" />
     <None Include="Makefile" />
-    <None Include="INDEX.md" />
-    <None Include="BOOT-FLOW-DIAGRAM.md" />
     <None Include="kernel\build-x86.bat">
       <Filter>Source Files</Filter>
     </None>
@@ -339,7 +329,6 @@
     <None Include="setup-toolchain.bat">
       <Filter>Source Files</Filter>
     </None>
-    <None Include="TOOLCHAIN-SETUP.md" />
     <None Include="diagnose.bat">
       <Filter>Source Files</Filter>
     </None>
@@ -349,46 +338,31 @@
       <Filter>Source Files</Filter>
     </None>
     <None Include="KernelBuild.vcxproj" />
-    <None Include="VS-SETUP.md" />
-    <None Include="VS-QUICK-START.md" />
     <None Include="RUN-KERNEL.bat">
       <Filter>Source Files</Filter>
     </None>
-    <None Include="VS-TOOLS-MENU-SETUP.md" />
-    <None Include="VS-INTEGRATION-FIXED.md" />
     <None Include="guideXOSServer.csproj" />
     <None Include="Properties\launchSettings.json" />
-    <None Include="F5-QEMU-SETUP.md" />
-    <None Include="F5-WHATS-NEW.md" />
-    <None Include="LAUNCH-PROFILES-FIX.md" />
-    <None Include="F5-QUICK-FIX.md" />
     <None Include="guideXOSKernel.vcxproj" />
     <None Include="guideXOSKernel.vcxproj.filters" />
-    <None Include="NATIVE-CPP-PROJECT.md" />
-    <None Include="SETUP-FINAL.md" />
-    <None Include="COMPLETE-SETUP-SUMMARY.md" />
-    <None Include="QUICK-REFERENCE.md" />
-    <None Include="VNC_SETUP_GUIDE.md" />
     <None Include="build.bat">
       <Filter>Source Files</Filter>
     </None>
-    <None Include="VNC_IMPLEMENTATION_SUMMARY.md" />
-    <None Include="QUICK_START_VNC.md" />
-    <None Include="GUI_FROM_VM_COMPLETE.md" />
-    <None Include="VNC_README.md" />
-    <None Include="VNC_DOCUMENTATION_INDEX.md" />
-    <None Include="FRAMEBUFFER_ARCHITECTURE.md" />
-    <None Include="VNC_REMOTE_BOOT_PLAN.md" />
     <None Include="scripts\run-qemu-x86-vnc.bat">
       <Filter>Source Files</Filter>
     </None>
     <None Include="scripts\run-qemu-x86-vnc.sh" />
-    <None Include="VNC_REMOTE_BOOT_GUIDE.md" />
-    <None Include="VNC_IMPLEMENTATION_COMPLETE.md" />
-    <None Include="VNC_QUICK_REFERENCE.md" />
-  </ItemGroup>
-  <ItemGroup>
-    <Text Include="ROADMAP.txt" />
-    <Text Include="TESTS.TXT" />
+    <None Include="kernel\README.md" />
+    <None Include="docs\FIX_INCLUDE_PATHS.md" />
+    <None Include="scripts\diagnose-qemu.bat">
+      <Filter>Source Files</Filter>
+    </None>
+    <None Include="QEMU_BOOT_FIX.md" />
+    <None Include="QEMU_QUICK_FIX.md" />
+    <None Include="BOOT_ISSUE_RESOLVED.md" />
+    <None Include="scripts\check-multiboot.bat">
+      <Filter>Source Files</Filter>
+    </None>
+    <None Include="ALIGNMENT_FIX_CRITICAL.md" />
   </ItemGroup>
 </Project>
