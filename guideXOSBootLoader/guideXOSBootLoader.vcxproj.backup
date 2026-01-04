@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <VCProjectVersion>17.0</VCProjectVersion>
+    <Keyword>MakeFileProj</Keyword>
+    <ProjectGuid>{1fedf2ad-1078-4f66-aacf-cea3c8511ad7}</ProjectGuid>
+    <RootNamespace>guideXOSBootLoader</RootNamespace>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <WholeProgramOptimization>false</WholeProgramOptimization>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <PropertyGroup Label="UserMacros" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <EmbedManifest>false</EmbedManifest>
+    <GenerateManifest>false</GenerateManifest>
+  </PropertyGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ConformanceMode>true</ConformanceMode>
+      <AdditionalIncludeDirectories>D:\devgitlab\guideXOS\guideXOS\edk2-master\MdePkg\Include;D:\devgitlab\guideXOS\guideXOS\edk2-master\MdePkg\Include\X64;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <BasicRuntimeChecks>Default</BasicRuntimeChecks>
+      <BufferSecurityCheck>false</BufferSecurityCheck>
+      <ExceptionHandling>false</ExceptionHandling>
+    </ClCompile>
+    <Link>
+      <SubSystem>EFI Application</SubSystem>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <EntryPointSymbol>efi_main</EntryPointSymbol>
+      <AdditionalOptions>/NODEFAULTLIB %(AdditionalOptions)</AdditionalOptions>
+      <RandomizedBaseAddress>false</RandomizedBaseAddress>
+      <DataExecutionPrevention>false</DataExecutionPrevention>
+      <EnableUAC>false</EnableUAC>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ConformanceMode>true</ConformanceMode>
+      <AdditionalIncludeDirectories>D:\devgitlab\guideXOS\guideXOS\edk2-master\MdePkg\Include;D:\devgitlab\guideXOS\guideXOS\edk2-master\MdePkg\Include\X64;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <BasicRuntimeChecks>Default</BasicRuntimeChecks>
+      <BufferSecurityCheck>false</BufferSecurityCheck>
+      <ExceptionHandling>false</ExceptionHandling>
+      <WholeProgramOptimization>false</WholeProgramOptimization>
+    </ClCompile>
+    <Link>
+      <SubSystem>EFI Application</SubSystem>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <EntryPointSymbol>efi_main</EntryPointSymbol>
+      <AdditionalOptions>/NODEFAULTLIB %(AdditionalOptions)</AdditionalOptions>
+      <RandomizedBaseAddress>false</RandomizedBaseAddress>
+      <DataExecutionPrevention>false</DataExecutionPrevention>
+      <EnableUAC>false</EnableUAC>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ClCompile Include="elf.cpp" />
+    <ClCompile Include="main.cpp" />
+    <ClCompile Include="fb_console.cpp" />
+    <ClCompile Include="guidexOSBootInfo_validation.cpp" />
+    <ClCompile Include="trampoline_msvc.cpp">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
+    </ClCompile>
+    <ClCompile Include="uefi_guids.cpp" />
+    <ClCompile Include="paging.cpp" />
+    <ClCompile Include="intrinsics.cpp">
+      <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='Release|x64'">/Oi- %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">/Oi- %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="bootinfo.h" />
+    <ClInclude Include="boot_diagnostics.h" />
+    <ClInclude Include="debug_helpers.h" />
+    <ClInclude Include="elf.h" />
+    <ClInclude Include="acpi.h" />
+    <ClInclude Include="guidexOSBootInfo.h" />
+    <ClInclude Include="fb_console.h" />
+    <ClInclude Include="uefi_shim.h" />
+    <ClInclude Include="paging.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="BOOTLOADER_ANALYSIS.md" />
+    <None Include="trampoline.asm" />
+  </ItemGroup>
+  <Target Name="AssembleHandoffTrampoline" BeforeTargets="Link">
+    <PropertyGroup>
+      <_NasmExe Condition="Exists('$(SolutionDir)Tools\nasm.exe')">$(SolutionDir)Tools\nasm.exe</_NasmExe>
+      <_NasmExe Condition="'$(_NasmExe)'=='' and Exists('$(MSBuildStartupDirectory)\Tools\nasm.exe')">$(MSBuildStartupDirectory)\Tools\nasm.exe</_NasmExe>
+      <_NasmExe Condition="'$(_NasmExe)'==''">nasm</_NasmExe>
+    </PropertyGroup>
+    <Message Text="[Native] Assembling handoff trampoline via NASM: $(_NasmExe)" Importance="high" />
+    <Exec Command="&quot;$(_NasmExe)&quot; -f win64 &quot;$(ProjectDir)handoff_trampoline.asm&quot; -o &quot;$(IntDir)handoff_trampoline.obj&quot;" />
+    <ItemGroup>
+      <Link Include="$(IntDir)handoff_trampoline.obj" />
+    </ItemGroup>
+  </Target>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+</Project>

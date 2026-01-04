@@ -1,13 +1,21 @@
 #ifndef KERNEL_FRAMEBUFFER_H
 #define KERNEL_FRAMEBUFFER_H
 
-#include <kernel/types.h>
+#include "types.h"
+
+// Forward declaration for BootInfo
+namespace guideXOS {
+    struct BootInfo;
+}
 
 namespace kernel {
 namespace framebuffer {
 
-// Initialize framebuffer from multiboot info
+// Initialize framebuffer from multiboot info (legacy BIOS)
 bool init(void* multiboot_info);
+
+// Initialize framebuffer from BootInfo (UEFI)
+bool init_from_bootinfo(const guideXOS::BootInfo* bootinfo);
 
 // Get framebuffer dimensions
 uint32_t get_width();

@@ -1,0 +1,7 @@
+D:\devgitlab\guideXOS\guideXOS.UEFI\guideXOSBootLoader\elf.cpp;D:\devgitlab\guideXOS\guideXOS.UEFI\guideXOSBootLoader\x64\Debug\elf.obj
+D:\devgitlab\guideXOS\guideXOS.UEFI\guideXOSBootLoader\main.cpp;D:\devgitlab\guideXOS\guideXOS.UEFI\guideXOSBootLoader\x64\Debug\main.obj
+D:\devgitlab\guideXOS\guideXOS.UEFI\guideXOSBootLoader\fb_console.cpp;D:\devgitlab\guideXOS\guideXOS.UEFI\guideXOSBootLoader\x64\Debug\fb_console.obj
+D:\devgitlab\guideXOS\guideXOS.UEFI\guideXOSBootLoader\guidexOSBootInfo_validation.cpp;D:\devgitlab\guideXOS\guideXOS.UEFI\guideXOSBootLoader\x64\Debug\guidexOSBootInfo_validation.obj
+D:\devgitlab\guideXOS\guideXOS.UEFI\guideXOSBootLoader\uefi_guids.cpp;D:\devgitlab\guideXOS\guideXOS.UEFI\guideXOSBootLoader\x64\Debug\uefi_guids.obj
+D:\devgitlab\guideXOS\guideXOS.UEFI\guideXOSBootLoader\paging.cpp;D:\devgitlab\guideXOS\guideXOS.UEFI\guideXOSBootLoader\x64\Debug\paging.obj
+D:\devgitlab\guideXOS\guideXOS.UEFI\guideXOSBootLoader\intrinsics.cpp;D:\devgitlab\guideXOS\guideXOS.UEFI\guideXOSBootLoader\x64\Debug\intrinsics.obj

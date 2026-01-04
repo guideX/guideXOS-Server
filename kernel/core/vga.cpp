@@ -4,7 +4,7 @@
 // Copyright (c) 2024 guideX
 //
 
-#include <kernel/vga.h>
+#include "include/kernel/vga.h"
 
 namespace kernel {
 namespace vga {

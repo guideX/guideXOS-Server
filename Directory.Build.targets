@@ -1,0 +1,6 @@
+<Project>
+  <!-- Disable bootloader NASM step in environments without NASM; the bootloader is not built as part of the normative server build. -->
+  <Target Name="AssembleHandoffTrampoline" Condition="'$(MSBuildProjectName)'=='guideXOSBootLoader'">
+    <Message Importance="high" Text="[Native] Skipping AssembleHandoffTrampoline for guideXOSBootLoader (NASM not required in server build)" />
+  </Target>
+</Project>

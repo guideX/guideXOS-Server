@@ -1,7 +1,11 @@
 #ifndef KERNEL_MULTIBOOT_H
 #define KERNEL_MULTIBOOT_H
 
-#include <kernel/types.h>
+#include "types.h"
+
+#if defined(_MSC_VER)
+#pragma pack(push, 1)
+#endif
 
 namespace kernel {
 namespace multiboot {
@@ -9,7 +13,7 @@ namespace multiboot {
 // Multiboot header flags
 constexpr uint32_t HEADER_MAGIC = 0x1BADB002;
 constexpr uint32_t HEADER_FLAGS = 0x00000007; // Request memory map, modules, and framebuffer
-constexpr uint32_t HEADER_CHECKSUM = -(HEADER_MAGIC + HEADER_FLAGS);
+constexpr uint32_t HEADER_CHECKSUM = 0u - (HEADER_MAGIC + HEADER_FLAGS);
 
 // Multiboot info flags
 constexpr uint32_t INFO_MEMORY = 0x00000001;
@@ -66,7 +70,11 @@ struct Info {
             uint8_t blue_mask_size;
         };
     };
-} __attribute__((packed));
+} 
+#if !defined(_MSC_VER)
+__attribute__((packed))
+#endif
+;
 
 // Module structure
 struct Module {
@@ -74,7 +82,14 @@ struct Module {
     uint32_t mod_end;
     uint32_t cmdline;
     uint32_t reserved;
-} __attribute__((packed));
+} 
+#if !defined(_MSC_VER)
+__attribute__((packed))
+#endif
+;
+#if defined(_MSC_VER)
+#pragma pack(pop)
+#endif
 
 } // namespace multiboot
 } // namespace kernel

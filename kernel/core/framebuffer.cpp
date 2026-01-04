@@ -1,11 +1,16 @@
 //
 // Framebuffer driver implementation
 //
+// Supports both Multiboot (legacy BIOS) and BootInfo (UEFI) initialization
+//
 // Copyright (c) 2024 guideX
 //
 
-#include <kernel/framebuffer.h>
-#include <kernel/multiboot.h>
+#include "include/kernel/framebuffer.h"
+#include "include/kernel/multiboot.h"
+
+// Include BootInfo for UEFI boot support
+#include "../../guideXOSBootLoader/guidexOSBootInfo.h"
 
 namespace kernel {
 namespace framebuffer {
@@ -42,6 +47,37 @@ bool init(void* multiboot_info_ptr)
     if (!g_buffer || g_width == 0 || g_height == 0) {
         return false;
     }
+    
+    g_available = true;
+    return true;
+}
+
+bool init_from_bootinfo(const guideXOS::BootInfo* bootinfo)
+{
+    if (!bootinfo) {
+        return false;
+    }
+    
+    // Check if framebuffer is valid in BootInfo
+    if (!(bootinfo->Flags & (1u << 1))) {
+        return false;  // Framebuffer not available
+    }
+    
+    // Validate framebuffer data
+    if (bootinfo->FramebufferBase == 0 || bootinfo->FramebufferSize == 0) {
+        return false;
+    }
+    
+    if (bootinfo->FramebufferWidth == 0 || bootinfo->FramebufferHeight == 0) {
+        return false;
+    }
+    
+    // Initialize framebuffer from BootInfo
+    g_buffer = reinterpret_cast<uint32_t*>(bootinfo->FramebufferBase);
+    g_width = bootinfo->FramebufferWidth;
+    g_height = bootinfo->FramebufferHeight;
+    g_pitch = bootinfo->FramebufferPitch;
+    g_bpp = 32;  // BootInfo always uses 32-bit format
     
     g_available = true;
     return true;

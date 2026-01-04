@@ -1,49 +1,48 @@
 /*
- * AMD64 Kernel Linker Script
+ * AMD64 Kernel Linker Script for MinGW
  *
  * Copyright (c) 2024 guideX
  */
 
-OUTPUT_FORMAT("elf64-x86-64")
-OUTPUT_ARCH(i386:x86-64)
+/* MinGW produces PE/COFF format - we'll convert to flat binary */
 ENTRY(_start)
 
 SECTIONS
 {
-    /* Kernel starts at 1MB */
-    . = 1M;
+    /* Start at 0 for PE format - bootloader will relocate */
+    . = 0x0;
     
     __kernel_start = .;
     
     /* Boot section (must be first) */
-    .boot ALIGN(4K) :
+    .boot ALIGN(4096) :
     {
         *(.boot)
     }
     
     /* Text section (code) */
-    .text ALIGN(4K) :
+    .text ALIGN(4096) :
     {
         *(.text)
         *(.text.*)
     }
     
     /* Read-only data */
-    .rodata ALIGN(4K) :
+    .rodata ALIGN(4096) :
     {
         *(.rodata)
         *(.rodata.*)
     }
     
     /* Initialized data */
-    .data ALIGN(4K) :
+    .data ALIGN(4096) :
     {
         *(.data)
         *(.data.*)
     }
     
     /* Uninitialized data */
-    .bss ALIGN(4K) :
+    .bss ALIGN(4096) :
     {
         __bss_start = .;
         *(.bss)
@@ -53,4 +52,16 @@ SECTIONS
     }
     
     __kernel_end = .;
+    
+    /* Discard unnecessary PE sections */
+    /DISCARD/ :
+    {
+        *(.eh_frame)
+        *(.eh_frame_hdr)
+        *(.comment)
+        *(.note*)
+        *(.pdata)
+        *(.xdata)
+        *(.debug*)
+    }
 }

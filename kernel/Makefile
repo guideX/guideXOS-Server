@@ -3,6 +3,15 @@
 # Copyright (c) 2024 guideX
 #
 
+# Detect OS for cross-platform compatibility
+ifeq ($(OS),Windows_NT)
+    MKDIR = if not exist "$(subst /,\,$1)" mkdir "$(subst /,\,$1)"
+    RM = if exist "$(subst /,\,$1)" rmdir /s /q "$(subst /,\,$1)"
+else
+    MKDIR = mkdir -p $1
+    RM = rm -rf $1
+endif
+
 # Detect architecture if not specified
 ifndef ARCH
     ARCH := $(shell uname -m)
@@ -28,19 +37,22 @@ BUILD_DIR := build/$(ARCH)
 OBJ_DIR := $(BUILD_DIR)/obj
 BIN_DIR := $(BUILD_DIR)/bin
 
-# Kernel binary
+# Kernel binary outputs
+KERNEL_PE := $(BIN_DIR)/kernel.exe
 KERNEL := $(BIN_DIR)/kernel.elf
 
-# Architecture-specific settings
+# Architecture-specific settings (sets CXX, AS, LD, and ARCH_CFLAGS)
 include kernel/arch/$(ARCH)/Makefile.arch
 
 # Common compiler flags
 CFLAGS := -std=c++14 -ffreestanding -O2 -Wall -Wextra -fno-exceptions -fno-rtti
 CFLAGS += -nostdlib -nostdinc++ -fno-builtin
 CFLAGS += -Ikernel/core/include -Ikernel/arch/$(ARCH)/include
+# Append architecture-specific flags
+CFLAGS += $(ARCH_CFLAGS)
 
-# Linker flags
-LDFLAGS := -T kernel/arch/$(ARCH)/linker.ld -nostdlib
+# Linker flags - produce PE executable first
+LDFLAGS := -T kernel/arch/$(ARCH)/linker.ld -nostdlib $(ARCH_LDFLAGS)
 
 # Source files
 CORE_SOURCES := $(wildcard kernel/core/*.cpp)
@@ -60,34 +72,39 @@ ALL_OBJS := $(CORE_OBJS) $(ARCH_OBJS) $(ASM_OBJS)
 
 all: $(KERNEL)
 
-$(KERNEL): $(ALL_OBJS)
-	@mkdir -p $(BIN_DIR)
-	@echo "Linking $(ARCH) kernel..."
+# Link to PE format first, then convert to flat binary (ELF-like)
+$(KERNEL_PE): $(ALL_OBJS)
+	@$(call MKDIR,$(BIN_DIR))
+	@echo "Linking $(ARCH) kernel (PE)..."
 	$(LD) $(LDFLAGS) -o $@ $^ $(LIBS)
+
+$(KERNEL): $(KERNEL_PE)
+	@echo "Converting to flat binary..."
+	objcopy -O binary $< $@
 	@echo "Built: $@"
 
 $(OBJ_DIR)/core/%.o: kernel/core/%.cpp
-	@mkdir -p $(OBJ_DIR)/core
+	@$(call MKDIR,$(OBJ_DIR)/core)
 	@echo "Compiling $<..."
 	$(CXX) $(CFLAGS) -c $< -o $@
 
 $(OBJ_DIR)/arch/%.o: kernel/arch/$(ARCH)/%.cpp
-	@mkdir -p $(OBJ_DIR)/arch
+	@$(call MKDIR,$(OBJ_DIR)/arch)
 	@echo "Compiling $<..."
 	$(CXX) $(CFLAGS) -c $< -o $@
 
 $(OBJ_DIR)/arch/%.o: kernel/arch/$(ARCH)/%.asm
-	@mkdir -p $(OBJ_DIR)/arch
+	@$(call MKDIR,$(OBJ_DIR)/arch)
 	@echo "Assembling $<..."
 	$(AS) $(ASFLAGS) $< -o $@
 
 $(OBJ_DIR)/arch/%.o: kernel/arch/$(ARCH)/%.s
-	@mkdir -p $(OBJ_DIR)/arch
+	@$(call MKDIR,$(OBJ_DIR)/arch)
 	@echo "Assembling $<..."
 	$(AS) $(ASFLAGS) $< -o $@
 
 clean:
-	rm -rf build/$(ARCH)
+	@$(call RM,build/$(ARCH))
 
 info:
 	@echo "Architecture: $(ARCH)"

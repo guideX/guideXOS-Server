@@ -6,7 +6,7 @@
 
 #pragma once
 
-#include <kernel/types.h>
+#include "types.h"
 
 namespace kernel {
 namespace vga {

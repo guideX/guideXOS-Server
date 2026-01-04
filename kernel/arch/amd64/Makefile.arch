@@ -3,14 +3,42 @@
 # Copyright (c) 2024 guideX
 #
 
-# Toolchain
-CXX := x86_64-elf-g++
-AS := nasm
-LD := x86_64-elf-ld
+# Toolchain - prefer cross-compiler if available, fallback to MinGW
+# On Windows, 'which' doesn't work, so we use different detection
+ifeq ($(OS),Windows_NT)
+    # Windows: Use MinGW g++ directly
+    CXX := g++
+    LD := ld
+    # Check for NASM in tools directory first, then PATH
+    ifneq ($(wildcard tools/nasm.exe),)
+        AS := tools/nasm.exe
+    else
+        AS := nasm
+    endif
+else
+    # Unix-like: Check for cross-compiler
+    ifneq ($(shell which x86_64-elf-g++ 2>/dev/null),)
+        CXX := x86_64-elf-g++
+        LD := x86_64-elf-ld
+    else ifneq ($(shell which x86_64-w64-mingw32-g++ 2>/dev/null),)
+        CXX := x86_64-w64-mingw32-g++
+        LD := x86_64-w64-mingw32-ld
+    else
+        CXX := g++
+        LD := ld
+    endif
+    AS := nasm
+endif
 
 # Architecture-specific flags
-CFLAGS += -m64 -mcmodel=kernel -mno-red-zone -mno-mmx -mno-sse -mno-sse2
+# For MinGW, use large code model instead of kernel (kernel model not well supported)
+# Disable PIC/PIE which is default on MinGW
+ARCH_CFLAGS := -m64 -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2
+ARCH_CFLAGS += -fno-pic -fno-pie -fno-PIC -fno-PIE
+ARCH_CFLAGS += -D__x86_64__
 ASFLAGS := -f elf64
+# Linker flags to disable PIE
+ARCH_LDFLAGS := -no-pie
 LIBS :=
 
 # Target information

@@ -1,35 +1,83 @@
 //
-// Kernel entry point
+// guideXOS Minimal Kernel - Entry Point
+//
+// ROLE: Bridge between bootloader and guideXOS Server (user-mode)
+//
+// RESPONSIBILITIES:
+//   - Receive BootInfo from bootloader (firmware-neutral)
+//   - Initialize minimal subsystems (memory, interrupts, processes)
+//   - Show minimal boot splash (NO desktop rendering)
+//   - Load guideXOSServer from ramdisk (TODO: implement ELF loader)
+//   - Launch server as PID 1 in user mode (ring 3)
+//   - Handle syscalls from user processes
+//   - Idle loop when no work to do
+//
+// CONSTRAINTS:
+//   - Keep MINIMAL (no unnecessary features)
+//   - Boot splash ONLY (desktop/GUI belongs in guideXOSServer)
+//   - NO user services (compositor, desktop, apps belong in server)
+//   - Prefer clarity over completeness
+//
+// ARCHITECTURE:
+//   Bootloader ? [kernel_main] ? guideXOSServer ? Applications
 //
 // Copyright (c) 2024 guideX
 //
 
-#include <kernel/version.h>
-#include <kernel/arch.h>
-#include <kernel/vga.h>
-#include <kernel/framebuffer.h>
-#include <kernel/multiboot.h>
+#include "include/kernel/version.h"
+#include "include/kernel/arch.h"
+#include "include/kernel/vga.h"
+#include "include/kernel/framebuffer.h"
+#include "include/kernel/multiboot.h"
+#include "include/kernel/process.h"
 
 // Forward declarations
 void init_boot_splash();
-void show_desktop();
+void launch_init_process();
 
-extern "C" void kernel_main(void* multiboot_info, uint32_t multiboot_magic)
+// Include BootInfo structure from bootloader
+#include "../../guideXOSBootLoader/guidexOSBootInfo.h"
+
+extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
 {
-    // Validate Multiboot magic number
-    if (multiboot_magic != 0x2BADB002) {
-        // Invalid multiboot, halt
+    // Support both Multiboot (legacy) and BootInfo (UEFI) boot
+    bool is_multiboot = (boot_magic == 0x2BADB002);
+    bool is_bootinfo = false;
+    
+    guideXOS::BootInfo* bootinfo = nullptr;
+    void* multiboot_info = nullptr;
+    
+    if (is_multiboot) {
+        // Legacy BIOS/Multiboot boot
+        multiboot_info = boot_environment;
+    } else {
+        // UEFI boot via guideXOSBootLoader
+        bootinfo = static_cast<guideXOS::BootInfo*>(boot_environment);
+        
+        // Validate BootInfo magic
+        if (bootinfo && bootinfo->Magic == guideXOS::GUIDEXOS_BOOTINFO_MAGIC) {
+            is_bootinfo = true;
+        }
+    }
+    
+    // If neither boot method is valid, halt
+    if (!is_multiboot && !is_bootinfo) {
         while(1) kernel::arch::halt();
     }
     
-    // Parse Multiboot info
-    auto* mb_info = reinterpret_cast<kernel::multiboot::Info*>(multiboot_info);
-    
     // Try to initialize framebuffer for graphics mode
-    bool has_fb = kernel::framebuffer::init(multiboot_info);
+    bool has_fb = false;
+    
+    if (is_bootinfo) {
+        // UEFI boot - use BootInfo framebuffer
+        has_fb = kernel::framebuffer::init_from_bootinfo(bootinfo);
+    } else {
+        // Multiboot boot - use Multiboot framebuffer
+        has_fb = kernel::framebuffer::init(multiboot_info);
+    }
     
     if (has_fb) {
-        // === GRAPHICS MODE BOOT (Like C# guideXOS) ===
+        // === GRAPHICS MODE BOOT ===
         
         // Clear to dark background
         kernel::framebuffer::clear(0x00000000);
@@ -41,22 +89,22 @@ extern "C" void kernel_main(void* multiboot_info, uint32_t multiboot_magic)
         kernel::arch::disable_interrupts();
         kernel::arch::init();
         
-        // TODO: Initialize subsystems
+        // Initialize kernel subsystems
+        kernel::process::init();
+        
+        // TODO: Initialize other subsystems
         // - GDT, IDT
         // - Memory manager
         // - Interrupts
         // - Keyboard, Mouse, Timer
         // - Filesystem
         
-        // Transition to desktop
-        show_desktop();
+        // Launch guideXOSServer as first user process
+        launch_init_process();
         
-        // Main kernel loop
+        // Main kernel loop - just schedule processes
         while (1) {
-            // TODO: Process events
-            // TODO: Update GUI
-            // TODO: Handle input
-            
+            kernel::process::schedule();
             kernel::arch::halt();
         }
     }
@@ -83,11 +131,15 @@ extern "C" void kernel_main(void* multiboot_info, uint32_t multiboot_magic)
         kernel::vga::print_colored("[ OK ]", kernel::vga::Color::LightGreen, kernel::vga::Color::Black);
         kernel::vga::print(" Interrupts disabled\n");
         
+        
         // Initialize architecture-specific features
         kernel::vga::print("[....] Initializing architecture...\r");
         kernel::arch::init();
         kernel::vga::print_colored("[ OK ]", kernel::vga::Color::LightGreen, kernel::vga::Color::Black);
         kernel::vga::print(" Architecture initialized\n");
+        
+        // Initialize kernel subsystems
+        kernel::process::init();
         
         // Framebuffer not available warning
         kernel::vga::print("\n");
@@ -95,18 +147,24 @@ extern "C" void kernel_main(void* multiboot_info, uint32_t multiboot_magic)
         kernel::vga::print("Running in text mode only\n");
         kernel::vga::print("For GUI, boot with: qemu-system-i386 -kernel kernel.elf -m 128M\n");
         
+        
         kernel::vga::print("\n");
         kernel::vga::print_colored("[INFO]", kernel::vga::Color::LightBlue, kernel::vga::Color::Black);
         kernel::vga::print(" Kernel initialization complete\n");
         
-        // Main kernel loop (text mode)
+        kernel::vga::print("\n");
+        kernel::vga::print_colored("[TODO]", kernel::vga::Color::Yellow, kernel::vga::Color::Black);
+        kernel::vga::print(" Load and launch guideXOSServer as init process\n");
+        kernel::vga::print("       (Currently no ELF loader - server.cpp needs to be linked in or loaded)\n");
+        
+        // Main kernel loop (text mode) - idle loop
         while (1) {
             kernel::arch::halt();
         }
     }
 }
 
-// Initialize boot splash screen
+// Initialize boot splash screen (minimal, kernel-only)
 void init_boot_splash()
 {
     uint32_t w = kernel::framebuffer::get_width();
@@ -150,7 +208,7 @@ void init_boot_splash()
     kernel::framebuffer::draw_line(bar_x, bar_y, bar_x, bar_y + bar_h, 0xFF666666);
     kernel::framebuffer::draw_line(bar_x + bar_w, bar_y, bar_x + bar_w, bar_y + bar_h, 0xFF666666);
     
-    // Animate progress (simulate loading)
+    // Animate progress (simulate kernel initialization)
     for (uint32_t progress = 0; progress < bar_w - 4; progress += 10) {
         // Fill progress
         kernel::framebuffer::fill_rect(bar_x + 2, bar_y + 2, progress, bar_h - 4, 0xFF00AAFF);
@@ -160,60 +218,55 @@ void init_boot_splash()
     }
 }
 
-// Show desktop environment
-void show_desktop()
+// Launch the init process (guideXOSServer)
+//
+// IMPORTANT: guideXOSServer is a USER-MODE PROCESS, not kernel code
+// - The server will be loaded from ramdisk as an ELF binary
+// - The server will execute in user mode (ring 3)
+// - The server has NO access to BootInfo or firmware structures
+// - The server requests hardware via syscalls only
+//
+// In a complete system, this would:
+// 1. Load guideXOSServer ELF from ramdisk/filesystem
+// 2. Set up user-mode page tables
+// 3. Create process structure (PID 1)
+// 4. Map necessary resources (framebuffer, etc.)
+// 5. Jump to user mode (ring 3) at server entry point
+void launch_init_process()
 {
+    // TODO: Implement ELF loader
+    // TODO: Load /sbin/guideXOSServer from ramdisk
+    // TODO: Set up user-mode memory mapping
+    // TODO: Create process with user privileges (ring 3)
+    // TODO: Map framebuffer to user address space
+    // TODO: Jump to user mode at server entry point
+    
+    // For now, just display a message indicating we would launch it
+    // The actual desktop UI (compositor, taskbar, windows) belongs in
+    // guideXOSServer (user mode), NOT the kernel
+    
+    // Stub: Clear screen and show "waiting for init" message
     uint32_t w = kernel::framebuffer::get_width();
     uint32_t h = kernel::framebuffer::get_height();
     
-    // Clear to desktop background (teal gradient like C# version)
-    for (uint32_t y = 0; y < h; y++) {
-        // Teal gradient: light at top, dark at bottom
-        uint8_t r = 0x5F - (y * 0x52 / h);
-        uint8_t g = 0xD4 - (y * 0x57 / h);
-        uint8_t b = 0xC4 - (y * 0x4D / h);
-        uint32_t color = 0xFF000000 | (r << 16) | (g << 8) | b;
-        kernel::framebuffer::fill_rect(0, y, w, 1, color);
-    }
+    kernel::framebuffer::clear(0xFF001020); // Dark blue-ish background
     
-    // Draw taskbar (bottom)
-    uint32_t taskbar_h = 32;
-    kernel::framebuffer::fill_rect(0, h - taskbar_h, w, taskbar_h, 0xFF2A2A2A);
+    // Center message area
+    uint32_t msg_w = 500;
+    uint32_t msg_h = 200;
+    uint32_t msg_x = (w - msg_w) / 2;
+    uint32_t msg_y = (h - msg_h) / 2;
     
-    // Draw taskbar border (top edge)
-    kernel::framebuffer::draw_line(0, h - taskbar_h, w, h - taskbar_h, 0xFF444444);
+    // Draw message box
+    kernel::framebuffer::fill_rect(msg_x, msg_y, msg_w, msg_h, 0xFF2A2A3A);
+    kernel::framebuffer::draw_line(msg_x, msg_y, msg_x + msg_w, msg_y, 0xFF5A5A7A);
+    kernel::framebuffer::draw_line(msg_x, msg_y + msg_h, msg_x + msg_w, msg_y + msg_h, 0xFF5A5A7A);
+    kernel::framebuffer::draw_line(msg_x, msg_y, msg_x, msg_y + msg_h, 0xFF5A5A7A);
+    kernel::framebuffer::draw_line(msg_x + msg_w, msg_y, msg_x + msg_w, msg_y + msg_h, 0xFF5A5A7A);
     
-    // Draw start button
-    uint32_t start_btn_w = 100;
-    kernel::framebuffer::fill_rect(5, h - taskbar_h + 4, start_btn_w, taskbar_h - 8, 0xFF3C3C3C);
-    kernel::framebuffer::draw_line(5, h - taskbar_h + 4, 5 + start_btn_w, h - taskbar_h + 4, 0xFF555555);
-    kernel::framebuffer::draw_line(5, h - 4, 5 + start_btn_w, h - 4, 0xFF555555);
-    kernel::framebuffer::draw_line(5, h - taskbar_h + 4, 5, h - 4, 0xFF555555);
-    kernel::framebuffer::draw_line(5 + start_btn_w, h - taskbar_h + 4, 5 + start_btn_w, h - 4, 0xFF555555);
+    // TODO: Draw text "Kernel ready - waiting for init process (guideXOSServer)"
+    // TODO: Draw text "ELF loader not yet implemented"
     
-    // TODO: Draw "Start" text (need font rendering)
-    
-    // Show system info window (like Welcome window in C#)
-    uint32_t win_w = 400;
-    uint32_t win_h = 300;
-    uint32_t win_x = (w - win_w) / 2;
-    uint32_t win_y = (h - win_h) / 2;
-    
-    // Window background
-    kernel::framebuffer::fill_rect(win_x, win_y, win_w, win_h, 0xFF3C3C3C);
-    
-    // Window border
-    kernel::framebuffer::draw_line(win_x, win_y, win_x + win_w, win_y, 0xFF666666);
-    kernel::framebuffer::draw_line(win_x, win_y + win_h, win_x + win_w, win_y + win_h, 0xFF666666);
-    kernel::framebuffer::draw_line(win_x, win_y, win_x, win_y + win_h, 0xFF666666);
-    kernel::framebuffer::draw_line(win_x + win_w, win_y, win_x + win_w, win_y + win_h, 0xFF666666);
-    
-    // Title bar
-    kernel::framebuffer::fill_rect(win_x, win_y, win_w, 24, 0xFF1E90FF);
-    kernel::framebuffer::draw_line(win_x, win_y + 24, win_x + win_w, win_y + 24, 0xFF666666);
-    
-    // TODO: Draw window title "guideXOS" (need font rendering)
-    
-    // Close button
-    kernel::framebuffer::fill_rect(win_x + win_w - 24, win_y + 2, 20, 20, 0xFFFF0000);
+    // Note: The actual GUI (desktop, taskbar, windows) belongs in guideXOSServer
+    // The kernel only provides this minimal boot UI
 }

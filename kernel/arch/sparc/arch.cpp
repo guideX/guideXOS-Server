@@ -4,7 +4,13 @@
 // Copyright (c) 2024 guideX
 //
 
-#include <arch/sparc.h>
+#include "include/arch/sparc.h"
+#if defined(_MSC_VER)
+#include <intrin.h>
+#define GXOS_MSVC_STUB 1
+#else
+#define GXOS_MSVC_STUB 0
+#endif
 
 namespace kernel {
 namespace arch {
@@ -12,27 +18,42 @@ namespace sparc {
 
 void halt()
 {
+#if GXOS_MSVC_STUB
+    while (true) { __nop(); }
+#else
     while (1) {
         asm volatile ("nop");
     }
+#endif
 }
 
 void enable_interrupts()
 {
+#if GXOS_MSVC_STUB
+    // No-op on MSVC host build
+#else
     uint32_t psr = read_psr();
     psr &= ~0x20;  // Clear PIL field
     write_psr(psr);
+#endif
 }
 
 void disable_interrupts()
 {
+#if GXOS_MSVC_STUB
+    // No-op on MSVC host build
+#else
     uint32_t psr = read_psr();
     psr |= 0x20;   // Set PIL to 15
     write_psr(psr);
+#endif
 }
 
 uint32_t read_asi(uint32_t asi, uint32_t address)
 {
+#if GXOS_MSVC_STUB
+    (void)asi; (void)address; return 0;
+#else
     uint32_t value;
     asm volatile (
         "lda [%1] %2, %0"
@@ -40,19 +61,27 @@ uint32_t read_asi(uint32_t asi, uint32_t address)
         : "r"(address), "i"(asi)
     );
     return value;
+#endif
 }
 
 void write_asi(uint32_t asi, uint32_t address, uint32_t value)
 {
+#if GXOS_MSVC_STUB
+    (void)asi; (void)address; (void)value;
+#else
     asm volatile (
         "sta %0, [%1] %2"
         :
         : "r"(value), "r"(address), "i"(asi)
     );
+#endif
 }
 
 void flush_windows()
 {
+#if GXOS_MSVC_STUB
+    // No-op
+#else
     asm volatile (
         "save %%sp, -64, %%sp\n"
         "restore\n"
@@ -60,10 +89,14 @@ void flush_windows()
         :
         : "memory"
     );
+#endif
 }
 
 uint32_t read_psr()
 {
+#if GXOS_MSVC_STUB
+    return 0;
+#else
     uint32_t psr;
     asm volatile (
         "rd %%psr, %0\n"
@@ -73,10 +106,14 @@ uint32_t read_psr()
         : "=r"(psr)
     );
     return psr;
+#endif
 }
 
 void write_psr(uint32_t value)
 {
+#if GXOS_MSVC_STUB
+    (void)value;
+#else
     asm volatile (
         "wr %0, %%psr\n"
         "nop\n"
@@ -85,10 +122,14 @@ void write_psr(uint32_t value)
         :
         : "r"(value)
     );
+#endif
 }
 
 uint32_t read_tbr()
 {
+#if GXOS_MSVC_STUB
+    return 0;
+#else
     uint32_t tbr;
     asm volatile (
         "rd %%tbr, %0\n"
@@ -98,10 +139,14 @@ uint32_t read_tbr()
         : "=r"(tbr)
     );
     return tbr;
+#endif
 }
 
 void write_tbr(uint32_t value)
 {
+#if GXOS_MSVC_STUB
+    (void)value;
+#else
     asm volatile (
         "wr %0, %%tbr\n"
         "nop\n"
@@ -110,10 +155,14 @@ void write_tbr(uint32_t value)
         :
         : "r"(value)
     );
+#endif
 }
 
 uint32_t read_wim()
 {
+#if GXOS_MSVC_STUB
+    return 0;
+#else
     uint32_t wim;
     asm volatile (
         "rd %%wim, %0\n"
@@ -123,10 +172,14 @@ uint32_t read_wim()
         : "=r"(wim)
     );
     return wim;
+#endif
 }
 
 void write_wim(uint32_t value)
 {
+#if GXOS_MSVC_STUB
+    (void)value;
+#else
     asm volatile (
         "wr %0, %%wim\n"
         "nop\n"
@@ -135,6 +188,7 @@ void write_wim(uint32_t value)
         :
         : "r"(value)
     );
+#endif
 }
 
 void init()

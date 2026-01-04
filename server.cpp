@@ -1,4 +1,43 @@
+//
+// guideXOS Server - User-Mode System Server
+//
+// ROLE: User-mode init process (PID 1) providing desktop environment
+//
+// RESPONSIBILITIES:
+//   - Compositor and window manager
+//   - Desktop environment (taskbar, start menu, wallpaper)
+//   - System services (console, file manager, VNC server, etc.)
+//   - IPC bus for inter-process communication
+//   - Application framework (Notepad, Calculator, Clock, etc.)
+//   - Process management (user-mode processes)
+//
+// CONSTRAINTS:
+//   - Must be BOOT-AGNOSTIC (no firmware or bootloader knowledge)
+//   - Must use syscalls for ALL hardware access
+//   - Must NOT access BootInfo (kernel-only structure)
+//   - Must run in USER MODE (ring 3)
+//   - Must NOT assume specific boot path (UEFI, BIOS, etc.)
+//
+// ARCHITECTURE:
+//   Bootloader ? Kernel ? [guideXOSServer] ? User Applications
+//
+// LAUNCH:
+//   - Launched by kernel as first user process (PID 1)
+//   - Assumes virtual address space already exists
+//   - Assumes memory allocation is available
+//   - Assumes IPC primitives exist or are stubbed
+//   - Fails gracefully if required services unavailable
+//
+// TESTING:
+//   - Can run standalone on Linux/Windows for development
+//   - Will run as PID 1 when launched by kernel
+//   - Same code works in both environments
+//
+// Copyright (c) 2024 guideX
+//
+
 #include "allocator.h"
+#include "lifecycle.h"
 #include "logger.h"
 #include "scheduler.h"
 #include "fs.h"
@@ -66,14 +105,28 @@ static void help(){
                  " pbytes | help | quit/exit\n"; }
 
 int main(){
-    using namespace gxos;
+// NOTE: This is a USER-MODE system server, NOT a kernel
+//
+// This process will be launched by the kernel as PID 1 (init process)
+// We have NO access to:
+//   - Firmware (UEFI/BIOS)
+//   - Bootloader structures
+//   - BootInfo (kernel-only)
+//   - Direct hardware (use syscalls instead)
+//
+// All hardware access must go through kernel syscalls:
+//   - Framebuffer mapping: syscall(SYS_MMAP_FRAMEBUFFER)
+//   - File I/O: syscall(SYS_READ/SYS_WRITE)
+//   - Device access: syscall(SYS_IOCTL)
+//
+// For testing, this can run standalone on Linux/Windows
+// In production, kernel loads this as ELF and jumps to main()
+    
+using namespace gxos;
     Logger::write(LogLevel::Info, "guideXOSServer server starting...");
-    auto pi = queryPlatform();
-    Allocator::init(512ull*1024*1024); // 512MB simulated heap
-    Scheduler::init(pi.cpuCount>0? pi.cpuCount:2);
-
-    // Initialize desktop service
-    gui::DesktopService::LoadState();
+    Lifecycle::bootstrap();
+    Lifecycle::markInteractive();
+    struct ShutdownGuard { ~ShutdownGuard(){ Lifecycle::shutdown(); } } guard;
 
     // Registerable specs
     std::unordered_map<std::string, ProcessSpec> specs{
@@ -81,26 +134,44 @@ int main(){
         {"worker", ProcessSpec{"worker", workerProc}},
     };
 
-    uint64_t consolePid = 0; // console service pid
-    uint64_t compositorPid = 0; // compositor service pid
+    auto requireCompositor = [&]() -> bool {
+        uint64_t before = Lifecycle::state().compositorPid;
+        uint64_t pid = Lifecycle::ensureCompositor();
+        if(pid==0){ std::cout<<"Compositor unavailable"<<std::endl; return false; }
+        if(before==0){ std::cout<<"Compositor pid="<<pid<<" (proto="<<gui::kGuiProtocolVersion<<")"<<std::endl; }
+        return true;
+    };
+
+    auto requireConsole = [&]() -> bool {
+        uint64_t before = Lifecycle::state().consolePid;
+        uint64_t pid = Lifecycle::ensureConsole();
+        if(pid==0){ std::cout<<"Console service unavailable"<<std::endl; return false; }
+        if(before==0){ std::cout<<"Console pid="<<pid<<std::endl; }
+        return true;
+    };
 
     std::string line; help();
     while (std::getline(std::cin, line)){
         if (line=="quit"||line=="exit") break;
         std::istringstream iss(line); std::string cmd; iss>>cmd;
         if (cmd=="gui.save"){
+            if(!requireCompositor()) continue;
             std::string path; iss>>path; if(path.empty()){ std::cout<<"gui.save <path>"<<std::endl; continue; } ipc::Message m; m.type=(uint32_t)gui::MsgType::MT_StateSave; m.data.assign(path.begin(), path.end()); ipc::Bus::publish("gui.input", std::move(m), false); std::cout<<"Save requested"<<std::endl; continue; }
         if (cmd=="gui.load"){
+            if(!requireCompositor()) continue;
             std::string path; iss>>path; if(path.empty()){ std::cout<<"gui.load <path>"<<std::endl; continue; } ipc::Message m; m.type=(uint32_t)gui::MsgType::MT_StateLoad; m.data.assign(path.begin(), path.end()); ipc::Bus::publish("gui.input", std::move(m), false); std::cout<<"Load requested"<<std::endl; continue; }
         if (cmd=="gui.btn"){
+            if(!requireCompositor()) continue;
             std::string winS; int id,x,y,w,h; iss>>winS>>id>>x>>y>>w>>h; std::string rest; std::getline(iss,rest); if(!rest.empty() && rest[0]==' ') rest.erase(0,1); if(winS.empty()){ std::cout<<"Usage: gui.btn <win> <id> <x> <y> <w> <h> <text>"<<std::endl; continue; }
             std::ostringstream oss; oss<<winS<<"|"<<1 /*Button*/<<"|"<<id<<"|"<<x<<"|"<<y<<"|"<<w<<"|"<<h<<"|"<<rest; ipc::Message m; m.type=(uint32_t)gui::MsgType::MT_WidgetAdd; auto s=oss.str(); m.data.assign(s.begin(), s.end()); ipc::Bus::publish("gui.input", std::move(m), false); std::cout<<"Button queued"<<std::endl; continue; }
-        if (cmd=="gui.wlist"){ ipc::Message m; m.type=(uint32_t)gui::MsgType::MT_WindowList; ipc::Bus::publish("gui.input", std::move(m), false); std::cout<<"Requested window list (use gui.pop)"<<std::endl; continue; }
-        if (cmd=="gui.activate"){ std::string idS; iss>>idS; if(idS.empty()){ std::cout<<"gui.activate <id>"<<std::endl; continue; } ipc::Message m; m.type=(uint32_t)gui::MsgType::MT_Activate; m.data.assign(idS.begin(), idS.end()); ipc::Bus::publish("gui.input", std::move(m), false); std::cout<<"Activate sent"<<std::endl; continue; }
-        if (cmd=="gui.min"){ std::string idS; iss>>idS; if(idS.empty()){ std::cout<<"gui.min <id>"<<std::endl; continue; } ipc::Message m; m.type=(uint32_t)gui::MsgType::MT_Minimize; m.data.assign(idS.begin(), idS.end()); ipc::Bus::publish("gui.input", std::move(m), false); std::cout<<"Minimize sent"<<std::endl; continue; }
+        if (cmd=="gui.wlist"){ if(!requireCompositor()) continue; ipc::Message m; m.type=(uint32_t)gui::MsgType::MT_WindowList; ipc::Bus::publish("gui.input", std::move(m), false); std::cout<<"Requested window list (use gui.pop)"<<std::endl; continue; }
+        if (cmd=="gui.activate"){ if(!requireCompositor()) continue; std::string idS; iss>>idS; if(idS.empty()){ std::cout<<"gui.activate <id>"<<std::endl; continue; } ipc::Message m; m.type=(uint32_t)gui::MsgType::MT_Activate; m.data.assign(idS.begin(), idS.end()); ipc::Bus::publish("gui.input", std::move(m), false); std::cout<<"Activate sent"<<std::endl; continue; }
+        if (cmd=="gui.min"){ if(!requireCompositor()) continue; std::string idS; iss>>idS; if(idS.empty()){ std::cout<<"gui.min <id>"<<std::endl; continue; } ipc::Message m; m.type=(uint32_t)gui::MsgType::MT_Minimize; m.data.assign(idS.begin(), idS.end()); ipc::Bus::publish("gui.input", std::move(m), false); std::cout<<"Minimize sent"<<std::endl; continue; }
         if (cmd=="gxm.load"){
+            if(!requireCompositor()) continue;
             std::string path; iss>>path; if(path.empty()){ std::cout<<"Usage: gxm.load <path>"<<std::endl; continue; } std::string err; if(gui::GxmLoader::ExecuteFile(path, err)) std::cout<<"GXM executed"<<std::endl; else std::cout<<"GXM error: "<<err<<std::endl; continue; }
         if (cmd=="gxm.sample"){
+            if(!requireCompositor()) continue;
             std::string script =
                 "WIN Sample|420|300\n"
                 "TEXT 1000|Welcome to GXM Sample\n"
@@ -108,19 +179,21 @@ int main(){
                 "BTN 1000|1|20|120|110|32|Click Me\n";
             std::string err; if(gui::GxmLoader::ExecuteText(script, err)) std::cout<<"Sample executed"<<std::endl; else std::cout<<"Sample error: "<<err<<std::endl; continue; }
         if (cmd=="gui.start"){
-            if(compositorPid==0){ compositorPid = gui::Compositor::start(); std::cout<<"Compositor pid="<<compositorPid<<" (proto="<<gui::kGuiProtocolVersion<<")"<<std::endl; }
-            else std::cout<<"Compositor already running pid="<<compositorPid<<std::endl;
+            uint64_t before = Lifecycle::state().compositorPid;
+            if(requireCompositor() && before!=0){ std::cout<<"Compositor already running pid="<<Lifecycle::state().compositorPid<<std::endl; }
         } else if (cmd=="gui.win"){
+            if(!requireCompositor()) continue;
             std::string title; iss>>title; int w=640,h=480; iss>>w>>h; if(title.empty()){ std::cout<<"Usage: gui.win <title> [w h]"<<std::endl; continue; }
             ipc::Message m; m.type=(uint32_t)gui::MsgType::MT_Create; std::string payload = title+"|"+std::to_string(w)+"|"+std::to_string(h); m.data.assign(payload.begin(), payload.end()); ipc::Bus::publish("gui.input", std::move(m), false); std::cout<<"Requested window: "<<title<<std::endl;
         } else if (cmd=="gui.text"){
+            if(!requireCompositor()) continue;
             std::string idS; iss>>idS; std::string rest; std::getline(iss, rest); if(rest.size()>0 && rest[0]==' ') rest.erase(0,1); ipc::Message m; m.type=(uint32_t)gui::MsgType::MT_DrawText; std::string payload = idS+"|"+rest; m.data.assign(payload.begin(), payload.end()); ipc::Bus::publish("gui.input", std::move(m), false); std::cout<<"Text queued"<<std::endl;
-        } else if (cmd=="gui.close"){ std::string idS; iss>>idS; ipc::Message m; m.type=(uint32_t)gui::MsgType::MT_Close; m.data.assign(idS.begin(), idS.end()); ipc::Bus::publish("gui.input", std::move(m), false); std::cout<<"Close requested"<<std::endl;
-        } else if (cmd=="gui.rect"){ std::string idS; int x,y,w,h,r,g,b; iss>>idS>>x>>y>>w>>h>>r>>g>>b; std::ostringstream oss; oss<<idS<<"|"<<x<<"|"<<y<<"|"<<w<<"|"<<h<<"|"<<r<<"|"<<g<<"|"<<b; ipc::Message m; m.type=(uint32_t)gui::MsgType::MT_DrawRect; auto s=oss.str(); m.data.assign(s.begin(), s.end()); ipc::Bus::publish("gui.input", std::move(m), false); std::cout<<"Rect queued"<<std::endl;
-        } else if (cmd=="gui.move"){ std::string idS; int x,y; iss>>idS>>x>>y; std::ostringstream oss; oss<<idS<<"|"<<x<<"|"<<y; ipc::Message m; m.type=(uint32_t)gui::MsgType::MT_Move; auto s=oss.str(); m.data.assign(s.begin(), s.end()); ipc::Bus::publish("gui.input", std::move(m), false); std::cout<<"Move queued"<<std::endl;
-        } else if (cmd=="gui.resize"){ std::string idS; int w,h; iss>>idS>>w>>h; std::ostringstream oss; oss<<idS<<"|"<<w<<"|"<<h; ipc::Message m; m.type=(uint32_t)gui::MsgType::MT_Resize; auto s=oss.str(); m.data.assign(s.begin(), s.end()); ipc::Bus::publish("gui.input", std::move(m), false); std::cout<<"Resize queued"<<std::endl;
-        } else if (cmd=="gui.title"){ std::string idS; std::string rest; iss>>idS; std::getline(iss,rest); if(!rest.empty() && rest[0]==' ') rest.erase(0,1); std::ostringstream oss; oss<<idS<<"|"<<rest; ipc::Message m; m.type=(uint32_t)gui::MsgType::MT_SetTitle; auto s=oss.str(); m.data.assign(s.begin(), s.end()); ipc::Bus::publish("gui.input", std::move(m), false); std::cout<<"Title queued"<<std::endl;
-        } else if (cmd=="gui.pop"){ ipc::Message m; if(ipc::Bus::pop("gui.output", m, 200)){ std::string s(m.data.begin(), m.data.end()); std::cout<<"GUI: type="<<m.type<<" payload="<<s<<std::endl; } else std::cout<<"No GUI events"<<std::endl;
+        } else if (cmd=="gui.close"){ if(!requireCompositor()) continue; std::string idS; iss>>idS; ipc::Message m; m.type=(uint32_t)gui::MsgType::MT_Close; m.data.assign(idS.begin(), idS.end()); ipc::Bus::publish("gui.input", std::move(m), false); std::cout<<"Close requested"<<std::endl;
+        } else if (cmd=="gui.rect"){ if(!requireCompositor()) continue; std::string idS; int x,y,w,h,r,g,b; iss>>idS>>x>>y>>w>>h>>r>>g>>b; std::ostringstream oss; oss<<idS<<"|"<<x<<"|"<<y<<"|"<<w<<"|"<<h<<"|"<<r<<"|"<<g<<"|"<<b; ipc::Message m; m.type=(uint32_t)gui::MsgType::MT_DrawRect; auto s=oss.str(); m.data.assign(s.begin(), s.end()); ipc::Bus::publish("gui.input", std::move(m), false); std::cout<<"Rect queued"<<std::endl;
+        } else if (cmd=="gui.move"){ if(!requireCompositor()) continue; std::string idS; int x,y; iss>>idS>>x>>y; std::ostringstream oss; oss<<idS<<"|"<<x<<"|"<<y; ipc::Message m; m.type=(uint32_t)gui::MsgType::MT_Move; auto s=oss.str(); m.data.assign(s.begin(), s.end()); ipc::Bus::publish("gui.input", std::move(m), false); std::cout<<"Move queued"<<std::endl;
+        } else if (cmd=="gui.resize"){ if(!requireCompositor()) continue; std::string idS; int w,h; iss>>idS>>w>>h; std::ostringstream oss; oss<<idS<<"|"<<w<<"|"<<h; ipc::Message m; m.type=(uint32_t)gui::MsgType::MT_Resize; auto s=oss.str(); m.data.assign(s.begin(), s.end()); ipc::Bus::publish("gui.input", std::move(m), false); std::cout<<"Resize queued"<<std::endl;
+        } else if (cmd=="gui.title"){ if(!requireCompositor()) continue; std::string idS; std::string rest; iss>>idS; std::getline(iss,rest); if(!rest.empty() && rest[0]==' ') rest.erase(0,1); std::ostringstream oss; oss<<idS<<"|"<<rest; ipc::Message m; m.type=(uint32_t)gui::MsgType::MT_SetTitle; auto s=oss.str(); m.data.assign(s.begin(), s.end()); ipc::Bus::publish("gui.input", std::move(m), false); std::cout<<"Title queued"<<std::endl;
+        } else if (cmd=="gui.pop"){ if(!requireCompositor()) continue; ipc::Message m; if(ipc::Bus::pop("gui.output", m, 200)){ std::string s(m.data.begin(), m.data.end()); std::cout<<"GUI: type="<<m.type<<" payload="<<s<<std::endl; } else std::cout<<"No GUI events"<<std::endl;
         } else if (cmd=="mem"){ std::cout << "mem in use=" << Allocator::bytesInUse()/1024 << " KB peak=" << Allocator::peakBytes()/1024 << " KB" << std::endl;
         } else if (cmd=="alloc"){ size_t sz; if(!(iss>>sz)) sz=1; void* p = Allocator::alloc(sz, AllocTag::Temp); std::cout << "Allocated " << sz << " bytes ptr=" << p << std::endl;
         } else if (cmd=="tasks"){ std::cout << "tasks executed=" << Scheduler::tasksExecuted() << std::endl;
@@ -136,31 +209,33 @@ int main(){
         } else if (cmd=="bus.pop"){ std::string chan; iss>>chan; uint64_t to=0; iss>>to; if(to==0) to=100; ipc::Message m; if(ipc::Bus::pop(chan,m,to)){ std::string s(m.data.begin(), m.data.end()); std::cout<<"POP["<<chan<<"] type="<<m.type<<" payload="<<s<<std::endl; } else std::cout<<"Timeout"<<std::endl;
         } else if (cmd=="bus.cap"){ std::string chan; size_t cap; iss>>chan>>cap; if(chan.empty()||cap==0){ std::cout<<"bus.cap <chan> <cap>"<<std::endl; continue; } ipc::Bus::setCapacity(chan, cap); std::cout<<"Capacity set"<<std::endl;
         } else if (cmd=="bus.stats"){ std::string chan; iss>>chan; std::cout<<"chan="<<chan<<" pending="<<ipc::Bus::pending(chan)<<" cap="<<ipc::Bus::capacity(chan)<<std::endl;
-        } else if (cmd=="console.start"){ if(consolePid==0){ consolePid = svc::ConsoleService::start(); std::cout<<"Console pid="<<consolePid<<std::endl; }
-            else std::cout<<"Console already running pid="<<consolePid<<std::endl;
-        } else if (cmd=="console.send"){ std::string payload; std::getline(iss,payload); if(payload.size()>0 && payload[0]==' ') payload.erase(0,1); ipc::Message m; m.srcPid=0; m.type=10; m.data.assign(payload.begin(), payload.end()); ipc::Bus::publish("console.input", std::move(m), false); std::cout<<"Sent to console"<<std::endl;
-        } else if (cmd=="console.pop"){ uint64_t to=0; iss>>to; if(to==0) to=200; ipc::Message m; if(ipc::Bus::pop("console.output", m, to)){ std::string s(m.data.begin(), m.data.end()); std::cout<<"Console: "<<s<<std::endl; } else std::cout<<"No console output"<<std::endl;
+        } else if (cmd=="console.start"){ uint64_t before = Lifecycle::state().consolePid; if(requireConsole() && before!=0){ std::cout<<"Console already running pid="<<Lifecycle::state().consolePid<<std::endl; }
+        } else if (cmd=="console.send"){ if(!requireConsole()) continue; std::string payload; std::getline(iss,payload); if(payload.size()>0 && payload[0]==' ') payload.erase(0,1); ipc::Message m; m.srcPid=0; m.type=10; m.data.assign(payload.begin(), payload.end()); ipc::Bus::publish("console.input", std::move(m), false); std::cout<<"Sent to console"<<std::endl;
+        } else if (cmd=="console.pop"){ if(!requireConsole()) continue; uint64_t to=0; iss>>to; if(to==0) to=200; ipc::Message m; if(ipc::Bus::pop("console.output", m, to)){ std::string s(m.data.begin(), m.data.end()); std::cout<<"Console: "<<s<<std::endl; } else std::cout<<"No console output"<<std::endl;
         } else if (cmd=="mem"){ std::cout << "mem in use=" << Allocator::bytesInUse()/1024 << " KB peak=" << Allocator::peakBytes()/1024 << " KB" << std::endl;
         } else if (cmd=="pbytes"){ auto list = Allocator::listPidBytes(); std::cout<<"PID   BYTES"<<std::endl; for(auto& pr:list){ std::cout<<std::setw(5)<<pr.first<<" "<<pr.second<<std::endl; }
         } else if (cmd=="help"){ help();
         }
         // Desktop and Taskbar convenience commands
         else if (cmd=="desktop.wallpaper"){
+            if(!requireCompositor()) continue;
             std::string path; iss>>path; if(path.empty()){ std::cout<<"desktop.wallpaper <path>"<<std::endl; continue; } ipc::Message m; m.type=(uint32_t)gui::MsgType::MT_DesktopWallpaperSet; m.data.assign(path.begin(), path.end()); ipc::Bus::publish("gui.input", std::move(m), false); std::cout<<"Desktop wallpaper set request sent: "<<path<<std::endl; }
         else if (cmd=="desktop.launch"){
-            std::string action; std::getline(iss, action); if(action.size()>0 && action[0]==' ') action.erase(0,1); if(action.empty()){ std::cout<<"desktop.launch <action>"<<std::endl; continue; }
-            std::string err;
-            if (gui::DesktopService::LaunchApp(action, err)) {
-                std::cout<<"Desktop launch successful: "<<action<<std::endl;
-            } else {
-                std::cout<<"Desktop launch failed: "<<err<<std::endl;
-            }
-        }
-        else if (cmd=="desktop.pin" || cmd=="desktop.unpin"){
-            std::string action; std::getline(iss, action); if(action.size()>0 && action[0]==' ') action.erase(0,1); if(action.empty()){ std::cout<< (cmd=="desktop.pin"?"desktop.pin <action>":"desktop.unpin <action>") << std::endl; continue; }
-            std::vector<std::pair<bool,std::string>> ops; ops.emplace_back(cmd=="desktop.pin", action);
-            std::string payload = gui::packPins(ops);
-            ipc::Message m; m.type=(uint32_t)gui::MsgType::MT_DesktopPins; m.data.assign(payload.begin(), payload.end()); ipc::Bus::publish("gui.input", std::move(m), false); std::cout<<"Desktop pin/unpin request sent: "<<payload<<std::endl; }
+            if(!requireCompositor()) continue;
+             std::string action; std::getline(iss, action); if(action.size()>0 && action[0]==' ') action.erase(0,1); if(action.empty()){ std::cout<<"desktop.launch <action>"<<std::endl; continue; }
+             std::string err;
+             if (gui::DesktopService::LaunchApp(action, err)) {
+                 std::cout<<"Desktop launch successful: "<<action<<std::endl;
+             } else {
+                 std::cout<<"Desktop launch failed: "<<err<<std::endl;
+             }
+         }
+         else if (cmd=="desktop.pin" || cmd=="desktop.unpin"){
+            if(!requireCompositor()) continue;
+             std::string action; std::getline(iss, action); if(action.size()>0 && action[0]==' ') action.erase(0,1); if(action.empty()){ std::cout<< (cmd=="desktop.pin"?"desktop.pin <action>":"desktop.unpin <action>") << std::endl; continue; }
+             std::vector<std::pair<bool,std::string>> ops; ops.emplace_back(cmd=="desktop.pin", action);
+             std::string payload = gui::packPins(ops);
+             ipc::Message m; m.type=(uint32_t)gui::MsgType::MT_DesktopPins; m.data.assign(payload.begin(), payload.end()); ipc::Bus::publish("gui.input", std::move(m), false); std::cout<<"Desktop pin/unpin request sent: "<<payload<<std::endl; }
         else if (cmd=="desktop.showconfig"){
             gxos::gui::DesktopConfigData cfg; std::string err; if(!gxos::gui::DesktopConfig::Load("desktop.json", cfg, err)){ std::cout<<"Failed to load desktop.json: "<<err<<std::endl; } else { std::cout<<"Wallpaper: "<<cfg.wallpaperPath<<std::endl; std::cout<<"Pinned:\n"; for(auto &p: cfg.pinned) std::cout<<"  "<<p<<std::endl; std::cout<<"Recent:\n"; for(auto &r: cfg.recent) std::cout<<"  "<<r<<std::endl; }
         }
@@ -201,14 +276,19 @@ int main(){
             std::cout<<"Pinned file: "<<name<<" -> "<<path<<std::endl;
         }
         else if (cmd=="taskbar.list"){
+            if(!requireCompositor()) continue;
             ipc::Message m; m.type=(uint32_t)gui::MsgType::MT_WindowList; ipc::Bus::publish("gui.input", std::move(m), false); std::cout<<"Requested window list (use gui.pop)"<<std::endl; }
         else if (cmd=="taskbar.activate"){
+            if(!requireCompositor()) continue;
             std::string idS; iss>>idS; if(idS.empty()){ std::cout<<"taskbar.activate <id>"<<std::endl; continue; } ipc::Message m; m.type=(uint32_t)gui::MsgType::MT_Activate; m.data.assign(idS.begin(), idS.end()); ipc::Bus::publish("gui.input", std::move(m), false); std::cout<<"Activate sent"<<std::endl; }
         else if (cmd=="taskbar.min"){
+            if(!requireCompositor()) continue;
             std::string idS; iss>>idS; if(idS.empty()){ std::cout<<"taskbar.min <id>"<<std::endl; continue; } ipc::Message m; m.type=(uint32_t)gui::MsgType::MT_Minimize; m.data.assign(idS.begin(), idS.end()); ipc::Bus::publish("gui.input", std::move(m), false); std::cout<<"Minimize sent"<<std::endl; }
         else if (cmd=="taskbar.close"){
+            if(!requireCompositor()) continue;
             std::string idS; iss>>idS; if(idS.empty()){ std::cout<<"taskbar.close <id>"<<std::endl; continue; } ipc::Message m; m.type=(uint32_t)gui::MsgType::MT_Close; m.data.assign(idS.begin(), idS.end()); ipc::Bus::publish("gui.input", std::move(m), false); std::cout<<"Close requested"<<std::endl; }
         else if (cmd=="workspace.switch"){
+            if(!requireCompositor()) continue;
             int n; if(!(iss>>n)){ std::cout<<"workspace.switch <n>"<<std::endl; continue; }
             ipc::Message m; m.type=(uint32_t)gui::MsgType::MT_WidgetEvt; 
             std::string payload = "WS_SWITCH|" + std::to_string(n);
@@ -217,6 +297,7 @@ int main(){
             std::cout<<"Workspace switch requested: "<<n<<std::endl; 
         }
         else if (cmd=="workspace.next"){
+            if(!requireCompositor()) continue;
             ipc::Message m; m.type=(uint32_t)gui::MsgType::MT_WidgetEvt; 
             std::string payload = "WS_NEXT";
             m.data.assign(payload.begin(), payload.end()); 
@@ -224,6 +305,7 @@ int main(){
             std::cout<<"Next workspace requested"<<std::endl; 
         }
         else if (cmd=="workspace.prev"){
+            if(!requireCompositor()) continue;
             ipc::Message m; m.type=(uint32_t)gui::MsgType::MT_WidgetEvt; 
             std::string payload = "WS_PREV";
             m.data.assign(payload.begin(), payload.end()); 
@@ -231,6 +313,7 @@ int main(){
             std::cout<<"Previous workspace requested"<<std::endl; 
         }
         else if (cmd=="workspace.current"){
+            if(!requireCompositor()) continue;
             ipc::Message m; m.type=(uint32_t)gui::MsgType::MT_WidgetEvt; 
             std::string payload = "WS_CURRENT";
             m.data.assign(payload.begin(), payload.end()); 
@@ -238,6 +321,7 @@ int main(){
             std::cout<<"Current workspace query sent (use gui.pop)"<<std::endl; 
         }
         else if (cmd=="notepad"){
+            if(!requireCompositor()) continue;
             std::string filePath; 
             std::getline(iss, filePath); 
             if(filePath.size()>0 && filePath[0]==' ') filePath.erase(0,1);
@@ -251,14 +335,17 @@ int main(){
             std::cout<<"Notepad launched, pid="<<pid<<std::endl;
         }
         else if (cmd=="calculator"){
+            if(!requireCompositor()) continue;
             uint64_t pid = apps::Calculator::Launch();
             std::cout<<"Calculator launched, pid="<<pid<<std::endl;
         }
         else if (cmd=="console"){
+            if(!requireCompositor()) continue;
             uint64_t pid = apps::ConsoleWindow::Launch();
             std::cout<<"Console window launched, pid="<<pid<<std::endl;
         }
         else if (cmd=="files"){
+            if(!requireCompositor()) continue;
             std::string startPath;
             std::getline(iss, startPath);
             if(startPath.size()>0 && startPath[0]==' ') startPath.erase(0,1);
@@ -272,10 +359,12 @@ int main(){
             std::cout<<"File Explorer launched, pid="<<pid<<std::endl;
         }
         else if (cmd=="clock"){
+            if(!requireCompositor()) continue;
             uint64_t pid = apps::Clock::Launch();
             std::cout<<"Clock launched, pid="<<pid<<std::endl;
         }
         else if (cmd=="taskmgr"){
+            if(!requireCompositor()) continue;
             uint64_t pid = apps::TaskManager::Launch();
             std::cout<<"Task Manager launched, pid="<<pid<<std::endl;
         }
@@ -312,7 +401,7 @@ int main(){
             std::cout << "Unknown command (help for list)" << std::endl;
         }
     }
-    Scheduler::shutdown();
+    Lifecycle::shutdown();
     Logger::write(LogLevel::Info, "guideXOSServer server exiting.");
     return 0;
 }
