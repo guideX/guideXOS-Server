@@ -1,16 +1,15 @@
 /*
- * AMD64 Kernel Linker Script (ELF64)
+ * AMD64 Kernel Linker Script for MinGW (PE/COFF)
  *
  * Copyright (c) 2024 guideX
  */
 
-/* ELF64 output format */
-OUTPUT_FORMAT(elf64-x86-64)
+/* PE/COFF output - will be converted to ELF64 */
 ENTRY(_start)
 
 SECTIONS
 {
-    /* Start at a reasonable kernel virtual address - bootloader will load and relocate */
+    /* Start at 1MB - standard kernel load address */
     . = 0x100000;
     
     __kernel_start = .;

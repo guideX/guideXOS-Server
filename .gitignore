@@ -5,3 +5,9 @@
 /edk2-master
 /guideXOSBootLoader/guideXOS.1fedf2ad
 /guideXOSBootLoader/x64
+/ESP/EFI/BOOT/BOOTX64.EFI
+/ESP/NvVars
+/ESP/kernel.elf
+/build/amd64/bin/kernel.elf
+/build/amd64/bin/kernel.exe
+/build/amd64/bin/kernel.pe

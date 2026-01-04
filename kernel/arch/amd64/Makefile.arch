@@ -36,8 +36,9 @@ endif
 ARCH_CFLAGS := -m64 -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2
 ARCH_CFLAGS += -fno-pic -fno-pie -fno-PIC -fno-PIE
 ARCH_CFLAGS += -D__x86_64__
-ASFLAGS := -f elf64
-# Linker flags to disable PIE
+# Use win64 format for NASM so object files are compatible with MinGW linker
+ASFLAGS := -f win64
+# Linker flags for PE output (will be converted to ELF64 afterward)
 ARCH_LDFLAGS := -no-pie
 LIBS :=
 
