@@ -1,8 +1,0 @@
-D:\devgitlab\guideXOS\guideXOSServer\guideXOSBootLoader\elf.cpp;D:\devgitlab\guideXOS\guideXOSServer\guideXOSBootLoader\guideXOS.1fedf2ad\x64\Release\elf.obj
-D:\devgitlab\guideXOS\guideXOSServer\guideXOSBootLoader\main.cpp;D:\devgitlab\guideXOS\guideXOSServer\guideXOSBootLoader\guideXOS.1fedf2ad\x64\Release\main.obj
-D:\devgitlab\guideXOS\guideXOSServer\guideXOSBootLoader\fb_console.cpp;D:\devgitlab\guideXOS\guideXOSServer\guideXOSBootLoader\guideXOS.1fedf2ad\x64\Release\fb_console.obj
-D:\devgitlab\guideXOS\guideXOSServer\guideXOSBootLoader\guidexOSBootInfo_validation.cpp;D:\devgitlab\guideXOS\guideXOSServer\guideXOSBootLoader\guideXOS.1fedf2ad\x64\Release\guidexOSBootInfo_validation.obj
-D:\devgitlab\guideXOS\guideXOSServer\guideXOSBootLoader\trampoline_msvc.cpp;D:\devgitlab\guideXOS\guideXOSServer\guideXOSBootLoader\guideXOS.1fedf2ad\x64\Release\trampoline_msvc.obj
-D:\devgitlab\guideXOS\guideXOSServer\guideXOSBootLoader\uefi_guids.cpp;D:\devgitlab\guideXOS\guideXOSServer\guideXOSBootLoader\guideXOS.1fedf2ad\x64\Release\uefi_guids.obj
-D:\devgitlab\guideXOS\guideXOSServer\guideXOSBootLoader\paging.cpp;D:\devgitlab\guideXOS\guideXOSServer\guideXOSBootLoader\guideXOS.1fedf2ad\x64\Release\paging.obj
-D:\devgitlab\guideXOS\guideXOSServer\guideXOSBootLoader\intrinsics.cpp;D:\devgitlab\guideXOS\guideXOSServer\guideXOSBootLoader\guideXOS.1fedf2ad\x64\Release\intrinsics.obj

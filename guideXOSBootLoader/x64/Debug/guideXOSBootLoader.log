@@ -1,5 +1,0 @@
-﻿LINK : warning LNK4075: ignoring '/INCREMENTAL' due to '/RELEASE' specification
-main.obj : error LNK2019: unresolved external symbol BootHandoffTrampoline referenced in function "unsigned __int64 __cdecl efi_main(void *,struct EFI_SYSTEM_TABLE *)" (?efi_main@@YA_KPEAXPEAUEFI_SYSTEM_TABLE@@@Z)
-main.obj : error LNK2019: unresolved external symbol SetupTrampoline referenced in function "unsigned __int64 __cdecl efi_main(void *,struct EFI_SYSTEM_TABLE *)" (?efi_main@@YA_KPEAXPEAUEFI_SYSTEM_TABLE@@@Z)
-main.obj : error LNK2019: unresolved external symbol GetTrampolineCodeSize referenced in function "unsigned __int64 __cdecl efi_main(void *,struct EFI_SYSTEM_TABLE *)" (?efi_main@@YA_KPEAXPEAUEFI_SYSTEM_TABLE@@@Z)
-D:\devgitlab\guideXOS\guideXOSServer\x64\Debug\guideXOSBootLoader.exe : fatal error LNK1120: 3 unresolved externals

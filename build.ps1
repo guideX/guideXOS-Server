@@ -295,13 +295,18 @@ $AllReady = $true
 
 # Check OVMF.fd
 $OVMF = Join-Path $RootDir "OVMF.fd"
-if (!(Test-Path $OVMF)) {
-    Write-Host "      ? OVMF.fd not found" -ForegroundColor Yellow
-    Write-Host "        Download from: https://github.com/tianocore/edk2/releases" -ForegroundColor Gray
-    Write-Host "        Or run: Invoke-WebRequest -Uri 'https://github.com/kraxel/edk2/raw/binaries/OVMF.fd' -OutFile 'OVMF.fd'" -ForegroundColor Gray
+$QemuOVMF = "C:\Program Files\qemu\share\edk2-x86_64-code.fd"
+if (!(Test-Path $OVMF) -and !(Test-Path $QemuOVMF)) {
+    Write-Host "      ? UEFI firmware not found" -ForegroundColor Yellow
+    Write-Host "        QEMU's built-in EDK2 firmware will be used if available" -ForegroundColor Gray
     $AllReady = $false
 } else {
-    Write-Host "      ? OVMF.fd found" -ForegroundColor Green
+    if (Test-Path $OVMF) {
+        Write-Host "      ? OVMF.fd found" -ForegroundColor Green
+    } else {
+        Write-Host "      ? Using QEMU's built-in UEFI firmware" -ForegroundColor Green
+        $OVMF = $QemuOVMF
+    }
 }
 
 # Check QEMU
@@ -354,7 +359,7 @@ if ($AllReady) {
         Write-Host ""
         
         $QemuArgs = @(
-            "-bios", $OVMF,
+            "-drive", "if=pflash,format=raw,readonly=on,file=$OVMF",
             "-drive", "file=fat:rw:ESP,format=raw",
             "-m", "1024M",
             "-serial", "stdio",
