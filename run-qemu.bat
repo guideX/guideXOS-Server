@@ -21,6 +21,8 @@ REM Check if OVMF.fd exists (try local first, then QEMU's built-in)
 set "OVMF_PATH="
 if exist "%SCRIPT_DIR%OVMF.fd" (
     set "OVMF_PATH=%SCRIPT_DIR%OVMF.fd"
+) else if exist "%SCRIPT_DIR%ovmf.fd" (
+    set "OVMF_PATH=%SCRIPT_DIR%ovmf.fd"
 ) else if exist "C:\Program Files\qemu\share\edk2-x86_64-code.fd" (
     set "OVMF_PATH=C:\Program Files\qemu\share\edk2-x86_64-code.fd"
     echo Using QEMU's built-in UEFI firmware

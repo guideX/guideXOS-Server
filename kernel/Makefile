@@ -37,8 +37,7 @@ BUILD_DIR := build/$(ARCH)
 OBJ_DIR := $(BUILD_DIR)/obj
 BIN_DIR := $(BUILD_DIR)/bin
 
-# Kernel binary outputs
-KERNEL_PE := $(BIN_DIR)/kernel.exe
+# Kernel binary output (ELF64 format for bootloader)
 KERNEL := $(BIN_DIR)/kernel.elf
 
 # Architecture-specific settings (sets CXX, AS, LD, and ARCH_CFLAGS)
@@ -51,8 +50,8 @@ CFLAGS += -Ikernel/core/include -Ikernel/arch/$(ARCH)/include
 # Append architecture-specific flags
 CFLAGS += $(ARCH_CFLAGS)
 
-# Linker flags - produce PE executable first
-LDFLAGS := -T kernel/arch/$(ARCH)/linker.ld -nostdlib $(ARCH_LDFLAGS)
+# Linker flags - produce ELF64 directly
+LDFLAGS := -T kernel/arch/$(ARCH)/linker.ld -nostdlib --oformat=elf64-x86-64 $(ARCH_LDFLAGS)
 
 # Source files
 CORE_SOURCES := $(wildcard kernel/core/*.cpp)
@@ -72,15 +71,11 @@ ALL_OBJS := $(CORE_OBJS) $(ARCH_OBJS) $(ASM_OBJS)
 
 all: $(KERNEL)
 
-# Link to PE format first, then convert to flat binary (ELF-like)
-$(KERNEL_PE): $(ALL_OBJS)
+# Link directly to ELF64 format
+$(KERNEL): $(ALL_OBJS)
 	@$(call MKDIR,$(BIN_DIR))
-	@echo "Linking $(ARCH) kernel (PE)..."
+	@echo "Linking $(ARCH) kernel (ELF64)..."
 	$(LD) $(LDFLAGS) -o $@ $^ $(LIBS)
-
-$(KERNEL): $(KERNEL_PE)
-	@echo "Converting to flat binary..."
-	objcopy -O binary $< $@
 	@echo "Built: $@"
 
 $(OBJ_DIR)/core/%.o: kernel/core/%.cpp

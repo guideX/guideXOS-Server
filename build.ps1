@@ -250,8 +250,8 @@ if (Test-Path $KernelBin) {
 $Ramdisk = Join-Path $ESPDir "ramdisk.img"
 if (!(Test-Path $Ramdisk)) {
     # Create a minimal ramdisk (1MB of zeros for now)
-    $null = New-Object byte[] 1048576
-    [System.IO.File]::WriteAllBytes($Ramdisk, $null)
+    $emptyRamdisk = New-Object byte[] 1048576
+    [System.IO.File]::WriteAllBytes($Ramdisk, $emptyRamdisk)
     Write-Host "      Created: ramdisk.img (1.0 MB, empty)" -ForegroundColor Cyan
 }
 
@@ -293,20 +293,22 @@ Write-Host "[6/6] Checking QEMU prerequisites..." -ForegroundColor Yellow
 
 $AllReady = $true
 
-# Check OVMF.fd
+# Check OVMF.fd (case-insensitive)
 $OVMF = Join-Path $RootDir "OVMF.fd"
+$OVMFLower = Join-Path $RootDir "ovmf.fd"
 $QemuOVMF = "C:\Program Files\qemu\share\edk2-x86_64-code.fd"
-if (!(Test-Path $OVMF) -and !(Test-Path $QemuOVMF)) {
+if (Test-Path $OVMF) {
+    Write-Host "      ? OVMF.fd found" -ForegroundColor Green
+} elseif (Test-Path $OVMFLower) {
+    $OVMF = $OVMFLower
+    Write-Host "      ? ovmf.fd found" -ForegroundColor Green
+} elseif (Test-Path $QemuOVMF) {
+    Write-Host "      ? Using QEMU's built-in UEFI firmware" -ForegroundColor Green
+    $OVMF = $QemuOVMF
+} else {
     Write-Host "      ? UEFI firmware not found" -ForegroundColor Yellow
     Write-Host "        QEMU's built-in EDK2 firmware will be used if available" -ForegroundColor Gray
     $AllReady = $false
-} else {
-    if (Test-Path $OVMF) {
-        Write-Host "      ? OVMF.fd found" -ForegroundColor Green
-    } else {
-        Write-Host "      ? Using QEMU's built-in UEFI firmware" -ForegroundColor Green
-        $OVMF = $QemuOVMF
-    }
 }
 
 # Check QEMU

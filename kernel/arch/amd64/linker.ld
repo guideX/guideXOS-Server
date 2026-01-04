@@ -1,16 +1,17 @@
 /*
- * AMD64 Kernel Linker Script for MinGW
+ * AMD64 Kernel Linker Script (ELF64)
  *
  * Copyright (c) 2024 guideX
  */
 
-/* MinGW produces PE/COFF format - we'll convert to flat binary */
+/* ELF64 output format */
+OUTPUT_FORMAT(elf64-x86-64)
 ENTRY(_start)
 
 SECTIONS
 {
-    /* Start at 0 for PE format - bootloader will relocate */
-    . = 0x0;
+    /* Start at a reasonable kernel virtual address - bootloader will load and relocate */
+    . = 0x100000;
     
     __kernel_start = .;
     
@@ -53,7 +54,7 @@ SECTIONS
     
     __kernel_end = .;
     
-    /* Discard unnecessary PE sections */
+    /* Discard unnecessary sections */
     /DISCARD/ :
     {
         *(.eh_frame)
