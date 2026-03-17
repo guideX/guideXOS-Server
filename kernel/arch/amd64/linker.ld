@@ -14,8 +14,8 @@ SECTIONS
     
     __kernel_start = .;
     
-    /* Boot section (must be first) */
-    .boot ALIGN(4096) :
+    /* Boot section at 1MB (must be first, contains _start entry point) */
+    .boot : ALIGN(4096)
     {
         *(.boot)
     }

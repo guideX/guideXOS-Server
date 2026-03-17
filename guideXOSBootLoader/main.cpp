@@ -976,10 +976,13 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
 
     guideXOS::debug::SerialPrint("\n[BOOT] === CALLING TRAMPOLINE NOW ===\n");
 
-    // Use VIRTUAL entry point. The kernel is compiled for virtual address 0x10000000.
-    // All internal calls and data references use virtual addresses.
-    // Our page tables map virtual 0x10XXXXXX -> physical 0x3DXXXXXX
-    BootHandoffTrampoline((void*)(UINTN)entryVirt, (void*)v1BootInfo, stackTop, (void*)(UINTN)pt.Pml4Phys);
+    // Use PHYSICAL entry point for the trampoline jump.
+    // After CR3 switch, our identity-mapped page tables ensure physical addresses work.
+    // The kernel's boot code (boot.asm) doesn't use RIP-relative addressing in its
+    // early instructions, so it will execute correctly at the physical address.
+    // When kernel_main is called, it uses internal relative calls that will work
+    // because the entire kernel is position-independent within its loaded region.
+    BootHandoffTrampoline((void*)(UINTN)entryPhys, (void*)v1BootInfo, stackTop, (void*)(UINTN)pt.Pml4Phys);
 
     // If we return, halt
     guideXOS::debug::SerialPrint("\n!!! KERNEL RETURNED - THIS SHOULD NOT HAPPEN !!!\n");

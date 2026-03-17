@@ -79,9 +79,17 @@ $(KERNEL_PE): $(ALL_OBJS)
 	$(LD) $(LDFLAGS) -o $@ $^ $(LIBS)
 
 # Step 2: Convert PE to ELF64 format
+# PE RVAs need to be adjusted by image base (0x100000) when converting to ELF
 $(KERNEL): $(KERNEL_PE)
 	@echo "Converting to ELF64 format..."
-	objcopy -I pei-x86-64 -O elf64-x86-64 $< $@
+	objcopy -I pei-x86-64 -O elf64-x86-64 \
+		--change-section-address .boot+0x100000 \
+		--change-section-address .text+0 \
+		--change-section-address .rdata+0 \
+		--change-section-address .data+0 \
+		--change-section-address .bss+0 \
+		--change-section-address .reloc+0 \
+		--set-start 0x100000 $< $@
 	@echo "Built: $@"
 
 $(OBJ_DIR)/core/%.o: kernel/core/%.cpp

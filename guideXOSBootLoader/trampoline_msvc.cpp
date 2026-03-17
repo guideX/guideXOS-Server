@@ -50,22 +50,12 @@ static inline void serial_print(const char* s) {
 //   - We align to 16, then subtract 32 (shadow space) to keep it 16-byte aligned
 //   - Result: RSP % 16 == 0 when kernel starts executing
 
-// The trampoline code bytes with serial debug markers
+// The trampoline code bytes - MINIMAL version without serial debug
 // We allocate this at runtime in executable memory
 static const uint8_t g_TrampolineCodeBytes[] = {
     // === STAGE 1: Disable interrupts and save parameters ===
     // cli - disable interrupts
     0xFA,
-    
-    // Output 'T' to serial (trampoline start) - uses dx, al
-    0xBA, 0xFD, 0x03,           // mov dx, 0x3FD (line status)
-    // .wait1:
-    0xEC,                        // in al, dx
-    0xA8, 0x20,                  // test al, 0x20
-    0x74, 0xFB,                  // jz .wait1 (-5)
-    0xBA, 0xF8, 0x03,           // mov dx, 0x3F8 (data)
-    0xB0, 0x54,                  // mov al, 'T'
-    0xEE,                        // out dx, al
     
     // mov r12, rcx  ; r12 = kernelEntry (save BEFORE we touch rcx)
     0x49, 0x89, 0xCC,
@@ -79,19 +69,7 @@ static const uint8_t g_TrampolineCodeBytes[] = {
     // mov r15, r9   ; r15 = pml4Phys (save)
     0x4D, 0x89, 0xCF,
 
-    // Output '1' to serial (parameters saved)
-    0xBA, 0xFD, 0x03,           // mov dx, 0x3FD
-    // .wait2:
-    0xEC,                        // in al, dx
-    0xA8, 0x20,                  // test al, 0x20
-    0x74, 0xFB,                  // jz .wait2
-    0xBA, 0xF8, 0x03,           // mov dx, 0x3F8
-    0xB0, 0x31,                  // mov al, '1'
-    0xEE,                        // out dx, al
-    
     // === STAGE 2: Load new page tables (if pml4Phys != 0) ===
-    // CRITICAL: Must load our page tables which map virtual -> physical addresses
-    // The kernel is linked at virtual 0x10000000 but loaded at physical 0x3D785000
     // test r15, r15
     0x4D, 0x85, 0xFF,
     // jz .skip_cr3
@@ -104,16 +82,6 @@ static const uint8_t g_TrampolineCodeBytes[] = {
     0x0F, 0x22, 0xD8,
     
     // .skip_cr3:
-    // Output '2' to serial (CR3 loaded or skipped)
-    0xBA, 0xFD, 0x03,           // mov dx, 0x3FD
-    // .wait3:
-    0xEC,                        // in al, dx
-    0xA8, 0x20,                  // test al, 0x20
-    0x74, 0xFB,                  // jz .wait3
-    0xBA, 0xF8, 0x03,           // mov dx, 0x3F8
-    0xB0, 0x32,                  // mov al, '2'
-    0xEE,                        // out dx, al
-    
     // === STAGE 3: Switch to new stack ===
     // mov rsp, r14   ; switch to new stack
     0x4C, 0x89, 0xF4,
@@ -121,20 +89,8 @@ static const uint8_t g_TrampolineCodeBytes[] = {
     // and rsp, 0xFFFFFFFFFFFFFFF0 ; ensure 16-byte alignment
     0x48, 0x83, 0xE4, 0xF0,
     
-    // sub rsp, 40   ; allocate shadow space (32 bytes) + 8 bytes to simulate CALL's push
-    // MS x64 ABI: RSP % 16 == 8 at function entry (after CALL pushes return address)
-    // Since we use JMP (no push), we subtract 40 (32 shadow + 8 fake return) = RSP % 16 == 8
+    // sub rsp, 40   ; allocate shadow space (32 bytes) + 8 bytes
     0x48, 0x83, 0xEC, 0x28,
-    
-    // Output '3' to serial (stack switched)
-    0xBA, 0xFD, 0x03,           // mov dx, 0x3FD
-    // .wait4:
-    0xEC,                        // in al, dx
-    0xA8, 0x20,                  // test al, 0x20
-    0x74, 0xFB,                  // jz .wait4
-    0xBA, 0xF8, 0x03,           // mov dx, 0x3F8
-    0xB0, 0x33,                  // mov al, '3'
-    0xEE,                        // out dx, al
     
     // === STAGE 4: Set up kernel call parameters ===
     // mov rcx, r13  ; RCX = bootInfo (first parameter for kernel)
@@ -149,40 +105,11 @@ static const uint8_t g_TrampolineCodeBytes[] = {
     // xor r9, r9    ; clear fourth param  
     0x4D, 0x31, 0xC9,
     
-    // Output 'J' to serial (about to jump)
-    0xBA, 0xFD, 0x03,           // mov dx, 0x3FD
-    // .wait5:
-    0xEC,                        // in al, dx
-    0xA8, 0x20,                  // test al, 0x20
-    0x74, 0xFB,                  // jz .wait5
-    0xBA, 0xF8, 0x03,           // mov dx, 0x3F8
-    0xB0, 0x4A,                  // mov al, 'J'
-    0xEE,                        // out dx, al
-    
-    // Output newline
-    0xBA, 0xFD, 0x03,
-    0xEC, 0xA8, 0x20, 0x74, 0xFB,
-    0xBA, 0xF8, 0x03,
-    0xB0, 0x0D,                  // CR
-    0xEE,
-    0xBA, 0xFD, 0x03,
-    0xEC, 0xA8, 0x20, 0x74, 0xFB,
-    0xBA, 0xF8, 0x03,
-    0xB0, 0x0A,                  // LF
-    0xEE,
-    
     // === STAGE 5: Jump to kernel ===
     // jmp r12       ; jump to kernel (indirect through r12)
     0x41, 0xFF, 0xE4,
     
     // === PANIC: Should never reach here ===
-    // Output '!' to serial (panic)
-    0xBA, 0xFD, 0x03,
-    0xEC, 0xA8, 0x20, 0x74, 0xFB,
-    0xBA, 0xF8, 0x03,
-    0xB0, 0x21,                  // '!'
-    0xEE,
-    
     // hlt
     0xF4,
     
