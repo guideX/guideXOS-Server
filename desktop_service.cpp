@@ -7,6 +7,10 @@
 #include "file_explorer.h"
 #include "clock.h"
 #include "task_manager.h"
+#include "paint.h"
+#include "image_viewer.h"
+#include "onscreen_keyboard.h"
+#include "shutdown_dialog.h"
 #include <algorithm>
 #include <fstream>
 #include <sstream>
@@ -180,8 +184,16 @@ namespace gxos {
                 apps::TaskManager::Launch();
             }
             else if (name == "Paint") {
-                // TODO: Launch Paint when implemented
-                Logger::write(LogLevel::Info, "Paint not yet implemented");
+                apps::Paint::Launch();
+            }
+            else if (name == "ImageViewer") {
+                apps::ImageViewer::Launch();
+            }
+            else if (name == "OnScreenKeyboard") {
+                apps::OnScreenKeyboard::Launch();
+            }
+            else if (name == "ShutdownDialog" || name == "Shutdown") {
+                apps::ShutdownDialog::Launch();
             }
             else {
                 error = "Application launcher not implemented: " + name;
@@ -206,6 +218,9 @@ namespace gxos {
                 RegisterApp("Notepad", "notepad");
                 RegisterApp("FileExplorer", "folder");
                 RegisterApp("TaskManager", "applications");
+                RegisterApp("ImageViewer", "image");
+                RegisterApp("OnScreenKeyboard", "edit");
+                RegisterApp("ShutdownDialog", "close");
                 return;
             }
 
@@ -237,6 +252,9 @@ namespace gxos {
             RegisterApp("Notepad", "notepad");
             RegisterApp("FileExplorer", "folder");
             RegisterApp("TaskManager", "applications");
+            RegisterApp("ImageViewer", "image");
+            RegisterApp("OnScreenKeyboard", "edit");
+            RegisterApp("ShutdownDialog", "close");
 
             Logger::write(LogLevel::Info, "Desktop state loaded");
         }

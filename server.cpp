@@ -59,6 +59,13 @@
 #include "clock.h"
 #include "task_manager.h"
 #include "vnc_server.h"
+#include "paint.h"
+#include "image_viewer.h"
+#include "onscreen_keyboard.h"
+#include "shutdown_dialog.h"
+#include "notification_manager.h"
+#include "firewall.h"
+#include "module_manager.h"
 #include <iostream>
 #include <chrono>
 #include <sstream>
@@ -99,6 +106,12 @@ static void help(){
                  " files | files <path>\n"
                  " clock\n"
                  " taskmgr\n"
+                 " paint\n"
+                 " imgview [file] | osk\n"
+                 " shutdown\n"
+                 " notify <text> | notify.clear\n"
+                 " fw.mode <normal|block|disabled|auto> | fw.allow <name> | fw.list | fw.alerts\n"
+                 " modules | module.launch <name>\n"
                  " proc.wait <pid> [timeoutMs] | proc.status <pid>\n"
                  " vfs.mkdir <path> | vfs.write <path> <text> | vfs.read <path> | vfs.ls <path>\n"
                  " vnc.start [port] | vnc.stop | vnc.status\n"
@@ -367,6 +380,77 @@ using namespace gxos;
             if(!requireCompositor()) continue;
             uint64_t pid = apps::TaskManager::Launch();
             std::cout<<"Task Manager launched, pid="<<pid<<std::endl;
+        }
+        else if (cmd=="paint"){
+            if(!requireCompositor()) continue;
+            uint64_t pid = apps::Paint::Launch();
+            std::cout<<"Paint launched, pid="<<pid<<std::endl;
+        }
+        else if (cmd=="imgview"){
+            if(!requireCompositor()) continue;
+            std::string filePath;
+            std::getline(iss, filePath);
+            if(filePath.size()>0 && filePath[0]==' ') filePath.erase(0,1);
+            uint64_t pid;
+            if(filePath.empty()) pid = apps::ImageViewer::Launch();
+            else pid = apps::ImageViewer::Launch(filePath);
+            std::cout<<"ImageViewer launched, pid="<<pid<<std::endl;
+        }
+        else if (cmd=="osk"){
+            if(!requireCompositor()) continue;
+            uint64_t pid = apps::OnScreenKeyboard::Launch();
+            std::cout<<"On-Screen Keyboard launched, pid="<<pid<<std::endl;
+        }
+        else if (cmd=="shutdown"){
+            if(!requireCompositor()) continue;
+            uint64_t pid = apps::ShutdownDialog::Launch();
+            std::cout<<"Shutdown dialog launched, pid="<<pid<<std::endl;
+        }
+        else if (cmd=="notify"){
+            std::string text; std::getline(iss, text); if(text.size()>0 && text[0]==' ') text.erase(0,1);
+            if(text.empty()){ std::cout<<"notify <text>"<<std::endl; continue; }
+            gui::NotificationManager::Add(text);
+            std::cout<<"Notification queued"<<std::endl;
+        }
+        else if (cmd=="notify.clear"){
+            gui::NotificationManager::Clear();
+            std::cout<<"Notifications cleared"<<std::endl;
+        }
+        else if (cmd=="fw.mode"){
+            std::string mode; iss>>mode;
+            if(mode=="normal") Firewall::SetMode(FirewallMode::Normal);
+            else if(mode=="block") Firewall::SetMode(FirewallMode::BlockAll);
+            else if(mode=="disabled") Firewall::SetMode(FirewallMode::Disabled);
+            else if(mode=="auto") Firewall::SetMode(FirewallMode::Autolearn);
+            else { std::cout<<"fw.mode <normal|block|disabled|auto>"<<std::endl; continue; }
+            std::cout<<"Firewall mode set"<<std::endl;
+        }
+        else if (cmd=="fw.allow"){
+            std::string name; std::getline(iss,name); if(name.size()>0 && name[0]==' ') name.erase(0,1);
+            if(name.empty()){ std::cout<<"fw.allow <name>"<<std::endl; continue; }
+            Firewall::AddException(name);
+            std::cout<<"Firewall exception added: "<<name<<std::endl;
+        }
+        else if (cmd=="fw.list"){
+            auto ex = Firewall::Exceptions();
+            std::cout<<"Firewall exceptions ("<<ex.size()<<"):"<<std::endl;
+            for(auto& e: ex) std::cout<<"  "<<e<<std::endl;
+        }
+        else if (cmd=="fw.alerts"){
+            auto al = Firewall::PendingAlerts();
+            std::cout<<"Pending alerts ("<<al.size()<<"):"<<std::endl;
+            for(auto& a: al) std::cout<<"  "<<a<<std::endl;
+        }
+        else if (cmd=="modules"){
+            auto names = ModuleManager::ListNames();
+            std::cout<<"Modules ("<<names.size()<<"):"<<std::endl;
+            for(auto& n: names) std::cout<<"  "<<n<<std::endl;
+        }
+        else if (cmd=="module.launch"){
+            std::string name; std::getline(iss,name); if(name.size()>0 && name[0]==' ') name.erase(0,1);
+            if(name.empty()){ std::cout<<"module.launch <name>"<<std::endl; continue; }
+            if(ModuleManager::Launch(name)) std::cout<<"Module launched: "<<name<<std::endl;
+            else std::cout<<"Module not found: "<<name<<std::endl;
         }
         else if (cmd=="vnc.start"){
             uint16_t port = 5900;

@@ -9,6 +9,9 @@
 #include "compositor.h"
 #include "gui_protocol.h"
 #include "process.h"
+#include "notification_manager.h"
+#include "firewall.h"
+#include "module_manager.h"
 
 namespace gxos {
     static LifecycleState g_state;
@@ -66,6 +69,9 @@ namespace gxos {
 
         setPhase(Phase::DesktopStateReady);
         gui::DesktopService::LoadState();
+        gui::NotificationManager::Initialize();
+        Firewall::Initialize();
+        ModuleManager::InitializeBuiltins();
         g_state.desktopStateLoaded = true;
 
         setPhase(Phase::ServicesReady);

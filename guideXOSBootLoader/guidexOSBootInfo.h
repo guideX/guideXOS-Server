@@ -29,7 +29,7 @@ namespace guideXOS
         uint32_t Flags;
         uint32_t HeaderChecksum;
         uint32_t Reserved0;
-        BootMode BootMode;
+        enum BootMode BootMode;
         uint32_t Reserved1;
         uint64_t MemoryMap;
         uint64_t MemoryMapEntryCount;
@@ -39,7 +39,7 @@ namespace guideXOS
         uint32_t FramebufferWidth;
         uint32_t FramebufferHeight;
         uint32_t FramebufferPitch;
-        FramebufferFormat FramebufferFormat;
+        enum FramebufferFormat FramebufferFormat;
         uint32_t Reserved2;
         uint64_t AcpiRsdp;
         uint64_t CommandLine;
