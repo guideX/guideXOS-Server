@@ -1,7 +1,40 @@
-﻿C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Microsoft\NuGet\17.0\Microsoft.NuGet.targets(198,5): error : Sequence contains no elements
-C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Microsoft\NuGet\17.0\Microsoft.NuGet.targets(198,5): error :    at System.Linq.Enumerable.First[TSource](IEnumerable`1 source)
-C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Microsoft\NuGet\17.0\Microsoft.NuGet.targets(198,5): error :    at Microsoft.NuGet.Build.Tasks.ResolveNuGetPackageAssets.GiveErrorForMissingFramework()
-C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Microsoft\NuGet\17.0\Microsoft.NuGet.targets(198,5): error :    at Microsoft.NuGet.Build.Tasks.ResolveNuGetPackageAssets.GetTargetOrAttemptFallback(JObject lockFile, Boolean needsRuntimeIdentifier)
-C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Microsoft\NuGet\17.0\Microsoft.NuGet.targets(198,5): error :    at Microsoft.NuGet.Build.Tasks.ResolveNuGetPackageAssets.GetReferences(JObject lockFile)
-C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Microsoft\NuGet\17.0\Microsoft.NuGet.targets(198,5): error :    at Microsoft.NuGet.Build.Tasks.ResolveNuGetPackageAssets.ExecuteCore()
-C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Microsoft\NuGet\17.0\Microsoft.NuGet.targets(198,5): error :    at Microsoft.NuGet.Build.Tasks.ResolveNuGetPackageAssets.Execute()
+﻿  [INFO] Found ELF toolchain at: D:\bkup\elfbin\bin
+  [INFO] Found NASM at: C:\Program Files\NASM
+  [OK] Added toolchain to PATH
+  [OK] Added NASM to PATH
+  
+  ==========================================
+  Building guideXOS Kernel (x86)
+  ==========================================
+  
+  [OK] Found source files
+  
+  Checking toolchain...
+  
+  [OK] Cross-compiler found
+  
+  NASM version 3.01rc9 compiled on Oct 10 2025
+  [OK] Assembler found
+  
+  Creating build directories...
+  [OK] Directories created
+  
+  [1/6] Assembling boot.asm...
+  [OK] boot.o created
+  [2/6] Compiling main.cpp...
+  [OK] main.o created
+  [3/7] Compiling vga.cpp...
+  [OK] vga.o created
+  [4/7] Compiling framebuffer.cpp...
+  [OK] framebuffer.o created
+  [5/7] Compiling core arch.cpp...
+  [OK] arch.o (core) created
+  [6/7] Compiling x86 arch.cpp...
+  [OK] arch.o (x86) created
+  [7/7] Linking kernel...
+  i686-elf-ld: build\x86\obj\core\main.o: in function `kernel_main':
+  main.cpp:(.text+0x3b): undefined reference to `kernel::desktop::init()'
+  i686-elf-ld: main.cpp:(.text+0x40): undefined reference to `kernel::desktop::draw()'
+  [ERROR] Failed to link kernel
+  Press any key to continue . . . 
+C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Microsoft\VC\v170\Microsoft.MakeFile.Targets(45,5): error MSB3073: The command "cd kernel && build-x86.bat" exited with code 1.
