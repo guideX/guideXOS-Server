@@ -30,6 +30,7 @@ namespace gxos { namespace gui {
     std::atomic<uint64_t> Compositor::s_nextWinId{1000};
     std::unordered_map<uint64_t, WinInfo> Compositor::g_windows; std::vector<uint64_t> Compositor::g_z; std::mutex Compositor::g_lock; uint64_t Compositor::g_focus=0;
     bool Compositor::g_dragActive=false; int Compositor::g_dragOffX=0; int Compositor::g_dragOffY=0; uint64_t Compositor::g_dragWin=0; int Compositor::g_dragStartX=0; int Compositor::g_dragStartY=0;
+    bool Compositor::g_dragPending=false; uint64_t Compositor::g_dragPendingWin=0;
     bool Compositor::g_resizeActive=false; int Compositor::g_resizeStartW=0; int Compositor::g_resizeStartH=0; int Compositor::g_resizeStartMX=0; int Compositor::g_resizeStartMY=0; uint64_t Compositor::g_resizeWin=0;
     bool Compositor::g_resizePreviewActive=false; int Compositor::g_resizePreviewW=0; int Compositor::g_resizePreviewH=0;
     bool Compositor::g_snapPreviewActive=false;
@@ -646,8 +647,13 @@ namespace gxos { namespace gui {
 #ifdef _WIN32
         if(g_hwnd) GetClientRect(g_hwnd,&cr);
 #endif
-        if(down){ g_dragStartX=mx; g_dragStartY=my; }
-        if(down && !g_dragActive){ for(int idx=(int)g_z.size()-1; idx>=0; --idx){ WinInfo &w=g_windows[g_z[idx]]; if(w.minimized||w.maximized||w.tombstoned) continue; if(mx>=w.x && mx < w.x+w.w && my>=w.y && my < w.y+titleBarH){ if(std::abs(mx-g_dragStartX)>=4 || std::abs(my-g_dragStartY)>=4){ g_dragActive=true; g_dragWin=w.id; g_dragOffX=mx-w.x; g_dragOffY=my-w.y; break; } } } }
+        // On mouse down, record start position and check if we're in a title bar (pending drag)
+        if(down){ g_dragStartX=mx; g_dragStartY=my; g_dragPending=false; g_dragPendingWin=0;
+            for(int idx=(int)g_z.size()-1; idx>=0; --idx){ WinInfo &w=g_windows[g_z[idx]]; if(w.minimized||w.maximized||w.tombstoned) continue; if(mx>=w.x && mx < w.x+w.w && my>=w.y && my < w.y+titleBarH){ g_dragPending=true; g_dragPendingWin=w.id; g_dragOffX=mx-w.x; g_dragOffY=my-w.y; break; } } }
+        // On mouse move with pending drag, check if we moved enough to initiate actual drag
+        if(!down && !up && g_dragPending && !g_dragActive){ if(std::abs(mx-g_dragStartX)>=4 || std::abs(my-g_dragStartY)>=4){ auto it=g_windows.find(g_dragPendingWin); if(it!=g_windows.end()){ WinInfo &w=it->second; if(!w.minimized && !w.maximized && !w.tombstoned){ g_dragActive=true; g_dragWin=g_dragPendingWin; g_dragPending=false; } } } }
+        // On mouse up, clear pending drag state
+        if(up){ g_dragPending=false; g_dragPendingWin=0; }
         // find topmost window under cursor
         WinInfo* topW=nullptr; for(int idx=(int)g_z.size()-1; idx>=0; --idx){ auto it=g_windows.find(g_z[idx]); if(it==g_windows.end()) continue; WinInfo &w=it->second; if(w.minimized||w.tombstoned) continue; if(mx>=w.x && mx < w.x+w.w && my>=w.y && my < w.y+w.h){ topW=&w; break; } }
         // Titlebar button handling (hover/press/click)

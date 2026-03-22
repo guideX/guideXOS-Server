@@ -80,6 +80,7 @@ namespace gxos { namespace gui {
         static std::atomic<uint64_t> s_nextWinId;
         static std::unordered_map<uint64_t, WinInfo> g_windows; static std::vector<uint64_t> g_z; static std::mutex g_lock; static uint64_t g_focus;
         static bool g_dragActive; static int g_dragOffX; static int g_dragOffY; static uint64_t g_dragWin; static int g_dragStartX; static int g_dragStartY;
+        static bool g_dragPending; static uint64_t g_dragPendingWin;
         static bool g_resizeActive; static int g_resizeStartW; static int g_resizeStartH; static int g_resizeStartMX; static int g_resizeStartMY; static uint64_t g_resizeWin;
         static bool g_resizePreviewActive; static int g_resizePreviewW; static int g_resizePreviewH;
         static bool g_snapPreviewActive;

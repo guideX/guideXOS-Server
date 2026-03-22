@@ -317,6 +317,9 @@
     <ClCompile Include="kernel\core\desktop.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="system_tray.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <None Include="kernel\arch\amd64\boot.asm">
@@ -397,5 +400,6 @@
     <None Include="run-qemu.bat">
       <Filter>Source Files</Filter>
     </None>
+    <None Include="docs\BUILD_GUIDE.md" />
   </ItemGroup>
 </Project>

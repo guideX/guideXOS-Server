@@ -257,6 +257,7 @@
     <None Include="configure-vs-project.bat" />
     <None Include="diagnose.bat" />
     <None Include="Directory.Build.targets" />
+    <None Include="docs\BUILD_GUIDE.md" />
     <None Include="fix-trampoline.ps1" />
     <None Include="guideXOSKernel.vcxproj" />
     <None Include="guideXOSKernel.vcxproj.filters" />
