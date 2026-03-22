@@ -63,6 +63,9 @@
 #include "image_viewer.h"
 #include "onscreen_keyboard.h"
 #include "shutdown_dialog.h"
+#include "message_box.h"
+#include "welcome.h"
+#include "open_dialog.h"
 #include "notification_manager.h"
 #include "firewall.h"
 #include "module_manager.h"
@@ -108,7 +111,7 @@ static void help(){
                  " taskmgr\n"
                  " paint\n"
                  " imgview [file] | osk\n"
-                 " shutdown\n"
+                 " shutdown | msgbox <text> | welcome\n"
                  " notify <text> | notify.clear\n"
                  " fw.mode <normal|block|disabled|auto> | fw.allow <name> | fw.list | fw.alerts\n"
                  " modules | module.launch <name>\n"
@@ -405,6 +408,18 @@ using namespace gxos;
             if(!requireCompositor()) continue;
             uint64_t pid = apps::ShutdownDialog::Launch();
             std::cout<<"Shutdown dialog launched, pid="<<pid<<std::endl;
+        }
+        else if (cmd=="msgbox"){
+            if(!requireCompositor()) continue;
+            std::string text; std::getline(iss, text); if(text.size()>0 && text[0]==' ') text.erase(0,1);
+            if(text.empty()){ std::cout<<"msgbox <text>"<<std::endl; continue; }
+            uint64_t pid = apps::MessageBox::Launch("Message", text);
+            std::cout<<"MessageBox launched, pid="<<pid<<std::endl;
+        }
+        else if (cmd=="welcome"){
+            if(!requireCompositor()) continue;
+            uint64_t pid = apps::Welcome::Launch();
+            std::cout<<"Welcome window launched, pid="<<pid<<std::endl;
         }
         else if (cmd=="notify"){
             std::string text; std::getline(iss, text); if(text.size()>0 && text[0]==' ') text.erase(0,1);

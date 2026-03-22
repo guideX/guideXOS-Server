@@ -190,7 +190,9 @@ void Paint::floodFill(int x, int y, uint32_t newColor) {
     std::queue<std::pair<int,int>> q;
     q.push({x, y});
     while (!q.empty()) {
-        auto [px, py] = q.front(); q.pop();
+        int px = q.front().first;
+        int py = q.front().second;
+        q.pop();
         if (px < 0 || py < 0 || px >= s_canvasW || py >= s_canvasH) continue;
         if (s_canvas[static_cast<size_t>(py) * s_canvasW + px] != target) continue;
         s_canvas[static_cast<size_t>(py) * s_canvasW + px] = newColor;

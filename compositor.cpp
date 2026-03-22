@@ -2,10 +2,16 @@
 #include "allocator.h"
 #include "desktop_state.h"
 #include "icons.h"
+#include "right_click_menu.h"
+#include "notification_manager.h"
+#include "system_tray.h"
+#include "desktop_wallpaper.h"
+#include "bitmap_font.h"
 #include <sstream>
 #include <algorithm>
 #include <chrono>
 #include <cstring>
+#include <ctime>
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #ifndef NOMINMAX
@@ -88,7 +94,7 @@ namespace gxos { namespace gui {
 
     WinInfo* Compositor::hitWindowAt(int mx, int my){ for(int idx=(int)g_z.size()-1; idx>=0; --idx){ uint64_t wid=g_z[idx]; auto it=g_windows.find(wid); if(it==g_windows.end()) continue; WinInfo &w=it->second; if(w.minimized || w.tombstoned) continue; if(mx>=w.x && mx < w.x+w.w && my>=w.y && my < w.y+w.h) return &w; } return nullptr; }
 #ifdef _WIN32
-    uint64_t Compositor::hitTestTaskbarButton(int mx, int my, RECT cr, int taskbarH){ int taskbarTop=cr.bottom-taskbarH; if(my < taskbarTop) return 0; int btnX=50; // leave space for start button
+    uint64_t Compositor::hitTestTaskbarButton(int mx, int my, RECT cr, int taskbarH){ int taskbarTop=cr.bottom-taskbarH; if(my < taskbarTop) return 0; int btnX=216; // leave space for start button + search box
         for(uint64_t id : g_z){ auto it=g_windows.find(id); if(it==g_windows.end()) continue; std::string label=it->second.title; SIZE sz; HDC dc=GetDC(g_hwnd); GetTextExtentPoint32A(dc,label.c_str(),(int)label.size(),&sz); ReleaseDC(g_hwnd,dc); int bw=sz.cx+30; int btnTop=taskbarTop+4; int btnBottom=cr.bottom-4; if(mx>=btnX && mx<=btnX+bw && my>=btnTop && my<=btnBottom) return id; btnX += bw + 6; } return 0; }
     void Compositor::initWindow(){ WNDCLASSA wc{}; wc.style=CS_OWNDC; wc.lpfnWndProc=Compositor::WndProc; wc.hInstance=GetModuleHandleA(nullptr); wc.lpszClassName="GXOS_COMPOSITOR"; RegisterClassA(&wc); g_hwnd=CreateWindowExA(0,wc.lpszClassName,"guideXOSCpp Compositor",WS_OVERLAPPEDWINDOW|WS_VISIBLE,CW_USEDEFAULT,CW_USEDEFAULT,1024,768,nullptr,nullptr,wc.hInstance,nullptr); g_startBtnBmp=(HBITMAP)LoadImageA(nullptr,"assets/start_button.bmp",IMAGE_BITMAP,0,0,LR_LOADFROMFILE|LR_CREATEDIBSECTION); }
     void Compositor::shutdownWindow(){ if(g_hwnd){ DestroyWindow(g_hwnd); g_hwnd=nullptr; } }
@@ -96,7 +102,32 @@ namespace gxos { namespace gui {
     void Compositor::loadWallpaper(const std::string& path){ g_wallpaperPath=path; if(g_wallpaperBmp){ DeleteObject(g_wallpaperBmp); g_wallpaperBmp=nullptr; } if(path.empty()) return; HBITMAP hb=(HBITMAP)LoadImageA(nullptr,path.c_str(),IMAGE_BITMAP,0,0,LR_LOADFROMFILE|LR_CREATEDIBSECTION); if(hb){ BITMAP bm{}; GetObject(hb,sizeof(bm),&bm); g_wallpaperBmp=hb; g_wallpaperW=bm.bmWidth; g_wallpaperH=bm.bmHeight; } }
     void Compositor::freeWallpaper(){ if(g_wallpaperBmp){ DeleteObject(g_wallpaperBmp); g_wallpaperBmp=nullptr; g_wallpaperW=g_wallpaperH=0; } }
 
-    void Compositor::drawDesktopIcons(HDC dc, RECT cr){ const int margin=16; const int iconW=64; const int iconH=64; const int cellW=iconW+20; const int cellH=iconH+34; int cols = (cr.right - margin*2)/cellW; if(cols<1) cols=1; int x0=margin; int y0=margin; HFONT font=(HFONT)GetStockObject(ANSI_VAR_FONT); SelectObject(dc,font); SetBkMode(dc,TRANSPARENT); SetTextColor(dc,RGB(220,220,230)); POINT cursor; GetCursorPos(&cursor); ScreenToClient(g_hwnd,&cursor); int idx=0; for(auto &it: g_items){ int col=idx%cols; int row=idx/cols; int x=x0+col*cellW; int y=y0+row*cellH; RECT cell{ x, y, x+cellW, y+cellH}; bool hover = (cursor.x>=cell.left && cursor.x<=cell.right && cursor.y>=cell.top && cursor.y<=cell.bottom); if(it.selected){ HBRUSH sel=CreateSolidBrush(RGB(50,90,160)); FillRect(dc,&cell,sel); DeleteObject(sel); FrameRect(dc,&cell,(HBRUSH)GetStockObject(WHITE_BRUSH)); } else if(hover){ HBRUSH hov=CreateSolidBrush(RGB(60,60,70)); FillRect(dc,&cell,hov); DeleteObject(hov); FrameRect(dc,&cell,(HBRUSH)GetStockObject(WHITE_BRUSH)); } RECT iconR{ x+(cellW-iconW)/2, y+4, x+(cellW-iconW)/2+iconW, y+4+iconH}; HBRUSH ib=CreateSolidBrush(it.pinned? RGB(90,140,220):RGB(110,110,130)); FillRect(dc,&iconR,ib); DeleteObject(ib); FrameRect(dc,&iconR,(HBRUSH)GetStockObject(WHITE_BRUSH)); std::string label=it.label; TextOutA(dc, x+4, iconR.bottom+4, label.c_str(), (int)label.size()); idx++; } }
+    void Compositor::drawDesktopIcons(HDC dc, RECT cr){ const int margin=20; const int iconW=56; const int iconH=56; const int cellW=iconW+28; const int cellH=iconH+38; int cols = (cr.right - margin*2)/cellW; if(cols<1) cols=1; int x0=margin; int y0=margin; HFONT font=(HFONT)GetStockObject(ANSI_VAR_FONT); SelectObject(dc,font); SetBkMode(dc,TRANSPARENT); POINT cursor; GetCursorPos(&cursor); ScreenToClient(g_hwnd,&cursor); int idx=0; for(auto &it: g_items){ int col=idx%cols; int row=idx/cols; int x=x0+col*cellW; int y=y0+row*cellH; RECT cell{ x, y, x+cellW, y+cellH}; bool hover = (cursor.x>=cell.left && cursor.x<=cell.right && cursor.y>=cell.top && cursor.y<=cell.bottom);
+        if(it.selected){ HBRUSH sel=CreateSolidBrush(RGB(50,90,160)); FillRect(dc,&cell,sel); DeleteObject(sel); HPEN selP=CreatePen(PS_SOLID,1,RGB(100,160,240)); HGDIOBJ oP=SelectObject(dc,selP); HGDIOBJ oB=SelectObject(dc,GetStockObject(NULL_BRUSH)); Rectangle(dc,cell.left,cell.top,cell.right,cell.bottom); SelectObject(dc,oP); SelectObject(dc,oB); DeleteObject(selP);
+        } else if(hover){ HBRUSH hov=CreateSolidBrush(RGB(50,55,65)); FillRect(dc,&cell,hov); DeleteObject(hov); HPEN hovP=CreatePen(PS_SOLID,1,RGB(80,100,140)); HGDIOBJ oP=SelectObject(dc,hovP); HGDIOBJ oB=SelectObject(dc,GetStockObject(NULL_BRUSH)); Rectangle(dc,cell.left,cell.top,cell.right,cell.bottom); SelectObject(dc,oP); SelectObject(dc,oB); DeleteObject(hovP); }
+        RECT iconR{ x+(cellW-iconW)/2, y+6, x+(cellW-iconW)/2+iconW, y+6+iconH};
+        // Color-coded icons based on app name
+        COLORREF iconColor = RGB(90,100,120); // default
+        std::string lbl = it.label;
+        if(lbl=="Calculator" || lbl=="Clock") iconColor = RGB(70,140,200);
+        else if(lbl=="Notepad" || lbl=="Console") iconColor = RGB(120,180,80);
+        else if(lbl=="Paint" || lbl=="ImageViewer") iconColor = RGB(200,120,60);
+        else if(lbl=="TaskManager") iconColor = RGB(180,70,70);
+        else if(lbl=="Files" || lbl=="ComputerFiles") iconColor = RGB(200,180,60);
+        else if(it.pinned) iconColor = RGB(90,140,220);
+        HBRUSH ib=CreateSolidBrush(iconColor); FillRect(dc,&iconR,ib); DeleteObject(ib);
+        // Icon inner detail: small symbol
+        { int cx=iconR.left+(iconW/2); int cy=iconR.top+(iconH/2);
+          HBRUSH inner=CreateSolidBrush(RGB(GetRValue(iconColor)+40>255?255:GetRValue(iconColor)+40, GetGValue(iconColor)+40>255?255:GetGValue(iconColor)+40, GetBValue(iconColor)+40>255?255:GetBValue(iconColor)+40));
+          RECT innerR{cx-10, cy-10, cx+10, cy+10}; FillRect(dc,&innerR,inner); DeleteObject(inner); }
+        // Rounded-ish frame (just a subtle border)
+        HPEN iconFrame=CreatePen(PS_SOLID,1,RGB(180,180,200)); HGDIOBJ oP2=SelectObject(dc,iconFrame); HGDIOBJ oB2=SelectObject(dc,GetStockObject(NULL_BRUSH)); Rectangle(dc,iconR.left,iconR.top,iconR.right,iconR.bottom); SelectObject(dc,oP2); SelectObject(dc,oB2); DeleteObject(iconFrame);
+        // Label with text shadow
+        SetTextColor(dc,RGB(0,0,0)); TextOutA(dc, x+5, iconR.bottom+5, lbl.c_str(), (int)lbl.size());
+        SetTextColor(dc,RGB(230,230,240)); TextOutA(dc, x+4, iconR.bottom+4, lbl.c_str(), (int)lbl.size());
+        // Pin indicator
+        if(it.pinned){ SetTextColor(dc,RGB(255,200,60)); const char* pin="*"; TextOutA(dc, iconR.right-10, iconR.top+2, pin, 1); }
+        idx++; } }
     
     // helper: draw a bitmap centered in rect
     static void drawBitmapCentered(HDC dc, HBITMAP hb, RECT r){ if(!hb) return; HDC mem=CreateCompatibleDC(dc); HGDIOBJ old=SelectObject(mem,hb); BITMAP bm{}; GetObject(hb,sizeof(bm),&bm); int w=bm.bmWidth,h=bm.bmHeight; int dx = r.left + ((r.right-r.left)-w)/2; int dy = r.top + ((r.bottom-r.top)-h)/2; BitBlt(dc,dx,dy,w,h,mem,0,0,SRCCOPY); SelectObject(mem,old); DeleteDC(mem); }
@@ -104,8 +135,8 @@ namespace gxos { namespace gui {
     LRESULT CALLBACK Compositor::WndProc(HWND h, UINT msg, WPARAM w, LPARAM l){
         switch(msg){
         case WM_CLOSE: PostQuitMessage(0); return 0;
-        case WM_SIZE: { RECT cr; GetClientRect(h,&cr); std::lock_guard<std::mutex> lk(g_lock); int taskbarH=32; for(auto &kv: g_windows){ WinInfo &wi=kv.second; if(wi.maximized){ wi.x=cr.left; wi.y=cr.top; wi.w=cr.right-cr.left; wi.h=cr.bottom-taskbarH; wi.dirty=true; } } requestRepaint(); return 0; }
-        case WM_PAINT: { PAINTSTRUCT ps; HDC dc=BeginPaint(h,&ps); RECT cr; GetClientRect(h,&cr); if(g_wallpaperBmp){ HDC mem=CreateCompatibleDC(dc); HGDIOBJ old=SelectObject(mem,g_wallpaperBmp); BITMAP bm{}; GetObject(g_wallpaperBmp,sizeof(bm),&bm); double sx=(double)(cr.right-cr.left)/bm.bmWidth; double sy=(double)(cr.bottom-cr.top)/bm.bmHeight; double s=sx<sy? sx: sy; int dstW=(int)(bm.bmWidth*s); int dstH=(int)(bm.bmHeight*s); int dx=(cr.right-dstW)/2; int dy=(cr.bottom-dstH)/2; HBRUSH bg=CreateSolidBrush(RGB(25,25,30)); FillRect(dc,&cr,bg); DeleteObject(bg); SetStretchBltMode(dc,HALFTONE); StretchBlt(dc,dx,dy,dstW,dstH,mem,0,0,bm.bmWidth,bm.bmHeight,SRCCOPY); SelectObject(mem,old); DeleteDC(mem);} else { HBRUSH bg=CreateSolidBrush(RGB(25,25,30)); FillRect(dc,&cr,bg); DeleteObject(bg);} drawDesktopIcons(dc, cr);
+        case WM_SIZE: { RECT cr; GetClientRect(h,&cr); std::lock_guard<std::mutex> lk(g_lock); int taskbarH=40; for(auto &kv: g_windows){ WinInfo &wi=kv.second; if(wi.maximized){ wi.x=cr.left; wi.y=cr.top; wi.w=cr.right-cr.left; wi.h=cr.bottom-taskbarH; wi.dirty=true; } } requestRepaint(); return 0; }
+        case WM_PAINT: { PAINTSTRUCT ps; HDC dc=BeginPaint(h,&ps); RECT cr; GetClientRect(h,&cr); if(g_wallpaperBmp){ HDC mem=CreateCompatibleDC(dc); HGDIOBJ old=SelectObject(mem,g_wallpaperBmp); BITMAP bm{}; GetObject(g_wallpaperBmp,sizeof(bm),&bm); double sx=(double)(cr.right-cr.left)/bm.bmWidth; double sy=(double)(cr.bottom-cr.top)/bm.bmHeight; double s=sx<sy? sx: sy; int dstW=(int)(bm.bmWidth*s); int dstH=(int)(bm.bmHeight*s); int dx=(cr.right-dstW)/2; int dy=(cr.bottom-dstH)/2; HBRUSH bg=CreateSolidBrush(RGB(25,25,30)); FillRect(dc,&cr,bg); DeleteObject(bg); SetStretchBltMode(dc,HALFTONE); StretchBlt(dc,dx,dy,dstW,dstH,mem,0,0,bm.bmWidth,bm.bmHeight,SRCCOPY); SelectObject(mem,old); DeleteDC(mem);} else { DesktopWallpaper::DrawGradient(dc, cr); DesktopWallpaper::DrawBranding(dc, cr);} drawDesktopIcons(dc, cr);
             // Draw application windows in Z-order (bottom to top)
             const int titleBarH = 24; HFONT font=(HFONT)GetStockObject(ANSI_VAR_FONT); SelectObject(dc,font); SetBkMode(dc,TRANSPARENT);
             for(size_t i=0;i<g_z.size(); ++i){ auto it=g_windows.find(g_z[i]); if(it==g_windows.end()) continue; const WinInfo &winfo=it->second; if(winfo.minimized) continue; RECT wrect{ winfo.x, winfo.y, winfo.x + winfo.w, winfo.y + winfo.h };
@@ -146,10 +177,121 @@ namespace gxos { namespace gui {
                 int ty = winfo.y + titleBarH + 8; for(const auto &tx : winfo.texts){ TextOutA(dc, winfo.x + 8, ty, tx.c_str(), (int)tx.size()); ty += 16; }
                 if(winfo.tombstoned){ const char* t="Tombstoned"; SIZE ts; GetTextExtentPoint32A(dc,t,(int)strlen(t),&ts); SetTextColor(dc, RGB(200,100,100)); TextOutA(dc, winfo.x + (winfo.w - ts.cx)/2, winfo.y + (winfo.h - ts.cy)/2, t, (int)strlen(t)); }
             }
-            int taskbarH=32; RECT tb{cr.left,cr.bottom-taskbarH,cr.right,cr.bottom}; HBRUSH tbBg=CreateSolidBrush(RGB(40,40,50)); FillRect(dc,&tb,tbBg); DeleteObject(tbBg);
-            RECT startBtn{8,cr.bottom-taskbarH+4,8+32,cr.bottom-4}; HBRUSH sbg=CreateSolidBrush(g_startMenuVisible? RGB(80,110,160):RGB(60,80,100)); FillRect(dc,&startBtn,sbg); DeleteObject(sbg); FrameRect(dc,&startBtn,(HBRUSH)GetStockObject(WHITE_BRUSH)); drawBitmapCentered(dc, g_startBtnBmp, startBtn);
-            // Taskbar buttons
-            POINT cursor; GetCursorPos(&cursor); ScreenToClient(h,&cursor); int btnX=50; for(uint64_t id: g_z){ auto it=g_windows.find(id); if(it==g_windows.end()) continue; std::string label=it->second.title; SIZE sz; GetTextExtentPoint32A(dc,label.c_str(),(int)label.size(),&sz); int bw=sz.cx+30; RECT br{ btnX, cr.bottom-taskbarH+4, btnX+bw, cr.bottom-4}; bool hover=(cursor.x>=br.left && cursor.x<=br.right && cursor.y>=br.top && cursor.y<=br.bottom); HBRUSH bbg=CreateSolidBrush( hover? RGB(90,130,190): (id==g_focus? RGB(80,110,160):(it->second.minimized? RGB(45,45,55): (it->second.tombstoned? RGB(90,70,40):RGB(70,70,85)))) ); FillRect(dc,&br,bbg); DeleteObject(bbg); FrameRect(dc,&br,(HBRUSH)GetStockObject(WHITE_BRUSH)); RECT iconRect{ br.left+4, br.top+4, br.left+20, br.top+20 }; drawBitmapCentered(dc, it->second.taskbarIcon, iconRect); SetTextColor(dc,RGB(240,240,240)); TextOutA(dc,br.left+24,br.top+10,label.c_str(),(int)label.size()); btnX += bw + 6; }
+            int taskbarH=40; RECT tb{cr.left,cr.bottom-taskbarH,cr.right,cr.bottom};
+            // Taskbar background with subtle gradient
+            for(int ty2=0; ty2<taskbarH; ++ty2){
+                float gt=(float)ty2/(float)(taskbarH>1?taskbarH-1:1);
+                int gr=(int)(30+gt*10), gg=(int)(30+gt*10), gb=(int)(38+gt*14);
+                HBRUSH tbLine=CreateSolidBrush(RGB(gr,gg,gb)); RECT tbLn{cr.left, cr.bottom-taskbarH+ty2, cr.right, cr.bottom-taskbarH+ty2+1}; FillRect(dc,&tbLn,tbLine); DeleteObject(tbLine);
+            }
+            // Top edge highlight
+            { HPEN tbEdge=CreatePen(PS_SOLID,1,RGB(60,65,80)); HGDIOBJ oldP=SelectObject(dc,tbEdge); MoveToEx(dc,cr.left,cr.bottom-taskbarH,nullptr); LineTo(dc,cr.right,cr.bottom-taskbarH); SelectObject(dc,oldP); DeleteObject(tbEdge); }
+            RECT startBtn{8,cr.bottom-taskbarH+6,8+32,cr.bottom-6}; HBRUSH sbg=CreateSolidBrush(g_startMenuVisible? RGB(80,110,160):RGB(55,75,100)); FillRect(dc,&startBtn,sbg); DeleteObject(sbg); FrameRect(dc,&startBtn,(HBRUSH)GetStockObject(WHITE_BRUSH)); drawBitmapCentered(dc, g_startBtnBmp, startBtn);
+            // Search box placeholder (after start button)
+            drawTaskbarSearchBox(dc, 48, cr.bottom-taskbarH+8, 160, taskbarH-16);
+            // Taskbar buttons (offset to right of search box)
+            POINT cursor; GetCursorPos(&cursor); ScreenToClient(h,&cursor); int btnX=216; for(uint64_t id: g_z){ auto it=g_windows.find(id); if(it==g_windows.end()) continue; std::string label=it->second.title; SIZE sz; GetTextExtentPoint32A(dc,label.c_str(),(int)label.size(),&sz); int bw=sz.cx+30; if(bw>180) bw=180; RECT br{ btnX, cr.bottom-taskbarH+6, btnX+bw, cr.bottom-6}; bool hover=(cursor.x>=br.left && cursor.x<=br.right && cursor.y>=br.top && cursor.y<=br.bottom); HBRUSH bbg=CreateSolidBrush( hover? RGB(90,130,190): (id==g_focus? RGB(70,100,150):(it->second.minimized? RGB(40,40,50): (it->second.tombstoned? RGB(85,65,35):RGB(55,58,70)))) ); FillRect(dc,&br,bbg); DeleteObject(bbg);
+                // Active indicator line at bottom for focused window
+                if(id==g_focus){ HBRUSH ind=CreateSolidBrush(RGB(100,160,240)); RECT indR{br.left+2,br.bottom-3,br.right-2,br.bottom-1}; FillRect(dc,&indR,ind); DeleteObject(ind); }
+                RECT iconRect{ br.left+4, br.top+4, br.left+20, br.top+20 }; drawBitmapCentered(dc, it->second.taskbarIcon, iconRect); SetTextColor(dc,RGB(230,230,240)); TextOutA(dc,br.left+24,br.top+8,label.c_str(),(int)label.size()); btnX += bw + 4; }
+            // System tray area (before clock)
+            drawSystemTray(dc, cr, taskbarH);
+            // Taskbar clock/date display (right side, matching Legacy Taskbar.cs)
+            {
+                std::time_t now = std::time(nullptr);
+                std::tm ltBuf{};
+#ifdef _WIN32
+                localtime_s(&ltBuf, &now);
+#else
+                std::tm* tmp = std::localtime(&now);
+                if (tmp) ltBuf = *tmp;
+#endif
+                char timeBuf[16]; char dateBuf[16];
+                std::snprintf(timeBuf, sizeof(timeBuf), "%02d:%02d", ltBuf.tm_hour, ltBuf.tm_min);
+                std::snprintf(dateBuf, sizeof(dateBuf), "%d/%d/%d", ltBuf.tm_mon+1, ltBuf.tm_mday, ltBuf.tm_year+1900);
+                SIZE timeSz, dateSz;
+                GetTextExtentPoint32A(dc, timeBuf, (int)strlen(timeBuf), &timeSz);
+                GetTextExtentPoint32A(dc, dateBuf, (int)strlen(dateBuf), &dateSz);
+                int clockW = (timeSz.cx > dateSz.cx ? timeSz.cx : dateSz.cx) + 16;
+                int clockX = cr.right - clockW - 12;
+                int timeY = cr.bottom - taskbarH + 6;
+                int dateY = timeY + timeSz.cy + 1;
+                SetTextColor(dc, RGB(200, 200, 210));
+                TextOutA(dc, clockX + (clockW - timeSz.cx)/2, timeY, timeBuf, (int)strlen(timeBuf));
+                SetTextColor(dc, RGB(150, 150, 165));
+                TextOutA(dc, clockX + (clockW - dateSz.cx)/2, dateY, dateBuf, (int)strlen(dateBuf));
+            }
+            // Show Desktop button (thin sliver on far right, matching Legacy)
+            {
+                int sdW = 6; int sdX = cr.right - sdW;
+                RECT sdRect{ sdX, cr.bottom - taskbarH, cr.right, cr.bottom };
+                bool hoverSD = (cursor.x >= sdRect.left && cursor.y >= sdRect.top && cursor.x <= sdRect.right && cursor.y <= sdRect.bottom);
+                HBRUSH sdBrush = CreateSolidBrush(hoverSD ? RGB(70,80,100) : RGB(50,50,60));
+                FillRect(dc, &sdRect, sdBrush); DeleteObject(sdBrush);
+            }
+            // Taskbar button tooltip (drawn last so it overlaps everything)
+            {
+                int tbtnX=216;
+                for(uint64_t id: g_z){
+                    auto it=g_windows.find(id); if(it==g_windows.end()) continue;
+                    std::string label=it->second.title; SIZE sz;
+                    GetTextExtentPoint32A(dc,label.c_str(),(int)label.size(),&sz);
+                    int bw=sz.cx+30; if(bw>180) bw=180;
+                    RECT br2{ tbtnX, cr.bottom-taskbarH+6, tbtnX+bw, cr.bottom-6};
+                    bool hov=(cursor.x>=br2.left && cursor.x<=br2.right && cursor.y>=br2.top && cursor.y<=br2.bottom);
+                    if(hov){ drawTaskbarTooltip(dc, (br2.left+br2.right)/2, cr.bottom-taskbarH, label.c_str()); break; }
+                    tbtnX += bw + 4;
+                }
+            }
+            // Notification toasts (top-right, matching Legacy NotificationManager.cs)
+            {
+                uint64_t nowTicks = nowMs();
+                NotificationManager::Update(nowTicks);
+                auto notes = NotificationManager::Snapshot();
+                int noteY = 8;
+                for (size_t ni = 0; ni < notes.size(); ni++) {
+                    const auto& n = notes[ni];
+                    if (n.dismissed) continue;
+                    SIZE nsz; const char* nmsg = n.message.c_str();
+                    GetTextExtentPoint32A(dc, nmsg, (int)n.message.size(), &nsz);
+                    int noteW = nsz.cx + 24; if (noteW < 160) noteW = 160;
+                    int noteH = 32;
+                    int noteX = cr.right - noteW - 8;
+                    RECT noteR{ noteX, noteY, noteX + noteW, noteY + noteH };
+                    HBRUSH nb = CreateSolidBrush(n.level == NotificationLevel::Error ? RGB(120,40,40) : RGB(40,55,80));
+                    FillRect(dc, &noteR, nb); DeleteObject(nb);
+                    FrameRect(dc, &noteR, (HBRUSH)GetStockObject(WHITE_BRUSH));
+                    SetTextColor(dc, RGB(240, 240, 240));
+                    TextOutA(dc, noteX + 12, noteY + 8, nmsg, (int)n.message.size());
+                    noteY += noteH + 4;
+                }
+            }
+            // Right-click context menu overlay
+            RightClickMenu::Draw(dc);
+            // Taskbar right-click menu (Task Manager, Reboot, Log Off)
+            if(g_taskbarMenuVisible){
+                const int tmItemH = 28; const int tmMenuW = 180; const int tmPad = 6;
+                static const char* tmLabels[] = { "Task Manager", "Reboot", "Log Off" };
+                const int tmItemCount = 3;
+                int tmH = tmItemH * tmItemCount + tmPad * 2;
+                g_taskbarMenuRect = { g_taskbarMenuRect.left, g_taskbarMenuRect.top,
+                    g_taskbarMenuRect.left + tmMenuW, g_taskbarMenuRect.top + tmH };
+                HBRUSH tmBg = CreateSolidBrush(RGB(42,42,42));
+                FillRect(dc, &g_taskbarMenuRect, tmBg); DeleteObject(tmBg);
+                HPEN tmBorder = CreatePen(PS_SOLID, 1, RGB(63,63,63));
+                HGDIOBJ oldPen2 = SelectObject(dc, tmBorder);
+                HGDIOBJ oldBr2 = SelectObject(dc, GetStockObject(NULL_BRUSH));
+                Rectangle(dc, g_taskbarMenuRect.left, g_taskbarMenuRect.top, g_taskbarMenuRect.right, g_taskbarMenuRect.bottom);
+                SelectObject(dc, oldPen2); SelectObject(dc, oldBr2); DeleteObject(tmBorder);
+                SetBkMode(dc, TRANSPARENT); SetTextColor(dc, RGB(220,220,220));
+                for(int tmi=0; tmi<tmItemCount; ++tmi){
+                    int iy = g_taskbarMenuRect.top + tmPad + tmi * tmItemH;
+                    RECT itemR{ g_taskbarMenuRect.left+1, iy, g_taskbarMenuRect.right-1, iy+tmItemH };
+                    bool hov = (cursor.x >= itemR.left && cursor.x <= itemR.right && cursor.y >= itemR.top && cursor.y <= itemR.bottom);
+                    if(tmi==g_taskbarMenuSel || hov){ HBRUSH hb = CreateSolidBrush(RGB(60,80,120)); FillRect(dc,&itemR,hb); DeleteObject(hb); }
+                    TextOutA(dc, itemR.left+8, iy+(tmItemH/2)-7, tmLabels[tmi], (int)strlen(tmLabels[tmi]));
+                }
+            }
             // Start menu popup (pinned + recent OR all programs)
             if(g_startMenuVisible){ 
                 int smW=440; // wider to accommodate two columns
@@ -272,7 +414,31 @@ namespace gxos { namespace gui {
             }
             
             EndPaint(h,&ps); return 0; }
-        case WM_LBUTTONDOWN:{ int mx=GET_X_LPARAM(l); int my=GET_Y_LPARAM(l); RECT cr; GetClientRect(h,&cr); int taskbarH=32; RECT startBtn{8,cr.bottom-taskbarH+4,8+32,cr.bottom-4}; // Start button toggle
+        case WM_LBUTTONDOWN:{ int mx=GET_X_LPARAM(l); int my=GET_Y_LPARAM(l); RECT cr; GetClientRect(h,&cr); int taskbarH=40;
+            // Dismiss right-click menu on any left click
+            if(RightClickMenu::IsVisible()){ RightClickMenu::HandleClick(mx, my); requestRepaint(); return 0; }
+            // Handle taskbar right-click menu click
+            if(g_taskbarMenuVisible){
+                const int tmItemH = 28; const int tmPad = 6;
+                static const char* tmActions[] = { "TaskManager", "Reboot", "LogOff" };
+                const int tmItemCount = 3;
+                if(mx>=g_taskbarMenuRect.left && mx<=g_taskbarMenuRect.right &&
+                   my>=g_taskbarMenuRect.top && my<=g_taskbarMenuRect.bottom){
+                    int idx = (my - g_taskbarMenuRect.top - tmPad) / tmItemH;
+                    if(idx>=0 && idx<tmItemCount){
+                        g_taskbarMenuVisible = false;
+                        if(idx==0){ launchAction("TaskManager"); }
+                        else if(idx==1){ publishOut(MsgType::MT_WidgetEvt, "REBOOT"); }
+                        else if(idx==2){ publishOut(MsgType::MT_WidgetEvt, "LOGOFF"); }
+                        requestRepaint(); return 0;
+                    }
+                }
+                g_taskbarMenuVisible = false;
+                requestRepaint(); return 0;
+            }
+            // Show Desktop button (thin sliver on far right of taskbar)
+            { int sdW=6; int sdX=cr.right-sdW; if(mx>=sdX && my>=cr.bottom-taskbarH && mx<=cr.right && my<=cr.bottom){ ipc::Message sdm; sdm.type=static_cast<uint32_t>(gui::MsgType::MT_ShowDesktopToggle); handleMessage(sdm); requestRepaint(); return 0; } }
+            RECT startBtn{8,cr.bottom-taskbarH+6,8+32,cr.bottom-6}; // Start button toggle
             if(mx>=startBtn.left && mx<=startBtn.right && my>=startBtn.top && my<=startBtn.bottom){ 
                 g_startMenuVisible=!g_startMenuVisible; 
                 if(g_startMenuVisible){ 
@@ -373,19 +539,53 @@ namespace gxos { namespace gui {
                 }
             }
             // Desktop icon click (selection / double)
-            const int margin=16; const int iconW=64; const int iconH=64; const int cellW=iconW+20; const int cellH=iconH+34; int cols=(cr.right-margin*2)/cellW; if(cols<1) cols=1; if(my < cr.bottom-taskbarH){ int col=(mx-margin)/cellW; int row=(my-margin)/cellH; if(col>=0 && row>=0){ int idx=row*cols+col; if(idx>=0 && idx<(int)g_items.size()){ uint64_t now=nowMs(); if(g_lastItemIndex==idx && (now-g_lastItemClickTicks)<450){ launchAction(g_items[idx].action); } else { for(auto &di: g_items) di.selected=false; g_items[idx].selected=true; g_lastItemIndex=idx; g_lastItemClickTicks=now; } requestRepaint(); return 0; } } }
+            const int margin=20; const int iconW=56; const int iconH=56; const int cellW=iconW+28; const int cellH=iconH+38; int cols=(cr.right-margin*2)/cellW; if(cols<1) cols=1; if(my < cr.bottom-taskbarH){ int col=(mx-margin)/cellW; int row=(my-margin)/cellH; if(col>=0 && row>=0){ int idx=row*cols+col; if(idx>=0 && idx<(int)g_items.size()){ uint64_t now=nowMs(); if(g_lastItemIndex==idx && (now-g_lastItemClickTicks)<450){ launchAction(g_items[idx].action); } else { for(auto &di: g_items) di.selected=false; g_items[idx].selected=true; g_lastItemIndex=idx; g_lastItemClickTicks=now; } requestRepaint(); return 0; } } }
             // Taskbar button click (minimize/restore/tombstone)
             uint64_t id=hitTestTaskbarButton(mx,my,cr,taskbarH); if(id){ std::lock_guard<std::mutex> lk(g_lock); auto it=g_windows.find(id); if(it!=g_windows.end()){ WinInfo &w=it->second; if(!w.minimized && !w.tombstoned){ w.tombstoned=true; w.minimized=true; if(g_focus==w.id) g_focus=0; } else { w.tombstoned=false; w.minimized=false; g_focus=w.id; for(auto itZ=g_z.begin(); itZ!=g_z.end(); ++itZ){ if(*itZ==id){ g_z.erase(itZ); break; } } g_z.push_back(id); } } requestRepaint(); return 0; }
             // pass to widget handling and general mouse handling
             Compositor::handleMouse(mx,my,true,false); publishOut(MsgType::MT_InputMouse,std::to_string(mx)+"|"+std::to_string(my)+"|1|down"); return 0; }
         case WM_RBUTTONDOWN:{ int mx=GET_X_LPARAM(l); int my=GET_Y_LPARAM(l); if(g_startMenuVisible && mx>=g_startMenuRect.left && mx<=g_startMenuRect.right && my>=g_startMenuRect.top && my<=g_startMenuRect.bottom){ int idx=(my - (g_startMenuRect.top+4))/20; if(idx>=0 && idx<(int)g_items.size()){ if(g_items[idx].pinned) unpinAction(g_items[idx].action); else pinAction(g_items[idx].action); requestRepaint(); return 0; } }
-            // Desktop icon right-click pin/unpin
-            RECT cr; GetClientRect(h,&cr); int taskbarH=32; if(my < cr.bottom-taskbarH){ const int margin=16; const int iconW=64; const int cellW=iconW+20; const int cellH=64+34; int cols=(cr.right-margin*2)/cellW; if(cols<1) cols=1; int col=(mx-margin)/cellW; int row=(my-margin)/cellH; if(col>=0 && row>=0){ int idx=row*cols+col; if(idx>=0 && idx<(int)g_items.size()){ if(g_items[idx].pinned) unpinAction(g_items[idx].action); else pinAction(g_items[idx].action); requestRepaint(); return 0; } } }
+            // Desktop icon right-click pin/unpin or taskbar right-click menu
+            RECT cr; GetClientRect(h,&cr); int taskbarH=40;
+            // Taskbar right-click: show context menu
+            if(my >= cr.bottom - taskbarH){
+                const int tmItemH = 28; const int tmItemCount = 3; const int tmPad = 6;
+                int tmH = tmItemH * tmItemCount + tmPad * 2;
+                int tmW = 180;
+                int tmX = mx; int tmY = cr.bottom - taskbarH - tmH;
+                if(tmX + tmW > cr.right) tmX = cr.right - tmW - 2;
+                if(tmY < 0) tmY = 0;
+                g_taskbarMenuRect = { tmX, tmY, tmX + tmW, tmY + tmH };
+                g_taskbarMenuVisible = true;
+                g_taskbarMenuSel = -1;
+                g_startMenuVisible = false;
+                requestRepaint(); return 0;
+            }
+            if(my < cr.bottom-taskbarH){ const int margin=20; const int iconW=56; const int cellW=iconW+28; const int cellH=56+38; int cols=(cr.right-margin*2)/cellW; if(cols<1) cols=1; int col=(mx-margin)/cellW; int row=(my-margin)/cellH; if(col>=0 && row>=0){ int idx=row*cols+col; if(idx>=0 && idx<(int)g_items.size()){ if(g_items[idx].pinned) unpinAction(g_items[idx].action); else pinAction(g_items[idx].action); requestRepaint(); return 0; } }
+                // Desktop right-click context menu (no icon hit)
+                RightClickMenu::Show(mx, my);
+                requestRepaint();
+                return 0;
+            }
         } break;
         case WM_LBUTTONUP:{ int mx=GET_X_LPARAM(l); int my=GET_Y_LPARAM(l); Compositor::handleMouse(mx,my,false,true); publishOut(MsgType::MT_InputMouse,std::to_string(mx)+"|"+std::to_string(my)+"|1|up"); } break;
         case WM_MOUSEMOVE:{ int mx=GET_X_LPARAM(l); int my=GET_Y_LPARAM(l); Compositor::handleMouse(mx,my,false,false); publishOut(MsgType::MT_InputMouse,std::to_string(mx)+"|"+std::to_string(my)+"|0|move"); } break;
         case WM_KEYDOWN: case WM_SYSKEYDOWN: {
             int key=(int)w;
+            // Taskbar menu keyboard handling
+            if(g_taskbarMenuVisible){
+                if(key==VK_ESCAPE){ g_taskbarMenuVisible=false; requestRepaint(); return 0; }
+                const int tmItemCount=3;
+                if(key==VK_UP){ if(g_taskbarMenuSel>0) g_taskbarMenuSel--; else g_taskbarMenuSel=tmItemCount-1; requestRepaint(); return 0; }
+                if(key==VK_DOWN){ if(g_taskbarMenuSel<tmItemCount-1) g_taskbarMenuSel++; else g_taskbarMenuSel=0; requestRepaint(); return 0; }
+                if(key==VK_RETURN && g_taskbarMenuSel>=0){
+                    int sel=g_taskbarMenuSel; g_taskbarMenuVisible=false;
+                    if(sel==0) launchAction("TaskManager");
+                    else if(sel==1) publishOut(MsgType::MT_WidgetEvt, "REBOOT");
+                    else if(sel==2) publishOut(MsgType::MT_WidgetEvt, "LOGOFF");
+                    requestRepaint(); return 0;
+                }
+            }
             // start-menu navigation handled here
             if(g_startMenuVisible){
                 int maxItems = g_startMenuAllProgs ? (int)g_startMenuAllProgsSorted.size() : (int)g_items.size();
@@ -442,7 +642,7 @@ namespace gxos { namespace gui {
     }
     void Compositor::emitWidgetEvt(uint64_t winId, int wid, const std::string& evt, const std::string& value){ publishOut(MsgType::MT_WidgetEvt,std::to_string(winId)+"|"+std::to_string(wid)+"|"+evt+"|"+value); }
 
-    void Compositor::handleMouse(int mx, int my, bool down, bool up){ std::lock_guard<std::mutex> lk(g_lock); const int titleBarH=24; const int gripSize=12; const int taskbarH=32; RECT cr{0,0,1024,768};
+    void Compositor::handleMouse(int mx, int my, bool down, bool up){ std::lock_guard<std::mutex> lk(g_lock); const int titleBarH=24; const int gripSize=12; const int taskbarH=40; RECT cr{0,0,1024,768};
 #ifdef _WIN32
         if(g_hwnd) GetClientRect(g_hwnd,&cr);
 #endif
@@ -525,7 +725,7 @@ namespace gxos { namespace gui {
         case MsgType::MT_Minimize:{ uint64_t id=0; try{ id=std::stoull(s);}catch(...){ } { std::lock_guard<std::mutex> lk(g_lock); auto wit=g_windows.find(id); if(wit!=g_windows.end()){ wit->second.minimized=true; wit->second.tombstoned=true; if(g_focus==id) g_focus=0; } } invalidate(id); } break;
         case MsgType::MT_ShowDesktopToggle:{ if(!g_showDesktopActive){ g_showDesktopMinimized.clear(); for(uint64_t id: g_z){ auto it=g_windows.find(id); if(it!=g_windows.end() && !it->second.minimized){ it->second.minimized=true; it->second.tombstoned=true; g_showDesktopMinimized.push_back(id);} } g_focus=0; g_showDesktopActive=true; } else { for(uint64_t id: g_showDesktopMinimized){ auto it=g_windows.find(id); if(it!=g_windows.end()){ it->second.minimized=false; it->second.tombstoned=false; } } g_showDesktopMinimized.clear(); g_showDesktopActive=false; } invalidate(0); } break;
         case MsgType::MT_StateSave:{ std::string path=s; std::vector<SavedWindow> sw; { std::lock_guard<std::mutex> lk(g_lock); for(size_t i=0;i<g_z.size();++i){ uint64_t id=g_z[i]; auto it=g_windows.find(id); if(it==g_windows.end()) continue; const WinInfo &w=it->second; SavedWindow rec; rec.id=w.id; rec.title=w.title; rec.x=w.x; rec.y=w.y; rec.w=w.w; rec.h=w.h; rec.minimized=w.minimized; rec.maximized=w.maximized; rec.z=(int)i; rec.focused=(g_focus==w.id); rec.snap=w.snapState; sw.push_back(rec);} } std::string err; if(!DesktopState::Save(path, sw, err)) publishOut(MsgType::MT_WidgetEvt,std::string("STATE_SAVE_ERR|")+err); else publishOut(MsgType::MT_WidgetEvt,std::string("STATE_SAVE_OK|")+path); } break;
-        case MsgType::MT_StateLoad:{ std::string path=s; std::vector<SavedWindow> sw; std::string err; if(!DesktopState::Load(path, sw, err)){ publishOut(MsgType::MT_WidgetEvt,std::string("STATE_LOAD_ERR|")+err); } else { { std::lock_guard<std::mutex> lk(g_lock); g_windows.clear(); g_z.clear(); g_focus=0; std::sort(sw.begin(), sw.end(), [](const SavedWindow&a,const SavedWindow&b){ return a.z<b.z; }); for(auto &w: sw){ uint64_t id=s_nextWinId.fetch_add(1); WinInfo wi{ id, w.title, w.x, w.y, w.w, w.h, {}, {}, {}, w.minimized, w.maximized, 0,0,0,0, true, w.snap }; if(wi.maximized){ RECT crL{0,0,1024,768}; if(g_hwnd) GetClientRect(g_hwnd,&crL); int taskbarY=crL.bottom-32; wi.x=crL.left; wi.y=crL.top; wi.w=crL.right-crL.left; wi.h=taskbarY-crL.top; } g_windows[id]=wi; g_z.push_back(id); if(w.focused && !wi.minimized) g_focus=id; } } publishOut(MsgType::MT_WidgetEvt,std::string("STATE_LOAD_OK|")+path); invalidate(0); } } break;
+        case MsgType::MT_StateLoad:{ std::string path=s; std::vector<SavedWindow> sw; std::string err; if(!DesktopState::Load(path, sw, err)){ publishOut(MsgType::MT_WidgetEvt,std::string("STATE_LOAD_ERR|")+err); } else { { std::lock_guard<std::mutex> lk(g_lock); g_windows.clear(); g_z.clear(); g_focus=0; std::sort(sw.begin(), sw.end(), [](const SavedWindow&a,const SavedWindow&b){ return a.z<b.z; }); for(auto &w: sw){ uint64_t id=s_nextWinId.fetch_add(1); WinInfo wi{ id, w.title, w.x, w.y, w.w, w.h, {}, {}, {}, w.minimized, w.maximized, 0,0,0,0, true, w.snap }; if(wi.maximized){ RECT crL{0,0,1024,768}; if(g_hwnd) GetClientRect(g_hwnd,&crL); int taskbarY=crL.bottom-40; wi.x=crL.left; wi.y=crL.top; wi.w=crL.right-crL.left; wi.h=taskbarY-crL.top; } g_windows[id]=wi; g_z.push_back(id); if(w.focused && !wi.minimized) g_focus=id; } } publishOut(MsgType::MT_WidgetEvt,std::string("STATE_LOAD_OK|")+path); invalidate(0); } } break;
         case MsgType::MT_Invalidate:{ invalidate(0); } break;
         case MsgType::MT_Ping:{ publishOut(MsgType::MT_Ping,s); } break;
         case MsgType::MT_DesktopLaunch:{ launchAction(s); } break;
@@ -564,7 +764,7 @@ namespace gxos { namespace gui {
 #ifdef _WIN32
                     if(g_hwnd) GetClientRect(g_hwnd,&crL);
 #endif
-                    int taskbarY=crL.bottom-32; wi.x=crL.left; wi.y=crL.top; wi.w=crL.right-crL.left; wi.h=taskbarY-crL.top; } g_windows[id]=wi; g_z.push_back(id); if(w.focused && !wi.minimized) g_focus=id; } legacyLoaded=true; } }
+                    int taskbarY=crL.bottom-40; wi.x=crL.left; wi.y=crL.top; wi.w=crL.right-crL.left; wi.h=taskbarY-crL.top; } g_windows[id]=wi; g_z.push_back(id); if(w.focused && !wi.minimized) g_focus=id; } legacyLoaded=true; } }
         bool running=true; while(running){ pumpEvents(); ipc::Message m; if(ipc::Bus::pop(kGuiChanIn,m,30)){ if(m.type==(uint32_t)MsgType::MT_Ping && m.data.size()==3 && std::string(m.data.begin(),m.data.end())=="bye") running=false; else handleMessage(m); } }
         DesktopConfigData outCfg=g_cfg; { std::lock_guard<std::mutex> lk(g_lock); outCfg.windows.clear(); for(size_t i=0;i<g_z.size();++i){ uint64_t id=g_z[i]; auto it=g_windows.find(id); if(it==g_windows.end()) continue; const WinInfo &w=it->second; DesktopWindowRec rec; rec.id=w.id; rec.title=w.title; rec.x=w.x; rec.y=w.y; rec.w=w.w; rec.h=w.h; rec.minimized=w.minimized; rec.maximized=w.maximized; rec.z=(int)i; rec.focused=(g_focus==w.id); rec.snap=w.snapState; outCfg.windows.push_back(rec);} }
         std::string cerr; DesktopConfig::Save("desktop.json", outCfg, cerr); if(!legacyLoaded){ std::vector<SavedWindow> sw; { std::lock_guard<std::mutex> lk(g_lock); for(auto &kv: g_windows){ sw.push_back(SavedWindow{ kv.second.id, kv.second.title, kv.second.x, kv.second.y, kv.second.w, kv.second.h, kv.second.minimized, kv.second.maximized }); } } std::string err; DesktopState::Save("desktop.state", sw, err); }
@@ -573,5 +773,84 @@ namespace gxos { namespace gui {
 #endif
         Logger::write(LogLevel::Info,"Compositor service stopping"); return 0; }
     uint64_t Compositor::start(){ ProcessSpec spec{"compositor", Compositor::main}; return ProcessTable::spawn(spec,{"compositor"}); }
+
+#ifdef _WIN32
+    void Compositor::drawTaskbarSearchBox(HDC dc, int x, int y, int w, int h) {
+        // Search box background
+        HBRUSH bg = CreateSolidBrush(RGB(50, 52, 62));
+        RECT r = { x, y, x + w, y + h };
+        FillRect(dc, &r, bg);
+        DeleteObject(bg);
+        // Border
+        HPEN border = CreatePen(PS_SOLID, 1, RGB(75, 78, 90));
+        HGDIOBJ oldPen = SelectObject(dc, border);
+        HGDIOBJ oldBr = SelectObject(dc, GetStockObject(NULL_BRUSH));
+        Rectangle(dc, x, y, x + w, y + h);
+        SelectObject(dc, oldPen);
+        SelectObject(dc, oldBr);
+        DeleteObject(border);
+        // Magnifying glass icon (small circle + line)
+        int iconX = x + 8;
+        int iconY = y + (h / 2);
+        HPEN iconPen = CreatePen(PS_SOLID, 1, RGB(140, 145, 160));
+        HGDIOBJ oP = SelectObject(dc, iconPen);
+        HGDIOBJ oB = SelectObject(dc, GetStockObject(NULL_BRUSH));
+        Ellipse(dc, iconX - 4, iconY - 4, iconX + 4, iconY + 4);
+        MoveToEx(dc, iconX + 3, iconY + 3, nullptr);
+        LineTo(dc, iconX + 7, iconY + 7);
+        SelectObject(dc, oP);
+        SelectObject(dc, oB);
+        DeleteObject(iconPen);
+        // Placeholder text
+        SetBkMode(dc, TRANSPARENT);
+        SetTextColor(dc, RGB(100, 105, 120));
+        const char* placeholder = "Search apps...";
+        TextOutA(dc, x + 20, y + (h - 14) / 2, placeholder, (int)strlen(placeholder));
+    }
+
+    void Compositor::drawSystemTray(HDC dc, RECT cr, int taskbarH) {
+        // System tray is drawn to the left of the clock area
+        // Calculate clock width first to position tray
+        std::time_t now = std::time(nullptr);
+        std::tm ltBuf{};
+        localtime_s(&ltBuf, &now);
+        char timeBuf[16];
+        std::snprintf(timeBuf, sizeof(timeBuf), "%02d:%02d", ltBuf.tm_hour, ltBuf.tm_min);
+        SIZE timeSz;
+        GetTextExtentPoint32A(dc, timeBuf, (int)strlen(timeBuf), &timeSz);
+        int clockW = timeSz.cx + 32; // approximate clock area width
+        int trayX = cr.right - clockW - SystemTray::Width() - 16;
+        int trayY = cr.bottom - taskbarH;
+        SystemTray::Draw(dc, trayX, trayY, taskbarH);
+    }
+
+    void Compositor::drawTaskbarTooltip(HDC dc, int x, int y, const char* text) {
+        if (!text || !text[0]) return;
+        SIZE sz;
+        GetTextExtentPoint32A(dc, text, (int)strlen(text), &sz);
+        int pad = 6;
+        int tipW = sz.cx + pad * 2;
+        int tipH = sz.cy + pad * 2;
+        // Position above the given point
+        int tipX = x - tipW / 2;
+        int tipY = y - tipH - 4;
+        if (tipX < 0) tipX = 0;
+        if (tipY < 0) tipY = 0;
+        RECT tipR = { tipX, tipY, tipX + tipW, tipY + tipH };
+        HBRUSH bg = CreateSolidBrush(RGB(55, 55, 65));
+        FillRect(dc, &tipR, bg);
+        DeleteObject(bg);
+        HPEN border = CreatePen(PS_SOLID, 1, RGB(100, 105, 120));
+        HGDIOBJ oldPen = SelectObject(dc, border);
+        HGDIOBJ oldBr = SelectObject(dc, GetStockObject(NULL_BRUSH));
+        Rectangle(dc, tipR.left, tipR.top, tipR.right, tipR.bottom);
+        SelectObject(dc, oldPen);
+        SelectObject(dc, oldBr);
+        DeleteObject(border);
+        SetBkMode(dc, TRANSPARENT);
+        SetTextColor(dc, RGB(220, 220, 230));
+        TextOutA(dc, tipX + pad, tipY + pad, text, (int)strlen(text));
+    }
+#endif
 }
 } // namespace gxos::gui

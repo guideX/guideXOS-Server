@@ -1,0 +1,7 @@
+﻿C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Microsoft\NuGet\17.0\Microsoft.NuGet.targets(198,5): error : Sequence contains no elements
+C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Microsoft\NuGet\17.0\Microsoft.NuGet.targets(198,5): error :    at System.Linq.Enumerable.First[TSource](IEnumerable`1 source)
+C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Microsoft\NuGet\17.0\Microsoft.NuGet.targets(198,5): error :    at Microsoft.NuGet.Build.Tasks.ResolveNuGetPackageAssets.GiveErrorForMissingFramework()
+C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Microsoft\NuGet\17.0\Microsoft.NuGet.targets(198,5): error :    at Microsoft.NuGet.Build.Tasks.ResolveNuGetPackageAssets.GetTargetOrAttemptFallback(JObject lockFile, Boolean needsRuntimeIdentifier)
+C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Microsoft\NuGet\17.0\Microsoft.NuGet.targets(198,5): error :    at Microsoft.NuGet.Build.Tasks.ResolveNuGetPackageAssets.GetReferences(JObject lockFile)
+C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Microsoft\NuGet\17.0\Microsoft.NuGet.targets(198,5): error :    at Microsoft.NuGet.Build.Tasks.ResolveNuGetPackageAssets.ExecuteCore()
+C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Microsoft\NuGet\17.0\Microsoft.NuGet.targets(198,5): error :    at Microsoft.NuGet.Build.Tasks.ResolveNuGetPackageAssets.Execute()

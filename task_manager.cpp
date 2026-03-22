@@ -26,6 +26,11 @@ namespace gxos { namespace apps {
     uint64_t TaskManager::s_peakMemory = 0;
     uint64_t TaskManager::s_tasksExecuted = 0;
     
+    int TaskManager::s_currentTab = 0;
+    int TaskManager::s_cpuPct = 0;
+    int TaskManager::s_memPct = 0;
+    int TaskManager::s_perfCategoryIndex = 0;
+    
     uint64_t TaskManager::Launch() {
         ProcessSpec spec{"task_manager", TaskManager::main};
         return ProcessTable::spawn(spec, {"task_manager"});
@@ -43,6 +48,10 @@ namespace gxos { namespace apps {
             s_lastRefreshTicks = 0;
             s_lastKeyCode = 0;
             s_keyDown = false;
+            s_currentTab = 0;
+            s_cpuPct = 0;
+            s_memPct = 0;
+            s_perfCategoryIndex = 0;
             
             // Get initial system stats
             s_totalMemory = 512 * 1024 * 1024; // 512MB (from platform info)
@@ -95,6 +104,11 @@ namespace gxos { namespace apps {
                                     // Control buttons
                                     addButton(1, 4, 4, 80, 20, "Refresh");
                                     addButton(2, 88, 4, 100, 20, "End Process");
+                                    
+                                    // Tab buttons (matching Legacy TaskManager tabs)
+                                    addButton(10, 4, 28, 120, 22, "Processes");
+                                    addButton(11, 128, 28, 120, 22, "Performance");
+                                    addButton(12, 252, 28, 120, 22, "Tombstoned");
                                     
                                     // Draw initial content
                                     updateHeader();
@@ -176,6 +190,18 @@ namespace gxos { namespace apps {
                                                 break;
                                             case 2: // End Process
                                                 endSelectedProcess();
+                                                break;
+                                            case 10: // Processes tab
+                                                s_currentTab = 0;
+                                                updateDisplay();
+                                                break;
+                                            case 11: // Performance tab
+                                                s_currentTab = 1;
+                                                updateDisplay();
+                                                break;
+                                            case 12: // Tombstoned tab
+                                                s_currentTab = 2;
+                                                updateDisplay();
                                                 break;
                                         }
                                     }
@@ -307,6 +333,38 @@ namespace gxos { namespace apps {
     }
     
     void TaskManager::handleKeyPress(int keyCode) {
+        // Tab key - cycle tabs
+        if (keyCode == 9) {
+            s_currentTab = (s_currentTab + 1) % kTabCount;
+            updateDisplay();
+            return;
+        }
+        
+        // Tab-specific handling
+        if (s_currentTab == 1) {
+            // Performance tab: Left/Right to change category
+            if (keyCode == 37) { // Left
+                if (s_perfCategoryIndex > 0) s_perfCategoryIndex--;
+                updateDisplay();
+                return;
+            }
+            if (keyCode == 39) { // Right
+                if (s_perfCategoryIndex < 1) s_perfCategoryIndex++;
+                updateDisplay();
+                return;
+            }
+            // F5 still refreshes
+            if (keyCode == 116) { refreshProcessList(); updateDisplay(); updateStatusBar(); }
+            return;
+        }
+        
+        if (s_currentTab == 2) {
+            // Tombstoned tab: F5 refreshes
+            if (keyCode == 116) { refreshProcessList(); updateDisplay(); updateStatusBar(); }
+            return;
+        }
+        
+        // Processes tab (s_currentTab == 0)
         // Up arrow - move selection up
         if (keyCode == 38) {
             if (s_selectedIndex > 0) {
@@ -413,55 +471,193 @@ namespace gxos { namespace apps {
     void TaskManager::updateDisplay() {
         const char* kGuiChanIn = "gui.input";
         
-        // Update header with latest stats
-        updateHeader();
+        // Clear previous text by sending a clear-texts message
+        {
+            ipc::Message clr;
+            clr.type = (uint32_t)MsgType::MT_DrawText;
+            std::ostringstream oss;
+            oss << s_windowId << "|\x01CLEAR";
+            auto payload = oss.str();
+            clr.data.assign(payload.begin(), payload.end());
+            ipc::Bus::publish(kGuiChanIn, std::move(clr), false);
+        }
         
-        // Calculate visible processes (12 visible items)
-        int visibleCount = 12;
-        int startIndex = s_scrollOffset;
-        int endIndex = std::min((int)s_processes.size(), startIndex + visibleCount);
-        
-        // Draw process list
-        for (int i = startIndex; i < endIndex; i++) {
-            const ProcessInfo& proc = s_processes[i];
-            
+        // Tab header line
+        {
             ipc::Message msg;
             msg.type = (uint32_t)MsgType::MT_DrawText;
-            
             std::ostringstream oss;
             oss << s_windowId << "|";
-            
-            // Selection indicator
-            if (i == s_selectedIndex) {
-                oss << "> ";
-            } else {
-                oss << "  ";
+            const char* tabNames[] = { "Processes", "Performance", "Tombstoned" };
+            for (int t = 0; t < kTabCount; t++) {
+                if (t == s_currentTab) oss << "[" << tabNames[t] << "]";
+                else oss << " " << tabNames[t] << " ";
+                if (t < kTabCount - 1) oss << "  ";
             }
-            
-            // PID (5 chars)
-            oss << std::setw(5) << std::right << proc.pid << " ";
-            
-            // Name (18 chars)
-            std::string name = proc.name;
-            if (name.length() > 18) {
-                name = name.substr(0, 15) + "...";
-            }
-            oss << std::setw(18) << std::left << name << " ";
-            
-            // Status (10 chars)
-            std::string status = proc.running ? "Running" : ("Stopped:" + std::to_string(proc.exitCode));
-            if (status.length() > 10) {
-                status = status.substr(0, 10);
-            }
-            oss << std::setw(10) << std::left << status << " ";
-            
-            // Memory (in KB)
-            oss << (proc.memoryBytes / 1024) << " KB";
-            
-            std::string payload = oss.str();
+            auto payload = oss.str();
             msg.data.assign(payload.begin(), payload.end());
             ipc::Bus::publish(kGuiChanIn, std::move(msg), false);
         }
+        
+        if (s_currentTab == 0) {
+            // Processes tab
+            updateHeader();
+            
+            int visibleCount = 12;
+            int startIndex = s_scrollOffset;
+            int endIndex = std::min((int)s_processes.size(), startIndex + visibleCount);
+            
+            for (int i = startIndex; i < endIndex; i++) {
+                const ProcessInfo& proc = s_processes[i];
+                
+                ipc::Message msg;
+                msg.type = (uint32_t)MsgType::MT_DrawText;
+                
+                std::ostringstream oss;
+                oss << s_windowId << "|";
+                
+                if (i == s_selectedIndex) oss << "> ";
+                else oss << "  ";
+                
+                oss << std::setw(5) << std::right << proc.pid << " ";
+                
+                std::string name = proc.name;
+                if (name.length() > 18) name = name.substr(0, 15) + "...";
+                oss << std::setw(18) << std::left << name << " ";
+                
+                std::string status = proc.running ? "Running" : ("Stopped:" + std::to_string(proc.exitCode));
+                if (status.length() > 10) status = status.substr(0, 10);
+                oss << std::setw(10) << std::left << status << " ";
+                
+                oss << (proc.memoryBytes / 1024) << " KB";
+                
+                auto payload = oss.str();
+                msg.data.assign(payload.begin(), payload.end());
+                ipc::Bus::publish(kGuiChanIn, std::move(msg), false);
+            }
+            
+            updateStatusBar();
+        } else if (s_currentTab == 1) {
+            updatePerformanceTab();
+        } else if (s_currentTab == 2) {
+            updateTombstonedTab();
+        }
+    }
+    
+    void TaskManager::updatePerformanceTab() {
+        const char* kGuiChanIn = "gui.input";
+        
+        // Compute live percentages
+        s_usedMemory = Allocator::bytesInUse();
+        s_peakMemory = Allocator::peakBytes();
+        uint64_t totalMem = s_totalMemory > 0 ? s_totalMemory : 1;
+        s_memPct = (int)(s_usedMemory * 100 / totalMem);
+        if (s_memPct > 100) s_memPct = 100;
+        
+        // CPU approximation from scheduler tasks
+        s_tasksExecuted = Scheduler::tasksExecuted();
+        s_cpuPct = (int)(s_tasksExecuted % 100); // synthetic
+        
+        auto sendLine = [&](const std::string& text) {
+            ipc::Message msg;
+            msg.type = (uint32_t)MsgType::MT_DrawText;
+            std::string payload = std::to_string(s_windowId) + "|" + text;
+            msg.data.assign(payload.begin(), payload.end());
+            ipc::Bus::publish(kGuiChanIn, std::move(msg), false);
+        };
+        
+        // Performance overview
+        sendLine("--- Performance ---");
+        sendLine("");
+        
+        // Category labels (matching Legacy: CPU, Memory)
+        const char* catLabels[] = { "CPU", "Memory" };
+        int catValues[] = { s_cpuPct, s_memPct };
+        
+        // Navigation hint
+        {
+            std::ostringstream oss;
+            oss << "Category: ";
+            for (int c = 0; c < 2; c++) {
+                if (c == s_perfCategoryIndex) oss << "[" << catLabels[c] << "]";
+                else oss << " " << catLabels[c] << " ";
+                if (c < 1) oss << "  ";
+            }
+            oss << "    (Left/Right to switch)";
+            sendLine(oss.str());
+        }
+        sendLine("");
+        
+        // ASCII bar chart for selected category
+        int val = catValues[s_perfCategoryIndex];
+        {
+            std::ostringstream oss;
+            oss << catLabels[s_perfCategoryIndex] << ": " << val << "%";
+            sendLine(oss.str());
+        }
+        {
+            // 40-char bar
+            int filled = val * 40 / 100;
+            std::string bar = "[";
+            for (int b = 0; b < 40; b++) bar += (b < filled ? '#' : '.');
+            bar += "]";
+            sendLine(bar);
+        }
+        sendLine("");
+        
+        // Detail stats for selected category
+        if (s_perfCategoryIndex == 0) {
+            // CPU details
+            sendLine("Utilization: " + std::to_string(s_cpuPct) + "%");
+            sendLine("Processes: " + std::to_string(s_processes.size()));
+            sendLine("Tasks Executed: " + std::to_string(s_tasksExecuted));
+        } else {
+            // Memory details
+            std::ostringstream oss;
+            oss << "In Use: " << (s_usedMemory / 1024) << " KB / " << (s_totalMemory / 1024) << " KB";
+            sendLine(oss.str());
+            sendLine("Peak: " + std::to_string(s_peakMemory / 1024) + " KB");
+            sendLine("Utilization: " + std::to_string(s_memPct) + "%");
+        }
+        
+        sendLine("");
+        sendLine("Auto-refresh every 2s | F5=Refresh | Tab=Switch Tab");
+    }
+    
+    void TaskManager::updateTombstonedTab() {
+        const char* kGuiChanIn = "gui.input";
+        
+        auto sendLine = [&](const std::string& text) {
+            ipc::Message msg;
+            msg.type = (uint32_t)MsgType::MT_DrawText;
+            std::string payload = std::to_string(s_windowId) + "|" + text;
+            msg.data.assign(payload.begin(), payload.end());
+            ipc::Bus::publish(kGuiChanIn, std::move(msg), false);
+        };
+        
+        sendLine("--- Tombstoned Apps ---");
+        sendLine("");
+        sendLine("   PID  Name               Status");
+        
+        int count = 0;
+        for (const auto& proc : s_processes) {
+            if (!proc.running) {
+                std::ostringstream oss;
+                oss << std::setw(5) << std::right << proc.pid << "  "
+                    << std::setw(18) << std::left << proc.name << " "
+                    << "Stopped:" << proc.exitCode;
+                sendLine(oss.str());
+                count++;
+            }
+        }
+        
+        if (count == 0) {
+            sendLine("");
+            sendLine("  No tombstoned apps.");
+        }
+        
+        sendLine("");
+        sendLine(std::to_string(count) + " tombstoned | F5=Refresh | Tab=Switch Tab");
     }
     
     void TaskManager::updateStatusBar() {

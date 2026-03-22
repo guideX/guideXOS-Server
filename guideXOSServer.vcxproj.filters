@@ -159,6 +159,21 @@
     <ClInclude Include="module_manager.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="message_box.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="open_dialog.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="right_click_menu.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="welcome.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\core\include\kernel\desktop.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="allocator.cpp">
@@ -287,9 +302,23 @@
     <ClCompile Include="module_manager.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="message_box.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="open_dialog.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="right_click_menu.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="welcome.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\core\desktop.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <None Include="docs\NEXT_STEPS.md" />
     <None Include="kernel\arch\amd64\boot.asm">
       <Filter>Source Files</Filter>
     </None>
@@ -362,32 +391,11 @@
     </None>
     <None Include="Directory.Build.targets" />
     <None Include="ARCHITECTURE.md" />
-    <None Include="README.md" />
-    <None Include="INTEGRATION.md" />
-    <None Include="INTEGRATION_SUMMARY.md" />
-    <None Include="QUICK_REFERENCE.md" />
-    <None Include="BOOTLOADER_COMPLIANCE.md" />
-    <None Include="MINIMAL_KERNEL_SPEC.md" />
-    <None Include="COMPLIANCE_SUMMARY.md" />
-    <None Include="COMPLIANCE_CHECKLIST.md" />
-    <None Include="SERVER_COMPLIANCE.md" />
-    <None Include="INTEGRATION_READINESS.md" />
-    <None Include="REPOSITORY_CLASSIFICATION.md" />
-    <None Include="DOCUMENTATION_UPDATE.md" />
     <None Include="build-uefi.ps1" />
     <None Include="run-uefi.sh" />
-    <None Include="UEFI_BOOT.md" />
-    <None Include="UEFI_INTEGRATION_SUMMARY.md" />
-    <None Include="UEFI_QUICK_REF.md" />
-    <None Include="UEFI_BOOT_CHECKLIST.md" />
-    <None Include="BUILD_ERRORS_FIX.md" />
     <None Include="fix-trampoline.ps1" />
-    <None Include="BUILD_SUCCESS.md" />
     <None Include="run-qemu.bat">
       <Filter>Source Files</Filter>
     </None>
-    <None Include="QUICK_START.md" />
-    <None Include="BUILD_SYSTEM_READY.md" />
-    <None Include="HOW_TO_BUILD.md" />
   </ItemGroup>
 </Project>

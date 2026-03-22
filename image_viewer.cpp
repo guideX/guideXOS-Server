@@ -61,8 +61,8 @@ int ImageViewer::main(int argc, char** argv) {
 
     // Try to "load" image metadata from VFS
     if (!s_filePath.empty()) {
-        std::string content;
-        if (Vfs::readFile(s_filePath, content)) {
+        std::vector<uint8_t> content;
+        if (Vfs::instance().readFile(s_filePath, content)) {
             // In the real kernel, this would be raw pixel data.
             // For the user-mode server stub, record that a file was loaded.
             s_originalW = 400;

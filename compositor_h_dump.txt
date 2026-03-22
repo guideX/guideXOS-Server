@@ -11,9 +11,6 @@
 #include "logger.h"
 #include "desktop_config.h"
 #include "vnc_server.h"
-#include "system_tray.h"
-#include "desktop_wallpaper.h"
-#include "bitmap_font.h"
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -72,9 +69,6 @@ namespace gxos { namespace gui {
         static void loadWallpaper(const std::string& path);
         static void freeWallpaper();
         static void drawDesktopIcons(HDC dc, RECT cr);
-        static void drawTaskbarSearchBox(HDC dc, int x, int y, int w, int h);
-        static void drawSystemTray(HDC dc, RECT cr, int taskbarH);
-        static void drawTaskbarTooltip(HDC dc, int x, int y, const char* text);
         static LRESULT CALLBACK WndProc(HWND h, UINT msg, WPARAM w, LPARAM l);
 #endif
         static std::atomic<uint64_t> s_nextWinId;

@@ -30,10 +30,10 @@
 #include "include/kernel/framebuffer.h"
 #include "include/kernel/multiboot.h"
 #include "include/kernel/process.h"
+#include "include/kernel/desktop.h"
 
 // Forward declarations
 void init_boot_splash();
-void launch_init_process();
 
 // Include BootInfo structure from bootloader
 #include "../../guideXOSBootLoader/guidexOSBootInfo.h"
@@ -99,12 +99,13 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         // - Keyboard, Mouse, Timer
         // - Filesystem
         
-        // Launch guideXOSServer as first user process
-        launch_init_process();
+        // Draw the desktop environment
+        // (Temporary kernel-mode desktop until guideXOSServer ELF loader is ready)
+        kernel::desktop::init();
+        kernel::desktop::draw();
         
-        // Main kernel loop - just schedule processes
+        // Main kernel loop - idle
         while (1) {
-            kernel::process::schedule();
             kernel::arch::halt();
         }
     }
@@ -218,55 +219,7 @@ void init_boot_splash()
     }
 }
 
-// Launch the init process (guideXOSServer)
-//
-// IMPORTANT: guideXOSServer is a USER-MODE PROCESS, not kernel code
-// - The server will be loaded from ramdisk as an ELF binary
-// - The server will execute in user mode (ring 3)
-// - The server has NO access to BootInfo or firmware structures
-// - The server requests hardware via syscalls only
-//
-// In a complete system, this would:
-// 1. Load guideXOSServer ELF from ramdisk/filesystem
-// 2. Set up user-mode page tables
-// 3. Create process structure (PID 1)
-// 4. Map necessary resources (framebuffer, etc.)
-// 5. Jump to user mode (ring 3) at server entry point
-void launch_init_process()
-{
-    // TODO: Implement ELF loader
-    // TODO: Load /sbin/guideXOSServer from ramdisk
-    // TODO: Set up user-mode memory mapping
-    // TODO: Create process with user privileges (ring 3)
-    // TODO: Map framebuffer to user address space
-    // TODO: Jump to user mode at server entry point
-    
-    // For now, just display a message indicating we would launch it
-    // The actual desktop UI (compositor, taskbar, windows) belongs in
-    // guideXOSServer (user mode), NOT the kernel
-    
-    // Stub: Clear screen and show "waiting for init" message
-    uint32_t w = kernel::framebuffer::get_width();
-    uint32_t h = kernel::framebuffer::get_height();
-    
-    kernel::framebuffer::clear(0xFF001020); // Dark blue-ish background
-    
-    // Center message area
-    uint32_t msg_w = 500;
-    uint32_t msg_h = 200;
-    uint32_t msg_x = (w - msg_w) / 2;
-    uint32_t msg_y = (h - msg_h) / 2;
-    
-    // Draw message box
-    kernel::framebuffer::fill_rect(msg_x, msg_y, msg_w, msg_h, 0xFF2A2A3A);
-    kernel::framebuffer::draw_line(msg_x, msg_y, msg_x + msg_w, msg_y, 0xFF5A5A7A);
-    kernel::framebuffer::draw_line(msg_x, msg_y + msg_h, msg_x + msg_w, msg_y + msg_h, 0xFF5A5A7A);
-    kernel::framebuffer::draw_line(msg_x, msg_y, msg_x, msg_y + msg_h, 0xFF5A5A7A);
-    kernel::framebuffer::draw_line(msg_x + msg_w, msg_y, msg_x + msg_w, msg_y + msg_h, 0xFF5A5A7A);
-    
-    // TODO: Draw text "Kernel ready - waiting for init process (guideXOSServer)"
-    // TODO: Draw text "ELF loader not yet implemented"
-    
-    // Note: The actual GUI (desktop, taskbar, windows) belongs in guideXOSServer
-    // The kernel only provides this minimal boot UI
-}
+// TODO: Future ELF loader will load guideXOSServer from ramdisk
+// and launch it as PID 1 in user mode (ring 3).
+// For now, the kernel draws the desktop environment directly
+// via kernel::desktop (see desktop.cpp).

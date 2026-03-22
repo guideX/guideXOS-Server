@@ -32,7 +32,6 @@
       <UniqueIdentifier>{df2fd243-6789-abcd-ef01-234567890123}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
-  
   <ItemGroup>
     <ClInclude Include="kernel\core\include\kernel\arch.h">
       <Filter>Header Files\Kernel</Filter>
@@ -46,11 +45,25 @@
     <ClInclude Include="kernel\core\include\kernel\version.h">
       <Filter>Header Files\Kernel</Filter>
     </ClInclude>
+    <ClInclude Include="kernel\core\include\kernel\desktop.h">
+      <Filter>Header Files\Kernel</Filter>
+    </ClInclude>
     <ClInclude Include="kernel\arch\x86\include\arch\x86.h">
       <Filter>Header Files\Architecture</Filter>
     </ClInclude>
+    <ClInclude Include="welcome.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="bitmap_font.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="system_tray.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="desktop_wallpaper.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
-  
   <ItemGroup>
     <ClCompile Include="kernel\core\main.cpp">
       <Filter>Source Files\Core</Filter>
@@ -61,11 +74,19 @@
     <ClCompile Include="kernel\core\arch.cpp">
       <Filter>Source Files\Core</Filter>
     </ClCompile>
+    <ClCompile Include="kernel\core\desktop.cpp">
+      <Filter>Source Files\Core</Filter>
+    </ClCompile>
     <ClCompile Include="kernel\arch\x86\arch.cpp">
       <Filter>Source Files\Architecture\x86</Filter>
     </ClCompile>
+    <ClCompile Include="welcome.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="system_tray.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
-  
   <ItemGroup>
     <None Include="kernel\arch\x86\boot.asm">
       <Filter>Source Files\Architecture\x86</Filter>
