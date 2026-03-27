@@ -10,17 +10,24 @@
 #include "include/kernel/arch.h"
 #include "include/kernel/vga.h"
 #include "include/kernel/framebuffer.h"
-#include "include/kernel/multiboot.h"
 #include "include/kernel/process.h"
 #include "include/kernel/desktop.h"
 #include "include/kernel/interrupts.h"
 #include "include/kernel/ps2mouse.h"
 
-// Include BootInfo structure from bootloader
+#if ARCH_HAS_PIC_8259
+#include "include/kernel/multiboot.h"
+// Include BootInfo structure from bootloader (x86 / amd64 UEFI only)
 #include "../../guideXOSBootLoader/guidexOSBootInfo.h"
+#endif
 
 extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
 {
+#if ARCH_HAS_PIC_8259
+    // ============================================================
+    // x86 / amd64 boot path  —  Multiboot (BIOS) or BootInfo (UEFI)
+    // ============================================================
+
     // Support both Multiboot (legacy) and BootInfo (UEFI) boot
     bool is_multiboot = (boot_magic == 0x2BADB002);
     bool is_bootinfo = false;
@@ -94,6 +101,26 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         
         while (1) { }
     }
+
+#else
+    // ============================================================
+    // Non-x86 boot path  (SPARC, IA-64, ARM, ...)
+    // ============================================================
+    (void)boot_environment;
+    (void)boot_magic;
+
+    // Initialize architecture-specific hardware
+    kernel::interrupts::init();
+
+    // TODO: platform-specific framebuffer discovery goes here.
+    //       For SPARC Sun4m the framebuffer is memory-mapped at an
+    //       address provided by OpenBoot PROM (OBP).
+
+    // Halt loop until drivers are wired up
+    while (1) {
+        kernel::arch::halt();
+    }
+#endif // ARCH_HAS_PIC_8259
 }
 
 

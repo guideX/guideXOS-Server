@@ -1,12 +1,15 @@
 //
-// SPARC Architecture-Specific Code
+// SPARC v8 Architecture-Specific Code
+//
+// Targets SPARC v8 (32-bit, e.g. SPARCstation / Sun4m).
+// No port I/O — all device access is memory-mapped.
 //
 // Copyright (c) 2024 guideX
 //
 
 #pragma once
 
-#include <cstdint>
+#include <kernel/types.h>
 
 namespace kernel {
 namespace arch {

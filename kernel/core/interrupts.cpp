@@ -5,6 +5,8 @@
 // vectors 32-47, and provides IRQ dispatch with handler registration.
 //
 // Supports both 32-bit (x86) and 64-bit (amd64) targets.
+// Non-x86 architectures compile a stub implementation (interrupt
+// controllers differ per platform and will be filled in per-arch).
 //
 // Copyright (c) 2024 guideX
 //
@@ -14,6 +16,12 @@
 
 namespace kernel {
 namespace interrupts {
+
+// ================================================================
+// x86 / amd64  —  IDT + 8259 PIC implementation
+// ================================================================
+
+#if ARCH_HAS_PIC_8259
 
 // ----------------------------------------------------------------
 // IDT structures — architecture-dependent
@@ -289,7 +297,7 @@ static void load_idt()
 #endif
 
 // ----------------------------------------------------------------
-// Public API
+// Public API  (x86 / amd64)
 // ----------------------------------------------------------------
 
 void init()
@@ -323,6 +331,32 @@ void register_irq(uint8_t irq, irq_handler_t handler)
         pic_unmask_irq(irq);
     }
 }
+
+#else // !ARCH_HAS_PIC_8259
+
+// ================================================================
+// Non-x86 stub  —  platform-specific interrupt controllers go here
+// ================================================================
+
+void eoi(uint8_t irq)
+{
+    (void)irq;
+}
+
+void init()
+{
+    // TODO: SPARC trap table / IA-64 IVT init will go here
+    arch::enable_interrupts();
+}
+
+void register_irq(uint8_t irq, irq_handler_t handler)
+{
+    (void)irq;
+    (void)handler;
+    // TODO: wire up platform interrupt controller
+}
+
+#endif // ARCH_HAS_PIC_8259
 
 } // namespace interrupts
 } // namespace kernel

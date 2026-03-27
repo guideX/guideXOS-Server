@@ -15,6 +15,8 @@
 namespace kernel {
 namespace ps2mouse {
 
+#if ARCH_HAS_PS2
+
 // PS/2 controller ports
 static const uint16_t kDataPort    = 0x60;
 static const uint16_t kCommandPort = 0x64;
@@ -247,6 +249,20 @@ uint8_t get_buttons() { return s_buttons; }
 int8_t  get_scroll_delta() { int8_t z = s_scrollZ; s_scrollZ = 0; return z; }
 bool    is_dirty()    { return s_dirty; }
 void    clear_dirty() { s_dirty = false; }
+
+#else // !ARCH_HAS_PS2
+
+// Stub implementation for platforms without PS/2 hardware
+void    init(uint32_t, uint32_t) { }
+void    irq_handler()           { }
+int32_t get_x()                 { return 0; }
+int32_t get_y()                 { return 0; }
+uint8_t get_buttons()           { return 0; }
+int8_t  get_scroll_delta()      { return 0; }
+bool    is_dirty()              { return false; }
+void    clear_dirty()           { }
+
+#endif // ARCH_HAS_PS2
 
 } // namespace ps2mouse
 } // namespace kernel

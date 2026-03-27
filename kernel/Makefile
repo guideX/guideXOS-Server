@@ -51,7 +51,7 @@ CFLAGS += -Ikernel/core/include -Ikernel/arch/$(ARCH)/include
 # Append architecture-specific flags
 CFLAGS += $(ARCH_CFLAGS)
 
-# Linker flags - link to PE format first, then convert to ELF64
+# Linker flags
 LDFLAGS := -T kernel/arch/$(ARCH)/linker.ld -nostdlib $(ARCH_LDFLAGS)
 
 # Source files
@@ -72,14 +72,22 @@ ALL_OBJS := $(CORE_OBJS) $(ARCH_OBJS) $(ASM_OBJS)
 
 all: $(KERNEL)
 
-# Step 1: Link to PE format
+# ----------------------------------------------------------------
+# Link step — architecture-dependent
+#
+# amd64 (MinGW): link to PE, then convert PE ? ELF64 with objcopy
+# Everything else: linker outputs native ELF directly
+# ----------------------------------------------------------------
+
+ifeq ($(ARCH),amd64)
+
+# Step 1: Link to PE format (amd64 / MinGW)
 $(KERNEL_PE): $(ALL_OBJS)
 	@$(call MKDIR,$(BIN_DIR))
 	@echo "Linking $(ARCH) kernel (PE format)..."
 	$(LD) $(LDFLAGS) -o $@ $^ $(LIBS)
 
 # Step 2: Convert PE to ELF64 format
-# PE RVAs need to be adjusted by image base (0x100000) when converting to ELF
 $(KERNEL): $(KERNEL_PE)
 	@echo "Converting to ELF64 format..."
 	objcopy -I pei-x86-64 -O elf64-x86-64 \
@@ -91,6 +99,17 @@ $(KERNEL): $(KERNEL_PE)
 		--change-section-address .reloc+0 \
 		--set-start 0x100000 $< $@
 	@echo "Built: $@"
+
+else
+# All other architectures: direct ELF link
+
+$(KERNEL): $(ALL_OBJS)
+	@$(call MKDIR,$(BIN_DIR))
+	@echo "Linking $(ARCH) kernel..."
+	$(LD) $(LDFLAGS) -o $@ $^ $(LIBS)
+	@echo "Built: $@"
+
+endif
 
 $(OBJ_DIR)/core/%.o: kernel/core/%.cpp
 	@$(call MKDIR,$(OBJ_DIR)/core)

@@ -6,9 +6,7 @@
 
 #include "include/kernel/process.h"
 #include "include/kernel/vga.h"
-#ifdef _MSC_VER
-#include <intrin.h>
-#endif
+#include "include/kernel/arch.h"
 
 namespace kernel {
 namespace process {
@@ -57,11 +55,7 @@ void schedule()
     // 3. Restore its state and jump to it
     
     // For now, just yield CPU
-#ifdef _MSC_VER
-    __nop(); // MSVC intrinsic - placeholder for __halt()
-#else
-    asm volatile("hlt"); // GCC/Clang inline assembly
-#endif
+    kernel::arch::halt();
 }
 
 } // namespace process

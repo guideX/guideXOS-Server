@@ -45,7 +45,7 @@
   ==========================================
   
   Kernel: build\x86\bin\kernel.elf
-  03/26/2026  09:35 AM            35,700 kernel.elf
+  03/26/2026  06:46 PM            35,700 kernel.elf
   
   Toolchain used:
   D:\bkup\ELFBIN\bin\i686-elf-g++.exe

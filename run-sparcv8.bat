@@ -1,0 +1,1 @@
+qemu-system-sparc -M SS-5 -m 128M -kernel build/sparc/bin/kernel.elf -nographic

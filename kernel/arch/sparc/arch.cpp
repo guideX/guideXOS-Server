@@ -1,5 +1,5 @@
 //
-// SPARC Architecture Implementation
+// SPARC v8 Architecture Implementation
 //
 // Copyright (c) 2024 guideX
 //
@@ -15,6 +15,13 @@
 namespace kernel {
 namespace arch {
 namespace sparc {
+
+// PSR bit layout (SPARC v8):
+//   Bit  5    : ET  (Enable Traps — must be 1 for interrupts to fire)
+//   Bits 11:8 : PIL (Processor Interrupt Level, 0–15)
+//
+// enable_interrupts  : set ET, clear PIL to 0
+// disable_interrupts : clear ET, set PIL to 15
 
 void halt()
 {
@@ -33,8 +40,10 @@ void enable_interrupts()
     // No-op on MSVC host build
 #else
     uint32_t psr = read_psr();
-    psr &= ~0x20;  // Clear PIL field
+    psr |= 0x20;          // set ET
+    psr &= ~0x0F00u;      // clear PIL (allow all levels)
     write_psr(psr);
+    asm volatile ("nop; nop; nop");
 #endif
 }
 
@@ -44,8 +53,10 @@ void disable_interrupts()
     // No-op on MSVC host build
 #else
     uint32_t psr = read_psr();
-    psr |= 0x20;   // Set PIL to 15
+    psr &= ~0x20u;        // clear ET
+    psr |= 0x0F00u;       // set PIL to 15
     write_psr(psr);
+    asm volatile ("nop; nop; nop");
 #endif
 }
 

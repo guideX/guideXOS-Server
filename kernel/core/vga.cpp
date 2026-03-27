@@ -5,9 +5,12 @@
 //
 
 #include "include/kernel/vga.h"
+#include "include/kernel/arch.h"
 
 namespace kernel {
 namespace vga {
+
+#if ARCH_HAS_VGA_TEXT
 
 // VGA text buffer constants
 static const uint32_t VGA_WIDTH = 80;
@@ -196,6 +199,23 @@ void set_cursor(uint32_t row, uint32_t col)
     g_row = row;
     g_col = col;
 }
+
+#else // !ARCH_HAS_VGA_TEXT
+
+// Stub implementation for platforms without VGA text hardware
+void init() { }
+void clear() { }
+void set_color(Color, Color) { }
+void putchar(char) { }
+void print(const char*) { }
+void print(const char*, uint32_t) { }
+void print_dec(int32_t) { }
+void print_hex(uint32_t) { }
+void print_colored(const char*, Color, Color) { }
+void get_cursor(uint32_t& row, uint32_t& col) { row = 0; col = 0; }
+void set_cursor(uint32_t, uint32_t) { }
+
+#endif // ARCH_HAS_VGA_TEXT
 
 } // namespace vga
 } // namespace kernel

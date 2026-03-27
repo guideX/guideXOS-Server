@@ -1,18 +1,38 @@
-# SPARC Architecture Build Configuration
+# SPARC v8 Architecture Build Configuration
+#
+# Targets SPARC v8 (32-bit).  Tested with sparc-elf toolchain
+# and qemu-system-sparc (Sun4m / SPARCstation 5).
 #
 # Copyright (c) 2024 guideX
 #
 
-# Toolchain
-CXX := sparc-elf-g++
-AS := sparc-elf-as
-LD := sparc-elf-ld
+# Toolchain — try sparc-elf first, fall back to sparc-linux-gnu
+ifeq ($(OS),Windows_NT)
+    CXX := sparc-elf-g++
+    AS  := sparc-elf-as
+    LD  := sparc-elf-ld
+else
+    ifneq ($(shell which sparc-elf-g++ 2>/dev/null),)
+        CXX := sparc-elf-g++
+        AS  := sparc-elf-as
+        LD  := sparc-elf-ld
+    else ifneq ($(shell which sparc-linux-gnu-g++ 2>/dev/null),)
+        CXX := sparc-linux-gnu-g++
+        AS  := sparc-linux-gnu-as
+        LD  := sparc-linux-gnu-ld
+    else
+        CXX := sparc-elf-g++
+        AS  := sparc-elf-as
+        LD  := sparc-elf-ld
+    endif
+endif
 
 # Architecture-specific flags
-CFLAGS += -m32 -mcpu=v8
-ASFLAGS := -Av8
+ARCH_CFLAGS := -m32 -mcpu=v8 -mno-fpu
+ASFLAGS := --defsym __sparc__=1
+ARCH_LDFLAGS :=
 LIBS :=
 
 # Target information
 ARCH_BITS := 32
-ARCH_NAME := SPARC
+ARCH_NAME := SPARC v8

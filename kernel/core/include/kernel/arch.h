@@ -53,6 +53,26 @@
     #error "Unsupported architecture"
 #endif
 
+// ================================================================
+// Platform feature macros
+//
+// Each arch sets the features it supports.  Core code uses these
+// guards so that x86-specific hardware (PIC, PS/2, VGA text,
+// port I/O) is never compiled on architectures that lack it.
+// ================================================================
+
+#if defined(ARCH_X86) || defined(ARCH_AMD64)
+    #define ARCH_HAS_PORT_IO    1
+    #define ARCH_HAS_VGA_TEXT   1
+    #define ARCH_HAS_PIC_8259   1
+    #define ARCH_HAS_PS2        1
+#else
+    #define ARCH_HAS_PORT_IO    0
+    #define ARCH_HAS_VGA_TEXT   0
+    #define ARCH_HAS_PIC_8259   0
+    #define ARCH_HAS_PS2        0
+#endif
+
 namespace kernel {
 namespace arch {
 

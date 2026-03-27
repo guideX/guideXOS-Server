@@ -7,10 +7,13 @@
 //
 
 #include "include/kernel/framebuffer.h"
-#include "include/kernel/multiboot.h"
+#include "include/kernel/arch.h"
 
+#if ARCH_HAS_PIC_8259
+#include "include/kernel/multiboot.h"
 // Include BootInfo for UEFI boot support
 #include "../../guideXOSBootLoader/guidexOSBootInfo.h"
+#endif
 
 namespace kernel {
 namespace framebuffer {
@@ -21,6 +24,8 @@ static uint32_t g_height = 0;
 static uint32_t g_pitch = 0;
 static uint8_t g_bpp = 0;
 static bool g_available = false;
+
+#if ARCH_HAS_PIC_8259
 
 bool init(void* multiboot_info_ptr)
 {
@@ -82,6 +87,13 @@ bool init_from_bootinfo(const guideXOS::BootInfo* bootinfo)
     g_available = true;
     return true;
 }
+
+#else // !ARCH_HAS_PIC_8259
+
+bool init(void*) { return false; }
+bool init_from_bootinfo(const guideXOS::BootInfo*) { return false; }
+
+#endif // ARCH_HAS_PIC_8259
 
 uint32_t get_width()
 {
