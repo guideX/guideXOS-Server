@@ -2,11 +2,14 @@
 #define KERNEL_FRAMEBUFFER_H
 
 #include "types.h"
+#include "arch.h"
 
-// Forward declaration for BootInfo
+// Forward declaration for BootInfo (x86/amd64 only)
+#if ARCH_HAS_PIC_8259
 namespace guideXOS {
     struct BootInfo;
 }
+#endif
 
 namespace kernel {
 namespace framebuffer {
@@ -14,8 +17,13 @@ namespace framebuffer {
 // Initialize framebuffer from multiboot info (legacy BIOS)
 bool init(void* multiboot_info);
 
+#if ARCH_HAS_PIC_8259
 // Initialize framebuffer from BootInfo (UEFI)
 bool init_from_bootinfo(const guideXOS::BootInfo* bootinfo);
+#endif
+
+// Initialize Sun4m TCX framebuffer (SPARC only, known MMIO address)
+bool init_sun4m();
 
 // Get framebuffer dimensions
 uint32_t get_width();

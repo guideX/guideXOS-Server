@@ -1,7 +1,7 @@
 //
 // Kernel version information
 //
-// Copyright (c) 2024 guideX
+// Copyright (c) 2026 guideXOS Server
 //
 
 #pragma once

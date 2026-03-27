@@ -3,7 +3,7 @@
 //
 // Supports both Multiboot (legacy BIOS) and BootInfo (UEFI) initialization
 //
-// Copyright (c) 2024 guideX
+// Copyright (c) 2026 guideXOS Server
 //
 
 #include "include/kernel/framebuffer.h"
@@ -91,7 +91,28 @@ bool init_from_bootinfo(const guideXOS::BootInfo* bootinfo)
 #else // !ARCH_HAS_PIC_8259
 
 bool init(void*) { return false; }
-bool init_from_bootinfo(const guideXOS::BootInfo*) { return false; }
+
+#if defined(ARCH_SPARC)
+
+// Sun4m TCX framebuffer initialisation.
+// On QEMU SS-5 the 24-bit direct-colour plane lives at 0x50800000.
+// Resolution defaults to 1024x768, 32-bit XRGB pixels.
+bool init_sun4m()
+{
+    g_buffer = reinterpret_cast<uint32_t*>(0x50800000u);
+    g_width  = 1024;
+    g_height = 768;
+    g_pitch  = 1024 * 4;   // 4 bytes per pixel, no padding
+    g_bpp    = 32;
+    g_available = true;
+    return true;
+}
+
+#else
+
+bool init_sun4m() { return false; }
+
+#endif // ARCH_SPARC
 
 #endif // ARCH_HAS_PIC_8259
 

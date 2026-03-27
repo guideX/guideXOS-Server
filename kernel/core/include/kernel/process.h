@@ -1,7 +1,7 @@
 //
 // Process management for guideXOS kernel
 //
-// Copyright (c) 2024 guideX
+// Copyright (c) 2026 guideXOS Server
 //
 
 #ifndef KERNEL_PROCESS_H

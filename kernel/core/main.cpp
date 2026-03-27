@@ -3,7 +3,7 @@
 //
 // ROLE: Bridge between bootloader and guideXOS Server (user-mode)
 //
-// Copyright (c) 2024 guideX
+// Copyright (c) 2026 guideXOS Server
 //
 
 #include "include/kernel/version.h"
@@ -19,6 +19,10 @@
 #include "include/kernel/multiboot.h"
 // Include BootInfo structure from bootloader (x86 / amd64 UEFI only)
 #include "../../guideXOSBootLoader/guidexOSBootInfo.h"
+#endif
+
+#if defined(ARCH_SPARC)
+#include <arch/zs_serial.h>
 #endif
 
 extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
@@ -110,13 +114,52 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
     (void)boot_magic;
 
     // Initialize architecture-specific hardware
+    kernel::arch::init();
+
+#if defined(ARCH_SPARC)
+    // ---- SPARC Sun4m boot path ----
+
+    // Discover the TCX framebuffer at its well-known MMIO address
+    bool has_fb = kernel::framebuffer::init_sun4m();
+
+    if (has_fb) {
+        // Clear screen to dark colour
+        kernel::framebuffer::clear(0xFF101828);
+
+        // Initialize and draw the desktop
+        kernel::desktop::init();
+        kernel::desktop::draw();
+
+        // Set up interrupts (SLAVIO already initialised in arch::init)
+        kernel::interrupts::init();
+
+        // Initialize the Z8530 serial keyboard/mouse driver
+        kernel::arch::sparc::zs::init(kernel::framebuffer::get_width(),
+                                       kernel::framebuffer::get_height());
+
+        // Register the ZS IRQ handler on SLAVIO IRQ 12 (serial/SBus level 6)
+        kernel::interrupts::register_irq(12, kernel::arch::sparc::zs::irq_handler);
+
+        // Draw initial cursor at centre of screen
+        kernel::desktop::draw_cursor(kernel::arch::sparc::zs::mouse_x(),
+                                     kernel::arch::sparc::zs::mouse_y());
+
+        // Main kernel loop — poll mouse state and redraw cursor
+        while (1) {
+            if (kernel::arch::sparc::zs::mouse_dirty()) {
+                kernel::arch::sparc::zs::mouse_clear_dirty();
+                kernel::desktop::handle_mouse(
+                    kernel::arch::sparc::zs::mouse_x(),
+                    kernel::arch::sparc::zs::mouse_y(),
+                    kernel::arch::sparc::zs::mouse_buttons());
+            }
+            kernel::arch::halt();
+        }
+    }
+#endif // ARCH_SPARC
+
+    // Fallback: no framebuffer or unsupported non-x86 platform
     kernel::interrupts::init();
-
-    // TODO: platform-specific framebuffer discovery goes here.
-    //       For SPARC Sun4m the framebuffer is memory-mapped at an
-    //       address provided by OpenBoot PROM (OBP).
-
-    // Halt loop until drivers are wired up
     while (1) {
         kernel::arch::halt();
     }

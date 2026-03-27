@@ -1,7 +1,7 @@
 //
 // AMD64 Architecture Implementation
 //
-// Copyright (c) 2024 guideX
+// Copyright (c) 2026 guideXOS Server
 //
 
 #include "include/arch/amd64.h"

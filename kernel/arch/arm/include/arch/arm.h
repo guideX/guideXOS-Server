@@ -1,12 +1,12 @@
 //
 // ARM Architecture-Specific Code
 //
-// Copyright (c) 2024 guideX
+// Copyright (c) 2026 guideXOS Server
 //
 
 #pragma once
 
-#include <cstdint>
+#include <kernel/types.h>
 
 namespace kernel {
 namespace arch {

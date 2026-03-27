@@ -11,7 +11,7 @@
 // Temporary kernel-mode desktop until guideXOSServer
 // can be loaded as a user-mode process (ELF loader TODO).
 //
-// Copyright (c) 2024 guideX
+// Copyright (c) 2026 guideXOS Server
 //
 
 #ifndef KERNEL_DESKTOP_H

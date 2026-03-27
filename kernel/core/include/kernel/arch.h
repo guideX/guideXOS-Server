@@ -1,7 +1,7 @@
 //
 // Architecture Abstraction Layer
 //
-// Copyright (c) 2024 guideX
+// Copyright (c) 2026 guideXOS Server
 //
 
 #pragma once

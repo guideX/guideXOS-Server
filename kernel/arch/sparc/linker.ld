@@ -15,7 +15,13 @@ SECTIONS
     
     __kernel_start = .;
     
-    /* Boot section (must be first) */
+    /* Trap vector table (must be 4096-byte aligned for TBR) */
+    .trapvec ALIGN(4K) :
+    {
+        *(.trapvec)
+    }
+    
+    /* Boot section */
     .boot ALIGN(4K) :
     {
         *(.boot)

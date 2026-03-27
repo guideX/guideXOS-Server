@@ -4,7 +4,7 @@
 // Provides IDT setup, PIC (8259) remapping, and IRQ dispatch
 // for the x86-64 kernel.
 //
-// Copyright (c) 2024 guideX
+// Copyright (c) 2026 guideXOS Server
 //
 
 #ifndef KERNEL_INTERRUPTS_H

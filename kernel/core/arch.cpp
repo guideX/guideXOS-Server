@@ -1,7 +1,7 @@
 //
 // Architecture Abstraction Layer Implementation
 //
-// Copyright (c) 2024 guideX
+// Copyright (c) 2026 guideXOS Server
 //
 
 #include "include/kernel/arch.h"

@@ -6,7 +6,7 @@
 //
 // Ported from guideXOS Legacy PS2Mouse.cs
 //
-// Copyright (c) 2024 guideX
+// Copyright (c) 2026 guideXOS Server
 //
 
 #ifndef KERNEL_PS2MOUSE_H

@@ -143,6 +143,7 @@
     <ClInclude Include="gui_protocol.h" />
     <ClInclude Include="gxm_loader.h" />
     <ClInclude Include="image_viewer.h" />
+    <ClInclude Include="kernel\arch\sparc\include\arch\zs_serial.h" />
     <ClInclude Include="kernel\core\include\kernel\desktop.h" />
     <ClInclude Include="kernel\core\include\kernel\framebuffer.h" />
     <ClInclude Include="kernel\core\include\kernel\interrupts.h" />
@@ -212,6 +213,7 @@
     <ClCompile Include="kernel\arch\sparc\arch.cpp">
       <ObjectFileName>$(IntDir)arch_sparc.obj</ObjectFileName>
     </ClCompile>
+    <ClCompile Include="kernel\arch\sparc\zs_serial.cpp" />
     <ClCompile Include="kernel\arch\x86\arch.cpp">
       <ObjectFileName>$(IntDir)arch_x86.obj</ObjectFileName>
     </ClCompile>

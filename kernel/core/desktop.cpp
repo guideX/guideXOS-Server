@@ -5,7 +5,7 @@
 // Ported visual style from guideXOS Server compositor (compositor.cpp),
 // desktop_wallpaper.h, system_tray.h, and bitmap_font.h.
 //
-// Copyright (c) 2024 guideX
+// Copyright (c) 2026 guideXOS Server
 //
 
 #include "include/kernel/desktop.h"

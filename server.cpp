@@ -33,7 +33,7 @@
 //   - Will run as PID 1 when launched by kernel
 //   - Same code works in both environments
 //
-// Copyright (c) 2024 guideX
+// Copyright (c) 2026 guideXOS Server
 //
 
 #include "allocator.h"

@@ -8,7 +8,7 @@
 // Non-x86 architectures compile a stub implementation (interrupt
 // controllers differ per platform and will be filled in per-arch).
 //
-// Copyright (c) 2024 guideX
+// Copyright (c) 2026 guideXOS Server
 //
 
 #include "include/kernel/interrupts.h"
@@ -335,25 +335,55 @@ void register_irq(uint8_t irq, irq_handler_t handler)
 #else // !ARCH_HAS_PIC_8259
 
 // ================================================================
-// Non-x86 stub  —  platform-specific interrupt controllers go here
+// Non-x86 implementation  —  SPARC SLAVIO / generic stub
 // ================================================================
+
+static irq_handler_t s_handlers[16] = { 0 };
 
 void eoi(uint8_t irq)
 {
+#if defined(ARCH_SPARC)
+    arch::slavio_eoi(static_cast<uint32_t>(irq));
+#else
     (void)irq;
+#endif
 }
 
 void init()
 {
-    // TODO: SPARC trap table / IA-64 IVT init will go here
+#if defined(ARCH_SPARC)
+    // SLAVIO is already initialised in arch::sparc::init();
+    // just enable traps so the CPU accepts interrupts.
     arch::enable_interrupts();
+#else
+    arch::enable_interrupts();
+#endif
 }
 
 void register_irq(uint8_t irq, irq_handler_t handler)
 {
+    if (irq >= 16) return;
+    s_handlers[irq] = handler;
+#if defined(ARCH_SPARC)
+    arch::slavio_irq_enable(static_cast<uint32_t>(irq));
+#else
     (void)irq;
     (void)handler;
-    // TODO: wire up platform interrupt controller
+#endif
+}
+
+// C-linkage dispatch called from boot.s irq_dispatch_asm.
+// irq_index is 0-based (IRQ 1 maps to index 0, IRQ 15 to index 14).
+extern "C" void sparc_irq_dispatch(uint32_t irq_index)
+{
+    // SPARC hardware IRQs 1–15 ? index 0–14.
+    // Our handler table is indexed 0–15 so shift by 1 to match
+    // the IRQ number convention used elsewhere in the kernel.
+    uint32_t irq = irq_index + 1;
+    if (irq < 16 && s_handlers[irq]) {
+        s_handlers[irq]();
+    }
+    eoi(static_cast<uint8_t>(irq));
 }
 
 #endif // ARCH_HAS_PIC_8259
