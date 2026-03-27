@@ -62,12 +62,13 @@ echo.
 
 REM Launch QEMU
 "%QEMU_PATH%" ^
-    -kernel "build\x86\bin\kernel.elf" ^
-    -m 128M ^
-    -serial stdio ^
-    -display gtk ^
-    -no-reboot ^
-    -no-shutdown
+-kernel "build\x86\bin\kernel.elf" ^
+-m 128M ^
+-vga std ^
+-serial stdio ^
+-display gtk ^
+-no-reboot ^
+-no-shutdown
 
 echo.
 echo QEMU closed.

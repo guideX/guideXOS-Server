@@ -31,11 +31,11 @@ fi
 
 # Launch QEMU with VNC
 qemu-system-i386 \
-    -kernel "$KERNEL" \
-    -m 128M \
-    -vnc :0 \
-    -k en-us \
-    -serial stdio
+-kernel "$KERNEL" \
+-m 128M \
+-vnc :0 \
+-k en-us \
+-serial stdio
 
 # Check if QEMU exited with error
 if [ $? -ne 0 ]; then

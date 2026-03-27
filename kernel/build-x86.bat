@@ -192,7 +192,7 @@ echo [OK] Directories created
 echo.
 
 REM Assemble boot.asm
-echo [1/6] Assembling boot.asm...
+echo [1/10] Assembling boot.asm...
 %AS% %ASFLAGS% arch\%ARCH%\boot.asm -o "%OBJ_DIR%\arch\boot.o"
 if %errorlevel% neq 0 (
     echo [ERROR] Failed to assemble boot.asm
@@ -202,7 +202,7 @@ if %errorlevel% neq 0 (
 echo [OK] boot.o created
 
 REM Compile main.cpp
-echo [2/6] Compiling main.cpp...
+echo [2/10] Compiling main.cpp...
 %CXX% %CFLAGS% -c core\main.cpp -o "%OBJ_DIR%\core\main.o"
 if %errorlevel% neq 0 (
     echo [ERROR] Failed to compile main.cpp
@@ -212,7 +212,7 @@ if %errorlevel% neq 0 (
 echo [OK] main.o created
 
 REM Compile vga.cpp
-echo [3/7] Compiling vga.cpp...
+echo [3/10] Compiling vga.cpp...
 %CXX% %CFLAGS% -c core\vga.cpp -o "%OBJ_DIR%\core\vga.o"
 if %errorlevel% neq 0 (
     echo [ERROR] Failed to compile vga.cpp
@@ -222,7 +222,7 @@ if %errorlevel% neq 0 (
 echo [OK] vga.o created
 
 REM Compile framebuffer.cpp
-echo [4/7] Compiling framebuffer.cpp...
+echo [4/10] Compiling framebuffer.cpp...
 %CXX% %CFLAGS% -c core\framebuffer.cpp -o "%OBJ_DIR%\core\framebuffer.o"
 if %errorlevel% neq 0 (
     echo [ERROR] Failed to compile framebuffer.cpp
@@ -232,7 +232,7 @@ if %errorlevel% neq 0 (
 echo [OK] framebuffer.o created
 
 REM Compile arch.cpp (core)
-echo [5/7] Compiling core arch.cpp...
+echo [5/10] Compiling core arch.cpp...
 %CXX% %CFLAGS% -c core\arch.cpp -o "%OBJ_DIR%\core\arch.o"
 if %errorlevel% neq 0 (
     echo [ERROR] Failed to compile core arch.cpp
@@ -242,7 +242,7 @@ if %errorlevel% neq 0 (
 echo [OK] arch.o (core) created
 
 REM Compile arch.cpp (x86)
-echo [6/7] Compiling x86 arch.cpp...
+echo [6/10] Compiling x86 arch.cpp...
 %CXX% %CFLAGS% -c arch\%ARCH%\arch.cpp -o "%OBJ_DIR%\arch\arch.o"
 if %errorlevel% neq 0 (
     echo [ERROR] Failed to compile x86 arch.cpp
@@ -251,9 +251,39 @@ if %errorlevel% neq 0 (
 )
 echo [OK] arch.o (x86) created
 
+REM Compile desktop.cpp
+echo [7/10] Compiling desktop.cpp...
+%CXX% %CFLAGS% -c core\desktop.cpp -o "%OBJ_DIR%\core\desktop.o"
+if %errorlevel% neq 0 (
+    echo [ERROR] Failed to compile desktop.cpp
+    pause
+    exit /b 1
+)
+echo [OK] desktop.o created
+
+REM Compile interrupts.cpp
+echo [8/10] Compiling interrupts.cpp...
+%CXX% %CFLAGS% -c core\interrupts.cpp -o "%OBJ_DIR%\core\interrupts.o"
+if %errorlevel% neq 0 (
+    echo [ERROR] Failed to compile interrupts.cpp
+    pause
+    exit /b 1
+)
+echo [OK] interrupts.o created
+
+REM Compile ps2mouse.cpp
+echo [9/10] Compiling ps2mouse.cpp...
+%CXX% %CFLAGS% -c core\ps2mouse.cpp -o "%OBJ_DIR%\core\ps2mouse.o"
+if %errorlevel% neq 0 (
+    echo [ERROR] Failed to compile ps2mouse.cpp
+    pause
+    exit /b 1
+)
+echo [OK] ps2mouse.o created
+
 REM Link kernel
-echo [7/7] Linking kernel...
-%LD% %LDFLAGS% -o "%KERNEL%" "%OBJ_DIR%\arch\boot.o" "%OBJ_DIR%\core\main.o" "%OBJ_DIR%\core\vga.o" "%OBJ_DIR%\core\framebuffer.o" "%OBJ_DIR%\core\arch.o" "%OBJ_DIR%\arch\arch.o"
+echo [10/10] Linking kernel...
+%LD% %LDFLAGS% -o "%KERNEL%" "%OBJ_DIR%\arch\boot.o" "%OBJ_DIR%\core\main.o" "%OBJ_DIR%\core\vga.o" "%OBJ_DIR%\core\framebuffer.o" "%OBJ_DIR%\core\arch.o" "%OBJ_DIR%\arch\arch.o" "%OBJ_DIR%\core\desktop.o" "%OBJ_DIR%\core\interrupts.o" "%OBJ_DIR%\core\ps2mouse.o"
 
 if %errorlevel% neq 0 (
     echo [ERROR] Failed to link kernel

@@ -48,6 +48,21 @@
     <ClInclude Include="kernel\core\include\kernel\desktop.h">
       <Filter>Header Files\Kernel</Filter>
     </ClInclude>
+    <ClInclude Include="kernel\core\include\kernel\interrupts.h">
+      <Filter>Header Files\Kernel</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\core\include\kernel\ps2mouse.h">
+      <Filter>Header Files\Kernel</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\core\include\kernel\framebuffer.h">
+      <Filter>Header Files\Kernel</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\core\include\kernel\multiboot.h">
+      <Filter>Header Files\Kernel</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\core\include\kernel\process.h">
+      <Filter>Header Files\Kernel</Filter>
+    </ClInclude>
     <ClInclude Include="kernel\arch\x86\include\arch\x86.h">
       <Filter>Header Files\Architecture</Filter>
     </ClInclude>
@@ -72,6 +87,12 @@
       <Filter>Source Files\Core</Filter>
     </ClCompile>
     <ClCompile Include="kernel\core\arch.cpp">
+      <Filter>Source Files\Core</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\core\interrupts.cpp">
+      <Filter>Source Files\Core</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\core\ps2mouse.cpp">
       <Filter>Source Files\Core</Filter>
     </ClCompile>
     <ClCompile Include="kernel\core\desktop.cpp">

@@ -85,6 +85,7 @@ else
     qemu-system-i386 \
         -kernel "$KERNEL_PATH" \
         -m 128M \
+        -vga std \
         -serial stdio \
         -display gtk \
         -no-reboot \

@@ -98,11 +98,11 @@ cd /d "%SCRIPT_DIR%"
 
 REM Launch QEMU with UEFI using pflash drives (modern way)
 "%QEMU_EXE%" ^
-    -drive if=pflash,format=raw,readonly=on,file="%OVMF_PATH%" ^
-    -drive file=fat:rw:ESP,format=raw ^
-    -m 1024M ^
-    -serial stdio ^
-    -no-reboot
+-drive if=pflash,format=raw,readonly=on,file="%OVMF_PATH%" ^
+-drive file=fat:rw:ESP,format=raw ^
+-m 1024M ^
+-serial stdio ^
+-no-reboot
 
 echo.
 echo QEMU exited

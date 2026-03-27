@@ -13,6 +13,8 @@
 #include "include/kernel/multiboot.h"
 #include "include/kernel/process.h"
 #include "include/kernel/desktop.h"
+#include "include/kernel/interrupts.h"
+#include "include/kernel/ps2mouse.h"
 
 // Include BootInfo structure from bootloader
 #include "../../guideXOSBootLoader/guidexOSBootInfo.h"
@@ -59,14 +61,29 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::desktop::init();
         kernel::desktop::draw();
         
-        // Main kernel loop - idle
+        // Set up IDT, remap PIC, enable interrupts
+        kernel::interrupts::init();
+        
+        // Initialize PS/2 mouse driver and register IRQ12 handler
+        kernel::ps2mouse::init(kernel::framebuffer::get_width(),
+                               kernel::framebuffer::get_height());
+        kernel::interrupts::register_irq(12, kernel::ps2mouse::irq_handler);
+        
+        // Draw initial cursor at center of screen
+        kernel::desktop::draw_cursor(kernel::ps2mouse::get_x(),
+                                     kernel::ps2mouse::get_y());
+        
+        // Main kernel loop — poll mouse state and redraw cursor
         while (1) {
+            if (kernel::ps2mouse::is_dirty()) {
+                kernel::ps2mouse::clear_dirty();
+                kernel::desktop::handle_mouse(
+                    kernel::ps2mouse::get_x(),
+                    kernel::ps2mouse::get_y(),
+                    kernel::ps2mouse::get_buttons());
+            }
             // Halt CPU until next interrupt (saves power)
-            #if defined(_MSC_VER)
-            __nop();
-            #else
-            asm volatile ("hlt");
-            #endif
+            kernel::arch::halt();
         }
     }
     else {
@@ -78,4 +95,5 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         while (1) { }
     }
 }
+
 

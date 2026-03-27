@@ -43,7 +43,16 @@ void close_context_menu();
 // Dismiss notification toast
 void dismiss_notification();
 
+// Process mouse input: update cursor position and handle clicks
+// Call this from the main loop when the mouse state changes.
+void handle_mouse(int32_t mx, int32_t my, uint8_t buttons);
+
+// Draw the mouse cursor at the given position (overlay on framebuffer)
+void draw_cursor(int32_t mx, int32_t my);
+
 } // namespace desktop
 } // namespace kernel
+
+
 
 #endif // KERNEL_DESKTOP_H

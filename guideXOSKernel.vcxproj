@@ -161,6 +161,12 @@
     <ClInclude Include="desktop_wallpaper.h" />
     <ClInclude Include="kernel\arch\x86\include\arch\x86.h" />
     <ClInclude Include="kernel\core\include\kernel\arch.h" />
+    <ClInclude Include="kernel\core\include\kernel\desktop.h" />
+    <ClInclude Include="kernel\core\include\kernel\framebuffer.h" />
+    <ClInclude Include="kernel\core\include\kernel\interrupts.h" />
+    <ClInclude Include="kernel\core\include\kernel\multiboot.h" />
+    <ClInclude Include="kernel\core\include\kernel\process.h" />
+    <ClInclude Include="kernel\core\include\kernel\ps2mouse.h" />
     <ClInclude Include="kernel\core\include\kernel\types.h" />
     <ClInclude Include="kernel\core\include\kernel\vga.h" />
     <ClInclude Include="kernel\core\include\kernel\version.h" />
@@ -168,6 +174,9 @@
     <ClInclude Include="welcome.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="kernel\core\desktop.cpp" />
+    <ClCompile Include="kernel\core\interrupts.cpp" />
+    <ClCompile Include="kernel\core\ps2mouse.cpp" />
     <ClCompile Include="kernel\arch\x86\arch.cpp" />
     <ClCompile Include="kernel\core\arch.cpp" />
     <ClCompile Include="kernel\core\main.cpp" />

@@ -145,8 +145,10 @@
     <ClInclude Include="image_viewer.h" />
     <ClInclude Include="kernel\core\include\kernel\desktop.h" />
     <ClInclude Include="kernel\core\include\kernel\framebuffer.h" />
+    <ClInclude Include="kernel\core\include\kernel\interrupts.h" />
     <ClInclude Include="kernel\core\include\kernel\multiboot.h" />
     <ClInclude Include="kernel\core\include\kernel\process.h" />
+    <ClInclude Include="kernel\core\include\kernel\ps2mouse.h" />
     <ClInclude Include="launchSettings.json" />
     <ClInclude Include="icons.h" />
     <ClInclude Include="ipc.h" />
@@ -218,10 +220,12 @@
     </ClCompile>
     <ClCompile Include="kernel\core\desktop.cpp" />
     <ClCompile Include="kernel\core\framebuffer.cpp" />
+    <ClCompile Include="kernel\core\interrupts.cpp" />
     <ClCompile Include="kernel\core\main.cpp" />
     <ClCompile Include="kernel\core\process.cpp">
       <ObjectFileName>$(IntDir)process_kernel.obj</ObjectFileName>
     </ClCompile>
+    <ClCompile Include="kernel\core\ps2mouse.cpp" />
     <ClCompile Include="kernel\core\vga.cpp" />
     <ClCompile Include="lifecycle.cpp" />
     <ClCompile Include="logger.cpp" />

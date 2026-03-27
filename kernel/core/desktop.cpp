@@ -867,5 +867,166 @@ void dismiss_notification()
     s_notification.visible = false;
 }
 
+// ============================================================
+// Mouse cursor (12x19 arrow, 1-bit mask)
+// ============================================================
+
+// Classic arrow cursor bitmap (12 wide x 19 tall)
+// 0=transparent, 1=black outline, 2=white fill
+static const uint8_t s_cursorBitmap[19][12] = {
+    {1,0,0,0,0,0,0,0,0,0,0,0},
+    {1,1,0,0,0,0,0,0,0,0,0,0},
+    {1,2,1,0,0,0,0,0,0,0,0,0},
+    {1,2,2,1,0,0,0,0,0,0,0,0},
+    {1,2,2,2,1,0,0,0,0,0,0,0},
+    {1,2,2,2,2,1,0,0,0,0,0,0},
+    {1,2,2,2,2,2,1,0,0,0,0,0},
+    {1,2,2,2,2,2,2,1,0,0,0,0},
+    {1,2,2,2,2,2,2,2,1,0,0,0},
+    {1,2,2,2,2,2,2,2,2,1,0,0},
+    {1,2,2,2,2,2,2,2,2,2,1,0},
+    {1,2,2,2,2,2,1,1,1,1,1,0},
+    {1,2,2,2,1,2,1,0,0,0,0,0},
+    {1,2,2,1,0,1,2,1,0,0,0,0},
+    {1,2,1,0,0,1,2,1,0,0,0,0},
+    {1,1,0,0,0,0,1,2,1,0,0,0},
+    {1,0,0,0,0,0,1,2,1,0,0,0},
+    {0,0,0,0,0,0,0,1,1,0,0,0},
+    {0,0,0,0,0,0,0,0,0,0,0,0},
+};
+
+static const int kCursorW = 12;
+static const int kCursorH = 19;
+
+// Saved pixels under cursor for restore
+static uint32_t s_cursorSave[19][12];
+static int32_t  s_lastCursorX = -1;
+static int32_t  s_lastCursorY = -1;
+static bool     s_cursorDrawn = false;
+
+// Previous button state for edge detection
+static uint8_t  s_prevButtons = 0;
+
+static void save_under_cursor(int32_t mx, int32_t my)
+{
+    for (int row = 0; row < kCursorH; row++) {
+        for (int col = 0; col < kCursorW; col++) {
+            int32_t px = mx + col;
+            int32_t py = my + row;
+            if (px >= 0 && px < (int32_t)s_screenW && py >= 0 && py < (int32_t)s_screenH)
+                s_cursorSave[row][col] = framebuffer::get_pixel((uint32_t)px, (uint32_t)py);
+            else
+                s_cursorSave[row][col] = 0;
+        }
+    }
+}
+
+static void restore_under_cursor()
+{
+    if (!s_cursorDrawn) return;
+    for (int row = 0; row < kCursorH; row++) {
+        for (int col = 0; col < kCursorW; col++) {
+            int32_t px = s_lastCursorX + col;
+            int32_t py = s_lastCursorY + row;
+            if (px >= 0 && px < (int32_t)s_screenW && py >= 0 && py < (int32_t)s_screenH)
+                framebuffer::put_pixel((uint32_t)px, (uint32_t)py, s_cursorSave[row][col]);
+        }
+    }
+    s_cursorDrawn = false;
+}
+
+void draw_cursor(int32_t mx, int32_t my)
+{
+    // Restore previous cursor area
+    restore_under_cursor();
+
+    // Save pixels under new position
+    save_under_cursor(mx, my);
+    s_lastCursorX = mx;
+    s_lastCursorY = my;
+
+    // Draw cursor
+    for (int row = 0; row < kCursorH; row++) {
+        for (int col = 0; col < kCursorW; col++) {
+            uint8_t p = s_cursorBitmap[row][col];
+            if (p == 0) continue;
+            int32_t px = mx + col;
+            int32_t py = my + row;
+            if (px >= 0 && px < (int32_t)s_screenW && py >= 0 && py < (int32_t)s_screenH) {
+                uint32_t color = (p == 1) ? rgb(0, 0, 0) : rgb(255, 255, 255);
+                framebuffer::put_pixel((uint32_t)px, (uint32_t)py, color);
+            }
+        }
+    }
+    s_cursorDrawn = true;
+}
+
+void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
+{
+    if (!s_initialized) return;
+
+    // Detect button press edges (newly pressed)
+    uint8_t pressed = buttons & ~s_prevButtons;
+    s_prevButtons = buttons;
+
+    uint32_t taskbarY = s_screenH - kTaskbarH;
+
+    // Left button click
+    if (pressed & 0x01) {
+        // Close context menu on any click
+        if (s_rightClickMenuOpen) {
+            s_rightClickMenuOpen = false;
+            draw();
+            draw_cursor(mx, my);
+            return;
+        }
+
+        // Start button area: x=[4..4+kStartBtnW], y=[taskbarY+4..taskbarY+kTaskbarH-4]
+        if ((uint32_t)mx >= 4 && (uint32_t)mx <= 4 + kStartBtnW &&
+            (uint32_t)my >= taskbarY + 4 && (uint32_t)my <= taskbarY + kTaskbarH - 4) {
+            toggle_start_menu();
+            draw();
+            draw_cursor(mx, my);
+            return;
+        }
+
+        // If start menu is open and click is outside it, close it
+        if (s_startMenuOpen) {
+            s_startMenuOpen = false;
+            draw();
+            draw_cursor(mx, my);
+            return;
+        }
+
+        // Notification dismiss: check if clicking the notification toast
+        if (s_notification.visible) {
+            uint32_t toastW = 280;
+            uint32_t toastH = 64;
+            uint32_t toastX = s_screenW - toastW - 16;
+            uint32_t toastY = taskbarY - toastH - 12;
+            if ((uint32_t)mx >= toastX && (uint32_t)mx <= toastX + toastW &&
+                (uint32_t)my >= toastY && (uint32_t)my <= toastY + toastH) {
+                dismiss_notification();
+                draw();
+                draw_cursor(mx, my);
+                return;
+            }
+        }
+    }
+
+    // Right button click — show context menu on desktop area
+    if (pressed & 0x02) {
+        if ((uint32_t)my < taskbarY) {
+            show_context_menu((uint32_t)mx, (uint32_t)my);
+            draw();
+            draw_cursor(mx, my);
+            return;
+        }
+    }
+
+    // Always redraw cursor at new position
+    draw_cursor(mx, my);
+}
+
 } // namespace desktop
 } // namespace kernel
