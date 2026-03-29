@@ -137,6 +137,125 @@ bool init_sun4u() { return false; }
 
 #endif // ARCH_HAS_PIC_8259
 
+// ================================================================
+// VESA / BGA init (x86 / amd64)
+// ================================================================
+
+bool init_vesa(uint16_t width, uint16_t height, uint8_t bpp)
+{
+#if ARCH_HAS_PORT_IO
+    // Use the VESA core driver to set a BGA mode and read back
+    // the LFB address.  If BGA is unavailable we still try to use
+    // the PCI VGA BAR0 address with a firmware-set mode.
+    //
+    // The caller is expected to have called vesa::init() first.
+    // We attempt BGA mode setting; if that fails we assume the
+    // current multiboot/firmware mode is already active and just
+    // record the geometry.
+
+    // Try port-I/O BGA mode setting
+    // (inline BGA register programming so we don't pull in vesa.h
+    //  — keeps the dependency tree flat)
+    const uint16_t BGA_INDEX = 0x01CE;
+    const uint16_t BGA_DATA  = 0x01CF;
+
+    // Read BGA ID
+    arch::outw(BGA_INDEX, 0x0000);
+    uint16_t id = arch::inw(BGA_DATA);
+    bool hasBga = (id >= 0xB0C0 && id <= 0xB0CF);
+
+    if (hasBga) {
+        // Disable
+        arch::outw(BGA_INDEX, 0x0004);
+        arch::outw(BGA_DATA,  0x0000);
+        // XRES
+        arch::outw(BGA_INDEX, 0x0001);
+        arch::outw(BGA_DATA,  width);
+        // YRES
+        arch::outw(BGA_INDEX, 0x0002);
+        arch::outw(BGA_DATA,  height);
+        // BPP
+        arch::outw(BGA_INDEX, 0x0003);
+        arch::outw(BGA_DATA,  bpp);
+        // Enable + LFB
+        arch::outw(BGA_INDEX, 0x0004);
+        arch::outw(BGA_DATA,  0x0041);
+    }
+
+    // Scan PCI for VGA BAR0
+    const uint16_t PCI_ADDR = 0x0CF8;
+    const uint16_t PCI_DAT  = 0x0CFC;
+    uint64_t lfb = 0xE0000000ULL; // default
+
+    for (uint16_t bus = 0; bus < 256 && lfb == 0xE0000000ULL; ++bus) {
+        for (uint8_t d = 0; d < 32; ++d) {
+            uint32_t addr = 0x80000000u | (bus << 16) | (d << 11) | 0;
+            arch::outl(PCI_ADDR, addr);
+            uint32_t pid = arch::inl(PCI_DAT);
+            if (pid == 0xFFFFFFFF) continue;
+
+            arch::outl(PCI_ADDR, addr | 0x08);
+            uint32_t cls = arch::inl(PCI_DAT);
+            if ((cls >> 24) == 0x03 && ((cls >> 16) & 0xFF) == 0x00) {
+                arch::outl(PCI_ADDR, addr | 0x10);
+                uint32_t bar0 = arch::inl(PCI_DAT);
+                if (!(bar0 & 1)) {
+                    lfb = bar0 & 0xFFFFFFF0u;
+                }
+                break;
+            }
+        }
+    }
+
+    g_buffer = reinterpret_cast<uint32_t*>(static_cast<uintptr_t>(lfb));
+    g_width  = width;
+    g_height = height;
+    g_bpp    = bpp;
+    g_pitch  = static_cast<uint32_t>(width) * (bpp / 8);
+    g_available = true;
+    return true;
+#else
+    (void)width; (void)height; (void)bpp;
+    return false;
+#endif
+}
+
+// ================================================================
+// EFI GOP init (IA-64 and any EFI-booted platform)
+// ================================================================
+
+bool init_efi_gop(uint64_t lfbBase, uint32_t width, uint32_t height,
+                  uint32_t pitch, uint8_t bpp)
+{
+    if (lfbBase == 0 || width == 0 || height == 0) return false;
+
+    g_buffer = reinterpret_cast<uint32_t*>(static_cast<uintptr_t>(lfbBase));
+    g_width  = width;
+    g_height = height;
+    g_pitch  = pitch;
+    g_bpp    = bpp;
+    g_available = true;
+    return true;
+}
+
+// ================================================================
+// Manual init (used by arch-specific backends)
+// ================================================================
+
+bool init_manual(uint64_t lfbBase, uint32_t width, uint32_t height,
+                 uint32_t pitch, uint8_t bpp)
+{
+    if (lfbBase == 0 || width == 0 || height == 0) return false;
+
+    g_buffer = reinterpret_cast<uint32_t*>(static_cast<uintptr_t>(lfbBase));
+    g_width  = width;
+    g_height = height;
+    g_pitch  = pitch;
+    g_bpp    = bpp;
+    g_available = true;
+    return true;
+}
+
 uint32_t get_width()
 {
     return g_width;

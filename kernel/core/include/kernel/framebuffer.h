@@ -22,11 +22,26 @@ bool init(void* multiboot_info);
 bool init_from_bootinfo(const guideXOS::BootInfo* bootinfo);
 #endif
 
+// Initialize framebuffer via VESA/BGA mode setting (x86/amd64).
+// Uses the Bochs Graphics Adapter if available, otherwise falls
+// back to the PCI VGA BAR0 linear framebuffer.
+bool init_vesa(uint16_t width, uint16_t height, uint8_t bpp);
+
+// Initialize framebuffer from an EFI GOP descriptor (IA-64).
+// The EFI firmware provides the framebuffer address and pixel format.
+bool init_efi_gop(uint64_t lfbBase, uint32_t width, uint32_t height,
+                  uint32_t pitch, uint8_t bpp);
+
 // Initialize Sun4m TCX framebuffer (SPARC v8 only, known MMIO address)
 bool init_sun4m();
 
 // Initialize Sun4u PCI VGA framebuffer (SPARC v9 only, known PCI BAR)
 bool init_sun4u();
+
+// Initialize from an arbitrary LFB address and geometry.
+// Used by arch-specific graphics backends after probing hardware.
+bool init_manual(uint64_t lfbBase, uint32_t width, uint32_t height,
+                 uint32_t pitch, uint8_t bpp);
 
 // Get framebuffer dimensions
 uint32_t get_width();

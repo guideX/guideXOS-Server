@@ -91,6 +91,28 @@
 #define ARCH_HAS_USB  1
 
 // ================================================================
+// PCI Audio controller availability
+//
+// HDA / AC'97 : PCI MMIO — x86/amd64/ia64/sparc64.
+// CS4231 SBus : SPARC v8 (Sun4m) — SBus MMIO, no PCI.
+// ARM         : platform-specific (I2S/codec); no PCI audio stub.
+// ================================================================
+
+#if defined(ARCH_X86) || defined(ARCH_AMD64)
+    #define ARCH_HAS_PCI_AUDIO  1
+    #define ARCH_HAS_SBUS_AUDIO 0
+#elif defined(ARCH_IA64) || defined(ARCH_SPARC64)
+    #define ARCH_HAS_PCI_AUDIO  1
+    #define ARCH_HAS_SBUS_AUDIO 0
+#elif defined(ARCH_SPARC)
+    #define ARCH_HAS_PCI_AUDIO  0
+    #define ARCH_HAS_SBUS_AUDIO 1
+#else
+    #define ARCH_HAS_PCI_AUDIO  0
+    #define ARCH_HAS_SBUS_AUDIO 0
+#endif
+
+// ================================================================
 // Storage controller availability
 //
 // ATA PIO : uses port I/O registers — x86/amd64 only.
@@ -124,6 +146,67 @@
 #define ARCH_HAS_FS_FAT   1
 #define ARCH_HAS_FS_EXT4  1
 #define ARCH_HAS_FS_UFS   1
+
+// ================================================================
+// Graphics / framebuffer support
+//
+// VESA_BGA  : Bochs VBE (port I/O 0x01CE/0x01CF) — x86/amd64 only.
+//             Used by QEMU -vga std, Bochs, VirtualBox.
+// VGA_REGS  : Standard VGA register access (DAC, CRTC, sequencer,
+//             attribute controller) via port I/O — x86/amd64 only.
+// PCI_VGA   : PCI VGA BAR0 linear framebuffer discovery.
+//             x86/amd64 via port-I/O PCI config; IA-64/SPARC64 via MMIO.
+// EFI_GOP   : EFI Graphics Output Protocol framebuffer — IA-64 (and
+//             any EFI-booted platform).
+// SUN_FB    : Sun-specific framebuffers (TCX, CG3, CG6 for SPARC v8;
+//             PCI VGA for SPARC v9).
+// FB_CONSOLE: Software text console rendered onto the framebuffer.
+//             Available on all architectures that have a framebuffer.
+// ================================================================
+
+#if defined(ARCH_X86) || defined(ARCH_AMD64)
+    #define ARCH_HAS_VESA_BGA   1
+    #define ARCH_HAS_VGA_REGS   1
+    #define ARCH_HAS_PCI_VGA    1
+    #define ARCH_HAS_EFI_GOP    0
+    #define ARCH_HAS_SUN_FB     0
+    #define ARCH_HAS_FB_CONSOLE 1
+#elif defined(ARCH_IA64)
+    #define ARCH_HAS_VESA_BGA   0
+    #define ARCH_HAS_VGA_REGS   0
+    #define ARCH_HAS_PCI_VGA    1
+    #define ARCH_HAS_EFI_GOP    1
+    #define ARCH_HAS_SUN_FB     0
+    #define ARCH_HAS_FB_CONSOLE 1
+#elif defined(ARCH_SPARC64)
+    #define ARCH_HAS_VESA_BGA   0
+    #define ARCH_HAS_VGA_REGS   0
+    #define ARCH_HAS_PCI_VGA    1
+    #define ARCH_HAS_EFI_GOP    0
+    #define ARCH_HAS_SUN_FB     1
+    #define ARCH_HAS_FB_CONSOLE 1
+#elif defined(ARCH_SPARC)
+    #define ARCH_HAS_VESA_BGA   0
+    #define ARCH_HAS_VGA_REGS   0
+    #define ARCH_HAS_PCI_VGA    0
+    #define ARCH_HAS_EFI_GOP    0
+    #define ARCH_HAS_SUN_FB     1
+    #define ARCH_HAS_FB_CONSOLE 1
+#elif defined(ARCH_ARM)
+    #define ARCH_HAS_VESA_BGA   0
+    #define ARCH_HAS_VGA_REGS   0
+    #define ARCH_HAS_PCI_VGA    0
+    #define ARCH_HAS_EFI_GOP    0
+    #define ARCH_HAS_SUN_FB     0
+    #define ARCH_HAS_FB_CONSOLE 1
+#else
+    #define ARCH_HAS_VESA_BGA   0
+    #define ARCH_HAS_VGA_REGS   0
+    #define ARCH_HAS_PCI_VGA    0
+    #define ARCH_HAS_EFI_GOP    0
+    #define ARCH_HAS_SUN_FB     0
+    #define ARCH_HAS_FB_CONSOLE 0
+#endif
 
 namespace kernel {
 namespace arch {
