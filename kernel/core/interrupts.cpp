@@ -335,7 +335,7 @@ void register_irq(uint8_t irq, irq_handler_t handler)
 #else // !ARCH_HAS_PIC_8259
 
 // ================================================================
-// Non-x86 implementation  —  SPARC SLAVIO / generic stub
+// Non-x86 implementation  —  SPARC / SPARC64 / generic stub
 // ================================================================
 
 static irq_handler_t s_handlers[16] = { 0 };
@@ -344,6 +344,8 @@ void eoi(uint8_t irq)
 {
 #if defined(ARCH_SPARC)
     arch::slavio_eoi(static_cast<uint32_t>(irq));
+#elif defined(ARCH_SPARC64)
+    arch::pci_eoi(static_cast<uint32_t>(irq));
 #else
     (void)irq;
 #endif
@@ -351,13 +353,7 @@ void eoi(uint8_t irq)
 
 void init()
 {
-#if defined(ARCH_SPARC)
-    // SLAVIO is already initialised in arch::sparc::init();
-    // just enable traps so the CPU accepts interrupts.
     arch::enable_interrupts();
-#else
-    arch::enable_interrupts();
-#endif
 }
 
 void register_irq(uint8_t irq, irq_handler_t handler)
@@ -366,21 +362,30 @@ void register_irq(uint8_t irq, irq_handler_t handler)
     s_handlers[irq] = handler;
 #if defined(ARCH_SPARC)
     arch::slavio_irq_enable(static_cast<uint32_t>(irq));
+#elif defined(ARCH_SPARC64)
+    arch::pci_irq_enable(static_cast<uint32_t>(irq));
 #else
     (void)irq;
     (void)handler;
 #endif
 }
 
-// C-linkage dispatch called from boot.s irq_dispatch_asm.
-// irq_index is 0-based (IRQ 1 maps to index 0, IRQ 15 to index 14).
+// C-linkage dispatch called from boot.s (SPARC v8)
 extern "C" void sparc_irq_dispatch(uint32_t irq_index)
 {
-    // SPARC hardware IRQs 1–15 ? index 0–14.
-    // Our handler table is indexed 0–15 so shift by 1 to match
-    // the IRQ number convention used elsewhere in the kernel.
     uint32_t irq = irq_index + 1;
     if (irq < 16 && s_handlers[irq]) {
+        s_handlers[irq]();
+    }
+    eoi(static_cast<uint8_t>(irq));
+}
+
+// C-linkage dispatch called from boot.s (SPARC v9)
+// tt_value is the raw trap type (0x41..0x4F for IRQ 1..15)
+extern "C" void sparc64_irq_dispatch(uint64_t tt_value)
+{
+    uint32_t irq = static_cast<uint32_t>(tt_value) - 0x40u;
+    if (irq >= 1 && irq < 16 && s_handlers[irq]) {
         s_handlers[irq]();
     }
     eoi(static_cast<uint8_t>(irq));

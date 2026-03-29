@@ -41,6 +41,14 @@
         #include <arch/ia64.h>
     #endif
     namespace kernel { namespace arch { using namespace ia64; } }
+#elif defined(__sparc__) && (defined(__arch64__) || defined(__sparcv9))
+    #define ARCH_SPARC64
+    #if defined(_MSC_VER)
+        #include "../../../arch/sparc64/include/arch/sparc64.h"
+    #else
+        #include <arch/sparc64.h>
+    #endif
+    namespace kernel { namespace arch { using namespace sparc64; } }
 #elif defined(__sparc__)
     #define ARCH_SPARC
     #if defined(_MSC_VER)
@@ -73,6 +81,15 @@
     #define ARCH_HAS_PS2        0
 #endif
 
+// USB host controller availability
+// All current architectures have a USB HCI implementation:
+//   x86/amd64 : UHCI (PCI, port I/O)
+//   ARM       : DWC OTG (MMIO)
+//   SPARC     : OHCI (SBus MMIO)
+//   SPARC64   : OHCI (PCI MMIO)
+//   IA-64     : OHCI (PCI MMIO)
+#define ARCH_HAS_USB  1
+
 namespace kernel {
 namespace arch {
 
@@ -87,8 +104,10 @@ inline const char* get_arch_name()
     return "ARM";
 #elif defined(ARCH_IA64)
     return "Itanium (IA-64)";
+#elif defined(ARCH_SPARC64)
+    return "SPARC v9 (UltraSPARC)";
 #elif defined(ARCH_SPARC)
-    return "SPARC";
+    return "SPARC v8";
 #else
     return "Unknown";
 #endif
@@ -97,7 +116,7 @@ inline const char* get_arch_name()
 // Get architecture bitness
 inline uint32_t get_arch_bits()
 {
-#if defined(ARCH_AMD64) || defined(ARCH_IA64)
+#if defined(ARCH_AMD64) || defined(ARCH_IA64) || defined(ARCH_SPARC64)
     return 64;
 #elif defined(ARCH_X86) || defined(ARCH_ARM) || defined(ARCH_SPARC)
     return 32;

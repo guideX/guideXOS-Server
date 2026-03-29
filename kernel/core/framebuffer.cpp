@@ -108,11 +108,32 @@ bool init_sun4m()
     return true;
 }
 
+bool init_sun4u() { return false; }
+
+#elif defined(ARCH_SPARC64)
+
+// Sun4u PCI VGA framebuffer initialisation.
+// QEMU sun4u with -vga std maps the linear framebuffer at
+// PCI BAR0, typically 0x80000000.  Default: 1024x768, 32-bit XRGB.
+bool init_sun4m() { return false; }
+
+bool init_sun4u()
+{
+    g_buffer = reinterpret_cast<uint32_t*>(0x80000000ULL);
+    g_width  = 1024;
+    g_height = 768;
+    g_pitch  = 1024 * 4;
+    g_bpp    = 32;
+    g_available = true;
+    return true;
+}
+
 #else
 
 bool init_sun4m() { return false; }
+bool init_sun4u() { return false; }
 
-#endif // ARCH_SPARC
+#endif
 
 #endif // ARCH_HAS_PIC_8259
 

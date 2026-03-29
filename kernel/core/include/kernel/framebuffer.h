@@ -22,8 +22,11 @@ bool init(void* multiboot_info);
 bool init_from_bootinfo(const guideXOS::BootInfo* bootinfo);
 #endif
 
-// Initialize Sun4m TCX framebuffer (SPARC only, known MMIO address)
+// Initialize Sun4m TCX framebuffer (SPARC v8 only, known MMIO address)
 bool init_sun4m();
+
+// Initialize Sun4u PCI VGA framebuffer (SPARC v9 only, known PCI BAR)
+bool init_sun4u();
 
 // Get framebuffer dimensions
 uint32_t get_width();

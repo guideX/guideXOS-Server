@@ -1,0 +1,42 @@
+# SPARC v9 (UltraSPARC, 64-bit) Architecture Build Configuration
+#
+# Targets SPARC v9 / Sun4u.  Tested with sparc64-linux-gnu toolchain
+# and qemu-system-sparc64 (Sun4u / Ultra 5).
+#
+# Copyright (c) 2026 guideXOS Server
+#
+
+# Toolchain — try sparc64-elf first, fall back to sparc64-linux-gnu
+ifeq ($(OS),Windows_NT)
+    CXX := sparc64-elf-g++
+    AS  := sparc64-elf-as
+    LD  := sparc64-elf-ld
+else
+    ifneq ($(shell which sparc64-elf-g++ 2>/dev/null),)
+        CXX := sparc64-elf-g++
+        AS  := sparc64-elf-as
+        LD  := sparc64-elf-ld
+    else ifneq ($(shell which sparc64-linux-gnu-g++ 2>/dev/null),)
+        CXX := sparc64-linux-gnu-g++
+        AS  := sparc64-linux-gnu-as
+        LD  := sparc64-linux-gnu-ld
+    else
+        CXX := sparc64-elf-g++
+        AS  := sparc64-elf-as
+        LD  := sparc64-elf-ld
+    endif
+endif
+
+# Architecture-specific flags
+# -m64          : 64-bit code generation
+# -mcpu=v9      : target SPARC v9 ISA
+# -mno-fpu      : no floating-point (kernel code)
+# -mcmodel=medlow : code model suitable for addresses < 4 GB
+ARCH_CFLAGS := -m64 -mcpu=v9 -mno-fpu -mcmodel=medlow
+ASFLAGS := -64 --defsym __sparc64__=1
+ARCH_LDFLAGS :=
+LIBS :=
+
+# Target information
+ARCH_BITS := 64
+ARCH_NAME := SPARC v9 (UltraSPARC)

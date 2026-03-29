@@ -143,13 +143,29 @@
     <ClInclude Include="gui_protocol.h" />
     <ClInclude Include="gxm_loader.h" />
     <ClInclude Include="image_viewer.h" />
+    <ClInclude Include="kernel\arch\amd64\include\arch\usb_hci.h" />
+    <ClInclude Include="kernel\arch\arm\include\arch\usb_hci.h" />
+    <ClInclude Include="kernel\arch\ia64\include\arch\ski_console.h" />
+    <ClInclude Include="kernel\arch\ia64\include\arch\usb_hci.h" />
+    <ClInclude Include="kernel\arch\sparc64\include\arch\sparc64.h" />
+    <ClInclude Include="kernel\arch\sparc64\include\arch\usb_hci.h" />
+    <ClInclude Include="kernel\arch\sparc64\include\arch\zs_serial.h" />
+    <ClInclude Include="kernel\arch\sparc\include\arch\usb_hci.h" />
     <ClInclude Include="kernel\arch\sparc\include\arch\zs_serial.h" />
+    <ClInclude Include="kernel\arch\x86\include\arch\usb_hci.h" />
     <ClInclude Include="kernel\core\include\kernel\desktop.h" />
     <ClInclude Include="kernel\core\include\kernel\framebuffer.h" />
     <ClInclude Include="kernel\core\include\kernel\interrupts.h" />
     <ClInclude Include="kernel\core\include\kernel\multiboot.h" />
     <ClInclude Include="kernel\core\include\kernel\process.h" />
     <ClInclude Include="kernel\core\include\kernel\ps2mouse.h" />
+    <ClInclude Include="kernel\core\include\kernel\usb.h" />
+    <ClInclude Include="kernel\core\include\kernel\usb_audio.h" />
+    <ClInclude Include="kernel\core\include\kernel\usb_cdc.h" />
+    <ClInclude Include="kernel\core\include\kernel\usb_hid.h" />
+    <ClInclude Include="kernel\core\include\kernel\usb_printer.h" />
+    <ClInclude Include="kernel\core\include\kernel\usb_storage.h" />
+    <ClInclude Include="kernel\core\include\kernel\usb_video.h" />
     <ClInclude Include="launchSettings.json" />
     <ClInclude Include="icons.h" />
     <ClInclude Include="ipc.h" />
@@ -204,19 +220,28 @@
     <ClCompile Include="kernel\arch\amd64\arch.cpp">
       <ObjectFileName>$(IntDir)arch_amd64.obj</ObjectFileName>
     </ClCompile>
+    <ClCompile Include="kernel\arch\amd64\usb_hci.cpp" />
     <ClCompile Include="kernel\arch\arm\arch.cpp">
       <ObjectFileName>$(IntDir)arch_arm.obj</ObjectFileName>
     </ClCompile>
+    <ClCompile Include="kernel\arch\arm\usb_hci.cpp" />
     <ClCompile Include="kernel\arch\ia64\arch.cpp">
       <ObjectFileName>$(IntDir)arch_ia64.obj</ObjectFileName>
     </ClCompile>
+    <ClCompile Include="kernel\arch\ia64\ski_console.cpp" />
+    <ClCompile Include="kernel\arch\ia64\usb_hci.cpp" />
+    <ClCompile Include="kernel\arch\sparc64\arch.cpp" />
+    <ClCompile Include="kernel\arch\sparc64\usb_hci.cpp" />
+    <ClCompile Include="kernel\arch\sparc64\zs_serial.cpp" />
     <ClCompile Include="kernel\arch\sparc\arch.cpp">
       <ObjectFileName>$(IntDir)arch_sparc.obj</ObjectFileName>
     </ClCompile>
+    <ClCompile Include="kernel\arch\sparc\usb_hci.cpp" />
     <ClCompile Include="kernel\arch\sparc\zs_serial.cpp" />
     <ClCompile Include="kernel\arch\x86\arch.cpp">
       <ObjectFileName>$(IntDir)arch_x86.obj</ObjectFileName>
     </ClCompile>
+    <ClCompile Include="kernel\arch\x86\usb_hci.cpp" />
     <ClCompile Include="kernel\core\arch.cpp">
       <ObjectFileName>$(IntDir)arch_core.obj</ObjectFileName>
     </ClCompile>
@@ -228,6 +253,13 @@
       <ObjectFileName>$(IntDir)process_kernel.obj</ObjectFileName>
     </ClCompile>
     <ClCompile Include="kernel\core\ps2mouse.cpp" />
+    <ClCompile Include="kernel\core\usb.cpp" />
+    <ClCompile Include="kernel\core\usb_audio.cpp" />
+    <ClCompile Include="kernel\core\usb_cdc.cpp" />
+    <ClCompile Include="kernel\core\usb_hid.cpp" />
+    <ClCompile Include="kernel\core\usb_printer.cpp" />
+    <ClCompile Include="kernel\core\usb_storage.cpp" />
+    <ClCompile Include="kernel\core\usb_video.cpp" />
     <ClCompile Include="kernel\core\vga.cpp" />
     <ClCompile Include="lifecycle.cpp" />
     <ClCompile Include="logger.cpp" />
@@ -278,6 +310,9 @@
     <None Include="kernel\arch\ia64\boot.s" />
     <None Include="kernel\arch\ia64\linker.ld" />
     <None Include="kernel\arch\ia64\Makefile.arch" />
+    <None Include="kernel\arch\sparc64\boot.s" />
+    <None Include="kernel\arch\sparc64\linker.ld" />
+    <None Include="kernel\arch\sparc64\Makefile.arch" />
     <None Include="kernel\arch\sparc\boot.s" />
     <None Include="kernel\arch\sparc\linker.ld" />
     <None Include="kernel\arch\sparc\Makefile.arch" />
@@ -292,16 +327,26 @@
     <None Include="RUN-KERNEL.bat" />
     <None Include="run-qemu.bat" />
     <None Include="run-uefi.sh" />
+    <None Include="scripts\build-and-run-sparcv9_in_linux.sh" />
+    <None Include="scripts\build-ia64.sh" />
+    <None Include="scripts\build-sparcv9.sh" />
     <None Include="scripts\check-multiboot.bat" />
     <None Include="scripts\diagnose-qemu.bat" />
+    <None Include="scripts\run-ia64_in_linux.sh" />
     <None Include="scripts\run-qemu-x86-vnc.bat" />
     <None Include="scripts\run-qemu-x86-vnc.sh" />
     <None Include="scripts\run-qemu-x86-with-build.bat" />
     <None Include="scripts\run-qemu-x86.bat" />
     <None Include="scripts\run-qemu-x86.sh" />
+    <None Include="scripts\run-sparcv9_in_windows.bat" />
+    <None Include="scripts\run-sparkv8_in_windows.sh" />
     <None Include="scripts\test-build.bat" />
     <None Include="scripts\test-build.sh" />
     <None Include="setup-toolchain.bat" />
+    <None Include="_fix_filters.py" />
+  </ItemGroup>
+  <ItemGroup>
+    <Text Include="scripts\build-and-run-sparcv8_in_linux.sh" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

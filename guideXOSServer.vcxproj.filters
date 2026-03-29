@@ -183,6 +183,54 @@
     <ClInclude Include="kernel\arch\sparc\include\arch\zs_serial.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="kernel\arch\sparc64\include\arch\sparc64.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\arch\sparc64\include\arch\zs_serial.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\arch\ia64\include\arch\ski_console.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\core\include\kernel\usb.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\core\include\kernel\usb_hid.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\core\include\kernel\usb_storage.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\core\include\kernel\usb_cdc.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\core\include\kernel\usb_audio.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\core\include\kernel\usb_video.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\core\include\kernel\usb_printer.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\arch\x86\include\arch\usb_hci.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\arch\amd64\include\arch\usb_hci.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\arch\arm\include\arch\usb_hci.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\arch\sparc\include\arch\usb_hci.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\arch\sparc64\include\arch\usb_hci.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\arch\ia64\include\arch\usb_hci.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="allocator.cpp">
@@ -338,6 +386,54 @@
     <ClCompile Include="kernel\arch\sparc\zs_serial.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="kernel\arch\sparc64\arch.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\arch\sparc64\zs_serial.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\arch\ia64\ski_console.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\core\usb.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\core\usb_hid.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\core\usb_storage.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\core\usb_cdc.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\core\usb_audio.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\core\usb_video.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\core\usb_printer.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\arch\x86\usb_hci.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\arch\amd64\usb_hci.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\arch\arm\usb_hci.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\arch\sparc\usb_hci.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\arch\sparc64\usb_hci.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\arch\ia64\usb_hci.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <None Include="kernel\arch\amd64\boot.asm">
@@ -419,5 +515,20 @@
       <Filter>Source Files</Filter>
     </None>
     <None Include="docs\BUILD_GUIDE.md" />
+    <None Include="scripts\run-sparkv8_in_windows.sh" />
+    <None Include="kernel\arch\sparc64\boot.s" />
+    <None Include="kernel\arch\sparc64\linker.ld" />
+    <None Include="kernel\arch\sparc64\Makefile.arch" />
+    <None Include="scripts\build-sparcv9.sh" />
+    <None Include="scripts\run-sparcv9_in_windows.bat">
+      <Filter>Source Files</Filter>
+    </None>
+    <None Include="scripts\build-and-run-sparcv9_in_linux.sh" />
+    <None Include="scripts\build-ia64.sh" />
+    <None Include="scripts\run-ia64_in_linux.sh" />
+    <None Include="_fix_filters.py" />
+  </ItemGroup>
+  <ItemGroup>
+    <Text Include="scripts\build-and-run-sparcv8_in_linux.sh" />
   </ItemGroup>
 </Project>

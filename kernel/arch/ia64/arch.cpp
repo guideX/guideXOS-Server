@@ -5,6 +5,7 @@
 //
 
 #include "include/arch/ia64.h"
+#include "include/arch/ski_console.h"
 #if defined(_MSC_VER)
 #include <intrin.h>
 #define GXOS_MSVC_STUB 1
@@ -250,11 +251,46 @@ void sync_instruction_cache()
 
 void init()
 {
-    // TODO: Initialize IA-64-specific features
-    // - Set up interrupt vector table (IVA)
-    // - Configure region registers
-    // - Set up translation registers
-    // - Initialize RSE
+    // IVT is already installed by boot.s (cr.iva set before kernel_main).
+    // RSE backing store is also configured in boot.s.
+
+    // Initialize ski simulator console for early output
+    ski_console::init();
+
+    // Print boot banner via firmware console
+    ski_console::puts("guideXOS IA-64 kernel init\r\n");
+
+    // Verify IVA is set (diagnostic)
+    uint64_t iva = read_iva();
+    ski_console::puts("  IVA = ");
+    ski_console::put_hex(iva);
+    ski_console::puts("\r\n");
+
+    // Verify RSE backing store pointer (diagnostic)
+    uint64_t bsp = read_bsp();
+    ski_console::puts("  BSP = ");
+    ski_console::put_hex(bsp);
+    ski_console::puts("\r\n");
+
+    // Set DCR (Default Control Register, CR0) to safe defaults:
+    // bit 0: defer data-TLB misses to VHPT walker (0 = use IVT handler)
+    write_cr(0, 0);
+
+    // Enable interrupt collection (psr.ic) so the IVT is active,
+    // but keep external interrupts masked (psr.i = 0) until the
+    // kernel explicitly calls enable_interrupts().
+#if !GXOS_MSVC_STUB
+    asm volatile (
+        "ssm psr.ic;;\n"
+        "srlz.d;;\n"
+        :
+        :
+        : "memory"
+    );
+#endif
+
+    ski_console::puts("  Interrupt collection enabled\r\n");
+    ski_console::puts("IA-64 arch init complete\r\n");
 }
 
 } // namespace ia64

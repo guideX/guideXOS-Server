@@ -1,18 +1,43 @@
 # Itanium (IA-64) Architecture Build Configuration
+# Itanium (IA-64) Architecture Build Configuration
 #
-# Copyright (c) 2024 guideX
+# Targets IA-64 / Itanium.  Tested with ia64-elf toolchain
+# and the HP ski IA-64 simulator.
+#
+# Copyright (c) 2026 guideXOS Server
 #
 
-# Toolchain
-CXX := ia64-elf-g++
-AS := ia64-elf-as
-LD := ia64-elf-ld
+# Toolchain — try ia64-elf first, fall back to ia64-linux-gnu
+ifeq ($(OS),Windows_NT)
+    CXX := ia64-elf-g++
+    AS  := ia64-elf-as
+    LD  := ia64-elf-ld
+else
+    ifneq ($(shell which ia64-elf-g++ 2>/dev/null),)
+        CXX := ia64-elf-g++
+        AS  := ia64-elf-as
+        LD  := ia64-elf-ld
+    else ifneq ($(shell which ia64-linux-gnu-g++ 2>/dev/null),)
+        CXX := ia64-linux-gnu-g++
+        AS  := ia64-linux-gnu-as
+        LD  := ia64-linux-gnu-ld
+    else
+        CXX := ia64-elf-g++
+        AS  := ia64-elf-as
+        LD  := ia64-elf-ld
+    endif
+endif
 
 # Architecture-specific flags
-CFLAGS += -m64
-ASFLAGS :=
+# -mlp64          : LP64 data model (standard for IA-64)
+# -mconstant-gp   : assume GP register is constant (kernel single-image)
+# -mno-pic        : no position-independent code (kernel runs at fixed VA)
+# -mfixed-range=f2-f127 : reserve floating-point regs (kernel avoids FP)
+ARCH_CFLAGS := -mlp64 -mconstant-gp -mno-pic -mfixed-range=f2-f127
+ASFLAGS := -mlp64 -mconstant-gp
+ARCH_LDFLAGS :=
 LIBS :=
 
 # Target information
 ARCH_BITS := 64
-ARCH_NAME := IA64
+ARCH_NAME := Itanium (IA-64)

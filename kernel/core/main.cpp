@@ -25,6 +25,14 @@
 #include <arch/zs_serial.h>
 #endif
 
+#if defined(ARCH_SPARC64)
+#include <arch/zs_serial.h>
+#endif
+
+#if defined(ARCH_IA64)
+#include <arch/ski_console.h>
+#endif
+
 extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
 {
 #if ARCH_HAS_PIC_8259
@@ -157,6 +165,65 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         }
     }
 #endif // ARCH_SPARC
+
+#if defined(ARCH_SPARC64)
+    // ---- SPARC v9 Sun4u boot path ----
+
+    bool has_fb = kernel::framebuffer::init_sun4u();
+
+    if (has_fb) {
+        kernel::framebuffer::clear(0xFF101828);
+
+        kernel::desktop::init();
+        kernel::desktop::draw();
+
+        kernel::interrupts::init();
+
+        kernel::arch::sparc64::zs::init(kernel::framebuffer::get_width(),
+                                         kernel::framebuffer::get_height());
+
+        kernel::interrupts::register_irq(12, kernel::arch::sparc64::zs::irq_handler);
+
+        kernel::desktop::draw_cursor(kernel::arch::sparc64::zs::mouse_x(),
+                                     kernel::arch::sparc64::zs::mouse_y());
+
+        while (1) {
+            if (kernel::arch::sparc64::zs::mouse_dirty()) {
+                kernel::arch::sparc64::zs::mouse_clear_dirty();
+                kernel::desktop::handle_mouse(
+                    kernel::arch::sparc64::zs::mouse_x(),
+                    kernel::arch::sparc64::zs::mouse_y(),
+                    kernel::arch::sparc64::zs::mouse_buttons());
+            }
+            kernel::arch::halt();
+        }
+    }
+#endif // ARCH_SPARC64
+
+#if defined(ARCH_IA64)
+    // ---- IA-64 / ski simulator boot path ----
+
+    // arch::init() already set up IVT, RSE, and ski console.
+    // Print boot information to the firmware console.
+    kernel::arch::ia64::ski_console::puts("\r\n");
+    kernel::arch::ia64::ski_console::puts("========================================\r\n");
+    kernel::arch::ia64::ski_console::puts("  guideXOS Server - Itanium (IA-64)\r\n");
+    kernel::arch::ia64::ski_console::puts("  Running on HP ski simulator\r\n");
+    kernel::arch::ia64::ski_console::puts("========================================\r\n");
+    kernel::arch::ia64::ski_console::puts("\r\n");
+    kernel::arch::ia64::ski_console::puts("Kernel loaded at 1 MB physical\r\n");
+    kernel::arch::ia64::ski_console::puts("Architecture: ");
+    kernel::arch::ia64::ski_console::puts(kernel::arch::get_arch_name());
+    kernel::arch::ia64::ski_console::puts("\r\n");
+    kernel::arch::ia64::ski_console::puts("\r\n");
+    kernel::arch::ia64::ski_console::puts("Entering idle loop (Ctrl-C in ski to exit)\r\n");
+
+    // Enable interrupts and idle
+    kernel::interrupts::init();
+    while (1) {
+        kernel::arch::halt();
+    }
+#endif // ARCH_IA64
 
     // Fallback: no framebuffer or unsupported non-x86 platform
     kernel::interrupts::init();
