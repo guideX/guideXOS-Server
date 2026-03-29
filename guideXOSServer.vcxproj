@@ -153,16 +153,26 @@
     <ClInclude Include="kernel\arch\sparc\include\arch\usb_hci.h" />
     <ClInclude Include="kernel\arch\sparc\include\arch\zs_serial.h" />
     <ClInclude Include="kernel\arch\x86\include\arch\usb_hci.h" />
+    <ClInclude Include="kernel\core\include\kernel\ata.h" />
+    <ClInclude Include="kernel\core\include\kernel\block_device.h" />
     <ClInclude Include="kernel\core\include\kernel\desktop.h" />
     <ClInclude Include="kernel\core\include\kernel\framebuffer.h" />
+    <ClInclude Include="kernel\core\include\kernel\fs_ext4.h" />
+    <ClInclude Include="kernel\core\include\kernel\fs_fat.h" />
+    <ClInclude Include="kernel\core\include\kernel\fs_ufs.h" />
     <ClInclude Include="kernel\core\include\kernel\interrupts.h" />
     <ClInclude Include="kernel\core\include\kernel\multiboot.h" />
+    <ClInclude Include="kernel\core\include\kernel\nvme.h" />
     <ClInclude Include="kernel\core\include\kernel\process.h" />
     <ClInclude Include="kernel\core\include\kernel\ps2mouse.h" />
     <ClInclude Include="kernel\core\include\kernel\usb.h" />
     <ClInclude Include="kernel\core\include\kernel\usb_audio.h" />
     <ClInclude Include="kernel\core\include\kernel\usb_cdc.h" />
     <ClInclude Include="kernel\core\include\kernel\usb_hid.h" />
+    <ClInclude Include="kernel\core\include\kernel\usb_net.h" />
+    <ClInclude Include="kernel\core\include\kernel\usb_net_ecm.h" />
+    <ClInclude Include="kernel\core\include\kernel\usb_net_rndis.h" />
+    <ClInclude Include="kernel\core\include\kernel\usb_net_wifi.h" />
     <ClInclude Include="kernel\core\include\kernel\usb_printer.h" />
     <ClInclude Include="kernel\core\include\kernel\usb_storage.h" />
     <ClInclude Include="kernel\core\include\kernel\usb_video.h" />
@@ -245,10 +255,16 @@
     <ClCompile Include="kernel\core\arch.cpp">
       <ObjectFileName>$(IntDir)arch_core.obj</ObjectFileName>
     </ClCompile>
+    <ClCompile Include="kernel\core\ata.cpp" />
+    <ClCompile Include="kernel\core\block_device.cpp" />
     <ClCompile Include="kernel\core\desktop.cpp" />
     <ClCompile Include="kernel\core\framebuffer.cpp" />
+    <ClCompile Include="kernel\core\fs_ext4.cpp" />
+    <ClCompile Include="kernel\core\fs_fat.cpp" />
+    <ClCompile Include="kernel\core\fs_ufs.cpp" />
     <ClCompile Include="kernel\core\interrupts.cpp" />
     <ClCompile Include="kernel\core\main.cpp" />
+    <ClCompile Include="kernel\core\nvme.cpp" />
     <ClCompile Include="kernel\core\process.cpp">
       <ObjectFileName>$(IntDir)process_kernel.obj</ObjectFileName>
     </ClCompile>
@@ -257,6 +273,10 @@
     <ClCompile Include="kernel\core\usb_audio.cpp" />
     <ClCompile Include="kernel\core\usb_cdc.cpp" />
     <ClCompile Include="kernel\core\usb_hid.cpp" />
+    <ClCompile Include="kernel\core\usb_net.cpp" />
+    <ClCompile Include="kernel\core\usb_net_ecm.cpp" />
+    <ClCompile Include="kernel\core\usb_net_rndis.cpp" />
+    <ClCompile Include="kernel\core\usb_net_wifi.cpp" />
     <ClCompile Include="kernel\core\usb_printer.cpp" />
     <ClCompile Include="kernel\core\usb_storage.cpp" />
     <ClCompile Include="kernel\core\usb_video.cpp" />

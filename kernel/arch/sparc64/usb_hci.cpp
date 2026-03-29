@@ -18,6 +18,8 @@ namespace kernel {
 namespace usb {
 namespace hci {
 
+namespace {
+
 // ================================================================
 // OHCI register offsets (same as SPARC v8 OHCI)
 // ================================================================
@@ -27,7 +29,7 @@ static const uint32_t OHCI_CONTROL      = 0x04;
 static const uint32_t OHCI_CMDSTATUS    = 0x08;
 static const uint32_t OHCI_INTRSTATUS   = 0x0C;
 static const uint32_t OHCI_INTRENABLE   = 0x10;
-static const uint32_t OHCI_HCCA         = 0x18;
+static const uint32_t OHCI_REG_HCCA     = 0x18;
 static const uint32_t OHCI_CTRL_HEAD    = 0x20;
 static const uint32_t OHCI_BULK_HEAD    = 0x28;
 static const uint32_t OHCI_FMINTERVAL   = 0x34;
@@ -198,6 +200,8 @@ static TransferStatus wait_td(volatile OHCI_TD* td, uint32_t timeout_loops)
     return XFER_TIMEOUT;
 }
 
+} // anonymous namespace
+
 // ================================================================
 // HCI interface implementation
 // ================================================================
@@ -219,7 +223,7 @@ bool init()
 
     // HCCA
     memzero(&s_hcca, sizeof(s_hcca));
-    ohci_write(OHCI_HCCA, ptr32(&s_hcca));
+    ohci_write(OHCI_REG_HCCA, ptr32(&s_hcca));
 
     // Frame interval
     ohci_write(OHCI_FMINTERVAL, (0x2778u << 16) | 0x2EDFu);

@@ -21,6 +21,8 @@ namespace kernel {
 namespace usb {
 namespace hci {
 
+namespace {
+
 // ================================================================
 // OHCI register offsets
 // ================================================================
@@ -31,7 +33,7 @@ static const uint32_t OHCI_CMDSTATUS    = 0x08;
 static const uint32_t OHCI_INTRSTATUS   = 0x0C;
 static const uint32_t OHCI_INTRENABLE   = 0x10;
 static const uint32_t OHCI_INTRDISABLE  = 0x14;
-static const uint32_t OHCI_HCCA         = 0x18;
+static const uint32_t OHCI_REG_HCCA     = 0x18;
 static const uint32_t OHCI_PERIOD_CUR   = 0x1C;
 static const uint32_t OHCI_CTRL_HEAD    = 0x20;
 static const uint32_t OHCI_CTRL_CUR     = 0x24;
@@ -201,6 +203,8 @@ static bool find_ohci_controller()
     return false;
 }
 
+} // anonymous namespace
+
 // ================================================================
 // HCI interface implementation
 // ================================================================
@@ -222,7 +226,7 @@ bool init()
 
     // Set up HCCA
     memzero(&s_hcca, sizeof(s_hcca));
-    ohci_write(OHCI_HCCA, reinterpret_cast<uint32_t>(&s_hcca));
+    ohci_write(OHCI_REG_HCCA, reinterpret_cast<uint32_t>(&s_hcca));
 
     // Set up frame interval (12000 - 1 = 0x2EDF for full-speed)
     ohci_write(OHCI_FMINTERVAL, (0x2778u << 16) | 0x2EDFu);

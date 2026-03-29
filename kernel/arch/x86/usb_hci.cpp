@@ -17,6 +17,8 @@ namespace kernel {
 namespace usb {
 namespace hci {
 
+namespace {
+
 // ================================================================
 // UHCI register offsets (relative to USBBASE)
 // ================================================================
@@ -204,6 +206,8 @@ static TransferStatus wait_td(volatile UHCI_TD* td, uint32_t timeout_loops)
     }
     return XFER_TIMEOUT;
 }
+
+} // anonymous namespace
 
 // ================================================================
 // HCI interface implementation

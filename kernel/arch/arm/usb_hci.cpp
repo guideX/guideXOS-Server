@@ -23,6 +23,8 @@ namespace kernel {
 namespace usb {
 namespace hci {
 
+namespace {
+
 // ================================================================
 // DWC OTG register offsets (host-mode subset)
 // ================================================================
@@ -207,6 +209,8 @@ static const uint8_t DWC_PID_DATA0 = 0;
 static const uint8_t DWC_PID_DATA1 = 2;
 static const uint8_t DWC_PID_DATA2 = 1;
 static const uint8_t DWC_PID_SETUP = 3;
+
+} // anonymous namespace
 
 // ================================================================
 // HCI interface implementation

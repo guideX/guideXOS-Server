@@ -90,6 +90,41 @@
 //   IA-64     : OHCI (PCI MMIO)
 #define ARCH_HAS_USB  1
 
+// ================================================================
+// Storage controller availability
+//
+// ATA PIO : uses port I/O registers — x86/amd64 only.
+// AHCI    : SATA over PCI MMIO — x86/amd64/ia64/sparc64.
+// NVMe    : PCIe MMIO — x86/amd64/ia64/sparc64.
+// ================================================================
+
+#if defined(ARCH_X86) || defined(ARCH_AMD64)
+    #define ARCH_HAS_ATA_PIO   1
+    #define ARCH_HAS_AHCI      1
+    #define ARCH_HAS_NVME      1
+#elif defined(ARCH_IA64) || defined(ARCH_SPARC64)
+    #define ARCH_HAS_ATA_PIO   0
+    #define ARCH_HAS_AHCI      1
+    #define ARCH_HAS_NVME      1
+#else
+    #define ARCH_HAS_ATA_PIO   0
+    #define ARCH_HAS_AHCI      0
+    #define ARCH_HAS_NVME      0
+#endif
+
+// ================================================================
+// Filesystem support
+//
+// FAT32/exFAT : universal — works on all architectures.
+// ext4        : universal — native Linux FS, useful everywhere.
+// UFS         : primarily for SPARC (Solaris/SunOS), also FreeBSD.
+//               Compiled on all arches but most relevant for SPARC.
+// ================================================================
+
+#define ARCH_HAS_FS_FAT   1
+#define ARCH_HAS_FS_EXT4  1
+#define ARCH_HAS_FS_UFS   1
+
 namespace kernel {
 namespace arch {
 
