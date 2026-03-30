@@ -24,10 +24,13 @@ ifndef ARCH
     ifeq ($(ARCH),armv7l)
         ARCH := arm
     endif
+    ifeq ($(ARCH),riscv64)
+        ARCH := riscv64
+    endif
 endif
 
 # Validate architecture
-VALID_ARCHS := amd64 x86 arm ia64 sparc sparc64
+VALID_ARCHS := amd64 x86 arm ia64 sparc sparc64 riscv64
 ifeq ($(filter $(ARCH),$(VALID_ARCHS)),)
     $(error Invalid ARCH: $(ARCH). Valid options: $(VALID_ARCHS))
 endif

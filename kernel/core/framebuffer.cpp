@@ -135,6 +135,20 @@ bool init_sun4u() { return false; }
 
 #endif
 
+// ================================================================
+// RISC-V ramfb init
+// ================================================================
+
+#if defined(ARCH_RISCV64)
+bool init_riscv_ramfb(uint64_t lfbBase, uint32_t width, uint32_t height,
+                      uint32_t pitch, uint8_t bpp)
+{
+    return init_manual(lfbBase, width, height, pitch, bpp);
+}
+#else
+bool init_riscv_ramfb(uint64_t, uint32_t, uint32_t, uint32_t, uint8_t) { return false; }
+#endif
+
 #endif // ARCH_HAS_PIC_8259
 
 // ================================================================

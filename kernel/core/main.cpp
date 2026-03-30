@@ -33,6 +33,11 @@
 #include <arch/ski_console.h>
 #endif
 
+#if defined(ARCH_RISCV64)
+#include <arch/sbi_console.h>
+#include <arch/graphics.h>
+#endif
+
 extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
 {
 #if ARCH_HAS_PIC_8259
@@ -224,6 +229,60 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::arch::halt();
     }
 #endif // ARCH_IA64
+
+#if defined(ARCH_RISCV64)
+    // ---- RISC-V 64 / QEMU virt boot path ----
+
+    // arch::init() already set up SBI console.
+    // Print boot information to the SBI serial console.
+    kernel::arch::riscv64::sbi_console::puts("\r\n");
+    kernel::arch::riscv64::sbi_console::puts("========================================\r\n");
+    kernel::arch::riscv64::sbi_console::puts("  guideXOS Server - RISC-V 64 (RV64IMA)\r\n");
+    kernel::arch::riscv64::sbi_console::puts("  Running on QEMU virt + OpenSBI\r\n");
+    kernel::arch::riscv64::sbi_console::puts("========================================\r\n");
+    kernel::arch::riscv64::sbi_console::puts("\r\n");
+    kernel::arch::riscv64::sbi_console::puts("Kernel loaded at 0x80200000\r\n");
+    kernel::arch::riscv64::sbi_console::puts("Architecture: ");
+    kernel::arch::riscv64::sbi_console::puts(kernel::arch::get_arch_name());
+    kernel::arch::riscv64::sbi_console::puts("\r\n");
+    kernel::arch::riscv64::sbi_console::puts("\r\n");
+
+    // Try to initialise ramfb / PCI VGA graphics
+    kernel::arch::riscv64::sbi_console::puts("Probing graphics...\r\n");
+    bool has_fb = kernel::arch::riscv64::graphics::init();
+
+    if (has_fb) {
+        kernel::arch::riscv64::sbi_console::puts("Framebuffer found: ");
+        kernel::arch::riscv64::sbi_console::put_hex(
+            kernel::arch::riscv64::graphics::get_lfb_address());
+        kernel::arch::riscv64::sbi_console::puts("\r\n");
+
+        // Register the framebuffer with the core driver
+        kernel::framebuffer::init_riscv_ramfb(
+            kernel::arch::riscv64::graphics::get_lfb_address(),
+            kernel::arch::riscv64::graphics::get_width(),
+            kernel::arch::riscv64::graphics::get_height(),
+            kernel::arch::riscv64::graphics::get_pitch(),
+            kernel::arch::riscv64::graphics::get_bpp());
+
+        kernel::framebuffer::clear(0xFF101828);
+
+        kernel::desktop::init();
+        kernel::desktop::draw();
+
+        kernel::arch::riscv64::sbi_console::puts("Desktop drawn\r\n");
+    } else {
+        kernel::arch::riscv64::sbi_console::puts("No framebuffer detected\r\n");
+    }
+
+    kernel::arch::riscv64::sbi_console::puts("Entering idle loop\r\n");
+
+    // Enable interrupts and idle
+    kernel::interrupts::init();
+    while (1) {
+        kernel::arch::halt();
+    }
+#endif // ARCH_RISCV64
 
     // Fallback: no framebuffer or unsupported non-x86 platform
     kernel::interrupts::init();

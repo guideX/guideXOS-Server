@@ -1,0 +1,48 @@
+# RISC-V 64-bit (RV64) Architecture Build Configuration
+#
+# Targets RV64IMA in S-mode (supervisor) on top of OpenSBI.
+# Tested with riscv64-elf and riscv64-unknown-elf toolchains
+# and QEMU virt machine.
+#
+# Copyright (c) 2026 guideXOS Server
+#
+
+# Toolchain - try riscv64-elf first, then riscv64-unknown-elf,
+# then riscv64-linux-gnu
+ifeq ($(OS),Windows_NT)
+    CXX := riscv64-unknown-elf-g++
+    AS  := riscv64-unknown-elf-as
+    LD  := riscv64-unknown-elf-ld
+else
+    ifneq ($(shell which riscv64-elf-g++ 2>/dev/null),)
+        CXX := riscv64-elf-g++
+        AS  := riscv64-elf-as
+        LD  := riscv64-elf-ld
+    else ifneq ($(shell which riscv64-unknown-elf-g++ 2>/dev/null),)
+        CXX := riscv64-unknown-elf-g++
+        AS  := riscv64-unknown-elf-as
+        LD  := riscv64-unknown-elf-ld
+    else ifneq ($(shell which riscv64-linux-gnu-g++ 2>/dev/null),)
+        CXX := riscv64-linux-gnu-g++
+        AS  := riscv64-linux-gnu-as
+        LD  := riscv64-linux-gnu-ld
+    else
+        CXX := riscv64-unknown-elf-g++
+        AS  := riscv64-unknown-elf-as
+        LD  := riscv64-unknown-elf-ld
+    endif
+endif
+
+# Architecture-specific flags
+# -march=rv64ima  : RV64 base + integer multiply + atomic
+# -mabi=lp64      : LP64 ABI (no hardware float in ABI)
+# -mcmodel=medany : medium-any code model (kernel at high address)
+# -mno-relax      : disable linker relaxation (GP not yet set in boot)
+ARCH_CFLAGS := -march=rv64ima -mabi=lp64 -mcmodel=medany -mno-relax
+ASFLAGS := -march=rv64ima -mabi=lp64
+ARCH_LDFLAGS :=
+LIBS :=
+
+# Target information
+ARCH_BITS := 64
+ARCH_NAME := RISC-V 64 (RV64IMA)

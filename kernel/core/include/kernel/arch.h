@@ -57,6 +57,14 @@
         #include <arch/sparc.h>
     #endif
     namespace kernel { namespace arch { using namespace sparc; } }
+#elif defined(__riscv) && (__riscv_xlen == 64)
+    #define ARCH_RISCV64
+    #if defined(_MSC_VER)
+        #include "../../../arch/riscv64/include/arch/riscv64.h"
+    #else
+        #include <arch/riscv64.h>
+    #endif
+    namespace kernel { namespace arch { using namespace riscv64; } }
 #else
     #error "Unsupported architecture"
 #endif
@@ -88,12 +96,13 @@
 //   SPARC     : OHCI (SBus MMIO)
 //   SPARC64   : OHCI (PCI MMIO)
 //   IA-64     : OHCI (PCI MMIO)
+//   RISC-V 64 : OHCI (PCI ECAM MMIO)
 #define ARCH_HAS_USB  1
 
 // ================================================================
 // PCI Audio controller availability
 //
-// HDA / AC'97 : PCI MMIO — x86/amd64/ia64/sparc64.
+// HDA / AC'97 : PCI MMIO — x86/amd64/ia64/sparc64/riscv64.
 // CS4231 SBus : SPARC v8 (Sun4m) — SBus MMIO, no PCI.
 // PL041 AACI  : ARM Versatile/RealView — MMIO AC'97 controller.
 // ================================================================
@@ -102,7 +111,7 @@
     #define ARCH_HAS_PCI_AUDIO   1
     #define ARCH_HAS_SBUS_AUDIO  0
     #define ARCH_HAS_PL041_AUDIO 0
-#elif defined(ARCH_IA64) || defined(ARCH_SPARC64)
+#elif defined(ARCH_IA64) || defined(ARCH_SPARC64) || defined(ARCH_RISCV64)
     #define ARCH_HAS_PCI_AUDIO   1
     #define ARCH_HAS_SBUS_AUDIO  0
     #define ARCH_HAS_PL041_AUDIO 0
@@ -124,15 +133,15 @@
 // Storage controller availability
 //
 // ATA PIO : uses port I/O registers — x86/amd64 only.
-// AHCI    : SATA over PCI MMIO — x86/amd64/ia64/sparc64.
-// NVMe    : PCIe MMIO — x86/amd64/ia64/sparc64.
+// AHCI    : SATA over PCI MMIO — x86/amd64/ia64/sparc64/riscv64.
+// NVMe    : PCIe MMIO — x86/amd64/ia64/sparc64/riscv64.
 // ================================================================
 
 #if defined(ARCH_X86) || defined(ARCH_AMD64)
     #define ARCH_HAS_ATA_PIO   1
     #define ARCH_HAS_AHCI      1
     #define ARCH_HAS_NVME      1
-#elif defined(ARCH_IA64) || defined(ARCH_SPARC64)
+#elif defined(ARCH_IA64) || defined(ARCH_SPARC64) || defined(ARCH_RISCV64)
     #define ARCH_HAS_ATA_PIO   0
     #define ARCH_HAS_AHCI      1
     #define ARCH_HAS_NVME      1
@@ -170,42 +179,47 @@
 //             PCI VGA for SPARC v9).
 // PL111_FB  : ARM PL111 CLCD controller (Versatile/RealView).
 //             QEMU versatilepb maps at 0x10120000.
+// RAMFB     : QEMU ramfb (RAM framebuffer via fw_cfg) — RISC-V 64.
 // FB_CONSOLE: Software text console rendered onto the framebuffer.
 //             Available on all architectures that have a framebuffer.
 // ================================================================
 
 #if defined(ARCH_X86) || defined(ARCH_AMD64)
-    #define ARCH_HAS_VESA_BGA   1
-    #define ARCH_HAS_VGA_REGS   1
-    #define ARCH_HAS_PCI_VGA    1
-    #define ARCH_HAS_EFI_GOP    0
-    #define ARCH_HAS_SUN_FB     0
-    #define ARCH_HAS_PL111_FB   0
-    #define ARCH_HAS_FB_CONSOLE 1
+#define ARCH_HAS_VESA_BGA   1
+#define ARCH_HAS_VGA_REGS   1
+#define ARCH_HAS_PCI_VGA    1
+#define ARCH_HAS_EFI_GOP    0
+#define ARCH_HAS_SUN_FB     0
+#define ARCH_HAS_PL111_FB   0
+#define ARCH_HAS_RAMFB      0
+#define ARCH_HAS_FB_CONSOLE 1
 #elif defined(ARCH_IA64)
-    #define ARCH_HAS_VESA_BGA   0
-    #define ARCH_HAS_VGA_REGS   0
-    #define ARCH_HAS_PCI_VGA    1
-    #define ARCH_HAS_EFI_GOP    1
-    #define ARCH_HAS_SUN_FB     0
-    #define ARCH_HAS_PL111_FB   0
-    #define ARCH_HAS_FB_CONSOLE 1
+#define ARCH_HAS_VESA_BGA   0
+#define ARCH_HAS_VGA_REGS   0
+#define ARCH_HAS_PCI_VGA    1
+#define ARCH_HAS_EFI_GOP    1
+#define ARCH_HAS_SUN_FB     0
+#define ARCH_HAS_PL111_FB   0
+#define ARCH_HAS_RAMFB      0
+#define ARCH_HAS_FB_CONSOLE 1
 #elif defined(ARCH_SPARC64)
-    #define ARCH_HAS_VESA_BGA   0
-    #define ARCH_HAS_VGA_REGS   0
-    #define ARCH_HAS_PCI_VGA    1
-    #define ARCH_HAS_EFI_GOP    0
-    #define ARCH_HAS_SUN_FB     1
-    #define ARCH_HAS_PL111_FB   0
-    #define ARCH_HAS_FB_CONSOLE 1
+#define ARCH_HAS_VESA_BGA   0
+#define ARCH_HAS_VGA_REGS   0
+#define ARCH_HAS_PCI_VGA    1
+#define ARCH_HAS_EFI_GOP    0
+#define ARCH_HAS_SUN_FB     1
+#define ARCH_HAS_PL111_FB   0
+#define ARCH_HAS_RAMFB      0
+#define ARCH_HAS_FB_CONSOLE 1
 #elif defined(ARCH_SPARC)
-    #define ARCH_HAS_VESA_BGA   0
-    #define ARCH_HAS_VGA_REGS   0
-    #define ARCH_HAS_PCI_VGA    0
-    #define ARCH_HAS_EFI_GOP    0
-    #define ARCH_HAS_SUN_FB     1
-    #define ARCH_HAS_PL111_FB   0
-    #define ARCH_HAS_FB_CONSOLE 1
+#define ARCH_HAS_VESA_BGA   0
+#define ARCH_HAS_VGA_REGS   0
+#define ARCH_HAS_PCI_VGA    0
+#define ARCH_HAS_EFI_GOP    0
+#define ARCH_HAS_SUN_FB     1
+#define ARCH_HAS_PL111_FB   0
+#define ARCH_HAS_RAMFB      0
+#define ARCH_HAS_FB_CONSOLE 1
 #elif defined(ARCH_ARM)
     #define ARCH_HAS_VESA_BGA   0
     #define ARCH_HAS_VGA_REGS   0
@@ -213,6 +227,16 @@
     #define ARCH_HAS_EFI_GOP    0
     #define ARCH_HAS_SUN_FB     0
     #define ARCH_HAS_PL111_FB   1
+    #define ARCH_HAS_RAMFB      0
+    #define ARCH_HAS_FB_CONSOLE 1
+#elif defined(ARCH_RISCV64)
+    #define ARCH_HAS_VESA_BGA   0
+    #define ARCH_HAS_VGA_REGS   0
+    #define ARCH_HAS_PCI_VGA    1
+    #define ARCH_HAS_EFI_GOP    0
+    #define ARCH_HAS_SUN_FB     0
+    #define ARCH_HAS_PL111_FB   0
+    #define ARCH_HAS_RAMFB      1
     #define ARCH_HAS_FB_CONSOLE 1
 #else
     #define ARCH_HAS_VESA_BGA   0
@@ -221,6 +245,7 @@
     #define ARCH_HAS_EFI_GOP    0
     #define ARCH_HAS_SUN_FB     0
     #define ARCH_HAS_PL111_FB   0
+    #define ARCH_HAS_RAMFB      0
     #define ARCH_HAS_FB_CONSOLE 0
 #endif
 
@@ -242,6 +267,8 @@ inline const char* get_arch_name()
     return "SPARC v9 (UltraSPARC)";
 #elif defined(ARCH_SPARC)
     return "SPARC v8";
+#elif defined(ARCH_RISCV64)
+    return "RISC-V 64 (RV64IMA)";
 #else
     return "Unknown";
 #endif
@@ -250,7 +277,7 @@ inline const char* get_arch_name()
 // Get architecture bitness
 inline uint32_t get_arch_bits()
 {
-#if defined(ARCH_AMD64) || defined(ARCH_IA64) || defined(ARCH_SPARC64)
+#if defined(ARCH_AMD64) || defined(ARCH_IA64) || defined(ARCH_SPARC64) || defined(ARCH_RISCV64)
     return 64;
 #elif defined(ARCH_X86) || defined(ARCH_ARM) || defined(ARCH_SPARC)
     return 32;

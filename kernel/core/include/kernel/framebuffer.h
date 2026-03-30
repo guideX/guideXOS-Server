@@ -38,6 +38,10 @@ bool init_sun4m();
 // Initialize Sun4u PCI VGA framebuffer (SPARC v9 only, known PCI BAR)
 bool init_sun4u();
 
+// Initialize from RISC-V ramfb (fw_cfg device, QEMU -device ramfb).
+bool init_riscv_ramfb(uint64_t lfbBase, uint32_t width, uint32_t height,
+                      uint32_t pitch, uint8_t bpp);
+
 // Initialize from an arbitrary LFB address and geometry.
 // Used by arch-specific graphics backends after probing hardware.
 bool init_manual(uint64_t lfbBase, uint32_t width, uint32_t height,
