@@ -399,6 +399,10 @@
     <None Include="setup-toolchain.bat" />
     <None Include="_fix_filters.py" />
     <None Include="_fix_filters_audio.py" />
+    <None Include="_fix_kernel_objnames.py" />
+    <None Include="_fix_server_objnames.py" />
+    <None Include="_fix_vcxproj_all.py" />
+    <None Include="_fix_vcxproj_filters_all.py" />
   </ItemGroup>
   <ItemGroup>
     <Text Include="scripts\build-and-run-sparcv8_in_linux.sh" />

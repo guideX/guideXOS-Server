@@ -10,7 +10,7 @@
 
 #pragma once
 
-#include <cstdint>
+#include <kernel/types.h>
 
 namespace kernel {
 namespace arch {

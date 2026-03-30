@@ -28,6 +28,39 @@
     <Filter Include="Header Files\Architecture">
       <UniqueIdentifier>{ce1fc132-5678-9abc-def0-123456789012}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Source Files\Architecture\amd64">
+      <UniqueIdentifier>{1a2b3c4d-0001-0001-0001-000000000001}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\Architecture\arm">
+      <UniqueIdentifier>{1a2b3c4d-0001-0001-0001-000000000002}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\Architecture\ia64">
+      <UniqueIdentifier>{1a2b3c4d-0001-0001-0001-000000000003}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\Architecture\sparc">
+      <UniqueIdentifier>{1a2b3c4d-0001-0001-0001-000000000004}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\Architecture\sparc64">
+      <UniqueIdentifier>{1a2b3c4d-0001-0001-0001-000000000005}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\Architecture\amd64">
+      <UniqueIdentifier>{1a2b3c4d-0002-0001-0001-000000000001}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\Architecture\arm">
+      <UniqueIdentifier>{1a2b3c4d-0002-0001-0001-000000000002}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\Architecture\ia64">
+      <UniqueIdentifier>{1a2b3c4d-0002-0001-0001-000000000003}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\Architecture\sparc">
+      <UniqueIdentifier>{1a2b3c4d-0002-0001-0001-000000000004}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\Architecture\sparc64">
+      <UniqueIdentifier>{1a2b3c4d-0002-0001-0001-000000000005}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\Architecture\x86">
+      <UniqueIdentifier>{1a2b3c4d-0002-0001-0001-000000000006}</UniqueIdentifier>
+    </Filter>
     <Filter Include="Build Scripts">
       <UniqueIdentifier>{df2fd243-6789-abcd-ef01-234567890123}</UniqueIdentifier>
     </Filter>
@@ -78,6 +111,150 @@
     <ClInclude Include="desktop_wallpaper.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="kernel\core\include\kernel\usb.h">
+      <Filter>Header Files\Kernel</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\core\include\kernel\usb_audio.h">
+      <Filter>Header Files\Kernel</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\core\include\kernel\usb_audio_uac2.h">
+      <Filter>Header Files\Kernel</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\core\include\kernel\usb_cdc.h">
+      <Filter>Header Files\Kernel</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\core\include\kernel\usb_hid.h">
+      <Filter>Header Files\Kernel</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\core\include\kernel\usb_net.h">
+      <Filter>Header Files\Kernel</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\core\include\kernel\usb_net_ecm.h">
+      <Filter>Header Files\Kernel</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\core\include\kernel\usb_net_rndis.h">
+      <Filter>Header Files\Kernel</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\core\include\kernel\usb_net_wifi.h">
+      <Filter>Header Files\Kernel</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\core\include\kernel\usb_printer.h">
+      <Filter>Header Files\Kernel</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\core\include\kernel\usb_storage.h">
+      <Filter>Header Files\Kernel</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\core\include\kernel\usb_video.h">
+      <Filter>Header Files\Kernel</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\core\include\kernel\usb_video_uvc.h">
+      <Filter>Header Files\Kernel</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\core\include\kernel\pci_audio.h">
+      <Filter>Header Files\Kernel</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\core\include\kernel\ata.h">
+      <Filter>Header Files\Kernel</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\core\include\kernel\nvme.h">
+      <Filter>Header Files\Kernel</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\core\include\kernel\block_device.h">
+      <Filter>Header Files\Kernel</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\core\include\kernel\fs_fat.h">
+      <Filter>Header Files\Kernel</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\core\include\kernel\fs_ext4.h">
+      <Filter>Header Files\Kernel</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\core\include\kernel\fs_ufs.h">
+      <Filter>Header Files\Kernel</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\core\include\kernel\vesa.h">
+      <Filter>Header Files\Kernel</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\core\include\kernel\fb_console.h">
+      <Filter>Header Files\Kernel</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\arch\amd64\include\arch\amd64.h">
+      <Filter>Header Files\Architecture\amd64</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\arch\amd64\include\arch\graphics.h">
+      <Filter>Header Files\Architecture\amd64</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\arch\amd64\include\arch\pci_audio.h">
+      <Filter>Header Files\Architecture\amd64</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\arch\amd64\include\arch\usb_hci.h">
+      <Filter>Header Files\Architecture\amd64</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\arch\arm\include\arch\arm.h">
+      <Filter>Header Files\Architecture\arm</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\arch\arm\include\arch\graphics.h">
+      <Filter>Header Files\Architecture\arm</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\arch\arm\include\arch\pci_audio.h">
+      <Filter>Header Files\Architecture\arm</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\arch\arm\include\arch\usb_hci.h">
+      <Filter>Header Files\Architecture\arm</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\arch\ia64\include\arch\ia64.h">
+      <Filter>Header Files\Architecture\ia64</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\arch\ia64\include\arch\graphics.h">
+      <Filter>Header Files\Architecture\ia64</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\arch\ia64\include\arch\pci_audio.h">
+      <Filter>Header Files\Architecture\ia64</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\arch\ia64\include\arch\ski_console.h">
+      <Filter>Header Files\Architecture\ia64</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\arch\ia64\include\arch\usb_hci.h">
+      <Filter>Header Files\Architecture\ia64</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\arch\sparc\include\arch\sparc.h">
+      <Filter>Header Files\Architecture\sparc</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\arch\sparc\include\arch\graphics.h">
+      <Filter>Header Files\Architecture\sparc</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\arch\sparc\include\arch\pci_audio.h">
+      <Filter>Header Files\Architecture\sparc</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\arch\sparc\include\arch\usb_hci.h">
+      <Filter>Header Files\Architecture\sparc</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\arch\sparc\include\arch\zs_serial.h">
+      <Filter>Header Files\Architecture\sparc</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\arch\sparc64\include\arch\sparc64.h">
+      <Filter>Header Files\Architecture\sparc64</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\arch\sparc64\include\arch\graphics.h">
+      <Filter>Header Files\Architecture\sparc64</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\arch\sparc64\include\arch\pci_audio.h">
+      <Filter>Header Files\Architecture\sparc64</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\arch\sparc64\include\arch\usb_hci.h">
+      <Filter>Header Files\Architecture\sparc64</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\arch\sparc64\include\arch\zs_serial.h">
+      <Filter>Header Files\Architecture\sparc64</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\arch\x86\include\arch\graphics.h">
+      <Filter>Header Files\Architecture\x86</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\arch\x86\include\arch\pci_audio.h">
+      <Filter>Header Files\Architecture\x86</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\arch\x86\include\arch\usb_hci.h">
+      <Filter>Header Files\Architecture\x86</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="kernel\core\main.cpp">
@@ -103,6 +280,156 @@
     </ClCompile>
     <ClCompile Include="welcome.cpp">
       <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\core\framebuffer.cpp">
+      <Filter>Source Files\Core</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\core\process.cpp">
+      <Filter>Source Files\Core</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\core\usb.cpp">
+      <Filter>Source Files\Core</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\core\usb_audio.cpp">
+      <Filter>Source Files\Core</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\core\usb_audio_uac2.cpp">
+      <Filter>Source Files\Core</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\core\usb_cdc.cpp">
+      <Filter>Source Files\Core</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\core\usb_hid.cpp">
+      <Filter>Source Files\Core</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\core\usb_net.cpp">
+      <Filter>Source Files\Core</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\core\usb_net_ecm.cpp">
+      <Filter>Source Files\Core</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\core\usb_net_rndis.cpp">
+      <Filter>Source Files\Core</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\core\usb_net_wifi.cpp">
+      <Filter>Source Files\Core</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\core\usb_printer.cpp">
+      <Filter>Source Files\Core</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\core\usb_storage.cpp">
+      <Filter>Source Files\Core</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\core\usb_video.cpp">
+      <Filter>Source Files\Core</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\core\usb_video_uvc.cpp">
+      <Filter>Source Files\Core</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\core\pci_audio.cpp">
+      <Filter>Source Files\Core</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\core\ata.cpp">
+      <Filter>Source Files\Core</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\core\nvme.cpp">
+      <Filter>Source Files\Core</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\core\block_device.cpp">
+      <Filter>Source Files\Core</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\core\fs_fat.cpp">
+      <Filter>Source Files\Core</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\core\fs_ext4.cpp">
+      <Filter>Source Files\Core</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\core\fs_ufs.cpp">
+      <Filter>Source Files\Core</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\core\vesa.cpp">
+      <Filter>Source Files\Core</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\core\fb_console.cpp">
+      <Filter>Source Files\Core</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\arch\x86\graphics.cpp">
+      <Filter>Source Files\Architecture\x86</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\arch\x86\pci_audio.cpp">
+      <Filter>Source Files\Architecture\x86</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\arch\x86\usb_hci.cpp">
+      <Filter>Source Files\Architecture\x86</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\arch\amd64\arch.cpp">
+      <Filter>Source Files\Architecture\amd64</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\arch\amd64\graphics.cpp">
+      <Filter>Source Files\Architecture\amd64</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\arch\amd64\pci_audio.cpp">
+      <Filter>Source Files\Architecture\amd64</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\arch\amd64\usb_hci.cpp">
+      <Filter>Source Files\Architecture\amd64</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\arch\arm\arch.cpp">
+      <Filter>Source Files\Architecture\arm</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\arch\arm\graphics.cpp">
+      <Filter>Source Files\Architecture\arm</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\arch\arm\pci_audio.cpp">
+      <Filter>Source Files\Architecture\arm</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\arch\arm\usb_hci.cpp">
+      <Filter>Source Files\Architecture\arm</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\arch\ia64\arch.cpp">
+      <Filter>Source Files\Architecture\ia64</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\arch\ia64\graphics.cpp">
+      <Filter>Source Files\Architecture\ia64</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\arch\ia64\pci_audio.cpp">
+      <Filter>Source Files\Architecture\ia64</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\arch\ia64\ski_console.cpp">
+      <Filter>Source Files\Architecture\ia64</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\arch\ia64\usb_hci.cpp">
+      <Filter>Source Files\Architecture\ia64</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\arch\sparc\arch.cpp">
+      <Filter>Source Files\Architecture\sparc</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\arch\sparc\graphics.cpp">
+      <Filter>Source Files\Architecture\sparc</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\arch\sparc\pci_audio.cpp">
+      <Filter>Source Files\Architecture\sparc</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\arch\sparc\usb_hci.cpp">
+      <Filter>Source Files\Architecture\sparc</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\arch\sparc\zs_serial.cpp">
+      <Filter>Source Files\Architecture\sparc</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\arch\sparc64\arch.cpp">
+      <Filter>Source Files\Architecture\sparc64</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\arch\sparc64\graphics.cpp">
+      <Filter>Source Files\Architecture\sparc64</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\arch\sparc64\pci_audio.cpp">
+      <Filter>Source Files\Architecture\sparc64</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\arch\sparc64\usb_hci.cpp">
+      <Filter>Source Files\Architecture\sparc64</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\arch\sparc64\zs_serial.cpp">
+      <Filter>Source Files\Architecture\sparc64</Filter>
     </ClCompile>
     <ClCompile Include="system_tray.cpp">
       <Filter>Source Files</Filter>
