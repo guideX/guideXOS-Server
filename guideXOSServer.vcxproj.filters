@@ -288,9 +288,6 @@
     <ClInclude Include="kernel\core\include\kernel\pci_audio.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="kernel\core\include\kernel\usb_video_uvc.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="kernel\arch\amd64\include\arch\pci_audio.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -304,6 +301,15 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="kernel\arch\sparc64\include\arch\pci_audio.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\core\include\kernel\usb_video_uvc.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\arch\arm\include\arch\pci_audio.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\arch\arm\include\arch\graphics.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
@@ -566,9 +572,6 @@
     <ClCompile Include="kernel\core\pci_audio.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="kernel\core\usb_video_uvc.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="kernel\arch\amd64\pci_audio.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -582,6 +585,15 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="kernel\arch\sparc64\pci_audio.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\core\usb_video_uvc.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\arch\arm\pci_audio.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\arch\arm\graphics.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
@@ -677,6 +689,7 @@
     <None Include="scripts\build-ia64.sh" />
     <None Include="scripts\run-ia64_in_linux.sh" />
     <None Include="_fix_filters.py" />
+    <None Include="_fix_filters_audio.py" />
   </ItemGroup>
   <ItemGroup>
     <Text Include="scripts\build-and-run-sparcv8_in_linux.sh" />

@@ -95,21 +95,29 @@
 //
 // HDA / AC'97 : PCI MMIO — x86/amd64/ia64/sparc64.
 // CS4231 SBus : SPARC v8 (Sun4m) — SBus MMIO, no PCI.
-// ARM         : platform-specific (I2S/codec); no PCI audio stub.
+// PL041 AACI  : ARM Versatile/RealView — MMIO AC'97 controller.
 // ================================================================
 
 #if defined(ARCH_X86) || defined(ARCH_AMD64)
-    #define ARCH_HAS_PCI_AUDIO  1
-    #define ARCH_HAS_SBUS_AUDIO 0
+    #define ARCH_HAS_PCI_AUDIO   1
+    #define ARCH_HAS_SBUS_AUDIO  0
+    #define ARCH_HAS_PL041_AUDIO 0
 #elif defined(ARCH_IA64) || defined(ARCH_SPARC64)
-    #define ARCH_HAS_PCI_AUDIO  1
-    #define ARCH_HAS_SBUS_AUDIO 0
+    #define ARCH_HAS_PCI_AUDIO   1
+    #define ARCH_HAS_SBUS_AUDIO  0
+    #define ARCH_HAS_PL041_AUDIO 0
 #elif defined(ARCH_SPARC)
-    #define ARCH_HAS_PCI_AUDIO  0
-    #define ARCH_HAS_SBUS_AUDIO 1
+    #define ARCH_HAS_PCI_AUDIO   0
+    #define ARCH_HAS_SBUS_AUDIO  1
+    #define ARCH_HAS_PL041_AUDIO 0
+#elif defined(ARCH_ARM)
+    #define ARCH_HAS_PCI_AUDIO   0
+    #define ARCH_HAS_SBUS_AUDIO  0
+    #define ARCH_HAS_PL041_AUDIO 1
 #else
-    #define ARCH_HAS_PCI_AUDIO  0
-    #define ARCH_HAS_SBUS_AUDIO 0
+    #define ARCH_HAS_PCI_AUDIO   0
+    #define ARCH_HAS_SBUS_AUDIO  0
+    #define ARCH_HAS_PL041_AUDIO 0
 #endif
 
 // ================================================================
@@ -160,6 +168,8 @@
 //             any EFI-booted platform).
 // SUN_FB    : Sun-specific framebuffers (TCX, CG3, CG6 for SPARC v8;
 //             PCI VGA for SPARC v9).
+// PL111_FB  : ARM PL111 CLCD controller (Versatile/RealView).
+//             QEMU versatilepb maps at 0x10120000.
 // FB_CONSOLE: Software text console rendered onto the framebuffer.
 //             Available on all architectures that have a framebuffer.
 // ================================================================
@@ -170,6 +180,7 @@
     #define ARCH_HAS_PCI_VGA    1
     #define ARCH_HAS_EFI_GOP    0
     #define ARCH_HAS_SUN_FB     0
+    #define ARCH_HAS_PL111_FB   0
     #define ARCH_HAS_FB_CONSOLE 1
 #elif defined(ARCH_IA64)
     #define ARCH_HAS_VESA_BGA   0
@@ -177,6 +188,7 @@
     #define ARCH_HAS_PCI_VGA    1
     #define ARCH_HAS_EFI_GOP    1
     #define ARCH_HAS_SUN_FB     0
+    #define ARCH_HAS_PL111_FB   0
     #define ARCH_HAS_FB_CONSOLE 1
 #elif defined(ARCH_SPARC64)
     #define ARCH_HAS_VESA_BGA   0
@@ -184,6 +196,7 @@
     #define ARCH_HAS_PCI_VGA    1
     #define ARCH_HAS_EFI_GOP    0
     #define ARCH_HAS_SUN_FB     1
+    #define ARCH_HAS_PL111_FB   0
     #define ARCH_HAS_FB_CONSOLE 1
 #elif defined(ARCH_SPARC)
     #define ARCH_HAS_VESA_BGA   0
@@ -191,6 +204,7 @@
     #define ARCH_HAS_PCI_VGA    0
     #define ARCH_HAS_EFI_GOP    0
     #define ARCH_HAS_SUN_FB     1
+    #define ARCH_HAS_PL111_FB   0
     #define ARCH_HAS_FB_CONSOLE 1
 #elif defined(ARCH_ARM)
     #define ARCH_HAS_VESA_BGA   0
@@ -198,6 +212,7 @@
     #define ARCH_HAS_PCI_VGA    0
     #define ARCH_HAS_EFI_GOP    0
     #define ARCH_HAS_SUN_FB     0
+    #define ARCH_HAS_PL111_FB   1
     #define ARCH_HAS_FB_CONSOLE 1
 #else
     #define ARCH_HAS_VESA_BGA   0
@@ -205,6 +220,7 @@
     #define ARCH_HAS_PCI_VGA    0
     #define ARCH_HAS_EFI_GOP    0
     #define ARCH_HAS_SUN_FB     0
+    #define ARCH_HAS_PL111_FB   0
     #define ARCH_HAS_FB_CONSOLE 0
 #endif
 

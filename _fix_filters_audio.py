@@ -15,6 +15,8 @@ new_headers = [
     'kernel\\arch\\ia64\\include\\arch\\pci_audio.h',
     'kernel\\arch\\sparc\\include\\arch\\pci_audio.h',
     'kernel\\arch\\sparc64\\include\\arch\\pci_audio.h',
+    'kernel\\arch\\arm\\include\\arch\\pci_audio.h',
+    'kernel\\arch\\arm\\include\\arch\\graphics.h',
 ]
 
 new_h = '    <ClInclude Include="kernel\\core\\include\\kernel\\fb_console.h">\n      <Filter>Header Files</Filter>\n    </ClInclude>\n'
@@ -41,6 +43,8 @@ new_sources = [
     'kernel\\arch\\ia64\\pci_audio.cpp',
     'kernel\\arch\\sparc\\pci_audio.cpp',
     'kernel\\arch\\sparc64\\pci_audio.cpp',
+    'kernel\\arch\\arm\\pci_audio.cpp',
+    'kernel\\arch\\arm\\graphics.cpp',
 ]
 
 new_s = '    <ClCompile Include="kernel\\core\\fb_console.cpp">\n      <Filter>Source Files</Filter>\n    </ClCompile>\n'

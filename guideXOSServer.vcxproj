@@ -144,19 +144,26 @@
     <ClInclude Include="gxm_loader.h" />
     <ClInclude Include="image_viewer.h" />
     <ClInclude Include="kernel\arch\amd64\include\arch\graphics.h" />
+    <ClInclude Include="kernel\arch\amd64\include\arch\pci_audio.h" />
     <ClInclude Include="kernel\arch\amd64\include\arch\usb_hci.h" />
+    <ClInclude Include="kernel\arch\arm\include\arch\graphics.h" />
+    <ClInclude Include="kernel\arch\arm\include\arch\pci_audio.h" />
     <ClInclude Include="kernel\arch\arm\include\arch\usb_hci.h" />
     <ClInclude Include="kernel\arch\ia64\include\arch\graphics.h" />
+    <ClInclude Include="kernel\arch\ia64\include\arch\pci_audio.h" />
     <ClInclude Include="kernel\arch\ia64\include\arch\ski_console.h" />
     <ClInclude Include="kernel\arch\ia64\include\arch\usb_hci.h" />
     <ClInclude Include="kernel\arch\sparc64\include\arch\graphics.h" />
+    <ClInclude Include="kernel\arch\sparc64\include\arch\pci_audio.h" />
     <ClInclude Include="kernel\arch\sparc64\include\arch\sparc64.h" />
     <ClInclude Include="kernel\arch\sparc64\include\arch\usb_hci.h" />
     <ClInclude Include="kernel\arch\sparc64\include\arch\zs_serial.h" />
     <ClInclude Include="kernel\arch\sparc\include\arch\graphics.h" />
+    <ClInclude Include="kernel\arch\sparc\include\arch\pci_audio.h" />
     <ClInclude Include="kernel\arch\sparc\include\arch\usb_hci.h" />
     <ClInclude Include="kernel\arch\sparc\include\arch\zs_serial.h" />
     <ClInclude Include="kernel\arch\x86\include\arch\graphics.h" />
+    <ClInclude Include="kernel\arch\x86\include\arch\pci_audio.h" />
     <ClInclude Include="kernel\arch\x86\include\arch\usb_hci.h" />
     <ClInclude Include="kernel\core\include\kernel\ata.h" />
     <ClInclude Include="kernel\core\include\kernel\block_device.h" />
@@ -169,10 +176,12 @@
     <ClInclude Include="kernel\core\include\kernel\interrupts.h" />
     <ClInclude Include="kernel\core\include\kernel\multiboot.h" />
     <ClInclude Include="kernel\core\include\kernel\nvme.h" />
+    <ClInclude Include="kernel\core\include\kernel\pci_audio.h" />
     <ClInclude Include="kernel\core\include\kernel\process.h" />
     <ClInclude Include="kernel\core\include\kernel\ps2mouse.h" />
     <ClInclude Include="kernel\core\include\kernel\usb.h" />
     <ClInclude Include="kernel\core\include\kernel\usb_audio.h" />
+    <ClInclude Include="kernel\core\include\kernel\usb_audio_uac2.h" />
     <ClInclude Include="kernel\core\include\kernel\usb_cdc.h" />
     <ClInclude Include="kernel\core\include\kernel\usb_hid.h" />
     <ClInclude Include="kernel\core\include\kernel\usb_net.h" />
@@ -182,6 +191,7 @@
     <ClInclude Include="kernel\core\include\kernel\usb_printer.h" />
     <ClInclude Include="kernel\core\include\kernel\usb_storage.h" />
     <ClInclude Include="kernel\core\include\kernel\usb_video.h" />
+    <ClInclude Include="kernel\core\include\kernel\usb_video_uvc.h" />
     <ClInclude Include="kernel\core\include\kernel\vesa.h" />
     <ClInclude Include="launchSettings.json" />
     <ClInclude Include="icons.h" />
@@ -238,31 +248,38 @@
       <ObjectFileName>$(IntDir)arch_amd64.obj</ObjectFileName>
     </ClCompile>
     <ClCompile Include="kernel\arch\amd64\graphics.cpp" />
+    <ClCompile Include="kernel\arch\amd64\pci_audio.cpp" />
     <ClCompile Include="kernel\arch\amd64\usb_hci.cpp" />
     <ClCompile Include="kernel\arch\arm\arch.cpp">
       <ObjectFileName>$(IntDir)arch_arm.obj</ObjectFileName>
     </ClCompile>
+    <ClCompile Include="kernel\arch\arm\graphics.cpp" />
+    <ClCompile Include="kernel\arch\arm\pci_audio.cpp" />
     <ClCompile Include="kernel\arch\arm\usb_hci.cpp" />
     <ClCompile Include="kernel\arch\ia64\arch.cpp">
       <ObjectFileName>$(IntDir)arch_ia64.obj</ObjectFileName>
     </ClCompile>
     <ClCompile Include="kernel\arch\ia64\graphics.cpp" />
+    <ClCompile Include="kernel\arch\ia64\pci_audio.cpp" />
     <ClCompile Include="kernel\arch\ia64\ski_console.cpp" />
     <ClCompile Include="kernel\arch\ia64\usb_hci.cpp" />
     <ClCompile Include="kernel\arch\sparc64\arch.cpp" />
     <ClCompile Include="kernel\arch\sparc64\graphics.cpp" />
+    <ClCompile Include="kernel\arch\sparc64\pci_audio.cpp" />
     <ClCompile Include="kernel\arch\sparc64\usb_hci.cpp" />
     <ClCompile Include="kernel\arch\sparc64\zs_serial.cpp" />
     <ClCompile Include="kernel\arch\sparc\arch.cpp">
       <ObjectFileName>$(IntDir)arch_sparc.obj</ObjectFileName>
     </ClCompile>
     <ClCompile Include="kernel\arch\sparc\graphics.cpp" />
+    <ClCompile Include="kernel\arch\sparc\pci_audio.cpp" />
     <ClCompile Include="kernel\arch\sparc\usb_hci.cpp" />
     <ClCompile Include="kernel\arch\sparc\zs_serial.cpp" />
     <ClCompile Include="kernel\arch\x86\arch.cpp">
       <ObjectFileName>$(IntDir)arch_x86.obj</ObjectFileName>
     </ClCompile>
     <ClCompile Include="kernel\arch\x86\graphics.cpp" />
+    <ClCompile Include="kernel\arch\x86\pci_audio.cpp" />
     <ClCompile Include="kernel\arch\x86\usb_hci.cpp" />
     <ClCompile Include="kernel\core\arch.cpp">
       <ObjectFileName>$(IntDir)arch_core.obj</ObjectFileName>
@@ -278,12 +295,14 @@
     <ClCompile Include="kernel\core\interrupts.cpp" />
     <ClCompile Include="kernel\core\main.cpp" />
     <ClCompile Include="kernel\core\nvme.cpp" />
+    <ClCompile Include="kernel\core\pci_audio.cpp" />
     <ClCompile Include="kernel\core\process.cpp">
       <ObjectFileName>$(IntDir)process_kernel.obj</ObjectFileName>
     </ClCompile>
     <ClCompile Include="kernel\core\ps2mouse.cpp" />
     <ClCompile Include="kernel\core\usb.cpp" />
     <ClCompile Include="kernel\core\usb_audio.cpp" />
+    <ClCompile Include="kernel\core\usb_audio_uac2.cpp" />
     <ClCompile Include="kernel\core\usb_cdc.cpp" />
     <ClCompile Include="kernel\core\usb_hid.cpp" />
     <ClCompile Include="kernel\core\usb_net.cpp" />
@@ -293,6 +312,7 @@
     <ClCompile Include="kernel\core\usb_printer.cpp" />
     <ClCompile Include="kernel\core\usb_storage.cpp" />
     <ClCompile Include="kernel\core\usb_video.cpp" />
+    <ClCompile Include="kernel\core\usb_video_uvc.cpp" />
     <ClCompile Include="kernel\core\vesa.cpp" />
     <ClCompile Include="kernel\core\vga.cpp" />
     <ClCompile Include="lifecycle.cpp" />
@@ -378,6 +398,7 @@
     <None Include="scripts\test-build.sh" />
     <None Include="setup-toolchain.bat" />
     <None Include="_fix_filters.py" />
+    <None Include="_fix_filters_audio.py" />
   </ItemGroup>
   <ItemGroup>
     <Text Include="scripts\build-and-run-sparcv8_in_linux.sh" />
