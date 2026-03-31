@@ -62,6 +62,7 @@ echo.
 
 REM Launch QEMU
 "%QEMU_PATH%" ^
+-machine pc,usb=off ^
 -kernel "build\x86\bin\kernel.elf" ^
 -m 128M ^
 -vga std ^

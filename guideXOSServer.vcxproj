@@ -162,6 +162,10 @@
     <ClInclude Include="kernel\arch\sparc\include\arch\pci_audio.h" />
     <ClInclude Include="kernel\arch\sparc\include\arch\usb_hci.h" />
     <ClInclude Include="kernel\arch\sparc\include\arch\zs_serial.h" />
+    <ClInclude Include="kernel\arch\riscv64\include\arch\graphics.h" />
+    <ClInclude Include="kernel\arch\riscv64\include\arch\pci_audio.h" />
+    <ClInclude Include="kernel\arch\riscv64\include\arch\sbi_console.h" />
+    <ClInclude Include="kernel\arch\riscv64\include\arch\usb_hci.h" />
     <ClInclude Include="kernel\arch\x86\include\arch\graphics.h" />
     <ClInclude Include="kernel\arch\x86\include\arch\pci_audio.h" />
     <ClInclude Include="kernel\arch\x86\include\arch\usb_hci.h" />
@@ -201,6 +205,7 @@
     <ClInclude Include="kernel\arch\arm\include\arch\arm.h" />
     <ClInclude Include="kernel\arch\ia64\include\arch\ia64.h" />
     <ClInclude Include="kernel\arch\sparc\include\arch\sparc.h" />
+    <ClInclude Include="kernel\arch\riscv64\include\arch\riscv64.h" />
     <ClInclude Include="kernel\arch\x86\include\arch\x86.h" />
     <ClInclude Include="kernel\core\include\kernel\arch.h" />
     <ClInclude Include="kernel\core\include\kernel\types.h" />
@@ -268,6 +273,13 @@
     <ClCompile Include="kernel\arch\sparc64\pci_audio.cpp" />
     <ClCompile Include="kernel\arch\sparc64\usb_hci.cpp" />
     <ClCompile Include="kernel\arch\sparc64\zs_serial.cpp" />
+    <ClCompile Include="kernel\arch\riscv64\arch.cpp">
+      <ObjectFileName>$(IntDir)arch_riscv64.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="kernel\arch\riscv64\graphics.cpp" />
+    <ClCompile Include="kernel\arch\riscv64\pci_audio.cpp" />
+    <ClCompile Include="kernel\arch\riscv64\sbi_console.cpp" />
+    <ClCompile Include="kernel\arch\riscv64\usb_hci.cpp" />
     <ClCompile Include="kernel\arch\sparc\arch.cpp">
       <ObjectFileName>$(IntDir)arch_sparc.obj</ObjectFileName>
     </ClCompile>
@@ -370,6 +382,9 @@
     <None Include="kernel\arch\sparc\boot.s" />
     <None Include="kernel\arch\sparc\linker.ld" />
     <None Include="kernel\arch\sparc\Makefile.arch" />
+    <None Include="kernel\arch\riscv64\boot.s" />
+    <None Include="kernel\arch\riscv64\linker.ld" />
+    <None Include="kernel\arch\riscv64\Makefile.arch" />
     <None Include="kernel\arch\x86\boot.asm" />
     <None Include="kernel\arch\x86\linker.ld" />
     <None Include="kernel\arch\x86\Makefile.arch" />
@@ -396,6 +411,9 @@
     <None Include="scripts\run-sparkv8_in_windows.sh" />
     <None Include="scripts\test-build.bat" />
     <None Include="scripts\test-build.sh" />
+    <None Include="scripts\build-riscv64.sh" />
+    <None Include="scripts\build-and-run-riscv64_in_linux.sh" />
+    <None Include="scripts\run-riscv64_in_windows.bat" />
     <None Include="setup-toolchain.bat" />
     <None Include="_fix_filters.py" />
     <None Include="_fix_filters_audio.py" />

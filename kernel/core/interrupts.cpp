@@ -13,6 +13,7 @@
 
 #include "include/kernel/interrupts.h"
 #include "include/kernel/arch.h"
+#include "include/kernel/serial_debug.h"
 
 namespace kernel {
 namespace interrupts {
@@ -171,6 +172,13 @@ static void set_idt_entry(int index, uint32_t addr, uint8_t type_attr)
 
 extern "C" void irq_dispatch(uint32_t irq_number)
 {
+    static uint32_t irq_total = 0;
+    irq_total++;
+    if (irq_total <= 10) {
+        serial::puts("[IRQ] dispatch irq=");
+        serial::put_hex8(static_cast<uint8_t>(irq_number));
+        serial::putc('\n');
+    }
     if (irq_number < 16 && s_handlers[irq_number]) {
         s_handlers[irq_number]();
     }
@@ -322,6 +330,13 @@ void init()
 
     load_idt();
     arch::enable_interrupts();
+
+    serial::puts("[IRQ] IDT loaded, PIC remapped, interrupts enabled\n");
+    serial::puts("[IRQ] Master PIC mask: 0x");
+    serial::put_hex8(arch::inb(kPICMasterData));
+    serial::puts(" Slave PIC mask: 0x");
+    serial::put_hex8(arch::inb(kPICSlaveData));
+    serial::putc('\n');
 }
 
 void register_irq(uint8_t irq, irq_handler_t handler)
@@ -329,6 +344,13 @@ void register_irq(uint8_t irq, irq_handler_t handler)
     if (irq < 16) {
         s_handlers[irq] = handler;
         pic_unmask_irq(irq);
+        serial::puts("[IRQ] Registered and unmasked IRQ ");
+        serial::put_hex8(irq);
+        serial::puts(" Master mask: 0x");
+        serial::put_hex8(arch::inb(kPICMasterData));
+        serial::puts(" Slave mask: 0x");
+        serial::put_hex8(arch::inb(kPICSlaveData));
+        serial::putc('\n');
     }
 }
 
@@ -395,3 +417,4 @@ extern "C" void sparc64_irq_dispatch(uint64_t tt_value)
 
 } // namespace interrupts
 } // namespace kernel
+

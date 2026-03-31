@@ -41,6 +41,7 @@ echo.
 
 REM Launch with explicit vga and boot settings
 "%QEMU_PATH%" ^
+    -machine pc,usb=off ^
     -kernel "%KERNEL_PATH%" ^
     -m 128M ^
     -vga std ^

@@ -14,6 +14,7 @@
 #include "include/kernel/desktop.h"
 #include "include/kernel/interrupts.h"
 #include "include/kernel/ps2mouse.h"
+#include "include/kernel/serial_debug.h"
 
 #if ARCH_HAS_PIC_8259
 #include "include/kernel/multiboot.h"
@@ -45,6 +46,10 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
     // x86 / amd64 boot path  —  Multiboot (BIOS) or BootInfo (UEFI)
     // ============================================================
 
+    // Initialize serial debug output early
+    kernel::serial::init();
+    kernel::serial::puts("[KERNEL] guideXOS kernel_main entered\n");
+
     // Support both Multiboot (legacy) and BootInfo (UEFI) boot
     bool is_multiboot = (boot_magic == 0x2BADB002);
     bool is_bootinfo = false;
@@ -54,15 +59,18 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
     
     if (is_multiboot) {
         multiboot_info = boot_environment;
+        kernel::serial::puts("[KERNEL] Boot method: Multiboot\n");
     } else {
         bootinfo = static_cast<guideXOS::BootInfo*>(boot_environment);
         if (bootinfo && bootinfo->Magic == guideXOS::GUIDEXOS_BOOTINFO_MAGIC) {
             is_bootinfo = true;
+            kernel::serial::puts("[KERNEL] Boot method: UEFI BootInfo\n");
         }
     }
     
     // If neither boot method is valid, halt
     if (!is_multiboot && !is_bootinfo) {
+        kernel::serial::puts("[KERNEL] ERROR: No valid boot method detected, halting\n");
         while(1) { }
     }
     
@@ -77,6 +85,11 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
     
     if (has_fb) {
         // === GRAPHICS MODE BOOT ===
+        kernel::serial::puts("[KERNEL] Framebuffer initialized: ");
+        kernel::serial::put_hex32(kernel::framebuffer::get_width());
+        kernel::serial::putc('x');
+        kernel::serial::put_hex32(kernel::framebuffer::get_height());
+        kernel::serial::putc('\n');
         
         // Clear screen to dark color
         kernel::framebuffer::clear(0xFF101828);
@@ -84,18 +97,25 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         // Initialize desktop and draw immediately (skip boot splash)
         kernel::desktop::init();
         kernel::desktop::draw();
+        kernel::serial::puts("[KERNEL] Desktop drawn\n");
         
         // Set up IDT, remap PIC, enable interrupts
         kernel::interrupts::init();
+        kernel::serial::puts("[KERNEL] IDT + PIC initialized, interrupts enabled\n");
         
         // Initialize PS/2 mouse driver and register IRQ12 handler
+        kernel::serial::puts("[KERNEL] Initializing PS/2 mouse...\n");
         kernel::ps2mouse::init(kernel::framebuffer::get_width(),
                                kernel::framebuffer::get_height());
+        kernel::serial::puts("[KERNEL] PS/2 mouse init complete\n");
         kernel::interrupts::register_irq(12, kernel::ps2mouse::irq_handler);
+        kernel::serial::puts("[KERNEL] IRQ12 handler registered and unmasked\n");
         
         // Draw initial cursor at center of screen
         kernel::desktop::draw_cursor(kernel::ps2mouse::get_x(),
                                      kernel::ps2mouse::get_y());
+        
+        kernel::serial::puts("[KERNEL] Entering main loop (waiting for mouse IRQs)...\n");
         
         // Main kernel loop — poll mouse state and redraw cursor
         while (1) {

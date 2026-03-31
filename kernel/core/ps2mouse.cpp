@@ -11,6 +11,7 @@
 
 #include "include/kernel/ps2mouse.h"
 #include "include/kernel/arch.h"
+#include "include/kernel/serial_debug.h"
 
 namespace kernel {
 namespace ps2mouse {
@@ -41,8 +42,10 @@ static bool     s_hasWheel  = false;
 static int32_t  s_screenW   = 1024;
 static int32_t  s_screenH   = 768;
 
-// Touchpad filtering (matches Legacy defaults)
-static const int kNoiseThreshold   = 2;
+// Touchpad filtering
+// kNoiseThreshold = 0 disables filtering (important for QEMU where
+// small deltas of ±1 are common and must not be discarded)
+static const int kNoiseThreshold   = 0;
 static const int kMaxDeltaPerPacket = 50;
 
 // Small I/O delay for PS/2 controller timing
@@ -130,22 +133,77 @@ void init(uint32_t screen_width, uint32_t screen_height)
     s_mouseY  = s_screenH / 2;
     s_phase   = 0;
 
+    serial::puts("[PS2] Starting PS/2 mouse init\n");
+
+    // Disable both PS/2 ports while we configure
+    controller_cmd(0xAD); // disable keyboard port
+    controller_cmd(0xA7); // disable mouse port
+
+    // Flush any data in the output buffer
+    while (arch::inb(kCommandPort) & 0x01) {
+        arch::inb(kDataPort);
+        io_wait();
+    }
+
+    // Read current controller config
+    controller_cmd(0x20);
+    uint8_t config = mouse_read();
+    serial::puts("[PS2] Controller config before: 0x");
+    serial::put_hex8(config);
+    serial::putc('\n');
+
+    // Enable IRQ1 (keyboard) and IRQ12 (mouse), disable translation
+    config |= 0x03;       // bit 0 = IRQ1 enable, bit 1 = IRQ12 enable
+    config &= ~0x20;      // bit 5 = disable mouse clock (clear it)
+    config &= ~0x40;      // bit 6 = translation (disable for clean scancodes)
+
+    // Write updated config
+    controller_cmd(0x60);
+    wait_write();
+    arch::outb(kDataPort, config);
+    io_wait();
+
+    serial::puts("[PS2] Controller config after: 0x");
+    serial::put_hex8(config);
+    serial::putc('\n');
+
     // Enable the auxiliary (mouse) PS/2 port
     controller_cmd(0xA8);
 
-    // Enable IRQ12: read controller config byte, set bit 1, write back
-    controller_cmd(0x20); // read config
-    uint8_t status = mouse_read();
-    status |= 0x02;       // enable IRQ12 (auxiliary interrupt)
-    status &= ~0x20;      // clear "disable mouse clock" bit
-    controller_cmd(0x60); // write config
+    // Re-enable keyboard port
+    controller_cmd(0xAE);
+
+    // Send mouse reset (0xFF) for a clean state after UEFI
+    serial::puts("[PS2] Sending mouse reset (0xFF)...\n");
     wait_write();
-    arch::outb(kDataPort, status);
+    arch::outb(kCommandPort, 0xD4);
     io_wait();
+    wait_write();
+    arch::outb(kDataPort, 0xFF);
+    io_wait();
+    // Wait for ACK (0xFA) then self-test result (0xAA)
+    wait_read();
+    uint8_t ack = arch::inb(kDataPort);
+    serial::puts("[PS2] Reset ACK: 0x");
+    serial::put_hex8(ack);
+    serial::putc('\n');
+    wait_read();
+    uint8_t selftest = arch::inb(kDataPort);
+    serial::puts("[PS2] Self-test result: 0x");
+    serial::put_hex8(selftest);
+    serial::putc('\n');
+    // Read device ID (0x00 for standard mouse)
+    wait_read();
+    uint8_t devid = arch::inb(kDataPort);
+    serial::puts("[PS2] Device ID: 0x");
+    serial::put_hex8(devid);
+    serial::putc('\n');
 
     // Reset & configure the mouse
     mouse_write(kSetDefaults);
     s_hasWheel = try_enable_intellimouse();
+    serial::puts("[PS2] IntelliMouse (scroll wheel): ");
+    serial::puts(s_hasWheel ? "yes\n" : "no\n");
     mouse_write(kSetSampleRate); mouse_write(100); // 100 samples/sec
     mouse_write(kEnableDataReporting);
 
@@ -157,7 +215,10 @@ void init(uint32_t screen_width, uint32_t screen_height)
     }
 
     s_phase = 0;
+    serial::puts("[PS2] Mouse init complete\n");
 }
+
+static uint32_t s_irqCount = 0;
 
 void irq_handler()
 {
@@ -169,6 +230,16 @@ void irq_handler()
         // Data is from keyboard, not mouse — read and discard to clear buffer
         arch::inb(kDataPort);
         return;
+    }
+
+    // Log first few IRQs for debugging
+    s_irqCount++;
+    if (s_irqCount <= 5) {
+        serial::puts("[PS2] IRQ12 #");
+        serial::put_hex32(s_irqCount);
+        serial::puts(" status=0x");
+        serial::put_hex8(status);
+        serial::putc('\n');
     }
 
     uint8_t d = arch::inb(kDataPort);

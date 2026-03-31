@@ -89,20 +89,29 @@ if errorlevel 1 (
 
 echo Launching QEMU with UEFI firmware...
 echo.
-echo Press Ctrl+C in this window to exit QEMU
+echo   Mouse: Press Ctrl+Alt+G to grab mouse, Ctrl+Alt+G again to release
+echo   Serial debug output from the kernel will appear below.
+echo   Press Ctrl+C in this window to exit QEMU
 echo ========================================
 echo.
 
 REM Change to script directory so relative paths work
 cd /d "%SCRIPT_DIR%"
 
-REM Launch QEMU with UEFI using pflash drives (modern way)
+REM Launch QEMU with UEFI firmware
+REM
+REM The kernel uses PS/2 mouse input (IRQ12, i8042 controller).
+REM QEMU's default 'pc' machine includes an i8042 PS/2 controller.
+REM You must click inside the QEMU window (or press Ctrl+Alt+G) to
+REM grab the mouse so QEMU routes mouse events to the PS/2 controller.
 "%QEMU_EXE%" ^
--drive if=pflash,format=raw,readonly=on,file="%OVMF_PATH%" ^
--drive file=fat:rw:ESP,format=raw ^
--m 1024M ^
--serial stdio ^
--no-reboot
+    -drive if=pflash,format=raw,readonly=on,file="%OVMF_PATH%" ^
+    -drive file=fat:rw:ESP,format=raw ^
+    -m 1024M ^
+    -vga std ^
+    -serial stdio ^
+    -no-reboot ^
+    -d guest_errors
 
 echo.
 echo QEMU exited

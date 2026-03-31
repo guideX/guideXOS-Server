@@ -31,8 +31,10 @@ fi
 
 # Launch QEMU with VNC
 qemu-system-i386 \
+-machine pc,usb=off \
 -kernel "$KERNEL" \
 -m 128M \
+-vga std \
 -vnc :0 \
 -k en-us \
 -serial stdio

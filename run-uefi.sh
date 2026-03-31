@@ -52,10 +52,14 @@ echo -e "${GREEN}Launching QEMU with UEFI boot...${NC}"
 echo ""
 
 # Launch QEMU
+# -machine pc,usb=off disables the implicit USB tablet so mouse events
+# are routed to the PS/2 controller (IRQ12) instead.
 qemu-system-x86_64 \
+    -machine pc,usb=off \
     -bios OVMF.fd \
     -drive file=fat:rw:ESP,format=raw \
     -m 1024M \
+    -vga std \
     -serial stdio \
     -no-reboot \
     -d int,cpu_reset

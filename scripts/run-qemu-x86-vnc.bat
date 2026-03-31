@@ -41,8 +41,10 @@ if not exist "%KERNEL%" (
 
 REM Launch QEMU with VNC
 "%QEMU%" ^
+    -machine pc,usb=off ^
     -kernel "%KERNEL%" ^
     -m 128M ^
+    -vga std ^
     -vnc :0 ^
     -k en-us ^
     -serial stdio
@@ -58,3 +60,4 @@ if errorlevel 1 (
 
 REM Restore original directory
 popd
+

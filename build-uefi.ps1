@@ -289,14 +289,17 @@ if ($AllReady) {
     Write-Host ""
     if ($RunQemu) {
         Write-Host "Launching QEMU..." -ForegroundColor Cyan
+        Write-Host "NOTE: Press Ctrl+Alt+G to grab/release the mouse in the QEMU window" -ForegroundColor Yellow
         Write-Host ""
         
         $QemuArgs = @(
             "-bios", $OVMF,
             "-drive", "file=fat:rw:ESP,format=raw",
             "-m", "1024M",
+            "-vga", "std",
             "-serial", "stdio",
-            "-no-reboot"
+            "-no-reboot",
+            "-d", "guest_errors"
         )
         
         & qemu-system-x86_64 $QemuArgs
