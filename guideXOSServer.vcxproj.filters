@@ -312,6 +312,24 @@
     <ClInclude Include="kernel\arch\arm\include\arch\graphics.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="kernel\arch\riscv64\include\arch\graphics.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\arch\riscv64\include\arch\pci_audio.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\arch\riscv64\include\arch\sbi_console.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\arch\riscv64\include\arch\usb_hci.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\arch\riscv64\include\arch\riscv64.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\core\include\kernel\serial_debug.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="allocator.cpp">
@@ -596,6 +614,21 @@
     <ClCompile Include="kernel\arch\arm\graphics.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="kernel\arch\riscv64\arch.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\arch\riscv64\graphics.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\arch\riscv64\pci_audio.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\arch\riscv64\sbi_console.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\arch\riscv64\usb_hci.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <None Include="kernel\arch\amd64\boot.asm">
@@ -669,13 +702,9 @@
       <Filter>Source Files</Filter>
     </None>
     <None Include="Directory.Build.targets" />
-    <None Include="ARCHITECTURE.md" />
     <None Include="build-uefi.ps1" />
     <None Include="run-uefi.sh" />
     <None Include="fix-trampoline.ps1" />
-    <None Include="run-qemu.bat">
-      <Filter>Source Files</Filter>
-    </None>
     <None Include="docs\BUILD_GUIDE.md" />
     <None Include="scripts\run-sparkv8_in_windows.sh" />
     <None Include="kernel\arch\sparc64\boot.s" />
@@ -688,12 +717,18 @@
     <None Include="scripts\build-and-run-sparcv9_in_linux.sh" />
     <None Include="scripts\build-ia64.sh" />
     <None Include="scripts\run-ia64_in_linux.sh" />
-    <None Include="_fix_filters.py" />
     <None Include="_fix_filters_audio.py" />
-    <None Include="_fix_vcxproj_all.py" />
-    <None Include="_fix_vcxproj_filters_all.py" />
-    <None Include="_fix_server_objnames.py" />
-    <None Include="_fix_kernel_objnames.py" />
+    <None Include="kernel\arch\riscv64\boot.s" />
+    <None Include="kernel\arch\riscv64\linker.ld" />
+    <None Include="kernel\arch\riscv64\Makefile.arch" />
+    <None Include="scripts\build-riscv64.sh" />
+    <None Include="scripts\build-and-run-riscv64_in_linux.sh" />
+    <None Include="scripts\run-riscv64_in_windows.bat">
+      <Filter>Source Files</Filter>
+    </None>
+    <None Include="run-qemu.bat">
+      <Filter>Source Files</Filter>
+    </None>
   </ItemGroup>
   <ItemGroup>
     <Text Include="scripts\build-and-run-sparcv8_in_linux.sh" />

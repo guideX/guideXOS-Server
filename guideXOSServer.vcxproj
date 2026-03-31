@@ -183,6 +183,7 @@
     <ClInclude Include="kernel\core\include\kernel\pci_audio.h" />
     <ClInclude Include="kernel\core\include\kernel\process.h" />
     <ClInclude Include="kernel\core\include\kernel\ps2mouse.h" />
+    <ClInclude Include="kernel\core\include\kernel\serial_debug.h" />
     <ClInclude Include="kernel\core\include\kernel\usb.h" />
     <ClInclude Include="kernel\core\include\kernel\usb_audio.h" />
     <ClInclude Include="kernel\core\include\kernel\usb_audio_uac2.h" />
@@ -355,7 +356,6 @@
   <ItemGroup>
     <None Include=".vs\launch.vs.json" />
     <None Include=".vs\tasks.vs.json" />
-    <None Include="ARCHITECTURE.md" />
     <None Include="build-uefi.ps1" />
     <None Include="build.bat" />
     <None Include="configure-vs-project.bat" />
@@ -415,12 +415,7 @@
     <None Include="scripts\build-and-run-riscv64_in_linux.sh" />
     <None Include="scripts\run-riscv64_in_windows.bat" />
     <None Include="setup-toolchain.bat" />
-    <None Include="_fix_filters.py" />
     <None Include="_fix_filters_audio.py" />
-    <None Include="_fix_kernel_objnames.py" />
-    <None Include="_fix_server_objnames.py" />
-    <None Include="_fix_vcxproj_all.py" />
-    <None Include="_fix_vcxproj_filters_all.py" />
   </ItemGroup>
   <ItemGroup>
     <Text Include="scripts\build-and-run-sparcv8_in_linux.sh" />
