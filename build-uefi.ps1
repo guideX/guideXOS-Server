@@ -102,7 +102,8 @@ Write-Host ""
 if (!$SkipKernel) {
     Write-Host "[3/6] Building Kernel ($Arch)..." -ForegroundColor Yellow
 
-    Push-Location $KernelDir
+    # Stay in root directory - the Makefile uses kernel/ prefixed paths
+    Push-Location $RootDir
 
     # Check if make is available
     # Try to find GNU make (avoid Embarcadero make or other incompatible makes)
@@ -139,7 +140,7 @@ if (!$SkipKernel) {
         Write-Host ""
         Write-Host "      Or use WSL:" -ForegroundColor Cyan
         Write-Host "        wsl --install" -ForegroundColor White
-        Write-Host "        wsl -e bash -c 'cd kernel && make ARCH=$Arch'" -ForegroundColor White
+        Write-Host "        wsl -e bash -c 'make -f kernel/Makefile ARCH=$Arch'" -ForegroundColor White
         Write-Host ""
         Write-Host "      Continuing without kernel (bootloader is ready)..." -ForegroundColor Gray
         Write-Host ""
@@ -149,8 +150,8 @@ if (!$SkipKernel) {
     } else {
         Write-Host "      Using: $Make" -ForegroundColor Cyan
 
-        # Build kernel
-        & $Make ARCH=$Arch
+        # Build kernel - Makefile must be invoked from project root with -f flag
+        & $Make -f kernel/Makefile ARCH=$Arch
 
         if ($LASTEXITCODE -ne 0) {
             Write-Host "      ERROR: Kernel build failed" -ForegroundColor Red
@@ -188,7 +189,8 @@ if (Test-Path $BootloaderBin) {
 }
 
 # Copy kernel if it exists
-$KernelBin = Join-Path $KernelDir "build\$Arch\bin\kernel.elf"
+# Kernel is built to build/<arch>/bin/ relative to project root (not kernel/ subdirectory)
+$KernelBin = Join-Path $RootDir "build\$Arch\bin\kernel.elf"
 if (Test-Path $KernelBin) {
     $TargetKernel = Join-Path $ESPDir "kernel.elf"
     Copy-Item $KernelBin $TargetKernel -Force

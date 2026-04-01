@@ -729,6 +729,7 @@
     <None Include="run-qemu.bat">
       <Filter>Source Files</Filter>
     </None>
+    <None Include="ESP\startup.nsh" />
   </ItemGroup>
   <ItemGroup>
     <Text Include="scripts\build-and-run-sparcv8_in_linux.sh" />

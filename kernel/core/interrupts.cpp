@@ -72,6 +72,42 @@ struct IDTPtr {
 #endif
 
 // ----------------------------------------------------------------
+// GDT structures (required for interrupt handling)
+// ----------------------------------------------------------------
+
+#if defined(__x86_64__) || defined(_M_X64)
+// 64-bit GDT entry (8 bytes)
+struct GDTEntry {
+    uint16_t limit_low;
+    uint16_t base_low;
+    uint8_t  base_mid;
+    uint8_t  access;
+    uint8_t  flags_limit_high;
+    uint8_t  base_high;
+} PACKED;
+
+struct GDTPtr {
+    uint16_t limit;
+    uint64_t base;
+} PACKED;
+#else
+// 32-bit GDT entry (8 bytes)
+struct GDTEntry {
+    uint16_t limit_low;
+    uint16_t base_low;
+    uint8_t  base_mid;
+    uint8_t  access;
+    uint8_t  flags_limit_high;
+    uint8_t  base_high;
+} PACKED;
+
+struct GDTPtr {
+    uint16_t limit;
+    uint32_t base;
+} PACKED;
+#endif
+
+// ----------------------------------------------------------------
 // Constants
 // ----------------------------------------------------------------
 
@@ -86,9 +122,108 @@ static const uint8_t kIRQBase       = 32;
 // Static data
 // ----------------------------------------------------------------
 
+// GDT: 3 entries - null, code, data
+static GDTEntry s_gdt[3];
+static GDTPtr   s_gdtPtr;
+
 static IDTEntry s_idt[kIDTSize];
 static IDTPtr   s_idtPtr;
 static irq_handler_t s_handlers[16] = { 0 };
+
+// ----------------------------------------------------------------
+// GDT helpers
+// ----------------------------------------------------------------
+
+static void set_gdt_entry(int index, uint32_t base, uint32_t limit, uint8_t access, uint8_t flags)
+{
+    s_gdt[index].limit_low       = (uint16_t)(limit & 0xFFFF);
+    s_gdt[index].base_low        = (uint16_t)(base & 0xFFFF);
+    s_gdt[index].base_mid        = (uint8_t)((base >> 16) & 0xFF);
+    s_gdt[index].access          = access;
+    s_gdt[index].flags_limit_high = (uint8_t)(((limit >> 16) & 0x0F) | (flags & 0xF0));
+    s_gdt[index].base_high       = (uint8_t)((base >> 24) & 0xFF);
+}
+
+static void gdt_init()
+{
+    // Entry 0: Null descriptor (required by x86)
+    set_gdt_entry(0, 0, 0, 0, 0);
+    
+#if defined(__x86_64__) || defined(_M_X64)
+    // Entry 1: 64-bit code segment (selector 0x08)
+    // Access: Present (0x80) | DPL=0 (0x00) | Type=code,exec,read (0x1A) = 0x9A
+    // Flags: Long mode (0x20) = 0x20 (no 4K granularity needed in 64-bit)
+    set_gdt_entry(1, 0, 0xFFFFF, 0x9A, 0x20);
+    
+    // Entry 2: 64-bit data segment (selector 0x10)
+    // Access: Present (0x80) | DPL=0 (0x00) | Type=data,read,write (0x12) = 0x92
+    // Flags: 0x00 (no long mode bit for data segments)
+    set_gdt_entry(2, 0, 0xFFFFF, 0x92, 0x00);
+#else
+    // Entry 1: 32-bit code segment (selector 0x08)
+    // Access: Present (0x80) | DPL=0 (0x00) | Type=code,exec,read (0x1A) = 0x9A
+    // Flags: 32-bit (0x40) | 4K granularity (0x80) = 0xC0
+    set_gdt_entry(1, 0, 0xFFFFF, 0x9A, 0xC0);
+    
+    // Entry 2: 32-bit data segment (selector 0x10)
+    // Access: Present (0x80) | DPL=0 (0x00) | Type=data,read,write (0x12) = 0x92
+    // Flags: 32-bit (0x40) | 4K granularity (0x80) = 0xC0
+    set_gdt_entry(2, 0, 0xFFFFF, 0x92, 0xC0);
+#endif
+    
+    // Load the GDT
+    s_gdtPtr.limit = sizeof(s_gdt) - 1;
+#if defined(__x86_64__) || defined(_M_X64)
+    s_gdtPtr.base = reinterpret_cast<uint64_t>(&s_gdt[0]);
+#else
+    s_gdtPtr.base = reinterpret_cast<uint32_t>(&s_gdt[0]);
+#endif
+
+#if defined(__GNUC__) || defined(__clang__)
+#if defined(__x86_64__)
+    // 64-bit: Load GDT and reload segment registers
+    asm volatile (
+        "lgdt %0\n"
+        // Reload CS by far jumping to the next instruction
+        "pushq $0x08\n"           // Push code segment selector
+        "leaq 1f(%%rip), %%rax\n" // Get address of label 1
+        "pushq %%rax\n"           // Push target address
+        "lretq\n"                 // Far return to reload CS
+        "1:\n"
+        // Reload data segment registers
+        "movw $0x10, %%ax\n"
+        "movw %%ax, %%ds\n"
+        "movw %%ax, %%es\n"
+        "movw %%ax, %%fs\n"
+        "movw %%ax, %%gs\n"
+        "movw %%ax, %%ss\n"
+        : 
+        : "m"(s_gdtPtr)
+        : "rax", "memory"
+    );
+#else
+    // 32-bit: Load GDT and reload segment registers
+    asm volatile (
+        "lgdt %0\n"
+        // Reload CS via far jump
+        "ljmp $0x08, $1f\n"
+        "1:\n"
+        // Reload data segment registers
+        "movw $0x10, %%ax\n"
+        "movw %%ax, %%ds\n"
+        "movw %%ax, %%es\n"
+        "movw %%ax, %%fs\n"
+        "movw %%ax, %%gs\n"
+        "movw %%ax, %%ss\n"
+        : 
+        : "m"(s_gdtPtr)
+        : "eax", "memory"
+    );
+#endif
+#endif
+
+    serial::puts("[GDT] GDT loaded with 3 entries, segments reloaded\n");
+}
 
 // ----------------------------------------------------------------
 // PIC helpers
@@ -193,7 +328,15 @@ extern "C" void irq_dispatch(uint32_t irq_number)
 
 #if defined(__x86_64__)
 
-// 64-bit ISR stubs (System V ABI: first arg in %rdi)
+// 64-bit ISR stubs
+// Stack must be 16-byte aligned before 'call'. After interrupt pushes
+// SS/RSP/RFLAGS/CS/RIP (40 bytes) and we push 9 regs (72 bytes), total
+// is 112 bytes. We need to sub 8 to make it 120 (divisible by 16) before call.
+//
+// MinGW uses Microsoft x64 ABI (first arg in RCX)
+// Linux/ELF uses System V ABI (first arg in RDI)
+#if defined(__MINGW32__) || defined(__MINGW64__) || defined(_WIN64)
+// Microsoft x64 ABI: first argument in RCX
 #define MAKE_IRQ_STUB(n)                                   \
     extern "C" void irq_stub_##n();                        \
     asm(                                                   \
@@ -208,8 +351,10 @@ extern "C" void irq_dispatch(uint32_t irq_number)
         "    push %r9\n"                                   \
         "    push %r10\n"                                  \
         "    push %r11\n"                                  \
-        "    mov $" #n ", %edi\n"                           \
-        "    call irq_dispatch\n"                           \
+        "    sub $40, %rsp\n"                              \
+        "    mov $" #n ", %ecx\n"                          \
+        "    call irq_dispatch\n"                          \
+        "    add $40, %rsp\n"                              \
         "    pop %r11\n"                                   \
         "    pop %r10\n"                                   \
         "    pop %r9\n"                                    \
@@ -221,6 +366,38 @@ extern "C" void irq_dispatch(uint32_t irq_number)
         "    pop %rax\n"                                   \
         "    iretq\n"                                      \
     );
+#else
+// System V ABI: first argument in RDI
+#define MAKE_IRQ_STUB(n)                                   \
+    extern "C" void irq_stub_##n();                        \
+    asm(                                                   \
+        ".global irq_stub_" #n "\n"                        \
+        "irq_stub_" #n ":\n"                               \
+        "    push %rax\n"                                  \
+        "    push %rcx\n"                                  \
+        "    push %rdx\n"                                  \
+        "    push %rsi\n"                                  \
+        "    push %rdi\n"                                  \
+        "    push %r8\n"                                   \
+        "    push %r9\n"                                   \
+        "    push %r10\n"                                  \
+        "    push %r11\n"                                  \
+        "    sub $8, %rsp\n"                               \
+        "    mov $" #n ", %edi\n"                          \
+        "    call irq_dispatch\n"                          \
+        "    add $8, %rsp\n"                               \
+        "    pop %r11\n"                                   \
+        "    pop %r10\n"                                   \
+        "    pop %r9\n"                                    \
+        "    pop %r8\n"                                    \
+        "    pop %rdi\n"                                   \
+        "    pop %rsi\n"                                   \
+        "    pop %rdx\n"                                   \
+        "    pop %rcx\n"                                   \
+        "    pop %rax\n"                                   \
+        "    iretq\n"                                      \
+    );
+#endif
 
 #else // 32-bit
 
@@ -310,6 +487,11 @@ static void load_idt()
 
 void init()
 {
+    // CRITICAL: Set up our own GDT first, before any interrupt handling.
+    // The UEFI-provided GDT may not be accessible after ExitBootServices
+    // or may not be mapped in the kernel's page tables.
+    gdt_init();
+
     for (int i = 0; i < kIDTSize; ++i) {
         set_idt_entry(i, 0, 0);
     }
@@ -341,8 +523,13 @@ void init()
 
 void register_irq(uint8_t irq, irq_handler_t handler)
 {
+    serial::puts("[IRQ] register_irq called for IRQ ");
+    serial::put_hex8(irq);
+    serial::putc('\n');
+    
     if (irq < 16) {
         s_handlers[irq] = handler;
+        serial::puts("[IRQ] Handler stored, unmasking...\n");
         pic_unmask_irq(irq);
         serial::puts("[IRQ] Registered and unmasked IRQ ");
         serial::put_hex8(irq);

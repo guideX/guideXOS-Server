@@ -362,6 +362,7 @@
     <None Include="diagnose.bat" />
     <None Include="Directory.Build.targets" />
     <None Include="docs\BUILD_GUIDE.md" />
+    <None Include="ESP\startup.nsh" />
     <None Include="fix-trampoline.ps1" />
     <None Include="guideXOSKernel.vcxproj" />
     <None Include="guideXOSKernel.vcxproj.filters" />

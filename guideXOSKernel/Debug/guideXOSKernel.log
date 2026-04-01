@@ -34,25 +34,11 @@
   [7/10] Compiling desktop.cpp...
   [OK] desktop.o created
   [8/10] Compiling interrupts.cpp...
-  [OK] interrupts.o created
-  [9/10] Compiling ps2mouse.cpp...
-  [OK] ps2mouse.o created
-  [10/10] Linking kernel...
-  [OK] kernel.elf created
-  
-  ==========================================
-  BUILD SUCCESSFUL
-  ==========================================
-  
-  Kernel: build\x86\bin\kernel.elf
-  03/29/2026  07:46 PM            35,872 kernel.elf
-  
-  Toolchain used:
-  D:\bkup\ELFBIN\bin\i686-elf-g++.exe
-  C:\Program Files\NASM\nasm.exe
-  D:\bkup\ELFBIN\bin\i686-elf-ld.exe
-  
-  Next steps:
-    Run in QEMU: ..\scripts\run-qemu-x86.bat
-  
+  C:\Users\DarthguideX\AppData\Local\Temp\cc5NRoZ6.s: Assembler messages:
+  C:\Users\DarthguideX\AppData\Local\Temp\cc5NRoZ6.s:353: Error: `pushq' is only supported in 64-bit mode
+  C:\Users\DarthguideX\AppData\Local\Temp\cc5NRoZ6.s:354: Error: `leaq' is only supported in 64-bit mode
+  C:\Users\DarthguideX\AppData\Local\Temp\cc5NRoZ6.s:355: Error: `pushq' is only supported in 64-bit mode
+  C:\Users\DarthguideX\AppData\Local\Temp\cc5NRoZ6.s:356: Error: `lretq' is only supported in 64-bit mode
+  [ERROR] Failed to compile interrupts.cpp
   Press any key to continue . . . 
+C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Microsoft\VC\v170\Microsoft.MakeFile.Targets(45,5): error MSB3073: The command "cd kernel && build-x86.bat" exited with code 1.
