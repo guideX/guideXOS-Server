@@ -16,7 +16,9 @@
 #include "include/kernel/ps2mouse.h"
 #endif
 
+#if ARCH_HAS_USB && defined(KERNEL_HAS_USB_HID)
 #include "include/kernel/usb_hid.h"
+#endif
 
 // VirtIO input is optional
 #if defined(KERNEL_HAS_VIRTIO_INPUT)
@@ -71,11 +73,13 @@ static void detect_sources()
 {
     s_availableSources = 0;
 
+#if ARCH_HAS_USB && defined(KERNEL_HAS_USB_HID)
     // Check USB HID
     if (usb_hid::has_mouse()) {
         s_availableSources |= (1 << static_cast<uint8_t>(InputSource::USB_HID));
         serial::puts("[INPUT] USB HID mouse detected\n");
     }
+#endif
 
 #if ARCH_HAS_PS2
     // PS/2 is always available on x86 if compiled in
@@ -170,6 +174,7 @@ static void poll_ps2_mouse()
 }
 #endif
 
+#if ARCH_HAS_USB && defined(KERNEL_HAS_USB_HID)
 static void poll_usb_hid_mouse()
 {
     // Poll USB HID subsystem
@@ -203,6 +208,7 @@ static void poll_usb_hid_mouse()
     s_mouse.mode = PositionMode::Relative;
     s_mouse.source = InputSource::USB_HID;
 }
+#endif // ARCH_HAS_USB && KERNEL_HAS_USB_HID
 
 #if defined(KERNEL_HAS_VIRTIO_INPUT)
 static void poll_virtio_input()
@@ -260,8 +266,10 @@ void init(uint32_t screen_width, uint32_t screen_height)
     s_mouse.x = s_screenWidth / 2;
     s_mouse.y = s_screenHeight / 2;
     
+#if ARCH_HAS_USB && defined(KERNEL_HAS_USB_HID)
     // Initialize USB HID subsystem
     usb_hid::init();
+#endif
     
 #if ARCH_HAS_PS2
     // PS/2 is initialized separately in main.cpp for now
@@ -285,9 +293,11 @@ void poll()
 {
     // Poll based on active source
     switch (s_activeMouseSource) {
+#if ARCH_HAS_USB && defined(KERNEL_HAS_USB_HID)
         case InputSource::USB_HID:
             poll_usb_hid_mouse();
             break;
+#endif
             
 #if ARCH_HAS_PS2
         case InputSource::PS2:

@@ -311,6 +311,9 @@ static NotificationToast s_notification = {
     true
 };
 
+// Selected desktop icon (-1 = none)
+static int s_selectedIcon = -1;
+
 // ============================================================
 // Drawing routines
 // ============================================================
@@ -397,6 +400,12 @@ static void draw_desktop_icons()
         uint32_t cy = kIconMargin + row * kIconCellH;
 
         if (cy + kIconCellH > deskH) break;
+
+        // Selection highlight background
+        if (i == s_selectedIcon) {
+            framebuffer::fill_rect(cx, cy, kIconCellW, kIconCellH, rgb(60, 80, 120));
+            draw_rect(cx, cy, kIconCellW, kIconCellH, rgb(100, 140, 200));
+        }
 
         // Icon background square
         uint32_t ix = cx + (kIconCellW - kIconSize) / 2;
@@ -907,6 +916,38 @@ static bool     s_cursorDrawn = false;
 // Previous button state for edge detection
 static uint8_t  s_prevButtons = 0;
 
+// Hit-test desktop icons: returns icon index or -1
+static int hit_test_icon(int32_t mx, int32_t my)
+{
+    uint32_t deskH = s_screenH - kTaskbarH;
+    uint32_t cols = (s_screenW - kIconMargin * 2) / kIconCellW;
+    if (cols < 1) cols = 1;
+
+    for (int i = 0; i < kDesktopIconCount; i++) {
+        uint32_t col = (uint32_t)i % cols;
+        uint32_t row = (uint32_t)i / cols;
+        uint32_t cx = kIconMargin + col * kIconCellW;
+        uint32_t cy = kIconMargin + row * kIconCellH;
+
+        if (cy + kIconCellH > deskH) break;
+
+        if ((uint32_t)mx >= cx && (uint32_t)mx < cx + kIconCellW &&
+            (uint32_t)my >= cy && (uint32_t)my < cy + kIconCellH) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+// Show a notification for an icon launch
+static void show_icon_notification(int iconIndex)
+{
+    if (iconIndex < 0 || iconIndex >= kDesktopIconCount) return;
+    s_notification.title = s_desktopIcons[iconIndex].label;
+    s_notification.message = "Application launched";
+    s_notification.visible = true;
+}
+
 static void save_under_cursor(int32_t mx, int32_t my)
 {
     for (int row = 0; row < kCursorH; row++) {
@@ -996,6 +1037,26 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
             draw();
             draw_cursor(mx, my);
             return;
+        }
+
+        // Desktop icon click
+        int iconIdx = hit_test_icon(mx, my);
+        if (iconIdx >= 0) {
+            s_selectedIcon = iconIdx;
+            show_icon_notification(iconIdx);
+            draw();
+            draw_cursor(mx, my);
+            return;
+        }
+
+        // Click on empty desktop area: deselect icon
+        if ((uint32_t)my < taskbarY) {
+            if (s_selectedIcon >= 0) {
+                s_selectedIcon = -1;
+                draw();
+                draw_cursor(mx, my);
+                return;
+            }
         }
 
         // Notification dismiss: check if clicking the notification toast

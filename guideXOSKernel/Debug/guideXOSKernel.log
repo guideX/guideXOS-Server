@@ -37,17 +37,27 @@
   [OK] interrupts.o created
   [9/10] Compiling ps2mouse.cpp...
   [OK] ps2mouse.o created
-  [10/10] Linking kernel...
-  i686-elf-ld: build\x86\obj\core\main.o: in function `kernel_main':
-  main.cpp:(.text+0x13f): undefined reference to `kernel::input::init(unsigned long, unsigned long)'
-  i686-elf-ld: main.cpp:(.text+0x150): undefined reference to `kernel::input::mouse_y()'
-  i686-elf-ld: main.cpp:(.text+0x157): undefined reference to `kernel::input::mouse_x()'
-  i686-elf-ld: main.cpp:(.text+0x181): undefined reference to `kernel::input::poll()'
-  i686-elf-ld: main.cpp:(.text+0x186): undefined reference to `kernel::input::mouse_dirty()'
-  i686-elf-ld: main.cpp:(.text+0x191): undefined reference to `kernel::input::mouse_clear_dirty()'
-  i686-elf-ld: main.cpp:(.text+0x196): undefined reference to `kernel::input::mouse_buttons()'
-  i686-elf-ld: main.cpp:(.text+0x19e): undefined reference to `kernel::input::mouse_y()'
-  i686-elf-ld: main.cpp:(.text+0x1a5): undefined reference to `kernel::input::mouse_x()'
-  [ERROR] Failed to link kernel
+  [10/11] Compiling input_manager.cpp...
+core\input_manager.cpp(61,16): warning GEC80797B: 'int32_t kernel::input::clamp(int32_t, int32_t, int32_t)' defined but not used [-Wunused-function]
+     61 | static int32_t clamp(int32_t v, int32_t lo, int32_t hi)
+        |                ^~~~~
+  [OK] input_manager.o created
+  [11/11] Linking kernel...
+  [OK] kernel.elf created
+  
+  ==========================================
+  BUILD SUCCESSFUL
+  ==========================================
+  
+  Kernel: build\x86\bin\kernel.elf
+  04/02/2026  12:12 PM            50,124 kernel.elf
+  
+  Toolchain used:
+  D:\bkup\ELFBIN\bin\i686-elf-g++.exe
+  C:\Program Files\NASM\nasm.exe
+  D:\bkup\ELFBIN\bin\i686-elf-ld.exe
+  
+  Next steps:
+    Run in QEMU: ..\scripts\run-qemu-x86.bat
+  
   Press any key to continue . . . 
-C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Microsoft\VC\v170\Microsoft.MakeFile.Targets(45,5): error MSB3073: The command "cd kernel && build-x86.bat" exited with code 1.

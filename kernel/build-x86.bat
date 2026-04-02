@@ -281,9 +281,19 @@ if %errorlevel% neq 0 (
 )
 echo [OK] ps2mouse.o created
 
+REM Compile input_manager.cpp
+echo [10/11] Compiling input_manager.cpp...
+%CXX% %CFLAGS% -c core\input_manager.cpp -o "%OBJ_DIR%\core\input_manager.o"
+if %errorlevel% neq 0 (
+    echo [ERROR] Failed to compile input_manager.cpp
+    pause
+    exit /b 1
+)
+echo [OK] input_manager.o created
+
 REM Link kernel
-echo [10/10] Linking kernel...
-%LD% %LDFLAGS% -o "%KERNEL%" "%OBJ_DIR%\arch\boot.o" "%OBJ_DIR%\core\main.o" "%OBJ_DIR%\core\vga.o" "%OBJ_DIR%\core\framebuffer.o" "%OBJ_DIR%\core\arch.o" "%OBJ_DIR%\arch\arch.o" "%OBJ_DIR%\core\desktop.o" "%OBJ_DIR%\core\interrupts.o" "%OBJ_DIR%\core\ps2mouse.o"
+echo [11/11] Linking kernel...
+%LD% %LDFLAGS% -o "%KERNEL%" "%OBJ_DIR%\arch\boot.o" "%OBJ_DIR%\core\main.o" "%OBJ_DIR%\core\vga.o" "%OBJ_DIR%\core\framebuffer.o" "%OBJ_DIR%\core\arch.o" "%OBJ_DIR%\arch\arch.o" "%OBJ_DIR%\core\desktop.o" "%OBJ_DIR%\core\interrupts.o" "%OBJ_DIR%\core\ps2mouse.o" "%OBJ_DIR%\core\input_manager.o"
 
 if %errorlevel% neq 0 (
     echo [ERROR] Failed to link kernel
