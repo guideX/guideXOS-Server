@@ -29,15 +29,18 @@ if [ ! -f "$KERNEL" ]; then
     exit 1
 fi
 
-# Launch QEMU with VNC
+# Launch QEMU with VNC and USB tablet for absolute mouse positioning
+# USB tablet works well with VNC clients that support absolute positioning
 qemu-system-i386 \
--machine pc,usb=off \
--kernel "$KERNEL" \
--m 128M \
--vga std \
--vnc :0 \
--k en-us \
--serial stdio
+    -machine pc \
+    -device usb-ehci,id=ehci \
+    -device usb-tablet,bus=ehci.0 \
+    -kernel "$KERNEL" \
+    -m 128M \
+    -vga std \
+    -vnc :0 \
+    -k en-us \
+    -serial stdio
 
 # Check if QEMU exited with error
 if [ $? -ne 0 ]; then

@@ -34,11 +34,20 @@
   [7/10] Compiling desktop.cpp...
   [OK] desktop.o created
   [8/10] Compiling interrupts.cpp...
-  C:\Users\DarthguideX\AppData\Local\Temp\cc5NRoZ6.s: Assembler messages:
-  C:\Users\DarthguideX\AppData\Local\Temp\cc5NRoZ6.s:353: Error: `pushq' is only supported in 64-bit mode
-  C:\Users\DarthguideX\AppData\Local\Temp\cc5NRoZ6.s:354: Error: `leaq' is only supported in 64-bit mode
-  C:\Users\DarthguideX\AppData\Local\Temp\cc5NRoZ6.s:355: Error: `pushq' is only supported in 64-bit mode
-  C:\Users\DarthguideX\AppData\Local\Temp\cc5NRoZ6.s:356: Error: `lretq' is only supported in 64-bit mode
-  [ERROR] Failed to compile interrupts.cpp
+  [OK] interrupts.o created
+  [9/10] Compiling ps2mouse.cpp...
+  [OK] ps2mouse.o created
+  [10/10] Linking kernel...
+  i686-elf-ld: build\x86\obj\core\main.o: in function `kernel_main':
+  main.cpp:(.text+0x13f): undefined reference to `kernel::input::init(unsigned long, unsigned long)'
+  i686-elf-ld: main.cpp:(.text+0x150): undefined reference to `kernel::input::mouse_y()'
+  i686-elf-ld: main.cpp:(.text+0x157): undefined reference to `kernel::input::mouse_x()'
+  i686-elf-ld: main.cpp:(.text+0x181): undefined reference to `kernel::input::poll()'
+  i686-elf-ld: main.cpp:(.text+0x186): undefined reference to `kernel::input::mouse_dirty()'
+  i686-elf-ld: main.cpp:(.text+0x191): undefined reference to `kernel::input::mouse_clear_dirty()'
+  i686-elf-ld: main.cpp:(.text+0x196): undefined reference to `kernel::input::mouse_buttons()'
+  i686-elf-ld: main.cpp:(.text+0x19e): undefined reference to `kernel::input::mouse_y()'
+  i686-elf-ld: main.cpp:(.text+0x1a5): undefined reference to `kernel::input::mouse_x()'
+  [ERROR] Failed to link kernel
   Press any key to continue . . . 
 C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Microsoft\VC\v170\Microsoft.MakeFile.Targets(45,5): error MSB3073: The command "cd kernel && build-x86.bat" exited with code 1.

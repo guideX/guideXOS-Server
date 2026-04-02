@@ -10,6 +10,10 @@
 //
 
 #include "include/arch/pci_audio.h"
+
+// Only compile for ARM target
+#if defined(__arm__) || defined(__aarch32__) || defined(_M_ARM)
+
 #include "include/arch/arm.h"
 
 namespace kernel {
@@ -165,3 +169,25 @@ void pl041_set_mute(bool mute)
 } // namespace arm
 } // namespace arch
 } // namespace kernel
+
+#else // Not ARM target
+
+// Stub implementation for non-ARM builds
+namespace kernel {
+namespace arch {
+namespace arm {
+namespace pci_audio {
+
+bool init() { return false; }
+bool is_available() { return false; }
+bool pl041_init() { return false; }
+bool pl041_configure(uint16_t, uint8_t, uint8_t) { return false; }
+void pl041_set_volume(uint8_t, uint8_t) {}
+void pl041_set_mute(bool) {}
+
+} // namespace pci_audio
+} // namespace arm
+} // namespace arch
+} // namespace kernel
+
+#endif

@@ -53,23 +53,27 @@ if not exist "build\x86\bin\kernel.elf" (
     exit /b 1
 )
 
+
 echo Starting QEMU...
 echo Kernel: build\x86\bin\kernel.elf
+echo USB tablet mode: No mouse grab required
 echo.
 echo Press Ctrl+C to stop QEMU
 echo ==========================================
 echo.
 
-REM Launch QEMU
+REM Launch QEMU with USB tablet for absolute mouse positioning
 "%QEMU_PATH%" ^
--machine pc,usb=off ^
--kernel "build\x86\bin\kernel.elf" ^
--m 128M ^
--vga std ^
--serial stdio ^
--display gtk ^
--no-reboot ^
--no-shutdown
+    -machine pc ^
+    -device usb-ehci,id=ehci ^
+    -device usb-tablet,bus=ehci.0 ^
+    -kernel "build\x86\bin\kernel.elf" ^
+    -m 128M ^
+    -vga std ^
+    -serial stdio ^
+    -display gtk ^
+    -no-reboot ^
+    -no-shutdown
 
 echo.
 echo QEMU closed.

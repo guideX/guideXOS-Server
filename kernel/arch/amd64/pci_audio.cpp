@@ -7,6 +7,10 @@
 //
 
 #include "include/arch/pci_audio.h"
+
+// Only compile for AMD64 target (not Windows native builds)
+#if (defined(__x86_64__) || defined(_M_X64)) && !defined(_WIN32)
+
 #include "include/arch/amd64.h"
 #include <kernel/pci_audio.h>
 
@@ -45,3 +49,22 @@ uint64_t get_hda_mmio_base() { return s_hdaMmio; }
 } // namespace amd64
 } // namespace arch
 } // namespace kernel
+
+#else // Not AMD64 kernel build
+
+// Stub implementation for non-AMD64 or Windows builds
+namespace kernel {
+namespace arch {
+namespace amd64 {
+namespace pci_audio {
+
+bool init() { return false; }
+bool is_available() { return false; }
+uint64_t get_hda_mmio_base() { return 0; }
+
+} // namespace pci_audio
+} // namespace amd64
+} // namespace arch
+} // namespace kernel
+
+#endif

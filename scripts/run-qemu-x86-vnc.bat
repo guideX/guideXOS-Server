@@ -39,9 +39,12 @@ if not exist "%KERNEL%" (
     exit /b 1
 )
 
-REM Launch QEMU with VNC
+REM Launch QEMU with VNC and USB tablet for absolute mouse positioning
+REM USB tablet works well with VNC clients that support absolute positioning
 "%QEMU%" ^
-    -machine pc,usb=off ^
+    -machine pc ^
+    -device usb-ehci,id=ehci ^
+    -device usb-tablet,bus=ehci.0 ^
     -kernel "%KERNEL%" ^
     -m 128M ^
     -vga std ^

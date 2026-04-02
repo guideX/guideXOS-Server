@@ -177,6 +177,7 @@
     <ClInclude Include="kernel\core\include\kernel\fs_ext4.h" />
     <ClInclude Include="kernel\core\include\kernel\fs_fat.h" />
     <ClInclude Include="kernel\core\include\kernel\fs_ufs.h" />
+    <ClInclude Include="kernel\core\include\kernel\input_manager.h" />
     <ClInclude Include="kernel\core\include\kernel\interrupts.h" />
     <ClInclude Include="kernel\core\include\kernel\multiboot.h" />
     <ClInclude Include="kernel\core\include\kernel\nvme.h" />
@@ -198,6 +199,7 @@
     <ClInclude Include="kernel\core\include\kernel\usb_video.h" />
     <ClInclude Include="kernel\core\include\kernel\usb_video_uvc.h" />
     <ClInclude Include="kernel\core\include\kernel\vesa.h" />
+    <ClInclude Include="kernel\core\include\kernel\virtio_input.h" />
     <ClInclude Include="launchSettings.json" />
     <ClInclude Include="icons.h" />
     <ClInclude Include="ipc.h" />
@@ -305,6 +307,7 @@
     <ClCompile Include="kernel\core\fs_ext4.cpp" />
     <ClCompile Include="kernel\core\fs_fat.cpp" />
     <ClCompile Include="kernel\core\fs_ufs.cpp" />
+    <ClCompile Include="kernel\core\input_manager.cpp" />
     <ClCompile Include="kernel\core\interrupts.cpp" />
     <ClCompile Include="kernel\core\main.cpp" />
     <ClCompile Include="kernel\core\nvme.cpp" />
@@ -328,6 +331,7 @@
     <ClCompile Include="kernel\core\usb_video_uvc.cpp" />
     <ClCompile Include="kernel\core\vesa.cpp" />
     <ClCompile Include="kernel\core\vga.cpp" />
+    <ClCompile Include="kernel\core\virtio_input.cpp" />
     <ClCompile Include="lifecycle.cpp" />
     <ClCompile Include="logger.cpp" />
     <ClCompile Include="message_box.cpp" />

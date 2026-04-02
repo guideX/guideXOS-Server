@@ -48,13 +48,16 @@ if [ "$1" = "uefi" ]; then
     
     echo -e "${GREEN}Launching QEMU with UEFI boot...${NC}"
     echo "ESP directory: ESP/"
+    echo "USB tablet mode: No mouse grab required"
     echo "Press Ctrl+A then X to exit QEMU"
     echo "----------------------------------------"
     echo ""
     
-    # Launch QEMU in UEFI mode
+    # Launch QEMU in UEFI mode with USB tablet for absolute mouse positioning
     qemu-system-x86_64 \
         -bios OVMF.fd \
+        -device qemu-xhci,id=xhci \
+        -device usb-tablet,bus=xhci.0 \
         -drive file=fat:rw:ESP,format=raw \
         -m 1024M \
         -serial stdio \
@@ -78,11 +81,15 @@ else
 
     echo -e "${GREEN}Launching guideXOS x86 kernel in QEMU...${NC}"
     echo "Kernel: $KERNEL_PATH"
+    echo "USB tablet mode: No mouse grab required"
     echo "Press Ctrl+A then X to exit QEMU"
     echo "----------------------------------------"
     echo ""
 
+    # Launch with USB tablet for absolute mouse positioning
     qemu-system-i386 \
+        -device usb-ehci,id=ehci \
+        -device usb-tablet,bus=ehci.0 \
         -kernel "$KERNEL_PATH" \
         -m 128M \
         -vga std \

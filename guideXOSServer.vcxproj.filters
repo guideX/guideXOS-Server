@@ -330,6 +330,12 @@
     <ClInclude Include="kernel\core\include\kernel\serial_debug.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="kernel\core\include\kernel\input_manager.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\core\include\kernel\virtio_input.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="allocator.cpp">
@@ -627,6 +633,12 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="kernel\arch\riscv64\usb_hci.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\core\input_manager.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\core\virtio_input.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

@@ -14,6 +14,7 @@
 #include "include/kernel/desktop.h"
 #include "include/kernel/interrupts.h"
 #include "include/kernel/ps2mouse.h"
+#include "include/kernel/input_manager.h"
 #include "include/kernel/serial_debug.h"
 
 #if ARCH_HAS_PIC_8259
@@ -104,6 +105,7 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::serial::puts("[KERNEL] IDT + PIC initialized, interrupts enabled\n");
         
         // Initialize PS/2 mouse driver and register IRQ12 handler
+        // (PS/2 is used as fallback when USB HID is not available)
         kernel::serial::puts("[KERNEL] Initializing PS/2 mouse...\n");
         kernel::ps2mouse::init(kernel::framebuffer::get_width(),
                                kernel::framebuffer::get_height());
@@ -111,20 +113,29 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::interrupts::register_irq(12, kernel::ps2mouse::irq_handler);
         kernel::serial::puts("[KERNEL] IRQ12 handler registered and unmasked\n");
         
+        // Initialize input manager (handles USB HID, PS/2, VirtIO fallback)
+        kernel::serial::puts("[KERNEL] Initializing input manager...\n");
+        kernel::input::init(kernel::framebuffer::get_width(),
+                            kernel::framebuffer::get_height());
+        kernel::serial::puts("[KERNEL] Input manager initialized\n");
+        
         // Draw initial cursor at center of screen
-        kernel::desktop::draw_cursor(kernel::ps2mouse::get_x(),
-                                     kernel::ps2mouse::get_y());
+        kernel::desktop::draw_cursor(kernel::input::mouse_x(),
+                                     kernel::input::mouse_y());
         
-        kernel::serial::puts("[KERNEL] Entering main loop (waiting for mouse IRQs)...\n");
+        kernel::serial::puts("[KERNEL] Entering main loop (waiting for input)...\n");
         
-        // Main kernel loop — poll mouse state and redraw cursor
+        // Main kernel loop — poll input and redraw cursor
         while (1) {
-            if (kernel::ps2mouse::is_dirty()) {
-                kernel::ps2mouse::clear_dirty();
+            // Poll input manager for updates (handles USB HID polling)
+            kernel::input::poll();
+            
+            if (kernel::input::mouse_dirty()) {
+                kernel::input::mouse_clear_dirty();
                 kernel::desktop::handle_mouse(
-                    kernel::ps2mouse::get_x(),
-                    kernel::ps2mouse::get_y(),
-                    kernel::ps2mouse::get_buttons());
+                    kernel::input::mouse_x(),
+                    kernel::input::mouse_y(),
+                    kernel::input::mouse_buttons());
             }
             // Halt CPU until next interrupt (saves power)
             kernel::arch::halt();

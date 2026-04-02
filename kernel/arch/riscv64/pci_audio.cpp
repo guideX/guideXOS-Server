@@ -6,6 +6,10 @@
 //
 
 #include "include/arch/pci_audio.h"
+
+// Only compile for RISC-V 64 target
+#if defined(__riscv) && (__riscv_xlen == 64)
+
 #include "include/arch/riscv64.h"
 #include <kernel/pci_audio.h>
 
@@ -43,3 +47,22 @@ uint64_t get_hda_mmio_base() { return s_hdaMmio; }
 } // namespace riscv64
 } // namespace arch
 } // namespace kernel
+
+#else // Not RISC-V 64
+
+// Stub implementation for non-RISC-V builds
+namespace kernel {
+namespace arch {
+namespace riscv64 {
+namespace pci_audio {
+
+bool init() { return false; }
+bool is_available() { return false; }
+uint64_t get_hda_mmio_base() { return 0; }
+
+} // namespace pci_audio
+} // namespace riscv64
+} // namespace arch
+} // namespace kernel
+
+#endif // __riscv

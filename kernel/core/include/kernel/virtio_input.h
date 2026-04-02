@@ -1,0 +1,179 @@
+//
+// VirtIO Input Device Driver
+//
+// Supports virtio-input devices for virtualized environments:
+//   - virtio-mouse (relative positioning)
+//   - virtio-tablet (absolute positioning)
+//   - virtio-keyboard
+//
+// Reference: OASIS Virtual I/O Device (VIRTIO) Version 1.1
+//            Section 5.8 - Input Device
+//
+// Copyright (c) 2026 guideXOS Server
+//
+
+#ifndef KERNEL_VIRTIO_INPUT_H
+#define KERNEL_VIRTIO_INPUT_H
+
+#include "kernel/types.h"
+
+namespace kernel {
+namespace virtio_input {
+
+// ================================================================
+// VirtIO Input Event Types (Linux evdev compatible)
+// ================================================================
+
+enum EventType : uint16_t {
+    EV_SYN       = 0x00,  // Synchronization events
+    EV_KEY       = 0x01,  // Key/button events
+    EV_REL       = 0x02,  // Relative axis events
+    EV_ABS       = 0x03,  // Absolute axis events
+    EV_MSC       = 0x04,  // Miscellaneous events
+    EV_LED       = 0x11,  // LED events
+    EV_REP       = 0x14,  // Auto-repeat events
+};
+
+// Relative axis codes
+enum RelativeAxis : uint16_t {
+    REL_X        = 0x00,
+    REL_Y        = 0x01,
+    REL_Z        = 0x02,
+    REL_WHEEL    = 0x08,
+    REL_HWHEEL   = 0x06,
+};
+
+// Absolute axis codes
+enum AbsoluteAxis : uint16_t {
+    ABS_X        = 0x00,
+    ABS_Y        = 0x01,
+    ABS_Z        = 0x02,
+    ABS_PRESSURE = 0x18,
+};
+
+// Button codes (subset)
+enum ButtonCode : uint16_t {
+    BTN_LEFT     = 0x110,
+    BTN_RIGHT    = 0x111,
+    BTN_MIDDLE   = 0x112,
+    BTN_TOUCH    = 0x14A,
+};
+
+// ================================================================
+// VirtIO Input Event Structure
+// ================================================================
+
+#if defined(_MSC_VER)
+#pragma pack(push, 1)
+#endif
+
+struct InputEvent {
+    uint16_t type;
+    uint16_t code;
+    int32_t  value;
+}
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((packed))
+#endif
+;
+
+#if defined(_MSC_VER)
+#pragma pack(pop)
+#endif
+
+// ================================================================
+// Mouse state
+// ================================================================
+
+struct MouseState {
+    int32_t  x;           // Current X (absolute) or last delta (relative)
+    int32_t  y;           // Current Y (absolute) or last delta (relative)
+    uint8_t  buttons;     // Button bitmask
+    int8_t   wheel;       // Vertical scroll delta
+    int8_t   hwheel;      // Horizontal scroll delta
+    bool     is_absolute; // True if reporting absolute coordinates
+};
+
+// ================================================================
+// Keyboard state
+// ================================================================
+
+struct KeyboardState {
+    uint8_t  modifiers;   // Modifier key bitmask
+    uint8_t  keys[6];     // Currently pressed keys
+    uint8_t  keyCount;    // Number of keys in the array
+};
+
+// ================================================================
+// Device information
+// ================================================================
+
+struct DeviceInfo {
+    bool     present;     // Device detected
+    bool     is_tablet;   // True if absolute positioning (tablet)
+    bool     is_keyboard; // Has keyboard capability
+    bool     is_mouse;    // Has mouse/tablet capability
+    uint32_t abs_max_x;   // Maximum X for absolute devices
+    uint32_t abs_max_y;   // Maximum Y for absolute devices
+};
+
+// ================================================================
+// Public API
+// ================================================================
+
+// Initialize VirtIO input subsystem
+// Scans PCI for virtio-input devices
+void init(uint32_t screen_width, uint32_t screen_height);
+
+// Poll for new input events
+void poll();
+
+// Release all VirtIO input devices
+void shutdown();
+
+// ----------------------------------------------------------------
+// Device queries
+// ----------------------------------------------------------------
+
+// Check if any VirtIO mouse/tablet is present
+bool has_mouse();
+
+// Check if any VirtIO keyboard is present
+bool has_keyboard();
+
+// Get device information
+const DeviceInfo* get_device_info();
+
+// ----------------------------------------------------------------
+// Mouse/Tablet accessors
+// ----------------------------------------------------------------
+
+// Get current mouse state
+const MouseState* get_mouse_state();
+
+// Check if mouse state changed
+bool mouse_dirty();
+
+// Clear mouse dirty flag
+void mouse_clear_dirty();
+
+// ----------------------------------------------------------------
+// Keyboard accessors
+// ----------------------------------------------------------------
+
+// Get current keyboard state
+const KeyboardState* get_keyboard_state();
+
+// Check if a specific key is pressed
+bool is_key_pressed(uint16_t keycode);
+
+// Check if keyboard state changed
+bool keyboard_dirty();
+
+// Clear keyboard dirty flag
+void keyboard_clear_dirty();
+
+} // namespace virtio_input
+} // namespace kernel
+
+#endif // KERNEL_VIRTIO_INPUT_H
