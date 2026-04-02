@@ -50,7 +50,7 @@ core\input_manager.cpp(61,16): warning GEC80797B: 'int32_t kernel::input::clamp(
   ==========================================
   
   Kernel: build\x86\bin\kernel.elf
-  04/02/2026  12:12 PM            50,124 kernel.elf
+  04/02/2026  12:42 PM            50,428 kernel.elf
   
   Toolchain used:
   D:\bkup\ELFBIN\bin\i686-elf-g++.exe

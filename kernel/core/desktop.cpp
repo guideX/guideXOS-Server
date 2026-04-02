@@ -314,6 +314,12 @@ static NotificationToast s_notification = {
 // Selected desktop icon (-1 = none)
 static int s_selectedIcon = -1;
 
+// Start menu hover and click state (-1 = none)
+static int s_hoverMenuLeft  = -1;   // hovered left-column item index
+static int s_hoverMenuRight = -1;   // hovered right-column item index
+static int s_clickedMenuLeft  = -1; // clicked left-column item index
+static int s_clickedMenuRight = -1; // clicked right-column item index
+
 // ============================================================
 // Drawing routines
 // ============================================================
@@ -661,9 +667,18 @@ static void draw_start_menu()
         uint32_t itemY = contentY + (uint32_t)i * kStartMenuItemH;
         if (itemY + kStartMenuItemH > menuY + headerH + maxBodyH) break;
 
+        // Clicked item highlight (bright blue)
+        if (i == s_clickedMenuLeft) {
+            framebuffer::fill_rect(leftX + 1, itemY, leftColW - 2, kStartMenuItemH, rgb(50, 90, 160));
+        }
+        // Hover highlight (subtle blue tint)
+        else if (i == s_hoverMenuLeft) {
+            framebuffer::fill_rect(leftX + 1, itemY, leftColW - 2, kStartMenuItemH, rgb(55, 60, 80));
+        }
         // Alternate row shading
-        if (i % 2 == 0)
+        else if (i % 2 == 0) {
             framebuffer::fill_rect(leftX + 1, itemY, leftColW - 2, kStartMenuItemH, rgb(46, 46, 58));
+        }
 
         // Small colored icon square
         uint32_t iconColor;
@@ -676,8 +691,10 @@ static void draw_start_menu()
         framebuffer::fill_rect(leftX + 10, itemY + 4, 20, 20, iconColor);
         draw_rect(leftX + 10, itemY + 4, 20, 20, rgb(160, 160, 180));
 
-        // App name
-        draw_text(leftX + 36, itemY + 10, s_startMenuApps[i], rgb(210, 210, 225), 1);
+        // App name (brighter when hovered or clicked)
+        uint32_t textColor = (i == s_clickedMenuLeft || i == s_hoverMenuLeft)
+            ? rgb(255, 255, 255) : rgb(210, 210, 225);
+        draw_text(leftX + 36, itemY + 10, s_startMenuApps[i], textColor, 1);
     }
 
     // Vertical divider between columns
@@ -691,16 +708,27 @@ static void draw_start_menu()
         uint32_t itemY = contentY + (uint32_t)i * kStartMenuItemH;
         if (itemY + kStartMenuItemH > menuY + headerH + maxBodyH) break;
 
-        // Hover-style alternate shading
-        if (i % 2 == 1)
+        // Clicked item highlight (bright blue)
+        if (i == s_clickedMenuRight) {
+            framebuffer::fill_rect(rightX, itemY, kStartMenuRightColW - 2, kStartMenuItemH, rgb(50, 90, 160));
+        }
+        // Hover highlight (subtle blue tint)
+        else if (i == s_hoverMenuRight) {
+            framebuffer::fill_rect(rightX, itemY, kStartMenuRightColW - 2, kStartMenuItemH, rgb(50, 55, 72));
+        }
+        // Alternate shading
+        else if (i % 2 == 1) {
             framebuffer::fill_rect(rightX, itemY, kStartMenuRightColW - 2, kStartMenuItemH, rgb(42, 42, 52));
+        }
 
         // Small colored icon
         framebuffer::fill_rect(rightX + 8, itemY + 5, 16, 16, s_startMenuRight[i].color);
         draw_rect(rightX + 8, itemY + 5, 16, 16, rgb(140, 140, 160));
 
-        // Label
-        draw_text(rightX + 30, itemY + 10, s_startMenuRight[i].label, rgb(200, 200, 220), 1);
+        // Label (brighter when hovered or clicked)
+        uint32_t rTextColor = (i == s_clickedMenuRight || i == s_hoverMenuRight)
+            ? rgb(255, 255, 255) : rgb(200, 200, 220);
+        draw_text(rightX + 30, itemY + 10, s_startMenuRight[i].label, rTextColor, 1);
     }
 
     // === Footer: "All Programs" button + Power menu (matching Legacy) ===
@@ -850,6 +878,11 @@ void toggle_start_menu()
     s_startMenuOpen = !s_startMenuOpen;
     // Close context menu when start menu is toggled
     if (s_startMenuOpen) s_rightClickMenuOpen = false;
+    // Reset hover/click state
+    s_hoverMenuLeft = -1;
+    s_hoverMenuRight = -1;
+    s_clickedMenuLeft = -1;
+    s_clickedMenuRight = -1;
 }
 
 bool is_start_menu_open()
@@ -948,6 +981,77 @@ static void show_icon_notification(int iconIndex)
     s_notification.visible = true;
 }
 
+// Compute start menu geometry (shared between drawing and hit-testing)
+struct StartMenuGeometry {
+    uint32_t menuX, menuY, menuH;
+    uint32_t headerH, footerH, maxBodyH;
+    uint32_t contentY;
+    uint32_t leftColW;
+    uint32_t rightX;
+};
+
+static StartMenuGeometry get_start_menu_geometry()
+{
+    StartMenuGeometry g;
+    g.headerH = 30;
+    g.footerH = 36;
+    uint32_t bodyH = (uint32_t)kStartMenuAppCount * kStartMenuItemH;
+    uint32_t rightBodyH = (uint32_t)kStartMenuRightCount * kStartMenuItemH;
+    g.maxBodyH = bodyH > rightBodyH ? bodyH : rightBodyH;
+    g.menuH = g.headerH + g.maxBodyH + g.footerH;
+    g.menuX = 4;
+    g.menuY = s_screenH - kTaskbarH - g.menuH;
+    g.leftColW = kStartMenuW - kStartMenuRightColW;
+    g.contentY = g.menuY + g.headerH + 1;
+    g.rightX = g.menuX + g.leftColW + 1;
+    return g;
+}
+
+// Hit-test start menu items: sets leftIdx or rightIdx to item index, or -1
+static void hit_test_start_menu(int32_t mx, int32_t my, int& leftIdx, int& rightIdx)
+{
+    leftIdx = -1;
+    rightIdx = -1;
+    if (!s_startMenuOpen) return;
+
+    StartMenuGeometry g = get_start_menu_geometry();
+
+    // Check if inside menu bounds at all
+    if ((uint32_t)mx < g.menuX || (uint32_t)mx >= g.menuX + kStartMenuW ||
+        (uint32_t)my < g.menuY || (uint32_t)my >= g.menuY + g.menuH) {
+        return;
+    }
+
+    // Only test in the body area (below header, above footer)
+    if ((uint32_t)my < g.contentY || (uint32_t)my >= g.contentY + g.maxBodyH) {
+        return;
+    }
+
+    uint32_t relY = (uint32_t)my - g.contentY;
+    int itemRow = static_cast<int>(relY / kStartMenuItemH);
+
+    // Left column
+    if ((uint32_t)mx >= g.menuX && (uint32_t)mx < g.menuX + g.leftColW) {
+        if (itemRow >= 0 && itemRow < kStartMenuAppCount) {
+            leftIdx = itemRow;
+        }
+    }
+    // Right column
+    else if ((uint32_t)mx >= g.rightX && (uint32_t)mx < g.rightX + kStartMenuRightColW) {
+        if (itemRow >= 0 && itemRow < kStartMenuRightCount) {
+            rightIdx = itemRow;
+        }
+    }
+}
+
+// Show notification for a start menu item launch
+static void show_start_menu_notification(const char* label)
+{
+    s_notification.title = label;
+    s_notification.message = "Application launched";
+    s_notification.visible = true;
+}
+
 static void save_under_cursor(int32_t mx, int32_t my)
 {
     for (int row = 0; row < kCursorH; row++) {
@@ -1033,7 +1137,35 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
 
         // If start menu is open and click is outside it, close it
         if (s_startMenuOpen) {
+            // First check if click is on a start menu item
+            int leftHit = -1, rightHit = -1;
+            hit_test_start_menu(mx, my, leftHit, rightHit);
+
+            if (leftHit >= 0) {
+                // Clicked a left-column app
+                s_clickedMenuLeft = leftHit;
+                s_clickedMenuRight = -1;
+                show_start_menu_notification(s_startMenuApps[leftHit]);
+                draw();
+                draw_cursor(mx, my);
+                return;
+            }
+            if (rightHit >= 0) {
+                // Clicked a right-column item
+                s_clickedMenuRight = rightHit;
+                s_clickedMenuLeft = -1;
+                show_start_menu_notification(s_startMenuRight[rightHit].label);
+                draw();
+                draw_cursor(mx, my);
+                return;
+            }
+
+            // Click outside start menu items — close it
             s_startMenuOpen = false;
+            s_hoverMenuLeft = -1;
+            s_hoverMenuRight = -1;
+            s_clickedMenuLeft = -1;
+            s_clickedMenuRight = -1;
             draw();
             draw_cursor(mx, my);
             return;
@@ -1079,6 +1211,20 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
     if (pressed & 0x02) {
         if ((uint32_t)my < taskbarY) {
             show_context_menu((uint32_t)mx, (uint32_t)my);
+            draw();
+            draw_cursor(mx, my);
+            return;
+        }
+    }
+
+    // Start menu hover tracking (on any mouse move, not just clicks)
+    if (s_startMenuOpen) {
+        int newHoverLeft = -1, newHoverRight = -1;
+        hit_test_start_menu(mx, my, newHoverLeft, newHoverRight);
+
+        if (newHoverLeft != s_hoverMenuLeft || newHoverRight != s_hoverMenuRight) {
+            s_hoverMenuLeft = newHoverLeft;
+            s_hoverMenuRight = newHoverRight;
             draw();
             draw_cursor(mx, my);
             return;
