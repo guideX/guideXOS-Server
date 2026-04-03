@@ -14,7 +14,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("guideXOSServer")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+6164fcbfc38cc3a440f0f9a6d34bee9241b22f9f")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+5c719c224aec7240b47593d7cdaba924577038db")]
 [assembly: System.Reflection.AssemblyProductAttribute("guideXOSServer")]
 [assembly: System.Reflection.AssemblyTitleAttribute("guideXOSServer")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

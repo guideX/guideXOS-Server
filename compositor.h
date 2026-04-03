@@ -29,7 +29,7 @@ namespace gxos { namespace gui {
         bool titleBtnCloseHover{false}; bool titleBtnClosePressed{false};
         bool titleBtnMaxHover{false}; bool titleBtnMaxPressed{false};
         bool titleBtnMinHover{false}; bool titleBtnMinPressed{false}; };
-    struct DesktopItem { std::string label; std::string action; bool pinned{false}; bool selected{false}; };
+    struct DesktopItem { std::string label; std::string action; bool pinned{false}; bool selected{false}; int ix{-1}; int iy{-1}; };
 
     class Compositor {
     public:
@@ -93,6 +93,7 @@ namespace gxos { namespace gui {
         static bool g_altTabOverlayActive; static uint64_t g_altTabOverlayTicks; static int g_altTabCycleIndex;
         static bool g_taskbarCycleActive; static int g_taskbarCycleIndex; static bool g_keyboardMoveActive; static bool g_keyboardSizeActive; static int g_kbOrigX; static int g_kbOrigY; static int g_kbOrigW; static int g_kbOrigH;
         static DesktopConfigData g_cfg; static uint64_t g_lastItemClickTicks; static int g_lastItemIndex;
+        static bool g_iconDragActive; static int g_iconDragIndex; static int g_iconDragOffX; static int g_iconDragOffY; static int g_iconDragStartX; static int g_iconDragStartY; static bool g_iconDragPending;
         // Start menu keyboard/selection state
         static int g_startMenuSel; static int g_startMenuScroll;
         static bool g_startMenuAllProgs; // "All Programs" view

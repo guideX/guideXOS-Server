@@ -52,6 +52,7 @@ namespace gxos { namespace gui {
     bool Compositor::g_taskbarCycleActive=false; int Compositor::g_taskbarCycleIndex=0; bool Compositor::g_keyboardMoveActive=false; bool Compositor::g_keyboardSizeActive=false; int Compositor::g_kbOrigX=0; int Compositor::g_kbOrigY=0; int Compositor::g_kbOrigW=0; int Compositor::g_kbOrigH=0;
 
     DesktopConfigData Compositor::g_cfg{}; std::vector<DesktopItem> Compositor::g_items; uint64_t Compositor::g_lastItemClickTicks=0; int Compositor::g_lastItemIndex=-1;
+    bool Compositor::g_iconDragActive=false; int Compositor::g_iconDragIndex=-1; int Compositor::g_iconDragOffX=0; int Compositor::g_iconDragOffY=0; int Compositor::g_iconDragStartX=0; int Compositor::g_iconDragStartY=0; bool Compositor::g_iconDragPending=false;
 
     // Start menu keyboard/selection state
     int Compositor::g_startMenuSel = 0; int Compositor::g_startMenuScroll = 0;
@@ -65,7 +66,12 @@ namespace gxos { namespace gui {
     static void publishOut(MsgType type, const std::string& payload){ ipc::Message out; out.type=(uint32_t)type; out.data.assign(payload.begin(), payload.end()); ipc::Bus::publish(kGuiChanOut, std::move(out), false); }
 
     void Compositor::refreshDesktopItems(){ g_items.clear(); // pinned first
-        for(const auto& p: g_cfg.pinned){ DesktopItem di; di.label=p; di.action=p; di.pinned=true; g_items.push_back(di);} for(const auto& r: g_cfg.recent){ if(std::find(g_cfg.pinned.begin(), g_cfg.pinned.end(), r)!=g_cfg.pinned.end()) continue; DesktopItem di; di.label=r; di.action=r; di.pinned=false; g_items.push_back(di);} }
+        for(const auto& p: g_cfg.pinned){ DesktopItem di; di.label=p; di.action=p; di.pinned=true; di.ix=-1; di.iy=-1; g_items.push_back(di);} for(const auto& r: g_cfg.recent){ if(std::find(g_cfg.pinned.begin(), g_cfg.pinned.end(), r)!=g_cfg.pinned.end()) continue; DesktopItem di; di.label=r; di.action=r; di.pinned=false; di.ix=-1; di.iy=-1; g_items.push_back(di);}
+        // Apply saved positions from config
+        for(auto &item: g_items){ for(const auto& ip: g_cfg.iconPositions){ if(ip.name==item.label){ item.ix=ip.x; item.iy=ip.y; break; } } }
+        // Assign default grid positions to any items that don't have saved positions
+        const int margin=20; const int iconW=56; const int iconH=56; const int cellW=iconW+28; const int cellH=iconH+38;
+        int defIdx=0; for(auto &item: g_items){ if(item.ix<0 || item.iy<0){ item.ix=margin+(defIdx%8)*cellW; item.iy=margin+(defIdx/8)*cellH; } defIdx++; } }
     
     void Compositor::refreshAllProgramsList(){
         // Load all registered apps from DesktopService and sort alphabetically
@@ -103,7 +109,7 @@ namespace gxos { namespace gui {
     void Compositor::loadWallpaper(const std::string& path){ g_wallpaperPath=path; if(g_wallpaperBmp){ DeleteObject(g_wallpaperBmp); g_wallpaperBmp=nullptr; } if(path.empty()) return; HBITMAP hb=(HBITMAP)LoadImageA(nullptr,path.c_str(),IMAGE_BITMAP,0,0,LR_LOADFROMFILE|LR_CREATEDIBSECTION); if(hb){ BITMAP bm{}; GetObject(hb,sizeof(bm),&bm); g_wallpaperBmp=hb; g_wallpaperW=bm.bmWidth; g_wallpaperH=bm.bmHeight; } }
     void Compositor::freeWallpaper(){ if(g_wallpaperBmp){ DeleteObject(g_wallpaperBmp); g_wallpaperBmp=nullptr; g_wallpaperW=g_wallpaperH=0; } }
 
-    void Compositor::drawDesktopIcons(HDC dc, RECT cr){ const int margin=20; const int iconW=56; const int iconH=56; const int cellW=iconW+28; const int cellH=iconH+38; int cols = (cr.right - margin*2)/cellW; if(cols<1) cols=1; int x0=margin; int y0=margin; HFONT font=(HFONT)GetStockObject(ANSI_VAR_FONT); SelectObject(dc,font); SetBkMode(dc,TRANSPARENT); POINT cursor; GetCursorPos(&cursor); ScreenToClient(g_hwnd,&cursor); int idx=0; for(auto &it: g_items){ int col=idx%cols; int row=idx/cols; int x=x0+col*cellW; int y=y0+row*cellH; RECT cell{ x, y, x+cellW, y+cellH}; bool hover = (cursor.x>=cell.left && cursor.x<=cell.right && cursor.y>=cell.top && cursor.y<=cell.bottom);
+    void Compositor::drawDesktopIcons(HDC dc, RECT cr){ const int iconW=56; const int iconH=56; const int cellW=iconW+28; const int cellH=iconH+38; HFONT font=(HFONT)GetStockObject(ANSI_VAR_FONT); SelectObject(dc,font); SetBkMode(dc,TRANSPARENT); POINT cursor; GetCursorPos(&cursor); ScreenToClient(g_hwnd,&cursor); int idx=0; for(auto &it: g_items){ int x=it.ix; int y=it.iy; RECT cell{ x, y, x+cellW, y+cellH}; bool hover = (cursor.x>=cell.left && cursor.x<=cell.right && cursor.y>=cell.top && cursor.y<=cell.bottom);
         if(it.selected){ HBRUSH sel=CreateSolidBrush(RGB(50,90,160)); FillRect(dc,&cell,sel); DeleteObject(sel); HPEN selP=CreatePen(PS_SOLID,1,RGB(100,160,240)); HGDIOBJ oP=SelectObject(dc,selP); HGDIOBJ oB=SelectObject(dc,GetStockObject(NULL_BRUSH)); Rectangle(dc,cell.left,cell.top,cell.right,cell.bottom); SelectObject(dc,oP); SelectObject(dc,oB); DeleteObject(selP);
         } else if(hover){ HBRUSH hov=CreateSolidBrush(RGB(50,55,65)); FillRect(dc,&cell,hov); DeleteObject(hov); HPEN hovP=CreatePen(PS_SOLID,1,RGB(80,100,140)); HGDIOBJ oP=SelectObject(dc,hovP); HGDIOBJ oB=SelectObject(dc,GetStockObject(NULL_BRUSH)); Rectangle(dc,cell.left,cell.top,cell.right,cell.bottom); SelectObject(dc,oP); SelectObject(dc,oB); DeleteObject(hovP); }
         RECT iconR{ x+(cellW-iconW)/2, y+6, x+(cellW-iconW)/2+iconW, y+6+iconH};
@@ -539,8 +545,8 @@ namespace gxos { namespace gui {
                     g_startMenuVisible=false; 
                 }
             }
-            // Desktop icon click (selection / double)
-            const int margin=20; const int iconW=56; const int iconH=56; const int cellW=iconW+28; const int cellH=iconH+38; int cols=(cr.right-margin*2)/cellW; if(cols<1) cols=1; if(my < cr.bottom-taskbarH){ int col=(mx-margin)/cellW; int row=(my-margin)/cellH; if(col>=0 && row>=0){ int idx=row*cols+col; if(idx>=0 && idx<(int)g_items.size()){ uint64_t now=nowMs(); if(g_lastItemIndex==idx && (now-g_lastItemClickTicks)<450){ launchAction(g_items[idx].action); } else { for(auto &di: g_items) di.selected=false; g_items[idx].selected=true; g_lastItemIndex=idx; g_lastItemClickTicks=now; } requestRepaint(); return 0; } } }
+            // Desktop icon click (selection / double / drag initiation)
+            { const int iconW=56; const int iconH=56; const int cellW=iconW+28; const int cellH=iconH+38; if(my < cr.bottom-taskbarH){ int hitIdx=-1; for(int i=0;i<(int)g_items.size();++i){ int ix=g_items[i].ix; int iy=g_items[i].iy; if(mx>=ix && mx<ix+cellW && my>=iy && my<iy+cellH){ hitIdx=i; break; } } if(hitIdx>=0){ uint64_t now=nowMs(); if(g_lastItemIndex==hitIdx && (now-g_lastItemClickTicks)<450){ launchAction(g_items[hitIdx].action); g_lastItemIndex=-1; g_lastItemClickTicks=0; } else { for(auto &di: g_items) di.selected=false; g_items[hitIdx].selected=true; g_lastItemIndex=hitIdx; g_lastItemClickTicks=now; g_iconDragPending=true; g_iconDragIndex=hitIdx; g_iconDragStartX=mx; g_iconDragStartY=my; g_iconDragOffX=mx-g_items[hitIdx].ix; g_iconDragOffY=my-g_items[hitIdx].iy; } requestRepaint(); return 0; } } }
             // Taskbar button click (minimize/restore/tombstone)
             uint64_t id=hitTestTaskbarButton(mx,my,cr,taskbarH); if(id){ std::lock_guard<std::mutex> lk(g_lock); auto it=g_windows.find(id); if(it!=g_windows.end()){ WinInfo &w=it->second; if(!w.minimized && !w.tombstoned){ w.tombstoned=true; w.minimized=true; if(g_focus==w.id) g_focus=0; } else { w.tombstoned=false; w.minimized=false; g_focus=w.id; for(auto itZ=g_z.begin(); itZ!=g_z.end(); ++itZ){ if(*itZ==id){ g_z.erase(itZ); break; } } g_z.push_back(id); } } requestRepaint(); return 0; }
             // pass to widget handling and general mouse handling
@@ -562,15 +568,23 @@ namespace gxos { namespace gui {
                 g_startMenuVisible = false;
                 requestRepaint(); return 0;
             }
-            if(my < cr.bottom-taskbarH){ const int margin=20; const int iconW=56; const int cellW=iconW+28; const int cellH=56+38; int cols=(cr.right-margin*2)/cellW; if(cols<1) cols=1; int col=(mx-margin)/cellW; int row=(my-margin)/cellH; if(col>=0 && row>=0){ int idx=row*cols+col; if(idx>=0 && idx<(int)g_items.size()){ if(g_items[idx].pinned) unpinAction(g_items[idx].action); else pinAction(g_items[idx].action); requestRepaint(); return 0; } }
+            if(my < cr.bottom-taskbarH){ const int iconW=56; const int cellW=iconW+28; const int cellH=56+38; int hitIdx=-1; for(int i=0;i<(int)g_items.size();++i){ int ix=g_items[i].ix; int iy=g_items[i].iy; if(mx>=ix && mx<ix+cellW && my>=iy && my<iy+cellH){ hitIdx=i; break; } } if(hitIdx>=0){ if(g_items[hitIdx].pinned) unpinAction(g_items[hitIdx].action); else pinAction(g_items[hitIdx].action); requestRepaint(); return 0; }
                 // Desktop right-click context menu (no icon hit)
                 RightClickMenu::Show(mx, my);
                 requestRepaint();
                 return 0;
             }
         } break;
-        case WM_LBUTTONUP:{ int mx=GET_X_LPARAM(l); int my=GET_Y_LPARAM(l); Compositor::handleMouse(mx,my,false,true); publishOut(MsgType::MT_InputMouse,std::to_string(mx)+"|"+std::to_string(my)+"|1|up"); } break;
-        case WM_MOUSEMOVE:{ int mx=GET_X_LPARAM(l); int my=GET_Y_LPARAM(l); Compositor::handleMouse(mx,my,false,false); publishOut(MsgType::MT_InputMouse,std::to_string(mx)+"|"+std::to_string(my)+"|0|move"); } break;
+        case WM_LBUTTONUP:{ int mx=GET_X_LPARAM(l); int my=GET_Y_LPARAM(l);
+            if(g_iconDragActive){ g_iconDragActive=false; g_iconDragPending=false;
+                // Save icon positions to config
+                g_cfg.iconPositions.clear(); for(const auto& di: g_items){ DesktopIconPos ip; ip.name=di.label; ip.x=di.ix; ip.y=di.iy; g_cfg.iconPositions.push_back(ip); } saveDesktopConfig(); requestRepaint(); }
+            g_iconDragPending=false;
+            Compositor::handleMouse(mx,my,false,true); publishOut(MsgType::MT_InputMouse,std::to_string(mx)+"|"+std::to_string(my)+"|1|up"); } break;
+        case WM_MOUSEMOVE:{ int mx=GET_X_LPARAM(l); int my=GET_Y_LPARAM(l);
+            if(g_iconDragPending && !g_iconDragActive){ if(std::abs(mx-g_iconDragStartX)>=4 || std::abs(my-g_iconDragStartY)>=4){ g_iconDragActive=true; } }
+            if(g_iconDragActive && g_iconDragIndex>=0 && g_iconDragIndex<(int)g_items.size()){ RECT cr2; GetClientRect(h,&cr2); int taskbarH2=40; int nx=mx-g_iconDragOffX; int ny=my-g_iconDragOffY; if(nx<0) nx=0; if(ny<0) ny=0; const int cellW2=84; const int cellH2=94; if(nx+cellW2>cr2.right) nx=cr2.right-cellW2; if(ny+cellH2>cr2.bottom-taskbarH2) ny=cr2.bottom-taskbarH2-cellH2; g_items[g_iconDragIndex].ix=nx; g_items[g_iconDragIndex].iy=ny; requestRepaint(); }
+            Compositor::handleMouse(mx,my,false,false); publishOut(MsgType::MT_InputMouse,std::to_string(mx)+"|"+std::to_string(my)+"|0|move"); } break;
         case WM_KEYDOWN: case WM_SYSKEYDOWN: {
             int key=(int)w;
             // Taskbar menu keyboard handling
