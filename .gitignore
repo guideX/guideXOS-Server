@@ -11,3 +11,4 @@
 /build/amd64/bin/kernel.elf
 /build/amd64/bin/kernel.exe
 /build/amd64/bin/kernel.pe
+/build/amd64/obj

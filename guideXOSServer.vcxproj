@@ -185,6 +185,7 @@
     <ClInclude Include="kernel\core\include\kernel\pit.h" />
     <ClInclude Include="kernel\core\include\kernel\process.h" />
     <ClInclude Include="kernel\core\include\kernel\ps2mouse.h" />
+    <ClInclude Include="kernel\core\include\kernel\ramdisk.h" />
     <ClInclude Include="kernel\core\include\kernel\serial_debug.h" />
     <ClInclude Include="kernel\core\include\kernel\usb.h" />
     <ClInclude Include="kernel\core\include\kernel\usb_audio.h" />
@@ -200,6 +201,7 @@
     <ClInclude Include="kernel\core\include\kernel\usb_video.h" />
     <ClInclude Include="kernel\core\include\kernel\usb_video_uvc.h" />
     <ClInclude Include="kernel\core\include\kernel\vesa.h" />
+    <ClInclude Include="kernel\core\include\kernel\vfs.h" />
     <ClInclude Include="kernel\core\include\kernel\virtio_input.h" />
     <ClInclude Include="launchSettings.json" />
     <ClInclude Include="icons.h" />
@@ -319,6 +321,7 @@
       <ObjectFileName>$(IntDir)process_kernel.obj</ObjectFileName>
     </ClCompile>
     <ClCompile Include="kernel\core\ps2mouse.cpp" />
+    <ClCompile Include="kernel\core\ramdisk.cpp" />
     <ClCompile Include="kernel\core\usb.cpp" />
     <ClCompile Include="kernel\core\usb_audio.cpp" />
     <ClCompile Include="kernel\core\usb_audio_uac2.cpp" />
@@ -333,6 +336,7 @@
     <ClCompile Include="kernel\core\usb_video.cpp" />
     <ClCompile Include="kernel\core\usb_video_uvc.cpp" />
     <ClCompile Include="kernel\core\vesa.cpp" />
+    <ClCompile Include="kernel\core\vfs.cpp" />
     <ClCompile Include="kernel\core\vga.cpp" />
     <ClCompile Include="kernel\core\virtio_input.cpp" />
     <ClCompile Include="lifecycle.cpp" />

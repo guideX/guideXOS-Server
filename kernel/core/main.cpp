@@ -18,6 +18,15 @@
 #include "include/kernel/pit.h"
 #include "include/kernel/serial_debug.h"
 
+// Storage subsystem
+#include "include/kernel/block_device.h"
+#include "include/kernel/ata.h"
+#include "include/kernel/nvme.h"
+#include "include/kernel/ramdisk.h"
+#include "include/kernel/vfs.h"
+#include "include/kernel/fs_fat.h"
+#include "include/kernel/fs_ext4.h"
+
 #if ARCH_HAS_PIC_8259
 #include "include/kernel/multiboot.h"
 // Include BootInfo structure from bootloader (x86 / amd64 UEFI only)
@@ -110,6 +119,52 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::pit::init(100);
         kernel::interrupts::register_irq(0, kernel::pit::irq_handler);
         kernel::serial::puts("[KERNEL] PIT timer initialized, IRQ0 registered\n");
+        
+        // ============================================================
+        // Storage Subsystem Initialization
+        // ============================================================
+        kernel::serial::puts("[KERNEL] Initializing storage subsystem...\n");
+        
+        // Initialize block device layer
+        kernel::block::init();
+        kernel::serial::puts("[KERNEL] Block device layer initialized\n");
+        
+        // Initialize filesystem drivers
+        kernel::fs_fat::init();
+        kernel::fs_ext4::init();
+        kernel::serial::puts("[KERNEL] Filesystem drivers initialized\n");
+        
+        // Initialize ATA/SATA driver (scans for IDE and AHCI controllers)
+        kernel::ata::init();
+        kernel::serial::puts("[KERNEL] ATA/SATA driver initialized, ");
+        kernel::serial::put_hex32(kernel::ata::device_count());
+        kernel::serial::puts(" drive(s) found\n");
+        
+        // Initialize NVMe driver (scans for NVMe controllers)
+        kernel::nvme::init();
+        kernel::serial::puts("[KERNEL] NVMe driver initialized, ");
+        kernel::serial::put_hex32(kernel::nvme::device_count());
+        kernel::serial::puts(" namespace(s) found\n");
+        
+        // Initialize RAM disk subsystem
+        kernel::ramdisk::init();
+        
+        // Create a 4MB RAM disk for temporary storage / testing
+        uint8_t ramdiskIdx = kernel::ramdisk::create(4 * 1024 * 1024, "ram0");
+        if (ramdiskIdx != 0xFF) {
+            kernel::serial::puts("[KERNEL] Created 4MB RAM disk 'ram0'\n");
+        }
+        
+        // Initialize VFS layer
+        kernel::vfs::init();
+        kernel::serial::puts("[KERNEL] VFS layer initialized\n");
+        
+        // Report total block devices
+        kernel::serial::puts("[KERNEL] Total block devices: ");
+        kernel::serial::put_hex32(kernel::block::device_count());
+        kernel::serial::putc('\n');
+        
+        // ============================================================
         
         // Initialize PS/2 mouse driver and register IRQ12 handler
         // (PS/2 is used as fallback when USB HID is not available)

@@ -342,6 +342,12 @@
     <ClInclude Include="kernel\core\include\kernel\pit.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="kernel\core\include\kernel\ramdisk.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\core\include\kernel\vfs.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="allocator.cpp">
@@ -651,6 +657,12 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="kernel\core\pit.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\core\ramdisk.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\core\vfs.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
