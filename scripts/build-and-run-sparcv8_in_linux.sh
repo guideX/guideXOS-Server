@@ -2,7 +2,7 @@
 #
 # Build and run guideXOS SPARC kernel in QEMU (Linux host)
 #
-# Usage:  ./kernel/build-and-run-sparc.sh [--graphics]
+# Usage:  ./kernel/build-and-run-sparc.sh [--nographic]
 #
 # Copyright (c) 2026 guideXOS Server
 #
@@ -13,9 +13,9 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 # Parse arguments
-GRAPHICS=0
-if [ "$1" = "--graphics" ]; then
-    GRAPHICS=1
+NOGRAPHIC=0
+if [ "$1" = "--nographic" ]; then
+    NOGRAPHIC=1
 fi
 
 # -----------------------------------------------------------
@@ -48,15 +48,7 @@ echo "  Ctrl-A X  to quit (nographic mode)"
 echo "  Ctrl-C    to interrupt"
 echo ""
 
-if [ "$GRAPHICS" -eq 1 ]; then
-    # Graphical mode — shows TCX framebuffer window
-    qemu-system-sparc \
-        -machine SS-5 \
-        -m 128 \
-        -kernel "$KERNEL" \
-        -vga tcx \
-        -d guest_errors
-else
+if [ "$NOGRAPHIC" -eq 1 ]; then
     # Serial console mode — no window, output to terminal
     qemu-system-sparc \
         -machine SS-5 \
@@ -64,5 +56,14 @@ else
         -kernel "$KERNEL" \
         -nographic \
         -serial mon:stdio \
+        -d guest_errors
+else
+    # Graphical mode — native TCX framebuffer window (primary) with VNC (secondary viewer)
+    qemu-system-sparc \
+        -machine SS-5 \
+        -m 128 \
+        -kernel "$KERNEL" \
+        -vga tcx \
+        -vnc :0 \
         -d guest_errors
 fi

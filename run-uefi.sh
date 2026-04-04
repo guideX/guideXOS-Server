@@ -117,6 +117,7 @@ if [ "$SPLIT_PFLASH" = "1" ]; then
         -drive file=fat:rw:ESP,format=raw \
         -m 1024M \
         -vga std \
+        -vnc :0 \
         -serial stdio \
         -no-reboot
 else
@@ -127,6 +128,7 @@ else
         -drive file=fat:rw:ESP,format=raw \
         -m 1024M \
         -vga std \
+        -vnc :0 \
         -serial stdio \
         -no-reboot
 fi

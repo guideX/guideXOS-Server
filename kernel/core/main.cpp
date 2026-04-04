@@ -15,6 +15,7 @@
 #include "include/kernel/interrupts.h"
 #include "include/kernel/ps2mouse.h"
 #include "include/kernel/input_manager.h"
+#include "include/kernel/pit.h"
 #include "include/kernel/serial_debug.h"
 
 #if ARCH_HAS_PIC_8259
@@ -103,6 +104,12 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         // Set up IDT, remap PIC, enable interrupts
         kernel::interrupts::init();
         kernel::serial::puts("[KERNEL] IDT + PIC initialized, interrupts enabled\n");
+        
+        // Initialize PIT timer for periodic IRQ0 (100 Hz heartbeat)
+        // This ensures the CPU wakes from HLT regularly to poll input.
+        kernel::pit::init(100);
+        kernel::interrupts::register_irq(0, kernel::pit::irq_handler);
+        kernel::serial::puts("[KERNEL] PIT timer initialized, IRQ0 registered\n");
         
         // Initialize PS/2 mouse driver and register IRQ12 handler
         // (PS/2 is used as fallback when USB HID is not available)

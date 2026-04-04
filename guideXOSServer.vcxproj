@@ -182,6 +182,7 @@
     <ClInclude Include="kernel\core\include\kernel\multiboot.h" />
     <ClInclude Include="kernel\core\include\kernel\nvme.h" />
     <ClInclude Include="kernel\core\include\kernel\pci_audio.h" />
+    <ClInclude Include="kernel\core\include\kernel\pit.h" />
     <ClInclude Include="kernel\core\include\kernel\process.h" />
     <ClInclude Include="kernel\core\include\kernel\ps2mouse.h" />
     <ClInclude Include="kernel\core\include\kernel\serial_debug.h" />
@@ -313,6 +314,7 @@
     <ClCompile Include="kernel\core\main.cpp" />
     <ClCompile Include="kernel\core\nvme.cpp" />
     <ClCompile Include="kernel\core\pci_audio.cpp" />
+    <ClCompile Include="kernel\core\pit.cpp" />
     <ClCompile Include="kernel\core\process.cpp">
       <ObjectFileName>$(IntDir)process_kernel.obj</ObjectFileName>
     </ClCompile>

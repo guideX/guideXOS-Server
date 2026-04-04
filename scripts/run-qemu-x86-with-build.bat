@@ -56,22 +56,24 @@ if not exist "build\x86\bin\kernel.elf" (
 
 echo Starting QEMU...
 echo Kernel: build\x86\bin\kernel.elf
-echo USB tablet mode: No mouse grab required
+echo Framebuffer display: QEMU window shows the desktop directly
+echo VNC secondary viewer: connect to localhost:5900
 echo.
 echo Press Ctrl+C to stop QEMU
 echo ==========================================
 echo.
 
-REM Launch QEMU with USB tablet for absolute mouse positioning
+REM Launch QEMU with native framebuffer display (primary) and VNC (secondary viewer)
+REM usb=off ensures mouse events route to PS/2 (IRQ12) since the
+REM kernel does not yet have a USB HID driver.
 "%QEMU_PATH%" ^
-    -machine pc ^
-    -device usb-ehci,id=ehci ^
-    -device usb-tablet,bus=ehci.0 ^
+    -machine pc,usb=off ^
     -kernel "build\x86\bin\kernel.elf" ^
     -m 128M ^
     -vga std ^
     -serial stdio ^
     -display gtk ^
+    -vnc :0 ^
     -no-reboot ^
     -no-shutdown
 

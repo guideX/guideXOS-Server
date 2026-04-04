@@ -29,15 +29,16 @@ if [ ! -f "$KERNEL" ]; then
     exit 1
 fi
 
-# Launch QEMU with VNC and USB tablet for absolute mouse positioning
-# USB tablet works well with VNC clients that support absolute positioning
+# Launch QEMU with native framebuffer display AND VNC for remote viewing.
+# The desktop renders to the QEMU window (framebuffer); VNC is a secondary viewer.
+# usb=off ensures mouse events are routed to PS/2 (IRQ12)
+# since the kernel does not yet have a USB HID driver.
 qemu-system-i386 \
-    -machine pc \
-    -device usb-ehci,id=ehci \
-    -device usb-tablet,bus=ehci.0 \
+    -machine pc,usb=off \
     -kernel "$KERNEL" \
     -m 128M \
     -vga std \
+    -display gtk \
     -vnc :0 \
     -k en-us \
     -serial stdio

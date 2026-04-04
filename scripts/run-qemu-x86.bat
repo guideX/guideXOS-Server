@@ -35,22 +35,23 @@ if not exist "%QEMU_PATH%" (
 echo Launching guideXOS x86 kernel in QEMU...
 echo Kernel: %KERNEL_PATH%
 echo.
-echo USB tablet mode: No mouse grab required
+echo Framebuffer display: QEMU window shows the desktop directly
+echo VNC secondary viewer: connect to localhost:5900
 echo Press Ctrl+C in this window to exit QEMU
 echo ----------------------------------------
 echo.
 
-REM Launch with USB tablet for absolute mouse positioning
-REM USB tablet provides better edge-of-screen behavior than PS/2 mouse
+REM Launch with native framebuffer display (primary) and VNC (secondary viewer).
+REM usb=off ensures mouse events route to PS/2 (IRQ12) since the
+REM kernel does not yet have a USB HID driver.
 "%QEMU_PATH%" ^
-    -machine pc ^
-    -device usb-ehci,id=ehci ^
-    -device usb-tablet,bus=ehci.0 ^
+    -machine pc,usb=off ^
     -kernel "%KERNEL_PATH%" ^
     -m 128M ^
     -vga std ^
     -serial stdio ^
     -display gtk ^
+    -vnc :0 ^
     -no-reboot ^
     -no-shutdown ^
     -d guest_errors

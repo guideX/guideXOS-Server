@@ -64,13 +64,15 @@ echo   Kernel:  %KERNEL%
 echo.
 echo   Machine: virt (OpenSBI firmware)
 echo   RAM:     256 MB
+echo   Display: Framebuffer (QEMU window)
+echo   VNC:     Secondary viewer on localhost:5900
 echo.
-echo   Press Ctrl+A then X to quit (nographic mode)
+echo   Press Ctrl+Alt+G to release mouse grab
 echo   Press Ctrl+C to interrupt
 echo.
 
 REM ============================================
-REM Launch QEMU - serial console mode
+REM Launch QEMU - graphical framebuffer mode (primary) with VNC (secondary viewer)
 REM ============================================
 
 "%QEMU%" ^
@@ -78,12 +80,12 @@ REM ============================================
     -bios default ^
     -m 256 ^
     -kernel "%KERNEL%" ^
-    -nographic ^
-    -serial mon:stdio ^
+    -vga std ^
+    -vnc :0 ^
     -d guest_errors
 
 REM ============================================
-REM Alternative: graphical mode (uncomment below, comment above)
+REM Alternative: serial console mode (uncomment below, comment above)
 REM ============================================
 
 REM "%QEMU%" ^
@@ -91,7 +93,8 @@ REM     -machine virt ^
 REM     -bios default ^
 REM     -m 256 ^
 REM     -kernel "%KERNEL%" ^
-REM     -vga std ^
+REM     -nographic ^
+REM     -serial mon:stdio ^
 REM     -d guest_errors
 
 echo.

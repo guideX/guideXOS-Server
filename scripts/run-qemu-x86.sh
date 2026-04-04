@@ -48,20 +48,25 @@ if [ "$1" = "uefi" ]; then
     
     echo -e "${GREEN}Launching QEMU with UEFI boot...${NC}"
     echo "ESP directory: ESP/"
-    echo "USB tablet mode: No mouse grab required"
+    echo "Framebuffer display: QEMU window shows the desktop directly"
+    echo "VNC secondary viewer: connect to localhost:5900"
     echo "Press Ctrl+A then X to exit QEMU"
     echo "----------------------------------------"
     echo ""
     
-    # Launch QEMU in UEFI mode with USB tablet for absolute mouse positioning
+    # Launch QEMU in UEFI mode with native framebuffer display (primary)
+    # and VNC as secondary viewer for remote access.
+    # usb=off ensures mouse events are routed to PS/2 (IRQ12)
+    # since the kernel does not yet have a USB HID driver.
     qemu-system-x86_64 \
-        -bios OVMF.fd \
-        -device qemu-xhci,id=xhci \
-        -device usb-tablet,bus=xhci.0 \
+        -machine q35,usb=off \
+        -drive if=pflash,format=raw,readonly=on,file=OVMF.fd \
         -drive file=fat:rw:ESP,format=raw \
         -m 1024M \
+        -vga std \
         -serial stdio \
         -display gtk \
+        -vnc :0 \
         -no-reboot \
         -no-shutdown
 else
@@ -81,20 +86,23 @@ else
 
     echo -e "${GREEN}Launching guideXOS x86 kernel in QEMU...${NC}"
     echo "Kernel: $KERNEL_PATH"
-    echo "USB tablet mode: No mouse grab required"
+    echo "Framebuffer display: QEMU window shows the desktop directly"
+    echo "VNC secondary viewer: connect to localhost:5900"
     echo "Press Ctrl+A then X to exit QEMU"
     echo "----------------------------------------"
     echo ""
 
-    # Launch with USB tablet for absolute mouse positioning
+    # Launch with native framebuffer display (primary) and VNC (secondary viewer)
+    # usb=off ensures mouse events are routed to PS/2 (IRQ12)
+    # since the kernel does not yet have a USB HID driver.
     qemu-system-i386 \
-        -device usb-ehci,id=ehci \
-        -device usb-tablet,bus=ehci.0 \
+        -machine pc,usb=off \
         -kernel "$KERNEL_PATH" \
         -m 128M \
         -vga std \
         -serial stdio \
         -display gtk \
+        -vnc :0 \
         -no-reboot \
         -no-shutdown
 fi

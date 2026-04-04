@@ -127,6 +127,8 @@ if errorlevel 1 (
 
 echo Launching QEMU with UEFI firmware...
 echo.
+echo   Framebuffer display: QEMU window shows the desktop directly
+echo   VNC secondary viewer: connect to localhost:5900
 echo   Mouse: Press Ctrl+Alt+G to grab mouse, Ctrl+Alt+G again to release
 echo   Serial debug output from the kernel will appear below.
 echo   Press Ctrl+C in this window to exit QEMU
@@ -138,13 +140,13 @@ cd /d "%SCRIPT_DIR%"
 
 REM Launch QEMU with UEFI firmware
 REM
-REM The kernel supports USB HID tablet (preferred) with PS/2 mouse fallback.
-REM USB tablet provides absolute positioning which solves edge-of-screen issues.
+REM The kernel currently uses PS/2 mouse input (IRQ12).  USB HID is not
+REM yet implemented, so we pass usb=off to ensure QEMU routes mouse
+REM events to the PS/2 controller instead of a USB tablet.
 REM The Q35 machine type includes HPET, LPC (for i8042 PS/2), and a
 REM modern chipset that OVMF expects.
 REM
-REM USB tablet mode: No mouse grab required - cursor tracks automatically.
-REM PS/2 fallback: Click inside window (or Ctrl+Alt+G) to grab mouse.
+REM Mouse: Click inside window (or Ctrl+Alt+G) to grab mouse.
 REM
 REM Split pflash images (edk2-x86_64-code.fd + vars) require two pflash
 REM drives: unit 0 for code (read-only) and unit 1 for variables (read-write).
@@ -154,26 +156,24 @@ REM trying to access unmapped flash regions.
 if "%SPLIT_PFLASH%"=="1" (
     echo Using split pflash: CODE + VARS
     "%QEMU_EXE%" ^
-        -machine q35 ^
-        -device qemu-xhci,id=xhci ^
-        -device usb-tablet,bus=xhci.0 ^
+        -machine q35,usb=off ^
         -drive if=pflash,format=raw,unit=0,readonly=on,file="%OVMF_CODE%" ^
         -drive if=pflash,format=raw,unit=1,file="%OVMF_VARS%" ^
         -drive file=fat:rw:ESP,format=raw ^
         -m 1024M ^
         -vga std ^
+        -vnc :0 ^
         -serial stdio ^
         -no-reboot
 ) else (
     echo Using combined pflash: OVMF.fd
     "%QEMU_EXE%" ^
-        -machine q35 ^
-        -device qemu-xhci,id=xhci ^
-        -device usb-tablet,bus=xhci.0 ^
+        -machine q35,usb=off ^
         -drive if=pflash,format=raw,readonly=on,file="%OVMF_CODE%" ^
         -drive file=fat:rw:ESP,format=raw ^
         -m 1024M ^
         -vga std ^
+        -vnc :0 ^
         -serial stdio ^
         -no-reboot
 )

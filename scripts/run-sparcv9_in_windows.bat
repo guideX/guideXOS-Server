@@ -64,33 +64,35 @@ echo   Kernel:  %KERNEL%
 echo.
 echo   Machine: Sun4u (UltraSPARC)
 echo   RAM:     256 MB
-echo   Video:   VGA (1024x768)
+echo   Display: VGA Framebuffer (1024x768)
+echo   VNC:     Secondary viewer on localhost:5900
 echo.
 echo   Press Ctrl+Alt+G to release mouse grab
 echo   Press Ctrl+Alt+2 then type 'quit' to exit QEMU
 echo.
 
 REM ============================================
-REM Launch QEMU — serial console mode
+REM Launch QEMU - graphical framebuffer mode (primary) with VNC (secondary viewer)
 REM ============================================
 
 "%QEMU%" ^
     -machine sun4u ^
     -m 256 ^
     -kernel "%KERNEL%" ^
-    -nographic ^
-    -serial mon:stdio ^
+    -vga std ^
+    -vnc :0 ^
     -d guest_errors
 
 REM ============================================
-REM Alternative: graphical mode (uncomment below, comment above)
+REM Alternative: serial console mode (uncomment below, comment above)
 REM ============================================
 
 REM "%QEMU%" ^
 REM     -machine sun4u ^
 REM     -m 256 ^
 REM     -kernel "%KERNEL%" ^
-REM     -vga std ^
+REM     -nographic ^
+REM     -serial mon:stdio ^
 REM     -d guest_errors
 
 echo.

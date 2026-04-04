@@ -39,15 +39,16 @@ if not exist "%KERNEL%" (
     exit /b 1
 )
 
-REM Launch QEMU with VNC and USB tablet for absolute mouse positioning
-REM USB tablet works well with VNC clients that support absolute positioning
+REM Launch QEMU with native framebuffer display AND VNC for remote viewing.
+REM The desktop renders to the QEMU window (framebuffer); VNC is a secondary viewer.
+REM usb=off ensures mouse events route to PS/2 (IRQ12) since the
+REM kernel does not yet have a USB HID driver.
 "%QEMU%" ^
-    -machine pc ^
-    -device usb-ehci,id=ehci ^
-    -device usb-tablet,bus=ehci.0 ^
+    -machine pc,usb=off ^
     -kernel "%KERNEL%" ^
     -m 128M ^
     -vga std ^
+    -display gtk ^
     -vnc :0 ^
     -k en-us ^
     -serial stdio
