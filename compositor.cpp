@@ -62,6 +62,41 @@ namespace gxos { namespace gui {
     RECT Compositor::g_taskbarMenuRect{0,0,0,0};
     int Compositor::g_taskbarMenuSel = 0;
 
+    // Video backend (GDI on Windows, kernel FB on bare-metal)
+    VideoBackend* Compositor::g_videoBackend = nullptr;
+
+    void Compositor::initVideoBackend(){
+#ifdef _WIN32
+        // On Windows host, use GDI backend (current rendering path).
+        // The GDI backend is created but the compositor still paints
+        // through GDI calls directly.  This is the first step towards
+        // migrating to a pixel-buffer renderer.
+        static GdiVideoBackend s_gdiBackend;
+        if(s_gdiBackend.init(1024, 768)){
+            g_videoBackend = &s_gdiBackend;
+            Logger::write(LogLevel::Info, "VideoBackend: GDI backend active");
+        }
+#else
+        // On bare-metal, use kernel framebuffer backend
+        static KernelFbVideoBackend s_kfbBackend;
+        if(s_kfbBackend.init(1024, 768)){
+            g_videoBackend = &s_kfbBackend;
+        }
+#endif
+    }
+
+    void Compositor::feedVncFromBackend(){
+        if(!vnc::VncServer::IsRunning()) return;
+        if(!g_videoBackend) return;
+        uint32_t* pixels = g_videoBackend->getPixels();
+        if(!pixels) return;
+        int w = g_videoBackend->getWidth();
+        int h = g_videoBackend->getHeight();
+        int stride = g_videoBackend->getPitch();
+        vnc::VncServer::UpdateFramebuffer(
+            reinterpret_cast<const uint8_t*>(pixels), w, h, stride);
+    }
+
     static uint64_t nowMs(){ return (uint64_t)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count(); }
     static void publishOut(MsgType type, const std::string& payload){ ipc::Message out; out.type=(uint32_t)type; out.data.assign(payload.begin(), payload.end()); ipc::Bus::publish(kGuiChanOut, std::move(out), false); }
 
@@ -396,7 +431,12 @@ namespace gxos { namespace gui {
                 TextOutA(dc, shutdownBtn.left+10, shutdownBtn.top+6, "Shutdown", 8);
             }
             
-            // Capture framebuffer for VNC if server is running
+            // Capture framebuffer for VNC if server is running.
+            // When using the GDI backend we still capture from the
+            // window DC because the compositor paints via GDI calls.
+            // Once the compositor migrates to painting into the
+            // VideoBackend pixel buffer, feedVncFromBackend() will
+            // be the sole path and this block can be removed.
             if(vnc::VncServer::IsRunning()) {
                 HDC memDC = CreateCompatibleDC(dc);
                 HBITMAP memBitmap = CreateCompatibleBitmap(dc, cr.right - cr.left, cr.bottom - cr.top);
@@ -415,6 +455,21 @@ namespace gxos { namespace gui {
                 GetDIBits(memDC, memBitmap, 0, cr.bottom - cr.top, pixels.data(), &bmi, DIB_RGB_COLORS);
                 vnc::VncServer::UpdateFramebuffer(pixels.data(), cr.right - cr.left, cr.bottom - cr.top, (cr.right - cr.left) * 4);
                 
+                // Also copy into the video backend buffer so
+                // feedVncFromBackend() stays in sync for future use.
+                if(g_videoBackend && g_videoBackend->getPixels()){
+                    uint32_t* dst = g_videoBackend->getPixels();
+                    int bw = g_videoBackend->getWidth();
+                    int bh = g_videoBackend->getHeight();
+                    int cw = cr.right - cr.left;
+                    int ch = cr.bottom - cr.top;
+                    int copyW = cw < bw ? cw : bw;
+                    int copyH = ch < bh ? ch : bh;
+                    const uint32_t* src = reinterpret_cast<const uint32_t*>(pixels.data());
+                    for(int y = 0; y < copyH; ++y)
+                        std::memcpy(dst + y * bw, src + y * cw, static_cast<size_t>(copyW) * 4);
+                }
+
                 SelectObject(memDC, oldBitmap);
                 DeleteObject(memBitmap);
                 DeleteDC(memDC);
@@ -546,7 +601,7 @@ namespace gxos { namespace gui {
                 }
             }
             // Desktop icon click (selection / double / drag initiation)
-            { const int iconW=56; const int iconH=56; const int cellW=iconW+28; const int cellH=iconH+38; if(my < cr.bottom-taskbarH){ int hitIdx=-1; for(int i=0;i<(int)g_items.size();++i){ int ix=g_items[i].ix; int iy=g_items[i].iy; if(mx>=ix && mx<ix+cellW && my>=iy && my<iy+cellH){ hitIdx=i; break; } } if(hitIdx>=0){ uint64_t now=nowMs(); if(g_lastItemIndex==hitIdx && (now-g_lastItemClickTicks)<450){ launchAction(g_items[hitIdx].action); g_lastItemIndex=-1; g_lastItemClickTicks=0; } else { for(auto &di: g_items) di.selected=false; g_items[hitIdx].selected=true; g_lastItemIndex=hitIdx; g_lastItemClickTicks=now; g_iconDragPending=true; g_iconDragIndex=hitIdx; g_iconDragStartX=mx; g_iconDragStartY=my; g_iconDragOffX=mx-g_items[hitIdx].ix; g_iconDragOffY=my-g_items[hitIdx].iy; } requestRepaint(); return 0; } } }
+            { const int iconW=56; const int iconH=56; const int cellW=iconW+28; const int cellH=iconH+38; if(my < cr.bottom-taskbarH){ int hitIdx=-1; for(int i=0;i<(int)g_items.size();++i){ int ix=g_items[i].ix; int iy=g_items[i].iy; if(mx>=ix && mx<ix+cellW && my>=iy && my<iy+cellH){ hitIdx=i; break; } } if(hitIdx>=0){ uint64_t now=nowMs(); if(g_lastItemIndex==hitIdx && (now-g_lastItemClickTicks)<450){ launchAction(g_items[hitIdx].action); g_lastItemIndex=-1; g_lastItemClickTicks=0; } else { for(auto &di: g_items) di.selected=false; g_items[hitIdx].selected=true; g_lastItemIndex=hitIdx; g_lastItemClickTicks=now; g_iconDragPending=true; g_iconDragIndex=hitIdx; g_iconDragStartX=mx; g_iconDragStartY=my; g_iconDragOffX=mx-g_items[hitIdx].ix; g_iconDragOffY=my-g_items[hitIdx].iy; SetCapture(h); } requestRepaint(); return 0; } } }
             // Taskbar button click (minimize/restore/tombstone)
             uint64_t id=hitTestTaskbarButton(mx,my,cr,taskbarH); if(id){ std::lock_guard<std::mutex> lk(g_lock); auto it=g_windows.find(id); if(it!=g_windows.end()){ WinInfo &w=it->second; if(!w.minimized && !w.tombstoned){ w.tombstoned=true; w.minimized=true; if(g_focus==w.id) g_focus=0; } else { w.tombstoned=false; w.minimized=false; g_focus=w.id; for(auto itZ=g_z.begin(); itZ!=g_z.end(); ++itZ){ if(*itZ==id){ g_z.erase(itZ); break; } } g_z.push_back(id); } } requestRepaint(); return 0; }
             // pass to widget handling and general mouse handling
@@ -576,15 +631,20 @@ namespace gxos { namespace gui {
             }
         } break;
         case WM_LBUTTONUP:{ int mx=GET_X_LPARAM(l); int my=GET_Y_LPARAM(l);
-            if(g_iconDragActive){ g_iconDragActive=false; g_iconDragPending=false;
+        if(g_iconDragActive || g_iconDragPending){ 
+            ReleaseCapture();
+            if(g_iconDragActive){
                 // Save icon positions to config
-                g_cfg.iconPositions.clear(); for(const auto& di: g_items){ DesktopIconPos ip; ip.name=di.label; ip.x=di.ix; ip.y=di.iy; g_cfg.iconPositions.push_back(ip); } saveDesktopConfig(); requestRepaint(); }
-            g_iconDragPending=false;
-            Compositor::handleMouse(mx,my,false,true); publishOut(MsgType::MT_InputMouse,std::to_string(mx)+"|"+std::to_string(my)+"|1|up"); } break;
+                g_cfg.iconPositions.clear(); for(const auto& di: g_items){ DesktopIconPos ip; ip.name=di.label; ip.x=di.ix; ip.y=di.iy; g_cfg.iconPositions.push_back(ip); } saveDesktopConfig();
+            }
+            g_iconDragActive=false; g_iconDragPending=false; requestRepaint(); break;
+        }
+        Compositor::handleMouse(mx,my,false,true); publishOut(MsgType::MT_InputMouse,std::to_string(mx)+"|"+std::to_string(my)+"|1|up"); } break;
         case WM_MOUSEMOVE:{ int mx=GET_X_LPARAM(l); int my=GET_Y_LPARAM(l);
-            if(g_iconDragPending && !g_iconDragActive){ if(std::abs(mx-g_iconDragStartX)>=4 || std::abs(my-g_iconDragStartY)>=4){ g_iconDragActive=true; } }
-            if(g_iconDragActive && g_iconDragIndex>=0 && g_iconDragIndex<(int)g_items.size()){ RECT cr2; GetClientRect(h,&cr2); int taskbarH2=40; int nx=mx-g_iconDragOffX; int ny=my-g_iconDragOffY; if(nx<0) nx=0; if(ny<0) ny=0; const int cellW2=84; const int cellH2=94; if(nx+cellW2>cr2.right) nx=cr2.right-cellW2; if(ny+cellH2>cr2.bottom-taskbarH2) ny=cr2.bottom-taskbarH2-cellH2; g_items[g_iconDragIndex].ix=nx; g_items[g_iconDragIndex].iy=ny; requestRepaint(); }
-            Compositor::handleMouse(mx,my,false,false); publishOut(MsgType::MT_InputMouse,std::to_string(mx)+"|"+std::to_string(my)+"|0|move"); } break;
+        if(g_iconDragPending && !g_iconDragActive){ if(std::abs(mx-g_iconDragStartX)>=4 || std::abs(my-g_iconDragStartY)>=4){ g_iconDragActive=true; } }
+        if(g_iconDragActive && g_iconDragIndex>=0 && g_iconDragIndex<(int)g_items.size()){ RECT cr2; GetClientRect(h,&cr2); int taskbarH2=40; int nx=mx-g_iconDragOffX; int ny=my-g_iconDragOffY; if(nx<0) nx=0; if(ny<0) ny=0; const int cellW2=84; const int cellH2=94; if(nx+cellW2>cr2.right) nx=cr2.right-cellW2; if(ny+cellH2>cr2.bottom-taskbarH2) ny=cr2.bottom-taskbarH2-cellH2; g_items[g_iconDragIndex].ix=nx; g_items[g_iconDragIndex].iy=ny; requestRepaint(); break; }
+        if(g_iconDragPending){ break; } // Skip handleMouse while drag is pending
+        Compositor::handleMouse(mx,my,false,false); publishOut(MsgType::MT_InputMouse,std::to_string(mx)+"|"+std::to_string(my)+"|0|move"); } break;
         case WM_KEYDOWN: case WM_SYSKEYDOWN: {
             int key=(int)w;
             // Taskbar menu keyboard handling
@@ -772,6 +832,7 @@ namespace gxos { namespace gui {
 #ifdef _WIN32
         initWindow();
 #endif
+        initVideoBackend();
         DesktopConfigData cfg; std::string cfgErr; bool cfgOk = DesktopConfig::Load("desktop.json", cfg, cfgErr);
         g_cfg = cfg; // Store config
         refreshDesktopItems(); // Populate g_items from pinned/recent

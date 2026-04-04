@@ -1,4 +1,5 @@
 #ifndef GXOS_VNC_SERVER_H
+#ifndef GXOS_VNC_SERVER_H
 #define GXOS_VNC_SERVER_H
 
 #include <cstdint>
@@ -32,6 +33,12 @@ public:
     
     /// Get current client count
     static int GetClientCount();
+    
+    /// Inject pointer (mouse) event - called internally to forward to compositor
+    static void InjectPointerEvent(uint8_t buttonMask, uint16_t x, uint16_t y);
+    
+    /// Inject key event - called internally to forward to compositor  
+    static void InjectKeyEvent(bool down, uint32_t keysym);
 
 private:
     static void ServerThread();
@@ -50,6 +57,9 @@ private:
     static int s_fbStride;
     static std::mutex s_fbMutex;
     static std::atomic<bool> s_fbDirty;
+    
+    // Last button state for detecting press/release
+    static uint8_t s_lastButtonMask;
 };
 
 } // namespace vnc

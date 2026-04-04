@@ -14,6 +14,7 @@
 #include "system_tray.h"
 #include "desktop_wallpaper.h"
 #include "bitmap_font.h"
+#include "video_backend.h"
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -38,6 +39,10 @@ namespace gxos { namespace gui {
         static HWND g_hwnd; // expose for helper drawing
 #endif
         static std::vector<DesktopItem> g_items; // expose for icon renderer
+
+        // Active video backend (GDI on Windows, kernel FB on bare-metal).
+        // VNC reads from this regardless of which backend is active.
+        static VideoBackend* g_videoBackend;
     private:
         static int main(int argc, char** argv);
         static void handleMessage(const ipc::Message& m);
@@ -102,5 +107,9 @@ namespace gxos { namespace gui {
         static bool g_taskbarMenuVisible;
         static RECT g_taskbarMenuRect;
         static int g_taskbarMenuSel; // selected item index
+
+        // Video backend helpers
+        static void initVideoBackend();
+        static void feedVncFromBackend();
     };
 } }

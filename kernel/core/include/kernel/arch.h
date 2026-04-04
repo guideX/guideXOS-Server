@@ -249,6 +249,21 @@
     #define ARCH_HAS_FB_CONSOLE 0
 #endif
 
+// ================================================================
+// Kernel Framebuffer availability for the compositor VideoBackend
+//
+// True when the architecture has *any* mechanism for providing a
+// linear framebuffer that the compositor can render into:
+//   VESA/BGA, PCI VGA BAR0, EFI GOP, Sun FB, PL111, or ramfb.
+// ================================================================
+
+#if ARCH_HAS_VESA_BGA || ARCH_HAS_PCI_VGA || ARCH_HAS_EFI_GOP || \
+    ARCH_HAS_SUN_FB   || ARCH_HAS_PL111_FB || ARCH_HAS_RAMFB
+    #define ARCH_HAS_KERNEL_FB 1
+#else
+    #define ARCH_HAS_KERNEL_FB 0
+#endif
+
 namespace kernel {
 namespace arch {
 

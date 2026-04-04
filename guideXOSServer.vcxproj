@@ -226,6 +226,7 @@
     <ClInclude Include="platform.h" />
     <ClInclude Include="process.h" />
     <ClInclude Include="right_click_menu.h" />
+    <ClInclude Include="video_backend.h" />
     <ClInclude Include="welcome.h" />
     <ClInclude Include="save_changes_dialog.h" />
     <ClInclude Include="save_dialog.h" />
@@ -345,6 +346,7 @@
       <ObjectFileName>$(IntDir)process_gxos.obj</ObjectFileName>
     </ClCompile>
     <ClCompile Include="right_click_menu.cpp" />
+    <ClCompile Include="video_backend.cpp" />
     <ClCompile Include="welcome.cpp" />
     <ClCompile Include="save_changes_dialog.cpp" />
     <ClCompile Include="save_dialog.cpp" />

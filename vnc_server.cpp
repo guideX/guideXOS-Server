@@ -1,4 +1,6 @@
 #include "vnc_server.h"
+#include "vnc_server.h"
+#include "compositor.h"
 #include "logger.h"
 #include <cstring>
 #include <algorithm>
@@ -39,6 +41,7 @@ int VncServer::s_fbHeight = 768;
 int VncServer::s_fbStride = 1024 * 4; // RGBA
 std::mutex VncServer::s_fbMutex;
 std::atomic<bool> VncServer::s_fbDirty{false};
+uint8_t VncServer::s_lastButtonMask = 0;
 
 bool VncServer::Start(uint16_t port) {
 if (s_running.load()) {
@@ -372,7 +375,8 @@ void VncServer::HandleClient(int clientSocket) {
                     recv(clientSocket, (char*)&downFlag, 1, 0);
                     recv(clientSocket, (char*)&padding, 2, 0);
                     recv(clientSocket, (char*)&key, 4, 0);
-                    // TODO: Forward key events to compositor
+                    key = ntohl(key);
+                    InjectKeyEvent(downFlag != 0, key);
                     break;
                 }
                 case 5: // PointerEvent
@@ -382,7 +386,9 @@ void VncServer::HandleClient(int clientSocket) {
                     recv(clientSocket, (char*)&buttonMask, 1, 0);
                     recv(clientSocket, (char*)&x, 2, 0);
                     recv(clientSocket, (char*)&y, 2, 0);
-                    // TODO: Forward pointer events to compositor
+                    x = ntohs(x);
+                    y = ntohs(y);
+                    InjectPointerEvent(buttonMask, x, y);
                     break;
                 }
                 default:
@@ -394,6 +400,95 @@ void VncServer::HandleClient(int clientSocket) {
     
     Logger::write(LogLevel::Info, "VNC: Client disconnected");
     closesocket(clientSocket);
+}
+
+void VncServer::InjectPointerEvent(uint8_t buttonMask, uint16_t x, uint16_t y) {
+#ifdef _WIN32
+    // Forward VNC pointer events to the compositor window
+    HWND hwnd = gui::Compositor::g_hwnd;
+    if (!hwnd) return;
+    
+    LPARAM lParam = MAKELPARAM(x, y);
+    
+    // Check for button state changes (comparing with last state)
+    bool leftDown = (buttonMask & 0x01) != 0;
+    bool leftWasDown = (s_lastButtonMask & 0x01) != 0;
+    bool rightDown = (buttonMask & 0x04) != 0;
+    bool rightWasDown = (s_lastButtonMask & 0x04) != 0;
+    bool middleDown = (buttonMask & 0x02) != 0;
+    
+    // Build wParam with current button states for WM_MOUSEMOVE
+    // This is critical for drag operations to work correctly
+    WPARAM moveWParam = 0;
+    if (leftDown) moveWParam |= MK_LBUTTON;
+    if (rightDown) moveWParam |= MK_RBUTTON;
+    if (middleDown) moveWParam |= MK_MBUTTON;
+    
+    // IMPORTANT: Send button DOWN events BEFORE mouse move so drag state is set up first
+    // Left button down
+    if (leftDown && !leftWasDown) {
+        PostMessage(hwnd, WM_LBUTTONDOWN, MK_LBUTTON, lParam);
+    }
+    // Right button down
+    if (rightDown && !rightWasDown) {
+        PostMessage(hwnd, WM_RBUTTONDOWN, MK_RBUTTON, lParam);
+    }
+    
+    // Send mouse move with current button state
+    PostMessage(hwnd, WM_MOUSEMOVE, moveWParam, lParam);
+    
+    // Send button UP events AFTER mouse move
+    if (!leftDown && leftWasDown) {
+        PostMessage(hwnd, WM_LBUTTONUP, 0, lParam);
+    }
+    if (!rightDown && rightWasDown) {
+        PostMessage(hwnd, WM_RBUTTONUP, 0, lParam);
+    }
+    
+    s_lastButtonMask = buttonMask;
+#endif
+}
+
+void VncServer::InjectKeyEvent(bool down, uint32_t keysym) {
+#ifdef _WIN32
+    HWND hwnd = gui::Compositor::g_hwnd;
+    if (!hwnd) return;
+    
+    // Convert X11 keysym to Windows virtual key code (basic mapping)
+    WPARAM vk = 0;
+    
+    // Common keysym mappings
+    if (keysym >= 0x20 && keysym <= 0x7E) {
+        // Printable ASCII - use VkKeyScan for proper mapping
+        vk = VkKeyScanA((char)keysym) & 0xFF;
+    } else if (keysym >= 0xFF50 && keysym <= 0xFF58) {
+        // Navigation keys
+        switch (keysym) {
+            case 0xFF50: vk = VK_HOME; break;
+            case 0xFF51: vk = VK_LEFT; break;
+            case 0xFF52: vk = VK_UP; break;
+            case 0xFF53: vk = VK_RIGHT; break;
+            case 0xFF54: vk = VK_DOWN; break;
+            case 0xFF55: vk = VK_PRIOR; break; // Page Up
+            case 0xFF56: vk = VK_NEXT; break;  // Page Down
+            case 0xFF57: vk = VK_END; break;
+        }
+    } else if (keysym == 0xFF1B) {
+        vk = VK_ESCAPE;
+    } else if (keysym == 0xFF0D) {
+        vk = VK_RETURN;
+    } else if (keysym == 0xFF08) {
+        vk = VK_BACK;
+    } else if (keysym == 0xFF09) {
+        vk = VK_TAB;
+    } else if (keysym == 0xFFFF) {
+        vk = VK_DELETE;
+    }
+    
+    if (vk != 0) {
+        PostMessage(hwnd, down ? WM_KEYDOWN : WM_KEYUP, vk, 0);
+    }
+#endif
 }
 
 } // namespace vnc
