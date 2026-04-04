@@ -1,4 +1,5 @@
 #include "process.h"
+#include "process.h"
 #include "scheduler.h"
 #include "logger.h"
 #include "allocator.h"
@@ -16,29 +17,42 @@ namespace gxos {
     }
 
     uint64_t ProcessTable::spawn(const ProcessSpec& spec, const std::vector<std::string>& args){
-        std::lock_guard<std::mutex> _g(g_lock);
-        uint64_t pid = g_nextPid++;
-        auto p = std::make_shared<Process>(pid, spec.name, spec.entry);
-        g_proc[pid] = p;
-        // run in scheduler thread
-        Scheduler::enqueue({ [pid,args]{
-            auto it = g_proc.find(pid); if (it==g_proc.end()) return; auto proc = it->second; 
+        uint64_t pid;
+        std::shared_ptr<Process> p;
+        {
+            std::lock_guard<std::mutex> _g(g_lock);
+            pid = g_nextPid++;
+            p = std::make_shared<Process>(pid, spec.name, spec.entry);
+            g_proc[pid] = p;
+        }
+        // Run on a dedicated thread instead of the scheduler to avoid blocking
+        // when the single scheduler worker is occupied (e.g., by the compositor)
+        std::thread t([pid, args, p]{
             {
-                std::lock_guard<std::mutex> lk(proc->mu);
-                proc->running = true; 
-                proc->finished = false;
+                std::lock_guard<std::mutex> lk(p->mu);
+                p->running = true; 
+                p->finished = false;
             }
             Allocator::setCurrentPid(pid);
-            std::vector<std::unique_ptr<char[]>> hold; auto argv = make_argv(args, hold); int argc = (int)args.size();
-            try { proc->exitCode = proc->entry(argc, argv.data()); }
-            catch(...) { Logger::write(LogLevel::Error, "Process crashed: "+proc->name); proc->exitCode = -1; }
+            std::vector<std::unique_ptr<char[]>> hold; 
+            auto argv = make_argv(args, hold); 
+            int argc = (int)args.size();
+            try { 
+                p->exitCode = p->entry(argc, argv.data()); 
+            }
+            catch(...) { 
+                Logger::write(LogLevel::Error, "Process crashed: "+p->name); 
+                p->exitCode = -1; 
+            }
             Allocator::setCurrentPid(0);
             {
-                std::lock_guard<std::mutex> lk(proc->mu);
-                proc->running=false; proc->finished=true; 
+                std::lock_guard<std::mutex> lk(p->mu);
+                p->running=false; 
+                p->finished=true; 
             }
-            proc->cv.notify_all();
-        }});
+            p->cv.notify_all();
+        });
+        t.detach();
         return pid;
     }
 

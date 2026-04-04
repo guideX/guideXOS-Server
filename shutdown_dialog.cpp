@@ -18,12 +18,8 @@ uint64_t ShutdownDialog::Launch() {
     s_confirmed = false;
     s_lastKeyCode = 0;
     s_keyDown = false;
-    // Spawn on a detached thread to avoid blocking the single scheduler worker
-    std::thread t([]() {
-        ShutdownDialog::main(0, nullptr);
-    });
-    t.detach();
-    return 1; // Return a dummy PID since we're not using ProcessTable
+    ProcessSpec spec{"ShutdownDialog", &ShutdownDialog::main};
+    return ProcessTable::spawn(spec, {});
 }
 
 int ShutdownDialog::main(int /*argc*/, char** /*argv*/) {
