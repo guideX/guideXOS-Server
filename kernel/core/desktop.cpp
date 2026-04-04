@@ -311,8 +311,25 @@ static NotificationToast s_notification = {
     true
 };
 
+// Per-icon positions (mutable, set to grid layout on init)
+static int32_t s_iconPosX[8];
+static int32_t s_iconPosY[8];
+static bool    s_iconPositionsInitialized = false;
+
 // Selected desktop icon (-1 = none)
 static int s_selectedIcon = -1;
+
+// Drag state for icon repositioning
+static bool  s_dragging = false;
+static int   s_dragIconIndex = -1;
+static int32_t s_dragOffsetX = 0;
+static int32_t s_dragOffsetY = 0;
+static int32_t s_dragStartMouseX = 0;
+static int32_t s_dragStartMouseY = 0;
+static int32_t s_dragCurrentX = 0;  // current mouse X during drag
+static int32_t s_dragCurrentY = 0;  // current mouse Y during drag
+static const int32_t kDragThreshold = 4;  // pixels before drag starts
+static bool  s_dragStarted = false;  // true once threshold exceeded
 
 // Start menu hover and click state (-1 = none)
 static int s_hoverMenuLeft  = -1;   // hovered left-column item index
@@ -396,16 +413,15 @@ static void draw_background()
 static void draw_desktop_icons()
 {
     uint32_t deskH = s_screenH - kTaskbarH;
-    uint32_t cols = (s_screenW - kIconMargin * 2) / kIconCellW;
-    if (cols < 1) cols = 1;
 
     for (int i = 0; i < kDesktopIconCount; i++) {
-        uint32_t col = (uint32_t)i % cols;
-        uint32_t row = (uint32_t)i / cols;
-        uint32_t cx = kIconMargin + col * kIconCellW;
-        uint32_t cy = kIconMargin + row * kIconCellH;
+        // Skip drawing the icon being dragged (it will be drawn at cursor)
+        if (s_dragging && s_dragStarted && i == s_dragIconIndex) continue;
 
-        if (cy + kIconCellH > deskH) break;
+        uint32_t cx = (uint32_t)s_iconPosX[i];
+        uint32_t cy = (uint32_t)s_iconPosY[i];
+
+        if (cy + kIconCellH > deskH) continue;
 
         // Selection highlight background
         if (i == s_selectedIcon) {
@@ -432,6 +448,29 @@ static void draw_desktop_icons()
         draw_rect(ix, iy, kIconSize, kIconSize, rgb(180, 180, 200));
 
         // Label (shadow + text)
+        uint32_t labelY = iy + kIconSize + 4;
+        const char* lbl = s_desktopIcons[i].label;
+        int tw = measure_text(lbl);
+        uint32_t lx = cx + (kIconCellW > (uint32_t)tw ? (kIconCellW - tw) / 2 : 0);
+        draw_text(lx + 1, labelY + 1, lbl, rgb(0, 0, 0), 1);
+        draw_text(lx, labelY, lbl, rgb(230, 230, 240), 1);
+    }
+
+    // Draw the dragged icon ghost at current drag position
+    if (s_dragging && s_dragStarted && s_dragIconIndex >= 0 && s_dragIconIndex < kDesktopIconCount) {
+        int i = s_dragIconIndex;
+        uint32_t cx = (uint32_t)(s_dragCurrentX - s_dragOffsetX);
+        uint32_t cy = (uint32_t)(s_dragCurrentY - s_dragOffsetY);
+
+        // Semi-transparent selection highlight
+        framebuffer::fill_rect(cx, cy, kIconCellW, kIconCellH, rgb(40, 60, 100));
+        draw_rect(cx, cy, kIconCellW, kIconCellH, rgb(80, 120, 180));
+
+        uint32_t ix = cx + (kIconCellW - kIconSize) / 2;
+        uint32_t iy = cy + 4;
+        framebuffer::fill_rect(ix, iy, kIconSize, kIconSize, s_desktopIcons[i].color);
+        draw_rect(ix, iy, kIconSize, kIconSize, rgb(180, 180, 200));
+
         uint32_t labelY = iy + kIconSize + 4;
         const char* lbl = s_desktopIcons[i].label;
         int tw = measure_text(lbl);
@@ -851,6 +890,20 @@ static void draw_notifications()
 // Public API
 // ============================================================
 
+static void init_icon_positions()
+{
+    uint32_t cols = (s_screenW - kIconMargin * 2) / kIconCellW;
+    if (cols < 1) cols = 1;
+
+    for (int i = 0; i < kDesktopIconCount; i++) {
+        uint32_t col = (uint32_t)i % cols;
+        uint32_t row = (uint32_t)i / cols;
+        s_iconPosX[i] = (int32_t)(kIconMargin + col * kIconCellW);
+        s_iconPosY[i] = (int32_t)(kIconMargin + row * kIconCellH);
+    }
+    s_iconPositionsInitialized = true;
+}
+
 void init()
 {
     s_screenW = framebuffer::get_width();
@@ -858,6 +911,7 @@ void init()
     s_startMenuOpen = false;
     s_rightClickMenuOpen = false;
     s_notification.visible = true;
+    init_icon_positions();
     s_initialized = true;
 }
 
@@ -953,16 +1007,12 @@ static uint8_t  s_prevButtons = 0;
 static int hit_test_icon(int32_t mx, int32_t my)
 {
     uint32_t deskH = s_screenH - kTaskbarH;
-    uint32_t cols = (s_screenW - kIconMargin * 2) / kIconCellW;
-    if (cols < 1) cols = 1;
 
     for (int i = 0; i < kDesktopIconCount; i++) {
-        uint32_t col = (uint32_t)i % cols;
-        uint32_t row = (uint32_t)i / cols;
-        uint32_t cx = kIconMargin + col * kIconCellW;
-        uint32_t cy = kIconMargin + row * kIconCellH;
+        uint32_t cx = (uint32_t)s_iconPosX[i];
+        uint32_t cy = (uint32_t)s_iconPosY[i];
 
-        if (cy + kIconCellH > deskH) break;
+        if (cy + kIconCellH > deskH) continue;
 
         if ((uint32_t)mx >= cx && (uint32_t)mx < cx + kIconCellW &&
             (uint32_t)my >= cy && (uint32_t)my < cy + kIconCellH) {
@@ -1110,13 +1160,66 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
 {
     if (!s_initialized) return;
 
-    // Detect button press edges (newly pressed)
-    uint8_t pressed = buttons & ~s_prevButtons;
+    // Detect button press/release edges
+    uint8_t pressed  = buttons & ~s_prevButtons;   // newly pressed
+    uint8_t released = s_prevButtons & ~buttons;    // newly released
     s_prevButtons = buttons;
 
     uint32_t taskbarY = s_screenH - kTaskbarH;
 
-    // Left button click
+    // ---- Handle drag-in-progress (left button held) ----
+    if (s_dragging && (buttons & 0x01)) {
+        // Update current drag position
+        s_dragCurrentX = mx;
+        s_dragCurrentY = my;
+
+        // Check if we've exceeded the drag threshold
+        if (!s_dragStarted) {
+            int32_t dx = mx - s_dragStartMouseX;
+            int32_t dy = my - s_dragStartMouseY;
+            if (dx < 0) dx = -dx;
+            if (dy < 0) dy = -dy;
+            if (dx > kDragThreshold || dy > kDragThreshold) {
+                s_dragStarted = true;
+            }
+        }
+
+        if (s_dragStarted) {
+            // Redraw scene with icon at drag position
+            draw();
+            draw_cursor(mx, my);
+            return;
+        }
+    }
+
+    // ---- Handle drag release (left button released while dragging) ----
+    if (s_dragging && (released & 0x01)) {
+        if (s_dragStarted && s_dragIconIndex >= 0 && s_dragIconIndex < kDesktopIconCount) {
+            // Compute new icon position from drop point
+            int32_t newX = mx - s_dragOffsetX;
+            int32_t newY = my - s_dragOffsetY;
+
+            // Clamp to desktop area
+            if (newX < 0) newX = 0;
+            if (newY < 0) newY = 0;
+            if (newX + (int32_t)kIconCellW > (int32_t)s_screenW)
+                newX = (int32_t)s_screenW - (int32_t)kIconCellW;
+            if (newY + (int32_t)kIconCellH > (int32_t)taskbarY)
+                newY = (int32_t)taskbarY - (int32_t)kIconCellH;
+
+            s_iconPosX[s_dragIconIndex] = newX;
+            s_iconPosY[s_dragIconIndex] = newY;
+        }
+
+        s_dragging = false;
+        s_dragStarted = false;
+        s_dragIconIndex = -1;
+        draw();
+        draw_cursor(mx, my);
+        return;
+    }
+
+    // Left button press
     if (pressed & 0x01) {
         // Close context menu on any click
         if (s_rightClickMenuOpen) {
@@ -1160,7 +1263,7 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
                 return;
             }
 
-            // Click outside start menu items — close it
+            // Click outside start menu items - close it
             s_startMenuOpen = false;
             s_hoverMenuLeft = -1;
             s_hoverMenuRight = -1;
@@ -1171,11 +1274,18 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
             return;
         }
 
-        // Desktop icon click
+        // Desktop icon click - begin potential drag
         int iconIdx = hit_test_icon(mx, my);
         if (iconIdx >= 0) {
             s_selectedIcon = iconIdx;
-            show_icon_notification(iconIdx);
+            // Start drag tracking (actual drag begins after threshold)
+            s_dragging = true;
+            s_dragStarted = false;
+            s_dragIconIndex = iconIdx;
+            s_dragStartMouseX = mx;
+            s_dragStartMouseY = my;
+            s_dragOffsetX = mx - s_iconPosX[iconIdx];
+            s_dragOffsetY = my - s_iconPosY[iconIdx];
             draw();
             draw_cursor(mx, my);
             return;
@@ -1207,7 +1317,7 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
         }
     }
 
-    // Right button click — show context menu on desktop area
+    // Right button click - show context menu on desktop area
     if (pressed & 0x02) {
         if ((uint32_t)my < taskbarY) {
             show_context_menu((uint32_t)mx, (uint32_t)my);

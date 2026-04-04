@@ -162,6 +162,7 @@ if "%SPLIT_PFLASH%"=="1" (
         -drive file=fat:rw:ESP,format=raw ^
         -m 1024M ^
         -vga std ^
+        -display gtk ^
         -vnc :0 ^
         -serial stdio ^
         -no-reboot
@@ -173,6 +174,7 @@ if "%SPLIT_PFLASH%"=="1" (
         -drive file=fat:rw:ESP,format=raw ^
         -m 1024M ^
         -vga std ^
+        -display gtk ^
         -vnc :0 ^
         -serial stdio ^
         -no-reboot

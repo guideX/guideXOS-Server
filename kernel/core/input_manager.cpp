@@ -69,7 +69,7 @@ static int32_t clamp(int32_t v, int32_t lo, int32_t hi)
 // Source detection and initialization
 // ================================================================
 
-static void detect_sources()
+static void detect_sources(bool verbose = true)
 {
     s_availableSources = 0;
 
@@ -77,20 +77,20 @@ static void detect_sources()
     // Check USB HID
     if (usb_hid::has_mouse()) {
         s_availableSources |= (1 << static_cast<uint8_t>(InputSource::USB_HID));
-        serial::puts("[INPUT] USB HID mouse detected\n");
+        if (verbose) serial::puts("[INPUT] USB HID mouse detected\n");
     }
 #endif
 
 #if ARCH_HAS_PS2
     // PS/2 is always available on x86 if compiled in
     s_availableSources |= (1 << static_cast<uint8_t>(InputSource::PS2));
-    serial::puts("[INPUT] PS/2 mouse available\n");
+    if (verbose) serial::puts("[INPUT] PS/2 mouse available\n");
 #endif
 
 #if defined(KERNEL_HAS_VIRTIO_INPUT)
     if (virtio_input::has_mouse()) {
         s_availableSources |= (1 << static_cast<uint8_t>(InputSource::VirtIO));
-        serial::puts("[INPUT] VirtIO input detected\n");
+        if (verbose) serial::puts("[INPUT] VirtIO input detected\n");
     }
 #endif
 
@@ -98,7 +98,7 @@ static void detect_sources()
     // (ADB on Mac, Sun mouse on SPARC, etc.)
 }
 
-static void select_best_source()
+static void select_best_source(bool verbose = true)
 {
     // Select mouse source based on priority
     // Priority: USB_HID > PS2 > VirtIO > Platform
@@ -115,9 +115,11 @@ static void select_best_source()
         if (is_source_available(s_preferredSource)) {
             s_activeMouseSource = s_preferredSource;
             s_activeKeyboardSource = s_preferredSource;
-            serial::puts("[INPUT] Using preferred source: ");
-            serial::puts(source_name(s_preferredSource));
-            serial::putc('\n');
+            if (verbose) {
+                serial::puts("[INPUT] Using preferred source: ");
+                serial::puts(source_name(s_preferredSource));
+                serial::putc('\n');
+            }
             return;
         }
     }
@@ -134,12 +136,14 @@ static void select_best_source()
     // For keyboard, use same logic (could be different source in future)
     s_activeKeyboardSource = s_activeMouseSource;
 
-    if (s_activeMouseSource != InputSource::None) {
-        serial::puts("[INPUT] Active mouse source: ");
-        serial::puts(source_name(s_activeMouseSource));
-        serial::putc('\n');
-    } else {
-        serial::puts("[INPUT] WARNING: No mouse input source available\n");
+    if (verbose) {
+        if (s_activeMouseSource != InputSource::None) {
+            serial::puts("[INPUT] Active mouse source: ");
+            serial::puts(source_name(s_activeMouseSource));
+            serial::putc('\n');
+        } else {
+            serial::puts("[INPUT] WARNING: No mouse input source available\n");
+        }
     }
 }
 
@@ -327,8 +331,8 @@ void poll()
         pollCount = 0;
         
         InputSource oldSource = s_activeMouseSource;
-        detect_sources();
-        select_best_source();
+        detect_sources(false);
+        select_best_source(false);
         
         if (s_activeMouseSource != oldSource) {
             serial::puts("[INPUT] Input source changed to: ");
