@@ -1,4 +1,5 @@
 #include "shutdown_dialog.h"
+#include "shutdown_dialog.h"
 #include "gui_protocol.h"
 #include "lifecycle.h"
 #include "logger.h"
@@ -17,12 +18,20 @@ uint64_t ShutdownDialog::Launch() {
     s_confirmed = false;
     s_lastKeyCode = 0;
     s_keyDown = false;
-    ProcessSpec spec{"ShutdownDialog", &ShutdownDialog::main};
-    return ProcessTable::spawn(spec, {});
+    // Spawn on a detached thread to avoid blocking the single scheduler worker
+    std::thread t([]() {
+        ShutdownDialog::main(0, nullptr);
+    });
+    t.detach();
+    return 1; // Return a dummy PID since we're not using ProcessTable
 }
 
 int ShutdownDialog::main(int /*argc*/, char** /*argv*/) {
     Logger::write(LogLevel::Info, "ShutdownDialog starting");
+
+    // Ensure IPC channels exist
+    ipc::Bus::ensure("gui.input");
+    ipc::Bus::ensure("gui.output");
 
     // Create the window via compositor
     {

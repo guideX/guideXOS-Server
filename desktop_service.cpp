@@ -15,6 +15,7 @@
 #include <fstream>
 #include <sstream>
 #include <chrono>
+#include <thread>
 /// <summary>
 /// guideX OS GUI - Desktop Service
 /// </summary>
@@ -164,41 +165,42 @@ namespace gxos {
             // Add to recent
             AddRecentProgram(name);
 
-            // Launch the actual application
-            if (name == "Notepad") {
-                apps::Notepad::Launch();
-            }
-            else if (name == "Calculator") {
-                apps::Calculator::Launch();
-            }
-            else if (name == "Console") {
-                apps::ConsoleWindow::Launch();
-            }
-            else if (name == "FileExplorer" || name == "Files") {
-                apps::FileExplorer::Launch();
-            }
-            else if (name == "Clock") {
-                apps::Clock::Launch();
-            }
-            else if (name == "TaskManager") {
-                apps::TaskManager::Launch();
-            }
-            else if (name == "Paint") {
-                apps::Paint::Launch();
-            }
-            else if (name == "ImageViewer") {
-                apps::ImageViewer::Launch();
-            }
-            else if (name == "OnScreenKeyboard") {
-                apps::OnScreenKeyboard::Launch();
-            }
-            else if (name == "ShutdownDialog" || name == "Shutdown") {
-                apps::ShutdownDialog::Launch();
-            }
-            else {
-                error = "Application launcher not implemented: " + name;
-                return false;
-            }
+            // Launch the actual application on a separate thread to avoid blocking
+            // the single-threaded scheduler that the compositor runs on
+            std::string appName = name; // capture by value for thread
+            std::thread t([appName]() {
+                if (appName == "Notepad") {
+                    apps::Notepad::Launch();
+                }
+                else if (appName == "Calculator") {
+                    apps::Calculator::Launch();
+                }
+                else if (appName == "Console") {
+                    apps::ConsoleWindow::Launch();
+                }
+                else if (appName == "FileExplorer" || appName == "Files") {
+                    apps::FileExplorer::Launch();
+                }
+                else if (appName == "Clock") {
+                    apps::Clock::Launch();
+                }
+                else if (appName == "TaskManager") {
+                    apps::TaskManager::Launch();
+                }
+                else if (appName == "Paint") {
+                    apps::Paint::Launch();
+                }
+                else if (appName == "ImageViewer") {
+                    apps::ImageViewer::Launch();
+                }
+                else if (appName == "OnScreenKeyboard") {
+                    apps::OnScreenKeyboard::Launch();
+                }
+                else if (appName == "ShutdownDialog" || appName == "Shutdown") {
+                    apps::ShutdownDialog::Launch();
+                }
+            });
+            t.detach();
 
             Logger::write(LogLevel::Info, std::string("Launched app: ") + name);
             return true;

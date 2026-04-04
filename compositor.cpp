@@ -1,6 +1,9 @@
 #include "compositor.h"
+#include "compositor.h"
 #include "allocator.h"
 #include "desktop_state.h"
+#include "desktop_service.h"
+#include "shutdown_dialog.h"
 #include "icons.h"
 #include "right_click_menu.h"
 #include "notification_manager.h"
@@ -132,7 +135,15 @@ namespace gxos { namespace gui {
     void Compositor::addRecent(const std::string& act){ auto it=std::find(g_cfg.recent.begin(), g_cfg.recent.end(), act); if(it!=g_cfg.recent.end()) g_cfg.recent.erase(it); g_cfg.recent.insert(g_cfg.recent.begin(), act); if(g_cfg.recent.size()>20) g_cfg.recent.pop_back(); refreshDesktopItems(); saveDesktopConfig(); }
     void Compositor::pinAction(const std::string& act){ if(act.empty()) return; if(std::find(g_cfg.pinned.begin(), g_cfg.pinned.end(), act)==g_cfg.pinned.end()){ g_cfg.pinned.push_back(act); refreshDesktopItems(); saveDesktopConfig(); } }
     void Compositor::unpinAction(const std::string& act){ auto it=std::find(g_cfg.pinned.begin(), g_cfg.pinned.end(), act); if(it!=g_cfg.pinned.end()){ g_cfg.pinned.erase(it); refreshDesktopItems(); saveDesktopConfig(); } }
-    void Compositor::launchAction(const std::string& act){ Logger::write(LogLevel::Info, std::string("Desktop launch: ")+act); addRecent(act); publishOut(MsgType::MT_DesktopLaunch, act); }
+    void Compositor::launchAction(const std::string& act){ 
+        Logger::write(LogLevel::Info, std::string("Desktop launch: ")+act); 
+        addRecent(act); 
+        // Actually launch the application
+        std::string err;
+        if (!DesktopService::LaunchApp(act, err)) {
+            Logger::write(LogLevel::Error, std::string("Failed to launch app: ") + act + " - " + err);
+        }
+    }
 
     WinInfo* Compositor::hitWindowAt(int mx, int my){ for(int idx=(int)g_z.size()-1; idx>=0; --idx){ uint64_t wid=g_z[idx]; auto it=g_windows.find(wid); if(it==g_windows.end()) continue; WinInfo &w=it->second; if(w.minimized || w.tombstoned) continue; if(mx>=w.x && mx < w.x+w.w && my>=w.y && my < w.y+w.h) return &w; } return nullptr; }
 #ifdef _WIN32
@@ -532,9 +543,9 @@ namespace gxos { namespace gui {
                 int shutdownBtnH = 24;
                 RECT shutdownBtn{ g_startMenuRect.right-shutdownBtnW-30, btnY, g_startMenuRect.right-30, btnY+shutdownBtnH };
                 if(mx>=shutdownBtn.left && mx<=shutdownBtn.right && my>=shutdownBtn.top && my<=shutdownBtn.bottom){
-                    // Publish shutdown event
+                    // Launch shutdown confirmation dialog
                     Logger::write(LogLevel::Info, "Shutdown requested from Start Menu");
-                    publishOut(MsgType::MT_WidgetEvt, "SHUTDOWN");
+                    apps::ShutdownDialog::Launch();
                     g_startMenuVisible = false;
                     requestRepaint();
                     return 0;
