@@ -94,30 +94,39 @@ int Paint::main(int /*argc*/, char** /*argv*/) {
                 handleKeyPress(keyCode);
             } else if (ev.type == static_cast<uint32_t>(gui::MsgType::MT_WidgetEvt)) {
                 std::string payload(ev.data.begin(), ev.data.end());
-                if (payload.find("BTN|") == 0) {
-                    int id = 0;
-                    try { id = std::stoi(payload.substr(4)); } catch (...) {}
-
-                    // Color buttons: id 100..115
-                    if (id >= 100 && id < 100 + kPaletteCount) {
-                        s_color = kPalette[id - 100];
-                        Logger::write(LogLevel::Info, "Paint color selected");
-                    }
-                    // Tool buttons: id 200..206
-                    else if (id >= 200 && id < 207) {
-                        s_tool = static_cast<PaintTool>(id - 200);
-                        Logger::write(LogLevel::Info, std::string("Paint tool: ") + kToolNames[id - 200]);
-                    }
-                    // Size buttons: id 300..304
-                    else if (id >= 300 && id < 305) {
-                        static const int sizes[] = {1, 3, 5, 10, 20};
-                        s_brushSize = sizes[id - 300];
-                    }
-                    // Clear button: id 400
-                    else if (id == 400) {
-                        clearCanvas();
-                    }
-                    updateDisplay();
+                // Widget events: "winId|widgetId|event|value"
+                std::istringstream iss(payload);
+                std::string winIdStr, widgetIdStr, event;
+                std::getline(iss, winIdStr, '|');
+                std::getline(iss, widgetIdStr, '|');
+                std::getline(iss, event, '|');
+                if (!winIdStr.empty() && !widgetIdStr.empty()) {
+                    try {
+                        uint64_t winId = std::stoull(winIdStr);
+                        int id = std::stoi(widgetIdStr);
+                        if (winId == s_windowId && event == "click") {
+                            // Color buttons: id 100..115
+                            if (id >= 100 && id < 100 + kPaletteCount) {
+                                s_color = kPalette[id - 100];
+                                Logger::write(LogLevel::Info, "Paint color selected");
+                            }
+                            // Tool buttons: id 200..206
+                            else if (id >= 200 && id < 207) {
+                                s_tool = static_cast<PaintTool>(id - 200);
+                                Logger::write(LogLevel::Info, std::string("Paint tool: ") + kToolNames[id - 200]);
+                            }
+                            // Size buttons: id 300..304
+                            else if (id >= 300 && id < 305) {
+                                static const int sizes[] = {1, 3, 5, 10, 20};
+                                s_brushSize = sizes[id - 300];
+                            }
+                            // Clear button: id 400
+                            else if (id == 400) {
+                                clearCanvas();
+                            }
+                            updateDisplay();
+                        }
+                    } catch (...) {}
                 }
             }
         }

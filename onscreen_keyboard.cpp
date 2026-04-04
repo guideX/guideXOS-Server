@@ -70,41 +70,49 @@ int OnScreenKeyboard::main(int /*argc*/, char** /*argv*/) {
                 running = false;
             } else if (ev.type == static_cast<uint32_t>(gui::MsgType::MT_WidgetEvt)) {
                 std::string payload(ev.data.begin(), ev.data.end());
-                // Button events from compositor: "BTN|<id>"
-                if (payload.find("BTN|") == 0) {
-                    int id = 0;
-                    try { id = std::stoi(payload.substr(4)); } catch (...) {}
-
-                    // id encoding:
-                    // 1000 + row*100 + col  -> key on row
-                    // 2001 = Shift, 2002 = CapsLock, 2003 = Space, 2004 = Backspace, 2005 = Enter
-                    if (id == 2001) {
-                        s_shift = !s_shift;
-                        updateDisplay();
-                    } else if (id == 2002) {
-                        s_caps = !s_caps;
-                        updateDisplay();
-                    } else if (id == 2003) {
-                        sendKey(' ');
-                    } else if (id == 2004) {
-                        sendKey('\b');
-                    } else if (id == 2005) {
-                        sendKey('\r');
-                    } else if (id >= 1000 && id < 2000) {
-                        int row = (id - 1000) / 100;
-                        int col = (id - 1000) % 100;
-                        if (row >= 0 && row < kRowCount) {
-                            const char* layout = (s_shift || s_caps) ? kRowsShift[row] : kRows[row];
-                            int len = static_cast<int>(std::string(layout).size());
-                            if (col >= 0 && col < len) {
-                                sendKey(layout[col]);
-                                if (s_shift && !s_caps) {
-                                    s_shift = false;
-                                    updateDisplay();
+                // Widget events: "winId|widgetId|event|value"
+                std::istringstream iss(payload);
+                std::string winIdStr, widgetIdStr, event;
+                std::getline(iss, winIdStr, '|');
+                std::getline(iss, widgetIdStr, '|');
+                std::getline(iss, event, '|');
+                if (!winIdStr.empty() && !widgetIdStr.empty()) {
+                    try {
+                        uint64_t winId = std::stoull(winIdStr);
+                        int id = std::stoi(widgetIdStr);
+                        if (winId == s_windowId && event == "click") {
+                            // id encoding:
+                            // 1000 + row*100 + col  -> key on row
+                            // 2001 = Shift, 2002 = CapsLock, 2003 = Space, 2004 = Backspace, 2005 = Enter
+                            if (id == 2001) {
+                                s_shift = !s_shift;
+                                updateDisplay();
+                            } else if (id == 2002) {
+                                s_caps = !s_caps;
+                                updateDisplay();
+                            } else if (id == 2003) {
+                                sendKey(' ');
+                            } else if (id == 2004) {
+                                sendKey('\b');
+                            } else if (id == 2005) {
+                                sendKey('\r');
+                            } else if (id >= 1000 && id < 2000) {
+                                int row = (id - 1000) / 100;
+                                int col = (id - 1000) % 100;
+                                if (row >= 0 && row < kRowCount) {
+                                    const char* layout = (s_shift || s_caps) ? kRowsShift[row] : kRows[row];
+                                    int len = static_cast<int>(std::string(layout).size());
+                                    if (col >= 0 && col < len) {
+                                        sendKey(layout[col]);
+                                        if (s_shift && !s_caps) {
+                                            s_shift = false;
+                                            updateDisplay();
+                                        }
+                                    }
                                 }
                             }
                         }
-                    }
+                    } catch (...) {}
                 }
             }
         }

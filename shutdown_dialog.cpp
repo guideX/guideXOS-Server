@@ -63,15 +63,28 @@ int ShutdownDialog::main(int /*argc*/, char** /*argv*/) {
             }
             if (ev.type == static_cast<uint32_t>(gui::MsgType::MT_WidgetEvt)) {
                 std::string payload(ev.data.begin(), ev.data.end());
-                // Button events: "BTN|<id>"
-                if (payload.find("BTN|1") != std::string::npos) {
-                    // Yes button
-                    s_confirmed = true;
-                    Logger::write(LogLevel::Info, "Shutdown confirmed by user");
-                    Lifecycle::shutdown();
-                } else if (payload.find("BTN|2") != std::string::npos) {
-                    // No button -> close dialog
-                    break;
+                // Widget events: "winId|widgetId|event|value"
+                std::istringstream iss(payload);
+                std::string winIdStr, widgetIdStr, event;
+                std::getline(iss, winIdStr, '|');
+                std::getline(iss, widgetIdStr, '|');
+                std::getline(iss, event, '|');
+                if (!winIdStr.empty() && !widgetIdStr.empty()) {
+                    try {
+                        uint64_t winId = std::stoull(winIdStr);
+                        int widgetId = std::stoi(widgetIdStr);
+                        if (winId == s_windowId && event == "click") {
+                            if (widgetId == 1) {
+                                // Yes button
+                                s_confirmed = true;
+                                Logger::write(LogLevel::Info, "Shutdown confirmed by user");
+                                Lifecycle::shutdown();
+                            } else if (widgetId == 2) {
+                                // No button -> close dialog
+                                break;
+                            }
+                        }
+                    } catch (...) {}
                 }
             }
         }

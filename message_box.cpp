@@ -67,9 +67,21 @@ int MessageBox::main(int /*argc*/, char** /*argv*/) {
             }
             if (ev.type == static_cast<uint32_t>(gui::MsgType::MT_WidgetEvt)) {
                 std::string payload(ev.data.begin(), ev.data.end());
-                // OK button (id=1)
-                if (payload.find("BTN|1") != std::string::npos) {
-                    s_dismissed = true;
+                // Widget events: "winId|widgetId|event|value"
+                std::istringstream iss(payload);
+                std::string winIdStr, widgetIdStr, event;
+                std::getline(iss, winIdStr, '|');
+                std::getline(iss, widgetIdStr, '|');
+                std::getline(iss, event, '|');
+                if (!winIdStr.empty() && !widgetIdStr.empty()) {
+                    try {
+                        uint64_t winId = std::stoull(winIdStr);
+                        int widgetId = std::stoi(widgetIdStr);
+                        // OK button (id=1)
+                        if (winId == s_windowId && event == "click" && widgetId == 1) {
+                            s_dismissed = true;
+                        }
+                    } catch (...) {}
                 }
             }
         }

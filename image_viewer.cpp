@@ -90,9 +90,23 @@ int ImageViewer::main(int argc, char** argv) {
                 handleKeyPress(keyCode);
             } else if (ev.type == static_cast<uint32_t>(gui::MsgType::MT_WidgetEvt)) {
                 std::string payload(ev.data.begin(), ev.data.end());
-                if (payload.find("BTN|1") != std::string::npos) { zoomIn(); updateDisplay(); }
-                else if (payload.find("BTN|2") != std::string::npos) { zoomOut(); updateDisplay(); }
-                else if (payload.find("BTN|3") != std::string::npos) { resetZoom(); updateDisplay(); }
+                // Widget events: "winId|widgetId|event|value"
+                std::istringstream iss(payload);
+                std::string winIdStr, widgetIdStr, event;
+                std::getline(iss, winIdStr, '|');
+                std::getline(iss, widgetIdStr, '|');
+                std::getline(iss, event, '|');
+                if (!winIdStr.empty() && !widgetIdStr.empty()) {
+                    try {
+                        uint64_t winId = std::stoull(winIdStr);
+                        int widgetId = std::stoi(widgetIdStr);
+                        if (winId == s_windowId && event == "click") {
+                            if (widgetId == 1) { zoomIn(); updateDisplay(); }
+                            else if (widgetId == 2) { zoomOut(); updateDisplay(); }
+                            else if (widgetId == 3) { resetZoom(); updateDisplay(); }
+                        }
+                    } catch (...) {}
+                }
             }
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(30));

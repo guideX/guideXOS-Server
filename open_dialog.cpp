@@ -77,15 +77,29 @@ int OpenDialog::main(int /*argc*/, char** /*argv*/) {
             }
             if (ev.type == static_cast<uint32_t>(MsgType::MT_WidgetEvt)) {
                 std::string payload(ev.data.begin(), ev.data.end());
-                if (payload.find("BTN|1") != std::string::npos) {
-                    // Open button
-                    openAction();
-                } else if (payload.find("BTN|2") != std::string::npos) {
-                    // Cancel button
-                    s_done = true;
-                } else if (payload.find("BTN|3") != std::string::npos) {
-                    // Up button
-                    goUp();
+                // Widget events: "winId|widgetId|event|value"
+                std::istringstream iss(payload);
+                std::string winIdStr, widgetIdStr, event;
+                std::getline(iss, winIdStr, '|');
+                std::getline(iss, widgetIdStr, '|');
+                std::getline(iss, event, '|');
+                if (!winIdStr.empty() && !widgetIdStr.empty()) {
+                    try {
+                        uint64_t winId = std::stoull(winIdStr);
+                        int widgetId = std::stoi(widgetIdStr);
+                        if (winId == s_windowId && event == "click") {
+                            if (widgetId == 1) {
+                                // Open button
+                                openAction();
+                            } else if (widgetId == 2) {
+                                // Cancel button
+                                s_done = true;
+                            } else if (widgetId == 3) {
+                                // Up button
+                                goUp();
+                            }
+                        }
+                    } catch (...) {}
                 }
             }
         }
