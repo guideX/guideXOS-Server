@@ -26,33 +26,48 @@ static bool s_ctrlDown = false;
 static bool s_altDown = false;
 static bool s_capsLock = false;
 
-// Scancode set 1 to ASCII mapping (US keyboard layout)
+// Scancode set 2 to ASCII mapping (US QWERTY keyboard layout)
+// Modern keyboards typically use scancode set 2
 // Index = scancode, value = ASCII (lowercase)
-static const char s_scancodeToAscii[128] = {
-    0,   27,  '1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '-', '=', '\b',  // 0x00-0x0E
-    '\t', 'q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p', '[', ']', '\n',     // 0x0F-0x1C
-    0,   'a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l', ';', '\'', '`',           // 0x1D-0x29 (0x1D=LCtrl)
-    0,   '\\', 'z', 'x', 'c', 'v', 'b', 'n', 'm', ',', '.', '/', 0,             // 0x2A-0x36 (0x2A=LShift, 0x36=RShift)
-    '*', 0,   ' ', 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,              // 0x37-0x43 (0x38=LAlt, 0x39=Space, 0x3A=CapsLock, 0x3B-0x44=F1-F10)
-    0,   0,   0,   0,   0,   0,   0,   '7', '8', '9', '-', '4', '5', '6', '+',  // 0x44-0x4E (numpad)
-    '1', '2', '3', '0', '.',                                                    // 0x4F-0x53
-    0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0, // 0x54-0x63
-    0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0, // 0x64-0x73
-    0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0                     // 0x74-0x7F
+static const char s_scancodeToAscii[256] = {
+//   0     1     2     3     4     5     6     7     8     9     A     B     C     D     E     F
+    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  '\t',  '`',   0,   // 0x00-0x0F: F9, F5, F3, F1, F2, F12, ?, F10, F8, F6, F4, TAB, `
+    0,    0,    0,    0,    0,   'q',  '1',   0,    0,    0,   'z',  's',  'a',  'w',  '2',   0,   // 0x10-0x1F: LALT, LSHIFT, ?, LCTRL, Q, 1, ?, ?, Z, S, A, W, 2
+    0,   'c',  'x',  'd',  'e',  '4',  '3',   0,    0,   ' ',  'v',  'f',  't',  'r',  '5',   0,   // 0x20-0x2F: ?, C, X, D, E, 4, 3, ?, ?, SPACE, V, F, T, R, 5
+    0,   'n',  'b',  'h',  'g',  'y',  '6',   0,    0,    0,   'm',  'j',  'u',  '7',  '8',   0,   // 0x30-0x3F: ?, N, B, H, G, Y, 6, ?, ?, ?, M, J, U, 7, 8
+    0,   ',',  'k',  'i',  'o',  '0',  '9',   0,    0,   '.',  '/',  'l',  ';',  'p',  '-',   0,   // 0x40-0x4F: ?, COMMA, K, I, O, 0, 9, ?, ?, ., /, L, ;, P, -
+    0,    0,  '\'',   0,   '[',  '=',   0,    0,    0,    0,  '\n',  ']',   0,  '\\',   0,    0,   // 0x50-0x5F: ?, ?, ', ?, [, =, ?, CAPS, RSHIFT, ENTER, ], ?, \
+    0,    0,    0,    0,    0,    0,  '\b',   0,    0,   '1',   0,   '4',  '7',   0,    0,    0,   // 0x60-0x6F: ?, ?, ?, ?, ?, ?, BS, ?, ?, KP1, ?, KP4, KP7
+   '0',  '.',  '2',  '5',  '6',  '8',  27,    0,    0,   '+',  '3',  '-',  '*',  '9',   0,    0,   // 0x70-0x7F: KP0, KP., KP2, KP5, KP6, KP8, ESC, NUM, F11, KP+, KP3, KP-, KP*, KP9
+    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   // 0x80-0x8F
+    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   // 0x90-0x9F
+    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   // 0xA0-0xAF
+    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   // 0xB0-0xBF
+    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   // 0xC0-0xCF
+    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   // 0xD0-0xDF
+    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   // 0xE0-0xEF
+    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0    // 0xF0-0xFF
 };
 
-// Shifted characters
-static const char s_scancodeToAsciiShift[128] = {
-    0,   27,  '!', '@', '#', '$', '%', '^', '&', '*', '(', ')', '_', '+', '\b',  // 0x00-0x0E
-    '\t', 'Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P', '{', '}', '\n',     // 0x0F-0x1C
-    0,   'A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L', ':', '"', '~',            // 0x1D-0x29
-    0,   '|', 'Z', 'X', 'C', 'V', 'B', 'N', 'M', '<', '>', '?', 0,              // 0x2A-0x36
-    '*', 0,   ' ', 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,              // 0x37-0x43
-    0,   0,   0,   0,   0,   0,   0,   '7', '8', '9', '-', '4', '5', '6', '+',  // 0x44-0x4E
-    '1', '2', '3', '0', '.',                                                    // 0x4F-0x53
-    0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0, // 0x54-0x63
-    0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0, // 0x64-0x73
-    0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0                     // 0x74-0x7F
+// Shifted characters (scancode set 2)
+static const char s_scancodeToAsciiShift[256] = {
+//   0     1     2     3     4     5     6     7     8     9     A     B     C     D     E     F
+    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,  '\t',  '~',   0,   // 0x00-0x0F
+    0,    0,    0,    0,    0,   'Q',  '!',   0,    0,    0,   'Z',  'S',  'A',  'W',  '@',   0,   // 0x10-0x1F
+    0,   'C',  'X',  'D',  'E',  '$',  '#',   0,    0,   ' ',  'V',  'F',  'T',  'R',  '%',   0,   // 0x20-0x2F
+    0,   'N',  'B',  'H',  'G',  'Y',  '^',   0,    0,    0,   'M',  'J',  'U',  '&',  '*',   0,   // 0x30-0x3F
+    0,   '<',  'K',  'I',  'O',  ')',  '(',   0,    0,   '>',  '?',  'L',  ':',  'P',  '_',   0,   // 0x40-0x4F
+    0,    0,   '"',   0,   '{',  '+',   0,    0,    0,    0,  '\n',  '}',   0,   '|',   0,    0,   // 0x50-0x5F
+    0,    0,    0,    0,    0,    0,  '\b',   0,    0,   '1',   0,   '4',  '7',   0,    0,    0,   // 0x60-0x6F
+   '0',  '.',  '2',  '5',  '6',  '8',  27,    0,    0,   '+',  '3',  '-',  '*',  '9',   0,    0,   // 0x70-0x7F
+    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   // 0x80-0x8F
+    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   // 0x90-0x9F
+    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   // 0xA0-0xAF
+    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   // 0xB0-0xBF
+    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   // 0xC0-0xCF
+    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   // 0xD0-0xDF
+    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,   // 0xE0-0xEF
+    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0    // 0xF0-0xFF
 };
 
 // Special key codes (returned for non-ASCII keys)
@@ -69,8 +84,16 @@ static const uint32_t KEY_F1     = 0x110;
 static const uint32_t KEY_F11    = 0x11A;
 static const uint32_t KEY_F12    = 0x11B;
 
-// Extended scancode flag
+// Scancode set 2 modifier scancodes
+static const uint8_t SC2_LSHIFT = 0x12;
+static const uint8_t SC2_RSHIFT = 0x59;
+static const uint8_t SC2_LCTRL  = 0x14;
+static const uint8_t SC2_LALT   = 0x11;
+static const uint8_t SC2_CAPS   = 0x58;
+
+// Extended scancode flag and break code flag
 static bool s_extendedKey = false;
+static bool s_breakCode = false;  // Scancode set 2 uses 0xF0 prefix for key release
 
 void init()
 {
@@ -89,8 +112,9 @@ void init()
     s_altDown = false;
     s_capsLock = false;
     s_extendedKey = false;
+    s_breakCode = false;
     
-    serial::puts("[PS2KB] Keyboard initialized\n");
+    serial::puts("[PS2KB] Keyboard initialized (scancode set 2)\n");
 }
 
 void irq_handler()
@@ -103,32 +127,38 @@ void irq_handler()
     
     uint8_t scancode = arch::inb(kDataPort);
     
-    // Handle extended scancode prefix
+    // Scancode set 2: Handle special prefixes
+    // 0xE0 = extended key prefix
+    // 0xF0 = break (key release) prefix
     if (scancode == 0xE0) {
         s_extendedKey = true;
         return;
     }
+    if (scancode == 0xF0) {
+        s_breakCode = true;
+        return;
+    }
     
-    bool keyUp = (scancode & 0x80) != 0;
-    uint8_t code = scancode & 0x7F;
+    bool keyUp = s_breakCode;
+    s_breakCode = false;  // Reset for next scancode
     
-    // Handle modifier keys
-    if (code == 0x2A || code == 0x36) {  // Left/Right Shift
+    // Handle modifier keys (scancode set 2 values)
+    if (scancode == SC2_LSHIFT || scancode == SC2_RSHIFT) {
         s_shiftDown = !keyUp;
         s_extendedKey = false;
         return;
     }
-    if (code == 0x1D) {  // Ctrl
+    if (scancode == SC2_LCTRL) {
         s_ctrlDown = !keyUp;
         s_extendedKey = false;
         return;
     }
-    if (code == 0x38) {  // Alt
+    if (scancode == SC2_LALT) {
         s_altDown = !keyUp;
         s_extendedKey = false;
         return;
     }
-    if (code == 0x3A && !keyUp) {  // Caps Lock (toggle on press)
+    if (scancode == SC2_CAPS && !keyUp) {  // Caps Lock (toggle on press)
         s_capsLock = !s_capsLock;
         s_extendedKey = false;
         return;
@@ -142,40 +172,48 @@ void irq_handler()
     
     uint32_t key = 0;
     
-    // Handle extended keys (arrow keys, etc.)
+    // Handle extended keys (arrow keys, etc.) - scancode set 2 values
     if (s_extendedKey) {
-        switch (code) {
-            case 0x48: key = KEY_UP; break;
-            case 0x50: key = KEY_DOWN; break;
-            case 0x4B: key = KEY_LEFT; break;
-            case 0x4D: key = KEY_RIGHT; break;
-            case 0x47: key = KEY_HOME; break;
-            case 0x4F: key = KEY_END; break;
-            case 0x53: key = KEY_DELETE; break;
-            case 0x49: key = KEY_PGUP; break;
-            case 0x51: key = KEY_PGDN; break;
+        switch (scancode) {
+            case 0x75: key = KEY_UP; break;
+            case 0x72: key = KEY_DOWN; break;
+            case 0x6B: key = KEY_LEFT; break;
+            case 0x74: key = KEY_RIGHT; break;
+            case 0x6C: key = KEY_HOME; break;
+            case 0x69: key = KEY_END; break;
+            case 0x71: key = KEY_DELETE; break;
+            case 0x7D: key = KEY_PGUP; break;
+            case 0x7A: key = KEY_PGDN; break;
             default: break;
         }
         s_extendedKey = false;
     } else {
-        // Handle function keys
-        if (code >= 0x3B && code <= 0x44) {
-            key = KEY_F1 + (code - 0x3B);  // F1-F10
-        } else if (code == 0x57) {
-            key = KEY_F11;
-        } else if (code == 0x58) {
-            key = KEY_F12;
-        } else if (code < 128) {
-            // Regular ASCII keys
-            bool shift = s_shiftDown;
-            if (s_capsLock && code >= 0x10 && code <= 0x32) {
-                // Caps lock affects letters
-                char c = s_scancodeToAscii[code];
-                if (c >= 'a' && c <= 'z') {
-                    shift = !shift;
+        // Handle function keys (scancode set 2)
+        // F1=0x05, F2=0x06, F3=0x04, F4=0x0C, F5=0x03, F6=0x0B, F7=0x83, F8=0x0A, F9=0x01, F10=0x09
+        switch (scancode) {
+            case 0x05: key = KEY_F1; break;
+            case 0x06: key = KEY_F1 + 1; break;
+            case 0x04: key = KEY_F1 + 2; break;
+            case 0x0C: key = KEY_F1 + 3; break;
+            case 0x03: key = KEY_F1 + 4; break;
+            case 0x0B: key = KEY_F1 + 5; break;
+            case 0x83: key = KEY_F1 + 6; break;
+            case 0x0A: key = KEY_F1 + 7; break;
+            case 0x01: key = KEY_F1 + 8; break;
+            case 0x09: key = KEY_F1 + 9; break;
+            case 0x78: key = KEY_F11; break;
+            case 0x07: key = KEY_F12; break;
+            default:
+                // Regular ASCII keys
+                if (scancode < 256) {
+                    bool shift = s_shiftDown;
+                    char c = s_scancodeToAscii[scancode];
+                    if (s_capsLock && c >= 'a' && c <= 'z') {
+                        shift = !shift;
+                    }
+                    key = shift ? s_scancodeToAsciiShift[scancode] : s_scancodeToAscii[scancode];
                 }
-            }
-            key = shift ? s_scancodeToAsciiShift[code] : s_scancodeToAscii[code];
+                break;
         }
     }
     

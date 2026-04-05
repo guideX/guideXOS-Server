@@ -553,6 +553,19 @@ static int s_hoverMenuRight = -1;   // hovered right-column item index
 static int s_clickedMenuLeft  = -1; // clicked left-column item index
 static int s_clickedMenuRight = -1; // clicked right-column item index
 
+// Shell window state
+static int32_t s_shellPosX = -1;    // Shell window X position (-1 = centered)
+static int32_t s_shellPosY = -1;    // Shell window Y position (-1 = centered)
+static bool    s_shellActive = true; // Whether shell window is active (focused)
+static const uint32_t kShellDefaultW = 700;
+static const uint32_t kShellDefaultH = 450;
+static const uint32_t kShellTitlebarH = 24;
+
+// Shell window dragging state
+static bool    s_shellDragging = false;
+static int32_t s_shellDragOffsetX = 0;
+static int32_t s_shellDragOffsetY = 0;
+
 // ============================================================
 // Drawing routines
 // ============================================================
@@ -1182,6 +1195,89 @@ static int hit_test_shutdown_dialog(int32_t mx, int32_t my)
 }
 
 // ============================================================
+// Shell Window Geometry and Hit-Testing
+// ============================================================
+
+struct ShellWindowGeometry {
+    uint32_t x, y, w, h;
+    uint32_t titlebarY, titlebarH;
+    uint32_t closeBtnX, closeBtnY, closeBtnW, closeBtnH;
+};
+
+static ShellWindowGeometry get_shell_geometry()
+{
+    ShellWindowGeometry g;
+    
+    if (shell::get_state() == shell::ShellState::Fullscreen) {
+        g.x = 0;
+        g.y = 0;
+        g.w = s_screenW;
+        g.h = s_screenH - kTaskbarH;
+    } else {
+        g.w = kShellDefaultW;
+        g.h = kShellDefaultH;
+        
+        // Use stored position or center if not set
+        if (s_shellPosX < 0) {
+            g.x = (s_screenW - g.w) / 2;
+        } else {
+            g.x = (uint32_t)s_shellPosX;
+        }
+        if (s_shellPosY < 0) {
+            g.y = (s_screenH - kTaskbarH - g.h) / 2;
+        } else {
+            g.y = (uint32_t)s_shellPosY;
+        }
+    }
+    
+    g.titlebarY = g.y;
+    g.titlebarH = kShellTitlebarH;
+    
+    // Close button is in top-right corner of titlebar (18x16 pixels)
+    g.closeBtnW = 18;
+    g.closeBtnH = 16;
+    g.closeBtnX = g.x + g.w - 22;
+    g.closeBtnY = g.y + 4;
+    
+    return g;
+}
+
+// Hit test result for shell window
+enum ShellHitTest {
+    SHELL_HIT_NONE = 0,
+    SHELL_HIT_TITLEBAR,
+    SHELL_HIT_CLOSE_BTN,
+    SHELL_HIT_CLIENT
+};
+
+static ShellHitTest hit_test_shell(int32_t mx, int32_t my)
+{
+    if (!shell::is_open()) return SHELL_HIT_NONE;
+    
+    ShellWindowGeometry g = get_shell_geometry();
+    
+    // Check if outside window bounds
+    if ((uint32_t)mx < g.x || (uint32_t)mx >= g.x + g.w ||
+        (uint32_t)my < g.y || (uint32_t)my >= g.y + g.h) {
+        return SHELL_HIT_NONE;
+    }
+    
+    // Check close button first (it's inside titlebar)
+    if ((uint32_t)mx >= g.closeBtnX && (uint32_t)mx < g.closeBtnX + g.closeBtnW &&
+        (uint32_t)my >= g.closeBtnY && (uint32_t)my < g.closeBtnY + g.closeBtnH) {
+        return SHELL_HIT_CLOSE_BTN;
+    }
+    
+    // Check titlebar area
+    if ((uint32_t)my >= g.titlebarY && (uint32_t)my < g.titlebarY + g.titlebarH) {
+        return SHELL_HIT_TITLEBAR;
+    }
+    
+    // Otherwise it's the client area
+    return SHELL_HIT_CLIENT;
+}
+
+// ============================================================
 // Public API
 // ============================================================
 
@@ -1241,23 +1337,27 @@ void draw()
     
     // Draw shell window if open
     if (shell::is_open()) {
-        uint32_t shellW = 700;
-        uint32_t shellH = 450;
-        uint32_t shellX = (s_screenW - shellW) / 2;
-        uint32_t shellY = (s_screenH - kTaskbarH - shellH) / 2;
+        ShellWindowGeometry g = get_shell_geometry();
         
-        if (shell::get_state() == shell::ShellState::Fullscreen) {
-            shellX = 0;
-            shellY = 0;
-            shellW = s_screenW;
-            shellH = s_screenH - kTaskbarH;
+        // Draw window background with border
+        uint32_t borderColor = s_shellActive ? rgb(80, 100, 140) : rgb(60, 60, 70);
+        framebuffer::fill_rect(g.x, g.y, g.w, g.h, rgb(20, 20, 30));
+        
+        // Draw border (changes color based on active state)
+        for (uint32_t px = g.x; px < g.x + g.w; px++) {
+            framebuffer::put_pixel(px, g.y, borderColor);
+            framebuffer::put_pixel(px, g.y + g.h - 1, borderColor);
+        }
+        for (uint32_t py = g.y; py < g.y + g.h; py++) {
+            framebuffer::put_pixel(g.x, py, borderColor);
+            framebuffer::put_pixel(g.x + g.w - 1, py, borderColor);
         }
         
-        // Debug: Draw a simple red rectangle to verify shell::is_open() works
-        framebuffer::fill_rect(shellX, shellY, shellW, shellH, rgb(80, 20, 20));
-        framebuffer::fill_rect(shellX + 2, shellY + 2, shellW - 4, 30, rgb(40, 50, 70));
+        // Draw titlebar (dimmed when inactive)
+        uint32_t titlebarColor = s_shellActive ? rgb(40, 50, 70) : rgb(50, 50, 55);
+        framebuffer::fill_rect(g.x + 1, g.y + 1, g.w - 2, g.titlebarH - 1, titlebarColor);
         
-        shell::draw(shellX, shellY, shellW, shellH);
+        shell::draw(g.x, g.y, g.w, g.h);
     }
 }
 
@@ -1303,6 +1403,7 @@ void dismiss_notification()
 void open_terminal()
 {
     shell::open();
+    s_shellActive = true;
 }
 
 void handle_key(uint32_t key)
@@ -1312,6 +1413,9 @@ void handle_key(uint32_t key)
         // Escape closes shell
         if (key == 27) {  // ESC
             shell::close();
+            s_shellPosX = -1;  // Reset position for next open
+            s_shellPosY = -1;
+            s_shellActive = true;
             draw();
             return;
         }
@@ -1321,8 +1425,11 @@ void handle_key(uint32_t key)
             draw();
             return;
         }
-        shell::process_key(key);
-        draw();
+        // Only process keys if shell is active
+        if (s_shellActive) {
+            shell::process_key(key);
+            draw();
+        }
         return;
     }
     
@@ -1330,6 +1437,7 @@ void handle_key(uint32_t key)
     if (key == '`' || key == '~') {
         // Backtick opens terminal
         shell::toggle();
+        s_shellActive = true;
         draw();
     }
 }
@@ -1504,6 +1612,7 @@ static void show_start_menu_notification(const char* label)
     if (isConsole) {
         s_startMenuOpen = false;
         shell::open();
+        s_shellActive = true;
         return;
     }
     
@@ -1638,7 +1747,37 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
 
     uint32_t taskbarY = s_screenH - kTaskbarH;
 
-    // ---- Handle drag-in-progress (left button held) ----
+    // ---- Handle shell window dragging (left button held) ----
+    if (s_shellDragging && (buttons & 0x01)) {
+        // Update shell window position during drag
+        int32_t newX = mx - s_shellDragOffsetX;
+        int32_t newY = my - s_shellDragOffsetY;
+        
+        // Clamp to screen bounds
+        if (newX < 0) newX = 0;
+        if (newY < 0) newY = 0;
+        if (newX + (int32_t)kShellDefaultW > (int32_t)s_screenW)
+            newX = (int32_t)s_screenW - (int32_t)kShellDefaultW;
+        if (newY + (int32_t)kShellDefaultH > (int32_t)taskbarY)
+            newY = (int32_t)taskbarY - (int32_t)kShellDefaultH;
+        
+        s_shellPosX = newX;
+        s_shellPosY = newY;
+        
+        draw();
+        draw_cursor(mx, my);
+        return;
+    }
+    
+    // ---- Handle shell window drag release ----
+    if (s_shellDragging && (released & 0x01)) {
+        s_shellDragging = false;
+        draw();
+        draw_cursor(mx, my);
+        return;
+    }
+
+    // ---- Handle icon drag-in-progress (left button held) ----
     if (s_dragging && (buttons & 0x01)) {
         // Update current drag position
         s_dragCurrentX = mx;
@@ -1695,6 +1834,7 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
             
             if (isConsole) {
                 shell::open();
+                s_shellActive = true;
                 // Debug: verify shell is open
                 if (!shell::is_open()) {
                     s_notification.title = "Shell Error";
@@ -1727,37 +1867,46 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
     if (pressed & 0x01) {
         // Handle shell window clicks first (if shell is open)
         if (shell::is_open()) {
-            // Calculate shell window bounds
-            uint32_t shellW = 700;
-            uint32_t shellH = 450;
-            uint32_t shellX = (s_screenW - shellW) / 2;
-            uint32_t shellY = (s_screenH - kTaskbarH - shellH) / 2;
+            ShellHitTest hit = hit_test_shell(mx, my);
             
-            if (shell::get_state() == shell::ShellState::Fullscreen) {
-                shellX = 0;
-                shellY = 0;
-                shellW = s_screenW;
-                shellH = s_screenH - kTaskbarH;
-            }
-            
-            // Check if click is inside shell window
-            if ((uint32_t)mx >= shellX && (uint32_t)mx < shellX + shellW &&
-                (uint32_t)my >= shellY && (uint32_t)my < shellY + shellH) {
-                // Click inside shell - check for close button (top-right corner)
-                if ((uint32_t)mx >= shellX + shellW - 24 && (uint32_t)my < shellY + 24) {
-                    shell::close();
-                    draw();
-                    draw_cursor(mx, my);
-                    return;
-                }
-                // Otherwise, shell handles the click (TODO: text selection)
+            if (hit == SHELL_HIT_CLOSE_BTN) {
+                // Close button clicked
+                shell::close();
+                s_shellPosX = -1;  // Reset position for next open
+                s_shellPosY = -1;
+                s_shellActive = true;
+                draw();
+                draw_cursor(mx, my);
                 return;
             }
-            // Click outside shell - close it
-            shell::close();
-            draw();
-            draw_cursor(mx, my);
-            return;
+            
+            if (hit == SHELL_HIT_TITLEBAR && shell::get_state() != shell::ShellState::Fullscreen) {
+                // Titlebar clicked - start dragging
+                s_shellDragging = true;
+                s_shellActive = true;
+                ShellWindowGeometry g = get_shell_geometry();
+                s_shellDragOffsetX = mx - (int32_t)g.x;
+                s_shellDragOffsetY = my - (int32_t)g.y;
+                draw();
+                draw_cursor(mx, my);
+                return;
+            }
+            
+            if (hit == SHELL_HIT_CLIENT || hit == SHELL_HIT_TITLEBAR) {
+                // Click inside shell window - activate it
+                s_shellActive = true;
+                draw();
+                draw_cursor(mx, my);
+                return;
+            }
+            
+            // Click outside shell window - deactivate it (don't close)
+            if (hit == SHELL_HIT_NONE) {
+                s_shellActive = false;
+                draw();
+                draw_cursor(mx, my);
+                // Don't return - allow click to be handled by desktop elements
+            }
         }
         
         // Handle shutdown dialog clicks first (dialog takes priority)
@@ -1908,6 +2057,7 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
                 // Check which icon was double-clicked
                 if (iconIdx == 2) {  // Console
                     shell::open();
+                    s_shellActive = true;
                     draw();
                     draw_cursor(mx, my);
                     return;
