@@ -180,6 +180,7 @@
     <ClInclude Include="kernel\core\include\kernel\input_manager.h" />
     <ClInclude Include="kernel\core\include\kernel\interrupts.h" />
     <ClInclude Include="kernel\core\include\kernel\multiboot.h" />
+    <ClInclude Include="kernel\core\include\kernel\nic.h" />
     <ClInclude Include="kernel\core\include\kernel\nvme.h" />
     <ClInclude Include="kernel\core\include\kernel\pci_audio.h" />
     <ClInclude Include="kernel\core\include\kernel\pit.h" />
@@ -321,6 +322,7 @@
     <ClCompile Include="kernel\core\input_manager.cpp" />
     <ClCompile Include="kernel\core\interrupts.cpp" />
     <ClCompile Include="kernel\core\main.cpp" />
+    <ClCompile Include="kernel\core\nic.cpp" />
     <ClCompile Include="kernel\core\nvme.cpp" />
     <ClCompile Include="kernel\core\pci_audio.cpp" />
     <ClCompile Include="kernel\core\pit.cpp" />

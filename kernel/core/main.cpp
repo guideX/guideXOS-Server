@@ -28,6 +28,9 @@
 #include "include/kernel/fs_fat.h"
 #include "include/kernel/fs_ext4.h"
 
+// Network subsystem
+#include "include/kernel/nic.h"
+
 #if ARCH_HAS_PIC_8259
 #include "include/kernel/multiboot.h"
 // Include BootInfo structure from bootloader (x86 / amd64 UEFI only)
@@ -164,6 +167,22 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::serial::puts("[KERNEL] Total block devices: ");
         kernel::serial::put_hex32(kernel::block::device_count());
         kernel::serial::putc('\n');
+        
+        // ============================================================
+        
+        // ============================================================
+        // Network Subsystem Initialization
+        // ============================================================
+        kernel::serial::puts("[KERNEL] Initializing NIC driver...\n");
+        kernel::nic::init();
+        if (kernel::nic::is_active()) {
+            kernel::serial::puts("[KERNEL] NIC active, registering IRQ");
+            kernel::serial::put_hex8(kernel::nic::get_device()->irqLine);
+            kernel::serial::putc('\n');
+            kernel::interrupts::register_irq(
+                kernel::nic::get_device()->irqLine,
+                kernel::nic::irq_handler);
+        }
         
         // ============================================================
         

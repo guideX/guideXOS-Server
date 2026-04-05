@@ -152,6 +152,22 @@
 #endif
 
 // ================================================================
+// Network Interface Card (NIC) availability
+//
+// E1000 PCI : Intel E1000/E1000E over PCI MMIO.
+//             x86/amd64 via port-I/O PCI config; future MMIO ECAM
+//             support for ia64/sparc64/riscv64.
+// ================================================================
+
+#if defined(ARCH_X86) || defined(ARCH_AMD64)
+    #define ARCH_HAS_NIC  1
+#elif defined(ARCH_IA64) || defined(ARCH_SPARC64) || defined(ARCH_RISCV64)
+    #define ARCH_HAS_NIC  1
+#else
+    #define ARCH_HAS_NIC  0
+#endif
+
+// ================================================================
 // Filesystem support
 //
 // FAT32/exFAT : universal — works on all architectures.
