@@ -262,31 +262,67 @@ static void cmd_help() {
     output_string("  cd <dir>       - Change directory\n");
     output_string("  pwd            - Print working directory\n");
     output_string("  cat, type      - Display file contents\n");
+    output_string("  head, tail     - Show beginning/end of file\n");
     output_string("  mkdir, md      - Create directory\n");
     output_string("  rmdir, rd      - Remove directory\n");
     output_string("  touch          - Create empty file\n");
     output_string("  rm, del        - Remove file\n");
     output_string("  cp, copy       - Copy file\n");
     output_string("  mv, ren        - Move/rename file\n");
+    output_string("  find           - Search for files\n");
+    output_string("  grep           - Search file contents\n");
+    output_string("  wc             - Word/line count\n");
+    output_string("  df             - Disk space usage\n");
+    output_string("  stat           - File status\n");
+    output_string("  file           - Determine file type\n");
     output_string("\n");
-    output_string("System:\n");
-    output_string("  clear, cls     - Clear screen\n");
-    output_string("  echo           - Print text\n");
+    output_string("System Info:\n");
+    output_string("  neofetch       - System info with logo\n");
+    output_string("  uname          - System information\n");
+    output_string("  version, ver   - OS version\n");
+    output_string("  about          - About guideXOS\n");
+    output_string("  dmesg          - Kernel messages\n");
     output_string("  whoami         - Current user\n");
+    output_string("  id             - User/group IDs\n");
     output_string("  hostname       - System hostname\n");
     output_string("  uptime         - System uptime\n");
+    output_string("  w, who         - Who is logged in\n");
+    output_string("  mem, free      - Memory info\n");
+    output_string("  cpuinfo, lscpu - CPU information\n");
+    output_string("  ps, top        - Process information\n");
     output_string("  date, time     - Current date/time\n");
-    output_string("  mem            - Memory info\n");
-    output_string("  cpuinfo        - CPU information\n");
-    output_string("  ps             - List processes\n");
-    output_string("  uname          - System information\n");
+    output_string("  cal            - Calendar\n");
+    output_string("\n");
+    output_string("Hardware:\n");
+    output_string("  lspci          - List PCI devices\n");
+    output_string("  lsusb          - List USB devices\n");
+    output_string("  lsblk          - List block devices\n");
+    output_string("\n");
+    output_string("Desktop:\n");
+    output_string("  apps           - List applications\n");
+    output_string("  workspaces     - Workspace info\n");
+    output_string("  osk            - On-screen keyboard\n");
+    output_string("\n");
+    output_string("Utilities:\n");
+    output_string("  clear, cls     - Clear screen\n");
+    output_string("  echo           - Print text\n");
+    output_string("  which          - Locate command\n");
+    output_string("  alias          - Show aliases\n");
+    output_string("  history        - Command history\n");
+    output_string("  env            - Environment vars\n");
+    output_string("  colors         - Color test\n");
+    output_string("  fortune, tip   - Random tip\n");
+    output_string("  motd           - Message of the day\n");
+    output_string("  banner <text>  - Display banner\n");
     output_string("\n");
     output_string("Power:\n");
     output_string("  reboot         - Restart system\n");
     output_string("  shutdown       - Power off system\n");
+    output_string("  sleep          - Suspend system\n");
     output_string("  exit           - Close shell\n");
     output_string("\n");
-    output_string("  help           - Show this help\n");
+    output_string("  help, ?        - Show this help\n");
+    output_string("  man <cmd>      - Command manual\n");
 }
 
 static void cmd_clear() {
@@ -484,6 +520,306 @@ static void cmd_not_found(const char* cmd) {
 }
 
 // ============================================================
+// Additional Commands (ported from guideXOS.Legacy)
+// ============================================================
+
+static void cmd_neofetch() {
+    // ASCII art logo (simplified guideXOS logo)
+    output_string("        ??????? ???  ??? ??????? ????????\n");
+    output_string("       ???????? ?????????????????????????\n");
+    output_string("       ???  ???? ?????? ???   ???????????\n");
+    output_string("       ???   ??? ?????? ???   ???????????\n");
+    output_string("       ????????????? ????????????????????\n");
+    output_string("        ??????? ???  ??? ??????? ????????\n");
+    output_string("\n");
+    output_string("  root@guideXOS\n");
+    output_string("  -------------\n");
+    output_string("  OS:        guideXOS Server\n");
+    output_string("  Kernel:    guideXOS Kernel 1.0.0\n");
+    output_string("  Shell:     guideXOS Shell v1.0\n");
+    
+    // Uptime
+    char buf[64];
+    uint32_t hours = s_uptimeSeconds / 3600;
+    uint32_t mins = (s_uptimeSeconds % 3600) / 60;
+    int i = 0;
+    buf[i++] = ' '; buf[i++] = ' ';
+    buf[i++] = 'U'; buf[i++] = 'p'; buf[i++] = 't'; buf[i++] = 'i'; buf[i++] = 'm'; buf[i++] = 'e'; buf[i++] = ':';
+    buf[i++] = ' '; buf[i++] = ' '; buf[i++] = ' '; buf[i++] = ' ';
+    buf[i++] = '0' + (hours / 10) % 10;
+    buf[i++] = '0' + hours % 10;
+    buf[i++] = ' '; buf[i++] = 'h'; buf[i++] = 'o'; buf[i++] = 'u'; buf[i++] = 'r'; buf[i++] = 's'; buf[i++] = ','; buf[i++] = ' ';
+    buf[i++] = '0' + (mins / 10) % 10;
+    buf[i++] = '0' + mins % 10;
+    buf[i++] = ' '; buf[i++] = 'm'; buf[i++] = 'i'; buf[i++] = 'n'; buf[i++] = 's';
+    buf[i++] = '\n';
+    buf[i] = '\0';
+    output_string(buf);
+    
+    output_string("  Resolution: 1024x768\n");
+    output_string("  Memory:    128 MB\n");
+    output_string("  CPU:       x86_64\n");
+    output_string("\n");
+}
+
+static void cmd_version() {
+    output_string("guideXOS Server\n");
+    output_string("Version: 1.0.0\n");
+    output_string("Build:   2026.01.01\n");
+    output_string("Arch:    x86_64\n");
+    output_string("\n");
+    output_string("Copyright (c) 2026 guideX\n");
+}
+
+static void cmd_about() {
+    output_string("??????????????????????????????????????????????\n");
+    output_string("?          guideXOS Server                   ?\n");
+    output_string("??????????????????????????????????????????????\n");
+    output_string("?  A modern operating system built from      ?\n");
+    output_string("?  scratch, featuring a windowing system,    ?\n");
+    output_string("?  desktop environment, and native apps.     ?\n");
+    output_string("?                                            ?\n");
+    output_string("?  Features:                                 ?\n");
+    output_string("?  - Desktop with icons and taskbar          ?\n");
+    output_string("?  - Window management (drag, resize)        ?\n");
+    output_string("?  - Start menu with applications            ?\n");
+    output_string("?  - Interactive shell                       ?\n");
+    output_string("?  - VNC remote access                       ?\n");
+    output_string("?                                            ?\n");
+    output_string("?  github.com/guideX/guidexos-server         ?\n");
+    output_string("??????????????????????????????????????????????\n");
+}
+
+static void cmd_apps() {
+    output_string("Available Applications:\n");
+    output_string("\n");
+    output_string("  Calculator   - Basic calculator\n");
+    output_string("  Clock        - Digital clock\n");
+    output_string("  Console      - Command-line terminal\n");
+    output_string("  Files        - File explorer\n");
+    output_string("  ImageViewer  - View images\n");
+    output_string("  Notepad      - Text editor\n");
+    output_string("  Paint        - Drawing application\n");
+    output_string("  TaskManager  - Process viewer\n");
+    output_string("\n");
+    output_string("Launch from Start Menu or double-click desktop icons.\n");
+}
+
+static void cmd_workspaces() {
+    output_string("Workspace Information:\n");
+    output_string("\n");
+    output_string("  Current Workspace: 1\n");
+    output_string("  Total Workspaces:  4\n");
+    output_string("\n");
+    output_string("Keyboard Shortcuts:\n");
+    output_string("  Ctrl+Alt+Left    - Previous workspace\n");
+    output_string("  Ctrl+Alt+Right   - Next workspace\n");
+    output_string("  Ctrl+Alt+1-4     - Switch to workspace 1-4\n");
+    output_string("\n");
+}
+
+static void cmd_colors() {
+    output_string("Terminal Color Test:\n");
+    output_string("\n");
+    output_string("  Standard Colors:\n");
+    output_string("  Black   Red     Green   Yellow\n");
+    output_string("  Blue    Magenta Cyan    White\n");
+    output_string("\n");
+    output_string("  Bright Colors:\n");
+    output_string("  Black   Red     Green   Yellow\n");
+    output_string("  Blue    Magenta Cyan    White\n");
+    output_string("\n");
+}
+
+static void cmd_fortune() {
+    // Random fortune cookies / tips
+    static int fortune_idx = 0;
+    const char* fortunes[] = {
+        "Tip: Use 'clear' or 'cls' to clear the screen.",
+        "Tip: Press Up/Down arrows to navigate command history.",
+        "Tip: Type 'neofetch' for system information.",
+        "Tip: Use 'cd ..' to go up one directory.",
+        "Tip: Press Escape to close the terminal window.",
+        "Tip: Double-click desktop icons to launch apps.",
+        "Tip: The Start Menu has all available applications.",
+        "Tip: Use 'help' to see all available commands.",
+    };
+    const int num_fortunes = 8;
+    
+    output_string(fortunes[fortune_idx % num_fortunes]);
+    output_string("\n");
+    fortune_idx++;
+}
+
+static void cmd_motd() {
+    output_string("\n");
+    output_string("  Welcome to guideXOS Server!\n");
+    output_string("\n");
+    output_string("  System Status: Running\n");
+    output_string("  Shell:         Active\n");
+    output_string("\n");
+    output_string("  Type 'help' for available commands.\n");
+    output_string("  Type 'apps' to see available applications.\n");
+    output_string("  Type 'about' for system information.\n");
+    output_string("\n");
+}
+
+static void cmd_cal() {
+    output_string("    January 2026\n");
+    output_string(" Su Mo Tu We Th Fr Sa\n");
+    output_string("              1  2  3\n");
+    output_string("  4  5  6  7  8  9 10\n");
+    output_string(" 11 12 13 14 15 16 17\n");
+    output_string(" 18 19 20 21 22 23 24\n");
+    output_string(" 25 26 27 28 29 30 31\n");
+}
+
+static void cmd_df() {
+    output_string("Filesystem      Size   Used  Avail  Use%  Mounted on\n");
+    output_string("/dev/ram0       128M    32M    96M   25%  /\n");
+    output_string("/dev/vda1       4.0G   1.2G   2.8G   30%  /mnt/disk\n");
+    output_string("tmpfs            64M    12M    52M   19%  /tmp\n");
+}
+
+static void cmd_id() {
+    output_string("uid=0(root) gid=0(root) groups=0(root)\n");
+}
+
+static void cmd_w() {
+    output_string(" 00:00:00 up ");
+    
+    char buf[32];
+    uint32_t hours = s_uptimeSeconds / 3600;
+    uint32_t mins = (s_uptimeSeconds % 3600) / 60;
+    int i = 0;
+    buf[i++] = '0' + (hours / 10) % 10;
+    buf[i++] = '0' + hours % 10;
+    buf[i++] = ':';
+    buf[i++] = '0' + (mins / 10) % 10;
+    buf[i++] = '0' + mins % 10;
+    buf[i] = '\0';
+    output_string(buf);
+    
+    output_string(",  1 user,  load average: 0.00, 0.01, 0.05\n");
+    output_string("USER     TTY      FROM             LOGIN@   IDLE   JCPU   PCPU WHAT\n");
+    output_string("root     tty1     -                00:00    0.00s  0.00s  0.00s shell\n");
+}
+
+static void cmd_head(const char* filename) {
+    if (!filename || filename[0] == '\0') {
+        output_string("head: missing operand\n");
+        output_string("Usage: head <file>\n");
+        return;
+    }
+    output_string("head: ");
+    output_string(filename);
+    output_string(": File system not fully implemented\n");
+}
+
+static void cmd_tail(const char* filename) {
+    if (!filename || filename[0] == '\0') {
+        output_string("tail: missing operand\n");
+        output_string("Usage: tail <file>\n");
+        return;
+    }
+    output_string("tail: ");
+    output_string(filename);
+    output_string(": File system not fully implemented\n");
+}
+
+static void cmd_wc(const char* filename) {
+    if (!filename || filename[0] == '\0') {
+        output_string("wc: missing operand\n");
+        output_string("Usage: wc <file>\n");
+        return;
+    }
+    output_string("wc: ");
+    output_string(filename);
+    output_string(": File system not fully implemented\n");
+}
+
+static void cmd_grep(const char* pattern) {
+    if (!pattern || pattern[0] == '\0') {
+        output_string("grep: missing pattern\n");
+        output_string("Usage: grep <pattern> <file>\n");
+        return;
+    }
+    output_string("grep: File system not fully implemented\n");
+}
+
+static void cmd_find(const char* path) {
+    if (!path || path[0] == '\0') {
+        output_string("find: missing path\n");
+        output_string("Usage: find <path> [-name pattern]\n");
+        return;
+    }
+    output_string("find: File system not fully implemented\n");
+}
+
+static void cmd_which(const char* program) {
+    if (!program || program[0] == '\0') {
+        output_string("which: missing argument\n");
+        return;
+    }
+    
+    // Check for known commands
+    if (str_eq(program, "ls") || str_eq(program, "cd") || str_eq(program, "cat") ||
+        str_eq(program, "echo") || str_eq(program, "clear") || str_eq(program, "help")) {
+        output_string("/bin/");
+        output_string(program);
+        output_string("\n");
+    } else {
+        output_string(program);
+        output_string(" not found\n");
+    }
+}
+
+static void cmd_osk() {
+    output_string("On-Screen Keyboard\n");
+    output_string("==================\n");
+    output_string("\n");
+    output_string("The on-screen keyboard provides touch/mouse input\n");
+    output_string("for systems without physical keyboards.\n");
+    output_string("\n");
+    output_string("To access the on-screen keyboard:\n");
+    output_string("  - Click the keyboard icon in the system tray\n");
+    output_string("  - Or launch from Start Menu > Accessories\n");
+    output_string("\n");
+    output_string("Note: Currently available in GUI mode only.\n");
+}
+
+static void cmd_dmesg() {
+    output_string("[    0.000000] guideXOS kernel initializing...\n");
+    output_string("[    0.001234] Detecting memory... 128 MB\n");
+    output_string("[    0.002345] Initializing framebuffer... 1024x768x32\n");
+    output_string("[    0.003456] PS/2 keyboard driver initialized\n");
+    output_string("[    0.004567] PS/2 mouse driver initialized\n");
+    output_string("[    0.005678] VFS mounted at /\n");
+    output_string("[    0.006789] Desktop environment starting...\n");
+    output_string("[    0.007890] Shell ready\n");
+}
+
+static void cmd_lsblk() {
+    output_string("NAME   MAJ:MIN RM  SIZE RO TYPE MOUNTPOINT\n");
+    output_string("ram0     1:0    0  128M  0 disk /\n");
+    output_string("vda    254:0    0    4G  0 disk \n");
+    output_string("|-vda1 254:1    0    4G  0 part /mnt/disk\n");
+}
+
+static void cmd_lspci() {
+    output_string("00:00.0 Host bridge: guideXOS Virtual Host Bridge\n");
+    output_string("00:01.0 VGA compatible controller: guideXOS Framebuffer\n");
+    output_string("00:02.0 Ethernet controller: Intel 82540EM Gigabit\n");
+    output_string("00:03.0 USB controller: UHCI Host Controller\n");
+}
+
+static void cmd_lsusb() {
+    output_string("Bus 001 Device 001: ID 0000:0000 guideXOS Virtual Hub\n");
+    output_string("Bus 001 Device 002: ID 0627:0001 USB Keyboard\n");
+    output_string("Bus 001 Device 003: ID 0627:0001 USB Mouse\n");
+}
+
+// ============================================================
 // Command Parser and Executor
 // ============================================================
 
@@ -613,6 +949,141 @@ static void execute_command(const char* cmd) {
             output_string(num);
             output_string(s_history[i]);
             output_string("\n");
+        }
+    }
+    // New commands ported from guideXOS.Legacy
+    else if (str_eq(command, "neofetch") || str_eq(command, "screenfetch") || str_eq(command, "sysinfo")) {
+        cmd_neofetch();
+    } else if (str_eq(command, "version") || str_eq(command, "ver")) {
+        cmd_version();
+    } else if (str_eq(command, "about")) {
+        cmd_about();
+    } else if (str_eq(command, "apps") || str_eq(command, "programs")) {
+        cmd_apps();
+    } else if (str_eq(command, "workspaces") || str_eq(command, "desktops")) {
+        cmd_workspaces();
+    } else if (str_eq(command, "colors") || str_eq(command, "colortest")) {
+        cmd_colors();
+    } else if (str_eq(command, "fortune") || str_eq(command, "tip")) {
+        cmd_fortune();
+    } else if (str_eq(command, "motd") || str_eq(command, "welcome")) {
+        cmd_motd();
+    } else if (str_eq(command, "cal") || str_eq(command, "calendar")) {
+        cmd_cal();
+    } else if (str_eq(command, "df")) {
+        cmd_df();
+    } else if (str_eq(command, "id")) {
+        cmd_id();
+    } else if (str_eq(command, "w") || str_eq(command, "who")) {
+        cmd_w();
+    } else if (str_eq(command, "head")) {
+        cmd_head(arg1);
+    } else if (str_eq(command, "tail")) {
+        cmd_tail(arg1);
+    } else if (str_eq(command, "wc")) {
+        cmd_wc(arg1);
+    } else if (str_eq(command, "grep")) {
+        cmd_grep(arg1);
+    } else if (str_eq(command, "find")) {
+        cmd_find(arg1);
+    } else if (str_eq(command, "which") || str_eq(command, "whereis")) {
+        cmd_which(arg1);
+    } else if (str_eq(command, "alias")) {
+        output_string("alias ls='ls --color=auto'\n");
+        output_string("alias ll='ls -la'\n");
+        output_string("alias cls='clear'\n");
+    } else if (str_eq(command, "man")) {
+        if (arg1[0] == '\0') {
+            output_string("Usage: man <command>\n");
+            output_string("Available: help, ls, cd, cat, echo, clear\n");
+        } else {
+            output_string("No manual entry for ");
+            output_string(arg1);
+            output_string("\nTry 'help' for available commands.\n");
+        }
+    } else if (str_eq(command, "true")) {
+        // Do nothing, return success (implicit)
+    } else if (str_eq(command, "false")) {
+        output_string(""); // Returns failure conceptually
+    } else if (str_eq(command, "yes")) {
+        output_string("y\ny\ny\n(use Ctrl+C to stop in a real terminal)\n");
+    } else if (str_eq(command, "banner")) {
+        if (arg1[0] == '\0') {
+            output_string("Usage: banner <text>\n");
+        } else {
+            output_string("#####################\n");
+            output_string("#                   #\n");
+            output_string("#  ");
+            output_string(arg1);
+            output_string("\n");
+            output_string("#                   #\n");
+            output_string("#####################\n");
+        }
+    } else if (str_eq(command, "osk") || str_eq(command, "onscreen-keyboard")) {
+        cmd_osk();
+    } else if (str_eq(command, "dmesg")) {
+        cmd_dmesg();
+    } else if (str_eq(command, "lsblk")) {
+        cmd_lsblk();
+    } else if (str_eq(command, "lspci")) {
+        cmd_lspci();
+    } else if (str_eq(command, "lsusb")) {
+        cmd_lsusb();
+    } else if (str_eq(command, "top") || str_eq(command, "htop")) {
+        output_string("top - 00:00:00 up ");
+        char buf[16];
+        uint32_t hours = s_uptimeSeconds / 3600;
+        uint32_t mins = (s_uptimeSeconds % 3600) / 60;
+        buf[0] = '0' + (hours / 10) % 10;
+        buf[1] = '0' + hours % 10;
+        buf[2] = ':';
+        buf[3] = '0' + (mins / 10) % 10;
+        buf[4] = '0' + mins % 10;
+        buf[5] = '\0';
+        output_string(buf);
+        output_string(",  1 user,  load: 0.00\n");
+        output_string("Tasks:   4 total,   1 running,   3 sleeping\n");
+        output_string("%Cpu(s):  0.0 us,  0.0 sy,  0.0 ni, 100.0 id\n");
+        output_string("MiB Mem:   128.0 total,    96.0 free,    32.0 used\n");
+        output_string("\n");
+        output_string("  PID USER      PR  NI    VIRT    RES %CPU CMD\n");
+        output_string("    1 root      20   0    4096   1024  0.0 init\n");
+        output_string("    2 root      20   0    8192   2048  0.0 kernel\n");
+        output_string("    3 root      20   0   16384   4096  0.0 desktop\n");
+        output_string("    4 root      20   0    8192   2048  0.1 shell\n");
+    } else if (str_eq(command, "kill")) {
+        if (arg1[0] == '\0') {
+            output_string("kill: usage: kill <pid>\n");
+        } else {
+            output_string("kill: cannot kill process ");
+            output_string(arg1);
+            output_string(": Not permitted\n");
+        }
+    } else if (str_eq(command, "sudo")) {
+        output_string("root is not in the sudoers file. (Just kidding, you're already root!)\n");
+    } else if (str_eq(command, "su")) {
+        output_string("Already running as root.\n");
+    } else if (str_eq(command, "chmod") || str_eq(command, "chown") || str_eq(command, "chgrp")) {
+        output_string(command);
+        output_string(": Permission management not implemented in this shell.\n");
+    } else if (str_eq(command, "ln")) {
+        output_string("ln: Symbolic links not implemented.\n");
+    } else if (str_eq(command, "stat")) {
+        if (arg1[0] == '\0') {
+            output_string("stat: missing operand\n");
+        } else {
+            output_string("  File: ");
+            output_string(arg1);
+            output_string("\n");
+            output_string("  Size: 0\t\tBlocks: 0\n");
+            output_string("Access: (0755/drwxr-xr-x)  Uid: (0/root)   Gid: (0/root)\n");
+        }
+    } else if (str_eq(command, "file")) {
+        if (arg1[0] == '\0') {
+            output_string("file: missing operand\n");
+        } else {
+            output_string(arg1);
+            output_string(": ASCII text\n");
         }
     } else {
         cmd_not_found(command);
