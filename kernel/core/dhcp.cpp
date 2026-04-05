@@ -83,6 +83,10 @@ static ClientState s_state = STATE_INIT;
 static Statistics  s_stats;
 static uint32_t    s_tickCounter = 0;  // Simple tick counter for lease timing
 
+// Static buffers to avoid large stack allocations (prevents ___chkstk_ms)
+static uint8_t s_txBuffer[sizeof(Packet)];
+static uint8_t s_rxBuffer[sizeof(Packet)];
+
 // ================================================================
 // Initialization
 // ================================================================
@@ -470,10 +474,9 @@ Status dhcp_receive(uint8_t* buffer, size_t max_len, uint32_t* server_ip)
 static Status do_discover(const uint8_t* mac, uint32_t xid,
                           Packet* offerPkt, ParsedOptions* offerOpts)
 {
-    uint8_t pktBuf[sizeof(Packet)];
     uint16_t pktLen = 0;
 
-    Status st = build_discover(pktBuf, sizeof(pktBuf), mac, xid, &pktLen);
+    Status st = build_discover(s_txBuffer, sizeof(s_txBuffer), mac, xid, &pktLen);
     if (st != DHCP_OK) return st;
 
     serial::puts("[DHCP] Sending DISCOVER (xid=0x");
@@ -483,7 +486,7 @@ static Status do_discover(const uint8_t* mac, uint32_t xid,
     s_state = STATE_SELECTING;
 
     for (uint8_t attempt = 0; attempt < MAX_DISCOVER_RETRIES; ++attempt) {
-        st = dhcp_send(pktBuf, pktLen, ipv4::ADDR_BROADCAST);
+        st = dhcp_send(s_txBuffer, pktLen, ipv4::ADDR_BROADCAST);
         if (st != DHCP_OK) {
             s_stats.errors++;
             continue;
@@ -491,11 +494,10 @@ static Status do_discover(const uint8_t* mac, uint32_t xid,
         s_stats.discoversSent++;
 
         // Wait for OFFER
-        uint8_t recvBuf[sizeof(Packet)];
         uint32_t fromIP = 0;
-        st = dhcp_receive(recvBuf, sizeof(recvBuf), &fromIP);
+        st = dhcp_receive(s_rxBuffer, sizeof(s_rxBuffer), &fromIP);
         if (st == DHCP_OK) {
-            Packet* resp = reinterpret_cast<Packet*>(recvBuf);
+            Packet* resp = reinterpret_cast<Packet*>(s_rxBuffer);
 
             // Validate: must be BOOTREPLY with our xid
             if (resp->op != BOOTREPLY) continue;
@@ -532,10 +534,9 @@ static Status do_request(const uint8_t* mac, uint32_t xid,
                          uint32_t offeredIP, uint32_t serverIP,
                          Packet* ackPkt, ParsedOptions* ackOpts)
 {
-    uint8_t pktBuf[sizeof(Packet)];
     uint16_t pktLen = 0;
 
-    Status st = build_request(pktBuf, sizeof(pktBuf), mac, xid,
+    Status st = build_request(s_txBuffer, sizeof(s_txBuffer), mac, xid,
                               offeredIP, serverIP, &pktLen);
     if (st != DHCP_OK) return st;
 
@@ -548,7 +549,7 @@ static Status do_request(const uint8_t* mac, uint32_t xid,
     s_state = STATE_REQUESTING;
 
     for (uint8_t attempt = 0; attempt < MAX_REQUEST_RETRIES; ++attempt) {
-        st = dhcp_send(pktBuf, pktLen, ipv4::ADDR_BROADCAST);
+        st = dhcp_send(s_txBuffer, pktLen, ipv4::ADDR_BROADCAST);
         if (st != DHCP_OK) {
             s_stats.errors++;
             continue;
@@ -556,11 +557,10 @@ static Status do_request(const uint8_t* mac, uint32_t xid,
         s_stats.requestsSent++;
 
         // Wait for ACK or NAK
-        uint8_t recvBuf[sizeof(Packet)];
         uint32_t fromIP = 0;
-        st = dhcp_receive(recvBuf, sizeof(recvBuf), &fromIP);
+        st = dhcp_receive(s_rxBuffer, sizeof(s_rxBuffer), &fromIP);
         if (st == DHCP_OK) {
-            Packet* resp = reinterpret_cast<Packet*>(recvBuf);
+            Packet* resp = reinterpret_cast<Packet*>(s_rxBuffer);
 
             // Validate
             if (resp->op != BOOTREPLY) continue;
@@ -743,16 +743,15 @@ void check_renewal()
         uint32_t xid = generate_xid();
 
         // Build a unicast REQUEST to renew
-        uint8_t pktBuf[sizeof(Packet)];
         uint16_t pktLen = 0;
-        Status st = build_request(pktBuf, sizeof(pktBuf), mac, xid,
+        Status st = build_request(s_txBuffer, sizeof(s_txBuffer), mac, xid,
                                   s_lease.assignedIP, s_lease.serverIP,
                                   &pktLen);
         if (st != DHCP_OK) return;
 
         // Send to server directly
         udp::bind(DHCP_CLIENT_PORT, ipv4::ADDR_ANY, nullptr);
-        st = dhcp_send(pktBuf, pktLen, s_lease.serverIP);
+        st = dhcp_send(s_txBuffer, pktLen, s_lease.serverIP);
         if (st != DHCP_OK) {
             udp::unbind(DHCP_CLIENT_PORT);
             return;
@@ -760,13 +759,12 @@ void check_renewal()
         s_stats.requestsSent++;
 
         // Wait for ACK
-        uint8_t recvBuf[sizeof(Packet)];
         uint32_t fromIP = 0;
-        st = dhcp_receive(recvBuf, sizeof(recvBuf), &fromIP);
+        st = dhcp_receive(s_rxBuffer, sizeof(s_rxBuffer), &fromIP);
         udp::unbind(DHCP_CLIENT_PORT);
 
         if (st == DHCP_OK) {
-            Packet* resp = reinterpret_cast<Packet*>(recvBuf);
+            Packet* resp = reinterpret_cast<Packet*>(s_rxBuffer);
             if (resp->op == BOOTREPLY && dhcp_ntohl(resp->xid) == xid) {
                 ParsedOptions opts;
                 if (parse_options(resp, &opts) == DHCP_OK) {
@@ -811,9 +809,8 @@ Status dhcp_release()
 
     uint32_t xid = generate_xid();
 
-    uint8_t pktBuf[sizeof(Packet)];
     uint16_t pktLen = 0;
-    Status st = build_release(pktBuf, sizeof(pktBuf), mac, xid,
+    Status st = build_release(s_txBuffer, sizeof(s_txBuffer), mac, xid,
                               s_lease.assignedIP, s_lease.serverIP,
                               &pktLen);
     if (st != DHCP_OK) return st;
@@ -821,7 +818,7 @@ Status dhcp_release()
     serial::puts("[DHCP] Sending RELEASE\n");
 
     udp::bind(DHCP_CLIENT_PORT, ipv4::ADDR_ANY, nullptr);
-    st = dhcp_send(pktBuf, pktLen, s_lease.serverIP);
+    st = dhcp_send(s_txBuffer, pktLen, s_lease.serverIP);
     udp::unbind(DHCP_CLIENT_PORT);
 
     if (st == DHCP_OK) {
