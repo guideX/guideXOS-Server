@@ -11,6 +11,93 @@
 #include "include/kernel/desktop.h"
 #include "include/kernel/framebuffer.h"
 
+// ============================================================
+// System Shutdown Implementation
+// ============================================================
+
+// QEMU debug exit port (isa-debug-exit device)
+// Writing to this port causes QEMU to exit with code (value << 1) | 1
+// Use -device isa-debug-exit,iobase=0x501,iosize=0x04 in QEMU command line
+static const uint16_t QEMU_DEBUG_EXIT_PORT = 0x501;
+
+// ACPI PM1a Control Register (standard location for many systems)
+// Writing SLP_TYPa | SLP_EN triggers sleep/shutdown
+static const uint16_t ACPI_PM1A_CNT = 0x604;  // Common ACPI PM1a port
+
+// Bochs/QEMU shutdown via special port
+static const uint16_t BOCHS_SHUTDOWN_PORT = 0xB004;
+
+// Architecture-specific port I/O
+#if defined(ARCH_X86) || defined(ARCH_AMD64)
+static inline void outw_shutdown(uint16_t port, uint16_t value)
+{
+#if defined(_MSC_VER)
+    __outword(port, value);
+#else
+    asm volatile ("outw %0, %1" : : "a"(value), "Nd"(port));
+#endif
+}
+
+static inline void outb_shutdown(uint16_t port, uint8_t value)
+{
+#if defined(_MSC_VER)
+    __outbyte(port, value);
+#else
+    asm volatile ("outb %0, %1" : : "a"(value), "Nd"(port));
+#endif
+}
+
+static inline void halt_cpu()
+{
+#if defined(_MSC_VER)
+    __halt();
+#else
+    asm volatile ("cli; hlt");
+#endif
+}
+#endif
+
+// Perform system shutdown
+static void perform_shutdown()
+{
+#if defined(ARCH_X86) || defined(ARCH_AMD64)
+    // Method 1: QEMU debug exit (cleanest for QEMU with isa-debug-exit device)
+    // Exit code will be (0 << 1) | 1 = 1, indicating success
+    outb_shutdown(QEMU_DEBUG_EXIT_PORT, 0x00);
+    
+    // Method 2: QEMU/Bochs ACPI shutdown
+    // S5 sleep state = shutdown (SLP_TYPa=5, SLP_EN=1)
+    // Value: (5 << 10) | (1 << 13) = 0x2000 | 0x1400 = 0x3400
+    outw_shutdown(ACPI_PM1A_CNT, 0x2000);
+    
+    // Method 3: Bochs-specific shutdown port
+    outw_shutdown(BOCHS_SHUTDOWN_PORT, 0x2000);
+    
+    // If we're still here, just halt
+    while (true) {
+        halt_cpu();
+    }
+#elif defined(ARCH_RISCV64)
+    // RISC-V uses SBI shutdown
+    // SBI_EXT_SHUTDOWN = 0x08
+    asm volatile (
+        "li a7, 0x08\n"
+        "ecall\n"
+        ::: "a7"
+    );
+    while (true) {}
+#else
+    // Other architectures: infinite halt loop
+    while (true) {
+#if defined(_MSC_VER)
+        __nop();
+#else
+        asm volatile ("nop");
+#endif
+    }
+#endif
+}
+
 namespace kernel {
 namespace desktop {
 
@@ -1377,9 +1464,12 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
                 s_notification.title = "Shutdown";
                 s_notification.message = "System is shutting down...";
                 s_notification.visible = true;
-                // TODO: Actually trigger ACPI shutdown here
                 draw();
                 draw_cursor(mx, my);
+                
+                // Actually perform the shutdown
+                perform_shutdown();
+                // If we return here, shutdown failed - stay in the system
                 return;
             } else if (btn == 1) {
                 // No - close dialog
