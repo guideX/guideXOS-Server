@@ -766,6 +766,7 @@
       <Filter>Source Files</Filter>
     </None>
     <None Include="ESP\startup.nsh" />
+    <None Include="Directory.Build.props" />
   </ItemGroup>
   <ItemGroup>
     <Text Include="scripts\build-and-run-sparcv8_in_linux.sh" />

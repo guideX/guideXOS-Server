@@ -24,6 +24,25 @@ namespace gxos {
     /// </summary>
     namespace gui {
 
+        static void ensureDefaultAppsRegistered() {
+            DesktopService::RegisterApp("Calculator", "calculator");
+            DesktopService::RegisterApp("Clock", "calendar");
+            DesktopService::RegisterApp("Paint", "image");
+            DesktopService::RegisterApp("Console", "edit");
+            DesktopService::RegisterApp("Notepad", "notepad");
+            DesktopService::RegisterApp("FileExplorer", "folder");
+            DesktopService::RegisterApp("TaskManager", "applications");
+            DesktopService::RegisterApp("ImageViewer", "image");
+            DesktopService::RegisterApp("OnScreenKeyboard", "edit");
+            DesktopService::RegisterApp("ShutdownDialog", "close");
+        }
+
+        static std::string canonicalAppName(const std::string& name) {
+            if (name == "Files" || name == "ComputerFiles") return "FileExplorer";
+            if (name == "Shutdown") return "ShutdownDialog";
+            return name;
+        }
+
         // Static member initialization
         std::vector<PinnedItem> DesktopService::s_pinned;
         std::vector<RecentProgramEntry> DesktopService::s_recentPrograms;
@@ -155,8 +174,11 @@ namespace gxos {
         }
 
         bool DesktopService::LaunchApp(const std::string& name, std::string& error) {
+            ensureDefaultAppsRegistered();
+            std::string appName = canonicalAppName(name);
+
             // Check if app is registered
-            if (std::find(s_apps.begin(), s_apps.end(), name) == s_apps.end()) {
+            if (std::find(s_apps.begin(), s_apps.end(), appName) == s_apps.end()) {
                 error = "Application not registered: " + name;
                 return false;
             }
@@ -165,34 +187,34 @@ namespace gxos {
             AddRecentProgram(name);
 
             // Launch the actual application
-            if (name == "Notepad") {
+            if (appName == "Notepad") {
                 apps::Notepad::Launch();
             }
-            else if (name == "Calculator") {
+            else if (appName == "Calculator") {
                 apps::Calculator::Launch();
             }
-            else if (name == "Console") {
+            else if (appName == "Console") {
                 apps::ConsoleWindow::Launch();
             }
-            else if (name == "FileExplorer" || name == "Files") {
+            else if (appName == "FileExplorer") {
                 apps::FileExplorer::Launch();
             }
-            else if (name == "Clock") {
+            else if (appName == "Clock") {
                 apps::Clock::Launch();
             }
-            else if (name == "TaskManager") {
+            else if (appName == "TaskManager") {
                 apps::TaskManager::Launch();
             }
-            else if (name == "Paint") {
+            else if (appName == "Paint") {
                 apps::Paint::Launch();
             }
-            else if (name == "ImageViewer") {
+            else if (appName == "ImageViewer") {
                 apps::ImageViewer::Launch();
             }
-            else if (name == "OnScreenKeyboard") {
+            else if (appName == "OnScreenKeyboard") {
                 apps::OnScreenKeyboard::Launch();
             }
-            else if (name == "ShutdownDialog" || name == "Shutdown") {
+            else if (appName == "ShutdownDialog") {
                 apps::ShutdownDialog::Launch();
             }
             else {
@@ -210,17 +232,7 @@ namespace gxos {
             std::string err;
             if (!DesktopConfig::Load("desktop.json", cfg, err)) {
                 Logger::write(LogLevel::Info, std::string("Desktop config not found (first run): ") + err);
-                // Initialize defaults
-                RegisterApp("Calculator", "calculator");
-                RegisterApp("Clock", "calendar");
-                RegisterApp("Paint", "image");
-                RegisterApp("Console", "edit");
-                RegisterApp("Notepad", "notepad");
-                RegisterApp("FileExplorer", "folder");
-                RegisterApp("TaskManager", "applications");
-                RegisterApp("ImageViewer", "image");
-                RegisterApp("OnScreenKeyboard", "edit");
-                RegisterApp("ShutdownDialog", "close");
+                ensureDefaultAppsRegistered();
                 return;
             }
 
@@ -244,17 +256,7 @@ namespace gxos {
                 s_recentPrograms.push_back(entry);
             }
 
-            // Register default apps
-            RegisterApp("Calculator", "calculator");
-            RegisterApp("Clock", "calendar");
-            RegisterApp("Paint", "image");
-            RegisterApp("Console", "edit");
-            RegisterApp("Notepad", "notepad");
-            RegisterApp("FileExplorer", "folder");
-            RegisterApp("TaskManager", "applications");
-            RegisterApp("ImageViewer", "image");
-            RegisterApp("OnScreenKeyboard", "edit");
-            RegisterApp("ShutdownDialog", "close");
+            ensureDefaultAppsRegistered();
 
             Logger::write(LogLevel::Info, "Desktop state loaded");
         }

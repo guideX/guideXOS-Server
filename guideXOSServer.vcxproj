@@ -372,6 +372,7 @@
     <None Include="build.bat" />
     <None Include="configure-vs-project.bat" />
     <None Include="diagnose.bat" />
+    <None Include="Directory.Build.props" />
     <None Include="Directory.Build.targets" />
     <None Include="docs\BUILD_GUIDE.md" />
     <None Include="ESP\startup.nsh" />

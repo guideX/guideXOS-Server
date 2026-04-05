@@ -1,4 +1,4 @@
-#ifndef GXOS_VNC_SERVER_H
+//#ifndef GXOS_VNC_SERVER_H
 #ifndef GXOS_VNC_SERVER_H
 #define GXOS_VNC_SERVER_H
 

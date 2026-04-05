@@ -1,0 +1,5 @@
+<Project>
+  <PropertyGroup>
+    <ResolveNuGetPackages>false</ResolveNuGetPackages>
+  </PropertyGroup>
+</Project>

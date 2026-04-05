@@ -199,6 +199,7 @@ static uint32_t lerp_color(uint32_t c1, uint32_t c2, uint32_t num, uint32_t den)
 // Desktop state
 // ============================================================
 
+
 static bool s_initialized = false;
 static bool s_startMenuOpen = false;
 static bool s_rightClickMenuOpen = false;
@@ -206,6 +207,10 @@ static uint32_t s_rightClickX = 0;
 static uint32_t s_rightClickY = 0;
 static uint32_t s_screenW = 0;
 static uint32_t s_screenH = 0;
+
+// Shutdown dialog state
+static bool s_shutdownDialogOpen = false;
+static int s_shutdownDialogHover = -1;  // 0 = Yes, 1 = No, -1 = none
 
 // Layout constants
 static const uint32_t kTaskbarH = 40;
@@ -874,6 +879,7 @@ static void draw_notifications()
     // Title
     draw_text(toastX + 12, toastY + 10, s_notification.title, rgb(230, 230, 245), 1);
 
+
     // Message
     draw_text(toastX + 12, toastY + 26, s_notification.message, rgb(170, 175, 190), 1);
 
@@ -884,6 +890,84 @@ static void draw_notifications()
 
     // Timestamp
     draw_text(toastX + 12, toastY + 42, "Just now", rgb(120, 125, 140), 1);
+}
+
+// ============================================================
+// Shutdown Confirmation Dialog
+// ============================================================
+
+static const uint32_t kShutdownDlgW = 320;
+static const uint32_t kShutdownDlgH = 140;
+static const uint32_t kShutdownBtnW = 80;
+static const uint32_t kShutdownBtnH = 28;
+
+static void draw_shutdown_dialog()
+{
+    if (!s_shutdownDialogOpen) return;
+
+    // Center the dialog on screen
+    uint32_t dlgX = (s_screenW - kShutdownDlgW) / 2;
+    uint32_t dlgY = (s_screenH - kShutdownDlgH) / 2;
+
+    // Shadow
+    framebuffer::fill_rect(dlgX + 4, dlgY + 4, kShutdownDlgW, kShutdownDlgH, rgb(10, 10, 15));
+
+    // Dialog background
+    framebuffer::fill_rect(dlgX, dlgY, kShutdownDlgW, kShutdownDlgH, rgb(45, 45, 55));
+
+    // Border
+    draw_rect(dlgX, dlgY, kShutdownDlgW, kShutdownDlgH, rgb(80, 100, 140));
+
+    // Title bar
+    framebuffer::fill_rect(dlgX + 1, dlgY + 1, kShutdownDlgW - 2, 28, rgb(50, 70, 110));
+    draw_text(dlgX + 12, dlgY + 8, "Confirm Shutdown", rgb(220, 225, 240), 1);
+
+    // Message
+    draw_text(dlgX + 30, dlgY + 50, "Are you sure you want to", rgb(200, 205, 220), 1);
+    draw_text(dlgX + 30, dlgY + 68, "shut down the system?", rgb(200, 205, 220), 1);
+
+    // Buttons
+    uint32_t btnY = dlgY + kShutdownDlgH - kShutdownBtnH - 16;
+    uint32_t yesX = dlgX + kShutdownDlgW / 2 - kShutdownBtnW - 10;
+    uint32_t noX = dlgX + kShutdownDlgW / 2 + 10;
+
+    // Yes button
+    uint32_t yesBg = (s_shutdownDialogHover == 0) ? rgb(70, 120, 180) : rgb(50, 90, 150);
+    framebuffer::fill_rect(yesX, btnY, kShutdownBtnW, kShutdownBtnH, yesBg);
+    draw_rect(yesX, btnY, kShutdownBtnW, kShutdownBtnH, rgb(100, 140, 200));
+    draw_text_centered(yesX, btnY, kShutdownBtnW, kShutdownBtnH, "Yes", rgb(220, 230, 250), 1);
+
+    // No button
+    uint32_t noBg = (s_shutdownDialogHover == 1) ? rgb(90, 60, 60) : rgb(70, 50, 50);
+    framebuffer::fill_rect(noX, btnY, kShutdownBtnW, kShutdownBtnH, noBg);
+    draw_rect(noX, btnY, kShutdownBtnW, kShutdownBtnH, rgb(140, 90, 90));
+    draw_text_centered(noX, btnY, kShutdownBtnW, kShutdownBtnH, "No", rgb(240, 210, 210), 1);
+}
+
+// Hit test shutdown dialog buttons: returns 0=Yes, 1=No, -1=none
+static int hit_test_shutdown_dialog(int32_t mx, int32_t my)
+{
+    if (!s_shutdownDialogOpen) return -1;
+
+    uint32_t dlgX = (s_screenW - kShutdownDlgW) / 2;
+    uint32_t dlgY = (s_screenH - kShutdownDlgH) / 2;
+    uint32_t btnY = dlgY + kShutdownDlgH - kShutdownBtnH - 16;
+    uint32_t yesX = dlgX + kShutdownDlgW / 2 - kShutdownBtnW - 10;
+    uint32_t noX = dlgX + kShutdownDlgW / 2 + 10;
+
+    // Yes button
+    if ((uint32_t)mx >= yesX && (uint32_t)mx < yesX + kShutdownBtnW &&
+        (uint32_t)my >= btnY && (uint32_t)my < btnY + kShutdownBtnH) {
+        return 0;
+    }
+
+    // No button
+    if ((uint32_t)mx >= noX && (uint32_t)mx < noX + kShutdownBtnW &&
+        (uint32_t)my >= btnY && (uint32_t)my < btnY + kShutdownBtnH) {
+        return 1;
+    }
+
+    return -1;
 }
 
 // ============================================================
@@ -915,6 +999,7 @@ void init()
     s_initialized = true;
 }
 
+
 void draw()
 {
     if (!s_initialized || !framebuffer::is_available()) return;
@@ -925,7 +1010,9 @@ void draw()
     draw_start_menu();
     draw_right_click_menu();
     draw_notifications();
+    draw_shutdown_dialog();
 }
+
 
 void toggle_start_menu()
 {
@@ -1102,6 +1189,66 @@ static void show_start_menu_notification(const char* label)
     s_notification.visible = true;
 }
 
+// Footer button IDs
+enum FooterButton {
+    FOOTER_NONE = 0,
+    FOOTER_SHUTDOWN = 1,
+    FOOTER_RESTART = 2,
+    FOOTER_SLEEP = 3,
+    FOOTER_ALL_PROGRAMS = 4
+};
+
+// Hit-test start menu footer buttons
+static FooterButton hit_test_start_menu_footer(int32_t mx, int32_t my)
+{
+    if (!s_startMenuOpen) return FOOTER_NONE;
+
+    StartMenuGeometry g = get_start_menu_geometry();
+
+    // Check if inside menu bounds
+    if ((uint32_t)mx < g.menuX || (uint32_t)mx >= g.menuX + kStartMenuW ||
+        (uint32_t)my < g.menuY || (uint32_t)my >= g.menuY + g.menuH) {
+        return FOOTER_NONE;
+    }
+
+    // Check if in footer area
+    uint32_t footerY = g.menuY + g.headerH + g.maxBodyH;
+    if ((uint32_t)my < footerY || (uint32_t)my >= footerY + g.footerH) {
+        return FOOTER_NONE;
+    }
+
+    // Button dimensions (must match draw_start_menu)
+    uint32_t shutW = 80, shutH = 24;
+    uint32_t shutX = g.menuX + kStartMenuW - shutW - 12;
+    uint32_t shutY = footerY + (g.footerH - shutH) / 2;
+
+    uint32_t restartW = 60;
+    uint32_t restartX = shutX - restartW - 6;
+
+    uint32_t sleepW = 50;
+    uint32_t sleepX = restartX - sleepW - 6;
+
+    // Test Shutdown button
+    if ((uint32_t)mx >= shutX && (uint32_t)mx < shutX + shutW &&
+        (uint32_t)my >= shutY && (uint32_t)my < shutY + shutH) {
+        return FOOTER_SHUTDOWN;
+    }
+
+    // Test Restart button
+    if ((uint32_t)mx >= restartX && (uint32_t)mx < restartX + restartW &&
+        (uint32_t)my >= shutY && (uint32_t)my < shutY + shutH) {
+        return FOOTER_RESTART;
+    }
+
+    // Test Sleep button
+    if ((uint32_t)mx >= sleepX && (uint32_t)mx < sleepX + sleepW &&
+        (uint32_t)my >= shutY && (uint32_t)my < shutY + shutH) {
+        return FOOTER_SLEEP;
+    }
+
+    return FOOTER_NONE;
+}
+
 static void save_under_cursor(int32_t mx, int32_t my)
 {
     for (int row = 0; row < kCursorH; row++) {
@@ -1221,6 +1368,41 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
 
     // Left button press
     if (pressed & 0x01) {
+        // Handle shutdown dialog clicks first (dialog takes priority)
+        if (s_shutdownDialogOpen) {
+            int btn = hit_test_shutdown_dialog(mx, my);
+            if (btn == 0) {
+                // Yes - initiate shutdown
+                s_shutdownDialogOpen = false;
+                s_notification.title = "Shutdown";
+                s_notification.message = "System is shutting down...";
+                s_notification.visible = true;
+                // TODO: Actually trigger ACPI shutdown here
+                draw();
+                draw_cursor(mx, my);
+                return;
+            } else if (btn == 1) {
+                // No - close dialog
+                s_shutdownDialogOpen = false;
+                draw();
+                draw_cursor(mx, my);
+                return;
+            }
+            // Click outside buttons but inside dialog - do nothing
+            // Click outside dialog - close it
+            uint32_t dlgX = (s_screenW - kShutdownDlgW) / 2;
+            uint32_t dlgY = (s_screenH - kShutdownDlgH) / 2;
+            if ((uint32_t)mx < dlgX || (uint32_t)mx >= dlgX + kShutdownDlgW ||
+                (uint32_t)my < dlgY || (uint32_t)my >= dlgY + kShutdownDlgH) {
+                s_shutdownDialogOpen = false;
+                draw();
+                draw_cursor(mx, my);
+                return;
+            }
+            // Inside dialog but not on buttons - ignore click
+            return;
+        }
+
         // Close context menu on any click
         if (s_rightClickMenuOpen) {
             s_rightClickMenuOpen = false;
@@ -1258,6 +1440,38 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
                 s_clickedMenuRight = rightHit;
                 s_clickedMenuLeft = -1;
                 show_start_menu_notification(s_startMenuRight[rightHit].label);
+                draw();
+                draw_cursor(mx, my);
+                return;
+            }
+
+            // Check footer buttons (Shutdown, Restart, Sleep)
+            FooterButton footerBtn = hit_test_start_menu_footer(mx, my);
+            if (footerBtn != FOOTER_NONE) {
+                s_startMenuOpen = false;
+                s_hoverMenuLeft = -1;
+                s_hoverMenuRight = -1;
+                switch (footerBtn) {
+                    case FOOTER_SHUTDOWN:
+                        // Show shutdown confirmation dialog
+                        s_shutdownDialogOpen = true;
+                        s_shutdownDialogHover = -1;
+                        break;
+                    case FOOTER_RESTART:
+                        s_notification.title = "Restart";
+                        s_notification.message = "System is restarting...";
+                        s_notification.visible = true;
+                        // TODO: Actually trigger system restart
+                        break;
+                    case FOOTER_SLEEP:
+                        s_notification.title = "Sleep";
+                        s_notification.message = "System entering sleep mode...";
+                        s_notification.visible = true;
+                        // TODO: Actually trigger sleep/suspend
+                        break;
+                    default:
+                        break;
+                }
                 draw();
                 draw_cursor(mx, my);
                 return;
@@ -1321,6 +1535,17 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
     if (pressed & 0x02) {
         if ((uint32_t)my < taskbarY) {
             show_context_menu((uint32_t)mx, (uint32_t)my);
+            draw();
+            draw_cursor(mx, my);
+            return;
+        }
+    }
+
+    // Shutdown dialog hover tracking
+    if (s_shutdownDialogOpen) {
+        int newHover = hit_test_shutdown_dialog(mx, my);
+        if (newHover != s_shutdownDialogHover) {
+            s_shutdownDialogHover = newHover;
             draw();
             draw_cursor(mx, my);
             return;

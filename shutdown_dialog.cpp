@@ -3,11 +3,24 @@
 #include "gui_protocol.h"
 #include "lifecycle.h"
 #include "logger.h"
+#include "allocator.h"
 #include <sstream>
 #include <thread>
 #include <chrono>
+#include <iostream>
 
 namespace gxos { namespace apps {
+
+
+static uint64_t parseWindowIdPayload(const std::string& payload) {
+    const size_t sep = payload.find('|');
+    const std::string idText = (sep == std::string::npos) ? payload : payload.substr(0, sep);
+    try {
+        return std::stoull(idText);
+    } catch (...) {
+        return 0;
+    }
+}
 
 uint64_t ShutdownDialog::s_windowId = 0;
 bool ShutdownDialog::s_confirmed = false;
@@ -15,6 +28,7 @@ int ShutdownDialog::s_lastKeyCode = 0;
 bool ShutdownDialog::s_keyDown = false;
 
 uint64_t ShutdownDialog::Launch() {
+    std::cout << "[ShutdownDialog] Launch() called" << std::endl;
     s_confirmed = false;
     s_lastKeyCode = 0;
     s_keyDown = false;
@@ -23,7 +37,11 @@ uint64_t ShutdownDialog::Launch() {
 }
 
 int ShutdownDialog::main(int /*argc*/, char** /*argv*/) {
+    std::cout << "[ShutdownDialog] main() starting, pid=" << gxos::Allocator::currentPid() << std::endl;
     Logger::write(LogLevel::Info, "ShutdownDialog starting");
+    
+    // Reset static state for this run
+    s_windowId = 0;
 
     // Ensure IPC channels exist
     ipc::Bus::ensure("gui.input");
@@ -35,18 +53,43 @@ int ShutdownDialog::main(int /*argc*/, char** /*argv*/) {
         m.type = static_cast<uint32_t>(gui::MsgType::MT_Create);
         std::string payload = "Confirm Shutdown|" + std::to_string(kDialogW) + "|" + std::to_string(kDialogH);
         m.data.assign(payload.begin(), payload.end());
+        std::cout << "[ShutdownDialog] Publishing MT_Create to gui.input" << std::endl;
         ipc::Bus::publish("gui.input", std::move(m), false);
+        std::cout << "[ShutdownDialog] MT_Create published" << std::endl;
     }
 
-    // Wait briefly for compositor to process and capture the window id
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    {
-        ipc::Message m;
-        if (ipc::Bus::pop("gui.output", m, 200)) {
-            std::string s(m.data.begin(), m.data.end());
-            // Expect id in response
-            try { s_windowId = std::stoull(s); } catch (...) { s_windowId = 0; }
+    // Wait for the matching create acknowledgement from the compositor.
+    std::cout << "[ShutdownDialog] Waiting for MT_Create ack..." << std::endl;
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(600);
+    while (s_windowId == 0 && std::chrono::steady_clock::now() < deadline) {
+    ipc::Message m;
+    if (!ipc::Bus::pop("gui.output", m, 100)) {
+        continue;
+    }
+        
+    Logger::write(LogLevel::Info, std::string("ShutdownDialog got msg type=") + std::to_string(m.type));
+
+    if (m.type != static_cast<uint32_t>(gui::MsgType::MT_Create)) {
+        continue;
+    }
+
+    std::string payload(m.data.begin(), m.data.end());
+    Logger::write(LogLevel::Info, std::string("ShutdownDialog got MT_Create payload=") + payload);
+    const size_t sep = payload.find('|');
+    if (sep != std::string::npos) {
+        const std::string title = payload.substr(sep + 1);
+        if (title != "Confirm Shutdown") {
+            continue;
         }
+    }
+
+    s_windowId = parseWindowIdPayload(payload);
+    Logger::write(LogLevel::Info, std::string("ShutdownDialog got window id=") + std::to_string(s_windowId));
+}
+
+if (s_windowId == 0) {
+        Logger::write(LogLevel::Error, "ShutdownDialog failed to acquire a window id");
+        return 1;
     }
 
     updateDisplay();

@@ -1,8 +1,12 @@
 #include "ipc_bus.h"
 
-#include "process.h"
 
+#include "ipc_bus.h"
+#include "process.h"
+#include "allocator.h"
 #include "logger.h"
+#include <thread>
+#include <chrono>
 
 namespace gxos {
     namespace ipc {
@@ -33,6 +37,16 @@ namespace gxos {
         }
 
         void Bus::publish(const std::string& name, Message&& msg, bool fanout) {
+            if (msg.srcPid == 0) {
+                msg.srcPid = Allocator::currentPid();
+            }
+            if (!fanout && msg.dstPid != 0) {
+                Logger::write(LogLevel::Info, std::string("Bus::publish directing msg type=") + std::to_string(msg.type) + " to pid=" + std::to_string(msg.dstPid));
+                ProcessTable::send(msg.dstPid, std::move(msg));
+                return;
+            }
+
+            Logger::write(LogLevel::Info, std::string("Bus::publish queueing msg type=") + std::to_string(msg.type) + " to channel=" + name);
             auto ch = get(name);
             std::unique_lock < std::mutex > lk(ch->mu);
             ch->cv.wait(lk, [&] {
@@ -53,16 +67,46 @@ namespace gxos {
         }
 
         bool Bus::pop(const std::string& name, Message& out, uint64_t timeoutMs) {
+            uint64_t pid = Allocator::currentPid();
+            
+            // Poll both sources with short intervals until timeout
+            auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeoutMs);
             auto ch = get(name);
-            std::unique_lock < std::mutex > lk(ch->mu);
-            if (!ch->cv.wait_for(lk, std::chrono::milliseconds(timeoutMs), [&] {
-                return !ch->queue.empty();
-                })) return false;
-            out = std::move(ch->queue.front());
-            ch->queue.pop_front();
-            lk.unlock();
-            ch->cv.notify_all();
-            return true;
+            
+            while (std::chrono::steady_clock::now() < deadline) {
+                // Check process mailbox first (directed messages have priority)
+                if (pid != 0 && ProcessTable::try_recv(pid, out)) {
+                    return true;
+                }
+                
+                // Check channel queue
+                {
+                    std::lock_guard<std::mutex> lk(ch->mu);
+                    if (!ch->queue.empty()) {
+                        out = std::move(ch->queue.front());
+                        ch->queue.pop_front();
+                        return true;
+                    }
+                }
+                
+                // Brief sleep to avoid busy spinning
+                std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            }
+            
+            // Final check before giving up
+            if (pid != 0 && ProcessTable::try_recv(pid, out)) {
+                return true;
+            }
+            {
+                std::lock_guard<std::mutex> lk(ch->mu);
+                if (!ch->queue.empty()) {
+                    out = std::move(ch->queue.front());
+                    ch->queue.pop_front();
+                    return true;
+                }
+            }
+            
+            return false;
         }
 
         bool Bus::setCapacity(const std::string& name, size_t cap) {

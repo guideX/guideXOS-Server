@@ -25,7 +25,7 @@ namespace gxos { namespace gui {
     struct DrawRectItem { int x; int y; int w; int h; uint8_t r; uint8_t g; uint8_t b; };
     enum class WidgetType { Button=1 };
     struct Widget { WidgetType type; int id; int x; int y; int w; int h; std::string text; bool hover=false; bool pressed=false; };
-    struct WinInfo { uint64_t id; std::string title; int x; int y; int w; int h; std::vector<std::string> texts; std::vector<DrawRectItem> rects; std::vector<Widget> widgets; bool minimized{false}; bool maximized{false}; int prevX{0}; int prevY{0}; int prevW{0}; int prevH{0}; bool dirty{true}; int snapState{0}; bool tombstoned{false}; HBITMAP taskbarIcon{nullptr};
+    struct WinInfo { uint64_t id; std::string title; int x; int y; int w; int h; std::vector<std::string> texts; std::vector<DrawRectItem> rects; std::vector<Widget> widgets; bool minimized{false}; bool maximized{false}; int prevX{0}; int prevY{0}; int prevW{0}; int prevH{0}; bool dirty{true}; int snapState{0}; bool tombstoned{false}; HBITMAP taskbarIcon{nullptr}; uint64_t ownerPid{0};
         // Titlebar button hover/pressed state
         bool titleBtnCloseHover{false}; bool titleBtnClosePressed{false};
         bool titleBtnMaxHover{false}; bool titleBtnMaxPressed{false};

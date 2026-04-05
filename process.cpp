@@ -58,7 +58,14 @@ namespace gxos {
 
     bool ProcessTable::send(uint64_t dstPid, ipc::Message&& msg){ std::lock_guard<std::mutex> _g(g_lock); auto it=g_proc.find(dstPid); if (it==g_proc.end()) return false; it->second->mbox.push(std::move(msg)); return true; }
     bool ProcessTable::try_recv(uint64_t pid, ipc::Message& out){ std::lock_guard<std::mutex> _g(g_lock); auto it=g_proc.find(pid); if (it==g_proc.end()) return false; return it->second->mbox.try_pop(out); }
-    bool ProcessTable::wait_recv(uint64_t pid, ipc::Message& out, uint64_t timeoutMs){ std::lock_guard<std::mutex> _g(g_lock); auto it=g_proc.find(pid); if (it==g_proc.end()) return false; return it->second->mbox.pop(out, timeoutMs); }
+    bool ProcessTable::wait_recv(uint64_t pid, ipc::Message& out, uint64_t timeoutMs){
+        std::shared_ptr<Process> proc;
+        {
+            std::lock_guard<std::mutex> _g(g_lock);
+            auto it=g_proc.find(pid); if (it==g_proc.end()) return false; proc = it->second;
+        }
+        return proc->mbox.pop(out, timeoutMs);
+    }
     bool ProcessTable::terminate(uint64_t pid){ std::lock_guard<std::mutex> _g(g_lock); return g_proc.erase(pid)>0; }
     std::vector<uint64_t> ProcessTable::list(){ std::lock_guard<std::mutex> _g(g_lock); std::vector<uint64_t> v; v.reserve(g_proc.size()); for(auto& kv: g_proc) v.push_back(kv.first); return v; }
 
