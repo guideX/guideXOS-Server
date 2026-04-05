@@ -231,6 +231,8 @@
     <ClInclude Include="platform.h" />
     <ClInclude Include="process.h" />
     <ClInclude Include="right_click_menu.h" />
+    <ClInclude Include="special_effects.h" />
+    <ClInclude Include="ui_settings.h" />
     <ClInclude Include="video_backend.h" />
     <ClInclude Include="welcome.h" />
     <ClInclude Include="save_changes_dialog.h" />
@@ -240,6 +242,9 @@
     <ClInclude Include="task_manager.h" />
     <ClInclude Include="vfs.h" />
     <ClInclude Include="vnc_server.h" />
+    <ClInclude Include="window_animator.h" />
+    <ClInclude Include="window_effects.h" />
+    <ClInclude Include="window_renderer.h" />
     <ClInclude Include="workspace_manager.h" />
   </ItemGroup>
   <ItemGroup>
@@ -356,6 +361,7 @@
       <ObjectFileName>$(IntDir)process_gxos.obj</ObjectFileName>
     </ClCompile>
     <ClCompile Include="right_click_menu.cpp" />
+    <ClCompile Include="special_effects.cpp" />
     <ClCompile Include="video_backend.cpp" />
     <ClCompile Include="welcome.cpp" />
     <ClCompile Include="save_changes_dialog.cpp" />

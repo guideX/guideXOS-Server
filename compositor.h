@@ -15,6 +15,8 @@
 #include "desktop_wallpaper.h"
 #include "bitmap_font.h"
 #include "video_backend.h"
+#include "window_effects.h"
+#include "ui_settings.h"
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -25,11 +27,29 @@ namespace gxos { namespace gui {
     struct DrawRectItem { int x; int y; int w; int h; uint8_t r; uint8_t g; uint8_t b; };
     enum class WidgetType { Button=1 };
     struct Widget { WidgetType type; int id; int x; int y; int w; int h; std::string text; bool hover=false; bool pressed=false; };
-    struct WinInfo { uint64_t id; std::string title; int x; int y; int w; int h; std::vector<std::string> texts; std::vector<DrawRectItem> rects; std::vector<Widget> widgets; bool minimized{false}; bool maximized{false}; int prevX{0}; int prevY{0}; int prevW{0}; int prevH{0}; bool dirty{true}; int snapState{0}; bool tombstoned{false}; HBITMAP taskbarIcon{nullptr}; uint64_t ownerPid{0};
+    struct WinInfo { 
+        uint64_t id; 
+        std::string title; 
+        int x; int y; int w; int h; 
+        std::vector<std::string> texts; 
+        std::vector<DrawRectItem> rects; 
+        std::vector<Widget> widgets; 
+        bool minimized{false}; 
+        bool maximized{false}; 
+        int prevX{0}; int prevY{0}; int prevW{0}; int prevH{0}; 
+        bool dirty{true}; 
+        int snapState{0}; 
+        bool tombstoned{false}; 
+        HBITMAP taskbarIcon{nullptr}; 
+        uint64_t ownerPid{0};
         // Titlebar button hover/pressed state
         bool titleBtnCloseHover{false}; bool titleBtnClosePressed{false};
         bool titleBtnMaxHover{false}; bool titleBtnMaxPressed{false};
-        bool titleBtnMinHover{false}; bool titleBtnMinPressed{false}; };
+        bool titleBtnMinHover{false}; bool titleBtnMinPressed{false};
+        // Animation state - ported from guideXOS.Legacy Window.cs
+        WindowAnimState animState{};
+        bool visible{true};
+    };
     struct DesktopItem { std::string label; std::string action; bool pinned{false}; bool selected{false}; int ix{-1}; int iy{-1}; };
 
     class Compositor {

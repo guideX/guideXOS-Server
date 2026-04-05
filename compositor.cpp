@@ -10,6 +10,9 @@
 #include "system_tray.h"
 #include "desktop_wallpaper.h"
 #include "bitmap_font.h"
+#include "window_renderer.h"
+#include "special_effects.h"
+#include "window_animator.h"
 #include <sstream>
 #include <algorithm>
 #include <chrono>
@@ -210,45 +213,91 @@ namespace gxos {
             case WM_PAINT: {
                 PAINTSTRUCT ps; HDC dc = BeginPaint(h, &ps); RECT cr; GetClientRect(h, &cr); if (g_wallpaperBmp) { HDC mem = CreateCompatibleDC(dc); HGDIOBJ old = SelectObject(mem, g_wallpaperBmp); BITMAP bm{}; GetObject(g_wallpaperBmp, sizeof(bm), &bm); double sx = (double)(cr.right - cr.left) / bm.bmWidth; double sy = (double)(cr.bottom - cr.top) / bm.bmHeight; double s = sx < sy ? sx : sy; int dstW = (int)(bm.bmWidth * s); int dstH = (int)(bm.bmHeight * s); int dx = (cr.right - dstW) / 2; int dy = (cr.bottom - dstH) / 2; HBRUSH bg = CreateSolidBrush(RGB(25, 25, 30)); FillRect(dc, &cr, bg); DeleteObject(bg); SetStretchBltMode(dc, HALFTONE); StretchBlt(dc, dx, dy, dstW, dstH, mem, 0, 0, bm.bmWidth, bm.bmHeight, SRCCOPY); SelectObject(mem, old); DeleteDC(mem); } else { DesktopWallpaper::DrawGradient(dc, cr); DesktopWallpaper::DrawBranding(dc, cr); } drawDesktopIcons(dc, cr);
                 // Draw application windows in Z-order (bottom to top)
-                const int titleBarH = 24; HFONT font = (HFONT)GetStockObject(ANSI_VAR_FONT); SelectObject(dc, font); SetBkMode(dc, TRANSPARENT);
+                const int titleBarH = UISettings::DefaultBarHeight; 
+                HFONT font = (HFONT)GetStockObject(ANSI_VAR_FONT); 
+                SelectObject(dc, font); 
+                SetBkMode(dc, TRANSPARENT);
+                
                 for (size_t i = 0; i < g_z.size( ); ++i) {
-                    auto it = g_windows.find(g_z[i]); if (it == g_windows.end( )) continue; const WinInfo& winfo = it->second; if (winfo.minimized) continue; RECT wrect{ winfo.x, winfo.y, winfo.x + winfo.w, winfo.y + winfo.h };
-                    HBRUSH wbg = CreateSolidBrush(RGB(60, 60, 70)); FillRect(dc, &wrect, wbg); DeleteObject(wbg);
-                    RECT tbr{ winfo.x, winfo.y, winfo.x + winfo.w, winfo.y + titleBarH }; HBRUSH tbg = CreateSolidBrush(winfo.id == g_focus ? RGB(80, 110, 160) : RGB(70, 70, 85)); FillRect(dc, &tbr, tbg); DeleteObject(tbg);
-                    FrameRect(dc, &wrect, (HBRUSH)GetStockObject(WHITE_BRUSH));
-                    SetTextColor(dc, RGB(240, 240, 240)); TextOutA(dc, tbr.left + 8, tbr.top + 4, winfo.title.c_str( ), (int)winfo.title.size( ));
+                    auto it = g_windows.find(g_z[i]); 
+                    if (it == g_windows.end( )) continue; 
+                    const WinInfo& winfo = it->second; 
+                    if (winfo.minimized || !winfo.visible) continue;
+                    
+                    bool isFocused = (winfo.id == g_focus);
+                    RECT wrect{ winfo.x, winfo.y, winfo.x + winfo.w, winfo.y + winfo.h };
+                    
+                    // Draw window glow/shadow (matching Legacy)
+                    WindowRenderer::DrawWindowGlow(dc, winfo.x, winfo.y, winfo.w, winfo.h, titleBarH, isFocused);
+                    
+                    // Draw window content background
+                    WindowRenderer::DrawRoundedRect(dc, winfo.x, winfo.y, winfo.w, winfo.h, 
+                        RGB((UISettings::WindowContentColor >> 16) & 0xFF,
+                            (UISettings::WindowContentColor >> 8) & 0xFF,
+                            UISettings::WindowContentColor & 0xFF),
+                        UISettings::EnableRoundedCorners ? UISettings::WindowCornerRadius : 0);
+                    
+                    // Draw title bar
+                    WindowRenderer::DrawTitleBar(dc, winfo.x, winfo.y, winfo.w, titleBarH, isFocused);
+                    
+                    // Draw window border
+                    WindowRenderer::DrawWindowBorder(dc, winfo.x, winfo.y, winfo.w, winfo.h, isFocused);
+                    
+                    // Draw window title text
+                    if (UISettings::EnableWindowTitles) {
+                        SetTextColor(dc, RGB(240, 240, 240)); 
+                        TextOutA(dc, winfo.x + 10, winfo.y + (titleBarH - 16) / 2, winfo.title.c_str( ), (int)winfo.title.size( ));
+                    }
 
                     // Titlebar buttons (minimize, maximize/restore, close)
-                    // compute button geometry
-                    const int btnSize = 16; const int btnGap = 6;
+                    const int btnSize = titleBarH - UISettings::ButtonSizeOffset;
+                    const int btnGap = UISettings::ButtonSpacing;
+                    int btnY = winfo.y + (titleBarH - btnSize) / 2;
+                    
                     int closeLeft = winfo.x + winfo.w - btnGap - btnSize;
                     int maxLeft = closeLeft - btnGap - btnSize;
                     int minLeft = maxLeft - btnGap - btnSize;
-                    RECT closeR{ closeLeft, winfo.y + (titleBarH - btnSize) / 2, closeLeft + btnSize, winfo.y + (titleBarH - btnSize) / 2 + btnSize };
-                    RECT maxR{ maxLeft, winfo.y + (titleBarH - btnSize) / 2, maxLeft + btnSize, winfo.y + (titleBarH - btnSize) / 2 + btnSize };
-                    RECT minR{ minLeft, winfo.y + (titleBarH - btnSize) / 2, minLeft + btnSize, winfo.y + (titleBarH - btnSize) / 2 + btnSize };
-                    // draw each button using hover/pressed state
-                    // Close
-                    HBRUSH cbg = CreateSolidBrush(winfo.titleBtnClosePressed ? RGB(180, 60, 60) : (winfo.titleBtnCloseHover ? RGB(200, 80, 80) : RGB(120, 120, 120)));
-                    FillRect(dc, &closeR, cbg); DeleteObject(cbg);
-                    FrameRect(dc, &closeR, (HBRUSH)GetStockObject(BLACK_BRUSH));
-                    SetTextColor(dc, RGB(255, 255, 255)); TextOutA(dc, closeR.left + 4, closeR.top + 2, "x", 1);
-                    // Maximize
-                    HBRUSH mgb = CreateSolidBrush(winfo.titleBtnMaxPressed ? RGB(120, 140, 200) : (winfo.titleBtnMaxHover ? RGB(140, 160, 220) : RGB(100, 100, 120)));
-                    FillRect(dc, &maxR, mgb); DeleteObject(mgb);
-                    FrameRect(dc, &maxR, (HBRUSH)GetStockObject(BLACK_BRUSH));
-                    // draw square for max/restore
-                    SetTextColor(dc, RGB(255, 255, 255)); if (winfo.maximized) TextOutA(dc, maxR.left + 3, maxR.top + 2, "?", 3); else TextOutA(dc, maxR.left + 3, maxR.top + 2, "?", 3);
-                    // Minimize
-                    HBRUSH mbg = CreateSolidBrush(winfo.titleBtnMinPressed ? RGB(120, 140, 120) : (winfo.titleBtnMinHover ? RGB(140, 160, 140) : RGB(100, 100, 120)));
-                    FillRect(dc, &minR, mbg); DeleteObject(mbg);
-                    FrameRect(dc, &minR, (HBRUSH)GetStockObject(BLACK_BRUSH));
-                    SetTextColor(dc, RGB(255, 255, 255)); TextOutA(dc, minR.left + 4, minR.top + 2, "_", 1);
+                    
+                    // Draw buttons using improved renderer (matching Legacy style)
+                    WindowRenderer::DrawTitleButton(dc, closeLeft, btnY, btnSize, 0, 
+                        winfo.titleBtnCloseHover, winfo.titleBtnClosePressed, isFocused);
+                    WindowRenderer::DrawTitleButton(dc, maxLeft, btnY, btnSize, 1, 
+                        winfo.titleBtnMaxHover, winfo.titleBtnMaxPressed, isFocused);
+                    WindowRenderer::DrawTitleButton(dc, minLeft, btnY, btnSize, 2, 
+                        winfo.titleBtnMinHover, winfo.titleBtnMinPressed, isFocused);
 
-                    for (const auto& ri : winfo.rects) { RECT rr{ winfo.x + ri.x, winfo.y + titleBarH + ri.y, winfo.x + ri.x + ri.w, winfo.y + titleBarH + ri.h }; HBRUSH rb = CreateSolidBrush(RGB(ri.r, ri.g, ri.b)); FillRect(dc, &rr, rb); DeleteObject(rb); }
-                    for (const auto& wd : winfo.widgets) { RECT wr{ winfo.x + wd.x, winfo.y + titleBarH + wd.y, winfo.x + wd.x + wd.w, winfo.y + titleBarH + wd.y + wd.h }; HBRUSH wb = CreateSolidBrush(wd.pressed ? RGB(40, 80, 140) : (wd.hover ? RGB(70, 90, 120) : RGB(90, 90, 100))); FillRect(dc, &wr, wb); DeleteObject(wb); FrameRect(dc, &wr, (HBRUSH)GetStockObject(WHITE_BRUSH)); SetTextColor(dc, RGB(240, 240, 240)); TextOutA(dc, wr.left + 6, wr.top + 4, wd.text.c_str( ), (int)wd.text.size( )); }
-                    int ty = winfo.y + titleBarH + 8; for (const auto& tx : winfo.texts) { TextOutA(dc, winfo.x + 8, ty, tx.c_str( ), (int)tx.size( )); ty += 16; }
-                    if (winfo.tombstoned) { const char* t = "Tombstoned"; SIZE ts; GetTextExtentPoint32A(dc, t, (int)strlen(t), &ts); SetTextColor(dc, RGB(200, 100, 100)); TextOutA(dc, winfo.x + (winfo.w - ts.cx) / 2, winfo.y + (winfo.h - ts.cy) / 2, t, (int)strlen(t)); }
+                    // Draw resize grip
+                    if (!winfo.maximized) {
+                        WindowRenderer::DrawResizeGrip(dc, winfo.x, winfo.y, winfo.w, winfo.h);
+                    }
+
+                    // Draw window content (rects, widgets, text)
+                    for (const auto& ri : winfo.rects) { 
+                        RECT rr{ winfo.x + ri.x, winfo.y + titleBarH + ri.y, winfo.x + ri.x + ri.w, winfo.y + titleBarH + ri.h }; 
+                        HBRUSH rb = CreateSolidBrush(RGB(ri.r, ri.g, ri.b)); 
+                        FillRect(dc, &rr, rb); 
+                        DeleteObject(rb); 
+                    }
+                    for (const auto& wd : winfo.widgets) { 
+                        RECT wr{ winfo.x + wd.x, winfo.y + titleBarH + wd.y, winfo.x + wd.x + wd.w, winfo.y + titleBarH + wd.y + wd.h }; 
+                        HBRUSH wb = CreateSolidBrush(wd.pressed ? RGB(40, 80, 140) : (wd.hover ? RGB(70, 90, 120) : RGB(90, 90, 100))); 
+                        FillRect(dc, &wr, wb); 
+                        DeleteObject(wb); 
+                        FrameRect(dc, &wr, (HBRUSH)GetStockObject(WHITE_BRUSH)); 
+                        SetTextColor(dc, RGB(240, 240, 240)); 
+                        TextOutA(dc, wr.left + 6, wr.top + 4, wd.text.c_str( ), (int)wd.text.size( )); 
+                    }
+                    int ty = winfo.y + titleBarH + 8; 
+                    for (const auto& tx : winfo.texts) { 
+                        SetTextColor(dc, RGB(220, 220, 220));
+                        TextOutA(dc, winfo.x + 8, ty, tx.c_str( ), (int)tx.size( )); 
+                        ty += 16; 
+                    }
+                    
+                    // Draw tombstone overlay
+                    if (winfo.tombstoned) { 
+                        WindowRenderer::DrawTombstoneOverlay(dc, winfo.x, winfo.y, winfo.w, winfo.h);
+                    }
                 }
                 int taskbarH = 40; RECT tb{ cr.left,cr.bottom - taskbarH,cr.right,cr.bottom };
                 // Taskbar background with subtle gradient
@@ -843,7 +892,35 @@ namespace gxos {
             std::string s(m.data.begin( ), m.data.end( )); switch ((MsgType)m.type) {
             case MsgType::MT_Create: { 
                 Logger::write(LogLevel::Info, std::string("Compositor received MT_Create: ") + s + " from pid=" + std::to_string(m.srcPid));
-                std::istringstream iss(s); std::string title; std::getline(iss, title, '|'); std::string wS, hS; std::getline(iss, wS, '|'); std::getline(iss, hS, '|'); int w = 320, h = 200; try { w = std::stoi(wS); h = std::stoi(hS); } catch (...) {} uint64_t id = s_nextWinId.fetch_add(1); { std::lock_guard<std::mutex> lk(g_lock); g_windows[id] = WinInfo{ id,title,60 + (int)(id % 7) * 40,60 + (int)(id % 7) * 40,w,h,{},{} ,{}, false,false,0,0,0,0, true }; g_windows[id].ownerPid = m.srcPid; g_z.push_back(id); g_focus = id; g_windows[id].taskbarIcon = Icons::TaskbarIcon(16); } 
+                std::istringstream iss(s); std::string title; std::getline(iss, title, '|'); std::string wS, hS; std::getline(iss, wS, '|'); std::getline(iss, hS, '|'); int w = 320, h = 200; try { w = std::stoi(wS); h = std::stoi(hS); } catch (...) {} uint64_t id = s_nextWinId.fetch_add(1); 
+                { 
+                    std::lock_guard<std::mutex> lk(g_lock); 
+                    int winX = 60 + (int)(id % 7) * 40;
+                    int winY = 60 + (int)(id % 7) * 40;
+                    WinInfo wi{};
+                    wi.id = id;
+                    wi.title = title;
+                    wi.x = winX;
+                    wi.y = winY;
+                    wi.w = w;
+                    wi.h = h;
+                    wi.minimized = false;
+                    wi.maximized = false;
+                    wi.dirty = true;
+                    wi.visible = true;
+                    wi.ownerPid = m.srcPid;
+                    wi.taskbarIcon = Icons::TaskbarIcon(16);
+                    // Initialize animation state - store normal bounds
+                    wi.animState.normX = winX;
+                    wi.animState.normY = winY;
+                    wi.animState.normW = w;
+                    wi.animState.normH = h;
+                    // Start fade-in animation
+                    WindowAnimator::BeginFadeIn(wi.animState, winY);
+                    g_windows[id] = wi;
+                    g_z.push_back(id); 
+                    g_focus = id; 
+                } 
                 Logger::write(LogLevel::Info, std::string("Compositor created window id=") + std::to_string(id) + " sending ack to pid=" + std::to_string(m.srcPid));
                 publishOut(MsgType::MT_Create, std::to_string(id) + "|" + title, m.srcPid); sendFocus(id); invalidate(id); } break;
             case MsgType::MT_DrawText: { std::istringstream iss(s); std::string idS; std::getline(iss, idS, '|'); std::string text; std::getline(iss, text); uint64_t id = 0; uint64_t ownerPid = 0; try { id = std::stoull(idS); } catch (...) {} { std::lock_guard<std::mutex> lk(g_lock); auto it = g_windows.find(id); if (it != g_windows.end( )) { it->second.texts.push_back(text); it->second.dirty = true; ownerPid = it->second.ownerPid; } } publishOut(MsgType::MT_DrawText, std::to_string(id) + "|" + text, ownerPid); invalidate(id); } break;

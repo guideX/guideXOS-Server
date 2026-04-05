@@ -354,6 +354,21 @@
     <ClInclude Include="kernel\core\include\kernel\ps2keyboard.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="ui_settings.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="window_effects.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="special_effects.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="window_renderer.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="window_animator.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="allocator.cpp">
@@ -675,6 +690,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="kernel\core\ps2keyboard.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="special_effects.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
