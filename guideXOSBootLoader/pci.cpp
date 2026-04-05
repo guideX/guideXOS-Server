@@ -4,11 +4,30 @@
 //
 
 #include "pci.h"
-#include <Library/UefiLib.h>
-#include <Library/IoLib.h>
+#include "uefi_shim.h"  // For Print macro
+
+// Use MSVC intrinsics for I/O port access
+extern "C" unsigned long __indword(unsigned short port);
+extern "C" void __outdword(unsigned short port, unsigned long value);
+#pragma intrinsic(__indword)
+#pragma intrinsic(__outdword)
 
 namespace guideXOS {
 namespace pci {
+
+// ================================================================
+// I/O Port Access via MSVC intrinsics
+// ================================================================
+
+static inline uint32_t PortRead32(uint16_t port)
+{
+    return __indword(port);
+}
+
+static inline void PortWrite32(uint16_t port, uint32_t value)
+{
+    __outdword(port, value);
+}
 
 // ================================================================
 // PCI Configuration Space Access
@@ -22,8 +41,8 @@ uint32_t PciRead32(uint8_t bus, uint8_t dev, uint8_t func, uint8_t offset)
                     ((uint32_t)func << 8)  |
                     (offset & 0xFC);
     
-    ::IoWrite32(PCI_CONFIG_ADDR, addr);
-    return ::IoRead32(PCI_CONFIG_DATA);
+    PortWrite32(PCI_CONFIG_ADDR, addr);
+    return PortRead32(PCI_CONFIG_DATA);
 }
 
 uint16_t PciRead16(uint8_t bus, uint8_t dev, uint8_t func, uint8_t offset)
@@ -46,8 +65,8 @@ void PciWrite32(uint8_t bus, uint8_t dev, uint8_t func, uint8_t offset, uint32_t
                     ((uint32_t)func << 8)  |
                     (offset & 0xFC);
     
-    ::IoWrite32(PCI_CONFIG_ADDR, addr);
-    ::IoWrite32(PCI_CONFIG_DATA, value);
+    PortWrite32(PCI_CONFIG_ADDR, addr);
+    PortWrite32(PCI_CONFIG_DATA, value);
 }
 
 void PciWrite16(uint8_t bus, uint8_t dev, uint8_t func, uint8_t offset, uint16_t value)
