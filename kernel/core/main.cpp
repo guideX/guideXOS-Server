@@ -33,6 +33,7 @@
 #include "include/kernel/ethernet.h"
 #include "include/kernel/ipv4.h"
 #include "include/kernel/icmp.h"
+#include "include/kernel/udp.h"
 
 #if ARCH_HAS_PIC_8259
 #include "include/kernel/multiboot.h"
@@ -201,6 +202,9 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
             
             // Initialize ICMP (ping support)
             kernel::icmp::init();
+            
+            // Initialize UDP layer
+            kernel::udp::init();
         }
         
         // ============================================================

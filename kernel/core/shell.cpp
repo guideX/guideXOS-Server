@@ -10,6 +10,7 @@
 #include "include/kernel/icmp.h"
 #include "include/kernel/ipv4.h"
 #include "include/kernel/nic.h"
+#include "include/kernel/udp.h"
 
 // Forward declarations for power functions (defined in desktop.cpp, outside any namespace)
 extern void perform_shutdown();
@@ -18,6 +19,8 @@ extern void perform_sleep();
 
 namespace kernel {
 namespace shell {
+
+
 
 // ============================================================
 // Bitmap font (8x16, ASCII 32..126) - compact subset
@@ -306,6 +309,8 @@ static void cmd_help() {
     output_string("  ifconfig, ip   - Network interface info\n");
     output_string("  route          - Routing table\n");
     output_string("  netstat, ss    - Network connections\n");
+    output_string("  nc <ip> <port> - Send UDP datagram\n");
+    output_string("  udpstat        - UDP statistics\n");
     output_string("\n");
     output_string("Desktop:\n");
     output_string("  apps           - List applications\n");
@@ -1127,6 +1132,169 @@ static void cmd_route() {
     }
 }
 
+// Simple number to string helper for UDP stats
+static void uint_to_str(uint32_t n, char* buf) {
+    int i = 0;
+    if (n == 0) {
+        buf[i++] = '0';
+    } else {
+        char tmp[12];
+        int j = 0;
+        while (n > 0) {
+            tmp[j++] = '0' + (n % 10);
+            n /= 10;
+        }
+        while (j > 0) {
+            buf[i++] = tmp[--j];
+        }
+    }
+    buf[i] = '\0';
+}
+
+static void cmd_nc(const char* args[], uint32_t argCount) {
+    // Usage: nc [-u] <ip> <port> [message]
+    // -u for UDP (default)
+    
+    if (argCount < 3) {
+        output_string("Usage: nc <ip> <port> [message]\n");
+        output_string("Send a UDP datagram to the specified host and port.\n");
+        output_string("Example: nc 10.0.2.2 1234 Hello\n");
+        return;
+    }
+    
+    if (!nic::is_active()) {
+        output_string("nc: network interface not active\n");
+        return;
+    }
+    
+    if (!ipv4::is_configured()) {
+        output_string("nc: network not configured\n");
+        return;
+    }
+    
+    // Parse IP
+    uint32_t dstIP;
+    if (!ipv4::ip_from_string(args[1], &dstIP)) {
+        output_string("nc: invalid IP address '");
+        output_string(args[1]);
+        output_string("'\n");
+        return;
+    }
+    
+    // Parse port
+    uint16_t dstPort = 0;
+    const char* portStr = args[2];
+    while (*portStr >= '0' && *portStr <= '9') {
+        dstPort = dstPort * 10 + (*portStr - '0');
+        portStr++;
+    }
+    
+    if (dstPort == 0) {
+        output_string("nc: invalid port '");
+        output_string(args[2]);
+        output_string("'\n");
+        return;
+    }
+    
+    // Build message from remaining args
+    char message[256];
+    uint16_t msgLen = 0;
+    
+    if (argCount > 3) {
+        for (uint32_t i = 3; i < argCount && msgLen < 250; i++) {
+            if (i > 3 && msgLen < 250) message[msgLen++] = ' ';
+            const char* arg = args[i];
+            while (*arg && msgLen < 250) {
+                message[msgLen++] = *arg++;
+            }
+        }
+    } else {
+        // Default test message
+        const char* defaultMsg = "Hello from guideXOS";
+        while (*defaultMsg && msgLen < 250) {
+            message[msgLen++] = *defaultMsg++;
+        }
+    }
+    message[msgLen] = '\0';
+    
+    // Send UDP datagram
+    uint16_t srcPort;
+    udp::Status status = udp::send_auto(dstIP, dstPort,
+                                         reinterpret_cast<const uint8_t*>(message),
+                                         msgLen, &srcPort);
+    
+    if (status == udp::UDP_OK) {
+        output_string("Sent ");
+        char numStr[12];
+        uint_to_str(msgLen, numStr);
+        output_string(numStr);
+        output_string(" bytes to ");
+        char ipStr[16];
+        ipv4::ip_to_string(dstIP, ipStr);
+        output_string(ipStr);
+        output_string(":");
+        uint_to_str(dstPort, numStr);
+        output_string(numStr);
+        output_string(" from port ");
+        uint_to_str(srcPort, numStr);
+        output_string(numStr);
+        output_string("\n");
+    } else {
+        output_string("nc: send failed (error ");
+        char numStr[12];
+        uint_to_str(static_cast<uint32_t>(status), numStr);
+        output_string(numStr);
+        output_string(")\n");
+    }
+}
+
+static void cmd_udpstat() {
+    output_string("UDP Statistics:\n");
+    
+    const udp::Statistics* stats = udp::get_stats();
+    char numStr[12];
+    
+    output_string("  Datagrams received: ");
+    uint_to_str(stats->rxDatagrams, numStr);
+    output_string(numStr);
+    output_string("\n");
+    
+    output_string("  Datagrams sent:     ");
+    uint_to_str(stats->txDatagrams, numStr);
+    output_string(numStr);
+    output_string("\n");
+    
+    output_string("  Bytes received:     ");
+    uint_to_str(stats->rxBytes, numStr);
+    output_string(numStr);
+    output_string("\n");
+    
+    output_string("  Bytes sent:         ");
+    uint_to_str(stats->txBytes, numStr);
+    output_string(numStr);
+    output_string("\n");
+    
+    output_string("  RX errors:          ");
+    uint_to_str(stats->rxErrors, numStr);
+    output_string(numStr);
+    output_string("\n");
+    
+    output_string("  TX errors:          ");
+    uint_to_str(stats->txErrors, numStr);
+    output_string(numStr);
+    output_string("\n");
+    
+    output_string("  Checksum errors:    ");
+    uint_to_str(stats->checksumErrors, numStr);
+    output_string(numStr);
+    output_string("\n");
+    
+    output_string("  No port errors:     ");
+    uint_to_str(stats->noPortErrors, numStr);
+    output_string(numStr);
+    output_string("\n");
+}
+
 // ============================================================
 // Command Parser and Executor
 // ============================================================
@@ -1347,6 +1515,15 @@ static void execute_command(const char* cmd) {
         cmd_netstat();
     } else if (str_eq(command, "route")) {
         cmd_route();
+    } else if (str_eq(command, "nc") || str_eq(command, "netcat")) {
+        // Pass all args to nc command
+        const char* ncArgs[MAX_ARGS];
+        for (uint32_t i = 0; i < argCount; i++) {
+            ncArgs[i] = args[i];
+        }
+        cmd_nc(ncArgs, argCount);
+    } else if (str_eq(command, "udpstat")) {
+        cmd_udpstat();
     }
     else if (str_eq(command, "top") || str_eq(command, "htop")) {
         output_string("top - 00:00:00 up ");
