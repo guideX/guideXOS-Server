@@ -316,11 +316,23 @@ static bool init_e1000(uint64_t mmioBase)
 
 static bool scan_pci_nic()
 {
-    for (uint16_t bus = 0; bus < 256; ++bus) {
+    // Scan only common bus/device ranges to avoid excessive PCI reads
+    for (uint16_t bus = 0; bus < 8; ++bus) {
         for (uint8_t dev = 0; dev < 32; ++dev) {
-            for (uint8_t func = 0; func < 8; ++func) {
-                uint32_t id = pci_read32(static_cast<uint8_t>(bus), dev, func, 0);
-                if (id == 0xFFFFFFFF || id == 0) continue;
+            // Only check function 0 first, then others if multi-function
+            uint32_t id = pci_read32(static_cast<uint8_t>(bus), dev, 0, 0);
+            if (id == 0xFFFFFFFF || id == 0) continue;
+
+            // Check header type to see if multi-function
+            uint32_t headerReg = pci_read32(static_cast<uint8_t>(bus), dev, 0, 0x0C);
+            uint8_t headerType = static_cast<uint8_t>(headerReg >> 16);
+            uint8_t maxFunc = (headerType & 0x80) ? 8 : 1;
+
+            for (uint8_t func = 0; func < maxFunc; ++func) {
+                if (func > 0) {
+                    id = pci_read32(static_cast<uint8_t>(bus), dev, func, 0);
+                    if (id == 0xFFFFFFFF || id == 0) continue;
+                }
 
                 uint32_t classReg = pci_read32(static_cast<uint8_t>(bus), dev, func, 0x08);
                 uint8_t baseClass = static_cast<uint8_t>(classReg >> 24);
@@ -332,11 +344,23 @@ static bool scan_pci_nic()
                 uint16_t vendor = static_cast<uint16_t>(id & 0xFFFF);
                 uint16_t device = static_cast<uint16_t>(id >> 16);
 
-                if (!is_supported_nic(vendor, device)) continue;
+                serial::puts("[NIC] Found NIC: vendor=");
+                serial::put_hex32(vendor);
+                serial::puts(" device=");
+                serial::put_hex32(device);
+                serial::putc('\n');
+
+                if (!is_supported_nic(vendor, device)) {
+                    serial::puts("[NIC] NIC not supported (not Intel E1000)\n");
+                    continue;
+                }
 
                 // Found a supported NIC — read BAR0 (MMIO base)
                 uint32_t bar0 = pci_read32(static_cast<uint8_t>(bus), dev, func, 0x10);
-                if (bar0 & 0x01) continue; // skip I/O space BARs
+                if (bar0 & 0x01) {
+                    serial::puts("[NIC] BAR0 is I/O space, skipping\n");
+                    continue;
+                }
 
                 uint64_t mmioBase = bar0 & 0xFFFFFFF0u;
 
@@ -346,16 +370,31 @@ static bool scan_pci_nic()
                     mmioBase |= (static_cast<uint64_t>(bar1) << 32);
                 }
 
+                serial::puts("[NIC] MMIO base: ");
+                serial::put_hex32(static_cast<uint32_t>(mmioBase >> 32));
+                serial::put_hex32(static_cast<uint32_t>(mmioBase));
+                serial::putc('\n');
+
+                // SAFETY CHECK: MMIO base must be mapped
+                // The bootloader doesn't map arbitrary MMIO regions.
+                // For now, we'll record the device info but skip hardware init
+                // unless the MMIO region is in a known-mapped range.
+                // 
+                // In QEMU, the E1000 is typically at 0xFEBC0000 or similar,
+                // which is NOT mapped by the bootloader's page tables.
+                //
+                // We need the bootloader to map this region, or we need
+                // to implement dynamic page table updates.
+                
                 // Read interrupt line
                 uint32_t intReg = pci_read32(static_cast<uint8_t>(bus), dev, func, 0x3C);
                 uint8_t irqLine = static_cast<uint8_t>(intReg & 0xFF);
 
-                // Enable PCI bus mastering (command register bit 2)
-                uint32_t cmdReg = pci_read32(static_cast<uint8_t>(bus), dev, func, 0x04);
-                cmdReg |= (1u << 2) | (1u << 1); // bus master + memory space
-                pci_write32(static_cast<uint8_t>(bus), dev, func, 0x04, cmdReg);
+                serial::puts("[NIC] IRQ line: ");
+                serial::put_hex8(irqLine);
+                serial::putc('\n');
 
-                // Populate device info
+                // Populate device info (without MMIO access)
                 s_device.pciBus   = static_cast<uint8_t>(bus);
                 s_device.pciSlot  = dev;
                 s_device.pciFunc  = func;
@@ -364,23 +403,27 @@ static bool scan_pci_nic()
                 s_device.mmioBase = mmioBase;
                 s_device.irqLine  = irqLine;
 
-                // Read MAC address
-                read_mac_address(mmioBase, s_device.macAddress);
-
                 // Set device name
                 s_device.name[0] = 'e'; s_device.name[1] = 't';
                 s_device.name[2] = 'h'; s_device.name[3] = '0';
                 s_device.name[4] = '\0';
 
-                // Initialise the hardware
-                if (!init_e1000(mmioBase)) return false;
-
-                // Check link status
-                uint32_t status = mmio_read32(mmioBase, E1000_STATUS);
-                s_device.link = (status & E1000_STATUS_LU) ? NIC_LINK_UP : NIC_LINK_DOWN;
-
-                s_device.active = true;
-                return true;
+                // For now, skip hardware initialization since MMIO is not mapped
+                // The device is detected but not active until MMIO mapping is available
+                serial::puts("[NIC] Device detected but MMIO not mapped - skipping hw init\n");
+                
+                // Set a placeholder MAC (will be read when MMIO is available)
+                s_device.macAddress[0] = 0x52;
+                s_device.macAddress[1] = 0x54;
+                s_device.macAddress[2] = 0x00;
+                s_device.macAddress[3] = 0x12;
+                s_device.macAddress[4] = 0x34;
+                s_device.macAddress[5] = 0x56;
+                
+                s_device.link = NIC_LINK_DOWN;
+                s_device.active = false;  // Not active until MMIO is mapped
+                
+                return true;  // Found a device, even if not initialized
             }
         }
     }
@@ -407,16 +450,26 @@ void init()
 
     if (scan_pci_nic()) {
         s_initialised = true;
-        serial::puts("[NIC] Found E1000 NIC: ");
+        serial::puts("[NIC] Found ");
         serial::puts(s_device.name);
-        serial::puts("  MAC=");
-        for (int i = 0; i < 6; ++i) {
-            if (i > 0) serial::putc(':');
-            serial::put_hex8(s_device.macAddress[i]);
-        }
-        serial::puts("  Link=");
-        serial::puts(s_device.link == NIC_LINK_UP ? "UP" : "DOWN");
+        serial::puts("  vendor=");
+        serial::put_hex32(s_device.vendorId);
+        serial::puts(" device=");
+        serial::put_hex32(s_device.deviceId);
         serial::putc('\n');
+        
+        if (s_device.active) {
+            serial::puts("[NIC] MAC=");
+            for (int i = 0; i < 6; ++i) {
+                if (i > 0) serial::putc(':');
+                serial::put_hex8(s_device.macAddress[i]);
+            }
+            serial::puts("  Link=");
+            serial::puts(s_device.link == NIC_LINK_UP ? "UP" : "DOWN");
+            serial::putc('\n');
+        } else {
+            serial::puts("[NIC] Device found but not active (MMIO not mapped)\n");
+        }
     } else {
         serial::puts("[NIC] No supported NIC found\n");
     }
