@@ -184,9 +184,11 @@
     <ClInclude Include="kernel\core\include\kernel\pci_audio.h" />
     <ClInclude Include="kernel\core\include\kernel\pit.h" />
     <ClInclude Include="kernel\core\include\kernel\process.h" />
+    <ClInclude Include="kernel\core\include\kernel\ps2keyboard.h" />
     <ClInclude Include="kernel\core\include\kernel\ps2mouse.h" />
     <ClInclude Include="kernel\core\include\kernel\ramdisk.h" />
     <ClInclude Include="kernel\core\include\kernel\serial_debug.h" />
+    <ClInclude Include="kernel\core\include\kernel\shell.h" />
     <ClInclude Include="kernel\core\include\kernel\usb.h" />
     <ClInclude Include="kernel\core\include\kernel\usb_audio.h" />
     <ClInclude Include="kernel\core\include\kernel\usb_audio_uac2.h" />
@@ -320,8 +322,10 @@
     <ClCompile Include="kernel\core\process.cpp">
       <ObjectFileName>$(IntDir)process_kernel.obj</ObjectFileName>
     </ClCompile>
+    <ClCompile Include="kernel\core\ps2keyboard.cpp" />
     <ClCompile Include="kernel\core\ps2mouse.cpp" />
     <ClCompile Include="kernel\core\ramdisk.cpp" />
+    <ClCompile Include="kernel\core\shell.cpp" />
     <ClCompile Include="kernel\core\usb.cpp" />
     <ClCompile Include="kernel\core\usb_audio.cpp" />
     <ClCompile Include="kernel\core\usb_audio_uac2.cpp" />

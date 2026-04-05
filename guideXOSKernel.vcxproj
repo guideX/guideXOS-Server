@@ -162,6 +162,7 @@
     <ClInclude Include="kernel\arch\x86\include\arch\x86.h" />
     <ClInclude Include="kernel\core\include\kernel\arch.h" />
     <ClInclude Include="kernel\core\include\kernel\desktop.h" />
+    <ClInclude Include="kernel\core\include\kernel\shell.h" />
     <ClInclude Include="kernel\core\include\kernel\framebuffer.h" />
     <ClInclude Include="kernel\core\include\kernel\interrupts.h" />
     <ClInclude Include="kernel\core\include\kernel\multiboot.h" />
@@ -223,6 +224,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="kernel\core\desktop.cpp" />
+    <ClCompile Include="kernel\core\shell.cpp" />
     <ClCompile Include="kernel\core\interrupts.cpp" />
     <ClCompile Include="kernel\core\ps2mouse.cpp" />
     <ClCompile Include="kernel\arch\x86\arch.cpp" />

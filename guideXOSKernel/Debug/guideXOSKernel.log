@@ -1,7 +1,98 @@
-﻿  Cleaning build artifacts...
-  Removing build\x86...
+﻿  [INFO] Found ELF toolchain at: D:\bkup\elfbin\bin
+  [INFO] Found NASM at: C:\Program Files\NASM
+  [OK] Added toolchain to PATH
+  [OK] Added NASM to PATH
   
-  Clean complete!
-  'build-x86.bat' is not recognized as an internal or external command,
-  operable program or batch file.
-C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Microsoft\VC\v170\Microsoft.MakeFile.Targets(53,5): error MSB3073: The command "cd kernel && clean.bat && build-x86.bat" exited with code 1.
+  ==========================================
+  Building guideXOS Kernel (x86)
+  ==========================================
+  
+  [OK] Found source files
+  
+  Checking toolchain...
+  
+  [OK] Cross-compiler found
+  
+  NASM version 3.01rc9 compiled on Oct 10 2025
+  [OK] Assembler found
+  
+  Creating build directories...
+  [OK] Directories created
+  
+  [1/10] Assembling boot.asm...
+  [OK] boot.o created
+  [2/10] Compiling main.cpp...
+  In file included from core\main.cpp:26:
+core\include/kernel/ramdisk.h(34,14): error G30A0E944: 'size_t' does not name a type
+     34 | static const size_t RAMDISK_POOL_SIZE = 16 * 1024 * 1024;
+        |              ^~~~~~
+  core\include/kernel/ramdisk.h:1:1: note: 'size_t' is defined in header '<cstddef>'; this is probably fixable by adding '#include <cstddef>'
+    +++ |+#include <cstddef>
+      1 | // RAM Disk Block Device Driver
+core\include/kernel/ramdisk.h(60,16): error G30A0E944: 'size_t' was not declared in this scope
+     60 | uint8_t create(size_t sizeBytes, const char* name = nullptr);
+        |                ^~~~~~
+  core\include/kernel/ramdisk.h:60:16: note: 'size_t' is defined in header '<cstddef>'; this is probably fixable by adding '#include <cstddef>'
+core\include/kernel/ramdisk.h(60,34): error G936F37D0: expected primary-expression before 'const'
+     60 | uint8_t create(size_t sizeBytes, const char* name = nullptr);
+        |                                  ^~~~~
+core\include/kernel/ramdisk.h(60,60): error G6BF28A8F: expression list treated as compound expression in initializer [-fpermissive]
+     60 | uint8_t create(size_t sizeBytes, const char* name = nullptr);
+        |                                                            ^
+core\include/kernel/ramdisk.h(66,33): error G30A0E944: 'size_t' has not been declared
+     66 | uint8_t create_at(void* memory, size_t sizeBytes, const char* name = nullptr);
+        |                                 ^~~~~~
+  core\include/kernel/ramdisk.h:66:33: note: 'size_t' is defined in header '<cstddef>'; this is probably fixable by adding '#include <cstddef>'
+  In file included from core\main.cpp:27:
+core\include/kernel/vfs.h(33,14): error G30A0E944: 'size_t' does not name a type
+     33 | static const size_t VFS_MAX_PATH = 256;
+        |              ^~~~~~
+  core\include/kernel/vfs.h:1:1: note: 'size_t' is defined in header '<cstddef>'; this is probably fixable by adding '#include <cstddef>'
+    +++ |+#include <cstddef>
+      1 | // Kernel Virtual File System (VFS) Layer
+core\include/kernel/vfs.h(34,14): error G30A0E944: 'size_t' does not name a type
+     34 | static const size_t VFS_MAX_FILENAME = 128;
+        |              ^~~~~~
+  core\include/kernel/vfs.h:34:14: note: 'size_t' is defined in header '<cstddef>'; this is probably fixable by adding '#include <cstddef>'
+core\include/kernel/vfs.h(35,14): error G30A0E944: 'size_t' does not name a type
+     35 | static const size_t VFS_MAX_MOUNTS = 8;
+        |              ^~~~~~
+  core\include/kernel/vfs.h:35:14: note: 'size_t' is defined in header '<cstddef>'; this is probably fixable by adding '#include <cstddef>'
+core\include/kernel/vfs.h(36,14): error G30A0E944: 'size_t' does not name a type
+     36 | static const size_t VFS_MAX_OPEN_FILES = 32;
+        |              ^~~~~~
+  core\include/kernel/vfs.h:36:14: note: 'size_t' is defined in header '<cstddef>'; this is probably fixable by adding '#include <cstddef>'
+core\include/kernel/vfs.h(115,19): error G2F7BD88E: 'VFS_MAX_FILENAME' was not declared in this scope
+    115 |     char     name[VFS_MAX_FILENAME];
+        |                   ^~~~~~~~~~~~~~~~
+core\include/kernel/vfs.h(132,19): error G2F7BD88E: 'VFS_MAX_FILENAME' was not declared in this scope
+    132 |     char     name[VFS_MAX_FILENAME];
+        |                   ^~~~~~~~~~~~~~~~
+core\include/kernel/vfs.h(146,19): error GAA57BB08: 'VFS_MAX_PATH' was not declared in this scope
+    146 |     char     path[VFS_MAX_PATH];      // Mount path (e.g., "/", "/mnt/usb")
+        |                   ^~~~~~~~~~~~
+core\include/kernel/vfs.h(164,19): error GAA57BB08: 'VFS_MAX_PATH' was not declared in this scope
+    164 |     char     path[VFS_MAX_PATH];      // Full path (for debugging)
+        |                   ^~~~~~~~~~~~
+core\include/kernel/vfs.h(174,19): error GAA57BB08: 'VFS_MAX_PATH' was not declared in this scope
+    174 |     char     path[VFS_MAX_PATH];
+        |                   ^~~~~~~~~~~~
+core\include/kernel/vfs.h(213,54): error G30A0E944: 'size_t' has not been declared
+    213 | void normalize_path(const char* input, char* output, size_t outputSize);
+        |                                                      ^~~~~~
+  core\include/kernel/vfs.h:213:54: note: 'size_t' is defined in header '<cstddef>'; this is probably fixable by adding '#include <cstddef>'
+core\include/kernel/vfs.h(216,50): error G30A0E944: 'size_t' has not been declared
+    216 | void parent_path(const char* path, char* output, size_t outputSize);
+        |                                                  ^~~~~~
+  core\include/kernel/vfs.h:216:50: note: 'size_t' is defined in header '<cstddef>'; this is probably fixable by adding '#include <cstddef>'
+core\include/kernel/vfs.h(225,66): error G30A0E944: 'size_t' has not been declared
+    225 | void join_path(const char* base, const char* name, char* output, size_t outputSize);
+        |                                                                  ^~~~~~
+  core\include/kernel/vfs.h:225:66: note: 'size_t' is defined in header '<cstddef>'; this is probably fixable by adding '#include <cstddef>'
+  core\main.cpp: In function 'void kernel_main(void*, uint32_t)':
+core\main.cpp(154,53): error GD5C94910: 'kernel::ramdisk::create' cannot be used as a function
+    154 |         uint8_t ramdiskIdx = kernel::ramdisk::create(4 * 1024 * 1024, "ram0");
+        |                              ~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~
+  [ERROR] Failed to compile main.cpp
+  Press any key to continue . . . 
+C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Microsoft\VC\v170\Microsoft.MakeFile.Targets(45,5): error MSB3073: The command "cd kernel && build-x86.bat" exited with code 1.

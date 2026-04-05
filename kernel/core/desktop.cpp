@@ -10,6 +10,7 @@
 
 #include "include/kernel/desktop.h"
 #include "include/kernel/framebuffer.h"
+#include "include/kernel/shell.h"
 
 // ============================================================
 // System Shutdown Implementation
@@ -90,8 +91,8 @@ static inline void disable_interrupts()
 }
 #endif
 
-// Perform system shutdown
-static void perform_shutdown()
+// Perform system shutdown (extern for shell access)
+void perform_shutdown()
 {
 #if defined(ARCH_X86) || defined(ARCH_AMD64)
     // Method 1: QEMU debug exit (cleanest for QEMU with isa-debug-exit device)
@@ -131,8 +132,8 @@ static void perform_shutdown()
 #endif
 }
 
-// Perform system restart/reboot
-static void perform_restart()
+// Perform system restart/reboot (extern for shell access)
+void perform_restart()
 {
 #if defined(ARCH_X86) || defined(ARCH_AMD64)
     disable_interrupts();
@@ -184,8 +185,8 @@ static void perform_restart()
 #endif
 }
 
-// Perform system sleep/suspend
-static void perform_sleep()
+// Perform system sleep/suspend (extern for shell access)
+void perform_sleep()
 {
 #if defined(ARCH_X86) || defined(ARCH_AMD64)
     // ACPI S1 sleep state (CPU stops, system power maintained)
@@ -539,6 +540,12 @@ static int32_t s_dragCurrentX = 0;  // current mouse X during drag
 static int32_t s_dragCurrentY = 0;  // current mouse Y during drag
 static const int32_t kDragThreshold = 4;  // pixels before drag starts
 static bool  s_dragStarted = false;  // true once threshold exceeded
+
+// Double-click detection for icons
+static int s_lastClickedIcon = -1;
+static uint32_t s_lastClickTime = 0;
+static const uint32_t kDoubleClickMs = 500;  // Max ms between clicks for double-click
+static uint32_t s_tickCounter = 0;  // Incremented by main loop
 
 // Start menu hover and click state (-1 = none)
 static int s_hoverMenuLeft  = -1;   // hovered left-column item index
@@ -1192,6 +1199,7 @@ static void init_icon_positions()
     s_iconPositionsInitialized = true;
 }
 
+
 void init()
 {
     s_screenW = framebuffer::get_width();
@@ -1199,9 +1207,24 @@ void init()
     s_startMenuOpen = false;
     s_rightClickMenuOpen = false;
     s_notification.visible = true;
+    s_tickCounter = 0;
+    s_lastClickedIcon = -1;
+    s_lastClickTime = 0;
     init_icon_positions();
+    shell::init();
     s_initialized = true;
 }
+
+// Update tick counter (call this from main loop, e.g., every 10ms)
+void tick()
+{
+    s_tickCounter++;
+}
+
+
+
+
+
 
 
 void draw()
@@ -1215,7 +1238,30 @@ void draw()
     draw_right_click_menu();
     draw_notifications();
     draw_shutdown_dialog();
+    
+    // Draw shell window if open
+    if (shell::is_open()) {
+        uint32_t shellW = 700;
+        uint32_t shellH = 450;
+        uint32_t shellX = (s_screenW - shellW) / 2;
+        uint32_t shellY = (s_screenH - kTaskbarH - shellH) / 2;
+        
+        if (shell::get_state() == shell::ShellState::Fullscreen) {
+            shellX = 0;
+            shellY = 0;
+            shellW = s_screenW;
+            shellH = s_screenH - kTaskbarH;
+        }
+        
+        // Debug: Draw a simple red rectangle to verify shell::is_open() works
+        framebuffer::fill_rect(shellX, shellY, shellW, shellH, rgb(80, 20, 20));
+        framebuffer::fill_rect(shellX + 2, shellY + 2, shellW - 4, 30, rgb(40, 50, 70));
+        
+        shell::draw(shellX, shellY, shellW, shellH);
+    }
 }
+
+
 
 
 void toggle_start_menu()
@@ -1254,9 +1300,68 @@ void dismiss_notification()
     s_notification.visible = false;
 }
 
+void open_terminal()
+{
+    shell::open();
+}
+
+void handle_key(uint32_t key)
+{
+    // If shell is open, send keys to it
+    if (shell::is_open()) {
+        // Escape closes shell
+        if (key == 27) {  // ESC
+            shell::close();
+            draw();
+            return;
+        }
+        // F11 toggles fullscreen
+        if (key == 0x10A) {  // F11
+            shell::toggle_fullscreen();
+            draw();
+            return;
+        }
+        shell::process_key(key);
+        draw();
+        return;
+    }
+    
+    // Desktop keyboard shortcuts
+    if (key == '`' || key == '~') {
+        // Backtick opens terminal
+        shell::toggle();
+        draw();
+    }
+}
+
 // ============================================================
 // Mouse cursor (12x19 arrow, 1-bit mask)
 // ============================================================
+
+// Request redraw flag for keyboard IRQ handler
+static volatile bool s_needsRedraw = false;
+
+} // namespace desktop
+} // namespace kernel
+
+// External function for keyboard IRQ to request redraw
+void desktop_request_redraw()
+{
+    kernel::desktop::s_needsRedraw = true;
+}
+
+namespace kernel {
+namespace desktop {
+
+// Check and clear redraw flag
+bool needs_redraw()
+{
+    if (s_needsRedraw) {
+        s_needsRedraw = false;
+        return true;
+    }
+    return false;
+}
 
 // Classic arrow cursor bitmap (12 wide x 19 tall)
 // 0=transparent, 1=black outline, 2=white fill
@@ -1385,13 +1490,28 @@ static void hit_test_start_menu(int32_t mx, int32_t my, int& leftIdx, int& right
     }
 }
 
-// Show notification for a start menu item launch
+
+// Show notification for a start menu item launch (or launch the app)
 static void show_start_menu_notification(const char* label)
 {
+    // Check if this is Console - if so, launch the shell
+    bool isConsole = false;
+    const char* c = "Console";
+    const char* l = label;
+    while (*c && *l && *c == *l) { c++; l++; }
+    if (*c == '\0' && *l == '\0') isConsole = true;
+    
+    if (isConsole) {
+        s_startMenuOpen = false;
+        shell::open();
+        return;
+    }
+    
     s_notification.title = label;
     s_notification.message = "Application launched";
     s_notification.visible = true;
 }
+
 
 // Footer button IDs
 enum FooterButton {
@@ -1560,6 +1680,39 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
 
             s_iconPosX[s_dragIconIndex] = newX;
             s_iconPosY[s_dragIconIndex] = newY;
+        } else if (!s_dragStarted && s_dragIconIndex >= 0 && s_dragIconIndex < kDesktopIconCount) {
+            // Click without drag - this is a single click to launch
+            int iconIdx = s_dragIconIndex;
+            s_dragging = false;
+            s_dragStarted = false;
+            s_dragIconIndex = -1;
+            
+            // Check if this is Console by name (more reliable than index)
+            const char* iconLabel = s_desktopIcons[iconIdx].label;
+            bool isConsole = (iconLabel[0] == 'C' && iconLabel[1] == 'o' && iconLabel[2] == 'n' &&
+                              iconLabel[3] == 's' && iconLabel[4] == 'o' && iconLabel[5] == 'l' &&
+                              iconLabel[6] == 'e' && iconLabel[7] == '\0');
+            
+            if (isConsole) {
+                shell::open();
+                // Debug: verify shell is open
+                if (!shell::is_open()) {
+                    s_notification.title = "Shell Error";
+                    s_notification.message = "Failed to open shell";
+                    s_notification.visible = true;
+                }
+                draw();
+                draw_cursor(mx, my);
+                return;
+            } else {
+                // Show notification for other apps
+                s_notification.title = s_desktopIcons[iconIdx].label;
+                s_notification.message = "Application launched";
+                s_notification.visible = true;
+                draw();
+                draw_cursor(mx, my);
+                return;
+            }
         }
 
         s_dragging = false;
@@ -1572,6 +1725,41 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
 
     // Left button press
     if (pressed & 0x01) {
+        // Handle shell window clicks first (if shell is open)
+        if (shell::is_open()) {
+            // Calculate shell window bounds
+            uint32_t shellW = 700;
+            uint32_t shellH = 450;
+            uint32_t shellX = (s_screenW - shellW) / 2;
+            uint32_t shellY = (s_screenH - kTaskbarH - shellH) / 2;
+            
+            if (shell::get_state() == shell::ShellState::Fullscreen) {
+                shellX = 0;
+                shellY = 0;
+                shellW = s_screenW;
+                shellH = s_screenH - kTaskbarH;
+            }
+            
+            // Check if click is inside shell window
+            if ((uint32_t)mx >= shellX && (uint32_t)mx < shellX + shellW &&
+                (uint32_t)my >= shellY && (uint32_t)my < shellY + shellH) {
+                // Click inside shell - check for close button (top-right corner)
+                if ((uint32_t)mx >= shellX + shellW - 24 && (uint32_t)my < shellY + 24) {
+                    shell::close();
+                    draw();
+                    draw_cursor(mx, my);
+                    return;
+                }
+                // Otherwise, shell handles the click (TODO: text selection)
+                return;
+            }
+            // Click outside shell - close it
+            shell::close();
+            draw();
+            draw_cursor(mx, my);
+            return;
+        }
+        
         // Handle shutdown dialog clicks first (dialog takes priority)
         if (s_shutdownDialogOpen) {
             int btn = hit_test_shutdown_dialog(mx, my);
@@ -1706,9 +1894,38 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
             return;
         }
 
-        // Desktop icon click - begin potential drag
+
+        // Desktop icon click - begin potential drag or handle double-click
         int iconIdx = hit_test_icon(mx, my);
         if (iconIdx >= 0) {
+            // Check for double-click
+            uint32_t now = s_tickCounter;
+            if (iconIdx == s_lastClickedIcon && (now - s_lastClickTime) < kDoubleClickMs) {
+                // Double-click detected - launch the app
+                s_lastClickedIcon = -1;
+                s_lastClickTime = 0;
+                
+                // Check which icon was double-clicked
+                if (iconIdx == 2) {  // Console
+                    shell::open();
+                    draw();
+                    draw_cursor(mx, my);
+                    return;
+                } else {
+                    // Show notification for other apps (not implemented yet)
+                    s_notification.title = s_desktopIcons[iconIdx].label;
+                    s_notification.message = "Application launched";
+                    s_notification.visible = true;
+                    draw();
+                    draw_cursor(mx, my);
+                    return;
+                }
+            }
+            
+            // First click - record for double-click detection
+            s_lastClickedIcon = iconIdx;
+            s_lastClickTime = now;
+            
             s_selectedIcon = iconIdx;
             // Start drag tracking (actual drag begins after threshold)
             s_dragging = true;
@@ -1722,6 +1939,7 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
             draw_cursor(mx, my);
             return;
         }
+
 
         // Click on empty desktop area: deselect icon
         if ((uint32_t)my < taskbarY) {

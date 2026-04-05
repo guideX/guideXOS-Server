@@ -14,6 +14,7 @@
 #include "include/kernel/desktop.h"
 #include "include/kernel/interrupts.h"
 #include "include/kernel/ps2mouse.h"
+#include "include/kernel/ps2keyboard.h"
 #include "include/kernel/input_manager.h"
 #include "include/kernel/pit.h"
 #include "include/kernel/serial_debug.h"
@@ -175,6 +176,12 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::interrupts::register_irq(12, kernel::ps2mouse::irq_handler);
         kernel::serial::puts("[KERNEL] IRQ12 handler registered and unmasked\n");
         
+        // Initialize PS/2 keyboard driver and register IRQ1 handler
+        kernel::serial::puts("[KERNEL] Initializing PS/2 keyboard...\n");
+        kernel::ps2keyboard::init();
+        kernel::interrupts::register_irq(1, kernel::ps2keyboard::irq_handler);
+        kernel::serial::puts("[KERNEL] IRQ1 (keyboard) handler registered\n");
+        
         // Initialize input manager (handles USB HID, PS/2, VirtIO fallback)
         kernel::serial::puts("[KERNEL] Initializing input manager...\n");
         kernel::input::init(kernel::framebuffer::get_width(),
@@ -186,6 +193,7 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
                                      kernel::input::mouse_y());
         
         kernel::serial::puts("[KERNEL] Entering main loop (waiting for input)...\n");
+        
         
         // Main kernel loop — poll input and redraw cursor
         while (1) {
@@ -199,6 +207,27 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
                     kernel::input::mouse_y(),
                     kernel::input::mouse_buttons());
             }
+            
+            // Process buffered keyboard input from PS/2 IRQ handler
+            if (kernel::ps2keyboard::has_key()) {
+                uint32_t key = kernel::ps2keyboard::get_key();
+                if (key != 0) {
+                    kernel::desktop::handle_key(key);
+                    // handle_key calls draw() internally; redraw cursor overlay
+                    kernel::desktop::draw_cursor(
+                        kernel::input::mouse_x(),
+                        kernel::input::mouse_y());
+                }
+            }
+            
+            // Check if any other source triggered a redraw
+            if (kernel::desktop::needs_redraw()) {
+                kernel::desktop::draw();
+                kernel::desktop::draw_cursor(
+                    kernel::input::mouse_x(),
+                    kernel::input::mouse_y());
+            }
+            
             // Halt CPU until next interrupt (saves power)
             kernel::arch::halt();
         }
