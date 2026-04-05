@@ -30,6 +30,7 @@
 
 // Network subsystem
 #include "include/kernel/nic.h"
+#include "include/kernel/ethernet.h"
 
 #if ARCH_HAS_PIC_8259
 #include "include/kernel/multiboot.h"
