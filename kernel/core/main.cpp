@@ -31,6 +31,8 @@
 // Network subsystem
 #include "include/kernel/nic.h"
 #include "include/kernel/ethernet.h"
+#include "include/kernel/ipv4.h"
+#include "include/kernel/icmp.h"
 
 #if ARCH_HAS_PIC_8259
 #include "include/kernel/multiboot.h"
@@ -183,6 +185,22 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
             kernel::interrupts::register_irq(
                 kernel::nic::get_device()->irqLine,
                 kernel::nic::irq_handler);
+            
+            // Initialize IPv4 layer
+            kernel::ipv4::init();
+            kernel::ipv4::set_mac_address(kernel::nic::get_mac_address());
+            
+            // Configure with default IP (can be changed via DHCP later)
+            // Default: 10.0.2.15/24, gateway 10.0.2.2 (QEMU user networking)
+            kernel::ipv4::configure(
+                kernel::ipv4::make_ip(10, 0, 2, 15),   // IP
+                kernel::ipv4::MASK_24,                  // Subnet mask
+                kernel::ipv4::make_ip(10, 0, 2, 2),    // Gateway
+                kernel::ipv4::make_ip(10, 0, 2, 3)     // DNS
+            );
+            
+            // Initialize ICMP (ping support)
+            kernel::icmp::init();
         }
         
         // ============================================================

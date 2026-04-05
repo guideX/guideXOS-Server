@@ -7,6 +7,9 @@
 
 #include "include/kernel/shell.h"
 #include "include/kernel/framebuffer.h"
+#include "include/kernel/icmp.h"
+#include "include/kernel/ipv4.h"
+#include "include/kernel/nic.h"
 
 // Forward declarations for power functions (defined in desktop.cpp, outside any namespace)
 extern void perform_shutdown();
@@ -297,6 +300,12 @@ static void cmd_help() {
     output_string("  lspci          - List PCI devices\n");
     output_string("  lsusb          - List USB devices\n");
     output_string("  lsblk          - List block devices\n");
+    output_string("\n");
+    output_string("Network:\n");
+    output_string("  ping <ip>      - Send ICMP echo request\n");
+    output_string("  ifconfig, ip   - Network interface info\n");
+    output_string("  route          - Routing table\n");
+    output_string("  netstat, ss    - Network connections\n");
     output_string("\n");
     output_string("Desktop:\n");
     output_string("  apps           - List applications\n");
@@ -820,6 +829,305 @@ static void cmd_lsusb() {
 }
 
 // ============================================================
+// Network Commands
+// ============================================================
+
+static void cmd_ifconfig() {
+    if (!nic::is_active()) {
+        output_string("No network interface active\n");
+        return;
+    }
+    
+    const nic::NICDevice* dev = nic::get_device();
+    const ipv4::NetworkConfig* cfg = ipv4::get_config();
+    
+    output_string(dev->name);
+    output_string(": flags=4163<UP,BROADCAST,RUNNING,MULTICAST>  mtu 1500\n");
+    
+    if (cfg && cfg->configured) {
+        output_string("        inet ");
+        char ipStr[16];
+        ipv4::ip_to_string(cfg->ipAddr, ipStr);
+        output_string(ipStr);
+        output_string("  netmask ");
+        ipv4::ip_to_string(cfg->subnetMask, ipStr);
+        output_string(ipStr);
+        output_string("\n");
+    }
+    
+    output_string("        ether ");
+    char macStr[18];
+    ethernet::mac_to_string(dev->macAddress, macStr);
+    output_string(macStr);
+    output_string("\n");
+    
+    output_string("        RX packets ");
+    // Simple number output
+    const nic::NetStats* stats = nic::get_stats();
+    if (stats) {
+        char num[12];
+        int i = 0;
+        uint32_t n = stats->rxFrames;
+        if (n == 0) { num[i++] = '0'; }
+        else {
+            char tmp[12];
+            int j = 0;
+            while (n > 0) { tmp[j++] = '0' + (n % 10); n /= 10; }
+            while (j > 0) { num[i++] = tmp[--j]; }
+        }
+        num[i] = '\0';
+        output_string(num);
+    }
+    output_string("  bytes ");
+    if (stats) {
+        char num[12];
+        int i = 0;
+        uint32_t n = stats->rxBytes;
+        if (n == 0) { num[i++] = '0'; }
+        else {
+            char tmp[12];
+            int j = 0;
+            while (n > 0) { tmp[j++] = '0' + (n % 10); n /= 10; }
+            while (j > 0) { num[i++] = tmp[--j]; }
+        }
+        num[i] = '\0';
+        output_string(num);
+    }
+    output_string("\n");
+    
+    output_string("        TX packets ");
+    if (stats) {
+        char num[12];
+        int i = 0;
+        uint32_t n = stats->txFrames;
+        if (n == 0) { num[i++] = '0'; }
+        else {
+            char tmp[12];
+            int j = 0;
+            while (n > 0) { tmp[j++] = '0' + (n % 10); n /= 10; }
+            while (j > 0) { num[i++] = tmp[--j]; }
+        }
+        num[i] = '\0';
+        output_string(num);
+    }
+    output_string("  bytes ");
+    if (stats) {
+        char num[12];
+        int i = 0;
+        uint32_t n = stats->txBytes;
+        if (n == 0) { num[i++] = '0'; }
+        else {
+            char tmp[12];
+            int j = 0;
+            while (n > 0) { tmp[j++] = '0' + (n % 10); n /= 10; }
+            while (j > 0) { num[i++] = tmp[--j]; }
+        }
+        num[i] = '\0';
+        output_string(num);
+    }
+    output_string("\n");
+}
+
+static void cmd_ping(const char* target) {
+    if (!target || target[0] == '\0') {
+        output_string("Usage: ping <ip-address>\n");
+        output_string("Example: ping 10.0.2.2\n");
+        return;
+    }
+    
+    if (!nic::is_active()) {
+        output_string("ping: network interface not active\n");
+        return;
+    }
+    
+    if (!ipv4::is_configured()) {
+        output_string("ping: network not configured\n");
+        return;
+    }
+    
+    // Parse IP address
+    uint32_t targetIP;
+    if (!ipv4::ip_from_string(target, &targetIP)) {
+        output_string("ping: invalid IP address '");
+        output_string(target);
+        output_string("'\n");
+        return;
+    }
+    
+    output_string("PING ");
+    output_string(target);
+    output_string(" 56 data bytes\n");
+    
+    // Send 4 pings
+    uint16_t sent = 0;
+    uint16_t received = 0;
+    
+    icmp::Status status = icmp::start_ping_session(targetIP, 1000);
+    if (status != icmp::ICMP_OK) {
+        output_string("ping: failed to start session\n");
+        return;
+    }
+    
+    for (int i = 0; i < 4; ++i) {
+        status = icmp::ping_session_send();
+        if (status != icmp::ICMP_OK) {
+            output_string("ping: send failed\n");
+            continue;
+        }
+        sent++;
+        
+        // Wait for reply (simplified polling)
+        bool gotReply = false;
+        for (int wait = 0; wait < 100; ++wait) {
+            icmp::PingReply reply;
+            if (icmp::ping_session_check_reply(&reply)) {
+                gotReply = true;
+                received++;
+                
+                // Format output
+                output_string("64 bytes from ");
+                char ipStr[16];
+                ipv4::ip_to_string(reply.srcIP, ipStr);
+                output_string(ipStr);
+                output_string(": icmp_seq=");
+                char seqStr[8];
+                seqStr[0] = '0' + ((reply.sequence / 10) % 10);
+                seqStr[1] = '0' + (reply.sequence % 10);
+                seqStr[2] = '\0';
+                output_string(seqStr);
+                output_string(" ttl=");
+                char ttlStr[8];
+                int ti = 0;
+                uint16_t t = reply.ttl;
+                if (t == 0) { ttlStr[ti++] = '0'; }
+                else {
+                    char tmp[8];
+                    int tj = 0;
+                    while (t > 0) { tmp[tj++] = '0' + (t % 10); t /= 10; }
+                    while (tj > 0) { ttlStr[ti++] = tmp[--tj]; }
+                }
+                ttlStr[ti] = '\0';
+                output_string(ttlStr);
+                output_string(" time=");
+                char rttStr[8];
+                int ri = 0;
+                uint16_t r = reply.rtt;
+                if (r == 0) { rttStr[ri++] = '0'; }
+                else {
+                    char tmp[8];
+                    int rj = 0;
+                    while (r > 0) { tmp[rj++] = '0' + (r % 10); r /= 10; }
+                    while (rj > 0) { rttStr[ri++] = tmp[--rj]; }
+                }
+                rttStr[ri] = '\0';
+                output_string(rttStr);
+                output_string(" ms\n");
+                break;
+            }
+            
+            // Small delay between checks
+            for (volatile int d = 0; d < 10000; ++d) {}
+        }
+        
+        if (!gotReply) {
+            output_string("Request timeout for icmp_seq ");
+            char seqStr[8];
+            seqStr[0] = '0' + (((i+1) / 10) % 10);
+            seqStr[1] = '0' + ((i+1) % 10);
+            seqStr[2] = '\0';
+            output_string(seqStr);
+            output_string("\n");
+        }
+        
+        // Delay between pings (approximately 1 second)
+        for (volatile int d = 0; d < 1000000; ++d) {}
+    }
+    
+    icmp::end_ping_session();
+    
+    // Print statistics
+    output_string("\n--- ");
+    output_string(target);
+    output_string(" ping statistics ---\n");
+    
+    char statStr[64];
+    int si = 0;
+    // sent
+    if (sent == 0) { statStr[si++] = '0'; }
+    else {
+        char tmp[8];
+        int tj = 0;
+        uint16_t n = sent;
+        while (n > 0) { tmp[tj++] = '0' + (n % 10); n /= 10; }
+        while (tj > 0) { statStr[si++] = tmp[--tj]; }
+    }
+    statStr[si++] = ' '; statStr[si++] = 'p'; statStr[si++] = 'a';
+    statStr[si++] = 'c'; statStr[si++] = 'k'; statStr[si++] = 'e';
+    statStr[si++] = 't'; statStr[si++] = 's'; statStr[si++] = ' ';
+    statStr[si++] = 't'; statStr[si++] = 'x'; statStr[si++] = ',';
+    statStr[si++] = ' ';
+    // received
+    if (received == 0) { statStr[si++] = '0'; }
+    else {
+        char tmp[8];
+        int tj = 0;
+        uint16_t n = received;
+        while (n > 0) { tmp[tj++] = '0' + (n % 10); n /= 10; }
+        while (tj > 0) { statStr[si++] = tmp[--tj]; }
+    }
+    statStr[si++] = ' '; statStr[si++] = 'r'; statStr[si++] = 'x';
+    statStr[si++] = ','; statStr[si++] = ' ';
+    // loss
+    uint16_t loss = (sent > 0) ? ((sent - received) * 100 / sent) : 0;
+    if (loss == 0) { statStr[si++] = '0'; }
+    else {
+        char tmp[8];
+        int tj = 0;
+        while (loss > 0) { tmp[tj++] = '0' + (loss % 10); loss /= 10; }
+        while (tj > 0) { statStr[si++] = tmp[--tj]; }
+    }
+    statStr[si++] = '%'; statStr[si++] = ' ';
+    statStr[si++] = 'l'; statStr[si++] = 'o'; statStr[si++] = 's';
+    statStr[si++] = 's'; statStr[si++] = '\n';
+    statStr[si] = '\0';
+    output_string(statStr);
+}
+
+static void cmd_netstat() {
+    output_string("Active Internet connections\n");
+    output_string("Proto Recv-Q Send-Q Local Address           Foreign Address         State\n");
+    // In a real implementation, this would show actual connections
+    output_string("(no active connections)\n");
+}
+
+static void cmd_route() {
+    output_string("Kernel IP routing table\n");
+    output_string("Destination     Gateway         Genmask         Flags Metric Iface\n");
+    
+    const ipv4::NetworkConfig* cfg = ipv4::get_config();
+    if (cfg && cfg->configured) {
+        char ipStr[16];
+        
+        // Local network route
+        uint32_t network = cfg->ipAddr & cfg->subnetMask;
+        ipv4::ip_to_string(network, ipStr);
+        output_string(ipStr);
+        output_string("     0.0.0.0         ");
+        ipv4::ip_to_string(cfg->subnetMask, ipStr);
+        output_string(ipStr);
+        output_string("     U     1      eth0\n");
+        
+        // Default gateway
+        output_string("0.0.0.0         ");
+        ipv4::ip_to_string(cfg->gateway, ipStr);
+        output_string(ipStr);
+        output_string("     0.0.0.0         UG    100    eth0\n");
+    } else {
+        output_string("(network not configured)\n");
+    }
+}
+
+// ============================================================
 // Command Parser and Executor
 // ============================================================
 
@@ -1029,7 +1337,18 @@ static void execute_command(const char* cmd) {
         cmd_lspci();
     } else if (str_eq(command, "lsusb")) {
         cmd_lsusb();
-    } else if (str_eq(command, "top") || str_eq(command, "htop")) {
+    }
+    // Network commands
+    else if (str_eq(command, "ping")) {
+        cmd_ping(arg1);
+    } else if (str_eq(command, "ifconfig") || str_eq(command, "ip")) {
+        cmd_ifconfig();
+    } else if (str_eq(command, "netstat") || str_eq(command, "ss")) {
+        cmd_netstat();
+    } else if (str_eq(command, "route")) {
+        cmd_route();
+    }
+    else if (str_eq(command, "top") || str_eq(command, "htop")) {
         output_string("top - 00:00:00 up ");
         char buf[16];
         uint32_t hours = s_uptimeSeconds / 3600;
