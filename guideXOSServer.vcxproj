@@ -172,6 +172,7 @@
     <ClInclude Include="kernel\core\include\kernel\ata.h" />
     <ClInclude Include="kernel\core\include\kernel\block_device.h" />
     <ClInclude Include="kernel\core\include\kernel\desktop.h" />
+    <ClInclude Include="kernel\core\include\kernel\dhcp.h" />
     <ClInclude Include="kernel\core\include\kernel\dns.h" />
     <ClInclude Include="kernel\core\include\kernel\ethernet.h" />
     <ClInclude Include="kernel\core\include\kernel\fb_console.h" />
@@ -321,6 +322,7 @@
     <ClCompile Include="kernel\core\ata.cpp" />
     <ClCompile Include="kernel\core\block_device.cpp" />
     <ClCompile Include="kernel\core\desktop.cpp" />
+    <ClCompile Include="kernel\core\dhcp.cpp" />
     <ClCompile Include="kernel\core\dns.cpp" />
     <ClCompile Include="kernel\core\ethernet.cpp" />
     <ClCompile Include="kernel\core\fb_console.cpp" />
