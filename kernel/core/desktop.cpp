@@ -556,15 +556,35 @@ static int s_clickedMenuRight = -1; // clicked right-column item index
 // Shell window state
 static int32_t s_shellPosX = -1;    // Shell window X position (-1 = centered)
 static int32_t s_shellPosY = -1;    // Shell window Y position (-1 = centered)
+static int32_t s_shellW = -1;       // Shell window width (-1 = default)
+static int32_t s_shellH = -1;       // Shell window height (-1 = default)
 static bool    s_shellActive = true; // Whether shell window is active (focused)
+static bool    s_shellMinimized = false; // Whether shell is minimized to taskbar
+static bool    s_shellMaximized = false; // Whether shell is maximized
 static const uint32_t kShellDefaultW = 700;
 static const uint32_t kShellDefaultH = 450;
+static const uint32_t kShellMinW = 400;     // Minimum resize width
+static const uint32_t kShellMinH = 200;     // Minimum resize height
 static const uint32_t kShellTitlebarH = 24;
+static const uint32_t kShellResizeMargin = 8; // Corner resize area size
+
+// Saved position/size before maximize (to restore)
+static int32_t s_shellSavedX = -1;
+static int32_t s_shellSavedY = -1;
+static int32_t s_shellSavedW = -1;
+static int32_t s_shellSavedH = -1;
 
 // Shell window dragging state
 static bool    s_shellDragging = false;
 static int32_t s_shellDragOffsetX = 0;
 static int32_t s_shellDragOffsetY = 0;
+
+// Shell window resize state
+static bool    s_shellResizing = false;
+static int32_t s_shellResizeStartX = 0;
+static int32_t s_shellResizeStartY = 0;
+static int32_t s_shellResizeStartW = 0;
+static int32_t s_shellResizeStartH = 0;
 
 // ============================================================
 // Drawing routines
@@ -791,11 +811,19 @@ static void draw_search_box(uint32_t x, uint32_t y)
 // Taskbar window buttons (matching Legacy Taskbar.cs button rendering)
 // ============================================================
 
+// Store terminal button bounds for click detection
+static uint32_t s_terminalBtnX = 0;
+static uint32_t s_terminalBtnY = 0;
+static uint32_t s_terminalBtnW = 0;
+static uint32_t s_terminalBtnH = 0;
+static bool s_terminalBtnVisible = false;
+
 static void draw_taskbar_buttons(uint32_t startX, uint32_t tbY, uint32_t maxX)
 {
     uint32_t btnX = startX;
     uint32_t btnY = tbY + (kTaskbarH - kTaskbarBtnH) / 2;
 
+    // Draw static taskbar entries
     for (int i = 0; i < kTaskbarEntryCount; i++) {
         if (btnX + kTaskbarBtnMaxW > maxX) break;
 
@@ -825,6 +853,48 @@ static void draw_taskbar_buttons(uint32_t startX, uint32_t tbY, uint32_t maxX)
                   s_taskbarEntries[i].title, rgb(230, 230, 240), 1);
 
         btnX += btnW + kTaskbarBtnGap;
+    }
+    
+    // Draw Terminal button if shell is open
+    s_terminalBtnVisible = false;
+    if (shell::is_open()) {
+        if (btnX + kTaskbarBtnMaxW <= maxX) {
+            const char* title = "Terminal";
+            uint32_t tw = (uint32_t)measure_text(title);
+            uint32_t btnW = tw + 30;
+            if (btnW > kTaskbarBtnMaxW) btnW = kTaskbarBtnMaxW;
+            
+            // Store button bounds for click detection
+            s_terminalBtnX = btnX;
+            s_terminalBtnY = btnY;
+            s_terminalBtnW = btnW;
+            s_terminalBtnH = kTaskbarBtnH;
+            s_terminalBtnVisible = true;
+            
+            // Button background - active if not minimized and is active
+            bool isActive = !s_shellMinimized && s_shellActive;
+            uint32_t bgColor = isActive ? rgb(70, 100, 150) : rgb(55, 58, 70);
+            framebuffer::fill_rect(btnX, btnY, btnW, kTaskbarBtnH, bgColor);
+            
+            // Active indicator line at bottom
+            if (isActive) {
+                framebuffer::fill_rect(btnX + 2, btnY + kTaskbarBtnH - 3, btnW - 4, 2, rgb(100, 160, 240));
+            }
+            
+            // Minimized indicator (dot) when minimized
+            if (s_shellMinimized) {
+                framebuffer::fill_rect(btnX + btnW/2 - 2, btnY + kTaskbarBtnH - 5, 4, 2, rgb(100, 160, 240));
+            }
+            
+            // Terminal icon (green square)
+            uint32_t iconSz = 14;
+            uint32_t iconX = btnX + 4;
+            uint32_t iconY2 = btnY + (kTaskbarBtnH - iconSz) / 2;
+            framebuffer::fill_rect(iconX, iconY2, iconSz, iconSz, rgb(120, 180, 80));
+            
+            // Title text
+            draw_text(btnX + 22, btnY + (kTaskbarBtnH - kGlyphH) / 2, title, rgb(230, 230, 240), 1);
+        }
     }
 }
 
@@ -1202,20 +1272,23 @@ struct ShellWindowGeometry {
     uint32_t x, y, w, h;
     uint32_t titlebarY, titlebarH;
     uint32_t closeBtnX, closeBtnY, closeBtnW, closeBtnH;
+    uint32_t maxBtnX, maxBtnY, maxBtnW, maxBtnH;
+    uint32_t minBtnX, minBtnY, minBtnW, minBtnH;
 };
 
 static ShellWindowGeometry get_shell_geometry()
 {
     ShellWindowGeometry g;
     
-    if (shell::get_state() == shell::ShellState::Fullscreen) {
+    if (shell::get_state() == shell::ShellState::Fullscreen || s_shellMaximized) {
         g.x = 0;
         g.y = 0;
         g.w = s_screenW;
         g.h = s_screenH - kTaskbarH;
     } else {
-        g.w = kShellDefaultW;
-        g.h = kShellDefaultH;
+        // Use custom size if set, otherwise default
+        g.w = (s_shellW > 0) ? (uint32_t)s_shellW : kShellDefaultW;
+        g.h = (s_shellH > 0) ? (uint32_t)s_shellH : kShellDefaultH;
         
         // Use stored position or center if not set
         if (s_shellPosX < 0) {
@@ -1233,11 +1306,30 @@ static ShellWindowGeometry get_shell_geometry()
     g.titlebarY = g.y;
     g.titlebarH = kShellTitlebarH;
     
-    // Close button is in top-right corner of titlebar (18x16 pixels)
-    g.closeBtnW = 18;
-    g.closeBtnH = 16;
-    g.closeBtnX = g.x + g.w - 22;
-    g.closeBtnY = g.y + 4;
+    // Window control buttons (right side of titlebar): [_] [?] [X]
+    // Each button is 18x16 pixels with 2px gap
+    const uint32_t btnW = 18;
+    const uint32_t btnH = 16;
+    const uint32_t btnGap = 2;
+    const uint32_t btnY = g.y + 4;
+    
+    // Close button (rightmost)
+    g.closeBtnW = btnW;
+    g.closeBtnH = btnH;
+    g.closeBtnX = g.x + g.w - btnW - 4;
+    g.closeBtnY = btnY;
+    
+    // Maximize button (left of close)
+    g.maxBtnW = btnW;
+    g.maxBtnH = btnH;
+    g.maxBtnX = g.closeBtnX - btnW - btnGap;
+    g.maxBtnY = btnY;
+    
+    // Minimize button (left of maximize)
+    g.minBtnW = btnW;
+    g.minBtnH = btnH;
+    g.minBtnX = g.maxBtnX - btnW - btnGap;
+    g.minBtnY = btnY;
     
     return g;
 }
@@ -1247,12 +1339,15 @@ enum ShellHitTest {
     SHELL_HIT_NONE = 0,
     SHELL_HIT_TITLEBAR,
     SHELL_HIT_CLOSE_BTN,
+    SHELL_HIT_MAX_BTN,
+    SHELL_HIT_MIN_BTN,
+    SHELL_HIT_RESIZE_CORNER,
     SHELL_HIT_CLIENT
 };
 
 static ShellHitTest hit_test_shell(int32_t mx, int32_t my)
 {
-    if (!shell::is_open()) return SHELL_HIT_NONE;
+    if (!shell::is_open() || s_shellMinimized) return SHELL_HIT_NONE;
     
     ShellWindowGeometry g = get_shell_geometry();
     
@@ -1262,10 +1357,31 @@ static ShellHitTest hit_test_shell(int32_t mx, int32_t my)
         return SHELL_HIT_NONE;
     }
     
-    // Check close button first (it's inside titlebar)
+    // Check close button first
     if ((uint32_t)mx >= g.closeBtnX && (uint32_t)mx < g.closeBtnX + g.closeBtnW &&
         (uint32_t)my >= g.closeBtnY && (uint32_t)my < g.closeBtnY + g.closeBtnH) {
         return SHELL_HIT_CLOSE_BTN;
+    }
+    
+    // Check maximize button
+    if ((uint32_t)mx >= g.maxBtnX && (uint32_t)mx < g.maxBtnX + g.maxBtnW &&
+        (uint32_t)my >= g.maxBtnY && (uint32_t)my < g.maxBtnY + g.maxBtnH) {
+        return SHELL_HIT_MAX_BTN;
+    }
+    
+    // Check minimize button
+    if ((uint32_t)mx >= g.minBtnX && (uint32_t)mx < g.minBtnX + g.minBtnW &&
+        (uint32_t)my >= g.minBtnY && (uint32_t)my < g.minBtnY + g.minBtnH) {
+        return SHELL_HIT_MIN_BTN;
+    }
+    
+    // Check resize corner (bottom-right, only when not maximized)
+    if (!s_shellMaximized && shell::get_state() != shell::ShellState::Fullscreen) {
+        uint32_t resizeX = g.x + g.w - kShellResizeMargin;
+        uint32_t resizeY = g.y + g.h - kShellResizeMargin;
+        if ((uint32_t)mx >= resizeX && (uint32_t)my >= resizeY) {
+            return SHELL_HIT_RESIZE_CORNER;
+        }
     }
     
     // Check titlebar area
@@ -1335,8 +1451,8 @@ void draw()
     draw_notifications();
     draw_shutdown_dialog();
     
-    // Draw shell window if open
-    if (shell::is_open()) {
+    // Draw shell window if open and not minimized
+    if (shell::is_open() && !s_shellMinimized) {
         ShellWindowGeometry g = get_shell_geometry();
         
         // Draw window background with border
@@ -1356,6 +1472,48 @@ void draw()
         // Draw titlebar (dimmed when inactive)
         uint32_t titlebarColor = s_shellActive ? rgb(40, 50, 70) : rgb(50, 50, 55);
         framebuffer::fill_rect(g.x + 1, g.y + 1, g.w - 2, g.titlebarH - 1, titlebarColor);
+        
+        // Draw window title
+        draw_text(g.x + 8, g.y + 6, "Terminal", s_shellActive ? rgb(220, 220, 230) : rgb(150, 150, 160), 1);
+        
+        // Draw window control buttons
+        // Close button (X) - red background
+        framebuffer::fill_rect(g.closeBtnX, g.closeBtnY, g.closeBtnW, g.closeBtnH, rgb(180, 60, 60));
+        // Draw X
+        for (int i = 0; i < 8; i++) {
+            framebuffer::put_pixel(g.closeBtnX + 5 + i, g.closeBtnY + 4 + i, rgb(255, 255, 255));
+            framebuffer::put_pixel(g.closeBtnX + 12 - i, g.closeBtnY + 4 + i, rgb(255, 255, 255));
+        }
+        
+        // Maximize button (?) - gray background
+        framebuffer::fill_rect(g.maxBtnX, g.maxBtnY, g.maxBtnW, g.maxBtnH, rgb(60, 65, 75));
+        if (s_shellMaximized) {
+            // Draw restore icon (two overlapping squares)
+            draw_rect(g.maxBtnX + 6, g.maxBtnY + 3, 8, 8, rgb(200, 200, 210));
+            draw_rect(g.maxBtnX + 4, g.maxBtnY + 5, 8, 8, rgb(200, 200, 210));
+        } else {
+            // Draw maximize icon (single square)
+            draw_rect(g.maxBtnX + 4, g.maxBtnY + 4, 10, 8, rgb(200, 200, 210));
+        }
+        
+        // Minimize button (_) - gray background
+        framebuffer::fill_rect(g.minBtnX, g.minBtnY, g.minBtnW, g.minBtnH, rgb(60, 65, 75));
+        // Draw underscore
+        hline(g.minBtnX + 4, g.minBtnY + 11, 10, rgb(200, 200, 210));
+        
+        // Draw resize grip in bottom-right corner (only when not maximized)
+        if (!s_shellMaximized && shell::get_state() != shell::ShellState::Fullscreen) {
+            uint32_t gripX = g.x + g.w - kShellResizeMargin;
+            uint32_t gripY = g.y + g.h - kShellResizeMargin;
+            // Draw diagonal lines for grip
+            for (int i = 0; i < 3; i++) {
+                uint32_t offset = i * 3;
+                framebuffer::put_pixel(gripX + 2 + offset, gripY + 5, rgb(100, 110, 130));
+                framebuffer::put_pixel(gripX + 3 + offset, gripY + 4, rgb(100, 110, 130));
+                framebuffer::put_pixel(gripX + 4 + offset, gripY + 3, rgb(100, 110, 130));
+                framebuffer::put_pixel(gripX + 5 + offset, gripY + 2, rgb(100, 110, 130));
+            }
+        }
         
         shell::draw(g.x, g.y, g.w, g.h);
     }
@@ -1404,6 +1562,7 @@ void open_terminal()
 {
     shell::open();
     s_shellActive = true;
+    s_shellMinimized = false;
 }
 
 void handle_key(uint32_t key)
@@ -1415,6 +1574,10 @@ void handle_key(uint32_t key)
             shell::close();
             s_shellPosX = -1;  // Reset position for next open
             s_shellPosY = -1;
+            s_shellW = -1;
+            s_shellH = -1;
+            s_shellMinimized = false;
+            s_shellMaximized = false;
             s_shellActive = true;
             draw();
             return;
@@ -1425,8 +1588,8 @@ void handle_key(uint32_t key)
             draw();
             return;
         }
-        // Only process keys if shell is active
-        if (s_shellActive) {
+        // Only process keys if shell is active and not minimized
+        if (s_shellActive && !s_shellMinimized) {
             shell::process_key(key);
             draw();
         }
@@ -1435,9 +1598,15 @@ void handle_key(uint32_t key)
     
     // Desktop keyboard shortcuts
     if (key == '`' || key == '~') {
-        // Backtick opens terminal
-        shell::toggle();
-        s_shellActive = true;
+        // Backtick opens/restores terminal
+        if (shell::is_open() && s_shellMinimized) {
+            s_shellMinimized = false;
+            s_shellActive = true;
+        } else {
+            shell::toggle();
+            s_shellActive = true;
+            s_shellMinimized = false;
+        }
         draw();
     }
 }
@@ -1613,8 +1782,10 @@ static void show_start_menu_notification(const char* label)
         s_startMenuOpen = false;
         shell::open();
         s_shellActive = true;
+        s_shellMinimized = false;
         return;
     }
+    
     
     s_notification.title = label;
     s_notification.message = "Application launched";
@@ -1776,6 +1947,41 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
         draw_cursor(mx, my);
         return;
     }
+    
+    // ---- Handle shell window resize in progress ----
+    if (s_shellResizing && (buttons & 0x01)) {
+        int32_t deltaX = mx - s_shellResizeStartX;
+        int32_t deltaY = my - s_shellResizeStartY;
+        
+        int32_t newW = s_shellResizeStartW + deltaX;
+        int32_t newH = s_shellResizeStartH + deltaY;
+        
+        // Clamp to minimum size
+        if (newW < (int32_t)kShellMinW) newW = (int32_t)kShellMinW;
+        if (newH < (int32_t)kShellMinH) newH = (int32_t)kShellMinH;
+        
+        // Clamp to screen bounds
+        ShellWindowGeometry g = get_shell_geometry();
+        if ((int32_t)g.x + newW > (int32_t)s_screenW)
+            newW = (int32_t)s_screenW - (int32_t)g.x;
+        if ((int32_t)g.y + newH > (int32_t)(s_screenH - kTaskbarH))
+            newH = (int32_t)(s_screenH - kTaskbarH) - (int32_t)g.y;
+        
+        s_shellW = newW;
+        s_shellH = newH;
+        
+        draw();
+        draw_cursor(mx, my);
+        return;
+    }
+    
+    // ---- Handle shell window resize release ----
+    if (s_shellResizing && (released & 0x01)) {
+        s_shellResizing = false;
+        draw();
+        draw_cursor(mx, my);
+        return;
+    }
 
     // ---- Handle icon drag-in-progress (left button held) ----
     if (s_dragging && (buttons & 0x01)) {
@@ -1835,6 +2041,7 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
             if (isConsole) {
                 shell::open();
                 s_shellActive = true;
+                s_shellMinimized = false;
                 // Debug: verify shell is open
                 if (!shell::is_open()) {
                     s_notification.title = "Shell Error";
@@ -1865,8 +2072,28 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
 
     // Left button press
     if (pressed & 0x01) {
-        // Handle shell window clicks first (if shell is open)
-        if (shell::is_open()) {
+        // Check for Terminal taskbar button click first
+        if (s_terminalBtnVisible && shell::is_open()) {
+            if ((uint32_t)mx >= s_terminalBtnX && (uint32_t)mx < s_terminalBtnX + s_terminalBtnW &&
+                (uint32_t)my >= s_terminalBtnY && (uint32_t)my < s_terminalBtnY + s_terminalBtnH) {
+                // Toggle minimize state or activate window
+                if (s_shellMinimized) {
+                    s_shellMinimized = false;
+                    s_shellActive = true;
+                } else if (s_shellActive) {
+                    s_shellMinimized = true;
+                    s_shellActive = false;
+                } else {
+                    s_shellActive = true;
+                }
+                draw();
+                draw_cursor(mx, my);
+                return;
+            }
+        }
+        
+        // Handle shell window clicks (if shell is open and not minimized)
+        if (shell::is_open() && !s_shellMinimized) {
             ShellHitTest hit = hit_test_shell(mx, my);
             
             if (hit == SHELL_HIT_CLOSE_BTN) {
@@ -1874,14 +2101,65 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
                 shell::close();
                 s_shellPosX = -1;  // Reset position for next open
                 s_shellPosY = -1;
+                s_shellW = -1;
+                s_shellH = -1;
+                s_shellMinimized = false;
+                s_shellMaximized = false;
                 s_shellActive = true;
                 draw();
                 draw_cursor(mx, my);
                 return;
             }
             
-            if (hit == SHELL_HIT_TITLEBAR && shell::get_state() != shell::ShellState::Fullscreen) {
-                // Titlebar clicked - start dragging
+            if (hit == SHELL_HIT_MAX_BTN) {
+                // Maximize button clicked - toggle maximize
+                if (s_shellMaximized) {
+                    // Restore to saved position/size
+                    s_shellMaximized = false;
+                    s_shellPosX = s_shellSavedX;
+                    s_shellPosY = s_shellSavedY;
+                    s_shellW = s_shellSavedW;
+                    s_shellH = s_shellSavedH;
+                } else {
+                    // Save current position/size and maximize
+                    ShellWindowGeometry g = get_shell_geometry();
+                    s_shellSavedX = (int32_t)g.x;
+                    s_shellSavedY = (int32_t)g.y;
+                    s_shellSavedW = (int32_t)g.w;
+                    s_shellSavedH = (int32_t)g.h;
+                    s_shellMaximized = true;
+                }
+                s_shellActive = true;
+                draw();
+                draw_cursor(mx, my);
+                return;
+            }
+            
+            if (hit == SHELL_HIT_MIN_BTN) {
+                // Minimize button clicked
+                s_shellMinimized = true;
+                s_shellActive = false;
+                draw();
+                draw_cursor(mx, my);
+                return;
+            }
+            
+            if (hit == SHELL_HIT_RESIZE_CORNER) {
+                // Start resize operation
+                s_shellResizing = true;
+                s_shellActive = true;
+                s_shellResizeStartX = mx;
+                s_shellResizeStartY = my;
+                ShellWindowGeometry g = get_shell_geometry();
+                s_shellResizeStartW = (int32_t)g.w;
+                s_shellResizeStartH = (int32_t)g.h;
+                draw();
+                draw_cursor(mx, my);
+                return;
+            }
+            
+            if (hit == SHELL_HIT_TITLEBAR && shell::get_state() != shell::ShellState::Fullscreen && !s_shellMaximized) {
+                // Titlebar clicked - start dragging (only when not maximized)
                 s_shellDragging = true;
                 s_shellActive = true;
                 ShellWindowGeometry g = get_shell_geometry();
@@ -2058,6 +2336,7 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
                 if (iconIdx == 2) {  // Console
                     shell::open();
                     s_shellActive = true;
+                    s_shellMinimized = false;
                     draw();
                     draw_cursor(mx, my);
                     return;
