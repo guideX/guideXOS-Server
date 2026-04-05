@@ -390,6 +390,9 @@
     <ClInclude Include="kernel\core\include\kernel\tcp.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="kernel\core\include\kernel\dns.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="allocator.cpp">
@@ -735,6 +738,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="kernel\core\tcp.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\core\dns.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

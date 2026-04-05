@@ -11,6 +11,7 @@
 #include "include/kernel/ipv4.h"
 #include "include/kernel/nic.h"
 #include "include/kernel/udp.h"
+#include "include/kernel/dns.h"
 
 // Forward declarations for power functions (defined in desktop.cpp, outside any namespace)
 extern void perform_shutdown();
@@ -307,6 +308,12 @@ static void cmd_help() {
     output_string("Network:\n");
     output_string("  ping <ip>      - Send ICMP echo request\n");
     output_string("  ifconfig, ip   - Network interface info\n");
+    output_string("  ipconfig       - Windows-style IP config\n");
+    output_string("  ipconfig /all  - Full IP configuration\n");
+    output_string("  ipconfig /flushdns - Flush DNS cache\n");
+    output_string("  nslookup <host>- DNS lookup\n");
+    output_string("  dig <host>     - DNS lookup (detailed)\n");
+    output_string("  host <host>    - DNS lookup (simple)\n");
     output_string("  route          - Routing table\n");
     output_string("  netstat, ss    - Network connections\n");
     output_string("  nc <ip> <port> - Send UDP datagram\n");
@@ -1296,6 +1303,333 @@ static void cmd_udpstat() {
 }
 
 // ============================================================
+// ipconfig Command (Windows-style network configuration)
+// ============================================================
+
+static void cmd_ipconfig(const char* args[], uint32_t argCount) {
+    // Check for flags
+    bool showAll = false;
+    bool flushDns = false;
+    bool release = false;
+    bool renew = false;
+    
+    for (uint32_t i = 1; i < argCount; ++i) {
+        if (str_eq(args[i], "/all") || str_eq(args[i], "-all") ||
+            str_eq(args[i], "/a") || str_eq(args[i], "-a")) {
+            showAll = true;
+        } else if (str_eq(args[i], "/flushdns") || str_eq(args[i], "-flushdns")) {
+            flushDns = true;
+        } else if (str_eq(args[i], "/release") || str_eq(args[i], "-release")) {
+            release = true;
+        } else if (str_eq(args[i], "/renew") || str_eq(args[i], "-renew")) {
+            renew = true;
+        } else if (str_eq(args[i], "/?") || str_eq(args[i], "-h") || str_eq(args[i], "--help")) {
+            output_string("Usage: ipconfig [/all] [/flushdns] [/release] [/renew]\n");
+            output_string("\n");
+            output_string("Options:\n");
+            output_string("  /all       Display full configuration\n");
+            output_string("  /flushdns  Flush the DNS resolver cache\n");
+            output_string("  /release   Release the current IP address\n");
+            output_string("  /renew     Renew the IP address (DHCP)\n");
+            return;
+        }
+    }
+    
+    // Handle special operations
+    if (flushDns) {
+        dns::cache_flush();
+        output_string("\nguideXOS IP Configuration\n");
+        output_string("\nSuccessfully flushed the DNS Resolver Cache.\n");
+        return;
+    }
+    
+    if (release) {
+        output_string("\nguideXOS IP Configuration\n");
+        output_string("\nNote: DHCP release not implemented in this version.\n");
+        output_string("Static IP configuration is being used.\n");
+        return;
+    }
+    
+    if (renew) {
+        output_string("\nguideXOS IP Configuration\n");
+        output_string("\nNote: DHCP renew not implemented in this version.\n");
+        output_string("Static IP configuration is being used.\n");
+        return;
+    }
+    
+    // Display configuration
+    output_string("\nguideXOS IP Configuration\n");
+    output_string("\n");
+    
+    const nic::NICDevice* dev = nic::get_device();
+    const ipv4::NetworkConfig* cfg = ipv4::get_config();
+    
+    if (!nic::is_active()) {
+        output_string("No network interfaces found.\n");
+        return;
+    }
+    
+    if (showAll) {
+        // Full configuration display
+        output_string("   Host Name . . . . . . . . . . . . : guideXOS\n");
+        output_string("   Primary Dns Suffix  . . . . . . . : \n");
+        output_string("   Node Type . . . . . . . . . . . . : Hybrid\n");
+        output_string("   IP Routing Enabled. . . . . . . . : No\n");
+        output_string("   WINS Proxy Enabled. . . . . . . . : No\n");
+        
+        // DNS cache info
+        output_string("   DNS Cache Entries . . . . . . . . : ");
+        char numStr[12];
+        uint_to_str(dns::cache_size(), numStr);
+        output_string(numStr);
+        output_string("\n");
+        
+        output_string("\n");
+    }
+    
+    // Ethernet adapter info
+    output_string("Ethernet adapter ");
+    if (dev) {
+        output_string(dev->name);
+    } else {
+        output_string("eth0");
+    }
+    output_string(":\n\n");
+    
+    if (!cfg || !cfg->configured) {
+        output_string("   Media State . . . . . . . . . . . : Media disconnected\n");
+        return;
+    }
+    
+    output_string("   Connection-specific DNS Suffix  . : \n");
+    
+    if (showAll) {
+        output_string("   Description . . . . . . . . . . . : Intel 82540EM Gigabit Ethernet\n");
+        output_string("   Physical Address. . . . . . . . . : ");
+        char macStr[18];
+        ethernet::mac_to_string(dev->macAddress, macStr);
+        // Convert to Windows format (XX-XX-XX-XX-XX-XX)
+        for (int i = 0; macStr[i]; ++i) {
+            if (macStr[i] == ':') macStr[i] = '-';
+            else if (macStr[i] >= 'a' && macStr[i] <= 'f') macStr[i] -= 32;  // Uppercase
+        }
+        output_string(macStr);
+        output_string("\n");
+        output_string("   DHCP Enabled. . . . . . . . . . . : No\n");
+        output_string("   Autoconfiguration Enabled . . . . : Yes\n");
+    }
+    
+    // IPv4 Address
+    output_string("   IPv4 Address. . . . . . . . . . . : ");
+    char ipStr[16];
+    ipv4::ip_to_string(cfg->ipAddr, ipStr);
+    output_string(ipStr);
+    if (showAll) {
+        output_string("(Preferred)");
+    }
+    output_string("\n");
+    
+    // Subnet Mask
+    output_string("   Subnet Mask . . . . . . . . . . . : ");
+    ipv4::ip_to_string(cfg->subnetMask, ipStr);
+    output_string(ipStr);
+    output_string("\n");
+    
+    // Default Gateway
+    output_string("   Default Gateway . . . . . . . . . : ");
+    if (cfg->gateway != 0) {
+        ipv4::ip_to_string(cfg->gateway, ipStr);
+        output_string(ipStr);
+    }
+    output_string("\n");
+    
+    if (showAll) {
+        // DNS Servers
+        output_string("   DNS Servers . . . . . . . . . . . : ");
+        uint32_t dnsServer = dns::get_server();
+        if (dnsServer != 0) {
+            ipv4::ip_to_string(dnsServer, ipStr);
+            output_string(ipStr);
+        }
+        output_string("\n");
+        
+        output_string("   NetBIOS over Tcpip. . . . . . . . : Disabled\n");
+    }
+}
+
+// ============================================================
+// nslookup Command (DNS lookup)
+// ============================================================
+
+static void cmd_nslookup(const char* domain) {
+    if (!domain || domain[0] == '\0') {
+        output_string("Usage: nslookup <domain>\n");
+        output_string("Example: nslookup example.com\n");
+        return;
+    }
+    
+    if (!nic::is_active()) {
+        output_string("nslookup: network interface not active\n");
+        return;
+    }
+    
+    if (!ipv4::is_configured()) {
+        output_string("nslookup: network not configured\n");
+        return;
+    }
+    
+    output_string("Server:  ");
+    char ipStr[16];
+    uint32_t dnsServer = dns::get_server();
+    ipv4::ip_to_string(dnsServer, ipStr);
+    output_string(ipStr);
+    output_string("\n");
+    output_string("Address: ");
+    output_string(ipStr);
+    output_string("#53\n");
+    output_string("\n");
+    
+    // Perform DNS lookup
+    dns::QueryResult result;
+    dns::Status status = dns::resolve_full(domain, dns::TYPE_A, &result);
+    
+    if (status == dns::DNS_OK && result.success) {
+        output_string("Non-authoritative answer:\n");
+        output_string("Name:    ");
+        output_string(domain);
+        output_string("\n");
+        
+        // Display all A records
+        for (uint8_t i = 0; i < result.answerCount; ++i) {
+            if (result.answers[i].type == dns::TYPE_A) {
+                output_string("Address: ");
+                ipv4::ip_to_string(result.answers[i].data.ipv4, ipStr);
+                output_string(ipStr);
+                output_string("\n");
+            } else if (result.answers[i].type == dns::TYPE_CNAME) {
+                output_string("Canonical name: ");
+                output_string(result.answers[i].data.cname);
+                output_string("\n");
+            } else if (result.answers[i].type == dns::TYPE_AAAA) {
+                output_string("IPv6 Address: (not displayed)\n");
+            }
+        }
+    } else {
+        output_string("** server can't find ");
+        output_string(domain);
+        output_string(": ");
+        
+        switch (status) {
+            case dns::DNS_ERR_NXDOMAIN:
+                output_string("NXDOMAIN\n");
+                break;
+            case dns::DNS_ERR_SERVFAIL:
+                output_string("SERVFAIL\n");
+                break;
+            case dns::DNS_ERR_TIMEOUT:
+                output_string("Query timed out\n");
+                break;
+            case dns::DNS_ERR_NETWORK:
+                output_string("Network error\n");
+                break;
+            default:
+                output_string(result.errorMsg);
+                output_string("\n");
+                break;
+        }
+    }
+}
+
+// ============================================================
+// dig Command (DNS lookup - more detailed)
+// ============================================================
+
+static void cmd_dig(const char* domain) {
+    if (!domain || domain[0] == '\0') {
+        output_string("Usage: dig <domain>\n");
+        output_string("Example: dig example.com\n");
+        return;
+    }
+    
+    if (!ipv4::is_configured()) {
+        output_string("dig: network not configured\n");
+        return;
+    }
+    
+    output_string("; <<>> DiG guideXOS <<>> ");
+    output_string(domain);
+    output_string("\n");
+    output_string(";; global options: +cmd\n");
+    output_string(";; Got answer:\n");
+    
+    // Perform DNS lookup
+    dns::QueryResult result;
+    dns::Status status = dns::resolve_full(domain, dns::TYPE_A, &result);
+    
+    output_string(";; ->>HEADER<<- opcode: QUERY, status: ");
+    output_string(dns::rcode_to_string(result.rcode));
+    output_string(", id: 1\n");
+    
+    char numStr[12];
+    output_string(";; ANSWER SECTION:\n");
+    
+    if (status == dns::DNS_OK && result.success) {
+        for (uint8_t i = 0; i < result.answerCount; ++i) {
+            output_string(result.answers[i].name);
+            output_string(".\t");
+            uint_to_str(result.answers[i].ttl, numStr);
+            output_string(numStr);
+            output_string("\tIN\t");
+            output_string(dns::type_to_string(static_cast<dns::RecordType>(result.answers[i].type)));
+            output_string("\t");
+            
+            if (result.answers[i].type == dns::TYPE_A) {
+                char ipStr[16];
+                ipv4::ip_to_string(result.answers[i].data.ipv4, ipStr);
+                output_string(ipStr);
+            } else if (result.answers[i].type == dns::TYPE_CNAME) {
+                output_string(result.answers[i].data.cname);
+            }
+            output_string("\n");
+        }
+    }
+    
+    output_string("\n;; Query time: N/A\n");
+    output_string(";; SERVER: ");
+    char ipStr[16];
+    ipv4::ip_to_string(dns::get_server(), ipStr);
+    output_string(ipStr);
+    output_string("#53\n");
+}
+
+// ============================================================
+// host Command (DNS lookup - simple)
+// ============================================================
+
+static void cmd_host(const char* domain) {
+    if (!domain || domain[0] == '\0') {
+        output_string("Usage: host <domain>\n");
+        return;
+    }
+    
+    uint32_t ip;
+    dns::Status status = dns::resolve(domain, &ip);
+    
+    if (status == dns::DNS_OK) {
+        output_string(domain);
+        output_string(" has address ");
+        char ipStr[16];
+        ipv4::ip_to_string(ip, ipStr);
+        output_string(ipStr);
+        output_string("\n");
+    } else {
+        output_string("Host ");
+        output_string(domain);
+        output_string(" not found\n");
+    }
+}
+
+// ============================================================
 // Command Parser and Executor
 // ============================================================
 
@@ -1524,6 +1858,19 @@ static void execute_command(const char* cmd) {
         cmd_nc(ncArgs, argCount);
     } else if (str_eq(command, "udpstat")) {
         cmd_udpstat();
+    } else if (str_eq(command, "ipconfig")) {
+        // Pass all args to ipconfig command
+        const char* ipconfigArgs[MAX_ARGS];
+        for (uint32_t i = 0; i < argCount; i++) {
+            ipconfigArgs[i] = args[i];
+        }
+        cmd_ipconfig(ipconfigArgs, argCount);
+    } else if (str_eq(command, "nslookup")) {
+        cmd_nslookup(arg1);
+    } else if (str_eq(command, "dig")) {
+        cmd_dig(arg1);
+    } else if (str_eq(command, "host")) {
+        cmd_host(arg1);
     }
     else if (str_eq(command, "top") || str_eq(command, "htop")) {
         output_string("top - 00:00:00 up ");

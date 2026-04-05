@@ -36,6 +36,7 @@
 #include "include/kernel/udp.h"
 #include "include/kernel/tcp.h"
 #include "include/kernel/socket.h"
+#include "include/kernel/dns.h"
 
 #if ARCH_HAS_PIC_8259
 #include "include/kernel/multiboot.h"
@@ -232,6 +233,9 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
             
             // Initialize Socket API
             kernel::socket::init();
+            
+            // Initialize DNS client
+            kernel::dns::init();
         }
         
         // ============================================================
