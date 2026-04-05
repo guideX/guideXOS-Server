@@ -228,17 +228,49 @@ struct NICDevice {
     uint8_t     pciFunc;
     uint16_t    vendorId;
     uint16_t    deviceId;
-    uint64_t    mmioBase;       // BAR0 MMIO base address
+    uint64_t    mmioBase;       // BAR0 MMIO base address (virtual after mapping)
+    uint64_t    mmioPhys;       // BAR0 physical address
     uint8_t     irqLine;        // PCI interrupt line
     uint8_t     macAddress[ETH_ALEN];
     LinkState   link;
     NetStats    stats;
     char        name[32];       // e.g. "eth0"
+    bool        mmioMapped;     // true if MMIO is mapped by bootloader
 };
+
+// ================================================================
+// NIC BootInfo (passed from bootloader)
+// Must match guideXOS::NicInfo in guidexOSBootInfo.h
+// ================================================================
+
+struct NicBootInfo {
+    uint64_t mmioPhys;      // Physical BAR0 address
+    uint64_t mmioVirt;      // Virtual address (mapped by bootloader)
+    uint64_t mmioSize;      // Size of MMIO region
+    uint16_t vendorId;
+    uint16_t deviceId;
+    uint8_t  bus;
+    uint8_t  device;
+    uint8_t  function;
+    uint8_t  irqLine;
+    uint8_t  macAddress[6];
+    uint8_t  reserved0[2];
+    uint32_t flags;
+    uint32_t reserved1;
+};
+
+// NicBootInfo flags
+static const uint32_t NIC_BOOT_FLAG_FOUND  = (1u << 0);
+static const uint32_t NIC_BOOT_FLAG_MAPPED = (1u << 1);
+static const uint32_t NIC_BOOT_FLAG_ACTIVE = (1u << 2);
 
 // ================================================================
 // Public API
 // ================================================================
+
+// Initialize NIC using BootInfo from bootloader (preferred method)
+// Returns true if NIC was initialized successfully
+bool init_from_bootinfo(const NicBootInfo* nicInfo);
 
 // Scan PCI bus for network controllers and initialise the first
 // supported NIC found.  Sets up RX/TX descriptor rings and

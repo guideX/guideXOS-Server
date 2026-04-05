@@ -36,6 +36,7 @@ Forbidden:
 #include "uefi_shim.h"         // UEFI shims for freestanding environment
 #include "debug_helpers.h"     // Post-ExitBootServices debugging
 #include "paging.h"            // minimal identity page tables
+#include "pci.h"               // PCI enumeration for NIC detection
 
 // MSVC intrinsics
 extern "C" void __halt(void);
@@ -589,6 +590,64 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
     SetMem((void*)(UINTN)trampolinePhys, trampolinePages * EFI_PAGE_SIZE, 0);
     SetupTrampoline((void*)(UINTN)trampolinePhys);
 
+    // --- PCI Enumeration: Find NIC and get MMIO address ---
+    Print(L"\n=== PCI Enumeration ===\n");
+    guideXOS::pci::PciEnumResult pciResult;
+    guideXOS::pci::InitPci();
+    uint8_t nicCount = guideXOS::pci::EnumeratePci(&pciResult);
+    
+    Print(L"Found %u network controller(s)\n", (UINTN)pciResult.deviceCount);
+    for (uint8_t i = 0; i < pciResult.deviceCount; i++) {
+        guideXOS::pci::PrintPciDevice(SystemTable, &pciResult.devices[i]);
+    }
+    
+    // Initialize NIC info in BootInfo (cleared by default)
+    SetMem(&v1BootInfo->Nic, sizeof(guideXOS::NicInfo), 0);
+    
+    // Track NIC MMIO for page table mapping
+    EFI_PHYSICAL_ADDRESS nicMmioPhys = 0;
+    UINTN nicMmioSize = 0;
+    
+    if (pciResult.nic != nullptr && pciResult.nic->isMemoryBar) {
+        guideXOS::pci::PciDevice* nic = pciResult.nic;
+        
+        Print(L"\n*** Using NIC at [%02x:%02x.%x] ***\n",
+              (UINTN)nic->bus, (UINTN)nic->device, (UINTN)nic->function);
+        Print(L"    Vendor: %04x  Device: %04x\n", (UINTN)nic->vendorId, (UINTN)nic->deviceId);
+        Print(L"    MMIO Phys: %016lx  Size: %lx\n", nic->bar0Phys, nic->bar0Size);
+        
+        // Store NIC info in BootInfo
+        v1BootInfo->Nic.VendorId = nic->vendorId;
+        v1BootInfo->Nic.DeviceId = nic->deviceId;
+        v1BootInfo->Nic.Bus = nic->bus;
+        v1BootInfo->Nic.Device = nic->device;
+        v1BootInfo->Nic.Function = nic->function;
+        v1BootInfo->Nic.IrqLine = nic->irqLine;
+        v1BootInfo->Nic.MmioPhys = nic->bar0Phys;
+        v1BootInfo->Nic.MmioSize = nic->bar0Size;
+        v1BootInfo->Nic.Flags = guideXOS::NIC_FLAG_FOUND;
+        
+        // Placeholder MAC (kernel will read actual MAC after MMIO is mapped)
+        v1BootInfo->Nic.MacAddress[0] = 0x52;
+        v1BootInfo->Nic.MacAddress[1] = 0x54;
+        v1BootInfo->Nic.MacAddress[2] = 0x00;
+        v1BootInfo->Nic.MacAddress[3] = 0x12;
+        v1BootInfo->Nic.MacAddress[4] = 0x34;
+        v1BootInfo->Nic.MacAddress[5] = 0x56;
+        
+        // Track for page table mapping
+        nicMmioPhys = (EFI_PHYSICAL_ADDRESS)nic->bar0Phys;
+        nicMmioSize = (UINTN)nic->bar0Size;
+        if (nicMmioSize == 0) nicMmioSize = 0x20000;  // Default 128KB for E1000
+        
+        // Enable bus mastering and memory space for the NIC
+        guideXOS::pci::EnablePciDevice(nic->bus, nic->device, nic->function);
+        Print(L"    PCI bus mastering enabled\n");
+    } else {
+        Print(L"\nNo supported NIC found for MMIO mapping\n");
+    }
+    Print(L"=========================\n\n");
+
     // --- Build identity-mapped page tables BEFORE ExitBootServices ---
     // We must build page tables while BootServices are still available.
     
@@ -732,6 +791,26 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
     sizes[rangeCount] = 2u * 1024u * 1024u; // 2MB (covers 1MB-3MB region)
     rangeCount++;
     Print(L"Mapping low memory stack region: 0x100000 size 2MB\n");
+
+    // 13. NIC MMIO region - CRITICAL for network driver
+    // Map the NIC's BAR0 MMIO region so the kernel can access hardware registers
+    if (nicMmioPhys != 0 && nicMmioSize != 0) {
+        // Align to page boundary
+        EFI_PHYSICAL_ADDRESS nicMmioAligned = nicMmioPhys & ~0xFFFull;
+        UINTN nicMmioAlignedSize = ((nicMmioPhys - nicMmioAligned) + nicMmioSize + 0xFFF) & ~0xFFFull;
+        
+        ranges[rangeCount] = nicMmioAligned;
+        sizes[rangeCount] = nicMmioAlignedSize;
+        rangeCount++;
+        Print(L"Mapping NIC MMIO: %016lx size %lx\n", nicMmioAligned, (UINT64)nicMmioAlignedSize);
+        
+        // For identity mapping, virtual == physical
+        v1BootInfo->Nic.MmioVirt = nicMmioPhys;
+        v1BootInfo->Nic.Flags |= guideXOS::NIC_FLAG_MAPPED;
+        
+        Print(L"NIC MMIO mapped: Phys=%016lx Virt=%016lx\n",
+              v1BootInfo->Nic.MmioPhys, v1BootInfo->Nic.MmioVirt);
+    }
 
     Print(L"Building identity page tables with %u ranges...\n", (UINT32)rangeCount);
 

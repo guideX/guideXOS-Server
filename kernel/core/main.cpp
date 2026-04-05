@@ -180,7 +180,26 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         // Network Subsystem Initialization
         // ============================================================
         kernel::serial::puts("[KERNEL] Initializing NIC driver...\n");
-        kernel::nic::init();
+        
+        // Try to initialize NIC from BootInfo first (MMIO already mapped by bootloader)
+        bool nicInitialized = false;
+        if (bootinfo != nullptr) {
+            // Cast BootInfo's Nic field to our NicBootInfo structure
+            const kernel::nic::NicBootInfo* nicInfo = 
+                reinterpret_cast<const kernel::nic::NicBootInfo*>(&bootinfo->Nic);
+            
+            if (nicInfo->flags & kernel::nic::NIC_BOOT_FLAG_FOUND) {
+                kernel::serial::puts("[KERNEL] NIC info found in BootInfo, using mapped MMIO\n");
+                nicInitialized = kernel::nic::init_from_bootinfo(nicInfo);
+            }
+        }
+        
+        // Fall back to PCI scan if bootinfo init failed
+        if (!nicInitialized) {
+            kernel::serial::puts("[KERNEL] Falling back to PCI scan...\n");
+            kernel::nic::init();
+        }
+        
         if (kernel::nic::is_active()) {
             kernel::serial::puts("[KERNEL] NIC active, registering IRQ");
             kernel::serial::put_hex8(kernel::nic::get_device()->irqLine);

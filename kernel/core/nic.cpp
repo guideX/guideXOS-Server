@@ -433,6 +433,117 @@ static bool scan_pci_nic()
 #endif // ARCH_HAS_PORT_IO
 
 // ================================================================
+// Initialize from BootInfo (bootloader provides mapped MMIO)
+// ================================================================
+
+bool init_from_bootinfo(const NicBootInfo* nicInfo)
+{
+    if (!nicInfo) {
+        serial::puts("[NIC] init_from_bootinfo: null pointer\n");
+        return false;
+    }
+    
+    // Check if NIC was found by bootloader
+    if (!(nicInfo->flags & NIC_BOOT_FLAG_FOUND)) {
+        serial::puts("[NIC] init_from_bootinfo: NIC not found by bootloader\n");
+        return false;
+    }
+    
+    // Check if MMIO is mapped
+    if (!(nicInfo->flags & NIC_BOOT_FLAG_MAPPED)) {
+        serial::puts("[NIC] init_from_bootinfo: MMIO not mapped by bootloader\n");
+        return false;
+    }
+    
+    if (nicInfo->mmioVirt == 0) {
+        serial::puts("[NIC] init_from_bootinfo: MMIO virtual address is zero\n");
+        return false;
+    }
+    
+    serial::puts("[NIC] Initializing from BootInfo:\n");
+    serial::puts("[NIC]   Vendor: ");
+    serial::put_hex32(nicInfo->vendorId);
+    serial::puts(" Device: ");
+    serial::put_hex32(nicInfo->deviceId);
+    serial::putc('\n');
+    serial::puts("[NIC]   MMIO Phys: ");
+    serial::put_hex32(static_cast<uint32_t>(nicInfo->mmioPhys >> 32));
+    serial::put_hex32(static_cast<uint32_t>(nicInfo->mmioPhys));
+    serial::putc('\n');
+    serial::puts("[NIC]   MMIO Virt: ");
+    serial::put_hex32(static_cast<uint32_t>(nicInfo->mmioVirt >> 32));
+    serial::put_hex32(static_cast<uint32_t>(nicInfo->mmioVirt));
+    serial::putc('\n');
+    
+    // Initialize device structure
+    memzero(&s_device, sizeof(s_device));
+    memzero(s_rxDescs, sizeof(s_rxDescs));
+    memzero(s_txDescs, sizeof(s_txDescs));
+    s_rxCur = 0;
+    s_txCur = 0;
+    
+    // Populate device info from BootInfo
+    s_device.pciBus = nicInfo->bus;
+    s_device.pciSlot = nicInfo->device;
+    s_device.pciFunc = nicInfo->function;
+    s_device.vendorId = nicInfo->vendorId;
+    s_device.deviceId = nicInfo->deviceId;
+    s_device.mmioBase = nicInfo->mmioVirt;  // Use virtual address for MMIO access
+    s_device.mmioPhys = nicInfo->mmioPhys;
+    s_device.irqLine = nicInfo->irqLine;
+    s_device.mmioMapped = true;
+    
+    // Copy placeholder MAC from bootinfo
+    for (int i = 0; i < 6; i++) {
+        s_device.macAddress[i] = nicInfo->macAddress[i];
+    }
+    
+    // Set device name
+    s_device.name[0] = 'e'; s_device.name[1] = 't';
+    s_device.name[2] = 'h'; s_device.name[3] = '0';
+    s_device.name[4] = '\0';
+    
+#if ARCH_HAS_PORT_IO
+    // Now we can safely access MMIO - initialize hardware
+    serial::puts("[NIC] Initializing E1000 hardware...\n");
+    
+    // Read actual MAC address from hardware
+    read_mac_address(s_device.mmioBase, s_device.macAddress);
+    
+    serial::puts("[NIC] MAC: ");
+    for (int i = 0; i < 6; ++i) {
+        if (i > 0) serial::putc(':');
+        serial::put_hex8(s_device.macAddress[i]);
+    }
+    serial::putc('\n');
+    
+    // Initialize the E1000 hardware
+    if (!init_e1000(s_device.mmioBase)) {
+        serial::puts("[NIC] Hardware initialization failed\n");
+        s_device.active = false;
+        return false;
+    }
+    
+    // Check link status
+    uint32_t status = mmio_read32(s_device.mmioBase, E1000_STATUS);
+    s_device.link = (status & E1000_STATUS_LU) ? NIC_LINK_UP : NIC_LINK_DOWN;
+    
+    serial::puts("[NIC] Link: ");
+    serial::puts(s_device.link == NIC_LINK_UP ? "UP" : "DOWN");
+    serial::putc('\n');
+    
+    s_device.active = true;
+    s_initialised = true;
+    
+    serial::puts("[NIC] E1000 initialization complete!\n");
+    return true;
+#else
+    serial::puts("[NIC] No PCI port-I/O support on this architecture\n");
+    return false;
+#endif
+}
+
+// ================================================================
 // Public API
 // ================================================================
 

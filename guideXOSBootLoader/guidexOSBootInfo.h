@@ -21,6 +21,29 @@ namespace guideXOS
         B8G8R8A8,   // 32‑bit, little‑endian, BGRA
     };
 
+    // NIC device information (passed from bootloader to kernel)
+    struct NicInfo
+    {
+        uint64_t MmioPhys;      // Physical BAR0 address
+        uint64_t MmioVirt;      // Virtual address (mapped by bootloader)
+        uint64_t MmioSize;      // Size of MMIO region
+        uint16_t VendorId;
+        uint16_t DeviceId;
+        uint8_t  Bus;
+        uint8_t  Device;
+        uint8_t  Function;
+        uint8_t  IrqLine;
+        uint8_t  MacAddress[6]; // Placeholder MAC (00:00:00:00:00:00 if not read)
+        uint8_t  Reserved0[2];
+        uint32_t Flags;         // Bit 0: found, Bit 1: mapped, Bit 2: active
+        uint32_t Reserved1;
+    };
+
+    // NIC flags
+    static const uint32_t NIC_FLAG_FOUND  = (1u << 0);
+    static const uint32_t NIC_FLAG_MAPPED = (1u << 1);
+    static const uint32_t NIC_FLAG_ACTIVE = (1u << 2);
+
     struct BootInfo
     {
         uint32_t Magic;
@@ -45,7 +68,9 @@ namespace guideXOS
         uint64_t CommandLine;
         uint64_t RamdiskBase;
         uint64_t RamdiskSize;
-        uint64_t Reserved[6];
+        // NIC information (uses former Reserved space)
+        NicInfo  Nic;
+        uint64_t Reserved3;
     };
 }
 
