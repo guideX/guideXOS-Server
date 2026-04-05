@@ -194,6 +194,7 @@
     <ClInclude Include="kernel\core\include\kernel\serial_debug.h" />
     <ClInclude Include="kernel\core\include\kernel\shell.h" />
     <ClInclude Include="kernel\core\include\kernel\socket.h" />
+    <ClInclude Include="kernel\core\include\kernel\tcp.h" />
     <ClInclude Include="kernel\core\include\kernel\udp.h" />
     <ClInclude Include="kernel\core\include\kernel\usb.h" />
     <ClInclude Include="kernel\core\include\kernel\usb_audio.h" />
@@ -342,6 +343,7 @@
     <ClCompile Include="kernel\core\ramdisk.cpp" />
     <ClCompile Include="kernel\core\shell.cpp" />
     <ClCompile Include="kernel\core\socket.cpp" />
+    <ClCompile Include="kernel\core\tcp.cpp" />
     <ClCompile Include="kernel\core\udp.cpp" />
     <ClCompile Include="kernel\core\usb.cpp" />
     <ClCompile Include="kernel\core\usb_audio.cpp" />

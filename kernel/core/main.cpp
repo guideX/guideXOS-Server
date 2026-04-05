@@ -34,6 +34,7 @@
 #include "include/kernel/ipv4.h"
 #include "include/kernel/icmp.h"
 #include "include/kernel/udp.h"
+#include "include/kernel/tcp.h"
 #include "include/kernel/socket.h"
 
 #if ARCH_HAS_PIC_8259
@@ -206,6 +207,9 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
             
             // Initialize UDP layer
             kernel::udp::init();
+            
+            // Initialize TCP stack
+            kernel::tcp::init();
             
             // Initialize Socket API
             kernel::socket::init();
