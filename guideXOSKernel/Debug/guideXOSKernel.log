@@ -90,8 +90,8 @@ core\include/kernel/vfs.h(225,66): error G30A0E944: 'size_t' has not been declar
         |                                                                  ^~~~~~
   core\include/kernel/vfs.h:225:66: note: 'size_t' is defined in header '<cstddef>'; this is probably fixable by adding '#include <cstddef>'
   core\main.cpp: In function 'void kernel_main(void*, uint32_t)':
-core\main.cpp(161,53): error GD5C94910: 'kernel::ramdisk::create' cannot be used as a function
-    161 |         uint8_t ramdiskIdx = kernel::ramdisk::create(4 * 1024 * 1024, "ram0");
+core\main.cpp(162,53): error GD5C94910: 'kernel::ramdisk::create' cannot be used as a function
+    162 |         uint8_t ramdiskIdx = kernel::ramdisk::create(4 * 1024 * 1024, "ram0");
         |                              ~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~
   [ERROR] Failed to compile main.cpp
   Press any key to continue . . . 
