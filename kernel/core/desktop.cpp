@@ -27,9 +27,13 @@ static const uint16_t ACPI_PM1A_CNT = 0x604;  // Common ACPI PM1a port
 // Bochs/QEMU shutdown via special port
 static const uint16_t BOCHS_SHUTDOWN_PORT = 0xB004;
 
+// Keyboard controller ports for reset
+static const uint16_t KB_CTRL_STATUS_PORT = 0x64;
+static const uint16_t KB_CTRL_CMD_RESET = 0xFE;
+
 // Architecture-specific port I/O
 #if defined(ARCH_X86) || defined(ARCH_AMD64)
-static inline void outw_shutdown(uint16_t port, uint16_t value)
+static inline void outw_power(uint16_t port, uint16_t value)
 {
 #if defined(_MSC_VER)
     __outword(port, value);
@@ -38,12 +42,23 @@ static inline void outw_shutdown(uint16_t port, uint16_t value)
 #endif
 }
 
-static inline void outb_shutdown(uint16_t port, uint8_t value)
+static inline void outb_power(uint16_t port, uint8_t value)
 {
 #if defined(_MSC_VER)
     __outbyte(port, value);
 #else
     asm volatile ("outb %0, %1" : : "a"(value), "Nd"(port));
+#endif
+}
+
+static inline uint8_t inb_power(uint16_t port)
+{
+#if defined(_MSC_VER)
+    return __inbyte(port);
+#else
+    uint8_t ret;
+    asm volatile ("inb %1, %0" : "=a"(ret) : "Nd"(port));
+    return ret;
 #endif
 }
 
@@ -55,6 +70,24 @@ static inline void halt_cpu()
     asm volatile ("cli; hlt");
 #endif
 }
+
+static inline void enable_interrupts()
+{
+#if defined(_MSC_VER)
+    _enable();
+#else
+    asm volatile ("sti");
+#endif
+}
+
+static inline void disable_interrupts()
+{
+#if defined(_MSC_VER)
+    _disable();
+#else
+    asm volatile ("cli");
+#endif
+}
 #endif
 
 // Perform system shutdown
@@ -63,15 +96,15 @@ static void perform_shutdown()
 #if defined(ARCH_X86) || defined(ARCH_AMD64)
     // Method 1: QEMU debug exit (cleanest for QEMU with isa-debug-exit device)
     // Exit code will be (0 << 1) | 1 = 1, indicating success
-    outb_shutdown(QEMU_DEBUG_EXIT_PORT, 0x00);
+    outb_power(QEMU_DEBUG_EXIT_PORT, 0x00);
     
     // Method 2: QEMU/Bochs ACPI shutdown
     // S5 sleep state = shutdown (SLP_TYPa=5, SLP_EN=1)
     // Value: (5 << 10) | (1 << 13) = 0x2000 | 0x1400 = 0x3400
-    outw_shutdown(ACPI_PM1A_CNT, 0x2000);
+    outw_power(ACPI_PM1A_CNT, 0x2000);
     
     // Method 3: Bochs-specific shutdown port
-    outw_shutdown(BOCHS_SHUTDOWN_PORT, 0x2000);
+    outw_power(BOCHS_SHUTDOWN_PORT, 0x2000);
     
     // If we're still here, just halt
     while (true) {
@@ -95,6 +128,90 @@ static void perform_shutdown()
         asm volatile ("nop");
 #endif
     }
+#endif
+}
+
+// Perform system restart/reboot
+static void perform_restart()
+{
+#if defined(ARCH_X86) || defined(ARCH_AMD64)
+    disable_interrupts();
+    
+    // Method 1: Keyboard controller reset (most reliable)
+    // Wait for keyboard controller to be ready
+    uint8_t status;
+    do {
+        status = inb_power(KB_CTRL_STATUS_PORT);
+    } while (status & 0x02);  // Wait while input buffer is full
+    
+    // Send reset command
+    outb_power(KB_CTRL_STATUS_PORT, KB_CTRL_CMD_RESET);
+    
+    // Method 2: Triple fault (backup) - load null IDT and trigger interrupt
+    // This usually causes a CPU reset
+    struct { uint16_t limit; uint32_t base; } __attribute__((packed)) null_idt = {0, 0};
+    (void)null_idt;  // Suppress unused warning if not using this method
+    
+    // If keyboard reset didn't work, try QEMU reset via debug exit with special code
+    outb_power(QEMU_DEBUG_EXIT_PORT, 0x01);  // Different exit code for restart
+    
+    // If we're still here, halt and wait for watchdog or manual reset
+    while (true) {
+        halt_cpu();
+    }
+#elif defined(ARCH_RISCV64)
+    // RISC-V uses SBI system reset
+    // SBI_EXT_SRST = 0x53525354 ("SRST")
+    // Function 0 = system reset, type 0 = shutdown, type 1 = cold reboot
+    asm volatile (
+        "li a7, 0x53525354\n"  // SBI_EXT_SRST
+        "li a6, 0\n"           // Function ID: system_reset
+        "li a0, 1\n"           // Reset type: cold reboot
+        "li a1, 0\n"           // Reset reason: no reason
+        "ecall\n"
+        ::: "a0", "a1", "a6", "a7"
+    );
+    while (true) {}
+#else
+    // Other architectures: just halt (restart not supported)
+    while (true) {
+#if defined(_MSC_VER)
+        __nop();
+#else
+        asm volatile ("nop");
+#endif
+    }
+#endif
+}
+
+// Perform system sleep/suspend
+static void perform_sleep()
+{
+#if defined(ARCH_X86) || defined(ARCH_AMD64)
+    // ACPI S1 sleep state (CPU stops, system power maintained)
+    // For proper S3 (suspend to RAM), we'd need to save system state first
+    
+    // Write S1 sleep type to PM1a control register
+    // S1: SLP_TYPa = 1, SLP_EN = 1
+    // Value: (1 << 10) | (1 << 13) = 0x2400
+    outw_power(ACPI_PM1A_CNT, 0x2400);
+    
+    // If ACPI sleep doesn't work, just halt with interrupts enabled
+    // This allows the system to wake on any interrupt (keyboard, timer, etc.)
+    enable_interrupts();
+    halt_cpu();
+    
+    // We'll wake up here when an interrupt occurs
+#elif defined(ARCH_RISCV64)
+    // RISC-V: use WFI (wait for interrupt) instruction
+    asm volatile ("wfi");
+#else
+    // Other architectures: halt with interrupts enabled
+#if defined(_MSC_VER)
+    // MSVC: no standard way, just return
+#else
+    asm volatile ("sti; hlt");
+#endif
 #endif
 }
 
@@ -1551,14 +1668,24 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
                         s_notification.title = "Restart";
                         s_notification.message = "System is restarting...";
                         s_notification.visible = true;
-                        // TODO: Actually trigger system restart
-                        break;
+                        draw();
+                        draw_cursor(mx, my);
+                        perform_restart();
+                        // If we return here, restart failed
+                        return;
                     case FOOTER_SLEEP:
                         s_notification.title = "Sleep";
                         s_notification.message = "System entering sleep mode...";
                         s_notification.visible = true;
-                        // TODO: Actually trigger sleep/suspend
-                        break;
+                        draw();
+                        draw_cursor(mx, my);
+                        perform_sleep();
+                        // System wakes up here after sleep
+                        s_notification.title = "Awake";
+                        s_notification.message = "System resumed from sleep";
+                        draw();
+                        draw_cursor(mx, my);
+                        return;
                     default:
                         break;
                 }
@@ -1566,6 +1693,7 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
                 draw_cursor(mx, my);
                 return;
             }
+
 
             // Click outside start menu items - close it
             s_startMenuOpen = false;
