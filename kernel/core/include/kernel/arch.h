@@ -65,6 +65,14 @@
         #include <arch/riscv64.h>
     #endif
     namespace kernel { namespace arch { using namespace riscv64; } }
+#elif defined(__loongarch__) && defined(__loongarch64)
+    #define ARCH_LOONGARCH64
+    #if defined(_MSC_VER)
+        #include "../../../arch/loongarch64/include/arch/loongarch64.h"
+    #else
+        #include <arch/loongarch64.h>
+    #endif
+    namespace kernel { namespace arch { using namespace loongarch64; } }
 #else
     #error "Unsupported architecture"
 #endif
@@ -91,12 +99,13 @@
 
 // USB host controller availability
 // All current architectures have a USB HCI implementation:
-//   x86/amd64 : UHCI (PCI, port I/O)
-//   ARM       : DWC OTG (MMIO)
-//   SPARC     : OHCI (SBus MMIO)
-//   SPARC64   : OHCI (PCI MMIO)
-//   IA-64     : OHCI (PCI MMIO)
-//   RISC-V 64 : OHCI (PCI ECAM MMIO)
+//   x86/amd64    : UHCI (PCI, port I/O)
+//   ARM          : DWC OTG (MMIO)
+//   SPARC        : OHCI (SBus MMIO)
+//   SPARC64      : OHCI (PCI MMIO)
+//   IA-64        : OHCI (PCI MMIO)
+//   RISC-V 64    : OHCI (PCI ECAM MMIO)
+//   LoongArch 64 : xHCI/OHCI (PCI ECAM MMIO)
 #define ARCH_HAS_USB  1
 
 // ================================================================
@@ -111,7 +120,7 @@
     #define ARCH_HAS_PCI_AUDIO   1
     #define ARCH_HAS_SBUS_AUDIO  0
     #define ARCH_HAS_PL041_AUDIO 0
-#elif defined(ARCH_IA64) || defined(ARCH_SPARC64) || defined(ARCH_RISCV64)
+#elif defined(ARCH_IA64) || defined(ARCH_SPARC64) || defined(ARCH_RISCV64) || defined(ARCH_LOONGARCH64)
     #define ARCH_HAS_PCI_AUDIO   1
     #define ARCH_HAS_SBUS_AUDIO  0
     #define ARCH_HAS_PL041_AUDIO 0
@@ -141,7 +150,7 @@
     #define ARCH_HAS_ATA_PIO   1
     #define ARCH_HAS_AHCI      1
     #define ARCH_HAS_NVME      1
-#elif defined(ARCH_IA64) || defined(ARCH_SPARC64) || defined(ARCH_RISCV64)
+#elif defined(ARCH_IA64) || defined(ARCH_SPARC64) || defined(ARCH_RISCV64) || defined(ARCH_LOONGARCH64)
     #define ARCH_HAS_ATA_PIO   0
     #define ARCH_HAS_AHCI      1
     #define ARCH_HAS_NVME      1
@@ -161,7 +170,7 @@
 
 #if defined(ARCH_X86) || defined(ARCH_AMD64)
     #define ARCH_HAS_NIC  1
-#elif defined(ARCH_IA64) || defined(ARCH_SPARC64) || defined(ARCH_RISCV64)
+#elif defined(ARCH_IA64) || defined(ARCH_SPARC64) || defined(ARCH_RISCV64) || defined(ARCH_LOONGARCH64)
     #define ARCH_HAS_NIC  1
 #else
     #define ARCH_HAS_NIC  0
@@ -195,7 +204,7 @@
 //             PCI VGA for SPARC v9).
 // PL111_FB  : ARM PL111 CLCD controller (Versatile/RealView).
 //             QEMU versatilepb maps at 0x10120000.
-// RAMFB     : QEMU ramfb (RAM framebuffer via fw_cfg) — RISC-V 64.
+// RAMFB     : QEMU ramfb (RAM framebuffer via fw_cfg) — RISC-V 64, LoongArch 64.
 // FB_CONSOLE: Software text console rendered onto the framebuffer.
 //             Available on all architectures that have a framebuffer.
 // ================================================================
@@ -254,6 +263,15 @@
     #define ARCH_HAS_PL111_FB   0
     #define ARCH_HAS_RAMFB      1
     #define ARCH_HAS_FB_CONSOLE 1
+#elif defined(ARCH_LOONGARCH64)
+    #define ARCH_HAS_VESA_BGA   0
+    #define ARCH_HAS_VGA_REGS   0
+    #define ARCH_HAS_PCI_VGA    1
+    #define ARCH_HAS_EFI_GOP    0
+    #define ARCH_HAS_SUN_FB     0
+    #define ARCH_HAS_PL111_FB   0
+    #define ARCH_HAS_RAMFB      1
+    #define ARCH_HAS_FB_CONSOLE 1
 #else
     #define ARCH_HAS_VESA_BGA   0
     #define ARCH_HAS_VGA_REGS   0
@@ -300,6 +318,8 @@ inline const char* get_arch_name()
     return "SPARC v8";
 #elif defined(ARCH_RISCV64)
     return "RISC-V 64 (RV64IMA)";
+#elif defined(ARCH_LOONGARCH64)
+    return "LoongArch 64 (LA64)";
 #else
     return "Unknown";
 #endif
@@ -308,7 +328,7 @@ inline const char* get_arch_name()
 // Get architecture bitness
 inline uint32_t get_arch_bits()
 {
-#if defined(ARCH_AMD64) || defined(ARCH_IA64) || defined(ARCH_SPARC64) || defined(ARCH_RISCV64)
+#if defined(ARCH_AMD64) || defined(ARCH_IA64) || defined(ARCH_SPARC64) || defined(ARCH_RISCV64) || defined(ARCH_LOONGARCH64)
     return 64;
 #elif defined(ARCH_X86) || defined(ARCH_ARM) || defined(ARCH_SPARC)
     return 32;

@@ -153,6 +153,13 @@
     <ClInclude Include="kernel\arch\ia64\include\arch\pci_audio.h" />
     <ClInclude Include="kernel\arch\ia64\include\arch\ski_console.h" />
     <ClInclude Include="kernel\arch\ia64\include\arch\usb_hci.h" />
+    <ClInclude Include="kernel\arch\loongarch64\include\arch\context_switch.h" />
+    <ClInclude Include="kernel\arch\loongarch64\include\arch\graphics.h" />
+    <ClInclude Include="kernel\arch\loongarch64\include\arch\loongarch64.h" />
+    <ClInclude Include="kernel\arch\loongarch64\include\arch\loongarch_console.h" />
+    <ClInclude Include="kernel\arch\loongarch64\include\arch\pci_audio.h" />
+    <ClInclude Include="kernel\arch\loongarch64\include\arch\syscall.h" />
+    <ClInclude Include="kernel\arch\loongarch64\include\arch\usb_hci.h" />
     <ClInclude Include="kernel\arch\sparc64\include\arch\graphics.h" />
     <ClInclude Include="kernel\arch\sparc64\include\arch\pci_audio.h" />
     <ClInclude Include="kernel\arch\sparc64\include\arch\sparc64.h" />
@@ -291,6 +298,13 @@
     <ClCompile Include="kernel\arch\ia64\pci_audio.cpp" />
     <ClCompile Include="kernel\arch\ia64\ski_console.cpp" />
     <ClCompile Include="kernel\arch\ia64\usb_hci.cpp" />
+    <ClCompile Include="kernel\arch\loongarch64\arch.cpp" />
+    <ClCompile Include="kernel\arch\loongarch64\context_switch.cpp" />
+    <ClCompile Include="kernel\arch\loongarch64\graphics.cpp" />
+    <ClCompile Include="kernel\arch\loongarch64\loongarch_console.cpp" />
+    <ClCompile Include="kernel\arch\loongarch64\pci_audio.cpp" />
+    <ClCompile Include="kernel\arch\loongarch64\syscall.cpp" />
+    <ClCompile Include="kernel\arch\loongarch64\usb_hci.cpp" />
     <ClCompile Include="kernel\arch\sparc64\arch.cpp" />
     <ClCompile Include="kernel\arch\sparc64\graphics.cpp" />
     <ClCompile Include="kernel\arch\sparc64\pci_audio.cpp" />
@@ -418,6 +432,9 @@
     <None Include="kernel\arch\ia64\boot.s" />
     <None Include="kernel\arch\ia64\linker.ld" />
     <None Include="kernel\arch\ia64\Makefile.arch" />
+    <None Include="kernel\arch\loongarch64\boot.s" />
+    <None Include="kernel\arch\loongarch64\linker.ld" />
+    <None Include="kernel\arch\loongarch64\Makefile.arch" />
     <None Include="kernel\arch\sparc64\boot.s" />
     <None Include="kernel\arch\sparc64\linker.ld" />
     <None Include="kernel\arch\sparc64\Makefile.arch" />

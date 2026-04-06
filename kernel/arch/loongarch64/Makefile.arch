@@ -1,0 +1,210 @@
+# LoongArch 64-bit (LA64) Architecture Build Configuration
+#
+# Targets LoongArch64 running in kernel mode (PLV0).
+# Tested with loongarch64-unknown-elf and loongarch64-linux-gnu
+# toolchains and QEMU loongarch64-virt machine.
+#
+# Copyright (c) 2026 guideXOS Server
+#
+
+# ================================================================
+# Toolchain selection
+#
+# LoongArch toolchains:
+#   - loongarch64-unknown-elf-*    (bare-metal)
+#   - loongarch64-linux-gnu-*      (Linux, also works for bare-metal)
+#   - loongarch64-unknown-linux-gnu-*
+#
+# The toolchain is selected based on availability.
+# ================================================================
+
+ifeq ($(OS),Windows_NT)
+    # Windows: Use whichever toolchain is installed
+    CXX := loongarch64-unknown-elf-g++
+    AS  := loongarch64-unknown-elf-as
+    LD  := loongarch64-unknown-elf-ld
+    OBJCOPY := loongarch64-unknown-elf-objcopy
+    OBJDUMP := loongarch64-unknown-elf-objdump
+else
+    # Linux/Unix: Try multiple toolchain names
+    ifneq ($(shell which loongarch64-unknown-elf-g++ 2>/dev/null),)
+        CXX := loongarch64-unknown-elf-g++
+        AS  := loongarch64-unknown-elf-as
+        LD  := loongarch64-unknown-elf-ld
+        OBJCOPY := loongarch64-unknown-elf-objcopy
+        OBJDUMP := loongarch64-unknown-elf-objdump
+    else ifneq ($(shell which loongarch64-linux-gnu-g++ 2>/dev/null),)
+        CXX := loongarch64-linux-gnu-g++
+        AS  := loongarch64-linux-gnu-as
+        LD  := loongarch64-linux-gnu-ld
+        OBJCOPY := loongarch64-linux-gnu-objcopy
+        OBJDUMP := loongarch64-linux-gnu-objdump
+    else ifneq ($(shell which loongarch64-unknown-linux-gnu-g++ 2>/dev/null),)
+        CXX := loongarch64-unknown-linux-gnu-g++
+        AS  := loongarch64-unknown-linux-gnu-as
+        LD  := loongarch64-unknown-linux-gnu-ld
+        OBJCOPY := loongarch64-unknown-linux-gnu-objcopy
+        OBJDUMP := loongarch64-unknown-linux-gnu-objdump
+    else
+        # Fallback to a common name
+        CXX := loongarch64-unknown-elf-g++
+        AS  := loongarch64-unknown-elf-as
+        LD  := loongarch64-unknown-elf-ld
+        OBJCOPY := loongarch64-unknown-elf-objcopy
+        OBJDUMP := loongarch64-unknown-elf-objdump
+    endif
+endif
+
+# ================================================================
+# Architecture-specific compiler flags
+#
+# LoongArch GCC options:
+#   -march=loongarch64  : Target LA64 base ISA
+#   -mabi=lp64d         : LP64 ABI with double-precision FP (default)
+#   -mabi=lp64s         : LP64 ABI with single-precision FP
+#   -mabi=lp64f         : LP64 ABI with soft-float
+#   -mcmodel=normal     : Normal code model (default, ±2GB)
+#   -mcmodel=medium     : Medium code model
+#   -mcmodel=extreme    : Extreme code model (full 64-bit)
+#   -mno-relax          : Disable linker relaxation
+#   -G0                 : No small data threshold
+#
+# For kernel code:
+#   - Use lp64d (with FPU) or lp64f (soft-float) depending on FPU support
+#   - Use extreme code model for kernel at high addresses
+#   - Disable relaxation until gp is properly set
+# ================================================================
+
+# Base architecture flags
+ARCH_CFLAGS := -march=loongarch64 -mabi=lp64d
+
+# Code model: extreme allows full 64-bit addressing
+ARCH_CFLAGS += -mcmodel=extreme
+
+# Disable linker relaxation (GP may not be set early in boot)
+ARCH_CFLAGS += -mno-relax
+
+# No small data section (kernel doesn't use GP-relative addressing)
+ARCH_CFLAGS += -G0
+
+# Kernel-specific flags
+ARCH_CFLAGS += -ffreestanding
+ARCH_CFLAGS += -fno-builtin
+ARCH_CFLAGS += -fno-stack-protector
+ARCH_CFLAGS += -fno-exceptions
+ARCH_CFLAGS += -fno-rtti
+ARCH_CFLAGS += -mno-strict-align
+
+# Warning flags
+ARCH_CFLAGS += -Wall -Wextra
+
+# ================================================================
+# Assembler flags
+# ================================================================
+
+ASFLAGS := -march=loongarch64 -mabi=lp64d
+
+# ================================================================
+# Linker flags
+# ================================================================
+
+ARCH_LDFLAGS := -nostdlib
+ARCH_LDFLAGS += -z max-page-size=4096
+ARCH_LDFLAGS += --gc-sections
+
+# Use the architecture-specific linker script
+LDSCRIPT := kernel/arch/loongarch64/linker.ld
+
+# ================================================================
+# Additional libraries (none for freestanding)
+# ================================================================
+
+LIBS :=
+
+# ================================================================
+# Architecture information
+# ================================================================
+
+ARCH_BITS := 64
+ARCH_NAME := LoongArch 64-bit (LA64)
+
+# ================================================================
+# Source files for this architecture
+# ================================================================
+
+ARCH_SRCS := \
+    kernel/arch/loongarch64/arch.cpp \
+    kernel/arch/loongarch64/loongarch_console.cpp \
+    kernel/arch/loongarch64/graphics.cpp \
+    kernel/arch/loongarch64/pci_audio.cpp \
+    kernel/arch/loongarch64/usb_hci.cpp \
+    kernel/arch/loongarch64/context_switch.cpp \
+    kernel/arch/loongarch64/syscall.cpp
+
+ARCH_ASM_SRCS := \
+    kernel/arch/loongarch64/boot.s
+
+# ================================================================
+# Include directories
+# ================================================================
+
+ARCH_INCLUDES := \
+    -Ikernel/arch/loongarch64/include \
+    -Ikernel/core/include
+
+# ================================================================
+# QEMU configuration for testing
+#
+# Run with:
+#   qemu-system-loongarch64 -M virt -cpu la464 -m 256M \
+#       -kernel kernel.elf -nographic -serial mon:stdio
+#
+# Add devices as needed:
+#   -device ramfb                    # Framebuffer
+#   -device qemu-xhci -device usb-kbd # USB
+#   -device intel-hda -device hda-duplex # Audio
+# ================================================================
+
+QEMU := qemu-system-loongarch64
+QEMU_MACHINE := virt
+QEMU_CPU := la464
+QEMU_MEMORY := 256M
+
+QEMU_FLAGS := \
+    -M $(QEMU_MACHINE) \
+    -cpu $(QEMU_CPU) \
+    -m $(QEMU_MEMORY) \
+    -nographic \
+    -serial mon:stdio
+
+# Optional QEMU flags for debugging
+QEMU_DEBUG_FLAGS := \
+    -S -gdb tcp::1234
+
+# ================================================================
+# Build targets
+# ================================================================
+
+.PHONY: arch-info
+
+arch-info:
+	@echo "Architecture: $(ARCH_NAME)"
+	@echo "Compiler: $(CXX)"
+	@echo "Assembler: $(AS)"
+	@echo "Linker: $(LD)"
+	@echo "CFLAGS: $(ARCH_CFLAGS)"
+	@echo "LDFLAGS: $(ARCH_LDFLAGS)"
+
+# ================================================================
+# QEMU run targets
+# ================================================================
+
+.PHONY: run-qemu run-qemu-debug
+
+run-qemu: kernel.elf
+	$(QEMU) $(QEMU_FLAGS) -kernel $<
+
+run-qemu-debug: kernel.elf
+	$(QEMU) $(QEMU_FLAGS) $(QEMU_DEBUG_FLAGS) -kernel $<
+	@echo "GDB server listening on tcp::1234"
+	@echo "Connect with: loongarch64-unknown-elf-gdb kernel.elf -ex 'target remote :1234'"
