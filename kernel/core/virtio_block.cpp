@@ -8,6 +8,15 @@
 #include "include/kernel/virtio_block.h"
 #include "include/kernel/serial_debug.h"
 
+#if defined(_MSC_VER)
+#define GXOS_MSVC_STUB 1
+#define MEMORY_BARRIER() _ReadWriteBarrier()
+#include <intrin.h>
+#else
+#define GXOS_MSVC_STUB 0
+#define MEMORY_BARRIER() asm volatile ("" ::: "memory")
+#endif
+
 namespace kernel {
 namespace virtio {
 namespace block {
@@ -47,17 +56,27 @@ static void memcopy(void* dst, const void* src, size_t len)
 
 static inline void mmio_write32(uint64_t addr, uint32_t value)
 {
+#if GXOS_MSVC_STUB
+    (void)addr;
+    (void)value;
+#else
     volatile uint32_t* ptr = reinterpret_cast<volatile uint32_t*>(addr);
     *ptr = value;
-    asm volatile ("" ::: "memory");  // Compiler barrier
+    MEMORY_BARRIER();
+#endif
 }
 
 static inline uint32_t mmio_read32(uint64_t addr)
 {
+#if GXOS_MSVC_STUB
+    (void)addr;
+    return 0;
+#else
     volatile uint32_t* ptr = reinterpret_cast<volatile uint32_t*>(addr);
     uint32_t value = *ptr;
-    asm volatile ("" ::: "memory");
+    MEMORY_BARRIER();
     return value;
+#endif
 }
 
 static inline void mmio_write64(uint64_t addr, uint64_t value)
@@ -93,14 +112,14 @@ bool BlockDevice::init()
     // Read magic value
     uint32_t magic = mmio_read32(baseAddr + mmio::MAGIC_VALUE);
     if (magic != mmio::MAGIC) {
-        serial_debug::print("VirtIO Block: Invalid magic value\n");
+        kernel::serial::puts("VirtIO Block: Invalid magic value\n");
         return false;
     }
     
     // Check version
     uint32_t version = mmio_read32(baseAddr + mmio::VERSION);
     if (version != mmio::VERSION_LEGACY && version != mmio::VERSION_MODERN) {
-        serial_debug::print("VirtIO Block: Unsupported version\n");
+        kernel::serial::puts("VirtIO Block: Unsupported version\n");
         return false;
     }
     
@@ -148,7 +167,7 @@ bool BlockDevice::init()
     
     // Verify features accepted
     if (!(getStatus() & STATUS_FEATURES_OK)) {
-        serial_debug::print("VirtIO Block: Feature negotiation failed\n");
+        kernel::serial::puts("VirtIO Block: Feature negotiation failed\n");
         setStatus(STATUS_FAILED);
         return false;
     }
@@ -161,7 +180,7 @@ bool BlockDevice::init()
     
     // Setup request queue (queue 0)
     if (!setupQueue(0, &requestQueue)) {
-        serial_debug::print("VirtIO Block: Failed to setup queue\n");
+        kernel::serial::puts("VirtIO Block: Failed to setup queue\n");
         setStatus(STATUS_FAILED);
         return false;
     }
@@ -177,10 +196,10 @@ bool BlockDevice::init()
     
     initialized = true;
     
-    serial_debug::print("VirtIO Block: Initialized, capacity = ");
+    kernel::serial::puts("VirtIO Block: Initialized, capacity = ");
     // Print capacity (simplified)
-    serial_debug::print_hex(config.capacity);
-    serial_debug::print(" sectors\n");
+    kernel::serial::put_hex32(static_cast<uint32_t>(config.capacity));
+    kernel::serial::puts(" sectors\n");
     
     return true;
 }
@@ -319,7 +338,7 @@ int BlockDevice::waitForRequest()
     // Poll for completion
     while (requestQueue.lastUsedIdx == requestQueue.used->idx) {
         // Could add timeout or yield here
-        asm volatile ("" ::: "memory");
+        MEMORY_BARRIER();
     }
     
     // Process completed request

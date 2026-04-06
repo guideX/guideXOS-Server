@@ -27,6 +27,8 @@
 #include "include/kernel/vfs.h"
 #include "include/kernel/fs_fat.h"
 #include "include/kernel/fs_ext4.h"
+#include "include/kernel/fs_ntfs.h"
+#include "include/kernel/fs_xfs.h"
 
 // Network subsystem
 #include "include/kernel/nic.h"
@@ -37,6 +39,20 @@
 #include "include/kernel/tcp.h"
 #include "include/kernel/socket.h"
 #include "include/kernel/dns.h"
+
+// VirtIO subsystem
+#include "include/kernel/virtio_block.h"
+#include "include/kernel/virtio_net.h"
+#include "include/kernel/virtio_gpu.h"
+
+// Interrupt support
+#include "include/kernel/msi.h"
+
+// Device discovery
+#include "include/kernel/device_tree.h"
+
+// Feature reporting
+#include "include/kernel/feature_report.h"
 
 #if ARCH_HAS_PIC_8259
 #include "include/kernel/multiboot.h"
@@ -136,14 +152,40 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         // ============================================================
         kernel::serial::puts("[KERNEL] Initializing storage subsystem...\n");
         
+        // Initialize feature reporting
+        kernel::feature_report::init();
+        
         // Initialize block device layer
         kernel::block::init();
         kernel::serial::puts("[KERNEL] Block device layer initialized\n");
         
         // Initialize filesystem drivers
         kernel::fs_fat::init();
+        kernel::feature_report::complete_init(kernel::feature_report::FS_FAT32);
+        
         kernel::fs_ext4::init();
-        kernel::serial::puts("[KERNEL] Filesystem drivers initialized\n");
+        kernel::feature_report::complete_init(kernel::feature_report::FS_EXT4);
+        kernel::feature_report::complete_init(kernel::feature_report::FS_EXT2);
+        
+        // Initialize NTFS driver
+        kernel::fs_ntfs::init();
+        kernel::feature_report::complete_init(kernel::feature_report::FS_NTFS);
+        
+        // Initialize XFS driver
+        kernel::fs_xfs::init();
+        kernel::feature_report::complete_init(kernel::feature_report::FS_XFS);
+        
+        kernel::serial::puts("[KERNEL] Filesystem drivers initialized (FAT32, ext2/4, NTFS, XFS)\n");
+        
+        // Initialize MSI/MSI-X subsystem
+        kernel::msi::init();
+        kernel::feature_report::complete_init(kernel::feature_report::INT_MSI);
+        kernel::serial::puts("[KERNEL] MSI/MSI-X subsystem initialized\n");
+        
+        // Initialize VirtIO subsystem
+        kernel::virtio::block::init();
+        kernel::virtio::gpu::init();
+        kernel::serial::puts("[KERNEL] VirtIO subsystem initialized\n");
         
         // Initialize ATA/SATA driver (scans for IDE and AHCI controllers)
         kernel::ata::init();
@@ -260,6 +302,16 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::input::init(kernel::framebuffer::get_width(),
                             kernel::framebuffer::get_height());
         kernel::serial::puts("[KERNEL] Input manager initialized\n");
+        
+        // Update feature report for input devices
+        kernel::feature_report::complete_init(kernel::feature_report::INPUT_PS2_KB);
+        kernel::feature_report::complete_init(kernel::feature_report::INPUT_PS2_MOUSE);
+        kernel::feature_report::complete_init(kernel::feature_report::INT_PIC_8259);
+        
+        // ============================================================
+        // Print Hardware Feature Report
+        // ============================================================
+        kernel::feature_report::print_report();
         
         // Draw initial cursor at center of screen
         kernel::desktop::draw_cursor(kernel::input::mouse_x(),

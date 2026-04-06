@@ -8,6 +8,15 @@
 #include "include/kernel/virtio_net.h"
 #include "include/kernel/serial_debug.h"
 
+#if defined(_MSC_VER)
+#define GXOS_MSVC_STUB 1
+#define MEMORY_BARRIER() _ReadWriteBarrier()
+#include <intrin.h>
+#else
+#define GXOS_MSVC_STUB 0
+#define MEMORY_BARRIER() asm volatile ("" ::: "memory")
+#endif
+
 namespace kernel {
 namespace virtio {
 namespace net {
@@ -47,17 +56,27 @@ static void memcopy(void* dst, const void* src, size_t len)
 
 static inline void mmio_write32(uint64_t addr, uint32_t value)
 {
+#if GXOS_MSVC_STUB
+    (void)addr;
+    (void)value;
+#else
     volatile uint32_t* ptr = reinterpret_cast<volatile uint32_t*>(addr);
     *ptr = value;
-    asm volatile ("" ::: "memory");
+    MEMORY_BARRIER();
+#endif
 }
 
 static inline uint32_t mmio_read32(uint64_t addr)
 {
+#if GXOS_MSVC_STUB
+    (void)addr;
+    return 0;
+#else
     volatile uint32_t* ptr = reinterpret_cast<volatile uint32_t*>(addr);
     uint32_t value = *ptr;
-    asm volatile ("" ::: "memory");
+    MEMORY_BARRIER();
     return value;
+#endif
 }
 
 static inline void mmio_write64(uint64_t addr, uint64_t value)
@@ -98,14 +117,14 @@ bool NetDevice::init()
     // Read magic value
     uint32_t magic = mmio_read32(baseAddr + mmio::MAGIC_VALUE);
     if (magic != mmio::MAGIC) {
-        serial_debug::print("VirtIO Net: Invalid magic value\n");
+        kernel::serial::puts("VirtIO Net: Invalid magic value\n");
         return false;
     }
     
     // Check version
     uint32_t version = mmio_read32(baseAddr + mmio::VERSION);
     if (version != mmio::VERSION_LEGACY && version != mmio::VERSION_MODERN) {
-        serial_debug::print("VirtIO Net: Unsupported version\n");
+        kernel::serial::puts("VirtIO Net: Unsupported version\n");
         return false;
     }
     
@@ -169,7 +188,7 @@ bool NetDevice::init()
     
     // Verify features accepted
     if (!(getStatus() & STATUS_FEATURES_OK)) {
-        serial_debug::print("VirtIO Net: Feature negotiation failed\n");
+        kernel::serial::puts("VirtIO Net: Feature negotiation failed\n");
         setStatus(STATUS_FAILED);
         return false;
     }
@@ -182,14 +201,14 @@ bool NetDevice::init()
     
     // Setup RX queue (queue 0)
     if (!setupQueue(0, &rxQueue)) {
-        serial_debug::print("VirtIO Net: Failed to setup RX queue\n");
+        kernel::serial::puts("VirtIO Net: Failed to setup RX queue\n");
         setStatus(STATUS_FAILED);
         return false;
     }
     
     // Setup TX queue (queue 1)
     if (!setupQueue(1, &txQueue)) {
-        serial_debug::print("VirtIO Net: Failed to setup TX queue\n");
+        kernel::serial::puts("VirtIO Net: Failed to setup TX queue\n");
         setStatus(STATUS_FAILED);
         return false;
     }
@@ -197,7 +216,7 @@ bool NetDevice::init()
     // Setup control queue if supported (queue 2)
     if (hasCtrlQueue) {
         if (!setupQueue(2, &ctrlQueue)) {
-            serial_debug::print("VirtIO Net: Control queue setup failed (continuing without)\n");
+            kernel::serial::puts("VirtIO Net: Control queue setup failed (continuing without)\n");
             hasCtrlQueue = false;
         }
     }
@@ -210,12 +229,12 @@ bool NetDevice::init()
     
     initialized = true;
     
-    serial_debug::print("VirtIO Net: Initialized, MAC = ");
+    kernel::serial::puts("VirtIO Net: Initialized, MAC = ");
     for (int i = 0; i < 6; ++i) {
-        if (i > 0) serial_debug::print(":");
-        serial_debug::print_hex(config.mac[i]);
+        if (i > 0) kernel::serial::putc(':');
+        kernel::serial::put_hex8(config.mac[i]);
     }
-    serial_debug::print("\n");
+    kernel::serial::puts("\n");
     
     return true;
 }

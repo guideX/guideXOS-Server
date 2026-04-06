@@ -89,9 +89,126 @@ core\include/kernel/vfs.h(225,66): error G30A0E944: 'size_t' has not been declar
     225 | void join_path(const char* base, const char* name, char* output, size_t outputSize);
         |                                                                  ^~~~~~
   core\include/kernel/vfs.h:225:66: note: 'size_t' is defined in header '<cstddef>'; this is probably fixable by adding '#include <cstddef>'
+  In file included from core\main.cpp:30:
+core\include/kernel/fs_ntfs.h(374,47): error G30A0E944: 'size_t' has not been declared
+    374 | NtfsStatus read(NtfsFile* file, void* buffer, size_t size, size_t* bytesRead);
+        |                                               ^~~~~~
+  core\include/kernel/fs_ntfs.h:1:1: note: 'size_t' is defined in header '<cstddef>'; this is probably fixable by adding '#include <cstddef>'
+    +++ |+#include <cstddef>
+      1 | // NTFS Filesystem Driver
+core\include/kernel/fs_ntfs.h(374,60): error G30A0E944: 'size_t' has not been declared
+    374 | NtfsStatus read(NtfsFile* file, void* buffer, size_t size, size_t* bytesRead);
+        |                                                            ^~~~~~
+  core\include/kernel/fs_ntfs.h:374:60: note: 'size_t' is defined in header '<cstddef>'; this is probably fixable by adding '#include <cstddef>'
+core\include/kernel/fs_ntfs.h(377,54): error G30A0E944: 'size_t' has not been declared
+    377 | NtfsStatus write(NtfsFile* file, const void* buffer, size_t size, size_t* bytesWritten);
+        |                                                      ^~~~~~
+  core\include/kernel/fs_ntfs.h:377:54: note: 'size_t' is defined in header '<cstddef>'; this is probably fixable by adding '#include <cstddef>'
+core\include/kernel/fs_ntfs.h(377,67): error G30A0E944: 'size_t' has not been declared
+    377 | NtfsStatus write(NtfsFile* file, const void* buffer, size_t size, size_t* bytesWritten);
+        |                                                                   ^~~~~~
+  core\include/kernel/fs_ntfs.h:377:67: note: 'size_t' is defined in header '<cstddef>'; this is probably fixable by adding '#include <cstddef>'
+  In file included from core\main.cpp:31:
+core\include/kernel/fs_xfs.h(415,45): error G30A0E944: 'size_t' has not been declared
+    415 | XfsStatus read(XfsFile* file, void* buffer, size_t size, size_t* bytesRead);
+        |                                             ^~~~~~
+  core\include/kernel/fs_xfs.h:1:1: note: 'size_t' is defined in header '<cstddef>'; this is probably fixable by adding '#include <cstddef>'
+    +++ |+#include <cstddef>
+      1 | // XFS Filesystem Driver
+core\include/kernel/fs_xfs.h(415,58): error G30A0E944: 'size_t' has not been declared
+    415 | XfsStatus read(XfsFile* file, void* buffer, size_t size, size_t* bytesRead);
+        |                                                          ^~~~~~
+  core\include/kernel/fs_xfs.h:415:58: note: 'size_t' is defined in header '<cstddef>'; this is probably fixable by adding '#include <cstddef>'
+core\include/kernel/fs_xfs.h(418,52): error G30A0E944: 'size_t' has not been declared
+    418 | XfsStatus write(XfsFile* file, const void* buffer, size_t size, size_t* bytesWritten);
+        |                                                    ^~~~~~
+  core\include/kernel/fs_xfs.h:418:52: note: 'size_t' is defined in header '<cstddef>'; this is probably fixable by adding '#include <cstddef>'
+core\include/kernel/fs_xfs.h(418,65): error G30A0E944: 'size_t' has not been declared
+    418 | XfsStatus write(XfsFile* file, const void* buffer, size_t size, size_t* bytesWritten);
+        |                                                                 ^~~~~~
+  core\include/kernel/fs_xfs.h:418:65: note: 'size_t' is defined in header '<cstddef>'; this is probably fixable by adding '#include <cstddef>'
+  In file included from core\include/kernel/virtio_block.h:15,
+                   from core\main.cpp:44:
+core/include/kernel/virtio.h(313,15): error G30A0E944: 'size_t' does not name a type
+    313 | static inline size_t vring_size(uint16_t num)
+        |               ^~~~~~
+  core/include/kernel/virtio.h:1:1: note: 'size_t' is defined in header '<cstddef>'; this is probably fixable by adding '#include <cstddef>'
+    +++ |+#include <cstddef>
+      1 | // VirtIO Common Definitions
+core\include/kernel/virtio_block.h(200,5): error G30A0E944: 'size_t' does not name a type
+    200 |     size_t requestBufferSize;
+        |     ^~~~~~
+  core\include/kernel/virtio_block.h:16:1: note: 'size_t' is defined in header '<cstddef>'; this is probably fixable by adding '#include <cstddef>'
+     15 | #include <kernel/virtio.h>
+    +++ |+#include <cstddef>
+     16 | 
+  In file included from core\main.cpp:45:
+core\include/kernel/virtio_net.h(96,14): error G30A0E944: 'size_t' does not name a type
+     96 | static const size_t NET_HEADER_SIZE = 10;
+        |              ^~~~~~
+  core\include/kernel/virtio_net.h:1:1: note: 'size_t' is defined in header '<cstddef>'; this is probably fixable by adding '#include <cstddef>'
+    +++ |+#include <cstddef>
+      1 | // VirtIO Network Device Driver
+core\include/kernel/virtio_net.h(98,14): error G30A0E944: 'size_t' does not name a type
+     98 | static const size_t NET_HEADER_SIZE_MRG = 12;
+        |              ^~~~~~
+  core\include/kernel/virtio_net.h:98:14: note: 'size_t' is defined in header '<cstddef>'; this is probably fixable by adding '#include <cstddef>'
+core\include/kernel/virtio_net.h(152,46): error G30A0E944: 'size_t' has not been declared
+    152 | typedef void (*RxCallback)(const void* data, size_t len, void* context);
+        |                                              ^~~~~~
+  core\include/kernel/virtio_net.h:152:46: note: 'size_t' is defined in header '<cstddef>'; this is probably fixable by adding '#include <cstddef>'
+core\include/kernel/virtio_net.h(196,32): error G30A0E944: 'size_t' has not been declared
+    196 |     int send(const void* data, size_t len);
+        |                                ^~~~~~
+  core\include/kernel/virtio_net.h:196:32: note: 'size_t' is defined in header '<cstddef>'; this is probably fixable by adding '#include <cstddef>'
+core\include/kernel/virtio_net.h(202,31): error G30A0E944: 'size_t' has not been declared
+    202 |     int receive(void* buffer, size_t bufferLen);
+        |                               ^~~~~~
+  core\include/kernel/virtio_net.h:202:31: note: 'size_t' is defined in header '<cstddef>'; this is probably fixable by adding '#include <cstddef>'
+core\include/kernel/virtio_net.h(263,70): error G30A0E944: 'size_t' has not been declared
+    263 |     bool sendCtrlCommand(uint8_t cls, uint8_t cmd, const void* data, size_t len);
+        |                                                                      ^~~~~~
+  core\include/kernel/virtio_net.h:263:70: note: 'size_t' is defined in header '<cstddef>'; this is probably fixable by adding '#include <cstddef>'
+  In file included from core\main.cpp:46:
+core\include/kernel/virtio_gpu.h(298,5): error G30A0E944: 'size_t' does not name a type
+    298 |     size_t   fbBufferSize;
+        |     ^~~~~~
+  core\include/kernel/virtio_gpu.h:1:1: note: 'size_t' is defined in header '<cstddef>'; this is probably fixable by adding '#include <cstddef>'
+    +++ |+#include <cstddef>
+      1 | // VirtIO GPU Driver
+core\include/kernel/virtio_gpu.h(389,45): error G30A0E944: 'size_t' has not been declared
+    389 |                          uint64_t physAddr, size_t size);
+        |                                             ^~~~~~
+  core\include/kernel/virtio_gpu.h:389:45: note: 'size_t' is defined in header '<cstddef>'; this is probably fixable by adding '#include <cstddef>'
+  In file included from core\main.cpp:52:
+core\include/kernel/device_tree.h(44,14): error G30A0E944: 'size_t' does not name a type
+     44 | static const size_t FDT_MAX_PATH_LEN     = 256;
+        |              ^~~~~~
+  core\include/kernel/device_tree.h:1:1: note: 'size_t' is defined in header '<cstddef>'; this is probably fixable by adding '#include <cstddef>'
+    +++ |+#include <cstddef>
+      1 | // Device Tree (Flattened Device Tree / DTB) Parser
+core\include/kernel/device_tree.h(45,14): error G30A0E944: 'size_t' does not name a type
+     45 | static const size_t FDT_MAX_NAME_LEN     = 64;
+        |              ^~~~~~
+  core\include/kernel/device_tree.h:45:14: note: 'size_t' is defined in header '<cstddef>'; this is probably fixable by adding '#include <cstddef>'
+core\include/kernel/device_tree.h(46,14): error G30A0E944: 'size_t' does not name a type
+     46 | static const size_t FDT_MAX_PHANDLE_ARGS = 16;
+        |              ^~~~~~
+  core\include/kernel/device_tree.h:46:14: note: 'size_t' is defined in header '<cstddef>'; this is probably fixable by adding '#include <cstddef>'
+core\include/kernel/device_tree.h(47,14): error G30A0E944: 'size_t' does not name a type
+     47 | static const size_t FDT_MAX_DEPTH        = 16;
+        |              ^~~~~~
+  core\include/kernel/device_tree.h:47:14: note: 'size_t' is defined in header '<cstddef>'; this is probably fixable by adding '#include <cstddef>'
+core\include/kernel/device_tree.h(179,20): error GCBAF8158: 'FDT_MAX_PHANDLE_ARGS' was not declared in this scope
+    179 |     uint32_t cells[FDT_MAX_PHANDLE_ARGS];
+        |                    ^~~~~~~~~~~~~~~~~~~~
+core\include/kernel/device_tree.h(244,55): error G30A0E944: 'size_t' has not been declared
+    244 | FdtStatus get_path(const FdtNode* node, char* buffer, size_t bufferSize);
+        |                                                       ^~~~~~
+  core\include/kernel/device_tree.h:244:55: note: 'size_t' is defined in header '<cstddef>'; this is probably fixable by adding '#include <cstddef>'
   core\main.cpp: In function 'void kernel_main(void*, uint32_t)':
-core\main.cpp(164,53): error GD5C94910: 'kernel::ramdisk::create' cannot be used as a function
-    164 |         uint8_t ramdiskIdx = kernel::ramdisk::create(4 * 1024 * 1024, "ram0");
+core\main.cpp(206,53): error GD5C94910: 'kernel::ramdisk::create' cannot be used as a function
+    206 |         uint8_t ramdiskIdx = kernel::ramdisk::create(4 * 1024 * 1024, "ram0");
         |                              ~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~
   [ERROR] Failed to compile main.cpp
   Press any key to continue . . . 

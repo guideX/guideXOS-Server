@@ -9,6 +9,12 @@
 #include "include/kernel/ethernet.h"
 #include "include/kernel/serial_debug.h"
 
+#if defined(_MSC_VER)
+#define GXOS_MSVC_STUB 1
+#else
+#define GXOS_MSVC_STUB 0
+#endif
+
 namespace kernel {
 namespace icmpv6 {
 

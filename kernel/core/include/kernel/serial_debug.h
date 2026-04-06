@@ -60,6 +60,23 @@ inline void put_hex32(uint32_t v)
     }
 }
 
+inline void put_hex16(uint16_t v)
+{
+    const char hex[] = "0123456789ABCDEF";
+    putc(hex[(v >> 12) & 0xF]);
+    putc(hex[(v >> 8) & 0xF]);
+    putc(hex[(v >> 4) & 0xF]);
+    putc(hex[v & 0xF]);
+}
+
+inline void put_hex64(uint64_t v)
+{
+    for (int i = 60; i >= 0; i -= 4) {
+        const char hex[] = "0123456789ABCDEF";
+        putc(hex[(v >> i) & 0xF]);
+    }
+}
+
 #else
 
 inline void init() { }
@@ -67,6 +84,8 @@ inline void putc(char) { }
 inline void puts(const char*) { }
 inline void put_hex8(uint8_t) { }
 inline void put_hex32(uint32_t) { }
+inline void put_hex16(uint16_t) { }
+inline void put_hex64(uint64_t) { }
 
 #endif // ARCH_HAS_PORT_IO
 
