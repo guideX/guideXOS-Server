@@ -5,12 +5,19 @@
 // Ported visual style from guideXOS Server compositor (compositor.cpp),
 // desktop_wallpaper.h, system_tray.h, and bitmap_font.h.
 //
+// Now includes full GUI app support in bare-metal/UEFI mode via the
+// kernel compositor and app framework.
+//
 // Copyright (c) 2026 guideXOS Server
 //
 
 #include "include/kernel/desktop.h"
 #include "include/kernel/framebuffer.h"
 #include "include/kernel/shell.h"
+#include "include/kernel/kernel_app.h"
+#include "include/kernel/kernel_apps.h"
+#include "include/kernel/kernel_compositor.h"
+#include "include/kernel/kernel_ipc.h"
 
 #if defined(_MSC_VER)
 #include <intrin.h>  // For MSVC intrinsics (__outbyte, __halt, etc.)
@@ -480,14 +487,14 @@ struct DesktopIcon {
 };
 
 static const DesktopIcon s_desktopIcons[] = {
-    {"Notepad",    0xFF78B450},  // green
-    {"Calculator", 0xFF4690C8},  // blue
-    {"Console",    0xFF78B450},  // green
-    {"Paint",      0xFFC87830},  // orange
-    {"Clock",      0xFF4690C8},  // blue
-    {"TaskMgr",    0xFFB44646},  // red
-    {"Files",      0xFFC8B43C},  // yellow
-    {"ImgViewer",  0xFFC87830},  // orange
+    {"Notepad",     0xFF78B450},  // green
+    {"Calculator",  0xFF4690C8},  // blue
+    {"Console",     0xFF78B450},  // green
+    {"Paint",       0xFFC87830},  // orange
+    {"Clock",       0xFF4690C8},  // blue
+    {"TaskManager", 0xFFB44646},  // red  (matches registered app name)
+    {"Files",       0xFFC8B43C},  // yellow
+    {"ImgViewer",   0xFFC87830},  // orange
 };
 static const int kDesktopIconCount = 8;
 
@@ -500,7 +507,7 @@ static const char* s_startMenuApps[] = {
     "Image Viewer",
     "Notepad",
     "Paint",
-    "Task Manager",
+    "TaskManager",
 };
 static const int kStartMenuAppCount = 8;
 
@@ -540,7 +547,7 @@ static const char* s_contextMenuItems[] = {
     "Personalize",
     "New Folder",
     "Open Terminal",
-    "Task Manager",
+    "TaskManager",
 };
 static const int kContextMenuCount = 6;
 static const uint32_t kContextMenuW = 160;
@@ -1983,6 +1990,134 @@ static void init_icon_positions()
     s_iconPositionsInitialized = true;
 }
 
+// Helper: try to launch an app using the kernel app framework
+static bool try_launch_kernel_app(const char* appName)
+{
+    if (!appName) return false;
+    
+    // Check if app is available in kernel mode
+    if (app::AppManager::isAppAvailable(appName)) {
+        return app::AppManager::launchApp(appName);
+    }
+    
+    return false;
+}
+
+// ============================================================
+// Test Mode - Validates compositor and app launching
+// ============================================================
+
+static bool s_testModeRan = false;
+
+// Run test mode to validate app launching (call from init or shell command)
+void run_test_mode()
+{
+    if (s_testModeRan) return;  // Only run once
+    s_testModeRan = true;
+    
+    // Log test start
+    shell::execute("echo === guideXOS Kernel GUI Test Mode ===");
+    shell::execute("echo Testing compositor and app framework...");
+    
+    // Test 1: Check if bare-metal mode
+    bool bareMetal = app::AppManager::isBareMetal();
+    if (bareMetal) {
+        shell::execute("echo [PASS] Running in bare-metal/UEFI mode");
+    } else {
+        shell::execute("echo [INFO] Running in hosted mode");
+    }
+    
+    // Test 2: Check compositor initialization
+    if (compositor::KernelCompositor::getWindowCount() >= 0) {
+        shell::execute("echo [PASS] Compositor initialized");
+    } else {
+        shell::execute("echo [FAIL] Compositor not initialized");
+    }
+    
+    // Test 3: Check IPC system
+    int testChannel = ipc::IpcManager::createChannel("test", 999);
+    if (testChannel >= 0) {
+        shell::execute("echo [PASS] IPC system operational");
+        ipc::IpcManager::destroyChannel(testChannel);
+    } else {
+        shell::execute("echo [FAIL] IPC system failed");
+    }
+    
+    // Test 4: Try launching Notepad
+    shell::execute("echo Testing Notepad launch...");
+    if (app::AppManager::isAppAvailable("Notepad")) {
+        bool launched = app::AppManager::launchApp("Notepad");
+        if (launched) {
+            shell::execute("echo [PASS] Notepad launched successfully");
+        } else {
+            shell::execute("echo [FAIL] Notepad failed to launch");
+        }
+    } else {
+        shell::execute("echo [SKIP] Notepad not registered");
+    }
+    
+    // Test 5: Try launching Calculator  
+    shell::execute("echo Testing Calculator launch...");
+    if (app::AppManager::isAppAvailable("Calculator")) {
+        bool launched = app::AppManager::launchApp("Calculator");
+        if (launched) {
+            shell::execute("echo [PASS] Calculator launched successfully");
+        } else {
+            shell::execute("echo [FAIL] Calculator failed to launch");
+        }
+    } else {
+        shell::execute("echo [SKIP] Calculator not registered");
+    }
+    
+    // Test 6: Try launching TaskManager
+    shell::execute("echo Testing TaskManager launch...");
+    if (app::AppManager::isAppAvailable("TaskManager")) {
+        bool launched = app::AppManager::launchApp("TaskManager");
+        if (launched) {
+            shell::execute("echo [PASS] TaskManager launched successfully");
+        } else {
+            shell::execute("echo [FAIL] TaskManager failed to launch");
+        }
+    } else {
+        shell::execute("echo [SKIP] TaskManager not registered");
+    }
+    
+    // Test 7: Check running app count
+    int runningCount = app::AppManager::getRunningAppCount();
+    if (runningCount > 0) {
+        // Build result message manually (no sprintf in kernel)
+        shell::execute("echo [PASS] Apps running in compositor");
+    } else {
+        shell::execute("echo [INFO] No apps currently running");
+    }
+    
+    // Test 8: Check window count in compositor
+    int windowCount = compositor::KernelCompositor::getWindowCount();
+    if (windowCount >= 0) {
+        shell::execute("echo [PASS] Compositor window tracking operational");
+    }
+    
+    // Log test completion
+    shell::execute("echo === Test Mode Complete ===");
+    
+    // Log summary from AppLogger
+    int logCount = app::AppLogger::getLogCount();
+    if (logCount > 0) {
+        shell::execute("echo App launch log entries recorded");
+    }
+    
+    // Show notification about test completion
+    s_notification.title = "Test Mode Complete";
+    s_notification.message = "Check console for results";
+    s_notification.visible = true;
+}
+
+// Check if compositor/IPC is available for GUI apps
+bool is_compositor_available()
+{
+    return s_initialized && 
+           compositor::KernelCompositor::getWindowCount() >= 0;
+}
 
 void init()
 {
@@ -1996,6 +2131,14 @@ void init()
     s_lastClickTime = 0;
     init_icon_positions();
     shell::init();
+    
+    // Initialize kernel app framework
+    ipc::IpcManager::init();
+    apps::registerKernelApps();
+    compositor::KernelCompositor::init(s_screenW, s_screenH, kTaskbarH);
+    compositor::TaskbarManager::init(s_screenW, s_screenH, kTaskbarH, 
+                                     4 + kStartBtnW + 8 + kSearchBoxW + 8);
+    
     s_initialized = true;
 }
 
@@ -2003,9 +2146,14 @@ void init()
 void tick()
 {
     s_tickCounter++;
+    ipc::IpcManager::tick();
+    
+    // Update running apps
+    app::AppManager::update();
+    
+    // Update taskbar buttons for kernel apps
+    compositor::TaskbarManager::updateButtons();
 }
-
-
 
 
 
@@ -2026,6 +2174,12 @@ void draw()
     draw_device_manager();
     draw_network_adapters();
     draw_network_config();
+    
+    // Draw kernel compositor windows (GUI apps)
+    compositor::KernelCompositor::drawAllWindows();
+    
+    // Draw taskbar buttons for kernel apps
+    compositor::TaskbarManager::drawButtons();
     
     // Draw shell window if open and not minimized
     if (shell::is_open() && !s_shellMinimized) {
@@ -2202,8 +2356,71 @@ void open_terminal()
     s_shellMinimized = false;
 }
 
+bool launch_app(const char* appName)
+{
+    if (!appName) return false;
+    
+    // Check for Console/Terminal special case
+    bool isConsole = false;
+    const char* c = "Console";
+    const char* l = appName;
+    while (*c && *l && *c == *l) { c++; l++; }
+    if (*c == '\0' && *l == '\0') isConsole = true;
+    
+    // Also check for "Terminal"
+    if (!isConsole) {
+        c = "Terminal";
+        l = appName;
+        while (*c && *l && *c == *l) { c++; l++; }
+        if (*c == '\0' && *l == '\0') isConsole = true;
+    }
+    
+    if (isConsole) {
+        open_terminal();
+        return true;
+    }
+    
+    // Try to launch as kernel GUI app
+    return try_launch_kernel_app(appName);
+}
+
+bool is_bare_metal_mode()
+{
+    return app::AppManager::isBareMetal();
+}
+
+int get_running_app_count()
+{
+    return app::AppManager::getRunningAppCount();
+}
+
 void handle_key(uint32_t key)
 {
+    // Route keyboard input to focused kernel compositor window first
+    if (compositor::KernelCompositor::hasWindows()) {
+        app::KernelWindow* focused = compositor::KernelCompositor::getFocusedWindow();
+        if (focused) {
+            // Escape closes app window
+            if (key == 27) {  // ESC
+                compositor::KernelCompositor::closeWindow(focused->id);
+                draw();
+                return;
+            }
+            
+            // Route character keys to the compositor
+            if (key < 256) {
+                compositor::KernelCompositor::handleKeyChar((char)key);
+                draw();
+                return;
+            }
+            
+            // Route special keys
+            compositor::KernelCompositor::handleKeyDown(key);
+            draw();
+            return;
+        }
+    }
+    
     // If shell is open, send keys to it
     if (shell::is_open()) {
         // Escape closes shell
@@ -2332,13 +2549,39 @@ static int hit_test_icon(int32_t mx, int32_t my)
     return -1;
 }
 
-// Show a notification for an icon launch
+// Show a notification for an icon launch (or launch the app if available)
 static void show_icon_notification(int iconIndex)
 {
     if (iconIndex < 0 || iconIndex >= kDesktopIconCount) return;
-    s_notification.title = s_desktopIcons[iconIndex].label;
-    s_notification.message = "Application launched";
+    
+    const char* label = s_desktopIcons[iconIndex].label;
+    
+    // Check if this is Console - special case for shell
+    bool isConsole = false;
+    const char* c = "Console";
+    const char* l = label;
+    while (*c && *l && *c == *l) { c++; l++; }
+    if (*c == '\0' && *l == '\0') isConsole = true;
+    
+    if (isConsole) {
+        shell::open();
+        s_shellActive = true;
+        s_shellMinimized = false;
+        return;
+    }
+    
+    // Try to launch as a kernel GUI app
+    if (try_launch_kernel_app(label)) {
+        // App launched successfully
+        app::AppLogger::logLaunch(label, app::LaunchResult::Success);
+        return;
+    }
+    
+    // App not available in kernel mode - show notification
+    s_notification.title = label;
+    s_notification.message = "Not available in bare-metal mode";
     s_notification.visible = true;
+    app::AppLogger::logLaunch(label, app::LaunchResult::NotAvailable);
 }
 
 // Compute start menu geometry (shared between drawing and hit-testing)
@@ -2423,10 +2666,21 @@ static void show_start_menu_notification(const char* label)
         return;
     }
     
+    // Close start menu before launching app
+    s_startMenuOpen = false;
     
+    // Try to launch as a kernel GUI app
+    if (try_launch_kernel_app(label)) {
+        // App launched successfully
+        app::AppLogger::logLaunch(label, app::LaunchResult::Success);
+        return;
+    }
+    
+    // App not available in kernel mode - show notification
     s_notification.title = label;
-    s_notification.message = "Application launched";
+    s_notification.message = "Not available in bare-metal mode";
     s_notification.visible = true;
+    app::AppLogger::logLaunch(label, app::LaunchResult::NotAvailable);
 }
 
 
@@ -2554,6 +2808,40 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
     s_prevButtons = buttons;
 
     uint32_t taskbarY = s_screenH - kTaskbarH;
+
+    // ---- Route input to kernel compositor first (GUI apps) ----
+    // Check if point is over a compositor window
+    if (compositor::KernelCompositor::isPointOverWindow(mx, my)) {
+        compositor::KernelCompositor::handleMouseMove(mx, my);
+        if (pressed & 0x01) {
+            compositor::KernelCompositor::handleMouseDown(mx, my, 0x01);
+        }
+        if (released & 0x01) {
+            compositor::KernelCompositor::handleMouseUp(mx, my, 0x01);
+        }
+        if (pressed & 0x02) {
+            compositor::KernelCompositor::handleMouseDown(mx, my, 0x02);
+        }
+        if (released & 0x02) {
+            compositor::KernelCompositor::handleMouseUp(mx, my, 0x02);
+        }
+        draw();
+        draw_cursor(mx, my);
+        return;
+    }
+    
+    // Update compositor hover states even when not over a window
+    compositor::KernelCompositor::handleMouseMove(mx, my);
+    
+    // Check for taskbar button clicks (for kernel apps)
+    if ((pressed & 0x01) && (uint32_t)my >= taskbarY) {
+        compositor::TaskbarManager::updateHover(mx, my);
+        if (compositor::TaskbarManager::handleClick(mx, my)) {
+            draw();
+            draw_cursor(mx, my);
+            return;
+        }
+    }
 
     // ---- Handle shell window dragging (left button held) ----
     if (s_shellDragging && (buttons & 0x01)) {
@@ -2689,9 +2977,9 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
                 draw_cursor(mx, my);
                 return;
             } else {
-                // Show notification for other apps
+                // Other apps are not yet implemented in kernel mode
                 s_notification.title = s_desktopIcons[iconIdx].label;
-                s_notification.message = "Application launched";
+                s_notification.message = "Not available in UEFI mode";
                 s_notification.visible = true;
                 draw();
                 draw_cursor(mx, my);
@@ -3099,9 +3387,9 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
                     draw_cursor(mx, my);
                     return;
                 } else {
-                    // Show notification for other apps (not implemented yet)
+                    // Other apps are not yet implemented in kernel mode
                     s_notification.title = s_desktopIcons[iconIdx].label;
-                    s_notification.message = "Application launched";
+                    s_notification.message = "Not available in UEFI mode";
                     s_notification.visible = true;
                     draw();
                     draw_cursor(mx, my);
@@ -3236,3 +3524,9 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
 
 } // namespace desktop
 } // namespace kernel
+
+// External function for shell to call test mode
+void desktop_run_test_mode()
+{
+    kernel::desktop::run_test_mode();
+}

@@ -54,6 +54,7 @@ namespace gxos {
         RECT Compositor::g_startMenuRect{ 0,0,0,0 };
 #else
         Compositor::SnapRect Compositor::g_snapPreviewRect{ 0,0,0,0 };
+        bool Compositor::g_needsRedraw = true;
 #endif
         bool Compositor::g_showDesktopActive = false; std::vector<uint64_t> Compositor::g_showDesktopMinimized; uint64_t Compositor::g_lastClickTicks = 0; uint64_t Compositor::g_lastClickWin = 0;
         bool Compositor::g_altTabOverlayActive = false; uint64_t Compositor::g_altTabOverlayTicks = 0; int Compositor::g_altTabCycleIndex = 0;
@@ -67,7 +68,11 @@ namespace gxos {
         bool Compositor::g_startMenuAllProgs = false; // "All Programs" view toggle
         std::vector<std::string> Compositor::g_startMenuAllProgsSorted; // Alphabetically sorted app list
         bool Compositor::g_taskbarMenuVisible = false;
+#ifdef _WIN32
         RECT Compositor::g_taskbarMenuRect{ 0,0,0,0 };
+#else
+        Compositor::SnapRect Compositor::g_taskbarMenuRect{ 0,0,0,0 };
+#endif
         int Compositor::g_taskbarMenuSel = 0;
 
         // Video backend (GDI on Windows, kernel FB on bare-metal)
@@ -825,17 +830,28 @@ namespace gxos {
 #endif
 
         void Compositor::sendFocus(uint64_t winId) { uint64_t ownerPid = 0; { std::lock_guard<std::mutex> lk(g_lock); auto it = g_windows.find(winId); if (it != g_windows.end( )) ownerPid = it->second.ownerPid; } publishOut(MsgType::MT_SetFocus, std::to_string(winId), ownerPid); }
-        void Compositor::invalidate(uint64_t) {
+        void Compositor::invalidate(uint64_t winId) {
 #ifdef _WIN32
             requestRepaint( );
+#else
+            g_needsRedraw = true;
+            Logger::write(LogLevel::Info, std::string("invalidate called for window ") + std::to_string(winId) + ", g_needsRedraw=true");
 #endif
         }
         void Compositor::emitWidgetEvt(uint64_t winId, int wid, const std::string& evt, const std::string& value) { uint64_t ownerPid = 0; { std::lock_guard<std::mutex> lk(g_lock); auto it = g_windows.find(winId); if (it != g_windows.end( )) ownerPid = it->second.ownerPid; } publishOut(MsgType::MT_WidgetEvt, std::to_string(winId) + "|" + std::to_string(wid) + "|" + evt + "|" + value, ownerPid); }
 
         void Compositor::handleMouse(int mx, int my, bool down, bool up) {
-            std::lock_guard<std::mutex> lk(g_lock); const int titleBarH = 24; const int gripSize = 12; const int taskbarH = 40; RECT cr{ 0,0,1024,768 };
+            std::lock_guard<std::mutex> lk(g_lock); const int titleBarH = 24; const int gripSize = 12; const int taskbarH = 40;
 #ifdef _WIN32
+            RECT cr{ 0,0,1024,768 };
             if (g_hwnd) GetClientRect(g_hwnd, &cr);
+#else
+            // On bare-metal, use video backend dimensions
+            struct { int left; int top; int right; int bottom; } cr{ 0, 0, 1024, 768 };
+            if (g_videoBackend) {
+                cr.right = g_videoBackend->getWidth();
+                cr.bottom = g_videoBackend->getHeight();
+            }
 #endif
             // On mouse down, record start position and check if we're in a title bar (pending drag)
             if (down) {
@@ -952,7 +968,9 @@ namespace gxos {
                     wi.dirty = true;
                     wi.visible = true;
                     wi.ownerPid = m.srcPid;
+#ifdef _WIN32
                     wi.taskbarIcon = Icons::TaskbarIcon(16);
+#endif
                     // Initialize animation state - store normal bounds
                     wi.animState.normX = winX;
                     wi.animState.normY = winY;
@@ -996,11 +1014,22 @@ namespace gxos {
         void Compositor::drawAll( ) {
 #ifdef _WIN32
             requestRepaint( );
+#else
+            if (g_needsRedraw) {
+                renderToFramebuffer();
+            }
 #endif
         }
         void Compositor::pumpEvents( ) {
 #ifdef _WIN32
             MSG msg; while (PeekMessageA(&msg, nullptr, 0, 0, PM_REMOVE)) { TranslateMessage(&msg); DispatchMessageA(&msg); if (msg.message == WM_QUIT) break; }
+#else
+            // On bare-metal, we don't have a native event pump
+            // Events come through IPC from the kernel input subsystem
+            // Trigger a redraw if needed
+            if (g_needsRedraw) {
+                renderToFramebuffer();
+            }
 #endif
         }
 
@@ -1024,15 +1053,25 @@ namespace gxos {
                 std::vector<SavedWindow> sw; std::string err; if (DesktopState::Load("desktop.state", sw, err)) {
                     std::lock_guard<std::mutex> lk(g_lock); g_windows.clear( ); g_z.clear( ); g_focus = 0; std::sort(sw.begin( ), sw.end( ), [] (const SavedWindow& a, const SavedWindow& b) { return a.z < b.z; }); for (auto& w : sw) {
                         uint64_t id = s_nextWinId.fetch_add(1); WinInfo wi{ id,w.title,w.x,w.y,w.w,w.h, {}, {}, {}, w.minimized, w.maximized, 0,0,0,0, true, w.snap }; if (wi.maximized) {
-                            RECT crL{ 0,0,1024,768 };
 #ifdef _WIN32
+                            RECT crL{ 0,0,1024,768 };
                             if (g_hwnd) GetClientRect(g_hwnd, &crL);
+#else
+                            struct { int left; int top; int right; int bottom; } crL{ 0, 0, 1024, 768 };
+                            if (g_videoBackend) { crL.right = g_videoBackend->getWidth(); crL.bottom = g_videoBackend->getHeight(); }
 #endif
                             int taskbarY = crL.bottom - 40; wi.x = crL.left; wi.y = crL.top; wi.w = crL.right - crL.left; wi.h = taskbarY - crL.top;
                         } g_windows[id] = wi; g_z.push_back(id); if (w.focused && !wi.minimized) g_focus = id;
                     } legacyLoaded = true;
                 }
             }
+            
+#if !defined(_WIN32)
+            // On bare-metal, trigger initial render
+            g_needsRedraw = true;
+            renderToFramebuffer();
+#endif
+            
             bool running = true; while (running) { pumpEvents( ); ipc::Message m; if (ipc::Bus::pop(kGuiChanIn, m, 30)) { if (m.type == (uint32_t)MsgType::MT_Ping && m.data.size( ) == 3 && std::string(m.data.begin( ), m.data.end( )) == "bye") running = false; else handleMessage(m); } }
             DesktopConfigData outCfg = g_cfg; { std::lock_guard<std::mutex> lk(g_lock); outCfg.windows.clear( ); for (size_t i = 0; i < g_z.size( ); ++i) { uint64_t id = g_z[i]; auto it = g_windows.find(id); if (it == g_windows.end( )) continue; const WinInfo& w = it->second; DesktopWindowRec rec; rec.id = w.id; rec.title = w.title; rec.x = w.x; rec.y = w.y; rec.w = w.w; rec.h = w.h; rec.minimized = w.minimized; rec.maximized = w.maximized; rec.z = (int)i; rec.focused = (g_focus == w.id); rec.snap = w.snapState; outCfg.windows.push_back(rec); } }
             std::string cerr; DesktopConfig::Save("desktop.json", outCfg, cerr); if (!legacyLoaded) { std::vector<SavedWindow> sw; { std::lock_guard<std::mutex> lk(g_lock); for (auto& kv : g_windows) { sw.push_back(SavedWindow{ kv.second.id, kv.second.title, kv.second.x, kv.second.y, kv.second.w, kv.second.h, kv.second.minimized, kv.second.maximized }); } } std::string err; DesktopState::Save("desktop.state", sw, err); }
@@ -1119,6 +1158,267 @@ namespace gxos {
             SetBkMode(dc, TRANSPARENT);
             SetTextColor(dc, RGB(220, 220, 230));
             TextOutA(dc, tipX + pad, tipY + pad, text, (int)strlen(text));
+        }
+#endif
+
+#if !defined(_WIN32)
+        // ==================================================================
+        // Bare-metal framebuffer rendering
+        // ==================================================================
+        
+        // Helper: fill a rectangle in the framebuffer
+        static void fbFillRect(uint32_t* pixels, int pitch, int bufW, int bufH,
+                               int x, int y, int w, int h, uint32_t color) {
+            if (!pixels) return;
+            int stride = pitch / 4;
+            for (int row = y; row < y + h && row < bufH; ++row) {
+                if (row < 0) continue;
+                for (int col = x; col < x + w && col < bufW; ++col) {
+                    if (col < 0) continue;
+                    pixels[row * stride + col] = color;
+                }
+            }
+        }
+        
+        // Helper: draw a border rectangle
+        static void fbDrawRect(uint32_t* pixels, int pitch, int bufW, int bufH,
+                               int x, int y, int w, int h, uint32_t color) {
+            if (!pixels) return;
+            int stride = pitch / 4;
+            // Top and bottom edges
+            for (int col = x; col < x + w && col < bufW; ++col) {
+                if (col < 0) continue;
+                if (y >= 0 && y < bufH) pixels[y * stride + col] = color;
+                if (y + h - 1 >= 0 && y + h - 1 < bufH) pixels[(y + h - 1) * stride + col] = color;
+            }
+            // Left and right edges
+            for (int row = y; row < y + h && row < bufH; ++row) {
+                if (row < 0) continue;
+                if (x >= 0 && x < bufW) pixels[row * stride + x] = color;
+                if (x + w - 1 >= 0 && x + w - 1 < bufW) pixels[row * stride + x + w - 1] = color;
+            }
+        }
+        
+        void Compositor::renderToFramebuffer() {
+            if (!g_videoBackend) {
+                Logger::write(LogLevel::Error, "renderToFramebuffer: no video backend!");
+                return;
+            }
+            
+            uint32_t* pixels = g_videoBackend->getPixels();
+            if (!pixels) {
+                Logger::write(LogLevel::Error, "renderToFramebuffer: no pixel buffer!");
+                return;
+            }
+            
+            int fbW = g_videoBackend->getWidth();
+            int fbH = g_videoBackend->getHeight();
+            int pitch = g_videoBackend->getPitch();
+            
+            // Log window count for debugging
+            {
+                std::lock_guard<std::mutex> lk(g_lock);
+                Logger::write(LogLevel::Info, std::string("renderToFramebuffer: ") + 
+                    std::to_string(g_windows.size()) + " windows, " +
+                    std::to_string(fbW) + "x" + std::to_string(fbH));
+            }
+            
+            const int taskbarH = 40;
+            const int titleBarH = 28;
+            
+            // Clear background with gradient (dark blue)
+            for (int y = 0; y < fbH - taskbarH; ++y) {
+                float t = (float)y / (float)(fbH - taskbarH);
+                uint8_t r = (uint8_t)(20 + t * 15);
+                uint8_t g = (uint8_t)(25 + t * 20);
+                uint8_t b = (uint8_t)(40 + t * 30);
+                uint32_t color = (r << 16) | (g << 8) | b;
+                for (int x = 0; x < fbW; ++x) {
+                    pixels[y * (pitch/4) + x] = color;
+                }
+            }
+            
+            // Draw branding text
+            const char* brand = "guideXOS Server - UEFI Mode";
+            BitmapFont::DrawStringToBufferScaled(pixels, pitch, fbW, fbH,
+                fbW / 2 - BitmapFont::MeasureWidth(brand) * 2 / 2,
+                fbH / 2 - 50, brand, -1, 0x00404040, 2);
+            BitmapFont::DrawStringToBufferScaled(pixels, pitch, fbW, fbH,
+                fbW / 2 - BitmapFont::MeasureWidth(brand) * 2 / 2 - 1,
+                fbH / 2 - 51, brand, -1, 0x00808090, 2);
+            
+            // Draw desktop icons
+            const int iconW = 56;
+            const int iconH = 56;
+            const int cellW = iconW + 28;
+            const int cellH = iconH + 38;
+            int iconIdx = 0;
+            for (const auto& item : g_items) {
+                int ix = item.ix >= 0 ? item.ix : 20 + (iconIdx % 8) * cellW;
+                int iy = item.iy >= 0 ? item.iy : 20 + (iconIdx / 8) * cellH;
+                
+                // Icon background
+                uint32_t iconColor = 0x005A6478; // default gray-blue
+                if (item.label == "Notepad" || item.label == "Console") iconColor = 0x0078B450;
+                else if (item.label == "Calculator" || item.label == "Clock") iconColor = 0x00468CC8;
+                else if (item.label == "TaskManager") iconColor = 0x00B44646;
+                
+                int iconX = ix + (cellW - iconW) / 2;
+                int iconY = iy + 6;
+                fbFillRect(pixels, pitch, fbW, fbH, iconX, iconY, iconW, iconH, iconColor);
+                fbDrawRect(pixels, pitch, fbW, fbH, iconX, iconY, iconW, iconH, 0x00B4B4C8);
+                
+                // Icon label
+                const char* label = item.label.c_str();
+                int labelW = BitmapFont::MeasureWidth(label);
+                BitmapFont::DrawStringToBuffer(pixels, pitch, fbW, fbH,
+                    ix + (cellW - labelW) / 2, iconY + iconH + 8, label, -1, 0x00E6E6F0);
+                
+                if (item.pinned) {
+                    BitmapFont::DrawStringToBuffer(pixels, pitch, fbW, fbH,
+                        iconX + iconW - 6, iconY + 2, "*", 1, 0x00FFC83C);
+                }
+                
+                iconIdx++;
+            }
+            
+            // Draw windows in Z-order
+            {
+                std::lock_guard<std::mutex> lk(g_lock);
+                for (uint64_t wid : g_z) {
+                    auto it = g_windows.find(wid);
+                    if (it == g_windows.end()) continue;
+                    const WinInfo& w = it->second;
+                    if (w.minimized || !w.visible) continue;
+                    
+                    bool isFocused = (w.id == g_focus);
+                    
+                    // Window shadow
+                    fbFillRect(pixels, pitch, fbW, fbH, w.x + 4, w.y + 4, w.w, w.h, 0x00202020);
+                    
+                    // Window background
+                    fbFillRect(pixels, pitch, fbW, fbH, w.x, w.y, w.w, w.h, 0x00303840);
+                    
+                    // Title bar
+                    uint32_t titleColor = isFocused ? 0x00466496 : 0x00505058;
+                    fbFillRect(pixels, pitch, fbW, fbH, w.x, w.y, w.w, titleBarH, titleColor);
+                    
+                    // Title text
+                    BitmapFont::DrawStringToBuffer(pixels, pitch, fbW, fbH,
+                        w.x + 10, w.y + (titleBarH - 7) / 2, w.title.c_str(), -1, 0x00F0F0F0);
+                    
+                    // Close button (X)
+                    int btnSize = titleBarH - 8;
+                    int closeX = w.x + w.w - btnSize - 4;
+                    int closeY = w.y + 4;
+                    fbFillRect(pixels, pitch, fbW, fbH, closeX, closeY, btnSize, btnSize, 0x00C83232);
+                    BitmapFont::DrawStringToBuffer(pixels, pitch, fbW, fbH,
+                        closeX + (btnSize - 5) / 2, closeY + (btnSize - 7) / 2, "X", 1, 0x00FFFFFF);
+                    
+                    // Window border
+                    uint32_t borderColor = isFocused ? 0x006496C8 : 0x00606068;
+                    fbDrawRect(pixels, pitch, fbW, fbH, w.x, w.y, w.w, w.h, borderColor);
+                    
+                    // Draw window content (widgets, text)
+                    int contentY = w.y + titleBarH;
+                    for (const auto& wd : w.widgets) {
+                        int wx = w.x + wd.x;
+                        int wy = contentY + wd.y;
+                        uint32_t wColor = wd.pressed ? 0x00285090 : (wd.hover ? 0x00465A78 : 0x005A5A64);
+                        fbFillRect(pixels, pitch, fbW, fbH, wx, wy, wd.w, wd.h, wColor);
+                        fbDrawRect(pixels, pitch, fbW, fbH, wx, wy, wd.w, wd.h, 0x00FFFFFF);
+                        BitmapFont::DrawStringToBuffer(pixels, pitch, fbW, fbH,
+                            wx + 6, wy + (wd.h - 7) / 2, wd.text.c_str(), -1, 0x00F0F0F0);
+                    }
+                    
+                    // Draw text lines
+                    int ty = contentY + 8;
+                    for (const auto& tx : w.texts) {
+                        BitmapFont::DrawStringToBuffer(pixels, pitch, fbW, fbH,
+                            w.x + 8, ty, tx.c_str(), -1, 0x00DCDCDC);
+                        ty += 10;
+                    }
+                    
+                    // Tombstone overlay
+                    if (w.tombstoned) {
+                        fbFillRect(pixels, pitch, fbW, fbH, w.x, w.y, w.w, w.h, 0x40202020);
+                        const char* tomb = "TOMBSTONED";
+                        int tw = BitmapFont::MeasureWidth(tomb) * 2;
+                        BitmapFont::DrawStringToBufferScaled(pixels, pitch, fbW, fbH,
+                            w.x + (w.w - tw) / 2, w.y + w.h / 2 - 7, tomb, -1, 0x00FF8080, 2);
+                    }
+                }
+            }
+            
+            // Draw taskbar
+            for (int y = fbH - taskbarH; y < fbH; ++y) {
+                float t = (float)(y - (fbH - taskbarH)) / (float)taskbarH;
+                uint8_t gray = (uint8_t)(30 + t * 10);
+                uint32_t color = (gray << 16) | (gray << 8) | (gray + 8);
+                for (int x = 0; x < fbW; ++x) {
+                    pixels[y * (pitch/4) + x] = color;
+                }
+            }
+            
+            // Taskbar top edge
+            for (int x = 0; x < fbW; ++x) {
+                pixels[(fbH - taskbarH) * (pitch/4) + x] = 0x003C4150;
+            }
+            
+            // Start button
+            fbFillRect(pixels, pitch, fbW, fbH, 8, fbH - taskbarH + 6, 32, taskbarH - 12, 0x00374B64);
+            fbDrawRect(pixels, pitch, fbW, fbH, 8, fbH - taskbarH + 6, 32, taskbarH - 12, 0x00FFFFFF);
+            BitmapFont::DrawStringToBuffer(pixels, pitch, fbW, fbH, 12, fbH - taskbarH + 14, "S", 1, 0x00FFFFFF);
+            
+            // Taskbar window buttons
+            int btnX = 50;
+            {
+                std::lock_guard<std::mutex> lk(g_lock);
+                for (uint64_t wid : g_z) {
+                    auto it = g_windows.find(wid);
+                    if (it == g_windows.end()) continue;
+                    const WinInfo& w = it->second;
+                    
+                    int labelLen = (int)w.title.size();
+                    if (labelLen > 15) labelLen = 15;
+                    int bw = labelLen * 6 + 20;
+                    if (bw > 150) bw = 150;
+                    
+                    uint32_t btnColor = (wid == g_focus) ? 0x00466496 : 
+                                        (w.minimized ? 0x00282832 : 
+                                        (w.tombstoned ? 0x00554123 : 0x00373A46));
+                    fbFillRect(pixels, pitch, fbW, fbH, btnX, fbH - taskbarH + 6, bw, taskbarH - 12, btnColor);
+                    
+                    // Focus indicator
+                    if (wid == g_focus) {
+                        fbFillRect(pixels, pitch, fbW, fbH, btnX + 2, fbH - 9, bw - 4, 2, 0x0064A0F0);
+                    }
+                    
+                    BitmapFont::DrawStringToBuffer(pixels, pitch, fbW, fbH,
+                        btnX + 8, fbH - taskbarH + 14, w.title.c_str(), labelLen, 0x00E6E6F0);
+                    
+                    btnX += bw + 4;
+                }
+            }
+            
+            // Clock
+            std::time_t now = std::time(nullptr);
+            std::tm ltBuf{};
+            std::tm* tmp = std::localtime(&now);
+            if (tmp) ltBuf = *tmp;
+            char timeBuf[16];
+            std::snprintf(timeBuf, sizeof(timeBuf), "%02d:%02d", ltBuf.tm_hour, ltBuf.tm_min);
+            int clockX = fbW - 60;
+            BitmapFont::DrawStringToBuffer(pixels, pitch, fbW, fbH,
+                clockX, fbH - taskbarH + 10, timeBuf, -1, 0x00C8C8D2);
+            char dateBuf[16];
+            std::snprintf(dateBuf, sizeof(dateBuf), "%d/%d", ltBuf.tm_mon + 1, ltBuf.tm_mday);
+            BitmapFont::DrawStringToBuffer(pixels, pitch, fbW, fbH,
+                clockX, fbH - taskbarH + 22, dateBuf, -1, 0x009696A5);
+            
+            // Present to hardware framebuffer
+            g_videoBackend->present();
+            g_needsRedraw = false;
         }
 #endif
     }

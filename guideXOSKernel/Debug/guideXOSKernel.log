@@ -129,8 +129,8 @@ core\include/kernel/fs_xfs.h(418,65): error G30A0E944: 'size_t' has not been dec
   core\include/kernel/fs_xfs.h:418:65: note: 'size_t' is defined in header '<cstddef>'; this is probably fixable by adding '#include <cstddef>'
   In file included from core\include/kernel/virtio_block.h:15,
                    from core\main.cpp:44:
-core/include/kernel/virtio.h(313,15): error G30A0E944: 'size_t' does not name a type
-    313 | static inline size_t vring_size(uint16_t num)
+core/include/kernel/virtio.h(319,15): error G30A0E944: 'size_t' does not name a type
+    319 | static inline size_t vring_size(uint16_t num)
         |               ^~~~~~
   core/include/kernel/virtio.h:1:1: note: 'size_t' is defined in header '<cstddef>'; this is probably fixable by adding '#include <cstddef>'
     +++ |+#include <cstddef>

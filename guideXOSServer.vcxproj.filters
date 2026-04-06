@@ -549,6 +549,18 @@
     <ClInclude Include="kernel\core\include\kernel\feature_report.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="kernel\core\include\kernel\kernel_app.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\core\include\kernel\kernel_ipc.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\core\include\kernel\kernel_apps.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\core\include\kernel\kernel_compositor.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="allocator.cpp">
@@ -1050,6 +1062,21 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="kernel\core\virtio_gpu.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\core\cxx_runtime.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\core\kernel_ipc.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\core\kernel_compositor.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\core\kernel_app.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\core\kernel_apps.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

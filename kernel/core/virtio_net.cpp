@@ -25,6 +25,8 @@ namespace net {
 // Internal state
 // ================================================================
 
+// Static device pool to avoid dynamic allocation (no C++ runtime in freestanding kernel)
+static NetDevice s_devicePool[MAX_NET_DEVICES];
 static NetDevice* s_devices[MAX_NET_DEVICES];
 static int s_deviceCount = 0;
 static bool s_initialized = false;
@@ -593,8 +595,9 @@ int detectMmio(uint64_t baseAddr, uint64_t size)
         return 0;
     }
     
-    // Found a network device
-    NetDevice* dev = new NetDevice();
+    // Found a network device - use static pool instead of dynamic allocation
+    NetDevice* dev = &s_devicePool[s_deviceCount];
+    dev->reset();  // Reset state (static objects are zero-initialized, but reset for re-detection)
     dev->setBaseAddress(baseAddr);
     
     if (dev->init()) {
@@ -602,7 +605,7 @@ int detectMmio(uint64_t baseAddr, uint64_t size)
         return 1;
     }
     
-    delete dev;
+    // No need to delete - static pool memory
     return 0;
 }
 

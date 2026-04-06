@@ -83,6 +83,63 @@ namespace gxos { namespace gui {
         }
 #endif
 
+        // Framebuffer rendering (for bare-metal / kernel builds)
+        // Draw a string directly to a 32-bit XRGB pixel buffer
+        static void DrawStringToBuffer(uint32_t* pixels, int pitch, int bufW, int bufH,
+                                       int x, int y, const char* str, int len, uint32_t color) {
+            if (!str || !pixels) return;
+            if (len < 0) len = (int)strlen(str);
+            int cx = x;
+            for (int i = 0; i < len; ++i) {
+                const uint8_t* g = Glyph(str[i]);
+                if (g) {
+                    for (int col = 0; col < kGlyphW; ++col) {
+                        uint8_t bits = g[col];
+                        for (int row = 0; row < kGlyphH; ++row) {
+                            if (bits & (1 << row)) {
+                                int px = cx + col;
+                                int py = y + row;
+                                if (px >= 0 && px < bufW && py >= 0 && py < bufH) {
+                                    pixels[py * (pitch / 4) + px] = color;
+                                }
+                            }
+                        }
+                    }
+                }
+                cx += kGlyphW + kSpacing;
+            }
+        }
+
+        // Draw a string scaled (e.g., 2x) to framebuffer
+        static void DrawStringToBufferScaled(uint32_t* pixels, int pitch, int bufW, int bufH,
+                                             int x, int y, const char* str, int len, uint32_t color, int scale = 2) {
+            if (!str || !pixels) return;
+            if (len < 0) len = (int)strlen(str);
+            int cx = x;
+            for (int i = 0; i < len; ++i) {
+                const uint8_t* g = Glyph(str[i]);
+                if (g) {
+                    for (int col = 0; col < kGlyphW; ++col) {
+                        uint8_t bits = g[col];
+                        for (int row = 0; row < kGlyphH; ++row) {
+                            if (bits & (1 << row)) {
+                                for (int sy = 0; sy < scale; ++sy) {
+                                    for (int sx = 0; sx < scale; ++sx) {
+                                        int px = cx + col * scale + sx;
+                                        int py = y + row * scale + sy;
+                                        if (px >= 0 && px < bufW && py >= 0 && py < bufH) {
+                                            pixels[py * (pitch / 4) + px] = color;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                cx += (kGlyphW + kSpacing) * scale;
+            }
+        }
+
     private:
         static constexpr int kGlyphCount = 95; // ASCII 32..126
 

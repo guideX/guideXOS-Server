@@ -230,6 +230,10 @@
     <ClInclude Include="kernel\core\include\kernel\interrupts.h" />
     <ClInclude Include="kernel\core\include\kernel\ipv4.h" />
     <ClInclude Include="kernel\core\include\kernel\ipv6.h" />
+    <ClInclude Include="kernel\core\include\kernel\kernel_app.h" />
+    <ClInclude Include="kernel\core\include\kernel\kernel_apps.h" />
+    <ClInclude Include="kernel\core\include\kernel\kernel_compositor.h" />
+    <ClInclude Include="kernel\core\include\kernel\kernel_ipc.h" />
     <ClInclude Include="kernel\core\include\kernel\msi.h" />
     <ClInclude Include="kernel\core\include\kernel\multiboot.h" />
     <ClInclude Include="kernel\core\include\kernel\nic.h" />
@@ -411,6 +415,7 @@
     </ClCompile>
     <ClCompile Include="kernel\core\ata.cpp" />
     <ClCompile Include="kernel\core\block_device.cpp" />
+    <ClCompile Include="kernel\core\cxx_runtime.cpp" />
     <ClCompile Include="kernel\core\desktop.cpp" />
     <ClCompile Include="kernel\core\device_tree.cpp" />
     <ClCompile Include="kernel\core\dhcp.cpp" />
@@ -431,6 +436,10 @@
     <ClCompile Include="kernel\core\interrupts.cpp" />
     <ClCompile Include="kernel\core\ipv4.cpp" />
     <ClCompile Include="kernel\core\ipv6.cpp" />
+    <ClCompile Include="kernel\core\kernel_app.cpp" />
+    <ClCompile Include="kernel\core\kernel_apps.cpp" />
+    <ClCompile Include="kernel\core\kernel_compositor.cpp" />
+    <ClCompile Include="kernel\core\kernel_ipc.cpp" />
     <ClCompile Include="kernel\core\main.cpp" />
     <ClCompile Include="kernel\core\msi.cpp" />
     <ClCompile Include="kernel\core\nic.cpp" />

@@ -40,7 +40,9 @@ namespace gxos { namespace gui {
         bool dirty{true}; 
         int snapState{0}; 
         bool tombstoned{false}; 
+#ifdef _WIN32
         HBITMAP taskbarIcon{nullptr}; 
+#endif
         uint64_t ownerPid{0};
         // Titlebar button hover/pressed state
         bool titleBtnCloseHover{false}; bool titleBtnClosePressed{false};
@@ -102,6 +104,10 @@ namespace gxos { namespace gui {
         static void drawSystemTray(HDC dc, RECT cr, int taskbarH);
         static void drawTaskbarTooltip(HDC dc, int x, int y, const char* text);
         static LRESULT CALLBACK WndProc(HWND h, UINT msg, WPARAM w, LPARAM l);
+#else
+        // Bare-metal rendering functions
+        static void renderToFramebuffer();
+        static bool g_needsRedraw;
 #endif
         static std::atomic<uint64_t> s_nextWinId;
         static std::unordered_map<uint64_t, WinInfo> g_windows; static std::vector<uint64_t> g_z; static std::mutex g_lock; static uint64_t g_focus;
@@ -126,7 +132,11 @@ namespace gxos { namespace gui {
         static std::vector<std::string> g_startMenuAllProgsSorted; // Sorted app names
         // Taskbar menu state
         static bool g_taskbarMenuVisible;
+#ifdef _WIN32
         static RECT g_taskbarMenuRect;
+#else
+        static SnapRect g_taskbarMenuRect;
+#endif
         static int g_taskbarMenuSel; // selected item index
 
         // Video backend helpers

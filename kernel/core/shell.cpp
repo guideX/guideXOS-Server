@@ -19,8 +19,14 @@ extern void perform_shutdown();
 extern void perform_restart();
 extern void perform_sleep();
 
+// Forward declaration for GUI test mode (defined in desktop.cpp, outside any namespace)
+extern void desktop_run_test_mode();
+
 namespace kernel {
 namespace shell {
+
+
+
 
 
 
@@ -328,6 +334,7 @@ static void cmd_help() {
     output_string("  apps           - List applications\n");
     output_string("  workspaces     - Workspace info\n");
     output_string("  osk            - On-screen keyboard\n");
+    output_string("  testmode       - GUI compositor test\n");
     output_string("\n");
     output_string("Utilities:\n");
     output_string("  clear, cls     - Clear screen\n");
@@ -2165,6 +2172,12 @@ static void execute_command(const char* cmd) {
             dhcpArgs[i] = args[i];
         }
         cmd_dhcp(dhcpArgs, argCount);
+    }
+    // Kernel GUI test mode
+    else if (str_eq(command, "testmode") || str_eq(command, "guitest")) {
+        output_string("Running GUI test mode...\n");
+        // Call the desktop test mode function (declared at file scope)
+        ::desktop_run_test_mode();
     }
     else if (str_eq(command, "top") || str_eq(command, "htop")) {
         output_string("top - 00:00:00 up ");
