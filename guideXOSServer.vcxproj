@@ -166,6 +166,13 @@
     <ClInclude Include="kernel\arch\loongarch64\include\arch\pci_audio.h" />
     <ClInclude Include="kernel\arch\loongarch64\include\arch\syscall.h" />
     <ClInclude Include="kernel\arch\loongarch64\include\arch\usb_hci.h" />
+    <ClInclude Include="kernel\arch\mips64\include\arch\context_switch.h" />
+    <ClInclude Include="kernel\arch\mips64\include\arch\graphics.h" />
+    <ClInclude Include="kernel\arch\mips64\include\arch\mips64.h" />
+    <ClInclude Include="kernel\arch\mips64\include\arch\pci_audio.h" />
+    <ClInclude Include="kernel\arch\mips64\include\arch\serial_console.h" />
+    <ClInclude Include="kernel\arch\mips64\include\arch\syscall.h" />
+    <ClInclude Include="kernel\arch\mips64\include\arch\usb_hci.h" />
     <ClInclude Include="kernel\arch\ppc64\include\arch\context_switch.h" />
     <ClInclude Include="kernel\arch\ppc64\include\arch\graphics.h" />
     <ClInclude Include="kernel\arch\ppc64\include\arch\pci_audio.h" />
@@ -331,6 +338,13 @@
     <ClCompile Include="kernel\arch\loongarch64\pci_audio.cpp" />
     <ClCompile Include="kernel\arch\loongarch64\syscall.cpp" />
     <ClCompile Include="kernel\arch\loongarch64\usb_hci.cpp" />
+    <ClCompile Include="kernel\arch\mips64\arch.cpp" />
+    <ClCompile Include="kernel\arch\mips64\context_switch.cpp" />
+    <ClCompile Include="kernel\arch\mips64\graphics.cpp" />
+    <ClCompile Include="kernel\arch\mips64\pci_audio.cpp" />
+    <ClCompile Include="kernel\arch\mips64\serial_console.cpp" />
+    <ClCompile Include="kernel\arch\mips64\syscall.cpp" />
+    <ClCompile Include="kernel\arch\mips64\usb_hci.cpp" />
     <ClCompile Include="kernel\arch\ppc64\arch.cpp" />
     <ClCompile Include="kernel\arch\ppc64\context_switch.cpp" />
     <ClCompile Include="kernel\arch\ppc64\graphics.cpp" />
@@ -475,6 +489,9 @@
     <None Include="kernel\arch\loongarch64\boot.s" />
     <None Include="kernel\arch\loongarch64\linker.ld" />
     <None Include="kernel\arch\loongarch64\Makefile.arch" />
+    <None Include="kernel\arch\mips64\boot.s" />
+    <None Include="kernel\arch\mips64\linker.ld" />
+    <None Include="kernel\arch\mips64\Makefile.arch" />
     <None Include="kernel\arch\ppc64\boot.s" />
     <None Include="kernel\arch\ppc64\linker.ld" />
     <None Include="kernel\arch\ppc64\Makefile.arch" />

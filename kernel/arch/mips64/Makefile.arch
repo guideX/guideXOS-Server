@@ -1,0 +1,95 @@
+# MIPS64 Architecture Build Configuration
+#
+# Targets MIPS64 Release 2.  Tested with mips64-linux-gnu toolchain
+# and qemu-system-mips64 (malta machine).
+#
+# Copyright (c) 2026 guideXOS Server
+#
+
+# Toolchain - try mips64-elf first, fall back to mips64-linux-gnu
+ifeq ($(OS),Windows_NT)
+    CXX := mips64-elf-g++
+    AS  := mips64-elf-as
+    LD  := mips64-elf-ld
+else
+    ifneq ($(shell which mips64-elf-g++ 2>/dev/null),)
+        CXX := mips64-elf-g++
+        AS  := mips64-elf-as
+        LD  := mips64-elf-ld
+    else ifneq ($(shell which mips64-linux-gnu-g++ 2>/dev/null),)
+        CXX := mips64-linux-gnu-g++
+        AS  := mips64-linux-gnu-as
+        LD  := mips64-linux-gnu-ld
+    else ifneq ($(shell which mips64-linux-gnuabi64-g++ 2>/dev/null),)
+        CXX := mips64-linux-gnuabi64-g++
+        AS  := mips64-linux-gnuabi64-as
+        LD  := mips64-linux-gnuabi64-ld
+    else
+        CXX := mips64-elf-g++
+        AS  := mips64-elf-as
+        LD  := mips64-elf-ld
+    endif
+endif
+
+# Architecture-specific flags
+# -mabi=64     : Use n64 ABI (64-bit registers, 64-bit pointers)
+# -march=mips64r2 : Target MIPS64 Release 2 (adds useful instructions)
+# -mno-float   : No floating-point (kernel code)
+# -G 0         : Disable GP-relative addressing for small data (simplifies linking)
+# -mno-abicalls : No PIC/position-independent code
+# -fno-pic     : No position-independent code
+# -msoft-float : Software floating point (no FPU)
+ARCH_CFLAGS := -mabi=64 -march=mips64r2 -mno-float -G 0 -mno-abicalls -fno-pic -msoft-float
+ARCH_CFLAGS += -EL  # Little-endian (change to -EB for big-endian)
+
+# Assembler flags
+ASFLAGS := -mabi=64 -march=mips64r2 -EL
+ASFLAGS += --defsym __mips64__=1
+
+# Linker flags
+ARCH_LDFLAGS := -melf64ltsmip  # Little-endian MIPS64 ELF
+# Use -melf64btsmip for big-endian
+
+LIBS :=
+
+# Target information
+ARCH_BITS := 64
+ARCH_NAME := MIPS64 Release 2
+
+# Source files for this architecture
+ARCH_SRCS := \
+    arch.cpp \
+    boot.s \
+    context_switch.cpp \
+    syscall.cpp \
+    serial_console.cpp \
+    graphics.cpp \
+    pci_audio.cpp \
+    usb_hci.cpp
+
+# Header directories
+ARCH_INCLUDES := -I$(ARCH_DIR)/include
+
+# QEMU command for testing
+QEMU := qemu-system-mips64el
+QEMU_MACHINE := malta
+QEMU_OPTS := -machine $(QEMU_MACHINE) -m 256M -nographic
+
+# Run kernel in QEMU
+.PHONY: run
+run: $(KERNEL_ELF)
+	$(QEMU) $(QEMU_OPTS) -kernel $(KERNEL_ELF)
+
+# Debug kernel in QEMU (wait for GDB)
+.PHONY: debug
+debug: $(KERNEL_ELF)
+	$(QEMU) $(QEMU_OPTS) -kernel $(KERNEL_ELF) -s -S
+
+# Big-endian variant
+.PHONY: run-be
+run-be: ARCH_CFLAGS := $(filter-out -EL,$(ARCH_CFLAGS)) -EB
+run-be: ASFLAGS := $(filter-out -EL,$(ASFLAGS)) -EB
+run-be: ARCH_LDFLAGS := -melf64btsmip
+run-be: QEMU := qemu-system-mips64
+run-be: $(KERNEL_ELF)
+	$(QEMU) $(QEMU_OPTS) -kernel $(KERNEL_ELF)
