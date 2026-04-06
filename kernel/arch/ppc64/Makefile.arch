@@ -1,0 +1,66 @@
+# PowerPC64 Architecture Build Configuration
+#
+# Targets PowerPC64 (64-bit big-endian) on QEMU pseries machine.
+# Uses ELFv2 ABI for cleaner code generation.
+#
+# Tested with powerpc64-linux-gnu and powerpc64le-linux-gnu toolchains
+# (the -le variant produces little-endian code).
+#
+# For big-endian (traditional PowerPC):
+#   QEMU: qemu-system-ppc64 -machine pseries -kernel guideXOS.elf
+#
+# Copyright (c) 2026 guideXOS Server
+#
+
+# Toolchain - try powerpc64-elf first, then powerpc64-linux-gnu
+ifeq ($(OS),Windows_NT)
+    CXX := powerpc64-unknown-elf-g++
+    AS  := powerpc64-unknown-elf-as
+    LD  := powerpc64-unknown-elf-ld
+else
+    ifneq ($(shell which powerpc64-elf-g++ 2>/dev/null),)
+        CXX := powerpc64-elf-g++
+        AS  := powerpc64-elf-as
+        LD  := powerpc64-elf-ld
+    else ifneq ($(shell which powerpc64-unknown-elf-g++ 2>/dev/null),)
+        CXX := powerpc64-unknown-elf-g++
+        AS  := powerpc64-unknown-elf-as
+        LD  := powerpc64-unknown-elf-ld
+    else ifneq ($(shell which powerpc64-linux-gnu-g++ 2>/dev/null),)
+        CXX := powerpc64-linux-gnu-g++
+        AS  := powerpc64-linux-gnu-as
+        LD  := powerpc64-linux-gnu-ld
+    else
+        # Default fallback
+        CXX := powerpc64-unknown-elf-g++
+        AS  := powerpc64-unknown-elf-as
+        LD  := powerpc64-unknown-elf-ld
+    endif
+endif
+
+# Architecture-specific flags
+#
+# -mcpu=power8       : Target POWER8 ISA (widely compatible)
+# -mabi=elfv2        : Use ELFv2 ABI (cleaner than ELFv1)
+# -mbig-endian       : Big-endian mode (traditional PowerPC)
+# -mno-toc           : Don't use TOC for small data (simpler for kernel)
+# -msoft-float       : No hardware FPU (avoid FPU context save overhead)
+# -fno-pic           : No position-independent code (kernel is at fixed address)
+#
+ARCH_CFLAGS := -mcpu=power8 -mabi=elfv2 -mbig-endian -msoft-float -fno-pic
+ASFLAGS := -mpower8 -mabi=elfv2 -mbig-endian
+ARCH_LDFLAGS := -EB
+LIBS :=
+
+# Alternative: For little-endian PowerPC64 (POWER8+):
+# ARCH_CFLAGS := -mcpu=power8 -mabi=elfv2 -mlittle-endian -msoft-float -fno-pic
+# ASFLAGS := -mpower8 -mabi=elfv2 -mlittle-endian
+# ARCH_LDFLAGS := -EL
+
+# Target information
+ARCH_BITS := 64
+ARCH_NAME := PowerPC64 (POWER8)
+
+# QEMU command for testing
+# qemu-system-ppc64 -machine pseries -cpu POWER8 -m 256M \
+#     -kernel guideXOS.elf -nographic -serial mon:stdio

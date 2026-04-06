@@ -25,7 +25,7 @@ typedef unsigned long long uint64_t;
 #endif
 
 // Pointer-sized types
-#if defined(__x86_64__) || defined(__amd64__) || defined(_M_X64) || defined(__ia64__) || defined(_M_IA64) || defined(__arch64__) || defined(__sparcv9) || (defined(__riscv) && (__riscv_xlen == 64))
+#if defined(__x86_64__) || defined(__amd64__) || defined(_M_X64) || defined(__ia64__) || defined(_M_IA64) || defined(__arch64__) || defined(__sparcv9) || (defined(__riscv) && (__riscv_xlen == 64)) || defined(__powerpc64__) || defined(__ppc64__) || defined(_ARCH_PPC64)
     typedef uint64_t uintptr_t;
     typedef int64_t  intptr_t;
     typedef uint64_t size_t;

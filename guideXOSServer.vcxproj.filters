@@ -459,6 +459,24 @@
     <ClInclude Include="kernel\arch\sparc64\include\arch\syscall.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="kernel\arch\ppc64\include\arch\ppc64.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\arch\ppc64\include\arch\context_switch.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\arch\ppc64\include\arch\graphics.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\arch\ppc64\include\arch\syscall.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\arch\ppc64\include\arch\pci_audio.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\arch\ppc64\include\arch\usb_hci.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="allocator.cpp">
@@ -875,6 +893,24 @@
     <ClCompile Include="kernel\arch\sparc64\syscall.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="kernel\arch\ppc64\arch.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\arch\ppc64\context_switch.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\arch\ppc64\graphics.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\arch\ppc64\syscall.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\arch\ppc64\pci_audio.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\arch\ppc64\usb_hci.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <None Include="kernel\arch\amd64\boot.asm">
@@ -980,6 +1016,9 @@
     <None Include="kernel\arch\loongarch64\boot.s" />
     <None Include="kernel\arch\loongarch64\linker.ld" />
     <None Include="kernel\arch\loongarch64\Makefile.arch" />
+    <None Include="kernel\arch\ppc64\boot.s" />
+    <None Include="kernel\arch\ppc64\Makefile.arch" />
+    <None Include="kernel\arch\ppc64\linker.ld" />
   </ItemGroup>
   <ItemGroup>
     <Text Include="scripts\build-and-run-sparcv8_in_linux.sh" />
