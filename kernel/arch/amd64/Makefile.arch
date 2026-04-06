@@ -33,8 +33,11 @@ endif
 # Architecture-specific flags
 # For MinGW, use large code model instead of kernel (kernel model not well supported)
 # Disable PIC/PIE which is default on MinGW
+# -mno-stack-arg-probe disables ___chkstk_ms calls for large stack allocations
+# -fno-stack-check and -fno-stack-protector further disable stack checking
 ARCH_CFLAGS := -m64 -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2
 ARCH_CFLAGS += -fno-pic -fno-pie -fno-PIC -fno-PIE
+ARCH_CFLAGS += -mno-stack-arg-probe -fno-stack-check -fno-stack-protector
 ARCH_CFLAGS += -D__x86_64__
 # Use win64 format for NASM so object files are compatible with MinGW linker
 ASFLAGS := -f win64

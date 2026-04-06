@@ -12,6 +12,7 @@
 #include "include/kernel/nic.h"
 #include "include/kernel/udp.h"
 #include "include/kernel/dns.h"
+#include "include/kernel/dhcp.h"
 
 // Forward declarations for power functions (defined in desktop.cpp, outside any namespace)
 extern void perform_shutdown();
@@ -311,6 +312,10 @@ static void cmd_help() {
     output_string("  ipconfig       - Windows-style IP config\n");
     output_string("  ipconfig /all  - Full IP configuration\n");
     output_string("  ipconfig /flushdns - Flush DNS cache\n");
+    output_string("  dhcp           - DHCP client status\n");
+    output_string("  dhcp /discover - Discover DHCP server\n");
+    output_string("  dhcp /release  - Release DHCP lease\n");
+    output_string("  dhcp /renew    - Renew DHCP lease\n");
     output_string("  nslookup <host>- DNS lookup\n");
     output_string("  dig <host>     - DNS lookup (detailed)\n");
     output_string("  host <host>    - DNS lookup (simple)\n");
@@ -1344,16 +1349,65 @@ static void cmd_ipconfig(const char* args[], uint32_t argCount) {
     }
     
     if (release) {
-        output_string("\nguideXOS IP Configuration\n");
-        output_string("\nNote: DHCP release not implemented in this version.\n");
-        output_string("Static IP configuration is being used.\n");
+        output_string("\nguideXOS IP Configuration\n\n");
+        
+        if (!nic::is_active()) {
+            output_string("No adapter is in a state permissible for this operation.\n");
+            return;
+        }
+        
+        dhcp::Status st = dhcp::dhcp_release();
+        if (st == dhcp::DHCP_OK) {
+            output_string("Successfully released IP address for adapter ");
+            const nic::NICDevice* dev = nic::get_device();
+            output_string(dev ? dev->name : "eth0");
+            output_string(".\n");
+        } else if (st == dhcp::DHCP_ERR_NOT_BOUND) {
+            output_string("No DHCP lease to release. Using static configuration.\n");
+        } else {
+            output_string("An error occurred while releasing the interface.\n");
+        }
         return;
     }
     
     if (renew) {
-        output_string("\nguideXOS IP Configuration\n");
-        output_string("\nNote: DHCP renew not implemented in this version.\n");
-        output_string("Static IP configuration is being used.\n");
+        output_string("\nguideXOS IP Configuration\n\n");
+        
+        if (!nic::is_active()) {
+            output_string("No adapter is in a state permissible for this operation.\n");
+            return;
+        }
+        
+        output_string("Renewing IP address for adapter ");
+        const nic::NICDevice* dev = nic::get_device();
+        output_string(dev ? dev->name : "eth0");
+        output_string("...\n");
+        
+        dhcp::Status st = dhcp::discover();
+        if (st == dhcp::DHCP_OK) {
+            const dhcp::LeaseInfo* lease = dhcp::get_lease();
+            output_string("\nIP Address obtained: ");
+            char ipStr[16];
+            ipv4::ip_to_string(lease->assignedIP, ipStr);
+            output_string(ipStr);
+            output_string("\n");
+        } else {
+            output_string("\nFailed to renew IP address.\n");
+            switch (st) {
+                case dhcp::DHCP_ERR_NO_NIC:
+                    output_string("Error: No network interface available.\n");
+                    break;
+                case dhcp::DHCP_ERR_TIMEOUT:
+                    output_string("Error: DHCP request timed out.\n");
+                    break;
+                case dhcp::DHCP_ERR_NO_OFFER:
+                    output_string("Error: No DHCP server responded.\n");
+                    break;
+                default:
+                    output_string("Error: DHCP operation failed.\n");
+                    break;
+            }
+        }
         return;
     }
     
@@ -1630,6 +1684,239 @@ static void cmd_host(const char* domain) {
 }
 
 // ============================================================
+// dhcp Command (DHCP client operations)
+// ============================================================
+
+static void cmd_dhcp(const char* args[], uint32_t argCount) {
+    // Check for flags
+    bool showStatus = (argCount <= 1);
+    bool doDiscover = false;
+    bool doRelease = false;
+    bool doRenew = false;
+    bool showStats = false;
+    
+    for (uint32_t i = 1; i < argCount; ++i) {
+        if (str_eq(args[i], "/discover") || str_eq(args[i], "-discover") ||
+            str_eq(args[i], "/d") || str_eq(args[i], "-d")) {
+            doDiscover = true;
+        } else if (str_eq(args[i], "/release") || str_eq(args[i], "-release") ||
+                   str_eq(args[i], "/r") || str_eq(args[i], "-r")) {
+            doRelease = true;
+        } else if (str_eq(args[i], "/renew") || str_eq(args[i], "-renew") ||
+                   str_eq(args[i], "/n") || str_eq(args[i], "-n")) {
+            doRenew = true;
+        } else if (str_eq(args[i], "/stats") || str_eq(args[i], "-stats") ||
+                   str_eq(args[i], "/s") || str_eq(args[i], "-s")) {
+            showStats = true;
+        } else if (str_eq(args[i], "/?") || str_eq(args[i], "-h") || str_eq(args[i], "--help")) {
+            output_string("Usage: dhcp [/discover] [/release] [/renew] [/stats]\n");
+            output_string("\n");
+            output_string("Options:\n");
+            output_string("  (none)     Display current DHCP lease status\n");
+            output_string("  /discover  Discover a DHCP server and obtain IP\n");
+            output_string("  /release   Release the current DHCP lease\n");
+            output_string("  /renew     Renew the current DHCP lease\n");
+            output_string("  /stats     Display DHCP client statistics\n");
+            return;
+        }
+    }
+    
+    if (!nic::is_active()) {
+        output_string("dhcp: no network interface active\n");
+        return;
+    }
+    
+    // Handle operations
+    if (doRelease) {
+        output_string("Releasing DHCP lease...\n");
+        dhcp::Status st = dhcp::dhcp_release();
+        if (st == dhcp::DHCP_OK) {
+            output_string("DHCP lease released successfully.\n");
+        } else if (st == dhcp::DHCP_ERR_NOT_BOUND) {
+            output_string("No active DHCP lease to release.\n");
+        } else {
+            output_string("Failed to release DHCP lease.\n");
+        }
+        return;
+    }
+    
+    if (doRenew || doDiscover) {
+        output_string("Requesting IP address from DHCP server...\n");
+        dhcp::Status st = dhcp::discover();
+        if (st == dhcp::DHCP_OK) {
+            output_string("DHCP configuration successful.\n\n");
+            // Show the obtained lease info
+            const dhcp::LeaseInfo* lease = dhcp::get_lease();
+            char ipStr[16];
+            
+            output_string("  IP Address:    ");
+            ipv4::ip_to_string(lease->assignedIP, ipStr);
+            output_string(ipStr);
+            output_string("\n");
+            
+            output_string("  Subnet Mask:   ");
+            ipv4::ip_to_string(lease->subnetMask, ipStr);
+            output_string(ipStr);
+            output_string("\n");
+            
+            output_string("  Gateway:       ");
+            ipv4::ip_to_string(lease->gateway, ipStr);
+            output_string(ipStr);
+            output_string("\n");
+            
+            output_string("  DNS Server:    ");
+            ipv4::ip_to_string(lease->dnsServer, ipStr);
+            output_string(ipStr);
+            output_string("\n");
+            
+            output_string("  DHCP Server:   ");
+            ipv4::ip_to_string(lease->serverIP, ipStr);
+            output_string(ipStr);
+            output_string("\n");
+            
+            output_string("  Lease Time:    ");
+            char numStr[12];
+            uint_to_str(lease->leaseTime, numStr);
+            output_string(numStr);
+            output_string(" seconds\n");
+        } else {
+            output_string("DHCP configuration failed.\n");
+            switch (st) {
+                case dhcp::DHCP_ERR_NO_NIC:
+                    output_string("Error: No network interface available.\n");
+                    break;
+                case dhcp::DHCP_ERR_TIMEOUT:
+                    output_string("Error: DHCP request timed out.\n");
+                    break;
+                case dhcp::DHCP_ERR_NO_OFFER:
+                    output_string("Error: No DHCP server responded.\n");
+                    break;
+                case dhcp::DHCP_ERR_NO_ACK:
+                    output_string("Error: DHCP server did not acknowledge.\n");
+                    break;
+                case dhcp::DHCP_ERR_NAK:
+                    output_string("Error: DHCP server refused the request.\n");
+                    break;
+                default:
+                    output_string("Error: Unknown DHCP error.\n");
+                    break;
+            }
+        }
+        return;
+    }
+    
+    if (showStats) {
+        output_string("DHCP Client Statistics:\n\n");
+        const dhcp::Statistics* stats = dhcp::get_stats();
+        char numStr[12];
+        
+        output_string("  Discovers sent:   ");
+        uint_to_str(stats->discoversSent, numStr);
+        output_string(numStr);
+        output_string("\n");
+        
+        output_string("  Offers received:  ");
+        uint_to_str(stats->offersReceived, numStr);
+        output_string(numStr);
+        output_string("\n");
+        
+        output_string("  Requests sent:    ");
+        uint_to_str(stats->requestsSent, numStr);
+        output_string(numStr);
+        output_string("\n");
+        
+        output_string("  ACKs received:    ");
+        uint_to_str(stats->acksReceived, numStr);
+        output_string(numStr);
+        output_string("\n");
+        
+        output_string("  NAKs received:    ");
+        uint_to_str(stats->naksReceived, numStr);
+        output_string(numStr);
+        output_string("\n");
+        
+        output_string("  Releases sent:    ");
+        uint_to_str(stats->releasesSent, numStr);
+        output_string(numStr);
+        output_string("\n");
+        
+        output_string("  Timeouts:         ");
+        uint_to_str(stats->timeouts, numStr);
+        output_string(numStr);
+        output_string("\n");
+        
+        output_string("  Renewals:         ");
+        uint_to_str(stats->renewals, numStr);
+        output_string(numStr);
+        output_string("\n");
+        
+        output_string("  Errors:           ");
+        uint_to_str(stats->errors, numStr);
+        output_string(numStr);
+        output_string("\n");
+        return;
+    }
+    
+    // Default: show status
+    output_string("DHCP Client Status:\n\n");
+    
+    output_string("  State: ");
+    output_string(dhcp::state_to_string(dhcp::get_state()));
+    output_string("\n");
+    
+    const dhcp::LeaseInfo* lease = dhcp::get_lease();
+    if (lease->valid) {
+        char ipStr[16];
+        char numStr[12];
+        
+        output_string("\n  Active Lease:\n");
+        
+        output_string("    IP Address:    ");
+        ipv4::ip_to_string(lease->assignedIP, ipStr);
+        output_string(ipStr);
+        output_string("\n");
+        
+        output_string("    Subnet Mask:   ");
+        ipv4::ip_to_string(lease->subnetMask, ipStr);
+        output_string(ipStr);
+        output_string("\n");
+        
+        output_string("    Gateway:       ");
+        ipv4::ip_to_string(lease->gateway, ipStr);
+        output_string(ipStr);
+        output_string("\n");
+        
+        output_string("    DNS Server:    ");
+        ipv4::ip_to_string(lease->dnsServer, ipStr);
+        output_string(ipStr);
+        output_string("\n");
+        
+        output_string("    DHCP Server:   ");
+        ipv4::ip_to_string(lease->serverIP, ipStr);
+        output_string(ipStr);
+        output_string("\n");
+        
+        output_string("    Lease Time:    ");
+        uint_to_str(lease->leaseTime, numStr);
+        output_string(numStr);
+        output_string(" seconds\n");
+        
+        output_string("    Renewal (T1):  ");
+        uint_to_str(lease->renewalTime, numStr);
+        output_string(numStr);
+        output_string(" seconds\n");
+        
+        output_string("    Rebind (T2):   ");
+        uint_to_str(lease->rebindingTime, numStr);
+        output_string(numStr);
+        output_string(" seconds\n");
+    } else {
+        output_string("\n  No active DHCP lease.\n");
+        output_string("  Use 'dhcp /discover' to obtain an IP address.\n");
+    }
+}
+
+// ============================================================
 // Command Parser and Executor
 // ============================================================
 
@@ -1871,6 +2158,13 @@ static void execute_command(const char* cmd) {
         cmd_dig(arg1);
     } else if (str_eq(command, "host")) {
         cmd_host(arg1);
+    } else if (str_eq(command, "dhcp")) {
+        // Pass all args to dhcp command
+        const char* dhcpArgs[MAX_ARGS];
+        for (uint32_t i = 0; i < argCount; i++) {
+            dhcpArgs[i] = args[i];
+        }
+        cmd_dhcp(dhcpArgs, argCount);
     }
     else if (str_eq(command, "top") || str_eq(command, "htop")) {
         output_string("top - 00:00:00 up ");

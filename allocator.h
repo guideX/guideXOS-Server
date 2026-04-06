@@ -9,7 +9,7 @@
 // Simplified page allocator mirroring C# Allocator for server (no paging hardware mapping here)
 namespace gxos {
     static const uint64_t PageSize = 4096;
-    struct AllocStat { uint64_t pagesInUse=0; uint64_t peakPages=0; };
+    struct AllocStat { uint64_t pagesInUse=0; uint64_t peakPages=0; uint64_t pagesFreed=0; };
     enum class AllocTag : uint8_t { Unknown=0, ThreadMeta, ThreadStack, ExecImage, Image, FileBuffer, Temp, Count };
 
     struct BlockHeader { uint32_t pages; AllocTag tag; uint64_t pid; };
@@ -22,6 +22,8 @@ namespace gxos {
         static void free(void* ptr);
         static uint64_t bytesInUse();
         static uint64_t peakBytes();
+        static uint64_t totalSize();
+        static uint64_t totalFreed();
         static uint64_t tagBytes(AllocTag tag);
         // Per-process attribution
         static void setCurrentPid(uint64_t pid);

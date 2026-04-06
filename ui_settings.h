@@ -141,6 +141,10 @@ struct UISettings {
     // Maximize button colors (blue tint)
     static constexpr uint32_t MaximizeButtonHoverColor = 0xFF446688;
 
+    // Tombstone button colors (amber tint)
+    static constexpr uint32_t TombstoneButtonHoverColor = 0xFF886644;
+    static constexpr uint32_t TombstoneButtonPressedColor = 0xFFAA8855;
+
     // Border and grip colors
     static constexpr uint32_t WindowBorderColor = 0xFF333333;
     static constexpr uint32_t WindowBorderFocusedColor = 0xFF5588AA;

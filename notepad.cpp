@@ -5,6 +5,7 @@
 #include "desktop_service.h"
 #include "save_dialog.h"
 #include "save_changes_dialog.h"
+#include "open_dialog.h"
 #include <sstream>
 #include <algorithm>
 #include <cctype>
@@ -29,6 +30,8 @@ namespace gxos { namespace apps {
     int Notepad::s_lastKeyCode = 0;
     bool Notepad::s_keyDown = false;
     bool Notepad::s_pendingClose = false;
+    std::vector<Notepad::TextSnapshot> Notepad::s_undoStack;
+    std::vector<Notepad::TextSnapshot> Notepad::s_redoStack;
     
     uint64_t Notepad::Launch() {
         ProcessSpec spec{"notepad", Notepad::main};
@@ -48,18 +51,8 @@ namespace gxos { namespace apps {
             s_windowId = 0;
             s_filePath = "";
             s_lines.clear();
-            s_lines.push_back("Welcome to Notepad!");
-            s_lines.push_back("This is a simple text editor.");
             s_lines.push_back("");
-            s_lines.push_back("Features:");
-            s_lines.push_back("- Multi-line text editing");
-            s_lines.push_back("- Tab support (4 spaces)");
-            s_lines.push_back("- Text wrapping toggle");
-            s_lines.push_back("- Special characters with Shift");
-            s_lines.push_back("");
-            s_lines.push_back("Type to edit text...");
-            s_cursorLine = s_lines.size();
-            s_lines.push_back(""); // Add blank line for typing
+            s_cursorLine = 0;
             s_cursorCol = 0;
             s_modified = false;
             s_scrollOffset = 0;
@@ -67,6 +60,8 @@ namespace gxos { namespace apps {
             s_shiftPressed = false;
             s_ctrlPressed = false;
             s_capsLockOn = false;
+            s_undoStack.clear();
+            s_redoStack.clear();
             
             // Check if file path was provided
             if (argc > 1) {
@@ -122,12 +117,14 @@ namespace gxos { namespace apps {
                                         ipc::Bus::publish("gui.input", std::move(msg), false);
                                     };
                                     
-                                    // Add menu buttons including Wrap toggle
+                                    // Add toolbar buttons matching Legacy Notepad
                                     addButton(1, 4, 4, 60, 20, "New");
                                     addButton(2, 68, 4, 60, 20, "Open");
                                     addButton(3, 132, 4, 60, 20, "Save");
                                     addButton(4, 196, 4, 80, 20, "Save As");
                                     addButton(5, 280, 4, 64, 20, s_wrapText ? "Wrap" : "NoWrap");
+                                    addButton(6, 348, 4, 60, 20, "Undo");
+                                    addButton(7, 412, 4, 60, 20, "Redo");
                                     
                                     // Draw initial content
                                     redrawContent();
@@ -211,6 +208,21 @@ namespace gxos { namespace apps {
                                             newFile();
                                             break;
                                         }
+                                        // Ctrl+O - Open
+                                        else if (s_ctrlPressed && (keyCode == 79 || keyCode == 111)) {
+                                            openFileDialog();
+                                            break;
+                                        }
+                                        // Ctrl+Z - Undo
+                                        else if (s_ctrlPressed && (keyCode == 90 || keyCode == 122)) {
+                                            performUndo();
+                                            break;
+                                        }
+                                        // Ctrl+Y - Redo
+                                        else if (s_ctrlPressed && (keyCode == 89 || keyCode == 121)) {
+                                            performRedo();
+                                            break;
+                                        }
                                         // Escape key - future use for dialogs
                                         if (keyCode == 27) {
                                             Logger::write(LogLevel::Info, "Notepad: Escape pressed");
@@ -249,6 +261,7 @@ namespace gxos { namespace apps {
                                         // Tab key - insert 4 spaces
                                         else if (keyCode == 9) {
                                             if (s_cursorLine < (int)s_lines.size()) {
+                                                pushUndo();
                                                 std::string temp = s_lines[s_cursorLine];
                                                 temp.insert(s_cursorCol, "    ");
                                                 s_lines[s_cursorLine] = temp;
@@ -263,6 +276,7 @@ namespace gxos { namespace apps {
                                         else if (keyCode >= 32 && keyCode <= 126) {
                                             char ch = mapKeyToChar(keyCode);
                                             if (ch != '\0' && s_cursorLine < (int)s_lines.size()) {
+                                                pushUndo();
                                                 std::string temp = s_lines[s_cursorLine];
                                                 temp.insert(s_cursorCol, 1, ch);
                                                 s_lines[s_cursorLine] = temp;
@@ -276,6 +290,7 @@ namespace gxos { namespace apps {
                                         // Backspace
                                         else if (keyCode == 8) {
                                             if (s_cursorCol > 0 && s_cursorLine < (int)s_lines.size()) {
+                                                pushUndo();
                                                 std::string temp = s_lines[s_cursorLine];
                                                 temp.erase(s_cursorCol - 1, 1);
                                                 s_lines[s_cursorLine] = temp;
@@ -284,22 +299,34 @@ namespace gxos { namespace apps {
                                                 redrawContent();
                                                 updateStatusBar();
                                                 updateTitle();
+                                            } else if (s_cursorCol == 0 && s_cursorLine > 0) {
+                                                // Join with previous line (matching Legacy behavior)
+                                                pushUndo();
+                                                int prevLen = (int)s_lines[s_cursorLine - 1].size();
+                                                s_lines[s_cursorLine - 1] += s_lines[s_cursorLine];
+                                                s_lines.erase(s_lines.begin() + s_cursorLine);
+                                                s_cursorLine--;
+                                                s_cursorCol = prevLen;
+                                                s_modified = true;
+                                                redrawContent();
+                                                updateStatusBar();
+                                                updateTitle();
                                             }
+                                        }
+                                        // Delete key (forward delete)
+                                        else if (keyCode == 46) {
+                                            deleteChar();
                                         }
                                         // Enter
                                         else if (keyCode == 13) {
                                             if (s_cursorLine < (int)s_lines.size()) {
-                                                // Copy the current line to avoid iterator issues
+                                                pushUndo();
                                                 std::string currentLine = s_lines[s_cursorLine];
                                                 std::string remainder = currentLine.substr(s_cursorCol);
                                                 std::string newCurrentLine = currentLine.substr(0, s_cursorCol);
-                                                
 
-                                                // Update current line
                                                 s_lines[s_cursorLine] = newCurrentLine;
-                                                
 
-                                                // Insert new line
                                                 s_lines.insert(s_lines.begin() + s_cursorLine + 1, remainder);
                                                 s_cursorLine++;
                                                 s_cursorCol = 0;
@@ -375,10 +402,12 @@ namespace gxos { namespace apps {
                                         // Handle button clicks
                                         switch (widgetId) {
                                             case 1: newFile(); break;
-                                            case 2: openFile(); break;
+                                            case 2: openFileDialog(); break;
                                             case 3: saveFile(); break;
                                             case 4: saveFileAs(); break;
                                             case 5: toggleWrap(); break;
+                                            case 6: performUndo(); break;
+                                            case 7: performRedo(); break;
                                         }
                                     }
                                 } catch (const std::exception& e) {
@@ -411,11 +440,49 @@ namespace gxos { namespace apps {
     }
     
     void Notepad::insertText(const std::string& text) {
-        // TODO: Implement
+        if (text.empty() || s_cursorLine >= (int)s_lines.size()) return;
+        pushUndo();
+        for (char ch : text) {
+            if (ch == '\n') {
+                std::string remainder = s_lines[s_cursorLine].substr(s_cursorCol);
+                s_lines[s_cursorLine] = s_lines[s_cursorLine].substr(0, s_cursorCol);
+                s_lines.insert(s_lines.begin() + s_cursorLine + 1, remainder);
+                s_cursorLine++;
+                s_cursorCol = 0;
+            } else {
+                s_lines[s_cursorLine].insert(s_cursorCol, 1, ch);
+                s_cursorCol++;
+            }
+        }
+        s_modified = true;
+        redrawContent();
+        updateStatusBar();
+        updateTitle();
+    }
+    
+    void Notepad::deleteChar() {
+        if (s_cursorLine >= (int)s_lines.size()) return;
+        if (s_cursorCol < (int)s_lines[s_cursorLine].size()) {
+            pushUndo();
+            s_lines[s_cursorLine].erase(s_cursorCol, 1);
+            s_modified = true;
+            redrawContent();
+            updateStatusBar();
+            updateTitle();
+        } else if (s_cursorLine < (int)s_lines.size() - 1) {
+            // Join with next line
+            pushUndo();
+            s_lines[s_cursorLine] += s_lines[s_cursorLine + 1];
+            s_lines.erase(s_lines.begin() + s_cursorLine + 1);
+            s_modified = true;
+            redrawContent();
+            updateStatusBar();
+            updateTitle();
+        }
     }
     
     void Notepad::deleteSelection() {
-        // TODO: Implement
+        // TODO: Implement selection-based delete
     }
     
     void Notepad::copy() {
@@ -430,6 +497,56 @@ namespace gxos { namespace apps {
         Logger::write(LogLevel::Info, "Notepad: Select All (not implemented)");
     }
     
+    void Notepad::pushUndo() {
+        if ((int)s_undoStack.size() >= kMaxUndo) {
+            s_undoStack.erase(s_undoStack.begin());
+        }
+        TextSnapshot snap;
+        snap.lines = s_lines;
+        snap.cursorLine = s_cursorLine;
+        snap.cursorCol = s_cursorCol;
+        s_undoStack.push_back(snap);
+        s_redoStack.clear();
+    }
+    
+    void Notepad::performUndo() {
+        if (s_undoStack.empty()) return;
+        TextSnapshot redo;
+        redo.lines = s_lines;
+        redo.cursorLine = s_cursorLine;
+        redo.cursorCol = s_cursorCol;
+        s_redoStack.push_back(redo);
+        
+        TextSnapshot& snap = s_undoStack.back();
+        s_lines = snap.lines;
+        s_cursorLine = snap.cursorLine;
+        s_cursorCol = snap.cursorCol;
+        s_undoStack.pop_back();
+        s_modified = true;
+        redrawContent();
+        updateStatusBar();
+        updateTitle();
+    }
+    
+    void Notepad::performRedo() {
+        if (s_redoStack.empty()) return;
+        TextSnapshot undo;
+        undo.lines = s_lines;
+        undo.cursorLine = s_cursorLine;
+        undo.cursorCol = s_cursorCol;
+        s_undoStack.push_back(undo);
+        
+        TextSnapshot& snap = s_redoStack.back();
+        s_lines = snap.lines;
+        s_cursorLine = snap.cursorLine;
+        s_cursorCol = snap.cursorCol;
+        s_redoStack.pop_back();
+        s_modified = true;
+        redrawContent();
+        updateStatusBar();
+        updateTitle();
+    }
+    
     void Notepad::newFile() {
         Logger::write(LogLevel::Info, "Notepad: New file");
         s_filePath = "";
@@ -439,6 +556,8 @@ namespace gxos { namespace apps {
         s_cursorCol = 0;
         s_modified = false;
         s_scrollOffset = 0;
+        s_undoStack.clear();
+        s_redoStack.clear();
         updateTitle();
         redrawContent();
         updateStatusBar();
@@ -446,26 +565,35 @@ namespace gxos { namespace apps {
     
     void Notepad::openFile() {
         if (s_filePath.empty()) {
-            Logger::write(LogLevel::Info, "Notepad: Open file - no path specified. Please provide a file path when launching notepad.");
+            openFileDialog();
             return;
         }
+        loadFile(s_filePath);
+    }
+    
+    void Notepad::openFileDialog() {
+        Logger::write(LogLevel::Info, "Notepad: Opening file dialog...");
+        int ownerX = 100;
+        int ownerY = 100;
+        OpenDialog::Show(ownerX, ownerY, "data/",
+            [](const std::string& path) {
+                loadFile(path);
+            }
+        );
+    }
+    
+    void Notepad::loadFile(const std::string& path) {
+        if (path.empty()) return;
         
         std::vector<uint8_t> data;
-        if (!Vfs::instance().readFile(s_filePath, data)) {
-            std::ostringstream errorMsg;
-            errorMsg << "Notepad: Failed to read file: " << s_filePath << "\n"
-                     << "Possible reasons:\n"
-                     << "  - File does not exist\n"
-                     << "  - No read permission\n"
-                     << "  - File is in use by another process\n"
-                     << "Suggestion: Check if the file exists and you have permission to read it.";
-            Logger::write(LogLevel::Error, errorMsg.str());
+        if (!Vfs::instance().readFile(path, data)) {
+            Logger::write(LogLevel::Error, std::string("Notepad: Failed to read file: ") + path);
             return;
         }
         
-        Logger::write(LogLevel::Info, std::string("Notepad: Successfully loaded file: ") + s_filePath + " (" + std::to_string(data.size()) + " bytes)");
+        Logger::write(LogLevel::Info, std::string("Notepad: Loaded file: ") + path + " (" + std::to_string(data.size()) + " bytes)");
         
-        // Parse file content into lines
+        // Parse file content into lines (matching Legacy OpenFile behavior)
         s_lines.clear();
         std::string currentLine;
         for (uint8_t byte : data) {
@@ -473,27 +601,24 @@ namespace gxos { namespace apps {
                 s_lines.push_back(currentLine);
                 currentLine.clear();
             } else if (byte >= 32 && byte < 127) {
-                // Printable ASCII
                 currentLine += (char)byte;
             } else if (byte == '\t') {
-                currentLine += "    "; // Convert tabs to 4 spaces
+                currentLine += "    ";
             }
-            // Ignore other control characters
         }
-        
-        // Add last line if any
         if (!currentLine.empty() || s_lines.empty()) {
             s_lines.push_back(currentLine);
         }
         
-        // Reset cursor and state
+        s_filePath = path;
         s_cursorLine = 0;
         s_cursorCol = 0;
         s_modified = false;
         s_scrollOffset = 0;
+        s_undoStack.clear();
+        s_redoStack.clear();
         
-        // Add to recent documents
-        DesktopService::AddRecentDocument(s_filePath);
+        DesktopService::AddRecentDocument(path);
         
         updateTitle();
         redrawContent();
@@ -716,6 +841,25 @@ namespace gxos { namespace apps {
         ipc::Bus::publish("gui.input", std::move(msg), false);
         
         redrawContent();
+    }
+    
+    void Notepad::rebuildToolbarButtons() {
+        auto addButton = [](int id, int x, int y, int w, int h, const std::string& text) {
+            ipc::Message msg;
+            msg.type = (uint32_t)MsgType::MT_WidgetAdd;
+            std::ostringstream oss;
+            oss << s_windowId << "|1|" << id << "|" << x << "|" << y << "|" << w << "|" << h << "|" << text;
+            std::string payload = oss.str();
+            msg.data.assign(payload.begin(), payload.end());
+            ipc::Bus::publish("gui.input", std::move(msg), false);
+        };
+        addButton(1, 4, 4, 60, 20, "New");
+        addButton(2, 68, 4, 60, 20, "Open");
+        addButton(3, 132, 4, 60, 20, "Save");
+        addButton(4, 196, 4, 80, 20, "Save As");
+        addButton(5, 280, 4, 64, 20, s_wrapText ? "Wrap" : "NoWrap");
+        addButton(6, 348, 4, 60, 20, "Undo");
+        addButton(7, 412, 4, 60, 20, "Redo");
     }
     
     char Notepad::mapKeyToChar(int keyCode) {

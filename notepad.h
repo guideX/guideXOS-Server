@@ -8,7 +8,9 @@ namespace gxos { namespace apps {
     
     /// <summary>
     /// Notepad - Simple text editor application
-    /// Features: Multi-line text editing, Open/Save via VFS, Text wrapping, Special characters, Dialogs
+    /// Features: Multi-line text editing, Open/Save via VFS, Text wrapping, Special characters,
+    ///           Undo/Redo, Open dialog, Save/SaveAs/Save-changes dialogs
+    /// Ported from guideXOS.Legacy DefaultApps/Notepad.cs
     /// </summary>
     class Notepad {
     public:
@@ -32,17 +34,26 @@ namespace gxos { namespace apps {
         
         // Text editing operations
         static void insertText(const std::string& text);
+        static void deleteChar();       // Delete key (forward delete)
         static void deleteSelection();
         static void copy();
         static void paste();
         static void selectAll();
         
+        // Undo / Redo (matching Legacy Notepad.cs)
+        static void pushUndo();
+        static void performUndo();
+        static void performRedo();
+        static const int kMaxUndo = 64;
+        
         // File operations
         static void newFile();
-        static void openFile();
+        static void openFile();         // Load current s_filePath
+        static void openFileDialog();   // Show Open dialog to pick file
+        static void loadFile(const std::string& path);  // Load specific file
         static void saveFile();
         static void saveFileAs();
-        static void closeWithPrompt();  // NEW: Prompt if unsaved changes
+        static void closeWithPrompt();
         
         // UI operations
         static void toggleWrap();
@@ -51,6 +62,7 @@ namespace gxos { namespace apps {
         static void updateTitle();
         static void redrawContent();
         static void updateStatusBar();
+        static void rebuildToolbarButtons();
         
         // Keyboard helpers
         static char mapKeyToChar(int keyCode);
@@ -67,9 +79,18 @@ namespace gxos { namespace apps {
         static bool s_shiftPressed;
         static bool s_ctrlPressed;
         static bool s_capsLockOn;
-        static int s_lastKeyCode;      // For key debouncing
-        static bool s_keyDown;          // For key debouncing
-        static bool s_pendingClose;     // NEW: For close after dialog
+        static int s_lastKeyCode;
+        static bool s_keyDown;
+        static bool s_pendingClose;
+        
+        // Undo / Redo stacks (store full line snapshots)
+        struct TextSnapshot {
+            std::vector<std::string> lines;
+            int cursorLine;
+            int cursorCol;
+        };
+        static std::vector<TextSnapshot> s_undoStack;
+        static std::vector<TextSnapshot> s_redoStack;
     };
     
 }} // namespace gxos::apps

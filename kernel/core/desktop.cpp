@@ -428,6 +428,32 @@ static uint32_t s_screenH = 0;
 static bool s_shutdownDialogOpen = false;
 static int s_shutdownDialogHover = -1;  // 0 = Yes, 1 = No, -1 = none
 
+// Control Panel window state
+static bool s_controlPanelOpen = false;
+static int s_controlPanelHover = -1;  // 0 = Device Manager, 1 = Network Adapters, -1 = none
+
+// Device Manager window state
+static bool s_deviceManagerOpen = false;
+static int s_deviceManagerScroll = 0;
+static int s_deviceManagerSelected = -1;
+
+// Network Adapters window state
+static bool s_networkAdaptersOpen = false;
+static int s_networkAdapterSelected = -1;
+static int s_networkAdapterHover = -1;
+
+// Network Configuration dialog state
+static bool s_networkConfigOpen = false;
+static int s_networkConfigFocusField = -1;  // Which IP octet field is focused
+static bool s_networkConfigUseDHCP = true;
+static bool s_networkConfigUseDHCPforDNS = true;
+// IP configuration values (4 octets each)
+static uint8_t s_netConfigIP[4] = {0, 0, 0, 0};
+static uint8_t s_netConfigMask[4] = {255, 255, 255, 0};
+static uint8_t s_netConfigGateway[4] = {0, 0, 0, 0};
+static uint8_t s_netConfigDNS[4] = {0, 0, 0, 0};
+static int s_networkConfigBtnHover = -1;  // 0 = OK, 1 = Cancel
+
 // Layout constants
 static const uint32_t kTaskbarH = 40;
 static const uint32_t kStartBtnW = 100;
@@ -485,14 +511,15 @@ struct StartMenuRightItem {
 };
 
 static const StartMenuRightItem s_startMenuRight[] = {
-    {"Computer",    0xFF4690C8},
-    {"Documents",   0xFFC8B43C},
-    {"Pictures",    0xFFC87830},
-    {"Music",       0xFF9050B4},
-    {"Network",     0xFF50B478},
-    {"Settings",    0xFF808890},
+    {"Computer",      0xFF4690C8},
+    {"Documents",     0xFFC8B43C},
+    {"Pictures",      0xFFC87830},
+    {"Music",         0xFF9050B4},
+    {"Network",       0xFF50B478},
+    {"Control Panel", 0xFF808890},
+    {"Settings",      0xFF606878},
 };
-static const int kStartMenuRightCount = 6;
+static const int kStartMenuRightCount = 7;
 
 // Simulated running windows for taskbar buttons
 struct TaskbarEntry {
@@ -1276,6 +1303,541 @@ static int hit_test_shutdown_dialog(int32_t mx, int32_t my)
 }
 
 // ============================================================
+// Control Panel Window
+// ============================================================
+
+static const uint32_t kControlPanelW = 420;
+static const uint32_t kControlPanelH = 320;
+static const uint32_t kCPIconSize = 48;
+static const uint32_t kCPIconSpacing = 100;
+
+struct ControlPanelItem {
+    const char* label;
+    uint32_t color;
+};
+
+static const ControlPanelItem s_controlPanelItems[] = {
+    {"Device Mgr",     0xFF4690C8},
+    {"Network",        0xFF50B478},
+};
+static const int kControlPanelItemCount = 2;
+
+static void draw_control_panel()
+{
+    if (!s_controlPanelOpen) return;
+
+    uint32_t dlgX = (s_screenW - kControlPanelW) / 2;
+    uint32_t dlgY = (s_screenH - kControlPanelH) / 2;
+
+    // Shadow
+    framebuffer::fill_rect(dlgX + 4, dlgY + 4, kControlPanelW, kControlPanelH, rgb(10, 10, 15));
+
+    // Window background
+    framebuffer::fill_rect(dlgX, dlgY, kControlPanelW, kControlPanelH, rgb(35, 35, 45));
+    draw_rect(dlgX, dlgY, kControlPanelW, kControlPanelH, rgb(70, 90, 130));
+
+    // Title bar
+    framebuffer::fill_rect(dlgX + 1, dlgY + 1, kControlPanelW - 2, 28, rgb(50, 70, 110));
+    draw_text(dlgX + 12, dlgY + 8, "Control Panel", rgb(220, 225, 240), 1);
+
+    // Close button
+    uint32_t closeBtnX = dlgX + kControlPanelW - 26;
+    uint32_t closeBtnY = dlgY + 4;
+    framebuffer::fill_rect(closeBtnX, closeBtnY, 20, 20, rgb(180, 60, 60));
+    draw_rect(closeBtnX, closeBtnY, 20, 20, rgb(200, 80, 80));
+    draw_text(closeBtnX + 6, closeBtnY + 5, "x", rgb(240, 220, 220), 1);
+
+    // Content area
+    uint32_t contentY = dlgY + 36;
+    uint32_t contentH = kControlPanelH - 44;
+    framebuffer::fill_rect(dlgX + 8, contentY, kControlPanelW - 16, contentH, rgb(30, 30, 38));
+
+    // Draw header text
+    draw_text(dlgX + 20, contentY + 12, "System Settings", rgb(200, 200, 220), 1);
+
+    // Draw icons
+    for (int i = 0; i < kControlPanelItemCount; i++) {
+        uint32_t iconX = dlgX + 30 + (uint32_t)i * kCPIconSpacing;
+        uint32_t iconY = contentY + 50;
+
+        // Hover highlight
+        if (s_controlPanelHover == i) {
+            framebuffer::fill_rect(iconX - 8, iconY - 4, kCPIconSize + 16, kCPIconSize + 30, rgb(50, 70, 100));
+            draw_rect(iconX - 8, iconY - 4, kCPIconSize + 16, kCPIconSize + 30, rgb(80, 110, 160));
+        }
+
+        // Icon
+        framebuffer::fill_rect(iconX, iconY, kCPIconSize, kCPIconSize, s_controlPanelItems[i].color);
+        draw_rect(iconX, iconY, kCPIconSize, kCPIconSize, rgb(180, 180, 200));
+
+        // Inner highlight
+        uint32_t innerSize = 20;
+        uint32_t innerX = iconX + (kCPIconSize - innerSize) / 2;
+        uint32_t innerY = iconY + (kCPIconSize - innerSize) / 2;
+        uint32_t c = s_controlPanelItems[i].color;
+        uint8_t hr = (uint8_t)(((c >> 16) & 0xFF) + 40 > 255 ? 255 : ((c >> 16) & 0xFF) + 40);
+        uint8_t hg = (uint8_t)(((c >> 8) & 0xFF) + 40 > 255 ? 255 : ((c >> 8) & 0xFF) + 40);
+        uint8_t hb = (uint8_t)((c & 0xFF) + 40 > 255 ? 255 : (c & 0xFF) + 40);
+        framebuffer::fill_rect(innerX, innerY, innerSize, innerSize, rgb(hr, hg, hb));
+
+        // Label
+        const char* lbl = s_controlPanelItems[i].label;
+        int tw = measure_text(lbl);
+        uint32_t lx = iconX + (kCPIconSize > (uint32_t)tw ? (kCPIconSize - tw) / 2 : 0);
+        uint32_t ly = iconY + kCPIconSize + 8;
+        draw_text(lx, ly, lbl, rgb(210, 210, 225), 1);
+    }
+}
+
+// Hit test Control Panel: returns 0=Device Manager, 1=Network, 2=close, -1=none
+static int hit_test_control_panel(int32_t mx, int32_t my)
+{
+    if (!s_controlPanelOpen) return -1;
+
+    uint32_t dlgX = (s_screenW - kControlPanelW) / 2;
+    uint32_t dlgY = (s_screenH - kControlPanelH) / 2;
+    uint32_t contentY = dlgY + 36;
+
+    // Close button
+    uint32_t closeBtnX = dlgX + kControlPanelW - 26;
+    uint32_t closeBtnY = dlgY + 4;
+    if ((uint32_t)mx >= closeBtnX && (uint32_t)mx < closeBtnX + 20 &&
+        (uint32_t)my >= closeBtnY && (uint32_t)my < closeBtnY + 20) {
+        return 2;
+    }
+
+    // Icon hit test
+    for (int i = 0; i < kControlPanelItemCount; i++) {
+        uint32_t iconX = dlgX + 30 + (uint32_t)i * kCPIconSpacing;
+        uint32_t iconY = contentY + 50;
+
+        if ((uint32_t)mx >= iconX - 8 && (uint32_t)mx < iconX + kCPIconSize + 8 &&
+            (uint32_t)my >= iconY - 4 && (uint32_t)my < iconY + kCPIconSize + 26) {
+            return i;
+        }
+    }
+
+    return -1;
+}
+
+// ============================================================
+// Device Manager Window
+// ============================================================
+
+static const uint32_t kDeviceMgrW = 560;
+static const uint32_t kDeviceMgrH = 400;
+static const uint32_t kDeviceMgrRowH = 24;
+
+struct DeviceEntry {
+    const char* name;
+    const char* status;
+    const char* detail;
+    uint32_t statusColor;
+    bool isNetwork;
+};
+
+static const DeviceEntry s_devices[] = {
+    {"Audio: Intel AC'97",          "Detected",     "Vendor 8086 Dev 2415",    0xFF5FB878, false},
+    {"Audio: ES1371",               "Not found",    "Vendor 1274 Dev 1371",    0xFFD96C6C, false},
+    {"Network: Intel 825xx",        "Detected",     "Vendor 8086 Class 02",    0xFF5FB878, true},
+    {"Network: Realtek 8111/8168",  "Not found",    "Vendor 10EC Dev 8168",    0xFFD96C6C, true},
+    {"USB Mass Storage",            "0 device(s)",  "",                        0xFFCCCCCC, false},
+    {"PCI Host Bridge",             "Bus:0 Slot:0", "Class: Host Bridge",      0xFFDDDDDD, false},
+    {"ISA Bridge",                  "Bus:0 Slot:1", "Class: ISA Bridge",       0xFFDDDDDD, false},
+    {"VGA Controller",              "Bus:0 Slot:2", "Class: Display",          0xFFDDDDDD, false},
+};
+static const int kDeviceCount = 8;
+
+static void draw_device_manager()
+{
+    if (!s_deviceManagerOpen) return;
+
+    uint32_t dlgX = (s_screenW - kDeviceMgrW) / 2;
+    uint32_t dlgY = (s_screenH - kDeviceMgrH) / 2;
+
+    // Shadow
+    framebuffer::fill_rect(dlgX + 4, dlgY + 4, kDeviceMgrW, kDeviceMgrH, rgb(10, 10, 15));
+
+    // Window background
+    framebuffer::fill_rect(dlgX, dlgY, kDeviceMgrW, kDeviceMgrH, rgb(35, 35, 45));
+    draw_rect(dlgX, dlgY, kDeviceMgrW, kDeviceMgrH, rgb(70, 90, 130));
+
+    // Title bar
+    framebuffer::fill_rect(dlgX + 1, dlgY + 1, kDeviceMgrW - 2, 28, rgb(50, 70, 110));
+    draw_text(dlgX + 12, dlgY + 8, "Device Manager", rgb(220, 225, 240), 1);
+
+    // Close button
+    uint32_t closeBtnX = dlgX + kDeviceMgrW - 26;
+    uint32_t closeBtnY = dlgY + 4;
+    framebuffer::fill_rect(closeBtnX, closeBtnY, 20, 20, rgb(180, 60, 60));
+    draw_rect(closeBtnX, closeBtnY, 20, 20, rgb(200, 80, 80));
+    draw_text(closeBtnX + 6, closeBtnY + 5, "x", rgb(240, 220, 220), 1);
+
+    // Content area
+    uint32_t contentY = dlgY + 36;
+    framebuffer::fill_rect(dlgX + 8, contentY, kDeviceMgrW - 16, kDeviceMgrH - 44, rgb(28, 28, 35));
+
+    // Header
+    draw_text(dlgX + 20, contentY + 8, "Hardware Inventory", rgb(200, 200, 220), 1);
+
+    // Column headers
+    uint32_t listY = contentY + 30;
+    uint32_t nameW = (uint32_t)((kDeviceMgrW - 32) * 0.38f);
+    uint32_t statusW = (uint32_t)((kDeviceMgrW - 32) * 0.22f);
+
+    framebuffer::fill_rect(dlgX + 12, listY, kDeviceMgrW - 24, kDeviceMgrRowH, rgb(40, 45, 55));
+    draw_text(dlgX + 18, listY + 6, "Device", rgb(180, 180, 200), 1);
+    draw_text(dlgX + 18 + nameW, listY + 6, "Status", rgb(180, 180, 200), 1);
+    draw_text(dlgX + 18 + nameW + statusW, listY + 6, "Details", rgb(180, 180, 200), 1);
+
+    // Device list
+    listY += kDeviceMgrRowH + 2;
+    for (int i = 0; i < kDeviceCount; i++) {
+        uint32_t rowY = listY + (uint32_t)i * kDeviceMgrRowH;
+        if (rowY + kDeviceMgrRowH > dlgY + kDeviceMgrH - 12) break;
+
+        uint32_t rowBg = (i % 2 == 0) ? rgb(32, 32, 40) : rgb(28, 28, 36);
+        if (s_deviceManagerSelected == i) rowBg = rgb(50, 70, 100);
+        framebuffer::fill_rect(dlgX + 12, rowY, kDeviceMgrW - 24, kDeviceMgrRowH - 1, rowBg);
+
+        draw_text(dlgX + 18, rowY + 5, s_devices[i].name, rgb(210, 210, 225), 1);
+
+        uint32_t statusX = dlgX + 18 + nameW;
+        framebuffer::fill_rect(statusX, rowY + 8, 8, 8, s_devices[i].statusColor);
+        draw_text(statusX + 12, rowY + 5, s_devices[i].status, rgb(200, 200, 215), 1);
+
+        draw_text(dlgX + 18 + nameW + statusW, rowY + 5, s_devices[i].detail, rgb(160, 160, 180), 1);
+
+        if (s_devices[i].isNetwork && s_devices[i].statusColor == 0xFF5FB878) {
+            uint32_t btnX = dlgX + kDeviceMgrW - 90;
+            uint32_t btnY2 = rowY + 2;
+            framebuffer::fill_rect(btnX, btnY2, 70, kDeviceMgrRowH - 4, rgb(50, 80, 120));
+            draw_rect(btnX, btnY2, 70, kDeviceMgrRowH - 4, rgb(70, 100, 150));
+            draw_text_centered(btnX, btnY2, 70, kDeviceMgrRowH - 4, "Config", rgb(200, 210, 230), 1);
+        }
+    }
+}
+
+static int hit_test_device_manager(int32_t mx, int32_t my)
+{
+    if (!s_deviceManagerOpen) return -1;
+
+    uint32_t dlgX = (s_screenW - kDeviceMgrW) / 2;
+    uint32_t dlgY = (s_screenH - kDeviceMgrH) / 2;
+
+    uint32_t closeBtnX = dlgX + kDeviceMgrW - 26;
+    uint32_t closeBtnY = dlgY + 4;
+    if ((uint32_t)mx >= closeBtnX && (uint32_t)mx < closeBtnX + 20 &&
+        (uint32_t)my >= closeBtnY && (uint32_t)my < closeBtnY + 20) {
+        return -2;
+    }
+
+    uint32_t contentY = dlgY + 36;
+    uint32_t listY = contentY + 30 + kDeviceMgrRowH + 2;
+
+    for (int i = 0; i < kDeviceCount; i++) {
+        uint32_t rowY = listY + (uint32_t)i * kDeviceMgrRowH;
+        if (rowY + kDeviceMgrRowH > dlgY + kDeviceMgrH - 12) break;
+
+        if (s_devices[i].isNetwork && s_devices[i].statusColor == 0xFF5FB878) {
+            uint32_t btnX = dlgX + kDeviceMgrW - 90;
+            uint32_t btnY2 = rowY + 2;
+            if ((uint32_t)mx >= btnX && (uint32_t)mx < btnX + 70 &&
+                (uint32_t)my >= btnY2 && (uint32_t)my < btnY2 + kDeviceMgrRowH - 4) {
+                return 100 + i;
+            }
+        }
+
+        if ((uint32_t)mx >= dlgX + 12 && (uint32_t)mx < dlgX + kDeviceMgrW - 12 &&
+            (uint32_t)my >= rowY && (uint32_t)my < rowY + kDeviceMgrRowH) {
+            return i;
+        }
+    }
+
+    return -1;
+}
+
+// ============================================================
+// Network Adapters Window
+// ============================================================
+
+static const uint32_t kNetAdaptersW = 520;
+static const uint32_t kNetAdaptersH = 360;
+static const uint32_t kNetAdapterRowH = 56;
+
+struct NetworkAdapter {
+    const char* name;
+    const char* vendor;
+    const char* status;
+    bool detected;
+};
+
+static const NetworkAdapter s_networkAdapters[] = {
+    {"Intel Ethernet Adapter",      "Intel Corporation",     "Connected", true},
+    {"Realtek PCIe GbE Controller", "Realtek Semiconductor", "Not found", false},
+};
+static const int kNetAdapterCount = 2;
+
+static void draw_network_adapters()
+{
+    if (!s_networkAdaptersOpen) return;
+
+    uint32_t dlgX = (s_screenW - kNetAdaptersW) / 2;
+    uint32_t dlgY = (s_screenH - kNetAdaptersH) / 2;
+
+    framebuffer::fill_rect(dlgX + 4, dlgY + 4, kNetAdaptersW, kNetAdaptersH, rgb(10, 10, 15));
+    framebuffer::fill_rect(dlgX, dlgY, kNetAdaptersW, kNetAdaptersH, rgb(35, 35, 45));
+    draw_rect(dlgX, dlgY, kNetAdaptersW, kNetAdaptersH, rgb(70, 90, 130));
+
+    framebuffer::fill_rect(dlgX + 1, dlgY + 1, kNetAdaptersW - 2, 28, rgb(50, 70, 110));
+    draw_text(dlgX + 12, dlgY + 8, "Network Adapters", rgb(220, 225, 240), 1);
+
+    uint32_t closeBtnX = dlgX + kNetAdaptersW - 26;
+    framebuffer::fill_rect(closeBtnX, dlgY + 4, 20, 20, rgb(180, 60, 60));
+    draw_rect(closeBtnX, dlgY + 4, 20, 20, rgb(200, 80, 80));
+    draw_text(closeBtnX + 6, dlgY + 9, "x", rgb(240, 220, 220), 1);
+
+    uint32_t contentY = dlgY + 36;
+    framebuffer::fill_rect(dlgX + 8, contentY, kNetAdaptersW - 16, kNetAdaptersH - 90, rgb(28, 28, 35));
+    draw_text(dlgX + 20, contentY + 8, "Network Connections", rgb(200, 200, 220), 1);
+
+    uint32_t listY = contentY + 30;
+    for (int i = 0; i < kNetAdapterCount; i++) {
+        uint32_t rowY = listY + (uint32_t)i * (kNetAdapterRowH + 4);
+        uint32_t rowBg = (s_networkAdapterSelected == i) ? rgb(45, 65, 95) : 
+                         (s_networkAdapterHover == i) ? rgb(38, 48, 58) : rgb(32, 32, 40);
+        framebuffer::fill_rect(dlgX + 12, rowY, kNetAdaptersW - 24, kNetAdapterRowH, rowBg);
+
+        uint32_t statusColor = s_networkAdapters[i].detected ? rgb(95, 184, 120) : rgb(100, 100, 110);
+        framebuffer::fill_rect(dlgX + 12, rowY, 4, kNetAdapterRowH, statusColor);
+
+        uint32_t iconColor = s_networkAdapters[i].detected ? rgb(80, 180, 120) : rgb(80, 80, 90);
+        framebuffer::fill_rect(dlgX + 24, rowY + 12, 32, 32, iconColor);
+        draw_rect(dlgX + 24, rowY + 12, 32, 32, rgb(120, 140, 160));
+
+        draw_text(dlgX + 64, rowY + 10, s_networkAdapters[i].name, rgb(220, 220, 235), 1);
+        draw_text(dlgX + 64, rowY + 28, s_networkAdapters[i].vendor, rgb(160, 165, 180), 1);
+        draw_text(dlgX + kNetAdaptersW - 120, rowY + 20, s_networkAdapters[i].status, rgb(180, 185, 200), 1);
+    }
+
+    uint32_t btnY = dlgY + kNetAdaptersH - 46;
+    uint32_t propBtnX = dlgX + kNetAdaptersW - 200;
+    bool propEnabled = (s_networkAdapterSelected >= 0 && s_networkAdapters[s_networkAdapterSelected].detected);
+    uint32_t propBg = propEnabled ? rgb(55, 85, 125) : rgb(45, 45, 55);
+    framebuffer::fill_rect(propBtnX, btnY, 90, 30, propBg);
+    draw_rect(propBtnX, btnY, 90, 30, propEnabled ? rgb(80, 120, 170) : rgb(60, 60, 70));
+    draw_text_centered(propBtnX, btnY, 90, 30, "Properties", propEnabled ? rgb(210, 220, 240) : rgb(120, 120, 130), 1);
+
+    uint32_t statusBtnX = dlgX + kNetAdaptersW - 100;
+    framebuffer::fill_rect(statusBtnX, btnY, 90, 30, rgb(45, 50, 60));
+    draw_rect(statusBtnX, btnY, 90, 30, rgb(65, 75, 90));
+    draw_text_centered(statusBtnX, btnY, 90, 30, "Status", rgb(160, 165, 180), 1);
+}
+
+static int hit_test_network_adapters(int32_t mx, int32_t my)
+{
+    if (!s_networkAdaptersOpen) return -1;
+
+    uint32_t dlgX = (s_screenW - kNetAdaptersW) / 2;
+    uint32_t dlgY = (s_screenH - kNetAdaptersH) / 2;
+
+    uint32_t closeBtnX = dlgX + kNetAdaptersW - 26;
+    if ((uint32_t)mx >= closeBtnX && (uint32_t)mx < closeBtnX + 20 &&
+        (uint32_t)my >= dlgY + 4 && (uint32_t)my < dlgY + 24) {
+        return -2;
+    }
+
+    uint32_t btnY = dlgY + kNetAdaptersH - 46;
+    uint32_t propBtnX = dlgX + kNetAdaptersW - 200;
+    if ((uint32_t)mx >= propBtnX && (uint32_t)mx < propBtnX + 90 &&
+        (uint32_t)my >= btnY && (uint32_t)my < btnY + 30) {
+        return -10;
+    }
+
+    uint32_t contentY = dlgY + 36;
+    uint32_t listY = contentY + 30;
+    for (int i = 0; i < kNetAdapterCount; i++) {
+        uint32_t rowY = listY + (uint32_t)i * (kNetAdapterRowH + 4);
+        if ((uint32_t)mx >= dlgX + 12 && (uint32_t)mx < dlgX + kNetAdaptersW - 12 &&
+            (uint32_t)my >= rowY && (uint32_t)my < rowY + kNetAdapterRowH) {
+            return i;
+        }
+    }
+
+    return -1;
+}
+
+// ============================================================
+// Network Configuration Dialog
+// ============================================================
+
+static const uint32_t kNetConfigW = 480;
+static const uint32_t kNetConfigH = 420;
+
+static void draw_network_config()
+{
+    if (!s_networkConfigOpen) return;
+
+    uint32_t dlgX = (s_screenW - kNetConfigW) / 2;
+    uint32_t dlgY = (s_screenH - kNetConfigH) / 2;
+
+    framebuffer::fill_rect(dlgX + 4, dlgY + 4, kNetConfigW, kNetConfigH, rgb(10, 10, 15));
+    framebuffer::fill_rect(dlgX, dlgY, kNetConfigW, kNetConfigH, rgb(35, 35, 45));
+    draw_rect(dlgX, dlgY, kNetConfigW, kNetConfigH, rgb(70, 90, 130));
+
+    framebuffer::fill_rect(dlgX + 1, dlgY + 1, kNetConfigW - 2, 28, rgb(50, 70, 110));
+    draw_text(dlgX + 12, dlgY + 8, "TCP/IPv4 Properties", rgb(220, 225, 240), 1);
+
+    uint32_t closeBtnX = dlgX + kNetConfigW - 26;
+    framebuffer::fill_rect(closeBtnX, dlgY + 4, 20, 20, rgb(180, 60, 60));
+    draw_text(closeBtnX + 6, dlgY + 9, "x", rgb(240, 220, 220), 1);
+
+    uint32_t contentY = dlgY + 36;
+    framebuffer::fill_rect(dlgX + 8, contentY, kNetConfigW - 16, kNetConfigH - 90, rgb(30, 30, 38));
+
+    uint32_t textY = contentY + 12;
+    draw_text(dlgX + 20, textY, "Network settings can be configured here.", rgb(180, 185, 200), 1);
+    textY += 32;
+
+    // DHCP option
+    framebuffer::fill_rect(dlgX + 20, textY + 2, 12, 12, s_networkConfigUseDHCP ? rgb(74, 158, 255) : rgb(60, 60, 70));
+    draw_rect(dlgX + 20, textY + 2, 12, 12, rgb(100, 120, 150));
+    draw_text(dlgX + 40, textY, "Obtain IP address automatically (DHCP)", rgb(200, 200, 220), 1);
+    textY += 28;
+
+    // Manual option
+    framebuffer::fill_rect(dlgX + 20, textY + 2, 12, 12, !s_networkConfigUseDHCP ? rgb(74, 158, 255) : rgb(60, 60, 70));
+    draw_rect(dlgX + 20, textY + 2, 12, 12, rgb(100, 120, 150));
+    draw_text(dlgX + 40, textY, "Use the following IP address:", rgb(200, 200, 220), 1);
+    textY += 36;
+
+    uint32_t labelColor = !s_networkConfigUseDHCP ? rgb(200, 200, 220) : rgb(120, 120, 135);
+    uint32_t fieldBg = !s_networkConfigUseDHCP ? rgb(42, 42, 52) : rgb(32, 32, 40);
+
+    // IP Address
+    draw_text(dlgX + 48, textY, "IP address:", labelColor, 1);
+    framebuffer::fill_rect(dlgX + 180, textY - 4, 200, 20, fieldBg);
+    draw_rect(dlgX + 180, textY - 4, 200, 20, rgb(70, 80, 95));
+    char ipStr[20]; 
+    // Format IP as string
+    int idx = 0;
+    for (int o = 0; o < 4; o++) {
+        uint8_t v = s_netConfigIP[o];
+        if (v >= 100) ipStr[idx++] = '0' + v / 100;
+        if (v >= 10) ipStr[idx++] = '0' + (v / 10) % 10;
+        ipStr[idx++] = '0' + v % 10;
+        if (o < 3) ipStr[idx++] = '.';
+    }
+    ipStr[idx] = '\0';
+    draw_text(dlgX + 188, textY, ipStr, labelColor, 1);
+    textY += 28;
+
+    // Subnet mask
+    draw_text(dlgX + 48, textY, "Subnet mask:", labelColor, 1);
+    framebuffer::fill_rect(dlgX + 180, textY - 4, 200, 20, fieldBg);
+    draw_rect(dlgX + 180, textY - 4, 200, 20, rgb(70, 80, 95));
+    idx = 0;
+    for (int o = 0; o < 4; o++) {
+        uint8_t v = s_netConfigMask[o];
+        if (v >= 100) ipStr[idx++] = '0' + v / 100;
+        if (v >= 10) ipStr[idx++] = '0' + (v / 10) % 10;
+        ipStr[idx++] = '0' + v % 10;
+        if (o < 3) ipStr[idx++] = '.';
+    }
+    ipStr[idx] = '\0';
+    draw_text(dlgX + 188, textY, ipStr, labelColor, 1);
+    textY += 28;
+
+    // Gateway
+    draw_text(dlgX + 48, textY, "Default gateway:", labelColor, 1);
+    framebuffer::fill_rect(dlgX + 180, textY - 4, 200, 20, fieldBg);
+    draw_rect(dlgX + 180, textY - 4, 200, 20, rgb(70, 80, 95));
+    idx = 0;
+    for (int o = 0; o < 4; o++) {
+        uint8_t v = s_netConfigGateway[o];
+        if (v >= 100) ipStr[idx++] = '0' + v / 100;
+        if (v >= 10) ipStr[idx++] = '0' + (v / 10) % 10;
+        ipStr[idx++] = '0' + v % 10;
+        if (o < 3) ipStr[idx++] = '.';
+    }
+    ipStr[idx] = '\0';
+    draw_text(dlgX + 188, textY, ipStr, labelColor, 1);
+    textY += 36;
+
+    // DNS
+    draw_text(dlgX + 48, textY, "Preferred DNS:", labelColor, 1);
+    framebuffer::fill_rect(dlgX + 180, textY - 4, 200, 20, fieldBg);
+    draw_rect(dlgX + 180, textY - 4, 200, 20, rgb(70, 80, 95));
+    idx = 0;
+    for (int o = 0; o < 4; o++) {
+        uint8_t v = s_netConfigDNS[o];
+        if (v >= 100) ipStr[idx++] = '0' + v / 100;
+        if (v >= 10) ipStr[idx++] = '0' + (v / 10) % 10;
+        ipStr[idx++] = '0' + v % 10;
+        if (o < 3) ipStr[idx++] = '.';
+    }
+    ipStr[idx] = '\0';
+    draw_text(dlgX + 188, textY, ipStr, labelColor, 1);
+
+    // Buttons
+    uint32_t btnY = dlgY + kNetConfigH - 50;
+    uint32_t okBtnX = dlgX + kNetConfigW - 200;
+    uint32_t cancelBtnX = dlgX + kNetConfigW - 100;
+
+    uint32_t okBg = (s_networkConfigBtnHover == 0) ? rgb(70, 100, 145) : rgb(55, 85, 130);
+    framebuffer::fill_rect(okBtnX, btnY, 90, 32, okBg);
+    draw_rect(okBtnX, btnY, 90, 32, rgb(85, 120, 175));
+    draw_text_centered(okBtnX, btnY, 90, 32, "OK", rgb(220, 230, 250), 1);
+
+    uint32_t cancelBg = (s_networkConfigBtnHover == 1) ? rgb(60, 55, 55) : rgb(50, 45, 45);
+    framebuffer::fill_rect(cancelBtnX, btnY, 90, 32, cancelBg);
+    draw_rect(cancelBtnX, btnY, 90, 32, rgb(90, 70, 70));
+    draw_text_centered(cancelBtnX, btnY, 90, 32, "Cancel", rgb(220, 200, 200), 1);
+}
+
+static int hit_test_network_config(int32_t mx, int32_t my)
+{
+    if (!s_networkConfigOpen) return -1;
+
+    uint32_t dlgX = (s_screenW - kNetConfigW) / 2;
+    uint32_t dlgY = (s_screenH - kNetConfigH) / 2;
+
+    uint32_t closeBtnX = dlgX + kNetConfigW - 26;
+    if ((uint32_t)mx >= closeBtnX && (uint32_t)mx < closeBtnX + 20 &&
+        (uint32_t)my >= dlgY + 4 && (uint32_t)my < dlgY + 24) {
+        return -2;
+    }
+
+    uint32_t btnY = dlgY + kNetConfigH - 50;
+    uint32_t okBtnX = dlgX + kNetConfigW - 200;
+    uint32_t cancelBtnX = dlgX + kNetConfigW - 100;
+
+    if ((uint32_t)mx >= okBtnX && (uint32_t)mx < okBtnX + 90 &&
+        (uint32_t)my >= btnY && (uint32_t)my < btnY + 32) {
+        return -10;
+    }
+    if ((uint32_t)mx >= cancelBtnX && (uint32_t)mx < cancelBtnX + 90 &&
+        (uint32_t)my >= btnY && (uint32_t)my < btnY + 32) {
+        return -11;
+    }
+
+    // DHCP radio
+    uint32_t contentY = dlgY + 36;
+    uint32_t textY = contentY + 12 + 32;
+    if ((uint32_t)mx >= dlgX + 20 && (uint32_t)mx < dlgX + 32 &&
+        (uint32_t)my >= textY && (uint32_t)my < textY + 16) {
+        return -20;
+    }
+    textY += 28;
+    if ((uint32_t)mx >= dlgX + 20 && (uint32_t)mx < dlgX + 32 &&
+        (uint32_t)my >= textY && (uint32_t)my < textY + 16) {
+        return -21;
+    }
+
+    return -1;
+}
+
+// ============================================================
 // Shell Window Geometry and Hit-Testing
 // ============================================================
 
@@ -1460,6 +2022,10 @@ void draw()
     draw_right_click_menu();
     draw_notifications();
     draw_shutdown_dialog();
+    draw_control_panel();
+    draw_device_manager();
+    draw_network_adapters();
+    draw_network_config();
     
     // Draw shell window if open and not minimized
     if (shell::is_open() && !s_shellMinimized) {
@@ -2296,6 +2862,117 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
             return;
         }
 
+        // Handle Network Config dialog clicks
+        if (s_networkConfigOpen) {
+            int btn = hit_test_network_config(mx, my);
+            if (btn == -2 || btn == -11) {
+                // Close or Cancel
+                s_networkConfigOpen = false;
+                draw();
+                draw_cursor(mx, my);
+                return;
+            } else if (btn == -10) {
+                // OK - apply config
+                s_networkConfigOpen = false;
+                s_notification.title = "Network";
+                s_notification.message = "Configuration applied";
+                s_notification.visible = true;
+                draw();
+                draw_cursor(mx, my);
+                return;
+            } else if (btn == -20) {
+                // DHCP selected
+                s_networkConfigUseDHCP = true;
+                draw();
+                draw_cursor(mx, my);
+                return;
+            } else if (btn == -21) {
+                // Manual selected
+                s_networkConfigUseDHCP = false;
+                draw();
+                draw_cursor(mx, my);
+                return;
+            }
+            return;  // Inside dialog
+        }
+
+        // Handle Network Adapters dialog clicks
+        if (s_networkAdaptersOpen) {
+            int btn = hit_test_network_adapters(mx, my);
+            if (btn == -2) {
+                // Close
+                s_networkAdaptersOpen = false;
+                draw();
+                draw_cursor(mx, my);
+                return;
+            } else if (btn == -10) {
+                // Properties - open config dialog
+                if (s_networkAdapterSelected >= 0 && s_networkAdapters[s_networkAdapterSelected].detected) {
+                    s_networkConfigOpen = true;
+                    draw();
+                    draw_cursor(mx, my);
+                    return;
+                }
+            } else if (btn >= 0 && btn < kNetAdapterCount) {
+                s_networkAdapterSelected = btn;
+                draw();
+                draw_cursor(mx, my);
+                return;
+            }
+            return;
+        }
+
+        // Handle Device Manager dialog clicks
+        if (s_deviceManagerOpen) {
+            int btn = hit_test_device_manager(mx, my);
+            if (btn == -2) {
+                // Close
+                s_deviceManagerOpen = false;
+                draw();
+                draw_cursor(mx, my);
+                return;
+            } else if (btn >= 100) {
+                // Config button clicked
+                s_networkConfigOpen = true;
+                draw();
+                draw_cursor(mx, my);
+                return;
+            } else if (btn >= 0 && btn < kDeviceCount) {
+                s_deviceManagerSelected = btn;
+                draw();
+                draw_cursor(mx, my);
+                return;
+            }
+            return;
+        }
+
+        // Handle Control Panel dialog clicks
+        if (s_controlPanelOpen) {
+            int btn = hit_test_control_panel(mx, my);
+            if (btn == 2) {
+                // Close
+                s_controlPanelOpen = false;
+                draw();
+                draw_cursor(mx, my);
+                return;
+            } else if (btn == 0) {
+                // Device Manager
+                s_controlPanelOpen = false;
+                s_deviceManagerOpen = true;
+                draw();
+                draw_cursor(mx, my);
+                return;
+            } else if (btn == 1) {
+                // Network Adapters
+                s_controlPanelOpen = false;
+                s_networkAdaptersOpen = true;
+                draw();
+                draw_cursor(mx, my);
+                return;
+            }
+            return;
+        }
+
         // Close context menu on any click
         if (s_rightClickMenuOpen) {
             s_rightClickMenuOpen = false;
@@ -2332,6 +3009,16 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
                 // Clicked a right-column item
                 s_clickedMenuRight = rightHit;
                 s_clickedMenuLeft = -1;
+                
+                // Handle Control Panel specially (index 5)
+                if (rightHit == 5) {
+                    s_startMenuOpen = false;
+                    s_controlPanelOpen = true;
+                    draw();
+                    draw_cursor(mx, my);
+                    return;
+                }
+                
                 show_start_menu_notification(s_startMenuRight[rightHit].label);
                 draw();
                 draw_cursor(mx, my);
@@ -2482,6 +3169,47 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
         int newHover = hit_test_shutdown_dialog(mx, my);
         if (newHover != s_shutdownDialogHover) {
             s_shutdownDialogHover = newHover;
+            draw();
+            draw_cursor(mx, my);
+            return;
+        }
+    }
+
+    // Control Panel hover tracking
+    if (s_controlPanelOpen) {
+        int newHover = hit_test_control_panel(mx, my);
+        if (newHover != 2 && newHover != s_controlPanelHover) {  // Don't track close button as hover
+            s_controlPanelHover = newHover;
+            draw();
+            draw_cursor(mx, my);
+            return;
+        }
+    }
+
+    // Network Adapters hover tracking
+    if (s_networkAdaptersOpen) {
+        int newHover = hit_test_network_adapters(mx, my);
+        if (newHover >= 0 && newHover < kNetAdapterCount && newHover != s_networkAdapterHover) {
+            s_networkAdapterHover = newHover;
+            draw();
+            draw_cursor(mx, my);
+            return;
+        } else if (newHover < 0 && s_networkAdapterHover >= 0) {
+            s_networkAdapterHover = -1;
+            draw();
+            draw_cursor(mx, my);
+            return;
+        }
+    }
+
+    // Network Config button hover tracking
+    if (s_networkConfigOpen) {
+        int newHover = -1;
+        int hit = hit_test_network_config(mx, my);
+        if (hit == -10) newHover = 0;  // OK
+        else if (hit == -11) newHover = 1;  // Cancel
+        if (newHover != s_networkConfigBtnHover) {
+            s_networkConfigBtnHover = newHover;
             draw();
             draw_cursor(mx, my);
             return;

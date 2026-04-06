@@ -249,22 +249,28 @@ namespace gxos {
                         TextOutA(dc, winfo.x + 10, winfo.y + (titleBarH - 16) / 2, winfo.title.c_str( ), (int)winfo.title.size( ));
                     }
 
-                    // Titlebar buttons (minimize, maximize/restore, close)
+                    // Titlebar buttons (matching Legacy: minimize, maximize, tombstone, close from left to right)
+                    // Button layout right-to-left: close, tombstone, maximize, minimize
                     const int btnSize = titleBarH - UISettings::ButtonSizeOffset;
                     const int btnGap = UISettings::ButtonSpacing;
                     int btnY = winfo.y + (titleBarH - btnSize) / 2;
                     
+                    // Position buttons from right to left
                     int closeLeft = winfo.x + winfo.w - btnGap - btnSize;
-                    int maxLeft = closeLeft - btnGap - btnSize;
+                    int tombLeft = closeLeft - btnGap - btnSize;
+                    int maxLeft = tombLeft - btnGap - btnSize;
                     int minLeft = maxLeft - btnGap - btnSize;
                     
                     // Draw buttons using improved renderer (matching Legacy style)
-                    WindowRenderer::DrawTitleButton(dc, closeLeft, btnY, btnSize, 0, 
-                        winfo.titleBtnCloseHover, winfo.titleBtnClosePressed, isFocused);
-                    WindowRenderer::DrawTitleButton(dc, maxLeft, btnY, btnSize, 1, 
-                        winfo.titleBtnMaxHover, winfo.titleBtnMaxPressed, isFocused);
+                    // buttonType: 0=close, 1=maximize, 2=minimize, 3=tombstone
                     WindowRenderer::DrawTitleButton(dc, minLeft, btnY, btnSize, 2, 
                         winfo.titleBtnMinHover, winfo.titleBtnMinPressed, isFocused);
+                    WindowRenderer::DrawTitleButton(dc, maxLeft, btnY, btnSize, 1, 
+                        winfo.titleBtnMaxHover, winfo.titleBtnMaxPressed, isFocused);
+                    WindowRenderer::DrawTitleButton(dc, tombLeft, btnY, btnSize, 3, 
+                        winfo.titleBtnTombHover, winfo.titleBtnTombPressed, isFocused);
+                    WindowRenderer::DrawTitleButton(dc, closeLeft, btnY, btnSize, 0, 
+                        winfo.titleBtnCloseHover, winfo.titleBtnClosePressed, isFocused);
 
                     // Draw resize grip
                     if (!winfo.maximized) {
@@ -685,8 +691,23 @@ namespace gxos {
                 }
                 // Desktop icon click (selection / double / drag initiation)
                 { const int iconW = 56; const int iconH = 56; const int cellW = iconW + 28; const int cellH = iconH + 38; if (my < cr.bottom - taskbarH) { int hitIdx = -1; for (int i = 0; i < (int)g_items.size( ); ++i) { int ix = g_items[i].ix; int iy = g_items[i].iy; if (mx >= ix && mx < ix + cellW && my >= iy && my < iy + cellH) { hitIdx = i; break; } } if (hitIdx >= 0) { uint64_t now = nowMs( ); if (g_lastItemIndex == hitIdx && (now - g_lastItemClickTicks) < 450) { launchAction(g_items[hitIdx].action); g_lastItemIndex = -1; g_lastItemClickTicks = 0; } else { for (auto& di : g_items) di.selected = false; g_items[hitIdx].selected = true; g_lastItemIndex = hitIdx; g_lastItemClickTicks = now; g_iconDragPending = true; g_iconDragIndex = hitIdx; g_iconDragStartX = mx; g_iconDragStartY = my; g_iconDragOffX = mx - g_items[hitIdx].ix; g_iconDragOffY = my - g_items[hitIdx].iy; SetCapture(h); } requestRepaint( ); return 0; } } }
-                // Taskbar button click (minimize/restore/tombstone)
-                uint64_t id = hitTestTaskbarButton(mx, my, cr, taskbarH); if (id) { std::lock_guard<std::mutex> lk(g_lock); auto it = g_windows.find(id); if (it != g_windows.end( )) { WinInfo& w = it->second; if (!w.minimized && !w.tombstoned) { w.tombstoned = true; w.minimized = true; if (g_focus == w.id) g_focus = 0; } else { w.tombstoned = false; w.minimized = false; g_focus = w.id; for (auto itZ = g_z.begin( ); itZ != g_z.end( ); ++itZ) { if (*itZ == id) { g_z.erase(itZ); break; } } g_z.push_back(id); } } requestRepaint( ); return 0; }
+                // Taskbar button click (minimize/restore/untombstone)
+                uint64_t id = hitTestTaskbarButton(mx, my, cr, taskbarH); if (id) { std::lock_guard<std::mutex> lk(g_lock); auto it = g_windows.find(id); if (it != g_windows.end( )) { WinInfo& w = it->second; if (w.tombstoned) { 
+                    // Restore from tombstone (untombstone)
+                    w.tombstoned = false; w.visible = true; g_focus = w.id; 
+                    for (auto itZ = g_z.begin( ); itZ != g_z.end( ); ++itZ) { if (*itZ == id) { g_z.erase(itZ); break; } } g_z.push_back(id); 
+                } else if (w.minimized) { 
+                    // Restore from minimized
+                    w.minimized = false; g_focus = w.id; 
+                    for (auto itZ = g_z.begin( ); itZ != g_z.end( ); ++itZ) { if (*itZ == id) { g_z.erase(itZ); break; } } g_z.push_back(id); 
+                } else if (g_focus == id) { 
+                    // Currently focused - minimize it
+                    w.minimized = true; g_focus = 0; 
+                } else { 
+                    // Not focused - bring to focus
+                    g_focus = w.id; 
+                    for (auto itZ = g_z.begin( ); itZ != g_z.end( ); ++itZ) { if (*itZ == id) { g_z.erase(itZ); break; } } g_z.push_back(id); 
+                } } requestRepaint( ); return 0; }
                 // pass to widget handling and general mouse handling
                 uint64_t ownerPid = 0; { std::lock_guard<std::mutex> lk(g_lock); auto it = g_windows.find(g_focus); if (it != g_windows.end( )) ownerPid = it->second.ownerPid; }
                 Compositor::handleMouse(mx, my, true, false); publishOut(MsgType::MT_InputMouse, std::to_string(mx) + "|" + std::to_string(my) + "|1|down", ownerPid); return 0;
@@ -827,19 +848,32 @@ namespace gxos {
             if (up) { g_dragPending = false; g_dragPendingWin = 0; }
             // find topmost window under cursor
             WinInfo* topW = nullptr; for (int idx = (int)g_z.size( ) - 1; idx >= 0; --idx) { auto it = g_windows.find(g_z[idx]); if (it == g_windows.end( )) continue; WinInfo& w = it->second; if (w.minimized || w.tombstoned) continue; if (mx >= w.x && mx < w.x + w.w && my >= w.y && my < w.y + w.h) { topW = &w; break; } }
-            // Titlebar button handling (hover/press/click)
+            // Titlebar button handling (hover/press/click) - matching Legacy layout
+            // Button layout right-to-left: close, tombstone, maximize, minimize
             if (topW) { // compute button rects for this window
                 const int btnSize = 16; const int btnGap = 6;
                 int closeLeft = topW->x + topW->w - btnGap - btnSize;
-                int maxLeft = closeLeft - btnGap - btnSize;
+                int tombLeft = closeLeft - btnGap - btnSize;
+                int maxLeft = tombLeft - btnGap - btnSize;
                 int minLeft = maxLeft - btnGap - btnSize;
                 bool overClose = (mx >= closeLeft && mx < closeLeft + btnSize && my >= topW->y && my < topW->y + titleBarH);
+                bool overTomb = (mx >= tombLeft && mx < tombLeft + btnSize && my >= topW->y && my < topW->y + titleBarH);
                 bool overMax = (mx >= maxLeft && mx < maxLeft + btnSize && my >= topW->y && my < topW->y + titleBarH);
                 bool overMin = (mx >= minLeft && mx < minLeft + btnSize && my >= topW->y && my < topW->y + titleBarH);
                 // mouse move -> update hover
-                if (!down && !up) { if (topW->titleBtnCloseHover != overClose) { topW->titleBtnCloseHover = overClose; invalidate(topW->id); } if (topW->titleBtnMaxHover != overMax) { topW->titleBtnMaxHover = overMax; invalidate(topW->id); } if (topW->titleBtnMinHover != overMin) { topW->titleBtnMinHover = overMin; invalidate(topW->id); } }
+                if (!down && !up) { 
+                    if (topW->titleBtnCloseHover != overClose) { topW->titleBtnCloseHover = overClose; invalidate(topW->id); } 
+                    if (topW->titleBtnTombHover != overTomb) { topW->titleBtnTombHover = overTomb; invalidate(topW->id); }
+                    if (topW->titleBtnMaxHover != overMax) { topW->titleBtnMaxHover = overMax; invalidate(topW->id); } 
+                    if (topW->titleBtnMinHover != overMin) { topW->titleBtnMinHover = overMin; invalidate(topW->id); } 
+                }
                 // mouse down -> set pressed if over
-                if (down) { if (overClose) { topW->titleBtnClosePressed = true; invalidate(topW->id); } if (overMax) { topW->titleBtnMaxPressed = true; invalidate(topW->id); } if (overMin) { topW->titleBtnMinPressed = true; invalidate(topW->id); } }
+                if (down) { 
+                    if (overClose) { topW->titleBtnClosePressed = true; invalidate(topW->id); } 
+                    if (overTomb) { topW->titleBtnTombPressed = true; invalidate(topW->id); }
+                    if (overMax) { topW->titleBtnMaxPressed = true; invalidate(topW->id); } 
+                    if (overMin) { topW->titleBtnMinPressed = true; invalidate(topW->id); } 
+                }
                 // mouse up -> perform action if pressed
                 if (up) {
                     if (topW->titleBtnClosePressed) { // close
@@ -853,9 +887,18 @@ namespace gxos {
                         publishOut(MsgType::MT_Close, std::to_string(id), ownerPid);
                         return;
                     }
+                    if (topW->titleBtnTombPressed) { // tombstone (freeze/disable window)
+                        uint64_t id = topW->id;
+                        topW->titleBtnTombPressed = false; topW->titleBtnTombHover = false;
+                        topW->tombstoned = true;
+                        topW->visible = false;
+                        if (g_focus == id) g_focus = 0;
+                        invalidate(id);
+                        return;
+                    }
                     if (topW->titleBtnMinPressed) { // minimize
                         uint64_t id = topW->id;
-                        topW->titleBtnMinPressed = false; topW->titleBtnMinHover = false; topW->minimized = true; topW->tombstoned = true; if (g_focus == id) g_focus = 0; invalidate(id); return;
+                        topW->titleBtnMinPressed = false; topW->titleBtnMinHover = false; topW->minimized = true; if (g_focus == id) g_focus = 0; invalidate(id); return;
                     }
                     if (topW->titleBtnMaxPressed) { // maximize/restore
                         uint64_t id = topW->id;

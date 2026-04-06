@@ -46,6 +46,7 @@ namespace gxos { namespace gui {
         bool titleBtnCloseHover{false}; bool titleBtnClosePressed{false};
         bool titleBtnMaxHover{false}; bool titleBtnMaxPressed{false};
         bool titleBtnMinHover{false}; bool titleBtnMinPressed{false};
+        bool titleBtnTombHover{false}; bool titleBtnTombPressed{false};
         // Animation state - ported from guideXOS.Legacy Window.cs
         WindowAnimState animState{};
         bool visible{true};

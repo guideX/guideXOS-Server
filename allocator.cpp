@@ -65,6 +65,7 @@ namespace gxos {
         for (size_t k=0;k<pages;k++) g_pageTags[start+k]=0;
         g_tagPageCount[(size_t)tag] -= pages;
         g_stat.pagesInUse -= pages;
+        g_stat.pagesFreed += pages;
         {
             std::lock_guard<std::mutex> lk(g_pidMu);
             auto it = g_pidPageCount.find(pid); if(it!=g_pidPageCount.end()){ if(it->second>pages) it->second-=pages; else it->second=0; }
@@ -73,6 +74,8 @@ namespace gxos {
 
     uint64_t Allocator::bytesInUse(){ std::lock_guard<std::mutex> _g(g_lock); return g_stat.pagesInUse*PageSize; }
     uint64_t Allocator::peakBytes(){ std::lock_guard<std::mutex> _g(g_lock); return g_stat.peakPages*PageSize; }
+    uint64_t Allocator::totalSize(){ std::lock_guard<std::mutex> _g(g_lock); return g_pagesTotal*PageSize; }
+    uint64_t Allocator::totalFreed(){ std::lock_guard<std::mutex> _g(g_lock); return g_stat.pagesFreed*PageSize; }
     uint64_t Allocator::tagBytes(AllocTag tag){ std::lock_guard<std::mutex> _g(g_lock); return g_tagPageCount[(size_t)tag]*PageSize; }
 
     void Allocator::setCurrentPid(uint64_t pid){ t_pid = pid; }

@@ -99,79 +99,73 @@ public:
     }
     
     /// Draw a title bar button with Legacy-style appearance
+    /// buttonType: 0=close, 1=maximize, 2=minimize, 3=tombstone
     static void DrawTitleButton(HDC dc, int x, int y, int size, int buttonType, 
                                  bool hover, bool pressed, bool focused) {
         if (!UISettings::EnableTitleBarButtons) return;
         
-        // Button colors based on type and state
+        // Legacy-style button colors: dark semi-transparent backgrounds
+        // Based on guideXOS.Legacy Window.cs DrawTitleButton
         COLORREF bgColor;
-        COLORREF fgColor = RGB(250, 250, 250);
+        COLORREF fgColor = pressed ? RGB(238, 238, 238) : RGB(250, 250, 250);
         
-        // buttonType: 0=close, 1=maximize, 2=minimize
-        if (buttonType == 0) { // Close button - red tint
+        // Base fill colors matching Legacy: baseFill = pressed ? 0xFF2A2A2A : (hover ? 0xFF343434 : 0xFF2E2E2E)
+        if (buttonType == 0) { // Close button - red tinted
             if (pressed) {
-                bgColor = RGB((UISettings::CloseButtonPressedColor >> 16) & 0xFF,
-                              (UISettings::CloseButtonPressedColor >> 8) & 0xFF,
-                              UISettings::CloseButtonPressedColor & 0xFF);
+                bgColor = RGB(0x2A, 0x2A, 0x2A);
             } else if (hover) {
-                bgColor = RGB((UISettings::CloseButtonHoverColor >> 16) & 0xFF,
-                              (UISettings::CloseButtonHoverColor >> 8) & 0xFF,
-                              UISettings::CloseButtonHoverColor & 0xFF);
+                bgColor = RGB(0x44, 0x34, 0x34); // slight red tint on hover
             } else {
-                bgColor = RGB((UISettings::CloseButtonNormalColor >> 16) & 0xFF,
-                              (UISettings::CloseButtonNormalColor >> 8) & 0xFF,
-                              UISettings::CloseButtonNormalColor & 0xFF);
+                bgColor = RGB(0x2E, 0x2E, 0x2E);
             }
-        } else if (buttonType == 1) { // Maximize - blue tint
+        } else if (buttonType == 1) { // Maximize - subtle blue
             if (pressed) {
-                bgColor = RGB(80, 100, 160);
+                bgColor = RGB(0x2A, 0x2A, 0x2A);
             } else if (hover) {
-                bgColor = RGB((UISettings::MaximizeButtonHoverColor >> 16) & 0xFF,
-                              (UISettings::MaximizeButtonHoverColor >> 8) & 0xFF,
-                              UISettings::MaximizeButtonHoverColor & 0xFF);
+                bgColor = RGB(0x34, 0x34, 0x3E); // slight blue tint
             } else {
-                bgColor = RGB((UISettings::ButtonNormalColor >> 16) & 0xFF,
-                              (UISettings::ButtonNormalColor >> 8) & 0xFF,
-                              UISettings::ButtonNormalColor & 0xFF);
+                bgColor = RGB(0x2E, 0x2E, 0x2E);
             }
-        } else { // Minimize - green tint
+        } else if (buttonType == 2) { // Minimize - subtle green
             if (pressed) {
-                bgColor = RGB(80, 120, 80);
+                bgColor = RGB(0x2A, 0x2A, 0x2A);
             } else if (hover) {
-                bgColor = RGB((UISettings::MinimizeButtonHoverColor >> 16) & 0xFF,
-                              (UISettings::MinimizeButtonHoverColor >> 8) & 0xFF,
-                              UISettings::MinimizeButtonHoverColor & 0xFF);
+                bgColor = RGB(0x34, 0x3E, 0x34); // slight green tint
             } else {
-                bgColor = RGB((UISettings::ButtonNormalColor >> 16) & 0xFF,
-                              (UISettings::ButtonNormalColor >> 8) & 0xFF,
-                              UISettings::ButtonNormalColor & 0xFF);
+                bgColor = RGB(0x2E, 0x2E, 0x2E);
+            }
+        } else { // Tombstone - amber tint
+            if (pressed) {
+                bgColor = RGB(0x2A, 0x2A, 0x2A);
+            } else if (hover) {
+                bgColor = RGB(0x3E, 0x38, 0x34); // amber tint
+            } else {
+                bgColor = RGB(0x2E, 0x2E, 0x2E);
             }
         }
         
-        // Draw hover glow effect (if enabled)
+        // Draw hover glow halo effect (matching Legacy: 0x332E89FF)
         if (hover && UISettings::EnableButtonHoverEffects) {
             int glowPad = 2;
-            uint32_t glowColor = UISettings::ButtonHoverGlowColor;
-            COLORREF glow = RGB((glowColor >> 16) & 0xFF, (glowColor >> 8) & 0xFF, glowColor & 0xFF);
+            COLORREF glowColor = RGB(0x2E, 0x89, 0xFF);
             int cornerRadius = UISettings::EnableRoundedCorners ? 6 : 0;
-            DrawRoundedRect(dc, x - glowPad, y - glowPad, size + glowPad * 2, size + glowPad * 2, glow, cornerRadius);
+            DrawRoundedRect(dc, x - glowPad, y - glowPad, size + glowPad * 2, size + glowPad * 2, glowColor, cornerRadius);
         }
         
-        // Draw button background
+        // Draw button background with rounded corners (matching Legacy)
         if (UISettings::EnableButtonBackgrounds) {
-            int cornerRadius = UISettings::EnableRoundedCorners ? 4 : 0;
+            int cornerRadius = UISettings::EnableRoundedCorners ? 6 : 0;
             DrawRoundedRect(dc, x, y, size, size, bgColor, cornerRadius);
         }
         
-        // Draw button border
+        // Draw button border (matching Legacy: 0xFF505050)
         if (UISettings::EnableButtonBorders) {
-            HPEN pen = CreatePen(PS_SOLID, 1, RGB((UISettings::ButtonBorderColor >> 16) & 0xFF,
-                                                   (UISettings::ButtonBorderColor >> 8) & 0xFF,
-                                                   UISettings::ButtonBorderColor & 0xFF));
+            COLORREF borderColor = RGB(0x50, 0x50, 0x50);
+            HPEN pen = CreatePen(PS_SOLID, 1, borderColor);
             HGDIOBJ oldPen = SelectObject(dc, pen);
             HGDIOBJ oldBrush = SelectObject(dc, GetStockObject(NULL_BRUSH));
             
-            int cornerRadius = UISettings::EnableRoundedCorners ? 4 : 0;
+            int cornerRadius = UISettings::EnableRoundedCorners ? 6 : 0;
             if (cornerRadius > 0) {
                 RoundRect(dc, x, y, x + size, y + size, cornerRadius * 2, cornerRadius * 2);
             } else {
@@ -183,31 +177,69 @@ public:
             DeleteObject(pen);
         }
         
-        // Draw button icon
+        // Draw button icon (matching Legacy icons)
         if (UISettings::EnableButtonIcons) {
-            HPEN iconPen = CreatePen(PS_SOLID, 2, fgColor);
-            HGDIOBJ oldPen = SelectObject(dc, iconPen);
-            
             int cx = x + size / 2;
             int cy = y + size / 2;
-            int iconSize = size / 3;
+            int iconR = size / 3;  // icon radius
+            int lineWidth = 2;
             
-            if (buttonType == 0) { // Close - X
-                MoveToEx(dc, cx - iconSize, cy - iconSize, nullptr);
-                LineTo(dc, cx + iconSize, cy + iconSize);
-                MoveToEx(dc, cx + iconSize, cy - iconSize, nullptr);
-                LineTo(dc, cx - iconSize, cy + iconSize);
-            } else if (buttonType == 1) { // Maximize - square
+            if (buttonType == 0) { 
+                // Close - X icon (matching Legacy: two diagonal lines)
+                HPEN iconPen = CreatePen(PS_SOLID, 1, fgColor);
+                HGDIOBJ oldPen = SelectObject(dc, iconPen);
+                // Draw thicker X by drawing two lines for each stroke
+                MoveToEx(dc, cx - iconR, cy - iconR, nullptr);
+                LineTo(dc, cx + iconR, cy + iconR);
+                MoveToEx(dc, cx - iconR + 1, cy - iconR, nullptr);
+                LineTo(dc, cx + iconR + 1, cy + iconR);
+                MoveToEx(dc, cx + iconR, cy - iconR, nullptr);
+                LineTo(dc, cx - iconR, cy + iconR);
+                MoveToEx(dc, cx + iconR + 1, cy - iconR, nullptr);
+                LineTo(dc, cx - iconR + 1, cy + iconR);
+                SelectObject(dc, oldPen);
+                DeleteObject(iconPen);
+            } else if (buttonType == 1) { 
+                // Maximize - square outline (matching Legacy: DrawRectangle)
+                HPEN iconPen = CreatePen(PS_SOLID, lineWidth, fgColor);
+                HGDIOBJ oldPen = SelectObject(dc, iconPen);
                 HGDIOBJ oldBrush = SelectObject(dc, GetStockObject(NULL_BRUSH));
-                Rectangle(dc, cx - iconSize, cy - iconSize, cx + iconSize, cy + iconSize);
+                int s = size / 2;
+                int rx = cx - s / 2;
+                int ry = cy - s / 2;
+                Rectangle(dc, rx, ry, rx + s, ry + s);
                 SelectObject(dc, oldBrush);
-            } else { // Minimize - underscore
-                MoveToEx(dc, cx - iconSize, cy + iconSize - 2, nullptr);
-                LineTo(dc, cx + iconSize, cy + iconSize - 2);
+                SelectObject(dc, oldPen);
+                DeleteObject(iconPen);
+            } else if (buttonType == 2) { 
+                // Minimize - horizontal bar (matching Legacy: FillRectangle at bottom)
+                HBRUSH iconBrush = CreateSolidBrush(fgColor);
+                int barW = size / 2;
+                int barH = lineWidth;
+                int hx = cx - barW / 2;
+                int hy = y + size - 8;
+                RECT barRect{ hx, hy, hx + barW, hy + barH };
+                FillRect(dc, &barRect, iconBrush);
+                DeleteObject(iconBrush);
+            } else { 
+                // Tombstone - rounded rect with base (matching Legacy tombstone icon)
+                HPEN iconPen = CreatePen(PS_SOLID, 1, fgColor);
+                HGDIOBJ oldPen = SelectObject(dc, iconPen);
+                HGDIOBJ oldBrush = SelectObject(dc, GetStockObject(NULL_BRUSH));
+                int w = size / 2;
+                int rx = cx - w / 2;
+                int ry = cy - w / 2;
+                // Draw tombstone shape (rounded rect + base)
+                RoundRect(dc, rx, ry, rx + w, ry + w + 3, 6, 6);
+                SelectObject(dc, oldBrush);
+                SelectObject(dc, oldPen);
+                DeleteObject(iconPen);
+                // Draw base line
+                HBRUSH baseBrush = CreateSolidBrush(fgColor);
+                RECT baseRect{ rx - 2, ry + w + 4, rx + w + 2, ry + w + 6 };
+                FillRect(dc, &baseRect, baseBrush);
+                DeleteObject(baseBrush);
             }
-            
-            SelectObject(dc, oldPen);
-            DeleteObject(iconPen);
         }
     }
     
