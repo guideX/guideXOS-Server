@@ -157,7 +157,9 @@ extern "C" void restore_full_context(FullContext* ctx)
 
 asm(
     ".global switch_context\n"
+#if defined(__ELF__)
     ".type switch_context, @function\n"
+#endif
     "switch_context:\n"
     
     // ---- Save current context ----
@@ -203,8 +205,9 @@ asm(
     
     // Jump to new thread's return address
     "    jmp     *%rax\n"
-    
+#if defined(__ELF__)
     ".size switch_context, .-switch_context\n"
+#endif
 );
 
 // ================================================================
@@ -216,7 +219,9 @@ asm(
 
 asm(
     ".global save_full_context\n"
+#if defined(__ELF__)
     ".type save_full_context, @function\n"
+#endif
     "save_full_context:\n"
     // RDI = pointer to FullContext
     
@@ -270,12 +275,16 @@ asm(
     // TODO: Save FS_BASE and GS_BASE from MSRs
     
     "    ret\n"
+#if defined(__ELF__)
     ".size save_full_context, .-save_full_context\n"
+#endif
 );
 
 asm(
     ".global restore_full_context\n"
+#if defined(__ELF__)
     ".type restore_full_context, @function\n"
+#endif
     "restore_full_context:\n"
     // RDI = pointer to FullContext
     // This function does not return - it performs IRETQ
@@ -313,8 +322,9 @@ asm(
     "    mov     128(%rdi), %rax\n"    // RIP
     "    mov     40(%rdi), %rdi\n"     // Restore RDI last
     "    jmp     *%rax\n"
-    
+#if defined(__ELF__)
     ".size restore_full_context, .-restore_full_context\n"
+#endif
 );
 
 #endif // GXOS_MSVC_STUB

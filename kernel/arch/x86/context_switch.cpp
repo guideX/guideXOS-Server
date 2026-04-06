@@ -134,7 +134,9 @@ extern "C" void restore_full_context(FullContext* ctx)
 
 asm(
     ".global switch_context\n"
+#if defined(__ELF__)
     ".type switch_context, @function\n"
+#endif
     "switch_context:\n"
     
     // Get parameters from stack
@@ -179,8 +181,9 @@ asm(
     
     // Jump to new thread's return address
     "    jmp     *%ecx\n"
-    
+#if defined(__ELF__)
     ".size switch_context, .-switch_context\n"
+#endif
 );
 
 // ================================================================
@@ -189,7 +192,9 @@ asm(
 
 asm(
     ".global save_full_context\n"
+#if defined(__ELF__)
     ".type save_full_context, @function\n"
+#endif
     "save_full_context:\n"
     // [esp+4] = pointer to FullContext
     "    mov     4(%esp), %ecx\n"
@@ -236,12 +241,16 @@ asm(
     "    mov     %eax, 60(%ecx)\n"
     
     "    ret\n"
+#if defined(__ELF__)
     ".size save_full_context, .-save_full_context\n"
+#endif
 );
 
 asm(
     ".global restore_full_context\n"
+#if defined(__ELF__)
     ".type restore_full_context, @function\n"
+#endif
     "restore_full_context:\n"
     // [esp+4] = pointer to FullContext
     // This function does not return - it performs IRET
@@ -268,8 +277,9 @@ asm(
     // Jump to saved EIP
     // TODO: Proper IRET with segment restoration
     "    jmp     *%ecx\n"
-    
+#if defined(__ELF__)
     ".size restore_full_context, .-restore_full_context\n"
+#endif
 );
 
 #endif // GXOS_MSVC_STUB

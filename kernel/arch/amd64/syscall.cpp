@@ -184,6 +184,14 @@ static void register_default_handlers()
 } // anonymous namespace
 
 // ================================================================
+// Forward declaration for syscall entry point (defined in assembly)
+// ================================================================
+
+#if !GXOS_MSVC_STUB
+extern "C" void syscall_entry();
+#endif
+
+// ================================================================
 // Public API implementation
 // ================================================================
 
@@ -218,7 +226,6 @@ void init()
     
     // LSTAR MSR: SYSCALL entry point (64-bit mode)
     // TODO: Set to actual syscall_entry assembly stub address
-    extern "C" void syscall_entry();
     write_msr(MSR_LSTAR, reinterpret_cast<uint64_t>(&syscall_entry));
     
     // SFMASK MSR: RFLAGS bits to clear on SYSCALL
@@ -494,15 +501,18 @@ void register_irq_handler(uint32_t irq, IrqHandler handler)
 // Placeholder syscall entry - needs proper implementation
 asm(
     ".global syscall_entry\n"
+#if defined(__ELF__)
     ".type syscall_entry, @function\n"
+#endif
     "syscall_entry:\n"
     
     // TODO: Proper implementation
     // For now, just return -ENOSYS
     "    mov     $-38, %rax\n"   // SYSCALL_ENOSYS
     "    sysretq\n"
-    
+#if defined(__ELF__)
     ".size syscall_entry, .-syscall_entry\n"
+#endif
 );
 
 #endif
