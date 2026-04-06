@@ -148,6 +148,11 @@
     <ClInclude Include="kernel\arch\amd64\include\arch\pci_audio.h" />
     <ClInclude Include="kernel\arch\amd64\include\arch\syscall.h" />
     <ClInclude Include="kernel\arch\amd64\include\arch\usb_hci.h" />
+    <ClInclude Include="kernel\arch\arm64\include\arch\arm64.h" />
+    <ClInclude Include="kernel\arch\arm64\include\arch\context_switch.h" />
+    <ClInclude Include="kernel\arch\arm64\include\arch\graphics.h" />
+    <ClInclude Include="kernel\arch\arm64\include\arch\serial_console.h" />
+    <ClInclude Include="kernel\arch\arm64\include\arch\syscall.h" />
     <ClInclude Include="kernel\arch\arm\include\arch\context_switch.h" />
     <ClInclude Include="kernel\arch\arm\include\arch\graphics.h" />
     <ClInclude Include="kernel\arch\arm\include\arch\pci_audio.h" />
@@ -214,10 +219,13 @@
     <ClInclude Include="kernel\core\include\kernel\fs_ext4.h" />
     <ClInclude Include="kernel\core\include\kernel\fs_fat.h" />
     <ClInclude Include="kernel\core\include\kernel\fs_ufs.h" />
+    <ClInclude Include="kernel\core\include\kernel\hugepages.h" />
     <ClInclude Include="kernel\core\include\kernel\icmp.h" />
+    <ClInclude Include="kernel\core\include\kernel\icmpv6.h" />
     <ClInclude Include="kernel\core\include\kernel\input_manager.h" />
     <ClInclude Include="kernel\core\include\kernel\interrupts.h" />
     <ClInclude Include="kernel\core\include\kernel\ipv4.h" />
+    <ClInclude Include="kernel\core\include\kernel\ipv6.h" />
     <ClInclude Include="kernel\core\include\kernel\multiboot.h" />
     <ClInclude Include="kernel\core\include\kernel\nic.h" />
     <ClInclude Include="kernel\core\include\kernel\nvme.h" />
@@ -247,7 +255,10 @@
     <ClInclude Include="kernel\core\include\kernel\usb_video_uvc.h" />
     <ClInclude Include="kernel\core\include\kernel\vesa.h" />
     <ClInclude Include="kernel\core\include\kernel\vfs.h" />
+    <ClInclude Include="kernel\core\include\kernel\virtio.h" />
+    <ClInclude Include="kernel\core\include\kernel\virtio_block.h" />
     <ClInclude Include="kernel\core\include\kernel\virtio_input.h" />
+    <ClInclude Include="kernel\core\include\kernel\virtio_net.h" />
     <ClInclude Include="launchSettings.json" />
     <ClInclude Include="icons.h" />
     <ClInclude Include="ipc.h" />
@@ -314,6 +325,11 @@
     <ClCompile Include="kernel\arch\amd64\pci_audio.cpp" />
     <ClCompile Include="kernel\arch\amd64\syscall.cpp" />
     <ClCompile Include="kernel\arch\amd64\usb_hci.cpp" />
+    <ClCompile Include="kernel\arch\arm64\arch.cpp" />
+    <ClCompile Include="kernel\arch\arm64\context_switch.cpp" />
+    <ClCompile Include="kernel\arch\arm64\graphics.cpp" />
+    <ClCompile Include="kernel\arch\arm64\serial_console.cpp" />
+    <ClCompile Include="kernel\arch\arm64\syscall.cpp" />
     <ClCompile Include="kernel\arch\arm\arch.cpp">
       <ObjectFileName>$(IntDir)arch_arm.obj</ObjectFileName>
     </ClCompile>
@@ -398,10 +414,13 @@
     <ClCompile Include="kernel\core\fs_ext4.cpp" />
     <ClCompile Include="kernel\core\fs_fat.cpp" />
     <ClCompile Include="kernel\core\fs_ufs.cpp" />
+    <ClCompile Include="kernel\core\hugepages.cpp" />
     <ClCompile Include="kernel\core\icmp.cpp" />
+    <ClCompile Include="kernel\core\icmpv6.cpp" />
     <ClCompile Include="kernel\core\input_manager.cpp" />
     <ClCompile Include="kernel\core\interrupts.cpp" />
     <ClCompile Include="kernel\core\ipv4.cpp" />
+    <ClCompile Include="kernel\core\ipv6.cpp" />
     <ClCompile Include="kernel\core\main.cpp" />
     <ClCompile Include="kernel\core\nic.cpp" />
     <ClCompile Include="kernel\core\nvme.cpp" />
@@ -433,7 +452,9 @@
     <ClCompile Include="kernel\core\vesa.cpp" />
     <ClCompile Include="kernel\core\vfs.cpp" />
     <ClCompile Include="kernel\core\vga.cpp" />
+    <ClCompile Include="kernel\core\virtio_block.cpp" />
     <ClCompile Include="kernel\core\virtio_input.cpp" />
+    <ClCompile Include="kernel\core\virtio_net.cpp" />
     <ClCompile Include="lifecycle.cpp" />
     <ClCompile Include="logger.cpp" />
     <ClCompile Include="message_box.cpp" />
@@ -480,6 +501,9 @@
     <None Include="kernel\arch\amd64\boot.asm" />
     <None Include="kernel\arch\amd64\linker.ld" />
     <None Include="kernel\arch\amd64\Makefile.arch" />
+    <None Include="kernel\arch\arm64\boot.S" />
+    <None Include="kernel\arch\arm64\linker.ld" />
+    <None Include="kernel\arch\arm64\Makefile.arch" />
     <None Include="kernel\arch\arm\boot.s" />
     <None Include="kernel\arch\arm\linker.ld" />
     <None Include="kernel\arch\arm\Makefile.arch" />
@@ -509,6 +533,7 @@
     <None Include="kernel\arch\x86\Makefile.arch" />
     <None Include="kernel\build-x86.bat" />
     <None Include="kernel\clean.bat" />
+    <None Include="kernel\docs\HARDWARE_SUPPORT_REPORT.md" />
     <None Include="kernel\Makefile" />
     <None Include="Makefile" />
     <None Include="Properties\launchSettings.json" />

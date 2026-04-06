@@ -1,0 +1,168 @@
+#
+# ARM64 (AArch64) Kernel Build Configuration
+#
+# Targets ARMv8-A processors.
+# Tested with aarch64-elf toolchain and qemu-system-aarch64 (virt machine).
+#
+# Copyright (c) 2026 guideXOS Server
+#
+
+# Toolchain - try aarch64-elf first, fall back to aarch64-linux-gnu
+ifeq ($(OS),Windows_NT)
+    CXX := aarch64-elf-g++
+    CC  := aarch64-elf-gcc
+    AS  := aarch64-elf-as
+    LD  := aarch64-elf-ld
+    OBJCOPY := aarch64-elf-objcopy
+    OBJDUMP := aarch64-elf-objdump
+else
+    ifneq ($(shell which aarch64-elf-g++ 2>/dev/null),)
+        CXX := aarch64-elf-g++
+        CC  := aarch64-elf-gcc
+        AS  := aarch64-elf-as
+        LD  := aarch64-elf-ld
+        OBJCOPY := aarch64-elf-objcopy
+        OBJDUMP := aarch64-elf-objdump
+    else ifneq ($(shell which aarch64-linux-gnu-g++ 2>/dev/null),)
+        CXX := aarch64-linux-gnu-g++
+        CC  := aarch64-linux-gnu-gcc
+        AS  := aarch64-linux-gnu-as
+        LD  := aarch64-linux-gnu-ld
+        OBJCOPY := aarch64-linux-gnu-objcopy
+        OBJDUMP := aarch64-linux-gnu-objdump
+    else ifneq ($(shell which aarch64-none-elf-g++ 2>/dev/null),)
+        CXX := aarch64-none-elf-g++
+        CC  := aarch64-none-elf-gcc
+        AS  := aarch64-none-elf-as
+        LD  := aarch64-none-elf-ld
+        OBJCOPY := aarch64-none-elf-objcopy
+        OBJDUMP := aarch64-none-elf-objdump
+    else
+        CXX := aarch64-elf-g++
+        CC  := aarch64-elf-gcc
+        AS  := aarch64-elf-as
+        LD  := aarch64-elf-ld
+        OBJCOPY := aarch64-elf-objcopy
+        OBJDUMP := aarch64-elf-objdump
+    endif
+endif
+
+# Architecture-specific compiler flags
+# -march=armv8-a    : Target ARMv8-A baseline
+# -mgeneral-regs-only : No FP/SIMD in kernel code (optional)
+# -mno-outline-atomics : Don't use outline atomics (simpler)
+# -fno-omit-frame-pointer : Keep frame pointer for debugging
+ARCH_CFLAGS := -march=armv8-a
+ARCH_CFLAGS += -mgeneral-regs-only
+ARCH_CFLAGS += -mno-outline-atomics
+ARCH_CFLAGS += -fno-omit-frame-pointer
+ARCH_CFLAGS += -mcmodel=large
+ARCH_CFLAGS += -mstrict-align
+
+# Disable features that require runtime support
+ARCH_CFLAGS += -fno-stack-protector
+ARCH_CFLAGS += -fno-exceptions
+ARCH_CFLAGS += -fno-rtti
+ARCH_CFLAGS += -fno-unwind-tables
+ARCH_CFLAGS += -fno-asynchronous-unwind-tables
+
+# Freestanding environment
+ARCH_CFLAGS += -ffreestanding
+ARCH_CFLAGS += -nostdlib
+ARCH_CFLAGS += -nostartfiles
+
+# Assembler flags
+ASFLAGS := -march=armv8-a
+ASFLAGS += -EL  # Little-endian
+
+# Linker flags
+ARCH_LDFLAGS := -nostdlib
+ARCH_LDFLAGS += -static
+ARCH_LDFLAGS += -z max-page-size=4096
+
+# No external libraries
+LIBS :=
+
+# Target information
+ARCH_BITS := 64
+ARCH_NAME := ARM64 (AArch64)
+
+# Source files for this architecture
+ARCH_SRCS := \
+    arch.cpp \
+    boot.S \
+    context_switch.cpp \
+    syscall.cpp \
+    serial_console.cpp \
+    graphics.cpp
+
+# Object files
+ARCH_OBJS := $(ARCH_SRCS:.cpp=.o)
+ARCH_OBJS := $(ARCH_OBJS:.S=.o)
+
+# Header directories
+ARCH_INCLUDES := -I$(ARCH_DIR)/include
+
+# Linker script
+LDSCRIPT := $(ARCH_DIR)/linker.ld
+
+# QEMU command for testing
+QEMU := qemu-system-aarch64
+QEMU_MACHINE := virt
+QEMU_CPU := cortex-a53
+QEMU_MEMORY := 512M
+
+# QEMU basic options
+QEMU_OPTS := -machine $(QEMU_MACHINE)
+QEMU_OPTS += -cpu $(QEMU_CPU)
+QEMU_OPTS += -m $(QEMU_MEMORY)
+QEMU_OPTS += -nographic
+QEMU_OPTS += -serial mon:stdio
+
+# Alternative: with graphics
+QEMU_OPTS_GUI := -machine $(QEMU_MACHINE)
+QEMU_OPTS_GUI += -cpu $(QEMU_CPU)
+QEMU_OPTS_GUI += -m $(QEMU_MEMORY)
+QEMU_OPTS_GUI += -device ramfb
+QEMU_OPTS_GUI += -serial stdio
+
+# Targets
+
+.PHONY: all clean run debug run-gui disasm
+
+all: $(KERNEL_ELF) $(KERNEL_BIN)
+
+# Create flat binary for direct loading
+$(KERNEL_BIN): $(KERNEL_ELF)
+	$(OBJCOPY) -O binary $< $@
+
+# Run kernel in QEMU (text mode)
+run: $(KERNEL_ELF)
+	$(QEMU) $(QEMU_OPTS) -kernel $(KERNEL_ELF)
+
+# Run kernel in QEMU with framebuffer
+run-gui: $(KERNEL_ELF)
+	$(QEMU) $(QEMU_OPTS_GUI) -kernel $(KERNEL_ELF)
+
+# Debug kernel in QEMU (wait for GDB)
+debug: $(KERNEL_ELF)
+	$(QEMU) $(QEMU_OPTS) -kernel $(KERNEL_ELF) -s -S &
+	@echo "Waiting for GDB connection on localhost:1234..."
+	@echo "Run: aarch64-elf-gdb $(KERNEL_ELF) -ex 'target remote :1234'"
+
+# Generate disassembly
+disasm: $(KERNEL_ELF)
+	$(OBJDUMP) -d $(KERNEL_ELF) > $(KERNEL_ELF:.elf=.asm)
+
+# Clean architecture-specific files
+clean-arch:
+	rm -f $(ARCH_DIR)/*.o
+	rm -f $(KERNEL_BIN)
+
+# Assembly rules
+%.o: %.S
+	$(CC) $(ASFLAGS) -c $< -o $@
+
+# C++ rules with architecture flags
+%.o: %.cpp
+	$(CXX) $(CXXFLAGS) $(ARCH_CFLAGS) $(ARCH_INCLUDES) -c $< -o $@
