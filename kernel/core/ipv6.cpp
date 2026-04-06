@@ -515,7 +515,7 @@ bool init()
     // Initialize ICMPv6
     icmpv6::init();
     
-    serial_debug::print("IPv6: Initialized\n");
+    kernel::serial::puts("IPv6: Initialized\n");
     
     s_initialized = true;
     return true;

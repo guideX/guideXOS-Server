@@ -147,13 +147,13 @@ bool init()
     s_supported = detect_hugepage_support();
     
     if (s_supported) {
-        serial_debug::print("Huge pages: Supported (2MB");
+        kernel::serial::puts("Huge pages: Supported (2MB");
         if (s_1gbSupported) {
-            serial_debug::print(", 1GB");
+            kernel::serial::puts(", 1GB");
         }
-        serial_debug::print(")\n");
+        kernel::serial::puts(")\n");
     } else {
-        serial_debug::print("Huge pages: Not supported\n");
+        kernel::serial::puts("Huge pages: Not supported\n");
     }
     
     s_initialized = true;

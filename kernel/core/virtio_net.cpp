@@ -595,7 +595,7 @@ int detectMmio(uint64_t baseAddr, uint64_t size)
     
     // Found a network device
     NetDevice* dev = new NetDevice();
-    dev->baseAddr = baseAddr;
+    dev->setBaseAddress(baseAddr);
     
     if (dev->init()) {
         s_devices[s_deviceCount++] = dev;

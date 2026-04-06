@@ -1,0 +1,45 @@
+﻿====================================
+  guideXOS Complete Build System
+====================================
+
+[2/6] Building UEFI Bootloader...
+      Building with Visual Studio...
+
+cl : command line  warning D9025: overriding '/sdl' with '/GS-' [D:\devgitlab\guideXOS\guideXOS.SERVER\guideXOSBootLoader\guideXOSBootLoader.vcxproj]
+  elf.cpp
+D:\devgitlab\guideXOS\guideXOS\edk2-master\MdePkg\Include\Base.h(1340,21): warning C4162: '_ReturnAddress': no function with C linkage found [D:\devgitlab\guideXOS\guideXOS.SERVER\guideXOSBootLoader\guideXOSBootLoader.vcxproj]
+  (compiling source file 'elf.cpp')
+  
+  main.cpp
+D:\devgitlab\guideXOS\guideXOS\edk2-master\MdePkg\Include\Base.h(1340,21): warning C4162: '_ReturnAddress': no function with C linkage found [D:\devgitlab\guideXOS\guideXOS.SERVER\guideXOSBootLoader\guideXOSBootLoader.vcxproj]
+  (compiling source file 'main.cpp')
+  
+  fb_console.cpp
+  guidexOSBootInfo_validation.cpp
+  pci.cpp
+D:\devgitlab\guideXOS\guideXOS\edk2-master\MdePkg\Include\Base.h(1340,21): warning C4162: '_ReturnAddress': no function with C linkage found [D:\devgitlab\guideXOS\guideXOS.SERVER\guideXOSBootLoader\guideXOSBootLoader.vcxproj]
+  (compiling source file 'pci.cpp')
+  
+  trampoline_msvc.cpp
+D:\devgitlab\guideXOS\guideXOS\edk2-master\MdePkg\Include\Base.h(1340,21): warning C4162: '_ReturnAddress': no function with C linkage found [D:\devgitlab\guideXOS\guideXOS.SERVER\guideXOSBootLoader\guideXOSBootLoader.vcxproj]
+  (compiling source file 'trampoline_msvc.cpp')
+  
+  uefi_guids.cpp
+D:\devgitlab\guideXOS\guideXOS\edk2-master\MdePkg\Include\Base.h(1340,21): warning C4162: '_ReturnAddress': no function with C linkage found [D:\devgitlab\guideXOS\guideXOS.SERVER\guideXOSBootLoader\guideXOSBootLoader.vcxproj]
+  (compiling source file 'uefi_guids.cpp')
+  
+  paging.cpp
+D:\devgitlab\guideXOS\guideXOS\edk2-master\MdePkg\Include\Base.h(1340,21): warning C4162: '_ReturnAddress': no function with C linkage found [D:\devgitlab\guideXOS\guideXOS.SERVER\guideXOSBootLoader\guideXOSBootLoader.vcxproj]
+  (compiling source file 'paging.cpp')
+  
+  Generating Code...
+cl : command line  warning D9025: overriding '/sdl' with '/GS-' [D:\devgitlab\guideXOS\guideXOS.SERVER\guideXOSBootLoader\guideXOSBootLoader.vcxproj]
+cl : command line  warning D9025: overriding '/Oi' with '/Oi-' [D:\devgitlab\guideXOS\guideXOS.SERVER\guideXOSBootLoader\guideXOSBootLoader.vcxproj]
+  intrinsics.cpp
+  guideXOSBootLoader.vcxproj -> D:\devgitlab\guideXOS\guideXOS.SERVER\guideXOSBootLoader\x64\Release\guideXOSBootLoader.exe
+      Bootloader built successfully
+
+[3/6] Building Kernel (amd64)...
+      Using: mingw32-make
+"Compiling kernel/core/virtio_block.cpp..."
+g++ -std=c++14 -ffreestanding -O2 -Wall -Wextra -fno-exceptions -fno-rtti -nostdlib -nostdinc++ -fno-builtin -Ikernel/core/include -Ikernel/arch/amd64/include -m64 -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-pic -fno-pie -fno-PIC -fno-PIE -mno-stack-arg-probe -fno-stack-check -fno-stack-protector -D__x86_64__ -c kernel/core/virtio_block.cpp -o build/amd64/obj/core/virtio_block.o

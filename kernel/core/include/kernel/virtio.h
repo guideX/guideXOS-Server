@@ -296,6 +296,12 @@ public:
     
     // Check for and acknowledge interrupts
     virtual uint32_t acknowledgeInterrupt() = 0;
+    
+    // Set base address for MMIO devices
+    void setBaseAddress(uint64_t addr) { baseAddr = addr; }
+    
+    // Get base address
+    uint64_t getBaseAddress() const { return baseAddr; }
 
 protected:
     uint64_t baseAddr;

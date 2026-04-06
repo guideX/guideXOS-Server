@@ -166,6 +166,29 @@ inline uint32_t ntohl(uint32_t val)
     return htonl(val);  // Same operation for 32-bit swap
 }
 
+// Convert 64-bit value from host to network byte order
+inline uint64_t htonll(uint64_t val)
+{
+#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+    return val;
+#else
+    return ((val >> 56) & 0x00000000000000FFULL) |
+           ((val >> 40) & 0x000000000000FF00ULL) |
+           ((val >> 24) & 0x0000000000FF0000ULL) |
+           ((val >>  8) & 0x00000000FF000000ULL) |
+           ((val <<  8) & 0x000000FF00000000ULL) |
+           ((val << 24) & 0x0000FF0000000000ULL) |
+           ((val << 40) & 0x00FF000000000000ULL) |
+           ((val << 56) & 0xFF00000000000000ULL);
+#endif
+}
+
+// Convert 64-bit value from network to host byte order
+inline uint64_t ntohll(uint64_t val)
+{
+    return htonll(val);  // Same operation for 64-bit swap
+}
+
 // ================================================================
 // MAC Address Utilities
 // ================================================================

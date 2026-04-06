@@ -452,7 +452,7 @@ int detectMmio(uint64_t baseAddr, uint64_t size)
     
     // Found a block device
     BlockDevice* dev = new BlockDevice();
-    dev->baseAddr = baseAddr;
+    dev->setBaseAddress(baseAddr);
     
     if (dev->init()) {
         s_devices[s_deviceCount++] = dev;

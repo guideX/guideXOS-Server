@@ -654,13 +654,14 @@ bool init()
 {
     if (s_initialized) return true;
     
+    
     memzero(&s_stats, sizeof(s_stats));
     memzero(s_neighborCache, sizeof(s_neighborCache));
     memzero(s_routers, sizeof(s_routers));
     s_neighborCount = 0;
     s_routerCount = 0;
     
-    serial_debug::print("ICMPv6: Initialized\n");
+    kernel::serial::puts("ICMPv6: Initialized\n");
     
     s_initialized = true;
     return true;
