@@ -143,15 +143,21 @@
     <ClInclude Include="gui_protocol.h" />
     <ClInclude Include="gxm_loader.h" />
     <ClInclude Include="image_viewer.h" />
+    <ClInclude Include="kernel\arch\amd64\include\arch\context_switch.h" />
     <ClInclude Include="kernel\arch\amd64\include\arch\graphics.h" />
     <ClInclude Include="kernel\arch\amd64\include\arch\pci_audio.h" />
+    <ClInclude Include="kernel\arch\amd64\include\arch\syscall.h" />
     <ClInclude Include="kernel\arch\amd64\include\arch\usb_hci.h" />
+    <ClInclude Include="kernel\arch\arm\include\arch\context_switch.h" />
     <ClInclude Include="kernel\arch\arm\include\arch\graphics.h" />
     <ClInclude Include="kernel\arch\arm\include\arch\pci_audio.h" />
+    <ClInclude Include="kernel\arch\arm\include\arch\syscall.h" />
     <ClInclude Include="kernel\arch\arm\include\arch\usb_hci.h" />
+    <ClInclude Include="kernel\arch\ia64\include\arch\context_switch.h" />
     <ClInclude Include="kernel\arch\ia64\include\arch\graphics.h" />
     <ClInclude Include="kernel\arch\ia64\include\arch\pci_audio.h" />
     <ClInclude Include="kernel\arch\ia64\include\arch\ski_console.h" />
+    <ClInclude Include="kernel\arch\ia64\include\arch\syscall.h" />
     <ClInclude Include="kernel\arch\ia64\include\arch\usb_hci.h" />
     <ClInclude Include="kernel\arch\loongarch64\include\arch\context_switch.h" />
     <ClInclude Include="kernel\arch\loongarch64\include\arch\graphics.h" />
@@ -160,21 +166,29 @@
     <ClInclude Include="kernel\arch\loongarch64\include\arch\pci_audio.h" />
     <ClInclude Include="kernel\arch\loongarch64\include\arch\syscall.h" />
     <ClInclude Include="kernel\arch\loongarch64\include\arch\usb_hci.h" />
+    <ClInclude Include="kernel\arch\riscv64\include\arch\context_switch.h" />
+    <ClInclude Include="kernel\arch\riscv64\include\arch\syscall.h" />
+    <ClInclude Include="kernel\arch\sparc64\include\arch\context_switch.h" />
     <ClInclude Include="kernel\arch\sparc64\include\arch\graphics.h" />
     <ClInclude Include="kernel\arch\sparc64\include\arch\pci_audio.h" />
     <ClInclude Include="kernel\arch\sparc64\include\arch\sparc64.h" />
+    <ClInclude Include="kernel\arch\sparc64\include\arch\syscall.h" />
     <ClInclude Include="kernel\arch\sparc64\include\arch\usb_hci.h" />
     <ClInclude Include="kernel\arch\sparc64\include\arch\zs_serial.h" />
+    <ClInclude Include="kernel\arch\sparc\include\arch\context_switch.h" />
     <ClInclude Include="kernel\arch\sparc\include\arch\graphics.h" />
     <ClInclude Include="kernel\arch\sparc\include\arch\pci_audio.h" />
+    <ClInclude Include="kernel\arch\sparc\include\arch\syscall.h" />
     <ClInclude Include="kernel\arch\sparc\include\arch\usb_hci.h" />
     <ClInclude Include="kernel\arch\sparc\include\arch\zs_serial.h" />
     <ClInclude Include="kernel\arch\riscv64\include\arch\graphics.h" />
     <ClInclude Include="kernel\arch\riscv64\include\arch\pci_audio.h" />
     <ClInclude Include="kernel\arch\riscv64\include\arch\sbi_console.h" />
     <ClInclude Include="kernel\arch\riscv64\include\arch\usb_hci.h" />
+    <ClInclude Include="kernel\arch\x86\include\arch\context_switch.h" />
     <ClInclude Include="kernel\arch\x86\include\arch\graphics.h" />
     <ClInclude Include="kernel\arch\x86\include\arch\pci_audio.h" />
+    <ClInclude Include="kernel\arch\x86\include\arch\syscall.h" />
     <ClInclude Include="kernel\arch\x86\include\arch\usb_hci.h" />
     <ClInclude Include="kernel\core\include\kernel\ata.h" />
     <ClInclude Include="kernel\core\include\kernel\block_device.h" />
@@ -282,21 +296,27 @@
     <ClCompile Include="kernel\arch\amd64\arch.cpp">
       <ObjectFileName>$(IntDir)arch_amd64.obj</ObjectFileName>
     </ClCompile>
+    <ClCompile Include="kernel\arch\amd64\context_switch.cpp" />
     <ClCompile Include="kernel\arch\amd64\graphics.cpp" />
     <ClCompile Include="kernel\arch\amd64\pci_audio.cpp" />
+    <ClCompile Include="kernel\arch\amd64\syscall.cpp" />
     <ClCompile Include="kernel\arch\amd64\usb_hci.cpp" />
     <ClCompile Include="kernel\arch\arm\arch.cpp">
       <ObjectFileName>$(IntDir)arch_arm.obj</ObjectFileName>
     </ClCompile>
+    <ClCompile Include="kernel\arch\arm\context_switch.cpp" />
     <ClCompile Include="kernel\arch\arm\graphics.cpp" />
     <ClCompile Include="kernel\arch\arm\pci_audio.cpp" />
+    <ClCompile Include="kernel\arch\arm\syscall.cpp" />
     <ClCompile Include="kernel\arch\arm\usb_hci.cpp" />
     <ClCompile Include="kernel\arch\ia64\arch.cpp">
       <ObjectFileName>$(IntDir)arch_ia64.obj</ObjectFileName>
     </ClCompile>
+    <ClCompile Include="kernel\arch\ia64\context_switch.cpp" />
     <ClCompile Include="kernel\arch\ia64\graphics.cpp" />
     <ClCompile Include="kernel\arch\ia64\pci_audio.cpp" />
     <ClCompile Include="kernel\arch\ia64\ski_console.cpp" />
+    <ClCompile Include="kernel\arch\ia64\syscall.cpp" />
     <ClCompile Include="kernel\arch\ia64\usb_hci.cpp" />
     <ClCompile Include="kernel\arch\loongarch64\arch.cpp" />
     <ClCompile Include="kernel\arch\loongarch64\context_switch.cpp" />
@@ -305,9 +325,13 @@
     <ClCompile Include="kernel\arch\loongarch64\pci_audio.cpp" />
     <ClCompile Include="kernel\arch\loongarch64\syscall.cpp" />
     <ClCompile Include="kernel\arch\loongarch64\usb_hci.cpp" />
+    <ClCompile Include="kernel\arch\riscv64\context_switch.cpp" />
+    <ClCompile Include="kernel\arch\riscv64\syscall.cpp" />
     <ClCompile Include="kernel\arch\sparc64\arch.cpp" />
+    <ClCompile Include="kernel\arch\sparc64\context_switch.cpp" />
     <ClCompile Include="kernel\arch\sparc64\graphics.cpp" />
     <ClCompile Include="kernel\arch\sparc64\pci_audio.cpp" />
+    <ClCompile Include="kernel\arch\sparc64\syscall.cpp" />
     <ClCompile Include="kernel\arch\sparc64\usb_hci.cpp" />
     <ClCompile Include="kernel\arch\sparc64\zs_serial.cpp" />
     <ClCompile Include="kernel\arch\riscv64\arch.cpp">
@@ -320,15 +344,19 @@
     <ClCompile Include="kernel\arch\sparc\arch.cpp">
       <ObjectFileName>$(IntDir)arch_sparc.obj</ObjectFileName>
     </ClCompile>
+    <ClCompile Include="kernel\arch\sparc\context_switch.cpp" />
     <ClCompile Include="kernel\arch\sparc\graphics.cpp" />
     <ClCompile Include="kernel\arch\sparc\pci_audio.cpp" />
+    <ClCompile Include="kernel\arch\sparc\syscall.cpp" />
     <ClCompile Include="kernel\arch\sparc\usb_hci.cpp" />
     <ClCompile Include="kernel\arch\sparc\zs_serial.cpp" />
     <ClCompile Include="kernel\arch\x86\arch.cpp">
       <ObjectFileName>$(IntDir)arch_x86.obj</ObjectFileName>
     </ClCompile>
+    <ClCompile Include="kernel\arch\x86\context_switch.cpp" />
     <ClCompile Include="kernel\arch\x86\graphics.cpp" />
     <ClCompile Include="kernel\arch\x86\pci_audio.cpp" />
+    <ClCompile Include="kernel\arch\x86\syscall.cpp" />
     <ClCompile Include="kernel\arch\x86\usb_hci.cpp" />
     <ClCompile Include="kernel\core\arch.cpp">
       <ObjectFileName>$(IntDir)arch_core.obj</ObjectFileName>
