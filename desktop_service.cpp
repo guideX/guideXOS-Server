@@ -1,6 +1,7 @@
 #include "desktop_service.h"
 #include "desktop_config.h"
 #include "logger.h"
+#include "lifecycle.h"
 #include "notepad.h"
 #include "calculator.h"
 #include "console_window.h"
@@ -15,6 +16,7 @@
 #include <fstream>
 #include <sstream>
 #include <chrono>
+#include <thread>
 /// <summary>
 /// guideX OS GUI - Desktop Service
 /// </summary>
@@ -181,6 +183,21 @@ namespace gxos {
             if (std::find(s_apps.begin(), s_apps.end(), appName) == s_apps.end()) {
                 error = "Application not registered: " + name;
                 return false;
+            }
+
+            // Ensure compositor is running before launching any GUI app
+            // Track if we just started it so we can wait for it to initialize
+            uint64_t prevCompositorPid = Lifecycle::state().compositorPid;
+            uint64_t compositorPid = Lifecycle::ensureCompositor();
+            if (compositorPid == 0) {
+                error = "Compositor failed to start";
+                return false;
+            }
+            
+            // If compositor was just started, wait briefly for it to initialize
+            if (prevCompositorPid == 0 && compositorPid != 0) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                Logger::write(LogLevel::Info, "LaunchApp: Waited for compositor to initialize");
             }
 
             // Add to recent
