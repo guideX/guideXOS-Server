@@ -252,8 +252,8 @@ Widget* KernelApp::getWidget(int id) {
 // ============================================================
 
 void AppManager::init() {
-    if (s_initialized) return;
-    
+    // Always reinitialize to handle cases where static init may not work
+    // (e.g., kernel/UEFI environments where .bss might not be zeroed)
     for (int i = 0; i < MAX_APPS; i++) {
         s_registeredApps[i].name[0] = '\0';
         s_registeredApps[i].available = false;

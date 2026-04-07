@@ -149,10 +149,8 @@ static int measureText(const char* str) {
 // ============================================================
 
 void KernelCompositor::init(uint32_t screenW, uint32_t screenH, uint32_t taskbarH) {
-    if (s_initialized) {
-        return;
-    }
-    
+    // Always reinitialize to handle cases where static init may not work
+    // (e.g., kernel/UEFI environments where .bss might not be zeroed)
     s_screenW = screenW;
     s_screenH = screenH;
     s_taskbarH = taskbarH;

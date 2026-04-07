@@ -120,18 +120,44 @@ int memcmp(const void* s1, const void* s2, size_t n)
 } // extern "C"
 
 // ============================================================================
-// C++ operator new/delete
-// These are stubs - in a real kernel, they would call the kernel allocator
+// Simple Kernel Heap Allocator (Bump Allocator)
+// This is a basic allocator that only allocates, never frees.
+// Sufficient for kernel GUI apps that have a fixed lifetime.
 // ============================================================================
 
-void* operator new(size_t) throw()
-{
-    return nullptr;
+namespace {
+    // 256 KB kernel heap - sufficient for a few app windows
+    static constexpr size_t KERNEL_HEAP_SIZE = 256 * 1024;
+    static uint8_t g_kernelHeap[KERNEL_HEAP_SIZE];
+    static size_t g_heapOffset = 0;
+    
+    void* kernel_alloc(size_t size) {
+        // Align to 8 bytes for proper alignment
+        size_t alignedSize = (size + 7) & ~7;
+        
+        if (g_heapOffset + alignedSize > KERNEL_HEAP_SIZE) {
+            return nullptr;  // Out of memory
+        }
+        
+        void* ptr = &g_kernelHeap[g_heapOffset];
+        g_heapOffset += alignedSize;
+        return ptr;
+    }
 }
 
-void* operator new[](size_t) throw()
+// ============================================================================
+// C++ operator new/delete
+// These use the kernel bump allocator
+// ============================================================================
+
+void* operator new(size_t size) throw()
 {
-    return nullptr;
+    return kernel_alloc(size);
+}
+
+void* operator new[](size_t size) throw()
+{
+    return kernel_alloc(size);
 }
 
 void operator delete(void*) noexcept

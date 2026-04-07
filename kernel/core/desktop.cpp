@@ -2000,6 +2000,16 @@ static bool try_launch_kernel_app(const char* appName)
         return app::AppManager::launchApp(appName);
     }
     
+    // Debug: Check registered app count to see if registration worked
+    int regCount = 0;
+    for (int i = 0; i < app::MAX_APPS; i++) {
+        const app::AppInfo* info = app::AppManager::getAppInfo(appName);
+        if (info) {
+            regCount++;
+            break;
+        }
+    }
+    
     return false;
 }
 
@@ -2571,9 +2581,17 @@ static void show_icon_notification(int iconIndex)
     }
     
     // Try to launch as a kernel GUI app
-    if (try_launch_kernel_app(label)) {
-        // App launched successfully
-        app::AppLogger::logLaunch(label, app::LaunchResult::Success);
+    if (app::AppManager::isAppAvailable(label)) {
+        if (app::AppManager::launchApp(label)) {
+            // App launched successfully
+            app::AppLogger::logLaunch(label, app::LaunchResult::Success);
+            return;
+        }
+        // App available but failed to launch
+        s_notification.title = label;
+        s_notification.message = "Failed to launch app";
+        s_notification.visible = true;
+        app::AppLogger::logLaunch(label, app::LaunchResult::FailedToInit);
         return;
     }
     
@@ -2951,40 +2969,8 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
             s_iconPosX[s_dragIconIndex] = newX;
             s_iconPosY[s_dragIconIndex] = newY;
         } else if (!s_dragStarted && s_dragIconIndex >= 0 && s_dragIconIndex < kDesktopIconCount) {
-            // Click without drag - this is a single click to launch
-            int iconIdx = s_dragIconIndex;
-            s_dragging = false;
-            s_dragStarted = false;
-            s_dragIconIndex = -1;
-            
-            // Check if this is Console by name (more reliable than index)
-            const char* iconLabel = s_desktopIcons[iconIdx].label;
-            bool isConsole = (iconLabel[0] == 'C' && iconLabel[1] == 'o' && iconLabel[2] == 'n' &&
-                              iconLabel[3] == 's' && iconLabel[4] == 'o' && iconLabel[5] == 'l' &&
-                              iconLabel[6] == 'e' && iconLabel[7] == '\0');
-            
-            if (isConsole) {
-                shell::open();
-                s_shellActive = true;
-                s_shellMinimized = false;
-                // Debug: verify shell is open
-                if (!shell::is_open()) {
-                    s_notification.title = "Shell Error";
-                    s_notification.message = "Failed to open shell";
-                    s_notification.visible = true;
-                }
-                draw();
-                draw_cursor(mx, my);
-                return;
-            } else {
-                // Other apps are not yet implemented in kernel mode
-                s_notification.title = s_desktopIcons[iconIdx].label;
-                s_notification.message = "Not available in UEFI mode";
-                s_notification.visible = true;
-                draw();
-                draw_cursor(mx, my);
-                return;
-            }
+            // Click without drag - just select the icon (launch happens on double-click)
+            s_selectedIcon = s_dragIconIndex;
         }
 
         s_dragging = false;
@@ -3378,23 +3364,11 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
                 s_lastClickedIcon = -1;
                 s_lastClickTime = 0;
                 
-                // Check which icon was double-clicked
-                if (iconIdx == 2) {  // Console
-                    shell::open();
-                    s_shellActive = true;
-                    s_shellMinimized = false;
-                    draw();
-                    draw_cursor(mx, my);
-                    return;
-                } else {
-                    // Other apps are not yet implemented in kernel mode
-                    s_notification.title = s_desktopIcons[iconIdx].label;
-                    s_notification.message = "Not available in UEFI mode";
-                    s_notification.visible = true;
-                    draw();
-                    draw_cursor(mx, my);
-                    return;
-                }
+                // Use show_icon_notification which handles kernel app launches
+                show_icon_notification(iconIdx);
+                draw();
+                draw_cursor(mx, my);
+                return;
             }
             
             // First click - record for double-click detection
