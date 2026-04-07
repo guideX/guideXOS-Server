@@ -330,9 +330,8 @@ void KernelCompositor::restoreWindow(uint32_t windowId) {
 void KernelCompositor::closeWindow(uint32_t windowId) {
     app::KernelWindow* win = getWindow(windowId);
     if (win && win->owner) {
-        // Send close message to app
-        ipc::Message msg = ipc::makeWindowCloseMsg(windowId);
-        ipc::IpcManager::sendTo(windowId, msg);
+        // Directly request the app to close (calls onWindowClose and cleans up)
+        win->owner->requestClose();
     }
 }
 

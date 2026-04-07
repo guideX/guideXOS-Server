@@ -404,9 +404,25 @@ void AppManager::processInput(const InputEvent& event) {
 }
 
 void AppManager::update() {
-    for (int i = 0; i < s_runningAppCount; i++) {
+    // Update all running apps and clean up terminated ones
+    for (int i = s_runningAppCount - 1; i >= 0; i--) {
         if (s_runningApps[i]) {
-            s_runningApps[i]->update();
+            // Check if app has been terminated (window was closed)
+            if (s_runningApps[i]->getState() == AppState::Terminated) {
+                // Clean up the app
+                KernelApp* app = s_runningApps[i];
+                
+                // Shift remaining apps
+                for (int j = i; j < s_runningAppCount - 1; j++) {
+                    s_runningApps[j] = s_runningApps[j + 1];
+                }
+                s_runningApps[--s_runningAppCount] = nullptr;
+                
+                // Delete the app object
+                delete app;
+            } else {
+                s_runningApps[i]->update();
+            }
         }
     }
 }

@@ -631,6 +631,9 @@ static int32_t s_shellResizeStartY = 0;
 static int32_t s_shellResizeStartW = 0;
 static int32_t s_shellResizeStartH = 0;
 
+// Forward declarations
+static void draw_shell_window();
+
 // ============================================================
 // Drawing routines
 // ============================================================
@@ -2169,7 +2172,95 @@ void tick()
 }
 
 
-
+// Helper function to draw the shell window
+static void draw_shell_window()
+{
+    ShellWindowGeometry g = get_shell_geometry();
+    
+    // ===== Window shadow (matching compositor style) =====
+    framebuffer::fill_rect(g.x + 3, g.y + 3, g.w, g.h, rgb(15, 15, 20));
+    
+    // ===== Window content background =====
+    framebuffer::fill_rect(g.x, g.y, g.w, g.h, rgb(34, 34, 34));
+    
+    // ===== Window border (focused = blue accent, unfocused = gray) =====
+    uint32_t borderColor = s_shellActive ? rgb(85, 136, 170) : rgb(51, 51, 51);
+    draw_rect(g.x, g.y, g.w, g.h, borderColor);
+    
+    // ===== Title bar (dark gradient, matching Legacy) =====
+    uint32_t titlebarColor = s_shellActive ? rgb(43, 80, 111) : rgb(17, 17, 17);
+    framebuffer::fill_rect(g.x + 1, g.y + 1, g.w - 2, g.titlebarH - 1, titlebarColor);
+    
+    // ===== Window title text (centered, matching Legacy) =====
+    const char* title = "Terminal";
+    int titleW = measure_text(title);
+    uint32_t titleX = g.x + (g.w - titleW) / 2;
+    draw_text(titleX, g.y + 7, title, s_shellActive ? rgb(240, 240, 240) : rgb(150, 150, 160), 1);
+    
+    // ===== Title bar buttons (matching guideXOS.Legacy style) =====
+    // Button styling constants
+    const uint32_t btnSize = 16;
+    const uint32_t btnGap = 6;
+    const uint32_t btnY = g.y + 4;
+    
+    // Close button (rightmost) - red background
+    uint32_t closeBtnX = g.x + g.w - btnGap - btnSize;
+    uint32_t closeNormal = rgb(120, 40, 40);
+    framebuffer::fill_rect(closeBtnX, btnY, btnSize, btnSize, closeNormal);
+    // Draw X icon (2px thick lines)
+    uint32_t iconColor = rgb(250, 250, 250);
+    int iconOff = btnSize / 3;
+    for (int i = 0; i < iconOff * 2; i++) {
+        framebuffer::put_pixel(closeBtnX + iconOff + i, btnY + iconOff + i, iconColor);
+        framebuffer::put_pixel(closeBtnX + iconOff + i + 1, btnY + iconOff + i, iconColor);
+        framebuffer::put_pixel(closeBtnX + btnSize - iconOff - i - 1, btnY + iconOff + i, iconColor);
+        framebuffer::put_pixel(closeBtnX + btnSize - iconOff - i, btnY + iconOff + i, iconColor);
+    }
+    // Border
+    draw_rect(closeBtnX, btnY, btnSize, btnSize, rgb(80, 80, 80));
+    
+    // Maximize button (left of close) - blue tint on hover
+    uint32_t maxBtnX = closeBtnX - btnGap - btnSize;
+    uint32_t maxColor = rgb(46, 46, 46);
+    framebuffer::fill_rect(maxBtnX, btnY, btnSize, btnSize, maxColor);
+    if (s_shellMaximized) {
+        // Restore icon (two overlapping squares)
+        draw_rect(maxBtnX + 5, btnY + 3, 7, 7, iconColor);
+        draw_rect(maxBtnX + 3, btnY + 5, 7, 7, iconColor);
+    } else {
+        // Maximize icon (square)
+        draw_rect(maxBtnX + 4, btnY + 4, 8, 8, iconColor);
+    }
+    draw_rect(maxBtnX, btnY, btnSize, btnSize, rgb(80, 80, 80));
+    
+    // Minimize button (left of maximize) - green tint on hover
+    uint32_t minBtnX = maxBtnX - btnGap - btnSize;
+    uint32_t minColor = rgb(46, 46, 46);
+    framebuffer::fill_rect(minBtnX, btnY, btnSize, btnSize, minColor);
+    // Minimize icon (underscore line)
+    hline(minBtnX + 4, btnY + btnSize - 5, 8, iconColor);
+    draw_rect(minBtnX, btnY, btnSize, btnSize, rgb(80, 80, 80));
+    
+    // ===== Resize grip (bottom-right corner, matching Legacy) =====
+    if (!s_shellMaximized && shell::get_state() != shell::ShellState::Fullscreen) {
+        uint32_t gripX = g.x + g.w - 16;
+        uint32_t gripY = g.y + g.h - 16;
+        uint32_t gripLineColor = rgb(119, 119, 119);
+        // Draw 3 diagonal grip lines
+        for (int line = 0; line < 3; line++) {
+            int offset = line * 4;
+            // Each line is a few pixels
+            framebuffer::put_pixel(gripX + 14 - offset, gripY + 13, gripLineColor);
+            framebuffer::put_pixel(gripX + 13 - offset, gripY + 12, gripLineColor);
+            framebuffer::put_pixel(gripX + 12 - offset, gripY + 11, gripLineColor);
+            framebuffer::put_pixel(gripX + 13, gripY + 13 - offset, gripLineColor);
+            framebuffer::put_pixel(gripX + 12, gripY + 12 - offset, gripLineColor);
+            framebuffer::put_pixel(gripX + 11, gripY + 11 - offset, gripLineColor);
+        }
+    }
+    
+    shell::draw(g.x, g.y, g.w, g.h);
+}
 
 
 void draw()
@@ -2179,7 +2270,6 @@ void draw()
     draw_background();
     draw_desktop_icons();
     draw_taskbar();
-    draw_start_menu();
     draw_right_click_menu();
     draw_notifications();
     draw_shutdown_dialog();
@@ -2188,139 +2278,28 @@ void draw()
     draw_network_adapters();
     draw_network_config();
     
+    // Draw windows in proper z-order based on focus
+    // Shell window is drawn first if not active, last if active
+    bool shellVisible = shell::is_open() && !s_shellMinimized;
+    
+    // Draw shell window first if not active (so compositor windows appear on top)
+    if (shellVisible && !s_shellActive) {
+        draw_shell_window();
+    }
+    
     // Draw kernel compositor windows (GUI apps)
     compositor::KernelCompositor::drawAllWindows();
     
     // Draw taskbar buttons for kernel apps
     compositor::TaskbarManager::drawButtons();
     
-    // Draw shell window if open and not minimized
-    if (shell::is_open() && !s_shellMinimized) {
-        ShellWindowGeometry g = get_shell_geometry();
-        
-        // ===== Window glow/shadow (matching guideXOS.Legacy) =====
-        // Draw soft glow behind window when focused
-        if (s_shellActive) {
-            uint32_t glowColor = rgb(30, 70, 120);  // Blue-ish glow
-            for (int glow = 6; glow >= 1; glow--) {
-                for (uint32_t px = g.x - glow; px <= g.x + g.w + glow; px++) {
-                    if (px < s_screenW) {
-                        if (g.y >= (uint32_t)glow) framebuffer::put_pixel(px, g.y - glow, glowColor);
-                        if (g.y + g.h + glow < s_screenH - kTaskbarH) framebuffer::put_pixel(px, g.y + g.h + glow - 1, glowColor);
-                    }
-                }
-                for (uint32_t py = g.y - glow; py <= g.y + g.h + glow; py++) {
-                    if (py < s_screenH - kTaskbarH) {
-                        if (g.x >= (uint32_t)glow) framebuffer::put_pixel(g.x - glow, py, glowColor);
-                        if (g.x + g.w + glow < s_screenW) framebuffer::put_pixel(g.x + g.w + glow - 1, py, glowColor);
-                    }
-                }
-            }
-        }
-        
-        // ===== Window content background =====
-        framebuffer::fill_rect(g.x, g.y, g.w, g.h, rgb(34, 34, 34));
-        
-        // ===== Window border (focused = blue accent, unfocused = gray) =====
-        uint32_t borderColor = s_shellActive ? rgb(85, 136, 170) : rgb(51, 51, 51);
-        for (uint32_t px = g.x; px < g.x + g.w; px++) {
-            framebuffer::put_pixel(px, g.y, borderColor);
-            framebuffer::put_pixel(px, g.y + g.h - 1, borderColor);
-        }
-        for (uint32_t py = g.y; py < g.y + g.h; py++) {
-            framebuffer::put_pixel(g.x, py, borderColor);
-            framebuffer::put_pixel(g.x + g.w - 1, py, borderColor);
-        }
-        
-        // ===== Title bar (dark gradient, matching Legacy) =====
-        uint32_t titlebarColor = s_shellActive ? rgb(43, 80, 111) : rgb(17, 17, 17);
-        framebuffer::fill_rect(g.x + 1, g.y + 1, g.w - 2, g.titlebarH - 1, titlebarColor);
-        
-        // ===== Window title text (centered, matching Legacy) =====
-        const char* title = "Terminal";
-        int titleW = measure_text(title);
-        uint32_t titleX = g.x + (g.w - titleW) / 2;
-        draw_text(titleX, g.y + 7, title, s_shellActive ? rgb(240, 240, 240) : rgb(150, 150, 160), 1);
-        
-        // ===== Title bar buttons (matching guideXOS.Legacy style) =====
-        // Button styling constants
-        const uint32_t btnSize = 16;
-        const uint32_t btnGap = 6;
-        const uint32_t btnY = g.y + 4;
-        
-        // Close button (rightmost) - red background
-        uint32_t closeBtnX = g.x + g.w - btnGap - btnSize;
-        uint32_t closeNormal = rgb(120, 40, 40);
-        uint32_t closeHover = rgb(170, 64, 64);
-        framebuffer::fill_rect(closeBtnX, btnY, btnSize, btnSize, closeNormal);
-        // Draw X icon (2px thick lines)
-        uint32_t iconColor = rgb(250, 250, 250);
-        int iconOff = btnSize / 3;
-        for (int i = 0; i < iconOff * 2; i++) {
-            framebuffer::put_pixel(closeBtnX + iconOff + i, btnY + iconOff + i, iconColor);
-            framebuffer::put_pixel(closeBtnX + iconOff + i + 1, btnY + iconOff + i, iconColor);
-            framebuffer::put_pixel(closeBtnX + btnSize - iconOff - i - 1, btnY + iconOff + i, iconColor);
-            framebuffer::put_pixel(closeBtnX + btnSize - iconOff - i, btnY + iconOff + i, iconColor);
-        }
-        // Border
-        draw_rect(closeBtnX, btnY, btnSize, btnSize, rgb(80, 80, 80));
-        
-        // Maximize button (left of close) - blue tint on hover
-        uint32_t maxBtnX = closeBtnX - btnGap - btnSize;
-        uint32_t maxColor = rgb(46, 46, 46);
-        framebuffer::fill_rect(maxBtnX, btnY, btnSize, btnSize, maxColor);
-        if (s_shellMaximized) {
-            // Restore icon (two overlapping squares)
-            draw_rect(maxBtnX + 5, btnY + 3, 7, 7, iconColor);
-            draw_rect(maxBtnX + 3, btnY + 5, 7, 7, iconColor);
-        } else {
-            // Maximize icon (square)
-            draw_rect(maxBtnX + 4, btnY + 4, 8, 8, iconColor);
-        }
-        draw_rect(maxBtnX, btnY, btnSize, btnSize, rgb(80, 80, 80));
-        
-        // Minimize button (left of maximize) - green tint on hover
-        uint32_t minBtnX = maxBtnX - btnGap - btnSize;
-        uint32_t minColor = rgb(46, 46, 46);
-        framebuffer::fill_rect(minBtnX, btnY, btnSize, btnSize, minColor);
-        // Minimize icon (underscore line)
-        hline(minBtnX + 4, btnY + btnSize - 5, 8, iconColor);
-        draw_rect(minBtnX, btnY, btnSize, btnSize, rgb(80, 80, 80));
-        
-        // Update geometry for hit testing
-        g.closeBtnX = closeBtnX;
-        g.closeBtnY = btnY;
-        g.closeBtnW = btnSize;
-        g.closeBtnH = btnSize;
-        g.maxBtnX = maxBtnX;
-        g.maxBtnY = btnY;
-        g.maxBtnW = btnSize;
-        g.maxBtnH = btnSize;
-        g.minBtnX = minBtnX;
-        g.minBtnY = btnY;
-        g.minBtnW = btnSize;
-        g.minBtnH = btnSize;
-        
-        // ===== Resize grip (bottom-right corner, matching Legacy) =====
-        if (!s_shellMaximized && shell::get_state() != shell::ShellState::Fullscreen) {
-            uint32_t gripX = g.x + g.w - 16;
-            uint32_t gripY = g.y + g.h - 16;
-            uint32_t gripLineColor = rgb(119, 119, 119);
-            // Draw 3 diagonal grip lines
-            for (int line = 0; line < 3; line++) {
-                int offset = line * 4;
-                // Each line is a few pixels
-                framebuffer::put_pixel(gripX + 14 - offset, gripY + 13, gripLineColor);
-                framebuffer::put_pixel(gripX + 13 - offset, gripY + 12, gripLineColor);
-                framebuffer::put_pixel(gripX + 12 - offset, gripY + 11, gripLineColor);
-                framebuffer::put_pixel(gripX + 13, gripY + 13 - offset, gripLineColor);
-                framebuffer::put_pixel(gripX + 12, gripY + 12 - offset, gripLineColor);
-                framebuffer::put_pixel(gripX + 11, gripY + 11 - offset, gripLineColor);
-            }
-        }
-        
-        shell::draw(g.x, g.y, g.w, g.h);
+    // Draw shell window last if active (so it appears on top)
+    if (shellVisible && s_shellActive) {
+        draw_shell_window();
     }
+    
+    // Draw start menu LAST so it appears on top of all windows
+    draw_start_menu();
     
     // Present the back buffer to the screen (swap buffers)
     // This is the key to preventing flickering - all drawing is done
@@ -2858,6 +2837,11 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
     // ---- Route input to kernel compositor first (GUI apps) ----
     // Check if point is over a compositor window
     if (compositor::KernelCompositor::isPointOverWindow(mx, my)) {
+        // Deactivate shell window when clicking a compositor window
+        if (s_shellActive) {
+            s_shellActive = false;
+        }
+        
         compositor::KernelCompositor::handleMouseMove(mx, my);
         if (pressed & 0x01) {
             compositor::KernelCompositor::handleMouseDown(mx, my, 0x01);
@@ -3110,8 +3094,9 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
             }
             
             if (hit == SHELL_HIT_CLIENT || hit == SHELL_HIT_TITLEBAR) {
-                // Click inside shell window - activate it
+                // Click inside shell window - activate it and unfocus compositor windows
                 s_shellActive = true;
+                compositor::KernelCompositor::setFocus(0);  // Unfocus all compositor windows
                 draw();
                 draw_cursor(mx, my);
                 return;
