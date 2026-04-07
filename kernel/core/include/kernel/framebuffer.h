@@ -77,6 +77,20 @@ void draw_line(uint32_t x1, uint32_t y1, uint32_t x2, uint32_t y2, uint32_t colo
 // Copy a buffer to screen
 void blit(uint32_t* buffer, uint32_t x, uint32_t y, uint32_t width, uint32_t height);
 
+// Double buffering support
+// Enable double buffering (allocates back buffer)
+bool enable_double_buffering();
+
+// Check if double buffering is enabled
+bool is_double_buffered();
+
+// Present back buffer to screen (copy back buffer to front buffer)
+// Call this after all drawing operations are complete for a frame
+void present();
+
+// Get the back buffer pointer (for direct access if needed)
+uint32_t* get_back_buffer();
+
 } // namespace framebuffer
 } // namespace kernel
 

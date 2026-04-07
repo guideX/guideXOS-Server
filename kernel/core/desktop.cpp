@@ -2142,6 +2142,9 @@ void init()
     init_icon_positions();
     shell::init();
     
+    // Enable double buffering to prevent flickering during window movement
+    framebuffer::enable_double_buffering();
+    
     // Initialize kernel app framework
     ipc::IpcManager::init();
     apps::registerKernelApps();
@@ -2318,6 +2321,11 @@ void draw()
         
         shell::draw(g.x, g.y, g.w, g.h);
     }
+    
+    // Present the back buffer to the screen (swap buffers)
+    // This is the key to preventing flickering - all drawing is done
+    // to the back buffer, then copied to the screen in one operation
+    framebuffer::present();
 }
 
 
@@ -2764,12 +2772,18 @@ static FooterButton hit_test_start_menu_footer(int32_t mx, int32_t my)
 
 static void save_under_cursor(int32_t mx, int32_t my)
 {
+    // Save from front buffer (video memory) since cursor is drawn there
+    uint32_t* frontBuffer = framebuffer::get_buffer();
+    if (!frontBuffer) return;
+    
+    uint32_t pitch = framebuffer::get_pitch() / 4;
+    
     for (int row = 0; row < kCursorH; row++) {
         for (int col = 0; col < kCursorW; col++) {
             int32_t px = mx + col;
             int32_t py = my + row;
             if (px >= 0 && px < (int32_t)s_screenW && py >= 0 && py < (int32_t)s_screenH)
-                s_cursorSave[row][col] = framebuffer::get_pixel((uint32_t)px, (uint32_t)py);
+                s_cursorSave[row][col] = frontBuffer[py * pitch + px];
             else
                 s_cursorSave[row][col] = 0;
         }
@@ -2779,12 +2793,19 @@ static void save_under_cursor(int32_t mx, int32_t my)
 static void restore_under_cursor()
 {
     if (!s_cursorDrawn) return;
+    
+    // Restore to front buffer (video memory) since cursor was drawn there
+    uint32_t* frontBuffer = framebuffer::get_buffer();
+    if (!frontBuffer) return;
+    
+    uint32_t pitch = framebuffer::get_pitch() / 4;
+    
     for (int row = 0; row < kCursorH; row++) {
         for (int col = 0; col < kCursorW; col++) {
             int32_t px = s_lastCursorX + col;
             int32_t py = s_lastCursorY + row;
             if (px >= 0 && px < (int32_t)s_screenW && py >= 0 && py < (int32_t)s_screenH)
-                framebuffer::put_pixel((uint32_t)px, (uint32_t)py, s_cursorSave[row][col]);
+                frontBuffer[py * pitch + px] = s_cursorSave[row][col];
         }
     }
     s_cursorDrawn = false;
@@ -2795,12 +2816,18 @@ void draw_cursor(int32_t mx, int32_t my)
     // Restore previous cursor area
     restore_under_cursor();
 
-    // Save pixels under new position
+    // Save pixels under new position (from front buffer)
     save_under_cursor(mx, my);
     s_lastCursorX = mx;
     s_lastCursorY = my;
 
-    // Draw cursor
+    // Draw cursor directly to front buffer (bypass double buffering for cursor)
+    // This ensures the cursor is always visible even with double buffering enabled
+    uint32_t* frontBuffer = framebuffer::get_buffer();
+    if (!frontBuffer) return;
+    
+    uint32_t pitch = framebuffer::get_pitch() / 4;
+    
     for (int row = 0; row < kCursorH; row++) {
         for (int col = 0; col < kCursorW; col++) {
             uint8_t p = s_cursorBitmap[row][col];
@@ -2809,7 +2836,8 @@ void draw_cursor(int32_t mx, int32_t my)
             int32_t py = my + row;
             if (px >= 0 && px < (int32_t)s_screenW && py >= 0 && py < (int32_t)s_screenH) {
                 uint32_t color = (p == 1) ? rgb(0, 0, 0) : rgb(255, 255, 255);
-                framebuffer::put_pixel((uint32_t)px, (uint32_t)py, color);
+                // Write directly to front buffer
+                frontBuffer[py * pitch + px] = color;
             }
         }
     }

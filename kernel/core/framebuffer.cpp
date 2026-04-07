@@ -18,12 +18,21 @@
 namespace kernel {
 namespace framebuffer {
 
-static uint32_t* g_buffer = nullptr;
+static uint32_t* g_buffer = nullptr;      // Front buffer (video memory)
+static uint32_t* g_backBuffer = nullptr;  // Back buffer (off-screen)
+static uint32_t* g_drawTarget = nullptr;  // Current draw target (back or front buffer)
 static uint32_t g_width = 0;
 static uint32_t g_height = 0;
 static uint32_t g_pitch = 0;
 static uint8_t g_bpp = 0;
 static bool g_available = false;
+static bool g_doubleBuffered = false;
+
+// Static back buffer storage (allocated in BSS segment)
+// Max resolution support: 1920x1080 = 2,073,600 pixels * 4 bytes = ~8MB
+// For kernel mode, we use a static buffer to avoid dynamic allocation
+static const uint32_t MAX_BACKBUFFER_PIXELS = 1920 * 1080;
+static uint32_t g_backBufferStorage[MAX_BACKBUFFER_PIXELS];
 
 #if ARCH_HAS_PIC_8259
 
@@ -53,6 +62,7 @@ bool init(void* multiboot_info_ptr)
         return false;
     }
     
+    g_drawTarget = g_buffer;  // Draw directly to video memory by default
     g_available = true;
     return true;
 }
@@ -84,6 +94,7 @@ bool init_from_bootinfo(const guideXOS::BootInfo* bootinfo)
     g_pitch = bootinfo->FramebufferPitch;
     g_bpp = 32;  // BootInfo always uses 32-bit format
     
+    g_drawTarget = g_buffer;  // Draw directly to video memory by default
     g_available = true;
     return true;
 }
@@ -104,6 +115,7 @@ bool init_sun4m()
     g_height = 768;
     g_pitch  = 1024 * 4;   // 4 bytes per pixel, no padding
     g_bpp    = 32;
+    g_drawTarget = g_buffer;  // Draw directly to video memory by default
     g_available = true;
     return true;
 }
@@ -124,6 +136,7 @@ bool init_sun4u()
     g_height = 768;
     g_pitch  = 1024 * 4;
     g_bpp    = 32;
+    g_drawTarget = g_buffer;  // Draw directly to video memory by default
     g_available = true;
     return true;
 }
@@ -226,6 +239,7 @@ bool init_vesa(uint16_t width, uint16_t height, uint8_t bpp)
     g_height = height;
     g_bpp    = bpp;
     g_pitch  = static_cast<uint32_t>(width) * (bpp / 8);
+    g_drawTarget = g_buffer;  // Draw directly to video memory by default
     g_available = true;
     return true;
 #else
@@ -248,6 +262,7 @@ bool init_efi_gop(uint64_t lfbBase, uint32_t width, uint32_t height,
     g_height = height;
     g_pitch  = pitch;
     g_bpp    = bpp;
+    g_drawTarget = g_buffer;  // Draw directly to video memory by default
     g_available = true;
     return true;
 }
@@ -266,6 +281,7 @@ bool init_manual(uint64_t lfbBase, uint32_t width, uint32_t height,
     g_height = height;
     g_pitch  = pitch;
     g_bpp    = bpp;
+    g_drawTarget = g_buffer;  // Draw directly to video memory by default
     g_available = true;
     return true;
 }
@@ -302,37 +318,44 @@ bool is_available()
 
 void clear(uint32_t color)
 {
-    if (!g_available) return;
+    if (!g_available || !g_drawTarget) return;
     
     uint32_t pixels = (g_pitch / 4) * g_height;
     for (uint32_t i = 0; i < pixels; i++) {
-        g_buffer[i] = color;
+        g_drawTarget[i] = color;
     }
 }
 
 void put_pixel(uint32_t x, uint32_t y, uint32_t color)
 {
-    if (!g_available || x >= g_width || y >= g_height) return;
+    if (!g_available || !g_drawTarget || x >= g_width || y >= g_height) return;
     
     uint32_t offset = y * (g_pitch / 4) + x;
-    g_buffer[offset] = color;
+    g_drawTarget[offset] = color;
 }
 
 uint32_t get_pixel(uint32_t x, uint32_t y)
 {
-    if (!g_available || x >= g_width || y >= g_height) return 0;
+    if (!g_available || !g_drawTarget || x >= g_width || y >= g_height) return 0;
     
     uint32_t offset = y * (g_pitch / 4) + x;
-    return g_buffer[offset];
+    return g_drawTarget[offset];
 }
 
 void fill_rect(uint32_t x, uint32_t y, uint32_t width, uint32_t height, uint32_t color)
 {
-    if (!g_available) return;
+    if (!g_available || !g_drawTarget) return;
     
+    // Optimized version: direct memory access with row-based filling
+    uint32_t pitchPixels = g_pitch / 4;
     for (uint32_t dy = 0; dy < height; dy++) {
+        uint32_t rowY = y + dy;
+        if (rowY >= g_height) break;
+        uint32_t* row = g_drawTarget + rowY * pitchPixels + x;
         for (uint32_t dx = 0; dx < width; dx++) {
-            put_pixel(x + dx, y + dy, color);
+            if (x + dx < g_width) {
+                row[dx] = color;
+            }
         }
     }
 }
@@ -375,6 +398,63 @@ void blit(uint32_t* buffer, uint32_t x, uint32_t y, uint32_t width, uint32_t hei
             put_pixel(x + dx, y + dy, color);
         }
     }
+}
+
+// ================================================================
+// Double Buffering Support
+// ================================================================
+
+bool enable_double_buffering()
+{
+    if (!g_available) return false;
+    
+    // Check if resolution fits in our static back buffer
+    uint32_t totalPixels = (g_pitch / 4) * g_height;
+    if (totalPixels > MAX_BACKBUFFER_PIXELS) {
+        return false;  // Resolution too high for our static buffer
+    }
+    
+    // Use the static back buffer storage
+    g_backBuffer = g_backBufferStorage;
+    
+    // Clear the back buffer
+    for (uint32_t i = 0; i < totalPixels; i++) {
+        g_backBuffer[i] = 0;
+    }
+    
+    // Redirect all drawing operations to the back buffer
+    g_drawTarget = g_backBuffer;
+    g_doubleBuffered = true;
+    
+    return true;
+}
+
+bool is_double_buffered()
+{
+    return g_doubleBuffered;
+}
+
+void present()
+{
+    if (!g_available || !g_doubleBuffered || !g_backBuffer || !g_buffer) return;
+    
+    // Copy the entire back buffer to the front buffer (video memory)
+    // This is done in one operation to minimize tearing
+    uint32_t totalPixels = (g_pitch / 4) * g_height;
+    
+    // Use a simple memcpy-style copy for maximum speed
+    uint32_t* src = g_backBuffer;
+    uint32_t* dst = g_buffer;
+    
+    // Copy in larger chunks for better performance
+    for (uint32_t i = 0; i < totalPixels; i++) {
+        dst[i] = src[i];
+    }
+}
+
+uint32_t* get_back_buffer()
+{
+    return g_backBuffer;
 }
 
 } // namespace framebuffer
