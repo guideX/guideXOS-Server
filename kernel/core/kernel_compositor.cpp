@@ -25,6 +25,7 @@ uint32_t KernelCompositor::s_taskbarH = 0;
 DragState KernelCompositor::s_dragState;
 uint32_t KernelCompositor::s_hoverWindowId = 0;
 HitTestResult KernelCompositor::s_hoverResult = HitTestResult::None;
+bool KernelCompositor::s_buttonPressActive = false;
 bool KernelCompositor::s_initialized = false;
 
 // Bitmap font (5x7) - same as desktop.cpp
@@ -166,6 +167,7 @@ void KernelCompositor::init(uint32_t screenW, uint32_t screenH, uint32_t taskbar
     s_hoverWindowId = 0;
     s_hoverResult = HitTestResult::None;
     s_dragState = DragState();
+    s_buttonPressActive = false;  // Ensure button press tracking is reset
     s_initialized = true;
 }
 
@@ -444,6 +446,9 @@ void KernelCompositor::handleMouseMove(int32_t mx, int32_t my) {
 void KernelCompositor::handleMouseDown(int32_t mx, int32_t my, uint8_t button) {
     if (!s_initialized) return;
     
+    // Track that we have an active button press
+    s_buttonPressActive = true;
+    
     app::KernelWindow* hitWin = nullptr;
     HitTestResult hit = hitTest(mx, my, &hitWin);
     
@@ -511,6 +516,9 @@ void KernelCompositor::handleMouseDown(int32_t mx, int32_t my, uint8_t button) {
 void KernelCompositor::handleMouseUp(int32_t mx, int32_t my, uint8_t button) {
     if (!s_initialized) return;
     
+    // Clear button press tracking
+    s_buttonPressActive = false;
+    
     // End drag
     if (s_dragState.active) {
         s_dragState.active = false;
@@ -530,6 +538,7 @@ void KernelCompositor::handleMouseUp(int32_t mx, int32_t my, uint8_t button) {
             win->dirty = true;
             if (hitWin == win && hit == HitTestResult::CloseButton) {
                 closeWindow(win->id);
+                return;  // Window was closed, stop processing
             }
         }
         
@@ -823,6 +832,10 @@ int KernelCompositor::getWindowCount() {
 bool KernelCompositor::isPointOverWindow(int32_t x, int32_t y) {
     app::KernelWindow* win = nullptr;
     return hitTest(x, y, &win) != HitTestResult::None;
+}
+
+bool KernelCompositor::isButtonPressActive() {
+    return s_buttonPressActive;
 }
 
 uint32_t KernelCompositor::generateWindowId() {

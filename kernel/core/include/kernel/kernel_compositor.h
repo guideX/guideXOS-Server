@@ -137,6 +137,9 @@ public:
     // Check if point is over any compositor window
     static bool isPointOverWindow(int32_t x, int32_t y);
     
+    // Check if a button press is active (for routing mouse up events)
+    static bool isButtonPressActive();
+    
     // Generate unique window ID
     static uint32_t generateWindowId();
     
@@ -161,6 +164,9 @@ private:
     // Hover state
     static uint32_t s_hoverWindowId;
     static HitTestResult s_hoverResult;
+    
+    // Button press tracking (to ensure mouse up is sent even if mouse moved)
+    static bool s_buttonPressActive;
     
     // Initialization flag
     static bool s_initialized;

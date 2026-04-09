@@ -2835,10 +2835,14 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
     uint32_t taskbarY = s_screenH - kTaskbarH;
 
     // ---- Route input to kernel compositor first (GUI apps) ----
-    // Check if point is over a compositor window
-    if (compositor::KernelCompositor::isPointOverWindow(mx, my)) {
+    // Check if point is over a compositor window OR if compositor has an active button press
+    // (need to send mouse up even if mouse moved outside window bounds)
+    bool overCompositorWindow = compositor::KernelCompositor::isPointOverWindow(mx, my);
+    bool compositorHasActivePress = compositor::KernelCompositor::isButtonPressActive();
+    
+    if (overCompositorWindow || compositorHasActivePress) {
         // Deactivate shell window when clicking a compositor window
-        if (s_shellActive) {
+        if (overCompositorWindow && s_shellActive) {
             s_shellActive = false;
         }
         
@@ -2857,7 +2861,12 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
         }
         draw();
         draw_cursor(mx, my);
-        return;
+        
+        // Only return early if actually over window OR handling a button release
+        // This ensures mouse up events are properly sent to compositor
+        if (overCompositorWindow || (released & 0x03)) {
+            return;
+        }
     }
     
     // Update compositor hover states even when not over a window
