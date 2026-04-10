@@ -41,9 +41,11 @@ private:
     int m_textLength;
     int m_cursorPos;
     int m_scrollY;
+    bool m_selectAll;
     
     void insertChar(char c);
     void deleteChar();
+    void clearText();
     void moveCursor(int delta);
     int getLineCount() const;
     int getLineStart(int lineIndex) const;

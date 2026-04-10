@@ -26,6 +26,11 @@ bool has_key();
 // Returns 0 if no key available
 uint32_t get_key();
 
+// Modifier state accessors
+bool is_ctrl_down();
+bool is_shift_down();
+bool is_alt_down();
+
 // Clear the key buffer
 void clear();
 

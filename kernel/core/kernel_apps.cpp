@@ -8,6 +8,7 @@
 #include "include/kernel/kernel_compositor.h"
 #include "include/kernel/framebuffer.h"
 #include "include/kernel/shell.h"
+#include "include/kernel/ps2keyboard.h"
 
 namespace kernel {
 namespace apps {
@@ -168,7 +169,7 @@ static void drawChar(uint32_t px, uint32_t py, char c, uint32_t color) {
 // NotepadApp Implementation
 // ============================================================
 
-NotepadApp::NotepadApp() : m_textLength(0), m_cursorPos(0), m_scrollY(0) {
+NotepadApp::NotepadApp() : m_textLength(0), m_cursorPos(0), m_scrollY(0), m_selectAll(false) {
     strcopy(m_name, "Notepad", app::MAX_APP_NAME);
     m_text[0] = '\0';
 }
@@ -211,6 +212,11 @@ void NotepadApp::shutdown() {
 void NotepadApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
     // Text editor background
     framebuffer::fill_rect(x + 4, y + 4, w - 8, h - 8, rgb(45, 45, 55));
+    
+    // Select-all highlight
+    if (m_selectAll && m_textLength > 0) {
+        framebuffer::fill_rect(x + 4, y + 4, w - 8, h - 8, rgb(42, 91, 154));
+    }
     
     // Draw text
     uint32_t textX = x + 8;
@@ -259,31 +265,72 @@ void NotepadApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
 
 void NotepadApp::onKeyChar(char c) {
     if (c >= 32 && c < 127) {
+        if (m_selectAll) {
+            clearText();
+            m_selectAll = false;
+        }
         insertChar(c);
         invalidate();
     }
 }
 
 void NotepadApp::onKeyDown(uint32_t key) {
+    bool ctrl = ps2keyboard::is_ctrl_down();
+    
+    // Ctrl+A: Select All
+    if (ctrl && (key == 'a' || key == 'A')) {
+        m_selectAll = true;
+        invalidate();
+        return;
+    }
+    
     switch (key) {
-        case '\n':
-        case '\r':
+        case '\n':  // 10
+        case '\r':  // 13
+            if (m_selectAll) { clearText(); m_selectAll = false; }
             insertChar('\n');
             break;
-        case '\b':
-        case 127:  // Delete
-            deleteChar();
+        case '\b':  // 8 (Backspace)
+            if (m_selectAll) {
+                clearText();
+                m_selectAll = false;
+            } else {
+                deleteChar();
+            }
+            break;
+        case '\t':  // 9 (Tab)
+            if (m_selectAll) { clearText(); m_selectAll = false; }
+            insertChar(' '); insertChar(' '); insertChar(' '); insertChar(' ');
+            break;
+        case 127:  // Delete (ASCII DEL)
+        case 0x106:  // KEY_DELETE
+            if (m_selectAll) {
+                clearText();
+                m_selectAll = false;
+            } else {
+                // Forward delete: remove char at cursor
+                if (m_cursorPos < m_textLength) {
+                    for (int i = m_cursorPos; i < m_textLength; i++) {
+                        m_text[i] = m_text[i + 1];
+                    }
+                    m_textLength--;
+                }
+            }
             break;
         case shell::KEY_LEFT:
+            m_selectAll = false;
             moveCursor(-1);
             break;
         case shell::KEY_RIGHT:
+            m_selectAll = false;
             moveCursor(1);
             break;
         case shell::KEY_HOME:
+            m_selectAll = false;
             m_cursorPos = 0;
             break;
         case shell::KEY_END:
+            m_selectAll = false;
             m_cursorPos = m_textLength;
             break;
         default:
@@ -320,6 +367,12 @@ void NotepadApp::deleteChar() {
         m_cursorPos--;
         m_textLength--;
     }
+}
+
+void NotepadApp::clearText() {
+    m_text[0] = '\0';
+    m_textLength = 0;
+    m_cursorPos = 0;
 }
 
 void NotepadApp::moveCursor(int delta) {

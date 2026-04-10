@@ -617,11 +617,8 @@ void KernelCompositor::updateHoverStates(int mx, int my) {
 void KernelCompositor::clearHoverStates(app::KernelWindow* window) {
     if (window) {
         window->closeBtnHover = false;
-        window->closeBtnPressed = false;
         window->maxBtnHover = false;
-        window->maxBtnPressed = false;
         window->minBtnHover = false;
-        window->minBtnPressed = false;
     }
 }
 

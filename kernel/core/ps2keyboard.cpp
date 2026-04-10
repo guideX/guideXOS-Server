@@ -241,6 +241,21 @@ void clear()
     s_lastKey = 0;
 }
 
+bool is_ctrl_down()
+{
+    return s_ctrlDown;
+}
+
+bool is_shift_down()
+{
+    return s_shiftDown;
+}
+
+bool is_alt_down()
+{
+    return s_altDown;
+}
+
 #else
 // Stub implementation for non-x86 architectures
 void init() {}
@@ -248,6 +263,9 @@ void irq_handler() {}
 bool has_key() { return false; }
 uint32_t get_key() { return 0; }
 void clear() {}
+bool is_ctrl_down() { return false; }
+bool is_shift_down() { return false; }
+bool is_alt_down() { return false; }
 #endif
 
 } // namespace ps2keyboard

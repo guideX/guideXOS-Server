@@ -223,7 +223,12 @@ namespace gxos { namespace apps {
                                             performRedo();
                                             break;
                                         }
-                                        // Escape key - future use for dialogs
+                                        // Ctrl+A - Select All
+                                        else if (s_ctrlPressed && (keyCode == 65 || keyCode == 97)) {
+                                            selectAll();
+                                            break;
+                                        }
+                                        // Escape key
                                         if (keyCode == 27) {
                                             Logger::write(LogLevel::Info, "Notepad: Escape pressed");
                                             break;
@@ -272,21 +277,6 @@ namespace gxos { namespace apps {
                                                 updateTitle();
                                             }
                                         }
-                                        // Handle printable characters with shift support
-                                        else if (keyCode >= 32 && keyCode <= 126) {
-                                            char ch = mapKeyToChar(keyCode);
-                                            if (ch != '\0' && s_cursorLine < (int)s_lines.size()) {
-                                                pushUndo();
-                                                std::string temp = s_lines[s_cursorLine];
-                                                temp.insert(s_cursorCol, 1, ch);
-                                                s_lines[s_cursorLine] = temp;
-                                                s_cursorCol++;
-                                                s_modified = true;
-                                                redrawContent();
-                                                updateStatusBar();
-                                                updateTitle();
-                                            }
-                                        }
                                         // Backspace
                                         else if (keyCode == 8) {
                                             if (s_cursorCol > 0 && s_cursorLine < (int)s_lines.size()) {
@@ -313,12 +303,8 @@ namespace gxos { namespace apps {
                                                 updateTitle();
                                             }
                                         }
-                                        // Delete key (forward delete)
-                                        else if (keyCode == 46) {
-                                            deleteChar();
-                                        }
-                                        // Enter
-                                        else if (keyCode == 13) {
+                                        // Enter (VK_RETURN=13, also accept '\n'=10)
+                                        else if (keyCode == 13 || keyCode == 10) {
                                             if (s_cursorLine < (int)s_lines.size()) {
                                                 pushUndo();
                                                 std::string currentLine = s_lines[s_cursorLine];
@@ -330,6 +316,25 @@ namespace gxos { namespace apps {
                                                 s_lines.insert(s_lines.begin() + s_cursorLine + 1, remainder);
                                                 s_cursorLine++;
                                                 s_cursorCol = 0;
+                                                s_modified = true;
+                                                redrawContent();
+                                                updateStatusBar();
+                                                updateTitle();
+                                            }
+                                        }
+                                        // Delete key (forward delete, VK_DELETE=46)
+                                        else if (keyCode == 46) {
+                                            deleteChar();
+                                        }
+                                        // Handle printable characters with shift support
+                                        else if (keyCode >= 32 && keyCode <= 126) {
+                                            char ch = mapKeyToChar(keyCode);
+                                            if (ch != '\0' && s_cursorLine < (int)s_lines.size()) {
+                                                pushUndo();
+                                                std::string temp = s_lines[s_cursorLine];
+                                                temp.insert(s_cursorCol, 1, ch);
+                                                s_lines[s_cursorLine] = temp;
+                                                s_cursorCol++;
                                                 s_modified = true;
                                                 redrawContent();
                                                 updateStatusBar();
@@ -494,7 +499,19 @@ namespace gxos { namespace apps {
     }
     
     void Notepad::selectAll() {
-        Logger::write(LogLevel::Info, "Notepad: Select All (not implemented)");
+        // Select all text: move cursor to end of all content
+        // In a full implementation this would set selection start/end markers
+        // For now, position cursor at start and log
+        if (!s_lines.empty()) {
+            s_cursorLine = 0;
+            s_cursorCol = 0;
+            // Move cursor to the very end
+            s_cursorLine = (int)s_lines.size() - 1;
+            s_cursorCol = (int)s_lines[s_cursorLine].size();
+            Logger::write(LogLevel::Info, "Notepad: Select All (cursor moved to end)");
+            redrawContent();
+            updateStatusBar();
+        }
     }
     
     void Notepad::pushUndo() {

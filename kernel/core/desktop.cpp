@@ -2404,14 +2404,16 @@ void handle_key(uint32_t key)
                 return;
             }
             
-            // Route character keys to the compositor
-            if (key < 256) {
+            // Route printable character keys to the compositor
+            if (key >= 32 && key < 127) {
                 compositor::KernelCompositor::handleKeyChar((char)key);
                 draw();
                 return;
             }
             
-            // Route special keys
+            // Route control characters and special keys to handleKeyDown
+            // This includes Enter ('\n'=10), Backspace ('\b'=8), Tab ('\t'=9),
+            // arrow keys (0x100+), and all other non-printable keys.
             compositor::KernelCompositor::handleKeyDown(key);
             draw();
             return;
@@ -2613,6 +2615,71 @@ static StartMenuGeometry get_start_menu_geometry()
     g.contentY = g.menuY + g.headerH + 1;
     g.rightX = g.menuX + g.leftColW + 1;
     return g;
+}
+
+// Check if a point is inside the start menu bounds (when open)
+static bool is_point_in_start_menu(int32_t mx, int32_t my)
+{
+    if (!s_startMenuOpen) return false;
+    StartMenuGeometry g = get_start_menu_geometry();
+    return (uint32_t)mx >= g.menuX && (uint32_t)mx < g.menuX + kStartMenuW &&
+           (uint32_t)my >= g.menuY && (uint32_t)my < g.menuY + g.menuH;
+}
+
+// Check if a point is inside any modal dialog (Control Panel, Device Manager, etc.)
+static bool is_point_in_modal_dialog(int32_t mx, int32_t my)
+{
+    // Shutdown dialog
+    if (s_shutdownDialogOpen) {
+        uint32_t dlgX = (s_screenW - kShutdownDlgW) / 2;
+        uint32_t dlgY = (s_screenH - kShutdownDlgH) / 2;
+        if ((uint32_t)mx >= dlgX && (uint32_t)mx < dlgX + kShutdownDlgW &&
+            (uint32_t)my >= dlgY && (uint32_t)my < dlgY + kShutdownDlgH) {
+            return true;
+        }
+    }
+    
+    // Control Panel
+    if (s_controlPanelOpen) {
+        uint32_t dlgX = (s_screenW - kControlPanelW) / 2;
+        uint32_t dlgY = (s_screenH - kControlPanelH) / 2;
+        if ((uint32_t)mx >= dlgX && (uint32_t)mx < dlgX + kControlPanelW &&
+            (uint32_t)my >= dlgY && (uint32_t)my < dlgY + kControlPanelH) {
+            return true;
+        }
+    }
+    
+    // Device Manager
+    if (s_deviceManagerOpen) {
+        uint32_t dlgX = (s_screenW - kDeviceMgrW) / 2;
+        uint32_t dlgY = (s_screenH - kDeviceMgrH) / 2;
+        if ((uint32_t)mx >= dlgX && (uint32_t)mx < dlgX + kDeviceMgrW &&
+            (uint32_t)my >= dlgY && (uint32_t)my < dlgY + kDeviceMgrH) {
+            return true;
+        }
+    }
+    
+    // Network Adapters
+    if (s_networkAdaptersOpen) {
+        uint32_t dlgX = (s_screenW - kNetAdaptersW) / 2;
+        uint32_t dlgY = (s_screenH - kNetAdaptersH) / 2;
+        if ((uint32_t)mx >= dlgX && (uint32_t)mx < dlgX + kNetAdaptersW &&
+            (uint32_t)my >= dlgY && (uint32_t)my < dlgY + kNetAdaptersH) {
+            return true;
+        }
+    }
+    
+    // Network Config dialog
+    if (s_networkConfigOpen) {
+        uint32_t dlgX = (s_screenW - kNetConfigW) / 2;
+        uint32_t dlgY = (s_screenH - kNetConfigH) / 2;
+        if ((uint32_t)mx >= dlgX && (uint32_t)mx < dlgX + kNetConfigW &&
+            (uint32_t)my >= dlgY && (uint32_t)my < dlgY + kNetConfigH) {
+            return true;
+        }
+    }
+    
+    return false;
 }
 
 // Hit-test start menu items: sets leftIdx or rightIdx to item index, or -1
@@ -2837,10 +2904,14 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
     // ---- Route input to kernel compositor first (GUI apps) ----
     // Check if point is over a compositor window OR if compositor has an active button press
     // (need to send mouse up even if mouse moved outside window bounds)
-    bool overCompositorWindow = compositor::KernelCompositor::isPointOverWindow(mx, my);
+    // BUT: Start menu and modal dialogs take priority over compositor windows
+    bool overStartMenu = is_point_in_start_menu(mx, my);
+    bool overModalDialog = is_point_in_modal_dialog(mx, my);
+    bool overUIOverlay = overStartMenu || overModalDialog;
+    bool overCompositorWindow = !overUIOverlay && compositor::KernelCompositor::isPointOverWindow(mx, my);
     bool compositorHasActivePress = compositor::KernelCompositor::isButtonPressActive();
     
-    if (overCompositorWindow || compositorHasActivePress) {
+    if ((overCompositorWindow || compositorHasActivePress) && !overUIOverlay) {
         // Deactivate shell window when clicking a compositor window
         if (overCompositorWindow && s_shellActive) {
             s_shellActive = false;
