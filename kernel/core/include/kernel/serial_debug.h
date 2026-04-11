@@ -12,6 +12,15 @@
 #include "kernel/types.h"
 #include "kernel/arch.h"
 
+// Define ARCH_HAS_PORT_IO for x86/amd64 architectures if not already defined
+#ifndef ARCH_HAS_PORT_IO
+#if defined(ARCH_X86) || defined(ARCH_AMD64) || defined(__i386__) || defined(__x86_64__)
+    #define ARCH_HAS_PORT_IO 1
+#else
+    #define ARCH_HAS_PORT_IO 0
+#endif
+#endif
+
 namespace kernel {
 namespace serial {
 

@@ -15,6 +15,18 @@
 #include "include/kernel/block_device.h"
 #include "include/kernel/arch.h"
 
+// Define ARCH_HAS_PORT_IO for x86/amd64 architectures
+#if defined(ARCH_X86) || defined(ARCH_AMD64) || defined(__i386__) || defined(__x86_64__)
+    #define ARCH_HAS_PORT_IO 1
+#else
+    #define ARCH_HAS_PORT_IO 0
+#endif
+
+// For debug output
+#if defined(__GNUC__) || defined(__clang__)
+#include "include/kernel/serial_debug.h"
+#endif
+
 namespace kernel {
 namespace ata {
 
@@ -314,6 +326,14 @@ static block::Status ata_pio_write(uint8_t devIdx,
 static void probe_channel(uint16_t ioBase, uint16_t ctrlBase,
                           const char* prefix, uint8_t chanIdx)
 {
+#if defined(__GNUC__) || defined(__clang__)
+    serial::puts("[ATA] Probing channel ");
+    serial::puts(prefix);
+    serial::puts(" (ioBase=0x");
+    serial::put_hex16(ioBase);
+    serial::puts(")\n");
+#endif
+
     for (uint8_t drive = 0; drive < 2; ++drive) {
         if (s_deviceCount >= MAX_ATA_DEVICES) return;
 
@@ -321,8 +341,23 @@ static void probe_channel(uint16_t ioBase, uint16_t ctrlBase,
         memzero(&id, sizeof(id));
 
         bool isMaster = (drive == 0);
-        if (!ata_identify(ioBase, ctrlBase, isMaster, &id))
+        
+#if defined(__GNUC__) || defined(__clang__)
+        serial::puts("[ATA]   Checking ");
+        serial::puts(isMaster ? "master" : "slave");
+        serial::puts("...\n");
+#endif
+
+        if (!ata_identify(ioBase, ctrlBase, isMaster, &id)) {
+#if defined(__GNUC__) || defined(__clang__)
+            serial::puts("[ATA]   No device\n");
+#endif
             continue;
+        }
+
+#if defined(__GNUC__) || defined(__clang__)
+        serial::puts("[ATA]   Found device!\n");
+#endif
 
         ATADevice& dev = s_devices[s_deviceCount];
         memzero(&dev, sizeof(dev));
@@ -414,17 +449,36 @@ void init()
     memzero(s_devices, sizeof(s_devices));
     s_deviceCount = 0;
 
+#if defined(__GNUC__) || defined(__clang__)
+    serial::puts("[ATA] Initializing ATA driver...\n");
+#endif
+
 #if ARCH_HAS_PORT_IO
     // x86 / amd64: scan PCI for IDE controllers, probe ATA PIO
     bool foundIDE = scan_pci_ide();
     
+#if defined(__GNUC__) || defined(__clang__)
+    serial::puts("[ATA] PCI scan ");
+    serial::puts(foundIDE ? "found" : "did not find");
+    serial::puts(" IDE controller\n");
+#endif
+    
     // If no IDE controller found via PCI, try probing standard ports anyway
     // This handles cases like QEMU's ISA IDE or legacy systems
     if (!foundIDE) {
+#if defined(__GNUC__) || defined(__clang__)
+        serial::puts("[ATA] Trying standard IDE ports...\n");
+#endif
         // Try standard IDE ports directly
         probe_channel(ATA_PRIMARY_IO, ATA_PRIMARY_CTRL, "pri", 0);
         probe_channel(ATA_SECONDARY_IO, ATA_SECONDARY_CTRL, "sec", 1);
     }
+#endif
+
+#if defined(__GNUC__) || defined(__clang__)
+    serial::puts("[ATA] Init complete. Devices: ");
+    serial::putc('0' + s_deviceCount);
+    serial::puts("\n");
 #endif
 
     // AHCI support (MMIO-based, all architectures with PCI) would
