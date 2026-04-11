@@ -261,6 +261,24 @@ void close_file(uint8_t fileHandle);
 // Return volume info.
 const FATVolume* get_volume(uint8_t volumeIndex);
 
+// ================================================================
+// Directory traversal by path (new functions for VFS integration)
+// ================================================================
+
+// Open a directory by cluster number for iteration.
+// For root directory, use rootCluster from FATVolume.
+bool open_dir(uint8_t volumeIndex, uint32_t dirCluster);
+
+// Find a file or directory by name in the currently open directory.
+// Returns true if found, fills out the DirEntry.
+// Name comparison is case-insensitive for FAT32.
+bool find_in_dir(uint8_t volumeIndex, const char* name, DirEntry* out);
+
+// Lookup a file by full path relative to volume root.
+// Traverses directories as needed.
+// Returns true if found, fills out the DirEntry.
+bool lookup_path(uint8_t volumeIndex, const char* path, DirEntry* out);
+
 } // namespace fs_fat
 } // namespace kernel
 

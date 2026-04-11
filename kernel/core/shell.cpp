@@ -13,6 +13,9 @@
 #include "include/kernel/udp.h"
 #include "include/kernel/dns.h"
 #include "include/kernel/dhcp.h"
+#include "include/kernel/vfs.h"
+#include "include/kernel/block_device.h"
+#include "include/kernel/fs_fat.h"
 
 // Forward declarations for power functions (defined in desktop.cpp, outside any namespace)
 extern void perform_shutdown();
@@ -850,6 +853,296 @@ static void cmd_lsusb() {
     output_string("Bus 001 Device 001: ID 0000:0000 guideXOS Virtual Hub\n");
     output_string("Bus 001 Device 002: ID 0627:0001 USB Keyboard\n");
     output_string("Bus 001 Device 003: ID 0627:0001 USB Mouse\n");
+}
+
+// ============================================================
+// Filesystem Test Commands (Phase 7.5)
+// ============================================================
+
+static void cmd_vfsmount(const char* path, const char* devIdx) {
+    if (!path || path[0] == '\0') {
+        output_string("Usage: vfsmount <path> <block_dev_index>\n");
+        output_string("Example: vfsmount / 0\n");
+        return;
+    }
+    
+    // Parse device index
+    uint8_t idx = 0;
+    if (devIdx && devIdx[0] >= '0' && devIdx[0] <= '9') {
+        idx = devIdx[0] - '0';
+    }
+    
+    output_string("Mounting block device ");
+    char numStr[4] = {'0' + idx, '\0'};
+    output_string(numStr);
+    output_string(" at ");
+    output_string(path);
+    output_string("...\n");
+    
+    uint8_t mountIdx = vfs::mount(path, idx);
+    if (mountIdx != 0xFF) {
+        output_string("Mount successful (index ");
+        numStr[0] = '0' + mountIdx;
+        output_string(numStr);
+        output_string(")\n");
+        
+        // Show filesystem type
+        const vfs::MountPoint* mp = vfs::get_mount_by_index(mountIdx);
+        if (mp) {
+            output_string("Filesystem type: ");
+            output_string(vfs::fs_type_name(mp->fsType));
+            output_string("\n");
+        }
+    } else {
+        output_string("Mount failed!\n");
+    }
+}
+
+static void cmd_vfsls(const char* path) {
+    const char* targetPath = (path && path[0] != '\0') ? path : "/";
+    
+    output_string("Directory listing: ");
+    output_string(targetPath);
+    output_string("\n\n");
+    
+    uint8_t dirHandle = vfs::opendir(targetPath);
+    if (dirHandle == 0xFF) {
+        output_string("Cannot open directory\n");
+        return;
+    }
+    
+    vfs::DirEntry entry;
+    int count = 0;
+    while (vfs::readdir(dirHandle, &entry)) {
+        // Type indicator
+        if (entry.type == vfs::FILE_TYPE_DIRECTORY) {
+            output_string("[DIR]  ");
+        } else {
+            output_string("[FILE] ");
+        }
+        
+        // Name
+        output_string(entry.name);
+        
+        // Size for files
+        if (entry.type != vfs::FILE_TYPE_DIRECTORY) {
+            output_string("  (");
+            // Format size
+            char sizeStr[16];
+            uint64_t sz = entry.size;
+            int i = 0;
+            if (sz == 0) { sizeStr[i++] = '0'; }
+            else {
+                char tmp[16];
+                int j = 0;
+                while (sz > 0) { tmp[j++] = '0' + (sz % 10); sz /= 10; }
+                while (j > 0) { sizeStr[i++] = tmp[--j]; }
+            }
+            sizeStr[i] = '\0';
+            output_string(sizeStr);
+            output_string(" bytes)");
+        }
+        
+        output_string("\n");
+        count++;
+    }
+    
+    vfs::closedir(dirHandle);
+    
+    output_string("\nTotal: ");
+    char countStr[8];
+    countStr[0] = '0' + (count / 10) % 10;
+    countStr[1] = '0' + count % 10;
+    countStr[2] = '\0';
+    output_string(countStr);
+    output_string(" entries\n");
+}
+
+static void cmd_vfscat(const char* path) {
+    if (!path || path[0] == '\0') {
+        output_string("Usage: vfscat <filepath>\n");
+        return;
+    }
+    
+    output_string("Reading file: ");
+    output_string(path);
+    output_string("\n\n");
+    
+    uint8_t handle = vfs::open(path, vfs::OPEN_READ);
+    if (handle == 0xFF) {
+        output_string("Cannot open file\n");
+        return;
+    }
+    
+    // Read file in chunks
+    char buffer[513];  // 512 bytes + null terminator
+    int32_t totalRead = 0;
+    int32_t bytesRead;
+    
+    while ((bytesRead = vfs::read(handle, buffer, 512)) > 0) {
+        buffer[bytesRead] = '\0';
+        output_string(buffer);
+        totalRead += bytesRead;
+    }
+    
+    vfs::close(handle);
+    
+    output_string("\n\n--- End of file (");
+    char sizeStr[16];
+    int i = 0;
+    int32_t sz = totalRead;
+    if (sz == 0) { sizeStr[i++] = '0'; }
+    else {
+        char tmp[16];
+        int j = 0;
+        while (sz > 0) { tmp[j++] = '0' + (sz % 10); sz /= 10; }
+        while (j > 0) { sizeStr[i++] = tmp[--j]; }
+    }
+    sizeStr[i] = '\0';
+    output_string(sizeStr);
+    output_string(" bytes read) ---\n");
+}
+
+static void cmd_vfsstat(const char* path) {
+    if (!path || path[0] == '\0') {
+        output_string("Usage: vfsstat <filepath>\n");
+        return;
+    }
+    
+    vfs::FileInfo info;
+    vfs::Status st = vfs::stat(path, &info);
+    
+    if (st != vfs::VFS_OK) {
+        output_string("Cannot stat file: ");
+        output_string(path);
+        output_string("\n");
+        return;
+    }
+    
+    output_string("File: ");
+    output_string(path);
+    output_string("\n");
+    
+    output_string("Name: ");
+    output_string(info.name);
+    output_string("\n");
+    
+    output_string("Type: ");
+    switch (info.type) {
+        case vfs::FILE_TYPE_REGULAR:   output_string("Regular file\n"); break;
+        case vfs::FILE_TYPE_DIRECTORY: output_string("Directory\n"); break;
+        default:                       output_string("Unknown\n"); break;
+    }
+    
+    output_string("Size: ");
+    char sizeStr[16];
+    uint64_t sz = info.size;
+    int i = 0;
+    if (sz == 0) { sizeStr[i++] = '0'; }
+    else {
+        char tmp[16];
+        int j = 0;
+        while (sz > 0) { tmp[j++] = '0' + (sz % 10); sz /= 10; }
+        while (j > 0) { sizeStr[i++] = tmp[--j]; }
+    }
+    sizeStr[i] = '\0';
+    output_string(sizeStr);
+    output_string(" bytes\n");
+}
+
+static void cmd_vfstest() {
+    output_string("=== VFS Filesystem Test Suite ===\n\n");
+    
+    // Test 1: Check block devices
+    output_string("1. Checking block devices...\n");
+    uint8_t devCount = block::device_count();
+    output_string("   Block devices found: ");
+    char countStr[4] = {'0' + devCount, '\0'};
+    output_string(countStr);
+    output_string("\n");
+    
+    if (devCount == 0) {
+        output_string("   ERROR: No block devices available!\n");
+        output_string("   Make sure disk images are attached to QEMU.\n");
+        return;
+    }
+    
+    // List block devices
+    for (uint8_t i = 0; i < 16 && i < devCount; i++) {
+        const block::BlockDevice* dev = block::get_device(i);
+        if (dev && dev->active) {
+            output_string("   Device ");
+            char idxStr[4] = {'0' + i, ':', ' ', '\0'};
+            output_string(idxStr);
+            output_string(dev->name);
+            output_string("\n");
+        }
+    }
+    
+    // Test 2: Check mounts
+    output_string("\n2. Checking mount points...\n");
+    uint8_t mountCount = vfs::mount_count();
+    output_string("   Active mounts: ");
+    countStr[0] = '0' + mountCount;
+    output_string(countStr);
+    output_string("\n");
+    
+    if (mountCount == 0) {
+        output_string("   No filesystems mounted.\n");
+        output_string("   Try: vfsmount / 0\n");
+        return;
+    }
+    
+    // List mounts
+    for (uint8_t i = 0; i < 8; i++) {
+        const vfs::MountPoint* mp = vfs::get_mount_by_index(i);
+        if (mp && mp->active) {
+            output_string("   ");
+            output_string(mp->path);
+            output_string(" -> ");
+            output_string(vfs::fs_type_name(mp->fsType));
+            output_string("\n");
+        }
+    }
+    
+    // Test 3: Try to read a test file
+    output_string("\n3. Testing file read...\n");
+    output_string("   Attempting to open /test.txt...\n");
+    
+    uint8_t handle = vfs::open("/test.txt", vfs::OPEN_READ);
+    if (handle != 0xFF) {
+        char buf[64];
+        int32_t bytesRead = vfs::read(handle, buf, 63);
+        vfs::close(handle);
+        
+        if (bytesRead > 0) {
+            buf[bytesRead] = '\0';
+            output_string("   SUCCESS! Read ");
+            char numStr[8];
+            int i = 0;
+            int32_t n = bytesRead;
+            if (n == 0) { numStr[i++] = '0'; }
+            else {
+                char tmp[8];
+                int j = 0;
+                while (n > 0) { tmp[j++] = '0' + (n % 10); n /= 10; }
+                while (j > 0) { numStr[i++] = tmp[--j]; }
+            }
+            numStr[i] = '\0';
+            output_string(numStr);
+            output_string(" bytes\n");
+            output_string("   Content: ");
+            output_string(buf);
+            output_string("\n");
+        } else {
+            output_string("   File opened but read returned 0 bytes\n");
+        }
+    } else {
+        output_string("   Could not open /test.txt\n");
+        output_string("   (This is OK if the file doesn't exist)\n");
+    }
+    
+    output_string("\n=== Test complete ===\n");
 }
 
 // ============================================================
@@ -2133,6 +2426,18 @@ static void execute_command(const char* cmd) {
         cmd_lspci();
     } else if (str_eq(command, "lsusb")) {
         cmd_lsusb();
+    }
+    // Filesystem test commands (Phase 7.5)
+    else if (str_eq(command, "vfsmount")) {
+        cmd_vfsmount(arg1, argCount > 2 ? args[2] : "0");
+    } else if (str_eq(command, "vfsls")) {
+        cmd_vfsls(arg1);
+    } else if (str_eq(command, "vfscat")) {
+        cmd_vfscat(arg1);
+    } else if (str_eq(command, "vfsstat")) {
+        cmd_vfsstat(arg1);
+    } else if (str_eq(command, "vfstest")) {
+        cmd_vfstest();
     }
     // Network commands
     else if (str_eq(command, "ping")) {

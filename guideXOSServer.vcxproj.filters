@@ -1194,8 +1194,19 @@
     <None Include="kernel\arch\arm64\boot.S" />
     <None Include="kernel\arch\arm64\Makefile.arch" />
     <None Include="kernel\arch\arm64\linker.ld" />
+    <None Include="docs\PHASE8_UNIVERSAL_BINARY_SYSTEM.md" />
+    <None Include="docs\SDK_ARCHITECTURE.md" />
+    <None Include="docs\GXAPP_FORMAT_SPEC.md" />
+    <None Include="docs\PHASE7.5_FILESYSTEM_SHAKEDOWN.md" />
+    <None Include="scripts\create-test-disks.sh" />
+    <None Include="scripts\create-test-disks.ps1" />
+    <None Include="scripts\run-qemu-fs-test.sh" />
+    <None Include="scripts\run-qemu-fs-test.ps1" />
   </ItemGroup>
   <ItemGroup>
     <Text Include="scripts\build-and-run-sparcv8_in_linux.sh" />
+    <Text Include="docs\Development Priorities.txt" />
+    <Text Include="docs\guideXOSServer_UniversalBinarySystem.txt" />
+    <Text Include="docs\Other_Random_Development_Priorities.txt" />
   </ItemGroup>
 </Project>

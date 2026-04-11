@@ -559,7 +559,9 @@ uint8_t open(const char* path, uint16_t flags)
     MountPoint* mount = find_mount_for_path(path);
     if (!mount) {
 #if defined(__GNUC__) || defined(__clang__)
-        serial::puts("[VFS] ERROR: No mount point for path\n");
+        serial::puts("[VFS] ERROR: No mount point for path: ");
+        serial::puts(path);
+        serial::puts("\n");
 #endif
         return 0xFF;
     }
@@ -574,32 +576,87 @@ uint8_t open(const char* path, uint16_t flags)
     }
     
     if (handle == 0xFF) {
+#if defined(__GNUC__) || defined(__clang__)
+        serial::puts("[VFS] ERROR: No free file handles\n");
+#endif
         return 0xFF;
     }
     
-    // Get relative path (for future use with non-root directory access)
+    // Get path relative to mount point
     const char* relPath = get_relative_path(path, mount);
-    (void)relPath;  // Currently unused; will be used for subdirectory access
     
     // Open via filesystem driver
     uint8_t fsHandle = 0xFF;
     uint64_t fileSize = 0;
+    bool found = false;
     
     switch (mount->fsType) {
         case FS_TYPE_FAT32:
-        case FS_TYPE_EXFAT:
-            // FAT uses cluster-based open, need to find file first
-            // For now, simplified implementation
-            // In full implementation, we'd traverse directories
+        case FS_TYPE_EXFAT: {
+            // Use lookup_path to find the file
+            fs_fat::DirEntry entry;
+            if (fs_fat::lookup_path(mount->fsVolumeIndex, relPath, &entry)) {
+                // Check if it's a directory when we want a file
+                if (entry.isDir && (flags & OPEN_WRITE)) {
+                    // Cannot open directory for writing
+#if defined(__GNUC__) || defined(__clang__)
+                    serial::puts("[VFS] ERROR: Cannot open directory for writing\n");
+#endif
+                    return 0xFF;
+                }
+                
+                // Open the file
+                fsHandle = fs_fat::open_file(mount->fsVolumeIndex,
+                                             entry.firstCluster,
+                                             entry.fileSize,
+                                             entry.attr);
+                if (fsHandle != 0xFF) {
+                    fileSize = entry.fileSize;
+                    found = true;
+#if defined(__GNUC__) || defined(__clang__)
+                    serial::puts("[VFS] Opened: ");
+                    serial::puts(path);
+                    serial::puts("\n");
+#endif
+                }
+            } else {
+                // File not found - check if we should create it
+                if (flags & OPEN_CREATE) {
+                    // TODO: File creation not yet implemented
+#if defined(__GNUC__) || defined(__clang__)
+                    serial::puts("[VFS] ERROR: File creation not implemented\n");
+#endif
+                    return 0xFF;
+                }
+#if defined(__GNUC__) || defined(__clang__)
+                serial::puts("[VFS] ERROR: File not found: ");
+                serial::puts(path);
+                serial::puts("\n");
+#endif
+                return 0xFF;
+            }
             break;
+        }
             
         case FS_TYPE_EXT2:
-        case FS_TYPE_EXT4:
-            // ext4 uses inode-based open
-            break;
+        case FS_TYPE_EXT4: {
+            // ext4 path lookup - simplified for now
+            // TODO: Implement ext4::lookup_path similar to FAT
+#if defined(__GNUC__) || defined(__clang__)
+            serial::puts("[VFS] ext4 path lookup not fully implemented\n");
+#endif
+            return 0xFF;
+        }
             
         default:
-            break;
+#if defined(__GNUC__) || defined(__clang__)
+            serial::puts("[VFS] ERROR: Unsupported filesystem type\n");
+#endif
+            return 0xFF;
+    }
+    
+    if (!found) {
+        return 0xFF;
     }
     
     // Initialize handle
@@ -903,10 +960,45 @@ Status stat(const char* path, FileInfo* info)
     MountPoint* mount = find_mount_for_path(path);
     if (!mount) return VFS_ERR_NOT_MOUNT;
     
-    // For now, basic implementation
-    // Full implementation would query the filesystem
+    // Get path relative to mount point
+    const char* relPath = get_relative_path(path, mount);
     
-    return VFS_ERR_NOT_SUPPORTED;
+    // Zero-initialize the output
+    memzero(info, sizeof(FileInfo));
+    
+    switch (mount->fsType) {
+        case FS_TYPE_FAT32:
+        case FS_TYPE_EXFAT: {
+            fs_fat::DirEntry entry;
+            if (!fs_fat::lookup_path(mount->fsVolumeIndex, relPath, &entry)) {
+                return VFS_ERR_NOT_FOUND;
+            }
+            
+            // Fill in FileInfo from DirEntry
+            strcopy(info->name, entry.name, sizeof(info->name));
+            info->type = entry.isDir ? FILE_TYPE_DIRECTORY : FILE_TYPE_REGULAR;
+            info->size = entry.fileSize;
+            info->permissions = 0755;  // Default permissions for FAT
+            if (entry.attr & 0x01) info->permissions &= ~0222;  // Read-only
+            info->createDate = entry.crtDate;
+            info->createTime = entry.crtTime;
+            info->modifyDate = entry.wrtDate;
+            info->modifyTime = entry.wrtTime;
+            info->accessDate = entry.wrtDate;  // FAT doesn't store access time accurately
+            info->accessTime = entry.wrtTime;
+            
+            return VFS_OK;
+        }
+        
+        case FS_TYPE_EXT2:
+        case FS_TYPE_EXT4: {
+            // TODO: Implement ext4 stat
+            return VFS_ERR_NOT_SUPPORTED;
+        }
+        
+        default:
+            return VFS_ERR_NOT_SUPPORTED;
+    }
 }
 
 Status unlink(const char* path)

@@ -513,6 +513,10 @@
     <None Include="Directory.Build.props" />
     <None Include="Directory.Build.targets" />
     <None Include="docs\BUILD_GUIDE.md" />
+    <None Include="docs\GXAPP_FORMAT_SPEC.md" />
+    <None Include="docs\PHASE7.5_FILESYSTEM_SHAKEDOWN.md" />
+    <None Include="docs\PHASE8_UNIVERSAL_BINARY_SYSTEM.md" />
+    <None Include="docs\SDK_ARCHITECTURE.md" />
     <None Include="ESP\startup.nsh" />
     <None Include="fix-trampoline.ps1" />
     <None Include="guideXOSKernel.vcxproj" />
@@ -565,8 +569,12 @@
     <None Include="scripts\build-ia64.sh" />
     <None Include="scripts\build-sparcv9.sh" />
     <None Include="scripts\check-multiboot.bat" />
+    <None Include="scripts\create-test-disks.ps1" />
+    <None Include="scripts\create-test-disks.sh" />
     <None Include="scripts\diagnose-qemu.bat" />
     <None Include="scripts\run-ia64_in_linux.sh" />
+    <None Include="scripts\run-qemu-fs-test.ps1" />
+    <None Include="scripts\run-qemu-fs-test.sh" />
     <None Include="scripts\run-qemu-x86-vnc.bat" />
     <None Include="scripts\run-qemu-x86-vnc.sh" />
     <None Include="scripts\run-qemu-x86-with-build.bat" />
@@ -583,6 +591,9 @@
     <None Include="_fix_filters_audio.py" />
   </ItemGroup>
   <ItemGroup>
+    <Text Include="docs\Development Priorities.txt" />
+    <Text Include="docs\guideXOSServer_UniversalBinarySystem.txt" />
+    <Text Include="docs\Other_Random_Development_Priorities.txt" />
     <Text Include="scripts\build-and-run-sparcv8_in_linux.sh" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

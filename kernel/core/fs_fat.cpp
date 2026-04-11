@@ -456,5 +456,128 @@ const FATVolume* get_volume(uint8_t volumeIndex)
     return &s_volumes[volumeIndex];
 }
 
+// ================================================================
+// Directory traversal by path (new functions for VFS integration)
+// ================================================================
+
+// Case-insensitive character comparison for FAT32
+static char to_upper(char c)
+{
+    if (c >= 'a' && c <= 'z') return c - 32;
+    return c;
+}
+
+static bool name_matches(const char* a, const char* b)
+{
+    while (*a && *b) {
+        if (to_upper(*a) != to_upper(*b)) return false;
+        ++a;
+        ++b;
+    }
+    return *a == *b;  // Both must be at end
+}
+
+bool open_dir(uint8_t volumeIndex, uint32_t dirCluster)
+{
+    if (volumeIndex >= MAX_FAT_VOLUMES) return false;
+    if (!s_volumes[volumeIndex].mounted) return false;
+    
+    s_dirIter.active          = true;
+    s_dirIter.volIdx          = volumeIndex;
+    s_dirIter.cluster         = dirCluster;
+    s_dirIter.sectorInCluster = 0;
+    s_dirIter.entryInSector   = 0;
+    return true;
+}
+
+bool find_in_dir(uint8_t volumeIndex, const char* name, DirEntry* out)
+{
+    if (!s_dirIter.active || s_dirIter.volIdx != volumeIndex) return false;
+    if (!name || !out) return false;
+    
+    DirEntry entry;
+    while (read_dir(volumeIndex, &entry)) {
+        if (name_matches(entry.name, name)) {
+            memcopy(out, &entry, sizeof(DirEntry));
+            s_dirIter.active = false;  // Close iteration
+            return true;
+        }
+    }
+    
+    return false;
+}
+
+bool lookup_path(uint8_t volumeIndex, const char* path, DirEntry* out)
+{
+    if (volumeIndex >= MAX_FAT_VOLUMES) return false;
+    if (!s_volumes[volumeIndex].mounted) return false;
+    if (!path || !out) return false;
+    
+    FATVolume& vol = s_volumes[volumeIndex];
+    
+    // Handle empty path or root
+    if (path[0] == '\0' || (path[0] == '/' && path[1] == '\0')) {
+        // Return root directory info
+        memzero(out, sizeof(DirEntry));
+        out->name[0] = '/';
+        out->name[1] = '\0';
+        out->firstCluster = vol.rootCluster;
+        out->fileSize = 0;
+        out->attr = ATTR_DIRECTORY;
+        out->isDir = true;
+        return true;
+    }
+    
+    // Skip leading slash
+    const char* p = path;
+    if (*p == '/') ++p;
+    
+    // Start at root cluster
+    uint32_t currentCluster = vol.rootCluster;
+    DirEntry entry;
+    
+    while (*p) {
+        // Extract next path component
+        char component[128];
+        int i = 0;
+        while (*p && *p != '/' && i < 127) {
+            component[i++] = *p++;
+        }
+        component[i] = '\0';
+        
+        // Skip trailing slashes
+        while (*p == '/') ++p;
+        
+        // Skip empty components
+        if (component[0] == '\0') continue;
+        
+        // Search in current directory
+        if (!open_dir(volumeIndex, currentCluster)) {
+            return false;
+        }
+        
+        if (!find_in_dir(volumeIndex, component, &entry)) {
+            return false;  // Not found
+        }
+        
+        // Check if this is the final component
+        if (*p == '\0') {
+            // Found it!
+            memcopy(out, &entry, sizeof(DirEntry));
+            return true;
+        }
+        
+        // Not the final component - must be a directory
+        if (!entry.isDir) {
+            return false;  // Path component is not a directory
+        }
+        
+        // Continue with this directory
+        currentCluster = entry.firstCluster;
+    }
+    
+    return false;
+}
+
 } // namespace fs_fat
 } // namespace kernel
