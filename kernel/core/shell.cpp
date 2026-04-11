@@ -280,18 +280,19 @@ static void cmd_help() {
     output_string("  pwd            - Print working directory\n");
     output_string("  cat, type      - Display file contents\n");
     output_string("  head, tail     - Show beginning/end of file\n");
-    output_string("  mkdir, md      - Create directory\n");
-    output_string("  rmdir, rd      - Remove directory\n");
-    output_string("  touch          - Create empty file\n");
-    output_string("  rm, del        - Remove file\n");
-    output_string("  cp, copy       - Copy file\n");
-    output_string("  mv, ren        - Move/rename file\n");
-    output_string("  find           - Search for files\n");
-    output_string("  grep           - Search file contents\n");
-    output_string("  wc             - Word/line count\n");
+    output_string("  mkdir, md      - Create directory (not impl)\n");
+    output_string("  touch          - Create empty file (not impl)\n");
+    output_string("  rm, del        - Remove file (not impl)\n");
     output_string("  df             - Disk space usage\n");
     output_string("  stat           - File status\n");
-    output_string("  file           - Determine file type\n");
+    output_string("\n");
+    output_string("VFS Commands (Phase 7.5):\n");
+    output_string("  vfsinfo        - Show filesystems and mounts\n");
+    output_string("  vfsmount / <n> - Mount block device n at /\n");
+    output_string("  vfsls [path]   - List directory via VFS\n");
+    output_string("  vfscat <file>  - Display file via VFS\n");
+    output_string("  vfsstat <file> - File info via VFS\n");
+    output_string("  vfstest        - Run filesystem tests\n");
     output_string("\n");
     output_string("System Info:\n");
     output_string("  neofetch       - System info with logo\n");
@@ -371,30 +372,155 @@ static void cmd_pwd() {
 }
 
 static void cmd_ls(const char* path) {
-    (void)path;  // TODO: implement VFS listing
-    output_string("bin/\n");
-    output_string("dev/\n");
-    output_string("etc/\n");
-    output_string("home/\n");
-    output_string("proc/\n");
-    output_string("sys/\n");
-    output_string("tmp/\n");
-    output_string("usr/\n");
-    output_string("var/\n");
+    // Determine target path - use argument if provided, else current directory
+    char targetPath[256];
+    if (path && path[0] != '\0') {
+        if (path[0] == '/') {
+            // Absolute path
+            str_copy(targetPath, path, 256);
+        } else {
+            // Relative path - combine with cwd
+            str_copy(targetPath, s_cwd, 256);
+            int len = str_len(targetPath);
+            if (len > 1 && targetPath[len-1] != '/') {
+                targetPath[len++] = '/';
+            }
+            str_copy(targetPath + len, path, 256 - len);
+        }
+    } else {
+        str_copy(targetPath, s_cwd, 256);
+    }
+    
+    // Try to open directory via VFS
+    uint8_t dirHandle = vfs::opendir(targetPath);
+    if (dirHandle == 0xFF) {
+        // VFS not mounted or directory not found - show fallback
+        output_string("ls: cannot access '");
+        output_string(targetPath);
+        output_string("': No filesystem mounted\n");
+        output_string("Use 'vfsmount / <device>' to mount a filesystem first\n");
+        return;
+    }
+    
+    vfs::DirEntry entry;
+    int count = 0;
+    
+    while (vfs::readdir(dirHandle, &entry)) {
+        // Skip . and .. entries
+        if (entry.name[0] == '.' && (entry.name[1] == '\0' || 
+            (entry.name[1] == '.' && entry.name[2] == '\0'))) {
+            continue;
+        }
+        
+        // Format output
+        if (entry.type == vfs::FILE_TYPE_DIRECTORY) {
+            output_string(entry.name);
+            output_string("/\n");
+        } else {
+            output_string(entry.name);
+            output_string("\n");
+        }
+        count++;
+    }
+    
+    vfs::closedir(dirHandle);
+    
+    if (count == 0) {
+        output_string("(empty directory)\n");
+    }
 }
 
 static void cmd_ll(const char* path) {
-    (void)path;
-    output_string("total 9\n");
-    output_string("drwxr-xr-x  2 root root  4096 Jan  1 00:00 bin/\n");
-    output_string("drwxr-xr-x  3 root root  4096 Jan  1 00:00 dev/\n");
-    output_string("drwxr-xr-x  2 root root  4096 Jan  1 00:00 etc/\n");
-    output_string("drwxr-xr-x  2 root root  4096 Jan  1 00:00 home/\n");
-    output_string("dr-xr-xr-x  1 root root     0 Jan  1 00:00 proc/\n");
-    output_string("dr-xr-xr-x  1 root root     0 Jan  1 00:00 sys/\n");
-    output_string("drwxrwxrwt  2 root root  4096 Jan  1 00:00 tmp/\n");
-    output_string("drwxr-xr-x  4 root root  4096 Jan  1 00:00 usr/\n");
-    output_string("drwxr-xr-x  3 root root  4096 Jan  1 00:00 var/\n");
+    // Determine target path
+    char targetPath[256];
+    if (path && path[0] != '\0') {
+        if (path[0] == '/') {
+            str_copy(targetPath, path, 256);
+        } else {
+            str_copy(targetPath, s_cwd, 256);
+            int len = str_len(targetPath);
+            if (len > 1 && targetPath[len-1] != '/') {
+                targetPath[len++] = '/';
+            }
+            str_copy(targetPath + len, path, 256 - len);
+        }
+    } else {
+        str_copy(targetPath, s_cwd, 256);
+    }
+    
+    // Try to open directory via VFS
+    uint8_t dirHandle = vfs::opendir(targetPath);
+    if (dirHandle == 0xFF) {
+        output_string("ls: cannot access '");
+        output_string(targetPath);
+        output_string("': No filesystem mounted\n");
+        return;
+    }
+    
+    vfs::DirEntry entry;
+    int count = 0;
+    uint64_t totalSize = 0;
+    
+    while (vfs::readdir(dirHandle, &entry)) {
+        // Skip . and .. entries
+        if (entry.name[0] == '.' && (entry.name[1] == '\0' || 
+            (entry.name[1] == '.' && entry.name[2] == '\0'))) {
+            continue;
+        }
+        
+        // Permission string
+        if (entry.type == vfs::FILE_TYPE_DIRECTORY) {
+            output_string("drwxr-xr-x  ");
+        } else {
+            if (entry.isReadOnly) {
+                output_string("-r--r--r--  ");
+            } else {
+                output_string("-rw-r--r--  ");
+            }
+        }
+        
+        // Owner/group
+        output_string("1 root root  ");
+        
+        // Size (right-aligned in 8 chars)
+        char sizeStr[16];
+        uint64_t sz = entry.size;
+        int i = 0;
+        if (sz == 0) { sizeStr[i++] = '0'; }
+        else {
+            char tmp[16];
+            int j = 0;
+            while (sz > 0) { tmp[j++] = '0' + (sz % 10); sz /= 10; }
+            while (j > 0) { sizeStr[i++] = tmp[--j]; }
+        }
+        sizeStr[i] = '\0';
+        // Pad to 8 chars
+        int padding = 8 - i;
+        while (padding-- > 0) output_string(" ");
+        output_string(sizeStr);
+        
+        output_string(" Jan  1 00:00 ");
+        output_string(entry.name);
+        
+        if (entry.type == vfs::FILE_TYPE_DIRECTORY) {
+            output_string("/");
+        }
+        output_string("\n");
+        
+        count++;
+        totalSize += entry.size;
+    }
+    
+    vfs::closedir(dirHandle);
+    
+    // Print total
+    output_string("total ");
+    char countStr[8];
+    countStr[0] = '0' + (count / 10) % 10;
+    countStr[1] = '0' + count % 10;
+    countStr[2] = '\0';
+    output_string(countStr);
+    output_string("\n");
 }
 
 static void cmd_cd(const char* path) {
@@ -426,10 +552,48 @@ static void cmd_cat(const char* filename) {
         output_string("cat: missing operand\n");
         return;
     }
-    // TODO: implement VFS file reading
-    output_string("cat: ");
-    output_string(filename);
-    output_string(": No such file or directory\n");
+    
+    // Build full path
+    char fullPath[256];
+    if (filename[0] == '/') {
+        // Absolute path
+        str_copy(fullPath, filename, 256);
+    } else {
+        // Relative path - combine with cwd
+        str_copy(fullPath, s_cwd, 256);
+        int len = str_len(fullPath);
+        if (len > 1 && fullPath[len-1] != '/') {
+            fullPath[len++] = '/';
+        }
+        str_copy(fullPath + len, filename, 256 - len);
+    }
+    
+    // Try to open file via VFS
+    uint8_t handle = vfs::open(fullPath, vfs::OPEN_READ);
+    if (handle == 0xFF) {
+        output_string("cat: ");
+        output_string(fullPath);
+        output_string(": No such file or directory\n");
+        return;
+    }
+    
+    // Read and display file contents
+    char buffer[513];  // 512 bytes + null terminator
+    int32_t bytesRead;
+    int32_t totalRead = 0;
+    
+    while ((bytesRead = vfs::read(handle, buffer, 512)) > 0) {
+        buffer[bytesRead] = '\0';
+        output_string(buffer);
+        totalRead += bytesRead;
+    }
+    
+    vfs::close(handle);
+    
+    // Add newline if file didn't end with one
+    if (totalRead > 0) {
+        output_string("\n");
+    }
 }
 
 static void cmd_echo(const char* text) {
@@ -1143,6 +1307,75 @@ static void cmd_vfstest() {
     }
     
     output_string("\n=== Test complete ===\n");
+}
+
+static void cmd_vfsinfo() {
+    output_string("=== Filesystem Information ===\n\n");
+    
+    // Block devices
+    output_string("Block Devices:\n");
+    uint8_t devCount = block::device_count();
+    char numStr[8];
+    numStr[0] = '0' + devCount;
+    numStr[1] = '\0';
+    output_string("  Total: ");
+    output_string(numStr);
+    output_string("\n");
+    
+    for (uint8_t i = 0; i < 16; i++) {
+        const block::BlockDevice* dev = block::get_device(i);
+        if (dev && dev->active) {
+            output_string("  [");
+            char idxStr[4] = {'0' + i, ']', ' ', '\0'};
+            output_string(idxStr);
+            output_string(dev->name);
+            output_string(" - ");
+            
+            // Size in MB
+            uint64_t sizeBytes = dev->totalSectors * dev->sectorSize;
+            uint32_t sizeMB = static_cast<uint32_t>(sizeBytes / (1024 * 1024));
+            char sizeStr[16];
+            int si = 0;
+            if (sizeMB == 0) { sizeStr[si++] = '0'; }
+            else {
+                char tmp[16];
+                int sj = 0;
+                while (sizeMB > 0) { tmp[sj++] = '0' + (sizeMB % 10); sizeMB /= 10; }
+                while (sj > 0) { sizeStr[si++] = tmp[--sj]; }
+            }
+            sizeStr[si] = '\0';
+            output_string(sizeStr);
+            output_string(" MB\n");
+        }
+    }
+    
+    output_string("\nMount Points:\n");
+    uint8_t mountCount = vfs::mount_count();
+    numStr[0] = '0' + mountCount;
+    output_string("  Active mounts: ");
+    output_string(numStr);
+    output_string("\n");
+    
+    for (uint8_t i = 0; i < 8; i++) {
+        const vfs::MountPoint* mp = vfs::get_mount_by_index(i);
+        if (mp && mp->active) {
+            output_string("  ");
+            output_string(mp->path);
+            output_string(" -> ");
+            output_string(vfs::fs_type_name(mp->fsType));
+            output_string(" (device ");
+            char devStr[4] = {'0' + mp->blockDevIndex, ')', '\0'};
+            output_string(devStr);
+            output_string("\n");
+        }
+    }
+    
+    if (mountCount == 0) {
+        output_string("  (no filesystems mounted)\n");
+        output_string("\n  Tip: Use 'vfsmount / <device_num>' to mount\n");
+    }
+    
+    output_string("\n");
 }
 
 // ============================================================
@@ -2438,6 +2671,8 @@ static void execute_command(const char* cmd) {
         cmd_vfsstat(arg1);
     } else if (str_eq(command, "vfstest")) {
         cmd_vfstest();
+    } else if (str_eq(command, "vfsinfo")) {
+        cmd_vfsinfo();
     }
     // Network commands
     else if (str_eq(command, "ping")) {

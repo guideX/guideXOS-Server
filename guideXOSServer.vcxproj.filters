@@ -1202,6 +1202,8 @@
     <None Include="scripts\create-test-disks.ps1" />
     <None Include="scripts\run-qemu-fs-test.sh" />
     <None Include="scripts\run-qemu-fs-test.ps1" />
+    <None Include="disks\test-ext4.img" />
+    <None Include="disks\test-fat32.img" />
   </ItemGroup>
   <ItemGroup>
     <Text Include="scripts\build-and-run-sparcv8_in_linux.sh" />

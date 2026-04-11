@@ -845,21 +845,45 @@ uint8_t opendir(const char* path)
     strcopy(di.path, path, sizeof(di.path));
     di.index = 0;
     
-    // Open root directory via filesystem
+    // Get path relative to mount point
     const char* relPath = get_relative_path(path, mount);
-    (void)relPath;  // Currently unused; will be used for subdirectory access
     
     switch (mount->fsType) {
         case FS_TYPE_FAT32:
-        case FS_TYPE_EXFAT:
-            if (!fs_fat::open_root_dir(mount->fsVolumeIndex)) {
-                di.active = false;
-                return 0xFF;
+        case FS_TYPE_EXFAT: {
+            // If path is root or empty, open root directory
+            if (!relPath || relPath[0] == '\0' || 
+                (relPath[0] == '/' && relPath[1] == '\0')) {
+                if (!fs_fat::open_root_dir(mount->fsVolumeIndex)) {
+                    di.active = false;
+                    return 0xFF;
+                }
+            } else {
+                // Lookup the directory by path
+                fs_fat::DirEntry dirEntry;
+                if (!fs_fat::lookup_path(mount->fsVolumeIndex, relPath, &dirEntry)) {
+                    di.active = false;
+                    return 0xFF;  // Directory not found
+                }
+                
+                // Must be a directory
+                if (!dirEntry.isDir) {
+                    di.active = false;
+                    return 0xFF;  // Not a directory
+                }
+                
+                // Open the directory by its cluster
+                if (!fs_fat::open_dir(mount->fsVolumeIndex, dirEntry.firstCluster)) {
+                    di.active = false;
+                    return 0xFF;
+                }
             }
             break;
+        }
             
         case FS_TYPE_EXT2:
         case FS_TYPE_EXT4:
+            // ext4 subdirectory support not yet implemented
             if (!fs_ext4::open_root_dir(mount->fsVolumeIndex)) {
                 di.active = false;
                 return 0xFF;

@@ -178,19 +178,22 @@ function Main {
     Write-Host "Attached test disks:" -ForegroundColor Cyan
     if ($UseFat32) {
         $fat32Path = Join-Path $DiskDir "test-fat32.img"
-        Write-Host "  SATA Port 1: $fat32Path (FAT32)"
+        Write-Host "  IDE index 2 (secondary master): $fat32Path (FAT32)"
+        Write-Host "    -> Will appear as block device 1 (ata1m) after ram0"
     }
     if ($UseExt4) {
         $ext4Path = Join-Path $DiskDir "test-ext4.img"
-        Write-Host "  SATA Port 2: $ext4Path (ext4)"
+        Write-Host "  IDE index 3 (secondary slave): $ext4Path (ext4)"
+        Write-Host "    -> Will appear as block device 2 (ata1s)"
     }
     Write-Host ""
     
     # Build QEMU arguments
     $qemuArgs = @()
     
-    # Machine type (Q35 with AHCI for SATA)
-    $qemuArgs += "-machine", "q35,usb=off"
+    # Machine type - Q35 for UEFI support
+    # We'll add an explicit PIIX IDE controller for the test disks
+    $qemuArgs += "-machine", "q35"
     
     # UEFI firmware
     if ($ovmf.SplitMode) {
@@ -203,25 +206,23 @@ function Main {
     # ESP as FAT drive (bootloader + kernel)
     $qemuArgs += "-drive", "file=fat:rw:$EspDir,format=raw"
     
-    # Test disk images attached to AHCI controller (Q35 has built-in AHCI at 00:1f.2)
-    # Using "if=none" + "ide-hd" on ahci bus for SATA drives
+    # Add an explicit ISA IDE controller for test disks
+    # Q35 doesn't have legacy IDE by default, so we add a piix3-ide on the ISA bus
+    $qemuArgs += "-device", "piix3-ide,id=ide"
+    
+    # Test disk images attached as IDE drives (compatible with legacy ATA driver)
+    # Note: AHCI support is not yet implemented in the kernel, so we use IDE mode
     if ($UseFat32) {
         $fat32Path = Join-Path $DiskDir "test-fat32.img"
-        $qemuArgs += "-drive", "file=$fat32Path,format=raw,if=none,id=testdisk1"
-        $qemuArgs += "-device", "ahci,id=ahci0"
-        $qemuArgs += "-device", "ide-hd,drive=testdisk1,bus=ahci0.0"
+        # Attach to the IDE controller we just added
+        $qemuArgs += "-drive", "file=$fat32Path,format=raw,if=none,id=fat32disk"
+        $qemuArgs += "-device", "ide-hd,drive=fat32disk,bus=ide.0"
     }
     
     if ($UseExt4) {
         $ext4Path = Join-Path $DiskDir "test-ext4.img"
-        $qemuArgs += "-drive", "file=$ext4Path,format=raw,if=none,id=testdisk2"
-        if (-not $UseFat32) {
-            # Only add AHCI controller if not already added
-            $qemuArgs += "-device", "ahci,id=ahci0"
-            $qemuArgs += "-device", "ide-hd,drive=testdisk2,bus=ahci0.0"
-        } else {
-            $qemuArgs += "-device", "ide-hd,drive=testdisk2,bus=ahci0.1"
-        }
+        $qemuArgs += "-drive", "file=$ext4Path,format=raw,if=none,id=ext4disk"
+        $qemuArgs += "-device", "ide-hd,drive=ext4disk,bus=ide.1"
     }
     
     # Memory and display
@@ -247,9 +248,12 @@ function Main {
     
     Write-Host "=============================================="
     Write-Host "Filesystem Testing Quick Reference:" -ForegroundColor Cyan
-    Write-Host "  The test disks are attached as SATA/AHCI drives."
-    Write-Host "  In the shell, use 'lsblk' to list block devices."
-    Write-Host "  Serial debug output shows VFS mount operations."
+    Write-Host "  The test disks are attached as IDE drives."
+    Write-Host "  In the shell, use these commands:" -ForegroundColor White
+    Write-Host "    vfstest        - Run filesystem diagnostics"
+    Write-Host "    vfsmount / 1   - Mount FAT32 disk (device 1) at /"
+    Write-Host "    vfsls          - List files in mounted filesystem"
+    Write-Host "    vfscat /test.txt - Read a file"
     Write-Host ""
     Write-Host "  Mouse: Ctrl+Alt+G to grab/release"
     Write-Host "  Exit:  Close window or Ctrl+C in terminal"

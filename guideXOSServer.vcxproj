@@ -512,6 +512,8 @@
     <None Include="diagnose.bat" />
     <None Include="Directory.Build.props" />
     <None Include="Directory.Build.targets" />
+    <None Include="disks\test-ext4.img" />
+    <None Include="disks\test-fat32.img" />
     <None Include="docs\BUILD_GUIDE.md" />
     <None Include="docs\GXAPP_FORMAT_SPEC.md" />
     <None Include="docs\PHASE7.5_FILESYSTEM_SHAKEDOWN.md" />

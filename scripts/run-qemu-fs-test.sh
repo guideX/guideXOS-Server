@@ -198,25 +198,20 @@ main() {
         "-drive" "file=fat:rw:$ESP_DIR,format=raw"
     )
     
-    # Add AHCI controller for test disks
-    AHCI_ADDED=false
+    # Add an explicit ISA IDE controller for test disks
+    # Q35 doesn't have legacy IDE by default, so we add a piix3-ide on the ISA bus
+    QEMU_ARGS+=("-device" "piix3-ide,id=ide")
     
-    # Add test disk images to AHCI controller
+    # Add test disk images as IDE drives (compatible with legacy ATA driver)
+    # Note: AHCI support is not yet implemented in the kernel, so we use IDE mode
     if $USE_FAT32 && [ -f "$DISK_DIR/test-fat32.img" ]; then
-        QEMU_ARGS+=("-drive" "file=$DISK_DIR/test-fat32.img,format=raw,if=none,id=testdisk1")
-        QEMU_ARGS+=("-device" "ahci,id=ahci0")
-        QEMU_ARGS+=("-device" "ide-hd,drive=testdisk1,bus=ahci0.0")
-        AHCI_ADDED=true
+        QEMU_ARGS+=("-drive" "file=$DISK_DIR/test-fat32.img,format=raw,if=none,id=fat32disk")
+        QEMU_ARGS+=("-device" "ide-hd,drive=fat32disk,bus=ide.0")
     fi
     
     if $USE_EXT4 && [ -f "$DISK_DIR/test-ext4.img" ]; then
-        QEMU_ARGS+=("-drive" "file=$DISK_DIR/test-ext4.img,format=raw,if=none,id=testdisk2")
-        if ! $AHCI_ADDED; then
-            QEMU_ARGS+=("-device" "ahci,id=ahci0")
-            QEMU_ARGS+=("-device" "ide-hd,drive=testdisk2,bus=ahci0.0")
-        else
-            QEMU_ARGS+=("-device" "ide-hd,drive=testdisk2,bus=ahci0.1")
-        fi
+        QEMU_ARGS+=("-drive" "file=$DISK_DIR/test-ext4.img,format=raw,if=none,id=ext4disk")
+        QEMU_ARGS+=("-device" "ide-hd,drive=ext4disk,bus=ide.1")
     fi
     
     # Memory and display
@@ -239,9 +234,12 @@ main() {
     
     echo "=============================================="
     echo "Filesystem Testing Quick Reference:"
-    echo "  The test disks are attached as SATA/AHCI drives."
-    echo "  In the shell, use 'lsblk' to list block devices."
-    echo "  Serial debug output shows VFS mount operations."
+    echo "  The test disks are attached as IDE drives."
+    echo "  In the shell, use these commands:"
+    echo "    vfstest        - Run filesystem diagnostics"
+    echo "    vfsmount / 1   - Mount FAT32 disk (device 1) at /"
+    echo "    vfsls          - List files in mounted filesystem"
+    echo "    vfscat /test.txt - Read a file"
     echo ""
     echo "  Mouse: Ctrl+Alt+G to grab/release"
     echo "  Exit:  Close window or Ctrl+C in terminal"
@@ -253,9 +251,6 @@ main() {
     
     # Run QEMU
     qemu-system-x86_64 "${QEMU_ARGS[@]}"
-}
-
-main
 }
 
 main "$@"

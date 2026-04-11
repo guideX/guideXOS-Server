@@ -1,4 +1,5 @@
 @echo off
+@echo off
 REM
 REM Windows Build Script for guideXOS Kernel (x86)
 REM Alternative to GNU Make for Windows users
@@ -192,7 +193,7 @@ echo [OK] Directories created
 echo.
 
 REM Assemble boot.asm
-echo [1/10] Assembling boot.asm...
+echo Assembling boot.asm...
 %AS% %ASFLAGS% arch\%ARCH%\boot.asm -o "%OBJ_DIR%\arch\boot.o"
 if %errorlevel% neq 0 (
     echo [ERROR] Failed to assemble boot.asm
@@ -201,48 +202,8 @@ if %errorlevel% neq 0 (
 )
 echo [OK] boot.o created
 
-REM Compile main.cpp
-echo [2/10] Compiling main.cpp...
-%CXX% %CFLAGS% -c core\main.cpp -o "%OBJ_DIR%\core\main.o"
-if %errorlevel% neq 0 (
-    echo [ERROR] Failed to compile main.cpp
-    pause
-    exit /b 1
-)
-echo [OK] main.o created
-
-REM Compile vga.cpp
-echo [3/10] Compiling vga.cpp...
-%CXX% %CFLAGS% -c core\vga.cpp -o "%OBJ_DIR%\core\vga.o"
-if %errorlevel% neq 0 (
-    echo [ERROR] Failed to compile vga.cpp
-    pause
-    exit /b 1
-)
-echo [OK] vga.o created
-
-REM Compile framebuffer.cpp
-echo [4/10] Compiling framebuffer.cpp...
-%CXX% %CFLAGS% -c core\framebuffer.cpp -o "%OBJ_DIR%\core\framebuffer.o"
-if %errorlevel% neq 0 (
-    echo [ERROR] Failed to compile framebuffer.cpp
-    pause
-    exit /b 1
-)
-echo [OK] framebuffer.o created
-
-REM Compile arch.cpp (core)
-echo [5/10] Compiling core arch.cpp...
-%CXX% %CFLAGS% -c core\arch.cpp -o "%OBJ_DIR%\core\arch.o"
-if %errorlevel% neq 0 (
-    echo [ERROR] Failed to compile core arch.cpp
-    pause
-    exit /b 1
-)
-echo [OK] arch.o (core) created
-
-REM Compile arch.cpp (x86)
-echo [6/10] Compiling x86 arch.cpp...
+REM Compile x86 arch.cpp
+echo Compiling x86 arch.cpp...
 %CXX% %CFLAGS% -c arch\%ARCH%\arch.cpp -o "%OBJ_DIR%\arch\arch.o"
 if %errorlevel% neq 0 (
     echo [ERROR] Failed to compile x86 arch.cpp
@@ -251,49 +212,36 @@ if %errorlevel% neq 0 (
 )
 echo [OK] arch.o (x86) created
 
-REM Compile desktop.cpp
-echo [7/10] Compiling desktop.cpp...
-%CXX% %CFLAGS% -c core\desktop.cpp -o "%OBJ_DIR%\core\desktop.o"
-if %errorlevel% neq 0 (
-    echo [ERROR] Failed to compile desktop.cpp
-    pause
-    exit /b 1
-)
-echo [OK] desktop.o created
+REM Compile all core .cpp files
+echo.
+echo Compiling core source files...
+set "CORE_OBJS="
+set "COMPILE_ERRORS=0"
 
-REM Compile interrupts.cpp
-echo [8/10] Compiling interrupts.cpp...
-%CXX% %CFLAGS% -c core\interrupts.cpp -o "%OBJ_DIR%\core\interrupts.o"
-if %errorlevel% neq 0 (
-    echo [ERROR] Failed to compile interrupts.cpp
-    pause
-    exit /b 1
+for %%f in (core\*.cpp) do (
+    set "SRC=%%f"
+    set "OBJ=%OBJ_DIR%\core\%%~nf.o"
+    echo   Compiling %%~nxf...
+    %CXX% %CFLAGS% -c "%%f" -o "%OBJ_DIR%\core\%%~nf.o"
+    if !errorlevel! neq 0 (
+        echo   [ERROR] Failed to compile %%~nxf
+        set "COMPILE_ERRORS=1"
+    )
+    set "CORE_OBJS=!CORE_OBJS! "%OBJ_DIR%\core\%%~nf.o""
 )
-echo [OK] interrupts.o created
 
-REM Compile ps2mouse.cpp
-echo [9/10] Compiling ps2mouse.cpp...
-%CXX% %CFLAGS% -c core\ps2mouse.cpp -o "%OBJ_DIR%\core\ps2mouse.o"
-if %errorlevel% neq 0 (
-    echo [ERROR] Failed to compile ps2mouse.cpp
+if %COMPILE_ERRORS%==1 (
+    echo.
+    echo [ERROR] One or more files failed to compile
     pause
     exit /b 1
 )
-echo [OK] ps2mouse.o created
-
-REM Compile input_manager.cpp
-echo [10/11] Compiling input_manager.cpp...
-%CXX% %CFLAGS% -c core\input_manager.cpp -o "%OBJ_DIR%\core\input_manager.o"
-if %errorlevel% neq 0 (
-    echo [ERROR] Failed to compile input_manager.cpp
-    pause
-    exit /b 1
-)
-echo [OK] input_manager.o created
+echo [OK] All core files compiled
+echo.
 
 REM Link kernel
-echo [11/11] Linking kernel...
-%LD% %LDFLAGS% -o "%KERNEL%" "%OBJ_DIR%\arch\boot.o" "%OBJ_DIR%\core\main.o" "%OBJ_DIR%\core\vga.o" "%OBJ_DIR%\core\framebuffer.o" "%OBJ_DIR%\core\arch.o" "%OBJ_DIR%\arch\arch.o" "%OBJ_DIR%\core\desktop.o" "%OBJ_DIR%\core\interrupts.o" "%OBJ_DIR%\core\ps2mouse.o" "%OBJ_DIR%\core\input_manager.o"
+echo Linking kernel...
+%LD% %LDFLAGS% -o "%KERNEL%" "%OBJ_DIR%\arch\boot.o" "%OBJ_DIR%\arch\arch.o" %CORE_OBJS%
 
 if %errorlevel% neq 0 (
     echo [ERROR] Failed to link kernel
