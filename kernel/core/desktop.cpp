@@ -18,6 +18,7 @@
 #include "include/kernel/kernel_apps.h"
 #include "include/kernel/kernel_compositor.h"
 #include "include/kernel/kernel_ipc.h"
+#include "include/kernel/vfs.h"
 
 #if defined(_MSC_VER)
 #include <intrin.h>  // For MSVC intrinsics (__outbyte, __halt, etc.)
@@ -1979,11 +1980,22 @@ static ShellHitTest hit_test_shell(int32_t mx, int32_t my)
 // Public API
 // ============================================================
 
+// Forward declarations for icon persistence
+static bool load_icon_positions();
+static void save_icon_positions();
+
 static void init_icon_positions()
 {
     uint32_t cols = (s_screenW - kIconMargin * 2) / kIconCellW;
     if (cols < 1) cols = 1;
 
+    // Try to load saved positions first
+    if (load_icon_positions()) {
+        s_iconPositionsInitialized = true;
+        return;
+    }
+
+    // If no saved positions, use grid layout
     for (int i = 0; i < kDesktopIconCount; i++) {
         uint32_t col = (uint32_t)i % cols;
         uint32_t row = (uint32_t)i / cols;
@@ -1991,6 +2003,128 @@ static void init_icon_positions()
         s_iconPosY[i] = (int32_t)(kIconMargin + row * kIconCellH);
     }
     s_iconPositionsInitialized = true;
+}
+
+// Save icon positions to VFS file
+static void save_icon_positions()
+{
+    // Create simple text format: x,y pairs on separate lines
+    char buffer[512];
+    int pos = 0;
+    
+    // Write header
+    const char* header = "# guideXOS Desktop Icon Positions\n";
+    for (int i = 0; header[i] && pos < 500; i++) {
+        buffer[pos++] = header[i];
+    }
+    
+    // Write each icon position
+    for (int i = 0; i < kDesktopIconCount; i++) {
+        // Convert X position to string
+        int32_t x = s_iconPosX[i];
+        int32_t y = s_iconPosY[i];
+        
+        // Simple number to string conversion
+        char xStr[16], yStr[16];
+        int xi = 0, yi = 0;
+        
+        // Convert X
+        if (x < 0) { xStr[xi++] = '-'; x = -x; }
+        if (x == 0) { xStr[xi++] = '0'; }
+        else {
+            char tmp[16];
+            int ti = 0;
+            while (x > 0) { tmp[ti++] = '0' + (x % 10); x /= 10; }
+            while (ti > 0) { xStr[xi++] = tmp[--ti]; }
+        }
+        xStr[xi] = '\0';
+        
+        // Convert Y
+        if (y < 0) { yStr[yi++] = '-'; y = -y; }
+        if (y == 0) { yStr[yi++] = '0'; }
+        else {
+            char tmp[16];
+            int ti = 0;
+            while (y > 0) { tmp[ti++] = '0' + (y % 10); y /= 10; }
+            while (ti > 0) { yStr[yi++] = tmp[--ti]; }
+        }
+        yStr[yi] = '\0';
+        
+        // Write "x,y\n"
+        for (int j = 0; xStr[j] && pos < 500; j++) buffer[pos++] = xStr[j];
+        if (pos < 500) buffer[pos++] = ',';
+        for (int j = 0; yStr[j] && pos < 500; j++) buffer[pos++] = yStr[j];
+        if (pos < 500) buffer[pos++] = '\n';
+    }
+    
+    // Write to VFS
+    uint8_t handle = vfs::open("/.desktop_icons", vfs::OPEN_WRITE);
+    if (handle != 0xFF) {
+        vfs::write(handle, buffer, pos);
+        vfs::close(handle);
+    }
+}
+
+// Load icon positions from VFS file
+static bool load_icon_positions()
+{
+    uint8_t handle = vfs::open("/.desktop_icons", vfs::OPEN_READ);
+    if (handle == 0xFF) return false;
+    
+    char buffer[512];
+    int32_t bytesRead = vfs::read(handle, buffer, 511);
+    vfs::close(handle);
+    
+    if (bytesRead <= 0) return false;
+    buffer[bytesRead] = '\0';
+    
+    // Parse the file
+    int iconIdx = 0;
+    int pos = 0;
+    
+    // Skip header line
+    while (pos < bytesRead && buffer[pos] != '\n') pos++;
+    if (pos < bytesRead) pos++; // Skip newline
+    
+    // Parse each line as "x,y"
+    while (pos < bytesRead && iconIdx < kDesktopIconCount) {
+        // Skip empty lines
+        if (buffer[pos] == '\n') { pos++; continue; }
+        
+        // Parse X coordinate
+        bool negX = false;
+        if (buffer[pos] == '-') { negX = true; pos++; }
+        int32_t x = 0;
+        while (pos < bytesRead && buffer[pos] >= '0' && buffer[pos] <= '9') {
+            x = x * 10 + (buffer[pos] - '0');
+            pos++;
+        }
+        if (negX) x = -x;
+        
+        // Skip comma
+        if (pos < bytesRead && buffer[pos] == ',') pos++;
+        
+        // Parse Y coordinate
+        bool negY = false;
+        if (buffer[pos] == '-') { negY = true; pos++; }
+        int32_t y = 0;
+        while (pos < bytesRead && buffer[pos] >= '0' && buffer[pos] <= '9') {
+            y = y * 10 + (buffer[pos] - '0');
+            pos++;
+        }
+        if (negY) y = -y;
+        
+        // Skip to next line
+        while (pos < bytesRead && buffer[pos] != '\n') pos++;
+        if (pos < bytesRead) pos++;
+        
+        // Store position
+        s_iconPosX[iconIdx] = x;
+        s_iconPosY[iconIdx] = y;
+        iconIdx++;
+    }
+    
+    return iconIdx == kDesktopIconCount;
 }
 
 // Helper: try to launch an app using the kernel app framework
@@ -3060,6 +3194,9 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
 
             s_iconPosX[s_dragIconIndex] = newX;
             s_iconPosY[s_dragIconIndex] = newY;
+            
+            // Save icon positions to VFS
+            save_icon_positions();
         } else if (!s_dragStarted && s_dragIconIndex >= 0 && s_dragIconIndex < kDesktopIconCount) {
             // Click without drag - just select the icon (launch happens on double-click)
             s_selectedIcon = s_dragIconIndex;

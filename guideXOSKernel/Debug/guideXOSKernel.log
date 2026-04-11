@@ -183,16 +183,64 @@ core\include/kernel/kernel_app.h(207,33): warning G24ACD1A9: unused parameter 'c
 core\include/kernel/kernel_app.h(208,36): warning G24ACD1A9: unused parameter 'widgetId' [-Wunused-parameter]
     208 |     virtual void onWidgetClick(int widgetId) {}
         |                                ~~~~^~~~~~~~
-  core\desktop.cpp: At global scope:
-core\desktop.cpp(456,13): warning G27EF45E7: 'kernel::desktop::s_networkConfigUseDHCPforDNS' defined but not used [-Wunused-variable]
-    456 | static bool s_networkConfigUseDHCPforDNS = true;
+  In file included from core\desktop.cpp:21:
+  core\include/kernel/vfs.h: At global scope:
+core\include/kernel/vfs.h(33,14): error G30A0E944: 'size_t' does not name a type
+     33 | static const size_t VFS_MAX_PATH = 256;
+        |              ^~~~~~
+  core\include/kernel/vfs.h:25:1: note: 'size_t' is defined in header '<cstddef>'; this is probably fixable by adding '#include <cstddef>'
+     24 | #include "kernel/block_device.h"
+    +++ |+#include <cstddef>
+     25 | 
+core\include/kernel/vfs.h(34,14): error G30A0E944: 'size_t' does not name a type
+     34 | static const size_t VFS_MAX_FILENAME = 128;
+        |              ^~~~~~
+  core\include/kernel/vfs.h:34:14: note: 'size_t' is defined in header '<cstddef>'; this is probably fixable by adding '#include <cstddef>'
+core\include/kernel/vfs.h(35,14): error G30A0E944: 'size_t' does not name a type
+     35 | static const size_t VFS_MAX_MOUNTS = 8;
+        |              ^~~~~~
+  core\include/kernel/vfs.h:35:14: note: 'size_t' is defined in header '<cstddef>'; this is probably fixable by adding '#include <cstddef>'
+core\include/kernel/vfs.h(36,14): error G30A0E944: 'size_t' does not name a type
+     36 | static const size_t VFS_MAX_OPEN_FILES = 32;
+        |              ^~~~~~
+  core\include/kernel/vfs.h:36:14: note: 'size_t' is defined in header '<cstddef>'; this is probably fixable by adding '#include <cstddef>'
+core\include/kernel/vfs.h(115,19): error G2F7BD88E: 'VFS_MAX_FILENAME' was not declared in this scope
+    115 |     char     name[VFS_MAX_FILENAME];
+        |                   ^~~~~~~~~~~~~~~~
+core\include/kernel/vfs.h(132,19): error G2F7BD88E: 'VFS_MAX_FILENAME' was not declared in this scope
+    132 |     char     name[VFS_MAX_FILENAME];
+        |                   ^~~~~~~~~~~~~~~~
+core\include/kernel/vfs.h(146,19): error GAA57BB08: 'VFS_MAX_PATH' was not declared in this scope
+    146 |     char     path[VFS_MAX_PATH];      // Mount path (e.g., "/", "/mnt/usb")
+        |                   ^~~~~~~~~~~~
+core\include/kernel/vfs.h(164,19): error GAA57BB08: 'VFS_MAX_PATH' was not declared in this scope
+    164 |     char     path[VFS_MAX_PATH];      // Full path (for debugging)
+        |                   ^~~~~~~~~~~~
+core\include/kernel/vfs.h(174,19): error GAA57BB08: 'VFS_MAX_PATH' was not declared in this scope
+    174 |     char     path[VFS_MAX_PATH];
+        |                   ^~~~~~~~~~~~
+core\include/kernel/vfs.h(213,54): error G30A0E944: 'size_t' has not been declared
+    213 | void normalize_path(const char* input, char* output, size_t outputSize);
+        |                                                      ^~~~~~
+  core\include/kernel/vfs.h:213:54: note: 'size_t' is defined in header '<cstddef>'; this is probably fixable by adding '#include <cstddef>'
+core\include/kernel/vfs.h(216,50): error G30A0E944: 'size_t' has not been declared
+    216 | void parent_path(const char* path, char* output, size_t outputSize);
+        |                                                  ^~~~~~
+  core\include/kernel/vfs.h:216:50: note: 'size_t' is defined in header '<cstddef>'; this is probably fixable by adding '#include <cstddef>'
+core\include/kernel/vfs.h(225,66): error G30A0E944: 'size_t' has not been declared
+    225 | void join_path(const char* base, const char* name, char* output, size_t outputSize);
+        |                                                                  ^~~~~~
+  core\include/kernel/vfs.h:225:66: note: 'size_t' is defined in header '<cstddef>'; this is probably fixable by adding '#include <cstddef>'
+core\desktop.cpp(457,13): warning G27EF45E7: 'kernel::desktop::s_networkConfigUseDHCPforDNS' defined but not used [-Wunused-variable]
+    457 | static bool s_networkConfigUseDHCPforDNS = true;
         |             ^~~~~~~~~~~~~~~~~~~~~~~~~~~~
-core\desktop.cpp(454,12): warning GEDB4F6D3: 'kernel::desktop::s_networkConfigFocusField' defined but not used [-Wunused-variable]
-    454 | static int s_networkConfigFocusField = -1;  // Which IP octet field is focused
+core\desktop.cpp(455,12): warning GEDB4F6D3: 'kernel::desktop::s_networkConfigFocusField' defined but not used [-Wunused-variable]
+    455 | static int s_networkConfigFocusField = -1;  // Which IP octet field is focused
         |            ^~~~~~~~~~~~~~~~~~~~~~~~~
-core\desktop.cpp(444,12): warning G075C0907: 'kernel::desktop::s_deviceManagerScroll' defined but not used [-Wunused-variable]
-    444 | static int s_deviceManagerScroll = 0;
+core\desktop.cpp(445,12): warning G075C0907: 'kernel::desktop::s_deviceManagerScroll' defined but not used [-Wunused-variable]
+    445 | static int s_deviceManagerScroll = 0;
         |            ^~~~~~~~~~~~~~~~~~~~~
+    [ERROR] Failed to compile desktop.cpp
     Compiling device_tree.cpp...
   In file included from core\device_tree.cpp:9:
 core\include/kernel/device_tree.h(44,14): error G30A0E944: 'size_t' does not name a type
@@ -1657,42 +1705,87 @@ core\include/kernel/vfs.h(225,66): error G30A0E944: 'size_t' has not been declar
     225 | void join_path(const char* base, const char* name, char* output, size_t outputSize);
         |                                                                  ^~~~~~
   core\include/kernel/vfs.h:225:66: note: 'size_t' is defined in header '<cstddef>'; this is probably fixable by adding '#include <cstddef>'
+  core\shell.cpp: In function 'void kernel::shell::cmd_ls(const char*)':
+core\shell.cpp(411,19): error G0B59A654: 'struct kernel::vfs::DirEntry' has no member named 'name'
+    411 |         if (entry.name[0] == '.' && (entry.name[1] == '\0' ||
+        |                   ^~~~
+core\shell.cpp(411,44): error G0B59A654: 'struct kernel::vfs::DirEntry' has no member named 'name'
+    411 |         if (entry.name[0] == '.' && (entry.name[1] == '\0' ||
+        |                                            ^~~~
+core\shell.cpp(412,20): error G0B59A654: 'struct kernel::vfs::DirEntry' has no member named 'name'
+    412 |             (entry.name[1] == '.' && entry.name[2] == '\0'))) {
+        |                    ^~~~
+core\shell.cpp(412,44): error G0B59A654: 'struct kernel::vfs::DirEntry' has no member named 'name'
+    412 |             (entry.name[1] == '.' && entry.name[2] == '\0'))) {
+        |                                            ^~~~
+core\shell.cpp(418,33): error G0B59A654: 'struct kernel::vfs::DirEntry' has no member named 'name'
+    418 |             output_string(entry.name);
+        |                                 ^~~~
+core\shell.cpp(421,33): error G0B59A654: 'struct kernel::vfs::DirEntry' has no member named 'name'
+    421 |             output_string(entry.name);
+        |                                 ^~~~
+  core\shell.cpp: In function 'void kernel::shell::cmd_ll(const char*)':
+core\shell.cpp(467,19): error G0B59A654: 'struct kernel::vfs::DirEntry' has no member named 'name'
+    467 |         if (entry.name[0] == '.' && (entry.name[1] == '\0' ||
+        |                   ^~~~
+core\shell.cpp(467,44): error G0B59A654: 'struct kernel::vfs::DirEntry' has no member named 'name'
+    467 |         if (entry.name[0] == '.' && (entry.name[1] == '\0' ||
+        |                                            ^~~~
+core\shell.cpp(468,20): error G0B59A654: 'struct kernel::vfs::DirEntry' has no member named 'name'
+    468 |             (entry.name[1] == '.' && entry.name[2] == '\0'))) {
+        |                    ^~~~
+core\shell.cpp(468,44): error G0B59A654: 'struct kernel::vfs::DirEntry' has no member named 'name'
+    468 |             (entry.name[1] == '.' && entry.name[2] == '\0'))) {
+        |                                            ^~~~
+core\shell.cpp(504,29): error G0B59A654: 'struct kernel::vfs::DirEntry' has no member named 'name'
+    504 |         output_string(entry.name);
+        |                             ^~~~
   core\shell.cpp: In function 'void kernel::shell::cmd_vfsmount(const char*, const char*)':
-core\shell.cpp(876,27): warning GA5864BA6: narrowing conversion of '(48 + ((int)idx))' from 'int' to 'char' [-Wnarrowing]
-    876 |     char numStr[4] = {'0' + idx, '\0'};
+core\shell.cpp(1041,27): warning GA5864BA6: narrowing conversion of '(48 + ((int)idx))' from 'int' to 'char' [-Wnarrowing]
+   1041 |     char numStr[4] = {'0' + idx, '\0'};
         |                       ~~~~^~~~~
   core\shell.cpp: In function 'void kernel::shell::cmd_vfsls(const char*)':
-core\shell.cpp(925,29): error G0B59A654: 'struct kernel::vfs::DirEntry' has no member named 'name'
-    925 |         output_string(entry.name);
+core\shell.cpp(1090,29): error G0B59A654: 'struct kernel::vfs::DirEntry' has no member named 'name'
+   1090 |         output_string(entry.name);
         |                             ^~~~
   core\shell.cpp: In function 'void kernel::shell::cmd_vfsstat(const char*)':
-core\shell.cpp(1027,24): error G8C8E30D7: 'struct kernel::vfs::FileInfo' has no member named 'name'
-   1027 |     output_string(info.name);
+core\shell.cpp(1192,24): error G8C8E30D7: 'struct kernel::vfs::FileInfo' has no member named 'name'
+   1192 |     output_string(info.name);
         |                        ^~~~
   core\shell.cpp: In function 'void kernel::shell::cmd_vfstest()':
-core\shell.cpp(1060,29): warning GA5864BA6: narrowing conversion of '(48 + ((int)devCount))' from 'int' to 'char' [-Wnarrowing]
-   1060 |     char countStr[4] = {'0' + devCount, '\0'};
+core\shell.cpp(1225,29): warning GA5864BA6: narrowing conversion of '(48 + ((int)devCount))' from 'int' to 'char' [-Wnarrowing]
+   1225 |     char countStr[4] = {'0' + devCount, '\0'};
         |                         ~~~~^~~~~~~~~~
-core\shell.cpp(1075,35): warning GA5864BA6: narrowing conversion of '(48 + ((int)i))' from 'int' to 'char' [-Wnarrowing]
-   1075 |             char idxStr[4] = {'0' + i, ':', ' ', '\0'};
+core\shell.cpp(1240,35): warning GA5864BA6: narrowing conversion of '(48 + ((int)i))' from 'int' to 'char' [-Wnarrowing]
+   1240 |             char idxStr[4] = {'0' + i, ':', ' ', '\0'};
         |                               ~~~~^~~
-core\shell.cpp(1101,31): error G0FC9DB6F: 'const struct kernel::vfs::MountPoint' has no member named 'path'
-   1101 |             output_string(mp->path);
+core\shell.cpp(1266,31): error G0FC9DB6F: 'const struct kernel::vfs::MountPoint' has no member named 'path'
+   1266 |             output_string(mp->path);
         |                               ^~~~
+  core\shell.cpp: In function 'void kernel::shell::cmd_vfsinfo()':
+core\shell.cpp(1330,35): warning GA5864BA6: narrowing conversion of '(48 + ((int)i))' from 'int' to 'char' [-Wnarrowing]
+   1330 |             char idxStr[4] = {'0' + i, ']', ' ', '\0'};
+        |                               ~~~~^~~
+core\shell.cpp(1364,31): error G0FC9DB6F: 'const struct kernel::vfs::MountPoint' has no member named 'path'
+   1364 |             output_string(mp->path);
+        |                               ^~~~
+core\shell.cpp(1368,35): warning GA5864BA6: narrowing conversion of '(48 + ((int)mp->kernel::vfs::MountPoint::blockDevIndex))' from 'int' to 'char' [-Wnarrowing]
+   1368 |             char devStr[4] = {'0' + mp->blockDevIndex, ')', '\0'};
+        |                               ~~~~^~~~~~~~~~~~~~~~~~~
   core\shell.cpp: In function 'void kernel::shell::cmd_dhcp(const char**, uint32_t)':
-core\shell.cpp(1992,10): warning G41AE70B8: unused variable 'showStatus' [-Wunused-variable]
-   1992 |     bool showStatus = (argCount <= 1);
+core\shell.cpp(2226,10): warning G41AE70B8: unused variable 'showStatus' [-Wunused-variable]
+   2226 |     bool showStatus = (argCount <= 1);
         |          ^~~~~~~~~~
   core\shell.cpp: In function 'void kernel::shell::draw(uint32_t, uint32_t, uint32_t, uint32_t)':
-core\shell.cpp(2826,14): warning G41AE70B8: unused variable 'charsPerLine' [-Wunused-variable]
-   2826 |     uint32_t charsPerLine = textW / kFontW;
+core\shell.cpp(3077,14): warning G41AE70B8: unused variable 'charsPerLine' [-Wunused-variable]
+   3077 |     uint32_t charsPerLine = textW / kFontW;
         |              ^~~~~~~~~~~~
   core\shell.cpp: At global scope:
-core\shell.cpp(247,13): warning G8A2F72A0: 'void kernel::shell::output_prompt()' defined but not used [-Wunused-function]
-    247 | static void output_prompt() {
+core\shell.cpp(248,13): warning G8A2F72A0: 'void kernel::shell::output_prompt()' defined but not used [-Wunused-function]
+    248 | static void output_prompt() {
         |             ^~~~~~~~~~~~~
-core\shell.cpp(201,13): warning G95263752: 'bool kernel::shell::str_starts_with(const char*, const char*)' defined but not used [-Wunused-function]
-    201 | static bool str_starts_with(const char* str, const char* prefix) {
+core\shell.cpp(202,13): warning G95263752: 'bool kernel::shell::str_starts_with(const char*, const char*)' defined but not used [-Wunused-function]
+    202 | static bool str_starts_with(const char* str, const char* prefix) {
         |             ^~~~~~~~~~~~~~~
     [ERROR] Failed to compile shell.cpp
     Compiling socket.cpp...
@@ -1883,374 +1976,374 @@ core\vfs.cpp(139,39): error G9F27EB4A: 'mountLen' was not declared in this scope
         |                                       ^~~~~~~~
         |                                       mount
   core\vfs.cpp: In function 'void kernel::vfs::init()':
-core\vfs.cpp(214,13): error G748CBD42: 's_mounts' was not declared in this scope
-    214 |     memzero(s_mounts, sizeof(s_mounts));
+core\vfs.cpp(288,13): error G748CBD42: 's_mounts' was not declared in this scope
+    288 |     memzero(s_mounts, sizeof(s_mounts));
         |             ^~~~~~~~
-core\vfs.cpp(215,13): error GA20723DD: 's_files' was not declared in this scope
-    215 |     memzero(s_files, sizeof(s_files));
+core\vfs.cpp(289,13): error GA20723DD: 's_files' was not declared in this scope
+    289 |     memzero(s_files, sizeof(s_files));
         |             ^~~~~~~
-core\vfs.cpp(216,13): error G2B795600: 's_dirs' was not declared in this scope
-    216 |     memzero(s_dirs, sizeof(s_dirs));
+core\vfs.cpp(290,13): error G2B795600: 's_dirs' was not declared in this scope
+    290 |     memzero(s_dirs, sizeof(s_dirs));
         |             ^~~~~~
   core\vfs.cpp: In function 'uint8_t kernel::vfs::mount_type(const char*, uint8_t, FSType)':
-core\vfs.cpp(248,18): error G6667CDC0: 'strlen' was not declared in this scope
-    248 |     if (!path || strlen(path) == 0) {
+core\vfs.cpp(322,18): error G6667CDC0: 'strlen' was not declared in this scope
+    322 |     if (!path || strlen(path) == 0) {
         |                  ^~~~~~
   core\vfs.cpp:16:1: note: 'strlen' is defined in header '<cstring>'; this is probably fixable by adding '#include <cstring>'
      15 | #include "include/kernel/serial_debug.h"
     +++ |+#include <cstring>
      16 | #endif
-core\vfs.cpp(253,29): error G68D5E829: 'VFS_MAX_MOUNTS' was not declared in this scope
-    253 |     for (uint8_t i = 0; i < VFS_MAX_MOUNTS; ++i) {
+core\vfs.cpp(327,29): error G68D5E829: 'VFS_MAX_MOUNTS' was not declared in this scope
+    327 |     for (uint8_t i = 0; i < VFS_MAX_MOUNTS; ++i) {
         |                             ^~~~~~~~~~~~~~
-core\vfs.cpp(254,13): error G748CBD42: 's_mounts' was not declared in this scope
-    254 |         if (s_mounts[i].active && strcmp(s_mounts[i].path, path) == 0) {
+core\vfs.cpp(328,13): error G748CBD42: 's_mounts' was not declared in this scope
+    328 |         if (s_mounts[i].active && strcmp(s_mounts[i].path, path) == 0) {
         |             ^~~~~~~~
-core\vfs.cpp(264,29): error G68D5E829: 'VFS_MAX_MOUNTS' was not declared in this scope
-    264 |     for (uint8_t i = 0; i < VFS_MAX_MOUNTS; ++i) {
+core\vfs.cpp(338,29): error G68D5E829: 'VFS_MAX_MOUNTS' was not declared in this scope
+    338 |     for (uint8_t i = 0; i < VFS_MAX_MOUNTS; ++i) {
         |                             ^~~~~~~~~~~~~~
-core\vfs.cpp(265,14): error G748CBD42: 's_mounts' was not declared in this scope
-    265 |         if (!s_mounts[i].active) {
+core\vfs.cpp(339,14): error G748CBD42: 's_mounts' was not declared in this scope
+    339 |         if (!s_mounts[i].active) {
         |              ^~~~~~~~
-core\vfs.cpp(309,22): error G748CBD42: 's_mounts' was not declared in this scope
-    309 |     MountPoint& mp = s_mounts[index];
+core\vfs.cpp(383,22): error G748CBD42: 's_mounts' was not declared in this scope
+    383 |     MountPoint& mp = s_mounts[index];
         |                      ^~~~~~~~
-core\vfs.cpp(311,16): error GA31A5404: 'struct kernel::vfs::MountPoint' has no member named 'path'
-    311 |     strcopy(mp.path, path, sizeof(mp.path));
+core\vfs.cpp(385,16): error GA31A5404: 'struct kernel::vfs::MountPoint' has no member named 'path'
+    385 |     strcopy(mp.path, path, sizeof(mp.path));
         |                ^~~~
-core\vfs.cpp(311,38): error GA31A5404: 'struct kernel::vfs::MountPoint' has no member named 'path'
-    311 |     strcopy(mp.path, path, sizeof(mp.path));
+core\vfs.cpp(385,38): error GA31A5404: 'struct kernel::vfs::MountPoint' has no member named 'path'
+    385 |     strcopy(mp.path, path, sizeof(mp.path));
         |                                      ^~~~
   core\vfs.cpp: In function 'kernel::vfs::Status kernel::vfs::unmount(const char*)':
-core\vfs.cpp(334,29): error G68D5E829: 'VFS_MAX_MOUNTS' was not declared in this scope
-    334 |     for (uint8_t i = 0; i < VFS_MAX_MOUNTS; ++i) {
+core\vfs.cpp(408,29): error G68D5E829: 'VFS_MAX_MOUNTS' was not declared in this scope
+    408 |     for (uint8_t i = 0; i < VFS_MAX_MOUNTS; ++i) {
         |                             ^~~~~~~~~~~~~~
-core\vfs.cpp(335,13): error G748CBD42: 's_mounts' was not declared in this scope
-    335 |         if (s_mounts[i].active && strcmp(s_mounts[i].path, path) == 0) {
+core\vfs.cpp(409,13): error G748CBD42: 's_mounts' was not declared in this scope
+    409 |         if (s_mounts[i].active && strcmp(s_mounts[i].path, path) == 0) {
         |             ^~~~~~~~
-core\vfs.cpp(337,37): error G2C15C025: 'VFS_MAX_OPEN_FILES' was not declared in this scope
-    337 |             for (uint8_t j = 0; j < VFS_MAX_OPEN_FILES; ++j) {
+core\vfs.cpp(411,37): error G2C15C025: 'VFS_MAX_OPEN_FILES' was not declared in this scope
+    411 |             for (uint8_t j = 0; j < VFS_MAX_OPEN_FILES; ++j) {
         |                                     ^~~~~~~~~~~~~~~~~~
-core\vfs.cpp(338,21): error GA20723DD: 's_files' was not declared in this scope
-    338 |                 if (s_files[j].open && s_files[j].mountIndex == i) {
+core\vfs.cpp(412,21): error GA20723DD: 's_files' was not declared in this scope
+    412 |                 if (s_files[j].open && s_files[j].mountIndex == i) {
         |                     ^~~~~~~
   core\vfs.cpp: In function 'const kernel::vfs::MountPoint* kernel::vfs::get_mount_by_index(uint8_t)':
-core\vfs.cpp(382,18): error G68D5E829: 'VFS_MAX_MOUNTS' was not declared in this scope
-    382 |     if (index >= VFS_MAX_MOUNTS) return nullptr;
+core\vfs.cpp(456,18): error G68D5E829: 'VFS_MAX_MOUNTS' was not declared in this scope
+    456 |     if (index >= VFS_MAX_MOUNTS) return nullptr;
         |                  ^~~~~~~~~~~~~~
-core\vfs.cpp(383,10): error G748CBD42: 's_mounts' was not declared in this scope
-    383 |     if (!s_mounts[index].active) return nullptr;
+core\vfs.cpp(457,10): error G748CBD42: 's_mounts' was not declared in this scope
+    457 |     if (!s_mounts[index].active) return nullptr;
         |          ^~~~~~~~
-core\vfs.cpp(384,13): error G748CBD42: 's_mounts' was not declared in this scope
-    384 |     return &s_mounts[index];
+core\vfs.cpp(458,13): error G748CBD42: 's_mounts' was not declared in this scope
+    458 |     return &s_mounts[index];
         |             ^~~~~~~~
   core\vfs.cpp: At global scope:
-core\vfs.cpp(396,54): error G30A0E944: 'size_t' has not been declared
-    396 | void normalize_path(const char* input, char* output, size_t outputSize)
+core\vfs.cpp(470,54): error G30A0E944: 'size_t' has not been declared
+    470 | void normalize_path(const char* input, char* output, size_t outputSize)
         |                                                      ^~~~~~
-  core\vfs.cpp:396:54: note: 'size_t' is defined in header '<cstddef>'; this is probably fixable by adding '#include <cstddef>'
+  core\vfs.cpp:470:54: note: 'size_t' is defined in header '<cstddef>'; this is probably fixable by adding '#include <cstddef>'
   core\vfs.cpp: In function 'void kernel::vfs::normalize_path(const char*, char*, int)':
-core\vfs.cpp(400,5): error G30A0E944: 'size_t' was not declared in this scope
-    400 |     size_t outIdx = 0;
-        |     ^~~~~~
-  core\vfs.cpp:400:5: note: 'size_t' is defined in header '<cstddef>'; this is probably fixable by adding '#include <cstddef>'
-core\vfs.cpp(401,11): error G65037BDE: expected ';' before 'inIdx'
-    401 |     size_t inIdx = 0;
-        |           ^~~~~~
-        |           ;
-core\vfs.cpp(402,11): error G65037BDE: expected ';' before 'inputLen'
-    402 |     size_t inputLen = strlen(input);
-        |           ^~~~~~~~~
-        |           ;
-core\vfs.cpp(405,9): error G81DA2019: 'inputLen' was not declared in this scope; did you mean 'input'?
-    405 |     if (inputLen == 0) {
-        |         ^~~~~~~~
-        |         input
-core\vfs.cpp(412,12): error GB4681F08: 'inIdx' was not declared in this scope
-    412 |     while (inIdx < inputLen && outIdx < outputSize - 1) {
-        |            ^~~~~
-core\vfs.cpp(412,20): error G81DA2019: 'inputLen' was not declared in this scope; did you mean 'input'?
-    412 |     while (inIdx < inputLen && outIdx < outputSize - 1) {
-        |                    ^~~~~~~~
-        |                    input
-core\vfs.cpp(412,32): error G29E8207F: 'outIdx' was not declared in this scope
-    412 |     while (inIdx < inputLen && outIdx < outputSize - 1) {
-        |                                ^~~~~~
-core\vfs.cpp(451,9): error G29E8207F: 'outIdx' was not declared in this scope
-    451 |     if (outIdx == 0 || output[0] != '/') {
-        |         ^~~~~~
-core\vfs.cpp(454,24): error G65037BDE: expected ';' before 'i'
-    454 |             for (size_t i = outIdx; i > 0; --i) {
-        |                        ^~
-        |                        ;
-core\vfs.cpp(454,37): error G162CB7C5: 'i' was not declared in this scope
-    454 |             for (size_t i = outIdx; i > 0; --i) {
-        |                                     ^
-core\vfs.cpp(463,9): error G29E8207F: 'outIdx' was not declared in this scope
-    463 |     if (outIdx > 1 && output[outIdx - 1] == '/') {
-        |         ^~~~~~
-core\vfs.cpp(467,12): error G29E8207F: 'outIdx' was not declared in this scope
-    467 |     output[outIdx] = '\0';
-        |            ^~~~~~
-  core\vfs.cpp: At global scope:
-core\vfs.cpp(470,50): error G30A0E944: 'size_t' has not been declared
-    470 | void parent_path(const char* path, char* output, size_t outputSize)
-        |                                                  ^~~~~~
-  core\vfs.cpp:470:50: note: 'size_t' is defined in header '<cstddef>'; this is probably fixable by adding '#include <cstddef>'
-  core\vfs.cpp: In function 'void kernel::vfs::parent_path(const char*, char*, int)':
 core\vfs.cpp(474,5): error G30A0E944: 'size_t' was not declared in this scope
-    474 |     size_t pathLen = strlen(path);
+    474 |     size_t outIdx = 0;
         |     ^~~~~~
   core\vfs.cpp:474:5: note: 'size_t' is defined in header '<cstddef>'; this is probably fixable by adding '#include <cstddef>'
-core\vfs.cpp(477,9): error G44030FB0: 'pathLen' was not declared in this scope; did you mean 'path'?
-    477 |     if (pathLen <= 1) {
+core\vfs.cpp(475,11): error G65037BDE: expected ';' before 'inIdx'
+    475 |     size_t inIdx = 0;
+        |           ^~~~~~
+        |           ;
+core\vfs.cpp(476,11): error G65037BDE: expected ';' before 'inputLen'
+    476 |     size_t inputLen = strlen(input);
+        |           ^~~~~~~~~
+        |           ;
+core\vfs.cpp(479,9): error G81DA2019: 'inputLen' was not declared in this scope; did you mean 'input'?
+    479 |     if (inputLen == 0) {
+        |         ^~~~~~~~
+        |         input
+core\vfs.cpp(486,12): error GB4681F08: 'inIdx' was not declared in this scope
+    486 |     while (inIdx < inputLen && outIdx < outputSize - 1) {
+        |            ^~~~~
+core\vfs.cpp(486,20): error G81DA2019: 'inputLen' was not declared in this scope; did you mean 'input'?
+    486 |     while (inIdx < inputLen && outIdx < outputSize - 1) {
+        |                    ^~~~~~~~
+        |                    input
+core\vfs.cpp(486,32): error G29E8207F: 'outIdx' was not declared in this scope
+    486 |     while (inIdx < inputLen && outIdx < outputSize - 1) {
+        |                                ^~~~~~
+core\vfs.cpp(525,9): error G29E8207F: 'outIdx' was not declared in this scope
+    525 |     if (outIdx == 0 || output[0] != '/') {
+        |         ^~~~~~
+core\vfs.cpp(528,24): error G65037BDE: expected ';' before 'i'
+    528 |             for (size_t i = outIdx; i > 0; --i) {
+        |                        ^~
+        |                        ;
+core\vfs.cpp(528,37): error G162CB7C5: 'i' was not declared in this scope
+    528 |             for (size_t i = outIdx; i > 0; --i) {
+        |                                     ^
+core\vfs.cpp(537,9): error G29E8207F: 'outIdx' was not declared in this scope
+    537 |     if (outIdx > 1 && output[outIdx - 1] == '/') {
+        |         ^~~~~~
+core\vfs.cpp(541,12): error G29E8207F: 'outIdx' was not declared in this scope
+    541 |     output[outIdx] = '\0';
+        |            ^~~~~~
+  core\vfs.cpp: At global scope:
+core\vfs.cpp(544,50): error G30A0E944: 'size_t' has not been declared
+    544 | void parent_path(const char* path, char* output, size_t outputSize)
+        |                                                  ^~~~~~
+  core\vfs.cpp:544:50: note: 'size_t' is defined in header '<cstddef>'; this is probably fixable by adding '#include <cstddef>'
+  core\vfs.cpp: In function 'void kernel::vfs::parent_path(const char*, char*, int)':
+core\vfs.cpp(548,5): error G30A0E944: 'size_t' was not declared in this scope
+    548 |     size_t pathLen = strlen(path);
+        |     ^~~~~~
+  core\vfs.cpp:548:5: note: 'size_t' is defined in header '<cstddef>'; this is probably fixable by adding '#include <cstddef>'
+core\vfs.cpp(551,9): error G44030FB0: 'pathLen' was not declared in this scope; did you mean 'path'?
+    551 |     if (pathLen <= 1) {
         |         ^~~~~~~
         |         path
-core\vfs.cpp(484,11): error G65037BDE: expected ';' before 'lastSlash'
-    484 |     size_t lastSlash = pathLen - 1;
+core\vfs.cpp(558,11): error G65037BDE: expected ';' before 'lastSlash'
+    558 |     size_t lastSlash = pathLen - 1;
         |           ^~~~~~~~~~
         |           ;
-core\vfs.cpp(485,14): error G2FE670AB: 'lastSlash' was not declared in this scope
-    485 |     if (path[lastSlash] == '/') --lastSlash;
+core\vfs.cpp(559,14): error G2FE670AB: 'lastSlash' was not declared in this scope
+    559 |     if (path[lastSlash] == '/') --lastSlash;
         |              ^~~~~~~~~
-core\vfs.cpp(487,12): error G2FE670AB: 'lastSlash' was not declared in this scope
-    487 |     while (lastSlash > 0 && path[lastSlash] != '/') {
+core\vfs.cpp(561,12): error G2FE670AB: 'lastSlash' was not declared in this scope
+    561 |     while (lastSlash > 0 && path[lastSlash] != '/') {
         |            ^~~~~~~~~
-core\vfs.cpp(492,11): error G65037BDE: expected ';' before 'copyLen'
-    492 |     size_t copyLen = (lastSlash == 0) ? 1 : lastSlash;
+core\vfs.cpp(566,11): error G65037BDE: expected ';' before 'copyLen'
+    566 |     size_t copyLen = (lastSlash == 0) ? 1 : lastSlash;
         |           ^~~~~~~~
         |           ;
-core\vfs.cpp(493,9): error GDD4AD822: 'copyLen' was not declared in this scope; did you mean 'open'?
-    493 |     if (copyLen >= outputSize) copyLen = outputSize - 1;
+core\vfs.cpp(567,9): error GDD4AD822: 'copyLen' was not declared in this scope; did you mean 'open'?
+    567 |     if (copyLen >= outputSize) copyLen = outputSize - 1;
         |         ^~~~~~~
         |         open
-core\vfs.cpp(495,16): error G65037BDE: expected ';' before 'i'
-    495 |     for (size_t i = 0; i < copyLen; ++i) {
+core\vfs.cpp(569,16): error G65037BDE: expected ';' before 'i'
+    569 |     for (size_t i = 0; i < copyLen; ++i) {
         |                ^~
         |                ;
-core\vfs.cpp(495,24): error G162CB7C5: 'i' was not declared in this scope
-    495 |     for (size_t i = 0; i < copyLen; ++i) {
+core\vfs.cpp(569,24): error G162CB7C5: 'i' was not declared in this scope
+    569 |     for (size_t i = 0; i < copyLen; ++i) {
         |                        ^
-core\vfs.cpp(495,28): error GDD4AD822: 'copyLen' was not declared in this scope; did you mean 'open'?
-    495 |     for (size_t i = 0; i < copyLen; ++i) {
+core\vfs.cpp(569,28): error GDD4AD822: 'copyLen' was not declared in this scope; did you mean 'open'?
+    569 |     for (size_t i = 0; i < copyLen; ++i) {
         |                            ^~~~~~~
         |                            open
-core\vfs.cpp(498,12): error GDD4AD822: 'copyLen' was not declared in this scope; did you mean 'open'?
-    498 |     output[copyLen] = '\0';
+core\vfs.cpp(572,12): error GDD4AD822: 'copyLen' was not declared in this scope; did you mean 'open'?
+    572 |     output[copyLen] = '\0';
         |            ^~~~~~~
         |            open
   core\vfs.cpp: In function 'const char* kernel::vfs::basename(const char*)':
-core\vfs.cpp(505,5): error G30A0E944: 'size_t' was not declared in this scope
-    505 |     size_t pathLen = strlen(path);
+core\vfs.cpp(579,5): error G30A0E944: 'size_t' was not declared in this scope
+    579 |     size_t pathLen = strlen(path);
         |     ^~~~~~
-  core\vfs.cpp:505:5: note: 'size_t' is defined in header '<cstddef>'; this is probably fixable by adding '#include <cstddef>'
-core\vfs.cpp(506,9): error G44030FB0: 'pathLen' was not declared in this scope; did you mean 'path'?
-    506 |     if (pathLen == 0) return path;
+  core\vfs.cpp:579:5: note: 'size_t' is defined in header '<cstddef>'; this is probably fixable by adding '#include <cstddef>'
+core\vfs.cpp(580,9): error G44030FB0: 'pathLen' was not declared in this scope; did you mean 'path'?
+    580 |     if (pathLen == 0) return path;
         |         ^~~~~~~
         |         path
-core\vfs.cpp(509,11): error G65037BDE: expected ';' before 'lastSlash'
-    509 |     size_t lastSlash = pathLen;
+core\vfs.cpp(583,11): error G65037BDE: expected ';' before 'lastSlash'
+    583 |     size_t lastSlash = pathLen;
         |           ^~~~~~~~~~
         |           ;
-core\vfs.cpp(510,12): error G2FE670AB: 'lastSlash' was not declared in this scope
-    510 |     while (lastSlash > 0 && path[lastSlash - 1] != '/') {
+core\vfs.cpp(584,12): error G2FE670AB: 'lastSlash' was not declared in this scope
+    584 |     while (lastSlash > 0 && path[lastSlash - 1] != '/') {
         |            ^~~~~~~~~
-core\vfs.cpp(514,19): error G2FE670AB: 'lastSlash' was not declared in this scope
-    514 |     return path + lastSlash;
+core\vfs.cpp(588,19): error G2FE670AB: 'lastSlash' was not declared in this scope
+    588 |     return path + lastSlash;
         |                   ^~~~~~~~~
   core\vfs.cpp: At global scope:
-core\vfs.cpp(522,66): error G30A0E944: 'size_t' has not been declared
-    522 | void join_path(const char* base, const char* name, char* output, size_t outputSize)
+core\vfs.cpp(596,66): error G30A0E944: 'size_t' has not been declared
+    596 | void join_path(const char* base, const char* name, char* output, size_t outputSize)
         |                                                                  ^~~~~~
-  core\vfs.cpp:522:66: note: 'size_t' is defined in header '<cstddef>'; this is probably fixable by adding '#include <cstddef>'
+  core\vfs.cpp:596:66: note: 'size_t' is defined in header '<cstddef>'; this is probably fixable by adding '#include <cstddef>'
   core\vfs.cpp: In function 'void kernel::vfs::join_path(const char*, const char*, char*, int)':
-core\vfs.cpp(526,5): error G30A0E944: 'size_t' was not declared in this scope
-    526 |     size_t outIdx = 0;
+core\vfs.cpp(600,5): error G30A0E944: 'size_t' was not declared in this scope
+    600 |     size_t outIdx = 0;
         |     ^~~~~~
-  core\vfs.cpp:526:5: note: 'size_t' is defined in header '<cstddef>'; this is probably fixable by adding '#include <cstddef>'
-core\vfs.cpp(530,25): error G29E8207F: 'outIdx' was not declared in this scope
-    530 |         while (*base && outIdx < outputSize - 1) {
+  core\vfs.cpp:600:5: note: 'size_t' is defined in header '<cstddef>'; this is probably fixable by adding '#include <cstddef>'
+core\vfs.cpp(604,25): error G29E8207F: 'outIdx' was not declared in this scope
+    604 |         while (*base && outIdx < outputSize - 1) {
         |                         ^~~~~~
-core\vfs.cpp(536,9): error G29E8207F: 'outIdx' was not declared in this scope
-    536 |     if (outIdx > 0 && output[outIdx - 1] != '/' && outIdx < outputSize - 1) {
+core\vfs.cpp(610,9): error G29E8207F: 'outIdx' was not declared in this scope
+    610 |     if (outIdx > 0 && output[outIdx - 1] != '/' && outIdx < outputSize - 1) {
         |         ^~~~~~
-core\vfs.cpp(543,25): error G29E8207F: 'outIdx' was not declared in this scope
-    543 |         while (*name && outIdx < outputSize - 1) {
+core\vfs.cpp(617,25): error G29E8207F: 'outIdx' was not declared in this scope
+    617 |         while (*name && outIdx < outputSize - 1) {
         |                         ^~~~~~
-core\vfs.cpp(548,12): error G29E8207F: 'outIdx' was not declared in this scope
-    548 |     output[outIdx] = '\0';
+core\vfs.cpp(622,12): error G29E8207F: 'outIdx' was not declared in this scope
+    622 |     output[outIdx] = '\0';
         |            ^~~~~~
   core\vfs.cpp: In function 'uint8_t kernel::vfs::open(const char*, uint16_t)':
-core\vfs.cpp(571,29): error G2C15C025: 'VFS_MAX_OPEN_FILES' was not declared in this scope
-    571 |     for (uint8_t i = 0; i < VFS_MAX_OPEN_FILES; ++i) {
+core\vfs.cpp(645,29): error G2C15C025: 'VFS_MAX_OPEN_FILES' was not declared in this scope
+    645 |     for (uint8_t i = 0; i < VFS_MAX_OPEN_FILES; ++i) {
         |                             ^~~~~~~~~~~~~~~~~~
-core\vfs.cpp(572,14): error GA20723DD: 's_files' was not declared in this scope
-    572 |         if (!s_files[i].open) {
+core\vfs.cpp(646,14): error GA20723DD: 's_files' was not declared in this scope
+    646 |         if (!s_files[i].open) {
         |              ^~~~~~~
-core\vfs.cpp(663,22): error GA20723DD: 's_files' was not declared in this scope
-    663 |     FileHandle& fh = s_files[handle];
+core\vfs.cpp(737,22): error GA20723DD: 's_files' was not declared in this scope
+    737 |     FileHandle& fh = s_files[handle];
         |                      ^~~~~~~
-core\vfs.cpp(665,50): error G748CBD42: 's_mounts' was not declared in this scope; did you mean 'mount'?
-    665 |     fh.mountIndex = static_cast<uint8_t>(mount - s_mounts);
+core\vfs.cpp(739,50): error G748CBD42: 's_mounts' was not declared in this scope; did you mean 'mount'?
+    739 |     fh.mountIndex = static_cast<uint8_t>(mount - s_mounts);
         |                                                  ^~~~~~~~
         |                                                  mount
-core\vfs.cpp(670,16): error GC0F3E33F: 'struct kernel::vfs::FileHandle' has no member named 'path'
-    670 |     strcopy(fh.path, path, sizeof(fh.path));
+core\vfs.cpp(744,16): error GC0F3E33F: 'struct kernel::vfs::FileHandle' has no member named 'path'
+    744 |     strcopy(fh.path, path, sizeof(fh.path));
         |                ^~~~
-core\vfs.cpp(670,38): error GC0F3E33F: 'struct kernel::vfs::FileHandle' has no member named 'path'
-    670 |     strcopy(fh.path, path, sizeof(fh.path));
+core\vfs.cpp(744,38): error GC0F3E33F: 'struct kernel::vfs::FileHandle' has no member named 'path'
+    744 |     strcopy(fh.path, path, sizeof(fh.path));
         |                                      ^~~~
   core\vfs.cpp: In function 'kernel::vfs::Status kernel::vfs::close(uint8_t)':
-core\vfs.cpp(677,19): error G2C15C025: 'VFS_MAX_OPEN_FILES' was not declared in this scope
-    677 |     if (handle >= VFS_MAX_OPEN_FILES) return VFS_ERR_INVALID;
+core\vfs.cpp(751,19): error G2C15C025: 'VFS_MAX_OPEN_FILES' was not declared in this scope
+    751 |     if (handle >= VFS_MAX_OPEN_FILES) return VFS_ERR_INVALID;
         |                   ^~~~~~~~~~~~~~~~~~
-core\vfs.cpp(678,10): error GA20723DD: 's_files' was not declared in this scope
-    678 |     if (!s_files[handle].open) return VFS_ERR_INVALID;
+core\vfs.cpp(752,10): error GA20723DD: 's_files' was not declared in this scope
+    752 |     if (!s_files[handle].open) return VFS_ERR_INVALID;
         |          ^~~~~~~
-core\vfs.cpp(680,22): error GA20723DD: 's_files' was not declared in this scope
-    680 |     FileHandle& fh = s_files[handle];
+core\vfs.cpp(754,22): error GA20723DD: 's_files' was not declared in this scope
+    754 |     FileHandle& fh = s_files[handle];
         |                      ^~~~~~~
-core\vfs.cpp(683,26): error G748CBD42: 's_mounts' was not declared in this scope; did you mean 'mount'?
-    683 |     MountPoint* mount = &s_mounts[fh.mountIndex];
+core\vfs.cpp(757,26): error G748CBD42: 's_mounts' was not declared in this scope; did you mean 'mount'?
+    757 |     MountPoint* mount = &s_mounts[fh.mountIndex];
         |                          ^~~~~~~~
         |                          mount
   core\vfs.cpp: In function 'int32_t kernel::vfs::read(uint8_t, void*, uint32_t)':
-core\vfs.cpp(703,19): error G2C15C025: 'VFS_MAX_OPEN_FILES' was not declared in this scope
-    703 |     if (handle >= VFS_MAX_OPEN_FILES) return VFS_ERR_INVALID;
+core\vfs.cpp(777,19): error G2C15C025: 'VFS_MAX_OPEN_FILES' was not declared in this scope
+    777 |     if (handle >= VFS_MAX_OPEN_FILES) return VFS_ERR_INVALID;
         |                   ^~~~~~~~~~~~~~~~~~
-core\vfs.cpp(704,10): error GA20723DD: 's_files' was not declared in this scope
-    704 |     if (!s_files[handle].open) return VFS_ERR_INVALID;
+core\vfs.cpp(778,10): error GA20723DD: 's_files' was not declared in this scope
+    778 |     if (!s_files[handle].open) return VFS_ERR_INVALID;
         |          ^~~~~~~
-core\vfs.cpp(707,22): error GA20723DD: 's_files' was not declared in this scope
-    707 |     FileHandle& fh = s_files[handle];
+core\vfs.cpp(781,22): error GA20723DD: 's_files' was not declared in this scope
+    781 |     FileHandle& fh = s_files[handle];
         |                      ^~~~~~~
-core\vfs.cpp(713,26): error G748CBD42: 's_mounts' was not declared in this scope; did you mean 'mount'?
-    713 |     MountPoint* mount = &s_mounts[fh.mountIndex];
+core\vfs.cpp(787,26): error G748CBD42: 's_mounts' was not declared in this scope; did you mean 'mount'?
+    787 |     MountPoint* mount = &s_mounts[fh.mountIndex];
         |                          ^~~~~~~~
         |                          mount
   core\vfs.cpp: In function 'int32_t kernel::vfs::write(uint8_t, const void*, uint32_t)':
-core\vfs.cpp(738,19): error G2C15C025: 'VFS_MAX_OPEN_FILES' was not declared in this scope
-    738 |     if (handle >= VFS_MAX_OPEN_FILES) return VFS_ERR_INVALID;
+core\vfs.cpp(812,19): error G2C15C025: 'VFS_MAX_OPEN_FILES' was not declared in this scope
+    812 |     if (handle >= VFS_MAX_OPEN_FILES) return VFS_ERR_INVALID;
         |                   ^~~~~~~~~~~~~~~~~~
-core\vfs.cpp(739,10): error GA20723DD: 's_files' was not declared in this scope
-    739 |     if (!s_files[handle].open) return VFS_ERR_INVALID;
+core\vfs.cpp(813,10): error GA20723DD: 's_files' was not declared in this scope
+    813 |     if (!s_files[handle].open) return VFS_ERR_INVALID;
         |          ^~~~~~~
-core\vfs.cpp(742,22): error GA20723DD: 's_files' was not declared in this scope
-    742 |     FileHandle& fh = s_files[handle];
+core\vfs.cpp(816,22): error GA20723DD: 's_files' was not declared in this scope
+    816 |     FileHandle& fh = s_files[handle];
         |                      ^~~~~~~
-core\vfs.cpp(748,26): error G748CBD42: 's_mounts' was not declared in this scope; did you mean 'mount'?
-    748 |     MountPoint* mount = &s_mounts[fh.mountIndex];
+core\vfs.cpp(822,26): error G748CBD42: 's_mounts' was not declared in this scope; did you mean 'mount'?
+    822 |     MountPoint* mount = &s_mounts[fh.mountIndex];
         |                          ^~~~~~~~
         |                          mount
   core\vfs.cpp: In function 'kernel::vfs::Status kernel::vfs::seek(uint8_t, int64_t, SeekOrigin)':
-core\vfs.cpp(762,19): error G2C15C025: 'VFS_MAX_OPEN_FILES' was not declared in this scope
-    762 |     if (handle >= VFS_MAX_OPEN_FILES) return VFS_ERR_INVALID;
+core\vfs.cpp(836,19): error G2C15C025: 'VFS_MAX_OPEN_FILES' was not declared in this scope
+    836 |     if (handle >= VFS_MAX_OPEN_FILES) return VFS_ERR_INVALID;
         |                   ^~~~~~~~~~~~~~~~~~
-core\vfs.cpp(763,10): error GA20723DD: 's_files' was not declared in this scope
-    763 |     if (!s_files[handle].open) return VFS_ERR_INVALID;
+core\vfs.cpp(837,10): error GA20723DD: 's_files' was not declared in this scope
+    837 |     if (!s_files[handle].open) return VFS_ERR_INVALID;
         |          ^~~~~~~
-core\vfs.cpp(765,22): error GA20723DD: 's_files' was not declared in this scope
-    765 |     FileHandle& fh = s_files[handle];
+core\vfs.cpp(839,22): error GA20723DD: 's_files' was not declared in this scope
+    839 |     FileHandle& fh = s_files[handle];
         |                      ^~~~~~~
   core\vfs.cpp: In function 'int64_t kernel::vfs::tell(uint8_t)':
-core\vfs.cpp(792,19): error G2C15C025: 'VFS_MAX_OPEN_FILES' was not declared in this scope
-    792 |     if (handle >= VFS_MAX_OPEN_FILES) return -1;
+core\vfs.cpp(866,19): error G2C15C025: 'VFS_MAX_OPEN_FILES' was not declared in this scope
+    866 |     if (handle >= VFS_MAX_OPEN_FILES) return -1;
         |                   ^~~~~~~~~~~~~~~~~~
-core\vfs.cpp(793,10): error GA20723DD: 's_files' was not declared in this scope
-    793 |     if (!s_files[handle].open) return -1;
+core\vfs.cpp(867,10): error GA20723DD: 's_files' was not declared in this scope
+    867 |     if (!s_files[handle].open) return -1;
         |          ^~~~~~~
-core\vfs.cpp(794,33): error GA20723DD: 's_files' was not declared in this scope
-    794 |     return static_cast<int64_t>(s_files[handle].position);
+core\vfs.cpp(868,33): error GA20723DD: 's_files' was not declared in this scope
+    868 |     return static_cast<int64_t>(s_files[handle].position);
         |                                 ^~~~~~~
   core\vfs.cpp: In function 'int64_t kernel::vfs::file_size(uint8_t)':
-core\vfs.cpp(799,19): error G2C15C025: 'VFS_MAX_OPEN_FILES' was not declared in this scope
-    799 |     if (handle >= VFS_MAX_OPEN_FILES) return -1;
+core\vfs.cpp(873,19): error G2C15C025: 'VFS_MAX_OPEN_FILES' was not declared in this scope
+    873 |     if (handle >= VFS_MAX_OPEN_FILES) return -1;
         |                   ^~~~~~~~~~~~~~~~~~
-core\vfs.cpp(800,10): error GA20723DD: 's_files' was not declared in this scope
-    800 |     if (!s_files[handle].open) return -1;
+core\vfs.cpp(874,10): error GA20723DD: 's_files' was not declared in this scope
+    874 |     if (!s_files[handle].open) return -1;
         |          ^~~~~~~
-core\vfs.cpp(801,33): error GA20723DD: 's_files' was not declared in this scope
-    801 |     return static_cast<int64_t>(s_files[handle].size);
+core\vfs.cpp(875,33): error GA20723DD: 's_files' was not declared in this scope
+    875 |     return static_cast<int64_t>(s_files[handle].size);
         |                                 ^~~~~~~
   core\vfs.cpp: In function 'kernel::vfs::Status kernel::vfs::flush(uint8_t)':
-core\vfs.cpp(806,19): error G2C15C025: 'VFS_MAX_OPEN_FILES' was not declared in this scope
-    806 |     if (handle >= VFS_MAX_OPEN_FILES) return VFS_ERR_INVALID;
+core\vfs.cpp(880,19): error G2C15C025: 'VFS_MAX_OPEN_FILES' was not declared in this scope
+    880 |     if (handle >= VFS_MAX_OPEN_FILES) return VFS_ERR_INVALID;
         |                   ^~~~~~~~~~~~~~~~~~
-core\vfs.cpp(807,10): error GA20723DD: 's_files' was not declared in this scope
-    807 |     if (!s_files[handle].open) return VFS_ERR_INVALID;
+core\vfs.cpp(881,10): error GA20723DD: 's_files' was not declared in this scope
+    881 |     if (!s_files[handle].open) return VFS_ERR_INVALID;
         |          ^~~~~~~
   core\vfs.cpp: In function 'const kernel::vfs::FileHandle* kernel::vfs::get_handle(uint8_t)':
-core\vfs.cpp(814,19): error G2C15C025: 'VFS_MAX_OPEN_FILES' was not declared in this scope
-    814 |     if (handle >= VFS_MAX_OPEN_FILES) return nullptr;
+core\vfs.cpp(888,19): error G2C15C025: 'VFS_MAX_OPEN_FILES' was not declared in this scope
+    888 |     if (handle >= VFS_MAX_OPEN_FILES) return nullptr;
         |                   ^~~~~~~~~~~~~~~~~~
-core\vfs.cpp(815,10): error GA20723DD: 's_files' was not declared in this scope
-    815 |     if (!s_files[handle].open) return nullptr;
+core\vfs.cpp(889,10): error GA20723DD: 's_files' was not declared in this scope
+    889 |     if (!s_files[handle].open) return nullptr;
         |          ^~~~~~~
-core\vfs.cpp(816,13): error GA20723DD: 's_files' was not declared in this scope
-    816 |     return &s_files[handle];
+core\vfs.cpp(890,13): error GA20723DD: 's_files' was not declared in this scope
+    890 |     return &s_files[handle];
         |             ^~~~~~~
   core\vfs.cpp: In function 'uint8_t kernel::vfs::opendir(const char*)':
-core\vfs.cpp(832,29): error G2C15C025: 'VFS_MAX_OPEN_FILES' was not declared in this scope
-    832 |     for (uint8_t i = 0; i < VFS_MAX_OPEN_FILES; ++i) {
+core\vfs.cpp(906,29): error G2C15C025: 'VFS_MAX_OPEN_FILES' was not declared in this scope
+    906 |     for (uint8_t i = 0; i < VFS_MAX_OPEN_FILES; ++i) {
         |                             ^~~~~~~~~~~~~~~~~~
-core\vfs.cpp(833,14): error G2B795600: 's_dirs' was not declared in this scope
-    833 |         if (!s_dirs[i].active) {
+core\vfs.cpp(907,14): error G2B795600: 's_dirs' was not declared in this scope
+    907 |         if (!s_dirs[i].active) {
         |              ^~~~~~
-core\vfs.cpp(842,23): error G2B795600: 's_dirs' was not declared in this scope
-    842 |     DirIterator& di = s_dirs[iter];
+core\vfs.cpp(916,23): error G2B795600: 's_dirs' was not declared in this scope
+    916 |     DirIterator& di = s_dirs[iter];
         |                       ^~~~~~
-core\vfs.cpp(844,50): error G748CBD42: 's_mounts' was not declared in this scope; did you mean 'mount'?
-    844 |     di.mountIndex = static_cast<uint8_t>(mount - s_mounts);
+core\vfs.cpp(918,50): error G748CBD42: 's_mounts' was not declared in this scope; did you mean 'mount'?
+    918 |     di.mountIndex = static_cast<uint8_t>(mount - s_mounts);
         |                                                  ^~~~~~~~
         |                                                  mount
-core\vfs.cpp(845,16): error GBADC9D1A: 'struct kernel::vfs::DirIterator' has no member named 'path'
-    845 |     strcopy(di.path, path, sizeof(di.path));
+core\vfs.cpp(919,16): error GBADC9D1A: 'struct kernel::vfs::DirIterator' has no member named 'path'
+    919 |     strcopy(di.path, path, sizeof(di.path));
         |                ^~~~
-core\vfs.cpp(845,38): error GBADC9D1A: 'struct kernel::vfs::DirIterator' has no member named 'path'
-    845 |     strcopy(di.path, path, sizeof(di.path));
+core\vfs.cpp(919,38): error GBADC9D1A: 'struct kernel::vfs::DirIterator' has no member named 'path'
+    919 |     strcopy(di.path, path, sizeof(di.path));
         |                                      ^~~~
   core\vfs.cpp: In function 'bool kernel::vfs::readdir(uint8_t, DirEntry*)':
-core\vfs.cpp(879,21): error G2C15C025: 'VFS_MAX_OPEN_FILES' was not declared in this scope
-    879 |     if (iterator >= VFS_MAX_OPEN_FILES) return false;
+core\vfs.cpp(977,21): error G2C15C025: 'VFS_MAX_OPEN_FILES' was not declared in this scope
+    977 |     if (iterator >= VFS_MAX_OPEN_FILES) return false;
         |                     ^~~~~~~~~~~~~~~~~~
-core\vfs.cpp(880,10): error G2B795600: 's_dirs' was not declared in this scope
-    880 |     if (!s_dirs[iterator].active) return false;
+core\vfs.cpp(978,10): error G2B795600: 's_dirs' was not declared in this scope
+    978 |     if (!s_dirs[iterator].active) return false;
         |          ^~~~~~
-core\vfs.cpp(883,23): error G2B795600: 's_dirs' was not declared in this scope
-    883 |     DirIterator& di = s_dirs[iterator];
+core\vfs.cpp(981,23): error G2B795600: 's_dirs' was not declared in this scope
+    981 |     DirIterator& di = s_dirs[iterator];
         |                       ^~~~~~
-core\vfs.cpp(884,26): error G748CBD42: 's_mounts' was not declared in this scope; did you mean 'mount'?
-    884 |     MountPoint* mount = &s_mounts[di.mountIndex];
+core\vfs.cpp(982,26): error G748CBD42: 's_mounts' was not declared in this scope; did you mean 'mount'?
+    982 |     MountPoint* mount = &s_mounts[di.mountIndex];
         |                          ^~~~~~~~
         |                          mount
-core\vfs.cpp(894,28): error G0B59A654: 'struct kernel::vfs::DirEntry' has no member named 'name'
-    894 |             strcopy(entry->name, fatEntry.name, sizeof(entry->name));
+core\vfs.cpp(992,28): error G0B59A654: 'struct kernel::vfs::DirEntry' has no member named 'name'
+    992 |             strcopy(entry->name, fatEntry.name, sizeof(entry->name));
         |                            ^~~~
-core\vfs.cpp(894,63): error G0B59A654: 'struct kernel::vfs::DirEntry' has no member named 'name'
-    894 |             strcopy(entry->name, fatEntry.name, sizeof(entry->name));
+core\vfs.cpp(992,63): error G0B59A654: 'struct kernel::vfs::DirEntry' has no member named 'name'
+    992 |             strcopy(entry->name, fatEntry.name, sizeof(entry->name));
         |                                                               ^~~~
-core\vfs.cpp(911,28): error G0B59A654: 'struct kernel::vfs::DirEntry' has no member named 'name'
-    911 |             strcopy(entry->name, extEntry.name, sizeof(entry->name));
+core\vfs.cpp(1009,28): error G0B59A654: 'struct kernel::vfs::DirEntry' has no member named 'name'
+   1009 |             strcopy(entry->name, extEntry.name, sizeof(entry->name));
         |                            ^~~~
-core\vfs.cpp(911,63): error G0B59A654: 'struct kernel::vfs::DirEntry' has no member named 'name'
-    911 |             strcopy(entry->name, extEntry.name, sizeof(entry->name));
+core\vfs.cpp(1009,63): error G0B59A654: 'struct kernel::vfs::DirEntry' has no member named 'name'
+   1009 |             strcopy(entry->name, extEntry.name, sizeof(entry->name));
         |                                                               ^~~~
-core\vfs.cpp(914,39): error G0B59A654: 'struct kernel::vfs::DirEntry' has no member named 'name'
-    914 |             entry->isHidden = (entry->name[0] == '.');
+core\vfs.cpp(1012,39): error G0B59A654: 'struct kernel::vfs::DirEntry' has no member named 'name'
+   1012 |             entry->isHidden = (entry->name[0] == '.');
         |                                       ^~~~
   core\vfs.cpp: In function 'void kernel::vfs::closedir(uint8_t)':
-core\vfs.cpp(928,21): error G2C15C025: 'VFS_MAX_OPEN_FILES' was not declared in this scope
-    928 |     if (iterator >= VFS_MAX_OPEN_FILES) return;
+core\vfs.cpp(1026,21): error G2C15C025: 'VFS_MAX_OPEN_FILES' was not declared in this scope
+   1026 |     if (iterator >= VFS_MAX_OPEN_FILES) return;
         |                     ^~~~~~~~~~~~~~~~~~
-core\vfs.cpp(929,5): error G2B795600: 's_dirs' was not declared in this scope
-    929 |     s_dirs[iterator].active = false;
+core\vfs.cpp(1027,5): error G2B795600: 's_dirs' was not declared in this scope
+   1027 |     s_dirs[iterator].active = false;
         |     ^~~~~~
   core\vfs.cpp: In function 'kernel::vfs::Status kernel::vfs::stat(const char*, FileInfo*)':
-core\vfs.cpp(978,27): error G8C8E30D7: 'struct kernel::vfs::FileInfo' has no member named 'name'
-    978 |             strcopy(info->name, entry.name, sizeof(info->name));
+core\vfs.cpp(1076,27): error G8C8E30D7: 'struct kernel::vfs::FileInfo' has no member named 'name'
+   1076 |             strcopy(info->name, entry.name, sizeof(info->name));
         |                           ^~~~
-core\vfs.cpp(978,58): error G8C8E30D7: 'struct kernel::vfs::FileInfo' has no member named 'name'
-    978 |             strcopy(info->name, entry.name, sizeof(info->name));
+core\vfs.cpp(1076,58): error G8C8E30D7: 'struct kernel::vfs::FileInfo' has no member named 'name'
+   1076 |             strcopy(info->name, entry.name, sizeof(info->name));
         |                                                          ^~~~
   core\vfs.cpp: At global scope:
 core\vfs.cpp(86,12): warning G98BE1198: 'int kernel::vfs::strncmp(const char*, const char*, int)' defined but not used [-Wunused-function]
