@@ -30,6 +30,10 @@ namespace gxos { namespace apps {
     int Notepad::s_lastKeyCode = 0;
     bool Notepad::s_keyDown = false;
     bool Notepad::s_pendingClose = false;
+    bool Notepad::s_contextMenuVisible = false;
+    int Notepad::s_contextMenuX = 0;
+    int Notepad::s_contextMenuY = 0;
+    int Notepad::s_contextMenuHoverIndex = -1;
     std::vector<Notepad::TextSnapshot> Notepad::s_undoStack;
     std::vector<Notepad::TextSnapshot> Notepad::s_redoStack;
     
@@ -417,6 +421,43 @@ namespace gxos { namespace apps {
                                     }
                                 } catch (const std::exception& e) {
                                     Logger::write(LogLevel::Error, std::string("Notepad: Failed to parse widget event: ") + e.what());
+                                }
+                            }
+                            break;
+                        }
+                        
+                        case MsgType::MT_InputMouse: {
+                            // Handle mouse input
+                            std::string payload(msg.data.begin(), msg.data.end());
+                            // Parse: <x>|<y>|<button>|<action>
+                            std::istringstream iss(payload);
+                            std::string xStr, yStr, buttonStr, action;
+                            std::getline(iss, xStr, '|');
+                            std::getline(iss, yStr, '|');
+                            std::getline(iss, buttonStr, '|');
+                            std::getline(iss, action);
+                            
+                            if (!xStr.empty() && !yStr.empty() && !buttonStr.empty()) {
+                                try {
+                                    int mx = std::stoi(xStr);
+                                    int my = std::stoi(yStr);
+                                    int button = std::stoi(buttonStr);
+                                    
+                                    // Button 2 = right click
+                                    if (button == 2 && action == "down") {
+                                        // Show context menu at mouse position
+                                        showContextMenu(mx, my);
+                                        redrawContent();
+                                    }
+                                    // Left click dismisses context menu
+                                    else if (button == 1 && action == "down" && s_contextMenuVisible) {
+                                        if (!handleContextMenuClick(mx, my)) {
+                                            hideContextMenu();
+                                            redrawContent();
+                                        }
+                                    }
+                                } catch (const std::exception& e) {
+                                    Logger::write(LogLevel::Error, std::string("Notepad: Failed to parse mouse event: ") + e.what());
                                 }
                             }
                             break;
@@ -822,6 +863,9 @@ namespace gxos { namespace apps {
         } else if (s_cursorLine >= s_scrollOffset + visibleLines) {
             s_scrollOffset = s_cursorLine - visibleLines + 1;
         }
+        
+        // Draw context menu if visible
+        drawContextMenu();
     }
     
     void Notepad::updateStatusBar() {
@@ -917,6 +961,113 @@ namespace gxos { namespace apps {
             case 221: return s_shiftPressed ? '}' : ']'; // OEM_6
             case 222: return s_shiftPressed ? '"' : '\''; // OEM_7
             default: return (char)keyCode; // Fallback
+        }
+    }
+    
+    void Notepad::showContextMenu(int x, int y) {
+        s_contextMenuVisible = true;
+        s_contextMenuX = x;
+        s_contextMenuY = y;
+        s_contextMenuHoverIndex = -1;
+        Logger::write(LogLevel::Info, std::string("Notepad: Context menu shown at ") + std::to_string(x) + "," + std::to_string(y));
+    }
+    
+    void Notepad::hideContextMenu() {
+        s_contextMenuVisible = false;
+        s_contextMenuHoverIndex = -1;
+    }
+    
+    bool Notepad::handleContextMenuClick(int mx, int my) {
+        if (!s_contextMenuVisible) return false;
+        
+        // Context menu dimensions
+        const int menuWidth = 140;
+        const int itemHeight = 24;
+        const char* menuItems[] = { "Cut", "Copy", "Paste", "Undo", "Redo", "Select All" };
+        const int itemCount = 6;
+        const int menuHeight = itemHeight * itemCount;
+        
+        // Check if click is within menu bounds
+        if (mx >= s_contextMenuX && mx < s_contextMenuX + menuWidth &&
+            my >= s_contextMenuY && my < s_contextMenuY + menuHeight) {
+            
+            // Determine which item was clicked
+            int itemIndex = (my - s_contextMenuY) / itemHeight;
+            if (itemIndex >= 0 && itemIndex < itemCount) {
+                Logger::write(LogLevel::Info, std::string("Notepad: Context menu item clicked: ") + menuItems[itemIndex]);
+                
+                // Execute the corresponding action
+                switch (itemIndex) {
+                    case 0: // Cut
+                        Logger::write(LogLevel::Info, "Notepad: Cut (not implemented)");
+                        break;
+                    case 1: // Copy
+                        copy();
+                        break;
+                    case 2: // Paste
+                        paste();
+                        break;
+                    case 3: // Undo
+                        performUndo();
+                        break;
+                    case 4: // Redo
+                        performRedo();
+                        break;
+                    case 5: // Select All
+                        selectAll();
+                        break;
+                }
+                
+                hideContextMenu();
+                redrawContent();
+                return true;
+            }
+        }
+        
+        return false;
+    }
+    
+    void Notepad::drawContextMenu() {
+        if (!s_contextMenuVisible) return;
+        
+        const char* kGuiChanIn = "gui.input";
+        const int menuWidth = 140;
+        const int itemHeight = 24;
+        const char* menuItems[] = { "Cut", "Copy", "Paste", "Undo", "Redo", "Select All" };
+        const int itemCount = 6;
+        
+        // Draw menu background rectangle
+        ipc::Message bgMsg;
+        bgMsg.type = (uint32_t)MsgType::MT_DrawRect;
+        std::ostringstream bgOss;
+        bgOss << s_windowId << "|" << s_contextMenuX << "|" << s_contextMenuY << "|" << menuWidth << "|" << (itemHeight * itemCount) << "|80|80|90";
+        std::string bgPayload = bgOss.str();
+        bgMsg.data.assign(bgPayload.begin(), bgPayload.end());
+        ipc::Bus::publish(kGuiChanIn, std::move(bgMsg), false);
+        
+        // Draw menu items
+        for (int i = 0; i < itemCount; i++) {
+            int itemY = s_contextMenuY + (i * itemHeight);
+            
+            // Draw item background (highlight on hover)
+            if (i == s_contextMenuHoverIndex) {
+                ipc::Message itemBgMsg;
+                itemBgMsg.type = (uint32_t)MsgType::MT_DrawRect;
+                std::ostringstream itemBgOss;
+                itemBgOss << s_windowId << "|" << s_contextMenuX << "|" << itemY << "|" << menuWidth << "|" << itemHeight << "|100|120|140";
+                std::string itemBgPayload = itemBgOss.str();
+                itemBgMsg.data.assign(itemBgPayload.begin(), itemBgPayload.end());
+                ipc::Bus::publish(kGuiChanIn, std::move(itemBgMsg), false);
+            }
+            
+            // Draw item text
+            ipc::Message itemTextMsg;
+            itemTextMsg.type = (uint32_t)MsgType::MT_DrawText;
+            std::ostringstream itemTextOss;
+            itemTextOss << s_windowId << "|" << menuItems[i];
+            std::string itemTextPayload = itemTextOss.str();
+            itemTextMsg.data.assign(itemTextPayload.begin(), itemTextPayload.end());
+            ipc::Bus::publish(kGuiChanIn, std::move(itemTextMsg), false);
         }
     }
     

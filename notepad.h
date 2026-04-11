@@ -67,6 +67,12 @@ namespace gxos { namespace apps {
         // Keyboard helpers
         static char mapKeyToChar(int keyCode);
         
+        // Context menu operations
+        static void showContextMenu(int x, int y);
+        static void hideContextMenu();
+        static bool handleContextMenuClick(int mx, int my);
+        static void drawContextMenu();
+        
         // State
         static uint64_t s_windowId;
         static std::string s_filePath;
@@ -82,6 +88,12 @@ namespace gxos { namespace apps {
         static int s_lastKeyCode;
         static bool s_keyDown;
         static bool s_pendingClose;
+        
+        // Context menu state
+        static bool s_contextMenuVisible;
+        static int s_contextMenuX;
+        static int s_contextMenuY;
+        static int s_contextMenuHoverIndex;
         
         // Undo / Redo stacks (store full line snapshots)
         struct TextSnapshot {
