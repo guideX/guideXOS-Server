@@ -46,13 +46,17 @@ check_root() {
     fi
 }
 
+# Ensure sbin directories are in PATH (needed for mkfs.* tools when using sudo)
+export PATH="$PATH:/sbin:/usr/sbin:/usr/local/sbin"
+
 # Check for required tools
 check_dependencies() {
     echo_info "Checking dependencies..."
     
     local missing=0
     
-    if ! command -v mkfs.fat &> /dev/null; then
+    # Check for mkfs.fat (could also be mkfs.vfat on some systems)
+    if ! command -v mkfs.fat &> /dev/null && ! command -v mkfs.vfat &> /dev/null; then
         echo_error "mkfs.fat not found. Install: sudo apt install dosfstools"
         missing=1
     fi
@@ -174,8 +178,12 @@ create_fat32_image() {
     # Create empty image
     dd if=/dev/zero of="$image_path" bs=1M count=$DISK_SIZE_MB 2>/dev/null
     
-    # Format as FAT32
-    mkfs.fat -F 32 -n "GXOSTEST" "$image_path"
+    # Format as FAT32 (try mkfs.fat first, then mkfs.vfat)
+    if command -v mkfs.fat &> /dev/null; then
+        mkfs.fat -F 32 -n "GXOSTEST" "$image_path"
+    else
+        mkfs.vfat -F 32 -n "GXOSTEST" "$image_path"
+    fi
     
     # Mount the image
     mount -o loop "$image_path" "$MOUNT_POINT"
