@@ -109,7 +109,6 @@
     <ClInclude Include="paging.h" />
   </ItemGroup>
   <ItemGroup>
-    <None Include="BOOTLOADER_ANALYSIS.md" />
     <None Include="trampoline.asm" />
   </ItemGroup>
   <Target Name="AssembleHandoffTrampoline" BeforeTargets="Link">

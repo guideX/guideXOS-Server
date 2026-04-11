@@ -140,48 +140,52 @@ core\cxx_runtime.cpp(134,11): warning GCF37EB8C: '{anonymous}::kernel_alloc' def
     [ERROR] Failed to compile cxx_runtime.cpp
     Compiling desktop.cpp...
   In file included from core\desktop.cpp:17:
+  core\include/kernel/kernel_app.h: In member function 'virtual bool kernel::app::KernelApp::initWithParam(const char*)':
+core\include/kernel/kernel_app.h(198,44): warning G24ACD1A9: unused parameter 'param' [-Wunused-parameter]
+    198 |     virtual bool initWithParam(const char* param) { return init(); }  // Override for param support
+        |                                ~~~~~~~~~~~~^~~~~
   core\include/kernel/kernel_app.h: In member function 'virtual void kernel::app::KernelApp::onMouseMove(int, int)':
-core\include/kernel/kernel_app.h(202,34): warning G24ACD1A9: unused parameter 'x' [-Wunused-parameter]
-    202 |     virtual void onMouseMove(int x, int y) {}
-        |                              ~~~~^
-core\include/kernel/kernel_app.h(202,41): warning G24ACD1A9: unused parameter 'y' [-Wunused-parameter]
-    202 |     virtual void onMouseMove(int x, int y) {}
-        |                                     ~~~~^
-  core\include/kernel/kernel_app.h: In member function 'virtual void kernel::app::KernelApp::onMouseDown(int, int, uint8_t)':
 core\include/kernel/kernel_app.h(203,34): warning G24ACD1A9: unused parameter 'x' [-Wunused-parameter]
-    203 |     virtual void onMouseDown(int x, int y, uint8_t button) {}
+    203 |     virtual void onMouseMove(int x, int y) {}
         |                              ~~~~^
 core\include/kernel/kernel_app.h(203,41): warning G24ACD1A9: unused parameter 'y' [-Wunused-parameter]
-    203 |     virtual void onMouseDown(int x, int y, uint8_t button) {}
+    203 |     virtual void onMouseMove(int x, int y) {}
         |                                     ~~~~^
-core\include/kernel/kernel_app.h(203,52): warning G24ACD1A9: unused parameter 'button' [-Wunused-parameter]
-    203 |     virtual void onMouseDown(int x, int y, uint8_t button) {}
+  core\include/kernel/kernel_app.h: In member function 'virtual void kernel::app::KernelApp::onMouseDown(int, int, uint8_t)':
+core\include/kernel/kernel_app.h(204,34): warning G24ACD1A9: unused parameter 'x' [-Wunused-parameter]
+    204 |     virtual void onMouseDown(int x, int y, uint8_t button) {}
+        |                              ~~~~^
+core\include/kernel/kernel_app.h(204,41): warning G24ACD1A9: unused parameter 'y' [-Wunused-parameter]
+    204 |     virtual void onMouseDown(int x, int y, uint8_t button) {}
+        |                                     ~~~~^
+core\include/kernel/kernel_app.h(204,52): warning G24ACD1A9: unused parameter 'button' [-Wunused-parameter]
+    204 |     virtual void onMouseDown(int x, int y, uint8_t button) {}
         |                                            ~~~~~~~~^~~~~~
   core\include/kernel/kernel_app.h: In member function 'virtual void kernel::app::KernelApp::onMouseUp(int, int, uint8_t)':
-core\include/kernel/kernel_app.h(204,32): warning G24ACD1A9: unused parameter 'x' [-Wunused-parameter]
-    204 |     virtual void onMouseUp(int x, int y, uint8_t button) {}
+core\include/kernel/kernel_app.h(205,32): warning G24ACD1A9: unused parameter 'x' [-Wunused-parameter]
+    205 |     virtual void onMouseUp(int x, int y, uint8_t button) {}
         |                            ~~~~^
-core\include/kernel/kernel_app.h(204,39): warning G24ACD1A9: unused parameter 'y' [-Wunused-parameter]
-    204 |     virtual void onMouseUp(int x, int y, uint8_t button) {}
+core\include/kernel/kernel_app.h(205,39): warning G24ACD1A9: unused parameter 'y' [-Wunused-parameter]
+    205 |     virtual void onMouseUp(int x, int y, uint8_t button) {}
         |                                   ~~~~^
-core\include/kernel/kernel_app.h(204,50): warning G24ACD1A9: unused parameter 'button' [-Wunused-parameter]
-    204 |     virtual void onMouseUp(int x, int y, uint8_t button) {}
+core\include/kernel/kernel_app.h(205,50): warning G24ACD1A9: unused parameter 'button' [-Wunused-parameter]
+    205 |     virtual void onMouseUp(int x, int y, uint8_t button) {}
         |                                          ~~~~~~~~^~~~~~
   core\include/kernel/kernel_app.h: In member function 'virtual void kernel::app::KernelApp::onKeyDown(uint32_t)':
-core\include/kernel/kernel_app.h(205,37): warning G24ACD1A9: unused parameter 'key' [-Wunused-parameter]
-    205 |     virtual void onKeyDown(uint32_t key) {}
+core\include/kernel/kernel_app.h(206,37): warning G24ACD1A9: unused parameter 'key' [-Wunused-parameter]
+    206 |     virtual void onKeyDown(uint32_t key) {}
         |                            ~~~~~~~~~^~~
   core\include/kernel/kernel_app.h: In member function 'virtual void kernel::app::KernelApp::onKeyUp(uint32_t)':
-core\include/kernel/kernel_app.h(206,35): warning G24ACD1A9: unused parameter 'key' [-Wunused-parameter]
-    206 |     virtual void onKeyUp(uint32_t key) {}
+core\include/kernel/kernel_app.h(207,35): warning G24ACD1A9: unused parameter 'key' [-Wunused-parameter]
+    207 |     virtual void onKeyUp(uint32_t key) {}
         |                          ~~~~~~~~~^~~
   core\include/kernel/kernel_app.h: In member function 'virtual void kernel::app::KernelApp::onKeyChar(char)':
-core\include/kernel/kernel_app.h(207,33): warning G24ACD1A9: unused parameter 'c' [-Wunused-parameter]
-    207 |     virtual void onKeyChar(char c) {}
+core\include/kernel/kernel_app.h(208,33): warning G24ACD1A9: unused parameter 'c' [-Wunused-parameter]
+    208 |     virtual void onKeyChar(char c) {}
         |                            ~~~~~^
   core\include/kernel/kernel_app.h: In member function 'virtual void kernel::app::KernelApp::onWidgetClick(int)':
-core\include/kernel/kernel_app.h(208,36): warning G24ACD1A9: unused parameter 'widgetId' [-Wunused-parameter]
-    208 |     virtual void onWidgetClick(int widgetId) {}
+core\include/kernel/kernel_app.h(209,36): warning G24ACD1A9: unused parameter 'widgetId' [-Wunused-parameter]
+    209 |     virtual void onWidgetClick(int widgetId) {}
         |                                ~~~~^~~~~~~~
   In file included from core\desktop.cpp:21:
   core\include/kernel/vfs.h: At global scope:
@@ -1067,152 +1071,213 @@ core\ipv6.cpp(406,18): error G60C22FD9: 'payloadLen' was not declared in this sc
     [ERROR] Failed to compile ipv6.cpp
     Compiling kernel_app.cpp...
   In file included from core\kernel_app.cpp:7:
+  core\include/kernel/kernel_app.h: In member function 'virtual bool kernel::app::KernelApp::initWithParam(const char*)':
+core\include/kernel/kernel_app.h(198,44): warning G24ACD1A9: unused parameter 'param' [-Wunused-parameter]
+    198 |     virtual bool initWithParam(const char* param) { return init(); }  // Override for param support
+        |                                ~~~~~~~~~~~~^~~~~
   core\include/kernel/kernel_app.h: In member function 'virtual void kernel::app::KernelApp::onMouseMove(int, int)':
-core\include/kernel/kernel_app.h(202,34): warning G24ACD1A9: unused parameter 'x' [-Wunused-parameter]
-    202 |     virtual void onMouseMove(int x, int y) {}
-        |                              ~~~~^
-core\include/kernel/kernel_app.h(202,41): warning G24ACD1A9: unused parameter 'y' [-Wunused-parameter]
-    202 |     virtual void onMouseMove(int x, int y) {}
-        |                                     ~~~~^
-  core\include/kernel/kernel_app.h: In member function 'virtual void kernel::app::KernelApp::onMouseDown(int, int, uint8_t)':
 core\include/kernel/kernel_app.h(203,34): warning G24ACD1A9: unused parameter 'x' [-Wunused-parameter]
-    203 |     virtual void onMouseDown(int x, int y, uint8_t button) {}
+    203 |     virtual void onMouseMove(int x, int y) {}
         |                              ~~~~^
 core\include/kernel/kernel_app.h(203,41): warning G24ACD1A9: unused parameter 'y' [-Wunused-parameter]
-    203 |     virtual void onMouseDown(int x, int y, uint8_t button) {}
+    203 |     virtual void onMouseMove(int x, int y) {}
         |                                     ~~~~^
-core\include/kernel/kernel_app.h(203,52): warning G24ACD1A9: unused parameter 'button' [-Wunused-parameter]
-    203 |     virtual void onMouseDown(int x, int y, uint8_t button) {}
+  core\include/kernel/kernel_app.h: In member function 'virtual void kernel::app::KernelApp::onMouseDown(int, int, uint8_t)':
+core\include/kernel/kernel_app.h(204,34): warning G24ACD1A9: unused parameter 'x' [-Wunused-parameter]
+    204 |     virtual void onMouseDown(int x, int y, uint8_t button) {}
+        |                              ~~~~^
+core\include/kernel/kernel_app.h(204,41): warning G24ACD1A9: unused parameter 'y' [-Wunused-parameter]
+    204 |     virtual void onMouseDown(int x, int y, uint8_t button) {}
+        |                                     ~~~~^
+core\include/kernel/kernel_app.h(204,52): warning G24ACD1A9: unused parameter 'button' [-Wunused-parameter]
+    204 |     virtual void onMouseDown(int x, int y, uint8_t button) {}
         |                                            ~~~~~~~~^~~~~~
   core\include/kernel/kernel_app.h: In member function 'virtual void kernel::app::KernelApp::onMouseUp(int, int, uint8_t)':
-core\include/kernel/kernel_app.h(204,32): warning G24ACD1A9: unused parameter 'x' [-Wunused-parameter]
-    204 |     virtual void onMouseUp(int x, int y, uint8_t button) {}
+core\include/kernel/kernel_app.h(205,32): warning G24ACD1A9: unused parameter 'x' [-Wunused-parameter]
+    205 |     virtual void onMouseUp(int x, int y, uint8_t button) {}
         |                            ~~~~^
-core\include/kernel/kernel_app.h(204,39): warning G24ACD1A9: unused parameter 'y' [-Wunused-parameter]
-    204 |     virtual void onMouseUp(int x, int y, uint8_t button) {}
+core\include/kernel/kernel_app.h(205,39): warning G24ACD1A9: unused parameter 'y' [-Wunused-parameter]
+    205 |     virtual void onMouseUp(int x, int y, uint8_t button) {}
         |                                   ~~~~^
-core\include/kernel/kernel_app.h(204,50): warning G24ACD1A9: unused parameter 'button' [-Wunused-parameter]
-    204 |     virtual void onMouseUp(int x, int y, uint8_t button) {}
+core\include/kernel/kernel_app.h(205,50): warning G24ACD1A9: unused parameter 'button' [-Wunused-parameter]
+    205 |     virtual void onMouseUp(int x, int y, uint8_t button) {}
         |                                          ~~~~~~~~^~~~~~
   core\include/kernel/kernel_app.h: In member function 'virtual void kernel::app::KernelApp::onKeyDown(uint32_t)':
-core\include/kernel/kernel_app.h(205,37): warning G24ACD1A9: unused parameter 'key' [-Wunused-parameter]
-    205 |     virtual void onKeyDown(uint32_t key) {}
+core\include/kernel/kernel_app.h(206,37): warning G24ACD1A9: unused parameter 'key' [-Wunused-parameter]
+    206 |     virtual void onKeyDown(uint32_t key) {}
         |                            ~~~~~~~~~^~~
   core\include/kernel/kernel_app.h: In member function 'virtual void kernel::app::KernelApp::onKeyUp(uint32_t)':
-core\include/kernel/kernel_app.h(206,35): warning G24ACD1A9: unused parameter 'key' [-Wunused-parameter]
-    206 |     virtual void onKeyUp(uint32_t key) {}
+core\include/kernel/kernel_app.h(207,35): warning G24ACD1A9: unused parameter 'key' [-Wunused-parameter]
+    207 |     virtual void onKeyUp(uint32_t key) {}
         |                          ~~~~~~~~~^~~
   core\include/kernel/kernel_app.h: In member function 'virtual void kernel::app::KernelApp::onKeyChar(char)':
-core\include/kernel/kernel_app.h(207,33): warning G24ACD1A9: unused parameter 'c' [-Wunused-parameter]
-    207 |     virtual void onKeyChar(char c) {}
+core\include/kernel/kernel_app.h(208,33): warning G24ACD1A9: unused parameter 'c' [-Wunused-parameter]
+    208 |     virtual void onKeyChar(char c) {}
         |                            ~~~~~^
   core\include/kernel/kernel_app.h: In member function 'virtual void kernel::app::KernelApp::onWidgetClick(int)':
-core\include/kernel/kernel_app.h(208,36): warning G24ACD1A9: unused parameter 'widgetId' [-Wunused-parameter]
-    208 |     virtual void onWidgetClick(int widgetId) {}
+core\include/kernel/kernel_app.h(209,36): warning G24ACD1A9: unused parameter 'widgetId' [-Wunused-parameter]
+    209 |     virtual void onWidgetClick(int widgetId) {}
         |                                ~~~~^~~~~~~~
     Compiling kernel_apps.cpp...
   In file included from core\include/kernel/kernel_apps.h:13,
                    from core\kernel_apps.cpp:7:
+  core/include/kernel/kernel_app.h: In member function 'virtual bool kernel::app::KernelApp::initWithParam(const char*)':
+core/include/kernel/kernel_app.h(198,44): warning G24ACD1A9: unused parameter 'param' [-Wunused-parameter]
+    198 |     virtual bool initWithParam(const char* param) { return init(); }  // Override for param support
+        |                                ~~~~~~~~~~~~^~~~~
   core/include/kernel/kernel_app.h: In member function 'virtual void kernel::app::KernelApp::onMouseMove(int, int)':
-core/include/kernel/kernel_app.h(202,34): warning G24ACD1A9: unused parameter 'x' [-Wunused-parameter]
-    202 |     virtual void onMouseMove(int x, int y) {}
-        |                              ~~~~^
-core/include/kernel/kernel_app.h(202,41): warning G24ACD1A9: unused parameter 'y' [-Wunused-parameter]
-    202 |     virtual void onMouseMove(int x, int y) {}
-        |                                     ~~~~^
-  core/include/kernel/kernel_app.h: In member function 'virtual void kernel::app::KernelApp::onMouseDown(int, int, uint8_t)':
 core/include/kernel/kernel_app.h(203,34): warning G24ACD1A9: unused parameter 'x' [-Wunused-parameter]
-    203 |     virtual void onMouseDown(int x, int y, uint8_t button) {}
+    203 |     virtual void onMouseMove(int x, int y) {}
         |                              ~~~~^
 core/include/kernel/kernel_app.h(203,41): warning G24ACD1A9: unused parameter 'y' [-Wunused-parameter]
-    203 |     virtual void onMouseDown(int x, int y, uint8_t button) {}
+    203 |     virtual void onMouseMove(int x, int y) {}
         |                                     ~~~~^
-core/include/kernel/kernel_app.h(203,52): warning G24ACD1A9: unused parameter 'button' [-Wunused-parameter]
-    203 |     virtual void onMouseDown(int x, int y, uint8_t button) {}
+  core/include/kernel/kernel_app.h: In member function 'virtual void kernel::app::KernelApp::onMouseDown(int, int, uint8_t)':
+core/include/kernel/kernel_app.h(204,34): warning G24ACD1A9: unused parameter 'x' [-Wunused-parameter]
+    204 |     virtual void onMouseDown(int x, int y, uint8_t button) {}
+        |                              ~~~~^
+core/include/kernel/kernel_app.h(204,41): warning G24ACD1A9: unused parameter 'y' [-Wunused-parameter]
+    204 |     virtual void onMouseDown(int x, int y, uint8_t button) {}
+        |                                     ~~~~^
+core/include/kernel/kernel_app.h(204,52): warning G24ACD1A9: unused parameter 'button' [-Wunused-parameter]
+    204 |     virtual void onMouseDown(int x, int y, uint8_t button) {}
         |                                            ~~~~~~~~^~~~~~
   core/include/kernel/kernel_app.h: In member function 'virtual void kernel::app::KernelApp::onMouseUp(int, int, uint8_t)':
-core/include/kernel/kernel_app.h(204,32): warning G24ACD1A9: unused parameter 'x' [-Wunused-parameter]
-    204 |     virtual void onMouseUp(int x, int y, uint8_t button) {}
+core/include/kernel/kernel_app.h(205,32): warning G24ACD1A9: unused parameter 'x' [-Wunused-parameter]
+    205 |     virtual void onMouseUp(int x, int y, uint8_t button) {}
         |                            ~~~~^
-core/include/kernel/kernel_app.h(204,39): warning G24ACD1A9: unused parameter 'y' [-Wunused-parameter]
-    204 |     virtual void onMouseUp(int x, int y, uint8_t button) {}
+core/include/kernel/kernel_app.h(205,39): warning G24ACD1A9: unused parameter 'y' [-Wunused-parameter]
+    205 |     virtual void onMouseUp(int x, int y, uint8_t button) {}
         |                                   ~~~~^
-core/include/kernel/kernel_app.h(204,50): warning G24ACD1A9: unused parameter 'button' [-Wunused-parameter]
-    204 |     virtual void onMouseUp(int x, int y, uint8_t button) {}
+core/include/kernel/kernel_app.h(205,50): warning G24ACD1A9: unused parameter 'button' [-Wunused-parameter]
+    205 |     virtual void onMouseUp(int x, int y, uint8_t button) {}
         |                                          ~~~~~~~~^~~~~~
   core/include/kernel/kernel_app.h: In member function 'virtual void kernel::app::KernelApp::onKeyDown(uint32_t)':
-core/include/kernel/kernel_app.h(205,37): warning G24ACD1A9: unused parameter 'key' [-Wunused-parameter]
-    205 |     virtual void onKeyDown(uint32_t key) {}
+core/include/kernel/kernel_app.h(206,37): warning G24ACD1A9: unused parameter 'key' [-Wunused-parameter]
+    206 |     virtual void onKeyDown(uint32_t key) {}
         |                            ~~~~~~~~~^~~
   core/include/kernel/kernel_app.h: In member function 'virtual void kernel::app::KernelApp::onKeyUp(uint32_t)':
-core/include/kernel/kernel_app.h(206,35): warning G24ACD1A9: unused parameter 'key' [-Wunused-parameter]
-    206 |     virtual void onKeyUp(uint32_t key) {}
+core/include/kernel/kernel_app.h(207,35): warning G24ACD1A9: unused parameter 'key' [-Wunused-parameter]
+    207 |     virtual void onKeyUp(uint32_t key) {}
         |                          ~~~~~~~~~^~~
   core/include/kernel/kernel_app.h: In member function 'virtual void kernel::app::KernelApp::onKeyChar(char)':
-core/include/kernel/kernel_app.h(207,33): warning G24ACD1A9: unused parameter 'c' [-Wunused-parameter]
-    207 |     virtual void onKeyChar(char c) {}
+core/include/kernel/kernel_app.h(208,33): warning G24ACD1A9: unused parameter 'c' [-Wunused-parameter]
+    208 |     virtual void onKeyChar(char c) {}
         |                            ~~~~~^
   core/include/kernel/kernel_app.h: In member function 'virtual void kernel::app::KernelApp::onWidgetClick(int)':
-core/include/kernel/kernel_app.h(208,36): warning G24ACD1A9: unused parameter 'widgetId' [-Wunused-parameter]
-    208 |     virtual void onWidgetClick(int widgetId) {}
+core/include/kernel/kernel_app.h(209,36): warning G24ACD1A9: unused parameter 'widgetId' [-Wunused-parameter]
+    209 |     virtual void onWidgetClick(int widgetId) {}
         |                                ~~~~^~~~~~~~
+  In file included from core\kernel_apps.cpp:12:
+  core\include/kernel/vfs.h: At global scope:
+core\include/kernel/vfs.h(33,14): error G30A0E944: 'size_t' does not name a type
+     33 | static const size_t VFS_MAX_PATH = 256;
+        |              ^~~~~~
+  core\include/kernel/vfs.h:25:1: note: 'size_t' is defined in header '<cstddef>'; this is probably fixable by adding '#include <cstddef>'
+     24 | #include "kernel/block_device.h"
+    +++ |+#include <cstddef>
+     25 | 
+core\include/kernel/vfs.h(34,14): error G30A0E944: 'size_t' does not name a type
+     34 | static const size_t VFS_MAX_FILENAME = 128;
+        |              ^~~~~~
+  core\include/kernel/vfs.h:34:14: note: 'size_t' is defined in header '<cstddef>'; this is probably fixable by adding '#include <cstddef>'
+core\include/kernel/vfs.h(35,14): error G30A0E944: 'size_t' does not name a type
+     35 | static const size_t VFS_MAX_MOUNTS = 8;
+        |              ^~~~~~
+  core\include/kernel/vfs.h:35:14: note: 'size_t' is defined in header '<cstddef>'; this is probably fixable by adding '#include <cstddef>'
+core\include/kernel/vfs.h(36,14): error G30A0E944: 'size_t' does not name a type
+     36 | static const size_t VFS_MAX_OPEN_FILES = 32;
+        |              ^~~~~~
+  core\include/kernel/vfs.h:36:14: note: 'size_t' is defined in header '<cstddef>'; this is probably fixable by adding '#include <cstddef>'
+core\include/kernel/vfs.h(115,19): error G2F7BD88E: 'VFS_MAX_FILENAME' was not declared in this scope
+    115 |     char     name[VFS_MAX_FILENAME];
+        |                   ^~~~~~~~~~~~~~~~
+core\include/kernel/vfs.h(132,19): error G2F7BD88E: 'VFS_MAX_FILENAME' was not declared in this scope
+    132 |     char     name[VFS_MAX_FILENAME];
+        |                   ^~~~~~~~~~~~~~~~
+core\include/kernel/vfs.h(146,19): error GAA57BB08: 'VFS_MAX_PATH' was not declared in this scope
+    146 |     char     path[VFS_MAX_PATH];      // Mount path (e.g., "/", "/mnt/usb")
+        |                   ^~~~~~~~~~~~
+core\include/kernel/vfs.h(164,19): error GAA57BB08: 'VFS_MAX_PATH' was not declared in this scope
+    164 |     char     path[VFS_MAX_PATH];      // Full path (for debugging)
+        |                   ^~~~~~~~~~~~
+core\include/kernel/vfs.h(174,19): error GAA57BB08: 'VFS_MAX_PATH' was not declared in this scope
+    174 |     char     path[VFS_MAX_PATH];
+        |                   ^~~~~~~~~~~~
+core\include/kernel/vfs.h(213,54): error G30A0E944: 'size_t' has not been declared
+    213 | void normalize_path(const char* input, char* output, size_t outputSize);
+        |                                                      ^~~~~~
+  core\include/kernel/vfs.h:213:54: note: 'size_t' is defined in header '<cstddef>'; this is probably fixable by adding '#include <cstddef>'
+core\include/kernel/vfs.h(216,50): error G30A0E944: 'size_t' has not been declared
+    216 | void parent_path(const char* path, char* output, size_t outputSize);
+        |                                                  ^~~~~~
+  core\include/kernel/vfs.h:216:50: note: 'size_t' is defined in header '<cstddef>'; this is probably fixable by adding '#include <cstddef>'
+core\include/kernel/vfs.h(225,66): error G30A0E944: 'size_t' has not been declared
+    225 | void join_path(const char* base, const char* name, char* output, size_t outputSize);
+        |                                                                  ^~~~~~
+  core\include/kernel/vfs.h:225:66: note: 'size_t' is defined in header '<cstddef>'; this is probably fixable by adding '#include <cstddef>'
   core\kernel_apps.cpp: In member function 'virtual void kernel::apps::NotepadApp::draw(uint32_t, uint32_t, uint32_t, uint32_t)':
-core\kernel_apps.cpp(255,59): warning G7D6735F0: comparison of integer expressions of different signedness: 'int' and 'long unsigned int' [-Wsign-compare]
-    255 |             if (col * (kGlyphW + kGlyphSpacing) + kGlyphW > w - 16) {
+core\kernel_apps.cpp(283,59): warning G7D6735F0: comparison of integer expressions of different signedness: 'int' and 'long unsigned int' [-Wsign-compare]
+    283 |             if (col * (kGlyphW + kGlyphSpacing) + kGlyphW > w - 16) {
         |                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~
   core\kernel_apps.cpp: In member function 'virtual void kernel::apps::CalculatorApp::onWidgetClick(int)':
-core\kernel_apps.cpp(519,17): warning G41AE70B8: unused variable 'btnChars' [-Wunused-variable]
-    519 |     const char* btnChars = "Cce/%789*456-123++/-0.=";
+core\kernel_apps.cpp(961,17): warning G41AE70B8: unused variable 'btnChars' [-Wunused-variable]
+    961 |     const char* btnChars = "Cce/%789*456-123++/-0.=";
         |                 ^~~~~~~~
   core\kernel_apps.cpp: In member function 'virtual void kernel::apps::TaskManagerApp::onMouseDown(int, int, uint8_t)':
-core\kernel_apps.cpp(874,38): warning G24ACD1A9: unused parameter 'localX' [-Wunused-parameter]
-    874 | void TaskManagerApp::onMouseDown(int localX, int localY, uint8_t button) {
+core\kernel_apps.cpp(1316,38): warning G24ACD1A9: unused parameter 'localX' [-Wunused-parameter]
+   1316 | void TaskManagerApp::onMouseDown(int localX, int localY, uint8_t button) {
         |                                  ~~~~^~~~~~
+    [ERROR] Failed to compile kernel_apps.cpp
     Compiling kernel_compositor.cpp...
   In file included from core\include/kernel/kernel_compositor.h:15,
                    from core\kernel_compositor.cpp:7:
+  core/include/kernel/kernel_app.h: In member function 'virtual bool kernel::app::KernelApp::initWithParam(const char*)':
+core/include/kernel/kernel_app.h(198,44): warning G24ACD1A9: unused parameter 'param' [-Wunused-parameter]
+    198 |     virtual bool initWithParam(const char* param) { return init(); }  // Override for param support
+        |                                ~~~~~~~~~~~~^~~~~
   core/include/kernel/kernel_app.h: In member function 'virtual void kernel::app::KernelApp::onMouseMove(int, int)':
-core/include/kernel/kernel_app.h(202,34): warning G24ACD1A9: unused parameter 'x' [-Wunused-parameter]
-    202 |     virtual void onMouseMove(int x, int y) {}
-        |                              ~~~~^
-core/include/kernel/kernel_app.h(202,41): warning G24ACD1A9: unused parameter 'y' [-Wunused-parameter]
-    202 |     virtual void onMouseMove(int x, int y) {}
-        |                                     ~~~~^
-  core/include/kernel/kernel_app.h: In member function 'virtual void kernel::app::KernelApp::onMouseDown(int, int, uint8_t)':
 core/include/kernel/kernel_app.h(203,34): warning G24ACD1A9: unused parameter 'x' [-Wunused-parameter]
-    203 |     virtual void onMouseDown(int x, int y, uint8_t button) {}
+    203 |     virtual void onMouseMove(int x, int y) {}
         |                              ~~~~^
 core/include/kernel/kernel_app.h(203,41): warning G24ACD1A9: unused parameter 'y' [-Wunused-parameter]
-    203 |     virtual void onMouseDown(int x, int y, uint8_t button) {}
+    203 |     virtual void onMouseMove(int x, int y) {}
         |                                     ~~~~^
-core/include/kernel/kernel_app.h(203,52): warning G24ACD1A9: unused parameter 'button' [-Wunused-parameter]
-    203 |     virtual void onMouseDown(int x, int y, uint8_t button) {}
+  core/include/kernel/kernel_app.h: In member function 'virtual void kernel::app::KernelApp::onMouseDown(int, int, uint8_t)':
+core/include/kernel/kernel_app.h(204,34): warning G24ACD1A9: unused parameter 'x' [-Wunused-parameter]
+    204 |     virtual void onMouseDown(int x, int y, uint8_t button) {}
+        |                              ~~~~^
+core/include/kernel/kernel_app.h(204,41): warning G24ACD1A9: unused parameter 'y' [-Wunused-parameter]
+    204 |     virtual void onMouseDown(int x, int y, uint8_t button) {}
+        |                                     ~~~~^
+core/include/kernel/kernel_app.h(204,52): warning G24ACD1A9: unused parameter 'button' [-Wunused-parameter]
+    204 |     virtual void onMouseDown(int x, int y, uint8_t button) {}
         |                                            ~~~~~~~~^~~~~~
   core/include/kernel/kernel_app.h: In member function 'virtual void kernel::app::KernelApp::onMouseUp(int, int, uint8_t)':
-core/include/kernel/kernel_app.h(204,32): warning G24ACD1A9: unused parameter 'x' [-Wunused-parameter]
-    204 |     virtual void onMouseUp(int x, int y, uint8_t button) {}
+core/include/kernel/kernel_app.h(205,32): warning G24ACD1A9: unused parameter 'x' [-Wunused-parameter]
+    205 |     virtual void onMouseUp(int x, int y, uint8_t button) {}
         |                            ~~~~^
-core/include/kernel/kernel_app.h(204,39): warning G24ACD1A9: unused parameter 'y' [-Wunused-parameter]
-    204 |     virtual void onMouseUp(int x, int y, uint8_t button) {}
+core/include/kernel/kernel_app.h(205,39): warning G24ACD1A9: unused parameter 'y' [-Wunused-parameter]
+    205 |     virtual void onMouseUp(int x, int y, uint8_t button) {}
         |                                   ~~~~^
-core/include/kernel/kernel_app.h(204,50): warning G24ACD1A9: unused parameter 'button' [-Wunused-parameter]
-    204 |     virtual void onMouseUp(int x, int y, uint8_t button) {}
+core/include/kernel/kernel_app.h(205,50): warning G24ACD1A9: unused parameter 'button' [-Wunused-parameter]
+    205 |     virtual void onMouseUp(int x, int y, uint8_t button) {}
         |                                          ~~~~~~~~^~~~~~
   core/include/kernel/kernel_app.h: In member function 'virtual void kernel::app::KernelApp::onKeyDown(uint32_t)':
-core/include/kernel/kernel_app.h(205,37): warning G24ACD1A9: unused parameter 'key' [-Wunused-parameter]
-    205 |     virtual void onKeyDown(uint32_t key) {}
+core/include/kernel/kernel_app.h(206,37): warning G24ACD1A9: unused parameter 'key' [-Wunused-parameter]
+    206 |     virtual void onKeyDown(uint32_t key) {}
         |                            ~~~~~~~~~^~~
   core/include/kernel/kernel_app.h: In member function 'virtual void kernel::app::KernelApp::onKeyUp(uint32_t)':
-core/include/kernel/kernel_app.h(206,35): warning G24ACD1A9: unused parameter 'key' [-Wunused-parameter]
-    206 |     virtual void onKeyUp(uint32_t key) {}
+core/include/kernel/kernel_app.h(207,35): warning G24ACD1A9: unused parameter 'key' [-Wunused-parameter]
+    207 |     virtual void onKeyUp(uint32_t key) {}
         |                          ~~~~~~~~~^~~
   core/include/kernel/kernel_app.h: In member function 'virtual void kernel::app::KernelApp::onKeyChar(char)':
-core/include/kernel/kernel_app.h(207,33): warning G24ACD1A9: unused parameter 'c' [-Wunused-parameter]
-    207 |     virtual void onKeyChar(char c) {}
+core/include/kernel/kernel_app.h(208,33): warning G24ACD1A9: unused parameter 'c' [-Wunused-parameter]
+    208 |     virtual void onKeyChar(char c) {}
         |                            ~~~~~^
   core/include/kernel/kernel_app.h: In member function 'virtual void kernel::app::KernelApp::onWidgetClick(int)':
-core/include/kernel/kernel_app.h(208,36): warning G24ACD1A9: unused parameter 'widgetId' [-Wunused-parameter]
-    208 |     virtual void onWidgetClick(int widgetId) {}
+core/include/kernel/kernel_app.h(209,36): warning G24ACD1A9: unused parameter 'widgetId' [-Wunused-parameter]
+    209 |     virtual void onWidgetClick(int widgetId) {}
         |                                ~~~~^~~~~~~~
     Compiling kernel_ipc.cpp...
     Compiling main.cpp...
@@ -1705,87 +1770,135 @@ core\include/kernel/vfs.h(225,66): error G30A0E944: 'size_t' has not been declar
     225 | void join_path(const char* base, const char* name, char* output, size_t outputSize);
         |                                                                  ^~~~~~
   core\include/kernel/vfs.h:225:66: note: 'size_t' is defined in header '<cstddef>'; this is probably fixable by adding '#include <cstddef>'
+  In file included from core\shell.cpp:20:
+  core\include/kernel/kernel_app.h: In member function 'virtual bool kernel::app::KernelApp::initWithParam(const char*)':
+core\include/kernel/kernel_app.h(198,44): warning G24ACD1A9: unused parameter 'param' [-Wunused-parameter]
+    198 |     virtual bool initWithParam(const char* param) { return init(); }  // Override for param support
+        |                                ~~~~~~~~~~~~^~~~~
+  core\include/kernel/kernel_app.h: In member function 'virtual void kernel::app::KernelApp::onMouseMove(int, int)':
+core\include/kernel/kernel_app.h(203,34): warning G24ACD1A9: unused parameter 'x' [-Wunused-parameter]
+    203 |     virtual void onMouseMove(int x, int y) {}
+        |                              ~~~~^
+core\include/kernel/kernel_app.h(203,41): warning G24ACD1A9: unused parameter 'y' [-Wunused-parameter]
+    203 |     virtual void onMouseMove(int x, int y) {}
+        |                                     ~~~~^
+  core\include/kernel/kernel_app.h: In member function 'virtual void kernel::app::KernelApp::onMouseDown(int, int, uint8_t)':
+core\include/kernel/kernel_app.h(204,34): warning G24ACD1A9: unused parameter 'x' [-Wunused-parameter]
+    204 |     virtual void onMouseDown(int x, int y, uint8_t button) {}
+        |                              ~~~~^
+core\include/kernel/kernel_app.h(204,41): warning G24ACD1A9: unused parameter 'y' [-Wunused-parameter]
+    204 |     virtual void onMouseDown(int x, int y, uint8_t button) {}
+        |                                     ~~~~^
+core\include/kernel/kernel_app.h(204,52): warning G24ACD1A9: unused parameter 'button' [-Wunused-parameter]
+    204 |     virtual void onMouseDown(int x, int y, uint8_t button) {}
+        |                                            ~~~~~~~~^~~~~~
+  core\include/kernel/kernel_app.h: In member function 'virtual void kernel::app::KernelApp::onMouseUp(int, int, uint8_t)':
+core\include/kernel/kernel_app.h(205,32): warning G24ACD1A9: unused parameter 'x' [-Wunused-parameter]
+    205 |     virtual void onMouseUp(int x, int y, uint8_t button) {}
+        |                            ~~~~^
+core\include/kernel/kernel_app.h(205,39): warning G24ACD1A9: unused parameter 'y' [-Wunused-parameter]
+    205 |     virtual void onMouseUp(int x, int y, uint8_t button) {}
+        |                                   ~~~~^
+core\include/kernel/kernel_app.h(205,50): warning G24ACD1A9: unused parameter 'button' [-Wunused-parameter]
+    205 |     virtual void onMouseUp(int x, int y, uint8_t button) {}
+        |                                          ~~~~~~~~^~~~~~
+  core\include/kernel/kernel_app.h: In member function 'virtual void kernel::app::KernelApp::onKeyDown(uint32_t)':
+core\include/kernel/kernel_app.h(206,37): warning G24ACD1A9: unused parameter 'key' [-Wunused-parameter]
+    206 |     virtual void onKeyDown(uint32_t key) {}
+        |                            ~~~~~~~~~^~~
+  core\include/kernel/kernel_app.h: In member function 'virtual void kernel::app::KernelApp::onKeyUp(uint32_t)':
+core\include/kernel/kernel_app.h(207,35): warning G24ACD1A9: unused parameter 'key' [-Wunused-parameter]
+    207 |     virtual void onKeyUp(uint32_t key) {}
+        |                          ~~~~~~~~~^~~
+  core\include/kernel/kernel_app.h: In member function 'virtual void kernel::app::KernelApp::onKeyChar(char)':
+core\include/kernel/kernel_app.h(208,33): warning G24ACD1A9: unused parameter 'c' [-Wunused-parameter]
+    208 |     virtual void onKeyChar(char c) {}
+        |                            ~~~~~^
+  core\include/kernel/kernel_app.h: In member function 'virtual void kernel::app::KernelApp::onWidgetClick(int)':
+core\include/kernel/kernel_app.h(209,36): warning G24ACD1A9: unused parameter 'widgetId' [-Wunused-parameter]
+    209 |     virtual void onWidgetClick(int widgetId) {}
+        |                                ~~~~^~~~~~~~
   core\shell.cpp: In function 'void kernel::shell::cmd_ls(const char*)':
-core\shell.cpp(411,19): error G0B59A654: 'struct kernel::vfs::DirEntry' has no member named 'name'
-    411 |         if (entry.name[0] == '.' && (entry.name[1] == '\0' ||
+core\shell.cpp(412,19): error G0B59A654: 'struct kernel::vfs::DirEntry' has no member named 'name'
+    412 |         if (entry.name[0] == '.' && (entry.name[1] == '\0' ||
         |                   ^~~~
-core\shell.cpp(411,44): error G0B59A654: 'struct kernel::vfs::DirEntry' has no member named 'name'
-    411 |         if (entry.name[0] == '.' && (entry.name[1] == '\0' ||
-        |                                            ^~~~
-core\shell.cpp(412,20): error G0B59A654: 'struct kernel::vfs::DirEntry' has no member named 'name'
-    412 |             (entry.name[1] == '.' && entry.name[2] == '\0'))) {
-        |                    ^~~~
 core\shell.cpp(412,44): error G0B59A654: 'struct kernel::vfs::DirEntry' has no member named 'name'
-    412 |             (entry.name[1] == '.' && entry.name[2] == '\0'))) {
+    412 |         if (entry.name[0] == '.' && (entry.name[1] == '\0' ||
         |                                            ^~~~
-core\shell.cpp(418,33): error G0B59A654: 'struct kernel::vfs::DirEntry' has no member named 'name'
-    418 |             output_string(entry.name);
+core\shell.cpp(413,20): error G0B59A654: 'struct kernel::vfs::DirEntry' has no member named 'name'
+    413 |             (entry.name[1] == '.' && entry.name[2] == '\0'))) {
+        |                    ^~~~
+core\shell.cpp(413,44): error G0B59A654: 'struct kernel::vfs::DirEntry' has no member named 'name'
+    413 |             (entry.name[1] == '.' && entry.name[2] == '\0'))) {
+        |                                            ^~~~
+core\shell.cpp(419,33): error G0B59A654: 'struct kernel::vfs::DirEntry' has no member named 'name'
+    419 |             output_string(entry.name);
         |                                 ^~~~
-core\shell.cpp(421,33): error G0B59A654: 'struct kernel::vfs::DirEntry' has no member named 'name'
-    421 |             output_string(entry.name);
+core\shell.cpp(422,33): error G0B59A654: 'struct kernel::vfs::DirEntry' has no member named 'name'
+    422 |             output_string(entry.name);
         |                                 ^~~~
   core\shell.cpp: In function 'void kernel::shell::cmd_ll(const char*)':
-core\shell.cpp(467,19): error G0B59A654: 'struct kernel::vfs::DirEntry' has no member named 'name'
-    467 |         if (entry.name[0] == '.' && (entry.name[1] == '\0' ||
+core\shell.cpp(468,19): error G0B59A654: 'struct kernel::vfs::DirEntry' has no member named 'name'
+    468 |         if (entry.name[0] == '.' && (entry.name[1] == '\0' ||
         |                   ^~~~
-core\shell.cpp(467,44): error G0B59A654: 'struct kernel::vfs::DirEntry' has no member named 'name'
-    467 |         if (entry.name[0] == '.' && (entry.name[1] == '\0' ||
-        |                                            ^~~~
-core\shell.cpp(468,20): error G0B59A654: 'struct kernel::vfs::DirEntry' has no member named 'name'
-    468 |             (entry.name[1] == '.' && entry.name[2] == '\0'))) {
-        |                    ^~~~
 core\shell.cpp(468,44): error G0B59A654: 'struct kernel::vfs::DirEntry' has no member named 'name'
-    468 |             (entry.name[1] == '.' && entry.name[2] == '\0'))) {
+    468 |         if (entry.name[0] == '.' && (entry.name[1] == '\0' ||
         |                                            ^~~~
-core\shell.cpp(504,29): error G0B59A654: 'struct kernel::vfs::DirEntry' has no member named 'name'
-    504 |         output_string(entry.name);
+core\shell.cpp(469,20): error G0B59A654: 'struct kernel::vfs::DirEntry' has no member named 'name'
+    469 |             (entry.name[1] == '.' && entry.name[2] == '\0'))) {
+        |                    ^~~~
+core\shell.cpp(469,44): error G0B59A654: 'struct kernel::vfs::DirEntry' has no member named 'name'
+    469 |             (entry.name[1] == '.' && entry.name[2] == '\0'))) {
+        |                                            ^~~~
+core\shell.cpp(505,29): error G0B59A654: 'struct kernel::vfs::DirEntry' has no member named 'name'
+    505 |         output_string(entry.name);
         |                             ^~~~
   core\shell.cpp: In function 'void kernel::shell::cmd_vfsmount(const char*, const char*)':
-core\shell.cpp(1041,27): warning GA5864BA6: narrowing conversion of '(48 + ((int)idx))' from 'int' to 'char' [-Wnarrowing]
-   1041 |     char numStr[4] = {'0' + idx, '\0'};
+core\shell.cpp(1042,27): warning GA5864BA6: narrowing conversion of '(48 + ((int)idx))' from 'int' to 'char' [-Wnarrowing]
+   1042 |     char numStr[4] = {'0' + idx, '\0'};
         |                       ~~~~^~~~~
   core\shell.cpp: In function 'void kernel::shell::cmd_vfsls(const char*)':
-core\shell.cpp(1090,29): error G0B59A654: 'struct kernel::vfs::DirEntry' has no member named 'name'
-   1090 |         output_string(entry.name);
+core\shell.cpp(1091,29): error G0B59A654: 'struct kernel::vfs::DirEntry' has no member named 'name'
+   1091 |         output_string(entry.name);
         |                             ^~~~
   core\shell.cpp: In function 'void kernel::shell::cmd_vfsstat(const char*)':
-core\shell.cpp(1192,24): error G8C8E30D7: 'struct kernel::vfs::FileInfo' has no member named 'name'
-   1192 |     output_string(info.name);
+core\shell.cpp(1193,24): error G8C8E30D7: 'struct kernel::vfs::FileInfo' has no member named 'name'
+   1193 |     output_string(info.name);
         |                        ^~~~
   core\shell.cpp: In function 'void kernel::shell::cmd_vfstest()':
-core\shell.cpp(1225,29): warning GA5864BA6: narrowing conversion of '(48 + ((int)devCount))' from 'int' to 'char' [-Wnarrowing]
-   1225 |     char countStr[4] = {'0' + devCount, '\0'};
+core\shell.cpp(1226,29): warning GA5864BA6: narrowing conversion of '(48 + ((int)devCount))' from 'int' to 'char' [-Wnarrowing]
+   1226 |     char countStr[4] = {'0' + devCount, '\0'};
         |                         ~~~~^~~~~~~~~~
-core\shell.cpp(1240,35): warning GA5864BA6: narrowing conversion of '(48 + ((int)i))' from 'int' to 'char' [-Wnarrowing]
-   1240 |             char idxStr[4] = {'0' + i, ':', ' ', '\0'};
+core\shell.cpp(1241,35): warning GA5864BA6: narrowing conversion of '(48 + ((int)i))' from 'int' to 'char' [-Wnarrowing]
+   1241 |             char idxStr[4] = {'0' + i, ':', ' ', '\0'};
         |                               ~~~~^~~
-core\shell.cpp(1266,31): error G0FC9DB6F: 'const struct kernel::vfs::MountPoint' has no member named 'path'
-   1266 |             output_string(mp->path);
+core\shell.cpp(1267,31): error G0FC9DB6F: 'const struct kernel::vfs::MountPoint' has no member named 'path'
+   1267 |             output_string(mp->path);
         |                               ^~~~
   core\shell.cpp: In function 'void kernel::shell::cmd_vfsinfo()':
-core\shell.cpp(1330,35): warning GA5864BA6: narrowing conversion of '(48 + ((int)i))' from 'int' to 'char' [-Wnarrowing]
-   1330 |             char idxStr[4] = {'0' + i, ']', ' ', '\0'};
+core\shell.cpp(1331,35): warning GA5864BA6: narrowing conversion of '(48 + ((int)i))' from 'int' to 'char' [-Wnarrowing]
+   1331 |             char idxStr[4] = {'0' + i, ']', ' ', '\0'};
         |                               ~~~~^~~
-core\shell.cpp(1364,31): error G0FC9DB6F: 'const struct kernel::vfs::MountPoint' has no member named 'path'
-   1364 |             output_string(mp->path);
+core\shell.cpp(1365,31): error G0FC9DB6F: 'const struct kernel::vfs::MountPoint' has no member named 'path'
+   1365 |             output_string(mp->path);
         |                               ^~~~
-core\shell.cpp(1368,35): warning GA5864BA6: narrowing conversion of '(48 + ((int)mp->kernel::vfs::MountPoint::blockDevIndex))' from 'int' to 'char' [-Wnarrowing]
-   1368 |             char devStr[4] = {'0' + mp->blockDevIndex, ')', '\0'};
+core\shell.cpp(1369,35): warning GA5864BA6: narrowing conversion of '(48 + ((int)mp->kernel::vfs::MountPoint::blockDevIndex))' from 'int' to 'char' [-Wnarrowing]
+   1369 |             char devStr[4] = {'0' + mp->blockDevIndex, ')', '\0'};
         |                               ~~~~^~~~~~~~~~~~~~~~~~~
   core\shell.cpp: In function 'void kernel::shell::cmd_dhcp(const char**, uint32_t)':
-core\shell.cpp(2226,10): warning G41AE70B8: unused variable 'showStatus' [-Wunused-variable]
-   2226 |     bool showStatus = (argCount <= 1);
+core\shell.cpp(2227,10): warning G41AE70B8: unused variable 'showStatus' [-Wunused-variable]
+   2227 |     bool showStatus = (argCount <= 1);
         |          ^~~~~~~~~~
   core\shell.cpp: In function 'void kernel::shell::draw(uint32_t, uint32_t, uint32_t, uint32_t)':
-core\shell.cpp(3077,14): warning G41AE70B8: unused variable 'charsPerLine' [-Wunused-variable]
-   3077 |     uint32_t charsPerLine = textW / kFontW;
+core\shell.cpp(3074,14): warning G41AE70B8: unused variable 'charsPerLine' [-Wunused-variable]
+   3074 |     uint32_t charsPerLine = textW / kFontW;
         |              ^~~~~~~~~~~~
   core\shell.cpp: At global scope:
-core\shell.cpp(248,13): warning G8A2F72A0: 'void kernel::shell::output_prompt()' defined but not used [-Wunused-function]
-    248 | static void output_prompt() {
+core\shell.cpp(249,13): warning G8A2F72A0: 'void kernel::shell::output_prompt()' defined but not used [-Wunused-function]
+    249 | static void output_prompt() {
         |             ^~~~~~~~~~~~~
-core\shell.cpp(202,13): warning G95263752: 'bool kernel::shell::str_starts_with(const char*, const char*)' defined but not used [-Wunused-function]
-    202 | static bool str_starts_with(const char* str, const char* prefix) {
+core\shell.cpp(203,13): warning G95263752: 'bool kernel::shell::str_starts_with(const char*, const char*)' defined but not used [-Wunused-function]
+    203 | static bool str_starts_with(const char* str, const char* prefix) {
         |             ^~~~~~~~~~~~~~~
     [ERROR] Failed to compile shell.cpp
     Compiling socket.cpp...

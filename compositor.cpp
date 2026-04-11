@@ -737,6 +737,34 @@ namespace gxos {
                     requestRepaint( ); return 0;
                 }
                 if (my < cr.bottom - taskbarH) {
+                    // Check if right-click is on a window
+                    WinInfo* hitWin = nullptr;
+                    uint64_t ownerPid = 0;
+                    {
+                        std::lock_guard<std::mutex> lk(g_lock);
+                        hitWin = hitWindowAt(mx, my);
+                        if (hitWin) {
+                            ownerPid = hitWin->ownerPid;
+                            // Set focus to the clicked window
+                            if (g_focus != hitWin->id) {
+                                g_focus = hitWin->id;
+                                auto it2 = std::find(g_z.begin(), g_z.end(), hitWin->id);
+                                if (it2 != g_z.end()) {
+                                    g_z.erase(it2);
+                                    g_z.push_back(hitWin->id);
+                                }
+                            }
+                        }
+                    }
+                    
+                    // If right-click is on a window, forward the event to the application
+                    if (hitWin) {
+                        publishOut(MsgType::MT_InputMouse, std::to_string(mx) + "|" + std::to_string(my) + "|2|down", ownerPid);
+                        requestRepaint();
+                        return 0;
+                    }
+                    
+                    // Otherwise, handle desktop icon right-click or show desktop context menu
                     const int iconW = 56; const int cellW = iconW + 28; const int cellH = 56 + 38; int hitIdx = -1; for (int i = 0; i < (int)g_items.size( ); ++i) { int ix = g_items[i].ix; int iy = g_items[i].iy; if (mx >= ix && mx < ix + cellW && my >= iy && my < iy + cellH) { hitIdx = i; break; } } if (hitIdx >= 0) { if (g_items[hitIdx].pinned) unpinAction(g_items[hitIdx].action); else pinAction(g_items[hitIdx].action); requestRepaint( ); return 0; }
                     // Desktop right-click context menu (no icon hit)
                     RightClickMenu::Show(mx, my);

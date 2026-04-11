@@ -76,7 +76,6 @@
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
-    <None Include="BOOTLOADER_ANALYSIS.md" />
     <None Include="trampoline.asm">
       <Filter>Source Files</Filter>
     </None>
