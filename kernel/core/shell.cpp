@@ -17,6 +17,7 @@
 #include "include/kernel/block_device.h"
 #include "include/kernel/fs_fat.h"
 #include "include/kernel/desktop.h"
+#include "include/kernel/kernel_app.h"
 
 // Forward declarations for power functions (defined in desktop.cpp, outside any namespace)
 extern void perform_shutdown();
@@ -2651,20 +2652,16 @@ static void execute_command(const char* cmd) {
             output_string("#####################\n");
         }
     } else if (str_eq(command, "notepad")) {
-        // Launch Notepad (file loading from CLI would require app framework extension)
+        // Launch Notepad with optional file parameter
         if (arg1[0] != '\0') {
             output_string("Launching Notepad with file: ");
             output_string(arg1);
             output_string("\n");
-            output_string("Note: File loading from CLI requires kernel app framework extension.\n");
-            output_string("For now, use Notepad's Open dialog to load files.\n");
+            ::kernel::app::AppManager::launchAppWithParam("Notepad", arg1);
         } else {
             output_string("Launching Notepad...\n");
+            ::kernel::desktop::launch_app("Notepad");
         }
-        
-        // Launch notepad via desktop launch_app which attempts kernel app launch
-        // In the future, extend AppManager::launchApp() to accept const char* argv[] parameter
-        ::kernel::desktop::launch_app("Notepad");
     } else if (str_eq(command, "osk") || str_eq(command, "onscreen-keyboard")) {
         cmd_osk();
     } else if (str_eq(command, "dmesg")) {

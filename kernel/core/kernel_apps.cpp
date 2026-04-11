@@ -9,6 +9,7 @@
 #include "include/kernel/framebuffer.h"
 #include "include/kernel/shell.h"
 #include "include/kernel/ps2keyboard.h"
+#include "include/kernel/vfs.h"
 
 namespace kernel {
 namespace apps {
@@ -169,22 +170,35 @@ static void drawChar(uint32_t px, uint32_t py, char c, uint32_t color) {
 // NotepadApp Implementation
 // ============================================================
 
-NotepadApp::NotepadApp() : m_textLength(0), m_cursorPos(0), m_scrollY(0), m_selectAll(false) {
+// Static clipboard for cut/copy/paste
+char NotepadApp::s_clipboard[MAX_TEXT_LENGTH] = {0};
+int NotepadApp::s_clipboardLength = 0;
+
+NotepadApp::NotepadApp() : m_textLength(0), m_cursorPos(0), m_scrollY(0), m_selectAll(false),
+                           m_modified(false), m_ctrlPressed(false), m_showFileMenu(false),
+                           m_showEditMenu(false), m_showContextMenu(false), m_contextMenuX(0),
+                           m_contextMenuY(0), m_hoveredMenuItem(-1), m_selectionStart(-1),
+                           m_selectionEnd(-1) {
     strcopy(m_name, "Notepad", app::MAX_APP_NAME);
     m_text[0] = '\0';
+    m_filePath[0] = '\0';
 }
 
 NotepadApp::~NotepadApp() {
 }
 
 bool NotepadApp::init() {
+    return initWithParam(nullptr);
+}
+
+bool NotepadApp::initWithParam(const char* filePath) {
     // Create window
     m_window = new app::KernelWindow();
     strcopy(m_window->title, "Notepad - Untitled", app::MAX_TITLE_LEN);
     m_window->x = 100;
     m_window->y = 50;
-    m_window->w = 500;
-    m_window->h = 350;
+    m_window->w = 600;
+    m_window->h = 400;
     m_window->flags = app::WF_VISIBLE | app::WF_TITLEBAR | app::WF_CLOSABLE | app::WF_RESIZABLE | app::WF_FOCUSED;
     m_window->owner = this;
     
@@ -195,11 +209,19 @@ bool NotepadApp::init() {
         return false;
     }
     
-    // Initialize text buffer with welcome message
-    const char* welcome = "Welcome to guideXOS Notepad!\n\nThis is a simple text editor running\nin bare-metal/UEFI mode.\n\nType here...";
-    strcopy(m_text, welcome, MAX_TEXT_LENGTH);
-    m_textLength = strlen_local(m_text);
-    m_cursorPos = m_textLength;
+    // Load file if specified, otherwise show welcome
+    if (filePath && filePath[0] != '\0') {
+        if (!loadFile(filePath)) {
+            // File load failed, start with empty document
+            newFile();
+        }
+    } else {
+        // Initialize with welcome message
+        const char* welcome = "Welcome to guideXOS Notepad!\n\nFile/Edit menus available.\nRight-click for context menu.\nCtrl+S to save, Ctrl+O to open.\n\nType here...";
+        strcopy(m_text, welcome, MAX_TEXT_LENGTH);
+        m_textLength = strlen_local(m_text);
+        m_cursorPos = m_textLength;
+    }
     
     m_state = app::AppState::Running;
     return true;
@@ -210,17 +232,23 @@ void NotepadApp::shutdown() {
 }
 
 void NotepadApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
+    // Draw menu bar background
+    framebuffer::fill_rect(x, y, w, MENU_BAR_HEIGHT, rgb(50, 50, 60));
+    drawMenuBar(x, y, w);
+    
     // Text editor background
-    framebuffer::fill_rect(x + 4, y + 4, w - 8, h - 8, rgb(45, 45, 55));
+    uint32_t textAreaY = y + MENU_BAR_HEIGHT;
+    uint32_t textAreaH = h - MENU_BAR_HEIGHT;
+    framebuffer::fill_rect(x + 4, textAreaY + 4, w - 8, textAreaH - 8, rgb(45, 45, 55));
     
     // Select-all highlight
     if (m_selectAll && m_textLength > 0) {
-        framebuffer::fill_rect(x + 4, y + 4, w - 8, h - 8, rgb(42, 91, 154));
+        framebuffer::fill_rect(x + 4, textAreaY + 4, w - 8, textAreaH - 8, rgb(42, 91, 154));
     }
     
     // Draw text
     uint32_t textX = x + 8;
-    uint32_t textY = y + 8;
+    uint32_t textY = textAreaY + 8;
     uint32_t lineH = kGlyphH + 3;
     uint32_t maxY = y + h - 8;
     
@@ -243,7 +271,7 @@ void NotepadApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
             col = 0;
             textY += lineH;
         } else if (c >= 32 && c < 127) {
-            // Printable character - draw it using proper glyph font
+            // Printable character
             uint32_t cx = textX + col * (kGlyphW + kGlyphSpacing);
             
             if (c != ' ') {
@@ -261,6 +289,11 @@ void NotepadApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
         
         charIdx++;
     }
+    
+    // Draw menus on top
+    if (m_showFileMenu) drawFileMenu(x + 4, y + MENU_BAR_HEIGHT);
+    if (m_showEditMenu) drawEditMenu(x + 50, y + MENU_BAR_HEIGHT);
+    if (m_showContextMenu) drawContextMenu(x + m_contextMenuX, y + m_contextMenuY);
 }
 
 void NotepadApp::onKeyChar(char c) {
@@ -270,18 +303,46 @@ void NotepadApp::onKeyChar(char c) {
             m_selectAll = false;
         }
         insertChar(c);
+        m_modified = true;
         invalidate();
     }
 }
 
 void NotepadApp::onKeyDown(uint32_t key) {
     bool ctrl = ps2keyboard::is_ctrl_down();
+    m_ctrlPressed = ctrl;
     
-    // Ctrl+A: Select All
-    if (ctrl && (key == 'a' || key == 'A')) {
-        m_selectAll = true;
-        invalidate();
-        return;
+    // Ctrl shortcuts
+    if (ctrl) {
+        if (key == 'a' || key == 'A') {
+            selectAll();
+            invalidate();
+            return;
+        }
+        if (key == 'c' || key == 'C') {
+            copy();
+            return;
+        }
+        if (key == 'x' || key == 'X') {
+            cut();
+            invalidate();
+            return;
+        }
+        if (key == 'v' || key == 'V') {
+            paste();
+            invalidate();
+            return;
+        }
+        if (key == 's' || key == 'S') {
+            saveFile();
+            invalidate();
+            return;
+        }
+        if (key == 'n' || key == 'N') {
+            newFile();
+            invalidate();
+            return;
+        }
     }
     
     switch (key) {
@@ -289,6 +350,7 @@ void NotepadApp::onKeyDown(uint32_t key) {
         case '\r':  // 13
             if (m_selectAll) { clearText(); m_selectAll = false; }
             insertChar('\n');
+            m_modified = true;
             break;
         case '\b':  // 8 (Backspace)
             if (m_selectAll) {
@@ -297,10 +359,12 @@ void NotepadApp::onKeyDown(uint32_t key) {
             } else {
                 deleteChar();
             }
+            m_modified = true;
             break;
         case '\t':  // 9 (Tab)
             if (m_selectAll) { clearText(); m_selectAll = false; }
             insertChar(' '); insertChar(' '); insertChar(' '); insertChar(' ');
+            m_modified = true;
             break;
         case 127:  // Delete (ASCII DEL)
         case 0x106:  // KEY_DELETE
@@ -316,6 +380,7 @@ void NotepadApp::onKeyDown(uint32_t key) {
                     m_textLength--;
                 }
             }
+            m_modified = true;
             break;
         case shell::KEY_LEFT:
             m_selectAll = false;
@@ -340,8 +405,54 @@ void NotepadApp::onKeyDown(uint32_t key) {
 }
 
 void NotepadApp::onMouseDown(int x, int y, uint8_t button) {
-    // Could implement click-to-position cursor here
-    (void)x; (void)y; (void)button;
+    // Left click
+    if (button == 1) {
+        // Click on menu bar
+        if (y < MENU_BAR_HEIGHT) {
+            if (handleMenuClick(x, y)) {
+                invalidate();
+                return;
+            }
+        }
+        // Click on dropdown menu
+        else if (m_showFileMenu || m_showEditMenu) {
+            if (handleMenuClick(x, y)) {
+                invalidate();
+                return;
+            }
+        }
+        
+        // Click elsewhere - close all menus
+        m_showFileMenu = false;
+        m_showEditMenu = false;
+        m_showContextMenu = false;
+        invalidate();
+        return;
+    }
+    
+    // Right click - show context menu in text area
+    if (button == 2) {
+        // Close dropdown menus
+        m_showFileMenu = false;
+        m_showEditMenu = false;
+        
+        // Show context menu at mouse position
+        m_showContextMenu = true;
+        m_contextMenuX = x;
+        m_contextMenuY = y;
+        invalidate();
+        return;
+    }
+}
+
+void NotepadApp::onMouseUp(int x, int y, uint8_t button) {
+    // Handle context menu clicks
+    if (m_showContextMenu && button == 1) {
+        if (handleContextMenuClick(x, y)) {
+            m_showContextMenu = false;
+            invalidate();
+        }
+    }
 }
 
 void NotepadApp::insertChar(char c) {
@@ -400,6 +511,337 @@ int NotepadApp::getLineStart(int lineIndex) const {
         }
     }
     return m_textLength;
+}
+
+// File operations
+bool NotepadApp::loadFile(const char* path) {
+    if (!path || path[0] == '\0') return false;
+    
+    uint8_t handle = vfs::open(path, vfs::OPEN_READ);
+    if (handle == 0xFF) return false;
+    
+    int32_t bytesRead = vfs::read(handle, m_text, MAX_TEXT_LENGTH - 1);
+    vfs::close(handle);
+    
+    if (bytesRead < 0) return false;
+    
+    m_text[bytesRead] = '\0';
+    m_textLength = bytesRead;
+    m_cursorPos = 0;
+    m_modified = false;
+    strcopy(m_filePath, path, MAX_PATH_LEN);
+    updateTitle();
+    return true;
+}
+
+bool NotepadApp::saveFile() {
+    if (m_filePath[0] == '\0') {
+        // Need to specify a file path - for now, use default
+        return saveFileAs("/notepad_document.txt");
+    }
+    return saveFileAs(m_filePath);
+}
+
+bool NotepadApp::saveFileAs(const char* path) {
+    if (!path || path[0] == '\0') return false;
+    
+    uint8_t handle = vfs::open(path, vfs::OPEN_WRITE | vfs::OPEN_CREATE);
+    if (handle == 0xFF) return false;
+    
+    int32_t bytesWritten = vfs::write(handle, m_text, m_textLength);
+    vfs::close(handle);
+    
+    if (bytesWritten != m_textLength) return false;
+    
+    m_modified = false;
+    strcopy(m_filePath, path, MAX_PATH_LEN);
+    updateTitle();
+    return true;
+}
+
+void NotepadApp::newFile() {
+    m_text[0] = '\0';
+    m_textLength = 0;
+    m_cursorPos = 0;
+    m_modified = false;
+    m_filePath[0] = '\0';
+    updateTitle();
+}
+
+void NotepadApp::updateTitle() {
+    char title[app::MAX_TITLE_LEN];
+    const char* filename = m_filePath[0] != '\0' ? m_filePath : "Untitled";
+    
+    // Build title: "filename - Notepad" or "*filename - Notepad" if modified
+    int pos = 0;
+    if (m_modified && pos < app::MAX_TITLE_LEN - 1) {
+        title[pos++] = '*';
+    }
+    
+    int i = 0;
+    while (filename[i] && pos < app::MAX_TITLE_LEN - 12) {
+        title[pos++] = filename[i++];
+    }
+    
+    const char* suffix = " - Notepad";
+    i = 0;
+    while (suffix[i] && pos < app::MAX_TITLE_LEN - 1) {
+        title[pos++] = suffix[i++];
+    }
+    title[pos] = '\0';
+    
+    strcopy(m_window->title, title, app::MAX_TITLE_LEN);
+}
+
+// Text editing operations
+void NotepadApp::backspace() {
+    deleteChar();
+}
+
+void NotepadApp::selectAll() {
+    m_selectAll = true;
+}
+
+void NotepadApp::cut() {
+    copy();
+    if (m_selectAll && m_textLength > 0) {
+        clearText();
+        m_selectAll = false;
+        m_modified = true;
+    }
+}
+
+void NotepadApp::copy() {
+    if (m_selectAll && m_textLength > 0) {
+        int copyLen = m_textLength < MAX_TEXT_LENGTH - 1 ? m_textLength : MAX_TEXT_LENGTH - 1;
+        for (int i = 0; i < copyLen; i++) {
+            s_clipboard[i] = m_text[i];
+        }
+        s_clipboard[copyLen] = '\0';
+        s_clipboardLength = copyLen;
+    }
+}
+
+void NotepadApp::paste() {
+    if (s_clipboardLength == 0) return;
+    
+    if (m_selectAll) {
+        clearText();
+        m_selectAll = false;
+    }
+    
+    // Insert clipboard contents at cursor
+    for (int i = 0; i < s_clipboardLength && m_textLength < MAX_TEXT_LENGTH - 1; i++) {
+        insertChar(s_clipboard[i]);
+    }
+    m_modified = true;
+}
+
+// Menu and UI drawing
+void NotepadApp::drawMenuBar(uint32_t x, uint32_t y, uint32_t w) {
+    // Draw menu bar background
+    framebuffer::fill_rect(x, y, w, MENU_BAR_HEIGHT, rgb(50, 50, 60));
+    
+    // Draw bottom separator line
+    framebuffer::fill_rect(x, y + MENU_BAR_HEIGHT - 1, w, 1, rgb(70, 70, 80));
+    
+    // File menu item
+    uint32_t fileX = x + 4;
+    uint32_t fileW = 40;
+    if (m_showFileMenu) {
+        framebuffer::fill_rect(fileX, y + 2, fileW, MENU_BAR_HEIGHT - 4, rgb(70, 100, 150));
+    }
+    drawChar(fileX + 4, y + 6, 'F', rgb(220, 220, 230));
+    drawChar(fileX + 10, y + 6, 'i', rgb(220, 220, 230));
+    drawChar(fileX + 16, y + 6, 'l', rgb(220, 220, 230));
+    drawChar(fileX + 22, y + 6, 'e', rgb(220, 220, 230));
+    
+    // Edit menu item
+    uint32_t editX = fileX + fileW + 4;
+    uint32_t editW = 40;
+    if (m_showEditMenu) {
+        framebuffer::fill_rect(editX, y + 2, editW, MENU_BAR_HEIGHT - 4, rgb(70, 100, 150));
+    }
+    drawChar(editX + 4, y + 6, 'E', rgb(220, 220, 230));
+    drawChar(editX + 10, y + 6, 'd', rgb(220, 220, 230));
+    drawChar(editX + 16, y + 6, 'i', rgb(220, 220, 230));
+    drawChar(editX + 22, y + 6, 't', rgb(220, 220, 230));
+}
+
+void NotepadApp::drawFileMenu(uint32_t x, uint32_t y) {
+    const char* items[] = {"New", "Save", "Save As", "Exit"};
+    const int itemCount = 4;
+    const int menuW = 120;
+    const int itemH = 22;
+    
+    // Menu background
+    framebuffer::fill_rect(x, y, menuW, itemCount * itemH + 2, rgb(240, 240, 245));
+    
+    // Border
+    framebuffer::fill_rect(x, y, menuW, 1, rgb(160, 160, 170)); // Top
+    framebuffer::fill_rect(x, y + itemCount * itemH + 1, menuW, 1, rgb(160, 160, 170)); // Bottom
+    framebuffer::fill_rect(x, y, 1, itemCount * itemH + 2, rgb(160, 160, 170)); // Left
+    framebuffer::fill_rect(x + menuW - 1, y, 1, itemCount * itemH + 2, rgb(160, 160, 170)); // Right
+    
+    for (int i = 0; i < itemCount; i++) {
+        uint32_t itemY = y + 1 + i * itemH;
+        
+        // Item text
+        uint32_t textColor = rgb(0, 0, 0);
+        for (int j = 0; items[i][j]; j++) {
+            drawChar(x + 8 + j * 6, itemY + 7, items[i][j], textColor);
+        }
+    }
+}
+
+void NotepadApp::drawEditMenu(uint32_t x, uint32_t y) {
+    const char* items[] = {"Cut      Ctrl+X", "Copy     Ctrl+C", "Paste    Ctrl+V", "Select All  Ctrl+A"};
+    const int itemCount = 4;
+    const int menuW = 160;
+    const int itemH = 22;
+    
+    // Menu background
+    framebuffer::fill_rect(x, y, menuW, itemCount * itemH + 2, rgb(240, 240, 245));
+    
+    // Border
+    framebuffer::fill_rect(x, y, menuW, 1, rgb(160, 160, 170));
+    framebuffer::fill_rect(x, y + itemCount * itemH + 1, menuW, 1, rgb(160, 160, 170));
+    framebuffer::fill_rect(x, y, 1, itemCount * itemH + 2, rgb(160, 160, 170));
+    framebuffer::fill_rect(x + menuW - 1, y, 1, itemCount * itemH + 2, rgb(160, 160, 170));
+    
+    for (int i = 0; i < itemCount; i++) {
+        uint32_t itemY = y + 1 + i * itemH;
+        
+        // Item text
+        uint32_t textColor = rgb(0, 0, 0);
+        for (int j = 0; items[i][j]; j++) {
+            drawChar(x + 8 + j * 6, itemY + 7, items[i][j], textColor);
+        }
+    }
+}
+
+void NotepadApp::drawContextMenu(uint32_t x, uint32_t y) {
+    const char* items[] = {"Cut", "Copy", "Paste", "Select All"};
+    const int itemCount = 4;
+    const int menuW = 130;
+    const int itemH = 22;
+    
+    // Menu background
+    framebuffer::fill_rect(x, y, menuW, itemCount * itemH + 2, rgb(240, 240, 245));
+    
+    // Border with shadow effect
+    framebuffer::fill_rect(x, y, menuW, 1, rgb(160, 160, 170));
+    framebuffer::fill_rect(x, y + itemCount * itemH + 1, menuW, 1, rgb(160, 160, 170));
+    framebuffer::fill_rect(x, y, 1, itemCount * itemH + 2, rgb(160, 160, 170));
+    framebuffer::fill_rect(x + menuW - 1, y, 1, itemCount * itemH + 2, rgb(160, 160, 170));
+    
+    // Shadow
+    framebuffer::fill_rect(x + 2, y + itemCount * itemH + 2, menuW, 2, rgb(100, 100, 110));
+    framebuffer::fill_rect(x + menuW, y + 2, 2, itemCount * itemH, rgb(100, 100, 110));
+    
+    for (int i = 0; i < itemCount; i++) {
+        uint32_t itemY = y + 1 + i * itemH;
+        
+        // Item text
+        uint32_t textColor = rgb(0, 0, 0);
+        for (int j = 0; items[i][j]; j++) {
+            drawChar(x + 8 + j * 6, itemY + 7, items[i][j], textColor);
+        }
+    }
+}
+
+bool NotepadApp::handleMenuClick(int x, int y) {
+    const int fileX = 4;
+    const int fileW = 40;
+    const int editX = 48;
+    const int editW = 40;
+    
+    // Click on menu bar
+    if (y < MENU_BAR_HEIGHT) {
+        // File menu toggle
+        if (x >= fileX && x < fileX + fileW) {
+            m_showFileMenu = !m_showFileMenu;
+            m_showEditMenu = false;
+            return true;
+        }
+        // Edit menu toggle
+        if (x >= editX && x < editX + editW) {
+            m_showEditMenu = !m_showEditMenu;
+            m_showFileMenu = false;
+            return true;
+        }
+    }
+    
+    // Handle File menu dropdown item clicks
+    if (m_showFileMenu) {
+        const int menuW = 120;
+        const int itemH = 22;
+        const int menuX = fileX;
+        const int menuY = MENU_BAR_HEIGHT;
+        
+        if (x >= menuX && x < menuX + menuW && 
+            y >= menuY && y < menuY + 4 * itemH + 2) {
+            int item = (y - menuY - 1) / itemH;
+            if (item >= 0 && item < 4) {
+                m_showFileMenu = false;
+                switch (item) {
+                    case 0: newFile(); break;
+                    case 1: saveFile(); break;
+                    case 2: saveFileAs("/notepad_document.txt"); break;
+                    case 3: requestClose(); break;
+                }
+                return true;
+            }
+        }
+    }
+    
+    // Handle Edit menu dropdown item clicks
+    if (m_showEditMenu) {
+        const int menuW = 160;
+        const int itemH = 22;
+        const int menuX = editX;
+        const int menuY = MENU_BAR_HEIGHT;
+        
+        if (x >= menuX && x < menuX + menuW && 
+            y >= menuY && y < menuY + 4 * itemH + 2) {
+            int item = (y - menuY - 1) / itemH;
+            if (item >= 0 && item < 4) {
+                m_showEditMenu = false;
+                switch (item) {
+                    case 0: cut(); break;
+                    case 1: copy(); break;
+                    case 2: paste(); break;
+                    case 3: selectAll(); break;
+                }
+                return true;
+            }
+        }
+    }
+    
+    return false;
+}
+
+bool NotepadApp::handleContextMenuClick(int x, int y) {
+    const int menuW = 130;
+    const int itemH = 22;
+    const int itemCount = 4;
+    
+    // Check if click is within context menu bounds
+    if (x >= m_contextMenuX && x < m_contextMenuX + menuW &&
+        y >= m_contextMenuY && y < m_contextMenuY + itemCount * itemH + 2) {
+        
+        int item = (y - m_contextMenuY - 1) / itemH;
+        if (item >= 0 && item < itemCount) {
+            switch (item) {
+                case 0: cut(); break;
+                case 1: copy(); break;
+                case 2: paste(); break;
+                case 3: selectAll(); break;
+            }
+            return true;
+        }
+    }
+    return false;
 }
 
 // ============================================================

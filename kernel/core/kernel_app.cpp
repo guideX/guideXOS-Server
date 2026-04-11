@@ -357,6 +357,59 @@ bool AppManager::launchApp(const char* name) {
     return true;
 }
 
+bool AppManager::launchAppWithParam(const char* name, const char* param) {
+    if (!s_initialized || !name) {
+        AppLogger::logLaunch(name ? name : "unknown", LaunchResult::NotAvailable);
+        return false;
+    }
+    
+    // Find registered app
+    const AppInfo* info = getAppInfo(name);
+    if (!info || !info->available || !info->factory) {
+        AppLogger::logLaunch(name, LaunchResult::NotAvailable);
+        return false;
+    }
+    
+    // Check if already running
+    for (int i = 0; i < s_runningAppCount; i++) {
+        if (s_runningApps[i] && streq(s_runningApps[i]->getName(), name)) {
+            // Focus existing window
+            if (s_runningApps[i]->getWindow()) {
+                compositor::KernelCompositor::setFocus(s_runningApps[i]->getWindow()->id);
+            }
+            AppLogger::logLaunch(name, LaunchResult::AlreadyRunning);
+            return true;
+        }
+    }
+    
+    // Check for available slot
+    if (s_runningAppCount >= MAX_APPS) {
+        AppLogger::logLaunch(name, LaunchResult::OutOfResources);
+        return false;
+    }
+    
+    // Create app instance
+    KernelApp* app = info->factory();
+    if (!app) {
+        AppLogger::logLaunch(name, LaunchResult::OutOfResources);
+        return false;
+    }
+    
+    // Initialize app with parameter
+    bool initSuccess = param ? app->initWithParam(param) : app->init();
+    if (!initSuccess) {
+        delete app;
+        AppLogger::logLaunch(name, LaunchResult::FailedToInit);
+        return false;
+    }
+    
+    // Add to running list
+    s_runningApps[s_runningAppCount++] = app;
+    
+    AppLogger::logLaunch(name, LaunchResult::Success);
+    return true;
+}
+
 void AppManager::closeApp(KernelApp* app) {
     if (!s_initialized || !app) return;
     

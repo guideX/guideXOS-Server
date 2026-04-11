@@ -25,28 +25,73 @@ public:
     virtual ~NotepadApp() override;
     
     virtual bool init() override;
+    virtual bool initWithParam(const char* filePath) override;  // Load file on init
     virtual void shutdown() override;
     virtual void draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) override;
     
     virtual void onKeyChar(char c) override;
     virtual void onKeyDown(uint32_t key) override;
     virtual void onMouseDown(int x, int y, uint8_t button) override;
+    virtual void onMouseUp(int x, int y, uint8_t button) override;
     
     static app::KernelApp* create() { return new NotepadApp(); }
     
 private:
-    static const int MAX_TEXT_LENGTH = 4096;
-    static const int MAX_LINES = 100;
+    static const int MAX_TEXT_LENGTH = 8192;
+    static const int MAX_LINES = 200;
+    static const int MAX_PATH_LEN = 256;
+    static const int MENU_BAR_HEIGHT = 20;
+    static const int CONTEXT_MENU_WIDTH = 120;
+    static const int CONTEXT_MENU_ITEM_HEIGHT = 20;
+    
     char m_text[MAX_TEXT_LENGTH];
+    char m_filePath[MAX_PATH_LEN];
     int m_textLength;
     int m_cursorPos;
     int m_scrollY;
     bool m_selectAll;
+    bool m_modified;
+    bool m_ctrlPressed;
     
+    // Menu state
+    bool m_showFileMenu;
+    bool m_showEditMenu;
+    bool m_showContextMenu;
+    int m_contextMenuX;
+    int m_contextMenuY;
+    int m_hoveredMenuItem;
+    
+    // Clipboard
+    static char s_clipboard[MAX_TEXT_LENGTH];
+    static int s_clipboardLength;
+    int m_selectionStart;
+    int m_selectionEnd;
+    
+    // File operations
+    bool loadFile(const char* path);
+    bool saveFile();
+    bool saveFileAs(const char* path);
+    void newFile();
+    void updateTitle();
+    
+    // Text operations
     void insertChar(char c);
     void deleteChar();
+    void backspace();
     void clearText();
     void moveCursor(int delta);
+    void selectAll();
+    void cut();
+    void copy();
+    void paste();
+    
+    // UI
+    void drawMenuBar(uint32_t x, uint32_t y, uint32_t w);
+    void drawFileMenu(uint32_t x, uint32_t y);
+    void drawEditMenu(uint32_t x, uint32_t y);
+    void drawContextMenu(uint32_t x, uint32_t y);
+    bool handleMenuClick(int x, int y);
+    bool handleContextMenuClick(int x, int y);
     int getLineCount() const;
     int getLineStart(int lineIndex) const;
 };

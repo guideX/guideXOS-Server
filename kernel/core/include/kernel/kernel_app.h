@@ -195,6 +195,7 @@ public:
     
     // Lifecycle methods (override in subclasses)
     virtual bool init() = 0;
+    virtual bool initWithParam(const char* param) { return init(); }  // Override for param support
     virtual void shutdown() = 0;
     virtual void update() {}  // Called each frame
     
@@ -261,6 +262,9 @@ public:
     
     // Launch an app by name
     static bool launchApp(const char* name);
+    
+    // Launch an app with a parameter (e.g., filename)
+    static bool launchAppWithParam(const char* name, const char* param);
     
     // Close an app
     static void closeApp(KernelApp* app);
