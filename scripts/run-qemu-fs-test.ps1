@@ -2,6 +2,9 @@
 # run-qemu-fs-test.ps1
 # Launches QEMU with test disk images attached for filesystem testing
 #
+# This script boots guideXOS via UEFI (same as run-qemu.bat) but also
+# attaches the test FAT32 and ext4 disk images for filesystem testing.
+#
 # Usage: .\run-qemu-fs-test.ps1 [options]
 #
 # Options:
@@ -9,7 +12,7 @@
 #   -Ext4Only     Only attach ext4 disk
 #   -Debug        Enable QEMU debug output
 #   -WaitGdb      Wait for GDB connection on port 1234
-#   -Memory       Set memory size (default: 256M)
+#   -Memory       Set memory size (default: 1024M)
 #
 # Copyright (c) 2025 guideXOS Server
 #
@@ -19,7 +22,7 @@ param(
     [switch]$Ext4Only,
     [switch]$Debug,
     [switch]$WaitGdb,
-    [string]$Memory = "256M"
+    [string]$Memory = "1024M"
 )
 
 $ErrorActionPreference = "Stop"
@@ -27,29 +30,11 @@ $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProjectDir = Split-Path -Parent $ScriptDir
 $DiskDir = Join-Path $ProjectDir "disks"
-$KernelDir = Join-Path $ProjectDir "kernel\build"
+$EspDir = Join-Path $ProjectDir "ESP"
 
 # Determine which disks to use
 $UseFat32 = -not $Ext4Only
 $UseExt4 = -not $Fat32Only
-
-function Find-Kernel {
-    $candidates = @(
-        (Join-Path $KernelDir "amd64\bin\kernel.elf"),
-        (Join-Path $KernelDir "x86\bin\kernel.elf"),
-        (Join-Path $ProjectDir "build\amd64\bin\kernel.elf"),
-        (Join-Path $ProjectDir "build\x86\bin\kernel.elf"),
-        (Join-Path $ProjectDir "kernel.elf")
-    )
-    
-    foreach ($candidate in $candidates) {
-        if (Test-Path $candidate) {
-            return $candidate
-        }
-    }
-    
-    return $null
-}
 
 function Find-Qemu {
     # Check if qemu is in PATH
@@ -75,6 +60,43 @@ function Find-Qemu {
     return $null
 }
 
+function Find-OvmfFirmware {
+    # Returns hashtable with Code, Vars, and SplitMode
+    $result = @{ Code = $null; Vars = $null; SplitMode = $false }
+    
+    # Try local combined OVMF.fd first (simplest)
+    $localOvmf = Join-Path $ProjectDir "OVMF.fd"
+    if (Test-Path $localOvmf) {
+        $result.Code = $localOvmf
+        return $result
+    }
+    
+    # Try QEMU's built-in split images
+    $qemuShareCode = "C:\Program Files\qemu\share\edk2-x86_64-code.fd"
+    $qemuShareVars = "C:\Program Files\qemu\share\edk2-x86_64-vars.fd"
+    
+    if (Test-Path $qemuShareCode) {
+        $result.Code = $qemuShareCode
+        $result.SplitMode = $true
+        
+        # Check for local vars copy or create one
+        $localVars = Join-Path $ProjectDir "OVMF_VARS.fd"
+        if (-not (Test-Path $localVars)) {
+            if (Test-Path $qemuShareVars) {
+                Copy-Item $qemuShareVars $localVars
+            } else {
+                # Create empty 128KB vars file
+                $bytes = New-Object byte[] 131072
+                [System.IO.File]::WriteAllBytes($localVars, $bytes)
+            }
+        }
+        $result.Vars = $localVars
+        return $result
+    }
+    
+    return $result
+}
+
 function Test-DiskImages {
     $missing = $false
     
@@ -93,54 +115,20 @@ function Test-DiskImages {
     return -not $missing
 }
 
-function Build-QemuCommand {
-    param([string]$QemuPath, [string]$KernelPath)
-    
-    $args = @()
-    
-    # Basic options
-    $args += "-m", $Memory
-    $args += "-serial", "stdio"
-    $args += "-no-reboot"
-    $args += "-no-shutdown"
-    
-    # Kernel
-    if ($KernelPath -and (Test-Path $KernelPath)) {
-        $args += "-kernel", $KernelPath
+function Test-EspDirectory {
+    if (-not (Test-Path $EspDir)) {
+        Write-Host "ERROR: ESP directory not found: $EspDir" -ForegroundColor Red
+        Write-Host "Run: .\build.ps1 to build the kernel and bootloader"
+        return $false
     }
     
-    # Disk images
-    $driveIndex = 0
-    
-    if ($UseFat32) {
-        $fat32Path = Join-Path $DiskDir "test-fat32.img"
-        if (Test-Path $fat32Path) {
-            $args += "-drive", "file=$fat32Path,format=raw,if=ide,index=$driveIndex"
-            $driveIndex++
-        }
+    $kernelPath = Join-Path $EspDir "kernel.elf"
+    if (-not (Test-Path $kernelPath)) {
+        Write-Host "WARNING: kernel.elf not found in ESP" -ForegroundColor Yellow
+        Write-Host "The bootloader will run but may not have a kernel to boot."
     }
     
-    if ($UseExt4) {
-        $ext4Path = Join-Path $DiskDir "test-ext4.img"
-        if (Test-Path $ext4Path) {
-            $args += "-drive", "file=$ext4Path,format=raw,if=ide,index=$driveIndex"
-            $driveIndex++
-        }
-    }
-    
-    # Debug options
-    if ($Debug) {
-        $args += "-d", "int,cpu_reset"
-        $args += "-D", "qemu-debug.log"
-    }
-    
-    # GDB support
-    if ($WaitGdb) {
-        $args += "-s", "-S"
-        Write-Host "Waiting for GDB connection on localhost:1234..." -ForegroundColor Yellow
-    }
-    
-    return $args
+    return $true
 }
 
 # Main
@@ -160,45 +148,124 @@ function Main {
     }
     Write-Host "Using QEMU: $qemu" -ForegroundColor Green
     
+    # Find UEFI firmware
+    $ovmf = Find-OvmfFirmware
+    if (-not $ovmf.Code) {
+        Write-Host "ERROR: UEFI firmware (OVMF) not found" -ForegroundColor Red
+        Write-Host "Download OVMF.fd from: https://github.com/tianocore/edk2/releases"
+        Write-Host "Or place OVMF.fd in: $ProjectDir"
+        exit 1
+    }
+    if ($ovmf.SplitMode) {
+        Write-Host "Using UEFI: Split pflash (code + vars)" -ForegroundColor Green
+    } else {
+        Write-Host "Using UEFI: $($ovmf.Code)" -ForegroundColor Green
+    }
+    
+    # Check ESP directory
+    if (-not (Test-EspDirectory)) {
+        exit 1
+    }
+    Write-Host "Using ESP: $EspDir" -ForegroundColor Green
+    
     # Check disk images
     if (-not (Test-DiskImages)) {
         exit 1
     }
     
-    # Find kernel
-    $kernel = Find-Kernel
-    if (-not $kernel) {
-        Write-Host "WARNING: Kernel not found. QEMU will start without a kernel." -ForegroundColor Yellow
-        Write-Host "Build the kernel first: make amd64"
-        Write-Host ""
-        Write-Host "Continuing anyway (for disk inspection)..."
-    } else {
-        Write-Host "Using kernel: $kernel" -ForegroundColor Green
-    }
-    
     # Show disk info
     Write-Host ""
-    Write-Host "Attached disks:"
+    Write-Host "Attached test disks:" -ForegroundColor Cyan
     if ($UseFat32) {
-        Write-Host "  IDE0: $DiskDir\test-fat32.img (FAT32)"
+        $fat32Path = Join-Path $DiskDir "test-fat32.img"
+        Write-Host "  SATA Port 1: $fat32Path (FAT32)"
     }
     if ($UseExt4) {
-        Write-Host "  IDE1: $DiskDir\test-ext4.img (ext4)"
+        $ext4Path = Join-Path $DiskDir "test-ext4.img"
+        Write-Host "  SATA Port 2: $ext4Path (ext4)"
     }
     Write-Host ""
     
-    # Build QEMU command
-    $qemuArgs = Build-QemuCommand -QemuPath $qemu -KernelPath $kernel
+    # Build QEMU arguments
+    $qemuArgs = @()
     
-    Write-Host "Running: $qemu $($qemuArgs -join ' ')"
-    Write-Host ""
+    # Machine type (Q35 with AHCI for SATA)
+    $qemuArgs += "-machine", "q35,usb=off"
+    
+    # UEFI firmware
+    if ($ovmf.SplitMode) {
+        $qemuArgs += "-drive", "if=pflash,format=raw,unit=0,readonly=on,file=$($ovmf.Code)"
+        $qemuArgs += "-drive", "if=pflash,format=raw,unit=1,file=$($ovmf.Vars)"
+    } else {
+        $qemuArgs += "-drive", "if=pflash,format=raw,readonly=on,file=$($ovmf.Code)"
+    }
+    
+    # ESP as FAT drive (bootloader + kernel)
+    $qemuArgs += "-drive", "file=fat:rw:$EspDir,format=raw"
+    
+    # Test disk images attached to AHCI controller (Q35 has built-in AHCI at 00:1f.2)
+    # Using "if=none" + "ide-hd" on ahci bus for SATA drives
+    if ($UseFat32) {
+        $fat32Path = Join-Path $DiskDir "test-fat32.img"
+        $qemuArgs += "-drive", "file=$fat32Path,format=raw,if=none,id=testdisk1"
+        $qemuArgs += "-device", "ahci,id=ahci0"
+        $qemuArgs += "-device", "ide-hd,drive=testdisk1,bus=ahci0.0"
+    }
+    
+    if ($UseExt4) {
+        $ext4Path = Join-Path $DiskDir "test-ext4.img"
+        $qemuArgs += "-drive", "file=$ext4Path,format=raw,if=none,id=testdisk2"
+        if (-not $UseFat32) {
+            # Only add AHCI controller if not already added
+            $qemuArgs += "-device", "ahci,id=ahci0"
+            $qemuArgs += "-device", "ide-hd,drive=testdisk2,bus=ahci0.0"
+        } else {
+            $qemuArgs += "-device", "ide-hd,drive=testdisk2,bus=ahci0.1"
+        }
+    }
+    
+    # Memory and display
+    $qemuArgs += "-m", $Memory
+    $qemuArgs += "-vga", "std"
+    $qemuArgs += "-display", "gtk"
+    $qemuArgs += "-vnc", ":0"
+    $qemuArgs += "-serial", "stdio"
+    $qemuArgs += "-no-reboot"
+    
+    # Debug options
+    if ($Debug) {
+        $qemuArgs += "-d", "int,cpu_reset"
+        $qemuArgs += "-D", "qemu-debug.log"
+        Write-Host "Debug output will be written to qemu-debug.log" -ForegroundColor Yellow
+    }
+    
+    # GDB support
+    if ($WaitGdb) {
+        $qemuArgs += "-s", "-S"
+        Write-Host "Waiting for GDB connection on localhost:1234..." -ForegroundColor Yellow
+    }
+    
     Write-Host "=============================================="
-    Write-Host "Press Ctrl+A, X to exit QEMU"
+    Write-Host "Filesystem Testing Quick Reference:" -ForegroundColor Cyan
+    Write-Host "  The test disks are attached as SATA/AHCI drives."
+    Write-Host "  In the shell, use 'lsblk' to list block devices."
+    Write-Host "  Serial debug output shows VFS mount operations."
+    Write-Host ""
+    Write-Host "  Mouse: Ctrl+Alt+G to grab/release"
+    Write-Host "  Exit:  Close window or Ctrl+C in terminal"
     Write-Host "=============================================="
     Write-Host ""
     
-    # Run QEMU
-    & $qemu $qemuArgs
+    
+    # Change to project directory for relative paths
+    Push-Location $ProjectDir
+    
+    try {
+        # Run QEMU
+        & $qemu $qemuArgs
+    } finally {
+        Pop-Location
+    }
 }
 
 Main
