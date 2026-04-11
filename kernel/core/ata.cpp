@@ -377,8 +377,9 @@ static void probe_channel(uint16_t ioBase, uint16_t ctrlBase,
 // PCI scan for IDE controllers (class 01 / subclass 01)
 // ================================================================
 
-static void scan_pci_ide()
+static bool scan_pci_ide()
 {
+    bool found = false;
     for (uint16_t bus = 0; bus < 256; ++bus) {
         for (uint8_t dev = 0; dev < 32; ++dev) {
             for (uint8_t func = 0; func < 8; ++func) {
@@ -393,11 +394,13 @@ static void scan_pci_ide()
                     // IDE controller found — use standard channel ports
                     probe_channel(ATA_PRIMARY_IO, ATA_PRIMARY_CTRL, "pri", 0);
                     probe_channel(ATA_SECONDARY_IO, ATA_SECONDARY_CTRL, "sec", 1);
-                    return; // one IDE controller is enough for now
+                    found = true;
+                    return found; // one IDE controller is enough for now
                 }
             }
         }
     }
+    return found;
 }
 
 #endif // ARCH_HAS_PORT_IO
@@ -413,7 +416,15 @@ void init()
 
 #if ARCH_HAS_PORT_IO
     // x86 / amd64: scan PCI for IDE controllers, probe ATA PIO
-    scan_pci_ide();
+    bool foundIDE = scan_pci_ide();
+    
+    // If no IDE controller found via PCI, try probing standard ports anyway
+    // This handles cases like QEMU's ISA IDE or legacy systems
+    if (!foundIDE) {
+        // Try standard IDE ports directly
+        probe_channel(ATA_PRIMARY_IO, ATA_PRIMARY_CTRL, "pri", 0);
+        probe_channel(ATA_SECONDARY_IO, ATA_SECONDARY_CTRL, "sec", 1);
+    }
 #endif
 
     // AHCI support (MMIO-based, all architectures with PCI) would

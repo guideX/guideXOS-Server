@@ -156,24 +156,103 @@ static FSType detect_fs_type(uint8_t blockDevIndex)
     
     // Read first sector
     if (block::read_sectors(blockDevIndex, 0, 1, buffer) != block::BLOCK_OK) {
+#if defined(__GNUC__) || defined(__clang__)
+        serial::puts("[VFS] detect_fs: Failed to read sector 0\n");
+#endif
         return FS_TYPE_NONE;
     }
     
-    // Check for FAT32 signature
+#if defined(__GNUC__) || defined(__clang__)
+    serial::puts("[VFS] detect_fs: Read sector 0, checking signatures...\n");
+    serial::puts("[VFS]   Bytes 510-511: ");
+    serial::puthex(buffer[510]);
+    serial::puts(" ");
+    serial::puthex(buffer[511]);
+    serial::puts("\n");
+#endif
+    
+    // Check for boot sector signature (0x55AA)
     if (buffer[510] == 0x55 && buffer[511] == 0xAA) {
-        // Check for FAT32 specific fields
+#if defined(__GNUC__) || defined(__clang__)
+        serial::puts("[VFS]   Found 0x55AA signature\n");
+#endif
+        
+        // Check for FAT32 specific fields at offset 82
         if (buffer[82] == 'F' && buffer[83] == 'A' && buffer[84] == 'T' &&
             buffer[85] == '3' && buffer[86] == '2') {
+#if defined(__GNUC__) || defined(__clang__)
+            serial::puts("[VFS]   Found FAT32 at offset 82\n");
+#endif
             return FS_TYPE_FAT32;
         }
+        
         // Check for exFAT
         if (buffer[3] == 'E' && buffer[4] == 'X' && buffer[5] == 'F' &&
             buffer[6] == 'A' && buffer[7] == 'T') {
             return FS_TYPE_EXFAT;
         }
-        // Generic FAT (could be FAT12/16/32)
+        
+        // Check for FAT signature at offset 54 (FAT12/16) 
         if (buffer[54] == 'F' && buffer[55] == 'A' && buffer[56] == 'T') {
+#if defined(__GNUC__) || defined(__clang__)
+            serial::puts("[VFS]   Found FAT at offset 54\n");
+#endif
             return FS_TYPE_FAT32;  // Treat as FAT32 for now
+        }
+        
+        // Check for FAT32 at offset 82 with different format
+        // Some tools put "FAT32   " with trailing spaces
+        if (buffer[82] == 'F' && buffer[83] == 'A' && buffer[84] == 'T') {
+#if defined(__GNUC__) || defined(__clang__)
+            serial::puts("[VFS]   Found FAT at offset 82 (partial)\n");
+#endif
+            return FS_TYPE_FAT32;
+        }
+        
+        // Check BPB fields to identify FAT32 even without string
+        // FAT32 has sectorsPerFAT16 = 0 (offset 22-23) and sectorsPerFAT32 > 0 (offset 36-39)
+        uint16_t sectorsPerFAT16 = *reinterpret_cast<uint16_t*>(&buffer[22]);
+        uint32_t sectorsPerFAT32 = *reinterpret_cast<uint32_t*>(&buffer[36]);
+        uint16_t bytesPerSector = *reinterpret_cast<uint16_t*>(&buffer[11]);
+        
+#if defined(__GNUC__) || defined(__clang__)
+        serial::puts("[VFS]   BPB: bytesPerSector=");
+        serial::putdec(bytesPerSector);
+        serial::puts(", sectorsPerFAT16=");
+        serial::putdec(sectorsPerFAT16);
+        serial::puts(", sectorsPerFAT32=");
+        serial::putdec(sectorsPerFAT32);
+        serial::puts("\n");
+#endif
+        
+        if (bytesPerSector == 512 && sectorsPerFAT16 == 0 && sectorsPerFAT32 > 0) {
+#if defined(__GNUC__) || defined(__clang__)
+            serial::puts("[VFS]   Detected FAT32 from BPB fields\n");
+#endif
+            return FS_TYPE_FAT32;
+        }
+        
+        // Could be MBR with partition table - check first partition entry
+        // Partition entries start at offset 446, each is 16 bytes
+        // Byte 4 is partition type: 0x0B/0x0C = FAT32, 0x83 = Linux
+        uint8_t partType = buffer[446 + 4];
+#if defined(__GNUC__) || defined(__clang__)
+        serial::puts("[VFS]   MBR partition 1 type: ");
+        serial::puthex(partType);
+        serial::puts("\n");
+#endif
+        
+        if (partType == 0x0B || partType == 0x0C) {
+            // FAT32 partition - get start LBA from partition entry (offset 446+8)
+            uint32_t startLBA = *reinterpret_cast<uint32_t*>(&buffer[446 + 8]);
+#if defined(__GNUC__) || defined(__clang__)
+            serial::puts("[VFS]   FAT32 partition starts at LBA ");
+            serial::putdec(startLBA);
+            serial::puts(" - NOTE: Partition offset not yet supported\n");
+#endif
+            // For now, we don't handle partitioned disks
+            // The test disk should be created WITHOUT a partition table
+            return FS_TYPE_NONE;
         }
     }
     

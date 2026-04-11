@@ -178,22 +178,22 @@ function Main {
     Write-Host "Attached test disks:" -ForegroundColor Cyan
     if ($UseFat32) {
         $fat32Path = Join-Path $DiskDir "test-fat32.img"
-        Write-Host "  IDE index 2 (secondary master): $fat32Path (FAT32)"
-        Write-Host "    -> Will appear as block device 1 (ata1m) after ram0"
+        Write-Host "  IDE primary slave (index 1): $fat32Path (FAT32)"
+        Write-Host "    -> Will appear as ata0s after ramdisk"
     }
     if ($UseExt4) {
         $ext4Path = Join-Path $DiskDir "test-ext4.img"
-        Write-Host "  IDE index 3 (secondary slave): $ext4Path (ext4)"
-        Write-Host "    -> Will appear as block device 2 (ata1s)"
+        Write-Host "  IDE secondary master (index 2): $ext4Path (ext4)"
+        Write-Host "    -> Will appear as ata1m"
     }
     Write-Host ""
     
     # Build QEMU arguments
     $qemuArgs = @()
     
-    # Machine type - Q35 for UEFI support
-    # We'll add an explicit PIIX IDE controller for the test disks
-    $qemuArgs += "-machine", "q35"
+    # Machine type - use 'pc' (i440FX) which has native PIIX IDE controller
+    # This is more compatible with our ATA PIO driver than Q35's AHCI
+    $qemuArgs += "-machine", "pc"
     
     # UEFI firmware
     if ($ovmf.SplitMode) {
@@ -203,26 +203,20 @@ function Main {
         $qemuArgs += "-drive", "if=pflash,format=raw,readonly=on,file=$($ovmf.Code)"
     }
     
-    # ESP as FAT drive (bootloader + kernel)
-    $qemuArgs += "-drive", "file=fat:rw:$EspDir,format=raw"
-    
-    # Add an explicit ISA IDE controller for test disks
-    # Q35 doesn't have legacy IDE by default, so we add a piix3-ide on the ISA bus
-    $qemuArgs += "-device", "piix3-ide,id=ide"
+    # ESP as FAT drive (bootloader + kernel) - primary master
+    $qemuArgs += "-drive", "file=fat:rw:$EspDir,format=raw,if=ide,index=0"
     
     # Test disk images attached as IDE drives (compatible with legacy ATA driver)
-    # Note: AHCI support is not yet implemented in the kernel, so we use IDE mode
     if ($UseFat32) {
         $fat32Path = Join-Path $DiskDir "test-fat32.img"
-        # Attach to the IDE controller we just added
-        $qemuArgs += "-drive", "file=$fat32Path,format=raw,if=none,id=fat32disk"
-        $qemuArgs += "-device", "ide-hd,drive=fat32disk,bus=ide.0"
+        # Attach as primary slave (index=1)
+        $qemuArgs += "-drive", "file=$fat32Path,format=raw,if=ide,index=1,media=disk"
     }
     
     if ($UseExt4) {
         $ext4Path = Join-Path $DiskDir "test-ext4.img"
-        $qemuArgs += "-drive", "file=$ext4Path,format=raw,if=none,id=ext4disk"
-        $qemuArgs += "-device", "ide-hd,drive=ext4disk,bus=ide.1"
+        # Attach as secondary master (index=2)
+        $qemuArgs += "-drive", "file=$ext4Path,format=raw,if=ide,index=2,media=disk"
     }
     
     # Memory and display

@@ -193,25 +193,18 @@ main() {
     
     # Build QEMU command
     QEMU_ARGS=(
-        "-machine" "q35"
+        "-machine" "pc"
         "-drive" "if=pflash,format=raw,readonly=on,file=$OVMF"
-        "-drive" "file=fat:rw:$ESP_DIR,format=raw"
+        "-drive" "file=fat:rw:$ESP_DIR,format=raw,if=ide,index=0"
     )
     
-    # Add an explicit ISA IDE controller for test disks
-    # Q35 doesn't have legacy IDE by default, so we add a piix3-ide on the ISA bus
-    QEMU_ARGS+=("-device" "piix3-ide,id=ide")
-    
     # Add test disk images as IDE drives (compatible with legacy ATA driver)
-    # Note: AHCI support is not yet implemented in the kernel, so we use IDE mode
     if $USE_FAT32 && [ -f "$DISK_DIR/test-fat32.img" ]; then
-        QEMU_ARGS+=("-drive" "file=$DISK_DIR/test-fat32.img,format=raw,if=none,id=fat32disk")
-        QEMU_ARGS+=("-device" "ide-hd,drive=fat32disk,bus=ide.0")
+        QEMU_ARGS+=("-drive" "file=$DISK_DIR/test-fat32.img,format=raw,if=ide,index=1,media=disk")
     fi
     
     if $USE_EXT4 && [ -f "$DISK_DIR/test-ext4.img" ]; then
-        QEMU_ARGS+=("-drive" "file=$DISK_DIR/test-ext4.img,format=raw,if=none,id=ext4disk")
-        QEMU_ARGS+=("-device" "ide-hd,drive=ext4disk,bus=ide.1")
+        QEMU_ARGS+=("-drive" "file=$DISK_DIR/test-ext4.img,format=raw,if=ide,index=2,media=disk")
     fi
     
     # Memory and display
