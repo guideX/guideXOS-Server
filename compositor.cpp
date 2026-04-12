@@ -1036,6 +1036,94 @@ namespace gxos {
             case MsgType::MT_DesktopLaunch: { launchAction(s); } break;
             case MsgType::MT_DesktopPins: { std::istringstream iss(s); std::string tok; while (std::getline(iss, tok, ';')) { if (tok.size( ) < 2) continue; if (tok[0] == '+') pinAction(tok.substr(1)); else if (tok[0] == '-') unpinAction(tok.substr(1)); } } break;
             case MsgType::MT_DesktopWallpaperSet: { loadWallpaper(s); g_cfg.wallpaperPath = s; saveDesktopConfig( ); invalidate(0); } break;
+            case MsgType::MT_InputMouse: {
+                // Handle mouse input from kernel (bare-metal) or test harness
+                // Format: <x>|<y>|<button>|<action>
+                std::istringstream iss(s);
+                std::string xStr, yStr, buttonStr, action;
+                std::getline(iss, xStr, '|');
+                std::getline(iss, yStr, '|');
+                std::getline(iss, buttonStr, '|');
+                std::getline(iss, action);
+                
+                try {
+                    int mx = std::stoi(xStr);
+                    int my = std::stoi(yStr);
+                    int button = std::stoi(buttonStr);
+                    
+                    // Handle based on button and action
+                    if (button == 1) { // Left button
+                        if (action == "down") {
+                            handleMouse(mx, my, true, false);
+                        } else if (action == "up") {
+                            handleMouse(mx, my, false, true);
+                        }
+                    } else if (button == 2) { // Right button
+                        if (action == "down") {
+                            // Right-click handling - check if over a window
+                            WinInfo* hitWin = nullptr;
+                            uint64_t ownerPid = 0;
+                            {
+                                std::lock_guard<std::mutex> lk(g_lock);
+                                hitWin = hitWindowAt(mx, my);
+                                if (hitWin) {
+                                    ownerPid = hitWin->ownerPid;
+                                    // Set focus to the clicked window
+                                    if (g_focus != hitWin->id) {
+                                        g_focus = hitWin->id;
+                                        auto it2 = std::find(g_z.begin(), g_z.end(), hitWin->id);
+                                        if (it2 != g_z.end()) {
+                                            g_z.erase(it2);
+                                            g_z.push_back(hitWin->id);
+                                        }
+                                    }
+                                }
+                            }
+                            
+                            // If right-click is on a window, forward the event to the application
+                            if (hitWin) {
+                                publishOut(MsgType::MT_InputMouse, std::to_string(mx) + "|" + std::to_string(my) + "|2|down", ownerPid);
+                                invalidate(0);
+                            } else {
+                                // Desktop right-click - show desktop context menu
+                                RightClickMenu::Show(mx, my);
+                                invalidate(0);
+                            }
+                        }
+                    } else if (button == 0) { // Mouse move
+                        if (action == "move") {
+                            handleMouse(mx, my, false, false);
+                        }
+                    }
+                } catch (const std::exception& e) {
+                    Logger::write(LogLevel::Error, std::string("Compositor: Failed to parse MT_InputMouse: ") + e.what());
+                }
+            } break;
+            case MsgType::MT_InputKey: {
+                // Handle keyboard input from kernel (bare-metal) or test harness
+                // Format: <keycode>|<action>
+                std::istringstream iss(s);
+                std::string keyCodeStr, action;
+                std::getline(iss, keyCodeStr, '|');
+                std::getline(iss, action);
+                
+                try {
+                    int keyCode = std::stoi(keyCodeStr);
+                    uint64_t ownerPid = 0;
+                    {
+                        std::lock_guard<std::mutex> lk(g_lock);
+                        auto it = g_windows.find(g_focus);
+                        if (it != g_windows.end()) {
+                            ownerPid = it->second.ownerPid;
+                        }
+                    }
+                    
+                    // Forward to focused window
+                    publishOut(MsgType::MT_InputKey, std::to_string(keyCode) + "|" + action, ownerPid);
+                } catch (const std::exception& e) {
+                    Logger::write(LogLevel::Error, std::string("Compositor: Failed to parse MT_InputKey: ") + e.what());
+                }
+            } break;
             default: break;
             }
         }
