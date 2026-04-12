@@ -1489,12 +1489,62 @@ static void cmd_ping(const char* target) {
     
     if (!nic::is_active()) {
         output_string("ping: network interface not active\n");
+        output_string("\nDiagnostics:\n");
+        
+        // Show NIC device info for debugging
+        const nic::NICDevice* dev = nic::get_device();
+        if (dev) {
+            output_string("  NIC device FOUND but NOT ACTIVE\n");
+            output_string("  Name: ");
+            output_string(dev->name);
+            output_string("\n  Vendor: ");
+            char hexStr[8];
+            hexStr[0] = '0'; hexStr[1] = 'x';
+            for (int i = 0; i < 4; i++) {
+                uint8_t nibble = (dev->vendorId >> (12 - i*4)) & 0xF;
+                hexStr[2+i] = (nibble < 10) ? ('0' + nibble) : ('A' + nibble - 10);
+            }
+            hexStr[6] = '\0';
+            output_string(hexStr);
+            output_string("  Device: ");
+            hexStr[0] = '0'; hexStr[1] = 'x';
+            for (int i = 0; i < 4; i++) {
+                uint8_t nibble = (dev->deviceId >> (12 - i*4)) & 0xF;
+                hexStr[2+i] = (nibble < 10) ? ('0' + nibble) : ('A' + nibble - 10);
+            }
+            hexStr[6] = '\0';
+            output_string(hexStr);
+            output_string("\n");
+            
+            if (!dev->mmioMapped) {
+                output_string("\n  ISSUE: NIC MMIO region not mapped by bootloader!\n");
+                output_string("  This is required for E1000 hardware access.\n");
+                output_string("\n  Solution:\n");
+                output_string("  - Ensure bootloader maps NIC MMIO\n");
+                output_string("  - Or use UEFI boot with proper NIC initialization\n");
+            }
+        } else {
+            output_string("  No NIC device found during PCI scan\n");
+            output_string("  Please check:\n");
+            output_string("  - QEMU network device is enabled (-net nic)\n");
+            output_string("  - Network device is Intel E1000 compatible\n");
+        }
         return;
     }
     
     if (!ipv4::is_configured()) {
         output_string("ping: network not configured\n");
         return;
+    }
+    
+    // Show current IP for debugging
+    const ipv4::NetworkConfig* cfg = ipv4::get_config();
+    if (cfg && cfg->configured) {
+        output_string("Source IP: ");
+        char ipStr[16];
+        ipv4::ip_to_string(cfg->ipAddr, ipStr);
+        output_string(ipStr);
+        output_string("\n");
     }
     
     // Parse IP address
@@ -1523,7 +1573,14 @@ static void cmd_ping(const char* target) {
     for (int i = 0; i < 4; ++i) {
         status = icmp::ping_session_send();
         if (status != icmp::ICMP_OK) {
-            output_string("ping: send failed\n");
+            output_string("ping: send failed (error code ");
+            char errStr[4];
+            errStr[0] = '0' + (status / 10);
+            errStr[1] = '0' + (status % 10);
+            errStr[2] = ')';
+            errStr[3] = '\0';
+            output_string(errStr);
+            output_string("\n");
             continue;
         }
         sent++;

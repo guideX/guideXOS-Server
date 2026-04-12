@@ -227,6 +227,10 @@ function Main {
     $qemuArgs += "-serial", "stdio"
     $qemuArgs += "-no-reboot"
     
+    # Network support (Intel E1000)
+    $qemuArgs += "-netdev", "user,id=net0"
+    $qemuArgs += "-device", "e1000,netdev=net0"
+    
     # Debug options
     if ($Debug) {
         $qemuArgs += "-d", "int,cpu_reset"
@@ -241,13 +245,20 @@ function Main {
     }
     
     Write-Host "=============================================="
-    Write-Host "Filesystem Testing Quick Reference:" -ForegroundColor Cyan
+    Write-Host "Filesystem + Network Testing Quick Reference:" -ForegroundColor Cyan
     Write-Host "  The test disks are attached as IDE drives."
-    Write-Host "  In the shell, use these commands:" -ForegroundColor White
+    Write-Host "  Network is enabled with Intel E1000 (IP: 10.0.2.15)"
+    Write-Host ""
+    Write-Host "  Filesystem commands:" -ForegroundColor White
     Write-Host "    vfstest        - Run filesystem diagnostics"
     Write-Host "    vfsmount / 1   - Mount FAT32 disk (device 1) at /"
     Write-Host "    vfsls          - List files in mounted filesystem"
     Write-Host "    vfscat /test.txt - Read a file"
+    Write-Host ""
+    Write-Host "  Network commands:" -ForegroundColor White
+    Write-Host "    ifconfig       - Show network configuration"
+    Write-Host "    ping 10.0.2.2  - Ping the QEMU gateway"
+    Write-Host "    ping 8.8.8.8   - Ping Google DNS (if routing works)"
     Write-Host ""
     Write-Host "  Mouse: Ctrl+Alt+G to grab/release"
     Write-Host "  Exit:  Close window or Ctrl+C in terminal"

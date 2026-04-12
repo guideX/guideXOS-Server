@@ -115,6 +115,8 @@ if [ "$SPLIT_PFLASH" = "1" ]; then
         -drive if=pflash,format=raw,unit=0,readonly=on,file="${OVMF_CODE}" \
         -drive if=pflash,format=raw,unit=1,file="${OVMF_VARS}" \
         -drive file=fat:rw:ESP,format=raw \
+        -netdev user,id=net0 \
+        -device e1000,netdev=net0 \
         -m 1024M \
         -vga std \
         -display gtk \
@@ -127,6 +129,8 @@ else
         -machine q35,usb=off \
         -drive if=pflash,format=raw,readonly=on,file="${OVMF_CODE}" \
         -drive file=fat:rw:ESP,format=raw \
+        -netdev user,id=net0 \
+        -device e1000,netdev=net0 \
         -m 1024M \
         -vga std \
         -display gtk \

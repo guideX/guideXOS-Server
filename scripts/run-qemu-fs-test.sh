@@ -213,6 +213,10 @@ main() {
     QEMU_ARGS+=("-serial" "stdio")
     QEMU_ARGS+=("-no-reboot")
     
+    # Network support (Intel E1000)
+    QEMU_ARGS+=("-netdev" "user,id=net0")
+    QEMU_ARGS+=("-device" "e1000,netdev=net0")
+    
     # Debug options
     if $DEBUG; then
         QEMU_ARGS+=("-d" "int,cpu_reset" "-D" "qemu-debug.log")
@@ -226,13 +230,20 @@ main() {
     fi
     
     echo "=============================================="
-    echo "Filesystem Testing Quick Reference:"
+    echo "Filesystem + Network Testing Quick Reference:"
     echo "  The test disks are attached as IDE drives."
-    echo "  In the shell, use these commands:"
+    echo "  Network is enabled with Intel E1000 (IP: 10.0.2.15)"
+    echo ""
+    echo "  Filesystem commands:"
     echo "    vfstest        - Run filesystem diagnostics"
     echo "    vfsmount / 1   - Mount FAT32 disk (device 1) at /"
     echo "    vfsls          - List files in mounted filesystem"
     echo "    vfscat /test.txt - Read a file"
+    echo ""
+    echo "  Network commands:"
+    echo "    ifconfig       - Show network configuration"
+    echo "    ping 10.0.2.2  - Ping the QEMU gateway"
+    echo "    ping 8.8.8.8   - Ping Google DNS (if routing works)"
     echo ""
     echo "  Mouse: Ctrl+Alt+G to grab/release"
     echo "  Exit:  Close window or Ctrl+C in terminal"
