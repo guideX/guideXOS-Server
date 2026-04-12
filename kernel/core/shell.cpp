@@ -1741,6 +1741,25 @@ static void cmd_route() {
     }
 }
 
+// Simple number to string helper
+static void uint_to_str(uint32_t n, char* buf) {
+    int i = 0;
+    if (n == 0) {
+        buf[i++] = '0';
+    } else {
+        char tmp[12];
+        int j = 0;
+        while (n > 0) {
+            tmp[j++] = '0' + (n % 10);
+            n /= 10;
+        }
+        while (j > 0) {
+            buf[i++] = tmp[--j];
+        }
+    }
+    buf[i] = '\0';
+}
+
 static void cmd_nicinfo() {
     output_string("=== NIC Diagnostic Information ===\n\n");
     
@@ -1891,25 +1910,6 @@ static void cmd_nicinfo() {
     uint_to_str(stats->interrupts, numStr);
     output_string(numStr);
     output_string("\n");
-}
-
-// Simple number to string helper for UDP stats
-static void uint_to_str(uint32_t n, char* buf) {
-    int i = 0;
-    if (n == 0) {
-        buf[i++] = '0';
-    } else {
-        char tmp[12];
-        int j = 0;
-        while (n > 0) {
-            tmp[j++] = '0' + (n % 10);
-            n /= 10;
-        }
-        while (j > 0) {
-            buf[i++] = tmp[--j];
-        }
-    }
-    buf[i] = '\0';
 }
 
 static void cmd_nc(const char* args[], uint32_t argCount) {
