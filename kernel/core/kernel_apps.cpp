@@ -10,6 +10,7 @@
 #include "include/kernel/shell.h"
 #include "include/kernel/ps2keyboard.h"
 #include "include/kernel/vfs.h"
+#include "include/kernel/serial_debug.h"
 
 namespace kernel {
 namespace apps {
@@ -405,6 +406,15 @@ void NotepadApp::onKeyDown(uint32_t key) {
 }
 
 void NotepadApp::onMouseDown(int x, int y, uint8_t button) {
+    // Debug: log all mouse clicks
+    serial::puts("[NOTEPAD] Mouse down: button=");
+    serial::put_hex8(button);
+    serial::puts(" x=");
+    serial::put_hex32(x);
+    serial::puts(" y=");
+    serial::put_hex32(y);
+    serial::putc('\n');
+    
     // Left click
     if (button == 1) {
         // Click on menu bar
@@ -432,6 +442,8 @@ void NotepadApp::onMouseDown(int x, int y, uint8_t button) {
     
     // Right click - show context menu in text area
     if (button == 2) {
+        serial::puts("[NOTEPAD] Right-click detected! Showing context menu\n");
+        
         // Close dropdown menus
         m_showFileMenu = false;
         m_showEditMenu = false;

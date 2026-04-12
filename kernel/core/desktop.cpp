@@ -3067,9 +3067,9 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
         draw();
         draw_cursor(mx, my);
         
-        // Only return early if actually over window OR handling a button release
-        // This ensures mouse up events are properly sent to compositor
-        if (overCompositorWindow || (released & 0x03)) {
+        // Return early if actually over window OR handling any button press/release
+        // This ensures mouse events are properly sent to compositor and not to desktop
+        if (overCompositorWindow || (pressed & 0x03) || (released & 0x03)) {
             return;
         }
     }
