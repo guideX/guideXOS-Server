@@ -1531,6 +1531,9 @@ static void cmd_ping(const char* target) {
         // Wait for reply (simplified polling)
         bool gotReply = false;
         for (int wait = 0; wait < 100; ++wait) {
+            // Poll network to receive incoming packets
+            ipv4::poll_network();
+            
             icmp::PingReply reply;
             if (icmp::ping_session_check_reply(&reply)) {
                 gotReply = true;
@@ -1577,8 +1580,10 @@ static void cmd_ping(const char* target) {
                 break;
             }
             
-            // Small delay between checks
-            for (volatile int d = 0; d < 10000; ++d) {}
+            // Small delay between checks, with network polling
+            for (volatile int d = 0; d < 10000; ++d) {
+                if (d % 1000 == 0) ipv4::poll_network();
+            }
         }
         
         if (!gotReply) {

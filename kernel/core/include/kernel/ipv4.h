@@ -454,6 +454,14 @@ const Statistics* get_stats();
 // Reset statistics
 void reset_stats();
 
+// ================================================================
+// Network Polling
+// ================================================================
+
+// Poll for received network frames and dispatch through protocol stack
+// Should be called periodically from main loop and during active waits
+void poll_network();
+
 } // namespace ipv4
 } // namespace kernel
 

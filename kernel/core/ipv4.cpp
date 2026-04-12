@@ -747,5 +747,54 @@ void reset_stats()
     memzero(&s_stats, sizeof(s_stats));
 }
 
+// ================================================================
+// Network Polling
+// ================================================================
+
+void poll_network()
+{
+    if (!s_config.configured) return;
+    if (!nic::is_active()) return;
+    
+    // Poll for received frames (process up to 8 per call to avoid starving other tasks)
+    uint8_t frameBuffer[ethernet::MAX_FRAME_LEN];
+    uint16_t frameLen = 0;
+    
+    for (int i = 0; i < 8; ++i) {
+        nic::Status nicStatus = nic::receive_frame(frameBuffer, sizeof(frameBuffer), &frameLen);
+        if (nicStatus != nic::NIC_OK) {
+            break;  // No more frames available
+        }
+        
+        if (frameLen < ethernet::HEADER_LEN) {
+            continue;  // Frame too short
+        }
+        
+        // Parse Ethernet header
+        ethernet::ParsedFrame ethFrame;
+        ethernet::Status ethStatus = ethernet::parse_frame(frameBuffer, frameLen, &ethFrame);
+        if (ethStatus != ethernet::ETH_OK) {
+            continue;  // Invalid frame
+        }
+        
+        // Dispatch based on EtherType
+        switch (ethFrame.etherType) {
+            case ethernet::ETHERTYPE_IPV4:
+                // Dispatch to IPv4 handler
+                handle_packet(ethFrame.payload, ethFrame.payloadLen);
+                break;
+                
+            case ethernet::ETHERTYPE_ARP:
+                // TODO: Handle ARP packets
+                // For now, just ignore them
+                break;
+                
+            default:
+                // Unknown EtherType, ignore
+                break;
+        }
+    }
+}
+
 } // namespace ipv4
 } // namespace kernel

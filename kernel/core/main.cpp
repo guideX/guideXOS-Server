@@ -355,6 +355,9 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
             // Poll input manager for updates (handles USB HID polling)
             kernel::input::poll();
             
+            // Poll network for received packets
+            kernel::ipv4::poll_network();
+            
             if (kernel::input::mouse_dirty()) {
                 kernel::input::mouse_clear_dirty();
                 kernel::desktop::handle_mouse(

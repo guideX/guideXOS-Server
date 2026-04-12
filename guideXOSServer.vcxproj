@@ -596,6 +596,7 @@
     <Text Include="docs\Development Priorities.txt" />
     <Text Include="docs\guideXOSServer_UniversalBinarySystem.txt" />
     <Text Include="docs\Other_Random_Development_Priorities.txt" />
+    <Text Include="docs\S390X.txt" />
     <Text Include="scripts\build-and-run-sparcv8_in_linux.sh" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
