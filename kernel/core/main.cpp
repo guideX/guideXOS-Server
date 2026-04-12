@@ -264,7 +264,18 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
             if (nicInfo->flags & kernel::nic::NIC_BOOT_FLAG_FOUND) {
                 kernel::serial::puts("[KERNEL] NIC info found in BootInfo, using mapped MMIO\n");
                 nicInitialized = kernel::nic::init_from_bootinfo(nicInfo);
+                if (nicInitialized) {
+                    kernel::serial::puts("[KERNEL] NIC initialized from BootInfo successfully\n");
+                } else {
+                    kernel::serial::puts("[KERNEL] WARNING: BootInfo NIC init failed, falling back to PCI scan\n");
+                }
+            } else {
+                kernel::serial::puts("[KERNEL] NIC not found in BootInfo (flags=");
+                kernel::serial::put_hex32(nicInfo->flags);
+                kernel::serial::puts("), falling back to PCI scan\n");
             }
+        } else {
+            kernel::serial::puts("[KERNEL] No BootInfo available, using PCI scan\n");
         }
         
         // Fall back to PCI scan if bootinfo init failed

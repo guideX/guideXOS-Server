@@ -1741,6 +1741,158 @@ static void cmd_route() {
     }
 }
 
+static void cmd_nicinfo() {
+    output_string("=== NIC Diagnostic Information ===\n\n");
+    
+    const nic::NICDevice* dev = nic::get_device();
+    if (!dev) {
+        output_string("ERROR: No NIC device structure available\n");
+        output_string("  This means NIC driver was never initialized.\n");
+        return;
+    }
+    
+    output_string("Device Name: ");
+    output_string(dev->name);
+    output_string("\n");
+    
+    // Vendor/Device ID
+    output_string("Vendor ID: 0x");
+    char hexStr[8];
+    for (int i = 0; i < 4; i++) {
+        uint8_t nibble = (dev->vendorId >> (12 - i*4)) & 0xF;
+        hexStr[i] = (nibble < 10) ? ('0' + nibble) : ('A' + nibble - 10);
+    }
+    hexStr[4] = '\0';
+    output_string(hexStr);
+    output_string("\n");
+    
+    output_string("Device ID: 0x");
+    for (int i = 0; i < 4; i++) {
+        uint8_t nibble = (dev->deviceId >> (12 - i*4)) & 0xF;
+        hexStr[i] = (nibble < 10) ? ('0' + nibble) : ('A' + nibble - 10);
+    }
+    hexStr[4] = '\0';
+    output_string(hexStr);
+    output_string("\n");
+    
+    // PCI location
+    output_string("PCI Location: ");
+    hexStr[0] = '0' + (dev->pciBus / 10) % 10;
+    hexStr[1] = '0' + dev->pciBus % 10;
+    hexStr[2] = ':';
+    hexStr[3] = '0' + (dev->pciSlot / 10) % 10;
+    hexStr[4] = '0' + dev->pciSlot % 10;
+    hexStr[5] = '.';
+    hexStr[6] = '0' + dev->pciFunc;
+    hexStr[7] = '\0';
+    output_string(hexStr);
+    output_string("\n");
+    
+    // IRQ
+    output_string("IRQ Line: ");
+    hexStr[0] = '0' + (dev->irqLine / 10) % 10;
+    hexStr[1] = '0' + dev->irqLine % 10;
+    hexStr[2] = '\0';
+    output_string(hexStr);
+    output_string("\n");
+    
+    // MAC Address
+    output_string("MAC Address: ");
+    char macStr[18];
+    ethernet::mac_to_string(dev->macAddress, macStr);
+    output_string(macStr);
+    output_string("\n");
+    
+    // MMIO Status
+    output_string("\n--- MMIO Status ---\n");
+    output_string("MMIO Mapped: ");
+    output_string(dev->mmioMapped ? "YES" : "NO");
+    output_string("\n");
+    
+    if (dev->mmioMapped) {
+        output_string("MMIO Virtual Address: 0x");
+        for (int i = 7; i >= 0; i--) {
+            uint8_t nibble = (dev->mmioBase >> (i * 4)) & 0xF;
+            hexStr[7-i] = (nibble < 10) ? ('0' + nibble) : ('A' + nibble - 10);
+        }
+        hexStr[8] = '\0';
+        output_string(hexStr);
+        output_string("\n");
+        
+        output_string("MMIO Physical Address: 0x");
+        for (int i = 7; i >= 0; i--) {
+            uint8_t nibble = (dev->mmioPhys >> (i * 4)) & 0xF;
+            hexStr[7-i] = (nibble < 10) ? ('0' + nibble) : ('A' + nibble - 10);
+        }
+        hexStr[8] = '\0';
+        output_string(hexStr);
+        output_string("\n");
+    } else {
+        output_string("\n** PROBLEM: MMIO NOT MAPPED **\n");
+        output_string("This means the bootloader did not map the NIC's\n");
+        output_string("memory-mapped I/O region. The NIC cannot function\n");
+        output_string("without MMIO access.\n");
+        output_string("\nSolution:\n");
+        output_string("  - Make sure you're using UEFI boot\n");
+        output_string("  - Check bootloader NIC initialization\n");
+        output_string("  - Verify QEMU has -netdev and -device arguments\n");
+    }
+    
+    // Active Status
+    output_string("\n--- Operation Status ---\n");
+    output_string("Active: ");
+    output_string(dev->active ? "YES" : "NO");
+    output_string("\n");
+    
+    if (!dev->active) {
+        output_string("\n** DEVICE NOT ACTIVE **\n");
+        output_string("Reason: ");
+        if (!dev->mmioMapped) {
+            output_string("MMIO not mapped by bootloader\n");
+        } else {
+            output_string("Hardware initialization failed\n");
+        }
+    }
+    
+    output_string("Link State: ");
+    output_string(dev->link == nic::NIC_LINK_UP ? "UP" : "DOWN");
+    output_string("\n");
+    
+    // Statistics
+    output_string("\n--- Statistics ---\n");
+    const nic::NetStats* stats = &dev->stats;
+    
+    char numStr[16];
+    output_string("TX Frames: ");
+    uint_to_str(stats->txFrames, numStr);
+    output_string(numStr);
+    output_string("   TX Bytes: ");
+    uint_to_str(stats->txBytes, numStr);
+    output_string(numStr);
+    output_string("\n");
+    
+    output_string("RX Frames: ");
+    uint_to_str(stats->rxFrames, numStr);
+    output_string(numStr);
+    output_string("   RX Bytes: ");
+    uint_to_str(stats->rxBytes, numStr);
+    output_string(numStr);
+    output_string("\n");
+    
+    output_string("TX Errors: ");
+    uint_to_str(stats->txErrors, numStr);
+    output_string(numStr);
+    output_string("   RX Errors: ");
+    uint_to_str(stats->rxErrors, numStr);
+    output_string(numStr);
+    output_string("\n");
+    
+    output_string("Interrupts: ");
+    uint_to_str(stats->interrupts, numStr);
+    output_string(numStr);
+    output_string("\n");
+}
+
 // Simple number to string helper for UDP stats
 static void uint_to_str(uint32_t n, char* buf) {
     int i = 0;
@@ -2754,6 +2906,8 @@ static void execute_command(const char* cmd) {
         cmd_ping(arg1);
     } else if (str_eq(command, "ifconfig") || str_eq(command, "ip")) {
         cmd_ifconfig();
+    } else if (str_eq(command, "nicinfo") || str_eq(command, "nicstat")) {
+        cmd_nicinfo();
     } else if (str_eq(command, "netstat") || str_eq(command, "ss")) {
         cmd_netstat();
     } else if (str_eq(command, "route")) {
