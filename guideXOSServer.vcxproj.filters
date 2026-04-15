@@ -1204,6 +1204,8 @@
     <None Include="scripts\run-qemu-fs-test.ps1" />
     <None Include="disks\test-ext4.img" />
     <None Include="disks\test-fat32.img" />
+    <None Include="docs\NETWORK_SETUP.md" />
+    <None Include="docs\TROUBLESHOOTING_PING.md" />
   </ItemGroup>
   <ItemGroup>
     <Text Include="scripts\build-and-run-sparcv8_in_linux.sh" />

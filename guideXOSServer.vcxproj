@@ -516,9 +516,11 @@
     <None Include="disks\test-fat32.img" />
     <None Include="docs\BUILD_GUIDE.md" />
     <None Include="docs\GXAPP_FORMAT_SPEC.md" />
+    <None Include="docs\NETWORK_SETUP.md" />
     <None Include="docs\PHASE7.5_FILESYSTEM_SHAKEDOWN.md" />
     <None Include="docs\PHASE8_UNIVERSAL_BINARY_SYSTEM.md" />
     <None Include="docs\SDK_ARCHITECTURE.md" />
+    <None Include="docs\TROUBLESHOOTING_PING.md" />
     <None Include="ESP\startup.nsh" />
     <None Include="fix-trampoline.ps1" />
     <None Include="guideXOSKernel.vcxproj" />
