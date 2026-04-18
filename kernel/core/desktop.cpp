@@ -595,6 +595,38 @@ static NotificationToast s_notification = {
     true
 };
 
+// ============================================================
+// Wallpaper Configuration
+// ============================================================
+
+enum class WallpaperType {
+    Gradient,      // Gradient from top to bottom
+    SolidColor,    // Single solid color
+    Grid,          // Grid pattern overlay
+    Custom         // Custom image (placeholder for future)
+};
+
+struct WallpaperConfig {
+    WallpaperType type;
+    uint32_t topColor;       // For gradient or solid color
+    uint32_t bottomColor;    // For gradient
+    bool showBranding;       // Show "guideXOS" branding
+    bool showGrid;           // Show subtle grid overlay
+    uint32_t gridColor;      // Grid line color
+    uint32_t gridSpacing;    // Grid spacing in pixels
+    
+    WallpaperConfig() 
+        : type(WallpaperType::Gradient),
+          topColor(0xFF142850),    // Dark blue top
+          bottomColor(0xFF0F121C), // Darker blue bottom
+          showBranding(true),
+          showGrid(true),
+          gridColor(0xFF192337),
+          gridSpacing(100) {}
+};
+
+static WallpaperConfig s_wallpaperConfig;
+
 // Per-icon positions (mutable, set to grid layout on init)
 static int32_t s_iconPosX[8];
 static int32_t s_iconPosY[8];
@@ -894,6 +926,47 @@ static int get_start_menu_item_count()
 }
 
 // ============================================================
+// Wallpaper Management
+// ============================================================
+
+// Set wallpaper to gradient mode
+static void set_wallpaper_gradient(uint32_t topColor, uint32_t bottomColor)
+{
+    s_wallpaperConfig.type = WallpaperType::Gradient;
+    s_wallpaperConfig.topColor = topColor;
+    s_wallpaperConfig.bottomColor = bottomColor;
+}
+
+// Set wallpaper to solid color mode
+static void set_wallpaper_solid(uint32_t color)
+{
+    s_wallpaperConfig.type = WallpaperType::SolidColor;
+    s_wallpaperConfig.topColor = color;
+}
+
+// Toggle branding visibility
+static void toggle_branding()
+{
+    s_wallpaperConfig.showBranding = !s_wallpaperConfig.showBranding;
+}
+
+// Toggle grid overlay
+static void toggle_grid()
+{
+    s_wallpaperConfig.showGrid = !s_wallpaperConfig.showGrid;
+}
+
+// Set wallpaper to grid mode
+static void set_wallpaper_grid(uint32_t topColor, uint32_t bottomColor, uint32_t gridColor, uint32_t spacing)
+{
+    s_wallpaperConfig.type = WallpaperType::Grid;
+    s_wallpaperConfig.topColor = topColor;
+    s_wallpaperConfig.bottomColor = bottomColor;
+    s_wallpaperConfig.gridColor = gridColor;
+    s_wallpaperConfig.gridSpacing = spacing;
+}
+
+// ============================================================
 // Drawing routines
 // ============================================================
 
@@ -928,37 +1001,112 @@ static void draw_background()
 {
     uint32_t w = s_screenW;
     uint32_t h = s_screenH - kTaskbarH;
-    uint32_t topColor = rgb(20, 40, 80);
-    uint32_t botColor = rgb(15, 18, 28);
 
-    for (uint32_t y = 0; y < h; y++) {
-        uint32_t lineColor = lerp_color(topColor, botColor, y, h > 1 ? h - 1 : 1);
-        framebuffer::fill_rect(0, y, w, 1, lineColor);
+    // Draw wallpaper based on configured type
+    switch (s_wallpaperConfig.type) {
+        case WallpaperType::Gradient: {
+            // Gradient from top to bottom
+            for (uint32_t y = 0; y < h; y++) {
+                uint32_t lineColor = lerp_color(
+                    s_wallpaperConfig.topColor, 
+                    s_wallpaperConfig.bottomColor, 
+                    y, 
+                    h > 1 ? h - 1 : 1
+                );
+                framebuffer::fill_rect(0, y, w, 1, lineColor);
+            }
+            break;
+        }
+        
+        case WallpaperType::SolidColor: {
+            // Single solid color
+            framebuffer::fill_rect(0, 0, w, h, s_wallpaperConfig.topColor);
+            break;
+        }
+        
+        case WallpaperType::Grid: {
+            // Gradient base with prominent grid
+            for (uint32_t y = 0; y < h; y++) {
+                uint32_t lineColor = lerp_color(
+                    s_wallpaperConfig.topColor, 
+                    s_wallpaperConfig.bottomColor, 
+                    y, 
+                    h > 1 ? h - 1 : 1
+                );
+                framebuffer::fill_rect(0, y, w, 1, lineColor);
+            }
+            // Draw more prominent grid
+            uint32_t gridCol = s_wallpaperConfig.gridColor;
+            for (uint32_t x = s_wallpaperConfig.gridSpacing; x < w; x += s_wallpaperConfig.gridSpacing)
+                vline(x, 0, h, gridCol);
+            for (uint32_t y = s_wallpaperConfig.gridSpacing; y < h; y += s_wallpaperConfig.gridSpacing)
+                hline(0, y, w, gridCol);
+            break;
+        }
+        
+        case WallpaperType::Custom:
+        default: {
+            // Default to gradient
+            for (uint32_t y = 0; y < h; y++) {
+                uint32_t lineColor = lerp_color(
+                    s_wallpaperConfig.topColor, 
+                    s_wallpaperConfig.bottomColor, 
+                    y, 
+                    h > 1 ? h - 1 : 1
+                );
+                framebuffer::fill_rect(0, y, w, 1, lineColor);
+            }
+            break;
+        }
     }
 
-    // Subtle grid overlay (every 100px)
-    uint32_t gridColor = rgb(25, 35, 55);
-    for (uint32_t x = 100; x < w; x += 100)
-        vline(x, 0, h, gridColor);
-    for (uint32_t y = 100; y < h; y += 100)
-        hline(0, y, w, gridColor);
-
-    // "guideXOS" branding - large centered text (scale 4)
-    {
-        const char* brand = "guideXOS";
-        int tw = measure_text(brand) * 4;
-        uint32_t bx = (w > (uint32_t)tw) ? (w - tw) / 2 : 0;
-        uint32_t by = h / 2 - 60;
-        draw_text(bx, by, brand, rgb(35, 50, 75), 4);
+    // Optional subtle grid overlay (if enabled and not Grid type)
+    if (s_wallpaperConfig.showGrid && s_wallpaperConfig.type != WallpaperType::Grid) {
+        uint32_t gridColor = s_wallpaperConfig.gridColor;
+        for (uint32_t x = s_wallpaperConfig.gridSpacing; x < w; x += s_wallpaperConfig.gridSpacing)
+            vline(x, 0, h, gridColor);
+        for (uint32_t y = s_wallpaperConfig.gridSpacing; y < h; y += s_wallpaperConfig.gridSpacing)
+            hline(0, y, w, gridColor);
     }
 
-    // Version subtitle (scale 2)
-    {
-        const char* ver = "Server Edition";
-        int tw = measure_text(ver) * 2;
-        uint32_t vx = (w > (uint32_t)tw) ? (w - tw) / 2 : 0;
-        uint32_t vy = s_screenH / 2 - 60 + 4 * kGlyphH + 12;
-        draw_text(vx, vy, ver, rgb(45, 60, 85), 2);
+    // Optional "guideXOS" branding
+    if (s_wallpaperConfig.showBranding) {
+        // Calculate branding colors based on wallpaper
+        // Use darker/lighter version of top color for subtle branding
+        uint32_t topCol = s_wallpaperConfig.topColor;
+        uint8_t r = (uint8_t)((topCol >> 16) & 0xFF);
+        uint8_t g = (uint8_t)((topCol >> 8) & 0xFF);
+        uint8_t b = (uint8_t)(topCol & 0xFF);
+        
+        // Slightly lighter for main branding
+        uint8_t br = (uint8_t)(r + 20 > 255 ? 255 : r + 20);
+        uint8_t bg = (uint8_t)(g + 25 > 255 ? 255 : g + 25);
+        uint8_t bb = (uint8_t)(b + 35 > 255 ? 255 : b + 35);
+        uint32_t brandColor = rgb(br, bg, bb);
+        
+        // Even lighter for version text
+        uint8_t vr = (uint8_t)(r + 30 > 255 ? 255 : r + 30);
+        uint8_t vg = (uint8_t)(g + 35 > 255 ? 255 : g + 35);
+        uint8_t vb = (uint8_t)(b + 45 > 255 ? 255 : b + 45);
+        uint32_t verColor = rgb(vr, vg, vb);
+        
+        // "guideXOS" branding - large centered text (scale 4)
+        {
+            const char* brand = "guideXOS";
+            int tw = measure_text(brand) * 4;
+            uint32_t bx = (w > (uint32_t)tw) ? (w - tw) / 2 : 0;
+            uint32_t by = h / 2 - 60;
+            draw_text(bx, by, brand, brandColor, 4);
+        }
+
+        // Version subtitle (scale 2)
+        {
+            const char* ver = "Server Edition";
+            int tw = measure_text(ver) * 2;
+            uint32_t vx = (w > (uint32_t)tw) ? (w - tw) / 2 : 0;
+            uint32_t vy = s_screenH / 2 - 60 + 4 * kGlyphH + 12;
+            draw_text(vx, vy, ver, verColor, 2);
+        }
     }
 }
 
