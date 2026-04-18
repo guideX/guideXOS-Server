@@ -98,8 +98,6 @@ core\cxx_runtime.cpp(130,22): error G30A0E944: 'size_t' does not name a type
 core\cxx_runtime.cpp(131,33): error G12C911F2: 'KERNEL_HEAP_SIZE' was not declared in this scope
     131 |     static uint8_t g_kernelHeap[KERNEL_HEAP_SIZE];
         |                                 ^~~~~~~~~~~~~~~~
-    [ERROR] Failed to compile cxx_runtime.cpp
-    Compiling desktop.cpp...
 core\cxx_runtime.cpp(132,12): error G30A0E944: 'size_t' does not name a type
     132 |     static size_t g_heapOffset = 0;
         |            ^~~~~~
@@ -139,6 +137,8 @@ core\cxx_runtime.cpp(167,6): warning G707C3B52: the program should also define '
 core\cxx_runtime.cpp(134,11): warning GCF37EB8C: '{anonymous}::kernel_alloc' defined but not used [-Wunused-variable]
     134 |     void* kernel_alloc(size_t size) {
         |           ^~~~~~~~~~~~
+    [ERROR] Failed to compile cxx_runtime.cpp
+    Compiling desktop.cpp...
   In file included from core\desktop.cpp:17:
   core\include/kernel/kernel_app.h: In member function 'virtual bool kernel::app::KernelApp::initWithParam(const char*)':
 core\include/kernel/kernel_app.h(198,44): warning G24ACD1A9: unused parameter 'param' [-Wunused-parameter]
@@ -235,6 +235,18 @@ core\include/kernel/vfs.h(225,66): error G30A0E944: 'size_t' has not been declar
     225 | void join_path(const char* base, const char* name, char* output, size_t outputSize);
         |                                                                  ^~~~~~
   core\include/kernel/vfs.h:225:66: note: 'size_t' is defined in header '<cstddef>'; this is probably fixable by adding '#include <cstddef>'
+core\desktop.cpp(2161,13): warning G800B4063: 'void kernel::desktop::init_icon_positions()' defined but not used [-Wunused-function]
+   2161 | static void init_icon_positions()
+        |             ^~~~~~~~~~~~~~~~~~~
+core\desktop.cpp(787,13): warning GB0A44E1C: 'void kernel::desktop::save_icon_position(int)' defined but not used [-Wunused-function]
+    787 | static void save_icon_position(int displayIndex)
+        |             ^~~~~~~~~~~~~~~~~~
+core\desktop.cpp(744,13): warning GCB72056F: 'void kernel::desktop::unpin_icon(const char*)' defined but not used [-Wunused-function]
+    744 | static void unpin_icon(const char* appName)
+        |             ^~~~~~~~~~
+core\desktop.cpp(731,13): warning G6BF0ADBA: 'void kernel::desktop::pin_icon(const char*)' defined but not used [-Wunused-function]
+    731 | static void pin_icon(const char* appName)
+        |             ^~~~~~~~
 core\desktop.cpp(457,13): warning G27EF45E7: 'kernel::desktop::s_networkConfigUseDHCPforDNS' defined but not used [-Wunused-variable]
     457 | static bool s_networkConfigUseDHCPforDNS = true;
         |             ^~~~~~~~~~~~~~~~~~~~~~~~~~~~

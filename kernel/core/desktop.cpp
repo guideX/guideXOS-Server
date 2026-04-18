@@ -481,23 +481,29 @@ static const uint32_t kTaskbarBtnMaxW = 150;
 static const uint32_t kTaskbarBtnH = 28;
 static const uint32_t kTaskbarBtnGap = 4;
 
-// Desktop icon entries
+// Desktop icon entries with enhanced management
 struct DesktopIcon {
     const char* label;
     uint32_t color;
+    bool pinned;      // True if pinned to desktop
+    bool recent;      // True if in recent apps list
+    int32_t savedX;   // Saved X position (-1 = use default grid)
+    int32_t savedY;   // Saved Y position (-1 = use default grid)
 };
 
-static const DesktopIcon s_desktopIcons[] = {
-    {"Notepad",     0xFF78B450},  // green
-    {"Calculator",  0xFF4690C8},  // blue
-    {"Console",     0xFF78B450},  // green
-    {"Paint",       0xFFC87830},  // orange
-    {"Clock",       0xFF4690C8},  // blue
-    {"TaskManager", 0xFFB44646},  // red  (matches registered app name)
-    {"Files",       0xFFC8B43C},  // yellow
-    {"ImgViewer",   0xFFC87830},  // orange
+// Desktop icons: now mutable to support pin/unpin
+static DesktopIcon s_desktopIcons[] = {
+    {"Notepad",     0xFF78B450, true, false, -1, -1},  // green, pinned
+    {"Calculator",  0xFF4690C8, true, false, -1, -1},  // blue, pinned
+    {"Console",     0xFF78B450, true, false, -1, -1},  // green, pinned
+    {"Paint",       0xFFC87830, false, true, -1, -1},  // orange, recent
+    {"Clock",       0xFF4690C8, false, true, -1, -1},  // blue, recent
+    {"TaskManager", 0xFFB44646, true, false, -1, -1},  // red, pinned (matches registered app name)
+    {"Files",       0xFFC8B43C, false, true, -1, -1},  // yellow, recent
+    {"ImgViewer",   0xFFC87830, false, false, -1, -1}, // orange
 };
 static const int kDesktopIconCount = 8;
+static const int kMaxRecentApps = 5;  // Max recent apps to show
 
 // Start menu entries (left column - recent/pinned apps)
 static const char* s_startMenuApps[] = {
@@ -575,6 +581,10 @@ static bool    s_iconPositionsInitialized = false;
 // Selected desktop icon (-1 = none)
 static int s_selectedIcon = -1;
 
+// Icon management helpers
+static int s_visibleIconCount = 0;  // Count of icons to display (pinned + recent)
+static int s_visibleIconIndices[8]; // Indices of visible icons in display order
+
 // Drag state for icon repositioning
 static bool  s_dragging = false;
 static int   s_dragIconIndex = -1;
@@ -592,6 +602,15 @@ static int s_lastClickedIcon = -1;
 static uint32_t s_lastClickTime = 0;
 static const uint32_t kDoubleClickMs = 500;  // Max ms between clicks for double-click
 static uint32_t s_tickCounter = 0;  // Incremented by main loop
+
+// Icon management function prototypes
+static void refresh_desktop_icons();      // Rebuild visible icon list
+static void add_to_recent(const char* appName);  // Add app to recent list
+static void pin_icon(const char* appName);       // Pin app to desktop
+static void unpin_icon(const char* appName);     // Unpin app from desktop
+static int find_icon_by_name(const char* name);  // Find icon index by name
+static void initialize_icon_positions();         // Set up initial icon grid layout
+static void save_icon_position(int iconIndex);   // Save position after drag
 
 // Start menu hover and click state (-1 = none)
 static int s_hoverMenuLeft  = -1;   // hovered left-column item index
@@ -636,6 +655,146 @@ static int32_t s_shellResizeStartH = 0;
 static void draw_shell_window();
 static int find_nearest_icon_in_direction(int currentIcon, int direction);
 static void show_icon_notification(int iconIndex);
+
+// ============================================================
+// Icon Management Implementation
+// ============================================================
+
+// Find icon by name (case-insensitive comparison)
+static int find_icon_by_name(const char* name)
+{
+    if (!name) return -1;
+    
+    for (int i = 0; i < kDesktopIconCount; i++) {
+        const char* a = s_desktopIcons[i].label;
+        const char* b = name;
+        bool match = true;
+        
+        while (*a && *b) {
+            char ca = *a >= 'A' && *a <= 'Z' ? *a + 32 : *a;
+            char cb = *b >= 'A' && *b <= 'Z' ? *b + 32 : *b;
+            if (ca != cb) {
+                match = false;
+                break;
+            }
+            a++;
+            b++;
+        }
+        
+        if (match && *a == *b) return i;
+    }
+    
+    return -1;
+}
+
+// Rebuild visible icon list based on pinned and recent status
+static void refresh_desktop_icons()
+{
+    s_visibleIconCount = 0;
+    
+    // First add all pinned icons
+    for (int i = 0; i < kDesktopIconCount && s_visibleIconCount < 8; i++) {
+        if (s_desktopIcons[i].pinned) {
+            s_visibleIconIndices[s_visibleIconCount++] = i;
+        }
+    }
+    
+    // Then add recent icons (up to limit)
+    int recentCount = 0;
+    for (int i = 0; i < kDesktopIconCount && s_visibleIconCount < 8; i++) {
+        if (s_desktopIcons[i].recent && !s_desktopIcons[i].pinned) {
+            if (recentCount < kMaxRecentApps) {
+                s_visibleIconIndices[s_visibleIconCount++] = i;
+                recentCount++;
+            }
+        }
+    }
+}
+
+// Add app to recent list
+static void add_to_recent(const char* appName)
+{
+    int idx = find_icon_by_name(appName);
+    if (idx < 0) return;
+    
+    // If already pinned, don't add to recent
+    if (s_desktopIcons[idx].pinned) return;
+    
+    // Mark as recent
+    s_desktopIcons[idx].recent = true;
+    
+    // Refresh visible icon list
+    refresh_desktop_icons();
+}
+
+// Pin app to desktop
+static void pin_icon(const char* appName)
+{
+    int idx = find_icon_by_name(appName);
+    if (idx < 0) return;
+    
+    s_desktopIcons[idx].pinned = true;
+    s_desktopIcons[idx].recent = false;  // Remove from recent if pinned
+    
+    // Refresh visible icon list
+    refresh_desktop_icons();
+}
+
+// Unpin app from desktop
+static void unpin_icon(const char* appName)
+{
+    int idx = find_icon_by_name(appName);
+    if (idx < 0) return;
+    
+    s_desktopIcons[idx].pinned = false;
+    
+    // Optionally add to recent
+    s_desktopIcons[idx].recent = true;
+    
+    // Refresh visible icon list
+    refresh_desktop_icons();
+}
+
+// Initialize icon positions in grid layout
+static void initialize_icon_positions()
+{
+    if (s_iconPositionsInitialized) return;
+    
+    refresh_desktop_icons();  // Build visible icon list first
+    
+    const int iconsPerRow = 8;
+    
+    for (int i = 0; i < s_visibleIconCount; i++) {
+        int iconIdx = s_visibleIconIndices[i];
+        
+        // Check if icon has saved position
+        if (s_desktopIcons[iconIdx].savedX >= 0 && s_desktopIcons[iconIdx].savedY >= 0) {
+            s_iconPosX[i] = s_desktopIcons[iconIdx].savedX;
+            s_iconPosY[i] = s_desktopIcons[iconIdx].savedY;
+        } else {
+            // Calculate default grid position
+            int row = i / iconsPerRow;
+            int col = i % iconsPerRow;
+            s_iconPosX[i] = (int32_t)(kIconMargin + col * kIconCellW);
+            s_iconPosY[i] = (int32_t)(kIconMargin + row * kIconCellH);
+        }
+    }
+    
+    s_iconPositionsInitialized = true;
+}
+
+// Save icon position after drag (store in icon structure)
+static void save_icon_position(int displayIndex)
+{
+    if (displayIndex < 0 || displayIndex >= s_visibleIconCount) return;
+    
+    int iconIdx = s_visibleIconIndices[displayIndex];
+    s_desktopIcons[iconIdx].savedX = s_iconPosX[displayIndex];
+    s_desktopIcons[iconIdx].savedY = s_iconPosY[displayIndex];
+    
+    // In a real system, this would persist to disk/NVRAM
+    // For now, positions are stored in memory only
+}
 
 // ============================================================
 // Drawing routines
@@ -710,73 +869,198 @@ static void draw_background()
 // Desktop icons
 // ============================================================
 
+// Draw a simple icon glyph/symbol inside the icon square
+static void draw_icon_symbol(uint32_t ix, uint32_t iy, uint32_t size, const char* appName)
+{
+    // Center coordinates
+    uint32_t cx = ix + size / 2;
+    uint32_t cy = iy + size / 2;
+    uint32_t iconColor = rgb(255, 255, 255);
+    
+    // Draw different symbols based on app type
+    // Using simple geometric shapes with bitmap font characters
+    
+    // Notepad - draw lines representing text
+    if (appName[0] == 'N' && appName[1] == 'o') {  // "Notepad"
+        for (int i = 0; i < 4; i++) {
+            hline(cx - 12, cy - 8 + i * 5, 24, iconColor);
+        }
+        return;
+    }
+    
+    // Calculator - draw grid pattern
+    if (appName[0] == 'C' && appName[1] == 'a') {  // "Calculator"
+        // Draw # symbol using bitmap font
+        draw_text(cx - 3, cy - 4, "#", iconColor, 1);
+        return;
+    }
+    
+    // Console/Terminal - draw prompt symbol
+    if (appName[0] == 'C' && appName[1] == 'o') {  // "Console"
+        draw_text(cx - 3, cy - 4, ">", iconColor, 1);
+        draw_text(cx + 2, cy - 4, "_", iconColor, 1);
+        return;
+    }
+    
+    // Paint - draw palette/brush
+    if (appName[0] == 'P' && appName[1] == 'a') {  // "Paint"
+        // Draw brush/pencil icon
+        for (int i = 0; i < 10; i++) {
+            framebuffer::put_pixel(cx - 6 + i, cy - 6 + i, iconColor);
+            framebuffer::put_pixel(cx - 5 + i, cy - 6 + i, iconColor);
+        }
+        return;
+    }
+    
+    // Clock - draw clock face
+    if (appName[0] == 'C' && appName[1] == 'l') {  // "Clock"
+        // Circle outline
+        draw_rect(cx - 8, cy - 8, 16, 16, iconColor);
+        // Clock hands
+        vline(cx, cy - 6, 6, iconColor);  // Hour hand (vertical)
+        hline(cx, cy, 6, iconColor);      // Minute hand (horizontal)
+        return;
+    }
+    
+    // TaskManager - draw chart/bars
+    if (appName[0] == 'T' && appName[1] == 'a') {  // "TaskManager"
+        // Bar chart representation
+        for (int i = 0; i < 4; i++) {
+            uint32_t barH = 4 + i * 3;
+            framebuffer::fill_rect(cx - 8 + i * 5, cy + 8 - barH, 3, barH, iconColor);
+        }
+        return;
+    }
+    
+    // Files - draw folder icon
+    if (appName[0] == 'F' && appName[1] == 'i') {  // "Files"
+        // Folder shape
+        framebuffer::fill_rect(cx - 10, cy - 4, 8, 2, iconColor);  // Folder tab
+        draw_rect(cx - 10, cy - 2, 20, 12, iconColor);  // Folder body
+        return;
+    }
+    
+    // ImageViewer - draw picture frame
+    if (appName[0] == 'I' && appName[1] == 'm') {  // "ImgViewer"
+        draw_rect(cx - 10, cy - 8, 20, 16, iconColor);
+        // Simple mountain/image symbol inside
+        for (int i = 0; i < 6; i++) {
+            framebuffer::put_pixel(cx - 6 + i, cy + 4 - i/2, iconColor);
+            framebuffer::put_pixel(cx + i, cy + 4 - i/3, iconColor);
+        }
+        return;
+    }
+    
+    // Default - draw first letter of app name
+    if (appName[0] >= 'A' && appName[0] <= 'Z') {
+        char letter[2] = { appName[0], '\0' };
+        draw_text(cx - 3, cy - 4, letter, iconColor, 1);
+    }
+}
+
 static void draw_desktop_icons()
 {
     uint32_t deskH = s_screenH - kTaskbarH;
 
-    for (int i = 0; i < kDesktopIconCount; i++) {
+    // Draw visible icons only (pinned + recent)
+    for (int displayIdx = 0; displayIdx < s_visibleIconCount; displayIdx++) {
         // Skip drawing the icon being dragged (it will be drawn at cursor)
-        if (s_dragging && s_dragStarted && i == s_dragIconIndex) continue;
+        if (s_dragging && s_dragStarted && displayIdx == s_dragIconIndex) continue;
 
-        uint32_t cx = (uint32_t)s_iconPosX[i];
-        uint32_t cy = (uint32_t)s_iconPosY[i];
+        int iconIdx = s_visibleIconIndices[displayIdx];
+        uint32_t cx = (uint32_t)s_iconPosX[displayIdx];
+        uint32_t cy = (uint32_t)s_iconPosY[displayIdx];
 
         if (cy + kIconCellH > deskH) continue;
 
-        // Selection highlight background
-        if (i == s_selectedIcon) {
-            framebuffer::fill_rect(cx, cy, kIconCellW, kIconCellH, rgb(60, 80, 120));
-            draw_rect(cx, cy, kIconCellW, kIconCellH, rgb(100, 140, 200));
+        // Selection highlight background (matching compositor style)
+        if (displayIdx == s_selectedIcon) {
+            framebuffer::fill_rect(cx, cy, kIconCellW, kIconCellH, rgb(50, 90, 160));
+            draw_rect(cx, cy, kIconCellW, kIconCellH, rgb(100, 160, 240));
         }
 
-        // Icon background square
+        // Icon background square with rounded appearance
         uint32_t ix = cx + (kIconCellW - kIconSize) / 2;
         uint32_t iy = cy + 4;
-        framebuffer::fill_rect(ix, iy, kIconSize, kIconSize, s_desktopIcons[i].color);
+        
+        // Draw icon background with base color
+        framebuffer::fill_rect(ix, iy, kIconSize, kIconSize, s_desktopIcons[iconIdx].color);
 
-        // Inner highlight
-        uint32_t innerSize = 20;
-        uint32_t innerX = ix + (kIconSize - innerSize) / 2;
-        uint32_t innerY = iy + (kIconSize - innerSize) / 2;
-        uint32_t ic = s_desktopIcons[i].color;
-        uint8_t hr = (uint8_t)(((ic >> 16) & 0xFF) + 40 > 255 ? 255 : ((ic >> 16) & 0xFF) + 40);
-        uint8_t hg = (uint8_t)(((ic >> 8) & 0xFF) + 40 > 255 ? 255 : ((ic >> 8) & 0xFF) + 40);
-        uint8_t hb = (uint8_t)((ic & 0xFF) + 40 > 255 ? 255 : (ic & 0xFF) + 40);
-        framebuffer::fill_rect(innerX, innerY, innerSize, innerSize, rgb(hr, hg, hb));
+        // Lighter top edge for depth effect
+        uint32_t baseColor = s_desktopIcons[iconIdx].color;
+        uint8_t br = (uint8_t)(((baseColor >> 16) & 0xFF));
+        uint8_t bg = (uint8_t)(((baseColor >> 8) & 0xFF));
+        uint8_t bb = (uint8_t)((baseColor & 0xFF));
+        uint8_t lr = (uint8_t)(br + 30 > 255 ? 255 : br + 30);
+        uint8_t lg = (uint8_t)(bg + 30 > 255 ? 255 : bg + 30);
+        uint8_t lb = (uint8_t)(bb + 30 > 255 ? 255 : bb + 30);
+        hline(ix + 1, iy + 1, kIconSize - 2, rgb(lr, lg, lb));
+        hline(ix + 1, iy + 2, kIconSize - 2, rgb(lr, lg, lb));
 
-        // Icon border
-        draw_rect(ix, iy, kIconSize, kIconSize, rgb(180, 180, 200));
+        // Draw app-specific icon symbol
+        draw_icon_symbol(ix, iy, kIconSize, s_desktopIcons[iconIdx].label);
 
-        // Label (shadow + text)
+        // Icon border with subtle 3D effect
+        draw_rect(ix, iy, kIconSize, kIconSize, rgb(200, 200, 220));
+        // Darker bottom/right edge for depth
+        hline(ix + 1, iy + kIconSize - 1, kIconSize - 1, rgb(80, 80, 100));
+        vline(ix + kIconSize - 1, iy + 1, kIconSize - 1, rgb(80, 80, 100));
+
+        // Pin indicator (bright star in top-right corner if pinned)
+        if (s_desktopIcons[iconIdx].pinned) {
+            draw_text(ix + kIconSize - 8, iy + 2, "*", rgb(255, 220, 80), 1);
+        }
+
+        // Label with shadow for better readability
         uint32_t labelY = iy + kIconSize + 4;
-        const char* lbl = s_desktopIcons[i].label;
+        const char* lbl = s_desktopIcons[iconIdx].label;
         int tw = measure_text(lbl);
         uint32_t lx = cx + (kIconCellW > (uint32_t)tw ? (kIconCellW - tw) / 2 : 0);
+        
+        // Text shadow (slightly offset black text)
         draw_text(lx + 1, labelY + 1, lbl, rgb(0, 0, 0), 1);
-        draw_text(lx, labelY, lbl, rgb(230, 230, 240), 1);
+        // Main text (bright white)
+        draw_text(lx, labelY, lbl, rgb(240, 240, 250), 1);
     }
 
     // Draw the dragged icon ghost at current drag position
-    if (s_dragging && s_dragStarted && s_dragIconIndex >= 0 && s_dragIconIndex < kDesktopIconCount) {
-        int i = s_dragIconIndex;
+    if (s_dragging && s_dragStarted && s_dragIconIndex >= 0 && s_dragIconIndex < s_visibleIconCount) {
+        int displayIdx = s_dragIconIndex;
+        int iconIdx = s_visibleIconIndices[displayIdx];
         uint32_t cx = (uint32_t)(s_dragCurrentX - s_dragOffsetX);
         uint32_t cy = (uint32_t)(s_dragCurrentY - s_dragOffsetY);
 
-        // Semi-transparent selection highlight
-        framebuffer::fill_rect(cx, cy, kIconCellW, kIconCellH, rgb(40, 60, 100));
+        // Semi-transparent selection highlight (darker for dragging)
+        framebuffer::fill_rect(cx, cy, kIconCellW, kIconCellH, rgb(30, 50, 90));
         draw_rect(cx, cy, kIconCellW, kIconCellH, rgb(80, 120, 180));
 
         uint32_t ix = cx + (kIconCellW - kIconSize) / 2;
         uint32_t iy = cy + 4;
-        framebuffer::fill_rect(ix, iy, kIconSize, kIconSize, s_desktopIcons[i].color);
-        draw_rect(ix, iy, kIconSize, kIconSize, rgb(180, 180, 200));
+        
+        // Draw icon with slightly dimmed colors when dragging
+        uint32_t dragColor = s_desktopIcons[iconIdx].color;
+        uint8_t dr = (uint8_t)(((dragColor >> 16) & 0xFF) * 7 / 10);
+        uint8_t dg = (uint8_t)(((dragColor >> 8) & 0xFF) * 7 / 10);
+        uint8_t db = (uint8_t)((dragColor & 0xFF) * 7 / 10);
+        framebuffer::fill_rect(ix, iy, kIconSize, kIconSize, rgb(dr, dg, db));
+        
+        // Draw icon symbol
+        draw_icon_symbol(ix, iy, kIconSize, s_desktopIcons[iconIdx].label);
+        
+        draw_rect(ix, iy, kIconSize, kIconSize, rgb(140, 140, 160));
 
+        // Pin indicator on dragged icon
+        if (s_desktopIcons[iconIdx].pinned) {
+            draw_text(ix + kIconSize - 8, iy + 2, "*", rgb(255, 220, 80), 1);
+        }
+
+        // Label
         uint32_t labelY = iy + kIconSize + 4;
-        const char* lbl = s_desktopIcons[i].label;
+        const char* lbl = s_desktopIcons[iconIdx].label;
         int tw = measure_text(lbl);
         uint32_t lx = cx + (kIconCellW > (uint32_t)tw ? (kIconCellW - tw) / 2 : 0);
         draw_text(lx + 1, labelY + 1, lbl, rgb(0, 0, 0), 1);
-        draw_text(lx, labelY, lbl, rgb(230, 230, 240), 1);
+        draw_text(lx, labelY, lbl, rgb(200, 200, 210), 1);
     }
 }
 
@@ -2278,7 +2562,7 @@ void init()
     s_tickCounter = 0;
     s_lastClickedIcon = -1;
     s_lastClickTime = 0;
-    init_icon_positions();
+    initialize_icon_positions();  // Use new icon management system
     shell::init();
     
     // Enable double buffering to prevent flickering during window movement
@@ -2601,7 +2885,7 @@ void handle_key(uint32_t key)
     }
     
     // Arrow key navigation for desktop icons
-    if (s_selectedIcon >= 0 && s_selectedIcon < kDesktopIconCount) {
+    if (s_selectedIcon >= 0 && s_selectedIcon < s_visibleIconCount) {
         int newIcon = -1;
         
         if (key == shell::KEY_UP) {
@@ -2692,20 +2976,20 @@ static bool     s_cursorDrawn = false;
 // Previous button state for edge detection
 static uint8_t  s_prevButtons = 0;
 
-// Hit-test desktop icons: returns icon index or -1
+// Hit-test desktop icons: returns display index or -1
 static int hit_test_icon(int32_t mx, int32_t my)
 {
     uint32_t deskH = s_screenH - kTaskbarH;
 
-    for (int i = 0; i < kDesktopIconCount; i++) {
-        uint32_t cx = (uint32_t)s_iconPosX[i];
-        uint32_t cy = (uint32_t)s_iconPosY[i];
+    for (int displayIdx = 0; displayIdx < s_visibleIconCount; displayIdx++) {
+        uint32_t cx = (uint32_t)s_iconPosX[displayIdx];
+        uint32_t cy = (uint32_t)s_iconPosY[displayIdx];
 
         if (cy + kIconCellH > deskH) continue;
 
         if ((uint32_t)mx >= cx && (uint32_t)mx < cx + kIconCellW &&
             (uint32_t)my >= cy && (uint32_t)my < cy + kIconCellH) {
-            return i;
+            return displayIdx;
         }
     }
     return -1;
@@ -2713,10 +2997,10 @@ static int hit_test_icon(int32_t mx, int32_t my)
 
 // Find the nearest icon in a given direction from the currently selected icon
 // direction: 0=up, 1=down, 2=left, 3=right
-// Returns icon index or -1 if none found
+// Returns display index or -1 if none found
 static int find_nearest_icon_in_direction(int currentIcon, int direction)
 {
-    if (currentIcon < 0 || currentIcon >= kDesktopIconCount) return -1;
+    if (currentIcon < 0 || currentIcon >= s_visibleIconCount) return -1;
     
     int32_t currX = s_iconPosX[currentIcon];
     int32_t currY = s_iconPosY[currentIcon];
@@ -2726,7 +3010,7 @@ static int find_nearest_icon_in_direction(int currentIcon, int direction)
     int bestIcon = -1;
     int32_t bestDistance = 0x7FFFFFFF; // Max int32
     
-    for (int i = 0; i < kDesktopIconCount; i++) {
+    for (int i = 0; i < s_visibleIconCount; i++) {
         if (i == currentIcon) continue;
         
         int32_t iconX = s_iconPosX[i];
@@ -2788,11 +3072,12 @@ static int find_nearest_icon_in_direction(int currentIcon, int direction)
 }
 
 // Show a notification for an icon launch (or launch the app if available)
-static void show_icon_notification(int iconIndex)
+static void show_icon_notification(int displayIndex)
 {
-    if (iconIndex < 0 || iconIndex >= kDesktopIconCount) return;
+    if (displayIndex < 0 || displayIndex >= s_visibleIconCount) return;
     
-    const char* label = s_desktopIcons[iconIndex].label;
+    int iconIdx = s_visibleIconIndices[displayIndex];
+    const char* label = s_desktopIcons[iconIdx].label;
     
     // Check if this is Console - special case for shell
     bool isConsole = false;
@@ -2805,6 +3090,7 @@ static void show_icon_notification(int iconIndex)
         shell::open();
         s_shellActive = true;
         s_shellMinimized = false;
+        add_to_recent(label);  // Add to recent apps
         return;
     }
     
@@ -2813,6 +3099,7 @@ static void show_icon_notification(int iconIndex)
         if (app::AppManager::launchApp(label)) {
             // App launched successfully
             app::AppLogger::logLaunch(label, app::LaunchResult::Success);
+            add_to_recent(label);  // Add to recent apps
             return;
         }
         // App available but failed to launch
