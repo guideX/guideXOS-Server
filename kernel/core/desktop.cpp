@@ -505,18 +505,40 @@ static DesktopIcon s_desktopIcons[] = {
 static const int kDesktopIconCount = 8;
 static const int kMaxRecentApps = 5;  // Max recent apps to show
 
-// Start menu entries (left column - recent/pinned apps)
-static const char* s_startMenuApps[] = {
+// Start menu entries structure for dynamic list
+struct StartMenuApp {
+    const char* name;
+    bool pinned;
+    bool recent;
+    uint32_t color;
+};
+
+// Start menu application list (pinned + recent, matching desktop icons)
+static StartMenuApp s_startMenuApps[] = {
+    {"Calculator",  true,  false, 0xFF4690C8},  // pinned
+    {"Notepad",     true,  false, 0xFF78B450},  // pinned
+    {"Console",     true,  false, 0xFF78B450},  // pinned
+    {"TaskManager", true,  false, 0xFFB44646},  // pinned
+    {"Paint",       false, true,  0xFFC87830},  // recent
+    {"Clock",       false, true,  0xFF4690C8},  // recent
+    {"Files",       false, true,  0xFFC8B43C},  // recent
+    {"ImgViewer",   false, false, 0xFFC87830},  // not shown by default
+};
+static const int kStartMenuAppCount = 8;
+static const int kMaxStartMenuRecent = 5;  // Max recent apps in start menu
+
+// All Programs alphabetically sorted list (for "All Programs" view)
+static const char* s_allProgramsList[] = {
     "Calculator",
     "Clock",
     "Console",
-    "File Explorer",
-    "Image Viewer",
+    "Files",
+    "ImgViewer",
     "Notepad",
     "Paint",
     "TaskManager",
 };
-static const int kStartMenuAppCount = 8;
+static const int kAllProgramsCount = 8;
 
 // Start menu right column entries (system shortcuts, matching Legacy StartMenu.cs)
 struct StartMenuRightItem {
@@ -612,11 +634,23 @@ static int find_icon_by_name(const char* name);  // Find icon index by name
 static void initialize_icon_positions();         // Set up initial icon grid layout
 static void save_icon_position(int iconIndex);   // Save position after drag
 
-// Start menu hover and click state (-1 = none)
+// Start menu state and navigation
 static int s_hoverMenuLeft  = -1;   // hovered left-column item index
 static int s_hoverMenuRight = -1;   // hovered right-column item index
 static int s_clickedMenuLeft  = -1; // clicked left-column item index
 static int s_clickedMenuRight = -1; // clicked right-column item index
+
+// Enhanced start menu state (matching compositor.cpp)
+static int s_startMenuSelection = 0;    // Currently selected item (keyboard nav)
+static int s_startMenuScroll = 0;       // Scroll offset for long lists
+static bool s_startMenuAllProgs = false; // Toggle between Recent/Pinned vs All Programs
+static const int kStartMenuMaxRows = 14; // Max visible rows before scrolling
+static const int kStartMenuRowH = 20;    // Height of each menu row
+
+// Start menu helper functions
+static void refresh_start_menu_list();   // Rebuild visible start menu items
+static void add_to_start_menu_recent(const char* appName);  // Add to recent list
+static int get_start_menu_item_count();  // Get current item count (pinned+recent or all)
 
 // Shell window state
 static int32_t s_shellPosX = -1;    // Shell window X position (-1 = centered)
@@ -794,6 +828,69 @@ static void save_icon_position(int displayIndex)
     
     // In a real system, this would persist to disk/NVRAM
     // For now, positions are stored in memory only
+}
+
+// ============================================================
+// Start Menu Management Implementation
+// ============================================================
+
+// Refresh start menu app list (sync with desktop icons for pinned/recent)
+static void refresh_start_menu_list()
+{
+    // Update start menu apps to match desktop icon states
+    for (int i = 0; i < kStartMenuAppCount; i++) {
+        int iconIdx = find_icon_by_name(s_startMenuApps[i].name);
+        if (iconIdx >= 0) {
+            s_startMenuApps[i].pinned = s_desktopIcons[iconIdx].pinned;
+            s_startMenuApps[i].recent = s_desktopIcons[iconIdx].recent;
+        }
+    }
+}
+
+// Add app to start menu recent list
+static void add_to_start_menu_recent(const char* appName)
+{
+    // Find the app in the start menu list
+    for (int i = 0; i < kStartMenuAppCount; i++) {
+        if (s_startMenuApps[i].name == appName ||
+            (s_startMenuApps[i].name[0] == appName[0] && 
+             s_startMenuApps[i].name[1] == appName[1])) {
+            
+            // Don't add if already pinned
+            if (s_startMenuApps[i].pinned) return;
+            
+            // Mark as recent
+            s_startMenuApps[i].recent = true;
+            return;
+        }
+    }
+}
+
+// Get current start menu item count based on mode
+static int get_start_menu_item_count()
+{
+    if (s_startMenuAllProgs) {
+        return kAllProgramsCount;
+    } else {
+        // Count pinned + recent items
+        int count = 0;
+        int recentCount = 0;
+        
+        // First count pinned
+        for (int i = 0; i < kStartMenuAppCount; i++) {
+            if (s_startMenuApps[i].pinned) count++;
+        }
+        
+        // Then count recent (up to limit)
+        for (int i = 0; i < kStartMenuAppCount && recentCount < kMaxStartMenuRecent; i++) {
+            if (s_startMenuApps[i].recent && !s_startMenuApps[i].pinned) {
+                count++;
+                recentCount++;
+            }
+        }
+        
+        return count;
+    }
 }
 
 // ============================================================
@@ -1304,12 +1401,16 @@ static void draw_start_menu()
 {
     if (!s_startMenuOpen) return;
 
-    // Two-column start menu matching Legacy StartMenu.cs layout
+    // Get current item count based on mode (pinned+recent or all programs)
+    int itemCount = get_start_menu_item_count();
+    int visibleRows = itemCount < kStartMenuMaxRows ? itemCount : kStartMenuMaxRows;
+    
+    // Two-column start menu matching compositor layout
     // Left column: app list, Right column: system shortcuts
     uint32_t headerH = 30;
     uint32_t footerH = 36;
-    uint32_t bodyH = (uint32_t)kStartMenuAppCount * kStartMenuItemH;
-    uint32_t rightBodyH = (uint32_t)kStartMenuRightCount * kStartMenuItemH;
+    uint32_t bodyH = (uint32_t)visibleRows * kStartMenuRowH;
+    uint32_t rightBodyH = (uint32_t)kStartMenuRightCount * kStartMenuRowH;
     uint32_t maxBodyH = bodyH > rightBodyH ? bodyH : rightBodyH;
     uint32_t menuH = headerH + maxBodyH + footerH;
     uint32_t menuX = 4;
@@ -1320,107 +1421,183 @@ static void draw_start_menu()
     framebuffer::fill_rect(menuX, menuY, kStartMenuW, menuH, rgb(40, 40, 50));
     draw_rect(menuX, menuY, kStartMenuW, menuH, rgb(80, 100, 140));
 
-    // Header bar (user profile area, matching Legacy)
+    // Header bar (user profile area)
     framebuffer::fill_rect(menuX + 1, menuY + 1, kStartMenuW - 2, headerH - 1, rgb(50, 70, 110));
-    // User avatar placeholder (small colored square)
+    // User avatar placeholder
     framebuffer::fill_rect(menuX + 8, menuY + 6, 18, 18, rgb(90, 140, 200));
     draw_rect(menuX + 8, menuY + 6, 18, 18, rgb(130, 170, 230));
     // Username
     draw_text(menuX + 32, menuY + 10, "User", rgb(230, 230, 250), 1);
     hline(menuX + 1, menuY + headerH, kStartMenuW - 2, rgb(60, 70, 90));
 
-    // === Left column: Recent/Pinned Programs ===
+    // === Left column: App list (pinned/recent or all programs) ===
     uint32_t leftX = menuX;
     uint32_t contentY = menuY + headerH + 1;
 
-    // Left column background (slightly lighter)
+    // Left column background
     framebuffer::fill_rect(leftX + 1, contentY, leftColW - 1, maxBodyH, rgb(42, 42, 52));
 
-    for (int i = 0; i < kStartMenuAppCount; i++) {
-        uint32_t itemY = contentY + (uint32_t)i * kStartMenuItemH;
-        if (itemY + kStartMenuItemH > menuY + headerH + maxBodyH) break;
+    // Draw visible items with scroll
+    for (int i = 0; i < visibleRows; i++) {
+        int itemIndex = i + s_startMenuScroll;
+        if (itemIndex >= itemCount) break;
+        
+        uint32_t itemY = contentY + (uint32_t)i * kStartMenuRowH;
 
+        // Get app name and color based on mode
+        const char* appName;
+        uint32_t appColor;
+        bool isPinned = false;
+        
+        if (s_startMenuAllProgs) {
+            // All Programs mode - use sorted list
+            appName = s_allProgramsList[itemIndex];
+            // Find color from app list
+            appColor = rgb(90, 130, 180); // default
+            for (int j = 0; j < kStartMenuAppCount; j++) {
+                if (s_startMenuApps[j].name[0] == appName[0] &&
+                    s_startMenuApps[j].name[1] == appName[1]) {
+                    appColor = s_startMenuApps[j].color;
+                    isPinned = s_startMenuApps[j].pinned;
+                    break;
+                }
+            }
+        } else {
+            // Pinned/Recent mode - build from app list
+            int currentIdx = 0;
+            bool found = false;
+            
+            // First iterate through pinned
+            for (int j = 0; j < kStartMenuAppCount && currentIdx <= itemIndex; j++) {
+                if (s_startMenuApps[j].pinned) {
+                    if (currentIdx == itemIndex) {
+                        appName = s_startMenuApps[j].name;
+                        appColor = s_startMenuApps[j].color;
+                        isPinned = true;
+                        found = true;
+                        break;
+                    }
+                    currentIdx++;
+                }
+            }
+            
+            // Then recent if not found
+            if (!found) {
+                int recentCount = 0;
+                for (int j = 0; j < kStartMenuAppCount && recentCount < kMaxStartMenuRecent; j++) {
+                    if (s_startMenuApps[j].recent && !s_startMenuApps[j].pinned) {
+                        if (currentIdx == itemIndex) {
+                            appName = s_startMenuApps[j].name;
+                            appColor = s_startMenuApps[j].color;
+                            isPinned = false;
+                            found = true;
+                            break;
+                        }
+                        currentIdx++;
+                        recentCount++;
+                    }
+                }
+            }
+            
+            if (!found) continue;
+        }
+
+        // Keyboard selection highlight (yellow/gold)
+        if (itemIndex == s_startMenuSelection) {
+            framebuffer::fill_rect(leftX + 1, itemY, leftColW - 2, kStartMenuRowH, rgb(90, 100, 60));
+        }
         // Clicked item highlight (bright blue)
-        if (i == s_clickedMenuLeft) {
-            framebuffer::fill_rect(leftX + 1, itemY, leftColW - 2, kStartMenuItemH, rgb(50, 90, 160));
+        else if (i == s_clickedMenuLeft) {
+            framebuffer::fill_rect(leftX + 1, itemY, leftColW - 2, kStartMenuRowH, rgb(50, 90, 160));
         }
         // Hover highlight (subtle blue tint)
         else if (i == s_hoverMenuLeft) {
-            framebuffer::fill_rect(leftX + 1, itemY, leftColW - 2, kStartMenuItemH, rgb(55, 60, 80));
+            framebuffer::fill_rect(leftX + 1, itemY, leftColW - 2, kStartMenuRowH, rgb(55, 60, 80));
         }
         // Alternate row shading
         else if (i % 2 == 0) {
-            framebuffer::fill_rect(leftX + 1, itemY, leftColW - 2, kStartMenuItemH, rgb(46, 46, 58));
+            framebuffer::fill_rect(leftX + 1, itemY, leftColW - 2, kStartMenuRowH, rgb(46, 46, 58));
         }
 
         // Small colored icon square
-        uint32_t iconColor;
-        if (i == 0 || i == 1) iconColor = rgb(70, 140, 200);
-        else if (i == 2 || i == 5) iconColor = rgb(120, 180, 80);
-        else if (i == 6) iconColor = rgb(200, 120, 60);
-        else if (i == 7) iconColor = rgb(180, 70, 70);
-        else iconColor = rgb(90, 130, 180);
+        framebuffer::fill_rect(leftX + 10, itemY + 3, 16, 16, appColor);
+        draw_rect(leftX + 10, itemY + 3, 16, 16, rgb(160, 160, 180));
+        
+        // Pin indicator (star) if pinned
+        if (isPinned) {
+            draw_text(leftX + 20, itemY + 4, "*", rgb(255, 220, 80), 1);
+        }
 
-        framebuffer::fill_rect(leftX + 10, itemY + 4, 20, 20, iconColor);
-        draw_rect(leftX + 10, itemY + 4, 20, 20, rgb(160, 160, 180));
-
-        // App name (brighter when hovered or clicked)
-        uint32_t textColor = (i == s_clickedMenuLeft || i == s_hoverMenuLeft)
+        // App name
+        uint32_t textColor = (itemIndex == s_startMenuSelection || i == s_clickedMenuLeft || i == s_hoverMenuLeft)
             ? rgb(255, 255, 255) : rgb(210, 210, 225);
-        draw_text(leftX + 36, itemY + 10, s_startMenuApps[i], textColor, 1);
+        draw_text(leftX + 32, itemY + 6, appName, textColor, 1);
+    }
+    
+    // Scroll indicators if needed
+    if (s_startMenuScroll > 0) {
+        // Up arrow indicator
+        draw_text(leftX + leftColW - 16, contentY + 2, "^", rgb(180, 190, 210), 1);
+    }
+    if (s_startMenuScroll + visibleRows < itemCount) {
+        // Down arrow indicator
+        draw_text(leftX + leftColW - 16, contentY + maxBodyH - 12, "v", rgb(180, 190, 210), 1);
     }
 
     // Vertical divider between columns
     vline(leftX + leftColW, contentY, maxBodyH, rgb(60, 70, 90));
 
-    // === Right column: System shortcuts (matching Legacy StartMenu.cs right panel) ===
+    // === Right column: System shortcuts ===
     uint32_t rightX = leftX + leftColW + 1;
     framebuffer::fill_rect(rightX, contentY, kStartMenuRightColW - 2, maxBodyH, rgb(38, 38, 48));
 
     for (int i = 0; i < kStartMenuRightCount; i++) {
-        uint32_t itemY = contentY + (uint32_t)i * kStartMenuItemH;
-        if (itemY + kStartMenuItemH > menuY + headerH + maxBodyH) break;
+        uint32_t itemY = contentY + (uint32_t)i * kStartMenuRowH;
+        if (itemY + kStartMenuRowH > menuY + headerH + maxBodyH) break;
 
-        // Clicked item highlight (bright blue)
+        // Clicked item highlight
         if (i == s_clickedMenuRight) {
-            framebuffer::fill_rect(rightX, itemY, kStartMenuRightColW - 2, kStartMenuItemH, rgb(50, 90, 160));
+            framebuffer::fill_rect(rightX, itemY, kStartMenuRightColW - 2, kStartMenuRowH, rgb(50, 90, 160));
         }
-        // Hover highlight (subtle blue tint)
+        // Hover highlight
         else if (i == s_hoverMenuRight) {
-            framebuffer::fill_rect(rightX, itemY, kStartMenuRightColW - 2, kStartMenuItemH, rgb(50, 55, 72));
+            framebuffer::fill_rect(rightX, itemY, kStartMenuRightColW - 2, kStartMenuRowH, rgb(50, 55, 72));
         }
         // Alternate shading
         else if (i % 2 == 1) {
-            framebuffer::fill_rect(rightX, itemY, kStartMenuRightColW - 2, kStartMenuItemH, rgb(42, 42, 52));
+            framebuffer::fill_rect(rightX, itemY, kStartMenuRightColW - 2, kStartMenuRowH, rgb(42, 42, 52));
         }
 
         // Small colored icon
-        framebuffer::fill_rect(rightX + 8, itemY + 5, 16, 16, s_startMenuRight[i].color);
-        draw_rect(rightX + 8, itemY + 5, 16, 16, rgb(140, 140, 160));
+        framebuffer::fill_rect(rightX + 8, itemY + 4, 14, 14, s_startMenuRight[i].color);
+        draw_rect(rightX + 8, itemY + 4, 14, 14, rgb(140, 140, 160));
 
-        // Label (brighter when hovered or clicked)
+        // Label
         uint32_t rTextColor = (i == s_clickedMenuRight || i == s_hoverMenuRight)
             ? rgb(255, 255, 255) : rgb(200, 200, 220);
-        draw_text(rightX + 30, itemY + 10, s_startMenuRight[i].label, rTextColor, 1);
+        draw_text(rightX + 28, itemY + 6, s_startMenuRight[i].label, rTextColor, 1);
     }
 
-    // === Footer: "All Programs" button + Power menu (matching Legacy) ===
+    // === Footer: "All Programs" toggle + Power buttons ===
     uint32_t footerY = menuY + headerH + maxBodyH;
     hline(menuX + 1, footerY, kStartMenuW - 2, rgb(60, 70, 90));
 
     // Footer background
     framebuffer::fill_rect(menuX + 1, footerY + 1, kStartMenuW - 2, footerH - 2, rgb(38, 38, 46));
 
-    // "All Programs" toggle button (bottom-left, matching Legacy)
+    // "All Programs" toggle button (highlighted if active)
     uint32_t allBtnW = 110;
     uint32_t allBtnH = 24;
     uint32_t allBtnX = menuX + 10;
     uint32_t allBtnY = footerY + (footerH - allBtnH) / 2;
-    framebuffer::fill_rect(allBtnX, allBtnY, allBtnW, allBtnH, rgb(50, 55, 65));
-    draw_rect(allBtnX, allBtnY, allBtnW, allBtnH, rgb(70, 80, 100));
-    draw_text_centered(allBtnX, allBtnY, allBtnW, allBtnH, "All Programs", rgb(190, 195, 210), 1);
+    uint32_t allBtnBg = s_startMenuAllProgs ? rgb(60, 80, 120) : rgb(50, 55, 65);
+    uint32_t allBtnBorder = s_startMenuAllProgs ? rgb(90, 120, 180) : rgb(70, 80, 100);
+    framebuffer::fill_rect(allBtnX, allBtnY, allBtnW, allBtnH, allBtnBg);
+    draw_rect(allBtnX, allBtnY, allBtnW, allBtnH, allBtnBorder);
+    const char* allBtnText = s_startMenuAllProgs ? "< Back" : "All Programs";
+    draw_text_centered(allBtnX, allBtnY, allBtnW, allBtnH, allBtnText, rgb(190, 195, 210), 1);
 
-    // Power buttons (right side of footer, matching Legacy)
+    // Power buttons (right side of footer)
     uint32_t shutW = 80;
     uint32_t shutH = 24;
     uint32_t shutX = menuX + kStartMenuW - shutW - 12;
@@ -1429,14 +1606,14 @@ static void draw_start_menu()
     draw_rect(shutX, shutY, shutW, shutH, rgb(180, 80, 80));
     draw_text_centered(shutX, shutY, shutW, shutH, "Shut Down", rgb(240, 220, 220), 1);
 
-    // Restart button (left of Shut Down)
+    // Restart button
     uint32_t restartW = 62;
     uint32_t restartX = shutX - restartW - 6;
     framebuffer::fill_rect(restartX, shutY, restartW, shutH, rgb(50, 60, 80));
     draw_rect(restartX, shutY, restartW, shutH, rgb(80, 100, 130));
     draw_text_centered(restartX, shutY, restartW, shutH, "Restart", rgb(200, 200, 220), 1);
 
-    // Sleep button (left of Restart)
+    // Sleep button
     uint32_t sleepW = 50;
     uint32_t sleepX = restartX - sleepW - 6;
     framebuffer::fill_rect(sleepX, shutY, sleepW, shutH, rgb(50, 60, 80));
@@ -2730,23 +2907,6 @@ void draw()
 
 
 
-void toggle_start_menu()
-{
-    s_startMenuOpen = !s_startMenuOpen;
-    // Close context menu when start menu is toggled
-    if (s_startMenuOpen) s_rightClickMenuOpen = false;
-    // Reset hover/click state
-    s_hoverMenuLeft = -1;
-    s_hoverMenuRight = -1;
-    s_clickedMenuLeft = -1;
-    s_clickedMenuRight = -1;
-}
-
-bool is_start_menu_open()
-{
-    return s_startMenuOpen;
-}
-
 void show_context_menu(uint32_t x, uint32_t y)
 {
     s_rightClickX = x;
@@ -2759,6 +2919,28 @@ void show_context_menu(uint32_t x, uint32_t y)
 void close_context_menu()
 {
     s_rightClickMenuOpen = false;
+}
+
+void toggle_start_menu()
+{
+    s_startMenuOpen = !s_startMenuOpen;
+    
+    if (s_startMenuOpen) {
+        // Initialize start menu state when opening
+        s_startMenuSelection = 0;
+        s_startMenuScroll = 0;
+        s_startMenuAllProgs = false;  // Start with pinned/recent view
+        refresh_start_menu_list();     // Sync with desktop icon states
+        s_hoverMenuLeft = -1;
+        s_hoverMenuRight = -1;
+        s_clickedMenuLeft = -1;
+        s_clickedMenuRight = -1;
+    }
+}
+
+bool is_start_menu_open()
+{
+    return s_startMenuOpen;
 }
 
 void dismiss_notification()
@@ -3896,7 +4078,7 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
                 // Clicked a left-column app
                 s_clickedMenuLeft = leftHit;
                 s_clickedMenuRight = -1;
-                show_start_menu_notification(s_startMenuApps[leftHit]);
+                show_start_menu_notification(s_startMenuApps[leftHit].name);
                 draw();
                 draw_cursor(mx, my);
                 return;
