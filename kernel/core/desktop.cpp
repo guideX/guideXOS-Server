@@ -19,6 +19,7 @@
 #include "include/kernel/kernel_compositor.h"
 #include "include/kernel/kernel_ipc.h"
 #include "include/kernel/vfs.h"
+#include <ctime>
 
 #if defined(_MSC_VER)
 #include <intrin.h>  // For MSVC intrinsics (__outbyte, __halt, etc.)
@@ -469,7 +470,6 @@ static const uint32_t kSearchBoxW = 160;
 static const uint32_t kSearchBoxH = 24;
 static const uint32_t kShowDesktopW = 6;
 static const uint32_t kStartMenuW = 420;
-static const uint32_t kStartMenuItemH = 28;
 static const uint32_t kStartMenuRightColW = 160;
 static const uint32_t kIconSize = 48;
 static const uint32_t kIconCellW = 80;
@@ -565,9 +565,9 @@ struct TaskbarEntry {
 };
 
 static TaskbarEntry s_taskbarEntries[] = {
-    {"Welcome", 0xFF4690C8, true},
+    // Remove Welcome - it's not needed
 };
-static const int kTaskbarEntryCount = 1;
+static const int kTaskbarEntryCount = 0;
 
 // Right-click context menu entries
 static const char* s_contextMenuItems[] = {
@@ -587,12 +587,14 @@ struct NotificationToast {
     const char* title;
     const char* message;
     bool visible;
+    uint32_t showTime;  // Tick counter when notification was shown
 };
 
 static NotificationToast s_notification = {
     "Welcome to guideXOS",
     "System started successfully",
-    true
+    true,
+    0
 };
 
 // ============================================================
@@ -724,6 +726,30 @@ static void update_time()
                 }
             }
         }
+    }
+}
+
+// Initialize time from system clock
+static void init_time()
+{
+    std::time_t now = std::time(nullptr);
+    std::tm* local_tm = nullptr;
+    
+#ifdef _WIN32
+    std::tm temp_tm;
+    localtime_s(&temp_tm, &now);
+    local_tm = &temp_tm;
+#else
+    local_tm = std::localtime(&now);
+#endif
+    
+    if (local_tm) {
+        s_currentTime.hour = local_tm->tm_hour;
+        s_currentTime.minute = local_tm->tm_min;
+        s_currentTime.second = local_tm->tm_sec;
+        s_currentTime.day = local_tm->tm_mday;
+        s_currentTime.month = local_tm->tm_mon + 1;  // tm_mon is 0-11
+        s_currentTime.year = local_tm->tm_year + 1900;  // tm_year is years since 1900
     }
 }
 
@@ -2980,6 +3006,7 @@ void run_test_mode()
     s_notification.title = "Test Mode Complete";
     s_notification.message = "Check console for results";
     s_notification.visible = true;
+    s_notification.showTime = s_tickCounter;
 }
 
 // Check if compositor/IPC is available for GUI apps
@@ -2996,10 +3023,12 @@ void init()
     s_startMenuOpen = false;
     s_rightClickMenuOpen = false;
     s_notification.visible = true;
+    s_notification.showTime = 0;
     s_tickCounter = 0;
     s_lastClickedIcon = -1;
     s_lastClickTime = 0;
     initialize_icon_positions();  // Use new icon management system
+    init_time();  // Initialize time from system clock
     shell::init();
     
     // Enable double buffering to prevent flickering during window movement
@@ -3023,6 +3052,13 @@ void tick()
     // Update time every ~100 ticks (roughly 1 second if tick is called every 10ms)
     if (s_tickCounter % 100 == 0) {
         update_time();
+    }
+    
+    // Auto-hide notifications after 5 seconds (500 ticks at 10ms each)
+    if (s_notification.visible && s_notification.showTime > 0) {
+        if (s_tickCounter - s_notification.showTime >= 500) {
+            s_notification.visible = false;
+        }
     }
     
     ipc::IpcManager::tick();
@@ -3554,6 +3590,7 @@ static void show_icon_notification(int displayIndex)
         s_notification.title = label;
         s_notification.message = "Failed to launch app";
         s_notification.visible = true;
+        s_notification.showTime = s_tickCounter;
         app::AppLogger::logLaunch(label, app::LaunchResult::FailedToInit);
         return;
     }
@@ -3562,6 +3599,7 @@ static void show_icon_notification(int displayIndex)
     s_notification.title = label;
     s_notification.message = "Not available in bare-metal mode";
     s_notification.visible = true;
+    s_notification.showTime = s_tickCounter;
     app::AppLogger::logLaunch(label, app::LaunchResult::NotAvailable);
 }
 
@@ -3579,8 +3617,8 @@ static StartMenuGeometry get_start_menu_geometry()
     StartMenuGeometry g;
     g.headerH = 30;
     g.footerH = 36;
-    uint32_t bodyH = (uint32_t)kStartMenuAppCount * kStartMenuItemH;
-    uint32_t rightBodyH = (uint32_t)kStartMenuRightCount * kStartMenuItemH;
+    uint32_t bodyH = (uint32_t)kStartMenuAppCount * kStartMenuRowH;
+    uint32_t rightBodyH = (uint32_t)kStartMenuRightCount * kStartMenuRowH;
     g.maxBodyH = bodyH > rightBodyH ? bodyH : rightBodyH;
     g.menuH = g.headerH + g.maxBodyH + g.footerH;
     g.menuX = 4;
@@ -3677,7 +3715,7 @@ static void hit_test_start_menu(int32_t mx, int32_t my, int& leftIdx, int& right
     }
 
     uint32_t relY = (uint32_t)my - g.contentY;
-    int itemRow = static_cast<int>(relY / kStartMenuItemH);
+    int itemRow = static_cast<int>(relY / kStartMenuRowH);
 
     // Left column
     if ((uint32_t)mx >= g.menuX && (uint32_t)mx < g.menuX + g.leftColW) {
@@ -3726,6 +3764,7 @@ static void show_start_menu_notification(const char* label)
     s_notification.title = label;
     s_notification.message = "Not available in bare-metal mode";
     s_notification.visible = true;
+    s_notification.showTime = s_tickCounter;
     app::AppLogger::logLaunch(label, app::LaunchResult::NotAvailable);
 }
 
@@ -4052,6 +4091,25 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
 
     // Left button press
     if (pressed & 0x01) {
+        // Check for notification close button click first
+        if (s_notification.visible) {
+            uint32_t toastW = 260;
+            uint32_t toastH = 60;
+            uint32_t toastX = s_screenW - toastW - 12;
+            uint32_t toastY = 12;
+            uint32_t closeX = toastX + toastW - 16;
+            uint32_t closeY = toastY + 4;
+            
+            // Close button is roughly 12x12 pixels around the 'x' character
+            if ((uint32_t)mx >= closeX && (uint32_t)mx < closeX + 12 &&
+                (uint32_t)my >= closeY && (uint32_t)my < closeY + 12) {
+                s_notification.visible = false;
+                draw();
+                draw_cursor(mx, my);
+                return;
+            }
+        }
+        
         // Check for Terminal taskbar button click first
         if (s_terminalBtnVisible && shell::is_open()) {
             if ((uint32_t)mx >= s_terminalBtnX && (uint32_t)mx < s_terminalBtnX + s_terminalBtnW &&
@@ -4221,6 +4279,7 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
                 s_notification.title = "Network";
                 s_notification.message = "Configuration applied";
                 s_notification.visible = true;
+                s_notification.showTime = s_tickCounter;
                 draw();
                 draw_cursor(mx, my);
                 return;
@@ -4385,6 +4444,7 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
                         s_notification.title = "Restart";
                         s_notification.message = "System is restarting...";
                         s_notification.visible = true;
+                        s_notification.showTime = s_tickCounter;
                         draw();
                         draw_cursor(mx, my);
                         perform_restart();
@@ -4394,12 +4454,15 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
                         s_notification.title = "Sleep";
                         s_notification.message = "System entering sleep mode...";
                         s_notification.visible = true;
+                        s_notification.showTime = s_tickCounter;
                         draw();
                         draw_cursor(mx, my);
                         perform_sleep();
                         // System wakes up here after sleep
                         s_notification.title = "Awake";
                         s_notification.message = "System resumed from sleep";
+                        s_notification.visible = true;
+                        s_notification.showTime = s_tickCounter;
                         draw();
                         draw_cursor(mx, my);
                         return;

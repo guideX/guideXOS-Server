@@ -9,7 +9,13 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "guideXOSBootLoader", "guide
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "guideXOSKernel", "guideXOSKernel.vcxproj", "{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}"
 EndProject
-Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Legacy", "Legacy", "{02EA681E-C7D8-13C7-8484-4AC65E1B71E8}"
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "guideXOS Legacy", "guideXOS Legacy", "{02EA681E-C7D8-13C7-8484-4AC65E1B71E8}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "guideXOS", "..\guideXOS.Legacy\guideXOS\guideXOS.csproj", "{5AA6EBB3-1FEF-9B19-8EDE-DDBC992D38A6}"
+EndProject
+Project("{D954291E-2A0B-460D-934E-DC6B0785DB48}") = "Kernel", "..\guideXOS.Legacy\Kernel\Kernel.shproj", "{F7CABB88-37FC-4D33-A7E7-0B117772D6FF}"
+EndProject
+Project("{D954291E-2A0B-460D-934E-DC6B0785DB48}") = "Corlib", "..\guideXOS.Legacy\Corlib\Corlib.shproj", "{863DCD00-4521-4E98-B610-EE29EF16773C}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -57,11 +63,34 @@ Global
 		{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}.Release|x64.Build.0 = Release|Win32
 		{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}.Release|x86.ActiveCfg = Release|Win32
 		{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}.Release|x86.Build.0 = Release|Win32
+		{5AA6EBB3-1FEF-9B19-8EDE-DDBC992D38A6}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{5AA6EBB3-1FEF-9B19-8EDE-DDBC992D38A6}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{5AA6EBB3-1FEF-9B19-8EDE-DDBC992D38A6}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{5AA6EBB3-1FEF-9B19-8EDE-DDBC992D38A6}.Debug|x64.Build.0 = Debug|Any CPU
+		{5AA6EBB3-1FEF-9B19-8EDE-DDBC992D38A6}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{5AA6EBB3-1FEF-9B19-8EDE-DDBC992D38A6}.Debug|x86.Build.0 = Debug|Any CPU
+		{5AA6EBB3-1FEF-9B19-8EDE-DDBC992D38A6}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{5AA6EBB3-1FEF-9B19-8EDE-DDBC992D38A6}.Release|Any CPU.Build.0 = Release|Any CPU
+		{5AA6EBB3-1FEF-9B19-8EDE-DDBC992D38A6}.Release|x64.ActiveCfg = Release|Any CPU
+		{5AA6EBB3-1FEF-9B19-8EDE-DDBC992D38A6}.Release|x64.Build.0 = Release|Any CPU
+		{5AA6EBB3-1FEF-9B19-8EDE-DDBC992D38A6}.Release|x86.ActiveCfg = Release|Any CPU
+		{5AA6EBB3-1FEF-9B19-8EDE-DDBC992D38A6}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
 	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{5AA6EBB3-1FEF-9B19-8EDE-DDBC992D38A6} = {02EA681E-C7D8-13C7-8484-4AC65E1B71E8}
+		{F7CABB88-37FC-4D33-A7E7-0B117772D6FF} = {02EA681E-C7D8-13C7-8484-4AC65E1B71E8}
+		{863DCD00-4521-4E98-B610-EE29EF16773C} = {02EA681E-C7D8-13C7-8484-4AC65E1B71E8}
+	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {93615F61-90A8-4899-BB05-44ABDA356BEF}
+	EndGlobalSection
+	GlobalSection(SharedMSBuildProjectFiles) = preSolution
+		..\guideXOS.Legacy\Corlib\Corlib.projitems*{5aa6ebb3-1fef-9b19-8ede-ddbc992d38a6}*SharedItemsImports = 5
+		..\guideXOS.Legacy\Kernel\Kernel.projitems*{5aa6ebb3-1fef-9b19-8ede-ddbc992d38a6}*SharedItemsImports = 5
+		..\guideXOS.Legacy\Corlib\Corlib.projitems*{863dcd00-4521-4e98-b610-ee29ef16773c}*SharedItemsImports = 13
+		..\guideXOS.Legacy\Kernel\Kernel.projitems*{f7cabb88-37fc-4d33-a7e7-0b117772d6ff}*SharedItemsImports = 13
 	EndGlobalSection
 EndGlobal
