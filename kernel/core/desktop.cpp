@@ -634,6 +634,8 @@ static int32_t s_shellResizeStartH = 0;
 
 // Forward declarations
 static void draw_shell_window();
+static int find_nearest_icon_in_direction(int currentIcon, int direction);
+static void show_icon_notification(int iconIndex);
 
 // ============================================================
 // Drawing routines
@@ -2595,6 +2597,33 @@ void handle_key(uint32_t key)
             s_shellMinimized = false;
         }
         draw();
+        return;
+    }
+    
+    // Arrow key navigation for desktop icons
+    if (s_selectedIcon >= 0 && s_selectedIcon < kDesktopIconCount) {
+        int newIcon = -1;
+        
+        if (key == shell::KEY_UP) {
+            newIcon = find_nearest_icon_in_direction(s_selectedIcon, 0);
+        } else if (key == shell::KEY_DOWN) {
+            newIcon = find_nearest_icon_in_direction(s_selectedIcon, 1);
+        } else if (key == shell::KEY_LEFT) {
+            newIcon = find_nearest_icon_in_direction(s_selectedIcon, 2);
+        } else if (key == shell::KEY_RIGHT) {
+            newIcon = find_nearest_icon_in_direction(s_selectedIcon, 3);
+        } else if (key == '\n' || key == '\r') {
+            // Enter key launches the selected icon
+            show_icon_notification(s_selectedIcon);
+            draw();
+            return;
+        }
+        
+        if (newIcon >= 0) {
+            s_selectedIcon = newIcon;
+            draw();
+            return;
+        }
     }
 }
 
@@ -2680,6 +2709,82 @@ static int hit_test_icon(int32_t mx, int32_t my)
         }
     }
     return -1;
+}
+
+// Find the nearest icon in a given direction from the currently selected icon
+// direction: 0=up, 1=down, 2=left, 3=right
+// Returns icon index or -1 if none found
+static int find_nearest_icon_in_direction(int currentIcon, int direction)
+{
+    if (currentIcon < 0 || currentIcon >= kDesktopIconCount) return -1;
+    
+    int32_t currX = s_iconPosX[currentIcon];
+    int32_t currY = s_iconPosY[currentIcon];
+    int32_t currCenterX = currX + (int32_t)(kIconCellW / 2);
+    int32_t currCenterY = currY + (int32_t)(kIconCellH / 2);
+    
+    int bestIcon = -1;
+    int32_t bestDistance = 0x7FFFFFFF; // Max int32
+    
+    for (int i = 0; i < kDesktopIconCount; i++) {
+        if (i == currentIcon) continue;
+        
+        int32_t iconX = s_iconPosX[i];
+        int32_t iconY = s_iconPosY[i];
+        int32_t iconCenterX = iconX + (int32_t)(kIconCellW / 2);
+        int32_t iconCenterY = iconY + (int32_t)(kIconCellH / 2);
+        
+        int32_t dx = iconCenterX - currCenterX;
+        int32_t dy = iconCenterY - currCenterY;
+        
+        // Check if icon is in the correct direction
+        bool validDirection = false;
+        int32_t primaryDist = 0;
+        int32_t secondaryDist = 0;
+        
+        switch (direction) {
+            case 0: // Up
+                if (dy < 0) {
+                    validDirection = true;
+                    primaryDist = -dy;
+                    secondaryDist = (dx < 0 ? -dx : dx);
+                }
+                break;
+            case 1: // Down
+                if (dy > 0) {
+                    validDirection = true;
+                    primaryDist = dy;
+                    secondaryDist = (dx < 0 ? -dx : dx);
+                }
+                break;
+            case 2: // Left
+                if (dx < 0) {
+                    validDirection = true;
+                    primaryDist = -dx;
+                    secondaryDist = (dy < 0 ? -dy : dy);
+                }
+                break;
+            case 3: // Right
+                if (dx > 0) {
+                    validDirection = true;
+                    primaryDist = dx;
+                    secondaryDist = (dy < 0 ? -dy : dy);
+                }
+                break;
+        }
+        
+        if (!validDirection) continue;
+        
+        // Calculate weighted distance (prioritize primary direction)
+        int32_t distance = primaryDist + (secondaryDist / 2);
+        
+        if (distance < bestDistance) {
+            bestDistance = distance;
+            bestIcon = i;
+        }
+    }
+    
+    return bestIcon;
 }
 
 // Show a notification for an icon launch (or launch the app if available)
