@@ -1886,12 +1886,12 @@ core\shell.cpp(1369,35): warning GA5864BA6: narrowing conversion of '(48 + ((int
    1369 |             char devStr[4] = {'0' + mp->blockDevIndex, ')', '\0'};
         |                               ~~~~^~~~~~~~~~~~~~~~~~~
   core\shell.cpp: In function 'void kernel::shell::cmd_dhcp(const char**, uint32_t)':
-core\shell.cpp(2232,10): warning G41AE70B8: unused variable 'showStatus' [-Wunused-variable]
-   2232 |     bool showStatus = (argCount <= 1);
+core\shell.cpp(2441,10): warning G41AE70B8: unused variable 'showStatus' [-Wunused-variable]
+   2441 |     bool showStatus = (argCount <= 1);
         |          ^~~~~~~~~~
   core\shell.cpp: In function 'void kernel::shell::draw(uint32_t, uint32_t, uint32_t, uint32_t)':
-core\shell.cpp(3079,14): warning G41AE70B8: unused variable 'charsPerLine' [-Wunused-variable]
-   3079 |     uint32_t charsPerLine = textW / kFontW;
+core\shell.cpp(3290,14): warning G41AE70B8: unused variable 'charsPerLine' [-Wunused-variable]
+   3290 |     uint32_t charsPerLine = textW / kFontW;
         |              ^~~~~~~~~~~~
   core\shell.cpp: At global scope:
 core\shell.cpp(249,13): warning G8A2F72A0: 'void kernel::shell::output_prompt()' defined but not used [-Wunused-function]

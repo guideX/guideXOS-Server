@@ -1,5 +1,4 @@
 #include <Uefi.h>
-#include <Library/UefiLib.h>
 #include "elf.h"
 #include "uefi_shim.h"
 

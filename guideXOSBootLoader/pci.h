@@ -10,7 +10,7 @@
 
 #pragma once
 
-#include <Uefi.h>
+#include "Uefi.h"
 #include <stdint.h>
 
 namespace guideXOS {

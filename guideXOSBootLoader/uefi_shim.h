@@ -1,5 +1,5 @@
 #pragma once
-#include <Uefi.h>
+#include "Uefi.h"
 #include <stdarg.h>
 
 // Minimal UEFI shims to avoid linking full EDK II libraries

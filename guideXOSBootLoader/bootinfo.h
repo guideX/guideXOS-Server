@@ -1,10 +1,10 @@
 #pragma once
-#include <Uefi.h>
-#include <Library/UefiLib.h>
-#include <Library/MemoryAllocationLib.h>
-#include <Library/BaseMemoryLib.h>
-#include <Library/PrintLib.h>
-#include <Protocol/SimpleFileSystem.h>
+#include "Uefi.h"
+#include "Library/UefiLib.h"
+#include "Library/MemoryAllocationLib.h"
+#include "Library/BaseMemoryLib.h"
+#include "Library/PrintLib.h"
+#include "Protocol/SimpleFileSystem.h"
 
 //#include <efi.h>
 //#include <efilib.h>

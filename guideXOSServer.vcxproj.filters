@@ -1206,6 +1206,8 @@
     <None Include="disks\test-fat32.img" />
     <None Include="docs\NETWORK_SETUP.md" />
     <None Include="docs\TROUBLESHOOTING_PING.md" />
+    <None Include="fix_include.py" />
+    <None Include="fix_include2.py" />
   </ItemGroup>
   <ItemGroup>
     <Text Include="scripts\build-and-run-sparcv8_in_linux.sh" />

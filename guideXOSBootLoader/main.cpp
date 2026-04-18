@@ -28,6 +28,7 @@ Forbidden:
 #include <Library/PrintLib.h>
 #include <Protocol/SimpleFileSystem.h>
 #include <Protocol/LoadedImage.h>
+#include <Protocol/GraphicsOutput.h>
 #include <Guid/Acpi.h>
 #include <Guid/FileInfo.h>
 #include "bootinfo.h"          // legacy, gradually being phased out

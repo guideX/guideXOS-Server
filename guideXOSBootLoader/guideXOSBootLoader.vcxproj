@@ -43,7 +43,7 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
-      <AdditionalIncludeDirectories>D:\devgitlab\guideXOS\guideXOS\edk2-master\MdePkg\Include;D:\devgitlab\guideXOS\guideXOS\edk2-master\MdePkg\Include\X64;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir);D:\devgitlab\guideXOS\guideXOS.SERVER\edk2-master\MdePkg\Include;D:\devgitlab\guideXOS\guideXOS.SERVER\edk2-master\MdePkg\Include\X64;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <BasicRuntimeChecks>Default</BasicRuntimeChecks>
       <BufferSecurityCheck>false</BufferSecurityCheck>
       <ExceptionHandling>false</ExceptionHandling>
@@ -66,7 +66,7 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
-      <AdditionalIncludeDirectories>D:\devgitlab\guideXOS\guideXOS\edk2-master\MdePkg\Include;D:\devgitlab\guideXOS\guideXOS\edk2-master\MdePkg\Include\X64;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir);D:\devgitlab\guideXOS\guideXOS.SERVER\edk2-master\MdePkg\Include;D:\devgitlab\guideXOS\guideXOS.SERVER\edk2-master\MdePkg\Include\X64;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <BasicRuntimeChecks>Default</BasicRuntimeChecks>
       <BufferSecurityCheck>false</BufferSecurityCheck>
       <ExceptionHandling>false</ExceptionHandling>
@@ -104,7 +104,17 @@
     <ClInclude Include="acpi.h" />
     <ClInclude Include="guidexOSBootInfo.h" />
     <ClInclude Include="fb_console.h" />
+    <ClInclude Include="Guid\Acpi.h" />
+    <ClInclude Include="Guid\FileInfo.h" />
+    <ClInclude Include="Library\BaseMemoryLib.h" />
+    <ClInclude Include="Library\MemoryAllocationLib.h" />
+    <ClInclude Include="Library\PrintLib.h" />
+    <ClInclude Include="Library\UefiLib.h" />
     <ClInclude Include="pci.h" />
+    <ClInclude Include="Protocol\GraphicsOutput.h" />
+    <ClInclude Include="Protocol\LoadedImage.h" />
+    <ClInclude Include="Protocol\SimpleFileSystem.h" />
+    <ClInclude Include="Uefi.h" />
     <ClInclude Include="uefi_shim.h" />
     <ClInclude Include="paging.h" />
   </ItemGroup>

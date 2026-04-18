@@ -1,6 +1,6 @@
 #pragma once
 
-#include <Uefi.h>
+#include "Uefi.h"
 #include <stdint.h>
 
 // Minimal x86_64 paging builder for UEFI->kernel handoff.

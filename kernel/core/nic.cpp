@@ -623,42 +623,74 @@ LinkState get_link_state()
 
 Status send_frame(const uint8_t* data, uint16_t len)
 {
-    if (!s_initialised || !s_device.active) return NIC_ERR_NO_DEVICE;
-    if (len < ETH_HLEN) return NIC_ERR_FRAME_TOO_LARGE; // too small
-    if (len > ETH_FRAME_MAX) return NIC_ERR_FRAME_TOO_LARGE;
+    if (!s_initialised || !s_device.active) {
+        serial::puts("[NIC] send_frame: not initialized or not active\n");
+        return NIC_ERR_NO_DEVICE;
+    }
+    if (len < ETH_HLEN) {
+        serial::puts("[NIC] send_frame: frame too small\n");
+        return NIC_ERR_FRAME_TOO_LARGE; // too small
+    }
+    if (len > ETH_FRAME_MAX) {
+        serial::puts("[NIC] send_frame: frame too large\n");
+        return NIC_ERR_FRAME_TOO_LARGE;
+    }
 
 #if ARCH_HAS_PORT_IO
     // Check that the current TX descriptor is available
     if (!(s_txDescs[s_txCur].status & E1000_TXD_STAT_DD)) {
+        serial::puts("[NIC] send_frame: TX descriptor not available (TX ring full)\n");
         s_device.stats.txDropped++;
         return NIC_ERR_TX_FULL;
     }
+
+    serial::puts("[NIC] send_frame: sending ");
+    serial::put_hex16(len);
+    serial::puts(" bytes, txCur=");
+    serial::put_hex16(s_txCur);
+    serial::putc('\n');
 
     // Copy frame data to TX buffer
     memcopy(s_txBuffer, data, static_cast<uint32_t>(len));
 
     // Set up the descriptor
-    s_txDescs[s_txCur].bufferAddr = reinterpret_cast<uint64_t>(s_txBuffer);
+    uint64_t bufAddr = reinterpret_cast<uint64_t>(s_txBuffer);
+    s_txDescs[s_txCur].bufferAddr = bufAddr;
     s_txDescs[s_txCur].length     = static_cast<uint16_t>(len);
     s_txDescs[s_txCur].cmd        = E1000_TXD_CMD_EOP |
                                     E1000_TXD_CMD_IFCS |
                                     E1000_TXD_CMD_RS;
     s_txDescs[s_txCur].status     = 0;
 
+    serial::puts("[NIC] TX desc bufferAddr=0x");
+    serial::put_hex32(static_cast<uint32_t>(bufAddr >> 32));
+    serial::put_hex32(static_cast<uint32_t>(bufAddr));
+    serial::putc('\n');
+
     // Advance tail pointer to submit the descriptor
     uint16_t oldTx = s_txCur;
     s_txCur = (s_txCur + 1) % NUM_TX_DESC;
     mmio_write32(s_device.mmioBase, E1000_TDT, s_txCur);
 
+    serial::puts("[NIC] TDT updated to ");
+    serial::put_hex16(s_txCur);
+    serial::puts(", waiting for completion...\n");
+
     // Wait for transmission to complete (busy-poll descriptor status)
     for (uint32_t i = 0; i < 1000000; ++i) {
         if (s_txDescs[oldTx].status & E1000_TXD_STAT_DD) {
+            serial::puts("[NIC] TX complete after ");
+            serial::put_hex32(i);
+            serial::puts(" iterations\n");
             s_device.stats.txFrames++;
             s_device.stats.txBytes += static_cast<uint32_t>(len);
             return NIC_OK;
         }
     }
 
+    serial::puts("[NIC] TX TIMEOUT! Descriptor status=0x");
+    serial::put_hex8(s_txDescs[oldTx].status);
+    serial::putc('\n');
     s_device.stats.txErrors++;
     return NIC_ERR_INIT_FAIL;
 #else

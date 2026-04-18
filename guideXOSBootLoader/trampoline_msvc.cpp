@@ -2,7 +2,7 @@
 // Trampoline using embedded machine code
 // Works with MSVC x64 without inline assembly
 
-#include <Uefi.h>
+#include "Uefi.h"
 #include <stdint.h>
 
 // MSVC intrinsics

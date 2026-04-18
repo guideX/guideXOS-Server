@@ -523,6 +523,8 @@
     <None Include="docs\TROUBLESHOOTING_PING.md" />
     <None Include="ESP\startup.nsh" />
     <None Include="fix-trampoline.ps1" />
+    <None Include="fix_include.py" />
+    <None Include="fix_include2.py" />
     <None Include="guideXOSKernel.vcxproj" />
     <None Include="guideXOSKernel.vcxproj.filters" />
     <None Include="guideXOSServer.csproj" />
