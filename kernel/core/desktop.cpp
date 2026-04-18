@@ -627,6 +627,106 @@ struct WallpaperConfig {
 
 static WallpaperConfig s_wallpaperConfig;
 
+// ============================================================
+// Time and Date Tracking
+// ============================================================
+
+struct DateTime {
+    int hour;      // 0-23
+    int minute;    // 0-59
+    int second;    // 0-59
+    int day;       // 1-31
+    int month;     // 1-12
+    int year;      // e.g., 2025
+    
+    DateTime() : hour(12), minute(0), second(0), day(1), month(1), year(2025) {}
+};
+
+static DateTime s_currentTime;
+
+// Simple helper to format time string "HH:MM"
+static void format_time_string(char* buffer, int bufSize)
+{
+    if (bufSize < 6) return;  // Need at least "HH:MM\0"
+    
+    // Format hours (0-23 to 12-hour format)
+    int displayHour = s_currentTime.hour;
+    if (displayHour == 0) displayHour = 12;
+    else if (displayHour > 12) displayHour -= 12;
+    
+    buffer[0] = (displayHour >= 10) ? ('0' + displayHour / 10) : ' ';
+    buffer[1] = '0' + (displayHour % 10);
+    buffer[2] = ':';
+    buffer[3] = '0' + (s_currentTime.minute / 10);
+    buffer[4] = '0' + (s_currentTime.minute % 10);
+    buffer[5] = '\0';
+}
+
+// Simple helper to format date string "M/D/YYYY"
+static void format_date_string(char* buffer, int bufSize)
+{
+    if (bufSize < 11) return;  // Need space for "MM/DD/YYYY\0"
+    
+    int pos = 0;
+    
+    // Month
+    if (s_currentTime.month >= 10) {
+        buffer[pos++] = '0' + (s_currentTime.month / 10);
+    }
+    buffer[pos++] = '0' + (s_currentTime.month % 10);
+    buffer[pos++] = '/';
+    
+    // Day
+    if (s_currentTime.day >= 10) {
+        buffer[pos++] = '0' + (s_currentTime.day / 10);
+    }
+    buffer[pos++] = '0' + (s_currentTime.day % 10);
+    buffer[pos++] = '/';
+    
+    // Year
+    buffer[pos++] = '0' + (s_currentTime.year / 1000);
+    buffer[pos++] = '0' + ((s_currentTime.year / 100) % 10);
+    buffer[pos++] = '0' + ((s_currentTime.year / 10) % 10);
+    buffer[pos++] = '0' + (s_currentTime.year % 10);
+    buffer[pos] = '\0';
+}
+
+// Update time (called from tick, increments by 1 second)
+static void update_time()
+{
+    s_currentTime.second++;
+    
+    if (s_currentTime.second >= 60) {
+        s_currentTime.second = 0;
+        s_currentTime.minute++;
+        
+        if (s_currentTime.minute >= 60) {
+            s_currentTime.minute = 0;
+            s_currentTime.hour++;
+            
+            if (s_currentTime.hour >= 24) {
+                s_currentTime.hour = 0;
+                s_currentTime.day++;
+                
+                // Simple month day limits (not accounting for leap years)
+                int daysInMonth[] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+                int maxDays = (s_currentTime.month >= 1 && s_currentTime.month <= 12) 
+                    ? daysInMonth[s_currentTime.month - 1] : 31;
+                
+                if (s_currentTime.day > maxDays) {
+                    s_currentTime.day = 1;
+                    s_currentTime.month++;
+                    
+                    if (s_currentTime.month > 12) {
+                        s_currentTime.month = 1;
+                        s_currentTime.year++;
+                    }
+                }
+            }
+        }
+    }
+}
+
 // Per-icon positions (mutable, set to grid layout on init)
 static int32_t s_iconPosX[8];
 static int32_t s_iconPosY[8];
@@ -1497,15 +1597,16 @@ static void draw_taskbar()
     // Top border highlight
     hline(0, tbY, s_screenW, rgb(70, 70, 85));
 
-    // Start button
+    // Start button (highlighted when menu is open)
     uint32_t btnY = tbY + 4;
     uint32_t btnH = kTaskbarH - 8;
     uint32_t btnColor = s_startMenuOpen ? rgb(70, 100, 150) : rgb(50, 70, 110);
+    uint32_t btnBorder = s_startMenuOpen ? rgb(100, 140, 200) : rgb(90, 120, 180);
     framebuffer::fill_rect(4, btnY, kStartBtnW, btnH, btnColor);
-    draw_rect(4, btnY, kStartBtnW, btnH, rgb(90, 120, 180));
+    draw_rect(4, btnY, kStartBtnW, btnH, btnBorder);
     draw_text_centered(4, btnY, kStartBtnW, btnH, "guideXOS", rgb(240, 240, 255), 1);
 
-    // Search box (after start button, matching Legacy/compositor layout)
+    // Search box (after start button, matching compositor layout)
     uint32_t searchX = 4 + kStartBtnW + 8;
     uint32_t searchY = tbY + (kTaskbarH - kSearchBoxH) / 2;
     draw_search_box(searchX, searchY);
@@ -1515,30 +1616,41 @@ static void draw_taskbar()
 
     // Calculate right-side reserved area
     uint32_t trayW = (kTrayIconSize + kTrayIconGap) * 3 + 12;
-    uint32_t clockW = 60;
+    uint32_t clockW = 70;  // Slightly wider for date
     uint32_t rightReserved = kShowDesktopW + trayW + clockW + 24;
     uint32_t taskBtnMaxX = s_screenW - rightReserved;
 
     draw_taskbar_buttons(taskBtnStart, tbY, taskBtnMaxX);
 
-    // Clock area (right side, before tray) - time and date
+    // Clock and date area (right side, before tray)
     uint32_t clockX = s_screenW - kShowDesktopW - trayW - clockW - 16;
+    
+    // Format time and date strings
+    char timeStr[6];
+    char dateStr[11];
+    format_time_string(timeStr, sizeof(timeStr));
+    format_date_string(dateStr, sizeof(dateStr));
+    
     // Time (centered in upper half)
-    uint32_t timeY = tbY + 4;
-    draw_text_centered(clockX, timeY, clockW, kTaskbarH / 2 - 2, "12:00", rgb(200, 200, 210), 1);
-    // Date below time (matching Legacy Taskbar.cs date rendering)
+    uint32_t timeY = tbY + 6;
+    draw_text_centered(clockX, timeY, clockW, kTaskbarH / 2 - 4, timeStr, rgb(210, 210, 220), 1);
+    
+    // Date below time (smaller, lighter color)
     uint32_t dateY = tbY + kTaskbarH / 2 + 2;
-    draw_text_centered(clockX, dateY, clockW, kTaskbarH / 2 - 4, "1/1/2025", rgb(150, 150, 165), 1);
+    draw_text_centered(clockX, dateY, clockW, kTaskbarH / 2 - 4, dateStr, rgb(160, 160, 175), 1);
 
     // System tray
     uint32_t trayX = s_screenW - kShowDesktopW - trayW;
     draw_system_tray(trayX, tbY);
 
-    // Show Desktop button (thin sliver on far right, matching Legacy Taskbar.cs)
+    // Show Desktop button (thin sliver on far right)
     uint32_t sdX = s_screenW - kShowDesktopW;
     framebuffer::fill_rect(sdX, tbY, kShowDesktopW, kTaskbarH, rgb(50, 50, 60));
     // Separator before show desktop
     vline(sdX, tbY + 4, kTaskbarH - 8, rgb(70, 75, 90));
+    
+    // Subtle vertical line pattern in show desktop area
+    vline(sdX + 2, tbY + 10, kTaskbarH - 20, rgb(60, 60, 70));
 }
 
 // ============================================================
@@ -2907,6 +3019,12 @@ void init()
 void tick()
 {
     s_tickCounter++;
+    
+    // Update time every ~100 ticks (roughly 1 second if tick is called every 10ms)
+    if (s_tickCounter % 100 == 0) {
+        update_time();
+    }
+    
     ipc::IpcManager::tick();
     
     // Update running apps
