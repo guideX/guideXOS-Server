@@ -135,6 +135,8 @@ namespace gxos {
             g_startMenuAllProgsSorted.push_back("Calculator");
             g_startMenuAllProgsSorted.push_back("Clock");
             g_startMenuAllProgsSorted.push_back("Console");
+            g_startMenuAllProgsSorted.push_back("ControlPanel");
+            g_startMenuAllProgsSorted.push_back("DiskManager");
             g_startMenuAllProgsSorted.push_back("Notepad");
             g_startMenuAllProgsSorted.push_back("Paint");
             g_startMenuAllProgsSorted.push_back("TaskManager");

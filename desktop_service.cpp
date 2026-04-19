@@ -13,6 +13,7 @@
 #include "onscreen_keyboard.h"
 #include "shutdown_dialog.h"
 #include "disk_manager.h"
+#include "control_panel.h"
 #include <algorithm>
 #include <fstream>
 #include <sstream>
@@ -39,6 +40,7 @@ namespace gxos {
             DesktopService::RegisterApp("OnScreenKeyboard", "edit");
             DesktopService::RegisterApp("ShutdownDialog", "close");
             DesktopService::RegisterApp("DiskManager", "harddisk");
+            DesktopService::RegisterApp("ControlPanel", "settings");
         }
 
         static std::string canonicalAppName(const std::string& name) {
@@ -237,7 +239,10 @@ namespace gxos {
                 apps::ShutdownDialog::Launch();
             }
             else if (appName == "DiskManager") {
-                DiskManager::show(100, 100);
+                apps::DiskManager::Launch();
+            }
+            else if (appName == "ControlPanel") {
+                apps::ControlPanel::Launch();
             }
             else {
                 error = "Application launcher not implemented: " + name;
