@@ -19,10 +19,10 @@
 #include "include/kernel/kernel_compositor.h"
 #include "include/kernel/kernel_ipc.h"
 #include "include/kernel/vfs.h"
-#include <ctime>
 
 #if defined(_MSC_VER)
 #include <intrin.h>  // For MSVC intrinsics (__outbyte, __halt, etc.)
+#include <ctime>     // Only available in MSVC (Windows) build
 #endif
 
 // ============================================================
@@ -732,16 +732,14 @@ static void update_time()
 // Initialize time from system clock
 static void init_time()
 {
+#ifdef _MSC_VER
+    // Windows/MSVC build can use standard library
     std::time_t now = std::time(nullptr);
     std::tm* local_tm = nullptr;
     
-#ifdef _WIN32
     std::tm temp_tm;
     localtime_s(&temp_tm, &now);
     local_tm = &temp_tm;
-#else
-    local_tm = std::localtime(&now);
-#endif
     
     if (local_tm) {
         s_currentTime.hour = local_tm->tm_hour;
@@ -751,6 +749,16 @@ static void init_time()
         s_currentTime.month = local_tm->tm_mon + 1;  // tm_mon is 0-11
         s_currentTime.year = local_tm->tm_year + 1900;  // tm_year is years since 1900
     }
+#else
+    // Freestanding/kernel build: use a reasonable default
+    // TODO: Read from RTC/CMOS hardware or UEFI runtime services
+    s_currentTime.hour = 12;
+    s_currentTime.minute = 0;
+    s_currentTime.second = 0;
+    s_currentTime.day = 1;
+    s_currentTime.month = 1;
+    s_currentTime.year = 2025;
+#endif
 }
 
 // Per-icon positions (mutable, set to grid layout on init)
