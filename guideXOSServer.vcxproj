@@ -137,6 +137,7 @@
     <ClInclude Include="desktop_config.h" />
     <ClInclude Include="desktop_service.h" />
     <ClInclude Include="desktop_state.h" />
+    <ClInclude Include="disk_manager.h" />
     <ClInclude Include="file_explorer.h" />
     <ClInclude Include="firewall.h" />
     <ClInclude Include="fs.h" />
@@ -320,6 +321,7 @@
     <ClCompile Include="console_window.cpp" />
     <ClCompile Include="desktop_service.cpp" />
     <ClCompile Include="desktop_state.cpp" />
+    <ClCompile Include="disk_manager.cpp" />
     <ClCompile Include="file_explorer.cpp" />
     <ClCompile Include="firewall.cpp" />
     <ClCompile Include="fs.cpp" />

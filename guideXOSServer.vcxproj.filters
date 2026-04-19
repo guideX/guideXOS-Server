@@ -561,6 +561,9 @@
     <ClInclude Include="kernel\core\include\kernel\kernel_compositor.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="disk_manager.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="allocator.cpp">
@@ -1077,6 +1080,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="kernel\core\kernel_apps.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="disk_manager.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
