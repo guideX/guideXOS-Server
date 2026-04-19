@@ -570,6 +570,9 @@
     <ClInclude Include="focus_indicator.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="hd_installer.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="allocator.cpp">
@@ -596,10 +599,7 @@
     <ClCompile Include="console_service.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-        <ClCompile Include="focus_indicator.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-<ClCompile Include="compositor.cpp">
+    <ClCompile Include="compositor.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="vfs.cpp">
@@ -1097,6 +1097,12 @@
     <ClCompile Include="control_panel.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="focus_indicator.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="hd_installer.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <None Include="kernel\arch\amd64\boot.asm">
@@ -1226,6 +1232,9 @@
     <None Include="docs\TROUBLESHOOTING_PING.md" />
     <None Include="fix_include.py" />
     <None Include="fix_include2.py" />
+    <None Include="CONTROL_PANEL_INTEGRATION.md" />
+    <None Include="FOCUS_AND_ICONS_IMPLEMENTATION.md" />
+    <None Include="SERVER.md" />
   </ItemGroup>
   <ItemGroup>
     <Text Include="scripts\build-and-run-sparcv8_in_linux.sh" />

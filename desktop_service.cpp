@@ -14,6 +14,7 @@
 #include "shutdown_dialog.h"
 #include "disk_manager.h"
 #include "control_panel.h"
+#include "hd_installer.h"
 #include <algorithm>
 #include <fstream>
 #include <sstream>
@@ -41,6 +42,7 @@ namespace gxos {
             DesktopService::RegisterApp("ShutdownDialog", "close");
             DesktopService::RegisterApp("DiskManager", "harddisk");
             DesktopService::RegisterApp("ControlPanel", "settings");
+            DesktopService::RegisterApp("HDInstaller", "harddisk");
         }
 
         static std::string canonicalAppName(const std::string& name) {
@@ -243,6 +245,9 @@ namespace gxos {
             }
             else if (appName == "ControlPanel") {
                 apps::ControlPanel::Launch();
+            }
+            else if (appName == "HDInstaller") {
+                apps::HDInstaller::Launch();
             }
             else {
                 error = "Application launcher not implemented: " + name;

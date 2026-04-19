@@ -236,39 +236,39 @@ core\include/kernel/vfs.h(225,66): error G30A0E944: 'size_t' has not been declar
         |                                                                  ^~~~~~
   core\include/kernel/vfs.h:225:66: note: 'size_t' is defined in header '<cstddef>'; this is probably fixable by adding '#include <cstddef>'
   core\desktop.cpp: In function 'void kernel::desktop::handle_mouse(int32_t, int32_t, uint8_t)':
-core\desktop.cpp(4105,22): warning G41AE70B8: unused variable 'toastH' [-Wunused-variable]
-   4105 |             uint32_t toastH = 60;
+core\desktop.cpp(4110,22): warning G41AE70B8: unused variable 'toastH' [-Wunused-variable]
+   4110 |             uint32_t toastH = 60;
         |                      ^~~~~~
   core\desktop.cpp: At global scope:
-core\desktop.cpp(2744,13): warning G800B4063: 'void kernel::desktop::init_icon_positions()' defined but not used [-Wunused-function]
-   2744 | static void init_icon_positions()
+core\desktop.cpp(2749,13): warning G800B4063: 'void kernel::desktop::init_icon_positions()' defined but not used [-Wunused-function]
+   2749 | static void init_icon_positions()
         |             ^~~~~~~~~~~~~~~~~~~
-core\desktop.cpp(1094,13): warning GACB2A34A: 'void kernel::desktop::set_wallpaper_grid(uint32_t, uint32_t, uint32_t, uint32_t)' defined but not used [-Wunused-function]
-   1094 | static void set_wallpaper_grid(uint32_t topColor, uint32_t bottomColor, uint32_t gridColor, uint32_t spacing)
+core\desktop.cpp(1099,13): warning GACB2A34A: 'void kernel::desktop::set_wallpaper_grid(uint32_t, uint32_t, uint32_t, uint32_t)' defined but not used [-Wunused-function]
+   1099 | static void set_wallpaper_grid(uint32_t topColor, uint32_t bottomColor, uint32_t gridColor, uint32_t spacing)
         |             ^~~~~~~~~~~~~~~~~~
-core\desktop.cpp(1088,13): warning G476BEFB5: 'void kernel::desktop::toggle_grid()' defined but not used [-Wunused-function]
-   1088 | static void toggle_grid()
+core\desktop.cpp(1093,13): warning G476BEFB5: 'void kernel::desktop::toggle_grid()' defined but not used [-Wunused-function]
+   1093 | static void toggle_grid()
         |             ^~~~~~~~~~~
-core\desktop.cpp(1082,13): warning G5C1A0608: 'void kernel::desktop::toggle_branding()' defined but not used [-Wunused-function]
-   1082 | static void toggle_branding()
+core\desktop.cpp(1087,13): warning G5C1A0608: 'void kernel::desktop::toggle_branding()' defined but not used [-Wunused-function]
+   1087 | static void toggle_branding()
         |             ^~~~~~~~~~~~~~~
-core\desktop.cpp(1075,13): warning GB7E2E7EF: 'void kernel::desktop::set_wallpaper_solid(uint32_t)' defined but not used [-Wunused-function]
-   1075 | static void set_wallpaper_solid(uint32_t color)
+core\desktop.cpp(1080,13): warning GB7E2E7EF: 'void kernel::desktop::set_wallpaper_solid(uint32_t)' defined but not used [-Wunused-function]
+   1080 | static void set_wallpaper_solid(uint32_t color)
         |             ^~~~~~~~~~~~~~~~~~~
-core\desktop.cpp(1067,13): warning G73295BA6: 'void kernel::desktop::set_wallpaper_gradient(uint32_t, uint32_t)' defined but not used [-Wunused-function]
-   1067 | static void set_wallpaper_gradient(uint32_t topColor, uint32_t bottomColor)
+core\desktop.cpp(1072,13): warning G73295BA6: 'void kernel::desktop::set_wallpaper_gradient(uint32_t, uint32_t)' defined but not used [-Wunused-function]
+   1072 | static void set_wallpaper_gradient(uint32_t topColor, uint32_t bottomColor)
         |             ^~~~~~~~~~~~~~~~~~~~~~
-core\desktop.cpp(1017,13): warning GB74D7035: 'void kernel::desktop::add_to_start_menu_recent(const char*)' defined but not used [-Wunused-function]
-   1017 | static void add_to_start_menu_recent(const char* appName)
+core\desktop.cpp(1022,13): warning GB74D7035: 'void kernel::desktop::add_to_start_menu_recent(const char*)' defined but not used [-Wunused-function]
+   1022 | static void add_to_start_menu_recent(const char* appName)
         |             ^~~~~~~~~~~~~~~~~~~~~~~~
-core\desktop.cpp(987,13): warning GB0A44E1C: 'void kernel::desktop::save_icon_position(int)' defined but not used [-Wunused-function]
-    987 | static void save_icon_position(int displayIndex)
+core\desktop.cpp(992,13): warning GB0A44E1C: 'void kernel::desktop::save_icon_position(int)' defined but not used [-Wunused-function]
+    992 | static void save_icon_position(int displayIndex)
         |             ^~~~~~~~~~~~~~~~~~
-core\desktop.cpp(944,13): warning GCB72056F: 'void kernel::desktop::unpin_icon(const char*)' defined but not used [-Wunused-function]
-    944 | static void unpin_icon(const char* appName)
+core\desktop.cpp(949,13): warning GCB72056F: 'void kernel::desktop::unpin_icon(const char*)' defined but not used [-Wunused-function]
+    949 | static void unpin_icon(const char* appName)
         |             ^~~~~~~~~~
-core\desktop.cpp(931,13): warning G6BF0ADBA: 'void kernel::desktop::pin_icon(const char*)' defined but not used [-Wunused-function]
-    931 | static void pin_icon(const char* appName)
+core\desktop.cpp(936,13): warning G6BF0ADBA: 'void kernel::desktop::pin_icon(const char*)' defined but not used [-Wunused-function]
+    936 | static void pin_icon(const char* appName)
         |             ^~~~~~~~
 core\desktop.cpp(458,13): warning G27EF45E7: 'kernel::desktop::s_networkConfigUseDHCPforDNS' defined but not used [-Wunused-variable]
     458 | static bool s_networkConfigUseDHCPforDNS = true;

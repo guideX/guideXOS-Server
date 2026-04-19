@@ -139,12 +139,13 @@
     <ClInclude Include="desktop_state.h" />
     <ClInclude Include="disk_manager.h" />
     <ClInclude Include="control_panel.h" />
-    <ClInclude Include="focus_indicator.h" />
     <ClInclude Include="file_explorer.h" />
     <ClInclude Include="firewall.h" />
+    <ClInclude Include="focus_indicator.h" />
     <ClInclude Include="fs.h" />
     <ClInclude Include="gui_protocol.h" />
     <ClInclude Include="gxm_loader.h" />
+    <ClInclude Include="hd_installer.h" />
     <ClInclude Include="image_viewer.h" />
     <ClInclude Include="kernel\arch\amd64\include\arch\context_switch.h" />
     <ClInclude Include="kernel\arch\amd64\include\arch\graphics.h" />
@@ -325,11 +326,12 @@
     <ClCompile Include="desktop_state.cpp" />
     <ClCompile Include="disk_manager.cpp" />
     <ClCompile Include="control_panel.cpp" />
-    <ClCompile Include="focus_indicator.cpp" />
     <ClCompile Include="file_explorer.cpp" />
     <ClCompile Include="firewall.cpp" />
+    <ClCompile Include="focus_indicator.cpp" />
     <ClCompile Include="fs.cpp" />
     <ClCompile Include="gxm_loader.cpp" />
+    <ClCompile Include="hd_installer.cpp" />
     <ClCompile Include="icons.cpp" />
     <ClCompile Include="image_viewer.cpp" />
     <ClCompile Include="ipc_bus.cpp" />
@@ -515,6 +517,7 @@
     <None Include="build-uefi.ps1" />
     <None Include="build.bat" />
     <None Include="configure-vs-project.bat" />
+    <None Include="CONTROL_PANEL_INTEGRATION.md" />
     <None Include="diagnose.bat" />
     <None Include="Directory.Build.props" />
     <None Include="Directory.Build.targets" />
@@ -531,6 +534,7 @@
     <None Include="fix-trampoline.ps1" />
     <None Include="fix_include.py" />
     <None Include="fix_include2.py" />
+    <None Include="FOCUS_AND_ICONS_IMPLEMENTATION.md" />
     <None Include="guideXOSKernel.vcxproj" />
     <None Include="guideXOSKernel.vcxproj.filters" />
     <None Include="guideXOSServer.csproj" />
@@ -599,6 +603,7 @@
     <None Include="scripts\build-riscv64.sh" />
     <None Include="scripts\build-and-run-riscv64_in_linux.sh" />
     <None Include="scripts\run-riscv64_in_windows.bat" />
+    <None Include="SERVER.md" />
     <None Include="setup-toolchain.bat" />
     <None Include="_fix_filters_audio.py" />
   </ItemGroup>

@@ -519,12 +519,14 @@ static StartMenuApp s_startMenuApps[] = {
     {"Notepad",     true,  false, 0xFF78B450},  // pinned
     {"Console",     true,  false, 0xFF78B450},  // pinned
     {"TaskManager", true,  false, 0xFFB44646},  // pinned
+    {"DiskManager", true,  false, 0xFFB48C46},  // pinned (orange-brown for disk)
+    {"HDInstaller", true,  false, 0xFFB48C46},  // pinned (orange-brown for installer)
     {"Paint",       false, true,  0xFFC87830},  // recent
     {"Clock",       false, true,  0xFF4690C8},  // recent
     {"Files",       false, true,  0xFFC8B43C},  // recent
     {"ImgViewer",   false, false, 0xFFC87830},  // not shown by default
 };
-static const int kStartMenuAppCount = 8;
+static const int kStartMenuAppCount = 10;
 static const int kMaxStartMenuRecent = 5;  // Max recent apps in start menu
 
 // All Programs alphabetically sorted list (for "All Programs" view)
@@ -532,13 +534,16 @@ static const char* s_allProgramsList[] = {
     "Calculator",
     "Clock",
     "Console",
+    "ControlPanel",
+    "DiskManager",
     "Files",
+    "HDInstaller",
     "ImgViewer",
     "Notepad",
     "Paint",
     "TaskManager",
 };
-static const int kAllProgramsCount = 8;
+static const int kAllProgramsCount = 11;
 
 // Start menu right column entries (system shortcuts, matching Legacy StartMenu.cs)
 struct StartMenuRightItem {
