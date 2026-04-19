@@ -567,6 +567,9 @@
     <ClInclude Include="control_panel.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="focus_indicator.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="allocator.cpp">
@@ -593,7 +596,10 @@
     <ClCompile Include="console_service.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="compositor.cpp">
+        <ClCompile Include="focus_indicator.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+<ClCompile Include="compositor.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="vfs.cpp">

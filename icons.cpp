@@ -23,4 +23,6 @@ namespace gxos { namespace gui {
     HBITMAP Icons::FolderIcon(int size){ return getCached("folder"+std::to_string(size), "BlueVelvet/"+std::to_string(size)+"/folder.bmp"); }
     HBITMAP Icons::ImageIcon(int size){ return getCached("img"+std::to_string(size), "BlueVelvet/"+std::to_string(size)+"/imagefile.bmp"); }
     HBITMAP Icons::AudioIcon(int size){ return getCached("audio"+std::to_string(size), "BlueVelvet/"+std::to_string(size)+"/music.bmp"); }
+    HBITMAP Icons::HardDiskIcon(int size){ return getCached("harddisk"+std::to_string(size), "BlueVelvet/"+std::to_string(size)+"/harddisk.bmp"); }
+    HBITMAP Icons::SettingsIcon(int size){ return getCached("settings"+std::to_string(size), "BlueVelvet/"+std::to_string(size)+"/settings.bmp"); }
 } }

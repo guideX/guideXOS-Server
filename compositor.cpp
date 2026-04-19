@@ -13,6 +13,7 @@
 #include "window_renderer.h"
 #include "special_effects.h"
 #include "window_animator.h"
+#include "focus_indicator.h"
 #include <sstream>
 #include <algorithm>
 #include <chrono>
@@ -180,7 +181,9 @@ namespace gxos {
             const int iconW = 56; const int iconH = 56; const int cellW = iconW + 28; const int cellH = iconH + 38; HFONT font = (HFONT)GetStockObject(ANSI_VAR_FONT); SelectObject(dc, font); SetBkMode(dc, TRANSPARENT); POINT cursor; GetCursorPos(&cursor); ScreenToClient(g_hwnd, &cursor); int idx = 0; for (auto& it : g_items) {
                 int x = it.ix; int y = it.iy; RECT cell{ x, y, x + cellW, y + cellH }; bool hover = (cursor.x >= cell.left && cursor.x <= cell.right && cursor.y >= cell.top && cursor.y <= cell.bottom);
                 if (it.selected) {
-                    HBRUSH sel = CreateSolidBrush(RGB(50, 90, 160)); FillRect(dc, &cell, sel); DeleteObject(sel); HPEN selP = CreatePen(PS_SOLID, 1, RGB(100, 160, 240)); HGDIOBJ oP = SelectObject(dc, selP); HGDIOBJ oB = SelectObject(dc, GetStockObject(NULL_BRUSH)); Rectangle(dc, cell.left, cell.top, cell.right, cell.bottom); SelectObject(dc, oP); SelectObject(dc, oB); DeleteObject(selP);
+                    HBRUSH sel = CreateSolidBrush(RGB(50, 90, 160)); FillRect(dc, &cell, sel); DeleteObject(sel); 
+                    // Draw focus indicator for selected icon
+                    FocusIndicator::DrawFocusRect(dc, cell.left, cell.top, cellW, cellH, 4, 2, 3);
                 } else if (hover) { HBRUSH hov = CreateSolidBrush(RGB(50, 55, 65)); FillRect(dc, &cell, hov); DeleteObject(hov); HPEN hovP = CreatePen(PS_SOLID, 1, RGB(80, 100, 140)); HGDIOBJ oP = SelectObject(dc, hovP); HGDIOBJ oB = SelectObject(dc, GetStockObject(NULL_BRUSH)); Rectangle(dc, cell.left, cell.top, cell.right, cell.bottom); SelectObject(dc, oP); SelectObject(dc, oB); DeleteObject(hovP); }
                 RECT iconR{ x + (cellW - iconW) / 2, y + 6, x + (cellW - iconW) / 2 + iconW, y + 6 + iconH };
                 // Color-coded icons based on app name
@@ -190,6 +193,7 @@ namespace gxos {
                 else if (lbl == "Notepad" || lbl == "Console") iconColor = RGB(120, 180, 80);
                 else if (lbl == "Paint" || lbl == "ImageViewer") iconColor = RGB(200, 120, 60);
                 else if (lbl == "TaskManager") iconColor = RGB(180, 70, 70);
+                else if (lbl == "DiskManager" || lbl == "ControlPanel") iconColor = RGB(140, 90, 180);
                 else if (lbl == "Files" || lbl == "ComputerFiles") iconColor = RGB(200, 180, 60);
                 else if (it.pinned) iconColor = RGB(90, 140, 220);
                 HBRUSH ib = CreateSolidBrush(iconColor); FillRect(dc, &iconR, ib); DeleteObject(ib);
@@ -459,9 +463,16 @@ namespace gxos {
                         for (size_t i = startIndex; i < g_startMenuAllProgsSorted.size( ) && row < maxRows; ++i) {
                             RECT r{ sm.left + 4, y, sm.left + leftColW - 4, y + rowH };
                             bool isSel = ((int)i == g_startMenuSel);
-                            HBRUSH rb = CreateSolidBrush(isSel ? RGB(80, 100, 150) : (cursor.x >= r.left && cursor.x <= r.right && cursor.y >= r.top && cursor.y <= r.bottom ? RGB(70, 90, 130) : RGB(55, 55, 70)));
+                            bool isHover = (cursor.x >= r.left && cursor.x <= r.right && cursor.y >= r.top && cursor.y <= r.bottom);
+                            HBRUSH rb = CreateSolidBrush(isSel ? RGB(80, 100, 150) : (isHover ? RGB(70, 90, 130) : RGB(55, 55, 70)));
                             FillRect(dc, &r, rb);
                             DeleteObject(rb);
+                            
+                            // Draw focus indicator if selected (keyboard focus)
+                            if (isSel && !isHover) {
+                                FocusIndicator::DrawFocusRect(dc, r.left, r.top, r.right - r.left, r.bottom - r.top, 3, 2, 2);
+                            }
+                            
                             std::string txt = g_startMenuAllProgsSorted[i];
                             TextOutA(dc, r.left + 4, r.top + 4, txt.c_str( ), (int)txt.size( ));
                             y += rowH; row++;
@@ -471,9 +482,16 @@ namespace gxos {
                         for (size_t i = startIndex; i < g_items.size( ) && row < maxRows; ++i) {
                             RECT r{ sm.left + 4, y, sm.left + leftColW - 4, y + rowH };
                             bool isSel = ((int)i == g_startMenuSel);
-                            HBRUSH rb = CreateSolidBrush(isSel ? RGB(80, 100, 150) : (cursor.x >= r.left && cursor.x <= r.right && cursor.y >= r.top && cursor.y <= r.bottom ? RGB(70, 90, 130) : RGB(55, 55, 70)));
+                            bool isHover = (cursor.x >= r.left && cursor.x <= r.right && cursor.y >= r.top && cursor.y <= r.bottom);
+                            HBRUSH rb = CreateSolidBrush(isSel ? RGB(80, 100, 150) : (isHover ? RGB(70, 90, 130) : RGB(55, 55, 70)));
                             FillRect(dc, &r, rb);
                             DeleteObject(rb);
+                            
+                            // Draw focus indicator if selected (keyboard focus)
+                            if (isSel && !isHover) {
+                                FocusIndicator::DrawFocusRect(dc, r.left, r.top, r.right - r.left, r.bottom - r.top, 3, 2, 2);
+                            }
+                            
                             std::string txt = (g_items[i].pinned ? "* " : "  ") + g_items[i].label;
                             TextOutA(dc, r.left + 4, r.top + 4, txt.c_str( ), (int)txt.size( ));
                             y += rowH; row++;

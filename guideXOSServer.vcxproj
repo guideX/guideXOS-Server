@@ -139,6 +139,7 @@
     <ClInclude Include="desktop_state.h" />
     <ClInclude Include="disk_manager.h" />
     <ClInclude Include="control_panel.h" />
+    <ClInclude Include="focus_indicator.h" />
     <ClInclude Include="file_explorer.h" />
     <ClInclude Include="firewall.h" />
     <ClInclude Include="fs.h" />
@@ -324,6 +325,7 @@
     <ClCompile Include="desktop_state.cpp" />
     <ClCompile Include="disk_manager.cpp" />
     <ClCompile Include="control_panel.cpp" />
+    <ClCompile Include="focus_indicator.cpp" />
     <ClCompile Include="file_explorer.cpp" />
     <ClCompile Include="firewall.cpp" />
     <ClCompile Include="fs.cpp" />

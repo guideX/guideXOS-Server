@@ -18,6 +18,8 @@ namespace gxos { namespace gui {
         static HBITMAP FolderIcon(int size);
         static HBITMAP ImageIcon(int size);
         static HBITMAP AudioIcon(int size);
+        static HBITMAP HardDiskIcon(int size);
+        static HBITMAP SettingsIcon(int size);
     private:
         static HBITMAP loadBmp(const std::string& path);
         static HBITMAP getCached(const std::string& key, const std::string& relPath);
