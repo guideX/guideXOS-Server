@@ -281,6 +281,7 @@ void irq_handler()
     bool ySign = (s_packet[0] & 0x20) != 0;
 
     // Buttons
+    uint8_t oldButtons = s_buttons;
     s_buttons = 0;
     if (s_packet[0] & 0x01) s_buttons |= Left;
     if (s_packet[0] & 0x02) s_buttons |= Right;
@@ -303,8 +304,7 @@ void irq_handler()
     if (iabs(dx) >= kMaxDeltaPerPacket && iabs(dy) >= kMaxDeltaPerPacket) return;
 
     // Update position
-    if (dx != 0 || dy != 0) s_dirty = true;
-    if (s_buttons != 0) s_dirty = true;
+    if (dx != 0 || dy != 0 || s_buttons != oldButtons) s_dirty = true;
     s_mouseX = clamp(s_mouseX + dx, 0, s_screenW - 1);
     s_mouseY = clamp(s_mouseY + dy, 0, s_screenH - 1);
 

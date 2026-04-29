@@ -430,6 +430,9 @@ static bool s_startMenuOpen = false;
 static bool s_rightClickMenuOpen = false;
 static uint32_t s_rightClickX = 0;
 static uint32_t s_rightClickY = 0;
+static int32_t s_mouseX = 0;
+static int32_t s_mouseY = 0;
+static int s_rightClickHover = -1;
 static uint32_t s_screenW = 0;
 static uint32_t s_screenH = 0;
 
@@ -586,6 +589,7 @@ static const char* s_contextMenuItems[] = {
 static const int kContextMenuCount = 6;
 static const uint32_t kContextMenuW = 160;
 static const uint32_t kContextMenuItemH = 24;
+static const uint32_t kContextMenuPad = 2;
 
 // Notification toast
 struct NotificationToast {
@@ -1928,7 +1932,7 @@ static void draw_right_click_menu()
 {
     if (!s_rightClickMenuOpen) return;
 
-    uint32_t menuH = (uint32_t)kContextMenuCount * kContextMenuItemH + 4;
+    uint32_t menuH = (uint32_t)kContextMenuCount * kContextMenuItemH + kContextMenuPad * 2;
     uint32_t mx = s_rightClickX;
     uint32_t my = s_rightClickY;
 
@@ -1936,25 +1940,111 @@ static void draw_right_click_menu()
     if (mx + kContextMenuW > s_screenW) mx = s_screenW - kContextMenuW;
     if (my + menuH > s_screenH - kTaskbarH) my = s_screenH - kTaskbarH - menuH;
 
+    int hoveredItem = -1;
+    if (s_mouseX >= 0 && s_mouseY >= 0 &&
+        (uint32_t)s_mouseX >= mx && (uint32_t)s_mouseX < mx + kContextMenuW &&
+        (uint32_t)s_mouseY >= my + kContextMenuPad && (uint32_t)s_mouseY < my + menuH - kContextMenuPad) {
+        hoveredItem = (s_mouseY - (int32_t)my - (int32_t)kContextMenuPad) / (int32_t)kContextMenuItemH;
+        if (hoveredItem < 0 || hoveredItem >= kContextMenuCount) hoveredItem = -1;
+    }
+
     // Background with shadow
     framebuffer::fill_rect(mx + 2, my + 2, kContextMenuW, menuH, rgb(20, 20, 25));
     framebuffer::fill_rect(mx, my, kContextMenuW, menuH, rgb(45, 45, 55));
     draw_rect(mx, my, kContextMenuW, menuH, rgb(80, 90, 110));
 
     for (int i = 0; i < kContextMenuCount; i++) {
-        uint32_t itemY = my + 2 + (uint32_t)i * kContextMenuItemH;
+        uint32_t itemY = my + kContextMenuPad + (uint32_t)i * kContextMenuItemH;
 
-        // Alternate shading
-        if (i % 2 == 0)
+        if (i == hoveredItem) {
+            framebuffer::fill_rect(mx + 1, itemY, kContextMenuW - 2, kContextMenuItemH, rgb(70, 90, 130));
+            draw_rect(mx + 2, itemY + 1, kContextMenuW - 4, kContextMenuItemH - 2, rgb(95, 120, 170));
+        } else if (i % 2 == 0) {
             framebuffer::fill_rect(mx + 1, itemY, kContextMenuW - 2, kContextMenuItemH, rgb(48, 48, 58));
+        }
 
         draw_text(mx + 12, itemY + (kContextMenuItemH - kGlyphH) / 2,
-                  s_contextMenuItems[i], rgb(210, 210, 225), 1);
+                  s_contextMenuItems[i], i == hoveredItem ? rgb(255, 255, 255) : rgb(210, 210, 225), 1);
 
         // Separator after "Personalize" (index 2)
         if (i == 2) {
             hline(mx + 4, itemY + kContextMenuItemH - 1, kContextMenuW - 8, rgb(60, 65, 80));
         }
+    }
+}
+
+static void get_context_menu_geometry(uint32_t& menuX, uint32_t& menuY, uint32_t& menuH)
+{
+    menuH = (uint32_t)kContextMenuCount * kContextMenuItemH + kContextMenuPad * 2;
+    menuX = s_rightClickX;
+    menuY = s_rightClickY;
+
+    if (s_screenW > kContextMenuW && menuX + kContextMenuW > s_screenW)
+        menuX = s_screenW - kContextMenuW;
+    if (s_screenH > kTaskbarH + menuH && menuY + menuH > s_screenH - kTaskbarH)
+        menuY = s_screenH - kTaskbarH - menuH;
+}
+
+static int hit_test_context_menu(int32_t mx, int32_t my)
+{
+    if (!s_rightClickMenuOpen || mx < 0 || my < 0) return -1;
+
+    uint32_t menuX, menuY, menuH;
+    get_context_menu_geometry(menuX, menuY, menuH);
+
+    if ((uint32_t)mx < menuX || (uint32_t)mx >= menuX + kContextMenuW ||
+        (uint32_t)my < menuY + kContextMenuPad || (uint32_t)my >= menuY + menuH - kContextMenuPad) {
+        return -1;
+    }
+
+    int idx = ((int32_t)my - (int32_t)menuY - (int32_t)kContextMenuPad) / (int32_t)kContextMenuItemH;
+    return (idx >= 0 && idx < kContextMenuCount) ? idx : -1;
+}
+
+static void handle_context_menu_command(int item)
+{
+    switch (item) {
+        case 0: // Refresh
+            refresh_desktop_icons();
+            refresh_start_menu_list();
+            s_notification.title = "Desktop";
+            s_notification.message = "Refreshed";
+            s_notification.visible = true;
+            s_notification.showTime = s_tickCounter;
+            break;
+        case 1: // Display Settings
+            s_controlPanelOpen = true;
+            s_controlPanelHover = -1;
+            break;
+        case 2: // Personalize
+            toggle_grid();
+            s_notification.title = "Personalize";
+            s_notification.message = s_wallpaperConfig.showGrid ? "Grid enabled" : "Grid disabled";
+            s_notification.visible = true;
+            s_notification.showTime = s_tickCounter;
+            break;
+        case 3: { // New Folder
+            vfs::Status status = vfs::mkdir("/New Folder");
+            s_notification.title = "New Folder";
+            if (status == vfs::VFS_OK) {
+                s_notification.message = "Created on desktop";
+            } else if (status == vfs::VFS_ERR_EXISTS) {
+                s_notification.message = "Already exists";
+            } else {
+                s_notification.message = "Not supported by filesystem";
+            }
+            s_notification.visible = true;
+            s_notification.showTime = s_tickCounter;
+            break;
+        }
+        case 4: // Open Terminal
+            open_terminal();
+            break;
+        case 5: // TaskManager
+            launch_app("TaskManager");
+            break;
+        default:
+            break;
     }
 }
 
@@ -3182,7 +3272,6 @@ void draw()
     draw_background();
     draw_desktop_icons();
     draw_taskbar();
-    draw_right_click_menu();
     draw_notifications();
     draw_shutdown_dialog();
     draw_control_panel();
@@ -3212,6 +3301,9 @@ void draw()
     
     // Draw start menu LAST so it appears on top of all windows
     draw_start_menu();
+
+    // Desktop context menu is a top-level overlay and should stay above windows.
+    draw_right_click_menu();
     
     // Present the back buffer to the screen (swap buffers)
     // This is the key to preventing flickering - all drawing is done
@@ -3227,6 +3319,7 @@ void show_context_menu(uint32_t x, uint32_t y)
     s_rightClickX = x;
     s_rightClickY = y;
     s_rightClickMenuOpen = true;
+    s_rightClickHover = -1;
     // Close start menu when context menu is shown
     s_startMenuOpen = false;
 }
@@ -3234,6 +3327,7 @@ void show_context_menu(uint32_t x, uint32_t y)
 void close_context_menu()
 {
     s_rightClickMenuOpen = false;
+    s_rightClickHover = -1;
 }
 
 void toggle_start_menu()
@@ -3920,6 +4014,9 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
 {
     if (!s_initialized) return;
 
+    s_mouseX = mx;
+    s_mouseY = my;
+
     // Detect button press/release edges
     uint8_t pressed  = buttons & ~s_prevButtons;   // newly pressed
     uint8_t released = s_prevButtons & ~buttons;    // newly released
@@ -3933,7 +4030,7 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
     // BUT: Start menu and modal dialogs take priority over compositor windows
     bool overStartMenu = is_point_in_start_menu(mx, my);
     bool overModalDialog = is_point_in_modal_dialog(mx, my);
-    bool overUIOverlay = overStartMenu || overModalDialog;
+    bool overUIOverlay = overStartMenu || overModalDialog || s_rightClickMenuOpen;
     bool overCompositorWindow = !overUIOverlay && compositor::KernelCompositor::isPointOverWindow(mx, my);
     bool compositorHasActivePress = compositor::KernelCompositor::isButtonPressActive();
     
@@ -4104,6 +4201,20 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
 
     // Left button press
     if (pressed & 0x01) {
+        // Desktop context menu consumes the next left click. If the click hits
+        // an item, run it before closing; otherwise just dismiss the menu.
+        if (s_rightClickMenuOpen) {
+            int menuItem = hit_test_context_menu(mx, my);
+            s_rightClickMenuOpen = false;
+            s_rightClickHover = -1;
+            if (menuItem >= 0) {
+                handle_context_menu_command(menuItem);
+            }
+            draw();
+            draw_cursor(mx, my);
+            return;
+        }
+
         // Check for notification close button click first
         if (s_notification.visible) {
             uint32_t toastW = 260;
@@ -4389,14 +4500,6 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
             return;
         }
 
-        // Close context menu on any click
-        if (s_rightClickMenuOpen) {
-            s_rightClickMenuOpen = false;
-            draw();
-            draw_cursor(mx, my);
-            return;
-        }
-
         // Start button area: x=[4..4+kStartBtnW], y=[taskbarY+4..taskbarY+kTaskbarH-4]
         if ((uint32_t)mx >= 4 && (uint32_t)mx <= 4 + kStartBtnW &&
             (uint32_t)my >= taskbarY + 4 && (uint32_t)my <= taskbarY + kTaskbarH - 4) {
@@ -4566,6 +4669,17 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
     if (pressed & 0x02) {
         if ((uint32_t)my < taskbarY) {
             show_context_menu((uint32_t)mx, (uint32_t)my);
+            draw();
+            draw_cursor(mx, my);
+            return;
+        }
+    }
+
+    // Context menu hover tracking
+    if (s_rightClickMenuOpen) {
+        int newHover = hit_test_context_menu(mx, my);
+        if (newHover != s_rightClickHover) {
+            s_rightClickHover = newHover;
             draw();
             draw_cursor(mx, my);
             return;

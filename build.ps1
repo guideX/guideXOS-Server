@@ -25,6 +25,7 @@ $RootDir = $PSScriptRoot
 $ESPDir = Join-Path $RootDir "ESP"
 $KernelDir = Join-Path $RootDir "kernel"
 $BootloaderDir = Join-Path $RootDir "guideXOSBootLoader"
+$KernelBuildSkipped = $false
 
 # Step 1: Clean if requested
 if ($Clean) {
@@ -48,6 +49,12 @@ if ($Clean) {
     if (Test-Path (Join-Path $KernelDir "build")) {
         Remove-Item -Recurse -Force (Join-Path $KernelDir "build")
         Write-Host "      Removed kernel build/" -ForegroundColor Gray
+    }
+    
+    $RootKernelBuildDir = Join-Path $RootDir "build\$Arch"
+    if (Test-Path $RootKernelBuildDir) {
+        Remove-Item -Recurse -Force $RootKernelBuildDir
+        Write-Host "      Removed build/$Arch/" -ForegroundColor Gray
     }
     
     Write-Host "      Clean complete" -ForegroundColor Green
@@ -156,6 +163,7 @@ if (!$SkipKernel) {
     }
 
     if (!$Make) {
+        $KernelBuildSkipped = $true
         Write-Host "      WARNING: GNU make not found. Kernel build skipped." -ForegroundColor Yellow
         Write-Host ""
         Write-Host "      To build the kernel, install MinGW-w64:" -ForegroundColor Cyan
@@ -175,6 +183,12 @@ if (!$SkipKernel) {
         # Don't fail - bootloader is working
     } else {
         Write-Host "      Using: $Make" -ForegroundColor Cyan
+
+        # Remove stale final kernel outputs before invoking make so a skipped
+        # or failed build cannot be mistaken for a fresh kernel.
+        $KernelBinDir = Join-Path $RootDir "build\$Arch\bin"
+        Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path $KernelBinDir "kernel.elf")
+        Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path $KernelBinDir "kernel.pe")
 
         # For amd64 builds, verify we have a 64-bit capable compiler
         if ($Arch -eq "amd64") {
@@ -211,6 +225,7 @@ if (!$SkipKernel) {
         Write-Host ""
     }
 } else {
+    $KernelBuildSkipped = $true
     Write-Host "[3/6] Kernel build skipped (-SkipKernel)" -ForegroundColor Gray
     Write-Host ""
 }
@@ -237,8 +252,19 @@ if (Test-Path $BootloaderBin) {
 
 # Copy kernel if it exists
 $KernelBin = Join-Path $RootDir "build\$Arch\bin\kernel.elf"
-if (Test-Path $KernelBin) {
+if ($KernelBuildSkipped) {
+    Write-Host "      WARNING: Kernel build was skipped; not copying existing kernel.elf." -ForegroundColor Yellow
+    Write-Host "               Run with a working AMD64 MinGW/GNU make toolchain to update ESP." -ForegroundColor Yellow
+}
+elseif (Test-Path $KernelBin) {
     $TargetKernel = Join-Path $ESPDir "kernel.elf"
+    $NewestKernelSource = Get-ChildItem (Join-Path $RootDir "kernel") -Recurse -Include *.cpp,*.h,*.asm,*.s,Makefile,*.arch |
+        Sort-Object LastWriteTime -Descending |
+        Select-Object -First 1
+    if ($NewestKernelSource -and (Get-Item $KernelBin).LastWriteTime -lt $NewestKernelSource.LastWriteTime) {
+        Write-Host "      WARNING: Kernel binary is older than source: $($NewestKernelSource.FullName)" -ForegroundColor Yellow
+        Write-Host "               ESP will receive a stale kernel unless the kernel build succeeds." -ForegroundColor Yellow
+    }
     Copy-Item $KernelBin $TargetKernel -Force
     Write-Host "      Copied: kernel.elf ($(((Get-Item $TargetKernel).Length / 1KB).ToString('0.0')) KB)" -ForegroundColor Cyan
 } else {
@@ -342,7 +368,29 @@ if (!(Test-Path (Join-Path $ESPDir "kernel.elf"))) {
     Write-Host "        Install MinGW and rebuild to create kernel" -ForegroundColor Gray
     $AllReady = $false
 } else {
-    Write-Host "      ? kernel.elf in ESP" -ForegroundColor Green
+    $EspKernel = Get-Item (Join-Path $ESPDir "kernel.elf")
+    $BuiltKernel = Join-Path $RootDir "build\$Arch\bin\kernel.elf"
+    $NewestKernelSource = Get-ChildItem (Join-Path $RootDir "kernel") -Recurse -Include *.cpp,*.h,*.asm,*.s,Makefile,*.arch |
+        Sort-Object LastWriteTime -Descending |
+        Select-Object -First 1
+    if ($KernelBuildSkipped) {
+        Write-Host "      ? kernel.elf in ESP was not updated this run" -ForegroundColor Yellow
+        Write-Host "        Kernel build was skipped, so this may still be an old boot image." -ForegroundColor Gray
+        $AllReady = $false
+    } elseif (!(Test-Path $BuiltKernel)) {
+        Write-Host "      ? built kernel missing at build\$Arch\bin\kernel.elf" -ForegroundColor Yellow
+        $AllReady = $false
+    } elseif ($NewestKernelSource -and (Get-Item $BuiltKernel).LastWriteTime -lt $NewestKernelSource.LastWriteTime) {
+        Write-Host "      ? built kernel is older than source" -ForegroundColor Yellow
+        Write-Host "        Newer source: $($NewestKernelSource.FullName)" -ForegroundColor Gray
+        $AllReady = $false
+    } elseif ($NewestKernelSource -and $EspKernel.LastWriteTime -lt $NewestKernelSource.LastWriteTime) {
+        Write-Host "      ? kernel.elf in ESP is stale" -ForegroundColor Yellow
+        Write-Host "        Newer source: $($NewestKernelSource.FullName)" -ForegroundColor Gray
+        $AllReady = $false
+    } else {
+        Write-Host "      ? kernel.elf in ESP" -ForegroundColor Green
+    }
 }
 
 Write-Host ""
@@ -381,7 +429,9 @@ if ($AllReady) {
     Write-Host "Current status:" -ForegroundColor Cyan
     Write-Host "  Bootloader: ? Built successfully" -ForegroundColor Green
     Write-Host "  Kernel: " -NoNewline
-    if (Test-Path (Join-Path $ESPDir "kernel.elf")) {
+    if ($KernelBuildSkipped) {
+        Write-Host "? Not updated (kernel build skipped)" -ForegroundColor Yellow
+    } elseif (Test-Path (Join-Path $ESPDir "kernel.elf")) {
         Write-Host "? Available" -ForegroundColor Green
     } else {
         Write-Host "? Not built (install MinGW)" -ForegroundColor Yellow
