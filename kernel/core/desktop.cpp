@@ -502,7 +502,7 @@ static DesktopIcon s_desktopIcons[] = {
     {"Paint",       0xFFC87830, false, true, -1, -1},  // orange, recent
     {"Clock",       0xFF4690C8, false, true, -1, -1},  // blue, recent
     {"TaskManager", 0xFFB44646, true, false, -1, -1},  // red, pinned (matches registered app name)
-    {"Files",       0xFFC8B43C, false, true, -1, -1},  // yellow, recent
+    {"Files",       0xFFC8B43C, true, false, -1, -1},  // yellow, pinned
     {"ImgViewer",   0xFFC87830, false, false, -1, -1}, // orange
 };
 static const int kDesktopIconCount = 8;
@@ -573,7 +573,7 @@ struct TaskbarEntry {
 };
 
 static TaskbarEntry s_taskbarEntries[] = {
-    // Remove Welcome - it's not needed
+    {"", 0, false}, // Placeholder; kTaskbarEntryCount keeps this disabled.
 };
 static const int kTaskbarEntryCount = 0;
 
@@ -1748,7 +1748,7 @@ static void draw_start_menu()
         uint32_t itemY = contentY + (uint32_t)i * kStartMenuRowH;
 
         // Get app name and color based on mode
-        const char* appName;
+        const char* appName = "";
         uint32_t appColor;
         bool isPinned = false;
         

@@ -11,6 +11,7 @@
 #define KERNEL_KERNEL_APPS_H
 
 #include "kernel/kernel_app.h"
+#include "kernel/vfs.h"
 
 namespace kernel {
 namespace apps {
@@ -167,6 +168,62 @@ private:
     int m_entryCount;
     
     void refreshList();
+};
+
+// ============================================================
+// File Explorer App
+// ============================================================
+
+class FileExplorerApp : public app::KernelApp {
+public:
+    FileExplorerApp();
+    virtual ~FileExplorerApp() override;
+
+    virtual bool init() override;
+    virtual bool initWithParam(const char* startPath) override;
+    virtual void shutdown() override;
+    virtual void draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) override;
+
+    virtual void onKeyDown(uint32_t key) override;
+    virtual void onMouseDown(int x, int y, uint8_t button) override;
+    virtual void onWidgetClick(int widgetId) override;
+
+    static app::KernelApp* create() { return new FileExplorerApp(); }
+
+private:
+    static const int MAX_PATH_LEN = 256;
+    static const int MAX_ENTRIES = 128;
+    static const int TOOLBAR_H = 30;
+    static const int ADDRESS_H = 22;
+    static const int LEFT_W = 150;
+    static const int ROW_H = 16;
+
+    struct Entry {
+        char name[vfs::VFS_MAX_FILENAME];
+        bool isDir;
+        uint64_t size;
+    };
+
+    char m_currentPath[MAX_PATH_LEN];
+    char m_status[96];
+    Entry m_entries[MAX_ENTRIES];
+    int m_entryCount;
+    int m_selected;
+    int m_scroll;
+    int m_backBtnId;
+    int m_upBtnId;
+    int m_refreshBtnId;
+    int m_rootBtnId;
+
+    void refresh();
+    void navigate(const char* path);
+    void openSelected();
+    void goUp();
+    void setStatus(const char* status);
+    void joinPath(const char* base, const char* name, char* out, int outSize) const;
+    void parentPath(const char* path, char* out, int outSize) const;
+    void formatSize(uint64_t size, char* out, int outSize) const;
+    const char* fileType(const Entry& entry) const;
 };
 
 // ============================================================

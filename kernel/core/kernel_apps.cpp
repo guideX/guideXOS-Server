@@ -167,6 +167,15 @@ static void drawChar(uint32_t px, uint32_t py, char c, uint32_t color) {
     }
 }
 
+static void drawText(uint32_t x, uint32_t y, const char* text, uint32_t color) {
+    uint32_t cx = x;
+    while (text && *text) {
+        drawChar(cx, y, *text, color);
+        cx += kGlyphW + kGlyphSpacing;
+        text++;
+    }
+}
+
 // ============================================================
 // NotepadApp Implementation
 // ============================================================
@@ -1386,6 +1395,316 @@ void TaskManagerApp::refreshList() {
 }
 
 // ============================================================
+// FileExplorerApp Implementation
+// ============================================================
+
+FileExplorerApp::FileExplorerApp()
+    : m_entryCount(0), m_selected(0), m_scroll(0),
+      m_backBtnId(-1), m_upBtnId(-1), m_refreshBtnId(-1), m_rootBtnId(-1) {
+    strcopy(m_name, "Files", app::MAX_APP_NAME);
+    strcopy(m_currentPath, "/", MAX_PATH_LEN);
+    strcopy(m_status, "Ready", sizeof(m_status));
+}
+
+FileExplorerApp::~FileExplorerApp() {
+}
+
+bool FileExplorerApp::init() {
+    return initWithParam("/");
+}
+
+bool FileExplorerApp::initWithParam(const char* startPath) {
+    m_window = new app::KernelWindow();
+    strcopy(m_window->title, "File Explorer", app::MAX_TITLE_LEN);
+    m_window->x = 80;
+    m_window->y = 45;
+    m_window->w = 760;
+    m_window->h = 460;
+    m_window->flags = app::WF_VISIBLE | app::WF_TITLEBAR | app::WF_CLOSABLE | app::WF_RESIZABLE | app::WF_FOCUSED;
+    m_window->owner = this;
+
+    if (!compositor::KernelCompositor::registerWindow(m_window)) {
+        delete m_window;
+        m_window = nullptr;
+        return false;
+    }
+
+    m_backBtnId = addButton(8, 5, 52, 20, "Root");
+    m_upBtnId = addButton(66, 5, 38, 20, "Up");
+    m_refreshBtnId = addButton(108, 5, 58, 20, "Refresh");
+    m_rootBtnId = addButton(170, 5, 70, 20, "Mounts");
+
+    strcopy(m_currentPath, startPath && startPath[0] ? startPath : "/", MAX_PATH_LEN);
+    refresh();
+    m_state = app::AppState::Running;
+    return true;
+}
+
+void FileExplorerApp::shutdown() {
+    m_state = app::AppState::Terminated;
+}
+
+void FileExplorerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
+    framebuffer::fill_rect(x, y, w, h, rgb(246, 246, 246));
+
+    uint32_t addressY = y + TOOLBAR_H;
+    framebuffer::fill_rect(x, addressY, w, ADDRESS_H, rgb(255, 255, 255));
+    drawText(x + 8, addressY + 7, "Address:", rgb(70, 70, 70));
+    drawText(x + 62, addressY + 7, m_currentPath, rgb(30, 30, 30));
+
+    uint32_t bodyY = y + TOOLBAR_H + ADDRESS_H;
+    uint32_t statusH = 22;
+    uint32_t bodyH = h > TOOLBAR_H + ADDRESS_H + statusH ? h - TOOLBAR_H - ADDRESS_H - statusH : 0;
+
+    framebuffer::fill_rect(x, bodyY, LEFT_W, bodyH, rgb(238, 238, 238));
+    drawText(x + 8, bodyY + 10, "Navigation", rgb(40, 40, 40));
+    drawText(x + 12, bodyY + 30, "Root", rgb(50, 70, 110));
+    drawText(x + 12, bodyY + 46, "Mounted drives", rgb(50, 70, 110));
+
+    uint8_t mountCount = vfs::mount_count();
+    if (mountCount == 0) {
+        drawText(x + 18, bodyY + 64, "No mounts", rgb(130, 60, 60));
+    } else {
+        int row = 0;
+        for (uint8_t i = 0; i < vfs::VFS_MAX_MOUNTS && row < 8; ++i) {
+            const vfs::MountPoint* mp = vfs::get_mount_by_index(i);
+            if (!mp || !mp->active) continue;
+            drawText(x + 18, bodyY + 64 + row * ROW_H, mp->path, rgb(30, 30, 30));
+            row++;
+        }
+    }
+
+    uint32_t mainX = x + LEFT_W;
+    uint32_t mainW = w > LEFT_W ? w - LEFT_W : 0;
+    framebuffer::fill_rect(mainX, bodyY, mainW, bodyH, rgb(255, 255, 255));
+    framebuffer::fill_rect(mainX, bodyY, mainW, 22, rgb(230, 230, 230));
+    drawText(mainX + 8, bodyY + 7, "Name", rgb(40, 40, 40));
+    drawText(mainX + 250, bodyY + 7, "Size", rgb(40, 40, 40));
+    drawText(mainX + 330, bodyY + 7, "Type", rgb(40, 40, 40));
+    drawText(mainX + 430, bodyY + 7, "Modified", rgb(40, 40, 40));
+
+    if (m_entryCount == 0) {
+        drawText(mainX + 8, bodyY + 34, "Empty directory or unavailable path", rgb(120, 120, 120));
+    }
+
+    int visibleRows = bodyH > 30 ? (int)((bodyH - 30) / ROW_H) : 0;
+    for (int i = 0; i < visibleRows && m_scroll + i < m_entryCount; ++i) {
+        int entryIndex = m_scroll + i;
+        Entry& e = m_entries[entryIndex];
+        uint32_t rowY = bodyY + 24 + i * ROW_H;
+        if (entryIndex == m_selected) {
+            framebuffer::fill_rect(mainX + 1, rowY - 2, mainW - 2, ROW_H, rgb(200, 220, 245));
+        }
+
+        char sizeText[24];
+        formatSize(e.size, sizeText, sizeof(sizeText));
+        drawText(mainX + 8, rowY, e.isDir ? "[DIR]" : "[FILE]", rgb(80, 80, 95));
+        drawText(mainX + 52, rowY, e.name, rgb(20, 20, 20));
+        drawText(mainX + 250, rowY, e.isDir ? "" : sizeText, rgb(70, 70, 70));
+        drawText(mainX + 330, rowY, fileType(e), rgb(70, 70, 70));
+        drawText(mainX + 430, rowY, "--", rgb(110, 110, 110));
+    }
+
+    framebuffer::fill_rect(x, y + h - statusH, w, statusH, rgb(235, 235, 235));
+    drawText(x + 8, y + h - 15, m_status, rgb(40, 40, 40));
+}
+
+void FileExplorerApp::onKeyDown(uint32_t key) {
+    if (key == shell::KEY_UP) {
+        if (m_selected > 0) {
+            m_selected--;
+            if (m_selected < m_scroll) m_scroll = m_selected;
+            invalidate();
+        }
+    } else if (key == shell::KEY_DOWN) {
+        if (m_selected < m_entryCount - 1) {
+            m_selected++;
+            if (m_selected >= m_scroll + 20) m_scroll = m_selected - 19;
+            invalidate();
+        }
+    } else if (key == '\n' || key == '\r') {
+        openSelected();
+    } else if (key == '\b') {
+        goUp();
+    } else if (key == shell::KEY_PGUP) {
+        m_selected -= 20;
+        if (m_selected < 0) m_selected = 0;
+        m_scroll -= 20;
+        if (m_scroll < 0) m_scroll = 0;
+        invalidate();
+    } else if (key == shell::KEY_PGDN) {
+        m_selected += 20;
+        if (m_selected >= m_entryCount) m_selected = m_entryCount - 1;
+        m_scroll += 20;
+        if (m_scroll > m_selected) m_scroll = m_selected;
+        invalidate();
+    } else if (key == 'r' || key == 'R') {
+        refresh();
+        invalidate();
+    }
+}
+
+void FileExplorerApp::onMouseDown(int localX, int localY, uint8_t button) {
+    (void)button;
+    int bodyY = TOOLBAR_H + ADDRESS_H;
+    if (localX < LEFT_W || localY < bodyY + 24) return;
+
+    int row = (localY - bodyY - 24) / ROW_H;
+    int index = m_scroll + row;
+    if (index >= 0 && index < m_entryCount) {
+        m_selected = index;
+        invalidate();
+    }
+}
+
+void FileExplorerApp::onWidgetClick(int widgetId) {
+    if (widgetId == m_backBtnId || widgetId == m_rootBtnId) {
+        navigate("/");
+    } else if (widgetId == m_upBtnId) {
+        goUp();
+    } else if (widgetId == m_refreshBtnId) {
+        refresh();
+        invalidate();
+    }
+}
+
+void FileExplorerApp::refresh() {
+    m_entryCount = 0;
+    uint8_t dir = vfs::opendir(m_currentPath);
+    if (dir == 0xFF) {
+        setStatus("Cannot open directory. Mount a filesystem with vfsmount if needed.");
+        return;
+    }
+
+    vfs::DirEntry de{};
+    while (m_entryCount < MAX_ENTRIES && vfs::readdir(dir, &de)) {
+        strcopy(m_entries[m_entryCount].name, de.name, vfs::VFS_MAX_FILENAME);
+        m_entries[m_entryCount].isDir = (de.type == vfs::FILE_TYPE_DIRECTORY);
+        m_entries[m_entryCount].size = de.size;
+        m_entryCount++;
+    }
+    vfs::closedir(dir);
+
+    if (m_selected >= m_entryCount) m_selected = m_entryCount - 1;
+    if (m_selected < 0) m_selected = 0;
+    if (m_scroll > m_selected) m_scroll = m_selected;
+    setStatus("Ready");
+}
+
+void FileExplorerApp::navigate(const char* path) {
+    if (!path || !path[0]) return;
+    vfs::FileInfo info{};
+    if (vfs::stat(path, &info) != vfs::VFS_OK || info.type != vfs::FILE_TYPE_DIRECTORY) {
+        setStatus("Path not found or not a directory");
+        invalidate();
+        return;
+    }
+    strcopy(m_currentPath, path, MAX_PATH_LEN);
+    m_selected = 0;
+    m_scroll = 0;
+    refresh();
+    invalidate();
+}
+
+void FileExplorerApp::openSelected() {
+    if (m_selected < 0 || m_selected >= m_entryCount) return;
+    Entry& e = m_entries[m_selected];
+    char full[MAX_PATH_LEN];
+    joinPath(m_currentPath, e.name, full, sizeof(full));
+    if (e.isDir) {
+        navigate(full);
+    } else {
+        setStatus("File selected. File associations will open this later.");
+        invalidate();
+    }
+}
+
+void FileExplorerApp::goUp() {
+    char parent[MAX_PATH_LEN];
+    parentPath(m_currentPath, parent, sizeof(parent));
+    if (parent[0] && parent[0] != m_currentPath[0]) {
+        navigate(parent);
+    } else if (parent[0]) {
+        bool different = false;
+        for (int i = 0; parent[i] || m_currentPath[i]; ++i) {
+            if (parent[i] != m_currentPath[i]) { different = true; break; }
+        }
+        if (different) navigate(parent);
+    }
+}
+
+void FileExplorerApp::setStatus(const char* status) {
+    strcopy(m_status, status ? status : "", sizeof(m_status));
+}
+
+void FileExplorerApp::joinPath(const char* base, const char* name, char* out, int outSize) const {
+    if (!out || outSize <= 0) return;
+    int pos = 0;
+    if (!base || !base[0]) base = "/";
+    while (base[pos] && pos < outSize - 1) {
+        out[pos] = base[pos];
+        pos++;
+    }
+    if (pos > 1 && out[pos - 1] != '/' && pos < outSize - 1) out[pos++] = '/';
+    if (pos == 1 && out[0] == '/') {
+        // root already has separator
+    }
+    for (int i = 0; name && name[i] && pos < outSize - 1; ++i) out[pos++] = name[i];
+    out[pos] = '\0';
+}
+
+void FileExplorerApp::parentPath(const char* path, char* out, int outSize) const {
+    if (!out || outSize <= 0) return;
+    if (!path || !path[0] || (path[0] == '/' && path[1] == '\0')) {
+        strcopy(out, "/", outSize);
+        return;
+    }
+
+    int len = strlen_local(path);
+    while (len > 1 && path[len - 1] == '/') len--;
+    int slash = len - 1;
+    while (slash > 0 && path[slash] != '/') slash--;
+    int copyLen = slash == 0 ? 1 : slash;
+    if (copyLen >= outSize) copyLen = outSize - 1;
+    for (int i = 0; i < copyLen; ++i) out[i] = path[i];
+    out[copyLen] = '\0';
+}
+
+void FileExplorerApp::formatSize(uint64_t size, char* out, int outSize) const {
+    if (!out || outSize <= 0) return;
+    uint64_t value = size;
+    const char* suffix = " B";
+    if (size >= 1024 * 1024) { value = size / (1024 * 1024); suffix = " MB"; }
+    else if (size >= 1024) { value = size / 1024; suffix = " KB"; }
+
+    char digits[24];
+    int d = 0;
+    if (value == 0) digits[d++] = '0';
+    else {
+        char tmp[24];
+        int t = 0;
+        while (value > 0 && t < 23) { tmp[t++] = '0' + (value % 10); value /= 10; }
+        while (t > 0) digits[d++] = tmp[--t];
+    }
+    digits[d] = '\0';
+
+    int pos = 0;
+    for (int i = 0; digits[i] && pos < outSize - 1; ++i) out[pos++] = digits[i];
+    for (int i = 0; suffix[i] && pos < outSize - 1; ++i) out[pos++] = suffix[i];
+    out[pos] = '\0';
+}
+
+const char* FileExplorerApp::fileType(const Entry& entry) const {
+    if (entry.isDir) return "File folder";
+    const char* dot = nullptr;
+    for (int i = 0; entry.name[i]; ++i) if (entry.name[i] == '.') dot = &entry.name[i];
+    if (!dot || !dot[1]) return "File";
+    if ((dot[1] == 't' || dot[1] == 'T') && (dot[2] == 'x' || dot[2] == 'X') && (dot[3] == 't' || dot[3] == 'T')) return "Text document";
+    if ((dot[1] == 'e' || dot[1] == 'E') && (dot[2] == 'l' || dot[2] == 'L') && (dot[3] == 'f' || dot[3] == 'F')) return "Application";
+    return "File";
+}
+
+// ============================================================
 // App Registration
 // ============================================================
 
@@ -1397,6 +1716,8 @@ void registerKernelApps() {
     app::AppManager::registerApp("Notepad", 0xFF78B450, NotepadApp::create);
     app::AppManager::registerApp("Calculator", 0xFF4690C8, CalculatorApp::create);
     app::AppManager::registerApp("TaskManager", 0xFFB44646, TaskManagerApp::create);
+    app::AppManager::registerApp("Files", 0xFFC8B43C, FileExplorerApp::create);
+    app::AppManager::registerApp("FileExplorer", 0xFFC8B43C, FileExplorerApp::create);
 }
 
 } // namespace apps

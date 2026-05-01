@@ -12,3 +12,7 @@
 /build/amd64/bin/kernel.exe
 /build/amd64/bin/kernel.pe
 /build/amd64/obj
+/GuideXOS.FileExplorer.Tests/obj
+/GuideXOS.FileExplorer.Tests/bin
+/GuideXOS.FileSystem/bin/Release
+/GuideXOS.FileSystem/bin/Debug

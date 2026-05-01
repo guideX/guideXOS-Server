@@ -518,6 +518,7 @@
     <None Include="build.bat" />
     <None Include="configure-vs-project.bat" />
     <None Include="CONTROL_PANEL_INTEGRATION.md" />
+    <None Include="create-test-image.ps1" />
     <None Include="diagnose.bat" />
     <None Include="Directory.Build.props" />
     <None Include="Directory.Build.targets" />
@@ -535,9 +536,36 @@
     <None Include="fix_include.py" />
     <None Include="fix_include2.py" />
     <None Include="FOCUS_AND_ICONS_IMPLEMENTATION.md" />
+    <None Include="GuideXOS.FileExplorer.Tests\FileEntryModelTests.cs" />
+    <None Include="GuideXOS.FileExplorer.Tests\FileSystemProviderTests.cs" />
+    <None Include="GuideXOS.FileExplorer.Tests\GuideXOS.FileExplorer.Tests.csproj" />
+    <None Include="GuideXOS.FileExplorer\App.xaml.cs" />
+    <None Include="GuideXOS.FileExplorer\Converters\ValueConverters.cs" />
+    <None Include="GuideXOS.FileExplorer\Core\RelayCommand.cs" />
+    <None Include="GuideXOS.FileExplorer\Core\ViewModelBase.cs" />
+    <None Include="GuideXOS.FileExplorer\GuideXOS.FileExplorer.csproj" />
+    <None Include="GuideXOS.FileExplorer\Models\FileEntryModel.cs" />
+    <None Include="GuideXOS.FileExplorer\Models\TreeNodeModel.cs" />
+    <None Include="GuideXOS.FileExplorer\ViewModels\FileExplorerViewModel.cs" />
+    <None Include="GuideXOS.FileExplorer\Views\InputDialog.xaml.cs" />
+    <None Include="GuideXOS.FileExplorer\Views\MainWindow.xaml.cs" />
+    <None Include="GuideXOS.FileSystem\FileSystemEntry.cs" />
+    <None Include="GuideXOS.FileSystem\FileSystemException.cs" />
+    <None Include="GuideXOS.FileSystem\GuideXOS.FileSystem.csproj" />
+    <None Include="GuideXOS.FileSystem\Hybrid\HybridFileSystemProvider.cs" />
+    <None Include="GuideXOS.FileSystem\IFileSystemEntry.cs" />
+    <None Include="GuideXOS.FileSystem\IFileSystemProvider.cs" />
+    <None Include="GuideXOS.FileSystem\Image\FatImageReader.cs" />
+    <None Include="GuideXOS.FileSystem\Image\ImageFileSystemProvider.cs" />
+    <None Include="GuideXOS.FileSystem\Mock\MockFileSystemProvider.cs" />
+    <None Include="GuideXOS.FileSystem\Windows\WindowsFileSystemProvider.cs" />
+    <None Include="GuideXOS.sln" />
     <None Include="guideXOSKernel.vcxproj" />
     <None Include="guideXOSKernel.vcxproj.filters" />
     <None Include="guideXOSServer.csproj" />
+    <None Include="GUIDEXOS_README.md" />
+    <None Include="IMAGE_BROWSING.md" />
+    <None Include="IMPLEMENTATION_SUMMARY.md" />
     <None Include="KernelBuild.vcxproj" />
     <None Include="kernel\arch\amd64\boot.asm" />
     <None Include="kernel\arch\amd64\linker.ld" />
@@ -577,7 +605,13 @@
     <None Include="kernel\docs\HARDWARE_SUPPORT_REPORT.md" />
     <None Include="kernel\Makefile" />
     <None Include="Makefile" />
+    <None Include="PROJECT_SUMMARY.md" />
     <None Include="Properties\launchSettings.json" />
+    <None Include="QUICKSTART.md" />
+    <None Include="QUICKSTART_IMG.md" />
+    <None Include="README_IMAGE_BROWSING.md" />
+    <None Include="REAL_FILESYSTEM_GUIDE.md" />
+    <None Include="REAL_FILESYSTEM_INTEGRATION.md" />
     <None Include="RUN-KERNEL.bat" />
     <None Include="run-qemu.bat" />
     <None Include="run-uefi.sh" />
@@ -605,6 +639,7 @@
     <None Include="scripts\run-riscv64_in_windows.bat" />
     <None Include="SERVER.md" />
     <None Include="setup-toolchain.bat" />
+    <None Include="START_HERE.md" />
     <None Include="_fix_filters_audio.py" />
   </ItemGroup>
   <ItemGroup>
@@ -613,6 +648,11 @@
     <Text Include="docs\Other_Random_Development_Priorities.txt" />
     <Text Include="docs\S390X.txt" />
     <Text Include="scripts\build-and-run-sparcv8_in_linux.sh" />
+  </ItemGroup>
+  <ItemGroup>
+    <Page Include="GuideXOS.FileExplorer\App.xaml" />
+    <Page Include="GuideXOS.FileExplorer\Views\InputDialog.xaml" />
+    <Page Include="GuideXOS.FileExplorer\Views\MainWindow.xaml" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
