@@ -825,10 +825,25 @@ int32_t write(uint8_t handle, const void* buffer, uint32_t size)
         return VFS_ERR_READ_ONLY;
     }
     
-    // Write operations depend on filesystem support
-    // Currently FAT and ext4 have limited write support
-    
-    return VFS_ERR_NOT_SUPPORTED;
+    int32_t bytesWritten = VFS_ERR_NOT_SUPPORTED;
+
+    switch (mount->fsType) {
+        case FS_TYPE_FAT32:
+            if (fh.fsFileHandle != 0xFF) {
+                bytesWritten = static_cast<int32_t>(
+                    fs_fat::write_file(fh.fsFileHandle, buffer, size));
+            }
+            break;
+
+        default:
+            return VFS_ERR_NOT_SUPPORTED;
+    }
+
+    if (bytesWritten > 0) {
+        fh.position += static_cast<uint64_t>(bytesWritten);
+    }
+
+    return bytesWritten;
 }
 
 Status seek(uint8_t handle, int64_t offset, SeekOrigin origin)
@@ -1129,13 +1144,22 @@ int32_t read_file(const char* path, void* buffer, uint32_t maxSize)
 
 int32_t write_file(const char* path, const void* buffer, uint32_t size)
 {
-    uint8_t handle = open(path, OPEN_WRITE | OPEN_CREATE | OPEN_TRUNCATE);
-    if (handle == 0xFF) return VFS_ERR_INVALID;
-    
-    int32_t bytesWritten = write(handle, buffer, size);
-    close(handle);
-    
-    return bytesWritten;
+    if (!path || (!buffer && size != 0)) return VFS_ERR_INVALID;
+
+    MountPoint* mount = find_mount_for_path(path);
+    if (!mount) return VFS_ERR_NOT_MOUNT;
+    if (mount->readOnly) return VFS_ERR_READ_ONLY;
+
+    const char* relPath = get_relative_path(path, mount);
+    switch (mount->fsType) {
+        case FS_TYPE_FAT32:
+            return fs_fat::overwrite_path(mount->fsVolumeIndex, relPath, buffer, size)
+                ? static_cast<int32_t>(size)
+                : VFS_ERR_NOT_SUPPORTED;
+
+        default:
+            return VFS_ERR_NOT_SUPPORTED;
+    }
 }
 
 int32_t append_file(const char* path, const void* buffer, uint32_t size)

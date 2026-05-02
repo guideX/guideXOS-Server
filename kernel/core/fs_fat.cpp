@@ -221,6 +221,21 @@ static block::Status read_cluster_sector(const FATVolume& vol,
     return block::read_sectors(vol.blockDevIndex, lba, 1, buffer);
 }
 
+static block::Status write_cluster_sector(const FATVolume& vol,
+                                          uint32_t cluster,
+                                          uint32_t sectorOffset,
+                                          const void* buffer)
+{
+    uint32_t lba;
+    if (vol.type == FAT_TYPE_FAT32) {
+        lba = cluster_to_sector(vol, cluster) + sectorOffset;
+    } else {
+        lba = vol.exfatClusterHeapOffset +
+              (cluster - 2) * vol.sectorsPerCluster + sectorOffset;
+    }
+    return block::write_sectors(vol.blockDevIndex, lba, 1, buffer);
+}
+
 // ================================================================
 // 8.3 short name to readable string
 // ================================================================
@@ -443,6 +458,55 @@ uint32_t read_file(uint8_t fileHandle, void* buffer, uint32_t len)
     return bytesRead;
 }
 
+uint32_t write_file(uint8_t fileHandle, const void* buffer, uint32_t len)
+{
+    if (fileHandle >= MAX_OPEN_FILES) return 0;
+    FATFile& f = s_files[fileHandle];
+    if (!f.open) return 0;
+    if (!buffer || len == 0) return 0;
+    if (f.attr & ATTR_READ_ONLY) return 0;
+
+    FATVolume& vol = s_volumes[f.volumeIndex];
+    if (vol.type != FAT_TYPE_FAT32) return 0;
+
+    uint32_t bytesWritten = 0;
+    const uint8_t* src = static_cast<const uint8_t*>(buffer);
+    uint32_t clusterBytes = vol.sectorsPerCluster * vol.bytesPerSector;
+
+    while (bytesWritten < len && f.currentOffset < f.fileSize) {
+        if (is_end_of_chain(vol, f.currentCluster)) break;
+
+        uint32_t offsetInCluster = f.currentOffset % clusterBytes;
+        uint32_t sectorInCluster = offsetInCluster / vol.bytesPerSector;
+        uint32_t offsetInSector  = offsetInCluster % vol.bytesPerSector;
+
+        block::Status st = read_cluster_sector(vol,
+            f.currentCluster, sectorInCluster, s_secBuf);
+        if (st != block::BLOCK_OK) break;
+
+        uint32_t available = vol.bytesPerSector - offsetInSector;
+        uint32_t remaining = f.fileSize - f.currentOffset;
+        uint32_t wanted    = len - bytesWritten;
+        uint32_t toCopy    = available;
+        if (toCopy > remaining) toCopy = remaining;
+        if (toCopy > wanted)    toCopy = wanted;
+
+        memcopy(&s_secBuf[offsetInSector], src + bytesWritten, toCopy);
+
+        st = write_cluster_sector(vol, f.currentCluster, sectorInCluster, s_secBuf);
+        if (st != block::BLOCK_OK) break;
+
+        bytesWritten    += toCopy;
+        f.currentOffset += toCopy;
+
+        if ((f.currentOffset % clusterBytes) == 0 && f.currentOffset > 0) {
+            f.currentCluster = next_cluster(vol, f.currentCluster);
+        }
+    }
+
+    return bytesWritten;
+}
+
 void close_file(uint8_t fileHandle)
 {
     if (fileHandle >= MAX_OPEN_FILES) return;
@@ -475,6 +539,114 @@ static bool name_matches(const char* a, const char* b)
         ++b;
     }
     return *a == *b;  // Both must be at end
+}
+
+static bool find_in_directory_at(uint8_t volumeIndex, uint32_t dirCluster, const char* name,
+                                 DirEntry* out, uint32_t* outSector, uint32_t* outOffset)
+{
+    if (volumeIndex >= MAX_FAT_VOLUMES) return false;
+    if (!name || !out || !outSector || !outOffset) return false;
+
+    FATVolume& vol = s_volumes[volumeIndex];
+    uint32_t cluster = dirCluster;
+
+    while (!is_end_of_chain(vol, cluster)) {
+        for (uint32_t sectorInCluster = 0; sectorInCluster < vol.sectorsPerCluster; ++sectorInCluster) {
+            uint32_t sector = cluster_to_sector(vol, cluster) + sectorInCluster;
+            if (block::read_sectors(vol.blockDevIndex, sector, 1, s_secBuf) != block::BLOCK_OK) {
+                return false;
+            }
+
+            uint32_t entriesPerSector = vol.bytesPerSector / 32;
+            for (uint32_t entryIndex = 0; entryIndex < entriesPerSector; ++entryIndex) {
+                uint32_t offset = entryIndex * 32;
+                const FAT32_DirEntry* de = reinterpret_cast<const FAT32_DirEntry*>(&s_secBuf[offset]);
+
+                if (de->name[0] == 0x00) return false;
+                if (static_cast<uint8_t>(de->name[0]) == 0xE5) continue;
+                if (de->attr == ATTR_LFN) continue;
+                if (de->attr & ATTR_VOLUME_ID) continue;
+
+                char entryName[32];
+                short_name_to_string(de->name, entryName);
+                if (!name_matches(entryName, name)) continue;
+
+                memzero(out, sizeof(DirEntry));
+                memcopy(out->name, entryName, sizeof(entryName));
+                out->fileSize     = de->fileSize;
+                out->firstCluster = (static_cast<uint32_t>(de->firstClusterHi) << 16) |
+                                    de->firstClusterLo;
+                out->attr         = de->attr;
+                out->crtDate      = de->crtDate;
+                out->crtTime      = de->crtTime;
+                out->wrtDate      = de->wrtDate;
+                out->wrtTime      = de->wrtTime;
+                out->isDir        = (de->attr & ATTR_DIRECTORY) != 0;
+                *outSector = sector;
+                *outOffset = offset;
+                return true;
+            }
+        }
+
+        cluster = next_cluster(vol, cluster);
+    }
+
+    return false;
+}
+
+static bool find_path_entry_at(uint8_t volumeIndex, const char* path,
+                               DirEntry* out, uint32_t* outSector, uint32_t* outOffset)
+{
+    if (volumeIndex >= MAX_FAT_VOLUMES) return false;
+    if (!s_volumes[volumeIndex].mounted) return false;
+    if (!path || !out || !outSector || !outOffset) return false;
+
+    FATVolume& vol = s_volumes[volumeIndex];
+    const char* p = path;
+    if (*p == '/') ++p;
+
+    uint32_t currentCluster = vol.rootCluster;
+    DirEntry entry;
+    uint32_t sector = 0;
+    uint32_t offset = 0;
+
+    while (*p) {
+        char component[128];
+        int i = 0;
+        while (*p && *p != '/' && i < 127) {
+            component[i++] = *p++;
+        }
+        component[i] = '\0';
+        while (*p == '/') ++p;
+        if (component[0] == '\0') continue;
+
+        if (!find_in_directory_at(volumeIndex, currentCluster, component, &entry, &sector, &offset)) {
+            return false;
+        }
+
+        if (*p == '\0') {
+            memcopy(out, &entry, sizeof(DirEntry));
+            *outSector = sector;
+            *outOffset = offset;
+            return true;
+        }
+
+        if (!entry.isDir) return false;
+        currentCluster = entry.firstCluster;
+    }
+
+    return false;
+}
+
+static uint32_t cluster_chain_capacity(const FATVolume& vol, uint32_t firstCluster)
+{
+    uint32_t clusters = 0;
+    uint32_t cluster = firstCluster;
+    while (!is_end_of_chain(vol, cluster) && clusters <= vol.totalDataClusters) {
+        ++clusters;
+        cluster = next_cluster(vol, cluster);
+    }
+    return clusters * vol.sectorsPerCluster * vol.bytesPerSector;
 }
 
 bool open_dir(uint8_t volumeIndex, uint32_t dirCluster)

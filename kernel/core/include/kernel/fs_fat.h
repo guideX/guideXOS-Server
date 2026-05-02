@@ -255,6 +255,14 @@ uint8_t open_file(uint8_t volumeIndex, uint32_t firstCluster,
 // Returns the number of bytes actually read.
 uint32_t read_file(uint8_t fileHandle, void* buffer, uint32_t len);
 
+// Overwrite bytes in an existing FAT32 file without extending its cluster chain.
+// Returns the number of bytes written.
+uint32_t write_file(uint8_t fileHandle, const void* buffer, uint32_t len);
+
+// Overwrite an existing file by path and update its directory file size.
+// Does not allocate additional clusters.
+bool overwrite_path(uint8_t volumeIndex, const char* path, const void* buffer, uint32_t len);
+
 // Close an open file.
 void close_file(uint8_t fileHandle);
 

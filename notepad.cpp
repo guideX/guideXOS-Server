@@ -10,6 +10,10 @@
 #include <algorithm>
 #include <cctype>
 
+#ifndef _WIN32
+#include "kernel/core/include/kernel/vfs.h"
+#endif
+
 namespace gxos { namespace apps {
     
     using namespace gxos::gui;
@@ -644,10 +648,26 @@ namespace gxos { namespace apps {
         if (path.empty()) return;
         
         std::vector<uint8_t> data;
+#ifndef _WIN32
+        kernel::vfs::FileInfo info{};
+        if (kernel::vfs::stat(path.c_str(), &info) != kernel::vfs::VFS_OK || info.type == kernel::vfs::FILE_TYPE_DIRECTORY) {
+            Logger::write(LogLevel::Error, std::string("Notepad: Failed to stat file: ") + path);
+            return;
+        }
+
+        data.resize(static_cast<size_t>(info.size));
+        int32_t bytesRead = kernel::vfs::read_file(path.c_str(), data.data(), static_cast<uint32_t>(data.size()));
+        if (bytesRead < 0) {
+            Logger::write(LogLevel::Error, std::string("Notepad: Failed to read file: ") + path);
+            return;
+        }
+        data.resize(static_cast<size_t>(bytesRead));
+#else
         if (!Vfs::instance().readFile(path, data)) {
             Logger::write(LogLevel::Error, std::string("Notepad: Failed to read file: ") + path);
             return;
         }
+#endif
         
         Logger::write(LogLevel::Info, std::string("Notepad: Loaded file: ") + path + " (" + std::to_string(data.size()) + " bytes)");
         
@@ -702,10 +722,18 @@ namespace gxos { namespace apps {
             }
         }
         
+#ifndef _WIN32
+        int32_t bytesWritten = kernel::vfs::write_file(s_filePath.c_str(), data.data(), static_cast<uint32_t>(data.size()));
+        if (bytesWritten < 0 || static_cast<size_t>(bytesWritten) != data.size()) {
+            Logger::write(LogLevel::Error, std::string("Notepad: Failed to write file: ") + s_filePath);
+            return;
+        }
+#else
         if (!Vfs::instance().writeFile(s_filePath, data)) {
             Logger::write(LogLevel::Error, std::string("Notepad: Failed to write file: ") + s_filePath);
             return;
         }
+#endif
         
         Logger::write(LogLevel::Info, std::string("Notepad: Saved to ") + s_filePath + " (" + std::to_string(data.size()) + " bytes)");
         s_modified = false;
