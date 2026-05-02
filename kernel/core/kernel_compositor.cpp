@@ -500,7 +500,21 @@ void KernelCompositor::handleMouseDown(int32_t mx, int32_t my, uint8_t button) {
             break;
             
         case HitTestResult::Client:
-            // Forward to app
+            // Check widgets first; bare-metal apps use these for toolbar buttons.
+            for (int i = hitWin->widgetCount - 1; i >= 0; --i) {
+                app::Widget* widget = &hitWin->widgets[i];
+                if (!widget->visible || !widget->enabled) continue;
+                int localX = mx - hitWin->x;
+                int localY = my - hitWin->y - TITLEBAR_HEIGHT;
+                if (localX >= widget->x && localX < widget->x + widget->w &&
+                    localY >= widget->y && localY < widget->y + widget->h) {
+                    widget->pressed = true;
+                    hitWin->dirty = true;
+                    return;
+                }
+            }
+
+            // Forward to app content
             if (hitWin->owner) {
                 int localX = mx - hitWin->x;
                 int localY = my - hitWin->y - TITLEBAR_HEIGHT;
@@ -563,6 +577,18 @@ void KernelCompositor::handleMouseUp(int32_t mx, int32_t my, uint8_t button) {
     if (hit == HitTestResult::Client && hitWin && hitWin->owner) {
         int localX = mx - hitWin->x;
         int localY = my - hitWin->y - TITLEBAR_HEIGHT;
+        for (int i = 0; i < hitWin->widgetCount; ++i) {
+            app::Widget* widget = &hitWin->widgets[i];
+            if (!widget->pressed) continue;
+            widget->pressed = false;
+            hitWin->dirty = true;
+            if (widget->visible && widget->enabled &&
+                localX >= widget->x && localX < widget->x + widget->w &&
+                localY >= widget->y && localY < widget->y + widget->h) {
+                hitWin->owner->onWidgetClick(widget->id);
+                return;
+            }
+        }
         hitWin->owner->onMouseUp(localX, localY, button);
     }
 }
@@ -664,17 +690,17 @@ void KernelCompositor::drawWindow(app::KernelWindow* window) {
     uint32_t clientY = y + TITLEBAR_HEIGHT;
     uint32_t clientH = h - TITLEBAR_HEIGHT;
     
-    // Draw widgets
+    // Let app draw custom content
+    if (window->owner) {
+        window->owner->draw(x, clientY, w, clientH);
+    }
+
+    // Draw widgets over the app content
     for (int i = 0; i < window->widgetCount; i++) {
         app::Widget* widget = &window->widgets[i];
         if (widget->visible) {
             drawWidget(widget, x, clientY);
         }
-    }
-    
-    // Let app draw custom content
-    if (window->owner) {
-        window->owner->draw(x, clientY, w, clientH);
     }
     
     // Resize grip

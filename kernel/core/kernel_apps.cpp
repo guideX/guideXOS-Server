@@ -167,7 +167,7 @@ static void drawChar(uint32_t px, uint32_t py, char c, uint32_t color) {
     }
 }
 
-static void drawText(uint32_t x, uint32_t y, const char* text, uint32_t color) {
+static void appDrawText(uint32_t x, uint32_t y, const char* text, uint32_t color) {
     uint32_t cx = x;
     while (text && *text) {
         drawChar(cx, y, *text, color);
@@ -1449,27 +1449,27 @@ void FileExplorerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
 
     uint32_t addressY = y + TOOLBAR_H;
     framebuffer::fill_rect(x, addressY, w, ADDRESS_H, rgb(255, 255, 255));
-    drawText(x + 8, addressY + 7, "Address:", rgb(70, 70, 70));
-    drawText(x + 62, addressY + 7, m_currentPath, rgb(30, 30, 30));
+    appDrawText(x + 8, addressY + 7, "Address:", rgb(70, 70, 70));
+    appDrawText(x + 62, addressY + 7, m_currentPath, rgb(30, 30, 30));
 
     uint32_t bodyY = y + TOOLBAR_H + ADDRESS_H;
     uint32_t statusH = 22;
     uint32_t bodyH = h > TOOLBAR_H + ADDRESS_H + statusH ? h - TOOLBAR_H - ADDRESS_H - statusH : 0;
 
     framebuffer::fill_rect(x, bodyY, LEFT_W, bodyH, rgb(238, 238, 238));
-    drawText(x + 8, bodyY + 10, "Navigation", rgb(40, 40, 40));
-    drawText(x + 12, bodyY + 30, "Root", rgb(50, 70, 110));
-    drawText(x + 12, bodyY + 46, "Mounted drives", rgb(50, 70, 110));
+    appDrawText(x + 8, bodyY + 10, "Navigation", rgb(40, 40, 40));
+    appDrawText(x + 12, bodyY + 30, "Root", rgb(50, 70, 110));
+    appDrawText(x + 12, bodyY + 46, "Mounted drives", rgb(50, 70, 110));
 
     uint8_t mountCount = vfs::mount_count();
     if (mountCount == 0) {
-        drawText(x + 18, bodyY + 64, "No mounts", rgb(130, 60, 60));
+        appDrawText(x + 18, bodyY + 64, "No mounts", rgb(130, 60, 60));
     } else {
         int row = 0;
         for (uint8_t i = 0; i < vfs::VFS_MAX_MOUNTS && row < 8; ++i) {
             const vfs::MountPoint* mp = vfs::get_mount_by_index(i);
             if (!mp || !mp->active) continue;
-            drawText(x + 18, bodyY + 64 + row * ROW_H, mp->path, rgb(30, 30, 30));
+            appDrawText(x + 18, bodyY + 64 + row * ROW_H, mp->path, rgb(30, 30, 30));
             row++;
         }
     }
@@ -1478,13 +1478,13 @@ void FileExplorerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
     uint32_t mainW = w > LEFT_W ? w - LEFT_W : 0;
     framebuffer::fill_rect(mainX, bodyY, mainW, bodyH, rgb(255, 255, 255));
     framebuffer::fill_rect(mainX, bodyY, mainW, 22, rgb(230, 230, 230));
-    drawText(mainX + 8, bodyY + 7, "Name", rgb(40, 40, 40));
-    drawText(mainX + 250, bodyY + 7, "Size", rgb(40, 40, 40));
-    drawText(mainX + 330, bodyY + 7, "Type", rgb(40, 40, 40));
-    drawText(mainX + 430, bodyY + 7, "Modified", rgb(40, 40, 40));
+    appDrawText(mainX + 8, bodyY + 7, "Name", rgb(40, 40, 40));
+    appDrawText(mainX + 250, bodyY + 7, "Size", rgb(40, 40, 40));
+    appDrawText(mainX + 330, bodyY + 7, "Type", rgb(40, 40, 40));
+    appDrawText(mainX + 430, bodyY + 7, "Modified", rgb(40, 40, 40));
 
     if (m_entryCount == 0) {
-        drawText(mainX + 8, bodyY + 34, "Empty directory or unavailable path", rgb(120, 120, 120));
+        appDrawText(mainX + 8, bodyY + 34, "Empty directory or unavailable path", rgb(120, 120, 120));
     }
 
     int visibleRows = bodyH > 30 ? (int)((bodyH - 30) / ROW_H) : 0;
@@ -1498,15 +1498,15 @@ void FileExplorerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
 
         char sizeText[24];
         formatSize(e.size, sizeText, sizeof(sizeText));
-        drawText(mainX + 8, rowY, e.isDir ? "[DIR]" : "[FILE]", rgb(80, 80, 95));
-        drawText(mainX + 52, rowY, e.name, rgb(20, 20, 20));
-        drawText(mainX + 250, rowY, e.isDir ? "" : sizeText, rgb(70, 70, 70));
-        drawText(mainX + 330, rowY, fileType(e), rgb(70, 70, 70));
-        drawText(mainX + 430, rowY, "--", rgb(110, 110, 110));
+        appDrawText(mainX + 8, rowY, e.isDir ? "[DIR]" : "[FILE]", rgb(80, 80, 95));
+        appDrawText(mainX + 52, rowY, e.name, rgb(20, 20, 20));
+        appDrawText(mainX + 250, rowY, e.isDir ? "" : sizeText, rgb(70, 70, 70));
+        appDrawText(mainX + 330, rowY, fileType(e), rgb(70, 70, 70));
+        appDrawText(mainX + 430, rowY, "--", rgb(110, 110, 110));
     }
 
     framebuffer::fill_rect(x, y + h - statusH, w, statusH, rgb(235, 235, 235));
-    drawText(x + 8, y + h - 15, m_status, rgb(40, 40, 40));
+    appDrawText(x + 8, y + h - 15, m_status, rgb(40, 40, 40));
 }
 
 void FileExplorerApp::onKeyDown(uint32_t key) {
@@ -1578,6 +1578,11 @@ void FileExplorerApp::refresh() {
 
     vfs::DirEntry de{};
     while (m_entryCount < MAX_ENTRIES && vfs::readdir(dir, &de)) {
+        if (de.name[0] == '.' && (de.name[1] == '\0' ||
+            (de.name[1] == '.' && de.name[2] == '\0'))) {
+            continue;
+        }
+
         strcopy(m_entries[m_entryCount].name, de.name, vfs::VFS_MAX_FILENAME);
         m_entries[m_entryCount].isDir = (de.type == vfs::FILE_TYPE_DIRECTORY);
         m_entries[m_entryCount].size = de.size;
@@ -1588,7 +1593,11 @@ void FileExplorerApp::refresh() {
     if (m_selected >= m_entryCount) m_selected = m_entryCount - 1;
     if (m_selected < 0) m_selected = 0;
     if (m_scroll > m_selected) m_scroll = m_selected;
-    setStatus("Ready");
+    if (m_entryCount == 0) {
+        setStatus("Directory is empty");
+    } else {
+        setStatus("Ready");
+    }
 }
 
 void FileExplorerApp::navigate(const char* path) {
