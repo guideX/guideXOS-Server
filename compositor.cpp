@@ -38,6 +38,7 @@ namespace gxos {
         // Static member definitions
         std::atomic<uint64_t> Compositor::s_nextWinId{ 1000 };
         std::unordered_map<uint64_t, WinInfo> Compositor::g_windows; std::vector<uint64_t> Compositor::g_z; std::mutex Compositor::g_lock; uint64_t Compositor::g_focus = 0;
+        uint64_t Compositor::g_modalWindow = 0;
         bool Compositor::g_dragActive = false; int Compositor::g_dragOffX = 0; int Compositor::g_dragOffY = 0; uint64_t Compositor::g_dragWin = 0; int Compositor::g_dragStartX = 0; int Compositor::g_dragStartY = 0;
         bool Compositor::g_dragPending = false; uint64_t Compositor::g_dragPendingWin = 0;
         bool Compositor::g_resizeActive = false; int Compositor::g_resizeStartW = 0; int Compositor::g_resizeStartH = 0; int Compositor::g_resizeStartMX = 0; int Compositor::g_resizeStartMY = 0; uint64_t Compositor::g_resizeWin = 0;
@@ -166,6 +167,9 @@ namespace gxos {
         }
 
         WinInfo* Compositor::hitWindowAt(int mx, int my) { for (int idx = (int)g_z.size( ) - 1; idx >= 0; --idx) { uint64_t wid = g_z[idx]; auto it = g_windows.find(wid); if (it == g_windows.end( )) continue; WinInfo& w = it->second; if (w.minimized || w.tombstoned) continue; if (mx >= w.x && mx < w.x + w.w && my >= w.y && my < w.y + w.h) return &w; } return nullptr; }
+        bool Compositor::isDialogTitle(const std::string& title) { return title == "Save As" || title == "Open" || title == "Unsaved Changes"; }
+        bool Compositor::blockInputBehindModal(int mx, int my) { if (g_modalWindow == 0) return false; auto modalIt = g_windows.find(g_modalWindow); if (modalIt == g_windows.end( ) || modalIt->second.minimized || modalIt->second.tombstoned) { g_modalWindow = 0; return false; } WinInfo& modal = modalIt->second; bool inside = mx >= modal.x && mx < modal.x + modal.w && my >= modal.y && my < modal.y + modal.h; if (!inside) { for (auto it = g_z.begin( ); it != g_z.end( ); ++it) { if (*it == modal.id) { g_z.erase(it); break; } } g_z.push_back(modal.id); g_focus = modal.id; return true; } return false; }
+        uint64_t Compositor::inputOwnerPid() { uint64_t ownerPid = 0; uint64_t focusId = g_modalWindow ? g_modalWindow : g_focus; auto it = g_windows.find(focusId); if (it != g_windows.end( ) && !it->second.minimized && !it->second.tombstoned) { ownerPid = it->second.ownerPid; } return ownerPid; }
 #ifdef _WIN32
         uint64_t Compositor::hitTestTaskbarButton(int mx, int my, RECT cr, int taskbarH) {
             int taskbarTop = cr.bottom - taskbarH; if (my < taskbarTop) return 0; int btnX = 216; // leave space for start button + search box
@@ -592,6 +596,7 @@ namespace gxos {
             }
             case WM_LBUTTONDOWN: {
                 int mx = GET_X_LPARAM(l); int my = GET_Y_LPARAM(l); RECT cr; GetClientRect(h, &cr); int taskbarH = 40;
+                { std::lock_guard<std::mutex> lk(g_lock); if (blockInputBehindModal(mx, my)) { requestRepaint( ); return 0; } }
                 // Dismiss right-click menu on any left click
                 if (RightClickMenu::IsVisible( )) { RightClickMenu::HandleClick(mx, my); requestRepaint( ); return 0; }
                 // Handle taskbar right-click menu click
@@ -735,11 +740,11 @@ namespace gxos {
                     for (auto itZ = g_z.begin( ); itZ != g_z.end( ); ++itZ) { if (*itZ == id) { g_z.erase(itZ); break; } } g_z.push_back(id); 
                 } } requestRepaint( ); return 0; }
                 // pass to widget handling and general mouse handling
-                uint64_t ownerPid = 0; { std::lock_guard<std::mutex> lk(g_lock); auto it = g_windows.find(g_focus); if (it != g_windows.end( )) ownerPid = it->second.ownerPid; }
+                uint64_t ownerPid = 0; { std::lock_guard<std::mutex> lk(g_lock); ownerPid = inputOwnerPid( ); }
                 Compositor::handleMouse(mx, my, true, false); publishOut(MsgType::MT_InputMouse, std::to_string(mx) + "|" + std::to_string(my) + "|1|down", ownerPid); return 0;
             }
             case WM_RBUTTONDOWN: {
-                int mx = GET_X_LPARAM(l); int my = GET_Y_LPARAM(l); if (g_startMenuVisible && mx >= g_startMenuRect.left && mx <= g_startMenuRect.right && my >= g_startMenuRect.top && my <= g_startMenuRect.bottom) { int idx = (my - (g_startMenuRect.top + 4)) / 20; if (idx >= 0 && idx < (int)g_items.size( )) { if (g_items[idx].pinned) unpinAction(g_items[idx].action); else pinAction(g_items[idx].action); requestRepaint( ); return 0; } }
+                int mx = GET_X_LPARAM(l); int my = GET_Y_LPARAM(l); { std::lock_guard<std::mutex> lk(g_lock); if (blockInputBehindModal(mx, my)) { requestRepaint( ); return 0; } } if (g_startMenuVisible && mx >= g_startMenuRect.left && mx <= g_startMenuRect.right && my >= g_startMenuRect.top && my <= g_startMenuRect.bottom) { int idx = (my - (g_startMenuRect.top + 4)) / 20; if (idx >= 0 && idx < (int)g_items.size( )) { if (g_items[idx].pinned) unpinAction(g_items[idx].action); else pinAction(g_items[idx].action); requestRepaint( ); return 0; } }
                 // Desktop icon right-click pin/unpin or taskbar right-click menu
                 RECT cr; GetClientRect(h, &cr); int taskbarH = 40;
                 // Taskbar right-click: show context menu
@@ -802,15 +807,16 @@ namespace gxos {
                     }
                     g_iconDragActive = false; g_iconDragPending = false; requestRepaint( ); break;
                 }
-                uint64_t ownerPid = 0; { std::lock_guard<std::mutex> lk(g_lock); auto it = g_windows.find(g_focus); if (it != g_windows.end( )) ownerPid = it->second.ownerPid; }
+                uint64_t ownerPid = 0; { std::lock_guard<std::mutex> lk(g_lock); ownerPid = inputOwnerPid( ); }
                 Compositor::handleMouse(mx, my, false, true); publishOut(MsgType::MT_InputMouse, std::to_string(mx) + "|" + std::to_string(my) + "|1|up", ownerPid);
             } break;
             case WM_MOUSEMOVE: {
                 int mx = GET_X_LPARAM(l); int my = GET_Y_LPARAM(l);
+                { std::lock_guard<std::mutex> lk(g_lock); if (blockInputBehindModal(mx, my)) { requestRepaint( ); return 0; } }
                 if (g_iconDragPending && !g_iconDragActive) { if (std::abs(mx - g_iconDragStartX) >= 4 || std::abs(my - g_iconDragStartY) >= 4) { g_iconDragActive = true; } }
                 if (g_iconDragActive && g_iconDragIndex >= 0 && g_iconDragIndex < (int)g_items.size( )) { RECT cr2; GetClientRect(h, &cr2); int taskbarH2 = 40; int nx = mx - g_iconDragOffX; int ny = my - g_iconDragOffY; if (nx < 0) nx = 0; if (ny < 0) ny = 0; const int cellW2 = 84; const int cellH2 = 94; if (nx + cellW2 > cr2.right) nx = cr2.right - cellW2; if (ny + cellH2 > cr2.bottom - taskbarH2) ny = cr2.bottom - taskbarH2 - cellH2; g_items[g_iconDragIndex].ix = nx; g_items[g_iconDragIndex].iy = ny; requestRepaint( ); break; }
                 if (g_iconDragPending) { break; } // Skip handleMouse while drag is pending
-                uint64_t ownerPid = 0; { std::lock_guard<std::mutex> lk(g_lock); auto it = g_windows.find(g_focus); if (it != g_windows.end( )) ownerPid = it->second.ownerPid; }
+                uint64_t ownerPid = 0; { std::lock_guard<std::mutex> lk(g_lock); ownerPid = inputOwnerPid( ); }
                 Compositor::handleMouse(mx, my, false, false); publishOut(MsgType::MT_InputMouse, std::to_string(mx) + "|" + std::to_string(my) + "|0|move", ownerPid);
             } break;
             case WM_KEYDOWN: case WM_SYSKEYDOWN: {
@@ -869,10 +875,10 @@ namespace gxos {
                     }
                 }
 
-                uint64_t ownerPid = 0; { std::lock_guard<std::mutex> lk(g_lock); auto it = g_windows.find(g_focus); if (it != g_windows.end( )) ownerPid = it->second.ownerPid; }
+                uint64_t ownerPid = 0; { std::lock_guard<std::mutex> lk(g_lock); ownerPid = inputOwnerPid( ); }
                 publishOut(MsgType::MT_InputKey, std::to_string(key) + "|down", ownerPid);
             } break;
-            case WM_KEYUP: { int key = (int)w; uint64_t ownerPid = 0; { std::lock_guard<std::mutex> lk(g_lock); auto it = g_windows.find(g_focus); if (it != g_windows.end( )) ownerPid = it->second.ownerPid; } publishOut(MsgType::MT_InputKey, std::to_string(key) + "|up", ownerPid); } break;
+            case WM_KEYUP: { int key = (int)w; uint64_t ownerPid = 0; { std::lock_guard<std::mutex> lk(g_lock); ownerPid = inputOwnerPid( ); } publishOut(MsgType::MT_InputKey, std::to_string(key) + "|up", ownerPid); } break;
             }
             return DefWindowProcA(h, msg, w, l);
         }
@@ -948,6 +954,7 @@ namespace gxos {
                         // remove window
                         g_windows.erase(id);
                         for (auto it = g_z.begin( ); it != g_z.end( ); ++it) { if (*it == id) { g_z.erase(it); break; } }
+                        if (g_modalWindow == id) g_modalWindow = 0;
                         if (g_focus == id) g_focus = 0;
                         publishOut(MsgType::MT_Close, std::to_string(id), ownerPid);
                         return;
@@ -993,7 +1000,7 @@ namespace gxos {
             if (g_dragActive && up) { auto it = g_windows.find(g_dragWin); if (it != g_windows.end( )) { WinInfo& w = it->second; const int snap = 16; bool nearLeft = mx <= snap, nearRight = mx >= cr.right - snap, nearTop = my <= snap; bool nearBottom = my >= cr.bottom - taskbarH - snap; if (nearTop && !(nearLeft || nearRight)) { w.prevX = w.x; w.prevY = w.y; w.prevW = w.w; w.prevH = w.h; w.x = 0; w.y = 0; w.w = cr.right; w.h = cr.bottom - taskbarH; w.maximized = true; w.snapState = 0; } else if (nearLeft) { w.maximized = false; w.x = 0; w.y = 0; w.w = cr.right / 2; w.h = cr.bottom - taskbarH; w.snapState = 1; } else if (nearRight) { w.maximized = false; w.x = cr.right / 2; w.y = 0; w.w = cr.right / 2; w.h = cr.bottom - taskbarH; w.snapState = 2; } w.dirty = true; } g_dragActive = false; g_dragWin = 0; g_snapPreviewActive = false; invalidate(0); }
             if (g_resizeActive && !up) { auto it = g_windows.find(g_resizeWin); if (it != g_windows.end( )) { int dw = mx - g_resizeStartMX; int dh = my - g_resizeStartMY; int newW = g_resizeStartW + dw; if (newW < 160) newW = 160; int newH = g_resizeStartH + dh; if (newH < 120) newH = 120; g_resizePreviewActive = true; g_resizePreviewW = newW; g_resizePreviewH = newH; } }
             if (g_resizeActive && up) { auto it = g_windows.find(g_resizeWin); if (it != g_windows.end( )) { int dw = mx - g_resizeStartMX; int dh = my - g_resizeStartMY; int newW = g_resizeStartW + dw; if (newW < 160) newW = 160; int newH = g_resizeStartH + dh; if (newH < 120) newH = 120; it->second.w = newW; it->second.h = newH; it->second.dirty = true; } g_resizeActive = false; g_resizeWin = 0; g_resizePreviewActive = false; }
-            if (down) { for (int idx = (int)g_z.size( ) - 1; idx >= 0; --idx) { WinInfo& w = g_windows[g_z[idx]]; if (w.minimized || w.tombstoned) continue; if (mx >= w.x && mx < w.x + w.w && my >= w.y && my < w.y + w.h) { g_focus = w.id; for (auto itZ = g_z.begin( ); itZ != g_z.end( ); ++itZ) { if (*itZ == w.id) { g_z.erase(itZ); break; } } g_z.push_back(w.id); sendFocus(w.id); break; } } }
+            if (down) { for (int idx = (int)g_z.size( ) - 1; idx >= 0; --idx) { WinInfo& w = g_windows[g_z[idx]]; if (w.minimized || w.tombstoned) continue; if (g_modalWindow != 0 && w.id != g_modalWindow) continue; if (mx >= w.x && mx < w.x + w.w && my >= w.y && my < w.y + w.h) { g_focus = w.id; for (auto itZ = g_z.begin( ); itZ != g_z.end( ); ++itZ) { if (*itZ == w.id) { g_z.erase(itZ); break; } } g_z.push_back(w.id); sendFocus(w.id); break; } } }
         }
 
         void Compositor::handleMessage(const ipc::Message& m) {
@@ -1016,6 +1023,7 @@ namespace gxos {
                     wi.maximized = false;
                     wi.dirty = true;
                     wi.visible = true;
+                    wi.modal = isDialogTitle(title);
                     wi.ownerPid = m.srcPid;
 #ifdef _WIN32
                     wi.taskbarIcon = Icons::TaskbarIcon(16);
@@ -1030,11 +1038,12 @@ namespace gxos {
                     g_windows[id] = wi;
                     g_z.push_back(id); 
                     g_focus = id; 
+                    if (wi.modal) g_modalWindow = id;
                 } 
                 Logger::write(LogLevel::Info, std::string("Compositor created window id=") + std::to_string(id) + " sending ack to pid=" + std::to_string(m.srcPid));
                 publishOut(MsgType::MT_Create, std::to_string(id) + "|" + title, m.srcPid); sendFocus(id); invalidate(id); } break;
             case MsgType::MT_DrawText: { std::istringstream iss(s); std::string idS; std::getline(iss, idS, '|'); std::string text; std::getline(iss, text); uint64_t id = 0; uint64_t ownerPid = 0; try { id = std::stoull(idS); } catch (...) {} { std::lock_guard<std::mutex> lk(g_lock); auto it = g_windows.find(id); if (it != g_windows.end( )) { if (text == "\f") { it->second.texts.clear(); it->second.rects.clear(); } else { it->second.texts.push_back(text); } it->second.dirty = true; ownerPid = it->second.ownerPid; } } publishOut(MsgType::MT_DrawText, std::to_string(id) + "|" + text, ownerPid); invalidate(id); } break;
-            case MsgType::MT_Close: { uint64_t id = 0; uint64_t ownerPid = 0; try { id = std::stoull(s); } catch (...) {} { std::lock_guard<std::mutex> lk(g_lock); auto wit = g_windows.find(id); if (wit != g_windows.end( )) ownerPid = wit->second.ownerPid; g_windows.erase(id); auto it = std::find(g_z.begin( ), g_z.end( ), id); if (it != g_z.end( )) g_z.erase(it); if (g_focus == id) g_focus = 0; } publishOut(MsgType::MT_Close, std::to_string(id), ownerPid ? ownerPid : m.srcPid); invalidate(0); } break;
+            case MsgType::MT_Close: { uint64_t id = 0; uint64_t ownerPid = 0; try { id = std::stoull(s); } catch (...) {} { std::lock_guard<std::mutex> lk(g_lock); auto wit = g_windows.find(id); if (wit != g_windows.end( )) ownerPid = wit->second.ownerPid; g_windows.erase(id); auto it = std::find(g_z.begin( ), g_z.end( ), id); if (it != g_z.end( )) g_z.erase(it); if (g_modalWindow == id) g_modalWindow = 0; if (g_focus == id) g_focus = 0; } publishOut(MsgType::MT_Close, std::to_string(id), ownerPid ? ownerPid : m.srcPid); invalidate(0); } break;
             case MsgType::MT_DrawRect: { std::istringstream iss(s); std::string idS; std::getline(iss, idS, '|'); std::string xs, ys, ws, hs, rs, gs, bs; std::getline(iss, xs, '|'); std::getline(iss, ys, '|'); std::getline(iss, ws, '|'); std::getline(iss, hs, '|'); std::getline(iss, rs, '|'); std::getline(iss, gs, '|'); std::getline(iss, bs, '|'); uint64_t id = 0; uint64_t ownerPid = 0; try { id = std::stoull(idS); } catch (...) {} DrawRectItem item{ std::stoi(xs), std::stoi(ys), std::stoi(ws), std::stoi(hs), (uint8_t)std::stoi(rs),(uint8_t)std::stoi(gs),(uint8_t)std::stoi(bs) }; { std::lock_guard<std::mutex> lk(g_lock); auto it = g_windows.find(id); if (it != g_windows.end( )) { it->second.rects.push_back(item); it->second.dirty = true; ownerPid = it->second.ownerPid; } } publishOut(MsgType::MT_DrawRect, std::to_string(id), ownerPid); invalidate(id); } break;
             case MsgType::MT_SetTitle: { std::istringstream iss(s); std::string idS; std::getline(iss, idS, '|'); std::string title; std::getline(iss, title); uint64_t id = 0; uint64_t ownerPid = 0; try { id = std::stoull(idS); } catch (...) {} { std::lock_guard<std::mutex> lk(g_lock); auto it = g_windows.find(id); if (it != g_windows.end( )) { it->second.title = title; it->second.dirty = true; ownerPid = it->second.ownerPid; } } publishOut(MsgType::MT_SetTitle, std::to_string(id) + "|" + title, ownerPid); invalidate(id); } break;
             case MsgType::MT_Move: { std::istringstream iss(s); std::string idS, xs, ys; std::getline(iss, idS, '|'); std::getline(iss, xs, '|'); std::getline(iss, ys, '|'); uint64_t id = 0; uint64_t ownerPid = 0; try { id = std::stoull(idS); } catch (...) {} int nx = std::stoi(xs), ny = std::stoi(ys); { std::lock_guard<std::mutex> lk(g_lock); auto it = g_windows.find(id); if (it != g_windows.end( ) && !it->second.maximized) { it->second.x = nx; it->second.y = ny; it->second.dirty = true; ownerPid = it->second.ownerPid; } } publishOut(MsgType::MT_Move, std::to_string(id) + "|" + xs + "|" + ys, ownerPid); invalidate(id); } break;
@@ -1046,9 +1055,9 @@ namespace gxos {
                 publishOut(MsgType::MT_WidgetAdd, std::to_string(winId) + "|" + std::to_string(wid), ownerPid); invalidate(winId);
             } break;
             case MsgType::MT_WindowList: { std::ostringstream oss; bool first = true; { std::lock_guard<std::mutex> lk(g_lock); for (uint64_t id : g_z) { auto it = g_windows.find(id); if (it == g_windows.end( )) continue; if (!first) oss << ";"; first = false; oss << it->first << "|" << it->second.title << "|" << (it->second.minimized ? 1 : 0); } } publishOut(MsgType::MT_WindowList, oss.str( ), m.srcPid); } break;
-            case MsgType::MT_Activate: { uint64_t id = 0; try { id = std::stoull(s); } catch (...) {} { std::lock_guard<std::mutex> lk(g_lock); for (auto it = g_z.begin( ); it != g_z.end( ); ++it) { if (*it == id) { g_z.erase(it); break; } } auto wit = g_windows.find(id); if (wit != g_windows.end( )) { wit->second.minimized = false; wit->second.tombstoned = false; } g_z.push_back(id); g_focus = id; } sendFocus(id); invalidate(id); } break;
-            case MsgType::MT_Minimize: { uint64_t id = 0; try { id = std::stoull(s); } catch (...) {} { std::lock_guard<std::mutex> lk(g_lock); auto wit = g_windows.find(id); if (wit != g_windows.end( )) { wit->second.minimized = true; wit->second.tombstoned = true; if (g_focus == id) g_focus = 0; } } invalidate(id); } break;
-            case MsgType::MT_ShowDesktopToggle: { if (!g_showDesktopActive) { g_showDesktopMinimized.clear( ); for (uint64_t id : g_z) { auto it = g_windows.find(id); if (it != g_windows.end( ) && !it->second.minimized) { it->second.minimized = true; it->second.tombstoned = true; g_showDesktopMinimized.push_back(id); } } g_focus = 0; g_showDesktopActive = true; } else { for (uint64_t id : g_showDesktopMinimized) { auto it = g_windows.find(id); if (it != g_windows.end( )) { it->second.minimized = false; it->second.tombstoned = false; } } g_showDesktopMinimized.clear( ); g_showDesktopActive = false; } invalidate(0); } break;
+            case MsgType::MT_Activate: { uint64_t id = 0; try { id = std::stoull(s); } catch (...) {} { std::lock_guard<std::mutex> lk(g_lock); if (g_modalWindow != 0 && id != g_modalWindow) id = g_modalWindow; for (auto it = g_z.begin( ); it != g_z.end( ); ++it) { if (*it == id) { g_z.erase(it); break; } } auto wit = g_windows.find(id); if (wit != g_windows.end( )) { wit->second.minimized = false; wit->second.tombstoned = false; } g_z.push_back(id); g_focus = id; } sendFocus(id); invalidate(id); } break;
+            case MsgType::MT_Minimize: { uint64_t id = 0; try { id = std::stoull(s); } catch (...) {} { std::lock_guard<std::mutex> lk(g_lock); if (g_modalWindow != 0 && id != g_modalWindow) break; auto wit = g_windows.find(id); if (wit != g_windows.end( )) { wit->second.minimized = true; wit->second.tombstoned = true; if (g_modalWindow == id) g_modalWindow = 0; if (g_focus == id) g_focus = 0; } } invalidate(id); } break;
+            case MsgType::MT_ShowDesktopToggle: { { std::lock_guard<std::mutex> lk(g_lock); if (g_modalWindow != 0) { for (auto it = g_z.begin( ); it != g_z.end( ); ++it) { if (*it == g_modalWindow) { g_z.erase(it); break; } } g_z.push_back(g_modalWindow); g_focus = g_modalWindow; invalidate(g_modalWindow); break; } } if (!g_showDesktopActive) { g_showDesktopMinimized.clear( ); for (uint64_t id : g_z) { auto it = g_windows.find(id); if (it != g_windows.end( ) && !it->second.minimized) { it->second.minimized = true; it->second.tombstoned = true; g_showDesktopMinimized.push_back(id); } } g_focus = 0; g_showDesktopActive = true; } else { for (uint64_t id : g_showDesktopMinimized) { auto it = g_windows.find(id); if (it != g_windows.end( )) { it->second.minimized = false; it->second.tombstoned = false; } } g_showDesktopMinimized.clear( ); g_showDesktopActive = false; } invalidate(0); } break;
             case MsgType::MT_StateSave: { std::string path = s; std::vector<SavedWindow> sw; { std::lock_guard<std::mutex> lk(g_lock); for (size_t i = 0; i < g_z.size( ); ++i) { uint64_t id = g_z[i]; auto it = g_windows.find(id); if (it == g_windows.end( )) continue; const WinInfo& w = it->second; SavedWindow rec; rec.id = w.id; rec.title = w.title; rec.x = w.x; rec.y = w.y; rec.w = w.w; rec.h = w.h; rec.minimized = w.minimized; rec.maximized = w.maximized; rec.z = (int)i; rec.focused = (g_focus == w.id); rec.snap = w.snapState; sw.push_back(rec); } } std::string err; if (!DesktopState::Save(path, sw, err)) publishOut(MsgType::MT_WidgetEvt, std::string("STATE_SAVE_ERR|") + err); else publishOut(MsgType::MT_WidgetEvt, std::string("STATE_SAVE_OK|") + path); } break;
             case MsgType::MT_StateLoad: { std::string path = s; std::vector<SavedWindow> sw; std::string err; if (!DesktopState::Load(path, sw, err)) { publishOut(MsgType::MT_WidgetEvt, std::string("STATE_LOAD_ERR|") + err); } else { { std::lock_guard<std::mutex> lk(g_lock); g_windows.clear( ); g_z.clear( ); g_focus = 0; std::sort(sw.begin( ), sw.end( ), [] (const SavedWindow& a, const SavedWindow& b) { return a.z < b.z; }); for (auto& w : sw) { uint64_t id = s_nextWinId.fetch_add(1); WinInfo wi{ id, w.title, w.x, w.y, w.w, w.h, {}, {}, {}, w.minimized, w.maximized, 0,0,0,0, true, w.snap }; if (wi.maximized) { RECT crL{ 0,0,1024,768 }; if (g_hwnd) GetClientRect(g_hwnd, &crL); int taskbarY = crL.bottom - 40; wi.x = crL.left; wi.y = crL.top; wi.w = crL.right - crL.left; wi.h = taskbarY - crL.top; } g_windows[id] = wi; g_z.push_back(id); if (w.focused && !wi.minimized) g_focus = id; } } publishOut(MsgType::MT_WidgetEvt, std::string("STATE_LOAD_OK|") + path); invalidate(0); } } break;
             case MsgType::MT_Invalidate: { invalidate(0); } break;
@@ -1070,6 +1079,15 @@ namespace gxos {
                     int mx = std::stoi(xStr);
                     int my = std::stoi(yStr);
                     int button = std::stoi(buttonStr);
+                    bool blockedByModal = false;
+                    {
+                        std::lock_guard<std::mutex> lk(g_lock);
+                        blockedByModal = blockInputBehindModal(mx, my);
+                    }
+                    if (blockedByModal) {
+                        invalidate(0);
+                        break;
+                    }
                     
                     // Handle based on button and action
                     if (button == 1) { // Left button
@@ -1083,21 +1101,34 @@ namespace gxos {
                             // Right-click handling - check if over a window
                             WinInfo* hitWin = nullptr;
                             uint64_t ownerPid = 0;
+                            bool blockedRightClick = false;
                             {
                                 std::lock_guard<std::mutex> lk(g_lock);
+                                blockedRightClick = blockInputBehindModal(mx, my);
                                 hitWin = hitWindowAt(mx, my);
                                 if (hitWin) {
-                                    ownerPid = hitWin->ownerPid;
-                                    // Set focus to the clicked window
-                                    if (g_focus != hitWin->id) {
-                                        g_focus = hitWin->id;
-                                        auto it2 = std::find(g_z.begin(), g_z.end(), hitWin->id);
-                                        if (it2 != g_z.end()) {
-                                            g_z.erase(it2);
-                                            g_z.push_back(hitWin->id);
+                                    if (g_modalWindow != 0 && hitWin->id != g_modalWindow) {
+                                        blockedRightClick = true;
+                                    }
+                                    if (blockedRightClick) {
+                                        hitWin = nullptr;
+                                    } else {
+                                        ownerPid = hitWin->ownerPid;
+                                        // Set focus to the clicked window
+                                        if (g_focus != hitWin->id) {
+                                            g_focus = hitWin->id;
+                                            auto it2 = std::find(g_z.begin(), g_z.end(), hitWin->id);
+                                            if (it2 != g_z.end()) {
+                                                g_z.erase(it2);
+                                                g_z.push_back(hitWin->id);
+                                            }
                                         }
                                     }
                                 }
+                            }
+                            if (blockedRightClick) {
+                                invalidate(0);
+                                break;
                             }
                             
                             // If right-click is on a window, forward the event to the application
@@ -1132,10 +1163,7 @@ namespace gxos {
                     uint64_t ownerPid = 0;
                     {
                         std::lock_guard<std::mutex> lk(g_lock);
-                        auto it = g_windows.find(g_focus);
-                        if (it != g_windows.end()) {
-                            ownerPid = it->second.ownerPid;
-                        }
+                        ownerPid = inputOwnerPid( );
                     }
                     
                     // Forward to focused window

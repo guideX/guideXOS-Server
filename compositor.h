@@ -40,6 +40,7 @@ namespace gxos { namespace gui {
         bool dirty{true}; 
         int snapState{0}; 
         bool tombstoned{false}; 
+        bool modal{false};
 #ifdef _WIN32
         HBITMAP taskbarIcon{nullptr}; 
 #endif
@@ -76,6 +77,9 @@ namespace gxos { namespace gui {
         static void handleMouse(int mx, int my, bool down, bool up);
         static void emitWidgetEvt(uint64_t winId, int wid, const std::string& evt, const std::string& value);
         static WinInfo* hitWindowAt(int mx, int my);
+        static bool isDialogTitle(const std::string& title);
+        static bool blockInputBehindModal(int mx, int my);
+        static uint64_t inputOwnerPid();
         static void launchAction(const std::string& act);
         static void pinAction(const std::string& act);
         static void unpinAction(const std::string& act);
@@ -111,6 +115,7 @@ namespace gxos { namespace gui {
 #endif
         static std::atomic<uint64_t> s_nextWinId;
         static std::unordered_map<uint64_t, WinInfo> g_windows; static std::vector<uint64_t> g_z; static std::mutex g_lock; static uint64_t g_focus;
+        static uint64_t g_modalWindow;
         static bool g_dragActive; static int g_dragOffX; static int g_dragOffY; static uint64_t g_dragWin; static int g_dragStartX; static int g_dragStartY;
         static bool g_dragPending; static uint64_t g_dragPendingWin;
         static bool g_resizeActive; static int g_resizeStartW; static int g_resizeStartH; static int g_resizeStartMX; static int g_resizeStartMY; static uint64_t g_resizeWin;
