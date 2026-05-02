@@ -3291,13 +3291,13 @@ void draw()
     // Draw kernel compositor windows (GUI apps)
     compositor::KernelCompositor::drawAllWindows();
     
-    // Draw taskbar buttons for kernel apps
-    compositor::TaskbarManager::drawButtons();
-    
     // Draw shell window last if active (so it appears on top)
     if (shellVisible && s_shellActive) {
         draw_shell_window();
     }
+
+    // Draw taskbar buttons for kernel apps after windows so minimized apps remain reachable.
+    compositor::TaskbarManager::drawButtons();
     
     // Draw start menu LAST so it appears on top of all windows
     draw_start_menu();

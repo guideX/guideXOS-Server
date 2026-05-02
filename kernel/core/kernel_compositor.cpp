@@ -985,6 +985,8 @@ void TaskbarManager::updateButtons() {
 }
 
 void TaskbarManager::drawButtons() {
+    updateButtons();
+
     for (int i = 0; i < s_buttonCount; i++) {
         TaskbarButton& btn = s_buttons[i];
         
@@ -1005,6 +1007,8 @@ void TaskbarManager::drawButtons() {
 }
 
 bool TaskbarManager::handleClick(int32_t mx, int32_t my) {
+    updateButtons();
+
     for (int i = 0; i < s_buttonCount; i++) {
         TaskbarButton& btn = s_buttons[i];
         if (mx >= btn.x && mx < btn.x + btn.w &&
