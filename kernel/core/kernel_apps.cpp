@@ -10,6 +10,7 @@
 #include "include/kernel/shell.h"
 #include "include/kernel/ps2keyboard.h"
 #include "include/kernel/vfs.h"
+#include "include/kernel/pit.h"
 #include "include/kernel/serial_debug.h"
 
 namespace kernel {
@@ -1400,6 +1401,7 @@ void TaskManagerApp::refreshList() {
 
 FileExplorerApp::FileExplorerApp()
     : m_entryCount(0), m_selected(0), m_scroll(0),
+      m_lastClickIndex(-1), m_lastClickTick(0),
       m_backBtnId(-1), m_upBtnId(-1), m_refreshBtnId(-1), m_rootBtnId(-1) {
     strcopy(m_name, "Files", app::MAX_APP_NAME);
     strcopy(m_currentPath, "/", MAX_PATH_LEN);
@@ -1552,7 +1554,15 @@ void FileExplorerApp::onMouseDown(int localX, int localY, uint8_t button) {
     int row = (localY - bodyY - 24) / ROW_H;
     int index = m_scroll + row;
     if (index >= 0 && index < m_entryCount) {
+        uint64_t now = pit::ticks();
+        bool doubleClick = (index == m_lastClickIndex && now >= m_lastClickTick && now - m_lastClickTick <= 50);
         m_selected = index;
+        m_lastClickIndex = index;
+        m_lastClickTick = now;
+        if (doubleClick) {
+            openSelected();
+            return;
+        }
         invalidate();
     }
 }
@@ -1611,6 +1621,8 @@ void FileExplorerApp::navigate(const char* path) {
     strcopy(m_currentPath, path, MAX_PATH_LEN);
     m_selected = 0;
     m_scroll = 0;
+    m_lastClickIndex = -1;
+    m_lastClickTick = 0;
     refresh();
     invalidate();
 }
@@ -1622,8 +1634,15 @@ void FileExplorerApp::openSelected() {
     joinPath(m_currentPath, e.name, full, sizeof(full));
     if (e.isDir) {
         navigate(full);
+    } else if (isTextFile(e.name)) {
+        if (app::AppManager::launchAppWithParam("Notepad", full)) {
+            setStatus("Opened text file in Notepad");
+        } else {
+            setStatus("Unable to open text file in Notepad");
+        }
+        invalidate();
     } else {
-        setStatus("File selected. File associations will open this later.");
+        setStatus("Only .TXT and .TEXT files open in Notepad");
         invalidate();
     }
 }
@@ -1644,6 +1663,29 @@ void FileExplorerApp::goUp() {
 
 void FileExplorerApp::setStatus(const char* status) {
     strcopy(m_status, status ? status : "", sizeof(m_status));
+}
+
+bool FileExplorerApp::isTextFile(const char* name) const {
+    if (!name) return false;
+
+    const char* dot = nullptr;
+    for (int i = 0; name[i]; ++i) {
+        if (name[i] == '.') dot = &name[i];
+    }
+
+    if (!dot) return false;
+
+    char ext[6];
+    int len = 0;
+    for (int i = 1; dot[i] && len < 5; ++i) {
+        char c = dot[i];
+        if (c >= 'A' && c <= 'Z') c = (char)(c - 'A' + 'a');
+        ext[len++] = c;
+    }
+    ext[len] = '\0';
+
+    return (len == 3 && ext[0] == 't' && ext[1] == 'x' && ext[2] == 't') ||
+           (len == 4 && ext[0] == 't' && ext[1] == 'e' && ext[2] == 'x' && ext[3] == 't');
 }
 
 void FileExplorerApp::joinPath(const char* base, const char* name, char* out, int outSize) const {

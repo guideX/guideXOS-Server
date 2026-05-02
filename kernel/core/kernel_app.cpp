@@ -370,15 +370,18 @@ bool AppManager::launchAppWithParam(const char* name, const char* param) {
         return false;
     }
     
-    // Check if already running
-    for (int i = 0; i < s_runningAppCount; i++) {
-        if (s_runningApps[i] && streq(s_runningApps[i]->getName(), name)) {
-            // Focus existing window
-            if (s_runningApps[i]->getWindow()) {
-                compositor::KernelCompositor::setFocus(s_runningApps[i]->getWindow()->id);
+    bool allowNewParameterizedInstance = param && streq(name, "Notepad");
+    if (!allowNewParameterizedInstance) {
+        // Check if already running
+        for (int i = 0; i < s_runningAppCount; i++) {
+            if (s_runningApps[i] && streq(s_runningApps[i]->getName(), name)) {
+                // Focus existing window
+                if (s_runningApps[i]->getWindow()) {
+                    compositor::KernelCompositor::setFocus(s_runningApps[i]->getWindow()->id);
+                }
+                AppLogger::logLaunch(name, LaunchResult::AlreadyRunning);
+                return true;
             }
-            AppLogger::logLaunch(name, LaunchResult::AlreadyRunning);
-            return true;
         }
     }
     

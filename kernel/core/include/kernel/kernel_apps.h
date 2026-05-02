@@ -210,6 +210,8 @@ private:
     int m_entryCount;
     int m_selected;
     int m_scroll;
+    int m_lastClickIndex;
+    uint64_t m_lastClickTick;
     int m_backBtnId;
     int m_upBtnId;
     int m_refreshBtnId;
@@ -220,6 +222,7 @@ private:
     void openSelected();
     void goUp();
     void setStatus(const char* status);
+    bool isTextFile(const char* name) const;
     void joinPath(const char* base, const char* name, char* out, int outSize) const;
     void parentPath(const char* path, char* out, int outSize) const;
     void formatSize(uint64_t size, char* out, int outSize) const;
