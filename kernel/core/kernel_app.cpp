@@ -310,6 +310,7 @@ bool AppManager::launchApp(const char* name) {
         AppLogger::logLaunch(name ? name : "unknown", LaunchResult::NotAvailable);
         return false;
     }
+    update();
     
     // Find registered app
     const AppInfo* info = getAppInfo(name);
@@ -320,7 +321,7 @@ bool AppManager::launchApp(const char* name) {
     
     // Check if already running
     for (int i = 0; i < s_runningAppCount; i++) {
-        if (s_runningApps[i] && streq(s_runningApps[i]->getName(), name)) {
+        if (s_runningApps[i] && s_runningApps[i]->getState() != AppState::Terminated && streq(s_runningApps[i]->getName(), name)) {
             // Focus existing window
             if (s_runningApps[i]->getWindow()) {
                 compositor::KernelCompositor::setFocus(s_runningApps[i]->getWindow()->id);
@@ -362,6 +363,7 @@ bool AppManager::launchAppWithParam(const char* name, const char* param) {
         AppLogger::logLaunch(name ? name : "unknown", LaunchResult::NotAvailable);
         return false;
     }
+    update();
     
     // Find registered app
     const AppInfo* info = getAppInfo(name);
@@ -374,7 +376,7 @@ bool AppManager::launchAppWithParam(const char* name, const char* param) {
     if (!allowNewParameterizedInstance) {
         // Check if already running
         for (int i = 0; i < s_runningAppCount; i++) {
-            if (s_runningApps[i] && streq(s_runningApps[i]->getName(), name)) {
+            if (s_runningApps[i] && s_runningApps[i]->getState() != AppState::Terminated && streq(s_runningApps[i]->getName(), name)) {
                 // Focus existing window
                 if (s_runningApps[i]->getWindow()) {
                     compositor::KernelCompositor::setFocus(s_runningApps[i]->getWindow()->id);

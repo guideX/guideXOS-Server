@@ -332,8 +332,10 @@ void KernelCompositor::restoreWindow(uint32_t windowId) {
 void KernelCompositor::closeWindow(uint32_t windowId) {
     app::KernelWindow* win = getWindow(windowId);
     if (win && win->owner) {
-        // Directly request the app to close (calls onWindowClose and cleans up)
-        win->owner->requestClose();
+        // Close the owning app, not just the window.  This removes it from
+        // AppManager immediately so launching the same app again creates a
+        // fresh instance instead of focusing a now-hidden/closed window.
+        app::AppManager::closeApp(win->owner);
     }
 }
 
