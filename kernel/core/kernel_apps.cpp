@@ -1473,31 +1473,8 @@ void TaskManagerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
     
     // Column headers
     uint32_t headerY = y + 10 + (24 - kGlyphH) / 2;
-    // Draw "Application" header
-    for (int i = 0; i < 11; i++) {
-        char c = "Application"[i];
-        for (int dy = 0; dy < kGlyphH; dy++) {
-            for (int dx = 0; dx < kGlyphW; dx++) {
-                if (((c + dx + dy) % 3) == 0) {
-                    framebuffer::put_pixel(x + 15 + i * (kGlyphW + kGlyphSpacing) + dx, 
-                                           headerY + dy, rgb(180, 185, 200));
-                }
-            }
-        }
-    }
-    
-    // Draw "Status" header
-    for (int i = 0; i < 6; i++) {
-        char c = "Status"[i];
-        for (int dy = 0; dy < kGlyphH; dy++) {
-            for (int dx = 0; dx < kGlyphW; dx++) {
-                if (((c + dx + dy) % 3) == 0) {
-                    framebuffer::put_pixel(x + w - 90 + i * (kGlyphW + kGlyphSpacing) + dx,
-                                           headerY + dy, rgb(180, 185, 200));
-                }
-            }
-        }
-    }
+    appDrawText(x + 15, headerY, "Application", rgb(220, 225, 240));
+    appDrawText(x + w - 95, headerY, "Status", rgb(220, 225, 240));
     
     // List background
     uint32_t listY = y + 40;
@@ -1518,18 +1495,7 @@ void TaskManagerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
         
         // App name
         uint32_t textY = rowY + (rowH - kGlyphH) / 2;
-        int nameLen = strlen_local(m_entries[i].name);
-        for (int j = 0; j < nameLen && j < 25; j++) {
-            char c = m_entries[i].name[j];
-            for (int dy = 0; dy < kGlyphH; dy++) {
-                for (int dx = 0; dx < kGlyphW; dx++) {
-                    if (((c + dx + dy) % 2) == 0) {
-                        framebuffer::put_pixel(x + 15 + j * (kGlyphW + kGlyphSpacing) + dx,
-                                               textY + dy, rgb(210, 210, 225));
-                    }
-                }
-            }
-        }
+        appDrawText(x + 15, textY, m_entries[i].name, rgb(235, 235, 245));
         
         // Status indicator
         uint32_t statusColor = m_entries[i].running ? rgb(80, 180, 100) : rgb(180, 80, 80);
@@ -1537,18 +1503,7 @@ void TaskManagerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
         
         // Status text
         const char* status = m_entries[i].running ? "Running" : "Stopped";
-        int slen = strlen_local(status);
-        for (int j = 0; j < slen; j++) {
-            char c = status[j];
-            for (int dy = 0; dy < kGlyphH; dy++) {
-                for (int dx = 0; dx < kGlyphW; dx++) {
-                    if (((c + dx + dy) % 3) == 0) {
-                        framebuffer::put_pixel(x + w - 68 + j * (kGlyphW + kGlyphSpacing) + dx,
-                                               textY + dy, rgb(160, 165, 180));
-                    }
-                }
-            }
-        }
+        appDrawText(x + w - 68, textY, status, rgb(210, 215, 225));
     }
 }
 
