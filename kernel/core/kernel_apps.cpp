@@ -193,6 +193,14 @@ NotepadApp::NotepadApp() : m_textLength(0), m_cursorPos(0), m_scrollY(0), m_sele
     strcopy(m_name, "Notepad", app::MAX_APP_NAME);
     m_text[0] = '\0';
     m_filePath[0] = '\0';
+    m_showSaveDialog = false;
+    m_saveDialogShowingDrives = true;
+    m_saveDialogPath[0] = '\0';
+    strcopy(m_saveDialogFilename, "untitled.txt", MAX_SAVE_FILENAME);
+    m_saveDialogStatus[0] = '\0';
+    m_saveEntryCount = 0;
+    m_saveSelected = 0;
+    m_saveScroll = 0;
 }
 
 NotepadApp::~NotepadApp() {
@@ -305,6 +313,7 @@ void NotepadApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
     if (m_showFileMenu) drawFileMenu(x + 4, y + MENU_BAR_HEIGHT);
     if (m_showEditMenu) drawEditMenu(x + 50, y + MENU_BAR_HEIGHT);
     if (m_showContextMenu) drawContextMenu(x + m_contextMenuX, y + m_contextMenuY);
+    if (m_showSaveDialog) drawSaveAsDialog(x, y, w, h);
 }
 
 void NotepadApp::onKeyChar(char c) {
@@ -427,6 +436,13 @@ void NotepadApp::onMouseDown(int x, int y, uint8_t button) {
     
     // Left click
     if (button == 1) {
+        if (m_showSaveDialog) {
+            if (handleSaveDialogClick(x, y)) {
+                invalidate();
+                return;
+            }
+        }
+
         // Click on menu bar
         if (y < MENU_BAR_HEIGHT) {
             if (handleMenuClick(x, y)) {
@@ -558,8 +574,8 @@ bool NotepadApp::loadFile(const char* path) {
 
 bool NotepadApp::saveFile() {
     if (m_filePath[0] == '\0') {
-        // Need to specify a file path - for now, use default
-        return saveFileAs("/notepad_document.txt");
+        openSaveAsDialog();
+        return false;
     }
     return saveFileAs(m_filePath);
 }
@@ -588,6 +604,207 @@ void NotepadApp::newFile() {
     m_modified = false;
     m_filePath[0] = '\0';
     updateTitle();
+}
+
+void NotepadApp::openSaveAsDialog() {
+    m_showFileMenu = false;
+    m_showEditMenu = false;
+    m_showContextMenu = false;
+    m_showSaveDialog = true;
+    m_saveDialogShowingDrives = true;
+    m_saveDialogPath[0] = '\0';
+    m_saveSelected = 0;
+    m_saveScroll = 0;
+    if (m_filePath[0] != '\0') {
+        const char* base = vfs::basename(m_filePath);
+        if (base && base[0] != '\0') strcopy(m_saveDialogFilename, base, MAX_SAVE_FILENAME);
+    } else {
+        strcopy(m_saveDialogFilename, "untitled.txt", MAX_SAVE_FILENAME);
+    }
+    strcopy(m_saveDialogStatus, "Pick a drive or folder, then Save.", sizeof(m_saveDialogStatus));
+    refreshSaveDialog();
+    invalidate();
+}
+
+void NotepadApp::refreshSaveDialog() {
+    m_saveEntryCount = 0;
+    if (m_saveDialogShowingDrives) {
+        uint8_t count = vfs::mount_count();
+        for (uint8_t i = 0; i < count && m_saveEntryCount < MAX_SAVE_ENTRIES; ++i) {
+            const vfs::MountPoint* mount = vfs::get_mount_by_index(i);
+            if (!mount || !mount->active) continue;
+            SaveDialogEntry& entry = m_saveEntries[m_saveEntryCount++];
+            strcopy(entry.name, mount->path, vfs::VFS_MAX_FILENAME);
+            entry.isDir = true;
+            entry.isDrive = true;
+        }
+    } else {
+        uint8_t dir = vfs::opendir(m_saveDialogPath);
+        if (dir != 0xFF) {
+            vfs::DirEntry de{};
+            while (vfs::readdir(dir, &de) && m_saveEntryCount < MAX_SAVE_ENTRIES) {
+                if (de.type != vfs::FILE_TYPE_DIRECTORY) continue;
+                SaveDialogEntry& entry = m_saveEntries[m_saveEntryCount++];
+                strcopy(entry.name, de.name, vfs::VFS_MAX_FILENAME);
+                entry.isDir = true;
+                entry.isDrive = false;
+            }
+            vfs::closedir(dir);
+        }
+    }
+    if (m_saveSelected >= m_saveEntryCount) m_saveSelected = m_saveEntryCount - 1;
+    if (m_saveSelected < 0) m_saveSelected = 0;
+}
+
+void NotepadApp::drawSaveAsDialog(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
+    uint32_t dlgW = w > 440 ? 420 : w - 20;
+    uint32_t dlgH = h > 300 ? 280 : h - 20;
+    uint32_t dlgX = x + (w - dlgW) / 2;
+    uint32_t dlgY = y + (h - dlgH) / 2;
+
+    framebuffer::fill_rect(dlgX, dlgY, dlgW, dlgH, rgb(35, 35, 45));
+    framebuffer::fill_rect(dlgX, dlgY, dlgW, 1, rgb(150, 150, 170));
+    framebuffer::fill_rect(dlgX, dlgY + dlgH - 1, dlgW, 1, rgb(150, 150, 170));
+    framebuffer::fill_rect(dlgX, dlgY, 1, dlgH, rgb(150, 150, 170));
+    framebuffer::fill_rect(dlgX + dlgW - 1, dlgY, 1, dlgH, rgb(150, 150, 170));
+    appDrawText(dlgX + 12, dlgY + 10, "Save As", rgb(255, 255, 255));
+
+    appDrawText(dlgX + 12, dlgY + 32, m_saveDialogShowingDrives ? "Save in: Computer" : "Save in:", rgb(220, 220, 230));
+    if (!m_saveDialogShowingDrives) appDrawText(dlgX + 70, dlgY + 32, m_saveDialogPath, rgb(200, 220, 255));
+
+    framebuffer::fill_rect(dlgX + 12, dlgY + 54, dlgW - 24, 130, rgb(25, 25, 32));
+    const int rowH = 16;
+    int rows = 8;
+    for (int i = 0; i < rows; ++i) {
+        int index = m_saveScroll + i;
+        if (index >= m_saveEntryCount) break;
+        uint32_t rowY = dlgY + 58 + i * rowH;
+        if (index == m_saveSelected) framebuffer::fill_rect(dlgX + 14, rowY - 2, dlgW - 28, rowH, rgb(50, 90, 150));
+        appDrawText(dlgX + 18, rowY, m_saveEntries[index].isDrive ? "[DRIVE]" : "[DIR]", rgb(210, 210, 120));
+        appDrawText(dlgX + 70, rowY, m_saveEntries[index].name, rgb(235, 235, 240));
+    }
+    if (m_saveEntryCount == 0) appDrawText(dlgX + 18, dlgY + 64, "No drives or folders found.", rgb(240, 180, 120));
+
+    appDrawText(dlgX + 12, dlgY + 196, "File name:", rgb(220, 220, 230));
+    framebuffer::fill_rect(dlgX + 86, dlgY + 190, dlgW - 110, 22, rgb(20, 20, 28));
+    appDrawText(dlgX + 92, dlgY + 197, m_saveDialogFilename, rgb(255, 255, 255));
+
+    framebuffer::fill_rect(dlgX + 12, dlgY + 226, 70, 24, rgb(65, 75, 95));
+    appDrawText(dlgX + 28, dlgY + 234, "Drives", rgb(255, 255, 255));
+    framebuffer::fill_rect(dlgX + 90, dlgY + 226, 55, 24, rgb(65, 75, 95));
+    appDrawText(dlgX + 110, dlgY + 234, "Up", rgb(255, 255, 255));
+    framebuffer::fill_rect(dlgX + dlgW - 170, dlgY + 226, 70, 24, rgb(50, 110, 70));
+    appDrawText(dlgX + dlgW - 147, dlgY + 234, "Save", rgb(255, 255, 255));
+    framebuffer::fill_rect(dlgX + dlgW - 90, dlgY + 226, 70, 24, rgb(110, 65, 65));
+    appDrawText(dlgX + dlgW - 72, dlgY + 234, "Cancel", rgb(255, 255, 255));
+
+    appDrawText(dlgX + 12, dlgY + 260, m_saveDialogStatus, rgb(210, 210, 210));
+}
+
+void NotepadApp::navigateSaveDialog(const char* path) {
+    if (!path || path[0] == '\0') return;
+    strcopy(m_saveDialogPath, path, MAX_PATH_LEN);
+    m_saveDialogShowingDrives = false;
+    m_saveSelected = 0;
+    m_saveScroll = 0;
+    refreshSaveDialog();
+}
+
+void NotepadApp::saveDialogGoUp() {
+    if (m_saveDialogShowingDrives || m_saveDialogPath[0] == '\0' || (m_saveDialogPath[0] == '/' && m_saveDialogPath[1] == '\0')) {
+        m_saveDialogShowingDrives = true;
+        m_saveDialogPath[0] = '\0';
+        refreshSaveDialog();
+        return;
+    }
+    char parent[MAX_PATH_LEN];
+    vfs::parent_path(m_saveDialogPath, parent, sizeof(parent));
+    navigateSaveDialog(parent);
+}
+
+void NotepadApp::buildSavePath(char* out, int outSize) const {
+    if (!out || outSize <= 0) return;
+    int pos = 0;
+    const char* path = m_saveDialogPath;
+    while (*path && pos < outSize - 1) out[pos++] = *path++;
+    if (pos > 0 && out[pos - 1] != '/' && pos < outSize - 1) out[pos++] = '/';
+    const char* name = m_saveDialogFilename;
+    bool hasDot = false;
+    while (*name && pos < outSize - 1) {
+        if (*name == '.') hasDot = true;
+        out[pos++] = *name++;
+    }
+    if (!hasDot) {
+        const char* ext = ".txt";
+        while (*ext && pos < outSize - 1) out[pos++] = *ext++;
+    }
+    out[pos] = '\0';
+}
+
+bool NotepadApp::saveToDialogTarget() {
+    if (m_saveDialogShowingDrives || m_saveDialogPath[0] == '\0') {
+        strcopy(m_saveDialogStatus, "Select a drive or folder first.", sizeof(m_saveDialogStatus));
+        return false;
+    }
+    char fullPath[MAX_PATH_LEN];
+    buildSavePath(fullPath, sizeof(fullPath));
+    if (!saveFileAs(fullPath)) {
+        strcopy(m_saveDialogStatus, "Save failed. Use an 8.3 name like NOTE.TXT.", sizeof(m_saveDialogStatus));
+        return false;
+    }
+    m_showSaveDialog = false;
+    return true;
+}
+
+bool NotepadApp::handleSaveDialogClick(int x, int y) {
+    if (!m_window) return false;
+    int w = m_window->w;
+    int h = m_window->h - 24;
+    int dlgW = w > 440 ? 420 : w - 20;
+    int dlgH = h > 300 ? 280 : h - 20;
+    int dlgX = (w - dlgW) / 2;
+    int dlgY = (h - dlgH) / 2;
+
+    if (x < dlgX || x >= dlgX + dlgW || y < dlgY || y >= dlgY + dlgH) return true;
+
+    if (y >= dlgY + 58 && y < dlgY + 58 + 8 * 16 && x >= dlgX + 12 && x < dlgX + dlgW - 12) {
+        int row = (y - (dlgY + 58)) / 16;
+        int index = m_saveScroll + row;
+        if (index >= 0 && index < m_saveEntryCount) {
+            m_saveSelected = index;
+            if (m_saveEntries[index].isDrive) {
+                navigateSaveDialog(m_saveEntries[index].name);
+            } else if (m_saveEntries[index].isDir) {
+                char child[MAX_PATH_LEN];
+                vfs::join_path(m_saveDialogPath, m_saveEntries[index].name, child, sizeof(child));
+                navigateSaveDialog(child);
+            }
+        }
+        return true;
+    }
+
+    if (y >= dlgY + 226 && y < dlgY + 250) {
+        if (x >= dlgX + 12 && x < dlgX + 82) {
+            m_saveDialogShowingDrives = true;
+            m_saveDialogPath[0] = '\0';
+            refreshSaveDialog();
+            return true;
+        }
+        if (x >= dlgX + 90 && x < dlgX + 145) {
+            saveDialogGoUp();
+            return true;
+        }
+        if (x >= dlgX + dlgW - 170 && x < dlgX + dlgW - 100) {
+            saveToDialogTarget();
+            return true;
+        }
+        if (x >= dlgX + dlgW - 90 && x < dlgX + dlgW - 20) {
+            m_showSaveDialog = false;
+            return true;
+        }
+    }
+
+    return true;
 }
 
 void NotepadApp::updateTitle() {
@@ -809,7 +1026,7 @@ bool NotepadApp::handleMenuClick(int x, int y) {
                 switch (item) {
                     case 0: newFile(); break;
                     case 1: saveFile(); break;
-                    case 2: saveFileAs("/notepad_document.txt"); break;
+                    case 2: openSaveAsDialog(); break;
                     case 3: requestClose(); break;
                 }
                 return true;

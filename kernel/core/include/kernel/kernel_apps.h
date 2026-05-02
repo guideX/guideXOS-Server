@@ -41,9 +41,17 @@ private:
     static const int MAX_TEXT_LENGTH = 8192;
     static const int MAX_LINES = 200;
     static const int MAX_PATH_LEN = 256;
+    static const int MAX_SAVE_ENTRIES = 32;
+    static const int MAX_SAVE_FILENAME = 64;
     static const int MENU_BAR_HEIGHT = 20;
     static const int CONTEXT_MENU_WIDTH = 120;
     static const int CONTEXT_MENU_ITEM_HEIGHT = 20;
+
+    struct SaveDialogEntry {
+        char name[vfs::VFS_MAX_FILENAME];
+        bool isDir;
+        bool isDrive;
+    };
     
     char m_text[MAX_TEXT_LENGTH];
     char m_filePath[MAX_PATH_LEN];
@@ -58,9 +66,18 @@ private:
     bool m_showFileMenu;
     bool m_showEditMenu;
     bool m_showContextMenu;
+    bool m_showSaveDialog;
+    bool m_saveDialogShowingDrives;
     int m_contextMenuX;
     int m_contextMenuY;
     int m_hoveredMenuItem;
+    char m_saveDialogPath[MAX_PATH_LEN];
+    char m_saveDialogFilename[MAX_SAVE_FILENAME];
+    char m_saveDialogStatus[96];
+    SaveDialogEntry m_saveEntries[MAX_SAVE_ENTRIES];
+    int m_saveEntryCount;
+    int m_saveSelected;
+    int m_saveScroll;
     
     // Clipboard
     static char s_clipboard[MAX_TEXT_LENGTH];
@@ -74,6 +91,14 @@ private:
     bool saveFileAs(const char* path);
     void newFile();
     void updateTitle();
+    void openSaveAsDialog();
+    void refreshSaveDialog();
+    void drawSaveAsDialog(uint32_t x, uint32_t y, uint32_t w, uint32_t h);
+    bool handleSaveDialogClick(int x, int y);
+    void navigateSaveDialog(const char* path);
+    void saveDialogGoUp();
+    bool saveToDialogTarget();
+    void buildSavePath(char* out, int outSize) const;
     
     // Text operations
     void insertChar(char c);

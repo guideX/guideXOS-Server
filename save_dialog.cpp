@@ -3,6 +3,11 @@
 #include "logger.h"
 #include <sstream>
 #include <algorithm>
+#include <cctype>
+
+#ifndef _WIN32
+#include "kernel/core/include/kernel/vfs.h"
+#endif
 
 namespace gxos { namespace dialogs {
     
@@ -16,6 +21,7 @@ namespace gxos { namespace dialogs {
     int SaveDialog::s_selectedIndex = 0;
     int SaveDialog::s_scrollOffset = 0;
     bool SaveDialog::s_fileNameFocus = true;
+    bool SaveDialog::s_showingDrives = false;
     std::function<void(const std::string&)> SaveDialog::s_onSave = nullptr;
     int SaveDialog::s_lastKeyCode = 0;
     bool SaveDialog::s_keyDown = false;
@@ -24,10 +30,13 @@ namespace gxos { namespace dialogs {
                          const std::string& startPath,
                          const std::string& defaultFileName,
                          std::function<void(const std::string&)> onSave) {
-        s_currentPath = startPath.empty() ? "data/" : startPath;
+        s_currentPath = startPath;
         s_fileName = defaultFileName.empty() ? "untitled.txt" : defaultFileName;
         s_onSave = onSave;
         s_fileNameFocus = true;
+        s_showingDrives = s_currentPath.empty() || s_currentPath == "drives";
+        s_selectedIndex = 0;
+        s_scrollOffset = 0;
         
         // Launch dialog as a new process
         ProcessSpec spec{"save_dialog", SaveDialog::main};
@@ -46,9 +55,6 @@ namespace gxos { namespace dialogs {
                 x = std::stoi(argv[1]);
                 y = std::stoi(argv[2]);
             }
-            
-            // Load directory listing
-            refresh();
             
             // Subscribe to IPC channels
             const char* kGuiChanIn = "gui.input";
@@ -95,13 +101,16 @@ namespace gxos { namespace dialogs {
                                     };
                                     
                                     // Add Up button at top
-                                    addButton(1, 10, 30, 60, 22, "Up");
+                                    addButton(1, 10, 30, 90, 24, "Drives");
+                                    addButton(4, 108, 30, 70, 24, "Up");
                                     
                                     // Add Save and Cancel buttons at bottom
                                     int btnY = 360;  // Near bottom of 400px window
                                     addButton(2, 320, btnY, 90, 28, "Save");
                                     addButton(3, 418, btnY, 90, 28, "Cancel");
                                     
+                                    refresh();
+
                                     // Draw initial content
                                     redraw();
                                 } catch (const std::exception& e) {
@@ -174,15 +183,27 @@ namespace gxos { namespace dialogs {
                                         
                                         switch (widgetId) {
                                             case 1: // Up
+                                                s_showingDrives = true;
+                                                s_currentPath.clear();
+                                                refresh();
+                                                redraw();
+                                                break;
+                                            case 4: // Up
                                                 goUp();
                                                 break;
                                             case 2: // Save
-                                                saveAction();
-                                                running = false;
+                                                if (saveAction()) {
+                                                    running = false;
+                                                }
                                                 break;
                                             case 3: // Cancel
                                                 Logger::write(LogLevel::Info, "SaveDialog: Cancelled");
                                                 running = false;
+                                                break;
+                                            default:
+                                                if (widgetId >= 100 && widgetId < 120) {
+                                                    selectEntry(widgetId - 100);
+                                                }
                                                 break;
                                         }
                                     }
@@ -199,6 +220,14 @@ namespace gxos { namespace dialogs {
                 }
             }
             
+            if (s_windowId != 0) {
+                ipc::Message closeMsg;
+                closeMsg.type = (uint32_t)MsgType::MT_Close;
+                std::string closePayload = std::to_string(s_windowId);
+                closeMsg.data.assign(closePayload.begin(), closePayload.end());
+                ipc::Bus::publish(kGuiChanIn, std::move(closeMsg), false);
+            }
+
             Logger::write(LogLevel::Info, "SaveDialog stopped");
             return 0;
             
@@ -213,12 +242,22 @@ namespace gxos { namespace dialogs {
     
     void SaveDialog::navigate(const std::string& path) {
         s_currentPath = path;
+        s_showingDrives = false;
+        s_selectedIndex = 0;
+        s_scrollOffset = 0;
         refresh();
         redraw();
     }
     
     void SaveDialog::goUp() {
+        if (s_showingDrives) {
+            return;
+        }
         if (s_currentPath.empty() || s_currentPath == "/") {
+            s_showingDrives = true;
+            s_currentPath.clear();
+            refresh();
+            redraw();
             return;
         }
         
@@ -236,25 +275,103 @@ namespace gxos { namespace dialogs {
     }
     
     void SaveDialog::refresh() {
-        s_entries = Vfs::instance().list(s_currentPath);
+        s_entries.clear();
+        if (s_showingDrives) {
+#ifndef _WIN32
+            uint8_t count = kernel::vfs::mount_count();
+            for (uint8_t i = 0; i < count; ++i) {
+                const kernel::vfs::MountPoint* mount = kernel::vfs::get_mount_by_index(i);
+                if (!mount || !mount->active) continue;
+
+                VfsEntryInfo info;
+                info.name = mount->path;
+                if (info.name.empty()) info.name = "/";
+                info.size = 0;
+                info.isDir = true;
+                s_entries.push_back(info);
+            }
+#else
+            VfsEntryInfo info;
+            info.name = "data/";
+            info.size = 0;
+            info.isDir = true;
+            s_entries.push_back(info);
+#endif
+        }
+#ifndef _WIN32
+        else {
+        uint8_t dir = kernel::vfs::opendir(s_currentPath.c_str());
+        if (dir != 0xFF) {
+            kernel::vfs::DirEntry entry{};
+            while (kernel::vfs::readdir(dir, &entry)) {
+                VfsEntryInfo info;
+                info.name = entry.name;
+                info.size = entry.size;
+                info.isDir = entry.type == kernel::vfs::FILE_TYPE_DIRECTORY;
+                s_entries.push_back(info);
+            }
+            kernel::vfs::closedir(dir);
+        }
+        }
+#else
+        else {
+            s_entries = Vfs::instance().list(s_currentPath);
+        }
+#endif
+        std::sort(s_entries.begin(), s_entries.end(), [](const VfsEntryInfo& a, const VfsEntryInfo& b) {
+            if (a.isDir != b.isDir) return a.isDir && !b.isDir;
+            return a.name < b.name;
+        });
         s_selectedIndex = std::min(s_selectedIndex, (int)s_entries.size() - 1);
         if (s_selectedIndex < 0) s_selectedIndex = 0;
         
         Logger::write(LogLevel::Info, std::string("SaveDialog: Loaded ") + std::to_string(s_entries.size()) + " entries from " + s_currentPath);
     }
-    
-    void SaveDialog::saveAction() {
-        if (s_fileName.empty()) {
-            Logger::write(LogLevel::Warn, "SaveDialog: No filename specified");
+
+    void SaveDialog::selectEntry(int visibleIndex) {
+        int index = s_scrollOffset + visibleIndex;
+        if (index < 0 || index >= (int)s_entries.size()) return;
+
+        s_selectedIndex = index;
+        const VfsEntryInfo& entry = s_entries[index];
+        if (s_showingDrives) {
+            navigate(entry.name);
             return;
         }
+
+        if (entry.isDir) {
+            std::string path = s_currentPath;
+            if (!path.empty() && path.back() != '/') path += '/';
+            path += entry.name;
+            if (!path.empty() && path.back() != '/') path += '/';
+            navigate(path);
+        }
+    }
+    
+    bool SaveDialog::saveAction() {
+        if (s_fileName.empty()) {
+            Logger::write(LogLevel::Warn, "SaveDialog: No filename specified");
+            return false;
+        }
         
-        std::string fullPath = s_currentPath + s_fileName;
+        if (s_fileName.find('.') == std::string::npos) {
+            s_fileName += ".txt";
+        }
+
+        if (s_showingDrives || s_currentPath.empty()) {
+            Logger::write(LogLevel::Warn, "SaveDialog: Select a drive or folder before saving");
+            return false;
+        }
+
+        std::string fullPath = s_currentPath;
+        if (!fullPath.empty() && fullPath.back() != '/') fullPath += '/';
+        fullPath += s_fileName;
         Logger::write(LogLevel::Info, std::string("SaveDialog: Saving to ") + fullPath);
         
         if (s_onSave) {
             s_onSave(fullPath);
         }
+        return true;
     }
     
     void SaveDialog::handleKeyPress(int keyCode) {
@@ -308,30 +425,31 @@ namespace gxos { namespace dialogs {
                     redraw();
                 }
             } else if (keyCode == 13) { // Enter - navigate into folder
-                if (s_selectedIndex >= 0 && s_selectedIndex < (int)s_entries.size()) {
-                    const VfsEntryInfo& entry = s_entries[s_selectedIndex];
-                    if (entry.isDir) {
-                        navigate(s_currentPath + entry.name + "/");
-                    }
-                }
+                selectEntry(s_selectedIndex - s_scrollOffset);
             }
         }
     }
     
     void SaveDialog::redraw() {
         const char* kGuiChanIn = "gui.input";
+
+        ipc::Message clearMsg;
+        clearMsg.type = (uint32_t)MsgType::MT_DrawText;
+        std::string clearPayload = std::to_string(s_windowId) + "|\f";
+        clearMsg.data.assign(clearPayload.begin(), clearPayload.end());
+        ipc::Bus::publish(kGuiChanIn, std::move(clearMsg), false);
         
         // Draw current path
         ipc::Message pathMsg;
         pathMsg.type = (uint32_t)MsgType::MT_DrawText;
         std::ostringstream pathOss;
-        pathOss << s_windowId << "|Path: " << s_currentPath;
+        pathOss << s_windowId << "|Save in: " << (s_showingDrives ? std::string("Computer - pick a drive") : s_currentPath);
         std::string pathPayload = pathOss.str();
         pathMsg.data.assign(pathPayload.begin(), pathPayload.end());
         ipc::Bus::publish(kGuiChanIn, std::move(pathMsg), false);
         
         // Draw file list (up to 10 entries)
-        int visibleCount = std::min(10, (int)s_entries.size());
+        int visibleCount = std::min(10, (int)s_entries.size() - s_scrollOffset);
         for (int i = 0; i < visibleCount; i++) {
             int index = s_scrollOffset + i;
             if (index >= (int)s_entries.size()) break;
@@ -342,11 +460,31 @@ namespace gxos { namespace dialogs {
             std::ostringstream entryOss;
             entryOss << s_windowId << "|";
             if (index == s_selectedIndex) entryOss << "> ";
-            if (entry.isDir) entryOss << "[DIR] ";
+            if (s_showingDrives) entryOss << "[DRIVE] ";
+            else if (entry.isDir) entryOss << "[DIR] ";
             entryOss << entry.name;
             std::string entryPayload = entryOss.str();
             entryMsg.data.assign(entryPayload.begin(), entryPayload.end());
             ipc::Bus::publish(kGuiChanIn, std::move(entryMsg), false);
+
+            if (entry.isDir) {
+                ipc::Message buttonMsg;
+                buttonMsg.type = (uint32_t)MsgType::MT_WidgetAdd;
+                std::ostringstream buttonOss;
+                std::string text = s_showingDrives ? ("Open " + entry.name) : ("Open " + entry.name);
+                if (text.size() > 32) text = text.substr(0, 32);
+                buttonOss << s_windowId << "|1|" << (100 + i) << "|260|" << (64 + i * 24) << "|150|22|" << text;
+                std::string buttonPayload = buttonOss.str();
+                buttonMsg.data.assign(buttonPayload.begin(), buttonPayload.end());
+                ipc::Bus::publish(kGuiChanIn, std::move(buttonMsg), false);
+            }
+        }
+        if (visibleCount == 0) {
+            ipc::Message emptyMsg;
+            emptyMsg.type = (uint32_t)MsgType::MT_DrawText;
+            std::string emptyPayload = std::to_string(s_windowId) + "|(No drives or folders found)";
+            emptyMsg.data.assign(emptyPayload.begin(), emptyPayload.end());
+            ipc::Bus::publish(kGuiChanIn, std::move(emptyMsg), false);
         }
         
         // Draw filename field

@@ -263,6 +263,9 @@ uint32_t write_file(uint8_t fileHandle, const void* buffer, uint32_t len);
 // Does not allocate additional clusters.
 bool overwrite_path(uint8_t volumeIndex, const char* path, const void* buffer, uint32_t len);
 
+// Create a new 8.3 file in an existing directory and write its contents.
+bool create_file_path(uint8_t volumeIndex, const char* path, const void* buffer, uint32_t len);
+
 // Close an open file.
 void close_file(uint8_t fileHandle);
 

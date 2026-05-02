@@ -35,9 +35,10 @@ namespace gxos { namespace dialogs {
         static void navigate(const std::string& path);
         static void goUp();
         static void refresh();
+        static void selectEntry(int visibleIndex);
         
         // Actions
-        static void saveAction();
+        static bool saveAction();
         static void handleKeyPress(int keyCode);
         
         // UI update
@@ -51,6 +52,7 @@ namespace gxos { namespace dialogs {
         static int s_selectedIndex;
         static int s_scrollOffset;
         static bool s_fileNameFocus;
+        static bool s_showingDrives;
         static std::function<void(const std::string&)> s_onSave;
         static int s_lastKeyCode;
         static bool s_keyDown;

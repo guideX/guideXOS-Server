@@ -1153,9 +1153,11 @@ int32_t write_file(const char* path, const void* buffer, uint32_t size)
     const char* relPath = get_relative_path(path, mount);
     switch (mount->fsType) {
         case FS_TYPE_FAT32:
-            return fs_fat::overwrite_path(mount->fsVolumeIndex, relPath, buffer, size)
-                ? static_cast<int32_t>(size)
-                : VFS_ERR_NOT_SUPPORTED;
+            if (fs_fat::overwrite_path(mount->fsVolumeIndex, relPath, buffer, size) ||
+                fs_fat::create_file_path(mount->fsVolumeIndex, relPath, buffer, size)) {
+                return static_cast<int32_t>(size);
+            }
+            return VFS_ERR_NOT_SUPPORTED;
 
         default:
             return VFS_ERR_NOT_SUPPORTED;

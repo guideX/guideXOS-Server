@@ -126,13 +126,13 @@ namespace gxos { namespace apps {
                                     };
                                     
                                     // Add toolbar buttons matching Legacy Notepad
-                                    addButton(1, 4, 4, 60, 20, "New");
-                                    addButton(2, 68, 4, 60, 20, "Open");
-                                    addButton(3, 132, 4, 60, 20, "Save");
-                                    addButton(4, 196, 4, 80, 20, "Save As");
-                                    addButton(5, 280, 4, 64, 20, s_wrapText ? "Wrap" : "NoWrap");
-                                    addButton(6, 348, 4, 60, 20, "Undo");
-                                    addButton(7, 412, 4, 60, 20, "Redo");
+                                    addButton(1, 4, 4, 84, 20, "New File");
+                                    addButton(2, 92, 4, 60, 20, "Open");
+                                    addButton(3, 156, 4, 60, 20, "Save");
+                                    addButton(4, 220, 4, 80, 20, "Save As");
+                                    addButton(5, 304, 4, 64, 20, s_wrapText ? "Wrap" : "NoWrap");
+                                    addButton(6, 372, 4, 60, 20, "Undo");
+                                    addButton(7, 436, 4, 60, 20, "Redo");
                                     
                                     // Draw initial content
                                     redrawContent();
@@ -764,7 +764,7 @@ namespace gxos { namespace apps {
             }
         }
         
-        SaveDialog::Show(ownerX, ownerY, "data/", fileName,
+        SaveDialog::Show(ownerX, ownerY, "drives", fileName,
             [](const std::string& path) {
                 // Save callback
                 s_filePath = path;
@@ -942,13 +942,13 @@ namespace gxos { namespace apps {
             msg.data.assign(payload.begin(), payload.end());
             ipc::Bus::publish("gui.input", std::move(msg), false);
         };
-        addButton(1, 4, 4, 60, 20, "New");
-        addButton(2, 68, 4, 60, 20, "Open");
-        addButton(3, 132, 4, 60, 20, "Save");
-        addButton(4, 196, 4, 80, 20, "Save As");
-        addButton(5, 280, 4, 64, 20, s_wrapText ? "Wrap" : "NoWrap");
-        addButton(6, 348, 4, 60, 20, "Undo");
-        addButton(7, 412, 4, 60, 20, "Redo");
+        addButton(1, 4, 4, 84, 20, "New File");
+        addButton(2, 92, 4, 60, 20, "Open");
+        addButton(3, 156, 4, 60, 20, "Save");
+        addButton(4, 220, 4, 80, 20, "Save As");
+        addButton(5, 304, 4, 64, 20, s_wrapText ? "Wrap" : "NoWrap");
+        addButton(6, 372, 4, 60, 20, "Undo");
+        addButton(7, 436, 4, 60, 20, "Redo");
     }
     
     char Notepad::mapKeyToChar(int keyCode) {
