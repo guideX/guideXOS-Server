@@ -13,6 +13,7 @@
 
 #include "include/kernel/desktop.h"
 #include "include/kernel/framebuffer.h"
+#include "include/kernel/startmenubutton_img.h"
 #include "include/kernel/shell.h"
 #include "include/kernel/kernel_app.h"
 #include "include/kernel/kernel_apps.h"
@@ -1642,14 +1643,19 @@ static void draw_taskbar()
     // Top border highlight
     hline(0, tbY, s_screenW, rgb(70, 70, 85));
 
-    // Start button (highlighted when menu is open)
+    // Start button - draw image centered in button area, with tint when menu open
     uint32_t btnY = tbY + 4;
     uint32_t btnH = kTaskbarH - 8;
     uint32_t btnColor = s_startMenuOpen ? rgb(70, 100, 150) : rgb(50, 70, 110);
     uint32_t btnBorder = s_startMenuOpen ? rgb(100, 140, 200) : rgb(90, 120, 180);
     framebuffer::fill_rect(4, btnY, kStartBtnW, btnH, btnColor);
     draw_rect(4, btnY, kStartBtnW, btnH, btnBorder);
-    draw_text_centered(4, btnY, kStartBtnW, btnH, "guideXOS", rgb(240, 240, 255), 1);
+    // Draw the start button image, centered within the button
+    {
+        uint32_t imgX = 4 + (kStartBtnW > kStartBtnImgW ? (kStartBtnW - kStartBtnImgW) / 2 : 0);
+        uint32_t imgY = btnY + (btnH > kStartBtnImgH ? (btnH - kStartBtnImgH) / 2 : 0);
+        framebuffer::blit_alpha(kStartBtnImg, imgX, imgY, kStartBtnImgW, kStartBtnImgH);
+    }
 
     // Search box (after start button, matching compositor layout)
     uint32_t searchX = 4 + kStartBtnW + 8;

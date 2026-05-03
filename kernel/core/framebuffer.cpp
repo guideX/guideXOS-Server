@@ -391,11 +391,39 @@ void draw_line(uint32_t x1, uint32_t y1, uint32_t x2, uint32_t y2, uint32_t colo
 void blit(uint32_t* buffer, uint32_t x, uint32_t y, uint32_t width, uint32_t height)
 {
     if (!g_available || !buffer) return;
-    
+
     for (uint32_t dy = 0; dy < height; dy++) {
         for (uint32_t dx = 0; dx < width; dx++) {
             uint32_t color = buffer[dy * width + dx];
             put_pixel(x + dx, y + dy, color);
+        }
+    }
+}
+
+void blit_alpha(const uint32_t* buffer, uint32_t x, uint32_t y, uint32_t width, uint32_t height)
+{
+    if (!g_available || !buffer) return;
+
+    for (uint32_t dy = 0; dy < height; dy++) {
+        for (uint32_t dx = 0; dx < width; dx++) {
+            uint32_t src = buffer[dy * width + dx];
+            uint8_t a = (src >> 24) & 0xFF;
+            if (a == 0) continue;
+            if (a == 0xFF) {
+                put_pixel(x + dx, y + dy, src);
+            } else {
+                uint32_t dst = get_pixel(x + dx, y + dy);
+                uint8_t sr = (src >> 16) & 0xFF;
+                uint8_t sg = (src >>  8) & 0xFF;
+                uint8_t sb =  src        & 0xFF;
+                uint8_t dr = (dst >> 16) & 0xFF;
+                uint8_t dg = (dst >>  8) & 0xFF;
+                uint8_t db =  dst        & 0xFF;
+                uint8_t or_ = (uint8_t)((sr * a + dr * (255 - a)) / 255);
+                uint8_t og  = (uint8_t)((sg * a + dg * (255 - a)) / 255);
+                uint8_t ob  = (uint8_t)((sb * a + db * (255 - a)) / 255);
+                put_pixel(x + dx, y + dy, 0xFF000000u | ((uint32_t)or_ << 16) | ((uint32_t)og << 8) | ob);
+            }
         }
     }
 }

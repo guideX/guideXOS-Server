@@ -77,6 +77,9 @@ void draw_line(uint32_t x1, uint32_t y1, uint32_t x2, uint32_t y2, uint32_t colo
 // Copy a buffer to screen
 void blit(uint32_t* buffer, uint32_t x, uint32_t y, uint32_t width, uint32_t height);
 
+// Copy a buffer to screen with per-pixel alpha blending (source pixels in ARGB format)
+void blit_alpha(const uint32_t* buffer, uint32_t x, uint32_t y, uint32_t width, uint32_t height);
+
 // Double buffering support
 // Enable double buffering (allocates back buffer)
 bool enable_double_buffering();
