@@ -1822,18 +1822,6 @@ void FileExplorerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
     appDrawText(x + 8, addressY + 7, "Address:", rgb(70, 70, 70));
     appDrawText(x + 62, addressY + 7, m_currentPath, rgb(30, 30, 30));
 
-    if (m_renamePrompt) {
-        framebuffer::fill_rect(x + 220, y + 165, 330, 92, rgb(245, 245, 250));
-        appDrawText(x + 232, y + 182, "Rename selected item", rgb(30, 30, 30));
-        appDrawText(x + 232, y + 205, m_renameValue, rgb(20, 20, 20));
-        appDrawText(x + 232, y + 230, "Enter=OK  Esc=Cancel  Backspace=Delete", rgb(80, 80, 80));
-    } else if (m_deleteConfirm) {
-        framebuffer::fill_rect(x + 220, y + 165, 330, 92, rgb(250, 245, 245));
-        appDrawText(x + 232, y + 182, m_deleteTargetIsDir ? "Delete this folder?" : "Delete this file?", rgb(80, 30, 30));
-        appDrawText(x + 232, y + 205, m_deleteTargetName, rgb(30, 30, 30));
-        appDrawText(x + 232, y + 230, "Use Delete or Cancel buttons.", rgb(80, 80, 80));
-    }
-
     uint32_t bodyY = y + TOOLBAR_H + ADDRESS_H;
     uint32_t statusH = 22;
     uint32_t bodyH = h > TOOLBAR_H + ADDRESS_H + statusH ? h - TOOLBAR_H - ADDRESS_H - statusH : 0;
@@ -1889,6 +1877,18 @@ void FileExplorerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
 
     framebuffer::fill_rect(x, y + h - statusH, w, statusH, rgb(235, 235, 235));
     appDrawText(x + 8, y + h - 15, m_status, rgb(40, 40, 40));
+
+    if (m_renamePrompt) {
+        framebuffer::fill_rect(x + 220, y + 165, 360, 92, rgb(245, 245, 250));
+        appDrawText(x + 232, y + 182, "Rename selected item", rgb(30, 30, 30));
+        appDrawText(x + 232, y + 205, m_renameValue, rgb(20, 20, 20));
+        appDrawText(x + 232, y + 230, "Enter=OK  Esc=Cancel  Backspace=Delete", rgb(80, 80, 80));
+    } else if (m_deleteConfirm) {
+        framebuffer::fill_rect(x + 220, y + 165, 390, 92, rgb(250, 245, 245));
+        appDrawText(x + 232, y + 182, m_deleteTargetIsDir ? "Are you sure you wish to delete this folder?" : "Are you sure you wish to delete this file?", rgb(80, 30, 30));
+        appDrawText(x + 232, y + 205, m_deleteTargetName, rgb(30, 30, 30));
+        appDrawText(x + 232, y + 230, "This cannot be undone.", rgb(80, 80, 80));
+    }
 }
 
 void FileExplorerApp::onKeyDown(uint32_t key) {

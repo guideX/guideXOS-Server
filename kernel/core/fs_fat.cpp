@@ -1047,5 +1047,74 @@ bool create_file_path(uint8_t volumeIndex, const char* path, const void* buffer,
     return block::write_sectors(vol.blockDevIndex, sector, 1, s_secBuf) == block::BLOCK_OK;
 }
 
+bool delete_path(uint8_t volumeIndex, const char* path, bool directory)
+{
+    if (volumeIndex >= MAX_FAT_VOLUMES) return false;
+    if (!s_volumes[volumeIndex].mounted) return false;
+    if (!path) return false;
+
+    FATVolume& vol = s_volumes[volumeIndex];
+    if (vol.type != FAT_TYPE_FAT32) return false;
+
+    DirEntry entry;
+    uint32_t sector = 0;
+    uint32_t offset = 0;
+    if (!find_path_entry_at(volumeIndex, path, &entry, &sector, &offset)) {
+        return false;
+    }
+    if (entry.isDir != directory) return false;
+    if (entry.attr & ATTR_READ_ONLY) return false;
+
+    if (block::read_sectors(vol.blockDevIndex, sector, 1, s_secBuf) != block::BLOCK_OK) {
+        return false;
+    }
+
+    FAT32_DirEntry* de = reinterpret_cast<FAT32_DirEntry*>(&s_secBuf[offset]);
+    de->name[0] = static_cast<char>(0xE5);
+
+    return block::write_sectors(vol.blockDevIndex, sector, 1, s_secBuf) == block::BLOCK_OK;
+}
+
+bool rename_path(uint8_t volumeIndex, const char* oldPath, const char* newPath)
+{
+    if (volumeIndex >= MAX_FAT_VOLUMES) return false;
+    if (!s_volumes[volumeIndex].mounted) return false;
+    if (!oldPath || !newPath) return false;
+
+    FATVolume& vol = s_volumes[volumeIndex];
+    if (vol.type != FAT_TYPE_FAT32) return false;
+
+    DirEntry existing;
+    if (lookup_path(volumeIndex, newPath, &existing)) return false;
+
+    uint32_t oldParent = 0;
+    uint32_t newParent = 0;
+    char oldName[128];
+    char newName[128];
+    if (!split_parent_and_name(volumeIndex, oldPath, &oldParent, oldName, sizeof(oldName))) return false;
+    if (!split_parent_and_name(volumeIndex, newPath, &newParent, newName, sizeof(newName))) return false;
+    if (oldParent != newParent) return false;
+
+    char shortName[11];
+    if (!make_short_name(newName, shortName)) return false;
+
+    DirEntry entry;
+    uint32_t sector = 0;
+    uint32_t offset = 0;
+    if (!find_in_directory_at(volumeIndex, oldParent, oldName, &entry, &sector, &offset)) {
+        return false;
+    }
+    if (entry.attr & ATTR_READ_ONLY) return false;
+
+    if (block::read_sectors(vol.blockDevIndex, sector, 1, s_secBuf) != block::BLOCK_OK) {
+        return false;
+    }
+
+    FAT32_DirEntry* de = reinterpret_cast<FAT32_DirEntry*>(&s_secBuf[offset]);
+    memcopy(de->name, shortName, 11);
+
+    return block::write_sectors(vol.blockDevIndex, sector, 1, s_secBuf) == block::BLOCK_OK;
+}
+
 } // namespace fs_fat
 } // namespace kernel

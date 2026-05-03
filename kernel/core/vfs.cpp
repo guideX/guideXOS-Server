@@ -1051,8 +1051,21 @@ Status mkdir(const char* path)
 
 Status rmdir(const char* path)
 {
-    (void)path;
-    // Directory removal not yet implemented
+    if (!path) return VFS_ERR_INVALID;
+
+    MountPoint* mount = find_mount_for_path(path);
+    if (!mount) return VFS_ERR_NOT_MOUNT;
+    if (mount->readOnly) return VFS_ERR_READ_ONLY;
+
+    const char* relPath = get_relative_path(path, mount);
+    switch (mount->fsType) {
+        case FS_TYPE_FAT32:
+            return fs_fat::delete_path(mount->fsVolumeIndex, relPath, true) ? VFS_OK : VFS_ERR_NOT_SUPPORTED;
+
+        default:
+            break;
+    }
+
     return VFS_ERR_NOT_SUPPORTED;
 }
 
@@ -1116,14 +1129,44 @@ Status stat(const char* path, FileInfo* info)
 
 Status unlink(const char* path)
 {
-    (void)path;
+    if (!path) return VFS_ERR_INVALID;
+
+    MountPoint* mount = find_mount_for_path(path);
+    if (!mount) return VFS_ERR_NOT_MOUNT;
+    if (mount->readOnly) return VFS_ERR_READ_ONLY;
+
+    const char* relPath = get_relative_path(path, mount);
+    switch (mount->fsType) {
+        case FS_TYPE_FAT32:
+            return fs_fat::delete_path(mount->fsVolumeIndex, relPath, false) ? VFS_OK : VFS_ERR_NOT_SUPPORTED;
+
+        default:
+            break;
+    }
+
     return VFS_ERR_NOT_SUPPORTED;
 }
 
 Status rename(const char* oldPath, const char* newPath)
 {
-    (void)oldPath;
-    (void)newPath;
+    if (!oldPath || !newPath) return VFS_ERR_INVALID;
+
+    MountPoint* oldMount = find_mount_for_path(oldPath);
+    MountPoint* newMount = find_mount_for_path(newPath);
+    if (!oldMount || !newMount) return VFS_ERR_NOT_MOUNT;
+    if (oldMount != newMount) return VFS_ERR_INVALID;
+    if (oldMount->readOnly) return VFS_ERR_READ_ONLY;
+
+    const char* relOldPath = get_relative_path(oldPath, oldMount);
+    const char* relNewPath = get_relative_path(newPath, newMount);
+    switch (oldMount->fsType) {
+        case FS_TYPE_FAT32:
+            return fs_fat::rename_path(oldMount->fsVolumeIndex, relOldPath, relNewPath) ? VFS_OK : VFS_ERR_NOT_SUPPORTED;
+
+        default:
+            break;
+    }
+
     return VFS_ERR_NOT_SUPPORTED;
 }
 
