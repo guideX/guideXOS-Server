@@ -267,6 +267,9 @@ namespace gxos { namespace apps {
     int FileExplorer::s_promptMode = PromptNone;
     std::string FileExplorer::s_promptTitle;
     std::string FileExplorer::s_promptValue;
+    bool FileExplorer::s_showDeleteConfirmation = false;
+    std::string FileExplorer::s_deleteTargetPath;
+    bool FileExplorer::s_deleteTargetIsDirectory = false;
 
     uint64_t FileExplorer::Launch(const std::string& startPath) {
         ProcessSpec spec{"file_explorer", FileExplorer::main};
@@ -294,6 +297,7 @@ namespace gxos { namespace apps {
         s_rootSelectedIndex = 0;
         s_status = "Ready";
         s_promptMode = PromptNone;
+        s_showDeleteConfirmation = false;
 
         refresh();
 
@@ -322,7 +326,6 @@ namespace gxos { namespace apps {
                     if (sep == std::string::npos) break;
                     s_windowId = std::stoull(message.substr(0, sep));
                     Logger::write(LogLevel::Info, std::string("FileExplorer window created: ") + std::to_string(s_windowId));
-                    renderToolbar();
                     updateDisplay();
                     break;
                 }
@@ -367,6 +370,12 @@ namespace gxos { namespace apps {
                         case 7: createFile(); break;
                         case 8: renameSelected(); break;
                         case 9: deleteSelected(); break;
+                        case 10: renameSelected(); break;
+                        case 11: showDeleteConfirmation(); break;
+                        case 12: renameSelected(); break;
+                        case 13: showDeleteConfirmation(); break;
+                        case 100: confirmDelete(); break;
+                        case 101: cancelDelete(); break;
                     }
                     break;
                 }
@@ -524,6 +533,34 @@ namespace gxos { namespace apps {
             s_status = "Deleted " + entry.name;
         }
         refresh();
+        updateDisplay();
+    }
+
+    void FileExplorer::showDeleteConfirmation() {
+        if (s_selectedIndex < 0 || s_selectedIndex >= static_cast<int>(s_entries.size())) return;
+        const ExplorerFileEntry& entry = s_entries[s_selectedIndex];
+        s_deleteTargetPath = entry.fullPath;
+        s_deleteTargetIsDirectory = entry.isDirectory();
+        s_showDeleteConfirmation = true;
+        updateDisplay();
+    }
+
+    void FileExplorer::confirmDelete() {
+        s_showDeleteConfirmation = false;
+        std::string error;
+        std::string name = s_deleteTargetPath.substr(s_deleteTargetPath.find_last_of('/') + 1);
+        if (!s_fileSystem->remove(s_deleteTargetPath, s_deleteTargetIsDirectory, error)) {
+            s_status = "Delete failed: " + error;
+        } else {
+            s_status = "Deleted " + name;
+        }
+        refresh();
+        updateDisplay();
+    }
+
+    void FileExplorer::cancelDelete() {
+        s_showDeleteConfirmation = false;
+        s_status = "Delete cancelled";
         updateDisplay();
     }
 
@@ -686,12 +723,24 @@ namespace gxos { namespace apps {
         if (s_windowId == 0) return;
         publish(MsgType::MT_SetTitle, std::to_string(s_windowId) + "|File Explorer - " + s_currentPath);
         drawText("\f");
+        renderToolbar();
         renderAddressBar();
         renderNavigationPane();
         renderMainPane();
         renderStatusBar();
 
-        if (s_promptMode != PromptNone) {
+        if (s_showDeleteConfirmation) {
+            std::string itemName = s_deleteTargetPath.substr(s_deleteTargetPath.find_last_of('/') + 1);
+            std::string itemType = s_deleteTargetIsDirectory ? "folder" : "file";
+            drawRect(230, 190, 420, 100, 45, 45, 55);
+            drawText("CONFIRM DELETE");
+            drawText("");
+            drawText("Are you sure you want to delete this " + itemType + "?");
+            drawText(itemName);
+            drawText("");
+            addButton(100, 270, 262, 80, 22, "Yes, Delete");
+            addButton(101, 370, 262, 80, 22, "Cancel");
+        } else if (s_promptMode != PromptNone) {
             drawRect(230, 190, 420, 84, 45, 45, 55);
             drawText("INPUT: " + s_promptTitle);
             drawText("> " + s_promptValue + "_");
@@ -709,6 +758,17 @@ namespace gxos { namespace apps {
         addButton(7, 416, 5, 78, 22, "New File");
         addButton(8, 498, 5, 70, 22, "Rename");
         addButton(9, 572, 5, 64, 22, "Delete");
+
+        if (s_selectedIndex >= 0 && s_selectedIndex < static_cast<int>(s_entries.size())) {
+            const ExplorerFileEntry& entry = s_entries[s_selectedIndex];
+            if (entry.isDirectory()) {
+                addButton(12, 650, 5, 100, 22, "Rename Folder");
+                addButton(13, 754, 5, 98, 22, "Delete Folder");
+            } else {
+                addButton(10, 650, 5, 88, 22, "Rename File");
+                addButton(11, 742, 5, 86, 22, "Delete File");
+            }
+        }
     }
 
     void FileExplorer::renderAddressBar() {

@@ -96,6 +96,9 @@ namespace gxos { namespace apps {
         static void createFile();
         static void renameSelected();
         static void navigateToSelectedRoot();
+        static void showDeleteConfirmation();
+        static void confirmDelete();
+        static void cancelDelete();
         
         // Keyboard handling
         static void handleKeyPress(int keyCode, const std::string& action);
@@ -140,6 +143,9 @@ namespace gxos { namespace apps {
         static int s_promptMode;
         static std::string s_promptTitle;
         static std::string s_promptValue;
+        static bool s_showDeleteConfirmation;
+        static std::string s_deleteTargetPath;
+        static bool s_deleteTargetIsDirectory;
     };
     
 }} // namespace gxos::apps
