@@ -759,14 +759,15 @@ namespace gxos { namespace apps {
         addButton(8, 498, 5, 70, 22, "Rename");
         addButton(9, 572, 5, 64, 22, "Delete");
 
+        // Context-sensitive buttons appear when file/folder is selected
         if (s_selectedIndex >= 0 && s_selectedIndex < static_cast<int>(s_entries.size())) {
             const ExplorerFileEntry& entry = s_entries[s_selectedIndex];
             if (entry.isDirectory()) {
-                addButton(12, 650, 5, 100, 22, "Rename Folder");
-                addButton(13, 754, 5, 98, 22, "Delete Folder");
+                addButton(12, 645, 5, 105, 22, "|Rename Fld");
+                addButton(13, 755, 5, 100, 22, "Delete Fld");
             } else {
-                addButton(10, 650, 5, 88, 22, "Rename File");
-                addButton(11, 742, 5, 86, 22, "Delete File");
+                addButton(10, 645, 5, 100, 22, "|Rename File");
+                addButton(11, 750, 5, 95, 22, "Delete File");
             }
         }
     }

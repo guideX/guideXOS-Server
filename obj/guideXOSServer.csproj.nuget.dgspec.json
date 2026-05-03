@@ -1,23 +1,23 @@
 {
   "format": 1,
   "restore": {
-    "D:\\devgitlab\\guideXOS\\guideXOS.SERVER\\guideXOSServer.csproj": {}
+    "D:\\dev\\guideXOSServer\\guideXOSServer.csproj": {}
   },
   "projects": {
-    "D:\\devgitlab\\guideXOS\\guideXOS.SERVER\\guideXOSServer.csproj": {
+    "D:\\dev\\guideXOSServer\\guideXOSServer.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "D:\\devgitlab\\guideXOS\\guideXOS.SERVER\\guideXOSServer.csproj",
+        "projectUniqueName": "D:\\dev\\guideXOSServer\\guideXOSServer.csproj",
         "projectName": "guideXOSServer",
-        "projectPath": "D:\\devgitlab\\guideXOS\\guideXOS.SERVER\\guideXOSServer.csproj",
-        "packagesPath": "C:\\Users\\DarthguideX\\.nuget\\packages\\",
-        "outputPath": "D:\\devgitlab\\guideXOS\\guideXOS.SERVER\\obj\\",
+        "projectPath": "D:\\dev\\guideXOSServer\\guideXOSServer.csproj",
+        "packagesPath": "C:\\Users\\guideX\\.nuget\\packages\\",
+        "outputPath": "D:\\dev\\guideXOSServer\\obj\\",
         "projectStyle": "PackageReference",
         "fallbackFolders": [
           "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages"
         ],
         "configFilePaths": [
-          "C:\\Users\\DarthguideX\\AppData\\Roaming\\NuGet\\NuGet.Config",
+          "C:\\Users\\guideX\\AppData\\Roaming\\NuGet\\NuGet.Config",
           "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.FallbackLocation.config",
           "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.Offline.config"
         ],
@@ -45,7 +45,7 @@
           "auditLevel": "low",
           "auditMode": "direct"
         },
-        "SdkAnalysisLevel": "9.0.300"
+        "SdkAnalysisLevel": "10.0.200"
       },
       "frameworks": {
         "net9.0": {
@@ -61,12 +61,30 @@
           ],
           "assetTargetFallback": true,
           "warn": true,
+          "downloadDependencies": [
+            {
+              "name": "Microsoft.AspNetCore.App.Ref",
+              "version": "[9.0.15, 9.0.15]"
+            },
+            {
+              "name": "Microsoft.NETCore.App.Host.win-x64",
+              "version": "[9.0.15, 9.0.15]"
+            },
+            {
+              "name": "Microsoft.NETCore.App.Ref",
+              "version": "[9.0.15, 9.0.15]"
+            },
+            {
+              "name": "Microsoft.WindowsDesktop.App.Ref",
+              "version": "[9.0.15, 9.0.15]"
+            }
+          ],
           "frameworkReferences": {
             "Microsoft.NETCore.App": {
               "privateAssets": "all"
             }
           },
-          "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\9.0.312/PortableRuntimeIdentifierGraph.json"
+          "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\10.0.203/PortableRuntimeIdentifierGraph.json"
         }
       }
     }
