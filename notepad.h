@@ -3,6 +3,7 @@
 #include "ipc_bus.h"
 #include <string>
 #include <vector>
+#include <cstdint>
 
 namespace gxos { namespace apps {
     
@@ -72,6 +73,12 @@ namespace gxos { namespace apps {
         static void hideContextMenu();
         static bool handleContextMenuClick(int mx, int my);
         static void drawContextMenu();
+
+        // File menu operations
+        static void toggleFileMenu();
+        static void hideFileMenu();
+        static bool handleFileMenuClick(int mx, int my);
+        static void drawFileMenu();
         
         // State
         static uint64_t s_windowId;
@@ -88,12 +95,19 @@ namespace gxos { namespace apps {
         static int s_lastKeyCode;
         static bool s_keyDown;
         static bool s_pendingClose;
+        static int s_pendingModalLaunches;
+        static std::vector<uint64_t> s_modalDialogWindowIds;
         
         // Context menu state
         static bool s_contextMenuVisible;
         static int s_contextMenuX;
         static int s_contextMenuY;
         static int s_contextMenuHoverIndex;
+
+        // File menu state
+        static bool s_fileMenuVisible;
+        static int s_fileMenuX;
+        static int s_fileMenuY;
         
         // Undo / Redo stacks (store full line snapshots)
         struct TextSnapshot {

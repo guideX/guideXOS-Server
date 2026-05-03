@@ -34,10 +34,15 @@ namespace gxos { namespace apps {
     int Notepad::s_lastKeyCode = 0;
     bool Notepad::s_keyDown = false;
     bool Notepad::s_pendingClose = false;
+    int Notepad::s_pendingModalLaunches = 0;
+    std::vector<uint64_t> Notepad::s_modalDialogWindowIds;
     bool Notepad::s_contextMenuVisible = false;
     int Notepad::s_contextMenuX = 0;
     int Notepad::s_contextMenuY = 0;
     int Notepad::s_contextMenuHoverIndex = -1;
+    bool Notepad::s_fileMenuVisible = false;
+    int Notepad::s_fileMenuX = 4;
+    int Notepad::s_fileMenuY = 28;
     std::vector<Notepad::TextSnapshot> Notepad::s_undoStack;
     std::vector<Notepad::TextSnapshot> Notepad::s_redoStack;
     
@@ -70,6 +75,11 @@ namespace gxos { namespace apps {
             s_capsLockOn = false;
             s_undoStack.clear();
             s_redoStack.clear();
+            s_pendingModalLaunches = 0;
+            s_modalDialogWindowIds.clear();
+            s_fileMenuVisible = false;
+            s_fileMenuX = 4;
+            s_fileMenuY = 28;
             
             // Check if file path was provided
             if (argc > 1) {
@@ -108,35 +118,45 @@ namespace gxos { namespace apps {
                             if (sep != std::string::npos && sep > 0) {
                                 try {
                                     std::string idStr = payload.substr(0, sep);
-                                    s_windowId = std::stoull(idStr);
-                                    Logger::write(LogLevel::Info, std::string("Notepad window created: ") + std::to_string(s_windowId));
-                                    
-                                    // Add menu buttons
-                                    const char* kGuiChanIn = "gui.input";
-                                    
-                                    // Helper lambda to add a button
-                                    auto addButton = [](int id, int x, int y, int w, int h, const std::string& text) {
-                                        ipc::Message msg;
-                                        msg.type = (uint32_t)MsgType::MT_WidgetAdd;
-                                        std::ostringstream oss;
-                                        oss << s_windowId << "|1|" << id << "|" << x << "|" << y << "|" << w << "|" << h << "|" << text;
-                                        std::string payload = oss.str();
-                                        msg.data.assign(payload.begin(), payload.end());
-                                        ipc::Bus::publish("gui.input", std::move(msg), false);
-                                    };
-                                    
-                                    // Add toolbar buttons matching Legacy Notepad
-                                    addButton(1, 4, 4, 84, 20, "New File");
-                                    addButton(2, 92, 4, 60, 20, "Open");
-                                    addButton(3, 156, 4, 60, 20, "Save");
-                                    addButton(4, 220, 4, 80, 20, "Save As");
-                                    addButton(5, 304, 4, 64, 20, s_wrapText ? "Wrap" : "NoWrap");
-                                    addButton(6, 372, 4, 60, 20, "Undo");
-                                    addButton(7, 436, 4, 60, 20, "Redo");
-                                    
-                                    // Draw initial content
-                                    redrawContent();
-                                    updateStatusBar();
+                                    uint64_t createdId = std::stoull(idStr);
+
+                                    if (s_windowId == 0) {
+                                        s_windowId = createdId;
+                                        Logger::write(LogLevel::Info, std::string("Notepad window created: ") + std::to_string(s_windowId));
+
+                                        // Add menu buttons
+                                        const char* kGuiChanIn = "gui.input";
+
+                                        // Helper lambda to add a button
+                                        auto addButton = [](int id, int x, int y, int w, int h, const std::string& text) {
+                                            ipc::Message msg;
+                                            msg.type = (uint32_t)MsgType::MT_WidgetAdd;
+                                            std::ostringstream oss;
+                                            oss << s_windowId << "|1|" << id << "|" << x << "|" << y << "|" << w << "|" << h << "|" << text;
+                                            std::string payload = oss.str();
+                                            msg.data.assign(payload.begin(), payload.end());
+                                            ipc::Bus::publish("gui.input", std::move(msg), false);
+                                        };
+
+                                        // Add toolbar buttons matching Legacy Notepad
+                                        addButton(1, 4, 4, 48, 20, "File");
+                                        addButton(2, 56, 4, 84, 20, "New File");
+                                        addButton(3, 144, 4, 60, 20, "Save");
+                                        addButton(4, 208, 4, 80, 20, "Save As");
+                                        addButton(5, 292, 4, 64, 20, s_wrapText ? "Wrap" : "NoWrap");
+                                        addButton(6, 360, 4, 60, 20, "Undo");
+                                        addButton(7, 424, 4, 60, 20, "Redo");
+
+                                        // Draw initial content
+                                        redrawContent();
+                                        updateStatusBar();
+                                    } else if (s_pendingModalLaunches > 0 && createdId != s_windowId) {
+                                        s_modalDialogWindowIds.push_back(createdId);
+                                        s_pendingModalLaunches--;
+                                        s_keyDown = false;
+                                        s_lastKeyCode = 0;
+                                        Logger::write(LogLevel::Info, std::string("Notepad: Registered modal dialog window ") + std::to_string(createdId));
+                                    }
                                 } catch (const std::exception& e) {
                                     Logger::write(LogLevel::Error, std::string("Notepad: Failed to parse window ID: ") + e.what() + " payload: " + payload);
                                 }
@@ -162,6 +182,14 @@ namespace gxos { namespace apps {
                                             Logger::write(LogLevel::Info, "Notepad closing...");
                                             running = false;
                                         }
+                                    } else {
+                                        auto it = std::find(s_modalDialogWindowIds.begin(), s_modalDialogWindowIds.end(), closedId);
+                                        if (it != s_modalDialogWindowIds.end()) {
+                                            s_modalDialogWindowIds.erase(it);
+                                            s_keyDown = false;
+                                            s_lastKeyCode = 0;
+                                            Logger::write(LogLevel::Info, std::string("Notepad: Modal dialog closed: ") + std::to_string(closedId));
+                                        }
                                     }
                                 } catch (const std::exception& e) {
                                     Logger::write(LogLevel::Error, std::string("Notepad: Failed to parse close ID: ") + e.what());
@@ -171,6 +199,10 @@ namespace gxos { namespace apps {
                         }
                         
                         case MsgType::MT_InputKey: {
+                            if (s_pendingModalLaunches > 0 || !s_modalDialogWindowIds.empty()) {
+                                break;
+                            }
+
                             // Improved keyboard input with modifier support and debouncing
                             std::string payload(msg.data.begin(), msg.data.end());
                             size_t sep = payload.find('|');
@@ -393,6 +425,10 @@ namespace gxos { namespace apps {
                         }
                         
                         case MsgType::MT_WidgetEvt: {
+                            if (s_pendingModalLaunches > 0 || !s_modalDialogWindowIds.empty()) {
+                                break;
+                            }
+
                             // Widget event (button click)
                             std::string payload(msg.data.begin(), msg.data.end());
                             
@@ -414,8 +450,8 @@ namespace gxos { namespace apps {
                                         
                                         // Handle button clicks
                                         switch (widgetId) {
-                                            case 1: newFile(); break;
-                                            case 2: openFileDialog(); break;
+                                            case 1: toggleFileMenu(); break;
+                                            case 2: newFile(); break;
                                             case 3: saveFile(); break;
                                             case 4: saveFileAs(); break;
                                             case 5: toggleWrap(); break;
@@ -431,6 +467,10 @@ namespace gxos { namespace apps {
                         }
                         
                         case MsgType::MT_InputMouse: {
+                            if (s_pendingModalLaunches > 0 || !s_modalDialogWindowIds.empty()) {
+                                break;
+                            }
+
                             // Handle mouse input
                             std::string payload(msg.data.begin(), msg.data.end());
                             // Parse: <x>|<y>|<button>|<action>
@@ -454,10 +494,17 @@ namespace gxos { namespace apps {
                                         redrawContent();
                                     }
                                     // Left click dismisses context menu
-                                    else if (button == 1 && action == "down" && s_contextMenuVisible) {
-                                        if (!handleContextMenuClick(mx, my)) {
-                                            hideContextMenu();
-                                            redrawContent();
+                                    else if (button == 1 && action == "down") {
+                                        if (s_fileMenuVisible) {
+                                            if (!handleFileMenuClick(mx, my)) {
+                                                hideFileMenu();
+                                                redrawContent();
+                                            }
+                                        } else if (s_contextMenuVisible) {
+                                            if (!handleContextMenuClick(mx, my)) {
+                                                hideContextMenu();
+                                                redrawContent();
+                                            }
                                         }
                                     }
                                 } catch (const std::exception& e) {
@@ -637,6 +684,9 @@ namespace gxos { namespace apps {
         Logger::write(LogLevel::Info, "Notepad: Opening file dialog...");
         int ownerX = 100;
         int ownerY = 100;
+        s_pendingModalLaunches++;
+        s_keyDown = false;
+        s_lastKeyCode = 0;
         OpenDialog::Show(ownerX, ownerY, "data/",
             [](const std::string& path) {
                 loadFile(path);
@@ -752,6 +802,9 @@ namespace gxos { namespace apps {
         // TODO: Get window position - for now use defaults
         int ownerX = 100;
         int ownerY = 100;
+        s_pendingModalLaunches++;
+        s_keyDown = false;
+        s_lastKeyCode = 0;
         
         // Extract just the filename from path if we have one
         std::string fileName = "untitled.txt";
@@ -780,6 +833,9 @@ namespace gxos { namespace apps {
         // TODO: Get window position - for now use defaults
         int ownerX = 100;
         int ownerY = 100;
+        s_pendingModalLaunches++;
+        s_keyDown = false;
+        s_lastKeyCode = 0;
         
         SaveChangesDialog::Show(ownerX, ownerY,
             []() {
@@ -787,6 +843,7 @@ namespace gxos { namespace apps {
                 Logger::write(LogLevel::Info, "SaveChangesDialog: User chose Save");
                 if (s_filePath.empty()) {
                     // Need to show SaveDialog first
+                    s_pendingModalLaunches++;
                     SaveDialog::Show(100, 100, "data/", "untitled.txt",
                         [](const std::string& path) {
                             s_filePath = path;
@@ -942,13 +999,13 @@ namespace gxos { namespace apps {
             msg.data.assign(payload.begin(), payload.end());
             ipc::Bus::publish("gui.input", std::move(msg), false);
         };
-        addButton(1, 4, 4, 84, 20, "New File");
-        addButton(2, 92, 4, 60, 20, "Open");
-        addButton(3, 156, 4, 60, 20, "Save");
-        addButton(4, 220, 4, 80, 20, "Save As");
-        addButton(5, 304, 4, 64, 20, s_wrapText ? "Wrap" : "NoWrap");
-        addButton(6, 372, 4, 60, 20, "Undo");
-        addButton(7, 436, 4, 60, 20, "Redo");
+        addButton(1, 4, 4, 48, 20, "File");
+        addButton(2, 56, 4, 84, 20, "New File");
+        addButton(3, 144, 4, 60, 20, "Save");
+        addButton(4, 208, 4, 80, 20, "Save As");
+        addButton(5, 292, 4, 64, 20, s_wrapText ? "Wrap" : "NoWrap");
+        addButton(6, 360, 4, 60, 20, "Undo");
+        addButton(7, 424, 4, 60, 20, "Redo");
     }
     
     char Notepad::mapKeyToChar(int keyCode) {
@@ -994,6 +1051,7 @@ namespace gxos { namespace apps {
     
     void Notepad::showContextMenu(int x, int y) {
         s_contextMenuVisible = true;
+        hideFileMenu();
         s_contextMenuX = x;
         s_contextMenuY = y;
         s_contextMenuHoverIndex = -1;
@@ -1003,6 +1061,56 @@ namespace gxos { namespace apps {
     void Notepad::hideContextMenu() {
         s_contextMenuVisible = false;
         s_contextMenuHoverIndex = -1;
+    }
+
+    void Notepad::toggleFileMenu() {
+        s_fileMenuVisible = !s_fileMenuVisible;
+        hideContextMenu();
+        redrawContent();
+    }
+
+    void Notepad::hideFileMenu() {
+        s_fileMenuVisible = false;
+    }
+
+    bool Notepad::handleFileMenuClick(int mx, int my) {
+        if (!s_fileMenuVisible) return false;
+
+        const int menuWidth = 120;
+        const int itemHeight = 24;
+        const int itemCount = 5;
+        const int menuHeight = itemHeight * itemCount;
+
+        if (mx >= s_fileMenuX && mx < s_fileMenuX + menuWidth &&
+            my >= s_fileMenuY && my < s_fileMenuY + menuHeight) {
+            int itemIndex = (my - s_fileMenuY) / itemHeight;
+            hideFileMenu();
+
+            switch (itemIndex) {
+                case 0:
+                    newFile();
+                    break;
+                case 1:
+                    openFileDialog();
+                    break;
+                case 2:
+                    saveFile();
+                    break;
+                case 3:
+                    saveFileAs();
+                    break;
+                case 4:
+                    closeWithPrompt();
+                    break;
+                default:
+                    return false;
+            }
+
+            redrawContent();
+            return true;
+        }
+
+        return false;
     }
     
     bool Notepad::handleContextMenuClick(int mx, int my) {
@@ -1089,6 +1197,34 @@ namespace gxos { namespace apps {
             }
             
             // Draw item text
+            ipc::Message itemTextMsg;
+            itemTextMsg.type = (uint32_t)MsgType::MT_DrawText;
+            std::ostringstream itemTextOss;
+            itemTextOss << s_windowId << "|" << menuItems[i];
+            std::string itemTextPayload = itemTextOss.str();
+            itemTextMsg.data.assign(itemTextPayload.begin(), itemTextPayload.end());
+            ipc::Bus::publish(kGuiChanIn, std::move(itemTextMsg), false);
+        }
+    }
+
+    void Notepad::drawFileMenu() {
+        if (!s_fileMenuVisible) return;
+
+        const char* kGuiChanIn = "gui.input";
+        const int menuWidth = 120;
+        const int itemHeight = 24;
+        const char* menuItems[] = { "New", "Open", "Save", "Save As", "Exit" };
+        const int itemCount = 5;
+
+        ipc::Message bgMsg;
+        bgMsg.type = (uint32_t)MsgType::MT_DrawRect;
+        std::ostringstream bgOss;
+        bgOss << s_windowId << "|" << s_fileMenuX << "|" << s_fileMenuY << "|" << menuWidth << "|" << (itemHeight * itemCount) << "|80|80|90";
+        std::string bgPayload = bgOss.str();
+        bgMsg.data.assign(bgPayload.begin(), bgPayload.end());
+        ipc::Bus::publish(kGuiChanIn, std::move(bgMsg), false);
+
+        for (int i = 0; i < itemCount; i++) {
             ipc::Message itemTextMsg;
             itemTextMsg.type = (uint32_t)MsgType::MT_DrawText;
             std::ostringstream itemTextOss;

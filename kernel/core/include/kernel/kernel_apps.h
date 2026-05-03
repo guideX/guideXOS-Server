@@ -68,6 +68,7 @@ private:
     bool m_showContextMenu;
     bool m_showSaveDialog;
     bool m_saveDialogShowingDrives;
+    bool m_saveDialogFilenameFocused;
     int m_contextMenuX;
     int m_contextMenuY;
     int m_hoveredMenuItem;
@@ -99,6 +100,8 @@ private:
     void saveDialogGoUp();
     bool saveToDialogTarget();
     void buildSavePath(char* out, int outSize) const;
+    void handleSaveDialogKey(uint32_t key);
+    void handleSaveDialogChar(char c);
     
     // Text operations
     void insertChar(char c);

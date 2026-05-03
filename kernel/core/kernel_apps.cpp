@@ -195,6 +195,7 @@ NotepadApp::NotepadApp() : m_textLength(0), m_cursorPos(0), m_scrollY(0), m_sele
     m_filePath[0] = '\0';
     m_showSaveDialog = false;
     m_saveDialogShowingDrives = true;
+    m_saveDialogFilenameFocused = true;
     m_saveDialogPath[0] = '\0';
     strcopy(m_saveDialogFilename, "untitled.txt", MAX_SAVE_FILENAME);
     m_saveDialogStatus[0] = '\0';
@@ -317,6 +318,12 @@ void NotepadApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
 }
 
 void NotepadApp::onKeyChar(char c) {
+    if (m_showSaveDialog) {
+        handleSaveDialogChar(c);
+        invalidate();
+        return;
+    }
+
     if (c >= 32 && c < 127) {
         if (m_selectAll) {
             clearText();
@@ -329,6 +336,12 @@ void NotepadApp::onKeyChar(char c) {
 }
 
 void NotepadApp::onKeyDown(uint32_t key) {
+    if (m_showSaveDialog) {
+        handleSaveDialogKey(key);
+        invalidate();
+        return;
+    }
+
     bool ctrl = ps2keyboard::is_ctrl_down();
     m_ctrlPressed = ctrl;
     
@@ -582,15 +595,10 @@ bool NotepadApp::saveFile() {
 
 bool NotepadApp::saveFileAs(const char* path) {
     if (!path || path[0] == '\0') return false;
-    
-    uint8_t handle = vfs::open(path, vfs::OPEN_WRITE | vfs::OPEN_CREATE);
-    if (handle == 0xFF) return false;
-    
-    int32_t bytesWritten = vfs::write(handle, m_text, m_textLength);
-    vfs::close(handle);
-    
+
+    int32_t bytesWritten = vfs::write_file(path, m_text, static_cast<uint32_t>(m_textLength));
     if (bytesWritten != m_textLength) return false;
-    
+
     m_modified = false;
     strcopy(m_filePath, path, MAX_PATH_LEN);
     updateTitle();
@@ -612,6 +620,7 @@ void NotepadApp::openSaveAsDialog() {
     m_showContextMenu = false;
     m_showSaveDialog = true;
     m_saveDialogShowingDrives = true;
+    m_saveDialogFilenameFocused = true;
     m_saveDialogPath[0] = '\0';
     m_saveSelected = 0;
     m_saveScroll = 0;
@@ -686,8 +695,21 @@ void NotepadApp::drawSaveAsDialog(uint32_t x, uint32_t y, uint32_t w, uint32_t h
     if (m_saveEntryCount == 0) appDrawText(dlgX + 18, dlgY + 64, "No drives or folders found.", rgb(240, 180, 120));
 
     appDrawText(dlgX + 12, dlgY + 196, "File name:", rgb(220, 220, 230));
-    framebuffer::fill_rect(dlgX + 86, dlgY + 190, dlgW - 110, 22, rgb(20, 20, 28));
+    framebuffer::fill_rect(dlgX + 86, dlgY + 190, dlgW - 110, 22, m_saveDialogFilenameFocused ? rgb(18, 28, 48) : rgb(20, 20, 28));
+    if (m_saveDialogFilenameFocused) {
+        framebuffer::fill_rect(dlgX + 86, dlgY + 190, dlgW - 110, 1, rgb(90, 140, 220));
+        framebuffer::fill_rect(dlgX + 86, dlgY + 211, dlgW - 110, 1, rgb(90, 140, 220));
+        framebuffer::fill_rect(dlgX + 86, dlgY + 190, 1, 22, rgb(90, 140, 220));
+        framebuffer::fill_rect(dlgX + dlgW - 25, dlgY + 190, 1, 22, rgb(90, 140, 220));
+    }
     appDrawText(dlgX + 92, dlgY + 197, m_saveDialogFilename, rgb(255, 255, 255));
+    if (m_saveDialogFilenameFocused) {
+        int len = strlen_local(m_saveDialogFilename);
+        int caretX = dlgX + 92 + len * (kGlyphW + kGlyphSpacing);
+        uint32_t rightLimit = dlgX + dlgW - 28;
+        if ((uint32_t)caretX > rightLimit) caretX = rightLimit;
+        framebuffer::fill_rect(caretX, dlgY + 196, 1, kGlyphH + 3, rgb(255, 255, 255));
+    }
 
     framebuffer::fill_rect(dlgX + 12, dlgY + 226, 70, 24, rgb(65, 75, 95));
     appDrawText(dlgX + 28, dlgY + 234, "Drives", rgb(255, 255, 255));
@@ -756,6 +778,78 @@ bool NotepadApp::saveToDialogTarget() {
     return true;
 }
 
+void NotepadApp::handleSaveDialogChar(char c) {
+    if (!m_saveDialogFilenameFocused) return;
+    if (c < 32 || c >= 127) return;
+
+    int len = strlen_local(m_saveDialogFilename);
+    if (len >= MAX_SAVE_FILENAME - 1) return;
+
+    if (c == '/' || c == '\\' || c == ':' || c == '*' || c == '?' || c == '"' || c == '<' || c == '>' || c == '|') {
+        strcopy(m_saveDialogStatus, "Filename cannot contain / \\ : * ? \" < > |", sizeof(m_saveDialogStatus));
+        return;
+    }
+
+    m_saveDialogFilename[len] = c;
+    m_saveDialogFilename[len + 1] = '\0';
+    strcopy(m_saveDialogStatus, "Type a filename, pick a folder, then Save.", sizeof(m_saveDialogStatus));
+}
+
+void NotepadApp::handleSaveDialogKey(uint32_t key) {
+    if (key == 27) {
+        m_showSaveDialog = false;
+        return;
+    }
+
+    if (key == '\t' || key == shell::KEY_TAB) {
+        m_saveDialogFilenameFocused = !m_saveDialogFilenameFocused;
+        return;
+    }
+
+    if (m_saveDialogFilenameFocused) {
+        if (key == '\b') {
+            int len = strlen_local(m_saveDialogFilename);
+            if (len > 0) m_saveDialogFilename[len - 1] = '\0';
+            return;
+        }
+        if (key == '\n' || key == '\r') {
+            saveToDialogTarget();
+            return;
+        }
+        if (key == shell::KEY_UP || key == shell::KEY_DOWN) {
+            m_saveDialogFilenameFocused = false;
+            return;
+        }
+        return;
+    }
+
+    switch (key) {
+        case shell::KEY_UP:
+            if (m_saveSelected > 0) m_saveSelected--;
+            break;
+        case shell::KEY_DOWN:
+            if (m_saveSelected < m_saveEntryCount - 1) m_saveSelected++;
+            break;
+        case '\b':
+            saveDialogGoUp();
+            break;
+        case '\n':
+        case '\r':
+            if (m_saveSelected >= 0 && m_saveSelected < m_saveEntryCount) {
+                if (m_saveEntries[m_saveSelected].isDrive) {
+                    navigateSaveDialog(m_saveEntries[m_saveSelected].name);
+                } else if (m_saveEntries[m_saveSelected].isDir) {
+                    char child[MAX_PATH_LEN];
+                    vfs::join_path(m_saveDialogPath, m_saveEntries[m_saveSelected].name, child, sizeof(child));
+                    navigateSaveDialog(child);
+                }
+            }
+            break;
+        default:
+            break;
+    }
+}
+
 bool NotepadApp::handleSaveDialogClick(int x, int y) {
     if (!m_window) return false;
     int w = m_window->w;
@@ -768,6 +862,7 @@ bool NotepadApp::handleSaveDialogClick(int x, int y) {
     if (x < dlgX || x >= dlgX + dlgW || y < dlgY || y >= dlgY + dlgH) return true;
 
     if (y >= dlgY + 58 && y < dlgY + 58 + 8 * 16 && x >= dlgX + 12 && x < dlgX + dlgW - 12) {
+        m_saveDialogFilenameFocused = false;
         int row = (y - (dlgY + 58)) / 16;
         int index = m_saveScroll + row;
         if (index >= 0 && index < m_saveEntryCount) {
@@ -783,14 +878,22 @@ bool NotepadApp::handleSaveDialogClick(int x, int y) {
         return true;
     }
 
+    if (y >= dlgY + 190 && y < dlgY + 212 && x >= dlgX + 86 && x < dlgX + dlgW - 24) {
+        m_saveDialogFilenameFocused = true;
+        strcopy(m_saveDialogStatus, "Type a filename, pick a folder, then Save.", sizeof(m_saveDialogStatus));
+        return true;
+    }
+
     if (y >= dlgY + 226 && y < dlgY + 250) {
         if (x >= dlgX + 12 && x < dlgX + 82) {
+            m_saveDialogFilenameFocused = false;
             m_saveDialogShowingDrives = true;
             m_saveDialogPath[0] = '\0';
             refreshSaveDialog();
             return true;
         }
         if (x >= dlgX + 90 && x < dlgX + 145) {
+            m_saveDialogFilenameFocused = false;
             saveDialogGoUp();
             return true;
         }
