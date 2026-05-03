@@ -51,6 +51,7 @@ private:
         char name[vfs::VFS_MAX_FILENAME];
         bool isDir;
         bool isDrive;
+        bool isFile;
     };
     
     char m_text[MAX_TEXT_LENGTH];
@@ -67,6 +68,7 @@ private:
     bool m_showEditMenu;
     bool m_showContextMenu;
     bool m_showSaveDialog;
+    bool m_saveDialogIsOpenMode;
     bool m_saveDialogShowingDrives;
     bool m_saveDialogFilenameFocused;
     int m_contextMenuX;
@@ -93,6 +95,7 @@ private:
     void newFile();
     void updateTitle();
     void openSaveAsDialog();
+    void openOpenFileDialog();
     void refreshSaveDialog();
     void drawSaveAsDialog(uint32_t x, uint32_t y, uint32_t w, uint32_t h);
     bool handleSaveDialogClick(int x, int y);

@@ -194,6 +194,7 @@ NotepadApp::NotepadApp() : m_textLength(0), m_cursorPos(0), m_scrollY(0), m_sele
     m_text[0] = '\0';
     m_filePath[0] = '\0';
     m_showSaveDialog = false;
+    m_saveDialogIsOpenMode = false;
     m_saveDialogShowingDrives = true;
     m_saveDialogFilenameFocused = true;
     m_saveDialogPath[0] = '\0';
@@ -368,6 +369,11 @@ void NotepadApp::onKeyDown(uint32_t key) {
         }
         if (key == 's' || key == 'S') {
             saveFile();
+            invalidate();
+            return;
+        }
+        if (key == 'o' || key == 'O') {
+            openOpenFileDialog();
             invalidate();
             return;
         }
@@ -619,6 +625,7 @@ void NotepadApp::openSaveAsDialog() {
     m_showEditMenu = false;
     m_showContextMenu = false;
     m_showSaveDialog = true;
+    m_saveDialogIsOpenMode = false;
     m_saveDialogShowingDrives = true;
     m_saveDialogFilenameFocused = true;
     m_saveDialogPath[0] = '\0';
@@ -635,6 +642,23 @@ void NotepadApp::openSaveAsDialog() {
     invalidate();
 }
 
+void NotepadApp::openOpenFileDialog() {
+    m_showFileMenu = false;
+    m_showEditMenu = false;
+    m_showContextMenu = false;
+    m_showSaveDialog = true;
+    m_saveDialogIsOpenMode = true;
+    m_saveDialogShowingDrives = true;
+    m_saveDialogFilenameFocused = true;
+    m_saveDialogPath[0] = '\0';
+    m_saveSelected = 0;
+    m_saveScroll = 0;
+    strcopy(m_saveDialogFilename, "", MAX_SAVE_FILENAME);
+    strcopy(m_saveDialogStatus, "Pick a drive, folder, or file to open.", sizeof(m_saveDialogStatus));
+    refreshSaveDialog();
+    invalidate();
+}
+
 void NotepadApp::refreshSaveDialog() {
     m_saveEntryCount = 0;
     if (m_saveDialogShowingDrives) {
@@ -646,17 +670,29 @@ void NotepadApp::refreshSaveDialog() {
             strcopy(entry.name, mount->path, vfs::VFS_MAX_FILENAME);
             entry.isDir = true;
             entry.isDrive = true;
+            entry.isFile = false;
         }
     } else {
         uint8_t dir = vfs::opendir(m_saveDialogPath);
         if (dir != 0xFF) {
             vfs::DirEntry de{};
             while (vfs::readdir(dir, &de) && m_saveEntryCount < MAX_SAVE_ENTRIES) {
-                if (de.type != vfs::FILE_TYPE_DIRECTORY) continue;
-                SaveDialogEntry& entry = m_saveEntries[m_saveEntryCount++];
-                strcopy(entry.name, de.name, vfs::VFS_MAX_FILENAME);
-                entry.isDir = true;
-                entry.isDrive = false;
+                // Always show directories
+                if (de.type == vfs::FILE_TYPE_DIRECTORY) {
+                    SaveDialogEntry& entry = m_saveEntries[m_saveEntryCount++];
+                    strcopy(entry.name, de.name, vfs::VFS_MAX_FILENAME);
+                    entry.isDir = true;
+                    entry.isDrive = false;
+                    entry.isFile = false;
+                }
+                // Show files only in Open mode
+                else if (m_saveDialogIsOpenMode && de.type == vfs::FILE_TYPE_REGULAR) {
+                    SaveDialogEntry& entry = m_saveEntries[m_saveEntryCount++];
+                    strcopy(entry.name, de.name, vfs::VFS_MAX_FILENAME);
+                    entry.isDir = false;
+                    entry.isDrive = false;
+                    entry.isFile = true;
+                }
             }
             vfs::closedir(dir);
         }
@@ -676,10 +712,15 @@ void NotepadApp::drawSaveAsDialog(uint32_t x, uint32_t y, uint32_t w, uint32_t h
     framebuffer::fill_rect(dlgX, dlgY + dlgH - 1, dlgW, 1, rgb(150, 150, 170));
     framebuffer::fill_rect(dlgX, dlgY, 1, dlgH, rgb(150, 150, 170));
     framebuffer::fill_rect(dlgX + dlgW - 1, dlgY, 1, dlgH, rgb(150, 150, 170));
-    appDrawText(dlgX + 12, dlgY + 10, "Save As", rgb(255, 255, 255));
 
-    appDrawText(dlgX + 12, dlgY + 32, m_saveDialogShowingDrives ? "Save in: Computer" : "Save in:", rgb(220, 220, 230));
-    if (!m_saveDialogShowingDrives) appDrawText(dlgX + 70, dlgY + 32, m_saveDialogPath, rgb(200, 220, 255));
+    const char* title = m_saveDialogIsOpenMode ? "Open File" : "Save As";
+    appDrawText(dlgX + 12, dlgY + 10, title, rgb(255, 255, 255));
+
+    const char* locationLabel = m_saveDialogShowingDrives ? 
+        (m_saveDialogIsOpenMode ? "Open from: Computer" : "Save in: Computer") : 
+        (m_saveDialogIsOpenMode ? "Open from:" : "Save in:");
+    appDrawText(dlgX + 12, dlgY + 32, locationLabel, rgb(220, 220, 230));
+    if (!m_saveDialogShowingDrives) appDrawText(dlgX + 80, dlgY + 32, m_saveDialogPath, rgb(200, 220, 255));
 
     framebuffer::fill_rect(dlgX + 12, dlgY + 54, dlgW - 24, 130, rgb(25, 25, 32));
     const int rowH = 16;
@@ -689,10 +730,16 @@ void NotepadApp::drawSaveAsDialog(uint32_t x, uint32_t y, uint32_t w, uint32_t h
         if (index >= m_saveEntryCount) break;
         uint32_t rowY = dlgY + 58 + i * rowH;
         if (index == m_saveSelected) framebuffer::fill_rect(dlgX + 14, rowY - 2, dlgW - 28, rowH, rgb(50, 90, 150));
-        appDrawText(dlgX + 18, rowY, m_saveEntries[index].isDrive ? "[DRIVE]" : "[DIR]", rgb(210, 210, 120));
+
+        const char* typeLabel = m_saveEntries[index].isDrive ? "[DRIVE]" : 
+                                 m_saveEntries[index].isDir ? "[DIR]" : "[FILE]";
+        appDrawText(dlgX + 18, rowY, typeLabel, rgb(210, 210, 120));
         appDrawText(dlgX + 70, rowY, m_saveEntries[index].name, rgb(235, 235, 240));
     }
-    if (m_saveEntryCount == 0) appDrawText(dlgX + 18, dlgY + 64, "No drives or folders found.", rgb(240, 180, 120));
+    if (m_saveEntryCount == 0) {
+        const char* emptyMsg = m_saveDialogIsOpenMode ? "No drives, folders, or files found." : "No drives or folders found.";
+        appDrawText(dlgX + 18, dlgY + 64, emptyMsg, rgb(240, 180, 120));
+    }
 
     appDrawText(dlgX + 12, dlgY + 196, "File name:", rgb(220, 220, 230));
     framebuffer::fill_rect(dlgX + 86, dlgY + 190, dlgW - 110, 22, m_saveDialogFilenameFocused ? rgb(18, 28, 48) : rgb(20, 20, 28));
@@ -715,8 +762,10 @@ void NotepadApp::drawSaveAsDialog(uint32_t x, uint32_t y, uint32_t w, uint32_t h
     appDrawText(dlgX + 28, dlgY + 234, "Drives", rgb(255, 255, 255));
     framebuffer::fill_rect(dlgX + 90, dlgY + 226, 55, 24, rgb(65, 75, 95));
     appDrawText(dlgX + 110, dlgY + 234, "Up", rgb(255, 255, 255));
+
+    const char* actionButtonText = m_saveDialogIsOpenMode ? "Open" : "Save";
     framebuffer::fill_rect(dlgX + dlgW - 170, dlgY + 226, 70, 24, rgb(50, 110, 70));
-    appDrawText(dlgX + dlgW - 147, dlgY + 234, "Save", rgb(255, 255, 255));
+    appDrawText(dlgX + dlgW - 147, dlgY + 234, actionButtonText, rgb(255, 255, 255));
     framebuffer::fill_rect(dlgX + dlgW - 90, dlgY + 226, 70, 24, rgb(110, 65, 65));
     appDrawText(dlgX + dlgW - 72, dlgY + 234, "Cancel", rgb(255, 255, 255));
 
@@ -842,6 +891,13 @@ void NotepadApp::handleSaveDialogKey(uint32_t key) {
                     char child[MAX_PATH_LEN];
                     vfs::join_path(m_saveDialogPath, m_saveEntries[m_saveSelected].name, child, sizeof(child));
                     navigateSaveDialog(child);
+                } else if (m_saveDialogIsOpenMode && m_saveEntries[m_saveSelected].isFile) {
+                    // Open the selected file
+                    char fullPath[MAX_PATH_LEN];
+                    vfs::join_path(m_saveDialogPath, m_saveEntries[m_saveSelected].name, fullPath, sizeof(fullPath));
+                    if (loadFile(fullPath)) {
+                        m_showSaveDialog = false;
+                    }
                 }
             }
             break;
@@ -873,6 +929,10 @@ bool NotepadApp::handleSaveDialogClick(int x, int y) {
                 char child[MAX_PATH_LEN];
                 vfs::join_path(m_saveDialogPath, m_saveEntries[index].name, child, sizeof(child));
                 navigateSaveDialog(child);
+            } else if (m_saveDialogIsOpenMode && m_saveEntries[index].isFile) {
+                // In open mode, populate filename field with clicked file
+                strcopy(m_saveDialogFilename, m_saveEntries[index].name, MAX_SAVE_FILENAME);
+                strcopy(m_saveDialogStatus, "Click Open to open this file.", sizeof(m_saveDialogStatus));
             }
         }
         return true;
@@ -880,7 +940,10 @@ bool NotepadApp::handleSaveDialogClick(int x, int y) {
 
     if (y >= dlgY + 190 && y < dlgY + 212 && x >= dlgX + 86 && x < dlgX + dlgW - 24) {
         m_saveDialogFilenameFocused = true;
-        strcopy(m_saveDialogStatus, "Type a filename, pick a folder, then Save.", sizeof(m_saveDialogStatus));
+        const char* statusMsg = m_saveDialogIsOpenMode ? 
+            "Type a filename or select from list." : 
+            "Type a filename, pick a folder, then Save.";
+        strcopy(m_saveDialogStatus, statusMsg, sizeof(m_saveDialogStatus));
         return true;
     }
 
@@ -898,7 +961,23 @@ bool NotepadApp::handleSaveDialogClick(int x, int y) {
             return true;
         }
         if (x >= dlgX + dlgW - 170 && x < dlgX + dlgW - 100) {
-            saveToDialogTarget();
+            if (m_saveDialogIsOpenMode) {
+                // Open mode: load the file
+                if (m_saveDialogFilename[0] != '\0' && m_saveDialogPath[0] != '\0') {
+                    char fullPath[MAX_PATH_LEN];
+                    vfs::join_path(m_saveDialogPath, m_saveDialogFilename, fullPath, sizeof(fullPath));
+                    if (loadFile(fullPath)) {
+                        m_showSaveDialog = false;
+                    } else {
+                        strcopy(m_saveDialogStatus, "Failed to open file.", sizeof(m_saveDialogStatus));
+                    }
+                } else {
+                    strcopy(m_saveDialogStatus, "Select a file or enter a filename.", sizeof(m_saveDialogStatus));
+                }
+            } else {
+                // Save mode
+                saveToDialogTarget();
+            }
             return true;
         }
         if (x >= dlgX + dlgW - 90 && x < dlgX + dlgW - 20) {
@@ -1011,23 +1090,23 @@ void NotepadApp::drawMenuBar(uint32_t x, uint32_t y, uint32_t w) {
 }
 
 void NotepadApp::drawFileMenu(uint32_t x, uint32_t y) {
-    const char* items[] = {"New", "Save", "Save As", "Exit"};
-    const int itemCount = 4;
+    const char* items[] = {"New", "Open", "Save", "Save As", "Exit"};
+    const int itemCount = 5;
     const int menuW = 120;
     const int itemH = 22;
-    
+
     // Menu background
     framebuffer::fill_rect(x, y, menuW, itemCount * itemH + 2, rgb(240, 240, 245));
-    
+
     // Border
     framebuffer::fill_rect(x, y, menuW, 1, rgb(160, 160, 170)); // Top
     framebuffer::fill_rect(x, y + itemCount * itemH + 1, menuW, 1, rgb(160, 160, 170)); // Bottom
     framebuffer::fill_rect(x, y, 1, itemCount * itemH + 2, rgb(160, 160, 170)); // Left
     framebuffer::fill_rect(x + menuW - 1, y, 1, itemCount * itemH + 2, rgb(160, 160, 170)); // Right
-    
+
     for (int i = 0; i < itemCount; i++) {
         uint32_t itemY = y + 1 + i * itemH;
-        
+
         // Item text
         uint32_t textColor = rgb(0, 0, 0);
         for (int j = 0; items[i][j]; j++) {
@@ -1120,17 +1199,18 @@ bool NotepadApp::handleMenuClick(int x, int y) {
         const int itemH = 22;
         const int menuX = fileX;
         const int menuY = MENU_BAR_HEIGHT;
-        
+
         if (x >= menuX && x < menuX + menuW && 
-            y >= menuY && y < menuY + 4 * itemH + 2) {
+            y >= menuY && y < menuY + 5 * itemH + 2) {
             int item = (y - menuY - 1) / itemH;
-            if (item >= 0 && item < 4) {
+            if (item >= 0 && item < 5) {
                 m_showFileMenu = false;
                 switch (item) {
                     case 0: newFile(); break;
-                    case 1: saveFile(); break;
-                    case 2: openSaveAsDialog(); break;
-                    case 3: requestClose(); break;
+                    case 1: openOpenFileDialog(); break;
+                    case 2: saveFile(); break;
+                    case 3: openSaveAsDialog(); break;
+                    case 4: requestClose(); break;
                 }
                 return true;
             }
