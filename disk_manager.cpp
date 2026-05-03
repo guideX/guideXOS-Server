@@ -54,7 +54,11 @@ uint64_t DiskManager::Launch() {
 
 int DiskManager::main(int argc, char** argv) {
     try {
-        Logger::write(LogLevel::Info, "DiskManager starting...");
+#ifdef _WIN32
+        Logger::write(LogLevel::Info, "DiskManager starting [Windows host mode]");
+#else
+        Logger::write(LogLevel::Info, "DiskManager starting [guideXOS baremetal mode]");
+#endif
         
         // Initialize state
         s_windowId = 0;
@@ -175,10 +179,12 @@ int DiskManager::main(int argc, char** argv) {
 
 std::string DiskManager::buildStatus() {
 #ifdef _WIN32
-    return "Driver: <Windows Host Mode>\nDetected media: " + s_detected;
+    Logger::write(LogLevel::Info, "DiskManager running in Windows host mode - disk data is simulated");
+    return "Mode: Windows Host (simulated)\nDetected media: " + s_detected;
 #else
-    std::string driver = "Unknown";
-    return "Driver: " + driver + "\nDetected media: " + s_detected;
+    Logger::write(LogLevel::Info, "DiskManager running in guideXOS baremetal mode - using kernel::block API");
+    std::string driver = "kernel::block";
+    return "Mode: guideXOS Baremetal\nDriver: " + driver + "\nDetected media: " + s_detected;
 #endif
 }
 

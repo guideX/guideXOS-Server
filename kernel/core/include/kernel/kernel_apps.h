@@ -12,6 +12,7 @@
 
 #include "kernel/kernel_app.h"
 #include "kernel/vfs.h"
+#include "kernel/block_device.h"
 
 namespace kernel {
 namespace apps {
@@ -281,6 +282,58 @@ private:
     void parentPath(const char* path, char* out, int outSize) const;
     void formatSize(uint64_t size, char* out, int outSize) const;
     const char* fileType(const Entry& entry) const;
+};
+
+// ============================================================
+// Disk Manager App (baremetal)
+// ============================================================
+
+class DiskManagerApp : public app::KernelApp {
+public:
+    DiskManagerApp();
+    virtual ~DiskManagerApp() override;
+
+    virtual bool init() override;
+    virtual void shutdown() override;
+    virtual void draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) override;
+
+    virtual void onMouseDown(int x, int y, uint8_t button) override;
+    virtual void onWidgetClick(int widgetId) override;
+
+    static app::KernelApp* create() { return new DiskManagerApp(); }
+
+private:
+    static const int MAX_DISKS = 16;
+    static const int MAX_PARTS = 4;
+
+    struct PartEntry {
+        uint8_t  type;
+        uint32_t lbaStart;
+        uint32_t lbaCount;
+        bool     bootable;
+        char     fsLabel[16];  // "FAT", "EXT2", "TarFS", "Unknown"
+    };
+
+    struct DiskEntry {
+        char     name[40];
+        uint8_t  devIndex;
+        uint64_t totalSectors;
+        uint32_t sectorSize;
+        bool     haveInfo;
+        PartEntry parts[MAX_PARTS];
+        int       partCount;
+    };
+
+    DiskEntry m_disks[MAX_DISKS];
+    int       m_diskCount;
+    int       m_selectedDisk;
+
+    int m_refreshBtnId;
+
+    void        scanDisks();
+    void        readMBR(DiskEntry& disk);
+    const char* detectFs(uint8_t devIndex, uint32_t lbaStart);
+    void        formatSize(uint64_t bytes, char* out, int outSize) const;
 };
 
 // ============================================================

@@ -2372,6 +2372,340 @@ const char* FileExplorerApp::fileType(const Entry& entry) const {
 }
 
 // ============================================================
+// DiskManagerApp Implementation
+// ============================================================
+
+DiskManagerApp::DiskManagerApp()
+    : m_diskCount(0), m_selectedDisk(0), m_refreshBtnId(-1) {
+    strcopy(m_name, "DiskManager", app::MAX_APP_NAME);
+}
+
+DiskManagerApp::~DiskManagerApp() {
+}
+
+bool DiskManagerApp::init() {
+    serial::puts("[DISKMANAGER] Starting in baremetal mode\n");
+
+    m_window = new app::KernelWindow();
+    strcopy(m_window->title, "Disk Manager", app::MAX_TITLE_LEN);
+    m_window->x = 120;
+    m_window->y = 55;
+    m_window->w = 700;
+    m_window->h = 420;
+    m_window->flags = app::WF_VISIBLE | app::WF_TITLEBAR | app::WF_CLOSABLE | app::WF_RESIZABLE | app::WF_FOCUSED;
+    m_window->owner = this;
+
+    if (!compositor::KernelCompositor::registerWindow(m_window)) {
+        delete m_window;
+        m_window = nullptr;
+        serial::puts("[DISKMANAGER] Failed to register window\n");
+        return false;
+    }
+
+    m_refreshBtnId = addButton(10, m_window->h - 44, 90, 28, "Refresh");
+
+    scanDisks();
+
+    m_state = app::AppState::Running;
+    serial::puts("[DISKMANAGER] Init complete\n");
+    return true;
+}
+
+void DiskManagerApp::shutdown() {
+    m_state = app::AppState::Terminated;
+}
+
+void DiskManagerApp::scanDisks() {
+    m_diskCount = 0;
+    uint8_t total = kernel::block::device_count();
+    serial::puts("[DISKMANAGER] Scanning block devices, count=");
+    serial::put_hex8(total);
+    serial::putc('\n');
+
+    for (uint8_t i = 0; i < total && m_diskCount < MAX_DISKS; i++) {
+        const kernel::block::BlockDevice* dev = kernel::block::get_device(i);
+        if (!dev || !dev->active) continue;
+
+        DiskEntry& e = m_disks[m_diskCount];
+        e.devIndex = i;
+        e.totalSectors = dev->totalSectors;
+        e.sectorSize = dev->sectorSize;
+        e.haveInfo = true;
+        e.partCount = 0;
+
+        // Build display name from device name + type
+        const char* typeStr = "Disk";
+        if (dev->type == kernel::block::BDEV_ATA_PIO || dev->type == kernel::block::BDEV_AHCI)
+            typeStr = "System";
+        else if (dev->type == kernel::block::BDEV_NVME)
+            typeStr = "NVMe";
+        else if (dev->type == kernel::block::BDEV_USB_MASS)
+            typeStr = "USB";
+
+        // name = "<dev->name> (<typeStr>)"
+        int ni = 0;
+        for (int j = 0; dev->name[j] && ni < 30; j++) e.name[ni++] = dev->name[j];
+        e.name[ni++] = ' '; e.name[ni++] = '(';
+        for (int j = 0; typeStr[j] && ni < 37; j++) e.name[ni++] = typeStr[j];
+        e.name[ni++] = ')'; e.name[ni] = '\0';
+
+        readMBR(e);
+        m_diskCount++;
+    }
+
+    if (m_diskCount == 0) {
+        serial::puts("[DISKMANAGER] No block devices found\n");
+        DiskEntry& e = m_disks[0];
+        strcopy(e.name, "No disks detected", 40);
+        e.devIndex = 0;
+        e.haveInfo = false;
+        e.totalSectors = 0;
+        e.sectorSize = 512;
+        e.partCount = 0;
+        m_diskCount = 1;
+    }
+
+    if (m_selectedDisk >= m_diskCount) m_selectedDisk = 0;
+}
+
+void DiskManagerApp::readMBR(DiskEntry& disk) {
+    disk.partCount = 0;
+    uint8_t mbr[512];
+    kernel::block::Status st = kernel::block::read_sectors(disk.devIndex, 0, 1, mbr);
+    if (st != kernel::block::BLOCK_OK) return;
+    if (mbr[510] != 0x55 || mbr[511] != 0xAA) return;
+
+    for (int i = 0; i < MAX_PARTS; i++) {
+        int off = 446 + i * 16;
+        uint8_t type = mbr[off + 4];
+        if (type == 0) continue;
+
+        PartEntry& p = disk.parts[disk.partCount];
+        p.type     = type;
+        p.bootable = (mbr[off + 0] == 0x80);
+        p.lbaStart = (uint32_t)mbr[off + 8]  | ((uint32_t)mbr[off + 9]  << 8) |
+                     ((uint32_t)mbr[off + 10] << 16) | ((uint32_t)mbr[off + 11] << 24);
+        p.lbaCount = (uint32_t)mbr[off + 12] | ((uint32_t)mbr[off + 13] << 8) |
+                     ((uint32_t)mbr[off + 14] << 16) | ((uint32_t)mbr[off + 15] << 24);
+        const char* fs = detectFs(disk.devIndex, p.lbaStart);
+        strcopy(p.fsLabel, fs, (int)sizeof(p.fsLabel));
+        disk.partCount++;
+    }
+}
+
+const char* DiskManagerApp::detectFs(uint8_t devIndex, uint32_t lbaStart) {
+    if (lbaStart == 0) return "Unknown";
+    uint8_t sec[512];
+    kernel::block::Status st = kernel::block::read_sectors(devIndex, lbaStart, 1, sec);
+    if (st != kernel::block::BLOCK_OK) return "Unknown";
+
+    // TarFS magic at offset 257
+    if (sec[257] == 'u' && sec[258] == 's' && sec[259] == 't' &&
+        sec[260] == 'a' && sec[261] == 'r') return "TarFS";
+
+    // FAT: boot signature + sane BPB
+    if (sec[510] == 0x55 && sec[511] == 0xAA) {
+        uint16_t bps = (uint16_t)sec[11] | ((uint16_t)sec[12] << 8);
+        if ((bps == 512 || bps == 1024 || bps == 2048 || bps == 4096) && sec[13] != 0)
+            return "FAT";
+    }
+
+    // EXT2/3/4: magic at superblock offset 0x438
+    uint8_t sb[512];
+    kernel::block::Status st2 = kernel::block::read_sectors(devIndex, lbaStart + 2, 1, sb);
+    if (st2 == kernel::block::BLOCK_OK) {
+        uint16_t ext_magic = (uint16_t)sb[0x38] | ((uint16_t)sb[0x39] << 8);
+        if (ext_magic == 0xEF53) return "EXT2";
+    }
+
+    return "Unknown";
+}
+
+void DiskManagerApp::formatSize(uint64_t bytes, char* out, int outSize) const {
+    // Simple size formatter: TB/GB/MB/KB/B
+    const char* units[] = {"B", "KB", "MB", "GB", "TB"};
+    int u = 0;
+    uint64_t val = bytes;
+    while (val >= 1024 && u < 4) { val >>= 10; u++; }
+
+    // Convert to decimal string (no printf available)
+    char tmp[24];
+    int ti = 0;
+    if (val == 0) {
+        tmp[ti++] = '0';
+    } else {
+        uint64_t v = val;
+        char rev[20]; int ri = 0;
+        while (v > 0) { rev[ri++] = '0' + (int)(v % 10); v /= 10; }
+        for (int j = ri - 1; j >= 0; j--) tmp[ti++] = rev[j];
+    }
+    tmp[ti++] = ' ';
+    for (int j = 0; units[u][j] && ti < 22; j++) tmp[ti++] = units[u][j];
+    tmp[ti] = '\0';
+
+    // Copy to out
+    int i = 0;
+    while (tmp[i] && i < outSize - 1) { out[i] = tmp[i]; i++; }
+    out[i] = '\0';
+}
+
+void DiskManagerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
+    static const uint32_t kHeader   = 0xFF2C3E50;
+    static const uint32_t kBg       = 0xFF1E2430;
+    static const uint32_t kPanel    = 0xFF252D3B;
+    static const uint32_t kRowSel   = 0xFF2E4A6E;
+    static const uint32_t kRowAlt   = 0xFF222A36;
+    static const uint32_t kText     = 0xFFDCE3F0;
+    static const uint32_t kSubText  = 0xFF8A9AB0;
+    static const uint32_t kAccent   = 0xFF4A9ECA;
+    static const uint32_t kPartBar  = 0xFF3A7EAA;
+    static const uint32_t kPartBarB = 0xFF2A5E80;
+    (void)kAccent; (void)kPartBarB;
+
+    // Background
+    framebuffer::fill_rect(x, y, w, h, kBg);
+
+    // Title bar stripe
+    framebuffer::fill_rect(x, y, w, 22, kHeader);
+    appDrawText(x + 10, y + 7, "Disk Manager  [baremetal mode]", kText);
+
+    // Left pane: disk list
+    const uint32_t leftW = 200;
+    framebuffer::fill_rect(x, y + 22, leftW, h - 22, kPanel);
+    appDrawText(x + 8, y + 28, "Disks", kSubText);
+
+    uint32_t rowH = 28;
+    for (int i = 0; i < m_diskCount; i++) {
+        uint32_t ry = y + 46 + (uint32_t)i * rowH;
+        uint32_t rowColor = (i == m_selectedDisk) ? kRowSel : ((i % 2 == 0) ? kPanel : kRowAlt);
+        framebuffer::fill_rect(x + 2, ry, leftW - 4, rowH - 2, rowColor);
+        appDrawText(x + 8, ry + (rowH - kGlyphH) / 2, m_disks[i].name, kText);
+    }
+
+    // Right pane: detail
+    uint32_t rx = x + leftW + 4;
+    uint32_t rw = (w > leftW + 8) ? (w - leftW - 8) : 0;
+    framebuffer::fill_rect(rx, y + 22, rw, h - 22, kBg);
+
+    if (m_selectedDisk >= 0 && m_selectedDisk < m_diskCount) {
+        const DiskEntry& d = m_disks[m_selectedDisk];
+        uint32_t dy = y + 28;
+
+        // Disk header
+        appDrawText(rx + 4, dy, d.name, kText);
+        dy += kGlyphH + 6;
+
+        if (d.haveInfo) {
+            char szBuf[32];
+            formatSize(d.totalSectors * (uint64_t)d.sectorSize, szBuf, sizeof(szBuf));
+            appDrawText(rx + 4, dy, szBuf, kSubText);
+            dy += kGlyphH + 10;
+
+            // Partition table header
+            appDrawText(rx + 4, dy, "# ", kSubText);
+            appDrawText(rx + 20, dy, "Type  LBA Start    Sectors     FS       Boot", kSubText);
+            dy += kGlyphH + 4;
+            framebuffer::fill_rect(rx + 4, dy, rw - 8, 1, kPanel);
+            dy += 3;
+
+            if (d.partCount == 0) {
+                appDrawText(rx + 4, dy, "No MBR partitions found", kSubText);
+                dy += kGlyphH + 6;
+            }
+
+            for (int pi = 0; pi < d.partCount; pi++) {
+                const PartEntry& p = d.parts[pi];
+                uint32_t pry = dy + (uint32_t)pi * (kGlyphH + 6);
+
+                // Small partition color bar
+                framebuffer::fill_rect(rx + 4, pry, 4, kGlyphH, kPartBar);
+
+                // Row text  (manual number → char)
+                char numBuf[4] = {'0' + (char)(pi + 1), '\0', '\0', '\0'};
+                appDrawText(rx + 10, pry, numBuf, kText);
+
+                // Type hex
+                char typeBuf[8];
+                typeBuf[0] = '0'; typeBuf[1] = 'x';
+                static const char hex[] = "0123456789ABCDEF";
+                typeBuf[2] = hex[(p.type >> 4) & 0xF];
+                typeBuf[3] = hex[p.type & 0xF];
+                typeBuf[4] = '\0';
+                appDrawText(rx + 22, pry, typeBuf, kSubText);
+
+                // LBA start (decimal, hand-rolled)
+                char lbaBuf[16]; int li = 0;
+                if (p.lbaStart == 0) { lbaBuf[li++] = '0'; }
+                else { uint32_t v = p.lbaStart; char rev[12]; int ri = 0;
+                       while (v > 0) { rev[ri++] = '0' + (int)(v % 10); v /= 10; }
+                       for (int j = ri - 1; j >= 0; j--) lbaBuf[li++] = rev[j]; }
+                lbaBuf[li] = '\0';
+                appDrawText(rx + 60, pry, lbaBuf, kSubText);
+
+                // Sector count
+                char scBuf[16]; int si = 0;
+                if (p.lbaCount == 0) { scBuf[si++] = '0'; }
+                else { uint32_t v = p.lbaCount; char rev[12]; int ri = 0;
+                       while (v > 0) { rev[ri++] = '0' + (int)(v % 10); v /= 10; }
+                       for (int j = ri - 1; j >= 0; j--) scBuf[si++] = rev[j]; }
+                scBuf[si] = '\0';
+                appDrawText(rx + 120, pry, scBuf, kSubText);
+
+                // FS label
+                appDrawText(rx + 190, pry, p.fsLabel, kText);
+
+                // Boot flag
+                if (p.bootable) appDrawText(rx + 240, pry, "*", kAccent);
+            }
+
+            // Partition bar at bottom
+            if (d.partCount > 0 && d.totalSectors > 0) {
+                uint32_t barY = y + h - 60;
+                uint32_t barX = rx + 4;
+                uint32_t barW = (rw > 16) ? rw - 16 : 0;
+                framebuffer::fill_rect(barX, barY, barW, 18, kPanel);
+
+                for (int pi = 0; pi < d.partCount; pi++) {
+                    const PartEntry& p = d.parts[pi];
+                    uint32_t pxOff = (uint32_t)((uint64_t)p.lbaStart * barW / d.totalSectors);
+                    uint32_t pxW   = (uint32_t)((uint64_t)p.lbaCount * barW / d.totalSectors);
+                    if (pxW < 2) pxW = 2;
+                    uint32_t col = (pi % 2 == 0) ? kPartBar : kPartBarB;
+                    framebuffer::fill_rect(barX + pxOff, barY, pxW, 18, col);
+                }
+
+                appDrawText(rx + 4, barY + 22, "Partition map", kSubText);
+            }
+        } else {
+            appDrawText(rx + 4, dy, "No disk info available", kSubText);
+        }
+    }
+}
+
+void DiskManagerApp::onMouseDown(int localX, int localY, uint8_t button) {
+    (void)button;
+    const uint32_t leftW = 200;
+    const uint32_t listTop = 46;
+    const uint32_t rowH = 28;
+
+    if ((uint32_t)localX < leftW && (uint32_t)localY >= listTop) {
+        int idx = ((uint32_t)localY - listTop) / rowH;
+        if (idx >= 0 && idx < m_diskCount) {
+            m_selectedDisk = idx;
+            invalidate();
+        }
+    }
+}
+
+void DiskManagerApp::onWidgetClick(int widgetId) {
+    if (widgetId == m_refreshBtnId) {
+        serial::puts("[DISKMANAGER] Manual refresh\n");
+        scanDisks();
+        invalidate();
+    }
+}
+
+// ============================================================
 // App Registration
 // ============================================================
 
@@ -2385,6 +2719,7 @@ void registerKernelApps() {
     app::AppManager::registerApp("TaskManager", 0xFFB44646, TaskManagerApp::create);
     app::AppManager::registerApp("Files", 0xFFC8B43C, FileExplorerApp::create);
     app::AppManager::registerApp("FileExplorer", 0xFFC8B43C, FileExplorerApp::create);
+    app::AppManager::registerApp("DiskManager", 0xFF7050C0, DiskManagerApp::create);
 }
 
 } // namespace apps
