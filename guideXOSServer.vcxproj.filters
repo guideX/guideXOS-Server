@@ -573,6 +573,12 @@
     <ClInclude Include="hd_installer.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="desktop_wallpaper.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="bitmap_font.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="allocator.cpp">
@@ -1230,12 +1236,7 @@
     <None Include="disks\test-fat32.img" />
     <None Include="docs\NETWORK_SETUP.md" />
     <None Include="docs\TROUBLESHOOTING_PING.md" />
-    <None Include="fix_include.py" />
-    <None Include="fix_include2.py" />
-    <None Include="CONTROL_PANEL_INTEGRATION.md" />
-    <None Include="FOCUS_AND_ICONS_IMPLEMENTATION.md" />
     <None Include="SERVER.md" />
-    <None Include="GuideXOS.sln" />
     <None Include="GuideXOS.FileExplorer.Tests\GuideXOS.FileExplorer.Tests.csproj" />
     <None Include="GuideXOS.FileSystem\GuideXOS.FileSystem.csproj" />
     <None Include="GuideXOS.FileExplorer\GuideXOS.FileExplorer.csproj" />
@@ -1255,21 +1256,20 @@
     <None Include="GuideXOS.FileExplorer\App.xaml.cs" />
     <None Include="GuideXOS.FileExplorer.Tests\FileEntryModelTests.cs" />
     <None Include="GuideXOS.FileExplorer.Tests\FileSystemProviderTests.cs" />
-    <None Include="GUIDEXOS_README.md" />
-    <None Include="QUICKSTART.md" />
-    <None Include="PROJECT_SUMMARY.md" />
     <None Include="GuideXOS.FileSystem\Windows\WindowsFileSystemProvider.cs" />
-    <None Include="REAL_FILESYSTEM_GUIDE.md" />
-    <None Include="REAL_FILESYSTEM_INTEGRATION.md" />
     <None Include="START_HERE.md" />
     <None Include="GuideXOS.FileSystem\Image\ImageFileSystemProvider.cs" />
     <None Include="GuideXOS.FileSystem\Image\FatImageReader.cs" />
     <None Include="GuideXOS.FileSystem\Hybrid\HybridFileSystemProvider.cs" />
-    <None Include="IMAGE_BROWSING.md" />
-    <None Include="QUICKSTART_IMG.md" />
-    <None Include="IMPLEMENTATION_SUMMARY.md" />
-    <None Include="create-test-image.ps1" />
-    <None Include="README_IMAGE_BROWSING.md" />
+    <None Include="README.md" />
+    <None Include="OVMF_VARS.fd" />
+    <None Include="OVMF.fd" />
+    <None Include="fix-bootloader-project.ps1" />
+    <None Include="desktop.json" />
+    <None Include="build-kernel.bat">
+      <Filter>Source Files</Filter>
+    </None>
+    <None Include="build.ps1" />
   </ItemGroup>
   <ItemGroup>
     <Text Include="scripts\build-and-run-sparcv8_in_linux.sh" />
@@ -1277,6 +1277,11 @@
     <Text Include="docs\guideXOSServer_UniversalBinarySystem.txt" />
     <Text Include="docs\Other_Random_Development_Priorities.txt" />
     <Text Include="docs\S390X.txt" />
+    <Text Include="output.log" />
+    <Text Include="full_build.log" />
+    <Text Include="compositor_h_dump.txt" />
+    <Text Include="build_output.txt" />
+    <Text Include="build.log" />
   </ItemGroup>
   <ItemGroup>
     <Page Include="GuideXOS.FileExplorer\Views\MainWindow.xaml" />

@@ -129,6 +129,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="allocator.h" />
+    <ClInclude Include="bitmap_font.h" />
     <ClInclude Include="calculator.h" />
     <ClInclude Include="clock.h" />
     <ClInclude Include="compositor.h" />
@@ -137,6 +138,7 @@
     <ClInclude Include="desktop_config.h" />
     <ClInclude Include="desktop_service.h" />
     <ClInclude Include="desktop_state.h" />
+    <ClInclude Include="desktop_wallpaper.h" />
     <ClInclude Include="disk_manager.h" />
     <ClInclude Include="control_panel.h" />
     <ClInclude Include="file_explorer.h" />
@@ -514,11 +516,12 @@
   <ItemGroup>
     <None Include=".vs\launch.vs.json" />
     <None Include=".vs\tasks.vs.json" />
+    <None Include="build-kernel.bat" />
     <None Include="build-uefi.ps1" />
     <None Include="build.bat" />
+    <None Include="build.ps1" />
     <None Include="configure-vs-project.bat" />
-    <None Include="CONTROL_PANEL_INTEGRATION.md" />
-    <None Include="create-test-image.ps1" />
+    <None Include="desktop.json" />
     <None Include="diagnose.bat" />
     <None Include="Directory.Build.props" />
     <None Include="Directory.Build.targets" />
@@ -532,10 +535,8 @@
     <None Include="docs\SDK_ARCHITECTURE.md" />
     <None Include="docs\TROUBLESHOOTING_PING.md" />
     <None Include="ESP\startup.nsh" />
+    <None Include="fix-bootloader-project.ps1" />
     <None Include="fix-trampoline.ps1" />
-    <None Include="fix_include.py" />
-    <None Include="fix_include2.py" />
-    <None Include="FOCUS_AND_ICONS_IMPLEMENTATION.md" />
     <None Include="GuideXOS.FileExplorer.Tests\FileEntryModelTests.cs" />
     <None Include="GuideXOS.FileExplorer.Tests\FileSystemProviderTests.cs" />
     <None Include="GuideXOS.FileExplorer.Tests\GuideXOS.FileExplorer.Tests.csproj" />
@@ -559,13 +560,9 @@
     <None Include="GuideXOS.FileSystem\Image\ImageFileSystemProvider.cs" />
     <None Include="GuideXOS.FileSystem\Mock\MockFileSystemProvider.cs" />
     <None Include="GuideXOS.FileSystem\Windows\WindowsFileSystemProvider.cs" />
-    <None Include="GuideXOS.sln" />
     <None Include="guideXOSKernel.vcxproj" />
     <None Include="guideXOSKernel.vcxproj.filters" />
     <None Include="guideXOSServer.csproj" />
-    <None Include="GUIDEXOS_README.md" />
-    <None Include="IMAGE_BROWSING.md" />
-    <None Include="IMPLEMENTATION_SUMMARY.md" />
     <None Include="KernelBuild.vcxproj" />
     <None Include="kernel\arch\amd64\boot.asm" />
     <None Include="kernel\arch\amd64\linker.ld" />
@@ -605,13 +602,10 @@
     <None Include="kernel\docs\HARDWARE_SUPPORT_REPORT.md" />
     <None Include="kernel\Makefile" />
     <None Include="Makefile" />
-    <None Include="PROJECT_SUMMARY.md" />
+    <None Include="OVMF.fd" />
+    <None Include="OVMF_VARS.fd" />
     <None Include="Properties\launchSettings.json" />
-    <None Include="QUICKSTART.md" />
-    <None Include="QUICKSTART_IMG.md" />
-    <None Include="README_IMAGE_BROWSING.md" />
-    <None Include="REAL_FILESYSTEM_GUIDE.md" />
-    <None Include="REAL_FILESYSTEM_INTEGRATION.md" />
+    <None Include="README.md" />
     <None Include="RUN-KERNEL.bat" />
     <None Include="run-qemu.bat" />
     <None Include="run-uefi.sh" />
@@ -643,10 +637,15 @@
     <None Include="_fix_filters_audio.py" />
   </ItemGroup>
   <ItemGroup>
+    <Text Include="build.log" />
+    <Text Include="build_output.txt" />
+    <Text Include="compositor_h_dump.txt" />
     <Text Include="docs\Development Priorities.txt" />
     <Text Include="docs\guideXOSServer_UniversalBinarySystem.txt" />
     <Text Include="docs\Other_Random_Development_Priorities.txt" />
     <Text Include="docs\S390X.txt" />
+    <Text Include="full_build.log" />
+    <Text Include="output.log" />
     <Text Include="scripts\build-and-run-sparcv8_in_linux.sh" />
   </ItemGroup>
   <ItemGroup>
