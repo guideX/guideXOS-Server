@@ -1757,10 +1757,16 @@ void TaskManagerApp::refreshList() {
 FileExplorerApp::FileExplorerApp()
     : m_entryCount(0), m_selected(0), m_scroll(0),
       m_lastClickIndex(-1), m_lastClickTick(0),
-      m_backBtnId(-1), m_upBtnId(-1), m_refreshBtnId(-1), m_rootBtnId(-1) {
+      m_backBtnId(-1), m_upBtnId(-1), m_refreshBtnId(-1), m_rootBtnId(-1),
+      m_renameFileBtnId(-1), m_deleteFileBtnId(-1), m_renameFolderBtnId(-1), m_deleteFolderBtnId(-1),
+      m_confirmDeleteBtnId(-1), m_cancelDeleteBtnId(-1), m_renamePrompt(false), m_deleteConfirm(false),
+      m_deleteTargetIsDir(false) {
     strcopy(m_name, "Files", app::MAX_APP_NAME);
     strcopy(m_currentPath, "/", MAX_PATH_LEN);
     strcopy(m_status, "Ready", sizeof(m_status));
+    m_renameValue[0] = '\0';
+    m_deleteTarget[0] = '\0';
+    m_deleteTargetName[0] = '\0';
 }
 
 FileExplorerApp::~FileExplorerApp() {
@@ -1790,9 +1796,16 @@ bool FileExplorerApp::initWithParam(const char* startPath) {
     m_upBtnId = addButton(66, 5, 38, 20, "Up");
     m_refreshBtnId = addButton(108, 5, 58, 20, "Refresh");
     m_rootBtnId = addButton(170, 5, 70, 20, "Mounts");
+    m_renameFileBtnId = addButton(248, 5, 82, 20, "Rename File");
+    m_deleteFileBtnId = addButton(334, 5, 78, 20, "Delete File");
+    m_renameFolderBtnId = addButton(248, 5, 92, 20, "Rename Dir");
+    m_deleteFolderBtnId = addButton(344, 5, 84, 20, "Delete Dir");
+    m_confirmDeleteBtnId = addButton(260, 205, 78, 20, "Delete");
+    m_cancelDeleteBtnId = addButton(344, 205, 70, 20, "Cancel");
 
     strcopy(m_currentPath, startPath && startPath[0] ? startPath : "/", MAX_PATH_LEN);
     refresh();
+    updateActionButtons();
     m_state = app::AppState::Running;
     return true;
 }
@@ -1808,6 +1821,18 @@ void FileExplorerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
     framebuffer::fill_rect(x, addressY, w, ADDRESS_H, rgb(255, 255, 255));
     appDrawText(x + 8, addressY + 7, "Address:", rgb(70, 70, 70));
     appDrawText(x + 62, addressY + 7, m_currentPath, rgb(30, 30, 30));
+
+    if (m_renamePrompt) {
+        framebuffer::fill_rect(x + 220, y + 165, 330, 92, rgb(245, 245, 250));
+        appDrawText(x + 232, y + 182, "Rename selected item", rgb(30, 30, 30));
+        appDrawText(x + 232, y + 205, m_renameValue, rgb(20, 20, 20));
+        appDrawText(x + 232, y + 230, "Enter=OK  Esc=Cancel  Backspace=Delete", rgb(80, 80, 80));
+    } else if (m_deleteConfirm) {
+        framebuffer::fill_rect(x + 220, y + 165, 330, 92, rgb(250, 245, 245));
+        appDrawText(x + 232, y + 182, m_deleteTargetIsDir ? "Delete this folder?" : "Delete this file?", rgb(80, 30, 30));
+        appDrawText(x + 232, y + 205, m_deleteTargetName, rgb(30, 30, 30));
+        appDrawText(x + 232, y + 230, "Use Delete or Cancel buttons.", rgb(80, 80, 80));
+    }
 
     uint32_t bodyY = y + TOOLBAR_H + ADDRESS_H;
     uint32_t statusH = 22;
@@ -1867,16 +1892,36 @@ void FileExplorerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
 }
 
 void FileExplorerApp::onKeyDown(uint32_t key) {
+    if (m_renamePrompt) {
+        if (key == '\n' || key == '\r') {
+            commitRename();
+        } else if (key == 27) {
+            cancelRename();
+        } else if (key == '\b') {
+            int len = strlen_local(m_renameValue);
+            if (len > 0) m_renameValue[len - 1] = '\0';
+            invalidate();
+        }
+        return;
+    }
+
+    if (m_deleteConfirm && key == 27) {
+        cancelDelete();
+        return;
+    }
+
     if (key == shell::KEY_UP) {
         if (m_selected > 0) {
             m_selected--;
             if (m_selected < m_scroll) m_scroll = m_selected;
+            updateActionButtons();
             invalidate();
         }
     } else if (key == shell::KEY_DOWN) {
         if (m_selected < m_entryCount - 1) {
             m_selected++;
             if (m_selected >= m_scroll + 20) m_scroll = m_selected - 19;
+            updateActionButtons();
             invalidate();
         }
     } else if (key == '\n' || key == '\r') {
@@ -1888,15 +1933,30 @@ void FileExplorerApp::onKeyDown(uint32_t key) {
         if (m_selected < 0) m_selected = 0;
         m_scroll -= 20;
         if (m_scroll < 0) m_scroll = 0;
+        updateActionButtons();
         invalidate();
     } else if (key == shell::KEY_PGDN) {
         m_selected += 20;
         if (m_selected >= m_entryCount) m_selected = m_entryCount - 1;
         m_scroll += 20;
         if (m_scroll > m_selected) m_scroll = m_selected;
+        updateActionButtons();
         invalidate();
     } else if (key == 'r' || key == 'R') {
         refresh();
+        updateActionButtons();
+        invalidate();
+    }
+}
+
+void FileExplorerApp::onKeyChar(char c) {
+    if (!m_renamePrompt) return;
+    if (c >= 32 && c < 127) {
+        int len = strlen_local(m_renameValue);
+        if (len < (int)sizeof(m_renameValue) - 1 && c != '/') {
+            m_renameValue[len] = c;
+            m_renameValue[len + 1] = '\0';
+        }
         invalidate();
     }
 }
@@ -1914,6 +1974,7 @@ void FileExplorerApp::onMouseDown(int localX, int localY, uint8_t button) {
         m_selected = index;
         m_lastClickIndex = index;
         m_lastClickTick = now;
+        updateActionButtons();
         if (doubleClick) {
             openSelected();
             return;
@@ -1929,7 +1990,16 @@ void FileExplorerApp::onWidgetClick(int widgetId) {
         goUp();
     } else if (widgetId == m_refreshBtnId) {
         refresh();
+        updateActionButtons();
         invalidate();
+    } else if (widgetId == m_renameFileBtnId || widgetId == m_renameFolderBtnId) {
+        beginRenameSelected();
+    } else if (widgetId == m_deleteFileBtnId || widgetId == m_deleteFolderBtnId) {
+        showDeleteConfirmation();
+    } else if (widgetId == m_confirmDeleteBtnId) {
+        confirmDelete();
+    } else if (widgetId == m_cancelDeleteBtnId) {
+        cancelDelete();
     }
 }
 
@@ -1963,6 +2033,7 @@ void FileExplorerApp::refresh() {
     } else {
         setStatus("Ready");
     }
+    updateActionButtons();
 }
 
 void FileExplorerApp::navigate(const char* path) {
@@ -2014,6 +2085,99 @@ void FileExplorerApp::goUp() {
         }
         if (different) navigate(parent);
     }
+}
+
+void FileExplorerApp::updateActionButtons() {
+    bool hasSelection = m_selected >= 0 && m_selected < m_entryCount;
+    bool isDir = hasSelection && m_entries[m_selected].isDir;
+
+    app::Widget* renameFile = getWidget(m_renameFileBtnId);
+    app::Widget* deleteFile = getWidget(m_deleteFileBtnId);
+    app::Widget* renameFolder = getWidget(m_renameFolderBtnId);
+    app::Widget* deleteFolder = getWidget(m_deleteFolderBtnId);
+    app::Widget* confirmDelete = getWidget(m_confirmDeleteBtnId);
+    app::Widget* cancelDelete = getWidget(m_cancelDeleteBtnId);
+
+    if (renameFile) renameFile->visible = hasSelection && !isDir && !m_renamePrompt && !m_deleteConfirm;
+    if (deleteFile) deleteFile->visible = hasSelection && !isDir && !m_renamePrompt && !m_deleteConfirm;
+    if (renameFolder) renameFolder->visible = hasSelection && isDir && !m_renamePrompt && !m_deleteConfirm;
+    if (deleteFolder) deleteFolder->visible = hasSelection && isDir && !m_renamePrompt && !m_deleteConfirm;
+    if (confirmDelete) confirmDelete->visible = m_deleteConfirm;
+    if (cancelDelete) cancelDelete->visible = m_deleteConfirm;
+}
+
+void FileExplorerApp::beginRenameSelected() {
+    if (m_selected < 0 || m_selected >= m_entryCount) return;
+    m_deleteConfirm = false;
+    m_renamePrompt = true;
+    strcopy(m_renameValue, m_entries[m_selected].name, sizeof(m_renameValue));
+    setStatus("Type a new name, then press Enter.");
+    updateActionButtons();
+    invalidate();
+}
+
+void FileExplorerApp::commitRename() {
+    if (m_selected < 0 || m_selected >= m_entryCount || !m_renameValue[0]) {
+        cancelRename();
+        return;
+    }
+
+    char oldPath[MAX_PATH_LEN];
+    char newPath[MAX_PATH_LEN];
+    joinPath(m_currentPath, m_entries[m_selected].name, oldPath, sizeof(oldPath));
+    joinPath(m_currentPath, m_renameValue, newPath, sizeof(newPath));
+
+    vfs::Status status = vfs::rename(oldPath, newPath);
+    m_renamePrompt = false;
+    if (status == vfs::VFS_OK) {
+        setStatus("Renamed item");
+    } else {
+        setStatus("Rename failed");
+    }
+    refresh();
+    updateActionButtons();
+    invalidate();
+}
+
+void FileExplorerApp::cancelRename() {
+    m_renamePrompt = false;
+    setStatus("Rename cancelled");
+    updateActionButtons();
+    invalidate();
+}
+
+void FileExplorerApp::showDeleteConfirmation() {
+    if (m_selected < 0 || m_selected >= m_entryCount) return;
+    Entry& entry = m_entries[m_selected];
+    joinPath(m_currentPath, entry.name, m_deleteTarget, sizeof(m_deleteTarget));
+    strcopy(m_deleteTargetName, entry.name, sizeof(m_deleteTargetName));
+    m_deleteTargetIsDir = entry.isDir;
+    m_renamePrompt = false;
+    m_deleteConfirm = true;
+    setStatus("Confirm delete");
+    updateActionButtons();
+    invalidate();
+}
+
+void FileExplorerApp::confirmDelete() {
+    if (!m_deleteConfirm || !m_deleteTarget[0]) return;
+    vfs::Status status = m_deleteTargetIsDir ? vfs::rmdir(m_deleteTarget) : vfs::unlink(m_deleteTarget);
+    m_deleteConfirm = false;
+    if (status == vfs::VFS_OK) {
+        setStatus("Deleted item");
+    } else {
+        setStatus("Delete failed");
+    }
+    refresh();
+    updateActionButtons();
+    invalidate();
+}
+
+void FileExplorerApp::cancelDelete() {
+    m_deleteConfirm = false;
+    setStatus("Delete cancelled");
+    updateActionButtons();
+    invalidate();
 }
 
 void FileExplorerApp::setStatus(const char* status) {

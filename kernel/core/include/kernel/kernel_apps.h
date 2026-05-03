@@ -216,6 +216,7 @@ public:
     virtual void draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) override;
 
     virtual void onKeyDown(uint32_t key) override;
+    virtual void onKeyChar(char c) override;
     virtual void onMouseDown(int x, int y, uint8_t button) override;
     virtual void onWidgetClick(int widgetId) override;
 
@@ -247,11 +248,30 @@ private:
     int m_upBtnId;
     int m_refreshBtnId;
     int m_rootBtnId;
+    int m_renameFileBtnId;
+    int m_deleteFileBtnId;
+    int m_renameFolderBtnId;
+    int m_deleteFolderBtnId;
+    int m_confirmDeleteBtnId;
+    int m_cancelDeleteBtnId;
+    bool m_renamePrompt;
+    bool m_deleteConfirm;
+    bool m_deleteTargetIsDir;
+    char m_renameValue[vfs::VFS_MAX_FILENAME];
+    char m_deleteTarget[MAX_PATH_LEN];
+    char m_deleteTargetName[vfs::VFS_MAX_FILENAME];
 
     void refresh();
     void navigate(const char* path);
     void openSelected();
     void goUp();
+    void updateActionButtons();
+    void beginRenameSelected();
+    void commitRename();
+    void cancelRename();
+    void showDeleteConfirmation();
+    void confirmDelete();
+    void cancelDelete();
     void setStatus(const char* status);
     bool isTextFile(const char* name) const;
     void joinPath(const char* base, const char* name, char* out, int outSize) const;
