@@ -73,12 +73,19 @@ namespace gxos { namespace apps {
         static void hideContextMenu();
         static bool handleContextMenuClick(int mx, int my);
         static void drawContextMenu();
+        static bool updateMenuHover(int mx, int my);
 
         // File menu operations
         static void toggleFileMenu();
         static void hideFileMenu();
         static bool handleFileMenuClick(int mx, int my);
         static void drawFileMenu();
+
+        // Edit menu operations
+        static void toggleEditMenu();
+        static void hideEditMenu();
+        static bool handleEditMenuClick(int mx, int my);
+        static void drawEditMenu();
         
         // State
         static uint64_t s_windowId;
@@ -108,6 +115,13 @@ namespace gxos { namespace apps {
         static bool s_fileMenuVisible;
         static int s_fileMenuX;
         static int s_fileMenuY;
+        static int s_fileMenuHoverIndex;
+
+        // Edit menu state
+        static bool s_editMenuVisible;
+        static int s_editMenuX;
+        static int s_editMenuY;
+        static int s_editMenuHoverIndex;
         
         // Undo / Redo stacks (store full line snapshots)
         struct TextSnapshot {

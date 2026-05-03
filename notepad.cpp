@@ -43,6 +43,11 @@ namespace gxos { namespace apps {
     bool Notepad::s_fileMenuVisible = false;
     int Notepad::s_fileMenuX = 4;
     int Notepad::s_fileMenuY = 28;
+    int Notepad::s_fileMenuHoverIndex = -1;
+    bool Notepad::s_editMenuVisible = false;
+    int Notepad::s_editMenuX = 56;
+    int Notepad::s_editMenuY = 28;
+    int Notepad::s_editMenuHoverIndex = -1;
     std::vector<Notepad::TextSnapshot> Notepad::s_undoStack;
     std::vector<Notepad::TextSnapshot> Notepad::s_redoStack;
     
@@ -80,6 +85,11 @@ namespace gxos { namespace apps {
             s_fileMenuVisible = false;
             s_fileMenuX = 4;
             s_fileMenuY = 28;
+            s_fileMenuHoverIndex = -1;
+            s_editMenuVisible = false;
+            s_editMenuX = 56;
+            s_editMenuY = 28;
+            s_editMenuHoverIndex = -1;
             
             // Check if file path was provided
             if (argc > 1) {
@@ -140,12 +150,13 @@ namespace gxos { namespace apps {
 
                                         // Add toolbar buttons matching Legacy Notepad
                                         addButton(1, 4, 4, 48, 20, "File");
-                                        addButton(2, 56, 4, 84, 20, "New File");
-                                        addButton(3, 144, 4, 60, 20, "Save");
-                                        addButton(4, 208, 4, 80, 20, "Save As");
-                                        addButton(5, 292, 4, 64, 20, s_wrapText ? "Wrap" : "NoWrap");
-                                        addButton(6, 360, 4, 60, 20, "Undo");
-                                        addButton(7, 424, 4, 60, 20, "Redo");
+                                        addButton(8, 56, 4, 48, 20, "Edit");
+                                        addButton(2, 108, 4, 84, 20, "New File");
+                                        addButton(3, 196, 4, 60, 20, "Save");
+                                        addButton(4, 260, 4, 80, 20, "Save As");
+                                        addButton(5, 344, 4, 64, 20, s_wrapText ? "Wrap" : "NoWrap");
+                                        addButton(6, 412, 4, 60, 20, "Undo");
+                                        addButton(7, 476, 4, 60, 20, "Redo");
 
                                         // Draw initial content
                                         redrawContent();
@@ -457,6 +468,7 @@ namespace gxos { namespace apps {
                                             case 5: toggleWrap(); break;
                                             case 6: performUndo(); break;
                                             case 7: performRedo(); break;
+                                            case 8: toggleEditMenu(); break;
                                         }
                                     }
                                 } catch (const std::exception& e) {
@@ -487,8 +499,13 @@ namespace gxos { namespace apps {
                                     int my = std::stoi(yStr);
                                     int button = std::stoi(buttonStr);
                                     
+                                    if (button == 0 && action == "move") {
+                                        if (updateMenuHover(mx, my)) {
+                                            redrawContent();
+                                        }
+                                    }
                                     // Button 2 = right click
-                                    if (button == 2 && action == "down") {
+                                    else if (button == 2 && action == "down") {
                                         // Show context menu at mouse position
                                         showContextMenu(mx, my);
                                         redrawContent();
@@ -498,6 +515,11 @@ namespace gxos { namespace apps {
                                         if (s_fileMenuVisible) {
                                             if (!handleFileMenuClick(mx, my)) {
                                                 hideFileMenu();
+                                                redrawContent();
+                                            }
+                                        } else if (s_editMenuVisible) {
+                                            if (!handleEditMenuClick(mx, my)) {
+                                                hideEditMenu();
                                                 redrawContent();
                                             }
                                         } else if (s_contextMenuVisible) {
@@ -949,8 +971,10 @@ namespace gxos { namespace apps {
             s_scrollOffset = s_cursorLine - visibleLines + 1;
         }
         
-        // Draw context menu if visible
+        // Draw menus if visible
         drawContextMenu();
+        drawFileMenu();
+        drawEditMenu();
     }
     
     void Notepad::updateStatusBar() {
@@ -981,7 +1005,7 @@ namespace gxos { namespace apps {
         ipc::Message msg;
         msg.type = (uint32_t)MsgType::MT_WidgetAdd;
         std::ostringstream oss;
-        oss << s_windowId << "|1|5|280|4|64|20|" << (s_wrapText ? "Wrap" : "NoWrap");
+        oss << s_windowId << "|1|5|344|4|64|20|" << (s_wrapText ? "Wrap" : "NoWrap");
         std::string payload = oss.str();
         msg.data.assign(payload.begin(), payload.end());
         ipc::Bus::publish("gui.input", std::move(msg), false);
@@ -1000,12 +1024,13 @@ namespace gxos { namespace apps {
             ipc::Bus::publish("gui.input", std::move(msg), false);
         };
         addButton(1, 4, 4, 48, 20, "File");
-        addButton(2, 56, 4, 84, 20, "New File");
-        addButton(3, 144, 4, 60, 20, "Save");
-        addButton(4, 208, 4, 80, 20, "Save As");
-        addButton(5, 292, 4, 64, 20, s_wrapText ? "Wrap" : "NoWrap");
-        addButton(6, 360, 4, 60, 20, "Undo");
-        addButton(7, 424, 4, 60, 20, "Redo");
+        addButton(8, 56, 4, 48, 20, "Edit");
+        addButton(2, 108, 4, 84, 20, "New File");
+        addButton(3, 196, 4, 60, 20, "Save");
+        addButton(4, 260, 4, 80, 20, "Save As");
+        addButton(5, 344, 4, 64, 20, s_wrapText ? "Wrap" : "NoWrap");
+        addButton(6, 412, 4, 60, 20, "Undo");
+        addButton(7, 476, 4, 60, 20, "Redo");
     }
     
     char Notepad::mapKeyToChar(int keyCode) {
@@ -1052,6 +1077,7 @@ namespace gxos { namespace apps {
     void Notepad::showContextMenu(int x, int y) {
         s_contextMenuVisible = true;
         hideFileMenu();
+        hideEditMenu();
         s_contextMenuX = x;
         s_contextMenuY = y;
         s_contextMenuHoverIndex = -1;
@@ -1065,12 +1091,28 @@ namespace gxos { namespace apps {
 
     void Notepad::toggleFileMenu() {
         s_fileMenuVisible = !s_fileMenuVisible;
+        s_fileMenuHoverIndex = -1;
+        hideEditMenu();
         hideContextMenu();
         redrawContent();
     }
 
     void Notepad::hideFileMenu() {
         s_fileMenuVisible = false;
+        s_fileMenuHoverIndex = -1;
+    }
+
+    void Notepad::toggleEditMenu() {
+        s_editMenuVisible = !s_editMenuVisible;
+        s_editMenuHoverIndex = -1;
+        hideFileMenu();
+        hideContextMenu();
+        redrawContent();
+    }
+
+    void Notepad::hideEditMenu() {
+        s_editMenuVisible = false;
+        s_editMenuHoverIndex = -1;
     }
 
     bool Notepad::handleFileMenuClick(int mx, int my) {
@@ -1111,6 +1153,106 @@ namespace gxos { namespace apps {
         }
 
         return false;
+    }
+
+    bool Notepad::handleEditMenuClick(int mx, int my) {
+        if (!s_editMenuVisible) return false;
+
+        const int menuWidth = 140;
+        const int itemHeight = 24;
+        const int itemCount = 6;
+        const int menuHeight = itemHeight * itemCount;
+
+        if (mx >= s_editMenuX && mx < s_editMenuX + menuWidth &&
+            my >= s_editMenuY && my < s_editMenuY + menuHeight) {
+            int itemIndex = (my - s_editMenuY) / itemHeight;
+            hideEditMenu();
+
+            switch (itemIndex) {
+                case 0:
+                    Logger::write(LogLevel::Info, "Notepad: Cut (not implemented)");
+                    break;
+                case 1:
+                    copy();
+                    break;
+                case 2:
+                    paste();
+                    break;
+                case 3:
+                    performUndo();
+                    break;
+                case 4:
+                    performRedo();
+                    break;
+                case 5:
+                    selectAll();
+                    break;
+                default:
+                    return false;
+            }
+
+            redrawContent();
+            return true;
+        }
+
+        return false;
+    }
+
+    bool Notepad::updateMenuHover(int mx, int my) {
+        bool changed = false;
+
+        if (s_fileMenuVisible) {
+            const int menuWidth = 120;
+            const int itemHeight = 24;
+            const int itemCount = 5;
+            int hoverIndex = -1;
+
+            if (mx >= s_fileMenuX && mx < s_fileMenuX + menuWidth &&
+                my >= s_fileMenuY && my < s_fileMenuY + (itemHeight * itemCount)) {
+                hoverIndex = (my - s_fileMenuY) / itemHeight;
+            }
+
+            if (s_fileMenuHoverIndex != hoverIndex) {
+                s_fileMenuHoverIndex = hoverIndex;
+                changed = true;
+            }
+        }
+
+        if (s_editMenuVisible) {
+            const int menuWidth = 140;
+            const int itemHeight = 24;
+            const int itemCount = 6;
+            int hoverIndex = -1;
+
+            if (mx >= s_editMenuX && mx < s_editMenuX + menuWidth &&
+                my >= s_editMenuY && my < s_editMenuY + (itemHeight * itemCount)) {
+                hoverIndex = (my - s_editMenuY) / itemHeight;
+            }
+
+            if (s_editMenuHoverIndex != hoverIndex) {
+                s_editMenuHoverIndex = hoverIndex;
+                changed = true;
+            }
+        }
+
+        if (s_contextMenuVisible) {
+            const int menuWidth = 140;
+            const int itemHeight = 24;
+            const int itemCount = 6;
+            int hoverIndex = -1;
+
+            if (mx >= s_contextMenuX && mx < s_contextMenuX + menuWidth &&
+                my >= s_contextMenuY && my < s_contextMenuY + (itemHeight * itemCount)) {
+                hoverIndex = (my - s_contextMenuY) / itemHeight;
+            }
+
+            if (s_contextMenuHoverIndex != hoverIndex) {
+                s_contextMenuHoverIndex = hoverIndex;
+                changed = true;
+            }
+        }
+
+        return changed;
     }
     
     bool Notepad::handleContextMenuClick(int mx, int my) {
@@ -1225,6 +1367,58 @@ namespace gxos { namespace apps {
         ipc::Bus::publish(kGuiChanIn, std::move(bgMsg), false);
 
         for (int i = 0; i < itemCount; i++) {
+            int itemY = s_fileMenuY + (i * itemHeight);
+
+            if (i == s_fileMenuHoverIndex) {
+                ipc::Message itemBgMsg;
+                itemBgMsg.type = (uint32_t)MsgType::MT_DrawRect;
+                std::ostringstream itemBgOss;
+                itemBgOss << s_windowId << "|" << s_fileMenuX << "|" << itemY << "|" << menuWidth << "|" << itemHeight << "|100|120|140";
+                std::string itemBgPayload = itemBgOss.str();
+                itemBgMsg.data.assign(itemBgPayload.begin(), itemBgPayload.end());
+                ipc::Bus::publish(kGuiChanIn, std::move(itemBgMsg), false);
+            }
+
+            ipc::Message itemTextMsg;
+            itemTextMsg.type = (uint32_t)MsgType::MT_DrawText;
+            std::ostringstream itemTextOss;
+            itemTextOss << s_windowId << "|" << menuItems[i];
+            std::string itemTextPayload = itemTextOss.str();
+            itemTextMsg.data.assign(itemTextPayload.begin(), itemTextPayload.end());
+            ipc::Bus::publish(kGuiChanIn, std::move(itemTextMsg), false);
+        }
+    }
+
+    void Notepad::drawEditMenu() {
+        if (!s_editMenuVisible) return;
+
+        const char* kGuiChanIn = "gui.input";
+        const int menuWidth = 140;
+        const int itemHeight = 24;
+        const char* menuItems[] = { "Cut", "Copy", "Paste", "Undo", "Redo", "Select All" };
+        const int itemCount = 6;
+
+        ipc::Message bgMsg;
+        bgMsg.type = (uint32_t)MsgType::MT_DrawRect;
+        std::ostringstream bgOss;
+        bgOss << s_windowId << "|" << s_editMenuX << "|" << s_editMenuY << "|" << menuWidth << "|" << (itemHeight * itemCount) << "|80|80|90";
+        std::string bgPayload = bgOss.str();
+        bgMsg.data.assign(bgPayload.begin(), bgPayload.end());
+        ipc::Bus::publish(kGuiChanIn, std::move(bgMsg), false);
+
+        for (int i = 0; i < itemCount; i++) {
+            int itemY = s_editMenuY + (i * itemHeight);
+
+            if (i == s_editMenuHoverIndex) {
+                ipc::Message itemBgMsg;
+                itemBgMsg.type = (uint32_t)MsgType::MT_DrawRect;
+                std::ostringstream itemBgOss;
+                itemBgOss << s_windowId << "|" << s_editMenuX << "|" << itemY << "|" << menuWidth << "|" << itemHeight << "|100|120|140";
+                std::string itemBgPayload = itemBgOss.str();
+                itemBgMsg.data.assign(itemBgPayload.begin(), itemBgPayload.end());
+                ipc::Bus::publish(kGuiChanIn, std::move(itemBgMsg), false);
+            }
+
             ipc::Message itemTextMsg;
             itemTextMsg.type = (uint32_t)MsgType::MT_DrawText;
             std::ostringstream itemTextOss;
