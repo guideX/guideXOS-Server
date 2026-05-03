@@ -190,6 +190,11 @@ void init();
 // Returns mount index, or 0xFF on failure.
 uint8_t mount(const char* path, uint8_t blockDevIndex);
 
+// TODO: Mount a filesystem inside an MBR/GPT partition without treating the
+// whole block device as the filesystem. This is a read-only planning stub for
+// DiskManager until partition-aware VFS adapters are implemented.
+uint8_t mount_partition(const char* path, uint8_t blockDevIndex, uint8_t partitionNumber);
+
 // Mount with explicit filesystem type.
 uint8_t mount_type(const char* path, uint8_t blockDevIndex, FSType fsType);
 

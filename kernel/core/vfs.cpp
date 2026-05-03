@@ -313,6 +313,17 @@ uint8_t mount(const char* path, uint8_t blockDevIndex)
     return mount_type(path, blockDevIndex, fsType);
 }
 
+uint8_t mount_partition(const char* path, uint8_t blockDevIndex, uint8_t partitionNumber)
+{
+    (void)path;
+    (void)blockDevIndex;
+    (void)partitionNumber;
+#if defined(__GNUC__) || defined(__clang__)
+    serial::puts("[VFS] mount_partition TODO: partition-aware mounting is not implemented\n");
+#endif
+    return 0xFF;
+}
+
 uint8_t mount_type(const char* path, uint8_t blockDevIndex, FSType fsType)
 {
     if (!s_initialized) {

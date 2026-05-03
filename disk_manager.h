@@ -39,22 +39,32 @@ private:
         uint32_t lbaStart;     // Starting LBA
         uint32_t lbaCount;     // Size in sectors
         std::string fs;        // Detected filesystem ("FAT", "EXT2", "TarFS", "Unknown")
+        std::string mountPoint; // Suggested mount point, or "unmounted"
+        bool mounted;
         
-        PartitionEntry() : status(0), type(0), lbaStart(0), lbaCount(0) {}
+        PartitionEntry() : status(0), type(0), lbaStart(0), lbaCount(0), mounted(false) {}
+    };
+
+    enum MbrStatus : uint8_t {
+        MBR_UNREADABLE = 0,
+        MBR_INVALID = 1,
+        MBR_VALID = 2,
     };
     
     // Disk entry
     struct DiskEntry {
         std::string name;                  // "Disk 0 (System)", "Disk 1 (USB)", etc.
+        std::string transportLabel;        // ATA, AHCI, NVMe, USB, RAM disk, unknown
         bool isSystem;                     // True for IDE/SATA system disk
         uint8_t devIndex;                  // Device index in block layer
         bool haveInfo;                     // True if size info available
         uint64_t totalSectors;             // Total disk capacity in sectors
         uint32_t bytesPerSector;           // Bytes per sector (usually 512)
+        MbrStatus mbrStatus;               // MBR signature/read status
         PartitionEntry parts[4];           // MBR primary partitions
         
         DiskEntry() : isSystem(false), devIndex(0), haveInfo(false), 
-                      totalSectors(0), bytesPerSector(512) {}
+                      totalSectors(0), bytesPerSector(512), mbrStatus(MBR_UNREADABLE) {}
     };
     
     // State
@@ -97,11 +107,13 @@ private:
     static void render();
     static void drawLeftPane(int winX, int winY, int winW, int winH);
     static void drawVolumesGrid(int x, int y, int w, int h);
+    static void drawMountsSection(int x, int y, int w, int h);
     static void drawPartitionMap(int x, int y, int w, int h);
     static void drawActions(int x, int y, int w, int h);
     static void drawHeaderCell(int x, int y, int w, int h, const char* text);
     static void drawCell(int x, int y, int w, int h, const char* text);
     static void drawButton(int x, int y, int w, int h, const char* text, bool hover);
+    static void drawDisabledButton(int x, int y, int w, int h, const char* text);
     
     // Input handling
     static void handleMouseMove(int mx, int my);
@@ -112,6 +124,10 @@ private:
     
     // Utilities
     static std::string fmtSize(uint64_t bytes);
+    static std::string fmtHexByte(uint8_t value);
+    static std::string mbrStatusText(MbrStatus status);
+    static std::string partitionStatusText(const PartitionEntry& part, int partIndex);
+    static std::string suggestMountPoint(const DiskEntry& disk, const PartitionEntry& part, int partIndex);
     static std::string buildStatus();
 };
 
