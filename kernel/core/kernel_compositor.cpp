@@ -443,6 +443,14 @@ void KernelCompositor::handleMouseMove(int32_t mx, int32_t my) {
     
     // Update hover states
     updateHoverStates(mx, my);
+
+    app::KernelWindow* hitWin = nullptr;
+    HitTestResult hit = hitTest(mx, my, &hitWin);
+    if (hit == HitTestResult::Client && hitWin && hitWin->owner) {
+        int localX = mx - hitWin->x;
+        int localY = my - hitWin->y - TITLEBAR_HEIGHT;
+        hitWin->owner->onMouseMove(localX, localY);
+    }
 }
 
 void KernelCompositor::handleMouseDown(int32_t mx, int32_t my, uint8_t button) {
@@ -632,6 +640,17 @@ void KernelCompositor::updateHoverStates(int mx, int my) {
             case HitTestResult::MinimizeButton:
                 hitWin->minBtnHover = true;
                 break;
+            case HitTestResult::Client: {
+                int localX = mx - hitWin->x;
+                int localY = my - hitWin->y - TITLEBAR_HEIGHT;
+                for (int i = 0; i < hitWin->widgetCount; ++i) {
+                    app::Widget* widget = &hitWin->widgets[i];
+                    if (!widget->visible || !widget->enabled) continue;
+                    widget->hover = localX >= widget->x && localX < widget->x + widget->w &&
+                                    localY >= widget->y && localY < widget->y + widget->h;
+                }
+                break;
+            }
             default:
                 break;
         }
@@ -647,6 +666,9 @@ void KernelCompositor::clearHoverStates(app::KernelWindow* window) {
         window->closeBtnHover = false;
         window->maxBtnHover = false;
         window->minBtnHover = false;
+        for (int i = 0; i < window->widgetCount; ++i) {
+            window->widgets[i].hover = false;
+        }
     }
 }
 

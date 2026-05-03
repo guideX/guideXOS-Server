@@ -188,8 +188,8 @@ int NotepadApp::s_clipboardLength = 0;
 NotepadApp::NotepadApp() : m_textLength(0), m_cursorPos(0), m_scrollY(0), m_selectAll(false),
                            m_modified(false), m_ctrlPressed(false), m_showFileMenu(false),
                            m_showEditMenu(false), m_showContextMenu(false), m_contextMenuX(0),
-                           m_contextMenuY(0), m_hoveredMenuItem(-1), m_selectionStart(-1),
-                           m_selectionEnd(-1) {
+                            m_contextMenuY(0), m_hoveredMenuItem(-1), m_hoveredMenuType(0),
+                            m_selectionStart(-1), m_selectionEnd(-1) {
     strcopy(m_name, "Notepad", app::MAX_APP_NAME);
     m_text[0] = '\0';
     m_filePath[0] = '\0';
@@ -443,6 +443,12 @@ void NotepadApp::onKeyDown(uint32_t key) {
     invalidate();
 }
 
+void NotepadApp::onMouseMove(int x, int y) {
+    if (updateMenuHover(x, y)) {
+        invalidate();
+    }
+}
+
 void NotepadApp::onMouseDown(int x, int y, uint8_t button) {
     // Debug: log all mouse clicks
     serial::puts("[NOTEPAD] Mouse down: button=");
@@ -457,6 +463,8 @@ void NotepadApp::onMouseDown(int x, int y, uint8_t button) {
     if (button == 1) {
         if (m_showSaveDialog) {
             if (handleSaveDialogClick(x, y)) {
+                m_hoveredMenuItem = -1;
+                m_hoveredMenuType = 0;
                 invalidate();
                 return;
             }
@@ -481,6 +489,8 @@ void NotepadApp::onMouseDown(int x, int y, uint8_t button) {
         m_showFileMenu = false;
         m_showEditMenu = false;
         m_showContextMenu = false;
+        m_hoveredMenuItem = -1;
+        m_hoveredMenuType = 0;
         invalidate();
         return;
     }
@@ -492,6 +502,8 @@ void NotepadApp::onMouseDown(int x, int y, uint8_t button) {
         // Close dropdown menus
         m_showFileMenu = false;
         m_showEditMenu = false;
+        m_hoveredMenuItem = -1;
+        m_hoveredMenuType = 0;
         
         // Show context menu at mouse position
         m_showContextMenu = true;
@@ -1069,7 +1081,7 @@ void NotepadApp::drawMenuBar(uint32_t x, uint32_t y, uint32_t w) {
     // File menu item
     uint32_t fileX = x + 4;
     uint32_t fileW = 40;
-    if (m_showFileMenu) {
+    if (m_showFileMenu || (m_hoveredMenuType == 1 && m_hoveredMenuItem == -2)) {
         framebuffer::fill_rect(fileX, y + 2, fileW, MENU_BAR_HEIGHT - 4, rgb(70, 100, 150));
     }
     drawChar(fileX + 4, y + 6, 'F', rgb(220, 220, 230));
@@ -1080,7 +1092,7 @@ void NotepadApp::drawMenuBar(uint32_t x, uint32_t y, uint32_t w) {
     // Edit menu item
     uint32_t editX = fileX + fileW + 4;
     uint32_t editW = 40;
-    if (m_showEditMenu) {
+    if (m_showEditMenu || (m_hoveredMenuType == 2 && m_hoveredMenuItem == -2)) {
         framebuffer::fill_rect(editX, y + 2, editW, MENU_BAR_HEIGHT - 4, rgb(70, 100, 150));
     }
     drawChar(editX + 4, y + 6, 'E', rgb(220, 220, 230));
@@ -1107,8 +1119,12 @@ void NotepadApp::drawFileMenu(uint32_t x, uint32_t y) {
     for (int i = 0; i < itemCount; i++) {
         uint32_t itemY = y + 1 + i * itemH;
 
+        if (m_hoveredMenuType == 1 && m_hoveredMenuItem == i) {
+            framebuffer::fill_rect(x + 1, itemY, menuW - 2, itemH, rgb(45, 95, 180));
+        }
+
         // Item text
-        uint32_t textColor = rgb(0, 0, 0);
+        uint32_t textColor = (m_hoveredMenuType == 1 && m_hoveredMenuItem == i) ? rgb(255, 255, 255) : rgb(0, 0, 0);
         for (int j = 0; items[i][j]; j++) {
             drawChar(x + 8 + j * 6, itemY + 7, items[i][j], textColor);
         }
@@ -1132,9 +1148,13 @@ void NotepadApp::drawEditMenu(uint32_t x, uint32_t y) {
     
     for (int i = 0; i < itemCount; i++) {
         uint32_t itemY = y + 1 + i * itemH;
+
+        if (m_hoveredMenuType == 2 && m_hoveredMenuItem == i) {
+            framebuffer::fill_rect(x + 1, itemY, menuW - 2, itemH, rgb(45, 95, 180));
+        }
         
         // Item text
-        uint32_t textColor = rgb(0, 0, 0);
+        uint32_t textColor = (m_hoveredMenuType == 2 && m_hoveredMenuItem == i) ? rgb(255, 255, 255) : rgb(0, 0, 0);
         for (int j = 0; items[i][j]; j++) {
             drawChar(x + 8 + j * 6, itemY + 7, items[i][j], textColor);
         }
@@ -1162,9 +1182,13 @@ void NotepadApp::drawContextMenu(uint32_t x, uint32_t y) {
     
     for (int i = 0; i < itemCount; i++) {
         uint32_t itemY = y + 1 + i * itemH;
+
+        if (m_hoveredMenuType == 3 && m_hoveredMenuItem == i) {
+            framebuffer::fill_rect(x + 1, itemY, menuW - 2, itemH, rgb(45, 95, 180));
+        }
         
         // Item text
-        uint32_t textColor = rgb(0, 0, 0);
+        uint32_t textColor = (m_hoveredMenuType == 3 && m_hoveredMenuItem == i) ? rgb(255, 255, 255) : rgb(0, 0, 0);
         for (int j = 0; items[i][j]; j++) {
             drawChar(x + 8 + j * 6, itemY + 7, items[i][j], textColor);
         }
@@ -1183,12 +1207,16 @@ bool NotepadApp::handleMenuClick(int x, int y) {
         if (x >= fileX && x < fileX + fileW) {
             m_showFileMenu = !m_showFileMenu;
             m_showEditMenu = false;
+            m_hoveredMenuItem = -1;
+            m_hoveredMenuType = 0;
             return true;
         }
         // Edit menu toggle
         if (x >= editX && x < editX + editW) {
             m_showEditMenu = !m_showEditMenu;
             m_showFileMenu = false;
+            m_hoveredMenuItem = -1;
+            m_hoveredMenuType = 0;
             return true;
         }
     }
@@ -1205,6 +1233,8 @@ bool NotepadApp::handleMenuClick(int x, int y) {
             int item = (y - menuY - 1) / itemH;
             if (item >= 0 && item < 5) {
                 m_showFileMenu = false;
+                m_hoveredMenuItem = -1;
+                m_hoveredMenuType = 0;
                 switch (item) {
                     case 0: newFile(); break;
                     case 1: openOpenFileDialog(); break;
@@ -1229,6 +1259,8 @@ bool NotepadApp::handleMenuClick(int x, int y) {
             int item = (y - menuY - 1) / itemH;
             if (item >= 0 && item < 4) {
                 m_showEditMenu = false;
+                m_hoveredMenuItem = -1;
+                m_hoveredMenuType = 0;
                 switch (item) {
                     case 0: cut(); break;
                     case 1: copy(); break;
@@ -1260,9 +1292,74 @@ bool NotepadApp::handleContextMenuClick(int x, int y) {
                 case 2: paste(); break;
                 case 3: selectAll(); break;
             }
+            m_hoveredMenuItem = -1;
+            m_hoveredMenuType = 0;
             return true;
         }
     }
+    return false;
+}
+
+bool NotepadApp::updateMenuHover(int x, int y) {
+    int newType = 0;
+    int newItem = -1;
+
+    const int fileX = 4;
+    const int fileW = 40;
+    const int editX = 48;
+    const int editW = 40;
+
+    if (y >= 0 && y < MENU_BAR_HEIGHT) {
+        if (x >= fileX && x < fileX + fileW) {
+            newType = 1;
+            newItem = -2;
+        } else if (x >= editX && x < editX + editW) {
+            newType = 2;
+            newItem = -2;
+        }
+    }
+
+    if (m_showFileMenu) {
+        const int menuX = fileX;
+        const int menuY = MENU_BAR_HEIGHT;
+        const int menuW = 120;
+        const int itemH = 22;
+        const int itemCount = 5;
+        if (x >= menuX && x < menuX + menuW && y >= menuY + 1 && y < menuY + 1 + itemCount * itemH) {
+            newType = 1;
+            newItem = (y - menuY - 1) / itemH;
+        }
+    }
+
+    if (m_showEditMenu) {
+        const int menuX = editX;
+        const int menuY = MENU_BAR_HEIGHT;
+        const int menuW = 160;
+        const int itemH = 22;
+        const int itemCount = 4;
+        if (x >= menuX && x < menuX + menuW && y >= menuY + 1 && y < menuY + 1 + itemCount * itemH) {
+            newType = 2;
+            newItem = (y - menuY - 1) / itemH;
+        }
+    }
+
+    if (m_showContextMenu) {
+        const int menuW = 130;
+        const int itemH = 22;
+        const int itemCount = 4;
+        if (x >= m_contextMenuX && x < m_contextMenuX + menuW &&
+            y >= m_contextMenuY + 1 && y < m_contextMenuY + 1 + itemCount * itemH) {
+            newType = 3;
+            newItem = (y - m_contextMenuY - 1) / itemH;
+        }
+    }
+
+    if (newType != m_hoveredMenuType || newItem != m_hoveredMenuItem) {
+        m_hoveredMenuType = newType;
+        m_hoveredMenuItem = newItem;
+        return true;
+    }
+
     return false;
 }
 

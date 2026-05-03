@@ -862,6 +862,8 @@ static int32_t s_shellResizeStartH = 0;
 
 // Forward declarations
 static void draw_shell_window();
+static void forget_cursor_save();
+static void get_context_menu_geometry(uint32_t& menuX, uint32_t& menuY, uint32_t& menuH);
 static int find_nearest_icon_in_direction(int currentIcon, int direction);
 static void show_icon_notification(int iconIndex);
 
@@ -1932,21 +1934,11 @@ static void draw_right_click_menu()
 {
     if (!s_rightClickMenuOpen) return;
 
-    uint32_t menuH = (uint32_t)kContextMenuCount * kContextMenuItemH + kContextMenuPad * 2;
-    uint32_t mx = s_rightClickX;
-    uint32_t my = s_rightClickY;
-
-    // Clamp to screen
-    if (mx + kContextMenuW > s_screenW) mx = s_screenW - kContextMenuW;
-    if (my + menuH > s_screenH - kTaskbarH) my = s_screenH - kTaskbarH - menuH;
-
-    int hoveredItem = -1;
-    if (s_mouseX >= 0 && s_mouseY >= 0 &&
-        (uint32_t)s_mouseX >= mx && (uint32_t)s_mouseX < mx + kContextMenuW &&
-        (uint32_t)s_mouseY >= my + kContextMenuPad && (uint32_t)s_mouseY < my + menuH - kContextMenuPad) {
-        hoveredItem = (s_mouseY - (int32_t)my - (int32_t)kContextMenuPad) / (int32_t)kContextMenuItemH;
-        if (hoveredItem < 0 || hoveredItem >= kContextMenuCount) hoveredItem = -1;
-    }
+    uint32_t menuH;
+    uint32_t mx;
+    uint32_t my;
+    get_context_menu_geometry(mx, my, menuH);
+    int hoveredItem = s_rightClickHover;
 
     // Background with shadow
     framebuffer::fill_rect(mx + 2, my + 2, kContextMenuW, menuH, rgb(20, 20, 25));
@@ -1957,8 +1949,8 @@ static void draw_right_click_menu()
         uint32_t itemY = my + kContextMenuPad + (uint32_t)i * kContextMenuItemH;
 
         if (i == hoveredItem) {
-            framebuffer::fill_rect(mx + 1, itemY, kContextMenuW - 2, kContextMenuItemH, rgb(70, 90, 130));
-            draw_rect(mx + 2, itemY + 1, kContextMenuW - 4, kContextMenuItemH - 2, rgb(95, 120, 170));
+            framebuffer::fill_rect(mx + 1, itemY, kContextMenuW - 2, kContextMenuItemH, rgb(45, 95, 180));
+            draw_rect(mx + 2, itemY + 1, kContextMenuW - 4, kContextMenuItemH - 2, rgb(120, 165, 230));
         } else if (i % 2 == 0) {
             framebuffer::fill_rect(mx + 1, itemY, kContextMenuW - 2, kContextMenuItemH, rgb(48, 48, 58));
         }
@@ -3269,6 +3261,8 @@ void draw()
 {
     if (!s_initialized || !framebuffer::is_available()) return;
 
+    forget_cursor_save();
+
     draw_background();
     draw_desktop_icons();
     draw_taskbar();
@@ -3319,7 +3313,7 @@ void show_context_menu(uint32_t x, uint32_t y)
     s_rightClickX = x;
     s_rightClickY = y;
     s_rightClickMenuOpen = true;
-    s_rightClickHover = -1;
+    s_rightClickHover = hit_test_context_menu((int32_t)x, (int32_t)y);
     // Close start menu when context menu is shown
     s_startMenuOpen = false;
 }
@@ -3563,6 +3557,11 @@ static uint32_t s_cursorSave[19][12];
 static int32_t  s_lastCursorX = -1;
 static int32_t  s_lastCursorY = -1;
 static bool     s_cursorDrawn = false;
+
+static void forget_cursor_save()
+{
+    s_cursorDrawn = false;
+}
 
 // Previous button state for edge detection
 static uint8_t  s_prevButtons = 0;

@@ -32,6 +32,7 @@ public:
     
     virtual void onKeyChar(char c) override;
     virtual void onKeyDown(uint32_t key) override;
+    virtual void onMouseMove(int x, int y) override;
     virtual void onMouseDown(int x, int y, uint8_t button) override;
     virtual void onMouseUp(int x, int y, uint8_t button) override;
     
@@ -74,6 +75,7 @@ private:
     int m_contextMenuX;
     int m_contextMenuY;
     int m_hoveredMenuItem;
+    int m_hoveredMenuType;
     char m_saveDialogPath[MAX_PATH_LEN];
     char m_saveDialogFilename[MAX_SAVE_FILENAME];
     char m_saveDialogStatus[96];
@@ -124,6 +126,7 @@ private:
     void drawContextMenu(uint32_t x, uint32_t y);
     bool handleMenuClick(int x, int y);
     bool handleContextMenuClick(int x, int y);
+    bool updateMenuHover(int x, int y);
     int getLineCount() const;
     int getLineStart(int lineIndex) const;
 };
