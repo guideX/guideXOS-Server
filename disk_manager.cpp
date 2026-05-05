@@ -16,9 +16,16 @@
 #include <algorithm>
 #include <cstring>
 #include <cstdio>
+#include <new>
+
+#ifdef _WIN32
+#include <fstream>
+#include <io.h>
+#endif
 
 #ifndef _WIN32
 #include "kernel/core/include/kernel/block_device.h"
+#include "kernel/core/include/kernel/ramdisk.h"
 #include "kernel/core/include/kernel/vfs.h"
 #endif
 
@@ -38,6 +45,8 @@ std::string DiskManager::s_cachedTotalCaption = "";
 int DiskManager::s_mouseX = 0;
 int DiskManager::s_mouseY = 0;
 bool DiskManager::s_mouseDown = false;
+std::vector<DiskManager::HostImageEntry> DiskManager::s_hostImages;
+int DiskManager::s_selectedHostImageIndex = 0;
 
 // Button positions
 int DiskManager::s_bxDetectX = 0, DiskManager::s_bxDetectY = 0;
@@ -48,6 +57,10 @@ int DiskManager::s_bxSwitchExtX = 0, DiskManager::s_bxSwitchExtY = 0;
 int DiskManager::s_bxFormatExfatX = 0, DiskManager::s_bxFormatExfatY = 0;
 int DiskManager::s_bxCreatePartX = 0, DiskManager::s_bxCreatePartY = 0;
 int DiskManager::s_bxRefreshX = 0, DiskManager::s_bxRefreshY = 0;
+int DiskManager::s_bxAttachImageX = 0, DiskManager::s_bxAttachImageY = 0;
+int DiskManager::s_bxPrevImageX = 0, DiskManager::s_bxPrevImageY = 0;
+int DiskManager::s_bxNextImageX = 0, DiskManager::s_bxNextImageY = 0;
+int DiskManager::s_bxRescanImagesX = 0, DiskManager::s_bxRescanImagesY = 0;
 
 uint64_t DiskManager::Launch() {
     ProcessSpec spec{"diskmanager", DiskManager::main};
@@ -66,12 +79,18 @@ int DiskManager::main(int argc, char** argv) {
         s_windowId = 0;
         s_disks.clear();
         s_disks.reserve(16);
+        s_hostImages.clear();
+        s_hostImages.reserve(16);
+        s_selectedHostImageIndex = 0;
         s_selectedDiskIndex = 0;
         s_mouseX = 0;
         s_mouseY = 0;
         s_mouseDown = false;
         
         // Load initial disk data
+#ifndef _WIN32
+        refreshHostImageLibrary();
+#endif
         refreshDisks();
         s_status = buildStatus();
         
@@ -182,8 +201,8 @@ int DiskManager::main(int argc, char** argv) {
 
 std::string DiskManager::buildStatus() {
 #ifdef _WIN32
-    Logger::write(LogLevel::Info, "DiskManager running in Windows host mode - disk data is simulated");
-    return "Mode: Windows Host (simulated)\nDetected media: " + s_detected;
+    Logger::write(LogLevel::Info, "DiskManager running in Windows host mode - host .img attachment enabled");
+    return "Mode: Windows Host (.img attach)\nDetected media: " + s_detected;
 #else
     Logger::write(LogLevel::Info, "DiskManager running in guideXOS baremetal mode - using kernel::block API");
     std::string driver = "kernel::block";
@@ -245,6 +264,8 @@ void DiskManager::refreshDisks() {
         s_disks.push_back(sysDisk);
     }
 #else
+    refreshHostImageLibrary();
+
     DiskEntry sysDisk;
     sysDisk.name = "Disk 0 (ATA)";
     sysDisk.transportLabel = "ATA";
@@ -263,30 +284,14 @@ void DiskManager::refreshDisks() {
     sysDisk.mbrStatus = MBR_VALID;
     s_disks.push_back(sysDisk);
 
-    DiskEntry imgDisk;
-    imgDisk.name = "Disk 1 (USB)";
-    imgDisk.transportLabel = "USB";
-    imgDisk.isSystem = false;
-    imgDisk.devIndex = 1;
-    imgDisk.haveInfo = true;
-    imgDisk.bytesPerSector = 512;
-    imgDisk.totalSectors = 8388608;
-    imgDisk.parts[0].status = 0x00;
-    imgDisk.parts[0].type = 0x0C;
-    imgDisk.parts[0].lbaStart = 2048;
-    imgDisk.parts[0].lbaCount = 1048576;
-    imgDisk.parts[0].fs = "FAT";
-    imgDisk.parts[0].mountPoint = "/shared";
-    imgDisk.parts[0].mounted = false;
-    imgDisk.parts[1].status = 0x00;
-    imgDisk.parts[1].type = 0x83;
-    imgDisk.parts[1].lbaStart = 1050624;
-    imgDisk.parts[1].lbaCount = 5242880;
-    imgDisk.parts[1].fs = "EXT2/EXT4";
-    imgDisk.parts[1].mountPoint = "/users";
-    imgDisk.parts[1].mounted = false;
-    imgDisk.mbrStatus = MBR_VALID;
-    s_disks.push_back(imgDisk);
+    for (size_t i = 0; i < s_hostImages.size(); ++i) {
+        if (!s_hostImages[i].attached) continue;
+
+        DiskEntry imageDisk;
+        if (buildHostDiskEntryFromImage(s_hostImages[i], static_cast<uint8_t>(s_disks.size()), imageDisk)) {
+            s_disks.push_back(imageDisk);
+        }
+    }
 #endif
     
     if (s_selectedDiskIndex >= static_cast<int>(s_disks.size())) {
@@ -329,6 +334,316 @@ void DiskManager::probeOnce() {
 #endif
     
     s_status = buildStatus();
+}
+
+void DiskManager::refreshHostImageLibrary() {
+#ifdef _WIN32
+    std::vector<HostImageEntry> refreshed;
+    intptr_t handle = 0;
+    _finddata_t findData;
+    handle = _findfirst("disks\\*.img", &findData);
+    if (handle == -1) {
+        handle = _findfirst("disks\\*.IMG", &findData);
+    }
+    if (handle == -1) {
+        s_hostImages.clear();
+        s_selectedHostImageIndex = 0;
+        return;
+    }
+
+    do {
+        if ((findData.attrib & _A_SUBDIR) != 0) continue;
+
+        HostImageEntry item;
+        item.path = std::string("disks\\") + findData.name;
+        item.displayName = findData.name;
+        item.attached = false;
+
+        for (size_t oldIndex = 0; oldIndex < s_hostImages.size(); ++oldIndex) {
+            if (s_hostImages[oldIndex].path == item.path) {
+                item.attached = s_hostImages[oldIndex].attached;
+                break;
+            }
+        }
+
+        refreshed.push_back(item);
+    } while (_findnext(handle, &findData) == 0);
+
+    _findclose(handle);
+
+    s_hostImages.swap(refreshed);
+    if (s_selectedHostImageIndex >= static_cast<int>(s_hostImages.size())) {
+        s_selectedHostImageIndex = static_cast<int>(s_hostImages.size()) - 1;
+    }
+    if (s_selectedHostImageIndex < 0) {
+        s_selectedHostImageIndex = 0;
+    }
+#else
+    bool hadSelection = !s_hostImages.empty();
+    for (size_t i = 0; i < s_hostImages.size(); ++i) {
+        if (s_hostImages[i].data) {
+            delete[] s_hostImages[i].data;
+        }
+    }
+    s_hostImages.clear();
+
+    kernel::vfs::DirEntry entry;
+    const char* searchPaths[] = { "/disks", "/" };
+    for (int pathIndex = 0; pathIndex < 2; ++pathIndex) {
+        uint8_t dir = kernel::vfs::opendir(searchPaths[pathIndex]);
+        if (dir == 0xFF) continue;
+
+        while (kernel::vfs::readdir(dir, &entry)) {
+            if (entry.type != kernel::vfs::FILE_TYPE_REGULAR || !isImgName(entry.name) || entry.size == 0) {
+                continue;
+            }
+            if (entry.size > 16U * 1024U * 1024U) {
+                continue;
+            }
+
+            char fullPath[256];
+            kernel::vfs::join_path(searchPaths[pathIndex], entry.name, fullPath, sizeof(fullPath));
+            uint8_t file = kernel::vfs::open(fullPath, kernel::vfs::OPEN_READ);
+            if (file == 0xFF) continue;
+
+            uint8_t* data = new (std::nothrow) uint8_t[static_cast<size_t>(entry.size)];
+            if (!data) {
+                kernel::vfs::close(file);
+                continue;
+            }
+
+            int32_t readBytes = kernel::vfs::read(file, data, static_cast<uint32_t>(entry.size));
+            kernel::vfs::close(file);
+            if (readBytes != static_cast<int32_t>(entry.size)) {
+                delete[] data;
+                continue;
+            }
+
+            HostImageEntry item;
+            item.path = fullPath;
+            item.displayName = entry.name;
+            item.attached = false;
+            item.data = data;
+            item.sizeBytes = static_cast<uint32_t>(entry.size);
+            item.ramdiskIndex = 0xFF;
+            s_hostImages.push_back(item);
+        }
+
+        kernel::vfs::closedir(dir);
+    }
+
+    if (!hadSelection) {
+        s_selectedHostImageIndex = 0;
+    }
+    if (s_selectedHostImageIndex >= static_cast<int>(s_hostImages.size())) {
+        s_selectedHostImageIndex = static_cast<int>(s_hostImages.size()) - 1;
+    }
+    if (s_selectedHostImageIndex < 0) {
+        s_selectedHostImageIndex = 0;
+    }
+#endif
+}
+
+void DiskManager::attachSelectedHostImage() {
+#ifdef _WIN32
+    if (s_hostImages.empty() || s_selectedHostImageIndex < 0 || s_selectedHostImageIndex >= static_cast<int>(s_hostImages.size())) {
+        s_status = "No .img file found in /disks. Add an image there and rescan.";
+        return;
+    }
+
+    s_hostImages[s_selectedHostImageIndex].attached = true;
+    refreshDisks();
+    s_status = "Attached image: " + s_hostImages[s_selectedHostImageIndex].displayName + " (read-only)";
+#else
+    if (s_hostImages.empty() || s_selectedHostImageIndex < 0 || s_selectedHostImageIndex >= static_cast<int>(s_hostImages.size())) {
+        s_status = "No .img found in /disks or /. Put a small image on a mounted boot volume and rescan.";
+        return;
+    }
+
+    HostImageEntry& image = s_hostImages[s_selectedHostImageIndex];
+    if (!image.attached) {
+        image.ramdiskIndex = kernel::ramdisk::create_readonly_at(image.data, image.sizeBytes, image.displayName.c_str());
+        if (image.ramdiskIndex == 0xFF) {
+            s_status = "Attach failed: no RAM disk slot or image is too small.";
+            return;
+        }
+        image.attached = true;
+    }
+
+    refreshDisks();
+    s_status = "Attached image as read-only RAM disk: " + image.displayName;
+#endif
+}
+
+void DiskManager::selectPrevHostImage() {
+    if (s_hostImages.empty()) return;
+    if (s_selectedHostImageIndex > 0) {
+        s_selectedHostImageIndex--;
+    }
+}
+
+void DiskManager::selectNextHostImage() {
+    if (s_hostImages.empty()) return;
+    if (s_selectedHostImageIndex < static_cast<int>(s_hostImages.size()) - 1) {
+        s_selectedHostImageIndex++;
+    }
+}
+
+bool DiskManager::readHostSectors(const std::string& path, uint64_t lba, uint32_t count, void* buffer, uint32_t sectorSize) {
+#ifdef _WIN32
+    if (!buffer || sectorSize == 0 || count == 0) return false;
+
+    std::ifstream file(path, std::ios::binary);
+    if (!file) {
+        return false;
+    }
+
+    uint64_t offset = lba * sectorSize;
+    uint64_t bytes = static_cast<uint64_t>(count) * sectorSize;
+    file.seekg(0, std::ios::end);
+    std::streamoff fileSize = file.tellg();
+    if (fileSize < 0 || offset + bytes > static_cast<uint64_t>(fileSize)) {
+        return false;
+    }
+
+    file.seekg(static_cast<std::streamoff>(offset), std::ios::beg);
+    file.read(static_cast<char*>(buffer), static_cast<std::streamsize>(bytes));
+    return file.good() || file.gcount() == static_cast<std::streamsize>(bytes);
+#else
+    (void)path;
+    (void)lba;
+    (void)count;
+    (void)buffer;
+    (void)sectorSize;
+    return false;
+#endif
+}
+
+bool DiskManager::buildHostDiskEntryFromImage(const HostImageEntry& image, uint8_t devIndex, DiskEntry& entry) {
+#ifdef _WIN32
+    std::ifstream file(image.path, std::ios::binary);
+    if (!file) {
+        return false;
+    }
+
+    file.seekg(0, std::ios::end);
+    std::streamoff fileSize = file.tellg();
+    if (fileSize < 512) {
+        return false;
+    }
+
+    uint8_t mbr[512];
+    std::memset(mbr, 0, sizeof(mbr));
+    file.seekg(0, std::ios::beg);
+    file.read(reinterpret_cast<char*>(mbr), sizeof(mbr));
+    if (file.gcount() != sizeof(mbr)) {
+        return false;
+    }
+
+    entry = DiskEntry();
+    entry.name = "Disk " + std::to_string(devIndex) + " (USB)";
+    entry.transportLabel = "USB";
+    entry.isSystem = false;
+    entry.isHostImage = true;
+    entry.devIndex = devIndex;
+    entry.haveInfo = true;
+    entry.bytesPerSector = 512;
+    entry.totalSectors = static_cast<uint64_t>(fileSize) / entry.bytesPerSector;
+    entry.backingPath = image.path;
+    entry.mbrStatus = MBR_UNREADABLE;
+
+    if (mbr[510] == 0x55 && mbr[511] == 0xAA) {
+        entry.mbrStatus = MBR_VALID;
+        for (int i = 0; i < 4; ++i) {
+            int off = 446 + i * 16;
+            PartitionEntry& part = entry.parts[i];
+            part.status = mbr[off + 0];
+            part.type = mbr[off + 4];
+            part.lbaStart =
+                static_cast<uint32_t>(mbr[off + 8]) |
+                (static_cast<uint32_t>(mbr[off + 9]) << 8) |
+                (static_cast<uint32_t>(mbr[off + 10]) << 16) |
+                (static_cast<uint32_t>(mbr[off + 11]) << 24);
+            part.lbaCount =
+                static_cast<uint32_t>(mbr[off + 12]) |
+                (static_cast<uint32_t>(mbr[off + 13]) << 8) |
+                (static_cast<uint32_t>(mbr[off + 14]) << 16) |
+                (static_cast<uint32_t>(mbr[off + 15]) << 24);
+
+            if (part.type != 0 && part.lbaCount != 0) {
+                part.fs = detectFsAtLBAFromImage(image.path, part.lbaStart);
+                part.mountPoint = suggestMountPoint(entry, part, i);
+                part.mounted = false;
+            }
+        }
+    } else {
+        entry.mbrStatus = MBR_INVALID;
+    }
+
+    entry.name = "Disk " + std::to_string(devIndex) + " (USB: " + image.displayName + ")";
+    return true;
+#else
+    (void)image;
+    (void)devIndex;
+    (void)entry;
+    return false;
+#endif
+}
+
+std::string DiskManager::detectFsAtLBAFromImage(const std::string& path, uint32_t lbaStart) {
+#ifdef _WIN32
+    if (lbaStart == 0) return "<empty>";
+
+    uint8_t sec[512];
+    std::memset(sec, 0, sizeof(sec));
+    if (!readHostSectors(path, lbaStart, 1, sec, 512)) {
+        return "Unknown";
+    }
+
+    if (sec[3] == 'E' && sec[4] == 'X' && sec[5] == 'F' && sec[6] == 'A' && sec[7] == 'T') {
+        return "exFAT";
+    }
+    if (sec[257] == 'u' && sec[258] == 's' && sec[259] == 't' && sec[260] == 'a' && sec[261] == 'r') {
+        return "TarFS";
+    }
+    if (sec[510] == 0x55 && sec[511] == 0xAA) {
+        if (sec[82] == 'F' && sec[83] == 'A' && sec[84] == 'T' && sec[85] == '3' && sec[86] == '2') {
+            return "FAT32";
+        }
+        if (sec[54] == 'F' && sec[55] == 'A' && sec[56] == 'T') {
+            return "FAT";
+        }
+        uint16_t bytesPerSec = sec[11] | (sec[12] << 8);
+        uint8_t secPerClus = sec[13];
+        if ((bytesPerSec == 512 || bytesPerSec == 1024 || bytesPerSec == 2048 || bytesPerSec == 4096) && secPerClus != 0) {
+            return "FAT";
+        }
+    }
+
+    uint8_t sb[1024];
+    std::memset(sb, 0, sizeof(sb));
+    if (readHostSectors(path, static_cast<uint64_t>(lbaStart) + 2, 2, sb, 512)) {
+        uint16_t magic = sb[56] | (sb[57] << 8);
+        if (magic == 0xEF53) {
+            return "EXT2/EXT4";
+        }
+    }
+#else
+    (void)path;
+    (void)lbaStart;
+#endif
+
+    return "Unknown";
+}
+
+bool DiskManager::isImgName(const char* name) {
+    if (!name) return false;
+    size_t len = 0;
+    while (name[len]) ++len;
+    if (len < 4) return false;
+    const char* ext = name + len - 4;
+    return (ext[0] == '.' && (ext[1] == 'i' || ext[1] == 'I') &&
+            (ext[2] == 'm' || ext[2] == 'M') && (ext[3] == 'g' || ext[3] == 'G'));
 }
 
 void DiskManager::readMBRForEntry(DiskEntry& entry) {
@@ -612,6 +927,36 @@ void DiskManager::handleMouseDown(int mx, int my) {
         render();
         return;
     }
+    if (hit(mx, my, s_bxAttachImageX, s_bxAttachImageY, 160, BTN_H)) {
+        attachSelectedHostImage();
+        s_clickLock = true;
+        render();
+        return;
+    }
+    if (hit(mx, my, s_bxPrevImageX, s_bxPrevImageY, 32, BTN_H)) {
+        selectPrevHostImage();
+        s_clickLock = true;
+        render();
+        return;
+    }
+    if (hit(mx, my, s_bxNextImageX, s_bxNextImageY, 32, BTN_H)) {
+        selectNextHostImage();
+        s_clickLock = true;
+        render();
+        return;
+    }
+    if (hit(mx, my, s_bxRescanImagesX, s_bxRescanImagesY, 160, BTN_H)) {
+        refreshHostImageLibrary();
+        refreshDisks();
+#ifdef _WIN32
+        s_status = "Rescanned disks/ for .img files.";
+#else
+        s_status = "Rescanned /disks and / for .img files.";
+#endif
+        s_clickLock = true;
+        render();
+        return;
+    }
 }
 
 void DiskManager::handleMouseUp(int mx, int my) {
@@ -742,6 +1087,9 @@ void DiskManager::drawLeftPane(int winX, int winY, int winW, int winH) {
         if (s_disks[i].haveInfo) {
             uint64_t totalBytes = s_disks[i].totalSectors * s_disks[i].bytesPerSector;
             std::string detail = "#" + std::to_string(s_disks[i].devIndex) + "  " + fmtSize(totalBytes) + "  " + mbrStatusText(s_disks[i].mbrStatus);
+            if (s_disks[i].isHostImage) {
+                detail += "  attached .img";
+            }
             ipc::Message detailMsg;
             detailMsg.type = (uint32_t)MsgType::MT_DrawText;
             std::ostringstream detailOss;
@@ -1149,6 +1497,55 @@ void DiskManager::drawActions(int x, int y, int w, int h) {
     std::string notePayload = noteOss.str();
     noteMsg.data.assign(notePayload.begin(), notePayload.end());
     ipc::Bus::publish("gui.input", std::move(noteMsg), false);
+
+    int hostY = noteY + 24;
+    ipc::Message hostMsg;
+    hostMsg.type = (uint32_t)MsgType::MT_DrawText;
+    std::ostringstream hostOss;
+#ifdef _WIN32
+    hostOss << s_windowId << "|" << rightX << "|" << hostY << "|Attach image from disks/ (.img, read-only)|210|210|210";
+#else
+    hostOss << s_windowId << "|" << rightX << "|" << hostY << "|Attach .img from VFS /disks or / as read-only RAM disk|210|210|210";
+#endif
+    std::string hostPayload = hostOss.str();
+    hostMsg.data.assign(hostPayload.begin(), hostPayload.end());
+    ipc::Bus::publish("gui.input", std::move(hostMsg), false);
+
+    int navY = hostY + 18;
+    s_bxPrevImageX = rightX;
+    s_bxPrevImageY = navY;
+    drawButton(s_bxPrevImageX, s_bxPrevImageY, 32, BTN_H, "<",
+               hit(s_mouseX, s_mouseY, s_bxPrevImageX, s_bxPrevImageY, 32, BTN_H));
+
+    std::string currentImage = "No .img files found";
+    if (!s_hostImages.empty() && s_selectedHostImageIndex >= 0 && s_selectedHostImageIndex < static_cast<int>(s_hostImages.size())) {
+        currentImage = s_hostImages[s_selectedHostImageIndex].displayName;
+        if (s_hostImages[s_selectedHostImageIndex].attached) {
+            currentImage += " [attached]";
+        }
+    }
+    ipc::Message curMsg;
+    curMsg.type = (uint32_t)MsgType::MT_DrawText;
+    std::ostringstream curOss;
+    curOss << s_windowId << "|" << (rightX + 40) << "|" << (navY + 8) << "|" << currentImage << "|255|255|255";
+    std::string curPayload = curOss.str();
+    curMsg.data.assign(curPayload.begin(), curPayload.end());
+    ipc::Bus::publish("gui.input", std::move(curMsg), false);
+
+    s_bxNextImageX = rightX + 220;
+    s_bxNextImageY = navY;
+    drawButton(s_bxNextImageX, s_bxNextImageY, 32, BTN_H, ">",
+               hit(s_mouseX, s_mouseY, s_bxNextImageX, s_bxNextImageY, 32, BTN_H));
+
+    s_bxAttachImageX = rightX + 264;
+    s_bxAttachImageY = navY;
+    drawButton(s_bxAttachImageX, s_bxAttachImageY, 160, BTN_H, "Attach image",
+               hit(s_mouseX, s_mouseY, s_bxAttachImageX, s_bxAttachImageY, 160, BTN_H));
+
+    s_bxRescanImagesX = rightX + 436;
+    s_bxRescanImagesY = navY;
+    drawButton(s_bxRescanImagesX, s_bxRescanImagesY, 160, BTN_H, "Rescan images",
+               hit(s_mouseX, s_mouseY, s_bxRescanImagesX, s_bxRescanImagesY, 160, BTN_H));
 }
 
 void DiskManager::drawHeaderCell(int x, int y, int w, int h, const char* text) {

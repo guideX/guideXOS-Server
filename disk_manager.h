@@ -56,15 +56,34 @@ private:
         std::string name;                  // "Disk 0 (System)", "Disk 1 (USB)", etc.
         std::string transportLabel;        // ATA, AHCI, NVMe, USB, RAM disk, unknown
         bool isSystem;                     // True for IDE/SATA system disk
+        bool isHostImage;                  // Windows host mode: backed by a .img file
         uint8_t devIndex;                  // Device index in block layer
         bool haveInfo;                     // True if size info available
         uint64_t totalSectors;             // Total disk capacity in sectors
         uint32_t bytesPerSector;           // Bytes per sector (usually 512)
         MbrStatus mbrStatus;               // MBR signature/read status
+        std::string backingPath;           // Optional source path in host mode
         PartitionEntry parts[4];           // MBR primary partitions
         
-        DiskEntry() : isSystem(false), devIndex(0), haveInfo(false), 
+        DiskEntry() : isSystem(false), isHostImage(false), devIndex(0), haveInfo(false), 
                       totalSectors(0), bytesPerSector(512), mbrStatus(MBR_UNREADABLE) {}
+    };
+
+    struct HostImageEntry {
+        std::string path;
+        std::string displayName;
+        bool attached;
+#ifndef _WIN32
+        uint8_t* data;
+        uint32_t sizeBytes;
+        uint8_t ramdiskIndex;
+#endif
+
+        HostImageEntry() : attached(false)
+#ifndef _WIN32
+            , data(nullptr), sizeBytes(0), ramdiskIndex(0xFF)
+#endif
+        {}
     };
     
     // State
@@ -77,6 +96,8 @@ private:
     static std::string s_cachedTotalCaption;
     static int s_mouseX, s_mouseY;
     static bool s_mouseDown;
+    static std::vector<HostImageEntry> s_hostImages;
+    static int s_selectedHostImageIndex;
     
     // Button positions (for hit testing)
     static int s_bxDetectX, s_bxDetectY;
@@ -87,12 +108,24 @@ private:
     static int s_bxFormatExfatX, s_bxFormatExfatY;
     static int s_bxCreatePartX, s_bxCreatePartY;
     static int s_bxRefreshX, s_bxRefreshY;
+    static int s_bxAttachImageX, s_bxAttachImageY;
+    static int s_bxPrevImageX, s_bxPrevImageY;
+    static int s_bxNextImageX, s_bxNextImageY;
+    static int s_bxRescanImagesX, s_bxRescanImagesY;
     
     // Core operations
     static void refreshDisks();
     static void probeOnce();
     static void readMBRForEntry(DiskEntry& entry);
     static DiskEntry* getSelected();
+    static void refreshHostImageLibrary();
+    static void attachSelectedHostImage();
+    static void selectPrevHostImage();
+    static void selectNextHostImage();
+    static bool readHostSectors(const std::string& path, uint64_t lba, uint32_t count, void* buffer, uint32_t sectorSize);
+    static bool buildHostDiskEntryFromImage(const HostImageEntry& image, uint8_t devIndex, DiskEntry& entry);
+    static std::string detectFsAtLBAFromImage(const std::string& path, uint32_t lbaStart);
+    static bool isImgName(const char* name);
     
     // Filesystem operations
     static std::string detectFsAtLBA(uint8_t devIndex, uint32_t lbaStart);

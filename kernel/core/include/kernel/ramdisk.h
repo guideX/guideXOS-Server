@@ -43,6 +43,7 @@ struct RamDisk {
     uint64_t sectorCount;       // Number of sectors
     uint32_t sectorSize;        // Bytes per sector (usually 512)
     bool     ownsMemory;        // True if we allocated the memory
+    bool     readOnly;          // True if writes are intentionally disabled
     char     name[32];          // Human-readable name (e.g., "ram0")
 };
 
@@ -64,6 +65,12 @@ uint8_t create(size_t sizeBytes, const char* name = nullptr);
 // The caller is responsible for the memory lifetime.
 // Returns the RAM disk index, or 0xFF on failure.
 uint8_t create_at(void* memory, size_t sizeBytes, const char* name = nullptr);
+
+// Create a read-only RAM disk view over a pre-loaded image buffer.
+// Useful for attaching .img files found through VFS without copying them.
+// The caller is responsible for keeping the image buffer alive.
+// Returns the RAM disk index, or 0xFF on failure.
+uint8_t create_readonly_at(const void* memory, size_t sizeBytes, const char* name = nullptr);
 
 // Destroy a RAM disk and free its memory (if owned).
 void destroy(uint8_t index);

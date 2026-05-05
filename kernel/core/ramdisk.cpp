@@ -131,6 +131,10 @@ block::Status read_sectors(uint8_t driverIndex,
     if (!disk.active || !disk.data) {
         return block::BLOCK_ERR_INVALID;
     }
+
+    if (disk.readOnly) {
+        return block::BLOCK_ERR_UNSUPPORTED;
+    }
     
     if (lba + count > disk.sectorCount) {
         return block::BLOCK_ERR_INVALID;
@@ -240,6 +244,7 @@ uint8_t create(size_t sizeBytes, const char* name)
     disk.sectorCount = sectorCount;
     disk.sectorSize = RAMDISK_SECTOR_SIZE;
     disk.ownsMemory = true;
+    disk.readOnly = false;
     
     // Generate name
     if (name && strlen(name) > 0) {
@@ -312,6 +317,7 @@ uint8_t create_at(void* memory, size_t sizeBytes, const char* name)
     disk.sectorCount = sectorCount;
     disk.sectorSize = RAMDISK_SECTOR_SIZE;
     disk.ownsMemory = false;  // Caller owns the memory
+    disk.readOnly = false;
     
     // Generate name
     if (name && strlen(name) > 0) {
@@ -350,6 +356,73 @@ uint8_t create_at(void* memory, size_t sizeBytes, const char* name)
     serial::puts(" sectors)\n");
 #endif
     
+    return index;
+}
+
+uint8_t create_readonly_at(const void* memory, size_t sizeBytes, const char* name)
+{
+    if (!s_initialized) {
+        init();
+    }
+
+    if (!memory || sizeBytes < RAMDISK_SECTOR_SIZE) {
+        return 0xFF;
+    }
+
+    uint8_t index = 0xFF;
+    for (uint8_t i = 0; i < MAX_RAMDISKS; ++i) {
+        if (!s_disks[i].active) {
+            index = i;
+            break;
+        }
+    }
+
+    if (index == 0xFF) {
+        return 0xFF;
+    }
+
+    uint64_t sectorCount = sizeBytes / RAMDISK_SECTOR_SIZE;
+
+    RamDisk& disk = s_disks[index];
+    disk.active = true;
+    disk.data = const_cast<uint8_t*>(static_cast<const uint8_t*>(memory));
+    disk.sectorCount = sectorCount;
+    disk.sectorSize = RAMDISK_SECTOR_SIZE;
+    disk.ownsMemory = false;
+    disk.readOnly = true;
+
+    if (name && strlen(name) > 0) {
+        strcopy(disk.name, name, sizeof(disk.name));
+    } else {
+        strcopy(disk.name, "ramimg", sizeof(disk.name));
+        char numBuf[8];
+        int_to_str(index, numBuf, sizeof(numBuf));
+        size_t nameLen = strlen(disk.name);
+        strcopy(disk.name + nameLen, numBuf, sizeof(disk.name) - nameLen);
+    }
+
+    ++s_diskCount;
+
+    block::BlockDevice bdev;
+    bdev.active = true;
+    bdev.type = block::BDEV_USB_MASS;
+    bdev.driverIndex = index;
+    bdev.totalSectors = sectorCount;
+    bdev.sectorSize = RAMDISK_SECTOR_SIZE;
+    strcopy(bdev.name, disk.name, sizeof(bdev.name));
+    bdev.readFn = read_sectors;
+    bdev.writeFn = nullptr;
+
+    block::register_device(bdev);
+
+#if defined(__GNUC__) || defined(__clang__)
+    serial::puts("[RAMDISK] Attached read-only image '");
+    serial::puts(disk.name);
+    serial::puts("' with ");
+    serial::put_hex32(static_cast<uint32_t>(sectorCount));
+    serial::puts(" sectors\n");
+#endif
+
     return index;
 }
 
