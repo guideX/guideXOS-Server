@@ -17,8 +17,11 @@ set -e
 
 # Configuration
 DISK_SIZE_MB=64
+INNER_DISK_SIZE_MB=4
 DISK_DIR="$(dirname "$0")/../disks"
 MOUNT_POINT="/tmp/guidexos-testdisk"
+INNER_MOUNT_POINT="/tmp/guidexos-inner-disk"
+INNER_IMG_TMP="/tmp/guidexos-inner.img"
 
 # Colors for output
 RED='\033[0;31m'
@@ -86,6 +89,43 @@ setup_directories() {
     mkdir -p "$MOUNT_POINT"
 }
 
+# Create a small inner FAT32 .img to be embedded inside the outer disk images
+create_inner_img() {
+    echo_info "Creating inner FAT32 image ($INNER_DISK_SIZE_MB MB) to embed inside outer disks..."
+
+    rm -f "$INNER_IMG_TMP"
+
+    # Create a small blank image
+    dd if=/dev/zero of="$INNER_IMG_TMP" bs=1M count=$INNER_DISK_SIZE_MB 2>/dev/null
+
+    # Format as FAT32
+    if command -v mkfs.fat &> /dev/null; then
+        mkfs.fat -F 32 -n "GXINNER" "$INNER_IMG_TMP"
+    else
+        mkfs.vfat -F 32 -n "GXINNER" "$INNER_IMG_TMP"
+    fi
+
+    mkdir -p "$INNER_MOUNT_POINT"
+    mount -o loop "$INNER_IMG_TMP" "$INNER_MOUNT_POINT"
+
+    # Place a recognisable file inside so the OS can verify it loaded correctly
+    cat > "$INNER_MOUNT_POINT/inner-hello.txt" << 'EOF'
+guideXOS Inner Image Test
+=========================
+If you can read this, the OS successfully loaded an .img file from disk.
+EOF
+
+    # Small binary payload for read testing
+    dd if=/dev/urandom of="$INNER_MOUNT_POINT/inner-data.bin" bs=1024 count=64 2>/dev/null
+
+    sync
+    umount "$INNER_MOUNT_POINT"
+    rmdir "$INNER_MOUNT_POINT" 2>/dev/null || true
+
+    echo_info "Inner image created: $INNER_IMG_TMP"
+    ls -lh "$INNER_IMG_TMP"
+}
+
 # Create test files content
 create_test_content() {
     local mount_path="$1"
@@ -133,6 +173,14 @@ EOF
     # Create an empty file
     touch "$mount_path/empty.txt"
     
+    # Embed the pre-built inner .img so the OS can find and load it
+    if [ -f "$INNER_IMG_TMP" ]; then
+        cp "$INNER_IMG_TMP" "$mount_path/apps/test-inner.img"
+        echo_info "Embedded inner .img at $mount_path/apps/test-inner.img"
+    else
+        echo_warn "Inner image not found at $INNER_IMG_TMP — skipping embed."
+    fi
+
     # Create a README
     cat > "$mount_path/README.txt" << 'EOF'
 guideXOS Filesystem Test Disk
@@ -142,16 +190,17 @@ This disk image contains test files for validating the guideXOS
 Virtual Filesystem (VFS) layer.
 
 Directory Structure:
-  /test.txt           - Simple text file (root)
-  /empty.txt          - Empty file
-  /special.txt        - File with special characters
-  /README.txt         - This file
-  /apps/              - Application directory
-  /apps/hello.txt     - Text file in subdirectory
-  /apps/test.bin      - 1KB binary file
-  /apps/large.bin     - 1MB binary file
-  /apps/sample.gxapp  - Mock gxapp package
-  /deep/nested/...    - Deeply nested directory
+  /test.txt                - Simple text file (root)
+  /empty.txt               - Empty file
+  /special.txt             - File with special characters
+  /README.txt              - This file
+  /apps/                   - Application directory
+  /apps/hello.txt          - Text file in subdirectory
+  /apps/test.bin           - 1KB binary file
+  /apps/large.bin          - 1MB binary file
+  /apps/sample.gxapp       - Mock gxapp package
+  /apps/test-inner.img     - Inner FAT32 disk image for .img load testing
+  /deep/nested/...         - Deeply nested directory
 
 Test Scenarios:
   1. Mount filesystem
@@ -160,6 +209,7 @@ Test Scenarios:
   4. Read /apps/hello.txt (subdirectory)
   5. Read /apps/large.bin (multi-cluster)
   6. Traverse deep directories
+  7. Load /apps/test-inner.img as a nested disk image (baremetal .img load test)
 
 EOF
 
@@ -238,13 +288,20 @@ create_ext4_image() {
 
 # Cleanup function
 cleanup() {
-    # Ensure mount point is unmounted
+    # Ensure outer mount point is unmounted
     if mountpoint -q "$MOUNT_POINT" 2>/dev/null; then
         umount "$MOUNT_POINT" 2>/dev/null || true
     fi
-    
-    # Remove mount point directory
     rmdir "$MOUNT_POINT" 2>/dev/null || true
+
+    # Ensure inner mount point is unmounted
+    if mountpoint -q "$INNER_MOUNT_POINT" 2>/dev/null; then
+        umount "$INNER_MOUNT_POINT" 2>/dev/null || true
+    fi
+    rmdir "$INNER_MOUNT_POINT" 2>/dev/null || true
+
+    # Remove the temporary inner image
+    rm -f "$INNER_IMG_TMP"
 }
 
 # Main execution
@@ -260,7 +317,9 @@ main() {
     check_root
     check_dependencies
     setup_directories
-    
+
+    create_inner_img
+    echo ""
     create_fat32_image
     echo ""
     create_ext4_image

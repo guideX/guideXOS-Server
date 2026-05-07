@@ -1099,6 +1099,8 @@ static void toggle_branding()
 // Toggle grid overlay
 static void toggle_grid()
 {
+    if (s_wallpaperConfig.gridSpacing == 0)
+        s_wallpaperConfig.gridSpacing = 50;
     s_wallpaperConfig.showGrid = !s_wallpaperConfig.showGrid;
 }
 
@@ -1183,9 +1185,10 @@ static void draw_background()
             }
             // Draw more prominent grid
             uint32_t gridCol = s_wallpaperConfig.gridColor;
-            for (uint32_t x = s_wallpaperConfig.gridSpacing; x < w; x += s_wallpaperConfig.gridSpacing)
+            uint32_t gs = s_wallpaperConfig.gridSpacing > 0 ? s_wallpaperConfig.gridSpacing : 50;
+            for (uint32_t x = gs; x < w; x += gs)
                 vline(x, 0, h, gridCol);
-            for (uint32_t y = s_wallpaperConfig.gridSpacing; y < h; y += s_wallpaperConfig.gridSpacing)
+            for (uint32_t y = gs; y < h; y += gs)
                 hline(0, y, w, gridCol);
             break;
         }
@@ -1209,9 +1212,10 @@ static void draw_background()
     // Optional subtle grid overlay (if enabled and not Grid type)
     if (s_wallpaperConfig.showGrid && s_wallpaperConfig.type != WallpaperType::Grid) {
         uint32_t gridColor = s_wallpaperConfig.gridColor;
-        for (uint32_t x = s_wallpaperConfig.gridSpacing; x < w; x += s_wallpaperConfig.gridSpacing)
+        uint32_t gs = s_wallpaperConfig.gridSpacing > 0 ? s_wallpaperConfig.gridSpacing : 50;
+        for (uint32_t x = gs; x < w; x += gs)
             vline(x, 0, h, gridColor);
-        for (uint32_t y = s_wallpaperConfig.gridSpacing; y < h; y += s_wallpaperConfig.gridSpacing)
+        for (uint32_t y = gs; y < h; y += gs)
             hline(0, y, w, gridColor);
     }
 
