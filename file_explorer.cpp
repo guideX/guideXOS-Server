@@ -374,6 +374,7 @@ namespace gxos { namespace apps {
                         case 11: showDeleteConfirmation(); break;
                         case 12: renameSelected(); break;
                         case 13: showDeleteConfirmation(); break;
+                        case 14: refresh(); updateDisplay(); break;
                         case 100: confirmDelete(); break;
                         case 101: cancelDelete(); break;
                     }
@@ -783,6 +784,7 @@ namespace gxos { namespace apps {
         drawText("Navigation");
         drawText("  Root");
         drawText("  Mounted drives");
+        addButton(14, 8, 100, 80, 22, "Mounts");
         for (size_t i = 0; i < s_roots.size(); ++i) {
             std::string marker = static_cast<int>(i) == s_rootSelectedIndex ? "> " : "  ";
             drawText(marker + truncate(s_roots[i].name, 24));
