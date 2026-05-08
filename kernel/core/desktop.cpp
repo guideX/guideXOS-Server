@@ -19,6 +19,8 @@
 #include "include/kernel/kernel_apps.h"
 #include "include/kernel/kernel_compositor.h"
 #include "include/kernel/kernel_ipc.h"
+#include "include/kernel/ps2keyboard.h"
+#include "include/kernel/serial_debug.h"
 #include "include/kernel/vfs.h"
 
 #if defined(_MSC_VER)
@@ -778,6 +780,19 @@ static bool    s_iconPositionsInitialized = false;
 
 // Selected desktop icon (-1 = none)
 static int s_selectedIcon = -1;
+static bool s_selectedIconIds[kDesktopIconCount] = {false};
+static bool s_selectionBaseIconIds[kDesktopIconCount] = {false};
+static int s_lastSelectedIconId = -1;
+static int s_focusedSelectedIconId = -1;
+
+// Desktop marquee selection state
+static bool s_selectionDragPending = false;
+static bool s_selectionDragActive = false;
+static bool s_selectionDragAdditive = false;
+static int32_t s_selectionStartX = 0;
+static int32_t s_selectionStartY = 0;
+static int32_t s_selectionCurrentX = 0;
+static int32_t s_selectionCurrentY = 0;
 
 // Icon management helpers
 static int s_visibleIconCount = 0;  // Count of icons to display (pinned + recent)
@@ -809,6 +824,15 @@ static void unpin_icon(const char* appName);     // Unpin app from desktop
 static int find_icon_by_name(const char* name);  // Find icon index by name
 static void initialize_icon_positions();         // Set up initial icon grid layout
 static void save_icon_position(int iconIndex);   // Save position after drag
+static void sync_selected_icon_after_layout();
+static bool is_display_icon_selected(int displayIndex);
+static void ClearDesktopIconSelection();
+static void SelectDesktopIcon(int displayIndex, bool additive);
+static void ToggleDesktopIconSelection(int displayIndex);
+static void SelectDesktopIconRange(int startDisplayIndex, int endDisplayIndex);
+static int GetSelectedDesktopIconIndices(int* outIndices, int maxIndices);
+static int HitTestDesktopIcon(int32_t mx, int32_t my);
+static void SelectIconsInRectangle(int32_t left, int32_t top, int32_t right, int32_t bottom, bool additive);
 
 // Start menu state and navigation
 static int s_hoverMenuLeft  = -1;   // hovered left-column item index
@@ -921,6 +945,8 @@ static void refresh_desktop_icons()
             }
         }
     }
+
+    sync_selected_icon_after_layout();
 }
 
 // Add app to recent list
@@ -1006,6 +1032,199 @@ static void save_icon_position(int displayIndex)
     
     // In a real system, this would persist to disk/NVRAM
     // For now, positions are stored in memory only
+}
+
+static bool is_ctrl_modifier_down()
+{
+    return ps2keyboard::is_ctrl_down();
+}
+
+static bool is_shift_modifier_down()
+{
+    return ps2keyboard::is_shift_down();
+}
+
+static void log_selection_change(const char* action)
+{
+    serial::puts("[desktop] icon selection ");
+    serial::puts(action);
+    serial::puts(" count=0x");
+    serial::put_hex32((uint32_t)GetSelectedDesktopIconIndices(nullptr, 0));
+    serial::puts("\n");
+}
+
+static int display_index_for_icon_id(int iconId)
+{
+    if (iconId < 0 || iconId >= kDesktopIconCount) return -1;
+    for (int displayIdx = 0; displayIdx < s_visibleIconCount; displayIdx++) {
+        if (s_visibleIconIndices[displayIdx] == iconId) return displayIdx;
+    }
+    return -1;
+}
+
+static void sync_selected_icon_after_layout()
+{
+    int focusedDisplayIndex = display_index_for_icon_id(s_focusedSelectedIconId);
+    if (focusedDisplayIndex >= 0) {
+        s_selectedIcon = focusedDisplayIndex;
+        return;
+    }
+
+    s_selectedIcon = -1;
+    for (int displayIdx = 0; displayIdx < s_visibleIconCount; displayIdx++) {
+        int iconId = s_visibleIconIndices[displayIdx];
+        if (iconId >= 0 && iconId < kDesktopIconCount && s_selectedIconIds[iconId]) {
+            s_selectedIcon = displayIdx;
+            s_focusedSelectedIconId = iconId;
+            return;
+        }
+    }
+}
+
+static bool is_display_icon_selected(int displayIndex)
+{
+    if (displayIndex < 0 || displayIndex >= s_visibleIconCount) return false;
+    int iconId = s_visibleIconIndices[displayIndex];
+    return iconId >= 0 && iconId < kDesktopIconCount && s_selectedIconIds[iconId];
+}
+
+static void ClearDesktopIconSelection()
+{
+    bool changed = false;
+    for (int i = 0; i < kDesktopIconCount; i++) {
+        if (s_selectedIconIds[i]) changed = true;
+        s_selectedIconIds[i] = false;
+    }
+    s_selectedIcon = -1;
+    s_focusedSelectedIconId = -1;
+    s_lastSelectedIconId = -1;
+    if (changed) log_selection_change("cleared");
+}
+
+static void SelectDesktopIcon(int displayIndex, bool additive)
+{
+    if (displayIndex < 0 || displayIndex >= s_visibleIconCount) return;
+    int iconId = s_visibleIconIndices[displayIndex];
+    if (iconId < 0 || iconId >= kDesktopIconCount) return;
+
+    if (!additive) {
+        for (int i = 0; i < kDesktopIconCount; i++) {
+            s_selectedIconIds[i] = false;
+        }
+    }
+
+    s_selectedIconIds[iconId] = true;
+    s_selectedIcon = displayIndex;
+    s_focusedSelectedIconId = iconId;
+    s_lastSelectedIconId = iconId;
+    log_selection_change(additive ? "added" : "selected");
+}
+
+static void ToggleDesktopIconSelection(int displayIndex)
+{
+    if (displayIndex < 0 || displayIndex >= s_visibleIconCount) return;
+    int iconId = s_visibleIconIndices[displayIndex];
+    if (iconId < 0 || iconId >= kDesktopIconCount) return;
+
+    s_selectedIconIds[iconId] = !s_selectedIconIds[iconId];
+    if (s_selectedIconIds[iconId]) {
+        s_selectedIcon = displayIndex;
+        s_focusedSelectedIconId = iconId;
+        s_lastSelectedIconId = iconId;
+    } else if (s_focusedSelectedIconId == iconId) {
+        s_focusedSelectedIconId = -1;
+        sync_selected_icon_after_layout();
+    }
+
+    log_selection_change(s_selectedIconIds[iconId] ? "toggled on" : "toggled off");
+}
+
+static void SelectDesktopIconRange(int startDisplayIndex, int endDisplayIndex)
+{
+    if (startDisplayIndex < 0 || startDisplayIndex >= s_visibleIconCount) startDisplayIndex = endDisplayIndex;
+    if (endDisplayIndex < 0 || endDisplayIndex >= s_visibleIconCount) return;
+
+    if (startDisplayIndex > endDisplayIndex) {
+        int tmp = startDisplayIndex;
+        startDisplayIndex = endDisplayIndex;
+        endDisplayIndex = tmp;
+    }
+
+    for (int i = 0; i < kDesktopIconCount; i++) {
+        s_selectedIconIds[i] = false;
+    }
+
+    for (int displayIdx = startDisplayIndex; displayIdx <= endDisplayIndex; displayIdx++) {
+        int iconId = s_visibleIconIndices[displayIdx];
+        if (iconId >= 0 && iconId < kDesktopIconCount) {
+            s_selectedIconIds[iconId] = true;
+        }
+    }
+
+    s_selectedIcon = endDisplayIndex;
+    s_focusedSelectedIconId = s_visibleIconIndices[endDisplayIndex];
+    s_lastSelectedIconId = s_focusedSelectedIconId;
+    log_selection_change("range selected");
+}
+
+static int GetSelectedDesktopIconIndices(int* outIndices, int maxIndices)
+{
+    int count = 0;
+    for (int displayIdx = 0; displayIdx < s_visibleIconCount; displayIdx++) {
+        if (is_display_icon_selected(displayIdx)) {
+            if (outIndices && count < maxIndices) {
+                outIndices[count] = displayIdx;
+            }
+            count++;
+        }
+    }
+    return count;
+}
+
+static bool icon_bounds_intersect_rect(int displayIndex, int32_t left, int32_t top, int32_t right, int32_t bottom)
+{
+    if (displayIndex < 0 || displayIndex >= s_visibleIconCount) return false;
+    int32_t iconLeft = s_iconPosX[displayIndex];
+    int32_t iconTop = s_iconPosY[displayIndex];
+    int32_t iconRight = iconLeft + (int32_t)kIconCellW;
+    int32_t iconBottom = iconTop + (int32_t)kIconCellH;
+    return iconLeft < right && iconRight > left && iconTop < bottom && iconBottom > top;
+}
+
+static void snapshot_selection_base()
+{
+    for (int i = 0; i < kDesktopIconCount; i++) {
+        s_selectionBaseIconIds[i] = s_selectedIconIds[i];
+    }
+}
+
+static void SelectIconsInRectangle(int32_t left, int32_t top, int32_t right, int32_t bottom, bool additive)
+{
+    if (left > right) { int32_t t = left; left = right; right = t; }
+    if (top > bottom) { int32_t t = top; top = bottom; bottom = t; }
+
+    for (int i = 0; i < kDesktopIconCount; i++) {
+        s_selectedIconIds[i] = additive ? s_selectionBaseIconIds[i] : false;
+    }
+
+    int lastHit = -1;
+    for (int displayIdx = 0; displayIdx < s_visibleIconCount; displayIdx++) {
+        if (icon_bounds_intersect_rect(displayIdx, left, top, right, bottom)) {
+            int iconId = s_visibleIconIndices[displayIdx];
+            if (iconId >= 0 && iconId < kDesktopIconCount) {
+                s_selectedIconIds[iconId] = true;
+                lastHit = displayIdx;
+            }
+        }
+    }
+
+    if (lastHit >= 0) {
+        s_selectedIcon = lastHit;
+        s_focusedSelectedIconId = s_visibleIconIndices[lastHit];
+        s_lastSelectedIconId = s_focusedSelectedIconId;
+    } else {
+        sync_selected_icon_after_layout();
+    }
 }
 
 // ============================================================
@@ -1139,6 +1358,37 @@ static void draw_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t c
     hline(x, y + h - 1, w, color);
     vline(x, y, h, color);
     vline(x + w - 1, y, h, color);
+}
+
+static void draw_selection_rectangle()
+{
+    if (!s_selectionDragPending && !s_selectionDragActive) return;
+
+    int32_t left = s_selectionStartX;
+    int32_t top = s_selectionStartY;
+    int32_t right = s_selectionCurrentX;
+    int32_t bottom = s_selectionCurrentY;
+    if (left > right) { int32_t t = left; left = right; right = t; }
+    if (top > bottom) { int32_t t = top; top = bottom; bottom = t; }
+
+    if (left < 0) left = 0;
+    if (top < 0) top = 0;
+    if (right >= (int32_t)s_screenW) right = (int32_t)s_screenW - 1;
+    int32_t desktopBottom = (int32_t)s_screenH - (int32_t)kTaskbarH - 1;
+    if (bottom > desktopBottom) bottom = desktopBottom;
+
+    int32_t width = right - left;
+    int32_t height = bottom - top;
+    if (width < 2 || height < 2) return;
+
+    uint32_t outline = rgb(120, 170, 255);
+    uint32_t fill = rgb(35, 65, 120);
+    for (int32_t y = top + 2; y < bottom - 1; y += 4) {
+        for (int32_t x = left + 2; x < right - 1; x += 4) {
+            framebuffer::put_pixel(x, y, fill);
+        }
+    }
+    draw_rect((uint32_t)left, (uint32_t)top, (uint32_t)width, (uint32_t)height, outline);
 }
 
 // ============================================================
@@ -1369,7 +1619,7 @@ static void draw_desktop_icons()
         if (cy + kIconCellH > deskH) continue;
 
         // Selection highlight background (matching compositor style)
-        if (displayIdx == s_selectedIcon) {
+        if (is_display_icon_selected(displayIdx)) {
             framebuffer::fill_rect(cx, cy, kIconCellW, kIconCellH, rgb(50, 90, 160));
             draw_rect(cx, cy, kIconCellW, kIconCellH, rgb(100, 160, 240));
         }
@@ -1457,6 +1707,8 @@ static void draw_desktop_icons()
         draw_text(lx + 1, labelY + 1, lbl, rgb(0, 0, 0), 1);
         draw_text(lx, labelY, lbl, rgb(200, 200, 210), 1);
     }
+
+    draw_selection_rectangle();
 }
 
 // ============================================================
@@ -3499,7 +3751,7 @@ void handle_key(uint32_t key)
         }
         
         if (newIcon >= 0) {
-            s_selectedIcon = newIcon;
+            SelectDesktopIcon(newIcon, false);
             draw();
             return;
         }
@@ -3593,6 +3845,11 @@ static int hit_test_icon(int32_t mx, int32_t my)
         }
     }
     return -1;
+}
+
+static int HitTestDesktopIcon(int32_t mx, int32_t my)
+{
+    return hit_test_icon(mx, my);
 }
 
 // Find the nearest icon in a given direction from the currently selected icon
@@ -4150,6 +4407,47 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
         return;
     }
 
+    // ---- Handle desktop rectangle selection (left button held on empty desktop) ----
+    if ((s_selectionDragPending || s_selectionDragActive) && (buttons & 0x01)) {
+        s_selectionCurrentX = mx;
+        s_selectionCurrentY = my;
+
+        if (!s_selectionDragActive) {
+            int32_t dx = mx - s_selectionStartX;
+            int32_t dy = my - s_selectionStartY;
+            if (dx < 0) dx = -dx;
+            if (dy < 0) dy = -dy;
+            if (dx > kDragThreshold || dy > kDragThreshold) {
+                s_selectionDragActive = true;
+                log_selection_change("marquee started");
+            }
+        }
+
+        if (s_selectionDragActive) {
+            SelectIconsInRectangle(s_selectionStartX, s_selectionStartY,
+                                   s_selectionCurrentX, s_selectionCurrentY,
+                                   s_selectionDragAdditive);
+            draw();
+            draw_cursor(mx, my);
+            return;
+        }
+    }
+
+    // ---- Finalize desktop rectangle selection ----
+    if ((s_selectionDragPending || s_selectionDragActive) && (released & 0x01)) {
+        if (s_selectionDragActive) {
+            SelectIconsInRectangle(s_selectionStartX, s_selectionStartY,
+                                   s_selectionCurrentX, s_selectionCurrentY,
+                                   s_selectionDragAdditive);
+            log_selection_change("marquee finished");
+        }
+        s_selectionDragPending = false;
+        s_selectionDragActive = false;
+        draw();
+        draw_cursor(mx, my);
+        return;
+    }
+
     // ---- Handle icon drag-in-progress (left button held) ----
     if (s_dragging && (buttons & 0x01)) {
         // Update current drag position
@@ -4177,7 +4475,7 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
 
     // ---- Handle drag release (left button released while dragging) ----
     if (s_dragging && (released & 0x01)) {
-        if (s_dragStarted && s_dragIconIndex >= 0 && s_dragIconIndex < kDesktopIconCount) {
+        if (s_dragStarted && s_dragIconIndex >= 0 && s_dragIconIndex < s_visibleIconCount) {
             // Compute new icon position from drop point
             int32_t newX = mx - s_dragOffsetX;
             int32_t newY = my - s_dragOffsetY;
@@ -4195,7 +4493,7 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
             
             // Save icon positions to VFS
             save_icon_positions();
-        } else if (!s_dragStarted && s_dragIconIndex >= 0 && s_dragIconIndex < kDesktopIconCount) {
+        } else if (!s_dragStarted && s_dragIconIndex >= 0 && s_dragIconIndex < s_visibleIconCount) {
             // Click without drag - just select the icon (launch happens on double-click)
             s_selectedIcon = s_dragIconIndex;
         }
@@ -4227,7 +4525,6 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
         // Check for notification close button click first
         if (s_notification.visible) {
             uint32_t toastW = 260;
-            uint32_t toastH = 60;
             uint32_t toastX = s_screenW - toastW - 12;
             uint32_t toastY = 12;
             uint32_t closeX = toastX + toastW - 16;
@@ -4613,7 +4910,7 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
 
 
         // Desktop icon click - begin potential drag or handle double-click
-        int iconIdx = hit_test_icon(mx, my);
+        int iconIdx = HitTestDesktopIcon(mx, my);
         if (iconIdx >= 0) {
             // Check for double-click
             uint32_t now = s_tickCounter;
@@ -4633,29 +4930,65 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
             s_lastClickedIcon = iconIdx;
             s_lastClickTime = now;
             
-            s_selectedIcon = iconIdx;
+            bool ctrlDown = is_ctrl_modifier_down();
+            bool shiftDown = is_shift_modifier_down();
+            if (shiftDown) {
+                int anchorDisplayIndex = display_index_for_icon_id(s_lastSelectedIconId);
+                SelectDesktopIconRange(anchorDisplayIndex >= 0 ? anchorDisplayIndex : iconIdx, iconIdx);
+            } else if (ctrlDown) {
+                ToggleDesktopIconSelection(iconIdx);
+            } else {
+                SelectDesktopIcon(iconIdx, false);
+            }
+
             // Start drag tracking (actual drag begins after threshold)
-            s_dragging = true;
-            s_dragStarted = false;
-            s_dragIconIndex = iconIdx;
-            s_dragStartMouseX = mx;
-            s_dragStartMouseY = my;
-            s_dragOffsetX = mx - s_iconPosX[iconIdx];
-            s_dragOffsetY = my - s_iconPosY[iconIdx];
+            if (is_display_icon_selected(iconIdx)) {
+                s_dragging = true;
+                s_dragStarted = false;
+                s_dragIconIndex = iconIdx;
+                s_dragStartMouseX = mx;
+                s_dragStartMouseY = my;
+                s_dragOffsetX = mx - s_iconPosX[iconIdx];
+                s_dragOffsetY = my - s_iconPosY[iconIdx];
+            }
             draw();
             draw_cursor(mx, my);
             return;
         }
 
-
-        // Click on empty desktop area: deselect icon
-        if ((uint32_t)my < taskbarY) {
-            if (s_selectedIcon >= 0) {
-                s_selectedIcon = -1;
+        // Notification dismiss: check before empty desktop selection handling.
+        if (s_notification.visible) {
+            uint32_t toastW = 280;
+            uint32_t toastH = 64;
+            uint32_t toastX = s_screenW - toastW - 16;
+            uint32_t toastY = taskbarY - toastH - 12;
+            if ((uint32_t)mx >= toastX && (uint32_t)mx <= toastX + toastW &&
+                (uint32_t)my >= toastY && (uint32_t)my <= toastY + toastH) {
+                dismiss_notification();
                 draw();
                 draw_cursor(mx, my);
                 return;
             }
+        }
+
+        // Click on empty desktop area: clear selection unless Ctrl is held, then
+        // prepare a marquee selection if the pointer moves beyond the drag threshold.
+        if ((uint32_t)my < taskbarY) {
+            bool ctrlDown = is_ctrl_modifier_down();
+            if (!ctrlDown) {
+                ClearDesktopIconSelection();
+            }
+            snapshot_selection_base();
+            s_selectionDragPending = true;
+            s_selectionDragActive = false;
+            s_selectionDragAdditive = ctrlDown;
+            s_selectionStartX = mx;
+            s_selectionStartY = my;
+            s_selectionCurrentX = mx;
+            s_selectionCurrentY = my;
+            draw();
+            draw_cursor(mx, my);
+            return;
         }
 
         // Notification dismiss: check if clicking the notification toast

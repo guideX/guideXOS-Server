@@ -5,6 +5,7 @@
 #include <atomic>
 #include <vector>
 #include <mutex>
+#include <set>
 #include "ipc_bus.h"
 #include "gui_protocol.h"
 #include "process.h"
@@ -87,6 +88,18 @@ namespace gxos { namespace gui {
         static void addRecent(const std::string& act);
         static void refreshDesktopItems();
         static void refreshAllProgramsList();
+        static void ClearDesktopIconSelection();
+        static void SelectDesktopIcon(int index, bool additive);
+        static void ToggleDesktopIconSelection(int index);
+        static void SelectDesktopIconRange(int startIndex, int endIndex);
+        static std::vector<int> GetSelectedDesktopIconIndices();
+#ifdef _WIN32
+        static int HitTestDesktopIcon(int mouseX, int mouseY);
+        static RECT GetDesktopIconBounds(int index);
+        static void SelectIconsInRectangle(const RECT& selectionRect, bool additive);
+        static bool IsCtrlDown();
+        static bool IsShiftDown();
+#endif
 #ifdef _WIN32
         static uint64_t hitTestTaskbarButton(int mx, int my, RECT cr, int taskbarH);
         static void initWindow();
@@ -130,7 +143,11 @@ namespace gxos { namespace gui {
         static bool g_altTabOverlayActive; static uint64_t g_altTabOverlayTicks; static int g_altTabCycleIndex;
         static bool g_taskbarCycleActive; static int g_taskbarCycleIndex; static bool g_keyboardMoveActive; static bool g_keyboardSizeActive; static int g_kbOrigX; static int g_kbOrigY; static int g_kbOrigW; static int g_kbOrigH;
         static DesktopConfigData g_cfg; static uint64_t g_lastItemClickTicks; static int g_lastItemIndex;
+        static std::set<int> g_selectedDesktopIconIndices; static int g_lastSelectedDesktopIconIndex;
         static bool g_iconDragActive; static int g_iconDragIndex; static int g_iconDragOffX; static int g_iconDragOffY; static int g_iconDragStartX; static int g_iconDragStartY; static bool g_iconDragPending;
+#ifdef _WIN32
+        static bool g_iconSelectionDragPending; static bool g_iconSelectionDragActive; static int g_iconSelectionStartX; static int g_iconSelectionStartY; static int g_iconSelectionCurrentX; static int g_iconSelectionCurrentY; static bool g_iconSelectionAdditive;
+#endif
         // Start menu keyboard/selection state
         static int g_startMenuSel; static int g_startMenuScroll;
         static bool g_startMenuAllProgs; // "All Programs" view

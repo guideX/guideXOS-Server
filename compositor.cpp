@@ -20,6 +20,7 @@
 #include <cstring>
 #include <ctime>
 #include <iostream>
+#include <cstdlib>
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #ifndef NOMINMAX
@@ -63,7 +64,11 @@ namespace gxos {
         bool Compositor::g_taskbarCycleActive = false; int Compositor::g_taskbarCycleIndex = 0; bool Compositor::g_keyboardMoveActive = false; bool Compositor::g_keyboardSizeActive = false; int Compositor::g_kbOrigX = 0; int Compositor::g_kbOrigY = 0; int Compositor::g_kbOrigW = 0; int Compositor::g_kbOrigH = 0;
 
         DesktopConfigData Compositor::g_cfg{}; std::vector<DesktopItem> Compositor::g_items; uint64_t Compositor::g_lastItemClickTicks = 0; int Compositor::g_lastItemIndex = -1;
+        std::set<int> Compositor::g_selectedDesktopIconIndices; int Compositor::g_lastSelectedDesktopIconIndex = -1;
         bool Compositor::g_iconDragActive = false; int Compositor::g_iconDragIndex = -1; int Compositor::g_iconDragOffX = 0; int Compositor::g_iconDragOffY = 0; int Compositor::g_iconDragStartX = 0; int Compositor::g_iconDragStartY = 0; bool Compositor::g_iconDragPending = false;
+#ifdef _WIN32
+        bool Compositor::g_iconSelectionDragPending = false; bool Compositor::g_iconSelectionDragActive = false; int Compositor::g_iconSelectionStartX = 0; int Compositor::g_iconSelectionStartY = 0; int Compositor::g_iconSelectionCurrentX = 0; int Compositor::g_iconSelectionCurrentY = 0; bool Compositor::g_iconSelectionAdditive = false;
+#endif
 
         // Start menu keyboard/selection state
         int Compositor::g_startMenuSel = 0; int Compositor::g_startMenuScroll = 0;
@@ -121,6 +126,10 @@ namespace gxos {
         }
 
         void Compositor::refreshDesktopItems( ) {
+            std::set<std::string> selectedActions;
+            for (int idx : g_selectedDesktopIconIndices) {
+                if (idx >= 0 && idx < (int)g_items.size( )) selectedActions.insert(g_items[idx].action);
+            }
             g_items.clear( ); // pinned first
             for (const auto& p : g_cfg.pinned) { DesktopItem di; di.label = p; di.action = p; di.pinned = true; di.ix = -1; di.iy = -1; g_items.push_back(di); } for (const auto& r : g_cfg.recent) { if (std::find(g_cfg.pinned.begin( ), g_cfg.pinned.end( ), r) != g_cfg.pinned.end( )) continue; DesktopItem di; di.label = r; di.action = r; di.pinned = false; di.ix = -1; di.iy = -1; g_items.push_back(di); }
             // Apply saved positions from config
@@ -128,6 +137,13 @@ namespace gxos {
             // Assign default grid positions to any items that don't have saved positions
             const int margin = 20; const int iconW = 56; const int iconH = 56; const int cellW = iconW + 28; const int cellH = iconH + 38;
             int defIdx = 0; for (auto& item : g_items) { if (item.ix < 0 || item.iy < 0) { item.ix = margin + (defIdx % 8) * cellW; item.iy = margin + (defIdx / 8) * cellH; } defIdx++; }
+            g_selectedDesktopIconIndices.clear( );
+            for (int i = 0; i < (int)g_items.size( ); ++i) {
+                bool selected = selectedActions.find(g_items[i].action) != selectedActions.end( );
+                g_items[i].selected = selected;
+                if (selected) g_selectedDesktopIconIndices.insert(i);
+            }
+            if (g_lastSelectedDesktopIconIndex >= (int)g_items.size( )) g_lastSelectedDesktopIconIndex = g_items.empty( ) ? -1 : (int)g_items.size( ) - 1;
         }
 
         void Compositor::refreshAllProgramsList( ) {
@@ -165,6 +181,118 @@ namespace gxos {
                 Logger::write(LogLevel::Error, std::string("Failed to launch app: ") + act + " - " + err);
             }
         }
+
+        void Compositor::ClearDesktopIconSelection( ) {
+            bool hadSelection = !g_selectedDesktopIconIndices.empty( );
+            for (int idx : g_selectedDesktopIconIndices) {
+                if (idx >= 0 && idx < (int)g_items.size( )) g_items[idx].selected = false;
+            }
+            for (auto& item : g_items) item.selected = false;
+            g_selectedDesktopIconIndices.clear( );
+            g_lastSelectedDesktopIconIndex = -1;
+            if (hadSelection) Logger::write(LogLevel::Info, "Desktop icon selection cleared");
+        }
+
+        void Compositor::SelectDesktopIcon(int index, bool additive) {
+            if (index < 0 || index >= (int)g_items.size( )) return;
+            if (!additive) ClearDesktopIconSelection( );
+            g_items[index].selected = true;
+            g_selectedDesktopIconIndices.insert(index);
+            g_lastSelectedDesktopIconIndex = index;
+            Logger::write(LogLevel::Info, std::string("Desktop icon selected: ") + g_items[index].label + " count=" + std::to_string(g_selectedDesktopIconIndices.size( )));
+        }
+
+        void Compositor::ToggleDesktopIconSelection(int index) {
+            if (index < 0 || index >= (int)g_items.size( )) return;
+            auto it = g_selectedDesktopIconIndices.find(index);
+            if (it != g_selectedDesktopIconIndices.end( )) {
+                g_selectedDesktopIconIndices.erase(it);
+                g_items[index].selected = false;
+                if (g_lastSelectedDesktopIconIndex == index) {
+                    g_lastSelectedDesktopIconIndex = g_selectedDesktopIconIndices.empty( ) ? -1 : *g_selectedDesktopIconIndices.rbegin( );
+                }
+                Logger::write(LogLevel::Info, std::string("Desktop icon deselected: ") + g_items[index].label + " count=" + std::to_string(g_selectedDesktopIconIndices.size( )));
+            } else {
+                g_items[index].selected = true;
+                g_selectedDesktopIconIndices.insert(index);
+                g_lastSelectedDesktopIconIndex = index;
+                Logger::write(LogLevel::Info, std::string("Desktop icon toggled selected: ") + g_items[index].label + " count=" + std::to_string(g_selectedDesktopIconIndices.size( )));
+            }
+        }
+
+        void Compositor::SelectDesktopIconRange(int startIndex, int endIndex) {
+            if (g_items.empty( )) return;
+            if (startIndex < 0 || startIndex >= (int)g_items.size( )) startIndex = endIndex;
+            if (endIndex < 0 || endIndex >= (int)g_items.size( )) return;
+            ClearDesktopIconSelection( );
+            int first = std::min(startIndex, endIndex);
+            int last = std::max(startIndex, endIndex);
+            for (int i = first; i <= last; ++i) {
+                g_items[i].selected = true;
+                g_selectedDesktopIconIndices.insert(i);
+            }
+            g_lastSelectedDesktopIconIndex = endIndex;
+            Logger::write(LogLevel::Info, "Desktop icon range selected: " + std::to_string(first) + "-" + std::to_string(last) + " count=" + std::to_string(g_selectedDesktopIconIndices.size( )));
+        }
+
+        std::vector<int> Compositor::GetSelectedDesktopIconIndices( ) {
+            return std::vector<int>(g_selectedDesktopIconIndices.begin( ), g_selectedDesktopIconIndices.end( ));
+        }
+
+#ifdef _WIN32
+        bool Compositor::IsCtrlDown( ) {
+            // Hosted compositor receives Win32 mouse messages; GetKeyState is the local modifier source.
+            return (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+        }
+
+        bool Compositor::IsShiftDown( ) {
+            // Hosted compositor receives Win32 mouse messages; GetKeyState is the local modifier source.
+            return (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+        }
+
+        RECT Compositor::GetDesktopIconBounds(int index) {
+            const int iconW = 56;
+            const int cellW = iconW + 28;
+            const int cellH = 56 + 38;
+            if (index < 0 || index >= (int)g_items.size( )) return RECT{ 0,0,0,0 };
+            return RECT{ g_items[index].ix, g_items[index].iy, g_items[index].ix + cellW, g_items[index].iy + cellH };
+        }
+
+        int Compositor::HitTestDesktopIcon(int mouseX, int mouseY) {
+            for (int i = 0; i < (int)g_items.size( ); ++i) {
+                RECT bounds = GetDesktopIconBounds(i);
+                if (mouseX >= bounds.left && mouseX < bounds.right && mouseY >= bounds.top && mouseY < bounds.bottom) return i;
+            }
+            return -1;
+        }
+
+        static RECT normalizedRect(int x1, int y1, int x2, int y2) {
+            return RECT{ std::min(x1, x2), std::min(y1, y2), std::max(x1, x2), std::max(y1, y2) };
+        }
+
+        void Compositor::SelectIconsInRectangle(const RECT& selectionRect, bool additive) {
+            std::set<int> before = g_selectedDesktopIconIndices;
+            if (!additive) {
+                for (int idx : g_selectedDesktopIconIndices) {
+                    if (idx >= 0 && idx < (int)g_items.size( )) g_items[idx].selected = false;
+                }
+                g_selectedDesktopIconIndices.clear( );
+                g_lastSelectedDesktopIconIndex = -1;
+            }
+            for (int i = 0; i < (int)g_items.size( ); ++i) {
+                RECT iconBounds = GetDesktopIconBounds(i);
+                RECT intersection{};
+                if (IntersectRect(&intersection, &selectionRect, &iconBounds)) {
+                    g_items[i].selected = true;
+                    g_selectedDesktopIconIndices.insert(i);
+                    g_lastSelectedDesktopIconIndex = i;
+                }
+            }
+            if (before != g_selectedDesktopIconIndices) {
+                Logger::write(LogLevel::Info, "Desktop drag selection count=" + std::to_string(g_selectedDesktopIconIndices.size( )));
+            }
+        }
+#endif
 
         WinInfo* Compositor::hitWindowAt(int mx, int my) { for (int idx = (int)g_z.size( ) - 1; idx >= 0; --idx) { uint64_t wid = g_z[idx]; auto it = g_windows.find(wid); if (it == g_windows.end( )) continue; WinInfo& w = it->second; if (w.minimized || w.tombstoned) continue; if (mx >= w.x && mx < w.x + w.w && my >= w.y && my < w.y + w.h) return &w; } return nullptr; }
         bool Compositor::isDialogTitle(const std::string& title) { return title == "Save As" || title == "Open" || title == "Unsaved Changes"; }
@@ -215,6 +343,21 @@ namespace gxos {
                 // Pin indicator
                 if (it.pinned) { SetTextColor(dc, RGB(255, 200, 60)); const char* pin = "*"; TextOutA(dc, iconR.right - 10, iconR.top + 2, pin, 1); }
                 idx++;
+            }
+            if (g_iconSelectionDragPending || g_iconSelectionDragActive) {
+                RECT selRect = normalizedRect(g_iconSelectionStartX, g_iconSelectionStartY, g_iconSelectionCurrentX, g_iconSelectionCurrentY);
+                if (selRect.right > selRect.left && selRect.bottom > selRect.top) {
+                    HBRUSH fill = CreateHatchBrush(HS_DIAGCROSS, RGB(70, 130, 220));
+                    HBRUSH oldBrush = (HBRUSH)SelectObject(dc, fill);
+                    HPEN pen = CreatePen(PS_DOT, 1, RGB(110, 170, 245));
+                    HPEN oldPen = (HPEN)SelectObject(dc, pen);
+                    SetBkMode(dc, TRANSPARENT);
+                    Rectangle(dc, selRect.left, selRect.top, selRect.right, selRect.bottom);
+                    SelectObject(dc, oldPen);
+                    SelectObject(dc, oldBrush);
+                    DeleteObject(pen);
+                    DeleteObject(fill);
+                }
             }
         }
 
@@ -721,7 +864,52 @@ namespace gxos {
                 }
                 // Desktop icon click (selection / double / drag initiation)
                 // Skip if a visible window is at the click position (windows are above desktop icons)
-                { bool windowAtClick = false; { std::lock_guard<std::mutex> lk(g_lock); windowAtClick = (hitWindowAt(mx, my) != nullptr); } if (!windowAtClick) { const int iconW = 56; const int iconH = 56; const int cellW = iconW + 28; const int cellH = iconH + 38; if (my < cr.bottom - taskbarH) { int hitIdx = -1; for (int i = 0; i < (int)g_items.size( ); ++i) { int ix = g_items[i].ix; int iy = g_items[i].iy; if (mx >= ix && mx < ix + cellW && my >= iy && my < iy + cellH) { hitIdx = i; break; } } if (hitIdx >= 0) { uint64_t now = nowMs( ); if (g_lastItemIndex == hitIdx && (now - g_lastItemClickTicks) < 450) { launchAction(g_items[hitIdx].action); g_lastItemIndex = -1; g_lastItemClickTicks = 0; } else { for (auto& di : g_items) di.selected = false; g_items[hitIdx].selected = true; g_lastItemIndex = hitIdx; g_lastItemClickTicks = now; g_iconDragPending = true; g_iconDragIndex = hitIdx; g_iconDragStartX = mx; g_iconDragStartY = my; g_iconDragOffX = mx - g_items[hitIdx].ix; g_iconDragOffY = my - g_items[hitIdx].iy; SetCapture(h); } requestRepaint( ); return 0; } } } }
+                {
+                    bool windowAtClick = false;
+                    { std::lock_guard<std::mutex> lk(g_lock); windowAtClick = (hitWindowAt(mx, my) != nullptr); }
+                    if (!windowAtClick && my < cr.bottom - taskbarH) {
+                        int hitIdx = HitTestDesktopIcon(mx, my);
+                        bool ctrlDown = IsCtrlDown( );
+                        bool shiftDown = IsShiftDown( );
+                        if (hitIdx >= 0) {
+                            uint64_t now = nowMs( );
+                            if (g_lastItemIndex == hitIdx && (now - g_lastItemClickTicks) < 450) {
+                                launchAction(g_items[hitIdx].action);
+                                g_lastItemIndex = -1;
+                                g_lastItemClickTicks = 0;
+                            } else {
+                                if (shiftDown) SelectDesktopIconRange(g_lastSelectedDesktopIconIndex, hitIdx);
+                                else if (ctrlDown) ToggleDesktopIconSelection(hitIdx);
+                                else SelectDesktopIcon(hitIdx, false);
+                                g_lastItemIndex = hitIdx;
+                                g_lastItemClickTicks = now;
+                                if (g_items[hitIdx].selected) {
+                                    g_iconDragPending = true;
+                                    g_iconDragIndex = hitIdx;
+                                    g_iconDragStartX = mx;
+                                    g_iconDragStartY = my;
+                                    g_iconDragOffX = mx - g_items[hitIdx].ix;
+                                    g_iconDragOffY = my - g_items[hitIdx].iy;
+                                    SetCapture(h);
+                                }
+                            }
+                            requestRepaint( );
+                            return 0;
+                        }
+
+                        if (!ctrlDown) ClearDesktopIconSelection( );
+                        g_iconSelectionDragPending = true;
+                        g_iconSelectionDragActive = false;
+                        g_iconSelectionStartX = mx;
+                        g_iconSelectionStartY = my;
+                        g_iconSelectionCurrentX = mx;
+                        g_iconSelectionCurrentY = my;
+                        g_iconSelectionAdditive = ctrlDown;
+                        SetCapture(h);
+                        requestRepaint( );
+                        return 0;
+                    }
+                }
                 // Taskbar button click (minimize/restore/untombstone)
                 uint64_t id = hitTestTaskbarButton(mx, my, cr, taskbarH); if (id) { std::lock_guard<std::mutex> lk(g_lock); auto it = g_windows.find(id); if (it != g_windows.end( )) { WinInfo& w = it->second; if (w.tombstoned) { 
                     // Restore from tombstone (untombstone)
@@ -799,6 +987,17 @@ namespace gxos {
             } break;
             case WM_LBUTTONUP: {
                 int mx = GET_X_LPARAM(l); int my = GET_Y_LPARAM(l);
+                if (g_iconSelectionDragActive || g_iconSelectionDragPending) {
+                    if (g_iconSelectionDragActive) {
+                        RECT selectionRect = normalizedRect(g_iconSelectionStartX, g_iconSelectionStartY, mx, my);
+                        SelectIconsInRectangle(selectionRect, g_iconSelectionAdditive);
+                    }
+                    g_iconSelectionDragActive = false;
+                    g_iconSelectionDragPending = false;
+                    ReleaseCapture( );
+                    requestRepaint( );
+                    break;
+                }
                 if (g_iconDragActive || g_iconDragPending) {
                     ReleaseCapture( );
                     if (g_iconDragActive) {
@@ -813,6 +1012,21 @@ namespace gxos {
             case WM_MOUSEMOVE: {
                 int mx = GET_X_LPARAM(l); int my = GET_Y_LPARAM(l);
                 { std::lock_guard<std::mutex> lk(g_lock); if (blockInputBehindModal(mx, my)) { requestRepaint( ); return 0; } }
+                if (g_iconSelectionDragPending || g_iconSelectionDragActive) {
+                    g_iconSelectionCurrentX = mx;
+                    g_iconSelectionCurrentY = my;
+                    if (!g_iconSelectionDragActive) {
+                        if (std::abs(mx - g_iconSelectionStartX) >= 4 || std::abs(my - g_iconSelectionStartY) >= 4) {
+                            g_iconSelectionDragActive = true;
+                        }
+                    }
+                    if (g_iconSelectionDragActive) {
+                        RECT selectionRect = normalizedRect(g_iconSelectionStartX, g_iconSelectionStartY, mx, my);
+                        SelectIconsInRectangle(selectionRect, g_iconSelectionAdditive);
+                    }
+                    requestRepaint( );
+                    break;
+                }
                 if (g_iconDragPending && !g_iconDragActive) { if (std::abs(mx - g_iconDragStartX) >= 4 || std::abs(my - g_iconDragStartY) >= 4) { g_iconDragActive = true; } }
                 if (g_iconDragActive && g_iconDragIndex >= 0 && g_iconDragIndex < (int)g_items.size( )) { RECT cr2; GetClientRect(h, &cr2); int taskbarH2 = 40; int nx = mx - g_iconDragOffX; int ny = my - g_iconDragOffY; if (nx < 0) nx = 0; if (ny < 0) ny = 0; const int cellW2 = 84; const int cellH2 = 94; if (nx + cellW2 > cr2.right) nx = cr2.right - cellW2; if (ny + cellH2 > cr2.bottom - taskbarH2) ny = cr2.bottom - taskbarH2 - cellH2; g_items[g_iconDragIndex].ix = nx; g_items[g_iconDragIndex].iy = ny; requestRepaint( ); break; }
                 if (g_iconDragPending) { break; } // Skip handleMouse while drag is pending
