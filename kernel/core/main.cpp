@@ -39,6 +39,7 @@
 #include "include/kernel/tcp.h"
 #include "include/kernel/socket.h"
 #include "include/kernel/dns.h"
+#include "include/kernel/dhcp.h"
 
 // VirtIO subsystem
 #include "include/kernel/virtio_block.h"
@@ -320,6 +321,14 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
             
             // Initialize DNS client
             kernel::dns::init();
+
+            kernel::serial::puts("[KERNEL] Attempting DHCP network configuration...\n");
+            if (kernel::dhcp::discover() == kernel::dhcp::DHCP_OK) {
+                kernel::serial::puts("[KERNEL] DHCP network configuration complete\n");
+                kernel::dns::init();
+            } else {
+                kernel::serial::puts("[KERNEL] DHCP failed, keeping static network configuration\n");
+            }
         }
         
         // ============================================================

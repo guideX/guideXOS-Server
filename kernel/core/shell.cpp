@@ -13,6 +13,7 @@
 #include "include/kernel/udp.h"
 #include "include/kernel/dns.h"
 #include "include/kernel/dhcp.h"
+#include "include/kernel/pit.h"
 #include "include/kernel/vfs.h"
 #include "include/kernel/block_device.h"
 #include "include/kernel/fs_fat.h"
@@ -1545,6 +1546,11 @@ static void cmd_ping(const char* target) {
         ipv4::ip_to_string(cfg->ipAddr, ipStr);
         output_string(ipStr);
         output_string("\n");
+
+        output_string("DNS Server: ");
+        ipv4::ip_to_string(dns::get_server(), ipStr);
+        output_string(ipStr);
+        output_string("\n");
     }
     
     // Parse IP address or resolve hostname
@@ -1613,9 +1619,12 @@ static void cmd_ping(const char* target) {
         }
         sent++;
         
-        // Wait for reply (simplified polling)
+        // Wait for reply using PIT ticks so external hosts have a real timeout window.
         bool gotReply = false;
-        for (int wait = 0; wait < 100; ++wait) {
+        uint32_t startTick = pit::ticks();
+        uint32_t timeoutTicks = 100;  // Approximately 1 second at 100 Hz
+
+        while ((pit::ticks() - startTick) < timeoutTicks) {
             // Poll network to receive incoming packets
             ipv4::poll_network();
             

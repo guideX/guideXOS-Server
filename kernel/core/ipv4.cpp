@@ -468,6 +468,18 @@ static bool resolve_mac_with_arp(uint32_t ip, uint8_t* mac)
         for (volatile int d = 0; d < 10000; ++d) {}
     }
 
+    if (s_config.configured && s_config.gateway != 0 && ip != s_config.gateway) {
+        if (resolve_mac(s_config.gateway, mac)) return true;
+
+        if (send_arp_packet(ARP_OPER_REQUEST, s_config.gateway, nullptr) == IP_OK) {
+            for (int wait = 0; wait < 100; ++wait) {
+                poll_network();
+                if (resolve_mac(s_config.gateway, mac)) return true;
+                for (volatile int d = 0; d < 10000; ++d) {}
+            }
+        }
+    }
+
     return false;
 }
 

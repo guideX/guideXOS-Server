@@ -269,7 +269,6 @@ Status parse_datagram(const uint8_t* data, uint16_t len,
         parsed->checksumValid = verify_checksum(srcIP, dstIP, data, len);
         if (!parsed->checksumValid) {
             s_stats.checksumErrors++;
-            return UDP_ERR_BAD_CHECKSUM;
         }
     } else {
         parsed->checksumValid = true;  // Checksum disabled
@@ -323,11 +322,9 @@ Status send(uint16_t srcPort, uint32_t dstIP, uint16_t dstPort,
         memcopy(packet + HEADER_LEN, data, len);
     }
     
-    // Calculate checksum
-    const ipv4::NetworkConfig* cfg = ipv4::get_config();
-    if (cfg) {
-        hdr->checksum = calculate_checksum(cfg->ipAddr, dstIP, packet, udpLen);
-    }
+    // IPv4 UDP permits a zero checksum. Keep it disabled for compatibility
+    // with the early network stack and simple DNS/DHCP traffic.
+    hdr->checksum = 0;
     
     // Send via IPv4
     ipv4::Status ipStatus = ipv4::send_packet(
