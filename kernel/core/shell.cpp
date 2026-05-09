@@ -1547,17 +1547,45 @@ static void cmd_ping(const char* target) {
         output_string("\n");
     }
     
-    // Parse IP address
+    // Parse IP address or resolve hostname
     uint32_t targetIP;
     if (!ipv4::ip_from_string(target, &targetIP)) {
-        output_string("ping: invalid IP address '");
+        output_string("Resolving ");
         output_string(target);
-        output_string("'\n");
-        return;
+        output_string("...\n");
+
+        dns::Status dnsStatus = dns::resolve(target, &targetIP);
+        if (dnsStatus != dns::DNS_OK) {
+            output_string("ping: cannot resolve '");
+            output_string(target);
+            output_string("' (DNS error ");
+            char errStr[4];
+            errStr[0] = '0' + (dnsStatus / 10);
+            errStr[1] = '0' + (dnsStatus % 10);
+            errStr[2] = ')';
+            errStr[3] = '\0';
+            output_string(errStr);
+            output_string("\n");
+            return;
+        }
+
+        output_string(target);
+        output_string(" resolved to ");
+        char resolvedStr[16];
+        ipv4::ip_to_string(targetIP, resolvedStr);
+        output_string(resolvedStr);
+        output_string("\n");
     }
     
     output_string("PING ");
     output_string(target);
+    if (!ipv4::ip_from_string(target, &targetIP)) {
+        output_string(" (");
+        char ipStr[16];
+        ipv4::ip_to_string(targetIP, ipStr);
+        output_string(ipStr);
+        output_string(")");
+    }
     output_string(" 56 data bytes\n");
     
     // Send 4 pings

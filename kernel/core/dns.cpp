@@ -630,6 +630,8 @@ Status resolve(const char* domain, uint32_t* ipv4)
         const uint32_t maxWait = 300000;  // Approximate timeout
         
         while (waitCount < maxWait && !gotResponse) {
+            ipv4::poll_network();
+
             socket::SockAddr fromAddr;
             int recvLen = socket::udp_recvfrom(sock, responsePacket, MAX_PACKET_SIZE, &fromAddr);
             
@@ -768,6 +770,8 @@ Status resolve_full(const char* domain, RecordType type, QueryResult* result)
         const uint32_t maxWait = 300000;
         
         while (waitCount < maxWait && !gotResponse) {
+            ipv4::poll_network();
+
             socket::SockAddr fromAddr;
             int recvLen = socket::udp_recvfrom(sock, responsePacket, MAX_PACKET_SIZE, &fromAddr);
             
