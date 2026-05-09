@@ -55,6 +55,35 @@ struct ArpEntry {
 };
 static ArpEntry s_arpCache[ARP_CACHE_SIZE];
 
+#if defined(__GNUC__) || defined(__clang__)
+#define ARP_PACKED __attribute__((packed))
+#else
+#pragma pack(push, 1)
+#define ARP_PACKED
+#endif
+
+struct ArpPacket {
+    uint16_t htype;
+    uint16_t ptype;
+    uint8_t  hlen;
+    uint8_t  plen;
+    uint16_t oper;
+    uint8_t  sha[6];
+    uint32_t spa;
+    uint8_t  tha[6];
+    uint32_t tpa;
+} ARP_PACKED;
+
+#if !defined(__GNUC__) && !defined(__clang__)
+#pragma pack(pop)
+#endif
+
+#undef ARP_PACKED
+
+static const uint16_t ARP_HTYPE_ETHERNET = 1;
+static const uint16_t ARP_OPER_REQUEST = 1;
+static const uint16_t ARP_OPER_REPLY = 2;
+
 // ================================================================
 // IP Address Utilities
 // ================================================================
@@ -339,6 +368,65 @@ static void arp_add(uint32_t ip, const uint8_t* mac)
     s_arpCache[slot].valid = true;
 }
 
+static Status send_arp_packet(uint16_t oper, uint32_t targetIP, const uint8_t* targetMAC)
+{
+    if (!s_config.configured) return IP_ERR_NOT_CONFIGURED;
+
+    ArpPacket arp;
+    memzero(&arp, sizeof(arp));
+    arp.htype = ethernet::htons(ARP_HTYPE_ETHERNET);
+    arp.ptype = ethernet::htons(ethernet::ETHERTYPE_IPV4);
+    arp.hlen = 6;
+    arp.plen = 4;
+    arp.oper = ethernet::htons(oper);
+    ethernet::mac_copy(arp.sha, s_config.macAddr);
+    arp.spa = ethernet::htonl(s_config.ipAddr);
+    if (targetMAC) {
+        ethernet::mac_copy(arp.tha, targetMAC);
+    }
+    arp.tpa = ethernet::htonl(targetIP);
+
+    uint8_t frame[ethernet::MAX_FRAME_LEN];
+    uint16_t frameLen;
+    const uint8_t* dstMAC = targetMAC ? targetMAC : ethernet::BROADCAST_MAC;
+
+    ethernet::Status ethStatus = ethernet::build_frame(
+        frame, sizeof(frame),
+        dstMAC, s_config.macAddr,
+        ethernet::ETHERTYPE_ARP,
+        reinterpret_cast<const uint8_t*>(&arp), sizeof(arp),
+        &frameLen);
+
+    if (ethStatus != ethernet::ETH_OK) return IP_ERR_TX_FAILED;
+
+    nic::Status nicStatus = nic::send_frame(frame, frameLen);
+    if (nicStatus != nic::NIC_OK) return IP_ERR_TX_FAILED;
+
+    return IP_OK;
+}
+
+static void handle_arp_packet(const ethernet::ParsedFrame* frame)
+{
+    if (!frame || !frame->payload || frame->payloadLen < sizeof(ArpPacket)) return;
+
+    const ArpPacket* arp = reinterpret_cast<const ArpPacket*>(frame->payload);
+    if (ethernet::ntohs(arp->htype) != ARP_HTYPE_ETHERNET ||
+        ethernet::ntohs(arp->ptype) != ethernet::ETHERTYPE_IPV4 ||
+        arp->hlen != 6 || arp->plen != 4) {
+        return;
+    }
+
+    uint16_t oper = ethernet::ntohs(arp->oper);
+    uint32_t senderIP = ethernet::ntohl(arp->spa);
+    uint32_t targetIP = ethernet::ntohl(arp->tpa);
+
+    arp_add(senderIP, arp->sha);
+
+    if (oper == ARP_OPER_REQUEST && s_config.configured && targetIP == s_config.ipAddr) {
+        send_arp_packet(ARP_OPER_REPLY, senderIP, arp->sha);
+    }
+}
+
 // For now, use broadcast if not in cache (real ARP would be separate)
 static bool resolve_mac(uint32_t ip, uint8_t* mac)
 {
@@ -363,9 +451,24 @@ static bool resolve_mac(uint32_t ip, uint8_t* mac)
         }
     }
     
-    // For now, use broadcast (proper ARP request would be needed)
-    ethernet::mac_copy(mac, ethernet::BROADCAST_MAC);
-    return true;
+    return false;
+}
+
+static bool resolve_mac_with_arp(uint32_t ip, uint8_t* mac)
+{
+    if (resolve_mac(ip, mac)) return true;
+
+    if (send_arp_packet(ARP_OPER_REQUEST, ip, nullptr) != IP_OK) {
+        return false;
+    }
+
+    for (int wait = 0; wait < 100; ++wait) {
+        poll_network();
+        if (resolve_mac(ip, mac)) return true;
+        for (volatile int d = 0; d < 10000; ++d) {}
+    }
+
+    return false;
 }
 
 // ================================================================
@@ -609,7 +712,7 @@ Status send_raw_packet(const uint8_t* packet, uint16_t len, uint32_t dstAddr)
     
     // Resolve MAC address
     uint8_t dstMAC[6];
-    if (!resolve_mac(nextHop, dstMAC)) {
+    if (!resolve_mac_with_arp(nextHop, dstMAC)) {
         s_stats.txErrors++;
         return IP_ERR_NO_ROUTE;
     }
@@ -785,8 +888,7 @@ void poll_network()
                 break;
                 
             case ethernet::ETHERTYPE_ARP:
-                // TODO: Handle ARP packets
-                // For now, just ignore them
+                handle_arp_packet(&ethFrame);
                 break;
                 
             default:

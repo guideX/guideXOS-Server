@@ -272,6 +272,9 @@ static const uint32_t NIC_BOOT_FLAG_ACTIVE = (1u << 2);
 // Returns true if NIC was initialized successfully
 bool init_from_bootinfo(const NicBootInfo* nicInfo);
 
+// Set the physical address where the kernel image was loaded.
+void set_kernel_physical_base(uint64_t physicalBase);
+
 // Scan PCI bus for network controllers and initialise the first
 // supported NIC found.  Sets up RX/TX descriptor rings and
 // enables the hardware.

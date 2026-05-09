@@ -387,6 +387,8 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
     Print(L"Kernel entry phys: %p virt: %p\n", (VOID*)(UINTN)entryPhys, (VOID*)(UINTN)entryVirt);
     Print(L"Kernel loaded at: %p - %p\n", (VOID*)(UINTN)kernelBase, (VOID*)(UINTN)(kernelBase + kernelTotalSize));
 
+    v1BootInfo->KernelPhysicalBase = kernelBase;
+
     // --- Load Ramdisk ---
     EFI_PHYSICAL_ADDRESS ramdiskPhys = 0;
     UINT64 ramdiskSize = 0;

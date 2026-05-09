@@ -70,7 +70,7 @@ namespace guideXOS
         uint64_t RamdiskSize;
         // NIC information (uses former Reserved space)
         NicInfo  Nic;
-        uint64_t Reserved3;
+        uint64_t KernelPhysicalBase;
     };
 }
 

@@ -45,6 +45,7 @@ static void memcopy(void* dst, const void* src, uint32_t len)
 
 static NICDevice   s_device;
 static bool        s_initialised = false;
+static uint64_t    s_kernelPhysicalBase = 0x100000;
 
 // Descriptor rings (statically allocated, 16-byte aligned)
 #if defined(__GNUC__) || defined(__clang__)
@@ -64,6 +65,15 @@ static uint8_t s_txBuffer[ETH_FRAME_MAX];
 // Current descriptor indices
 static uint16_t s_rxCur = 0;
 static uint16_t s_txCur = 0;
+
+static uint64_t dma_address(const void* ptr)
+{
+    uint64_t virt = reinterpret_cast<uint64_t>(ptr);
+    if (virt >= 0x100000) {
+        return s_kernelPhysicalBase + (virt - 0x100000);
+    }
+    return virt;
+}
 
 // ================================================================
 // MMIO register access
@@ -181,12 +191,12 @@ static void init_rx(uint64_t mmioBase)
     // Initialise each RX descriptor to point at its buffer
     for (uint16_t i = 0; i < NUM_RX_DESC; ++i) {
         memzero(&s_rxDescs[i], sizeof(RxDescriptor));
-        s_rxDescs[i].bufferAddr = reinterpret_cast<uint64_t>(&s_rxBuffers[i][0]);
+        s_rxDescs[i].bufferAddr = dma_address(&s_rxBuffers[i][0]);
         s_rxDescs[i].status     = 0;
     }
 
     // Program the RX descriptor ring base address
-    uint64_t rxDescPhys = reinterpret_cast<uint64_t>(&s_rxDescs[0]);
+    uint64_t rxDescPhys = dma_address(&s_rxDescs[0]);
     mmio_write32(mmioBase, E1000_RDBAL, static_cast<uint32_t>(rxDescPhys & 0xFFFFFFFF));
     mmio_write32(mmioBase, E1000_RDBAH, static_cast<uint32_t>(rxDescPhys >> 32));
 
@@ -218,7 +228,7 @@ static void init_tx(uint64_t mmioBase)
     }
 
     // Program the TX descriptor ring base address
-    uint64_t txDescPhys = reinterpret_cast<uint64_t>(&s_txDescs[0]);
+    uint64_t txDescPhys = dma_address(&s_txDescs[0]);
     mmio_write32(mmioBase, E1000_TDBAL, static_cast<uint32_t>(txDescPhys & 0xFFFFFFFF));
     mmio_write32(mmioBase, E1000_TDBAH, static_cast<uint32_t>(txDescPhys >> 32));
 
@@ -241,6 +251,13 @@ static void init_tx(uint64_t mmioBase)
 
     // Set inter-packet gap (TIPG)
     mmio_write32(mmioBase, E1000_TIPG, E1000_TIPG_DEFAULT);
+}
+
+void set_kernel_physical_base(uint64_t physicalBase)
+{
+    if (physicalBase != 0) {
+        s_kernelPhysicalBase = physicalBase;
+    }
 }
 
 // ================================================================
@@ -654,7 +671,7 @@ Status send_frame(const uint8_t* data, uint16_t len)
     memcopy(s_txBuffer, data, static_cast<uint32_t>(len));
 
     // Set up the descriptor
-    uint64_t bufAddr = reinterpret_cast<uint64_t>(s_txBuffer);
+    uint64_t bufAddr = dma_address(s_txBuffer);
     s_txDescs[s_txCur].bufferAddr = bufAddr;
     s_txDescs[s_txCur].length     = static_cast<uint16_t>(len);
     s_txDescs[s_txCur].cmd        = E1000_TXD_CMD_EOP |

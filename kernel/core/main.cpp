@@ -103,6 +103,7 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         if (bootinfo && bootinfo->Magic == guideXOS::GUIDEXOS_BOOTINFO_MAGIC) {
             is_bootinfo = true;
             kernel::serial::puts("[KERNEL] Boot method: UEFI BootInfo\n");
+            kernel::nic::set_kernel_physical_base(bootinfo->KernelPhysicalBase);
         }
     }
     
