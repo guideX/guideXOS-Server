@@ -15,6 +15,7 @@
 #include "disk_manager.h"
 #include "control_panel.h"
 #include "hd_installer.h"
+#include "package_manager.h"
 #include <algorithm>
 #include <fstream>
 #include <sstream>
@@ -185,8 +186,12 @@ namespace gxos {
             ensureDefaultAppsRegistered();
             std::string appName = canonicalAppName(name);
 
-            // Check if app is registered
+            // Installed universal applications are launched through the package manager.
             if (std::find(s_apps.begin(), s_apps.end(), appName) == s_apps.end()) {
+                if (PackageManager::LaunchGXApp(appName, error)) {
+                    AddRecentProgram(appName);
+                    return true;
+                }
                 error = "Application not registered: " + name;
                 return false;
             }

@@ -69,6 +69,7 @@
 #include "notification_manager.h"
 #include "firewall.h"
 #include "module_manager.h"
+#include "package_manager.h"
 #include <iostream>
 #include <chrono>
 #include <sstream>
@@ -115,6 +116,7 @@ static void help(){
                  " notify <text> | notify.clear\n"
                  " fw.mode <normal|block|disabled|auto> | fw.allow <name> | fw.list | fw.alerts\n"
                  " modules | module.launch <name>\n"
+                 " pkg.install <path.gxapp> | pkg.launch <app> | pkg.list | pkg.validate <path.gxapp>\n"
                  " proc.wait <pid> [timeoutMs] | proc.status <pid>\n"
                  " vfs.mkdir <path> | vfs.write <path> <text> | vfs.read <path> | vfs.ls <path>\n"
                  " vnc.start [port] | vnc.stop | vnc.status\n"
@@ -230,7 +232,31 @@ using namespace gxos;
         } else if (cmd=="console.pop"){ if(!requireConsole()) continue; uint64_t to=0; iss>>to; if(to==0) to=200; ipc::Message m; if(ipc::Bus::pop("console.output", m, to)){ std::string s(m.data.begin(), m.data.end()); std::cout<<"Console: "<<s<<std::endl; } else std::cout<<"No console output"<<std::endl;
         } else if (cmd=="mem"){ std::cout << "mem in use=" << Allocator::bytesInUse()/1024 << " KB peak=" << Allocator::peakBytes()/1024 << " KB" << std::endl;
         } else if (cmd=="pbytes"){ auto list = Allocator::listPidBytes(); std::cout<<"PID   BYTES"<<std::endl; for(auto& pr:list){ std::cout<<std::setw(5)<<pr.first<<" "<<pr.second<<std::endl; }
-        } else if (cmd=="help"){ help();
+        else if (cmd=="pkg.install"){
+            std::string path; iss>>path; if(path.empty()){ std::cout<<"pkg.install <path.gxapp>"<<std::endl; continue; }
+            auto result = PackageManager::InstallGXApp(path);
+            if(result.success) std::cout<<"Installed "<<result.applicationName<<" -> "<<result.installedPath<<std::endl;
+            else std::cout<<"Install warning/error: "<<result.message<<std::endl;
+            continue;
+        }
+        else if (cmd=="pkg.validate"){
+            std::string path; iss>>path; if(path.empty()){ std::cout<<"pkg.validate <path.gxapp>"<<std::endl; continue; }
+            std::string message; bool ok = PackageManager::ValidateGXAppArchitecture(path, message);
+            if(ok) std::cout<<"GXAPP supports this CPU architecture"<<std::endl;
+            else std::cout<<"GXAPP validation warning/error: "<<message<<std::endl;
+            continue;
+        }
+        else if (cmd=="pkg.launch"){
+            std::string app; std::getline(iss, app); if(app.size()>0 && app[0]==' ') app.erase(0,1); if(app.empty()){ std::cout<<"pkg.launch <app>"<<std::endl; continue; }
+            std::string error; if(PackageManager::LaunchGXApp(app, error)) std::cout<<"Launched "<<app<<std::endl; else std::cout<<"Launch failed: "<<error<<std::endl;
+            continue;
+        }
+        else if (cmd=="pkg.list"){
+            auto apps = PackageManager::ListInstalledGXApps();
+            std::cout<<"Installed GXAPPs ("<<apps.size()<<"):"<<std::endl;
+            for(const auto& app : apps) std::cout<<"  "<<app<<std::endl;
+            continue;
+        }        } else if (cmd=="help"){ help();
         }
         // Desktop and Taskbar convenience commands
         else if (cmd=="desktop.wallpaper"){
