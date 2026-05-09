@@ -579,6 +579,15 @@
     <ClInclude Include="bitmap_font.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="kernel\core\include\kernel\architecture_detector.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="gxapp_container.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="gxapp_loader.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="allocator.cpp">
@@ -1107,6 +1116,12 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="hd_installer.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\core\architecture_detector.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="gxapp_container.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

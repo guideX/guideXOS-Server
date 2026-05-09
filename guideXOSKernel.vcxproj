@@ -161,6 +161,7 @@
     <ClInclude Include="desktop_wallpaper.h" />
     <ClInclude Include="kernel\arch\x86\include\arch\x86.h" />
     <ClInclude Include="kernel\core\include\kernel\arch.h" />
+    <ClInclude Include="kernel\core\include\kernel\architecture_detector.h" />
     <ClInclude Include="kernel\core\include\kernel\desktop.h" />
     <ClInclude Include="kernel\core\include\kernel\shell.h" />
     <ClInclude Include="kernel\core\include\kernel\framebuffer.h" />
@@ -229,6 +230,7 @@
     <ClCompile Include="kernel\core\ps2mouse.cpp" />
     <ClCompile Include="kernel\arch\x86\arch.cpp" />
     <ClCompile Include="kernel\core\arch.cpp" />
+    <ClCompile Include="kernel\core\architecture_detector.cpp" />
     <ClCompile Include="kernel\core\main.cpp" />
     <ClCompile Include="kernel\core\vga.cpp" />
     <ClCompile Include="kernel\core\framebuffer.cpp" />

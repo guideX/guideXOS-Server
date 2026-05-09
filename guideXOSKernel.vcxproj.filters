@@ -69,6 +69,9 @@
     <ClInclude Include="kernel\core\include\kernel\arch.h">
       <Filter>Header Files\Kernel</Filter>
     </ClInclude>
+    <ClInclude Include="kernel\core\include\kernel\architecture_detector.h">
+      <Filter>Header Files\Kernel</Filter>
+    </ClInclude>
     <ClInclude Include="kernel\core\include\kernel\types.h">
       <Filter>Header Files\Kernel</Filter>
     </ClInclude>
@@ -264,6 +267,9 @@
       <Filter>Source Files\Core</Filter>
     </ClCompile>
     <ClCompile Include="kernel\core\arch.cpp">
+      <Filter>Source Files\Core</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\core\architecture_detector.cpp">
       <Filter>Source Files\Core</Filter>
     </ClCompile>
     <ClCompile Include="kernel\core\interrupts.cpp">

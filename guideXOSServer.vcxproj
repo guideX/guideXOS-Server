@@ -146,6 +146,8 @@
     <ClInclude Include="focus_indicator.h" />
     <ClInclude Include="fs.h" />
     <ClInclude Include="gui_protocol.h" />
+    <ClInclude Include="gxapp_container.h" />
+    <ClInclude Include="gxapp_loader.h" />
     <ClInclude Include="gxm_loader.h" />
     <ClInclude Include="hd_installer.h" />
     <ClInclude Include="image_viewer.h" />
@@ -214,6 +216,7 @@
     <ClInclude Include="kernel\arch\x86\include\arch\pci_audio.h" />
     <ClInclude Include="kernel\arch\x86\include\arch\syscall.h" />
     <ClInclude Include="kernel\arch\x86\include\arch\usb_hci.h" />
+    <ClInclude Include="kernel\core\include\kernel\architecture_detector.h" />
     <ClInclude Include="kernel\core\include\kernel\ata.h" />
     <ClInclude Include="kernel\core\include\kernel\block_device.h" />
     <ClInclude Include="kernel\core\include\kernel\desktop.h" />
@@ -332,6 +335,7 @@
     <ClCompile Include="firewall.cpp" />
     <ClCompile Include="focus_indicator.cpp" />
     <ClCompile Include="fs.cpp" />
+    <ClCompile Include="gxapp_container.cpp" />
     <ClCompile Include="gxm_loader.cpp" />
     <ClCompile Include="hd_installer.cpp" />
     <ClCompile Include="icons.cpp" />
@@ -423,6 +427,7 @@
     <ClCompile Include="kernel\core\arch.cpp">
       <ObjectFileName>$(IntDir)arch_core.obj</ObjectFileName>
     </ClCompile>
+    <ClCompile Include="kernel\core\architecture_detector.cpp" />
     <ClCompile Include="kernel\core\ata.cpp" />
     <ClCompile Include="kernel\core\block_device.cpp" />
     <ClCompile Include="kernel\core\cxx_runtime.cpp" />
