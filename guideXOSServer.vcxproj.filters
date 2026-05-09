@@ -588,6 +588,15 @@
     <ClInclude Include="gxapp_loader.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="package_manager.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="universal_app_loader.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="cpu_architecture.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="allocator.cpp">
@@ -1124,6 +1133,12 @@
     <ClCompile Include="gxapp_container.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="package_manager.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="universal_app_loader.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <None Include="kernel\arch\amd64\boot.asm">
@@ -1241,7 +1256,6 @@
     <None Include="kernel\arch\arm64\linker.ld" />
     <None Include="docs\PHASE8_UNIVERSAL_BINARY_SYSTEM.md" />
     <None Include="docs\SDK_ARCHITECTURE.md" />
-    <None Include="docs\GXAPP_FORMAT_SPEC.md" />
     <None Include="docs\PHASE7.5_FILESYSTEM_SHAKEDOWN.md" />
     <None Include="scripts\create-test-disks.sh" />
     <None Include="scripts\create-test-disks.ps1" />
@@ -1285,6 +1299,12 @@
       <Filter>Source Files</Filter>
     </None>
     <None Include="build.ps1" />
+    <None Include="tools\gxbuild.py" />
+    <None Include="tools\gxbuild.cmd" />
+    <None Include="tools\gxbuild" />
+    <None Include="docs\GXBUILD.md" />
+    <None Include="docs\GXAPP_FORMAT_SPEC.md" />
+    <None Include="docs\universal-app-audit.md" />
   </ItemGroup>
   <ItemGroup>
     <Text Include="scripts\build-and-run-sparcv8_in_linux.sh" />

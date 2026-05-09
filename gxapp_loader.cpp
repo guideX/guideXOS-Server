@@ -41,20 +41,7 @@ static void copyToExecutableMemory(const std::vector<uint8_t>& binary, std::vect
 } // namespace
 
 int GXAppLoader::currentArchitecture(){
-    switch (kernel::ArchitectureDetector::GetArchitecture()) {
-    case kernel::CpuArchitecture::X86: return static_cast<int>(gxos::CpuArchitecture::X86);
-    case kernel::CpuArchitecture::Amd64: return static_cast<int>(gxos::CpuArchitecture::AMD64);
-    case kernel::CpuArchitecture::Arm: return static_cast<int>(gxos::CpuArchitecture::ARM);
-    case kernel::CpuArchitecture::Arm64: return static_cast<int>(gxos::CpuArchitecture::ARM64);
-    case kernel::CpuArchitecture::Ia64: return static_cast<int>(gxos::CpuArchitecture::IA64);
-    case kernel::CpuArchitecture::LoongArch64: return static_cast<int>(gxos::CpuArchitecture::LoongArch64);
-    case kernel::CpuArchitecture::Mips64: return static_cast<int>(gxos::CpuArchitecture::MIPS64);
-    case kernel::CpuArchitecture::Ppc64: return static_cast<int>(gxos::CpuArchitecture::PPC64);
-    case kernel::CpuArchitecture::Sparc: return static_cast<int>(gxos::CpuArchitecture::SPARC);
-    case kernel::CpuArchitecture::Sparc64: return static_cast<int>(gxos::CpuArchitecture::SPARC64);
-    case kernel::CpuArchitecture::Unknown:
-    default: return static_cast<int>(gxos::CpuArchitecture::Unknown);
-    }
+    return static_cast<int>(kernel::ArchitectureDetector::GetArchitecture());
 }
 
 bool GXAppLoader::LoadBinary(const std::string& packagePath, std::vector<uint8_t>& binary, std::string& entryPoint, std::string& error){

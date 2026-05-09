@@ -5,15 +5,15 @@
 #include "fs.h"
 #include "logger.h"
 #include "universal_app_loader.h"
-#include "universal_app_loader.h"
 
 #include <algorithm>
-#include <cstdlib>
+#include <ctime>
 
 namespace gxos {
 namespace {
 
-const char* const kApplicationDirectory = "apps";
+const char* const kApplicationDirectory = "/system/apps";
+const char* const kStagingDirectory = "/system/apps/.staging";
 const char* const kUnsupportedArchitectureWarning = "This application does not support your CPU architecture.";
 
 static bool hasGxappExtension(const std::string& path){
@@ -42,28 +42,19 @@ static std::string sanitizeApplicationName(const std::string& name){
 }
 
 static CpuArchitecture currentGXAppArchitecture(){
-    switch (kernel::ArchitectureDetector::GetArchitecture()) {
-    case kernel::CpuArchitecture::X86: return CpuArchitecture::X86;
-    case kernel::CpuArchitecture::Amd64: return CpuArchitecture::AMD64;
-    case kernel::CpuArchitecture::Arm: return CpuArchitecture::ARM;
-    case kernel::CpuArchitecture::Arm64: return CpuArchitecture::ARM64;
-    case kernel::CpuArchitecture::Ia64: return CpuArchitecture::IA64;
-    case kernel::CpuArchitecture::LoongArch64: return CpuArchitecture::LoongArch64;
-    case kernel::CpuArchitecture::Mips64: return CpuArchitecture::MIPS64;
-    case kernel::CpuArchitecture::Ppc64: return CpuArchitecture::PPC64;
-    case kernel::CpuArchitecture::Sparc: return CpuArchitecture::SPARC;
-    case kernel::CpuArchitecture::Sparc64: return CpuArchitecture::SPARC64;
-    case kernel::CpuArchitecture::Unknown:
-    default: return CpuArchitecture::Unknown;
-    }
+    return kernel::ArchitectureDetector::GetArchitecture();
 }
 
 static bool ensureApplicationDirectory(){
-#if defined(_WIN32)
-    return system("if not exist apps mkdir apps") == 0;
-#else
-    return system("mkdir -p apps") == 0;
-#endif
+    return FS::createDirectories(kApplicationDirectory) && FS::createDirectories(kStagingDirectory);
+}
+
+static std::string stagingPackagePath(const std::string& applicationName){
+    return std::string(kStagingDirectory) + "/" + sanitizeApplicationName(applicationName) + "." + std::to_string(static_cast<long long>(std::time(nullptr))) + ".gxapp.tmp";
+}
+
+static std::string replacementPackagePath(const std::string& applicationName){
+    return std::string(kApplicationDirectory) + "/" + sanitizeApplicationName(applicationName) + ".replacing." + std::to_string(static_cast<long long>(std::time(nullptr))) + ".gxapp";
 }
 
 } // namespace
@@ -135,17 +126,46 @@ PackageInstallResult PackageManager::InstallGXApp(const std::string& packagePath
     }
 
     std::vector<uint8_t> packageBytes;
-    if (!FS::readAll(packagePath, packageBytes)) {
-        result.message = "Failed to read gxapp package bytes.";
+    FSResult readResult = FS::readAll(packagePath, packageBytes, 128ULL * 1024ULL * 1024ULL);
+    if (!readResult.success) {
+        result.message = std::string("Failed to read gxapp package bytes: ") + readResult.message;
         Logger::write(LogLevel::Error, std::string("PackageManager: ") + result.message);
         return result;
     }
 
     result.installedPath = installedPackagePath(result.applicationName);
-    if (!FS::writeAll(result.installedPath, packageBytes)) {
-        result.message = "Failed to store gxapp package in application directory.";
+    std::string stagedPath = stagingPackagePath(result.applicationName);
+    if (!FS::writeAll(stagedPath, packageBytes)) {
+        result.message = "Failed to write staged gxapp package.";
         Logger::write(LogLevel::Error, std::string("PackageManager: ") + result.message);
         return result;
+    }
+
+    GXApp stagedApp = GXAppContainer::Open(stagedPath);
+    if (!stagedApp.IsValid()) {
+        result.message = std::string("Staged gxapp validation failed: ") + stagedApp.GetLastError();
+        FS::removeFile(stagedPath);
+        Logger::write(LogLevel::Error, std::string("PackageManager: ") + result.message);
+        return result;
+    }
+
+    if (!FS::exists(result.installedPath)) {
+        if (!FS::renameFile(stagedPath, result.installedPath, false)) {
+            result.message = "Failed to atomically install staged gxapp package.";
+            FS::removeFile(stagedPath);
+            Logger::write(LogLevel::Error, std::string("PackageManager: ") + result.message);
+            return result;
+        }
+    } else {
+        std::string replacementPath = replacementPackagePath(result.applicationName);
+        Logger::write(LogLevel::Warn, std::string("PackageManager: existing package found at ") + result.installedPath + "; installing replacement to " + replacementPath);
+        if (!FS::renameFile(stagedPath, replacementPath, false)) {
+            result.message = "Existing gxapp package was not overwritten; failed to store safe replacement package.";
+            FS::removeFile(stagedPath);
+            Logger::write(LogLevel::Error, std::string("PackageManager: ") + result.message);
+            return result;
+        }
+        result.installedPath = replacementPath;
     }
 
     result.success = true;

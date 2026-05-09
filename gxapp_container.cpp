@@ -4,6 +4,7 @@
 #include <cstring>
 #include <limits>
 #include <sstream>
+#include <set>
 
 namespace gxos {
 namespace {
@@ -11,8 +12,11 @@ namespace {
 const uint8_t GXAPP_MAGIC[8] = { 'G', 'X', 'A', 'P', 'P', '\r', '\n', 0x1A };
 const uint32_t GXAPP_FORMAT_VERSION = 1;
 const uint32_t GXAPP_FLAG_REQUIRED = 1U;
+const uint64_t GXAPP_MAX_PACKAGE_SIZE = 128ULL * 1024ULL * 1024ULL;
+const uint64_t GXAPP_MAX_BINARY_SIZE = 64ULL * 1024ULL * 1024ULL;
 const uint64_t GXAPP_MAX_METADATA_SIZE = 1024ULL * 1024ULL;
 const uint64_t GXAPP_MAX_ENTRY_SIZE = 4096ULL;
+const uint32_t GXAPP_MAX_ENTRY_COUNT = 64U;
 
 enum class EntryKind : uint32_t { Metadata = 1, Binary = 2 };
 
@@ -95,11 +99,25 @@ static bool parseJsonStringField(const std::string& json, const std::string& nam
     return false;
 }
 
+static bool looksLikeJsonObject(const std::string& json){
+    size_t first = json.find_first_not_of(" \t\r\n");
+    size_t last = json.find_last_not_of(" \t\r\n");
+    return first != std::string::npos && json[first] == '{' && json[last] == '}';
+}
+
+static bool parseMetadataJson(const std::string& json, GXAppMetadata& metadata){
+    if (!looksLikeJsonObject(json)) return false;
+    std::string format;
+    if (!parseJsonStringField(json, "format", format) || format != "gxapp") return false;
+    if (!parseJsonStringField(json, "applicationName", metadata.applicationName)) return false;
+    if (!parseJsonStringField(json, "version", metadata.version)) return false;
+    if (!parseJsonStringField(json, "requiredGuideXOSVersion", metadata.requiredGuideXOSVersion)) return false;
+    return !metadata.applicationName.empty() && !metadata.version.empty() && !metadata.requiredGuideXOSVersion.empty();
+}
+
 static GXAppMetadata parseMetadataJson(const std::string& json){
     GXAppMetadata metadata;
-    parseJsonStringField(json, "applicationName", metadata.applicationName);
-    parseJsonStringField(json, "version", metadata.version);
-    parseJsonStringField(json, "requiredGuideXOSVersion", metadata.requiredGuideXOSVersion);
+    parseMetadataJson(json, metadata);
     return metadata;
 }
 
@@ -125,7 +143,7 @@ static std::string parseEntryPointForArchitecture(const std::string& json, CpuAr
 }
 
 static std::string binaryPath(CpuArchitecture architecture){ return std::string("bin/") + GXAppContainer::ArchitectureToString(architecture) + "/app.bin"; }
-static bool isSupportedArchitecture(CpuArchitecture architecture){ return architecture != CpuArchitecture::Unknown; }
+static bool isSupportedArchitecture(CpuArchitecture architecture){ return architecture != CpuArchitecture::Unknown && GXAppContainer::ArchitectureToString(architecture) != std::string("unknown"); }
 
 } // namespace
 
@@ -172,7 +190,7 @@ const GXAppMetadata& GXApp::GetMetadata() const{ return metadata_; }
 void GXApp::SetMetadata(const GXAppMetadata& metadata){ metadata_ = metadata; }
 
 bool GXApp::AddBinary(CpuArchitecture architecture, const std::string& entryPoint, const std::vector<uint8_t>& binary){
-    if (!isSupportedArchitecture(architecture) || binary.empty() || entryPoint.size() > GXAPP_MAX_ENTRY_SIZE) return false;
+    if (!isSupportedArchitecture(architecture) || binary.empty() || binary.size() > GXAPP_MAX_BINARY_SIZE || entryPoint.size() > GXAPP_MAX_ENTRY_SIZE) return false;
     for (GXAppBinary& existing : binaries_) {
         if (existing.architecture == architecture) { existing.entryPoint = entryPoint; existing.data = binary; return true; }
     }
@@ -223,7 +241,9 @@ GXApp GXAppContainer::Create(const GXAppMetadata& metadata){
 GXApp GXAppContainer::Open(const std::string& path){
     GXApp app;
     std::vector<uint8_t> data;
-    if (!FS::readAll(path, data)) { app.setError("failed to read gxapp package"); return app; }
+    FSResult readResult = FS::readAll(path, data, GXAPP_MAX_PACKAGE_SIZE);
+    if (!readResult.success) { app.setError(std::string("failed to read gxapp package: ") + readResult.message); return app; }
+    if (data.size() > GXAPP_MAX_PACKAGE_SIZE) { app.setError("gxapp package exceeds maximum size"); return app; }
     size_t offset = 0;
     if (data.size() < sizeof(GXAPP_MAGIC) + 12 || std::memcmp(data.data(), GXAPP_MAGIC, sizeof(GXAPP_MAGIC)) != 0) { app.setError("invalid gxapp header"); return app; }
     offset += sizeof(GXAPP_MAGIC);
@@ -231,9 +251,11 @@ GXApp GXAppContainer::Open(const std::string& path){
     if (!readU32(data, offset, formatVersion) || !readU32(data, offset, flags) || !readU32(data, offset, entryCount)) { app.setError("truncated gxapp header"); return app; }
     if (formatVersion != GXAPP_FORMAT_VERSION) { app.setError("unsupported gxapp format version"); return app; }
     if ((flags & GXAPP_FLAG_REQUIRED) != GXAPP_FLAG_REQUIRED) { app.setError("invalid gxapp flags"); return app; }
+    if (entryCount == 0 || entryCount > GXAPP_MAX_ENTRY_COUNT) { app.setError("invalid gxapp entry count"); return app; }
     bool foundMetadata = false;
     std::string metadataJson;
     std::vector<EntryRecord> binaryEntries;
+    std::set<CpuArchitecture> seenArchitectures;
     for (uint32_t i = 0; i < entryCount; ++i) {
         uint32_t kindValue; uint32_t archValue; uint16_t pathSize; uint64_t dataSize;
         if (!readU32(data, offset, kindValue) || !readU32(data, offset, archValue) || !readU16(data, offset, pathSize) || !readU64(data, offset, dataSize)) { app.setError("truncated gxapp entry header"); return app; }
@@ -248,10 +270,11 @@ GXApp GXAppContainer::Open(const std::string& path){
         if (kind == EntryKind::Metadata) {
             if (foundMetadata || entryPath != "metadata.json" || dataSize > GXAPP_MAX_METADATA_SIZE) { app.setError("invalid gxapp metadata entry"); return app; }
             metadataJson.assign(reinterpret_cast<const char*>(&data[offset]), static_cast<size_t>(dataSize));
-            app.metadata_ = parseMetadataJson(metadataJson);
+            if (!parseMetadataJson(metadataJson, app.metadata_)) { app.setError("malformed gxapp metadata"); return app; }
             foundMetadata = true;
         } else if (kind == EntryKind::Binary) {
-            if (!isSupportedArchitecture(architecture) || entryPath != binaryPath(architecture)) { app.setError("invalid gxapp binary entry"); return app; }
+            if (!isSupportedArchitecture(architecture) || entryPath != binaryPath(architecture) || dataSize == 0 || dataSize > GXAPP_MAX_BINARY_SIZE) { app.setError("invalid gxapp binary entry"); return app; }
+            if (!seenArchitectures.insert(architecture).second) { app.setError("duplicate gxapp architecture entry"); return app; }
             EntryRecord record;
             record.kind = kind;
             record.architecture = architecture;
@@ -264,6 +287,7 @@ GXApp GXAppContainer::Open(const std::string& path){
         }
         offset = dataEnd;
     }
+    if (offset != data.size()) { app.setError("trailing bytes after gxapp entries"); return app; }
     if (!foundMetadata) { app.setError("missing gxapp metadata"); return app; }
     if (app.metadata_.applicationName.empty() || app.metadata_.version.empty() || app.metadata_.requiredGuideXOSVersion.empty()) { app.setError("incomplete gxapp metadata"); return app; }
     if (binaryEntries.empty()) { app.setError("gxapp package has no architecture binaries"); return app; }
@@ -291,34 +315,11 @@ bool GXAppContainer::ExtractBinary(const std::string& packagePath, CpuArchitectu
 }
 
 const char* GXAppContainer::ArchitectureToString(CpuArchitecture architecture){
-    switch (architecture) {
-    case CpuArchitecture::X86: return "x86";
-    case CpuArchitecture::AMD64: return "amd64";
-    case CpuArchitecture::ARM: return "arm";
-    case CpuArchitecture::ARM64: return "arm64";
-    case CpuArchitecture::IA64: return "ia64";
-    case CpuArchitecture::LoongArch64: return "loongarch64";
-    case CpuArchitecture::MIPS64: return "mips64";
-    case CpuArchitecture::PPC64: return "ppc64";
-    case CpuArchitecture::SPARC: return "sparc";
-    case CpuArchitecture::SPARC64: return "sparc64";
-    case CpuArchitecture::Unknown:
-    default: return "unknown";
-    }
+    return CpuArchitectureToString(architecture);
 }
 
 CpuArchitecture GXAppContainer::ArchitectureFromString(const std::string& architecture){
-    if (architecture == "x86") return CpuArchitecture::X86;
-    if (architecture == "amd64") return CpuArchitecture::AMD64;
-    if (architecture == "arm") return CpuArchitecture::ARM;
-    if (architecture == "arm64") return CpuArchitecture::ARM64;
-    if (architecture == "ia64") return CpuArchitecture::IA64;
-    if (architecture == "loongarch64") return CpuArchitecture::LoongArch64;
-    if (architecture == "mips64") return CpuArchitecture::MIPS64;
-    if (architecture == "ppc64") return CpuArchitecture::PPC64;
-    if (architecture == "sparc") return CpuArchitecture::SPARC;
-    if (architecture == "sparc64") return CpuArchitecture::SPARC64;
-    return CpuArchitecture::Unknown;
+    return CpuArchitectureFromString(architecture);
 }
 
 } // namespace gxos

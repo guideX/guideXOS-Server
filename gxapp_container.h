@@ -1,24 +1,12 @@
 #pragma once
 
+#include "cpu_architecture.h"
+
 #include <cstdint>
 #include <string>
 #include <vector>
 
 namespace gxos {
-
-    enum class CpuArchitecture {
-        Unknown = 0,
-        X86,
-        AMD64,
-        ARM,
-        ARM64,
-        IA64,
-        LoongArch64,
-        MIPS64,
-        PPC64,
-        SPARC,
-        SPARC64
-    };
 
     struct GXAppBinary {
         CpuArchitecture architecture = CpuArchitecture::Unknown;

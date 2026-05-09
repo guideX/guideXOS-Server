@@ -135,6 +135,7 @@
     <ClInclude Include="compositor.h" />
     <ClInclude Include="console_service.h" />
     <ClInclude Include="console_window.h" />
+    <ClInclude Include="cpu_architecture.h" />
     <ClInclude Include="desktop_config.h" />
     <ClInclude Include="desktop_service.h" />
     <ClInclude Include="desktop_state.h" />
@@ -300,12 +301,14 @@
     <ClInclude Include="notification_manager.h" />
     <ClInclude Include="onscreen_keyboard.h" />
     <ClInclude Include="open_dialog.h" />
+    <ClInclude Include="package_manager.h" />
     <ClInclude Include="paint.h" />
     <ClInclude Include="platform.h" />
     <ClInclude Include="process.h" />
     <ClInclude Include="right_click_menu.h" />
     <ClInclude Include="special_effects.h" />
     <ClInclude Include="ui_settings.h" />
+    <ClInclude Include="universal_app_loader.h" />
     <ClInclude Include="video_backend.h" />
     <ClInclude Include="welcome.h" />
     <ClInclude Include="save_changes_dialog.h" />
@@ -499,12 +502,14 @@
     <ClCompile Include="notification_manager.cpp" />
     <ClCompile Include="onscreen_keyboard.cpp" />
     <ClCompile Include="open_dialog.cpp" />
+    <ClCompile Include="package_manager.cpp" />
     <ClCompile Include="paint.cpp" />
     <ClCompile Include="process.cpp">
       <ObjectFileName>$(IntDir)process_gxos.obj</ObjectFileName>
     </ClCompile>
     <ClCompile Include="right_click_menu.cpp" />
     <ClCompile Include="special_effects.cpp" />
+    <ClCompile Include="universal_app_loader.cpp" />
     <ClCompile Include="video_backend.cpp" />
     <ClCompile Include="welcome.cpp" />
     <ClCompile Include="save_changes_dialog.cpp" />
@@ -534,11 +539,13 @@
     <None Include="disks\test-fat32.img" />
     <None Include="docs\BUILD_GUIDE.md" />
     <None Include="docs\GXAPP_FORMAT_SPEC.md" />
+    <None Include="docs\GXBUILD.md" />
     <None Include="docs\NETWORK_SETUP.md" />
     <None Include="docs\PHASE7.5_FILESYSTEM_SHAKEDOWN.md" />
     <None Include="docs\PHASE8_UNIVERSAL_BINARY_SYSTEM.md" />
     <None Include="docs\SDK_ARCHITECTURE.md" />
     <None Include="docs\TROUBLESHOOTING_PING.md" />
+    <None Include="docs\universal-app-audit.md" />
     <None Include="ESP\startup.nsh" />
     <None Include="fix-bootloader-project.ps1" />
     <None Include="fix-trampoline.ps1" />
@@ -639,6 +646,9 @@
     <None Include="SERVER.md" />
     <None Include="setup-toolchain.bat" />
     <None Include="START_HERE.md" />
+    <None Include="tools\gxbuild" />
+    <None Include="tools\gxbuild.cmd" />
+    <None Include="tools\gxbuild.py" />
     <None Include="_fix_filters_audio.py" />
   </ItemGroup>
   <ItemGroup>

@@ -6,21 +6,11 @@
 
 #pragma once
 
+#include "../../../../cpu_architecture.h"
+
 namespace kernel {
 
-enum class CpuArchitecture {
-    Unknown = 0,
-    X86,
-    Amd64,
-    Arm,
-    Arm64,
-    Ia64,
-    LoongArch64,
-    Mips64,
-    Ppc64,
-    Sparc,
-    Sparc64
-};
+using CpuArchitecture = gxos::CpuArchitecture;
 
 class ArchitectureDetector {
 public:

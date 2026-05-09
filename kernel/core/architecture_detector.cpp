@@ -89,29 +89,33 @@ static bool x86_cpu_supports_long_mode()
 CpuArchitecture ArchitectureDetector::GetArchitecture()
 {
 #if defined(__x86_64__) || defined(__amd64__) || defined(_M_X64) || defined(_M_AMD64)
-    return CpuArchitecture::Amd64;
+    return CpuArchitecture::AMD64;
 #elif defined(__i386__) || defined(__i486__) || defined(__i586__) || defined(__i686__) || defined(_M_IX86) || defined(__X86__)
     if (x86_cpu_supports_long_mode()) {
-        return CpuArchitecture::Amd64;
+        return CpuArchitecture::AMD64;
     }
 
     return CpuArchitecture::X86;
 #elif defined(__aarch64__) || defined(_M_ARM64) || defined(__arm64__) || defined(__ARM64_ARCH_8__) || defined(__ARM_ARCH_ISA_A64)
-    return CpuArchitecture::Arm64;
+    return CpuArchitecture::ARM64;
 #elif defined(__arm__) || defined(__aarch32__) || defined(_M_ARM) || defined(_M_ARMT) || defined(__thumb__) || defined(__ARM_ARCH)
-    return CpuArchitecture::Arm;
+    return CpuArchitecture::ARM;
 #elif defined(__ia64__) || defined(_M_IA64)
-    return CpuArchitecture::Ia64;
+    return CpuArchitecture::IA64;
 #elif defined(__loongarch64) || (defined(__loongarch__) && defined(__loongarch_grlen) && (__loongarch_grlen == 64))
-    return CpuArchitecture::LoongArch64;
+    return CpuArchitecture::LOONGARCH64;
 #elif defined(__mips64) || defined(__mips64__) || (defined(__mips) && defined(_MIPS_SZLONG) && (_MIPS_SZLONG == 64)) || defined(_M_MRX000)
-    return CpuArchitecture::Mips64;
+    return CpuArchitecture::MIPS64;
 #elif defined(__powerpc64__) || defined(__ppc64__) || defined(_ARCH_PPC64) || defined(__PPC64__)
-    return CpuArchitecture::Ppc64;
+    return CpuArchitecture::PPC64;
 #elif defined(__sparc__) && (defined(__arch64__) || defined(__sparcv9) || defined(__sparc_v9__) || defined(__sparc64__))
-    return CpuArchitecture::Sparc64;
+    return CpuArchitecture::SPARC64;
 #elif defined(__sparc__) || defined(__sparc)
-    return CpuArchitecture::Sparc;
+    return CpuArchitecture::SPARC;
+#elif defined(__riscv) && defined(__riscv_xlen) && (__riscv_xlen == 64)
+    return CpuArchitecture::RISCV64;
+#elif defined(__s390x__)
+    return CpuArchitecture::S390X;
 #else
     return CpuArchitecture::Unknown;
 #endif
@@ -119,31 +123,7 @@ CpuArchitecture ArchitectureDetector::GetArchitecture()
 
 const char* ArchitectureDetector::ToString(CpuArchitecture architecture)
 {
-    switch (architecture) {
-    case CpuArchitecture::X86:
-        return "x86";
-    case CpuArchitecture::Amd64:
-        return "amd64";
-    case CpuArchitecture::Arm:
-        return "arm";
-    case CpuArchitecture::Arm64:
-        return "arm64";
-    case CpuArchitecture::Ia64:
-        return "ia64";
-    case CpuArchitecture::LoongArch64:
-        return "loongarch64";
-    case CpuArchitecture::Mips64:
-        return "mips64";
-    case CpuArchitecture::Ppc64:
-        return "ppc64";
-    case CpuArchitecture::Sparc:
-        return "sparc";
-    case CpuArchitecture::Sparc64:
-        return "sparc64";
-    case CpuArchitecture::Unknown:
-    default:
-        return "unknown";
-    }
+    return gxos::CpuArchitectureToString(architecture);
 }
 
 } // namespace kernel
