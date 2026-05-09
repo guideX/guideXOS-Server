@@ -209,6 +209,38 @@ static bool str_starts_with(const char* str, const char* prefix) {
     return true;
 }
 
+static void append_char(char* dst, uint32_t maxLen, uint32_t* pos, char c) {
+    if (!dst || !pos || *pos >= maxLen - 1) return;
+    dst[(*pos)++] = c;
+    dst[*pos] = '\0';
+}
+
+static void append_str(char* dst, uint32_t maxLen, uint32_t* pos, const char* src) {
+    if (!dst || !pos || !src) return;
+    while (*src && *pos < maxLen - 1) {
+        dst[(*pos)++] = *src++;
+    }
+    dst[*pos] = '\0';
+}
+
+static void append_uint(char* dst, uint32_t maxLen, uint32_t* pos, uint32_t n) {
+    char tmp[12];
+    uint32_t ti = 0;
+
+    if (n == 0) {
+        append_char(dst, maxLen, pos, '0');
+        return;
+    }
+
+    while (n > 0 && ti < sizeof(tmp)) {
+        tmp[ti++] = '0' + (n % 10);
+        n /= 10;
+    }
+    while (ti > 0) {
+        append_char(dst, maxLen, pos, tmp[--ti]);
+    }
+}
+
 // ============================================================
 // Output Functions
 // ============================================================
@@ -1538,23 +1570,9 @@ static void cmd_ping(const char* target) {
         return;
     }
     
-    // Show current IP for debugging
-    const ipv4::NetworkConfig* cfg = ipv4::get_config();
-    if (cfg && cfg->configured) {
-        output_string("Source IP: ");
-        char ipStr[16];
-        ipv4::ip_to_string(cfg->ipAddr, ipStr);
-        output_string(ipStr);
-        output_string("\n");
-
-        output_string("DNS Server: ");
-        ipv4::ip_to_string(dns::get_server(), ipStr);
-        output_string(ipStr);
-        output_string("\n");
-    }
-    
     // Parse IP address or resolve hostname
     uint32_t targetIP;
+    bool resolvedHostname = false;
     if (!ipv4::ip_from_string(target, &targetIP)) {
         output_string("Resolving ");
         output_string(target);
@@ -1581,18 +1599,22 @@ static void cmd_ping(const char* target) {
         ipv4::ip_to_string(targetIP, resolvedStr);
         output_string(resolvedStr);
         output_string("\n");
+        resolvedHostname = true;
     }
     
-    output_string("PING ");
-    output_string(target);
-    if (!ipv4::ip_from_string(target, &targetIP)) {
-        output_string(" (");
+    char pingLine[96];
+    uint32_t linePos = 0;
+    append_str(pingLine, sizeof(pingLine), &linePos, "PING ");
+    append_str(pingLine, sizeof(pingLine), &linePos, target);
+    if (resolvedHostname) {
         char ipStr[16];
         ipv4::ip_to_string(targetIP, ipStr);
-        output_string(ipStr);
-        output_string(")");
+        append_str(pingLine, sizeof(pingLine), &linePos, " (");
+        append_str(pingLine, sizeof(pingLine), &linePos, ipStr);
+        append_char(pingLine, sizeof(pingLine), &linePos, ')');
     }
-    output_string(" 56 data bytes\n");
+    append_str(pingLine, sizeof(pingLine), &linePos, ": 56 data bytes\n");
+    output_string(pingLine);
     
     // Send 4 pings
     uint16_t sent = 0;
@@ -1633,44 +1655,22 @@ static void cmd_ping(const char* target) {
                 gotReply = true;
                 received++;
                 
-                // Format output
-                output_string("64 bytes from ");
+                char replyLine[96];
+                uint32_t pos = 0;
                 char ipStr[16];
                 ipv4::ip_to_string(reply.srcIP, ipStr);
-                output_string(ipStr);
-                output_string(": icmp_seq=");
-                char seqStr[8];
-                seqStr[0] = '0' + ((reply.sequence / 10) % 10);
-                seqStr[1] = '0' + (reply.sequence % 10);
-                seqStr[2] = '\0';
-                output_string(seqStr);
-                output_string(" ttl=");
-                char ttlStr[8];
-                int ti = 0;
-                uint16_t t = reply.ttl;
-                if (t == 0) { ttlStr[ti++] = '0'; }
-                else {
-                    char tmp[8];
-                    int tj = 0;
-                    while (t > 0) { tmp[tj++] = '0' + (t % 10); t /= 10; }
-                    while (tj > 0) { ttlStr[ti++] = tmp[--tj]; }
-                }
-                ttlStr[ti] = '\0';
-                output_string(ttlStr);
-                output_string(" time=");
-                char rttStr[8];
-                int ri = 0;
-                uint16_t r = reply.rtt;
-                if (r == 0) { rttStr[ri++] = '0'; }
-                else {
-                    char tmp[8];
-                    int rj = 0;
-                    while (r > 0) { tmp[rj++] = '0' + (r % 10); r /= 10; }
-                    while (rj > 0) { rttStr[ri++] = tmp[--rj]; }
-                }
-                rttStr[ri] = '\0';
-                output_string(rttStr);
-                output_string(" ms\n");
+
+                append_uint(replyLine, sizeof(replyLine), &pos, 64);
+                append_str(replyLine, sizeof(replyLine), &pos, " bytes from ");
+                append_str(replyLine, sizeof(replyLine), &pos, ipStr);
+                append_str(replyLine, sizeof(replyLine), &pos, ": icmp_seq=");
+                append_uint(replyLine, sizeof(replyLine), &pos, reply.sequence);
+                append_str(replyLine, sizeof(replyLine), &pos, " ttl=");
+                append_uint(replyLine, sizeof(replyLine), &pos, reply.ttl);
+                append_str(replyLine, sizeof(replyLine), &pos, " time=");
+                append_uint(replyLine, sizeof(replyLine), &pos, reply.rtt);
+                append_str(replyLine, sizeof(replyLine), &pos, " ms\n");
+                output_string(replyLine);
                 break;
             }
             
@@ -1681,13 +1681,12 @@ static void cmd_ping(const char* target) {
         }
         
         if (!gotReply) {
-            output_string("Request timeout for icmp_seq ");
-            char seqStr[8];
-            seqStr[0] = '0' + (((i+1) / 10) % 10);
-            seqStr[1] = '0' + ((i+1) % 10);
-            seqStr[2] = '\0';
-            output_string(seqStr);
-            output_string("\n");
+            char timeoutLine[48];
+            uint32_t pos = 0;
+            append_str(timeoutLine, sizeof(timeoutLine), &pos, "Request timeout for icmp_seq ");
+            append_uint(timeoutLine, sizeof(timeoutLine), &pos, i + 1);
+            append_char(timeoutLine, sizeof(timeoutLine), &pos, '\n');
+            output_string(timeoutLine);
         }
         
         // Delay between pings (approximately 1 second)
@@ -1696,10 +1695,12 @@ static void cmd_ping(const char* target) {
     
     icmp::end_ping_session();
     
-    // Print statistics
-    output_string("\n--- ");
-    output_string(target);
-    output_string(" ping statistics ---\n");
+    char headerLine[96];
+    uint32_t headerPos = 0;
+    append_str(headerLine, sizeof(headerLine), &headerPos, "\n--- ");
+    append_str(headerLine, sizeof(headerLine), &headerPos, target);
+    append_str(headerLine, sizeof(headerLine), &headerPos, " ping statistics ---\n");
+    output_string(headerLine);
     
     char statStr[64];
     int si = 0;
