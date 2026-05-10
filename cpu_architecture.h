@@ -1,6 +1,8 @@
 #pragma once
 
+#if !defined(__STDC_HOSTED__) || __STDC_HOSTED__
 #include <string>
+#endif
 
 namespace gxos {
 
@@ -39,21 +41,39 @@ namespace gxos {
         }
     }
 
-    inline CpuArchitecture CpuArchitectureFromString(const std::string& architecture){
-        if (architecture == "x86") return CpuArchitecture::X86;
-        if (architecture == "amd64") return CpuArchitecture::AMD64;
-        if (architecture == "arm") return CpuArchitecture::ARM;
-        if (architecture == "arm64") return CpuArchitecture::ARM64;
-        if (architecture == "ia64") return CpuArchitecture::IA64;
-        if (architecture == "loongarch64") return CpuArchitecture::LOONGARCH64;
-        if (architecture == "mips64") return CpuArchitecture::MIPS64;
-        if (architecture == "ppc64") return CpuArchitecture::PPC64;
-        if (architecture == "sparc") return CpuArchitecture::SPARC;
-        if (architecture == "sparc64") return CpuArchitecture::SPARC64;
-        if (architecture == "riscv64") return CpuArchitecture::RISCV64;
-        if (architecture == "s390x") return CpuArchitecture::S390X;
+    inline bool CpuArchitectureStringEquals(const char* left, const char* right){
+        if (!left || !right) return false;
+
+        while (*left && *right) {
+            if (*left != *right) return false;
+            ++left;
+            ++right;
+        }
+
+        return *left == *right;
+    }
+
+    inline CpuArchitecture CpuArchitectureFromString(const char* architecture){
+        if (CpuArchitectureStringEquals(architecture, "x86")) return CpuArchitecture::X86;
+        if (CpuArchitectureStringEquals(architecture, "amd64")) return CpuArchitecture::AMD64;
+        if (CpuArchitectureStringEquals(architecture, "arm")) return CpuArchitecture::ARM;
+        if (CpuArchitectureStringEquals(architecture, "arm64")) return CpuArchitecture::ARM64;
+        if (CpuArchitectureStringEquals(architecture, "ia64")) return CpuArchitecture::IA64;
+        if (CpuArchitectureStringEquals(architecture, "loongarch64")) return CpuArchitecture::LOONGARCH64;
+        if (CpuArchitectureStringEquals(architecture, "mips64")) return CpuArchitecture::MIPS64;
+        if (CpuArchitectureStringEquals(architecture, "ppc64")) return CpuArchitecture::PPC64;
+        if (CpuArchitectureStringEquals(architecture, "sparc")) return CpuArchitecture::SPARC;
+        if (CpuArchitectureStringEquals(architecture, "sparc64")) return CpuArchitecture::SPARC64;
+        if (CpuArchitectureStringEquals(architecture, "riscv64")) return CpuArchitecture::RISCV64;
+        if (CpuArchitectureStringEquals(architecture, "s390x")) return CpuArchitecture::S390X;
         return CpuArchitecture::Unknown;
     }
+
+#if !defined(__STDC_HOSTED__) || __STDC_HOSTED__
+    inline CpuArchitecture CpuArchitectureFromString(const std::string& architecture){
+        return CpuArchitectureFromString(architecture.c_str());
+    }
+#endif
 
 } // namespace gxos
 
