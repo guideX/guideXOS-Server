@@ -21,17 +21,21 @@ desktop_service.cpp ^
 desktop_state.cpp ^
 file_explorer.cpp ^
 fs.cpp ^
+gxapp_container.cpp ^
+gxapp_loader.cpp ^
 gxm_loader.cpp ^
 icons.cpp ^
 ipc_bus.cpp ^
 logger.cpp ^
 notepad.cpp ^
+package_manager.cpp ^
 process.cpp ^
 save_changes_dialog.cpp ^
 save_dialog.cpp ^
 scheduler.cpp ^
 server.cpp ^
 task_manager.cpp ^
+universal_app_loader.cpp ^
 vfs.cpp ^
 vnc_server.cpp ^
 workspace_manager.cpp
