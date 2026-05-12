@@ -7,7 +7,7 @@ echo Building guideXOS Server...
 REM Compiler settings
 set CXX=g++
 set CXXFLAGS=-std=c++14 -Wall -O2 -I.
-set LDFLAGS=-lws2_32 -lgdi32 -luser32
+set LDFLAGS=-lws2_32 -lgdi32 -luser32 -lmsimg32
 
 REM Source files (exclude kernel)
 set SOURCES=^
@@ -24,12 +24,16 @@ fs.cpp ^
 gxapp_container.cpp ^
 gxapp_loader.cpp ^
 gxm_loader.cpp ^
+image.cpp ^
+image_renderer.cpp ^
+image_viewer.cpp ^
 icons.cpp ^
 ipc_bus.cpp ^
 logger.cpp ^
 notepad.cpp ^
 package_manager.cpp ^
 process.cpp ^
+png_loader.cpp ^
 save_changes_dialog.cpp ^
 save_dialog.cpp ^
 scheduler.cpp ^

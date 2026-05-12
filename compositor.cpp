@@ -14,6 +14,8 @@
 #include "special_effects.h"
 #include "window_animator.h"
 #include "focus_indicator.h"
+#include "png_loader.h"
+#include "image_renderer.h"
 #include <sstream>
 #include <algorithm>
 #include <chrono>
@@ -21,7 +23,7 @@
 #include <ctime>
 #include <iostream>
 #include <cstdlib>
-#ifdef _WIN32
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
 #define WIN32_LEAN_AND_MEAN
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -45,7 +47,7 @@ namespace gxos {
         bool Compositor::g_resizeActive = false; int Compositor::g_resizeStartW = 0; int Compositor::g_resizeStartH = 0; int Compositor::g_resizeStartMX = 0; int Compositor::g_resizeStartMY = 0; uint64_t Compositor::g_resizeWin = 0;
         bool Compositor::g_resizePreviewActive = false; int Compositor::g_resizePreviewW = 0; int Compositor::g_resizePreviewH = 0;
         bool Compositor::g_snapPreviewActive = false;
-#ifdef _WIN32
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
         RECT Compositor::g_snapPreviewRect{ 0,0,0,0 };
         HWND Compositor::g_hwnd = nullptr;
         HBITMAP Compositor::g_startBtnBmp = nullptr;
@@ -66,7 +68,7 @@ namespace gxos {
         DesktopConfigData Compositor::g_cfg{}; std::vector<DesktopItem> Compositor::g_items; uint64_t Compositor::g_lastItemClickTicks = 0; int Compositor::g_lastItemIndex = -1;
         std::set<int> Compositor::g_selectedDesktopIconIndices; int Compositor::g_lastSelectedDesktopIconIndex = -1;
         bool Compositor::g_iconDragActive = false; int Compositor::g_iconDragIndex = -1; int Compositor::g_iconDragOffX = 0; int Compositor::g_iconDragOffY = 0; int Compositor::g_iconDragStartX = 0; int Compositor::g_iconDragStartY = 0; bool Compositor::g_iconDragPending = false;
-#ifdef _WIN32
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
         bool Compositor::g_iconSelectionDragPending = false; bool Compositor::g_iconSelectionDragActive = false; int Compositor::g_iconSelectionStartX = 0; int Compositor::g_iconSelectionStartY = 0; int Compositor::g_iconSelectionCurrentX = 0; int Compositor::g_iconSelectionCurrentY = 0; bool Compositor::g_iconSelectionAdditive = false;
 #endif
 
@@ -75,7 +77,7 @@ namespace gxos {
         bool Compositor::g_startMenuAllProgs = false; // "All Programs" view toggle
         std::vector<std::string> Compositor::g_startMenuAllProgsSorted; // Alphabetically sorted app list
         bool Compositor::g_taskbarMenuVisible = false;
-#ifdef _WIN32
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
         RECT Compositor::g_taskbarMenuRect{ 0,0,0,0 };
 #else
         Compositor::SnapRect Compositor::g_taskbarMenuRect{ 0,0,0,0 };
@@ -86,7 +88,7 @@ namespace gxos {
         VideoBackend* Compositor::g_videoBackend = nullptr;
 
         void Compositor::initVideoBackend( ) {
-#ifdef _WIN32
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
             // On Windows host, use GDI backend (current rendering path).
             // The GDI backend is created but the compositor still paints
             // through GDI calls directly.  This is the first step towards
@@ -239,7 +241,7 @@ namespace gxos {
             return std::vector<int>(g_selectedDesktopIconIndices.begin( ), g_selectedDesktopIconIndices.end( ));
         }
 
-#ifdef _WIN32
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
         bool Compositor::IsCtrlDown( ) {
             // Hosted compositor receives Win32 mouse messages; GetKeyState is the local modifier source.
             return (GetKeyState(VK_CONTROL) & 0x8000) != 0;
@@ -298,7 +300,7 @@ namespace gxos {
         bool Compositor::isDialogTitle(const std::string& title) { return title == "Save As" || title == "Open" || title == "Unsaved Changes"; }
         bool Compositor::blockInputBehindModal(int mx, int my) { if (g_modalWindow == 0) return false; auto modalIt = g_windows.find(g_modalWindow); if (modalIt == g_windows.end( ) || modalIt->second.minimized || modalIt->second.tombstoned) { g_modalWindow = 0; return false; } WinInfo& modal = modalIt->second; bool inside = mx >= modal.x && mx < modal.x + modal.w && my >= modal.y && my < modal.y + modal.h; if (!inside) { for (auto it = g_z.begin( ); it != g_z.end( ); ++it) { if (*it == modal.id) { g_z.erase(it); break; } } g_z.push_back(modal.id); g_focus = modal.id; return true; } return false; }
         uint64_t Compositor::inputOwnerPid() { uint64_t ownerPid = 0; uint64_t focusId = g_modalWindow ? g_modalWindow : g_focus; auto it = g_windows.find(focusId); if (it != g_windows.end( ) && !it->second.minimized && !it->second.tombstoned) { ownerPid = it->second.ownerPid; } return ownerPid; }
-#ifdef _WIN32
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
         uint64_t Compositor::hitTestTaskbarButton(int mx, int my, RECT cr, int taskbarH) {
             int taskbarTop = cr.bottom - taskbarH; if (my < taskbarTop) return 0; int btnX = 216; // leave space for start button + search box
             for (uint64_t id : g_z) { auto it = g_windows.find(id); if (it == g_windows.end( )) continue; std::string label = it->second.title; SIZE sz; HDC dc = GetDC(g_hwnd); GetTextExtentPoint32A(dc, label.c_str( ), (int)label.size( ), &sz); ReleaseDC(g_hwnd, dc); int bw = sz.cx + 30; int btnTop = taskbarTop + 4; int btnBottom = cr.bottom - 4; if (mx >= btnX && mx <= btnX + bw && my >= btnTop && my <= btnBottom) return id; btnX += bw + 6; } return 0;
@@ -435,12 +437,15 @@ namespace gxos {
                         WindowRenderer::DrawResizeGrip(dc, winfo.x, winfo.y, winfo.w, winfo.h);
                     }
 
-                    // Draw window content (rects, widgets, text)
+                    // Draw window content (rects, images, widgets, text)
                     for (const auto& ri : winfo.rects) { 
                         RECT rr{ winfo.x + ri.x, winfo.y + titleBarH + ri.y, winfo.x + ri.x + ri.w, winfo.y + titleBarH + ri.h }; 
                         HBRUSH rb = CreateSolidBrush(RGB(ri.r, ri.g, ri.b)); 
                         FillRect(dc, &rr, rb); 
                         DeleteObject(rb); 
+                    }
+                    for (const auto& img : winfo.images) {
+                        ImageRenderer::DrawImage(dc, img.image, winfo.x + img.x, winfo.y + titleBarH + img.y);
                     }
                     for (const auto& wd : winfo.widgets) { 
                         RECT wr{ winfo.x + wd.x, winfo.y + titleBarH + wd.y, winfo.x + wd.x + wd.w, winfo.y + titleBarH + wd.y + wd.h }; 
@@ -488,7 +493,7 @@ namespace gxos {
                 {
                     std::time_t now = std::time(nullptr);
                     std::tm ltBuf{};
-#ifdef _WIN32
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
                     localtime_s(&ltBuf, &now);
 #else
                     std::tm* tmp = std::localtime(&now);
@@ -1100,7 +1105,7 @@ namespace gxos {
 
         void Compositor::sendFocus(uint64_t winId) { uint64_t ownerPid = 0; { std::lock_guard<std::mutex> lk(g_lock); auto it = g_windows.find(winId); if (it != g_windows.end( )) ownerPid = it->second.ownerPid; } publishOut(MsgType::MT_SetFocus, std::to_string(winId), ownerPid); }
         void Compositor::invalidate(uint64_t winId) {
-#ifdef _WIN32
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
             requestRepaint( );
 #else
             g_needsRedraw = true;
@@ -1111,7 +1116,7 @@ namespace gxos {
 
         void Compositor::handleMouse(int mx, int my, bool down, bool up) {
             std::lock_guard<std::mutex> lk(g_lock); const int titleBarH = 24; const int gripSize = 12; const int taskbarH = 40;
-#ifdef _WIN32
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
             RECT cr{ 0,0,1024,768 };
             if (g_hwnd) GetClientRect(g_hwnd, &cr);
 #else
@@ -1191,7 +1196,7 @@ namespace gxos {
                         // toggle maximize state
                         if (!topW->maximized) { // maximize
                             topW->prevX = topW->x; topW->prevY = topW->y; topW->prevW = topW->w; topW->prevH = topW->h;
-#ifdef _WIN32
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
                             RECT crL{ 0,0,1024,768 }; if (g_hwnd) GetClientRect(g_hwnd, &crL);
 #else
                             RECT crL{ 0,0,1024,768 };
@@ -1239,7 +1244,7 @@ namespace gxos {
                     wi.visible = true;
                     wi.modal = isDialogTitle(title);
                     wi.ownerPid = m.srcPid;
-#ifdef _WIN32
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
                     wi.taskbarIcon = Icons::TaskbarIcon(16);
 #endif
                     // Initialize animation state - store normal bounds
@@ -1256,9 +1261,10 @@ namespace gxos {
                 } 
                 Logger::write(LogLevel::Info, std::string("Compositor created window id=") + std::to_string(id) + " sending ack to pid=" + std::to_string(m.srcPid));
                 publishOut(MsgType::MT_Create, std::to_string(id) + "|" + title, m.srcPid); sendFocus(id); invalidate(id); } break;
-            case MsgType::MT_DrawText: { std::istringstream iss(s); std::string idS; std::getline(iss, idS, '|'); std::string text; std::getline(iss, text); uint64_t id = 0; uint64_t ownerPid = 0; try { id = std::stoull(idS); } catch (...) {} { std::lock_guard<std::mutex> lk(g_lock); auto it = g_windows.find(id); if (it != g_windows.end( )) { if (text == "\f") { it->second.texts.clear(); it->second.rects.clear(); } else { it->second.texts.push_back(text); } it->second.dirty = true; ownerPid = it->second.ownerPid; } } publishOut(MsgType::MT_DrawText, std::to_string(id) + "|" + text, ownerPid); invalidate(id); } break;
+            case MsgType::MT_DrawText: { std::istringstream iss(s); std::string idS; std::getline(iss, idS, '|'); std::string text; std::getline(iss, text); uint64_t id = 0; uint64_t ownerPid = 0; try { id = std::stoull(idS); } catch (...) {} { std::lock_guard<std::mutex> lk(g_lock); auto it = g_windows.find(id); if (it != g_windows.end( )) { if (text == "\f") { it->second.texts.clear(); it->second.rects.clear(); it->second.images.clear(); } else { it->second.texts.push_back(text); } it->second.dirty = true; ownerPid = it->second.ownerPid; } } publishOut(MsgType::MT_DrawText, std::to_string(id) + "|" + text, ownerPid); invalidate(id); } break;
             case MsgType::MT_Close: { uint64_t id = 0; uint64_t ownerPid = 0; try { id = std::stoull(s); } catch (...) {} { std::lock_guard<std::mutex> lk(g_lock); auto wit = g_windows.find(id); if (wit != g_windows.end( )) ownerPid = wit->second.ownerPid; g_windows.erase(id); auto it = std::find(g_z.begin( ), g_z.end( ), id); if (it != g_z.end( )) g_z.erase(it); if (g_modalWindow == id) g_modalWindow = 0; if (g_focus == id) g_focus = 0; } publishOut(MsgType::MT_Close, std::to_string(id), ownerPid ? ownerPid : m.srcPid); invalidate(0); } break;
             case MsgType::MT_DrawRect: { std::istringstream iss(s); std::string idS; std::getline(iss, idS, '|'); std::string xs, ys, ws, hs, rs, gs, bs; std::getline(iss, xs, '|'); std::getline(iss, ys, '|'); std::getline(iss, ws, '|'); std::getline(iss, hs, '|'); std::getline(iss, rs, '|'); std::getline(iss, gs, '|'); std::getline(iss, bs, '|'); uint64_t id = 0; uint64_t ownerPid = 0; try { id = std::stoull(idS); } catch (...) {} DrawRectItem item{ std::stoi(xs), std::stoi(ys), std::stoi(ws), std::stoi(hs), (uint8_t)std::stoi(rs),(uint8_t)std::stoi(gs),(uint8_t)std::stoi(bs) }; { std::lock_guard<std::mutex> lk(g_lock); auto it = g_windows.find(id); if (it != g_windows.end( )) { it->second.rects.push_back(item); it->second.dirty = true; ownerPid = it->second.ownerPid; } } publishOut(MsgType::MT_DrawRect, std::to_string(id), ownerPid); invalidate(id); } break;
+            case MsgType::MT_DrawImage: { std::istringstream iss(s); std::string idS, xs, ys; std::getline(iss, idS, '|'); std::getline(iss, xs, '|'); std::getline(iss, ys, '|'); std::string path; std::getline(iss, path); uint64_t id = 0; uint64_t ownerPid = 0; try { id = std::stoull(idS); } catch (...) {} ImagePtr image = PngLoader::LoadFromFile(path); if (!image) { Logger::write(LogLevel::Warn, std::string("Compositor: DrawImage skipped, PNG load failed: ") + path); break; } DrawImageItem item{ std::stoi(xs), std::stoi(ys), path, image }; { std::lock_guard<std::mutex> lk(g_lock); auto it = g_windows.find(id); if (it != g_windows.end( )) { it->second.images.push_back(item); it->second.dirty = true; ownerPid = it->second.ownerPid; } } publishOut(MsgType::MT_DrawImage, std::to_string(id), ownerPid); invalidate(id); } break;
             case MsgType::MT_SetTitle: { std::istringstream iss(s); std::string idS; std::getline(iss, idS, '|'); std::string title; std::getline(iss, title); uint64_t id = 0; uint64_t ownerPid = 0; try { id = std::stoull(idS); } catch (...) {} { std::lock_guard<std::mutex> lk(g_lock); auto it = g_windows.find(id); if (it != g_windows.end( )) { it->second.title = title; it->second.dirty = true; ownerPid = it->second.ownerPid; } } publishOut(MsgType::MT_SetTitle, std::to_string(id) + "|" + title, ownerPid); invalidate(id); } break;
             case MsgType::MT_Move: { std::istringstream iss(s); std::string idS, xs, ys; std::getline(iss, idS, '|'); std::getline(iss, xs, '|'); std::getline(iss, ys, '|'); uint64_t id = 0; uint64_t ownerPid = 0; try { id = std::stoull(idS); } catch (...) {} int nx = std::stoi(xs), ny = std::stoi(ys); { std::lock_guard<std::mutex> lk(g_lock); auto it = g_windows.find(id); if (it != g_windows.end( ) && !it->second.maximized) { it->second.x = nx; it->second.y = ny; it->second.dirty = true; ownerPid = it->second.ownerPid; } } publishOut(MsgType::MT_Move, std::to_string(id) + "|" + xs + "|" + ys, ownerPid); invalidate(id); } break;
             case MsgType::MT_Resize: { std::istringstream iss(s); std::string idS, ws, hs; std::getline(iss, idS, '|'); std::getline(iss, ws, '|'); std::getline(iss, hs, '|'); uint64_t id = 0; uint64_t ownerPid = 0; try { id = std::stoull(idS); } catch (...) {} int nw = std::stoi(ws), nh = std::stoi(hs); { std::lock_guard<std::mutex> lk(g_lock); auto it = g_windows.find(id); if (it != g_windows.end( ) && !it->second.maximized) { it->second.w = nw; it->second.h = nh; it->second.dirty = true; ownerPid = it->second.ownerPid; } } publishOut(MsgType::MT_Resize, std::to_string(id) + "|" + ws + "|" + hs, ownerPid); invalidate(id); } break;
@@ -1391,7 +1397,7 @@ namespace gxos {
         }
 
         void Compositor::drawAll( ) {
-#ifdef _WIN32
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
             requestRepaint( );
 #else
             if (g_needsRedraw) {
@@ -1400,7 +1406,7 @@ namespace gxos {
 #endif
         }
         void Compositor::pumpEvents( ) {
-#ifdef _WIN32
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
             MSG msg; while (PeekMessageA(&msg, nullptr, 0, 0, PM_REMOVE)) { TranslateMessage(&msg); DispatchMessageA(&msg); if (msg.message == WM_QUIT) break; }
 #else
             // On bare-metal, we don't have a native event pump
@@ -1416,7 +1422,7 @@ namespace gxos {
             Logger::write(LogLevel::Info, "Compositor service started (native window)");
             ipc::Bus::ensure(kGuiChanIn);
             ipc::Bus::ensure(kGuiChanOut);
-#ifdef _WIN32
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
             initWindow( );
 #endif
             initVideoBackend( );
@@ -1424,7 +1430,7 @@ namespace gxos {
             g_cfg = cfg; // Store config
             refreshDesktopItems( ); // Populate g_items from pinned/recent
             refreshAllProgramsList( ); // Populate sorted all programs list
-#ifdef _WIN32
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
             if (cfgOk) loadWallpaper(cfg.wallpaperPath);
 #endif
 
@@ -1432,7 +1438,7 @@ namespace gxos {
                 std::vector<SavedWindow> sw; std::string err; if (DesktopState::Load("desktop.state", sw, err)) {
                     std::lock_guard<std::mutex> lk(g_lock); g_windows.clear( ); g_z.clear( ); g_focus = 0; std::sort(sw.begin( ), sw.end( ), [] (const SavedWindow& a, const SavedWindow& b) { return a.z < b.z; }); for (auto& w : sw) {
                         uint64_t id = s_nextWinId.fetch_add(1); WinInfo wi{ id,w.title,w.x,w.y,w.w,w.h, {}, {}, {}, w.minimized, w.maximized, 0,0,0,0, true, w.snap }; if (wi.maximized) {
-#ifdef _WIN32
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
                             RECT crL{ 0,0,1024,768 };
                             if (g_hwnd) GetClientRect(g_hwnd, &crL);
 #else
@@ -1454,14 +1460,14 @@ namespace gxos {
             bool running = true; while (running) { pumpEvents( ); ipc::Message m; if (ipc::Bus::pop(kGuiChanIn, m, 30)) { if (m.type == (uint32_t)MsgType::MT_Ping && m.data.size( ) == 3 && std::string(m.data.begin( ), m.data.end( )) == "bye") running = false; else handleMessage(m); } }
             DesktopConfigData outCfg = g_cfg; { std::lock_guard<std::mutex> lk(g_lock); outCfg.windows.clear( ); for (size_t i = 0; i < g_z.size( ); ++i) { uint64_t id = g_z[i]; auto it = g_windows.find(id); if (it == g_windows.end( )) continue; const WinInfo& w = it->second; DesktopWindowRec rec; rec.id = w.id; rec.title = w.title; rec.x = w.x; rec.y = w.y; rec.w = w.w; rec.h = w.h; rec.minimized = w.minimized; rec.maximized = w.maximized; rec.z = (int)i; rec.focused = (g_focus == w.id); rec.snap = w.snapState; outCfg.windows.push_back(rec); } }
             std::string cerr; DesktopConfig::Save("desktop.json", outCfg, cerr); if (!legacyLoaded) { std::vector<SavedWindow> sw; { std::lock_guard<std::mutex> lk(g_lock); for (auto& kv : g_windows) { sw.push_back(SavedWindow{ kv.second.id, kv.second.title, kv.second.x, kv.second.y, kv.second.w, kv.second.h, kv.second.minimized, kv.second.maximized }); } } std::string err; DesktopState::Save("desktop.state", sw, err); }
-#ifdef _WIN32
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
             shutdownWindow( );
 #endif
             Logger::write(LogLevel::Info, "Compositor service stopping"); return 0;
         }
         uint64_t Compositor::start( ) { ProcessSpec spec{ "compositor", Compositor::main }; return ProcessTable::spawn(spec, { "compositor" }); }
 
-#ifdef _WIN32
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
         void Compositor::drawTaskbarSearchBox(HDC dc, int x, int y, int w, int h) {
             // Search box background
             HBRUSH bg = CreateSolidBrush(RGB(50, 52, 62));
@@ -1698,8 +1704,11 @@ namespace gxos {
                     uint32_t borderColor = isFocused ? 0x006496C8 : 0x00606068;
                     fbDrawRect(pixels, pitch, fbW, fbH, w.x, w.y, w.w, w.h, borderColor);
                     
-                    // Draw window content (widgets, text)
+                    // Draw window content (images, widgets, text)
                     int contentY = w.y + titleBarH;
+                    for (const auto& img : w.images) {
+                        ImageRenderer::DrawImage(pixels, fbW, fbH, pitch, img.image, w.x + img.x, contentY + img.y);
+                    }
                     for (const auto& wd : w.widgets) {
                         int wx = w.x + wd.x;
                         int wy = contentY + wd.y;

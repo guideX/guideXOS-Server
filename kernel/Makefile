@@ -50,6 +50,7 @@ include kernel/arch/$(ARCH)/Makefile.arch
 # Common compiler flags
 CFLAGS := -std=c++14 -ffreestanding -O2 -Wall -Wextra -fno-exceptions -fno-rtti
 CFLAGS += -nostdlib -nostdinc++ -fno-builtin
+CFLAGS += -DGXOS_BARE_METAL
 CFLAGS += -Ikernel/core/include -Ikernel/arch/$(ARCH)/include
 # Append architecture-specific flags
 CFLAGS += $(ARCH_CFLAGS)

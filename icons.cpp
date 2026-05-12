@@ -1,4 +1,5 @@
 #include "icons.h"
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
 #include <windows.h>
 #include <shlwapi.h>
 
@@ -26,3 +27,4 @@ namespace gxos { namespace gui {
     HBITMAP Icons::HardDiskIcon(int size){ return getCached("harddisk"+std::to_string(size), "BlueVelvet/"+std::to_string(size)+"/harddisk.bmp"); }
     HBITMAP Icons::SettingsIcon(int size){ return getCached("settings"+std::to_string(size), "BlueVelvet/"+std::to_string(size)+"/settings.bmp"); }
 } }
+#endif

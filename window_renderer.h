@@ -9,7 +9,7 @@
 #include "ui_settings.h"
 #include "window_effects.h"
 
-#ifdef _WIN32
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
 #define WIN32_LEAN_AND_MEAN
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -324,4 +324,4 @@ public:
 } // namespace gui
 } // namespace gxos
 
-#endif // _WIN32
+#endif // defined(_WIN32) && !defined(GXOS_BARE_METAL)

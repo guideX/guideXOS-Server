@@ -1,6 +1,7 @@
 #pragma once
 #include "process.h"
 #include "ipc_bus.h"
+#include "image.h"
 #include <string>
 
 namespace gxos { namespace apps {
@@ -28,6 +29,7 @@ namespace gxos { namespace apps {
         // State
         static uint64_t s_windowId;
         static std::string s_filePath;
+        static gui::ImagePtr s_image;
         static int s_originalW;
         static int s_originalH;
         static float s_zoomLevel;

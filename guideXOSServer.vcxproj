@@ -151,6 +151,8 @@
     <ClInclude Include="gxapp_loader.h" />
     <ClInclude Include="gxm_loader.h" />
     <ClInclude Include="hd_installer.h" />
+    <ClInclude Include="image.h" />
+    <ClInclude Include="image_renderer.h" />
     <ClInclude Include="image_viewer.h" />
     <ClInclude Include="kernel\arch\amd64\include\arch\context_switch.h" />
     <ClInclude Include="kernel\arch\amd64\include\arch\graphics.h" />
@@ -304,6 +306,7 @@
     <ClInclude Include="package_manager.h" />
     <ClInclude Include="paint.h" />
     <ClInclude Include="platform.h" />
+    <ClInclude Include="png_loader.h" />
     <ClInclude Include="process.h" />
     <ClInclude Include="right_click_menu.h" />
     <ClInclude Include="special_effects.h" />
@@ -342,6 +345,8 @@
     <ClCompile Include="gxm_loader.cpp" />
     <ClCompile Include="hd_installer.cpp" />
     <ClCompile Include="icons.cpp" />
+    <ClCompile Include="image.cpp" />
+    <ClCompile Include="image_renderer.cpp" />
     <ClCompile Include="image_viewer.cpp" />
     <ClCompile Include="ipc_bus.cpp" />
     <ClCompile Include="kernel\arch\amd64\arch.cpp">
@@ -504,6 +509,7 @@
     <ClCompile Include="open_dialog.cpp" />
     <ClCompile Include="package_manager.cpp" />
     <ClCompile Include="paint.cpp" />
+    <ClCompile Include="png_loader.cpp" />
     <ClCompile Include="process.cpp">
       <ObjectFileName>$(IntDir)process_gxos.obj</ObjectFileName>
     </ClCompile>

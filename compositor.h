@@ -18,14 +18,16 @@
 #include "video_backend.h"
 #include "window_effects.h"
 #include "ui_settings.h"
+#include "image.h"
 
-#ifdef _WIN32
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #endif
 
 namespace gxos { namespace gui {
     struct DrawRectItem { int x; int y; int w; int h; uint8_t r; uint8_t g; uint8_t b; };
+    struct DrawImageItem { int x; int y; std::string path; ImagePtr image; };
     enum class WidgetType { Button=1 };
     struct Widget { WidgetType type; int id; int x; int y; int w; int h; std::string text; bool hover=false; bool pressed=false; };
     struct WinInfo { 
@@ -34,6 +36,7 @@ namespace gxos { namespace gui {
         int x; int y; int w; int h; 
         std::vector<std::string> texts; 
         std::vector<DrawRectItem> rects; 
+        std::vector<DrawImageItem> images;
         std::vector<Widget> widgets; 
         bool minimized{false}; 
         bool maximized{false}; 
@@ -42,7 +45,7 @@ namespace gxos { namespace gui {
         int snapState{0}; 
         bool tombstoned{false}; 
         bool modal{false};
-#ifdef _WIN32
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
         HBITMAP taskbarIcon{nullptr}; 
 #endif
         uint64_t ownerPid{0};
@@ -60,7 +63,7 @@ namespace gxos { namespace gui {
     class Compositor {
     public:
         static uint64_t start();
-#ifdef _WIN32
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
         static HWND g_hwnd; // expose for helper drawing
 #endif
         static std::vector<DesktopItem> g_items; // expose for icon renderer
@@ -93,14 +96,14 @@ namespace gxos { namespace gui {
         static void ToggleDesktopIconSelection(int index);
         static void SelectDesktopIconRange(int startIndex, int endIndex);
         static std::vector<int> GetSelectedDesktopIconIndices();
-#ifdef _WIN32
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
         static int HitTestDesktopIcon(int mouseX, int mouseY);
         static RECT GetDesktopIconBounds(int index);
         static void SelectIconsInRectangle(const RECT& selectionRect, bool additive);
         static bool IsCtrlDown();
         static bool IsShiftDown();
 #endif
-#ifdef _WIN32
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
         static uint64_t hitTestTaskbarButton(int mx, int my, RECT cr, int taskbarH);
         static void initWindow();
         static void shutdownWindow();
@@ -134,7 +137,7 @@ namespace gxos { namespace gui {
         static bool g_resizeActive; static int g_resizeStartW; static int g_resizeStartH; static int g_resizeStartMX; static int g_resizeStartMY; static uint64_t g_resizeWin;
         static bool g_resizePreviewActive; static int g_resizePreviewW; static int g_resizePreviewH;
         static bool g_snapPreviewActive;
-#ifdef _WIN32
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
         static RECT g_snapPreviewRect;
 #else
         struct SnapRect { int l; int t; int r; int b; }; static SnapRect g_snapPreviewRect;
@@ -145,7 +148,7 @@ namespace gxos { namespace gui {
         static DesktopConfigData g_cfg; static uint64_t g_lastItemClickTicks; static int g_lastItemIndex;
         static std::set<int> g_selectedDesktopIconIndices; static int g_lastSelectedDesktopIconIndex;
         static bool g_iconDragActive; static int g_iconDragIndex; static int g_iconDragOffX; static int g_iconDragOffY; static int g_iconDragStartX; static int g_iconDragStartY; static bool g_iconDragPending;
-#ifdef _WIN32
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
         static bool g_iconSelectionDragPending; static bool g_iconSelectionDragActive; static int g_iconSelectionStartX; static int g_iconSelectionStartY; static int g_iconSelectionCurrentX; static int g_iconSelectionCurrentY; static bool g_iconSelectionAdditive;
 #endif
         // Start menu keyboard/selection state
@@ -154,7 +157,7 @@ namespace gxos { namespace gui {
         static std::vector<std::string> g_startMenuAllProgsSorted; // Sorted app names
         // Taskbar menu state
         static bool g_taskbarMenuVisible;
-#ifdef _WIN32
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
         static RECT g_taskbarMenuRect;
 #else
         static SnapRect g_taskbarMenuRect;

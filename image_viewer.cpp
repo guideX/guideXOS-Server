@@ -2,6 +2,7 @@
 #include "gui_protocol.h"
 #include "vfs.h"
 #include "logger.h"
+#include "png_loader.h"
 #include <sstream>
 #include <thread>
 #include <chrono>
@@ -11,6 +12,7 @@ namespace gxos { namespace apps {
 
 uint64_t ImageViewer::s_windowId = 0;
 std::string ImageViewer::s_filePath;
+gui::ImagePtr ImageViewer::s_image;
 int ImageViewer::s_originalW = 0;
 int ImageViewer::s_originalH = 0;
 float ImageViewer::s_zoomLevel = 1.0f;
@@ -24,6 +26,7 @@ uint64_t ImageViewer::Launch(const std::string& filePath) {
     s_zoomLevel = 1.0f;
     s_panX = 0;
     s_panY = 0;
+    s_image.reset();
     s_lastKeyCode = 0;
     s_keyDown = false;
     ProcessSpec spec{"ImageViewer", &ImageViewer::main};
@@ -59,18 +62,16 @@ int ImageViewer::main(int argc, char** argv) {
         }
     }
 
-    // Try to "load" image metadata from VFS
+    // Try to load PNG image metadata from the filesystem.
     if (!s_filePath.empty()) {
-        std::vector<uint8_t> content;
-        if (Vfs::instance().readFile(s_filePath, content)) {
-            // In the real kernel, this would be raw pixel data.
-            // For the user-mode server stub, record that a file was loaded.
-            s_originalW = 400;
-            s_originalH = 300;
-            Logger::write(LogLevel::Info, "ImageViewer loaded: " + s_filePath +
-                          " (" + std::to_string(content.size()) + " bytes)");
+        s_image = gui::PngLoader::LoadFromFile(s_filePath);
+        if (s_image) {
+            s_originalW = s_image->Width;
+            s_originalH = s_image->Height;
+            Logger::write(LogLevel::Info, "ImageViewer loaded PNG: " + s_filePath +
+                          " (" + std::to_string(s_originalW) + "x" + std::to_string(s_originalH) + ")");
         } else {
-            Logger::write(LogLevel::Info, "ImageViewer: file not found: " + s_filePath);
+            Logger::write(LogLevel::Warn, "ImageViewer: PNG load failed: " + s_filePath);
         }
     }
 
@@ -161,6 +162,16 @@ void ImageViewer::updateDisplay() {
         oss << wid << "|0|0|" << kWinW << "|" << kWinH << "|30|30|30";
         auto s = oss.str();
         m.data.assign(s.begin(), s.end());
+        ipc::Bus::publish("gui.input", std::move(m), false);
+    }
+
+    if (s_image) {
+        ipc::Message m;
+        m.type = static_cast<uint32_t>(gui::MsgType::MT_DrawImage);
+        int drawX = (kWinW - s_image->Width) / 2 + s_panX;
+        int drawY = 36 + s_panY;
+        auto payload = gui::packDrawImage(s_windowId, drawX, drawY, s_filePath);
+        m.data.assign(payload.begin(), payload.end());
         ipc::Bus::publish("gui.input", std::move(m), false);
     }
 

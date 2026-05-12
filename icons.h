@@ -1,4 +1,5 @@
 #pragma once
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
 #include <windows.h>
 #include <string>
 #include <unordered_map>
@@ -26,3 +27,4 @@ namespace gxos { namespace gui {
         static std::unordered_map<std::string,HBITMAP> s_cache;
     };
 } }
+#endif

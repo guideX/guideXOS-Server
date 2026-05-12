@@ -77,7 +77,7 @@ set "LD=i686-elf-ld"
 
 REM Compiler flags (using relative paths from kernel directory)
 set "CFLAGS=-std=c++14 -ffreestanding -O2 -Wall -Wextra -fno-exceptions -fno-rtti"
-set "CFLAGS=%CFLAGS% -nostdlib -nostdinc++ -fno-builtin"
+set "CFLAGS=%CFLAGS% -nostdlib -nostdinc++ -fno-builtin -DGXOS_BARE_METAL"
 set "CFLAGS=%CFLAGS% -m32 -march=i686"
 set "CFLAGS=%CFLAGS% -Icore/include -Iarch/%ARCH%/include"
 
