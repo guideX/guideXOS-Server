@@ -65,8 +65,16 @@ void clear(uint32_t color);
 // Draw a pixel
 void put_pixel(uint32_t x, uint32_t y, uint32_t color);
 
+// Draw a pixel directly to the physical/front framebuffer.
+// Use only for overlays that intentionally bypass double buffering.
+void put_front_pixel(uint32_t x, uint32_t y, uint32_t color);
+
 // Get a pixel
 uint32_t get_pixel(uint32_t x, uint32_t y);
+
+// Get a pixel directly from the physical/front framebuffer.
+// Use only for overlays that intentionally bypass double buffering.
+uint32_t get_front_pixel(uint32_t x, uint32_t y);
 
 // Draw a filled rectangle
 void fill_rect(uint32_t x, uint32_t y, uint32_t width, uint32_t height, uint32_t color);

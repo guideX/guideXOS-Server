@@ -30,7 +30,7 @@ ifndef ARCH
 endif
 
 # Validate architecture
-VALID_ARCHS := amd64 x86 arm ia64 sparc sparc64 riscv64
+VALID_ARCHS := amd64 x86 arm arm64 ia64 sparc sparc64 riscv64 ppc64 loongarch64 mips64
 ifeq ($(filter $(ARCH),$(VALID_ARCHS)),)
     $(error Invalid ARCH: $(ARCH). Valid options: $(VALID_ARCHS))
 endif

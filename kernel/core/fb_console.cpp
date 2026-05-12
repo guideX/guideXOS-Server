@@ -263,18 +263,13 @@ static void scroll()
 {
     if (!framebuffer::is_available()) return;
 
-    uint32_t* buf = framebuffer::get_buffer();
-    if (!buf) return;
-
-    uint32_t pitch32 = framebuffer::get_pitch() / 4;
-    uint32_t rowPixels = FONT_HEIGHT * pitch32;
     uint32_t totalRows = s_rows;
 
     // Move all rows up by one
     for (uint32_t y = 0; y < (totalRows - 1) * FONT_HEIGHT; ++y) {
         uint32_t srcY = y + FONT_HEIGHT;
         for (uint32_t x = 0; x < s_cols * FONT_WIDTH; ++x) {
-            buf[y * pitch32 + x] = buf[srcY * pitch32 + x];
+            framebuffer::put_pixel(x, y, framebuffer::get_pixel(x, srcY));
         }
     }
 
@@ -282,11 +277,9 @@ static void scroll()
     uint32_t lastRowStart = (totalRows - 1) * FONT_HEIGHT;
     for (uint32_t y = 0; y < FONT_HEIGHT; ++y) {
         for (uint32_t x = 0; x < s_cols * FONT_WIDTH; ++x) {
-            buf[(lastRowStart + y) * pitch32 + x] = s_bg;
+            framebuffer::put_pixel(x, lastRowStart + y, s_bg);
         }
     }
-
-    (void)rowPixels;
 }
 
 // ================================================================

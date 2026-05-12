@@ -22,6 +22,7 @@
 #include "include/kernel/ps2keyboard.h"
 #include "include/kernel/serial_debug.h"
 #include "include/kernel/vfs.h"
+#include "include/kernel/desktop_capabilities.h"
 
 #if defined(_MSC_VER)
 #include <intrin.h>  // For MSVC intrinsics (__outbyte, __halt, etc.)
@@ -3399,6 +3400,7 @@ void init()
                                      4 + kStartBtnW + 8 + kSearchBoxW + 8);
     
     s_initialized = true;
+    desktop_capabilities::log_current(false, false);
 }
 
 // Update tick counter (call this from main loop, e.g., every 10ms)
@@ -4204,18 +4206,12 @@ static FooterButton hit_test_start_menu_footer(int32_t mx, int32_t my)
 
 static void save_under_cursor(int32_t mx, int32_t my)
 {
-    // Save from front buffer (video memory) since cursor is drawn there
-    uint32_t* frontBuffer = framebuffer::get_buffer();
-    if (!frontBuffer) return;
-    
-    uint32_t pitch = framebuffer::get_pitch() / 4;
-    
     for (int row = 0; row < kCursorH; row++) {
         for (int col = 0; col < kCursorW; col++) {
             int32_t px = mx + col;
             int32_t py = my + row;
             if (px >= 0 && px < (int32_t)s_screenW && py >= 0 && py < (int32_t)s_screenH)
-                s_cursorSave[row][col] = frontBuffer[py * pitch + px];
+                s_cursorSave[row][col] = framebuffer::get_front_pixel((uint32_t)px, (uint32_t)py);
             else
                 s_cursorSave[row][col] = 0;
         }
@@ -4225,19 +4221,13 @@ static void save_under_cursor(int32_t mx, int32_t my)
 static void restore_under_cursor()
 {
     if (!s_cursorDrawn) return;
-    
-    // Restore to front buffer (video memory) since cursor was drawn there
-    uint32_t* frontBuffer = framebuffer::get_buffer();
-    if (!frontBuffer) return;
-    
-    uint32_t pitch = framebuffer::get_pitch() / 4;
-    
+
     for (int row = 0; row < kCursorH; row++) {
         for (int col = 0; col < kCursorW; col++) {
             int32_t px = s_lastCursorX + col;
             int32_t py = s_lastCursorY + row;
             if (px >= 0 && px < (int32_t)s_screenW && py >= 0 && py < (int32_t)s_screenH)
-                frontBuffer[py * pitch + px] = s_cursorSave[row][col];
+                framebuffer::put_front_pixel((uint32_t)px, (uint32_t)py, s_cursorSave[row][col]);
         }
     }
     s_cursorDrawn = false;
@@ -4255,11 +4245,6 @@ void draw_cursor(int32_t mx, int32_t my)
 
     // Draw cursor directly to front buffer (bypass double buffering for cursor)
     // This ensures the cursor is always visible even with double buffering enabled
-    uint32_t* frontBuffer = framebuffer::get_buffer();
-    if (!frontBuffer) return;
-    
-    uint32_t pitch = framebuffer::get_pitch() / 4;
-    
     for (int row = 0; row < kCursorH; row++) {
         for (int col = 0; col < kCursorW; col++) {
             uint8_t p = s_cursorBitmap[row][col];
@@ -4268,8 +4253,7 @@ void draw_cursor(int32_t mx, int32_t my)
             int32_t py = my + row;
             if (px >= 0 && px < (int32_t)s_screenW && py >= 0 && py < (int32_t)s_screenH) {
                 uint32_t color = (p == 1) ? rgb(0, 0, 0) : rgb(255, 255, 255);
-                // Write directly to front buffer
-                frontBuffer[py * pitch + px] = color;
+                framebuffer::put_front_pixel((uint32_t)px, (uint32_t)py, color);
             }
         }
     }

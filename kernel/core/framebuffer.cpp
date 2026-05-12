@@ -34,6 +34,90 @@ static bool g_doubleBuffered = false;
 static const uint32_t MAX_BACKBUFFER_PIXELS = 1920 * 1080;
 static uint32_t g_backBufferStorage[MAX_BACKBUFFER_PIXELS];
 
+static uint32_t bytes_per_pixel()
+{
+    return g_bpp / 8;
+}
+
+static bool supports_direct_color_bpp()
+{
+    return g_bpp == 16 || g_bpp == 24 || g_bpp == 32;
+}
+
+static uint16_t pack_rgb565(uint32_t color)
+{
+    uint8_t r = (color >> 16) & 0xFF;
+    uint8_t g = (color >> 8) & 0xFF;
+    uint8_t b = color & 0xFF;
+    return static_cast<uint16_t>(((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3));
+}
+
+static uint32_t unpack_rgb565(uint16_t color)
+{
+    uint8_t r = static_cast<uint8_t>(((color >> 11) & 0x1F) << 3);
+    uint8_t g = static_cast<uint8_t>(((color >> 5) & 0x3F) << 2);
+    uint8_t b = static_cast<uint8_t>((color & 0x1F) << 3);
+    return 0xFF000000u | (static_cast<uint32_t>(r) << 16) |
+           (static_cast<uint32_t>(g) << 8) | b;
+}
+
+static void write_front_pixel(uint32_t x, uint32_t y, uint32_t color)
+{
+    uint32_t bppBytes = bytes_per_pixel();
+    if (!g_buffer || bppBytes == 0) return;
+
+    uint8_t* base = reinterpret_cast<uint8_t*>(g_buffer);
+    uint8_t* pixel = base + static_cast<uint64_t>(y) * g_pitch + static_cast<uint64_t>(x) * bppBytes;
+
+    switch (g_bpp) {
+        case 32:
+            pixel[0] = static_cast<uint8_t>(color & 0xFF);
+            pixel[1] = static_cast<uint8_t>((color >> 8) & 0xFF);
+            pixel[2] = static_cast<uint8_t>((color >> 16) & 0xFF);
+            pixel[3] = static_cast<uint8_t>((color >> 24) & 0xFF);
+            break;
+        case 24:
+            pixel[0] = static_cast<uint8_t>(color & 0xFF);
+            pixel[1] = static_cast<uint8_t>((color >> 8) & 0xFF);
+            pixel[2] = static_cast<uint8_t>((color >> 16) & 0xFF);
+            break;
+        case 16: {
+            uint16_t packed = pack_rgb565(color);
+            pixel[0] = static_cast<uint8_t>(packed & 0xFF);
+            pixel[1] = static_cast<uint8_t>((packed >> 8) & 0xFF);
+            break;
+        }
+        default:
+            // TODO: Add palette-aware 8bpp support for CG3/other indexed framebuffers.
+            break;
+    }
+}
+
+static uint32_t read_front_pixel(uint32_t x, uint32_t y)
+{
+    uint32_t bppBytes = bytes_per_pixel();
+    if (!g_buffer || bppBytes == 0) return 0;
+
+    const uint8_t* base = reinterpret_cast<const uint8_t*>(g_buffer);
+    const uint8_t* pixel = base + static_cast<uint64_t>(y) * g_pitch + static_cast<uint64_t>(x) * bppBytes;
+
+    switch (g_bpp) {
+        case 32:
+            return 0xFF000000u | (static_cast<uint32_t>(pixel[2]) << 16) |
+                   (static_cast<uint32_t>(pixel[1]) << 8) | pixel[0];
+        case 24:
+            return 0xFF000000u | (static_cast<uint32_t>(pixel[2]) << 16) |
+                   (static_cast<uint32_t>(pixel[1]) << 8) | pixel[0];
+        case 16: {
+            uint16_t packed = static_cast<uint16_t>(pixel[0]) |
+                              (static_cast<uint16_t>(pixel[1]) << 8);
+            return unpack_rgb565(packed);
+        }
+        default:
+            return 0;
+    }
+}
+
 #if ARCH_HAS_PIC_8259
 
 bool init(void* multiboot_info_ptr)
@@ -318,44 +402,68 @@ bool is_available()
 
 void clear(uint32_t color)
 {
-    if (!g_available || !g_drawTarget) return;
-    
-    uint32_t pixels = (g_pitch / 4) * g_height;
-    for (uint32_t i = 0; i < pixels; i++) {
-        g_drawTarget[i] = color;
+    if (!g_available) return;
+
+    if (g_doubleBuffered && g_backBuffer) {
+        uint32_t pixels = g_width * g_height;
+        for (uint32_t i = 0; i < pixels; i++) {
+            g_backBuffer[i] = color;
+        }
+        return;
+    }
+
+    for (uint32_t y = 0; y < g_height; y++) {
+        for (uint32_t x = 0; x < g_width; x++) {
+            write_front_pixel(x, y, color);
+        }
     }
 }
 
 void put_pixel(uint32_t x, uint32_t y, uint32_t color)
 {
-    if (!g_available || !g_drawTarget || x >= g_width || y >= g_height) return;
-    
-    uint32_t offset = y * (g_pitch / 4) + x;
-    g_drawTarget[offset] = color;
+    if (!g_available || x >= g_width || y >= g_height) return;
+
+    if (g_doubleBuffered && g_backBuffer) {
+        g_backBuffer[y * g_width + x] = color;
+        return;
+    }
+
+    write_front_pixel(x, y, color);
+}
+
+void put_front_pixel(uint32_t x, uint32_t y, uint32_t color)
+{
+    if (!g_available || x >= g_width || y >= g_height) return;
+    write_front_pixel(x, y, color);
 }
 
 uint32_t get_pixel(uint32_t x, uint32_t y)
 {
-    if (!g_available || !g_drawTarget || x >= g_width || y >= g_height) return 0;
-    
-    uint32_t offset = y * (g_pitch / 4) + x;
-    return g_drawTarget[offset];
+    if (!g_available || x >= g_width || y >= g_height) return 0;
+
+    if (g_doubleBuffered && g_backBuffer) {
+        return g_backBuffer[y * g_width + x];
+    }
+
+    return read_front_pixel(x, y);
+}
+
+uint32_t get_front_pixel(uint32_t x, uint32_t y)
+{
+    if (!g_available || x >= g_width || y >= g_height) return 0;
+    return read_front_pixel(x, y);
 }
 
 void fill_rect(uint32_t x, uint32_t y, uint32_t width, uint32_t height, uint32_t color)
 {
-    if (!g_available || !g_drawTarget) return;
-    
-    // Optimized version: direct memory access with row-based filling
-    uint32_t pitchPixels = g_pitch / 4;
+    if (!g_available || x >= g_width || y >= g_height) return;
+
+    if (x + width > g_width) width = g_width - x;
+    if (y + height > g_height) height = g_height - y;
+
     for (uint32_t dy = 0; dy < height; dy++) {
-        uint32_t rowY = y + dy;
-        if (rowY >= g_height) break;
-        uint32_t* row = g_drawTarget + rowY * pitchPixels + x;
         for (uint32_t dx = 0; dx < width; dx++) {
-            if (x + dx < g_width) {
-                row[dx] = color;
-            }
+            put_pixel(x + dx, y + dy, color);
         }
     }
 }
@@ -435,9 +543,14 @@ void blit_alpha(const uint32_t* buffer, uint32_t x, uint32_t y, uint32_t width, 
 bool enable_double_buffering()
 {
     if (!g_available) return false;
+
+    if (!supports_direct_color_bpp()) {
+        // TODO: Add palette-aware double buffering for 8bpp indexed framebuffers.
+        return false;
+    }
     
     // Check if resolution fits in our static back buffer
-    uint32_t totalPixels = (g_pitch / 4) * g_height;
+    uint32_t totalPixels = g_width * g_height;
     if (totalPixels > MAX_BACKBUFFER_PIXELS) {
         return false;  // Resolution too high for our static buffer
     }
@@ -450,7 +563,8 @@ bool enable_double_buffering()
         g_backBuffer[i] = 0;
     }
     
-    // Redirect all drawing operations to the back buffer
+    // Redirect all drawing operations to the ARGB back buffer. present()
+    // converts to the active front-buffer pixel format.
     g_drawTarget = g_backBuffer;
     g_doubleBuffered = true;
     
@@ -465,18 +579,11 @@ bool is_double_buffered()
 void present()
 {
     if (!g_available || !g_doubleBuffered || !g_backBuffer || !g_buffer) return;
-    
-    // Copy the entire back buffer to the front buffer (video memory)
-    // This is done in one operation to minimize tearing
-    uint32_t totalPixels = (g_pitch / 4) * g_height;
-    
-    // Use a simple memcpy-style copy for maximum speed
-    uint32_t* src = g_backBuffer;
-    uint32_t* dst = g_buffer;
-    
-    // Copy in larger chunks for better performance
-    for (uint32_t i = 0; i < totalPixels; i++) {
-        dst[i] = src[i];
+
+    for (uint32_t y = 0; y < g_height; y++) {
+        for (uint32_t x = 0; x < g_width; x++) {
+            write_front_pixel(x, y, g_backBuffer[y * g_width + x]);
+        }
     }
 }
 

@@ -65,6 +65,22 @@
         #include <arch/riscv64.h>
     #endif
     namespace kernel { namespace arch { using namespace riscv64; } }
+#elif defined(__aarch64__) || defined(_M_ARM64)
+    #define ARCH_ARM64
+    #if defined(_MSC_VER)
+        #include "../../../arch/arm64/include/arch/arm64.h"
+    #else
+        #include <arch/arm64.h>
+    #endif
+    namespace kernel { namespace arch { using namespace arm64; } }
+#elif defined(__powerpc64__) || defined(__ppc64__)
+    #define ARCH_PPC64
+    #if defined(_MSC_VER)
+        #include "../../../arch/ppc64/include/arch/ppc64.h"
+    #else
+        #include <arch/ppc64.h>
+    #endif
+    namespace kernel { namespace arch { using namespace ppc64; } }
 #elif defined(__loongarch__) && defined(__loongarch64)
     #define ARCH_LOONGARCH64
     #if defined(_MSC_VER)
@@ -73,6 +89,14 @@
         #include <arch/loongarch64.h>
     #endif
     namespace kernel { namespace arch { using namespace loongarch64; } }
+#elif defined(__mips64) || defined(__mips64__) || defined(_M_MIPS64)
+    #define ARCH_MIPS64
+    #if defined(_MSC_VER)
+        #include "../../../arch/mips64/include/arch/mips64.h"
+    #else
+        #include <arch/mips64.h>
+    #endif
+    namespace kernel { namespace arch { using namespace mips64; } }
 #else
     #error "Unsupported architecture"
 #endif
@@ -254,6 +278,15 @@
     #define ARCH_HAS_PL111_FB   1
     #define ARCH_HAS_RAMFB      0
     #define ARCH_HAS_FB_CONSOLE 1
+#elif defined(ARCH_ARM64)
+    #define ARCH_HAS_VESA_BGA   0
+    #define ARCH_HAS_VGA_REGS   0
+    #define ARCH_HAS_PCI_VGA    0
+    #define ARCH_HAS_EFI_GOP    0
+    #define ARCH_HAS_SUN_FB     0
+    #define ARCH_HAS_PL111_FB   0
+    #define ARCH_HAS_RAMFB      0
+    #define ARCH_HAS_FB_CONSOLE 0
 #elif defined(ARCH_RISCV64)
     #define ARCH_HAS_VESA_BGA   0
     #define ARCH_HAS_VGA_REGS   0
@@ -263,6 +296,15 @@
     #define ARCH_HAS_PL111_FB   0
     #define ARCH_HAS_RAMFB      1
     #define ARCH_HAS_FB_CONSOLE 1
+#elif defined(ARCH_PPC64) || defined(ARCH_MIPS64)
+    #define ARCH_HAS_VESA_BGA   0
+    #define ARCH_HAS_VGA_REGS   0
+    #define ARCH_HAS_PCI_VGA    0
+    #define ARCH_HAS_EFI_GOP    0
+    #define ARCH_HAS_SUN_FB     0
+    #define ARCH_HAS_PL111_FB   0
+    #define ARCH_HAS_RAMFB      0
+    #define ARCH_HAS_FB_CONSOLE 0
 #elif defined(ARCH_LOONGARCH64)
     #define ARCH_HAS_VESA_BGA   0
     #define ARCH_HAS_VGA_REGS   0
@@ -310,6 +352,8 @@ inline const char* get_arch_name()
     return "x86 (32-bit)";
 #elif defined(ARCH_ARM)
     return "ARM";
+#elif defined(ARCH_ARM64)
+    return "ARM64";
 #elif defined(ARCH_IA64)
     return "Itanium (IA-64)";
 #elif defined(ARCH_SPARC64)
@@ -320,6 +364,10 @@ inline const char* get_arch_name()
     return "RISC-V 64 (RV64IMA)";
 #elif defined(ARCH_LOONGARCH64)
     return "LoongArch 64 (LA64)";
+#elif defined(ARCH_PPC64)
+    return "PowerPC 64";
+#elif defined(ARCH_MIPS64)
+    return "MIPS64";
 #else
     return "Unknown";
 #endif
@@ -328,7 +376,7 @@ inline const char* get_arch_name()
 // Get architecture bitness
 inline uint32_t get_arch_bits()
 {
-#if defined(ARCH_AMD64) || defined(ARCH_IA64) || defined(ARCH_SPARC64) || defined(ARCH_RISCV64) || defined(ARCH_LOONGARCH64)
+#if defined(ARCH_AMD64) || defined(ARCH_ARM64) || defined(ARCH_IA64) || defined(ARCH_SPARC64) || defined(ARCH_RISCV64) || defined(ARCH_LOONGARCH64) || defined(ARCH_PPC64) || defined(ARCH_MIPS64)
     return 64;
 #elif defined(ARCH_X86) || defined(ARCH_ARM) || defined(ARCH_SPARC)
     return 32;

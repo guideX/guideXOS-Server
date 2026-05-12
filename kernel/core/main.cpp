@@ -18,6 +18,7 @@
 #include "include/kernel/input_manager.h"
 #include "include/kernel/pit.h"
 #include "include/kernel/serial_debug.h"
+#include "include/kernel/desktop_capabilities.h"
 
 // Storage subsystem
 #include "include/kernel/block_device.h"
@@ -367,6 +368,7 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         // Draw initial cursor at center of screen
         kernel::desktop::draw_cursor(kernel::input::mouse_x(),
                                      kernel::input::mouse_y());
+        kernel::desktop_capabilities::log_current(true, true);
         
         kernel::serial::puts("[KERNEL] Entering main loop (waiting for input)...\n");
         
@@ -457,6 +459,7 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         // Draw initial cursor at centre of screen
         kernel::desktop::draw_cursor(kernel::arch::sparc::zs::mouse_x(),
                                      kernel::arch::sparc::zs::mouse_y());
+        kernel::desktop_capabilities::log_current(true, true);
 
         // Main kernel loop — poll mouse state and redraw cursor
         while (1) {
@@ -492,6 +495,7 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
 
         kernel::desktop::draw_cursor(kernel::arch::sparc64::zs::mouse_x(),
                                      kernel::arch::sparc64::zs::mouse_y());
+        kernel::desktop_capabilities::log_current(true, true);
 
         while (1) {
             if (kernel::arch::sparc64::zs::mouse_dirty()) {
@@ -523,6 +527,7 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
     kernel::arch::ia64::ski_console::puts("\r\n");
     kernel::arch::ia64::ski_console::puts("\r\n");
     kernel::arch::ia64::ski_console::puts("Entering idle loop (Ctrl-C in ski to exit)\r\n");
+    kernel::desktop_capabilities::log_current(false, false);
 
     // Enable interrupts and idle
     kernel::interrupts::init();
@@ -572,8 +577,10 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::desktop::draw();
 
         kernel::arch::riscv64::sbi_console::puts("Desktop drawn\r\n");
+        kernel::desktop_capabilities::log_current(false, false);
     } else {
         kernel::arch::riscv64::sbi_console::puts("No framebuffer detected\r\n");
+        kernel::desktop_capabilities::log_current(false, false);
     }
 
     kernel::arch::riscv64::sbi_console::puts("Entering idle loop\r\n");
@@ -586,6 +593,7 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
 #endif // ARCH_RISCV64
 
     // Fallback: no framebuffer or unsupported non-x86 platform
+    kernel::desktop_capabilities::log_current(false, false);
     kernel::interrupts::init();
     while (1) {
         kernel::arch::halt();
