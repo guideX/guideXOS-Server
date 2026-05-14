@@ -84,6 +84,9 @@
     <ClInclude Include="kernel\core\include\kernel\desktop.h">
       <Filter>Header Files\Kernel</Filter>
     </ClInclude>
+    <ClInclude Include="kernel\core\include\kernel\desktop_font.h">
+      <Filter>Header Files\Kernel</Filter>
+    </ClInclude>
     <ClInclude Include="kernel\core\include\kernel\interrupts.h">
       <Filter>Header Files\Kernel</Filter>
     </ClInclude>
@@ -279,6 +282,9 @@
       <Filter>Source Files\Core</Filter>
     </ClCompile>
     <ClCompile Include="kernel\core\desktop.cpp">
+      <Filter>Source Files\Core</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\core\desktop_font.cpp">
       <Filter>Source Files\Core</Filter>
     </ClCompile>
     <ClCompile Include="kernel\arch\x86\arch.cpp">

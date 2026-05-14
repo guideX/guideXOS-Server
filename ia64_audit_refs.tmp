@@ -1,0 +1,1015 @@
+﻿D:\dev\guideXOSServer\docs\ALL_FIXES_COMPLETE.md:210:**Reason:** Variable parsed but not yet used
+D:\dev\guideXOSServer\docs\ARCHITECTURE.md:59:- Parse UEFI environment
+D:\dev\guideXOSServer\docs\ARCHITECTURE.md:61:- Parse ELF, load segments to memory
+D:\dev\guideXOSServer\docs\ARCHITECTURE.md:89:- Receive and parse `BootInfo` from bootloader
+D:\dev\guideXOSServer\docs\BOOT-FLOW-DIAGRAM.md:22:? (Bootloader) ?  ? Parses Multiboot header
+D:\dev\guideXOSServer\docs\BOOT-FLOW-DIAGRAM.md:70:??? Parse ELF headers
+D:\dev\guideXOSServer\docs\BOOTLOADER_COMPLIANCE.md:18:?    - Locate GOP, filesystem, ACPI        ?
+D:\dev\guideXOSServer\docs\BOOTLOADER_COMPLIANCE.md:25:?    - Parse ELF headers                   ?
+D:\dev\guideXOSServer\docs\BOOTLOADER_COMPLIANCE.md:51:- ? Parse server binary
+D:\dev\guideXOSServer\docs\BOOTLOADER_COMPLIANCE.md:80:// === FRAMEBUFFER (abstracted, NOT GOP-specific) ===
+D:\dev\guideXOSServer\docs\BOOTLOADER_COMPLIANCE.md:138:- Does NOT parse filesystem
+D:\dev\guideXOSServer\docs\BOOTLOADER_COMPLIANCE.md:148:- Kernel: "I'll parse it and load the server"
+D:\dev\guideXOSServer\docs\BOOTLOADER_COMPLIANCE.md:184:SystemTable->BootServices->LocateProtocol(&gopGuid, NULL, (void**)&GOP);
+D:\dev\guideXOSServer\docs\BOOTLOADER_COMPLIANCE.md:185:SystemTable->BootServices->HandleProtocol(ImageHandle, ...);
+D:\dev\guideXOSServer\docs\BOOTLOADER_COMPLIANCE.md:202:v1BootInfo->FramebufferBase = GOP->Mode->FrameBufferBase;  // extract, don't expose
+D:\dev\guideXOSServer\docs\BOOTLOADER_COMPLIANCE.md:209:ExitBootServicesWithMemoryMapInBuffer(...);
+D:\dev\guideXOSServer\docs\BOOTLOADER_COMPLIANCE.md:239:// Kernel will parse and extract server binary
+D:\dev\guideXOSServer\docs\BUILD_ERRORS_FIXED.md:61:$(ProjectDir)kernel\arch\ia64\include
+D:\dev\guideXOSServer\docs\BUILD_FIXED_READY.md:110:The `unused variable 'mb_info'` warning is harmless. The variable is parsed but not yet used (reserved for future features).
+D:\dev\guideXOSServer\docs\BUILD_FIXED_READY.md:118:- Parse Multiboot info
+D:\dev\guideXOSServer\docs\BUILD_GUIDE.md:95:?   ?   ??? ia64/             ? Intel Itanium
+D:\dev\guideXOSServer\docs\BUILD_GUIDE.md:199:| IA64 (Itanium) | `kernel/arch/ia64/` | Experimental |
+D:\dev\guideXOSServer\docs\BUILD_SUCCESS.md:159:Remove-Item guideXOSBootLoader\guideXOS.1fedf2ad -Recurse -Force
+D:\dev\guideXOSServer\docs\COMPLIANCE_CHECKLIST.md:10:- [ ] Parse ELF headers and load segments
+D:\dev\guideXOSServer\docs\COMPLIANCE_CHECKLIST.md:20:- [ ] Parse or load server binary
+D:\dev\guideXOSServer\docs\COMPLIANCE_CHECKLIST.md:46:- [ ] Parse ramdisk from `BootInfo->RamdiskBase`
+D:\dev\guideXOSServer\docs\COMPLIANCE_CHECKLIST.md:142:- [ ] Ensure BootInfo survives ExitBootServices
+D:\dev\guideXOSServer\docs\COMPLIANCE_CHECKLIST.md:217:EFI_GRAPHICS_OUTPUT_PROTOCOL* GOP; ?
+D:\dev\guideXOSServer\docs\COMPLIANCE_SUMMARY.md:112:?  UEFI Firmware ? Provides: GOP, memory services, ACPI
+D:\dev\guideXOSServer\docs\COMPLIANCE_SUMMARY.md:213:v1BootInfo->FramebufferBase = GOP->Mode->FrameBufferBase;  // uint64_t
+D:\dev\guideXOSServer\docs\COMPLIANCE_SUMMARY.md:358:- Parse ELF from ramdisk
+D:\dev\guideXOSServer\docs\CONSOLE_WINDOW_COMPLETE.md:465:- **ANSI color codes** - Parse and display
+D:\dev\guideXOSServer\docs\CRASH_FIX_SUMMARY.md:29:Logger::write(LogLevel::Error, std::string("Notepad: Failed to parse window ID: ") + e.what());
+D:\dev\guideXOSServer\docs\Development Priorities.txt:40:- ia64     Intel Itanium
+D:\dev\guideXOSServer\docs\DEVELOPMENT_PLAN.md:151:// TODO: Parse content into s_lines
+D:\dev\guideXOSServer\docs\DISKMANAGER_IMPLEMENTATION.md:178:entry.bytesPerSector = dev->sectorSize;
+D:\dev\guideXOSServer\docs\DISKMANAGER_IMPLEMENTATION.md:210:uint16_t bytesPerSec = sec[11] | (sec[12] << 8);
+D:\dev\guideXOSServer\docs\DISKMANAGER_IMPLEMENTATION.md:212:if ((bytesPerSec == 512 || ...) && secPerClus != 0) {
+D:\dev\guideXOSServer\docs\DISKMANAGER_IMPLEMENTATION.md:236:// Parse partition table (offset 446)
+D:\dev\guideXOSServer\docs\FIX_INCLUDE_PATHS.md:41:$(ProjectDir)kernel\arch\ia64\include
+D:\dev\guideXOSServer\docs\FIX_INCLUDE_PATHS.md:68:<AdditionalIncludeDirectories>$(ProjectDir)kernel\core\include;$(ProjectDir)kernel\arch\x86\include;$(ProjectDir)kernel\arch\amd64\include;$(ProjectDir)kernel\arch\arm\include;$(ProjectDir)kernel\arch\ia64\include;$(ProjectDir)kernel\arch\sparc\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+D:\dev\guideXOSServer\docs\FIX_INCLUDE_PATHS.md:106:echo kernel\arch\ia64\include
+D:\dev\guideXOSServer\docs\FRAMEBUFFER_ARCHITECTURE.md:44:Parse framebuffer address from Multiboot
+D:\dev\guideXOSServer\docs\FRAMEBUFFER_ARCHITECTURE.md:93:- Parse Multiboot structure
+D:\dev\guideXOSServer\docs\guideXOSServer_UniversalBinarySystem.txt:55:- ia64     (Intel Itanium)
+D:\dev\guideXOSServer\docs\guideXOSServer_UniversalBinarySystem.txt:96:IA64,           // Intel Itanium (IA-64)
+D:\dev\guideXOSServer\docs\guideXOSServer_UniversalBinarySystem.txt:143:case CpuArchitecture::IA64:        return "ia64";
+D:\dev\guideXOSServer\docs\guideXOSServer_UniversalBinarySystem.txt:171:if (strcmp(name, "ia64") == 0 || strcmp(name, "itanium") == 0) {
+D:\dev\guideXOSServer\docs\guideXOSServer_UniversalBinarySystem.txt:172:return CpuArchitecture::IA64;
+D:\dev\guideXOSServer\docs\guideXOSServer_UniversalBinarySystem.txt:213:case CpuArchitecture::IA64:
+D:\dev\guideXOSServer\docs\guideXOSServer_UniversalBinarySystem.txt:229:case CpuArchitecture::IA64:        return 50;   // EM_IA_64
+D:\dev\guideXOSServer\docs\guideXOSServer_UniversalBinarySystem.txt:406:#elif defined(__ia64__)
+D:\dev\guideXOSServer\docs\guideXOSServer_UniversalBinarySystem.txt:407:s_info.architecture = CpuArchitecture::IA64;
+D:\dev\guideXOSServer\docs\guideXOSServer_UniversalBinarySystem.txt:1087:- Lightweight JSON parser
+D:\dev\guideXOSServer\docs\guideXOSServer_UniversalBinarySystem.txt:1131:- Additional architectures (arm64, sparc64, ia64)
+D:\dev\guideXOSServer\docs\GXAPP_FORMAT_SPEC.md:12:- Simple bounded parser suitable for OS loader/package-manager paths.
+D:\dev\guideXOSServer\docs\GXAPP_FORMAT_SPEC.md:100:| IA64 | `ia64` |
+D:\dev\guideXOSServer\docs\GXAPP_FORMAT_SPEC.md:109:## 5. Parser limits
+D:\dev\guideXOSServer\docs\GXAPP_FORMAT_SPEC.md:149:1. Validate source package extension and parse the source `.gxapp`.
+D:\dev\guideXOSServer\docs\GXBUILD.md:13:- ia64
+D:\dev\guideXOSServer\docs\GXBUILD.md:27:--targets amd64,arm64,sparc64,ia64 \
+D:\dev\guideXOSServer\docs\GXBUILD.md:51:"targets": ["amd64", "arm64", "sparc64", "ia64"],
+D:\dev\guideXOSServer\docs\INTEGRATION.md:94:// Parse BootInfo
+D:\dev\guideXOSServer\docs\INTEGRATION.md:116:// 2. Parse ELF headers
+D:\dev\guideXOSServer\docs\INTEGRATION.md:336:- Kernel parses ELF
+D:\dev\guideXOSServer\docs\INTEGRATION_READINESS.md:91:// 2. Parse ELF headers
+D:\dev\guideXOSServer\docs\INTEGRATION_READINESS.md:354:- Day 1-2: Implement ELF parser
+D:\dev\guideXOSServer\docs\ITERATOR_DEBUG_FIX_COMPLETE.md:46:// Or worse: modify the vector THEN use the reference
+D:\dev\guideXOSServer\docs\MINIMAL_KERNEL_SPEC.md:83:- Parse memory map from BootInfo
+D:\dev\guideXOSServer\docs\MINIMAL_KERNEL_SPEC.md:152:// 1. Parse ramdisk from BootInfo
+D:\dev\guideXOSServer\docs\MINIMAL_KERNEL_SPEC.md:182:Since ELF loader and ramdisk parser don't exist yet:
+D:\dev\guideXOSServer\docs\MINIMAL_KERNEL_SPEC.md:188:// TODO: Parse ELF
+D:\dev\guideXOSServer\docs\MINIMAL_KERNEL_SPEC.md:238:// Parse memory map
+D:\dev\guideXOSServer\docs\MINIMAL_KERNEL_SPEC.md:326:- Parse ramdisk
+D:\dev\guideXOSServer\docs\MULTIBOOT_FIXED.md:15:When you set bit 2 (video mode) in Multiboot v1, you need additional header fields in a specific format, **OR** you need to use Multiboot v2. The header had a mix that QEMU's Multiboot loader couldn't parse, so it fell back to "Booting from ROM...".
+D:\dev\guideXOSServer\docs\NETWORK_SETUP.md:75:? **`10.0.2.15`** - Pinging yourself (loopback not fully implemented)
+D:\dev\guideXOSServer\docs\NOTEPAD_CRASH_DIAGNOSIS.md:85:| `"Failed to parse window ID..."` | ? Bad response format |
+D:\dev\guideXOSServer\docs\NOTEPAD_CRASH_DIAGNOSIS.md:111:### Scenario B: "Failed to parse..." error logged
+D:\dev\guideXOSServer\docs\NOTEPAD_CRASH_DIAGNOSIS.md:218:### "Failed to parse window ID: <error>"
+D:\dev\guideXOSServer\docs\NOTEPAD_CRASH_DIAGNOSIS.md:219:? **Got response but couldn't parse it**
+D:\dev\guideXOSServer\docs\NOTEPAD_CRASH_FIXED.md:17:- Any string that couldn't be parsed as an unsigned long long
+D:\dev\guideXOSServer\docs\NOTEPAD_CRASH_FIXED.md:40:Logger::write(LogLevel::Error, std::string("Failed to parse: ") + e.what());
+D:\dev\guideXOSServer\docs\NOTEPAD_CRASH_FIXED.md:109:- Throws `std::invalid_argument` if string can't be parsed
+D:\dev\guideXOSServer\docs\NOTEPAD_CRASH_FIXED.md:139:2. **Look for** "Failed to parse..." messages
+D:\dev\guideXOSServer\docs\NOTEPAD_CRASH_FIXED.md:155:| `"Failed to parse window ID: invalid stoul argument"` | Compositor sent malformed MT_Create |
+D:\dev\guideXOSServer\docs\NOTEPAD_CRASH_FIXED.md:156:| `"Failed to parse close ID: invalid stoul argument"` | Compositor sent malformed MT_Close |
+D:\dev\guideXOSServer\docs\NOTEPAD_CRASH_FIXED.md:157:| `"Failed to parse key code: invalid stoi argument"` | Compositor sent malformed MT_InputKey |
+D:\dev\guideXOSServer\docs\NOTEPAD_CRASH_FIXED.md:158:| `"Failed to parse widget event: invalid stoul argument"` | Compositor sent malformed MT_WidgetEvt |
+D:\dev\guideXOSServer\docs\NOTEPAD_CRASH_FIXED.md:191:// Safe to parse
+D:\dev\guideXOSServer\docs\NOTEPAD_DIAGNOSTIC_GUIDE.md:208:5. **Tries to parse** the message payload
+D:\dev\guideXOSServer\docs\NOTEPAD_PARITY_ANALYSIS.md:212:- [ ] Parse file content into s_lines
+D:\dev\guideXOSServer\docs\NOTEPAD_PARITY_PROGRESS.md:16:- ? `openFile()` - Reads file from VFS, parses into lines
+D:\dev\guideXOSServer\docs\NOTEPAD_PARITY_PROGRESS.md:27:// Parse into lines...
+D:\dev\guideXOSServer\docs\NOTEPAD_TEST_GUIDE.md:272:[ERROR] Failed to parse ...
+D:\dev\guideXOSServer\docs\Other_Random_Development_Priorities.txt:37:ia64
+D:\dev\guideXOSServer\docs\Other_Random_Development_Priorities.txt:157:ia64
+D:\dev\guideXOSServer\docs\PHASE5_FINAL_SUMMARY.md:323:1. Test the features yourself
+D:\dev\guideXOSServer\docs\PHASE6_NOTEPAD_COMPLETE.md:34:- ? Parse file content into lines
+D:\dev\guideXOSServer\docs\PHASE6_NOTEPAD_COMPLETE.md:49:// Parse into lines
+D:\dev\guideXOSServer\docs\PHASE6_SESSION1.md:117:- [ ] Parse key code and action
+D:\dev\guideXOSServer\docs\PHASE6_SESSION1.md:142:- [ ] Parse file content into lines
+D:\dev\guideXOSServer\docs\PHASE7.5_FILESYSTEM_SHAKEDOWN.md:199:Problem: vfs::open() doesn't actually traverse directories to find files.
+D:\dev\guideXOSServer\docs\PHASE7.5_FILESYSTEM_SHAKEDOWN.md:205:// In full implementation, we'd traverse directories
+D:\dev\guideXOSServer\docs\PHASE7.5_FILESYSTEM_SHAKEDOWN.md:210:1. Parse path into components: "/apps/hello.txt" ? ["apps", "hello.txt"]
+D:\dev\guideXOSServer\docs\PHASE7.5_FILESYSTEM_SHAKEDOWN.md:411:2. vfs.cpp - No open_by_path() that parses "/path/to/file"
+D:\dev\guideXOSServer\docs\PHASE8_UNIVERSAL_BINARY_SYSTEM.md:109:IA64,           // Intel Itanium
+D:\dev\guideXOSServer\docs\PHASE8_UNIVERSAL_BINARY_SYSTEM.md:502:| 8c.7 | JSON parser for metadata.json | Medium |
+D:\dev\guideXOSServer\docs\PHASE8_UNIVERSAL_BINARY_SYSTEM.md:601:?    - Parse ELF headers              ?
+D:\dev\guideXOSServer\docs\PHASE8_UNIVERSAL_BINARY_SYSTEM.md:753:| 8e.1 | Create argument parser | Low |
+D:\dev\guideXOSServer\docs\PHASE8_UNIVERSAL_BINARY_SYSTEM.md:760:| 8e.8 | Project file parser | Medium |
+D:\dev\guideXOSServer\docs\QEMU_BOOT_FIX.md:114:**Problem:** If you built using Visual Studio (F7), it might produce a Windows PE/COFF executable instead of an ELF file.
+D:\dev\guideXOSServer\docs\README-BOOT.md:309:- `ARCH=ia64` - 64-bit Itanium
+D:\dev\guideXOSServer\docs\REPOSITORY_CLASSIFICATION.md:27:- ? Parse ELF headers and segments
+D:\dev\guideXOSServer\docs\REPOSITORY_CLASSIFICATION.md:98:??? ia64/
+D:\dev\guideXOSServer\docs\REPOSITORY_CLASSIFICATION.md:247:v1BootInfo->FramebufferBase = GOP->Mode->FrameBufferBase;
+D:\dev\guideXOSServer\docs\REPOSITORY_CLASSIFICATION.md:250:ExitBootServicesWithMemoryMapInBuffer(...);
+D:\dev\guideXOSServer\docs\REPOSITORY_CLASSIFICATION.md:279:// CORRECT: Parse BootInfo ?
+D:\dev\guideXOSServer\docs\REPOSITORY_CLASSIFICATION.md:390:| Exit boot services | ? Yes | `ExitBootServices` called |
+D:\dev\guideXOSServer\docs\ROADMAP.txt:15:�	Port GXMLoader.cs to C++ (gxm_loader.{h,cpp}). Parse simple �GUI script� and emit compositor messages.
+D:\dev\guideXOSServer\docs\SDK_ARCHITECTURE.md:162:- IA-64, SPARC may have better GCC support
+D:\dev\guideXOSServer\docs\SESSION_NOTEPAD_PARITY_COMPLETE.md:26:- Parse content into lines
+D:\dev\guideXOSServer\docs\SESSION_SUMMARY_CURRENT.md:219:std::string("Parse failed: ") + e.what() +
+D:\dev\guideXOSServer\docs\SESSION_SUMMARY_CURRENT.md:371:- Validate, then parse, then handle errors
+D:\dev\guideXOSServer\docs\SIMPLE_FIX.md:23:Based on my analysis, the crash is probably happening when trying to **parse the window ID** from the MT_Create response:
+D:\dev\guideXOSServer\docs\SIMPLE_FIX.md:48:If you want to fix it yourself:
+D:\dev\guideXOSServer\docs\SIMPLE_FIX.md:53:Logger::write(LogLevel::Info, std::string("Notepad: About to parse payload: ") + payload);
+D:\dev\guideXOSServer\docs\TEST_NOTEPAD.md:64:- `"Failed to parse..."` ? Tell me the full message
+D:\dev\guideXOSServer\docs\TROUBLESHOOTING_PING.md:10:Remove-Item -Recurse -Force ESP\kernel.elf -ErrorAction SilentlyContinue
+D:\dev\guideXOSServer\docs\TROUBLESHOOTING_PING.md:11:Remove-Item -Recurse -Force kernel\build\amd64 -ErrorAction SilentlyContinue
+D:\dev\guideXOSServer\docs\UEFI_BOOT.md:296:- Loaded but not parsed
+D:\dev\guideXOSServer\docs\UEFI_BOOT.md:297:- TODO: Implement tar/initramfs parser
+D:\dev\guideXOSServer\docs\UEFI_BOOT_CHECKLIST.md:84:- [ ] Parse ramdisk (tar/initramfs)
+D:\dev\guideXOSServer\docs\UEFI_INTEGRATION_SUMMARY.md:318:4. **Ramdisk Parser** - Extract files from initramfs
+D:\dev\guideXOSServer\docs\universal-app-audit.md:8:- The canonical architecture set now includes `Unknown`, `X86`, `AMD64`, `ARM`, `ARM64`, `IA64`, `LOONGARCH64`, `MIPS64`, `PPC64`, `SPARC`, `SPARC64`, `RISCV64`, and `S390X`.
+D:\dev\guideXOSServer\docs\universal-app-audit.md:20:- Metadata parsing is still a small hand-rolled parser, not a full JSON parser. It now rejects more malformed metadata, but it can still misread duplicate fields or misleading nested fields.
+D:\dev\guideXOSServer\docs\universal-app-audit.md:21:- `parseEntryPointForArchitecture` can still fall back to `main` when the per-architecture entry point is missing or malformed.
+D:\dev\guideXOSServer\docs\universal-app-audit.md:31:1. Replace the remaining hand-rolled metadata and entry-point lookup logic with a bounded strict JSON parser or a purpose-built metadata scanner that rejects duplicates and validates the binary table against entries.
+D:\dev\guideXOSServer\docs\VNC_IMPLEMENTATION_COMPLETE.md:364:5. **Teaching** - Perfect for OS development courses
+D:\dev\guideXOSServer\docs\VNC_REMOTE_BOOT_PLAN.md:19:?   Framebuffer (VBE/GOP)                     ?
+D:\dev\guideXOSServer\docs\VNC_REMOTE_BOOT_PLAN.md:138:2. ? Parse framebuffer info from Multiboot
+D:\dev\guideXOSServer\docs\VS_BUILD_ERRORS_FIX.md:57:$(ProjectDir)kernel\arch\ia64\include
+D:\dev\guideXOSServer\guideXOSBootLoader\Protocol\GraphicsOutput.h:3:// Minimal stub for Protocol/GraphicsOutput.h
+D:\dev\guideXOSServer\guideXOSBootLoader\Protocol\GraphicsOutput.h:50:extern EFI_GUID gEfiGraphicsOutputProtocolGuid;
+D:\dev\guideXOSServer\guideXOSBootLoader\Protocol\SimpleFileSystem.h:3:// Minimal stub for Protocol/SimpleFileSystem.h
+D:\dev\guideXOSServer\guideXOSBootLoader\Protocol\SimpleFileSystem.h:20:extern EFI_GUID gEfiSimpleFileSystemProtocolGuid;
+D:\dev\guideXOSServer\guideXOSBootLoader\bootinfo.h:7:#include "Protocol/SimpleFileSystem.h"
+D:\dev\guideXOSServer\guideXOSBootLoader\bootinfo.h:13:// We will fill it with data from UEFI's GOP.
+D:\dev\guideXOSServer\guideXOSBootLoader\boot_diagnostics.h:3:// Works both before and after ExitBootServices
+D:\dev\guideXOSServer\guideXOSBootLoader\boot_diagnostics.h:27:// SECTION 1: SERIAL PORT OUTPUT (works after ExitBootServices)
+D:\dev\guideXOSServer\guideXOSBootLoader\debug_helpers.h:2:// Post-ExitBootServices debugging helpers for GuideXOS
+D:\dev\guideXOSServer\guideXOSBootLoader\debug_helpers.h:123:// Verify CPU is in expected state after ExitBootServices
+D:\dev\guideXOSServer\guideXOSBootLoader\elf.h:8:#include "Protocol/SimpleFileSystem.h"
+D:\dev\guideXOSServer\guideXOSBootLoader\fb_console.cpp:221:// GOP usually exposes XRGB32 or BGRA32.
+D:\dev\guideXOSServer\guideXOSBootLoader\fb_console.cpp:249:s_bpp    = 32; // guideXOS v1 assumes 32bpp GOP for now
+D:\dev\guideXOSServer\guideXOSBootLoader\fb_console.cpp:353:unsigned int srcOffset = scrollPixels * s_pitch;
+D:\dev\guideXOSServer\guideXOSBootLoader\fb_console.cpp:361:volatile unsigned char* src = s_fbBase + srcOffset + y * s_pitch;
+D:\dev\guideXOSServer\guideXOSBootLoader\fb_console.h:5:// Minimal framebuffer text console that works after ExitBootServices.
+D:\dev\guideXOSServer\guideXOSBootLoader\fb_console.h:7:// - Uses linear framebuffer from `VBEInfo` in `BootInfo` (UEFI GOP-backed).
+D:\dev\guideXOSServer\guideXOSBootLoader\fb_console.h:11:// - Safe to call from both bootloader (after ExitBootServices) and kernel
+D:\dev\guideXOSServer\guideXOSBootLoader\guidexOSBootInfo.h:16:// Simple framebuffer pixel format (subset of what GOP can describe)
+D:\dev\guideXOSServer\guideXOSBootLoader\main.cpp:21:- calling UEFI services after ExitBootServices
+D:\dev\guideXOSServer\guideXOSBootLoader\main.cpp:29:#include <Protocol/SimpleFileSystem.h>
+D:\dev\guideXOSServer\guideXOSBootLoader\main.cpp:31:#include <Protocol/GraphicsOutput.h>
+D:\dev\guideXOSServer\guideXOSBootLoader\main.cpp:38:#include "debug_helpers.h"     // Post-ExitBootServices debugging
+D:\dev\guideXOSServer\guideXOSBootLoader\main.cpp:55:EFI_GRAPHICS_OUTPUT_PROTOCOL* GOP;
+D:\dev\guideXOSServer\guideXOSBootLoader\main.cpp:58:// v1BootInfo is now allocated dynamically in EfiLoaderData pages to survive ExitBootServices
+D:\dev\guideXOSServer\guideXOSBootLoader\main.cpp:66:SystemTable->BootServices->HandleProtocol(ImageHandle, &gEfiLoadedImageProtocolGuid, (void**)&LoadedImage);
+D:\dev\guideXOSServer\guideXOSBootLoader\main.cpp:67:SystemTable->BootServices->HandleProtocol(LoadedImage->DeviceHandle, &gEfiSimpleFileSystemProtocolGuid, (void**)&FileSystem);
+D:\dev\guideXOSServer\guideXOSBootLoader\main.cpp:78:// (Kept for compatibility; handoff path uses ExitBootServicesWithMemoryMapInBuffer)
+D:\dev\guideXOSServer\guideXOSBootLoader\main.cpp:79:EFI_STATUS ExitBootServicesWithMemoryMap(
+D:\dev\guideXOSServer\guideXOSBootLoader\main.cpp:95:status = SystemTable->BootServices->GetMemoryMap(
+D:\dev\guideXOSServer\guideXOSBootLoader\main.cpp:122:status = SystemTable->BootServices->GetMemoryMap(
+D:\dev\guideXOSServer\guideXOSBootLoader\main.cpp:131:// Map grew; reallocate and retry (still before ExitBootServices)
+D:\dev\guideXOSServer\guideXOSBootLoader\main.cpp:152:// survives ExitBootServices (conventional pages, not pool).
+D:\dev\guideXOSServer\guideXOSBootLoader\main.cpp:170:status = SystemTable->BootServices->ExitBootServices(
+D:\dev\guideXOSServer\guideXOSBootLoader\main.cpp:177:// - finalMap is now in pages that remain valid after ExitBootServices
+D:\dev\guideXOSServer\guideXOSBootLoader\main.cpp:189:// ExitBootServices failed; free finalMap pages while BootServices
+D:\dev\guideXOSServer\guideXOSBootLoader\main.cpp:207:EFI_STATUS ExitBootServicesWithMemoryMapInBuffer(
+D:\dev\guideXOSServer\guideXOSBootLoader\main.cpp:227:status = SystemTable->BootServices->GetMemoryMap(
+D:\dev\guideXOSServer\guideXOSBootLoader\main.cpp:245:status = SystemTable->BootServices->GetMemoryMap(
+D:\dev\guideXOSServer\guideXOSBootLoader\main.cpp:272:status = SystemTable->BootServices->ExitBootServices(ImageHandle, mapKey);
+D:\dev\guideXOSServer\guideXOSBootLoader\main.cpp:333:// --- Allocate BootInfo in EfiLoaderData pages (survives ExitBootServices) ---
+D:\dev\guideXOSServer\guideXOSBootLoader\main.cpp:356:// --- Locate GOP ---
+D:\dev\guideXOSServer\guideXOSBootLoader\main.cpp:357:EFI_GUID gopGuid = EFI_GRAPHICS_OUTPUT_PROTOCOL_GUID;
+D:\dev\guideXOSServer\guideXOSBootLoader\main.cpp:358:status = SystemTable->BootServices->LocateProtocol(
+D:\dev\guideXOSServer\guideXOSBootLoader\main.cpp:359:&gopGuid,
+D:\dev\guideXOSServer\guideXOSBootLoader\main.cpp:361:(void**)&GOP
+D:\dev\guideXOSServer\guideXOSBootLoader\main.cpp:364:Print(L"Failed to locate GOP\n");
+D:\dev\guideXOSServer\guideXOSBootLoader\main.cpp:455:// --- Populate BootInfo v1 BEFORE ExitBootServices ---
+D:\dev\guideXOSServer\guideXOSBootLoader\main.cpp:466:// Framebuffer from GOP
+D:\dev\guideXOSServer\guideXOSBootLoader\main.cpp:467:v1BootInfo->FramebufferBase   = (uint64_t)GOP->Mode->FrameBufferBase;
+D:\dev\guideXOSServer\guideXOSBootLoader\main.cpp:468:v1BootInfo->FramebufferWidth  = GOP->Mode->Info->HorizontalResolution;
+D:\dev\guideXOSServer\guideXOSBootLoader\main.cpp:469:v1BootInfo->FramebufferHeight = GOP->Mode->Info->VerticalResolution;
+D:\dev\guideXOSServer\guideXOSBootLoader\main.cpp:470:v1BootInfo->FramebufferPitch  = GOP->Mode->Info->PixelsPerScanLine * 4u; // 32 bpp
+D:\dev\guideXOSServer\guideXOSBootLoader\main.cpp:473:v1BootInfo->FramebufferFormat = guideXOS::FramebufferFormat::B8G8R8A8; // typical GOP
+D:\dev\guideXOSServer\guideXOSBootLoader\main.cpp:478:// Allocate a simple stack that survives ExitBootServices
+D:\dev\guideXOSServer\guideXOSBootLoader\main.cpp:579:// --- Allocate executable trampoline buffer that survives ExitBootServices ---
+D:\dev\guideXOSServer\guideXOSBootLoader\main.cpp:654:// --- Build identity-mapped page tables BEFORE ExitBootServices ---
+D:\dev\guideXOSServer\guideXOSBootLoader\main.cpp:658:// that survives ExitBootServices and include it in the mappings.
+D:\dev\guideXOSServer\guideXOSBootLoader\main.cpp:677:// CRITICAL: Map ALL regions the kernel needs access to after ExitBootServices:
+D:\dev\guideXOSServer\guideXOSBootLoader\main.cpp:723:// 6. Framebuffer - CRITICAL for any display output after ExitBootServices
+D:\dev\guideXOSServer\guideXOSBootLoader\main.cpp:754:EFI_STATUS st = SystemTable->BootServices->HandleProtocol(
+D:\dev\guideXOSServer\guideXOSBootLoader\main.cpp:864:// Draw a visible marker on framebuffer BEFORE ExitBootServices
+D:\dev\guideXOSServer\guideXOSBootLoader\main.cpp:885:EFI_STATUS statusExit = ExitBootServicesWithMemoryMapInBuffer(
+D:\dev\guideXOSServer\guideXOSBootLoader\main.cpp:894:Print(L"ExitBootServices failed: %r\n", statusExit);
+D:\dev\guideXOSServer\guideXOSBootLoader\main.cpp:898:// *** CRITICAL: No Print() or any UEFI Boot Services calls after ExitBootServices! ***
+D:\dev\guideXOSServer\guideXOSBootLoader\main.cpp:966:// === POST-EXITBOOTSERVICES DEBUGGING ===
+D:\dev\guideXOSServer\guideXOSBootLoader\main.cpp:992:guideXOS::debug::SerialPrint("\n\n=== GuideXOS Boot (Post-ExitBootServices) ===\n");
+D:\dev\guideXOSServer\guideXOSBootLoader\trampoline_msvc.cpp:125:// Pass a pointer to executable memory that will persist after ExitBootServices
+D:\dev\guideXOSServer\guideXOSBootLoader\Uefi.h:183:EFI_STATUS (EFIAPI *GetMemoryMap)(
+D:\dev\guideXOSServer\guideXOSBootLoader\Uefi.h:211:EFI_STATUS (EFIAPI *HandleProtocol)(
+D:\dev\guideXOSServer\guideXOSBootLoader\Uefi.h:223:VOID*   LoadImage;
+D:\dev\guideXOSServer\guideXOSBootLoader\Uefi.h:224:VOID*   StartImage;
+D:\dev\guideXOSServer\guideXOSBootLoader\Uefi.h:226:VOID*   UnloadImage;
+D:\dev\guideXOSServer\guideXOSBootLoader\Uefi.h:227:EFI_STATUS (EFIAPI *ExitBootServices)(
+D:\dev\guideXOSServer\guideXOSBootLoader\Uefi.h:249:EFI_STATUS (EFIAPI *LocateProtocol)(
+D:\dev\guideXOSServer\guideXOSBootLoader\uefi_guids.cpp:2:#include "Protocol/SimpleFileSystem.h"
+D:\dev\guideXOSServer\guideXOSBootLoader\uefi_guids.cpp:4:#include "Protocol/GraphicsOutput.h"
+D:\dev\guideXOSServer\guideXOSBootLoader\uefi_guids.cpp:11:EFI_GUID gEfiSimpleFileSystemProtocolGuid = EFI_SIMPLE_FILE_SYSTEM_PROTOCOL_GUID;
+D:\dev\guideXOSServer\guideXOSBootLoader\uefi_guids.cpp:15:EFI_GUID gEfiGraphicsOutputProtocolGuid   = EFI_GRAPHICS_OUTPUT_PROTOCOL_GUID;
+D:\dev\guideXOSServer\guideXOSBootLoader\uefi_shim.h:65:// reverse
+D:\dev\guideXOSServer\kernel\arch\arm64\include\arch\arm64.h:44:static const uint64_t EL2 = 2;  // Hypervisor
+D:\dev\guideXOSServer\kernel\arch\arm64\boot.S:147:orr     x0, x0, #(1 << 8)           /* HCE: Hypervisor call enable */
+D:\dev\guideXOSServer\kernel\arch\arm64\boot.S:162:* EL2 Entry (Hypervisor level)
+D:\dev\guideXOSServer\kernel\arch\arm64\graphics.cpp:85:// device tree or UEFI GOP)
+D:\dev\guideXOSServer\kernel\arch\arm64\serial_console.cpp:185:// Build digits in reverse
+D:\dev\guideXOSServer\kernel\arch\arm64\syscall.cpp:65:// Reverse the number part
+D:\dev\guideXOSServer\kernel\arch\ia64\include\arch\context_switch.h:2:// IA-64 (Itanium) Context Switch and Scheduler Integration
+D:\dev\guideXOSServer\kernel\arch\ia64\include\arch\context_switch.h:5:// primitives for the IA-64 architecture.
+D:\dev\guideXOSServer\kernel\arch\ia64\include\arch\context_switch.h:7:// IA-64 register set:
+D:\dev\guideXOSServer\kernel\arch\ia64\include\arch\context_switch.h:16://     - GR14-GR31 = scratch (stacked in RSE)
+D:\dev\guideXOSServer\kernel\arch\ia64\include\arch\context_switch.h:17://     - GR32-GR127 = stacked registers (RSE managed)
+D:\dev\guideXOSServer\kernel\arch\ia64\include\arch\context_switch.h:19://   - 64 predicate registers (PR0-PR63)
+D:\dev\guideXOSServer\kernel\arch\ia64\include\arch\context_switch.h:23:// The Register Stack Engine (RSE) automatically saves/restores
+D:\dev\guideXOSServer\kernel\arch\ia64\include\arch\context_switch.h:35:namespace ia64 {
+D:\dev\guideXOSServer\kernel\arch\ia64\include\arch\context_switch.h:69:uint64_t rnat;   // AR.RNAT (RSE NaT collection)
+D:\dev\guideXOSServer\kernel\arch\ia64\include\arch\context_switch.h:84:// Predicate registers (64-bit mask)
+D:\dev\guideXOSServer\kernel\arch\ia64\include\arch\context_switch.h:108:// RSE state for context switch
+D:\dev\guideXOSServer\kernel\arch\ia64\include\arch\context_switch.h:113:// Predicate registers
+D:\dev\guideXOSServer\kernel\arch\ia64\include\arch\context_switch.h:118:// Thread Control Block (TCB) extension for IA-64
+D:\dev\guideXOSServer\kernel\arch\ia64\include\arch\context_switch.h:145:// TODO: IA-64 specific assembly to read GR12
+D:\dev\guideXOSServer\kernel\arch\ia64\include\arch\context_switch.h:163:} // namespace ia64
+D:\dev\guideXOSServer\kernel\arch\ia64\include\arch\graphics.h:1:// Itanium (IA-64) Graphics Backend
+D:\dev\guideXOSServer\kernel\arch\ia64\include\arch\graphics.h:3:// Provides platform-specific graphics initialisation for IA-64:
+D:\dev\guideXOSServer\kernel\arch\ia64\include\arch\graphics.h:5://   1. EFI GOP (Graphics Output Protocol) framebuffer
+D:\dev\guideXOSServer\kernel\arch\ia64\include\arch\graphics.h:11://      On real Itanium servers with PCI VGA cards, the linear
+D:\dev\guideXOSServer\kernel\arch\ia64\include\arch\graphics.h:29:namespace ia64 {
+D:\dev\guideXOSServer\kernel\arch\ia64\include\arch\graphics.h:33:// EFI GOP framebuffer descriptor
+D:\dev\guideXOSServer\kernel\arch\ia64\include\arch\graphics.h:39:struct EfiGopInfo {
+D:\dev\guideXOSServer\kernel\arch\ia64\include\arch\graphics.h:50:// Initialise the IA-64 graphics subsystem.
+D:\dev\guideXOSServer\kernel\arch\ia64\include\arch\graphics.h:51:// Attempts to use EFI GOP info, then falls back to PCI VGA probe.
+D:\dev\guideXOSServer\kernel\arch\ia64\include\arch\graphics.h:55:// Initialise from an EFI GOP descriptor (passed from bootloader).
+D:\dev\guideXOSServer\kernel\arch\ia64\include\arch\graphics.h:56:bool init_from_gop(const EfiGopInfo* gopInfo);
+D:\dev\guideXOSServer\kernel\arch\ia64\include\arch\graphics.h:69:} // namespace ia64
+D:\dev\guideXOSServer\kernel\arch\ia64\include\arch\ia64.h:2:// Itanium (IA-64) Architecture-Specific Code
+D:\dev\guideXOSServer\kernel\arch\ia64\include\arch\ia64.h:13:namespace ia64 {
+D:\dev\guideXOSServer\kernel\arch\ia64\include\arch\ia64.h:33:// RSE (Register Stack Engine) operations
+D:\dev\guideXOSServer\kernel\arch\ia64\include\arch\ia64.h:34:void flush_rse();
+D:\dev\guideXOSServer\kernel\arch\ia64\include\arch\ia64.h:50:} // namespace ia64
+D:\dev\guideXOSServer\kernel\arch\ia64\include\arch\pci_audio.h:1:// Itanium (IA-64) PCI Audio Backend
+D:\dev\guideXOSServer\kernel\arch\ia64\include\arch\pci_audio.h:3:// Platform-specific PCI audio initialisation for IA-64:
+D:\dev\guideXOSServer\kernel\arch\ia64\include\arch\pci_audio.h:17:namespace ia64 {
+D:\dev\guideXOSServer\kernel\arch\ia64\include\arch\pci_audio.h:25:} // namespace ia64
+D:\dev\guideXOSServer\kernel\arch\ia64\include\arch\ski_console.h:3:// The HP ski IA-64 simulator provides a firmware-style console via
+D:\dev\guideXOSServer\kernel\arch\ia64\include\arch\ski_console.h:20:namespace ia64 {
+D:\dev\guideXOSServer\kernel\arch\ia64\include\arch\ski_console.h:55:} // namespace ia64
+D:\dev\guideXOSServer\kernel\arch\ia64\include\arch\syscall.h:2:// IA-64 (Itanium) System Call Interface
+D:\dev\guideXOSServer\kernel\arch\ia64\include\arch\syscall.h:5:// interrupt dispatch for the IA-64 architecture.
+D:\dev\guideXOSServer\kernel\arch\ia64\include\arch\syscall.h:7:// IA-64 syscall mechanism (EPC - Enter Privileged Code):
+D:\dev\guideXOSServer\kernel\arch\ia64\include\arch\syscall.h:23:namespace ia64 {
+D:\dev\guideXOSServer\kernel\arch\ia64\include\arch\syscall.h:157:// IA-64 interruption vectors
+D:\dev\guideXOSServer\kernel\arch\ia64\include\arch\syscall.h:196:} // namespace ia64
+D:\dev\guideXOSServer\kernel\arch\ia64\include\arch\usb_hci.h:1:// IA-64 (Itanium) USB Host Controller Interface
+D:\dev\guideXOSServer\kernel\arch\ia64\include\arch\usb_hci.h:3:// OHCI/EHCI driver for IA-64 platforms.
+D:\dev\guideXOSServer\kernel\arch\ia64\include\arch\usb_hci.h:4:// On Itanium systems, USB controllers are PCI devices accessed
+D:\dev\guideXOSServer\kernel\arch\ia64\include\arch\usb_hci.h:5:// through the standard IA-64 PCI configuration mechanism.
+D:\dev\guideXOSServer\kernel\arch\ia64\include\arch\usb_hci.h:16:namespace ia64 {
+D:\dev\guideXOSServer\kernel\arch\ia64\include\arch\usb_hci.h:26:} // namespace ia64
+D:\dev\guideXOSServer\kernel\arch\ia64\arch.cpp:2:// Itanium (IA-64) Architecture Implementation
+D:\dev\guideXOSServer\kernel\arch\ia64\arch.cpp:7:#include "include/arch/ia64.h"
+D:\dev\guideXOSServer\kernel\arch\ia64\arch.cpp:18:namespace ia64 {
+D:\dev\guideXOSServer\kernel\arch\ia64\arch.cpp:156:void flush_rse()
+D:\dev\guideXOSServer\kernel\arch\ia64\arch.cpp:255:// RSE backing store is also configured in boot.s.
+D:\dev\guideXOSServer\kernel\arch\ia64\arch.cpp:261:ski_console::puts("guideXOS IA-64 kernel init\r\n");
+D:\dev\guideXOSServer\kernel\arch\ia64\arch.cpp:269:// Verify RSE backing store pointer (diagnostic)
+D:\dev\guideXOSServer\kernel\arch\ia64\arch.cpp:293:ski_console::puts("IA-64 arch init complete\r\n");
+D:\dev\guideXOSServer\kernel\arch\ia64\arch.cpp:296:} // namespace ia64
+D:\dev\guideXOSServer\kernel\arch\ia64\boot.s:2:* Itanium (IA-64) Kernel Entry Point
+D:\dev\guideXOSServer\kernel\arch\ia64\boot.s:7:* IA-64 boot differences from other architectures:
+D:\dev\guideXOSServer\kernel\arch\ia64\boot.s:9:*   - Register Stack Engine (RSE) manages spill/fill automatically
+D:\dev\guideXOSServer\kernel\arch\ia64\boot.s:10:*   - Instruction bundles are 128-bit (3 instructions + template)
+D:\dev\guideXOSServer\kernel\arch\ia64\boot.s:13:*   - Predicate registers (p0-p63), p0 always true
+D:\dev\guideXOSServer\kernel\arch\ia64\boot.s:34:* IA-64 IVT has 69 entry points, each 256 bytes (64 bundles).
+D:\dev\guideXOSServer\kernel\arch\ia64\boot.s:41:.global ia64_ivt
+D:\dev\guideXOSServer\kernel\arch\ia64\boot.s:43:ia64_ivt:
+D:\dev\guideXOSServer\kernel\arch\ia64\boot.s:181:* IA-64 stack grows downward; sp must be 16-byte aligned.
+D:\dev\guideXOSServer\kernel\arch\ia64\boot.s:185:/* ---- 4. Set up RSE backing store ----
+D:\dev\guideXOSServer\kernel\arch\ia64\boot.s:189:movl r14 = rse_backing_store_base ;;
+D:\dev\guideXOSServer\kernel\arch\ia64\boot.s:192:mov ar.rsc = 3 ;;       /* eager RSE mode, little-endian */
+D:\dev\guideXOSServer\kernel\arch\ia64\boot.s:197:movl r14 = ia64_ivt ;;
+D:\dev\guideXOSServer\kernel\arch\ia64\boot.s:216:* IA-64 C calling convention: first two args in out0, out1.
+D:\dev\guideXOSServer\kernel\arch\ia64\boot.s:241:* RSE (Register Stack Engine) backing store � 64 KB (BSS)
+D:\dev\guideXOSServer\kernel\arch\ia64\boot.s:243:* The RSE spills stacked registers here automatically.
+D:\dev\guideXOSServer\kernel\arch\ia64\boot.s:247:rse_backing_store_base:
+D:\dev\guideXOSServer\kernel\arch\ia64\boot.s:249:rse_backing_store_top:
+D:\dev\guideXOSServer\kernel\arch\ia64\context_switch.cpp:2:// IA-64 (Itanium) Context Switch Implementation
+D:\dev\guideXOSServer\kernel\arch\ia64\context_switch.cpp:4:// Provides context switching primitives for the scheduler on IA-64.
+D:\dev\guideXOSServer\kernel\arch\ia64\context_switch.cpp:6:// IA-64 context switch is more complex than other architectures due to:
+D:\dev\guideXOSServer\kernel\arch\ia64\context_switch.cpp:7:// - Register Stack Engine (RSE) managing stacked registers
+D:\dev\guideXOSServer\kernel\arch\ia64\context_switch.cpp:9:// - Predicate registers affecting control flow
+D:\dev\guideXOSServer\kernel\arch\ia64\context_switch.cpp:15:#include "include/arch/ia64.h"
+D:\dev\guideXOSServer\kernel\arch\ia64\context_switch.cpp:26:namespace ia64 {
+D:\dev\guideXOSServer\kernel\arch\ia64\context_switch.cpp:63:// IA-64 requires 16-byte stack alignment
+D:\dev\guideXOSServer\kernel\arch\ia64\context_switch.cpp:88:// RSE state - needs proper initialization
+D:\dev\guideXOSServer\kernel\arch\ia64\context_switch.cpp:93:// Predicate registers
+D:\dev\guideXOSServer\kernel\arch\ia64\context_switch.cpp:129:// IA-64 Context Switch Assembly
+D:\dev\guideXOSServer\kernel\arch\ia64\context_switch.cpp:135:// IA-64 uses a register-based calling convention with stacked registers.
+D:\dev\guideXOSServer\kernel\arch\ia64\context_switch.cpp:136:// TODO: This needs proper IA-64 assembly syntax and RSE handling
+D:\dev\guideXOSServer\kernel\arch\ia64\context_switch.cpp:139:// Placeholder - needs proper IA-64 assembly implementation
+D:\dev\guideXOSServer\kernel\arch\ia64\context_switch.cpp:142:// TODO: Implement IA-64 context switch
+D:\dev\guideXOSServer\kernel\arch\ia64\context_switch.cpp:144:// 1. Flush RSE (flushrs instruction)
+D:\dev\guideXOSServer\kernel\arch\ia64\context_switch.cpp:148:// 5. Save RSE state (AR.BSP, AR.BSPSTORE, AR.RNAT)
+D:\dev\guideXOSServer\kernel\arch\ia64\context_switch.cpp:149:// 6. Save predicate registers
+D:\dev\guideXOSServer\kernel\arch\ia64\context_switch.cpp:152:// 9. Restore RSE state
+D:\dev\guideXOSServer\kernel\arch\ia64\context_switch.cpp:162:// TODO: Save all IA-64 context for exception handling
+D:\dev\guideXOSServer\kernel\arch\ia64\context_switch.cpp:168:// TODO: Restore IA-64 context and return from interruption
+D:\dev\guideXOSServer\kernel\arch\ia64\context_switch.cpp:228:} // namespace ia64
+D:\dev\guideXOSServer\kernel\arch\ia64\graphics.cpp:1:// Itanium (IA-64) Graphics Backend � Implementation
+D:\dev\guideXOSServer\kernel\arch\ia64\graphics.cpp:3:// EFI GOP framebuffer and PCI VGA discovery for IA-64 platforms.
+D:\dev\guideXOSServer\kernel\arch\ia64\graphics.cpp:8:// On real Itanium servers (rx2620, rx6600, Integrity, etc.) the
+D:\dev\guideXOSServer\kernel\arch\ia64\graphics.cpp:9:// EFI firmware configures a GOP framebuffer that the bootloader
+D:\dev\guideXOSServer\kernel\arch\ia64\graphics.cpp:16:#include "include/arch/ia64.h"
+D:\dev\guideXOSServer\kernel\arch\ia64\graphics.cpp:20:namespace ia64 {
+D:\dev\guideXOSServer\kernel\arch\ia64\graphics.cpp:33:// PCI configuration space (MMIO-based on IA-64)
+D:\dev\guideXOSServer\kernel\arch\ia64\graphics.cpp:35:// Itanium uses SAL (System Abstraction Layer) or memory-mapped
+D:\dev\guideXOSServer\kernel\arch\ia64\graphics.cpp:108:bool init_from_gop(const EfiGopInfo* gopInfo)
+D:\dev\guideXOSServer\kernel\arch\ia64\graphics.cpp:110:if (!gopInfo) return false;
+D:\dev\guideXOSServer\kernel\arch\ia64\graphics.cpp:111:if (gopInfo->framebufferBase == 0 || gopInfo->width == 0 || gopInfo->height == 0)
+D:\dev\guideXOSServer\kernel\arch\ia64\graphics.cpp:114:s_lfb    = gopInfo->framebufferBase;
+D:\dev\guideXOSServer\kernel\arch\ia64\graphics.cpp:115:s_width  = gopInfo->width;
+D:\dev\guideXOSServer\kernel\arch\ia64\graphics.cpp:116:s_height = gopInfo->height;
+D:\dev\guideXOSServer\kernel\arch\ia64\graphics.cpp:117:s_pitch  = gopInfo->pitch;
+D:\dev\guideXOSServer\kernel\arch\ia64\graphics.cpp:118:s_bpp    = 32; // GOP typically provides 32-bit BGRX or RGBX
+D:\dev\guideXOSServer\kernel\arch\ia64\graphics.cpp:132:} // namespace ia64
+D:\dev\guideXOSServer\kernel\arch\ia64\pci_audio.cpp:1:// Itanium (IA-64) PCI Audio Backend � Implementation
+D:\dev\guideXOSServer\kernel\arch\ia64\pci_audio.cpp:9:#include "include/arch/ia64.h"
+D:\dev\guideXOSServer\kernel\arch\ia64\pci_audio.cpp:14:namespace ia64 {
+D:\dev\guideXOSServer\kernel\arch\ia64\pci_audio.cpp:43:} // namespace ia64
+D:\dev\guideXOSServer\kernel\arch\ia64\ski_console.cpp:5:// communicate with the HP ski IA-64 simulator's built-in console.
+D:\dev\guideXOSServer\kernel\arch\ia64\ski_console.cpp:20:namespace ia64 {
+D:\dev\guideXOSServer\kernel\arch\ia64\ski_console.cpp:104:} // namespace ia64
+D:\dev\guideXOSServer\kernel\arch\ia64\syscall.cpp:2:// IA-64 (Itanium) System Call Handler Implementation
+D:\dev\guideXOSServer\kernel\arch\ia64\syscall.cpp:4:// Handles syscalls, exceptions, and interrupts for IA-64.
+D:\dev\guideXOSServer\kernel\arch\ia64\syscall.cpp:6:// IA-64 exception flow:
+D:\dev\guideXOSServer\kernel\arch\ia64\syscall.cpp:17:#include "include/arch/ia64.h"
+D:\dev\guideXOSServer\kernel\arch\ia64\syscall.cpp:29:namespace ia64 {
+D:\dev\guideXOSServer\kernel\arch\ia64\syscall.cpp:110:ski_console::puts("[Syscall] Initializing IA-64 syscall subsystem\n");
+D:\dev\guideXOSServer\kernel\arch\ia64\syscall.cpp:122:ski_console::puts("[Syscall] IA-64 syscall subsystem initialized\n");
+D:\dev\guideXOSServer\kernel\arch\ia64\syscall.cpp:268:} // namespace ia64
+D:\dev\guideXOSServer\kernel\arch\ia64\usb_hci.cpp:1:// IA-64 OHCI Host Controller Interface � Implementation
+D:\dev\guideXOSServer\kernel\arch\ia64\usb_hci.cpp:3:// Provides the platform-specific USB HCI backend for IA-64 (Itanium).
+D:\dev\guideXOSServer\kernel\arch\ia64\usb_hci.cpp:6:// On Itanium, OHCI/EHCI controllers are PCI devices.  PCI config
+D:\dev\guideXOSServer\kernel\arch\ia64\usb_hci.cpp:19:#include "include/arch/ia64.h"
+D:\dev\guideXOSServer\kernel\arch\ia64\usb_hci.cpp:98:// MMIO helpers � IA-64 uses uncacheable loads/stores
+D:\dev\guideXOSServer\kernel\arch\ia64\usb_hci.cpp:132:// On IA-64, PCI config space is typically MMIO-mapped by firmware.
+D:\dev\guideXOSServer\kernel\arch\ia64\usb_hci.cpp:424:namespace ia64 {
+D:\dev\guideXOSServer\kernel\arch\ia64\usb_hci.cpp:431:} // namespace ia64
+D:\dev\guideXOSServer\kernel\arch\loongarch64\context_switch.cpp:292:// Restore GPRs (in reverse order to free $a0 last)
+D:\dev\guideXOSServer\kernel\arch\mips64\serial_console.cpp:91:// Write inverse pattern
+D:\dev\guideXOSServer\kernel\arch\mips64\serial_console.cpp:256:// Print in reverse order
+D:\dev\guideXOSServer\kernel\arch\ppc64\include\arch\ppc64.h:5:// Implements the Book III-S (Server) model with hypervisor extensions.
+D:\dev\guideXOSServer\kernel\arch\ppc64\include\arch\ppc64.h:148:constexpr uint64_t VECTOR_HYPERVISOR_DECREMENTER = 0x0980;
+D:\dev\guideXOSServer\kernel\arch\ppc64\include\arch\ppc64.h:152:constexpr uint64_t VECTOR_HYPERVISOR_DATA_STORAGE = 0x0E00;
+D:\dev\guideXOSServer\kernel\arch\ppc64\include\arch\ppc64.h:153:constexpr uint64_t VECTOR_HYPERVISOR_INSTRUCTION_STORAGE = 0x0E20;
+D:\dev\guideXOSServer\kernel\arch\ppc64\include\arch\ppc64.h:154:constexpr uint64_t VECTOR_HYPERVISOR_EMULATION = 0x0E40;
+D:\dev\guideXOSServer\kernel\arch\ppc64\include\arch\ppc64.h:155:constexpr uint64_t VECTOR_HYPERVISOR_MAINTENANCE = 0x0E60;
+D:\dev\guideXOSServer\kernel\arch\ppc64\arch.cpp:4:// Runs on QEMU pseries machine in hypervisor mode.
+D:\dev\guideXOSServer\kernel\arch\ppc64\boot.s:5:* big-endian mode with the processor in hypervisor state.
+D:\dev\guideXOSServer\kernel\arch\ppc64\boot.s:24:*   - MSR[SF]=1 (64-bit mode), MSR[HV]=1 (hypervisor)
+D:\dev\guideXOSServer\kernel\arch\ppc64\boot.s:62:* vectors to physical address 0x0, or use the hypervisor
+D:\dev\guideXOSServer\kernel\arch\riscv64\context_switch.cpp:266:// Restore GPRs (in reverse order to free a0 last)
+D:\dev\guideXOSServer\kernel\core\include\kernel\arch.h:36:#elif defined(__ia64__) || defined(_M_IA64)
+D:\dev\guideXOSServer\kernel\core\include\kernel\arch.h:37:#define ARCH_IA64
+D:\dev\guideXOSServer\kernel\core\include\kernel\arch.h:39:#include "../../../arch/ia64/include/arch/ia64.h"
+D:\dev\guideXOSServer\kernel\core\include\kernel\arch.h:41:#include <arch/ia64.h>
+D:\dev\guideXOSServer\kernel\core\include\kernel\arch.h:43:namespace kernel { namespace arch { using namespace ia64; } }
+D:\dev\guideXOSServer\kernel\core\include\kernel\arch.h:106://   IA-64        : OHCI (PCI MMIO)
+D:\dev\guideXOSServer\kernel\core\include\kernel\arch.h:114:// HDA / AC'97 : PCI MMIO � x86/amd64/ia64/sparc64/riscv64.
+D:\dev\guideXOSServer\kernel\core\include\kernel\arch.h:123:#elif defined(ARCH_IA64) || defined(ARCH_SPARC64) || defined(ARCH_RISCV64) || defined(ARCH_LOONGARCH64)
+D:\dev\guideXOSServer\kernel\core\include\kernel\arch.h:145:// AHCI    : SATA over PCI MMIO � x86/amd64/ia64/sparc64/riscv64.
+D:\dev\guideXOSServer\kernel\core\include\kernel\arch.h:146:// NVMe    : PCIe MMIO � x86/amd64/ia64/sparc64/riscv64.
+D:\dev\guideXOSServer\kernel\core\include\kernel\arch.h:153:#elif defined(ARCH_IA64) || defined(ARCH_SPARC64) || defined(ARCH_RISCV64) || defined(ARCH_LOONGARCH64)
+D:\dev\guideXOSServer\kernel\core\include\kernel\arch.h:168://             support for ia64/sparc64/riscv64.
+D:\dev\guideXOSServer\kernel\core\include\kernel\arch.h:173:#elif defined(ARCH_IA64) || defined(ARCH_SPARC64) || defined(ARCH_RISCV64) || defined(ARCH_LOONGARCH64)
+D:\dev\guideXOSServer\kernel\core\include\kernel\arch.h:200://             x86/amd64 via port-I/O PCI config; IA-64/SPARC64 via MMIO.
+D:\dev\guideXOSServer\kernel\core\include\kernel\arch.h:201:// EFI_GOP   : EFI Graphics Output Protocol framebuffer � IA-64 (and
+D:\dev\guideXOSServer\kernel\core\include\kernel\arch.h:216:#define ARCH_HAS_EFI_GOP    0
+D:\dev\guideXOSServer\kernel\core\include\kernel\arch.h:221:#elif defined(ARCH_IA64)
+D:\dev\guideXOSServer\kernel\core\include\kernel\arch.h:225:#define ARCH_HAS_EFI_GOP    1
+D:\dev\guideXOSServer\kernel\core\include\kernel\arch.h:234:#define ARCH_HAS_EFI_GOP    0
+D:\dev\guideXOSServer\kernel\core\include\kernel\arch.h:243:#define ARCH_HAS_EFI_GOP    0
+D:\dev\guideXOSServer\kernel\core\include\kernel\arch.h:252:#define ARCH_HAS_EFI_GOP    0
+D:\dev\guideXOSServer\kernel\core\include\kernel\arch.h:261:#define ARCH_HAS_EFI_GOP    0
+D:\dev\guideXOSServer\kernel\core\include\kernel\arch.h:270:#define ARCH_HAS_EFI_GOP    0
+D:\dev\guideXOSServer\kernel\core\include\kernel\arch.h:279:#define ARCH_HAS_EFI_GOP    0
+D:\dev\guideXOSServer\kernel\core\include\kernel\arch.h:291://   VESA/BGA, PCI VGA BAR0, EFI GOP, Sun FB, PL111, or ramfb.
+D:\dev\guideXOSServer\kernel\core\include\kernel\arch.h:294:#if ARCH_HAS_VESA_BGA || ARCH_HAS_PCI_VGA || ARCH_HAS_EFI_GOP || \
+D:\dev\guideXOSServer\kernel\core\include\kernel\arch.h:313:#elif defined(ARCH_IA64)
+D:\dev\guideXOSServer\kernel\core\include\kernel\arch.h:314:return "Itanium (IA-64)";
+D:\dev\guideXOSServer\kernel\core\include\kernel\arch.h:331:#if defined(ARCH_AMD64) || defined(ARCH_IA64) || defined(ARCH_SPARC64) || defined(ARCH_RISCV64) || defined(ARCH_LOONGARCH64)
+D:\dev\guideXOSServer\kernel\core\include\kernel\ata.h:5://   - AHCI / SATA (MMIO, available on x86/amd64/ia64/sparc64)
+D:\dev\guideXOSServer\kernel\core\include\kernel\device_tree.h:1:// Device Tree (Flattened Device Tree / DTB) Parser
+D:\dev\guideXOSServer\kernel\core\include\kernel\dhcp.h:163:// Parsed DHCP Options
+D:\dev\guideXOSServer\kernel\core\include\kernel\dhcp.h:166:struct ParsedOptions {
+D:\dev\guideXOSServer\kernel\core\include\kernel\dhcp.h:201:DHCP_ERR_PARSE       = 10,  // Failed to parse response
+D:\dev\guideXOSServer\kernel\core\include\kernel\dhcp.h:320:// Parse DHCP options from a packet
+D:\dev\guideXOSServer\kernel\core\include\kernel\dhcp.h:321:Status parse_options(const Packet* pkt, ParsedOptions* opts);
+D:\dev\guideXOSServer\kernel\core\include\kernel\dns.h:78:TYPE_PTR    = 12,   // Pointer (reverse DNS)
+D:\dev\guideXOSServer\kernel\core\include\kernel\dns.h:125:// Parsed DNS Resource Record
+D:\dev\guideXOSServer\kernel\core\include\kernel\dns.h:257:// Parse a DNS response packet
+D:\dev\guideXOSServer\kernel\core\include\kernel\dns.h:263://   result      - Output: parsed result
+D:\dev\guideXOSServer\kernel\core\include\kernel\dns.h:266:Status parse_response(const uint8_t* packet, uint16_t packetLen,
+D:\dev\guideXOSServer\kernel\core\include\kernel\ethernet.h:1:// Ethernet Frame Parser and Builder
+D:\dev\guideXOSServer\kernel\core\include\kernel\ethernet.h:4://   - Parse raw Ethernet frames (extract MAC addresses, EtherType, payload)
+D:\dev\guideXOSServer\kernel\core\include\kernel\ethernet.h:86:// Parsed frame information
+D:\dev\guideXOSServer\kernel\core\include\kernel\ethernet.h:89:struct ParsedFrame {
+D:\dev\guideXOSServer\kernel\core\include\kernel\ethernet.h:113:bool     headerSet;                // Header has been written
+D:\dev\guideXOSServer\kernel\core\include\kernel\ethernet.h:214:// Parse MAC address from string "XX:XX:XX:XX:XX:XX"
+D:\dev\guideXOSServer\kernel\core\include\kernel\ethernet.h:221:// Parse a raw Ethernet frame and extract header/payload information.
+D:\dev\guideXOSServer\kernel\core\include\kernel\ethernet.h:222:// The parsed frame contains pointers into the original frame buffer.
+D:\dev\guideXOSServer\kernel\core\include\kernel\ethernet.h:225://   frame    - Raw frame data (must remain valid while ParsedFrame is used)
+D:\dev\guideXOSServer\kernel\core\include\kernel\ethernet.h:227://   parsed   - Output structure to receive parsed information
+D:\dev\guideXOSServer\kernel\core\include\kernel\ethernet.h:231:Status parse_frame(const uint8_t* frame, uint16_t len, ParsedFrame* parsed);
+D:\dev\guideXOSServer\kernel\core\include\kernel\fb_console.h:5:// lack VGA hardware (SPARC, IA-64, ARM).
+D:\dev\guideXOSServer\kernel\core\include\kernel\feature_report.h:77:CPU_IA64       = 0x010A,
+D:\dev\guideXOSServer\kernel\core\include\kernel\feature_report.h:123:GFX_GOP         = 0x0502,
+D:\dev\guideXOSServer\kernel\core\include\kernel\framebuffer.h:30:// Initialize framebuffer from an EFI GOP descriptor (IA-64).
+D:\dev\guideXOSServer\kernel\core\include\kernel\framebuffer.h:32:bool init_efi_gop(uint64_t lfbBase, uint32_t width, uint32_t height,
+D:\dev\guideXOSServer\kernel\core\include\kernel\fs_ext4.h:11:// this especially useful on SPARC, IA-64, and ARM targets where
+D:\dev\guideXOSServer\kernel\core\include\kernel\fs_fat.h:51:uint16_t bytesPerSector;
+D:\dev\guideXOSServer\kernel\core\include\kernel\fs_fat.h:97:uint8_t  bytesPerSectorShift;
+D:\dev\guideXOSServer\kernel\core\include\kernel\fs_fat.h:172:uint32_t bytesPerSector;
+D:\dev\guideXOSServer\kernel\core\include\kernel\fs_fat.h:188:uint8_t  exfatBytesPerSectorShift;
+D:\dev\guideXOSServer\kernel\core\include\kernel\fs_fat.h:295:// Traverses directories as needed.
+D:\dev\guideXOSServer\kernel\core\include\kernel\fs_ntfs.h:61:static const uint32_t ATTR_TYPE_REPARSE_POINT    = 0xC0;
+D:\dev\guideXOSServer\kernel\core\include\kernel\fs_ntfs.h:76:static const uint32_t FILE_ATTR_SPARSE_FILE      = 0x0200;
+D:\dev\guideXOSServer\kernel\core\include\kernel\fs_ntfs.h:77:static const uint32_t FILE_ATTR_REPARSE_POINT    = 0x0400;
+D:\dev\guideXOSServer\kernel\core\include\kernel\fs_ntfs.h:122:uint16_t bytesPerSector;       // Usually 512
+D:\dev\guideXOSServer\kernel\core\include\kernel\fs_ntfs.h:181:uint16_t flags;                // Compression, sparse, encrypted
+D:\dev\guideXOSServer\kernel\core\include\kernel\fs_ntfs.h:238:uint32_t extendedAttributes;   // EA and reparse
+D:\dev\guideXOSServer\kernel\core\include\kernel\fs_ntfs.h:291:uint16_t bytesPerSector;
+D:\dev\guideXOSServer\kernel\core\include\kernel\fs_ntfs.h:435:// Parse data runs from non-resident attribute
+D:\dev\guideXOSServer\kernel\core\include\kernel\fs_ntfs.h:436:// Returns number of runs parsed
+D:\dev\guideXOSServer\kernel\core\include\kernel\fs_ntfs.h:437:int parse_data_runs(const uint8_t* runList, uint64_t* lcnOut, uint64_t* lengthOut, int maxRuns);
+D:\dev\guideXOSServer\kernel\core\include\kernel\fs_xfs.h:76:static const uint32_t XFS_SB_FEAT_INCOMPAT_SPINODES = 0x02; // Sparse inodes
+D:\dev\guideXOSServer\kernel\core\include\kernel\fs_xfs.h:170:uint32_t sb_spino_align;       // Sparse inode alignment
+D:\dev\guideXOSServer\kernel\core\include\kernel\fs_xfs.h:478:// Parse extent record
+D:\dev\guideXOSServer\kernel\core\include\kernel\fs_xfs.h:479:void parse_extent(const XfsBmbtRec* rec, uint64_t* startOffOut,
+D:\dev\guideXOSServer\kernel\core\include\kernel\icmp.h:100:// Parsed ICMP packet
+D:\dev\guideXOSServer\kernel\core\include\kernel\icmp.h:103:struct ParsedPacket {
+D:\dev\guideXOSServer\kernel\core\include\kernel\icmp.h:196:// Parse an ICMP packet (from IPv4 payload)
+D:\dev\guideXOSServer\kernel\core\include\kernel\icmp.h:197:Status parse_packet(const uint8_t* data, uint16_t len,
+D:\dev\guideXOSServer\kernel\core\include\kernel\icmp.h:199:ParsedPacket* parsed);
+D:\dev\guideXOSServer\kernel\core\include\kernel\icmp.h:251:void handle_packet(const ipv4::ParsedPacket* ipPacket);
+D:\dev\guideXOSServer\kernel\core\include\kernel\ipv4.h:156:// Parsed packet information
+D:\dev\guideXOSServer\kernel\core\include\kernel\ipv4.h:159:struct ParsedPacket {
+D:\dev\guideXOSServer\kernel\core\include\kernel\ipv4.h:255:// Parse IP address from string "A.B.C.D"
+D:\dev\guideXOSServer\kernel\core\include\kernel\ipv4.h:343:// Parse an IP packet from raw data
+D:\dev\guideXOSServer\kernel\core\include\kernel\ipv4.h:344:// Returns IP_OK on success, populates 'parsed' structure
+D:\dev\guideXOSServer\kernel\core\include\kernel\ipv4.h:345:Status parse_packet(const uint8_t* data, uint16_t len, ParsedPacket* parsed);
+D:\dev\guideXOSServer\kernel\core\include\kernel\ipv4.h:422:typedef void (*ProtocolHandler)(const ParsedPacket* packet);
+D:\dev\guideXOSServer\kernel\core\include\kernel\ipv6.h:232:// Parse address from string
+D:\dev\guideXOSServer\kernel\core\include\kernel\nic.h:10://   x86, amd64, ia64, sparc64, riscv64
+D:\dev\guideXOSServer\kernel\core\include\kernel\nvme.h:10://   x86, amd64, ia64, sparc64
+D:\dev\guideXOSServer\kernel\core\include\kernel\pci_audio.h:12://   IA-64     : PCI MMCFG + MMIO BAR
+D:\dev\guideXOSServer\kernel\core\include\kernel\tcp.h:232:// Parsed segment information
+D:\dev\guideXOSServer\kernel\core\include\kernel\tcp.h:235:struct ParsedSegment {
+D:\dev\guideXOSServer\kernel\core\include\kernel\tcp.h:350:void handle_segment(const ipv4::ParsedPacket* ipPacket);
+D:\dev\guideXOSServer\kernel\core\include\kernel\types.h:28:#if defined(__x86_64__) || defined(__amd64__) || defined(_M_X64) || defined(__ia64__) || defined(_M_IA64) || defined(__arch64__) || defined(__sparcv9) || (defined(__riscv) && (__riscv_xlen == 64)) || defined(__powerpc64__) || defined(__ppc64__) || defined(_ARCH_PPC64)
+D:\dev\guideXOSServer\kernel\core\include\kernel\udp.h:93:// Parsed datagram information
+D:\dev\guideXOSServer\kernel\core\include\kernel\udp.h:96:struct ParsedDatagram {
+D:\dev\guideXOSServer\kernel\core\include\kernel\udp.h:121:typedef void (*DatagramHandler)(const ParsedDatagram* datagram);
+D:\dev\guideXOSServer\kernel\core\include\kernel\udp.h:211:// Parse a UDP datagram (from IPv4 payload)
+D:\dev\guideXOSServer\kernel\core\include\kernel\udp.h:212:Status parse_datagram(const uint8_t* data, uint16_t len,
+D:\dev\guideXOSServer\kernel\core\include\kernel\udp.h:214:ParsedDatagram* parsed);
+D:\dev\guideXOSServer\kernel\core\include\kernel\udp.h:251:void handle_packet(const ipv4::ParsedPacket* ipPacket);
+D:\dev\guideXOSServer\kernel\core\include\kernel\usb_audio_uac2.h:189:// UAC2 Clock Source descriptor (parsed)
+D:\dev\guideXOSServer\kernel\core\include\kernel\usb_hid.h:110:// HID report field descriptor (parsed from report descriptor)
+D:\dev\guideXOSServer\kernel\core\include\kernel\usb_hid.h:149:// Parsed report descriptor fields
+D:\dev\guideXOSServer\kernel\core\include\kernel\usb_net.h:8:// SPARC v9, and IA-64 through the USB HCI abstraction.
+D:\dev\guideXOSServer\kernel\core\include\kernel\usb_net_wifi.h:16:// on x86, amd64, ARM, SPARC v8, SPARC v9, and IA-64.
+D:\dev\guideXOSServer\kernel\core\include\kernel\usb_video.h:111:// Frame descriptor (parsed from device)
+D:\dev\guideXOSServer\kernel\core\include\kernel\usb_video.h:126:// Format descriptor (parsed from device)
+D:\dev\guideXOSServer\kernel\core\include\kernel\usb_video.h:189:// formatIndex / frameIndex come from the parsed descriptors.
+D:\dev\guideXOSServer\kernel\core\include\kernel\vesa.h:17:// VBE/BGA structures (useful for PCI VGA cards on SPARC64/IA-64),
+D:\dev\guideXOSServer\kernel\core\include\kernel\vesa.h:211:// On SPARC64/IA64: probes PCI for VGA-class devices.
+D:\dev\guideXOSServer\kernel\core\include\kernel\virtio_gpu.h:4:// Provides framebuffer access in QEMU, KVM, and other hypervisors.
+D:\dev\guideXOSServer\kernel\core\architecture_detector.cpp:103:#elif defined(__ia64__) || defined(_M_IA64)
+D:\dev\guideXOSServer\kernel\core\architecture_detector.cpp:104:return CpuArchitecture::IA64;
+D:\dev\guideXOSServer\kernel\core\desktop.cpp:443:static bool s_shutdownDialogOpen = false;
+D:\dev\guideXOSServer\kernel\core\desktop.cpp:453:static int s_deviceManagerSelected = -1;
+D:\dev\guideXOSServer\kernel\core\desktop.cpp:457:static int s_networkAdapterSelected = -1;
+D:\dev\guideXOSServer\kernel\core\desktop.cpp:461:static bool s_networkConfigOpen = false;
+D:\dev\guideXOSServer\kernel\core\desktop.cpp:1184:static bool icon_bounds_intersect_rect(int displayIndex, int32_t left, int32_t top, int32_t right, int32_t bottom)
+D:\dev\guideXOSServer\kernel\core\desktop.cpp:1212:if (icon_bounds_intersect_rect(displayIdx, left, top, right, bottom)) {
+D:\dev\guideXOSServer\kernel\core\desktop.cpp:1769:// Search box (taskbar, matching Legacy/compositor drawTaskbarSearchBox)
+D:\dev\guideXOSServer\kernel\core\desktop.cpp:2355:if (!s_shutdownDialogOpen) return;
+D:\dev\guideXOSServer\kernel\core\desktop.cpp:2399:if (!s_shutdownDialogOpen) return -1;
+D:\dev\guideXOSServer\kernel\core\desktop.cpp:2617:if (s_deviceManagerSelected == i) rowBg = rgb(50, 70, 100);
+D:\dev\guideXOSServer\kernel\core\desktop.cpp:2724:uint32_t rowBg = (s_networkAdapterSelected == i) ? rgb(45, 65, 95) :
+D:\dev\guideXOSServer\kernel\core\desktop.cpp:2742:bool propEnabled = (s_networkAdapterSelected >= 0 && s_networkAdapters[s_networkAdapterSelected].detected);
+D:\dev\guideXOSServer\kernel\core\desktop.cpp:2796:if (!s_networkConfigOpen) return;
+D:\dev\guideXOSServer\kernel\core\desktop.cpp:2917:if (!s_networkConfigOpen) return -1;
+D:\dev\guideXOSServer\kernel\core\desktop.cpp:3187:// Parse the file
+D:\dev\guideXOSServer\kernel\core\desktop.cpp:3195:// Parse each line as "x,y"
+D:\dev\guideXOSServer\kernel\core\desktop.cpp:3200:// Parse X coordinate
+D:\dev\guideXOSServer\kernel\core\desktop.cpp:3213:// Parse Y coordinate
+D:\dev\guideXOSServer\kernel\core\desktop.cpp:4018:if (s_shutdownDialogOpen) {
+D:\dev\guideXOSServer\kernel\core\desktop.cpp:4058:if (s_networkConfigOpen) {
+D:\dev\guideXOSServer\kernel\core\desktop.cpp:4660:if (s_shutdownDialogOpen) {
+D:\dev\guideXOSServer\kernel\core\desktop.cpp:4664:s_shutdownDialogOpen = false;
+D:\dev\guideXOSServer\kernel\core\desktop.cpp:4677:s_shutdownDialogOpen = false;
+D:\dev\guideXOSServer\kernel\core\desktop.cpp:4688:s_shutdownDialogOpen = false;
+D:\dev\guideXOSServer\kernel\core\desktop.cpp:4698:if (s_networkConfigOpen) {
+D:\dev\guideXOSServer\kernel\core\desktop.cpp:4702:s_networkConfigOpen = false;
+D:\dev\guideXOSServer\kernel\core\desktop.cpp:4708:s_networkConfigOpen = false;
+D:\dev\guideXOSServer\kernel\core\desktop.cpp:4743:if (s_networkAdapterSelected >= 0 && s_networkAdapters[s_networkAdapterSelected].detected) {
+D:\dev\guideXOSServer\kernel\core\desktop.cpp:4744:s_networkConfigOpen = true;
+D:\dev\guideXOSServer\kernel\core\desktop.cpp:4750:s_networkAdapterSelected = btn;
+D:\dev\guideXOSServer\kernel\core\desktop.cpp:4769:s_networkConfigOpen = true;
+D:\dev\guideXOSServer\kernel\core\desktop.cpp:4774:s_deviceManagerSelected = btn;
+D:\dev\guideXOSServer\kernel\core\desktop.cpp:4862:s_shutdownDialogOpen = true;
+D:\dev\guideXOSServer\kernel\core\desktop.cpp:5032:if (s_shutdownDialogOpen) {
+D:\dev\guideXOSServer\kernel\core\desktop.cpp:5070:if (s_networkConfigOpen) {
+D:\dev\guideXOSServer\kernel\core\device_tree.cpp:1:// Device Tree (FDT/DTB) Parser Implementation
+D:\dev\guideXOSServer\kernel\core\device_tree.cpp:3:// Parses Flattened Device Tree blobs for hardware discovery
+D:\dev\guideXOSServer\kernel\core\device_tree.cpp:282:// Parse path components
+D:\dev\guideXOSServer\kernel\core\device_tree.cpp:857:* Full implementation would parse /reserved-memory node
+D:\dev\guideXOSServer\kernel\core\device_tree.cpp:978:* Full implementation would parse "ranges" property and
+D:\dev\guideXOSServer\kernel\core\dhcp.cpp:273:Status parse_options(const Packet* pkt, ParsedOptions* opts)
+D:\dev\guideXOSServer\kernel\core\dhcp.cpp:277:memzero(opts, sizeof(ParsedOptions));
+D:\dev\guideXOSServer\kernel\core\dhcp.cpp:284:return DHCP_ERR_PARSE;
+D:\dev\guideXOSServer\kernel\core\dhcp.cpp:475:Packet* offerPkt, ParsedOptions* offerOpts)
+D:\dev\guideXOSServer\kernel\core\dhcp.cpp:506:// Parse options
+D:\dev\guideXOSServer\kernel\core\dhcp.cpp:507:ParsedOptions opts;
+D:\dev\guideXOSServer\kernel\core\dhcp.cpp:508:if (parse_options(resp, &opts) != DHCP_OK) continue;
+D:\dev\guideXOSServer\kernel\core\dhcp.cpp:513:memcopy(offerOpts, &opts, sizeof(ParsedOptions));
+D:\dev\guideXOSServer\kernel\core\dhcp.cpp:535:Packet* ackPkt, ParsedOptions* ackOpts)
+D:\dev\guideXOSServer\kernel\core\dhcp.cpp:569:ParsedOptions opts;
+D:\dev\guideXOSServer\kernel\core\dhcp.cpp:570:if (parse_options(resp, &opts) != DHCP_OK) continue;
+D:\dev\guideXOSServer\kernel\core\dhcp.cpp:580:memcopy(ackOpts, &opts, sizeof(ParsedOptions));
+D:\dev\guideXOSServer\kernel\core\dhcp.cpp:596:static void apply_lease(const Packet* ackPkt, const ParsedOptions* opts,
+D:\dev\guideXOSServer\kernel\core\dhcp.cpp:647:ParsedOptions offerOpts;
+D:\dev\guideXOSServer\kernel\core\dhcp.cpp:664:ParsedOptions ackOpts;
+D:\dev\guideXOSServer\kernel\core\dhcp.cpp:769:ParsedOptions opts;
+D:\dev\guideXOSServer\kernel\core\dhcp.cpp:770:if (parse_options(resp, &opts) == DHCP_OK) {
+D:\dev\guideXOSServer\kernel\core\dns.cpp:321:Status parse_response(const uint8_t* packet, uint16_t packetLen,
+D:\dev\guideXOSServer\kernel\core\dns.cpp:384:// Parse answers
+D:\dev\guideXOSServer\kernel\core\dns.cpp:414:// Parse record data based on type
+D:\dev\guideXOSServer\kernel\core\dns.cpp:641:// Parse response
+D:\dev\guideXOSServer\kernel\core\dns.cpp:642:status = parse_response(responsePacket, recvLen, queryId, &result);
+D:\dev\guideXOSServer\kernel\core\dns.cpp:780:status = parse_response(responsePacket, recvLen, queryId, result);
+D:\dev\guideXOSServer\kernel\core\ethernet.cpp:1:// Ethernet Frame Parser and Builder � Implementation
+D:\dev\guideXOSServer\kernel\core\ethernet.cpp:137:Status parse_frame(const uint8_t* frame, uint16_t len, ParsedFrame* parsed)
+D:\dev\guideXOSServer\kernel\core\ethernet.cpp:139:if (!frame || !parsed) return ETH_ERR_NULL_PTR;
+D:\dev\guideXOSServer\kernel\core\ethernet.cpp:143:memzero(parsed, sizeof(ParsedFrame));
+D:\dev\guideXOSServer\kernel\core\ethernet.cpp:149:mac_copy(parsed->destMAC, hdr->destMAC);
+D:\dev\guideXOSServer\kernel\core\ethernet.cpp:150:mac_copy(parsed->srcMAC, hdr->srcMAC);
+D:\dev\guideXOSServer\kernel\core\ethernet.cpp:153:parsed->etherType = ntohs(hdr->etherType);
+D:\dev\guideXOSServer\kernel\core\ethernet.cpp:156:parsed->payload = frame + HEADER_LEN;
+D:\dev\guideXOSServer\kernel\core\ethernet.cpp:157:parsed->payloadLen = len - HEADER_LEN;
+D:\dev\guideXOSServer\kernel\core\ethernet.cpp:160:parsed->isBroadcast = mac_is_broadcast(parsed->destMAC);
+D:\dev\guideXOSServer\kernel\core\ethernet.cpp:161:parsed->isMulticast = mac_is_multicast(parsed->destMAC);
+D:\dev\guideXOSServer\kernel\core\ethernet.cpp:162:parsed->isValid = true;
+D:\dev\guideXOSServer\kernel\core\ethernet.cpp:210:builder->headerSet = false;
+D:\dev\guideXOSServer\kernel\core\ethernet.cpp:237:builder->headerSet = true;
+D:\dev\guideXOSServer\kernel\core\ethernet.cpp:247:if (!builder->headerSet) return ETH_ERR_NO_HEADER;
+D:\dev\guideXOSServer\kernel\core\ethernet.cpp:268:if (!builder->headerSet) return ETH_ERR_NO_HEADER;
+D:\dev\guideXOSServer\kernel\core\ethernet.cpp:288:builder->headerSet = false;
+D:\dev\guideXOSServer\kernel\core\feature_report.cpp:361:#elif defined(__ia64__)
+D:\dev\guideXOSServer\kernel\core\feature_report.cpp:362:register_feature(CPU_IA64, STATUS_ACTIVE, CAT_CPU, "IA-64 (Itanium)");
+D:\dev\guideXOSServer\kernel\core\feature_report.cpp:399:register_feature(GFX_GOP, STATUS_NOT_PRESENT, CAT_GRAPHICS, "UEFI GOP");
+D:\dev\guideXOSServer\kernel\core\framebuffer.cpp:252:// EFI GOP init (IA-64 and any EFI-booted platform)
+D:\dev\guideXOSServer\kernel\core\framebuffer.cpp:255:bool init_efi_gop(uint64_t lfbBase, uint32_t width, uint32_t height,
+D:\dev\guideXOSServer\kernel\core\fs_fat.cpp:86:uint32_t fatSector   = vol.reservedSectors + (fatOffset / vol.bytesPerSector);
+D:\dev\guideXOSServer\kernel\core\fs_fat.cpp:87:uint32_t entryOffset = fatOffset % vol.bytesPerSector;
+D:\dev\guideXOSServer\kernel\core\fs_fat.cpp:103:uint32_t sectorSize  = 1u << vol.exfatBytesPerSectorShift;
+D:\dev\guideXOSServer\kernel\core\fs_fat.cpp:143:if (bpb->bytesPerSector < 512 || bpb->bytesPerSector > 4096) return false;
+D:\dev\guideXOSServer\kernel\core\fs_fat.cpp:153:vol.bytesPerSector    = bpb->bytesPerSector;
+D:\dev\guideXOSServer\kernel\core\fs_fat.cpp:196:vol.exfatBytesPerSectorShift   = bs->bytesPerSectorShift;
+D:\dev\guideXOSServer\kernel\core\fs_fat.cpp:201:vol.bytesPerSector    = 1u << bs->bytesPerSectorShift;
+D:\dev\guideXOSServer\kernel\core\fs_fat.cpp:248:uint32_t fatSector = vol.reservedSectors + (fatOffset / vol.bytesPerSector);
+D:\dev\guideXOSServer\kernel\core\fs_fat.cpp:249:uint32_t entryOffset = fatOffset % vol.bytesPerSector;
+D:\dev\guideXOSServer\kernel\core\fs_fat.cpp:259:uint32_t mirrorSector = fatSector + fatIndex * vol.fatSizeSectors;
+D:\dev\guideXOSServer\kernel\core\fs_fat.cpp:260:st = block::write_sectors(vol.blockDevIndex, mirrorSector, 1, s_secBuf);
+D:\dev\guideXOSServer\kernel\core\fs_fat.cpp:269:uint32_t entriesPerSector = vol.bytesPerSector / 4;
+D:\dev\guideXOSServer\kernel\core\fs_fat.cpp:276:for (uint32_t entryIndex = 0; entryIndex < entriesPerSector; ++entryIndex) {
+D:\dev\guideXOSServer\kernel\core\fs_fat.cpp:277:uint32_t cluster = fatSectorOffset * entriesPerSector + entryIndex;
+D:\dev\guideXOSServer\kernel\core\fs_fat.cpp:391:uint32_t entriesPerSector = vol.bytesPerSector / 32;
+D:\dev\guideXOSServer\kernel\core\fs_fat.cpp:407:while (s_dirIter.entryInSector < entriesPerSector) {
+D:\dev\guideXOSServer\kernel\core\fs_fat.cpp:482:uint32_t clusterBytes = vol.sectorsPerCluster * vol.bytesPerSector;
+D:\dev\guideXOSServer\kernel\core\fs_fat.cpp:489:uint32_t sectorInCluster = offsetInCluster / vol.bytesPerSector;
+D:\dev\guideXOSServer\kernel\core\fs_fat.cpp:490:uint32_t offsetInSector  = offsetInCluster % vol.bytesPerSector;
+D:\dev\guideXOSServer\kernel\core\fs_fat.cpp:496:uint32_t available = vol.bytesPerSector - offsetInSector;
+D:\dev\guideXOSServer\kernel\core\fs_fat.cpp:529:uint32_t clusterBytes = vol.sectorsPerCluster * vol.bytesPerSector;
+D:\dev\guideXOSServer\kernel\core\fs_fat.cpp:535:uint32_t sectorInCluster = offsetInCluster / vol.bytesPerSector;
+D:\dev\guideXOSServer\kernel\core\fs_fat.cpp:536:uint32_t offsetInSector  = offsetInCluster % vol.bytesPerSector;
+D:\dev\guideXOSServer\kernel\core\fs_fat.cpp:542:uint32_t available = vol.bytesPerSector - offsetInSector;
+D:\dev\guideXOSServer\kernel\core\fs_fat.cpp:707:uint32_t entriesPerSector = vol.bytesPerSector / 32;
+D:\dev\guideXOSServer\kernel\core\fs_fat.cpp:708:for (uint32_t entryIndex = 0; entryIndex < entriesPerSector; ++entryIndex) {
+D:\dev\guideXOSServer\kernel\core\fs_fat.cpp:736:memzero(s_secBuf, vol.bytesPerSector);
+D:\dev\guideXOSServer\kernel\core\fs_fat.cpp:738:if (toCopy > vol.bytesPerSector) toCopy = vol.bytesPerSector;
+D:\dev\guideXOSServer\kernel\core\fs_fat.cpp:778:uint32_t entriesPerSector = vol.bytesPerSector / 32;
+D:\dev\guideXOSServer\kernel\core\fs_fat.cpp:779:for (uint32_t entryIndex = 0; entryIndex < entriesPerSector; ++entryIndex) {
+D:\dev\guideXOSServer\kernel\core\fs_fat.cpp:867:return clusters * vol.sectorsPerCluster * vol.bytesPerSector;
+D:\dev\guideXOSServer\kernel\core\fs_ntfs.cpp:164:if (bs->bytesPerSector == 0 || bs->sectorsPerCluster == 0) {
+D:\dev\guideXOSServer\kernel\core\fs_ntfs.cpp:204:// Parse boot sector parameters
+D:\dev\guideXOSServer\kernel\core\fs_ntfs.cpp:205:volumeOut->bytesPerSector = bs->bytesPerSector;
+D:\dev\guideXOSServer\kernel\core\fs_ntfs.cpp:206:volumeOut->bytesPerCluster = bs->bytesPerSector * bs->sectorsPerCluster;
+D:\dev\guideXOSServer\kernel\core\fs_ntfs.cpp:210:// Parse MFT record size
+D:\dev\guideXOSServer\kernel\core\fs_ntfs.cpp:219:// Parse index record size (same logic)
+D:\dev\guideXOSServer\kernel\core\fs_ntfs.cpp:241:// This is a stub - full implementation would parse the attribute
+D:\dev\guideXOSServer\kernel\core\fs_ntfs.cpp:248:kernel::serial::put_hex32(volumeOut->bytesPerSector);
+D:\dev\guideXOSServer\kernel\core\fs_ntfs.cpp:290:uint64_t recordLba = recordOffset / volume->bytesPerSector;
+D:\dev\guideXOSServer\kernel\core\fs_ntfs.cpp:291:uint32_t sectorsToRead = volume->mftRecordSize / volume->bytesPerSector;
+D:\dev\guideXOSServer\kernel\core\fs_ntfs.cpp:319:int parse_data_runs(const uint8_t* runList, uint64_t* lcnOut, uint64_t* lengthOut, int maxRuns)
+D:\dev\guideXOSServer\kernel\core\fs_ntfs.cpp:359:// LCN of 0 means sparse extent
+D:\dev\guideXOSServer\kernel\core\fs_ntfs.cpp:377:* 3. Parse data runs
+D:\dev\guideXOSServer\kernel\core\fs_ntfs.cpp:401:* 2. Parse path components
+D:\dev\guideXOSServer\kernel\core\fs_ntfs.cpp:560:*    b. Parse B+ tree index blocks
+D:\dev\guideXOSServer\kernel\core\fs_ntfs.cpp:561:*    c. Traverse leaf nodes
+D:\dev\guideXOSServer\kernel\core\fs_ntfs.cpp:586:* 2. Parse path to find parent directory
+D:\dev\guideXOSServer\kernel\core\fs_ntfs.cpp:691:* 3. Parse destination path
+D:\dev\guideXOSServer\kernel\core\fs_ufs.cpp:4:// group descriptors, resolves inodes, and traverses direct /
+D:\dev\guideXOSServer\kernel\core\fs_xfs.cpp:288:void parse_extent(const XfsBmbtRec* rec, uint64_t* startOffOut,
+D:\dev\guideXOSServer\kernel\core\fs_xfs.cpp:324:* 2. Parse path components
+D:\dev\guideXOSServer\kernel\core\fs_xfs.cpp:330:*       - B+tree: traverse tree to find entry
+D:\dev\guideXOSServer\kernel\core\fs_xfs.cpp:375:*      a. Traverse B+tree to find extent
+D:\dev\guideXOSServer\kernel\core\icmp.cpp:101:Status parse_packet(const uint8_t* data, uint16_t len,
+D:\dev\guideXOSServer\kernel\core\icmp.cpp:103:ParsedPacket* parsed)
+D:\dev\guideXOSServer\kernel\core\icmp.cpp:105:if (!data || !parsed) return ICMP_ERR_NULL_PTR;
+D:\dev\guideXOSServer\kernel\core\icmp.cpp:108:memzero(parsed, sizeof(ParsedPacket));
+D:\dev\guideXOSServer\kernel\core\icmp.cpp:118:parsed->type = hdr->type;
+D:\dev\guideXOSServer\kernel\core\icmp.cpp:119:parsed->code = hdr->code;
+D:\dev\guideXOSServer\kernel\core\icmp.cpp:120:parsed->checksum = ethernet::ntohs(hdr->checksum);
+D:\dev\guideXOSServer\kernel\core\icmp.cpp:121:parsed->id = ethernet::ntohs(hdr->rest.echo.id);
+D:\dev\guideXOSServer\kernel\core\icmp.cpp:122:parsed->sequence = ethernet::ntohs(hdr->rest.echo.sequence);
+D:\dev\guideXOSServer\kernel\core\icmp.cpp:123:parsed->srcIP = srcIP;
+D:\dev\guideXOSServer\kernel\core\icmp.cpp:124:parsed->dstIP = dstIP;
+D:\dev\guideXOSServer\kernel\core\icmp.cpp:128:parsed->data = data + sizeof(Header);
+D:\dev\guideXOSServer\kernel\core\icmp.cpp:129:parsed->dataLen = len - sizeof(Header);
+D:\dev\guideXOSServer\kernel\core\icmp.cpp:131:parsed->data = nullptr;
+D:\dev\guideXOSServer\kernel\core\icmp.cpp:132:parsed->dataLen = 0;
+D:\dev\guideXOSServer\kernel\core\icmp.cpp:135:parsed->isValid = true;
+D:\dev\guideXOSServer\kernel\core\icmp.cpp:136:parsed->checksumValid = true;
+D:\dev\guideXOSServer\kernel\core\icmp.cpp:457:void handle_packet(const ipv4::ParsedPacket* ipPacket)
+D:\dev\guideXOSServer\kernel\core\icmp.cpp:464:ParsedPacket icmp;
+D:\dev\guideXOSServer\kernel\core\icmp.cpp:465:Status status = parse_packet(ipPacket->payload, ipPacket->payloadLen,
+D:\dev\guideXOSServer\kernel\core\interrupts.cpp:491:// The UEFI-provided GDT may not be accessible after ExitBootServices
+D:\dev\guideXOSServer\kernel\core\ipv4.cpp:408:static void handle_arp_packet(const ethernet::ParsedFrame* frame)
+D:\dev\guideXOSServer\kernel\core\ipv4.cpp:490:Status parse_packet(const uint8_t* data, uint16_t len, ParsedPacket* parsed)
+D:\dev\guideXOSServer\kernel\core\ipv4.cpp:492:if (!data || !parsed) return IP_ERR_NULL_PTR;
+D:\dev\guideXOSServer\kernel\core\ipv4.cpp:495:memzero(parsed, sizeof(ParsedPacket));
+D:\dev\guideXOSServer\kernel\core\ipv4.cpp:500:parsed->version = get_version(hdr);
+D:\dev\guideXOSServer\kernel\core\ipv4.cpp:501:if (parsed->version != 4) {
+D:\dev\guideXOSServer\kernel\core\ipv4.cpp:506:parsed->headerLen = get_header_len(hdr);
+D:\dev\guideXOSServer\kernel\core\ipv4.cpp:507:if (parsed->headerLen < MIN_HEADER_LEN || parsed->headerLen > len) {
+D:\dev\guideXOSServer\kernel\core\ipv4.cpp:512:parsed->checksumValid = verify_checksum(hdr);
+D:\dev\guideXOSServer\kernel\core\ipv4.cpp:513:if (!parsed->checksumValid) {
+D:\dev\guideXOSServer\kernel\core\ipv4.cpp:518:// Parse remaining fields
+D:\dev\guideXOSServer\kernel\core\ipv4.cpp:519:parsed->tos = hdr->tos;
+D:\dev\guideXOSServer\kernel\core\ipv4.cpp:520:parsed->totalLen = ethernet::ntohs(hdr->totalLength);
+D:\dev\guideXOSServer\kernel\core\ipv4.cpp:521:parsed->identification = ethernet::ntohs(hdr->identification);
+D:\dev\guideXOSServer\kernel\core\ipv4.cpp:522:parsed->flags = get_flags(hdr);
+D:\dev\guideXOSServer\kernel\core\ipv4.cpp:523:parsed->fragOffset = get_frag_offset(hdr);
+D:\dev\guideXOSServer\kernel\core\ipv4.cpp:524:parsed->ttl = hdr->ttl;
+D:\dev\guideXOSServer\kernel\core\ipv4.cpp:525:parsed->protocol = hdr->protocol;
+D:\dev\guideXOSServer\kernel\core\ipv4.cpp:526:parsed->checksum = ethernet::ntohs(hdr->checksum);
+D:\dev\guideXOSServer\kernel\core\ipv4.cpp:527:parsed->srcAddr = ethernet::ntohl(hdr->srcAddr);
+D:\dev\guideXOSServer\kernel\core\ipv4.cpp:528:parsed->dstAddr = ethernet::ntohl(hdr->dstAddr);
+D:\dev\guideXOSServer\kernel\core\ipv4.cpp:531:if (parsed->totalLen < parsed->headerLen || parsed->totalLen > len) {
+D:\dev\guideXOSServer\kernel\core\ipv4.cpp:536:parsed->payload = data + parsed->headerLen;
+D:\dev\guideXOSServer\kernel\core\ipv4.cpp:537:parsed->payloadLen = parsed->totalLen - parsed->headerLen;
+D:\dev\guideXOSServer\kernel\core\ipv4.cpp:540:parsed->isValid = true;
+D:\dev\guideXOSServer\kernel\core\ipv4.cpp:541:parsed->isFragmented = is_fragmented(hdr);
+D:\dev\guideXOSServer\kernel\core\ipv4.cpp:542:parsed->isBroadcast = (parsed->dstAddr == ADDR_BROADCAST);
+D:\dev\guideXOSServer\kernel\core\ipv4.cpp:543:parsed->isMulticast = is_multicast(parsed->dstAddr);
+D:\dev\guideXOSServer\kernel\core\ipv4.cpp:544:parsed->isLoopback = is_loopback(parsed->dstAddr);
+D:\dev\guideXOSServer\kernel\core\ipv4.cpp:799:// Parse packet
+D:\dev\guideXOSServer\kernel\core\ipv4.cpp:800:ParsedPacket parsed;
+D:\dev\guideXOSServer\kernel\core\ipv4.cpp:801:Status status = parse_packet(data, len, &parsed);
+D:\dev\guideXOSServer\kernel\core\ipv4.cpp:813:if (parsed.dstAddr != s_config.ipAddr &&
+D:\dev\guideXOSServer\kernel\core\ipv4.cpp:814:parsed.dstAddr != ADDR_BROADCAST &&
+D:\dev\guideXOSServer\kernel\core\ipv4.cpp:815:!is_multicast(parsed.dstAddr) &&
+D:\dev\guideXOSServer\kernel\core\ipv4.cpp:816:!is_subnet_broadcast(parsed.dstAddr,
+D:\dev\guideXOSServer\kernel\core\ipv4.cpp:825:if (parsed.ttl == 0) {
+D:\dev\guideXOSServer\kernel\core\ipv4.cpp:831:if (parsed.isFragmented) {
+D:\dev\guideXOSServer\kernel\core\ipv4.cpp:842:if (s_handlers[i].active && s_handlers[i].protocol == parsed.protocol) {
+D:\dev\guideXOSServer\kernel\core\ipv4.cpp:843:s_handlers[i].handler(&parsed);
+D:\dev\guideXOSServer\kernel\core\ipv4.cpp:888:// Parse Ethernet header
+D:\dev\guideXOSServer\kernel\core\ipv4.cpp:889:ethernet::ParsedFrame ethFrame;
+D:\dev\guideXOSServer\kernel\core\ipv4.cpp:890:ethernet::Status ethStatus = ethernet::parse_frame(frameBuffer, frameLen, &ethFrame);
+D:\dev\guideXOSServer\kernel\core\ipv6.cpp:220:// Simple parser (doesn't handle :: compression fully)
+D:\dev\guideXOSServer\kernel\core\kernel_apps.cpp:1540:// Parse current display
+D:\dev\guideXOSServer\kernel\core\kernel_apps.cpp:1573:// Parse and calculate
+D:\dev\guideXOSServer\kernel\core\main.cpp:72:#if defined(ARCH_IA64)
+D:\dev\guideXOSServer\kernel\core\main.cpp:425:// Non-x86 boot path  (SPARC, IA-64, ARM, ...)
+D:\dev\guideXOSServer\kernel\core\main.cpp:509:#if defined(ARCH_IA64)
+D:\dev\guideXOSServer\kernel\core\main.cpp:510:// ---- IA-64 / ski simulator boot path ----
+D:\dev\guideXOSServer\kernel\core\main.cpp:512:// arch::init() already set up IVT, RSE, and ski console.
+D:\dev\guideXOSServer\kernel\core\main.cpp:514:kernel::arch::ia64::ski_console::puts("\r\n");
+D:\dev\guideXOSServer\kernel\core\main.cpp:515:kernel::arch::ia64::ski_console::puts("========================================\r\n");
+D:\dev\guideXOSServer\kernel\core\main.cpp:516:kernel::arch::ia64::ski_console::puts("  guideXOS Server - Itanium (IA-64)\r\n");
+D:\dev\guideXOSServer\kernel\core\main.cpp:517:kernel::arch::ia64::ski_console::puts("  Running on HP ski simulator\r\n");
+D:\dev\guideXOSServer\kernel\core\main.cpp:518:kernel::arch::ia64::ski_console::puts("========================================\r\n");
+D:\dev\guideXOSServer\kernel\core\main.cpp:519:kernel::arch::ia64::ski_console::puts("\r\n");
+D:\dev\guideXOSServer\kernel\core\main.cpp:520:kernel::arch::ia64::ski_console::puts("Kernel loaded at 1 MB physical\r\n");
+D:\dev\guideXOSServer\kernel\core\main.cpp:521:kernel::arch::ia64::ski_console::puts("Architecture: ");
+D:\dev\guideXOSServer\kernel\core\main.cpp:522:kernel::arch::ia64::ski_console::puts(kernel::arch::get_arch_name());
+D:\dev\guideXOSServer\kernel\core\main.cpp:523:kernel::arch::ia64::ski_console::puts("\r\n");
+D:\dev\guideXOSServer\kernel\core\main.cpp:524:kernel::arch::ia64::ski_console::puts("\r\n");
+D:\dev\guideXOSServer\kernel\core\main.cpp:525:kernel::arch::ia64::ski_console::puts("Entering idle loop (Ctrl-C in ski to exit)\r\n");
+D:\dev\guideXOSServer\kernel\core\main.cpp:532:#endif // ARCH_IA64
+D:\dev\guideXOSServer\kernel\core\msi.cpp:236:// Parse MSI control register
+D:\dev\guideXOSServer\kernel\core\msi.cpp:258:// Parse MSI-X control register
+D:\dev\guideXOSServer\kernel\core\nic.cpp:606:// enumeration would go here for ia64/sparc64/riscv64.
+D:\dev\guideXOSServer\kernel\core\nvme.cpp:58:// freestanding C++).  On SPARC64/IA-64, arch::mmio_readXX helpers
+D:\dev\guideXOSServer\kernel\core\nvme.cpp:115:#elif defined(ARCH_IA64)
+D:\dev\guideXOSServer\kernel\core\nvme.cpp:117:// IA-64: use volatile pointer access with compiler barrier
+D:\dev\guideXOSServer\kernel\core\nvme.cpp:152:// For MMIO-based PCI (SPARC64, IA64) a separate accessor is used.
+D:\dev\guideXOSServer\kernel\core\nvme.cpp:595:// TODO: MMIO-based PCI scanning for SPARC64 and IA-64
+D:\dev\guideXOSServer\kernel\core\nvme.cpp:597:// access routines (psycho/sabre on SPARC64, SAL on IA-64).
+D:\dev\guideXOSServer\kernel\core\pci_audio.cpp:94:// or arch::mmio_read32 (IA-64/SPARC64).
+D:\dev\guideXOSServer\kernel\core\pci_audio.cpp:132:// IA-64 and SPARC64 use memory-mapped config space.
+D:\dev\guideXOSServer\kernel\core\pci_audio.cpp:134:#if defined(ARCH_IA64)
+D:\dev\guideXOSServer\kernel\core\pci_audio.cpp:571:#if ARCH_HAS_PORT_IO || defined(ARCH_IA64) || defined(ARCH_SPARC64)
+D:\dev\guideXOSServer\kernel\core\shell.cpp:1068:// Parse device index
+D:\dev\guideXOSServer\kernel\core\shell.cpp:1573:// Parse IP address or resolve hostname
+D:\dev\guideXOSServer\kernel\core\shell.cpp:1974:// Parse IP
+D:\dev\guideXOSServer\kernel\core\shell.cpp:1983:// Parse port
+D:\dev\guideXOSServer\kernel\core\shell.cpp:2707:// Command Parser and Executor
+D:\dev\guideXOSServer\kernel\core\shell.cpp:2710:static void parse_args(const char* cmd, char args[MAX_ARGS][64], uint32_t& argCount) {
+D:\dev\guideXOSServer\kernel\core\shell.cpp:2740:// Parse command into arguments
+D:\dev\guideXOSServer\kernel\core\shell.cpp:2743:parse_args(cmd, args, argCount);
+D:\dev\guideXOSServer\kernel\core\socket.cpp:44:static void socket_datagram_handler(const udp::ParsedDatagram* datagram)
+D:\dev\guideXOSServer\kernel\core\tcp.cpp:729:static void process_segment(TCB* tcb, const ParsedSegment* seg)
+D:\dev\guideXOSServer\kernel\core\tcp.cpp:896:void handle_segment(const ipv4::ParsedPacket* ipPacket)
+D:\dev\guideXOSServer\kernel\core\tcp.cpp:910:// Parse segment
+D:\dev\guideXOSServer\kernel\core\tcp.cpp:913:ParsedSegment seg;
+D:\dev\guideXOSServer\kernel\core\udp.cpp:243:Status parse_datagram(const uint8_t* data, uint16_t len,
+D:\dev\guideXOSServer\kernel\core\udp.cpp:245:ParsedDatagram* parsed)
+D:\dev\guideXOSServer\kernel\core\udp.cpp:247:if (!data || !parsed) return UDP_ERR_NULL_PTR;
+D:\dev\guideXOSServer\kernel\core\udp.cpp:250:memzero(parsed, sizeof(ParsedDatagram));
+D:\dev\guideXOSServer\kernel\core\udp.cpp:254:// Parse header fields (convert from network byte order)
+D:\dev\guideXOSServer\kernel\core\udp.cpp:255:parsed->srcPort = ethernet::ntohs(hdr->srcPort);
+D:\dev\guideXOSServer\kernel\core\udp.cpp:256:parsed->dstPort = ethernet::ntohs(hdr->dstPort);
+D:\dev\guideXOSServer\kernel\core\udp.cpp:257:parsed->length = ethernet::ntohs(hdr->length);
+D:\dev\guideXOSServer\kernel\core\udp.cpp:258:parsed->checksum = ethernet::ntohs(hdr->checksum);
+D:\dev\guideXOSServer\kernel\core\udp.cpp:259:parsed->srcIP = srcIP;
+D:\dev\guideXOSServer\kernel\core\udp.cpp:260:parsed->dstIP = dstIP;
+D:\dev\guideXOSServer\kernel\core\udp.cpp:263:if (parsed->length < HEADER_LEN || parsed->length > len) {
+D:\dev\guideXOSServer\kernel\core\udp.cpp:269:parsed->checksumValid = verify_checksum(srcIP, dstIP, data, len);
+D:\dev\guideXOSServer\kernel\core\udp.cpp:270:if (!parsed->checksumValid) {
+D:\dev\guideXOSServer\kernel\core\udp.cpp:274:parsed->checksumValid = true;  // Checksum disabled
+D:\dev\guideXOSServer\kernel\core\udp.cpp:278:parsed->data = data + HEADER_LEN;
+D:\dev\guideXOSServer\kernel\core\udp.cpp:279:parsed->dataLen = parsed->length - HEADER_LEN;
+D:\dev\guideXOSServer\kernel\core\udp.cpp:280:parsed->isValid = true;
+D:\dev\guideXOSServer\kernel\core\udp.cpp:371:void handle_packet(const ipv4::ParsedPacket* ipPacket)
+D:\dev\guideXOSServer\kernel\core\udp.cpp:378:// Parse datagram
+D:\dev\guideXOSServer\kernel\core\udp.cpp:379:ParsedDatagram datagram;
+D:\dev\guideXOSServer\kernel\core\udp.cpp:380:Status status = parse_datagram(ipPacket->payload, ipPacket->payloadLen,
+D:\dev\guideXOSServer\kernel\core\usb.cpp:78:// Parse a configuration descriptor and populate device info
+D:\dev\guideXOSServer\kernel\core\usb.cpp:81:static void parse_config(Device* dev, const uint8_t* data, uint16_t totalLen)
+D:\dev\guideXOSServer\kernel\core\usb.cpp:212:parse_config(dev, cfgBuf, totalLen);
+D:\dev\guideXOSServer\kernel\core\usb_audio.cpp:141:// Parse audio control and streaming descriptors
+D:\dev\guideXOSServer\kernel\core\usb_audio.cpp:144:static void parse_audio_descriptors(AudioDevice* dev,
+D:\dev\guideXOSServer\kernel\core\usb_audio.cpp:156:dev->featureUnitId = 2; // typical default; real parser would read descriptors
+D:\dev\guideXOSServer\kernel\core\usb_audio.cpp:227:parse_audio_descriptors(dev, usbDev);
+D:\dev\guideXOSServer\kernel\core\usb_audio_uac2.cpp:201:// Parse UAC2 descriptors
+D:\dev\guideXOSServer\kernel\core\usb_audio_uac2.cpp:204:static void parse_uac2_descriptors(UAC2Device* dev,
+D:\dev\guideXOSServer\kernel\core\usb_audio_uac2.cpp:214:dev->featureUnitId = 2; // typical; real parser reads descriptors
+D:\dev\guideXOSServer\kernel\core\usb_audio_uac2.cpp:286:parse_uac2_descriptors(dev, usbDev);
+D:\dev\guideXOSServer\kernel\core\usb_hid.cpp:4:// Parses HID report descriptors for non-boot devices and polls
+D:\dev\guideXOSServer\kernel\core\usb_hid.cpp:99:// HID report descriptor parser (minimal)
+D:\dev\guideXOSServer\kernel\core\usb_hid.cpp:105:static void parse_report_descriptor(HIDDevice* dev,
+D:\dev\guideXOSServer\kernel\core\usb_hid.cpp:188:// Determine device type from interface class/protocol or parsed
+D:\dev\guideXOSServer\kernel\core\usb_hid.cpp:257:// Reads the first parsed axis and button fields and maps them to
+D:\dev\guideXOSServer\kernel\core\usb_hid.cpp:441:// Fetch and parse the HID report descriptor
+D:\dev\guideXOSServer\kernel\core\usb_hid.cpp:450:parse_report_descriptor(dev, reportBuf, sizeof(reportBuf));
+D:\dev\guideXOSServer\kernel\core\usb_net_ecm.cpp:41:// Parse a hex nibble from an ASCII character
+D:\dev\guideXOSServer\kernel\core\usb_net_ecm.cpp:50:// Parse MAC address from a USB string descriptor (Unicode hex digits).
+D:\dev\guideXOSServer\kernel\core\usb_net_ecm.cpp:52:static bool parse_mac_from_string(uint8_t usbAddr, uint8_t strIndex,
+D:\dev\guideXOSServer\kernel\core\usb_net_ecm.cpp:115:// Parse ECM functional descriptors from configuration descriptor
+D:\dev\guideXOSServer\kernel\core\usb_net_ecm.cpp:118:static bool parse_ecm_descriptors(uint8_t usbAddr, ECMDevice* ecm)
+D:\dev\guideXOSServer\kernel\core\usb_net_ecm.cpp:153:// Parse MAC from string descriptor
+D:\dev\guideXOSServer\kernel\core\usb_net_ecm.cpp:154:parse_mac_from_string(usbAddr, desc->iMACAddress,
+D:\dev\guideXOSServer\kernel\core\usb_net_ecm.cpp:299:// Parse ECM descriptors for MAC, segment size, etc.
+D:\dev\guideXOSServer\kernel\core\usb_net_ecm.cpp:300:parse_ecm_descriptors(usbAddress, dev);
+D:\dev\guideXOSServer\kernel\core\usb_printer.cpp:118:// Parse IEEE 1284 Device ID
+D:\dev\guideXOSServer\kernel\core\usb_printer.cpp:124:static void parse_device_id(PrinterDevice* dev,
+D:\dev\guideXOSServer\kernel\core\usb_printer.cpp:192:parse_device_id(dev, idBuf, sizeof(idBuf));
+D:\dev\guideXOSServer\kernel\core\usb_printer.cpp:245:parse_device_id(dev, raw, sizeof(raw));
+D:\dev\guideXOSServer\kernel\core\usb_video.cpp:94:// Parse video streaming descriptors
+D:\dev\guideXOSServer\kernel\core\usb_video.cpp:96:// This is a simplified parser that looks at the interface class
+D:\dev\guideXOSServer\kernel\core\usb_video.cpp:98:// parse the class-specific VS descriptors from the raw config.
+D:\dev\guideXOSServer\kernel\core\usb_video.cpp:101:static void parse_video_descriptors(VideoDevice* dev,
+D:\dev\guideXOSServer\kernel\core\usb_video.cpp:225:parse_video_descriptors(dev, usbDev);
+D:\dev\guideXOSServer\kernel\core\usb_video_uvc.cpp:166:// Parse UVC descriptors for enhanced features
+D:\dev\guideXOSServer\kernel\core\usb_video_uvc.cpp:169:static void parse_uvc_descriptors(UVCDevice* dev,
+D:\dev\guideXOSServer\kernel\core\usb_video_uvc.cpp:180:// Typical entity IDs (would be parsed from CS descriptors)
+D:\dev\guideXOSServer\kernel\core\usb_video_uvc.cpp:281:parse_uvc_descriptors(dev, usbDev);
+D:\dev\guideXOSServer\kernel\core\vesa.cpp:7://   IA-64     : PCI VGA MMIO probe (EFI GOP passed separately)
+D:\dev\guideXOSServer\kernel\core\vfs.cpp:215:uint16_t bytesPerSector = *reinterpret_cast<uint16_t*>(&buffer[11]);
+D:\dev\guideXOSServer\kernel\core\vfs.cpp:219:serial::put_hex16(bytesPerSector);
+D:\dev\guideXOSServer\kernel\core\vfs.cpp:227:if (bytesPerSector == 512 && sectorsPerFAT16 == 0 && sectorsPerFAT32 > 0) {
+D:\dev\guideXOSServer\kernel\core\vga.cpp:159:// Print in reverse
+D:\dev\guideXOSServer\kernel\core\virtio_gpu.cpp:295:* and parse the response.
+D:\dev\guideXOSServer\kernel\core\virtio_gpu.cpp:315:// Parse response (stub - use defaults)
+D:\dev\guideXOSServer\kernel\core\virtio_net.cpp:439:// Parse virtio-net header
+D:\dev\guideXOSServer\kernel\docs\HARDWARE_SUPPORT_REPORT.md:26:| **IA-64 (Itanium)** | ? PRESENT | Itanium, Itanium 2 | EFI boot, Ski emulator support |
+D:\dev\guideXOSServer\kernel\docs\HARDWARE_SUPPORT_REPORT.md:42:| Feature | x86/AMD64 | ARM | RISC-V | LoongArch | IA-64 | SPARC | MIPS64 |
+D:\dev\guideXOSServer\kernel\docs\HARDWARE_SUPPORT_REPORT.md:62:| **UEFI Boot** | ? PRESENT | IA-64 ? | Full UEFI bootloader with GOP |
+D:\dev\guideXOSServer\kernel\docs\HARDWARE_SUPPORT_REPORT.md:65:| **Device Tree** | ? | ?? Partial | Not fully parsed |
+D:\dev\guideXOSServer\kernel\docs\HARDWARE_SUPPORT_REPORT.md:72:| **ACPI 2.0+** | ? PRESENT | x86, AMD64, IA-64 | Extended tables supported |
+D:\dev\guideXOSServer\kernel\docs\HARDWARE_SUPPORT_REPORT.md:73:| **Device Tree (FDT)** | ?? PARTIAL | ARM, RISC-V | Basic awareness, not fully parsed |
+D:\dev\guideXOSServer\kernel\docs\HARDWARE_SUPPORT_REPORT.md:117:| **AHCI/SATA** | ? PRESENT | x86, AMD64, IA-64, SPARC64, RISC-V | MMIO-based |
+D:\dev\guideXOSServer\kernel\docs\HARDWARE_SUPPORT_REPORT.md:118:| **NVMe** | ? PRESENT | x86, AMD64, IA-64, SPARC64, RISC-V, LoongArch | PCIe MMIO |
+D:\dev\guideXOSServer\kernel\docs\HARDWARE_SUPPORT_REPORT.md:162:| **Intel E1000** | ? PRESENT | x86, AMD64, IA-64, SPARC64, RISC-V, LoongArch | QEMU default NIC |
+D:\dev\guideXOSServer\kernel\docs\HARDWARE_SUPPORT_REPORT.md:218:| IA-64 | Ski Console | Emulator support |
+D:\dev\guideXOSServer\kernel\docs\HARDWARE_SUPPORT_REPORT.md:242:| **IA-64** | EFI GOP, PCI VGA | None | ? PRESENT |
+D:\dev\guideXOSServer\kernel\docs\HARDWARE_SUPPORT_REPORT.md:310:| **OHCI** | ? PRESENT | SPARC, SPARC64, IA-64, RISC-V | USB 1.x via MMIO |
+D:\dev\guideXOSServer\kernel\docs\HARDWARE_SUPPORT_REPORT.md:332:| **PCI Config (MMIO/ECAM)** | ? PRESENT | RISC-V, LoongArch, IA-64, SPARC64 | Memory-mapped |
+D:\dev\guideXOSServer\kernel\docs\HARDWARE_SUPPORT_REPORT.md:354:| **Intel HDA** | ? PRESENT | x86, AMD64, IA-64, SPARC64, RISC-V, LoongArch | High Definition Audio |
+D:\dev\guideXOSServer\kernel\docs\HARDWARE_SUPPORT_REPORT.md:435:| Macro | x86/AMD64 | ARM | RISC-V | LoongArch | IA-64 | SPARC64 | SPARC | MIPS64 |
+D:\dev\guideXOSServer\kernel\docs\HARDWARE_SUPPORT_REPORT.md:454:| `ARCH_HAS_EFI_GOP` | ? | ? | ? | ? | ? | ? | ? | ? |
+D:\dev\guideXOSServer\kernel\README.md:11:- **Itanium** (IA-64) - 64-bit Intel Itanium architecture
+D:\dev\guideXOSServer\kernel\README.md:26:?   ??? ia64/          # Itanium support
+D:\dev\guideXOSServer\kernel\README.md:49:- **IA-64**: `ia64-elf-gcc`, `ia64-elf-g++`
+D:\dev\guideXOSServer\kernel\README.md:66:# Build for Itanium
+D:\dev\guideXOSServer\kernel\README.md:67:make ARCH=ia64
+D:\dev\guideXOSServer\kernel\README.md:124:### Itanium
+D:\dev\guideXOSServer\kernel\README.md:158:#### Itanium
+D:\dev\guideXOSServer\kernel\README.md:161:- RSE operations: `flush_rse()`, `read_bsp()`
+D:\dev\guideXOSServer\kernel\README.md:196:- [ ] Interrupt vectors (ARM, SPARC, IA-64)
+D:\dev\guideXOSServer\scripts\build-and-run-riscv64_in_linux.sh:25:# Parse arguments
+D:\dev\guideXOSServer\scripts\build-and-run-sparcv8_in_linux.sh:15:# Parse arguments
+D:\dev\guideXOSServer\scripts\build-and-run-sparcv9_in_linux.sh:15:# Parse arguments
+D:\dev\guideXOSServer\scripts\build-ia64.sh:3:# Linux Build Script for guideXOS Kernel (IA-64 / Itanium)
+D:\dev\guideXOSServer\scripts\build-ia64.sh:5:# Run from the scripts directory:  ./build-ia64.sh
+D:\dev\guideXOSServer\scripts\build-ia64.sh:6:# Or from the repository root:     ./scripts/build-ia64.sh
+D:\dev\guideXOSServer\scripts\build-ia64.sh:17:echo "  guideXOS Itanium (IA-64) Kernel Build"
+D:\dev\guideXOSServer\scripts\build-ia64.sh:25:if command -v ia64-linux-gnu-g++ &>/dev/null; then
+D:\dev\guideXOSServer\scripts\build-ia64.sh:26:CROSS="ia64-linux-gnu"
+D:\dev\guideXOSServer\scripts\build-ia64.sh:27:elif command -v ia64-elf-g++ &>/dev/null; then
+D:\dev\guideXOSServer\scripts\build-ia64.sh:28:CROSS="ia64-elf"
+D:\dev\guideXOSServer\scripts\build-ia64.sh:30:echo "[ERROR] No IA-64 cross-compiler found."
+D:\dev\guideXOSServer\scripts\build-ia64.sh:32:echo "  Install with:  sudo apt install gcc-ia64-linux-gnu g++-ia64-linux-gnu"
+D:\dev\guideXOSServer\scripts\build-ia64.sh:34:echo "  Or build an ia64-elf cross-toolchain from source."
+D:\dev\guideXOSServer\scripts\build-ia64.sh:48:echo "[BUILD] Cleaning previous IA-64 build..."
+D:\dev\guideXOSServer\scripts\build-ia64.sh:49:make ARCH=ia64 clean 2>/dev/null || true
+D:\dev\guideXOSServer\scripts\build-ia64.sh:51:echo "[BUILD] Compiling IA-64 kernel..."
+D:\dev\guideXOSServer\scripts\build-ia64.sh:52:make ARCH=ia64 -j"$(nproc)"
+D:\dev\guideXOSServer\scripts\build-ia64.sh:57:KERNEL="$REPO_ROOT/build/ia64/bin/kernel.elf"
+D:\dev\guideXOSServer\scripts\build-ia64.sh:74:echo "    ./scripts/run-ia64_in_linux.sh"
+D:\dev\guideXOSServer\scripts\create-test-disks.ps1:136:6. Traverse deep directories
+D:\dev\guideXOSServer\scripts\create-test-disks.ps1:244:if (Test-Path $mockDir) { Remove-Item $mockDir -Recurse -Force }
+D:\dev\guideXOSServer\scripts\create-test-disks.sh:211:6. Traverse deep directories
+D:\dev\guideXOSServer\scripts\run-ia64_in_linux.sh:3:# Build and run guideXOS IA-64 kernel on the HP ski simulator (Linux host)
+D:\dev\guideXOSServer\scripts\run-ia64_in_linux.sh:5:# Usage:  ./run-ia64_in_linux.sh [--build-only]
+D:\dev\guideXOSServer\scripts\run-ia64_in_linux.sh:8:#   - ia64-linux-gnu or ia64-elf cross-compiler (for building)
+D:\dev\guideXOSServer\scripts\run-ia64_in_linux.sh:9:#   - ski IA-64 simulator (for running)
+D:\dev\guideXOSServer\scripts\run-ia64_in_linux.sh:29:"$SCRIPT_DIR/build-ia64.sh"
+D:\dev\guideXOSServer\scripts\run-ia64_in_linux.sh:31:KERNEL="$REPO_ROOT/build/ia64/bin/kernel.elf"
+D:\dev\guideXOSServer\scripts\run-ia64_in_linux.sh:45:echo "[ERROR] HP ski IA-64 simulator not found."
+D:\dev\guideXOSServer\scripts\run-ia64_in_linux.sh:63:echo "  Launching ski IA-64 Simulator"
+D:\dev\guideXOSServer\scripts\run-qemu-fs-test.sh:34:# Parse arguments
+D:\dev\guideXOSServer\scripts\run-qemu-fs-test2.ps1:241:Write-Host "    If mouse acts worse, run with -NoUsbTablet"
+D:\dev\guideXOSServer\build-uefi.ps1:35:Remove-Item -Recurse -Force $ESPDir
+D:\dev\guideXOSServer\build-uefi.ps1:40:Remove-Item -Recurse -Force (Join-Path $BootloaderDir "guideXOS.1fedf2ad")
+D:\dev\guideXOSServer\build-uefi.ps1:45:Remove-Item -Recurse -Force (Join-Path $BootloaderDir "x64")
+D:\dev\guideXOSServer\build-uefi.ps1:50:Remove-Item -Recurse -Force (Join-Path $KernelDir "build")
+D:\dev\guideXOSServer\build-uefi.ps1:56:Remove-Item -Recurse -Force $RootKernelBuildDir
+D:\dev\guideXOSServer\build-uefi.ps1:255:$NewestKernelSource = Get-ChildItem (Join-Path $RootDir "kernel") -Recurse -Include *.cpp,*.h,*.asm,*.s,Makefile,*.arch |
+D:\dev\guideXOSServer\build-uefi.ps1:360:$NewestKernelSource = Get-ChildItem (Join-Path $RootDir "kernel") -Recurse -Include *.cpp,*.h,*.asm,*.s,Makefile,*.arch |
+D:\dev\guideXOSServer\build.ps1:35:Remove-Item -Recurse -Force $ESPDir
+D:\dev\guideXOSServer\build.ps1:40:Remove-Item -Recurse -Force (Join-Path $BootloaderDir "guideXOS.1fedf2ad")
+D:\dev\guideXOSServer\build.ps1:45:Remove-Item -Recurse -Force (Join-Path $BootloaderDir "x64")
+D:\dev\guideXOSServer\build.ps1:50:Remove-Item -Recurse -Force (Join-Path $KernelDir "build")
+D:\dev\guideXOSServer\build.ps1:56:Remove-Item -Recurse -Force $RootKernelBuildDir
+D:\dev\guideXOSServer\build.ps1:261:$NewestKernelSource = Get-ChildItem (Join-Path $RootDir "kernel") -Recurse -Include *.cpp,*.h,*.asm,*.s,Makefile,*.arch |
+D:\dev\guideXOSServer\build.ps1:373:$NewestKernelSource = Get-ChildItem (Join-Path $RootDir "kernel") -Recurse -Include *.cpp,*.h,*.asm,*.s,Makefile,*.arch |
+D:\dev\guideXOSServer\calculator.cpp:121:Logger::write(LogLevel::Error, std::string("Calculator: Failed to parse window ID: ") + e.what());
+D:\dev\guideXOSServer\calculator.cpp:138:Logger::write(LogLevel::Error, std::string("Calculator: Failed to parse close ID: ") + e.what());
+D:\dev\guideXOSServer\calculator.cpp:175:Logger::write(LogLevel::Error, std::string("Calculator: Failed to parse key code: ") + e.what());
+D:\dev\guideXOSServer\calculator.cpp:228:Logger::write(LogLevel::Error, std::string("Calculator: Failed to parse widget event: ") + e.what());
+D:\dev\guideXOSServer\clock.cpp:66:Logger::write(LogLevel::Error, std::string("Clock: Failed to parse window ID: ") + e.what());
+D:\dev\guideXOSServer\clock.cpp:83:Logger::write(LogLevel::Error, std::string("Clock: Failed to parse close ID: ") + e.what());
+D:\dev\guideXOSServer\compositor.cpp:284:RECT intersection{};
+D:\dev\guideXOSServer\compositor.cpp:285:if (IntersectRect(&intersection, &selectionRect, &iconBounds)) {
+D:\dev\guideXOSServer\compositor.cpp:306:void Compositor::initWindow( ) { WNDCLASSA wc{}; wc.style = CS_OWNDC; wc.lpfnWndProc = Compositor::WndProc; wc.hInstance = GetModuleHandleA(nullptr); wc.lpszClassName = "GXOS_COMPOSITOR"; RegisterClassA(&wc); g_hwnd = CreateWindowExA(0, wc.lpszClassName, "guideXOSCpp Compositor", WS_OVERLAPPEDWINDOW | WS_VISIBLE, CW_USEDEFAULT, CW_USEDEFAULT, 1024, 768, nullptr, nullptr, wc.hInstance, nullptr); g_startBtnBmp = (HBITMAP)LoadImageA(nullptr, "assets/start_button.bmp", IMAGE_BITMAP, 0, 0, LR_LOADFROMFILE | LR_CREATEDIBSECTION); }
+D:\dev\guideXOSServer\compositor.cpp:309:void Compositor::loadWallpaper(const std::string& path) { g_wallpaperPath = path; if (g_wallpaperBmp) { DeleteObject(g_wallpaperBmp); g_wallpaperBmp = nullptr; } if (path.empty( )) return; HBITMAP hb = (HBITMAP)LoadImageA(nullptr, path.c_str( ), IMAGE_BITMAP, 0, 0, LR_LOADFROMFILE | LR_CREATEDIBSECTION); if (hb) { BITMAP bm{}; GetObject(hb, sizeof(bm), &bm); g_wallpaperBmp = hb; g_wallpaperW = bm.bmWidth; g_wallpaperH = bm.bmHeight; } }
+D:\dev\guideXOSServer\compositor.cpp:477:drawTaskbarSearchBox(dc, 48, cr.bottom - taskbarH + 8, 160, taskbarH - 16);
+D:\dev\guideXOSServer\compositor.cpp:1281:case MsgType::MT_DesktopWallpaperSet: { loadWallpaper(s); g_cfg.wallpaperPath = s; saveDesktopConfig( ); invalidate(0); } break;
+D:\dev\guideXOSServer\compositor.cpp:1364:Logger::write(LogLevel::Error, std::string("Compositor: Failed to parse MT_InputMouse: ") + e.what());
+D:\dev\guideXOSServer\compositor.cpp:1386:Logger::write(LogLevel::Error, std::string("Compositor: Failed to parse MT_InputKey: ") + e.what());
+D:\dev\guideXOSServer\compositor.cpp:1465:void Compositor::drawTaskbarSearchBox(HDC dc, int x, int y, int w, int h) {
+D:\dev\guideXOSServer\compositor.h:120:static void drawTaskbarSearchBox(HDC dc, int x, int y, int w, int h);
+D:\dev\guideXOSServer\console_window.cpp:91:Logger::write(LogLevel::Error, std::string("ConsoleWindow: Failed to parse window ID: ") + e.what());
+D:\dev\guideXOSServer\console_window.cpp:108:Logger::write(LogLevel::Error, std::string("ConsoleWindow: Failed to parse close ID: ") + e.what());
+D:\dev\guideXOSServer\console_window.cpp:145:Logger::write(LogLevel::Error, std::string("ConsoleWindow: Failed to parse key code: ") + e.what());
+D:\dev\guideXOSServer\control_panel.cpp:148:Logger::write(LogLevel::Error, "Failed to parse window ID");
+D:\dev\guideXOSServer\cpu_architecture.h:15:IA64,
+D:\dev\guideXOSServer\cpu_architecture.h:31:case CpuArchitecture::IA64: return "ia64";
+D:\dev\guideXOSServer\cpu_architecture.h:61:if (CpuArchitectureStringEquals(architecture, "ia64")) return CpuArchitecture::IA64;
+D:\dev\guideXOSServer\desktop_config.h:20:// Load JSON from path. Extremely small permissive parser; expects correct schema.
+D:\dev\guideXOSServer\desktop_config.h:27:auto parseJSONString=[&](const std::string& src, size_t& i, std::string& outS){ outS.clear(); if(i>=src.size()||src[i]!='"') return false; ++i; while(i<src.size()){ char c=src[i++]; if(c=='\\'){ if(i>=src.size()) break; char e=src[i++]; if(e=='"'||e=='\\'||e=='/') outS.push_back(e); else if(e=='b') outS.push_back('\b'); else if(e=='f') outS.push_back('\f'); else if(e=='n') outS.push_back('\n'); else if(e=='r') outS.push_back('\r'); else if(e=='t') outS.push_back('\t'); else outS.push_back(e); }
+D:\dev\guideXOSServer\desktop_config.h:29:auto parseJSONInt=[&](const std::string& src, size_t& i, long long& outV){ outV=0; bool neg=false; if(i<src.size() && (src[i]=='-'||src[i]=='+')){ neg=src[i]=='-'; ++i; } if(i>=src.size()|| !(src[i]>='0'&&src[i]<='9')) return false; long long v=0; while(i<src.size() && src[i]>='0' && src[i]<='9'){ v = v*10 + (src[i]-'0'); ++i; } outV = neg? -v : v; return true; };
+D:\dev\guideXOSServer\desktop_config.h:30:auto parseJSONBool=[&](const std::string& src, size_t& i, bool& outV){ if(src.compare(i,4,"true")==0){ outV=true; i+=4; return true; } if(src.compare(i,5,"false")==0){ outV=false; i+=5; return true; } return false; };
+D:\dev\guideXOSServer\desktop_config.h:31:auto extractSection=[&](const std::string& s, const std::string& key, std::string& content){ content.clear(); auto kpos = s.find('"'+key+'"'); if(kpos==std::string::npos) return false; auto colon = s.find(':', kpos); if(colon==std::string::npos) return false; size_t i=colon+1; skipWS(s,i); if(i>=s.size()) return false; if(s[i]=='"'){ size_t j=i; std::string tmp; if(!parseJSONString(s,j,tmp)) return false; content='"'+tmp+'"'; return true; } if(s[i]=='['){ int depth=0; size_t j=i; while(j<s.size()){ if(s[j]=='[') depth++; else if(s[j]==']'){ depth--; if(depth==0){ ++j; break; } } ++j; } if(depth!=0) return false; content = s.substr(i, j-i); return true; } if(s[i]=='{'){ int depth=0; size_t j=i; while(j<s.size()){ if(s[j]=='{') depth++; else if(s[j]=='}'){ depth--; if(depth==0){ ++j; break; } } ++j; } if(depth!=0) return false; content = s.substr(i, j-i); return true; } size_t j=i; while(j<s.size() && s[j]!=',' && s[j]!='}' && s[j]!=']' && s[j]!='\n' && s[j]!='\r') ++j; content = s.substr(i, j-i); return true; };
+D:\dev\guideXOSServer\desktop_config.h:32:auto parseStringArray=[&](const std::string& src, std::vector<std::string>& outArr){ outArr.clear(); size_t i=0; skipWS(src,i); if(i>=src.size()||src[i]!='[') return false; ++i; skipWS(src,i); if(i<src.size() && src[i]==']'){ ++i; return true; } while(i<src.size()){ skipWS(src,i); std::string val; if(!parseJSONString(src,i,val)) return false; outArr.push_back(val); skipWS(src,i); if(i<src.size() && src[i]==','){ ++i; continue; } if(i<src.size() && src[i]==']'){ ++i; return true; } return false; } return false; };
+D:\dev\guideXOSServer\desktop_config.h:33:auto parseWindowsArray=[&](const std::string& src, std::vector<DesktopWindowRec>& outWins){ outWins.clear(); size_t i=0; skipWS(src,i); if(i>=src.size() || src[i]!='[') return false; ++i; skipWS(src,i); if(i<src.size() && src[i]==']'){ ++i; return true; } while(i<src.size()){ skipWS(src,i); if(i>=src.size()||src[i]!='{') return false; int depth=0; size_t start=i; size_t j=i; while(j<src.size()){ if(src[j]=='{') depth++; else if(src[j]=='}'){ depth--; if(depth==0){ ++j; break; } } ++j; } if(depth!=0) return false; std::string obj = src.substr(start, j-start); DesktopWindowRec rec{}; auto findStr=[&](const char* key, std::string& outStr){ auto p=obj.find(std::string("\"")+key+"\""); if(p==std::string::npos) return false; auto c=obj.find(':',p); if(c==std::string::npos) return false; size_t ii=c+1; skipWS(obj,ii); if(ii>=obj.size()||obj[ii]!='"') return false; return parseJSONString(obj, ii, outStr); }; auto findInt=[&](const char* key, long long& outVal){ auto p=obj.find(std::string("\"")+key+"\""); if(p==std::string::npos) return false; auto c=obj.find(':',p); if(c==std::string::npos) return false; size_t ii=c+1; skipWS(obj,ii); return parseJSONInt(obj, ii, outVal); }; auto findBool=[&](const char* key, bool& outVal){ auto p=obj.find(std::string("\"")+key+"\""); if(p==std::string::npos) return false; auto c=obj.find(':',p); if(c==std::string::npos) return false; size_t ii=c+1; skipWS(obj,ii); return parseJSONBool(obj, ii, outVal); }; std::string title; long long id=0,x=0,y=0,w=0,h=0,z=0,snap=0; bool minimized=false,maximized=false,focused=false; findInt("id", id); findStr("title", title); findInt("x", x); findInt("y", y); findInt("w", w); findInt("h", h); findBool("minimized", minimized); findBool("maximized", maximized); findInt("z", z); findBool("focused", focused); findInt("snap", snap); DesktopWindowRec r; r.id=(uint64_t)id; r.title=title; r.x=(int)x; r.y=(int)y; r.w=(int)w; r.h=(int)h; r.minimized=minimized; r.maximized=maximized; r.z=(int)z; r.focused=focused; r.snap=(int)snap; outWins.push_back(r); i=j; skipWS(src,i); if(i<src.size() && src[i]==','){ ++i; continue; } if(i<src.size() && src[i]==']'){ ++i; return true; } return false; } return false; };
+D:\dev\guideXOSServer\desktop_config.h:34:auto parseIconPosArray=[&](const std::string& src, std::vector<DesktopIconPos>& outPos){ outPos.clear(); size_t i=0; skipWS(src,i); if(i>=src.size() || src[i]!='[') return false; ++i; skipWS(src,i); if(i<src.size() && src[i]==']'){ ++i; return true; } while(i<src.size()){ skipWS(src,i); if(i>=src.size()||src[i]!='{') return false; int depth=0; size_t start=i; size_t j=i; while(j<src.size()){ if(src[j]=='{') depth++; else if(src[j]=='}'){ depth--; if(depth==0){ ++j; break; } } ++j; } if(depth!=0) return false; std::string obj = src.substr(start, j-start); auto findStr2=[&](const char* key, std::string& outStr){ auto p=obj.find(std::string("\"")+key+"\""); if(p==std::string::npos) return false; auto c=obj.find(':',p); if(c==std::string::npos) return false; size_t ii=c+1; skipWS(obj,ii); if(ii>=obj.size()||obj[ii]!='"') return false; return parseJSONString(obj, ii, outStr); }; auto findInt2=[&](const char* key, long long& outVal){ auto p=obj.find(std::string("\"")+key+"\""); if(p==std::string::npos) return false; auto c=obj.find(':',p); if(c==std::string::npos) return false; size_t ii=c+1; skipWS(obj,ii); return parseJSONInt(obj, ii, outVal); }; DesktopIconPos ip; long long px=0,py=0; findStr2("name", ip.name); findInt2("x", px); findInt2("y", py); ip.x=(int)px; ip.y=(int)py; outPos.push_back(ip); i=j; skipWS(src,i); if(i<src.size() && src[i]==','){ ++i; continue; } if(i<src.size() && src[i]==']'){ ++i; return true; } return false; } return false; };
+D:\dev\guideXOSServer\desktop_config.h:35:std::string section; if(extractSection(txt, "wallpaper", section)){ if(!section.empty() && section[0]=='"'){ size_t i=0; parseJSONString(section, i, out.wallpaperPath); } }
+D:\dev\guideXOSServer\desktop_config.h:36:if(extractSection(txt, "pinned", section)) parseStringArray(section, out.pinned);
+D:\dev\guideXOSServer\desktop_config.h:37:if(extractSection(txt, "recent", section)) parseStringArray(section, out.recent);
+D:\dev\guideXOSServer\desktop_config.h:38:if(extractSection(txt, "windows", section)) parseWindowsArray(section, out.windows);
+D:\dev\guideXOSServer\desktop_config.h:39:if(extractSection(txt, "iconPositions", section)) parseIconPosArray(section, out.iconPositions);
+D:\dev\guideXOSServer\desktop_wallpaper.h:68:DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+D:\dev\guideXOSServer\desktop_wallpaper.h:84:DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+D:\dev\guideXOSServer\disk_manager.cpp:130:Logger::write(LogLevel::Error, "Failed to parse window ID");
+D:\dev\guideXOSServer\disk_manager.cpp:228:entry.bytesPerSector = dev->sectorSize == 0 ? 512 : dev->sectorSize;
+D:\dev\guideXOSServer\disk_manager.cpp:275:sysDisk.bytesPerSector = 512;
+D:\dev\guideXOSServer\disk_manager.cpp:306:uint64_t totalBytes = sel->totalSectors * sel->bytesPerSector;
+D:\dev\guideXOSServer\disk_manager.cpp:550:entry.bytesPerSector = 512;
+D:\dev\guideXOSServer\disk_manager.cpp:551:entry.totalSectors = static_cast<uint64_t>(fileSize) / entry.bytesPerSector;
+D:\dev\guideXOSServer\disk_manager.cpp:616:uint16_t bytesPerSec = sec[11] | (sec[12] << 8);
+D:\dev\guideXOSServer\disk_manager.cpp:618:if ((bytesPerSec == 512 || bytesPerSec == 1024 || bytesPerSec == 2048 || bytesPerSec == 4096) && secPerClus != 0) {
+D:\dev\guideXOSServer\disk_manager.cpp:733:uint16_t bytesPerSec = sec[11] | (sec[12] << 8);
+D:\dev\guideXOSServer\disk_manager.cpp:735:if ((bytesPerSec == 512 || bytesPerSec == 1024 ||
+D:\dev\guideXOSServer\disk_manager.cpp:736:bytesPerSec == 2048 || bytesPerSec == 4096) && secPerClus != 0) {
+D:\dev\guideXOSServer\disk_manager.cpp:873:uint64_t totalBytes = sel->totalSectors * sel->bytesPerSector;
+D:\dev\guideXOSServer\disk_manager.cpp:981:uint64_t totalBytes = sel->totalSectors * sel->bytesPerSector;
+D:\dev\guideXOSServer\disk_manager.cpp:991:uint64_t totalBytes = sel->totalSectors * sel->bytesPerSector;
+D:\dev\guideXOSServer\disk_manager.cpp:1088:uint64_t totalBytes = s_disks[i].totalSectors * s_disks[i].bytesPerSector;
+D:\dev\guideXOSServer\disk_manager.cpp:1128:uint64_t totalBytes = sel->totalSectors * (sel->bytesPerSector == 0 ? 512UL : sel->bytesPerSector);
+D:\dev\guideXOSServer\disk_manager.cpp:1130:"  Sector " + std::to_string(sel->bytesPerSector) + " B" +
+D:\dev\guideXOSServer\disk_manager.cpp:1205:(sel->bytesPerSector == 0 ? 512UL : sel->bytesPerSector);
+D:\dev\guideXOSServer\disk_manager.cpp:1222:std::string sectorSize = std::to_string(sel->bytesPerSector);
+D:\dev\guideXOSServer\disk_manager.cpp:1354:std::string freeLbl = "Unallocated " + fmtSize(freeCount * (sel->bytesPerSector == 0 ? 512UL : sel->bytesPerSector));
+D:\dev\guideXOSServer\disk_manager.cpp:1380:lbl += " " + fmtSize(p.lbaCount * (sel->bytesPerSector == 0 ? 512UL : sel->bytesPerSector));
+D:\dev\guideXOSServer\disk_manager.cpp:1409:std::string freeLbl = "Unallocated " + fmtSize(freeCount * (sel->bytesPerSector == 0 ? 512UL : sel->bytesPerSector));
+D:\dev\guideXOSServer\disk_manager.cpp:1425:std::string info = "Device " + std::to_string(sel->devIndex) + ", " + s_cachedTotalCaption + ", sector " + std::to_string(sel->bytesPerSector) + " B, sectors " + std::to_string(sel->totalSectors) + ", " + mbrStatusText(sel->mbrStatus);
+D:\dev\guideXOSServer\disk_manager.h:63:uint32_t bytesPerSector;           // Bytes per sector (usually 512)
+D:\dev\guideXOSServer\disk_manager.h:69:totalSectors(0), bytesPerSector(512), mbrStatus(MBR_UNREADABLE) {}
+D:\dev\guideXOSServer\fix-trampoline.ps1:51:Write-Host "  1. Clean solution: Remove-Item 'guideXOSBootLoader\guideXOS.1fedf2ad' -Recurse -Force" -ForegroundColor White
+D:\dev\guideXOSServer\guideXOSServer_vcxproj_content.txt:34:<CharacterSet>Unicode</CharacterSet>
+D:\dev\guideXOSServer\guideXOSServer_vcxproj_content.txt:41:<CharacterSet>Unicode</CharacterSet>
+D:\dev\guideXOSServer\guideXOSServer_vcxproj_content.txt:47:<CharacterSet>Unicode</CharacterSet>
+D:\dev\guideXOSServer\guideXOSServer_vcxproj_content.txt:54:<CharacterSet>Unicode</CharacterSet>
+D:\dev\guideXOSServer\guideXOSServer_vcxproj_content.txt:153:<ClInclude Include="kernel\arch\ia64\include\arch\ia64.h" />
+D:\dev\guideXOSServer\guideXOSServer_vcxproj_content.txt:200:<ClCompile Include="kernel\arch\ia64\arch.cpp" />
+D:\dev\guideXOSServer\guideXOSServer_vcxproj_content.txt:251:<None Include="kernel\arch\ia64\boot.s" />
+D:\dev\guideXOSServer\guideXOSServer_vcxproj_content.txt:252:<None Include="kernel\arch\ia64\linker.ld" />
+D:\dev\guideXOSServer\guideXOSServer_vcxproj_content.txt:253:<None Include="kernel\arch\ia64\Makefile.arch" />
+D:\dev\guideXOSServer\gui_protocol.h:37:MT_DesktopWallpaperSet = 25  // payload: path string
+D:\dev\guideXOSServer\gxapp_container.cpp:75:static bool parseJsonStringField(const std::string& json, const std::string& name, std::string& value){
+D:\dev\guideXOSServer\gxapp_container.cpp:108:static bool parseMetadataJson(const std::string& json, GXAppMetadata& metadata){
+D:\dev\guideXOSServer\gxapp_container.cpp:111:if (!parseJsonStringField(json, "format", format) || format != "gxapp") return false;
+D:\dev\guideXOSServer\gxapp_container.cpp:112:if (!parseJsonStringField(json, "applicationName", metadata.applicationName)) return false;
+D:\dev\guideXOSServer\gxapp_container.cpp:113:if (!parseJsonStringField(json, "version", metadata.version)) return false;
+D:\dev\guideXOSServer\gxapp_container.cpp:114:if (!parseJsonStringField(json, "requiredGuideXOSVersion", metadata.requiredGuideXOSVersion)) return false;
+D:\dev\guideXOSServer\gxapp_container.cpp:118:static GXAppMetadata parseMetadataJson(const std::string& json){
+D:\dev\guideXOSServer\gxapp_container.cpp:120:parseMetadataJson(json, metadata);
+D:\dev\guideXOSServer\gxapp_container.cpp:124:static std::string parseEntryPointForArchitecture(const std::string& json, CpuArchitecture architecture){
+D:\dev\guideXOSServer\gxapp_container.cpp:137:parseJsonStringField(objectJson, "entryPoint", entryPoint);
+D:\dev\guideXOSServer\gxapp_container.cpp:273:if (!parseMetadataJson(metadataJson, app.metadata_)) { app.setError("malformed gxapp metadata"); return app; }
+D:\dev\guideXOSServer\gxapp_container.cpp:295:std::string entryPoint = parseEntryPointForArchitecture(metadataJson, record.architecture);
+D:\dev\guideXOSServer\gxapp_loader.cpp:37:case CpuArchitecture::IA64:
+D:\dev\guideXOSServer\gxapp_loader.cpp:81:case CpuArchitecture::IA64:
+D:\dev\guideXOSServer\gxapp_loader.cpp:101:case CpuArchitecture::IA64: return 50;
+D:\dev\guideXOSServer\hd_installer.cpp:137:sysInfo.bytesPerSector = 512;
+D:\dev\guideXOSServer\hd_installer.cpp:419:std::string sizeStr = formatSize(disk.totalSectors * disk.bytesPerSector);
+D:\dev\guideXOSServer\hd_installer.cpp:442:std::string sizeInfo = "Total Size: " + formatSize(disk.totalSectors * disk.bytesPerSector);
+D:\dev\guideXOSServer\hd_installer.cpp:491:std::string sizeInfo = "  Size: " + formatSize(disk.totalSectors * disk.bytesPerSector);
+D:\dev\guideXOSServer\hd_installer.cpp:830:uint64_t sectorCount, uint32_t bytesPerSector,
+D:\dev\guideXOSServer\hd_installer.h:48:uint32_t bytesPerSector;   // Sector size (typically 512)
+D:\dev\guideXOSServer\hd_installer.h:51:DiskInfo() : isUSB(false), totalSectors(0), bytesPerSector(512), devIndex(0) {}
+D:\dev\guideXOSServer\hd_installer.h:135:uint64_t sectorCount, uint32_t bytesPerSector,
+D:\dev\guideXOSServer\icons.cpp:9:return (HBITMAP)LoadImageA(nullptr, path.c_str(), IMAGE_BITMAP, 0,0, LR_LOADFROMFILE|LR_CREATEDIBSECTION);
+D:\dev\guideXOSServer\notepad.cpp:172:Logger::write(LogLevel::Error, std::string("Notepad: Failed to parse window ID: ") + e.what() + " payload: " + payload);
+D:\dev\guideXOSServer\notepad.cpp:206:Logger::write(LogLevel::Error, std::string("Notepad: Failed to parse close ID: ") + e.what());
+D:\dev\guideXOSServer\notepad.cpp:432:Logger::write(LogLevel::Error, std::string("Notepad: Failed to parse key code: ") + e.what());
+D:\dev\guideXOSServer\notepad.cpp:447:// Parse: <winId>|<widgetId>|<event>|<value>
+D:\dev\guideXOSServer\notepad.cpp:475:Logger::write(LogLevel::Error, std::string("Notepad: Failed to parse widget event: ") + e.what());
+D:\dev\guideXOSServer\notepad.cpp:488:// Parse: <x>|<y>|<button>|<action>
+D:\dev\guideXOSServer\notepad.cpp:533:Logger::write(LogLevel::Error, std::string("Notepad: Failed to parse mouse event: ") + e.what());
+D:\dev\guideXOSServer\notepad.cpp:746:// Parse file content into lines (matching Legacy OpenFile behavior)
+D:\dev\guideXOSServer\README.md:9:* 11 CPU architectures supported (x86 -> RISC-V -> IA-64)
+D:\dev\guideXOSServer\README.md:48:| Next     | arm64, ia64, sparc64                   |
+D:\dev\guideXOSServer\save_changes_dialog.cpp:35:// Parse position from args
+D:\dev\guideXOSServer\save_changes_dialog.cpp:95:Logger::write(LogLevel::Error, std::string("SaveChangesDialog: Failed to parse window ID: ") + e.what());
+D:\dev\guideXOSServer\save_changes_dialog.cpp:113:Logger::write(LogLevel::Error, std::string("SaveChangesDialog: Failed to parse close ID: ") + e.what());
+D:\dev\guideXOSServer\save_changes_dialog.cpp:154:Logger::write(LogLevel::Error, std::string("SaveChangesDialog: Failed to parse widget event: ") + e.what());
+D:\dev\guideXOSServer\save_dialog.cpp:52:// Parse position from args
+D:\dev\guideXOSServer\save_dialog.cpp:117:Logger::write(LogLevel::Error, std::string("SaveDialog: Failed to parse window ID: ") + e.what());
+D:\dev\guideXOSServer\save_dialog.cpp:134:Logger::write(LogLevel::Error, std::string("SaveDialog: Failed to parse close ID: ") + e.what());
+D:\dev\guideXOSServer\save_dialog.cpp:162:Logger::write(LogLevel::Error, std::string("SaveDialog: Failed to parse key code: ") + e.what());
+D:\dev\guideXOSServer\save_dialog.cpp:211:Logger::write(LogLevel::Error, std::string("SaveDialog: Failed to parse widget event: ") + e.what());
+D:\dev\guideXOSServer\server.cpp:264:std::string path; iss>>path; if(path.empty()){ std::cout<<"desktop.wallpaper <path>"<<std::endl; continue; } ipc::Message m; m.type=(uint32_t)gui::MsgType::MT_DesktopWallpaperSet; m.data.assign(path.begin(), path.end()); ipc::Bus::publish("gui.input", std::move(m), false); std::cout<<"Desktop wallpaper set request sent: "<<path<<std::endl; }
+D:\dev\guideXOSServer\shutdown_dialog.cpp:15:static uint64_t parseWindowIdPayload(const std::string& payload) {
+D:\dev\guideXOSServer\shutdown_dialog.cpp:86:s_windowId = parseWindowIdPayload(payload);
+D:\dev\guideXOSServer\task_manager.cpp:162:Logger::write(LogLevel::Error, std::string("TaskManager: Failed to parse window ID: ") + e.what());
+D:\dev\guideXOSServer\task_manager.cpp:179:Logger::write(LogLevel::Error, std::string("TaskManager: Failed to parse close ID: ") + e.what());
+D:\dev\guideXOSServer\task_manager.cpp:207:Logger::write(LogLevel::Error, std::string("TaskManager: Failed to parse key code: ") + e.what());
+D:\dev\guideXOSServer\task_manager.cpp:263:Logger::write(LogLevel::Error, std::string("TaskManager: Failed to parse widget event: ") + e.what());

@@ -224,6 +224,7 @@
     <ClInclude Include="kernel\core\include\kernel\block_device.h" />
     <ClInclude Include="kernel\core\include\kernel\desktop.h" />
     <ClInclude Include="kernel\core\include\kernel\desktop_capabilities.h" />
+    <ClInclude Include="kernel\core\include\kernel\desktop_font.h" />
     <ClInclude Include="kernel\core\include\kernel\device_tree.h" />
     <ClInclude Include="kernel\core\include\kernel\dhcp.h" />
     <ClInclude Include="kernel\core\include\kernel\dns.h" />
@@ -443,6 +444,7 @@
     <ClCompile Include="kernel\core\cxx_runtime.cpp" />
     <ClCompile Include="kernel\core\desktop.cpp" />
     <ClCompile Include="kernel\core\desktop_capabilities.cpp" />
+    <ClCompile Include="kernel\core\desktop_font.cpp" />
     <ClCompile Include="kernel\core\device_tree.cpp" />
     <ClCompile Include="kernel\core\dhcp.cpp" />
     <ClCompile Include="kernel\core\dns.cpp" />

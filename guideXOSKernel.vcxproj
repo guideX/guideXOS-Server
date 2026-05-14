@@ -163,6 +163,7 @@
     <ClInclude Include="kernel\core\include\kernel\arch.h" />
     <ClInclude Include="kernel\core\include\kernel\architecture_detector.h" />
     <ClInclude Include="kernel\core\include\kernel\desktop.h" />
+    <ClInclude Include="kernel\core\include\kernel\desktop_font.h" />
     <ClInclude Include="kernel\core\include\kernel\shell.h" />
     <ClInclude Include="kernel\core\include\kernel\framebuffer.h" />
     <ClInclude Include="kernel\core\include\kernel\interrupts.h" />
@@ -225,6 +226,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="kernel\core\desktop.cpp" />
+    <ClCompile Include="kernel\core\desktop_font.cpp" />
     <ClCompile Include="kernel\core\shell.cpp" />
     <ClCompile Include="kernel\core\interrupts.cpp" />
     <ClCompile Include="kernel\core\ps2mouse.cpp" />
