@@ -930,12 +930,13 @@ static int s_visibleIconIndices[8]; // Indices of visible icons in display order
 // Drag state for icon repositioning
 static bool  s_dragging = false;
 static int   s_dragIconIndex = -1;
-static int32_t s_dragOffsetX = 0;
-static int32_t s_dragOffsetY = 0;
 static int32_t s_dragStartMouseX = 0;
 static int32_t s_dragStartMouseY = 0;
 static int32_t s_dragCurrentX = 0;  // current mouse X during drag
 static int32_t s_dragCurrentY = 0;  // current mouse Y during drag
+static int32_t s_dragOriginalIconX[8];
+static int32_t s_dragOriginalIconY[8];
+static bool    s_dragSelectedIcons[8];
 static const int32_t kDragThreshold = 4;  // pixels before drag starts
 static bool  s_dragStarted = false;  // true once threshold exceeded
 
@@ -1311,6 +1312,25 @@ static int GetSelectedDesktopIconIndices(int* outIndices, int maxIndices)
         }
     }
     return count;
+}
+
+static void snapshot_icon_drag_positions()
+{
+    for (int displayIdx = 0; displayIdx < s_visibleIconCount; displayIdx++) {
+        s_dragOriginalIconX[displayIdx] = s_iconPosX[displayIdx];
+        s_dragOriginalIconY[displayIdx] = s_iconPosY[displayIdx];
+        s_dragSelectedIcons[displayIdx] = is_display_icon_selected(displayIdx);
+    }
+}
+
+static void clear_icon_drag_state()
+{
+    s_dragging = false;
+    s_dragStarted = false;
+    s_dragIconIndex = -1;
+    for (int displayIdx = 0; displayIdx < 8; displayIdx++) {
+        s_dragSelectedIcons[displayIdx] = false;
+    }
 }
 
 static bool icon_bounds_intersect_rect(int displayIndex, int32_t left, int32_t top, int32_t right, int32_t bottom)
@@ -1738,11 +1758,13 @@ static void draw_icon_symbol(uint32_t ix, uint32_t iy, uint32_t size, const char
 static void draw_desktop_icons()
 {
     DesktopRect work = get_current_work_area();
+    int32_t dragDeltaX = s_dragCurrentX - s_dragStartMouseX;
+    int32_t dragDeltaY = s_dragCurrentY - s_dragStartMouseY;
 
     // Draw visible icons only (pinned + recent)
     for (int displayIdx = 0; displayIdx < s_visibleIconCount; displayIdx++) {
-        // Skip drawing the icon being dragged (it will be drawn at cursor)
-        if (s_dragging && s_dragStarted && displayIdx == s_dragIconIndex) continue;
+        // Selected icons are drawn together below while a group drag is active.
+        if (s_dragging && s_dragStarted && s_dragSelectedIcons[displayIdx]) continue;
 
         int iconIdx = s_visibleIconIndices[displayIdx];
         uint32_t cx = (uint32_t)s_iconPosX[displayIdx];
@@ -1800,44 +1822,48 @@ static void draw_desktop_icons()
         draw_text(lx, labelY, lbl, rgb(240, 240, 250), 1);
     }
 
-    // Draw the dragged icon ghost at current drag position
+    // Draw the dragged icon ghost(s) at current drag position. For a group
+    // drag, every icon keeps the offset it had when the mouse button went down.
     if (s_dragging && s_dragStarted && s_dragIconIndex >= 0 && s_dragIconIndex < s_visibleIconCount) {
-        int displayIdx = s_dragIconIndex;
-        int iconIdx = s_visibleIconIndices[displayIdx];
-        uint32_t cx = (uint32_t)(s_dragCurrentX - s_dragOffsetX);
-        uint32_t cy = (uint32_t)(s_dragCurrentY - s_dragOffsetY);
+        for (int displayIdx = 0; displayIdx < s_visibleIconCount; displayIdx++) {
+            if (!s_dragSelectedIcons[displayIdx]) continue;
 
-        // Semi-transparent selection highlight (darker for dragging)
-        framebuffer::fill_rect(cx, cy, kIconCellW, kIconCellH, rgb(30, 50, 90));
-        draw_rect(cx, cy, kIconCellW, kIconCellH, rgb(80, 120, 180));
+            int iconIdx = s_visibleIconIndices[displayIdx];
+            uint32_t cx = (uint32_t)(s_dragOriginalIconX[displayIdx] + dragDeltaX);
+            uint32_t cy = (uint32_t)(s_dragOriginalIconY[displayIdx] + dragDeltaY);
 
-        uint32_t ix = cx + (kIconCellW - kIconSize) / 2;
-        uint32_t iy = cy + 4;
-        
-        // Draw icon with slightly dimmed colors when dragging
-        uint32_t dragColor = s_desktopIcons[iconIdx].color;
-        uint8_t dr = (uint8_t)(((dragColor >> 16) & 0xFF) * 7 / 10);
-        uint8_t dg = (uint8_t)(((dragColor >> 8) & 0xFF) * 7 / 10);
-        uint8_t db = (uint8_t)((dragColor & 0xFF) * 7 / 10);
-        framebuffer::fill_rect(ix, iy, kIconSize, kIconSize, rgb(dr, dg, db));
-        
-        // Draw icon symbol
-        draw_icon_symbol(ix, iy, kIconSize, s_desktopIcons[iconIdx].label);
-        
-        draw_rect(ix, iy, kIconSize, kIconSize, rgb(140, 140, 160));
+            // Semi-transparent selection highlight (darker for dragging)
+            framebuffer::fill_rect(cx, cy, kIconCellW, kIconCellH, rgb(30, 50, 90));
+            draw_rect(cx, cy, kIconCellW, kIconCellH, rgb(80, 120, 180));
 
-        // Pin indicator on dragged icon
-        if (s_desktopIcons[iconIdx].pinned) {
-            draw_text(ix + kIconSize - 8, iy + 2, "*", rgb(255, 220, 80), 1);
+            uint32_t ix = cx + (kIconCellW - kIconSize) / 2;
+            uint32_t iy = cy + 4;
+        
+            // Draw icon with slightly dimmed colors when dragging
+            uint32_t dragColor = s_desktopIcons[iconIdx].color;
+            uint8_t dr = (uint8_t)(((dragColor >> 16) & 0xFF) * 7 / 10);
+            uint8_t dg = (uint8_t)(((dragColor >> 8) & 0xFF) * 7 / 10);
+            uint8_t db = (uint8_t)((dragColor & 0xFF) * 7 / 10);
+            framebuffer::fill_rect(ix, iy, kIconSize, kIconSize, rgb(dr, dg, db));
+        
+            // Draw icon symbol
+            draw_icon_symbol(ix, iy, kIconSize, s_desktopIcons[iconIdx].label);
+        
+            draw_rect(ix, iy, kIconSize, kIconSize, rgb(140, 140, 160));
+
+            // Pin indicator on dragged icon
+            if (s_desktopIcons[iconIdx].pinned) {
+                draw_text(ix + kIconSize - 8, iy + 2, "*", rgb(255, 220, 80), 1);
+            }
+
+            // Label
+            uint32_t labelY = iy + kIconSize + 4;
+            const char* lbl = s_desktopIcons[iconIdx].label;
+            int tw = measure_text(lbl);
+            uint32_t lx = cx + (kIconCellW > (uint32_t)tw ? (kIconCellW - tw) / 2 : 0);
+            draw_text(lx + 1, labelY + 1, lbl, rgb(0, 0, 0), 1);
+            draw_text(lx, labelY, lbl, rgb(200, 200, 210), 1);
         }
-
-        // Label
-        uint32_t labelY = iy + kIconSize + 4;
-        const char* lbl = s_desktopIcons[iconIdx].label;
-        int tw = measure_text(lbl);
-        uint32_t lx = cx + (kIconCellW > (uint32_t)tw ? (kIconCellW - tw) / 2 : 0);
-        draw_text(lx + 1, labelY + 1, lbl, rgb(0, 0, 0), 1);
-        draw_text(lx, labelY, lbl, rgb(200, 200, 210), 1);
     }
 
     draw_selection_rectangle();
@@ -4936,20 +4962,51 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
     // ---- Handle drag release (left button released while dragging) ----
     if (s_dragging && (released & 0x01)) {
         if (s_dragStarted && s_dragIconIndex >= 0 && s_dragIconIndex < s_visibleIconCount) {
-            // Compute new icon position from drop point
-            int32_t newX = mx - s_dragOffsetX;
-            int32_t newY = my - s_dragOffsetY;
+            // Commit the same mouse delta to every icon that was selected
+            // when dragging began, preserving the group's relative spacing.
+            int32_t deltaX = mx - s_dragStartMouseX;
+            int32_t deltaY = my - s_dragStartMouseY;
+            int32_t groupLeft = 0;
+            int32_t groupTop = 0;
+            int32_t groupRight = 0;
+            int32_t groupBottom = 0;
+            bool haveGroupBounds = false;
+            for (int displayIdx = 0; displayIdx < s_visibleIconCount; displayIdx++) {
+                if (!s_dragSelectedIcons[displayIdx]) continue;
+                int32_t left = s_dragOriginalIconX[displayIdx] + deltaX;
+                int32_t top = s_dragOriginalIconY[displayIdx] + deltaY;
+                int32_t right = left + (int32_t)kIconCellW;
+                int32_t bottom = top + (int32_t)kIconCellH;
+                if (!haveGroupBounds) {
+                    groupLeft = left;
+                    groupTop = top;
+                    groupRight = right;
+                    groupBottom = bottom;
+                    haveGroupBounds = true;
+                } else {
+                    if (left < groupLeft) groupLeft = left;
+                    if (top < groupTop) groupTop = top;
+                    if (right > groupRight) groupRight = right;
+                    if (bottom > groupBottom) groupBottom = bottom;
+                }
+            }
 
-            // Clamp to desktop work area
-            if (newX < (int32_t)workArea.x) newX = (int32_t)workArea.x;
-            if (newY < (int32_t)workArea.y) newY = (int32_t)workArea.y;
-            if (newX + (int32_t)kIconCellW > (int32_t)(workArea.x + workArea.w))
-                newX = (int32_t)(workArea.x + workArea.w) - (int32_t)kIconCellW;
-            if (newY + (int32_t)kIconCellH > (int32_t)(workArea.y + workArea.h))
-                newY = (int32_t)(workArea.y + workArea.h) - (int32_t)kIconCellH;
+            // Clamp the selected group as one unit to avoid dropping any
+            // selected icon outside the visible desktop work area.
+            if (haveGroupBounds) {
+                if (groupLeft < (int32_t)workArea.x) deltaX += (int32_t)workArea.x - groupLeft;
+                if (groupTop < (int32_t)workArea.y) deltaY += (int32_t)workArea.y - groupTop;
+                if (groupRight > (int32_t)(workArea.x + workArea.w))
+                    deltaX -= groupRight - (int32_t)(workArea.x + workArea.w);
+                if (groupBottom > (int32_t)(workArea.y + workArea.h))
+                    deltaY -= groupBottom - (int32_t)(workArea.y + workArea.h);
+            }
 
-            s_iconPosX[s_dragIconIndex] = newX;
-            s_iconPosY[s_dragIconIndex] = newY;
+            for (int displayIdx = 0; displayIdx < s_visibleIconCount; displayIdx++) {
+                if (!s_dragSelectedIcons[displayIdx]) continue;
+                s_iconPosX[displayIdx] = s_dragOriginalIconX[displayIdx] + deltaX;
+                s_iconPosY[displayIdx] = s_dragOriginalIconY[displayIdx] + deltaY;
+            }
             
             // Save icon positions to VFS
             save_icon_positions();
@@ -4958,9 +5015,7 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
             s_selectedIcon = s_dragIconIndex;
         }
 
-        s_dragging = false;
-        s_dragStarted = false;
-        s_dragIconIndex = -1;
+        clear_icon_drag_state();
         draw();
         draw_cursor(mx, my);
         return;
@@ -5400,11 +5455,17 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
             
             bool ctrlDown = is_ctrl_modifier_down();
             bool shiftDown = is_shift_modifier_down();
+            bool wasSelected = is_display_icon_selected(iconIdx);
             if (shiftDown) {
                 int anchorDisplayIndex = display_index_for_icon_id(s_lastSelectedIconId);
                 SelectDesktopIconRange(anchorDisplayIndex >= 0 ? anchorDisplayIndex : iconIdx, iconIdx);
             } else if (ctrlDown) {
                 ToggleDesktopIconSelection(iconIdx);
+            } else if (wasSelected) {
+                // Pressing an already-selected icon starts a possible group drag;
+                // do not collapse the selection unless the click was on an unselected icon.
+                s_selectedIcon = iconIdx;
+                s_focusedSelectedIconId = s_visibleIconIndices[iconIdx];
             } else {
                 SelectDesktopIcon(iconIdx, false);
             }
@@ -5416,8 +5477,9 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
                 s_dragIconIndex = iconIdx;
                 s_dragStartMouseX = mx;
                 s_dragStartMouseY = my;
-                s_dragOffsetX = mx - s_iconPosX[iconIdx];
-                s_dragOffsetY = my - s_iconPosY[iconIdx];
+                s_dragCurrentX = mx;
+                s_dragCurrentY = my;
+                snapshot_icon_drag_positions();
             }
             draw();
             draw_cursor(mx, my);
