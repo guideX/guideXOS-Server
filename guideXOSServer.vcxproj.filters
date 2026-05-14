@@ -606,6 +606,12 @@
     <ClInclude Include="image_renderer.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="kernel\core\include\kernel\desktop_capabilities.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\core\include\kernel\time.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="allocator.cpp">
@@ -1155,6 +1161,12 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="image_renderer.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\core\desktop_capabilities.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="kernel\core\time.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

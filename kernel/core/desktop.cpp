@@ -23,10 +23,15 @@
 #include "include/kernel/serial_debug.h"
 #include "include/kernel/vfs.h"
 #include "include/kernel/desktop_capabilities.h"
+#include "include/kernel/nic.h"
+#include "include/kernel/usb_net.h"
+#include "include/kernel/ipv4.h"
+#include "include/kernel/pci_audio.h"
+#include "include/kernel/usb_audio.h"
+#include "include/kernel/time.h"
 
 #if defined(_MSC_VER)
 #include <intrin.h>  // For MSVC intrinsics (__outbyte, __halt, etc.)
-#include <ctime>     // Only available in MSVC (Windows) build
 #endif
 
 // ============================================================
@@ -439,6 +444,7 @@ static int32_t s_mouseY = 0;
 static int s_rightClickHover = -1;
 static uint32_t s_screenW = 0;
 static uint32_t s_screenH = 0;
+static volatile bool s_needsRedraw = false;
 
 // Shutdown dialog state
 static bool s_shutdownDialogOpen = false;
@@ -472,6 +478,7 @@ static int s_networkConfigBtnHover = -1;  // 0 = OK, 1 = Cancel
 
 // Layout constants
 static const uint32_t kTaskbarH = 40;
+static const uint32_t kTaskbarSnapThreshold = 48;
 static const uint32_t kStartBtnW = 100;
 static const uint32_t kSearchBoxW = 160;
 static const uint32_t kSearchBoxH = 24;
@@ -487,6 +494,150 @@ static const uint32_t kTrayIconGap = 6;
 static const uint32_t kTaskbarBtnMaxW = 150;
 static const uint32_t kTaskbarBtnH = 28;
 static const uint32_t kTaskbarBtnGap = 4;
+
+struct DesktopRect {
+    uint32_t x;
+    uint32_t y;
+    uint32_t w;
+    uint32_t h;
+};
+
+enum class TaskbarDockPosition : uint8_t {
+    Bottom,
+    Top,
+    Left,
+    Right
+};
+
+static TaskbarDockPosition s_taskbarDockPosition = TaskbarDockPosition::Bottom;
+static bool s_taskbarDragging = false;
+
+static bool is_vertical_taskbar(TaskbarDockPosition position)
+{
+    return position == TaskbarDockPosition::Left || position == TaskbarDockPosition::Right;
+}
+
+static DesktopRect get_taskbar_rect(uint32_t screenW, uint32_t screenH, TaskbarDockPosition position)
+{
+    DesktopRect r;
+    switch (position) {
+        case TaskbarDockPosition::Top:
+            r = {0, 0, screenW, kTaskbarH};
+            break;
+        case TaskbarDockPosition::Left:
+            r = {0, 0, kTaskbarH, screenH};
+            break;
+        case TaskbarDockPosition::Right:
+            r = {screenW > kTaskbarH ? screenW - kTaskbarH : 0, 0, kTaskbarH, screenH};
+            break;
+        case TaskbarDockPosition::Bottom:
+        default:
+            r = {0, screenH > kTaskbarH ? screenH - kTaskbarH : 0, screenW, kTaskbarH};
+            break;
+    }
+    return r;
+}
+
+static DesktopRect get_desktop_work_area(uint32_t screenW, uint32_t screenH, TaskbarDockPosition position)
+{
+    switch (position) {
+        case TaskbarDockPosition::Top:
+            return {0, kTaskbarH, screenW, screenH > kTaskbarH ? screenH - kTaskbarH : 0};
+        case TaskbarDockPosition::Left:
+            return {kTaskbarH, 0, screenW > kTaskbarH ? screenW - kTaskbarH : 0, screenH};
+        case TaskbarDockPosition::Right:
+            return {0, 0, screenW > kTaskbarH ? screenW - kTaskbarH : 0, screenH};
+        case TaskbarDockPosition::Bottom:
+        default:
+            return {0, 0, screenW, screenH > kTaskbarH ? screenH - kTaskbarH : 0};
+    }
+}
+
+static bool point_in_rect(int32_t mx, int32_t my, const DesktopRect& r)
+{
+    return mx >= 0 && my >= 0 &&
+           (uint32_t)mx >= r.x && (uint32_t)mx < r.x + r.w &&
+           (uint32_t)my >= r.y && (uint32_t)my < r.y + r.h;
+}
+
+static DesktopRect get_current_taskbar_rect()
+{
+    return get_taskbar_rect(s_screenW, s_screenH, s_taskbarDockPosition);
+}
+
+static DesktopRect get_current_work_area()
+{
+    return get_desktop_work_area(s_screenW, s_screenH, s_taskbarDockPosition);
+}
+
+static DesktopRect get_start_button_rect()
+{
+    DesktopRect tb = get_current_taskbar_rect();
+    if (is_vertical_taskbar(s_taskbarDockPosition)) {
+        return {tb.x + 4, tb.y + 4, tb.w > 8 ? tb.w - 8 : tb.w, kTaskbarH - 8};
+    }
+
+    return {tb.x + 4, tb.y + 4, kStartBtnW, tb.h > 8 ? tb.h - 8 : tb.h};
+}
+
+static DesktopRect get_show_desktop_rect()
+{
+    DesktopRect tb = get_current_taskbar_rect();
+    if (is_vertical_taskbar(s_taskbarDockPosition)) {
+        return {tb.x, tb.y + tb.h - kShowDesktopW, tb.w, kShowDesktopW};
+    }
+
+    return {tb.x + tb.w - kShowDesktopW, tb.y, kShowDesktopW, tb.h};
+}
+
+static bool is_point_in_work_area(int32_t mx, int32_t my)
+{
+    return point_in_rect(mx, my, get_current_work_area());
+}
+
+static int32_t abs_i32(int32_t value)
+{
+    return value < 0 ? -value : value;
+}
+
+static bool is_near_screen_edge(int32_t mouseX, int32_t mouseY, uint32_t screenW, uint32_t screenH)
+{
+    int32_t right = (int32_t)screenW - 1 - mouseX;
+    int32_t bottom = (int32_t)screenH - 1 - mouseY;
+    return mouseX <= (int32_t)kTaskbarSnapThreshold ||
+           mouseY <= (int32_t)kTaskbarSnapThreshold ||
+           right <= (int32_t)kTaskbarSnapThreshold ||
+           bottom <= (int32_t)kTaskbarSnapThreshold;
+}
+
+static TaskbarDockPosition get_nearest_dock_edge(int32_t mouseX, int32_t mouseY, uint32_t screenW, uint32_t screenH)
+{
+    int32_t left = mouseX < 0 ? 0 : mouseX;
+    int32_t top = mouseY < 0 ? 0 : mouseY;
+    int32_t right = (int32_t)screenW - 1 - mouseX;
+    int32_t bottom = (int32_t)screenH - 1 - mouseY;
+    if (right < 0) right = 0;
+    if (bottom < 0) bottom = 0;
+
+    int32_t best = bottom;
+    TaskbarDockPosition pos = TaskbarDockPosition::Bottom;
+    if (top < best) { best = top; pos = TaskbarDockPosition::Top; }
+    if (left < best) { best = left; pos = TaskbarDockPosition::Left; }
+    if (right < best) { pos = TaskbarDockPosition::Right; }
+    return pos;
+}
+
+static void apply_taskbar_layout()
+{
+    DesktopRect work = get_current_work_area();
+    DesktopRect tb = get_current_taskbar_rect();
+    bool vertical = is_vertical_taskbar(s_taskbarDockPosition);
+    DesktopRect start = get_start_button_rect();
+    uint32_t buttonStartX = vertical ? tb.x + 4 : start.x + start.w + 8;
+    uint32_t buttonStartY = vertical ? start.y + start.h + 8 : tb.y + 6;
+    compositor::KernelCompositor::setWorkArea(work.x, work.y, work.w, work.h);
+    compositor::TaskbarManager::setLayout(tb.x, tb.y, tb.w, tb.h, vertical, buttonStartX, buttonStartY);
+}
 
 // Desktop icon entries with enhanced management
 struct DesktopIcon {
@@ -654,61 +805,59 @@ struct DateTime {
     int month;     // 1-12
     int year;      // e.g., 2025
     
-    DateTime() : hour(12), minute(0), second(0), day(1), month(1), year(2025) {}
+    DateTime() : hour(0), minute(0), second(0), day(0), month(0), year(0) {}
 };
 
 static DateTime s_currentTime;
+static bool s_timeAvailable = false;
+static int s_lastRenderedClockMinute = -1;
+
+static void copy_datetime_from_time_service(const time::DateTime& src)
+{
+    s_currentTime.year = src.year;
+    s_currentTime.month = src.month;
+    s_currentTime.day = src.day;
+    s_currentTime.hour = src.hour;
+    s_currentTime.minute = src.minute;
+    s_currentTime.second = src.second;
+}
 
 // Simple helper to format time string "HH:MM"
 static void format_time_string(char* buffer, int bufSize)
 {
     if (bufSize < 6) return;  // Need at least "HH:MM\0"
-    
-    // Format hours (0-23 to 12-hour format)
-    int displayHour = s_currentTime.hour;
-    if (displayHour == 0) displayHour = 12;
-    else if (displayHour > 12) displayHour -= 12;
-    
-    buffer[0] = (displayHour >= 10) ? ('0' + displayHour / 10) : ' ';
-    buffer[1] = '0' + (displayHour % 10);
+
+    buffer[0] = '0' + (s_currentTime.hour / 10);
+    buffer[1] = '0' + (s_currentTime.hour % 10);
     buffer[2] = ':';
     buffer[3] = '0' + (s_currentTime.minute / 10);
     buffer[4] = '0' + (s_currentTime.minute % 10);
     buffer[5] = '\0';
 }
 
-// Simple helper to format date string "M/D/YYYY"
+// Simple helper to format date string "MM/DD/YYYY"
 static void format_date_string(char* buffer, int bufSize)
 {
     if (bufSize < 11) return;  // Need space for "MM/DD/YYYY\0"
-    
-    int pos = 0;
-    
-    // Month
-    if (s_currentTime.month >= 10) {
-        buffer[pos++] = '0' + (s_currentTime.month / 10);
-    }
-    buffer[pos++] = '0' + (s_currentTime.month % 10);
-    buffer[pos++] = '/';
-    
-    // Day
-    if (s_currentTime.day >= 10) {
-        buffer[pos++] = '0' + (s_currentTime.day / 10);
-    }
-    buffer[pos++] = '0' + (s_currentTime.day % 10);
-    buffer[pos++] = '/';
-    
-    // Year
-    buffer[pos++] = '0' + (s_currentTime.year / 1000);
-    buffer[pos++] = '0' + ((s_currentTime.year / 100) % 10);
-    buffer[pos++] = '0' + ((s_currentTime.year / 10) % 10);
-    buffer[pos++] = '0' + (s_currentTime.year % 10);
-    buffer[pos] = '\0';
+
+    buffer[0] = '0' + (s_currentTime.month / 10);
+    buffer[1] = '0' + (s_currentTime.month % 10);
+    buffer[2] = '/';
+    buffer[3] = '0' + (s_currentTime.day / 10);
+    buffer[4] = '0' + (s_currentTime.day % 10);
+    buffer[5] = '/';
+    buffer[6] = '0' + (s_currentTime.year / 1000);
+    buffer[7] = '0' + ((s_currentTime.year / 100) % 10);
+    buffer[8] = '0' + ((s_currentTime.year / 10) % 10);
+    buffer[9] = '0' + (s_currentTime.year % 10);
+    buffer[10] = '\0';
 }
 
 // Update time (called from tick, increments by 1 second)
 static void update_time()
 {
+    if (!s_timeAvailable) return;
+
     s_currentTime.second++;
     
     if (s_currentTime.second >= 60) {
@@ -745,33 +894,12 @@ static void update_time()
 // Initialize time from system clock
 static void init_time()
 {
-#ifdef _MSC_VER
-    // Windows/MSVC build can use standard library
-    std::time_t now = std::time(nullptr);
-    std::tm* local_tm = nullptr;
-    
-    std::tm temp_tm;
-    localtime_s(&temp_tm, &now);
-    local_tm = &temp_tm;
-    
-    if (local_tm) {
-        s_currentTime.hour = local_tm->tm_hour;
-        s_currentTime.minute = local_tm->tm_min;
-        s_currentTime.second = local_tm->tm_sec;
-        s_currentTime.day = local_tm->tm_mday;
-        s_currentTime.month = local_tm->tm_mon + 1;  // tm_mon is 0-11
-        s_currentTime.year = local_tm->tm_year + 1900;  // tm_year is years since 1900
+    time::DateTime now{};
+    s_timeAvailable = time::get_current_datetime(now);
+    if (s_timeAvailable) {
+        copy_datetime_from_time_service(now);
+        s_lastRenderedClockMinute = s_currentTime.minute;
     }
-#else
-    // Freestanding/kernel build: use a reasonable default
-    // TODO: Read from RTC/CMOS hardware or UEFI runtime services
-    s_currentTime.hour = 12;
-    s_currentTime.minute = 0;
-    s_currentTime.second = 0;
-    s_currentTime.day = 1;
-    s_currentTime.month = 1;
-    s_currentTime.year = 2025;
-#endif
 }
 
 // Per-icon positions (mutable, set to grid layout on init)
@@ -861,6 +989,8 @@ static int32_t s_shellH = -1;       // Shell window height (-1 = default)
 static bool    s_shellActive = true; // Whether shell window is active (focused)
 static bool    s_shellMinimized = false; // Whether shell is minimized to taskbar
 static bool    s_shellMaximized = false; // Whether shell is maximized
+static bool    s_showDesktopActive = false;
+static bool    s_showDesktopHidShell = false;
 static const uint32_t kShellDefaultW = 700;
 static const uint32_t kShellDefaultH = 450;
 static const uint32_t kShellMinW = 400;     // Minimum resize width
@@ -892,6 +1022,7 @@ static void forget_cursor_save();
 static void get_context_menu_geometry(uint32_t& menuX, uint32_t& menuY, uint32_t& menuH);
 static int find_nearest_icon_in_direction(int currentIcon, int direction);
 static void show_icon_notification(int iconIndex);
+static void toggle_show_desktop();
 
 // ============================================================
 // Icon Management Implementation
@@ -1372,11 +1503,11 @@ static void draw_selection_rectangle()
     if (left > right) { int32_t t = left; left = right; right = t; }
     if (top > bottom) { int32_t t = top; top = bottom; bottom = t; }
 
-    if (left < 0) left = 0;
-    if (top < 0) top = 0;
-    if (right >= (int32_t)s_screenW) right = (int32_t)s_screenW - 1;
-    int32_t desktopBottom = (int32_t)s_screenH - (int32_t)kTaskbarH - 1;
-    if (bottom > desktopBottom) bottom = desktopBottom;
+    DesktopRect work = get_current_work_area();
+    if (left < (int32_t)work.x) left = (int32_t)work.x;
+    if (top < (int32_t)work.y) top = (int32_t)work.y;
+    if (right >= (int32_t)(work.x + work.w)) right = (int32_t)(work.x + work.w) - 1;
+    if (bottom >= (int32_t)(work.y + work.h)) bottom = (int32_t)(work.y + work.h) - 1;
 
     int32_t width = right - left;
     int32_t height = bottom - top;
@@ -1399,7 +1530,7 @@ static void draw_selection_rectangle()
 static void draw_background()
 {
     uint32_t w = s_screenW;
-    uint32_t h = s_screenH - kTaskbarH;
+    uint32_t h = s_screenH;
 
     // Draw wallpaper based on configured type
     switch (s_wallpaperConfig.type) {
@@ -1606,7 +1737,7 @@ static void draw_icon_symbol(uint32_t ix, uint32_t iy, uint32_t size, const char
 
 static void draw_desktop_icons()
 {
-    uint32_t deskH = s_screenH - kTaskbarH;
+    DesktopRect work = get_current_work_area();
 
     // Draw visible icons only (pinned + recent)
     for (int displayIdx = 0; displayIdx < s_visibleIconCount; displayIdx++) {
@@ -1617,7 +1748,7 @@ static void draw_desktop_icons()
         uint32_t cx = (uint32_t)s_iconPosX[displayIdx];
         uint32_t cy = (uint32_t)s_iconPosY[displayIdx];
 
-        if (cy + kIconCellH > deskH) continue;
+        if (cx < work.x || cy < work.y || cx + kIconCellW > work.x + work.w || cy + kIconCellH > work.y + work.h) continue;
 
         // Selection highlight background (matching compositor style)
         if (is_display_icon_selected(displayIdx)) {
@@ -1713,81 +1844,256 @@ static void draw_desktop_icons()
 }
 
 // ============================================================
-// System tray (network bars, volume, battery)
+// Taskbar widgets
 // ============================================================
 
-static void draw_network_icon(uint32_t x, uint32_t y)
+enum class TaskbarWidgetType : uint8_t {
+    Search = 0,
+    Clock,
+    Network,
+    Volume,
+    Battery,
+    Count,
+};
+
+struct TaskbarWidgetBounds {
+    uint32_t x;
+    uint32_t y;
+    uint32_t w;
+    uint32_t h;
+};
+
+struct TaskbarWidget {
+    TaskbarWidgetType type;
+    bool visible;
+    bool enabled;
+    TaskbarWidgetBounds bounds;
+    const char* hiddenReason;
+    void (*render)(TaskbarWidget& widget);
+    void (*click)(TaskbarWidget& widget);
+    void (*update)(TaskbarWidget& widget);
+};
+
+static TaskbarWidget s_taskbarWidgets[(int)TaskbarWidgetType::Count];
+static bool s_taskbarWidgetsInitialized = false;
+
+static const char* taskbar_widget_name(TaskbarWidgetType type)
 {
-    // 4 signal bars, all lit (green)
+    switch (type) {
+        case TaskbarWidgetType::Search: return "SearchWidget";
+        case TaskbarWidgetType::Clock: return "ClockWidget";
+        case TaskbarWidgetType::Network: return "NetworkWidget";
+        case TaskbarWidgetType::Volume: return "VolumeWidget";
+        case TaskbarWidgetType::Battery: return "BatteryWidget";
+        default: return "UnknownWidget";
+    }
+}
+
+static void log_taskbar_widget(TaskbarWidgetType type, bool visible, const char* reason)
+{
+    serial::puts("Taskbar: ");
+    serial::puts(taskbar_widget_name(type));
+    serial::puts(visible ? " enabled, " : " hidden, ");
+    serial::puts(reason ? reason : "no reason recorded");
+    serial::puts("\n");
+}
+
+static bool search_provider_available()
+{
+    // TODO: Re-enable SearchWidget when an app/command/file search provider and taskbar text input focus are available.
+    return false;
+}
+
+static bool battery_provider_available()
+{
+    // TODO: Re-enable BatteryWidget when ACPI battery/power service exposes real battery state.
+    return false;
+}
+
+static bool network_provider_available()
+{
+    return nic::is_active() || usb_net::device_count() > 0;
+}
+
+static bool network_link_up()
+{
+    if (nic::is_active() && nic::get_link_state() == nic::NIC_LINK_UP) return true;
+
+    uint8_t count = usb_net::device_count();
+    for (uint8_t i = 0; i < count; i++) {
+        const usb_net::NetDevice* dev = usb_net::get_device(i);
+        if (dev && dev->link == usb_net::LINK_UP) return true;
+    }
+
+    return false;
+}
+
+static bool audio_provider_available()
+{
+    return pci_audio::controller_count() > 0 || usb_audio::device_count() > 0;
+}
+
+static bool audio_muted()
+{
+    if (pci_audio::controller_count() > 0) return pci_audio::get_mute(0);
+    if (usb_audio::device_count() > 0) return usb_audio::get_mute(0);
+    return false;
+}
+
+static void draw_network_widget(TaskbarWidget& widget)
+{
+    uint32_t x = widget.bounds.x;
+    uint32_t y = widget.bounds.y;
+    bool linkUp = network_link_up();
+    bool configured = ipv4::is_configured();
+    uint32_t barColor = linkUp ? (configured ? rgb(100, 200, 100) : rgb(200, 170, 80)) : rgb(110, 110, 120);
+
     for (int i = 0; i < 4; i++) {
         uint32_t barH = 4 + (uint32_t)i * 3;
         uint32_t barW = 3;
         uint32_t bx = x + (uint32_t)i * 4;
         uint32_t by = y + kTrayIconSize - barH;
-        framebuffer::fill_rect(bx, by, barW, barH, rgb(100, 200, 100));
+        if (linkUp || i == 0) framebuffer::fill_rect(bx, by, barW, barH, barColor);
+        else draw_rect(bx, by, barW, barH, barColor);
     }
 }
 
-static void draw_volume_icon(uint32_t x, uint32_t y)
+static void draw_volume_widget(TaskbarWidget& widget)
 {
-    // Speaker body
-    framebuffer::fill_rect(x + 2, y + 5, 4, 6, rgb(180, 180, 190));
-    // Speaker cone (triangle approximation)
+    uint32_t x = widget.bounds.x;
+    uint32_t y = widget.bounds.y;
+    bool muted = audio_muted();
+    uint32_t speakerColor = muted ? rgb(130, 130, 140) : rgb(180, 180, 190);
+    uint32_t waveColor = muted ? rgb(110, 70, 70) : rgb(130, 130, 150);
+
+    framebuffer::fill_rect(x + 2, y + 5, 4, 6, speakerColor);
     for (int i = 0; i < 5; i++) {
-        framebuffer::fill_rect(x + 6, y + 4 - i/2, 1, 8 + i, rgb(180, 180, 190));
+        framebuffer::fill_rect(x + 6, y + 4 - i/2, 1, 8 + i, speakerColor);
     }
-    // Sound waves (two arcs as vertical bars)
-    vline(x + 12, y + 4, 8, rgb(130, 130, 150));
-    vline(x + 14, y + 2, 12, rgb(100, 100, 120));
+
+    if (muted) {
+        for (int i = 0; i < 8; i++) {
+            framebuffer::put_pixel(x + 11 + (uint32_t)i / 2, y + 4 + (uint32_t)i, waveColor);
+            framebuffer::put_pixel(x + 14 - (uint32_t)i / 2, y + 4 + (uint32_t)i, waveColor);
+        }
+    } else {
+        vline(x + 12, y + 4, 8, waveColor);
+        vline(x + 14, y + 2, 12, rgb(100, 100, 120));
+    }
 }
 
-static void draw_battery_icon(uint32_t x, uint32_t y)
+static void click_volume_widget(TaskbarWidget& widget)
 {
-    // Battery outline
-    draw_rect(x + 1, y + 4, 12, 8, rgb(180, 180, 190));
-    // Battery tip
-    framebuffer::fill_rect(x + 13, y + 6, 2, 4, rgb(180, 180, 190));
-    // Battery fill (green = full)
-    framebuffer::fill_rect(x + 3, y + 6, 8, 4, rgb(100, 200, 100));
+    (void)widget;
+    if (pci_audio::controller_count() > 0) {
+        pci_audio::set_mute(0, !pci_audio::get_mute(0));
+        s_needsRedraw = true;
+        return;
+    }
+    if (usb_audio::device_count() > 0) {
+        usb_audio::set_mute(0, !usb_audio::get_mute(0));
+        s_needsRedraw = true;
+    }
+}
+
+static void draw_clock_widget(TaskbarWidget& widget)
+{
+    char timeStr[6];
+    char dateStr[11];
+    format_time_string(timeStr, sizeof(timeStr));
+    format_date_string(dateStr, sizeof(dateStr));
+
+    if (is_vertical_taskbar(s_taskbarDockPosition)) {
+        draw_text_centered(widget.bounds.x, widget.bounds.y + 4, widget.bounds.w, 12, timeStr, rgb(210, 210, 220), 1);
+        draw_text_centered(widget.bounds.x, widget.bounds.y + 18, widget.bounds.w, 12, dateStr, rgb(160, 160, 175), 1);
+        return;
+    }
+
+    uint32_t timeY = widget.bounds.y + 6;
+    draw_text_centered(widget.bounds.x, timeY, widget.bounds.w, kTaskbarH / 2 - 4, timeStr, rgb(210, 210, 220), 1);
+    uint32_t dateY = widget.bounds.y + kTaskbarH / 2 + 2;
+    draw_text_centered(widget.bounds.x, dateY, widget.bounds.w, kTaskbarH / 2 - 4, dateStr, rgb(160, 160, 175), 1);
+}
+
+static void init_taskbar_widgets()
+{
+    TaskbarWidget& search = s_taskbarWidgets[(int)TaskbarWidgetType::Search];
+    search = {TaskbarWidgetType::Search, search_provider_available(), false, {0, 0, 0, 0}, "search provider unavailable", nullptr, nullptr, nullptr};
+    log_taskbar_widget(TaskbarWidgetType::Search, search.visible, search.visible ? "search provider available" : search.hiddenReason);
+
+    TaskbarWidget& clock = s_taskbarWidgets[(int)TaskbarWidgetType::Clock];
+    clock = {TaskbarWidgetType::Clock, s_timeAvailable, false, {0, 0, 0, 0}, "RTC/time service unavailable", draw_clock_widget, nullptr, nullptr};
+    log_taskbar_widget(TaskbarWidgetType::Clock, clock.visible, clock.visible ? "RTC/CMOS time available" : clock.hiddenReason);
+
+    TaskbarWidget& network = s_taskbarWidgets[(int)TaskbarWidgetType::Network];
+    network = {TaskbarWidgetType::Network, network_provider_available(), false, {0, 0, 0, 0}, "no network provider available", draw_network_widget, nullptr, nullptr};
+    log_taskbar_widget(TaskbarWidgetType::Network, network.visible, network.visible ? "network provider available" : network.hiddenReason);
+
+    TaskbarWidget& volume = s_taskbarWidgets[(int)TaskbarWidgetType::Volume];
+    volume = {TaskbarWidgetType::Volume, audio_provider_available(), true, {0, 0, 0, 0}, "audio provider unavailable", draw_volume_widget, click_volume_widget, nullptr};
+    log_taskbar_widget(TaskbarWidgetType::Volume, volume.visible, volume.visible ? "audio provider available" : volume.hiddenReason);
+
+    TaskbarWidget& battery = s_taskbarWidgets[(int)TaskbarWidgetType::Battery];
+    battery = {TaskbarWidgetType::Battery, battery_provider_available(), false, {0, 0, 0, 0}, "no battery provider available", nullptr, nullptr, nullptr};
+    log_taskbar_widget(TaskbarWidgetType::Battery, battery.visible, battery.visible ? "battery provider available" : battery.hiddenReason);
+
+    s_taskbarWidgetsInitialized = true;
+}
+
+static uint32_t taskbar_widget_width(TaskbarWidgetType type)
+{
+    TaskbarWidget& widget = s_taskbarWidgets[(int)type];
+    if (!widget.visible) return 0;
+    if (is_vertical_taskbar(s_taskbarDockPosition)) return kTaskbarH > 8 ? kTaskbarH - 8 : kTaskbarH;
+    if (type == TaskbarWidgetType::Search) return kSearchBoxW;
+    if (type == TaskbarWidgetType::Clock) return 70;
+    return kTrayIconSize;
+}
+
+static uint32_t taskbar_tray_width()
+{
+    uint32_t count = 0;
+    for (int i = (int)TaskbarWidgetType::Network; i <= (int)TaskbarWidgetType::Battery; i++) {
+        if (s_taskbarWidgets[i].visible) count++;
+    }
+
+    if (count == 0) return 0;
+    return 8 + count * kTrayIconSize + (count - 1) * kTrayIconGap;
 }
 
 static void draw_system_tray(uint32_t trayX, uint32_t taskbarY)
 {
-    uint32_t iconY = taskbarY + (kTaskbarH - kTrayIconSize) / 2;
+    if (is_vertical_taskbar(s_taskbarDockPosition)) return;
 
-    // Separator line
+    uint32_t trayW = taskbar_tray_width();
+    if (trayW == 0) return;
+
+    uint32_t iconY = taskbarY + (kTaskbarH - kTrayIconSize) / 2;
     vline(trayX - 2, taskbarY + 4, kTaskbarH - 8, rgb(80, 80, 90));
 
     uint32_t cx = trayX + 4;
-    draw_network_icon(cx, iconY);
-    cx += kTrayIconSize + kTrayIconGap;
-    draw_volume_icon(cx, iconY);
-    cx += kTrayIconSize + kTrayIconGap;
-    draw_battery_icon(cx, iconY);
+    for (int i = (int)TaskbarWidgetType::Network; i <= (int)TaskbarWidgetType::Battery; i++) {
+        TaskbarWidget& widget = s_taskbarWidgets[i];
+        if (!widget.visible || !widget.render) continue;
+        widget.bounds = {cx, iconY, kTrayIconSize, kTrayIconSize};
+        widget.render(widget);
+        cx += kTrayIconSize + kTrayIconGap;
+    }
 }
 
-// ============================================================
-// Search box (taskbar, matching Legacy/compositor drawTaskbarSearchBox)
-// ============================================================
-
-static void draw_search_box(uint32_t x, uint32_t y)
+static bool handle_taskbar_widget_click(int32_t mx, int32_t my)
 {
-    // Search box background
-    framebuffer::fill_rect(x, y, kSearchBoxW, kSearchBoxH, rgb(35, 35, 45));
-    draw_rect(x, y, kSearchBoxW, kSearchBoxH, rgb(70, 80, 100));
+    for (int i = 0; i < (int)TaskbarWidgetType::Count; i++) {
+        TaskbarWidget& widget = s_taskbarWidgets[i];
+        if (!widget.visible || !widget.enabled || !widget.click) continue;
+        if ((uint32_t)mx >= widget.bounds.x && (uint32_t)mx < widget.bounds.x + widget.bounds.w &&
+            (uint32_t)my >= widget.bounds.y && (uint32_t)my < widget.bounds.y + widget.bounds.h) {
+            widget.click(widget);
+            return true;
+        }
+    }
 
-    // Magnifying glass icon (small circle + handle)
-    uint32_t iconX = x + 6;
-    uint32_t iconY = y + 5;
-    // Circle (approximated as small square with gap)
-    draw_rect(iconX, iconY, 10, 10, rgb(120, 130, 150));
-    // Handle (diagonal line approximation)
-    framebuffer::put_pixel(iconX + 10, iconY + 10, rgb(120, 130, 150));
-    framebuffer::put_pixel(iconX + 11, iconY + 11, rgb(120, 130, 150));
-    framebuffer::put_pixel(iconX + 12, iconY + 12, rgb(120, 130, 150));
-
-    // Placeholder text
-    draw_text(x + 22, y + (kSearchBoxH - kGlyphH) / 2, "Search...", rgb(100, 105, 120), 1);
+    return false;
 }
 
 // ============================================================
@@ -1801,8 +2107,56 @@ static uint32_t s_terminalBtnW = 0;
 static uint32_t s_terminalBtnH = 0;
 static bool s_terminalBtnVisible = false;
 
+static bool is_taskbar_drag_area(int32_t mx, int32_t my)
+{
+    DesktopRect tb = get_current_taskbar_rect();
+    if (!point_in_rect(mx, my, tb)) return false;
+    if (point_in_rect(mx, my, get_start_button_rect())) return false;
+    if (point_in_rect(mx, my, get_show_desktop_rect())) return false;
+
+    if (s_terminalBtnVisible && shell::is_open()) {
+        DesktopRect terminal = {s_terminalBtnX, s_terminalBtnY, s_terminalBtnW, s_terminalBtnH};
+        if (point_in_rect(mx, my, terminal)) return false;
+    }
+
+    for (int i = 0; i < (int)TaskbarWidgetType::Count; i++) {
+        TaskbarWidget& widget = s_taskbarWidgets[i];
+        if (!widget.visible) continue;
+        DesktopRect bounds = {widget.bounds.x, widget.bounds.y, widget.bounds.w, widget.bounds.h};
+        if (point_in_rect(mx, my, bounds)) return false;
+    }
+
+    return true;
+}
+
 static void draw_taskbar_buttons(uint32_t startX, uint32_t tbY, uint32_t maxX)
 {
+    if (is_vertical_taskbar(s_taskbarDockPosition)) {
+        s_terminalBtnVisible = false;
+        if (!shell::is_open()) return;
+
+        DesktopRect tb = get_current_taskbar_rect();
+        uint32_t btnX = tb.x + 4;
+        uint32_t btnY = tbY;
+        uint32_t btnW = tb.w > 8 ? tb.w - 8 : tb.w;
+        uint32_t btnH = kTaskbarBtnH;
+        if (btnY + btnH > tb.y + tb.h) return;
+
+        s_terminalBtnX = btnX;
+        s_terminalBtnY = btnY;
+        s_terminalBtnW = btnW;
+        s_terminalBtnH = btnH;
+        s_terminalBtnVisible = true;
+
+        bool isActive = !s_shellMinimized && s_shellActive;
+        uint32_t bgColor = isActive ? rgb(70, 100, 150) : rgb(55, 58, 70);
+        framebuffer::fill_rect(btnX, btnY, btnW, btnH, bgColor);
+        if (isActive) framebuffer::fill_rect(btnX + 2, btnY + btnH - 3, btnW - 4, 2, rgb(100, 160, 240));
+        framebuffer::fill_rect(btnX + (btnW > 14 ? (btnW - 14) / 2 : 0), btnY + 4, 14, 14, rgb(120, 180, 80));
+        draw_text_centered(btnX, btnY + 18, btnW, btnH > 18 ? btnH - 18 : btnH, "Term", rgb(230, 230, 240), 1);
+        return;
+    }
+
     uint32_t btnX = startX;
     uint32_t btnY = tbY + (kTaskbarH - kTaskbarBtnH) / 2;
 
@@ -1887,78 +2241,93 @@ static void draw_taskbar_buttons(uint32_t startX, uint32_t tbY, uint32_t maxX)
 
 static void draw_taskbar()
 {
-    uint32_t tbY = s_screenH - kTaskbarH;
+    apply_taskbar_layout();
+    DesktopRect tb = get_current_taskbar_rect();
+    bool vertical = is_vertical_taskbar(s_taskbarDockPosition);
 
     // Taskbar background (dark gradient)
     uint32_t tbTop = rgb(45, 45, 55);
     uint32_t tbBot = rgb(30, 30, 38);
-    for (uint32_t y = 0; y < kTaskbarH; y++) {
-        uint32_t c = lerp_color(tbTop, tbBot, y, kTaskbarH - 1);
-        framebuffer::fill_rect(0, tbY + y, s_screenW, 1, c);
+    uint32_t gradientLen = vertical ? tb.w : tb.h;
+    for (uint32_t i = 0; i < gradientLen; i++) {
+        uint32_t c = lerp_color(tbTop, tbBot, i, gradientLen > 1 ? gradientLen - 1 : 1);
+        if (vertical) framebuffer::fill_rect(tb.x + i, tb.y, 1, tb.h, c);
+        else framebuffer::fill_rect(tb.x, tb.y + i, tb.w, 1, c);
     }
 
-    // Top border highlight
-    hline(0, tbY, s_screenW, rgb(70, 70, 85));
+    if (vertical) vline(tb.x, tb.y, tb.h, rgb(70, 70, 85));
+    else hline(tb.x, tb.y, tb.w, rgb(70, 70, 85));
 
     // Start button - draw image centered in button area, with tint when menu open
-    uint32_t btnY = tbY + 4;
-    uint32_t btnH = kTaskbarH - 8;
+    DesktopRect start = get_start_button_rect();
     uint32_t btnColor = s_startMenuOpen ? rgb(70, 100, 150) : rgb(50, 70, 110);
     uint32_t btnBorder = s_startMenuOpen ? rgb(100, 140, 200) : rgb(90, 120, 180);
-    framebuffer::fill_rect(4, btnY, kStartBtnW, btnH, btnColor);
-    draw_rect(4, btnY, kStartBtnW, btnH, btnBorder);
+    framebuffer::fill_rect(start.x, start.y, start.w, start.h, btnColor);
+    draw_rect(start.x, start.y, start.w, start.h, btnBorder);
     // Draw the start button image, centered within the button
     {
-        uint32_t imgX = 4 + (kStartBtnW > kStartBtnImgW ? (kStartBtnW - kStartBtnImgW) / 2 : 0);
-        uint32_t imgY = btnY + (btnH > kStartBtnImgH ? (btnH - kStartBtnImgH) / 2 : 0);
+        uint32_t imgX = start.x + (start.w > kStartBtnImgW ? (start.w - kStartBtnImgW) / 2 : 0);
+        uint32_t imgY = start.y + (start.h > kStartBtnImgH ? (start.h - kStartBtnImgH) / 2 : 0);
         framebuffer::blit_alpha(kStartBtnImg, imgX, imgY, kStartBtnImgW, kStartBtnImgH);
     }
 
-    // Search box (after start button, matching compositor layout)
-    uint32_t searchX = 4 + kStartBtnW + 8;
-    uint32_t searchY = tbY + (kTaskbarH - kSearchBoxH) / 2;
-    draw_search_box(searchX, searchY);
+    if (vertical) {
+        uint32_t itemY = start.y + start.h + 8;
+        draw_taskbar_buttons(tb.x + 4, itemY, tb.x + tb.w - 4);
 
-    // Taskbar window buttons (after search box)
-    uint32_t taskBtnStart = searchX + kSearchBoxW + 8;
+        TaskbarWidget& clockWidget = s_taskbarWidgets[(int)TaskbarWidgetType::Clock];
+        if (clockWidget.visible && clockWidget.render && tb.h > 82) {
+            clockWidget.bounds = {tb.x + 2, tb.y + tb.h - 76, tb.w > 4 ? tb.w - 4 : tb.w, 34};
+            clockWidget.render(clockWidget);
+        }
+
+        DesktopRect sd = get_show_desktop_rect();
+        framebuffer::fill_rect(sd.x, sd.y, sd.w, sd.h, rgb(50, 50, 60));
+        hline(sd.x + 4, sd.y, sd.w > 8 ? sd.w - 8 : sd.w, rgb(70, 75, 90));
+        return;
+    }
+
+    // Search is hidden unless a real search provider exists.
+    uint32_t searchX = start.x + start.w + 8;
+    uint32_t taskBtnStart = searchX;
+    TaskbarWidget& searchWidget = s_taskbarWidgets[(int)TaskbarWidgetType::Search];
+    if (searchWidget.visible) {
+        searchWidget.bounds = {searchX, tb.y + (kTaskbarH - kSearchBoxH) / 2, kSearchBoxW, kSearchBoxH};
+        if (searchWidget.render) searchWidget.render(searchWidget);
+        taskBtnStart = searchX + kSearchBoxW + 8;
+    }
 
     // Calculate right-side reserved area
-    uint32_t trayW = (kTrayIconSize + kTrayIconGap) * 3 + 12;
-    uint32_t clockW = 70;  // Slightly wider for date
-    uint32_t rightReserved = kShowDesktopW + trayW + clockW + 24;
-    uint32_t taskBtnMaxX = s_screenW - rightReserved;
+    uint32_t trayW = taskbar_tray_width();
+    uint32_t clockW = taskbar_widget_width(TaskbarWidgetType::Clock);
+    uint32_t rightReserved = kShowDesktopW + 12;
+    if (trayW > 0) rightReserved += trayW + 10;
+    if (clockW > 0) rightReserved += clockW + 6;
+    uint32_t taskBtnMaxX = tb.x + tb.w - rightReserved;
 
-    draw_taskbar_buttons(taskBtnStart, tbY, taskBtnMaxX);
+    draw_taskbar_buttons(taskBtnStart, tb.y, taskBtnMaxX);
 
-    // Clock and date area (right side, before tray)
-    uint32_t clockX = s_screenW - kShowDesktopW - trayW - clockW - 16;
-    
-    // Format time and date strings
-    char timeStr[6];
-    char dateStr[11];
-    format_time_string(timeStr, sizeof(timeStr));
-    format_date_string(dateStr, sizeof(dateStr));
-    
-    // Time (centered in upper half)
-    uint32_t timeY = tbY + 6;
-    draw_text_centered(clockX, timeY, clockW, kTaskbarH / 2 - 4, timeStr, rgb(210, 210, 220), 1);
-    
-    // Date below time (smaller, lighter color)
-    uint32_t dateY = tbY + kTaskbarH / 2 + 2;
-    draw_text_centered(clockX, dateY, clockW, kTaskbarH / 2 - 4, dateStr, rgb(160, 160, 175), 1);
+    uint32_t rightX = tb.x + tb.w - kShowDesktopW;
+    if (trayW > 0) {
+        uint32_t trayX = rightX - trayW;
+        draw_system_tray(trayX, tb.y);
+        rightX = trayX - 10;
+    }
 
-    // System tray
-    uint32_t trayX = s_screenW - kShowDesktopW - trayW;
-    draw_system_tray(trayX, tbY);
+    TaskbarWidget& clockWidget = s_taskbarWidgets[(int)TaskbarWidgetType::Clock];
+    if (clockWidget.visible && clockWidget.render) {
+        clockWidget.bounds = {rightX - clockW, tb.y, clockW, kTaskbarH};
+        clockWidget.render(clockWidget);
+    }
 
     // Show Desktop button (thin sliver on far right)
-    uint32_t sdX = s_screenW - kShowDesktopW;
-    framebuffer::fill_rect(sdX, tbY, kShowDesktopW, kTaskbarH, rgb(50, 50, 60));
+    uint32_t sdX = tb.x + tb.w - kShowDesktopW;
+    framebuffer::fill_rect(sdX, tb.y, kShowDesktopW, kTaskbarH, rgb(50, 50, 60));
     // Separator before show desktop
-    vline(sdX, tbY + 4, kTaskbarH - 8, rgb(70, 75, 90));
+    vline(sdX, tb.y + 4, kTaskbarH - 8, rgb(70, 75, 90));
     
     // Subtle vertical line pattern in show desktop area
-    vline(sdX + 2, tbY + 10, kTaskbarH - 20, rgb(60, 60, 70));
+    vline(sdX + 2, tb.y + 10, kTaskbarH - 20, rgb(60, 60, 70));
 }
 
 // ============================================================
@@ -1981,8 +2350,19 @@ static void draw_start_menu()
     uint32_t rightBodyH = (uint32_t)kStartMenuRightCount * kStartMenuRowH;
     uint32_t maxBodyH = bodyH > rightBodyH ? bodyH : rightBodyH;
     uint32_t menuH = headerH + maxBodyH + footerH;
-    uint32_t menuX = 4;
-    uint32_t menuY = s_screenH - kTaskbarH - menuH;
+    DesktopRect work = get_current_work_area();
+    DesktopRect start = get_start_button_rect();
+    uint32_t menuX;
+    uint32_t menuY;
+    if (is_vertical_taskbar(s_taskbarDockPosition)) {
+        menuX = (s_taskbarDockPosition == TaskbarDockPosition::Left) ? work.x : (work.w > kStartMenuW ? work.w - kStartMenuW : 0);
+        menuY = start.y;
+        if (menuY + menuH > work.y + work.h)
+            menuY = work.h > menuH ? work.y + work.h - menuH : work.y;
+    } else {
+        menuX = start.x;
+        menuY = (s_taskbarDockPosition == TaskbarDockPosition::Top) ? work.y : (work.h > menuH ? work.y + work.h - menuH : work.y);
+    }
     uint32_t leftColW = kStartMenuW - kStartMenuRightColW;
 
     // Menu background
@@ -2970,12 +3350,13 @@ struct ShellWindowGeometry {
 static ShellWindowGeometry get_shell_geometry()
 {
     ShellWindowGeometry g;
+    DesktopRect work = get_current_work_area();
     
     if (shell::get_state() == shell::ShellState::Fullscreen || s_shellMaximized) {
-        g.x = 0;
-        g.y = 0;
-        g.w = s_screenW;
-        g.h = s_screenH - kTaskbarH;
+        g.x = work.x;
+        g.y = work.y;
+        g.w = work.w;
+        g.h = work.h;
     } else {
         // Use custom size if set, otherwise default
         g.w = (s_shellW > 0) ? (uint32_t)s_shellW : kShellDefaultW;
@@ -2983,12 +3364,12 @@ static ShellWindowGeometry get_shell_geometry()
         
         // Use stored position or center if not set
         if (s_shellPosX < 0) {
-            g.x = (s_screenW - g.w) / 2;
+            g.x = work.x + (work.w > g.w ? (work.w - g.w) / 2 : 0);
         } else {
             g.x = (uint32_t)s_shellPosX;
         }
         if (s_shellPosY < 0) {
-            g.y = (s_screenH - kTaskbarH - g.h) / 2;
+            g.y = work.y + (work.h > g.h ? (work.h - g.h) / 2 : 0);
         } else {
             g.y = (uint32_t)s_shellPosY;
         }
@@ -3386,7 +3767,7 @@ void init()
     s_lastClickedIcon = -1;
     s_lastClickTime = 0;
     initialize_icon_positions();  // Use new icon management system
-    init_time();  // Initialize time from system clock
+    init_time();  // Initialize time only if a real clock source is available
     shell::init();
     
     // Enable double buffering to prevent flickering during window movement
@@ -3397,7 +3778,8 @@ void init()
     apps::registerKernelApps();
     compositor::KernelCompositor::init(s_screenW, s_screenH, kTaskbarH);
     compositor::TaskbarManager::init(s_screenW, s_screenH, kTaskbarH, 
-                                     4 + kStartBtnW + 8 + kSearchBoxW + 8);
+                                     4 + kStartBtnW + 8);
+    init_taskbar_widgets();
     
     s_initialized = true;
     desktop_capabilities::log_current(false, false);
@@ -3410,7 +3792,24 @@ void tick()
     
     // Update time every ~100 ticks (roughly 1 second if tick is called every 10ms)
     if (s_tickCounter % 100 == 0) {
-        update_time();
+        time::DateTime now{};
+        if (time::get_current_datetime(now)) {
+            bool wasAvailable = s_timeAvailable;
+            s_timeAvailable = true;
+            copy_datetime_from_time_service(now);
+            TaskbarWidget& clock = s_taskbarWidgets[(int)TaskbarWidgetType::Clock];
+            if (!clock.visible) clock.visible = true;
+            if (!wasAvailable) {
+                log_taskbar_widget(TaskbarWidgetType::Clock, true, "RTC/CMOS time became available");
+            }
+        } else {
+            update_time();
+        }
+
+        if (s_timeAvailable && s_currentTime.minute != s_lastRenderedClockMinute) {
+            s_lastRenderedClockMinute = s_currentTime.minute;
+            s_needsRedraw = true;
+        }
     }
     
     // Auto-hide notifications after 5 seconds (500 ticks at 10ms each)
@@ -3620,6 +4019,8 @@ void open_terminal()
     shell::open();
     s_shellActive = true;
     s_shellMinimized = false;
+    s_showDesktopActive = false;
+    s_showDesktopHidShell = false;
 }
 
 bool launch_app(const char* appName)
@@ -3653,6 +4054,30 @@ bool launch_app(const char* appName)
 bool is_bare_metal_mode()
 {
     return app::AppManager::isBareMetal();
+}
+
+static void toggle_show_desktop()
+{
+    if (s_showDesktopActive) {
+        compositor::KernelCompositor::restoreWindowsFromShowDesktop();
+        if (s_showDesktopHidShell && shell::is_open()) {
+            s_shellMinimized = false;
+            s_shellActive = true;
+        }
+        s_showDesktopActive = false;
+        s_showDesktopHidShell = false;
+    } else {
+        s_showDesktopHidShell = shell::is_open() && !s_shellMinimized;
+        if (s_showDesktopHidShell) {
+            s_shellMinimized = true;
+            s_shellActive = false;
+        }
+        compositor::KernelCompositor::minimizeWindowsForShowDesktop();
+        s_showDesktopActive = true;
+    }
+
+    s_startMenuOpen = false;
+    s_rightClickMenuOpen = false;
 }
 
 int get_running_app_count()
@@ -3764,9 +4189,6 @@ void handle_key(uint32_t key)
 // Mouse cursor (12x19 arrow, 1-bit mask)
 // ============================================================
 
-// Request redraw flag for keyboard IRQ handler
-static volatile bool s_needsRedraw = false;
-
 } // namespace desktop
 } // namespace kernel
 
@@ -3833,13 +4255,14 @@ static uint8_t  s_prevButtons = 0;
 // Hit-test desktop icons: returns display index or -1
 static int hit_test_icon(int32_t mx, int32_t my)
 {
-    uint32_t deskH = s_screenH - kTaskbarH;
+    DesktopRect work = get_current_work_area();
+    if (!point_in_rect(mx, my, work)) return -1;
 
     for (int displayIdx = 0; displayIdx < s_visibleIconCount; displayIdx++) {
         uint32_t cx = (uint32_t)s_iconPosX[displayIdx];
         uint32_t cy = (uint32_t)s_iconPosY[displayIdx];
 
-        if (cy + kIconCellH > deskH) continue;
+        if (cx < work.x || cy < work.y || cx + kIconCellW > work.x + work.w || cy + kIconCellH > work.y + work.h) continue;
 
         if ((uint32_t)mx >= cx && (uint32_t)mx < cx + kIconCellW &&
             (uint32_t)my >= cy && (uint32_t)my < cy + kIconCellH) {
@@ -3990,14 +4413,29 @@ struct StartMenuGeometry {
 static StartMenuGeometry get_start_menu_geometry()
 {
     StartMenuGeometry g;
+    DesktopRect work = get_current_work_area();
+    DesktopRect start = get_start_button_rect();
     g.headerH = 30;
     g.footerH = 36;
     uint32_t bodyH = (uint32_t)kStartMenuAppCount * kStartMenuRowH;
     uint32_t rightBodyH = (uint32_t)kStartMenuRightCount * kStartMenuRowH;
     g.maxBodyH = bodyH > rightBodyH ? bodyH : rightBodyH;
     g.menuH = g.headerH + g.maxBodyH + g.footerH;
-    g.menuX = 4;
-    g.menuY = s_screenH - kTaskbarH - g.menuH;
+    if (is_vertical_taskbar(s_taskbarDockPosition)) {
+        if (s_taskbarDockPosition == TaskbarDockPosition::Left)
+            g.menuX = work.x;
+        else
+            g.menuX = work.w > kStartMenuW ? work.w - kStartMenuW : 0;
+        g.menuY = start.y;
+        if (g.menuY + g.menuH > work.y + work.h)
+            g.menuY = work.h > g.menuH ? work.y + work.h - g.menuH : work.y;
+    } else {
+        g.menuX = start.x;
+        if (s_taskbarDockPosition == TaskbarDockPosition::Top)
+            g.menuY = work.y;
+        else
+            g.menuY = work.h > g.menuH ? work.y + work.h - g.menuH : work.y;
+    }
     g.leftColW = kStartMenuW - kStartMenuRightColW;
     g.contentY = g.menuY + g.headerH + 1;
     g.rightX = g.menuX + g.leftColW + 1;
@@ -4272,7 +4710,32 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
     uint8_t released = s_prevButtons & ~buttons;    // newly released
     s_prevButtons = buttons;
 
-    uint32_t taskbarY = s_screenH - kTaskbarH;
+    apply_taskbar_layout();
+    DesktopRect workArea = get_current_work_area();
+    DesktopRect taskbarRect = get_current_taskbar_rect();
+
+    if (s_taskbarDragging) {
+        if (buttons & 0x01) {
+            if (is_near_screen_edge(mx, my, s_screenW, s_screenH)) {
+                TaskbarDockPosition newPosition = get_nearest_dock_edge(mx, my, s_screenW, s_screenH);
+                if (newPosition != s_taskbarDockPosition) {
+                    s_taskbarDockPosition = newPosition;
+                    apply_taskbar_layout();
+                }
+            }
+            draw();
+            draw_cursor(mx, my);
+            return;
+        }
+
+        if (released & 0x01) {
+            s_taskbarDragging = false;
+            apply_taskbar_layout();
+            draw();
+            draw_cursor(mx, my);
+            return;
+        }
+    }
 
     // ---- Route input to kernel compositor first (GUI apps) ----
     // Check if point is over a compositor window OR if compositor has an active button press
@@ -4317,7 +4780,20 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
     compositor::KernelCompositor::handleMouseMove(mx, my);
     
     // Check for taskbar button clicks (for kernel apps)
-    if ((pressed & 0x01) && (uint32_t)my >= taskbarY) {
+    if ((pressed & 0x01) && point_in_rect(mx, my, taskbarRect)) {
+        if (point_in_rect(mx, my, get_show_desktop_rect())) {
+            toggle_show_desktop();
+            draw();
+            draw_cursor(mx, my);
+            return;
+        }
+
+        if (handle_taskbar_widget_click(mx, my)) {
+            draw();
+            draw_cursor(mx, my);
+            return;
+        }
+
         compositor::TaskbarManager::updateHover(mx, my);
         if (compositor::TaskbarManager::handleClick(mx, my)) {
             draw();
@@ -4332,13 +4808,13 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
         int32_t newX = mx - s_shellDragOffsetX;
         int32_t newY = my - s_shellDragOffsetY;
         
-        // Clamp to screen bounds
-        if (newX < 0) newX = 0;
-        if (newY < 0) newY = 0;
-        if (newX + (int32_t)kShellDefaultW > (int32_t)s_screenW)
-            newX = (int32_t)s_screenW - (int32_t)kShellDefaultW;
-        if (newY + (int32_t)kShellDefaultH > (int32_t)taskbarY)
-            newY = (int32_t)taskbarY - (int32_t)kShellDefaultH;
+        // Clamp to desktop work area
+        if (newX < (int32_t)workArea.x) newX = (int32_t)workArea.x;
+        if (newY < (int32_t)workArea.y) newY = (int32_t)workArea.y;
+        if (newX + (int32_t)kShellDefaultW > (int32_t)(workArea.x + workArea.w))
+            newX = (int32_t)(workArea.x + workArea.w) - (int32_t)kShellDefaultW;
+        if (newY + (int32_t)kShellDefaultH > (int32_t)(workArea.y + workArea.h))
+            newY = (int32_t)(workArea.y + workArea.h) - (int32_t)kShellDefaultH;
         
         s_shellPosX = newX;
         s_shellPosY = newY;
@@ -4368,12 +4844,12 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
         if (newW < (int32_t)kShellMinW) newW = (int32_t)kShellMinW;
         if (newH < (int32_t)kShellMinH) newH = (int32_t)kShellMinH;
         
-        // Clamp to screen bounds
+        // Clamp to desktop work area
         ShellWindowGeometry g = get_shell_geometry();
-        if ((int32_t)g.x + newW > (int32_t)s_screenW)
-            newW = (int32_t)s_screenW - (int32_t)g.x;
-        if ((int32_t)g.y + newH > (int32_t)(s_screenH - kTaskbarH))
-            newH = (int32_t)(s_screenH - kTaskbarH) - (int32_t)g.y;
+        if ((int32_t)g.x + newW > (int32_t)(workArea.x + workArea.w))
+            newW = (int32_t)(workArea.x + workArea.w) - (int32_t)g.x;
+        if ((int32_t)g.y + newH > (int32_t)(workArea.y + workArea.h))
+            newH = (int32_t)(workArea.y + workArea.h) - (int32_t)g.y;
         
         s_shellW = newW;
         s_shellH = newH;
@@ -4464,13 +4940,13 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
             int32_t newX = mx - s_dragOffsetX;
             int32_t newY = my - s_dragOffsetY;
 
-            // Clamp to desktop area
-            if (newX < 0) newX = 0;
-            if (newY < 0) newY = 0;
-            if (newX + (int32_t)kIconCellW > (int32_t)s_screenW)
-                newX = (int32_t)s_screenW - (int32_t)kIconCellW;
-            if (newY + (int32_t)kIconCellH > (int32_t)taskbarY)
-                newY = (int32_t)taskbarY - (int32_t)kIconCellH;
+            // Clamp to desktop work area
+            if (newX < (int32_t)workArea.x) newX = (int32_t)workArea.x;
+            if (newY < (int32_t)workArea.y) newY = (int32_t)workArea.y;
+            if (newX + (int32_t)kIconCellW > (int32_t)(workArea.x + workArea.w))
+                newX = (int32_t)(workArea.x + workArea.w) - (int32_t)kIconCellW;
+            if (newY + (int32_t)kIconCellH > (int32_t)(workArea.y + workArea.h))
+                newY = (int32_t)(workArea.y + workArea.h) - (int32_t)kIconCellH;
 
             s_iconPosX[s_dragIconIndex] = newX;
             s_iconPosY[s_dragIconIndex] = newY;
@@ -4790,10 +5266,18 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
             return;
         }
 
-        // Start button area: x=[4..4+kStartBtnW], y=[taskbarY+4..taskbarY+kTaskbarH-4]
-        if ((uint32_t)mx >= 4 && (uint32_t)mx <= 4 + kStartBtnW &&
-            (uint32_t)my >= taskbarY + 4 && (uint32_t)my <= taskbarY + kTaskbarH - 4) {
+        // Start button area follows the current taskbar dock position.
+        if (point_in_rect(mx, my, get_start_button_rect())) {
             toggle_start_menu();
+            draw();
+            draw_cursor(mx, my);
+            return;
+        }
+
+        if (is_taskbar_drag_area(mx, my)) {
+            s_taskbarDragging = true;
+            s_startMenuOpen = false;
+            s_rightClickMenuOpen = false;
             draw();
             draw_cursor(mx, my);
             return;
@@ -4945,7 +5429,7 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
             uint32_t toastW = 280;
             uint32_t toastH = 64;
             uint32_t toastX = s_screenW - toastW - 16;
-            uint32_t toastY = taskbarY - toastH - 12;
+            uint32_t toastY = workArea.y + workArea.h > toastH + 12 ? workArea.y + workArea.h - toastH - 12 : workArea.y;
             if ((uint32_t)mx >= toastX && (uint32_t)mx <= toastX + toastW &&
                 (uint32_t)my >= toastY && (uint32_t)my <= toastY + toastH) {
                 dismiss_notification();
@@ -4957,7 +5441,7 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
 
         // Click on empty desktop area: clear selection unless Ctrl is held, then
         // prepare a marquee selection if the pointer moves beyond the drag threshold.
-        if ((uint32_t)my < taskbarY) {
+        if (is_point_in_work_area(mx, my)) {
             bool ctrlDown = is_ctrl_modifier_down();
             if (!ctrlDown) {
                 ClearDesktopIconSelection();
@@ -4980,7 +5464,7 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
             uint32_t toastW = 280;
             uint32_t toastH = 64;
             uint32_t toastX = s_screenW - toastW - 16;
-            uint32_t toastY = taskbarY - toastH - 12;
+            uint32_t toastY = workArea.y + workArea.h > toastH + 12 ? workArea.y + workArea.h - toastH - 12 : workArea.y;
             if ((uint32_t)mx >= toastX && (uint32_t)mx <= toastX + toastW &&
                 (uint32_t)my >= toastY && (uint32_t)my <= toastY + toastH) {
                 dismiss_notification();
@@ -4993,7 +5477,7 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
 
     // Right button click - show context menu on desktop area
     if (pressed & 0x02) {
-        if ((uint32_t)my < taskbarY) {
+        if (is_point_in_work_area(mx, my)) {
             show_context_menu((uint32_t)mx, (uint32_t)my);
             draw();
             draw_cursor(mx, my);

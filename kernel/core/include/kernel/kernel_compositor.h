@@ -84,6 +84,7 @@ class KernelCompositor {
 public:
     // Initialize the compositor
     static void init(uint32_t screenW, uint32_t screenH, uint32_t taskbarH);
+    static void setWorkArea(uint32_t x, uint32_t y, uint32_t w, uint32_t h);
     
     // Shutdown the compositor
     static void shutdown();
@@ -111,6 +112,8 @@ public:
     static void maximizeWindow(uint32_t windowId);
     static void restoreWindow(uint32_t windowId);
     static void closeWindow(uint32_t windowId);
+    static void minimizeWindowsForShowDesktop();
+    static void restoreWindowsFromShowDesktop();
     
     // Hit testing
     static HitTestResult hitTest(int x, int y, app::KernelWindow** outWindow);
@@ -157,6 +160,10 @@ private:
     static uint32_t s_screenW;
     static uint32_t s_screenH;
     static uint32_t s_taskbarH;
+    static uint32_t s_workX;
+    static uint32_t s_workY;
+    static uint32_t s_workW;
+    static uint32_t s_workH;
     
     // Drag/resize state
     static DragState s_dragState;
@@ -167,6 +174,8 @@ private:
     
     // Button press tracking (to ensure mouse up is sent even if mouse moved)
     static bool s_buttonPressActive;
+    static uint32_t s_showDesktopMinimized[MAX_WINDOWS];
+    static int s_showDesktopMinimizedCount;
     
     // Initialization flag
     static bool s_initialized;
@@ -217,6 +226,8 @@ struct TaskbarButton {
 class TaskbarManager {
 public:
     static void init(uint32_t screenW, uint32_t screenH, uint32_t taskbarH, uint32_t startX);
+    static void setLayout(uint32_t taskbarX, uint32_t taskbarY, uint32_t taskbarW, uint32_t taskbarH,
+                          bool vertical, uint32_t buttonStartX, uint32_t buttonStartY);
     static void updateButtons();
     static void drawButtons();
     static bool handleClick(int32_t mx, int32_t my);
@@ -230,6 +241,11 @@ private:
     static uint32_t s_screenH;
     static uint32_t s_taskbarH;
     static uint32_t s_startX;
+    static uint32_t s_taskbarX;
+    static uint32_t s_taskbarY;
+    static uint32_t s_taskbarW;
+    static bool s_vertical;
+    static uint32_t s_startY;
 };
 
 } // namespace compositor

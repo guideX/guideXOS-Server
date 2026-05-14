@@ -22,11 +22,17 @@ uint32_t KernelCompositor::s_nextWindowId = 1000;
 uint32_t KernelCompositor::s_screenW = 0;
 uint32_t KernelCompositor::s_screenH = 0;
 uint32_t KernelCompositor::s_taskbarH = 0;
+uint32_t KernelCompositor::s_workX = 0;
+uint32_t KernelCompositor::s_workY = 0;
+uint32_t KernelCompositor::s_workW = 0;
+uint32_t KernelCompositor::s_workH = 0;
 DragState KernelCompositor::s_dragState;
 uint32_t KernelCompositor::s_hoverWindowId = 0;
 HitTestResult KernelCompositor::s_hoverResult = HitTestResult::None;
 bool KernelCompositor::s_buttonPressActive = false;
 bool KernelCompositor::s_initialized = false;
+uint32_t KernelCompositor::s_showDesktopMinimized[MAX_WINDOWS];
+int KernelCompositor::s_showDesktopMinimizedCount = 0;
 
 // Bitmap font (5x7) - same as desktop.cpp
 static const int kGlyphW = 5;
@@ -155,6 +161,7 @@ void KernelCompositor::init(uint32_t screenW, uint32_t screenH, uint32_t taskbar
     s_screenW = screenW;
     s_screenH = screenH;
     s_taskbarH = taskbarH;
+    setWorkArea(0, 0, screenW, screenH > taskbarH ? screenH - taskbarH : screenH);
     
     for (int i = 0; i < MAX_WINDOWS; i++) {
         s_windows[i].valid = false;
@@ -168,7 +175,15 @@ void KernelCompositor::init(uint32_t screenW, uint32_t screenH, uint32_t taskbar
     s_hoverResult = HitTestResult::None;
     s_dragState = DragState();
     s_buttonPressActive = false;  // Ensure button press tracking is reset
+    s_showDesktopMinimizedCount = 0;
     s_initialized = true;
+}
+
+void KernelCompositor::setWorkArea(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
+    s_workX = x;
+    s_workY = y;
+    s_workW = w;
+    s_workH = h;
 }
 
 void KernelCompositor::shutdown() {
@@ -311,10 +326,10 @@ void KernelCompositor::maximizeWindow(uint32_t windowId) {
             win->savedY = win->y;
             win->savedW = win->w;
             win->savedH = win->h;
-            win->x = 0;
-            win->y = 0;
-            win->w = (int)s_screenW;
-            win->h = (int)(s_screenH - s_taskbarH);
+            win->x = (int)s_workX;
+            win->y = (int)s_workY;
+            win->w = (int)s_workW;
+            win->h = (int)s_workH;
             win->flags |= app::WF_MAXIMIZED;
         }
         win->dirty = true;
@@ -327,6 +342,35 @@ void KernelCompositor::restoreWindow(uint32_t windowId) {
         win->flags &= ~(app::WF_MINIMIZED | app::WF_MAXIMIZED);
         win->dirty = true;
     }
+}
+
+void KernelCompositor::minimizeWindowsForShowDesktop() {
+    s_showDesktopMinimizedCount = 0;
+    for (int i = 0; i < MAX_WINDOWS; i++) {
+        if (!s_windows[i].valid || !s_windows[i].window) continue;
+        app::KernelWindow* win = s_windows[i].window;
+        if ((win->flags & app::WF_VISIBLE) && !(win->flags & app::WF_MINIMIZED)) {
+            s_showDesktopMinimized[s_showDesktopMinimizedCount++] = win->id;
+            win->flags |= app::WF_MINIMIZED;
+            win->dirty = true;
+            if (s_showDesktopMinimizedCount >= MAX_WINDOWS) break;
+        }
+    }
+}
+
+void KernelCompositor::restoreWindowsFromShowDesktop() {
+    for (int i = 0; i < s_showDesktopMinimizedCount; i++) {
+        app::KernelWindow* win = getWindow(s_showDesktopMinimized[i]);
+        if (win) {
+            win->flags &= ~app::WF_MINIMIZED;
+            win->dirty = true;
+        }
+    }
+
+    if (s_showDesktopMinimizedCount > 0) {
+        setFocus(s_showDesktopMinimized[s_showDesktopMinimizedCount - 1]);
+    }
+    s_showDesktopMinimizedCount = 0;
 }
 
 void KernelCompositor::closeWindow(uint32_t windowId) {
@@ -430,11 +474,11 @@ void KernelCompositor::handleMouseMove(int32_t mx, int32_t my) {
                 win->x = mx - s_dragState.offsetX;
                 win->y = my - s_dragState.offsetY;
                 // Clamp to screen
-                if (win->x < 0) win->x = 0;
-                if (win->y < 0) win->y = 0;
-                if (win->x + win->w > (int)s_screenW) win->x = (int)s_screenW - win->w;
-                if (win->y + win->h > (int)(s_screenH - s_taskbarH)) 
-                    win->y = (int)(s_screenH - s_taskbarH) - win->h;
+                if (win->x < (int)s_workX) win->x = (int)s_workX;
+                if (win->y < (int)s_workY) win->y = (int)s_workY;
+                if (win->x + win->w > (int)(s_workX + s_workW)) win->x = (int)(s_workX + s_workW) - win->w;
+                if (win->y + win->h > (int)(s_workY + s_workH)) 
+                    win->y = (int)(s_workY + s_workH) - win->h;
             }
             win->dirty = true;
         }
@@ -962,20 +1006,43 @@ uint32_t TaskbarManager::s_screenW = 0;
 uint32_t TaskbarManager::s_screenH = 0;
 uint32_t TaskbarManager::s_taskbarH = 0;
 uint32_t TaskbarManager::s_startX = 0;
+uint32_t TaskbarManager::s_taskbarX = 0;
+uint32_t TaskbarManager::s_taskbarY = 0;
+uint32_t TaskbarManager::s_taskbarW = 0;
+bool TaskbarManager::s_vertical = false;
+uint32_t TaskbarManager::s_startY = 0;
 
 void TaskbarManager::init(uint32_t screenW, uint32_t screenH, uint32_t taskbarH, uint32_t startX) {
     s_screenW = screenW;
     s_screenH = screenH;
     s_taskbarH = taskbarH;
     s_startX = startX;
+    s_taskbarX = 0;
+    s_taskbarY = screenH - taskbarH;
+    s_taskbarW = screenW;
+    s_vertical = false;
+    s_startY = s_taskbarY + 6;
     s_buttonCount = 0;
+}
+
+void TaskbarManager::setLayout(uint32_t taskbarX, uint32_t taskbarY, uint32_t taskbarW, uint32_t taskbarH,
+                               bool vertical, uint32_t buttonStartX, uint32_t buttonStartY) {
+    s_taskbarX = taskbarX;
+    s_taskbarY = taskbarY;
+    s_taskbarW = taskbarW;
+    s_taskbarH = taskbarH;
+    s_vertical = vertical;
+    s_startX = buttonStartX;
+    s_startY = buttonStartY;
 }
 
 void TaskbarManager::updateButtons() {
     s_buttonCount = 0;
     uint32_t btnX = s_startX;
-    uint32_t btnY = s_screenH - s_taskbarH + 6;
-    uint32_t btnH = s_taskbarH - 12;
+    uint32_t btnY = s_startY;
+    uint32_t btnH = s_vertical ? 28 : (s_taskbarH > 12 ? s_taskbarH - 12 : s_taskbarH);
+    uint32_t maxX = s_taskbarX + s_taskbarW;
+    uint32_t maxY = s_taskbarY + s_taskbarH;
     
     for (int i = 0; i < MAX_WINDOWS; i++) {
         if (!KernelCompositor::s_windows[i].valid) continue;
@@ -996,10 +1063,16 @@ void TaskbarManager::updateButtons() {
         btn.active = (win->flags & app::WF_FOCUSED) != 0;
         btn.x = (int)btnX;
         btn.y = (int)btnY;
-        btn.w = measureText(btn.title) + 24;
+        btn.w = s_vertical ? (int)(s_taskbarW > 8 ? s_taskbarW - 8 : s_taskbarW) : measureText(btn.title) + 24;
         btn.h = (int)btnH;
+
+        if ((!s_vertical && btnX + (uint32_t)btn.w > maxX) ||
+            (s_vertical && btnY + (uint32_t)btn.h > maxY)) {
+            break;
+        }
         
-        btnX += btn.w + 4;
+        if (s_vertical) btnY += btn.h + 4;
+        else btnX += btn.w + 4;
         s_buttonCount++;
         
         if (s_buttonCount >= MAX_TASKBAR_BUTTONS) break;
