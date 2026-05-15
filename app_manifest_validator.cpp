@@ -40,6 +40,8 @@ bool AppManifestValidator::IsKnownPermission(const std::string& permission) {
         "audio.output",
         "input.keyboard",
         "input.pointer",
+        "log",
+        "window",
         "system.settings",
         "hypervisor.guest",
         "service.background"

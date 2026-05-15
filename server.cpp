@@ -284,7 +284,7 @@ using namespace gxos;
         else if (cmd=="desktop.apps"){
             auto& apps = gui::DesktopService::GetRegisteredApps();
             std::cout<<"Registered Applications ("<<apps.size()<<"):"<<std::endl;
-            for(const auto& app : apps) std::cout<<"  "<<app<<std::endl;
+            for(const auto& app : apps) std::cout<<"  "<<app.displayName<<std::endl;
         }
         else if (cmd=="desktop.pinned"){
             auto& pinned = gui::DesktopService::GetPinned();

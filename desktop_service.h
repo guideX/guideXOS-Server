@@ -1,4 +1,6 @@
 #pragma once
+#include "app_manifest.h"
+
 #include <string>
 #include <vector>
 #include <cstdint>
@@ -30,6 +32,15 @@ namespace gxos { namespace gui {
         std::string iconName;
     };
 
+    struct RegisteredDesktopApp {
+        std::string id;
+        std::string displayName;
+        std::string icon;
+        apps::AppKind kind = apps::AppKind::Unknown;
+        std::string launchName;
+        std::string source;
+    };
+
     class DesktopService {
     public:
         // Pinned management
@@ -48,8 +59,11 @@ namespace gxos { namespace gui {
 
         // App registry
         static void RegisterApp(const std::string& name, const std::string& iconName = "");
+        static void RegisterApp(const std::string& id, const std::string& displayName, const std::string& icon, apps::AppKind kind, const std::string& launchName);
+        static void RegisterApp(const std::string& id, const std::string& displayName, const std::string& icon, apps::AppKind kind, const std::string& launchName, const std::string& source);
         static bool LaunchApp(const std::string& name, std::string& error);
-        static const std::vector<std::string>& GetRegisteredApps() { return s_apps; }
+        static const std::vector<RegisteredDesktopApp>& GetRegisteredApps() { return s_apps; }
+        static std::string GetRegisteredAppsVerboseDiagnostic();
 
         // Persistence
         static void LoadState();
@@ -62,6 +76,6 @@ namespace gxos { namespace gui {
         static std::vector<PinnedItem> s_pinned;
         static std::vector<RecentProgramEntry> s_recentPrograms;
         static std::vector<RecentDocumentEntry> s_recentDocuments;
-        static std::vector<std::string> s_apps; // Registered app names
+        static std::vector<RegisteredDesktopApp> s_apps;
     };
 } }

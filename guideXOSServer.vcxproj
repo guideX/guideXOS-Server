@@ -546,6 +546,7 @@
   <ItemGroup>
     <None Include=".vs\launch.vs.json" />
     <None Include=".vs\tasks.vs.json" />
+    <None Include="Apps\HelloWorld\app.json" />
     <None Include="build-kernel.bat" />
     <None Include="build-uefi.ps1" />
     <None Include="build.bat" />

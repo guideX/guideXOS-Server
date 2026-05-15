@@ -1,4 +1,5 @@
 #include "console_service.h"
+#include "desktop_service.h"
 #include "process.h"
 #include "logger.h"
 #include "scheduler.h"
@@ -11,6 +12,13 @@ namespace gxos { namespace svc {
 
     static std::string trim(const std::string& s){ size_t a = s.find_first_not_of(" \t\r\n"); if(a==std::string::npos) return {}; size_t b = s.find_last_not_of(" \t\r\n"); return s.substr(a, b-a+1); }
 
+    static void publishOutput(const std::string& text) {
+        ipc::Message out;
+        out.type = 0;
+        out.data.assign(text.begin(), text.end());
+        ipc::Bus::publish(kOutputChan, std::move(out), false);
+    }
+
     int ConsoleService::main(int argc, char** argv){
         Logger::write(LogLevel::Info, "ConsoleService started");
         ipc::Bus::ensure(kInputChan); ipc::Bus::ensure(kOutputChan);
@@ -19,10 +27,11 @@ namespace gxos { namespace svc {
         while(true){
             ipc::Message m; if(!ipc::Bus::pop(kInputChan, m, 1000)){ continue; }
             std::string line(m.data.begin(), m.data.end()); line = trim(line);
-            if(line=="exit"||line=="quit"){ ipc::Message out; out.type=0; std::string r = "bye"; out.data.assign(r.begin(), r.end()); ipc::Bus::publish(kOutputChan, std::move(out), false); break; }
+            if(line=="exit"||line=="quit"){ publishOutput("bye"); break; }
+            if(line=="desktop.apps.verbose") { publishOutput(gxos::gui::DesktopService::GetRegisteredAppsVerboseDiagnostic()); continue; }
             // Basic demo: echo and simple commands
             std::string resp = "[console] " + line;
-            ipc::Message out; out.type=0; out.data.assign(resp.begin(), resp.end()); ipc::Bus::publish(kOutputChan, std::move(out), false);
+            publishOutput(resp);
         }
         Logger::write(LogLevel::Info, "ConsoleService stopped");
         return 0;

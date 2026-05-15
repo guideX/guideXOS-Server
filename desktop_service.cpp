@@ -1,4 +1,5 @@
 #include "desktop_service.h"
+#include "app_registry.h"
 #include "desktop_config.h"
 #include "logger.h"
 #include "lifecycle.h"
@@ -30,20 +31,78 @@ namespace gxos {
     /// </summary>
     namespace gui {
 
+        static apps::AppRegistry s_appRegistry;
+        static bool s_appRegistryInitialized = false;
+        static size_t s_appRegistryInitializeCount = 0;
+        static apps::AppScanResult s_lastManifestScanResult;
+        static apps::AppScanResult s_lastBuiltInRegisterResult;
+
+        static void logScanIssues(const char* label, const std::vector<apps::AppScanIssue>& issues) {
+            for (const auto& issue : issues) {
+                std::string message = std::string(label) + ": ";
+                if (!issue.appId.empty()) message += issue.appId + " ";
+                if (!issue.manifestPath.empty()) message += issue.manifestPath.string() + " ";
+                for (const std::string& error : issue.errors) message += error + "; ";
+                Logger::write(LogLevel::Warn, message);
+            }
+        }
+
+        static std::string launchNameForApp(const apps::RegisteredApp& app) {
+            auto hint = app.manifest.desktopRegistryHints.find("registeredName");
+            if (hint != app.manifest.desktopRegistryHints.end() && !hint->second.empty()) return hint->second;
+            const apps::AppEntry* entry = app.FindCompatibleEntry("any");
+            if (entry && !entry->entryPoint.empty()) return entry->entryPoint;
+            return app.manifest.displayName;
+        }
+
+        static const RegisteredDesktopApp* findRegisteredApp(const std::string& name) {
+            for (const auto& app : DesktopService::GetRegisteredApps()) {
+                if (app.displayName == name || app.launchName == name || app.id == name) return &app;
+            }
+            return nullptr;
+        }
+
+        static void refreshRegisteredAppsFromRegistry() {
+            for (const auto& app : s_appRegistry.GetAllApps()) {
+                DesktopService::RegisterApp(app.manifest.id, app.manifest.displayName, app.manifest.icon, app.manifest.kind, launchNameForApp(app), apps::AppRegistry::ToString(app.sourceKind));
+            }
+        }
+
+        static void appendScanIssues(std::ostringstream& oss, const char* label, const std::vector<apps::AppScanIssue>& issues) {
+            oss << label << ": " << issues.size() << "\n";
+            for (const auto& issue : issues) {
+                oss << "  source=" << apps::AppRegistry::ToString(issue.sourceKind);
+                if (!issue.appId.empty()) oss << " id=" << issue.appId;
+                if (!issue.manifestPath.empty()) oss << " path=" << issue.manifestPath.string();
+                if (!issue.errors.empty()) {
+                    oss << " errors=";
+                    for (size_t i = 0; i < issue.errors.size(); ++i) {
+                        if (i > 0) oss << "; ";
+                        oss << issue.errors[i];
+                    }
+                }
+                oss << "\n";
+            }
+        }
+
         static void ensureDefaultAppsRegistered() {
-            DesktopService::RegisterApp("Calculator", "calculator");
-            DesktopService::RegisterApp("Clock", "calendar");
-            DesktopService::RegisterApp("Paint", "image");
-            DesktopService::RegisterApp("Console", "edit");
-            DesktopService::RegisterApp("Notepad", "notepad");
-            DesktopService::RegisterApp("FileExplorer", "folder");
-            DesktopService::RegisterApp("TaskManager", "applications");
-            DesktopService::RegisterApp("ImageViewer", "image");
-            DesktopService::RegisterApp("OnScreenKeyboard", "edit");
-            DesktopService::RegisterApp("ShutdownDialog", "close");
-            DesktopService::RegisterApp("DiskManager", "harddisk");
-            DesktopService::RegisterApp("ControlPanel", "settings");
-            DesktopService::RegisterApp("HDInstaller", "harddisk");
+            if (s_appRegistryInitialized) return;
+
+            ++s_appRegistryInitializeCount;
+            Logger::write(LogLevel::Info, "AppRegistry initializing, count=" + std::to_string(s_appRegistryInitializeCount));
+
+            s_lastManifestScanResult = s_appRegistry.Scan();
+            Logger::write(LogLevel::Info, "AppRegistry manifest scan succeeded: scanned=" + std::to_string(s_lastManifestScanResult.scannedManifestCount) + ", registered=" + std::to_string(s_lastManifestScanResult.registeredAppCount));
+            logScanIssues("Invalid app manifest", s_lastManifestScanResult.invalidApps);
+            logScanIssues("Duplicate app id", s_lastManifestScanResult.duplicateApps);
+
+            s_lastBuiltInRegisterResult = s_appRegistry.RegisterBuiltInAppsAsManifests();
+            logScanIssues("Duplicate app id", s_lastBuiltInRegisterResult.duplicateApps);
+
+            s_apps.clear();
+            refreshRegisteredAppsFromRegistry();
+            s_appRegistryInitialized = true;
+            Logger::write(LogLevel::Info, "AppRegistry initialized, desktop apps=" + std::to_string(s_apps.size()));
         }
 
         static std::string canonicalAppName(const std::string& name) {
@@ -56,7 +115,7 @@ namespace gxos {
         std::vector<PinnedItem> DesktopService::s_pinned;
         std::vector<RecentProgramEntry> DesktopService::s_recentPrograms;
         std::vector<RecentDocumentEntry> DesktopService::s_recentDocuments;
-        std::vector<std::string> DesktopService::s_apps;
+        std::vector<RegisteredDesktopApp> DesktopService::s_apps;
 
         static uint64_t currentTicks() {
             return (uint64_t)std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -176,23 +235,89 @@ namespace gxos {
 
         void DesktopService::RegisterApp(const std::string& name, const std::string& iconName) {
             if (name.empty()) return;
-            if (std::find(s_apps.begin(), s_apps.end(), name) == s_apps.end()) {
-                s_apps.push_back(name);
-                Logger::write(LogLevel::Info, std::string("Registered app: ") + name);
+            RegisterApp(std::string("gxos.legacy.") + name, name, iconName, apps::AppKind::BuiltIn, name);
+        }
+
+        void DesktopService::RegisterApp(const std::string& id, const std::string& displayName, const std::string& icon, apps::AppKind kind, const std::string& launchName) {
+            RegisterApp(id, displayName, icon, kind, launchName, "Legacy");
+        }
+
+        void DesktopService::RegisterApp(const std::string& id, const std::string& displayName, const std::string& icon, apps::AppKind kind, const std::string& launchName, const std::string& source) {
+            if (id.empty() || displayName.empty()) return;
+            for (auto& app : s_apps) {
+                if (app.id == id) {
+                    app.displayName = displayName;
+                    app.icon = icon;
+                    app.kind = kind;
+                    app.launchName = launchName.empty() ? displayName : launchName;
+                    app.source = source;
+                    return;
+                }
             }
+
+            RegisteredDesktopApp app;
+            app.id = id;
+            app.displayName = displayName;
+            app.icon = icon;
+            app.kind = kind;
+            app.launchName = launchName.empty() ? displayName : launchName;
+            app.source = source;
+            s_apps.push_back(app);
+            Logger::write(LogLevel::Info, std::string("Registered app: ") + displayName);
+        }
+
+        std::string DesktopService::GetRegisteredAppsVerboseDiagnostic() {
+            ensureDefaultAppsRegistered();
+
+            std::ostringstream oss;
+            oss << "AppRegistry diagnostic\n";
+            oss << "initialized=" << (s_appRegistryInitialized ? "true" : "false") << " initCount=" << s_appRegistryInitializeCount << "\n";
+            oss << "sources:\n";
+            for (const auto& source : apps::AppRegistry::DefaultSources()) {
+                oss << "  " << apps::AppRegistry::ToString(source.kind) << " " << source.path.string() << "\n";
+            }
+            oss << "manifestScan scanned=" << s_lastManifestScanResult.scannedManifestCount << " registered=" << s_lastManifestScanResult.registeredAppCount << "\n";
+            oss << "builtInRegister scanned=" << s_lastBuiltInRegisterResult.scannedManifestCount << " registered=" << s_lastBuiltInRegisterResult.registeredAppCount << "\n";
+            appendScanIssues(oss, "invalidManifests", s_lastManifestScanResult.invalidApps);
+            appendScanIssues(oss, "duplicateAppIds(manifestScan)", s_lastManifestScanResult.duplicateApps);
+            appendScanIssues(oss, "duplicateAppIds(builtInRegister)", s_lastBuiltInRegisterResult.duplicateApps);
+            oss << "registeredApps: " << s_apps.size() << "\n";
+            for (const auto& app : s_apps) {
+                oss << "  id=" << app.id
+                    << " displayName=" << app.displayName
+                    << " kind=" << apps::ToString(app.kind)
+                    << " icon=" << app.icon
+                    << " launchName=" << app.launchName
+                    << " source=" << app.source << "\n";
+            }
+            oss << "launchPolicy: BuiltIn uses existing hardcoded launch branch; NativeElf/GXAppPackage return: manifest found but execution is not implemented yet\n";
+            return oss.str();
         }
 
         bool DesktopService::LaunchApp(const std::string& name, std::string& error) {
             ensureDefaultAppsRegistered();
             std::string appName = canonicalAppName(name);
+            const RegisteredDesktopApp* manifestApp = findRegisteredApp(appName);
 
             // Installed universal applications are launched through the package manager.
-            if (std::find(s_apps.begin(), s_apps.end(), appName) == s_apps.end()) {
+            if (!manifestApp) {
                 if (PackageManager::LaunchGXApp(appName, error)) {
                     AddRecentProgram(appName);
                     return true;
                 }
                 error = "Application not registered: " + name;
+                return false;
+            }
+
+            if (manifestApp->kind == apps::AppKind::NativeElf || manifestApp->kind == apps::AppKind::GXAppPackage) {
+                Logger::write(LogLevel::Warn, std::string("Launch attempted for unsupported app kind: ") + apps::ToString(manifestApp->kind) + " id=" + manifestApp->id);
+                error = std::string("Manifest found for ") + manifestApp->displayName + " but execution is not implemented yet for " + apps::ToString(manifestApp->kind);
+                return false;
+            }
+
+            if (manifestApp->kind != apps::AppKind::BuiltIn) {
+                Logger::write(LogLevel::Warn, std::string("Launch attempted for unsupported app kind: ") + apps::ToString(manifestApp->kind) + " id=" + manifestApp->id);
+                error = std::string("Manifest found for ") + manifestApp->displayName + " but execution is not implemented yet for " + apps::ToString(manifestApp->kind);
                 return false;
             }
 

@@ -1368,6 +1368,7 @@
     <None Include="examples\apps\notepad\app.json" />
     <None Include="examples\apps\helloworld-elf\app.json" />
     <None Include="examples\apps\future-gxapp\app.json" />
+    <None Include="Apps\HelloWorld\app.json" />
   </ItemGroup>
   <ItemGroup>
     <Text Include="scripts\build-and-run-sparcv8_in_linux.sh" />
