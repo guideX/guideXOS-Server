@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 1,
+  "id": "gxos.example.futuregxapp",
+  "displayName": "Future GXApp Package",
+  "version": "0.1.0",
+  "publisher": "guideXOS Samples",
+  "description": "Example manifest for a future packaged GXApp application.",
+  "category": "Samples",
+  "kind": "GXAppPackage",
+  "icon": "assets/icon.png",
+  "minGuideXOSVersion": "0.1.0",
+  "supportedArchitectures": [
+    "x86",
+    "amd64"
+  ],
+  "entries": [
+    {
+      "architecture": "x86",
+      "path": "app.gxapp",
+      "entryPoint": "main",
+      "abi": "guidexos-gxapp-abi-v1",
+      "runtime": "gxapp"
+    },
+    {
+      "architecture": "amd64",
+      "path": "app.gxapp",
+      "entryPoint": "main",
+      "abi": "guidexos-gxapp-abi-v1",
+      "runtime": "gxapp"
+    }
+  ],
+  "permissions": [
+    "desktop.window",
+    "filesystem.read"
+  ],
+  "fileAssociations": [
+    {
+      "extension": ".gxdemo",
+      "contentType": "application/x-guidexos-demo",
+      "description": "guideXOS demo document"
+    }
+  ],
+  "defaultWindow": {
+    "width": 800,
+    "height": 600,
+    "resizable": true
+  }
+}

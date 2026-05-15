@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "id": "gxos.example.helloworld",
+  "displayName": "HelloWorld ELF",
+  "version": "0.1.0",
+  "publisher": "guideXOS Samples",
+  "description": "Example external native ELF application manifest.",
+  "category": "Samples",
+  "kind": "NativeElf",
+  "icon": "icons/helloworld.png",
+  "minGuideXOSVersion": "0.1.0",
+  "supportedArchitectures": [
+    "amd64"
+  ],
+  "entries": [
+    {
+      "architecture": "amd64",
+      "path": "bin/amd64/helloworld.elf",
+      "entryPoint": "gx_main",
+      "abi": "guidexos-c-abi-v1",
+      "runtime": "native-elf"
+    }
+  ],
+  "permissions": [
+    "desktop.window"
+  ],
+  "fileAssociations": [],
+  "defaultWindow": {
+    "width": 480,
+    "height": 320,
+    "resizable": true
+  }
+}

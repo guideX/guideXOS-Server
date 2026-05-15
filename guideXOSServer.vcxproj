@@ -129,6 +129,10 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="allocator.h" />
+    <ClInclude Include="app_manifest.h" />
+    <ClInclude Include="app_manifest_loader.h" />
+    <ClInclude Include="app_manifest_validator.h" />
+    <ClInclude Include="app_registry.h" />
     <ClInclude Include="bitmap_font.h" />
     <ClInclude Include="calculator.h" />
     <ClInclude Include="clock.h" />
@@ -331,6 +335,10 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="allocator.cpp" />
+    <ClCompile Include="app_manifest.cpp" />
+    <ClCompile Include="app_manifest_loader.cpp" />
+    <ClCompile Include="app_manifest_validator.cpp" />
+    <ClCompile Include="app_registry.cpp" />
     <ClCompile Include="calculator.cpp" />
     <ClCompile Include="clock.cpp" />
     <ClCompile Include="compositor.cpp" />
@@ -559,6 +567,9 @@
     <None Include="docs\TROUBLESHOOTING_PING.md" />
     <None Include="docs\universal-app-audit.md" />
     <None Include="ESP\startup.nsh" />
+    <None Include="examples\apps\future-gxapp\app.json" />
+    <None Include="examples\apps\helloworld-elf\app.json" />
+    <None Include="examples\apps\notepad\app.json" />
     <None Include="fix-bootloader-project.ps1" />
     <None Include="fix-trampoline.ps1" />
     <None Include="GuideXOS.FileExplorer.Tests\FileEntryModelTests.cs" />

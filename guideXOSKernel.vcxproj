@@ -157,6 +157,10 @@
     <NMakeIncludeSearchPath>kernel\core\include;kernel\arch\x86\include</NMakeIncludeSearchPath>
   </PropertyGroup>
   <ItemGroup>
+    <ClInclude Include="app_registry.h" />
+    <ClInclude Include="app_manifest.h" />
+    <ClInclude Include="app_manifest_loader.h" />
+    <ClInclude Include="app_manifest_validator.h" />
     <ClInclude Include="bitmap_font.h" />
     <ClInclude Include="desktop_wallpaper.h" />
     <ClInclude Include="kernel\arch\x86\include\arch\x86.h" />
@@ -225,6 +229,10 @@
     <ClInclude Include="welcome.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="app_registry.cpp" />
+    <ClCompile Include="app_manifest.cpp" />
+    <ClCompile Include="app_manifest_loader.cpp" />
+    <ClCompile Include="app_manifest_validator.cpp" />
     <ClCompile Include="kernel\core\desktop.cpp" />
     <ClCompile Include="kernel\core\desktop_font.cpp" />
     <ClCompile Include="kernel\core\shell.cpp" />
@@ -341,6 +349,9 @@
     <ClCompile Include="welcome.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <None Include="examples\apps\future-gxapp\app.json" />
+    <None Include="examples\apps\helloworld-elf\app.json" />
+    <None Include="examples\apps\notepad\app.json" />
     <None Include="kernel\arch\x86\boot.asm" />
     <None Include="kernel\arch\x86\linker.ld" />
     <None Include="kernel\build-x86.bat" />
@@ -352,3 +363,4 @@
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>
 </Project>
+

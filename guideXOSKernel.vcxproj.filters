@@ -66,6 +66,18 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="app_registry.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="app_manifest.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="app_manifest_loader.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="app_manifest_validator.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="kernel\core\include\kernel\arch.h">
       <Filter>Header Files\Kernel</Filter>
     </ClInclude>
@@ -263,6 +275,18 @@
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="app_registry.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="app_manifest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="app_manifest_loader.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="app_manifest_validator.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="kernel\core\main.cpp">
       <Filter>Source Files\Core</Filter>
     </ClCompile>
@@ -448,6 +472,9 @@
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
+    <None Include="examples\apps\future-gxapp\app.json" />
+    <None Include="examples\apps\helloworld-elf\app.json" />
+    <None Include="examples\apps\notepad\app.json" />
     <None Include="kernel\arch\x86\boot.asm">
       <Filter>Source Files\Architecture\x86</Filter>
     </None>
@@ -468,3 +495,4 @@
     </None>
   </ItemGroup>
 </Project>
+

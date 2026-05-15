@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "id": "gxos.builtin.notepad",
+  "displayName": "Notepad",
+  "version": "1.0.0",
+  "publisher": "guideXOS",
+  "description": "Built-in text editor.",
+  "category": "Utilities",
+  "kind": "BuiltIn",
+  "icon": "icons/notepad.png",
+  "minGuideXOSVersion": "0.1.0",
+  "supportedArchitectures": [],
+  "entries": [
+    {
+      "architecture": "any",
+      "path": "builtin/notepad",
+      "entryPoint": "Notepad",
+      "abi": "guidexos-desktop-service-v1",
+      "runtime": "builtin-hosted"
+    }
+  ],
+  "permissions": [
+    "desktop.window",
+    "filesystem.read",
+    "filesystem.write"
+  ],
+  "fileAssociations": [
+    {
+      "extension": ".txt",
+      "contentType": "text/plain",
+      "description": "Plain text document"
+    }
+  ],
+  "defaultWindow": {
+    "width": 640,
+    "height": 480,
+    "resizable": true
+  },
+  "desktopRegistryHints": {
+    "registeredName": "Notepad",
+    "iconName": "notepad"
+  }
+}

@@ -615,6 +615,18 @@
     <ClInclude Include="kernel\core\include\kernel\desktop_font.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="app_manifest.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="app_manifest_validator.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="app_manifest_loader.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="app_registry.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="allocator.cpp">
@@ -1175,6 +1187,18 @@
     <ClCompile Include="kernel\core\desktop_font.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="app_manifest.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="app_manifest_validator.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="app_manifest_loader.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="app_registry.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <None Include="kernel\arch\amd64\boot.asm">
@@ -1341,6 +1365,9 @@
     <None Include="docs\GXBUILD.md" />
     <None Include="docs\GXAPP_FORMAT_SPEC.md" />
     <None Include="docs\universal-app-audit.md" />
+    <None Include="examples\apps\notepad\app.json" />
+    <None Include="examples\apps\helloworld-elf\app.json" />
+    <None Include="examples\apps\future-gxapp\app.json" />
   </ItemGroup>
   <ItemGroup>
     <Text Include="scripts\build-and-run-sparcv8_in_linux.sh" />
