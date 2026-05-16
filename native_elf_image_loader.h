@@ -30,6 +30,7 @@ struct NativeElfImage {
     std::vector<NativeElfSegment> loadedSegments;
     std::vector<std::string> requiredPermissions;
     bool isPositionIndependent = false;
+    bool isExecutable = false;
     bool hasInterpreter = false;
     std::vector<std::string> diagnostics;
 };

@@ -23,7 +23,7 @@ target_include_directories(helloworld.elf PRIVATE "${GUIDEXOS_SDK_ROOT}/include"
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(helloworld.elf PRIVATE -ffreestanding -fno-exceptions -fno-rtti -fno-stack-protector)
-    target_link_options(helloworld.elf PRIVATE -nostdlib -static -Wl,-e,gx_main)
+    target_link_options(helloworld.elf PRIVATE -nostdlib -static -no-pie -Wl,-e,gx_main)
 endif()
 
 set_target_properties(helloworld.elf PROPERTIES

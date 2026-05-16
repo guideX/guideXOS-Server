@@ -33,6 +33,8 @@ public:
         const NativeElfImage& image,
         const NativeAppRuntimeContext& runtimeContext);
 
+    static bool ExperimentalExecutionEnabled();
+
 private:
     static void LogDecision(const std::string& appId, const std::string& architecture, bool canExecute, const std::string& reason, const std::string& result);
 };

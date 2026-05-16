@@ -12,6 +12,10 @@ namespace gxos { namespace svc {
 
     static std::string trim(const std::string& s){ size_t a = s.find_first_not_of(" \t\r\n"); if(a==std::string::npos) return {}; size_t b = s.find_last_not_of(" \t\r\n"); return s.substr(a, b-a+1); }
 
+    static bool startsWith(const std::string& value, const std::string& prefix) {
+        return value.size() >= prefix.size() && value.compare(0, prefix.size(), prefix) == 0;
+    }
+
     static void publishOutput(const std::string& text) {
         ipc::Message out;
         out.type = 0;
@@ -29,6 +33,8 @@ namespace gxos { namespace svc {
             std::string line(m.data.begin(), m.data.end()); line = trim(line);
             if(line=="exit"||line=="quit"){ publishOutput("bye"); break; }
             if(line=="desktop.apps.verbose") { publishOutput(gxos::gui::DesktopService::GetRegisteredAppsVerboseDiagnostic()); continue; }
+            if(startsWith(line, "nativeapp.inspect ")) { publishOutput(gxos::gui::DesktopService::InspectNativeAppPipeline(trim(line.substr(18)))); continue; }
+            if(startsWith(line, "nativeapp.smoketest ")) { publishOutput(gxos::gui::DesktopService::NativeAppPipelineSmokeTest(trim(line.substr(20)))); continue; }
             // Basic demo: echo and simple commands
             std::string resp = "[console] " + line;
             publishOutput(resp);

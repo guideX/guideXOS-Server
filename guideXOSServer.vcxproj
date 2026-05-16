@@ -148,6 +148,7 @@
     <ClInclude Include="disk_manager.h" />
     <ClInclude Include="control_panel.h" />
     <ClInclude Include="elf_validator.h" />
+    <ClInclude Include="executable_memory.h" />
     <ClInclude Include="file_explorer.h" />
     <ClInclude Include="firewall.h" />
     <ClInclude Include="focus_indicator.h" />
@@ -359,6 +360,7 @@
     <ClCompile Include="disk_manager.cpp" />
     <ClCompile Include="control_panel.cpp" />
     <ClCompile Include="elf_validator.cpp" />
+    <ClCompile Include="executable_memory.cpp" />
     <ClCompile Include="file_explorer.cpp" />
     <ClCompile Include="firewall.cpp" />
     <ClCompile Include="focus_indicator.cpp" />

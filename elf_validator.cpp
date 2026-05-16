@@ -51,6 +51,31 @@ std::string formatHex(uint64_t value) {
     return std::string(buffer);
 }
 
+std::string machineTypeName(uint16_t machine) {
+    switch (machine) {
+    case 0x03: return "EM_386";
+    case 0x08: return "EM_MIPS";
+    case 0x14: return "EM_PPC";
+    case 0x28: return "EM_ARM";
+    case 0x2a: return "EM_SUPERH";
+    case 0x2b: return "EM_SPARCV9";
+    case 0x32: return "EM_IA_64";
+    case 0x3e: return "EM_X86_64";
+    case 0xB7: return "EM_AARCH64";
+    case 0xF3: return "EM_RISCV";
+    case 0x102: return "EM_LOONGARCH";
+    default: return "EM_UNKNOWN(" + std::to_string(machine) + ")";
+    }
+}
+
+std::string elfTypeName(uint16_t type) {
+    switch (type) {
+    case kElfTypeExecutable: return "ET_EXEC";
+    case kElfTypeShared: return "ET_DYN";
+    default: return "ET_UNKNOWN(" + std::to_string(type) + ")";
+    }
+}
+
 std::string architectureForMachine(uint16_t machine, uint8_t elfClass) {
     switch (machine) {
     case 0x03: return "x86";
@@ -117,6 +142,10 @@ ElfValidationResult ElfValidator::Validate(const std::vector<uint8_t>& bytes, co
     uint16_t programHeaderEntrySize = readU16(bytes, elfClass == kElfClass64 ? 54 : 42, littleEndian);
     uint16_t programHeaderCount = readU16(bytes, elfClass == kElfClass64 ? 56 : 44, littleEndian);
 
+    result.elfClass = elfClass == kElfClass64 ? "ELF64" : "ELF32";
+    result.endian = littleEndian ? "little" : "big";
+    result.machineType = machineTypeName(machine);
+    result.elfType = elfTypeName(type);
     result.architecture = architectureForMachine(machine, elfClass);
     result.entryPoint = formatHex(entry);
 

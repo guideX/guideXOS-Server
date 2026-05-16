@@ -2,6 +2,8 @@
 #include "app_launch_resolver.h"
 #include "app_registry.h"
 #include "desktop_config.h"
+#include "elf_validator.h"
+#include "fs.h"
 #include "logger.h"
 #include "lifecycle.h"
 #include "native_app_runtime.h"
@@ -24,6 +26,7 @@
 #include "package_manager.h"
 #include <algorithm>
 #include <fstream>
+#include <iomanip>
 #include <sstream>
 #include <chrono>
 #include <thread>
@@ -305,6 +308,151 @@ namespace gxos {
             return oss.str();
         }
 
+        std::string DesktopService::InspectNativeAppPipeline(const std::string& appIdOrDisplayName) {
+            ensureDefaultAppsRegistered();
+
+            std::ostringstream oss;
+            oss << "nativeapp.inspect " << appIdOrDisplayName << "\n";
+
+            const apps::RegisteredApp* app = s_appRegistry.FindById(appIdOrDisplayName);
+            if (!app) app = s_appRegistry.FindByDisplayName(appIdOrDisplayName);
+            if (!app) {
+                oss << "Result: app not found\n";
+                return oss.str();
+            }
+
+            apps::AppLaunchResolver launchResolver(s_appRegistry, apps::AppLaunchResolver::CurrentArchitecture());
+            apps::LaunchDecision launchDecision = launchResolver.ResolveLaunch(*app);
+            const apps::AppEntry* selectedEntry = app->FindCompatibleEntry(launchDecision.architecture);
+
+            oss << "\n[Manifest]\n";
+            oss << "appId: " << app->manifest.id << "\n";
+            oss << "displayName: " << app->manifest.displayName << "\n";
+            oss << "kind: " << apps::ToString(app->manifest.kind) << "\n";
+            oss << "version: " << app->manifest.version << "\n";
+            oss << "publisher: " << app->manifest.publisher << "\n";
+            oss << "manifestPath: " << app->manifestPath.string() << "\n";
+            oss << "appDirectory: " << app->appDirectory.string() << "\n";
+
+            oss << "\n[LaunchResolution]\n";
+            oss << "selectedStrategy: " << apps::AppLaunchResolver::ToString(launchDecision.strategy) << "\n";
+            oss << "selectedArchitecture: " << launchDecision.architecture << "\n";
+            oss << "selectedEntryPath: " << launchDecision.entryPath << "\n";
+            oss << "runtime: " << launchDecision.runtime << "\n";
+            oss << "abi: " << (selectedEntry ? selectedEntry->abi : std::string()) << "\n";
+            oss << "resolverSuccess: " << (launchDecision.success ? "true" : "false") << "\n";
+            oss << "resolverReason: " << launchDecision.reason << "\n";
+
+            if (launchDecision.strategy != apps::AppLaunchStrategy::NativeElf || !launchDecision.success) {
+                oss << "\nResult: not a resolved NativeElf launch\n";
+                return oss.str();
+            }
+
+            apps::NativeElfLaunchResult nativeElfResult = apps::NativeElfLaunchPipeline::PrepareLaunch(*app, launchDecision);
+
+            std::vector<uint8_t> elfBytes;
+            bool fileExists = FS::exists(nativeElfResult.elfPath);
+            apps::ElfValidationResult elfValidation;
+            if (fileExists && FS::readAll(nativeElfResult.elfPath, elfBytes)) {
+                elfValidation = apps::ElfValidator::Validate(elfBytes, launchDecision.architecture);
+            }
+
+            oss << "\n[ElfValidation]\n";
+            oss << "elfPath: " << nativeElfResult.elfPath << "\n";
+            oss << "fileExists: " << (fileExists ? "true" : "false") << "\n";
+            oss << "elfClass: " << elfValidation.elfClass << "\n";
+            oss << "endian: " << elfValidation.endian << "\n";
+            oss << "machineType: " << elfValidation.machineType << "\n";
+            oss << "elfType: " << elfValidation.elfType << "\n";
+            oss << "validationSuccess: " << (nativeElfResult.success ? "true" : "false") << "\n";
+            if (!nativeElfResult.validationErrors.empty()) {
+                oss << "validationErrors: ";
+                for (size_t i = 0; i < nativeElfResult.validationErrors.size(); ++i) {
+                    if (i > 0) oss << "; ";
+                    oss << nativeElfResult.validationErrors[i];
+                }
+                oss << "\n";
+            }
+
+            apps::NativeElfImage nativeElfImage;
+            if (nativeElfResult.success) nativeElfImage = apps::NativeElfImageLoader::LoadImage(nativeElfResult);
+
+            oss << "\n[ElfImage]\n";
+            oss << "entryVirtualAddress: 0x" << std::hex << nativeElfImage.entryPointVirtualAddress << std::dec << "\n";
+            oss << "preferredBase: 0x" << std::hex << nativeElfImage.preferredBaseAddress << std::dec << "\n";
+            oss << "imageSize: " << nativeElfImage.imageSize << "\n";
+            oss << "segmentCount: " << nativeElfImage.loadedSegments.size() << "\n";
+            oss << "ptInterpPresent: " << (nativeElfImage.hasInterpreter ? "true" : "false") << "\n";
+            oss << "pieOrDynamic: " << (nativeElfImage.isPositionIndependent ? "true" : "false") << "\n";
+            oss << "imageLoaderSuccess: " << (nativeElfImage.success ? "true" : "false") << "\n";
+            if (!nativeElfImage.diagnostics.empty()) {
+                oss << "imageDiagnostics: ";
+                for (size_t i = 0; i < nativeElfImage.diagnostics.size(); ++i) {
+                    if (i > 0) oss << "; ";
+                    oss << nativeElfImage.diagnostics[i];
+                }
+                oss << "\n";
+            }
+
+            apps::NativeAppRuntimeContext runtimeContext;
+            if (nativeElfImage.success) runtimeContext = apps::NativeAppRuntime::Prepare(*app, launchDecision, nativeElfResult, nativeElfImage);
+
+            oss << "\n[Runtime]\n";
+            oss << "lifecycleState: " << apps::NativeAppRuntime::ToString(runtimeContext.lifecycleState) << "\n";
+            oss << "permissions: ";
+            for (size_t i = 0; i < runtimeContext.permissions.size(); ++i) {
+                if (i > 0) oss << ", ";
+                oss << runtimeContext.permissions[i];
+            }
+            oss << "\n";
+            oss << "apiVersion: " << runtimeContext.hostCalls.version << "\n";
+            oss << "hostCallsAvailable: " << ((runtimeContext.hostCalls.log && runtimeContext.hostCalls.get_api_version && runtimeContext.hostCalls.request_window && runtimeContext.hostCalls.exit) ? "true" : "false") << "\n";
+            oss << "runtimeSuccess: " << (runtimeContext.success ? "true" : "false") << "\n";
+            if (!runtimeContext.diagnostics.empty()) {
+                oss << "runtimeDiagnostics: ";
+                for (size_t i = 0; i < runtimeContext.diagnostics.size(); ++i) {
+                    if (i > 0) oss << "; ";
+                    oss << runtimeContext.diagnostics[i];
+                }
+                oss << "\n";
+            }
+
+            std::string executorReason;
+            bool canExecute = runtimeContext.success && apps::NativeElfExecutor::CanExecute(nativeElfResult, nativeElfImage, runtimeContext, &executorReason);
+            oss << "\n[ExecutorGate]\n";
+            oss << "canExecute: " << (canExecute ? "true" : "false") << "\n";
+            oss << "reason: " << executorReason << "\n";
+            oss << "buildFlagEnabled: " << (apps::NativeElfExecutor::ExperimentalExecutionEnabled() ? "true" : "false") << "\n";
+            oss << "hostArchitecture: " << apps::AppLaunchResolver::CurrentArchitecture() << "\n";
+            oss << "appArchitecture: " << nativeElfResult.architecture << "\n";
+            apps::NativeElfExecutionResult executionResult;
+            if (canExecute) executionResult = apps::NativeElfExecutor::Execute(nativeElfResult, nativeElfImage, runtimeContext);
+            oss << "executableMappingPossible: " << (canExecute ? "true" : "false") << "\n";
+            oss << "executionAttempted: " << (canExecute ? "true" : "false") << "\n";
+            oss << "executionSuccess: " << (executionResult.success ? "true" : "false") << "\n";
+            oss << "returnCode: " << executionResult.exitCode << "\n";
+            if (!executionResult.diagnostics.empty()) {
+                oss << "executionDiagnostics: ";
+                for (size_t i = 0; i < executionResult.diagnostics.size(); ++i) {
+                    if (i > 0) oss << "; ";
+                    oss << executionResult.diagnostics[i];
+                }
+                oss << "\n";
+            } else {
+                oss << "executionDiagnostics: execution skipped or unavailable\n";
+            }
+            oss << "\nResult: inspection complete; " << (canExecute ? "experimental execution path attempted" : "no ELF code executed") << "\n";
+            return oss.str();
+        }
+
+        std::string DesktopService::NativeAppPipelineSmokeTest(const std::string& appIdOrDisplayName) {
+            std::ostringstream oss;
+            oss << "NativeAppPipelineSmokeTest(" << appIdOrDisplayName << ")\n";
+            oss << InspectNativeAppPipeline(appIdOrDisplayName);
+            oss << "\nExpected: find manifest, validate ELF if present, load image, prepare runtime, stop at executor gate unless experimental execution is enabled.\n";
+            return oss.str();
+        }
+
         bool DesktopService::LaunchApp(const std::string& name, std::string& error) {
             ensureDefaultAppsRegistered();
             std::string appName = canonicalAppName(name);
@@ -342,7 +490,7 @@ namespace gxos {
                         if (runtimeContext.success) {
                             std::string executorReason;
                             if (apps::NativeElfExecutor::CanExecute(nativeElfResult, nativeElfImage, runtimeContext, &executorReason)) {
-                                error = "Native app executor available; actual execution not implemented yet";
+                                error = "Native app executor available; use nativeapp.inspect or nativeapp.smoketest for experimental execution";
                             } else {
                                 error = "Native app runtime prepared; execution disabled/not available";
                                 if (!executorReason.empty()) error += ": " + executorReason;

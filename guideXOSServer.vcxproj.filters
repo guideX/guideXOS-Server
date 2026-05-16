@@ -654,6 +654,9 @@
     <ClInclude Include="native_elf_executor.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="executable_memory.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="allocator.cpp">
@@ -1245,6 +1248,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="native_elf_executor.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="executable_memory.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

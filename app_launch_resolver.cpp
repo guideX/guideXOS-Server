@@ -142,8 +142,7 @@ bool AppLaunchResolver::IsArchitectureSupportedByManifest(const AppManifest& man
 
 std::string AppLaunchResolver::ResolveEntryPath(const RegisteredApp& app, const AppEntry& entry) const {
     std::filesystem::path entryPath(entry.path);
-    if (entryPath.empty() || entryPath.is_absolute() || app.appDirectory.empty() || app.sourceKind == AppSourceKind::BuiltIn) return entryPath.string();
-    return (app.appDirectory / entryPath).string();
+    return entryPath.string();
 }
 
 std::string AppLaunchResolver::LaunchNameForApp(const RegisteredApp& app, const AppEntry* entry) const {

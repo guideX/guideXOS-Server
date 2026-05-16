@@ -58,6 +58,13 @@ struct NativeAppRuntimeContext {
     std::vector<std::string> diagnostics;
 };
 
+struct NativeGxAppContext {
+    uint32_t size = 0;
+    uint32_t apiVersion = kGuideXOSNativeApiVersion;
+    const NativeHostCallTable* host = nullptr;
+    void* userData = nullptr;
+};
+
 class NativeAppRuntime {
 public:
     static NativeAppRuntimeContext Prepare(

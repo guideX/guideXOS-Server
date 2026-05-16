@@ -168,6 +168,8 @@ NativeElfImage NativeElfImageLoader::LoadImage(const NativeElfLaunchResult& laun
         addDiagnostic(image, "ELF type is not executable or position-independent executable");
         LogImage(image);
         return image;
+    } else {
+        image.isExecutable = true;
     }
 
     if (programHeaderOffset == 0 || programHeaderEntrySize == 0 || programHeaderCount == 0) {

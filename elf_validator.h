@@ -11,6 +11,10 @@ struct ElfValidationResult {
     bool valid = false;
     std::string architecture;
     std::string entryPoint;
+    std::string elfClass;
+    std::string endian;
+    std::string machineType;
+    std::string elfType;
     std::vector<std::string> errors;
 };
 
