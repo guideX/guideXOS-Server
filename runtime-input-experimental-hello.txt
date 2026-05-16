@@ -1,0 +1,6 @@
+console.start
+console.send nativeapp.smoketest com.guidexos.helloworld
+console.pop 5000
+console.send nativeapp.processes
+console.pop 3000
+exit

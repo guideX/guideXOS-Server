@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <exception>
 #include <iomanip>
 #include <limits>
 #include <sstream>
@@ -69,7 +70,11 @@ ExecutableMemoryProtection protectionForFlags(uint32_t flags) {
 }
 
 #ifdef GX_ENABLE_EXPERIMENTAL_NATIVE_ELF_EXECUTION
+#if defined(_WIN32) && defined(__x86_64__)
+using gx_entry_fn = gx_result (__attribute__((ms_abi)) *)(NativeGxAppContext* ctx);
+#else
 using gx_entry_fn = gx_result (*)(NativeGxAppContext* ctx);
+#endif
 #endif
 
 } // namespace
@@ -235,7 +240,7 @@ NativeElfExecutionResult NativeElfExecutor::Execute(
     NativeAppRuntime::BeginHostCallDispatch(runtimeContext);
     bool executionFailed = false;
     std::string failureReason;
-#ifdef _WIN32
+#if defined(_WIN32) && defined(_MSC_VER)
     __try {
         result.exitCode = entry(&appContext);
     } __except (EXCEPTION_EXECUTE_HANDLER) {

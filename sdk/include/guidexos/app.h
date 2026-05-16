@@ -16,7 +16,7 @@ struct gx_app_context {
 
 typedef gx_result (*gx_main_fn)(gx_app_context* ctx);
 
-gx_result gx_main(gx_app_context* ctx);
+gx_result GX_CALL gx_main(gx_app_context* ctx);
 
 #ifdef __cplusplus
 }

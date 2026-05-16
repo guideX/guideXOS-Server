@@ -549,6 +549,7 @@
     </ClCompile>
     <ClCompile Include="right_click_menu.cpp" />
     <ClCompile Include="sdk\samples\helloworld\main.cpp" />
+    <ClCompile Include="sdk\samples\resourceviewer\main.cpp" />
     <ClCompile Include="special_effects.cpp" />
     <ClCompile Include="universal_app_loader.cpp" />
     <ClCompile Include="video_backend.cpp" />
@@ -565,10 +566,12 @@
     <ClCompile Include="workspace_manager.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <None Include=".github\copilot-instructions.md" />
     <None Include=".vs\launch.vs.json" />
     <None Include=".vs\tasks.vs.json" />
     <None Include="Apps\HelloWorld\app.json" />
     <None Include="build-kernel.bat" />
+    <None Include="build-native-experimental.bat" />
     <None Include="build-uefi.ps1" />
     <None Include="build.bat" />
     <None Include="build.ps1" />
@@ -688,8 +691,12 @@
     <None Include="scripts\build-riscv64.sh" />
     <None Include="scripts\build-and-run-riscv64_in_linux.sh" />
     <None Include="scripts\run-riscv64_in_windows.bat" />
+    <None Include="sdk\build-samples.ps1" />
+    <None Include="sdk\README.md" />
     <None Include="sdk\samples\helloworld\app.json" />
     <None Include="sdk\samples\helloworld\README.md" />
+    <None Include="sdk\samples\resourceviewer\app.json" />
+    <None Include="sdk\samples\resourceviewer\README.md" />
     <None Include="SERVER.md" />
     <None Include="setup-toolchain.bat" />
     <None Include="START_HERE.md" />
@@ -712,6 +719,8 @@
     <Text Include="scripts\build-and-run-sparcv8_in_linux.sh" />
     <Text Include="sdk\samples\helloworld\CMakeLists.txt" />
     <Text Include="sdk\samples\helloworld\resources\message.txt" />
+    <Text Include="sdk\samples\resourceviewer\CMakeLists.txt" />
+    <Text Include="sdk\samples\resourceviewer\resources\about.txt" />
   </ItemGroup>
   <ItemGroup>
     <Page Include="GuideXOS.FileExplorer\App.xaml" />

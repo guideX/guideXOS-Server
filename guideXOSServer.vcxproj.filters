@@ -1262,6 +1262,9 @@
     <ClCompile Include="native_app_process_table.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="sdk\samples\resourceviewer\main.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <None Include="kernel\arch\amd64\boot.asm">
@@ -1434,6 +1437,14 @@
     <None Include="Apps\HelloWorld\app.json" />
     <None Include="sdk\samples\helloworld\app.json" />
     <None Include="sdk\samples\helloworld\README.md" />
+    <None Include=".github\copilot-instructions.md" />
+    <None Include="sdk\samples\resourceviewer\app.json" />
+    <None Include="sdk\samples\resourceviewer\README.md" />
+    <None Include="sdk\build-samples.ps1" />
+    <None Include="sdk\README.md" />
+    <None Include="build-native-experimental.bat">
+      <Filter>Source Files</Filter>
+    </None>
   </ItemGroup>
   <ItemGroup>
     <Text Include="scripts\build-and-run-sparcv8_in_linux.sh" />
@@ -1449,6 +1460,8 @@
     <Text Include="sdk\samples\helloworld\CMakeLists.txt" />
     <Text Include="sdk\samples\helloworld\resources\message.txt" />
     <Text Include="Apps\HelloWorld\resources\message.txt" />
+    <Text Include="sdk\samples\resourceviewer\resources\about.txt" />
+    <Text Include="sdk\samples\resourceviewer\CMakeLists.txt" />
   </ItemGroup>
   <ItemGroup>
     <Page Include="GuideXOS.FileExplorer\Views\MainWindow.xaml" />

@@ -1,0 +1,91 @@
+guideXOSServer server starting...
+[lifecycle] phase -> PlatformDiscovery
+[lifecycle] phase -> MemoryReady
+[lifecycle] phase -> SchedulerReady
+[lifecycle] phase -> IpcReady
+[lifecycle] phase -> DesktopStateReady
+AppRegistry initializing, count=1
+AppRegistry manifest scan succeeded: scanned=2, registered=2
+Registered app: Hello World
+Registered app: Resource Viewer
+Registered app: Notepad
+Registered app: Calculator
+Registered app: Clock
+Registered app: Console
+Registered app: FileExplorer
+Registered app: TaskManager
+Registered app: Paint
+Registered app: ImageViewer
+Registered app: OnScreenKeyboard
+Registered app: ShutdownDialog
+Registered app: DiskManager
+Registered app: ControlPanel
+Registered app: HDInstaller
+AppRegistry initialized, desktop apps=15
+Desktop state loaded
+NotificationManager initialized
+Firewall initialized (Normal mode)
+Module registered: Notepad
+Module registered: Calculator
+Module registered: Paint
+Module registered: ImageViewer
+Module registered: Clock
+Module registered: TaskManager
+Module registered: FileExplorer
+Module registered: Console
+Module registered: OnScreenKeyboard
+Module registered: ShutdownDialog
+Built-in modules registered (10)
+[lifecycle] phase -> ServicesReady
+[lifecycle] phase -> Interactive
+Commands:
+ mem | alloc <n> | tasks | log
+ spawn <echo|worker> [args...] | plist
+ send <pid> <text> | recv <pid>
+ bus.sub <chan> <pid> | bus.unsub <chan> <pid>
+ bus.pub <chan> <text> [fanout] | bus.pop <chan> [timeoutMs]
+ bus.cap <chan> <cap> | bus.stats <chan>
+ console.start | console.send <text> | console.pop [timeoutMs]
+ gui.start | gui.win <title> [w h] | gui.text <id> <text> | gui.close <id>
+ gui.rect <id> <x> <y> <w> <h> <r> <g> <b> | gui.move <id> <x> <y> | gui.resize <id> <w> <h> | gui.title <id> <title>
+ gui.btn <win> <id> <x> <y> <w> <h> <text> | gui.pop | gui.wlist | gui.activate <id> | gui.min <id>
+ gxm.load <path> | gxm.sample | gui.save <path> | gui.load <path>
+ desktop.wallpaper <path> | desktop.launch <action> | desktop.pin <action> | desktop.unpin <action> | desktop.showconfig
+ desktop.apps | desktop.pinned | desktop.recent | desktop.pinapp <name> | desktop.pinfile <name> <path>
+ taskbar.list | taskbar.activate <id> | taskbar.min <id> | taskbar.close <id>
+ workspace.switch <n> | workspace.next | workspace.prev | workspace.current
+ notepad | notepad <file>
+ calculator
+ console | console.start | console.send <text> | console.pop [timeoutMs]
+ files | files <path>
+ clock
+ taskmgr
+ paint
+ imgview [file] | osk
+ shutdown | msgbox <text> | welcome
+ notify <text> | notify.clear
+ fw.mode <normal|block|disabled|auto> | fw.allow <name> | fw.list | fw.alerts
+ modules | module.launch <name>
+ pkg.install <path.gxapp> | pkg.launch <app> | pkg.list | pkg.validate <path.gxapp>
+ proc.wait <pid> [timeoutMs] | proc.status <pid>
+ vfs.mkdir <path> | vfs.write <path> <text> | vfs.read <path> | vfs.ls <path>
+ vnc.start [port] | vnc.stop | vnc.status
+ pbytes | help | quit/exit
+[lifecycle] phase -> ServicesReady
+[lifecycle] compositor pid=10
+Compositor pid=Compositor service started (native window)
+10 (proto=2)
+[lifecycle] phase -> ServicesReady
+[lifecycle] console pid=11
+Console pid=11
+Bus::publish queueing msg type=10 to channel=console.input
+Sent to console
+ConsoleService started
+[LaunchResolver] App: com.guidexos.helloworld Strategy: NativeElf Architecture: amd64 Entry: bin/amd64/helloworld.elf Result: success Reason: Launch resolved
+[NativeElfLaunch] App: com.guidexos.helloworld Architecture: amd64 Path: /Apps\HelloWorld\bin/amd64/helloworld.elf Validation: valid Result: success Message: Native ELF validated.
+[NativeElfImageLoader] App: com.guidexos.helloworld Architecture: amd64 EntryVA: 0x201300 Segments: 3 ImageSize: 11916 PIE: false Interpreter: false Result: success Diagnostics: Native ELF image loaded
+[NativeAppRuntime] App: com.guidexos.helloworld RuntimeId: 1 ProcessId: 0 Architecture: amd64 ABI: guidexos-c-abi-v1 Permissions: 3 State: Prepared Result: success Diagnostics: Native app runtime prepared
+[NativeElfExecutor] App: com.guidexos.helloworld Architecture: amd64 CanExecute: true Reason: Native ELF executor gate passed Result: available
+[NativeAppRuntime] App: com.guidexos.helloworld (Hello World) runtimeId=1 entering host call dispatch
+GdiVideoBackend: initialized 1024x768
+VideoBackend: GDI backend active

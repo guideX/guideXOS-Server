@@ -9,6 +9,12 @@ extern "C" {
 #define GX_API_VERSION 0u
 #define GX_ABI_NAME "guidexos-c-abi-v1"
 
+#if defined(__x86_64__)
+#define GX_CALL __attribute__((ms_abi))
+#else
+#define GX_CALL
+#endif
+
 typedef struct gx_app_context gx_app_context;
 
 typedef enum gx_event_type {
@@ -57,16 +63,16 @@ typedef struct gx_event {
 typedef struct gx_host_calls {
     uint32_t size;
     uint32_t version;
-    gx_result (*log)(gx_app_context* ctx, const char* message);
-    uint32_t (*get_api_version)(gx_app_context* ctx);
-    gx_result (*request_window)(gx_app_context* ctx, const char* title, int width, int height, gx_handle* outWindow);
-    gx_result (*draw_text)(gx_app_context* ctx, gx_handle window, int x, int y, const char* text);
-    gx_result (*draw_rect)(gx_app_context* ctx, gx_handle window, int x, int y, int width, int height, uint32_t color);
-    gx_result (*wait_for_close)(gx_app_context* ctx, gx_handle window, int timeoutMs);
-    gx_result (*poll_event)(gx_app_context* ctx, gx_event* outEvent, int timeoutMs);
-    gx_result (*exit)(gx_app_context* ctx, gx_result exitCode);
-    gx_result (*file_read_all)(gx_app_context* ctx, const char* path, void* buffer, uint32_t bufferSize, uint32_t* outBytesRead);
-    gx_result (*file_exists)(gx_app_context* ctx, const char* path, uint32_t* outExists);
+    gx_result (GX_CALL *log)(gx_app_context* ctx, const char* message);
+    uint32_t (GX_CALL *get_api_version)(gx_app_context* ctx);
+    gx_result (GX_CALL *request_window)(gx_app_context* ctx, const char* title, int width, int height, gx_handle* outWindow);
+    gx_result (GX_CALL *draw_text)(gx_app_context* ctx, gx_handle window, int x, int y, const char* text);
+    gx_result (GX_CALL *draw_rect)(gx_app_context* ctx, gx_handle window, int x, int y, int width, int height, uint32_t color);
+    gx_result (GX_CALL *wait_for_close)(gx_app_context* ctx, gx_handle window, int timeoutMs);
+    gx_result (GX_CALL *poll_event)(gx_app_context* ctx, gx_event* outEvent, int timeoutMs);
+    gx_result (GX_CALL *exit)(gx_app_context* ctx, gx_result exitCode);
+    gx_result (GX_CALL *file_read_all)(gx_app_context* ctx, const char* path, void* buffer, uint32_t bufferSize, uint32_t* outBytesRead);
+    gx_result (GX_CALL *file_exists)(gx_app_context* ctx, const char* path, uint32_t* outExists);
 } gx_host_calls;
 
 #ifdef __cplusplus

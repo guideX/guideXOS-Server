@@ -37,7 +37,7 @@ static void draw_content(gx_app_context* ctx, gx_handle window, int resourceLoad
     }
 }
 
-extern "C" gx_result gx_main(gx_app_context* ctx) {
+extern "C" gx_result GX_CALL gx_main(gx_app_context* ctx) {
     if (!ctx || !ctx->host) return GX_ERROR_INVALID_ARGUMENT;
     if (!ctx->host->get_api_version || !ctx->host->log) return GX_ERROR_UNSUPPORTED;
 
