@@ -636,6 +636,15 @@
     <ClInclude Include="native_elf_launch_pipeline.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="sdk\include\guidexos\types.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="sdk\include\guidexos\abi.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="sdk\include\guidexos\app.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="allocator.cpp">
@@ -1217,6 +1226,9 @@
     <ClCompile Include="native_elf_launch_pipeline.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="sdk\samples\helloworld\main.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <None Include="kernel\arch\amd64\boot.asm">
@@ -1387,6 +1399,8 @@
     <None Include="examples\apps\helloworld-elf\app.json" />
     <None Include="examples\apps\future-gxapp\app.json" />
     <None Include="Apps\HelloWorld\app.json" />
+    <None Include="sdk\samples\helloworld\app.json" />
+    <None Include="sdk\samples\helloworld\README.md" />
   </ItemGroup>
   <ItemGroup>
     <Text Include="scripts\build-and-run-sparcv8_in_linux.sh" />
@@ -1399,6 +1413,7 @@
     <Text Include="compositor_h_dump.txt" />
     <Text Include="build_output.txt" />
     <Text Include="build.log" />
+    <Text Include="sdk\samples\helloworld\CMakeLists.txt" />
   </ItemGroup>
   <ItemGroup>
     <Page Include="GuideXOS.FileExplorer\Views\MainWindow.xaml" />

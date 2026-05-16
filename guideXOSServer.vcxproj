@@ -319,6 +319,9 @@
     <ClInclude Include="png_loader.h" />
     <ClInclude Include="process.h" />
     <ClInclude Include="right_click_menu.h" />
+    <ClInclude Include="sdk\include\guidexos\abi.h" />
+    <ClInclude Include="sdk\include\guidexos\app.h" />
+    <ClInclude Include="sdk\include\guidexos\types.h" />
     <ClInclude Include="special_effects.h" />
     <ClInclude Include="ui_settings.h" />
     <ClInclude Include="universal_app_loader.h" />
@@ -534,6 +537,7 @@
       <ObjectFileName>$(IntDir)process_gxos.obj</ObjectFileName>
     </ClCompile>
     <ClCompile Include="right_click_menu.cpp" />
+    <ClCompile Include="sdk\samples\helloworld\main.cpp" />
     <ClCompile Include="special_effects.cpp" />
     <ClCompile Include="universal_app_loader.cpp" />
     <ClCompile Include="video_backend.cpp" />
@@ -673,6 +677,8 @@
     <None Include="scripts\build-riscv64.sh" />
     <None Include="scripts\build-and-run-riscv64_in_linux.sh" />
     <None Include="scripts\run-riscv64_in_windows.bat" />
+    <None Include="sdk\samples\helloworld\app.json" />
+    <None Include="sdk\samples\helloworld\README.md" />
     <None Include="SERVER.md" />
     <None Include="setup-toolchain.bat" />
     <None Include="START_HERE.md" />
@@ -692,6 +698,7 @@
     <Text Include="full_build.log" />
     <Text Include="output.log" />
     <Text Include="scripts\build-and-run-sparcv8_in_linux.sh" />
+    <Text Include="sdk\samples\helloworld\CMakeLists.txt" />
   </ItemGroup>
   <ItemGroup>
     <Page Include="GuideXOS.FileExplorer\App.xaml" />
