@@ -164,6 +164,7 @@
     <ClInclude Include="app_manifest_validator.h" />
     <ClInclude Include="elf_validator.h" />
     <ClInclude Include="native_app_runtime.h" />
+    <ClInclude Include="native_elf_executor.h" />
     <ClInclude Include="native_elf_image_loader.h" />
     <ClInclude Include="native_elf_launch_pipeline.h" />
     <ClInclude Include="bitmap_font.h" />
@@ -241,6 +242,7 @@
     <ClCompile Include="app_manifest_validator.cpp" />
     <ClCompile Include="elf_validator.cpp" />
     <ClCompile Include="native_app_runtime.cpp" />
+    <ClCompile Include="native_elf_executor.cpp" />
     <ClCompile Include="native_elf_image_loader.cpp" />
     <ClCompile Include="native_elf_launch_pipeline.cpp" />
     <ClCompile Include="kernel\core\desktop.cpp" />
