@@ -1,0 +1,9 @@
+gui.start
+console.start
+console.send nativeapp.smoketest com.guidexos.resourceviewer
+console.pop 5000
+gui.close 1000
+console.pop 20000
+console.send nativeapp.processes
+console.pop 5000
+exit

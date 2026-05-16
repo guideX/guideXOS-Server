@@ -54,6 +54,10 @@ int toNativeProtection(ExecutableMemoryProtection protection) {
 } // namespace
 
 bool ExecutableMemory::Allocate(size_t size, ExecutableMemoryBlock& block, std::string& error) {
+    return AllocateAt(nullptr, size, block, error);
+}
+
+bool ExecutableMemory::AllocateAt(void* preferredBase, size_t size, ExecutableMemoryBlock& block, std::string& error) {
     block = ExecutableMemoryBlock();
     if (size == 0) {
         error = "Executable memory allocation size is zero";
@@ -62,12 +66,21 @@ bool ExecutableMemory::Allocate(size_t size, ExecutableMemoryBlock& block, std::
 
     size_t alignedSize = alignUp(size, pageSize());
 #ifdef _WIN32
-    void* memory = VirtualAlloc(nullptr, alignedSize, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+    void* memory = VirtualAlloc(preferredBase, alignedSize, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
     if (!memory) {
         error = "VirtualAlloc failed";
         return false;
     }
+    if (preferredBase && memory != preferredBase) {
+        VirtualFree(memory, 0, MEM_RELEASE);
+        error = "VirtualAlloc did not return the requested preferred base";
+        return false;
+    }
 #else
+    if (preferredBase) {
+        error = "preferred-base executable mapping is not supported on this host";
+        return false;
+    }
     void* memory = mmap(nullptr, alignedSize, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     if (memory == MAP_FAILED) {
         error = "mmap failed";

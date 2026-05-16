@@ -70,6 +70,12 @@ struct NativeElfExecutionResult {
     uint32_t cleanedWindowCount = 0;
     uint32_t remainingOwnedWindowCount = 0;
     std::string failureReason;
+    uint64_t preferredBaseAddress = 0;
+    uint64_t actualMappedBaseAddress = 0;
+    bool preferredBaseMappingAttempted = false;
+    bool preferredBaseMappingSucceeded = false;
+    bool trampolineUsed = false;
+    uint64_t entryHostAddress = 0;
 };
 
 class NativeElfExecutor {

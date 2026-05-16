@@ -52,6 +52,7 @@ native_app_runtime.cpp ^
 native_elf_executor.cpp ^
 native_elf_image_loader.cpp ^
 native_elf_launch_pipeline.cpp ^
+native_elf_trampoline_win64.cpp ^
 notepad.cpp ^
 notification_manager.cpp ^
 onscreen_keyboard.cpp ^

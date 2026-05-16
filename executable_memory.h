@@ -20,6 +20,7 @@ struct ExecutableMemoryBlock {
 class ExecutableMemory {
 public:
     static bool Allocate(size_t size, ExecutableMemoryBlock& block, std::string& error);
+    static bool AllocateAt(void* preferredBase, size_t size, ExecutableMemoryBlock& block, std::string& error);
     static bool Protect(ExecutableMemoryBlock& block, size_t offset, size_t size, ExecutableMemoryProtection protection, std::string& error);
     static void Free(ExecutableMemoryBlock& block);
 };

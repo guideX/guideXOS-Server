@@ -3,6 +3,7 @@
 #include "app_launch_resolver.h"
 #include "executable_memory.h"
 #include "logger.h"
+#include "native_elf_trampoline_win64.h"
 
 #include <algorithm>
 #include <cstring>
@@ -71,7 +72,7 @@ ExecutableMemoryProtection protectionForFlags(uint32_t flags) {
 
 #ifdef GX_ENABLE_EXPERIMENTAL_NATIVE_ELF_EXECUTION
 #if defined(_WIN32) && defined(__x86_64__)
-using gx_entry_fn = gx_result (__attribute__((ms_abi)) *)(NativeGxAppContext* ctx);
+using gx_entry_fn = NativeElfWin64Entry;
 #else
 using gx_entry_fn = gx_result (*)(NativeGxAppContext* ctx);
 #endif
@@ -121,6 +122,7 @@ NativeElfExecutionResult NativeElfExecutor::Execute(
     result.exitCode = 0;
     result.runtimeId = runtimeContext.runtimeId;
     result.lifecycleStateBeforeExecution = NativeAppRuntime::ToString(runtimeContext.lifecycleState);
+    result.preferredBaseAddress = image.preferredBaseAddress;
 
     if (!experimentalExecutionEnabled()) {
         addDiagnostic(result, "Native ELF execution disabled by build flag");
@@ -183,6 +185,18 @@ NativeElfExecutionResult NativeElfExecutor::Execute(
         return result;
     }
 
+    if (image.isPositionIndependent) {
+        addDiagnostic(result, "ET_DYN/PIE execution is unsupported; relocations are not implemented");
+        LogDecision(result.appId, result.architecture, false, result.message, "failure");
+        return result;
+    }
+
+    if (image.preferredBaseAddress != minVirtualAddress) {
+        addDiagnostic(result, "ET_EXEC preferred base does not match minimum PT_LOAD virtual address");
+        LogDecision(result.appId, result.architecture, false, result.message, "failure");
+        return result;
+    }
+
     uint64_t mappingSize64 = maxVirtualAddress - minVirtualAddress;
     if (mappingSize64 > static_cast<uint64_t>(std::numeric_limits<size_t>::max())) {
         addDiagnostic(result, "Native ELF mapping is too large for host address space");
@@ -192,8 +206,19 @@ NativeElfExecutionResult NativeElfExecutor::Execute(
 
     ExecutableMemoryBlock mapping;
     std::string memoryError;
-    if (!ExecutableMemory::Allocate(static_cast<size_t>(mappingSize64), mapping, memoryError)) {
-        addDiagnostic(result, "Executable memory allocation failed: " + memoryError);
+    result.preferredBaseMappingAttempted = true;
+    void* preferredBase = reinterpret_cast<void*>(static_cast<uintptr_t>(image.preferredBaseAddress));
+    if (!ExecutableMemory::AllocateAt(preferredBase, static_cast<size_t>(mappingSize64), mapping, memoryError)) {
+        addDiagnostic(result, "ET_EXEC preferred-base mapping failed; relocations are not implemented");
+        if (!memoryError.empty()) addDiagnostic(result, "preferred-base mapping error: " + memoryError);
+        LogDecision(result.appId, result.architecture, false, result.message, "failure");
+        return result;
+    }
+    result.actualMappedBaseAddress = reinterpret_cast<uint64_t>(mapping.base);
+    result.preferredBaseMappingSucceeded = mapping.base == preferredBase;
+    if (!result.preferredBaseMappingSucceeded) {
+        addDiagnostic(result, "ET_EXEC preferred-base mapping failed; relocations are not implemented");
+        ExecutableMemory::Free(mapping);
         LogDecision(result.appId, result.architecture, false, result.message, "failure");
         return result;
     }
@@ -227,7 +252,11 @@ NativeElfExecutionResult NativeElfExecutor::Execute(
     }
 
     void* entryAddress = static_cast<char*>(mapping.base) + static_cast<size_t>(image.entryPointVirtualAddress - minVirtualAddress);
+    result.entryHostAddress = reinterpret_cast<uint64_t>(entryAddress);
     addDiagnostic(result, "Native ELF mapped for experimental execution");
+    addDiagnostic(result, "Preferred base: " + pointerToString(reinterpret_cast<void*>(static_cast<uintptr_t>(result.preferredBaseAddress))));
+    addDiagnostic(result, "Actual mapped base: " + pointerToString(mapping.base));
+    addDiagnostic(result, std::string("Preferred-base mapping: ") + (result.preferredBaseMappingSucceeded ? "success" : "failure"));
     addDiagnostic(result, "Entry host address resolved: " + pointerToString(entryAddress));
 
 #ifdef GX_ENABLE_EXPERIMENTAL_NATIVE_ELF_EXECUTION
@@ -251,7 +280,15 @@ NativeElfExecutionResult NativeElfExecutor::Execute(
     }
 #else
     try {
+#if defined(_WIN32) && defined(__x86_64__)
+        result.trampolineUsed = true;
+        addDiagnostic(result, "Windows amd64 trampoline used: yes");
+        result.exitCode = CallNativeElfWin64Entry(entry, &appContext);
+#else
+        result.trampolineUsed = false;
+        addDiagnostic(result, "Windows amd64 trampoline used: no");
         result.exitCode = entry(&appContext);
+#endif
     } catch (const std::exception& ex) {
         failureReason = std::string("Native ELF execution raised an exception: ") + ex.what();
         addDiagnostic(result, failureReason);

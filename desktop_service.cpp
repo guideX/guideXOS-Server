@@ -442,6 +442,13 @@ namespace gxos {
             oss << "cleanupAttempted: " << (executionResult.cleanupAttempted ? "true" : "false") << "\n";
             oss << "cleanedWindowCount: " << executionResult.cleanedWindowCount << "\n";
             oss << "remainingOwnedWindowCount: " << executionResult.remainingOwnedWindowCount << "\n";
+            oss << "preferredBase: 0x" << std::hex << executionResult.preferredBaseAddress << std::dec << "\n";
+            oss << "actualMappedBase: 0x" << std::hex << executionResult.actualMappedBaseAddress << std::dec << "\n";
+            oss << "preferredBaseMappingAttempted: " << (executionResult.preferredBaseMappingAttempted ? "true" : "false") << "\n";
+            oss << "preferredBaseMappingSuccess: " << (executionResult.preferredBaseMappingSucceeded ? "true" : "false") << "\n";
+            oss << "trampolineUsed: " << (executionResult.trampolineUsed ? "true" : "false") << "\n";
+            oss << "entryHostAddress: 0x" << std::hex << executionResult.entryHostAddress << std::dec << "\n";
+            oss << "gxMainReturnCode: " << executionResult.exitCode << "\n";
             if (!executionResult.failureReason.empty()) oss << "failureReason: " << executionResult.failureReason << "\n";
             oss << "requestWindowCallCount: " << executionResult.requestWindowCallCount << "\n";
             oss << "lastWindowId: " << executionResult.lastWindowId << "\n";

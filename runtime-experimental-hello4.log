@@ -1,0 +1,1331 @@
+guideXOSServer server starting...
+[lifecycle] phase -> PlatformDiscovery
+[lifecycle] phase -> MemoryReady
+[lifecycle] phase -> SchedulerReady
+[lifecycle] phase -> IpcReady
+[lifecycle] phase -> DesktopStateReady
+AppRegistry initializing, count=1
+AppRegistry manifest scan succeeded: scanned=2, registered=2
+Registered app: Hello World
+Registered app: Resource Viewer
+Registered app: Notepad
+Registered app: Calculator
+Registered app: Clock
+Registered app: Console
+Registered app: FileExplorer
+Registered app: TaskManager
+Registered app: Paint
+Registered app: ImageViewer
+Registered app: OnScreenKeyboard
+Registered app: ShutdownDialog
+Registered app: DiskManager
+Registered app: ControlPanel
+Registered app: HDInstaller
+AppRegistry initialized, desktop apps=15
+Desktop state loaded
+NotificationManager initialized
+Firewall initialized (Normal mode)
+Module registered: Notepad
+Module registered: Calculator
+Module registered: Paint
+Module registered: ImageViewer
+Module registered: Clock
+Module registered: TaskManager
+Module registered: FileExplorer
+Module registered: Console
+Module registered: OnScreenKeyboard
+Module registered: ShutdownDialog
+Built-in modules registered (10)
+[lifecycle] phase -> ServicesReady
+[lifecycle] phase -> Interactive
+Commands:
+ mem | alloc <n> | tasks | log
+ spawn <echo|worker> [args...] | plist
+ send <pid> <text> | recv <pid>
+ bus.sub <chan> <pid> | bus.unsub <chan> <pid>
+ bus.pub <chan> <text> [fanout] | bus.pop <chan> [timeoutMs]
+ bus.cap <chan> <cap> | bus.stats <chan>
+ console.start | console.send <text> | console.pop [timeoutMs]
+ gui.start | gui.win <title> [w h] | gui.text <id> <text> | gui.close <id>
+ gui.rect <id> <x> <y> <w> <h> <r> <g> <b> | gui.move <id> <x> <y> | gui.resize <id> <w> <h> | gui.title <id> <title>
+ gui.btn <win> <id> <x> <y> <w> <h> <text> | gui.pop | gui.wlist | gui.activate <id> | gui.min <id>
+ gxm.load <path> | gxm.sample | gui.save <path> | gui.load <path>
+ desktop.wallpaper <path> | desktop.launch <action> | desktop.pin <action> | desktop.unpin <action> | desktop.showconfig
+ desktop.apps | desktop.pinned | desktop.recent | desktop.pinapp <name> | desktop.pinfile <name> <path>
+ taskbar.list | taskbar.activate <id> | taskbar.min <id> | taskbar.close <id>
+ workspace.switch <n> | workspace.next | workspace.prev | workspace.current
+ notepad | notepad <file>
+ calculator
+ console | console.start | console.send <text> | console.pop [timeoutMs]
+ files | files <path>
+ clock
+ taskmgr
+ paint
+ imgview [file] | osk
+ shutdown | msgbox <text> | welcome
+ notify <text> | notify.clear
+ fw.mode <normal|block|disabled|auto> | fw.allow <name> | fw.list | fw.alerts
+ modules | module.launch <name>
+ pkg.install <path.gxapp> | pkg.launch <app> | pkg.list | pkg.validate <path.gxapp>
+ proc.wait <pid> [timeoutMs] | proc.status <pid>
+ vfs.mkdir <path> | vfs.write <path> <text> | vfs.read <path> | vfs.ls <path>
+ vnc.start [port] | vnc.stop | vnc.status
+ pbytes | help | quit/exit
+[lifecycle] phase -> ServicesReady
+[lifecycle] compositor pid=10
+Compositor pid=10 (proto=2)
+Compositor service started (native window)
+[lifecycle] phase -> ServicesReady
+[lifecycle] console pid=11
+Console pid=11
+Bus::publish queueing msg type=10 to channel=console.input
+Sent to console
+ConsoleService started
+[LaunchResolver] App: com.guidexos.helloworld Strategy: NativeElf Architecture: amd64 Entry: bin/amd64/helloworld.elf Result: success Reason: Launch resolved
+[NativeElfLaunch] App: com.guidexos.helloworld Architecture: amd64 Path: /Apps\HelloWorld\bin/amd64/helloworld.elf Validation: valid Result: success Message: Native ELF validated.
+[NativeElfImageLoader] App: com.guidexos.helloworld Architecture: amd64 EntryVA: 0x201300 Segments: 3 ImageSize: 12236 PIE: false Interpreter: false Result: success Diagnostics: Native ELF image loaded
+[NativeAppRuntime] App: com.guidexos.helloworld RuntimeId: 1 ProcessId: 0 Architecture: amd64 ABI: guidexos-c-abi-v1 Permissions: 3 State: Prepared Result: success Diagnostics: Native app runtime prepared
+[NativeElfExecutor] App: com.guidexos.helloworld Architecture: amd64 CanExecute: true Reason: Native ELF executor gate passed Result: available
+[NativeAppRuntime] App: com.guidexos.helloworld (Hello World) runtimeId=1 entering host call dispatch
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) log: Hello from guideXOS Native ELF HelloWorld
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) file_exists path="resources/message.txt" exists=1
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) file_read_all path="resources/message.txt" bytes=40 result=0
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) log: resource read succeeded
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) log: Hello from a Native ELF resource file.
+
+Bus::publish queueing msg type=1 to channel=gui.input
+GdiVideoBackend: initialized 1024x768
+VideoBackend: GDI backend active
+Compositor received MT_Create: HelloWorld Native ELF|480|240 from pid=11
+Compositor created window id=1000 sending ack to pid=11
+publishOut MT_Create payload=1000|HelloWorld Native ELF dstPid=11
+Bus::publish directing msg type=1 to pid=11
+Bus::publish directing msg type=14 to pid=11
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) request_window title="HelloWorld Native ELF" size=480x240 windowId=1000
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) log: request_window succeeded
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=10,10 460x80 color=0x2105376
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,40 text="Hello from Native ELF"
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,65 text="Resource loaded"
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=20,90 160x40 color=0x4210752
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=35,115 text="Click Me"
+Bus::publish queueing msg type=4 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) poll_event returned type=2 windowId=1000
+Bus::publish queueing msg type=4 to channel=gui.input
+Bus::publish directing msg type=9 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=9 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=4 to pid=11
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) poll_event returned type=6 windowId=1000
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=10,10 460x80 color=0x2105376
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,40 text="Hello from Native ELF"
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,65 text="Resource loaded"
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=20,90 160x40 color=0x4210752
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=35,115 text="Click Me"
+Bus::publish queueing msg type=4 to channel=gui.input
+Bus::publish directing msg type=4 to pid=11
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) poll_event returned type=6 windowId=1000
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=10,10 460x80 color=0x2105376
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,40 text="Hello from Native ELF"
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,65 text="Resource loaded"
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=20,90 160x40 color=0x4210752
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=35,115 text="Click Me"
+Bus::publish queueing msg type=4 to channel=gui.input
+Bus::publish directing msg type=9 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=9 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=4 to pid=11
+Bus::publish directing msg type=9 to pid=11
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) poll_event returned type=6 windowId=1000
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=10,10 460x80 color=0x2105376
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,40 text="Hello from Native ELF"
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,65 text="Resource loaded"
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=20,90 160x40 color=0x4210752
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=35,115 text="Click Me"
+Bus::publish queueing msg type=4 to channel=gui.input
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=9 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=4 to pid=11
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) poll_event returned type=6 windowId=1000
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=10,10 460x80 color=0x2105376
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,40 text="Hello from Native ELF"
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,65 text="Resource loaded"
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=20,90 160x40 color=0x4210752
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=35,115 text="Click Me"
+Bus::publish queueing msg type=4 to channel=gui.input
+Bus::publish directing msg type=9 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=9 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=4 to pid=11
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) poll_event returned type=6 windowId=1000
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=10,10 460x80 color=0x2105376
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,40 text="Hello from Native ELF"
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,65 text="Resource loaded"
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=20,90 160x40 color=0x4210752
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=35,115 text="Click Me"
+Bus::publish queueing msg type=4 to channel=gui.input
+Bus::publish directing msg type=9 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=9 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=4 to pid=11
+Bus::publish directing msg type=9 to pid=11
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) poll_event returned type=6 windowId=1000
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=10,10 460x80 color=0x2105376
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,40 text="Hello from Native ELF"
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,65 text="Resource loaded"
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=20,90 160x40 color=0x4210752
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=35,115 text="Click Me"
+Bus::publish queueing msg type=4 to channel=gui.input
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=9 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=4 to pid=11
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) poll_event returned type=6 windowId=1000
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=10,10 460x80 color=0x2105376
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,40 text="Hello from Native ELF"
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,65 text="Resource loaded"
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=20,90 160x40 color=0x4210752
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=35,115 text="Click Me"
+Bus::publish queueing msg type=4 to channel=gui.input
+Bus::publish directing msg type=9 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=9 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=4 to pid=11
+Bus::publish directing msg type=9 to pid=11
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) poll_event returned type=6 windowId=1000
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=10,10 460x80 color=0x2105376
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,40 text="Hello from Native ELF"
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,65 text="Resource loaded"
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=20,90 160x40 color=0x4210752
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=35,115 text="Click Me"
+Bus::publish queueing msg type=4 to channel=gui.input
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=9 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=4 to pid=11
+Bus::publish directing msg type=9 to pid=11
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) poll_event returned type=6 windowId=1000
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=10,10 460x80 color=0x2105376
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,40 text="Hello from Native ELF"
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,65 text="Resource loaded"
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=20,90 160x40 color=0x4210752
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=35,115 text="Click Me"
+Bus::publish queueing msg type=4 to channel=gui.input
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=9 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=4 to pid=11
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) poll_event returned type=6 windowId=1000
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=10,10 460x80 color=0x2105376
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,40 text="Hello from Native ELF"
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,65 text="Resource loaded"
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=20,90 160x40 color=0x4210752
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=35,115 text="Click Me"
+Bus::publish queueing msg type=4 to channel=gui.input
+Bus::publish directing msg type=9 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=9 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=4 to pid=11
+Bus::publish directing msg type=9 to pid=11
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) poll_event returned type=6 windowId=1000
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=10,10 460x80 color=0x2105376
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,40 text="Hello from Native ELF"
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,65 text="Resource loaded"
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=20,90 160x40 color=0x4210752
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=35,115 text="Click Me"
+Bus::publish queueing msg type=4 to channel=gui.input
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=9 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=4 to pid=11
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) poll_event returned type=6 windowId=1000
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=10,10 460x80 color=0x2105376
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,40 text="Hello from Native ELF"
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,65 text="Resource loaded"
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=20,90 160x40 color=0x4210752
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=35,115 text="Click Me"
+Bus::publish queueing msg type=4 to channel=gui.input
+Bus::publish directing msg type=9 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=9 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=4 to pid=11
+Bus::publish directing msg type=9 to pid=11
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) poll_event returned type=6 windowId=1000
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=10,10 460x80 color=0x2105376
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,40 text="Hello from Native ELF"
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,65 text="Resource loaded"
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=20,90 160x40 color=0x4210752
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=35,115 text="Click Me"
+Bus::publish queueing msg type=4 to channel=gui.input
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=9 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=4 to pid=11
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) poll_event returned type=6 windowId=1000
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=10,10 460x80 color=0x2105376
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,40 text="Hello from Native ELF"
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,65 text="Resource loaded"
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=20,90 160x40 color=0x4210752
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=35,115 text="Click Me"
+Bus::publish queueing msg type=4 to channel=gui.input
+Bus::publish directing msg type=9 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=9 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=4 to pid=11
+Bus::publish directing msg type=9 to pid=11
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) poll_event returned type=6 windowId=1000
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=10,10 460x80 color=0x2105376
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,40 text="Hello from Native ELF"
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,65 text="Resource loaded"
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=20,90 160x40 color=0x4210752
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=35,115 text="Click Me"
+Bus::publish queueing msg type=4 to channel=gui.input
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=9 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=4 to pid=11
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) poll_event returned type=6 windowId=1000
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=10,10 460x80 color=0x2105376
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,40 text="Hello from Native ELF"
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,65 text="Resource loaded"
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=20,90 160x40 color=0x4210752
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=35,115 text="Click Me"
+Bus::publish queueing msg type=4 to channel=gui.input
+Bus::publish directing msg type=9 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=9 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=4 to pid=11
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) poll_event returned type=6 windowId=1000
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=10,10 460x80 color=0x2105376
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,40 text="Hello from Native ELF"
+Bus::publish queueing msg type=3 to channel=gui.input
+Bus::publish directing msg type=9 to pid=11
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,65 text="Resource loaded"
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=20,90 160x40 color=0x4210752
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=35,115 text="Click Me"
+Bus::publish queueing msg type=4 to channel=gui.input
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=9 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=4 to pid=11
+Bus::publish directing msg type=9 to pid=11
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) poll_event returned type=6 windowId=1000
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=10,10 460x80 color=0x2105376
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,40 text="Hello from Native ELF"
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,65 text="Resource loaded"
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=20,90 160x40 color=0x4210752
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=35,115 text="Click Me"
+Bus::publish queueing msg type=4 to channel=gui.input
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=9 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=4 to pid=11
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) poll_event returned type=6 windowId=1000
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=10,10 460x80 color=0x2105376
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,40 text="Hello from Native ELF"
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,65 text="Resource loaded"
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=20,90 160x40 color=0x4210752
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=35,115 text="Click Me"
+Bus::publish queueing msg type=4 to channel=gui.input
+Bus::publish directing msg type=9 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=9 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=4 to pid=11
+Bus::publish directing msg type=9 to pid=11
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) poll_event returned type=6 windowId=1000
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=10,10 460x80 color=0x2105376
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,40 text="Hello from Native ELF"
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,65 text="Resource loaded"
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=20,90 160x40 color=0x4210752
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=35,115 text="Click Me"
+Bus::publish queueing msg type=4 to channel=gui.input
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=9 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=4 to pid=11
+Bus::publish directing msg type=9 to pid=11
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) poll_event returned type=6 windowId=1000
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=10,10 460x80 color=0x2105376
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,40 text="Hello from Native ELF"
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,65 text="Resource loaded"
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=20,90 160x40 color=0x4210752
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=35,115 text="Click Me"
+Bus::publish queueing msg type=4 to channel=gui.input
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=9 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=4 to pid=11
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) poll_event returned type=6 windowId=1000
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=10,10 460x80 color=0x2105376
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,40 text="Hello from Native ELF"
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,65 text="Resource loaded"
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=20,90 160x40 color=0x4210752
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=35,115 text="Click Me"
+Bus::publish queueing msg type=4 to channel=gui.input
+Bus::publish directing msg type=9 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=9 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=4 to pid=11
+Bus::publish directing msg type=9 to pid=11
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) poll_event returned type=6 windowId=1000
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=10,10 460x80 color=0x2105376
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,40 text="Hello from Native ELF"
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,65 text="Resource loaded"
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=20,90 160x40 color=0x4210752
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=35,115 text="Click Me"
+Bus::publish queueing msg type=4 to channel=gui.input
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=9 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=4 to pid=11
+Bus::publish directing msg type=9 to pid=11
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) poll_event returned type=6 windowId=1000
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=10,10 460x80 color=0x2105376
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,40 text="Hello from Native ELF"
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,65 text="Resource loaded"
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=20,90 160x40 color=0x4210752
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=35,115 text="Click Me"
+Bus::publish queueing msg type=4 to channel=gui.input
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=9 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=4 to pid=11
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) poll_event returned type=6 windowId=1000
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=10,10 460x80 color=0x2105376
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,40 text="Hello from Native ELF"
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,65 text="Resource loaded"
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=20,90 160x40 color=0x4210752
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=35,115 text="Click Me"
+Bus::publish queueing msg type=4 to channel=gui.input
+Bus::publish directing msg type=9 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=9 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=4 to pid=11
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) poll_event returned type=6 windowId=1000
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=10,10 460x80 color=0x2105376
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,40 text="Hello from Native ELF"
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,65 text="Resource loaded"
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=20,90 160x40 color=0x4210752
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=35,115 text="Click Me"
+Bus::publish queueing msg type=4 to channel=gui.input
+Bus::publish directing msg type=9 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=9 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=4 to pid=11
+Bus::publish directing msg type=9 to pid=11
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) poll_event returned type=6 windowId=1000
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=10,10 460x80 color=0x2105376
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,40 text="Hello from Native ELF"
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,65 text="Resource loaded"
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=20,90 160x40 color=0x4210752
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=35,115 text="Click Me"
+Bus::publish queueing msg type=4 to channel=gui.input
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=9 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=4 to pid=11
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) poll_event returned type=6 windowId=1000
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=10,10 460x80 color=0x2105376
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,40 text="Hello from Native ELF"
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,65 text="Resource loaded"
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=20,90 160x40 color=0x4210752
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=35,115 text="Click Me"
+Bus::publish queueing msg type=4 to channel=gui.input
+Bus::publish directing msg type=9 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=9 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=4 to pid=11
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) poll_event returned type=6 windowId=1000
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=10,10 460x80 color=0x2105376
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,40 text="Hello from Native ELF"
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,65 text="Resource loaded"
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=20,90 160x40 color=0x4210752
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=35,115 text="Click Me"
+Bus::publish queueing msg type=4 to channel=gui.input
+Bus::publish directing msg type=9 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=9 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=4 to pid=11
+Bus::publish directing msg type=9 to pid=11
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) poll_event returned type=6 windowId=1000
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=10,10 460x80 color=0x2105376
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,40 text="Hello from Native ELF"
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,65 text="Resource loaded"
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=20,90 160x40 color=0x4210752
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=35,115 text="Click Me"
+Bus::publish queueing msg type=4 to channel=gui.input
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=9 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=4 to pid=11
+Bus::publish directing msg type=9 to pid=11
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) poll_event returned type=6 windowId=1000
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=10,10 460x80 color=0x2105376
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,40 text="Hello from Native ELF"
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,65 text="Resource loaded"
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=20,90 160x40 color=0x4210752
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=35,115 text="Click Me"
+Bus::publish queueing msg type=4 to channel=gui.input
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=9 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=4 to pid=11
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) poll_event returned type=6 windowId=1000
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=10,10 460x80 color=0x2105376
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,40 text="Hello from Native ELF"
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,65 text="Resource loaded"
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=20,90 160x40 color=0x4210752
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=35,115 text="Click Me"
+Bus::publish queueing msg type=4 to channel=gui.input
+Bus::publish directing msg type=9 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=9 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=4 to pid=11
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) poll_event returned type=6 windowId=1000
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=10,10 460x80 color=0x2105376
+Bus::publish queueing msg type=3 to channel=gui.input
+Bus::publish directing msg type=9 to pid=11
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,40 text="Hello from Native ELF"
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,65 text="Resource loaded"
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=20,90 160x40 color=0x4210752
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=35,115 text="Click Me"
+Bus::publish queueing msg type=4 to channel=gui.input
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=9 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=4 to pid=11
+Bus::publish directing msg type=9 to pid=11
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) poll_event returned type=6 windowId=1000
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=10,10 460x80 color=0x2105376
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,40 text="Hello from Native ELF"
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,65 text="Resource loaded"
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=20,90 160x40 color=0x4210752
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=35,115 text="Click Me"
+Bus::publish queueing msg type=4 to channel=gui.input
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=9 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=4 to pid=11
+Bus::publish directing msg type=9 to pid=11
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) poll_event returned type=6 windowId=1000
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=10,10 460x80 color=0x2105376
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,40 text="Hello from Native ELF"
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,65 text="Resource loaded"
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=20,90 160x40 color=0x4210752
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=35,115 text="Click Me"
+Bus::publish queueing msg type=4 to channel=gui.input
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=9 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=4 to pid=11
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) poll_event returned type=6 windowId=1000
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=10,10 460x80 color=0x2105376
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,40 text="Hello from Native ELF"
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,65 text="Resource loaded"
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=20,90 160x40 color=0x4210752
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=35,115 text="Click Me"
+Bus::publish queueing msg type=4 to channel=gui.input
+Bus::publish directing msg type=9 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=9 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=4 to pid=11
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) poll_event returned type=6 windowId=1000
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=10,10 460x80 color=0x2105376
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,40 text="Hello from Native ELF"
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,65 text="Resource loaded"
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=20,90 160x40 color=0x4210752
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=35,115 text="Click Me"
+Bus::publish queueing msg type=4 to channel=gui.input
+Bus::publish directing msg type=9 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=9 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=4 to pid=11
+Bus::publish directing msg type=9 to pid=11
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) poll_event returned type=6 windowId=1000
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=10,10 460x80 color=0x2105376
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,40 text="Hello from Native ELF"
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,65 text="Resource loaded"
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=20,90 160x40 color=0x4210752
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=35,115 text="Click Me"
+Bus::publish queueing msg type=4 to channel=gui.input
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=9 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=4 to pid=11
+Bus::publish directing msg type=9 to pid=11
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) poll_event returned type=6 windowId=1000
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=10,10 460x80 color=0x2105376
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,40 text="Hello from Native ELF"
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,65 text="Resource loaded"
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=20,90 160x40 color=0x4210752
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=35,115 text="Click Me"
+Bus::publish queueing msg type=4 to channel=gui.input
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=9 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=4 to pid=11
+Bus::publish directing msg type=9 to pid=11
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) poll_event returned type=6 windowId=1000
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=10,10 460x80 color=0x2105376
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,40 text="Hello from Native ELF"
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,65 text="Resource loaded"
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=20,90 160x40 color=0x4210752
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=35,115 text="Click Me"
+Bus::publish queueing msg type=4 to channel=gui.input
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=9 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=4 to pid=11
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) poll_event returned type=6 windowId=1000
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=10,10 460x80 color=0x2105376
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,40 text="Hello from Native ELF"
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,65 text="Resource loaded"
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=20,90 160x40 color=0x4210752
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=35,115 text="Click Me"
+Bus::publish queueing msg type=4 to channel=gui.input
+Bus::publish directing msg type=9 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=9 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=4 to pid=11
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) poll_event returned type=6 windowId=1000
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=10,10 460x80 color=0x2105376
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,40 text="Hello from Native ELF"
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,65 text="Resource loaded"
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=20,90 160x40 color=0x4210752
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=35,115 text="Click Me"
+Bus::publish queueing msg type=4 to channel=gui.input
+Bus::publish directing msg type=9 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=9 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=4 to pid=11
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) poll_event returned type=6 windowId=1000
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=10,10 460x80 color=0x2105376
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,40 text="Hello from Native ELF"
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,65 text="Resource loaded"
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=20,90 160x40 color=0x4210752
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=35,115 text="Click Me"
+Bus::publish queueing msg type=4 to channel=gui.input
+Bus::publish directing msg type=9 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=9 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=4 to pid=11
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) poll_event returned type=6 windowId=1000
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=10,10 460x80 color=0x2105376
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,40 text="Hello from Native ELF"
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,65 text="Resource loaded"
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=20,90 160x40 color=0x4210752
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=35,115 text="Click Me"
+Bus::publish queueing msg type=4 to channel=gui.input
+Bus::publish directing msg type=9 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=9 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=4 to pid=11
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) poll_event returned type=6 windowId=1000
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=10,10 460x80 color=0x2105376
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,40 text="Hello from Native ELF"
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,65 text="Resource loaded"
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=20,90 160x40 color=0x4210752
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=35,115 text="Click Me"
+Bus::publish queueing msg type=4 to channel=gui.input
+Bus::publish directing msg type=9 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=9 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=4 to pid=11
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) poll_event returned type=6 windowId=1000
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=10,10 460x80 color=0x2105376
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,40 text="Hello from Native ELF"
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,65 text="Resource loaded"
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=20,90 160x40 color=0x4210752
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=35,115 text="Click Me"
+Bus::publish queueing msg type=4 to channel=gui.input
+Bus::publish directing msg type=9 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=9 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=4 to pid=11
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) poll_event returned type=6 windowId=1000
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=10,10 460x80 color=0x2105376
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,40 text="Hello from Native ELF"
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,65 text="Resource loaded"
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=20,90 160x40 color=0x4210752
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=35,115 text="Click Me"
+Bus::publish queueing msg type=4 to channel=gui.input
+Bus::publish directing msg type=9 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=9 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=4 to pid=11
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) poll_event returned type=6 windowId=1000
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=10,10 460x80 color=0x2105376
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,40 text="Hello from Native ELF"
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,65 text="Resource loaded"
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=20,90 160x40 color=0x4210752
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=35,115 text="Click Me"
+Bus::publish queueing msg type=4 to channel=gui.input
+Bus::publish directing msg type=9 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=9 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=4 to pid=11
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) poll_event returned type=6 windowId=1000
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=10,10 460x80 color=0x2105376
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,40 text="Hello from Native ELF"
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,65 text="Resource loaded"
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=20,90 160x40 color=0x4210752
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=35,115 text="Click Me"
+Bus::publish queueing msg type=4 to channel=gui.input
+Bus::publish directing msg type=9 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=9 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=4 to pid=11
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) poll_event returned type=6 windowId=1000
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=10,10 460x80 color=0x2105376
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,40 text="Hello from Native ELF"
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,65 text="Resource loaded"
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=20,90 160x40 color=0x4210752
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=35,115 text="Click Me"
+Bus::publish queueing msg type=4 to channel=gui.input
+Bus::publish directing msg type=9 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=9 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=4 to pid=11
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) poll_event returned type=6 windowId=1000
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=10,10 460x80 color=0x2105376
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,40 text="Hello from Native ELF"
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,65 text="Resource loaded"
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=20,90 160x40 color=0x4210752
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=35,115 text="Click Me"
+Bus::publish queueing msg type=4 to channel=gui.input
+Bus::publish directing msg type=9 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=9 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=4 to pid=11
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) poll_event returned type=6 windowId=1000
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=10,10 460x80 color=0x2105376
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,40 text="Hello from Native ELF"
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,65 text="Resource loaded"
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=20,90 160x40 color=0x4210752
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=35,115 text="Click Me"
+Bus::publish queueing msg type=4 to channel=gui.input
+Bus::publish directing msg type=9 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=9 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=4 to pid=11
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) poll_event returned type=6 windowId=1000
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=10,10 460x80 color=0x2105376
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,40 text="Hello from Native ELF"
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,65 text="Resource loaded"
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=20,90 160x40 color=0x4210752
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=35,115 text="Click Me"
+Bus::publish queueing msg type=4 to channel=gui.input
+Bus::publish directing msg type=9 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=9 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=4 to pid=11
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) poll_event returned type=6 windowId=1000
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=10,10 460x80 color=0x2105376
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,40 text="Hello from Native ELF"
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,65 text="Resource loaded"
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=20,90 160x40 color=0x4210752
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=35,115 text="Click Me"
+Bus::publish queueing msg type=4 to channel=gui.input
+Bus::publish directing msg type=9 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=9 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=4 to pid=11
+Bus::publish directing msg type=9 to pid=11
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) poll_event returned type=6 windowId=1000
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=10,10 460x80 color=0x2105376
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,40 text="Hello from Native ELF"
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,65 text="Resource loaded"
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=20,90 160x40 color=0x4210752
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=35,115 text="Click Me"
+Bus::publish queueing msg type=4 to channel=gui.input
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=9 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=4 to pid=11
+Bus::publish directing msg type=9 to pid=11
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) poll_event returned type=6 windowId=1000
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=10,10 460x80 color=0x2105376
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,40 text="Hello from Native ELF"
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,65 text="Resource loaded"
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=20,90 160x40 color=0x4210752
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=35,115 text="Click Me"
+Bus::publish queueing msg type=4 to channel=gui.input
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=9 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=4 to pid=11
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) poll_event returned type=6 windowId=1000
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=10,10 460x80 color=0x2105376
+Bus::publish directing msg type=9 to pid=11
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,40 text="Hello from Native ELF"
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,65 text="Resource loaded"
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=20,90 160x40 color=0x4210752
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=35,115 text="Click Me"
+Bus::publish queueing msg type=4 to channel=gui.input
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=9 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=4 to pid=11
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) poll_event returned type=6 windowId=1000
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=10,10 460x80 color=0x2105376
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,40 text="Hello from Native ELF"
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,65 text="Resource loaded"
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=20,90 160x40 color=0x4210752
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=35,115 text="Click Me"
+Bus::publish queueing msg type=4 to channel=gui.input
+Bus::publish directing msg type=9 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=9 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=4 to pid=11
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) poll_event returned type=6 windowId=1000
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=10,10 460x80 color=0x2105376
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,40 text="Hello from Native ELF"
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=20,65 text="Resource loaded"
+Bus::publish queueing msg type=9 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_rect windowId=1000 rect=20,90 160x40 color=0x4210752
+Bus::publish queueing msg type=3 to channel=gui.input
+[NativeAppHost] App: com.guidexos.helloworld (Hello World) draw_text windowId=1000 pos=35,115 text="Click Me"
+[NativeAppRuntime] Cleanup begin app=com.guidexos.helloworld (Hello World) runtimeId=1 processId=11 ownedWindows=1
+Bus::publish queueing msg type=2 to channel=gui.input
+[NativeAppRuntime] Cleanup published MT_Close app=com.guidexos.helloworld (Hello World) runtimeId=1 windowId=1000
+[NativeAppRuntime] Cleanup complete app=com.guidexos.helloworld (Hello World) runtimeId=1 state=Exited exitCode=0 cleanedWindows=1 remainingWindows=0
+[NativeElfExecutor] App: com.guidexos.helloworld Architecture: amd64 CanExecute: true Reason: Native ELF mapped for experimental execution; Preferred base: 0x200000; Actual mapped base: 0x200000; Preferred-base mapping: success; Entry host address resolved: 0x201300; Windows amd64 trampoline used: yes; Native ELF gx_main returned 0; runtimeId: 1; lifecycle state before execution: Prepared; lifecycle state after execution: Exited; cleanup attempted: true; cleaned window count: 1; remaining owned window count: 0; Host log call count: 4; Last host log message: request_window succeeded; API version returned: 0; request_window call count: 1; last window id: 1000; last window title: HelloWorld Native ELF; request_window result: 0; drawText call count: 180; last drawText window: 1000; last drawText: Click Me; last drawText result: 0; drawRect call count: 120; last drawRect window: 1000; last drawRect width: 160; last drawRect height: 40; last drawRect color: 4210752; last drawRect result: 0; waitForClose call count: 0; last wait window: 0; last wait timeoutMs: 0; last wait result: 0; pollEvent call count: 60; last event type: 6; last event window: 1000; last pollEvent result: 0; paint event count: 59; last paint window: 1000; last paint width: 480; last paint height: 240; key event count: 0; last key window: 0; last key code: 0; last key action: 0; last key modifiers: 0; mouse event count: 0; last mouse window: 0; last mouse x: 0; last mouse y: 0; last mouse packed button action: 0; last mouse modifiers: 0; fileRead call count: 1; fileExists call count: 1; last file path: resources/message.txt; last file read bytes: 40; last file IO result: 0 Result: executed
+Bus::publish queueing msg type=0 to channel=console.output
+Bus::publish directing msg type=9 to pid=11
+Bus::publish queueing msg type=0 to channel=console.outputConsole: 
+NativeAppPipelineSmokeTest(com.guidexos.helloworld)
+nativeapp.inspect com.guidexos.helloworld
+
+[Manifest]
+appId: com.guidexos.helloworld
+displayName: Hello World
+kind: NativeElf
+version: 0.1.0
+publisher: guideXOS SDK
+manifestPath: /Apps\HelloWorld\app.json
+appDirectory: /Apps\HelloWorld
+
+[LaunchResolution]
+selectedStrategy: NativeElf
+selectedArchitecture: amd64
+selectedEntryPath: bin/amd64/helloworld.elf
+runtime: native-elf
+abi: guidexos-c-abi-v1
+resolverSuccess: true
+resolverReason: Launch resolved
+
+[ElfValidation]
+elfPath: /Apps\HelloWorld\bin/amd64/helloworld.elf
+fileExists: true
+elfClass: ELF64
+endian: little
+machineType: EM_X86_64
+elfType: ET_EXEC
+validationSuccess: true
+
+[ElfImage]
+entryVirtualAddress: 0x201300
+preferredBase: 0x200000
+imageSize: 12236
+segmentCount: 3
+ptInterpPresent: false
+pieOrDynamic: false
+imageLoaderSuccess: true
+imageDiagnostics: Native ELF image loaded
+
+[Runtime]
+runtimeId: 1
+processId: 0
+lifecycleState: Prepared
+permissions: log, window, file.read
+apiVersion: 0
+hostCallsAvailable: true
+runtimeSuccess: true
+runtimeDiagnostics: Native app runtime prepared
+
+[ExecutorGate]
+canExecute: true
+reason: Native ELF executor gate passed
+buildFlagEnabled: true
+hostArchitecture: amd64
+appArchitecture: amd64
+executableMappingPossible: true
+executionAttempted: true
+executionSuccess: true
+runtimeId: 1
+lifecycleStateBeforeExecution: Prepared
+lifecycleStateAfterExecution: Exited
+returnCode: 0
+exitCode: 0
+cleanupAttempted: true
+cleanedWindowCount: 1
+remainingOwnedWindowCount: 0
+preferredBase: 0x200000
+actualMappedBase: 0x200000
+preferredBaseMappingAttempted: true
+preferredBaseMappingSuccess: true
+trampolineUsed: true
+entryHostAddress: 0x201300
+gxMainReturnCode: 0
+requestWindowCallCount: 1
+lastWindowId: 1000
+lastWindowTitle: HelloWorld Native ELF
+requestWindowResult: 0
+drawTextCallCount: 180
+lastDrawTextWindow: 1000
+lastDrawText: Click Me
+lastDrawTextResult: 0
+drawRectCallCount: 120
+lastDrawRectWindow: 1000
+lastDrawRectWidth: 160
+lastDrawRectHeight: 40
+lastDrawRectColor: 4210752
+lastDrawRectResult: 0
+waitForCloseCallCount: 0
+lastWaitWindow: 0
+lastWaitTimeoutMs: 0
+lastWaitResult: 0
+pollEventCallCount: 60
+lastEventType: 6
+lastEventWindow: 1000
+lastPollEventResult: 0
+paintEventCount: 59
+lastPaintWindow: 1000
+lastPaintWidth: 480
+lastPaintHeight: 240
+keyEventCount: 0
+lastKeyWindow: 0
+lastKeyCode: 0
+lastKeyAction: 0
+lastKeyModifiers: 0
+mouseEventCount: 0
+lastMouseWindow: 0
+lastMouseX: 0
+lastMouseY: 0
+lastMousePackedButtonAction: 0
+lastMouseModifiers: 0
+executionDiagnostics: Native ELF mapped for experimental execution; Preferred base: 0x200000; Actual mapped base: 0x200000; Preferred-base mapping: success; Entry host address resolved: 0x201300; Windows amd64 trampoline used: yes; Native ELF gx_main returned 0; runtimeId: 1; lifecycle state before execution: Prepared; lifecycle state after execution: Exited; cleanup attempted: true; cleaned window count: 1; remaining owned window count: 0; Host log call count: 4; Last host log message: request_window succeeded; API version returned: 0; request_window call count: 1; last window id: 1000; last window title: HelloWorld Native ELF; request_window result: 0; drawText call count: 180; last drawText window: 1000; last drawText: Click Me; last drawText result: 0; drawRect call count: 120; last drawRect window: 1000; last drawRect width: 160; last drawRect height: 40; last drawRect color: 4210752; last drawRect result: 0; waitForClose call count: 0; last wait window: 0; last wait timeoutMs: 0; last wait result: 0; pollEvent call count: 60; last event type: 6; last event window: 1000; last pollEvent result: 0; paint event count: 59; last paint window: 1000; last paint width: 480; last paint height: 240; key event count: 0; last key window: 0; last key code: 0; last key action: 0; last key modifiers: 0; mouse event count: 0; last mouse window: 0; last mouse x: 0; last mouse y: 0; last mouse packed button action: 0; last mouse modifiers: 0; fileRead call count: 1; fileExists call count: 1; last file path: resources/message.txt; last file read bytes: 40; last file IO result: 0
+
+Result: inspection complete; experimental execution path attempted
+
+Expected: find manifest, validate ELF if present, load image, prepare runtime, stop at executor gate unless experimental execution is enabled.
+
+Bus::publish directing msg type=3 to pid=11
+Bus::publish queueing msg type=10 to channel=console.input
+Sent to console
+Console: [console] 1000
+[lifecycle] phase -> ShuttingDown
+Bus::publish queueing msg type=5 to channel=gui.input
+Bus::publish directing msg type=3 to pid=11
+Bus::publish queueing msg type=0 to channel=console.output
+Bus::publish queueing msg type=0 to channel=console.output
+Bus::publish queueing msg type=0 to channel=console.output
+Bus::publish directing msg type=9 to pid=11
+Bus::publish queueing msg type=0 to channel=console.output
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=4 to pid=11
+Bus::publish queueing msg type=0 to channel=console.output
+Bus::publish queueing msg type=0 to channel=console.output
+Bus::publish directing msg type=9 to pid=11
+Bus::publish queueing msg type=0 to channel=console.output
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Bus::publish queueing msg type=0 to channel=console.output
+Bus::publish queueing msg type=0 to channel=console.output
+Bus::publish directing msg type=9 to pid=11
+Bus::publish queueing msg type=0 to channel=console.output
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=2 to pid=11
+Bus::publish queueing msg type=0 to channel=console.output
+Bus::publish queueing msg type=0 to channel=console.output
+Compositor service stopping
+[lifecycle] console stop is SHADOWED (no teardown hook yet)
+[lifecycle] phase -> Stopped
+guideXOSServer server exiting.
