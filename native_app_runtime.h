@@ -32,6 +32,26 @@ enum : gx_result {
 
 typedef uint64_t gx_handle;
 
+enum gx_event_type : uint32_t {
+    GX_EVENT_NONE = 0,
+    GX_EVENT_WINDOW_CLOSE = 1,
+    GX_EVENT_WINDOW_FOCUS = 2,
+    GX_EVENT_WINDOW_BLUR = 3,
+    GX_EVENT_KEY = 4,
+    GX_EVENT_MOUSE = 5,
+    GX_EVENT_WINDOW_PAINT = 6
+};
+
+struct gx_event {
+    uint32_t size = 0;
+    gx_event_type type = GX_EVENT_NONE;
+    gx_handle window = 0;
+    int param1 = 0;
+    int param2 = 0;
+    int param3 = 0;
+    int param4 = 0;
+};
+
 struct NativeHostCallTable {
     uint32_t size = 0;
     uint32_t version = kGuideXOSNativeApiVersion;
@@ -40,6 +60,7 @@ struct NativeHostCallTable {
     gx_result (*request_window)(NativeGxAppContext* ctx, const char* title, int width, int height, gx_handle* outWindow) = nullptr;
     gx_result (*draw_text)(NativeGxAppContext* ctx, gx_handle window, int x, int y, const char* text) = nullptr;
     gx_result (*wait_for_close)(NativeGxAppContext* ctx, gx_handle window, int timeoutMs) = nullptr;
+    gx_result (*poll_event)(NativeGxAppContext* ctx, gx_event* outEvent, int timeoutMs) = nullptr;
     gx_result (*exit)(NativeGxAppContext* ctx, gx_result exitCode) = nullptr;
 };
 
@@ -90,6 +111,14 @@ struct NativeAppRuntimeContext {
     gx_handle lastWaitWindow = 0;
     int lastWaitTimeoutMs = 0;
     gx_result lastWaitResult = GX_OK;
+    uint32_t pollEventCallCount = 0;
+    gx_event_type lastEventType = GX_EVENT_NONE;
+    gx_handle lastEventWindow = 0;
+    gx_result lastPollEventResult = GX_OK;
+    uint32_t paintEventCount = 0;
+    gx_handle lastPaintWindow = 0;
+    int lastPaintWidth = 0;
+    int lastPaintHeight = 0;
 };
 
 struct NativeGxAppContext {

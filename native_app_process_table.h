@@ -26,6 +26,14 @@ struct NativeAppProcessInfo {
     uint32_t remainingWindowCount = 0;
     bool experimentalExecutionEnabled = false;
     std::string hostArchitecture;
+    uint32_t pollEventCallCount = 0;
+    gx_event_type lastEventType = GX_EVENT_NONE;
+    gx_handle lastEventWindow = 0;
+    gx_result lastPollEventResult = GX_OK;
+    uint32_t paintEventCount = 0;
+    gx_handle lastPaintWindow = 0;
+    int lastPaintWidth = 0;
+    int lastPaintHeight = 0;
 };
 
 class NativeAppProcessTable {

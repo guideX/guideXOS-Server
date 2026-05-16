@@ -35,6 +35,14 @@ namespace gxos { namespace svc {
                 << " architecture=" << process.architecture
                 << " state=" << gxos::apps::NativeAppRuntime::ToString(process.lifecycleState)
                 << " windows=" << process.createdWindowCount << "/" << process.cleanedWindowCount << "/" << process.remainingWindowCount
+                << " pollEventCallCount=" << process.pollEventCallCount
+                << " lastEventType=" << static_cast<uint32_t>(process.lastEventType)
+                << " lastEventWindow=" << process.lastEventWindow
+                << " lastPollEventResult=" << process.lastPollEventResult
+                << " paintEventCount=" << process.paintEventCount
+                << " lastPaintWindow=" << process.lastPaintWindow
+                << " lastPaintWidth=" << process.lastPaintWidth
+                << " lastPaintHeight=" << process.lastPaintHeight
                 << " exitCode=" << process.exitCode
                 << " failureReason=" << process.failureReason
                 << " experimentalExecutionEnabled=" << (process.experimentalExecutionEnabled ? "true" : "false")

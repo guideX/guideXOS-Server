@@ -32,6 +32,14 @@ void applyRuntimeState(NativeAppProcessInfo& process, const NativeAppRuntimeCont
     process.createdWindowCount = createdWindowCount(context);
     process.cleanedWindowCount = context.cleanedWindowCount;
     process.remainingWindowCount = static_cast<uint32_t>(context.createdWindowHandles.size());
+    process.pollEventCallCount = context.pollEventCallCount;
+    process.lastEventType = context.lastEventType;
+    process.lastEventWindow = context.lastEventWindow;
+    process.lastPollEventResult = context.lastPollEventResult;
+    process.paintEventCount = context.paintEventCount;
+    process.lastPaintWindow = context.lastPaintWindow;
+    process.lastPaintWidth = context.lastPaintWidth;
+    process.lastPaintHeight = context.lastPaintHeight;
 }
 
 } // namespace

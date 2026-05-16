@@ -278,6 +278,14 @@ NativeElfExecutionResult NativeElfExecutor::Execute(
     result.lastWaitWindow = runtimeContext.lastWaitWindow;
     result.lastWaitTimeoutMs = runtimeContext.lastWaitTimeoutMs;
     result.lastWaitResult = runtimeContext.lastWaitResult;
+    result.pollEventCallCount = runtimeContext.pollEventCallCount;
+    result.lastEventType = runtimeContext.lastEventType;
+    result.lastEventWindow = runtimeContext.lastEventWindow;
+    result.lastPollEventResult = runtimeContext.lastPollEventResult;
+    result.paintEventCount = runtimeContext.paintEventCount;
+    result.lastPaintWindow = runtimeContext.lastPaintWindow;
+    result.lastPaintWidth = runtimeContext.lastPaintWidth;
+    result.lastPaintHeight = runtimeContext.lastPaintHeight;
     result.lifecycleStateAfterExecution = NativeAppRuntime::ToString(runtimeContext.lifecycleState);
     result.cleanupAttempted = runtimeContext.cleanupAttempted;
     result.cleanedWindowCount = runtimeContext.cleanedWindowCount;
@@ -306,6 +314,14 @@ NativeElfExecutionResult NativeElfExecutor::Execute(
     addDiagnostic(result, "last wait window: " + std::to_string(result.lastWaitWindow));
     addDiagnostic(result, "last wait timeoutMs: " + std::to_string(result.lastWaitTimeoutMs));
     addDiagnostic(result, "last wait result: " + std::to_string(result.lastWaitResult));
+    addDiagnostic(result, "pollEvent call count: " + std::to_string(result.pollEventCallCount));
+    addDiagnostic(result, "last event type: " + std::to_string(static_cast<uint32_t>(result.lastEventType)));
+    addDiagnostic(result, "last event window: " + std::to_string(result.lastEventWindow));
+    addDiagnostic(result, "last pollEvent result: " + std::to_string(result.lastPollEventResult));
+    addDiagnostic(result, "paint event count: " + std::to_string(result.paintEventCount));
+    addDiagnostic(result, "last paint window: " + std::to_string(result.lastPaintWindow));
+    addDiagnostic(result, "last paint width: " + std::to_string(result.lastPaintWidth));
+    addDiagnostic(result, "last paint height: " + std::to_string(result.lastPaintHeight));
 #endif
 
     result.message = joinDiagnostics(result.diagnostics);

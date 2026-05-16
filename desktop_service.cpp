@@ -408,7 +408,7 @@ namespace gxos {
             }
             oss << "\n";
             oss << "apiVersion: " << runtimeContext.hostCalls.version << "\n";
-            oss << "hostCallsAvailable: " << ((runtimeContext.hostCalls.log && runtimeContext.hostCalls.get_api_version && runtimeContext.hostCalls.request_window && runtimeContext.hostCalls.draw_text && runtimeContext.hostCalls.wait_for_close && runtimeContext.hostCalls.exit) ? "true" : "false") << "\n";
+            oss << "hostCallsAvailable: " << ((runtimeContext.hostCalls.log && runtimeContext.hostCalls.get_api_version && runtimeContext.hostCalls.request_window && runtimeContext.hostCalls.draw_text && runtimeContext.hostCalls.wait_for_close && runtimeContext.hostCalls.poll_event && runtimeContext.hostCalls.exit) ? "true" : "false") << "\n";
             oss << "runtimeSuccess: " << (runtimeContext.success ? "true" : "false") << "\n";
             if (!runtimeContext.diagnostics.empty()) {
                 oss << "runtimeDiagnostics: ";
@@ -453,6 +453,14 @@ namespace gxos {
             oss << "lastWaitWindow: " << executionResult.lastWaitWindow << "\n";
             oss << "lastWaitTimeoutMs: " << executionResult.lastWaitTimeoutMs << "\n";
             oss << "lastWaitResult: " << executionResult.lastWaitResult << "\n";
+            oss << "pollEventCallCount: " << executionResult.pollEventCallCount << "\n";
+            oss << "lastEventType: " << static_cast<uint32_t>(executionResult.lastEventType) << "\n";
+            oss << "lastEventWindow: " << executionResult.lastEventWindow << "\n";
+            oss << "lastPollEventResult: " << executionResult.lastPollEventResult << "\n";
+            oss << "paintEventCount: " << executionResult.paintEventCount << "\n";
+            oss << "lastPaintWindow: " << executionResult.lastPaintWindow << "\n";
+            oss << "lastPaintWidth: " << executionResult.lastPaintWidth << "\n";
+            oss << "lastPaintHeight: " << executionResult.lastPaintHeight << "\n";
             if (!executionResult.diagnostics.empty()) {
                 oss << "executionDiagnostics: ";
                 for (size_t i = 0; i < executionResult.diagnostics.size(); ++i) {

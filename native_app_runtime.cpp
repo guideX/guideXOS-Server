@@ -6,6 +6,7 @@
 #include "logger.h"
 #include "native_app_process_table.h"
 
+#include <algorithm>
 #include <chrono>
 #include <sstream>
 
@@ -25,11 +26,32 @@ constexpr int kMaxDrawCoordinate = 16384;
 constexpr uint64_t kWindowCreateTimeoutMs = 500;
 constexpr int kMinWaitForCloseTimeoutMs = 0;
 constexpr int kMaxWaitForCloseTimeoutMs = 300000;
+constexpr int kMinPollEventTimeoutMs = 0;
+constexpr int kMaxPollEventTimeoutMs = 30000;
 
 std::string appLabel(const NativeAppRuntimeContext* context) {
     if (!context) return "<unknown>";
     if (!context->displayName.empty()) return context->appId + " (" + context->displayName + ")";
     return context->appId.empty() ? "<unknown>" : context->appId;
+}
+
+bool parseFramePayload(const std::string& payload, uint64_t& id, int& width, int& height) {
+    std::istringstream iss(payload);
+    std::string idText;
+    std::string widthText;
+    std::string heightText;
+    std::getline(iss, idText, '|');
+    std::getline(iss, widthText, '|');
+    std::getline(iss, heightText, '|');
+    if (idText.empty()) return false;
+    try {
+        id = std::stoull(idText);
+        width = widthText.empty() ? 0 : std::stoi(widthText);
+        height = heightText.empty() ? 0 : std::stoi(heightText);
+        return id != 0 && width >= 0 && height >= 0;
+    } catch (...) {
+        return false;
+    }
 }
 
 bool experimentalExecutionEnabled() {
@@ -73,6 +95,43 @@ bool ownsWindow(const NativeAppRuntimeContext& context, gx_handle window) {
         if (createdWindow == window) return true;
     }
     return false;
+}
+
+void removeOwnedWindow(NativeAppRuntimeContext& context, gx_handle window) {
+    auto it = std::remove(context.createdWindowHandles.begin(), context.createdWindowHandles.end(), window);
+    context.createdWindowHandles.erase(it, context.createdWindowHandles.end());
+}
+
+void initializeEvent(gx_event* outEvent) {
+    if (!outEvent) return;
+    outEvent->size = static_cast<uint32_t>(sizeof(gx_event));
+    outEvent->type = GX_EVENT_NONE;
+    outEvent->window = 0;
+    outEvent->param1 = 0;
+    outEvent->param2 = 0;
+    outEvent->param3 = 0;
+    outEvent->param4 = 0;
+}
+
+gx_event_type eventTypeForMessage(uint32_t messageType) {
+    if (messageType == static_cast<uint32_t>(gui::MsgType::MT_Close)) return GX_EVENT_WINDOW_CLOSE;
+    if (messageType == static_cast<uint32_t>(gui::MsgType::MT_SetFocus)) return GX_EVENT_WINDOW_FOCUS;
+    if (messageType == static_cast<uint32_t>(gui::MsgType::MT_RequestFrame)) return GX_EVENT_WINDOW_PAINT;
+    return GX_EVENT_NONE;
+}
+
+void requestPaintForOwnedWindows(NativeAppRuntimeContext& context) {
+    uint64_t nativeAppPid = context.processId != 0 ? context.processId : Allocator::currentPid();
+    if (context.processId == 0) context.processId = nativeAppPid;
+    for (gx_handle window : context.createdWindowHandles) {
+        if (window == 0) continue;
+        ipc::Message request;
+        request.srcPid = nativeAppPid;
+        request.type = static_cast<uint32_t>(gui::MsgType::MT_RequestFrame);
+        std::string payload = std::to_string(window);
+        request.data.assign(payload.begin(), payload.end());
+        ipc::Bus::publish("gui.input", std::move(request), false);
+    }
 }
 
 gx_result hostLog(NativeGxAppContext* ctx, const char* message) {
@@ -211,6 +270,88 @@ gx_result hostDrawText(NativeGxAppContext* ctx, gx_handle window, int x, int y, 
     return GX_OK;
 }
 
+gx_result hostPollEvent(NativeGxAppContext* ctx, gx_event* outEvent, int timeoutMs) {
+    NativeAppRuntimeContext* context = runtimeContextFor(ctx);
+    if (!context) {
+        Logger::write(LogLevel::Warn, "[NativeAppHost] poll_event rejected: invalid app context or host table");
+        return GX_ERROR_INVALID_ARGUMENT;
+    }
+
+    ++context->pollEventCallCount;
+    context->lastEventType = GX_EVENT_NONE;
+    context->lastEventWindow = 0;
+    context->lastPollEventResult = GX_ERROR_INVALID_ARGUMENT;
+
+    if (!outEvent || timeoutMs < kMinPollEventTimeoutMs || timeoutMs > kMaxPollEventTimeoutMs) {
+        Logger::write(LogLevel::Warn, "[NativeAppHost] App: " + appLabel(context) + " poll_event rejected: invalid output event or timeout");
+        NativeAppProcessTable::UpdateFromRuntime(*context);
+        return context->lastPollEventResult;
+    }
+
+    initializeEvent(outEvent);
+    requestPaintForOwnedWindows(*context);
+
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeoutMs);
+    ipc::Message message;
+    do {
+        uint64_t remainingMs = 0;
+        if (timeoutMs > 0) {
+            auto now = std::chrono::steady_clock::now();
+            if (now >= deadline) break;
+            remainingMs = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now).count());
+            if (remainingMs > 25) remainingMs = 25;
+        }
+
+        if (!ipc::Bus::pop("gui.output", message, remainingMs)) break;
+
+        gx_event_type eventType = eventTypeForMessage(message.type);
+        if (eventType == GX_EVENT_NONE) continue;
+
+        std::string payload(message.data.begin(), message.data.end());
+        uint64_t window = 0;
+        int paintWidth = 0;
+        int paintHeight = 0;
+        bool parsed = eventType == GX_EVENT_WINDOW_PAINT
+            ? parseFramePayload(payload, window, paintWidth, paintHeight)
+            : parseWindowId(payload, window);
+        if (!parsed) {
+            context->lastPollEventResult = GX_ERROR_UNSUPPORTED;
+            Logger::write(LogLevel::Warn, "[NativeAppHost] App: " + appLabel(context) + " poll_event unsupported: GUI event did not identify a window");
+            NativeAppProcessTable::UpdateFromRuntime(*context);
+            return context->lastPollEventResult;
+        }
+
+        if (!ownsWindow(*context, window)) {
+            context->lastPollEventResult = GX_ERROR_UNSUPPORTED;
+            Logger::write(LogLevel::Warn, "[NativeAppHost] App: " + appLabel(context) + " poll_event unsupported: encountered event for an unowned window");
+            NativeAppProcessTable::UpdateFromRuntime(*context);
+            return context->lastPollEventResult;
+        }
+
+        outEvent->type = eventType;
+        outEvent->window = window;
+        if (eventType == GX_EVENT_WINDOW_PAINT) {
+            outEvent->param1 = paintWidth;
+            outEvent->param2 = paintHeight;
+            ++context->paintEventCount;
+            context->lastPaintWindow = window;
+            context->lastPaintWidth = paintWidth;
+            context->lastPaintHeight = paintHeight;
+        }
+        context->lastEventType = eventType;
+        context->lastEventWindow = window;
+        context->lastPollEventResult = GX_OK;
+        if (eventType == GX_EVENT_WINDOW_CLOSE) removeOwnedWindow(*context, window);
+        NativeAppProcessTable::UpdateFromRuntime(*context);
+        Logger::write(LogLevel::Info, "[NativeAppHost] App: " + appLabel(context) + " poll_event returned type=" + std::to_string(static_cast<uint32_t>(eventType)) + " windowId=" + std::to_string(window));
+        return GX_OK;
+    } while (timeoutMs > 0);
+
+    context->lastPollEventResult = GX_ERROR_TIMEOUT;
+    NativeAppProcessTable::UpdateFromRuntime(*context);
+    return context->lastPollEventResult;
+}
+
 gx_result hostWaitForClose(NativeGxAppContext* ctx, gx_handle window, int timeoutMs) {
     NativeAppRuntimeContext* context = runtimeContextFor(ctx);
     if (!context) {
@@ -250,6 +391,8 @@ gx_result hostWaitForClose(NativeGxAppContext* ctx, gx_handle window, int timeou
 
         if (closedWindow == window) {
             context->lastWaitResult = GX_OK;
+            removeOwnedWindow(*context, window);
+            NativeAppProcessTable::UpdateFromRuntime(*context);
             Logger::write(LogLevel::Info, "[NativeAppHost] App: " + appLabel(context) + " wait_for_close completed windowId=" + std::to_string(window));
             return GX_OK;
         }
@@ -327,6 +470,7 @@ NativeAppRuntimeContext NativeAppRuntime::Prepare(
     context.hostCalls.request_window = hostRequestWindow;
     context.hostCalls.draw_text = hostDrawText;
     context.hostCalls.wait_for_close = hostWaitForClose;
+    context.hostCalls.poll_event = hostPollEvent;
     context.hostCalls.exit = hostExit;
 
     if (launchDecision.strategy != AppLaunchStrategy::NativeElf) {

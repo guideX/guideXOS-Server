@@ -33,6 +33,14 @@ struct NativeElfExecutionResult {
     uint64_t lastWaitWindow = 0;
     int lastWaitTimeoutMs = 0;
     int32_t lastWaitResult = GX_OK;
+    uint32_t pollEventCallCount = 0;
+    gx_event_type lastEventType = GX_EVENT_NONE;
+    uint64_t lastEventWindow = 0;
+    int32_t lastPollEventResult = GX_OK;
+    uint32_t paintEventCount = 0;
+    uint64_t lastPaintWindow = 0;
+    int lastPaintWidth = 0;
+    int lastPaintHeight = 0;
     uint64_t runtimeId = 0;
     std::string lifecycleStateBeforeExecution;
     std::string lifecycleStateAfterExecution;

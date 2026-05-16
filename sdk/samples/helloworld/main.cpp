@@ -15,7 +15,29 @@ extern "C" gx_result gx_main(gx_app_context* ctx) {
         if (windowResult == GX_OK && ctx->host->draw_text) {
             ctx->host->draw_text(ctx, window, 20, 40, "Hello from Native ELF");
         }
-        if (windowResult == GX_OK && ctx->host->wait_for_close) {
+        if (windowResult == GX_OK && ctx->host->poll_event) {
+            int elapsedMs = 0;
+            while (elapsedMs < 30000) {
+                gx_event event = {};
+                gx_result eventResult = ctx->host->poll_event(ctx, &event, 500);
+                if (eventResult == GX_OK && event.window == window) {
+                    if (event.type == GX_EVENT_WINDOW_PAINT) {
+                        if (ctx->host->draw_text) {
+                            ctx->host->draw_text(ctx, window, 20, 40, "Hello from Native ELF");
+                            ctx->host->draw_text(ctx, window, 20, 60, "Paint event handled");
+                        }
+                    } else if (event.type == GX_EVENT_WINDOW_CLOSE) {
+                        ctx->host->log(ctx, "close event received");
+                        break;
+                    }
+                }
+                if (eventResult != GX_OK && eventResult != GX_ERROR_TIMEOUT) {
+                    ctx->host->log(ctx, "poll_event failed");
+                    break;
+                }
+                elapsedMs += 500;
+            }
+        } else if (windowResult == GX_OK && ctx->host->wait_for_close) {
             gx_result waitResult = ctx->host->wait_for_close(ctx, window, 30000);
             ctx->host->log(ctx, waitResult == GX_OK ? "wait_for_close succeeded" : "wait_for_close timed out or failed");
         }
