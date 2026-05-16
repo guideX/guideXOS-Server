@@ -1,0 +1,3 @@
+D:/dev/guideXOSServer/sdk/samples/resourceviewer/build/CMakeFiles/resourceviewer.elf.dir
+D:/dev/guideXOSServer/sdk/samples/resourceviewer/build/CMakeFiles/edit_cache.dir
+D:/dev/guideXOSServer/sdk/samples/resourceviewer/build/CMakeFiles/rebuild_cache.dir

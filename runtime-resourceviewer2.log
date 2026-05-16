@@ -1,0 +1,338 @@
+guideXOSServer server starting...
+[lifecycle] phase -> PlatformDiscovery
+[lifecycle] phase -> MemoryReady
+[lifecycle] phase -> SchedulerReady
+[lifecycle] phase -> IpcReady
+[lifecycle] phase -> DesktopStateReady
+AppRegistry initializing, count=1
+AppRegistry manifest scan succeeded: scanned=2, registered=2
+Registered app: Hello World
+Registered app: Resource Viewer
+Registered app: Notepad
+Registered app: Calculator
+Registered app: Clock
+Registered app: Console
+Registered app: FileExplorer
+Registered app: TaskManager
+Registered app: Paint
+Registered app: ImageViewer
+Registered app: OnScreenKeyboard
+Registered app: ShutdownDialog
+Registered app: DiskManager
+Registered app: ControlPanel
+Registered app: HDInstaller
+AppRegistry initialized, desktop apps=15
+Desktop state loaded
+NotificationManager initialized
+Firewall initialized (Normal mode)
+Module registered: Notepad
+Module registered: Calculator
+Module registered: Paint
+Module registered: ImageViewer
+Module registered: Clock
+Module registered: TaskManager
+Module registered: FileExplorer
+Module registered: Console
+Module registered: OnScreenKeyboard
+Module registered: ShutdownDialog
+Built-in modules registered (10)
+[lifecycle] phase -> ServicesReady
+[lifecycle] phase -> Interactive
+Commands:
+ mem | alloc <n> | tasks | log
+ spawn <echo|worker> [args...] | plist
+ send <pid> <text> | recv <pid>
+ bus.sub <chan> <pid> | bus.unsub <chan> <pid>
+ bus.pub <chan> <text> [fanout] | bus.pop <chan> [timeoutMs]
+ bus.cap <chan> <cap> | bus.stats <chan>
+ console.start | console.send <text> | console.pop [timeoutMs]
+ gui.start | gui.win <title> [w h] | gui.text <id> <text> | gui.close <id>
+ gui.rect <id> <x> <y> <w> <h> <r> <g> <b> | gui.move <id> <x> <y> | gui.resize <id> <w> <h> | gui.title <id> <title>
+ gui.btn <win> <id> <x> <y> <w> <h> <text> | gui.pop | gui.wlist | gui.activate <id> | gui.min <id>
+ gxm.load <path> | gxm.sample | gui.save <path> | gui.load <path>
+ desktop.wallpaper <path> | desktop.launch <action> | desktop.pin <action> | desktop.unpin <action> | desktop.showconfig
+ desktop.apps | desktop.pinned | desktop.recent | desktop.pinapp <name> | desktop.pinfile <name> <path>
+ taskbar.list | taskbar.activate <id> | taskbar.min <id> | taskbar.close <id>
+ workspace.switch <n> | workspace.next | workspace.prev | workspace.current
+ notepad | notepad <file>
+ calculator
+ console | console.start | console.send <text> | console.pop [timeoutMs]
+ files | files <path>
+ clock
+ taskmgr
+ paint
+ imgview [file] | osk
+ shutdown | msgbox <text> | welcome
+ notify <text> | notify.clear
+ fw.mode <normal|block|disabled|auto> | fw.allow <name> | fw.list | fw.alerts
+ modules | module.launch <name>
+ pkg.install <path.gxapp> | pkg.launch <app> | pkg.list | pkg.validate <path.gxapp>
+ proc.wait <pid> [timeoutMs] | proc.status <pid>
+ vfs.mkdir <path> | vfs.write <path> <text> | vfs.read <path> | vfs.ls <path>
+ vnc.start [port] | vnc.stop | vnc.status
+ pbytes | help | quit/exit
+[lifecycle] phase -> ServicesReady
+[lifecycle] console pid=10
+Console pid=ConsoleService started
+10
+Bus::publish queueing msg type=10 to channel=console.input
+Sent to console
+Bus::publish queueing msg type=0 to channel=console.output
+Console: AppRegistry diagnostic
+initialized=true initCount=1
+sources:
+  SystemApps /system/apps
+  Package /Apps
+  UserApps /users/default/apps
+manifestScan scanned=2 registered=2
+builtInRegister scanned=13 registered=15
+invalidManifests: 0
+duplicateAppIds(manifestScan): 0
+duplicateAppIds(builtInRegister): 0
+registeredApps: 15
+  id=com.guidexos.helloworld displayName=Hello World kind=NativeElf icon=resources/icon.png launchName=Hello World source=Package
+  id=com.guidexos.resourceviewer displayName=Resource Viewer kind=NativeElf icon= launchName=Resource Viewer source=Package
+  id=gxos.builtin.notepad displayName=Notepad kind=BuiltIn icon= launchName=Notepad source=BuiltIn
+  id=gxos.builtin.calculator displayName=Calculator kind=BuiltIn icon= launchName=Calculator source=BuiltIn
+  id=gxos.builtin.clock displayName=Clock kind=BuiltIn icon= launchName=Clock source=BuiltIn
+  id=gxos.builtin.console displayName=Console kind=BuiltIn icon= launchName=Console source=BuiltIn
+  id=gxos.builtin.fileexplorer displayName=FileExplorer kind=BuiltIn icon= launchName=FileExplorer source=BuiltIn
+  id=gxos.builtin.taskmanager displayName=TaskManager kind=BuiltIn icon= launchName=TaskManager source=BuiltIn
+  id=gxos.builtin.paint displayName=Paint kind=BuiltIn icon= launchName=Paint source=BuiltIn
+  id=gxos.builtin.imageviewer displayName=ImageViewer kind=BuiltIn icon= launchName=ImageViewer source=BuiltIn
+  id=gxos.builtin.onscreenkeyboard displayName=OnScreenKeyboard kind=BuiltIn icon= launchName=OnScreenKeyboard source=BuiltIn
+  id=gxos.builtin.shutdowndialog displayName=ShutdownDialog kind=BuiltIn icon= launchName=ShutdownDialog source=BuiltIn
+  id=gxos.builtin.diskmanager displayName=DiskManager kind=BuiltIn icon= launchName=DiskManager source=BuiltIn
+  id=gxos.builtin.controlpanel displayName=ControlPanel kind=BuiltIn icon= launchName=ControlPanel source=BuiltIn
+  id=gxos.builtin.hdinstaller displayName=HDInstaller kind=BuiltIn icon= launchName=HDInstaller source=BuiltIn availability=unavailable reason=HD Installer is not available in this runtime target
+launchPolicy: BuiltIn uses existing hardcoded launch branch; NativeElf/GXAppPackage return: manifest found but execution is not implemented yet
+
+Bus::publish queueing msg type=10 to channel=console.input
+Sent to console
+[LaunchResolver] App: com.guidexos.resourceviewer Strategy: NativeElf Architecture: amd64 Entry: bin/amd64/resourceviewer.elf Result: success Reason: Launch resolved
+[NativeElfLaunch] App: com.guidexos.resourceviewer Architecture: amd64 Path: /Apps\ResourceViewer\bin/amd64/resourceviewer.elf Validation: File does not contain ELF magic Result: failure Message: File does not contain ELF magic
+Bus::publish queueing msg type=0 to channel=console.output
+Console: nativeapp.inspect com.guidexos.resourceviewer
+
+[Manifest]
+appId: com.guidexos.resourceviewer
+displayName: Resource Viewer
+kind: NativeElf
+version: 0.1.0
+publisher: guideXOS
+manifestPath: /Apps\ResourceViewer\app.json
+appDirectory: /Apps\ResourceViewer
+
+[LaunchResolution]
+selectedStrategy: NativeElf
+selectedArchitecture: amd64
+selectedEntryPath: bin/amd64/resourceviewer.elf
+runtime: native-elf
+abi: guidexos-c-abi-v1
+resolverSuccess: true
+resolverReason: Launch resolved
+
+[ElfValidation]
+elfPath: /Apps\ResourceViewer\bin/amd64/resourceviewer.elf
+fileExists: true
+elfClass: 
+endian: 
+machineType: 
+elfType: 
+validationSuccess: false
+validationErrors: File does not contain ELF magic
+
+[ElfImage]
+entryVirtualAddress: 0x0
+preferredBase: 0x0
+imageSize: 0
+segmentCount: 0
+ptInterpPresent: false
+pieOrDynamic: false
+imageLoaderSuccess: false
+
+[Runtime]
+runtimeId: 0
+processId: 0
+lifecycleState: Created
+permissions: 
+apiVersion: 0
+hostCallsAvailable: false
+runtimeSuccess: false
+
+[ExecutorGate]
+canExecute: false
+reason: 
+buildFlagEnabled: false
+hostArchitecture: amd64
+appArchitecture: amd64
+executableMappingPossible: false
+executionAttempted: false
+executionSuccess: false
+runtimeId: 0
+lifecycleStateBeforeExecution: 
+lifecycleStateAfterExecution: 
+returnCode: 0
+exitCode: 0
+cleanupAttempted: false
+cleanedWindowCount: 0
+remainingOwnedWindowCount: 0
+requestWindowCallCount: 0
+lastWindowId: 0
+lastWindowTitle: 
+requestWindowResult: 0
+drawTextCallCount: 0
+lastDrawTextWindow: 0
+lastDrawText: 
+lastDrawTextResult: 0
+drawRectCallCount: 0
+lastDrawRectWindow: 0
+lastDrawRectWidth: 0
+lastDrawRectHeight: 0
+lastDrawRectColor: 0
+lastDrawRectResult: 0
+waitForCloseCallCount: 0
+lastWaitWindow: 0
+lastWaitTimeoutMs: 0
+lastWaitResult: 0
+pollEventCallCount: 0
+lastEventType: 0
+lastEventWindow: 0
+lastPollEventResult: 0
+paintEventCount: 0
+lastPaintWindow: 0
+lastPaintWidth: 0
+lastPaintHeight: 0
+keyEventCount: 0
+lastKeyWindow: 0
+lastKeyCode: 0
+lastKeyAction: 0
+lastKeyModifiers: 0
+mouseEventCount: 0
+lastMouseWindow: 0
+lastMouseX: 0
+lastMouseY: 0
+lastMousePackedButtonAction: 0
+lastMouseModifiers: 0
+executionDiagnostics: execution skipped or unavailable
+
+Result: inspection complete; no ELF code executed
+
+Bus::publish queueing msg type=10 to channel=console.input
+Sent to console
+[LaunchResolver] App: com.guidexos.resourceviewer Strategy: NativeElf Architecture: amd64 Entry: bin/amd64/resourceviewer.elf Result: success Reason: Launch resolved
+[NativeElfLaunch] App: com.guidexos.resourceviewer Architecture: amd64 Path: /Apps\ResourceViewer\bin/amd64/resourceviewer.elf Validation: File does not contain ELF magic Result: failure Message: File does not contain ELF magic
+Bus::publish queueing msg type=0 to channel=console.output
+Console: NativeAppPipelineSmokeTest(com.guidexos.resourceviewer)
+nativeapp.inspect com.guidexos.resourceviewer
+
+[Manifest]
+appId: com.guidexos.resourceviewer
+displayName: Resource Viewer
+kind: NativeElf
+version: 0.1.0
+publisher: guideXOS
+manifestPath: /Apps\ResourceViewer\app.json
+appDirectory: /Apps\ResourceViewer
+
+[LaunchResolution]
+selectedStrategy: NativeElf
+selectedArchitecture: amd64
+selectedEntryPath: bin/amd64/resourceviewer.elf
+runtime: native-elf
+abi: guidexos-c-abi-v1
+resolverSuccess: true
+resolverReason: Launch resolved
+
+[ElfValidation]
+elfPath: /Apps\ResourceViewer\bin/amd64/resourceviewer.elf
+fileExists: true
+elfClass: 
+endian: 
+machineType: 
+elfType: 
+validationSuccess: false
+validationErrors: File does not contain ELF magic
+
+[ElfImage]
+entryVirtualAddress: 0x0
+preferredBase: 0x0
+imageSize: 0
+segmentCount: 0
+ptInterpPresent: false
+pieOrDynamic: false
+imageLoaderSuccess: false
+
+[Runtime]
+runtimeId: 0
+processId: 0
+lifecycleState: Created
+permissions: 
+apiVersion: 0
+hostCallsAvailable: false
+runtimeSuccess: false
+
+[ExecutorGate]
+canExecute: false
+reason: 
+buildFlagEnabled: false
+hostArchitecture: amd64
+appArchitecture: amd64
+executableMappingPossible: false
+executionAttempted: false
+executionSuccess: false
+runtimeId: 0
+lifecycleStateBeforeExecution: 
+lifecycleStateAfterExecution: 
+returnCode: 0
+exitCode: 0
+cleanupAttempted: false
+cleanedWindowCount: 0
+remainingOwnedWindowCount: 0
+requestWindowCallCount: 0
+lastWindowId: 0
+lastWindowTitle: 
+requestWindowResult: 0
+drawTextCallCount: 0
+lastDrawTextWindow: 0
+lastDrawText: 
+lastDrawTextResult: 0
+drawRectCallCount: 0
+lastDrawRectWindow: 0
+lastDrawRectWidth: 0
+lastDrawRectHeight: 0
+lastDrawRectColor: 0
+lastDrawRectResult: 0
+waitForCloseCallCount: 0
+lastWaitWindow: 0
+lastWaitTimeoutMs: 0
+lastWaitResult: 0
+pollEventCallCount: 0
+lastEventType: 0
+lastEventWindow: 0
+lastPollEventResult: 0
+paintEventCount: 0
+lastPaintWindow: 0
+lastPaintWidth: 0
+lastPaintHeight: 0
+keyEventCount: 0
+lastKeyWindow: 0
+lastKeyCode: 0
+lastKeyAction: 0
+lastKeyModifiers: 0
+mouseEventCount: 0
+lastMouseWindow: 0
+lastMouseX: 0
+lastMouseY: 0
+lastMousePackedButtonAction: 0
+lastMouseModifiers: 0
+executionDiagnostics: execution skipped or unavailable
+
+Result: inspection complete; no ELF code executed
+
+Expected: find manifest, validate ELF if present, load image, prepare runtime, stop at executor gate unless experimental execution is enabled.
+
+[lifecycle] phase -> ShuttingDown
+[lifecycle] console stop is SHADOWED (no teardown hook yet)
+[lifecycle] phase -> Stopped
+guideXOSServer server exiting.

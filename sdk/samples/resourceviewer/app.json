@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "id": "com.guidexos.resourceviewer",
+  "displayName": "Resource Viewer",
+  "version": "0.1.0",
+  "publisher": "guideXOS",
+  "description": "Native ELF sample that reads an app resource file and redraws it in a hosted window.",
+  "category": "Samples",
+  "kind": "NativeElf",
+  "icon": "",
+  "minGuideXOSVersion": "0.1.0",
+  "supportedArchitectures": [
+    "amd64"
+  ],
+  "entries": [
+    {
+      "architecture": "amd64",
+      "path": "bin/amd64/resourceviewer.elf",
+      "entryPoint": "gx_main",
+      "abi": "guidexos-c-abi-v1",
+      "runtime": "native-elf"
+    }
+  ],
+  "permissions": [
+    "log",
+    "window",
+    "draw",
+    "file.read"
+  ],
+  "fileAssociations": [],
+  "defaultWindow": {
+    "width": 520,
+    "height": 320,
+    "resizable": true
+  }
+}

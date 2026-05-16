@@ -1,0 +1,7 @@
+{
+	"InstallScripts" : 
+	[
+		"D:/dev/guideXOSServer/sdk/samples/resourceviewer/build/cmake_install.cmake"
+	],
+	"Parallel" : false
+}
