@@ -29,6 +29,21 @@ enum {
     GX_KEY_MOD_ALT = 4
 };
 
+enum {
+    GX_MOUSE_ACTION_MOVE = 0,
+    GX_MOUSE_ACTION_DOWN = 1,
+    GX_MOUSE_ACTION_UP = 2,
+    GX_MOUSE_ACTION_DOUBLE_CLICK = 3,
+    GX_MOUSE_BUTTON_NONE = 0,
+    GX_MOUSE_BUTTON_LEFT = 1,
+    GX_MOUSE_BUTTON_RIGHT = 2,
+    GX_MOUSE_BUTTON_MIDDLE = 3
+};
+
+#define GX_MOUSE_PACK(button, action) ((((button) & 0xFFFF) << 16) | ((action) & 0xFFFF))
+#define GX_MOUSE_ACTION(value) ((value) & 0xFFFF)
+#define GX_MOUSE_BUTTON(value) (((value) >> 16) & 0xFFFF)
+
 typedef struct gx_event {
     uint32_t size;
     gx_event_type type;

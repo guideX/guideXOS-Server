@@ -45,6 +45,12 @@ struct NativeAppProcessInfo {
     int lastKeyCode = 0;
     int lastKeyAction = 0;
     int lastKeyModifiers = 0;
+    uint32_t mouseEventCount = 0;
+    gx_handle lastMouseWindow = 0;
+    int lastMouseX = 0;
+    int lastMouseY = 0;
+    int lastMousePackedButtonAction = 0;
+    int lastMouseModifiers = 0;
 };
 
 class NativeAppProcessTable {
@@ -56,6 +62,7 @@ public:
     static void MarkCompleted(uint64_t runtimeId, NativeAppLifecycleState state, int32_t exitCode, const std::string& failureReason);
     static std::vector<NativeAppProcessInfo> List();
     static bool Find(uint64_t runtimeId, NativeAppProcessInfo& outInfo);
+    static bool IsNativeProcessId(uint64_t processId);
 };
 
 } // namespace apps

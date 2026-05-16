@@ -51,6 +51,12 @@ void applyRuntimeState(NativeAppProcessInfo& process, const NativeAppRuntimeCont
     process.lastKeyCode = context.lastKeyCode;
     process.lastKeyAction = context.lastKeyAction;
     process.lastKeyModifiers = context.lastKeyModifiers;
+    process.mouseEventCount = context.mouseEventCount;
+    process.lastMouseWindow = context.lastMouseWindow;
+    process.lastMouseX = context.lastMouseX;
+    process.lastMouseY = context.lastMouseY;
+    process.lastMousePackedButtonAction = context.lastMousePackedButtonAction;
+    process.lastMouseModifiers = context.lastMouseModifiers;
 }
 
 } // namespace
@@ -161,6 +167,21 @@ bool NativeAppProcessTable::Find(uint64_t runtimeId, NativeAppProcessInfo& outIn
 #else
     (void)runtimeId;
     (void)outInfo;
+    return false;
+#endif
+}
+
+bool NativeAppProcessTable::IsNativeProcessId(uint64_t processId) {
+#ifdef GX_ENABLE_EXPERIMENTAL_NATIVE_ELF_EXECUTION
+    if (processId == 0) return false;
+
+    std::lock_guard<std::mutex> lock(g_processTableMutex);
+    for (const NativeAppProcessInfo& process : g_processes) {
+        if (process.runtimeId == processId || process.nativePid == processId) return true;
+    }
+    return false;
+#else
+    (void)processId;
     return false;
 #endif
 }

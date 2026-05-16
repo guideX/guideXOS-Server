@@ -54,6 +54,12 @@ namespace gxos { namespace svc {
                 << " lastKeyCode=" << process.lastKeyCode
                 << " lastKeyAction=" << process.lastKeyAction
                 << " lastKeyModifiers=" << process.lastKeyModifiers
+                << " mouseEventCount=" << process.mouseEventCount
+                << " lastMouseWindow=" << process.lastMouseWindow
+                << " lastMouseX=" << process.lastMouseX
+                << " lastMouseY=" << process.lastMouseY
+                << " lastMousePackedButtonAction=" << process.lastMousePackedButtonAction
+                << " lastMouseModifiers=" << process.lastMouseModifiers
                 << " exitCode=" << process.exitCode
                 << " failureReason=" << process.failureReason
                 << " experimentalExecutionEnabled=" << (process.experimentalExecutionEnabled ? "true" : "false")

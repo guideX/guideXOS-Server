@@ -9,6 +9,7 @@
 #include "notification_manager.h"
 #include "system_tray.h"
 #include "desktop_wallpaper.h"
+#include "native_app_process_table.h"
 #include "bitmap_font.h"
 #include "window_renderer.h"
 #include "special_effects.h"
@@ -125,6 +126,19 @@ namespace gxos {
                 Logger::write(LogLevel::Info, std::string("publishOut MT_Create payload=") + payload + " dstPid=" + std::to_string(dstPid));
             }
             ipc::Message out; out.type = (uint32_t)type; out.dstPid = dstPid; out.data.assign(payload.begin( ), payload.end( )); ipc::Bus::publish(kGuiChanOut, std::move(out), false); 
+        }
+
+        static std::string packMousePayload(int x, int y, int button, const std::string& action, uint64_t ownerPid, uint64_t windowId = 0) {
+            std::string payload = std::to_string(x) + "|" + std::to_string(y) + "|" + std::to_string(button) + "|" + action;
+#ifdef GX_ENABLE_EXPERIMENTAL_NATIVE_ELF_EXECUTION
+            if (windowId != 0 && gxos::apps::NativeAppProcessTable::IsNativeProcessId(ownerPid)) {
+                payload += "|0|" + std::to_string(windowId);
+            }
+#else
+            (void)ownerPid;
+            (void)windowId;
+#endif
+            return payload;
         }
 
         void Compositor::refreshDesktopItems( ) {
@@ -933,8 +947,8 @@ namespace gxos {
                     for (auto itZ = g_z.begin( ); itZ != g_z.end( ); ++itZ) { if (*itZ == id) { g_z.erase(itZ); break; } } g_z.push_back(id); 
                 } } requestRepaint( ); return 0; }
                 // pass to widget handling and general mouse handling
-                uint64_t ownerPid = 0; { std::lock_guard<std::mutex> lk(g_lock); ownerPid = inputOwnerPid( ); }
-                Compositor::handleMouse(mx, my, true, false); publishOut(MsgType::MT_InputMouse, std::to_string(mx) + "|" + std::to_string(my) + "|1|down", ownerPid); return 0;
+                uint64_t ownerPid = 0; uint64_t targetWindow = 0; { std::lock_guard<std::mutex> lk(g_lock); WinInfo* hitWin = hitWindowAt(mx, my); if (hitWin) { ownerPid = hitWin->ownerPid; targetWindow = hitWin->id; } else { ownerPid = inputOwnerPid( ); targetWindow = g_modalWindow ? g_modalWindow : g_focus; } }
+                Compositor::handleMouse(mx, my, true, false); publishOut(MsgType::MT_InputMouse, packMousePayload(mx, my, 1, "down", ownerPid, targetWindow), ownerPid); return 0;
             }
             case WM_RBUTTONDOWN: {
                 int mx = GET_X_LPARAM(l); int my = GET_Y_LPARAM(l); { std::lock_guard<std::mutex> lk(g_lock); if (blockInputBehindModal(mx, my)) { requestRepaint( ); return 0; } } if (g_startMenuVisible && mx >= g_startMenuRect.left && mx <= g_startMenuRect.right && my >= g_startMenuRect.top && my <= g_startMenuRect.bottom) { int idx = (my - (g_startMenuRect.top + 4)) / 20; if (idx >= 0 && idx < (int)g_items.size( )) { if (g_items[idx].pinned) unpinAction(g_items[idx].action); else pinAction(g_items[idx].action); requestRepaint( ); return 0; } }
@@ -977,7 +991,7 @@ namespace gxos {
                     
                     // If right-click is on a window, forward the event to the application
                     if (hitWin) {
-                        publishOut(MsgType::MT_InputMouse, std::to_string(mx) + "|" + std::to_string(my) + "|2|down", ownerPid);
+                        publishOut(MsgType::MT_InputMouse, packMousePayload(mx, my, 2, "down", ownerPid, hitWin->id), ownerPid);
                         requestRepaint();
                         return 0;
                     }
@@ -1011,8 +1025,8 @@ namespace gxos {
                     }
                     g_iconDragActive = false; g_iconDragPending = false; requestRepaint( ); break;
                 }
-                uint64_t ownerPid = 0; { std::lock_guard<std::mutex> lk(g_lock); ownerPid = inputOwnerPid( ); }
-                Compositor::handleMouse(mx, my, false, true); publishOut(MsgType::MT_InputMouse, std::to_string(mx) + "|" + std::to_string(my) + "|1|up", ownerPid);
+                uint64_t ownerPid = 0; uint64_t targetWindow = 0; { std::lock_guard<std::mutex> lk(g_lock); ownerPid = inputOwnerPid( ); targetWindow = g_modalWindow ? g_modalWindow : g_focus; }
+                Compositor::handleMouse(mx, my, false, true); publishOut(MsgType::MT_InputMouse, packMousePayload(mx, my, 1, "up", ownerPid, targetWindow), ownerPid);
             } break;
             case WM_MOUSEMOVE: {
                 int mx = GET_X_LPARAM(l); int my = GET_Y_LPARAM(l);
@@ -1035,8 +1049,8 @@ namespace gxos {
                 if (g_iconDragPending && !g_iconDragActive) { if (std::abs(mx - g_iconDragStartX) >= 4 || std::abs(my - g_iconDragStartY) >= 4) { g_iconDragActive = true; } }
                 if (g_iconDragActive && g_iconDragIndex >= 0 && g_iconDragIndex < (int)g_items.size( )) { RECT cr2; GetClientRect(h, &cr2); int taskbarH2 = 40; int nx = mx - g_iconDragOffX; int ny = my - g_iconDragOffY; if (nx < 0) nx = 0; if (ny < 0) ny = 0; const int cellW2 = 84; const int cellH2 = 94; if (nx + cellW2 > cr2.right) nx = cr2.right - cellW2; if (ny + cellH2 > cr2.bottom - taskbarH2) ny = cr2.bottom - taskbarH2 - cellH2; g_items[g_iconDragIndex].ix = nx; g_items[g_iconDragIndex].iy = ny; requestRepaint( ); break; }
                 if (g_iconDragPending) { break; } // Skip handleMouse while drag is pending
-                uint64_t ownerPid = 0; { std::lock_guard<std::mutex> lk(g_lock); ownerPid = inputOwnerPid( ); }
-                Compositor::handleMouse(mx, my, false, false); publishOut(MsgType::MT_InputMouse, std::to_string(mx) + "|" + std::to_string(my) + "|0|move", ownerPid);
+                uint64_t ownerPid = 0; uint64_t targetWindow = 0; { std::lock_guard<std::mutex> lk(g_lock); WinInfo* hitWin = hitWindowAt(mx, my); if (hitWin) { ownerPid = hitWin->ownerPid; targetWindow = hitWin->id; } else { ownerPid = inputOwnerPid( ); targetWindow = g_modalWindow ? g_modalWindow : g_focus; } }
+                Compositor::handleMouse(mx, my, false, false); publishOut(MsgType::MT_InputMouse, packMousePayload(mx, my, 0, "move", ownerPid, targetWindow), ownerPid);
             } break;
             case WM_KEYDOWN: case WM_SYSKEYDOWN: {
                 int key = (int)w;
@@ -1354,7 +1368,7 @@ namespace gxos {
                             
                             // If right-click is on a window, forward the event to the application
                             if (hitWin) {
-                                publishOut(MsgType::MT_InputMouse, std::to_string(mx) + "|" + std::to_string(my) + "|2|down", ownerPid);
+                                publishOut(MsgType::MT_InputMouse, packMousePayload(mx, my, 2, "down", ownerPid, hitWin->id), ownerPid);
                                 invalidate(0);
                             } else {
                                 // Desktop right-click - show desktop context menu

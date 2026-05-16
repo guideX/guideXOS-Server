@@ -50,6 +50,21 @@ enum : int {
     GX_KEY_MOD_ALT = 4
 };
 
+enum : int {
+    GX_MOUSE_ACTION_MOVE = 0,
+    GX_MOUSE_ACTION_DOWN = 1,
+    GX_MOUSE_ACTION_UP = 2,
+    GX_MOUSE_ACTION_DOUBLE_CLICK = 3,
+    GX_MOUSE_BUTTON_NONE = 0,
+    GX_MOUSE_BUTTON_LEFT = 1,
+    GX_MOUSE_BUTTON_RIGHT = 2,
+    GX_MOUSE_BUTTON_MIDDLE = 3
+};
+
+constexpr int GX_MOUSE_PACK(int button, int action) { return ((button & 0xFFFF) << 16) | (action & 0xFFFF); }
+constexpr int GX_MOUSE_ACTION(int value) { return value & 0xFFFF; }
+constexpr int GX_MOUSE_BUTTON(int value) { return (value >> 16) & 0xFFFF; }
+
 struct gx_event {
     uint32_t size = 0;
     gx_event_type type = GX_EVENT_NONE;
@@ -142,6 +157,12 @@ struct NativeAppRuntimeContext {
     int lastKeyCode = 0;
     int lastKeyAction = 0;
     int lastKeyModifiers = 0;
+    uint32_t mouseEventCount = 0;
+    gx_handle lastMouseWindow = 0;
+    int lastMouseX = 0;
+    int lastMouseY = 0;
+    int lastMousePackedButtonAction = 0;
+    int lastMouseModifiers = 0;
 };
 
 struct NativeGxAppContext {

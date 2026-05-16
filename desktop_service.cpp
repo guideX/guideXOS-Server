@@ -472,6 +472,12 @@ namespace gxos {
             oss << "lastKeyCode: " << executionResult.lastKeyCode << "\n";
             oss << "lastKeyAction: " << executionResult.lastKeyAction << "\n";
             oss << "lastKeyModifiers: " << executionResult.lastKeyModifiers << "\n";
+            oss << "mouseEventCount: " << executionResult.mouseEventCount << "\n";
+            oss << "lastMouseWindow: " << executionResult.lastMouseWindow << "\n";
+            oss << "lastMouseX: " << executionResult.lastMouseX << "\n";
+            oss << "lastMouseY: " << executionResult.lastMouseY << "\n";
+            oss << "lastMousePackedButtonAction: " << executionResult.lastMousePackedButtonAction << "\n";
+            oss << "lastMouseModifiers: " << executionResult.lastMouseModifiers << "\n";
             if (!executionResult.diagnostics.empty()) {
                 oss << "executionDiagnostics: ";
                 for (size_t i = 0; i < executionResult.diagnostics.size(); ++i) {

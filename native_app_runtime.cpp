@@ -149,6 +149,50 @@ bool parseKeyPayload(const std::string& payload, int& keyCode, int& action, int&
     return true;
 }
 
+bool parseMousePayload(const std::string& payload, int& x, int& y, int& packedButtonAction, int& modifiers, uint64_t& window) {
+    std::istringstream iss(payload);
+    std::string xText;
+    std::string yText;
+    std::string buttonText;
+    std::string actionText;
+    std::string modifiersText;
+    std::string windowText;
+    std::getline(iss, xText, '|');
+    std::getline(iss, yText, '|');
+    std::getline(iss, buttonText, '|');
+    std::getline(iss, actionText, '|');
+    std::getline(iss, modifiersText, '|');
+    std::getline(iss, windowText, '|');
+
+    int button = GX_MOUSE_BUTTON_NONE;
+    int action = GX_MOUSE_ACTION_MOVE;
+    if (!tryParseInt(xText, x) || !tryParseInt(yText, y)) return false;
+    if (!tryParseInt(buttonText, button)) return false;
+    if (button < GX_MOUSE_BUTTON_NONE || button > GX_MOUSE_BUTTON_MIDDLE) return false;
+
+    if (actionText == "move") {
+        action = GX_MOUSE_ACTION_MOVE;
+    } else if (actionText == "down") {
+        action = GX_MOUSE_ACTION_DOWN;
+    } else if (actionText == "up") {
+        action = GX_MOUSE_ACTION_UP;
+    } else if (actionText == "double" || actionText == "double_click") {
+        action = GX_MOUSE_ACTION_DOUBLE_CLICK;
+    } else if (tryParseInt(actionText, action)) {
+        if (action < GX_MOUSE_ACTION_MOVE || action > GX_MOUSE_ACTION_DOUBLE_CLICK) return false;
+    } else {
+        return false;
+    }
+
+    modifiers = 0;
+    if (!modifiersText.empty() && !tryParseInt(modifiersText, modifiers)) return false;
+
+    window = 0;
+    if (!windowText.empty() && !tryParseUnsigned64(windowText, window)) return false;
+    packedButtonAction = GX_MOUSE_PACK(button, action);
+    return true;
+}
+
 bool ownsWindow(const NativeAppRuntimeContext& context, gx_handle window) {
     for (gx_handle createdWindow : context.createdWindowHandles) {
         if (createdWindow == window) return true;
@@ -176,6 +220,7 @@ gx_event_type eventTypeForMessage(uint32_t messageType) {
     if (messageType == static_cast<uint32_t>(gui::MsgType::MT_Close)) return GX_EVENT_WINDOW_CLOSE;
     if (messageType == static_cast<uint32_t>(gui::MsgType::MT_SetFocus)) return GX_EVENT_WINDOW_FOCUS;
     if (messageType == static_cast<uint32_t>(gui::MsgType::MT_InputKey)) return GX_EVENT_KEY;
+    if (messageType == static_cast<uint32_t>(gui::MsgType::MT_InputMouse)) return GX_EVENT_MOUSE;
     if (messageType == static_cast<uint32_t>(gui::MsgType::MT_RequestFrame)) return GX_EVENT_WINDOW_PAINT;
     return GX_EVENT_NONE;
 }
@@ -443,11 +488,18 @@ gx_result hostPollEvent(NativeGxAppContext* ctx, gx_event* outEvent, int timeout
         int keyCode = 0;
         int keyAction = 0;
         int keyModifiers = 0;
+        int mouseX = 0;
+        int mouseY = 0;
+        int mousePackedButtonAction = 0;
+        int mouseModifiers = 0;
         bool parsed = false;
         if (eventType == GX_EVENT_WINDOW_PAINT) {
             parsed = parseFramePayload(payload, window, paintWidth, paintHeight);
         } else if (eventType == GX_EVENT_KEY) {
             parsed = parseKeyPayload(payload, keyCode, keyAction, keyModifiers, window);
+            if (parsed && window == 0) window = context->focusedOwnedWindow;
+        } else if (eventType == GX_EVENT_MOUSE) {
+            parsed = parseMousePayload(payload, mouseX, mouseY, mousePackedButtonAction, mouseModifiers, window);
             if (parsed && window == 0) window = context->focusedOwnedWindow;
         } else {
             parsed = parseWindowId(payload, window);
@@ -486,6 +538,17 @@ gx_result hostPollEvent(NativeGxAppContext* ctx, gx_event* outEvent, int timeout
             context->lastKeyCode = keyCode;
             context->lastKeyAction = keyAction;
             context->lastKeyModifiers = keyModifiers;
+        } else if (eventType == GX_EVENT_MOUSE) {
+            outEvent->param1 = mouseX;
+            outEvent->param2 = mouseY;
+            outEvent->param3 = mousePackedButtonAction;
+            outEvent->param4 = mouseModifiers;
+            ++context->mouseEventCount;
+            context->lastMouseWindow = window;
+            context->lastMouseX = mouseX;
+            context->lastMouseY = mouseY;
+            context->lastMousePackedButtonAction = mousePackedButtonAction;
+            context->lastMouseModifiers = mouseModifiers;
         }
         context->lastEventType = eventType;
         context->lastEventWindow = window;

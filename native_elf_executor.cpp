@@ -297,6 +297,12 @@ NativeElfExecutionResult NativeElfExecutor::Execute(
     result.lastKeyCode = runtimeContext.lastKeyCode;
     result.lastKeyAction = runtimeContext.lastKeyAction;
     result.lastKeyModifiers = runtimeContext.lastKeyModifiers;
+    result.mouseEventCount = runtimeContext.mouseEventCount;
+    result.lastMouseWindow = runtimeContext.lastMouseWindow;
+    result.lastMouseX = runtimeContext.lastMouseX;
+    result.lastMouseY = runtimeContext.lastMouseY;
+    result.lastMousePackedButtonAction = runtimeContext.lastMousePackedButtonAction;
+    result.lastMouseModifiers = runtimeContext.lastMouseModifiers;
     result.lifecycleStateAfterExecution = NativeAppRuntime::ToString(runtimeContext.lifecycleState);
     result.cleanupAttempted = runtimeContext.cleanupAttempted;
     result.cleanedWindowCount = runtimeContext.cleanedWindowCount;
@@ -344,6 +350,12 @@ NativeElfExecutionResult NativeElfExecutor::Execute(
     addDiagnostic(result, "last key code: " + std::to_string(result.lastKeyCode));
     addDiagnostic(result, "last key action: " + std::to_string(result.lastKeyAction));
     addDiagnostic(result, "last key modifiers: " + std::to_string(result.lastKeyModifiers));
+    addDiagnostic(result, "mouse event count: " + std::to_string(result.mouseEventCount));
+    addDiagnostic(result, "last mouse window: " + std::to_string(result.lastMouseWindow));
+    addDiagnostic(result, "last mouse x: " + std::to_string(result.lastMouseX));
+    addDiagnostic(result, "last mouse y: " + std::to_string(result.lastMouseY));
+    addDiagnostic(result, "last mouse packed button action: " + std::to_string(result.lastMousePackedButtonAction));
+    addDiagnostic(result, "last mouse modifiers: " + std::to_string(result.lastMouseModifiers));
 #endif
 
     result.message = joinDiagnostics(result.diagnostics);

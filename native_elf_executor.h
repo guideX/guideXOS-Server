@@ -52,6 +52,12 @@ struct NativeElfExecutionResult {
     int lastKeyCode = 0;
     int lastKeyAction = 0;
     int lastKeyModifiers = 0;
+    uint32_t mouseEventCount = 0;
+    uint64_t lastMouseWindow = 0;
+    int lastMouseX = 0;
+    int lastMouseY = 0;
+    int lastMousePackedButtonAction = 0;
+    int lastMouseModifiers = 0;
     uint64_t runtimeId = 0;
     std::string lifecycleStateBeforeExecution;
     std::string lifecycleStateAfterExecution;
