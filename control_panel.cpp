@@ -10,6 +10,7 @@
 #include "process.h"
 #include "ipc_bus.h"
 #include "desktop_service.h"
+#include <chrono>
 #include <sstream>
 #include <algorithm>
 
@@ -151,11 +152,6 @@ int ControlPanel::main(int argc, char** argv) {
                         break;
                     }
                     
-                    case MsgType::MT_Paint: {
-                        render();
-                        break;
-                    }
-                    
                     case MsgType::MT_InputMouse: {
                         std::istringstream iss(payload);
                         std::string xs, ys, btns;
@@ -223,14 +219,19 @@ int ControlPanel::main(int argc, char** argv) {
 void ControlPanel::render() {
     if (s_windowId == 0) return;
     
-    // Clear background
+    // Clear previous draw commands
     ipc::Message msg;
-    msg.type = (uint32_t)MsgType::MT_DrawClear;
-    std::ostringstream oss;
-    oss << s_windowId << "|240|240|240";  // Light gray background
-    std::string payload = oss.str();
+    msg.type = (uint32_t)MsgType::MT_DrawText;
+    std::string payload = std::to_string(s_windowId) + "|\f";
     msg.data.assign(payload.begin(), payload.end());
     ipc::Bus::publish("gui.input", std::move(msg), false);
+
+    // Light gray background
+    ipc::Message bgMsg;
+    bgMsg.type = (uint32_t)MsgType::MT_DrawRect;
+    std::string bgPayload = std::to_string(s_windowId) + "|0|0|640|480|240|240|240";
+    bgMsg.data.assign(bgPayload.begin(), bgPayload.end());
+    ipc::Bus::publish("gui.input", std::move(bgMsg), false);
     
     // Title
     ipc::Message titleMsg;
@@ -258,13 +259,6 @@ void ControlPanel::render() {
         
         drawItem(itemX, itemY, s_items[i], hover, selected);
     }
-    
-    // Request paint
-    ipc::Message paintMsg;
-    paintMsg.type = (uint32_t)MsgType::MT_Paint;
-    std::string paintPayload = std::to_string(s_windowId);
-    paintMsg.data.assign(paintPayload.begin(), paintPayload.end());
-    ipc::Bus::publish("gui.input", std::move(paintMsg), false);
 }
 
 void ControlPanel::drawItem(int x, int y, const PanelItem& item, bool hover, bool selected) {

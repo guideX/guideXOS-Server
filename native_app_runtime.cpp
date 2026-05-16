@@ -7,6 +7,7 @@
 #include "native_app_process_table.h"
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <fstream>
 #include <limits>
@@ -18,6 +19,7 @@ namespace {
 
 NativeAppLifecycleState g_hostLifecycleState = NativeAppLifecycleState::Created;
 NativeAppRuntimeContext* g_activeRuntimeContext = nullptr;
+std::atomic<uint64_t> g_nextRuntimeId{ 1 };
 
 constexpr int kMinWindowWidth = 64;
 constexpr int kMinWindowHeight = 64;

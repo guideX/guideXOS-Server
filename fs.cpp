@@ -56,8 +56,8 @@ namespace gxos {
         for(size_t i=0; i<path.size(); ++i){
             char c = path[i];
             current.push_back(c);
-            if(c != '/' && c != '\' && i + 1 != path.size()) continue;
-            while(!current.empty() && (current.back() == '/' || current.back() == '\')) current.pop_back();
+            if(c != '/' && c != '\\' && i + 1 != path.size()) continue;
+            while(!current.empty() && (current.back() == '/' || current.back() == '\\')) current.pop_back();
             if(current.empty()) continue;
 #ifdef _WIN32
             DWORD attrs = GetFileAttributesA(current.c_str());

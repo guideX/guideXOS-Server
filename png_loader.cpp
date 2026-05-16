@@ -92,8 +92,8 @@ ImagePtr PngLoader::LoadFromMemory(const uint8_t* bytes, size_t byteCount, const
         return nullptr;
     }
 
-    const size_t byteCount = static_cast<size_t>(width) * static_cast<size_t>(height) * static_cast<size_t>(requestedChannels);
-    std::copy(decoded, decoded + byteCount, image->Pixels);
+    const size_t decodedByteCount = static_cast<size_t>(width) * static_cast<size_t>(height) * static_cast<size_t>(requestedChannels);
+    std::copy(decoded, decoded + decodedByteCount, image->Pixels);
     stbi_image_free(decoded);
 
     Logger::write(LogLevel::Info,

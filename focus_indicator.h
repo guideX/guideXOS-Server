@@ -9,6 +9,8 @@
 
 #pragma once
 
+#include <cstdint>
+
 #ifdef _WIN32
 #include <windows.h>
 

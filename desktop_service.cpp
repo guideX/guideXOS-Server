@@ -22,7 +22,6 @@
 #include "shutdown_dialog.h"
 #include "disk_manager.h"
 #include "control_panel.h"
-#include "hd_installer.h"
 #include "package_manager.h"
 #include <algorithm>
 #include <fstream>
@@ -113,10 +112,9 @@ namespace gxos {
             s_lastBuiltInRegisterResult = s_appRegistry.RegisterBuiltInAppsAsManifests();
             logScanIssues("Duplicate app id", s_lastBuiltInRegisterResult.duplicateApps);
 
-            s_apps.clear();
             refreshRegisteredAppsFromRegistry();
             s_appRegistryInitialized = true;
-            Logger::write(LogLevel::Info, "AppRegistry initialized, desktop apps=" + std::to_string(s_apps.size()));
+            Logger::write(LogLevel::Info, "AppRegistry initialized, desktop apps=" + std::to_string(DesktopService::GetRegisteredApps().size()));
         }
 
         static std::string canonicalAppName(const std::string& name) {
@@ -652,7 +650,8 @@ namespace gxos {
                 apps::ControlPanel::Launch();
             }
             else if (appName == "HDInstaller") {
-                apps::HDInstaller::Launch();
+                error = "HD Installer is not available in this runtime target";
+                return false;
             }
             else {
                 error = "Application launcher not implemented: " + name;

@@ -232,7 +232,7 @@ using namespace gxos;
         } else if (cmd=="console.pop"){ if(!requireConsole()) continue; uint64_t to=0; iss>>to; if(to==0) to=200; ipc::Message m; if(ipc::Bus::pop("console.output", m, to)){ std::string s(m.data.begin(), m.data.end()); std::cout<<"Console: "<<s<<std::endl; } else std::cout<<"No console output"<<std::endl;
         } else if (cmd=="mem"){ std::cout << "mem in use=" << Allocator::bytesInUse()/1024 << " KB peak=" << Allocator::peakBytes()/1024 << " KB" << std::endl;
         } else if (cmd=="pbytes"){ auto list = Allocator::listPidBytes(); std::cout<<"PID   BYTES"<<std::endl; for(auto& pr:list){ std::cout<<std::setw(5)<<pr.first<<" "<<pr.second<<std::endl; }
-        else if (cmd=="pkg.install"){
+        } else if (cmd=="pkg.install"){
             std::string path; iss>>path; if(path.empty()){ std::cout<<"pkg.install <path.gxapp>"<<std::endl; continue; }
             auto result = PackageManager::InstallGXApp(path);
             if(result.success) std::cout<<"Installed "<<result.applicationName<<" -> "<<result.installedPath<<std::endl;
@@ -256,7 +256,7 @@ using namespace gxos;
             std::cout<<"Installed GXAPPs ("<<apps.size()<<"):"<<std::endl;
             for(const auto& app : apps) std::cout<<"  "<<app<<std::endl;
             continue;
-        }        } else if (cmd=="help"){ help();
+        } else if (cmd=="help"){ help();
         }
         // Desktop and Taskbar convenience commands
         else if (cmd=="desktop.wallpaper"){

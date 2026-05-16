@@ -6,7 +6,7 @@ echo Building guideXOS Server...
 
 REM Compiler settings
 set CXX=g++
-set CXXFLAGS=-std=c++17 -Wall -O2 -I.
+set CXXFLAGS=-std=c++17 -Wall -O2 -iquote .
 set LDFLAGS=-lws2_32 -lgdi32 -luser32 -lmsimg32
 
 REM Source files (exclude kernel)
@@ -24,9 +24,13 @@ console_service.cpp ^
 console_window.cpp ^
 desktop_service.cpp ^
 desktop_state.cpp ^
+disk_manager.cpp ^
+control_panel.cpp ^
 elf_validator.cpp ^
 executable_memory.cpp ^
 file_explorer.cpp ^
+firewall.cpp ^
+focus_indicator.cpp ^
 fs.cpp ^
 gxapp_container.cpp ^
 gxapp_loader.cpp ^
@@ -36,24 +40,38 @@ image_renderer.cpp ^
 image_viewer.cpp ^
 icons.cpp ^
 ipc_bus.cpp ^
+kernel/core/architecture_detector.cpp ^
+lifecycle.cpp ^
 logger.cpp ^
+message_box.cpp ^
+module_manager.cpp ^
 native_app_process_table.cpp ^
 native_app_runtime.cpp ^
 native_elf_executor.cpp ^
 native_elf_image_loader.cpp ^
 native_elf_launch_pipeline.cpp ^
 notepad.cpp ^
+notification_manager.cpp ^
+onscreen_keyboard.cpp ^
+open_dialog.cpp ^
 package_manager.cpp ^
+paint.cpp ^
 process.cpp ^
 png_loader.cpp ^
+right_click_menu.cpp ^
 save_changes_dialog.cpp ^
 save_dialog.cpp ^
 scheduler.cpp ^
 server.cpp ^
+shutdown_dialog.cpp ^
+special_effects.cpp ^
+system_tray.cpp ^
 task_manager.cpp ^
 universal_app_loader.cpp ^
+video_backend.cpp ^
 vfs.cpp ^
 vnc_server.cpp ^
+welcome.cpp ^
 workspace_manager.cpp
 
 REM Output

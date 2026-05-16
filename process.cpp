@@ -3,6 +3,7 @@
 #include "scheduler.h"
 #include "logger.h"
 #include "allocator.h"
+#include <cstring>
 #include <thread>
 
 namespace gxos {
