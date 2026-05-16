@@ -86,6 +86,8 @@ struct NativeHostCallTable {
     gx_result (*wait_for_close)(NativeGxAppContext* ctx, gx_handle window, int timeoutMs) = nullptr;
     gx_result (*poll_event)(NativeGxAppContext* ctx, gx_event* outEvent, int timeoutMs) = nullptr;
     gx_result (*exit)(NativeGxAppContext* ctx, gx_result exitCode) = nullptr;
+    gx_result (*file_read_all)(NativeGxAppContext* ctx, const char* path, void* buffer, uint32_t bufferSize, uint32_t* outBytesRead) = nullptr;
+    gx_result (*file_exists)(NativeGxAppContext* ctx, const char* path, uint32_t* outExists) = nullptr;
 };
 
 enum class NativeAppLifecycleState {
@@ -163,6 +165,11 @@ struct NativeAppRuntimeContext {
     int lastMouseY = 0;
     int lastMousePackedButtonAction = 0;
     int lastMouseModifiers = 0;
+    uint32_t fileReadCallCount = 0;
+    uint32_t fileExistsCallCount = 0;
+    std::string lastFilePath;
+    uint32_t lastFileReadBytes = 0;
+    gx_result lastFileIoResult = GX_OK;
 };
 
 struct NativeGxAppContext {

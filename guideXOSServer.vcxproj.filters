@@ -1447,6 +1447,8 @@
     <Text Include="build_output.txt" />
     <Text Include="build.log" />
     <Text Include="sdk\samples\helloworld\CMakeLists.txt" />
+    <Text Include="sdk\samples\helloworld\resources\message.txt" />
+    <Text Include="Apps\HelloWorld\resources\message.txt" />
   </ItemGroup>
   <ItemGroup>
     <Page Include="GuideXOS.FileExplorer\Views\MainWindow.xaml" />

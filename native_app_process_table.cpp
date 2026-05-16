@@ -57,6 +57,11 @@ void applyRuntimeState(NativeAppProcessInfo& process, const NativeAppRuntimeCont
     process.lastMouseY = context.lastMouseY;
     process.lastMousePackedButtonAction = context.lastMousePackedButtonAction;
     process.lastMouseModifiers = context.lastMouseModifiers;
+    process.fileReadCallCount = context.fileReadCallCount;
+    process.fileExistsCallCount = context.fileExistsCallCount;
+    process.lastFilePath = context.lastFilePath;
+    process.lastFileReadBytes = context.lastFileReadBytes;
+    process.lastFileIoResult = context.lastFileIoResult;
 }
 
 } // namespace

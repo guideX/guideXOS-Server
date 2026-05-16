@@ -23,7 +23,8 @@
   ],
   "permissions": [
     "log",
-    "window"
+    "window",
+    "file.read"
   ],
   "fileAssociations": [],
   "defaultWindow": {

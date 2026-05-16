@@ -42,6 +42,7 @@ bool AppManifestValidator::IsKnownPermission(const std::string& permission) {
         "input.pointer",
         "log",
         "window",
+        "file.read",
         "system.settings",
         "hypervisor.guest",
         "service.background"

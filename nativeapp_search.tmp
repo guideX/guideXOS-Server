@@ -1,0 +1,48 @@
+﻿D:\dev\guideXOSServer\compositor.cpp:134: if (windowId != 0 && gxos::apps::NativeAppProcessTable::IsNativeProcessId(ownerPid)) {
+D:\dev\guideXOSServer\console_service.cpp:29: std::vector<gxos::apps::NativeAppProcessInfo> processes = gxos::apps::NativeAppProcessTable::List();
+D:\dev\guideXOSServer\console_service.cpp:82: if(startsWith(line, "nativeapp.inspect ")) { publishOutput(gxos::gui::DesktopService::InspectNativeAppPipeline(trim(line.substr(18)))); continue; }
+D:\dev\guideXOSServer\console_service.cpp:83: if(startsWith(line, "nativeapp.smoketest ")) { publishOutput(gxos::gui::DesktopService::NativeAppPipelineSmokeTest(trim(line.substr(20)))); continue; }
+D:\dev\guideXOSServer\console_service.cpp:84: if(line=="nativeapp.processes") { publishOutput(nativeAppProcessesDiagnostic()); continue; }
+D:\dev\guideXOSServer\desktop_service.cpp:311: std::string DesktopService::InspectNativeAppPipeline(const std::string& appIdOrDisplayName) {
+D:\dev\guideXOSServer\desktop_service.cpp:315: oss << "nativeapp.inspect " << appIdOrDisplayName << "\n";
+D:\dev\guideXOSServer\desktop_service.cpp:495: std::string DesktopService::NativeAppPipelineSmokeTest(const std::string& appIdOrDisplayName) {
+D:\dev\guideXOSServer\desktop_service.cpp:497: oss << "NativeAppPipelineSmokeTest(" << appIdOrDisplayName << ")\n";
+D:\dev\guideXOSServer\desktop_service.cpp:498: oss << InspectNativeAppPipeline(appIdOrDisplayName);
+D:\dev\guideXOSServer\desktop_service.cpp:540: error = "Native app executor available; use nativeapp.inspect or nativeapp.smoketest for experimental execution";
+D:\dev\guideXOSServer\desktop_service.h:67: static std::string InspectNativeAppPipeline(const std::string& appIdOrDisplayName);
+D:\dev\guideXOSServer\desktop_service.h:68: static std::string NativeAppPipelineSmokeTest(const std::string& appIdOrDisplayName);
+D:\dev\guideXOSServer\native_app_process_table.cpp:69: uint64_t NativeAppProcessTable::AllocateRuntimeId() {
+D:\dev\guideXOSServer\native_app_process_table.cpp:77: void NativeAppProcessTable::RegisterPrepared(const NativeAppRuntimeContext& context, bool experimentalExecutionEnabled, const std::string& hostArchitecture) {
+D:\dev\guideXOSServer\native_app_process_table.cpp:110: void NativeAppProcessTable::MarkRunning(uint64_t runtimeId) {
+D:\dev\guideXOSServer\native_app_process_table.cpp:123: void NativeAppProcessTable::UpdateFromRuntime(const NativeAppRuntimeContext& context) {
+D:\dev\guideXOSServer\native_app_process_table.cpp:137: void NativeAppProcessTable::MarkCompleted(uint64_t runtimeId, NativeAppLifecycleState state, int32_t exitCode, const std::string& failureReason) {
+D:\dev\guideXOSServer\native_app_process_table.cpp:155: std::vector<NativeAppProcessInfo> NativeAppProcessTable::List() {
+D:\dev\guideXOSServer\native_app_process_table.cpp:164: bool NativeAppProcessTable::Find(uint64_t runtimeId, NativeAppProcessInfo& outInfo) {
+D:\dev\guideXOSServer\native_app_process_table.cpp:179: bool NativeAppProcessTable::IsNativeProcessId(uint64_t processId) {
+D:\dev\guideXOSServer\native_app_process_table.h:61: class NativeAppProcessTable {
+D:\dev\guideXOSServer\native_app_runtime.cpp:317: NativeAppProcessTable::UpdateFromRuntime(*context);
+D:\dev\guideXOSServer\native_app_runtime.cpp:324: NativeAppProcessTable::UpdateFromRuntime(*context);
+D:\dev\guideXOSServer\native_app_runtime.cpp:332: NativeAppProcessTable::UpdateFromRuntime(*context);
+D:\dev\guideXOSServer\native_app_runtime.cpp:340: NativeAppProcessTable::UpdateFromRuntime(*context);
+D:\dev\guideXOSServer\native_app_runtime.cpp:359: NativeAppProcessTable::UpdateFromRuntime(*context);
+D:\dev\guideXOSServer\native_app_runtime.cpp:366: NativeAppProcessTable::UpdateFromRuntime(*context);
+D:\dev\guideXOSServer\native_app_runtime.cpp:374: NativeAppProcessTable::UpdateFromRuntime(*context);
+D:\dev\guideXOSServer\native_app_runtime.cpp:382: NativeAppProcessTable::UpdateFromRuntime(*context);
+D:\dev\guideXOSServer\native_app_runtime.cpp:390: NativeAppProcessTable::UpdateFromRuntime(*context);
+D:\dev\guideXOSServer\native_app_runtime.cpp:397: NativeAppProcessTable::UpdateFromRuntime(*context);
+D:\dev\guideXOSServer\native_app_runtime.cpp:404: NativeAppProcessTable::UpdateFromRuntime(*context);
+D:\dev\guideXOSServer\native_app_runtime.cpp:411: NativeAppProcessTable::UpdateFromRuntime(*context);
+D:\dev\guideXOSServer\native_app_runtime.cpp:422: NativeAppProcessTable::UpdateFromRuntime(*context);
+D:\dev\guideXOSServer\native_app_runtime.cpp:477: NativeAppProcessTable::UpdateFromRuntime(*context);
+D:\dev\guideXOSServer\native_app_runtime.cpp:556: NativeAppProcessTable::UpdateFromRuntime(*context);
+D:\dev\guideXOSServer\native_app_runtime.cpp:563: NativeAppProcessTable::UpdateFromRuntime(*context);
+D:\dev\guideXOSServer\native_app_runtime.cpp:571: NativeAppProcessTable::UpdateFromRuntime(*context);
+D:\dev\guideXOSServer\native_app_runtime.cpp:578: NativeAppProcessTable::UpdateFromRuntime(*context);
+D:\dev\guideXOSServer\native_app_runtime.cpp:597: NativeAppProcessTable::UpdateFromRuntime(*context);
+D:\dev\guideXOSServer\native_app_runtime.cpp:602: NativeAppProcessTable::UpdateFromRuntime(*context);
+D:\dev\guideXOSServer\native_app_runtime.cpp:621: NativeAppProcessTable::UpdateFromRuntime(*context);
+D:\dev\guideXOSServer\native_app_runtime.cpp:670: NativeAppProcessTable::UpdateFromRuntime(*context);
+D:\dev\guideXOSServer\native_app_runtime.cpp:677: NativeAppProcessTable::UpdateFromRuntime(*context);
+D:\dev\guideXOSServer\native_app_runtime.cpp:717: NativeAppProcessTable::UpdateFromRuntime(*context);
+D:\dev\guideXOSServer\native_app_runtime.cpp:723: NativeAppProcessTable::UpdateFromRuntime(*context);
+D:\dev\guideXOSServer\native_app_runtime.cpp:767: NativeAppProcessTable::UpdateFromRuntime(*context);

@@ -34,6 +34,8 @@ set_target_properties(helloworld.elf PROPERTIES
 
 add_custom_command(TARGET helloworld.elf POST_BUILD
     COMMAND "${CMAKE_COMMAND}" -E make_directory "${GUIDEXOS_APP_OUTPUT_DIR}"
+    COMMAND "${CMAKE_COMMAND}" -E make_directory "${GUIDEXOS_APP_OUTPUT_DIR}/resources"
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${CMAKE_CURRENT_LIST_DIR}/app.json" "${GUIDEXOS_APP_OUTPUT_DIR}/app.json"
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${CMAKE_CURRENT_LIST_DIR}/resources/message.txt" "${GUIDEXOS_APP_OUTPUT_DIR}/resources/message.txt"
     COMMENT "Copying guideXOS app manifest to Apps/HelloWorld"
 )

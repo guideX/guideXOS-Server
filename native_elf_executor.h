@@ -58,6 +58,11 @@ struct NativeElfExecutionResult {
     int lastMouseY = 0;
     int lastMousePackedButtonAction = 0;
     int lastMouseModifiers = 0;
+    uint32_t fileReadCallCount = 0;
+    uint32_t fileExistsCallCount = 0;
+    std::string lastFilePath;
+    uint32_t lastFileReadBytes = 0;
+    int32_t lastFileIoResult = GX_OK;
     uint64_t runtimeId = 0;
     std::string lifecycleStateBeforeExecution;
     std::string lifecycleStateAfterExecution;

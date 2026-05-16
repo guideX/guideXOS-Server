@@ -65,6 +65,8 @@ typedef struct gx_host_calls {
     gx_result (*wait_for_close)(gx_app_context* ctx, gx_handle window, int timeoutMs);
     gx_result (*poll_event)(gx_app_context* ctx, gx_event* outEvent, int timeoutMs);
     gx_result (*exit)(gx_app_context* ctx, gx_result exitCode);
+    gx_result (*file_read_all)(gx_app_context* ctx, const char* path, void* buffer, uint32_t bufferSize, uint32_t* outBytesRead);
+    gx_result (*file_exists)(gx_app_context* ctx, const char* path, uint32_t* outExists);
 } gx_host_calls;
 
 #ifdef __cplusplus

@@ -303,6 +303,11 @@ NativeElfExecutionResult NativeElfExecutor::Execute(
     result.lastMouseY = runtimeContext.lastMouseY;
     result.lastMousePackedButtonAction = runtimeContext.lastMousePackedButtonAction;
     result.lastMouseModifiers = runtimeContext.lastMouseModifiers;
+    result.fileReadCallCount = runtimeContext.fileReadCallCount;
+    result.fileExistsCallCount = runtimeContext.fileExistsCallCount;
+    result.lastFilePath = runtimeContext.lastFilePath;
+    result.lastFileReadBytes = runtimeContext.lastFileReadBytes;
+    result.lastFileIoResult = runtimeContext.lastFileIoResult;
     result.lifecycleStateAfterExecution = NativeAppRuntime::ToString(runtimeContext.lifecycleState);
     result.cleanupAttempted = runtimeContext.cleanupAttempted;
     result.cleanedWindowCount = runtimeContext.cleanedWindowCount;
@@ -356,6 +361,11 @@ NativeElfExecutionResult NativeElfExecutor::Execute(
     addDiagnostic(result, "last mouse y: " + std::to_string(result.lastMouseY));
     addDiagnostic(result, "last mouse packed button action: " + std::to_string(result.lastMousePackedButtonAction));
     addDiagnostic(result, "last mouse modifiers: " + std::to_string(result.lastMouseModifiers));
+    addDiagnostic(result, "fileRead call count: " + std::to_string(result.fileReadCallCount));
+    addDiagnostic(result, "fileExists call count: " + std::to_string(result.fileExistsCallCount));
+    if (!result.lastFilePath.empty()) addDiagnostic(result, "last file path: " + result.lastFilePath);
+    addDiagnostic(result, "last file read bytes: " + std::to_string(result.lastFileReadBytes));
+    addDiagnostic(result, "last file IO result: " + std::to_string(result.lastFileIoResult));
 #endif
 
     result.message = joinDiagnostics(result.diagnostics);

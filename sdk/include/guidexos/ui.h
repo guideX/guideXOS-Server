@@ -38,6 +38,16 @@ static inline gx_result gx_draw_label(gx_app_context* ctx, gx_handle window, int
     return ctx->host->draw_text(ctx, window, x, y, text);
 }
 
+static inline gx_result file_read_all(gx_app_context* ctx, const char* path, void* buffer, uint32_t bufferSize, uint32_t* outBytesRead) {
+    if (!ctx || !ctx->host || !ctx->host->file_read_all) return GX_ERROR_UNSUPPORTED;
+    return ctx->host->file_read_all(ctx, path, buffer, bufferSize, outBytesRead);
+}
+
+static inline gx_result file_exists(gx_app_context* ctx, const char* path, uint32_t* outExists) {
+    if (!ctx || !ctx->host || !ctx->host->file_exists) return GX_ERROR_UNSUPPORTED;
+    return ctx->host->file_exists(ctx, path, outExists);
+}
+
 static inline gx_result gx_draw_button(gx_app_context* ctx, gx_handle window, gx_rect rect, const char* label, int pressed) {
     gx_result result = gx_draw_panel(ctx, window, rect, pressed ? 0x606060u : 0x404040u);
     if (result != GX_OK) return result;

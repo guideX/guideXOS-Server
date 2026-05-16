@@ -6,12 +6,17 @@ echo Building guideXOS Server...
 
 REM Compiler settings
 set CXX=g++
-set CXXFLAGS=-std=c++14 -Wall -O2 -I.
+set CXXFLAGS=-std=c++17 -Wall -O2 -I.
 set LDFLAGS=-lws2_32 -lgdi32 -luser32 -lmsimg32
 
 REM Source files (exclude kernel)
 set SOURCES=^
 allocator.cpp ^
+app_launch_resolver.cpp ^
+app_manifest.cpp ^
+app_manifest_loader.cpp ^
+app_manifest_validator.cpp ^
+app_registry.cpp ^
 calculator.cpp ^
 clock.cpp ^
 compositor.cpp ^
@@ -19,6 +24,8 @@ console_service.cpp ^
 console_window.cpp ^
 desktop_service.cpp ^
 desktop_state.cpp ^
+elf_validator.cpp ^
+executable_memory.cpp ^
 file_explorer.cpp ^
 fs.cpp ^
 gxapp_container.cpp ^
@@ -30,6 +37,11 @@ image_viewer.cpp ^
 icons.cpp ^
 ipc_bus.cpp ^
 logger.cpp ^
+native_app_process_table.cpp ^
+native_app_runtime.cpp ^
+native_elf_executor.cpp ^
+native_elf_image_loader.cpp ^
+native_elf_launch_pipeline.cpp ^
 notepad.cpp ^
 package_manager.cpp ^
 process.cpp ^

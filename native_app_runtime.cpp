@@ -8,6 +8,8 @@
 
 #include <algorithm>
 #include <chrono>
+#include <fstream>
+#include <limits>
 #include <sstream>
 
 namespace gxos {
@@ -30,6 +32,8 @@ constexpr int kMinWaitForCloseTimeoutMs = 0;
 constexpr int kMaxWaitForCloseTimeoutMs = 300000;
 constexpr int kMinPollEventTimeoutMs = 0;
 constexpr int kMaxPollEventTimeoutMs = 30000;
+constexpr uint32_t kMaxFilePathLength = 240;
+constexpr uint32_t kMaxFileReadBytes = 64u * 1024u;
 
 std::string appLabel(const NativeAppRuntimeContext* context) {
     if (!context) return "<unknown>";
@@ -77,6 +81,38 @@ bool hasPermission(const NativeAppRuntimeContext& context, const std::string& pe
         if (granted == permission) return true;
     }
     return false;
+}
+
+bool pathContainsTraversal(const std::string& path) {
+    std::string::size_type segmentStart = 0;
+    for (std::string::size_type i = 0; i <= path.size(); ++i) {
+        if (i != path.size() && path[i] != '/' && path[i] != static_cast<char>(92)) continue;
+        if (i - segmentStart == 2 && path[segmentStart] == '.' && path[segmentStart + 1] == '.') return true;
+        segmentStart = i + 1;
+    }
+    return false;
+}
+
+gx_result resolveFileReadPath(NativeAppRuntimeContext& context, const char* path, std::string& resolvedPath) {
+    context.lastFilePath.clear();
+
+    if (!path || !path[0]) return GX_ERROR_INVALID_ARGUMENT;
+
+    std::string requestedPath(path);
+    context.lastFilePath = requestedPath;
+    if (requestedPath.size() > kMaxFilePathLength) return GX_ERROR_INVALID_ARGUMENT;
+    if (requestedPath.find('\0') != std::string::npos) return GX_ERROR_INVALID_ARGUMENT;
+    if (requestedPath.find(':') != std::string::npos) return GX_ERROR_PERMISSION_DENIED;
+    if (!context.appDirectory.empty() && requestedPath.rfind(context.appDirectory, 0) == 0) return GX_ERROR_PERMISSION_DENIED;
+    if (requestedPath[0] == '/' || requestedPath[0] == static_cast<char>(92)) return GX_ERROR_PERMISSION_DENIED;
+    if (requestedPath.size() >= 2 && requestedPath[1] == ':') return GX_ERROR_PERMISSION_DENIED;
+    if (pathContainsTraversal(requestedPath)) return GX_ERROR_PERMISSION_DENIED;
+    if (context.appDirectory.empty()) return GX_ERROR_INVALID_ARGUMENT;
+
+    resolvedPath = context.appDirectory;
+    if (!resolvedPath.empty() && resolvedPath.back() != '/' && resolvedPath.back() != static_cast<char>(92)) resolvedPath.push_back('/');
+    resolvedPath += requestedPath;
+    return GX_OK;
 }
 
 bool parseWindowId(const std::string& payload, uint64_t& id) {
@@ -262,6 +298,130 @@ uint32_t hostGetApiVersion(NativeGxAppContext* ctx) {
 
     context->lastApiVersionReturned = kGuideXOSNativeApiVersion;
     return kGuideXOSNativeApiVersion;
+}
+
+gx_result hostFileExists(NativeGxAppContext* ctx, const char* path, uint32_t* outExists) {
+    NativeAppRuntimeContext* context = runtimeContextFor(ctx);
+    if (!context) {
+        Logger::write(LogLevel::Warn, "[NativeAppHost] file_exists rejected: invalid app context or host table");
+        return GX_ERROR_INVALID_ARGUMENT;
+    }
+
+    ++context->fileExistsCallCount;
+    context->lastFileReadBytes = 0;
+    context->lastFileIoResult = GX_ERROR_INVALID_ARGUMENT;
+    if (outExists) *outExists = 0;
+
+    if (!outExists) {
+        Logger::write(LogLevel::Warn, "[NativeAppHost] App: " + appLabel(context) + " file_exists rejected: null output pointer");
+        NativeAppProcessTable::UpdateFromRuntime(*context);
+        return context->lastFileIoResult;
+    }
+
+    if (!hasPermission(*context, "file.read")) {
+        context->lastFileIoResult = GX_ERROR_PERMISSION_DENIED;
+        Logger::write(LogLevel::Warn, "[NativeAppHost] App: " + appLabel(context) + " file_exists denied: missing file.read permission");
+        NativeAppProcessTable::UpdateFromRuntime(*context);
+        return context->lastFileIoResult;
+    }
+
+    std::string resolvedPath;
+    context->lastFileIoResult = resolveFileReadPath(*context, path, resolvedPath);
+    if (context->lastFileIoResult != GX_OK) {
+        Logger::write(LogLevel::Warn, "[NativeAppHost] App: " + appLabel(context) + " file_exists rejected: unsafe path");
+        NativeAppProcessTable::UpdateFromRuntime(*context);
+        return context->lastFileIoResult;
+    }
+
+    std::ifstream input(resolvedPath.c_str(), std::ios::binary);
+    *outExists = input ? 1u : 0u;
+    context->lastFileIoResult = GX_OK;
+
+    NativeAppProcessTable::UpdateFromRuntime(*context);
+    Logger::write(LogLevel::Info, "[NativeAppHost] App: " + appLabel(context) + " file_exists path=\"" + context->lastFilePath + "\" exists=" + std::to_string(*outExists));
+    return context->lastFileIoResult;
+}
+
+gx_result hostFileReadAll(NativeGxAppContext* ctx, const char* path, void* buffer, uint32_t bufferSize, uint32_t* outBytesRead) {
+    NativeAppRuntimeContext* context = runtimeContextFor(ctx);
+    if (!context) {
+        Logger::write(LogLevel::Warn, "[NativeAppHost] file_read_all rejected: invalid app context or host table");
+        return GX_ERROR_INVALID_ARGUMENT;
+    }
+
+    ++context->fileReadCallCount;
+    context->lastFileReadBytes = 0;
+    context->lastFileIoResult = GX_ERROR_INVALID_ARGUMENT;
+    if (outBytesRead) *outBytesRead = 0;
+
+    if (!buffer || bufferSize == 0 || !outBytesRead) {
+        Logger::write(LogLevel::Warn, "[NativeAppHost] App: " + appLabel(context) + " file_read_all rejected: invalid buffer or output pointer");
+        NativeAppProcessTable::UpdateFromRuntime(*context);
+        return context->lastFileIoResult;
+    }
+
+    if (!hasPermission(*context, "file.read")) {
+        context->lastFileIoResult = GX_ERROR_PERMISSION_DENIED;
+        Logger::write(LogLevel::Warn, "[NativeAppHost] App: " + appLabel(context) + " file_read_all denied: missing file.read permission");
+        NativeAppProcessTable::UpdateFromRuntime(*context);
+        return context->lastFileIoResult;
+    }
+
+    std::string resolvedPath;
+    context->lastFileIoResult = resolveFileReadPath(*context, path, resolvedPath);
+    if (context->lastFileIoResult != GX_OK) {
+        Logger::write(LogLevel::Warn, "[NativeAppHost] App: " + appLabel(context) + " file_read_all rejected: unsafe path");
+        NativeAppProcessTable::UpdateFromRuntime(*context);
+        return context->lastFileIoResult;
+    }
+
+    try {
+        std::ifstream input(resolvedPath.c_str(), std::ios::binary);
+        if (!input) {
+            context->lastFileIoResult = GX_ERROR_FAILED;
+            NativeAppProcessTable::UpdateFromRuntime(*context);
+            return context->lastFileIoResult;
+        }
+
+        input.seekg(0, std::ios::end);
+        std::streamoff streamSize = input.tellg();
+        if (streamSize < 0) {
+            context->lastFileIoResult = GX_ERROR_FAILED;
+            NativeAppProcessTable::UpdateFromRuntime(*context);
+            return context->lastFileIoResult;
+        }
+
+        uint64_t fileSize = static_cast<uint64_t>(streamSize);
+        if (fileSize > kMaxFileReadBytes || fileSize > bufferSize || fileSize > static_cast<uint64_t>(std::numeric_limits<uint32_t>::max())) {
+            context->lastFileIoResult = GX_ERROR_UNSUPPORTED;
+            NativeAppProcessTable::UpdateFromRuntime(*context);
+            return context->lastFileIoResult;
+        }
+
+        input.seekg(0, std::ios::beg);
+        if (!input) {
+            context->lastFileIoResult = GX_ERROR_FAILED;
+            NativeAppProcessTable::UpdateFromRuntime(*context);
+            return context->lastFileIoResult;
+        }
+
+        if (fileSize > 0) input.read(static_cast<char*>(buffer), static_cast<std::streamsize>(fileSize));
+        if (!input || static_cast<uint64_t>(input.gcount()) != fileSize) {
+            context->lastFileIoResult = GX_ERROR_FAILED;
+            NativeAppProcessTable::UpdateFromRuntime(*context);
+            return context->lastFileIoResult;
+        }
+
+        *outBytesRead = static_cast<uint32_t>(fileSize);
+        context->lastFileReadBytes = *outBytesRead;
+        context->lastFileIoResult = GX_OK;
+    } catch (...) {
+        context->lastFileIoResult = GX_ERROR_FAILED;
+    }
+
+    NativeAppProcessTable::UpdateFromRuntime(*context);
+    Logger::write(LogLevel::Info, "[NativeAppHost] App: " + appLabel(context) + " file_read_all path=\"" + context->lastFilePath + "\" bytes=" + std::to_string(context->lastFileReadBytes) + " result=" + std::to_string(context->lastFileIoResult));
+    return context->lastFileIoResult;
 }
 
 gx_result hostRequestWindow(NativeGxAppContext* ctx, const char* title, int width, int height, gx_handle* outWindow) {
@@ -685,6 +845,8 @@ NativeAppRuntimeContext NativeAppRuntime::Prepare(
     context.hostCalls.wait_for_close = hostWaitForClose;
     context.hostCalls.poll_event = hostPollEvent;
     context.hostCalls.exit = hostExit;
+    context.hostCalls.file_read_all = hostFileReadAll;
+    context.hostCalls.file_exists = hostFileExists;
 
     if (launchDecision.strategy != AppLaunchStrategy::NativeElf) {
         addDiagnostic(context, "Launch decision strategy is not NativeElf");
