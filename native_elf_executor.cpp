@@ -3,6 +3,7 @@
 #include "app_launch_resolver.h"
 #include "executable_memory.h"
 #include "logger.h"
+#include "native_app_debug_log.h"
 #include "native_app_process_table.h"
 #include "native_elf_trampoline_win64.h"
 
@@ -128,42 +129,49 @@ NativeElfExecutionResult NativeElfExecutor::Execute(
 
     if (!experimentalExecutionEnabled()) {
         addDiagnostic(result, "Native ELF execution disabled by build flag");
+        NativeAppDebugLog::Add(runtimeContext.runtimeId, runtimeContext.appId, "error", result.message);
         LogDecision(result.appId, result.architecture, false, result.message, "failure");
         return result;
     }
 
     if (hostArchitecture() != launchResult.architecture) {
         addDiagnostic(result, "Wrong architecture: host=" + hostArchitecture() + " app=" + launchResult.architecture + "; cross-architecture execution is not supported");
+        NativeAppDebugLog::Add(runtimeContext.runtimeId, runtimeContext.appId, "error", result.message);
         LogDecision(result.appId, result.architecture, false, result.message, "failure");
         return result;
     }
 
     if (!isAmd64HostAndApp(launchResult)) {
         addDiagnostic(result, "Native ELF experimental execution supports amd64 host running amd64 apps only");
+        NativeAppDebugLog::Add(runtimeContext.runtimeId, runtimeContext.appId, "error", result.message);
         LogDecision(result.appId, result.architecture, false, result.message, "failure");
         return result;
     }
 
     if (image.hasInterpreter) {
         addDiagnostic(result, "PT_INTERP present; dynamic linker/dynamic linking is not supported");
+        NativeAppDebugLog::Add(runtimeContext.runtimeId, runtimeContext.appId, "error", result.message);
         LogDecision(result.appId, result.architecture, false, result.message, "failure");
         return result;
     }
 
     if (!isSupportedStaticImage(image)) {
         addDiagnostic(result, "Native ELF image is not a supported static executable image");
+        NativeAppDebugLog::Add(runtimeContext.runtimeId, runtimeContext.appId, "error", result.message);
         LogDecision(result.appId, result.architecture, false, result.message, "failure");
         return result;
     }
 
     if (launchResult.abi != kGuideXOSNativeAbiName) {
         addDiagnostic(result, std::string("ABI mismatch: expected ") + kGuideXOSNativeAbiName + ", got " + launchResult.abi);
+        NativeAppDebugLog::Add(runtimeContext.runtimeId, runtimeContext.appId, "error", result.message);
         LogDecision(result.appId, result.architecture, false, result.message, "failure");
         return result;
     }
 
     if (runtimeContext.lifecycleState != NativeAppLifecycleState::Prepared) {
         addDiagnostic(result, std::string("Native app runtime state is not Prepared: ") + NativeAppRuntime::ToString(runtimeContext.lifecycleState));
+        NativeAppDebugLog::Add(runtimeContext.runtimeId, runtimeContext.appId, "error", result.message);
         LogDecision(result.appId, result.architecture, false, result.message, "failure");
         return result;
     }
@@ -174,6 +182,7 @@ NativeElfExecutionResult NativeElfExecutor::Execute(
         uint64_t segmentEnd = 0;
         if (!checkedAdd(segment.virtualAddress, segment.memorySize, segmentEnd)) {
             addDiagnostic(result, "Native ELF segment virtual range overflows");
+            NativeAppDebugLog::Add(runtimeContext.runtimeId, runtimeContext.appId, "error", result.message);
             LogDecision(result.appId, result.architecture, false, result.message, "failure");
             return result;
         }
@@ -183,6 +192,7 @@ NativeElfExecutionResult NativeElfExecutor::Execute(
 
     if (minVirtualAddress == std::numeric_limits<uint64_t>::max() || maxVirtualAddress <= minVirtualAddress) {
         addDiagnostic(result, "Native ELF image has invalid virtual address range");
+        NativeAppDebugLog::Add(runtimeContext.runtimeId, runtimeContext.appId, "error", result.message);
         LogDecision(result.appId, result.architecture, false, result.message, "failure");
         return result;
     }

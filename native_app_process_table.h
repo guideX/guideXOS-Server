@@ -26,6 +26,9 @@ struct NativeAppProcessInfo {
     uint32_t remainingWindowCount = 0;
     bool experimentalExecutionEnabled = false;
     std::string hostArchitecture;
+    uint32_t hostLogCallCount = 0;
+    uint32_t requestWindowCallCount = 0;
+    uint32_t drawTextCallCount = 0;
     uint32_t pollEventCallCount = 0;
     gx_event_type lastEventType = GX_EVENT_NONE;
     gx_handle lastEventWindow = 0;

@@ -1,5 +1,7 @@
 #include "native_app_process_table.h"
 
+#include "native_app_debug_log.h"
+
 #include <algorithm>
 #include <atomic>
 #include <mutex>
@@ -32,6 +34,9 @@ void applyRuntimeState(NativeAppProcessInfo& process, const NativeAppRuntimeCont
     process.createdWindowCount = createdWindowCount(context);
     process.cleanedWindowCount = context.cleanedWindowCount;
     process.remainingWindowCount = static_cast<uint32_t>(context.createdWindowHandles.size());
+    process.hostLogCallCount = context.hostLogCallCount;
+    process.requestWindowCallCount = context.requestWindowCallCount;
+    process.drawTextCallCount = context.drawTextCallCount;
     process.pollEventCallCount = context.pollEventCallCount;
     process.lastEventType = context.lastEventType;
     process.lastEventWindow = context.lastEventWindow;
@@ -91,6 +96,7 @@ void NativeAppProcessTable::RegisterPrepared(const NativeAppRuntimeContext& cont
         process.hostArchitecture = hostArchitecture;
         applyRuntimeState(process, context);
         g_processes.push_back(process);
+        NativeAppDebugLog::Add(context.runtimeId, context.appId, "info", "runtime prepared");
         return;
     }
 
@@ -100,6 +106,7 @@ void NativeAppProcessTable::RegisterPrepared(const NativeAppRuntimeContext& cont
     existing->experimentalExecutionEnabled = experimentalExecutionEnabled;
     existing->hostArchitecture = hostArchitecture;
     applyRuntimeState(*existing, context);
+    NativeAppDebugLog::Add(context.runtimeId, context.appId, "info", "runtime prepared");
 #else
     (void)context;
     (void)experimentalExecutionEnabled;
@@ -115,6 +122,7 @@ void NativeAppProcessTable::MarkRunning(uint64_t runtimeId) {
 
     process->lifecycleState = NativeAppLifecycleState::Running;
     process->startTime = std::chrono::steady_clock::now();
+    NativeAppDebugLog::Add(process->runtimeId, process->appId, "info", "execution started");
 #else
     (void)runtimeId;
 #endif
@@ -144,6 +152,7 @@ void NativeAppProcessTable::MarkCompleted(uint64_t runtimeId, NativeAppLifecycle
     process->endTime = std::chrono::steady_clock::now();
     process->exitCode = exitCode;
     if (!failureReason.empty()) process->failureReason = failureReason;
+    NativeAppDebugLog::Add(process->runtimeId, process->appId, state == NativeAppLifecycleState::Failed ? "error" : "info", std::string("execution completed state=") + NativeAppRuntime::ToString(state) + " exitCode=" + std::to_string(exitCode) + (process->failureReason.empty() ? std::string() : " failure=" + process->failureReason));
 #else
     (void)runtimeId;
     (void)state;

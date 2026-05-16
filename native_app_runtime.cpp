@@ -4,6 +4,7 @@
 #include "gui_protocol.h"
 #include "ipc_bus.h"
 #include "logger.h"
+#include "native_app_debug_log.h"
 #include "native_app_process_table.h"
 
 #include <algorithm>
@@ -287,6 +288,7 @@ gx_result hostLog(NativeGxAppContext* ctx, const char* message) {
     const char* safeMessage = message ? message : "<null>";
     ++context->hostLogCallCount;
     context->lastHostLogMessage = safeMessage;
+    NativeAppDebugLog::Add(context->runtimeId, context->appId, "info", std::string("host log: ") + safeMessage);
     Logger::write(LogLevel::Info, "[NativeAppHost] App: " + appLabel(context) + " log: " + safeMessage);
     return GX_OK;
 }
@@ -316,6 +318,7 @@ gx_result hostFileExists(NativeGxAppContext* ctx, const char* path, uint32_t* ou
 
     if (!outExists) {
         Logger::write(LogLevel::Warn, "[NativeAppHost] App: " + appLabel(context) + " file_exists rejected: null output pointer");
+        NativeAppDebugLog::Add(context->runtimeId, context->appId, "warn", "file_exists failed: null output pointer");
         NativeAppProcessTable::UpdateFromRuntime(*context);
         return context->lastFileIoResult;
     }
@@ -323,6 +326,7 @@ gx_result hostFileExists(NativeGxAppContext* ctx, const char* path, uint32_t* ou
     if (!hasPermission(*context, "file.read")) {
         context->lastFileIoResult = GX_ERROR_PERMISSION_DENIED;
         Logger::write(LogLevel::Warn, "[NativeAppHost] App: " + appLabel(context) + " file_exists denied: missing permission file.read");
+        NativeAppDebugLog::Add(context->runtimeId, context->appId, "warn", "file_exists failed: missing permission file.read");
         NativeAppProcessTable::UpdateFromRuntime(*context);
         return context->lastFileIoResult;
     }
@@ -340,6 +344,7 @@ gx_result hostFileExists(NativeGxAppContext* ctx, const char* path, uint32_t* ou
     context->lastFileIoResult = GX_OK;
 
     NativeAppProcessTable::UpdateFromRuntime(*context);
+    NativeAppDebugLog::Add(context->runtimeId, context->appId, "info", "file_exists path=\"" + context->lastFilePath + "\" exists=" + std::to_string(*outExists));
     Logger::write(LogLevel::Info, "[NativeAppHost] App: " + appLabel(context) + " file_exists path=\"" + context->lastFilePath + "\" exists=" + std::to_string(*outExists));
     return context->lastFileIoResult;
 }
@@ -358,6 +363,7 @@ gx_result hostFileReadAll(NativeGxAppContext* ctx, const char* path, void* buffe
 
     if (!buffer || bufferSize == 0 || !outBytesRead) {
         Logger::write(LogLevel::Warn, "[NativeAppHost] App: " + appLabel(context) + " file_read_all rejected: invalid buffer or output pointer");
+        NativeAppDebugLog::Add(context->runtimeId, context->appId, "warn", "file_read_all failed: invalid buffer or output pointer");
         NativeAppProcessTable::UpdateFromRuntime(*context);
         return context->lastFileIoResult;
     }
@@ -365,6 +371,7 @@ gx_result hostFileReadAll(NativeGxAppContext* ctx, const char* path, void* buffe
     if (!hasPermission(*context, "file.read")) {
         context->lastFileIoResult = GX_ERROR_PERMISSION_DENIED;
         Logger::write(LogLevel::Warn, "[NativeAppHost] App: " + appLabel(context) + " file_read_all denied: missing permission file.read");
+        NativeAppDebugLog::Add(context->runtimeId, context->appId, "warn", "file_read_all failed: missing permission file.read");
         NativeAppProcessTable::UpdateFromRuntime(*context);
         return context->lastFileIoResult;
     }
@@ -382,6 +389,7 @@ gx_result hostFileReadAll(NativeGxAppContext* ctx, const char* path, void* buffe
         if (!input) {
             context->lastFileIoResult = GX_ERROR_FAILED;
             Logger::write(LogLevel::Warn, "[NativeAppHost] App: " + appLabel(context) + " file_read_all failed: missing resource file " + context->lastFilePath);
+            NativeAppDebugLog::Add(context->runtimeId, context->appId, "warn", "file_read_all failed: missing resource " + context->lastFilePath);
             NativeAppProcessTable::UpdateFromRuntime(*context);
             return context->lastFileIoResult;
         }
@@ -423,6 +431,7 @@ gx_result hostFileReadAll(NativeGxAppContext* ctx, const char* path, void* buffe
     }
 
     NativeAppProcessTable::UpdateFromRuntime(*context);
+    NativeAppDebugLog::Add(context->runtimeId, context->appId, context->lastFileIoResult == GX_OK ? "info" : "warn", "file_read_all path=\"" + context->lastFilePath + "\" bytes=" + std::to_string(context->lastFileReadBytes) + " result=" + std::to_string(context->lastFileIoResult));
     Logger::write(LogLevel::Info, "[NativeAppHost] App: " + appLabel(context) + " file_read_all path=\"" + context->lastFilePath + "\" bytes=" + std::to_string(context->lastFileReadBytes) + " result=" + std::to_string(context->lastFileIoResult));
     return context->lastFileIoResult;
 }
@@ -478,12 +487,14 @@ gx_result hostRequestWindow(NativeGxAppContext* ctx, const char* title, int widt
         context->lastCreatedWindowId = windowId;
         context->lastRequestWindowResult = GX_OK;
         NativeAppProcessTable::UpdateFromRuntime(*context);
+        NativeAppDebugLog::Add(context->runtimeId, context->appId, "info", "request_window title=\"" + context->lastRequestedWindowTitle + "\" windowId=" + std::to_string(windowId));
         Logger::write(LogLevel::Info, "[NativeAppHost] App: " + appLabel(context) + " request_window title=\"" + context->lastRequestedWindowTitle + "\" size=" + std::to_string(width) + "x" + std::to_string(height) + " windowId=" + std::to_string(windowId));
         return GX_OK;
     }
 
     context->lastRequestWindowResult = GX_ERROR_UNSUPPORTED;
     Logger::write(LogLevel::Warn, "[NativeAppHost] App: " + appLabel(context) + " request_window failed: compositor unavailable or no MT_Create ack");
+    NativeAppDebugLog::Add(context->runtimeId, context->appId, "warn", "request_window failed: compositor unavailable or no MT_Create ack");
     return context->lastRequestWindowResult;
 }
 
@@ -534,6 +545,8 @@ gx_result hostDrawText(NativeGxAppContext* ctx, gx_handle window, int x, int y, 
     ipc::Bus::publish("gui.input", std::move(request), false);
 
     context->lastDrawTextResult = GX_OK;
+    NativeAppProcessTable::UpdateFromRuntime(*context);
+    NativeAppDebugLog::Add(context->runtimeId, context->appId, "info", "draw_text windowId=" + std::to_string(window) + " textLength=" + std::to_string(context->lastDrawText.size()));
     Logger::write(LogLevel::Info, "[NativeAppHost] App: " + appLabel(context) + " draw_text windowId=" + std::to_string(window) + " pos=" + std::to_string(x) + "," + std::to_string(y) + " text=\"" + context->lastDrawText + "\"");
     return GX_OK;
 }
@@ -603,6 +616,7 @@ gx_result hostDrawRect(NativeGxAppContext* ctx, gx_handle window, int x, int y, 
 
     context->lastDrawRectResult = GX_OK;
     NativeAppProcessTable::UpdateFromRuntime(*context);
+    NativeAppDebugLog::Add(context->runtimeId, context->appId, "info", "draw_rect windowId=" + std::to_string(window) + " size=" + std::to_string(width) + "x" + std::to_string(height));
     Logger::write(LogLevel::Info, "[NativeAppHost] App: " + appLabel(context) + " draw_rect windowId=" + std::to_string(window) + " rect=" + std::to_string(x) + "," + std::to_string(y) + " " + std::to_string(width) + "x" + std::to_string(height) + " color=0x" + std::to_string(rgb));
     return GX_OK;
 }
@@ -718,6 +732,7 @@ gx_result hostPollEvent(NativeGxAppContext* ctx, gx_event* outEvent, int timeout
         context->lastPollEventResult = GX_OK;
         if (eventType == GX_EVENT_WINDOW_CLOSE) removeOwnedWindow(*context, window);
         NativeAppProcessTable::UpdateFromRuntime(*context);
+        if (eventType == GX_EVENT_WINDOW_CLOSE) NativeAppDebugLog::Add(context->runtimeId, context->appId, "info", "poll_event close windowId=" + std::to_string(window));
         Logger::write(LogLevel::Info, "[NativeAppHost] App: " + appLabel(context) + " poll_event returned type=" + std::to_string(static_cast<uint32_t>(eventType)) + " windowId=" + std::to_string(window));
         return GX_OK;
     } while (timeoutMs > 0);
@@ -918,6 +933,7 @@ void NativeAppRuntime::Cleanup(NativeAppRuntimeContext& context, NativeAppLifecy
         context.failureReason = failureReason;
 
         Logger::write(LogLevel::Info, "[NativeAppRuntime] Cleanup begin app=" + appLabel(&context) + " runtimeId=" + std::to_string(context.runtimeId) + " processId=" + std::to_string(context.processId) + " ownedWindows=" + std::to_string(context.createdWindowHandles.size()));
+        NativeAppDebugLog::Add(context.runtimeId, context.appId, "info", "cleanup started ownedWindows=" + std::to_string(context.createdWindowHandles.size()));
 
         std::vector<gx_handle> windowsToClose = context.createdWindowHandles;
         context.createdWindowHandles.clear();
@@ -942,6 +958,7 @@ void NativeAppRuntime::Cleanup(NativeAppRuntimeContext& context, NativeAppLifecy
         context.endTime = std::chrono::steady_clock::now();
         context.lifecycleState = finalState == NativeAppLifecycleState::Failed ? NativeAppLifecycleState::Failed : NativeAppLifecycleState::Exited;
         g_hostLifecycleState = context.lifecycleState;
+        NativeAppDebugLog::Add(context.runtimeId, context.appId, context.lifecycleState == NativeAppLifecycleState::Failed ? "error" : "info", "cleanup completed state=" + std::string(ToString(context.lifecycleState)) + " cleanedWindows=" + std::to_string(context.cleanedWindowCount) + " remainingWindows=" + std::to_string(context.createdWindowHandles.size()));
         Logger::write(context.lifecycleState == NativeAppLifecycleState::Failed ? LogLevel::Warn : LogLevel::Info, "[NativeAppRuntime] Cleanup complete app=" + appLabel(&context) + " runtimeId=" + std::to_string(context.runtimeId) + " state=" + ToString(context.lifecycleState) + " exitCode=" + std::to_string(context.exitCode) + " cleanedWindows=" + std::to_string(context.cleanedWindowCount) + " remainingWindows=" + std::to_string(context.createdWindowHandles.size()) + (context.failureReason.empty() ? std::string() : " failureReason=" + context.failureReason));
     } catch (...) {
         context.endTime = std::chrono::steady_clock::now();
