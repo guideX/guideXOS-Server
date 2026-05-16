@@ -893,6 +893,13 @@ void NativeAppRuntime::EndHostCallDispatch(NativeAppRuntimeContext& context) {
     if (g_activeRuntimeContext == &context) g_activeRuntimeContext = nullptr;
 }
 
+void NativeAppRuntime::RequestCloseOwnedWindows(NativeAppRuntimeContext& context) {
+    uint64_t closePid = context.processId != 0 ? context.processId : Allocator::currentPid();
+    for (gx_handle window : context.createdWindowHandles) {
+        if (window != 0) publishWindowClose(closePid, window);
+    }
+}
+
 void NativeAppRuntime::Cleanup(NativeAppRuntimeContext& context, NativeAppLifecycleState finalState, int32_t exitCode, const std::string& failureReason) {
 #ifdef GX_ENABLE_EXPERIMENTAL_NATIVE_ELF_EXECUTION
     try {

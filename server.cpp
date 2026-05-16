@@ -71,6 +71,7 @@
 #include "module_manager.h"
 #include "package_manager.h"
 #include "native_elf_executor.h"
+#include "native_app_process_table.h"
 #include <iostream>
 #include <chrono>
 #include <sstream>
@@ -88,6 +89,51 @@ namespace gxos {
 static int echoProc(int argc, char** argv){ gxos::Logger::write(gxos::LogLevel::Info, "echoProc start"); for(int i=1;i<argc;i++){ gxos::Logger::write(gxos::LogLevel::Info, std::string("ARG ")+argv[i]); } return 0; }
 static int workerProc(int argc, char** argv){ int loops=5; if(argc>1) loops=std::atoi(argv[1]); for(int i=0;i<loops;i++){ gxos::Logger::write(gxos::LogLevel::Info, "worker tick "+std::to_string(i)); std::this_thread::sleep_for(std::chrono::milliseconds(100)); } return loops; }
 
+static std::string nativeAppProcessesDiagnostic() {
+    std::ostringstream oss;
+    std::vector<gxos::apps::NativeAppProcessInfo> processes = gxos::apps::NativeAppProcessTable::List();
+    oss << "Native app processes: " << processes.size() << "\n";
+    for (const auto& process : processes) {
+        oss << "runtimeId=" << process.runtimeId
+            << " appId=" << process.appId
+            << " displayName=" << process.displayName
+            << " architecture=" << process.architecture
+            << " state=" << gxos::apps::NativeAppRuntime::ToString(process.lifecycleState)
+            << " windows=" << process.createdWindowCount << "/" << process.cleanedWindowCount << "/" << process.remainingWindowCount
+            << " pollEventCallCount=" << process.pollEventCallCount
+            << " lastEventType=" << static_cast<uint32_t>(process.lastEventType)
+            << " lastEventWindow=" << process.lastEventWindow
+            << " lastPollEventResult=" << process.lastPollEventResult
+            << " drawRectCallCount=" << process.drawRectCallCount
+            << " lastDrawRectWindow=" << process.lastDrawRectWindow
+            << " lastDrawRectWidth=" << process.lastDrawRectWidth
+            << " lastDrawRectHeight=" << process.lastDrawRectHeight
+            << " lastDrawRectColor=" << process.lastDrawRectColor
+            << " lastDrawRectResult=" << process.lastDrawRectResult
+            << " paintEventCount=" << process.paintEventCount
+            << " lastPaintWindow=" << process.lastPaintWindow
+            << " lastPaintWidth=" << process.lastPaintWidth
+            << " lastPaintHeight=" << process.lastPaintHeight
+            << " keyEventCount=" << process.keyEventCount
+            << " lastKeyWindow=" << process.lastKeyWindow
+            << " lastKeyCode=" << process.lastKeyCode
+            << " lastKeyAction=" << process.lastKeyAction
+            << " lastKeyModifiers=" << process.lastKeyModifiers
+            << " mouseEventCount=" << process.mouseEventCount
+            << " lastMouseWindow=" << process.lastMouseWindow
+            << " lastMouseX=" << process.lastMouseX
+            << " lastMouseY=" << process.lastMouseY
+            << " lastMousePackedButtonAction=" << process.lastMousePackedButtonAction
+            << " lastMouseModifiers=" << process.lastMouseModifiers
+            << " exitCode=" << process.exitCode
+            << " failureReason=" << process.failureReason
+            << " experimentalExecutionEnabled=" << (process.experimentalExecutionEnabled ? "true" : "false")
+            << " hostArchitecture=" << process.hostArchitecture
+            << "\n";
+    }
+    return oss.str();
+}
+
 static void help(){
     std::cout << "Commands:\n"
                  " mem | alloc <n> | tasks | log\n"
@@ -102,8 +148,8 @@ static void help(){
                  " gui.btn <win> <id> <x> <y> <w> <h> <text> | gui.pop | gui.wlist | gui.activate <id> | gui.min <id>\n"
                  " gxm.load <path> | gxm.sample | gui.save <path> | gui.load <path>\n"
                  " desktop.wallpaper <path> | desktop.launch <action> | desktop.pin <action> | desktop.unpin <action> | desktop.showconfig\n"
-                 " desktop.apps | desktop.pinned | desktop.recent | desktop.pinapp <name> | desktop.pinfile <name> <path>\n"
-                 " nativeapp.capabilities\n"
+                 " desktop.apps | desktop.apps.verbose | desktop.pinned | desktop.recent | desktop.pinapp <name> | desktop.pinfile <name> <path>\n"
+                 " nativeapp.capabilities | nativeapp.inspect <app> | nativeapp.smoketest <app> | nativeapp.processes\n"
                  " taskbar.list | taskbar.activate <id> | taskbar.min <id> | taskbar.close <id>\n"
                  " workspace.switch <n> | workspace.next | workspace.prev | workspace.current\n"
                  " notepad | notepad <file>\n"
@@ -293,6 +339,9 @@ using namespace gxos;
             std::cout<<"Registered Applications ("<<apps.size()<<"):"<<std::endl;
             for(const auto& app : apps) std::cout<<"  "<<app.displayName<<std::endl;
         }
+        else if (cmd=="desktop.apps.verbose"){
+            std::cout << gui::DesktopService::GetRegisteredAppsVerboseDiagnostic();
+        }
         else if (cmd=="desktop.pinned"){
             auto& pinned = gui::DesktopService::GetPinned();
             std::cout<<"Pinned Items ("<<pinned.size()<<"):"<<std::endl;
@@ -314,6 +363,19 @@ using namespace gxos;
         }
         else if (cmd=="nativeapp.capabilities"){
             std::cout << gui::DesktopService::NativeAppCapabilitiesDiagnostic();
+        }
+        else if (cmd=="nativeapp.inspect"){
+            std::string app; std::getline(iss, app); if(app.size()>0 && app[0]==' ') app.erase(0,1);
+            if(app.empty()){ std::cout<<"nativeapp.inspect <app>"<<std::endl; continue; }
+            std::cout << gui::DesktopService::InspectNativeAppPipeline(app);
+        }
+        else if (cmd=="nativeapp.smoketest"){
+            std::string app; std::getline(iss, app); if(app.size()>0 && app[0]==' ') app.erase(0,1);
+            if(app.empty()){ std::cout<<"nativeapp.smoketest <app>"<<std::endl; continue; }
+            std::cout << gui::DesktopService::NativeAppPipelineSmokeTest(app);
+        }
+        else if (cmd=="nativeapp.processes"){
+            std::cout << nativeAppProcessesDiagnostic();
         }
         else if (cmd=="desktop.pinapp"){
             std::string name; std::getline(iss, name); if(name.size()>0 && name[0]==' ') name.erase(0,1);

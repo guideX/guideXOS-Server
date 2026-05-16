@@ -3,6 +3,7 @@
 #include "app_launch_resolver.h"
 #include "executable_memory.h"
 #include "logger.h"
+#include "native_app_process_table.h"
 #include "native_elf_trampoline_win64.h"
 
 #include <algorithm>
@@ -11,6 +12,7 @@
 #include <iomanip>
 #include <limits>
 #include <sstream>
+#include <thread>
 
 namespace gxos {
 namespace apps {
@@ -266,9 +268,18 @@ NativeElfExecutionResult NativeElfExecutor::Execute(
     appContext.host = &runtimeContext.hostCalls;
     appContext.userData = nullptr;
     gx_entry_fn entry = reinterpret_cast<gx_entry_fn>(entryAddress);
+    NativeAppProcessTable::RegisterPrepared(runtimeContext, true, hostArchitecture());
     NativeAppRuntime::BeginHostCallDispatch(runtimeContext);
+    NativeAppProcessTable::MarkRunning(runtimeContext.runtimeId);
     bool executionFailed = false;
     std::string failureReason;
+    std::thread smokeTestCloseThread;
+    if (runtimeContext.environment.find("GX_NATIVE_SMOKETEST") != runtimeContext.environment.end()) {
+        smokeTestCloseThread = std::thread([&runtimeContext]() {
+            std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+            NativeAppRuntime::RequestCloseOwnedWindows(runtimeContext);
+        });
+    }
 #if defined(_WIN32) && defined(_MSC_VER)
     __try {
         result.exitCode = entry(&appContext);
@@ -301,9 +312,12 @@ NativeElfExecutionResult NativeElfExecutor::Execute(
         executionFailed = true;
     }
 #endif
+    if (smokeTestCloseThread.joinable()) smokeTestCloseThread.join();
     NativeAppRuntime::EndHostCallDispatch(runtimeContext);
     if (runtimeContext.lastWaitResult == GX_ERROR_TIMEOUT && result.exitCode == GX_OK) addDiagnostic(result, "wait_for_close timed out; cleaning up remaining owned windows");
     NativeAppRuntime::Cleanup(runtimeContext, (executionFailed || result.exitCode != GX_OK) ? NativeAppLifecycleState::Failed : NativeAppLifecycleState::Exited, result.exitCode, failureReason);
+    NativeAppProcessTable::UpdateFromRuntime(runtimeContext);
+    NativeAppProcessTable::MarkCompleted(runtimeContext.runtimeId, runtimeContext.lifecycleState, runtimeContext.exitCode, runtimeContext.failureReason);
     result.success = result.exitCode == GX_OK && !executionFailed;
     result.hostLogCallCount = runtimeContext.hostLogCallCount;
     result.lastHostLogMessage = runtimeContext.lastHostLogMessage;

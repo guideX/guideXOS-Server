@@ -422,6 +422,7 @@ namespace gxos {
 
             apps::NativeAppRuntimeContext runtimeContext;
             if (nativeElfImage.success) runtimeContext = apps::NativeAppRuntime::Prepare(*app, launchDecision, nativeElfResult, nativeElfImage);
+            if (runtimeContext.success) runtimeContext.environment["GX_NATIVE_SMOKETEST"] = "1";
 
             oss << "\n[Runtime]\n";
             oss << "runtimeId: " << runtimeContext.runtimeId << "\n";

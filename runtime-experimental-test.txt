@@ -1,0 +1,6 @@
+gui.start
+nativeapp.capabilities
+nativeapp.smoketest com.guidexos.helloworld
+nativeapp.smoketest com.guidexos.resourceviewer
+nativeapp.processes
+exit

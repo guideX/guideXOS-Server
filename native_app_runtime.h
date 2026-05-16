@@ -189,6 +189,7 @@ public:
 
     static void BeginHostCallDispatch(NativeAppRuntimeContext& context);
     static void EndHostCallDispatch(NativeAppRuntimeContext& context);
+    static void RequestCloseOwnedWindows(NativeAppRuntimeContext& context);
     static void Cleanup(NativeAppRuntimeContext& context, NativeAppLifecycleState finalState, int32_t exitCode, const std::string& failureReason = std::string());
     static const char* ToString(NativeAppLifecycleState state);
 

@@ -1,0 +1,10 @@
+nativeapp.capabilities
+desktop.apps.verbose
+nativeapp.inspect com.guidexos.helloworld
+nativeapp.smoketest com.guidexos.helloworld
+nativeapp.inspect com.guidexos.resourceviewer
+nativeapp.smoketest com.guidexos.resourceviewer
+nativeapp.processes
+desktop.launch HDInstaller
+desktop.launch ControlPanel
+exit
