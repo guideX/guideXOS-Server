@@ -59,6 +59,7 @@ struct NativeHostCallTable {
     uint32_t (*get_api_version)(NativeGxAppContext* ctx) = nullptr;
     gx_result (*request_window)(NativeGxAppContext* ctx, const char* title, int width, int height, gx_handle* outWindow) = nullptr;
     gx_result (*draw_text)(NativeGxAppContext* ctx, gx_handle window, int x, int y, const char* text) = nullptr;
+    gx_result (*draw_rect)(NativeGxAppContext* ctx, gx_handle window, int x, int y, int width, int height, uint32_t color) = nullptr;
     gx_result (*wait_for_close)(NativeGxAppContext* ctx, gx_handle window, int timeoutMs) = nullptr;
     gx_result (*poll_event)(NativeGxAppContext* ctx, gx_event* outEvent, int timeoutMs) = nullptr;
     gx_result (*exit)(NativeGxAppContext* ctx, gx_result exitCode) = nullptr;
@@ -107,6 +108,14 @@ struct NativeAppRuntimeContext {
     gx_handle lastDrawTextWindow = 0;
     std::string lastDrawText;
     gx_result lastDrawTextResult = GX_OK;
+    uint32_t drawRectCallCount = 0;
+    gx_handle lastDrawRectWindow = 0;
+    int lastDrawRectX = 0;
+    int lastDrawRectY = 0;
+    int lastDrawRectWidth = 0;
+    int lastDrawRectHeight = 0;
+    uint32_t lastDrawRectColor = 0;
+    gx_result lastDrawRectResult = GX_OK;
     uint32_t waitForCloseCallCount = 0;
     gx_handle lastWaitWindow = 0;
     int lastWaitTimeoutMs = 0;

@@ -36,6 +36,12 @@ void applyRuntimeState(NativeAppProcessInfo& process, const NativeAppRuntimeCont
     process.lastEventType = context.lastEventType;
     process.lastEventWindow = context.lastEventWindow;
     process.lastPollEventResult = context.lastPollEventResult;
+    process.drawRectCallCount = context.drawRectCallCount;
+    process.lastDrawRectWindow = context.lastDrawRectWindow;
+    process.lastDrawRectWidth = context.lastDrawRectWidth;
+    process.lastDrawRectHeight = context.lastDrawRectHeight;
+    process.lastDrawRectColor = context.lastDrawRectColor;
+    process.lastDrawRectResult = context.lastDrawRectResult;
     process.paintEventCount = context.paintEventCount;
     process.lastPaintWindow = context.lastPaintWindow;
     process.lastPaintWidth = context.lastPaintWidth;

@@ -39,6 +39,12 @@ namespace gxos { namespace svc {
                 << " lastEventType=" << static_cast<uint32_t>(process.lastEventType)
                 << " lastEventWindow=" << process.lastEventWindow
                 << " lastPollEventResult=" << process.lastPollEventResult
+                << " drawRectCallCount=" << process.drawRectCallCount
+                << " lastDrawRectWindow=" << process.lastDrawRectWindow
+                << " lastDrawRectWidth=" << process.lastDrawRectWidth
+                << " lastDrawRectHeight=" << process.lastDrawRectHeight
+                << " lastDrawRectColor=" << process.lastDrawRectColor
+                << " lastDrawRectResult=" << process.lastDrawRectResult
                 << " paintEventCount=" << process.paintEventCount
                 << " lastPaintWindow=" << process.lastPaintWindow
                 << " lastPaintWidth=" << process.lastPaintWidth

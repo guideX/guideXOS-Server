@@ -23,6 +23,8 @@ constexpr int kMaxWindowWidth = 4096;
 constexpr int kMaxWindowHeight = 4096;
 constexpr int kMinDrawCoordinate = 0;
 constexpr int kMaxDrawCoordinate = 16384;
+constexpr int kMinDrawSize = 1;
+constexpr int kMaxDrawSize = 4096;
 constexpr uint64_t kWindowCreateTimeoutMs = 500;
 constexpr int kMinWaitForCloseTimeoutMs = 0;
 constexpr int kMaxWaitForCloseTimeoutMs = 300000;
@@ -270,6 +272,75 @@ gx_result hostDrawText(NativeGxAppContext* ctx, gx_handle window, int x, int y, 
     return GX_OK;
 }
 
+gx_result hostDrawRect(NativeGxAppContext* ctx, gx_handle window, int x, int y, int width, int height, uint32_t color) {
+    NativeAppRuntimeContext* context = runtimeContextFor(ctx);
+    if (!context) {
+        Logger::write(LogLevel::Warn, "[NativeAppHost] draw_rect rejected: invalid app context or host table");
+        return GX_ERROR_INVALID_ARGUMENT;
+    }
+
+    ++context->drawRectCallCount;
+    context->lastDrawRectWindow = window;
+    context->lastDrawRectX = x;
+    context->lastDrawRectY = y;
+    context->lastDrawRectWidth = width;
+    context->lastDrawRectHeight = height;
+    context->lastDrawRectColor = color;
+    context->lastDrawRectResult = GX_ERROR_INVALID_ARGUMENT;
+
+    if (window == 0) {
+        Logger::write(LogLevel::Warn, "[NativeAppHost] App: " + appLabel(context) + " draw_rect rejected: invalid window handle");
+        NativeAppProcessTable::UpdateFromRuntime(*context);
+        return context->lastDrawRectResult;
+    }
+
+    if (!ownsWindow(*context, window)) {
+        context->lastDrawRectResult = GX_ERROR_PERMISSION_DENIED;
+        Logger::write(LogLevel::Warn, "[NativeAppHost] App: " + appLabel(context) + " draw_rect denied: window is not owned by this native runtime");
+        NativeAppProcessTable::UpdateFromRuntime(*context);
+        return context->lastDrawRectResult;
+    }
+
+    if (x < kMinDrawCoordinate || y < kMinDrawCoordinate || x > kMaxDrawCoordinate || y > kMaxDrawCoordinate ||
+        width < kMinDrawSize || height < kMinDrawSize || width > kMaxDrawSize || height > kMaxDrawSize ||
+        x > kMaxDrawCoordinate - width || y > kMaxDrawCoordinate - height) {
+        Logger::write(LogLevel::Warn, "[NativeAppHost] App: " + appLabel(context) + " draw_rect rejected: invalid rect " + std::to_string(x) + "," + std::to_string(y) + " " + std::to_string(width) + "x" + std::to_string(height));
+        NativeAppProcessTable::UpdateFromRuntime(*context);
+        return context->lastDrawRectResult;
+    }
+
+    if (!hasPermission(*context, "draw") && !hasPermission(*context, "window")) {
+        context->lastDrawRectResult = GX_ERROR_PERMISSION_DENIED;
+        Logger::write(LogLevel::Warn, "[NativeAppHost] App: " + appLabel(context) + " draw_rect denied: missing draw/window permission");
+        NativeAppProcessTable::UpdateFromRuntime(*context);
+        return context->lastDrawRectResult;
+    }
+
+    uint32_t rgb = color & 0x00FFFFFFu;
+    uint32_t red = (rgb >> 16) & 0xFFu;
+    uint32_t green = (rgb >> 8) & 0xFFu;
+    uint32_t blue = rgb & 0xFFu;
+
+    try {
+        ipc::Message request;
+        request.srcPid = Allocator::currentPid();
+        request.type = static_cast<uint32_t>(gui::MsgType::MT_DrawRect);
+        std::string payload = std::to_string(window) + "|" + std::to_string(x) + "|" + std::to_string(y) + "|" + std::to_string(width) + "|" + std::to_string(height) + "|" + std::to_string(red) + "|" + std::to_string(green) + "|" + std::to_string(blue);
+        request.data.assign(payload.begin(), payload.end());
+        ipc::Bus::publish("gui.input", std::move(request), false);
+    } catch (...) {
+        context->lastDrawRectResult = GX_ERROR_INTERNAL;
+        Logger::write(LogLevel::Warn, "[NativeAppHost] App: " + appLabel(context) + " draw_rect failed: compositor publish failed");
+        NativeAppProcessTable::UpdateFromRuntime(*context);
+        return context->lastDrawRectResult;
+    }
+
+    context->lastDrawRectResult = GX_OK;
+    NativeAppProcessTable::UpdateFromRuntime(*context);
+    Logger::write(LogLevel::Info, "[NativeAppHost] App: " + appLabel(context) + " draw_rect windowId=" + std::to_string(window) + " rect=" + std::to_string(x) + "," + std::to_string(y) + " " + std::to_string(width) + "x" + std::to_string(height) + " color=0x" + std::to_string(rgb));
+    return GX_OK;
+}
+
 gx_result hostPollEvent(NativeGxAppContext* ctx, gx_event* outEvent, int timeoutMs) {
     NativeAppRuntimeContext* context = runtimeContextFor(ctx);
     if (!context) {
@@ -469,6 +540,7 @@ NativeAppRuntimeContext NativeAppRuntime::Prepare(
     context.hostCalls.get_api_version = hostGetApiVersion;
     context.hostCalls.request_window = hostRequestWindow;
     context.hostCalls.draw_text = hostDrawText;
+    context.hostCalls.draw_rect = hostDrawRect;
     context.hostCalls.wait_for_close = hostWaitForClose;
     context.hostCalls.poll_event = hostPollEvent;
     context.hostCalls.exit = hostExit;

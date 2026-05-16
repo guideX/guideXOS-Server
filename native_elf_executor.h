@@ -29,6 +29,12 @@ struct NativeElfExecutionResult {
     uint64_t lastDrawTextWindow = 0;
     std::string lastDrawText;
     int32_t lastDrawTextResult = GX_OK;
+    uint32_t drawRectCallCount = 0;
+    uint64_t lastDrawRectWindow = 0;
+    int lastDrawRectWidth = 0;
+    int lastDrawRectHeight = 0;
+    uint32_t lastDrawRectColor = 0;
+    int32_t lastDrawRectResult = GX_OK;
     uint32_t waitForCloseCallCount = 0;
     uint64_t lastWaitWindow = 0;
     int lastWaitTimeoutMs = 0;

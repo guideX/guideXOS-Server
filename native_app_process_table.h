@@ -30,6 +30,12 @@ struct NativeAppProcessInfo {
     gx_event_type lastEventType = GX_EVENT_NONE;
     gx_handle lastEventWindow = 0;
     gx_result lastPollEventResult = GX_OK;
+    uint32_t drawRectCallCount = 0;
+    gx_handle lastDrawRectWindow = 0;
+    int lastDrawRectWidth = 0;
+    int lastDrawRectHeight = 0;
+    uint32_t lastDrawRectColor = 0;
+    gx_result lastDrawRectResult = GX_OK;
     uint32_t paintEventCount = 0;
     gx_handle lastPaintWindow = 0;
     int lastPaintWidth = 0;

@@ -408,7 +408,7 @@ namespace gxos {
             }
             oss << "\n";
             oss << "apiVersion: " << runtimeContext.hostCalls.version << "\n";
-            oss << "hostCallsAvailable: " << ((runtimeContext.hostCalls.log && runtimeContext.hostCalls.get_api_version && runtimeContext.hostCalls.request_window && runtimeContext.hostCalls.draw_text && runtimeContext.hostCalls.wait_for_close && runtimeContext.hostCalls.poll_event && runtimeContext.hostCalls.exit) ? "true" : "false") << "\n";
+            oss << "hostCallsAvailable: " << ((runtimeContext.hostCalls.log && runtimeContext.hostCalls.get_api_version && runtimeContext.hostCalls.request_window && runtimeContext.hostCalls.draw_text && runtimeContext.hostCalls.draw_rect && runtimeContext.hostCalls.wait_for_close && runtimeContext.hostCalls.poll_event && runtimeContext.hostCalls.exit) ? "true" : "false") << "\n";
             oss << "runtimeSuccess: " << (runtimeContext.success ? "true" : "false") << "\n";
             if (!runtimeContext.diagnostics.empty()) {
                 oss << "runtimeDiagnostics: ";
@@ -449,6 +449,12 @@ namespace gxos {
             oss << "lastDrawTextWindow: " << executionResult.lastDrawTextWindow << "\n";
             oss << "lastDrawText: " << executionResult.lastDrawText << "\n";
             oss << "lastDrawTextResult: " << executionResult.lastDrawTextResult << "\n";
+            oss << "drawRectCallCount: " << executionResult.drawRectCallCount << "\n";
+            oss << "lastDrawRectWindow: " << executionResult.lastDrawRectWindow << "\n";
+            oss << "lastDrawRectWidth: " << executionResult.lastDrawRectWidth << "\n";
+            oss << "lastDrawRectHeight: " << executionResult.lastDrawRectHeight << "\n";
+            oss << "lastDrawRectColor: " << executionResult.lastDrawRectColor << "\n";
+            oss << "lastDrawRectResult: " << executionResult.lastDrawRectResult << "\n";
             oss << "waitForCloseCallCount: " << executionResult.waitForCloseCallCount << "\n";
             oss << "lastWaitWindow: " << executionResult.lastWaitWindow << "\n";
             oss << "lastWaitTimeoutMs: " << executionResult.lastWaitTimeoutMs << "\n";

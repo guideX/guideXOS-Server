@@ -274,6 +274,12 @@ NativeElfExecutionResult NativeElfExecutor::Execute(
     result.lastDrawTextWindow = runtimeContext.lastDrawTextWindow;
     result.lastDrawText = runtimeContext.lastDrawText;
     result.lastDrawTextResult = runtimeContext.lastDrawTextResult;
+    result.drawRectCallCount = runtimeContext.drawRectCallCount;
+    result.lastDrawRectWindow = runtimeContext.lastDrawRectWindow;
+    result.lastDrawRectWidth = runtimeContext.lastDrawRectWidth;
+    result.lastDrawRectHeight = runtimeContext.lastDrawRectHeight;
+    result.lastDrawRectColor = runtimeContext.lastDrawRectColor;
+    result.lastDrawRectResult = runtimeContext.lastDrawRectResult;
     result.waitForCloseCallCount = runtimeContext.waitForCloseCallCount;
     result.lastWaitWindow = runtimeContext.lastWaitWindow;
     result.lastWaitTimeoutMs = runtimeContext.lastWaitTimeoutMs;
@@ -310,6 +316,12 @@ NativeElfExecutionResult NativeElfExecutor::Execute(
     addDiagnostic(result, "last drawText window: " + std::to_string(result.lastDrawTextWindow));
     if (!result.lastDrawText.empty()) addDiagnostic(result, "last drawText: " + result.lastDrawText);
     addDiagnostic(result, "last drawText result: " + std::to_string(result.lastDrawTextResult));
+    addDiagnostic(result, "drawRect call count: " + std::to_string(result.drawRectCallCount));
+    addDiagnostic(result, "last drawRect window: " + std::to_string(result.lastDrawRectWindow));
+    addDiagnostic(result, "last drawRect width: " + std::to_string(result.lastDrawRectWidth));
+    addDiagnostic(result, "last drawRect height: " + std::to_string(result.lastDrawRectHeight));
+    addDiagnostic(result, "last drawRect color: " + std::to_string(result.lastDrawRectColor));
+    addDiagnostic(result, "last drawRect result: " + std::to_string(result.lastDrawRectResult));
     addDiagnostic(result, "waitForClose call count: " + std::to_string(result.waitForCloseCallCount));
     addDiagnostic(result, "last wait window: " + std::to_string(result.lastWaitWindow));
     addDiagnostic(result, "last wait timeoutMs: " + std::to_string(result.lastWaitTimeoutMs));
