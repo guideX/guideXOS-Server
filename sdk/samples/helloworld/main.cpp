@@ -1,18 +1,16 @@
-#include <guidexos/app.h>
+#include <guidexos/ui.h>
 
-#include <stdio.h>
+static gx_rect kPanelRect = { 10, 10, 460, 80 };
+static gx_rect kButtonRect = { 20, 90, 160, 40 };
 
-static void draw_content(gx_app_context* ctx, gx_handle window, int clickCount) {
-    if (ctx->host->draw_rect) {
-        ctx->host->draw_rect(ctx, window, 10, 10, 460, 80, 0x202020);
-        ctx->host->draw_rect(ctx, window, 20, 90, 160, 40, 0x404040);
-    }
-    if (ctx->host->draw_text) {
-        ctx->host->draw_text(ctx, window, 20, 40, "Hello from Native ELF");
-        ctx->host->draw_text(ctx, window, 35, 115, "Click Me");
-        char message[64];
-        snprintf(message, sizeof(message), "Clicked: %d", clickCount);
-        ctx->host->draw_text(ctx, window, 20, 150, message);
+static void draw_content(gx_app_context* ctx, gx_handle window, int clickCount, int pressed) {
+    gx_draw_panel(ctx, window, kPanelRect, 0x202020u);
+    gx_draw_label(ctx, window, 20, 40, "Hello from Native ELF");
+    gx_draw_button(ctx, window, kButtonRect, "Click Me", pressed);
+    if (clickCount == 1) {
+        gx_draw_label(ctx, window, 20, 150, "Clicked once");
+    } else if (clickCount > 1) {
+        gx_draw_label(ctx, window, 20, 150, "Clicked many");
     }
 }
 
@@ -29,8 +27,9 @@ extern "C" gx_result gx_main(gx_app_context* ctx) {
         gx_result windowResult = ctx->host->request_window(ctx, "HelloWorld Native ELF", 480, 240, &window);
         ctx->host->log(ctx, windowResult == GX_OK ? "request_window succeeded" : "request_window failed");
         int clickCount = 0;
+        int buttonPressed = 0;
         if (windowResult == GX_OK) {
-            draw_content(ctx, window, clickCount);
+            draw_content(ctx, window, clickCount, buttonPressed);
         }
         if (windowResult == GX_OK && ctx->host->poll_event) {
             int elapsedMs = 0;
@@ -38,28 +37,19 @@ extern "C" gx_result gx_main(gx_app_context* ctx) {
                 gx_event event = {};
                 gx_result eventResult = ctx->host->poll_event(ctx, &event, 500);
                 if (eventResult == GX_OK && event.window == window) {
-                    if (event.type == GX_EVENT_WINDOW_PAINT) {
-                        draw_content(ctx, window, clickCount);
-                    } else if (event.type == GX_EVENT_WINDOW_CLOSE) {
+                    if (gx_event_is_paint(&event)) {
+                        draw_content(ctx, window, clickCount, buttonPressed);
+                    } else if (gx_event_is_close(&event)) {
                         ctx->host->log(ctx, "close event received");
                         break;
-                    } else if (event.type == GX_EVENT_KEY) {
-                        if (event.param1 == 27 && event.param2 == GX_KEY_ACTION_DOWN) {
-                            ctx->host->log(ctx, "Escape pressed");
-                            break;
-                        }
-                        char message[64];
-                        snprintf(message, sizeof(message), "key code %d", event.param1);
-                        ctx->host->log(ctx, message);
-                    } else if (event.type == GX_EVENT_MOUSE) {
-                        int action = GX_MOUSE_ACTION(event.param3);
-                        int button = GX_MOUSE_BUTTON(event.param3);
-                        if (button == GX_MOUSE_BUTTON_LEFT && action == GX_MOUSE_ACTION_DOWN &&
-                            event.param1 >= 20 && event.param1 < 180 && event.param2 >= 90 && event.param2 < 130) {
-                            ++clickCount;
-                            ctx->host->log(ctx, "Native button clicked");
-                            draw_content(ctx, window, clickCount);
-                        }
+                    } else if (gx_event_is_escape_down(&event)) {
+                        ctx->host->log(ctx, "Escape pressed");
+                        break;
+                    } else if (gx_mouse_is_left_down(&event) && gx_rect_contains(kButtonRect, event.param1, event.param2)) {
+                        ++clickCount;
+                        buttonPressed = 1;
+                        ctx->host->log(ctx, "Native button clicked");
+                        draw_content(ctx, window, clickCount, buttonPressed);
                     }
                 }
                 if (eventResult != GX_OK && eventResult != GX_ERROR_TIMEOUT) {

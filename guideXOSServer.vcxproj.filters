@@ -660,6 +660,9 @@
     <ClInclude Include="native_app_process_table.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="sdk\include\guidexos\ui.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="allocator.cpp">

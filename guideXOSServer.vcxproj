@@ -327,6 +327,7 @@
     <ClInclude Include="sdk\include\guidexos\abi.h" />
     <ClInclude Include="sdk\include\guidexos\app.h" />
     <ClInclude Include="sdk\include\guidexos\types.h" />
+    <ClInclude Include="sdk\include\guidexos\ui.h" />
     <ClInclude Include="special_effects.h" />
     <ClInclude Include="ui_settings.h" />
     <ClInclude Include="universal_app_loader.h" />

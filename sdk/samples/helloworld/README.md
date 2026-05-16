@@ -15,14 +15,19 @@ extern "C" gx_result gx_main(gx_app_context* ctx);
 - The Native ELF launch pipeline can locate and read the ELF file.
 - The ELF validator can validate the ELF header and architecture.
 
-## What this does not do yet
+## Tiny SDK UI helper
 
-- The ELF is not executed.
-- guideXOS does not jump to `gx_main` yet.
+This sample uses `guidexos/ui.h` for a panel, label, and fake button.
+
+`ui.h` is not an OS widget toolkit. It is only a tiny header-only helper layer over existing Native ELF host calls such as `draw_rect`, `draw_text`, and `poll_event`.
+
+Apps still own their event handling and UI state. For example, this sample checks mouse coordinates, tracks click state, redraws on paint, exits on close, and exits on Escape. OS-side widgets may come later.
+
+## Current runtime scope
+
 - Dynamic linking is not implemented.
-- Host calls/syscalls are placeholders only.
-
-A successful launch attempt should report that the Native ELF was validated, but execution is not implemented yet.
+- The helper layer does not allocate memory and does not create OS-managed controls.
+- Experimental Native ELF execution remains gated by the guideXOS build configuration.
 
 ## Build
 
