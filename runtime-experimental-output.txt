@@ -182,13 +182,14 @@ Bus::publish queueing msg type=4 to channel=gui.input
 Bus::publish queueing msg type=4 to channel=gui.input
 Bus::publish queueing msg type=4 to channel=gui.input
 Bus::publish queueing msg type=4 to channel=gui.input
+Bus::publish queueing msg type=4 to channel=gui.input
 Bus::publish queueing msg type=2 to channel=gui.input
 Bus::publish queueing msg type=2 to channel=gui.output
 [NativeAppHost] App: com.guidexos.helloworld (Hello World) poll_event returned type=1 windowId=1000
 [NativeAppHost] App: com.guidexos.helloworld (Hello World) log: close event received
 [NativeAppRuntime] Cleanup begin app=com.guidexos.helloworld (Hello World) runtimeId=1 processId=0 ownedWindows=0
 [NativeAppRuntime] Cleanup complete app=com.guidexos.helloworld (Hello World) runtimeId=1 state=Exited exitCode=0 cleanedWindows=0 remainingWindows=0
-[NativeElfExecutor] App: com.guidexos.helloworld Architecture: amd64 CanExecute: true Reason: Native ELF mapped for experimental execution; Preferred base: 0x200000; Actual mapped base: 0x200000; Preferred-base mapping: success; Entry host address resolved: 0x201300; Windows amd64 trampoline used: yes; Native ELF gx_main returned 0; runtimeId: 1; lifecycle state before execution: Prepared; lifecycle state after execution: Exited; cleanup attempted: true; cleaned window count: 0; remaining owned window count: 0; Host log call count: 5; Last host log message: close event received; API version returned: 0; request_window call count: 1; last window id: 1000; last window title: HelloWorld Native ELF; request_window result: 0; drawText call count: 3; last drawText window: 1000; last drawText: Click Me; last drawText result: 0; drawRect call count: 2; last drawRect window: 1000; last drawRect width: 160; last drawRect height: 40; last drawRect color: 4210752; last drawRect result: 0; waitForClose call count: 0; last wait window: 0; last wait timeoutMs: 0; last wait result: 0; pollEvent call count: 45; last event type: 1; last event window: 1000; last pollEvent result: 0; paint event count: 0; last paint window: 0; last paint width: 0; last paint height: 0; key event count: 0; last key window: 0; last key code: 0; last key action: 0; last key modifiers: 0; mouse event count: 0; last mouse window: 0; last mouse x: 0; last mouse y: 0; last mouse packed button action: 0; last mouse modifiers: 0; fileRead call count: 1; fileExists call count: 1; last file path: resources/message.txt; last file read bytes: 40; last file IO result: 0 Result: executed
+[NativeElfExecutor] App: com.guidexos.helloworld Architecture: amd64 CanExecute: true Reason: Native ELF mapped for experimental execution; Preferred base: 0x200000; Actual mapped base: 0x200000; Preferred-base mapping: success; Entry host address resolved: 0x201300; Windows amd64 trampoline used: yes; Native ELF gx_main returned 0; runtimeId: 1; lifecycle state before execution: Prepared; lifecycle state after execution: Exited; cleanup attempted: true; cleaned window count: 0; remaining owned window count: 0; Host log call count: 5; Last host log message: close event received; API version returned: 0; request_window call count: 1; last window id: 1000; last window title: HelloWorld Native ELF; request_window result: 0; drawText call count: 3; last drawText window: 1000; last drawText: Click Me; last drawText result: 0; drawRect call count: 2; last drawRect window: 1000; last drawRect width: 160; last drawRect height: 40; last drawRect color: 4210752; last drawRect result: 0; waitForClose call count: 0; last wait window: 0; last wait timeoutMs: 0; last wait result: 0; pollEvent call count: 46; last event type: 1; last event window: 1000; last pollEvent result: 0; paint event count: 0; last paint window: 0; last paint width: 0; last paint height: 0; key event count: 0; last key window: 0; last key code: 0; last key action: 0; last key modifiers: 0; mouse event count: 0; last mouse window: 0; last mouse x: 0; last mouse y: 0; last mouse packed button action: 0; last mouse modifiers: 0; fileRead call count: 1; fileExists call count: 1; last file path: resources/message.txt; last file read bytes: 40; last file IO result: 0 Result: executed
 NativeAppPipelineSmokeTest(com.guidexos.helloworld)
 nativeapp.inspect com.guidexos.helloworld
 
@@ -281,7 +282,7 @@ waitForCloseCallCount: 0
 lastWaitWindow: 0
 lastWaitTimeoutMs: 0
 lastWaitResult: 0
-pollEventCallCount: 45
+pollEventCallCount: 46
 lastEventType: 1
 lastEventWindow: 1000
 lastPollEventResult: 0
@@ -300,7 +301,7 @@ lastMouseX: 0
 lastMouseY: 0
 lastMousePackedButtonAction: 0
 lastMouseModifiers: 0
-executionDiagnostics: Native ELF mapped for experimental execution; Preferred base: 0x200000; Actual mapped base: 0x200000; Preferred-base mapping: success; Entry host address resolved: 0x201300; Windows amd64 trampoline used: yes; Native ELF gx_main returned 0; runtimeId: 1; lifecycle state before execution: Prepared; lifecycle state after execution: Exited; cleanup attempted: true; cleaned window count: 0; remaining owned window count: 0; Host log call count: 5; Last host log message: close event received; API version returned: 0; request_window call count: 1; last window id: 1000; last window title: HelloWorld Native ELF; request_window result: 0; drawText call count: 3; last drawText window: 1000; last drawText: Click Me; last drawText result: 0; drawRect call count: 2; last drawRect window: 1000; last drawRect width: 160; last drawRect height: 40; last drawRect color: 4210752; last drawRect result: 0; waitForClose call count: 0; last wait window: 0; last wait timeoutMs: 0; last wait result: 0; pollEvent call count: 45; last event type: 1; last event window: 1000; last pollEvent result: 0; paint event count: 0; last paint window: 0; last paint width: 0; last paint height: 0; key event count: 0; last key window: 0; last key code: 0; last key action: 0; last key modifiers: 0; mouse event count: 0; last mouse window: 0; last mouse x: 0; last mouse y: 0; last mouse packed button action: 0; last mouse modifiers: 0; fileRead call count: 1; fileExists call count: 1; last file path: resources/message.txt; last file read bytes: 40; last file IO result: 0
+executionDiagnostics: Native ELF mapped for experimental execution; Preferred base: 0x200000; Actual mapped base: 0x200000; Preferred-base mapping: success; Entry host address resolved: 0x201300; Windows amd64 trampoline used: yes; Native ELF gx_main returned 0; runtimeId: 1; lifecycle state before execution: Prepared; lifecycle state after execution: Exited; cleanup attempted: true; cleaned window count: 0; remaining owned window count: 0; Host log call count: 5; Last host log message: close event received; API version returned: 0; request_window call count: 1; last window id: 1000; last window title: HelloWorld Native ELF; request_window result: 0; drawText call count: 3; last drawText window: 1000; last drawText: Click Me; last drawText result: 0; drawRect call count: 2; last drawRect window: 1000; last drawRect width: 160; last drawRect height: 40; last drawRect color: 4210752; last drawRect result: 0; waitForClose call count: 0; last wait window: 0; last wait timeoutMs: 0; last wait result: 0; pollEvent call count: 46; last event type: 1; last event window: 1000; last pollEvent result: 0; paint event count: 0; last paint window: 0; last paint width: 0; last paint height: 0; key event count: 0; last key window: 0; last key code: 0; last key action: 0; last key modifiers: 0; mouse event count: 0; last mouse window: 0; last mouse x: 0; last mouse y: 0; last mouse packed button action: 0; last mouse modifiers: 0; fileRead call count: 1; fileExists call count: 1; last file path: resources/message.txt; last file read bytes: 40; last file IO result: 0
 
 Result: inspection complete; experimental execution path attempted
 
@@ -349,106 +350,29 @@ Bus::publish queueing msg type=4 to channel=gui.input
 Bus::publish queueing msg type=4 to channel=gui.input
 Bus::publish queueing msg type=4 to channel=gui.input
 Bus::publish queueing msg type=4 to channel=gui.input
-Bus::publish queueing msg type=13 to channel=gui.output
-[NativeAppHost] App: com.guidexos.resourceviewer (Resource Viewer) poll_event returned type=5 windowId=1001
-Bus::publish queueing msg type=4 to channel=gui.input
-Bus::publish queueing msg type=13 to channel=gui.output
-Bus::publish queueing msg type=13 to channel=gui.output
-[NativeAppHost] App: com.guidexos.resourceviewer (Resource Viewer) poll_event returned type=5 windowId=1001
-Bus::publish queueing msg type=4 to channel=gui.input
-[NativeAppHost] App: com.guidexos.resourceviewer (Resource Viewer) poll_event returned type=5 windowId=1001
-Bus::publish queueing msg type=4 to channel=gui.input
-Bus::publish queueing msg type=13 to channel=gui.output
-Bus::publish queueing msg type=13 to channel=gui.output
-[NativeAppHost] App: com.guidexos.resourceviewer (Resource Viewer) poll_event returned type=5 windowId=1001
-Bus::publish queueing msg type=4 to channel=gui.input
-[NativeAppHost] App: com.guidexos.resourceviewer (Resource Viewer) poll_event returned type=5 windowId=1001
-Bus::publish queueing msg type=4 to channel=gui.input
-Bus::publish queueing msg type=13 to channel=gui.output
-Bus::publish queueing msg type=13 to channel=gui.output
-Bus::publish queueing msg type=13 to channel=gui.output
-[NativeAppHost] App: com.guidexos.resourceviewer (Resource Viewer) poll_event returned type=5 windowId=1001
-Bus::publish queueing msg type=4 to channel=gui.input
-[NativeAppHost] App: com.guidexos.resourceviewer (Resource Viewer) poll_event returned type=5 windowId=1001
-Bus::publish queueing msg type=4 to channel=gui.input
-[NativeAppHost] App: com.guidexos.resourceviewer (Resource Viewer) poll_event returned type=5 windowId=1001
-Bus::publish queueing msg type=4 to channel=gui.input
-Bus::publish queueing msg type=13 to channel=gui.output
-Bus::publish queueing msg type=13 to channel=gui.output
-[NativeAppHost] App: com.guidexos.resourceviewer (Resource Viewer) poll_event returned type=5 windowId=1001
-Bus::publish queueing msg type=4 to channel=gui.input
-[NativeAppHost] App: com.guidexos.resourceviewer (Resource Viewer) poll_event returned type=5 windowId=1001
-Bus::publish queueing msg type=4 to channel=gui.input
-Bus::publish queueing msg type=13 to channel=gui.output
-Bus::publish queueing msg type=13 to channel=gui.output
-[NativeAppHost] App: com.guidexos.resourceviewer (Resource Viewer) poll_event returned type=5 windowId=1001
-Bus::publish queueing msg type=4 to channel=gui.input
-[NativeAppHost] App: com.guidexos.resourceviewer (Resource Viewer) poll_event returned type=5 windowId=1001
-Bus::publish queueing msg type=4 to channel=gui.input
-Bus::publish queueing msg type=13 to channel=gui.output
-Bus::publish queueing msg type=13 to channel=gui.output
-[NativeAppHost] App: com.guidexos.resourceviewer (Resource Viewer) poll_event returned type=5 windowId=1001
-Bus::publish queueing msg type=4 to channel=gui.input
-[NativeAppHost] App: com.guidexos.resourceviewer (Resource Viewer) poll_event returned type=5 windowId=1001
-Bus::publish queueing msg type=4 to channel=gui.input
-Bus::publish queueing msg type=13 to channel=gui.output
-Bus::publish queueing msg type=13 to channel=gui.output
-[NativeAppHost] App: com.guidexos.resourceviewer (Resource Viewer) poll_event returned type=5 windowId=1001
-Bus::publish queueing msg type=4 to channel=gui.input
-[NativeAppHost] App: com.guidexos.resourceviewer (Resource Viewer) poll_event returned type=5 windowId=1001
-Bus::publish queueing msg type=4 to channel=gui.input
-Bus::publish queueing msg type=13 to channel=gui.output
-[NativeAppHost] App: com.guidexos.resourceviewer (Resource Viewer) poll_event returned type=5 windowId=1001
 Bus::publish queueing msg type=4 to channel=gui.input
 Bus::publish queueing msg type=4 to channel=gui.input
 Bus::publish queueing msg type=4 to channel=gui.input
-Bus::publish queueing msg type=13 to channel=gui.output
-[NativeAppHost] App: com.guidexos.resourceviewer (Resource Viewer) poll_event returned type=5 windowId=1001
 Bus::publish queueing msg type=4 to channel=gui.input
-Bus::publish queueing msg type=13 to channel=gui.output
-[NativeAppHost] App: com.guidexos.resourceviewer (Resource Viewer) poll_event returned type=5 windowId=1001
 Bus::publish queueing msg type=4 to channel=gui.input
-Bus::publish queueing msg type=13 to channel=gui.output
-[NativeAppHost] App: com.guidexos.resourceviewer (Resource Viewer) poll_event returned type=5 windowId=1001
 Bus::publish queueing msg type=4 to channel=gui.input
-Bus::publish queueing msg type=13 to channel=gui.output
-[NativeAppHost] App: com.guidexos.resourceviewer (Resource Viewer) poll_event returned type=5 windowId=1001
 Bus::publish queueing msg type=4 to channel=gui.input
-Bus::publish queueing msg type=13 to channel=gui.output
-[NativeAppHost] App: com.guidexos.resourceviewer (Resource Viewer) poll_event returned type=5 windowId=1001
 Bus::publish queueing msg type=4 to channel=gui.input
-Bus::publish queueing msg type=13 to channel=gui.output
-[NativeAppHost] App: com.guidexos.resourceviewer (Resource Viewer) poll_event returned type=5 windowId=1001
 Bus::publish queueing msg type=4 to channel=gui.input
-Bus::publish queueing msg type=13 to channel=gui.output
-[NativeAppHost] App: com.guidexos.resourceviewer (Resource Viewer) poll_event returned type=5 windowId=1001
 Bus::publish queueing msg type=4 to channel=gui.input
-Bus::publish queueing msg type=13 to channel=gui.output
-[NativeAppHost] App: com.guidexos.resourceviewer (Resource Viewer) poll_event returned type=5 windowId=1001
 Bus::publish queueing msg type=4 to channel=gui.input
-Bus::publish queueing msg type=13 to channel=gui.output
-[NativeAppHost] App: com.guidexos.resourceviewer (Resource Viewer) poll_event returned type=5 windowId=1001
 Bus::publish queueing msg type=4 to channel=gui.input
-Bus::publish queueing msg type=13 to channel=gui.output
-[NativeAppHost] App: com.guidexos.resourceviewer (Resource Viewer) poll_event returned type=5 windowId=1001
 Bus::publish queueing msg type=4 to channel=gui.input
-Bus::publish queueing msg type=13 to channel=gui.output
-[NativeAppHost] App: com.guidexos.resourceviewer (Resource Viewer) poll_event returned type=5 windowId=1001
 Bus::publish queueing msg type=4 to channel=gui.input
-Bus::publish queueing msg type=13 to channel=gui.output
-[NativeAppHost] App: com.guidexos.resourceviewer (Resource Viewer) poll_event returned type=5 windowId=1001
 Bus::publish queueing msg type=4 to channel=gui.input
-Bus::publish queueing msg type=13 to channel=gui.output
-Bus::publish queueing msg type=13 to channel=gui.output
-[NativeAppHost] App: com.guidexos.resourceviewer (Resource Viewer) poll_event returned type=5 windowId=1001
 Bus::publish queueing msg type=4 to channel=gui.input
-[NativeAppHost] App: com.guidexos.resourceviewer (Resource Viewer) poll_event returned type=5 windowId=1001
 Bus::publish queueing msg type=4 to channel=gui.input
-Bus::publish queueing msg type=13 to channel=gui.output
-Bus::publish queueing msg type=13 to channel=gui.output
-[NativeAppHost] App: com.guidexos.resourceviewer (Resource Viewer) poll_event returned type=5 windowId=1001
 Bus::publish queueing msg type=4 to channel=gui.input
-[NativeAppHost] App: com.guidexos.resourceviewer (Resource Viewer) poll_event returned type=5 windowId=1001
+Bus::publish queueing msg type=4 to channel=gui.input
+Bus::publish queueing msg type=4 to channel=gui.input
+Bus::publish queueing msg type=4 to channel=gui.input
+Bus::publish queueing msg type=4 to channel=gui.input
+Bus::publish queueing msg type=4 to channel=gui.input
 Bus::publish queueing msg type=4 to channel=gui.input
 Bus::publish queueing msg type=4 to channel=gui.input
 Bus::publish queueing msg type=4 to channel=gui.input
@@ -470,7 +394,7 @@ Bus::publish queueing msg type=2 to channel=gui.output
 [NativeAppHost] App: com.guidexos.resourceviewer (Resource Viewer) exit requested with code 0
 [NativeAppRuntime] Cleanup begin app=com.guidexos.resourceviewer (Resource Viewer) runtimeId=2 processId=0 ownedWindows=0
 [NativeAppRuntime] Cleanup complete app=com.guidexos.resourceviewer (Resource Viewer) runtimeId=2 state=Exited exitCode=0 cleanedWindows=0 remainingWindows=0
-[NativeElfExecutor] App: com.guidexos.resourceviewer Architecture: amd64 CanExecute: true Reason: Native ELF mapped for experimental execution; Preferred base: 0x200000; Actual mapped base: 0x200000; Preferred-base mapping: success; Entry host address resolved: 0x2012e0; Windows amd64 trampoline used: yes; Native ELF gx_main returned 0; runtimeId: 2; lifecycle state before execution: Prepared; lifecycle state after execution: Exited; cleanup attempted: true; cleaned window count: 0; remaining owned window count: 0; Host log call count: 4; Last host log message: ResourceViewer close event received; API version returned: 0; request_window call count: 1; last window id: 1001; last window title: Resource Viewer; request_window result: 0; drawText call count: 3; last drawText window: 1001; last drawText: This text was loaded from a Native ELF app resource file.  ; last drawText result: 0; drawRect call count: 2; last drawRect window: 1001; last drawRect width: 480; last drawRect height: 70; last drawRect color: 3160128; last drawRect result: 0; waitForClose call count: 0; last wait window: 0; last wait timeoutMs: 0; last wait result: 0; pollEvent call count: 58; last event type: 1; last event window: 1001; last pollEvent result: 0; paint event count: 0; last paint window: 0; last paint width: 0; last paint height: 0; key event count: 0; last key window: 0; last key code: 0; last key action: 0; last key modifiers: 0; mouse event count: 33; last mouse window: 1001; last mouse x: 954; last mouse y: 66; last mouse packed button action: 0; last mouse modifiers: 0; fileRead call count: 1; fileExists call count: 1; last file path: resources/about.txt; last file read bytes: 59; last file IO result: 0 Result: executed
+[NativeElfExecutor] App: com.guidexos.resourceviewer Architecture: amd64 CanExecute: true Reason: Native ELF mapped for experimental execution; Preferred base: 0x200000; Actual mapped base: 0x200000; Preferred-base mapping: success; Entry host address resolved: 0x2012e0; Windows amd64 trampoline used: yes; Native ELF gx_main returned 0; runtimeId: 2; lifecycle state before execution: Prepared; lifecycle state after execution: Exited; cleanup attempted: true; cleaned window count: 0; remaining owned window count: 0; Host log call count: 4; Last host log message: ResourceViewer close event received; API version returned: 0; request_window call count: 1; last window id: 1001; last window title: Resource Viewer; request_window result: 0; drawText call count: 3; last drawText window: 1001; last drawText: This text was loaded from a Native ELF app resource file.  ; last drawText result: 0; drawRect call count: 2; last drawRect window: 1001; last drawRect width: 480; last drawRect height: 70; last drawRect color: 3160128; last drawRect result: 0; waitForClose call count: 0; last wait window: 0; last wait timeoutMs: 0; last wait result: 0; pollEvent call count: 47; last event type: 1; last event window: 1001; last pollEvent result: 0; paint event count: 0; last paint window: 0; last paint width: 0; last paint height: 0; key event count: 0; last key window: 0; last key code: 0; last key action: 0; last key modifiers: 0; mouse event count: 0; last mouse window: 0; last mouse x: 0; last mouse y: 0; last mouse packed button action: 0; last mouse modifiers: 0; fileRead call count: 1; fileExists call count: 1; last file path: resources/about.txt; last file read bytes: 59; last file IO result: 0 Result: executed
 NativeAppPipelineSmokeTest(com.guidexos.resourceviewer)
 nativeapp.inspect com.guidexos.resourceviewer
 
@@ -563,7 +487,7 @@ waitForCloseCallCount: 0
 lastWaitWindow: 0
 lastWaitTimeoutMs: 0
 lastWaitResult: 0
-pollEventCallCount: 58
+pollEventCallCount: 47
 lastEventType: 1
 lastEventWindow: 1001
 lastPollEventResult: 0
@@ -576,18 +500,20 @@ lastKeyWindow: 0
 lastKeyCode: 0
 lastKeyAction: 0
 lastKeyModifiers: 0
-mouseEventCount: 33
-lastMouseWindow: 1001
-lastMouseX: 954
-lastMouseY: 66
+mouseEventCount: 0
+lastMouseWindow: 0
+lastMouseX: 0
+lastMouseY: 0
 lastMousePackedButtonAction: 0
 lastMouseModifiers: 0
-executionDiagnostics: Native ELF mapped for experimental execution; Preferred base: 0x200000; Actual mapped base: 0x200000; Preferred-base mapping: success; Entry host address resolved: 0x2012e0; Windows amd64 trampoline used: yes; Native ELF gx_main returned 0; runtimeId: 2; lifecycle state before execution: Prepared; lifecycle state after execution: Exited; cleanup attempted: true; cleaned window count: 0; remaining owned window count: 0; Host log call count: 4; Last host log message: ResourceViewer close event received; API version returned: 0; request_window call count: 1; last window id: 1001; last window title: Resource Viewer; request_window result: 0; drawText call count: 3; last drawText window: 1001; last drawText: This text was loaded from a Native ELF app resource file.  ; last drawText result: 0; drawRect call count: 2; last drawRect window: 1001; last drawRect width: 480; last drawRect height: 70; last drawRect color: 3160128; last drawRect result: 0; waitForClose call count: 0; last wait window: 0; last wait timeoutMs: 0; last wait result: 0; pollEvent call count: 58; last event type: 1; last event window: 1001; last pollEvent result: 0; paint event count: 0; last paint window: 0; last paint width: 0; last paint height: 0; key event count: 0; last key window: 0; last key code: 0; last key action: 0; last key modifiers: 0; mouse event count: 33; last mouse window: 1001; last mouse x: 954; last mouse y: 66; last mouse packed button action: 0; last mouse modifiers: 0; fileRead call count: 1; fileExists call count: 1; last file path: resources/about.txt; last file read bytes: 59; last file IO result: 0
+executionDiagnostics: Native ELF mapped for experimental execution; Preferred base: 0x200000; Actual mapped base: 0x200000; Preferred-base mapping: success; Entry host address resolved: 0x2012e0; Windows amd64 trampoline used: yes; Native ELF gx_main returned 0; runtimeId: 2; lifecycle state before execution: Prepared; lifecycle state after execution: Exited; cleanup attempted: true; cleaned window count: 0; remaining owned window count: 0; Host log call count: 4; Last host log message: ResourceViewer close event received; API version returned: 0; request_window call count: 1; last window id: 1001; last window title: Resource Viewer; request_window result: 0; drawText call count: 3; last drawText window: 1001; last drawText: This text was loaded from a Native ELF app resource file.  ; last drawText result: 0; drawRect call count: 2; last drawRect window: 1001; last drawRect width: 480; last drawRect height: 70; last drawRect color: 3160128; last drawRect result: 0; waitForClose call count: 0; last wait window: 0; last wait timeoutMs: 0; last wait result: 0; pollEvent call count: 47; last event type: 1; last event window: 1001; last pollEvent result: 0; paint event count: 0; last paint window: 0; last paint width: 0; last paint height: 0; key event count: 0; last key window: 0; last key code: 0; last key action: 0; last key modifiers: 0; mouse event count: 0; last mouse window: 0; last mouse x: 0; last mouse y: 0; last mouse packed button action: 0; last mouse modifiers: 0; fileRead call count: 1; fileExists call count: 1; last file path: resources/about.txt; last file read bytes: 59; last file IO result: 0
 
 Result: inspection complete; experimental execution path attempted
 
 Expected: find manifest, validate ELF if present, load image, prepare runtime, stop at executor gate unless experimental execution is enabled.
-Native app processes: 0
+Native app processes: 2
+runtimeId=1 appId=com.guidexos.helloworld displayName=Hello World architecture=amd64 state=Exited windows=0/0/0 pollEventCallCount=46 lastEventType=1 lastEventWindow=1000 lastPollEventResult=0 drawRectCallCount=2 lastDrawRectWindow=1000 lastDrawRectWidth=160 lastDrawRectHeight=40 lastDrawRectColor=4210752 lastDrawRectResult=0 paintEventCount=0 lastPaintWindow=0 lastPaintWidth=0 lastPaintHeight=0 keyEventCount=0 lastKeyWindow=0 lastKeyCode=0 lastKeyAction=0 lastKeyModifiers=0 mouseEventCount=0 lastMouseWindow=0 lastMouseX=0 lastMouseY=0 lastMousePackedButtonAction=0 lastMouseModifiers=0 exitCode=0 failureReason= experimentalExecutionEnabled=true hostArchitecture=amd64
+runtimeId=2 appId=com.guidexos.resourceviewer displayName=Resource Viewer architecture=amd64 state=Exited windows=0/0/0 pollEventCallCount=47 lastEventType=1 lastEventWindow=1001 lastPollEventResult=0 drawRectCallCount=2 lastDrawRectWindow=1001 lastDrawRectWidth=480 lastDrawRectHeight=70 lastDrawRectColor=3160128 lastDrawRectResult=0 paintEventCount=0 lastPaintWindow=0 lastPaintWidth=0 lastPaintHeight=0 keyEventCount=0 lastKeyWindow=0 lastKeyCode=0 lastKeyAction=0 lastKeyModifiers=0 mouseEventCount=0 lastMouseWindow=0 lastMouseX=0 lastMouseY=0 lastMousePackedButtonAction=0 lastMouseModifiers=0 exitCode=0 failureReason= experimentalExecutionEnabled=true hostArchitecture=amd64
 [lifecycle] phase -> ShuttingDown
 Bus::publish queueing msg type=5 to channel=gui.input
 Compositor service stopping
