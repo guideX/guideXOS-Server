@@ -40,6 +40,11 @@ struct NativeAppProcessInfo {
     gx_handle lastPaintWindow = 0;
     int lastPaintWidth = 0;
     int lastPaintHeight = 0;
+    uint32_t keyEventCount = 0;
+    gx_handle lastKeyWindow = 0;
+    int lastKeyCode = 0;
+    int lastKeyAction = 0;
+    int lastKeyModifiers = 0;
 };
 
 class NativeAppProcessTable {

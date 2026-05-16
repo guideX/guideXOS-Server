@@ -292,6 +292,11 @@ NativeElfExecutionResult NativeElfExecutor::Execute(
     result.lastPaintWindow = runtimeContext.lastPaintWindow;
     result.lastPaintWidth = runtimeContext.lastPaintWidth;
     result.lastPaintHeight = runtimeContext.lastPaintHeight;
+    result.keyEventCount = runtimeContext.keyEventCount;
+    result.lastKeyWindow = runtimeContext.lastKeyWindow;
+    result.lastKeyCode = runtimeContext.lastKeyCode;
+    result.lastKeyAction = runtimeContext.lastKeyAction;
+    result.lastKeyModifiers = runtimeContext.lastKeyModifiers;
     result.lifecycleStateAfterExecution = NativeAppRuntime::ToString(runtimeContext.lifecycleState);
     result.cleanupAttempted = runtimeContext.cleanupAttempted;
     result.cleanedWindowCount = runtimeContext.cleanedWindowCount;
@@ -334,6 +339,11 @@ NativeElfExecutionResult NativeElfExecutor::Execute(
     addDiagnostic(result, "last paint window: " + std::to_string(result.lastPaintWindow));
     addDiagnostic(result, "last paint width: " + std::to_string(result.lastPaintWidth));
     addDiagnostic(result, "last paint height: " + std::to_string(result.lastPaintHeight));
+    addDiagnostic(result, "key event count: " + std::to_string(result.keyEventCount));
+    addDiagnostic(result, "last key window: " + std::to_string(result.lastKeyWindow));
+    addDiagnostic(result, "last key code: " + std::to_string(result.lastKeyCode));
+    addDiagnostic(result, "last key action: " + std::to_string(result.lastKeyAction));
+    addDiagnostic(result, "last key modifiers: " + std::to_string(result.lastKeyModifiers));
 #endif
 
     result.message = joinDiagnostics(result.diagnostics);

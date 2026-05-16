@@ -47,6 +47,11 @@ struct NativeElfExecutionResult {
     uint64_t lastPaintWindow = 0;
     int lastPaintWidth = 0;
     int lastPaintHeight = 0;
+    uint32_t keyEventCount = 0;
+    uint64_t lastKeyWindow = 0;
+    int lastKeyCode = 0;
+    int lastKeyAction = 0;
+    int lastKeyModifiers = 0;
     uint64_t runtimeId = 0;
     std::string lifecycleStateBeforeExecution;
     std::string lifecycleStateAfterExecution;

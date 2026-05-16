@@ -467,6 +467,11 @@ namespace gxos {
             oss << "lastPaintWindow: " << executionResult.lastPaintWindow << "\n";
             oss << "lastPaintWidth: " << executionResult.lastPaintWidth << "\n";
             oss << "lastPaintHeight: " << executionResult.lastPaintHeight << "\n";
+            oss << "keyEventCount: " << executionResult.keyEventCount << "\n";
+            oss << "lastKeyWindow: " << executionResult.lastKeyWindow << "\n";
+            oss << "lastKeyCode: " << executionResult.lastKeyCode << "\n";
+            oss << "lastKeyAction: " << executionResult.lastKeyAction << "\n";
+            oss << "lastKeyModifiers: " << executionResult.lastKeyModifiers << "\n";
             if (!executionResult.diagnostics.empty()) {
                 oss << "executionDiagnostics: ";
                 for (size_t i = 0; i < executionResult.diagnostics.size(); ++i) {

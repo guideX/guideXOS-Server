@@ -92,6 +92,63 @@ bool parseWindowId(const std::string& payload, uint64_t& id) {
     }
 }
 
+bool tryParseInt(const std::string& text, int& value) {
+    if (text.empty()) return false;
+    try {
+        size_t consumed = 0;
+        int parsed = std::stoi(text, &consumed);
+        if (consumed != text.size()) return false;
+        value = parsed;
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
+bool tryParseUnsigned64(const std::string& text, uint64_t& value) {
+    if (text.empty()) return false;
+    try {
+        size_t consumed = 0;
+        uint64_t parsed = std::stoull(text, &consumed);
+        if (consumed != text.size()) return false;
+        value = parsed;
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
+bool parseKeyPayload(const std::string& payload, int& keyCode, int& action, int& modifiers, uint64_t& window) {
+    std::istringstream iss(payload);
+    std::string keyCodeText;
+    std::string actionText;
+    std::string modifiersText;
+    std::string windowText;
+    std::getline(iss, keyCodeText, '|');
+    std::getline(iss, actionText, '|');
+    std::getline(iss, modifiersText, '|');
+    std::getline(iss, windowText, '|');
+
+    if (!tryParseInt(keyCodeText, keyCode) || keyCode < 0) return false;
+    if (actionText == "down") {
+        action = GX_KEY_ACTION_DOWN;
+    } else if (actionText == "up") {
+        action = GX_KEY_ACTION_UP;
+    } else if (tryParseInt(actionText, action)) {
+        if (action != GX_KEY_ACTION_UP && action != GX_KEY_ACTION_DOWN) return false;
+    } else {
+        return false;
+    }
+
+    modifiers = 0;
+    if (!modifiersText.empty() && !tryParseInt(modifiersText, modifiers)) return false;
+    modifiers &= GX_KEY_MOD_SHIFT | GX_KEY_MOD_CTRL | GX_KEY_MOD_ALT;
+
+    window = 0;
+    if (!windowText.empty() && !tryParseUnsigned64(windowText, window)) return false;
+    return true;
+}
+
 bool ownsWindow(const NativeAppRuntimeContext& context, gx_handle window) {
     for (gx_handle createdWindow : context.createdWindowHandles) {
         if (createdWindow == window) return true;
@@ -118,6 +175,7 @@ void initializeEvent(gx_event* outEvent) {
 gx_event_type eventTypeForMessage(uint32_t messageType) {
     if (messageType == static_cast<uint32_t>(gui::MsgType::MT_Close)) return GX_EVENT_WINDOW_CLOSE;
     if (messageType == static_cast<uint32_t>(gui::MsgType::MT_SetFocus)) return GX_EVENT_WINDOW_FOCUS;
+    if (messageType == static_cast<uint32_t>(gui::MsgType::MT_InputKey)) return GX_EVENT_KEY;
     if (messageType == static_cast<uint32_t>(gui::MsgType::MT_RequestFrame)) return GX_EVENT_WINDOW_PAINT;
     return GX_EVENT_NONE;
 }
@@ -382,9 +440,18 @@ gx_result hostPollEvent(NativeGxAppContext* ctx, gx_event* outEvent, int timeout
         uint64_t window = 0;
         int paintWidth = 0;
         int paintHeight = 0;
-        bool parsed = eventType == GX_EVENT_WINDOW_PAINT
-            ? parseFramePayload(payload, window, paintWidth, paintHeight)
-            : parseWindowId(payload, window);
+        int keyCode = 0;
+        int keyAction = 0;
+        int keyModifiers = 0;
+        bool parsed = false;
+        if (eventType == GX_EVENT_WINDOW_PAINT) {
+            parsed = parseFramePayload(payload, window, paintWidth, paintHeight);
+        } else if (eventType == GX_EVENT_KEY) {
+            parsed = parseKeyPayload(payload, keyCode, keyAction, keyModifiers, window);
+            if (parsed && window == 0) window = context->focusedOwnedWindow;
+        } else {
+            parsed = parseWindowId(payload, window);
+        }
         if (!parsed) {
             context->lastPollEventResult = GX_ERROR_UNSUPPORTED;
             Logger::write(LogLevel::Warn, "[NativeAppHost] App: " + appLabel(context) + " poll_event unsupported: GUI event did not identify a window");
@@ -408,6 +475,17 @@ gx_result hostPollEvent(NativeGxAppContext* ctx, gx_event* outEvent, int timeout
             context->lastPaintWindow = window;
             context->lastPaintWidth = paintWidth;
             context->lastPaintHeight = paintHeight;
+        } else if (eventType == GX_EVENT_WINDOW_FOCUS) {
+            context->focusedOwnedWindow = window;
+        } else if (eventType == GX_EVENT_KEY) {
+            outEvent->param1 = keyCode;
+            outEvent->param2 = keyAction;
+            outEvent->param3 = keyModifiers;
+            ++context->keyEventCount;
+            context->lastKeyWindow = window;
+            context->lastKeyCode = keyCode;
+            context->lastKeyAction = keyAction;
+            context->lastKeyModifiers = keyModifiers;
         }
         context->lastEventType = eventType;
         context->lastEventWindow = window;

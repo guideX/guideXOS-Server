@@ -46,6 +46,11 @@ void applyRuntimeState(NativeAppProcessInfo& process, const NativeAppRuntimeCont
     process.lastPaintWindow = context.lastPaintWindow;
     process.lastPaintWidth = context.lastPaintWidth;
     process.lastPaintHeight = context.lastPaintHeight;
+    process.keyEventCount = context.keyEventCount;
+    process.lastKeyWindow = context.lastKeyWindow;
+    process.lastKeyCode = context.lastKeyCode;
+    process.lastKeyAction = context.lastKeyAction;
+    process.lastKeyModifiers = context.lastKeyModifiers;
 }
 
 } // namespace

@@ -1,5 +1,7 @@
 #include <guidexos/app.h>
 
+#include <stdio.h>
+
 extern "C" gx_result gx_main(gx_app_context* ctx) {
     if (!ctx || !ctx->host) return GX_ERROR_INVALID_ARGUMENT;
     if (!ctx->host->get_api_version || !ctx->host->log) return GX_ERROR_UNSUPPORTED;
@@ -36,6 +38,14 @@ extern "C" gx_result gx_main(gx_app_context* ctx) {
                     } else if (event.type == GX_EVENT_WINDOW_CLOSE) {
                         ctx->host->log(ctx, "close event received");
                         break;
+                    } else if (event.type == GX_EVENT_KEY) {
+                        if (event.param1 == 27 && event.param2 == GX_KEY_ACTION_DOWN) {
+                            ctx->host->log(ctx, "Escape pressed");
+                            break;
+                        }
+                        char message[64];
+                        snprintf(message, sizeof(message), "key code %d", event.param1);
+                        ctx->host->log(ctx, message);
                     }
                 }
                 if (eventResult != GX_OK && eventResult != GX_ERROR_TIMEOUT) {

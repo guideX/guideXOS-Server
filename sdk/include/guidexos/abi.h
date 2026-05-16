@@ -21,6 +21,14 @@ typedef enum gx_event_type {
     GX_EVENT_WINDOW_PAINT = 6
 } gx_event_type;
 
+enum {
+    GX_KEY_ACTION_UP = 0,
+    GX_KEY_ACTION_DOWN = 1,
+    GX_KEY_MOD_SHIFT = 1,
+    GX_KEY_MOD_CTRL = 2,
+    GX_KEY_MOD_ALT = 4
+};
+
 typedef struct gx_event {
     uint32_t size;
     gx_event_type type;

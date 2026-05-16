@@ -42,6 +42,14 @@ enum gx_event_type : uint32_t {
     GX_EVENT_WINDOW_PAINT = 6
 };
 
+enum : int {
+    GX_KEY_ACTION_UP = 0,
+    GX_KEY_ACTION_DOWN = 1,
+    GX_KEY_MOD_SHIFT = 1,
+    GX_KEY_MOD_CTRL = 2,
+    GX_KEY_MOD_ALT = 4
+};
+
 struct gx_event {
     uint32_t size = 0;
     gx_event_type type = GX_EVENT_NONE;
@@ -128,6 +136,12 @@ struct NativeAppRuntimeContext {
     gx_handle lastPaintWindow = 0;
     int lastPaintWidth = 0;
     int lastPaintHeight = 0;
+    gx_handle focusedOwnedWindow = 0;
+    uint32_t keyEventCount = 0;
+    gx_handle lastKeyWindow = 0;
+    int lastKeyCode = 0;
+    int lastKeyAction = 0;
+    int lastKeyModifiers = 0;
 };
 
 struct NativeGxAppContext {
