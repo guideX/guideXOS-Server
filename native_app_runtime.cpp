@@ -19,6 +19,8 @@ constexpr int kMinWindowWidth = 64;
 constexpr int kMinWindowHeight = 64;
 constexpr int kMaxWindowWidth = 4096;
 constexpr int kMaxWindowHeight = 4096;
+constexpr int kMinDrawCoordinate = 0;
+constexpr int kMaxDrawCoordinate = 16384;
 constexpr uint64_t kWindowCreateTimeoutMs = 500;
 
 std::string appLabel(const NativeAppRuntimeContext* context) {
@@ -53,6 +55,13 @@ bool parseWindowId(const std::string& payload, uint64_t& id) {
     } catch (...) {
         return false;
     }
+}
+
+bool ownsWindow(const NativeAppRuntimeContext& context, gx_handle window) {
+    for (gx_handle createdWindow : context.createdWindowHandles) {
+        if (createdWindow == window) return true;
+    }
+    return false;
 }
 
 gx_result hostLog(NativeGxAppContext* ctx, const char* message) {
@@ -138,6 +147,57 @@ gx_result hostRequestWindow(NativeGxAppContext* ctx, const char* title, int widt
     return context->lastRequestWindowResult;
 }
 
+gx_result hostDrawText(NativeGxAppContext* ctx, gx_handle window, int x, int y, const char* text) {
+    NativeAppRuntimeContext* context = runtimeContextFor(ctx);
+    if (!context) {
+        Logger::write(LogLevel::Warn, "[NativeAppHost] draw_text rejected: invalid app context or host table");
+        return GX_ERROR_INVALID_ARGUMENT;
+    }
+
+    ++context->drawTextCallCount;
+    context->lastDrawTextWindow = window;
+    context->lastDrawTextResult = GX_ERROR_INVALID_ARGUMENT;
+
+    if (window == 0) {
+        Logger::write(LogLevel::Warn, "[NativeAppHost] App: " + appLabel(context) + " draw_text rejected: invalid window handle");
+        return context->lastDrawTextResult;
+    }
+
+    if (!ownsWindow(*context, window)) {
+        context->lastDrawTextResult = GX_ERROR_PERMISSION_DENIED;
+        Logger::write(LogLevel::Warn, "[NativeAppHost] App: " + appLabel(context) + " draw_text denied: window is not owned by this native runtime");
+        return context->lastDrawTextResult;
+    }
+
+    if (!text) {
+        Logger::write(LogLevel::Warn, "[NativeAppHost] App: " + appLabel(context) + " draw_text rejected: null text");
+        return context->lastDrawTextResult;
+    }
+
+    context->lastDrawText = text;
+    if (x < kMinDrawCoordinate || y < kMinDrawCoordinate || x > kMaxDrawCoordinate || y > kMaxDrawCoordinate) {
+        Logger::write(LogLevel::Warn, "[NativeAppHost] App: " + appLabel(context) + " draw_text rejected: invalid position " + std::to_string(x) + "," + std::to_string(y));
+        return context->lastDrawTextResult;
+    }
+
+    if (!hasPermission(*context, "draw") && !hasPermission(*context, "window")) {
+        context->lastDrawTextResult = GX_ERROR_PERMISSION_DENIED;
+        Logger::write(LogLevel::Warn, "[NativeAppHost] App: " + appLabel(context) + " draw_text denied: missing draw/window permission");
+        return context->lastDrawTextResult;
+    }
+
+    ipc::Message request;
+    request.srcPid = Allocator::currentPid();
+    request.type = static_cast<uint32_t>(gui::MsgType::MT_DrawText);
+    std::string payload = std::to_string(window) + "|@" + std::to_string(x) + "," + std::to_string(y) + "|" + context->lastDrawText;
+    request.data.assign(payload.begin(), payload.end());
+    ipc::Bus::publish("gui.input", std::move(request), false);
+
+    context->lastDrawTextResult = GX_OK;
+    Logger::write(LogLevel::Info, "[NativeAppHost] App: " + appLabel(context) + " draw_text windowId=" + std::to_string(window) + " pos=" + std::to_string(x) + "," + std::to_string(y) + " text=\"" + context->lastDrawText + "\"");
+    return GX_OK;
+}
+
 gx_result hostExit(NativeGxAppContext* ctx, gx_result exitCode) {
     NativeAppRuntimeContext* context = runtimeContextFor(ctx);
     if (!context) {
@@ -191,6 +251,7 @@ NativeAppRuntimeContext NativeAppRuntime::Prepare(
     context.hostCalls.log = hostLog;
     context.hostCalls.get_api_version = hostGetApiVersion;
     context.hostCalls.request_window = hostRequestWindow;
+    context.hostCalls.draw_text = hostDrawText;
     context.hostCalls.exit = hostExit;
 
     if (launchDecision.strategy != AppLaunchStrategy::NativeElf) {

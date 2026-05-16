@@ -250,6 +250,10 @@ NativeElfExecutionResult NativeElfExecutor::Execute(
     result.lastWindowId = runtimeContext.lastCreatedWindowId;
     result.lastWindowTitle = runtimeContext.lastRequestedWindowTitle;
     result.requestWindowResult = runtimeContext.lastRequestWindowResult;
+    result.drawTextCallCount = runtimeContext.drawTextCallCount;
+    result.lastDrawTextWindow = runtimeContext.lastDrawTextWindow;
+    result.lastDrawText = runtimeContext.lastDrawText;
+    result.lastDrawTextResult = runtimeContext.lastDrawTextResult;
     addDiagnostic(result, std::string("Native ELF gx_main returned ") + std::to_string(result.exitCode));
     addDiagnostic(result, "Host log call count: " + std::to_string(result.hostLogCallCount));
     if (!result.lastHostLogMessage.empty()) addDiagnostic(result, "Last host log message: " + result.lastHostLogMessage);
@@ -258,6 +262,10 @@ NativeElfExecutionResult NativeElfExecutor::Execute(
     addDiagnostic(result, "last window id: " + std::to_string(result.lastWindowId));
     if (!result.lastWindowTitle.empty()) addDiagnostic(result, "last window title: " + result.lastWindowTitle);
     addDiagnostic(result, "request_window result: " + std::to_string(result.requestWindowResult));
+    addDiagnostic(result, "drawText call count: " + std::to_string(result.drawTextCallCount));
+    addDiagnostic(result, "last drawText window: " + std::to_string(result.lastDrawTextWindow));
+    if (!result.lastDrawText.empty()) addDiagnostic(result, "last drawText: " + result.lastDrawText);
+    addDiagnostic(result, "last drawText result: " + std::to_string(result.lastDrawTextResult));
 #endif
 
     result.message = joinDiagnostics(result.diagnostics);

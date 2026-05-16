@@ -36,6 +36,7 @@ struct NativeHostCallTable {
     gx_result (*log)(NativeGxAppContext* ctx, const char* message) = nullptr;
     uint32_t (*get_api_version)(NativeGxAppContext* ctx) = nullptr;
     gx_result (*request_window)(NativeGxAppContext* ctx, const char* title, int width, int height, gx_handle* outWindow) = nullptr;
+    gx_result (*draw_text)(NativeGxAppContext* ctx, gx_handle window, int x, int y, const char* text) = nullptr;
     gx_result (*exit)(NativeGxAppContext* ctx, gx_result exitCode) = nullptr;
 };
 
@@ -71,6 +72,10 @@ struct NativeAppRuntimeContext {
     gx_handle lastCreatedWindowId = 0;
     std::string lastRequestedWindowTitle;
     gx_result lastRequestWindowResult = GX_OK;
+    uint32_t drawTextCallCount = 0;
+    gx_handle lastDrawTextWindow = 0;
+    std::string lastDrawText;
+    gx_result lastDrawTextResult = GX_OK;
 };
 
 struct NativeGxAppContext {

@@ -25,6 +25,10 @@ struct NativeElfExecutionResult {
     uint64_t lastWindowId = 0;
     std::string lastWindowTitle;
     int32_t requestWindowResult = GX_OK;
+    uint32_t drawTextCallCount = 0;
+    uint64_t lastDrawTextWindow = 0;
+    std::string lastDrawText;
+    int32_t lastDrawTextResult = GX_OK;
 };
 
 class NativeElfExecutor {

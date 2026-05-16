@@ -406,7 +406,7 @@ namespace gxos {
             }
             oss << "\n";
             oss << "apiVersion: " << runtimeContext.hostCalls.version << "\n";
-            oss << "hostCallsAvailable: " << ((runtimeContext.hostCalls.log && runtimeContext.hostCalls.get_api_version && runtimeContext.hostCalls.request_window && runtimeContext.hostCalls.exit) ? "true" : "false") << "\n";
+            oss << "hostCallsAvailable: " << ((runtimeContext.hostCalls.log && runtimeContext.hostCalls.get_api_version && runtimeContext.hostCalls.request_window && runtimeContext.hostCalls.draw_text && runtimeContext.hostCalls.exit) ? "true" : "false") << "\n";
             oss << "runtimeSuccess: " << (runtimeContext.success ? "true" : "false") << "\n";
             if (!runtimeContext.diagnostics.empty()) {
                 oss << "runtimeDiagnostics: ";
@@ -435,6 +435,10 @@ namespace gxos {
             oss << "lastWindowId: " << executionResult.lastWindowId << "\n";
             oss << "lastWindowTitle: " << executionResult.lastWindowTitle << "\n";
             oss << "requestWindowResult: " << executionResult.requestWindowResult << "\n";
+            oss << "drawTextCallCount: " << executionResult.drawTextCallCount << "\n";
+            oss << "lastDrawTextWindow: " << executionResult.lastDrawTextWindow << "\n";
+            oss << "lastDrawText: " << executionResult.lastDrawText << "\n";
+            oss << "lastDrawTextResult: " << executionResult.lastDrawTextResult << "\n";
             if (!executionResult.diagnostics.empty()) {
                 oss << "executionDiagnostics: ";
                 for (size_t i = 0; i < executionResult.diagnostics.size(); ++i) {
