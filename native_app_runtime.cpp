@@ -322,7 +322,7 @@ gx_result hostFileExists(NativeGxAppContext* ctx, const char* path, uint32_t* ou
 
     if (!hasPermission(*context, "file.read")) {
         context->lastFileIoResult = GX_ERROR_PERMISSION_DENIED;
-        Logger::write(LogLevel::Warn, "[NativeAppHost] App: " + appLabel(context) + " file_exists denied: missing file.read permission");
+        Logger::write(LogLevel::Warn, "[NativeAppHost] App: " + appLabel(context) + " file_exists denied: missing permission file.read");
         NativeAppProcessTable::UpdateFromRuntime(*context);
         return context->lastFileIoResult;
     }
@@ -364,7 +364,7 @@ gx_result hostFileReadAll(NativeGxAppContext* ctx, const char* path, void* buffe
 
     if (!hasPermission(*context, "file.read")) {
         context->lastFileIoResult = GX_ERROR_PERMISSION_DENIED;
-        Logger::write(LogLevel::Warn, "[NativeAppHost] App: " + appLabel(context) + " file_read_all denied: missing file.read permission");
+        Logger::write(LogLevel::Warn, "[NativeAppHost] App: " + appLabel(context) + " file_read_all denied: missing permission file.read");
         NativeAppProcessTable::UpdateFromRuntime(*context);
         return context->lastFileIoResult;
     }
@@ -381,6 +381,7 @@ gx_result hostFileReadAll(NativeGxAppContext* ctx, const char* path, void* buffe
         std::ifstream input(resolvedPath.c_str(), std::ios::binary);
         if (!input) {
             context->lastFileIoResult = GX_ERROR_FAILED;
+            Logger::write(LogLevel::Warn, "[NativeAppHost] App: " + appLabel(context) + " file_read_all failed: missing resource file " + context->lastFilePath);
             NativeAppProcessTable::UpdateFromRuntime(*context);
             return context->lastFileIoResult;
         }
@@ -450,7 +451,7 @@ gx_result hostRequestWindow(NativeGxAppContext* ctx, const char* title, int widt
 
     if (!hasPermission(*context, "window")) {
         context->lastRequestWindowResult = GX_ERROR_PERMISSION_DENIED;
-        Logger::write(LogLevel::Warn, "[NativeAppHost] App: " + appLabel(context) + " request_window denied: missing window permission");
+        Logger::write(LogLevel::Warn, "[NativeAppHost] App: " + appLabel(context) + " request_window denied: missing permission window");
         return context->lastRequestWindowResult;
     }
 
@@ -521,7 +522,7 @@ gx_result hostDrawText(NativeGxAppContext* ctx, gx_handle window, int x, int y, 
 
     if (!hasPermission(*context, "draw") && !hasPermission(*context, "window")) {
         context->lastDrawTextResult = GX_ERROR_PERMISSION_DENIED;
-        Logger::write(LogLevel::Warn, "[NativeAppHost] App: " + appLabel(context) + " draw_text denied: missing draw/window permission");
+        Logger::write(LogLevel::Warn, "[NativeAppHost] App: " + appLabel(context) + " draw_text denied: missing permission draw/window");
         return context->lastDrawTextResult;
     }
 
@@ -576,7 +577,7 @@ gx_result hostDrawRect(NativeGxAppContext* ctx, gx_handle window, int x, int y, 
 
     if (!hasPermission(*context, "draw") && !hasPermission(*context, "window")) {
         context->lastDrawRectResult = GX_ERROR_PERMISSION_DENIED;
-        Logger::write(LogLevel::Warn, "[NativeAppHost] App: " + appLabel(context) + " draw_rect denied: missing draw/window permission");
+        Logger::write(LogLevel::Warn, "[NativeAppHost] App: " + appLabel(context) + " draw_rect denied: missing permission draw/window");
         NativeAppProcessTable::UpdateFromRuntime(*context);
         return context->lastDrawRectResult;
     }
@@ -860,7 +861,7 @@ NativeAppRuntimeContext NativeAppRuntime::Prepare(
         addDiagnostic(context, "Native ELF image was not loaded successfully");
     }
     if (launchResult.abi != kGuideXOSNativeAbiName) {
-        addDiagnostic(context, std::string("Unsupported Native app ABI: ") + launchResult.abi);
+        addDiagnostic(context, std::string("ABI mismatch: expected ") + kGuideXOSNativeAbiName + ", got " + launchResult.abi);
     }
     if (context.appId.empty()) {
         addDiagnostic(context, "Native app id is empty");

@@ -85,7 +85,13 @@ AppManifestValidationResult AppManifestValidator::Validate(const AppManifest& ma
 
     for (const AppEntry& entry : manifest.entries) {
         if (!isRelativePath(entry.path)) {
-            addError(result.errors, "Entry path must be relative: " + entry.path);
+            addError(result.errors, "Invalid manifest entry: entry path must be relative: " + entry.path);
+        }
+        if ((manifest.kind == AppKind::NativeElf || manifest.kind == AppKind::GXAppPackage) && entry.path.empty()) {
+            addError(result.errors, "Invalid manifest entry: entry path is required.");
+        }
+        if ((manifest.kind == AppKind::NativeElf || manifest.kind == AppKind::GXAppPackage) && entry.architecture.empty()) {
+            addError(result.errors, "Invalid manifest entry: entry architecture is required.");
         }
     }
 

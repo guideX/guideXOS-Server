@@ -70,6 +70,7 @@
 #include "firewall.h"
 #include "module_manager.h"
 #include "package_manager.h"
+#include "native_elf_executor.h"
 #include <iostream>
 #include <chrono>
 #include <sstream>
@@ -102,6 +103,7 @@ static void help(){
                  " gxm.load <path> | gxm.sample | gui.save <path> | gui.load <path>\n"
                  " desktop.wallpaper <path> | desktop.launch <action> | desktop.pin <action> | desktop.unpin <action> | desktop.showconfig\n"
                  " desktop.apps | desktop.pinned | desktop.recent | desktop.pinapp <name> | desktop.pinfile <name> <path>\n"
+                 " nativeapp.capabilities\n"
                  " taskbar.list | taskbar.activate <id> | taskbar.min <id> | taskbar.close <id>\n"
                  " workspace.switch <n> | workspace.next | workspace.prev | workspace.current\n"
                  " notepad | notepad <file>\n"
@@ -142,6 +144,11 @@ int main(){
     
 using namespace gxos;
     Logger::write(LogLevel::Info, "guideXOSServer server starting...");
+    if (apps::NativeElfExecutor::ExperimentalExecutionEnabled()) {
+        const char* warning = "WARNING: Experimental Native ELF execution is enabled.\nOnly trusted Native ELF apps should be run.";
+        std::cout << warning << std::endl;
+        Logger::write(LogLevel::Warn, warning);
+    }
     Lifecycle::bootstrap();
     Lifecycle::markInteractive();
     struct ShutdownGuard { ~ShutdownGuard(){ Lifecycle::shutdown(); } } guard;
@@ -304,6 +311,9 @@ using namespace gxos;
             auto& docs = gui::DesktopService::GetRecentDocuments();
             std::cout<<"Recent Documents ("<<docs.size()<<"):"<<std::endl;
             for(const auto& doc : docs) std::cout<<"  "<<doc.path<<std::endl;
+        }
+        else if (cmd=="nativeapp.capabilities"){
+            std::cout << gui::DesktopService::NativeAppCapabilitiesDiagnostic();
         }
         else if (cmd=="desktop.pinapp"){
             std::string name; std::getline(iss, name); if(name.size()>0 && name[0]==' ') name.erase(0,1);

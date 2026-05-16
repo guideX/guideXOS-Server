@@ -15,6 +15,7 @@ constexpr uint8_t kElfDataBigEndian = 2;
 constexpr uint16_t kElfVersionCurrent = 1;
 constexpr uint16_t kElfTypeExecutable = 2;
 constexpr uint16_t kElfTypeShared = 3;
+constexpr uint32_t kElfProgramHeaderTypeInterp = 3;
 
 uint16_t readU16(const std::vector<uint8_t>& bytes, size_t offset, bool littleEndian) {
     if (littleEndian) return static_cast<uint16_t>(bytes[offset]) | (static_cast<uint16_t>(bytes[offset + 1]) << 8);
@@ -105,6 +106,10 @@ bool checkedAdd(size_t left, uint64_t right, size_t& result) {
     return true;
 }
 
+uint32_t readProgramHeaderType(const std::vector<uint8_t>& bytes, size_t offset, bool littleEndian) {
+    return readU32(bytes, offset, littleEndian);
+}
+
 } // namespace
 
 ElfValidationResult ElfValidator::Validate(const std::vector<uint8_t>& bytes, const std::string& expectedArchitecture) {
@@ -150,17 +155,27 @@ ElfValidationResult ElfValidator::Validate(const std::vector<uint8_t>& bytes, co
     result.entryPoint = formatHex(entry);
 
     if (version != kElfVersionCurrent) result.errors.push_back("Unsupported ELF version");
-    if (type != kElfTypeExecutable && type != kElfTypeShared) result.errors.push_back("ELF type is not executable or shared-object");
+    if (type == kElfTypeShared) result.errors.push_back("ET_DYN/PIE is unsupported; Native ELF experimental execution currently supports static ET_EXEC only");
+    else if (type != kElfTypeExecutable) result.errors.push_back("Unsupported ELF type " + elfTypeName(type) + "; Native ELF experimental execution currently supports static ET_EXEC only");
     if (result.architecture.empty()) result.errors.push_back("Unsupported ELF machine architecture");
-    if (!architectureMatches(result.architecture, expectedArchitecture)) result.errors.push_back("ELF architecture " + result.architecture + " does not match manifest architecture " + expectedArchitecture);
+    if (!architectureMatches(result.architecture, expectedArchitecture)) result.errors.push_back("Wrong architecture: ELF architecture " + result.architecture + " does not match manifest architecture " + expectedArchitecture);
     if (headerSize < (elfClass == kElfClass64 ? 64 : 52)) result.errors.push_back("Invalid ELF header size");
+    if (programHeaderEntrySize < (elfClass == kElfClass64 ? 56 : 32)) result.errors.push_back("Invalid ELF program header entry size");
     if (programHeaderOffset == 0 || programHeaderCount == 0) result.errors.push_back("ELF has no program headers");
 
-    if (programHeaderOffset != 0 && programHeaderCount != 0) {
+    if (programHeaderOffset != 0 && programHeaderCount != 0 && programHeaderEntrySize >= (elfClass == kElfClass64 ? 56 : 32)) {
         size_t tableStart;
         size_t tableSize = static_cast<size_t>(programHeaderEntrySize) * static_cast<size_t>(programHeaderCount);
         if (!checkedAdd(0, programHeaderOffset, tableStart) || tableStart > bytes.size() || tableSize > bytes.size() - tableStart) {
             result.errors.push_back("ELF program header table extends beyond file");
+        } else {
+            for (uint16_t i = 0; i < programHeaderCount; ++i) {
+                size_t programHeaderStart = tableStart + static_cast<size_t>(i) * static_cast<size_t>(programHeaderEntrySize);
+                if (readProgramHeaderType(bytes, programHeaderStart, littleEndian) == kElfProgramHeaderTypeInterp) {
+                    result.errors.push_back("PT_INTERP present; dynamic linker/dynamic linking is not supported");
+                    break;
+                }
+            }
         }
     }
 

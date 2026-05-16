@@ -310,6 +310,30 @@ namespace gxos {
             return oss.str();
         }
 
+        std::string DesktopService::NativeAppCapabilitiesDiagnostic() {
+            std::ostringstream oss;
+            oss << "nativeapp.capabilities\n";
+            oss << "experimental execution enabled: " << (apps::NativeElfExecutor::ExperimentalExecutionEnabled() ? "true" : "false") << "\n";
+            oss << "host architecture: " << apps::AppLaunchResolver::CurrentArchitecture() << "\n";
+            oss << "supported native execution architecture: amd64\n";
+            oss << "supported ELF type: static ET_EXEC\n";
+            oss << "dynamic linking supported: false\n";
+            oss << "relocations supported: false\n";
+            oss << "cross-architecture execution supported: false\n";
+            oss << "supported ABI: " << apps::kGuideXOSNativeAbiName << "\n";
+            oss << "available host calls:\n";
+            oss << "  log\n";
+            oss << "  get_api_version\n";
+            oss << "  request_window\n";
+            oss << "  draw_text\n";
+            oss << "  draw_rect\n";
+            oss << "  wait_for_close\n";
+            oss << "  poll_event\n";
+            oss << "  file_exists\n";
+            oss << "  file_read_all\n";
+            return oss.str();
+        }
+
         std::string DesktopService::InspectNativeAppPipeline(const std::string& appIdOrDisplayName) {
             ensureDefaultAppsRegistered();
 

@@ -105,6 +105,14 @@ make amd64
 make qemu
 ```
 
+### Experimental Native ELF hosted runtime
+
+Native ELF execution in the hosted runtime is experimental. Normal `build.bat` does not enable execution. `build-native-experimental.bat` builds `guideXOSServer.experimental.exe` with experimental execution enabled for trusted local validation only.
+
+Current support is intentionally narrow: amd64 host, amd64 app, static `ET_EXEC`, no `PT_INTERP`, no dynamic linking, no relocations, preferred-base mapping must succeed, and guideXOS C ABI v1 (`guidexos-c-abi-v1`) only.
+
+Unsupported: `ET_DYN`/PIE, shared libraries, libc-heavy apps, cross-architecture execution, dynamic linker, and arbitrary host filesystem access.
+
 ### Kernel Only
 
 ```bash

@@ -79,6 +79,7 @@ namespace gxos { namespace svc {
             std::string line(m.data.begin(), m.data.end()); line = trim(line);
             if(line=="exit"||line=="quit"){ publishOutput("bye"); break; }
             if(line=="desktop.apps.verbose") { publishOutput(gxos::gui::DesktopService::GetRegisteredAppsVerboseDiagnostic()); continue; }
+            if(line=="nativeapp.capabilities") { publishOutput(gxos::gui::DesktopService::NativeAppCapabilitiesDiagnostic()); continue; }
             if(startsWith(line, "nativeapp.inspect ")) { publishOutput(gxos::gui::DesktopService::InspectNativeAppPipeline(trim(line.substr(18)))); continue; }
             if(startsWith(line, "nativeapp.smoketest ")) { publishOutput(gxos::gui::DesktopService::NativeAppPipelineSmokeTest(trim(line.substr(20)))); continue; }
             if(line=="nativeapp.processes") { publishOutput(nativeAppProcessesDiagnostic()); continue; }

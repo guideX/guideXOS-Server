@@ -91,15 +91,15 @@ bool NativeElfExecutor::CanExecute(
     if (!experimentalExecutionEnabled()) {
         localReason = "Native ELF execution disabled by build flag";
     } else if (hostArchitecture() != launchResult.architecture) {
-        localReason = "Native ELF architecture mismatch: host=" + hostArchitecture() + " app=" + launchResult.architecture;
+        localReason = "Wrong architecture: host=" + hostArchitecture() + " app=" + launchResult.architecture + "; cross-architecture execution is not supported";
     } else if (!isAmd64HostAndApp(launchResult)) {
         localReason = "Native ELF experimental execution supports amd64 host running amd64 apps only";
     } else if (image.hasInterpreter) {
-        localReason = "Native ELF requires PT_INTERP/dynamic linking, which is not supported";
+        localReason = "PT_INTERP present; dynamic linker/dynamic linking is not supported";
     } else if (!isSupportedStaticImage(image)) {
         localReason = "Native ELF image is not a supported static executable image";
     } else if (launchResult.abi != kGuideXOSNativeAbiName) {
-        localReason = std::string("Unsupported Native app ABI: ") + launchResult.abi;
+        localReason = std::string("ABI mismatch: expected ") + kGuideXOSNativeAbiName + ", got " + launchResult.abi;
     } else if (runtimeContext.lifecycleState != NativeAppLifecycleState::Prepared) {
         localReason = std::string("Native app runtime state is not Prepared: ") + NativeAppRuntime::ToString(runtimeContext.lifecycleState);
     } else {
@@ -131,7 +131,7 @@ NativeElfExecutionResult NativeElfExecutor::Execute(
     }
 
     if (hostArchitecture() != launchResult.architecture) {
-        addDiagnostic(result, "Native ELF architecture mismatch: host=" + hostArchitecture() + " app=" + launchResult.architecture);
+        addDiagnostic(result, "Wrong architecture: host=" + hostArchitecture() + " app=" + launchResult.architecture + "; cross-architecture execution is not supported");
         LogDecision(result.appId, result.architecture, false, result.message, "failure");
         return result;
     }
@@ -143,7 +143,7 @@ NativeElfExecutionResult NativeElfExecutor::Execute(
     }
 
     if (image.hasInterpreter) {
-        addDiagnostic(result, "Native ELF requires PT_INTERP/dynamic linking, which is not supported");
+        addDiagnostic(result, "PT_INTERP present; dynamic linker/dynamic linking is not supported");
         LogDecision(result.appId, result.architecture, false, result.message, "failure");
         return result;
     }
@@ -155,7 +155,7 @@ NativeElfExecutionResult NativeElfExecutor::Execute(
     }
 
     if (launchResult.abi != kGuideXOSNativeAbiName) {
-        addDiagnostic(result, std::string("Unsupported Native app ABI: ") + launchResult.abi);
+        addDiagnostic(result, std::string("ABI mismatch: expected ") + kGuideXOSNativeAbiName + ", got " + launchResult.abi);
         LogDecision(result.appId, result.architecture, false, result.message, "failure");
         return result;
     }
@@ -209,7 +209,7 @@ NativeElfExecutionResult NativeElfExecutor::Execute(
     result.preferredBaseMappingAttempted = true;
     void* preferredBase = reinterpret_cast<void*>(static_cast<uintptr_t>(image.preferredBaseAddress));
     if (!ExecutableMemory::AllocateAt(preferredBase, static_cast<size_t>(mappingSize64), mapping, memoryError)) {
-        addDiagnostic(result, "ET_EXEC preferred-base mapping failed; relocations are not implemented");
+        addDiagnostic(result, "Preferred-base allocation failure: ET_EXEC preferred base could not be mapped; relocations are not supported");
         if (!memoryError.empty()) addDiagnostic(result, "preferred-base mapping error: " + memoryError);
         LogDecision(result.appId, result.architecture, false, result.message, "failure");
         return result;
@@ -217,7 +217,7 @@ NativeElfExecutionResult NativeElfExecutor::Execute(
     result.actualMappedBaseAddress = reinterpret_cast<uint64_t>(mapping.base);
     result.preferredBaseMappingSucceeded = mapping.base == preferredBase;
     if (!result.preferredBaseMappingSucceeded) {
-        addDiagnostic(result, "ET_EXEC preferred-base mapping failed; relocations are not implemented");
+        addDiagnostic(result, "Preferred-base allocation failure: ET_EXEC preferred base could not be mapped exactly; relocations are not supported");
         ExecutableMemory::Free(mapping);
         LogDecision(result.appId, result.architecture, false, result.message, "failure");
         return result;
@@ -408,6 +408,11 @@ NativeElfExecutionResult NativeElfExecutor::Execute(
     if (!result.lastFilePath.empty()) addDiagnostic(result, "last file path: " + result.lastFilePath);
     addDiagnostic(result, "last file read bytes: " + std::to_string(result.lastFileReadBytes));
     addDiagnostic(result, "last file IO result: " + std::to_string(result.lastFileIoResult));
+    if (result.lastFileIoResult == GX_ERROR_PERMISSION_DENIED) addDiagnostic(result, "missing permission: file.read");
+    if (result.lastFileIoResult == GX_ERROR_FAILED && !result.lastFilePath.empty()) addDiagnostic(result, "missing resource file: " + result.lastFilePath);
+    if (result.requestWindowResult == GX_ERROR_PERMISSION_DENIED) addDiagnostic(result, "missing permission: window");
+    if (result.drawTextCallCount > 0 && result.lastDrawTextResult == GX_ERROR_PERMISSION_DENIED) addDiagnostic(result, "missing permission: draw/window");
+    if (result.drawRectCallCount > 0 && result.lastDrawRectResult == GX_ERROR_PERMISSION_DENIED) addDiagnostic(result, "missing permission: draw/window");
 #endif
 
     result.message = joinDiagnostics(result.diagnostics);

@@ -164,8 +164,11 @@ NativeElfImage NativeElfImageLoader::LoadImage(const NativeElfLaunchResult& laun
     if (elfType == kEtDyn) {
         image.isPositionIndependent = true;
         image.preferredBaseAddress = 0;
+        addDiagnostic(image, "ET_DYN/PIE is unsupported; relocations are not implemented");
+        LogImage(image);
+        return image;
     } else if (elfType != kEtExec) {
-        addDiagnostic(image, "ELF type is not executable or position-independent executable");
+        addDiagnostic(image, "Unsupported ELF type; Native ELF experimental execution currently supports static ET_EXEC only");
         LogImage(image);
         return image;
     } else {
@@ -201,8 +204,9 @@ NativeElfImage NativeElfImageLoader::LoadImage(const NativeElfLaunchResult& laun
 
         if (header.type == kPtInterp) {
             image.hasInterpreter = true;
-            addDiagnostic(image, "PT_INTERP present; dynamic loader is not supported yet");
-            continue;
+            addDiagnostic(image, "PT_INTERP present; dynamic linker/dynamic linking is not supported");
+            LogImage(image);
+            return image;
         }
 
         if (header.type != kPtLoad) continue;
