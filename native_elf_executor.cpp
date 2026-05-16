@@ -114,6 +114,8 @@ NativeElfExecutionResult NativeElfExecutor::Execute(
     result.appId = launchResult.appId;
     result.architecture = launchResult.architecture;
     result.exitCode = 0;
+    result.runtimeId = runtimeContext.runtimeId;
+    result.lifecycleStateBeforeExecution = NativeAppRuntime::ToString(runtimeContext.lifecycleState);
 
     if (!experimentalExecutionEnabled()) {
         addDiagnostic(result, "Native ELF execution disabled by build flag");
@@ -231,18 +233,36 @@ NativeElfExecutionResult NativeElfExecutor::Execute(
     appContext.userData = nullptr;
     gx_entry_fn entry = reinterpret_cast<gx_entry_fn>(entryAddress);
     NativeAppRuntime::BeginHostCallDispatch(runtimeContext);
+    bool executionFailed = false;
+    std::string failureReason;
 #ifdef _WIN32
     __try {
         result.exitCode = entry(&appContext);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
-        addDiagnostic(result, "Native ELF execution raised a structured exception");
+        failureReason = "Native ELF execution raised a structured exception";
+        addDiagnostic(result, failureReason);
         result.exitCode = GX_ERROR_FAILED;
+        executionFailed = true;
     }
 #else
-    result.exitCode = entry(&appContext);
+    try {
+        result.exitCode = entry(&appContext);
+    } catch (const std::exception& ex) {
+        failureReason = std::string("Native ELF execution raised an exception: ") + ex.what();
+        addDiagnostic(result, failureReason);
+        result.exitCode = GX_ERROR_FAILED;
+        executionFailed = true;
+    } catch (...) {
+        failureReason = "Native ELF execution raised an unknown exception";
+        addDiagnostic(result, failureReason);
+        result.exitCode = GX_ERROR_FAILED;
+        executionFailed = true;
+    }
 #endif
     NativeAppRuntime::EndHostCallDispatch(runtimeContext);
-    result.success = result.exitCode == GX_OK;
+    if (runtimeContext.lastWaitResult == GX_ERROR_TIMEOUT && result.exitCode == GX_OK) addDiagnostic(result, "wait_for_close timed out; cleaning up remaining owned windows");
+    NativeAppRuntime::Cleanup(runtimeContext, (executionFailed || result.exitCode != GX_OK) ? NativeAppLifecycleState::Failed : NativeAppLifecycleState::Exited, result.exitCode, failureReason);
+    result.success = result.exitCode == GX_OK && !executionFailed;
     result.hostLogCallCount = runtimeContext.hostLogCallCount;
     result.lastHostLogMessage = runtimeContext.lastHostLogMessage;
     result.apiVersionReturned = runtimeContext.lastApiVersionReturned;
@@ -254,7 +274,23 @@ NativeElfExecutionResult NativeElfExecutor::Execute(
     result.lastDrawTextWindow = runtimeContext.lastDrawTextWindow;
     result.lastDrawText = runtimeContext.lastDrawText;
     result.lastDrawTextResult = runtimeContext.lastDrawTextResult;
+    result.waitForCloseCallCount = runtimeContext.waitForCloseCallCount;
+    result.lastWaitWindow = runtimeContext.lastWaitWindow;
+    result.lastWaitTimeoutMs = runtimeContext.lastWaitTimeoutMs;
+    result.lastWaitResult = runtimeContext.lastWaitResult;
+    result.lifecycleStateAfterExecution = NativeAppRuntime::ToString(runtimeContext.lifecycleState);
+    result.cleanupAttempted = runtimeContext.cleanupAttempted;
+    result.cleanedWindowCount = runtimeContext.cleanedWindowCount;
+    result.remainingOwnedWindowCount = static_cast<uint32_t>(runtimeContext.createdWindowHandles.size());
+    result.failureReason = runtimeContext.failureReason;
     addDiagnostic(result, std::string("Native ELF gx_main returned ") + std::to_string(result.exitCode));
+    addDiagnostic(result, "runtimeId: " + std::to_string(result.runtimeId));
+    addDiagnostic(result, "lifecycle state before execution: " + result.lifecycleStateBeforeExecution);
+    addDiagnostic(result, "lifecycle state after execution: " + result.lifecycleStateAfterExecution);
+    addDiagnostic(result, std::string("cleanup attempted: ") + (result.cleanupAttempted ? "true" : "false"));
+    addDiagnostic(result, "cleaned window count: " + std::to_string(result.cleanedWindowCount));
+    addDiagnostic(result, "remaining owned window count: " + std::to_string(result.remainingOwnedWindowCount));
+    if (!result.failureReason.empty()) addDiagnostic(result, "failure reason: " + result.failureReason);
     addDiagnostic(result, "Host log call count: " + std::to_string(result.hostLogCallCount));
     if (!result.lastHostLogMessage.empty()) addDiagnostic(result, "Last host log message: " + result.lastHostLogMessage);
     addDiagnostic(result, "API version returned: " + std::to_string(result.apiVersionReturned));
@@ -266,6 +302,10 @@ NativeElfExecutionResult NativeElfExecutor::Execute(
     addDiagnostic(result, "last drawText window: " + std::to_string(result.lastDrawTextWindow));
     if (!result.lastDrawText.empty()) addDiagnostic(result, "last drawText: " + result.lastDrawText);
     addDiagnostic(result, "last drawText result: " + std::to_string(result.lastDrawTextResult));
+    addDiagnostic(result, "waitForClose call count: " + std::to_string(result.waitForCloseCallCount));
+    addDiagnostic(result, "last wait window: " + std::to_string(result.lastWaitWindow));
+    addDiagnostic(result, "last wait timeoutMs: " + std::to_string(result.lastWaitTimeoutMs));
+    addDiagnostic(result, "last wait result: " + std::to_string(result.lastWaitResult));
 #endif
 
     result.message = joinDiagnostics(result.diagnostics);

@@ -7,6 +7,7 @@
 #include <map>
 #include <string>
 #include <vector>
+#include <chrono>
 
 namespace gxos {
 namespace apps {
@@ -25,7 +26,8 @@ enum : gx_result {
     GX_ERROR_UNSUPPORTED = -3,
     GX_ERROR_FAILED = -4,
     GX_ERROR_PERMISSION_DENIED = -5,
-    GX_ERROR_INTERNAL = -6
+    GX_ERROR_INTERNAL = -6,
+    GX_ERROR_TIMEOUT = -7
 };
 
 typedef uint64_t gx_handle;
@@ -37,6 +39,7 @@ struct NativeHostCallTable {
     uint32_t (*get_api_version)(NativeGxAppContext* ctx) = nullptr;
     gx_result (*request_window)(NativeGxAppContext* ctx, const char* title, int width, int height, gx_handle* outWindow) = nullptr;
     gx_result (*draw_text)(NativeGxAppContext* ctx, gx_handle window, int x, int y, const char* text) = nullptr;
+    gx_result (*wait_for_close)(NativeGxAppContext* ctx, gx_handle window, int timeoutMs) = nullptr;
     gx_result (*exit)(NativeGxAppContext* ctx, gx_result exitCode) = nullptr;
 };
 
@@ -53,6 +56,7 @@ enum class NativeAppLifecycleState {
 struct NativeAppRuntimeContext {
     bool success = false;
     std::string appId;
+    uint64_t runtimeId = 0;
     std::string displayName;
     std::string architecture;
     uint64_t processId = 0;
@@ -62,7 +66,13 @@ struct NativeAppRuntimeContext {
     std::map<std::string, std::string> environment;
     std::vector<std::string> arguments;
     NativeAppLifecycleState lifecycleState = NativeAppLifecycleState::Created;
+    int32_t exitCode = 0;
+    std::string failureReason;
+    std::chrono::steady_clock::time_point startTime;
+    std::chrono::steady_clock::time_point endTime;
     std::vector<std::string> diagnostics;
+    bool cleanupAttempted = false;
+    uint32_t cleanedWindowCount = 0;
     uint32_t hostLogCallCount = 0;
     std::string lastHostLogMessage;
     uint32_t lastApiVersionReturned = 0;
@@ -76,6 +86,10 @@ struct NativeAppRuntimeContext {
     gx_handle lastDrawTextWindow = 0;
     std::string lastDrawText;
     gx_result lastDrawTextResult = GX_OK;
+    uint32_t waitForCloseCallCount = 0;
+    gx_handle lastWaitWindow = 0;
+    int lastWaitTimeoutMs = 0;
+    gx_result lastWaitResult = GX_OK;
 };
 
 struct NativeGxAppContext {
@@ -95,6 +109,7 @@ public:
 
     static void BeginHostCallDispatch(NativeAppRuntimeContext& context);
     static void EndHostCallDispatch(NativeAppRuntimeContext& context);
+    static void Cleanup(NativeAppRuntimeContext& context, NativeAppLifecycleState finalState, int32_t exitCode, const std::string& failureReason = std::string());
     static const char* ToString(NativeAppLifecycleState state);
 
 private:

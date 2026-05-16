@@ -15,6 +15,10 @@ extern "C" gx_result gx_main(gx_app_context* ctx) {
         if (windowResult == GX_OK && ctx->host->draw_text) {
             ctx->host->draw_text(ctx, window, 20, 40, "Hello from Native ELF");
         }
+        if (windowResult == GX_OK && ctx->host->wait_for_close) {
+            gx_result waitResult = ctx->host->wait_for_close(ctx, window, 30000);
+            ctx->host->log(ctx, waitResult == GX_OK ? "wait_for_close succeeded" : "wait_for_close timed out or failed");
+        }
     }
     return GX_OK;
 }

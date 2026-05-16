@@ -164,6 +164,7 @@
     <ClInclude Include="app_manifest_validator.h" />
     <ClInclude Include="executable_memory.h" />
     <ClInclude Include="elf_validator.h" />
+    <ClInclude Include="native_app_process_table.h" />
     <ClInclude Include="native_app_runtime.h" />
     <ClInclude Include="native_elf_executor.h" />
     <ClInclude Include="native_elf_image_loader.h" />
@@ -243,6 +244,7 @@
     <ClCompile Include="app_manifest_validator.cpp" />
     <ClCompile Include="executable_memory.cpp" />
     <ClCompile Include="elf_validator.cpp" />
+    <ClCompile Include="native_app_process_table.cpp" />
     <ClCompile Include="native_app_runtime.cpp" />
     <ClCompile Include="native_elf_executor.cpp" />
     <ClCompile Include="native_elf_image_loader.cpp" />

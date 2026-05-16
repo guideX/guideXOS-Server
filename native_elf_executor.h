@@ -29,6 +29,17 @@ struct NativeElfExecutionResult {
     uint64_t lastDrawTextWindow = 0;
     std::string lastDrawText;
     int32_t lastDrawTextResult = GX_OK;
+    uint32_t waitForCloseCallCount = 0;
+    uint64_t lastWaitWindow = 0;
+    int lastWaitTimeoutMs = 0;
+    int32_t lastWaitResult = GX_OK;
+    uint64_t runtimeId = 0;
+    std::string lifecycleStateBeforeExecution;
+    std::string lifecycleStateAfterExecution;
+    bool cleanupAttempted = false;
+    uint32_t cleanedWindowCount = 0;
+    uint32_t remainingOwnedWindowCount = 0;
+    std::string failureReason;
 };
 
 class NativeElfExecutor {

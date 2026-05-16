@@ -309,6 +309,7 @@
     <ClInclude Include="logger.h" />
     <ClInclude Include="message_box.h" />
     <ClInclude Include="module_manager.h" />
+    <ClInclude Include="native_app_process_table.h" />
     <ClInclude Include="native_app_runtime.h" />
     <ClInclude Include="native_elf_executor.h" />
     <ClInclude Include="native_elf_image_loader.h" />
@@ -530,6 +531,7 @@
     <ClCompile Include="logger.cpp" />
     <ClCompile Include="message_box.cpp" />
     <ClCompile Include="module_manager.cpp" />
+    <ClCompile Include="native_app_process_table.cpp" />
     <ClCompile Include="native_app_runtime.cpp" />
     <ClCompile Include="native_elf_executor.cpp" />
     <ClCompile Include="native_elf_image_loader.cpp" />

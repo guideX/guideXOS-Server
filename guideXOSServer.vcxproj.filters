@@ -657,6 +657,9 @@
     <ClInclude Include="executable_memory.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="native_app_process_table.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="allocator.cpp">
@@ -1251,6 +1254,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="executable_memory.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="native_app_process_table.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

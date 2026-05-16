@@ -1,5 +1,6 @@
 #include "console_service.h"
 #include "desktop_service.h"
+#include "native_app_process_table.h"
 #include "process.h"
 #include "logger.h"
 #include "scheduler.h"
@@ -23,6 +24,26 @@ namespace gxos { namespace svc {
         ipc::Bus::publish(kOutputChan, std::move(out), false);
     }
 
+    static std::string nativeAppProcessesDiagnostic() {
+        std::ostringstream oss;
+        std::vector<gxos::apps::NativeAppProcessInfo> processes = gxos::apps::NativeAppProcessTable::List();
+        oss << "Native app processes: " << processes.size() << "\n";
+        for (const auto& process : processes) {
+            oss << "runtimeId=" << process.runtimeId
+                << " appId=" << process.appId
+                << " displayName=" << process.displayName
+                << " architecture=" << process.architecture
+                << " state=" << gxos::apps::NativeAppRuntime::ToString(process.lifecycleState)
+                << " windows=" << process.createdWindowCount << "/" << process.cleanedWindowCount << "/" << process.remainingWindowCount
+                << " exitCode=" << process.exitCode
+                << " failureReason=" << process.failureReason
+                << " experimentalExecutionEnabled=" << (process.experimentalExecutionEnabled ? "true" : "false")
+                << " hostArchitecture=" << process.hostArchitecture
+                << "\n";
+        }
+        return oss.str();
+    }
+
     int ConsoleService::main(int argc, char** argv){
         Logger::write(LogLevel::Info, "ConsoleService started");
         ipc::Bus::ensure(kInputChan); ipc::Bus::ensure(kOutputChan);
@@ -35,6 +56,7 @@ namespace gxos { namespace svc {
             if(line=="desktop.apps.verbose") { publishOutput(gxos::gui::DesktopService::GetRegisteredAppsVerboseDiagnostic()); continue; }
             if(startsWith(line, "nativeapp.inspect ")) { publishOutput(gxos::gui::DesktopService::InspectNativeAppPipeline(trim(line.substr(18)))); continue; }
             if(startsWith(line, "nativeapp.smoketest ")) { publishOutput(gxos::gui::DesktopService::NativeAppPipelineSmokeTest(trim(line.substr(20)))); continue; }
+            if(line=="nativeapp.processes") { publishOutput(nativeAppProcessesDiagnostic()); continue; }
             // Basic demo: echo and simple commands
             std::string resp = "[console] " + line;
             publishOutput(resp);

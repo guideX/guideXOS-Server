@@ -4,6 +4,7 @@
 #include "gui_protocol.h"
 #include "ipc_bus.h"
 #include "logger.h"
+#include "native_app_process_table.h"
 
 #include <chrono>
 #include <sstream>
@@ -22,11 +23,21 @@ constexpr int kMaxWindowHeight = 4096;
 constexpr int kMinDrawCoordinate = 0;
 constexpr int kMaxDrawCoordinate = 16384;
 constexpr uint64_t kWindowCreateTimeoutMs = 500;
+constexpr int kMinWaitForCloseTimeoutMs = 0;
+constexpr int kMaxWaitForCloseTimeoutMs = 300000;
 
 std::string appLabel(const NativeAppRuntimeContext* context) {
     if (!context) return "<unknown>";
     if (!context->displayName.empty()) return context->appId + " (" + context->displayName + ")";
     return context->appId.empty() ? "<unknown>" : context->appId;
+}
+
+bool experimentalExecutionEnabled() {
+#ifdef GX_ENABLE_EXPERIMENTAL_NATIVE_ELF_EXECUTION
+    return true;
+#else
+    return false;
+#endif
 }
 
 NativeAppRuntimeContext* runtimeContextFor(NativeGxAppContext* ctx) {
@@ -118,6 +129,7 @@ gx_result hostRequestWindow(NativeGxAppContext* ctx, const char* title, int widt
     }
 
     uint64_t nativeAppPid = Allocator::currentPid();
+    if (context->processId == 0) context->processId = nativeAppPid;
     ipc::Message request;
     request.srcPid = nativeAppPid;
     request.type = static_cast<uint32_t>(gui::MsgType::MT_Create);
@@ -138,6 +150,7 @@ gx_result hostRequestWindow(NativeGxAppContext* ctx, const char* title, int widt
         context->createdWindowHandles.push_back(windowId);
         context->lastCreatedWindowId = windowId;
         context->lastRequestWindowResult = GX_OK;
+        NativeAppProcessTable::UpdateFromRuntime(*context);
         Logger::write(LogLevel::Info, "[NativeAppHost] App: " + appLabel(context) + " request_window title=\"" + context->lastRequestedWindowTitle + "\" size=" + std::to_string(width) + "x" + std::to_string(height) + " windowId=" + std::to_string(windowId));
         return GX_OK;
     }
@@ -198,6 +211,64 @@ gx_result hostDrawText(NativeGxAppContext* ctx, gx_handle window, int x, int y, 
     return GX_OK;
 }
 
+gx_result hostWaitForClose(NativeGxAppContext* ctx, gx_handle window, int timeoutMs) {
+    NativeAppRuntimeContext* context = runtimeContextFor(ctx);
+    if (!context) {
+        Logger::write(LogLevel::Warn, "[NativeAppHost] wait_for_close rejected: invalid app context or host table");
+        return GX_ERROR_INVALID_ARGUMENT;
+    }
+
+    ++context->waitForCloseCallCount;
+    context->lastWaitWindow = window;
+    context->lastWaitTimeoutMs = timeoutMs;
+    context->lastWaitResult = GX_ERROR_INVALID_ARGUMENT;
+
+    if (window == 0 || timeoutMs < kMinWaitForCloseTimeoutMs || timeoutMs > kMaxWaitForCloseTimeoutMs) {
+        Logger::write(LogLevel::Warn, "[NativeAppHost] App: " + appLabel(context) + " wait_for_close rejected: invalid window or timeout");
+        return context->lastWaitResult;
+    }
+
+    if (!ownsWindow(*context, window)) {
+        context->lastWaitResult = GX_ERROR_PERMISSION_DENIED;
+        Logger::write(LogLevel::Warn, "[NativeAppHost] App: " + appLabel(context) + " wait_for_close denied: window is not owned by this native runtime");
+        return context->lastWaitResult;
+    }
+
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeoutMs);
+    ipc::Message message;
+    while (std::chrono::steady_clock::now() < deadline) {
+        if (!ipc::Bus::pop("gui.output", message, 25)) continue;
+        if (message.type != static_cast<uint32_t>(gui::MsgType::MT_Close)) continue;
+
+        std::string payload(message.data.begin(), message.data.end());
+        uint64_t closedWindow = 0;
+        if (!parseWindowId(payload, closedWindow)) {
+            context->lastWaitResult = GX_ERROR_UNSUPPORTED;
+            Logger::write(LogLevel::Warn, "[NativeAppHost] App: " + appLabel(context) + " wait_for_close unsupported: MT_Close did not identify a window");
+            return context->lastWaitResult;
+        }
+
+        if (closedWindow == window) {
+            context->lastWaitResult = GX_OK;
+            Logger::write(LogLevel::Info, "[NativeAppHost] App: " + appLabel(context) + " wait_for_close completed windowId=" + std::to_string(window));
+            return GX_OK;
+        }
+    }
+
+    context->lastWaitResult = GX_ERROR_TIMEOUT;
+    Logger::write(LogLevel::Info, "[NativeAppHost] App: " + appLabel(context) + " wait_for_close timed out windowId=" + std::to_string(window) + " timeoutMs=" + std::to_string(timeoutMs));
+    return context->lastWaitResult;
+}
+
+void publishWindowClose(uint64_t processId, gx_handle window) {
+    ipc::Message request;
+    request.srcPid = processId;
+    request.type = static_cast<uint32_t>(gui::MsgType::MT_Close);
+    std::string payload = std::to_string(window);
+    request.data.assign(payload.begin(), payload.end());
+    ipc::Bus::publish("gui.input", std::move(request), false);
+}
+
 gx_result hostExit(NativeGxAppContext* ctx, gx_result exitCode) {
     NativeAppRuntimeContext* context = runtimeContextFor(ctx);
     if (!context) {
@@ -207,6 +278,7 @@ gx_result hostExit(NativeGxAppContext* ctx, gx_result exitCode) {
 
     g_hostLifecycleState = NativeAppLifecycleState::Exited;
     context->lifecycleState = NativeAppLifecycleState::Exited;
+    context->exitCode = exitCode;
     Logger::write(LogLevel::Info, "[NativeAppHost] App: " + appLabel(context) + " exit requested with code " + std::to_string(exitCode));
     return GX_OK;
 }
@@ -233,6 +305,7 @@ NativeAppRuntimeContext NativeAppRuntime::Prepare(
     const NativeElfImage& image) {
     NativeAppRuntimeContext context;
     context.appId = app.manifest.id;
+    context.runtimeId = g_nextRuntimeId.fetch_add(1);
     context.displayName = app.manifest.displayName;
     context.architecture = launchResult.architecture.empty() ? launchDecision.architecture : launchResult.architecture;
     context.processId = 0;
@@ -244,6 +317,7 @@ NativeAppRuntimeContext NativeAppRuntime::Prepare(
     context.environment["GX_APP_DIRECTORY"] = context.appDirectory;
     context.environment["GX_APP_ARCHITECTURE"] = context.architecture;
     context.environment["GX_APP_ABI"] = launchResult.abi;
+    context.environment["GX_NATIVE_RUNTIME_ID"] = std::to_string(context.runtimeId);
     context.lifecycleState = NativeAppLifecycleState::Created;
 
     context.hostCalls.size = static_cast<uint32_t>(sizeof(NativeHostCallTable));
@@ -252,6 +326,7 @@ NativeAppRuntimeContext NativeAppRuntime::Prepare(
     context.hostCalls.get_api_version = hostGetApiVersion;
     context.hostCalls.request_window = hostRequestWindow;
     context.hostCalls.draw_text = hostDrawText;
+    context.hostCalls.wait_for_close = hostWaitForClose;
     context.hostCalls.exit = hostExit;
 
     if (launchDecision.strategy != AppLaunchStrategy::NativeElf) {
@@ -285,11 +360,73 @@ NativeAppRuntimeContext NativeAppRuntime::Prepare(
 }
 
 void NativeAppRuntime::BeginHostCallDispatch(NativeAppRuntimeContext& context) {
+    context.lifecycleState = NativeAppLifecycleState::Running;
+    context.startTime = std::chrono::steady_clock::now();
+    g_hostLifecycleState = NativeAppLifecycleState::Running;
     g_activeRuntimeContext = &context;
+    Logger::write(LogLevel::Info, "[NativeAppRuntime] App: " + appLabel(&context) + " runtimeId=" + std::to_string(context.runtimeId) + " entering host call dispatch");
 }
 
 void NativeAppRuntime::EndHostCallDispatch(NativeAppRuntimeContext& context) {
     if (g_activeRuntimeContext == &context) g_activeRuntimeContext = nullptr;
+}
+
+void NativeAppRuntime::Cleanup(NativeAppRuntimeContext& context, NativeAppLifecycleState finalState, int32_t exitCode, const std::string& failureReason) {
+#ifdef GX_ENABLE_EXPERIMENTAL_NATIVE_ELF_EXECUTION
+    try {
+        if (context.cleanupAttempted) {
+            Logger::write(LogLevel::Info, "[NativeAppRuntime] Cleanup already attempted for app=" + appLabel(&context) + " runtimeId=" + std::to_string(context.runtimeId) + " remainingWindows=" + std::to_string(context.createdWindowHandles.size()));
+            context.exitCode = exitCode;
+            if (!failureReason.empty()) context.failureReason = failureReason;
+            if (context.lifecycleState != NativeAppLifecycleState::Failed && finalState == NativeAppLifecycleState::Failed) context.lifecycleState = NativeAppLifecycleState::Failed;
+            return;
+        }
+
+        context.cleanupAttempted = true;
+        context.lifecycleState = NativeAppLifecycleState::Closing;
+        g_hostLifecycleState = NativeAppLifecycleState::Closing;
+        context.exitCode = exitCode;
+        context.failureReason = failureReason;
+
+        Logger::write(LogLevel::Info, "[NativeAppRuntime] Cleanup begin app=" + appLabel(&context) + " runtimeId=" + std::to_string(context.runtimeId) + " processId=" + std::to_string(context.processId) + " ownedWindows=" + std::to_string(context.createdWindowHandles.size()));
+
+        std::vector<gx_handle> windowsToClose = context.createdWindowHandles;
+        context.createdWindowHandles.clear();
+        uint64_t cleanupPid = context.processId != 0 ? context.processId : Allocator::currentPid();
+        for (gx_handle window : windowsToClose) {
+            if (window == 0) {
+                Logger::write(LogLevel::Warn, "[NativeAppRuntime] Cleanup skipped invalid window handle app=" + appLabel(&context) + " runtimeId=" + std::to_string(context.runtimeId));
+                continue;
+            }
+
+            try {
+                publishWindowClose(cleanupPid, window);
+                ++context.cleanedWindowCount;
+                Logger::write(LogLevel::Info, "[NativeAppRuntime] Cleanup published MT_Close app=" + appLabel(&context) + " runtimeId=" + std::to_string(context.runtimeId) + " windowId=" + std::to_string(window));
+            } catch (const std::exception& ex) {
+                Logger::write(LogLevel::Warn, "[NativeAppRuntime] Cleanup failed to publish MT_Close app=" + appLabel(&context) + " runtimeId=" + std::to_string(context.runtimeId) + " windowId=" + std::to_string(window) + " reason=" + ex.what());
+            } catch (...) {
+                Logger::write(LogLevel::Warn, "[NativeAppRuntime] Cleanup failed to publish MT_Close app=" + appLabel(&context) + " runtimeId=" + std::to_string(context.runtimeId) + " windowId=" + std::to_string(window) + " reason=unknown");
+            }
+        }
+
+        context.endTime = std::chrono::steady_clock::now();
+        context.lifecycleState = finalState == NativeAppLifecycleState::Failed ? NativeAppLifecycleState::Failed : NativeAppLifecycleState::Exited;
+        g_hostLifecycleState = context.lifecycleState;
+        Logger::write(context.lifecycleState == NativeAppLifecycleState::Failed ? LogLevel::Warn : LogLevel::Info, "[NativeAppRuntime] Cleanup complete app=" + appLabel(&context) + " runtimeId=" + std::to_string(context.runtimeId) + " state=" + ToString(context.lifecycleState) + " exitCode=" + std::to_string(context.exitCode) + " cleanedWindows=" + std::to_string(context.cleanedWindowCount) + " remainingWindows=" + std::to_string(context.createdWindowHandles.size()) + (context.failureReason.empty() ? std::string() : " failureReason=" + context.failureReason));
+    } catch (...) {
+        context.endTime = std::chrono::steady_clock::now();
+        context.lifecycleState = NativeAppLifecycleState::Failed;
+        g_hostLifecycleState = NativeAppLifecycleState::Failed;
+        context.failureReason = context.failureReason.empty() ? "cleanup raised an unexpected exception" : context.failureReason;
+        Logger::write(LogLevel::Error, "[NativeAppRuntime] Cleanup suppressed unexpected exception app=" + appLabel(&context) + " runtimeId=" + std::to_string(context.runtimeId));
+    }
+#else
+    (void)context;
+    (void)finalState;
+    (void)exitCode;
+    (void)failureReason;
+#endif
 }
 
 const char* NativeAppRuntime::ToString(NativeAppLifecycleState state) {
@@ -309,6 +446,8 @@ void NativeAppRuntime::LogContext(const NativeAppRuntimeContext& context, const 
     std::ostringstream oss;
     oss << "[NativeAppRuntime] "
         << "App: " << context.appId
+        << " RuntimeId: " << context.runtimeId
+        << " ProcessId: " << context.processId
         << " Architecture: " << context.architecture
         << " ABI: " << abi
         << " Permissions: " << context.permissions.size()

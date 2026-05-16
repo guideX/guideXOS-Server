@@ -18,6 +18,7 @@ typedef struct gx_host_calls {
     uint32_t (*get_api_version)(gx_app_context* ctx);
     gx_result (*request_window)(gx_app_context* ctx, const char* title, int width, int height, gx_handle* outWindow);
     gx_result (*draw_text)(gx_app_context* ctx, gx_handle window, int x, int y, const char* text);
+    gx_result (*wait_for_close)(gx_app_context* ctx, gx_handle window, int timeoutMs);
     gx_result (*exit)(gx_app_context* ctx, gx_result exitCode);
 } gx_host_calls;
 

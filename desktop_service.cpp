@@ -398,6 +398,8 @@ namespace gxos {
             if (nativeElfImage.success) runtimeContext = apps::NativeAppRuntime::Prepare(*app, launchDecision, nativeElfResult, nativeElfImage);
 
             oss << "\n[Runtime]\n";
+            oss << "runtimeId: " << runtimeContext.runtimeId << "\n";
+            oss << "processId: " << runtimeContext.processId << "\n";
             oss << "lifecycleState: " << apps::NativeAppRuntime::ToString(runtimeContext.lifecycleState) << "\n";
             oss << "permissions: ";
             for (size_t i = 0; i < runtimeContext.permissions.size(); ++i) {
@@ -406,7 +408,7 @@ namespace gxos {
             }
             oss << "\n";
             oss << "apiVersion: " << runtimeContext.hostCalls.version << "\n";
-            oss << "hostCallsAvailable: " << ((runtimeContext.hostCalls.log && runtimeContext.hostCalls.get_api_version && runtimeContext.hostCalls.request_window && runtimeContext.hostCalls.draw_text && runtimeContext.hostCalls.exit) ? "true" : "false") << "\n";
+            oss << "hostCallsAvailable: " << ((runtimeContext.hostCalls.log && runtimeContext.hostCalls.get_api_version && runtimeContext.hostCalls.request_window && runtimeContext.hostCalls.draw_text && runtimeContext.hostCalls.wait_for_close && runtimeContext.hostCalls.exit) ? "true" : "false") << "\n";
             oss << "runtimeSuccess: " << (runtimeContext.success ? "true" : "false") << "\n";
             if (!runtimeContext.diagnostics.empty()) {
                 oss << "runtimeDiagnostics: ";
@@ -430,7 +432,15 @@ namespace gxos {
             oss << "executableMappingPossible: " << (canExecute ? "true" : "false") << "\n";
             oss << "executionAttempted: " << (canExecute ? "true" : "false") << "\n";
             oss << "executionSuccess: " << (executionResult.success ? "true" : "false") << "\n";
+            oss << "runtimeId: " << executionResult.runtimeId << "\n";
+            oss << "lifecycleStateBeforeExecution: " << executionResult.lifecycleStateBeforeExecution << "\n";
+            oss << "lifecycleStateAfterExecution: " << executionResult.lifecycleStateAfterExecution << "\n";
             oss << "returnCode: " << executionResult.exitCode << "\n";
+            oss << "exitCode: " << executionResult.exitCode << "\n";
+            oss << "cleanupAttempted: " << (executionResult.cleanupAttempted ? "true" : "false") << "\n";
+            oss << "cleanedWindowCount: " << executionResult.cleanedWindowCount << "\n";
+            oss << "remainingOwnedWindowCount: " << executionResult.remainingOwnedWindowCount << "\n";
+            if (!executionResult.failureReason.empty()) oss << "failureReason: " << executionResult.failureReason << "\n";
             oss << "requestWindowCallCount: " << executionResult.requestWindowCallCount << "\n";
             oss << "lastWindowId: " << executionResult.lastWindowId << "\n";
             oss << "lastWindowTitle: " << executionResult.lastWindowTitle << "\n";
@@ -439,6 +449,10 @@ namespace gxos {
             oss << "lastDrawTextWindow: " << executionResult.lastDrawTextWindow << "\n";
             oss << "lastDrawText: " << executionResult.lastDrawText << "\n";
             oss << "lastDrawTextResult: " << executionResult.lastDrawTextResult << "\n";
+            oss << "waitForCloseCallCount: " << executionResult.waitForCloseCallCount << "\n";
+            oss << "lastWaitWindow: " << executionResult.lastWaitWindow << "\n";
+            oss << "lastWaitTimeoutMs: " << executionResult.lastWaitTimeoutMs << "\n";
+            oss << "lastWaitResult: " << executionResult.lastWaitResult << "\n";
             if (!executionResult.diagnostics.empty()) {
                 oss << "executionDiagnostics: ";
                 for (size_t i = 0; i < executionResult.diagnostics.size(); ++i) {
