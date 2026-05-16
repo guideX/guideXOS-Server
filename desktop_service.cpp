@@ -4,6 +4,7 @@
 #include "desktop_config.h"
 #include "logger.h"
 #include "lifecycle.h"
+#include "native_elf_image_loader.h"
 #include "native_elf_launch_pipeline.h"
 #include "notepad.h"
 #include "calculator.h"
@@ -333,7 +334,21 @@ namespace gxos {
             if (launchDecision.strategy == apps::AppLaunchStrategy::NativeElf) {
                 apps::NativeElfLaunchResult nativeElfResult = apps::NativeElfLaunchPipeline::PrepareLaunch(*registryApp, launchDecision);
                 if (nativeElfResult.success) {
-                    error = "Native ELF validated; execution not implemented yet";
+                    apps::NativeElfImage nativeElfImage = apps::NativeElfImageLoader::LoadImage(nativeElfResult);
+                    if (nativeElfImage.success) {
+                        error = "Native ELF image loaded; execution not implemented yet";
+                    } else {
+                        std::ostringstream details;
+                        details << "Native ELF image load failed";
+                        if (!nativeElfImage.diagnostics.empty()) {
+                            details << ": ";
+                            for (size_t i = 0; i < nativeElfImage.diagnostics.size(); ++i) {
+                                if (i > 0) details << "; ";
+                                details << nativeElfImage.diagnostics[i];
+                            }
+                        }
+                        error = details.str();
+                    }
                 } else {
                     std::ostringstream details;
                     details << "Native ELF validation failed";

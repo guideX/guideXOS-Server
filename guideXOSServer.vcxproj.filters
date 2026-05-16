@@ -645,6 +645,9 @@
     <ClInclude Include="sdk\include\guidexos\app.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="native_elf_image_loader.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="allocator.cpp">
@@ -1227,6 +1230,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="sdk\samples\helloworld\main.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="native_elf_image_loader.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
