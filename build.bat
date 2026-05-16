@@ -5,7 +5,25 @@ REM Copyright (c) 2024 guideX
 echo Building guideXOS Server...
 
 REM Compiler settings
-set CXX=g++
+if defined CXX (
+    echo Checking configured compiler: %CXX%
+) else (
+    if exist "C:\mingw64\bin\g++.exe" set "CXX=C:\mingw64\bin\g++.exe"
+)
+
+if not defined CXX (
+    for %%G in (g++.exe g++) do (
+        for /f "delims=" %%P in ('where %%G 2^>nul') do if not defined CXX set "CXX=%%P"
+    )
+)
+
+if not defined CXX (
+    echo ERROR: Could not find g++ compiler.
+    echo Checked: existing CXX environment variable, C:\mingw64\bin\g++.exe, and g++ on PATH.
+    exit /b 1
+)
+
+echo Using compiler: %CXX%
 set CXXFLAGS=-std=c++17 -Wall -O2 -iquote .
 set LDFLAGS=-lws2_32 -lgdi32 -luser32 -lmsimg32
 
@@ -78,7 +96,7 @@ REM Output
 set OUTPUT=guideXOSServer.exe
 
 echo Compiling...
-%CXX% %CXXFLAGS% %SOURCES% %LDFLAGS% -o %OUTPUT%
+"%CXX%" %CXXFLAGS% %SOURCES% %LDFLAGS% -o %OUTPUT%
 
 if %ERRORLEVEL% EQU 0 (
     echo Build successful: %OUTPUT%
