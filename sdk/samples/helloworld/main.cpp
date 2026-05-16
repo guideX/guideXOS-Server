@@ -3,6 +3,17 @@
 static gx_rect kPanelRect = { 10, 10, 460, 80 };
 static gx_rect kButtonRect = { 20, 90, 160, 40 };
 
+static void clear_event(gx_event* event) {
+    if (!event) return;
+    event->size = 0;
+    event->type = GX_EVENT_NONE;
+    event->window = 0;
+    event->param1 = 0;
+    event->param2 = 0;
+    event->param3 = 0;
+    event->param4 = 0;
+}
+
 static void draw_content(gx_app_context* ctx, gx_handle window, int clickCount, int pressed, int resourceLoaded) {
     gx_draw_panel(ctx, window, kPanelRect, 0x202020u);
     gx_draw_label(ctx, window, 20, 40, "Hello from Native ELF");
@@ -53,7 +64,8 @@ extern "C" gx_result gx_main(gx_app_context* ctx) {
         if (windowResult == GX_OK && ctx->host->poll_event) {
             int elapsedMs = 0;
             while (elapsedMs < 30000) {
-                gx_event event = {};
+                gx_event event;
+                clear_event(&event);
                 gx_result eventResult = ctx->host->poll_event(ctx, &event, 500);
                 if (eventResult == GX_OK && event.window == window) {
                     if (gx_event_is_paint(&event)) {

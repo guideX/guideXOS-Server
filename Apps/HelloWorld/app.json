@@ -3,35 +3,19 @@
   "id": "com.guidexos.helloworld",
   "displayName": "Hello World",
   "version": "0.1.0",
-  "publisher": "guideXOS",
-  "description": "Manifest discovery fixture for a future external NativeElf app. The referenced ELF files are intentionally absent and execution is not implemented yet.",
-  "category": "Diagnostics",
+  "publisher": "guideXOS SDK",
+  "description": "Minimal guideXOS Native ELF smoke-test application.",
+  "category": "Samples",
   "kind": "NativeElf",
-  "icon": "resources/icon.png",
+  "icon": "",
   "minGuideXOSVersion": "0.1.0",
   "supportedArchitectures": [
-    "amd64",
-    "x86",
-    "arm64"
+    "amd64"
   ],
   "entries": [
     {
       "architecture": "amd64",
       "path": "bin/amd64/helloworld.elf",
-      "entryPoint": "gx_main",
-      "abi": "guidexos-c-abi-v1",
-      "runtime": "native-elf"
-    },
-    {
-      "architecture": "x86",
-      "path": "bin/x86/helloworld.elf",
-      "entryPoint": "gx_main",
-      "abi": "guidexos-c-abi-v1",
-      "runtime": "native-elf"
-    },
-    {
-      "architecture": "arm64",
-      "path": "bin/arm64/helloworld.elf",
       "entryPoint": "gx_main",
       "abi": "guidexos-c-abi-v1",
       "runtime": "native-elf"
@@ -44,8 +28,8 @@
   ],
   "fileAssociations": [],
   "defaultWindow": {
-    "width": 640,
-    "height": 480,
+    "width": 480,
+    "height": 320,
     "resizable": true
   }
 }

@@ -1,0 +1,8 @@
+console.start
+console.send desktop.apps.verbose
+console.pop 3000
+console.send nativeapp.inspect com.guidexos.helloworld
+console.pop 3000
+console.send nativeapp.inspect com.guidexos.resourceviewer
+console.pop 3000
+exit
