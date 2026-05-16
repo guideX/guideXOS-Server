@@ -259,7 +259,7 @@ NativeElfImage NativeElfImageLoader::LoadImage(const NativeElfLaunchResult& laun
     image.preferredBaseAddress = image.isPositionIndependent ? 0 : minVirtualAddress;
     image.imageSize = maxVirtualAddress - minVirtualAddress;
     image.success = true;
-    addDiagnostic(image, "Native ELF image loaded; execution not implemented yet");
+    addDiagnostic(image, "Native ELF image loaded");
     LogImage(image);
     return image;
 }

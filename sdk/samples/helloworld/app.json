@@ -21,7 +21,10 @@
       "runtime": "native-elf"
     }
   ],
-  "permissions": [],
+  "permissions": [
+    "log",
+    "window"
+  ],
   "fileAssociations": [],
   "defaultWindow": {
     "width": 480,

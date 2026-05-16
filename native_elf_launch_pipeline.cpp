@@ -108,7 +108,7 @@ NativeElfLaunchResult NativeElfLaunchPipeline::PrepareLaunch(const RegisteredApp
     }
 
     result.success = true;
-    result.message = "Native ELF validated but execution is not implemented yet.";
+    result.message = "Native ELF validated.";
     LogResult(result);
     return result;
 }

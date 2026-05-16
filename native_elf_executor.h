@@ -18,6 +18,13 @@ struct NativeElfExecutionResult {
     int32_t exitCode = 0;
     std::string message;
     std::vector<std::string> diagnostics;
+    uint32_t hostLogCallCount = 0;
+    std::string lastHostLogMessage;
+    uint32_t apiVersionReturned = 0;
+    uint32_t requestWindowCallCount = 0;
+    uint64_t lastWindowId = 0;
+    std::string lastWindowTitle;
+    int32_t requestWindowResult = GX_OK;
 };
 
 class NativeElfExecutor {
@@ -31,7 +38,7 @@ public:
     static NativeElfExecutionResult Execute(
         const NativeElfLaunchResult& launchResult,
         const NativeElfImage& image,
-        const NativeAppRuntimeContext& runtimeContext);
+        NativeAppRuntimeContext& runtimeContext);
 
     static bool ExperimentalExecutionEnabled();
 

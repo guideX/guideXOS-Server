@@ -431,6 +431,10 @@ namespace gxos {
             oss << "executionAttempted: " << (canExecute ? "true" : "false") << "\n";
             oss << "executionSuccess: " << (executionResult.success ? "true" : "false") << "\n";
             oss << "returnCode: " << executionResult.exitCode << "\n";
+            oss << "requestWindowCallCount: " << executionResult.requestWindowCallCount << "\n";
+            oss << "lastWindowId: " << executionResult.lastWindowId << "\n";
+            oss << "lastWindowTitle: " << executionResult.lastWindowTitle << "\n";
+            oss << "requestWindowResult: " << executionResult.requestWindowResult << "\n";
             if (!executionResult.diagnostics.empty()) {
                 oss << "executionDiagnostics: ";
                 for (size_t i = 0; i < executionResult.diagnostics.size(); ++i) {

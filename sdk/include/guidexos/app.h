@@ -7,12 +7,12 @@
 extern "C" {
 #endif
 
-typedef struct gx_app_context {
+struct gx_app_context {
     uint32_t size;
     uint32_t apiVersion;
     const gx_host_calls* host;
     void* userData;
-} gx_app_context;
+};
 
 typedef gx_result (*gx_main_fn)(gx_app_context* ctx);
 

@@ -98,7 +98,7 @@ bool NativeElfExecutor::CanExecute(
         localReason = std::string("Native app runtime state is not Prepared: ") + NativeAppRuntime::ToString(runtimeContext.lifecycleState);
     } else {
         canExecute = true;
-        localReason = "Native ELF executor is available, but actual execution is not implemented yet";
+        localReason = "Native ELF executor gate passed";
     }
 
     if (reason) *reason = localReason;
@@ -109,7 +109,7 @@ bool NativeElfExecutor::CanExecute(
 NativeElfExecutionResult NativeElfExecutor::Execute(
     const NativeElfLaunchResult& launchResult,
     const NativeElfImage& image,
-    const NativeAppRuntimeContext& runtimeContext) {
+    NativeAppRuntimeContext& runtimeContext) {
     NativeElfExecutionResult result;
     result.appId = launchResult.appId;
     result.architecture = launchResult.architecture;
@@ -230,6 +230,7 @@ NativeElfExecutionResult NativeElfExecutor::Execute(
     appContext.host = &runtimeContext.hostCalls;
     appContext.userData = nullptr;
     gx_entry_fn entry = reinterpret_cast<gx_entry_fn>(entryAddress);
+    NativeAppRuntime::BeginHostCallDispatch(runtimeContext);
 #ifdef _WIN32
     __try {
         result.exitCode = entry(&appContext);
@@ -240,8 +241,23 @@ NativeElfExecutionResult NativeElfExecutor::Execute(
 #else
     result.exitCode = entry(&appContext);
 #endif
+    NativeAppRuntime::EndHostCallDispatch(runtimeContext);
     result.success = result.exitCode == GX_OK;
+    result.hostLogCallCount = runtimeContext.hostLogCallCount;
+    result.lastHostLogMessage = runtimeContext.lastHostLogMessage;
+    result.apiVersionReturned = runtimeContext.lastApiVersionReturned;
+    result.requestWindowCallCount = runtimeContext.requestWindowCallCount;
+    result.lastWindowId = runtimeContext.lastCreatedWindowId;
+    result.lastWindowTitle = runtimeContext.lastRequestedWindowTitle;
+    result.requestWindowResult = runtimeContext.lastRequestWindowResult;
     addDiagnostic(result, std::string("Native ELF gx_main returned ") + std::to_string(result.exitCode));
+    addDiagnostic(result, "Host log call count: " + std::to_string(result.hostLogCallCount));
+    if (!result.lastHostLogMessage.empty()) addDiagnostic(result, "Last host log message: " + result.lastHostLogMessage);
+    addDiagnostic(result, "API version returned: " + std::to_string(result.apiVersionReturned));
+    addDiagnostic(result, "request_window call count: " + std::to_string(result.requestWindowCallCount));
+    addDiagnostic(result, "last window id: " + std::to_string(result.lastWindowId));
+    if (!result.lastWindowTitle.empty()) addDiagnostic(result, "last window title: " + result.lastWindowTitle);
+    addDiagnostic(result, "request_window result: " + std::to_string(result.requestWindowResult));
 #endif
 
     result.message = joinDiagnostics(result.diagnostics);
