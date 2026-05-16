@@ -4,6 +4,7 @@
 #include "desktop_config.h"
 #include "logger.h"
 #include "lifecycle.h"
+#include "native_app_runtime.h"
 #include "native_elf_image_loader.h"
 #include "native_elf_launch_pipeline.h"
 #include "notepad.h"
@@ -336,7 +337,21 @@ namespace gxos {
                 if (nativeElfResult.success) {
                     apps::NativeElfImage nativeElfImage = apps::NativeElfImageLoader::LoadImage(nativeElfResult);
                     if (nativeElfImage.success) {
-                        error = "Native ELF image loaded; execution not implemented yet";
+                        apps::NativeAppRuntimeContext runtimeContext = apps::NativeAppRuntime::Prepare(*registryApp, launchDecision, nativeElfResult, nativeElfImage);
+                        if (runtimeContext.success) {
+                            error = "Native app runtime prepared; execution not implemented yet";
+                        } else {
+                            std::ostringstream details;
+                            details << "Native app runtime prepare failed";
+                            if (!runtimeContext.diagnostics.empty()) {
+                                details << ": ";
+                                for (size_t i = 0; i < runtimeContext.diagnostics.size(); ++i) {
+                                    if (i > 0) details << "; ";
+                                    details << runtimeContext.diagnostics[i];
+                                }
+                            }
+                            error = details.str();
+                        }
                     } else {
                         std::ostringstream details;
                         details << "Native ELF image load failed";

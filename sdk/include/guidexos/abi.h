@@ -12,10 +12,10 @@ extern "C" {
 typedef struct gx_host_calls {
     uint32_t size;
     uint32_t version;
-    gx_result (*reserved0)(void);
-    gx_result (*reserved1)(void);
-    gx_result (*reserved2)(void);
-    gx_result (*reserved3)(void);
+    gx_result (*log)(const char* message);
+    uint32_t (*get_api_version)(void);
+    gx_result (*request_window)(void);
+    gx_result (*exit)(gx_result exitCode);
 } gx_host_calls;
 
 #ifdef __cplusplus
