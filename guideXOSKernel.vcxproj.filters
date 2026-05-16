@@ -81,6 +81,12 @@
     <ClInclude Include="app_launch_resolver.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="elf_validator.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="native_elf_launch_pipeline.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="kernel\core\include\kernel\arch.h">
       <Filter>Header Files\Kernel</Filter>
     </ClInclude>
@@ -291,6 +297,12 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="app_launch_resolver.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="elf_validator.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="native_elf_launch_pipeline.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="kernel\core\main.cpp">

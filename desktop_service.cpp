@@ -4,6 +4,7 @@
 #include "desktop_config.h"
 #include "logger.h"
 #include "lifecycle.h"
+#include "native_elf_launch_pipeline.h"
 #include "notepad.h"
 #include "calculator.h"
 #include "console_window.h"
@@ -330,7 +331,23 @@ namespace gxos {
             }
 
             if (launchDecision.strategy == apps::AppLaunchStrategy::NativeElf) {
-                error = "Native ELF launch pipeline not implemented";
+                apps::NativeElfLaunchResult nativeElfResult = apps::NativeElfLaunchPipeline::PrepareLaunch(*registryApp, launchDecision);
+                if (nativeElfResult.success) {
+                    error = "Native ELF validated; execution not implemented yet";
+                } else {
+                    std::ostringstream details;
+                    details << "Native ELF validation failed";
+                    if (!nativeElfResult.validationErrors.empty()) {
+                        details << ": ";
+                        for (size_t i = 0; i < nativeElfResult.validationErrors.size(); ++i) {
+                            if (i > 0) details << "; ";
+                            details << nativeElfResult.validationErrors[i];
+                        }
+                    } else if (!nativeElfResult.message.empty()) {
+                        details << ": " << nativeElfResult.message;
+                    }
+                    error = details.str();
+                }
                 return false;
             }
 

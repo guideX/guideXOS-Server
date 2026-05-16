@@ -147,6 +147,7 @@
     <ClInclude Include="desktop_wallpaper.h" />
     <ClInclude Include="disk_manager.h" />
     <ClInclude Include="control_panel.h" />
+    <ClInclude Include="elf_validator.h" />
     <ClInclude Include="file_explorer.h" />
     <ClInclude Include="firewall.h" />
     <ClInclude Include="focus_indicator.h" />
@@ -307,6 +308,7 @@
     <ClInclude Include="logger.h" />
     <ClInclude Include="message_box.h" />
     <ClInclude Include="module_manager.h" />
+    <ClInclude Include="native_elf_launch_pipeline.h" />
     <ClInclude Include="notepad.h" />
     <ClInclude Include="notification_manager.h" />
     <ClInclude Include="onscreen_keyboard.h" />
@@ -350,6 +352,7 @@
     <ClCompile Include="desktop_state.cpp" />
     <ClCompile Include="disk_manager.cpp" />
     <ClCompile Include="control_panel.cpp" />
+    <ClCompile Include="elf_validator.cpp" />
     <ClCompile Include="file_explorer.cpp" />
     <ClCompile Include="firewall.cpp" />
     <ClCompile Include="focus_indicator.cpp" />
@@ -519,6 +522,7 @@
     <ClCompile Include="logger.cpp" />
     <ClCompile Include="message_box.cpp" />
     <ClCompile Include="module_manager.cpp" />
+    <ClCompile Include="native_elf_launch_pipeline.cpp" />
     <ClCompile Include="notepad.cpp" />
     <ClCompile Include="notification_manager.cpp" />
     <ClCompile Include="onscreen_keyboard.cpp" />

@@ -162,6 +162,8 @@
     <ClInclude Include="app_manifest.h" />
     <ClInclude Include="app_manifest_loader.h" />
     <ClInclude Include="app_manifest_validator.h" />
+    <ClInclude Include="elf_validator.h" />
+    <ClInclude Include="native_elf_launch_pipeline.h" />
     <ClInclude Include="bitmap_font.h" />
     <ClInclude Include="desktop_wallpaper.h" />
     <ClInclude Include="kernel\arch\x86\include\arch\x86.h" />
@@ -235,6 +237,8 @@
     <ClCompile Include="app_manifest.cpp" />
     <ClCompile Include="app_manifest_loader.cpp" />
     <ClCompile Include="app_manifest_validator.cpp" />
+    <ClCompile Include="elf_validator.cpp" />
+    <ClCompile Include="native_elf_launch_pipeline.cpp" />
     <ClCompile Include="kernel\core\desktop.cpp" />
     <ClCompile Include="kernel\core\desktop_font.cpp" />
     <ClCompile Include="kernel\core\shell.cpp" />
