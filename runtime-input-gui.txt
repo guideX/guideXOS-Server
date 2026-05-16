@@ -1,0 +1,6 @@
+desktop.launch HDInstaller
+desktop.launch ControlPanel
+gui.wlist
+gui.pop 1000
+log
+exit

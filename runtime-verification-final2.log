@@ -1,0 +1,596 @@
+guideXOSServer server starting...
+[lifecycle] phase -> PlatformDiscovery
+[lifecycle] phase -> MemoryReady
+[lifecycle] phase -> SchedulerReady
+[lifecycle] phase -> IpcReady
+[lifecycle] phase -> DesktopStateReady
+AppRegistry initializing, count=1
+AppRegistry manifest scan succeeded: scanned=1, registered=1
+Registered app: Hello World
+Registered app: Notepad
+Registered app: Calculator
+Registered app: Clock
+Registered app: Console
+Registered app: FileExplorer
+Registered app: TaskManager
+Registered app: Paint
+Registered app: ImageViewer
+Registered app: OnScreenKeyboard
+Registered app: ShutdownDialog
+Registered app: DiskManager
+Registered app: ControlPanel
+Registered app: HDInstaller
+AppRegistry initialized, desktop apps=14
+Desktop state loaded
+NotificationManager initialized
+Firewall initialized (Normal mode)
+Module registered: Notepad
+Module registered: Calculator
+Module registered: Paint
+Module registered: ImageViewer
+Module registered: Clock
+Module registered: TaskManager
+Module registered: FileExplorer
+Module registered: Console
+Module registered: OnScreenKeyboard
+Module registered: ShutdownDialog
+Built-in modules registered (10)
+[lifecycle] phase -> ServicesReady
+[lifecycle] phase -> Interactive
+Commands:
+ mem | alloc <n> | tasks | log
+ spawn <echo|worker> [args...] | plist
+ send <pid> <text> | recv <pid>
+ bus.sub <chan> <pid> | bus.unsub <chan> <pid>
+ bus.pub <chan> <text> [fanout] | bus.pop <chan> [timeoutMs]
+ bus.cap <chan> <cap> | bus.stats <chan>
+ console.start | console.send <text> | console.pop [timeoutMs]
+ gui.start | gui.win <title> [w h] | gui.text <id> <text> | gui.close <id>
+ gui.rect <id> <x> <y> <w> <h> <r> <g> <b> | gui.move <id> <x> <y> | gui.resize <id> <w> <h> | gui.title <id> <title>
+ gui.btn <win> <id> <x> <y> <w> <h> <text> | gui.pop | gui.wlist | gui.activate <id> | gui.min <id>
+ gxm.load <path> | gxm.sample | gui.save <path> | gui.load <path>
+ desktop.wallpaper <path> | desktop.launch <action> | desktop.pin <action> | desktop.unpin <action> | desktop.showconfig
+ desktop.apps | desktop.pinned | desktop.recent | desktop.pinapp <name> | desktop.pinfile <name> <path>
+ taskbar.list | taskbar.activate <id> | taskbar.min <id> | taskbar.close <id>
+ workspace.switch <n> | workspace.next | workspace.prev | workspace.current
+ notepad | notepad <file>
+ calculator
+ console | console.start | console.send <text> | console.pop [timeoutMs]
+ files | files <path>
+ clock
+ taskmgr
+ paint
+ imgview [file] | osk
+ shutdown | msgbox <text> | welcome
+ notify <text> | notify.clear
+ fw.mode <normal|block|disabled|auto> | fw.allow <name> | fw.list | fw.alerts
+ modules | module.launch <name>
+ pkg.install <path.gxapp> | pkg.launch <app> | pkg.list | pkg.validate <path.gxapp>
+ proc.wait <pid> [timeoutMs] | proc.status <pid>
+ vfs.mkdir <path> | vfs.write <path> <text> | vfs.read <path> | vfs.ls <path>
+ vnc.start [port] | vnc.stop | vnc.status
+ pbytes | help | quit/exit
+[lifecycle] phase -> ServicesReady
+[lifecycle] console pid=10
+Console pid=ConsoleService started
+10
+Bus::publish queueing msg type=10 to channel=console.input
+Sent to console
+Bus::publish queueing msg type=0 to channel=console.output
+Console: AppRegistry diagnostic
+initialized=true initCount=1
+sources:
+  SystemApps /system/apps
+  Package /Apps
+  UserApps /users/default/apps
+manifestScan scanned=1 registered=1
+builtInRegister scanned=13 registered=14
+invalidManifests: 0
+duplicateAppIds(manifestScan): 0
+duplicateAppIds(builtInRegister): 0
+registeredApps: 14
+  id=com.guidexos.helloworld displayName=Hello World kind=NativeElf icon=resources/icon.png launchName=Hello World source=Package
+  id=gxos.builtin.notepad displayName=Notepad kind=BuiltIn icon= launchName=Notepad source=BuiltIn
+  id=gxos.builtin.calculator displayName=Calculator kind=BuiltIn icon= launchName=Calculator source=BuiltIn
+  id=gxos.builtin.clock displayName=Clock kind=BuiltIn icon= launchName=Clock source=BuiltIn
+  id=gxos.builtin.console displayName=Console kind=BuiltIn icon= launchName=Console source=BuiltIn
+  id=gxos.builtin.fileexplorer displayName=FileExplorer kind=BuiltIn icon= launchName=FileExplorer source=BuiltIn
+  id=gxos.builtin.taskmanager displayName=TaskManager kind=BuiltIn icon= launchName=TaskManager source=BuiltIn
+  id=gxos.builtin.paint displayName=Paint kind=BuiltIn icon= launchName=Paint source=BuiltIn
+  id=gxos.builtin.imageviewer displayName=ImageViewer kind=BuiltIn icon= launchName=ImageViewer source=BuiltIn
+  id=gxos.builtin.onscreenkeyboard displayName=OnScreenKeyboard kind=BuiltIn icon= launchName=OnScreenKeyboard source=BuiltIn
+  id=gxos.builtin.shutdowndialog displayName=ShutdownDialog kind=BuiltIn icon= launchName=ShutdownDialog source=BuiltIn
+  id=gxos.builtin.diskmanager displayName=DiskManager kind=BuiltIn icon= launchName=DiskManager source=BuiltIn
+  id=gxos.builtin.controlpanel displayName=ControlPanel kind=BuiltIn icon= launchName=ControlPanel source=BuiltIn
+  id=gxos.builtin.hdinstaller displayName=HDInstaller kind=BuiltIn icon= launchName=HDInstaller source=BuiltIn availability=unavailable reason=HD Installer is not available in this runtime target
+launchPolicy: BuiltIn uses existing hardcoded launch branch; NativeElf/GXAppPackage return: manifest found but execution is not implemented yet
+
+Bus::publish queueing msg type=10 to channel=console.input
+Sent to console
+[LaunchResolver] App: com.guidexos.helloworld Strategy: NativeElf Architecture: amd64 Entry: bin/amd64/helloworld.elf Result: success Reason: Launch resolved
+[NativeElfLaunch] App: com.guidexos.helloworld Architecture: amd64 Path: /Apps\HelloWorld\bin/amd64/helloworld.elf Validation: valid Result: success Message: Native ELF validated.
+[NativeElfImageLoader] App: com.guidexos.helloworld Architecture: amd64 EntryVA: 0x400078 Segments: 1 ImageSize: 1 PIE: false Interpreter: false Result: success Diagnostics: Native ELF image loaded
+[NativeAppRuntime] App: com.guidexos.helloworld RuntimeId: 1 ProcessId: 0 Architecture: amd64 ABI: guidexos-c-abi-v1 Permissions: 3 State: Prepared Result: success Diagnostics: Native app runtime prepared
+[NativeElfExecutor] App: com.guidexos.helloworld Architecture: amd64 CanExecute: false Reason: Native ELF execution disabled by build flag Result: unavailable
+Bus::publish queueing msg type=0 to channel=console.output
+Console: nativeapp.inspect com.guidexos.helloworld
+
+[Manifest]
+appId: com.guidexos.helloworld
+displayName: Hello World
+kind: NativeElf
+version: 0.1.0
+publisher: guideXOS
+manifestPath: /Apps\HelloWorld\app.json
+appDirectory: /Apps\HelloWorld
+
+[LaunchResolution]
+selectedStrategy: NativeElf
+selectedArchitecture: amd64
+selectedEntryPath: bin/amd64/helloworld.elf
+runtime: native-elf
+abi: guidexos-c-abi-v1
+resolverSuccess: true
+resolverReason: Launch resolved
+
+[ElfValidation]
+elfPath: /Apps\HelloWorld\bin/amd64/helloworld.elf
+fileExists: true
+elfClass: ELF64
+endian: little
+machineType: EM_X86_64
+elfType: ET_EXEC
+validationSuccess: true
+
+[ElfImage]
+entryVirtualAddress: 0x400078
+preferredBase: 0x400078
+imageSize: 1
+segmentCount: 1
+ptInterpPresent: false
+pieOrDynamic: false
+imageLoaderSuccess: true
+imageDiagnostics: Native ELF image loaded
+
+[Runtime]
+runtimeId: 1
+processId: 0
+lifecycleState: Prepared
+permissions: log, window, file.read
+apiVersion: 0
+hostCallsAvailable: true
+runtimeSuccess: true
+runtimeDiagnostics: Native app runtime prepared
+
+[ExecutorGate]
+canExecute: false
+reason: Native ELF execution disabled by build flag
+buildFlagEnabled: false
+hostArchitecture: amd64
+appArchitecture: amd64
+executableMappingPossible: false
+executionAttempted: false
+executionSuccess: false
+runtimeId: 0
+lifecycleStateBeforeExecution: 
+lifecycleStateAfterExecution: 
+returnCode: 0
+exitCode: 0
+cleanupAttempted: false
+cleanedWindowCount: 0
+remainingOwnedWindowCount: 0
+requestWindowCallCount: 0
+lastWindowId: 0
+lastWindowTitle: 
+requestWindowResult: 0
+drawTextCallCount: 0
+lastDrawTextWindow: 0
+lastDrawText: 
+lastDrawTextResult: 0
+drawRectCallCount: 0
+lastDrawRectWindow: 0
+lastDrawRectWidth: 0
+lastDrawRectHeight: 0
+lastDrawRectColor: 0
+lastDrawRectResult: 0
+waitForCloseCallCount: 0
+lastWaitWindow: 0
+lastWaitTimeoutMs: 0
+lastWaitResult: 0
+pollEventCallCount: 0
+lastEventType: 0
+lastEventWindow: 0
+lastPollEventResult: 0
+paintEventCount: 0
+lastPaintWindow: 0
+lastPaintWidth: 0
+lastPaintHeight: 0
+keyEventCount: 0
+lastKeyWindow: 0
+lastKeyCode: 0
+lastKeyAction: 0
+lastKeyModifiers: 0
+mouseEventCount: 0
+lastMouseWindow: 0
+lastMouseX: 0
+lastMouseY: 0
+lastMousePackedButtonAction: 0
+lastMouseModifiers: 0
+executionDiagnostics: execution skipped or unavailable
+
+Result: inspection complete; no ELF code executed
+
+Bus::publish queueing msg type=10 to channel=console.input
+Sent to console
+[LaunchResolver] App: com.guidexos.helloworld Strategy: NativeElf Architecture: amd64 Entry: bin/amd64/helloworld.elf Result: success Reason: Launch resolved
+[NativeElfLaunch] App: com.guidexos.helloworld Architecture: amd64 Path: /Apps\HelloWorld\bin/amd64/helloworld.elf Validation: valid Result: success Message: Native ELF validated.
+[NativeElfImageLoader] App: com.guidexos.helloworld Architecture: amd64 EntryVA: 0x400078 Segments: 1 ImageSize: 1 PIE: false Interpreter: false Result: success Diagnostics: Native ELF image loaded
+[NativeAppRuntime] App: com.guidexos.helloworld RuntimeId: 2 ProcessId: 0 Architecture: amd64 ABI: guidexos-c-abi-v1 Permissions: 3 State: Prepared Result: success Diagnostics: Native app runtime prepared
+[NativeElfExecutor] App: com.guidexos.helloworld Architecture: amd64 CanExecute: false Reason: Native ELF execution disabled by build flag Result: unavailable
+Bus::publish queueing msg type=0 to channel=console.output
+Console: NativeAppPipelineSmokeTest(com.guidexos.helloworld)
+nativeapp.inspect com.guidexos.helloworld
+
+[Manifest]
+appId: com.guidexos.helloworld
+displayName: Hello World
+kind: NativeElf
+version: 0.1.0
+publisher: guideXOS
+manifestPath: /Apps\HelloWorld\app.json
+appDirectory: /Apps\HelloWorld
+
+[LaunchResolution]
+selectedStrategy: NativeElf
+selectedArchitecture: amd64
+selectedEntryPath: bin/amd64/helloworld.elf
+runtime: native-elf
+abi: guidexos-c-abi-v1
+resolverSuccess: true
+resolverReason: Launch resolved
+
+[ElfValidation]
+elfPath: /Apps\HelloWorld\bin/amd64/helloworld.elf
+fileExists: true
+elfClass: ELF64
+endian: little
+machineType: EM_X86_64
+elfType: ET_EXEC
+validationSuccess: true
+
+[ElfImage]
+entryVirtualAddress: 0x400078
+preferredBase: 0x400078
+imageSize: 1
+segmentCount: 1
+ptInterpPresent: false
+pieOrDynamic: false
+imageLoaderSuccess: true
+imageDiagnostics: Native ELF image loaded
+
+[Runtime]
+runtimeId: 2
+processId: 0
+lifecycleState: Prepared
+permissions: log, window, file.read
+apiVersion: 0
+hostCallsAvailable: true
+runtimeSuccess: true
+runtimeDiagnostics: Native app runtime prepared
+
+[ExecutorGate]
+canExecute: false
+reason: Native ELF execution disabled by build flag
+buildFlagEnabled: false
+hostArchitecture: amd64
+appArchitecture: amd64
+executableMappingPossible: false
+executionAttempted: false
+executionSuccess: false
+runtimeId: 0
+lifecycleStateBeforeExecution: 
+lifecycleStateAfterExecution: 
+returnCode: 0
+exitCode: 0
+cleanupAttempted: false
+cleanedWindowCount: 0
+remainingOwnedWindowCount: 0
+requestWindowCallCount: 0
+lastWindowId: 0
+lastWindowTitle: 
+requestWindowResult: 0
+drawTextCallCount: 0
+lastDrawTextWindow: 0
+lastDrawText: 
+lastDrawTextResult: 0
+drawRectCallCount: 0
+lastDrawRectWindow: 0
+lastDrawRectWidth: 0
+lastDrawRectHeight: 0
+lastDrawRectColor: 0
+lastDrawRectResult: 0
+waitForCloseCallCount: 0
+lastWaitWindow: 0
+lastWaitTimeoutMs: 0
+lastWaitResult: 0
+pollEventCallCount: 0
+lastEventType: 0
+lastEventWindow: 0
+lastPollEventResult: 0
+paintEventCount: 0
+lastPaintWindow: 0
+lastPaintWidth: 0
+lastPaintHeight: 0
+keyEventCount: 0
+lastKeyWindow: 0
+lastKeyCode: 0
+lastKeyAction: 0
+lastKeyModifiers: 0
+mouseEventCount: 0
+lastMouseWindow: 0
+lastMouseX: 0
+lastMouseY: 0
+lastMousePackedButtonAction: 0
+lastMouseModifiers: 0
+executionDiagnostics: execution skipped or unavailable
+
+Result: inspection complete; no ELF code executed
+
+Expected: find manifest, validate ELF if present, load image, prepare runtime, stop at executor gate unless experimental execution is enabled.
+
+Bus::publish queueing msg type=10 to channel=console.input
+Sent to console
+Bus::publish queueing msg type=0 to channel=console.output
+Console: Native app processes: 0
+
+[lifecycle] phase -> ServicesReady
+[lifecycle] compositor pid=11
+Compositor pid=11 (proto=2)
+Compositor service started (native window)
+[LaunchResolver] App: gxos.builtin.hdinstaller Strategy: BuiltIn Architecture: any Entry: builtin/HDInstaller Result: success Reason: Launch resolved
+Desktop launch failed: HD Installer is not available in this runtime target
+[LaunchResolver] App: gxos.builtin.controlpanel Strategy: BuiltIn Architecture: any Entry: builtin/ControlPanel Result: success Reason: Launch resolved
+Launched app: ControlPanel
+Desktop launch successful: ControlPanel
+ControlPanel starting...
+Bus::publish queueing msg type=1 to channel=gui.input
+Bus::publish queueing msg type=17 to channel=gui.input
+Requested window list (use gui.pop)
+GdiVideoBackend: initialized 1024x768
+VideoBackend: GDI backend active
+Compositor received MT_Create: Control Panel|640|480 from pid=12
+Compositor created window id=1000 sending ack to pid=12
+publishOut MT_Create payload=1000|Control Panel dstPid=12
+Bus::publish directing msg type=1 to pid=12
+Bus::publish directing msg type=14 to pid=12
+ControlPanel window created: 1000
+Bus::publish queueing msg type=3 to channel=gui.input
+Bus::publish queueing msg type=9 to channel=gui.input
+Bus::publish queueing msg type=3 to channel=gui.input
+Bus::publish queueing msg type=9 to channel=gui.input
+Bus::publish queueing msg type=9 to channel=gui.input
+Bus::publish queueing msg type=9 to channel=gui.input
+Bus::publish queueing msg type=3 to channel=gui.input
+Bus::publish queueing msg type=3 to channel=gui.input
+Bus::publish queueing msg type=9 to channel=gui.input
+Bus::publish queueing msg type=9 to channel=gui.input
+Bus::publish queueing msg type=9 to channel=gui.input
+Bus::publish queueing msg type=3 to channel=gui.input
+Bus::publish queueing msg type=3 to channel=gui.input
+Bus::publish queueing msg type=9 to channel=gui.input
+Bus::publish queueing msg type=9 to channel=gui.input
+Bus::publish queueing msg type=9 to channel=gui.input
+Bus::publish queueing msg type=3 to channel=gui.input
+Bus::publish queueing msg type=3 to channel=gui.input
+Bus::publish queueing msg type=9 to channel=gui.input
+Bus::publish queueing msg type=9 to channel=gui.input
+Bus::publish queueing msg type=9 to channel=gui.input
+Bus::publish queueing msg type=3 to channel=gui.input
+Bus::publish queueing msg type=3 to channel=gui.input
+Bus::publish queueing msg type=9 to channel=gui.input
+Bus::publish queueing msg type=9 to channel=gui.input
+Bus::publish queueing msg type=9 to channel=gui.input
+Bus::publish queueing msg type=3 to channel=gui.input
+Bus::publish queueing msg type=3 to channel=gui.input
+Bus::publish queueing msg type=9 to channel=gui.input
+Bus::publish queueing msg type=9 to channel=gui.input
+Bus::publish queueing msg type=9 to channel=gui.input
+Bus::publish queueing msg type=3 to channel=gui.input
+Bus::publish queueing msg type=3 to channel=gui.input
+Bus::publish queueing msg type=9 to channel=gui.input
+Bus::publish queueing msg type=9 to channel=gui.input
+Bus::publish queueing msg type=9 to channel=gui.input
+Bus::publish queueing msg type=3 to channel=gui.input
+Bus::publish queueing msg type=3 to channel=gui.input
+Bus::publish queueing msg type=9 to channel=gui.input
+Bus::publish queueing msg type=9 to channel=gui.input
+Bus::publish queueing msg type=9 to channel=gui.input
+Bus::publish queueing msg type=3 to channel=gui.input
+Bus::publish queueing msg type=3 to channel=gui.input
+Bus::publish queueing msg type=17 to channel=gui.output
+Bus::publish directing msg type=3 to pid=12
+Bus::publish directing msg type=9 to pid=12
+Bus::publish directing msg type=3 to pid=12
+Bus::publish directing msg type=9 to pid=12
+Bus::publish directing msg type=9 to pid=12
+Bus::publish directing msg type=9 to pid=12
+Bus::publish directing msg type=3 to pid=12
+Bus::publish directing msg type=3 to pid=12
+Bus::publish directing msg type=9 to pid=12
+Bus::publish directing msg type=9 to pid=12
+Bus::publish directing msg type=9 to pid=12
+Bus::publish directing msg type=3 to pid=12
+Bus::publish directing msg type=3 to pid=12
+Bus::publish directing msg type=9 to pid=12
+Bus::publish directing msg type=9 to pid=12
+No GUI events
+1: guideXOSServer server starting...
+1: [lifecycle] phase -> PlatformDiscovery
+1: [lifecycle] phase -> MemoryReady
+1: [lifecycle] phase -> SchedulerReady
+1: [lifecycle] phase -> IpcReady
+1: [lifecycle] phase -> DesktopStateReady
+1: AppRegistry initializing, count=1
+1: AppRegistry manifest scan succeeded: scanned=1, registered=1
+1: Registered app: Hello World
+1: Registered app: Notepad
+1: Registered app: Calculator
+1: Registered app: Clock
+1: Registered app: Console
+1: Registered app: FileExplorer
+1: Registered app: TaskManager
+1: Registered app: Paint
+1: Registered app: ImageViewer
+1: Registered app: OnScreenKeyboard
+1: Registered app: ShutdownDialog
+1: Registered app: DiskManager
+1: Registered app: ControlPanel
+1: Registered app: HDInstaller
+1: AppRegistry initialized, desktop apps=14
+1: Desktop state loaded
+1: NotificationManager initialized
+1: Firewall initialized (Normal mode)
+1: Module registered: Notepad
+1: Module registered: Calculator
+1: Module registered: Paint
+1: Module registered: ImageViewer
+1: Module registered: Clock
+1: Module registered: TaskManager
+1: Module registered: FileExplorer
+1: Module registered: Console
+1: Module registered: OnScreenKeyboard
+1: Module registered: ShutdownDialog
+1: Built-in modules registered (10)
+1: [lifecycle] phase -> ServicesReady
+1: [lifecycle] phase -> Interactive
+1: [lifecycle] phase -> ServicesReady
+1: [lifecycle] console pid=10
+1: ConsoleService started
+1: Bus::publish queueing msg type=10 to channel=console.input
+1: Bus::publish queueing msg type=0 to channel=console.output
+1: Bus::publish queueing msg type=10 to channel=console.input
+1: [LaunchResolver] App: com.guidexos.helloworld Strategy: NativeElf Architecture: amd64 Entry: bin/amd64/helloworld.elf Result: success Reason: Launch resolved
+1: [NativeElfLaunch] App: com.guidexos.helloworld Architecture: amd64 Path: /Apps\HelloWorld\bin/amd64/helloworld.elf Validation: valid Result: success Message: Native ELF validated.
+1: [NativeElfImageLoader] App: com.guidexos.helloworld Architecture: amd64 EntryVA: 0x400078 Segments: 1 ImageSize: 1 PIE: false Interpreter: false Result: success Diagnostics: Native ELF image loaded
+1: [NativeAppRuntime] App: com.guidexos.helloworld RuntimeId: 1 ProcessId: 0 Architecture: amd64 ABI: guidexos-c-abi-v1 Permissions: 3 State: Prepared Result: success Diagnostics: Native app runtime prepared
+2: [NativeElfExecutor] App: com.guidexos.helloworld Architecture: amd64 CanExecute: false Reason: Native ELF execution disabled by build flag Result: unavailable
+1: Bus::publish queueing msg type=0 to channel=console.output
+1: Bus::publish queueing msg type=10 to channel=console.input
+1: [LaunchResolver] App: com.guidexos.helloworld Strategy: NativeElf Architecture: amd64 Entry: bin/amd64/helloworld.elf Result: success Reason: Launch resolved
+1: [NativeElfLaunch] App: com.guidexos.helloworld Architecture: amd64 Path: /Apps\HelloWorld\bin/amd64/helloworld.elf Validation: valid Result: success Message: Native ELF validated.
+1: [NativeElfImageLoader] App: com.guidexos.helloworld Architecture: amd64 EntryVA: 0x400078 Segments: 1 ImageSize: 1 PIE: false Interpreter: false Result: success Diagnostics: Native ELF image loaded
+1: [NativeAppRuntime] App: com.guidexos.helloworld RuntimeId: 2 ProcessId: 0 Architecture: amd64 ABI: guidexos-c-abi-v1 Permissions: 3 State: Prepared Result: success Diagnostics: Native app runtime prepared
+2: [NativeElfExecutor] App: com.guidexos.helloworld Architecture: amd64 CanExecute: false Reason: Native ELF execution disabled by build flag Result: unavailable
+1: Bus::publish queueing msg type=0 to channel=console.output
+1: Bus::publish queueing msg type=10 to channel=console.input
+1: Bus::publish queueing msg type=0 to channel=console.output
+1: [lifecycle] phase -> ServicesReady
+1: [lifecycle] compositor pid=11
+1: Compositor service started (native window)
+1: [LaunchResolver] App: gxos.builtin.hdinstaller Strategy: BuiltIn Architecture: any Entry: builtin/HDInstaller Result: success Reason: Launch resolved
+1: [LaunchResolver] App: gxos.builtin.controlpanel Strategy: BuiltIn Architecture: any Entry: builtin/ControlPanel Result: success Reason: Launch resolved
+1: Launched app: ControlPanel
+1: ControlPanel starting...
+1: Bus::publish queueing msg type=1 to channel=gui.input
+1: Bus::publish queueing msg type=17 to channel=gui.input
+1: GdiVideoBackend: initialized 1024x768Bus::publish directing msg type=9 to pid=12
+1: VideoBackend: GDI backend active
+1: Compositor received MT_Create: Control Panel|640|480 from pid=12
+1: Compositor created window id=1000 sending ack to pid=12
+1: publishOut MT_Create payload=1000|Control Panel dstPid=12
+1: Bus::publish directing msg type=1 to pid=12
+1: Bus::publish directing msg type=14 to pid=12
+1: ControlPanel window created: 1000
+1: Bus::publish queueing msg type=3 to channel=gui.input
+1: Bus::publish queueing msg type=9 to channel=gui.input
+1: Bus::publish queueing msg type=3 to channel=gui.input
+1: Bus::publish queueing msg type=9 to channel=gui.input
+1: Bus::publish queueing msg type=9 to channel=gui.input
+1: Bus::publish queueing msg type=9 to channel=gui.input
+1: Bus::publish queueing msg type=3 to channel=gui.input
+1: Bus::publish queueing msg type=3 to channel=gui.input
+1: Bus::publish queueing msg type=9 to channel=gui.input
+1: Bus::publish queueing msg type=9 to channel=gui.input
+1: Bus::publish queueing msg type=9 to channel=gui.input
+1: Bus::publish queueing msg type=3 to channel=gui.input
+1: Bus::publish queueing msg type=3 to channel=gui.input
+1: Bus::publish queueing msg type=9 to channel=gui.input
+1: Bus::publish queueing msg type=9 to channel=gui.input
+1: Bus::publish queueing msg type=9 to channel=gui.input
+1: Bus::publish queueing msg type=3 to channel=gui.input
+1: Bus::publish queueing msg type=3 to channel=gui.input
+1: Bus::publish queueing msg type=9 to channel=gui.input
+1: Bus::publish queueing msg type=9 to channel=gui.input
+1: Bus::publish queueing msg type=9 to channel=gui.input
+1: Bus::publish queueing msg type=3 to channel=gui.input
+1: Bus::publish queueing msg type=3 to channel=gui.input
+1: Bus::publish queueing msg type=9 to channel=gui.input
+1: Bus::publish queueing msg type=9 to channel=gui.input
+1: Bus::publish queueing msg type=9 to channel=gui.input
+1: Bus::publish queueing msg type=3 to channel=gui.input
+1: Bus::publish queueing msg type=3 to channel=gui.input
+1: Bus::publish queueing msg type=9 to channel=gui.input
+1: Bus::publish queueing msg type=9 to channel=gui.input
+1: Bus::publish queueing msg type=9 to channel=gui.input
+1: Bus::publish queueing msg type=3 to channel=gui.input
+1: Bus::publish queueing msg type=3 to channel=gui.input
+1: Bus::publish queueing msg type=9 to channel=gui.input
+1: Bus::publish queueing msg type=9 to channel=gui.input
+1: Bus::publish queueing msg type=9 to channel=gui.input
+1: Bus::publish queueing msg type=3 to channel=gui.input
+1: Bus::publish queueing msg type=3 to channel=gui.input
+1: Bus::publish queueing msg type=9 to channel=gui.input
+1: Bus::publish queueing msg type=9 to channel=gui.input
+1: Bus::publish queueing msg type=9 to channel=gui.input
+1: Bus::publish queueing msg type=3 to channel=gui.input
+1: Bus::publish queueing msg type=3 to channel=gui.input
+1: Bus::publish queueing msg type=17 to channel=gui.output
+1: Bus::publish directing msg type=3 to pid=12
+1: Bus::publish directing msg type=9 to pid=12
+1: Bus::publish directing msg type=3 to pid=12
+1: Bus::publish directing msg type=9 to pid=12
+1: Bus::publish directing msg type=9 to pid=12
+1: Bus::publish directing msg type=9 to pid=12
+1: Bus::publish directing msg type=3 to pid=12
+1: Bus::publish directing msg type=3 to pid=12
+1: Bus::publish directing msg type=9 to pid=12
+1: Bus::publish directing msg type=9 to pid=12
+1: Bus::publish directing msg type=9 to pid=12
+1: Bus::publish directing msg type=3 to pid=12
+1: Bus::publish directing msg type=3 to pid=12
+1: Bus::publish directing msg type=9 to pid=12
+1: Bus::publish directing msg type=9 to pid=12
+
+[lifecycle] phase -> ShuttingDown
+Bus::publish queueing msg type=5 to channel=gui.input
+Bus::publish directing msg type=3 to pid=12
+Bus::publish directing msg type=3 to pid=12
+Bus::publish directing msg type=9 to pid=12
+Bus::publish directing msg type=9 to pid=12
+Bus::publish directing msg type=9 to pid=12
+Bus::publish directing msg type=3 to pid=12
+Bus::publish directing msg type=3 to pid=12
+Bus::publish directing msg type=9 to pid=12
+Bus::publish directing msg type=9 to pid=12
+Bus::publish directing msg type=9 to pid=12
+Bus::publish directing msg type=3 to pid=12
+Bus::publish directing msg type=3 to pid=12
+Bus::publish directing msg type=9 to pid=12
+Bus::publish directing msg type=9 to pid=12
+Bus::publish directing msg type=9 to pid=12
+Bus::publish directing msg type=3 to pid=12
+Bus::publish directing msg type=3 to pid=12
+Bus::publish directing msg type=9 to pid=12
+Bus::publish directing msg type=9 to pid=12
+Bus::publish directing msg type=9 to pid=12
+Bus::publish directing msg type=3 to pid=12
+Bus::publish directing msg type=3 to pid=12
+Bus::publish directing msg type=9 to pid=12
+Bus::publish directing msg type=9 to pid=12
+Bus::publish directing msg type=9 to pid=12
+Bus::publish directing msg type=3 to pid=12
+Bus::publish directing msg type=3 to pid=12
+Compositor service stopping
+[lifecycle] console stop is SHADOWED (no teardown hook yet)
+[lifecycle] phase -> Stopped
+guideXOSServer server exiting.

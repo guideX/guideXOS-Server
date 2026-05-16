@@ -1,0 +1,15 @@
+console.start
+console.send desktop.apps.verbose
+console.pop 3000
+console.send nativeapp.inspect com.guidexos.helloworld
+console.pop 3000
+console.send nativeapp.smoketest com.guidexos.helloworld
+console.pop 3000
+console.send nativeapp.processes
+console.pop 3000
+desktop.launch HDInstaller
+desktop.launch ControlPanel
+gui.wlist
+gui.pop 1000
+log
+exit

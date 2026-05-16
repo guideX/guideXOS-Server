@@ -1,7 +1,10 @@
 {
   "wallpaper": "assetsImages\tronporche.png",
   "pinned": ["ComputerFiles"],
-  "recent": ["TaskManager","Console","ComputerFiles","Notepad","Calculator"],
+  "recent": ["ControlPanel","HDInstaller","TaskManager","Console","ComputerFiles","Notepad","Calculator"],
   "windows": [
+    {"id": 1000, "title": "Control Panel", "x": 300, "y": 300, "w": 640, "h": 480, "minimized": false, "maximized": false, "z": 0, "focused": true, "snap": 0}
+  ],
+  "iconPositions": [
   ]
 }

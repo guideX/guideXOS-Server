@@ -1,0 +1,203 @@
+guideXOSServer server starting...
+[lifecycle] phase -> PlatformDiscovery
+[lifecycle] phase -> MemoryReady
+[lifecycle] phase -> SchedulerReady
+[lifecycle] phase -> IpcReady
+[lifecycle] phase -> DesktopStateReady
+AppRegistry initializing, count=1
+AppRegistry manifest scan succeeded: scanned=1, registered=1
+Registered app: Hello World
+Registered app: Notepad
+Registered app: Calculator
+Registered app: Clock
+Registered app: Console
+Registered app: FileExplorer
+Registered app: TaskManager
+Registered app: Paint
+Registered app: ImageViewer
+Registered app: OnScreenKeyboard
+Registered app: ShutdownDialog
+Registered app: DiskManager
+Registered app: ControlPanel
+Registered app: HDInstaller
+AppRegistry initialized, desktop apps=14
+Desktop state loaded
+NotificationManager initialized
+Firewall initialized (Normal mode)
+Module registered: Notepad
+Module registered: Calculator
+Module registered: Paint
+Module registered: ImageViewer
+Module registered: Clock
+Module registered: TaskManager
+Module registered: FileExplorer
+Module registered: Console
+Module registered: OnScreenKeyboard
+Module registered: ShutdownDialog
+Built-in modules registered (10)
+[lifecycle] phase -> ServicesReady
+[lifecycle] phase -> Interactive
+Commands:
+ mem | alloc <n> | tasks | log
+ spawn <echo|worker> [args...] | plist
+ send <pid> <text> | recv <pid>
+ bus.sub <chan> <pid> | bus.unsub <chan> <pid>
+ bus.pub <chan> <text> [fanout] | bus.pop <chan> [timeoutMs]
+ bus.cap <chan> <cap> | bus.stats <chan>
+ console.start | console.send <text> | console.pop [timeoutMs]
+ gui.start | gui.win <title> [w h] | gui.text <id> <text> | gui.close <id>
+ gui.rect <id> <x> <y> <w> <h> <r> <g> <b> | gui.move <id> <x> <y> | gui.resize <id> <w> <h> | gui.title <id> <title>
+ gui.btn <win> <id> <x> <y> <w> <h> <text> | gui.pop | gui.wlist | gui.activate <id> | gui.min <id>
+ gxm.load <path> | gxm.sample | gui.save <path> | gui.load <path>
+ desktop.wallpaper <path> | desktop.launch <action> | desktop.pin <action> | desktop.unpin <action> | desktop.showconfig
+ desktop.apps | desktop.pinned | desktop.recent | desktop.pinapp <name> | desktop.pinfile <name> <path>
+ taskbar.list | taskbar.activate <id> | taskbar.min <id> | taskbar.close <id>
+ workspace.switch <n> | workspace.next | workspace.prev | workspace.current
+ notepad | notepad <file>
+ calculator
+ console | console.start | console.send <text> | console.pop [timeoutMs]
+ files | files <path>
+ clock
+ taskmgr
+ paint
+ imgview [file] | osk
+ shutdown | msgbox <text> | welcome
+ notify <text> | notify.clear
+ fw.mode <normal|block|disabled|auto> | fw.allow <name> | fw.list | fw.alerts
+ modules | module.launch <name>
+ pkg.install <path.gxapp> | pkg.launch <app> | pkg.list | pkg.validate <path.gxapp>
+ proc.wait <pid> [timeoutMs] | proc.status <pid>
+ vfs.mkdir <path> | vfs.write <path> <text> | vfs.read <path> | vfs.ls <path>
+ vnc.start [port] | vnc.stop | vnc.status
+ pbytes | help | quit/exit
+[lifecycle] phase -> ServicesReady
+[lifecycle] compositor pid=10
+Compositor pid=Compositor service started (native window)
+10 (proto=2)
+[LaunchResolver] App: gxos.builtin.hdinstaller Strategy: BuiltIn Architecture: any Entry: builtin/HDInstaller Result: success Reason: Launch resolved
+Desktop launch failed: HD Installer is not available in this runtime target
+[LaunchResolver] App: gxos.builtin.controlpanel Strategy: BuiltIn Architecture: any Entry: builtin/ControlPanel Result: success Reason: Launch resolved
+Launched app: ControlPanel
+Desktop launch successful: ControlPanel
+ControlPanel starting...
+Bus::publish queueing msg type=17 to channel=gui.input
+Requested window list (use gui.pop)
+Bus::publish queueing msg type=1 to channel=gui.input
+GdiVideoBackend: initialized 1024x768
+VideoBackend: GDI backend active
+Bus::publish queueing msg type=17 to channel=gui.output
+Compositor received MT_Create: Control Panel|640|480 from pid=11
+Compositor created window id=1000 sending ack to pid=11
+publishOut MT_Create payload=1000|Control Panel dstPid=11
+Bus::publish directing msg type=1 to pid=11
+Bus::publish directing msg type=14 to pid=11
+GUI: type=17 payload=
+ControlPanel window created: 1000
+1: guideXOSServer server starting...
+1: [lifecycle] phase -> PlatformDiscovery
+1: [lifecycle] phase -> MemoryReady
+1: [lifecycle] phase -> SchedulerReady
+1: [lifecycle] phase -> IpcReady
+1: [lifecycle] phase -> DesktopStateReady
+1: AppRegistry initializing, count=1
+1: AppRegistry manifest scan succeeded: scanned=1, registered=1
+1: Registered app: Hello World
+1: Registered app: Notepad
+1: Registered app: Calculator
+1: Registered app: Clock
+1: Registered app: Console
+1: Registered app: FileExplorer
+1: Registered app: TaskManager
+1: Registered app: Paint
+1: Registered app: ImageViewer
+1: Registered app: OnScreenKeyboard
+1: Registered app: ShutdownDialog
+1: Registered app: DiskManager
+1: Registered app: ControlPanel
+1: Registered app: HDInstaller
+1: AppRegistry initialized, desktop apps=14
+1: Desktop state loaded
+1: NotificationManager initialized
+1: Firewall initialized (Normal mode)
+1: Module registered: Notepad
+1: Module registered: Calculator
+1: Module registered: Paint
+1: Module registered: ImageViewer
+1: Module registered: Clock
+1: Module registered: TaskManager
+1: Module registered: FileExplorer
+1: Module registered: Console
+1: Module registered: OnScreenKeyboard
+1: Module registered: ShutdownDialog
+1: Built-in modules registered (10)
+1: [lifecycle] phase -> ServicesReady
+1: [lifecycle] phase -> Interactive
+1: [lifecycle] phase -> ServicesReady
+1: [lifecycle] compositor pid=10
+1: Compositor service started (native window)
+1: [LaunchResolver] App: gxos.builtin.hdinstaller Strategy: BuiltIn Architecture: any Entry: builtin/HDInstaller Result: success Reason: Launch resolved
+1: [LaunchResolver] App: gxos.builtin.controlpanel Strategy: BuiltIn Architecture: any Entry: builtin/ControlPanel Result: success Reason: Launch resolved
+1: Launched app: ControlPanel
+1: ControlPanel starting...
+1: Bus::publish queueing msg type=17 to channel=gui.input
+1: Bus::publish queueing msg type=1 to channel=gui.input
+1: GdiVideoBackend: initialized 1024x768
+1: VideoBackend: GDI backend active
+1: Bus::publish queueing msg type=17 to channel=gui.output
+1: Compositor received MT_Create: Control Panel|640|480 from pid=11
+1: Compositor created window id=1000 sending ack to pid=11
+1: publishOut MT_Create payload=1000|Control Panel dstPid=11
+1: Bus::publish directing msg type=1 to pid=11
+1: Bus::publish directing msg type=14 to pid=11
+1: ControlPanel window created: 1000
+Bus::publish queueing msg type=3 to channel=gui.input
+Bus::publish queueing msg type=9 to channel=gui.input
+[lifecycle] phase -> ShuttingDown
+Bus::publish queueing msg type=3 to channel=gui.input
+Bus::publish queueing msg type=5 to channel=gui.input
+Bus::publish queueing msg type=9 to channel=gui.input
+Bus::publish queueing msg type=9 to channel=gui.input
+Bus::publish queueing msg type=9 to channel=gui.input
+Bus::publish queueing msg type=3 to channel=gui.input
+Bus::publish queueing msg type=3 to channel=gui.input
+Bus::publish queueing msg type=9 to channel=gui.input
+Bus::publish queueing msg type=9 to channel=gui.input
+Bus::publish queueing msg type=9 to channel=gui.input
+Bus::publish queueing msg type=3 to channel=gui.input
+Bus::publish queueing msg type=3 to channel=gui.input
+Bus::publish queueing msg type=9 to channel=gui.input
+Bus::publish queueing msg type=9 to channel=gui.input
+Bus::publish queueing msg type=9 to channel=gui.input
+Bus::publish queueing msg type=3 to channel=gui.input
+Bus::publish queueing msg type=3 to channel=gui.input
+Bus::publish queueing msg type=9 to channel=gui.input
+Bus::publish queueing msg type=9 to channel=gui.input
+Bus::publish queueing msg type=9 to channel=gui.input
+Bus::publish queueing msg type=3 to channel=gui.input
+Bus::publish queueing msg type=3 to channel=gui.input
+Bus::publish queueing msg type=9 to channel=gui.input
+Bus::publish queueing msg type=9 to channel=gui.input
+Bus::publish queueing msg type=9 to channel=gui.input
+Bus::publish queueing msg type=3 to channel=gui.input
+Bus::publish queueing msg type=3 to channel=gui.input
+Bus::publish queueing msg type=9 to channel=gui.input
+Bus::publish queueing msg type=9 to channel=gui.input
+Bus::publish queueing msg type=9 to channel=gui.input
+Bus::publish queueing msg type=3 to channel=gui.input
+Bus::publish queueing msg type=3 to channel=gui.input
+Bus::publish queueing msg type=9 to channel=gui.input
+Bus::publish queueing msg type=9 to channel=gui.input
+Bus::publish queueing msg type=9 to channel=gui.input
+Bus::publish queueing msg type=3 to channel=gui.input
+Bus::publish queueing msg type=3 to channel=gui.input
+Bus::publish queueing msg type=9 to channel=gui.input
+Bus::publish queueing msg type=9 to channel=gui.input
+Bus::publish queueing msg type=9 to channel=gui.input
+Bus::publish queueing msg type=3 to channel=gui.input
+Bus::publish queueing msg type=3 to channel=gui.input
+Bus::publish directing msg type=3 to pid=11
+Bus::publish directing msg type=9 to pid=11
+Bus::publish directing msg type=3 to pid=11
+Compositor service stopping
+[lifecycle] phase -> Stopped
+guideXOSServer server exiting.

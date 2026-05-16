@@ -300,7 +300,11 @@ namespace gxos {
                     << " kind=" << apps::ToString(app.kind)
                     << " icon=" << app.icon
                     << " launchName=" << app.launchName
-                    << " source=" << app.source << "\n";
+                    << " source=" << app.source;
+                if (app.displayName == "HDInstaller" || app.launchName == "HDInstaller") {
+                    oss << " availability=unavailable reason=HD Installer is not available in this runtime target";
+                }
+                oss << "\n";
             }
             oss << "launchPolicy: BuiltIn uses existing hardcoded launch branch; NativeElf/GXAppPackage return: manifest found but execution is not implemented yet\n";
             return oss.str();
