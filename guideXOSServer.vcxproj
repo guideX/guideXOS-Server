@@ -129,6 +129,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="allocator.h" />
+    <ClInclude Include="app_launch_resolver.h" />
     <ClInclude Include="app_manifest.h" />
     <ClInclude Include="app_manifest_loader.h" />
     <ClInclude Include="app_manifest_validator.h" />
@@ -335,6 +336,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="allocator.cpp" />
+    <ClCompile Include="app_launch_resolver.cpp" />
     <ClCompile Include="app_manifest.cpp" />
     <ClCompile Include="app_manifest_loader.cpp" />
     <ClCompile Include="app_manifest_validator.cpp" />

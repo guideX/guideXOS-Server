@@ -78,6 +78,9 @@
     <ClInclude Include="app_manifest_validator.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="app_launch_resolver.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="kernel\core\include\kernel\arch.h">
       <Filter>Header Files\Kernel</Filter>
     </ClInclude>
@@ -285,6 +288,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="app_manifest_validator.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="app_launch_resolver.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="kernel\core\main.cpp">

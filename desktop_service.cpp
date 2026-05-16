@@ -1,4 +1,5 @@
 #include "desktop_service.h"
+#include "app_launch_resolver.h"
 #include "app_registry.h"
 #include "desktop_config.h"
 #include "logger.h"
@@ -60,6 +61,12 @@ namespace gxos {
                 if (app.displayName == name || app.launchName == name || app.id == name) return &app;
             }
             return nullptr;
+        }
+
+        static const apps::RegisteredApp* findRegistryApp(const RegisteredDesktopApp& app) {
+            const apps::RegisteredApp* registryApp = s_appRegistry.FindById(app.id);
+            if (registryApp) return registryApp;
+            return s_appRegistry.FindByDisplayName(app.displayName);
         }
 
         static void refreshRegisteredAppsFromRegistry() {
@@ -309,17 +316,36 @@ namespace gxos {
                 return false;
             }
 
-            if (manifestApp->kind == apps::AppKind::NativeElf || manifestApp->kind == apps::AppKind::GXAppPackage) {
-                Logger::write(LogLevel::Warn, std::string("Launch attempted for unsupported app kind: ") + apps::ToString(manifestApp->kind) + " id=" + manifestApp->id);
-                error = std::string("Manifest found for ") + manifestApp->displayName + " but execution is not implemented yet for " + apps::ToString(manifestApp->kind);
+            const apps::RegisteredApp* registryApp = findRegistryApp(*manifestApp);
+            if (!registryApp) {
+                error = "Application manifest not found: " + name;
                 return false;
             }
 
-            if (manifestApp->kind != apps::AppKind::BuiltIn) {
-                Logger::write(LogLevel::Warn, std::string("Launch attempted for unsupported app kind: ") + apps::ToString(manifestApp->kind) + " id=" + manifestApp->id);
-                error = std::string("Manifest found for ") + manifestApp->displayName + " but execution is not implemented yet for " + apps::ToString(manifestApp->kind);
+            apps::AppLaunchResolver launchResolver(s_appRegistry, apps::AppLaunchResolver::CurrentArchitecture());
+            apps::LaunchDecision launchDecision = launchResolver.ResolveLaunch(*registryApp);
+            if (!launchDecision.success) {
+                error = launchDecision.reason;
                 return false;
             }
+
+            if (launchDecision.strategy == apps::AppLaunchStrategy::NativeElf) {
+                error = "Native ELF launch pipeline not implemented";
+                return false;
+            }
+
+            if (launchDecision.strategy == apps::AppLaunchStrategy::GXAppPackage) {
+                error = "GXApp launch pipeline not implemented";
+                return false;
+            }
+
+            if (launchDecision.strategy != apps::AppLaunchStrategy::BuiltIn) {
+                Logger::write(LogLevel::Warn, std::string("Launch attempted for unsupported launch strategy: ") + apps::AppLaunchResolver::ToString(launchDecision.strategy) + " id=" + launchDecision.appId);
+                error = std::string("Manifest found for ") + manifestApp->displayName + " but execution is not implemented yet for " + apps::AppLaunchResolver::ToString(launchDecision.strategy);
+                return false;
+            }
+
+            if (!launchDecision.launchName.empty()) appName = canonicalAppName(launchDecision.launchName);
 
             // Ensure compositor is running before launching any GUI app
             // Track if we just started it so we can wait for it to initialize

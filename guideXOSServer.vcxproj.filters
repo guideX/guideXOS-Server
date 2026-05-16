@@ -627,6 +627,9 @@
     <ClInclude Include="app_registry.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="app_launch_resolver.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="allocator.cpp">
@@ -1197,6 +1200,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="app_registry.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="app_launch_resolver.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

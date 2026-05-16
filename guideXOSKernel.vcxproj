@@ -157,6 +157,7 @@
     <NMakeIncludeSearchPath>kernel\core\include;kernel\arch\x86\include</NMakeIncludeSearchPath>
   </PropertyGroup>
   <ItemGroup>
+    <ClInclude Include="app_launch_resolver.h" />
     <ClInclude Include="app_registry.h" />
     <ClInclude Include="app_manifest.h" />
     <ClInclude Include="app_manifest_loader.h" />
@@ -229,6 +230,7 @@
     <ClInclude Include="welcome.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="app_launch_resolver.cpp" />
     <ClCompile Include="app_registry.cpp" />
     <ClCompile Include="app_manifest.cpp" />
     <ClCompile Include="app_manifest_loader.cpp" />
