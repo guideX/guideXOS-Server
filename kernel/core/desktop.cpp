@@ -341,7 +341,7 @@ static const uint32_t kTrayIconGap = 6;
 static const uint32_t kTaskbarBtnMaxW = 150;
 static const uint32_t kTaskbarBtnH = 28;
 static const uint32_t kTaskbarBtnGap = 4;
-static bool s_enableStartMenuIcons = false; // Ensure default is false for verification
+static bool s_enableStartMenuIcons = true;
 static uint32_t s_startMenuIconSize = 16;
 static const char* s_startMenuIconTheme = "Flat";
 
@@ -1712,25 +1712,67 @@ static bool draw_argb_icon_buffer(const uint32_t* pixels, uint32_t srcW, uint32_
 
 static const uint32_t* get_embedded_desktop_icon_pixels(const char* logicalName)
 {
-    if (text_equals(logicalName, "app.notepad")) return kDesktopThemeIcon_Notepad;
-    if (text_equals(logicalName, "app.calculator")) return kDesktopThemeIcon_Calculator;
-    if (text_equals(logicalName, "app.console")) return kDesktopThemeIcon_Console;
-    if (text_equals(logicalName, "app.taskmanager")) return kDesktopThemeIcon_TaskManager;
-    if (text_equals(logicalName, "app.files")) return kDesktopThemeIcon_Files;
-    if (text_equals(logicalName, "app.paint")) return kDesktopThemeIcon_Paint;
-    if (text_equals(logicalName, "app.clock")) return kDesktopThemeIcon_Clock;
+    if (text_equals(logicalName, "app.notepad"))       return kDesktopThemeIcon_Notepad;
+    if (text_equals(logicalName, "app.calculator"))    return kDesktopThemeIcon_Calculator;
+    if (text_equals(logicalName, "app.console"))       return kDesktopThemeIcon_Console;
+    if (text_equals(logicalName, "app.taskmanager"))   return kDesktopThemeIcon_TaskManager;
+    if (text_equals(logicalName, "app.files"))         return kDesktopThemeIcon_Files;
+    if (text_equals(logicalName, "app.paint"))         return kDesktopThemeIcon_Paint;
+    if (text_equals(logicalName, "app.clock"))         return kDesktopThemeIcon_Clock;
+    // Unmapped app icons: use closest available embedded icon as fallback
+    if (text_equals(logicalName, "app.diskmanager"))   return kDesktopThemeIcon_Files;
+    if (text_equals(logicalName, "app.installer"))     return kDesktopThemeIcon_Files;
+    if (text_equals(logicalName, "app.controlpanel"))  return kDesktopThemeIcon_TaskManager;
+    if (text_equals(logicalName, "app.settings"))      return kDesktopThemeIcon_TaskManager;
+    // place.* icons (Start Menu right column)
+    if (text_equals(logicalName, "place.computer"))    return kDesktopThemeIcon_Files;
+    if (text_equals(logicalName, "place.documents"))   return kDesktopThemeIcon_Notepad;
+    if (text_equals(logicalName, "place.pictures"))    return kDesktopThemeIcon_Paint;
+    if (text_equals(logicalName, "place.music"))       return kDesktopThemeIcon_Clock;
+    if (text_equals(logicalName, "place.network"))     return kDesktopThemeIcon_Console;
     return kDesktopThemeIcon_FileGeneric;
 }
 
+#if !defined(GXOS_BARE_METAL)
+// Forward declaration - defined below inside the non-bare-metal block
+static void draw_scaled_rgba_icon(const gxos::gui::ImagePtr& image, uint32_t x, uint32_t y, uint32_t width, uint32_t height);
+#endif
+
 static bool draw_themed_start_menu_icon(uint32_t x, uint32_t y, const char* label)
 {
-    if (!s_enableStartMenuIcons || !s_startMenuIconTheme || !text_equals(s_startMenuIconTheme, "Flat")) return false;
-    const char* logicalName = GetStartMenuLogicalIconName(label);
-    const uint32_t* pixels = get_embedded_desktop_icon_pixels(logicalName);
-    if (!pixels) return false;
+    if (!s_enableStartMenuIcons) return false;
+    if (!label || label[0] == '\0') return false;
 
+    const char* logicalName = GetStartMenuLogicalIconName(label);
     uint32_t drawSize = s_startMenuIconSize > 0 ? s_startMenuIconSize : 16;
+
+#if defined(GXOS_BARE_METAL)
+    // Bare-metal: use embedded ARGB pixel arrays
+    if (!s_startMenuIconTheme || !text_equals(s_startMenuIconTheme, "Flat")) return false;
+    const uint32_t* pixels = get_embedded_desktop_icon_pixels(logicalName);
+    if (!pixels) {
+        serial::puts("[startmenu] embedded icon not found: ");
+        serial::puts(logicalName);
+        serial::puts("\n");
+        return false;
+    }
     return draw_argb_icon_buffer(pixels, kDesktopThemeIconW, kDesktopThemeIconH, x, y, drawSize, drawSize);
+#else
+    // Server / Windows host: use IconThemeManager (same path as desktop icons)
+    gxos::gui::IconThemeManager& manager = gxos::gui::IconThemeManager::Instance();
+    manager.SetCurrentThemeName(s_startMenuIconTheme ? s_startMenuIconTheme : "Flat");
+    if (!manager.IconsEnabled()) return false;
+
+    gxos::gui::ImagePtr image = manager.LoadIcon(logicalName, (int)drawSize);
+    if (!image) {
+        serial::puts("[startmenu] themed icon unavailable: ");
+        serial::puts(logicalName);
+        serial::puts("\n");
+        return false;
+    }
+    draw_scaled_rgba_icon(image, x, y, drawSize, drawSize);
+    return true;
+#endif
 }
 
 #if defined(GXOS_BARE_METAL)
@@ -2387,7 +2429,10 @@ static void draw_start_menu()
     // Left column: app list, Right column: system shortcuts
     uint32_t headerH = 30;
     uint32_t footerH = 36;
-    uint32_t bodyH = (uint32_t)visibleRows * kStartMenuRowH;
+    // Use kStartMenuAppCount (not visibleRows) so menuH/menuY stays consistent
+    // with get_start_menu_geometry() used by hit-testing — otherwise the menu
+    // renders at a different Y than the hover/click hit-test expects.
+    uint32_t bodyH = (uint32_t)kStartMenuAppCount * kStartMenuRowH;
     uint32_t rightBodyH = (uint32_t)kStartMenuRightCount * kStartMenuRowH;
     uint32_t maxBodyH = bodyH > rightBodyH ? bodyH : rightBodyH;
     uint32_t menuH = headerH + maxBodyH + footerH;

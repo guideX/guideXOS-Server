@@ -1,4 +1,4 @@
-#
+﻿#
 # guideXOS Complete Build Script
 #
 # Builds: Bootloader + Kernel + Sets up ESP
@@ -409,26 +409,65 @@ Write-Host "====================================" -ForegroundColor Green
 Write-Host ""
 
 if ($AllReady) {
-    Write-Host "? All prerequisites met!" -ForegroundColor Green
+    Write-Host "✓ All prerequisites met!" -ForegroundColor Green
     Write-Host ""
     if ($RunQemu) {
-        Write-Host "Launching QEMU..." -ForegroundColor Cyan
-        Write-Host ""
-        
-        $QemuArgs = @(
-            "-drive", "if=pflash,format=raw,readonly=on,file=$OVMF",
-            "-drive", "file=fat:rw:ESP,format=raw",
-            "-m", "1024M",
-            "-serial", "stdio",
-            "-no-reboot"
-        )
-        
-        & $Qemu.Source $QemuArgs
+        if ($FsTest) {
+            # Delegate entirely to the canonical filesystem test script so QEMU
+            # arguments, disk image paths, IDE drive ordering, machine type,
+            # display and network settings all stay in one place.
+            Write-Host "Delegating to scripts\run-qemu-fs-test.ps1 (canonical FS test path)..." -ForegroundColor Cyan
+            Write-Host ""
+            $FsTestScript = Join-Path $RootDir "scripts\run-qemu-fs-test.ps1"
+            if (!(Test-Path $FsTestScript)) {
+                Write-Host "ERROR: scripts\run-qemu-fs-test.ps1 not found at: $FsTestScript" -ForegroundColor Red
+                Write-Host "Cannot run filesystem test." -ForegroundColor Red
+                exit 1
+            }
+            # Forward compatible switches
+            $fsArgs = @{}
+            if ($Fat32Only) { $fsArgs["Fat32Only"] = $true }
+            if ($Ext4Only)  { $fsArgs["Ext4Only"]  = $true }
+            if ($Debug)     { $fsArgs["Debug"]      = $true }
+            if ($WaitGdb)   { $fsArgs["WaitGdb"]    = $true }
+            $fsArgs["Memory"] = $Memory
+            & $FsTestScript @fsArgs
+        } else {
+            Write-Host "Launching QEMU..." -ForegroundColor Cyan
+            Write-Host ""
+
+            $QemuArgs = @(
+                "-machine", "pc",
+                "-drive", "if=pflash,format=raw,readonly=on,file=$OVMF",
+                "-drive", "file=fat:rw:$ESPDir,format=raw,if=ide,index=0",
+                "-m", $Memory,
+                "-vga", "std",
+                "-serial", "stdio",
+                "-no-reboot",
+                "-netdev", "user,id=net0",
+                "-device", "e1000,netdev=net0"
+            )
+            if ($Debug) {
+                $QemuArgs += "-d", "int,cpu_reset"
+                $QemuArgs += "-D", "qemu-debug.log"
+            }
+            if ($WaitGdb) {
+                $QemuArgs += "-s", "-S"
+                Write-Host "Waiting for GDB connection on localhost:1234..." -ForegroundColor Yellow
+            }
+
+            Push-Location $RootDir
+            try { & $Qemu.Source $QemuArgs } finally { Pop-Location }
+        }
     } else {
         Write-Host "To run in QEMU:" -ForegroundColor Cyan
-        Write-Host "  .\build-uefi.ps1 -RunQemu" -ForegroundColor White
-        Write-Host "  OR" -ForegroundColor Gray
-        Write-Host "  .\run-qemu.bat" -ForegroundColor White
+        Write-Host "  .\build.ps1 -RunQemu" -ForegroundColor White
+        Write-Host ""
+        Write-Host "To run filesystem tests (canonical path):" -ForegroundColor Cyan
+        Write-Host "  .\scripts\run-qemu-fs-test.ps1" -ForegroundColor White
+        Write-Host ""
+        Write-Host "  NOTE: '.\build.ps1 -RunQemu -FsTest' delegates to the above script." -ForegroundColor Gray
+        Write-Host "  Use scripts\run-qemu-fs-test.ps1 directly for full control." -ForegroundColor Gray
     }
 } else {
     Write-Host "? Some prerequisites missing" -ForegroundColor Yellow
