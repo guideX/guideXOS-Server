@@ -17,6 +17,7 @@
 #include "focus_indicator.h"
 #include "png_loader.h"
 #include "image_renderer.h"
+#include "icon_theme_manager.h"
 #include <sstream>
 #include <algorithm>
 #include <chrono>
@@ -126,6 +127,81 @@ namespace gxos {
                 Logger::write(LogLevel::Info, std::string("publishOut MT_Create payload=") + payload + " dstPid=" + std::to_string(dstPid));
             }
             ipc::Message out; out.type = (uint32_t)type; out.dstPid = dstPid; out.data.assign(payload.begin( ), payload.end( )); ipc::Bus::publish(kGuiChanOut, std::move(out), false); 
+        }
+
+        static const bool kEnableStartMenuIcons = true;
+        static const int kStartMenuIconSize = 16;
+
+        static std::string startMenuLogicalIconName(const std::string& label) {
+            if (label == "Calculator") return "app.calculator";
+            if (label == "Notepad") return "app.notepad";
+            if (label == "Console") return "app.console";
+            if (label == "TaskManager" || label == "Task Manager") return "app.taskmanager";
+            if (label == "DiskManager") return "app.diskmanager";
+            if (label == "HDInstaller") return "app.installer";
+            if (label == "Files" || label == "FileExplorer") return "app.files";
+            if (label == "Computer" || label == "Computer Files" || label == "ComputerFiles") return "place.computer";
+            if (label == "Paint") return "app.paint";
+            if (label == "Clock") return "app.clock";
+            if (label == "Documents" || label == "Recent Docs") return "place.documents";
+            if (label == "Pictures") return "place.pictures";
+            if (label == "Music") return "place.music";
+            if (label == "Network") return "place.network";
+            if (label == "Control Panel" || label == "ControlPanel") return "app.controlpanel";
+            if (label == "Settings") return "app.settings";
+            return "app.generic";
+        }
+
+        static COLORREF startMenuFallbackIconColor(const std::string& label) {
+            if (label == "Calculator" || label == "Clock") return RGB(70, 140, 200);
+            if (label == "Notepad" || label == "Console") return RGB(120, 180, 80);
+            if (label == "Paint") return RGB(200, 120, 60);
+            if (label == "TaskManager" || label == "Task Manager") return RGB(180, 70, 70);
+            if (label == "DiskManager" || label == "ControlPanel" || label == "Control Panel" || label == "Settings") return RGB(140, 90, 180);
+            if (label == "Files" || label == "FileExplorer" || label == "Computer" || label == "Computer Files" || label == "ComputerFiles" || label == "Documents" || label == "Recent Docs") return RGB(200, 180, 60);
+            if (label == "Network") return RGB(80, 150, 180);
+            return RGB(90, 100, 120);
+        }
+
+        static uint32_t startMenuFallbackIconColor32(const std::string& label) {
+            COLORREF color = startMenuFallbackIconColor(label);
+            return (static_cast<uint32_t>(GetRValue(color)) << 16) |
+                (static_cast<uint32_t>(GetGValue(color)) << 8) |
+                static_cast<uint32_t>(GetBValue(color));
+        }
+
+        static void drawStartMenuFallbackIcon(HDC dc, const RECT& iconRect, const std::string& label) {
+            HBRUSH iconBrush = CreateSolidBrush(startMenuFallbackIconColor(label));
+            FillRect(dc, &iconRect, iconBrush);
+            DeleteObject(iconBrush);
+            FrameRect(dc, &iconRect, (HBRUSH)GetStockObject(WHITE_BRUSH));
+        }
+
+        static bool drawStartMenuIcon(HDC dc, const RECT& rowRect, const std::string& label, int& textX) {
+            RECT iconRect{ rowRect.left + 4, rowRect.top + ((rowRect.bottom - rowRect.top) - kStartMenuIconSize) / 2,
+                rowRect.left + 4 + kStartMenuIconSize, rowRect.top + ((rowRect.bottom - rowRect.top) - kStartMenuIconSize) / 2 + kStartMenuIconSize };
+            textX = iconRect.right + 6;
+
+            if (!kEnableStartMenuIcons) {
+                drawStartMenuFallbackIcon(dc, iconRect, label);
+                return false;
+            }
+
+            ImagePtr icon;
+            try {
+                icon = IconThemeManager::Instance().LoadIcon(startMenuLogicalIconName(label), kStartMenuIconSize);
+            }
+            catch (...) {
+                icon.reset();
+            }
+
+            if (!icon || !icon->isValid()) {
+                drawStartMenuFallbackIcon(dc, iconRect, label);
+                return false;
+            }
+
+            ImageRenderer::DrawImage(dc, icon, iconRect.left, iconRect.top, kStartMenuIconSize, kStartMenuIconSize);
+            return true;
         }
 
         static std::string packMousePayload(int x, int y, int button, const std::string& action, uint64_t ownerPid, uint64_t windowId = 0) {
@@ -640,7 +716,9 @@ namespace gxos {
                             }
                             
                             std::string txt = g_startMenuAllProgsSorted[i];
-                            TextOutA(dc, r.left + 4, r.top + 4, txt.c_str( ), (int)txt.size( ));
+                            int textX = r.left + 4;
+                            drawStartMenuIcon(dc, r, txt, textX);
+                            TextOutA(dc, textX, r.top + 4, txt.c_str( ), (int)txt.size( ));
                             y += rowH; row++;
                         }
                     } else {
@@ -658,8 +736,11 @@ namespace gxos {
                                 FocusIndicator::DrawFocusRect(dc, r.left, r.top, r.right - r.left, r.bottom - r.top, 3, 2, 2);
                             }
                             
-                            std::string txt = (g_items[i].pinned ? "* " : "  ") + g_items[i].label;
-                            TextOutA(dc, r.left + 4, r.top + 4, txt.c_str( ), (int)txt.size( ));
+                            std::string txt = g_items[i].label;
+                            int textX = r.left + 4;
+                            drawStartMenuIcon(dc, r, txt, textX);
+                            std::string displayText = (g_items[i].pinned ? "* " : "  ") + txt;
+                            TextOutA(dc, textX, r.top + 4, displayText.c_str( ), (int)displayText.size( ));
                             y += rowH; row++;
                         }
                     }
@@ -673,21 +754,27 @@ namespace gxos {
                     RECT rcComputer{ rcX, rcY, sm.right - 6, rcY + rowH };
                     bool overComp = (cursor.x >= rcComputer.left && cursor.x <= rcComputer.right && cursor.y >= rcComputer.top && cursor.y <= rcComputer.bottom);
                     if (overComp) { HBRUSH hb = CreateSolidBrush(RGB(70, 90, 130)); FillRect(dc, &rcComputer, hb); DeleteObject(hb); }
-                    TextOutA(dc, rcComputer.left + 6, rcComputer.top + 4, "Computer Files", 14);
+                    int computerTextX = rcComputer.left + 6;
+                    drawStartMenuIcon(dc, rcComputer, "Computer Files", computerTextX);
+                    TextOutA(dc, computerTextX, rcComputer.top + 4, "Computer Files", 14);
                     rcY += rowH + 4;
 
                     // Console shortcut
                     RECT rcConsole{ rcX, rcY, sm.right - 6, rcY + rowH };
                     bool overCon = (cursor.x >= rcConsole.left && cursor.x <= rcConsole.right && cursor.y >= rcConsole.top && cursor.y <= rcConsole.bottom);
                     if (overCon) { HBRUSH hb = CreateSolidBrush(RGB(70, 90, 130)); FillRect(dc, &rcConsole, hb); DeleteObject(hb); }
-                    TextOutA(dc, rcConsole.left + 6, rcConsole.top + 4, "Console", 7);
+                    int consoleTextX = rcConsole.left + 6;
+                    drawStartMenuIcon(dc, rcConsole, "Console", consoleTextX);
+                    TextOutA(dc, consoleTextX, rcConsole.top + 4, "Console", 7);
                     rcY += rowH + 4;
 
                     // Recent Documents shortcut
                     RECT rcDocs{ rcX, rcY, sm.right - 6, rcY + rowH };
                     bool overDocs = (cursor.x >= rcDocs.left && cursor.x <= rcDocs.right && cursor.y >= rcDocs.top && cursor.y <= rcDocs.bottom);
                     if (overDocs) { HBRUSH hb = CreateSolidBrush(RGB(70, 90, 130)); FillRect(dc, &rcDocs, hb); DeleteObject(hb); }
-                    TextOutA(dc, rcDocs.left + 6, rcDocs.top + 4, "Recent Docs", 11);
+                    int docsTextX = rcDocs.left + 6;
+                    drawStartMenuIcon(dc, rcDocs, "Recent Docs", docsTextX);
+                    TextOutA(dc, docsTextX, rcDocs.top + 4, "Recent Docs", 11);
 
                     // Bottom area - "All Programs" toggle button
                     int btnY = sm.bottom - 30;
@@ -1598,6 +1685,30 @@ namespace gxos {
                 if (x + w - 1 >= 0 && x + w - 1 < bufW) pixels[row * stride + x + w - 1] = color;
             }
         }
+
+        static void fbDrawStartMenuIcon(uint32_t* pixels, int pitch, int bufW, int bufH, int rowX, int rowY, int rowH, const std::string& label, int& textX) {
+            int iconX = rowX + 4;
+            int iconY = rowY + (rowH - kStartMenuIconSize) / 2;
+            textX = iconX + kStartMenuIconSize + 6;
+
+            if (kEnableStartMenuIcons) {
+                ImagePtr icon;
+                try {
+                    icon = IconThemeManager::Instance().LoadIcon(startMenuLogicalIconName(label), kStartMenuIconSize);
+                }
+                catch (...) {
+                    icon.reset();
+                }
+
+                if (icon && icon->isValid()) {
+                    ImageRenderer::DrawImage(pixels, bufW, bufH, pitch, icon, iconX, iconY);
+                    return;
+                }
+            }
+
+            fbFillRect(pixels, pitch, bufW, bufH, iconX, iconY, kStartMenuIconSize, kStartMenuIconSize, startMenuFallbackIconColor32(label));
+            fbDrawRect(pixels, pitch, bufW, bufH, iconX, iconY, kStartMenuIconSize, kStartMenuIconSize, 0x00FFFFFF);
+        }
         
         void Compositor::renderToFramebuffer() {
             if (!g_videoBackend) {
@@ -1772,6 +1883,81 @@ namespace gxos {
             fbFillRect(pixels, pitch, fbW, fbH, 8, fbH - taskbarH + 6, 32, taskbarH - 12, 0x00374B64);
             fbDrawRect(pixels, pitch, fbW, fbH, 8, fbH - taskbarH + 6, 32, taskbarH - 12, 0x00FFFFFF);
             BitmapFont::DrawStringToBuffer(pixels, pitch, fbW, fbH, 12, fbH - taskbarH + 14, "S", 1, 0x00FFFFFF);
+
+            if (g_startMenuVisible) {
+                const int smW = 440;
+                const int maxRows = 14;
+                const int rowH = 20;
+                const int leftColW = 260;
+                const int smH = maxRows * rowH + 10;
+                int smLeft = 8;
+                int smTop = fbH - taskbarH + 6 - smH - 6;
+                if (smTop < 0) smTop = 4;
+                int smRight = smLeft + smW;
+                int smBottom = smTop + smH;
+
+                fbFillRect(pixels, pitch, fbW, fbH, smLeft, smTop, smW, smH, 0x002D2D37);
+                fbDrawRect(pixels, pitch, fbW, fbH, smLeft, smTop, smW, smH, 0x00FFFFFF);
+
+                int y = smTop + 4;
+                int row = 0;
+                int startIndex = g_startMenuScroll;
+                if (g_startMenuAllProgs) {
+                    for (size_t i = startIndex; i < g_startMenuAllProgsSorted.size() && row < maxRows; ++i) {
+                        int rowX = smLeft + 4;
+                        int rowW = leftColW - 8;
+                        uint32_t rowColor = ((int)i == g_startMenuSel) ? 0x00506496 : 0x00373746;
+                        fbFillRect(pixels, pitch, fbW, fbH, rowX, y, rowW, rowH, rowColor);
+                        std::string txt = g_startMenuAllProgsSorted[i];
+                        int textX = rowX + 4;
+                        fbDrawStartMenuIcon(pixels, pitch, fbW, fbH, rowX, y, rowH, txt, textX);
+                        BitmapFont::DrawStringToBuffer(pixels, pitch, fbW, fbH, textX, y + 6, txt.c_str(), -1, 0x00E6E6E6);
+                        y += rowH;
+                        row++;
+                    }
+                } else {
+                    for (size_t i = startIndex; i < g_items.size() && row < maxRows; ++i) {
+                        int rowX = smLeft + 4;
+                        int rowW = leftColW - 8;
+                        uint32_t rowColor = ((int)i == g_startMenuSel) ? 0x00506496 : 0x00373746;
+                        fbFillRect(pixels, pitch, fbW, fbH, rowX, y, rowW, rowH, rowColor);
+                        std::string txt = g_items[i].label;
+                        int textX = rowX + 4;
+                        fbDrawStartMenuIcon(pixels, pitch, fbW, fbH, rowX, y, rowH, txt, textX);
+                        std::string displayText = (g_items[i].pinned ? "* " : "  ") + txt;
+                        BitmapFont::DrawStringToBuffer(pixels, pitch, fbW, fbH, textX, y + 6, displayText.c_str(), -1, 0x00E6E6E6);
+                        y += rowH;
+                        row++;
+                    }
+                }
+
+                int rcX = smLeft + leftColW + 4;
+                int rcY = smTop + 6;
+                int computerTextX = rcX + 4;
+                fbDrawStartMenuIcon(pixels, pitch, fbW, fbH, rcX, rcY, rowH, "Computer Files", computerTextX);
+                BitmapFont::DrawStringToBuffer(pixels, pitch, fbW, fbH, computerTextX, rcY + 6, "Computer Files", -1, 0x00C8C8C8);
+                rcY += rowH + 4;
+
+                int consoleTextX = rcX + 4;
+                fbDrawStartMenuIcon(pixels, pitch, fbW, fbH, rcX, rcY, rowH, "Console", consoleTextX);
+                BitmapFont::DrawStringToBuffer(pixels, pitch, fbW, fbH, consoleTextX, rcY + 6, "Console", -1, 0x00C8C8C8);
+                rcY += rowH + 4;
+
+                int docsTextX = rcX + 4;
+                fbDrawStartMenuIcon(pixels, pitch, fbW, fbH, rcX, rcY, rowH, "Recent Docs", docsTextX);
+                BitmapFont::DrawStringToBuffer(pixels, pitch, fbW, fbH, docsTextX, rcY + 6, "Recent Docs", -1, 0x00C8C8C8);
+
+                int btnY = smBottom - 30;
+                fbFillRect(pixels, pitch, fbW, fbH, smLeft + 6, btnY, leftColW - 12, 24, 0x003C3C4B);
+                fbDrawRect(pixels, pitch, fbW, fbH, smLeft + 6, btnY, leftColW - 12, 24, 0x00FFFFFF);
+                const char* btnText = g_startMenuAllProgs ? "< Back" : "All Programs >";
+                BitmapFont::DrawStringToBuffer(pixels, pitch, fbW, fbH, smLeft + 14, btnY + 8, btnText, -1, 0x00E6E6E6);
+
+                int shutdownBtnW = 80;
+                fbFillRect(pixels, pitch, fbW, fbH, smRight - shutdownBtnW - 30, btnY, shutdownBtnW, 24, 0x003C3C4B);
+                fbDrawRect(pixels, pitch, fbW, fbH, smRight - shutdownBtnW - 30, btnY, shutdownBtnW, 24, 0x00FFFFFF);
+                BitmapFont::DrawStringToBuffer(pixels, pitch, fbW, fbH, smRight - shutdownBtnW - 20, btnY + 8, "Shutdown", -1, 0x00E6E6E6);
+            }
             
             // Taskbar window buttons
             int btnX = 50;

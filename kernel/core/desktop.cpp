@@ -341,6 +341,9 @@ static const uint32_t kTrayIconGap = 6;
 static const uint32_t kTaskbarBtnMaxW = 150;
 static const uint32_t kTaskbarBtnH = 28;
 static const uint32_t kTaskbarBtnGap = 4;
+static bool s_enableStartMenuIcons = false; // Ensure default is false for verification
+static uint32_t s_startMenuIconSize = 16;
+static const char* s_startMenuIconTheme = "Flat";
 
 struct DesktopRect {
     uint32_t x;
@@ -1637,6 +1640,11 @@ static const char* GetDesktopIconLogicalName(const char* label)
     return "file.generic";
 }
 
+static const char* GetStartMenuLogicalIconName(const char* label)
+{
+    return GetDesktopIconLogicalName(label);
+}
+
 static void draw_colored_desktop_icon(uint32_t ix, uint32_t iy, uint32_t color, const char* label, bool dragging)
 {
     if (dragging) {
@@ -1712,6 +1720,17 @@ static const uint32_t* get_embedded_desktop_icon_pixels(const char* logicalName)
     if (text_equals(logicalName, "app.paint")) return kDesktopThemeIcon_Paint;
     if (text_equals(logicalName, "app.clock")) return kDesktopThemeIcon_Clock;
     return kDesktopThemeIcon_FileGeneric;
+}
+
+static bool draw_themed_start_menu_icon(uint32_t x, uint32_t y, const char* label)
+{
+    if (!s_enableStartMenuIcons || !s_startMenuIconTheme || !text_equals(s_startMenuIconTheme, "Flat")) return false;
+    const char* logicalName = GetStartMenuLogicalIconName(label);
+    const uint32_t* pixels = get_embedded_desktop_icon_pixels(logicalName);
+    if (!pixels) return false;
+
+    uint32_t drawSize = s_startMenuIconSize > 0 ? s_startMenuIconSize : 16;
+    return draw_argb_icon_buffer(pixels, kDesktopThemeIconW, kDesktopThemeIconH, x, y, drawSize, drawSize);
 }
 
 #if defined(GXOS_BARE_METAL)
@@ -2489,9 +2508,13 @@ static void draw_start_menu()
             framebuffer::fill_rect(leftX + 1, itemY, leftColW - 2, kStartMenuRowH, rgb(46, 46, 58));
         }
 
-        // Small colored icon square
-        framebuffer::fill_rect(leftX + 10, itemY + 3, 16, 16, appColor);
-        draw_rect(leftX + 10, itemY + 3, 16, 16, rgb(160, 160, 180));
+        uint32_t iconSize = s_startMenuIconSize > 0 ? s_startMenuIconSize : 16;
+        uint32_t iconX = leftX + 10;
+        uint32_t iconY = itemY + (kStartMenuRowH > iconSize ? (kStartMenuRowH - iconSize) / 2 : 0);
+        if (!draw_themed_start_menu_icon(iconX, iconY, appName)) {
+            framebuffer::fill_rect(iconX, iconY, iconSize, iconSize, appColor);
+            draw_rect(iconX, iconY, iconSize, iconSize, rgb(160, 160, 180));
+        }
         
         // Pin indicator (star) if pinned
         if (isPinned) {
@@ -2501,7 +2524,7 @@ static void draw_start_menu()
         // App name
         uint32_t textColor = (itemIndex == s_startMenuSelection || i == s_clickedMenuLeft || i == s_hoverMenuLeft)
             ? rgb(255, 255, 255) : rgb(210, 210, 225);
-        draw_text(leftX + 32, itemY + 6, appName, textColor, 1);
+        draw_text(iconX + iconSize + 6, itemY + 6, appName, textColor, 1);
     }
     
     // Scroll indicators if needed
@@ -2538,14 +2561,18 @@ static void draw_start_menu()
             framebuffer::fill_rect(rightX, itemY, kStartMenuRightColW - 2, kStartMenuRowH, rgb(42, 42, 52));
         }
 
-        // Small colored icon
-        framebuffer::fill_rect(rightX + 8, itemY + 4, 14, 14, s_startMenuRight[i].color);
-        draw_rect(rightX + 8, itemY + 4, 14, 14, rgb(140, 140, 160));
+        uint32_t iconSize = s_startMenuIconSize > 0 ? s_startMenuIconSize : 16;
+        uint32_t iconX = rightX + 8;
+        uint32_t iconY = itemY + (kStartMenuRowH > iconSize ? (kStartMenuRowH - iconSize) / 2 : 0);
+        if (!draw_themed_start_menu_icon(iconX, iconY, s_startMenuRight[i].label)) {
+            framebuffer::fill_rect(iconX, iconY, iconSize, iconSize, s_startMenuRight[i].color);
+            draw_rect(iconX, iconY, iconSize, iconSize, rgb(140, 140, 160));
+        }
 
         // Label
         uint32_t rTextColor = (i == s_clickedMenuRight || i == s_hoverMenuRight)
             ? rgb(255, 255, 255) : rgb(200, 200, 220);
-        draw_text(rightX + 28, itemY + 6, s_startMenuRight[i].label, rTextColor, 1);
+        draw_text(iconX + iconSize + 6, itemY + 6, s_startMenuRight[i].label, rTextColor, 1);
     }
 
     // === Footer: "All Programs" toggle + Power buttons ===

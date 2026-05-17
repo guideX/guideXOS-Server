@@ -11,6 +11,12 @@ param(
     [switch]$Clean,
     [switch]$SkipKernel,
     [switch]$RunQemu,
+    [switch]$FsTest,
+    [switch]$Fat32Only,
+    [switch]$Ext4Only,
+    [switch]$Debug,
+    [switch]$WaitGdb,
+    [string]$Memory = "1024M",
     [string]$Arch = "amd64"
 )
 
@@ -25,6 +31,7 @@ $RootDir = $PSScriptRoot
 $ESPDir = Join-Path $RootDir "ESP"
 $KernelDir = Join-Path $RootDir "kernel"
 $BootloaderDir = Join-Path $RootDir "guideXOSBootLoader"
+$DiskDir = Join-Path $RootDir "disks"
 $KernelBuildSkipped = $false
 
 # Step 1: Clean if requested
@@ -416,7 +423,7 @@ if ($AllReady) {
             "-no-reboot"
         )
         
-        & qemu-system-x86_64 $QemuArgs
+        & $Qemu.Source $QemuArgs
     } else {
         Write-Host "To run in QEMU:" -ForegroundColor Cyan
         Write-Host "  .\build-uefi.ps1 -RunQemu" -ForegroundColor White

@@ -20,6 +20,7 @@ public:
 
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)
     static void DrawImage(HDC dc, const ImagePtr& image, int x, int y);
+    static void DrawImage(HDC dc, const ImagePtr& image, int x, int y, int width, int height);
 #endif
 };
 

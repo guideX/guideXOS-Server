@@ -73,12 +73,25 @@ void ImageRenderer::DrawImage(uint32_t* targetPixels, int targetWidth, int targe
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)
 void ImageRenderer::DrawImage(HDC dc, const ImagePtr& image, int x, int y)
 {
+    if (!image) {
+        Logger::write(LogLevel::Warn, "ImageRenderer: invalid image for HDC draw");
+        return;
+    }
+    DrawImage(dc, image, x, y, image->Width, image->Height);
+}
+
+void ImageRenderer::DrawImage(HDC dc, const ImagePtr& image, int x, int y, int width, int height)
+{
     if (!dc) {
         Logger::write(LogLevel::Warn, "ImageRenderer: invalid HDC");
         return;
     }
     if (!image || !image->isValid() || image->Channels < 4) {
         Logger::write(LogLevel::Warn, "ImageRenderer: invalid image for HDC draw");
+        return;
+    }
+    if (width <= 0 || height <= 0) {
+        Logger::write(LogLevel::Warn, "ImageRenderer: invalid HDC draw size");
         return;
     }
 
@@ -124,7 +137,7 @@ void ImageRenderer::DrawImage(HDC dc, const ImagePtr& image, int x, int y)
 
     std::copy(bgra.begin(), bgra.end(), static_cast<uint32_t*>(bits));
     HGDIOBJ old = SelectObject(mem, dib);
-    AlphaBlend(dc, x, y, image->Width, image->Height, mem, 0, 0, image->Width, image->Height, blend);
+    AlphaBlend(dc, x, y, width, height, mem, 0, 0, image->Width, image->Height, blend);
     SelectObject(mem, old);
     DeleteObject(dib);
     DeleteDC(mem);
