@@ -12,6 +12,7 @@
 #include "include/kernel/vfs.h"
 #include "include/kernel/pit.h"
 #include "include/kernel/serial_debug.h"
+#include "include/kernel/desktop_icon_theme_flat.h"
 
 namespace kernel {
 namespace apps {
@@ -174,6 +175,22 @@ static void appDrawText(uint32_t x, uint32_t y, const char* text, uint32_t color
         drawChar(cx, y, *text, color);
         cx += kGlyphW + kGlyphSpacing;
         text++;
+    }
+}
+
+static void serial_put_dec(uint32_t value) {
+    char buffer[16];
+    int index = 0;
+    if (value == 0) {
+        serial::putc('0');
+        return;
+    }
+    while (value > 0 && index < (int)(sizeof(buffer) - 1)) {
+        buffer[index++] = (char)('0' + (value % 10));
+        value /= 10;
+    }
+    while (index > 0) {
+        serial::putc(buffer[--index]);
     }
 }
 
@@ -1869,6 +1886,113 @@ FileExplorerApp::FileExplorerApp()
 FileExplorerApp::~FileExplorerApp() {
 }
 
+bool FileExplorerApp::textEquals(const char* a, const char* b) {
+    if (!a || !b) return false;
+    while (*a && *b) {
+        if (*a != *b) return false;
+        ++a;
+        ++b;
+    }
+    return *a == '\0' && *b == '\0';
+}
+
+bool FileExplorerApp::endsWithIgnoreCase(const char* value, const char* suffix) {
+    if (!value || !suffix) return false;
+    int valueLen = strlen_local(value);
+    int suffixLen = strlen_local(suffix);
+    if (suffixLen > valueLen) return false;
+    for (int i = 0; i < suffixLen; ++i) {
+        char a = value[valueLen - suffixLen + i];
+        char b = suffix[i];
+        if (a >= 'A' && a <= 'Z') a = (char)(a - 'A' + 'a');
+        if (b >= 'A' && b <= 'Z') b = (char)(b - 'A' + 'a');
+        if (a != b) return false;
+    }
+    return true;
+}
+
+const uint32_t* FileExplorerApp::getEmbeddedIconPixels(const char* logicalName) {
+    if (textEquals(logicalName, "app.notepad"))       return kDesktopThemeIcon_Notepad;
+    if (textEquals(logicalName, "app.calculator"))    return kDesktopThemeIcon_Calculator;
+    if (textEquals(logicalName, "app.console"))       return kDesktopThemeIcon_Console;
+    if (textEquals(logicalName, "app.taskmanager"))   return kDesktopThemeIcon_TaskManager;
+    if (textEquals(logicalName, "app.files"))         return kDesktopThemeIcon_Files;
+    if (textEquals(logicalName, "app.paint"))         return kDesktopThemeIcon_Paint;
+    if (textEquals(logicalName, "app.clock"))         return kDesktopThemeIcon_Clock;
+    if (textEquals(logicalName, "file.folder"))       return kDesktopThemeIcon_Files;
+    if (textEquals(logicalName, "file.sysfolder"))    return kDesktopThemeIcon_Files;
+    if (textEquals(logicalName, "file.text"))         return kDesktopThemeIcon_Notepad;
+    if (textEquals(logicalName, "file.image"))        return kDesktopThemeIcon_Paint;
+    if (textEquals(logicalName, "file.binary"))       return kDesktopThemeIcon_FileGeneric;
+    if (textEquals(logicalName, "file.generic"))      return kDesktopThemeIcon_FileGeneric;
+    if (textEquals(logicalName, "file.unknown"))      return kDesktopThemeIcon_FileGeneric;
+    if (textEquals(logicalName, "drive.fixed"))       return kDesktopThemeIcon_Files;
+    if (textEquals(logicalName, "drive.mounted"))     return kDesktopThemeIcon_Files;
+    if (textEquals(logicalName, "place.computer"))    return kDesktopThemeIcon_Files;
+    return kDesktopThemeIcon_FileGeneric;
+}
+
+bool FileExplorerApp::drawArgbIconBuffer(const uint32_t* pixels, uint32_t srcW, uint32_t srcH, uint32_t x, uint32_t y, uint32_t width, uint32_t height) {
+    if (!pixels || srcW == 0 || srcH == 0 || width == 0 || height == 0) return false;
+    bool drewPixel = false;
+    for (uint32_t dy = 0; dy < height; ++dy) {
+        uint32_t sy = (uint32_t)((uint64_t)dy * (uint64_t)srcH / height);
+        for (uint32_t dx = 0; dx < width; ++dx) {
+            uint32_t sx = (uint32_t)((uint64_t)dx * (uint64_t)srcW / width);
+            uint32_t src = pixels[sy * srcW + sx];
+            uint8_t a = (uint8_t)((src >> 24) & 0xFF);
+            if (a == 0) continue;
+            drewPixel = true;
+            uint32_t px = x + dx;
+            uint32_t py = y + dy;
+            if (a == 0xFF) {
+                framebuffer::put_pixel(px, py, src);
+            } else {
+                uint32_t dst = framebuffer::get_pixel(px, py);
+                uint8_t sr = (uint8_t)((src >> 16) & 0xFF);
+                uint8_t sg = (uint8_t)((src >> 8) & 0xFF);
+                uint8_t sb = (uint8_t)(src & 0xFF);
+                uint8_t dr = (uint8_t)((dst >> 16) & 0xFF);
+                uint8_t dg = (uint8_t)((dst >> 8) & 0xFF);
+                uint8_t db = (uint8_t)(dst & 0xFF);
+                uint8_t r = (uint8_t)((sr * a + dr * (255 - a)) / 255);
+                uint8_t g = (uint8_t)((sg * a + dg * (255 - a)) / 255);
+                uint8_t b = (uint8_t)((sb * a + db * (255 - a)) / 255);
+                framebuffer::put_pixel(px, py, 0xFF000000u | ((uint32_t)r << 16) | ((uint32_t)g << 8) | b);
+            }
+        }
+    }
+    return drewPixel;
+}
+
+bool FileExplorerApp::drawThemedIcon(uint32_t x, uint32_t y, uint32_t size, const char* logicalName) {
+    const uint32_t* pixels = getEmbeddedIconPixels(logicalName);
+    serial::puts("[fileexplorer-bm] draw icon logical=");
+    serial::puts(logicalName ? logicalName : "<null>");
+    serial::puts(" x="); serial_put_dec(x);
+    serial::puts(" y="); serial_put_dec(y);
+    serial::puts(" size="); serial_put_dec(size);
+    serial::puts(" pixels="); serial::puts(pixels ? "yes" : "no");
+    serial::puts("\n");
+    if (!pixels) return false;
+    return drawArgbIconBuffer(pixels, kDesktopThemeIconW, kDesktopThemeIconH, x, y, size, size);
+}
+
+void FileExplorerApp::drawPlaceholderIcon(uint32_t x, uint32_t y, uint32_t size) {
+    framebuffer::fill_rect(x, y, size, size, rgb(180, 40, 40));
+    framebuffer::fill_rect(x + 1, y + 1, size > 2 ? size - 2 : size, size > 2 ? size - 2 : size, rgb(255, 255, 255));
+}
+
+const char* FileExplorerApp::fileLogicalIcon(const Entry& entry) const {
+    if (entry.isDir) return "file.folder";
+    if (endsWithIgnoreCase(entry.name, ".txt") || endsWithIgnoreCase(entry.name, ".log") || endsWithIgnoreCase(entry.name, ".cfg") || endsWithIgnoreCase(entry.name, ".ini") || endsWithIgnoreCase(entry.name, ".md")) return "file.text";
+    if (endsWithIgnoreCase(entry.name, ".bmp") || endsWithIgnoreCase(entry.name, ".png") || endsWithIgnoreCase(entry.name, ".jpg") || endsWithIgnoreCase(entry.name, ".jpeg") || endsWithIgnoreCase(entry.name, ".gif")) return "file.image";
+    if (endsWithIgnoreCase(entry.name, ".elf") || endsWithIgnoreCase(entry.name, ".gxapp") || endsWithIgnoreCase(entry.name, ".gxq") || endsWithIgnoreCase(entry.name, ".exe")) return "app.files";
+    if (endsWithIgnoreCase(entry.name, ".img")) return "drive.mounted";
+    if (endsWithIgnoreCase(entry.name, ".bin") || endsWithIgnoreCase(entry.name, ".dat") || endsWithIgnoreCase(entry.name, ".dll") || endsWithIgnoreCase(entry.name, ".so") || endsWithIgnoreCase(entry.name, ".o")) return "file.binary";
+    return "file.unknown";
+}
+
 bool FileExplorerApp::init() {
     return initWithParam("/");
 }
@@ -1912,6 +2036,7 @@ void FileExplorerApp::shutdown() {
 }
 
 void FileExplorerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
+    static const uint32_t kIconSize = 16;
     framebuffer::fill_rect(x, y, w, h, rgb(246, 246, 246));
 
     uint32_t addressY = y + TOOLBAR_H;
@@ -1925,8 +2050,10 @@ void FileExplorerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
 
     framebuffer::fill_rect(x, bodyY, LEFT_W, bodyH, rgb(238, 238, 238));
     appDrawText(x + 8, bodyY + 10, "Navigation", rgb(40, 40, 40));
-    appDrawText(x + 12, bodyY + 30, "Root", rgb(50, 70, 110));
-    appDrawText(x + 12, bodyY + 46, "Mounted drives", rgb(50, 70, 110));
+    if (!drawThemedIcon(x + 10, bodyY + 26, kIconSize, "place.computer")) drawPlaceholderIcon(x + 10, bodyY + 26, kIconSize);
+    appDrawText(x + 30, bodyY + 30, "Root", rgb(50, 70, 110));
+    if (!drawThemedIcon(x + 10, bodyY + 42, kIconSize, "drive.fixed")) drawPlaceholderIcon(x + 10, bodyY + 42, kIconSize);
+    appDrawText(x + 30, bodyY + 46, "Mounted drives", rgb(50, 70, 110));
 
     uint8_t mountCount = vfs::mount_count();
     if (mountCount == 0) {
@@ -1936,7 +2063,8 @@ void FileExplorerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
         for (uint8_t i = 0; i < vfs::VFS_MAX_MOUNTS && row < 8; ++i) {
             const vfs::MountPoint* mp = vfs::get_mount_by_index(i);
             if (!mp || !mp->active) continue;
-            appDrawText(x + 18, bodyY + 64 + row * ROW_H, mp->path, rgb(30, 30, 30));
+            if (!drawThemedIcon(x + 10, bodyY + 60 + row * ROW_H, kIconSize, "drive.mounted")) drawPlaceholderIcon(x + 10, bodyY + 60 + row * ROW_H, kIconSize);
+            appDrawText(x + 30, bodyY + 64 + row * ROW_H, mp->path, rgb(30, 30, 30));
             row++;
         }
     }
@@ -1965,8 +2093,16 @@ void FileExplorerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
 
         char sizeText[24];
         formatSize(e.size, sizeText, sizeof(sizeText));
-        appDrawText(mainX + 8, rowY, e.isDir ? "[DIR]" : "[FILE]", rgb(80, 80, 95));
-        appDrawText(mainX + 52, rowY, e.name, rgb(20, 20, 20));
+        const char* logicalIcon = fileLogicalIcon(e);
+        serial::puts("[fileexplorer-bm] row file=");
+        serial::puts(e.name);
+        serial::puts(" logical=");
+        serial::puts(logicalIcon);
+        serial::puts(" rowY=");
+        serial_put_dec(rowY);
+        serial::puts("\n");
+        if (!drawThemedIcon(mainX + 8, rowY - 2, kIconSize, logicalIcon)) drawPlaceholderIcon(mainX + 8, rowY - 2, kIconSize);
+        appDrawText(mainX + 30, rowY, e.name, rgb(20, 20, 20));
         appDrawText(mainX + 250, rowY, e.isDir ? "" : sizeText, rgb(70, 70, 70));
         appDrawText(mainX + 330, rowY, fileType(e), rgb(70, 70, 70));
         appDrawText(mainX + 430, rowY, "--", rgb(110, 110, 110));

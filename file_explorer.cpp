@@ -26,13 +26,24 @@ namespace gxos { namespace apps {
         constexpr int kVisibleRows = 20;
         constexpr size_t kLazyPageSize = 256;
 
-        // Icon rendering constants - match compositor text line height (16px) and start offset (8px)
-        constexpr int kIconSize = 16;           // 16x16 icons for row display
-        constexpr int kNavIconSize = 16;        // nav pane icons
-        constexpr int kTextLineH = 16;          // matches compositor ty += 16
-        constexpr int kTextStartY = 8;          // matches compositor ty = y + titleBarH + 8
-        constexpr int kIconPadX = 4;            // left padding for icons
-        constexpr int kNavIconOffsetX = 2;      // extra left indent for nav pane icons
+        constexpr int kIconSize = 16;
+        constexpr int kNavIconSize = 16;
+        constexpr int kToolbarIconSize = 16;
+        constexpr int kRowTextOffsetY = 4;
+        constexpr int kPaneTextColorPad = 0;
+        constexpr int kToolbarButtonY = 5;
+        constexpr int kToolbarButtonH = 22;
+        constexpr int kHeaderTextY = kToolbarH + kAddressH + 6;
+        constexpr int kNavStartY = kToolbarH + kAddressH + 8;
+        constexpr int kMainRowsStartY = kToolbarH + kAddressH + kHeaderH + 6;
+        constexpr int kStatusBarY = kWindowH - 24;
+        constexpr int kNavTextX = 26;
+        constexpr int kNavIconX = 8;
+        constexpr int kMainIconX = kLeftPaneW + 8;
+        constexpr int kMainNameTextX = kMainIconX + kIconSize + 6;
+        constexpr int kMainSizeTextX = kLeftPaneW + 350;
+        constexpr int kMainTypeTextX = kLeftPaneW + 440;
+        constexpr int kMainModifiedTextX = kLeftPaneW + 570;
 
         enum PromptMode {
             PromptNone = 0,
@@ -280,7 +291,6 @@ namespace gxos { namespace apps {
     bool FileExplorer::s_showDeleteConfirmation = false;
     std::string FileExplorer::s_deleteTargetPath;
     bool FileExplorer::s_deleteTargetIsDirectory = false;
-    int FileExplorer::s_textLineCount = 0;
 
     uint64_t FileExplorer::Launch(const std::string& startPath) {
         ProcessSpec spec{"file_explorer", FileExplorer::main};
@@ -678,20 +688,32 @@ namespace gxos { namespace apps {
     }
 
     void FileExplorer::drawText(const std::string& text) {
-        if (text == "\f") {
-            s_textLineCount = 0;
-        } else {
-            ++s_textLineCount;
-        }
         publish(MsgType::MT_DrawText, std::to_string(s_windowId) + "|" + text);
     }
 
-    void FileExplorer::drawIcon(const std::string& logicalIconName, int x, int iconSize) {
-        // Resolve via shared IconThemeManager - same pipeline as desktop icons and start menu icons
-        std::string path = gui::IconThemeManager::Instance().ResolveIconPath(logicalIconName, iconSize);
-        if (path.empty()) return;
-        // Vertically centre icon in the next text line that will be emitted
-        int y = kTextStartY + s_textLineCount * kTextLineH + (kTextLineH - iconSize) / 2;
+    void FileExplorer::drawTextAt(int x, int y, const std::string& text) {
+        publish(MsgType::MT_DrawTextAt, packDrawTextAt(s_windowId, x, y, text));
+    }
+
+    void FileExplorer::drawDebugPlaceholder(int x, int y, int size) {
+        drawRect(x, y, size, size, 180, 35, 35);
+        drawRect(x + 1, y + 1, size - 2, size - 2, 255, 255, 255);
+    }
+
+    void FileExplorer::drawIcon(const std::string& logicalIconName, int x, int y, int iconSize) {
+        const std::string path = gui::IconThemeManager::Instance().ResolveIconPath(logicalIconName, iconSize);
+        Logger::write(LogLevel::Info,
+            std::string("FileExplorer::drawIcon logical=") + logicalIconName +
+            " path=" + (path.empty() ? "<empty>" : path) +
+            " x=" + std::to_string(x) +
+            " y=" + std::to_string(y) +
+            " size=" + std::to_string(iconSize));
+
+        if (path.empty()) {
+            drawDebugPlaceholder(x, y, iconSize);
+            return;
+        }
+
         publish(MsgType::MT_DrawImage, packDrawImage(s_windowId, x, y, path));
     }
 
@@ -775,15 +797,9 @@ namespace gxos { namespace apps {
     }
 
     void FileExplorer::renderToolbar() {
-        // Toolbar buttons - small icon images are drawn at fixed pixel positions in the toolbar
-        // area (y=5..27), which is above the text-line zone so we use publish directly.
-        // Icon y: toolbar top = 5, h = 22 → centre 16px icon at y = 5 + (22-16)/2 = 8
-        constexpr int kTbIconY = 8;
-        constexpr int kTbIconSz = 16;
+        const int iconY = kToolbarButtonY + (kToolbarButtonH - kToolbarIconSize) / 2;
         auto tbIcon = [&](const std::string& iconName, int btnX) {
-            std::string path = gui::IconThemeManager::Instance().ResolveIconPath(iconName, kTbIconSz);
-            if (!path.empty())
-                publish(MsgType::MT_DrawImage, packDrawImage(s_windowId, btnX + 3, kTbIconY, path));
+            drawIcon(iconName, btnX + 3, iconY, kToolbarIconSize);
         };
 
         addButton(1,   8, 5,  56, 22, "< Back");
@@ -826,74 +842,103 @@ namespace gxos { namespace apps {
     void FileExplorer::renderAddressBar() {
         drawRect(0, 0, kWindowW, kToolbarH, 240, 240, 240);
         drawRect(0, kToolbarH, kWindowW, kAddressH, 252, 252, 252);
-        drawText("Address: " + s_currentPath);
+        drawTextAt(8, kToolbarH + 8, "Address: " + s_currentPath);
     }
 
     void FileExplorer::renderNavigationPane() {
         drawRect(0, kToolbarH + kAddressH, kLeftPaneW, kWindowH - kToolbarH - kAddressH - 30, 248, 248, 248);
 
-        // "Navigation" heading (no icon)
-        drawText("Navigation");
+        int y = kNavStartY;
+        drawTextAt(8, y, "Navigation");
+        y += kRowH;
 
-        // Root entry
-        drawIcon("place.computer", kNavIconOffsetX, kNavIconSize);
-        drawText("  Root");
+        drawIcon("place.computer", kNavIconX, y, kNavIconSize);
+        drawTextAt(kNavTextX, y + kRowTextOffsetY, "Root");
+        y += kRowH;
 
-        // Mounted drives heading
-        drawIcon("drive.fixed", kNavIconOffsetX, kNavIconSize);
-        drawText("  Mounted drives");
+        drawIcon("drive.fixed", kNavIconX, y, kNavIconSize);
+        drawTextAt(kNavTextX, y + kRowTextOffsetY, "Mounted drives");
+        y += kRowH;
 
         for (size_t i = 0; i < s_roots.size(); ++i) {
             const ExplorerFileEntry& root = s_roots[i];
-            // Choose icon: mounted .img file, CommonFolder, or regular drive
-            const char* iconName = "drive.fixed";
-            if (root.kind == ExplorerEntryKind::CommonFolder) {
-                iconName = "file.sysfolder";
-            } else {
-                std::string lowName = root.name;
-                std::transform(lowName.begin(), lowName.end(), lowName.begin(),
-                    [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-                if (lowName.find(".img") != std::string::npos) iconName = "drive.mounted";
-            }
-            drawIcon(iconName, kNavIconOffsetX, kNavIconSize);
             std::string marker = static_cast<int>(i) == s_rootSelectedIndex ? "> " : "  ";
-            drawText(marker + truncate(root.name, 24));
+            const char* iconName = FileIconProvider::logicalIconNameForEntry(root);
+            drawIcon(iconName, kNavIconX, y, kNavIconSize);
+            drawTextAt(kNavTextX, y + kRowTextOffsetY, marker + truncate(root.name, 22));
+            Logger::write(LogLevel::Info,
+                std::string("FileExplorer nav icon root=") + root.name +
+                " logical=" + iconName +
+                " y=" + std::to_string(y));
+            y += kRowH;
         }
 
-        drawIcon("file.sysfolder", kNavIconOffsetX, kNavIconSize);
-        drawText("  Common folders");
-        drawText("Keys: L/R roots, O open");
+        drawIcon("file.sysfolder", kNavIconX, y, kNavIconSize);
+        drawTextAt(kNavTextX, y + kRowTextOffsetY, "Common folders");
+        y += kRowH;
+        drawTextAt(8, y + 2, "Keys: L/R roots, O open");
     }
 
     void FileExplorer::renderMainPane() {
         drawRect(kLeftPaneW, kToolbarH + kAddressH, kWindowW - kLeftPaneW, kHeaderH, 235, 235, 235);
-        // Column header - no icon, just text
-        drawText("  Name                              Size        Type             Modified");
+        drawTextAt(kLeftPaneW + 8, kHeaderTextY, "Name");
+        drawTextAt(kMainSizeTextX, kHeaderTextY, "Size");
+        drawTextAt(kMainTypeTextX, kHeaderTextY, "Type");
+        drawTextAt(kMainModifiedTextX, kHeaderTextY, "Modified");
 
         if (s_loading) {
-            drawText("  Loading...");
+            drawTextAt(kLeftPaneW + 8, kMainRowsStartY, "Loading...");
             return;
         }
         if (s_entries.empty()) {
-            drawText("  (Empty directory or unavailable path)");
+            drawTextAt(kLeftPaneW + 8, kMainRowsStartY, "(Empty directory or unavailable path)");
             return;
         }
 
         int end = std::min(static_cast<int>(s_entries.size()), s_scrollOffset + kVisibleRows);
         for (int i = s_scrollOffset; i < end; ++i) {
             const ExplorerFileEntry& entry = s_entries[i];
+            const int row = i - s_scrollOffset;
+            const int rowY = kMainRowsStartY + row * kRowH;
+            const bool selected = i == s_selectedIndex;
 
-            // Draw icon for this row before emitting its text line
-            const char* iconName = FileIconProvider::logicalIconNameForEntry(entry);
-            drawIcon(iconName, kLeftPaneW + kIconPadX, kIconSize);
+            if (selected) {
+                drawRect(kLeftPaneW, rowY - 1, kWindowW - kLeftPaneW - 8, kRowH, 80, 100, 150);
+            }
 
-            std::string prefix = i == s_selectedIndex ? "> " : "  ";
-            // Indent name by icon width + padding (icon is 16px + 4 left pad + 2 gap = 22px ~ 2 chars wide in monospace)
-            std::string line = prefix + "  " + padRight(entry.name, 28)
-                + padRight(entry.isDirectory() ? "" : formatSize(entry.size), 12)
-                + padRight(entry.type, 17)
-                + entry.modified;
-            drawText(line);
+            const FileIconType iconType = FileIconProvider::iconTypeForEntry(entry);
+            const char* iconName = FileIconProvider::logicalIconName(iconType);
+            drawIcon(iconName, kMainIconX, rowY, kIconSize);
+
+            auto iconTypeText = [&](FileIconType type) {
+                switch (type) {
+                    case FileIconType::Folder: return "Folder";
+                    case FileIconType::SystemFolder: return "SystemFolder";
+                    case FileIconType::Drive: return "Drive";
+                    case FileIconType::MountedDrive: return "MountedDrive";
+                    case FileIconType::TextFile: return "TextFile";
+                    case FileIconType::ImageFile: return "ImageFile";
+                    case FileIconType::BinaryFile: return "BinaryFile";
+                    case FileIconType::Application: return "Application";
+                    case FileIconType::UnknownFile: return "UnknownFile";
+                }
+                return "UnknownFile";
+            };
+
+            Logger::write(LogLevel::Info,
+                std::string("FileExplorer row file=") + entry.name +
+                " iconType=" + iconTypeText(iconType) +
+                " logical=" + iconName +
+                " resolved=" + gui::IconThemeManager::Instance().ResolveIconPath(iconName, kIconSize) +
+                " x=" + std::to_string(kMainIconX) +
+                " y=" + std::to_string(rowY) +
+                " size=" + std::to_string(kIconSize));
+
+            const std::string prefix = selected ? "> " : "  ";
+            drawTextAt(kMainNameTextX, rowY + kRowTextOffsetY, prefix + truncate(entry.name, 26));
+            drawTextAt(kMainSizeTextX, rowY + kRowTextOffsetY, entry.isDirectory() ? "" : formatSize(entry.size));
+            drawTextAt(kMainTypeTextX, rowY + kRowTextOffsetY, truncate(entry.type, 14));
+            drawTextAt(kMainModifiedTextX, rowY + kRowTextOffsetY, entry.modified);
         }
     }
 
@@ -903,7 +948,7 @@ namespace gxos { namespace apps {
         if (s_hasMoreEntries) oss << " | lazy page loaded";
         if (!s_status.empty()) oss << " | " << s_status;
         if (s_selectedIndex >= 0 && s_selectedIndex < static_cast<int>(s_entries.size())) oss << " | Selected: " << s_entries[s_selectedIndex].name;
-        drawText(oss.str());
+        drawTextAt(8, kStatusBarY, oss.str());
     }
 
 }} // namespace gxos::apps

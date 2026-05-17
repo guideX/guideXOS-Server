@@ -28,6 +28,7 @@
 namespace gxos { namespace gui {
     struct DrawRectItem { int x; int y; int w; int h; uint8_t r; uint8_t g; uint8_t b; };
     struct DrawImageItem { int x; int y; std::string path; ImagePtr image; };
+    struct DrawTextItem { int x; int y; std::string text; };
     enum class WidgetType { Button=1 };
     struct Widget { WidgetType type; int id; int x; int y; int w; int h; std::string text; bool hover=false; bool pressed=false; };
     struct WinInfo { 
@@ -35,6 +36,7 @@ namespace gxos { namespace gui {
         std::string title; 
         int x; int y; int w; int h; 
         std::vector<std::string> texts; 
+        std::vector<DrawTextItem> positionedTexts;
         std::vector<DrawRectItem> rects; 
         std::vector<DrawImageItem> images;
         std::vector<Widget> widgets; 

@@ -282,6 +282,13 @@ private:
     void parentPath(const char* path, char* out, int outSize) const;
     void formatSize(uint64_t size, char* out, int outSize) const;
     const char* fileType(const Entry& entry) const;
+    const char* fileLogicalIcon(const Entry& entry) const;
+    static bool textEquals(const char* a, const char* b);
+    static bool endsWithIgnoreCase(const char* value, const char* suffix);
+    static const uint32_t* getEmbeddedIconPixels(const char* logicalName);
+    static bool drawArgbIconBuffer(const uint32_t* pixels, uint32_t srcW, uint32_t srcH, uint32_t x, uint32_t y, uint32_t width, uint32_t height);
+    static bool drawThemedIcon(uint32_t x, uint32_t y, uint32_t size, const char* logicalName);
+    static void drawPlaceholderIcon(uint32_t x, uint32_t y, uint32_t size);
 };
 
 // ============================================================
