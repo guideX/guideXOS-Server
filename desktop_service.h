@@ -64,9 +64,11 @@ namespace gxos { namespace gui {
         static bool LaunchApp(const std::string& name, std::string& error);
         static const std::vector<RegisteredDesktopApp>& GetRegisteredApps() { return s_apps; }
         static std::string GetRegisteredAppsVerboseDiagnostic();
+        static std::string GetRegisteredAppsDiagnostic();
         static std::string NativeAppCapabilitiesDiagnostic();
         static std::string InspectNativeAppPipeline(const std::string& appIdOrDisplayName);
         static std::string NativeAppPipelineSmokeTest(const std::string& appIdOrDisplayName);
+        static std::vector<RegisteredDesktopApp> GetAppModelDemoApps();
 
         // Persistence
         static void LoadState();

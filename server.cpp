@@ -335,9 +335,7 @@ using namespace gxos;
             gxos::gui::DesktopConfigData cfg; std::string err; if(!gxos::gui::DesktopConfig::Load("desktop.json", cfg, err)){ std::cout<<"Failed to load desktop.json: "<<err<<std::endl; } else { std::cout<<"Wallpaper: "<<cfg.wallpaperPath<<std::endl; std::cout<<"Pinned:\n"; for(auto &p: cfg.pinned) std::cout<<"  "<<p<<std::endl; std::cout<<"Recent:\n"; for(auto &r: cfg.recent) std::cout<<"  "<<r<<std::endl; }
         }
         else if (cmd=="desktop.apps"){
-            auto& apps = gui::DesktopService::GetRegisteredApps();
-            std::cout<<"Registered Applications ("<<apps.size()<<"):"<<std::endl;
-            for(const auto& app : apps) std::cout<<"  "<<app.displayName<<std::endl;
+            std::cout << gui::DesktopService::GetRegisteredAppsDiagnostic();
         }
         else if (cmd=="desktop.apps.verbose"){
             std::cout << gui::DesktopService::GetRegisteredAppsVerboseDiagnostic();

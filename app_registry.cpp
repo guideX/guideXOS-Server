@@ -218,6 +218,8 @@ const AppEntry* AppRegistry::FindCompatibleEntry(const std::string& appId, const
 std::vector<AppRegistrySource> AppRegistry::DefaultSources() {
     return {
         { AppSourceKind::SystemApps, "/system/apps" },
+        { AppSourceKind::SystemApps, "sdk/samples" },
+        { AppSourceKind::SystemApps, "examples/apps" },
         { AppSourceKind::Package, "/Apps" },
         { AppSourceKind::UserApps, "/users/default/apps" }
     };

@@ -509,8 +509,9 @@ static DesktopIcon s_desktopIcons[] = {
     {"TaskManager", 0xFFB44646, true, false, -1, -1},  // red, pinned (matches registered app name)
     {"Files",       0xFFC8B43C, true, false, -1, -1},  // yellow, pinned
     {"ImgViewer",   0xFFC87830, false, false, -1, -1}, // orange
+    {"AppModel",    0xFF5587D2, true, false, -1, -1},  // blue, app model demo
 };
-static const int kDesktopIconCount = 8;
+static const int kDesktopIconCount = 9;
 static const int kMaxRecentApps = 5;  // Max recent apps to show
 
 // Start menu entries structure for dynamic list
@@ -529,12 +530,13 @@ static StartMenuApp s_startMenuApps[] = {
     {"TaskManager", true,  false, 0xFFB44646},  // pinned
     {"DiskManager", true,  false, 0xFFB48C46},  // pinned (orange-brown for disk)
     {"HDInstaller", true,  false, 0xFFB48C46},  // pinned (orange-brown for installer)
+    {"AppModel",    true,  false, 0xFF5587D2},  // pinned app model demo entry
     {"Paint",       false, true,  0xFFC87830},  // recent
     {"Clock",       false, true,  0xFF4690C8},  // recent
     {"Files",       false, true,  0xFFC8B43C},  // recent
     {"ImgViewer",   false, false, 0xFFC87830},  // not shown by default
 };
-static const int kStartMenuAppCount = 10;
+static const int kStartMenuAppCount = 11;
 static const int kMaxStartMenuRecent = 5;  // Max recent apps in start menu
 
 // All Programs alphabetically sorted list (for "All Programs" view)
@@ -547,11 +549,12 @@ static const char* s_allProgramsList[] = {
     "Files",
     "HDInstaller",
     "ImgViewer",
+    "AppModel",
     "Notepad",
     "Paint",
     "TaskManager",
 };
-static const int kAllProgramsCount = 11;
+static const int kAllProgramsCount = 12;
 
 // Start menu right column entries (system shortcuts, matching Legacy StartMenu.cs)
 struct StartMenuRightItem {
@@ -753,8 +756,8 @@ static void init_time()
 }
 
 // Per-icon positions (mutable, set to grid layout on init)
-static int32_t s_iconPosX[8];
-static int32_t s_iconPosY[8];
+static int32_t s_iconPosX[kDesktopIconCount];
+static int32_t s_iconPosY[kDesktopIconCount];
 static bool    s_iconPositionsInitialized = false;
 
 // Selected desktop icon (-1 = none)
@@ -774,15 +777,15 @@ static int32_t s_selectionCurrentX = 0;
 static int32_t s_selectionCurrentY = 0;
 
 #if !defined(GXOS_BARE_METAL)
-static gxos::gui::ImagePtr s_desktopIconImageCache[8];
-static bool s_desktopIconLoadAttempted[8] = {false};
-static bool s_desktopIconMissingLogged[8] = {false};
+static gxos::gui::ImagePtr s_desktopIconImageCache[kDesktopIconCount];
+static bool s_desktopIconLoadAttempted[kDesktopIconCount] = {false};
+static bool s_desktopIconMissingLogged[kDesktopIconCount] = {false};
 static uint32_t s_cachedDesktopIconSize = 0;
 #endif
 
 // Icon management helpers
 static int s_visibleIconCount = 0;  // Count of icons to display (pinned + recent)
-static int s_visibleIconIndices[8]; // Indices of visible icons in display order
+static int s_visibleIconIndices[kDesktopIconCount]; // Indices of visible icons in display order
 
 // Drag state for icon repositioning
 static bool  s_dragging = false;
@@ -791,9 +794,9 @@ static int32_t s_dragStartMouseX = 0;
 static int32_t s_dragStartMouseY = 0;
 static int32_t s_dragCurrentX = 0;  // current mouse X during drag
 static int32_t s_dragCurrentY = 0;  // current mouse Y during drag
-static int32_t s_dragOriginalIconX[8];
-static int32_t s_dragOriginalIconY[8];
-static bool    s_dragSelectedIcons[8];
+static int32_t s_dragOriginalIconX[kDesktopIconCount];
+static int32_t s_dragOriginalIconY[kDesktopIconCount];
+static bool    s_dragSelectedIcons[kDesktopIconCount];
 static const int32_t kDragThreshold = 4;  // pixels before drag starts
 static bool  s_dragStarted = false;  // true once threshold exceeded
 
@@ -919,7 +922,7 @@ static void refresh_desktop_icons()
     s_visibleIconCount = 0;
     
     // First add all pinned icons
-    for (int i = 0; i < kDesktopIconCount && s_visibleIconCount < 8; i++) {
+    for (int i = 0; i < kDesktopIconCount && s_visibleIconCount < kDesktopIconCount; i++) {
         if (s_desktopIcons[i].pinned) {
             s_visibleIconIndices[s_visibleIconCount++] = i;
         }
@@ -927,7 +930,7 @@ static void refresh_desktop_icons()
     
     // Then add recent icons (up to limit)
     int recentCount = 0;
-    for (int i = 0; i < kDesktopIconCount && s_visibleIconCount < 8; i++) {
+    for (int i = 0; i < kDesktopIconCount && s_visibleIconCount < kDesktopIconCount; i++) {
         if (s_desktopIcons[i].recent && !s_desktopIcons[i].pinned) {
             if (recentCount < kMaxRecentApps) {
                 s_visibleIconIndices[s_visibleIconCount++] = i;
@@ -1185,7 +1188,7 @@ static void clear_icon_drag_state()
     s_dragging = false;
     s_dragStarted = false;
     s_dragIconIndex = -1;
-    for (int displayIdx = 0; displayIdx < 8; displayIdx++) {
+    for (int displayIdx = 0; displayIdx < kDesktopIconCount; displayIdx++) {
         s_dragSelectedIcons[displayIdx] = false;
     }
 }
@@ -4461,6 +4464,14 @@ static void show_icon_notification(int displayIndex)
     
     int iconIdx = s_visibleIconIndices[displayIndex];
     const char* label = s_desktopIcons[iconIdx].label;
+    if (str_eq(label, "AppModel")) {
+        s_notification.title = "App Model Demo";
+        s_notification.message = "Hello World and Resource Viewer are native SDK samples; experimental execution is disabled in bare-metal builds.";
+        s_notification.visible = true;
+        s_notification.showTime = s_tickCounter;
+        app::AppLogger::logLaunch(label, app::LaunchResult::NotAvailable);
+        return;
+    }
     
     // Check if this is Console - special case for shell
     bool isConsole = false;
@@ -4649,6 +4660,16 @@ static void hit_test_start_menu(int32_t mx, int32_t my, int& leftIdx, int& right
 // Show notification for a start menu item launch (or launch the app)
 static void show_start_menu_notification(const char* label)
 {
+    if (str_eq(label, "AppModel")) {
+        s_startMenuOpen = false;
+        s_notification.title = "App Model Demo";
+        s_notification.message = "Hello World and Resource Viewer are native SDK samples; experimental execution is disabled in bare-metal builds.";
+        s_notification.visible = true;
+        s_notification.showTime = s_tickCounter;
+        app::AppLogger::logLaunch(label, app::LaunchResult::NotAvailable);
+        return;
+    }
+
     // Check if this is Console - if so, launch the shell
     bool isConsole = false;
     const char* c = "Console";

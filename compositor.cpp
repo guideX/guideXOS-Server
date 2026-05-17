@@ -132,6 +132,14 @@ namespace gxos {
         static const bool kEnableStartMenuIcons = true;
         static const int kStartMenuIconSize = 16;
 
+        static bool isAppModelDemoAppLabel(const std::string& label) {
+            return label == "Native App Debug Viewer" ||
+                label == "Hello World" ||
+                label == "Resource Viewer" ||
+                label == "HelloWorld ELF" ||
+                label == "Future GXApp Package";
+        }
+
         static std::string startMenuLogicalIconName(const std::string& label) {
             if (label == "Calculator") return "app.calculator";
             if (label == "Notepad") return "app.notepad";
@@ -139,6 +147,7 @@ namespace gxos {
             if (label == "TaskManager" || label == "Task Manager") return "app.taskmanager";
             if (label == "DiskManager") return "app.diskmanager";
             if (label == "HDInstaller") return "app.installer";
+            if (isAppModelDemoAppLabel(label)) return "app.generic";
             if (label == "Files" || label == "FileExplorer") return "app.files";
             if (label == "Computer" || label == "Computer Files" || label == "ComputerFiles") return "place.computer";
             if (label == "Paint") return "app.paint";
@@ -158,6 +167,7 @@ namespace gxos {
             if (label == "Paint") return RGB(200, 120, 60);
             if (label == "TaskManager" || label == "Task Manager") return RGB(180, 70, 70);
             if (label == "DiskManager" || label == "ControlPanel" || label == "Control Panel" || label == "Settings") return RGB(140, 90, 180);
+            if (isAppModelDemoAppLabel(label)) return RGB(85, 135, 210);
             if (label == "Files" || label == "FileExplorer" || label == "Computer" || label == "Computer Files" || label == "ComputerFiles" || label == "Documents" || label == "Recent Docs") return RGB(200, 180, 60);
             if (label == "Network") return RGB(80, 150, 180);
             return RGB(90, 100, 120);
@@ -239,17 +249,10 @@ namespace gxos {
         }
 
         void Compositor::refreshAllProgramsList( ) {
-            // Load all registered apps from DesktopService and sort alphabetically
             g_startMenuAllProgsSorted.clear( );
-            // For now, use a default list matching C# implementation
-            g_startMenuAllProgsSorted.push_back("Calculator");
-            g_startMenuAllProgsSorted.push_back("Clock");
-            g_startMenuAllProgsSorted.push_back("Console");
-            g_startMenuAllProgsSorted.push_back("ControlPanel");
-            g_startMenuAllProgsSorted.push_back("DiskManager");
-            g_startMenuAllProgsSorted.push_back("Notepad");
-            g_startMenuAllProgsSorted.push_back("Paint");
-            g_startMenuAllProgsSorted.push_back("TaskManager");
+            for (const auto& app : DesktopService::GetRegisteredApps()) {
+                if (!app.displayName.empty()) g_startMenuAllProgsSorted.push_back(app.displayName);
+            }
             // Sort alphabetically (case-insensitive)
             std::sort(g_startMenuAllProgsSorted.begin( ), g_startMenuAllProgsSorted.end( ),
                 [] (const std::string& a, const std::string& b) {
@@ -271,6 +274,7 @@ namespace gxos {
             std::string err;
             if (!DesktopService::LaunchApp(act, err)) {
                 Logger::write(LogLevel::Error, std::string("Failed to launch app: ") + act + " - " + err);
+                NotificationManager::Add(err.empty() ? std::string("Failed to launch app: ") + act : err, NotificationLevel::Error);
             }
         }
 
@@ -1535,6 +1539,11 @@ namespace gxos {
             initVideoBackend( );
             DesktopConfigData cfg; std::string cfgErr; bool cfgOk = DesktopConfig::Load("desktop.json", cfg, cfgErr);
             g_cfg = cfg; // Store config
+            for (const auto& app : DesktopService::GetAppModelDemoApps()) {
+                if (std::find(g_cfg.pinned.begin(), g_cfg.pinned.end(), app.displayName) == g_cfg.pinned.end()) {
+                    g_cfg.pinned.push_back(app.displayName);
+                }
+            }
             refreshDesktopItems( ); // Populate g_items from pinned/recent
             refreshAllProgramsList( ); // Populate sorted all programs list
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)

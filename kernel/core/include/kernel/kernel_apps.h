@@ -221,6 +221,7 @@ public:
 
     virtual void onKeyDown(uint32_t key) override;
     virtual void onKeyChar(char c) override;
+    virtual void onMouseMove(int x, int y) override;
     virtual void onMouseDown(int x, int y, uint8_t button) override;
     virtual void onWidgetClick(int widgetId) override;
 
@@ -284,6 +285,7 @@ private:
     bool m_contextMenuOpen;
     int m_contextMenuX;
     int m_contextMenuY;
+    int m_contextMenuHover;
     bool m_propertiesOpen;
     bool m_propertiesIsDir;
     char m_propertiesName[vfs::VFS_MAX_FILENAME];
@@ -291,6 +293,7 @@ private:
     char m_propertiesType[32];
     char m_propertiesSize[24];
     char m_propertiesModified[24];
+    char m_propertiesIcon[32];
 
     void refresh();
     void navigate(const char* path);

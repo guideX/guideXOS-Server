@@ -19,6 +19,7 @@
 #include "include/kernel/fs_fat.h"
 #include "include/kernel/desktop.h"
 #include "include/kernel/kernel_app.h"
+#include "include/kernel/serial_debug.h"
 
 // Forward declarations for power functions (defined in desktop.cpp, outside any namespace)
 extern void perform_shutdown();
@@ -182,6 +183,16 @@ static int str_len(const char* s) {
     int len = 0;
     while (s[len]) len++;
     return len;
+}
+
+static bool str_contains(const char* text, const char* needle) {
+    if (!text || !needle || !*needle) return false;
+    for (uint32_t i = 0; text[i]; i++) {
+        uint32_t j = 0;
+        while (needle[j] && text[i + j] && text[i + j] == needle[j]) j++;
+        if (!needle[j]) return true;
+    }
+    return false;
 }
 
 static void str_copy(char* dst, const char* src, uint32_t maxLen) {
@@ -371,6 +382,11 @@ static void cmd_help() {
     output_string("\n");
     output_string("Desktop:\n");
     output_string("  apps           - List applications\n");
+        output_string("  desktop.apps   - List app model entries\n");
+        output_string("  desktop.apps.verbose - App registry diagnostics\n");
+        output_string("  desktop.launch <AppName> - Launch app or show availability\n");
+        output_string("  nativeapp.inspect <AppName> - Inspect native app availability\n");
+        output_string("  nativeapp.smoketest <AppName> - Native app smoke-test path\n");
     output_string("  workspaces     - Workspace info\n");
     output_string("  osk            - On-screen keyboard\n");
     output_string("  testmode       - GUI compositor test\n");
@@ -837,7 +853,65 @@ static void cmd_apps() {
     output_string("  Paint        - Drawing application\n");
     output_string("  TaskManager  - Process viewer\n");
     output_string("\n");
+    output_string("App Model Demos:\n");
+    output_string("  AppModel     - Bare-metal app model explanation\n");
+    output_string("  Hello World  - SDK NativeElf sample (hosted manifest)\n");
+    output_string("  Resource Viewer - SDK NativeElf sample (hosted manifest)\n");
+    output_string("  Native App Debug Viewer - hosted console-backed viewer\n");
+    output_string("\n");
     output_string("Launch from Start Menu or double-click desktop icons.\n");
+}
+
+static void cmd_desktop_apps(bool verbose) {
+    output_string(verbose ? "Desktop app registry (bare-metal):\n" : "Registered Applications (bare-metal):\n");
+    output_string("  Notepad [BuiltIn] launch=Notepad source=KernelApp\n");
+    output_string("  Calculator [BuiltIn] launch=Calculator source=KernelApp\n");
+    output_string("  TaskManager [BuiltIn] launch=TaskManager source=KernelApp\n");
+    output_string("  Files [BuiltIn] launch=Files source=KernelApp\n");
+    output_string("  FileExplorer [BuiltIn] launch=FileExplorer source=KernelApp\n");
+    output_string("  DiskManager [BuiltIn] launch=DiskManager source=KernelApp\n");
+    output_string("  AppModel [Diagnostic] launch=AppModel source=DesktopShortcut\n");
+    if (verbose) {
+        output_string("\nNative SDK sample manifests are hosted/server-side app model inputs:\n");
+        output_string("  Hello World -> sdk/samples/helloworld/app.json\n");
+        output_string("  Resource Viewer -> sdk/samples/resourceviewer/app.json\n");
+        output_string("Bare-metal does not execute hosted NativeElf samples; launch AppModel for a visible explanation.\n");
+    }
+}
+
+static void cmd_desktop_launch(const char* appName) {
+    if (!appName || appName[0] == '\0') {
+        output_string("Usage: desktop.launch <AppName>\n");
+        return;
+    }
+
+    if (str_eq(appName, "AppModel") || str_contains(appName, "Hello") || str_contains(appName, "Resource") || str_contains(appName, "Native")) {
+        output_string("App model demo entry is visible in the Start Menu/Desktop.\n");
+        output_string("Hello World and Resource Viewer are NativeElf SDK samples discovered by hosted app manifests.\n");
+        output_string("Bare-metal/non-experimental builds do not execute native ELF samples; this is expected.\n");
+        return;
+    }
+
+    output_string("Launching ");
+    output_string(appName);
+    output_string("...\n");
+    if (!::kernel::desktop::launch_app(appName)) {
+        output_string("Desktop launch failed or app is unavailable in bare-metal mode.\n");
+    }
+}
+
+static void cmd_nativeapp_inspect(const char* appName, bool smokeTest) {
+    if (!appName || appName[0] == '\0') {
+        output_string(smokeTest ? "Usage: nativeapp.smoketest <AppName>\n" : "Usage: nativeapp.inspect <AppName>\n");
+        return;
+    }
+
+    output_string(smokeTest ? "nativeapp.smoketest " : "nativeapp.inspect ");
+    output_string(appName);
+    output_string("\n");
+    output_string("Manifest/demo status: available in hosted app registry under sdk/samples or examples/apps.\n");
+    output_string("Execution status: native ELF execution is disabled/unavailable in bare-metal builds.\n");
+    output_string("Result: no ELF code executed; GUI entries remain visible and explain the limitation.\n");
 }
 
 static void cmd_workspaces() {
@@ -2844,6 +2918,16 @@ static void execute_command(const char* cmd) {
         cmd_about();
     } else if (str_eq(command, "apps") || str_eq(command, "programs")) {
         cmd_apps();
+    } else if (str_eq(command, "desktop.apps")) {
+        cmd_desktop_apps(false);
+    } else if (str_eq(command, "desktop.apps.verbose")) {
+        cmd_desktop_apps(true);
+    } else if (str_eq(command, "desktop.launch")) {
+        cmd_desktop_launch(arg1);
+    } else if (str_eq(command, "nativeapp.inspect")) {
+        cmd_nativeapp_inspect(arg1, false);
+    } else if (str_eq(command, "nativeapp.smoketest")) {
+        cmd_nativeapp_inspect(arg1, true);
     } else if (str_eq(command, "workspaces") || str_eq(command, "desktops")) {
         cmd_workspaces();
     } else if (str_eq(command, "colors") || str_eq(command, "colortest")) {

@@ -19,6 +19,7 @@
 #include "paint.h"
 #include "image_viewer.h"
 #include "onscreen_keyboard.h"
+#include "notification_manager.h"
 #include "shutdown_dialog.h"
 #include "disk_manager.h"
 #include "control_panel.h"
@@ -75,6 +76,36 @@ namespace gxos {
             return s_appRegistry.FindByDisplayName(app.displayName);
         }
 
+        static bool isAppModelDemoApp(const RegisteredDesktopApp& app) {
+            if (app.displayName == "Hello World" ||
+                app.displayName == "Resource Viewer" ||
+                app.displayName == "HelloWorld ELF" ||
+                app.displayName == "Native App Debug Viewer") {
+                return true;
+            }
+
+            return app.kind == apps::AppKind::NativeElf || app.kind == apps::AppKind::GXAppPackage;
+        }
+
+        static void ensureDefaultAppModelPins() {
+            const char* defaults[] = {
+                "Native App Debug Viewer",
+                "Hello World",
+                "Resource Viewer"
+            };
+
+            for (const char* name : defaults) {
+                if (!findRegisteredApp(name) || IsPinned(name)) continue;
+
+                PinnedItem item;
+                item.name = name;
+                item.kind = PinnedKind::App;
+                item.iconName = "app.generic";
+                s_pinned.push_back(item);
+                Logger::write(LogLevel::Info, std::string("Pinned app-model demo app: ") + name);
+            }
+        }
+
         static void refreshRegisteredAppsFromRegistry() {
             for (const auto& app : s_appRegistry.GetAllApps()) {
                 DesktopService::RegisterApp(app.manifest.id, app.manifest.displayName, app.manifest.icon, app.manifest.kind, launchNameForApp(app), apps::AppRegistry::ToString(app.sourceKind));
@@ -113,6 +144,7 @@ namespace gxos {
             logScanIssues("Duplicate app id", s_lastBuiltInRegisterResult.duplicateApps);
 
             refreshRegisteredAppsFromRegistry();
+            ensureDefaultAppModelPins();
             s_appRegistryInitialized = true;
             Logger::write(LogLevel::Info, "AppRegistry initialized, desktop apps=" + std::to_string(DesktopService::GetRegisteredApps().size()));
         }
@@ -308,6 +340,35 @@ namespace gxos {
             }
             oss << "launchPolicy: BuiltIn uses existing hardcoded launch branch; NativeElf/GXAppPackage return: manifest found but execution is not implemented yet\n";
             return oss.str();
+        }
+
+        std::string DesktopService::GetRegisteredAppsDiagnostic() {
+            ensureDefaultAppsRegistered();
+
+            std::ostringstream oss;
+            oss << "Registered Applications (" << s_apps.size() << "):\n";
+            for (const auto& app : s_apps) {
+                oss << "  " << app.displayName
+                    << " [" << apps::ToString(app.kind) << "]"
+                    << " id=" << app.id
+                    << " launch=" << app.launchName
+                    << " source=" << app.source << "\n";
+            }
+            return oss.str();
+        }
+
+        std::vector<RegisteredDesktopApp> DesktopService::GetAppModelDemoApps() {
+            ensureDefaultAppsRegistered();
+
+            std::vector<RegisteredDesktopApp> demos;
+            for (const auto& app : s_apps) {
+                if (isAppModelDemoApp(app)) demos.push_back(app);
+            }
+
+            std::sort(demos.begin(), demos.end(), [](const RegisteredDesktopApp& a, const RegisteredDesktopApp& b) {
+                return a.displayName < b.displayName;
+            });
+            return demos;
         }
 
         std::string DesktopService::NativeAppCapabilitiesDiagnostic() {
@@ -614,11 +675,13 @@ namespace gxos {
                     }
                     error = details.str();
                 }
+                NotificationManager::Add(error.empty() ? "Native app execution is unavailable for this app" : error, NotificationLevel::Error);
                 return false;
             }
 
             if (launchDecision.strategy == apps::AppLaunchStrategy::GXAppPackage) {
                 error = "GXApp launch pipeline not implemented";
+                NotificationManager::Add(error, NotificationLevel::Error);
                 return false;
             }
 
@@ -687,10 +750,16 @@ namespace gxos {
             }
             else if (appName == "HDInstaller") {
                 error = "HD Installer is not available in this runtime target";
+                NotificationManager::Add(error, NotificationLevel::Error);
                 return false;
+            }
+            else if (appName == "Native App Debug Viewer") {
+                apps::ConsoleWindow::Launch();
+                NotificationManager::Add("Native App Debug Viewer opened. Try: nativeapp.inspect Hello World", NotificationLevel::Info);
             }
             else {
                 error = "Application launcher not implemented: " + name;
+                NotificationManager::Add(error, NotificationLevel::Error);
                 return false;
             }
 
@@ -705,6 +774,7 @@ namespace gxos {
             if (!DesktopConfig::Load("desktop.json", cfg, err)) {
                 Logger::write(LogLevel::Info, std::string("Desktop config not found (first run): ") + err);
                 ensureDefaultAppsRegistered();
+                SaveState();
                 return;
             }
 
@@ -729,6 +799,7 @@ namespace gxos {
             }
 
             ensureDefaultAppsRegistered();
+            SaveState();
 
             Logger::write(LogLevel::Info, "Desktop state loaded");
         }

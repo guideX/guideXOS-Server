@@ -1889,6 +1889,7 @@ FileExplorerApp::FileExplorerApp()
     m_contextMenuOpen = false;
     m_contextMenuX = 0;
     m_contextMenuY = 0;
+    m_contextMenuHover = -1;
     m_propertiesOpen = false;
     m_propertiesIsDir = false;
     m_propertiesName[0] = '\0';
@@ -1896,6 +1897,7 @@ FileExplorerApp::FileExplorerApp()
     m_propertiesType[0] = '\0';
     m_propertiesSize[0] = '\0';
     m_propertiesModified[0] = '\0';
+    m_propertiesIcon[0] = '\0';
 }
 
 FileExplorerApp::~FileExplorerApp() {
@@ -2054,6 +2056,12 @@ void FileExplorerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
     static const uint32_t kIconSize = 16;
     framebuffer::fill_rect(x, y, w, h, rgb(246, 246, 246));
 
+    uint32_t toolbarIconY = y + 7;
+    drawThemedIcon(x + 10, toolbarIconY, kIconSize, "place.computer");
+    drawThemedIcon(x + 68, toolbarIconY, kIconSize, "file.folder");
+    drawThemedIcon(x + 110, toolbarIconY, kIconSize, "file.binary");
+    drawThemedIcon(x + 172, toolbarIconY, kIconSize, "drive.mounted");
+
     uint32_t addressY = y + TOOLBAR_H;
     framebuffer::fill_rect(x, addressY, w, ADDRESS_H, rgb(255, 255, 255));
     appDrawText(x + 8, addressY + 7, "Address:", rgb(70, 70, 70));
@@ -2132,6 +2140,11 @@ void FileExplorerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
         framebuffer::fill_rect(x + m_contextMenuX, y + m_contextMenuY + CONTEXT_MENU_ITEM_H * 4 + 1, CONTEXT_MENU_W, 1, rgb(120, 120, 140));
         framebuffer::fill_rect(x + m_contextMenuX, y + m_contextMenuY, 1, CONTEXT_MENU_ITEM_H * 4 + 2, rgb(120, 120, 140));
         framebuffer::fill_rect(x + m_contextMenuX + CONTEXT_MENU_W - 1, y + m_contextMenuY, 1, CONTEXT_MENU_ITEM_H * 4 + 2, rgb(120, 120, 140));
+        for (int i = 0; i < 4; ++i) {
+            if (m_contextMenuHover == i) {
+                framebuffer::fill_rect(x + m_contextMenuX + 1, y + m_contextMenuY + 1 + i * CONTEXT_MENU_ITEM_H, CONTEXT_MENU_W - 2, CONTEXT_MENU_ITEM_H, rgb(60, 90, 140));
+            }
+        }
         appDrawText(x + m_contextMenuX + 8, y + m_contextMenuY + 6,  "Open", rgb(20, 20, 20));
         appDrawText(x + m_contextMenuX + 8, y + m_contextMenuY + 6 + CONTEXT_MENU_ITEM_H, "Rename", rgb(20, 20, 20));
         appDrawText(x + m_contextMenuX + 8, y + m_contextMenuY + 6 + CONTEXT_MENU_ITEM_H * 2, "Delete", rgb(20, 20, 20));
@@ -2154,7 +2167,7 @@ void FileExplorerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
         framebuffer::fill_rect(x + 200, y + 294, 400, 1, rgb(110, 110, 130));
         framebuffer::fill_rect(x + 200, y + 145, 1, 150, rgb(110, 110, 130));
         framebuffer::fill_rect(x + 599, y + 145, 1, 150, rgb(110, 110, 130));
-        if (!drawThemedIcon(x + 216, y + 162, 24, m_propertiesIsDir ? "file.folder" : fileLogicalIcon(m_entries[m_selected >= 0 && m_selected < m_entryCount ? m_selected : 0]))) {
+        if (!drawThemedIcon(x + 216, y + 162, 24, m_propertiesIcon[0] ? m_propertiesIcon : (m_propertiesIsDir ? "file.folder" : "file.unknown"))) {
             drawPlaceholderIcon(x + 216, y + 162, 24);
         }
         appDrawText(x + 248, y + 168, "Properties", rgb(30, 30, 30));
@@ -2200,6 +2213,10 @@ void FileExplorerApp::onKeyDown(uint32_t key) {
     if (ps2keyboard::is_ctrl_down()) {
         if (key == 'c' || key == 'C') {
             beginCopySelected();
+            return;
+        }
+        if (key == 'x' || key == 'X') {
+            beginMoveSelected();
             return;
         }
         if (key == 'v' || key == 'V') {
@@ -2267,6 +2284,16 @@ void FileExplorerApp::onKeyChar(char c) {
     }
 }
 
+void FileExplorerApp::onMouseMove(int x, int y) {
+    if (m_contextMenuOpen) {
+        int hover = hitTestContextMenu(x, y);
+        if (hover != m_contextMenuHover) {
+            m_contextMenuHover = hover;
+            invalidate();
+        }
+    }
+}
+
 void FileExplorerApp::onMouseDown(int localX, int localY, uint8_t button) {
     if (m_propertiesOpen && button == 1) {
         closeProperties();
@@ -2295,6 +2322,7 @@ void FileExplorerApp::onMouseDown(int localX, int localY, uint8_t button) {
         m_contextMenuOpen = (index >= 0 && index < m_entryCount);
         m_contextMenuX = localX;
         m_contextMenuY = localY;
+        m_contextMenuHover = -1;
         serial::puts("[fileexplorer-bm] context menu open\n");
         invalidate();
         return;
@@ -2559,6 +2587,7 @@ void FileExplorerApp::showPropertiesForSelected() {
     else formatSize(entry.size, m_propertiesSize, sizeof(m_propertiesSize));
     strcopy(m_propertiesModified, "--", sizeof(m_propertiesModified));
     m_propertiesIsDir = entry.isDir;
+    strcopy(m_propertiesIcon, fileLogicalIcon(entry), sizeof(m_propertiesIcon));
     m_propertiesOpen = true;
     m_contextMenuOpen = false;
     serial::puts("[fileexplorer-bm] properties open\n");
@@ -2675,6 +2704,7 @@ int FileExplorerApp::hitTestEntryRow(int x, int y) const {
 
 void FileExplorerApp::closeTransientUi() {
     m_contextMenuOpen = false;
+    m_contextMenuHover = -1;
     m_propertiesOpen = false;
 }
 
