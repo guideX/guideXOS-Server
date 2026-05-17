@@ -37,6 +37,10 @@ RegisteredApp makeBuiltInApp(const std::string& appName) {
     app.manifest.description = "Built-in guideXOS application.";
     app.manifest.category = "BuiltIn";
     app.manifest.kind = AppKind::BuiltIn;
+    if (appName == "Trash") {
+        app.manifest.description = "Built-in guideXOS Trash placeholder.";
+        app.manifest.icon = "trash.empty";
+    }
     app.manifest.supportedArchitectures.push_back("any");
 
     AppEntry entry;
@@ -68,6 +72,7 @@ const std::vector<std::string>& defaultBuiltInAppNames() {
         "Clock",
         "Console",
         "FileExplorer",
+        "Trash",
         "TaskManager",
         "Paint",
         "ImageViewer",

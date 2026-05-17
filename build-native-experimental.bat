@@ -49,6 +49,7 @@ control_panel.cpp ^
 elf_validator.cpp ^
 executable_memory.cpp ^
 file_explorer.cpp ^
+file_icon_provider.cpp ^
 firewall.cpp ^
 focus_indicator.cpp ^
 fs.cpp ^
@@ -58,6 +59,7 @@ gxm_loader.cpp ^
 image.cpp ^
 image_renderer.cpp ^
 image_viewer.cpp ^
+icon_theme_manager.cpp ^
 icons.cpp ^
 ipc_bus.cpp ^
 kernel/core/architecture_detector.cpp ^
@@ -65,6 +67,7 @@ lifecycle.cpp ^
 logger.cpp ^
 message_box.cpp ^
 module_manager.cpp ^
+native_app_debug_log.cpp ^
 native_app_process_table.cpp ^
 native_app_runtime.cpp ^
 native_elf_executor.cpp ^

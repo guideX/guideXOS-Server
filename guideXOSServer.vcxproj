@@ -333,6 +333,7 @@
     <ClInclude Include="sdk\include\guidexos\types.h" />
     <ClInclude Include="sdk\include\guidexos\ui.h" />
     <ClInclude Include="special_effects.h" />
+    <ClInclude Include="trash.h" />
     <ClInclude Include="ui_settings.h" />
     <ClInclude Include="universal_app_loader.h" />
     <ClInclude Include="video_backend.h" />
@@ -558,6 +559,7 @@
     <ClCompile Include="sdk\samples\helloworld\main.cpp" />
     <ClCompile Include="sdk\samples\resourceviewer\main.cpp" />
     <ClCompile Include="special_effects.cpp" />
+    <ClCompile Include="trash.cpp" />
     <ClCompile Include="universal_app_loader.cpp" />
     <ClCompile Include="video_backend.cpp" />
     <ClCompile Include="welcome.cpp" />
@@ -738,3 +740,5 @@
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>
 </Project>
+
+

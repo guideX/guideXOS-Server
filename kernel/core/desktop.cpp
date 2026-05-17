@@ -521,6 +521,7 @@ static DesktopIcon s_desktopIcons[] = {
     {"Notepad",     0xFF78B450, true, false, -1, -1},  // green, pinned
     {"Calculator",  0xFF4690C8, true, false, -1, -1},  // blue, pinned
     {"Console",     0xFF78B450, true, false, -1, -1},  // green, pinned
+    {"Trash",       0xFF9098A4, true, false, -1, -1},  // gray, pinned
     {"Paint",       0xFFC87830, false, true, -1, -1},  // orange, recent
     {"Clock",       0xFF4690C8, false, true, -1, -1},  // blue, recent
     {"TaskManager", 0xFFB44646, true, false, -1, -1},  // red, pinned (matches registered app name)
@@ -528,7 +529,7 @@ static DesktopIcon s_desktopIcons[] = {
     {"ImgViewer",   0xFFC87830, false, false, -1, -1}, // orange
     {"AppModel",    0xFF5587D2, true, false, -1, -1},  // blue, app model demo
 };
-static const int kDesktopIconCount = 9;
+static const int kDesktopIconCount = sizeof(s_desktopIcons) / sizeof(s_desktopIcons[0]);
 static const int kMaxRecentApps = 5;  // Max recent apps to show
 
 // Start menu entries structure for dynamic list
@@ -544,6 +545,7 @@ static StartMenuApp s_startMenuApps[] = {
     {"Calculator",  true,  false, 0xFF4690C8},  // pinned
     {"Notepad",     true,  false, 0xFF78B450},  // pinned
     {"Console",     true,  false, 0xFF78B450},  // pinned
+    {"Trash",       true,  false, 0xFF9098A4},  // pinned
     {"TaskManager", true,  false, 0xFFB44646},  // pinned
     {"DiskManager", true,  false, 0xFFB48C46},  // pinned (orange-brown for disk)
     {"HDInstaller", true,  false, 0xFFB48C46},  // pinned (orange-brown for installer)
@@ -553,7 +555,7 @@ static StartMenuApp s_startMenuApps[] = {
     {"Files",       false, true,  0xFFC8B43C},  // recent
     {"ImgViewer",   false, false, 0xFFC87830},  // not shown by default
 };
-static const int kStartMenuAppCount = 11;
+static const int kStartMenuAppCount = sizeof(s_startMenuApps) / sizeof(s_startMenuApps[0]);
 static const int kMaxStartMenuRecent = 5;  // Max recent apps in start menu
 
 // All Programs alphabetically sorted list (for "All Programs" view)
@@ -570,8 +572,9 @@ static const char* s_allProgramsList[] = {
     "Notepad",
     "Paint",
     "TaskManager",
+    "Trash",
 };
-static const int kAllProgramsCount = 12;
+static const int kAllProgramsCount = sizeof(s_allProgramsList) / sizeof(s_allProgramsList[0]);
 
 struct AppModelDemoRow {
     const char* displayName;
@@ -1724,6 +1727,15 @@ static void draw_icon_symbol(uint32_t ix, uint32_t iy, uint32_t size, const char
         draw_text(cx + 2, cy - 4, "_", iconColor, 1);
         return;
     }
+
+    if (appName[0] == 'T' && appName[1] == 'r') {  // "Trash"
+        framebuffer::fill_rect(cx - 7, cy - 6, 14, 2, iconColor);
+        framebuffer::fill_rect(cx - 5, cy - 8, 10, 2, iconColor);
+        draw_rect(cx - 6, cy - 4, 12, 14, iconColor);
+        vline(cx - 2, cy - 2, 10, iconColor);
+        vline(cx + 1, cy - 2, 10, iconColor);
+        return;
+    }
     
     // Paint - draw palette/brush
     if (appName[0] == 'P' && appName[1] == 'a') {  // "Paint"
@@ -1793,6 +1805,7 @@ static const char* GetDesktopIconLogicalName(const char* label)
     if (text_equals(label, "Notepad")) return "app.notepad";
     if (text_equals(label, "Calculator")) return "app.calculator";
     if (text_equals(label, "Console")) return "app.console";
+    if (text_equals(label, "Trash")) return "trash.empty";
     if (text_equals(label, "TaskManager")) return "app.taskmanager";
     if (text_equals(label, "Files")) return "app.files";
     if (text_equals(label, "Paint")) return "app.paint";
@@ -1884,6 +1897,8 @@ static const uint32_t* get_embedded_desktop_icon_pixels(const char* logicalName)
     if (text_equals(logicalName, "app.notepad"))       return kDesktopThemeIcon_Notepad;
     if (text_equals(logicalName, "app.calculator"))    return kDesktopThemeIcon_Calculator;
     if (text_equals(logicalName, "app.console"))       return kDesktopThemeIcon_Console;
+    if (text_equals(logicalName, "trash.empty"))       return kDesktopThemeIcon_TrashEmpty;
+    if (text_equals(logicalName, "trash.full"))        return kDesktopThemeIcon_TrashFull;
     if (text_equals(logicalName, "app.taskmanager"))   return kDesktopThemeIcon_TaskManager;
     if (text_equals(logicalName, "app.files"))         return kDesktopThemeIcon_Files;
     if (text_equals(logicalName, "app.paint"))         return kDesktopThemeIcon_Paint;
@@ -1960,7 +1975,7 @@ static bool draw_themed_desktop_icon(int iconIdx, uint32_t cx, uint32_t iy)
 static void reset_desktop_icon_cache_if_needed()
 {
     if (s_cachedDesktopIconSize == s_desktopIconSize) return;
-    for (int i = 0; i < 8; i++) {
+    for (int i = 0; i < kDesktopIconCount; i++) {
         s_desktopIconImageCache[i].reset();
         s_desktopIconLoadAttempted[i] = false;
         s_desktopIconMissingLogged[i] = false;

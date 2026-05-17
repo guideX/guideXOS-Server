@@ -31,6 +31,7 @@ IconThemeManager::IconThemeManager()
     m_manifest.emplace("app.clock", "47-_iCal_256x256_35384.png");
     m_manifest.emplace("app.console", "29-Generic_256x256_35387.png");
     m_manifest.emplace("app.calculator", "15-Dashboard__256x256_35400.png");
+    m_manifest.emplace("app.trash", "24-Empty_Trash_256x256_35394.png");
     m_manifest.emplace("app.generic", "31-Document_256x256_35398.png");
     m_manifest.emplace("place.computer", "1_My_Computer_256x256_35372.png");
     m_manifest.emplace("place.home", "1_-_Home_256x256_35385.png");

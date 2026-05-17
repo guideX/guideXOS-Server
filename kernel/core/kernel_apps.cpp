@@ -1932,6 +1932,8 @@ const uint32_t* FileExplorerApp::getEmbeddedIconPixels(const char* logicalName) 
     if (textEquals(logicalName, "app.notepad"))       return kDesktopThemeIcon_Notepad;
     if (textEquals(logicalName, "app.calculator"))    return kDesktopThemeIcon_Calculator;
     if (textEquals(logicalName, "app.console"))       return kDesktopThemeIcon_Console;
+    if (textEquals(logicalName, "trash.empty"))       return kDesktopThemeIcon_TrashEmpty;
+    if (textEquals(logicalName, "trash.full"))        return kDesktopThemeIcon_TrashFull;
     if (textEquals(logicalName, "app.taskmanager"))   return kDesktopThemeIcon_TaskManager;
     if (textEquals(logicalName, "app.files"))         return kDesktopThemeIcon_Files;
     if (textEquals(logicalName, "app.paint"))         return kDesktopThemeIcon_Paint;
@@ -3159,6 +3161,53 @@ void DiskManagerApp::onWidgetClick(int widgetId) {
     }
 }
 
+TrashApp::TrashApp()
+{
+    strcopy(m_name, "Trash", app::MAX_APP_NAME);
+}
+
+TrashApp::~TrashApp()
+{
+}
+
+bool TrashApp::init()
+{
+    m_window = new app::KernelWindow();
+    if (!m_window) return false;
+
+    strcopy(m_window->title, "Trash", app::MAX_TITLE_LEN);
+    m_window->x = 140;
+    m_window->y = 90;
+    m_window->w = 420;
+    m_window->h = 240;
+    m_window->flags = app::WF_VISIBLE | app::WF_TITLEBAR | app::WF_CLOSABLE | app::WF_RESIZABLE | app::WF_FOCUSED;
+    m_window->owner = this;
+
+    if (!compositor::KernelCompositor::registerWindow(m_window)) {
+        delete m_window;
+        m_window = nullptr;
+        return false;
+    }
+
+    m_state = app::AppState::Running;
+    return true;
+}
+
+void TrashApp::shutdown()
+{
+    m_state = app::AppState::Terminated;
+}
+
+void TrashApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h)
+{
+    framebuffer::fill_rect(x, y, w, h, rgb(38, 40, 46));
+    if (w > 32 && h > 36) {
+        framebuffer::fill_rect(x + 16, y + 18, w - 32, h - 36, rgb(28, 30, 36));
+    }
+    appDrawText(x + 26, y + 34, "Trash is empty.", rgb(220, 225, 235));
+    appDrawText(x + 26, y + 58, "Deleted files will appear here.", rgb(165, 170, 185));
+}
+
 // ============================================================
 // App Registration
 // ============================================================
@@ -3173,6 +3222,7 @@ void registerKernelApps() {
     app::AppManager::registerApp("TaskManager", 0xFFB44646, TaskManagerApp::create);
     app::AppManager::registerApp("Files", 0xFFC8B43C, FileExplorerApp::create);
     app::AppManager::registerApp("FileExplorer", 0xFFC8B43C, FileExplorerApp::create);
+    app::AppManager::registerApp("Trash", 0xFF9098A4, TrashApp::create);
     app::AppManager::registerApp("DiskManager", 0xFF7050C0, DiskManagerApp::create);
 }
 

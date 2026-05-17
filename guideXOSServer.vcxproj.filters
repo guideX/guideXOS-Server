@@ -675,6 +675,9 @@
     <ClInclude Include="native_elf_trampoline_win64.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="trash.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="allocator.cpp">
@@ -1284,6 +1287,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="native_elf_trampoline_win64.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="trash.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

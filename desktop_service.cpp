@@ -6,6 +6,7 @@
 #include "fs.h"
 #include "logger.h"
 #include "lifecycle.h"
+#include "process.h"
 #include "native_app_runtime.h"
 #include "native_elf_executor.h"
 #include "native_elf_image_loader.h"
@@ -23,6 +24,7 @@
 #include "shutdown_dialog.h"
 #include "disk_manager.h"
 #include "control_panel.h"
+#include "trash.h"
 #include "package_manager.h"
 #include <algorithm>
 #include <filesystem>
@@ -128,6 +130,66 @@ namespace gxos {
                 }
                 oss << "\n";
             }
+        }
+
+        static std::string joinMessages(const std::vector<std::string>& messages) {
+            std::ostringstream oss;
+            for (size_t i = 0; i < messages.size(); ++i) {
+                if (i > 0) oss << "; ";
+                oss << messages[i];
+            }
+            return oss.str();
+        }
+
+        static uint64_t launchNativeElfProcess(const apps::RegisteredApp& registryApp, const apps::LaunchDecision& launchDecision) {
+            ProcessSpec spec;
+            spec.name = std::string("nativeelf:") + (registryApp.manifest.id.empty() ? registryApp.manifest.displayName : registryApp.manifest.id);
+            spec.entry = [registryApp, launchDecision](int, char**) -> int {
+                apps::NativeElfLaunchResult nativeElfResult = apps::NativeElfLaunchPipeline::PrepareLaunch(registryApp, launchDecision);
+                if (!nativeElfResult.success) {
+                    std::string message = std::string("Native app launch failed: ") + (nativeElfResult.validationErrors.empty() ? nativeElfResult.message : joinMessages(nativeElfResult.validationErrors));
+                    Logger::write(LogLevel::Warn, message);
+                    NotificationManager::Add(message, NotificationLevel::Error);
+                    return apps::GX_ERROR_FAILED;
+                }
+
+                apps::NativeElfImage nativeElfImage = apps::NativeElfImageLoader::LoadImage(nativeElfResult);
+                if (!nativeElfImage.success) {
+                    std::string message = std::string("Native app image load failed: ") + (nativeElfImage.diagnostics.empty() ? nativeElfResult.elfPath : joinMessages(nativeElfImage.diagnostics));
+                    Logger::write(LogLevel::Warn, message);
+                    NotificationManager::Add(message, NotificationLevel::Error);
+                    return apps::GX_ERROR_FAILED;
+                }
+
+                apps::NativeAppRuntimeContext runtimeContext = apps::NativeAppRuntime::Prepare(registryApp, launchDecision, nativeElfResult, nativeElfImage);
+                if (!runtimeContext.success) {
+                    std::string message = std::string("Native app runtime prepare failed: ") + joinMessages(runtimeContext.diagnostics);
+                    Logger::write(LogLevel::Warn, message);
+                    NotificationManager::Add(message, NotificationLevel::Error);
+                    return apps::GX_ERROR_FAILED;
+                }
+
+                std::string executorReason;
+                if (!apps::NativeElfExecutor::CanExecute(nativeElfResult, nativeElfImage, runtimeContext, &executorReason)) {
+                    std::string message = std::string("Native app launch unavailable: ") + executorReason;
+                    Logger::write(LogLevel::Warn, message);
+                    NotificationManager::Add(message, NotificationLevel::Error);
+                    return apps::GX_ERROR_FAILED;
+                }
+
+                apps::NativeElfExecutionResult executionResult = apps::NativeElfExecutor::Execute(nativeElfResult, nativeElfImage, runtimeContext);
+                if (!executionResult.success) {
+                    std::string message = std::string("Native app execution failed: ") + (executionResult.failureReason.empty() ? executionResult.message : executionResult.failureReason);
+                    Logger::write(LogLevel::Warn, message);
+                    NotificationManager::Add(message, NotificationLevel::Error);
+                    return executionResult.exitCode == 0 ? apps::GX_ERROR_FAILED : executionResult.exitCode;
+                }
+
+                Logger::write(LogLevel::Info, std::string("Native app execution completed: ") + registryApp.manifest.displayName + " exitCode=" + std::to_string(executionResult.exitCode));
+                return executionResult.exitCode;
+            };
+
+            return ProcessTable::spawn(spec, { spec.name });
         }
 
         static void ensureDefaultAppsRegistered() {
@@ -630,7 +692,7 @@ namespace gxos {
                 }
 
                 if (!apps::NativeElfExecutor::ExperimentalExecutionEnabled()) {
-                    error = std::string("Native app discovered but execution is disabled in this runtime target: ") + manifestApp->displayName;
+                    error = std::string("Native app launch requires the experimental hosted runtime. Build with build-native-experimental.bat and run with run-server-experimental.bat: ") + manifestApp->displayName;
                     if (!resolvedNativeElfPath.empty() && !FS::exists(resolvedNativeElfPath)) {
                         error += " (sample binary not built: " + resolvedNativeElfPath + ")";
                     }
@@ -644,59 +706,15 @@ namespace gxos {
                     return false;
                 }
 
-                apps::NativeElfLaunchResult nativeElfResult = apps::NativeElfLaunchPipeline::PrepareLaunch(*registryApp, launchDecision);
-                if (nativeElfResult.success) {
-                    apps::NativeElfImage nativeElfImage = apps::NativeElfImageLoader::LoadImage(nativeElfResult);
-                    if (nativeElfImage.success) {
-                        apps::NativeAppRuntimeContext runtimeContext = apps::NativeAppRuntime::Prepare(*registryApp, launchDecision, nativeElfResult, nativeElfImage);
-                        if (runtimeContext.success) {
-                            std::string executorReason;
-                            if (apps::NativeElfExecutor::CanExecute(nativeElfResult, nativeElfImage, runtimeContext, &executorReason)) {
-                                error = "Native app executor available; use nativeapp.inspect or nativeapp.smoketest for experimental execution";
-                            } else {
-                                error = "Native app runtime prepared; execution disabled/not available";
-                                if (!executorReason.empty()) error += ": " + executorReason;
-                            }
-                        } else {
-                            std::ostringstream details;
-                            details << "Native app runtime prepare failed";
-                            if (!runtimeContext.diagnostics.empty()) {
-                                details << ": ";
-                                for (size_t i = 0; i < runtimeContext.diagnostics.size(); ++i) {
-                                    if (i > 0) details << "; ";
-                                    details << runtimeContext.diagnostics[i];
-                                }
-                            }
-                            error = details.str();
-                        }
-                    } else {
-                        std::ostringstream details;
-                        details << "Native ELF image load failed";
-                        if (!nativeElfImage.diagnostics.empty()) {
-                            details << ": ";
-                            for (size_t i = 0; i < nativeElfImage.diagnostics.size(); ++i) {
-                                if (i > 0) details << "; ";
-                                details << nativeElfImage.diagnostics[i];
-                            }
-                        }
-                        error = details.str();
-                    }
-                } else {
-                    std::ostringstream details;
-                    details << "Native ELF validation failed";
-                    if (!nativeElfResult.validationErrors.empty()) {
-                        details << ": ";
-                        for (size_t i = 0; i < nativeElfResult.validationErrors.size(); ++i) {
-                            if (i > 0) details << "; ";
-                            details << nativeElfResult.validationErrors[i];
-                        }
-                    } else if (!nativeElfResult.message.empty()) {
-                        details << ": " << nativeElfResult.message;
-                    }
-                    error = details.str();
+                uint64_t nativePid = launchNativeElfProcess(*registryApp, launchDecision);
+                if (nativePid == 0) {
+                    error = std::string("Native app launch failed to start process: ") + manifestApp->displayName;
+                    NotificationManager::Add(error, NotificationLevel::Error);
+                    return false;
                 }
-                NotificationManager::Add(error.empty() ? "Native app execution is unavailable for this app" : error, NotificationLevel::Error);
-                return false;
+
+                Logger::write(LogLevel::Info, std::string("Launched native app process: ") + manifestApp->displayName + " pid=" + std::to_string(nativePid));
+                return true;
             }
 
             if (launchDecision.strategy == apps::AppLaunchStrategy::GXAppPackage) {
@@ -767,6 +785,9 @@ namespace gxos {
             }
             else if (appName == "ControlPanel") {
                 apps::ControlPanel::Launch();
+            }
+            else if (appName == "Trash") {
+                apps::Trash::Launch();
             }
             else if (appName == "HDInstaller") {
                 error = "HD Installer is not available in this runtime target";

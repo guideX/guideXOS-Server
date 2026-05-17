@@ -185,6 +185,7 @@ namespace gxos {
             if (label == "Calculator") return "app.calculator";
             if (label == "Notepad") return "app.notepad";
             if (label == "Console") return "app.console";
+            if (label == "Trash") return "trash.empty";
             if (label == "TaskManager" || label == "Task Manager") return "app.taskmanager";
             if (label == "DiskManager") return "app.diskmanager";
             if (label == "HDInstaller") return "app.installer";
@@ -205,6 +206,7 @@ namespace gxos {
         static COLORREF startMenuFallbackIconColor(const std::string& label) {
             if (label == "Calculator" || label == "Clock") return RGB(70, 140, 200);
             if (label == "Notepad" || label == "Console") return RGB(120, 180, 80);
+            if (label == "Trash") return RGB(150, 150, 160);
             if (label == "Paint") return RGB(200, 120, 60);
             if (label == "TaskManager" || label == "Task Manager") return RGB(180, 70, 70);
             if (label == "DiskManager" || label == "ControlPanel" || label == "Control Panel" || label == "Settings") return RGB(140, 90, 180);
@@ -253,6 +255,18 @@ namespace gxos {
 
             ImageRenderer::DrawImage(dc, icon, iconRect.left, iconRect.top, kStartMenuIconSize, kStartMenuIconSize);
             return true;
+        }
+
+        static bool drawDesktopThemedIcon(HDC dc, const RECT& iconRect, const std::string& label) {
+            try {
+                ImagePtr icon = IconThemeManager::Instance().LoadIcon(startMenuLogicalIconName(label), iconRect.right - iconRect.left);
+                if (!icon || !icon->isValid()) return false;
+                ImageRenderer::DrawImage(dc, icon, iconRect.left, iconRect.top, iconRect.right - iconRect.left, iconRect.bottom - iconRect.top);
+                return true;
+            }
+            catch (...) {
+                return false;
+            }
         }
 
         static std::string packMousePayload(int x, int y, int button, const std::string& action, uint64_t ownerPid, uint64_t windowId = 0) {
@@ -556,25 +570,25 @@ namespace gxos {
                     FocusIndicator::DrawFocusRect(dc, cell.left, cell.top, cellW, cellH, 4, 2, 3);
                 } else if (hover) { HBRUSH hov = CreateSolidBrush(RGB(50, 55, 65)); FillRect(dc, &cell, hov); DeleteObject(hov); HPEN hovP = CreatePen(PS_SOLID, 1, RGB(80, 100, 140)); HGDIOBJ oP = SelectObject(dc, hovP); HGDIOBJ oB = SelectObject(dc, GetStockObject(NULL_BRUSH)); Rectangle(dc, cell.left, cell.top, cell.right, cell.bottom); SelectObject(dc, oP); SelectObject(dc, oB); DeleteObject(hovP); }
                 RECT iconR{ x + (cellW - iconW) / 2, y + 6, x + (cellW - iconW) / 2 + iconW, y + 6 + iconH };
-                // Color-coded icons based on app name
-                COLORREF iconColor = RGB(90, 100, 120); // default
                 std::string lbl = it.label;
-                if (lbl == "Calculator" || lbl == "Clock") iconColor = RGB(70, 140, 200);
-                else if (lbl == "Notepad" || lbl == "Console") iconColor = RGB(120, 180, 80);
-                else if (lbl == "Paint" || lbl == "ImageViewer") iconColor = RGB(200, 120, 60);
-                else if (lbl == "TaskManager") iconColor = RGB(180, 70, 70);
-                else if (lbl == "DiskManager" || lbl == "ControlPanel") iconColor = RGB(140, 90, 180);
-                else if (lbl == "Files" || lbl == "ComputerFiles") iconColor = RGB(200, 180, 60);
-                else if (it.pinned) iconColor = RGB(90, 140, 220);
-                HBRUSH ib = CreateSolidBrush(iconColor); FillRect(dc, &iconR, ib); DeleteObject(ib);
-                // Icon inner detail: small symbol
-                {
-                    int cx = iconR.left + (iconW / 2); int cy = iconR.top + (iconH / 2);
-                    HBRUSH inner = CreateSolidBrush(RGB(GetRValue(iconColor) + 40 > 255 ? 255 : GetRValue(iconColor) + 40, GetGValue(iconColor) + 40 > 255 ? 255 : GetGValue(iconColor) + 40, GetBValue(iconColor) + 40 > 255 ? 255 : GetBValue(iconColor) + 40));
-                    RECT innerR{ cx - 10, cy - 10, cx + 10, cy + 10 }; FillRect(dc, &innerR, inner); DeleteObject(inner);
+                if (!drawDesktopThemedIcon(dc, iconR, lbl)) {
+                    COLORREF iconColor = RGB(90, 100, 120);
+                    if (lbl == "Calculator" || lbl == "Clock") iconColor = RGB(70, 140, 200);
+                    else if (lbl == "Notepad" || lbl == "Console") iconColor = RGB(120, 180, 80);
+                    else if (lbl == "Trash") iconColor = RGB(150, 150, 160);
+                    else if (lbl == "Paint" || lbl == "ImageViewer") iconColor = RGB(200, 120, 60);
+                    else if (lbl == "TaskManager") iconColor = RGB(180, 70, 70);
+                    else if (lbl == "DiskManager" || lbl == "ControlPanel") iconColor = RGB(140, 90, 180);
+                    else if (lbl == "Files" || lbl == "ComputerFiles") iconColor = RGB(200, 180, 60);
+                    else if (it.pinned) iconColor = RGB(90, 140, 220);
+                    HBRUSH ib = CreateSolidBrush(iconColor); FillRect(dc, &iconR, ib); DeleteObject(ib);
+                    {
+                        int cx = iconR.left + (iconW / 2); int cy = iconR.top + (iconH / 2);
+                        HBRUSH inner = CreateSolidBrush(RGB(GetRValue(iconColor) + 40 > 255 ? 255 : GetRValue(iconColor) + 40, GetGValue(iconColor) + 40 > 255 ? 255 : GetGValue(iconColor) + 40, GetBValue(iconColor) + 40 > 255 ? 255 : GetBValue(iconColor) + 40));
+                        RECT innerR{ cx - 10, cy - 10, cx + 10, cy + 10 }; FillRect(dc, &innerR, inner); DeleteObject(inner);
+                    }
+                    HPEN iconFrame = CreatePen(PS_SOLID, 1, RGB(180, 180, 200)); HGDIOBJ oP2 = SelectObject(dc, iconFrame); HGDIOBJ oB2 = SelectObject(dc, GetStockObject(NULL_BRUSH)); Rectangle(dc, iconR.left, iconR.top, iconR.right, iconR.bottom); SelectObject(dc, oP2); SelectObject(dc, oB2); DeleteObject(iconFrame);
                 }
-                // Rounded-ish frame (just a subtle border)
-                HPEN iconFrame = CreatePen(PS_SOLID, 1, RGB(180, 180, 200)); HGDIOBJ oP2 = SelectObject(dc, iconFrame); HGDIOBJ oB2 = SelectObject(dc, GetStockObject(NULL_BRUSH)); Rectangle(dc, iconR.left, iconR.top, iconR.right, iconR.bottom); SelectObject(dc, oP2); SelectObject(dc, oB2); DeleteObject(iconFrame);
                 // Label with text shadow
                 SetTextColor(dc, RGB(0, 0, 0)); TextOutA(dc, x + 5, iconR.bottom + 5, lbl.c_str( ), (int)lbl.size( ));
                 SetTextColor(dc, RGB(230, 230, 240)); TextOutA(dc, x + 4, iconR.bottom + 4, lbl.c_str( ), (int)lbl.size( ));

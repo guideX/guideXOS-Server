@@ -88,6 +88,7 @@ shutdown_dialog.cpp ^
 special_effects.cpp ^
 system_tray.cpp ^
 task_manager.cpp ^
+trash.cpp ^
 universal_app_loader.cpp ^
 video_backend.cpp ^
 vfs.cpp ^
