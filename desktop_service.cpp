@@ -89,6 +89,7 @@ namespace gxos {
 
         static void ensureDefaultAppModelPins() {
             const char* defaults[] = {
+                "App Model Demo",
                 "Native App Debug Viewer",
                 "Hello World",
                 "Resource Viewer"

@@ -133,7 +133,9 @@ namespace gxos {
         static const int kStartMenuIconSize = 16;
 
         static bool isAppModelDemoAppLabel(const std::string& label) {
-            return label == "Native App Debug Viewer" ||
+            return label == "App Model Demo" ||
+                label == "AppModel" ||
+                label == "Native App Debug Viewer" ||
                 label == "Hello World" ||
                 label == "Resource Viewer" ||
                 label == "HelloWorld ELF" ||
@@ -267,9 +269,89 @@ namespace gxos {
         void Compositor::addRecent(const std::string& act) { auto it = std::find(g_cfg.recent.begin( ), g_cfg.recent.end( ), act); if (it != g_cfg.recent.end( )) g_cfg.recent.erase(it); g_cfg.recent.insert(g_cfg.recent.begin( ), act); if (g_cfg.recent.size( ) > 20) g_cfg.recent.pop_back( ); refreshDesktopItems( ); saveDesktopConfig( ); }
         void Compositor::pinAction(const std::string& act) { if (act.empty( )) return; if (std::find(g_cfg.pinned.begin( ), g_cfg.pinned.end( ), act) == g_cfg.pinned.end( )) { g_cfg.pinned.push_back(act); refreshDesktopItems( ); saveDesktopConfig( ); } }
         void Compositor::unpinAction(const std::string& act) { auto it = std::find(g_cfg.pinned.begin( ), g_cfg.pinned.end( ), act); if (it != g_cfg.pinned.end( )) { g_cfg.pinned.erase(it); refreshDesktopItems( ); saveDesktopConfig( ); } }
+        static std::string hostedLaunchStatus(const RegisteredDesktopApp& app) {
+            if (app.displayName == "App Model Demo" || app.launchName == "App Model Demo") return "launchable viewer";
+            if (app.kind == apps::AppKind::BuiltIn) return "launchable if built-in handler exists";
+            if (app.kind == apps::AppKind::NativeElf) return apps::NativeElfExecutor::ExperimentalExecutionEnabled() ? "experimental native path" : "disabled: native execution off";
+            if (app.kind == apps::AppKind::GXAppPackage) return "disabled: GXApp launch not implemented";
+            return "unknown";
+        }
+
+        void Compositor::openAppModelDemoViewerWindow() {
+            std::vector<RegisteredDesktopApp> apps = DesktopService::GetAppModelDemoApps();
+            bool hasDemo = false;
+            for (const auto& app : apps) {
+                if (app.displayName == "App Model Demo" || app.launchName == "App Model Demo") hasDemo = true;
+            }
+            if (!hasDemo) {
+                RegisteredDesktopApp demo;
+                demo.id = "gxos.builtin.appmodeldemo";
+                demo.displayName = "App Model Demo";
+                demo.kind = apps::AppKind::BuiltIn;
+                demo.launchName = "App Model Demo";
+                demo.source = "BuiltIn";
+                apps.push_back(demo);
+            }
+
+            uint64_t id = s_nextWinId.fetch_add(1);
+            WinInfo wi{};
+            wi.id = id;
+            wi.title = "App Model Demo";
+            wi.w = 860;
+            wi.h = 520;
+            wi.x = 82;
+            wi.y = 70;
+            wi.visible = true;
+            wi.dirty = true;
+            wi.ownerPid = 0;
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
+            wi.taskbarIcon = Icons::TaskbarIcon(16);
+#endif
+            wi.rects.push_back(DrawRectItem{0, 0, 860, 28, 32, 40, 58});
+            wi.rects.push_back(DrawRectItem{0, 118, 860, 2, 64, 80, 110});
+            wi.rects.push_back(DrawRectItem{0, 466, 860, 24, 32, 40, 58});
+            wi.texts.push_back("APP MODEL VIEWER v3 - OLD TOAST REMOVED");
+            wi.texts.push_back("Runtime:");
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
+            wi.texts.push_back("  Mode: Windows compositor/test harness");
+#else
+            wi.texts.push_back("  Mode: compositor / unknown");
+#endif
+            wi.texts.push_back(std::string("  Native execution: ") + (apps::NativeElfExecutor::ExperimentalExecutionEnabled() ? "enabled" : "disabled"));
+            wi.texts.push_back("  Discovered apps: " + std::to_string(apps.size()));
+            wi.texts.push_back("");
+            wi.texts.push_back("Apps:");
+            wi.texts.push_back("  Display name                 App ID/name                         Type         Status");
+            for (const auto& app : apps) {
+                std::ostringstream row;
+                row << "  " << app.displayName;
+                if (app.displayName.size() < 29) row << std::string(29 - app.displayName.size(), ' ');
+                row << app.id;
+                if (app.id.size() < 36) row << std::string(36 - app.id.size(), ' ');
+                row << apps::ToString(app.kind);
+                std::string kind = apps::ToString(app.kind);
+                if (kind.size() < 13) row << std::string(13 - kind.size(), ' ');
+                row << hostedLaunchStatus(app);
+                wi.texts.push_back(row.str());
+            }
+            wi.texts.push_back("");
+            wi.texts.push_back("Actions: close window. Use desktop.launch, nativeapp.inspect, nativeapp.smoketest for command actions.");
+            {
+                std::lock_guard<std::mutex> lk(g_lock);
+                g_windows[id] = wi;
+                g_z.push_back(id);
+                g_focus = id;
+            }
+            invalidate(id);
+        }
+
         void Compositor::launchAction(const std::string& act) {
             Logger::write(LogLevel::Info, std::string("Desktop launch: ") + act);
             addRecent(act);
+            if (act == "App Model Demo" || act == "AppModel") {
+                openAppModelDemoViewerWindow();
+                return;
+            }
             // Actually launch the application
             std::string err;
             if (!DesktopService::LaunchApp(act, err)) {

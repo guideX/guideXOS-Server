@@ -11,6 +11,7 @@
 #include "process.h"
 #include "logger.h"
 #include "desktop_config.h"
+#include "desktop_service.h"
 #include "vnc_server.h"
 #include "system_tray.h"
 #include "desktop_wallpaper.h"
@@ -61,6 +62,7 @@ namespace gxos { namespace gui {
         bool visible{true};
     };
     struct DesktopItem { std::string label; std::string action; bool pinned{false}; bool selected{false}; int ix{-1}; int iy{-1}; };
+    struct AppModelDemoWindowState { uint64_t windowId{0}; std::vector<RegisteredDesktopApp> apps; int selectedIndex{0}; std::string status; };
 
     class Compositor {
     public:
@@ -87,6 +89,9 @@ namespace gxos { namespace gui {
         static bool blockInputBehindModal(int mx, int my);
         static uint64_t inputOwnerPid();
         static void launchAction(const std::string& act);
+        static void openAppModelDemoViewerWindow();
+        static void updateAppModelDemoViewerWindow(const std::string& status = "");
+        static bool handleAppModelDemoKey(int key);
         static void pinAction(const std::string& act);
         static void unpinAction(const std::string& act);
         static void saveDesktopConfig();
@@ -148,6 +153,7 @@ namespace gxos { namespace gui {
         static bool g_altTabOverlayActive; static uint64_t g_altTabOverlayTicks; static int g_altTabCycleIndex;
         static bool g_taskbarCycleActive; static int g_taskbarCycleIndex; static bool g_keyboardMoveActive; static bool g_keyboardSizeActive; static int g_kbOrigX; static int g_kbOrigY; static int g_kbOrigW; static int g_kbOrigH;
         static DesktopConfigData g_cfg; static uint64_t g_lastItemClickTicks; static int g_lastItemIndex;
+        static AppModelDemoWindowState g_appModelDemo;
         static std::set<int> g_selectedDesktopIconIndices; static int g_lastSelectedDesktopIconIndex;
         static bool g_iconDragActive; static int g_iconDragIndex; static int g_iconDragOffX; static int g_iconDragOffY; static int g_iconDragStartX; static int g_iconDragStartY; static bool g_iconDragPending;
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)

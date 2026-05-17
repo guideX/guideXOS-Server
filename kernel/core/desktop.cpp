@@ -273,6 +273,17 @@ static uint32_t lerp_color(uint32_t c1, uint32_t c2, uint32_t num, uint32_t den)
     return rgb(r, g, b);
 }
 
+static bool desktop_str_eq(const char* a, const char* b)
+{
+    if (!a || !b) return false;
+    while (*a && *b) {
+        if (*a != *b) return false;
+        a++;
+        b++;
+    }
+    return *a == '\0' && *b == '\0';
+}
+
 // ============================================================
 // Desktop state
 // ============================================================
@@ -293,6 +304,10 @@ static volatile bool s_needsRedraw = false;
 // Shutdown dialog state
 static bool s_shutdownDialogOpen = false;
 static int s_shutdownDialogHover = -1;  // 0 = Yes, 1 = No, -1 = none
+
+// App model demo dialog state
+static bool s_appModelDialogOpen = false;
+static int s_appModelDialogHover = -1;  // 0 = Close, -1 = none
 
 // Control Panel window state
 static bool s_controlPanelOpen = false;
@@ -555,6 +570,23 @@ static const char* s_allProgramsList[] = {
     "TaskManager",
 };
 static const int kAllProgramsCount = 12;
+
+struct AppModelDemoRow {
+    const char* displayName;
+    const char* appId;
+    const char* type;
+    const char* status;
+};
+
+static const AppModelDemoRow s_appModelDemoRows[] = {
+    {"Hello World", "gxos.sample.helloworld", "native sample", "unsupported in bare-metal / native disabled"},
+    {"Resource Viewer", "gxos.sample.resourceviewer", "native sample", "unsupported in bare-metal / native disabled"},
+    {"Native App Debug Viewer", "gxos.builtin.nativeappdebugviewer", "debug tool", "hosted compositor only"},
+    {"App Model Demo", "AppModel", "built-in diagnostic", "launchable viewer"},
+};
+static const int kAppModelDemoRowCount = sizeof(s_appModelDemoRows) / sizeof(s_appModelDemoRows[0]);
+
+static const char* kAppModelViewerMarker = "APP MODEL VIEWER v3 - OLD TOAST REMOVED";
 
 // Start menu right column entries (system shortcuts, matching Legacy StartMenu.cs)
 struct StartMenuRightItem {
@@ -878,6 +910,7 @@ static int32_t s_shellResizeStartW = 0;
 static int32_t s_shellResizeStartH = 0;
 
 // Forward declarations
+static void draw_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t color);
 static void draw_shell_window();
 static void forget_cursor_save();
 static void get_context_menu_geometry(uint32_t& menuX, uint32_t& menuY, uint32_t& menuH);
@@ -913,6 +946,137 @@ static int find_icon_by_name(const char* name)
         if (match && *a == *b) return i;
     }
     
+    return -1;
+}
+
+// ============================================================
+// App Model Demo Viewer
+// ============================================================
+
+static const uint32_t kAppModelDlgW = 720;
+static const uint32_t kAppModelDlgH = 340;
+static const uint32_t kAppModelBtnW = 92;
+static const uint32_t kAppModelBtnH = 28;
+
+static uint32_t app_model_dialog_width()
+{
+    return (s_screenW > kAppModelDlgW + 24) ? kAppModelDlgW : (s_screenW > 24 ? s_screenW - 24 : s_screenW);
+}
+
+static uint32_t app_model_dialog_height()
+{
+    return (s_screenH > kAppModelDlgH + 16) ? kAppModelDlgH : (s_screenH > 16 ? s_screenH - 16 : s_screenH);
+}
+
+static uint32_t app_model_dialog_x()
+{
+    uint32_t dlgW = app_model_dialog_width();
+    return (s_screenW > dlgW) ? (s_screenW - dlgW) / 2 : 0;
+}
+
+static uint32_t app_model_dialog_y()
+{
+    uint32_t dlgH = app_model_dialog_height();
+    return (s_screenH > dlgH) ? (s_screenH - dlgH) / 2 : 0;
+}
+
+static void open_app_model_viewer()
+{
+    s_appModelDialogOpen = true;
+    s_appModelDialogHover = -1;
+    s_appModelSelectedIndex = 0;
+    s_notification.visible = false;
+}
+
+static void draw_app_model_dialog()
+{
+    if (!s_appModelDialogOpen) return;
+
+    uint32_t dlgW = app_model_dialog_width();
+    uint32_t dlgH = app_model_dialog_height();
+    uint32_t dlgX = app_model_dialog_x();
+    uint32_t dlgY = app_model_dialog_y();
+
+    framebuffer::fill_rect(dlgX + 4, dlgY + 4, dlgW, dlgH, rgb(10, 10, 15));
+    framebuffer::fill_rect(dlgX, dlgY, dlgW, dlgH, rgb(35, 35, 45));
+    draw_rect(dlgX, dlgY, dlgW, dlgH, rgb(80, 110, 170));
+
+    framebuffer::fill_rect(dlgX + 1, dlgY + 1, dlgW - 2, 30, rgb(50, 70, 110));
+    draw_text(dlgX + 12, dlgY + 9, "App Model Demo", rgb(230, 235, 250), 1);
+
+    uint32_t closeX = dlgX + dlgW - 26;
+    uint32_t closeY = dlgY + 5;
+    framebuffer::fill_rect(closeX, closeY, 20, 20, s_appModelDialogHover == 0 ? rgb(210, 70, 70) : rgb(160, 55, 55));
+    draw_rect(closeX, closeY, 20, 20, rgb(220, 100, 100));
+    draw_text(closeX + 6, closeY + 5, "x", rgb(250, 230, 230), 1);
+
+    uint32_t contentX = dlgX + 16;
+    uint32_t y = dlgY + 46;
+    draw_text(contentX, y, kAppModelViewerMarker, rgb(255, 230, 120), 1);
+    y += 24;
+    draw_text(contentX, y, "Runtime:", rgb(220, 225, 240), 1);
+    y += 18;
+    draw_text(contentX + 12, y, "Mode: bare-metal", rgb(200, 210, 230), 1);
+    y += 18;
+    draw_text(contentX + 12, y, "Native execution: unsupported", rgb(200, 210, 230), 1);
+    y += 18;
+    draw_text(contentX + 12, y, "Discovered apps: 4 (temporary bare-metal list)", rgb(200, 210, 230), 1);
+    y += 28;
+
+    draw_text(contentX, y, "Apps:", rgb(220, 225, 240), 1);
+    y += 20;
+    for (int i = 0; i < kAppModelDemoRowCount; ++i) {
+        char line[128];
+        int pos = 0;
+        line[pos++] = static_cast<char>('1' + i);
+        line[pos++] = '.';
+        line[pos++] = ' ';
+        const char* name = s_appModelDemoRows[i].displayName;
+        while (*name && pos < 126) line[pos++] = *name++;
+        line[pos++] = ' ';
+        line[pos++] = '-';
+        line[pos++] = ' ';
+        const char* status = s_appModelDemoRows[i].status;
+        while (*status && pos < 126) line[pos++] = *status++;
+        line[pos] = '\0';
+        draw_text(contentX + 12, y, line, i == 3 ? rgb(255, 230, 120) : rgb(205, 210, 225), 1);
+        y += 18;
+    }
+
+    y += 10;
+    draw_text(contentX, y, "Close: button or Escape. Launch/inspect disabled in bare-metal for this pass.", rgb(190, 200, 220), 1);
+
+    uint32_t btnX = dlgX + dlgW - kAppModelBtnW - 18;
+    uint32_t btnY = dlgY + dlgH - kAppModelBtnH - 14;
+    uint32_t btnBg = (s_appModelDialogHover == 0) ? rgb(70, 120, 180) : rgb(50, 90, 150);
+    framebuffer::fill_rect(btnX, btnY, kAppModelBtnW, kAppModelBtnH, btnBg);
+    draw_rect(btnX, btnY, kAppModelBtnW, kAppModelBtnH, rgb(100, 140, 200));
+    draw_text_centered(btnX, btnY, kAppModelBtnW, kAppModelBtnH, "Close", rgb(220, 230, 250), 1);
+}
+
+static int hit_test_app_model_dialog(int32_t mx, int32_t my)
+{
+    if (!s_appModelDialogOpen) return -1;
+
+    uint32_t dlgW = app_model_dialog_width();
+    uint32_t dlgH = app_model_dialog_height();
+    uint32_t dlgX = app_model_dialog_x();
+    uint32_t dlgY = app_model_dialog_y();
+
+    uint32_t closeX = dlgX + dlgW - 26;
+    uint32_t closeY = dlgY + 5;
+    if ((uint32_t)mx >= closeX && (uint32_t)mx < closeX + 20 &&
+        (uint32_t)my >= closeY && (uint32_t)my < closeY + 20) {
+        return 0;
+    }
+
+    uint32_t btnX = dlgX + dlgW - kAppModelBtnW - 18;
+    uint32_t btnY = dlgY + dlgH - kAppModelBtnH - 14;
+    if ((uint32_t)mx >= btnX && (uint32_t)mx < btnX + kAppModelBtnW &&
+        (uint32_t)my >= btnY && (uint32_t)my < btnY + kAppModelBtnH) {
+        return 0;
+    }
+
     return -1;
 }
 
@@ -4028,6 +4192,7 @@ void draw()
     draw_taskbar();
     draw_notifications();
     draw_shutdown_dialog();
+    draw_app_model_dialog();
     draw_control_panel();
     draw_device_manager();
     draw_network_adapters();
@@ -4464,11 +4629,8 @@ static void show_icon_notification(int displayIndex)
     
     int iconIdx = s_visibleIconIndices[displayIndex];
     const char* label = s_desktopIcons[iconIdx].label;
-    if (str_eq(label, "AppModel")) {
-        s_notification.title = "App Model Demo";
-        s_notification.message = "Hello World and Resource Viewer are native SDK samples; experimental execution is disabled in bare-metal builds.";
-        s_notification.visible = true;
-        s_notification.showTime = s_tickCounter;
+    if (desktop_str_eq(label, "AppModel")) {
+        open_app_model_viewer();
         app::AppLogger::logLaunch(label, app::LaunchResult::NotAvailable);
         return;
     }
@@ -4575,6 +4737,18 @@ static bool is_point_in_modal_dialog(int32_t mx, int32_t my)
             return true;
         }
     }
+
+    // App Model Demo
+    if (s_appModelDialogOpen) {
+        uint32_t dlgW = app_model_dialog_width();
+        uint32_t dlgH = app_model_dialog_height();
+        uint32_t dlgX = app_model_dialog_x();
+        uint32_t dlgY = app_model_dialog_y();
+        if ((uint32_t)mx >= dlgX && (uint32_t)mx < dlgX + dlgW &&
+            (uint32_t)my >= dlgY && (uint32_t)my < dlgY + dlgH) {
+            return true;
+        }
+    }
     
     // Control Panel
     if (s_controlPanelOpen) {
@@ -4660,12 +4834,9 @@ static void hit_test_start_menu(int32_t mx, int32_t my, int& leftIdx, int& right
 // Show notification for a start menu item launch (or launch the app)
 static void show_start_menu_notification(const char* label)
 {
-    if (str_eq(label, "AppModel")) {
+    if (desktop_str_eq(label, "AppModel")) {
         s_startMenuOpen = false;
-        s_notification.title = "App Model Demo";
-        s_notification.message = "Hello World and Resource Viewer are native SDK samples; experimental execution is disabled in bare-metal builds.";
-        s_notification.visible = true;
-        s_notification.showTime = s_tickCounter;
+        open_app_model_viewer();
         app::AppLogger::logLaunch(label, app::LaunchResult::NotAvailable);
         return;
     }
@@ -5305,6 +5476,29 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
             return;
         }
 
+        // Handle App Model Demo dialog clicks
+        if (s_appModelDialogOpen) {
+            int btn = hit_test_app_model_dialog(mx, my);
+            if (btn == 0) {
+                s_appModelDialogOpen = false;
+                draw();
+                draw_cursor(mx, my);
+                return;
+            }
+            uint32_t dlgW = app_model_dialog_width();
+            uint32_t dlgH = app_model_dialog_height();
+            uint32_t dlgX = app_model_dialog_x();
+            uint32_t dlgY = app_model_dialog_y();
+            if ((uint32_t)mx < dlgX || (uint32_t)mx >= dlgX + dlgW ||
+                (uint32_t)my < dlgY || (uint32_t)my >= dlgY + dlgH) {
+                s_appModelDialogOpen = false;
+                draw();
+                draw_cursor(mx, my);
+                return;
+            }
+            return;
+        }
+
         // Handle Network Config dialog clicks
         if (s_networkConfigOpen) {
             int btn = hit_test_network_config(mx, my);
@@ -5700,6 +5894,17 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
         else if (hit == -11) newHover = 1;  // Cancel
         if (newHover != s_networkConfigBtnHover) {
             s_networkConfigBtnHover = newHover;
+            draw();
+            draw_cursor(mx, my);
+            return;
+        }
+    }
+
+    // App Model Demo hover tracking
+    if (s_appModelDialogOpen) {
+        int newHover = hit_test_app_model_dialog(mx, my);
+        if (newHover != s_appModelDialogHover) {
+            s_appModelDialogHover = newHover;
             draw();
             draw_cursor(mx, my);
             return;

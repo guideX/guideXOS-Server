@@ -75,6 +75,8 @@ const std::vector<std::string>& defaultBuiltInAppNames() {
         "ShutdownDialog",
         "DiskManager",
         "ControlPanel",
+        "App Model Demo",
+        "Native App Debug Viewer",
         "HDInstaller"
     };
     return appNames;
