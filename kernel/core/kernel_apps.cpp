@@ -1881,6 +1881,21 @@ FileExplorerApp::FileExplorerApp()
     m_renameValue[0] = '\0';
     m_deleteTarget[0] = '\0';
     m_deleteTargetName[0] = '\0';
+    m_clipboard.sourcePath[0] = '\0';
+    m_clipboard.sourceName[0] = '\0';
+    m_clipboard.sourceMount[0] = '\0';
+    m_clipboard.sourceIsDir = false;
+    m_clipboard.operation = ClipboardOperation::None;
+    m_contextMenuOpen = false;
+    m_contextMenuX = 0;
+    m_contextMenuY = 0;
+    m_propertiesOpen = false;
+    m_propertiesIsDir = false;
+    m_propertiesName[0] = '\0';
+    m_propertiesPath[0] = '\0';
+    m_propertiesType[0] = '\0';
+    m_propertiesSize[0] = '\0';
+    m_propertiesModified[0] = '\0';
 }
 
 FileExplorerApp::~FileExplorerApp() {
@@ -2111,6 +2126,18 @@ void FileExplorerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
     framebuffer::fill_rect(x, y + h - statusH, w, statusH, rgb(235, 235, 235));
     appDrawText(x + 8, y + h - 15, m_status, rgb(40, 40, 40));
 
+    if (m_contextMenuOpen) {
+        framebuffer::fill_rect(x + m_contextMenuX, y + m_contextMenuY, CONTEXT_MENU_W, CONTEXT_MENU_ITEM_H * 4 + 2, rgb(245, 245, 248));
+        framebuffer::fill_rect(x + m_contextMenuX, y + m_contextMenuY, CONTEXT_MENU_W, 1, rgb(120, 120, 140));
+        framebuffer::fill_rect(x + m_contextMenuX, y + m_contextMenuY + CONTEXT_MENU_ITEM_H * 4 + 1, CONTEXT_MENU_W, 1, rgb(120, 120, 140));
+        framebuffer::fill_rect(x + m_contextMenuX, y + m_contextMenuY, 1, CONTEXT_MENU_ITEM_H * 4 + 2, rgb(120, 120, 140));
+        framebuffer::fill_rect(x + m_contextMenuX + CONTEXT_MENU_W - 1, y + m_contextMenuY, 1, CONTEXT_MENU_ITEM_H * 4 + 2, rgb(120, 120, 140));
+        appDrawText(x + m_contextMenuX + 8, y + m_contextMenuY + 6,  "Open", rgb(20, 20, 20));
+        appDrawText(x + m_contextMenuX + 8, y + m_contextMenuY + 6 + CONTEXT_MENU_ITEM_H, "Rename", rgb(20, 20, 20));
+        appDrawText(x + m_contextMenuX + 8, y + m_contextMenuY + 6 + CONTEXT_MENU_ITEM_H * 2, "Delete", rgb(20, 20, 20));
+        appDrawText(x + m_contextMenuX + 8, y + m_contextMenuY + 6 + CONTEXT_MENU_ITEM_H * 3, "Properties", rgb(20, 20, 20));
+    }
+
     if (m_renamePrompt) {
         framebuffer::fill_rect(x + 220, y + 165, 360, 92, rgb(245, 245, 250));
         appDrawText(x + 232, y + 182, "Rename selected item", rgb(30, 30, 30));
@@ -2121,10 +2148,37 @@ void FileExplorerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
         appDrawText(x + 232, y + 182, m_deleteTargetIsDir ? "Are you sure you wish to delete this folder?" : "Are you sure you wish to delete this file?", rgb(80, 30, 30));
         appDrawText(x + 232, y + 205, m_deleteTargetName, rgb(30, 30, 30));
         appDrawText(x + 232, y + 230, "This cannot be undone.", rgb(80, 80, 80));
+    } else if (m_propertiesOpen) {
+        framebuffer::fill_rect(x + 200, y + 145, 400, 150, rgb(244, 244, 248));
+        framebuffer::fill_rect(x + 200, y + 145, 400, 1, rgb(110, 110, 130));
+        framebuffer::fill_rect(x + 200, y + 294, 400, 1, rgb(110, 110, 130));
+        framebuffer::fill_rect(x + 200, y + 145, 1, 150, rgb(110, 110, 130));
+        framebuffer::fill_rect(x + 599, y + 145, 1, 150, rgb(110, 110, 130));
+        if (!drawThemedIcon(x + 216, y + 162, 24, m_propertiesIsDir ? "file.folder" : fileLogicalIcon(m_entries[m_selected >= 0 && m_selected < m_entryCount ? m_selected : 0]))) {
+            drawPlaceholderIcon(x + 216, y + 162, 24);
+        }
+        appDrawText(x + 248, y + 168, "Properties", rgb(30, 30, 30));
+        appDrawText(x + 216, y + 194, "Name:", rgb(70, 70, 70));
+        appDrawText(x + 286, y + 194, m_propertiesName, rgb(20, 20, 20));
+        appDrawText(x + 216, y + 212, "Type:", rgb(70, 70, 70));
+        appDrawText(x + 286, y + 212, m_propertiesType, rgb(20, 20, 20));
+        appDrawText(x + 216, y + 230, "Size:", rgb(70, 70, 70));
+        appDrawText(x + 286, y + 230, m_propertiesSize, rgb(20, 20, 20));
+        appDrawText(x + 216, y + 248, "Path:", rgb(70, 70, 70));
+        appDrawText(x + 286, y + 248, m_propertiesPath, rgb(20, 20, 20));
+        appDrawText(x + 216, y + 266, "Modified:", rgb(70, 70, 70));
+        appDrawText(x + 286, y + 266, m_propertiesModified, rgb(20, 20, 20));
     }
 }
 
 void FileExplorerApp::onKeyDown(uint32_t key) {
+    if (m_propertiesOpen) {
+        if (key == 27 || key == '\n' || key == '\r') {
+            closeProperties();
+        }
+        return;
+    }
+
     if (m_renamePrompt) {
         if (key == '\n' || key == '\r') {
             commitRename();
@@ -2141,6 +2195,17 @@ void FileExplorerApp::onKeyDown(uint32_t key) {
     if (m_deleteConfirm && key == 27) {
         cancelDelete();
         return;
+    }
+
+    if (ps2keyboard::is_ctrl_down()) {
+        if (key == 'c' || key == 'C') {
+            beginCopySelected();
+            return;
+        }
+        if (key == 'v' || key == 'V') {
+            pasteClipboard();
+            return;
+        }
     }
 
     if (key == shell::KEY_UP) {
@@ -2161,6 +2226,8 @@ void FileExplorerApp::onKeyDown(uint32_t key) {
         openSelected();
     } else if (key == '\b') {
         goUp();
+    } else if (key == shell::KEY_DELETE) {
+        showDeleteConfirmation();
     } else if (key == shell::KEY_PGUP) {
         m_selected -= 20;
         if (m_selected < 0) m_selected = 0;
@@ -2176,6 +2243,12 @@ void FileExplorerApp::onKeyDown(uint32_t key) {
         updateActionButtons();
         invalidate();
     } else if (key == 'r' || key == 'R') {
+        refresh();
+        updateActionButtons();
+        invalidate();
+    } else if (key == 0x111) { // F2
+        beginRenameSelected();
+    } else if (key == 0x114) { // F5
         refresh();
         updateActionButtons();
         invalidate();
@@ -2195,12 +2268,40 @@ void FileExplorerApp::onKeyChar(char c) {
 }
 
 void FileExplorerApp::onMouseDown(int localX, int localY, uint8_t button) {
-    (void)button;
+    if (m_propertiesOpen && button == 1) {
+        closeProperties();
+        return;
+    }
+
+    if (m_contextMenuOpen) {
+        if (button == 1 && handleContextMenuClick(localX, localY)) {
+            return;
+        }
+        if (button == 1 || button == 2) {
+            m_contextMenuOpen = false;
+            invalidate();
+            if (button != 2) return;
+        }
+    }
+
     int bodyY = TOOLBAR_H + ADDRESS_H;
+    int index = hitTestEntryRow(localX, localY);
+
+    if (button == 2) {
+        if (index >= 0 && index < m_entryCount) {
+            m_selected = index;
+            updateActionButtons();
+        }
+        m_contextMenuOpen = (index >= 0 && index < m_entryCount);
+        m_contextMenuX = localX;
+        m_contextMenuY = localY;
+        serial::puts("[fileexplorer-bm] context menu open\n");
+        invalidate();
+        return;
+    }
+
     if (localX < LEFT_W || localY < bodyY + 24) return;
 
-    int row = (localY - bodyY - 24) / ROW_H;
-    int index = m_scroll + row;
     if (index >= 0 && index < m_entryCount) {
         uint64_t now = pit::ticks();
         bool doubleClick = (index == m_lastClickIndex && now >= m_lastClickTick && now - m_lastClickTick <= 50);
@@ -2217,6 +2318,7 @@ void FileExplorerApp::onMouseDown(int localX, int localY, uint8_t button) {
 }
 
 void FileExplorerApp::onWidgetClick(int widgetId) {
+    closeTransientUi();
     if (widgetId == m_backBtnId || widgetId == m_rootBtnId) {
         navigate("/");
     } else if (widgetId == m_upBtnId) {
@@ -2258,6 +2360,32 @@ void FileExplorerApp::refresh() {
     }
     vfs::closedir(dir);
 
+    for (int i = 0; i < m_entryCount - 1; ++i) {
+        for (int j = i + 1; j < m_entryCount; ++j) {
+            bool swap = false;
+            if (m_entries[i].isDir != m_entries[j].isDir) {
+                swap = !m_entries[i].isDir && m_entries[j].isDir;
+            } else {
+                int k = 0;
+                while (m_entries[i].name[k] && m_entries[j].name[k]) {
+                    char a = m_entries[i].name[k];
+                    char b = m_entries[j].name[k];
+                    if (a >= 'A' && a <= 'Z') a = (char)(a - 'A' + 'a');
+                    if (b >= 'A' && b <= 'Z') b = (char)(b - 'A' + 'a');
+                    if (a != b) { swap = a > b; break; }
+                    ++k;
+                }
+                if (!swap && !m_entries[i].name[k] && m_entries[j].name[k]) swap = false;
+                else if (!swap && m_entries[i].name[k] && !m_entries[j].name[k]) swap = true;
+            }
+            if (swap) {
+                Entry tmp = m_entries[i];
+                m_entries[i] = m_entries[j];
+                m_entries[j] = tmp;
+            }
+        }
+    }
+
     if (m_selected >= m_entryCount) m_selected = m_entryCount - 1;
     if (m_selected < 0) m_selected = 0;
     if (m_scroll > m_selected) m_scroll = m_selected;
@@ -2282,6 +2410,7 @@ void FileExplorerApp::navigate(const char* path) {
     m_scroll = 0;
     m_lastClickIndex = -1;
     m_lastClickTick = 0;
+    closeTransientUi();
     refresh();
     invalidate();
 }
@@ -2292,6 +2421,7 @@ void FileExplorerApp::openSelected() {
     char full[MAX_PATH_LEN];
     joinPath(m_currentPath, e.name, full, sizeof(full));
     if (e.isDir) {
+        serial::puts("[fileexplorer-bm] open folder\n");
         navigate(full);
     } else if (isTextFile(e.name)) {
         if (app::AppManager::launchAppWithParam("Notepad", full)) {
@@ -2300,8 +2430,12 @@ void FileExplorerApp::openSelected() {
             setStatus("Unable to open text file in Notepad");
         }
         invalidate();
+    } else if (endsWithIgnoreCase(e.name, ".img")) {
+        openDiskImage(full, e);
+    } else if (endsWithIgnoreCase(e.name, ".gxq") || endsWithIgnoreCase(e.name, ".gxapp") || endsWithIgnoreCase(e.name, ".elf") || endsWithIgnoreCase(e.name, ".exe")) {
+        launchApplicationLikeFile(full, e);
     } else {
-        setStatus("Only .TXT and .TEXT files open in Notepad");
+        setStatus("No application registered for this file type");
         invalidate();
     }
 }
@@ -2413,6 +2547,161 @@ void FileExplorerApp::cancelDelete() {
     invalidate();
 }
 
+void FileExplorerApp::showPropertiesForSelected() {
+    if (m_selected < 0 || m_selected >= m_entryCount) return;
+    Entry& entry = m_entries[m_selected];
+    char full[MAX_PATH_LEN];
+    joinPath(m_currentPath, entry.name, full, sizeof(full));
+    strcopy(m_propertiesName, entry.name, sizeof(m_propertiesName));
+    strcopy(m_propertiesPath, full, sizeof(m_propertiesPath));
+    strcopy(m_propertiesType, fileType(entry), sizeof(m_propertiesType));
+    if (entry.isDir) strcopy(m_propertiesSize, "--", sizeof(m_propertiesSize));
+    else formatSize(entry.size, m_propertiesSize, sizeof(m_propertiesSize));
+    strcopy(m_propertiesModified, "--", sizeof(m_propertiesModified));
+    m_propertiesIsDir = entry.isDir;
+    m_propertiesOpen = true;
+    m_contextMenuOpen = false;
+    serial::puts("[fileexplorer-bm] properties open\n");
+    invalidate();
+}
+
+void FileExplorerApp::closeProperties() {
+    m_propertiesOpen = false;
+    invalidate();
+}
+
+void FileExplorerApp::beginCopySelected() {
+    if (m_selected < 0 || m_selected >= m_entryCount) return;
+    Entry& entry = m_entries[m_selected];
+    joinPath(m_currentPath, entry.name, m_clipboard.sourcePath, sizeof(m_clipboard.sourcePath));
+    strcopy(m_clipboard.sourceName, entry.name, sizeof(m_clipboard.sourceName));
+    strcopy(m_clipboard.sourceMount, m_currentPath, sizeof(m_clipboard.sourceMount));
+    m_clipboard.sourceIsDir = entry.isDir;
+    m_clipboard.operation = ClipboardOperation::Copy;
+    setStatus("Copied item path to File Explorer clipboard");
+    serial::puts("[fileexplorer-bm] clipboard copy prepared\n");
+    invalidate();
+}
+
+void FileExplorerApp::beginMoveSelected() {
+    if (m_selected < 0 || m_selected >= m_entryCount) return;
+    Entry& entry = m_entries[m_selected];
+    joinPath(m_currentPath, entry.name, m_clipboard.sourcePath, sizeof(m_clipboard.sourcePath));
+    strcopy(m_clipboard.sourceName, entry.name, sizeof(m_clipboard.sourceName));
+    strcopy(m_clipboard.sourceMount, m_currentPath, sizeof(m_clipboard.sourceMount));
+    m_clipboard.sourceIsDir = entry.isDir;
+    m_clipboard.operation = ClipboardOperation::Move;
+    setStatus("Prepared move in File Explorer clipboard");
+    serial::puts("[fileexplorer-bm] clipboard move prepared\n");
+    invalidate();
+}
+
+bool FileExplorerApp::copyFileContents(const char* sourcePath, const char* destPath) {
+    char buffer[8192];
+    int32_t bytesRead = vfs::read_file(sourcePath, buffer, sizeof(buffer));
+    if (bytesRead < 0) return false;
+    int32_t bytesWritten = vfs::write_file(destPath, buffer, (uint32_t)bytesRead);
+    return bytesWritten == bytesRead;
+}
+
+void FileExplorerApp::pasteClipboard() {
+    if (m_clipboard.operation == ClipboardOperation::None || !m_clipboard.sourcePath[0]) {
+        setStatus("Clipboard is empty");
+        invalidate();
+        return;
+    }
+
+    char destPath[MAX_PATH_LEN];
+    joinPath(m_currentPath, m_clipboard.sourceName, destPath, sizeof(destPath));
+
+    if (m_clipboard.sourceIsDir) {
+        setStatus("copy/paste not yet supported for folders");
+        serial::puts("[fileexplorer-bm] copy/paste not yet supported for folders\n");
+        invalidate();
+        return;
+    }
+
+    if (m_clipboard.operation == ClipboardOperation::Copy) {
+        if (copyFileContents(m_clipboard.sourcePath, destPath)) {
+            setStatus("Copied item into current directory");
+            refresh();
+        } else {
+            setStatus("copy/paste not yet supported");
+            serial::puts("[fileexplorer-bm] file copy failed or unsupported\n");
+        }
+    } else if (m_clipboard.operation == ClipboardOperation::Move) {
+        vfs::Status status = vfs::rename(m_clipboard.sourcePath, destPath);
+        if (status == vfs::VFS_OK) {
+            setStatus("Moved item into current directory");
+            m_clipboard.operation = ClipboardOperation::None;
+            m_clipboard.sourcePath[0] = '\0';
+            refresh();
+        } else {
+            setStatus("Move not yet supported");
+            serial::puts("[fileexplorer-bm] move failed\n");
+        }
+    }
+    invalidate();
+}
+
+int FileExplorerApp::hitTestContextMenu(int x, int y) const {
+    if (!m_contextMenuOpen) return -1;
+    if (x < m_contextMenuX || x >= m_contextMenuX + CONTEXT_MENU_W) return -1;
+    if (y < m_contextMenuY || y >= m_contextMenuY + CONTEXT_MENU_ITEM_H * 4) return -1;
+    return (y - m_contextMenuY) / CONTEXT_MENU_ITEM_H;
+}
+
+bool FileExplorerApp::handleContextMenuClick(int x, int y) {
+    int item = hitTestContextMenu(x, y);
+    if (item < 0) return false;
+    m_contextMenuOpen = false;
+    switch (item) {
+        case 0: openSelected(); break;
+        case 1: beginRenameSelected(); break;
+        case 2: showDeleteConfirmation(); break;
+        case 3: showPropertiesForSelected(); break;
+        default: break;
+    }
+    return true;
+}
+
+int FileExplorerApp::hitTestEntryRow(int x, int y) const {
+    int bodyY = TOOLBAR_H + ADDRESS_H;
+    if (x < LEFT_W || y < bodyY + 24) return -1;
+    int row = (y - bodyY - 24) / ROW_H;
+    int index = m_scroll + row;
+    return (index >= 0 && index < m_entryCount) ? index : -1;
+}
+
+void FileExplorerApp::closeTransientUi() {
+    m_contextMenuOpen = false;
+    m_propertiesOpen = false;
+}
+
+bool FileExplorerApp::launchApplicationLikeFile(const char* fullPath, const Entry& entry) {
+    (void)fullPath;
+    serial::puts("[fileexplorer-bm] application-like file open requested: ");
+    serial::puts(entry.name);
+    serial::puts("\n");
+    setStatus("Application file launch not yet wired in bare metal");
+    invalidate();
+    return false;
+}
+
+bool FileExplorerApp::openDiskImage(const char* fullPath, const Entry& entry) {
+    (void)fullPath;
+    serial::puts("[fileexplorer-bm] disk image open requested: ");
+    serial::puts(entry.name);
+    serial::puts("\n");
+    if (app::AppManager::launchApp("DiskManager")) {
+        setStatus("Opened Disk Manager for disk image workflow");
+    } else {
+        setStatus("Unable to open Disk Manager");
+    }
+    invalidate();
+    return true;
+}
+
 void FileExplorerApp::setStatus(const char* status) {
     strcopy(m_status, status ? status : "", sizeof(m_status));
 }
@@ -2499,11 +2788,10 @@ void FileExplorerApp::formatSize(uint64_t size, char* out, int outSize) const {
 
 const char* FileExplorerApp::fileType(const Entry& entry) const {
     if (entry.isDir) return "File folder";
-    const char* dot = nullptr;
-    for (int i = 0; entry.name[i]; ++i) if (entry.name[i] == '.') dot = &entry.name[i];
-    if (!dot || !dot[1]) return "File";
-    if ((dot[1] == 't' || dot[1] == 'T') && (dot[2] == 'x' || dot[2] == 'X') && (dot[3] == 't' || dot[3] == 'T')) return "Text document";
-    if ((dot[1] == 'e' || dot[1] == 'E') && (dot[2] == 'l' || dot[2] == 'L') && (dot[3] == 'f' || dot[3] == 'F')) return "Application";
+    if (endsWithIgnoreCase(entry.name, ".txt") || endsWithIgnoreCase(entry.name, ".log") || endsWithIgnoreCase(entry.name, ".cfg") || endsWithIgnoreCase(entry.name, ".ini") || endsWithIgnoreCase(entry.name, ".md")) return "Text document";
+    if (endsWithIgnoreCase(entry.name, ".gxq") || endsWithIgnoreCase(entry.name, ".gxapp") || endsWithIgnoreCase(entry.name, ".elf") || endsWithIgnoreCase(entry.name, ".exe")) return "Application";
+    if (endsWithIgnoreCase(entry.name, ".img")) return "Disk image";
+    if (endsWithIgnoreCase(entry.name, ".bin") || endsWithIgnoreCase(entry.name, ".dat") || endsWithIgnoreCase(entry.name, ".dll") || endsWithIgnoreCase(entry.name, ".so") || endsWithIgnoreCase(entry.name, ".o")) return "Binary file";
     return "File";
 }
 

@@ -8,6 +8,7 @@
 #include "include/kernel/ps2keyboard.h"
 #include "include/kernel/arch.h"
 #include "include/kernel/serial_debug.h"
+#include "include/kernel/shell.h"
 
 namespace kernel {
 namespace ps2keyboard {
@@ -184,6 +185,8 @@ void irq_handler()
             case 0x71: key = KEY_DELETE; break;
             case 0x7D: key = KEY_PGUP; break;
             case 0x7A: key = KEY_PGDN; break;
+            case 0x1F: key = shell::KEY_SUPER; break; // Left Windows / Super
+            case 0x27: key = shell::KEY_SUPER; break; // Right Windows / Super
             default: break;
         }
         s_extendedKey = false;

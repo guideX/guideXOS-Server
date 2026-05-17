@@ -233,11 +233,27 @@ private:
     static const int ADDRESS_H = 22;
     static const int LEFT_W = 150;
     static const int ROW_H = 16;
+    static const int CONTEXT_MENU_W = 120;
+    static const int CONTEXT_MENU_ITEM_H = 20;
 
     struct Entry {
         char name[vfs::VFS_MAX_FILENAME];
         bool isDir;
         uint64_t size;
+    };
+
+    enum class ClipboardOperation {
+        None,
+        Copy,
+        Move,
+    };
+
+    struct ClipboardState {
+        char sourcePath[MAX_PATH_LEN];
+        char sourceName[vfs::VFS_MAX_FILENAME];
+        char sourceMount[64];
+        bool sourceIsDir;
+        ClipboardOperation operation;
     };
 
     char m_currentPath[MAX_PATH_LEN];
@@ -264,6 +280,17 @@ private:
     char m_renameValue[vfs::VFS_MAX_FILENAME];
     char m_deleteTarget[MAX_PATH_LEN];
     char m_deleteTargetName[vfs::VFS_MAX_FILENAME];
+    ClipboardState m_clipboard;
+    bool m_contextMenuOpen;
+    int m_contextMenuX;
+    int m_contextMenuY;
+    bool m_propertiesOpen;
+    bool m_propertiesIsDir;
+    char m_propertiesName[vfs::VFS_MAX_FILENAME];
+    char m_propertiesPath[MAX_PATH_LEN];
+    char m_propertiesType[32];
+    char m_propertiesSize[24];
+    char m_propertiesModified[24];
 
     void refresh();
     void navigate(const char* path);
@@ -276,6 +303,18 @@ private:
     void showDeleteConfirmation();
     void confirmDelete();
     void cancelDelete();
+    void showPropertiesForSelected();
+    void closeProperties();
+    void beginCopySelected();
+    void beginMoveSelected();
+    void pasteClipboard();
+    bool copyFileContents(const char* sourcePath, const char* destPath);
+    int hitTestContextMenu(int x, int y) const;
+    bool handleContextMenuClick(int x, int y);
+    int hitTestEntryRow(int x, int y) const;
+    void closeTransientUi();
+    bool launchApplicationLikeFile(const char* fullPath, const Entry& entry);
+    bool openDiskImage(const char* fullPath, const Entry& entry);
     void setStatus(const char* status);
     bool isTextFile(const char* name) const;
     void joinPath(const char* base, const char* name, char* out, int outSize) const;

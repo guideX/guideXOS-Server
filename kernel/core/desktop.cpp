@@ -4181,6 +4181,13 @@ int get_running_app_count()
 
 void handle_key(uint32_t key)
 {
+    if (key == shell::KEY_SUPER) {
+        serial::puts("[desktop] Super key pressed, toggling Start Menu\n");
+        toggle_start_menu();
+        draw();
+        return;
+    }
+
     // Route keyboard input to focused kernel compositor window first
     if (compositor::KernelCompositor::hasWindows()) {
         app::KernelWindow* focused = compositor::KernelCompositor::getFocusedWindow();

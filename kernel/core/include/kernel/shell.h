@@ -95,6 +95,7 @@ static const uint32_t KEY_DELETE = 0x106;
 static const uint32_t KEY_TAB    = 0x107;
 static const uint32_t KEY_PGUP   = 0x108;
 static const uint32_t KEY_PGDN   = 0x109;
+static const uint32_t KEY_SUPER  = 0x11C;
 
 } // namespace shell
 } // namespace kernel
