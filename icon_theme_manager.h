@@ -4,6 +4,10 @@
 #include <string>
 #include <unordered_map>
 
+#ifdef LoadIcon
+#undef LoadIcon
+#endif
+
 namespace gxos {
 namespace gui {
 

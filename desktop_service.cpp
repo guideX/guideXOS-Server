@@ -25,6 +25,7 @@
 #include "control_panel.h"
 #include "package_manager.h"
 #include <algorithm>
+#include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <sstream>
@@ -49,7 +50,6 @@ namespace gxos {
             for (const auto& issue : issues) {
                 std::string message = std::string(label) + ": ";
                 if (!issue.appId.empty()) message += issue.appId + " ";
-                if (!issue.manifestPath.empty()) message += issue.manifestPath.string() + " ";
                 for (const std::string& error : issue.errors) message += error + "; ";
                 Logger::write(LogLevel::Warn, message);
             }
@@ -77,7 +77,8 @@ namespace gxos {
         }
 
         static bool isAppModelDemoApp(const RegisteredDesktopApp& app) {
-            if (app.displayName == "Hello World" ||
+            if (app.displayName == "App Model Demo" ||
+                app.displayName == "Hello World" ||
                 app.displayName == "Resource Viewer" ||
                 app.displayName == "HelloWorld ELF" ||
                 app.displayName == "Native App Debug Viewer") {
@@ -96,19 +97,19 @@ namespace gxos {
             };
 
             for (const char* name : defaults) {
-                if (!findRegisteredApp(name) || IsPinned(name)) continue;
-
-                PinnedItem item;
-                item.name = name;
-                item.kind = PinnedKind::App;
-                item.iconName = "app.generic";
-                s_pinned.push_back(item);
+                if (!findRegisteredApp(name) || DesktopService::IsPinned(name)) continue;
+                DesktopService::PinApp(name);
                 Logger::write(LogLevel::Info, std::string("Pinned app-model demo app: ") + name);
             }
         }
 
         static void refreshRegisteredAppsFromRegistry() {
             for (const auto& app : s_appRegistry.GetAllApps()) {
+                Logger::write(LogLevel::Info, std::string("AppModel registry candidate: ") +
+                    " displayName=" + app.manifest.displayName +
+                    " id=" + app.manifest.id +
+                    " kind=" + apps::ToString(app.manifest.kind) +
+                    " source=" + apps::AppRegistry::ToString(app.sourceKind));
                 DesktopService::RegisterApp(app.manifest.id, app.manifest.displayName, app.manifest.icon, app.manifest.kind, launchNameForApp(app), apps::AppRegistry::ToString(app.sourceKind));
             }
         }
@@ -118,7 +119,6 @@ namespace gxos {
             for (const auto& issue : issues) {
                 oss << "  source=" << apps::AppRegistry::ToString(issue.sourceKind);
                 if (!issue.appId.empty()) oss << " id=" << issue.appId;
-                if (!issue.manifestPath.empty()) oss << " path=" << issue.manifestPath.string();
                 if (!issue.errors.empty()) {
                     oss << " errors=";
                     for (size_t i = 0; i < issue.errors.size(); ++i) {
@@ -319,7 +319,7 @@ namespace gxos {
             oss << "initialized=" << (s_appRegistryInitialized ? "true" : "false") << " initCount=" << s_appRegistryInitializeCount << "\n";
             oss << "sources:\n";
             for (const auto& source : apps::AppRegistry::DefaultSources()) {
-                oss << "  " << apps::AppRegistry::ToString(source.kind) << " " << source.path.string() << "\n";
+                oss << "  " << apps::AppRegistry::ToString(source.kind) << "\n";
             }
             oss << "manifestScan scanned=" << s_lastManifestScanResult.scannedManifestCount << " registered=" << s_lastManifestScanResult.registeredAppCount << "\n";
             oss << "builtInRegister scanned=" << s_lastBuiltInRegisterResult.scannedManifestCount << " registered=" << s_lastBuiltInRegisterResult.registeredAppCount << "\n";
@@ -419,8 +419,6 @@ namespace gxos {
             oss << "kind: " << apps::ToString(app->manifest.kind) << "\n";
             oss << "version: " << app->manifest.version << "\n";
             oss << "publisher: " << app->manifest.publisher << "\n";
-            oss << "manifestPath: " << app->manifestPath.string() << "\n";
-            oss << "appDirectory: " << app->appDirectory.string() << "\n";
 
             oss << "\n[LaunchResolution]\n";
             oss << "selectedStrategy: " << apps::AppLaunchResolver::ToString(launchDecision.strategy) << "\n";
@@ -625,6 +623,27 @@ namespace gxos {
             }
 
             if (launchDecision.strategy == apps::AppLaunchStrategy::NativeElf) {
+                const apps::AppEntry* nativeEntry = registryApp->FindCompatibleEntry(launchDecision.architecture);
+                std::string resolvedNativeElfPath;
+                if (nativeEntry && !nativeEntry->path.empty() && !registryApp->appDirectory.empty()) {
+                    resolvedNativeElfPath = (registryApp->appDirectory / std::filesystem::path(nativeEntry->path)).string();
+                }
+
+                if (!apps::NativeElfExecutor::ExperimentalExecutionEnabled()) {
+                    error = std::string("Native app discovered but execution is disabled in this runtime target: ") + manifestApp->displayName;
+                    if (!resolvedNativeElfPath.empty() && !FS::exists(resolvedNativeElfPath)) {
+                        error += " (sample binary not built: " + resolvedNativeElfPath + ")";
+                    }
+                    NotificationManager::Add(error, NotificationLevel::Error);
+                    return false;
+                }
+
+                if (!resolvedNativeElfPath.empty() && !FS::exists(resolvedNativeElfPath)) {
+                    error = std::string("Native app discovered but sample binary is missing: ") + resolvedNativeElfPath;
+                    NotificationManager::Add(error, NotificationLevel::Error);
+                    return false;
+                }
+
                 apps::NativeElfLaunchResult nativeElfResult = apps::NativeElfLaunchPipeline::PrepareLaunch(*registryApp, launchDecision);
                 if (nativeElfResult.success) {
                     apps::NativeElfImage nativeElfImage = apps::NativeElfImageLoader::LoadImage(nativeElfResult);

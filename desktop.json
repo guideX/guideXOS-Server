@@ -1,7 +1,7 @@
 {
   "wallpaper": "assetsImages\tronporche.png",
-  "pinned": ["ComputerFiles"],
-  "recent": ["ComputerFiles","TaskManager","ControlPanel","HDInstaller","Console","Notepad","Calculator"],
+  "pinned": ["ComputerFiles","App Model Demo","Native App Debug Viewer","Hello World","Resource Viewer","Future GXApp Package","HelloWorld ELF"],
+  "recent": ["HelloWorld ELF","Native App Debug Viewer","Console","ComputerFiles","TaskManager","ControlPanel","HDInstaller","Notepad","Calculator","App Model Demo","Future GXApp Package","Hello World","Resource Viewer"],
   "windows": [
   ],
   "iconPositions": [

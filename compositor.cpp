@@ -10,6 +10,7 @@
 #include "system_tray.h"
 #include "desktop_wallpaper.h"
 #include "native_app_process_table.h"
+#include "native_elf_executor.h"
 #include "bitmap_font.h"
 #include "window_renderer.h"
 #include "special_effects.h"
@@ -131,6 +132,8 @@ namespace gxos {
 
         static const bool kEnableStartMenuIcons = true;
         static const int kStartMenuIconSize = 16;
+        static std::string s_lastLaunchAction;
+        static uint64_t s_lastLaunchTicks = 0;
 
         static bool isAppModelDemoAppLabel(const std::string& label) {
             return label == "App Model Demo" ||
@@ -140,6 +143,42 @@ namespace gxos {
                 label == "Resource Viewer" ||
                 label == "HelloWorld ELF" ||
                 label == "Future GXApp Package";
+        }
+
+        static void logCompositorList(const char* label, const std::vector<std::string>& items) {
+            Logger::write(LogLevel::Info, std::string("Compositor ") + label + " count=" + std::to_string(items.size()));
+            for (const auto& item : items) {
+                Logger::write(LogLevel::Info, std::string("  ") + label + ": " + item);
+            }
+        }
+
+        static bool hasListItem(const std::vector<std::string>& items, const std::string& value) {
+            return std::find(items.begin(), items.end(), value) != items.end();
+        }
+
+        static bool namesEquivalent(const std::string& a, const std::string& b) {
+            if (a == b) return true;
+            return (a == "AppModel" && b == "App Model Demo") || (a == "App Model Demo" && b == "AppModel");
+        }
+
+        static bool hasEquivalentListItem(const std::vector<std::string>& items, const std::string& value) {
+            for (const auto& item : items) {
+                if (namesEquivalent(item, value)) return true;
+            }
+            return false;
+        }
+
+        static void mergeVisibleAppEntry(std::vector<std::string>& target, const std::string& value, const char* sourceLabel, bool visiblePreferred) {
+            if (value.empty()) {
+                Logger::write(LogLevel::Info, std::string("Compositor skip empty visible entry from ") + sourceLabel);
+                return;
+            }
+            if (hasEquivalentListItem(target, value)) {
+                Logger::write(LogLevel::Info, std::string("Compositor skip already present from ") + sourceLabel + ": " + value);
+                return;
+            }
+            target.push_back(value);
+            Logger::write(LogLevel::Info, std::string("Compositor include ") + (visiblePreferred ? "desktop/start " : "list ") + "entry from " + sourceLabel + ": " + value);
         }
 
         static std::string startMenuLogicalIconName(const std::string& label) {
@@ -230,6 +269,7 @@ namespace gxos {
         }
 
         void Compositor::refreshDesktopItems( ) {
+            Logger::write(LogLevel::Info, std::string("Compositor refreshDesktopItems input pinned=") + std::to_string(g_cfg.pinned.size()) + " recent=" + std::to_string(g_cfg.recent.size()));
             std::set<std::string> selectedActions;
             for (int idx : g_selectedDesktopIconIndices) {
                 if (idx >= 0 && idx < (int)g_items.size( )) selectedActions.insert(g_items[idx].action);
@@ -248,12 +288,24 @@ namespace gxos {
                 if (selected) g_selectedDesktopIconIndices.insert(i);
             }
             if (g_lastSelectedDesktopIconIndex >= (int)g_items.size( )) g_lastSelectedDesktopIconIndex = g_items.empty( ) ? -1 : (int)g_items.size( ) - 1;
+            std::vector<std::string> finalDesktop;
+            for (const auto& item : g_items) finalDesktop.push_back(item.label);
+            logCompositorList("desktop item", finalDesktop);
         }
 
         void Compositor::refreshAllProgramsList( ) {
             g_startMenuAllProgsSorted.clear( );
             for (const auto& app : DesktopService::GetRegisteredApps()) {
-                if (!app.displayName.empty()) g_startMenuAllProgsSorted.push_back(app.displayName);
+                if (app.displayName.empty()) {
+                    Logger::write(LogLevel::Info, "Compositor start menu skipped empty app display name");
+                    continue;
+                }
+                if (hasEquivalentListItem(g_startMenuAllProgsSorted, app.displayName)) {
+                    Logger::write(LogLevel::Info, std::string("Compositor start menu skipped duplicate app: ") + app.displayName + " id=" + app.id + " source=" + app.source);
+                    continue;
+                }
+                Logger::write(LogLevel::Info, std::string("Compositor start menu include: ") + app.displayName + " id=" + app.id + " source=" + app.source);
+                g_startMenuAllProgsSorted.push_back(app.displayName);
             }
             // Sort alphabetically (case-insensitive)
             std::sort(g_startMenuAllProgsSorted.begin( ), g_startMenuAllProgsSorted.end( ),
@@ -263,6 +315,7 @@ namespace gxos {
                     std::transform(bl.begin( ), bl.end( ), bl.begin( ), ::tolower);
                     return al < bl;
                 });
+            logCompositorList("start menu app", g_startMenuAllProgsSorted);
         }
 
         void Compositor::saveDesktopConfig( ) { std::string err; DesktopConfig::Save("desktop.json", g_cfg, err); }
@@ -272,15 +325,15 @@ namespace gxos {
         static std::string hostedLaunchStatus(const RegisteredDesktopApp& app) {
             if (app.displayName == "App Model Demo" || app.launchName == "App Model Demo") return "launchable viewer";
             if (app.kind == apps::AppKind::BuiltIn) return "launchable if built-in handler exists";
-            if (app.kind == apps::AppKind::NativeElf) return apps::NativeElfExecutor::ExperimentalExecutionEnabled() ? "experimental native path" : "disabled: native execution off";
+            if (app.kind == apps::AppKind::NativeElf) return gxos::apps::NativeElfExecutor::ExperimentalExecutionEnabled() ? "experimental native path" : "disabled: native execution off";
             if (app.kind == apps::AppKind::GXAppPackage) return "disabled: GXApp launch not implemented";
             return "unknown";
         }
 
         void Compositor::openAppModelDemoViewerWindow() {
-            std::vector<RegisteredDesktopApp> apps = DesktopService::GetAppModelDemoApps();
+            std::vector<RegisteredDesktopApp> demoApps = DesktopService::GetAppModelDemoApps();
             bool hasDemo = false;
-            for (const auto& app : apps) {
+            for (const auto& app : demoApps) {
                 if (app.displayName == "App Model Demo" || app.launchName == "App Model Demo") hasDemo = true;
             }
             if (!hasDemo) {
@@ -290,7 +343,7 @@ namespace gxos {
                 demo.kind = apps::AppKind::BuiltIn;
                 demo.launchName = "App Model Demo";
                 demo.source = "BuiltIn";
-                apps.push_back(demo);
+                demoApps.push_back(demo);
             }
 
             uint64_t id = s_nextWinId.fetch_add(1);
@@ -317,12 +370,12 @@ namespace gxos {
 #else
             wi.texts.push_back("  Mode: compositor / unknown");
 #endif
-            wi.texts.push_back(std::string("  Native execution: ") + (apps::NativeElfExecutor::ExperimentalExecutionEnabled() ? "enabled" : "disabled"));
-            wi.texts.push_back("  Discovered apps: " + std::to_string(apps.size()));
+            wi.texts.push_back(std::string("  Native execution: ") + (gxos::apps::NativeElfExecutor::ExperimentalExecutionEnabled() ? "enabled" : "disabled"));
+            wi.texts.push_back("  Discovered apps: " + std::to_string(demoApps.size()));
             wi.texts.push_back("");
             wi.texts.push_back("Apps:");
             wi.texts.push_back("  Display name                 App ID/name                         Type         Status");
-            for (const auto& app : apps) {
+            for (const auto& app : demoApps) {
                 std::ostringstream row;
                 row << "  " << app.displayName;
                 if (app.displayName.size() < 29) row << std::string(29 - app.displayName.size(), ' ');
@@ -346,6 +399,13 @@ namespace gxos {
         }
 
         void Compositor::launchAction(const std::string& act) {
+            uint64_t now = nowMs();
+            if (!act.empty() && act == s_lastLaunchAction && (now - s_lastLaunchTicks) < 350) {
+                Logger::write(LogLevel::Info, std::string("Desktop launch skipped duplicate click: ") + act);
+                return;
+            }
+            s_lastLaunchAction = act;
+            s_lastLaunchTicks = now;
             Logger::write(LogLevel::Info, std::string("Desktop launch: ") + act);
             addRecent(act);
             if (act == "App Model Demo" || act == "AppModel") {
@@ -1472,7 +1532,7 @@ namespace gxos {
             case MsgType::MT_Minimize: { uint64_t id = 0; try { id = std::stoull(s); } catch (...) {} { std::lock_guard<std::mutex> lk(g_lock); if (g_modalWindow != 0 && id != g_modalWindow) break; auto wit = g_windows.find(id); if (wit != g_windows.end( )) { wit->second.minimized = true; wit->second.tombstoned = true; if (g_modalWindow == id) g_modalWindow = 0; if (g_focus == id) g_focus = 0; } } invalidate(id); } break;
             case MsgType::MT_ShowDesktopToggle: { { std::lock_guard<std::mutex> lk(g_lock); if (g_modalWindow != 0) { for (auto it = g_z.begin( ); it != g_z.end( ); ++it) { if (*it == g_modalWindow) { g_z.erase(it); break; } } g_z.push_back(g_modalWindow); g_focus = g_modalWindow; invalidate(g_modalWindow); break; } } if (!g_showDesktopActive) { g_showDesktopMinimized.clear( ); for (uint64_t id : g_z) { auto it = g_windows.find(id); if (it != g_windows.end( ) && !it->second.minimized) { it->second.minimized = true; it->second.tombstoned = true; g_showDesktopMinimized.push_back(id); } } g_focus = 0; g_showDesktopActive = true; } else { for (uint64_t id : g_showDesktopMinimized) { auto it = g_windows.find(id); if (it != g_windows.end( )) { it->second.minimized = false; it->second.tombstoned = false; } } g_showDesktopMinimized.clear( ); g_showDesktopActive = false; } invalidate(0); } break;
             case MsgType::MT_StateSave: { std::string path = s; std::vector<SavedWindow> sw; { std::lock_guard<std::mutex> lk(g_lock); for (size_t i = 0; i < g_z.size( ); ++i) { uint64_t id = g_z[i]; auto it = g_windows.find(id); if (it == g_windows.end( )) continue; const WinInfo& w = it->second; SavedWindow rec; rec.id = w.id; rec.title = w.title; rec.x = w.x; rec.y = w.y; rec.w = w.w; rec.h = w.h; rec.minimized = w.minimized; rec.maximized = w.maximized; rec.z = (int)i; rec.focused = (g_focus == w.id); rec.snap = w.snapState; sw.push_back(rec); } } std::string err; if (!DesktopState::Save(path, sw, err)) publishOut(MsgType::MT_WidgetEvt, std::string("STATE_SAVE_ERR|") + err); else publishOut(MsgType::MT_WidgetEvt, std::string("STATE_SAVE_OK|") + path); } break;
-            case MsgType::MT_StateLoad: { std::string path = s; std::vector<SavedWindow> sw; std::string err; if (!DesktopState::Load(path, sw, err)) { publishOut(MsgType::MT_WidgetEvt, std::string("STATE_LOAD_ERR|") + err); } else { { std::lock_guard<std::mutex> lk(g_lock); g_windows.clear( ); g_z.clear( ); g_focus = 0; std::sort(sw.begin( ), sw.end( ), [] (const SavedWindow& a, const SavedWindow& b) { return a.z < b.z; }); for (auto& w : sw) { uint64_t id = s_nextWinId.fetch_add(1); WinInfo wi{ id, w.title, w.x, w.y, w.w, w.h, {}, {}, {}, {}, w.minimized, w.maximized, 0,0,0,0, true, w.snap }; if (wi.maximized) { RECT crL{ 0,0,1024,768 }; if (g_hwnd) GetClientRect(g_hwnd, &crL); int taskbarY = crL.bottom - 40; wi.x = crL.left; wi.y = crL.top; wi.w = crL.right - crL.left; wi.h = taskbarY - crL.top; } g_windows[id] = wi; g_z.push_back(id); if (w.focused && !wi.minimized) g_focus = id; } } publishOut(MsgType::MT_WidgetEvt, std::string("STATE_LOAD_OK|") + path); invalidate(0); } } break;
+            case MsgType::MT_StateLoad: { std::string path = s; std::vector<SavedWindow> sw; std::string err; if (!DesktopState::Load(path, sw, err)) { publishOut(MsgType::MT_WidgetEvt, std::string("STATE_LOAD_ERR|") + err); } else { { std::lock_guard<std::mutex> lk(g_lock); g_windows.clear( ); g_z.clear( ); g_focus = 0; std::sort(sw.begin( ), sw.end( ), [] (const SavedWindow& a, const SavedWindow& b) { return a.z < b.z; }); for (auto& w : sw) { uint64_t id = s_nextWinId.fetch_add(1); WinInfo wi{}; wi.id = id; wi.title = w.title; wi.x = w.x; wi.y = w.y; wi.w = w.w; wi.h = w.h; wi.minimized = w.minimized; wi.maximized = w.maximized; wi.dirty = true; wi.snapState = w.snap; if (wi.maximized) { RECT crL{ 0,0,1024,768 }; if (g_hwnd) GetClientRect(g_hwnd, &crL); int taskbarY = crL.bottom - 40; wi.x = crL.left; wi.y = crL.top; wi.w = crL.right - crL.left; wi.h = taskbarY - crL.top; } g_windows[id] = wi; g_z.push_back(id); if (w.focused && !wi.minimized) g_focus = id; } } publishOut(MsgType::MT_WidgetEvt, std::string("STATE_LOAD_OK|") + path); invalidate(0); } } break;
             case MsgType::MT_Invalidate: { invalidate(0); } break;
             case MsgType::MT_Ping: { publishOut(MsgType::MT_Ping, s); } break;
             case MsgType::MT_DesktopLaunch: { launchAction(s); } break;
@@ -1621,13 +1681,27 @@ namespace gxos {
             initVideoBackend( );
             DesktopConfigData cfg; std::string cfgErr; bool cfgOk = DesktopConfig::Load("desktop.json", cfg, cfgErr);
             g_cfg = cfg; // Store config
-            for (const auto& app : DesktopService::GetAppModelDemoApps()) {
-                if (std::find(g_cfg.pinned.begin(), g_cfg.pinned.end(), app.displayName) == g_cfg.pinned.end()) {
-                    g_cfg.pinned.push_back(app.displayName);
-                }
+            Logger::write(LogLevel::Info, std::string("Compositor DesktopConfig loaded=") + (cfgOk ? "true" : "false") + " err=" + cfgErr);
+            logCompositorList("config pinned before merge", g_cfg.pinned);
+            logCompositorList("config recent before merge", g_cfg.recent);
+            for (const auto& pinned : DesktopService::GetPinned()) {
+                Logger::write(LogLevel::Info, std::string("Compositor DesktopService pin considered: ") + pinned.name);
+                mergeVisibleAppEntry(g_cfg.pinned, pinned.name, "DesktopService pin", true);
             }
+            for (const auto& app : DesktopService::GetAppModelDemoApps()) {
+                Logger::write(LogLevel::Info, std::string("Compositor app-model app considered: ") + app.displayName + " id=" + app.id + " source=" + app.source);
+                mergeVisibleAppEntry(g_cfg.pinned, app.displayName, "AppModel registry", true);
+                mergeVisibleAppEntry(g_cfg.recent, app.displayName, "AppModel registry", false);
+            }
+            if (hasListItem(g_cfg.pinned, "AppModel") && !hasEquivalentListItem(g_cfg.pinned, "App Model Demo")) {
+                Logger::write(LogLevel::Info, "Compositor replacing legacy AppModel pin with App Model Demo alias");
+                for (auto& pinned : g_cfg.pinned) if (pinned == "AppModel") pinned = "App Model Demo";
+            }
+            logCompositorList("config pinned after merge", g_cfg.pinned);
+            logCompositorList("config recent after merge", g_cfg.recent);
             refreshDesktopItems( ); // Populate g_items from pinned/recent
             refreshAllProgramsList( ); // Populate sorted all programs list
+            saveDesktopConfig( );
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)
             if (cfgOk) loadWallpaper(cfg.wallpaperPath);
 #endif
@@ -1635,7 +1709,7 @@ namespace gxos {
             bool legacyLoaded = false; if (!cfgOk || cfg.windows.empty( )) {
                 std::vector<SavedWindow> sw; std::string err; if (DesktopState::Load("desktop.state", sw, err)) {
                     std::lock_guard<std::mutex> lk(g_lock); g_windows.clear( ); g_z.clear( ); g_focus = 0; std::sort(sw.begin( ), sw.end( ), [] (const SavedWindow& a, const SavedWindow& b) { return a.z < b.z; }); for (auto& w : sw) {
-                        uint64_t id = s_nextWinId.fetch_add(1); WinInfo wi{ id,w.title,w.x,w.y,w.w,w.h, {}, {}, {}, {}, w.minimized, w.maximized, 0,0,0,0, true, w.snap }; if (wi.maximized) {
+                        uint64_t id = s_nextWinId.fetch_add(1); WinInfo wi{}; wi.id = id; wi.title = w.title; wi.x = w.x; wi.y = w.y; wi.w = w.w; wi.h = w.h; wi.minimized = w.minimized; wi.maximized = w.maximized; wi.dirty = true; wi.snapState = w.snap; if (wi.maximized) {
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)
                             RECT crL{ 0,0,1024,768 };
                             if (g_hwnd) GetClientRect(g_hwnd, &crL);

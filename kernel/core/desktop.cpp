@@ -308,6 +308,8 @@ static int s_shutdownDialogHover = -1;  // 0 = Yes, 1 = No, -1 = none
 // App model demo dialog state
 static bool s_appModelDialogOpen = false;
 static int s_appModelDialogHover = -1;  // 0 = Close, -1 = none
+static int s_appModelSelectedIndex = 0;
+static const char* s_appModelStatus = "Ready. Use Up/Down, 1-4, Enter, I, S, Escape.";
 
 // Control Panel window state
 static bool s_controlPanelOpen = false;
