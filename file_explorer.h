@@ -108,6 +108,7 @@ namespace gxos { namespace apps {
         static void publish(gxos::gui::MsgType type, const std::string& payload);
         static void drawRect(int x, int y, int w, int h, int r, int g, int b);
         static void drawText(const std::string& text);
+        static void drawIcon(const std::string& logicalIconName, int x, int iconSize = 16);
         static void addButton(int id, int x, int y, int w, int h, const std::string& text);
         static std::string formatSize(uint64_t bytes);
         static std::string truncate(const std::string& value, size_t width);
@@ -146,6 +147,7 @@ namespace gxos { namespace apps {
         static bool s_showDeleteConfirmation;
         static std::string s_deleteTargetPath;
         static bool s_deleteTargetIsDirectory;
+        static int s_textLineCount;  // tracks emitted text lines for icon y-coordinate alignment
     };
     
 }} // namespace gxos::apps

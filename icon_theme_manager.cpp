@@ -39,10 +39,14 @@ IconThemeManager::IconThemeManager()
     m_manifest.emplace("place.music", "22-iTUnes_256x256_35379.png");
     m_manifest.emplace("place.network", "39-Globe_256x256_35386.png");
     m_manifest.emplace("file.folder", "25-Folder_256x256_35390.png");
+    m_manifest.emplace("file.sysfolder", "12-Desktop_256x256_35399.png");
     m_manifest.emplace("file.text", "33-TXT_256x256_35365.png");
+    m_manifest.emplace("file.image", "7-Image_capture_256x256_35382.png");
+    m_manifest.emplace("file.binary", "29-Generic_256x256_35387.png");
     m_manifest.emplace("file.generic", "31-Document_256x256_35398.png");
     m_manifest.emplace("file.unknown", "34-Unknown__256x256_35364.png");
     m_manifest.emplace("drive.fixed", "41-Macintosh_HD_256x256_35377.png");
+    m_manifest.emplace("drive.mounted", "36-Removable_HD_256x256_35368.png");
     m_manifest.emplace("drive.usb", "38-USB_HD_256x256_35363.png");
     m_manifest.emplace("trash.empty", "24-Empty_Trash_256x256_35394.png");
     m_manifest.emplace("trash.full", "23-Full_Trash_256x256_35388.png");

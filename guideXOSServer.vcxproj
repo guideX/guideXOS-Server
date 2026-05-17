@@ -150,6 +150,7 @@
     <ClInclude Include="elf_validator.h" />
     <ClInclude Include="executable_memory.h" />
     <ClInclude Include="file_explorer.h" />
+    <ClInclude Include="file_icon_provider.h" />
     <ClInclude Include="firewall.h" />
     <ClInclude Include="focus_indicator.h" />
     <ClInclude Include="fs.h" />
@@ -367,6 +368,7 @@
     <ClCompile Include="elf_validator.cpp" />
     <ClCompile Include="executable_memory.cpp" />
     <ClCompile Include="file_explorer.cpp" />
+    <ClCompile Include="file_icon_provider.cpp" />
     <ClCompile Include="firewall.cpp" />
     <ClCompile Include="focus_indicator.cpp" />
     <ClCompile Include="fs.cpp" />
