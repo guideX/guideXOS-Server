@@ -161,6 +161,7 @@
     <ClInclude Include="image.h" />
     <ClInclude Include="image_renderer.h" />
     <ClInclude Include="image_viewer.h" />
+    <ClInclude Include="icon_theme_manager.h" />
     <ClInclude Include="kernel\arch\amd64\include\arch\context_switch.h" />
     <ClInclude Include="kernel\arch\amd64\include\arch\graphics.h" />
     <ClInclude Include="kernel\arch\amd64\include\arch\pci_audio.h" />
@@ -232,6 +233,7 @@
     <ClInclude Include="kernel\core\include\kernel\desktop.h" />
     <ClInclude Include="kernel\core\include\kernel\desktop_capabilities.h" />
     <ClInclude Include="kernel\core\include\kernel\desktop_font.h" />
+    <ClInclude Include="kernel\core\include\kernel\desktop_icon_theme_flat.h" />
     <ClInclude Include="kernel\core\include\kernel\device_tree.h" />
     <ClInclude Include="kernel\core\include\kernel\dhcp.h" />
     <ClInclude Include="kernel\core\include\kernel\dns.h" />
@@ -372,6 +374,7 @@
     <ClCompile Include="gxm_loader.cpp" />
     <ClCompile Include="hd_installer.cpp" />
     <ClCompile Include="icons.cpp" />
+    <ClCompile Include="icon_theme_manager.cpp" />
     <ClCompile Include="image.cpp" />
     <ClCompile Include="image_renderer.cpp" />
     <ClCompile Include="image_viewer.cpp" />

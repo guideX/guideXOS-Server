@@ -60,6 +60,9 @@
     <ClInclude Include="icons.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="icon_theme_manager.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="desktop_config.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -615,6 +618,9 @@
     <ClInclude Include="kernel\core\include\kernel\desktop_font.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="kernel\core\include\kernel\desktop_icon_theme_flat.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="app_manifest.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -705,6 +711,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="icons.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="icon_theme_manager.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="desktop_service.cpp">

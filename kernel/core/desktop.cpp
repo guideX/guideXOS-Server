@@ -15,6 +15,7 @@
 #include "include/kernel/desktop_font.h"
 #include "include/kernel/framebuffer.h"
 #include "include/kernel/startmenubutton_img.h"
+#include "include/kernel/desktop_icon_theme_flat.h"
 #include "include/kernel/shell.h"
 #include "include/kernel/kernel_app.h"
 #include "include/kernel/kernel_apps.h"
@@ -30,6 +31,9 @@
 #include "include/kernel/pci_audio.h"
 #include "include/kernel/usb_audio.h"
 #include "include/kernel/time.h"
+#if !defined(GXOS_BARE_METAL)
+#include "../../icon_theme_manager.h"
+#endif
 
 #if defined(_MSC_VER)
 #include <intrin.h>  // For MSVC intrinsics (__outbyte, __halt, etc.)
@@ -329,6 +333,9 @@ static const uint32_t kIconSize = 48;
 static const uint32_t kIconCellW = 80;
 static const uint32_t kIconCellH = 76;
 static const uint32_t kIconMargin = 24;
+static bool s_enableDesktopIcons = true;
+static uint32_t s_desktopIconSize = kIconSize;
+static const char* s_desktopIconTheme = "Flat";
 static const uint32_t kTrayIconSize = 16;
 static const uint32_t kTrayIconGap = 6;
 static const uint32_t kTaskbarBtnMaxW = 150;
@@ -762,6 +769,13 @@ static int32_t s_selectionStartX = 0;
 static int32_t s_selectionStartY = 0;
 static int32_t s_selectionCurrentX = 0;
 static int32_t s_selectionCurrentY = 0;
+
+#if !defined(GXOS_BARE_METAL)
+static gxos::gui::ImagePtr s_desktopIconImageCache[8];
+static bool s_desktopIconLoadAttempted[8] = {false};
+static bool s_desktopIconMissingLogged[8] = {false};
+static uint32_t s_cachedDesktopIconSize = 0;
+#endif
 
 // Icon management helpers
 static int s_visibleIconCount = 0;  // Count of icons to display (pinned + recent)
@@ -1595,6 +1609,219 @@ static void draw_icon_symbol(uint32_t ix, uint32_t iy, uint32_t size, const char
     }
 }
 
+static bool text_equals(const char* a, const char* b)
+{
+    if (!a || !b) return false;
+    while (*a && *b && *a == *b) { a++; b++; }
+    return *a == '\0' && *b == '\0';
+}
+
+static const char* GetDesktopIconLogicalName(const char* label)
+{
+    if (text_equals(label, "Notepad")) return "app.notepad";
+    if (text_equals(label, "Calculator")) return "app.calculator";
+    if (text_equals(label, "Console")) return "app.console";
+    if (text_equals(label, "TaskManager")) return "app.taskmanager";
+    if (text_equals(label, "Files")) return "app.files";
+    if (text_equals(label, "Paint")) return "app.paint";
+    if (text_equals(label, "Clock")) return "app.clock";
+    if (text_equals(label, "DiskManager")) return "app.diskmanager";
+    if (text_equals(label, "HDInstaller")) return "app.installer";
+    if (text_equals(label, "Control Panel")) return "app.controlpanel";
+    if (text_equals(label, "Settings")) return "app.settings";
+    if (text_equals(label, "Computer")) return "place.computer";
+    if (text_equals(label, "Documents")) return "place.documents";
+    if (text_equals(label, "Pictures")) return "place.pictures";
+    if (text_equals(label, "Music")) return "place.music";
+    if (text_equals(label, "Network")) return "place.network";
+    return "file.generic";
+}
+
+static void draw_colored_desktop_icon(uint32_t ix, uint32_t iy, uint32_t color, const char* label, bool dragging)
+{
+    if (dragging) {
+        uint8_t dr = (uint8_t)(((color >> 16) & 0xFF) * 7 / 10);
+        uint8_t dg = (uint8_t)(((color >> 8) & 0xFF) * 7 / 10);
+        uint8_t db = (uint8_t)((color & 0xFF) * 7 / 10);
+        framebuffer::fill_rect(ix, iy, kIconSize, kIconSize, rgb(dr, dg, db));
+        draw_icon_symbol(ix, iy, kIconSize, label);
+        draw_rect(ix, iy, kIconSize, kIconSize, rgb(140, 140, 160));
+        return;
+    }
+
+    framebuffer::fill_rect(ix, iy, kIconSize, kIconSize, color);
+
+    uint8_t br = (uint8_t)(((color >> 16) & 0xFF));
+    uint8_t bg = (uint8_t)(((color >> 8) & 0xFF));
+    uint8_t bb = (uint8_t)(color & 0xFF);
+    uint8_t lr = (uint8_t)(br + 30 > 255 ? 255 : br + 30);
+    uint8_t lg = (uint8_t)(bg + 30 > 255 ? 255 : bg + 30);
+    uint8_t lb = (uint8_t)(bb + 30 > 255 ? 255 : bb + 30);
+    hline(ix + 1, iy + 1, kIconSize - 2, rgb(lr, lg, lb));
+    hline(ix + 1, iy + 2, kIconSize - 2, rgb(lr, lg, lb));
+
+    draw_icon_symbol(ix, iy, kIconSize, label);
+    draw_rect(ix, iy, kIconSize, kIconSize, rgb(200, 200, 220));
+    hline(ix + 1, iy + kIconSize - 1, kIconSize - 1, rgb(80, 80, 100));
+    vline(ix + kIconSize - 1, iy + 1, kIconSize - 1, rgb(80, 80, 100));
+}
+
+static bool draw_argb_icon_buffer(const uint32_t* pixels, uint32_t srcW, uint32_t srcH, uint32_t x, uint32_t y, uint32_t width, uint32_t height)
+{
+    if (!pixels || srcW == 0 || srcH == 0 || width == 0 || height == 0) return false;
+
+    bool drewPixel = false;
+    for (uint32_t dy = 0; dy < height; dy++) {
+        uint32_t sy = (uint32_t)((uint64_t)dy * (uint64_t)srcH / height);
+        for (uint32_t dx = 0; dx < width; dx++) {
+            uint32_t sx = (uint32_t)((uint64_t)dx * (uint64_t)srcW / width);
+            uint32_t src = pixels[sy * srcW + sx];
+            uint8_t a = (uint8_t)((src >> 24) & 0xFF);
+            if (a == 0) continue;
+
+            uint32_t px = x + dx;
+            uint32_t py = y + dy;
+            drewPixel = true;
+            if (a == 0xFF) {
+                framebuffer::put_pixel(px, py, src);
+            } else {
+                uint32_t dst = framebuffer::get_pixel(px, py);
+                uint8_t sr = (uint8_t)((src >> 16) & 0xFF);
+                uint8_t sg = (uint8_t)((src >> 8) & 0xFF);
+                uint8_t sb = (uint8_t)(src & 0xFF);
+                uint8_t dr = (uint8_t)((dst >> 16) & 0xFF);
+                uint8_t dg = (uint8_t)((dst >> 8) & 0xFF);
+                uint8_t db = (uint8_t)(dst & 0xFF);
+                uint8_t r = (uint8_t)((sr * a + dr * (255 - a)) / 255);
+                uint8_t g = (uint8_t)((sg * a + dg * (255 - a)) / 255);
+                uint8_t b = (uint8_t)((sb * a + db * (255 - a)) / 255);
+                framebuffer::put_pixel(px, py, 0xFF000000u | ((uint32_t)r << 16) | ((uint32_t)g << 8) | b);
+            }
+        }
+    }
+    return drewPixel;
+}
+
+static const uint32_t* get_embedded_desktop_icon_pixels(const char* logicalName)
+{
+    if (text_equals(logicalName, "app.notepad")) return kDesktopThemeIcon_Notepad;
+    if (text_equals(logicalName, "app.calculator")) return kDesktopThemeIcon_Calculator;
+    if (text_equals(logicalName, "app.console")) return kDesktopThemeIcon_Console;
+    if (text_equals(logicalName, "app.taskmanager")) return kDesktopThemeIcon_TaskManager;
+    if (text_equals(logicalName, "app.files")) return kDesktopThemeIcon_Files;
+    if (text_equals(logicalName, "app.paint")) return kDesktopThemeIcon_Paint;
+    if (text_equals(logicalName, "app.clock")) return kDesktopThemeIcon_Clock;
+    return kDesktopThemeIcon_FileGeneric;
+}
+
+#if defined(GXOS_BARE_METAL)
+static bool draw_themed_desktop_icon(int iconIdx, uint32_t cx, uint32_t iy)
+{
+    if (!s_enableDesktopIcons || iconIdx < 0 || iconIdx >= kDesktopIconCount) return false;
+    const char* logicalName = GetDesktopIconLogicalName(s_desktopIcons[iconIdx].label);
+    const uint32_t* pixels = get_embedded_desktop_icon_pixels(logicalName);
+    if (!pixels) return false;
+
+    uint32_t drawSize = s_desktopIconSize > 0 ? s_desktopIconSize : kIconSize;
+    uint32_t ix = cx + (kIconCellW > drawSize ? (kIconCellW - drawSize) / 2 : 0);
+    return draw_argb_icon_buffer(pixels, kDesktopThemeIconW, kDesktopThemeIconH, ix, iy, drawSize, drawSize);
+}
+#else
+static void reset_desktop_icon_cache_if_needed()
+{
+    if (s_cachedDesktopIconSize == s_desktopIconSize) return;
+    for (int i = 0; i < 8; i++) {
+        s_desktopIconImageCache[i].reset();
+        s_desktopIconLoadAttempted[i] = false;
+        s_desktopIconMissingLogged[i] = false;
+    }
+    s_cachedDesktopIconSize = s_desktopIconSize;
+}
+
+static void draw_scaled_rgba_icon(const gxos::gui::ImagePtr& image, uint32_t x, uint32_t y, uint32_t width, uint32_t height)
+{
+    if (!image || !image->isValid() || image->Channels < 4 || width == 0 || height == 0) return;
+
+    for (uint32_t dy = 0; dy < height; dy++) {
+        int sy = (int)((uint64_t)dy * (uint64_t)image->Height / height);
+        for (uint32_t dx = 0; dx < width; dx++) {
+            int sx = (int)((uint64_t)dx * (uint64_t)image->Width / width);
+            const uint8_t* src = image->Pixels + ((sy * image->Width + sx) * image->Channels);
+            uint8_t a = src[3];
+            if (a == 0) continue;
+
+            uint32_t px = x + dx;
+            uint32_t py = y + dy;
+            uint32_t srcColor = 0xFF000000u | ((uint32_t)src[0] << 16) | ((uint32_t)src[1] << 8) | (uint32_t)src[2];
+            if (a == 0xFF) {
+                framebuffer::put_pixel(px, py, srcColor);
+            } else {
+                uint32_t dst = framebuffer::get_pixel(px, py);
+                uint8_t dr = (uint8_t)((dst >> 16) & 0xFF);
+                uint8_t dg = (uint8_t)((dst >> 8) & 0xFF);
+                uint8_t db = (uint8_t)(dst & 0xFF);
+                uint8_t r = (uint8_t)((src[0] * a + dr * (255 - a)) / 255);
+                uint8_t g = (uint8_t)((src[1] * a + dg * (255 - a)) / 255);
+                uint8_t b = (uint8_t)((src[2] * a + db * (255 - a)) / 255);
+                framebuffer::put_pixel(px, py, 0xFF000000u | ((uint32_t)r << 16) | ((uint32_t)g << 8) | b);
+            }
+        }
+    }
+}
+
+static bool draw_themed_desktop_icon(int iconIdx, uint32_t cx, uint32_t iy)
+{
+    if (!s_enableDesktopIcons || iconIdx < 0 || iconIdx >= kDesktopIconCount) return false;
+
+    reset_desktop_icon_cache_if_needed();
+
+    gxos::gui::IconThemeManager& manager = gxos::gui::IconThemeManager::Instance();
+    manager.SetCurrentThemeName(s_desktopIconTheme);
+    if (!manager.IconsEnabled()) return false;
+
+    if (!s_desktopIconLoadAttempted[iconIdx]) {
+        s_desktopIconLoadAttempted[iconIdx] = true;
+        const char* logicalName = GetDesktopIconLogicalName(s_desktopIcons[iconIdx].label);
+        s_desktopIconImageCache[iconIdx] = manager.LoadIcon(logicalName, (int)s_desktopIconSize);
+        if (!s_desktopIconImageCache[iconIdx] && !s_desktopIconMissingLogged[iconIdx]) {
+            serial::puts("[desktop] themed icon unavailable: ");
+            serial::puts(logicalName);
+            serial::puts("\n");
+            s_desktopIconMissingLogged[iconIdx] = true;
+        }
+    }
+
+    gxos::gui::ImagePtr image = s_desktopIconImageCache[iconIdx];
+    if (!image) return false;
+
+    uint32_t drawSize = s_desktopIconSize > 0 ? s_desktopIconSize : kIconSize;
+    uint32_t ix = cx + (kIconCellW > drawSize ? (kIconCellW - drawSize) / 2 : 0);
+    draw_scaled_rgba_icon(image, ix, iy, drawSize, drawSize);
+    return true;
+}
+#endif
+
+static void draw_desktop_icon_item(int iconIdx, uint32_t cx, uint32_t cy, bool dragging)
+{
+    uint32_t ix = cx + (kIconCellW - kIconSize) / 2;
+    uint32_t iy = cy + 4;
+    const char* lbl = s_desktopIcons[iconIdx].label;
+
+    if (!draw_themed_desktop_icon(iconIdx, cx, iy)) {
+        draw_colored_desktop_icon(ix, iy, s_desktopIcons[iconIdx].color, lbl, dragging);
+    }
+
+    if (s_desktopIcons[iconIdx].pinned) {
+        draw_text(ix + kIconSize - 8, iy + 2, "*", rgb(255, 220, 80), 1);
+    }
+
+    uint32_t labelY = iy + kIconSize + 4;
+    int tw = measure_text(lbl);
+    uint32_t lx = cx + (kIconCellW > (uint32_t)tw ? (kIconCellW - tw) / 2 : 0);
+    draw_text(lx + 1, labelY + 1, lbl, rgb(0, 0, 0), 1);
+    draw_text(lx, labelY, lbl, dragging ? rgb(200, 200, 210) : rgb(240, 240, 250), 1);
+}
+
 static void draw_desktop_icons()
 {
     DesktopRect work = get_current_work_area();
@@ -1618,48 +1845,7 @@ static void draw_desktop_icons()
             draw_rect(cx, cy, kIconCellW, kIconCellH, rgb(100, 160, 240));
         }
 
-        // Icon background square with rounded appearance
-        uint32_t ix = cx + (kIconCellW - kIconSize) / 2;
-        uint32_t iy = cy + 4;
-        
-        // Draw icon background with base color
-        framebuffer::fill_rect(ix, iy, kIconSize, kIconSize, s_desktopIcons[iconIdx].color);
-
-        // Lighter top edge for depth effect
-        uint32_t baseColor = s_desktopIcons[iconIdx].color;
-        uint8_t br = (uint8_t)(((baseColor >> 16) & 0xFF));
-        uint8_t bg = (uint8_t)(((baseColor >> 8) & 0xFF));
-        uint8_t bb = (uint8_t)((baseColor & 0xFF));
-        uint8_t lr = (uint8_t)(br + 30 > 255 ? 255 : br + 30);
-        uint8_t lg = (uint8_t)(bg + 30 > 255 ? 255 : bg + 30);
-        uint8_t lb = (uint8_t)(bb + 30 > 255 ? 255 : bb + 30);
-        hline(ix + 1, iy + 1, kIconSize - 2, rgb(lr, lg, lb));
-        hline(ix + 1, iy + 2, kIconSize - 2, rgb(lr, lg, lb));
-
-        // Draw app-specific icon symbol
-        draw_icon_symbol(ix, iy, kIconSize, s_desktopIcons[iconIdx].label);
-
-        // Icon border with subtle 3D effect
-        draw_rect(ix, iy, kIconSize, kIconSize, rgb(200, 200, 220));
-        // Darker bottom/right edge for depth
-        hline(ix + 1, iy + kIconSize - 1, kIconSize - 1, rgb(80, 80, 100));
-        vline(ix + kIconSize - 1, iy + 1, kIconSize - 1, rgb(80, 80, 100));
-
-        // Pin indicator (bright star in top-right corner if pinned)
-        if (s_desktopIcons[iconIdx].pinned) {
-            draw_text(ix + kIconSize - 8, iy + 2, "*", rgb(255, 220, 80), 1);
-        }
-
-        // Label with shadow for better readability
-        uint32_t labelY = iy + kIconSize + 4;
-        const char* lbl = s_desktopIcons[iconIdx].label;
-        int tw = measure_text(lbl);
-        uint32_t lx = cx + (kIconCellW > (uint32_t)tw ? (kIconCellW - tw) / 2 : 0);
-        
-        // Text shadow (slightly offset black text)
-        draw_text(lx + 1, labelY + 1, lbl, rgb(0, 0, 0), 1);
-        // Main text (bright white)
-        draw_text(lx, labelY, lbl, rgb(240, 240, 250), 1);
+        draw_desktop_icon_item(iconIdx, cx, cy, false);
     }
 
     // Draw the dragged icon ghost(s) at current drag position. For a group
@@ -1672,37 +1858,7 @@ static void draw_desktop_icons()
             uint32_t cx = (uint32_t)(s_dragOriginalIconX[displayIdx] + dragDeltaX);
             uint32_t cy = (uint32_t)(s_dragOriginalIconY[displayIdx] + dragDeltaY);
 
-            // Semi-transparent selection highlight (darker for dragging)
-            framebuffer::fill_rect(cx, cy, kIconCellW, kIconCellH, rgb(30, 50, 90));
-            draw_rect(cx, cy, kIconCellW, kIconCellH, rgb(80, 120, 180));
-
-            uint32_t ix = cx + (kIconCellW - kIconSize) / 2;
-            uint32_t iy = cy + 4;
-        
-            // Draw icon with slightly dimmed colors when dragging
-            uint32_t dragColor = s_desktopIcons[iconIdx].color;
-            uint8_t dr = (uint8_t)(((dragColor >> 16) & 0xFF) * 7 / 10);
-            uint8_t dg = (uint8_t)(((dragColor >> 8) & 0xFF) * 7 / 10);
-            uint8_t db = (uint8_t)((dragColor & 0xFF) * 7 / 10);
-            framebuffer::fill_rect(ix, iy, kIconSize, kIconSize, rgb(dr, dg, db));
-        
-            // Draw icon symbol
-            draw_icon_symbol(ix, iy, kIconSize, s_desktopIcons[iconIdx].label);
-        
-            draw_rect(ix, iy, kIconSize, kIconSize, rgb(140, 140, 160));
-
-            // Pin indicator on dragged icon
-            if (s_desktopIcons[iconIdx].pinned) {
-                draw_text(ix + kIconSize - 8, iy + 2, "*", rgb(255, 220, 80), 1);
-            }
-
-            // Label
-            uint32_t labelY = iy + kIconSize + 4;
-            const char* lbl = s_desktopIcons[iconIdx].label;
-            int tw = measure_text(lbl);
-            uint32_t lx = cx + (kIconCellW > (uint32_t)tw ? (kIconCellW - tw) / 2 : 0);
-            draw_text(lx + 1, labelY + 1, lbl, rgb(0, 0, 0), 1);
-            draw_text(lx, labelY, lbl, rgb(200, 200, 210), 1);
+            draw_desktop_icon_item(iconIdx, cx, cy, true);
         }
     }
 
