@@ -24,6 +24,7 @@
 #include <chrono>
 #include <cstring>
 #include <ctime>
+#include <filesystem>
 #include <iostream>
 #include <cstdlib>
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)
@@ -168,6 +169,54 @@ namespace gxos {
             return false;
         }
 
+        static const char* kHostedTrashPath = "/Trash";
+        static const char* kHostedTrashInfoSuffix = ".trashinfo";
+
+        static bool endsWithText(const std::string& value, const char* suffix) {
+            if (!suffix) return false;
+            size_t suffixLen = std::strlen(suffix);
+            return value.size() >= suffixLen && value.compare(value.size() - suffixLen, suffixLen, suffix) == 0;
+        }
+
+        static std::string normalizeHostedVirtualPath(const std::string& path) {
+            std::string normalized = path.empty() ? "/" : path;
+            std::replace(normalized.begin(), normalized.end(), '\\', '/');
+            std::filesystem::path virtualPath(normalized);
+            if (virtualPath.is_relative()) virtualPath = std::filesystem::path("/") / virtualPath;
+            std::string out = virtualPath.lexically_normal().generic_string();
+            if (out.empty()) out = "/";
+            if (out.front() != '/') out.insert(out.begin(), '/');
+            return out;
+        }
+
+        static std::filesystem::path hostedRootPath() {
+            return std::filesystem::current_path();
+        }
+
+        static std::filesystem::path hostedPathForVirtual(const std::string& path) {
+            std::string normalized = normalizeHostedVirtualPath(path);
+            if (normalized == "/") return hostedRootPath();
+            return hostedRootPath() / std::filesystem::path(normalized.substr(1));
+        }
+
+        static size_t hostedTrashItemCount() {
+            std::error_code error;
+            std::filesystem::path trashPath = hostedPathForVirtual(kHostedTrashPath);
+            if (!std::filesystem::exists(trashPath, error) || error) return 0;
+            size_t count = 0;
+            for (const auto& entry : std::filesystem::directory_iterator(trashPath, error)) {
+                if (error) break;
+                std::string name = entry.path().filename().generic_string();
+                if (endsWithText(name, kHostedTrashInfoSuffix)) continue;
+                ++count;
+            }
+            return count;
+        }
+
+        static std::string hostedTrashIconLogicalName() {
+            return hostedTrashItemCount() > 0 ? "trash.full" : "trash.empty";
+        }
+
         static void mergeVisibleAppEntry(std::vector<std::string>& target, const std::string& value, const char* sourceLabel, bool visiblePreferred) {
             if (value.empty()) {
                 Logger::write(LogLevel::Info, std::string("Compositor skip empty visible entry from ") + sourceLabel);
@@ -185,7 +234,7 @@ namespace gxos {
             if (label == "Calculator") return "app.calculator";
             if (label == "Notepad") return "app.notepad";
             if (label == "Console") return "app.console";
-            if (label == "Trash") return "trash.empty";
+            if (label == "Trash") return hostedTrashIconLogicalName();
             if (label == "TaskManager" || label == "Task Manager") return "app.taskmanager";
             if (label == "DiskManager") return "app.diskmanager";
             if (label == "HDInstaller") return "app.installer";
@@ -432,6 +481,14 @@ namespace gxos {
                 Logger::write(LogLevel::Error, std::string("Failed to launch app: ") + act + " - " + err);
                 NotificationManager::Add(err.empty() ? std::string("Failed to launch app: ") + act : err, NotificationLevel::Error);
             }
+        }
+
+        void Compositor::requestDesktopRefresh() {
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
+            Logger::write(LogLevel::Info,
+                std::string("Desktop Trash icon refresh requested; trash items=") + std::to_string(hostedTrashItemCount()));
+            requestRepaint();
+#endif
         }
 
         void Compositor::ClearDesktopIconSelection( ) {

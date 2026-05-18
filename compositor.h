@@ -67,6 +67,7 @@ namespace gxos { namespace gui {
     class Compositor {
     public:
         static uint64_t start();
+        static void requestDesktopRefresh();
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)
         static HWND g_hwnd; // expose for helper drawing
 #endif

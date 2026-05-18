@@ -395,6 +395,20 @@ public:
     virtual void draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) override;
 
     static app::KernelApp* create() { return new TrashApp(); }
+
+private:
+    static const int MAX_TRASH_ENTRIES = 32;
+
+    struct TrashEntry {
+        char name[vfs::VFS_MAX_FILENAME];
+        bool isDir;
+        char originalPath[256];
+    };
+
+    TrashEntry m_entries[MAX_TRASH_ENTRIES];
+    int m_entryCount;
+
+    void refreshEntries();
 };
 
 // ============================================================

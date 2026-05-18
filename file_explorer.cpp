@@ -2,10 +2,14 @@
 #include "file_icon_provider.h"
 #include "icon_theme_manager.h"
 #include "logger.h"
+#include "compositor.h"
 #include "notepad.h"
 #include <sstream>
 #include <algorithm>
 #include <cctype>
+#include <ctime>
+#include <filesystem>
+#include <fstream>
 
 #ifndef _WIN32
 #include "kernel/core/include/kernel/vfs.h"
@@ -25,6 +29,8 @@ namespace gxos { namespace apps {
         constexpr int kRowH = 16;
         constexpr int kVisibleRows = 20;
         constexpr size_t kLazyPageSize = 256;
+        constexpr const char* kTrashRootPath = "/Trash";
+        constexpr const char* kTrashInfoSuffix = ".trashinfo";
 
         constexpr int kIconSize = 16;
         constexpr int kNavIconSize = 16;
@@ -130,6 +136,27 @@ namespace gxos { namespace apps {
                 }
 
                 kernel::vfs::closedir(dir);
+#else
+                std::error_code ec;
+                std::filesystem::path hostPath = hostPathForVirtual(path);
+                if (!std::filesystem::exists(hostPath, ec) || !std::filesystem::is_directory(hostPath, ec)) return entries;
+                size_t index = 0;
+                for (const auto& item : std::filesystem::directory_iterator(hostPath, ec)) {
+                    if (ec) break;
+                    if (index++ < offset) continue;
+                    if (entries.size() >= limit) {
+                        hasMore = true;
+                        break;
+                    }
+                    ExplorerFileEntry entry;
+                    entry.name = item.path().filename().generic_string();
+                    entry.fullPath = combinePath(normalizePath(path), entry.name);
+                    entry.kind = item.is_directory(ec) ? ExplorerEntryKind::Directory : ExplorerEntryKind::File;
+                    entry.type = entry.isDirectory() ? "File folder" : fileTypeFromName(entry.name);
+                    entry.size = entry.isDirectory() ? 0 : static_cast<uint64_t>(item.file_size(ec));
+                    entry.modified = "--";
+                    entries.push_back(entry);
+                }
 #endif
                 std::sort(entries.begin(), entries.end(), [](const ExplorerFileEntry& a, const ExplorerFileEntry& b) {
                     if (a.isDirectory() != b.isDirectory()) return a.isDirectory();
@@ -146,7 +173,8 @@ namespace gxos { namespace apps {
 #ifndef _WIN32
                 return kernel::vfs::exists(path.c_str());
 #else
-                return path == "/";
+                std::error_code ec;
+                return std::filesystem::exists(hostPathForVirtual(path), ec) && !ec;
 #endif
             }
 
@@ -155,7 +183,8 @@ namespace gxos { namespace apps {
                 kernel::vfs::FileInfo info{};
                 return kernel::vfs::stat(path.c_str(), &info) == kernel::vfs::VFS_OK && info.type == kernel::vfs::FILE_TYPE_DIRECTORY;
 #else
-                return path == "/";
+                std::error_code ec;
+                return std::filesystem::is_directory(hostPathForVirtual(path), ec) && !ec;
 #endif
             }
 
@@ -166,7 +195,11 @@ namespace gxos { namespace apps {
                 error = statusText(status);
                 return false;
 #else
-                error = "Not supported in host test mode";
+                std::error_code ec;
+                if (std::filesystem::exists(hostPathForVirtual(path), ec)) return std::filesystem::is_directory(hostPathForVirtual(path), ec);
+                bool created = std::filesystem::create_directories(hostPathForVirtual(path), ec);
+                if (created && !ec) return true;
+                error = ec ? ec.message() : "Unable to create directory";
                 return false;
 #endif
             }
@@ -179,7 +212,9 @@ namespace gxos { namespace apps {
                 error = "VFS write_file failed";
                 return false;
 #else
-                error = "Not supported in host test mode";
+                std::ofstream file(hostPathForVirtual(path), std::ios::binary | std::ios::app);
+                if (file.good()) return true;
+                error = "Unable to create file";
                 return false;
 #endif
             }
@@ -191,7 +226,11 @@ namespace gxos { namespace apps {
                 error = statusText(status);
                 return false;
 #else
-                error = "Not supported in host test mode";
+                std::error_code ec;
+                if (directory) std::filesystem::remove_all(hostPathForVirtual(path), ec);
+                else std::filesystem::remove(hostPathForVirtual(path), ec);
+                if (!ec) return true;
+                error = ec.message();
                 return false;
 #endif
             }
@@ -203,7 +242,10 @@ namespace gxos { namespace apps {
                 error = statusText(status);
                 return false;
 #else
-                error = "Not supported in host test mode";
+                std::error_code ec;
+                std::filesystem::rename(hostPathForVirtual(oldPath), hostPathForVirtual(newPath), ec);
+                if (!ec) return true;
+                error = ec.message();
                 return false;
 #endif
             }
@@ -214,7 +256,14 @@ namespace gxos { namespace apps {
                 kernel::vfs::normalize_path(path.c_str(), normalized, sizeof(normalized));
                 return normalized[0] ? normalized : "/";
 #else
-                return path.empty() ? "/" : path;
+                std::string normalized = path.empty() ? "/" : path;
+                std::replace(normalized.begin(), normalized.end(), '\\', '/');
+                std::filesystem::path virtualPath(normalized);
+                if (virtualPath.is_relative()) virtualPath = std::filesystem::path("/") / virtualPath;
+                std::string out = virtualPath.lexically_normal().generic_string();
+                if (out.empty()) out = "/";
+                if (out.front() != '/') out.insert(out.begin(), '/');
+                return out;
 #endif
             }
 
@@ -224,8 +273,7 @@ namespace gxos { namespace apps {
                 kernel::vfs::join_path(base.c_str(), name.c_str(), combined, sizeof(combined));
                 return combined;
 #else
-                if (base.empty() || base == "/") return "/" + name;
-                return base + "/" + name;
+                return normalizePath((base.empty() || base == "/") ? "/" + name : base + "/" + name);
 #endif
             }
 
@@ -242,6 +290,23 @@ namespace gxos { namespace apps {
             }
 
         private:
+#ifdef _WIN32
+            static std::filesystem::path hostRootPath() {
+                return std::filesystem::current_path();
+            }
+
+            static std::filesystem::path hostPathForVirtual(const std::string& path) {
+                std::string normalized = path.empty() ? "/" : path;
+                std::replace(normalized.begin(), normalized.end(), '\\', '/');
+                std::filesystem::path virtualPath(normalized);
+                if (virtualPath.is_relative()) virtualPath = std::filesystem::path("/") / virtualPath;
+                std::string generic = virtualPath.lexically_normal().generic_string();
+                if (generic.empty() || generic == "/") return hostRootPath();
+                if (generic.front() == '/') generic.erase(generic.begin());
+                return hostRootPath() / std::filesystem::path(generic);
+            }
+#endif
+
             static std::string fileTypeFromName(const std::string& name) {
                 size_t dot = name.find_last_of('.');
                 if (dot == std::string::npos || dot + 1 >= name.size()) return "File";
@@ -549,10 +614,12 @@ namespace gxos { namespace apps {
         if (s_selectedIndex < 0 || s_selectedIndex >= static_cast<int>(s_entries.size())) return;
         const ExplorerFileEntry entry = s_entries[s_selectedIndex];
         std::string error;
-        if (!s_fileSystem->remove(entry.fullPath, entry.isDirectory(), error)) {
-            s_status = "Delete failed: " + error;
+        std::string trashedPath;
+        Logger::write(LogLevel::Info, std::string("FileExplorer delete requested path=") + entry.fullPath);
+        if (!moveEntryToTrash(entry, error, trashedPath)) {
+            s_status = "Move to Trash failed: " + error;
         } else {
-            s_status = "Deleted " + entry.name;
+            s_status = "Moved to Trash: " + entry.name;
         }
         refresh();
         updateDisplay();
@@ -569,12 +636,19 @@ namespace gxos { namespace apps {
 
     void FileExplorer::confirmDelete() {
         s_showDeleteConfirmation = false;
-        std::string error;
         std::string name = s_deleteTargetPath.substr(s_deleteTargetPath.find_last_of('/') + 1);
-        if (!s_fileSystem->remove(s_deleteTargetPath, s_deleteTargetIsDirectory, error)) {
-            s_status = "Delete failed: " + error;
+        ExplorerFileEntry entry;
+        entry.name = name;
+        entry.fullPath = s_deleteTargetPath;
+        entry.kind = s_deleteTargetIsDirectory ? ExplorerEntryKind::Directory : ExplorerEntryKind::File;
+        entry.type = s_deleteTargetIsDirectory ? "File folder" : "File";
+        std::string error;
+        std::string trashedPath;
+        Logger::write(LogLevel::Info, std::string("FileExplorer confirm delete path=") + s_deleteTargetPath);
+        if (!moveEntryToTrash(entry, error, trashedPath)) {
+            s_status = "Move to Trash failed: " + error;
         } else {
-            s_status = "Deleted " + name;
+            s_status = "Moved to Trash: " + name;
         }
         refresh();
         updateDisplay();
@@ -767,6 +841,100 @@ namespace gxos { namespace apps {
         return path;
     }
 
+    std::string FileExplorer::trashRootPath() {
+        return kTrashRootPath;
+    }
+
+    std::string FileExplorer::makeUniquePathInDirectory(const std::string& directoryPath, const std::string& baseName, bool directory) {
+        std::string path = s_fileSystem->combinePath(directoryPath, baseName);
+        if (!s_fileSystem->exists(path)) return path;
+        for (int i = 1; i < 100; ++i) {
+            std::string candidate = baseName + " (" + std::to_string(i) + ")";
+            if (!directory && baseName.find('.') != std::string::npos) {
+                size_t dot = baseName.find_last_of('.');
+                candidate = baseName.substr(0, dot) + " (" + std::to_string(i) + ")" + baseName.substr(dot);
+            }
+            path = s_fileSystem->combinePath(directoryPath, candidate);
+            if (!s_fileSystem->exists(path)) return path;
+        }
+        return path;
+    }
+
+    std::string FileExplorer::trashInfoPathFor(const std::string& trashedPath) {
+        return trashedPath + kTrashInfoSuffix;
+    }
+
+    std::string FileExplorer::jsonEscape(const std::string& value) {
+        std::string out;
+        out.reserve(value.size() + 8);
+        for (char ch : value) {
+            switch (ch) {
+                case '\\': out += "\\\\"; break;
+                case '"': out += "\\\""; break;
+                case '\n': out += "\\n"; break;
+                case '\r': out += "\\r"; break;
+                case '\t': out += "\\t"; break;
+                default: out.push_back(ch); break;
+            }
+        }
+        return out;
+    }
+
+    void FileExplorer::refreshTrashDesktopState() {
+        Logger::write(LogLevel::Info, "FileExplorer desktop Trash icon refresh requested");
+#ifdef _WIN32
+        gxos::gui::Compositor::requestDesktopRefresh();
+#endif
+    }
+
+    bool FileExplorer::moveEntryToTrash(const ExplorerFileEntry& entry, std::string& error, std::string& trashedPath) {
+        Logger::write(LogLevel::Info, std::string("FileExplorer move-to-trash resolved path=") + entry.fullPath);
+        const std::string trashPath = trashRootPath();
+        Logger::write(LogLevel::Info, std::string("FileExplorer trash directory selected=") + trashPath);
+        if (!s_fileSystem->exists(trashPath)) {
+            if (!s_fileSystem->createDirectory(trashPath, error)) {
+                Logger::write(LogLevel::Error, std::string("FileExplorer trash mkdir failed: ") + error);
+                return false;
+            }
+            Logger::write(LogLevel::Info, std::string("FileExplorer trash directory created=") + trashPath);
+        }
+
+        trashedPath = makeUniquePathInDirectory(trashPath, entry.name, entry.isDirectory());
+        if (trashedPath != s_fileSystem->combinePath(trashPath, entry.name)) {
+            Logger::write(LogLevel::Info, std::string("FileExplorer trash collision resolved to=") + trashedPath);
+        }
+
+        if (!s_fileSystem->rename(entry.fullPath, trashedPath, error)) {
+            Logger::write(LogLevel::Error, std::string("FileExplorer move-to-trash failed: ") + error);
+            return false;
+        }
+
+        std::time_t now = std::time(nullptr);
+        std::ostringstream info;
+        info << "{\n"
+             << "  \"originalPath\": \"" << jsonEscape(entry.fullPath) << "\",\n"
+             << "  \"originalName\": \"" << jsonEscape(entry.name) << "\",\n"
+             << "  \"isDirectory\": " << (entry.isDirectory() ? "true" : "false") << ",\n"
+             << "  \"trashedAt\": " << static_cast<long long>(now) << "\n"
+             << "}";
+        std::string infoText = info.str();
+#ifndef _WIN32
+        int32_t infoWritten = kernel::vfs::write_file(trashInfoPathFor(trashedPath).c_str(), infoText.data(), static_cast<uint32_t>(infoText.size()));
+        if (infoWritten < 0) {
+            Logger::write(LogLevel::Warn, std::string("FileExplorer trash metadata write failed for ") + trashedPath);
+        }
+#else
+        std::filesystem::path infoPath = std::filesystem::current_path() / std::filesystem::path(trashInfoPathFor(trashedPath).substr(1));
+        std::ofstream infoFile(infoPath, std::ios::binary | std::ios::trunc);
+        if (infoFile) infoFile << infoText;
+        else Logger::write(LogLevel::Warn, std::string("FileExplorer trash metadata write failed for ") + trashedPath);
+#endif
+
+        Logger::write(LogLevel::Info, std::string("FileExplorer move-to-trash success path=") + trashedPath);
+        refreshTrashDesktopState();
+        return true;
+    }
+
     void FileExplorer::updateDisplay() {
         if (s_windowId == 0) return;
         publish(MsgType::MT_SetTitle, std::to_string(s_windowId) + "|File Explorer - " + s_currentPath);
@@ -781,12 +949,12 @@ namespace gxos { namespace apps {
             std::string itemName = s_deleteTargetPath.substr(s_deleteTargetPath.find_last_of('/') + 1);
             std::string itemType = s_deleteTargetIsDirectory ? "folder" : "file";
             drawRect(230, 190, 420, 100, 45, 45, 55);
-            drawText("CONFIRM DELETE");
+            drawText("MOVE TO TRASH");
             drawText("");
-            drawText("Are you sure you want to delete this " + itemType + "?");
+            drawText("Move this " + itemType + " to Trash?");
             drawText(itemName);
             drawText("");
-            addButton(100, 270, 262, 80, 22, "Yes, Delete");
+            addButton(100, 270, 262, 80, 22, "Move to Trash");
             addButton(101, 370, 262, 80, 22, "Cancel");
         } else if (s_promptMode != PromptNone) {
             drawRect(230, 190, 420, 84, 45, 45, 55);

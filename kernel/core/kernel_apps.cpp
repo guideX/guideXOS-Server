@@ -14,6 +14,8 @@
 #include "include/kernel/serial_debug.h"
 #include "include/kernel/desktop_icon_theme_flat.h"
 
+extern "C" void desktop_request_redraw();
+
 namespace kernel {
 namespace apps {
 
@@ -167,6 +169,289 @@ static void drawChar(uint32_t px, uint32_t py, char c, uint32_t color) {
             }
         }
     }
+}
+
+static void strappend(char* dst, const char* src, int maxLen) {
+    if (!dst || !src || maxLen <= 0) return;
+    int len = strlen_local(dst);
+    int i = 0;
+    while (src[i] && len < maxLen - 1) {
+        dst[len++] = src[i++];
+    }
+    dst[len] = '\0';
+}
+
+static bool startsWithText(const char* value, const char* prefix) {
+    if (!value || !prefix) return false;
+    while (*prefix) {
+        if (*value++ != *prefix++) return false;
+    }
+    return true;
+}
+
+static bool endsWithText(const char* value, const char* suffix) {
+    if (!value || !suffix) return false;
+    int valueLen = strlen_local(value);
+    int suffixLen = strlen_local(suffix);
+    if (suffixLen > valueLen) return false;
+    for (int i = 0; i < suffixLen; ++i) {
+        if (value[valueLen - suffixLen + i] != suffix[i]) return false;
+    }
+    return true;
+}
+
+static const char* kKernelTrashRootPath = "/Trash";
+static const char* kKernelTrashInfoSuffix = ".trashinfo";
+
+static bool kernel_trash_exists()
+{
+    vfs::DirEntry entry{};
+    uint8_t dir = vfs::opendir(kKernelTrashRootPath);
+    if (dir == 0xFF) return false;
+    bool hasItems = false;
+    while (vfs::readdir(dir, &entry)) {
+        if (entry.name[0] == '.' && (entry.name[1] == '\0' || (entry.name[1] == '.' && entry.name[2] == '\0'))) continue;
+        if (endsWithText(entry.name, kKernelTrashInfoSuffix)) continue;
+        hasItems = true;
+        break;
+    }
+    vfs::closedir(dir);
+    return hasItems;
+}
+
+static void kernel_write_text_file(const char* path, const char* text)
+{
+    if (!path || !text) return;
+    vfs::write_file(path, text, (uint32_t)strlen_local(text));
+}
+
+static void kernel_desktop_refresh_trash_state()
+{
+    serial::puts("[trash] desktop refresh requested; hasItems=");
+    serial::puts(kernel_trash_exists() ? "yes" : "no");
+    serial::puts("\n");
+    desktop_request_redraw();
+}
+
+static const char* kernel_vfs_status_text(vfs::Status status)
+{
+    switch (status) {
+        case vfs::VFS_OK: return "OK";
+        case vfs::VFS_ERR_NOT_FOUND: return "Path not found";
+        case vfs::VFS_ERR_EXISTS: return "Already exists";
+        case vfs::VFS_ERR_NOT_DIR: return "Parent is not a directory";
+        case vfs::VFS_ERR_IS_DIR: return "Path is a directory";
+        case vfs::VFS_ERR_NOT_EMPTY: return "Directory is not empty";
+        case vfs::VFS_ERR_NO_SPACE: return "No space left";
+        case vfs::VFS_ERR_READ_ONLY: return "Filesystem is read-only";
+        case vfs::VFS_ERR_INVALID: return "Invalid filesystem operation";
+        case vfs::VFS_ERR_IO: return "Filesystem I/O error";
+        case vfs::VFS_ERR_NOT_MOUNT: return "No mounted filesystem for path";
+        case vfs::VFS_ERR_BUSY: return "Filesystem busy";
+        case vfs::VFS_ERR_TOO_MANY: return "Too many open filesystem objects";
+        case vfs::VFS_ERR_NOT_SUPPORTED: return "Filesystem operation not supported";
+        default: return "Filesystem operation failed";
+    }
+}
+
+static bool kernel_make_directory_if_missing(const char* path)
+{
+    vfs::FileInfo info{};
+    vfs::Status statStatus = vfs::stat(path, &info);
+    if (statStatus == vfs::VFS_OK) return info.type == vfs::FILE_TYPE_DIRECTORY;
+    vfs::Status mkdirStatus = vfs::mkdir(path);
+    serial::puts("[trash] mkdir ");
+    serial::puts(path ? path : "<null>");
+    serial::puts(" result=");
+    serial::puts(kernel_vfs_status_text(mkdirStatus));
+    serial::puts("\n");
+    return mkdirStatus == vfs::VFS_OK;
+}
+
+static bool kernel_copy_file_to_trash_then_delete(const char* sourcePath, const char* destPath, char* error, int errorSize)
+{
+    vfs::FileInfo info{};
+    vfs::Status statStatus = vfs::stat(sourcePath, &info);
+    if (statStatus != vfs::VFS_OK) {
+        strcopy(error, kernel_vfs_status_text(statStatus), errorSize);
+        return false;
+    }
+    if (info.type == vfs::FILE_TYPE_DIRECTORY) {
+        strcopy(error, "Folder move requires filesystem rename support", errorSize);
+        return false;
+    }
+    if (info.size > 1024 * 1024) {
+        strcopy(error, "File too large for Trash fallback", errorSize);
+        return false;
+    }
+
+    static char buffer[1024 * 1024];
+    int32_t bytesRead = vfs::read_file(sourcePath, buffer, (uint32_t)info.size);
+    if (bytesRead < 0 || (uint64_t)bytesRead != info.size) {
+        strcopy(error, "Unable to read source for Trash copy", errorSize);
+        serial::puts("[trash] copy fallback read failed\n");
+        return false;
+    }
+
+    int32_t bytesWritten = vfs::write_file(destPath, buffer, (uint32_t)bytesRead);
+    if (bytesWritten < 0 || bytesWritten != bytesRead) {
+        strcopy(error, "Unable to write Trash copy", errorSize);
+        serial::puts("[trash] copy fallback write failed\n");
+        return false;
+    }
+
+    vfs::FileInfo destInfo{};
+    vfs::Status destStat = vfs::stat(destPath, &destInfo);
+    if (destStat != vfs::VFS_OK || destInfo.size != info.size) {
+        strcopy(error, "Trash copy verification failed", errorSize);
+        serial::puts("[trash] copy fallback verify failed\n");
+        return false;
+    }
+
+    vfs::Status unlinkStatus = vfs::unlink(sourcePath);
+    if (unlinkStatus != vfs::VFS_OK) {
+        strcopy(error, "Copied to Trash but source delete failed", errorSize);
+        serial::puts("[trash] copy fallback source unlink failed\n");
+        return false;
+    }
+
+    serial::puts("[trash] filesystem operation=copy-verify-delete fallback\n");
+    return true;
+}
+
+static void kernel_join_path(const char* base, const char* name, char* out, int outSize)
+{
+    if (!out || outSize <= 0) return;
+    vfs::join_path(base, name, out, (size_t)outSize);
+}
+
+static void kernel_trash_info_path_for(const char* trashedPath, char* out, int outSize)
+{
+    if (!out || outSize <= 0) return;
+    strcopy(out, trashedPath, outSize);
+    strappend(out, kKernelTrashInfoSuffix, outSize);
+}
+
+static void kernel_make_fat_safe_collision_name(const char* baseName, bool isDir, int index, char* out, int outSize)
+{
+    if (!out || outSize <= 0) return;
+    out[0] = '\0';
+
+    char stem[9];
+    char ext[4];
+    int stemLen = 0;
+    int extLen = 0;
+    int dot = -1;
+    int nameLen = strlen_local(baseName);
+    if (!isDir) {
+        for (int i = nameLen - 1; i >= 0; --i) {
+            if (baseName[i] == '.') { dot = i; break; }
+        }
+    }
+
+    int stemEnd = dot > 0 ? dot : nameLen;
+    for (int i = 0; i < stemEnd && stemLen < 6; ++i) {
+        char c = baseName[i];
+        if (c >= 'a' && c <= 'z') c = (char)(c - 'a' + 'A');
+        if ((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_') stem[stemLen++] = c;
+    }
+    if (stemLen == 0) stem[stemLen++] = 'I';
+    stem[stemLen] = '\0';
+
+    if (!isDir && dot > 0) {
+        for (int i = dot + 1; baseName[i] && extLen < 3; ++i) {
+            char c = baseName[i];
+            if (c >= 'a' && c <= 'z') c = (char)(c - 'a' + 'A');
+            if ((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_') ext[extLen++] = c;
+        }
+    }
+    ext[extLen] = '\0';
+
+    strcopy(out, stem, outSize);
+    strappend(out, "~", outSize);
+    char digits[12];
+    int di = 0;
+    int value = index;
+    char rev[12];
+    int ri = 0;
+    while (value > 0) { rev[ri++] = (char)('0' + (value % 10)); value /= 10; }
+    while (ri > 0 && di < 2) digits[di++] = rev[--ri];
+    digits[di] = '\0';
+    strappend(out, digits, outSize);
+    if (!isDir && extLen > 0) {
+        strappend(out, ".", outSize);
+        strappend(out, ext, outSize);
+    }
+}
+
+static void kernel_unique_trash_path(const char* baseName, bool isDir, char* out, int outSize)
+{
+    kernel_join_path(kKernelTrashRootPath, baseName, out, outSize);
+    if (!vfs::exists(out)) return;
+
+    for (int index = 1; index < 100; ++index) {
+        char candidate[vfs::VFS_MAX_FILENAME];
+        kernel_make_fat_safe_collision_name(baseName, isDir, index, candidate, sizeof(candidate));
+        kernel_join_path(kKernelTrashRootPath, candidate, out, outSize);
+        if (!vfs::exists(out)) return;
+    }
+}
+
+static bool kernel_move_path_to_trash(const char* sourcePath, const char* sourceName, bool isDir, char* movedPath, int movedPathSize, char* error, int errorSize)
+{
+    serial::puts("[trash] delete requested path=");
+    serial::puts(sourcePath ? sourcePath : "<null>");
+    serial::puts("\n");
+    serial::puts("[trash] selected full item name=");
+    serial::puts(sourceName ? sourceName : "<null>");
+    serial::puts("\n");
+
+    if (!kernel_make_directory_if_missing(kKernelTrashRootPath)) {
+        strcopy(error, "Unable to create Trash directory", errorSize);
+        serial::puts("[trash] Trash directory unavailable\n");
+        return false;
+    }
+
+    serial::puts("[trash] selected trash dir=");
+    serial::puts(kKernelTrashRootPath);
+    serial::puts("\n");
+
+    kernel_unique_trash_path(sourceName, isDir, movedPath, movedPathSize);
+    serial::puts("[trash] collision-safe target=");
+    serial::puts(movedPath);
+    serial::puts("\n");
+
+    serial::puts("[trash] filesystem operation=rename/move\n");
+    vfs::Status renameStatus = vfs::rename(sourcePath, movedPath);
+    if (renameStatus != vfs::VFS_OK) {
+        serial::puts("[trash] rename/move failed result=");
+        serial::puts(kernel_vfs_status_text(renameStatus));
+        serial::puts("\n");
+        if (!kernel_copy_file_to_trash_then_delete(sourcePath, movedPath, error, errorSize)) {
+            if (!error[0]) strcopy(error, kernel_vfs_status_text(renameStatus), errorSize);
+            serial::puts("[trash] move-to-trash failed\n");
+            return false;
+        }
+    }
+
+    char infoPath[256];
+    kernel_trash_info_path_for(movedPath, infoPath, sizeof(infoPath));
+    char metadata[512];
+    metadata[0] = '\0';
+    strappend(metadata, "{\n  \"originalPath\": \"", sizeof(metadata));
+    strappend(metadata, sourcePath, sizeof(metadata));
+    strappend(metadata, "\",\n  \"originalName\": \"", sizeof(metadata));
+    strappend(metadata, sourceName, sizeof(metadata));
+    strappend(metadata, "\",\n  \"isDirectory\": ", sizeof(metadata));
+    strappend(metadata, isDir ? "true" : "false", sizeof(metadata));
+    strappend(metadata, "\n}", sizeof(metadata));
+    kernel_write_text_file(infoPath, metadata);
+
+    serial::puts("[trash] move-to-trash success path=");
+    serial::puts(movedPath);
+    serial::puts("\n");
+    kernel_desktop_refresh_trash_state();
+    return true;
 }
 
 static void appDrawText(uint32_t x, uint32_t y, const char* text, uint32_t color) {
@@ -2040,7 +2325,7 @@ bool FileExplorerApp::initWithParam(const char* startPath) {
     m_deleteFileBtnId = addButton(334, 5, 78, 20, "Delete File");
     m_renameFolderBtnId = addButton(248, 5, 92, 20, "Rename Dir");
     m_deleteFolderBtnId = addButton(344, 5, 84, 20, "Delete Dir");
-    m_confirmDeleteBtnId = addButton(260, 205, 78, 20, "Delete");
+    m_confirmDeleteBtnId = addButton(260, 205, 92, 20, "Move");
     m_cancelDeleteBtnId = addButton(344, 205, 70, 20, "Cancel");
 
     strcopy(m_currentPath, startPath && startPath[0] ? startPath : "/", MAX_PATH_LEN);
@@ -2160,9 +2445,9 @@ void FileExplorerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
         appDrawText(x + 232, y + 230, "Enter=OK  Esc=Cancel  Backspace=Delete", rgb(80, 80, 80));
     } else if (m_deleteConfirm) {
         framebuffer::fill_rect(x + 220, y + 165, 390, 92, rgb(250, 245, 245));
-        appDrawText(x + 232, y + 182, m_deleteTargetIsDir ? "Are you sure you wish to delete this folder?" : "Are you sure you wish to delete this file?", rgb(80, 30, 30));
+        appDrawText(x + 232, y + 182, m_deleteTargetIsDir ? "Move this folder to Trash?" : "Move this file to Trash?", rgb(80, 30, 30));
         appDrawText(x + 232, y + 205, m_deleteTargetName, rgb(30, 30, 30));
-        appDrawText(x + 232, y + 230, "This cannot be undone.", rgb(80, 80, 80));
+        appDrawText(x + 232, y + 230, "The item will be moved to Trash.", rgb(80, 80, 80));
     } else if (m_propertiesOpen) {
         framebuffer::fill_rect(x + 200, y + 145, 400, 150, rgb(244, 244, 248));
         framebuffer::fill_rect(x + 200, y + 145, 400, 1, rgb(110, 110, 130));
@@ -2552,20 +2837,40 @@ void FileExplorerApp::showDeleteConfirmation() {
     m_renamePrompt = false;
     m_deleteConfirm = true;
     setStatus("Confirm delete");
+    serial::puts("[fileexplorer-bm] move-to-trash requested\n");
+    serial::puts("[fileexplorer-bm] current directory=");
+    serial::puts(m_currentPath);
+    serial::puts("\n[fileexplorer-bm] selected full item name=");
+    serial::puts(entry.name);
+    serial::puts("\n[fileexplorer-bm] resolved source path=");
+    serial::puts(m_deleteTarget);
+    serial::puts("\n");
     updateActionButtons();
     invalidate();
 }
 
 void FileExplorerApp::confirmDelete() {
     if (!m_deleteConfirm || !m_deleteTarget[0]) return;
-    vfs::Status status = m_deleteTargetIsDir ? vfs::rmdir(m_deleteTarget) : vfs::unlink(m_deleteTarget);
+    char movedPath[MAX_PATH_LEN];
+    char error[96];
+    movedPath[0] = '\0';
+    error[0] = '\0';
     m_deleteConfirm = false;
-    if (status == vfs::VFS_OK) {
-        setStatus("Deleted item");
+    bool moved = kernel_move_path_to_trash(m_deleteTarget, m_deleteTargetName, m_deleteTargetIsDir, movedPath, sizeof(movedPath), error, sizeof(error));
+    if (moved) {
+        setStatus("Moved item to Trash");
     } else {
-        setStatus("Delete failed");
+        setStatus(error[0] ? error : "Move to Trash failed");
     }
     refresh();
+    if (moved) {
+        setStatus("Moved item to Trash");
+    } else {
+        setStatus(error[0] ? error : "Move to Trash failed");
+    }
+    serial::puts("[fileexplorer-bm] refresh triggered after move-to-trash result=");
+    serial::puts(moved ? "success" : "failure");
+    serial::puts("\n");
     updateActionButtons();
     invalidate();
 }
@@ -3162,6 +3467,7 @@ void DiskManagerApp::onWidgetClick(int widgetId) {
 }
 
 TrashApp::TrashApp()
+    : m_entryCount(0)
 {
     strcopy(m_name, "Trash", app::MAX_APP_NAME);
 }
@@ -3189,6 +3495,8 @@ bool TrashApp::init()
         return false;
     }
 
+    refreshEntries();
+    kernel_desktop_refresh_trash_state();
     m_state = app::AppState::Running;
     return true;
 }
@@ -3204,8 +3512,83 @@ void TrashApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h)
     if (w > 32 && h > 36) {
         framebuffer::fill_rect(x + 16, y + 18, w - 32, h - 36, rgb(28, 30, 36));
     }
-    appDrawText(x + 26, y + 34, "Trash is empty.", rgb(220, 225, 235));
-    appDrawText(x + 26, y + 58, "Deleted files will appear here.", rgb(165, 170, 185));
+    if (m_entryCount == 0) {
+        appDrawText(x + 26, y + 34, "Trash is empty.", rgb(220, 225, 235));
+        appDrawText(x + 26, y + 58, "Deleted files will appear here.", rgb(165, 170, 185));
+        return;
+    }
+
+    char countText[48];
+    countText[0] = '\0';
+    strcopy(countText, "Trash contains ", sizeof(countText));
+    char digits[12];
+    int di = 0;
+    int value = m_entryCount;
+    char rev[12];
+    int ri = 0;
+    if (value == 0) rev[ri++] = '0';
+    while (value > 0) { rev[ri++] = (char)('0' + (value % 10)); value /= 10; }
+    while (ri > 0) digits[di++] = rev[--ri];
+    digits[di] = '\0';
+    strappend(countText, digits, sizeof(countText));
+    strappend(countText, " item(s).", sizeof(countText));
+    appDrawText(x + 26, y + 34, countText, rgb(220, 225, 235));
+
+    for (int i = 0; i < m_entryCount && i < 6; ++i) {
+        char line[320];
+        line[0] = '\0';
+        strappend(line, "- ", sizeof(line));
+        strappend(line, m_entries[i].name, sizeof(line));
+        strappend(line, m_entries[i].isDir ? " [Folder]" : " [File]", sizeof(line));
+        if (m_entries[i].originalPath[0]) {
+            strappend(line, " from ", sizeof(line));
+            strappend(line, m_entries[i].originalPath, sizeof(line));
+        }
+        appDrawText(x + 26, y + 58 + (uint32_t)i * 20, line, rgb(165, 170, 185));
+    }
+}
+
+void TrashApp::refreshEntries()
+{
+    m_entryCount = 0;
+    uint8_t dir = vfs::opendir(kKernelTrashRootPath);
+    if (dir == 0xFF) return;
+
+    vfs::DirEntry entry{};
+    while (m_entryCount < MAX_TRASH_ENTRIES && vfs::readdir(dir, &entry)) {
+        if (entry.name[0] == '.' && (entry.name[1] == '\0' || (entry.name[1] == '.' && entry.name[2] == '\0'))) continue;
+        if (endsWithText(entry.name, kKernelTrashInfoSuffix)) continue;
+
+        TrashEntry& item = m_entries[m_entryCount];
+        strcopy(item.name, entry.name, sizeof(item.name));
+        item.isDir = entry.type == vfs::FILE_TYPE_DIRECTORY;
+        item.originalPath[0] = '\0';
+
+        char itemPath[256];
+        char infoPath[256];
+        kernel_join_path(kKernelTrashRootPath, entry.name, itemPath, sizeof(itemPath));
+        kernel_trash_info_path_for(itemPath, infoPath, sizeof(infoPath));
+        char metadata[512];
+        int32_t bytesRead = vfs::read_file(infoPath, metadata, sizeof(metadata) - 1);
+        if (bytesRead > 0) {
+            metadata[bytesRead] = '\0';
+            const char* key = "\"originalPath\": \"";
+            for (int i = 0; metadata[i]; ++i) {
+                if (startsWithText(metadata + i, key)) {
+                    i += strlen_local(key);
+                    int pi = 0;
+                    while (metadata[i] && metadata[i] != '"' && pi < (int)sizeof(item.originalPath) - 1) {
+                        item.originalPath[pi++] = metadata[i++];
+                    }
+                    item.originalPath[pi] = '\0';
+                    break;
+                }
+            }
+        }
+
+        ++m_entryCount;
+    }
+    vfs::closedir(dir);
 }
 
 // ============================================================

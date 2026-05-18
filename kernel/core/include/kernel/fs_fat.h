@@ -266,10 +266,13 @@ bool overwrite_path(uint8_t volumeIndex, const char* path, const void* buffer, u
 // Create a new 8.3 file in an existing directory and write its contents.
 bool create_file_path(uint8_t volumeIndex, const char* path, const void* buffer, uint32_t len);
 
+// Create a new empty 8.3 directory in an existing directory.
+bool create_directory_path(uint8_t volumeIndex, const char* path);
+
 // Delete an existing 8.3 file or empty directory entry by path.
 bool delete_path(uint8_t volumeIndex, const char* path, bool directory);
 
-// Rename an existing 8.3 file or directory within the same parent directory.
+// Rename or move an existing 8.3 file or directory.
 bool rename_path(uint8_t volumeIndex, const char* oldPath, const char* newPath);
 
 // Close an open file.

@@ -1055,8 +1055,21 @@ void closedir(uint8_t iterator)
 
 Status mkdir(const char* path)
 {
-    (void)path;
-    // Directory creation not yet implemented
+    if (!path) return VFS_ERR_INVALID;
+
+    MountPoint* mount = find_mount_for_path(path);
+    if (!mount) return VFS_ERR_NOT_MOUNT;
+    if (mount->readOnly) return VFS_ERR_READ_ONLY;
+
+    const char* relPath = get_relative_path(path, mount);
+    switch (mount->fsType) {
+        case FS_TYPE_FAT32:
+            return fs_fat::create_directory_path(mount->fsVolumeIndex, relPath) ? VFS_OK : VFS_ERR_NOT_SUPPORTED;
+
+        default:
+            break;
+    }
+
     return VFS_ERR_NOT_SUPPORTED;
 }
 

@@ -118,6 +118,12 @@ namespace gxos { namespace apps {
         static std::string kindText(const ExplorerFileEntry& entry);
         static std::string selectedPath();
         static std::string makeUniqueChildPath(const std::string& baseName, bool directory);
+        static bool moveEntryToTrash(const ExplorerFileEntry& entry, std::string& error, std::string& trashedPath);
+        static std::string trashRootPath();
+        static std::string makeUniquePathInDirectory(const std::string& directoryPath, const std::string& baseName, bool directory);
+        static std::string trashInfoPathFor(const std::string& trashedPath);
+        static std::string jsonEscape(const std::string& value);
+        static void refreshTrashDesktopState();
         
         // UI update
         static void updateDisplay();
