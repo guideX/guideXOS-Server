@@ -225,6 +225,8 @@ public:
     virtual void onWidgetClick(int widgetId) override;
 
     static app::KernelApp* create() { return new FileExplorerApp(); }
+    static bool drawThemedIcon(uint32_t x, uint32_t y, uint32_t size, const char* logicalName);
+    static void drawPlaceholderIcon(uint32_t x, uint32_t y, uint32_t size);
 
 private:
     static const int MAX_PATH_LEN = 256;
@@ -328,8 +330,6 @@ private:
     static bool endsWithIgnoreCase(const char* value, const char* suffix);
     static const uint32_t* getEmbeddedIconPixels(const char* logicalName);
     static bool drawArgbIconBuffer(const uint32_t* pixels, uint32_t srcW, uint32_t srcH, uint32_t x, uint32_t y, uint32_t width, uint32_t height);
-    static bool drawThemedIcon(uint32_t x, uint32_t y, uint32_t size, const char* logicalName);
-    static void drawPlaceholderIcon(uint32_t x, uint32_t y, uint32_t size);
 };
 
 // ============================================================
@@ -403,19 +403,42 @@ private:
         char name[vfs::VFS_MAX_FILENAME];
         bool isDir;
         char originalPath[256];
+        char originalFolder[256];
+        char type[32];
+        char iconKey[32];
+        char deletedText[32];
+        uint64_t size;
     };
 
     TrashEntry m_entries[MAX_TRASH_ENTRIES];
     int m_entryCount;
+    int m_selectedIndex;
     int m_emptyBtnId;
     int m_confirmEmptyBtnId;
     int m_cancelEmptyBtnId;
+    int m_restoreBtnId;
+    int m_restoreAllBtnId;
+    int m_deletePermanentBtnId;
+    int m_refreshBtnId;
+    int m_propertiesBtnId;
     bool m_confirmEmpty;
+    bool m_showProperties;
     char m_status[128];
 
     void refreshEntries();
     bool purgeContents(int* deletedCount);
     void updateButtons();
+    void restoreSelected();
+    void restoreAll();
+    void deleteSelectedPermanently();
+    bool restoreEntry(const TrashEntry& entry);
+    bool deleteEntryPermanently(const TrashEntry& entry);
+    void parentPathOf(const char* path, char* out, int outSize) const;
+    void basenameOf(const char* path, char* out, int outSize) const;
+    void makeUniqueRestorePath(const char* desiredPath, char* out, int outSize) const;
+    void formatSize(uint64_t size, char* out, int outSize) const;
+    const char* iconForEntry(const TrashEntry& entry) const;
+    const char* typeForEntry(const TrashEntry& entry) const;
 };
 
 // ============================================================

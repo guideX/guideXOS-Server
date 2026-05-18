@@ -685,6 +685,7 @@
     <None Include="scripts\create-test-disks.ps1" />
     <None Include="scripts\create-test-disks.sh" />
     <None Include="scripts\diagnose-qemu.bat" />
+    <None Include="scripts\generate-desktop-icon-theme-flat.ps1" />
     <None Include="scripts\run-ia64_in_linux.sh" />
     <None Include="scripts\run-qemu-fs-test.ps1" />
     <None Include="scripts\run-qemu-fs-test.sh" />
@@ -740,5 +741,3 @@
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>
 </Project>
-
-

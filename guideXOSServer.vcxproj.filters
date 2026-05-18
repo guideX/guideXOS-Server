@@ -1472,6 +1472,7 @@
     <None Include="build-native-experimental.bat">
       <Filter>Source Files</Filter>
     </None>
+    <None Include="scripts\generate-desktop-icon-theme-flat.ps1" />
   </ItemGroup>
   <ItemGroup>
     <Text Include="scripts\build-and-run-sparcv8_in_linux.sh" />

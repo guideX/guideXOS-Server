@@ -38,6 +38,21 @@ static int strlen_local(const char* s) {
     return len;
 }
 
+static bool endsWithIgnoreCaseLocal(const char* value, const char* suffix) {
+    if (!value || !suffix) return false;
+    int valueLen = strlen_local(value);
+    int suffixLen = strlen_local(suffix);
+    if (suffixLen > valueLen) return false;
+    for (int i = 0; i < suffixLen; ++i) {
+        char a = value[valueLen - suffixLen + i];
+        char b = suffix[i];
+        if (a >= 'A' && a <= 'Z') a = (char)(a - 'A' + 'a');
+        if (b >= 'A' && b <= 'Z') b = (char)(b - 'A' + 'a');
+        if (a != b) return false;
+    }
+    return true;
+}
+
 // ============================================================
 // Color helpers
 // ============================================================
@@ -3472,7 +3487,9 @@ void DiskManagerApp::onWidgetClick(int widgetId) {
 }
 
 TrashApp::TrashApp()
-    : m_entryCount(0), m_emptyBtnId(-1), m_confirmEmptyBtnId(-1), m_cancelEmptyBtnId(-1), m_confirmEmpty(false)
+    : m_entryCount(0), m_selectedIndex(-1), m_emptyBtnId(-1), m_confirmEmptyBtnId(-1), m_cancelEmptyBtnId(-1),
+      m_restoreBtnId(-1), m_restoreAllBtnId(-1), m_deletePermanentBtnId(-1), m_refreshBtnId(-1), m_propertiesBtnId(-1),
+      m_confirmEmpty(false), m_showProperties(false)
 {
     strcopy(m_name, "Trash", app::MAX_APP_NAME);
     m_status[0] = '\0';
@@ -3501,7 +3518,12 @@ bool TrashApp::init()
         return false;
     }
 
-    m_emptyBtnId = addButton(276, 188, 112, 22, "Empty Trash");
+    m_restoreBtnId = addButton(18, 6, 64, 20, "Restore");
+    m_restoreAllBtnId = addButton(86, 6, 76, 20, "Restore All");
+    m_deletePermanentBtnId = addButton(166, 6, 86, 20, "Delete Perm");
+    m_emptyBtnId = addButton(256, 6, 60, 20, "Empty");
+    m_refreshBtnId = addButton(320, 6, 58, 20, "Refresh");
+    m_propertiesBtnId = addButton(276, 188, 82, 22, "Properties");
     m_confirmEmptyBtnId = addButton(92, 146, 104, 22, "Empty Trash");
     m_cancelEmptyBtnId = addButton(214, 146, 70, 22, "Cancel");
     refreshEntries();
@@ -3546,17 +3568,26 @@ void TrashApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h)
     strappend(countText, " item(s).", sizeof(countText));
     appDrawText(x + 26, y + 34, countText, rgb(220, 225, 235));
 
+    appDrawText(x + 46, y + 52, "Name", rgb(190, 195, 205));
+    appDrawText(x + 156, y + 52, "Original", rgb(190, 195, 205));
+    appDrawText(x + 238, y + 52, "Size", rgb(190, 195, 205));
+    appDrawText(x + 286, y + 52, "Type", rgb(190, 195, 205));
+    appDrawText(x + 350, y + 52, "Deleted", rgb(190, 195, 205));
+
     for (int i = 0; i < m_entryCount && i < 6; ++i) {
-        char line[320];
-        line[0] = '\0';
-        strappend(line, "- ", sizeof(line));
-        strappend(line, m_entries[i].name, sizeof(line));
-        strappend(line, m_entries[i].isDir ? " [Folder]" : " [File]", sizeof(line));
-        if (m_entries[i].originalPath[0]) {
-            strappend(line, " from ", sizeof(line));
-            strappend(line, m_entries[i].originalPath, sizeof(line));
+        uint32_t rowY = y + 70 + (uint32_t)i * 20;
+        if (i == m_selectedIndex) framebuffer::fill_rect(x + 22, rowY - 2, 374, 18, rgb(70, 90, 135));
+        if (!FileExplorerApp::drawThemedIcon(x + 26, rowY - 2, 16, iconForEntry(m_entries[i]))) FileExplorerApp::drawPlaceholderIcon(x + 26, rowY - 2, 16);
+        appDrawText(x + 46, rowY + 2, m_entries[i].name, rgb(220, 225, 235));
+        appDrawText(x + 156, rowY + 2, m_entries[i].originalFolder, rgb(165, 170, 185));
+        if (m_entries[i].isDir) appDrawText(x + 238, rowY + 2, "Folder", rgb(165, 170, 185));
+        else {
+            char sizeText[24];
+            formatSize(m_entries[i].size, sizeText, sizeof(sizeText));
+            appDrawText(x + 238, rowY + 2, sizeText, rgb(165, 170, 185));
         }
-        appDrawText(x + 26, y + 58 + (uint32_t)i * 20, line, rgb(165, 170, 185));
+        appDrawText(x + 286, rowY + 2, typeForEntry(m_entries[i]), rgb(165, 170, 185));
+        appDrawText(x + 350, rowY + 2, m_entries[i].deletedText, rgb(165, 170, 185));
     }
 
     if (m_status[0]) {
@@ -3569,11 +3600,46 @@ void TrashApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h)
         appDrawText(x + 84, y + 112, "This will permanently delete all", rgb(210, 205, 205));
         appDrawText(x + 84, y + 130, "items in Trash.", rgb(210, 205, 205));
     }
+    if (m_showProperties && m_selectedIndex >= 0 && m_selectedIndex < m_entryCount) {
+        TrashEntry& item = m_entries[m_selectedIndex];
+        framebuffer::fill_rect(x + 54, y + 52, 312, 138, rgb(45, 45, 55));
+        appDrawText(x + 74, y + 70, "Properties", rgb(230, 235, 245));
+        appDrawText(x + 74, y + 94, item.name, rgb(200, 205, 215));
+        appDrawText(x + 74, y + 112, typeForEntry(item), rgb(200, 205, 215));
+        appDrawText(x + 74, y + 130, item.originalPath, rgb(200, 205, 215));
+        appDrawText(x + 74, y + 148, "Current: /Trash", rgb(200, 205, 215));
+        appDrawText(x + 74, y + 166, item.deletedText, rgb(200, 205, 215));
+    }
     updateButtons();
 }
 
 void TrashApp::onWidgetClick(int widgetId)
 {
+    if (widgetId == m_restoreBtnId) {
+        restoreSelected();
+        return;
+    }
+    if (widgetId == m_restoreAllBtnId) {
+        restoreAll();
+        return;
+    }
+    if (widgetId == m_deletePermanentBtnId) {
+        deleteSelectedPermanently();
+        return;
+    }
+    if (widgetId == m_refreshBtnId) {
+        refreshEntries();
+        strcopy(m_status, "Refreshed.", sizeof(m_status));
+        updateButtons();
+        invalidate();
+        return;
+    }
+    if (widgetId == m_propertiesBtnId) {
+        m_showProperties = (m_selectedIndex >= 0 && m_selectedIndex < m_entryCount) && !m_showProperties;
+        updateButtons();
+        invalidate();
+        return;
+    }
     if (widgetId == m_emptyBtnId) {
         serial::puts("[trash] Empty Trash requested\n");
         refreshEntries();
@@ -3629,7 +3695,12 @@ void TrashApp::refreshEntries()
         TrashEntry& item = m_entries[m_entryCount];
         strcopy(item.name, entry.name, sizeof(item.name));
         item.isDir = entry.type == vfs::FILE_TYPE_DIRECTORY;
+        item.size = entry.size;
         item.originalPath[0] = '\0';
+        item.originalFolder[0] = '\0';
+        item.type[0] = '\0';
+        item.iconKey[0] = '\0';
+        strcopy(item.deletedText, "Unknown", sizeof(item.deletedText));
 
         char itemPath[256];
         char infoPath[256];
@@ -3651,11 +3722,28 @@ void TrashApp::refreshEntries()
                     break;
                 }
             }
+            const char* timeKey = "\"trashedAt\": ";
+            for (int i = 0; metadata[i]; ++i) {
+                if (startsWithText(metadata + i, timeKey)) {
+                    strcopy(item.deletedText, "Recently", sizeof(item.deletedText));
+                    break;
+                }
+            }
         }
+        if (!item.originalPath[0]) {
+            strcopy(item.originalPath, "/", sizeof(item.originalPath));
+            strappend(item.originalPath, entry.name, sizeof(item.originalPath));
+        }
+        parentPathOf(item.originalPath, item.originalFolder, sizeof(item.originalFolder));
+        strcopy(item.type, typeForEntry(item), sizeof(item.type));
+        strcopy(item.iconKey, iconForEntry(item), sizeof(item.iconKey));
 
         ++m_entryCount;
     }
     vfs::closedir(dir);
+    if (m_selectedIndex >= m_entryCount) m_selectedIndex = m_entryCount - 1;
+    if (m_entryCount == 0) m_selectedIndex = -1;
+    else if (m_selectedIndex < 0) m_selectedIndex = 0;
     serial::puts("[trash] item count computed=");
     serial_put_dec((uint32_t)m_entryCount);
     serial::puts("\n");
@@ -3721,12 +3809,199 @@ bool TrashApp::purgeContents(int* deletedCount)
 
 void TrashApp::updateButtons()
 {
+    bool hasSelection = m_selectedIndex >= 0 && m_selectedIndex < m_entryCount;
     app::Widget* empty = getWidget(m_emptyBtnId);
     app::Widget* confirm = getWidget(m_confirmEmptyBtnId);
     app::Widget* cancel = getWidget(m_cancelEmptyBtnId);
+    app::Widget* restore = getWidget(m_restoreBtnId);
+    app::Widget* restoreAll = getWidget(m_restoreAllBtnId);
+    app::Widget* deletePermanent = getWidget(m_deletePermanentBtnId);
+    app::Widget* refresh = getWidget(m_refreshBtnId);
+    app::Widget* properties = getWidget(m_propertiesBtnId);
     if (empty) empty->visible = m_entryCount > 0 && !m_confirmEmpty;
     if (confirm) confirm->visible = m_confirmEmpty;
     if (cancel) cancel->visible = m_confirmEmpty;
+    if (restore) restore->visible = hasSelection && !m_confirmEmpty;
+    if (restoreAll) restoreAll->visible = m_entryCount > 0 && !m_confirmEmpty;
+    if (deletePermanent) deletePermanent->visible = hasSelection && !m_confirmEmpty;
+    if (refresh) refresh->visible = !m_confirmEmpty;
+    if (properties) properties->visible = hasSelection && !m_confirmEmpty;
+}
+
+void TrashApp::restoreSelected()
+{
+    if (m_selectedIndex < 0 || m_selectedIndex >= m_entryCount) {
+        strcopy(m_status, "Select an item to restore.", sizeof(m_status));
+        invalidate();
+        return;
+    }
+    if (restoreEntry(m_entries[m_selectedIndex])) strcopy(m_status, "Restored item.", sizeof(m_status));
+    else strcopy(m_status, "Restore failed.", sizeof(m_status));
+    refreshEntries();
+    updateButtons();
+    kernel_desktop_refresh_trash_state();
+    invalidate();
+}
+
+void TrashApp::restoreAll()
+{
+    refreshEntries();
+    int restored = 0;
+    int failed = 0;
+    for (int i = 0; i < m_entryCount; ++i) {
+        if (restoreEntry(m_entries[i])) ++restored;
+        else ++failed;
+    }
+    strcopy(m_status, "Restored: ", sizeof(m_status));
+    char digits[12];
+    int di = 0;
+    int value = restored;
+    char rev[12];
+    int ri = 0;
+    if (value == 0) rev[ri++] = '0';
+    while (value > 0) { rev[ri++] = (char)('0' + (value % 10)); value /= 10; }
+    while (ri > 0) digits[di++] = rev[--ri];
+    digits[di] = '\0';
+    strappend(m_status, digits, sizeof(m_status));
+    strappend(m_status, " Failed: ", sizeof(m_status));
+    di = 0; ri = 0; value = failed;
+    if (value == 0) rev[ri++] = '0';
+    while (value > 0) { rev[ri++] = (char)('0' + (value % 10)); value /= 10; }
+    while (ri > 0) digits[di++] = rev[--ri];
+    digits[di] = '\0';
+    strappend(m_status, digits, sizeof(m_status));
+    refreshEntries();
+    updateButtons();
+    kernel_desktop_refresh_trash_state();
+    invalidate();
+}
+
+void TrashApp::deleteSelectedPermanently()
+{
+    if (m_selectedIndex < 0 || m_selectedIndex >= m_entryCount) {
+        strcopy(m_status, "Select an item to delete.", sizeof(m_status));
+        invalidate();
+        return;
+    }
+    if (deleteEntryPermanently(m_entries[m_selectedIndex])) strcopy(m_status, "Deleted permanently.", sizeof(m_status));
+    else strcopy(m_status, "Delete failed.", sizeof(m_status));
+    refreshEntries();
+    updateButtons();
+    kernel_desktop_refresh_trash_state();
+    invalidate();
+}
+
+bool TrashApp::restoreEntry(const TrashEntry& entry)
+{
+    char sourcePath[256];
+    kernel_join_path(kKernelTrashRootPath, entry.name, sourcePath, sizeof(sourcePath));
+    char targetPath[256];
+    makeUniqueRestorePath(entry.originalPath, targetPath, sizeof(targetPath));
+    vfs::Status status = vfs::rename(sourcePath, targetPath);
+    if (status != vfs::VFS_OK) {
+        serial::puts("[trash] restore failed\n");
+        return false;
+    }
+    char infoPath[256];
+    kernel_trash_info_path_for(sourcePath, infoPath, sizeof(infoPath));
+    vfs::unlink(infoPath);
+    serial::puts("[trash] restored item\n");
+    return true;
+}
+
+bool TrashApp::deleteEntryPermanently(const TrashEntry& entry)
+{
+    char itemPath[256];
+    char infoPath[256];
+    kernel_join_path(kKernelTrashRootPath, entry.name, itemPath, sizeof(itemPath));
+    kernel_trash_info_path_for(itemPath, infoPath, sizeof(infoPath));
+    if (!startsWithText(itemPath, kKernelTrashRootPath) || itemPath[strlen_local(kKernelTrashRootPath)] != '/') return false;
+    vfs::Status status = entry.isDir ? vfs::rmdir(itemPath) : vfs::unlink(itemPath);
+    if (status != vfs::VFS_OK) return false;
+    vfs::unlink(infoPath);
+    return true;
+}
+
+void TrashApp::parentPathOf(const char* path, char* out, int outSize) const
+{
+    if (!out || outSize <= 0) return;
+    if (!path || !path[0] || (path[0] == '/' && path[1] == '\0')) {
+        strcopy(out, "/", outSize);
+        return;
+    }
+    int len = strlen_local(path);
+    while (len > 1 && path[len - 1] == '/') --len;
+    int slash = len - 1;
+    while (slash > 0 && path[slash] != '/') --slash;
+    int copyLen = slash == 0 ? 1 : slash;
+    if (copyLen >= outSize) copyLen = outSize - 1;
+    for (int i = 0; i < copyLen; ++i) out[i] = path[i];
+    out[copyLen] = '\0';
+}
+
+void TrashApp::basenameOf(const char* path, char* out, int outSize) const
+{
+    if (!out || outSize <= 0) return;
+    const char* base = path;
+    for (int i = 0; path && path[i]; ++i) if (path[i] == '/') base = path + i + 1;
+    strcopy(out, base && base[0] ? base : "RESTORE", outSize);
+}
+
+void TrashApp::makeUniqueRestorePath(const char* desiredPath, char* out, int outSize) const
+{
+    strcopy(out, desiredPath && desiredPath[0] ? desiredPath : "/RESTORE", outSize);
+    if (!vfs::exists(out)) return;
+    char parent[256];
+    char name[128];
+    parentPathOf(out, parent, sizeof(parent));
+    basenameOf(out, name, sizeof(name));
+    for (int i = 1; i < 100; ++i) {
+        char candidate[128];
+        kernel_make_fat_safe_collision_name(name, false, i, candidate, sizeof(candidate));
+        kernel_join_path(parent, candidate, out, outSize);
+        if (!vfs::exists(out)) return;
+    }
+}
+
+void TrashApp::formatSize(uint64_t size, char* out, int outSize) const
+{
+    if (!out || outSize <= 0) return;
+    uint64_t value = size;
+    const char* suffix = " B";
+    if (size >= 1024 * 1024) { value = size / (1024 * 1024); suffix = " MB"; }
+    else if (size >= 1024) { value = size / 1024; suffix = " KB"; }
+    char digits[24];
+    int d = 0;
+    if (value == 0) digits[d++] = '0';
+    else {
+        char tmp[24];
+        int t = 0;
+        while (value > 0 && t < 23) { tmp[t++] = '0' + (value % 10); value /= 10; }
+        while (t > 0) digits[d++] = tmp[--t];
+    }
+    digits[d] = '\0';
+    strcopy(out, digits, outSize);
+    strappend(out, suffix, outSize);
+}
+
+const char* TrashApp::iconForEntry(const TrashEntry& entry) const
+{
+    if (entry.isDir) return "file.folder";
+    if (endsWithIgnoreCaseLocal(entry.name, ".txt") || endsWithIgnoreCaseLocal(entry.name, ".log") || endsWithIgnoreCaseLocal(entry.name, ".cfg") || endsWithIgnoreCaseLocal(entry.name, ".ini") || endsWithIgnoreCaseLocal(entry.name, ".md")) return "file.text";
+    if (endsWithIgnoreCaseLocal(entry.name, ".bmp") || endsWithIgnoreCaseLocal(entry.name, ".png") || endsWithIgnoreCaseLocal(entry.name, ".jpg") || endsWithIgnoreCaseLocal(entry.name, ".jpeg")) return "file.image";
+    if (endsWithIgnoreCaseLocal(entry.name, ".elf") || endsWithIgnoreCaseLocal(entry.name, ".gxapp") || endsWithIgnoreCaseLocal(entry.name, ".gxq") || endsWithIgnoreCaseLocal(entry.name, ".exe")) return "app.files";
+    if (endsWithIgnoreCaseLocal(entry.name, ".bin") || endsWithIgnoreCaseLocal(entry.name, ".dat") || endsWithIgnoreCaseLocal(entry.name, ".dll") || endsWithIgnoreCaseLocal(entry.name, ".so") || endsWithIgnoreCaseLocal(entry.name, ".o")) return "file.binary";
+    return "file.unknown";
+}
+
+const char* TrashApp::typeForEntry(const TrashEntry& entry) const
+{
+    if (entry.isDir) return "Folder";
+    if (endsWithIgnoreCaseLocal(entry.name, ".txt") || endsWithIgnoreCaseLocal(entry.name, ".log") || endsWithIgnoreCaseLocal(entry.name, ".cfg") || endsWithIgnoreCaseLocal(entry.name, ".ini") || endsWithIgnoreCaseLocal(entry.name, ".md")) return "Text";
+    if (endsWithIgnoreCaseLocal(entry.name, ".bmp") || endsWithIgnoreCaseLocal(entry.name, ".png") || endsWithIgnoreCaseLocal(entry.name, ".jpg") || endsWithIgnoreCaseLocal(entry.name, ".jpeg")) return "Image";
+    if (endsWithIgnoreCaseLocal(entry.name, ".elf") || endsWithIgnoreCaseLocal(entry.name, ".gxapp") || endsWithIgnoreCaseLocal(entry.name, ".gxq") || endsWithIgnoreCaseLocal(entry.name, ".exe")) return "App";
+    if (endsWithIgnoreCaseLocal(entry.name, ".bin") || endsWithIgnoreCaseLocal(entry.name, ".dat") || endsWithIgnoreCaseLocal(entry.name, ".dll") || endsWithIgnoreCaseLocal(entry.name, ".so") || endsWithIgnoreCaseLocal(entry.name, ".o")) return "Binary";
+    return "File";
 }
 
 // ============================================================
