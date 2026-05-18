@@ -145,6 +145,7 @@
     <ClInclude Include="desktop_service.h" />
     <ClInclude Include="desktop_state.h" />
     <ClInclude Include="desktop_wallpaper.h" />
+    <ClInclude Include="display_options.h" />
     <ClInclude Include="disk_manager.h" />
     <ClInclude Include="control_panel.h" />
     <ClInclude Include="elf_validator.h" />
@@ -345,6 +346,7 @@
     <ClInclude Include="task_manager.h" />
     <ClInclude Include="vfs.h" />
     <ClInclude Include="vnc_server.h" />
+    <ClInclude Include="wallpaper_registry.h" />
     <ClInclude Include="window_animator.h" />
     <ClInclude Include="window_effects.h" />
     <ClInclude Include="window_renderer.h" />
@@ -364,6 +366,7 @@
     <ClCompile Include="console_window.cpp" />
     <ClCompile Include="desktop_service.cpp" />
     <ClCompile Include="desktop_state.cpp" />
+    <ClCompile Include="display_options.cpp" />
     <ClCompile Include="disk_manager.cpp" />
     <ClCompile Include="control_panel.cpp" />
     <ClCompile Include="elf_validator.cpp" />
@@ -572,6 +575,7 @@
     <ClCompile Include="task_manager.cpp" />
     <ClCompile Include="vfs.cpp" />
     <ClCompile Include="vnc_server.cpp" />
+    <ClCompile Include="wallpaper_registry.cpp" />
     <ClCompile Include="workspace_manager.cpp" />
   </ItemGroup>
   <ItemGroup>
@@ -686,6 +690,7 @@
     <None Include="scripts\create-test-disks.sh" />
     <None Include="scripts\diagnose-qemu.bat" />
     <None Include="scripts\generate-desktop-icon-theme-flat.ps1" />
+    <None Include="scripts\generate-wallpaper-pack.ps1" />
     <None Include="scripts\run-ia64_in_linux.sh" />
     <None Include="scripts\run-qemu-fs-test.ps1" />
     <None Include="scripts\run-qemu-fs-test.sh" />

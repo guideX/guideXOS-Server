@@ -28,7 +28,7 @@
 
 namespace gxos { namespace gui {
     struct DrawRectItem { int x; int y; int w; int h; uint8_t r; uint8_t g; uint8_t b; };
-    struct DrawImageItem { int x; int y; std::string path; ImagePtr image; };
+    struct DrawImageItem { int x; int y; int w; int h; std::string path; ImagePtr image; };
     struct DrawTextItem { int x; int y; std::string text; };
     enum class WidgetType { Button=1 };
     struct Widget { WidgetType type; int id; int x; int y; int w; int h; std::string text; bool hover=false; bool pressed=false; };
@@ -104,6 +104,11 @@ namespace gxos { namespace gui {
         static void ToggleDesktopIconSelection(int index);
         static void SelectDesktopIconRange(int startIndex, int endIndex);
         static std::vector<int> GetSelectedDesktopIconIndices();
+        static void loadWallpaper(const std::string& idOrPath);
+        static void freeWallpaper();
+        static std::string g_wallpaperPath;
+        static std::string g_wallpaperId;
+        static ImagePtr g_wallpaperImage;
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)
         static int HitTestDesktopIcon(int mouseX, int mouseY);
         static RECT GetDesktopIconBounds(int index);
@@ -121,12 +126,9 @@ namespace gxos { namespace gui {
         static HBITMAP g_wallpaperBmp;
         static int g_wallpaperW;
         static int g_wallpaperH;
-        static std::string g_wallpaperPath;
         static bool g_startMenuVisible;
         static RECT g_startMenuRect;
         // Functions implemented in compositor.cpp
-        static void loadWallpaper(const std::string& path);
-        static void freeWallpaper();
         static void drawDesktopIcons(HDC dc, RECT cr);
         static void drawTaskbarSearchBox(HDC dc, int x, int y, int w, int h);
         static void drawSystemTray(HDC dc, RECT cr, int taskbarH);

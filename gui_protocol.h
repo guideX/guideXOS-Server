@@ -42,6 +42,7 @@ namespace gxos {
         struct Rect { int x; int y; int w; int h; };
         struct KeyEvent { int keyCode; bool down; };
         struct MouseEvent { int x; int y; int dx; int dy; uint32_t buttons; };
+        struct DrawImageSpec { uint64_t winId; int x; int y; int w; int h; std::string path; };
         inline std::vector<uint8_t> packString(const std::string& s) { return std::vector<uint8_t>(s.begin( ), s.end( )); }
         inline std::string unpackString(const std::vector<uint8_t>& d) { return std::string(d.begin( ), d.end( )); }
 
@@ -71,7 +72,30 @@ namespace gxos {
         }
         // Helper for building widget add payloads: <winId>|<type>|<id>|<x>|<y>|<w>|<h>|<text>
         inline std::string packWidgetAdd(uint64_t winId, int type, int id, int x, int y, int w, int h, const std::string& text) { std::ostringstream oss; oss << winId << "|" << type << "|" << id << "|" << x << "|" << y << "|" << w << "|" << h << "|" << text; return oss.str( ); }
-        inline std::string packDrawImage(uint64_t winId, int x, int y, const std::string& path) { std::ostringstream oss; oss << winId << "|" << x << "|" << y << "|" << path; return oss.str( ); }
+        inline std::string packDrawImage(uint64_t winId, int x, int y, const std::string& path) { std::ostringstream oss; oss << winId << "|" << x << "|" << y << "|-1|-1|" << path; return oss.str( ); }
+        inline std::string packDrawImage(uint64_t winId, int x, int y, int w, int h, const std::string& path) { std::ostringstream oss; oss << winId << "|" << x << "|" << y << "|" << w << "|" << h << "|" << path; return oss.str( ); }
+        inline bool unpackDrawImage(const std::string& payload, DrawImageSpec& spec) {
+            std::istringstream iss(payload);
+            std::string winS, xS, yS, wS, hS;
+            if (!std::getline(iss, winS, '|')) return false;
+            if (!std::getline(iss, xS, '|')) return false;
+            if (!std::getline(iss, yS, '|')) return false;
+            if (!std::getline(iss, wS, '|')) return false;
+            if (!std::getline(iss, hS, '|')) return false;
+            std::string path;
+            if (!std::getline(iss, path)) return false;
+            try {
+                spec.winId = std::stoull(winS);
+                spec.x = std::stoi(xS);
+                spec.y = std::stoi(yS);
+                spec.w = std::stoi(wS);
+                spec.h = std::stoi(hS);
+                spec.path = path;
+                return true;
+            } catch (...) {
+                return false;
+            }
+        }
         inline std::string packDrawTextAt(uint64_t winId, int x, int y, const std::string& text) { std::ostringstream oss; oss << winId << "|" << x << "|" << y << "|" << text; return oss.str( ); }
     }
 }

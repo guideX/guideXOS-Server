@@ -1,7 +1,27 @@
-﻿C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Microsoft\NuGet\17.0\Microsoft.NuGet.targets(198,5): error : Sequence contains no elements
-C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Microsoft\NuGet\17.0\Microsoft.NuGet.targets(198,5): error :    at System.Linq.Enumerable.First[TSource](IEnumerable`1 source)
-C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Microsoft\NuGet\17.0\Microsoft.NuGet.targets(198,5): error :    at Microsoft.NuGet.Build.Tasks.ResolveNuGetPackageAssets.GiveErrorForMissingFramework()
-C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Microsoft\NuGet\17.0\Microsoft.NuGet.targets(198,5): error :    at Microsoft.NuGet.Build.Tasks.ResolveNuGetPackageAssets.GetTargetOrAttemptFallback(JObject lockFile, Boolean needsRuntimeIdentifier)
-C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Microsoft\NuGet\17.0\Microsoft.NuGet.targets(198,5): error :    at Microsoft.NuGet.Build.Tasks.ResolveNuGetPackageAssets.GetReferences(JObject lockFile)
-C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Microsoft\NuGet\17.0\Microsoft.NuGet.targets(198,5): error :    at Microsoft.NuGet.Build.Tasks.ResolveNuGetPackageAssets.ExecuteCore()
-C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Microsoft\NuGet\17.0\Microsoft.NuGet.targets(198,5): error :    at Microsoft.NuGet.Build.Tasks.ResolveNuGetPackageAssets.Execute()
+﻿  
+  ==========================================
+  Building guideXOS Kernel (x86)
+  ==========================================
+  
+  [OK] Found source files
+  
+  Checking toolchain...
+  
+  [ERROR] i686-elf-g++ not found in PATH
+  
+  Toolchain not found
+  
+  Option 1: Install to D:\bkup\elfbin\bin
+    - Download from: https://github.com/lordmilko/i686-elf-tools/releases
+    - Extract so that i686-elf-gcc.exe is at: D:\bkup\elfbin\bin\i686-elf-gcc.exe
+  
+  Option 2: Add to PATH manually
+    - Open System Properties > Environment Variables
+    - Add your toolchain bin directory to PATH
+  
+  Option 3: Edit this script
+    - Find the "Toolchain Path Configuration" section
+    - Add your custom path to the detection logic
+  
+  Press any key to continue . . . 
+C:\Program Files\Microsoft Visual Studio\18\Community\MSBuild\Microsoft\VC\v170\Microsoft.MakeFile.Targets(45,5): error MSB3073: The command "cd kernel && build-x86.bat" exited with code 1.

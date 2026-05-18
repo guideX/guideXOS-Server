@@ -132,6 +132,9 @@
     <ClInclude Include="vnc_server.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="wallpaper_registry.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="kernel\core\include\kernel\multiboot.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -582,6 +585,9 @@
     <ClInclude Include="desktop_wallpaper.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="display_options.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="bitmap_font.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -716,6 +722,9 @@
     <ClCompile Include="desktop_state.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="display_options.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="icons.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -780,6 +789,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="vnc_server.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="wallpaper_registry.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="kernel\core\framebuffer.cpp">
@@ -1473,6 +1485,7 @@
       <Filter>Source Files</Filter>
     </None>
     <None Include="scripts\generate-desktop-icon-theme-flat.ps1" />
+    <None Include="scripts\generate-wallpaper-pack.ps1" />
   </ItemGroup>
   <ItemGroup>
     <Text Include="scripts\build-and-run-sparcv8_in_linux.sh" />

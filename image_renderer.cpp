@@ -70,6 +70,76 @@ void ImageRenderer::DrawImage(uint32_t* targetPixels, int targetWidth, int targe
     }
 }
 
+void ImageRenderer::DrawImage(uint32_t* targetPixels, int targetWidth, int targetHeight, int targetPitchBytes, const ImagePtr& image, int x, int y, int width, int height)
+{
+    if (!targetPixels || targetWidth <= 0 || targetHeight <= 0 || targetPitchBytes <= 0) {
+        Logger::write(LogLevel::Warn, "ImageRenderer: invalid scaled target");
+        return;
+    }
+    if (!image || !image->isValid() || image->Channels < 4) {
+        Logger::write(LogLevel::Warn, "ImageRenderer: invalid scaled image");
+        return;
+    }
+    if (width <= 0 || height <= 0) {
+        Logger::write(LogLevel::Warn, "ImageRenderer: invalid scaled draw size");
+        return;
+    }
+
+    int drawX = x;
+    int drawY = y;
+    int drawW = width;
+    int drawH = height;
+    int dstStartX = 0;
+    int dstStartY = 0;
+
+    if (drawX < 0) {
+        dstStartX = -drawX;
+        drawW += drawX;
+        drawX = 0;
+    }
+    if (drawY < 0) {
+        dstStartY = -drawY;
+        drawH += drawY;
+        drawY = 0;
+    }
+    if (drawX + drawW > targetWidth) drawW = targetWidth - drawX;
+    if (drawY + drawH > targetHeight) drawH = targetHeight - drawY;
+    if (drawW <= 0 || drawH <= 0) return;
+
+    const int targetStride = targetPitchBytes / 4;
+    for (int row = 0; row < drawH; ++row) {
+        int dstRelativeY = dstStartY + row;
+        int srcY = (dstRelativeY * image->Height) / height;
+        if (srcY < 0) srcY = 0;
+        if (srcY >= image->Height) srcY = image->Height - 1;
+        uint32_t* dstRow = targetPixels + (drawY + row) * targetStride + drawX;
+        for (int col = 0; col < drawW; ++col) {
+            int dstRelativeX = dstStartX + col;
+            int srcX = (dstRelativeX * image->Width) / width;
+            if (srcX < 0) srcX = 0;
+            if (srcX >= image->Width) srcX = image->Width - 1;
+            const uint8_t* src = image->Pixels + (srcY * image->Width + srcX) * image->Channels;
+            const uint8_t sr = src[0];
+            const uint8_t sg = src[1];
+            const uint8_t sb = src[2];
+            const uint8_t sa = src[3];
+            if (sa == 0) continue;
+            if (sa == 255) {
+                dstRow[col] = 0xFF000000u | (static_cast<uint32_t>(sr) << 16) | (static_cast<uint32_t>(sg) << 8) | sb;
+            } else {
+                uint32_t dst = dstRow[col];
+                uint8_t dr = static_cast<uint8_t>((dst >> 16) & 0xFF);
+                uint8_t dg = static_cast<uint8_t>((dst >> 8) & 0xFF);
+                uint8_t db = static_cast<uint8_t>(dst & 0xFF);
+                dstRow[col] = 0xFF000000u |
+                    (static_cast<uint32_t>(blendChannel(sr, dr, sa)) << 16) |
+                    (static_cast<uint32_t>(blendChannel(sg, dg, sa)) << 8) |
+                    blendChannel(sb, db, sa);
+            }
+        }
+    }
+}
+
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)
 void ImageRenderer::DrawImage(HDC dc, const ImagePtr& image, int x, int y)
 {

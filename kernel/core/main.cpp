@@ -204,6 +204,11 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         
         // Initialize RAM disk subsystem
         kernel::ramdisk::init();
+
+        if (is_bootinfo && bootinfo && bootinfo->RamdiskBase != 0 && bootinfo->RamdiskSize != 0) {
+            kernel::serial::puts("[KERNEL] Boot wallpaper pack found in ramdisk.img\n");
+            kernel::desktop::set_wallpaper_image_pack(reinterpret_cast<const void*>(static_cast<uintptr_t>(bootinfo->RamdiskBase)), bootinfo->RamdiskSize);
+        }
         
         // Create a 4MB RAM disk for temporary storage / testing
         uint8_t ramdiskIdx = kernel::ramdisk::create(4 * 1024 * 1024, "ram0");
@@ -249,6 +254,8 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         if (!mounted && kernel::block::device_count() > 0) {
             kernel::serial::puts("[KERNEL] WARNING: No filesystem could be mounted automatically\n");
         }
+
+        kernel::desktop::reload_persisted_wallpaper();
         
         // ============================================================
         

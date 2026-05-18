@@ -7,6 +7,7 @@
 #include "include/kernel/kernel_apps.h"
 #include "include/kernel/kernel_compositor.h"
 #include "include/kernel/framebuffer.h"
+#include "include/kernel/desktop.h"
 #include "include/kernel/shell.h"
 #include "include/kernel/ps2keyboard.h"
 #include "include/kernel/vfs.h"
@@ -36,6 +37,17 @@ static int strlen_local(const char* s) {
     int len = 0;
     while (s[len]) len++;
     return len;
+}
+
+static bool streq_local(const char* a, const char* b) {
+    if (a == b) return true;
+    if (!a || !b) return false;
+    int i = 0;
+    while (a[i] && b[i]) {
+        if (a[i] != b[i]) return false;
+        ++i;
+    }
+    return a[i] == '\0' && b[i] == '\0';
 }
 
 static bool endsWithIgnoreCaseLocal(const char* value, const char* suffix) {
@@ -483,6 +495,16 @@ static void appDrawText(uint32_t x, uint32_t y, const char* text, uint32_t color
     }
 }
 
+static void appDrawRect(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t color) {
+    if (w == 0 || h == 0) return;
+    framebuffer::fill_rect(x, y, w, 1, color);
+    if (h > 1) framebuffer::fill_rect(x, y + h - 1, w, 1, color);
+    if (h > 2) {
+        framebuffer::fill_rect(x, y + 1, 1, h - 2, color);
+        if (w > 1) framebuffer::fill_rect(x + w - 1, y + 1, 1, h - 2, color);
+    }
+}
+
 static void serial_put_dec(uint32_t value) {
     char buffer[16];
     int index = 0;
@@ -497,6 +519,35 @@ static void serial_put_dec(uint32_t value) {
     while (index > 0) {
         serial::putc(buffer[--index]);
     }
+}
+
+namespace {
+struct KernelWallpaperEntry {
+    const char* id;
+    const char* displayName;
+    uint32_t previewColorA;
+    uint32_t previewColorB;
+};
+
+static const KernelWallpaperEntry s_kernelWallpapers[] = {
+    {"legacy_blue_flower", "Blue Flower", 0xFF123070, 0xFF1B4FA8},
+    {"legacy_dinos", "Dinos", 0xFF6B8D3B, 0xFFB8A05E},
+    {"legacy_flower", "Flower", 0xFF375A78, 0xFF60B8C8},
+    {"legacy_guidexos_space", "guideXOS Space", 0xFF071433, 0xFF2A5AA8},
+    {"legacy_red_flower", "Red Flower", 0xFF390808, 0xFFA82020},
+    {"legacy_ameoba", "Ameoba", 0xFF102060, 0xFF7020B0},
+    {"legacy_ameobagx", "Ameoba GX", 0xFF180830, 0xFF8A36B8},
+    {"legacy_tron_porsche", "Tron Porsche", 0xFF052A35, 0xFF18B8C8},
+    {"legacy_wallpaper2", "Wallpaper 2", 0xFF1A1640, 0xFFC02080},
+};
+
+static const int kKernelWallpaperCount = sizeof(s_kernelWallpapers) / sizeof(s_kernelWallpapers[0]);
+static const int kTileW = 92;
+static const int kTileH = 76;
+static const int kTileGap = 12;
+static const int kTileCols = 4;
+static const int kGalleryX = 18;
+static const int kGalleryY = 82;
 }
 
 // ============================================================
@@ -1683,6 +1734,136 @@ bool NotepadApp::updateMenuHover(int x, int y) {
     }
 
     return false;
+}
+
+// ============================================================
+// DisplayOptionsApp Implementation
+// ============================================================
+
+DisplayOptionsApp::DisplayOptionsApp()
+    : m_selectedIndex(0), m_appliedIndex(0), m_selectButtonId(-1) {
+    strcopy(m_name, "DisplayOptions", app::MAX_APP_NAME);
+}
+
+DisplayOptionsApp::~DisplayOptionsApp() {
+}
+
+void DisplayOptionsApp::loadSelection() {
+    const char* currentId = kernel::desktop::get_wallpaper_id();
+    m_selectedIndex = 0;
+    m_appliedIndex = 0;
+    for (int i = 0; i < kKernelWallpaperCount; ++i) {
+        if (streq_local(currentId, s_kernelWallpapers[i].id)) {
+            m_selectedIndex = i;
+            m_appliedIndex = i;
+            return;
+        }
+    }
+}
+
+bool DisplayOptionsApp::init() {
+    m_window = new app::KernelWindow();
+    if (!m_window) return false;
+
+    m_window->owner = this;
+    m_window->x = 70;
+    m_window->y = 50;
+    m_window->w = 520;
+    m_window->h = 390;
+    m_window->flags = app::WF_VISIBLE | app::WF_TITLEBAR | app::WF_CLOSABLE | app::WF_FOCUSED;
+    strcopy(m_window->title, "Display Options", app::MAX_TITLE_LEN);
+
+    if (!compositor::KernelCompositor::registerWindow(m_window)) {
+        delete m_window;
+        m_window = nullptr;
+        return false;
+    }
+
+    loadSelection();
+    m_selectButtonId = addButton(18, 326, 142, 28, "Select Background");
+    m_state = app::AppState::Running;
+    return true;
+}
+
+void DisplayOptionsApp::shutdown() {
+    m_state = app::AppState::Terminated;
+}
+
+void DisplayOptionsApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
+    framebuffer::fill_rect(x, y, w, h, rgb(28, 30, 38));
+
+    framebuffer::fill_rect(x + 16, y + 16, 140, 30, rgb(58, 58, 58));
+    appDrawRect(x + 16, y + 16, 140, 30, rgb(90, 90, 96));
+    appDrawText(x + 28, y + 27, "Backgrounds", rgb(235, 235, 240));
+
+    framebuffer::fill_rect(x + 166, y + 16, 140, 30, rgb(34, 34, 38));
+    appDrawRect(x + 166, y + 16, 140, 30, rgb(70, 70, 76));
+    appDrawText(x + 178, y + 27, "Resolution", rgb(130, 130, 138));
+
+    framebuffer::fill_rect(x + 316, y + 16, 140, 30, rgb(34, 34, 38));
+    appDrawRect(x + 316, y + 16, 140, 30, rgb(70, 70, 76));
+    appDrawText(x + 328, y + 27, "Gradients", rgb(130, 130, 138));
+
+    appDrawText(x + 18, y + 58, "Select a background from the gallery:", rgb(230, 230, 238));
+    framebuffer::fill_rect(x + 14, y + 74, w - 28, 240, rgb(22, 22, 24));
+
+    for (int i = 0; i < kKernelWallpaperCount; ++i) {
+        int col = i % kTileCols;
+        int row = i / kTileCols;
+        uint32_t tx = x + kGalleryX + col * (kTileW + kTileGap);
+        uint32_t ty = y + kGalleryY + row * (kTileH + kTileGap);
+
+        if (i == m_selectedIndex) {
+            framebuffer::fill_rect(tx - 4, ty - 4, kTileW + 8, kTileH + 8, rgb(72, 110, 180));
+        }
+
+        framebuffer::fill_rect(tx, ty, kTileW, kTileH, rgb(42, 42, 42));
+        bool drewThumb = kernel::desktop::draw_wallpaper_thumbnail_by_id(s_kernelWallpapers[i].id, tx + 6, ty + 6, kTileW - 12, 42);
+        if (!drewThumb) {
+            for (int py = 0; py < 42; ++py) {
+                uint8_t t = (uint8_t)((py * 255) / 41);
+                uint32_t color = ((s_kernelWallpapers[i].previewColorA & 0xFF000000u)) |
+                                 (((((s_kernelWallpapers[i].previewColorA >> 16) & 0xFFu) * (255 - t)) + (((s_kernelWallpapers[i].previewColorB >> 16) & 0xFFu) * t)) / 255) << 16 |
+                                 (((((s_kernelWallpapers[i].previewColorA >> 8) & 0xFFu) * (255 - t)) + (((s_kernelWallpapers[i].previewColorB >> 8) & 0xFFu) * t)) / 255) << 8 |
+                                 (((((s_kernelWallpapers[i].previewColorA) & 0xFFu) * (255 - t)) + (((s_kernelWallpapers[i].previewColorB) & 0xFFu) * t)) / 255);
+                framebuffer::fill_rect(tx + 6, ty + 6 + (uint32_t)py, kTileW - 12, 1, color);
+            }
+        }
+
+        appDrawRect(tx + 6, ty + 6, kTileW - 12, 42, rgb(130, 130, 145));
+        appDrawText(tx + 6, ty + 54, s_kernelWallpapers[i].displayName, rgb(220, 220, 225));
+        if (i == m_appliedIndex) appDrawText(tx + kTileW - 12, ty + 54, "*", rgb(255, 220, 80));
+    }
+}
+
+int DisplayOptionsApp::hitWallpaper(int mx, int my) const {
+    for (int i = 0; i < kKernelWallpaperCount; ++i) {
+        int col = i % kTileCols;
+        int row = i / kTileCols;
+        int tx = kGalleryX + col * (kTileW + kTileGap);
+        int ty = kGalleryY + row * (kTileH + kTileGap);
+        if (mx >= tx && mx < tx + kTileW && my >= ty && my < ty + kTileH) return i;
+    }
+    return -1;
+}
+
+void DisplayOptionsApp::onMouseDown(int x, int y, uint8_t) {
+    int hit = hitWallpaper(x, y);
+    if (hit >= 0) {
+        m_selectedIndex = hit;
+        invalidate();
+    }
+}
+
+void DisplayOptionsApp::onWidgetClick(int widgetId) {
+    if (widgetId == m_selectButtonId) applySelected();
+}
+
+void DisplayOptionsApp::applySelected() {
+    if (m_selectedIndex < 0 || m_selectedIndex >= kKernelWallpaperCount) return;
+    kernel::desktop::set_wallpaper_by_id(s_kernelWallpapers[m_selectedIndex].id);
+    m_appliedIndex = m_selectedIndex;
+    invalidate();
 }
 
 // ============================================================
@@ -3401,7 +3582,7 @@ void DiskManagerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
                 // Small partition color bar
                 framebuffer::fill_rect(rx + 4, pry, 4, kGlyphH, kPartBar);
 
-                // Row text  (manual number â†’ char)
+                // Row text  (manual number GåÆ char)
                 char numBuf[4] = {'0' + (char)(pi + 1), '\0', '\0', '\0'};
                 appDrawText(rx + 10, pry, numBuf, kText);
 
@@ -4015,6 +4196,7 @@ void registerKernelApps() {
     // Register available kernel-mode apps
     app::AppManager::registerApp("Notepad", 0xFF78B450, NotepadApp::create);
     app::AppManager::registerApp("Calculator", 0xFF4690C8, CalculatorApp::create);
+    app::AppManager::registerApp("DisplayOptions", 0xFF606878, DisplayOptionsApp::create);
     app::AppManager::registerApp("TaskManager", 0xFFB44646, TaskManagerApp::create);
     app::AppManager::registerApp("Files", 0xFFC8B43C, FileExplorerApp::create);
     app::AppManager::registerApp("FileExplorer", 0xFFC8B43C, FileExplorerApp::create);

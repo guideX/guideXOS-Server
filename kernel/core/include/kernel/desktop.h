@@ -90,6 +90,21 @@ void open_terminal();
 // Returns true if app was launched or is already running
 bool launch_app(const char* appName);
 
+// Apply a built-in desktop wallpaper/background id and persist it when possible.
+void set_wallpaper_by_id(const char* wallpaperId);
+
+// Return the currently selected built-in wallpaper/background id.
+const char* get_wallpaper_id();
+
+// Attach a boot-time wallpaper image pack loaded from ramdisk.img.
+void set_wallpaper_image_pack(const void* packBase, uint64_t packSize);
+
+// Draw a built-in wallpaper thumbnail if the image pack contains it.
+bool draw_wallpaper_thumbnail_by_id(const char* wallpaperId, uint32_t x, uint32_t y, uint32_t w, uint32_t h);
+
+// Reload persisted wallpaper selection after the VFS becomes available.
+void reload_persisted_wallpaper();
+
 // Check if running in bare-metal/UEFI mode (vs hosted mode with server)
 bool is_bare_metal_mode();
 

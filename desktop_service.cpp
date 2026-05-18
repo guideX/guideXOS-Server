@@ -24,6 +24,7 @@
 #include "shutdown_dialog.h"
 #include "disk_manager.h"
 #include "control_panel.h"
+#include "display_options.h"
 #include "trash.h"
 #include "package_manager.h"
 #include <algorithm>
@@ -785,6 +786,9 @@ namespace gxos {
             }
             else if (appName == "ControlPanel") {
                 apps::ControlPanel::Launch();
+            }
+            else if (appName == "DisplayOptions" || appName == "Display Settings" || appName == "Desktop Background" || appName == "Wallpaper") {
+                apps::DisplayOptions::Launch();
             }
             else if (appName == "Trash") {
                 apps::Trash::Launch();

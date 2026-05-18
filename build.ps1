@@ -288,6 +288,11 @@ if (!(Test-Path $Ramdisk)) {
     Write-Host "      Created: ramdisk.img (1.0 MB, empty)" -ForegroundColor Cyan
 }
 
+$WallpaperPackScript = Join-Path $RootDir "scripts\generate-wallpaper-pack.ps1"
+if (Test-Path $WallpaperPackScript) {
+    Write-Host "      Wallpaper pack helper available: scripts\generate-wallpaper-pack.ps1" -ForegroundColor Gray
+}
+
 Write-Host "      ESP directory ready" -ForegroundColor Green
 Write-Host ""
 

@@ -31,6 +31,7 @@
 #include "include/kernel/pci_audio.h"
 #include "include/kernel/usb_audio.h"
 #include "include/kernel/time.h"
+#include "include/kernel/ramdisk.h"
 #if !defined(GXOS_BARE_METAL)
 #include "../../icon_theme_manager.h"
 #endif
@@ -68,6 +69,17 @@ static inline void outw_power(uint16_t port, uint16_t value)
 #else
     asm volatile ("outw %0, %1" : : "a"(value), "Nd"(port));
 #endif
+}
+
+static bool desktop_starts_with(const char* value, const char* prefix)
+{
+    if (!value || !prefix) return false;
+    while (*prefix) {
+        if (*value != *prefix) return false;
+        ++value;
+        ++prefix;
+    }
+    return true;
 }
 
 static inline void outb_power(uint16_t port, uint8_t value)
@@ -284,6 +296,14 @@ static bool desktop_str_eq(const char* a, const char* b)
     return *a == '\0' && *b == '\0';
 }
 
+static int desktop_strlen(const char* value)
+{
+    int len = 0;
+    if (!value) return 0;
+    while (value[len]) ++len;
+    return len;
+}
+
 // ============================================================
 // Desktop state
 // ============================================================
@@ -313,7 +333,7 @@ static const char* s_appModelStatus = "Ready. Use Up/Down, 1-4, Enter, I, S, Esc
 
 // Control Panel window state
 static bool s_controlPanelOpen = false;
-static int s_controlPanelHover = -1;  // 0 = Device Manager, 1 = Network Adapters, -1 = none
+static int s_controlPanelHover = -1;  // 0 = Display, 1 = Device Manager, 2 = Network Adapters, -1 = none
 
 // Device Manager window state
 static bool s_deviceManagerOpen = false;
@@ -522,6 +542,7 @@ static DesktopIcon s_desktopIcons[] = {
     {"Calculator",  0xFF4690C8, true, false, -1, -1},  // blue, pinned
     {"Console",     0xFF78B450, true, false, -1, -1},  // green, pinned
     {"Trash",       0xFF9098A4, true, false, -1, -1},  // gray, pinned
+    {"DisplayOptions", 0xFF606878, true, false, -1, -1}, // display options
     {"Paint",       0xFFC87830, false, true, -1, -1},  // orange, recent
     {"Clock",       0xFF4690C8, false, true, -1, -1},  // blue, recent
     {"TaskManager", 0xFFB44646, true, false, -1, -1},  // red, pinned (matches registered app name)
@@ -548,6 +569,7 @@ static StartMenuApp s_startMenuApps[] = {
     {"Trash",       true,  false, 0xFF9098A4},  // pinned
     {"TaskManager", true,  false, 0xFFB44646},  // pinned
     {"DiskManager", true,  false, 0xFFB48C46},  // pinned (orange-brown for disk)
+    {"DisplayOptions", true, false, 0xFF606878}, // display options
     {"HDInstaller", true,  false, 0xFFB48C46},  // pinned (orange-brown for installer)
     {"AppModel",    true,  false, 0xFF5587D2},  // pinned app model demo entry
     {"Paint",       false, true,  0xFFC87830},  // recent
@@ -659,7 +681,8 @@ enum class WallpaperType {
     Gradient,      // Gradient from top to bottom
     SolidColor,    // Single solid color
     Grid,          // Grid pattern overlay
-    Custom         // Custom image (placeholder for future)
+    Custom,        // Custom image (placeholder for future)
+    BuiltIn        // Built-in wallpaper palette/preview for bare-metal
 };
 
 struct WallpaperConfig {
@@ -670,6 +693,7 @@ struct WallpaperConfig {
     bool showGrid;           // Show subtle grid overlay
     uint32_t gridColor;      // Grid line color
     uint32_t gridSpacing;    // Grid spacing in pixels
+    const char* wallpaperId; // Stable built-in wallpaper id
     
     WallpaperConfig() 
         : type(WallpaperType::Gradient),
@@ -678,10 +702,62 @@ struct WallpaperConfig {
           showBranding(true),
           showGrid(true),
           gridColor(0xFF192337),
-          gridSpacing(100) {}
+          gridSpacing(100),
+          wallpaperId("legacy_blue_flower") {}
 };
 
 static WallpaperConfig s_wallpaperConfig;
+
+struct BuiltInWallpaperPalette {
+    const char* id;
+    const char* displayName;
+    const char* fullImagePath;
+    const char* thumbnailPath;
+    uint32_t topColor;
+    uint32_t bottomColor;
+    uint32_t accentColor;
+};
+
+static const BuiltInWallpaperPalette s_builtInWallpapers[] = {
+    {"legacy_blue_flower", "Blue Flower", "/Wallpapers/blueflower.gximg", "/Wallpapers/blueflower_thumb.gximg", 0xFF061638, 0xFF123B84, 0xFF2568D8},
+    {"legacy_dinos", "Dinos", "/Wallpapers/dinos.gximg", "/Wallpapers/dinos_thumb.gximg", 0xFF476020, 0xFFB8A05E, 0xFF70A048},
+    {"legacy_flower", "Flower", "/Wallpapers/flower.gximg", "/Wallpapers/flower_thumb.gximg", 0xFF103C50, 0xFF51AFC2, 0xFF88E0F0},
+    {"legacy_guidexos_space", "guideXOS Space", "/Wallpapers/guidexosspace.gximg", "/Wallpapers/guidexosspace_thumb.gximg", 0xFF030713, 0xFF102A70, 0xFF2F6BDC},
+    {"legacy_red_flower", "Red Flower", "/Wallpapers/redflower.gximg", "/Wallpapers/redflower_thumb.gximg", 0xFF190202, 0xFF7D1010, 0xFFD82020},
+    {"legacy_ameoba", "Ameoba", "/Wallpapers/ameoba.gximg", "/Wallpapers/ameoba_thumb.gximg", 0xFF071044, 0xFF501090, 0xFF7E2DDD},
+    {"legacy_ameobagx", "Ameoba GX", "/Wallpapers/ameobagx.gximg", "/Wallpapers/ameobagx_thumb.gximg", 0xFF13051F, 0xFF68289A, 0xFFD04DF0},
+    {"legacy_tron_porsche", "Tron Porsche", "/Wallpapers/tronporche.gximg", "/Wallpapers/tronporche_thumb.gximg", 0xFF031820, 0xFF0B7485, 0xFF20E0F0},
+    {"legacy_wallpaper2", "Wallpaper 2", "/Wallpapers/Wallpaper2.gximg", "/Wallpapers/Wallpaper2_thumb.gximg", 0xFF100E35, 0xFF8C145F, 0xFFFF52B0},
+};
+static const int kBuiltInWallpaperCount = sizeof(s_builtInWallpapers) / sizeof(s_builtInWallpapers[0]);
+
+struct WallpaperPackEntry {
+    const char* id;
+    const char* path;
+    bool thumbnail;
+};
+
+struct GximgHeader {
+    char magic[8];
+    uint32_t width;
+    uint32_t height;
+    uint32_t format;
+};
+
+struct WallpaperImageCache {
+    uint32_t* pixels;
+    uint32_t width;
+    uint32_t height;
+    bool loadAttempted;
+    bool loadSucceeded;
+};
+
+static WallpaperPackEntry s_wallpaperPackEntries[kBuiltInWallpaperCount * 2];
+static int s_wallpaperPackEntryCount = 0;
+static bool s_wallpaperPackMounted = false;
+static WallpaperImageCache s_wallpaperThumbCache[kBuiltInWallpaperCount];
+static WallpaperImageCache s_wallpaperFullCache{};
+static const char* s_wallpaperFullCacheId = nullptr;
 
 // ============================================================
 // Time and Date Tracking
@@ -873,6 +949,8 @@ static int s_startMenuScroll = 0;       // Scroll offset for long lists
 static bool s_startMenuAllProgs = false; // Toggle between Recent/Pinned vs All Programs
 static const int kStartMenuMaxRows = 14; // Max visible rows before scrolling
 static const int kStartMenuRowH = 20;    // Height of each menu row
+
+static bool draw_argb_icon_buffer(const uint32_t* pixels, uint32_t srcW, uint32_t srcH, uint32_t x, uint32_t y, uint32_t width, uint32_t height);
 
 // Start menu helper functions
 static void refresh_start_menu_list();   // Rebuild visible start menu items
@@ -1514,6 +1592,237 @@ static void set_wallpaper_grid(uint32_t topColor, uint32_t bottomColor, uint32_t
     s_wallpaperConfig.gridSpacing = spacing;
 }
 
+static const BuiltInWallpaperPalette* find_builtin_wallpaper(const char* id)
+{
+    if (!id) return nullptr;
+    for (int i = 0; i < kBuiltInWallpaperCount; ++i) {
+        if (desktop_str_eq(id, s_builtInWallpapers[i].id)) return &s_builtInWallpapers[i];
+    }
+    return nullptr;
+}
+
+static bool gximg_header_valid(const GximgHeader* header)
+{
+    return header &&
+           header->magic[0] == 'G' && header->magic[1] == 'X' && header->magic[2] == 'I' && header->magic[3] == 'M' &&
+           header->magic[4] == 'G' && header->magic[5] == '0' && header->magic[6] == '0' && header->magic[7] == '1' &&
+           header->width > 0 && header->height > 0 && header->format == 1;
+}
+
+static bool load_gximg_file(const char* path, WallpaperImageCache& cache)
+{
+    cache.loadAttempted = true;
+    cache.loadSucceeded = false;
+    cache.pixels = nullptr;
+    cache.width = 0;
+    cache.height = 0;
+
+    if (!path || !path[0]) return false;
+
+    kernel::vfs::FileInfo info{};
+    if (kernel::vfs::stat(path, &info) != kernel::vfs::VFS_OK || info.size < sizeof(GximgHeader)) {
+        serial::puts("[desktop] gximg stat failed: ");
+        serial::puts(path);
+        serial::puts("\n");
+        return false;
+    }
+
+    uint8_t handle = kernel::vfs::open(path, kernel::vfs::OPEN_READ);
+    if (handle == 0xFF) {
+        serial::puts("[desktop] gximg open failed: ");
+        serial::puts(path);
+        serial::puts("\n");
+        return false;
+    }
+
+    GximgHeader header{};
+    int32_t headerRead = kernel::vfs::read(handle, &header, sizeof(header));
+    if (headerRead != (int32_t)sizeof(header) || !gximg_header_valid(&header)) {
+        kernel::vfs::close(handle);
+        serial::puts("[desktop] gximg header invalid: ");
+        serial::puts(path);
+        serial::puts("\n");
+        return false;
+    }
+
+    uint64_t pixelCount = (uint64_t)header.width * (uint64_t)header.height;
+    uint64_t byteCount = pixelCount * sizeof(uint32_t);
+    if (sizeof(GximgHeader) + byteCount > info.size) {
+        kernel::vfs::close(handle);
+        serial::puts("[desktop] gximg payload truncated: ");
+        serial::puts(path);
+        serial::puts("\n");
+        return false;
+    }
+
+    uint32_t* pixels = new uint32_t[(size_t)pixelCount];
+    if (!pixels) {
+        kernel::vfs::close(handle);
+        serial::puts("[desktop] gximg allocation failed\n");
+        return false;
+    }
+
+    int32_t bytesRead = kernel::vfs::read(handle, pixels, (uint32_t)byteCount);
+    kernel::vfs::close(handle);
+    if (bytesRead != (int32_t)byteCount) {
+        delete[] pixels;
+        serial::puts("[desktop] gximg read failed: ");
+        serial::puts(path);
+        serial::puts("\n");
+        return false;
+    }
+
+    cache.pixels = pixels;
+    cache.width = header.width;
+    cache.height = header.height;
+    cache.loadSucceeded = true;
+    serial::puts("[desktop] gximg loaded: ");
+    serial::puts(path);
+    serial::puts("\n");
+    return true;
+}
+
+static void draw_scaled_gximg(const WallpaperImageCache& cache, uint32_t x, uint32_t y, uint32_t width, uint32_t height)
+{
+    if (!cache.pixels || cache.width == 0 || cache.height == 0 || width == 0 || height == 0) return;
+    draw_argb_icon_buffer(cache.pixels, cache.width, cache.height, x, y, width, height);
+}
+
+static WallpaperImageCache* load_wallpaper_thumbnail_cache(const char* wallpaperId)
+{
+    for (int i = 0; i < kBuiltInWallpaperCount; ++i) {
+        if (!desktop_str_eq(s_builtInWallpapers[i].id, wallpaperId)) continue;
+        if (!s_wallpaperThumbCache[i].loadAttempted) load_gximg_file(s_builtInWallpapers[i].thumbnailPath, s_wallpaperThumbCache[i]);
+        return s_wallpaperThumbCache[i].loadSucceeded ? &s_wallpaperThumbCache[i] : nullptr;
+    }
+    return nullptr;
+}
+
+static WallpaperImageCache* load_wallpaper_full_cache(const char* wallpaperId)
+{
+    const BuiltInWallpaperPalette* entry = find_builtin_wallpaper(wallpaperId);
+    if (!entry) return nullptr;
+    if (s_wallpaperFullCacheId && desktop_str_eq(s_wallpaperFullCacheId, wallpaperId) && s_wallpaperFullCache.loadAttempted) {
+        return s_wallpaperFullCache.loadSucceeded ? &s_wallpaperFullCache : nullptr;
+    }
+    if (s_wallpaperFullCache.pixels) {
+        delete[] s_wallpaperFullCache.pixels;
+        s_wallpaperFullCache.pixels = nullptr;
+    }
+    s_wallpaperFullCacheId = wallpaperId;
+    load_gximg_file(entry->fullImagePath, s_wallpaperFullCache);
+    return s_wallpaperFullCache.loadSucceeded ? &s_wallpaperFullCache : nullptr;
+}
+
+static void initialize_wallpaper_pack_registry()
+{
+    if (s_wallpaperPackEntryCount != 0) return;
+    for (int i = 0; i < kBuiltInWallpaperCount; ++i) {
+        s_wallpaperPackEntries[s_wallpaperPackEntryCount++] = { s_builtInWallpapers[i].id, s_builtInWallpapers[i].fullImagePath, false };
+        s_wallpaperPackEntries[s_wallpaperPackEntryCount++] = { s_builtInWallpapers[i].id, s_builtInWallpapers[i].thumbnailPath, true };
+    }
+}
+
+static WallpaperPackEntry* find_wallpaper_pack_entry(const char* wallpaperId, bool thumbnail)
+{
+    if (!wallpaperId) return nullptr;
+    initialize_wallpaper_pack_registry();
+    for (int i = 0; i < s_wallpaperPackEntryCount; ++i) {
+        WallpaperPackEntry& entry = s_wallpaperPackEntries[i];
+        if (desktop_str_eq(entry.id, wallpaperId) && entry.thumbnail == thumbnail) return &entry;
+    }
+    return nullptr;
+}
+
+void set_wallpaper_image_pack(const void* packBase, uint64_t packSize)
+{
+    initialize_wallpaper_pack_registry();
+    if (!packBase || packSize < kernel::ramdisk::RAMDISK_SECTOR_SIZE) {
+        serial::puts("[desktop] wallpaper image pack missing\n");
+        return;
+    }
+
+    uint8_t diskIndex = kernel::ramdisk::create_readonly_at(packBase, (size_t)packSize, "wallimg");
+    if (diskIndex == 0xFF) {
+        serial::puts("[desktop] failed to attach wallpaper image pack\n");
+        return;
+    }
+
+    if (kernel::vfs::mount_type("/Wallpapers", diskIndex, kernel::vfs::FS_TYPE_FAT32) == 0xFF) {
+        serial::puts("[desktop] failed to mount wallpaper image pack at /Wallpapers\n");
+        return;
+    }
+
+    s_wallpaperPackMounted = true;
+    serial::puts("[desktop] mounted wallpaper image pack at /Wallpapers\n");
+}
+
+bool draw_wallpaper_thumbnail_by_id(const char* wallpaperId, uint32_t x, uint32_t y, uint32_t w, uint32_t h)
+{
+    if (!s_wallpaperPackMounted) return false;
+    WallpaperImageCache* cache = load_wallpaper_thumbnail_cache(wallpaperId);
+    if (!cache) return false;
+    draw_scaled_gximg(*cache, x, y, w, h);
+    return true;
+}
+
+static void persist_wallpaper_id(const char* id)
+{
+    if (!id || !id[0]) return;
+    vfs::write_file("/desktop.wallpaper.id", id, (uint32_t)desktop_strlen(id));
+}
+
+static void load_persisted_wallpaper_id()
+{
+    char idBuf[96];
+    int32_t count = vfs::read_file("/desktop.wallpaper.id", idBuf, sizeof(idBuf) - 1);
+    if (count <= 0) return;
+    idBuf[count] = '\0';
+    while (count > 0 && (idBuf[count - 1] == '\n' || idBuf[count - 1] == '\r' || idBuf[count - 1] == ' ' || idBuf[count - 1] == '\t')) {
+        idBuf[--count] = '\0';
+    }
+    const BuiltInWallpaperPalette* entry = find_builtin_wallpaper(idBuf);
+    if (entry) {
+        s_wallpaperConfig.type = WallpaperType::BuiltIn;
+        s_wallpaperConfig.topColor = entry->topColor;
+        s_wallpaperConfig.bottomColor = entry->bottomColor;
+        s_wallpaperConfig.gridColor = entry->accentColor;
+        s_wallpaperConfig.wallpaperId = entry->id;
+        s_wallpaperConfig.showBranding = false;
+        s_wallpaperConfig.showGrid = false;
+    } else {
+        serial::puts("[desktop] Invalid persisted wallpaper id, using default\n");
+    }
+}
+
+void set_wallpaper_by_id(const char* wallpaperId)
+{
+    const BuiltInWallpaperPalette* entry = find_builtin_wallpaper(wallpaperId);
+    if (!entry) {
+        serial::puts("[desktop] Wallpaper id not found, falling back to default\n");
+        entry = &s_builtInWallpapers[0];
+    }
+    s_wallpaperConfig.type = WallpaperType::BuiltIn;
+    s_wallpaperConfig.topColor = entry->topColor;
+    s_wallpaperConfig.bottomColor = entry->bottomColor;
+    s_wallpaperConfig.gridColor = entry->accentColor;
+    s_wallpaperConfig.wallpaperId = entry->id;
+    s_wallpaperConfig.showBranding = false;
+    s_wallpaperConfig.showGrid = false;
+    persist_wallpaper_id(entry->id);
+    s_needsRedraw = true;
+}
+
+const char* get_wallpaper_id()
+{
+    return s_wallpaperConfig.wallpaperId ? s_wallpaperConfig.wallpaperId : s_builtInWallpapers[0].id;
+}
+
+void reload_persisted_wallpaper()
+{
+    load_persisted_wallpaper_id();
+}
+
 // ============================================================
 // Drawing routines
 // ============================================================
@@ -1621,6 +1930,39 @@ static void draw_background()
                 vline(x, 0, h, gridCol);
             for (uint32_t y = gs; y < h; y += gs)
                 hline(0, y, w, gridCol);
+            break;
+        }
+
+        case WallpaperType::BuiltIn: {
+            WallpaperImageCache* image = load_wallpaper_full_cache(get_wallpaper_id());
+            if (image) {
+                serial::puts("[desktop] rendering wallpaper image for id=");
+                serial::puts(get_wallpaper_id());
+                serial::puts("\n");
+                draw_scaled_gximg(*image, 0, 0, w, h);
+            } else {
+                serial::puts("[desktop] wallpaper image fallback to gradient\n");
+                for (uint32_t y = 0; y < h; y++) {
+                    uint32_t lineColor = lerp_color(
+                        s_wallpaperConfig.topColor,
+                        s_wallpaperConfig.bottomColor,
+                        y,
+                        h > 1 ? h - 1 : 1
+                    );
+                    framebuffer::fill_rect(0, y, w, 1, lineColor);
+                }
+
+                uint32_t accent = s_wallpaperConfig.gridColor;
+                uint32_t cx = w / 2;
+                uint32_t cy = h / 2;
+                for (uint32_t ring = 0; ring < 7; ++ring) {
+                    uint32_t rw = 80 + ring * 46;
+                    uint32_t rh = 24 + ring * 18;
+                    uint32_t ox = cx > rw / 2 ? cx - rw / 2 : 0;
+                    uint32_t oy = cy > rh / 2 ? cy - rh / 2 : 0;
+                    draw_rect(ox, oy, rw, rh, accent);
+                }
+            }
             break;
         }
         
@@ -1845,6 +2187,7 @@ static const char* GetDesktopIconLogicalName(const char* label)
     if (text_equals(label, "Clock")) return "app.clock";
     if (text_equals(label, "DiskManager")) return "app.diskmanager";
     if (text_equals(label, "HDInstaller")) return "app.installer";
+    if (text_equals(label, "DisplayOptions")) return "app.settings";
     if (text_equals(label, "Control Panel")) return "app.controlpanel";
     if (text_equals(label, "Settings")) return "app.settings";
     if (text_equals(label, "Computer")) return "place.computer";
@@ -2959,15 +3302,10 @@ static void handle_context_menu_command(int item)
             s_notification.showTime = s_tickCounter;
             break;
         case 1: // Display Settings
-            s_controlPanelOpen = true;
-            s_controlPanelHover = -1;
+            launch_app("DisplayOptions");
             break;
         case 2: // Personalize
-            toggle_grid();
-            s_notification.title = "Personalize";
-            s_notification.message = s_wallpaperConfig.showGrid ? "Grid enabled" : "Grid disabled";
-            s_notification.visible = true;
-            s_notification.showTime = s_tickCounter;
+            launch_app("DisplayOptions");
             break;
         case 3: { // New Folder
             vfs::Status status = vfs::mkdir("/New Folder");
@@ -3126,10 +3464,11 @@ struct ControlPanelItem {
 };
 
 static const ControlPanelItem s_controlPanelItems[] = {
+    {"Display",        0xFF606878},
     {"Device Mgr",     0xFF4690C8},
     {"Network",        0xFF50B478},
 };
-static const int kControlPanelItemCount = 2;
+static const int kControlPanelItemCount = 3;
 
 static void draw_control_panel()
 {
@@ -3198,7 +3537,7 @@ static void draw_control_panel()
     }
 }
 
-// Hit test Control Panel: returns 0=Device Manager, 1=Network, 2=close, -1=none
+// Hit test Control Panel: returns item index, 3=close, -1=none
 static int hit_test_control_panel(int32_t mx, int32_t my)
 {
     if (!s_controlPanelOpen) return -1;
@@ -3212,7 +3551,7 @@ static int hit_test_control_panel(int32_t mx, int32_t my)
     uint32_t closeBtnY = dlgY + 4;
     if ((uint32_t)mx >= closeBtnX && (uint32_t)mx < closeBtnX + 20 &&
         (uint32_t)my >= closeBtnY && (uint32_t)my < closeBtnY + 20) {
-        return 2;
+        return 3;
     }
 
     // Icon hit test
@@ -4080,6 +4419,7 @@ void init()
     initialize_icon_positions();  // Use new icon management system
     init_time();  // Initialize time only if a real clock source is available
     shell::init();
+    load_persisted_wallpaper_id();
     
     // Enable double buffering to prevent flickering during window movement
     framebuffer::enable_double_buffering();
@@ -5637,20 +5977,27 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
         // Handle Control Panel dialog clicks
         if (s_controlPanelOpen) {
             int btn = hit_test_control_panel(mx, my);
-            if (btn == 2) {
+            if (btn == 3) {
                 // Close
                 s_controlPanelOpen = false;
                 draw();
                 draw_cursor(mx, my);
                 return;
             } else if (btn == 0) {
+                // Display Options
+                s_controlPanelOpen = false;
+                launch_app("DisplayOptions");
+                draw();
+                draw_cursor(mx, my);
+                return;
+            } else if (btn == 1) {
                 // Device Manager
                 s_controlPanelOpen = false;
                 s_deviceManagerOpen = true;
                 draw();
                 draw_cursor(mx, my);
                 return;
-            } else if (btn == 1) {
+            } else if (btn == 2) {
                 // Network Adapters
                 s_controlPanelOpen = false;
                 s_networkAdaptersOpen = true;
@@ -5912,7 +6259,7 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
     // Control Panel hover tracking
     if (s_controlPanelOpen) {
         int newHover = hit_test_control_panel(mx, my);
-        if (newHover != 2 && newHover != s_controlPanelHover) {  // Don't track close button as hover
+        if (newHover != 3 && newHover != s_controlPanelHover) {  // Don't track close button as hover
             s_controlPanelHover = newHover;
             draw();
             draw_cursor(mx, my);

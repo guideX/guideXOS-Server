@@ -59,17 +59,17 @@ void ControlPanel::initItems() {
     
     // Appearance & Personalization
     s_items.push_back(PanelItem(
-        "Display Settings",
-        "Adjust screen resolution",
+        "Display Options",
+        "Backgrounds and display",
         "monitor",
-        "DisplaySettings"
+        "DisplayOptions"
     ));
     
     s_items.push_back(PanelItem(
         "Desktop Background",
         "Change wallpaper",
         "image",
-        "Wallpaper"
+        "DisplayOptions"
     ));
     
     // Hardware & Sound

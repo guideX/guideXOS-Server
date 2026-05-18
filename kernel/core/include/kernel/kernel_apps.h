@@ -168,6 +168,33 @@ private:
 };
 
 // ============================================================
+// Display Options App
+// ============================================================
+
+class DisplayOptionsApp : public app::KernelApp {
+public:
+    DisplayOptionsApp();
+    virtual ~DisplayOptionsApp() override;
+
+    virtual bool init() override;
+    virtual void shutdown() override;
+    virtual void draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) override;
+    virtual void onMouseDown(int x, int y, uint8_t button) override;
+    virtual void onWidgetClick(int widgetId) override;
+
+    static app::KernelApp* create() { return new DisplayOptionsApp(); }
+
+private:
+    int m_selectedIndex;
+    int m_appliedIndex;
+    int m_selectButtonId;
+
+    void loadSelection();
+    void applySelected();
+    int hitWallpaper(int x, int y) const;
+};
+
+// ============================================================
 // Task Manager App
 // ============================================================
 
