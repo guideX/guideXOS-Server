@@ -61,6 +61,31 @@ namespace {
         if (end == std::string::npos) return std::string();
         return content.substr(start, end - start);
     }
+
+    void publishGui(MsgType type, const std::string& payload) {
+        ipc::Message msg;
+        msg.type = static_cast<uint32_t>(type);
+        msg.data.assign(payload.begin(), payload.end());
+        ipc::Bus::publish("gui.input", std::move(msg), false);
+    }
+
+    void drawTextAt(uint64_t windowId, int x, int y, const std::string& text, int r, int g, int b) {
+        std::ostringstream payload;
+        payload << windowId << "|" << x << "|" << y << "|" << text << "|" << r << "|" << g << "|" << b;
+        publishGui(MsgType::MT_DrawText, payload.str());
+    }
+
+    void drawRect(uint64_t windowId, int x, int y, int w, int h, int r, int g, int b) {
+        std::ostringstream payload;
+        payload << windowId << "|" << x << "|" << y << "|" << w << "|" << h << "|" << r << "|" << g << "|" << b;
+        publishGui(MsgType::MT_DrawRect, payload.str());
+    }
+
+    void addButton(uint64_t windowId, int id, int x, int y, int w, int h, const std::string& text) {
+        std::ostringstream payload;
+        payload << windowId << "|1|" << id << "|" << x << "|" << y << "|" << w << "|" << h << "|" << text;
+        publishGui(MsgType::MT_WidgetAdd, payload.str());
+    }
 }
 
 uint64_t Trash::Launch() {
@@ -89,7 +114,113 @@ std::vector<Trash::TrashEntry> Trash::listEntries() {
     std::sort(items.begin(), items.end(), [](const TrashEntry& a, const TrashEntry& b) {
         return a.name < b.name;
     });
+    Logger::write(LogLevel::Info, std::string("Trash item count computed=") + std::to_string(items.size()));
     return items;
+}
+
+bool Trash::purgeContents(std::string& error, size_t& deletedCount) {
+    deletedCount = 0;
+    std::error_code ec;
+    std::filesystem::path trashPath = hostedPathForVirtual(kTrashRootPath);
+    std::filesystem::path root = hostedRootPath();
+
+    if (!std::filesystem::exists(trashPath, ec)) {
+        if (!std::filesystem::create_directories(trashPath, ec) || ec) {
+            error = ec ? ec.message() : "Unable to create Trash directory";
+            return false;
+        }
+        return true;
+    }
+    if (!std::filesystem::is_directory(trashPath, ec) || ec) {
+        error = "Trash path is not a directory";
+        return false;
+    }
+
+    std::filesystem::path canonicalRoot = std::filesystem::weakly_canonical(root, ec);
+    if (ec) canonicalRoot = root.lexically_normal();
+    std::filesystem::path canonicalTrash = std::filesystem::weakly_canonical(trashPath, ec);
+    if (ec) canonicalTrash = trashPath.lexically_normal();
+    if (canonicalTrash == canonicalRoot || canonicalTrash.empty()) {
+        error = "Refusing to purge unsafe Trash path";
+        return false;
+    }
+
+    Logger::write(LogLevel::Info, "Empty Trash confirmed; purging hosted Trash contents");
+    bool ok = true;
+    for (const auto& entry : std::filesystem::directory_iterator(trashPath, ec)) {
+        if (ec) { ok = false; break; }
+        std::filesystem::path child = entry.path();
+        std::filesystem::path canonicalChild = std::filesystem::weakly_canonical(child, ec);
+        if (ec) canonicalChild = child.lexically_normal();
+        std::string childText = canonicalChild.generic_string();
+        std::string trashText = canonicalTrash.generic_string();
+        if (childText.size() <= trashText.size() || childText.compare(0, trashText.size(), trashText) != 0) {
+            Logger::write(LogLevel::Error, std::string("Refusing to delete path outside Trash: ") + childText);
+            ok = false;
+            continue;
+        }
+
+        std::string name = child.filename().generic_string();
+        bool realItem = !endsWithText(name, kTrashInfoSuffix);
+        std::uintmax_t removed = std::filesystem::remove_all(child, ec);
+        if (ec) {
+            Logger::write(LogLevel::Error, std::string("Empty Trash failed deleting ") + child.generic_string() + ": " + ec.message());
+            ok = false;
+            ec.clear();
+        } else {
+            if (realItem && removed > 0) ++deletedCount;
+            Logger::write(LogLevel::Info, std::string("Empty Trash deleted ") + child.generic_string());
+        }
+    }
+
+    std::filesystem::create_directories(trashPath, ec);
+    if (ec) {
+        error = ec.message();
+        ok = false;
+    }
+    if (!ok && error.empty()) error = "Some Trash items could not be deleted";
+    Logger::write(ok ? LogLevel::Info : LogLevel::Error,
+        std::string("Empty Trash purge ") + (ok ? "succeeded" : "failed") + "; deleted=" + std::to_string(deletedCount));
+    return ok;
+}
+
+void Trash::render(uint64_t windowId, bool confirmEmpty, const std::string& status) {
+    publishGui(MsgType::MT_DrawText, std::to_string(windowId) + "|\f");
+    drawRect(windowId, 0, 0, 420, 240, 44, 46, 54);
+    drawRect(windowId, 16, 18, 388, 196, 30, 32, 38);
+
+    std::vector<TrashEntry> items = listEntries();
+    Logger::write(LogLevel::Info, std::string("Trash window render; item count=") + std::to_string(items.size()));
+
+    if (items.empty()) {
+        drawTextAt(windowId, 26, 34, "Trash is empty.", 220, 225, 235);
+        drawTextAt(windowId, 26, 58, status.empty() ? "Deleted files will appear here." : status, 165, 170, 185);
+    } else {
+        std::ostringstream summary;
+        summary << "Trash contains " << items.size() << " item(s).";
+        drawTextAt(windowId, 26, 34, summary.str(), 220, 225, 235);
+        int y = 58;
+        for (size_t i = 0; i < items.size() && i < 5; ++i) {
+            std::ostringstream item;
+            item << "- " << items[i].name << (items[i].isDirectory ? " [Folder]" : " [File]");
+            if (!items[i].originalPath.empty()) item << " from " << items[i].originalPath;
+            drawTextAt(windowId, 26, y, item.str(), 165, 170, 185);
+            y += 20;
+        }
+        addButton(windowId, 200, 276, 188, 112, 22, "Empty Trash");
+    }
+
+    if (!status.empty() && !items.empty()) drawTextAt(windowId, 26, 182, status, 185, 190, 205);
+    if (confirmEmpty) {
+        drawRect(windowId, 64, 70, 292, 104, 55, 48, 48);
+        drawTextAt(windowId, 84, 88, "Empty Trash?", 240, 230, 230);
+        drawTextAt(windowId, 84, 112, "This will permanently delete all", 210, 205, 205);
+        drawTextAt(windowId, 84, 130, "items in Trash.", 210, 205, 205);
+        addButton(windowId, 201, 92, 146, 100, 22, "Empty Trash");
+        addButton(windowId, 202, 214, 146, 70, 22, "Cancel");
+    }
+
+    gxos::gui::Compositor::requestDesktopRefresh();
 }
 
 int Trash::main(int argc, char** argv) {
@@ -111,6 +242,8 @@ int Trash::main(int argc, char** argv) {
         ipc::Bus::publish(kGuiChanIn, std::move(createMsg), false);
 
         uint64_t windowId = 0;
+        bool confirmEmpty = false;
+        std::string status;
         bool running = true;
         while (running) {
             ipc::Message msg;
@@ -128,68 +261,46 @@ int Trash::main(int argc, char** argv) {
                     continue;
                 }
 
-                ipc::Message clearMsg;
-                clearMsg.type = static_cast<uint32_t>(MsgType::MT_DrawText);
-                std::string clearPayload = std::to_string(windowId) + "|\f";
-                clearMsg.data.assign(clearPayload.begin(), clearPayload.end());
-                ipc::Bus::publish(kGuiChanIn, std::move(clearMsg), false);
-
-                ipc::Message bgMsg;
-                bgMsg.type = static_cast<uint32_t>(MsgType::MT_DrawRect);
-                std::string bgPayload = std::to_string(windowId) + "|0|0|420|240|44|46|54";
-                bgMsg.data.assign(bgPayload.begin(), bgPayload.end());
-                ipc::Bus::publish(kGuiChanIn, std::move(bgMsg), false);
-
-                ipc::Message panelMsg;
-                panelMsg.type = static_cast<uint32_t>(MsgType::MT_DrawRect);
-                std::string panelPayload = std::to_string(windowId) + "|16|18|388|196|30|32|38";
-                panelMsg.data.assign(panelPayload.begin(), panelPayload.end());
-                ipc::Bus::publish(kGuiChanIn, std::move(panelMsg), false);
-
-                std::vector<TrashEntry> items = listEntries();
-                Logger::write(LogLevel::Info, std::string("Trash window opened; item count=") + std::to_string(items.size()));
-                if (items.empty()) {
-                    ipc::Message textMsg1;
-                    textMsg1.type = static_cast<uint32_t>(MsgType::MT_DrawText);
-                    std::ostringstream text1;
-                    text1 << windowId << "|26|34|Trash is empty.|220|225|235";
-                    std::string textPayload1 = text1.str();
-                    textMsg1.data.assign(textPayload1.begin(), textPayload1.end());
-                    ipc::Bus::publish(kGuiChanIn, std::move(textMsg1), false);
-
-                    ipc::Message textMsg2;
-                    textMsg2.type = static_cast<uint32_t>(MsgType::MT_DrawText);
-                    std::ostringstream text2;
-                    text2 << windowId << "|26|58|Deleted files will appear here.|165|170|185";
-                    std::string textPayload2 = text2.str();
-                    textMsg2.data.assign(textPayload2.begin(), textPayload2.end());
-                    ipc::Bus::publish(kGuiChanIn, std::move(textMsg2), false);
-                } else {
-                    ipc::Message summaryMsg;
-                    summaryMsg.type = static_cast<uint32_t>(MsgType::MT_DrawText);
-                    std::ostringstream summary;
-                    summary << windowId << "|26|34|Trash contains " << items.size() << " item(s).|220|225|235";
-                    std::string summaryPayload = summary.str();
-                    summaryMsg.data.assign(summaryPayload.begin(), summaryPayload.end());
-                    ipc::Bus::publish(kGuiChanIn, std::move(summaryMsg), false);
-
-                    int y = 58;
-                    for (size_t i = 0; i < items.size() && i < 6; ++i) {
-                        ipc::Message itemMsg;
-                        itemMsg.type = static_cast<uint32_t>(MsgType::MT_DrawText);
-                        std::ostringstream item;
-                        item << windowId << "|26|" << y << "|- " << items[i].name;
-                        if (items[i].isDirectory) item << " [Folder]";
-                        else item << " [File]";
-                        if (!items[i].originalPath.empty()) item << " from " << items[i].originalPath;
-                        item << "|165|170|185";
-                        std::string itemPayload = item.str();
-                        itemMsg.data.assign(itemPayload.begin(), itemPayload.end());
-                        ipc::Bus::publish(kGuiChanIn, std::move(itemMsg), false);
-                        y += 20;
+                render(windowId, confirmEmpty, status);
+            }
+            else if (msgType == MsgType::MT_WidgetEvt) {
+                std::istringstream iss(payload);
+                std::string winIdStr, widgetIdStr, event;
+                std::getline(iss, winIdStr, '|');
+                std::getline(iss, widgetIdStr, '|');
+                std::getline(iss, event, '|');
+                uint64_t eventWindowId = 0;
+                try { eventWindowId = std::stoull(winIdStr); } catch (...) { eventWindowId = 0; }
+                if (eventWindowId != windowId || event != "click") continue;
+                int widgetId = 0;
+                try { widgetId = std::stoi(widgetIdStr); } catch (...) { widgetId = 0; }
+                if (widgetId == 200) {
+                    if (listEntries().empty()) {
+                        status = "Trash is already empty.";
+                        Logger::write(LogLevel::Info, "Empty Trash requested while already empty");
+                    } else {
+                        status.clear();
+                        confirmEmpty = true;
+                        Logger::write(LogLevel::Info, "Empty Trash requested; showing confirmation");
                     }
+                    render(windowId, confirmEmpty, status);
+                } else if (widgetId == 201) {
+                    std::string error;
+                    size_t deleted = 0;
+                    Logger::write(LogLevel::Info, "Empty Trash confirmed");
+                    confirmEmpty = false;
+                    if (purgeContents(error, deleted)) {
+                        status = "Trash emptied.";
+                    } else {
+                        status = "Empty Trash failed: " + error;
+                    }
+                    render(windowId, confirmEmpty, status);
+                } else if (widgetId == 202) {
+                    Logger::write(LogLevel::Info, "Empty Trash canceled");
+                    confirmEmpty = false;
+                    status = "Empty Trash canceled.";
+                    render(windowId, confirmEmpty, status);
                 }
-                gxos::gui::Compositor::requestDesktopRefresh();
             }
             else if (msgType == MsgType::MT_Close) {
                 running = false;

@@ -216,6 +216,11 @@ static bool kernel_trash_exists()
         break;
     }
     vfs::closedir(dir);
+    serial::puts("[trash] item count computed=");
+    serial::puts(hasItems ? "nonzero" : "0");
+    serial::puts(" iconKey=");
+    serial::puts(hasItems ? "trash.full" : "trash.empty");
+    serial::puts("\n");
     return hasItems;
 }
 
@@ -3467,9 +3472,10 @@ void DiskManagerApp::onWidgetClick(int widgetId) {
 }
 
 TrashApp::TrashApp()
-    : m_entryCount(0)
+    : m_entryCount(0), m_emptyBtnId(-1), m_confirmEmptyBtnId(-1), m_cancelEmptyBtnId(-1), m_confirmEmpty(false)
 {
     strcopy(m_name, "Trash", app::MAX_APP_NAME);
+    m_status[0] = '\0';
 }
 
 TrashApp::~TrashApp()
@@ -3495,7 +3501,11 @@ bool TrashApp::init()
         return false;
     }
 
+    m_emptyBtnId = addButton(276, 188, 112, 22, "Empty Trash");
+    m_confirmEmptyBtnId = addButton(92, 146, 104, 22, "Empty Trash");
+    m_cancelEmptyBtnId = addButton(214, 146, 70, 22, "Cancel");
     refreshEntries();
+    updateButtons();
     kernel_desktop_refresh_trash_state();
     m_state = app::AppState::Running;
     return true;
@@ -3514,7 +3524,9 @@ void TrashApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h)
     }
     if (m_entryCount == 0) {
         appDrawText(x + 26, y + 34, "Trash is empty.", rgb(220, 225, 235));
-        appDrawText(x + 26, y + 58, "Deleted files will appear here.", rgb(165, 170, 185));
+        appDrawText(x + 26, y + 58, m_status[0] ? m_status : "Deleted files will appear here.", rgb(165, 170, 185));
+        if (m_confirmEmpty) m_confirmEmpty = false;
+        updateButtons();
         return;
     }
 
@@ -3545,6 +3557,61 @@ void TrashApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h)
             strappend(line, m_entries[i].originalPath, sizeof(line));
         }
         appDrawText(x + 26, y + 58 + (uint32_t)i * 20, line, rgb(165, 170, 185));
+    }
+
+    if (m_status[0]) {
+        appDrawText(x + 26, y + 182, m_status, rgb(185, 190, 205));
+    }
+
+    if (m_confirmEmpty) {
+        framebuffer::fill_rect(x + 64, y + 70, 292, 104, rgb(55, 48, 48));
+        appDrawText(x + 84, y + 88, "Empty Trash?", rgb(240, 230, 230));
+        appDrawText(x + 84, y + 112, "This will permanently delete all", rgb(210, 205, 205));
+        appDrawText(x + 84, y + 130, "items in Trash.", rgb(210, 205, 205));
+    }
+    updateButtons();
+}
+
+void TrashApp::onWidgetClick(int widgetId)
+{
+    if (widgetId == m_emptyBtnId) {
+        serial::puts("[trash] Empty Trash requested\n");
+        refreshEntries();
+        if (m_entryCount == 0) {
+            strcopy(m_status, "Trash is already empty.", sizeof(m_status));
+            m_confirmEmpty = false;
+        } else {
+            m_status[0] = '\0';
+            m_confirmEmpty = true;
+        }
+        updateButtons();
+        invalidate();
+        return;
+    }
+
+    if (widgetId == m_confirmEmptyBtnId) {
+        serial::puts("[trash] Empty Trash confirmed\n");
+        int deleted = 0;
+        m_confirmEmpty = false;
+        if (purgeContents(&deleted)) {
+            strcopy(m_status, "Trash emptied.", sizeof(m_status));
+        } else {
+            strcopy(m_status, "Empty Trash had errors.", sizeof(m_status));
+        }
+        refreshEntries();
+        updateButtons();
+        kernel_desktop_refresh_trash_state();
+        invalidate();
+        return;
+    }
+
+    if (widgetId == m_cancelEmptyBtnId) {
+        serial::puts("[trash] Empty Trash canceled\n");
+        m_confirmEmpty = false;
+        strcopy(m_status, "Empty Trash canceled.", sizeof(m_status));
+        updateButtons();
+        invalidate();
+        return;
     }
 }
 
@@ -3589,6 +3656,77 @@ void TrashApp::refreshEntries()
         ++m_entryCount;
     }
     vfs::closedir(dir);
+    serial::puts("[trash] item count computed=");
+    serial_put_dec((uint32_t)m_entryCount);
+    serial::puts("\n");
+}
+
+bool TrashApp::purgeContents(int* deletedCount)
+{
+    if (deletedCount) *deletedCount = 0;
+    refreshEntries();
+    if (m_entryCount == 0) return true;
+
+    bool ok = true;
+    for (int i = 0; i < m_entryCount; ++i) {
+        char itemPath[256];
+        char infoPath[256];
+        kernel_join_path(kKernelTrashRootPath, m_entries[i].name, itemPath, sizeof(itemPath));
+        kernel_trash_info_path_for(itemPath, infoPath, sizeof(infoPath));
+
+        if (!startsWithText(itemPath, kKernelTrashRootPath) || itemPath[strlen_local(kKernelTrashRootPath)] != '/') {
+            serial::puts("[trash] refusing unsafe purge path\n");
+            ok = false;
+            continue;
+        }
+
+        vfs::Status deleteStatus = m_entries[i].isDir ? vfs::rmdir(itemPath) : vfs::unlink(itemPath);
+        if (deleteStatus == vfs::VFS_OK) {
+            if (deletedCount) ++(*deletedCount);
+            serial::puts("[trash] purged item=");
+            serial::puts(itemPath);
+            serial::puts("\n");
+        } else {
+            serial::puts("[trash] purge failed item=");
+            serial::puts(itemPath);
+            serial::puts(" result=");
+            serial::puts(kernel_vfs_status_text(deleteStatus));
+            serial::puts("\n");
+            ok = false;
+        }
+
+        vfs::Status infoStatus = vfs::unlink(infoPath);
+        if (infoStatus == vfs::VFS_OK) {
+            serial::puts("[trash] purged metadata=ok\n");
+        }
+    }
+
+    kernel_make_directory_if_missing(kKernelTrashRootPath);
+    int finalCount = 0;
+    uint8_t dir = vfs::opendir(kKernelTrashRootPath);
+    if (dir != 0xFF) {
+        vfs::DirEntry entry{};
+        while (vfs::readdir(dir, &entry)) {
+            if (entry.name[0] == '.' && (entry.name[1] == '\0' || (entry.name[1] == '.' && entry.name[2] == '\0'))) continue;
+            if (endsWithText(entry.name, kKernelTrashInfoSuffix)) continue;
+            ++finalCount;
+        }
+        vfs::closedir(dir);
+    }
+    serial::puts("[trash] purge complete final item count=");
+    serial_put_dec((uint32_t)finalCount);
+    serial::puts("\n");
+    return ok;
+}
+
+void TrashApp::updateButtons()
+{
+    app::Widget* empty = getWidget(m_emptyBtnId);
+    app::Widget* confirm = getWidget(m_confirmEmptyBtnId);
+    app::Widget* cancel = getWidget(m_cancelEmptyBtnId);
+    if (empty) empty->visible = m_entryCount > 0 && !m_confirmEmpty;
+    if (confirm) confirm->visible = m_confirmEmpty;
+    if (cancel) cancel->visible = m_confirmEmpty;
 }
 
 // ============================================================

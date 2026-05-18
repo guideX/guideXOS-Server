@@ -144,7 +144,6 @@ public:
     virtual bool init() override;
     virtual void shutdown() override;
     virtual void draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) override;
-    
     virtual void onWidgetClick(int widgetId) override;
     virtual void onKeyChar(char c) override;
     
@@ -393,6 +392,7 @@ public:
     virtual bool init() override;
     virtual void shutdown() override;
     virtual void draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) override;
+    virtual void onWidgetClick(int widgetId) override;
 
     static app::KernelApp* create() { return new TrashApp(); }
 
@@ -407,8 +407,15 @@ private:
 
     TrashEntry m_entries[MAX_TRASH_ENTRIES];
     int m_entryCount;
+    int m_emptyBtnId;
+    int m_confirmEmptyBtnId;
+    int m_cancelEmptyBtnId;
+    bool m_confirmEmpty;
+    char m_status[128];
 
     void refreshEntries();
+    bool purgeContents(int* deletedCount);
+    void updateButtons();
 };
 
 // ============================================================

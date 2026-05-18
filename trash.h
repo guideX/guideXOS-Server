@@ -20,6 +20,8 @@ private:
     };
 
     static std::vector<TrashEntry> listEntries();
+    static bool purgeContents(std::string& error, size_t& deletedCount);
+    static void render(uint64_t windowId, bool confirmEmpty, const std::string& status);
 };
 
 } // namespace apps

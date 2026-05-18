@@ -1800,12 +1800,45 @@ static bool text_equals(const char* a, const char* b)
     return *a == '\0' && *b == '\0';
 }
 
+static bool text_ends_with(const char* value, const char* suffix)
+{
+    if (!value || !suffix) return false;
+    int valueLen = 0;
+    int suffixLen = 0;
+    while (value[valueLen]) ++valueLen;
+    while (suffix[suffixLen]) ++suffixLen;
+    if (suffixLen > valueLen) return false;
+    for (int i = 0; i < suffixLen; ++i) {
+        if (value[valueLen - suffixLen + i] != suffix[i]) return false;
+    }
+    return true;
+}
+
 static const char* GetDesktopIconLogicalName(const char* label)
 {
     if (text_equals(label, "Notepad")) return "app.notepad";
     if (text_equals(label, "Calculator")) return "app.calculator";
     if (text_equals(label, "Console")) return "app.console";
-    if (text_equals(label, "Trash")) return "trash.empty";
+    if (text_equals(label, "Trash")) {
+        int count = 0;
+        uint8_t dir = vfs::opendir("/Trash");
+        if (dir != 0xFF) {
+            vfs::DirEntry entry{};
+            while (vfs::readdir(dir, &entry)) {
+                if (entry.name[0] == '.' && (entry.name[1] == '\0' || (entry.name[1] == '.' && entry.name[2] == '\0'))) continue;
+                if (text_ends_with(entry.name, ".trashinfo")) continue;
+                ++count;
+                break;
+            }
+            vfs::closedir(dir);
+        }
+        serial::puts("[desktop] Trash icon state count=");
+        serial::puts(count > 0 ? "nonzero" : "0");
+        serial::puts(" iconKey=");
+        serial::puts(count > 0 ? "trash.full" : "trash.empty");
+        serial::puts("\n");
+        return count > 0 ? "trash.full" : "trash.empty";
+    }
     if (text_equals(label, "TaskManager")) return "app.taskmanager";
     if (text_equals(label, "Files")) return "app.files";
     if (text_equals(label, "Paint")) return "app.paint";
