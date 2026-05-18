@@ -68,6 +68,9 @@ namespace gxos {
         std::string Compositor::g_wallpaperPath = "";
         std::string Compositor::g_wallpaperId = "";
         ImagePtr Compositor::g_wallpaperImage = nullptr;
+        uint32_t Compositor::g_gradientTopColor = 0xFF142850;
+        uint32_t Compositor::g_gradientBottomColor = 0xFF0F121C;
+        uint32_t Compositor::g_gradientAccentColor = 0xFF192337;
         bool Compositor::g_showDesktopActive = false; std::vector<uint64_t> Compositor::g_showDesktopMinimized; uint64_t Compositor::g_lastClickTicks = 0; uint64_t Compositor::g_lastClickWin = 0;
         bool Compositor::g_altTabOverlayActive = false; uint64_t Compositor::g_altTabOverlayTicks = 0; int Compositor::g_altTabCycleIndex = 0;
         bool Compositor::g_taskbarCycleActive = false; int Compositor::g_taskbarCycleIndex = 0; bool Compositor::g_keyboardMoveActive = false; bool Compositor::g_keyboardSizeActive = false; int Compositor::g_kbOrigX = 0; int Compositor::g_kbOrigY = 0; int Compositor::g_kbOrigW = 0; int Compositor::g_kbOrigH = 0;
@@ -333,6 +336,21 @@ namespace gxos {
             (void)windowId;
 #endif
             return payload;
+        }
+
+        std::string Compositor::packMousePayloadForTarget(int x, int y, int button, const std::string& action, uint64_t ownerPid, uint64_t windowId) {
+            int appX = x;
+            int appY = y;
+            if (windowId != 0) {
+                std::lock_guard<std::mutex> lk(g_lock);
+                auto it = g_windows.find(windowId);
+                if (it != g_windows.end()) {
+                    constexpr int titleBarH = 28;
+                    appX = x - it->second.x;
+                    appY = y - it->second.y - titleBarH;
+                }
+            }
+            return packMousePayload(appX, appY, button, action, ownerPid, windowId);
         }
 
         void Compositor::refreshDesktopItems( ) {
@@ -679,7 +697,7 @@ namespace gxos {
             case WM_CLOSE: PostQuitMessage(0); return 0;
             case WM_SIZE: { RECT cr; GetClientRect(h, &cr); std::lock_guard<std::mutex> lk(g_lock); int taskbarH = 40; for (auto& kv : g_windows) { WinInfo& wi = kv.second; if (wi.maximized) { wi.x = cr.left; wi.y = cr.top; wi.w = cr.right - cr.left; wi.h = cr.bottom - taskbarH; wi.dirty = true; } } requestRepaint( ); return 0; }
             case WM_PAINT: {
-                PAINTSTRUCT ps; HDC dc = BeginPaint(h, &ps); RECT cr; GetClientRect(h, &cr); if (g_wallpaperImage && g_wallpaperImage->isValid()) { ImageRenderer::DrawImage(dc, g_wallpaperImage, cr.left, cr.top, cr.right - cr.left, cr.bottom - cr.top); } else { DesktopWallpaper::DrawGradient(dc, cr); DesktopWallpaper::DrawBranding(dc, cr); } drawDesktopIcons(dc, cr);
+                PAINTSTRUCT ps; HDC dc = BeginPaint(h, &ps); RECT cr; GetClientRect(h, &cr); if (g_wallpaperImage && g_wallpaperImage->isValid()) { ImageRenderer::DrawImage(dc, g_wallpaperImage, cr.left, cr.top, cr.right - cr.left, cr.bottom - cr.top); } else { DesktopWallpaper::DrawGradient(dc, cr, g_gradientTopColor, g_gradientBottomColor, g_gradientAccentColor, true); DesktopWallpaper::DrawBranding(dc, cr); } drawDesktopIcons(dc, cr);
                 // Draw application windows in Z-order (bottom to top)
                 const int titleBarH = UISettings::DefaultBarHeight; 
                 HFONT font = (HFONT)GetStockObject(ANSI_VAR_FONT); 
@@ -1258,7 +1276,7 @@ namespace gxos {
                 } } requestRepaint( ); return 0; }
                 // pass to widget handling and general mouse handling
                 uint64_t ownerPid = 0; uint64_t targetWindow = 0; { std::lock_guard<std::mutex> lk(g_lock); WinInfo* hitWin = hitWindowAt(mx, my); if (hitWin) { ownerPid = hitWin->ownerPid; targetWindow = hitWin->id; } else { ownerPid = inputOwnerPid( ); targetWindow = g_modalWindow ? g_modalWindow : g_focus; } }
-                Compositor::handleMouse(mx, my, true, false); publishOut(MsgType::MT_InputMouse, packMousePayload(mx, my, 1, "down", ownerPid, targetWindow), ownerPid); return 0;
+                Compositor::handleMouse(mx, my, true, false); publishOut(MsgType::MT_InputMouse, Compositor::packMousePayloadForTarget(mx, my, 1, "down", ownerPid, targetWindow), ownerPid); return 0;
             }
             case WM_RBUTTONDOWN: {
                 int mx = GET_X_LPARAM(l); int my = GET_Y_LPARAM(l); { std::lock_guard<std::mutex> lk(g_lock); if (blockInputBehindModal(mx, my)) { requestRepaint( ); return 0; } } if (g_startMenuVisible && mx >= g_startMenuRect.left && mx <= g_startMenuRect.right && my >= g_startMenuRect.top && my <= g_startMenuRect.bottom) { int idx = (my - (g_startMenuRect.top + 4)) / 20; if (idx >= 0 && idx < (int)g_items.size( )) { if (g_items[idx].pinned) unpinAction(g_items[idx].action); else pinAction(g_items[idx].action); requestRepaint( ); return 0; } }
@@ -1301,7 +1319,7 @@ namespace gxos {
                     
                     // If right-click is on a window, forward the event to the application
                     if (hitWin) {
-                        publishOut(MsgType::MT_InputMouse, packMousePayload(mx, my, 2, "down", ownerPid, hitWin->id), ownerPid);
+                        publishOut(MsgType::MT_InputMouse, Compositor::packMousePayloadForTarget(mx, my, 2, "down", ownerPid, hitWin->id), ownerPid);
                         requestRepaint();
                         return 0;
                     }
@@ -1336,7 +1354,7 @@ namespace gxos {
                     g_iconDragActive = false; g_iconDragPending = false; requestRepaint( ); break;
                 }
                 uint64_t ownerPid = 0; uint64_t targetWindow = 0; { std::lock_guard<std::mutex> lk(g_lock); ownerPid = inputOwnerPid( ); targetWindow = g_modalWindow ? g_modalWindow : g_focus; }
-                Compositor::handleMouse(mx, my, false, true); publishOut(MsgType::MT_InputMouse, packMousePayload(mx, my, 1, "up", ownerPid, targetWindow), ownerPid);
+                Compositor::handleMouse(mx, my, false, true); publishOut(MsgType::MT_InputMouse, Compositor::packMousePayloadForTarget(mx, my, 1, "up", ownerPid, targetWindow), ownerPid);
             } break;
             case WM_MOUSEMOVE: {
                 int mx = GET_X_LPARAM(l); int my = GET_Y_LPARAM(l);
@@ -1360,7 +1378,7 @@ namespace gxos {
                 if (g_iconDragActive && g_iconDragIndex >= 0 && g_iconDragIndex < (int)g_items.size( )) { RECT cr2; GetClientRect(h, &cr2); int taskbarH2 = 40; int nx = mx - g_iconDragOffX; int ny = my - g_iconDragOffY; if (nx < 0) nx = 0; if (ny < 0) ny = 0; const int cellW2 = 84; const int cellH2 = 94; if (nx + cellW2 > cr2.right) nx = cr2.right - cellW2; if (ny + cellH2 > cr2.bottom - taskbarH2) ny = cr2.bottom - taskbarH2 - cellH2; g_items[g_iconDragIndex].ix = nx; g_items[g_iconDragIndex].iy = ny; requestRepaint( ); break; }
                 if (g_iconDragPending) { break; } // Skip handleMouse while drag is pending
                 uint64_t ownerPid = 0; uint64_t targetWindow = 0; { std::lock_guard<std::mutex> lk(g_lock); WinInfo* hitWin = hitWindowAt(mx, my); if (hitWin) { ownerPid = hitWin->ownerPid; targetWindow = hitWin->id; } else { ownerPid = inputOwnerPid( ); targetWindow = g_modalWindow ? g_modalWindow : g_focus; } }
-                Compositor::handleMouse(mx, my, false, false); publishOut(MsgType::MT_InputMouse, packMousePayload(mx, my, 0, "move", ownerPid, targetWindow), ownerPid);
+                Compositor::handleMouse(mx, my, false, false); publishOut(MsgType::MT_InputMouse, Compositor::packMousePayloadForTarget(mx, my, 0, "move", ownerPid, targetWindow), ownerPid);
             } break;
             case WM_KEYDOWN: case WM_SYSKEYDOWN: {
                 int key = (int)w;
@@ -1429,6 +1447,22 @@ namespace gxos {
 
         void Compositor::sendFocus(uint64_t winId) { uint64_t ownerPid = 0; { std::lock_guard<std::mutex> lk(g_lock); auto it = g_windows.find(winId); if (it != g_windows.end( )) ownerPid = it->second.ownerPid; } publishOut(MsgType::MT_SetFocus, std::to_string(winId), ownerPid); }
         void Compositor::loadWallpaper(const std::string& idOrPath) {
+            if (const GradientEntry* gradient = WallpaperRegistry::FindGradientById(idOrPath)) {
+                g_wallpaperId = gradient->id;
+                g_wallpaperPath.clear();
+                g_wallpaperImage.reset();
+                g_gradientTopColor = gradient->topColor;
+                g_gradientBottomColor = gradient->bottomColor;
+                g_gradientAccentColor = gradient->accentColor;
+                Logger::write(LogLevel::Info, std::string("Compositor gradient select id=") + g_wallpaperId);
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
+                if (g_wallpaperBmp) { DeleteObject(g_wallpaperBmp); g_wallpaperBmp = nullptr; }
+                g_wallpaperW = 0;
+                g_wallpaperH = 0;
+#endif
+                return;
+            }
+
             std::string id = WallpaperRegistry::ResolveIdOrDefault(idOrPath);
             std::string path;
             if (id == idOrPath || WallpaperRegistry::FindById(idOrPath)) {
@@ -1446,9 +1480,25 @@ namespace gxos {
 
             g_wallpaperId = id;
             g_wallpaperPath = path;
+            Logger::write(LogLevel::Info, std::string("Compositor wallpaper select id=") + g_wallpaperId + " full=" + g_wallpaperPath);
             g_wallpaperImage = PngLoader::LoadFromFile(path);
             if (!g_wallpaperImage) {
                 Logger::write(LogLevel::Warn, std::string("Compositor wallpaper load failed, falling back to gradient: ") + path);
+                const WallpaperEntry& fallback = WallpaperRegistry::DefaultWallpaper();
+                if (path != fallback.fullImagePath) {
+                    Logger::write(LogLevel::Warn, std::string("Compositor wallpaper retrying default id=") + fallback.id + " full=" + fallback.fullImagePath);
+                    g_wallpaperId = fallback.id;
+                    g_wallpaperPath = fallback.fullImagePath;
+                    g_wallpaperImage = PngLoader::LoadFromFile(g_wallpaperPath);
+                    if (g_wallpaperImage) {
+                        Logger::write(LogLevel::Info, std::string("Compositor wallpaper default decode succeeded id=") + g_wallpaperId + " full=" + g_wallpaperPath);
+                    }
+                }
+                if (!g_wallpaperImage) {
+                    Logger::write(LogLevel::Warn, std::string("Compositor wallpaper default failed, gradient fallback remains: ") + g_wallpaperPath);
+                }
+            } else {
+                Logger::write(LogLevel::Info, std::string("Compositor wallpaper decode succeeded id=") + g_wallpaperId + " full=" + g_wallpaperPath);
             }
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)
             if (g_wallpaperBmp) { DeleteObject(g_wallpaperBmp); g_wallpaperBmp = nullptr; }
@@ -1678,28 +1728,51 @@ namespace gxos {
                     // Handle based on button and action
                     if (button == 1) { // Left button
                         if (action == "down") {
+                            uint64_t ownerPid = 0;
+                            uint64_t targetWindow = 0;
+                            {
+                                std::lock_guard<std::mutex> lk(g_lock);
+                                WinInfo* hitWin = hitWindowAt(mx, my);
+                                if (hitWin) {
+                                    ownerPid = hitWin->ownerPid;
+                                    targetWindow = hitWin->id;
+                                } else {
+                                    ownerPid = inputOwnerPid();
+                                    targetWindow = g_modalWindow ? g_modalWindow : g_focus;
+                                }
+                            }
                             handleMouse(mx, my, true, false);
+                            publishOut(MsgType::MT_InputMouse, Compositor::packMousePayloadForTarget(mx, my, 1, "down", ownerPid, targetWindow), ownerPid);
                         } else if (action == "up") {
+                            uint64_t ownerPid = 0;
+                            uint64_t targetWindow = 0;
+                            {
+                                std::lock_guard<std::mutex> lk(g_lock);
+                                ownerPid = inputOwnerPid();
+                                targetWindow = g_modalWindow ? g_modalWindow : g_focus;
+                            }
                             handleMouse(mx, my, false, true);
+                            publishOut(MsgType::MT_InputMouse, Compositor::packMousePayloadForTarget(mx, my, 1, "up", ownerPid, targetWindow), ownerPid);
                         }
                     } else if (button == 2) { // Right button
                         if (action == "down") {
                             // Right-click handling - check if over a window
-                            WinInfo* hitWin = nullptr;
                             uint64_t ownerPid = 0;
+                            uint64_t targetWindow = 0;
                             bool blockedRightClick = false;
                             {
                                 std::lock_guard<std::mutex> lk(g_lock);
                                 blockedRightClick = blockInputBehindModal(mx, my);
-                                hitWin = hitWindowAt(mx, my);
+                                WinInfo* hitWin = hitWindowAt(mx, my);
                                 if (hitWin) {
                                     if (g_modalWindow != 0 && hitWin->id != g_modalWindow) {
                                         blockedRightClick = true;
                                     }
                                     if (blockedRightClick) {
-                                        hitWin = nullptr;
+                                        targetWindow = 0;
                                     } else {
                                         ownerPid = hitWin->ownerPid;
+                                        targetWindow = hitWin->id;
                                         // Set focus to the clicked window
                                         if (g_focus != hitWin->id) {
                                             g_focus = hitWin->id;
@@ -1718,8 +1791,8 @@ namespace gxos {
                             }
                             
                             // If right-click is on a window, forward the event to the application
-                            if (hitWin) {
-                                publishOut(MsgType::MT_InputMouse, packMousePayload(mx, my, 2, "down", ownerPid, hitWin->id), ownerPid);
+                            if (targetWindow != 0) {
+                                publishOut(MsgType::MT_InputMouse, Compositor::packMousePayloadForTarget(mx, my, 2, "down", ownerPid, targetWindow), ownerPid);
                                 invalidate(0);
                             } else {
                                 // Desktop right-click - show desktop context menu
@@ -1729,7 +1802,21 @@ namespace gxos {
                         }
                     } else if (button == 0) { // Mouse move
                         if (action == "move") {
+                            uint64_t ownerPid = 0;
+                            uint64_t targetWindow = 0;
+                            {
+                                std::lock_guard<std::mutex> lk(g_lock);
+                                WinInfo* hitWin = hitWindowAt(mx, my);
+                                if (hitWin) {
+                                    ownerPid = hitWin->ownerPid;
+                                    targetWindow = hitWin->id;
+                                } else {
+                                    ownerPid = inputOwnerPid();
+                                    targetWindow = g_modalWindow ? g_modalWindow : g_focus;
+                                }
+                            }
                             handleMouse(mx, my, false, false);
+                            publishOut(MsgType::MT_InputMouse, Compositor::packMousePayloadForTarget(mx, my, 0, "move", ownerPid, targetWindow), ownerPid);
                         }
                     }
                 } catch (const std::exception& e) {
@@ -2034,9 +2121,15 @@ namespace gxos {
                 // Clear background with gradient (dark blue)
                 for (int y = 0; y < fbH - taskbarH; ++y) {
                     float t = (float)y / (float)(fbH - taskbarH);
-                    uint8_t r = (uint8_t)(20 + t * 15);
-                    uint8_t g = (uint8_t)(25 + t * 20);
-                    uint8_t b = (uint8_t)(40 + t * 30);
+                    uint8_t topR = (uint8_t)((g_gradientTopColor >> 16) & 0xFF);
+                    uint8_t topG = (uint8_t)((g_gradientTopColor >> 8) & 0xFF);
+                    uint8_t topB = (uint8_t)(g_gradientTopColor & 0xFF);
+                    uint8_t botR = (uint8_t)((g_gradientBottomColor >> 16) & 0xFF);
+                    uint8_t botG = (uint8_t)((g_gradientBottomColor >> 8) & 0xFF);
+                    uint8_t botB = (uint8_t)(g_gradientBottomColor & 0xFF);
+                    uint8_t r = (uint8_t)(topR + t * (botR - topR));
+                    uint8_t g = (uint8_t)(topG + t * (botG - topG));
+                    uint8_t b = (uint8_t)(topB + t * (botB - topB));
                     uint32_t color = (r << 16) | (g << 8) | b;
                     for (int x = 0; x < fbW; ++x) {
                         pixels[y * (pitch/4) + x] = color;
@@ -2127,6 +2220,10 @@ namespace gxos {
                     
                     // Draw window content (images, widgets, text)
                     int contentY = w.y + titleBarH;
+                    for (const auto& ri : w.rects) {
+                        fbFillRect(pixels, pitch, fbW, fbH, w.x + ri.x, contentY + ri.y, ri.w, ri.h,
+                                   (static_cast<uint32_t>(ri.r) << 16) | (static_cast<uint32_t>(ri.g) << 8) | ri.b);
+                    }
                     for (const auto& img : w.images) {
                         if (img.w > 0 && img.h > 0) ImageRenderer::DrawImage(pixels, fbW, fbH, pitch, img.image, w.x + img.x, contentY + img.y, img.w, img.h);
                         else ImageRenderer::DrawImage(pixels, fbW, fbH, pitch, img.image, w.x + img.x, contentY + img.y);

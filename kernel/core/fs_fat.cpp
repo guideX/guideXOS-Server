@@ -316,6 +316,59 @@ static void short_name_to_string(const char* raw, char* out)
     out[pos] = '\0';
 }
 
+static void copy_c_string(char* dst, uint32_t dstSize, const char* src)
+{
+    if (!dst || dstSize == 0) return;
+    uint32_t i = 0;
+    if (src) {
+        while (src[i] && i + 1 < dstSize) {
+            dst[i] = src[i];
+            ++i;
+        }
+    }
+    dst[i] = '\0';
+}
+
+static void clear_lfn_name(char* name, uint32_t nameSize)
+{
+    if (!name || nameSize == 0) return;
+    name[0] = '\0';
+}
+
+static void lfn_put_char(char* name, uint32_t nameSize, uint32_t pos, uint16_t ch)
+{
+    if (!name || nameSize == 0 || pos + 1 >= nameSize) return;
+    if (ch == 0x0000 || ch == 0xFFFF) return;
+    name[pos] = (ch < 0x80) ? static_cast<char>(ch) : '?';
+    name[pos + 1] = '\0';
+}
+
+static void collect_lfn_entry(const FAT32_LFNEntry* lfn, char* name, uint32_t nameSize)
+{
+    if (!lfn || !name || nameSize == 0) return;
+    uint32_t sequence = lfn->order & 0x1F;
+    if (sequence == 0) return;
+    uint32_t base = (sequence - 1) * 13;
+    for (uint32_t i = 0; i < 5; ++i) lfn_put_char(name, nameSize, base + i, lfn->name1[i]);
+    for (uint32_t i = 0; i < 6; ++i) lfn_put_char(name, nameSize, base + 5 + i, lfn->name2[i]);
+    for (uint32_t i = 0; i < 2; ++i) lfn_put_char(name, nameSize, base + 11 + i, lfn->name3[i]);
+}
+
+static void fill_dir_entry_from_fat(const FAT32_DirEntry* de, const char* displayName, DirEntry* out)
+{
+    memzero(out, sizeof(DirEntry));
+    copy_c_string(out->name, sizeof(out->name), displayName);
+    out->fileSize     = de->fileSize;
+    out->firstCluster = (static_cast<uint32_t>(de->firstClusterHi) << 16) |
+                        de->firstClusterLo;
+    out->attr         = de->attr;
+    out->crtDate      = de->crtDate;
+    out->crtTime      = de->crtTime;
+    out->wrtDate      = de->wrtDate;
+    out->wrtTime      = de->wrtTime;
+    out->isDir        = (de->attr & ATTR_DIRECTORY) != 0;
+}
+
 // ================================================================
 // Public API
 // ================================================================
@@ -389,6 +442,8 @@ bool read_dir(uint8_t volumeIndex, DirEntry* out)
 
     FATVolume& vol = s_volumes[volumeIndex];
     uint32_t entriesPerSector = vol.bytesPerSector / 32;
+    char lfnName[256];
+    clear_lfn_name(lfnName, sizeof(lfnName));
 
     while (true) {
         if (is_end_of_chain(vol, s_dirIter.cluster)) {
@@ -418,24 +473,25 @@ bool read_dir(uint8_t volumeIndex, DirEntry* out)
             }
 
             // Deleted entry
-            if (static_cast<uint8_t>(de->name[0]) == 0xE5) continue;
+            if (static_cast<uint8_t>(de->name[0]) == 0xE5) {
+                clear_lfn_name(lfnName, sizeof(lfnName));
+                continue;
+            }
 
-            // Skip LFN and volume ID entries
-            if (de->attr == ATTR_LFN) continue;
-            if (de->attr & ATTR_VOLUME_ID) continue;
+            if (de->attr == ATTR_LFN) {
+                collect_lfn_entry(reinterpret_cast<const FAT32_LFNEntry*>(de), lfnName, sizeof(lfnName));
+                continue;
+            }
+            if (de->attr & ATTR_VOLUME_ID) {
+                clear_lfn_name(lfnName, sizeof(lfnName));
+                continue;
+            }
 
-            // Valid entry — fill output
-            memzero(out, sizeof(DirEntry));
-            short_name_to_string(de->name, out->name);
-            out->fileSize     = de->fileSize;
-            out->firstCluster = (static_cast<uint32_t>(de->firstClusterHi) << 16) |
-                                de->firstClusterLo;
-            out->attr         = de->attr;
-            out->crtDate      = de->crtDate;
-            out->crtTime      = de->crtTime;
-            out->wrtDate      = de->wrtDate;
-            out->wrtTime      = de->wrtTime;
-            out->isDir        = (de->attr & ATTR_DIRECTORY) != 0;
+            char shortName[32];
+            short_name_to_string(de->name, shortName);
+            const char* displayName = lfnName[0] ? lfnName : shortName;
+            fill_dir_entry_from_fat(de, displayName, out);
+            clear_lfn_name(lfnName, sizeof(lfnName));
             return true;
         }
 
@@ -767,6 +823,8 @@ static bool find_in_directory_at(uint8_t volumeIndex, uint32_t dirCluster, const
 
     FATVolume& vol = s_volumes[volumeIndex];
     uint32_t cluster = dirCluster;
+    char lfnName[256];
+    clear_lfn_name(lfnName, sizeof(lfnName));
 
     while (!is_end_of_chain(vol, cluster)) {
         for (uint32_t sectorInCluster = 0; sectorInCluster < vol.sectorsPerCluster; ++sectorInCluster) {
@@ -781,25 +839,28 @@ static bool find_in_directory_at(uint8_t volumeIndex, uint32_t dirCluster, const
                 const FAT32_DirEntry* de = reinterpret_cast<const FAT32_DirEntry*>(&s_secBuf[offset]);
 
                 if (de->name[0] == 0x00) return false;
-                if (static_cast<uint8_t>(de->name[0]) == 0xE5) continue;
-                if (de->attr == ATTR_LFN) continue;
-                if (de->attr & ATTR_VOLUME_ID) continue;
+                if (static_cast<uint8_t>(de->name[0]) == 0xE5) {
+                    clear_lfn_name(lfnName, sizeof(lfnName));
+                    continue;
+                }
+                if (de->attr == ATTR_LFN) {
+                    collect_lfn_entry(reinterpret_cast<const FAT32_LFNEntry*>(de), lfnName, sizeof(lfnName));
+                    continue;
+                }
+                if (de->attr & ATTR_VOLUME_ID) {
+                    clear_lfn_name(lfnName, sizeof(lfnName));
+                    continue;
+                }
 
-                char entryName[32];
-                short_name_to_string(de->name, entryName);
-                if (!name_matches(entryName, name)) continue;
+                char shortName[32];
+                short_name_to_string(de->name, shortName);
+                const char* displayName = lfnName[0] ? lfnName : shortName;
+                if (!name_matches(displayName, name) && !name_matches(shortName, name)) {
+                    clear_lfn_name(lfnName, sizeof(lfnName));
+                    continue;
+                }
 
-                memzero(out, sizeof(DirEntry));
-                memcopy(out->name, entryName, sizeof(entryName));
-                out->fileSize     = de->fileSize;
-                out->firstCluster = (static_cast<uint32_t>(de->firstClusterHi) << 16) |
-                                    de->firstClusterLo;
-                out->attr         = de->attr;
-                out->crtDate      = de->crtDate;
-                out->crtTime      = de->crtTime;
-                out->wrtDate      = de->wrtDate;
-                out->wrtTime      = de->wrtTime;
-                out->isDir        = (de->attr & ATTR_DIRECTORY) != 0;
+                fill_dir_entry_from_fat(de, displayName, out);
                 *outSector = sector;
                 *outOffset = offset;
                 return true;

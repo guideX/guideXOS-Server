@@ -542,6 +542,26 @@ static const KernelWallpaperEntry s_kernelWallpapers[] = {
 };
 
 static const int kKernelWallpaperCount = sizeof(s_kernelWallpapers) / sizeof(s_kernelWallpapers[0]);
+
+struct KernelGradientEntry {
+    const char* id;
+    const char* displayName;
+    uint32_t topColor;
+    uint32_t bottomColor;
+    uint32_t accentColor;
+};
+
+static const KernelGradientEntry s_kernelGradients[] = {
+    {"gradient_midnight", "Midnight", 0xFF142850, 0xFF0F121C, 0xFF192337},
+    {"gradient_ocean", "Ocean", 0xFF063B5C, 0xFF061522, 0xFF1496B8},
+    {"gradient_aurora", "Aurora", 0xFF0B2C35, 0xFF251046, 0xFF21C78A},
+    {"gradient_violet", "Violet", 0xFF26104A, 0xFF0D0B18, 0xFF8A52E8},
+    {"gradient_sunset", "Sunset", 0xFF5E1B45, 0xFF17101E, 0xFFE06A55},
+    {"gradient_forest", "Forest", 0xFF123B2B, 0xFF071711, 0xFF5E9C50},
+    {"gradient_ember", "Ember", 0xFF45170F, 0xFF120B09, 0xFFD46A33},
+    {"gradient_graphite", "Graphite", 0xFF333946, 0xFF111318, 0xFF7E8796},
+};
+static const int kKernelGradientCount = sizeof(s_kernelGradients) / sizeof(s_kernelGradients[0]);
 static const int kTileW = 92;
 static const int kTileH = 76;
 static const int kTileGap = 12;
@@ -1741,7 +1761,7 @@ bool NotepadApp::updateMenuHover(int x, int y) {
 // ============================================================
 
 DisplayOptionsApp::DisplayOptionsApp()
-    : m_selectedIndex(0), m_appliedIndex(0), m_selectButtonId(-1) {
+    : m_selectedIndex(0), m_appliedIndex(0), m_selectedGradientIndex(0), m_appliedGradientIndex(0), m_activeTab(0), m_selectButtonId(-1) {
     strcopy(m_name, "DisplayOptions", app::MAX_APP_NAME);
 }
 
@@ -1752,6 +1772,19 @@ void DisplayOptionsApp::loadSelection() {
     const char* currentId = kernel::desktop::get_wallpaper_id();
     m_selectedIndex = 0;
     m_appliedIndex = 0;
+    m_selectedGradientIndex = 0;
+    m_appliedGradientIndex = 0;
+    m_activeTab = 0;
+
+    for (int i = 0; i < kKernelGradientCount; ++i) {
+        if (streq_local(currentId, s_kernelGradients[i].id)) {
+            m_selectedGradientIndex = i;
+            m_appliedGradientIndex = i;
+            m_activeTab = 1;
+            return;
+        }
+    }
+
     for (int i = 0; i < kKernelWallpaperCount; ++i) {
         if (streq_local(currentId, s_kernelWallpapers[i].id)) {
             m_selectedIndex = i;
@@ -1780,7 +1813,7 @@ bool DisplayOptionsApp::init() {
     }
 
     loadSelection();
-    m_selectButtonId = addButton(18, 326, 142, 28, "Select Background");
+    m_selectButtonId = addButton(18, 326, 142, 28, m_activeTab == 1 ? "Select Gradient" : "Select Background");
     m_state = app::AppState::Running;
     return true;
 }
@@ -1792,47 +1825,74 @@ void DisplayOptionsApp::shutdown() {
 void DisplayOptionsApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
     framebuffer::fill_rect(x, y, w, h, rgb(28, 30, 38));
 
-    framebuffer::fill_rect(x + 16, y + 16, 140, 30, rgb(58, 58, 58));
+    framebuffer::fill_rect(x + 16, y + 16, 140, 30, m_activeTab == 0 ? rgb(58, 58, 58) : rgb(34, 34, 38));
     appDrawRect(x + 16, y + 16, 140, 30, rgb(90, 90, 96));
-    appDrawText(x + 28, y + 27, "Backgrounds", rgb(235, 235, 240));
+    appDrawText(x + 28, y + 27, "Backgrounds", m_activeTab == 0 ? rgb(235, 235, 240) : rgb(160, 160, 168));
 
     framebuffer::fill_rect(x + 166, y + 16, 140, 30, rgb(34, 34, 38));
     appDrawRect(x + 166, y + 16, 140, 30, rgb(70, 70, 76));
     appDrawText(x + 178, y + 27, "Resolution", rgb(130, 130, 138));
 
-    framebuffer::fill_rect(x + 316, y + 16, 140, 30, rgb(34, 34, 38));
-    appDrawRect(x + 316, y + 16, 140, 30, rgb(70, 70, 76));
-    appDrawText(x + 328, y + 27, "Gradients", rgb(130, 130, 138));
+    framebuffer::fill_rect(x + 316, y + 16, 140, 30, m_activeTab == 1 ? rgb(58, 58, 58) : rgb(34, 34, 38));
+    appDrawRect(x + 316, y + 16, 140, 30, rgb(90, 90, 96));
+    appDrawText(x + 328, y + 27, "Gradients", m_activeTab == 1 ? rgb(235, 235, 240) : rgb(160, 160, 168));
 
-    appDrawText(x + 18, y + 58, "Select a background from the gallery:", rgb(230, 230, 238));
+    appDrawText(x + 18, y + 58, m_activeTab == 0 ? "Select a background from the gallery:" : "Select a gradient from the gallery:", rgb(230, 230, 238));
     framebuffer::fill_rect(x + 14, y + 74, w - 28, 240, rgb(22, 22, 24));
 
-    for (int i = 0; i < kKernelWallpaperCount; ++i) {
-        int col = i % kTileCols;
-        int row = i / kTileCols;
-        uint32_t tx = x + kGalleryX + col * (kTileW + kTileGap);
-        uint32_t ty = y + kGalleryY + row * (kTileH + kTileGap);
+    if (m_activeTab == 0) {
+        for (int i = 0; i < kKernelWallpaperCount; ++i) {
+            int col = i % kTileCols;
+            int row = i / kTileCols;
+            uint32_t tx = x + kGalleryX + col * (kTileW + kTileGap);
+            uint32_t ty = y + kGalleryY + row * (kTileH + kTileGap);
 
-        if (i == m_selectedIndex) {
-            framebuffer::fill_rect(tx - 4, ty - 4, kTileW + 8, kTileH + 8, rgb(72, 110, 180));
+            if (i == m_selectedIndex) {
+                framebuffer::fill_rect(tx - 4, ty - 4, kTileW + 8, kTileH + 8, rgb(72, 110, 180));
+            }
+
+            framebuffer::fill_rect(tx, ty, kTileW, kTileH, rgb(42, 42, 42));
+            bool drewThumb = kernel::desktop::draw_wallpaper_thumbnail_by_id(s_kernelWallpapers[i].id, tx + 6, ty + 6, kTileW - 12, 42);
+            if (!drewThumb) {
+                for (int py = 0; py < 42; ++py) {
+                    uint8_t t = (uint8_t)((py * 255) / 41);
+                    uint32_t color = ((s_kernelWallpapers[i].previewColorA & 0xFF000000u)) |
+                                     (((((s_kernelWallpapers[i].previewColorA >> 16) & 0xFFu) * (255 - t)) + (((s_kernelWallpapers[i].previewColorB >> 16) & 0xFFu) * t)) / 255) << 16 |
+                                     (((((s_kernelWallpapers[i].previewColorA >> 8) & 0xFFu) * (255 - t)) + (((s_kernelWallpapers[i].previewColorB >> 8) & 0xFFu) * t)) / 255) << 8 |
+                                     (((((s_kernelWallpapers[i].previewColorA) & 0xFFu) * (255 - t)) + (((s_kernelWallpapers[i].previewColorB) & 0xFFu) * t)) / 255);
+                    framebuffer::fill_rect(tx + 6, ty + 6 + (uint32_t)py, kTileW - 12, 1, color);
+                }
+            }
+
+            appDrawRect(tx + 6, ty + 6, kTileW - 12, 42, rgb(130, 130, 145));
+            appDrawText(tx + 6, ty + 54, s_kernelWallpapers[i].displayName, rgb(220, 220, 225));
+            if (i == m_appliedIndex) appDrawText(tx + kTileW - 12, ty + 54, "*", rgb(255, 220, 80));
         }
+    } else {
+        for (int i = 0; i < kKernelGradientCount; ++i) {
+            int col = i % kTileCols;
+            int row = i / kTileCols;
+            uint32_t tx = x + kGalleryX + col * (kTileW + kTileGap);
+            uint32_t ty = y + kGalleryY + row * (kTileH + kTileGap);
 
-        framebuffer::fill_rect(tx, ty, kTileW, kTileH, rgb(42, 42, 42));
-        bool drewThumb = kernel::desktop::draw_wallpaper_thumbnail_by_id(s_kernelWallpapers[i].id, tx + 6, ty + 6, kTileW - 12, 42);
-        if (!drewThumb) {
+            if (i == m_selectedGradientIndex) {
+                framebuffer::fill_rect(tx - 4, ty - 4, kTileW + 8, kTileH + 8, rgb(72, 110, 180));
+            }
+            framebuffer::fill_rect(tx, ty, kTileW, kTileH, rgb(42, 42, 42));
             for (int py = 0; py < 42; ++py) {
                 uint8_t t = (uint8_t)((py * 255) / 41);
-                uint32_t color = ((s_kernelWallpapers[i].previewColorA & 0xFF000000u)) |
-                                 (((((s_kernelWallpapers[i].previewColorA >> 16) & 0xFFu) * (255 - t)) + (((s_kernelWallpapers[i].previewColorB >> 16) & 0xFFu) * t)) / 255) << 16 |
-                                 (((((s_kernelWallpapers[i].previewColorA >> 8) & 0xFFu) * (255 - t)) + (((s_kernelWallpapers[i].previewColorB >> 8) & 0xFFu) * t)) / 255) << 8 |
-                                 (((((s_kernelWallpapers[i].previewColorA) & 0xFFu) * (255 - t)) + (((s_kernelWallpapers[i].previewColorB) & 0xFFu) * t)) / 255);
+                uint32_t top = s_kernelGradients[i].topColor;
+                uint32_t bot = s_kernelGradients[i].bottomColor;
+                uint32_t color = 0xFF000000u |
+                                 (((((top >> 16) & 0xFFu) * (255 - t)) + (((bot >> 16) & 0xFFu) * t)) / 255) << 16 |
+                                 (((((top >> 8) & 0xFFu) * (255 - t)) + (((bot >> 8) & 0xFFu) * t)) / 255) << 8 |
+                                 (((top & 0xFFu) * (255 - t)) + ((bot & 0xFFu) * t)) / 255;
                 framebuffer::fill_rect(tx + 6, ty + 6 + (uint32_t)py, kTileW - 12, 1, color);
             }
+            appDrawRect(tx + 6, ty + 6, kTileW - 12, 42, s_kernelGradients[i].accentColor);
+            appDrawText(tx + 6, ty + 54, s_kernelGradients[i].displayName, rgb(220, 220, 225));
+            if (i == m_appliedGradientIndex) appDrawText(tx + kTileW - 12, ty + 54, "*", rgb(255, 220, 80));
         }
-
-        appDrawRect(tx + 6, ty + 6, kTileW - 12, 42, rgb(130, 130, 145));
-        appDrawText(tx + 6, ty + 54, s_kernelWallpapers[i].displayName, rgb(220, 220, 225));
-        if (i == m_appliedIndex) appDrawText(tx + kTileW - 12, ty + 54, "*", rgb(255, 220, 80));
     }
 }
 
@@ -1847,7 +1907,40 @@ int DisplayOptionsApp::hitWallpaper(int mx, int my) const {
     return -1;
 }
 
+int DisplayOptionsApp::hitGradient(int mx, int my) const {
+    for (int i = 0; i < kKernelGradientCount; ++i) {
+        int col = i % kTileCols;
+        int row = i / kTileCols;
+        int tx = kGalleryX + col * (kTileW + kTileGap);
+        int ty = kGalleryY + row * (kTileH + kTileGap);
+        if (mx >= tx && mx < tx + kTileW && my >= ty && my < ty + kTileH) return i;
+    }
+    return -1;
+}
+
 void DisplayOptionsApp::onMouseDown(int x, int y, uint8_t) {
+    if (x >= 16 && x < 156 && y >= 16 && y < 46) {
+        m_activeTab = 0;
+        setWidgetText(m_selectButtonId, "Select Background");
+        invalidate();
+        return;
+    }
+    if (x >= 316 && x < 456 && y >= 16 && y < 46) {
+        m_activeTab = 1;
+        setWidgetText(m_selectButtonId, "Select Gradient");
+        invalidate();
+        return;
+    }
+
+    if (m_activeTab == 1) {
+        int hit = hitGradient(x, y);
+        if (hit >= 0) {
+            m_selectedGradientIndex = hit;
+            invalidate();
+        }
+        return;
+    }
+
     int hit = hitWallpaper(x, y);
     if (hit >= 0) {
         m_selectedIndex = hit;
@@ -1860,12 +1953,19 @@ void DisplayOptionsApp::onWidgetClick(int widgetId) {
 }
 
 void DisplayOptionsApp::applySelected() {
+    if (m_activeTab == 1) {
+        if (m_selectedGradientIndex < 0 || m_selectedGradientIndex >= kKernelGradientCount) return;
+        kernel::desktop::set_wallpaper_by_id(s_kernelGradients[m_selectedGradientIndex].id);
+        m_appliedGradientIndex = m_selectedGradientIndex;
+        invalidate();
+        return;
+    }
+
     if (m_selectedIndex < 0 || m_selectedIndex >= kKernelWallpaperCount) return;
     kernel::desktop::set_wallpaper_by_id(s_kernelWallpapers[m_selectedIndex].id);
     m_appliedIndex = m_selectedIndex;
     invalidate();
 }
-
 // ============================================================
 // CalculatorApp Implementation
 // ============================================================

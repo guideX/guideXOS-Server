@@ -32,6 +32,7 @@
 #include "include/kernel/usb_audio.h"
 #include "include/kernel/time.h"
 #include "include/kernel/ramdisk.h"
+#include "include/kernel/block_device.h"
 #if !defined(GXOS_BARE_METAL)
 #include "../../icon_theme_manager.h"
 #endif
@@ -696,11 +697,11 @@ struct WallpaperConfig {
     const char* wallpaperId; // Stable built-in wallpaper id
     
     WallpaperConfig() 
-        : type(WallpaperType::Gradient),
+        : type(WallpaperType::BuiltIn),
           topColor(0xFF142850),    // Dark blue top
           bottomColor(0xFF0F121C), // Darker blue bottom
-          showBranding(true),
-          showGrid(true),
+          showBranding(false),
+          showGrid(false),
           gridColor(0xFF192337),
           gridSpacing(100),
           wallpaperId("legacy_blue_flower") {}
@@ -719,17 +720,37 @@ struct BuiltInWallpaperPalette {
 };
 
 static const BuiltInWallpaperPalette s_builtInWallpapers[] = {
-    {"legacy_blue_flower", "Blue Flower", "/Wallpapers/blueflower.gximg", "/Wallpapers/blueflower_thumb.gximg", 0xFF061638, 0xFF123B84, 0xFF2568D8},
-    {"legacy_dinos", "Dinos", "/Wallpapers/dinos.gximg", "/Wallpapers/dinos_thumb.gximg", 0xFF476020, 0xFFB8A05E, 0xFF70A048},
-    {"legacy_flower", "Flower", "/Wallpapers/flower.gximg", "/Wallpapers/flower_thumb.gximg", 0xFF103C50, 0xFF51AFC2, 0xFF88E0F0},
-    {"legacy_guidexos_space", "guideXOS Space", "/Wallpapers/guidexosspace.gximg", "/Wallpapers/guidexosspace_thumb.gximg", 0xFF030713, 0xFF102A70, 0xFF2F6BDC},
-    {"legacy_red_flower", "Red Flower", "/Wallpapers/redflower.gximg", "/Wallpapers/redflower_thumb.gximg", 0xFF190202, 0xFF7D1010, 0xFFD82020},
-    {"legacy_ameoba", "Ameoba", "/Wallpapers/ameoba.gximg", "/Wallpapers/ameoba_thumb.gximg", 0xFF071044, 0xFF501090, 0xFF7E2DDD},
-    {"legacy_ameobagx", "Ameoba GX", "/Wallpapers/ameobagx.gximg", "/Wallpapers/ameobagx_thumb.gximg", 0xFF13051F, 0xFF68289A, 0xFFD04DF0},
-    {"legacy_tron_porsche", "Tron Porsche", "/Wallpapers/tronporche.gximg", "/Wallpapers/tronporche_thumb.gximg", 0xFF031820, 0xFF0B7485, 0xFF20E0F0},
-    {"legacy_wallpaper2", "Wallpaper 2", "/Wallpapers/Wallpaper2.gximg", "/Wallpapers/Wallpaper2_thumb.gximg", 0xFF100E35, 0xFF8C145F, 0xFFFF52B0},
+    {"legacy_blue_flower", "Blue Flower", "/system/wall/blueflwr.gxi", "/system/wall/bluef_t.gxi", 0xFF061638, 0xFF123B84, 0xFF2568D8},
+    {"legacy_dinos", "Dinos", "/system/wall/dinos.gxi", "/system/wall/dinos_t.gxi", 0xFF476020, 0xFFB8A05E, 0xFF70A048},
+    {"legacy_flower", "Flower", "/system/wall/flower.gxi", "/system/wall/flower_t.gxi", 0xFF103C50, 0xFF51AFC2, 0xFF88E0F0},
+    {"legacy_guidexos_space", "guideXOS Space", "/system/wall/gspace.gxi", "/system/wall/gspace_t.gxi", 0xFF030713, 0xFF102A70, 0xFF2F6BDC},
+    {"legacy_red_flower", "Red Flower", "/system/wall/redflwr.gxi", "/system/wall/redf_t.gxi", 0xFF190202, 0xFF7D1010, 0xFFD82020},
+    {"legacy_ameoba", "Ameoba", "/system/wall/ameoba.gxi", "/system/wall/ameoba_t.gxi", 0xFF071044, 0xFF501090, 0xFF7E2DDD},
+    {"legacy_ameobagx", "Ameoba GX", "/system/wall/ameobagx.gxi", "/system/wall/amebgx_t.gxi", 0xFF13051F, 0xFF68289A, 0xFFD04DF0},
+    {"legacy_tron_porsche", "Tron Porsche", "/system/wall/tronpor.gxi", "/system/wall/tronp_t.gxi", 0xFF031820, 0xFF0B7485, 0xFF20E0F0},
+    {"legacy_wallpaper2", "Wallpaper 2", "/system/wall/wallp2.gxi", "/system/wall/wallp2_t.gxi", 0xFF100E35, 0xFF8C145F, 0xFFFF52B0},
 };
 static const int kBuiltInWallpaperCount = sizeof(s_builtInWallpapers) / sizeof(s_builtInWallpapers[0]);
+
+struct BuiltInGradientPalette {
+    const char* id;
+    const char* displayName;
+    uint32_t topColor;
+    uint32_t bottomColor;
+    uint32_t accentColor;
+};
+
+static const BuiltInGradientPalette s_builtInGradients[] = {
+    {"gradient_midnight", "Midnight", 0xFF142850, 0xFF0F121C, 0xFF192337},
+    {"gradient_ocean", "Ocean", 0xFF063B5C, 0xFF061522, 0xFF1496B8},
+    {"gradient_aurora", "Aurora", 0xFF0B2C35, 0xFF251046, 0xFF21C78A},
+    {"gradient_violet", "Violet", 0xFF26104A, 0xFF0D0B18, 0xFF8A52E8},
+    {"gradient_sunset", "Sunset", 0xFF5E1B45, 0xFF17101E, 0xFFE06A55},
+    {"gradient_forest", "Forest", 0xFF123B2B, 0xFF071711, 0xFF5E9C50},
+    {"gradient_ember", "Ember", 0xFF45170F, 0xFF120B09, 0xFFD46A33},
+    {"gradient_graphite", "Graphite", 0xFF333946, 0xFF111318, 0xFF7E8796},
+};
+static const int kBuiltInGradientCount = sizeof(s_builtInGradients) / sizeof(s_builtInGradients[0]);
 
 struct WallpaperPackEntry {
     const char* id;
@@ -758,6 +779,29 @@ static bool s_wallpaperPackMounted = false;
 static WallpaperImageCache s_wallpaperThumbCache[kBuiltInWallpaperCount];
 static WallpaperImageCache s_wallpaperFullCache{};
 static const char* s_wallpaperFullCacheId = nullptr;
+static const uint32_t kWallpaperFullPixelCapacity = 800u * 600u;
+static const uint32_t kWallpaperThumbPixelCapacity = 256u * 128u;
+static uint32_t s_wallpaperFullPixels[kWallpaperFullPixelCapacity];
+static uint32_t s_wallpaperThumbPixels[kBuiltInWallpaperCount][kWallpaperThumbPixelCapacity];
+static uint32_t s_wallpaperLoadScratch[(sizeof(GximgHeader) + (kWallpaperFullPixelCapacity * sizeof(uint32_t)) + 3u) / 4u];
+
+static void reset_wallpaper_image_caches()
+{
+    for (int i = 0; i < kBuiltInWallpaperCount; ++i) {
+        s_wallpaperThumbCache[i].pixels = nullptr;
+        s_wallpaperThumbCache[i].width = 0;
+        s_wallpaperThumbCache[i].height = 0;
+        s_wallpaperThumbCache[i].loadAttempted = false;
+        s_wallpaperThumbCache[i].loadSucceeded = false;
+    }
+
+    s_wallpaperFullCache.pixels = nullptr;
+    s_wallpaperFullCache.width = 0;
+    s_wallpaperFullCache.height = 0;
+    s_wallpaperFullCache.loadAttempted = false;
+    s_wallpaperFullCache.loadSucceeded = false;
+    s_wallpaperFullCacheId = nullptr;
+}
 
 // ============================================================
 // Time and Date Tracking
@@ -1601,6 +1645,15 @@ static const BuiltInWallpaperPalette* find_builtin_wallpaper(const char* id)
     return nullptr;
 }
 
+static const BuiltInGradientPalette* find_builtin_gradient(const char* id)
+{
+    if (!id) return nullptr;
+    for (int i = 0; i < kBuiltInGradientCount; ++i) {
+        if (desktop_str_eq(id, s_builtInGradients[i].id)) return &s_builtInGradients[i];
+    }
+    return nullptr;
+}
+
 static bool gximg_header_valid(const GximgHeader* header)
 {
     return header &&
@@ -1619,6 +1672,10 @@ static bool load_gximg_file(const char* path, WallpaperImageCache& cache)
 
     if (!path || !path[0]) return false;
 
+    serial::puts("[desktop] wallpaper image lookup path=");
+    serial::puts(path);
+    serial::puts("\n");
+
     kernel::vfs::FileInfo info{};
     if (kernel::vfs::stat(path, &info) != kernel::vfs::VFS_OK || info.size < sizeof(GximgHeader)) {
         serial::puts("[desktop] gximg stat failed: ");
@@ -1627,54 +1684,81 @@ static bool load_gximg_file(const char* path, WallpaperImageCache& cache)
         return false;
     }
 
-    uint8_t handle = kernel::vfs::open(path, kernel::vfs::OPEN_READ);
-    if (handle == 0xFF) {
-        serial::puts("[desktop] gximg open failed: ");
+    if (info.size > 0x7FFFFFFF) {
+        serial::puts("[desktop] gximg too large: ");
         serial::puts(path);
         serial::puts("\n");
         return false;
     }
 
-    GximgHeader header{};
-    int32_t headerRead = kernel::vfs::read(handle, &header, sizeof(header));
-    if (headerRead != (int32_t)sizeof(header) || !gximg_header_valid(&header)) {
-        kernel::vfs::close(handle);
+    if (info.size > sizeof(s_wallpaperLoadScratch)) {
+        serial::puts("[desktop] gximg exceeds static scratch buffer: ");
+        serial::puts(path);
+        serial::puts("\n");
+        return false;
+    }
+
+    uint8_t* raw = reinterpret_cast<uint8_t*>(s_wallpaperLoadScratch);
+
+    int32_t fileRead = kernel::vfs::read_file(path, raw, (uint32_t)info.size);
+    if (fileRead != (int32_t)info.size) {
+        serial::puts("[desktop] gximg file read failed: ");
+        serial::puts(path);
+        serial::puts(" read=");
+        serial::put_hex32((uint32_t)(fileRead < 0 ? 0 : fileRead));
+        serial::puts(" expected=");
+        serial::put_hex32((uint32_t)info.size);
+        serial::puts("\n");
+        return false;
+    }
+
+    const GximgHeader* header = reinterpret_cast<const GximgHeader*>(raw);
+    if (!gximg_header_valid(header)) {
         serial::puts("[desktop] gximg header invalid: ");
         serial::puts(path);
         serial::puts("\n");
         return false;
     }
 
-    uint64_t pixelCount = (uint64_t)header.width * (uint64_t)header.height;
+    uint64_t pixelCount = (uint64_t)header->width * (uint64_t)header->height;
     uint64_t byteCount = pixelCount * sizeof(uint32_t);
     if (sizeof(GximgHeader) + byteCount > info.size) {
-        kernel::vfs::close(handle);
         serial::puts("[desktop] gximg payload truncated: ");
         serial::puts(path);
         serial::puts("\n");
         return false;
     }
 
-    uint32_t* pixels = new uint32_t[(size_t)pixelCount];
-    if (!pixels) {
-        kernel::vfs::close(handle);
-        serial::puts("[desktop] gximg allocation failed\n");
-        return false;
+    uint32_t* pixels = nullptr;
+    uint32_t pixelCapacity = 0;
+    if (&cache == &s_wallpaperFullCache) {
+        pixels = s_wallpaperFullPixels;
+        pixelCapacity = kWallpaperFullPixelCapacity;
+    } else {
+        for (int i = 0; i < kBuiltInWallpaperCount; ++i) {
+            if (&cache == &s_wallpaperThumbCache[i]) {
+                pixels = s_wallpaperThumbPixels[i];
+                pixelCapacity = kWallpaperThumbPixelCapacity;
+                break;
+            }
+        }
     }
-
-    int32_t bytesRead = kernel::vfs::read(handle, pixels, (uint32_t)byteCount);
-    kernel::vfs::close(handle);
-    if (bytesRead != (int32_t)byteCount) {
-        delete[] pixels;
-        serial::puts("[desktop] gximg read failed: ");
+    if (!pixels || pixelCount > pixelCapacity) {
+        serial::puts("[desktop] gximg exceeds static pixel cache: ");
         serial::puts(path);
         serial::puts("\n");
         return false;
     }
 
+    uint32_t imageWidth = header->width;
+    uint32_t imageHeight = header->height;
+    const uint32_t* srcPixels = reinterpret_cast<const uint32_t*>(raw + sizeof(GximgHeader));
+    for (uint64_t i = 0; i < pixelCount; ++i) {
+        pixels[(size_t)i] = srcPixels[(size_t)i];
+    }
     cache.pixels = pixels;
-    cache.width = header.width;
-    cache.height = header.height;
+    cache.width = imageWidth;
+    cache.height = imageHeight;
     cache.loadSucceeded = true;
     serial::puts("[desktop] gximg loaded: ");
     serial::puts(path);
@@ -1705,10 +1789,7 @@ static WallpaperImageCache* load_wallpaper_full_cache(const char* wallpaperId)
     if (s_wallpaperFullCacheId && desktop_str_eq(s_wallpaperFullCacheId, wallpaperId) && s_wallpaperFullCache.loadAttempted) {
         return s_wallpaperFullCache.loadSucceeded ? &s_wallpaperFullCache : nullptr;
     }
-    if (s_wallpaperFullCache.pixels) {
-        delete[] s_wallpaperFullCache.pixels;
-        s_wallpaperFullCache.pixels = nullptr;
-    }
+    s_wallpaperFullCache.pixels = nullptr;
     s_wallpaperFullCacheId = wallpaperId;
     load_gximg_file(entry->fullImagePath, s_wallpaperFullCache);
     return s_wallpaperFullCache.loadSucceeded ? &s_wallpaperFullCache : nullptr;
@@ -1742,24 +1823,42 @@ void set_wallpaper_image_pack(const void* packBase, uint64_t packSize)
         return;
     }
 
-    uint8_t diskIndex = kernel::ramdisk::create_readonly_at(packBase, (size_t)packSize, "wallimg");
-    if (diskIndex == 0xFF) {
+    uint8_t ramdiskIndex = kernel::ramdisk::create_readonly_at(packBase, (size_t)packSize, "wallimg");
+    if (ramdiskIndex == 0xFF) {
         serial::puts("[desktop] failed to attach wallpaper image pack\n");
         return;
     }
 
-    if (kernel::vfs::mount_type("/Wallpapers", diskIndex, kernel::vfs::FS_TYPE_FAT32) == 0xFF) {
-        serial::puts("[desktop] failed to mount wallpaper image pack at /Wallpapers\n");
+    uint8_t blockIndex = 0xFF;
+    for (uint8_t i = 0; i < kernel::block::MAX_BLOCK_DEVICES; ++i) {
+        const kernel::block::BlockDevice* dev = kernel::block::get_device(i);
+        if (dev && desktop_str_eq(dev->name, "wallimg")) {
+            blockIndex = i;
+            break;
+        }
+    }
+
+    if (blockIndex == 0xFF) {
+        serial::puts("[desktop] failed to find wallpaper block device\n");
+        return;
+    }
+
+    if (kernel::vfs::mount_type("/system", blockIndex, kernel::vfs::FS_TYPE_FAT32) == 0xFF) {
+        serial::puts("[desktop] failed to mount wallpaper image pack at /system\n");
         return;
     }
 
     s_wallpaperPackMounted = true;
-    serial::puts("[desktop] mounted wallpaper image pack at /Wallpapers\n");
+    reset_wallpaper_image_caches();
+    serial::puts("[desktop] mounted wallpaper image pack at /system; wallpapers live at /system/wall\n");
 }
 
 bool draw_wallpaper_thumbnail_by_id(const char* wallpaperId, uint32_t x, uint32_t y, uint32_t w, uint32_t h)
 {
-    if (!s_wallpaperPackMounted) return false;
+    if (!s_wallpaperPackMounted) {
+        serial::puts("[desktop] wallpaper thumbnail fallback: image pack not mounted\n");
+        return false;
+    }
     WallpaperImageCache* cache = load_wallpaper_thumbnail_cache(wallpaperId);
     if (!cache) return false;
     draw_scaled_gximg(*cache, x, y, w, h);
@@ -1781,6 +1880,18 @@ static void load_persisted_wallpaper_id()
     while (count > 0 && (idBuf[count - 1] == '\n' || idBuf[count - 1] == '\r' || idBuf[count - 1] == ' ' || idBuf[count - 1] == '\t')) {
         idBuf[--count] = '\0';
     }
+    const BuiltInGradientPalette* gradient = find_builtin_gradient(idBuf);
+    if (gradient) {
+        s_wallpaperConfig.type = WallpaperType::Gradient;
+        s_wallpaperConfig.topColor = gradient->topColor;
+        s_wallpaperConfig.bottomColor = gradient->bottomColor;
+        s_wallpaperConfig.gridColor = gradient->accentColor;
+        s_wallpaperConfig.wallpaperId = gradient->id;
+        s_wallpaperConfig.showBranding = true;
+        s_wallpaperConfig.showGrid = true;
+        return;
+    }
+
     const BuiltInWallpaperPalette* entry = find_builtin_wallpaper(idBuf);
     if (entry) {
         s_wallpaperConfig.type = WallpaperType::BuiltIn;
@@ -1797,11 +1908,36 @@ static void load_persisted_wallpaper_id()
 
 void set_wallpaper_by_id(const char* wallpaperId)
 {
+    serial::puts("[desktop] set wallpaper request id=");
+    serial::puts(wallpaperId ? wallpaperId : "(null)");
+    serial::puts("\n");
+    const BuiltInGradientPalette* gradient = find_builtin_gradient(wallpaperId);
+    if (gradient) {
+        serial::puts("[desktop] selected gradient id=");
+        serial::puts(gradient->id);
+        serial::puts("\n");
+        s_wallpaperConfig.type = WallpaperType::Gradient;
+        s_wallpaperConfig.topColor = gradient->topColor;
+        s_wallpaperConfig.bottomColor = gradient->bottomColor;
+        s_wallpaperConfig.gridColor = gradient->accentColor;
+        s_wallpaperConfig.wallpaperId = gradient->id;
+        s_wallpaperConfig.showBranding = true;
+        s_wallpaperConfig.showGrid = true;
+        persist_wallpaper_id(gradient->id);
+        s_needsRedraw = true;
+        return;
+    }
+
     const BuiltInWallpaperPalette* entry = find_builtin_wallpaper(wallpaperId);
     if (!entry) {
         serial::puts("[desktop] Wallpaper id not found, falling back to default\n");
         entry = &s_builtInWallpapers[0];
     }
+    serial::puts("[desktop] selected wallpaper full=");
+    serial::puts(entry->fullImagePath);
+    serial::puts(" thumb=");
+    serial::puts(entry->thumbnailPath);
+    serial::puts("\n");
     s_wallpaperConfig.type = WallpaperType::BuiltIn;
     s_wallpaperConfig.topColor = entry->topColor;
     s_wallpaperConfig.bottomColor = entry->bottomColor;
@@ -4419,6 +4555,15 @@ void init()
     initialize_icon_positions();  // Use new icon management system
     init_time();  // Initialize time only if a real clock source is available
     shell::init();
+
+    s_wallpaperConfig.type = WallpaperType::BuiltIn;
+    s_wallpaperConfig.topColor = 0xFF142850;
+    s_wallpaperConfig.bottomColor = 0xFF0F121C;
+    s_wallpaperConfig.showBranding = false;
+    s_wallpaperConfig.showGrid = false;
+    s_wallpaperConfig.gridColor = 0xFF192337;
+    s_wallpaperConfig.gridSpacing = 100;
+    s_wallpaperConfig.wallpaperId = "legacy_blue_flower";
     load_persisted_wallpaper_id();
     
     // Enable double buffering to prevent flickering during window movement

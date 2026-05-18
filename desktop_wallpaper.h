@@ -1,5 +1,4 @@
 #pragma once
-#pragma once
 // desktop_wallpaper.h - Procedural desktop wallpaper / gradient background
 // Draws a nice gradient background when no wallpaper BMP is loaded.
 // Provides the blue-to-dark gradient reminiscent of classic OS desktops.
@@ -23,16 +22,26 @@ namespace gxos { namespace gui {
         // Draw a vertical gradient background across the given rect
         // Top color: deep blue, Bottom color: dark navy/charcoal
         static void DrawGradient(HDC dc, RECT cr) {
+            DrawGradient(dc, cr, 0xFF142850, 0xFF0F121C, 0xFF192337, true);
+        }
+
+        static void DrawGradient(HDC dc, RECT cr, uint32_t topColor, uint32_t bottomColor, uint32_t gridColor, bool drawGrid) {
             int w = cr.right - cr.left;
             int h = cr.bottom - cr.top;
             if (w <= 0 || h <= 0) return;
 
-            // Gradient: top (20, 40, 80) -> bottom (15, 18, 28)
+            int topR = (topColor >> 16) & 0xFF;
+            int topG = (topColor >> 8) & 0xFF;
+            int topB = topColor & 0xFF;
+            int botR = (bottomColor >> 16) & 0xFF;
+            int botG = (bottomColor >> 8) & 0xFF;
+            int botB = bottomColor & 0xFF;
+
             for (int y = 0; y < h; ++y) {
                 float t = (float)y / (float)(h > 1 ? h - 1 : 1);
-                int r = (int)(20 + (15 - 20) * t);
-                int g = (int)(40 + (18 - 40) * t);
-                int b = (int)(80 + (28 - 80) * t);
+                int r = (int)(topR + (botR - topR) * t);
+                int g = (int)(topG + (botG - topG) * t);
+                int b = (int)(topB + (botB - topB) * t);
                 // Clamp
                 r = r < 0 ? 0 : (r > 255 ? 255 : r);
                 g = g < 0 ? 0 : (g > 255 ? 255 : g);
@@ -43,8 +52,9 @@ namespace gxos { namespace gui {
                 DeleteObject(br);
             }
 
+            if (!drawGrid) return;
             // Subtle grid pattern overlay (like a desktop grid)
-            HPEN gridPen = CreatePen(PS_SOLID, 1, RGB(25, 35, 55));
+            HPEN gridPen = CreatePen(PS_SOLID, 1, RGB((gridColor >> 16) & 0xFF, (gridColor >> 8) & 0xFF, gridColor & 0xFF));
             HGDIOBJ oldPen = SelectObject(dc, gridPen);
             // Vertical lines every 100px (very subtle)
             for (int x = cr.left + 100; x < cr.right; x += 100) {

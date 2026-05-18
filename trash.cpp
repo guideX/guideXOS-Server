@@ -3,6 +3,7 @@
 #include "compositor.h"
 #include "gui_protocol.h"
 #include "ipc_bus.h"
+#include "icon_theme_manager.h"
 #include "logger.h"
 #include "process.h"
 

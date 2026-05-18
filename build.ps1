@@ -33,6 +33,30 @@ $KernelDir = Join-Path $RootDir "kernel"
 $BootloaderDir = Join-Path $RootDir "guideXOSBootLoader"
 $DiskDir = Join-Path $RootDir "disks"
 $KernelBuildSkipped = $false
+$WallpaperRuntimeImageBuilt = $false
+
+function Build-WallpaperRuntimeImage {
+    if ($script:WallpaperRuntimeImageBuilt) {
+        return
+    }
+
+    if (!(Test-Path $ESPDir)) {
+        New-Item -ItemType Directory -Path $ESPDir -Force | Out-Null
+    }
+
+    $Ramdisk = Join-Path $ESPDir "ramdisk.img"
+    $WallpaperPackScript = Join-Path $RootDir "scripts\generate-wallpaper-pack.ps1"
+    if (Test-Path $WallpaperPackScript) {
+        Write-Host "      Building wallpaper filesystem image..." -ForegroundColor Cyan
+        & $WallpaperPackScript -InputDir (Join-Path $RootDir "assets\Backgrounds") -OutputDir (Join-Path $RootDir "out\wallpaper-pack") -OutputImage $Ramdisk
+        $script:WallpaperRuntimeImageBuilt = $true
+    } elseif (!(Test-Path $Ramdisk)) {
+        $emptyRamdisk = New-Object byte[] 1048576
+        [System.IO.File]::WriteAllBytes($Ramdisk, $emptyRamdisk)
+        Write-Host "      WARNING: Wallpaper pack script missing; created empty ramdisk.img" -ForegroundColor Yellow
+        $script:WallpaperRuntimeImageBuilt = $true
+    }
+}
 
 # Step 1: Clean if requested
 if ($Clean) {
@@ -68,6 +92,12 @@ if ($Clean) {
     Write-Host ""
 }
 
+# Build the boot-time wallpaper filesystem image before the compile stages so a
+# failed bootloader/kernel prerequisite cannot leave QEMU using stale thumbnails.
+Write-Host "[1b/6] Building wallpaper runtime image..." -ForegroundColor Yellow
+Build-WallpaperRuntimeImage
+Write-Host ""
+
 # Step 2: Build UEFI Bootloader
 Write-Host "[2/6] Building UEFI Bootloader..." -ForegroundColor Yellow
 
@@ -88,7 +118,9 @@ if (Test-Path $BootloaderProject) {
     
     if (Test-Path $VSWhere) {
         $VSPath = & $VSWhere -latest -property installationPath
-        $MSBuild = Join-Path $VSPath "MSBuild\Current\Bin\MSBuild.exe"
+        if ($VSPath) {
+            $MSBuild = Join-Path $VSPath "MSBuild\Current\Bin\MSBuild.exe"
+        }
     }
     
     if (!$MSBuild -or !(Test-Path $MSBuild)) {
@@ -279,19 +311,9 @@ elseif (Test-Path $KernelBin) {
     Write-Host "      ESP will boot but needs a kernel to run" -ForegroundColor Gray
 }
 
-# Create empty ramdisk if it doesn't exist
-$Ramdisk = Join-Path $ESPDir "ramdisk.img"
-if (!(Test-Path $Ramdisk)) {
-    # Create a minimal ramdisk (1MB of zeros for now)
-    $emptyRamdisk = New-Object byte[] 1048576
-    [System.IO.File]::WriteAllBytes($Ramdisk, $emptyRamdisk)
-    Write-Host "      Created: ramdisk.img (1.0 MB, empty)" -ForegroundColor Cyan
-}
-
-$WallpaperPackScript = Join-Path $RootDir "scripts\generate-wallpaper-pack.ps1"
-if (Test-Path $WallpaperPackScript) {
-    Write-Host "      Wallpaper pack helper available: scripts\generate-wallpaper-pack.ps1" -ForegroundColor Gray
-}
+# Ensure the boot-time wallpaper filesystem image exists in ESP. The bootloader
+# loads this as ramdisk.img and the kernel mounts it at /system/wall.
+Build-WallpaperRuntimeImage
 
 Write-Host "      ESP directory ready" -ForegroundColor Green
 Write-Host ""

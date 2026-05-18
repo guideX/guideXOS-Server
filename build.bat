@@ -43,6 +43,7 @@ console_window.cpp ^
 desktop_service.cpp ^
 desktop_state.cpp ^
 disk_manager.cpp ^
+display_options.cpp ^
 control_panel.cpp ^
 elf_validator.cpp ^
 executable_memory.cpp ^
@@ -93,6 +94,7 @@ universal_app_loader.cpp ^
 video_backend.cpp ^
 vfs.cpp ^
 vnc_server.cpp ^
+wallpaper_registry.cpp ^
 welcome.cpp ^
 workspace_manager.cpp
 

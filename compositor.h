@@ -84,6 +84,7 @@ namespace gxos { namespace gui {
         static void invalidate(uint64_t winId);
         static void sendFocus(uint64_t winId);
         static void handleMouse(int mx, int my, bool down, bool up);
+        static std::string packMousePayloadForTarget(int x, int y, int button, const std::string& action, uint64_t ownerPid, uint64_t windowId = 0);
         static void emitWidgetEvt(uint64_t winId, int wid, const std::string& evt, const std::string& value);
         static WinInfo* hitWindowAt(int mx, int my);
         static bool isDialogTitle(const std::string& title);
@@ -109,6 +110,9 @@ namespace gxos { namespace gui {
         static std::string g_wallpaperPath;
         static std::string g_wallpaperId;
         static ImagePtr g_wallpaperImage;
+        static uint32_t g_gradientTopColor;
+        static uint32_t g_gradientBottomColor;
+        static uint32_t g_gradientAccentColor;
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)
         static int HitTestDesktopIcon(int mouseX, int mouseY);
         static RECT GetDesktopIconBounds(int index);

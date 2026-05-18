@@ -62,6 +62,16 @@ static void* gxos_stbi_realloc(void* ptr, size_t newSize)
 
 namespace gxos {
 namespace gui {
+namespace {
+
+std::string mapRuntimeWallpaperPathToHostPath(const std::string& path)
+{
+    const std::string prefix = "/system/wallpapers/";
+    if (path.rfind(prefix, 0) != 0) return path;
+    return std::string("assets/Backgrounds/") + path.substr(prefix.size());
+}
+
+} // namespace
 
 ImagePtr PngLoader::LoadFromMemory(const uint8_t* bytes, size_t byteCount, const std::string& sourceName)
 {
@@ -116,15 +126,22 @@ ImagePtr PngLoader::LoadFromFile(const std::string& path)
     }
 
     std::vector<uint8_t> encoded;
+    Logger::write(LogLevel::Info, std::string("PngLoader: lookup path=") + path +
+        " vfsExists=" + (Vfs::instance().exists(path) ? "true" : "false"));
     if (Vfs::instance().readFile(path, encoded)) {
         return LoadFromMemory(encoded, path);
     }
 
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)
-    std::ifstream file(path, std::ios::binary);
+    std::string hostPath = mapRuntimeWallpaperPathToHostPath(path);
+    std::ifstream file(hostPath, std::ios::binary);
     if (file) {
         encoded.assign(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
+        Logger::write(LogLevel::Info, std::string("PngLoader: host file exists path=") + hostPath);
         return LoadFromMemory(encoded, path);
+    }
+    if (hostPath != path) {
+        Logger::write(LogLevel::Warn, std::string("PngLoader: mapped host file missing path=") + hostPath);
     }
 #endif
 

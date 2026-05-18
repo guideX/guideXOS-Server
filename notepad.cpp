@@ -18,6 +18,38 @@ namespace gxos { namespace apps {
     
     using namespace gxos::gui;
     using namespace gxos::dialogs;
+
+    namespace {
+        constexpr int kEditorX = 8;
+        constexpr int kEditorY = 32;
+        constexpr int kEditorWidth = 624;
+        constexpr int kEditorHeight = 384;
+        constexpr int kEditorCharWidth = 6;
+        constexpr int kEditorLineHeight = 16;
+        constexpr int kEditorVisibleLines = kEditorHeight / kEditorLineHeight;
+        constexpr int kEditorMaxDisplayCols = 100;
+        constexpr int kStatusY = kEditorY + kEditorHeight + 8;
+
+        void publishDrawTextAt(uint64_t windowId, int x, int y, const std::string& text) {
+            ipc::Message msg;
+            msg.type = (uint32_t)MsgType::MT_DrawTextAt;
+            std::ostringstream oss;
+            oss << windowId << "|" << x << "|" << y << "|" << text;
+            std::string payload = oss.str();
+            msg.data.assign(payload.begin(), payload.end());
+            ipc::Bus::publish("gui.input", std::move(msg), false);
+        }
+
+        void publishDrawRect(uint64_t windowId, int x, int y, int w, int h, int r, int g, int b) {
+            ipc::Message msg;
+            msg.type = (uint32_t)MsgType::MT_DrawRect;
+            std::ostringstream oss;
+            oss << windowId << "|" << x << "|" << y << "|" << w << "|" << h << "|" << r << "|" << g << "|" << b;
+            std::string payload = oss.str();
+            msg.data.assign(payload.begin(), payload.end());
+            ipc::Bus::publish("gui.input", std::move(msg), false);
+        }
+    }
     
     // Static member initialization
     uint64_t Notepad::s_windowId = 0;
@@ -25,6 +57,9 @@ namespace gxos { namespace apps {
     std::vector<std::string> Notepad::s_lines;
     int Notepad::s_cursorLine = 0;
     int Notepad::s_cursorCol = 0;
+    int Notepad::s_selectionAnchorIndex = 0;
+    int Notepad::s_selectionActiveEndIndex = 0;
+    bool Notepad::s_mouseSelecting = false;
     bool Notepad::s_modified = false;
     int Notepad::s_scrollOffset = 0;
     bool Notepad::s_wrapText = true;
@@ -72,6 +107,9 @@ namespace gxos { namespace apps {
             s_lines.push_back("");
             s_cursorLine = 0;
             s_cursorCol = 0;
+            s_selectionAnchorIndex = 0;
+            s_selectionActiveEndIndex = 0;
+            s_mouseSelecting = false;
             s_modified = false;
             s_scrollOffset = 0;
             s_wrapText = true;
@@ -90,6 +128,8 @@ namespace gxos { namespace apps {
             s_editMenuX = 56;
             s_editMenuY = 28;
             s_editMenuHoverIndex = -1;
+
+            runSelectionSelfTest();
             
             // Check if file path was provided
             if (argc > 1) {
@@ -303,6 +343,7 @@ namespace gxos { namespace apps {
                                         // Home - beginning of line
                                         else if (keyCode == 36) {
                                             s_cursorCol = 0;
+                                            clearSelection();
                                             redrawContent();
                                             updateStatusBar();
                                         }
@@ -310,32 +351,26 @@ namespace gxos { namespace apps {
                                         else if (keyCode == 35) {
                                             if (s_cursorLine < (int)s_lines.size()) {
                                                 s_cursorCol = (int)s_lines[s_cursorLine].size();
+                                                clearSelection();
                                                 redrawContent();
                                                 updateStatusBar();
                                             }
                                         }
                                         // Tab key - insert 4 spaces
                                         else if (keyCode == 9) {
-                                            if (s_cursorLine < (int)s_lines.size()) {
-                                                pushUndo();
-                                                std::string temp = s_lines[s_cursorLine];
-                                                temp.insert(s_cursorCol, "    ");
-                                                s_lines[s_cursorLine] = temp;
-                                                s_cursorCol += 4;
-                                                s_modified = true;
-                                                redrawContent();
-                                                updateStatusBar();
-                                                updateTitle();
-                                            }
+                                            insertText("    ");
                                         }
                                         // Backspace
                                         else if (keyCode == 8) {
-                                            if (s_cursorCol > 0 && s_cursorLine < (int)s_lines.size()) {
+                                            if (hasSelection()) {
+                                                deleteSelection();
+                                            } else if (s_cursorCol > 0 && s_cursorLine < (int)s_lines.size()) {
                                                 pushUndo();
                                                 std::string temp = s_lines[s_cursorLine];
                                                 temp.erase(s_cursorCol - 1, 1);
                                                 s_lines[s_cursorLine] = temp;
                                                 s_cursorCol--;
+                                                clearSelection();
                                                 s_modified = true;
                                                 redrawContent();
                                                 updateStatusBar();
@@ -348,6 +383,7 @@ namespace gxos { namespace apps {
                                                 s_lines.erase(s_lines.begin() + s_cursorLine);
                                                 s_cursorLine--;
                                                 s_cursorCol = prevLen;
+                                                clearSelection();
                                                 s_modified = true;
                                                 redrawContent();
                                                 updateStatusBar();
@@ -356,22 +392,7 @@ namespace gxos { namespace apps {
                                         }
                                         // Enter (VK_RETURN=13, also accept '\n'=10)
                                         else if (keyCode == 13 || keyCode == 10) {
-                                            if (s_cursorLine < (int)s_lines.size()) {
-                                                pushUndo();
-                                                std::string currentLine = s_lines[s_cursorLine];
-                                                std::string remainder = currentLine.substr(s_cursorCol);
-                                                std::string newCurrentLine = currentLine.substr(0, s_cursorCol);
-
-                                                s_lines[s_cursorLine] = newCurrentLine;
-
-                                                s_lines.insert(s_lines.begin() + s_cursorLine + 1, remainder);
-                                                s_cursorLine++;
-                                                s_cursorCol = 0;
-                                                s_modified = true;
-                                                redrawContent();
-                                                updateStatusBar();
-                                                updateTitle();
-                                            }
+                                            insertText("\n");
                                         }
                                         // Delete key (forward delete, VK_DELETE=46)
                                         else if (keyCode == 46) {
@@ -380,22 +401,15 @@ namespace gxos { namespace apps {
                                         // Handle printable characters with shift support
                                         else if (keyCode >= 32 && keyCode <= 126) {
                                             char ch = mapKeyToChar(keyCode);
-                                            if (ch != '\0' && s_cursorLine < (int)s_lines.size()) {
-                                                pushUndo();
-                                                std::string temp = s_lines[s_cursorLine];
-                                                temp.insert(s_cursorCol, 1, ch);
-                                                s_lines[s_cursorLine] = temp;
-                                                s_cursorCol++;
-                                                s_modified = true;
-                                                redrawContent();
-                                                updateStatusBar();
-                                                updateTitle();
+                                            if (ch != '\0') {
+                                                insertText(std::string(1, ch));
                                             }
                                         }
                                         // Arrow keys
                                         else if (keyCode == 37) { // Left
                                             if (s_cursorCol > 0) {
                                                 s_cursorCol--;
+                                                clearSelection();
                                                 redrawContent();
                                                 updateStatusBar();
                                             }
@@ -406,6 +420,7 @@ namespace gxos { namespace apps {
                                                 if (s_cursorCol > (int)s_lines[s_cursorLine].size()) {
                                                     s_cursorCol = (int)s_lines[s_cursorLine].size();
                                                 }
+                                                clearSelection();
                                                 redrawContent();
                                                 updateStatusBar();
                                             }
@@ -413,6 +428,7 @@ namespace gxos { namespace apps {
                                         else if (keyCode == 39) { // Right
                                             if (s_cursorLine < (int)s_lines.size() && s_cursorCol < (int)s_lines[s_cursorLine].size()) {
                                                 s_cursorCol++;
+                                                clearSelection();
                                                 redrawContent();
                                                 updateStatusBar();
                                             }
@@ -423,6 +439,7 @@ namespace gxos { namespace apps {
                                                 if (s_cursorCol > (int)s_lines[s_cursorLine].size()) {
                                                     s_cursorCol = (int)s_lines[s_cursorLine].size();
                                                 }
+                                                clearSelection();
                                                 redrawContent();
                                                 updateStatusBar();
                                             }
@@ -500,8 +517,15 @@ namespace gxos { namespace apps {
                                     int button = std::stoi(buttonStr);
                                     
                                     if (button == 0 && action == "move") {
-                                        if (updateMenuHover(mx, my)) {
+                                        if (s_mouseSelecting) {
+                                            updateMouseSelection(mx, my);
+                                        } else if (updateMenuHover(mx, my)) {
                                             redrawContent();
+                                        }
+                                    }
+                                    else if (button == 1 && action == "up") {
+                                        if (s_mouseSelecting) {
+                                            endMouseSelection(mx, my);
                                         }
                                     }
                                     // Button 2 = right click
@@ -527,6 +551,8 @@ namespace gxos { namespace apps {
                                                 hideContextMenu();
                                                 redrawContent();
                                             }
+                                        } else if (isPointInTextArea(mx, my)) {
+                                            beginMouseSelection(mx, my);
                                         }
                                     }
                                 } catch (const std::exception& e) {
@@ -557,10 +583,143 @@ namespace gxos { namespace apps {
     void Notepad::handleMessage(const ipc::Message& m) {
         // Not used in this simple version
     }
+
+    int Notepad::documentLength() {
+        if (s_lines.empty()) return 0;
+        int length = 0;
+        for (size_t i = 0; i < s_lines.size(); ++i) {
+            length += (int)s_lines[i].size();
+            if (i + 1 < s_lines.size()) length += 1;
+        }
+        return length;
+    }
+
+    int Notepad::lineColToTextIndex(int line, int col) {
+        if (s_lines.empty()) return 0;
+        if (line < 0) line = 0;
+        if (line >= (int)s_lines.size()) line = (int)s_lines.size() - 1;
+        col = std::max(0, std::min(col, (int)s_lines[line].size()));
+
+        int index = 0;
+        for (int i = 0; i < line; ++i) {
+            index += (int)s_lines[i].size() + 1;
+        }
+        return index + col;
+    }
+
+    int Notepad::cursorTextIndex() {
+        return lineColToTextIndex(s_cursorLine, s_cursorCol);
+    }
+
+    void Notepad::textIndexToLineCol(int index, int& line, int& col) {
+        if (s_lines.empty()) {
+            line = 0;
+            col = 0;
+            return;
+        }
+
+        index = std::max(0, std::min(index, documentLength()));
+        int running = 0;
+        for (int i = 0; i < (int)s_lines.size(); ++i) {
+            int lineLen = (int)s_lines[i].size();
+            int lineEnd = running + lineLen;
+            if (index <= lineEnd || i == (int)s_lines.size() - 1) {
+                line = i;
+                col = std::max(0, std::min(index - running, lineLen));
+                return;
+            }
+            running = lineEnd + 1;
+        }
+
+        line = (int)s_lines.size() - 1;
+        col = (int)s_lines.back().size();
+    }
+
+    void Notepad::setCursorFromTextIndex(int index) {
+        textIndexToLineCol(index, s_cursorLine, s_cursorCol);
+    }
+
+    bool Notepad::hasSelection() {
+        return s_selectionAnchorIndex != s_selectionActiveEndIndex;
+    }
+
+    int Notepad::getSelectionStart() {
+        return std::min(s_selectionAnchorIndex, s_selectionActiveEndIndex);
+    }
+
+    int Notepad::getSelectionEnd() {
+        return std::max(s_selectionAnchorIndex, s_selectionActiveEndIndex);
+    }
+
+    void Notepad::clearSelection() {
+        int caret = cursorTextIndex();
+        s_selectionAnchorIndex = caret;
+        s_selectionActiveEndIndex = caret;
+    }
+
+    bool Notepad::isPointInTextArea(int x, int y) {
+        return x >= kEditorX && x < kEditorX + kEditorWidth &&
+               y >= kEditorY && y < kEditorY + kEditorHeight;
+    }
+
+    int Notepad::pointToTextIndex(int x, int y) {
+        if (s_lines.empty()) return 0;
+
+        int row = (y - kEditorY) / kEditorLineHeight;
+        if (y < kEditorY) row = 0;
+        if (row < 0) row = 0;
+        if (row >= kEditorVisibleLines) row = kEditorVisibleLines - 1;
+
+        int line = s_scrollOffset + row;
+        if (line < 0) line = 0;
+        if (line >= (int)s_lines.size()) line = (int)s_lines.size() - 1;
+
+        int col = (x - kEditorX + (kEditorCharWidth / 2)) / kEditorCharWidth;
+        if (x < kEditorX) col = 0;
+        col = std::max(0, std::min(col, (int)s_lines[line].size()));
+        return lineColToTextIndex(line, col);
+    }
+
+    void Notepad::beginMouseSelection(int x, int y) {
+        int index = pointToTextIndex(x, y);
+        s_mouseSelecting = true;
+        s_selectionAnchorIndex = index;
+        s_selectionActiveEndIndex = index;
+        setCursorFromTextIndex(index);
+        hideContextMenu();
+        hideFileMenu();
+        hideEditMenu();
+        if (s_windowId != 0) {
+            redrawContent();
+        }
+    }
+
+    void Notepad::updateMouseSelection(int x, int y) {
+        if (!s_mouseSelecting) return;
+        int index = pointToTextIndex(x, y);
+        s_selectionActiveEndIndex = index;
+        setCursorFromTextIndex(index);
+        if (s_windowId != 0) {
+            redrawContent();
+        }
+    }
+
+    void Notepad::endMouseSelection(int x, int y) {
+        if (!s_mouseSelecting) return;
+        updateMouseSelection(x, y);
+        s_mouseSelecting = false;
+        if (!hasSelection()) clearSelection();
+        if (s_windowId != 0) {
+            redrawContent();
+        }
+    }
     
     void Notepad::insertText(const std::string& text) {
         if (text.empty() || s_cursorLine >= (int)s_lines.size()) return;
         pushUndo();
+        if (hasSelection()) {
+            deleteSelectionWithoutUndo();
+        }
         for (char ch : text) {
             if (ch == '\n') {
                 std::string remainder = s_lines[s_cursorLine].substr(s_cursorCol);
@@ -573,6 +732,7 @@ namespace gxos { namespace apps {
                 s_cursorCol++;
             }
         }
+        clearSelection();
         s_modified = true;
         redrawContent();
         updateStatusBar();
@@ -581,6 +741,10 @@ namespace gxos { namespace apps {
     
     void Notepad::deleteChar() {
         if (s_cursorLine >= (int)s_lines.size()) return;
+        if (hasSelection()) {
+            deleteSelection();
+            return;
+        }
         if (s_cursorCol < (int)s_lines[s_cursorLine].size()) {
             pushUndo();
             s_lines[s_cursorLine].erase(s_cursorCol, 1);
@@ -601,10 +765,41 @@ namespace gxos { namespace apps {
     }
     
     void Notepad::deleteSelection() {
-        // TODO: Implement selection-based delete
+        if (!hasSelection()) return;
+        pushUndo();
+        deleteSelectionWithoutUndo();
+        s_modified = true;
+        if (s_windowId != 0) {
+            redrawContent();
+            updateTitle();
+        }
+    }
+
+    void Notepad::deleteSelectionWithoutUndo() {
+        if (!hasSelection() || s_lines.empty()) return;
+
+        int start = getSelectionStart();
+        int end = getSelectionEnd();
+        int startLine = 0, startCol = 0, endLine = 0, endCol = 0;
+        textIndexToLineCol(start, startLine, startCol);
+        textIndexToLineCol(end, endLine, endCol);
+
+        if (startLine == endLine) {
+            s_lines[startLine].erase(startCol, endCol - startCol);
+        } else {
+            std::string merged = s_lines[startLine].substr(0, startCol) + s_lines[endLine].substr(endCol);
+            s_lines[startLine] = merged;
+            s_lines.erase(s_lines.begin() + startLine + 1, s_lines.begin() + endLine + 1);
+        }
+
+        if (s_lines.empty()) s_lines.push_back("");
+        setCursorFromTextIndex(start);
+        clearSelection();
     }
     
     void Notepad::copy() {
+        // TODO: Wire this to a shared clipboard service when one exists.
+        // The selected range is tracked in buffer offsets by getSelectionStart()/getSelectionEnd().
         Logger::write(LogLevel::Info, "Notepad: Copy (not implemented)");
     }
     
@@ -613,19 +808,78 @@ namespace gxos { namespace apps {
     }
     
     void Notepad::selectAll() {
-        // Select all text: move cursor to end of all content
-        // In a full implementation this would set selection start/end markers
-        // For now, position cursor at start and log
-        if (!s_lines.empty()) {
-            s_cursorLine = 0;
-            s_cursorCol = 0;
-            // Move cursor to the very end
-            s_cursorLine = (int)s_lines.size() - 1;
-            s_cursorCol = (int)s_lines[s_cursorLine].size();
-            Logger::write(LogLevel::Info, "Notepad: Select All (cursor moved to end)");
+        int end = documentLength();
+        s_selectionAnchorIndex = 0;
+        s_selectionActiveEndIndex = end;
+        setCursorFromTextIndex(end);
+        Logger::write(LogLevel::Info, "Notepad: Select All");
+        if (s_windowId != 0) {
             redrawContent();
-            updateStatusBar();
         }
+    }
+
+    bool Notepad::runSelectionSelfTest() {
+        std::vector<std::string> savedLines = s_lines;
+        int savedCursorLine = s_cursorLine;
+        int savedCursorCol = s_cursorCol;
+        int savedScrollOffset = s_scrollOffset;
+        int savedAnchor = s_selectionAnchorIndex;
+        int savedActive = s_selectionActiveEndIndex;
+        bool savedMouseSelecting = s_mouseSelecting;
+        bool savedModified = s_modified;
+        std::vector<TextSnapshot> savedUndo = s_undoStack;
+        std::vector<TextSnapshot> savedRedo = s_redoStack;
+        uint64_t savedWindowId = s_windowId;
+        s_windowId = 0;
+
+        bool ok = true;
+        s_lines = {"abcd", "efgh"};
+        s_cursorLine = 0;
+        s_cursorCol = 0;
+        clearSelection();
+
+        selectAll();
+        ok = ok && hasSelection() && getSelectionStart() == 0 && getSelectionEnd() == documentLength();
+        ok = ok && s_cursorLine == 1 && s_cursorCol == 4;
+
+        s_lines = {"abcd", "efgh"};
+        s_cursorLine = 0;
+        s_cursorCol = 0;
+        s_selectionAnchorIndex = 1;
+        s_selectionActiveEndIndex = 6;
+        deleteSelectionWithoutUndo();
+        ok = ok && s_lines.size() == 1 && s_lines[0] == "agh" && s_cursorLine == 0 && s_cursorCol == 1 && !hasSelection();
+
+        s_lines = {"abcd", "efgh"};
+        s_scrollOffset = 0;
+        beginMouseSelection(kEditorX + kEditorCharWidth, kEditorY + 2);
+        updateMouseSelection(kEditorX + (3 * kEditorCharWidth), kEditorY + 2);
+        ok = ok && getSelectionStart() == 1 && getSelectionEnd() == 3;
+        endMouseSelection(kEditorX + (3 * kEditorCharWidth), kEditorY + 2);
+
+        beginMouseSelection(kEditorX + (3 * kEditorCharWidth), kEditorY + 2);
+        updateMouseSelection(kEditorX + kEditorCharWidth, kEditorY + 2);
+        ok = ok && getSelectionStart() == 1 && getSelectionEnd() == 3;
+        endMouseSelection(kEditorX + kEditorCharWidth, kEditorY + 2);
+
+        s_lines = savedLines;
+        s_cursorLine = savedCursorLine;
+        s_cursorCol = savedCursorCol;
+        s_scrollOffset = savedScrollOffset;
+        s_selectionAnchorIndex = savedAnchor;
+        s_selectionActiveEndIndex = savedActive;
+        s_mouseSelecting = savedMouseSelecting;
+        s_modified = savedModified;
+        s_undoStack = savedUndo;
+        s_redoStack = savedRedo;
+        s_windowId = savedWindowId;
+
+        if (!ok) {
+            Logger::write(LogLevel::Error, "Notepad: selection self-test failed");
+        } else {
+            Logger::write(LogLevel::Info, "Notepad: selection self-test passed");
+        }
+        return ok;
     }
     
     void Notepad::pushUndo() {
@@ -652,6 +906,7 @@ namespace gxos { namespace apps {
         s_lines = snap.lines;
         s_cursorLine = snap.cursorLine;
         s_cursorCol = snap.cursorCol;
+        clearSelection();
         s_undoStack.pop_back();
         s_modified = true;
         redrawContent();
@@ -671,6 +926,7 @@ namespace gxos { namespace apps {
         s_lines = snap.lines;
         s_cursorLine = snap.cursorLine;
         s_cursorCol = snap.cursorCol;
+        clearSelection();
         s_redoStack.pop_back();
         s_modified = true;
         redrawContent();
@@ -685,6 +941,7 @@ namespace gxos { namespace apps {
         s_lines.push_back("");
         s_cursorLine = 0;
         s_cursorCol = 0;
+        clearSelection();
         s_modified = false;
         s_scrollOffset = 0;
         s_undoStack.clear();
@@ -763,6 +1020,7 @@ namespace gxos { namespace apps {
         s_filePath = path;
         s_cursorLine = 0;
         s_cursorCol = 0;
+        clearSelection();
         s_modified = false;
         s_scrollOffset = 0;
         s_undoStack.clear();
@@ -913,63 +1171,83 @@ namespace gxos { namespace apps {
     
     void Notepad::redrawContent() {
         const char* kGuiChanIn = "gui.input";
+
+        ipc::Message clearMsg;
+        clearMsg.type = (uint32_t)MsgType::MT_DrawText;
+        std::string clearPayload = std::to_string(s_windowId) + "|\f";
+        clearMsg.data.assign(clearPayload.begin(), clearPayload.end());
+        ipc::Bus::publish(kGuiChanIn, std::move(clearMsg), false);
         
         // Calculate visible window - support scrolling
-        int visibleLines = 25; // Maximum lines to display
-        int startLine = s_scrollOffset;
-        int endLine = std::min((int)s_lines.size(), startLine + visibleLines);
-        
-        // Draw visible lines with cursor indicator
-        for (int i = startLine; i < endLine; i++) {
-            ipc::Message textMsg;
-            textMsg.type = (uint32_t)MsgType::MT_DrawText;
-            
-            // Build the line text with cursor if needed
-            std::string lineText;
-            const std::string& sourceLine = s_lines[i];
-            
-            // Apply text wrapping if enabled
-            std::string displayLine = sourceLine;
-            if (s_wrapText && displayLine.length() > 80) {
-                // Simple wrapping at 80 characters
-                displayLine = displayLine.substr(0, 80);
-            }
-            
-            if (i == s_cursorLine && s_cursorCol <= (int)sourceLine.size()) {
-                // Build line with cursor using basic string operations
-                if (s_cursorCol == 0) {
-                    lineText = "|";
-                    lineText += displayLine;
-                } else if (s_cursorCol >= (int)displayLine.size()) {
-                    lineText = displayLine;
-                    lineText += "|";
-                } else {
-                    lineText.reserve(displayLine.size() + 1);
-                    for (int j = 0; j < s_cursorCol; j++) {
-                        lineText += displayLine[j];
-                    }
-                    lineText += '|';
-                    for (size_t j = s_cursorCol; j < displayLine.size(); j++) {
-                        lineText += displayLine[j];
-                    }
-                }
-            } else {
-                lineText = displayLine;
-            }
-            
-            std::ostringstream oss;
-            oss << s_windowId << "|" << lineText;
-            std::string payload = oss.str();
-            textMsg.data.assign(payload.begin(), payload.end());
-            ipc::Bus::publish(kGuiChanIn, std::move(textMsg), false);
-        }
-        
-        // Ensure cursor scrolls into view
+        int visibleLines = kEditorVisibleLines;
         if (s_cursorLine < s_scrollOffset) {
             s_scrollOffset = s_cursorLine;
         } else if (s_cursorLine >= s_scrollOffset + visibleLines) {
             s_scrollOffset = s_cursorLine - visibleLines + 1;
         }
+        if (s_scrollOffset < 0) s_scrollOffset = 0;
+
+        int startLine = s_scrollOffset;
+        int endLine = std::min((int)s_lines.size(), startLine + visibleLines);
+
+        publishDrawRect(s_windowId, kEditorX - 2, kEditorY - 2, kEditorWidth + 4, kEditorHeight + 4, 36, 38, 44);
+        publishDrawRect(s_windowId, kEditorX - 1, kEditorY - 1, kEditorWidth + 2, kEditorHeight + 2, 18, 20, 24);
+
+        int selectionStart = getSelectionStart();
+        int selectionEnd = getSelectionEnd();
+        
+        // Draw selection highlights first so text remains readable on top.
+        for (int i = startLine; i < endLine; i++) {
+            const std::string& sourceLine = s_lines[i];
+            int lineStart = lineColToTextIndex(i, 0);
+            int lineEnd = lineStart + (int)sourceLine.size();
+
+            if (selectionStart != selectionEnd && selectionEnd >= lineStart && selectionStart <= lineEnd + 1) {
+                int highlightStart = std::max(selectionStart, lineStart);
+                int highlightEnd = std::min(selectionEnd, lineEnd);
+                int startCol = std::max(0, highlightStart - lineStart);
+                int endCol = std::max(startCol, highlightEnd - lineStart);
+                bool includesLineBreak = (selectionEnd > lineEnd && selectionStart <= lineEnd && i + 1 < (int)s_lines.size());
+                if (includesLineBreak && endCol < kEditorMaxDisplayCols) {
+                    endCol++;
+                }
+                startCol = std::min(startCol, kEditorMaxDisplayCols);
+                endCol = std::min(endCol, kEditorMaxDisplayCols);
+                if (endCol > startCol) {
+                    int hx = kEditorX + startCol * kEditorCharWidth;
+                    int hy = kEditorY + (i - startLine) * kEditorLineHeight;
+                    int hw = std::max(kEditorCharWidth, (endCol - startCol) * kEditorCharWidth);
+                    publishDrawRect(s_windowId, hx, hy, hw, kEditorLineHeight, 42, 92, 160);
+                }
+            }
+        }
+
+        // Draw visible lines using positioned text so mouse hit-testing and highlights share one grid.
+        for (int i = startLine; i < endLine; i++) {
+            std::string displayLine = s_lines[i];
+            if (s_wrapText && displayLine.length() > kEditorMaxDisplayCols) {
+                displayLine = displayLine.substr(0, kEditorMaxDisplayCols);
+            }
+            int y = kEditorY + (i - startLine) * kEditorLineHeight + 3;
+            publishDrawTextAt(s_windowId, kEditorX, y, displayLine);
+        }
+
+        if (s_cursorLine >= startLine && s_cursorLine < endLine) {
+            int caretCol = std::min(s_cursorCol, kEditorMaxDisplayCols);
+            int caretX = kEditorX + caretCol * kEditorCharWidth;
+            int caretY = kEditorY + (s_cursorLine - startLine) * kEditorLineHeight + 3;
+            publishDrawTextAt(s_windowId, caretX, caretY, "|");
+        }
+
+        std::ostringstream status;
+        status << "Line " << (s_cursorLine + 1) << ", Col " << (s_cursorCol + 1);
+        if (hasSelection()) status << "  Selection " << (getSelectionEnd() - getSelectionStart()) << " chars";
+        if (s_modified) status << " (Modified)";
+        if (s_capsLockOn) status << " [CAPS]";
+        if (s_shiftPressed) status << " [SHIFT]";
+        if (s_ctrlPressed) status << " [CTRL]";
+        publishDrawRect(s_windowId, kEditorX - 2, kStatusY - 2, kEditorWidth + 4, kEditorLineHeight + 4, 48, 50, 58);
+        publishDrawTextAt(s_windowId, kEditorX, kStatusY, status.str());
         
         // Draw menus if visible
         drawContextMenu();
@@ -978,23 +1256,7 @@ namespace gxos { namespace apps {
     }
     
     void Notepad::updateStatusBar() {
-        const char* kGuiChanIn = "gui.input";
-        
-        ipc::Message msg;
-        msg.type = (uint32_t)MsgType::MT_DrawText;
-        
-        std::ostringstream oss;
-        oss << s_windowId << "|Line " << (s_cursorLine + 1) << ", Col " << (s_cursorCol + 1);
-        if (s_modified) oss << " (Modified)";
-        
-        // Add modifier status
-        if (s_capsLockOn) oss << " [CAPS]";
-        if (s_shiftPressed) oss << " [SHIFT]";
-        if (s_ctrlPressed) oss << " [CTRL]";
-        
-        std::string payload = oss.str();
-        msg.data.assign(payload.begin(), payload.end());
-        ipc::Bus::publish(kGuiChanIn, std::move(msg), false);
+        redrawContent();
     }
     
     void Notepad::toggleWrap() {
@@ -1170,6 +1432,7 @@ namespace gxos { namespace apps {
 
             switch (itemIndex) {
                 case 0:
+                    // TODO: Copy getSelectionStart()/getSelectionEnd() to a shared clipboard before deleting.
                     Logger::write(LogLevel::Info, "Notepad: Cut (not implemented)");
                     break;
                 case 1:
@@ -1277,6 +1540,7 @@ namespace gxos { namespace apps {
                 // Execute the corresponding action
                 switch (itemIndex) {
                     case 0: // Cut
+                        // TODO: Copy getSelectionStart()/getSelectionEnd() to a shared clipboard before deleting.
                         Logger::write(LogLevel::Info, "Notepad: Cut (not implemented)");
                         break;
                     case 1: // Copy
@@ -1338,14 +1602,7 @@ namespace gxos { namespace apps {
                 ipc::Bus::publish(kGuiChanIn, std::move(itemBgMsg), false);
             }
             
-            // Draw item text
-            ipc::Message itemTextMsg;
-            itemTextMsg.type = (uint32_t)MsgType::MT_DrawText;
-            std::ostringstream itemTextOss;
-            itemTextOss << s_windowId << "|" << menuItems[i];
-            std::string itemTextPayload = itemTextOss.str();
-            itemTextMsg.data.assign(itemTextPayload.begin(), itemTextPayload.end());
-            ipc::Bus::publish(kGuiChanIn, std::move(itemTextMsg), false);
+            publishDrawTextAt(s_windowId, s_contextMenuX + 8, itemY + 7, menuItems[i]);
         }
     }
 
@@ -1379,13 +1636,7 @@ namespace gxos { namespace apps {
                 ipc::Bus::publish(kGuiChanIn, std::move(itemBgMsg), false);
             }
 
-            ipc::Message itemTextMsg;
-            itemTextMsg.type = (uint32_t)MsgType::MT_DrawText;
-            std::ostringstream itemTextOss;
-            itemTextOss << s_windowId << "|" << menuItems[i];
-            std::string itemTextPayload = itemTextOss.str();
-            itemTextMsg.data.assign(itemTextPayload.begin(), itemTextPayload.end());
-            ipc::Bus::publish(kGuiChanIn, std::move(itemTextMsg), false);
+            publishDrawTextAt(s_windowId, s_fileMenuX + 8, itemY + 7, menuItems[i]);
         }
     }
 
@@ -1419,13 +1670,7 @@ namespace gxos { namespace apps {
                 ipc::Bus::publish(kGuiChanIn, std::move(itemBgMsg), false);
             }
 
-            ipc::Message itemTextMsg;
-            itemTextMsg.type = (uint32_t)MsgType::MT_DrawText;
-            std::ostringstream itemTextOss;
-            itemTextOss << s_windowId << "|" << menuItems[i];
-            std::string itemTextPayload = itemTextOss.str();
-            itemTextMsg.data.assign(itemTextPayload.begin(), itemTextPayload.end());
-            ipc::Bus::publish(kGuiChanIn, std::move(itemTextMsg), false);
+            publishDrawTextAt(s_windowId, s_editMenuX + 8, itemY + 7, menuItems[i]);
         }
     }
     

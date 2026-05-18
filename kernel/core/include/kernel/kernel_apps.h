@@ -187,11 +187,15 @@ public:
 private:
     int m_selectedIndex;
     int m_appliedIndex;
+    int m_selectedGradientIndex;
+    int m_appliedGradientIndex;
+    int m_activeTab;
     int m_selectButtonId;
 
     void loadSelection();
     void applySelected();
     int hitWallpaper(int x, int y) const;
+    int hitGradient(int x, int y) const;
 };
 
 // ============================================================

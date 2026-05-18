@@ -132,9 +132,6 @@ block::Status read_sectors(uint8_t driverIndex,
         return block::BLOCK_ERR_INVALID;
     }
 
-    if (disk.readOnly) {
-        return block::BLOCK_ERR_UNSUPPORTED;
-    }
     
     if (lba + count > disk.sectorCount) {
         return block::BLOCK_ERR_INVALID;
@@ -164,6 +161,10 @@ block::Status write_sectors(uint8_t driverIndex,
     RamDisk& disk = s_disks[driverIndex];
     if (!disk.active || !disk.data) {
         return block::BLOCK_ERR_INVALID;
+    }
+
+    if (disk.readOnly) {
+        return block::BLOCK_ERR_UNSUPPORTED;
     }
     
     if (lba + count > disk.sectorCount) {

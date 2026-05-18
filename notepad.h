@@ -37,9 +37,27 @@ namespace gxos { namespace apps {
         static void insertText(const std::string& text);
         static void deleteChar();       // Delete key (forward delete)
         static void deleteSelection();
+        static void deleteSelectionWithoutUndo();
         static void copy();
         static void paste();
         static void selectAll();
+
+        // Selection/caret helpers
+        static int documentLength();
+        static int cursorTextIndex();
+        static int lineColToTextIndex(int line, int col);
+        static void textIndexToLineCol(int index, int& line, int& col);
+        static void setCursorFromTextIndex(int index);
+        static bool hasSelection();
+        static int getSelectionStart();
+        static int getSelectionEnd();
+        static void clearSelection();
+        static bool isPointInTextArea(int x, int y);
+        static int pointToTextIndex(int x, int y);
+        static void beginMouseSelection(int x, int y);
+        static void updateMouseSelection(int x, int y);
+        static void endMouseSelection(int x, int y);
+        static bool runSelectionSelfTest();
         
         // Undo / Redo (matching Legacy Notepad.cs)
         static void pushUndo();
@@ -93,6 +111,9 @@ namespace gxos { namespace apps {
         static std::vector<std::string> s_lines;
         static int s_cursorLine;
         static int s_cursorCol;
+        static int s_selectionAnchorIndex;
+        static int s_selectionActiveEndIndex;
+        static bool s_mouseSelecting;
         static bool s_modified;
         static int s_scrollOffset;
         static bool s_wrapText;

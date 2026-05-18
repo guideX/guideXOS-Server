@@ -17,6 +17,9 @@ using namespace gxos::gui;
 uint64_t DisplayOptions::s_windowId = 0;
 int DisplayOptions::s_selectedIndex = 0;
 int DisplayOptions::s_appliedIndex = 0;
+int DisplayOptions::s_selectedGradientIndex = 0;
+int DisplayOptions::s_appliedGradientIndex = 0;
+int DisplayOptions::s_activeTab = 0;
 int DisplayOptions::s_mouseX = 0;
 int DisplayOptions::s_mouseY = 0;
 bool DisplayOptions::s_mouseDown = false;
@@ -89,8 +92,19 @@ void DisplayOptions::loadSelection()
 {
     std::string selectedId = selectedWallpaperIdFromConfig();
     const auto& wallpapers = WallpaperRegistry::BuiltInWallpapers();
+    const auto& gradients = WallpaperRegistry::BuiltInGradients();
     s_selectedIndex = 0;
     s_appliedIndex = 0;
+    s_selectedGradientIndex = 0;
+    s_appliedGradientIndex = 0;
+    s_activeTab = WallpaperRegistry::IsGradientId(selectedId) ? 1 : 0;
+    for (size_t i = 0; i < gradients.size(); ++i) {
+        if (gradients[i].id == selectedId) {
+            s_selectedGradientIndex = static_cast<int>(i);
+            s_appliedGradientIndex = static_cast<int>(i);
+            return;
+        }
+    }
     for (size_t i = 0; i < wallpapers.size(); ++i) {
         if (wallpapers[i].id == selectedId) {
             s_selectedIndex = static_cast<int>(i);
@@ -191,23 +205,35 @@ void DisplayOptions::render()
     publish(MsgType::MT_DrawText, std::to_string(s_windowId) + "|\f");
     drawRect(s_windowId, 0, 0, kWindowW, kWindowH, 27, 31, 40);
 
-    drawButton(20, kTabY, kTabW, kTabH, "Backgrounds", true, true);
+    drawButton(20, kTabY, kTabW, kTabH, "Backgrounds", s_activeTab == 0, true);
     drawButton(250, kTabY, kTabW, kTabH, "Resolution", false, false);
-    drawButton(480, kTabY, kTabW, kTabH, "Gradients", false, false);
-    drawText(s_windowId, 26, 72, "Select a background from the gallery:");
+    drawButton(480, kTabY, kTabW, kTabH, "Gradients", s_activeTab == 1, true);
+    drawText(s_windowId, 26, 72, s_activeTab == 0 ? "Select a background from the gallery:" : "Select a gradient from the gallery:");
     drawRect(s_windowId, 20, 92, 742, 372, 22, 22, 24);
 
-    const auto& wallpapers = WallpaperRegistry::BuiltInWallpapers();
-    for (size_t i = 0; i < wallpapers.size(); ++i) {
-        int col = static_cast<int>(i) % kCols;
-        int row = static_cast<int>(i) / kCols;
-        int x = kGalleryX + col * (kTileW + kGapX);
-        int y = kGalleryY + row * (kTileH + kGapY);
-        bool hover = hit(s_mouseX, s_mouseY, x, y, kTileW, kTileH);
-        drawWallpaperTile(static_cast<int>(i), x, y, hover, static_cast<int>(i) == s_selectedIndex, static_cast<int>(i) == s_appliedIndex);
+    if (s_activeTab == 0) {
+        const auto& wallpapers = WallpaperRegistry::BuiltInWallpapers();
+        for (size_t i = 0; i < wallpapers.size(); ++i) {
+            int col = static_cast<int>(i) % kCols;
+            int row = static_cast<int>(i) / kCols;
+            int x = kGalleryX + col * (kTileW + kGapX);
+            int y = kGalleryY + row * (kTileH + kGapY);
+            bool hover = hit(s_mouseX, s_mouseY, x, y, kTileW, kTileH);
+            drawWallpaperTile(static_cast<int>(i), x, y, hover, static_cast<int>(i) == s_selectedIndex, static_cast<int>(i) == s_appliedIndex);
+        }
+    } else {
+        const auto& gradients = WallpaperRegistry::BuiltInGradients();
+        for (size_t i = 0; i < gradients.size(); ++i) {
+            int col = static_cast<int>(i) % kCols;
+            int row = static_cast<int>(i) / kCols;
+            int x = kGalleryX + col * (kTileW + kGapX);
+            int y = kGalleryY + row * (kTileH + kGapY);
+            bool hover = hit(s_mouseX, s_mouseY, x, y, kTileW, kTileH);
+            drawGradientTile(static_cast<int>(i), x, y, hover, static_cast<int>(i) == s_selectedGradientIndex, static_cast<int>(i) == s_appliedGradientIndex);
+        }
     }
 
-    drawButton(kSelectButtonX, kButtonY, kButtonW, kButtonH, "Select Background", false, true);
+    drawButton(kSelectButtonX, kButtonY, kButtonW, kButtonH, s_activeTab == 0 ? "Select Background" : "Select Gradient", false, true);
     drawButton(kSelectButtonX + 200, kButtonY, kButtonW, kButtonH, "Choose Color", false, false);
     drawButton(kSelectButtonX + 400, kButtonY, kButtonW, kButtonH, "Visual Effects", false, false);
 }
@@ -231,9 +257,26 @@ void DisplayOptions::drawWallpaperTile(int index, int x, int y, bool hover, bool
     else if (hover) drawRect(s_windowId, x - 4, y - 4, kTileW + 8, kTileH + 8, 55, 65, 85);
     drawRect(s_windowId, x, y, kTileW, kTileH, 42, 42, 42);
     drawRect(s_windowId, x + 6, y + 8, kThumbW, kThumbH, 18, 18, 20);
-    std::string thumbnailPath = entry.thumbnailPath.empty() ? entry.assetPath : entry.thumbnailPath;
+    std::string thumbnailPath = entry.thumbnailPath.empty() ? entry.fullImagePath : entry.thumbnailPath;
     Logger::write(LogLevel::Info, std::string("DisplayOptions thumbnail id=") + entry.id + " path=" + thumbnailPath);
     drawImage(s_windowId, x + 6, y + 8, kThumbW, kThumbH, thumbnailPath);
+    drawText(s_windowId, x + 8, y + 88, entry.displayName + (applied ? " *" : ""));
+}
+
+void DisplayOptions::drawGradientTile(int index, int x, int y, bool hover, bool selected, bool applied)
+{
+    const auto& entry = WallpaperRegistry::BuiltInGradients()[static_cast<size_t>(index)];
+    if (selected) drawRect(s_windowId, x - 4, y - 4, kTileW + 8, kTileH + 8, 72, 110, 180);
+    else if (hover) drawRect(s_windowId, x - 4, y - 4, kTileW + 8, kTileH + 8, 55, 65, 85);
+    drawRect(s_windowId, x, y, kTileW, kTileH, 42, 42, 42);
+    for (int py = 0; py < kThumbH; ++py) {
+        int t = (py * 255) / (kThumbH > 1 ? kThumbH - 1 : 1);
+        int r = ((((entry.topColor >> 16) & 0xFF) * (255 - t)) + (((entry.bottomColor >> 16) & 0xFF) * t)) / 255;
+        int g = ((((entry.topColor >> 8) & 0xFF) * (255 - t)) + (((entry.bottomColor >> 8) & 0xFF) * t)) / 255;
+        int b = (((entry.topColor & 0xFF) * (255 - t)) + ((entry.bottomColor & 0xFF) * t)) / 255;
+        drawRect(s_windowId, x + 6, y + 8 + py, kThumbW, 1, r, g, b);
+    }
+    drawRect(s_windowId, x + 6, y + 8, kThumbW, 1, (entry.accentColor >> 16) & 0xFF, (entry.accentColor >> 8) & 0xFF, entry.accentColor & 0xFF);
     drawText(s_windowId, x + 8, y + 88, entry.displayName + (applied ? " *" : ""));
 }
 
@@ -244,6 +287,38 @@ void DisplayOptions::handleMouseMove(int, int)
 
 void DisplayOptions::handleMouseDown(int mx, int my)
 {
+    if (hit(mx, my, 20, kTabY, kTabW, kTabH)) {
+        s_activeTab = 0;
+        render();
+        return;
+    }
+    if (hit(mx, my, 480, kTabY, kTabW, kTabH)) {
+        s_activeTab = 1;
+        render();
+        return;
+    }
+
+    if (s_activeTab == 1) {
+        const auto& gradients = WallpaperRegistry::BuiltInGradients();
+        for (size_t i = 0; i < gradients.size(); ++i) {
+            int col = static_cast<int>(i) % kCols;
+            int row = static_cast<int>(i) / kCols;
+            int x = kGalleryX + col * (kTileW + kGapX);
+            int y = kGalleryY + row * (kTileH + kGapY);
+            if (hit(mx, my, x, y, kTileW, kTileH)) {
+                s_selectedGradientIndex = static_cast<int>(i);
+                render();
+                return;
+            }
+        }
+
+        if (hit(mx, my, kSelectButtonX, kButtonY, kButtonW, kButtonH)) {
+            applySelectedGradient();
+            render();
+        }
+        return;
+    }
+
     const auto& wallpapers = WallpaperRegistry::BuiltInWallpapers();
     for (size_t i = 0; i < wallpapers.size(); ++i) {
         int col = static_cast<int>(i) % kCols;
@@ -269,6 +344,23 @@ void DisplayOptions::handleMouseUp(int, int)
 
 void DisplayOptions::handleDoubleClick(int mx, int my)
 {
+    if (s_activeTab == 1) {
+        const auto& gradients = WallpaperRegistry::BuiltInGradients();
+        for (size_t i = 0; i < gradients.size(); ++i) {
+            int col = static_cast<int>(i) % kCols;
+            int row = static_cast<int>(i) / kCols;
+            int x = kGalleryX + col * (kTileW + kGapX);
+            int y = kGalleryY + row * (kTileH + kGapY);
+            if (hit(mx, my, x, y, kTileW, kTileH)) {
+                s_selectedGradientIndex = static_cast<int>(i);
+                applySelectedGradient();
+                render();
+                return;
+            }
+        }
+        return;
+    }
+
     const auto& wallpapers = WallpaperRegistry::BuiltInWallpapers();
     for (size_t i = 0; i < wallpapers.size(); ++i) {
         int col = static_cast<int>(i) % kCols;
@@ -284,6 +376,19 @@ void DisplayOptions::handleDoubleClick(int mx, int my)
     }
 }
 
+void DisplayOptions::applySelectedGradient()
+{
+    const auto& gradients = WallpaperRegistry::BuiltInGradients();
+    if (s_selectedGradientIndex < 0 || s_selectedGradientIndex >= static_cast<int>(gradients.size())) return;
+    const GradientEntry& selected = gradients[static_cast<size_t>(s_selectedGradientIndex)];
+    ipc::Message msg;
+    msg.type = static_cast<uint32_t>(MsgType::MT_DesktopWallpaperSet);
+    msg.data.assign(selected.id.begin(), selected.id.end());
+    ipc::Bus::publish("gui.input", std::move(msg), false);
+    s_appliedGradientIndex = s_selectedGradientIndex;
+    Logger::write(LogLevel::Info, std::string("DisplayOptions applied gradient id=") + selected.id);
+}
+
 void DisplayOptions::applySelectedWallpaper()
 {
     const auto& wallpapers = WallpaperRegistry::BuiltInWallpapers();
@@ -294,7 +399,7 @@ void DisplayOptions::applySelectedWallpaper()
     msg.data.assign(selected.id.begin(), selected.id.end());
     ipc::Bus::publish("gui.input", std::move(msg), false);
     s_appliedIndex = s_selectedIndex;
-    Logger::write(LogLevel::Info, std::string("DisplayOptions applied wallpaper id=") + selected.id + " full=" + selected.assetPath + " thumb=" + selected.thumbnailPath);
+    Logger::write(LogLevel::Info, std::string("DisplayOptions applied wallpaper id=") + selected.id + " full=" + selected.fullImagePath + " thumb=" + selected.thumbnailPath);
 }
 
 bool DisplayOptions::hit(int mx, int my, int x, int y, int w, int h)
