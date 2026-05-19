@@ -248,6 +248,7 @@ namespace gxos {
             if (label == "Files" || label == "FileExplorer") return "app.files";
             if (label == "Computer" || label == "Computer Files" || label == "ComputerFiles") return "place.computer";
             if (label == "Paint") return "app.paint";
+            if (label == "guideXOS Navigator") return "app.generic";
             if (label == "Clock") return "app.clock";
             if (label == "Documents" || label == "Recent Docs") return "place.documents";
             if (label == "Pictures") return "place.pictures";
@@ -264,6 +265,7 @@ namespace gxos {
             if (label == "Notepad" || label == "Console") return RGB(120, 180, 80);
             if (label == "Trash") return RGB(150, 150, 160);
             if (label == "Paint") return RGB(200, 120, 60);
+            if (label == "guideXOS Navigator") return RGB(70, 120, 190);
             if (label == "TaskManager" || label == "Task Manager") return RGB(180, 70, 70);
             if (label == "DiskManager" || label == "ControlPanel" || label == "Control Panel" || label == "Settings") return RGB(140, 90, 180);
             if (isAppModelDemoAppLabel(label)) return RGB(85, 135, 210);

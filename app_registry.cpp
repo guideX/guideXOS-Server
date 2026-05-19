@@ -30,7 +30,7 @@ RegisteredApp makeBuiltInApp(const std::string& appName) {
     RegisteredApp app;
     app.sourceKind = AppSourceKind::BuiltIn;
     app.manifest.schemaVersion = kSupportedAppManifestSchemaVersion;
-    app.manifest.id = builtInAppId(appName);
+    app.manifest.id = appName == "guideXOS Navigator" ? "guidexos.navigator" : builtInAppId(appName);
     app.manifest.displayName = appName;
     app.manifest.version = "1.0.0";
     app.manifest.publisher = "guideXOS";
@@ -40,6 +40,14 @@ RegisteredApp makeBuiltInApp(const std::string& appName) {
     if (appName == "Trash") {
         app.manifest.description = "Built-in guideXOS Trash placeholder.";
         app.manifest.icon = "trash.empty";
+    }
+    else if (appName == "guideXOS Navigator") {
+        app.manifest.description = "Native guideXOS browser shell placeholder bundled with the OS app model.";
+        app.manifest.icon = "app.generic";
+        app.manifest.category = "Internet";
+        app.manifest.defaultWindow.width = 920;
+        app.manifest.defaultWindow.height = 640;
+        app.manifest.defaultWindow.resizable = true;
     }
     app.manifest.supportedArchitectures.push_back("any");
 
@@ -81,6 +89,7 @@ const std::vector<std::string>& defaultBuiltInAppNames() {
         "DiskManager",
         "ControlPanel",
         "DisplayOptions",
+        "guideXOS Navigator",
         "App Model Demo",
         "Native App Debug Viewer",
         "HDInstaller"

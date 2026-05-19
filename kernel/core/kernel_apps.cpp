@@ -4286,6 +4286,172 @@ const char* TrashApp::typeForEntry(const TrashEntry& entry) const
 }
 
 // ============================================================
+// Navigator App (baremetal)
+// ============================================================
+
+NavigatorApp::NavigatorApp()
+    : m_scrollY(0), m_helpLinkHover(false)
+{
+    strcopy(m_status, "Ready.", MAX_STATUS_LEN);
+}
+
+NavigatorApp::~NavigatorApp() {
+}
+
+bool NavigatorApp::init()
+{
+    if (m_window) return true;
+
+    m_window = new app::KernelWindow();
+    if (!m_window) return false;
+
+    strcopy(m_name, "guideXOS Navigator", app::MAX_APP_NAME);
+    strcopy(m_window->title, "guideXOS Navigator", app::MAX_TITLE_LEN);
+    m_window->x = 96;
+    m_window->y = 72;
+    m_window->w = 920;
+    m_window->h = 640;
+    m_window->owner = this;
+    m_window->flags = app::WF_VISIBLE | app::WF_TITLEBAR | app::WF_CLOSABLE | app::WF_RESIZABLE;
+    compositor::KernelCompositor::registerWindow(m_window);
+    m_state = app::AppState::Running;
+
+    updateButtons();
+    invalidate();
+    return true;
+}
+
+void NavigatorApp::shutdown() {
+}
+
+void NavigatorApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h)
+{
+    framebuffer::fill_rect(x, y, w, h, 0xFFF6F8FB);
+    framebuffer::fill_rect(x, y, w, TOOLBAR_H, 0xFF2B2F3A);
+    framebuffer::fill_rect(x, y + TOOLBAR_H - 1, w, 1, 0xFF586076);
+
+    int addressW = (int)w - ADDRESS_X - 20;
+    if (addressW > 0) {
+        framebuffer::fill_rect(x + ADDRESS_X, y + ADDRESS_Y, (uint32_t)addressW, ADDRESS_H, 0xFF161A22);
+    }
+
+    uint32_t contentTop = y + TOOLBAR_H + 6;
+    uint32_t contentH = h > (uint32_t)(TOOLBAR_H + STATUS_H + 12) ? h - TOOLBAR_H - STATUS_H - 12 : 0;
+    if (contentH > 0) {
+        framebuffer::fill_rect(x + CONTENT_X, contentTop, w - CONTENT_X * 2, contentH, 0xFFFAFBFD);
+    }
+
+    if (maxScroll() > 0) {
+        uint32_t trackX = x + w - 22;
+        uint32_t trackY = contentTop + 4;
+        uint32_t trackH = contentH > 8 ? contentH - 8 : contentH;
+        framebuffer::fill_rect(trackX, trackY, 6, trackH, 0xFFE0E4EB);
+        int thumbH = (int)((trackH * (contentH ? contentH : 1)) / 180);
+        if (thumbH < 20) thumbH = 20;
+        int maxScrollValue = maxScroll();
+        int thumbY = (int)trackY;
+        if (maxScrollValue > 0 && (int)trackH > thumbH) {
+            thumbY += ((int)trackH - thumbH) * m_scrollY / maxScrollValue;
+        }
+        framebuffer::fill_rect(trackX, (uint32_t)thumbY, 6, (uint32_t)thumbH, 0xFF848C9C);
+    }
+
+    framebuffer::fill_rect(x, y + h - STATUS_H, w, STATUS_H, 0xFF262A34);
+    framebuffer::fill_rect(x, y + h - STATUS_H, w, 1, 0xFF586076);
+}
+
+void NavigatorApp::onMouseMove(int x, int y)
+{
+    bool hover = hitHelpLink(x, y);
+    if (hover != m_helpLinkHover) {
+        m_helpLinkHover = hover;
+        if (hover) setStatus("Link: Open guideXOS Help");
+        else setStatus("Ready.");
+    }
+}
+
+void NavigatorApp::onMouseDown(int x, int y, uint8_t button)
+{
+    if (button == 1 && hitHelpLink(x, y)) {
+        setStatus("Open guideXOS Help is a placeholder for future guideWeb/guideNet integration.");
+    }
+}
+
+void NavigatorApp::onWidgetClick(int widgetId)
+{
+    switch (widgetId) {
+        case WID_BACK:
+            setStatus("Back is not implemented yet.");
+            break;
+        case WID_FORWARD:
+            setStatus("Forward is not implemented yet.");
+            break;
+        case WID_RELOAD:
+            setStatus("Reload requested for file:///docs/index.html.");
+            break;
+        case WID_HOME:
+            m_scrollY = 0;
+            setStatus("Home opened: file:///docs/index.html.");
+            break;
+        default:
+            break;
+    }
+}
+
+void NavigatorApp::onKeyDown(uint32_t key)
+{
+    if (key == shell::KEY_PGUP) {
+        m_scrollY -= 48;
+        clampScroll();
+        setStatus("Scrolled up.");
+    } else if (key == shell::KEY_PGDN) {
+        m_scrollY += 48;
+        clampScroll();
+        setStatus("Scrolled down.");
+    } else if (key == shell::KEY_HOME) {
+        m_scrollY = 0;
+        setStatus("Home position.");
+    }
+}
+
+void NavigatorApp::setStatus(const char* text)
+{
+    strcopy(m_status, text ? text : "", MAX_STATUS_LEN);
+    invalidate();
+}
+
+void NavigatorApp::updateButtons()
+{
+    if (!m_window) return;
+    m_window->widgetCount = 0;
+    addButton(16, 12, BUTTON_W, BUTTON_H, "Back");
+    addButton(16 + BUTTON_W + BUTTON_GAP, 12, BUTTON_W, BUTTON_H, "Forward");
+    addButton(16 + (BUTTON_W + BUTTON_GAP) * 2, 12, BUTTON_W, BUTTON_H, "Reload");
+    addButton(16 + (BUTTON_W + BUTTON_GAP) * 3, 12, BUTTON_W, BUTTON_H, "Home");
+}
+
+bool NavigatorApp::hitHelpLink(int x, int y) const
+{
+    int linkX = CONTENT_X + 14;
+    int linkY = CONTENT_Y + 108 - m_scrollY;
+    return x >= linkX && x < linkX + 120 && y >= linkY && y < linkY + 14;
+}
+
+int NavigatorApp::maxScroll() const
+{
+    int visible = m_window ? ((int)m_window->h - TOOLBAR_H - STATUS_H - 12) : 0;
+    int overflow = 180 - visible;
+    return overflow > 0 ? overflow : 0;
+}
+
+void NavigatorApp::clampScroll()
+{
+    int maximum = maxScroll();
+    if (m_scrollY < 0) m_scrollY = 0;
+    if (m_scrollY > maximum) m_scrollY = maximum;
+}
+
+// ============================================================
 // App Registration
 // ============================================================
 
@@ -4300,6 +4466,7 @@ void registerKernelApps() {
     app::AppManager::registerApp("TaskManager", 0xFFB44646, TaskManagerApp::create);
     app::AppManager::registerApp("Files", 0xFFC8B43C, FileExplorerApp::create);
     app::AppManager::registerApp("FileExplorer", 0xFFC8B43C, FileExplorerApp::create);
+    app::AppManager::registerApp("guideXOS Navigator", 0xFF4678BE, NavigatorApp::create);
     app::AppManager::registerApp("Trash", 0xFF9098A4, TrashApp::create);
     app::AppManager::registerApp("DiskManager", 0xFF7050C0, DiskManagerApp::create);
 }

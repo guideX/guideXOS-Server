@@ -60,6 +60,7 @@
 #include "task_manager.h"
 #include "vnc_server.h"
 #include "paint.h"
+#include "navigator.h"
 #include "image_viewer.h"
 #include "onscreen_keyboard.h"
 #include "shutdown_dialog.h"
@@ -159,6 +160,7 @@ static void help(){
                  " clock\n"
                  " taskmgr\n"
                  " paint\n"
+                 " navigator\n"
                  " imgview [file] | osk\n"
                  " shutdown | msgbox <text> | welcome\n"
                  " notify <text> | notify.clear\n"
@@ -484,6 +486,12 @@ using namespace gxos;
             if(!requireCompositor()) continue;
             uint64_t pid = apps::Paint::Launch();
             std::cout<<"Paint launched, pid="<<pid<<std::endl;
+        }
+        else if (cmd=="navigator"){
+            if(!requireCompositor()) continue;
+            std::string err;
+            if(gui::DesktopService::LaunchApp("guideXOS Navigator", err)) std::cout<<"guideXOS Navigator launched"<<std::endl;
+            else std::cout<<"guideXOS Navigator launch failed: "<<err<<std::endl;
         }
         else if (cmd=="imgview"){
             if(!requireCompositor()) continue;

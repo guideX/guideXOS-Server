@@ -25,6 +25,7 @@
 #include "disk_manager.h"
 #include "control_panel.h"
 #include "display_options.h"
+#include "navigator.h"
 #include "trash.h"
 #include "package_manager.h"
 #include <algorithm>
@@ -789,6 +790,9 @@ namespace gxos {
             }
             else if (appName == "DisplayOptions" || appName == "Display Settings" || appName == "Desktop Background" || appName == "Wallpaper") {
                 apps::DisplayOptions::Launch();
+            }
+            else if (appName == "guideXOS Navigator") {
+                apps::Navigator::Launch();
             }
             else if (appName == "Trash") {
                 apps::Trash::Launch();

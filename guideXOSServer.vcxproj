@@ -319,6 +319,7 @@
     <ClInclude Include="native_elf_image_loader.h" />
     <ClInclude Include="native_elf_launch_pipeline.h" />
     <ClInclude Include="native_elf_trampoline_win64.h" />
+    <ClInclude Include="navigator.h" />
     <ClInclude Include="notepad.h" />
     <ClInclude Include="notification_manager.h" />
     <ClInclude Include="onscreen_keyboard.h" />
@@ -548,6 +549,7 @@
     <ClCompile Include="native_elf_image_loader.cpp" />
     <ClCompile Include="native_elf_launch_pipeline.cpp" />
     <ClCompile Include="native_elf_trampoline_win64.cpp" />
+    <ClCompile Include="navigator.cpp" />
     <ClCompile Include="notepad.cpp" />
     <ClCompile Include="notification_manager.cpp" />
     <ClCompile Include="onscreen_keyboard.cpp" />
@@ -746,3 +748,4 @@
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>
 </Project>
+

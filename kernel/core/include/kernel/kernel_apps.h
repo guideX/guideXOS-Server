@@ -363,6 +363,52 @@ private:
     static bool drawArgbIconBuffer(const uint32_t* pixels, uint32_t srcW, uint32_t srcH, uint32_t x, uint32_t y, uint32_t width, uint32_t height);
 };
 
+class NavigatorApp : public app::KernelApp {
+public:
+    NavigatorApp();
+    virtual ~NavigatorApp() override;
+
+    virtual bool init() override;
+    virtual void shutdown() override;
+    virtual void draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) override;
+    virtual void onMouseMove(int x, int y) override;
+    virtual void onMouseDown(int x, int y, uint8_t button) override;
+    virtual void onWidgetClick(int widgetId) override;
+    virtual void onKeyDown(uint32_t key) override;
+
+    static app::KernelApp* create() { return new NavigatorApp(); }
+
+private:
+    static const int MAX_STATUS_LEN = 128;
+    static const int TOOLBAR_H = 48;
+    static const int STATUS_H = 24;
+    static const int BUTTON_W = 64;
+    static const int BUTTON_H = 22;
+    static const int BUTTON_GAP = 8;
+    static const int CONTENT_X = 16;
+    static const int CONTENT_Y = 62;
+    static const int ADDRESS_X = 298;
+    static const int ADDRESS_Y = 12;
+    static const int ADDRESS_H = 22;
+
+    enum WidgetIds {
+        WID_BACK = 1,
+        WID_FORWARD = 2,
+        WID_RELOAD = 3,
+        WID_HOME = 4,
+    };
+
+    char m_status[MAX_STATUS_LEN];
+    int m_scrollY;
+    bool m_helpLinkHover;
+
+    void setStatus(const char* text);
+    void updateButtons();
+    bool hitHelpLink(int x, int y) const;
+    int maxScroll() const;
+    void clampScroll();
+};
+
 // ============================================================
 // Disk Manager App (baremetal)
 // ============================================================

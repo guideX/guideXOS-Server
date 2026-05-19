@@ -544,6 +544,7 @@ static DesktopIcon s_desktopIcons[] = {
     {"Console",     0xFF78B450, true, false, -1, -1},  // green, pinned
     {"Trash",       0xFF9098A4, true, false, -1, -1},  // gray, pinned
     {"DisplayOptions", 0xFF606878, true, false, -1, -1}, // display options
+    {"guideXOS Navigator", 0xFF4678BE, true, false, -1, -1}, // navigator
     {"Paint",       0xFFC87830, false, true, -1, -1},  // orange, recent
     {"Clock",       0xFF4690C8, false, true, -1, -1},  // blue, recent
     {"TaskManager", 0xFFB44646, true, false, -1, -1},  // red, pinned (matches registered app name)
@@ -571,6 +572,7 @@ static StartMenuApp s_startMenuApps[] = {
     {"TaskManager", true,  false, 0xFFB44646},  // pinned
     {"DiskManager", true,  false, 0xFFB48C46},  // pinned (orange-brown for disk)
     {"DisplayOptions", true, false, 0xFF606878}, // display options
+    {"guideXOS Navigator", true, false, 0xFF4678BE}, // pinned navigator
     {"HDInstaller", true,  false, 0xFFB48C46},  // pinned (orange-brown for installer)
     {"AppModel",    true,  false, 0xFF5587D2},  // pinned app model demo entry
     {"Paint",       false, true,  0xFFC87830},  // recent
@@ -589,6 +591,7 @@ static const char* s_allProgramsList[] = {
     "ControlPanel",
     "DiskManager",
     "Files",
+    "guideXOS Navigator",
     "HDInstaller",
     "ImgViewer",
     "AppModel",

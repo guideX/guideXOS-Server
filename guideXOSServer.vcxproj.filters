@@ -585,6 +585,9 @@
     <ClInclude Include="desktop_wallpaper.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="navigator.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="display_options.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -1301,6 +1304,9 @@
     <ClCompile Include="native_elf_trampoline_win64.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="navigator.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="trash.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -1510,3 +1516,4 @@
     <Page Include="GuideXOS.FileExplorer\Views\InputDialog.xaml" />
   </ItemGroup>
 </Project>
+
