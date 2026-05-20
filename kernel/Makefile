@@ -45,29 +45,33 @@ KERNEL_PE := $(BIN_DIR)/kernel.pe
 KERNEL := $(BIN_DIR)/kernel.elf
 
 # Architecture-specific settings (sets CXX, AS, LD, and ARCH_CFLAGS)
-include kernel/arch/$(ARCH)/Makefile.arch
+include arch/$(ARCH)/Makefile.arch
 
 # Common compiler flags
 CFLAGS := -std=c++14 -ffreestanding -O2 -Wall -Wextra -fno-exceptions -fno-rtti
 CFLAGS += -nostdlib -nostdinc++ -fno-builtin
 CFLAGS += -DGXOS_BARE_METAL
-CFLAGS += -Ikernel/core/include -Ikernel/arch/$(ARCH)/include
+CFLAGS += -Icore/include -Iarch/$(ARCH)/include
 # Append architecture-specific flags
 CFLAGS += $(ARCH_CFLAGS)
 
 # Linker flags
-LDFLAGS := -T kernel/arch/$(ARCH)/linker.ld -nostdlib $(ARCH_LDFLAGS)
+# LINKER_SCRIPT_FLAG is defined per-arch: compiler-driver arches (x86) use -Wl,-T,
+# while plain ld arches (amd64) use -T directly.
+# Compiler-driver-only flags like -ffreestanding/-nostdlib live in ARCH_LDFLAGS.
+LDFLAGS := $(LINKER_SCRIPT_FLAG)arch/$(ARCH)/linker.ld $(ARCH_LDFLAGS)
+# LIBS is set per-arch in Makefile.arch
 
 # Source files
-CORE_SOURCES := $(wildcard kernel/core/*.cpp)
-ARCH_SOURCES := $(wildcard kernel/arch/$(ARCH)/*.cpp)
-ASM_SOURCES := $(wildcard kernel/arch/$(ARCH)/*.asm) $(wildcard kernel/arch/$(ARCH)/*.s)
+CORE_SOURCES := $(wildcard core/*.cpp)
+ARCH_SOURCES := $(wildcard arch/$(ARCH)/*.cpp)
+ASM_SOURCES := $(wildcard arch/$(ARCH)/*.asm) $(wildcard arch/$(ARCH)/*.s)
 
 # Object files
-CORE_OBJS := $(patsubst kernel/core/%.cpp,$(OBJ_DIR)/core/%.o,$(CORE_SOURCES))
-ARCH_OBJS := $(patsubst kernel/arch/$(ARCH)/%.cpp,$(OBJ_DIR)/arch/%.o,$(ARCH_SOURCES))
-ASM_OBJS := $(patsubst kernel/arch/$(ARCH)/%.asm,$(OBJ_DIR)/arch/%.o,$(ASM_SOURCES))
-ASM_OBJS += $(patsubst kernel/arch/$(ARCH)/%.s,$(OBJ_DIR)/arch/%.o,$(filter %.s,$(ASM_SOURCES)))
+CORE_OBJS := $(patsubst core/%.cpp,$(OBJ_DIR)/core/%.o,$(CORE_SOURCES))
+ARCH_OBJS := $(patsubst arch/$(ARCH)/%.cpp,$(OBJ_DIR)/arch/%.o,$(ARCH_SOURCES))
+ASM_OBJS := $(patsubst arch/$(ARCH)/%.asm,$(OBJ_DIR)/arch/%.o,$(ASM_SOURCES))
+ASM_OBJS += $(patsubst arch/$(ARCH)/%.s,$(OBJ_DIR)/arch/%.o,$(filter %.s,$(ASM_SOURCES)))
 
 ALL_OBJS := $(CORE_OBJS) $(ARCH_OBJS) $(ASM_OBJS)
 
@@ -115,22 +119,22 @@ $(KERNEL): $(ALL_OBJS)
 
 endif
 
-$(OBJ_DIR)/core/%.o: kernel/core/%.cpp
+$(OBJ_DIR)/core/%.o: core/%.cpp
 	@$(call MKDIR,$(OBJ_DIR)/core)
 	@echo "Compiling $<..."
 	$(CXX) $(CFLAGS) -c $< -o $@
 
-$(OBJ_DIR)/arch/%.o: kernel/arch/$(ARCH)/%.cpp
+$(OBJ_DIR)/arch/%.o: arch/$(ARCH)/%.cpp
 	@$(call MKDIR,$(OBJ_DIR)/arch)
 	@echo "Compiling $<..."
 	$(CXX) $(CFLAGS) -c $< -o $@
 
-$(OBJ_DIR)/arch/%.o: kernel/arch/$(ARCH)/%.asm
+$(OBJ_DIR)/arch/%.o: arch/$(ARCH)/%.asm
 	@$(call MKDIR,$(OBJ_DIR)/arch)
 	@echo "Assembling $<..."
 	$(AS) $(ASFLAGS) $< -o $@
 
-$(OBJ_DIR)/arch/%.o: kernel/arch/$(ARCH)/%.s
+$(OBJ_DIR)/arch/%.o: arch/$(ARCH)/%.s
 	@$(call MKDIR,$(OBJ_DIR)/arch)
 	@echo "Assembling $<..."
 	$(AS) $(ASFLAGS) $< -o $@

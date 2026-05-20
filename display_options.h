@@ -16,6 +16,8 @@ private:
     static uint64_t s_windowId;
     static int s_selectedIndex;
     static int s_appliedIndex;
+    static int s_selectedBackgroundIndex;
+    static int s_appliedBackgroundIndex;
     static int s_selectedGradientIndex;
     static int s_appliedGradientIndex;
     static int s_activeTab;
@@ -26,6 +28,7 @@ private:
     static void loadSelection();
     static void render();
     static void drawButton(int x, int y, int w, int h, const std::string& text, bool active, bool enabled);
+    static void drawBackgroundTile(int index, int x, int y, bool hover, bool selected, bool applied);
     static void drawWallpaperTile(int index, int x, int y, bool hover, bool selected, bool applied);
     static void drawGradientTile(int index, int x, int y, bool hover, bool selected, bool applied);
     static void handleMouseDown(int mx, int my);
@@ -34,6 +37,7 @@ private:
     static void handleDoubleClick(int mx, int my);
     static void applySelectedWallpaper();
     static void applySelectedGradient();
+    static void applySelectedBackground();
     static bool hit(int mx, int my, int x, int y, int w, int h);
 };
 

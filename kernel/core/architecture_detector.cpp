@@ -4,6 +4,7 @@
 // Copyright (c) 2026 guideXOS Server
 //
 
+#include <stdint.h>
 #include "include/kernel/architecture_detector.h"
 
 namespace kernel {

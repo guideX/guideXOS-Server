@@ -7,11 +7,13 @@
 
 #pragma once
 
-// In a freestanding GCC environment, <stdint.h> is one of the few
-// guaranteed headers. Use it to avoid typedef conflicts with GCC
+// In a freestanding GCC environment, <stdint.h> and <stddef.h> are among
+// the few guaranteed headers. Use them to avoid typedef conflicts with GCC
 // internal headers (e.g., stdint-gcc.h using 'long int' for int32_t).
+// <stddef.h> provides size_t, ptrdiff_t, and NULL for all GCC targets.
 #if defined(__GNUC__) || defined(__clang__)
 #include <stdint.h>
+#include <stddef.h>
 #else
 // MSVC or other compilers without freestanding <stdint.h>
 typedef signed char        int8_t;
@@ -24,26 +26,30 @@ typedef signed long long   int64_t;
 typedef unsigned long long uint64_t;
 #endif
 
-// Pointer-sized types
-#if defined(__x86_64__) || defined(__amd64__) || defined(_M_X64) || defined(__ia64__) || defined(_M_IA64) || defined(__arch64__) || defined(__sparcv9) || (defined(__riscv) && (__riscv_xlen == 64)) || defined(__powerpc64__) || defined(__ppc64__) || defined(_ARCH_PPC64)
+// Pointer-sized types (only needed for MSVC; GCC/Clang get them from stddef.h)
+#if !defined(__GNUC__) && !defined(__clang__)
+#if defined(_M_X64) || defined(_M_IA64)
     typedef uint64_t uintptr_t;
     typedef int64_t  intptr_t;
     typedef uint64_t size_t;
     typedef int64_t  ssize_t;
-#elif !defined(__GNUC__) && !defined(__clang__)
+#else
     typedef uint32_t uintptr_t;
     typedef int32_t  intptr_t;
     typedef uint32_t size_t;
     typedef int32_t  ssize_t;
 #endif
+#endif
 
-// NULL pointer for C compatibility
+// NULL pointer for non-GCC/Clang compilers (GCC/Clang get it from stddef.h)
+#if !defined(__GNUC__) && !defined(__clang__)
 #ifndef NULL
     #ifdef __cplusplus
         #define NULL 0
     #else
         #define NULL ((void*)0)
     #endif
+#endif
 #endif
 
 // Note: C++11 and later have nullptr as a keyword, don't redefine it

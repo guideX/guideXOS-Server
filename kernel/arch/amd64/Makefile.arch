@@ -45,6 +45,9 @@ ASFLAGS := -f win64
 # --image-base=0x100000 sets the base address to 1MB (standard kernel address)
 # This ensures addresses in the converted ELF match what the kernel expects
 ARCH_LDFLAGS := -no-pie --image-base=0x100000
+# Plain ld is used as the linker for amd64, so the linker script flag is -T directly.
+LINKER_SCRIPT_FLAG := -T
+# Plain ld cannot search for -lgcc; runtime support comes from the compiled objects.
 LIBS :=
 
 # Target information

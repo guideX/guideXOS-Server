@@ -176,4 +176,10 @@ void operator delete[](void*, size_t) noexcept
 {
 }
 
+// GCC emits references to __dso_handle for static object destruction
+// registration (__cxa_atexit).  In a freestanding kernel there is no
+// dynamic linker, so define it as a weak null symbol so the linker is
+// satisfied without pulling in atexit machinery.
+void* __dso_handle __attribute__((weak)) = nullptr;
+
 #endif // !_MSC_VER

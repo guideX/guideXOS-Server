@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|Win32">
@@ -233,6 +233,10 @@
     <ClInclude Include="kernel\arch\x86\include\arch\graphics.h" />
     <ClInclude Include="kernel\arch\x86\include\arch\pci_audio.h" />
     <ClInclude Include="kernel\arch\x86\include\arch\usb_hci.h" />
+    <ClInclude Include="guide_web_document.h" />
+    <ClInclude Include="guide_web_html_parser.h" />
+    <ClInclude Include="navigator_file_io.h" />
+    <ClInclude Include="navigator_html_parser.h" />
     <ClInclude Include="system_tray.h" />
     <ClInclude Include="welcome.h" />
   </ItemGroup>
@@ -361,10 +365,15 @@
     <ClCompile Include="kernel\arch\sparc64\zs_serial.cpp">
       <ObjectFileName>$(IntDir)zs_serial_sparc64.obj</ObjectFileName>
     </ClCompile>
+    <ClCompile Include="guide_web_html_parser.cpp" />
+    <ClCompile Include="navigator_file_io.cpp" />
+    <ClCompile Include="navigator_html_parser.cpp" />
     <ClCompile Include="system_tray.cpp" />
     <ClCompile Include="welcome.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <None Include="docs\desktop.html" />
+    <None Include="docs\index.html" />
     <None Include="examples\apps\future-gxapp\app.json" />
     <None Include="examples\apps\helloworld-elf\app.json" />
     <None Include="examples\apps\notepad\app.json" />
@@ -379,4 +388,3 @@
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>
 </Project>
-

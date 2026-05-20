@@ -61,11 +61,15 @@ image_viewer.cpp ^
 icon_theme_manager.cpp ^
 icons.cpp ^
 ipc_bus.cpp ^
+guide_web_html_parser.cpp ^
 kernel/core/architecture_detector.cpp ^
 lifecycle.cpp ^
 logger.cpp ^
 message_box.cpp ^
 module_manager.cpp ^
+navigator.cpp ^
+navigator_file_io.cpp ^
+navigator_html_parser.cpp ^
 native_app_debug_log.cpp ^
 native_app_process_table.cpp ^
 native_app_runtime.cpp ^

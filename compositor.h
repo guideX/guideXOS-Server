@@ -109,6 +109,7 @@ namespace gxos { namespace gui {
         static void freeWallpaper();
         static std::string g_wallpaperPath;
         static std::string g_wallpaperId;
+        static std::string g_backgroundScaleMode;
         static ImagePtr g_wallpaperImage;
         static uint32_t g_gradientTopColor;
         static uint32_t g_gradientBottomColor;

@@ -82,10 +82,10 @@ if ($Clean) {
         Write-Host "      Removed kernel build/" -ForegroundColor Gray
     }
     
-    $RootKernelBuildDir = Join-Path $RootDir "build\$Arch"
+    $RootKernelBuildDir = Join-Path $KernelDir "build\$Arch"
     if (Test-Path $RootKernelBuildDir) {
         Remove-Item -Recurse -Force $RootKernelBuildDir
-        Write-Host "      Removed build/$Arch/" -ForegroundColor Gray
+        Write-Host "      Removed kernel/build/$Arch/" -ForegroundColor Gray
     }
     
     Write-Host "      Clean complete" -ForegroundColor Green
@@ -223,9 +223,26 @@ if (!$SkipKernel) {
     } else {
         Write-Host "      Using: $Make" -ForegroundColor Cyan
 
+        # For x86 (i686) bare-metal builds, ensure the cross-compiler is in PATH.
+        # i686-elf-tools ships separately from MinGW and lives in C:\i686-elf-tools\bin.
+        $CrossCompilerPaths = @(
+            "C:\i686-elf-tools\bin"
+        )
+        if ($Arch -eq "x86") {
+            foreach ($ccPath in $CrossCompilerPaths) {
+                if ((Test-Path $ccPath) -and ($env:PATH -notlike "*$ccPath*")) {
+                    $env:PATH = "$ccPath;$env:PATH"
+                    Write-Host "      Added cross-compiler to PATH: $ccPath" -ForegroundColor Cyan
+                }
+            }
+            if (!(Get-Command i686-elf-g++ -ErrorAction SilentlyContinue)) {
+                Write-Host "      WARNING: i686-elf-g++ not found. Install i686-elf-tools to C:\i686-elf-tools" -ForegroundColor Yellow
+            }
+        }
+
         # Remove stale final kernel outputs before invoking make so a skipped
         # or failed build cannot be mistaken for a fresh kernel.
-        $KernelBinDir = Join-Path $RootDir "build\$Arch\bin"
+        $KernelBinDir = Join-Path $KernelDir "build\$Arch\bin"
         Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path $KernelBinDir "kernel.elf")
         Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path $KernelBinDir "kernel.pe")
 
@@ -250,17 +267,22 @@ if (!$SkipKernel) {
             }
         }
 
-        # Build kernel (Makefile is in kernel/ but expects to run from root)
-        & $Make -f kernel/Makefile ARCH=$Arch
+        # Build kernel.  The kernel Makefile uses paths relative to its own
+        # directory, so push into kernel/ first (mirrors what the root Makefile
+        # does: cd kernel && $(MAKE) ARCH=...).
+        Push-Location $KernelDir
+        & $Make ARCH=$Arch
 
         if ($LASTEXITCODE -ne 0) {
             Write-Host "      ERROR: Kernel build failed" -ForegroundColor Red
-            Pop-Location
+            Pop-Location   # kernel dir
+            Pop-Location   # root dir
             exit 1
         }
 
         Write-Host "      Kernel built successfully" -ForegroundColor Green
-        Pop-Location
+        Pop-Location   # back to root
+        Pop-Location   # back to original
         Write-Host ""
     }
 } else {
@@ -290,7 +312,7 @@ if (Test-Path $BootloaderBin) {
 }
 
 # Copy kernel if it exists
-$KernelBin = Join-Path $RootDir "build\$Arch\bin\kernel.elf"
+$KernelBin = Join-Path $KernelDir "build\$Arch\bin\kernel.elf"
 if ($KernelBuildSkipped) {
     Write-Host "      WARNING: Kernel build was skipped; not copying existing kernel.elf." -ForegroundColor Yellow
     Write-Host "               Run with a working AMD64 MinGW/GNU make toolchain to update ESP." -ForegroundColor Yellow
@@ -403,7 +425,7 @@ if (!(Test-Path (Join-Path $ESPDir "kernel.elf"))) {
     $AllReady = $false
 } else {
     $EspKernel = Get-Item (Join-Path $ESPDir "kernel.elf")
-    $BuiltKernel = Join-Path $RootDir "build\$Arch\bin\kernel.elf"
+    $BuiltKernel = Join-Path $KernelDir "build\$Arch\bin\kernel.elf"
     $NewestKernelSource = Get-ChildItem (Join-Path $RootDir "kernel") -Recurse -Include *.cpp,*.h,*.asm,*.s,Makefile,*.arch |
         Sort-Object LastWriteTime -Descending |
         Select-Object -First 1
@@ -412,7 +434,7 @@ if (!(Test-Path (Join-Path $ESPDir "kernel.elf"))) {
         Write-Host "        Kernel build was skipped, so this may still be an old boot image." -ForegroundColor Gray
         $AllReady = $false
     } elseif (!(Test-Path $BuiltKernel)) {
-        Write-Host "      ? built kernel missing at build\$Arch\bin\kernel.elf" -ForegroundColor Yellow
+        Write-Host "      ? built kernel missing at kernel/build/$Arch/bin/kernel.elf" -ForegroundColor Yellow
         $AllReady = $false
     } elseif ($NewestKernelSource -and (Get-Item $BuiltKernel).LastWriteTime -lt $NewestKernelSource.LastWriteTime) {
         Write-Host "      ? built kernel is older than source" -ForegroundColor Yellow

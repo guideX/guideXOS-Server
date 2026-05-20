@@ -5,13 +5,19 @@
 
 # Toolchain
 CXX := i686-elf-g++
-AS := nasm
-LD := i686-elf-ld
+AS  := nasm
+# Use the compiler driver as the linker so it can locate its own libgcc.a.
+LD  := i686-elf-g++
+# -Wl, prefix is required when passing linker flags through the compiler driver.
+LINKER_SCRIPT_FLAG := -Wl,-T,
 
 # Architecture-specific flags
-CFLAGS += -m32 -march=i686
-ASFLAGS := -f elf32
-LIBS :=
+CFLAGS   += -m32 -march=i686
+# Pass linker flags through the compiler driver with -Wl,
+# -ffreestanding and -nostdlib are compiler-driver flags (not valid for plain ld).
+ARCH_LDFLAGS := -ffreestanding -nostdlib -Wl,--nmagic
+ASFLAGS  := -f elf32
+LIBS     := -lgcc
 
 # Target information
 ARCH_BITS := 32

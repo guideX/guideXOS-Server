@@ -11,6 +11,7 @@ namespace gxos { namespace gui {
     struct DesktopConfigData {
         std::string wallpaperPath; // may be empty
         std::string wallpaperId; // stable built-in wallpaper id, e.g. desktop.wallpaper.id
+        std::string backgroundScaleMode; // fill, fit, stretch, center, or tile
         std::vector<std::string> pinned;
         std::vector<std::string> recent;
         std::vector<DesktopWindowRec> windows;
@@ -35,6 +36,7 @@ namespace gxos { namespace gui {
             auto parseIconPosArray=[&](const std::string& src, std::vector<DesktopIconPos>& outPos){ outPos.clear(); size_t i=0; skipWS(src,i); if(i>=src.size() || src[i]!='[') return false; ++i; skipWS(src,i); if(i<src.size() && src[i]==']'){ ++i; return true; } while(i<src.size()){ skipWS(src,i); if(i>=src.size()||src[i]!='{') return false; int depth=0; size_t start=i; size_t j=i; while(j<src.size()){ if(src[j]=='{') depth++; else if(src[j]=='}'){ depth--; if(depth==0){ ++j; break; } } ++j; } if(depth!=0) return false; std::string obj = src.substr(start, j-start); auto findStr2=[&](const char* key, std::string& outStr){ auto p=obj.find(std::string("\"")+key+"\""); if(p==std::string::npos) return false; auto c=obj.find(':',p); if(c==std::string::npos) return false; size_t ii=c+1; skipWS(obj,ii); if(ii>=obj.size()||obj[ii]!='"') return false; return parseJSONString(obj, ii, outStr); }; auto findInt2=[&](const char* key, long long& outVal){ auto p=obj.find(std::string("\"")+key+"\""); if(p==std::string::npos) return false; auto c=obj.find(':',p); if(c==std::string::npos) return false; size_t ii=c+1; skipWS(obj,ii); return parseJSONInt(obj, ii, outVal); }; DesktopIconPos ip; long long px=0,py=0; findStr2("name", ip.name); findInt2("x", px); findInt2("y", py); ip.x=(int)px; ip.y=(int)py; outPos.push_back(ip); i=j; skipWS(src,i); if(i<src.size() && src[i]==','){ ++i; continue; } if(i<src.size() && src[i]==']'){ ++i; return true; } return false; } return false; };
             std::string section; if(extractSection(txt, "wallpaper", section)){ if(!section.empty() && section[0]=='"'){ size_t i=0; parseJSONString(section, i, out.wallpaperPath); } }
             if(extractSection(txt, "desktop.wallpaper.id", section)){ if(!section.empty() && section[0]=='"'){ size_t i=0; parseJSONString(section, i, out.wallpaperId); } }
+            if(extractSection(txt, "desktop.background.scale", section)){ if(!section.empty() && section[0]=='"'){ size_t i=0; parseJSONString(section, i, out.backgroundScaleMode); } }
             if(extractSection(txt, "pinned", section)) parseStringArray(section, out.pinned);
             if(extractSection(txt, "recent", section)) parseStringArray(section, out.recent);
             if(extractSection(txt, "windows", section)) parseWindowsArray(section, out.windows);
@@ -47,6 +49,7 @@ namespace gxos { namespace gui {
             f << "{\n";
             f << "  \"wallpaper\": " << jsonEscape(data.wallpaperPath) << ",\n";
             f << "  \"desktop.wallpaper.id\": " << jsonEscape(data.wallpaperId) << ",\n";
+            f << "  \"desktop.background.scale\": " << jsonEscape(data.backgroundScaleMode.empty() ? "fill" : data.backgroundScaleMode) << ",\n";
             f << "  \"pinned\": ["; for(size_t i=0;i<data.pinned.size();++i){ if(i) f<<","; f<<jsonEscape(data.pinned[i]);} f << "],\n";
             f << "  \"recent\": ["; for(size_t i=0;i<data.recent.size();++i){ if(i) f<<","; f<<jsonEscape(data.recent[i]);} f << "],\n";
             f << "  \"windows\": [\n";

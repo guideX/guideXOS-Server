@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
     <Filter Include="Source Files">
@@ -297,6 +297,21 @@
     <ClInclude Include="kernel\arch\x86\include\arch\usb_hci.h">
       <Filter>Header Files\Architecture\x86</Filter>
     </ClInclude>
+    <ClInclude Include="kernel\core\include\kernel\shell.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="guide_web_document.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="guide_web_html_parser.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="navigator_file_io.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="navigator_html_parser.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="app_registry.cpp">
@@ -518,6 +533,18 @@
     <ClCompile Include="system_tray.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="kernel\core\shell.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="guide_web_html_parser.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="navigator_file_io.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="navigator_html_parser.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <None Include="examples\apps\future-gxapp\app.json" />
@@ -541,6 +568,7 @@
     <None Include="RUN-KERNEL.bat">
       <Filter>Build Scripts</Filter>
     </None>
+    <None Include="docs\index.html" />
+    <None Include="docs\desktop.html" />
   </ItemGroup>
 </Project>
-

@@ -689,6 +689,20 @@ enum class WallpaperType {
     BuiltIn        // Built-in wallpaper palette/preview for bare-metal
 };
 
+enum class BackgroundKind {
+    Image,
+    Gradient,
+    SolidColor
+};
+
+enum class WallpaperScaleMode {
+    Fill,
+    Fit,
+    Stretch,
+    Center,
+    Tile
+};
+
 struct WallpaperConfig {
     WallpaperType type;
     uint32_t topColor;       // For gradient or solid color
@@ -698,6 +712,7 @@ struct WallpaperConfig {
     uint32_t gridColor;      // Grid line color
     uint32_t gridSpacing;    // Grid spacing in pixels
     const char* wallpaperId; // Stable built-in wallpaper id
+    WallpaperScaleMode scaleMode; // Image scaling mode
     
     WallpaperConfig() 
         : type(WallpaperType::BuiltIn),
@@ -707,7 +722,8 @@ struct WallpaperConfig {
           showGrid(false),
           gridColor(0xFF192337),
           gridSpacing(100),
-          wallpaperId("legacy_blue_flower") {}
+          wallpaperId("legacy_blue_flower"),
+          scaleMode(WallpaperScaleMode::Fill) {}
 };
 
 static WallpaperConfig s_wallpaperConfig;
@@ -1657,6 +1673,30 @@ static const BuiltInGradientPalette* find_builtin_gradient(const char* id)
     return nullptr;
 }
 
+static const char* wallpaper_scale_mode_name(WallpaperScaleMode mode)
+{
+    switch (mode) {
+        case WallpaperScaleMode::Fit: return "fit";
+        case WallpaperScaleMode::Stretch: return "stretch";
+        case WallpaperScaleMode::Center: return "center";
+        case WallpaperScaleMode::Tile: return "tile";
+        case WallpaperScaleMode::Fill:
+        default: return "fill";
+    }
+}
+
+static WallpaperScaleMode parse_wallpaper_scale_mode(const char* value, bool* supported = nullptr)
+{
+    if (supported) *supported = true;
+    if (!value || value[0] == '\0' || desktop_str_eq(value, "fill") || desktop_str_eq(value, "cover")) return WallpaperScaleMode::Fill;
+    if (desktop_str_eq(value, "fit") || desktop_str_eq(value, "contain")) return WallpaperScaleMode::Fit;
+    if (desktop_str_eq(value, "stretch")) return WallpaperScaleMode::Stretch;
+    if (desktop_str_eq(value, "center")) return WallpaperScaleMode::Center;
+    if (desktop_str_eq(value, "tile")) return WallpaperScaleMode::Tile;
+    if (supported) *supported = false;
+    return WallpaperScaleMode::Fill;
+}
+
 static bool gximg_header_valid(const GximgHeader* header)
 {
     return header &&
@@ -1775,6 +1815,91 @@ static void draw_scaled_gximg(const WallpaperImageCache& cache, uint32_t x, uint
     draw_argb_icon_buffer(cache.pixels, cache.width, cache.height, x, y, width, height);
 }
 
+static void draw_wallpaper_gradient_base(uint32_t w, uint32_t h)
+{
+    for (uint32_t y = 0; y < h; y++) {
+        uint32_t lineColor = lerp_color(
+            s_wallpaperConfig.topColor,
+            s_wallpaperConfig.bottomColor,
+            y,
+            h > 1 ? h - 1 : 1
+        );
+        framebuffer::fill_rect(0, y, w, 1, lineColor);
+    }
+}
+
+static void draw_gximg_scaled_mode(const WallpaperImageCache& cache, uint32_t targetW, uint32_t targetH, WallpaperScaleMode mode)
+{
+    if (!cache.pixels || cache.width == 0 || cache.height == 0 || targetW == 0 || targetH == 0) return;
+
+    if (mode == WallpaperScaleMode::Tile) {
+        uint32_t stepW = cache.width ? cache.width : 1;
+        uint32_t stepH = cache.height ? cache.height : 1;
+        for (uint32_t ty = 0; ty < targetH; ty += stepH) {
+            for (uint32_t tx = 0; tx < targetW; tx += stepW) {
+                for (uint32_t y = 0; y < stepH && ty + y < targetH; ++y) {
+                    for (uint32_t x = 0; x < stepW && tx + x < targetW; ++x) {
+                        framebuffer::put_pixel(tx + x, ty + y, cache.pixels[y * cache.width + x]);
+                    }
+                }
+            }
+        }
+        return;
+    }
+
+    int32_t drawX = 0;
+    int32_t drawY = 0;
+    uint32_t drawW = targetW;
+    uint32_t drawH = targetH;
+
+    if (mode == WallpaperScaleMode::Center) {
+        drawW = cache.width;
+        drawH = cache.height;
+        drawX = ((int32_t)targetW - (int32_t)drawW) / 2;
+        drawY = ((int32_t)targetH - (int32_t)drawH) / 2;
+    } else if (mode == WallpaperScaleMode::Fit || mode == WallpaperScaleMode::Fill) {
+        uint64_t byWidthH = ((uint64_t)cache.height * targetW) / cache.width;
+        uint64_t byHeightW = ((uint64_t)cache.width * targetH) / cache.height;
+        if (mode == WallpaperScaleMode::Fit) {
+            if (byWidthH <= targetH) {
+                drawW = targetW;
+                drawH = (uint32_t)(byWidthH ? byWidthH : 1);
+            } else {
+                drawW = (uint32_t)(byHeightW ? byHeightW : 1);
+                drawH = targetH;
+            }
+        } else {
+            if (byWidthH >= targetH) {
+                drawW = targetW;
+                drawH = (uint32_t)(byWidthH ? byWidthH : 1);
+            } else {
+                drawW = (uint32_t)(byHeightW ? byHeightW : 1);
+                drawH = targetH;
+            }
+        }
+        drawX = ((int32_t)targetW - (int32_t)drawW) / 2;
+        drawY = ((int32_t)targetH - (int32_t)drawH) / 2;
+    }
+
+    int32_t minY = drawY < 0 ? 0 : drawY;
+    int32_t minX = drawX < 0 ? 0 : drawX;
+    int32_t maxY = drawY + (int32_t)drawH;
+    int32_t maxX = drawX + (int32_t)drawW;
+    if (maxY > (int32_t)targetH) maxY = (int32_t)targetH;
+    if (maxX > (int32_t)targetW) maxX = (int32_t)targetW;
+    if (maxX <= minX || maxY <= minY) return;
+
+    for (int32_t y = minY; y < maxY; ++y) {
+        uint32_t sy = (uint32_t)(((uint64_t)(y - drawY) * cache.height) / drawH);
+        if (sy >= cache.height) sy = cache.height - 1;
+        for (int32_t x = minX; x < maxX; ++x) {
+            uint32_t sx = (uint32_t)(((uint64_t)(x - drawX) * cache.width) / drawW);
+            if (sx >= cache.width) sx = cache.width - 1;
+            framebuffer::put_pixel((uint32_t)x, (uint32_t)y, cache.pixels[sy * cache.width + sx]);
+        }
+    }
+}
+
 static WallpaperImageCache* load_wallpaper_thumbnail_cache(const char* wallpaperId)
 {
     for (int i = 0; i < kBuiltInWallpaperCount; ++i) {
@@ -1874,6 +1999,33 @@ static void persist_wallpaper_id(const char* id)
     vfs::write_file("/desktop.wallpaper.id", id, (uint32_t)desktop_strlen(id));
 }
 
+static void persist_wallpaper_scale_mode()
+{
+    const char* mode = wallpaper_scale_mode_name(s_wallpaperConfig.scaleMode);
+    vfs::write_file("/desktop.background.scale", mode, (uint32_t)desktop_strlen(mode));
+}
+
+static void load_persisted_wallpaper_scale_mode()
+{
+    char modeBuf[32];
+    int32_t count = vfs::read_file("/desktop.background.scale", modeBuf, sizeof(modeBuf) - 1);
+    if (count <= 0) {
+        serial::puts("[desktop] background scale mode default=fill\n");
+        s_wallpaperConfig.scaleMode = WallpaperScaleMode::Fill;
+        return;
+    }
+    modeBuf[count] = '\0';
+    while (count > 0 && (modeBuf[count - 1] == '\n' || modeBuf[count - 1] == '\r' || modeBuf[count - 1] == ' ' || modeBuf[count - 1] == '\t')) {
+        modeBuf[--count] = '\0';
+    }
+    bool supported = true;
+    s_wallpaperConfig.scaleMode = parse_wallpaper_scale_mode(modeBuf, &supported);
+    serial::puts("[desktop] loaded background scale mode=");
+    serial::puts(wallpaper_scale_mode_name(s_wallpaperConfig.scaleMode));
+    serial::puts("\n");
+    if (!supported) serial::puts("[desktop] unsupported background scale mode, falling back to fill\n");
+}
+
 static void load_persisted_wallpaper_id()
 {
     char idBuf[96];
@@ -1883,6 +2035,9 @@ static void load_persisted_wallpaper_id()
     while (count > 0 && (idBuf[count - 1] == '\n' || idBuf[count - 1] == '\r' || idBuf[count - 1] == ' ' || idBuf[count - 1] == '\t')) {
         idBuf[--count] = '\0';
     }
+    serial::puts("[desktop] loaded saved background id=");
+    serial::puts(idBuf);
+    serial::puts("\n");
     const BuiltInGradientPalette* gradient = find_builtin_gradient(idBuf);
     if (gradient) {
         s_wallpaperConfig.type = WallpaperType::Gradient;
@@ -1892,6 +2047,7 @@ static void load_persisted_wallpaper_id()
         s_wallpaperConfig.wallpaperId = gradient->id;
         s_wallpaperConfig.showBranding = true;
         s_wallpaperConfig.showGrid = true;
+        serial::puts("[desktop] loaded background kind=gradient\n");
         return;
     }
 
@@ -1904,6 +2060,7 @@ static void load_persisted_wallpaper_id()
         s_wallpaperConfig.wallpaperId = entry->id;
         s_wallpaperConfig.showBranding = false;
         s_wallpaperConfig.showGrid = false;
+        serial::puts("[desktop] loaded background kind=image\n");
     } else {
         serial::puts("[desktop] Invalid persisted wallpaper id, using default\n");
     }
@@ -1927,6 +2084,7 @@ void set_wallpaper_by_id(const char* wallpaperId)
         s_wallpaperConfig.showBranding = true;
         s_wallpaperConfig.showGrid = true;
         persist_wallpaper_id(gradient->id);
+        persist_wallpaper_scale_mode();
         s_needsRedraw = true;
         return;
     }
@@ -1949,6 +2107,7 @@ void set_wallpaper_by_id(const char* wallpaperId)
     s_wallpaperConfig.showBranding = false;
     s_wallpaperConfig.showGrid = false;
     persist_wallpaper_id(entry->id);
+    persist_wallpaper_scale_mode();
     s_needsRedraw = true;
 }
 
@@ -1959,6 +2118,7 @@ const char* get_wallpaper_id()
 
 void reload_persisted_wallpaper()
 {
+    load_persisted_wallpaper_scale_mode();
     load_persisted_wallpaper_id();
 }
 
@@ -2073,12 +2233,15 @@ static void draw_background()
         }
 
         case WallpaperType::BuiltIn: {
+            draw_wallpaper_gradient_base(w, h);
             WallpaperImageCache* image = load_wallpaper_full_cache(get_wallpaper_id());
             if (image) {
                 serial::puts("[desktop] rendering wallpaper image for id=");
                 serial::puts(get_wallpaper_id());
+                serial::puts(" scale=");
+                serial::puts(wallpaper_scale_mode_name(s_wallpaperConfig.scaleMode));
                 serial::puts("\n");
-                draw_scaled_gximg(*image, 0, 0, w, h);
+                draw_gximg_scaled_mode(*image, w, h, s_wallpaperConfig.scaleMode);
             } else {
                 serial::puts("[desktop] wallpaper image fallback to gradient\n");
                 for (uint32_t y = 0; y < h; y++) {
@@ -4567,6 +4730,8 @@ void init()
     s_wallpaperConfig.gridColor = 0xFF192337;
     s_wallpaperConfig.gridSpacing = 100;
     s_wallpaperConfig.wallpaperId = "legacy_blue_flower";
+    s_wallpaperConfig.scaleMode = WallpaperScaleMode::Fill;
+    load_persisted_wallpaper_scale_mode();
     load_persisted_wallpaper_id();
     
     // Enable double buffering to prevent flickering during window movement

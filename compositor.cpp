@@ -67,6 +67,7 @@ namespace gxos {
 #endif
         std::string Compositor::g_wallpaperPath = "";
         std::string Compositor::g_wallpaperId = "";
+        std::string Compositor::g_backgroundScaleMode = "fill";
         ImagePtr Compositor::g_wallpaperImage = nullptr;
         uint32_t Compositor::g_gradientTopColor = 0xFF142850;
         uint32_t Compositor::g_gradientBottomColor = 0xFF0F121C;
@@ -136,6 +137,91 @@ namespace gxos {
             }
             ipc::Message out; out.type = (uint32_t)type; out.dstPid = dstPid; out.data.assign(payload.begin( ), payload.end( )); ipc::Bus::publish(kGuiChanOut, std::move(out), false); 
         }
+
+        struct BackgroundDrawRect {
+            int x;
+            int y;
+            int w;
+            int h;
+        };
+
+        static BackgroundDrawRect computeBackgroundDrawRect(const ImagePtr& image, int targetW, int targetH, BackgroundScaleMode mode)
+        {
+            if (!image || image->Width <= 0 || image->Height <= 0 || targetW <= 0 || targetH <= 0) {
+                return { 0, 0, targetW, targetH };
+            }
+            if (mode == BackgroundScaleMode::Stretch) return { 0, 0, targetW, targetH };
+            if (mode == BackgroundScaleMode::Center || mode == BackgroundScaleMode::Tile) {
+                return { (targetW - image->Width) / 2, (targetH - image->Height) / 2, image->Width, image->Height };
+            }
+
+            const double sx = static_cast<double>(targetW) / static_cast<double>(image->Width);
+            const double sy = static_cast<double>(targetH) / static_cast<double>(image->Height);
+            const double scale = (mode == BackgroundScaleMode::Fit) ? std::min(sx, sy) : std::max(sx, sy);
+            int drawW = std::max(1, static_cast<int>(image->Width * scale + 0.5));
+            int drawH = std::max(1, static_cast<int>(image->Height * scale + 0.5));
+            return { (targetW - drawW) / 2, (targetH - drawH) / 2, drawW, drawH };
+        }
+
+        static void drawBackgroundGradientToPixels(uint32_t* pixels, int fbW, int fbH, int pitch, uint32_t topColor, uint32_t bottomColor)
+        {
+            if (!pixels || fbW <= 0 || fbH <= 0 || pitch <= 0) return;
+            const int stride = pitch / 4;
+            uint8_t topR = static_cast<uint8_t>((topColor >> 16) & 0xFF);
+            uint8_t topG = static_cast<uint8_t>((topColor >> 8) & 0xFF);
+            uint8_t topB = static_cast<uint8_t>(topColor & 0xFF);
+            uint8_t botR = static_cast<uint8_t>((bottomColor >> 16) & 0xFF);
+            uint8_t botG = static_cast<uint8_t>((bottomColor >> 8) & 0xFF);
+            uint8_t botB = static_cast<uint8_t>(bottomColor & 0xFF);
+            for (int y = 0; y < fbH; ++y) {
+                float t = static_cast<float>(y) / static_cast<float>(fbH > 1 ? fbH - 1 : 1);
+                uint8_t r = static_cast<uint8_t>(topR + t * (botR - topR));
+                uint8_t g = static_cast<uint8_t>(topG + t * (botG - topG));
+                uint8_t b = static_cast<uint8_t>(topB + t * (botB - topB));
+                uint32_t color = 0xFF000000u | (static_cast<uint32_t>(r) << 16) | (static_cast<uint32_t>(g) << 8) | b;
+                for (int x = 0; x < fbW; ++x) {
+                    pixels[y * stride + x] = color;
+                }
+            }
+        }
+
+        static void drawBackgroundImageToPixels(uint32_t* pixels, int fbW, int fbH, int pitch, const ImagePtr& image, BackgroundScaleMode mode)
+        {
+            if (!image || !image->isValid()) return;
+            if (mode == BackgroundScaleMode::Tile) {
+                int stepW = std::max(1, image->Width);
+                int stepH = std::max(1, image->Height);
+                for (int y = 0; y < fbH; y += stepH) {
+                    for (int x = 0; x < fbW; x += stepW) {
+                        ImageRenderer::DrawImage(pixels, fbW, fbH, pitch, image, x, y);
+                    }
+                }
+                return;
+            }
+            BackgroundDrawRect r = computeBackgroundDrawRect(image, fbW, fbH, mode);
+            ImageRenderer::DrawImage(pixels, fbW, fbH, pitch, image, r.x, r.y, r.w, r.h);
+        }
+
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
+        static void drawBackgroundImageToHdc(HDC dc, RECT cr, const ImagePtr& image, BackgroundScaleMode mode)
+        {
+            if (!image || !image->isValid()) return;
+            int w = cr.right - cr.left;
+            int h = cr.bottom - cr.top;
+            if (mode == BackgroundScaleMode::Tile) {
+                int stepW = std::max(1, image->Width);
+                int stepH = std::max(1, image->Height);
+                for (int y = cr.top; y < cr.bottom; y += stepH) {
+                    for (int x = cr.left; x < cr.right; x += stepW) {
+                        ImageRenderer::DrawImage(dc, image, x, y);
+                    }
+                }
+                return;
+            }
+            BackgroundDrawRect r = computeBackgroundDrawRect(image, w, h, mode);
+            ImageRenderer::DrawImage(dc, image, cr.left + r.x, cr.top + r.y, r.w, r.h);
+        }
+#endif
 
         static const bool kEnableStartMenuIcons = true;
         static const int kStartMenuIconSize = 16;
@@ -699,7 +785,7 @@ namespace gxos {
             case WM_CLOSE: PostQuitMessage(0); return 0;
             case WM_SIZE: { RECT cr; GetClientRect(h, &cr); std::lock_guard<std::mutex> lk(g_lock); int taskbarH = 40; for (auto& kv : g_windows) { WinInfo& wi = kv.second; if (wi.maximized) { wi.x = cr.left; wi.y = cr.top; wi.w = cr.right - cr.left; wi.h = cr.bottom - taskbarH; wi.dirty = true; } } requestRepaint( ); return 0; }
             case WM_PAINT: {
-                PAINTSTRUCT ps; HDC dc = BeginPaint(h, &ps); RECT cr; GetClientRect(h, &cr); if (g_wallpaperImage && g_wallpaperImage->isValid()) { ImageRenderer::DrawImage(dc, g_wallpaperImage, cr.left, cr.top, cr.right - cr.left, cr.bottom - cr.top); } else { DesktopWallpaper::DrawGradient(dc, cr, g_gradientTopColor, g_gradientBottomColor, g_gradientAccentColor, true); DesktopWallpaper::DrawBranding(dc, cr); } drawDesktopIcons(dc, cr);
+                PAINTSTRUCT ps; HDC dc = BeginPaint(h, &ps); RECT cr; GetClientRect(h, &cr); DesktopWallpaper::DrawGradient(dc, cr, g_gradientTopColor, g_gradientBottomColor, g_gradientAccentColor, !g_wallpaperImage); if (g_wallpaperImage && g_wallpaperImage->isValid()) { drawBackgroundImageToHdc(dc, cr, g_wallpaperImage, WallpaperRegistry::ParseScaleMode(g_backgroundScaleMode)); } else { DesktopWallpaper::DrawBranding(dc, cr); } drawDesktopIcons(dc, cr);
                 // Draw application windows in Z-order (bottom to top)
                 const int titleBarH = UISettings::DefaultBarHeight; 
                 HFONT font = (HFONT)GetStockObject(ANSI_VAR_FONT); 
@@ -1449,13 +1535,29 @@ namespace gxos {
 
         void Compositor::sendFocus(uint64_t winId) { uint64_t ownerPid = 0; { std::lock_guard<std::mutex> lk(g_lock); auto it = g_windows.find(winId); if (it != g_windows.end( )) ownerPid = it->second.ownerPid; } publishOut(MsgType::MT_SetFocus, std::to_string(winId), ownerPid); }
         void Compositor::loadWallpaper(const std::string& idOrPath) {
-            if (const GradientEntry* gradient = WallpaperRegistry::FindGradientById(idOrPath)) {
-                g_wallpaperId = gradient->id;
+            const BackgroundEntry* entry = WallpaperRegistry::FindBackgroundById(idOrPath);
+            if (!entry && !idOrPath.empty()) {
+                std::string mappedId = WallpaperRegistry::IdForAssetPath(idOrPath);
+                if (!mappedId.empty()) {
+                    entry = WallpaperRegistry::FindBackgroundById(mappedId);
+                }
+            }
+            if (!entry) {
+                Logger::write(LogLevel::Warn, std::string("Compositor background fallback: invalid id/path '") + idOrPath + "'");
+                entry = &WallpaperRegistry::DefaultBackground();
+            }
+
+            Logger::write(LogLevel::Info, std::string("Compositor background select id=") + entry->id +
+                " kind=" + WallpaperRegistry::KindName(entry->kind) +
+                " scale=" + WallpaperRegistry::NormalizeScaleModeOrDefault(g_backgroundScaleMode));
+
+            if (entry->kind == BackgroundKind::Gradient) {
+                g_wallpaperId = entry->id;
                 g_wallpaperPath.clear();
                 g_wallpaperImage.reset();
-                g_gradientTopColor = gradient->topColor;
-                g_gradientBottomColor = gradient->bottomColor;
-                g_gradientAccentColor = gradient->accentColor;
+                g_gradientTopColor = entry->topColor;
+                g_gradientBottomColor = entry->bottomColor;
+                g_gradientAccentColor = entry->accentColor;
                 Logger::write(LogLevel::Info, std::string("Compositor gradient select id=") + g_wallpaperId);
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)
                 if (g_wallpaperBmp) { DeleteObject(g_wallpaperBmp); g_wallpaperBmp = nullptr; }
@@ -1465,39 +1567,41 @@ namespace gxos {
                 return;
             }
 
-            std::string id = WallpaperRegistry::ResolveIdOrDefault(idOrPath);
-            std::string path;
-            if (id == idOrPath || WallpaperRegistry::FindById(idOrPath)) {
-                path = WallpaperRegistry::ResolveAssetPathOrDefault(id);
-            } else {
-                std::string mappedId = WallpaperRegistry::IdForAssetPath(idOrPath);
-                if (!mappedId.empty()) {
-                    id = mappedId;
-                    path = WallpaperRegistry::ResolveAssetPathOrDefault(id);
-                } else {
-                    path = idOrPath;
-                    id = WallpaperRegistry::DefaultWallpaper().id;
-                }
+            if (entry->kind == BackgroundKind::SolidColor) {
+                g_wallpaperId = entry->id;
+                g_wallpaperPath.clear();
+                g_wallpaperImage.reset();
+                g_gradientTopColor = entry->solidColor;
+                g_gradientBottomColor = entry->solidColor;
+                g_gradientAccentColor = entry->accentColor;
+                Logger::write(LogLevel::Info, std::string("Compositor solid background select id=") + g_wallpaperId);
+                return;
             }
 
-            g_wallpaperId = id;
-            g_wallpaperPath = path;
-            Logger::write(LogLevel::Info, std::string("Compositor wallpaper select id=") + g_wallpaperId + " full=" + g_wallpaperPath);
-            g_wallpaperImage = PngLoader::LoadFromFile(path);
+            g_wallpaperId = entry->id;
+            g_wallpaperPath = entry->fullImagePath;
+            g_gradientTopColor = entry->topColor;
+            g_gradientBottomColor = entry->bottomColor;
+            g_gradientAccentColor = entry->accentColor;
+            Logger::write(LogLevel::Info, std::string("Compositor wallpaper select id=") + g_wallpaperId + " full=" + g_wallpaperPath + " thumb=" + entry->thumbnailPath);
+            g_wallpaperImage = PngLoader::LoadFromFile(g_wallpaperPath);
             if (!g_wallpaperImage) {
-                Logger::write(LogLevel::Warn, std::string("Compositor wallpaper load failed, falling back to gradient: ") + path);
-                const WallpaperEntry& fallback = WallpaperRegistry::DefaultWallpaper();
-                if (path != fallback.fullImagePath) {
+                Logger::write(LogLevel::Warn, std::string("Compositor wallpaper decode failed, trying default: ") + g_wallpaperPath);
+                const BackgroundEntry& fallback = WallpaperRegistry::DefaultBackground();
+                if (entry->id != fallback.id && fallback.kind == BackgroundKind::Image) {
                     Logger::write(LogLevel::Warn, std::string("Compositor wallpaper retrying default id=") + fallback.id + " full=" + fallback.fullImagePath);
                     g_wallpaperId = fallback.id;
                     g_wallpaperPath = fallback.fullImagePath;
+                    g_gradientTopColor = fallback.topColor;
+                    g_gradientBottomColor = fallback.bottomColor;
+                    g_gradientAccentColor = fallback.accentColor;
                     g_wallpaperImage = PngLoader::LoadFromFile(g_wallpaperPath);
                     if (g_wallpaperImage) {
                         Logger::write(LogLevel::Info, std::string("Compositor wallpaper default decode succeeded id=") + g_wallpaperId + " full=" + g_wallpaperPath);
                     }
                 }
                 if (!g_wallpaperImage) {
-                    Logger::write(LogLevel::Warn, std::string("Compositor wallpaper default failed, gradient fallback remains: ") + g_wallpaperPath);
+                    Logger::write(LogLevel::Warn, std::string("Compositor wallpaper default failed, using gradient fallback for id=") + g_wallpaperId);
                 }
             } else {
                 Logger::write(LogLevel::Info, std::string("Compositor wallpaper decode succeeded id=") + g_wallpaperId + " full=" + g_wallpaperPath);
@@ -1702,7 +1806,7 @@ namespace gxos {
             case MsgType::MT_Ping: { publishOut(MsgType::MT_Ping, s); } break;
             case MsgType::MT_DesktopLaunch: { launchAction(s); } break;
             case MsgType::MT_DesktopPins: { std::istringstream iss(s); std::string tok; while (std::getline(iss, tok, ';')) { if (tok.size( ) < 2) continue; if (tok[0] == '+') pinAction(tok.substr(1)); else if (tok[0] == '-') unpinAction(tok.substr(1)); } } break;
-            case MsgType::MT_DesktopWallpaperSet: { loadWallpaper(s); g_cfg.wallpaperId = g_wallpaperId; g_cfg.wallpaperPath = g_wallpaperPath; saveDesktopConfig( ); invalidate(0); } break;
+            case MsgType::MT_DesktopWallpaperSet: { loadWallpaper(s); g_cfg.wallpaperId = g_wallpaperId; g_cfg.wallpaperPath = g_wallpaperPath; g_cfg.backgroundScaleMode = g_backgroundScaleMode; saveDesktopConfig( ); invalidate(0); } break;
             case MsgType::MT_InputMouse: {
                 // Handle mouse input from kernel (bare-metal) or test harness
                 // Format: <x>|<y>|<button>|<action>
@@ -1884,6 +1988,13 @@ namespace gxos {
             DesktopConfigData cfg; std::string cfgErr; bool cfgOk = DesktopConfig::Load("desktop.json", cfg, cfgErr);
             g_cfg = cfg; // Store config
             Logger::write(LogLevel::Info, std::string("Compositor DesktopConfig loaded=") + (cfgOk ? "true" : "false") + " err=" + cfgErr);
+            std::string configuredScale = cfg.backgroundScaleMode.empty() ? "fill" : cfg.backgroundScaleMode;
+            g_backgroundScaleMode = WallpaperRegistry::NormalizeScaleModeOrDefault(configuredScale);
+            if (configuredScale != g_backgroundScaleMode) {
+                Logger::write(LogLevel::Warn, std::string("Compositor unsupported background scale mode '") + configuredScale + "', falling back to fill");
+            }
+            g_cfg.backgroundScaleMode = g_backgroundScaleMode;
+            Logger::write(LogLevel::Info, std::string("Compositor background scale mode=") + g_backgroundScaleMode);
             logCompositorList("config pinned before merge", g_cfg.pinned);
             logCompositorList("config recent before merge", g_cfg.recent);
             for (const auto& pinned : DesktopService::GetPinned()) {
@@ -1907,13 +2018,15 @@ namespace gxos {
             if (cfgOk) {
                 if (!cfg.wallpaperId.empty()) loadWallpaper(cfg.wallpaperId);
                 else if (!cfg.wallpaperPath.empty()) loadWallpaper(cfg.wallpaperPath);
-                else loadWallpaper(WallpaperRegistry::DefaultWallpaper().id);
+                else loadWallpaper(WallpaperRegistry::DefaultBackground().id);
                 g_cfg.wallpaperId = g_wallpaperId;
                 g_cfg.wallpaperPath = g_wallpaperPath;
+                g_cfg.backgroundScaleMode = g_backgroundScaleMode;
             } else {
-                loadWallpaper(WallpaperRegistry::DefaultWallpaper().id);
+                loadWallpaper(WallpaperRegistry::DefaultBackground().id);
                 g_cfg.wallpaperId = g_wallpaperId;
                 g_cfg.wallpaperPath = g_wallpaperPath;
+                g_cfg.backgroundScaleMode = g_backgroundScaleMode;
             }
 
             bool legacyLoaded = false; if (!cfgOk || cfg.windows.empty( )) {
@@ -2117,26 +2230,10 @@ namespace gxos {
             const int taskbarH = 40;
             const int titleBarH = 28;
             
+            drawBackgroundGradientToPixels(pixels, fbW, fbH - taskbarH, pitch, g_gradientTopColor, g_gradientBottomColor);
             if (g_wallpaperImage && g_wallpaperImage->isValid()) {
-                ImageRenderer::DrawImage(pixels, fbW, fbH, pitch, g_wallpaperImage, 0, 0, fbW, fbH);
+                drawBackgroundImageToPixels(pixels, fbW, fbH - taskbarH, pitch, g_wallpaperImage, WallpaperRegistry::ParseScaleMode(g_backgroundScaleMode));
             } else {
-                // Clear background with gradient (dark blue)
-                for (int y = 0; y < fbH - taskbarH; ++y) {
-                    float t = (float)y / (float)(fbH - taskbarH);
-                    uint8_t topR = (uint8_t)((g_gradientTopColor >> 16) & 0xFF);
-                    uint8_t topG = (uint8_t)((g_gradientTopColor >> 8) & 0xFF);
-                    uint8_t topB = (uint8_t)(g_gradientTopColor & 0xFF);
-                    uint8_t botR = (uint8_t)((g_gradientBottomColor >> 16) & 0xFF);
-                    uint8_t botG = (uint8_t)((g_gradientBottomColor >> 8) & 0xFF);
-                    uint8_t botB = (uint8_t)(g_gradientBottomColor & 0xFF);
-                    uint8_t r = (uint8_t)(topR + t * (botR - topR));
-                    uint8_t g = (uint8_t)(topG + t * (botG - topG));
-                    uint8_t b = (uint8_t)(topB + t * (botB - topB));
-                    uint32_t color = (r << 16) | (g << 8) | b;
-                    for (int x = 0; x < fbW; ++x) {
-                        pixels[y * (pitch/4) + x] = color;
-                    }
-                }
 
                 // Draw branding text
                 const char* brand = "guideXOS Server - UEFI Mode";

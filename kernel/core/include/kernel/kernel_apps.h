@@ -187,6 +187,8 @@ public:
 private:
     int m_selectedIndex;
     int m_appliedIndex;
+    int m_selectedBackgroundIndex;
+    int m_appliedBackgroundIndex;
     int m_selectedGradientIndex;
     int m_appliedGradientIndex;
     int m_activeTab;
@@ -194,6 +196,7 @@ private:
 
     void loadSelection();
     void applySelected();
+    int hitBackground(int x, int y) const;
     int hitWallpaper(int x, int y) const;
     int hitGradient(int x, int y) const;
 };
