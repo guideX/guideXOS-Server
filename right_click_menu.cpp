@@ -1,5 +1,6 @@
 #include "right_click_menu.h"
 #include "logger.h"
+#include "compositor.h"
 #include "desktop_service.h"
 #include <cstring>
 
@@ -9,6 +10,7 @@ bool RightClickMenu::s_visible = false;
 int RightClickMenu::s_x = 0;
 int RightClickMenu::s_y = 0;
 std::vector<RightClickMenu::MenuItem> RightClickMenu::s_items;
+int RightClickMenu::s_desktopItemIndex = -1;
 bool RightClickMenu::s_iconSubmenuVisible = false;
 int RightClickMenu::s_iconSubmenuIndex = -1;
 
@@ -16,13 +18,25 @@ void RightClickMenu::Show(int x, int y) {
     s_x = x;
     s_y = y;
     s_visible = true;
+    s_desktopItemIndex = -1;
     s_iconSubmenuVisible = false;
     buildItems();
     Logger::write(LogLevel::Info, "RightClickMenu shown");
 }
 
+void RightClickMenu::ShowForDesktopItem(int x, int y, int desktopItemIndex) {
+    s_x = x;
+    s_y = y;
+    s_visible = true;
+    s_desktopItemIndex = desktopItemIndex;
+    s_iconSubmenuVisible = false;
+    buildItems();
+    Logger::write(LogLevel::Info, "RightClickMenu shown for desktop item");
+}
+
 void RightClickMenu::Hide() {
     s_visible = false;
+    s_desktopItemIndex = -1;
     s_iconSubmenuVisible = false;
     s_items.clear();
 }
@@ -33,11 +47,14 @@ bool RightClickMenu::IsVisible() {
 
 void RightClickMenu::buildItems() {
     s_items.clear();
+    if (s_desktopItemIndex >= 0) {
+        s_items.push_back({"Open", false, false});
+        return;
+    }
+    s_items.push_back({"Refresh", false, false});
     s_items.push_back({"Display Options", false, false});
-    s_items.push_back({"Performance Widget", false, false});
-    s_items.push_back({"Save Settings", false, false});
     s_items.push_back({"Icon Size", true, false});
-    s_iconSubmenuIndex = 3;
+    s_iconSubmenuIndex = 2;
 }
 
 bool RightClickMenu::HandleClick(int mx, int my) {
@@ -69,13 +86,16 @@ bool RightClickMenu::HandleClick(int mx, int my) {
                 s_iconSubmenuVisible = !s_iconSubmenuVisible;
                 return true;
             }
-            if (s_items[idx].label == "Display Options") {
+            if (s_items[idx].label == "Open" && s_desktopItemIndex >= 0) {
+                Logger::write(LogLevel::Info, "Desktop item Open selected");
+                Compositor::openDesktopItem(s_desktopItemIndex);
+            } else if (s_items[idx].label == "Refresh") {
+                Logger::write(LogLevel::Info, "Desktop Refresh selected");
+                Compositor::requestDesktopRefresh();
+            } else if (s_items[idx].label == "Display Options") {
                 Logger::write(LogLevel::Info, "Display Options selected");
-            } else if (s_items[idx].label == "Performance Widget") {
-                Logger::write(LogLevel::Info, "Performance Widget toggled");
-            } else if (s_items[idx].label == "Save Settings") {
-                Logger::write(LogLevel::Info, "Save Settings selected");
-                DesktopService::SaveState();
+                std::string err;
+                DesktopService::LaunchApp("DisplayOptions", err);
             }
             Hide();
             return true;

@@ -29,6 +29,7 @@
 #include "trash.h"
 #include "package_manager.h"
 #include <algorithm>
+#include <cctype>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
@@ -656,6 +657,37 @@ namespace gxos {
             oss << InspectNativeAppPipeline(appIdOrDisplayName);
             oss << "\nExpected: find manifest, validate ELF if present, load image, prepare runtime, stop at executor gate unless experimental execution is enabled.\n";
             return oss.str();
+        }
+
+        bool DesktopService::OpenFilesystemEntry(const std::string& path, bool isDirectory, std::string& error) {
+            error.clear();
+            Logger::write(LogLevel::Info, std::string("Desktop filesystem open requested path=") + path + " directory=" + (isDirectory ? "true" : "false"));
+            if (path.empty()) {
+                error = "No filesystem path supplied";
+                return false;
+            }
+
+            if (isDirectory) {
+                apps::FileExplorer::Launch(path);
+                return true;
+            }
+
+            std::string lower = path;
+            std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+            if (lower.size() >= 4 && (lower.substr(lower.size() - 4) == ".txt" || lower.substr(lower.size() - 4) == ".log" || lower.substr(lower.size() - 4) == ".cfg" || lower.substr(lower.size() - 4) == ".ini")) {
+                apps::Notepad::LaunchWithFile(path);
+                return true;
+            }
+            if ((lower.size() >= 4 && (lower.substr(lower.size() - 4) == ".png" || lower.substr(lower.size() - 4) == ".bmp" || lower.substr(lower.size() - 4) == ".jpg" || lower.substr(lower.size() - 4) == ".gif")) ||
+                (lower.size() >= 5 && lower.substr(lower.size() - 5) == ".jpeg")) {
+                apps::ImageViewer::Launch(path);
+                return true;
+            }
+
+            error = "No file association registered for " + path;
+            Logger::write(LogLevel::Warn, "Desktop filesystem open failed: " + error);
+            NotificationManager::Add(error, NotificationLevel::Error);
+            return false;
         }
 
         bool DesktopService::LaunchApp(const std::string& name, std::string& error) {

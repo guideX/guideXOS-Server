@@ -126,8 +126,8 @@ int memcmp(const void* s1, const void* s2, size_t n)
 // ============================================================================
 
 namespace {
-    // 256 KB kernel heap - sufficient for a few app windows
-    static constexpr size_t KERNEL_HEAP_SIZE = 256 * 1024;
+    // 1 MB kernel heap - required for Navigator and multiple concurrent app windows
+    static constexpr size_t KERNEL_HEAP_SIZE = 1024 * 1024;
     static uint8_t g_kernelHeap[KERNEL_HEAP_SIZE];
     static size_t g_heapOffset = 0;
     

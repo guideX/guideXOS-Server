@@ -62,13 +62,39 @@ namespace gxos { namespace gui {
         WindowAnimState animState{};
         bool visible{true};
     };
-    struct DesktopItem { std::string label; std::string action; bool pinned{false}; bool selected{false}; int ix{-1}; int iy{-1}; };
+    enum class DesktopItemKind {
+        SystemObject,
+        FilesystemEntry,
+        Shortcut // TODO: future desktop shortcut persistence/creation.
+    };
+    enum class DesktopSystemObjectKind {
+        None,
+        Trash,
+        ThisSystem,
+        FileManager,
+        SystemSettings
+    };
+    struct DesktopItem {
+        std::string label;
+        std::string action;
+        std::string iconName;
+        std::string path;
+        DesktopItemKind kind{DesktopItemKind::SystemObject};
+        DesktopSystemObjectKind systemObject{DesktopSystemObjectKind::None};
+        bool isDirectory{false};
+        bool removable{false};
+        bool pinned{false};
+        bool selected{false};
+        int ix{-1};
+        int iy{-1};
+    };
     struct AppModelDemoWindowState { uint64_t windowId{0}; std::vector<RegisteredDesktopApp> apps; int selectedIndex{0}; std::string status; };
 
     class Compositor {
     public:
         static uint64_t start();
         static void requestDesktopRefresh();
+        static void openDesktopItem(int index);
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)
         static HWND g_hwnd; // expose for helper drawing
 #endif
@@ -172,6 +198,7 @@ namespace gxos { namespace gui {
         static int g_startMenuSel; static int g_startMenuScroll;
         static bool g_startMenuAllProgs; // "All Programs" view
         static std::vector<std::string> g_startMenuAllProgsSorted; // Sorted app names
+        static std::vector<std::string> g_startMenuPinnedRecent; // Start menu app pins/recent, separate from desktop files.
         // Taskbar menu state
         static bool g_taskbarMenuVisible;
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)

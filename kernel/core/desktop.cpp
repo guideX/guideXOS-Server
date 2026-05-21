@@ -305,6 +305,19 @@ static int desktop_strlen(const char* value)
     return len;
 }
 
+static void desktop_str_copy(char* dst, const char* src, int dstSize)
+{
+    if (!dst || dstSize <= 0) return;
+    int i = 0;
+    if (src) {
+        while (src[i] && i < dstSize - 1) {
+            dst[i] = src[i];
+            ++i;
+        }
+    }
+    dst[i] = '\0';
+}
+
 // ============================================================
 // Desktop state
 // ============================================================
@@ -528,6 +541,20 @@ static void apply_taskbar_layout()
 }
 
 // Desktop icon entries with enhanced management
+enum class DesktopItemKind : uint8_t {
+    SystemObject,
+    FilesystemEntry,
+    Shortcut // TODO: future desktop shortcut persistence/creation.
+};
+
+enum class DesktopSystemObjectKind : uint8_t {
+    None,
+    Trash,
+    ThisSystem,
+    FileManager,
+    SystemSettings
+};
+
 struct DesktopIcon {
     const char* label;
     uint32_t color;
@@ -535,22 +562,58 @@ struct DesktopIcon {
     bool recent;      // True if in recent apps list
     int32_t savedX;   // Saved X position (-1 = use default grid)
     int32_t savedY;   // Saved Y position (-1 = use default grid)
+    DesktopItemKind kind;
+    DesktopSystemObjectKind systemObject;
+    char path[vfs::VFS_MAX_PATH];
+    bool isDirectory;
+    bool removable;
 };
 
-// Desktop icons: now mutable to support pin/unpin
+static const char* kDesktopFolderPath = "/Desktop";
+static const int kSystemDesktopIconCount = 4;
+static const int kMaxDesktopFilesystemEntries = 32;
+
+static char s_desktopFileLabels[kMaxDesktopFilesystemEntries][vfs::VFS_MAX_FILENAME];
+static char s_desktopFilePaths[kMaxDesktopFilesystemEntries][vfs::VFS_MAX_PATH];
+
+// Desktop icons: system objects plus fixed VFS-backed slots for /Desktop entries.
 static DesktopIcon s_desktopIcons[] = {
-    {"Notepad",     0xFF78B450, true, false, -1, -1},  // green, pinned
-    {"Calculator",  0xFF4690C8, true, false, -1, -1},  // blue, pinned
-    {"Console",     0xFF78B450, true, false, -1, -1},  // green, pinned
-    {"Trash",       0xFF9098A4, true, false, -1, -1},  // gray, pinned
-    {"DisplayOptions", 0xFF606878, true, false, -1, -1}, // display options
-    {"guideXOS Navigator", 0xFF4678BE, true, false, -1, -1}, // navigator
-    {"Paint",       0xFFC87830, false, true, -1, -1},  // orange, recent
-    {"Clock",       0xFF4690C8, false, true, -1, -1},  // blue, recent
-    {"TaskManager", 0xFFB44646, true, false, -1, -1},  // red, pinned (matches registered app name)
-    {"Files",       0xFFC8B43C, true, false, -1, -1},  // yellow, pinned
-    {"ImgViewer",   0xFFC87830, false, false, -1, -1}, // orange
-    {"AppModel",    0xFF5587D2, true, false, -1, -1},  // blue, app model demo
+    {"Trash",           0xFF9098A4, true, false, -1, -1, DesktopItemKind::SystemObject, DesktopSystemObjectKind::Trash, "", false, false},
+    {"This System",     0xFFC8B43C, true, false, -1, -1, DesktopItemKind::SystemObject, DesktopSystemObjectKind::ThisSystem, "", false, false},
+    {"File Manager",    0xFFC8B43C, true, false, -1, -1, DesktopItemKind::SystemObject, DesktopSystemObjectKind::FileManager, "", false, false},
+    {"System Settings", 0xFF606878, true, false, -1, -1, DesktopItemKind::SystemObject, DesktopSystemObjectKind::SystemSettings, "", false, false},
+    {"", 0xFF9098A4, false, false, -1, -1, DesktopItemKind::FilesystemEntry, DesktopSystemObjectKind::None, "", false, true},
+    {"", 0xFF9098A4, false, false, -1, -1, DesktopItemKind::FilesystemEntry, DesktopSystemObjectKind::None, "", false, true},
+    {"", 0xFF9098A4, false, false, -1, -1, DesktopItemKind::FilesystemEntry, DesktopSystemObjectKind::None, "", false, true},
+    {"", 0xFF9098A4, false, false, -1, -1, DesktopItemKind::FilesystemEntry, DesktopSystemObjectKind::None, "", false, true},
+    {"", 0xFF9098A4, false, false, -1, -1, DesktopItemKind::FilesystemEntry, DesktopSystemObjectKind::None, "", false, true},
+    {"", 0xFF9098A4, false, false, -1, -1, DesktopItemKind::FilesystemEntry, DesktopSystemObjectKind::None, "", false, true},
+    {"", 0xFF9098A4, false, false, -1, -1, DesktopItemKind::FilesystemEntry, DesktopSystemObjectKind::None, "", false, true},
+    {"", 0xFF9098A4, false, false, -1, -1, DesktopItemKind::FilesystemEntry, DesktopSystemObjectKind::None, "", false, true},
+    {"", 0xFF9098A4, false, false, -1, -1, DesktopItemKind::FilesystemEntry, DesktopSystemObjectKind::None, "", false, true},
+    {"", 0xFF9098A4, false, false, -1, -1, DesktopItemKind::FilesystemEntry, DesktopSystemObjectKind::None, "", false, true},
+    {"", 0xFF9098A4, false, false, -1, -1, DesktopItemKind::FilesystemEntry, DesktopSystemObjectKind::None, "", false, true},
+    {"", 0xFF9098A4, false, false, -1, -1, DesktopItemKind::FilesystemEntry, DesktopSystemObjectKind::None, "", false, true},
+    {"", 0xFF9098A4, false, false, -1, -1, DesktopItemKind::FilesystemEntry, DesktopSystemObjectKind::None, "", false, true},
+    {"", 0xFF9098A4, false, false, -1, -1, DesktopItemKind::FilesystemEntry, DesktopSystemObjectKind::None, "", false, true},
+    {"", 0xFF9098A4, false, false, -1, -1, DesktopItemKind::FilesystemEntry, DesktopSystemObjectKind::None, "", false, true},
+    {"", 0xFF9098A4, false, false, -1, -1, DesktopItemKind::FilesystemEntry, DesktopSystemObjectKind::None, "", false, true},
+    {"", 0xFF9098A4, false, false, -1, -1, DesktopItemKind::FilesystemEntry, DesktopSystemObjectKind::None, "", false, true},
+    {"", 0xFF9098A4, false, false, -1, -1, DesktopItemKind::FilesystemEntry, DesktopSystemObjectKind::None, "", false, true},
+    {"", 0xFF9098A4, false, false, -1, -1, DesktopItemKind::FilesystemEntry, DesktopSystemObjectKind::None, "", false, true},
+    {"", 0xFF9098A4, false, false, -1, -1, DesktopItemKind::FilesystemEntry, DesktopSystemObjectKind::None, "", false, true},
+    {"", 0xFF9098A4, false, false, -1, -1, DesktopItemKind::FilesystemEntry, DesktopSystemObjectKind::None, "", false, true},
+    {"", 0xFF9098A4, false, false, -1, -1, DesktopItemKind::FilesystemEntry, DesktopSystemObjectKind::None, "", false, true},
+    {"", 0xFF9098A4, false, false, -1, -1, DesktopItemKind::FilesystemEntry, DesktopSystemObjectKind::None, "", false, true},
+    {"", 0xFF9098A4, false, false, -1, -1, DesktopItemKind::FilesystemEntry, DesktopSystemObjectKind::None, "", false, true},
+    {"", 0xFF9098A4, false, false, -1, -1, DesktopItemKind::FilesystemEntry, DesktopSystemObjectKind::None, "", false, true},
+    {"", 0xFF9098A4, false, false, -1, -1, DesktopItemKind::FilesystemEntry, DesktopSystemObjectKind::None, "", false, true},
+    {"", 0xFF9098A4, false, false, -1, -1, DesktopItemKind::FilesystemEntry, DesktopSystemObjectKind::None, "", false, true},
+    {"", 0xFF9098A4, false, false, -1, -1, DesktopItemKind::FilesystemEntry, DesktopSystemObjectKind::None, "", false, true},
+    {"", 0xFF9098A4, false, false, -1, -1, DesktopItemKind::FilesystemEntry, DesktopSystemObjectKind::None, "", false, true},
+    {"", 0xFF9098A4, false, false, -1, -1, DesktopItemKind::FilesystemEntry, DesktopSystemObjectKind::None, "", false, true},
+    {"", 0xFF9098A4, false, false, -1, -1, DesktopItemKind::FilesystemEntry, DesktopSystemObjectKind::None, "", false, true},
+    {"", 0xFF9098A4, false, false, -1, -1, DesktopItemKind::FilesystemEntry, DesktopSystemObjectKind::None, "", false, true},
 };
 static const int kDesktopIconCount = sizeof(s_desktopIcons) / sizeof(s_desktopIcons[0]);
 static const int kMaxRecentApps = 5;  // Max recent apps to show
@@ -1063,6 +1126,7 @@ static void get_context_menu_geometry(uint32_t& menuX, uint32_t& menuY, uint32_t
 static int find_nearest_icon_in_direction(int currentIcon, int direction);
 static void show_icon_notification(int iconIndex);
 static void toggle_show_desktop();
+static bool try_launch_kernel_app(const char* appName);
 
 // ============================================================
 // Icon Management Implementation
@@ -1226,9 +1290,99 @@ static int hit_test_app_model_dialog(int32_t mx, int32_t my)
     return -1;
 }
 
+static bool text_ends_with(const char* value, const char* suffix);
+
+static bool ensure_desktop_folder()
+{
+    serial::puts("[desktop] Desktop folder path selected: ");
+    serial::puts(kDesktopFolderPath);
+    serial::puts("\n");
+
+    vfs::FileInfo info{};
+    if (vfs::stat(kDesktopFolderPath, &info) == vfs::VFS_OK) {
+        if (info.type == vfs::FILE_TYPE_DIRECTORY) {
+            serial::puts("[desktop] Desktop folder already exists\n");
+            return true;
+        }
+        serial::puts("[desktop] Desktop folder path exists but is not a directory\n");
+        return false;
+    }
+
+    vfs::Status status = vfs::mkdir(kDesktopFolderPath);
+    if (status == vfs::VFS_OK || status == vfs::VFS_ERR_EXISTS) {
+        serial::puts("[desktop] Desktop folder created\n");
+        return true;
+    }
+
+    serial::puts("[desktop] Desktop folder creation failed; continuing with system icons\n");
+    return false;
+}
+
+static bool desktop_entry_is_known_image(const char* name)
+{
+    return text_ends_with(name, ".png") || text_ends_with(name, ".bmp") ||
+           text_ends_with(name, ".jpg") || text_ends_with(name, ".jpeg") ||
+           text_ends_with(name, ".gif");
+}
+
+static bool desktop_entry_is_text(const char* name)
+{
+    return text_ends_with(name, ".txt") || text_ends_with(name, ".log") ||
+           text_ends_with(name, ".cfg") || text_ends_with(name, ".ini") ||
+           text_ends_with(name, ".md");
+}
+
+static void enumerate_desktop_folder_items()
+{
+    for (int i = 0; i < kMaxDesktopFilesystemEntries; ++i) {
+        int iconIdx = kSystemDesktopIconCount + i;
+        if (iconIdx >= kDesktopIconCount) break;
+        s_desktopFileLabels[i][0] = '\0';
+        s_desktopFilePaths[i][0] = '\0';
+        s_desktopIcons[iconIdx].label = s_desktopFileLabels[i];
+        s_desktopIcons[iconIdx].path[0] = '\0';
+        s_desktopIcons[iconIdx].pinned = false;
+        s_desktopIcons[iconIdx].recent = false;
+        s_desktopIcons[iconIdx].isDirectory = false;
+        s_desktopIcons[iconIdx].removable = true;
+    }
+
+    if (!ensure_desktop_folder()) return;
+
+    serial::puts("[desktop] Desktop folder enumeration started\n");
+    uint8_t dir = vfs::opendir(kDesktopFolderPath);
+    if (dir == 0xFF) {
+        serial::puts("[desktop] Desktop folder enumeration failed\n");
+        return;
+    }
+
+    int slot = 0;
+    vfs::DirEntry entry{};
+    while (slot < kMaxDesktopFilesystemEntries && vfs::readdir(dir, &entry)) {
+        if (entry.name[0] == '.' && (entry.name[1] == '\0' || (entry.name[1] == '.' && entry.name[2] == '\0'))) continue;
+        int iconIdx = kSystemDesktopIconCount + slot;
+        desktop_str_copy(s_desktopFileLabels[slot], entry.name, (int)sizeof(s_desktopFileLabels[slot]));
+        vfs::join_path(kDesktopFolderPath, entry.name, s_desktopFilePaths[slot], sizeof(s_desktopFilePaths[slot]));
+        s_desktopIcons[iconIdx].label = s_desktopFileLabels[slot];
+        desktop_str_copy(s_desktopIcons[iconIdx].path, s_desktopFilePaths[slot], (int)sizeof(s_desktopIcons[iconIdx].path));
+        s_desktopIcons[iconIdx].pinned = true;
+        s_desktopIcons[iconIdx].recent = false;
+        s_desktopIcons[iconIdx].isDirectory = entry.type == vfs::FILE_TYPE_DIRECTORY;
+        s_desktopIcons[iconIdx].removable = true;
+        s_desktopIcons[iconIdx].color = s_desktopIcons[iconIdx].isDirectory ? 0xFFC8B43C : 0xFF9098A4;
+        serial::puts("[desktop] Desktop filesystem item discovered: ");
+        serial::puts(s_desktopIcons[iconIdx].path);
+        serial::puts(s_desktopIcons[iconIdx].isDirectory ? " [folder]\n" : " [file]\n");
+        ++slot;
+    }
+    vfs::closedir(dir);
+    serial::puts("[desktop] Desktop folder enumeration completed\n");
+}
+
 // Rebuild visible icon list based on pinned and recent status
 static void refresh_desktop_icons()
 {
+    enumerate_desktop_folder_items();
     s_visibleIconCount = 0;
     
     // First add all pinned icons
@@ -2492,12 +2646,29 @@ static const char* GetDesktopIconLogicalName(const char* label)
     if (text_equals(label, "DisplayOptions")) return "app.settings";
     if (text_equals(label, "Control Panel")) return "app.controlpanel";
     if (text_equals(label, "Settings")) return "app.settings";
+    if (text_equals(label, "This System")) return "place.computer";
+    if (text_equals(label, "File Manager")) return "app.files";
+    if (text_equals(label, "System Settings")) return "app.settings";
     if (text_equals(label, "Computer")) return "place.computer";
     if (text_equals(label, "Documents")) return "place.documents";
     if (text_equals(label, "Pictures")) return "place.pictures";
     if (text_equals(label, "Music")) return "place.music";
     if (text_equals(label, "Network")) return "place.network";
     return "file.generic";
+}
+
+static const char* GetDesktopIconLogicalNameForIcon(int iconIdx)
+{
+    if (iconIdx < 0 || iconIdx >= kDesktopIconCount) return "file.generic";
+    const DesktopIcon& icon = s_desktopIcons[iconIdx];
+    if (icon.kind == DesktopItemKind::FilesystemEntry) {
+        if (icon.isDirectory) return "file.folder";
+        if (desktop_entry_is_text(icon.label)) return "file.text";
+        if (desktop_entry_is_known_image(icon.label)) return "file.image";
+        if (text_ends_with(icon.label, ".elf") || text_ends_with(icon.label, ".gxapp")) return "app.generic";
+        return "file.unknown";
+    }
+    return GetDesktopIconLogicalName(icon.label);
 }
 
 static const char* GetStartMenuLogicalIconName(const char* label)
@@ -2592,6 +2763,12 @@ static const uint32_t* get_embedded_desktop_icon_pixels(const char* logicalName)
     if (text_equals(logicalName, "place.pictures"))    return kDesktopThemeIcon_Paint;
     if (text_equals(logicalName, "place.music"))       return kDesktopThemeIcon_Clock;
     if (text_equals(logicalName, "place.network"))     return kDesktopThemeIcon_Console;
+    if (text_equals(logicalName, "file.folder"))       return kDesktopThemeIcon_Files;
+    if (text_equals(logicalName, "file.text"))         return kDesktopThemeIcon_Notepad;
+    if (text_equals(logicalName, "file.image"))        return kDesktopThemeIcon_Paint;
+    if (text_equals(logicalName, "file.binary"))       return kDesktopThemeIcon_Console;
+    if (text_equals(logicalName, "file.unknown"))      return kDesktopThemeIcon_FileGeneric;
+    if (text_equals(logicalName, "file.generic"))      return kDesktopThemeIcon_FileGeneric;
     return kDesktopThemeIcon_FileGeneric;
 }
 
@@ -2641,7 +2818,7 @@ static bool draw_themed_start_menu_icon(uint32_t x, uint32_t y, const char* labe
 static bool draw_themed_desktop_icon(int iconIdx, uint32_t cx, uint32_t iy)
 {
     if (!s_enableDesktopIcons || iconIdx < 0 || iconIdx >= kDesktopIconCount) return false;
-    const char* logicalName = GetDesktopIconLogicalName(s_desktopIcons[iconIdx].label);
+    const char* logicalName = GetDesktopIconLogicalNameForIcon(iconIdx);
     const uint32_t* pixels = get_embedded_desktop_icon_pixels(logicalName);
     if (!pixels) return false;
 
@@ -2704,7 +2881,7 @@ static bool draw_themed_desktop_icon(int iconIdx, uint32_t cx, uint32_t iy)
 
     if (!s_desktopIconLoadAttempted[iconIdx]) {
         s_desktopIconLoadAttempted[iconIdx] = true;
-        const char* logicalName = GetDesktopIconLogicalName(s_desktopIcons[iconIdx].label);
+        const char* logicalName = GetDesktopIconLogicalNameForIcon(iconIdx);
         s_desktopIconImageCache[iconIdx] = manager.LoadIcon(logicalName, (int)s_desktopIconSize);
         if (!s_desktopIconImageCache[iconIdx] && !s_desktopIconMissingLogged[iconIdx]) {
             serial::puts("[desktop] themed icon unavailable: ");
@@ -2734,9 +2911,7 @@ static void draw_desktop_icon_item(int iconIdx, uint32_t cx, uint32_t cy, bool d
         draw_colored_desktop_icon(ix, iy, s_desktopIcons[iconIdx].color, lbl, dragging);
     }
 
-    if (s_desktopIcons[iconIdx].pinned) {
-        draw_text(ix + kIconSize - 8, iy + 2, "*", rgb(255, 220, 80), 1);
-    }
+    // TODO: draw shortcut/pin badges when DesktopItemKind::Shortcut is implemented.
 
     uint32_t labelY = iy + kIconSize + 4;
     int tw = measure_text(lbl);
@@ -3610,10 +3785,13 @@ static void handle_context_menu_command(int item)
             launch_app("DisplayOptions");
             break;
         case 3: { // New Folder
-            vfs::Status status = vfs::mkdir("/New Folder");
+            char newFolderPath[vfs::VFS_MAX_PATH]{};
+            vfs::join_path(kDesktopFolderPath, "New Folder", newFolderPath, sizeof(newFolderPath));
+            vfs::Status status = vfs::mkdir(newFolderPath);
             s_notification.title = "New Folder";
             if (status == vfs::VFS_OK) {
                 s_notification.message = "Created on desktop";
+                refresh_desktop_icons();
             } else if (status == vfs::VFS_ERR_EXISTS) {
                 s_notification.message = "Already exists";
             } else {
@@ -5331,7 +5509,64 @@ static void show_icon_notification(int displayIndex)
     if (displayIndex < 0 || displayIndex >= s_visibleIconCount) return;
     
     int iconIdx = s_visibleIconIndices[displayIndex];
+    const DesktopIcon& icon = s_desktopIcons[iconIdx];
     const char* label = s_desktopIcons[iconIdx].label;
+    serial::puts("[desktop] Open desktop item: ");
+    serial::puts(label);
+    serial::puts("\n");
+
+    if (icon.kind == DesktopItemKind::FilesystemEntry) {
+        if (icon.isDirectory) {
+            serial::puts("[desktop] Opening desktop folder in File Manager: ");
+            serial::puts(icon.path);
+            serial::puts("\n");
+            if (app::AppManager::launchAppWithParam("Files", icon.path)) return;
+            s_notification.title = label;
+            s_notification.message = "Unable to open folder";
+        } else if (desktop_entry_is_text(label)) {
+            serial::puts("[desktop] Opening desktop text file: ");
+            serial::puts(icon.path);
+            serial::puts("\n");
+            if (app::AppManager::launchAppWithParam("Notepad", icon.path)) return;
+            s_notification.title = label;
+            s_notification.message = "Unable to open file";
+        } else {
+            serial::puts("[desktop] No file handler for desktop file: ");
+            serial::puts(icon.path);
+            serial::puts("\n");
+            s_notification.title = label;
+            s_notification.message = "No file handler";
+        }
+        s_notification.visible = true;
+        s_notification.showTime = s_tickCounter;
+        return;
+    }
+
+    if (icon.kind == DesktopItemKind::SystemObject) {
+        switch (icon.systemObject) {
+            case DesktopSystemObjectKind::Trash:
+                if (try_launch_kernel_app("Trash")) return;
+                break;
+            case DesktopSystemObjectKind::ThisSystem:
+                if (app::AppManager::launchAppWithParam("Files", "/")) return;
+                if (try_launch_kernel_app("Files")) return;
+                break;
+            case DesktopSystemObjectKind::FileManager:
+                if (try_launch_kernel_app("Files")) return;
+                break;
+            case DesktopSystemObjectKind::SystemSettings:
+                if (try_launch_kernel_app("DisplayOptions")) return;
+                break;
+            default:
+                break;
+        }
+        s_notification.title = label;
+        s_notification.message = "System object unavailable";
+        s_notification.visible = true;
+        s_notification.showTime = s_tickCounter;
+        return;
+    }
+
     if (desktop_str_eq(label, "AppModel")) {
         open_app_model_viewer();
         app::AppLogger::logLaunch(label, app::LaunchResult::NotAvailable);
@@ -5561,17 +5796,19 @@ static void show_start_menu_notification(const char* label)
     
     // Close start menu before launching app
     s_startMenuOpen = false;
-    
+
     // Try to launch as a kernel GUI app
     if (try_launch_kernel_app(label)) {
         // App launched successfully
         app::AppLogger::logLaunch(label, app::LaunchResult::Success);
         return;
     }
-    
+
     // App not available in kernel mode - show notification
     s_notification.title = label;
-    s_notification.message = "Not available in bare-metal mode";
+    s_notification.message = app::AppManager::isAppAvailable(label)
+        ? "Failed to launch app"
+        : "Not available in bare-metal mode";
     s_notification.visible = true;
     s_notification.showTime = s_tickCounter;
     app::AppLogger::logLaunch(label, app::LaunchResult::NotAvailable);

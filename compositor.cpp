@@ -3,6 +3,9 @@
 #include "allocator.h"
 #include "desktop_state.h"
 #include "desktop_service.h"
+#include "desktop_folder.h"
+#include "file_icon_provider.h"
+#include "file_explorer.h"
 #include "shutdown_dialog.h"
 #include "icons.h"
 #include "right_click_menu.h"
@@ -87,6 +90,7 @@ namespace gxos {
         int Compositor::g_startMenuSel = 0; int Compositor::g_startMenuScroll = 0;
         bool Compositor::g_startMenuAllProgs = false; // "All Programs" view toggle
         std::vector<std::string> Compositor::g_startMenuAllProgsSorted; // Alphabetically sorted app list
+        std::vector<std::string> Compositor::g_startMenuPinnedRecent; // Start menu app pins/recent, independent of desktop files.
         bool Compositor::g_taskbarMenuVisible = false;
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)
         RECT Compositor::g_taskbarMenuRect{ 0,0,0,0 };
@@ -261,6 +265,65 @@ namespace gxos {
             return false;
         }
 
+        static bool startsWithText(const std::string& value, const char* prefix) {
+            if (!prefix) return false;
+            size_t prefixLen = std::strlen(prefix);
+            return value.size() >= prefixLen && value.compare(0, prefixLen, prefix) == 0;
+        }
+
+        static std::string desktopLayoutKey(const DesktopItem& item) {
+            if (item.kind == DesktopItemKind::SystemObject) return item.action;
+            if (item.kind == DesktopItemKind::FilesystemEntry) return std::string(item.isDirectory ? "desktop-folder:" : "desktop-file:") + item.path;
+            return item.action;
+        }
+
+        static DesktopItem makeSystemDesktopItem(DesktopSystemObjectKind kind, const char* label, const char* action, const char* iconName) {
+            DesktopItem item;
+            item.kind = DesktopItemKind::SystemObject;
+            item.systemObject = kind;
+            item.label = label;
+            item.action = action;
+            item.iconName = iconName;
+            item.removable = false;
+            item.pinned = true;
+            Logger::write(LogLevel::Info, std::string("Desktop system icon created: ") + item.action + " label=" + item.label + " icon=" + item.iconName);
+            return item;
+        }
+
+        static std::string desktopEntryIconName(const DesktopFolderEntry& entry) {
+            apps::ExplorerFileEntry explorerEntry;
+            explorerEntry.name = entry.name;
+            explorerEntry.fullPath = entry.virtualPath;
+            explorerEntry.kind = entry.isDirectory ? apps::ExplorerEntryKind::Directory : apps::ExplorerEntryKind::File;
+            explorerEntry.size = entry.size;
+            return apps::FileIconProvider::logicalIconNameForEntry(explorerEntry);
+        }
+
+        static DesktopItem makeFilesystemDesktopItem(const DesktopFolderEntry& entry) {
+            DesktopItem item;
+            item.kind = DesktopItemKind::FilesystemEntry;
+            item.label = entry.name;
+            item.path = entry.virtualPath;
+            item.action = std::string(entry.isDirectory ? "desktop-folder:" : "desktop-file:") + entry.virtualPath;
+            item.iconName = desktopEntryIconName(entry);
+            item.isDirectory = entry.isDirectory;
+            item.removable = true;
+            Logger::write(LogLevel::Info, std::string("Desktop filesystem icon created: ") + item.action + " icon=" + item.iconName);
+            return item;
+        }
+
+        static void refreshStartMenuPinnedRecentFromConfig(const DesktopConfigData& cfg, std::vector<std::string>& items) {
+            items.clear();
+            for (const auto& pinned : cfg.pinned) {
+                if (!pinned.empty() && !hasEquivalentListItem(items, pinned)) items.push_back(pinned);
+            }
+            for (const auto& recent : cfg.recent) {
+                if (!recent.empty() && !hasEquivalentListItem(items, recent)) items.push_back(recent);
+            }
+            if (items.size() > 20) items.resize(20);
+            logCompositorList("start menu pinned/recent", items);
+        }
+
         static const char* kHostedTrashPath = "/Trash";
         static const char* kHostedTrashInfoSuffix = ".trashinfo";
 
@@ -331,8 +394,8 @@ namespace gxos {
             if (label == "DiskManager") return "app.diskmanager";
             if (label == "HDInstaller") return "app.installer";
             if (isAppModelDemoAppLabel(label)) return "app.generic";
-            if (label == "Files" || label == "FileExplorer") return "app.files";
-            if (label == "Computer" || label == "Computer Files" || label == "ComputerFiles") return "place.computer";
+            if (label == "Files" || label == "FileExplorer" || label == "File Manager") return "app.files";
+            if (label == "Computer" || label == "This System" || label == "Computer Files" || label == "ComputerFiles") return "place.computer";
             if (label == "Paint") return "app.paint";
             if (label == "guideXOS Navigator") return "app.generic";
             if (label == "Clock") return "app.clock";
@@ -340,7 +403,7 @@ namespace gxos {
             if (label == "Pictures") return "place.pictures";
             if (label == "Music") return "place.music";
             if (label == "Network") return "place.network";
-            if (label == "Control Panel" || label == "ControlPanel") return "app.controlpanel";
+            if (label == "Control Panel" || label == "ControlPanel" || label == "System Settings") return "app.controlpanel";
             if (label == "DisplayOptions" || label == "Display Options" || label == "Display Settings" || label == "Desktop Background" || label == "Wallpaper") return "app.settings";
             if (label == "Settings") return "app.settings";
             return "app.generic";
@@ -401,9 +464,10 @@ namespace gxos {
             return true;
         }
 
-        static bool drawDesktopThemedIcon(HDC dc, const RECT& iconRect, const std::string& label) {
+        static bool drawDesktopThemedIcon(HDC dc, const RECT& iconRect, const DesktopItem& item) {
             try {
-                ImagePtr icon = IconThemeManager::Instance().LoadIcon(startMenuLogicalIconName(label), iconRect.right - iconRect.left);
+                const std::string logicalIcon = item.iconName.empty() ? startMenuLogicalIconName(item.label) : item.iconName;
+                ImagePtr icon = IconThemeManager::Instance().LoadIcon(logicalIcon, iconRect.right - iconRect.left);
                 if (!icon || !icon->isValid()) return false;
                 ImageRenderer::DrawImage(dc, icon, iconRect.left, iconRect.top, iconRect.right - iconRect.left, iconRect.bottom - iconRect.top);
                 return true;
@@ -447,10 +511,31 @@ namespace gxos {
             for (int idx : g_selectedDesktopIconIndices) {
                 if (idx >= 0 && idx < (int)g_items.size( )) selectedActions.insert(g_items[idx].action);
             }
-            g_items.clear( ); // pinned first
-            for (const auto& p : g_cfg.pinned) { DesktopItem di; di.label = p; di.action = p; di.pinned = true; di.ix = -1; di.iy = -1; g_items.push_back(di); } for (const auto& r : g_cfg.recent) { if (std::find(g_cfg.pinned.begin( ), g_cfg.pinned.end( ), r) != g_cfg.pinned.end( )) continue; DesktopItem di; di.label = r; di.action = r; di.pinned = false; di.ix = -1; di.iy = -1; g_items.push_back(di); }
+
+            refreshStartMenuPinnedRecentFromConfig(g_cfg, g_startMenuPinnedRecent);
+
+            g_items.clear( );
+            g_items.push_back(makeSystemDesktopItem(DesktopSystemObjectKind::Trash, "Trash", "system:Trash", hostedTrashIconLogicalName().c_str()));
+            g_items.push_back(makeSystemDesktopItem(DesktopSystemObjectKind::ThisSystem, "This System", "system:ThisSystem", "place.computer"));
+            g_items.push_back(makeSystemDesktopItem(DesktopSystemObjectKind::FileManager, "File Manager", "system:FileManager", "app.files"));
+            g_items.push_back(makeSystemDesktopItem(DesktopSystemObjectKind::SystemSettings, "System Settings", "system:SystemSettings", "app.settings"));
+
+            std::vector<DesktopFolderEntry> desktopEntries = DesktopFolderResolver::Enumerate();
+            for (const auto& entry : desktopEntries) {
+                g_items.push_back(makeFilesystemDesktopItem(entry));
+            }
+
             // Apply saved positions from config
-            for (auto& item : g_items) { for (const auto& ip : g_cfg.iconPositions) { if (ip.name == item.label) { item.ix = ip.x; item.iy = ip.y; break; } } }
+            for (auto& item : g_items) {
+                const std::string key = desktopLayoutKey(item);
+                for (const auto& ip : g_cfg.iconPositions) {
+                    if (ip.name == key || ip.name == item.label) {
+                        item.ix = ip.x;
+                        item.iy = ip.y;
+                        break;
+                    }
+                }
+            }
             // Assign default grid positions to any items that don't have saved positions
             const int margin = 20; const int iconW = 56; const int iconH = 56; const int cellW = iconW + 28; const int cellH = iconH + 38;
             int defIdx = 0; for (auto& item : g_items) { if (item.ix < 0 || item.iy < 0) { item.ix = margin + (defIdx % 8) * cellW; item.iy = margin + (defIdx / 8) * cellH; } defIdx++; }
@@ -593,10 +678,45 @@ namespace gxos {
             }
         }
 
+        void Compositor::openDesktopItem(int index) {
+            if (index < 0 || index >= (int)g_items.size()) return;
+            const DesktopItem& item = g_items[index];
+            Logger::write(LogLevel::Info, std::string("Desktop item open requested: ") + desktopLayoutKey(item));
+
+            std::string err;
+            if (item.kind == DesktopItemKind::SystemObject) {
+                switch (item.systemObject) {
+                    case DesktopSystemObjectKind::Trash:
+                        launchAction("Trash");
+                        return;
+                    case DesktopSystemObjectKind::ThisSystem:
+                        apps::FileExplorer::Launch("/");
+                        return;
+                    case DesktopSystemObjectKind::FileManager:
+                        apps::FileExplorer::Launch();
+                        return;
+                    case DesktopSystemObjectKind::SystemSettings:
+                        launchAction("ControlPanel");
+                        return;
+                    default:
+                        err = "Unknown system desktop object: " + item.label;
+                        break;
+                }
+            } else if (item.kind == DesktopItemKind::FilesystemEntry) {
+                if (DesktopService::OpenFilesystemEntry(item.path, item.isDirectory, err)) return;
+            } else {
+                err = "Desktop shortcuts are not implemented yet";
+            }
+
+            Logger::write(LogLevel::Warn, "Desktop item open failed: " + err);
+            NotificationManager::Add(err.empty() ? "Unable to open desktop item" : err, NotificationLevel::Error);
+        }
+
         void Compositor::requestDesktopRefresh() {
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)
             Logger::write(LogLevel::Info,
                 std::string("Desktop Trash icon refresh requested; trash items=") + std::to_string(hostedTrashItemCount()));
+            refreshDesktopItems();
             requestRepaint();
 #endif
         }
@@ -735,15 +855,16 @@ namespace gxos {
                 } else if (hover) { HBRUSH hov = CreateSolidBrush(RGB(50, 55, 65)); FillRect(dc, &cell, hov); DeleteObject(hov); HPEN hovP = CreatePen(PS_SOLID, 1, RGB(80, 100, 140)); HGDIOBJ oP = SelectObject(dc, hovP); HGDIOBJ oB = SelectObject(dc, GetStockObject(NULL_BRUSH)); Rectangle(dc, cell.left, cell.top, cell.right, cell.bottom); SelectObject(dc, oP); SelectObject(dc, oB); DeleteObject(hovP); }
                 RECT iconR{ x + (cellW - iconW) / 2, y + 6, x + (cellW - iconW) / 2 + iconW, y + 6 + iconH };
                 std::string lbl = it.label;
-                if (!drawDesktopThemedIcon(dc, iconR, lbl)) {
+                if (!drawDesktopThemedIcon(dc, iconR, it)) {
+                    if (!it.iconName.empty()) Logger::write(LogLevel::Warn, "Desktop icon fallback used for " + it.label + " logical=" + it.iconName);
                     COLORREF iconColor = RGB(90, 100, 120);
                     if (lbl == "Calculator" || lbl == "Clock") iconColor = RGB(70, 140, 200);
                     else if (lbl == "Notepad" || lbl == "Console") iconColor = RGB(120, 180, 80);
                     else if (lbl == "Trash") iconColor = RGB(150, 150, 160);
                     else if (lbl == "Paint" || lbl == "ImageViewer") iconColor = RGB(200, 120, 60);
                     else if (lbl == "TaskManager") iconColor = RGB(180, 70, 70);
-                    else if (lbl == "DiskManager" || lbl == "ControlPanel") iconColor = RGB(140, 90, 180);
-                    else if (lbl == "Files" || lbl == "ComputerFiles") iconColor = RGB(200, 180, 60);
+                    else if (lbl == "DiskManager" || lbl == "ControlPanel" || lbl == "System Settings") iconColor = RGB(140, 90, 180);
+                    else if (lbl == "Files" || lbl == "ComputerFiles" || lbl == "File Manager" || lbl == "This System" || it.isDirectory) iconColor = RGB(200, 180, 60);
                     else if (it.pinned) iconColor = RGB(90, 140, 220);
                     HBRUSH ib = CreateSolidBrush(iconColor); FillRect(dc, &iconR, ib); DeleteObject(ib);
                     {
@@ -757,7 +878,7 @@ namespace gxos {
                 SetTextColor(dc, RGB(0, 0, 0)); TextOutA(dc, x + 5, iconR.bottom + 5, lbl.c_str( ), (int)lbl.size( ));
                 SetTextColor(dc, RGB(230, 230, 240)); TextOutA(dc, x + 4, iconR.bottom + 4, lbl.c_str( ), (int)lbl.size( ));
                 // Pin indicator
-                if (it.pinned) { SetTextColor(dc, RGB(255, 200, 60)); const char* pin = "*"; TextOutA(dc, iconR.right - 10, iconR.top + 2, pin, 1); }
+                if (it.pinned && it.kind == DesktopItemKind::Shortcut) { SetTextColor(dc, RGB(255, 200, 60)); const char* pin = "*"; TextOutA(dc, iconR.right - 10, iconR.top + 2, pin, 1); }
                 idx++;
             }
             if (g_iconSelectionDragPending || g_iconSelectionDragActive) {
@@ -1052,7 +1173,7 @@ namespace gxos {
                         }
                     } else {
                         // Show pinned + recent
-                        for (size_t i = startIndex; i < g_items.size( ) && row < maxRows; ++i) {
+                        for (size_t i = startIndex; i < g_startMenuPinnedRecent.size( ) && row < maxRows; ++i) {
                             RECT r{ sm.left + 4, y, sm.left + leftColW - 4, y + rowH };
                             bool isSel = ((int)i == g_startMenuSel);
                             bool isHover = (cursor.x >= r.left && cursor.x <= r.right && cursor.y >= r.top && cursor.y <= r.bottom);
@@ -1065,10 +1186,10 @@ namespace gxos {
                                 FocusIndicator::DrawFocusRect(dc, r.left, r.top, r.right - r.left, r.bottom - r.top, 3, 2, 2);
                             }
                             
-                            std::string txt = g_items[i].label;
+                            std::string txt = g_startMenuPinnedRecent[i];
                             int textX = r.left + 4;
                             drawStartMenuIcon(dc, r, txt, textX);
-                            std::string displayText = (g_items[i].pinned ? "* " : "  ") + txt;
+                            std::string displayText = (hasEquivalentListItem(g_cfg.pinned, txt) ? "* " : "  ") + txt;
                             TextOutA(dc, textX, r.top + 4, displayText.c_str( ), (int)displayText.size( ));
                             y += rowH; row++;
                         }
@@ -1276,12 +1397,12 @@ namespace gxos {
                     int listBottom = btnY - 4; // above buttons
                     if (mx >= g_startMenuRect.left && mx <= g_startMenuRect.left + leftColW && my >= listTop && my <= listBottom) {
                         int idx = (my - listTop) / rowH + g_startMenuScroll;
-                        int itemCount = g_startMenuAllProgs ? (int)g_startMenuAllProgsSorted.size( ) : (int)g_items.size( );
+                        int itemCount = g_startMenuAllProgs ? (int)g_startMenuAllProgsSorted.size( ) : (int)g_startMenuPinnedRecent.size( );
                         if (idx >= 0 && idx < itemCount) {
                             uint64_t now = nowMs( );
                             if (g_lastItemIndex == idx && (now - g_lastItemClickTicks) < 450) {
                                 // Double-click: launch
-                                std::string action = g_startMenuAllProgs ? g_startMenuAllProgsSorted[idx] : g_items[idx].action;
+                                std::string action = g_startMenuAllProgs ? g_startMenuAllProgsSorted[idx] : g_startMenuPinnedRecent[idx];
                                 launchAction(action);
                                 g_startMenuVisible = false;
                             } else {
@@ -1309,7 +1430,7 @@ namespace gxos {
                         if (hitIdx >= 0) {
                             uint64_t now = nowMs( );
                             if (g_lastItemIndex == hitIdx && (now - g_lastItemClickTicks) < 450) {
-                                launchAction(g_items[hitIdx].action);
+                                openDesktopItem(hitIdx);
                                 g_lastItemIndex = -1;
                                 g_lastItemClickTicks = 0;
                             } else {
@@ -1367,7 +1488,7 @@ namespace gxos {
                 Compositor::handleMouse(mx, my, true, false); publishOut(MsgType::MT_InputMouse, Compositor::packMousePayloadForTarget(mx, my, 1, "down", ownerPid, targetWindow), ownerPid); return 0;
             }
             case WM_RBUTTONDOWN: {
-                int mx = GET_X_LPARAM(l); int my = GET_Y_LPARAM(l); { std::lock_guard<std::mutex> lk(g_lock); if (blockInputBehindModal(mx, my)) { requestRepaint( ); return 0; } } if (g_startMenuVisible && mx >= g_startMenuRect.left && mx <= g_startMenuRect.right && my >= g_startMenuRect.top && my <= g_startMenuRect.bottom) { int idx = (my - (g_startMenuRect.top + 4)) / 20; if (idx >= 0 && idx < (int)g_items.size( )) { if (g_items[idx].pinned) unpinAction(g_items[idx].action); else pinAction(g_items[idx].action); requestRepaint( ); return 0; } }
+                int mx = GET_X_LPARAM(l); int my = GET_Y_LPARAM(l); { std::lock_guard<std::mutex> lk(g_lock); if (blockInputBehindModal(mx, my)) { requestRepaint( ); return 0; } } if (g_startMenuVisible && mx >= g_startMenuRect.left && mx <= g_startMenuRect.right && my >= g_startMenuRect.top && my <= g_startMenuRect.bottom) { int idx = (my - (g_startMenuRect.top + 4)) / 20 + g_startMenuScroll; if (!g_startMenuAllProgs && idx >= 0 && idx < (int)g_startMenuPinnedRecent.size( )) { const std::string& action = g_startMenuPinnedRecent[idx]; if (hasEquivalentListItem(g_cfg.pinned, action)) unpinAction(action); else pinAction(action); requestRepaint( ); return 0; } }
                 // Desktop icon right-click pin/unpin or taskbar right-click menu
                 RECT cr; GetClientRect(h, &cr); int taskbarH = 40;
                 // Taskbar right-click: show context menu
@@ -1413,7 +1534,7 @@ namespace gxos {
                     }
                     
                     // Otherwise, handle desktop icon right-click or show desktop context menu
-                    const int iconW = 56; const int cellW = iconW + 28; const int cellH = 56 + 38; int hitIdx = -1; for (int i = 0; i < (int)g_items.size( ); ++i) { int ix = g_items[i].ix; int iy = g_items[i].iy; if (mx >= ix && mx < ix + cellW && my >= iy && my < iy + cellH) { hitIdx = i; break; } } if (hitIdx >= 0) { if (g_items[hitIdx].pinned) unpinAction(g_items[hitIdx].action); else pinAction(g_items[hitIdx].action); requestRepaint( ); return 0; }
+                    const int iconW = 56; const int cellW = iconW + 28; const int cellH = 56 + 38; int hitIdx = -1; for (int i = 0; i < (int)g_items.size( ); ++i) { int ix = g_items[i].ix; int iy = g_items[i].iy; if (mx >= ix && mx < ix + cellW && my >= iy && my < iy + cellH) { hitIdx = i; break; } } if (hitIdx >= 0) { SelectDesktopIcon(hitIdx, false); Logger::write(LogLevel::Info, std::string("Desktop item context requested: ") + desktopLayoutKey(g_items[hitIdx])); RightClickMenu::ShowForDesktopItem(mx, my, hitIdx); requestRepaint( ); return 0; }
                     // Desktop right-click context menu (no icon hit)
                     RightClickMenu::Show(mx, my);
                     requestRepaint( );
@@ -1437,7 +1558,7 @@ namespace gxos {
                     ReleaseCapture( );
                     if (g_iconDragActive) {
                         // Save icon positions to config
-                        g_cfg.iconPositions.clear( ); for (const auto& di : g_items) { DesktopIconPos ip; ip.name = di.label; ip.x = di.ix; ip.y = di.iy; g_cfg.iconPositions.push_back(ip); } saveDesktopConfig( );
+                        g_cfg.iconPositions.clear( ); for (const auto& di : g_items) { DesktopIconPos ip; ip.name = desktopLayoutKey(di); ip.x = di.ix; ip.y = di.iy; g_cfg.iconPositions.push_back(ip); } saveDesktopConfig( );
                     }
                     g_iconDragActive = false; g_iconDragPending = false; requestRepaint( ); break;
                 }
@@ -1486,7 +1607,7 @@ namespace gxos {
                 }
                 // start-menu navigation handled here
                 if (g_startMenuVisible) {
-                    int maxItems = g_startMenuAllProgs ? (int)g_startMenuAllProgsSorted.size( ) : (int)g_items.size( );
+                    int maxItems = g_startMenuAllProgs ? (int)g_startMenuAllProgsSorted.size( ) : (int)g_startMenuPinnedRecent.size( );
                     if (key == VK_UP) {
                         if (g_startMenuSel > 0) g_startMenuSel--;
                         if (g_startMenuSel < g_startMenuScroll) g_startMenuScroll = g_startMenuSel;
@@ -1502,7 +1623,7 @@ namespace gxos {
                     }
                     if (key == VK_RETURN) {
                         if (g_startMenuSel >= 0 && g_startMenuSel < maxItems) {
-                            std::string action = g_startMenuAllProgs ? g_startMenuAllProgsSorted[g_startMenuSel] : g_items[g_startMenuSel].action;
+                            std::string action = g_startMenuAllProgs ? g_startMenuAllProgsSorted[g_startMenuSel] : g_startMenuPinnedRecent[g_startMenuSel];
                             launchAction(action);
                             g_startMenuVisible = false;
                             requestRepaint( );
@@ -2412,15 +2533,15 @@ namespace gxos {
                         row++;
                     }
                 } else {
-                    for (size_t i = startIndex; i < g_items.size() && row < maxRows; ++i) {
+                    for (size_t i = startIndex; i < g_startMenuPinnedRecent.size() && row < maxRows; ++i) {
                         int rowX = smLeft + 4;
                         int rowW = leftColW - 8;
                         uint32_t rowColor = ((int)i == g_startMenuSel) ? 0x00506496 : 0x00373746;
                         fbFillRect(pixels, pitch, fbW, fbH, rowX, y, rowW, rowH, rowColor);
-                        std::string txt = g_items[i].label;
+                        std::string txt = g_startMenuPinnedRecent[i];
                         int textX = rowX + 4;
                         fbDrawStartMenuIcon(pixels, pitch, fbW, fbH, rowX, y, rowH, txt, textX);
-                        std::string displayText = (g_items[i].pinned ? "* " : "  ") + txt;
+                        std::string displayText = (hasEquivalentListItem(g_cfg.pinned, txt) ? "* " : "  ") + txt;
                         BitmapFont::DrawStringToBuffer(pixels, pitch, fbW, fbH, textX, y + 6, displayText.c_str(), -1, 0x00E6E6E6);
                         y += rowH;
                         row++;

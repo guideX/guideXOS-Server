@@ -20,6 +20,7 @@ namespace gxos { namespace gui {
     public:
         /// Show the right-click menu at the given screen coordinates
         static void Show(int x, int y);
+        static void ShowForDesktopItem(int x, int y, int desktopItemIndex);
 
         /// Hide the menu
         static void Hide();
@@ -52,6 +53,7 @@ namespace gxos { namespace gui {
         static int s_x;
         static int s_y;
         static std::vector<MenuItem> s_items;
+        static int s_desktopItemIndex;
         static bool s_iconSubmenuVisible;
         static int s_iconSubmenuIndex;
 
