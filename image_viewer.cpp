@@ -1,8 +1,8 @@
 #include "image_viewer.h"
 #include "gui_protocol.h"
+#include "kernel/core/include/kernel/image_adapter.h"
 #include "vfs.h"
 #include "logger.h"
-#include "png_loader.h"
 #include <sstream>
 #include <thread>
 #include <chrono>
@@ -64,14 +64,16 @@ int ImageViewer::main(int argc, char** argv) {
 
     // Try to load PNG image metadata from the filesystem.
     if (!s_filePath.empty()) {
-        s_image = gui::PngLoader::LoadFromFile(s_filePath);
+        gui::ImageBitmap loaded = gui::ImageAdapter::LoadFromFile(s_filePath);
+        s_image = loaded.image;
         if (s_image) {
             s_originalW = s_image->Width;
             s_originalH = s_image->Height;
             Logger::write(LogLevel::Info, "ImageViewer loaded PNG: " + s_filePath +
                           " (" + std::to_string(s_originalW) + "x" + std::to_string(s_originalH) + ")");
         } else {
-            Logger::write(LogLevel::Warn, "ImageViewer: PNG load failed: " + s_filePath);
+            Logger::write(LogLevel::Warn, "ImageViewer: image load failed: " + s_filePath +
+                          " status=" + gui::ImageLoadStatusName(loaded.status));
         }
     }
 

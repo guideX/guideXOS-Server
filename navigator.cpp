@@ -1,11 +1,11 @@
 #include "navigator.h"
 
 #include "gui_protocol.h"
+#include "kernel/core/include/kernel/image_adapter.h"
 #include "ipc_bus.h"
 #include "logger.h"
 #include "navigator_file_io.h"
 #include "navigator_html_parser.h"
-#include "png_loader.h"
 #include <algorithm>
 #include <cctype>
 #include <sstream>
@@ -162,6 +162,7 @@ namespace {
 		bool ok = false;
 		bool unsupported = false;
 		bool tooLarge = false;
+		gxos::gui::ImageLoadStatus status = gxos::gui::ImageLoadStatus::NotFound;
 		int naturalW = 0;
 		int naturalH = 0;
 		std::string filePath;
@@ -193,28 +194,6 @@ namespace {
 		return path;
 	}
 
-	static bool readPngDimensions(const std::vector<uint8_t>& bytes, int& width, int& height)
-	{
-		static const uint8_t sig[8] = { 0x89, 'P', 'N', 'G', '\r', '\n', 0x1A, '\n' };
-		if (bytes.size() < 24) return false;
-		for (int i = 0; i < 8; ++i) {
-			if (bytes[static_cast<size_t>(i)] != sig[i]) return false;
-		}
-		if (bytes[12] != 'I' || bytes[13] != 'H' || bytes[14] != 'D' || bytes[15] != 'R') return false;
-		auto be32 = [&bytes](size_t pos) -> uint32_t {
-			return (static_cast<uint32_t>(bytes[pos]) << 24) |
-			       (static_cast<uint32_t>(bytes[pos + 1]) << 16) |
-			       (static_cast<uint32_t>(bytes[pos + 2]) << 8) |
-			       static_cast<uint32_t>(bytes[pos + 3]);
-		};
-		uint32_t w = be32(16);
-		uint32_t h = be32(20);
-		if (w == 0 || h == 0 || w > 4096 || h > 4096) return false;
-		width = static_cast<int>(w);
-		height = static_cast<int>(h);
-		return true;
-	}
-
 	static const ImageInfo& imageInfoForBlock(const DocBlock& block)
 	{
 		const std::string key = block.url.empty() ? block.src : block.url;
@@ -225,6 +204,7 @@ namespace {
 		info.attempted = true;
 		if (block.url.rfind("file://", 0) != 0) {
 			info.unsupported = true;
+			info.status = gxos::gui::ImageLoadStatus::UnsupportedFormat;
 			info.message = "[unsupported image]";
 			auto inserted = s_imageCache.emplace(key, std::move(info));
 			return inserted.first->second;
@@ -233,6 +213,7 @@ namespace {
 		info.filePath = filePathFromUrl(block.url);
 		if (!endsWithIgnoreCase(info.filePath, ".png")) {
 			info.unsupported = true;
+			info.status = gxos::gui::ImageLoadStatus::UnsupportedFormat;
 			info.message = "[unsupported image]";
 			auto inserted = s_imageCache.emplace(key, std::move(info));
 			return inserted.first->second;
@@ -240,27 +221,27 @@ namespace {
 
 		BinaryReadResult br = readBinaryFile(info.filePath);
 		if (br.status == FileReadStatus::NotFound) {
+			info.status = gxos::gui::ImageLoadStatus::NotFound;
 			info.message = "[missing image]";
 		} else if (br.status == FileReadStatus::TooLarge) {
 			info.tooLarge = true;
+			info.status = gxos::gui::ImageLoadStatus::TooLarge;
 			info.message = "[image too large]";
 		} else if (br.status == FileReadStatus::IoError) {
+			info.status = gxos::gui::ImageLoadStatus::DecodeFailed;
 			info.message = "[image read error]";
 		} else {
-			int headerW = 0;
-			int headerH = 0;
-			if (!readPngDimensions(br.bytes, headerW, headerH)) {
-				info.message = "[unsupported image]";
+			gxos::gui::ImageBitmap decoded = gxos::gui::ImageAdapter::LoadFromBytes(br.bytes, info.filePath);
+			info.status = decoded.status;
+			if (decoded.status == gxos::gui::ImageLoadStatus::Ok) {
+				info.ok = true;
+				info.naturalW = decoded.width;
+				info.naturalH = decoded.height;
+				info.drawPath = imageLoaderPathForFile(info.filePath);
 			} else {
-				gxos::gui::ImagePtr decoded = gxos::gui::PngLoader::LoadFromMemory(br.bytes, info.filePath);
-				if (decoded && decoded->isValid()) {
-					info.ok = true;
-					info.naturalW = decoded->Width;
-					info.naturalH = decoded->Height;
-					info.drawPath = imageLoaderPathForFile(info.filePath);
-				} else {
-					info.message = "[missing image]";
-				}
+				info.unsupported = decoded.status == gxos::gui::ImageLoadStatus::UnsupportedFormat;
+				info.tooLarge = decoded.status == gxos::gui::ImageLoadStatus::TooLarge;
+				info.message = std::string("[") + gxos::gui::ImageLoadStatusName(decoded.status) + "]";
 			}
 		}
 

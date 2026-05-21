@@ -16,8 +16,8 @@
 #include "special_effects.h"
 #include "window_animator.h"
 #include "focus_indicator.h"
-#include "png_loader.h"
 #include "image_renderer.h"
+#include "kernel/core/include/kernel/image_adapter.h"
 #include "icon_theme_manager.h"
 #include "wallpaper_registry.h"
 #include <sstream>
@@ -859,8 +859,8 @@ namespace gxos {
                         DeleteObject(rb); 
                     }
                     for (const auto& img : winfo.images) {
-                        if (img.w > 0 && img.h > 0) ImageRenderer::DrawImage(dc, img.image, winfo.x + img.x, winfo.y + titleBarH + img.y, img.w, img.h);
-                        else ImageRenderer::DrawImage(dc, img.image, winfo.x + img.x, winfo.y + titleBarH + img.y);
+                        if (img.w > 0 && img.h > 0) ImageAdapter::DrawToHdc(dc, img.image, winfo.x + img.x, winfo.y + titleBarH + img.y, img.w, img.h);
+                        else ImageAdapter::DrawToHdc(dc, img.image, winfo.x + img.x, winfo.y + titleBarH + img.y);
                     }
                     for (const auto& wd : winfo.widgets) { 
                         RECT wr{ winfo.x + wd.x, winfo.y + titleBarH + wd.y, winfo.x + wd.x + wd.w, winfo.y + titleBarH + wd.y + wd.h }; 
@@ -1584,7 +1584,7 @@ namespace gxos {
             g_gradientBottomColor = entry->bottomColor;
             g_gradientAccentColor = entry->accentColor;
             Logger::write(LogLevel::Info, std::string("Compositor wallpaper select id=") + g_wallpaperId + " full=" + g_wallpaperPath + " thumb=" + entry->thumbnailPath);
-            g_wallpaperImage = PngLoader::LoadFromFile(g_wallpaperPath);
+            g_wallpaperImage = ImageAdapter::LoadFromFile(g_wallpaperPath).image;
             if (!g_wallpaperImage) {
                 Logger::write(LogLevel::Warn, std::string("Compositor wallpaper decode failed, trying default: ") + g_wallpaperPath);
                 const BackgroundEntry& fallback = WallpaperRegistry::DefaultBackground();
@@ -1595,7 +1595,7 @@ namespace gxos {
                     g_gradientTopColor = fallback.topColor;
                     g_gradientBottomColor = fallback.bottomColor;
                     g_gradientAccentColor = fallback.accentColor;
-                    g_wallpaperImage = PngLoader::LoadFromFile(g_wallpaperPath);
+                    g_wallpaperImage = ImageAdapter::LoadFromFile(g_wallpaperPath).image;
                     if (g_wallpaperImage) {
                         Logger::write(LogLevel::Info, std::string("Compositor wallpaper default decode succeeded id=") + g_wallpaperId + " full=" + g_wallpaperPath);
                     }
@@ -1786,7 +1786,7 @@ namespace gxos {
             case MsgType::MT_DrawTextAt: { std::istringstream iss(s); std::string idS, xs, ys; std::getline(iss, idS, '|'); std::getline(iss, xs, '|'); std::getline(iss, ys, '|'); std::string text; std::getline(iss, text); uint64_t id = 0; uint64_t ownerPid = 0; try { id = std::stoull(idS); } catch (...) {} DrawTextItem item{ std::stoi(xs), std::stoi(ys), text }; { std::lock_guard<std::mutex> lk(g_lock); auto it = g_windows.find(id); if (it != g_windows.end( )) { it->second.positionedTexts.push_back(item); it->second.dirty = true; ownerPid = it->second.ownerPid; } } publishOut(MsgType::MT_DrawTextAt, std::to_string(id), ownerPid); invalidate(id); } break;
             case MsgType::MT_Close: { uint64_t id = 0; uint64_t ownerPid = 0; try { id = std::stoull(s); } catch (...) {} { std::lock_guard<std::mutex> lk(g_lock); auto wit = g_windows.find(id); if (wit != g_windows.end( )) ownerPid = wit->second.ownerPid; g_windows.erase(id); auto it = std::find(g_z.begin( ), g_z.end( ), id); if (it != g_z.end( )) g_z.erase(it); if (g_modalWindow == id) g_modalWindow = 0; if (g_focus == id) g_focus = 0; } publishOut(MsgType::MT_Close, std::to_string(id), ownerPid ? ownerPid : m.srcPid); invalidate(0); } break;
             case MsgType::MT_DrawRect: { std::istringstream iss(s); std::string idS; std::getline(iss, idS, '|'); std::string xs, ys, ws, hs, rs, gs, bs; std::getline(iss, xs, '|'); std::getline(iss, ys, '|'); std::getline(iss, ws, '|'); std::getline(iss, hs, '|'); std::getline(iss, rs, '|'); std::getline(iss, gs, '|'); std::getline(iss, bs, '|'); uint64_t id = 0; uint64_t ownerPid = 0; try { id = std::stoull(idS); } catch (...) {} DrawRectItem item{ std::stoi(xs), std::stoi(ys), std::stoi(ws), std::stoi(hs), (uint8_t)std::stoi(rs),(uint8_t)std::stoi(gs),(uint8_t)std::stoi(bs) }; { std::lock_guard<std::mutex> lk(g_lock); auto it = g_windows.find(id); if (it != g_windows.end( )) { it->second.rects.push_back(item); it->second.dirty = true; ownerPid = it->second.ownerPid; } } publishOut(MsgType::MT_DrawRect, std::to_string(id), ownerPid); invalidate(id); } break;
-            case MsgType::MT_DrawImage: { DrawImageSpec spec{}; uint64_t ownerPid = 0; if (!unpackDrawImage(s, spec)) break; ImagePtr image = PngLoader::LoadFromFile(spec.path); if (!image) { Logger::write(LogLevel::Warn, std::string("Compositor: DrawImage skipped, PNG load failed: ") + spec.path); break; } DrawImageItem item{ spec.x, spec.y, spec.w, spec.h, spec.path, image }; { std::lock_guard<std::mutex> lk(g_lock); auto it = g_windows.find(spec.winId); if (it != g_windows.end( )) { it->second.images.push_back(item); it->second.dirty = true; ownerPid = it->second.ownerPid; } } publishOut(MsgType::MT_DrawImage, std::to_string(spec.winId), ownerPid); invalidate(spec.winId); } break;
+            case MsgType::MT_DrawImage: { DrawImageSpec spec{}; uint64_t ownerPid = 0; if (!unpackDrawImage(s, spec)) break; ImageBitmap image = ImageAdapter::LoadFromFile(spec.path); if (image.status != ImageLoadStatus::Ok) { Logger::write(LogLevel::Warn, std::string("Compositor: DrawImage skipped, image load failed: ") + spec.path + " status=" + ImageLoadStatusName(image.status)); break; } DrawImageItem item{ spec.x, spec.y, spec.w, spec.h, spec.path, image }; { std::lock_guard<std::mutex> lk(g_lock); auto it = g_windows.find(spec.winId); if (it != g_windows.end( )) { it->second.images.push_back(item); it->second.dirty = true; ownerPid = it->second.ownerPid; } } publishOut(MsgType::MT_DrawImage, std::to_string(spec.winId), ownerPid); invalidate(spec.winId); } break;
             case MsgType::MT_SetTitle: { std::istringstream iss(s); std::string idS; std::getline(iss, idS, '|'); std::string title; std::getline(iss, title); uint64_t id = 0; uint64_t ownerPid = 0; try { id = std::stoull(idS); } catch (...) {} { std::lock_guard<std::mutex> lk(g_lock); auto it = g_windows.find(id); if (it != g_windows.end( )) { it->second.title = title; it->second.dirty = true; ownerPid = it->second.ownerPid; } } publishOut(MsgType::MT_SetTitle, std::to_string(id) + "|" + title, ownerPid); invalidate(id); } break;
             case MsgType::MT_Move: { std::istringstream iss(s); std::string idS, xs, ys; std::getline(iss, idS, '|'); std::getline(iss, xs, '|'); std::getline(iss, ys, '|'); uint64_t id = 0; uint64_t ownerPid = 0; try { id = std::stoull(idS); } catch (...) {} int nx = std::stoi(xs), ny = std::stoi(ys); { std::lock_guard<std::mutex> lk(g_lock); auto it = g_windows.find(id); if (it != g_windows.end( ) && !it->second.maximized) { it->second.x = nx; it->second.y = ny; it->second.dirty = true; ownerPid = it->second.ownerPid; } } publishOut(MsgType::MT_Move, std::to_string(id) + "|" + xs + "|" + ys, ownerPid); invalidate(id); } break;
             case MsgType::MT_Resize: { std::istringstream iss(s); std::string idS, ws, hs; std::getline(iss, idS, '|'); std::getline(iss, ws, '|'); std::getline(iss, hs, '|'); uint64_t id = 0; uint64_t ownerPid = 0; try { id = std::stoull(idS); } catch (...) {} int nw = std::stoi(ws), nh = std::stoi(hs); { std::lock_guard<std::mutex> lk(g_lock); auto it = g_windows.find(id); if (it != g_windows.end( ) && !it->second.maximized) { it->second.w = nw; it->second.h = nh; it->second.dirty = true; ownerPid = it->second.ownerPid; } } publishOut(MsgType::MT_Resize, std::to_string(id) + "|" + ws + "|" + hs, ownerPid); invalidate(id); } break;
@@ -2324,8 +2324,8 @@ namespace gxos {
                                    (static_cast<uint32_t>(ri.r) << 16) | (static_cast<uint32_t>(ri.g) << 8) | ri.b);
                     }
                     for (const auto& img : w.images) {
-                        if (img.w > 0 && img.h > 0) ImageRenderer::DrawImage(pixels, fbW, fbH, pitch, img.image, w.x + img.x, contentY + img.y, img.w, img.h);
-                        else ImageRenderer::DrawImage(pixels, fbW, fbH, pitch, img.image, w.x + img.x, contentY + img.y);
+                        if (img.w > 0 && img.h > 0) ImageAdapter::DrawToPixels(pixels, fbW, fbH, pitch, img.image, w.x + img.x, contentY + img.y, img.w, img.h);
+                        else ImageAdapter::DrawToPixels(pixels, fbW, fbH, pitch, img.image, w.x + img.x, contentY + img.y);
                     }
                     for (const auto& wd : w.widgets) {
                         int wx = w.x + wd.x;

@@ -161,6 +161,7 @@
     <ClInclude Include="gxm_loader.h" />
     <ClInclude Include="hd_installer.h" />
     <ClInclude Include="image.h" />
+    <ClInclude Include="kernel\core\include\kernel\image_adapter.h" />
     <ClInclude Include="image_renderer.h" />
     <ClInclude Include="image_viewer.h" />
     <ClInclude Include="icon_theme_manager.h" />
@@ -383,6 +384,7 @@
     <ClCompile Include="icons.cpp" />
     <ClCompile Include="icon_theme_manager.cpp" />
     <ClCompile Include="image.cpp" />
+    <ClCompile Include="image_adapter.cpp" />
     <ClCompile Include="image_renderer.cpp" />
     <ClCompile Include="image_viewer.cpp" />
     <ClCompile Include="ipc_bus.cpp" />

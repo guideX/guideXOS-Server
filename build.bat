@@ -56,6 +56,7 @@ gxapp_container.cpp ^
 gxapp_loader.cpp ^
 gxm_loader.cpp ^
 image.cpp ^
+image_adapter.cpp ^
 image_renderer.cpp ^
 image_viewer.cpp ^
 icon_theme_manager.cpp ^

@@ -14,6 +14,7 @@
 #include "include/kernel/pit.h"
 #include "include/kernel/serial_debug.h"
 #include "include/kernel/desktop_icon_theme_flat.h"
+#include "include/kernel/image_adapter.h"
 
 extern "C" void desktop_request_redraw();
 
@@ -4592,6 +4593,20 @@ void NavigatorApp::updateButtons()
     m_addBookmarkBtnId = addButton(x, 12, BUTTON_W, BUTTON_H, "Add *");
 }
 
+static void nav_image_file_path_from_url(const char* url, char* out, int outSize)
+{
+    out[0] = '\0';
+    if (!url || outSize <= 0) return;
+    const char* prefix = "file://";
+    int i = 0;
+    while (prefix[i]) {
+        if (url[i] != prefix[i]) return;
+        ++i;
+    }
+    const char* path = url + i;
+    strcopy(out, path, outSize);
+}
+
 void NavigatorApp::addBlock(BlockKind kind, const char* text, const char* url)
 {
     if (m_blockCount >= MAX_BLOCKS) return;
@@ -4602,6 +4617,9 @@ void NavigatorApp::addBlock(BlockKind kind, const char* text, const char* url)
     m_blocks[m_blockCount].alt[0] = '\0';
     m_blocks[m_blockCount].width = 0;
     m_blocks[m_blockCount].height = 0;
+    m_blocks[m_blockCount].naturalWidth = 0;
+    m_blocks[m_blockCount].naturalHeight = 0;
+    m_blocks[m_blockCount].imageStatus = (int)gxos::gui::ImageLoadStatus::Ok;
     ++m_blockCount;
 }
 
@@ -4615,6 +4633,14 @@ void NavigatorApp::addImageBlock(const char* src, const char* alt, const char* r
     strcopy(m_blocks[m_blockCount].alt, alt ? alt : "", 96);
     m_blocks[m_blockCount].width = width > 0 ? width : 0;
     m_blocks[m_blockCount].height = height > 0 ? height : 0;
+
+    char imagePath[MAX_URL_LEN];
+    nav_image_file_path_from_url(resolvedUrl, imagePath, MAX_URL_LEN);
+    gxos::gui::ImageProbe probe = gxos::gui::ImageAdapter::ProbeFile(imagePath);
+    m_blocks[m_blockCount].naturalWidth = (int)probe.width;
+    m_blocks[m_blockCount].naturalHeight = (int)probe.height;
+    m_blocks[m_blockCount].imageStatus = (int)probe.status;
+
     ++m_blockCount;
 }
 
@@ -5154,7 +5180,7 @@ int NavigatorApp::blockHeight(const DocBlock& block, int maxChars) const
         if (lines < 1) lines = 1;
     }
     if (block.kind == BLOCK_IMAGE) {
-        int imageH = block.height > 0 ? block.height : 64;
+        int imageH = block.height > 0 ? block.height : (block.naturalHeight > 0 ? block.naturalHeight : 64);
         if (imageH > 420) imageH = 420;
         return imageH + 12;
     }
@@ -5276,21 +5302,28 @@ void NavigatorApp::drawDocument(uint32_t x, uint32_t y, uint32_t w, uint32_t h)
             int outY = absY;
             drawWrappedText(textX, (uint32_t)absY, m_blocks[i].text, rgb(40, 50, 68), maxChars, outY);
         } else if (m_blocks[i].kind == BLOCK_IMAGE) {
-            int imageW = m_blocks[i].width > 0 ? m_blocks[i].width : 220;
-            int imageH = m_blocks[i].height > 0 ? m_blocks[i].height : 64;
+            int imageW = m_blocks[i].width > 0 ? m_blocks[i].width : (m_blocks[i].naturalWidth > 0 ? m_blocks[i].naturalWidth : 220);
+            int imageH = m_blocks[i].height > 0 ? m_blocks[i].height : (m_blocks[i].naturalHeight > 0 ? m_blocks[i].naturalHeight : 64);
             int maxW = (int)w - CONTENT_X * 2 - 36;
             if (maxW < 40) maxW = 40;
             if (imageW > maxW) imageW = maxW;
             if (imageH > 420) imageH = 420;
             int contentBottom = (int)h - STATUS_H - 8;
             if (absY >= CONTENT_Y && absY + imageH <= contentBottom) {
-                framebuffer::fill_rect(textX, (uint32_t)absY, (uint32_t)imageW, (uint32_t)imageH, rgb(232, 236, 242));
-                framebuffer::fill_rect(textX, (uint32_t)absY, (uint32_t)imageW, 1, rgb(145, 153, 168));
-                framebuffer::fill_rect(textX, (uint32_t)(absY + imageH - 1), (uint32_t)imageW, 1, rgb(145, 153, 168));
-                framebuffer::fill_rect(textX, (uint32_t)absY, 1, (uint32_t)imageH, rgb(145, 153, 168));
-                framebuffer::fill_rect(textX + (uint32_t)imageW - 1, (uint32_t)absY, 1, (uint32_t)imageH, rgb(145, 153, 168));
-                const char* label = m_blocks[i].alt[0] ? m_blocks[i].alt : "[PNG image unavailable]";
-                appDrawText(textX + 8, (uint32_t)(absY + 8), label, rgb(54, 60, 72));
+                char imagePath[MAX_URL_LEN];
+                nav_image_file_path_from_url(m_blocks[i].url, imagePath, MAX_URL_LEN);
+                gxos::gui::ImageBitmap bitmap = gxos::gui::ImageAdapter::LoadFromFile(imagePath);
+                bool drew = gxos::gui::ImageAdapter::DrawToFramebuffer(bitmap, textX, (uint32_t)absY, (uint32_t)imageW, (uint32_t)imageH);
+                if (!drew) {
+                    framebuffer::fill_rect(textX, (uint32_t)absY, (uint32_t)imageW, (uint32_t)imageH, rgb(232, 236, 242));
+                    framebuffer::fill_rect(textX, (uint32_t)absY, (uint32_t)imageW, 1, rgb(145, 153, 168));
+                    framebuffer::fill_rect(textX, (uint32_t)(absY + imageH - 1), (uint32_t)imageW, 1, rgb(145, 153, 168));
+                    framebuffer::fill_rect(textX, (uint32_t)absY, 1, (uint32_t)imageH, rgb(145, 153, 168));
+                    framebuffer::fill_rect(textX + (uint32_t)imageW - 1, (uint32_t)absY, 1, (uint32_t)imageH, rgb(145, 153, 168));
+                    gxos::gui::ImageLoadStatus status = bitmap.status != gxos::gui::ImageLoadStatus::Ok ? bitmap.status : (gxos::gui::ImageLoadStatus)m_blocks[i].imageStatus;
+                    const char* label = m_blocks[i].alt[0] ? m_blocks[i].alt : gxos::gui::ImageLoadStatusName(status);
+                    appDrawText(textX + 8, (uint32_t)(absY + 8), label, rgb(54, 60, 72));
+                }
             }
         } else {
             int outY = absY;

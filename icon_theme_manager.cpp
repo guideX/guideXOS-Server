@@ -1,9 +1,13 @@
 #include "icon_theme_manager.h"
+#include "kernel/core/include/kernel/image_adapter.h"
 #include "logger.h"
-#include "png_loader.h"
 
 #include <cstdlib>
 #include <limits>
+
+#ifdef LoadIcon
+#undef LoadIcon
+#endif
 
 namespace gxos {
 namespace gui {
@@ -143,7 +147,7 @@ ImagePtr IconThemeManager::LoadIconFromPath(const std::string& path)
     auto it = m_cache.find(path);
     if (it != m_cache.end()) return it->second;
 
-    ImagePtr image = PngLoader::LoadFromFile(path);
+    ImagePtr image = ImageAdapter::LoadFromFile(path).image;
     if (image) m_cache.emplace(path, image);
     return image;
 }

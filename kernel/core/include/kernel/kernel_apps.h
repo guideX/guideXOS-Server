@@ -417,6 +417,9 @@ private:
         char alt[96];
         int width;
         int height;
+        int naturalWidth;
+        int naturalHeight;
+        int imageStatus;
     };
 
     struct Bookmark {

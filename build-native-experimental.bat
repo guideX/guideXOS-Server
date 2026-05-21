@@ -45,6 +45,7 @@ console_window.cpp ^
 desktop_service.cpp ^
 desktop_state.cpp ^
 disk_manager.cpp ^
+display_options.cpp ^
 control_panel.cpp ^
 elf_validator.cpp ^
 executable_memory.cpp ^
@@ -57,16 +58,21 @@ gxapp_container.cpp ^
 gxapp_loader.cpp ^
 gxm_loader.cpp ^
 image.cpp ^
+image_adapter.cpp ^
 image_renderer.cpp ^
 image_viewer.cpp ^
 icon_theme_manager.cpp ^
 icons.cpp ^
 ipc_bus.cpp ^
+guide_web_html_parser.cpp ^
 kernel/core/architecture_detector.cpp ^
 lifecycle.cpp ^
 logger.cpp ^
 message_box.cpp ^
 module_manager.cpp ^
+navigator.cpp ^
+navigator_file_io.cpp ^
+navigator_html_parser.cpp ^
 native_app_debug_log.cpp ^
 native_app_process_table.cpp ^
 native_app_runtime.cpp ^
@@ -91,10 +97,12 @@ shutdown_dialog.cpp ^
 special_effects.cpp ^
 system_tray.cpp ^
 task_manager.cpp ^
+trash.cpp ^
 universal_app_loader.cpp ^
 video_backend.cpp ^
 vfs.cpp ^
 vnc_server.cpp ^
+wallpaper_registry.cpp ^
 welcome.cpp ^
 workspace_manager.cpp
 

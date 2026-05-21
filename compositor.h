@@ -20,6 +20,7 @@
 #include "window_effects.h"
 #include "ui_settings.h"
 #include "image.h"
+#include "kernel/core/include/kernel/image_adapter.h"
 
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)
 #define WIN32_LEAN_AND_MEAN
@@ -28,7 +29,7 @@
 
 namespace gxos { namespace gui {
     struct DrawRectItem { int x; int y; int w; int h; uint8_t r; uint8_t g; uint8_t b; };
-    struct DrawImageItem { int x; int y; int w; int h; std::string path; ImagePtr image; };
+    struct DrawImageItem { int x; int y; int w; int h; std::string path; ImageBitmap image; };
     struct DrawTextItem { int x; int y; std::string text; };
     enum class WidgetType { Button=1 };
     struct Widget { WidgetType type; int id; int x; int y; int w; int h; std::string text; bool hover=false; bool pressed=false; };
