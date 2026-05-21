@@ -318,6 +318,37 @@ static void desktop_str_copy(char* dst, const char* src, int dstSize)
     dst[i] = '\0';
 }
 
+static void desktop_append_text(char* dst, int* pos, int dstSize, const char* text)
+{
+    if (!dst || !pos || dstSize <= 0 || !text) return;
+    while (*text && *pos < dstSize - 1) {
+        dst[(*pos)++] = *text++;
+    }
+    dst[*pos] = '\0';
+}
+
+static void desktop_append_int(char* dst, int* pos, int dstSize, int32_t value)
+{
+    char tmp[16];
+    int i = 0;
+    if (value < 0) {
+        desktop_append_text(dst, pos, dstSize, "-");
+        value = -value;
+    }
+    if (value == 0) {
+        desktop_append_text(dst, pos, dstSize, "0");
+        return;
+    }
+    while (value > 0 && i < (int)sizeof(tmp)) {
+        tmp[i++] = (char)('0' + (value % 10));
+        value /= 10;
+    }
+    while (i > 0 && *pos < dstSize - 1) {
+        dst[(*pos)++] = tmp[--i];
+    }
+    dst[*pos] = '\0';
+}
+
 // ============================================================
 // Desktop state
 // ============================================================
@@ -617,6 +648,50 @@ static DesktopIcon s_desktopIcons[] = {
 };
 static const int kDesktopIconCount = sizeof(s_desktopIcons) / sizeof(s_desktopIcons[0]);
 static const int kMaxRecentApps = 5;  // Max recent apps to show
+
+static void desktop_icon_layout_key(int iconIdx, char* out, int outSize)
+{
+    if (!out || outSize <= 0) return;
+    out[0] = '\0';
+    if (iconIdx < 0 || iconIdx >= kDesktopIconCount) return;
+
+    const DesktopIcon& icon = s_desktopIcons[iconIdx];
+    int pos = 0;
+    if (icon.kind == DesktopItemKind::SystemObject) {
+        switch (icon.systemObject) {
+            case DesktopSystemObjectKind::Trash:
+                desktop_append_text(out, &pos, outSize, "system:Trash");
+                return;
+            case DesktopSystemObjectKind::ThisSystem:
+                desktop_append_text(out, &pos, outSize, "system:ThisSystem");
+                return;
+            case DesktopSystemObjectKind::FileManager:
+                desktop_append_text(out, &pos, outSize, "system:FileManager");
+                return;
+            case DesktopSystemObjectKind::SystemSettings:
+                desktop_append_text(out, &pos, outSize, "system:SystemSettings");
+                return;
+            default:
+                break;
+        }
+    }
+
+    if (icon.kind == DesktopItemKind::FilesystemEntry && icon.path[0]) {
+        desktop_append_text(out, &pos, outSize, icon.isDirectory ? "desktop-folder:" : "desktop-file:");
+        desktop_append_text(out, &pos, outSize, icon.path);
+        return;
+    }
+
+    // TODO: use shortcut IDs once DesktopItemKind::Shortcut is implemented.
+    desktop_append_text(out, &pos, outSize, icon.label);
+}
+
+static bool desktop_layout_key_matches(int iconIdx, const char* key)
+{
+    char current[192];
+    desktop_icon_layout_key(iconIdx, current, sizeof(current));
+    return desktop_str_eq(current, key);
+}
 
 // Start menu entries structure for dynamic list
 struct StartMenuApp {
@@ -1053,6 +1128,8 @@ static void unpin_icon(const char* appName);     // Unpin app from desktop
 static int find_icon_by_name(const char* name);  // Find icon index by name
 static void initialize_icon_positions();         // Set up initial icon grid layout
 static void save_icon_position(int iconIndex);   // Save position after drag
+static bool load_icon_positions();
+static void save_icon_positions();
 static void sync_selected_icon_after_layout();
 static bool is_display_icon_selected(int displayIndex);
 static void ClearDesktopIconSelection();
@@ -1456,6 +1533,7 @@ static void initialize_icon_positions()
     if (s_iconPositionsInitialized) return;
     
     refresh_desktop_icons();  // Build visible icon list first
+    load_icon_positions();
     
     const int iconsPerRow = 8;
     
@@ -4598,88 +4676,40 @@ static ShellHitTest hit_test_shell(int32_t mx, int32_t my)
 // Public API
 // ============================================================
 
-// Forward declarations for icon persistence
-static bool load_icon_positions();
-static void save_icon_positions();
-
-static void init_icon_positions()
-{
-    uint32_t cols = (s_screenW - kIconMargin * 2) / kIconCellW;
-    if (cols < 1) cols = 1;
-
-    // Try to load saved positions first
-    if (load_icon_positions()) {
-        s_iconPositionsInitialized = true;
-        return;
-    }
-
-    // If no saved positions, use grid layout
-    for (int i = 0; i < kDesktopIconCount; i++) {
-        uint32_t col = (uint32_t)i % cols;
-        uint32_t row = (uint32_t)i / cols;
-        s_iconPosX[i] = (int32_t)(kIconMargin + col * kIconCellW);
-        s_iconPosY[i] = (int32_t)(kIconMargin + row * kIconCellH);
-    }
-    s_iconPositionsInitialized = true;
-}
-
 // Save icon positions to VFS file
 static void save_icon_positions()
 {
-    // Create simple text format: x,y pairs on separate lines
-    char buffer[512];
+    char buffer[4096];
     int pos = 0;
     
-    // Write header
-    const char* header = "# guideXOS Desktop Icon Positions\n";
-    for (int i = 0; header[i] && pos < 500; i++) {
-        buffer[pos++] = header[i];
+    desktop_append_text(buffer, &pos, sizeof(buffer), "# guideXOS Desktop Icon Positions v2\n");
+    
+    for (int displayIdx = 0; displayIdx < s_visibleIconCount; ++displayIdx) {
+        int iconIdx = s_visibleIconIndices[displayIdx];
+        if (iconIdx < 0 || iconIdx >= kDesktopIconCount) continue;
+
+        char key[192];
+        desktop_icon_layout_key(iconIdx, key, sizeof(key));
+        if (!key[0]) continue;
+
+        s_desktopIcons[iconIdx].savedX = s_iconPosX[displayIdx];
+        s_desktopIcons[iconIdx].savedY = s_iconPosY[displayIdx];
+
+        desktop_append_text(buffer, &pos, sizeof(buffer), key);
+        desktop_append_text(buffer, &pos, sizeof(buffer), "\t");
+        desktop_append_int(buffer, &pos, sizeof(buffer), s_iconPosX[displayIdx]);
+        desktop_append_text(buffer, &pos, sizeof(buffer), "\t");
+        desktop_append_int(buffer, &pos, sizeof(buffer), s_iconPosY[displayIdx]);
+        desktop_append_text(buffer, &pos, sizeof(buffer), "\n");
     }
     
-    // Write each icon position
-    for (int i = 0; i < kDesktopIconCount; i++) {
-        // Convert X position to string
-        int32_t x = s_iconPosX[i];
-        int32_t y = s_iconPosY[i];
-        
-        // Simple number to string conversion
-        char xStr[16], yStr[16];
-        int xi = 0, yi = 0;
-        
-        // Convert X
-        if (x < 0) { xStr[xi++] = '-'; x = -x; }
-        if (x == 0) { xStr[xi++] = '0'; }
-        else {
-            char tmp[16];
-            int ti = 0;
-            while (x > 0) { tmp[ti++] = '0' + (x % 10); x /= 10; }
-            while (ti > 0) { xStr[xi++] = tmp[--ti]; }
-        }
-        xStr[xi] = '\0';
-        
-        // Convert Y
-        if (y < 0) { yStr[yi++] = '-'; y = -y; }
-        if (y == 0) { yStr[yi++] = '0'; }
-        else {
-            char tmp[16];
-            int ti = 0;
-            while (y > 0) { tmp[ti++] = '0' + (y % 10); y /= 10; }
-            while (ti > 0) { yStr[yi++] = tmp[--ti]; }
-        }
-        yStr[yi] = '\0';
-        
-        // Write "x,y\n"
-        for (int j = 0; xStr[j] && pos < 500; j++) buffer[pos++] = xStr[j];
-        if (pos < 500) buffer[pos++] = ',';
-        for (int j = 0; yStr[j] && pos < 500; j++) buffer[pos++] = yStr[j];
-        if (pos < 500) buffer[pos++] = '\n';
-    }
-    
-    // Write to VFS
     uint8_t handle = vfs::open("/.desktop_icons", vfs::OPEN_WRITE);
     if (handle != 0xFF) {
         vfs::write(handle, buffer, pos);
         vfs::close(handle);
+        serial::puts("[desktop] Saved desktop icon positions with stable keys\n");
+    } else {
+        serial::puts("[desktop] Failed to save desktop icon positions\n");
     }
 }
 
@@ -4689,60 +4719,119 @@ static bool load_icon_positions()
     uint8_t handle = vfs::open("/.desktop_icons", vfs::OPEN_READ);
     if (handle == 0xFF) return false;
     
-    char buffer[512];
-    int32_t bytesRead = vfs::read(handle, buffer, 511);
+    char buffer[4096];
+    int32_t bytesRead = vfs::read(handle, buffer, (int32_t)sizeof(buffer) - 1);
     vfs::close(handle);
     
     if (bytesRead <= 0) return false;
     buffer[bytesRead] = '\0';
-    
-    // Parse the file
-    int iconIdx = 0;
-    int pos = 0;
-    
-    // Skip header line
-    while (pos < bytesRead && buffer[pos] != '\n') pos++;
-    if (pos < bytesRead) pos++; // Skip newline
-    
-    // Parse each line as "x,y"
-    while (pos < bytesRead && iconIdx < kDesktopIconCount) {
-        // Skip empty lines
-        if (buffer[pos] == '\n') { pos++; continue; }
-        
-        // Parse X coordinate
-        bool negX = false;
-        if (buffer[pos] == '-') { negX = true; pos++; }
-        int32_t x = 0;
-        while (pos < bytesRead && buffer[pos] >= '0' && buffer[pos] <= '9') {
-            x = x * 10 + (buffer[pos] - '0');
-            pos++;
-        }
-        if (negX) x = -x;
-        
-        // Skip comma
-        if (pos < bytesRead && buffer[pos] == ',') pos++;
-        
-        // Parse Y coordinate
-        bool negY = false;
-        if (buffer[pos] == '-') { negY = true; pos++; }
-        int32_t y = 0;
-        while (pos < bytesRead && buffer[pos] >= '0' && buffer[pos] <= '9') {
-            y = y * 10 + (buffer[pos] - '0');
-            pos++;
-        }
-        if (negY) y = -y;
-        
-        // Skip to next line
-        while (pos < bytesRead && buffer[pos] != '\n') pos++;
-        if (pos < bytesRead) pos++;
-        
-        // Store position
-        s_iconPosX[iconIdx] = x;
-        s_iconPosY[iconIdx] = y;
-        iconIdx++;
+
+    for (int i = 0; i < kDesktopIconCount; ++i) {
+        s_desktopIcons[i].savedX = -1;
+        s_desktopIcons[i].savedY = -1;
     }
     
-    return iconIdx == kDesktopIconCount;
+    int matched = 0;
+    int legacyIndex = 0;
+    int pos = 0;
+
+    while (pos < bytesRead) {
+        while (pos < bytesRead && (buffer[pos] == '\n' || buffer[pos] == '\r')) pos++;
+        if (pos >= bytesRead) break;
+
+        int lineStart = pos;
+        while (pos < bytesRead && buffer[pos] != '\n' && buffer[pos] != '\r') pos++;
+        int lineEnd = pos;
+        if (lineEnd <= lineStart) continue;
+
+        if (buffer[lineStart] == '#') continue;
+
+        int firstTab = -1;
+        int secondTab = -1;
+        for (int i = lineStart; i < lineEnd; ++i) {
+            if (buffer[i] == '\t') {
+                if (firstTab < 0) firstTab = i;
+                else { secondTab = i; break; }
+            }
+        }
+
+        if (firstTab > lineStart && secondTab > firstTab) {
+            char key[192];
+            int keyLen = firstTab - lineStart;
+            if (keyLen >= (int)sizeof(key)) keyLen = (int)sizeof(key) - 1;
+            for (int i = 0; i < keyLen; ++i) key[i] = buffer[lineStart + i];
+            key[keyLen] = '\0';
+
+            int parsePos = firstTab + 1;
+            bool negX = false;
+            if (parsePos < lineEnd && buffer[parsePos] == '-') { negX = true; parsePos++; }
+            int32_t x = 0;
+            while (parsePos < secondTab && buffer[parsePos] >= '0' && buffer[parsePos] <= '9') {
+                x = x * 10 + (buffer[parsePos] - '0');
+                parsePos++;
+            }
+            if (negX) x = -x;
+
+            parsePos = secondTab + 1;
+            bool negY = false;
+            if (parsePos < lineEnd && buffer[parsePos] == '-') { negY = true; parsePos++; }
+            int32_t y = 0;
+            while (parsePos < lineEnd && buffer[parsePos] >= '0' && buffer[parsePos] <= '9') {
+                y = y * 10 + (buffer[parsePos] - '0');
+                parsePos++;
+            }
+            if (negY) y = -y;
+
+            for (int iconIdx = 0; iconIdx < kDesktopIconCount; ++iconIdx) {
+                if (desktop_layout_key_matches(iconIdx, key)) {
+                    s_desktopIcons[iconIdx].savedX = x;
+                    s_desktopIcons[iconIdx].savedY = y;
+                    ++matched;
+                    break;
+                }
+            }
+            continue;
+        }
+        
+        int parsePos = lineStart;
+        bool negX = false;
+        if (parsePos < lineEnd && buffer[parsePos] == '-') { negX = true; parsePos++; }
+        int32_t x = 0;
+        while (parsePos < lineEnd && buffer[parsePos] >= '0' && buffer[parsePos] <= '9') {
+            x = x * 10 + (buffer[parsePos] - '0');
+            parsePos++;
+        }
+        if (negX) x = -x;
+
+        if (parsePos >= lineEnd || buffer[parsePos] != ',') continue;
+        parsePos++;
+
+        bool negY = false;
+        if (parsePos < lineEnd && buffer[parsePos] == '-') { negY = true; parsePos++; }
+        int32_t y = 0;
+        while (parsePos < lineEnd && buffer[parsePos] >= '0' && buffer[parsePos] <= '9') {
+            y = y * 10 + (buffer[parsePos] - '0');
+            parsePos++;
+        }
+        if (negY) y = -y;
+
+        if (legacyIndex < s_visibleIconCount) {
+            int iconIdx = s_visibleIconIndices[legacyIndex];
+            if (iconIdx >= 0 && iconIdx < kDesktopIconCount) {
+                s_desktopIcons[iconIdx].savedX = x;
+                s_desktopIcons[iconIdx].savedY = y;
+                ++matched;
+            }
+        }
+        ++legacyIndex;
+    }
+
+    if (matched > 0) {
+        serial::puts("[desktop] Loaded desktop icon positions\n");
+        return true;
+    }
+    serial::puts("[desktop] Desktop icon positions file contained no matching entries\n");
+    return false;
 }
 
 // Helper: try to launch an app using the kernel app framework
