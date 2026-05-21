@@ -5,8 +5,11 @@
 #include "logger.h"
 #include "navigator_file_io.h"
 #include "navigator_html_parser.h"
+#include "png_loader.h"
 #include <algorithm>
+#include <cctype>
 #include <sstream>
+#include <unordered_map>
 
 namespace gxos {
 namespace apps {
@@ -23,6 +26,9 @@ WebDocument        Navigator::s_currentDoc;
 std::vector<std::string> Navigator::s_backStack;
 std::vector<std::string> Navigator::s_forwardStack;
 std::vector<Bookmark>    Navigator::s_bookmarks;
+bool        Navigator::s_addressFocused = false;
+std::string Navigator::s_addressBuffer;
+int         Navigator::s_addressCaret   = 0;
 
 namespace {
 	constexpr int kWindowW = 920;
@@ -70,9 +76,234 @@ namespace {
 		publish(MsgType::MT_DrawTextAt, packDrawTextAt(windowId, x, y, text));
 	}
 
+	void drawImage(uint64_t windowId, int x, int y, int w, int h, const std::string& path)
+	{
+		publish(MsgType::MT_DrawImage, packDrawImage(windowId, x, y, w, h, path));
+	}
+
 	void addButton(uint64_t windowId, int id, int x, int y, int w, int h, const std::string& text)
 	{
 		publish(MsgType::MT_WidgetAdd, packWidgetAdd(windowId, 1, id, x, y, w, h, text));
+	}
+
+	// -----------------------------------------------------------------------
+	// Word-wrap helpers
+	//
+	// All text is rendered with a fixed-width bitmap font.
+	// kCharW is the approximate glyph advance in pixels.
+	// TODO: replace with proportional text-measurement API when available.
+	// -----------------------------------------------------------------------
+	constexpr int kCharW    = 8;   // approximate character cell width in pixels
+	constexpr int kLineH    = 16;  // single line height in pixels
+
+	// Wrap |text| into lines that fit within |maxChars| characters.
+	// Returns a vector of line strings (may be empty if text is empty).
+	static std::vector<std::string> wrapText(const std::string& text, int maxChars)
+	{
+		std::vector<std::string> lines;
+		if (maxChars <= 0 || text.empty()) {
+			if (!text.empty()) lines.push_back(text);
+			return lines;
+		}
+
+		size_t start = 0;
+		const size_t len = text.size();
+		while (start < len) {
+			size_t remaining = len - start;
+			if (static_cast<int>(remaining) <= maxChars) {
+				lines.push_back(text.substr(start));
+				break;
+			}
+			// Try to break at a word boundary (space) within the column limit.
+			size_t breakAt = static_cast<size_t>(maxChars);
+			// Search backward from column limit for a space.
+			size_t spacePos = text.rfind(' ', start + breakAt);
+			if (spacePos != std::string::npos && spacePos > start) {
+				breakAt = spacePos - start;
+			}
+			lines.push_back(text.substr(start, breakAt));
+			start += breakAt;
+			// Skip a single space at the break point.
+			if (start < len && text[start] == ' ') ++start;
+		}
+		return lines;
+	}
+
+	// Like wrapText but splits on embedded newlines first (for Preformatted blocks).
+	static std::vector<std::string> splitPreLines(const std::string& text)
+	{
+		std::vector<std::string> lines;
+		size_t start = 0;
+		const size_t len = text.size();
+		while (start <= len) {
+			size_t nl = text.find('\n', start);
+			if (nl == std::string::npos) nl = len;
+			lines.push_back(text.substr(start, nl - start));
+			if (nl == len) break;
+			start = nl + 1;
+		}
+		return lines;
+	}
+
+	// Number of pixel rows occupied by a block (based on wrapped line count).
+	// wrapCols: max chars per line for the block type.
+	static int wrappedBlockHeight(const std::string& text, int wrapCols, bool isPre = false)
+	{
+		if (isPre) {
+			return static_cast<int>(splitPreLines(text).size()) * kLineH;
+		}
+		int lines = static_cast<int>(wrapText(text, wrapCols).size());
+		if (lines == 0) lines = 1;
+		return lines * kLineH;
+	}
+
+	struct ImageInfo {
+		bool attempted = false;
+		bool ok = false;
+		bool unsupported = false;
+		bool tooLarge = false;
+		int naturalW = 0;
+		int naturalH = 0;
+		std::string filePath;
+		std::string drawPath;
+		std::string message;
+	};
+
+	static std::unordered_map<std::string, ImageInfo> s_imageCache;
+
+	static std::string toLowerAscii(std::string value)
+	{
+		for (char& ch : value) {
+			ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+		}
+		return value;
+	}
+
+	static bool endsWithIgnoreCase(const std::string& value, const std::string& suffix)
+	{
+		if (suffix.size() > value.size()) return false;
+		return toLowerAscii(value.substr(value.size() - suffix.size())) == toLowerAscii(suffix);
+	}
+
+	static std::string filePathFromUrl(const std::string& url)
+	{
+		if (url.rfind("file://", 0) != 0) return "";
+		std::string path = url.substr(7);
+		if (path.size() >= 2 && path[0] == '/' && path[1] == '/') path = path.substr(1);
+		return path;
+	}
+
+	static bool readPngDimensions(const std::vector<uint8_t>& bytes, int& width, int& height)
+	{
+		static const uint8_t sig[8] = { 0x89, 'P', 'N', 'G', '\r', '\n', 0x1A, '\n' };
+		if (bytes.size() < 24) return false;
+		for (int i = 0; i < 8; ++i) {
+			if (bytes[static_cast<size_t>(i)] != sig[i]) return false;
+		}
+		if (bytes[12] != 'I' || bytes[13] != 'H' || bytes[14] != 'D' || bytes[15] != 'R') return false;
+		auto be32 = [&bytes](size_t pos) -> uint32_t {
+			return (static_cast<uint32_t>(bytes[pos]) << 24) |
+			       (static_cast<uint32_t>(bytes[pos + 1]) << 16) |
+			       (static_cast<uint32_t>(bytes[pos + 2]) << 8) |
+			       static_cast<uint32_t>(bytes[pos + 3]);
+		};
+		uint32_t w = be32(16);
+		uint32_t h = be32(20);
+		if (w == 0 || h == 0 || w > 4096 || h > 4096) return false;
+		width = static_cast<int>(w);
+		height = static_cast<int>(h);
+		return true;
+	}
+
+	static const ImageInfo& imageInfoForBlock(const DocBlock& block)
+	{
+		const std::string key = block.url.empty() ? block.src : block.url;
+		auto found = s_imageCache.find(key);
+		if (found != s_imageCache.end()) return found->second;
+
+		ImageInfo info;
+		info.attempted = true;
+		if (block.url.rfind("file://", 0) != 0) {
+			info.unsupported = true;
+			info.message = "[unsupported image]";
+			auto inserted = s_imageCache.emplace(key, std::move(info));
+			return inserted.first->second;
+		}
+
+		info.filePath = filePathFromUrl(block.url);
+		if (!endsWithIgnoreCase(info.filePath, ".png")) {
+			info.unsupported = true;
+			info.message = "[unsupported image]";
+			auto inserted = s_imageCache.emplace(key, std::move(info));
+			return inserted.first->second;
+		}
+
+		BinaryReadResult br = readBinaryFile(info.filePath);
+		if (br.status == FileReadStatus::NotFound) {
+			info.message = "[missing image]";
+		} else if (br.status == FileReadStatus::TooLarge) {
+			info.tooLarge = true;
+			info.message = "[image too large]";
+		} else if (br.status == FileReadStatus::IoError) {
+			info.message = "[image read error]";
+		} else {
+			int headerW = 0;
+			int headerH = 0;
+			if (!readPngDimensions(br.bytes, headerW, headerH)) {
+				info.message = "[unsupported image]";
+			} else {
+				gxos::gui::ImagePtr decoded = gxos::gui::PngLoader::LoadFromMemory(br.bytes, info.filePath);
+				if (decoded && decoded->isValid()) {
+					info.ok = true;
+					info.naturalW = decoded->Width;
+					info.naturalH = decoded->Height;
+					info.drawPath = imageLoaderPathForFile(info.filePath);
+				} else {
+					info.message = "[missing image]";
+				}
+			}
+		}
+
+		auto inserted = s_imageCache.emplace(key, std::move(info));
+		return inserted.first->second;
+	}
+
+	static void imageDisplaySize(const DocBlock& block, int& outW, int& outH)
+	{
+		constexpr int kImageMaxW = kContentW - 36;
+		constexpr int kImageMaxH = kContentH - 20;
+		const ImageInfo& info = imageInfoForBlock(block);
+		int naturalW = info.ok ? info.naturalW : 220;
+		int naturalH = info.ok ? info.naturalH : 64;
+		if (naturalW <= 0) naturalW = 220;
+		if (naturalH <= 0) naturalH = 64;
+
+		int drawW = block.width > 0 ? block.width : naturalW;
+		int drawH = block.height > 0 ? block.height : naturalH;
+		if (block.width > 0 && block.height <= 0) {
+			drawH = std::max(1, (drawW * naturalH) / naturalW);
+		} else if (block.height > 0 && block.width <= 0) {
+			drawW = std::max(1, (drawH * naturalW) / naturalH);
+		}
+
+		if (drawW > kImageMaxW) {
+			drawH = std::max(1, (drawH * kImageMaxW) / drawW);
+			drawW = kImageMaxW;
+		}
+		if (drawH > kImageMaxH) {
+			// TODO: replace nearest-neighbor compositor scaling with higher-quality scaling.
+			drawW = std::max(1, (drawW * kImageMaxH) / drawH);
+			drawH = kImageMaxH;
+		}
+		outW = std::max(1, drawW);
+		outH = std::max(1, drawH);
+	}
+
+	static std::string imagePlaceholderText(const DocBlock& block, const ImageInfo& info)
+	{
+		if (!block.alt.empty()) return block.alt;
+		if (!block.text.empty()) return block.text;
+		return info.message.empty() ? "[missing image]" : info.message;
 	}
 }
 
@@ -93,6 +324,9 @@ int Navigator::main(int, char**)
 	s_hitLinkBlockIndex = -1;
 	s_backStack.clear();
 	s_forwardStack.clear();
+	s_addressFocused = false;
+	s_addressBuffer.clear();
+	s_addressCaret   = 0;
 
 	loadBookmarks();
 
@@ -167,7 +401,23 @@ int Navigator::main(int, char**)
 				if (button == 0 && action == "move") {
 					updateHoverStatus(target, linkIdx);
 				} else if (button == 1 && action == "down") {
-					if (target == HitTarget::Link) handleDocumentClick(target, linkIdx);
+					if (target == HitTarget::AddressBar) {
+							focusAddressBar();
+							// Set caret from click X position using the same fixed char width as rendering.
+							// TODO: replace with proportional text measurement when available.
+							if (s_addressFocused) {
+								constexpr int kCharW = 8;
+								constexpr int kTextX = kAddressX + 10;
+								int charOffset = (x - kTextX) / kCharW;
+								s_addressCaret = std::max(0, std::min(charOffset,
+									static_cast<int>(s_addressBuffer.size())));
+								renderToolbar();
+							}
+					} else {
+						// Clicking anywhere outside the address bar blurs it.
+						if (s_addressFocused) blurAddressBar();
+						if (target == HitTarget::Link) handleDocumentClick(target, linkIdx);
+					}
 				}
 			} catch (...) {
 			}
@@ -210,7 +460,7 @@ void Navigator::updateDisplay()
 	// Window title tracks the current document title.
 	const std::string winTitle = s_currentDoc.title.empty()
 		? "guideXOS Navigator"
-		: s_currentDoc.title + " – guideXOS Navigator";
+		: s_currentDoc.title + " - guideXOS Navigator";
 	publish(MsgType::MT_SetTitle, std::to_string(s_windowId) + "|" + winTitle);
 	publish(MsgType::MT_DrawText, std::to_string(s_windowId) + "|\f");
 
@@ -230,12 +480,43 @@ void Navigator::renderToolbar()
 	addButton(s_windowId, kWidgetIdReload, 20 + 2 * (kButtonW + kButtonGap), kButtonY, kButtonW, kButtonH, "Reload");
 	addButton(s_windowId, kWidgetIdHome, 20 + 3 * (kButtonW + kButtonGap), kButtonY, kButtonW, kButtonH, "Home");
 	addButton(s_windowId, kWidgetIdBookmarks, 20 + 4 * (kButtonW + kButtonGap), kButtonY, kButtonW, kButtonH, "Bookmarks");
-	addButton(s_windowId, kWidgetIdAddBookmark, 20 + 5 * (kButtonW + kButtonGap), kButtonY, kButtonW, kButtonH, "Add \u2605");
+	addButton(s_windowId, kWidgetIdAddBookmark, 20 + 5 * (kButtonW + kButtonGap), kButtonY, kButtonW, kButtonH, "Add *");
 
 	drawRect(s_windowId, kAddressX, kAddressY, kAddressW, kAddressH, 18, 22, 30);
-	drawRect(s_windowId, kAddressX, kAddressY, kAddressW, 1, 110, 120, 142);
-	drawRect(s_windowId, kAddressX, kAddressY + kAddressH - 1, kAddressW, 1, 70, 78, 96);
-	drawTextAt(s_windowId, kAddressX + 10, kAddressY + 7, s_currentDoc.url);
+	if (s_addressFocused) {
+		// Focused: bright blue border on all four sides
+		drawRect(s_windowId, kAddressX,                 kAddressY,                 kAddressW, 1, 80, 140, 220);
+		drawRect(s_windowId, kAddressX,                 kAddressY + kAddressH - 1, kAddressW, 1, 80, 140, 220);
+		drawRect(s_windowId, kAddressX,                 kAddressY,                 1, kAddressH, 80, 140, 220);
+		drawRect(s_windowId, kAddressX + kAddressW - 1, kAddressY,                 1, kAddressH, 80, 140, 220);
+
+		// Draw buffer text split at caret position so we can paint the caret in between.
+		// The UI bitmap font has a fixed cell width; kCharW is the best approximation.
+		// TODO: replace with proportional text-measurement API when available.
+		constexpr int kCharW     = 8;  // approximate glyph advance in pixels
+		constexpr int kTextX     = kAddressX + 10;
+		constexpr int kTextY     = kAddressY + 7;
+
+		// Clamp caret defensively (should already be in range, but guard rendering).
+		int caretPos = std::max(0, std::min(s_addressCaret,
+			static_cast<int>(s_addressBuffer.size())));
+
+		std::string before = s_addressBuffer.substr(0, static_cast<size_t>(caretPos));
+		std::string after  = s_addressBuffer.substr(static_cast<size_t>(caretPos));
+
+		int caretX = kTextX + caretPos * kCharW;
+
+		// Draw the full text (simpler for renderers that don't do sub-string positioning).
+		drawTextAt(s_windowId, kTextX, kTextY, s_addressBuffer);
+		// Draw a 1-px wide caret bar on top.
+		drawRect(s_windowId, caretX, kAddressY + 4, 1, kAddressH - 8, 200, 220, 255);
+		(void)before; (void)after; // reserved for future proportional split-draw
+	} else {
+		// Normal: subtle top/bottom border
+		drawRect(s_windowId, kAddressX, kAddressY,                 kAddressW, 1, 110, 120, 142);
+		drawRect(s_windowId, kAddressX, kAddressY + kAddressH - 1, kAddressW, 1,  70,  78,  96);
+		drawTextAt(s_windowId, kAddressX + 10, kAddressY + 7, s_currentDoc.url);
+	}
 }
 
 void Navigator::renderDocument()
@@ -248,25 +529,127 @@ void Navigator::renderDocument()
 	// Scroll-track slot
 	drawRect(s_windowId, kContentX + kContentW - 12, kToolbarH + 6, 8, kContentH, 229, 232, 238);
 
-	constexpr int kLinkLineH = 18;
+	// Layout constants
+	// Wrap columns: content width minus indent, divided by character cell width.
+	constexpr int kIndent       = 18;
+	constexpr int kListIndent   = 28;
+	constexpr int kPreIndent    = 18;
+	constexpr int kWrapW        = kContentW - kIndent - 16; // 16px right margin
+	const     int kWrapCols     = kWrapW / kCharW;
+	const     int kListWrapCols = (kContentW - kListIndent - 16) / kCharW;
+	const     int kPreWrapCols  = (kContentW - kPreIndent - 16) / kCharW;
 
 	int blockIndex = 0;
 	for (const DocBlock& block : s_currentDoc.blocks) {
 		int relY  = blockLayoutY(blockIndex);
 		int drawY = kContentY + relY - s_scrollOffset;
 
+		// Skip blocks fully above or below the visible viewport
+		int blockH = 0;
+		bool nextIsHeading = (blockIndex + 1 < static_cast<int>(s_currentDoc.blocks.size()) &&
+			s_currentDoc.blocks[blockIndex + 1].type == BlockType::Heading);
+		constexpr int kPreGapIfNextHeading = 10;
+		switch (block.type) {
+		case BlockType::Heading:      blockH = kLineH + 4; break;
+		case BlockType::Paragraph:    blockH = wrappedBlockHeight(block.text, kWrapCols)        + (nextIsHeading ? kPreGapIfNextHeading : 0); break;
+		case BlockType::Link:         blockH = wrappedBlockHeight(block.text, kWrapCols)        + (nextIsHeading ? kPreGapIfNextHeading : 0); break;
+		case BlockType::ListItem:     blockH = wrappedBlockHeight(block.text, kListWrapCols)    + (nextIsHeading ? kPreGapIfNextHeading : 0); break;
+		case BlockType::Preformatted: blockH = wrappedBlockHeight(block.text, kPreWrapCols, true); break;
+		case BlockType::Image: {
+			int imageW = 0;
+			int imageH = 0;
+			imageDisplaySize(block, imageW, imageH);
+			blockH = imageH + 4;
+			break;
+		}
+		}
+		if (drawY + blockH < kContentY || drawY > kContentY + kContentH) {
+			++blockIndex;
+			continue;
+		}
+
 		switch (block.type) {
 		case BlockType::Heading:
-			drawTextAt(s_windowId, kContentX + 18, drawY, block.text);
+			// Slightly larger heading: draw a subtle accent bar then the text
+			drawRect(s_windowId, kContentX + kIndent, drawY + kLineH,
+				kContentW - kIndent - 16, 2, 80, 140, 220);
+			drawTextAt(s_windowId, kContentX + kIndent, drawY, block.text);
 			break;
-		case BlockType::Paragraph:
-			drawTextAt(s_windowId, kContentX + 18, drawY, block.text);
+
+		case BlockType::Paragraph: {
+			auto lines = wrapText(block.text, kWrapCols);
+			int lineY = drawY;
+			for (const std::string& ln : lines) {
+				drawTextAt(s_windowId, kContentX + kIndent, lineY, ln);
+				lineY += kLineH;
+			}
 			break;
+		}
+
+		case BlockType::ListItem: {
+			// Dash bullet + indented wrapped text
+			drawTextAt(s_windowId, kContentX + kIndent, drawY, "-");
+			auto lines = wrapText(block.text, kListWrapCols);
+			int lineY = drawY;
+			for (const std::string& ln : lines) {
+				drawTextAt(s_windowId, kContentX + kListIndent, lineY, ln);
+				lineY += kLineH;
+			}
+			break;
+		}
+
+		case BlockType::Preformatted: {
+			// Light background box for the pre block
+			int preH = wrappedBlockHeight(block.text, kPreWrapCols, true);
+			drawRect(s_windowId, kContentX + kPreIndent - 4, drawY - 2,
+				kContentW - kPreIndent - 8, preH + 4, 230, 232, 238);
+			// Draw each line preserving exact content
+			auto lines = splitPreLines(block.text);
+			int lineY = drawY;
+			for (const std::string& ln : lines) {
+				drawTextAt(s_windowId, kContentX + kPreIndent, lineY, ln);
+				lineY += kLineH;
+			}
+			break;
+		}
+
 		case BlockType::Link: {
-			Rect lr = linkBlockRect(blockIndex);
-			// 1-px underline at baseline
-			drawRect(s_windowId, lr.x, lr.y + kLinkLineH - 1, lr.w, 1, 55, 110, 210);
-			drawTextAt(s_windowId, lr.x, drawY, block.text);
+			// Full wrapped link block: underline + blue text
+			// The entire bounding rect is clickable (TODO: per-line hit testing).
+			auto lines = wrapText(block.text, kWrapCols);
+			int lineY = drawY;
+			for (const std::string& ln : lines) {
+				// Underline under each line
+				int lineW = static_cast<int>(ln.size()) * kCharW;
+				drawRect(s_windowId, kContentX + kIndent, lineY + kLineH - 1,
+					lineW, 1, 55, 110, 210);
+				drawTextAt(s_windowId, kContentX + kIndent, lineY, ln);
+				lineY += kLineH;
+			}
+			break;
+		}
+
+		case BlockType::Image: {
+			int imageW = 0;
+			int imageH = 0;
+			imageDisplaySize(block, imageW, imageH);
+			const ImageInfo& info = imageInfoForBlock(block);
+			const int imageX = kContentX + kIndent;
+			const int viewportTop = kContentY;
+			const int viewportBottom = kToolbarH + 6 + kContentH;
+			if (drawY >= viewportTop && drawY + imageH <= viewportBottom) {
+				if (info.ok) {
+					drawImage(s_windowId, imageX, drawY, imageW, imageH, info.drawPath);
+				} else {
+					drawRect(s_windowId, imageX, drawY, imageW, imageH, 232, 236, 242);
+					drawRect(s_windowId, imageX, drawY, imageW, 1, 145, 153, 168);
+					drawRect(s_windowId, imageX, drawY + imageH - 1, imageW, 1, 145, 153, 168);
+					drawRect(s_windowId, imageX, drawY, 1, imageH, 145, 153, 168);
+					drawRect(s_windowId, imageX + imageW - 1, drawY, 1, imageH, 145, 153, 168);
+					drawTextAt(s_windowId, imageX + 10, drawY + std::max(8, (imageH - kLineH) / 2),
+						imagePlaceholderText(block, info));
+				}
+			}
 			break;
 		}
 		}
@@ -310,6 +693,7 @@ void Navigator::updateHoverStatus(HitTarget target, int linkBlockIndex)
 	case HitTarget::Home:        next = "Home button";           break;
 	case HitTarget::Bookmarks:   next = "View Bookmarks";        break;
 	case HitTarget::AddBookmark: next = "Add current page to Bookmarks"; break;
+	case HitTarget::AddressBar:  next = "Click to edit address"; break;
 	case HitTarget::Link:
 		if (linkBlockIndex >= 0 &&
 			linkBlockIndex < static_cast<int>(s_currentDoc.blocks.size()))
@@ -328,6 +712,14 @@ void Navigator::updateHoverStatus(HitTarget target, int linkBlockIndex)
 
 void Navigator::handleToolbarAction(int widgetId)
 {
+	// Any toolbar button click while the address bar is focused cancels the edit,
+	// except AddBookmark which explicitly uses the committed document URL anyway.
+	if (s_addressFocused) {
+		s_addressFocused = false;
+		s_addressBuffer.clear();
+		s_addressCaret   = 0;
+	}
+
 	switch (widgetId) {
 	case kWidgetIdBack:
 		goBack();
@@ -352,9 +744,9 @@ void Navigator::handleToolbarAction(int widgetId)
 		}
 		break;
 	case kWidgetIdAddBookmark: {
-		// Add the current page to bookmarks.
+		// Always bookmark the committed document URL, never the typed buffer.
 		const std::string& currentUrl = s_currentDoc.url;
-		const std::string& currentTitle = s_currentDoc.title.empty()
+		const std::string currentTitle = s_currentDoc.title.empty()
 			? currentUrl : s_currentDoc.title;
 		if (!currentUrl.empty()) {
 			addBookmark(currentTitle, currentUrl);
@@ -380,6 +772,51 @@ void Navigator::handleKeyPress(int keyCode, const std::string& action)
 {
 	if (action != "down") return;
 
+	// --- Address bar editing mode ---
+	if (s_addressFocused) {
+		const int bufLen = static_cast<int>(s_addressBuffer.size());
+
+		if (keyCode == 13) {                        // Enter â€“ commit navigation
+			commitAddressBar();
+		} else if (keyCode == 27) {                 // Escape â€“ cancel edit
+			blurAddressBar();
+		} else if (keyCode == 8) {                  // Backspace â€“ delete before caret
+			if (s_addressCaret > 0) {
+				s_addressBuffer.erase(static_cast<size_t>(s_addressCaret - 1), 1);
+				--s_addressCaret;
+				renderToolbar();
+			}
+		} else if (keyCode == 46) {                 // Delete â€“ delete at caret
+			if (s_addressCaret < bufLen) {
+				s_addressBuffer.erase(static_cast<size_t>(s_addressCaret), 1);
+				renderToolbar();
+			}
+		} else if (keyCode == 37) {                 // Left arrow
+			if (s_addressCaret > 0) {
+				--s_addressCaret;
+				renderToolbar();
+			}
+		} else if (keyCode == 39) {                 // Right arrow
+			if (s_addressCaret < bufLen) {
+				++s_addressCaret;
+				renderToolbar();
+			}
+		} else if (keyCode == 36) {                 // Home â€“ caret to start
+			s_addressCaret = 0;
+			renderToolbar();
+		} else if (keyCode == 35) {                 // End â€“ caret to end
+			s_addressCaret = bufLen;
+			renderToolbar();
+		} else if (keyCode >= 32 && keyCode <= 126) { // Printable ASCII â€“ insert at caret
+			s_addressBuffer.insert(static_cast<size_t>(s_addressCaret), 1,
+				static_cast<char>(keyCode));
+			++s_addressCaret;
+			renderToolbar();
+		}
+		return;
+	}
+
+	// --- Normal (unfocused) keyboard shortcuts ---
 	if (keyCode == 33) {
 		s_scrollOffset -= 48;
 		clampScrollOffset();
@@ -404,6 +841,12 @@ Navigator::HitTarget Navigator::hitTest(int x, int y, int& outLinkBlockIndex)
 	if (toolbarButtonRect(kWidgetIdHome).contains(x, y))    return HitTarget::Home;
 	if (toolbarButtonRect(kWidgetIdBookmarks).contains(x, y))    return HitTarget::Bookmarks;
 	if (toolbarButtonRect(kWidgetIdAddBookmark).contains(x, y))  return HitTarget::AddBookmark;
+
+	// Address bar hit region
+	{
+		Rect addrRect{ kAddressX, kAddressY, kAddressW, kAddressH };
+		if (addrRect.contains(x, y)) return HitTarget::AddressBar;
+	}
 
 	for (int i = 0; i < static_cast<int>(s_currentDoc.blocks.size()); ++i) {
 		if (s_currentDoc.blocks[i].type == BlockType::Link) {
@@ -451,6 +894,78 @@ void Navigator::clampScrollOffset()
 }
 
 // -----------------------------------------------------------------------------
+// Address bar editing
+// -----------------------------------------------------------------------------
+
+std::string Navigator::normalizeUrl(const std::string& input)
+{
+	if (input.empty()) return input;
+
+	// Already has any scheme (file://, http://, https://, about:, etc.) â€“ pass through.
+	// Detect scheme by looking for "://" or the special "about:" prefix.
+	if (input.find("://") != std::string::npos) return input;
+	if (input.size() >= 6 && input.substr(0, 6) == "about:") return input;
+
+	// Bare path â€“ convert to a file:// URL.
+	// file:// URLs have the form:  file:// <empty-authority> <absolute-path>
+	// which renders as exactly three slashes:  file:///path/to/file
+	//
+	// Strip any leading slash(es) from the input so we can re-attach exactly one,
+	// giving:  "file://" + "/" + "docs/index.html"  =  "file:///docs/index.html"
+	std::string path = input;
+	size_t firstNonSlash = path.find_first_not_of('/');
+	if (firstNonSlash == std::string::npos) {
+		// Input was all slashes â€“ treat as root.
+		return "file:///";
+	}
+	path = path.substr(firstNonSlash);          // strip all leading slashes
+	return std::string("file:///") + path;      // re-attach exactly three
+}
+
+void Navigator::focusAddressBar()
+{
+	if (s_addressFocused) return;
+	s_addressFocused = true;
+	s_addressBuffer  = s_currentDoc.url;
+	s_addressCaret   = static_cast<int>(s_addressBuffer.size()); // caret at end on focus
+	s_statusText     = "Editing address";
+	renderToolbar();
+	renderStatusBar();
+}
+
+void Navigator::blurAddressBar()
+{
+	if (!s_addressFocused) return;
+	s_addressFocused = false;
+	s_addressBuffer.clear();
+	s_addressCaret   = 0;
+	s_statusText = "Address edit canceled";
+	renderToolbar();
+	renderStatusBar();
+}
+
+void Navigator::commitAddressBar()
+{
+	std::string typed = s_addressBuffer;
+	s_addressFocused = false;
+	s_addressBuffer.clear();
+	s_addressCaret   = 0;
+
+	if (typed.empty()) {
+		s_statusText = "No URL entered.";
+		renderToolbar();
+		renderStatusBar();
+		return;
+	}
+
+	std::string url = normalizeUrl(typed);
+	s_statusText = "Loading " + url;
+	renderToolbar();
+	renderStatusBar();
+	navigateTo(url);
+}
+
+// -----------------------------------------------------------------------------
 // Bookmarks
 // -----------------------------------------------------------------------------
 
@@ -469,7 +984,7 @@ void Navigator::loadBookmarks()
 
 	FileReadResult fr = readTextFile(kBookmarkFilePath);
 	if (fr.status != FileReadStatus::Ok) {
-		// File missing or unreadable – use defaults.
+		// File missing or unreadable â€“ use defaults.
 		addDefaultBookmarks(s_bookmarks);
 		return;
 	}
@@ -542,6 +1057,7 @@ WebDocument Navigator::buildBookmarksDocument()
 void Navigator::loadUrl(const std::string& url)
 {
 	Logger::write(LogLevel::Info, std::string("Navigator loadUrl: ") + url);
+	s_imageCache.clear();
 
 	WebDocument doc;
 	if (url == "about:navigator" || url.empty()) {
@@ -620,12 +1136,23 @@ WebDocument Navigator::buildAboutNavigatorDocument()
 	WebDocument doc;
 	doc.url   = "about:navigator";
 	doc.title = "About guideXOS Navigator";
-	doc.blocks.push_back({BlockType::Heading,   "About guideXOS Navigator",                                      ""});
-	doc.blocks.push_back({BlockType::Paragraph, "guideXOS Navigator is the native document viewer and browser shell for guideXOS Server.", ""});
-	doc.blocks.push_back({BlockType::Paragraph, "It renders guideWeb documents and will support local file:// and eventually network browsing.", ""});
-	doc.blocks.push_back({BlockType::Paragraph, "No external HTML, CSS, JavaScript, or network stack is required.", ""});
-	doc.blocks.push_back({BlockType::Link,      "Open guideXOS Help",   "file:///docs/index.html"});
-	doc.blocks.push_back({BlockType::Link,      "View Bookmarks",       "about:bookmarks"});
+	doc.blocks.push_back({BlockType::Heading,   "About guideXOS Navigator", ""});
+	doc.blocks.push_back({BlockType::Paragraph,
+		"guideXOS Navigator is the native document viewer and browser shell for guideXOS Server.", ""});
+	doc.blocks.push_back({BlockType::Paragraph,
+		"It renders guideWeb documents and supports local file:// browsing.", ""});
+	doc.blocks.push_back({BlockType::Heading,   "Features", ""});
+	doc.blocks.push_back({BlockType::ListItem,  "Headings, paragraphs, lists, and preformatted blocks", ""});
+	doc.blocks.push_back({BlockType::ListItem,  "Word-wrapped text for readable documents", ""});
+	doc.blocks.push_back({BlockType::ListItem,  "Relative link resolution for file:// pages", ""});
+	doc.blocks.push_back({BlockType::ListItem,  "Back / Forward / Reload / Home navigation", ""});
+	doc.blocks.push_back({BlockType::ListItem,  "Bookmarks with persistent storage", ""});
+	doc.blocks.push_back({BlockType::Heading,   "Quick Start", ""});
+	doc.blocks.push_back({BlockType::Preformatted,
+		"Type a file:// URL in the address bar and press Enter.\n"
+		"Example: file:///docs/index.html", ""});
+	doc.blocks.push_back({BlockType::Link, "Open guideXOS Help",   "file:///docs/index.html"});
+	doc.blocks.push_back({BlockType::Link, "View Bookmarks",       "about:bookmarks"});
 	return doc;
 }
 
@@ -648,43 +1175,106 @@ WebDocument Navigator::buildNavigatorHomeDocument()
 int Navigator::blockLayoutY(int blockIndex)
 {
 	// Returns the Y coordinate of blockIndex relative to kContentY (pre-scroll).
-	constexpr int kHeadingLineH   = 22;
-	constexpr int kParagraphLineH = 18;
-	constexpr int kLinkLineH      = 18;
-	constexpr int kBlockGap       = 12;
+	// Spacing constants
+	constexpr int kHeadingGap    = 14;  // space after a Heading block
+	constexpr int kHeadingPreGap = 10;  // extra space BEFORE a Heading (except the first)
+	constexpr int kBlockGap      = 8;   // space after other blocks
+	constexpr int kPreWrapCols   = (kContentW - 34) / kCharW;
+	const     int kWrapCols      = (kContentW - 34) / kCharW;
+	const     int kListWrapCols  = (kContentW - 44) / kCharW;
 
 	int y = kHeadingY;
 	for (int i = 0; i < blockIndex && i < static_cast<int>(s_currentDoc.blocks.size()); ++i) {
-		switch (s_currentDoc.blocks[i].type) {
-		case BlockType::Heading:   y += kHeadingLineH   + kBlockGap; break;
-		case BlockType::Paragraph: y += kParagraphLineH + kBlockGap; break;
-		case BlockType::Link:      y += kLinkLineH      + kBlockGap; break;
+		const DocBlock& b    = s_currentDoc.blocks[i];
+		// Apply pre-gap before the *next* block when the next block is a Heading
+		// and the current block is not the first block.
+		bool nextIsHeading = false;
+		if (i + 1 < blockIndex &&
+			i + 1 < static_cast<int>(s_currentDoc.blocks.size())) {
+			nextIsHeading = (s_currentDoc.blocks[i + 1].type == BlockType::Heading);
 		}
+		int h = 0;
+		switch (b.type) {
+		case BlockType::Heading:
+			h = (kLineH + 4) + kHeadingGap;
+			break;
+		case BlockType::Paragraph:
+			h = wrappedBlockHeight(b.text, kWrapCols) + kBlockGap + (nextIsHeading ? kHeadingPreGap : 0);
+			break;
+		case BlockType::Link:
+			h = wrappedBlockHeight(b.text, kWrapCols) + kBlockGap + (nextIsHeading ? kHeadingPreGap : 0);
+			break;
+		case BlockType::ListItem:
+			h = wrappedBlockHeight(b.text, kListWrapCols) + kBlockGap + (nextIsHeading ? kHeadingPreGap : 0);
+			break;
+		case BlockType::Preformatted:
+			h = wrappedBlockHeight(b.text, kPreWrapCols, true) + 8 + kBlockGap + (nextIsHeading ? kHeadingPreGap : 0);
+			break;
+		case BlockType::Image: {
+			int imageW = 0;
+			int imageH = 0;
+			imageDisplaySize(b, imageW, imageH);
+			h = imageH + 4 + kBlockGap + (nextIsHeading ? kHeadingPreGap : 0);
+			break;
+		}
+		}
+		y += h;
 	}
 	return y;
 }
 
 Navigator::Rect Navigator::linkBlockRect(int blockIndex)
 {
-	constexpr int kLinkLineH = 18;
+	// The entire wrapped link height is clickable.
+	// TODO: per-line hit testing when proportional text measurement is available.
+	const int kWrapCols = (kContentW - 34) / kCharW;
 	int relY  = blockLayoutY(blockIndex);
 	int drawY = kContentY + relY - s_scrollOffset;
-	return Rect{ kContentX + 18, drawY, 180, kLinkLineH };
+	int h     = wrappedBlockHeight(s_currentDoc.blocks[blockIndex].text, kWrapCols);
+	int w     = std::min(
+		static_cast<int>(s_currentDoc.blocks[blockIndex].text.size()) * kCharW,
+		kContentW - 34);
+	return Rect{ kContentX + 18, drawY, w, h };
 }
 
 int Navigator::computeDocumentHeight()
 {
-	constexpr int kHeadingLineH   = 22;
-	constexpr int kParagraphLineH = 18;
-	constexpr int kLinkLineH      = 18;
-	constexpr int kBlockGap       = 12;
+	constexpr int kHeadingGap    = 14;
+	constexpr int kHeadingPreGap = 10;
+	constexpr int kBlockGap      = 8;
+	constexpr int kPreWrapCols   = (kContentW - 34) / kCharW;
+	const     int kWrapCols      = (kContentW - 34) / kCharW;
+	const     int kListWrapCols  = (kContentW - 44) / kCharW;
 
 	int h = kHeadingY;
-	for (const DocBlock& block : s_currentDoc.blocks) {
+	const int n = static_cast<int>(s_currentDoc.blocks.size());
+	for (int idx = 0; idx < n; ++idx) {
+		const DocBlock& block = s_currentDoc.blocks[idx];
+		bool nextIsHeading = (idx + 1 < n &&
+			s_currentDoc.blocks[idx + 1].type == BlockType::Heading);
 		switch (block.type) {
-		case BlockType::Heading:   h += kHeadingLineH   + kBlockGap; break;
-		case BlockType::Paragraph: h += kParagraphLineH + kBlockGap; break;
-		case BlockType::Link:      h += kLinkLineH      + kBlockGap; break;
+		case BlockType::Heading:
+			h += (kLineH + 4) + kHeadingGap;
+			break;
+		case BlockType::Paragraph:
+			h += wrappedBlockHeight(block.text, kWrapCols) + kBlockGap + (nextIsHeading ? kHeadingPreGap : 0);
+			break;
+		case BlockType::Link:
+			h += wrappedBlockHeight(block.text, kWrapCols) + kBlockGap + (nextIsHeading ? kHeadingPreGap : 0);
+			break;
+		case BlockType::ListItem:
+			h += wrappedBlockHeight(block.text, kListWrapCols) + kBlockGap + (nextIsHeading ? kHeadingPreGap : 0);
+			break;
+		case BlockType::Preformatted:
+			h += wrappedBlockHeight(block.text, kPreWrapCols, true) + 8 + kBlockGap + (nextIsHeading ? kHeadingPreGap : 0);
+			break;
+		case BlockType::Image: {
+			int imageW = 0;
+			int imageH = 0;
+			imageDisplaySize(block, imageW, imageH);
+			h += imageH + 4 + kBlockGap + (nextIsHeading ? kHeadingPreGap : 0);
+			break;
+		}
 		}
 	}
 	return h + kBlockGap;  // trailing padding
@@ -707,7 +1297,7 @@ WebDocument Navigator::loadFileUrl(const std::string& url)
 	// file://docs/index.html   ->  docs/index.html  (non-standard, tolerated)
 	std::string path = url.substr(7); // remove "file://"
 	if (path.size() >= 2 && path[0] == '/' && path[1] == '/') {
-		// file:////... — trim the extra slash pair (rare)
+		// file:////... â€” trim the extra slash pair (rare)
 		path = path.substr(1);
 	}
 	// path is now an absolute POSIX path like /docs/index.html
@@ -762,25 +1352,31 @@ WebDocument Navigator::loadFileUrl(const std::string& url)
 		}
 	}
 
-	// Plain-text path: each non-empty line becomes a Paragraph block.
+	// Plain-text path: render the entire file as a single Preformatted block
+	// so line breaks and spacing are preserved naturally.
+	// A heading block shows the filename; one Preformatted block holds the content.
 	WebDocument doc;
 	doc.url   = url;
 	doc.title = filename;
 	doc.blocks.push_back({BlockType::Heading, filename, ""});
 
-	std::istringstream iss(fr.text);
-	std::string line;
-	while (std::getline(iss, line)) {
-		// Strip trailing CR so Windows line-endings render cleanly.
-		if (!line.empty() && line.back() == '\r') line.pop_back();
-
-		if (line.empty()) continue;  // skip blank lines (keep layout tidy)
-		doc.blocks.push_back({BlockType::Paragraph, line, ""});
+	// Strip trailing CR from the whole text for clean Windows line-endings.
+	std::string cleanText = fr.text;
+	{
+		std::string out;
+		out.reserve(cleanText.size());
+		for (char c : cleanText) {
+			if (c != '\r') out += c;
+		}
+		// Remove single trailing newline for tidiness
+		if (!out.empty() && out.back() == '\n') out.pop_back();
+		cleanText = std::move(out);
 	}
 
-	// If the file was empty or all-whitespace, say so.
-	if (doc.blocks.size() == 1) {
+	if (cleanText.empty()) {
 		doc.blocks.push_back({BlockType::Paragraph, "(empty file)", ""});
+	} else {
+		doc.blocks.push_back({BlockType::Preformatted, cleanText, ""});
 	}
 
 	return doc;

@@ -140,6 +140,18 @@ ImagePtr PngLoader::LoadFromFile(const std::string& path)
         Logger::write(LogLevel::Info, std::string("PngLoader: host file exists path=") + hostPath);
         return LoadFromMemory(encoded, path);
     }
+    if (!hostPath.empty() && (hostPath[0] == '/' || hostPath[0] == '\\')) {
+        std::string relativeHostPath = hostPath.substr(1);
+        for (char& c : relativeHostPath) {
+            if (c == '/') c = '\\';
+        }
+        std::ifstream relativeFile(relativeHostPath, std::ios::binary);
+        if (relativeFile) {
+            encoded.assign(std::istreambuf_iterator<char>(relativeFile), std::istreambuf_iterator<char>());
+            Logger::write(LogLevel::Info, std::string("PngLoader: host file exists path=") + relativeHostPath);
+            return LoadFromMemory(encoded, path);
+        }
+    }
     if (hostPath != path) {
         Logger::write(LogLevel::Warn, std::string("PngLoader: mapped host file missing path=") + hostPath);
     }

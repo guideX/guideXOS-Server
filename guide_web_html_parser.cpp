@@ -17,7 +17,9 @@
 #include "guide_web_html_parser.h"
 #include <algorithm>
 #include <cctype>
+#include <cstdlib>
 #include <sstream>
+#include <utility>
 
 namespace gxos {
 namespace web {
@@ -83,6 +85,13 @@ static std::string decodeEntities(const std::string& s)
 		else if (entLo == "gt")   out += '>';
 		else if (entLo == "quot") out += '"';
 		else if (entLo == "apos") out += '\'';
+		else if (entLo == "nbsp") out += ' ';
+		else if (entLo == "ndash" || entLo == "mdash") out += '-';
+		else if (entLo == "hellip") { out += '.'; out += '.'; out += '.'; }
+		else if (entLo == "laquo") { out += '<'; out += '<'; }
+		else if (entLo == "raquo") { out += '>'; out += '>'; }
+		else if (entLo == "copy") out += '('; // (C)
+		else if (entLo == "reg")  out += '('; // (R)
 		else if (!ent.empty() && ent[0] == '#') {
 			try {
 				int cp = (ent.size() > 1 && (ent[1] == 'x' || ent[1] == 'X'))
@@ -123,6 +132,19 @@ static std::string extractAttr(const std::string& tagBody, const std::string& at
 	return tagBody.substr(rawPos, end - rawPos);
 }
 
+static int parsePositiveIntAttr(const std::string& tagBody, const std::string& attr)
+{
+	std::string value = trim(extractAttr(tagBody, attr));
+	if (value.empty()) return 0;
+	int result = 0;
+	for (char c : value) {
+		if (c < '0' || c > '9') break;
+		result = result * 10 + (c - '0');
+		if (result > 4096) return 4096;
+	}
+	return result > 0 ? result : 0;
+}
+
 // Block-tag context: what block is currently open.
 enum class OpenTag : uint8_t {
 	None  = 0,
@@ -131,6 +153,7 @@ enum class OpenTag : uint8_t {
 	A,
 	Li,
 	Title,
+	Pre,   // <pre> block — whitespace preserved
 };
 
 struct ParserState {
@@ -140,13 +163,24 @@ struct ParserState {
 	OpenTag      open    = OpenTag::None;
 	bool         inScript = false;
 	bool         inStyle  = false;
+	bool         inPre    = false; // true inside <pre>: preserve whitespace
 	bool         bodyReached = false; // ignore content before <body> except <title>
 };
 
 // Flush textBuf into a DocBlock, if non-empty.
 static void flushText(ParserState& st)
 {
-	std::string t = trim(collapseWs(decodeEntities(st.textBuf)));
+	std::string t;
+	if (st.inPre) {
+		// Inside <pre>: decode entities but preserve whitespace/newlines.
+		t = decodeEntities(st.textBuf);
+		// Strip a single leading newline that immediately follows <pre>
+		if (!t.empty() && t[0] == '\n') t = t.substr(1);
+		// Strip a single trailing newline before </pre>
+		if (!t.empty() && t.back() == '\n') t.pop_back();
+	} else {
+		t = trim(collapseWs(decodeEntities(st.textBuf)));
+	}
 	st.textBuf.clear();
 	if (t.empty()) return;
 
@@ -157,8 +191,13 @@ static void flushText(ParserState& st)
 		st.doc.blocks.push_back({BlockType::Heading, t, ""});
 		break;
 	case OpenTag::P:
-	case OpenTag::Li:
 		st.doc.blocks.push_back({BlockType::Paragraph, t, ""});
+		break;
+	case OpenTag::Li:
+		st.doc.blocks.push_back({BlockType::ListItem, t, ""});
+		break;
+	case OpenTag::Pre:
+		st.doc.blocks.push_back({BlockType::Preformatted, t, ""});
 		break;
 	case OpenTag::A:
 		if (!st.hrefBuf.empty())
@@ -192,6 +231,8 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 	if (name == "script") { flushText(st); st.inScript = true; return; }
 	if (name == "style")  { flushText(st); st.inStyle  = true; return; }
 
+	if (st.inScript || st.inStyle) return;
+
 	// Mark body reached.
 	if (name == "body") { st.bodyReached = true; return; }
 
@@ -202,9 +243,33 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 		name == "table" || name == "tr" || name == "td" || name == "th")
 		return;
 
-	// <br> – flush current text as a paragraph (creates a line break).
+	// <br> – inside <pre> append a newline to the buffer; outside flush as a
+	// line break only if there is pending text (avoids empty Paragraph blocks).
 	if (name == "br") {
+		if (st.inPre) {
+			st.textBuf += '\n';
+		} else if (!trim(collapseWs(st.textBuf)).empty()) {
+			flushText(st);
+		}
+		return;
+	}
+
+	if (name == "img") {
 		flushText(st);
+		std::string src = trim(decodeEntities(extractAttr(tagBody, "src")));
+		if (src.empty()) return;
+		std::string alt = decodeEntities(extractAttr(tagBody, "alt"));
+		DocBlock block;
+		block.type = BlockType::Image;
+		block.text = alt;
+		block.url = resolveRelativeUrl(st.doc.url, src);
+		block.src = src;
+		block.alt = alt;
+		block.width = parsePositiveIntAttr(tagBody, "width");
+		block.height = parsePositiveIntAttr(tagBody, "height");
+		st.doc.blocks.push_back(std::move(block));
+		st.open = OpenTag::None;
+		st.hrefBuf.clear();
 		return;
 	}
 
@@ -217,6 +282,17 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 	if (name == "p")     { st.open = OpenTag::P;     return; }
 	if (name == "li")    { st.open = OpenTag::Li;    return; }
 	if (name == "title") { st.open = OpenTag::Title; return; }
+
+	if (name == "pre") {
+		st.open  = OpenTag::Pre;
+		st.inPre = true;
+		return;
+	}
+	// <code>: if a <pre> is already open, stay in it; otherwise treat as plain text.
+	if (name == "code") {
+		if (!st.inPre) { /* leave current context; code text flows through */ }
+		return;
+	}
 
 	if (name == "a") {
 		std::string href = extractAttr(tagBody, "href");
@@ -249,6 +325,13 @@ static void handleCloseTag(ParserState& st, const std::string& tagName)
 		st.open    = OpenTag::None;
 		st.hrefBuf.clear();
 	}
+	if (name == "pre") {
+		flushText(st);
+		st.open  = OpenTag::None;
+		st.inPre = false;
+	}
+	// </code> inside <pre>: stay in pre context.
+	// </code> outside: nothing to do.
 }
 
 } // anonymous namespace
@@ -337,6 +420,9 @@ WebDocument parseHtml(const std::string& pageUrl, const std::string& htmlText)
 		// Character data
 		// ----------------------------------------------------------------
 		if (!st.inScript && !st.inStyle) {
+			// Inside <pre>, preserve all characters including newlines/spaces.
+			// Outside <pre>, collapse the character stream normally; flushText()
+			// will call collapseWs() later.
 			st.textBuf += c;
 		}
 		++i;

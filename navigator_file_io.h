@@ -17,6 +17,7 @@
 
 #include <string>
 #include <cstdint>
+#include <vector>
 
 namespace gxos {
 namespace apps {
@@ -24,6 +25,7 @@ namespace apps {
 // Maximum bytes Navigator will load from a single file.
 // Keeps stack/heap pressure predictable on bare-metal targets.
 static constexpr uint32_t kNavigatorMaxFileBytes = 64u * 1024u;
+static constexpr uint32_t kNavigatorMaxImageBytes = 4u * 1024u * 1024u;
 
 enum class FileReadStatus : uint8_t {
 	Ok          = 0,
@@ -37,6 +39,11 @@ struct FileReadResult {
 	std::string    text;   // populated on Ok
 };
 
+struct BinaryReadResult {
+	FileReadStatus       status = FileReadStatus::NotFound;
+	std::vector<uint8_t> bytes;  // populated on Ok
+};
+
 // Read the entire contents of |absolutePath| as UTF-8 / Latin-1 text.
 //
 // |absolutePath| must be an absolute POSIX-style path (e.g. /docs/index.html).
@@ -45,6 +52,14 @@ struct FileReadResult {
 // the process working directory so that running from D:\dev\guideXOSServer\
 // finds docs\index.html naturally.
 FileReadResult readTextFile(const std::string& absolutePath);
+
+// Read binary data from |absolutePath| using the same host / bare-metal path
+// mapping as readTextFile().  |maxBytes| protects Navigator from huge images.
+BinaryReadResult readBinaryFile(const std::string& absolutePath, uint32_t maxBytes = kNavigatorMaxImageBytes);
+
+// Convert an absolute POSIX-style Navigator path into the path a host-side
+// compositor image loader can open.  On bare-metal this returns absolutePath.
+std::string imageLoaderPathForFile(const std::string& absolutePath);
 
 // Write |text| to |absolutePath|, creating the file (and any missing
 // intermediate directories) if necessary.  Returns true on success.

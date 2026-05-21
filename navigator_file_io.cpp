@@ -20,22 +20,25 @@
 namespace gxos {
 namespace apps {
 
-FileReadResult readTextFile(const std::string& absolutePath)
+static std::string toHostPath(const std::string& absolutePath)
 {
-	FileReadResult result;
-
-	// Strip the leading '/' so the path is relative to the CWD.
-	// e.g. /docs/index.html  ->  docs/index.html
 	std::string hostPath = absolutePath;
 	if (!hostPath.empty() && (hostPath[0] == '/' || hostPath[0] == '\\')) {
 		hostPath = hostPath.substr(1);
 	}
-	// Convert forward slashes to the native separator on Windows.
 #if defined(_WIN32)
 	for (char& c : hostPath) {
 		if (c == '/') c = '\\';
 	}
 #endif
+	return hostPath;
+}
+
+FileReadResult readTextFile(const std::string& absolutePath)
+{
+	FileReadResult result;
+
+	std::string hostPath = toHostPath(absolutePath);
 
 	Logger::write(LogLevel::Info,
 		std::string("Navigator readTextFile (host): ") + hostPath);
@@ -74,14 +77,54 @@ FileReadResult readTextFile(const std::string& absolutePath)
 	return result;
 }
 
+BinaryReadResult readBinaryFile(const std::string& absolutePath, uint32_t maxBytes)
+{
+	BinaryReadResult result;
+	std::string hostPath = toHostPath(absolutePath);
+
+	Logger::write(LogLevel::Info,
+		std::string("Navigator readBinaryFile (host): ") + hostPath);
+
+	std::ifstream input(hostPath, std::ios::binary);
+	if (!input) {
+		result.status = FileReadStatus::NotFound;
+		return result;
+	}
+
+	input.seekg(0, std::ios::end);
+	std::streamoff fileSize = input.tellg();
+	if (fileSize < 0) {
+		result.status = FileReadStatus::IoError;
+		return result;
+	}
+	if (static_cast<uint64_t>(fileSize) > maxBytes) {
+		result.status = FileReadStatus::TooLarge;
+		return result;
+	}
+
+	input.seekg(0, std::ios::beg);
+	result.bytes.resize(static_cast<size_t>(fileSize));
+	if (!result.bytes.empty()) {
+		input.read(reinterpret_cast<char*>(result.bytes.data()), fileSize);
+		if (!input) {
+			result.bytes.clear();
+			result.status = FileReadStatus::IoError;
+			return result;
+		}
+	}
+	result.status = FileReadStatus::Ok;
+	return result;
+}
+
+std::string imageLoaderPathForFile(const std::string& absolutePath)
+{
+	return toHostPath(absolutePath);
+}
+
 bool writeTextFile(const std::string& absolutePath, const std::string& text)
 {
-	std::string hostPath = absolutePath;
-	if (!hostPath.empty() && (hostPath[0] == '/' || hostPath[0] == '\\')) {
-		hostPath = hostPath.substr(1);
-	}
+	std::string hostPath = toHostPath(absolutePath);
 #if defined(_WIN32)
-	for (char& c : hostPath) { if (c == '/') c = '\\'; }
 	// Create intermediate directories on Windows using _mkdir.
 	{
 		std::string dir = hostPath;
@@ -153,6 +196,41 @@ FileReadResult readTextFile(const std::string& absolutePath)
 	result.text   = std::string(buf, static_cast<size_t>(bytesRead));
 	result.status = FileReadStatus::Ok;
 	return result;
+}
+
+BinaryReadResult readBinaryFile(const std::string& absolutePath, uint32_t maxBytes)
+{
+	BinaryReadResult result;
+	static char buf[kNavigatorMaxImageBytes + 1];
+	uint32_t cappedMax = maxBytes < kNavigatorMaxImageBytes ? maxBytes : kNavigatorMaxImageBytes;
+
+	int32_t bytesRead = kernel::vfs::read_file(
+		absolutePath.c_str(),
+		buf,
+		cappedMax);
+
+	if (bytesRead == kernel::vfs::VFS_ERR_NOT_FOUND) {
+		result.status = FileReadStatus::NotFound;
+		return result;
+	}
+	if (bytesRead < 0) {
+		result.status = FileReadStatus::IoError;
+		return result;
+	}
+	if (static_cast<uint32_t>(bytesRead) >= cappedMax) {
+		result.status = FileReadStatus::TooLarge;
+		return result;
+	}
+
+	result.bytes.assign(reinterpret_cast<const uint8_t*>(buf),
+		reinterpret_cast<const uint8_t*>(buf) + bytesRead);
+	result.status = FileReadStatus::Ok;
+	return result;
+}
+
+std::string imageLoaderPathForFile(const std::string& absolutePath)
+{
+	return absolutePath;
 }
 
 bool writeTextFile(const std::string& absolutePath, const std::string& text)

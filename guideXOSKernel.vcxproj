@@ -368,6 +368,7 @@
     <ClCompile Include="guide_web_html_parser.cpp" />
     <ClCompile Include="navigator_file_io.cpp" />
     <ClCompile Include="navigator_html_parser.cpp" />
+    <ClCompile Include="navigator_url_tests.cpp" />
     <ClCompile Include="system_tray.cpp" />
     <ClCompile Include="welcome.cpp" />
   </ItemGroup>
@@ -383,6 +384,9 @@
     <None Include="kernel\clean.bat" />
     <None Include="kernel\Makefile" />
     <None Include="RUN-KERNEL.bat" />
+  </ItemGroup>
+  <ItemGroup>
+    <Text Include="docs\plain.txt" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

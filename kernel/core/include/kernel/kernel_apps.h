@@ -378,36 +378,101 @@ public:
     virtual void onMouseDown(int x, int y, uint8_t button) override;
     virtual void onWidgetClick(int widgetId) override;
     virtual void onKeyDown(uint32_t key) override;
+    virtual void onKeyChar(char c) override;
 
     static app::KernelApp* create() { return new NavigatorApp(); }
 
 private:
     static const int MAX_STATUS_LEN = 128;
+    static const int MAX_URL_LEN = 160;
+    static const int MAX_TITLE_LEN_NAV = 96;
+    static const int MAX_BLOCKS = 40;
+    static const int MAX_BLOCK_TEXT = 320;
+    static const int MAX_BOOKMARKS = 12;
     static const int TOOLBAR_H = 48;
     static const int STATUS_H = 24;
     static const int BUTTON_W = 64;
     static const int BUTTON_H = 22;
-    static const int BUTTON_GAP = 8;
+    static const int BUTTON_GAP = 6;
     static const int CONTENT_X = 16;
     static const int CONTENT_Y = 62;
-    static const int ADDRESS_X = 298;
+    static const int ADDRESS_X = 452;
     static const int ADDRESS_Y = 12;
     static const int ADDRESS_H = 22;
 
-    enum WidgetIds {
-        WID_BACK = 1,
-        WID_FORWARD = 2,
-        WID_RELOAD = 3,
-        WID_HOME = 4,
+    enum BlockKind {
+        BLOCK_HEADING = 0,
+        BLOCK_PARAGRAPH,
+        BLOCK_LINK,
+        BLOCK_LIST_ITEM,
+        BLOCK_PREFORMATTED,
+        BLOCK_IMAGE
+    };
+
+    struct DocBlock {
+        BlockKind kind;
+        char text[MAX_BLOCK_TEXT];
+        char url[MAX_URL_LEN];
+        char src[MAX_URL_LEN];
+        char alt[96];
+        int width;
+        int height;
+    };
+
+    struct Bookmark {
+        char title[64];
+        char url[MAX_URL_LEN];
     };
 
     char m_status[MAX_STATUS_LEN];
+    char m_currentUrl[MAX_URL_LEN];
+    char m_title[MAX_TITLE_LEN_NAV];
+    DocBlock m_blocks[MAX_BLOCKS];
+    int m_blockCount;
+    Bookmark m_bookmarks[MAX_BOOKMARKS];
+    int m_bookmarkCount;
+    char m_backStack[12][MAX_URL_LEN];
+    int m_backCount;
+    char m_forwardStack[12][MAX_URL_LEN];
+    int m_forwardCount;
+    bool m_addressFocused;
+    char m_addressBuffer[MAX_URL_LEN];
+    int m_addressCaret;
     int m_scrollY;
-    bool m_helpLinkHover;
+    int m_hoverLinkIndex;
+    int m_backBtnId;
+    int m_forwardBtnId;
+    int m_reloadBtnId;
+    int m_homeBtnId;
+    int m_bookmarksBtnId;
+    int m_addBookmarkBtnId;
 
     void setStatus(const char* text);
     void updateButtons();
-    bool hitHelpLink(int x, int y) const;
+    void loadUrl(const char* url);
+    void navigateTo(const char* url);
+    void goBack();
+    void goForward();
+    void buildAboutNavigatorDocument();
+    void buildBookmarksDocument();
+    void buildErrorDocument(const char* url, const char* reason);
+    void loadFileUrl(const char* url);
+    void addBlock(BlockKind kind, const char* text, const char* url = "");
+    void addImageBlock(const char* src, const char* alt, const char* resolvedUrl, int width, int height);
+    void addBookmark(const char* title, const char* url);
+    void loadDefaultBookmarks();
+    void drawDocument(uint32_t x, uint32_t y, uint32_t w, uint32_t h);
+    void drawWrappedText(uint32_t x, uint32_t y, const char* text, uint32_t color, int maxChars, int& outY) const;
+    int blockHeight(const DocBlock& block, int maxChars) const;
+    int blockY(int index, int maxChars) const;
+    int hitLinkIndex(int x, int y) const;
+    bool hitAddressBar(int x, int y) const;
+    void focusAddressBar();
+    void blurAddressBar();
+    void commitAddressBar();
+    void normalizeUrl(const char* input, char* out, int outSize) const;
+    void parseHtmlDocument(const char* url, const char* html);
+    void resolveHref(const char* baseUrl, const char* href, char* out, int outSize) const;
     int maxScroll() const;
     void clampScroll();
 };

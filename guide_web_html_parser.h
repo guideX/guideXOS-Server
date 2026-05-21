@@ -4,13 +4,16 @@
 // Forgiving, minimal HTML-subset parser for guideXOS.
 //
 // Supported tags (case-insensitive):
+//   <img src="...">  - Image block; src resolved via resolveRelativeUrl()
 //   <title>          – sets WebDocument.title
 //   <h1> <h2> <h3>   – Heading block
 //   <p>              – Paragraph block
-//   <br>             – emits the accumulated text as a Paragraph then resets
+//   <br>             – line break (flush pending text; no empty Paragraph if no text)
 //   <a href="...">   – Link block; href resolved via resolveRelativeUrl()
-//   <li>             – Paragraph block (plain text bullet)
+//   <li>             – ListItem block (bullet item with dash prefix)
 //   <ul> <ol>        – ignored (structure only; <li> carries the content)
+//   <pre>            – Preformatted block; whitespace/newlines preserved
+//   <code>           – inside <pre>: stays in Preformatted; elsewhere: plain text
 //
 // Ignored with content stripped:
 //   <script>  <style>

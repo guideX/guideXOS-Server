@@ -545,6 +545,9 @@
     <ClCompile Include="navigator_html_parser.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="navigator_url_tests.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <None Include="examples\apps\future-gxapp\app.json" />
@@ -570,5 +573,8 @@
     </None>
     <None Include="docs\index.html" />
     <None Include="docs\desktop.html" />
+  </ItemGroup>
+  <ItemGroup>
+    <Text Include="docs\plain.txt" />
   </ItemGroup>
 </Project>

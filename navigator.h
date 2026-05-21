@@ -57,6 +57,7 @@ private:
 		Home,
 		Bookmarks,
 		AddBookmark,
+		AddressBar,
 		Link,   // any Link block; s_hitLinkBlockIndex carries the index
 	};
 
@@ -119,6 +120,14 @@ private:
 	static void handleKeyPress(int keyCode, const std::string& action);
 
 	// -------------------------------------------------------------------------
+	// Address bar editing
+	// -------------------------------------------------------------------------
+	static void focusAddressBar();   // begin editing – copies current URL into buffer
+	static void blurAddressBar();    // cancel editing – restores current URL
+	static void commitAddressBar();  // navigate to typed URL, then blur
+	static std::string normalizeUrl(const std::string& input); // scheme normalizer
+
+	// -------------------------------------------------------------------------
 	// Hit testing & layout helpers
 	// -------------------------------------------------------------------------
 	static HitTarget hitTest(int x, int y, int& outLinkBlockIndex);
@@ -144,6 +153,10 @@ private:
 	static std::vector<std::string> s_forwardStack;
 	// Persistent bookmark list.
 	static std::vector<Bookmark>    s_bookmarks;
+	// Address bar editing state.
+	static bool        s_addressFocused;   // true while user is typing
+	static std::string s_addressBuffer;    // the editable text
+	static int         s_addressCaret;     // insertion point index into s_addressBuffer
 };
 
 } // namespace apps

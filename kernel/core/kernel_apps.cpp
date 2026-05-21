@@ -4379,9 +4379,15 @@ const char* TrashApp::typeForEntry(const TrashEntry& entry) const
 // ============================================================
 
 NavigatorApp::NavigatorApp()
-    : m_scrollY(0), m_helpLinkHover(false)
+    : m_blockCount(0), m_bookmarkCount(0), m_backCount(0), m_forwardCount(0),
+      m_addressFocused(false), m_addressCaret(0), m_scrollY(0), m_hoverLinkIndex(-1),
+      m_backBtnId(-1), m_forwardBtnId(-1), m_reloadBtnId(-1), m_homeBtnId(-1),
+      m_bookmarksBtnId(-1), m_addBookmarkBtnId(-1)
 {
-    strcopy(m_status, "Ready.", MAX_STATUS_LEN);
+    strcopy(m_status, "Ready", MAX_STATUS_LEN);
+    strcopy(m_currentUrl, "about:navigator", MAX_URL_LEN);
+    strcopy(m_title, "guideXOS Navigator", MAX_TITLE_LEN_NAV);
+    m_addressBuffer[0] = '\0';
 }
 
 NavigatorApp::~NavigatorApp() {
@@ -4405,6 +4411,8 @@ bool NavigatorApp::init()
     compositor::KernelCompositor::registerWindow(m_window);
     m_state = app::AppState::Running;
 
+    loadDefaultBookmarks();
+    loadUrl("about:navigator");
     updateButtons();
     invalidate();
     return true;
@@ -4422,12 +4430,26 @@ void NavigatorApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h)
     int addressW = (int)w - ADDRESS_X - 20;
     if (addressW > 0) {
         framebuffer::fill_rect(x + ADDRESS_X, y + ADDRESS_Y, (uint32_t)addressW, ADDRESS_H, 0xFF161A22);
+        framebuffer::fill_rect(x + ADDRESS_X, y + ADDRESS_Y, (uint32_t)addressW, 1, m_addressFocused ? 0xFF6FA8FF : 0xFF6E7688);
+        framebuffer::fill_rect(x + ADDRESS_X, y + ADDRESS_Y + ADDRESS_H - 1, (uint32_t)addressW, 1, 0xFF11151D);
+        framebuffer::fill_rect(x + ADDRESS_X, y + ADDRESS_Y, 1, ADDRESS_H, m_addressFocused ? 0xFF6FA8FF : 0xFF6E7688);
+        framebuffer::fill_rect(x + ADDRESS_X + addressW - 1, y + ADDRESS_Y, 1, ADDRESS_H, 0xFF11151D);
+        appDrawText(x + ADDRESS_X + 8, y + ADDRESS_Y + 7,
+                    m_addressFocused ? m_addressBuffer : m_currentUrl,
+                    rgb(232, 236, 246));
+        if (m_addressFocused) {
+            int caretX = ADDRESS_X + 8 + m_addressCaret * 6;
+            if (caretX < ADDRESS_X + addressW - 4) {
+                framebuffer::fill_rect(x + (uint32_t)caretX, y + ADDRESS_Y + 4, 1, ADDRESS_H - 8, 0xFFE8ECF6);
+            }
+        }
     }
 
     uint32_t contentTop = y + TOOLBAR_H + 6;
     uint32_t contentH = h > (uint32_t)(TOOLBAR_H + STATUS_H + 12) ? h - TOOLBAR_H - STATUS_H - 12 : 0;
     if (contentH > 0) {
         framebuffer::fill_rect(x + CONTENT_X, contentTop, w - CONTENT_X * 2, contentH, 0xFFFAFBFD);
+        drawDocument(x, y, w, h);
     }
 
     if (maxScroll() > 0) {
@@ -4435,7 +4457,7 @@ void NavigatorApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h)
         uint32_t trackY = contentTop + 4;
         uint32_t trackH = contentH > 8 ? contentH - 8 : contentH;
         framebuffer::fill_rect(trackX, trackY, 6, trackH, 0xFFE0E4EB);
-        int thumbH = (int)((trackH * (contentH ? contentH : 1)) / 180);
+        int thumbH = (int)((trackH * (contentH ? contentH : 1)) / (uint32_t)(maxScroll() + (int)contentH));
         if (thumbH < 20) thumbH = 20;
         int maxScrollValue = maxScroll();
         int thumbY = (int)trackY;
@@ -4447,43 +4469,63 @@ void NavigatorApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h)
 
     framebuffer::fill_rect(x, y + h - STATUS_H, w, STATUS_H, 0xFF262A34);
     framebuffer::fill_rect(x, y + h - STATUS_H, w, 1, 0xFF586076);
+    appDrawText(x + 10, y + h - STATUS_H + 8, m_status, rgb(222, 226, 236));
 }
 
 void NavigatorApp::onMouseMove(int x, int y)
 {
-    bool hover = hitHelpLink(x, y);
-    if (hover != m_helpLinkHover) {
-        m_helpLinkHover = hover;
-        if (hover) setStatus("Link: Open guideXOS Help");
-        else setStatus("Ready.");
+    int linkIndex = hitLinkIndex(x, y);
+    if (linkIndex != m_hoverLinkIndex) {
+        m_hoverLinkIndex = linkIndex;
+        if (linkIndex >= 0 && linkIndex < m_blockCount) {
+            setStatus(m_blocks[linkIndex].url);
+        } else if (hitAddressBar(x, y)) {
+            setStatus("Click to edit address");
+        } else {
+            setStatus("Ready");
+        }
     }
 }
 
 void NavigatorApp::onMouseDown(int x, int y, uint8_t button)
 {
-    if (button == 1 && hitHelpLink(x, y)) {
-        setStatus("Open guideXOS Help is a placeholder for future guideWeb/guideNet integration.");
+    if ((button & 0x01) == 0 && button != 1) return;
+
+    if (hitAddressBar(x, y)) {
+        focusAddressBar();
+        int charOffset = (x - ADDRESS_X - 8) / 6;
+        if (charOffset < 0) charOffset = 0;
+        int len = strlen_local(m_addressBuffer);
+        if (charOffset > len) charOffset = len;
+        m_addressCaret = charOffset;
+        invalidate();
+        return;
+    }
+
+    if (m_addressFocused) blurAddressBar();
+
+    int linkIndex = hitLinkIndex(x, y);
+    if (linkIndex >= 0 && linkIndex < m_blockCount) {
+        navigateTo(m_blocks[linkIndex].url);
     }
 }
 
 void NavigatorApp::onWidgetClick(int widgetId)
 {
-    switch (widgetId) {
-        case WID_BACK:
-            setStatus("Back is not implemented yet.");
-            break;
-        case WID_FORWARD:
-            setStatus("Forward is not implemented yet.");
-            break;
-        case WID_RELOAD:
-            setStatus("Reload requested for file:///docs/index.html.");
-            break;
-        case WID_HOME:
-            m_scrollY = 0;
-            setStatus("Home opened: file:///docs/index.html.");
-            break;
-        default:
-            break;
+    if (widgetId == m_backBtnId) {
+        goBack();
+    } else if (widgetId == m_forwardBtnId) {
+        goForward();
+    } else if (widgetId == m_reloadBtnId) {
+        loadUrl(m_currentUrl);
+    } else if (widgetId == m_homeBtnId) {
+        navigateTo("about:navigator");
+    } else if (widgetId == m_bookmarksBtnId) {
+        navigateTo("about:bookmarks");
+    } else if (widgetId == m_addBookmarkBtnId) {
+        addBookmark(m_title[0] ? m_title : m_currentUrl, m_currentUrl);
+        setStatus("Bookmark added");
+        invalidate();
     }
 }
 
@@ -4492,15 +4534,43 @@ void NavigatorApp::onKeyDown(uint32_t key)
     if (key == shell::KEY_PGUP) {
         m_scrollY -= 48;
         clampScroll();
-        setStatus("Scrolled up.");
+        setStatus("Scrolled up");
     } else if (key == shell::KEY_PGDN) {
         m_scrollY += 48;
         clampScroll();
-        setStatus("Scrolled down.");
+        setStatus("Scrolled down");
     } else if (key == shell::KEY_HOME) {
-        m_scrollY = 0;
-        setStatus("Home position.");
+        if (m_addressFocused) {
+            m_addressCaret = 0;
+            invalidate();
+        } else {
+            m_scrollY = 0;
+            setStatus("Home position");
+        }
+    } else if (key == 8) {
+        if (m_addressFocused && m_addressCaret > 0) {
+            int len = strlen_local(m_addressBuffer);
+            for (int i = m_addressCaret - 1; i < len; ++i) m_addressBuffer[i] = m_addressBuffer[i + 1];
+            --m_addressCaret;
+            invalidate();
+        }
+    } else if (key == 13) {
+        if (m_addressFocused) commitAddressBar();
+    } else if (key == 27) {
+        if (m_addressFocused) blurAddressBar();
     }
+}
+
+void NavigatorApp::onKeyChar(char c)
+{
+    if (!m_addressFocused) return;
+    if (c < 32 || c > 126) return;
+    int len = strlen_local(m_addressBuffer);
+    if (len >= MAX_URL_LEN - 1) return;
+    for (int i = len; i >= m_addressCaret; --i) m_addressBuffer[i + 1] = m_addressBuffer[i];
+    m_addressBuffer[m_addressCaret] = c;
+    ++m_addressCaret;
+    invalidate();
 }
 
 void NavigatorApp::setStatus(const char* text)
@@ -4513,23 +4583,734 @@ void NavigatorApp::updateButtons()
 {
     if (!m_window) return;
     m_window->widgetCount = 0;
-    addButton(16, 12, BUTTON_W, BUTTON_H, "Back");
-    addButton(16 + BUTTON_W + BUTTON_GAP, 12, BUTTON_W, BUTTON_H, "Forward");
-    addButton(16 + (BUTTON_W + BUTTON_GAP) * 2, 12, BUTTON_W, BUTTON_H, "Reload");
-    addButton(16 + (BUTTON_W + BUTTON_GAP) * 3, 12, BUTTON_W, BUTTON_H, "Home");
+    int x = 16;
+    m_backBtnId = addButton(x, 12, BUTTON_W, BUTTON_H, "Back"); x += BUTTON_W + BUTTON_GAP;
+    m_forwardBtnId = addButton(x, 12, BUTTON_W, BUTTON_H, "Forward"); x += BUTTON_W + BUTTON_GAP;
+    m_reloadBtnId = addButton(x, 12, BUTTON_W, BUTTON_H, "Reload"); x += BUTTON_W + BUTTON_GAP;
+    m_homeBtnId = addButton(x, 12, BUTTON_W, BUTTON_H, "Home"); x += BUTTON_W + BUTTON_GAP;
+    m_bookmarksBtnId = addButton(x, 12, BUTTON_W, BUTTON_H, "Bookmarks"); x += BUTTON_W + BUTTON_GAP;
+    m_addBookmarkBtnId = addButton(x, 12, BUTTON_W, BUTTON_H, "Add *");
 }
 
-bool NavigatorApp::hitHelpLink(int x, int y) const
+void NavigatorApp::addBlock(BlockKind kind, const char* text, const char* url)
 {
-    int linkX = CONTENT_X + 14;
-    int linkY = CONTENT_Y + 108 - m_scrollY;
-    return x >= linkX && x < linkX + 120 && y >= linkY && y < linkY + 14;
+    if (m_blockCount >= MAX_BLOCKS) return;
+    m_blocks[m_blockCount].kind = kind;
+    strcopy(m_blocks[m_blockCount].text, text ? text : "", MAX_BLOCK_TEXT);
+    strcopy(m_blocks[m_blockCount].url, url ? url : "", MAX_URL_LEN);
+    m_blocks[m_blockCount].src[0] = '\0';
+    m_blocks[m_blockCount].alt[0] = '\0';
+    m_blocks[m_blockCount].width = 0;
+    m_blocks[m_blockCount].height = 0;
+    ++m_blockCount;
+}
+
+void NavigatorApp::addImageBlock(const char* src, const char* alt, const char* resolvedUrl, int width, int height)
+{
+    if (m_blockCount >= MAX_BLOCKS) return;
+    m_blocks[m_blockCount].kind = BLOCK_IMAGE;
+    strcopy(m_blocks[m_blockCount].text, alt ? alt : "", MAX_BLOCK_TEXT);
+    strcopy(m_blocks[m_blockCount].url, resolvedUrl ? resolvedUrl : "", MAX_URL_LEN);
+    strcopy(m_blocks[m_blockCount].src, src ? src : "", MAX_URL_LEN);
+    strcopy(m_blocks[m_blockCount].alt, alt ? alt : "", 96);
+    m_blocks[m_blockCount].width = width > 0 ? width : 0;
+    m_blocks[m_blockCount].height = height > 0 ? height : 0;
+    ++m_blockCount;
+}
+
+void NavigatorApp::loadDefaultBookmarks()
+{
+    m_bookmarkCount = 0;
+    addBookmark("About Navigator", "about:navigator");
+    addBookmark("Bookmarks", "about:bookmarks");
+    addBookmark("guideXOS Help", "file:///docs/index.html");
+}
+
+void NavigatorApp::addBookmark(const char* title, const char* url)
+{
+    if (!url || !url[0]) return;
+    for (int i = 0; i < m_bookmarkCount; ++i) {
+        if (streq_local(m_bookmarks[i].url, url)) return;
+    }
+    if (m_bookmarkCount >= MAX_BOOKMARKS) {
+        setStatus("Bookmark list full");
+        return;
+    }
+    strcopy(m_bookmarks[m_bookmarkCount].title, title && title[0] ? title : url, 64);
+    strcopy(m_bookmarks[m_bookmarkCount].url, url, MAX_URL_LEN);
+    ++m_bookmarkCount;
+}
+
+void NavigatorApp::buildAboutNavigatorDocument()
+{
+    strcopy(m_currentUrl, "about:navigator", MAX_URL_LEN);
+    strcopy(m_title, "About guideXOS Navigator", MAX_TITLE_LEN_NAV);
+    m_blockCount = 0;
+    addBlock(BLOCK_HEADING, "About guideXOS Navigator");
+    addBlock(BLOCK_PARAGRAPH, "guideXOS Navigator is the native document viewer and browser shell for guideXOS Server.");
+    addBlock(BLOCK_PARAGRAPH, "This runtime is using the updated Navigator path, not the old placeholder shell.");
+    addBlock(BLOCK_LIST_ITEM, "Address bar navigation");
+    addBlock(BLOCK_LIST_ITEM, "Back / Forward / Reload / Home navigation");
+    addBlock(BLOCK_LIST_ITEM, "Bookmarks and Add controls");
+    addBlock(BLOCK_LIST_ITEM, "file:// HTML document loading");
+    addBlock(BLOCK_LINK, "Open guideXOS Help", "file:///docs/index.html");
+    addBlock(BLOCK_LINK, "View Bookmarks", "about:bookmarks");
+}
+
+void NavigatorApp::buildBookmarksDocument()
+{
+    strcopy(m_currentUrl, "about:bookmarks", MAX_URL_LEN);
+    strcopy(m_title, "Bookmarks", MAX_TITLE_LEN_NAV);
+    m_blockCount = 0;
+    addBlock(BLOCK_HEADING, "Bookmarks");
+    for (int i = 0; i < m_bookmarkCount; ++i) {
+        addBlock(BLOCK_LINK, m_bookmarks[i].title, m_bookmarks[i].url);
+    }
+}
+
+void NavigatorApp::buildErrorDocument(const char* url, const char* reason)
+{
+    strcopy(m_currentUrl, url ? url : "", MAX_URL_LEN);
+    strcopy(m_title, "Navigator Error", MAX_TITLE_LEN_NAV);
+    m_blockCount = 0;
+    addBlock(BLOCK_HEADING, "Page Not Found");
+    addBlock(BLOCK_PARAGRAPH, reason ? reason : "Navigator could not load this page.");
+    addBlock(BLOCK_LINK, "Go to about:navigator", "about:navigator");
+}
+
+static bool nav_starts_with(const char* value, const char* prefix)
+{
+    if (!value || !prefix) return false;
+    for (int i = 0; prefix[i]; ++i) {
+        if (value[i] != prefix[i]) return false;
+    }
+    return true;
+}
+
+static char nav_lower(char c)
+{
+    return (c >= 'A' && c <= 'Z') ? (char)(c - 'A' + 'a') : c;
+}
+
+static bool nav_tag_at(const char* p, const char* tag)
+{
+    if (!p || *p != '<') return false;
+    ++p;
+    if (*p == '/') return false;
+    int i = 0;
+    while (tag[i]) {
+        if (nav_lower(p[i]) != tag[i]) return false;
+        ++i;
+    }
+    char end = p[i];
+    return end == '>' || end == ' ' || end == '\t' || end == '\r' || end == '\n';
+}
+
+static const char* nav_find_char(const char* p, char wanted)
+{
+    while (p && *p) {
+        if (*p == wanted) return p;
+        ++p;
+    }
+    return nullptr;
+}
+
+static const char* nav_find_close_tag(const char* p, const char* tag)
+{
+    char pattern[16];
+    int k = 0;
+    pattern[k++] = '<';
+    pattern[k++] = '/';
+    for (int i = 0; tag[i] && k < 14; ++i) pattern[k++] = tag[i];
+    pattern[k++] = '>';
+    pattern[k] = '\0';
+
+    while (p && *p) {
+        int i = 0;
+        while (pattern[i] && p[i] && nav_lower(p[i]) == pattern[i]) ++i;
+        if (!pattern[i]) return p;
+        ++p;
+    }
+    return nullptr;
+}
+
+static void nav_append_char(char* out, int outSize, int& oi, char c)
+{
+    if (oi < outSize - 1) out[oi++] = c;
+}
+
+static void nav_copy_clean_text(const char* start, const char* end, char* out, int outSize, bool preserveWhitespace)
+{
+    int oi = 0;
+    bool pendingSpace = false;
+    const char* p = start;
+    while (p && p < end && *p) {
+        if (*p == '<') {
+            while (p < end && *p && *p != '>') ++p;
+            if (p < end && *p == '>') ++p;
+            continue;
+        }
+        if (!preserveWhitespace && (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n')) {
+            pendingSpace = oi > 0;
+            ++p;
+            continue;
+        }
+        if (pendingSpace) {
+            nav_append_char(out, outSize, oi, ' ');
+            pendingSpace = false;
+        }
+        if (nav_starts_with(p, "&amp;")) {
+            nav_append_char(out, outSize, oi, '&');
+            p += 5;
+        } else if (nav_starts_with(p, "&nbsp;")) {
+            nav_append_char(out, outSize, oi, ' ');
+            p += 6;
+        } else if (nav_starts_with(p, "&ndash;") || nav_starts_with(p, "&mdash;")) {
+            nav_append_char(out, outSize, oi, '-');
+            p += 7;
+        } else if (nav_starts_with(p, "&#9733;")) {
+            nav_append_char(out, outSize, oi, '*');
+            p += 7;
+        } else {
+            nav_append_char(out, outSize, oi, *p++);
+        }
+    }
+    while (oi > 0 && out[oi - 1] == ' ') --oi;
+    out[oi] = '\0';
+}
+
+static void nav_extract_href(const char* tagStart, const char* tagEnd, char* out, int outSize)
+{
+    out[0] = '\0';
+    const char* p = tagStart;
+    while (p && p < tagEnd && *p) {
+        if (nav_lower(p[0]) == 'h' && nav_lower(p[1]) == 'r' && nav_lower(p[2]) == 'e' && nav_lower(p[3]) == 'f') {
+            p += 4;
+            while (p < tagEnd && (*p == ' ' || *p == '\t')) ++p;
+            if (p < tagEnd && *p == '=') ++p;
+            while (p < tagEnd && (*p == ' ' || *p == '\t')) ++p;
+            char quote = (*p == '"' || *p == '\'') ? *p++ : ' ';
+            int oi = 0;
+            while (p < tagEnd && *p && oi < outSize - 1) {
+                if ((quote != ' ' && *p == quote) || (quote == ' ' && (*p == ' ' || *p == '\t' || *p == '>'))) break;
+                out[oi++] = *p++;
+            }
+            out[oi] = '\0';
+            return;
+        }
+        ++p;
+    }
+}
+
+static bool nav_attr_name_at(const char* p, const char* attr)
+{
+    int i = 0;
+    while (attr[i]) {
+        if (nav_lower(p[i]) != attr[i]) return false;
+        ++i;
+    }
+    char c = p[i];
+    return c == '=' || c == ' ' || c == '\t' || c == '\r' || c == '\n';
+}
+
+static void nav_extract_attr(const char* tagStart, const char* tagEnd, const char* attr, char* out, int outSize)
+{
+    out[0] = '\0';
+    const char* p = tagStart;
+    while (p && p < tagEnd && *p) {
+        if (nav_attr_name_at(p, attr)) {
+            int attrLen = 0;
+            while (attr[attrLen]) ++attrLen;
+            p += attrLen;
+            while (p < tagEnd && (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n')) ++p;
+            if (p < tagEnd && *p == '=') ++p;
+            while (p < tagEnd && (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n')) ++p;
+            char quote = (*p == '"' || *p == '\'') ? *p++ : ' ';
+            int oi = 0;
+            while (p < tagEnd && *p && oi < outSize - 1) {
+                if ((quote != ' ' && *p == quote) ||
+                    (quote == ' ' && (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n' || *p == '>'))) break;
+                out[oi++] = *p++;
+            }
+            out[oi] = '\0';
+            return;
+        }
+        ++p;
+    }
+}
+
+static int nav_parse_positive_int(const char* value)
+{
+    if (!value) return 0;
+    int out = 0;
+    while (*value >= '0' && *value <= '9') {
+        out = out * 10 + (*value - '0');
+        if (out > 4096) return 4096;
+        ++value;
+    }
+    return out > 0 ? out : 0;
+}
+void NavigatorApp::resolveHref(const char* baseUrl, const char* href, char* out, int outSize) const
+{
+    if (!href || !href[0]) {
+        strcopy(out, baseUrl ? baseUrl : "about:navigator", outSize);
+        return;
+    }
+    if (nav_starts_with(href, "about:") || nav_starts_with(href, "file://")) {
+        strcopy(out, href, outSize);
+        return;
+    }
+    if (href[0] == '#') {
+        strcopy(out, baseUrl ? baseUrl : "about:navigator", outSize);
+        return;
+    }
+    if (href[0] == '/') {
+        strcopy(out, "file://", outSize);
+        int len = strlen_local(out);
+        strcopy(out + len, href, outSize - len);
+        return;
+    }
+    strcopy(out, baseUrl ? baseUrl : "file:///", outSize);
+    int len = strlen_local(out);
+    while (len > 0 && out[len - 1] != '/') --len;
+    out[len] = '\0';
+    strcopy(out + len, href, outSize - len);
+}
+
+void NavigatorApp::parseHtmlDocument(const char* url, const char* html)
+{
+    strcopy(m_currentUrl, url ? url : "", MAX_URL_LEN);
+    strcopy(m_title, url ? url : "Document", MAX_TITLE_LEN_NAV);
+    m_blockCount = 0;
+    const char* p = html;
+    while (p && *p && m_blockCount < MAX_BLOCKS) {
+        const char* tagEnd = (*p == '<') ? nav_find_char(p, '>') : nullptr;
+        if (!tagEnd) {
+            ++p;
+            continue;
+        }
+
+        const char* close = nullptr;
+        char text[MAX_BLOCK_TEXT];
+        if (nav_tag_at(p, "title")) {
+            close = nav_find_close_tag(tagEnd + 1, "title");
+            if (close) nav_copy_clean_text(tagEnd + 1, close, m_title, MAX_TITLE_LEN_NAV, false);
+        } else if (nav_tag_at(p, "h1")) {
+            close = nav_find_close_tag(tagEnd + 1, "h1");
+            if (close) {
+                nav_copy_clean_text(tagEnd + 1, close, text, MAX_BLOCK_TEXT, false);
+                addBlock(BLOCK_HEADING, text);
+            }
+        } else if (nav_tag_at(p, "h2")) {
+            close = nav_find_close_tag(tagEnd + 1, "h2");
+            if (close) {
+                nav_copy_clean_text(tagEnd + 1, close, text, MAX_BLOCK_TEXT, false);
+                addBlock(BLOCK_HEADING, text);
+            }
+        } else if (nav_tag_at(p, "h3")) {
+            close = nav_find_close_tag(tagEnd + 1, "h3");
+            if (close) {
+                nav_copy_clean_text(tagEnd + 1, close, text, MAX_BLOCK_TEXT, false);
+                addBlock(BLOCK_HEADING, text);
+            }
+        } else if (nav_tag_at(p, "p")) {
+            close = nav_find_close_tag(tagEnd + 1, "p");
+            if (close) {
+                nav_copy_clean_text(tagEnd + 1, close, text, MAX_BLOCK_TEXT, false);
+                addBlock(BLOCK_PARAGRAPH, text);
+            }
+        } else if (nav_tag_at(p, "li")) {
+            close = nav_find_close_tag(tagEnd + 1, "li");
+            if (close) {
+                nav_copy_clean_text(tagEnd + 1, close, text, MAX_BLOCK_TEXT, false);
+                addBlock(BLOCK_LIST_ITEM, text);
+            }
+        } else if (nav_tag_at(p, "pre")) {
+            close = nav_find_close_tag(tagEnd + 1, "pre");
+            if (close) {
+                nav_copy_clean_text(tagEnd + 1, close, text, MAX_BLOCK_TEXT, true);
+                addBlock(BLOCK_PREFORMATTED, text);
+            }
+        } else if (nav_tag_at(p, "script")) {
+            close = nav_find_close_tag(tagEnd + 1, "script");
+        } else if (nav_tag_at(p, "style")) {
+            close = nav_find_close_tag(tagEnd + 1, "style");
+        } else if (nav_tag_at(p, "img")) {
+            char src[MAX_URL_LEN];
+            char alt[96];
+            char widthText[16];
+            char heightText[16];
+            char resolved[MAX_URL_LEN];
+            nav_extract_attr(p, tagEnd, "src", src, MAX_URL_LEN);
+            nav_extract_attr(p, tagEnd, "alt", alt, 96);
+            nav_extract_attr(p, tagEnd, "width", widthText, 16);
+            nav_extract_attr(p, tagEnd, "height", heightText, 16);
+            if (src[0]) {
+                resolveHref(url, src, resolved, MAX_URL_LEN);
+                addImageBlock(src, alt, resolved, nav_parse_positive_int(widthText), nav_parse_positive_int(heightText));
+            }
+        } else if (nav_tag_at(p, "a")) {
+            close = nav_find_close_tag(tagEnd + 1, "a");
+            if (close) {
+                char href[MAX_URL_LEN];
+                char resolved[MAX_URL_LEN];
+                nav_extract_href(p, tagEnd, href, MAX_URL_LEN);
+                resolveHref(url, href, resolved, MAX_URL_LEN);
+                nav_copy_clean_text(tagEnd + 1, close, text, MAX_BLOCK_TEXT, false);
+                addBlock(BLOCK_LINK, text, resolved);
+            }
+        }
+        p = close ? nav_find_char(close, '>') : tagEnd;
+        if (p && *p == '>') ++p;
+    }
+    if (m_blockCount == 0) {
+        addBlock(BLOCK_PREFORMATTED, html ? html : "");
+    }
+}
+
+void NavigatorApp::loadFileUrl(const char* url)
+{
+    if (!nav_starts_with(url, "file://")) {
+        buildErrorDocument(url, "Only file:// URLs are available in this runtime.");
+        return;
+    }
+
+    const char* path = url + 7;
+    static char buffer[32768];
+    int32_t bytesRead = vfs::read_file(path, buffer, sizeof(buffer) - 1);
+    if (bytesRead < 0) {
+        if (streq_local(path, "/docs/index.html")) {
+            const char* fallback =
+                "<html><head><title>guideXOS Navigator Help</title></head><body>"
+                "<h1>guideXOS Navigator Help</h1>"
+                "<p>Welcome to guideXOS Navigator, the built-in document viewer and browser shell for guideXOS Server.</p>"
+                "<p>Navigator renders local guideWeb documents from the filesystem without requiring CSS, JavaScript, or a network connection.</p>"
+                "<img src=\"/assets/Images/BlueVelvet/48/web.png\" alt=\"guideXOS image\">"
+                "<h2>Getting Started</h2>"
+                "<li>Back and Forward navigate page history</li>"
+                "<li>Reload re-reads the current page</li>"
+                "<li>Home returns to about:navigator</li>"
+                "<li>Bookmarks opens saved pages</li>"
+                "<li>Add &#9733; bookmarks the current page</li>"
+                "<h2>Topics</h2>"
+                "<a href=\"desktop.html\">guideXOS Desktop Guide</a>"
+                "</body></html>";
+            parseHtmlDocument(url, fallback);
+            return;
+        }
+        if (streq_local(path, "/docs/desktop.html")) {
+            const char* fallback =
+                "<html><head><title>guideXOS Desktop Guide</title></head><body>"
+                "<h1>guideXOS Desktop Guide</h1>"
+                "<p>The guideXOS desktop hosts built-in applications, pinned shortcuts, windows, and the taskbar.</p>"
+                "<a href=\"index.html\">Back to Navigator Help</a>"
+                "</body></html>";
+            parseHtmlDocument(url, fallback);
+            return;
+        }
+        buildErrorDocument(url, "The requested file was not found.");
+        return;
+    }
+    if (bytesRead >= (int32_t)(sizeof(buffer) - 1)) {
+        buildErrorDocument(url, "The requested file is too large.");
+        return;
+    }
+    buffer[bytesRead] = '\0';
+    parseHtmlDocument(url, buffer);
+}
+
+void NavigatorApp::loadUrl(const char* url)
+{
+    char normalized[MAX_URL_LEN];
+    normalizeUrl(url && url[0] ? url : "about:navigator", normalized, MAX_URL_LEN);
+    if (streq_local(normalized, "about:navigator")) {
+        buildAboutNavigatorDocument();
+    } else if (streq_local(normalized, "about:bookmarks")) {
+        buildBookmarksDocument();
+    } else if (nav_starts_with(normalized, "file://")) {
+        loadFileUrl(normalized);
+    } else {
+        buildErrorDocument(normalized, "Unsupported URL. Use about: or file://.");
+    }
+    m_scrollY = 0;
+    m_addressFocused = false;
+    m_addressBuffer[0] = '\0';
+    m_addressCaret = 0;
+    setStatus("Ready");
+
+}
+
+static void nav_push_url(char stack[][160], int& count, const char* url)
+{
+    if (!url || !url[0]) return;
+    if (count >= 12) {
+        for (int i = 1; i < 12; ++i) strcopy(stack[i - 1], stack[i], 160);
+        count = 11;
+    }
+    strcopy(stack[count++], url, 160);
+}
+
+void NavigatorApp::navigateTo(const char* url)
+{
+    char normalized[MAX_URL_LEN];
+    normalizeUrl(url, normalized, MAX_URL_LEN);
+    if (!streq_local(m_currentUrl, normalized) && m_currentUrl[0]) {
+        nav_push_url(m_backStack, m_backCount, m_currentUrl);
+        m_forwardCount = 0;
+    }
+    loadUrl(normalized);
+}
+
+void NavigatorApp::goBack()
+{
+    if (m_backCount <= 0) {
+        setStatus("No Back history");
+        return;
+    }
+    char target[MAX_URL_LEN];
+    strcopy(target, m_backStack[m_backCount - 1], MAX_URL_LEN);
+    --m_backCount;
+    nav_push_url(m_forwardStack, m_forwardCount, m_currentUrl);
+    loadUrl(target);
+}
+
+void NavigatorApp::goForward()
+{
+    if (m_forwardCount <= 0) {
+        setStatus("No Forward history");
+        return;
+    }
+    char target[MAX_URL_LEN];
+    strcopy(target, m_forwardStack[m_forwardCount - 1], MAX_URL_LEN);
+    --m_forwardCount;
+    nav_push_url(m_backStack, m_backCount, m_currentUrl);
+    loadUrl(target);
+}
+
+void NavigatorApp::normalizeUrl(const char* input, char* out, int outSize) const
+{
+    while (input && (*input == ' ' || *input == '\t')) ++input;
+    if (!input || !input[0]) {
+        strcopy(out, "about:navigator", outSize);
+        return;
+    }
+    if (nav_starts_with(input, "about:") || nav_starts_with(input, "file://")) {
+        strcopy(out, input, outSize);
+        return;
+    }
+    if (input[0] == '/') {
+        strcopy(out, "file://", outSize);
+        int len = strlen_local(out);
+        strcopy(out + len, input, outSize - len);
+        return;
+    }
+    strcopy(out, "file:///", outSize);
+    int len = strlen_local(out);
+    strcopy(out + len, input, outSize - len);
+}
+
+void NavigatorApp::focusAddressBar()
+{
+    strcopy(m_addressBuffer, m_currentUrl, MAX_URL_LEN);
+    m_addressCaret = strlen_local(m_addressBuffer);
+    m_addressFocused = true;
+    setStatus("Editing address");
+}
+
+void NavigatorApp::blurAddressBar()
+{
+    m_addressFocused = false;
+    m_addressBuffer[0] = '\0';
+    m_addressCaret = 0;
+    setStatus("Ready");
+}
+
+void NavigatorApp::commitAddressBar()
+{
+    char normalized[MAX_URL_LEN];
+    normalizeUrl(m_addressBuffer, normalized, MAX_URL_LEN);
+    navigateTo(normalized);
+}
+
+bool NavigatorApp::hitAddressBar(int x, int y) const
+{
+    if (!m_window) return false;
+    int addressW = m_window->w - ADDRESS_X - 20;
+    return addressW > 0 && x >= ADDRESS_X && x < ADDRESS_X + addressW &&
+           y >= ADDRESS_Y && y < ADDRESS_Y + ADDRESS_H;
+}
+
+int NavigatorApp::blockHeight(const DocBlock& block, int maxChars) const
+{
+    int len = strlen_local(block.text);
+    int lines = 1;
+    if (block.kind == BLOCK_PREFORMATTED) {
+        // Count embedded newlines – each is a new line in the output.
+        lines = 1;
+        for (int i = 0; block.text[i]; ++i) if (block.text[i] == '\n') ++lines;
+    } else if (maxChars > 0 && len > 0) {
+        // Approximate word-wrap line count.
+        lines = (len + maxChars - 1) / maxChars;
+        if (lines < 1) lines = 1;
+    }
+    if (block.kind == BLOCK_IMAGE) {
+        int imageH = block.height > 0 ? block.height : 64;
+        if (imageH > 420) imageH = 420;
+        return imageH + 12;
+    }
+    int lineH = block.kind == BLOCK_HEADING ? 20 : 16;
+    // Extra pre-gap before headings is accounted for in blockY() via the caller.
+    return lines * lineH + 8;
+}
+
+int NavigatorApp::blockY(int index, int maxChars) const
+{
+    int y = CONTENT_Y + 12 - m_scrollY;
+    for (int i = 0; i < index && i < m_blockCount; ++i) {
+        y += blockHeight(m_blocks[i], maxChars);
+        // Extra pre-gap before a heading that follows another block.
+        if (i + 1 < index && i + 1 < m_blockCount &&
+            m_blocks[i + 1].kind == BLOCK_HEADING) {
+            y += 10;
+        }
+    }
+    return y;
+}
+
+int NavigatorApp::hitLinkIndex(int x, int y) const
+{
+    if (!m_window) return -1;
+    int maxChars = (m_window->w - CONTENT_X * 2 - 32) / 6;
+    for (int i = 0; i < m_blockCount; ++i) {
+        if (m_blocks[i].kind != BLOCK_LINK) continue;
+        int by = blockY(i, maxChars);
+        int h = blockHeight(m_blocks[i], maxChars);
+        int tw = strlen_local(m_blocks[i].text) * 6;
+        if (x >= CONTENT_X + 14 && x < CONTENT_X + 14 + tw && y >= by && y < by + h) return i;
+    }
+    return -1;
+}
+
+void NavigatorApp::drawWrappedText(uint32_t x, uint32_t y, const char* text, uint32_t color, int maxChars, int& outY) const
+{
+    char line[96];
+    int len = strlen_local(text);
+    int yy = (int)y;
+    if (maxChars > 90) maxChars = 90;
+    if (maxChars < 8) maxChars = 8;
+
+    // Split on embedded newlines first; then word-wrap each physical line.
+    int lineStart = 0;
+    while (lineStart <= len) {
+        // Find end of this physical line (newline or string end)
+        int lineEnd = lineStart;
+        while (lineEnd < len && text[lineEnd] != '\n') ++lineEnd;
+
+        // Word-wrap [lineStart, lineEnd)
+        int pos = lineStart;
+        int segLen = lineEnd - lineStart;
+        if (segLen == 0) {
+            // Blank physical line (e.g. empty line in <pre>)
+            yy += 16;
+        }
+        while (pos < lineEnd) {
+            int take = maxChars;
+            if (pos + take > lineEnd) take = lineEnd - pos;
+            int breakAt = take;
+            if (pos + take < lineEnd) {
+                for (int i = take; i > 0; --i) {
+                    if (text[pos + i] == ' ') { breakAt = i; break; }
+                }
+            }
+            int copyLen = breakAt < 95 ? breakAt : 95;
+            for (int i = 0; i < copyLen; ++i) line[i] = text[pos + i];
+            line[copyLen] = '\0';
+            appDrawText(x, (uint32_t)yy, line, color);
+            yy += 16;
+            pos += breakAt;
+            while (pos < lineEnd && text[pos] == ' ') ++pos;
+        }
+
+        if (lineEnd >= len) break;
+        lineStart = lineEnd + 1; // skip '\n'
+    }
+
+    if (len == 0) yy += 16;
+    outY = yy;
+}
+
+void NavigatorApp::drawDocument(uint32_t x, uint32_t y, uint32_t w, uint32_t h)
+{
+    int maxChars = ((int)w - CONTENT_X * 2 - 32) / 6;
+    int bottom = (int)h - STATUS_H - 8;
+    for (int i = 0; i < m_blockCount; ++i) {
+        int by = blockY(i, maxChars);
+        if (by > bottom) continue;
+        if (by + blockHeight(m_blocks[i], maxChars) < CONTENT_Y) continue;
+        int absY = (int)y + by;
+        uint32_t textX = x + CONTENT_X + 14;
+        if (m_blocks[i].kind == BLOCK_HEADING) {
+            // Bold-looking heading: draw in a deep navy color, then a 2px accent bar.
+            appDrawText(textX, (uint32_t)absY, m_blocks[i].text, rgb(22, 32, 52));
+            int barW = (int)w - CONTENT_X * 2 - 32;
+            framebuffer::fill_rect(textX, (uint32_t)(absY + 18), (uint32_t)(barW > 0 ? barW : 1), 2, rgb(55, 110, 200));
+        } else if (m_blocks[i].kind == BLOCK_LINK) {
+            uint32_t color = i == m_hoverLinkIndex ? rgb(10, 84, 160) : rgb(30, 92, 184);
+            int linkOutY = absY;
+            drawWrappedText(textX, (uint32_t)absY, m_blocks[i].text, color, maxChars, linkOutY);
+            // Underline each rendered line.
+            for (int ly = absY + 13; ly < linkOutY; ly += 16) {
+                int lineCharCount = maxChars < 90 ? maxChars : 90;
+                framebuffer::fill_rect(textX, (uint32_t)ly, (uint32_t)(lineCharCount * 6), 1, color);
+            }
+        } else if (m_blocks[i].kind == BLOCK_LIST_ITEM) {
+            appDrawText(textX, (uint32_t)absY, "-", rgb(72, 78, 92));
+            int outY = absY;
+            drawWrappedText(textX + 14, (uint32_t)absY, m_blocks[i].text, rgb(54, 60, 72), maxChars - 4, outY);
+        } else if (m_blocks[i].kind == BLOCK_PREFORMATTED) {
+            // Light box background for preformatted blocks.
+            int preH = blockHeight(m_blocks[i], maxChars);
+            int boxW = (int)w - CONTENT_X * 2 - 28;
+            if (boxW > 0 && preH > 0)
+                framebuffer::fill_rect(textX - 4, (uint32_t)(absY - 2), (uint32_t)(boxW), (uint32_t)(preH), rgb(230, 232, 238));
+            int outY = absY;
+            drawWrappedText(textX, (uint32_t)absY, m_blocks[i].text, rgb(40, 50, 68), maxChars, outY);
+        } else if (m_blocks[i].kind == BLOCK_IMAGE) {
+            int imageW = m_blocks[i].width > 0 ? m_blocks[i].width : 220;
+            int imageH = m_blocks[i].height > 0 ? m_blocks[i].height : 64;
+            int maxW = (int)w - CONTENT_X * 2 - 36;
+            if (maxW < 40) maxW = 40;
+            if (imageW > maxW) imageW = maxW;
+            if (imageH > 420) imageH = 420;
+            int contentBottom = (int)h - STATUS_H - 8;
+            if (absY >= CONTENT_Y && absY + imageH <= contentBottom) {
+                framebuffer::fill_rect(textX, (uint32_t)absY, (uint32_t)imageW, (uint32_t)imageH, rgb(232, 236, 242));
+                framebuffer::fill_rect(textX, (uint32_t)absY, (uint32_t)imageW, 1, rgb(145, 153, 168));
+                framebuffer::fill_rect(textX, (uint32_t)(absY + imageH - 1), (uint32_t)imageW, 1, rgb(145, 153, 168));
+                framebuffer::fill_rect(textX, (uint32_t)absY, 1, (uint32_t)imageH, rgb(145, 153, 168));
+                framebuffer::fill_rect(textX + (uint32_t)imageW - 1, (uint32_t)absY, 1, (uint32_t)imageH, rgb(145, 153, 168));
+                const char* label = m_blocks[i].alt[0] ? m_blocks[i].alt : "[PNG image unavailable]";
+                appDrawText(textX + 8, (uint32_t)(absY + 8), label, rgb(54, 60, 72));
+            }
+        } else {
+            int outY = absY;
+            drawWrappedText(textX, (uint32_t)absY, m_blocks[i].text, rgb(54, 60, 72), maxChars, outY);
+        }
+    }
 }
 
 int NavigatorApp::maxScroll() const
 {
     int visible = m_window ? ((int)m_window->h - TOOLBAR_H - STATUS_H - 12) : 0;
-    int overflow = 180 - visible;
+    int maxChars = m_window ? ((m_window->w - CONTENT_X * 2 - 32) / 6) : 80;
+    int docHeight = 24;
+    for (int i = 0; i < m_blockCount; ++i) {
+        docHeight += blockHeight(m_blocks[i], maxChars);
+        // Match the pre-gap added in blockY.
+        if (i + 1 < m_blockCount && m_blocks[i + 1].kind == BLOCK_HEADING)
+            docHeight += 10;
+    }
+    int overflow = docHeight - visible;
     return overflow > 0 ? overflow : 0;
 }
 
@@ -4539,7 +5320,6 @@ void NavigatorApp::clampScroll()
     if (m_scrollY < 0) m_scrollY = 0;
     if (m_scrollY > maximum) m_scrollY = maximum;
 }
-
 // ============================================================
 // App Registration
 // ============================================================
