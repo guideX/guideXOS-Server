@@ -91,6 +91,8 @@ private:
 	// Load a file:// URL and convert the raw text to a WebDocument.
 	// Returns an error document if the file cannot be read.
 	static WebDocument loadFileUrl(const std::string& url);
+	// Load an http:// URL and convert the response body to a WebDocument.
+	static WebDocument loadHttpUrl(const std::string& url);
 	// Build a "Page Not Found" error document for the given URL.
 	static WebDocument buildErrorDocument(const std::string& url, const std::string& reason);
 

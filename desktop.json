@@ -3,8 +3,13 @@
   "desktop.wallpaper.id": "legacy_ameobagx",
   "desktop.background.scale": "fill",
   "pinned": ["ComputerFiles","Trash","App Model Demo","Native App Debug Viewer","Hello World","Resource Viewer","Future GXApp Package","HelloWorld ELF"],
-  "recent": ["Future GXApp Package","HelloWorld ELF","Native App Debug Viewer","Console","ComputerFiles","TaskManager","ControlPanel","HDInstaller","Notepad","Calculator","App Model Demo","Hello World","Resource Viewer"],
+  "recent": ["guideXOS Navigator","Future GXApp Package","HelloWorld ELF","Native App Debug Viewer","Console","ComputerFiles","TaskManager","ControlPanel","HDInstaller","Notepad","Calculator","App Model Demo","Hello World","Resource Viewer"],
+  "showDesktopTrash": true,
+  "showDesktopThisSystem": true,
+  "showDesktopFileManager": true,
+  "showDesktopSystemSettings": false,
   "windows": [
+    {"id": 1000, "title": "About guideXOS Navigator - guideXOS Navigator", "x": 300, "y": 300, "w": 920, "h": 640, "minimized": false, "maximized": false, "z": 0, "focused": true, "snap": 0}
   ],
   "iconPositions": [
   ]

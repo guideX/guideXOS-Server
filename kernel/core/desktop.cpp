@@ -418,6 +418,8 @@ static const uint32_t kIconMargin = 24;
 static bool s_enableDesktopIcons = true;
 static uint32_t s_desktopIconSize = kIconSize;
 static const char* s_desktopIconTheme = "Flat";
+static SystemDesktopIconVisibility s_systemDesktopIconVisibility{true, true, true, false};
+static bool s_systemDesktopIconVisibilityLoaded = false;
 static const uint32_t kTrayIconSize = 16;
 static const uint32_t kTrayIconGap = 6;
 static const uint32_t kTaskbarBtnMaxW = 150;
@@ -1409,6 +1411,126 @@ static bool desktop_entry_is_text(const char* name)
            text_ends_with(name, ".md");
 }
 
+static bool parse_system_icon_setting(const char* buffer, int count, const char* key, bool currentValue)
+{
+    int keyLen = desktop_strlen(key);
+    if (!buffer || count <= 0 || keyLen <= 0) return currentValue;
+    for (int i = 0; i + keyLen + 1 < count; ++i) {
+        if (i > 0 && buffer[i - 1] != '\n' && buffer[i - 1] != '\r') continue;
+        bool match = true;
+        for (int j = 0; j < keyLen; ++j) {
+            if (buffer[i + j] != key[j]) {
+                match = false;
+                break;
+            }
+        }
+        if (!match || buffer[i + keyLen] != '=') continue;
+        char value = buffer[i + keyLen + 1];
+        if (value == '1' || value == 't' || value == 'T') return true;
+        if (value == '0' || value == 'f' || value == 'F') return false;
+    }
+    return currentValue;
+}
+
+static void persist_system_desktop_icons()
+{
+    char buffer[160];
+    int pos = 0;
+    desktop_append_text(buffer, &pos, sizeof(buffer), "Trash=");
+    desktop_append_text(buffer, &pos, sizeof(buffer), s_systemDesktopIconVisibility.showTrash ? "1\n" : "0\n");
+    desktop_append_text(buffer, &pos, sizeof(buffer), "ThisSystem=");
+    desktop_append_text(buffer, &pos, sizeof(buffer), s_systemDesktopIconVisibility.showThisSystem ? "1\n" : "0\n");
+    desktop_append_text(buffer, &pos, sizeof(buffer), "FileManager=");
+    desktop_append_text(buffer, &pos, sizeof(buffer), s_systemDesktopIconVisibility.showFileManager ? "1\n" : "0\n");
+    desktop_append_text(buffer, &pos, sizeof(buffer), "SystemSettings=");
+    desktop_append_text(buffer, &pos, sizeof(buffer), s_systemDesktopIconVisibility.showSystemSettings ? "1\n" : "0\n");
+    int32_t written = vfs::write_file("/desktop.system.icons", buffer, (uint32_t)pos);
+    serial::puts(written == pos ? "[desktop] system desktop icon settings saved\n" : "[desktop] system desktop icon settings save failed\n");
+}
+
+void reload_persisted_system_desktop_icons()
+{
+    char buffer[192];
+    int32_t count = vfs::read_file("/desktop.system.icons", buffer, sizeof(buffer) - 1);
+    if (count <= 0) {
+        s_systemDesktopIconVisibility = {true, true, true, false};
+        s_systemDesktopIconVisibilityLoaded = true;
+        serial::puts("[desktop] system desktop icon settings defaulted: Trash=1 ThisSystem=1 FileManager=1 SystemSettings=0\n");
+        return;
+    }
+    buffer[count] = '\0';
+    s_systemDesktopIconVisibility.showTrash = parse_system_icon_setting(buffer, count, "Trash", true);
+    s_systemDesktopIconVisibility.showThisSystem = parse_system_icon_setting(buffer, count, "ThisSystem", true);
+    s_systemDesktopIconVisibility.showFileManager = parse_system_icon_setting(buffer, count, "FileManager", true);
+    s_systemDesktopIconVisibility.showSystemSettings = parse_system_icon_setting(buffer, count, "SystemSettings", false);
+    s_systemDesktopIconVisibilityLoaded = true;
+    serial::puts("[desktop] system desktop icon settings loaded\n");
+}
+
+SystemDesktopIconVisibility get_system_desktop_icon_visibility()
+{
+    if (!s_systemDesktopIconVisibilityLoaded) reload_persisted_system_desktop_icons();
+    return s_systemDesktopIconVisibility;
+}
+
+bool get_system_desktop_icon_visible(const char* key)
+{
+    if (!s_systemDesktopIconVisibilityLoaded) reload_persisted_system_desktop_icons();
+    if (desktop_str_eq(key, "Trash")) return s_systemDesktopIconVisibility.showTrash;
+    if (desktop_str_eq(key, "ThisSystem")) return s_systemDesktopIconVisibility.showThisSystem;
+    if (desktop_str_eq(key, "FileManager")) return s_systemDesktopIconVisibility.showFileManager;
+    if (desktop_str_eq(key, "SystemSettings")) return s_systemDesktopIconVisibility.showSystemSettings;
+    return false;
+}
+
+void set_system_desktop_icon_visibility(const SystemDesktopIconVisibility& visibility)
+{
+    s_systemDesktopIconVisibility = visibility;
+    s_systemDesktopIconVisibilityLoaded = true;
+    persist_system_desktop_icons();
+    refresh_desktop_icons();
+    s_needsRedraw = true;
+    serial::puts("[desktop] system desktop icon visibility applied and desktop refreshed\n");
+}
+
+void set_system_desktop_icon_visible(const char* key, bool visible)
+{
+    if (!s_systemDesktopIconVisibilityLoaded) reload_persisted_system_desktop_icons();
+    if (desktop_str_eq(key, "Trash")) s_systemDesktopIconVisibility.showTrash = visible;
+    else if (desktop_str_eq(key, "ThisSystem")) s_systemDesktopIconVisibility.showThisSystem = visible;
+    else if (desktop_str_eq(key, "FileManager")) s_systemDesktopIconVisibility.showFileManager = visible;
+    else if (desktop_str_eq(key, "SystemSettings")) s_systemDesktopIconVisibility.showSystemSettings = visible;
+    else return;
+    serial::puts("[desktop] system desktop icon setting changed: ");
+    serial::puts(key);
+    serial::puts(visible ? "=1\n" : "=0\n");
+    set_system_desktop_icon_visibility(s_systemDesktopIconVisibility);
+}
+
+static bool system_icon_visible_for_kind(DesktopSystemObjectKind kind)
+{
+    if (!s_systemDesktopIconVisibilityLoaded) reload_persisted_system_desktop_icons();
+    switch (kind) {
+        case DesktopSystemObjectKind::Trash: return s_systemDesktopIconVisibility.showTrash;
+        case DesktopSystemObjectKind::ThisSystem: return s_systemDesktopIconVisibility.showThisSystem;
+        case DesktopSystemObjectKind::FileManager: return s_systemDesktopIconVisibility.showFileManager;
+        case DesktopSystemObjectKind::SystemSettings: return s_systemDesktopIconVisibility.showSystemSettings;
+        default: return false;
+    }
+}
+
+static void apply_system_desktop_icon_visibility()
+{
+    for (int i = 0; i < kSystemDesktopIconCount; ++i) {
+        bool visible = system_icon_visible_for_kind(s_desktopIcons[i].systemObject);
+        s_desktopIcons[i].pinned = visible;
+        s_desktopIcons[i].recent = false;
+        serial::puts("[desktop] system icon visibility decision: ");
+        serial::puts(s_desktopIcons[i].label);
+        serial::puts(visible ? " enabled\n" : " hidden\n");
+    }
+}
+
 static void enumerate_desktop_folder_items()
 {
     for (int i = 0; i < kMaxDesktopFilesystemEntries; ++i) {
@@ -1460,6 +1582,7 @@ static void enumerate_desktop_folder_items()
 static void refresh_desktop_icons()
 {
     enumerate_desktop_folder_items();
+    apply_system_desktop_icon_visibility();
     s_visibleIconCount = 0;
     
     // First add all pinned icons
@@ -1788,14 +1911,9 @@ static void SelectIconsInRectangle(int32_t left, int32_t top, int32_t right, int
 // Refresh start menu app list (sync with desktop icons for pinned/recent)
 static void refresh_start_menu_list()
 {
-    // Update start menu apps to match desktop icon states
-    for (int i = 0; i < kStartMenuAppCount; i++) {
-        int iconIdx = find_icon_by_name(s_startMenuApps[i].name);
-        if (iconIdx >= 0) {
-            s_startMenuApps[i].pinned = s_desktopIcons[iconIdx].pinned;
-            s_startMenuApps[i].recent = s_desktopIcons[iconIdx].recent;
-        }
-    }
+    // Start Menu app visibility is intentionally independent from the
+    // desktop system-icon policy.
+    serial::puts("[desktop] Start Menu app list refresh preserves app pins independent of desktop icons\n");
 }
 
 // Add app to start menu recent list
@@ -4985,6 +5103,7 @@ void init()
     s_tickCounter = 0;
     s_lastClickedIcon = -1;
     s_lastClickTime = 0;
+    reload_persisted_system_desktop_icons();
     initialize_icon_positions();  // Use new icon management system
     init_time();  // Initialize time only if a real clock source is available
     shell::init();

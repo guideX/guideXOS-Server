@@ -312,6 +312,15 @@ namespace gxos {
             return item;
         }
 
+        static void appendSystemDesktopItemIfEnabled(std::vector<DesktopItem>& items, bool enabled, DesktopSystemObjectKind kind, const char* label, const char* action, const char* iconName) {
+            Logger::write(LogLevel::Info, std::string("Desktop system icon visibility: ") + action + " enabled=" + (enabled ? "true" : "false"));
+            if (!enabled) {
+                Logger::write(LogLevel::Info, std::string("Desktop system icon skipped by setting: ") + action);
+                return;
+            }
+            items.push_back(makeSystemDesktopItem(kind, label, action, iconName));
+        }
+
         static void refreshStartMenuPinnedRecentFromConfig(const DesktopConfigData& cfg, std::vector<std::string>& items) {
             items.clear();
             for (const auto& pinned : cfg.pinned) {
@@ -515,10 +524,10 @@ namespace gxos {
             refreshStartMenuPinnedRecentFromConfig(g_cfg, g_startMenuPinnedRecent);
 
             g_items.clear( );
-            g_items.push_back(makeSystemDesktopItem(DesktopSystemObjectKind::Trash, "Trash", "system:Trash", hostedTrashIconLogicalName().c_str()));
-            g_items.push_back(makeSystemDesktopItem(DesktopSystemObjectKind::ThisSystem, "This System", "system:ThisSystem", "place.computer"));
-            g_items.push_back(makeSystemDesktopItem(DesktopSystemObjectKind::FileManager, "File Manager", "system:FileManager", "app.files"));
-            g_items.push_back(makeSystemDesktopItem(DesktopSystemObjectKind::SystemSettings, "System Settings", "system:SystemSettings", "app.settings"));
+            appendSystemDesktopItemIfEnabled(g_items, g_cfg.showDesktopTrash, DesktopSystemObjectKind::Trash, "Trash", "system:Trash", hostedTrashIconLogicalName().c_str());
+            appendSystemDesktopItemIfEnabled(g_items, g_cfg.showDesktopThisSystem, DesktopSystemObjectKind::ThisSystem, "This System", "system:ThisSystem", "place.computer");
+            appendSystemDesktopItemIfEnabled(g_items, g_cfg.showDesktopFileManager, DesktopSystemObjectKind::FileManager, "File Manager", "system:FileManager", "app.files");
+            appendSystemDesktopItemIfEnabled(g_items, g_cfg.showDesktopSystemSettings, DesktopSystemObjectKind::SystemSettings, "System Settings", "system:SystemSettings", "app.settings");
 
             std::vector<DesktopFolderEntry> desktopEntries = DesktopFolderResolver::Enumerate();
             for (const auto& entry : desktopEntries) {
@@ -715,7 +724,7 @@ namespace gxos {
         void Compositor::requestDesktopRefresh() {
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)
             Logger::write(LogLevel::Info,
-                std::string("Desktop Trash icon refresh requested; trash items=") + std::to_string(hostedTrashItemCount()));
+                std::string("Desktop icon refresh requested; trash items=") + std::to_string(hostedTrashItemCount()));
             refreshDesktopItems();
             requestRepaint();
 #endif
@@ -1928,6 +1937,23 @@ namespace gxos {
             case MsgType::MT_DesktopLaunch: { launchAction(s); } break;
             case MsgType::MT_DesktopPins: { std::istringstream iss(s); std::string tok; while (std::getline(iss, tok, ';')) { if (tok.size( ) < 2) continue; if (tok[0] == '+') pinAction(tok.substr(1)); else if (tok[0] == '-') unpinAction(tok.substr(1)); } } break;
             case MsgType::MT_DesktopWallpaperSet: { loadWallpaper(s); g_cfg.wallpaperId = g_wallpaperId; g_cfg.wallpaperPath = g_wallpaperPath; g_cfg.backgroundScaleMode = g_backgroundScaleMode; saveDesktopConfig( ); invalidate(0); } break;
+            case MsgType::MT_DesktopConfigReload: {
+                DesktopConfigData cfg;
+                std::string cfgErr;
+                if (DesktopConfig::Load("desktop.json", cfg, cfgErr)) {
+                    g_cfg = cfg;
+                    g_backgroundScaleMode = WallpaperRegistry::NormalizeScaleModeOrDefault(g_cfg.backgroundScaleMode.empty() ? "fill" : g_cfg.backgroundScaleMode);
+                    g_cfg.backgroundScaleMode = g_backgroundScaleMode;
+                    Logger::write(LogLevel::Info, std::string("Desktop config reloaded for system icon visibility: Trash=") + (g_cfg.showDesktopTrash ? "true" : "false") +
+                        " ThisSystem=" + (g_cfg.showDesktopThisSystem ? "true" : "false") +
+                        " FileManager=" + (g_cfg.showDesktopFileManager ? "true" : "false") +
+                        " SystemSettings=" + (g_cfg.showDesktopSystemSettings ? "true" : "false"));
+                    refreshDesktopItems();
+                    invalidate(0);
+                } else {
+                    Logger::write(LogLevel::Warn, "Desktop config reload requested but load failed: " + cfgErr);
+                }
+            } break;
             case MsgType::MT_InputMouse: {
                 // Handle mouse input from kernel (bare-metal) or test harness
                 // Format: <x>|<y>|<button>|<action>

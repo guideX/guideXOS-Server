@@ -63,6 +63,7 @@ icon_theme_manager.cpp ^
 icons.cpp ^
 ipc_bus.cpp ^
 guide_web_html_parser.cpp ^
+guide_web_http.cpp ^
 kernel/core/architecture_detector.cpp ^
 lifecycle.cpp ^
 logger.cpp ^

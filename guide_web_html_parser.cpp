@@ -344,19 +344,37 @@ std::string resolveRelativeUrl(const std::string& base, const std::string& href)
 	if (href.empty()) return base;
 
 	// Already absolute?
-	if (href.find("://") != std::string::npos) return href;
+	size_t colon = href.find(':');
+	if (colon != std::string::npos) {
+		bool scheme = colon > 0;
+		for (size_t i = 0; i < colon && scheme; ++i) {
+			unsigned char ch = static_cast<unsigned char>(href[i]);
+			scheme = std::isalnum(ch) || href[i] == '+' || href[i] == '-' || href[i] == '.';
+		}
+		if (scheme) return href;
+	}
 
-	// Root-relative: file:// + href
-	if (href[0] == '/') return "file://" + href;
+	// Root-relative: preserve the http origin, or use the existing file:// rule.
+	if (href[0] == '/') {
+		if (base.rfind("http://", 0) == 0) {
+			size_t authorityStart = 7;
+			size_t authorityEnd = base.find('/', authorityStart);
+			if (authorityEnd == std::string::npos) return base + href;
+			return base.substr(0, authorityEnd) + href;
+		}
+		return "file://" + href;
+	}
 
 	// Fragment-only ("#...") – stay on the same page.
 	if (href[0] == '#') return base;
 
 	// Relative: strip the last path segment from base, append href.
-	// base looks like "file:///docs/index.html"
-	size_t lastSlash = base.rfind('/');
+	// base looks like "file:///docs/index.html" or "http://host/docs/index.html"
+	size_t end = base.find_first_of("?#");
+	std::string baseNoQuery = end == std::string::npos ? base : base.substr(0, end);
+	size_t lastSlash = baseNoQuery.rfind('/');
 	if (lastSlash == std::string::npos) return "file:///" + href;
-	return base.substr(0, lastSlash + 1) + href;
+	return baseNoQuery.substr(0, lastSlash + 1) + href;
 }
 
 // ---------------------------------------------------------------------------

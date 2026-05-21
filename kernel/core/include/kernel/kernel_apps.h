@@ -13,6 +13,7 @@
 #include "kernel/kernel_app.h"
 #include "kernel/vfs.h"
 #include "kernel/block_device.h"
+#include "kernel/desktop.h"
 
 namespace kernel {
 namespace apps {
@@ -193,12 +194,16 @@ private:
     int m_appliedGradientIndex;
     int m_activeTab;
     int m_selectButtonId;
+    kernel::desktop::SystemDesktopIconVisibility m_desktopIconVisibility;
 
     void loadSelection();
     void applySelected();
     int hitBackground(int x, int y) const;
     int hitWallpaper(int x, int y) const;
     int hitGradient(int x, int y) const;
+    int hitDesktopIconCheckbox(int x, int y) const;
+    void drawCheckbox(uint32_t x, uint32_t y, const char* label, bool checked);
+    void toggleDesktopIconCheckbox(int index);
 };
 
 // ============================================================

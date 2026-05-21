@@ -23,6 +23,13 @@
 namespace kernel {
 namespace desktop {
 
+struct SystemDesktopIconVisibility {
+    bool showTrash;
+    bool showThisSystem;
+    bool showFileManager;
+    bool showSystemSettings;
+};
+
 // ================================================================
 // Initialization & Core Loop
 // ================================================================
@@ -95,6 +102,13 @@ void set_wallpaper_by_id(const char* wallpaperId);
 
 // Return the currently selected built-in wallpaper/background id.
 const char* get_wallpaper_id();
+
+// Get or update the visible built-in system desktop icons.
+SystemDesktopIconVisibility get_system_desktop_icon_visibility();
+void set_system_desktop_icon_visibility(const SystemDesktopIconVisibility& visibility);
+bool get_system_desktop_icon_visible(const char* key);
+void set_system_desktop_icon_visible(const char* key, bool visible);
+void reload_persisted_system_desktop_icons();
 
 // Attach a boot-time wallpaper image pack loaded from ramdisk.img.
 void set_wallpaper_image_pack(const void* packBase, uint64_t packSize);

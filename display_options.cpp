@@ -25,6 +25,10 @@ int DisplayOptions::s_activeTab = 0;
 int DisplayOptions::s_mouseX = 0;
 int DisplayOptions::s_mouseY = 0;
 bool DisplayOptions::s_mouseDown = false;
+bool DisplayOptions::s_showDesktopTrash = true;
+bool DisplayOptions::s_showDesktopThisSystem = true;
+bool DisplayOptions::s_showDesktopFileManager = true;
+bool DisplayOptions::s_showDesktopSystemSettings = false;
 
 namespace {
     const int kWindowW = 800;
@@ -45,6 +49,10 @@ namespace {
     const int kButtonY = 486;
     const int kButtonW = 180;
     const int kButtonH = 36;
+    const int kDesktopIconsX = 46;
+    const int kDesktopIconsY = 132;
+    const int kDesktopIconRowH = 42;
+    const int kDesktopIconCheckboxSize = 18;
 
     void publish(MsgType type, const std::string& payload)
     {
@@ -100,6 +108,17 @@ namespace {
         }
         return 0;
     }
+
+    const char* desktopIconSettingName(int index)
+    {
+        switch (index) {
+        case 0: return "Trash";
+        case 1: return "This System";
+        case 2: return "File Manager";
+        case 3: return "System Settings";
+        default: return "";
+        }
+    }
 }
 
 uint64_t DisplayOptions::Launch()
@@ -122,6 +141,24 @@ void DisplayOptions::loadSelection()
     s_selectedGradientIndex = 0;
     s_appliedGradientIndex = 0;
     s_activeTab = WallpaperRegistry::IsGradientId(selectedId) ? 1 : 0;
+    DesktopConfigData cfg;
+    std::string cfgErr;
+    if (DesktopConfig::Load("desktop.json", cfg, cfgErr)) {
+        s_showDesktopTrash = cfg.showDesktopTrash;
+        s_showDesktopThisSystem = cfg.showDesktopThisSystem;
+        s_showDesktopFileManager = cfg.showDesktopFileManager;
+        s_showDesktopSystemSettings = cfg.showDesktopSystemSettings;
+        Logger::write(LogLevel::Info, std::string("DisplayOptions Desktop Icons loaded: Trash=") + (s_showDesktopTrash ? "true" : "false") +
+            " ThisSystem=" + (s_showDesktopThisSystem ? "true" : "false") +
+            " FileManager=" + (s_showDesktopFileManager ? "true" : "false") +
+            " SystemSettings=" + (s_showDesktopSystemSettings ? "true" : "false"));
+    } else {
+        s_showDesktopTrash = true;
+        s_showDesktopThisSystem = true;
+        s_showDesktopFileManager = true;
+        s_showDesktopSystemSettings = false;
+        Logger::write(LogLevel::Info, "DisplayOptions Desktop Icons defaulted: Trash=true ThisSystem=true FileManager=true SystemSettings=false");
+    }
     for (size_t i = 0; i < backgrounds.size(); ++i) {
         if (backgrounds[i].id == selectedId) {
             s_selectedBackgroundIndex = static_cast<int>(i);
@@ -202,7 +239,7 @@ int DisplayOptions::main(int, char**)
                 if (s_mouseDown && !wasDown) {
                     handleMouseDown(x, y);
                     uint64_t now = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count());
-                    int clickIndex = s_activeTab == 0 ? s_selectedBackgroundIndex : (1000 + s_selectedGradientIndex);
+                    int clickIndex = s_activeTab == 0 ? s_selectedBackgroundIndex : (s_activeTab == 1 ? (1000 + s_selectedGradientIndex) : -2000);
                     if (clickIndex == lastClickIndex && (now - lastClickTime) < 500) {
                         handleDoubleClick(x, y);
                         lastClickTime = 0;
@@ -238,9 +275,9 @@ void DisplayOptions::render()
     drawRect(s_windowId, 0, 0, kWindowW, kWindowH, 27, 31, 40);
 
     drawButton(20, kTabY, kTabW, kTabH, "Backgrounds", s_activeTab == 0, true);
-    drawButton(250, kTabY, kTabW, kTabH, "Resolution", false, false);
+    drawButton(250, kTabY, kTabW, kTabH, "Desktop Icons", s_activeTab == 2, true);
     drawButton(480, kTabY, kTabW, kTabH, "Gradients", s_activeTab == 1, true);
-    drawText(s_windowId, 26, 72, s_activeTab == 0 ? "Select a background from the gallery:" : "Select a gradient from the gallery:");
+    drawText(s_windowId, 26, 72, s_activeTab == 2 ? "Choose which system icons appear on the desktop:" : (s_activeTab == 0 ? "Select a background from the gallery:" : "Select a gradient from the gallery:"));
     drawRect(s_windowId, 20, 92, 742, 372, 22, 22, 24);
 
     if (s_activeTab == 0) {
@@ -253,7 +290,7 @@ void DisplayOptions::render()
             bool hover = hit(s_mouseX, s_mouseY, x, y, kTileW, kTileH);
             drawBackgroundTile(static_cast<int>(i), x, y, hover, static_cast<int>(i) == s_selectedBackgroundIndex, static_cast<int>(i) == s_appliedBackgroundIndex);
         }
-    } else {
+    } else if (s_activeTab == 1) {
         const auto& gradients = WallpaperRegistry::BuiltInGradients();
         for (size_t i = 0; i < gradients.size(); ++i) {
             int col = static_cast<int>(i) % kCols;
@@ -263,11 +300,17 @@ void DisplayOptions::render()
             bool hover = hit(s_mouseX, s_mouseY, x, y, kTileW, kTileH);
             drawGradientTile(static_cast<int>(i), x, y, hover, static_cast<int>(i) == s_selectedGradientIndex, static_cast<int>(i) == s_appliedGradientIndex);
         }
+    } else {
+        drawDesktopIconsTab();
     }
 
-    drawButton(kSelectButtonX, kButtonY, kButtonW, kButtonH, s_activeTab == 0 ? "Select Background" : "Select Gradient", false, true);
-    drawButton(kSelectButtonX + 200, kButtonY, kButtonW, kButtonH, "Choose Color", false, false);
-    drawButton(kSelectButtonX + 400, kButtonY, kButtonW, kButtonH, "Visual Effects", false, false);
+    if (s_activeTab != 2) {
+        drawButton(kSelectButtonX, kButtonY, kButtonW, kButtonH, s_activeTab == 0 ? "Select Background" : "Select Gradient", false, true);
+        drawButton(kSelectButtonX + 200, kButtonY, kButtonW, kButtonH, "Choose Color", false, false);
+        drawButton(kSelectButtonX + 400, kButtonY, kButtonW, kButtonH, "Visual Effects", false, false);
+    } else {
+        drawText(s_windowId, 26, kButtonY + 10, "Changes are saved immediately.");
+    }
 }
 
 void DisplayOptions::drawButton(int x, int y, int w, int h, const std::string& text, bool active, bool enabled)
@@ -280,6 +323,34 @@ void DisplayOptions::drawButton(int x, int y, int w, int h, const std::string& t
     drawRect(s_windowId, x, y, 1, h, 85, 85, 90);
     drawRect(s_windowId, x + w - 1, y, 1, h, 55, 55, 60);
     drawText(s_windowId, x + 16, y + 14, enabled ? text : text + " (soon)");
+}
+
+void DisplayOptions::drawCheckbox(int x, int y, const std::string& text, bool checked, bool hover)
+{
+    int box = kDesktopIconCheckboxSize;
+    if (hover) drawRect(s_windowId, x - 8, y - 8, 320, 34, 38, 46, 62);
+    drawRect(s_windowId, x, y, box, box, checked ? 70 : 30, checked ? 110 : 30, checked ? 180 : 34);
+    drawRect(s_windowId, x, y, box, 1, 130, 135, 150);
+    drawRect(s_windowId, x, y + box - 1, box, 1, 85, 90, 110);
+    drawRect(s_windowId, x, y, 1, box, 120, 125, 140);
+    drawRect(s_windowId, x + box - 1, y, 1, box, 65, 70, 82);
+    if (checked) drawText(s_windowId, x + 4, y + 3, "x");
+    drawText(s_windowId, x + box + 12, y + 4, text);
+}
+
+void DisplayOptions::drawDesktopIconsTab()
+{
+    const bool states[] = {
+        s_showDesktopTrash,
+        s_showDesktopThisSystem,
+        s_showDesktopFileManager,
+        s_showDesktopSystemSettings
+    };
+    for (int i = 0; i < 4; ++i) {
+        int y = kDesktopIconsY + i * kDesktopIconRowH;
+        bool hover = hit(s_mouseX, s_mouseY, kDesktopIconsX - 8, y - 8, 320, 34);
+        drawCheckbox(kDesktopIconsX, y, desktopIconSettingName(i), states[i], hover);
+    }
 }
 
 void DisplayOptions::drawWallpaperTile(int index, int x, int y, bool hover, bool selected, bool applied)
@@ -352,9 +423,29 @@ void DisplayOptions::handleMouseDown(int mx, int my)
         render();
         return;
     }
+    if (hit(mx, my, 250, kTabY, kTabW, kTabH)) {
+        s_activeTab = 2;
+        Logger::write(LogLevel::Info, "DisplayOptions Desktop Icons tab selected");
+        render();
+        return;
+    }
     if (hit(mx, my, 480, kTabY, kTabW, kTabH)) {
         s_activeTab = 1;
         render();
+        return;
+    }
+
+    if (s_activeTab == 2) {
+        for (int i = 0; i < 4; ++i) {
+            int rowY = kDesktopIconsY + i * kDesktopIconRowH;
+            if (hit(mx, my, kDesktopIconsX - 8, rowY - 8, 320, 34)) {
+                if (toggleDesktopIconSetting(i)) {
+                    saveDesktopIconSettings();
+                    render();
+                }
+                return;
+            }
+        }
         return;
     }
 
@@ -408,6 +499,7 @@ void DisplayOptions::handleMouseUp(int, int)
 
 void DisplayOptions::handleDoubleClick(int mx, int my)
 {
+    if (s_activeTab == 2) return;
     if (s_activeTab == 1) {
         const auto& gradients = WallpaperRegistry::BuiltInGradients();
         for (size_t i = 0; i < gradients.size(); ++i) {
@@ -438,6 +530,40 @@ void DisplayOptions::handleDoubleClick(int mx, int my)
             render();
             return;
         }
+    }
+}
+
+bool DisplayOptions::toggleDesktopIconSetting(int index)
+{
+    bool* setting = nullptr;
+    switch (index) {
+    case 0: setting = &s_showDesktopTrash; break;
+    case 1: setting = &s_showDesktopThisSystem; break;
+    case 2: setting = &s_showDesktopFileManager; break;
+    case 3: setting = &s_showDesktopSystemSettings; break;
+    default: return false;
+    }
+    *setting = !*setting;
+    Logger::write(LogLevel::Info, std::string("DisplayOptions Desktop Icons checkbox changed: ") + desktopIconSettingName(index) + "=" + (*setting ? "true" : "false"));
+    return true;
+}
+
+void DisplayOptions::saveDesktopIconSettings()
+{
+    DesktopConfigData cfg;
+    std::string err;
+    if (!DesktopConfig::Load("desktop.json", cfg, err)) {
+        Logger::write(LogLevel::Info, "DisplayOptions Desktop Icons save using default config because load failed: " + err);
+    }
+    cfg.showDesktopTrash = s_showDesktopTrash;
+    cfg.showDesktopThisSystem = s_showDesktopThisSystem;
+    cfg.showDesktopFileManager = s_showDesktopFileManager;
+    cfg.showDesktopSystemSettings = s_showDesktopSystemSettings;
+    if (DesktopConfig::Save("desktop.json", cfg, err)) {
+        Logger::write(LogLevel::Info, "DisplayOptions Desktop Icons settings saved");
+        publish(MsgType::MT_DesktopConfigReload, "");
+    } else {
+        Logger::write(LogLevel::Warn, "DisplayOptions Desktop Icons settings save failed: " + err);
     }
 }
 

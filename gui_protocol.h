@@ -36,7 +36,8 @@ namespace gxos {
             MT_DesktopPins = 24,         // payload: +ACTION;-ACTION;... (semicol separated)
             MT_DesktopWallpaperSet = 25, // payload: path string
             MT_DrawImage = 26,           // payload: <winId>|<x>|<y>|<path>
-            MT_DrawTextAt = 27           // payload: <winId>|<x>|<y>|<text>
+            MT_DrawTextAt = 27,          // payload: <winId>|<x>|<y>|<text>
+            MT_DesktopConfigReload = 28  // payload empty; reload desktop.json and rebuild desktop items
         };
         struct WindowDesc { uint64_t id; std::string title; int w; int h; };
         struct Rect { int x; int y; int w; int h; };

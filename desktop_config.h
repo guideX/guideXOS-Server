@@ -16,6 +16,10 @@ namespace gxos { namespace gui {
         std::vector<std::string> recent;
         std::vector<DesktopWindowRec> windows;
         std::vector<DesktopIconPos> iconPositions;
+        bool showDesktopTrash{true};
+        bool showDesktopThisSystem{true};
+        bool showDesktopFileManager{true};
+        bool showDesktopSystemSettings{false};
     };
     class DesktopConfig {
     public:
@@ -41,6 +45,10 @@ namespace gxos { namespace gui {
             if(extractSection(txt, "recent", section)) parseStringArray(section, out.recent);
             if(extractSection(txt, "windows", section)) parseWindowsArray(section, out.windows);
             if(extractSection(txt, "iconPositions", section)) parseIconPosArray(section, out.iconPositions);
+            if(extractSection(txt, "showDesktopTrash", section)){ size_t i=0; skipWS(section,i); parseJSONBool(section, i, out.showDesktopTrash); }
+            if(extractSection(txt, "showDesktopThisSystem", section)){ size_t i=0; skipWS(section,i); parseJSONBool(section, i, out.showDesktopThisSystem); }
+            if(extractSection(txt, "showDesktopFileManager", section)){ size_t i=0; skipWS(section,i); parseJSONBool(section, i, out.showDesktopFileManager); }
+            if(extractSection(txt, "showDesktopSystemSettings", section)){ size_t i=0; skipWS(section,i); parseJSONBool(section, i, out.showDesktopSystemSettings); }
             return true;
         }
         static inline bool Save(const std::string& path, const DesktopConfigData& data, std::string& err){
@@ -52,6 +60,10 @@ namespace gxos { namespace gui {
             f << "  \"desktop.background.scale\": " << jsonEscape(data.backgroundScaleMode.empty() ? "fill" : data.backgroundScaleMode) << ",\n";
             f << "  \"pinned\": ["; for(size_t i=0;i<data.pinned.size();++i){ if(i) f<<","; f<<jsonEscape(data.pinned[i]);} f << "],\n";
             f << "  \"recent\": ["; for(size_t i=0;i<data.recent.size();++i){ if(i) f<<","; f<<jsonEscape(data.recent[i]);} f << "],\n";
+            f << "  \"showDesktopTrash\": " << (data.showDesktopTrash ? "true" : "false") << ",\n";
+            f << "  \"showDesktopThisSystem\": " << (data.showDesktopThisSystem ? "true" : "false") << ",\n";
+            f << "  \"showDesktopFileManager\": " << (data.showDesktopFileManager ? "true" : "false") << ",\n";
+            f << "  \"showDesktopSystemSettings\": " << (data.showDesktopSystemSettings ? "true" : "false") << ",\n";
             f << "  \"windows\": [\n";
             for(size_t i=0;i<data.windows.size();++i){ const auto& w=data.windows[i]; f << "    {";
             f << "\"id\": " << w.id << ", "; f << "\"title\": " << jsonEscape(w.title) << ", "; f << "\"x\": "<<w.x<<", \"y\": "<<w.y<<", \"w\": "<<w.w<<", \"h\": "<<w.h<<", ";

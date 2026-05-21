@@ -155,6 +155,7 @@
     <ClInclude Include="firewall.h" />
     <ClInclude Include="focus_indicator.h" />
     <ClInclude Include="fs.h" />
+    <ClInclude Include="guide_web_http.h" />
     <ClInclude Include="gui_protocol.h" />
     <ClInclude Include="gxapp_container.h" />
     <ClInclude Include="gxapp_loader.h" />
@@ -388,6 +389,7 @@
     <ClCompile Include="image_renderer.cpp" />
     <ClCompile Include="image_viewer.cpp" />
     <ClCompile Include="ipc_bus.cpp" />
+    <ClCompile Include="guide_web_http.cpp" />
     <ClCompile Include="kernel\arch\amd64\arch.cpp">
       <ObjectFileName>$(IntDir)arch_amd64.obj</ObjectFileName>
     </ClCompile>

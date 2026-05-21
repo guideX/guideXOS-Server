@@ -603,6 +603,10 @@ static const int kTileGap = 12;
 static const int kTileCols = 4;
 static const int kGalleryX = 18;
 static const int kGalleryY = 82;
+static const int kDesktopIconCheckboxX = 34;
+static const int kDesktopIconCheckboxY = 104;
+static const int kDesktopIconCheckboxRowH = 34;
+static const int kDesktopIconCheckboxSize = 14;
 }
 
 // ============================================================
@@ -1796,7 +1800,7 @@ bool NotepadApp::updateMenuHover(int x, int y) {
 // ============================================================
 
 DisplayOptionsApp::DisplayOptionsApp()
-    : m_selectedIndex(0), m_appliedIndex(0), m_selectedBackgroundIndex(0), m_appliedBackgroundIndex(0), m_selectedGradientIndex(0), m_appliedGradientIndex(0), m_activeTab(0), m_selectButtonId(-1) {
+    : m_selectedIndex(0), m_appliedIndex(0), m_selectedBackgroundIndex(0), m_appliedBackgroundIndex(0), m_selectedGradientIndex(0), m_appliedGradientIndex(0), m_activeTab(0), m_selectButtonId(-1), m_desktopIconVisibility{true, true, true, false} {
     strcopy(m_name, "DisplayOptions", app::MAX_APP_NAME);
 }
 
@@ -1812,6 +1816,8 @@ void DisplayOptionsApp::loadSelection() {
     m_selectedGradientIndex = 0;
     m_appliedGradientIndex = 0;
     m_activeTab = 0;
+    m_desktopIconVisibility = kernel::desktop::get_system_desktop_icon_visibility();
+    serial::puts("[display-options] Desktop Icons checkbox state loaded\n");
 
     for (int i = 0; i < kKernelBackgroundCount; ++i) {
         if (streq_local(currentId, s_kernelBackgrounds[i].id)) {
@@ -1875,15 +1881,15 @@ void DisplayOptionsApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
     appDrawRect(x + 16, y + 16, 140, 30, rgb(90, 90, 96));
     appDrawText(x + 28, y + 27, "Backgrounds", m_activeTab == 0 ? rgb(235, 235, 240) : rgb(160, 160, 168));
 
-    framebuffer::fill_rect(x + 166, y + 16, 140, 30, rgb(34, 34, 38));
-    appDrawRect(x + 166, y + 16, 140, 30, rgb(70, 70, 76));
-    appDrawText(x + 178, y + 27, "Resolution", rgb(130, 130, 138));
+    framebuffer::fill_rect(x + 166, y + 16, 140, 30, m_activeTab == 2 ? rgb(58, 58, 58) : rgb(34, 34, 38));
+    appDrawRect(x + 166, y + 16, 140, 30, rgb(90, 90, 96));
+    appDrawText(x + 178, y + 27, "Desktop Icons", m_activeTab == 2 ? rgb(235, 235, 240) : rgb(160, 160, 168));
 
     framebuffer::fill_rect(x + 316, y + 16, 140, 30, m_activeTab == 1 ? rgb(58, 58, 58) : rgb(34, 34, 38));
     appDrawRect(x + 316, y + 16, 140, 30, rgb(90, 90, 96));
     appDrawText(x + 328, y + 27, "Gradients", m_activeTab == 1 ? rgb(235, 235, 240) : rgb(160, 160, 168));
 
-    appDrawText(x + 18, y + 58, m_activeTab == 0 ? "Select a background from the gallery:" : "Select a gradient from the gallery:", rgb(230, 230, 238));
+    appDrawText(x + 18, y + 58, m_activeTab == 2 ? "Choose system icons shown on the desktop:" : (m_activeTab == 0 ? "Select a background from the gallery:" : "Select a gradient from the gallery:"), rgb(230, 230, 238));
     framebuffer::fill_rect(x + 14, y + 74, w - 28, 240, rgb(22, 22, 24));
 
     if (m_activeTab == 0) {
@@ -1936,7 +1942,7 @@ void DisplayOptionsApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
             appDrawText(tx + 6, ty + 54, s_kernelGradients[i].displayName, rgb(220, 220, 225));
             if (bgIndex == m_appliedBackgroundIndex) appDrawText(tx + kTileW - 12, ty + 54, "*", rgb(255, 220, 80));
         }
-    } else {
+    } else if (m_activeTab == 1) {
         for (int i = 0; i < kKernelGradientCount; ++i) {
             int col = i % kTileCols;
             int row = i / kTileCols;
@@ -1961,6 +1967,12 @@ void DisplayOptionsApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
             appDrawText(tx + 6, ty + 54, s_kernelGradients[i].displayName, rgb(220, 220, 225));
             if (i == m_appliedGradientIndex) appDrawText(tx + kTileW - 12, ty + 54, "*", rgb(255, 220, 80));
         }
+    } else {
+        drawCheckbox(x + kDesktopIconCheckboxX, y + kDesktopIconCheckboxY, "Trash", m_desktopIconVisibility.showTrash);
+        drawCheckbox(x + kDesktopIconCheckboxX, y + kDesktopIconCheckboxY + kDesktopIconCheckboxRowH, "This System", m_desktopIconVisibility.showThisSystem);
+        drawCheckbox(x + kDesktopIconCheckboxX, y + kDesktopIconCheckboxY + kDesktopIconCheckboxRowH * 2, "File Manager", m_desktopIconVisibility.showFileManager);
+        drawCheckbox(x + kDesktopIconCheckboxX, y + kDesktopIconCheckboxY + kDesktopIconCheckboxRowH * 3, "System Settings", m_desktopIconVisibility.showSystemSettings);
+        appDrawText(x + kDesktopIconCheckboxX, y + 292, "Changes are saved immediately.", rgb(190, 195, 205));
     }
 }
 
@@ -1996,6 +2008,34 @@ int DisplayOptionsApp::hitGradient(int mx, int my) const {
     return -1;
 }
 
+int DisplayOptionsApp::hitDesktopIconCheckbox(int mx, int my) const {
+    for (int i = 0; i < 4; ++i) {
+        int y = kDesktopIconCheckboxY + i * kDesktopIconCheckboxRowH;
+        if (mx >= kDesktopIconCheckboxX - 8 && mx < kDesktopIconCheckboxX + 280 && my >= y - 8 && my < y + 26) return i;
+    }
+    return -1;
+}
+
+void DisplayOptionsApp::drawCheckbox(uint32_t x, uint32_t y, const char* label, bool checked) {
+    framebuffer::fill_rect(x, y, kDesktopIconCheckboxSize, kDesktopIconCheckboxSize, checked ? rgb(70, 110, 180) : rgb(30, 30, 34));
+    appDrawRect(x, y, kDesktopIconCheckboxSize, kDesktopIconCheckboxSize, rgb(130, 135, 150));
+    if (checked) appDrawText(x + 3, y + 2, "x", rgb(245, 245, 250));
+    appDrawText(x + kDesktopIconCheckboxSize + 12, y + 2, label, rgb(225, 228, 236));
+}
+
+void DisplayOptionsApp::toggleDesktopIconCheckbox(int index) {
+    switch (index) {
+        case 0: m_desktopIconVisibility.showTrash = !m_desktopIconVisibility.showTrash; break;
+        case 1: m_desktopIconVisibility.showThisSystem = !m_desktopIconVisibility.showThisSystem; break;
+        case 2: m_desktopIconVisibility.showFileManager = !m_desktopIconVisibility.showFileManager; break;
+        case 3: m_desktopIconVisibility.showSystemSettings = !m_desktopIconVisibility.showSystemSettings; break;
+        default: return;
+    }
+    serial::puts("[display-options] Desktop Icons checkbox changed\n");
+    kernel::desktop::set_system_desktop_icon_visibility(m_desktopIconVisibility);
+    invalidate();
+}
+
 void DisplayOptionsApp::onMouseDown(int x, int y, uint8_t) {
     if (x >= 16 && x < 156 && y >= 16 && y < 46) {
         m_activeTab = 0;
@@ -2003,10 +2043,23 @@ void DisplayOptionsApp::onMouseDown(int x, int y, uint8_t) {
         invalidate();
         return;
     }
+    if (x >= 166 && x < 306 && y >= 16 && y < 46) {
+        m_activeTab = 2;
+        setWidgetText(m_selectButtonId, "Saved Automatically");
+        serial::puts("[display-options] Desktop Icons UI selected\n");
+        invalidate();
+        return;
+    }
     if (x >= 316 && x < 456 && y >= 16 && y < 46) {
         m_activeTab = 1;
         setWidgetText(m_selectButtonId, "Select Gradient");
         invalidate();
+        return;
+    }
+
+    if (m_activeTab == 2) {
+        int hit = hitDesktopIconCheckbox(x, y);
+        if (hit >= 0) toggleDesktopIconCheckbox(hit);
         return;
     }
 
@@ -2030,10 +2083,12 @@ void DisplayOptionsApp::onMouseDown(int x, int y, uint8_t) {
 }
 
 void DisplayOptionsApp::onWidgetClick(int widgetId) {
-    if (widgetId == m_selectButtonId) applySelected();
+    if (widgetId == m_selectButtonId && m_activeTab != 2) applySelected();
 }
 
 void DisplayOptionsApp::applySelected() {
+    if (m_activeTab == 2) return;
+
     if (m_activeTab == 1) {
         if (m_selectedGradientIndex < 0 || m_selectedGradientIndex >= kKernelGradientCount) return;
         kernel::desktop::set_wallpaper_by_id(s_kernelGradients[m_selectedGradientIndex].id);
@@ -4882,7 +4937,8 @@ void NavigatorApp::resolveHref(const char* baseUrl, const char* href, char* out,
         strcopy(out, baseUrl ? baseUrl : "about:navigator", outSize);
         return;
     }
-    if (nav_starts_with(href, "about:") || nav_starts_with(href, "file://")) {
+    if (nav_starts_with(href, "about:") || nav_starts_with(href, "file://") ||
+        nav_starts_with(href, "http://") || nav_starts_with(href, "https://")) {
         strcopy(out, href, outSize);
         return;
     }
@@ -4891,6 +4947,16 @@ void NavigatorApp::resolveHref(const char* baseUrl, const char* href, char* out,
         return;
     }
     if (href[0] == '/') {
+        if (baseUrl && nav_starts_with(baseUrl, "http://")) {
+            strcopy(out, baseUrl, outSize);
+            int len = strlen_local(out);
+            int originLen = 7;
+            while (originLen < len && out[originLen] != '/') ++originLen;
+            out[originLen] = '\0';
+            len = strlen_local(out);
+            strcopy(out + len, href, outSize - len);
+            return;
+        }
         strcopy(out, "file://", outSize);
         int len = strlen_local(out);
         strcopy(out + len, href, outSize - len);
@@ -5055,8 +5121,12 @@ void NavigatorApp::loadUrl(const char* url)
         buildBookmarksDocument();
     } else if (nav_starts_with(normalized, "file://")) {
         loadFileUrl(normalized);
+    } else if (nav_starts_with(normalized, "http://")) {
+        buildErrorDocument(normalized, "HTTP networking is not available in the bare-metal Navigator runtime yet.");
+    } else if (nav_starts_with(normalized, "https://")) {
+        buildErrorDocument(normalized, "HTTPS and TLS are not supported in Navigator yet. Use plain http:// in the hosted runtime.");
     } else {
-        buildErrorDocument(normalized, "Unsupported URL. Use about: or file://.");
+        buildErrorDocument(normalized, "Unsupported URL. Use about:, file://, or hosted http://.");
     }
     m_scrollY = 0;
     m_addressFocused = false;
@@ -5120,7 +5190,8 @@ void NavigatorApp::normalizeUrl(const char* input, char* out, int outSize) const
         strcopy(out, "about:navigator", outSize);
         return;
     }
-    if (nav_starts_with(input, "about:") || nav_starts_with(input, "file://")) {
+    if (nav_starts_with(input, "about:") || nav_starts_with(input, "file://") ||
+        nav_starts_with(input, "http://") || nav_starts_with(input, "https://")) {
         strcopy(out, input, outSize);
         return;
     }

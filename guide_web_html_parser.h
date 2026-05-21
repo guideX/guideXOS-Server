@@ -33,7 +33,9 @@ namespace web {
 // ---------------------------------------------------------------------------
 // resolveRelativeUrl
 //
-// Given a base file:// URL and an href string, return an absolute URL.
+// Given a base URL and an href string, return an absolute URL.
+// Supports both file:// and http:// bases. Root-relative http links keep the
+// http origin; root-relative non-http links keep the historic file:// behavior.
 //
 // Rules:
 //  - href already starts with a scheme (contains "://") → return as-is

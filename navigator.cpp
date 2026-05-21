@@ -3,6 +3,7 @@
 #include "gui_protocol.h"
 #include "kernel/core/include/kernel/image_adapter.h"
 #include "ipc_bus.h"
+#include "guide_web_http.h"
 #include "logger.h"
 #include "navigator_file_io.h"
 #include "navigator_html_parser.h"
@@ -184,6 +185,42 @@ namespace {
 	{
 		if (suffix.size() > value.size()) return false;
 		return toLowerAscii(value.substr(value.size() - suffix.size())) == toLowerAscii(suffix);
+	}
+
+	static bool headerHasToken(const std::string& value, const std::string& token)
+	{
+		std::string lower = toLowerAscii(value);
+		std::string needle = toLowerAscii(token);
+		size_t start = 0;
+		while (start <= lower.size()) {
+			size_t comma = lower.find(',', start);
+			size_t end = comma == std::string::npos ? lower.size() : comma;
+			std::string part = lower.substr(start, end - start);
+			size_t semi = part.find(';');
+			if (semi != std::string::npos) part = part.substr(0, semi);
+			size_t first = part.find_first_not_of(" \t\r\n");
+			size_t last = part.find_last_not_of(" \t\r\n");
+			if (first != std::string::npos && part.substr(first, last - first + 1) == needle) {
+				return true;
+			}
+			if (comma == std::string::npos) break;
+			start = comma + 1;
+		}
+		return false;
+	}
+
+	static WebDocument buildSimpleDocument(const std::string& url,
+		const std::string& title,
+		const std::string& heading,
+		const std::string& message)
+	{
+		WebDocument doc;
+		doc.url = url;
+		doc.title = title;
+		doc.blocks.push_back({BlockType::Heading, heading, ""});
+		doc.blocks.push_back({BlockType::Paragraph, message, ""});
+		doc.blocks.push_back({BlockType::Link, "Go to about:navigator", "about:navigator"});
+		return doc;
 	}
 
 	static std::string filePathFromUrl(const std::string& url)
@@ -1047,10 +1084,18 @@ void Navigator::loadUrl(const std::string& url)
 		doc = buildBookmarksDocument();
 	} else if (url.size() >= 7 && url.substr(0, 7) == "file://") {
 		doc = loadFileUrl(url);
+	} else if (url.rfind("http://", 0) == 0) {
+		doc = loadHttpUrl(url);
+	} else if (url.rfind("https://", 0) == 0) {
+		doc = buildSimpleDocument(url,
+			"HTTPS Unsupported",
+			"HTTPS Unsupported",
+			"Navigator does not support HTTPS or TLS yet. Use a plain http:// URL for this milestone.");
 	} else {
-		// Unrecognised scheme: fall back to home placeholder.
-		doc = buildNavigatorHomeDocument();
-		doc.url = url;
+		doc = buildSimpleDocument(url,
+			"Unsupported URL",
+			"Unsupported URL",
+			"Navigator supports about:, file://, and basic http:// URLs in this build.");
 	}
 
 	s_currentDoc      = std::move(doc);
@@ -1121,17 +1166,19 @@ WebDocument Navigator::buildAboutNavigatorDocument()
 	doc.blocks.push_back({BlockType::Paragraph,
 		"guideXOS Navigator is the native document viewer and browser shell for guideXOS Server.", ""});
 	doc.blocks.push_back({BlockType::Paragraph,
-		"It renders guideWeb documents and supports local file:// browsing.", ""});
+		"It renders guideWeb documents and supports local file:// browsing plus basic plain HTTP text pages.", ""});
 	doc.blocks.push_back({BlockType::Heading,   "Features", ""});
 	doc.blocks.push_back({BlockType::ListItem,  "Headings, paragraphs, lists, and preformatted blocks", ""});
 	doc.blocks.push_back({BlockType::ListItem,  "Word-wrapped text for readable documents", ""});
-	doc.blocks.push_back({BlockType::ListItem,  "Relative link resolution for file:// pages", ""});
+	doc.blocks.push_back({BlockType::ListItem,  "Relative link resolution for file:// and http:// pages", ""});
+	doc.blocks.push_back({BlockType::ListItem,  "Basic http:// GET for text/html and text/plain pages", ""});
 	doc.blocks.push_back({BlockType::ListItem,  "Back / Forward / Reload / Home navigation", ""});
 	doc.blocks.push_back({BlockType::ListItem,  "Bookmarks with persistent storage", ""});
 	doc.blocks.push_back({BlockType::Heading,   "Quick Start", ""});
 	doc.blocks.push_back({BlockType::Preformatted,
 		"Type a file:// URL in the address bar and press Enter.\n"
-		"Example: file:///docs/index.html", ""});
+		"Example: file:///docs/index.html\n"
+		"Or start a small local HTTP server and open http://127.0.0.1:8080/docs/index.html", ""});
 	doc.blocks.push_back({BlockType::Link, "Open guideXOS Help",   "file:///docs/index.html"});
 	doc.blocks.push_back({BlockType::Link, "View Bookmarks",       "about:bookmarks"});
 	return doc;
@@ -1147,6 +1194,88 @@ WebDocument Navigator::buildNavigatorHomeDocument()
 	doc.blocks.push_back({BlockType::Paragraph, "guideWeb will provide local documentation, simple HTML rendering, and eventually network browsing.", ""});
 	doc.blocks.push_back({BlockType::Link,      "Open guideXOS Help",   "file:///docs/index.html"});
 	return doc;
+}
+
+WebDocument Navigator::loadHttpUrl(const std::string& url)
+{
+	Logger::write(LogLevel::Info, std::string("Navigator loadHttpUrl: ") + url);
+
+	gxos::web::HttpResponse response = gxos::web::fetchHttpUrl(url);
+	if (!response.ok()) {
+		return buildSimpleDocument(url,
+			"Network Error",
+			"Network Error",
+			std::string(gxos::web::httpErrorName(response.error)) + ": " + response.errorMessage);
+	}
+
+	const std::string transferEncoding = response.headerValue("Transfer-Encoding");
+	if (!transferEncoding.empty() && headerHasToken(transferEncoding, "chunked")) {
+		return buildSimpleDocument(url,
+			"Unsupported Transfer Encoding",
+			"Unsupported Transfer Encoding",
+			"This server returned chunked HTTP content. Navigator does not decode chunked responses yet.");
+	}
+
+	const std::string contentEncoding = response.headerValue("Content-Encoding");
+	if (!contentEncoding.empty() && !headerHasToken(contentEncoding, "identity")) {
+		return buildSimpleDocument(url,
+			"Unsupported Content Encoding",
+			"Unsupported Content Encoding",
+			"This server returned compressed content. Navigator does not support gzip, deflate, or br yet.");
+	}
+
+	if (response.statusCode == 301 || response.statusCode == 302) {
+		WebDocument doc;
+		doc.url = url;
+		doc.title = "Redirect";
+		doc.blocks.push_back({BlockType::Heading, "Redirect", ""});
+		std::ostringstream line;
+		line << "HTTP " << response.statusCode;
+		if (!response.reasonPhrase.empty()) line << " " << response.reasonPhrase;
+		doc.blocks.push_back({BlockType::Paragraph, line.str(), ""});
+		const std::string location = response.headerValue("Location");
+		if (!location.empty()) {
+			doc.blocks.push_back({BlockType::Paragraph, "The server asked Navigator to load another URL.", ""});
+			doc.blocks.push_back({BlockType::Link, location, gxos::web::resolveRelativeUrl(url, location)});
+		} else {
+			doc.blocks.push_back({BlockType::Paragraph, "The response did not include a Location header.", ""});
+		}
+		doc.blocks.push_back({BlockType::Link, "Go to about:navigator", "about:navigator"});
+		return doc;
+	}
+
+	if (response.statusCode < 200 || response.statusCode >= 300) {
+		std::ostringstream reason;
+		reason << "HTTP " << response.statusCode;
+		if (!response.reasonPhrase.empty()) reason << " " << response.reasonPhrase;
+		return buildErrorDocument(url, reason.str());
+	}
+
+	if (response.contentType == "text/html") {
+		WebDocument doc = parseHtml(url, response.body);
+		if (doc.title.empty()) doc.title = url;
+		return doc;
+	}
+
+	if (response.contentType == "text/plain" || response.contentType.empty()) {
+		WebDocument doc;
+		doc.url = url;
+		doc.title = url;
+		doc.blocks.push_back({BlockType::Heading, url, ""});
+		std::string cleanText;
+		cleanText.reserve(response.body.size());
+		for (char c : response.body) {
+			if (c != '\r') cleanText += c;
+		}
+		if (!cleanText.empty() && cleanText.back() == '\n') cleanText.pop_back();
+		doc.blocks.push_back({BlockType::Preformatted, cleanText.empty() ? "(empty response)" : cleanText, ""});
+		return doc;
+	}
+
+	return buildSimpleDocument(url,
+		"Unsupported Content",
+		"Unsupported Content",
+		"Navigator only renders text/html and text/plain HTTP responses. Content-Type was: " + response.contentType);
 }
 
 // -----------------------------------------------------------------------------
