@@ -2,6 +2,7 @@
 
 #include "process.h"
 #include "guide_web_document.h"   // BlockType, DocBlock, WebDocument (gxos::web)
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -25,6 +26,25 @@ using gxos::web::WebDocument;
 struct Bookmark {
 	std::string title;
 	std::string url;
+};
+
+struct NavigatorPageMetadata {
+	std::string requestedUrl;
+	std::string finalUrl;
+	std::string sourceType;
+	int         httpStatusCode = 0;
+	std::string httpReasonPhrase;
+	std::string contentType;
+	bool        redirected = false;
+	int         redirectCount = 0;
+	std::string errorStatus;
+	std::string rawSource;
+	size_t      rawSourceBytes = 0;
+	bool        rawSourceTruncated = false;
+	int         documentBlockCount = 0;
+	int         imageBlockCount = 0;
+	int         loadedImageCount = 0;
+	int         failedImageCount = 0;
 };
 
 // =============================================================================
@@ -88,6 +108,8 @@ private:
 
 	static WebDocument buildNavigatorHomeDocument();
 	static WebDocument buildAboutNavigatorDocument();
+	static WebDocument buildPageInfoDocument();
+	static WebDocument buildViewSourceDocument();
 	// Load a file:// URL and convert the raw text to a WebDocument.
 	// Returns an error document if the file cannot be read.
 	static WebDocument loadFileUrl(const std::string& url);
@@ -128,6 +150,7 @@ private:
 	static void blurAddressBar();    // cancel editing – restores current URL
 	static void commitAddressBar();  // navigate to typed URL, then blur
 	static std::string normalizeUrl(const std::string& input); // scheme normalizer
+	static void storePageMetadata(NavigatorPageMetadata metadata, const WebDocument& doc);
 
 	// -------------------------------------------------------------------------
 	// Hit testing & layout helpers
@@ -150,6 +173,7 @@ private:
 	static std::string          s_hoverStatusText;
 	static int                  s_hitLinkBlockIndex; // index of the link under the cursor
 	static WebDocument          s_currentDoc;
+	static NavigatorPageMetadata s_pageMetadata;
 	// Navigation history – scheme-agnostic URL stacks.
 	static std::vector<std::string> s_backStack;
 	static std::vector<std::string> s_forwardStack;

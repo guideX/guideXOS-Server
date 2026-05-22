@@ -394,6 +394,7 @@ private:
     static const int MAX_BLOCKS = 40;
     static const int MAX_BLOCK_TEXT = 320;
     static const int MAX_BOOKMARKS = 12;
+    static const int MAX_SOURCE_PREVIEW = 2048;
     static const int TOOLBAR_H = 48;
     static const int STATUS_H = 24;
     static const int BUTTON_W = 64;
@@ -454,6 +455,22 @@ private:
     int m_homeBtnId;
     int m_bookmarksBtnId;
     int m_addBookmarkBtnId;
+    char m_metaRequestedUrl[MAX_URL_LEN];
+    char m_metaFinalUrl[MAX_URL_LEN];
+    char m_metaSourceType[24];
+    int m_metaHttpStatusCode;
+    char m_metaHttpReason[48];
+    char m_metaContentType[48];
+    bool m_metaRedirected;
+    int m_metaRedirectCount;
+    char m_metaErrorStatus[128];
+    char m_metaSourcePreview[MAX_SOURCE_PREVIEW];
+    int m_metaSourceBytes;
+    bool m_metaSourceTruncated;
+    int m_metaDocumentBlocks;
+    int m_metaImageBlocks;
+    int m_metaLoadedImages;
+    int m_metaFailedImages;
 
     void setStatus(const char* text);
     void updateButtons();
@@ -463,8 +480,15 @@ private:
     void goForward();
     void buildAboutNavigatorDocument();
     void buildBookmarksDocument();
+    void buildPageInfoDocument();
+    void buildViewSourceDocument();
     void buildErrorDocument(const char* url, const char* reason);
     void loadFileUrl(const char* url);
+    void rememberPageMetadata(const char* requestedUrl, const char* finalUrl, const char* sourceType,
+                              const char* contentType, const char* errorStatus,
+                              const char* rawSource, int rawSourceBytes,
+                              int httpStatusCode = 0, const char* httpReason = "",
+                              int redirectCount = 0);
     void addBlock(BlockKind kind, const char* text, const char* url = "");
     void addImageBlock(const char* src, const char* alt, const char* resolvedUrl, int width, int height);
     void addBookmark(const char* title, const char* url);

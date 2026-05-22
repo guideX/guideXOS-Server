@@ -4444,6 +4444,22 @@ NavigatorApp::NavigatorApp()
     strcopy(m_currentUrl, "about:navigator", MAX_URL_LEN);
     strcopy(m_title, "guideXOS Navigator", MAX_TITLE_LEN_NAV);
     m_addressBuffer[0] = '\0';
+    m_metaRequestedUrl[0] = '\0';
+    m_metaFinalUrl[0] = '\0';
+    m_metaSourceType[0] = '\0';
+    m_metaHttpStatusCode = 0;
+    m_metaHttpReason[0] = '\0';
+    m_metaContentType[0] = '\0';
+    m_metaRedirected = false;
+    m_metaRedirectCount = 0;
+    m_metaErrorStatus[0] = '\0';
+    m_metaSourcePreview[0] = '\0';
+    m_metaSourceBytes = 0;
+    m_metaSourceTruncated = false;
+    m_metaDocumentBlocks = 0;
+    m_metaImageBlocks = 0;
+    m_metaLoadedImages = 0;
+    m_metaFailedImages = 0;
 }
 
 NavigatorApp::~NavigatorApp() {
@@ -4736,6 +4752,9 @@ void NavigatorApp::buildAboutNavigatorDocument()
     addBlock(BLOCK_LIST_ITEM, "file:// HTML document loading");
     addBlock(BLOCK_LINK, "Open guideXOS Help", "file:///docs/index.html");
     addBlock(BLOCK_LINK, "View Bookmarks", "about:bookmarks");
+    addBlock(BLOCK_LINK, "Page Info", "about:page-info");
+    addBlock(BLOCK_LINK, "View Source", "about:view-source");
+    rememberPageMetadata("about:navigator", "about:navigator", "about", "generated/about", "", nullptr, 0);
 }
 
 void NavigatorApp::buildBookmarksDocument()
@@ -4747,8 +4766,136 @@ void NavigatorApp::buildBookmarksDocument()
     for (int i = 0; i < m_bookmarkCount; ++i) {
         addBlock(BLOCK_LINK, m_bookmarks[i].title, m_bookmarks[i].url);
     }
+    rememberPageMetadata("about:bookmarks", "about:bookmarks", "about", "generated/about", "", nullptr, 0);
 }
 
+static void nav_int_to_text(int value, char* out, int outSize)
+{
+    if (!out || outSize <= 0) return;
+    char tmp[16];
+    int pos = 0;
+    bool neg = value < 0;
+    unsigned int v = neg ? (unsigned int)(-value) : (unsigned int)value;
+    if (v == 0) tmp[pos++] = '0';
+    while (v > 0 && pos < 15) {
+        tmp[pos++] = (char)('0' + (v % 10));
+        v /= 10;
+    }
+    int outPos = 0;
+    if (neg && outPos < outSize - 1) out[outPos++] = '-';
+    while (pos > 0 && outPos < outSize - 1) out[outPos++] = tmp[--pos];
+    out[outPos] = '\0';
+}
+void NavigatorApp::rememberPageMetadata(const char* requestedUrl, const char* finalUrl, const char* sourceType,
+                                        const char* contentType, const char* errorStatus,
+                                        const char* rawSource, int rawSourceBytes,
+                                        int httpStatusCode, const char* httpReason,
+                                        int redirectCount)
+{
+    strcopy(m_metaRequestedUrl, requestedUrl ? requestedUrl : "", MAX_URL_LEN);
+    strcopy(m_metaFinalUrl, finalUrl ? finalUrl : m_metaRequestedUrl, MAX_URL_LEN);
+    strcopy(m_metaSourceType, sourceType ? sourceType : "", sizeof(m_metaSourceType));
+    m_metaHttpStatusCode = httpStatusCode;
+    strcopy(m_metaHttpReason, httpReason ? httpReason : "", sizeof(m_metaHttpReason));
+    strcopy(m_metaContentType, contentType ? contentType : "", sizeof(m_metaContentType));
+    m_metaRedirectCount = redirectCount;
+    m_metaRedirected = redirectCount > 0;
+    strcopy(m_metaErrorStatus, errorStatus ? errorStatus : "", sizeof(m_metaErrorStatus));
+    m_metaSourceBytes = rawSourceBytes > 0 ? rawSourceBytes : 0;
+    m_metaSourcePreview[0] = '\0';
+    m_metaSourceTruncated = false;
+    if (rawSource && rawSourceBytes > 0) {
+        int copyLen = rawSourceBytes;
+        if (copyLen > MAX_SOURCE_PREVIEW - 1) {
+            copyLen = MAX_SOURCE_PREVIEW - 1;
+            m_metaSourceTruncated = true;
+        }
+        for (int i = 0; i < copyLen; ++i) m_metaSourcePreview[i] = rawSource[i];
+        m_metaSourcePreview[copyLen] = '\0';
+    }
+
+    m_metaDocumentBlocks = m_blockCount;
+    m_metaImageBlocks = 0;
+    m_metaLoadedImages = 0;
+    m_metaFailedImages = 0;
+    for (int i = 0; i < m_blockCount; ++i) {
+        if (m_blocks[i].kind != BLOCK_IMAGE) continue;
+        ++m_metaImageBlocks;
+        if (m_blocks[i].imageStatus == (int)gxos::gui::ImageLoadStatus::Ok) ++m_metaLoadedImages;
+        else ++m_metaFailedImages;
+    }
+}
+
+void NavigatorApp::buildPageInfoDocument()
+{
+    strcopy(m_currentUrl, "about:page-info", MAX_URL_LEN);
+    strcopy(m_title, "Page Info", MAX_TITLE_LEN_NAV);
+    m_blockCount = 0;
+    addBlock(BLOCK_HEADING, "Page Info");
+    if (!m_metaRequestedUrl[0]) {
+        addBlock(BLOCK_PARAGRAPH, "No page has been loaded yet.");
+        addBlock(BLOCK_LINK, "Go to about:navigator", "about:navigator");
+        return;
+    }
+
+    char line[MAX_BLOCK_TEXT];
+    char number[24];
+#define NAV_INFO_TEXT(label, value) do { strcopy(line, label, sizeof(line)); strappend(line, value, sizeof(line)); addBlock(BLOCK_LIST_ITEM, line); } while (0)
+#define NAV_INFO_INT(label, value) do { nav_int_to_text(value, number, sizeof(number)); strcopy(line, label, sizeof(line)); strappend(line, number, sizeof(line)); addBlock(BLOCK_LIST_ITEM, line); } while (0)
+    NAV_INFO_TEXT("Requested URL: ", m_metaRequestedUrl);
+    NAV_INFO_TEXT("Final URL: ", m_metaFinalUrl);
+    NAV_INFO_TEXT("Source type: ", m_metaSourceType);
+    NAV_INFO_TEXT("Content type: ", m_metaContentType[0] ? m_metaContentType : "(none)");
+    if (m_metaHttpStatusCode > 0) NAV_INFO_INT("HTTP status: ", m_metaHttpStatusCode);
+    else NAV_INFO_TEXT("HTTP status: ", "not applicable");
+    NAV_INFO_TEXT("Redirected: ", m_metaRedirected ? "yes" : "no");
+    NAV_INFO_INT("Redirect count: ", m_metaRedirectCount);
+    NAV_INFO_TEXT("Error status: ", m_metaErrorStatus[0] ? m_metaErrorStatus : "(none)");
+    NAV_INFO_INT("Document blocks: ", m_metaDocumentBlocks);
+    NAV_INFO_INT("Image blocks: ", m_metaImageBlocks);
+    NAV_INFO_INT("Loaded images: ", m_metaLoadedImages);
+    NAV_INFO_INT("Failed images: ", m_metaFailedImages);
+    NAV_INFO_INT("Raw/source bytes: ", m_metaSourceBytes);
+    NAV_INFO_TEXT("Source preview truncated: ", m_metaSourceTruncated ? "yes" : "no");
+#undef NAV_INFO_TEXT
+#undef NAV_INFO_INT
+
+    addBlock(BLOCK_HEADING, "Safety Limits");
+    addBlock(BLOCK_LIST_ITEM, "HTTP header limit: 32768 bytes");
+    addBlock(BLOCK_LIST_ITEM, "HTTP body limit: 262144 bytes");
+    addBlock(BLOCK_LIST_ITEM, "HTTP redirect limit: 5");
+    addBlock(BLOCK_LIST_ITEM, "HTTP timeouts: unavailable in bare-metal Navigator HTTP path");
+    addBlock(BLOCK_LIST_ITEM, "File text/source preview limit: 32768 bytes");
+    addBlock(BLOCK_LIST_ITEM, "Stored source preview limit: 2048 bytes");
+    addBlock(BLOCK_LINK, "View Source", "about:view-source");
+    addBlock(BLOCK_LINK, "Go to about:navigator", "about:navigator");
+}
+
+void NavigatorApp::buildViewSourceDocument()
+{
+    strcopy(m_currentUrl, "about:view-source", MAX_URL_LEN);
+    strcopy(m_title, "View Source", MAX_TITLE_LEN_NAV);
+    m_blockCount = 0;
+    addBlock(BLOCK_HEADING, "View Source");
+    if (!m_metaRequestedUrl[0]) {
+        addBlock(BLOCK_PARAGRAPH, "No page has been loaded yet.");
+        addBlock(BLOCK_LINK, "Go to about:navigator", "about:navigator");
+        return;
+    }
+    char line[MAX_BLOCK_TEXT];
+    strcopy(line, "Source for ", sizeof(line));
+    strappend(line, m_metaFinalUrl, sizeof(line));
+    addBlock(BLOCK_PARAGRAPH, line);
+    if (!m_metaSourcePreview[0]) {
+        if (streq_local(m_metaSourceType, "about")) addBlock(BLOCK_PARAGRAPH, "No raw source available for generated about: pages.");
+        else addBlock(BLOCK_PARAGRAPH, "No raw source is available for this page.");
+    } else {
+        if (m_metaSourceTruncated) addBlock(BLOCK_PARAGRAPH, "Showing a bounded source preview.");
+        addBlock(BLOCK_PREFORMATTED, m_metaSourcePreview);
+    }
+    addBlock(BLOCK_LINK, "Page Info", "about:page-info");
+    addBlock(BLOCK_LINK, "Go to about:navigator", "about:navigator");
+}
 void NavigatorApp::buildErrorDocument(const char* url, const char* reason)
 {
     strcopy(m_currentUrl, url ? url : "", MAX_URL_LEN);
@@ -5058,12 +5205,14 @@ void NavigatorApp::parseHtmlDocument(const char* url, const char* html)
     if (m_blockCount == 0) {
         addBlock(BLOCK_PREFORMATTED, html ? html : "");
     }
+    rememberPageMetadata(url, url, "file", "text/html", "", html, html ? strlen_local(html) : 0);
 }
 
 void NavigatorApp::loadFileUrl(const char* url)
 {
     if (!nav_starts_with(url, "file://")) {
         buildErrorDocument(url, "Only file:// URLs are available in this runtime.");
+        rememberPageMetadata(url, url, "unsupported", "", "Only file:// URLs are available", nullptr, 0);
         return;
     }
 
@@ -5101,10 +5250,12 @@ void NavigatorApp::loadFileUrl(const char* url)
             return;
         }
         buildErrorDocument(url, "The requested file was not found.");
+        rememberPageMetadata(url, url, "file", "text/html", "File not found", nullptr, 0);
         return;
     }
     if (bytesRead >= (int32_t)(sizeof(buffer) - 1)) {
         buildErrorDocument(url, "The requested file is too large.");
+        rememberPageMetadata(url, url, "file", "text/html", "File too large", nullptr, 0);
         return;
     }
     buffer[bytesRead] = '\0';
@@ -5119,14 +5270,21 @@ void NavigatorApp::loadUrl(const char* url)
         buildAboutNavigatorDocument();
     } else if (streq_local(normalized, "about:bookmarks")) {
         buildBookmarksDocument();
+    } else if (streq_local(normalized, "about:page-info")) {
+        buildPageInfoDocument();
+    } else if (streq_local(normalized, "about:view-source")) {
+        buildViewSourceDocument();
     } else if (nav_starts_with(normalized, "file://")) {
         loadFileUrl(normalized);
     } else if (nav_starts_with(normalized, "http://")) {
         buildErrorDocument(normalized, "HTTP networking is not available in the bare-metal Navigator runtime yet.");
+        rememberPageMetadata(normalized, normalized, "unsupported", "", "NetworkUnavailable: bare-metal HTTP unsupported", nullptr, 0);
     } else if (nav_starts_with(normalized, "https://")) {
         buildErrorDocument(normalized, "HTTPS and TLS are not supported in Navigator yet. Use plain http:// in the hosted runtime.");
+        rememberPageMetadata(normalized, normalized, "unsupported", "", "HTTPS/TLS unsupported", nullptr, 0);
     } else {
         buildErrorDocument(normalized, "Unsupported URL. Use about:, file://, or hosted http://.");
+        rememberPageMetadata(normalized, normalized, "unsupported", "", "Unsupported URL scheme", nullptr, 0);
     }
     m_scrollY = 0;
     m_addressFocused = false;

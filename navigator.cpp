@@ -24,6 +24,7 @@ std::string        Navigator::s_statusText      = "Ready";
 std::string        Navigator::s_hoverStatusText;
 int                Navigator::s_hitLinkBlockIndex = -1;
 WebDocument        Navigator::s_currentDoc;
+NavigatorPageMetadata Navigator::s_pageMetadata;
 std::vector<std::string> Navigator::s_backStack;
 std::vector<std::string> Navigator::s_forwardStack;
 std::vector<Bookmark>    Navigator::s_bookmarks;
@@ -49,6 +50,7 @@ namespace {
 	constexpr int kContentW = 920 - 48;
 	constexpr int kContentH = 640 - kToolbarH - kStatusBarH - 24;
 	constexpr int kHeadingY = 24;
+	constexpr size_t kNavigatorMaxSourcePreviewBytes = gxos::web::kHttpMaxBodyBytes;
 
 	constexpr int kWidgetIdBack = 1;
 	constexpr int kWidgetIdForward = 2;
@@ -172,6 +174,7 @@ namespace {
 	};
 
 	static std::unordered_map<std::string, ImageInfo> s_imageCache;
+	static const ImageInfo& imageInfoForBlock(const DocBlock& block);
 
 	static std::string toLowerAscii(std::string value)
 	{
@@ -187,28 +190,6 @@ namespace {
 		return toLowerAscii(value.substr(value.size() - suffix.size())) == toLowerAscii(suffix);
 	}
 
-	static bool headerHasToken(const std::string& value, const std::string& token)
-	{
-		std::string lower = toLowerAscii(value);
-		std::string needle = toLowerAscii(token);
-		size_t start = 0;
-		while (start <= lower.size()) {
-			size_t comma = lower.find(',', start);
-			size_t end = comma == std::string::npos ? lower.size() : comma;
-			std::string part = lower.substr(start, end - start);
-			size_t semi = part.find(';');
-			if (semi != std::string::npos) part = part.substr(0, semi);
-			size_t first = part.find_first_not_of(" \t\r\n");
-			size_t last = part.find_last_not_of(" \t\r\n");
-			if (first != std::string::npos && part.substr(first, last - first + 1) == needle) {
-				return true;
-			}
-			if (comma == std::string::npos) break;
-			start = comma + 1;
-		}
-		return false;
-	}
-
 	static WebDocument buildSimpleDocument(const std::string& url,
 		const std::string& title,
 		const std::string& heading,
@@ -221,6 +202,52 @@ namespace {
 		doc.blocks.push_back({BlockType::Paragraph, message, ""});
 		doc.blocks.push_back({BlockType::Link, "Go to about:navigator", "about:navigator"});
 		return doc;
+	}
+
+	static std::string yesNo(bool value)
+	{
+		return value ? "yes" : "no";
+	}
+
+	static void setSourcePreview(NavigatorPageMetadata& metadata, const std::string& source)
+	{
+		metadata.rawSourceBytes = source.size();
+		if (source.size() > kNavigatorMaxSourcePreviewBytes) {
+			metadata.rawSource = source.substr(0, kNavigatorMaxSourcePreviewBytes);
+			metadata.rawSourceTruncated = true;
+		} else {
+			metadata.rawSource = source;
+			metadata.rawSourceTruncated = false;
+		}
+	}
+
+	static void fillDocumentCounts(NavigatorPageMetadata& metadata, const WebDocument& doc)
+	{
+		metadata.documentBlockCount = static_cast<int>(doc.blocks.size());
+		metadata.imageBlockCount = 0;
+		metadata.loadedImageCount = 0;
+		metadata.failedImageCount = 0;
+
+		for (const DocBlock& block : doc.blocks) {
+			if (block.type != BlockType::Image) continue;
+			++metadata.imageBlockCount;
+			const ImageInfo& info = imageInfoForBlock(block);
+			if (info.ok) {
+				++metadata.loadedImageCount;
+			} else {
+				++metadata.failedImageCount;
+			}
+		}
+	}
+
+	static std::string pageInfoLine(const std::string& label, const std::string& value)
+	{
+		return label + ": " + (value.empty() ? "(none)" : value);
+	}
+
+	static std::string pageInfoLine(const std::string& label, int value)
+	{
+		return label + ": " + std::to_string(value);
 	}
 
 	static std::string filePathFromUrl(const std::string& url)
@@ -342,6 +369,7 @@ int Navigator::main(int, char**)
 	s_hitLinkBlockIndex = -1;
 	s_backStack.clear();
 	s_forwardStack.clear();
+	s_pageMetadata = NavigatorPageMetadata{};
 	s_addressFocused = false;
 	s_addressBuffer.clear();
 	s_addressCaret   = 0;
@@ -1080,8 +1108,24 @@ void Navigator::loadUrl(const std::string& url)
 	WebDocument doc;
 	if (url == "about:navigator" || url.empty()) {
 		doc = buildAboutNavigatorDocument();
+		NavigatorPageMetadata metadata;
+		metadata.requestedUrl = "about:navigator";
+		metadata.finalUrl = "about:navigator";
+		metadata.sourceType = "about";
+		metadata.contentType = "generated/about";
+		storePageMetadata(std::move(metadata), doc);
 	} else if (url == "about:bookmarks") {
 		doc = buildBookmarksDocument();
+		NavigatorPageMetadata metadata;
+		metadata.requestedUrl = "about:bookmarks";
+		metadata.finalUrl = "about:bookmarks";
+		metadata.sourceType = "about";
+		metadata.contentType = "generated/about";
+		storePageMetadata(std::move(metadata), doc);
+	} else if (url == "about:page-info") {
+		doc = buildPageInfoDocument();
+	} else if (url == "about:view-source") {
+		doc = buildViewSourceDocument();
 	} else if (url.size() >= 7 && url.substr(0, 7) == "file://") {
 		doc = loadFileUrl(url);
 	} else if (url.rfind("http://", 0) == 0) {
@@ -1091,11 +1135,23 @@ void Navigator::loadUrl(const std::string& url)
 			"HTTPS Unsupported",
 			"HTTPS Unsupported",
 			"Navigator does not support HTTPS or TLS yet. Use a plain http:// URL for this milestone.");
+		NavigatorPageMetadata metadata;
+		metadata.requestedUrl = url;
+		metadata.finalUrl = url;
+		metadata.sourceType = "unsupported";
+		metadata.errorStatus = "HTTPS/TLS unsupported";
+		storePageMetadata(std::move(metadata), doc);
 	} else {
 		doc = buildSimpleDocument(url,
 			"Unsupported URL",
 			"Unsupported URL",
 			"Navigator supports about:, file://, and basic http:// URLs in this build.");
+		NavigatorPageMetadata metadata;
+		metadata.requestedUrl = url;
+		metadata.finalUrl = url;
+		metadata.sourceType = "unsupported";
+		metadata.errorStatus = "Unsupported URL scheme";
+		storePageMetadata(std::move(metadata), doc);
 	}
 
 	s_currentDoc      = std::move(doc);
@@ -1181,6 +1237,8 @@ WebDocument Navigator::buildAboutNavigatorDocument()
 		"Or start a small local HTTP server and open http://127.0.0.1:8080/docs/index.html", ""});
 	doc.blocks.push_back({BlockType::Link, "Open guideXOS Help",   "file:///docs/index.html"});
 	doc.blocks.push_back({BlockType::Link, "View Bookmarks",       "about:bookmarks"});
+	doc.blocks.push_back({BlockType::Link, "Page Info",            "about:page-info"});
+	doc.blocks.push_back({BlockType::Link, "View Source",          "about:view-source"});
 	return doc;
 }
 
@@ -1196,37 +1254,154 @@ WebDocument Navigator::buildNavigatorHomeDocument()
 	return doc;
 }
 
+void Navigator::storePageMetadata(NavigatorPageMetadata metadata, const WebDocument& doc)
+{
+	if (metadata.finalUrl.empty()) metadata.finalUrl = doc.url;
+	if (metadata.requestedUrl.empty()) metadata.requestedUrl = metadata.finalUrl;
+	fillDocumentCounts(metadata, doc);
+	s_pageMetadata = std::move(metadata);
+}
+
+WebDocument Navigator::buildPageInfoDocument()
+{
+	WebDocument doc;
+	doc.url = "about:page-info";
+	doc.title = "Page Info";
+	doc.blocks.push_back({BlockType::Heading, "Page Info", ""});
+
+	const NavigatorPageMetadata& m = s_pageMetadata;
+	if (m.requestedUrl.empty()) {
+		doc.blocks.push_back({BlockType::Paragraph, "No page has been loaded yet.", ""});
+		doc.blocks.push_back({BlockType::Link, "Go to about:navigator", "about:navigator"});
+		return doc;
+	}
+
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Requested URL", m.requestedUrl), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Final URL", m.finalUrl), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Source type", m.sourceType), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Content type", m.contentType), ""});
+
+	if (m.httpStatusCode > 0) {
+		std::string status = std::to_string(m.httpStatusCode);
+		if (!m.httpReasonPhrase.empty()) status += " " + m.httpReasonPhrase;
+		doc.blocks.push_back({BlockType::ListItem, pageInfoLine("HTTP status", status), ""});
+	} else {
+		doc.blocks.push_back({BlockType::ListItem, pageInfoLine("HTTP status", "not applicable"), ""});
+	}
+
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Redirected", yesNo(m.redirected)), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Redirect count", m.redirectCount), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Error status", m.errorStatus), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Document blocks", m.documentBlockCount), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Image blocks", m.imageBlockCount), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Loaded images", m.loadedImageCount), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Failed images", m.failedImageCount), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Raw/source bytes", static_cast<int>(m.rawSourceBytes)), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Source preview truncated", yesNo(m.rawSourceTruncated)), ""});
+
+	doc.blocks.push_back({BlockType::Heading, "Safety Limits", ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("HTTP header limit", static_cast<int>(gxos::web::kHttpMaxHeaderBytes)) + " bytes", ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("HTTP body limit", static_cast<int>(gxos::web::kHttpMaxBodyBytes)) + " bytes", ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("HTTP redirect limit", gxos::web::kHttpMaxRedirects), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("HTTP connect timeout", gxos::web::kHttpConnectTimeoutMs) + " ms", ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("HTTP read timeout", gxos::web::kHttpReadTimeoutMs) + " ms", ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("File text limit", static_cast<int>(kNavigatorMaxFileBytes)) + " bytes", ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Source preview limit", static_cast<int>(kNavigatorMaxSourcePreviewBytes)) + " bytes", ""});
+
+	doc.blocks.push_back({BlockType::Link, "View Source", "about:view-source"});
+	doc.blocks.push_back({BlockType::Link, "Go to about:navigator", "about:navigator"});
+	return doc;
+}
+
+WebDocument Navigator::buildViewSourceDocument()
+{
+	WebDocument doc;
+	doc.url = "about:view-source";
+	doc.title = "View Source";
+	doc.blocks.push_back({BlockType::Heading, "View Source", ""});
+
+	const NavigatorPageMetadata& m = s_pageMetadata;
+	if (m.requestedUrl.empty()) {
+		doc.blocks.push_back({BlockType::Paragraph, "No page has been loaded yet.", ""});
+		doc.blocks.push_back({BlockType::Link, "Go to about:navigator", "about:navigator"});
+		return doc;
+	}
+
+	doc.blocks.push_back({BlockType::Paragraph, "Source for " + m.finalUrl, ""});
+	if (m.rawSource.empty()) {
+		if (m.sourceType == "about") {
+			doc.blocks.push_back({BlockType::Paragraph, "No raw source available for generated about: pages.", ""});
+		} else {
+			doc.blocks.push_back({BlockType::Paragraph, "No raw source is available for this page.", ""});
+		}
+	} else {
+		if (m.rawSourceTruncated) {
+			doc.blocks.push_back({BlockType::Paragraph,
+				"Showing the first " + std::to_string(kNavigatorMaxSourcePreviewBytes) +
+				" bytes of a " + std::to_string(m.rawSourceBytes) + " byte source.", ""});
+		}
+		doc.blocks.push_back({BlockType::Preformatted, m.rawSource, ""});
+	}
+
+	doc.blocks.push_back({BlockType::Link, "Page Info", "about:page-info"});
+	doc.blocks.push_back({BlockType::Link, "Go to about:navigator", "about:navigator"});
+	return doc;
+}
+
 WebDocument Navigator::loadHttpUrl(const std::string& url)
 {
 	Logger::write(LogLevel::Info, std::string("Navigator loadHttpUrl: ") + url);
 
 	gxos::web::HttpResponse response = gxos::web::fetchHttpUrl(url);
+	NavigatorPageMetadata metadata;
+	metadata.requestedUrl = response.requestedUrl.empty() ? url : response.requestedUrl;
+	metadata.finalUrl = response.finalUrl.empty() ? url : response.finalUrl;
+	metadata.sourceType = "http";
+	metadata.httpStatusCode = response.statusCode;
+	metadata.httpReasonPhrase = response.reasonPhrase;
+	metadata.contentType = response.contentType;
+	metadata.redirectCount = response.redirectCount;
+	metadata.redirected = response.redirectCount > 0 || metadata.requestedUrl != metadata.finalUrl;
+	if (response.error != gxos::web::HttpError::None) {
+		metadata.errorStatus = gxos::web::httpErrorName(response.error);
+		if (!response.errorMessage.empty()) metadata.errorStatus += ": " + response.errorMessage;
+	}
+	if (response.error == gxos::web::HttpError::None &&
+		(response.contentType == "text/html" || response.contentType == "text/plain" || response.contentType.empty())) {
+		setSourcePreview(metadata, response.body);
+	}
+
+	auto finish = [&](WebDocument doc) -> WebDocument {
+		storePageMetadata(metadata, doc);
+		return doc;
+	};
+
 	if (!response.ok()) {
-		return buildSimpleDocument(url,
-			"Network Error",
-			"Network Error",
-			std::string(gxos::web::httpErrorName(response.error)) + ": " + response.errorMessage);
+		std::string title = "HTTP Error";
+		if (response.error == gxos::web::HttpError::UnsupportedContentEncoding) {
+			title = "Unsupported Content Encoding";
+		} else if (response.error == gxos::web::HttpError::UnsupportedTransferEncoding) {
+			title = "Unsupported Transfer Encoding";
+		} else if (response.error == gxos::web::HttpError::MalformedChunkedEncoding) {
+			title = "Malformed Chunked Response";
+		} else if (response.error == gxos::web::HttpError::RedirectLimitExceeded) {
+			title = "Redirect Limit Exceeded";
+		} else if (response.error == gxos::web::HttpError::BodyTooLarge) {
+			title = "Response Too Large";
+		} else if (response.error == gxos::web::HttpError::Timeout) {
+			title = "Network Timeout";
+		}
+		return finish(buildSimpleDocument(response.finalUrl.empty() ? url : response.finalUrl,
+			title,
+			title,
+			std::string(gxos::web::httpErrorName(response.error)) + ": " + response.errorMessage));
 	}
 
-	const std::string transferEncoding = response.headerValue("Transfer-Encoding");
-	if (!transferEncoding.empty() && headerHasToken(transferEncoding, "chunked")) {
-		return buildSimpleDocument(url,
-			"Unsupported Transfer Encoding",
-			"Unsupported Transfer Encoding",
-			"This server returned chunked HTTP content. Navigator does not decode chunked responses yet.");
-	}
+	const std::string documentUrl = response.finalUrl.empty() ? url : response.finalUrl;
 
-	const std::string contentEncoding = response.headerValue("Content-Encoding");
-	if (!contentEncoding.empty() && !headerHasToken(contentEncoding, "identity")) {
-		return buildSimpleDocument(url,
-			"Unsupported Content Encoding",
-			"Unsupported Content Encoding",
-			"This server returned compressed content. Navigator does not support gzip, deflate, or br yet.");
-	}
-
-	if (response.statusCode == 301 || response.statusCode == 302) {
+	if (response.statusCode >= 300 && response.statusCode < 400) {
 		WebDocument doc;
-		doc.url = url;
+		doc.url = documentUrl;
 		doc.title = "Redirect";
 		doc.blocks.push_back({BlockType::Heading, "Redirect", ""});
 		std::ostringstream line;
@@ -1236,32 +1411,33 @@ WebDocument Navigator::loadHttpUrl(const std::string& url)
 		const std::string location = response.headerValue("Location");
 		if (!location.empty()) {
 			doc.blocks.push_back({BlockType::Paragraph, "The server asked Navigator to load another URL.", ""});
-			doc.blocks.push_back({BlockType::Link, location, gxos::web::resolveRelativeUrl(url, location)});
+			doc.blocks.push_back({BlockType::Link, location, gxos::web::resolveRelativeUrl(documentUrl, location)});
 		} else {
 			doc.blocks.push_back({BlockType::Paragraph, "The response did not include a Location header.", ""});
 		}
 		doc.blocks.push_back({BlockType::Link, "Go to about:navigator", "about:navigator"});
-		return doc;
+		return finish(std::move(doc));
 	}
 
 	if (response.statusCode < 200 || response.statusCode >= 300) {
 		std::ostringstream reason;
 		reason << "HTTP " << response.statusCode;
 		if (!response.reasonPhrase.empty()) reason << " " << response.reasonPhrase;
-		return buildErrorDocument(url, reason.str());
+		if (metadata.errorStatus.empty()) metadata.errorStatus = reason.str();
+		return finish(buildErrorDocument(documentUrl, reason.str()));
 	}
 
 	if (response.contentType == "text/html") {
-		WebDocument doc = parseHtml(url, response.body);
-		if (doc.title.empty()) doc.title = url;
-		return doc;
+		WebDocument doc = parseHtml(documentUrl, response.body);
+		if (doc.title.empty()) doc.title = documentUrl;
+		return finish(std::move(doc));
 	}
 
 	if (response.contentType == "text/plain" || response.contentType.empty()) {
 		WebDocument doc;
-		doc.url = url;
-		doc.title = url;
-		doc.blocks.push_back({BlockType::Heading, url, ""});
+		doc.url = documentUrl;
+		doc.title = documentUrl;
+		doc.blocks.push_back({BlockType::Heading, documentUrl, ""});
 		std::string cleanText;
 		cleanText.reserve(response.body.size());
 		for (char c : response.body) {
@@ -1269,13 +1445,14 @@ WebDocument Navigator::loadHttpUrl(const std::string& url)
 		}
 		if (!cleanText.empty() && cleanText.back() == '\n') cleanText.pop_back();
 		doc.blocks.push_back({BlockType::Preformatted, cleanText.empty() ? "(empty response)" : cleanText, ""});
-		return doc;
+		return finish(std::move(doc));
 	}
 
-	return buildSimpleDocument(url,
+	metadata.errorStatus = "Unsupported content type";
+	return finish(buildSimpleDocument(documentUrl,
 		"Unsupported Content",
 		"Unsupported Content",
-		"Navigator only renders text/html and text/plain HTTP responses. Content-Type was: " + response.contentType);
+		"Navigator only renders text/html and text/plain HTTP responses. Content-Type was: " + response.contentType));
 }
 
 // -----------------------------------------------------------------------------
@@ -1422,22 +1599,8 @@ WebDocument Navigator::loadFileUrl(const std::string& url)
 	Logger::write(LogLevel::Info,
 		std::string("Navigator loadFileUrl: ") + path);
 
-	FileReadResult fr = readTextFile(path);
-
-	if (fr.status == FileReadStatus::NotFound) {
-		return buildErrorDocument(url, "File not found: " + url);
-	}
-	if (fr.status == FileReadStatus::TooLarge) {
-		return buildErrorDocument(url, "File too large to display: " + url);
-	}
-	if (fr.status == FileReadStatus::IoError) {
-		return buildErrorDocument(url, "I/O error reading: " + url);
-	}
-
-	// Decide whether to invoke the HTML parser or the plain-text path.
 	bool isHtml = false;
 	{
-		// Check the last 5 chars of the path for .html / .htm (case-insensitive).
 		std::string ext;
 		size_t dot = path.rfind('.');
 		if (dot != std::string::npos) {
@@ -1446,6 +1609,33 @@ WebDocument Navigator::loadFileUrl(const std::string& url)
 		}
 		isHtml = (ext == ".html" || ext == ".htm");
 	}
+
+	NavigatorPageMetadata metadata;
+	metadata.requestedUrl = url;
+	metadata.finalUrl = url;
+	metadata.sourceType = "file";
+	metadata.contentType = isHtml ? "text/html" : "text/plain";
+	auto finish = [&](WebDocument doc) -> WebDocument {
+		storePageMetadata(metadata, doc);
+		return doc;
+	};
+
+	FileReadResult fr = readTextFile(path);
+
+	if (fr.status == FileReadStatus::NotFound) {
+		metadata.errorStatus = "File not found";
+		return finish(buildErrorDocument(url, "File not found: " + url));
+	}
+	if (fr.status == FileReadStatus::TooLarge) {
+		metadata.errorStatus = "File too large";
+		return finish(buildErrorDocument(url, "File too large to display: " + url));
+	}
+	if (fr.status == FileReadStatus::IoError) {
+		metadata.errorStatus = "File I/O error";
+		return finish(buildErrorDocument(url, "I/O error reading: " + url));
+	}
+
+	setSourcePreview(metadata, fr.text);
 
 	if (isHtml) {
 		// Delegate to the HTML parser; it handles title, headings, paragraphs, links.
@@ -1456,9 +1646,10 @@ WebDocument Navigator::loadFileUrl(const std::string& url)
 				size_t slash = path.rfind('/');
 				doc.title = (slash != std::string::npos) ? path.substr(slash + 1) : path;
 			}
-			return doc;
+			return finish(std::move(doc));
 		} catch (...) {
-			return buildErrorDocument(url, "HTML parse error for: " + url);
+			metadata.errorStatus = "HTML parse error";
+			return finish(buildErrorDocument(url, "HTML parse error for: " + url));
 		}
 	}
 
@@ -1489,7 +1680,7 @@ WebDocument Navigator::loadFileUrl(const std::string& url)
 		doc.blocks.push_back({BlockType::Preformatted, cleanText, ""});
 	}
 
-	return doc;
+	return finish(std::move(doc));
 }
 
 WebDocument Navigator::buildErrorDocument(const std::string& url,

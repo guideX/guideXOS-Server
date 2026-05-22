@@ -68,6 +68,130 @@ static std::string firstContentTypeToken(std::string value)
 	return toLowerAscii(trimAscii(value));
 }
 
+static bool hasHeaderToken(const std::string& value, const std::string& token)
+{
+	std::string lower = toLowerAscii(value);
+	std::string needle = toLowerAscii(token);
+	size_t start = 0;
+	while (start <= lower.size()) {
+		size_t comma = lower.find(',', start);
+		size_t end = comma == std::string::npos ? lower.size() : comma;
+		std::string part = lower.substr(start, end - start);
+		size_t semi = part.find(';');
+		if (semi != std::string::npos) part = part.substr(0, semi);
+		part = trimAscii(part);
+		if (part == needle) return true;
+		if (comma == std::string::npos) break;
+		start = comma + 1;
+	}
+	return false;
+}
+
+static bool parseChunkSize(const std::string& line, size_t& outSize)
+{
+	std::string sizeText = line;
+	size_t semi = sizeText.find(';');
+	if (semi != std::string::npos) sizeText = sizeText.substr(0, semi);
+	sizeText = trimAscii(sizeText);
+	if (sizeText.empty()) return false;
+
+	size_t value = 0;
+	for (char ch : sizeText) {
+		unsigned digit = 0;
+		if (ch >= '0' && ch <= '9') digit = static_cast<unsigned>(ch - '0');
+		else if (ch >= 'a' && ch <= 'f') digit = static_cast<unsigned>(10 + ch - 'a');
+		else if (ch >= 'A' && ch <= 'F') digit = static_cast<unsigned>(10 + ch - 'A');
+		else return false;
+		if (value > (static_cast<size_t>(-1) >> 4)) return false;
+		value = (value << 4) + digit;
+	}
+	outSize = value;
+	return true;
+}
+
+static bool decodeChunkedBody(const std::string& encoded, std::string& decoded, std::string& errorMessage)
+{
+	decoded.clear();
+	size_t pos = 0;
+	for (;;) {
+		size_t lineEnd = encoded.find("\r\n", pos);
+		size_t lineDelimiterLen = 2;
+		if (lineEnd == std::string::npos) {
+			lineEnd = encoded.find('\n', pos);
+			lineDelimiterLen = 1;
+		}
+		if (lineEnd == std::string::npos) {
+			errorMessage = "Chunked response ended before a chunk-size line completed.";
+			return false;
+		}
+
+		std::string sizeLine = encoded.substr(pos, lineEnd - pos);
+		if (!sizeLine.empty() && sizeLine.back() == '\r') sizeLine.pop_back();
+		size_t chunkSize = 0;
+		if (!parseChunkSize(sizeLine, chunkSize)) {
+			errorMessage = "Chunked response included an invalid chunk size.";
+			return false;
+		}
+		pos = lineEnd + lineDelimiterLen;
+
+		if (chunkSize == 0) {
+			// Ignore trailers.  A complete response may end immediately or after
+			// a final blank line/trailer block.
+			return true;
+		}
+		if (decoded.size() + chunkSize > kHttpMaxBodyBytes) {
+			errorMessage = "Decoded chunked response body exceeded the safety limit.";
+			return false;
+		}
+		if (pos + chunkSize > encoded.size()) {
+			errorMessage = "Chunked response ended in the middle of a chunk.";
+			return false;
+		}
+
+		decoded.append(encoded.data() + pos, chunkSize);
+		pos += chunkSize;
+		if (pos + 2 <= encoded.size() && encoded[pos] == '\r' && encoded[pos + 1] == '\n') {
+			pos += 2;
+		} else if (pos < encoded.size() && encoded[pos] == '\n') {
+			pos += 1;
+		} else {
+			errorMessage = "Chunked response was missing the chunk terminator.";
+			return false;
+		}
+	}
+}
+
+static bool isRedirectStatus(int statusCode)
+{
+	return statusCode == 301 || statusCode == 302 || statusCode == 303 ||
+		statusCode == 307 || statusCode == 308;
+}
+
+static std::string resolveHttpReference(const std::string& baseUrl, const std::string& ref)
+{
+	if (ref.empty()) return baseUrl;
+	size_t colon = ref.find(':');
+	if (colon != std::string::npos) {
+		bool scheme = colon > 0;
+		for (size_t i = 0; i < colon && scheme; ++i) {
+			unsigned char ch = static_cast<unsigned char>(ref[i]);
+			scheme = std::isalnum(ch) || ref[i] == '+' || ref[i] == '-' || ref[i] == '.';
+		}
+		if (scheme) return ref;
+	}
+
+	ParsedHttpUrl base = parseHttpUrl(baseUrl);
+	if (!base.valid) return ref;
+	if (ref.rfind("//", 0) == 0) return base.scheme + ":" + ref;
+	if (ref[0] == '/') return base.origin() + ref;
+	if (ref[0] == '#') return baseUrl;
+
+	std::string path = base.path.empty() ? "/" : base.path;
+	size_t slash = path.rfind('/');
+	std::string dir = slash == std::string::npos ? "/" : path.substr(0, slash + 1);
+	return base.origin() + dir + ref;
+}
+
 static bool parseHttpResponse(const std::string& raw, HttpResponse& response)
 {
 	size_t headerEnd = raw.find("\r\n\r\n");
@@ -114,6 +238,41 @@ static bool parseHttpResponse(const std::string& raw, HttpResponse& response)
 	}
 
 	response.contentType = firstContentTypeToken(response.headerValue("Content-Type"));
+	response.transferEncoding = toLowerAscii(trimAscii(response.headerValue("Transfer-Encoding")));
+	response.contentEncoding = toLowerAscii(trimAscii(response.headerValue("Content-Encoding")));
+
+	if (isRedirectStatus(response.statusCode)) {
+		return true;
+	}
+
+	if (!response.transferEncoding.empty() && !hasHeaderToken(response.transferEncoding, "identity")) {
+		if (hasHeaderToken(response.transferEncoding, "chunked")) {
+			std::string decoded;
+			std::string chunkError;
+			if (!decodeChunkedBody(response.body, decoded, chunkError)) {
+				setError(response, chunkError.find("safety limit") != std::string::npos
+					? HttpError::BodyTooLarge
+					: HttpError::MalformedChunkedEncoding,
+					chunkError);
+				return false;
+			}
+			response.body = std::move(decoded);
+		} else {
+			setError(response, HttpError::UnsupportedTransferEncoding,
+				"Unsupported Transfer-Encoding: " + response.transferEncoding);
+			return false;
+		}
+	} else if (response.body.size() > kHttpMaxBodyBytes) {
+		setError(response, HttpError::BodyTooLarge, "HTTP response body exceeded the safety limit.");
+		return false;
+	}
+
+	if (!response.contentEncoding.empty() && !hasHeaderToken(response.contentEncoding, "identity")) {
+		setError(response, HttpError::UnsupportedContentEncoding,
+			"Unsupported Content-Encoding: " + response.contentEncoding);
+		return false;
+	}
+
 	return true;
 }
 
@@ -257,6 +416,10 @@ const char* httpErrorName(HttpError error)
 	case HttpError::HeaderTooLarge: return "HeaderTooLarge";
 	case HttpError::BodyTooLarge: return "BodyTooLarge";
 	case HttpError::MalformedResponse: return "MalformedResponse";
+	case HttpError::RedirectLimitExceeded: return "RedirectLimitExceeded";
+	case HttpError::UnsupportedTransferEncoding: return "UnsupportedTransferEncoding";
+	case HttpError::UnsupportedContentEncoding: return "UnsupportedContentEncoding";
+	case HttpError::MalformedChunkedEncoding: return "MalformedChunkedEncoding";
 	}
 	return "Unknown";
 }
@@ -270,9 +433,11 @@ std::string HttpResponse::headerValue(const std::string& name) const
 	return "";
 }
 
-HttpResponse fetchHttpUrl(const std::string& url)
+static HttpResponse fetchSingleHttpUrl(const std::string& url)
 {
 	HttpResponse response;
+	response.requestedUrl = url;
+	response.finalUrl = url;
 	ParsedHttpUrl parsed = parseHttpUrl(url);
 	if (!parsed.valid) {
 		setError(response,
@@ -344,6 +509,7 @@ HttpResponse fetchHttpUrl(const std::string& url)
 	if (parsed.port != 80) request << ":" << parsed.port;
 	request << "\r\n"
 		<< "User-Agent: guideXOS-Navigator/0.1\r\n"
+		<< "Accept-Encoding: identity\r\n"
 		<< "Connection: close\r\n"
 		<< "\r\n";
 	const std::string requestText = request.str();
@@ -362,6 +528,7 @@ HttpResponse fetchHttpUrl(const std::string& url)
 	std::string raw;
 	raw.reserve(16u * 1024u);
 	bool sawHeaderEnd = false;
+	bool rawChunked = false;
 	size_t headerBytes = 0;
 	char buffer[4096];
 	for (;;) {
@@ -386,13 +553,16 @@ HttpResponse fetchHttpUrl(const std::string& url)
 			if (end != std::string::npos) {
 				sawHeaderEnd = true;
 				headerBytes = end + delimiterLen;
+				rawChunked = toLowerAscii(raw.substr(0, end)).find("transfer-encoding:") != std::string::npos &&
+					toLowerAscii(raw.substr(0, end)).find("chunked") != std::string::npos;
 			} else if (raw.size() > kHttpMaxHeaderBytes) {
 				closesocket(sock);
 				setError(response, HttpError::HeaderTooLarge, "HTTP response headers exceeded the safety limit.");
 				return response;
 			}
 		}
-		if (sawHeaderEnd && raw.size() > headerBytes + kHttpMaxBodyBytes) {
+		const size_t rawBodyLimit = kHttpMaxBodyBytes + (rawChunked ? kHttpMaxHeaderBytes : 0u);
+		if (sawHeaderEnd && raw.size() > headerBytes + rawBodyLimit) {
 			closesocket(sock);
 			setError(response, HttpError::BodyTooLarge, "HTTP response body exceeded the safety limit.");
 			return response;
@@ -406,6 +576,55 @@ HttpResponse fetchHttpUrl(const std::string& url)
 	setError(response, HttpError::NetworkUnavailable, "HTTP networking is unavailable in this runtime.");
 	return response;
 #endif
+}
+
+HttpResponse fetchHttpUrl(const std::string& url)
+{
+	std::string currentUrl = url;
+	std::vector<std::string> chain;
+
+	for (int redirectCount = 0; redirectCount <= kHttpMaxRedirects; ++redirectCount) {
+		HttpResponse response = fetchSingleHttpUrl(currentUrl);
+		response.requestedUrl = url;
+		response.finalUrl = currentUrl;
+		response.redirectCount = redirectCount;
+		response.redirectChain = chain;
+		if (!response.ok()) return response;
+
+		if (!isRedirectStatus(response.statusCode)) {
+			return response;
+		}
+
+		const std::string location = response.headerValue("Location");
+		if (location.empty()) {
+			return response;
+		}
+		if (redirectCount == kHttpMaxRedirects) {
+			setError(response, HttpError::RedirectLimitExceeded,
+				"HTTP redirect limit exceeded while loading: " + url);
+			return response;
+		}
+
+		std::string nextUrl = resolveHttpReference(currentUrl, location);
+		ParsedHttpUrl parsedNext = parseHttpUrl(nextUrl);
+		if (!parsedNext.valid) {
+			setError(response,
+				parsedNext.scheme.empty() || parsedNext.scheme == "http" ? HttpError::InvalidUrl : HttpError::UnsupportedScheme,
+				"Redirect Location is unsupported or invalid: " + location);
+			return response;
+		}
+		chain.push_back(nextUrl);
+		currentUrl = nextUrl;
+	}
+
+	HttpResponse response;
+	response.requestedUrl = url;
+	response.finalUrl = currentUrl;
+	response.redirectChain = chain;
+	response.redirectCount = static_cast<int>(chain.size());
+	setError(response, HttpError::RedirectLimitExceeded,
+		"HTTP redirect limit exceeded while loading: " + url);
+	return response;
 }
 
 } // namespace web
