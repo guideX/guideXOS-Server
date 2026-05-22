@@ -95,6 +95,9 @@ $checks = @(
     "[NAVIGATOR-SMOKE] capability.file_read=enabled through VFS",
     "[NAVIGATOR-SMOKE] capability.http=unsupported/network unavailable",
     "[NAVIGATOR-SMOKE] capability.remote_png=unsupported without bare-metal HTTP transport",
+    "[NAVIGATOR-SMOKE] capability.downloads=unavailable until HTTP/VFS write path is connected",
+    "[NAVIGATOR-SMOKE] capability.css_lite=enabled for embedded style blocks",
+    "[NAVIGATOR-SMOKE] capability.external_stylesheets=unsupported",
     "[NAVIGATOR-SMOKE] capability.bookmark_persistence=unavailable; in-memory defaults only",
     "[NAVIGATOR-SMOKE] result=PASS"
 )

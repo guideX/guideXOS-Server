@@ -6,7 +6,7 @@
 #include <sstream>
 namespace gxos {
     namespace gui {
-        static const uint32_t kGuiProtocolVersion = 2;
+        static const uint32_t kGuiProtocolVersion = 3;
         enum class MsgType : uint32_t {
             MT_None = 0,
             MT_Create = 1,
@@ -37,7 +37,8 @@ namespace gxos {
             MT_DesktopWallpaperSet = 25, // payload: path string
             MT_DrawImage = 26,           // payload: <winId>|<x>|<y>|<path>
             MT_DrawTextAt = 27,          // payload: <winId>|<x>|<y>|<text>
-            MT_DesktopConfigReload = 28  // payload empty; reload desktop.json and rebuild desktop items
+            MT_DesktopConfigReload = 28, // payload empty; reload desktop.json and rebuild desktop items
+            MT_DrawTextAtColor = 29      // payload: <winId>|<x>|<y>|<r>|<g>|<b>|<text>
         };
         struct WindowDesc { uint64_t id; std::string title; int w; int h; };
         struct Rect { int x; int y; int w; int h; };
@@ -98,5 +99,6 @@ namespace gxos {
             }
         }
         inline std::string packDrawTextAt(uint64_t winId, int x, int y, const std::string& text) { std::ostringstream oss; oss << winId << "|" << x << "|" << y << "|" << text; return oss.str( ); }
+        inline std::string packDrawTextAtColor(uint64_t winId, int x, int y, uint8_t r, uint8_t g, uint8_t b, const std::string& text) { std::ostringstream oss; oss << winId << "|" << x << "|" << y << "|" << static_cast<int>(r) << "|" << static_cast<int>(g) << "|" << static_cast<int>(b) << "|" << text; return oss.str( ); }
     }
 }

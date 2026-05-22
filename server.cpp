@@ -204,7 +204,22 @@ static std::string navigatorHostedSmokeDiagnostic() {
     add("local PNG enabled", contains(runtimeReport, "Capabilities.Local PNG=enabled"), "expected enabled");
     add("HTTP enabled", contains(runtimeReport, "Capabilities.HTTP=enabled"), "expected enabled");
     add("remote PNG enabled", contains(runtimeReport, "Capabilities.Remote PNG=enabled"), "expected enabled");
+    add("downloads enabled", contains(runtimeReport, "Capabilities.Downloads=enabled"), "expected enabled");
+    add("CSS-lite enabled", contains(runtimeReport, "Capabilities.CSS-lite embedded <style>=enabled"), "expected enabled");
+    add("colored text primitive enabled", contains(runtimeReport, "Capabilities.Hosted colored text primitive=enabled"), "expected enabled");
+    add("CSS text color visible", contains(runtimeReport, "Capabilities.CSS text color visible=enabled"), "expected enabled");
+    add("external stylesheets unsupported", contains(runtimeReport, "Capabilities.External stylesheets=unsupported"), "expected unsupported");
     add("bookmark persistence enabled", contains(runtimeReport, "Capabilities.Bookmark persistence=enabled"), "expected enabled");
+
+    bool docsLoaded = gxos::apps::Navigator::SmokeNavigateTo("file:///docs/index.html");
+    std::string docsUrl = gxos::apps::Navigator::SmokeCurrentUrl();
+    std::string docsReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    add("docs page loads", docsLoaded && docsUrl == "file:///docs/index.html", "currentUrl=" + docsUrl);
+    add("docs CSS-lite detected", contains(docsReport, "Current Document.CSS diagnostics=css detected"), "expected css detected");
+
+    bool downloadsLoaded = gxos::apps::Navigator::SmokeNavigateTo("about:downloads");
+    std::string downloadsUrl = gxos::apps::Navigator::SmokeCurrentUrl();
+    add("downloads page loads", downloadsLoaded && downloadsUrl == "about:downloads", "currentUrl=" + downloadsUrl);
 
     bool pass = true;
     for (const Check& check : checks) {
@@ -213,11 +228,51 @@ static std::string navigatorHostedSmokeDiagnostic() {
     }
 
     out << "runtime_report:\n" << runtimeReport;
+    out << "docs_runtime_report:\n" << docsReport;
     out << "current_url=" << currentUrl << "\n";
+    out << "docs_url=" << docsUrl << "\n";
+    out << "downloads_url=" << downloadsUrl << "\n";
     out << "current_block_count=" << gxos::apps::Navigator::SmokeCurrentBlockCount() << "\n";
     out << "toolbar_count=" << (foundWindow ? navWindow.widgetCount : 0) << "\n";
     out << "NAVIGATOR_SMOKE_RESULT: " << (pass ? "PASS" : "FAIL") << "\n";
     out << "NAVIGATOR_SMOKE_END\n";
+    return out.str();
+}
+
+static std::string navigatorGotoDiagnostic(const std::string& url) {
+    std::ostringstream out;
+    if (url.empty()) {
+        return "NAVIGATOR_GOTO_RESULT: FAIL missing URL\n";
+    }
+
+    bool ok = gxos::apps::Navigator::SmokeNavigateTo(url);
+    if (!ok) {
+        std::string err;
+        if (!gxos::gui::DesktopService::LaunchApp("guideXOS Navigator", err)) {
+            return "NAVIGATOR_GOTO_RESULT: FAIL launch failed: " + err + "\n";
+        }
+        for (int attempt = 0; attempt < 30; ++attempt) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            bool ready = false;
+            for (const gxos::gui::WindowDebugInfo& window : gxos::gui::Compositor::debugWindowsSnapshot()) {
+                if (window.title.find("guideXOS Navigator") != std::string::npos ||
+                    window.title.find("Navigator") != std::string::npos) {
+                    ready = true;
+                    break;
+                }
+            }
+            if (ready) break;
+        }
+        for (int attempt = 0; attempt < 30 && !ok; ++attempt) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            ok = gxos::apps::Navigator::SmokeNavigateTo(url);
+        }
+    }
+
+    out << "NAVIGATOR_GOTO_RESULT: " << (ok ? "PASS" : "FAIL") << "\n";
+    out << "requested_url=" << url << "\n";
+    out << "current_url=" << gxos::apps::Navigator::SmokeCurrentUrl() << "\n";
+    out << "current_block_count=" << gxos::apps::Navigator::SmokeCurrentBlockCount() << "\n";
     return out.str();
 }
 
@@ -246,7 +301,7 @@ static void help(){
                  " clock\n"
                  " taskmgr\n"
                  " paint\n"
-                 " navigator | navigator.smoke\n"
+                 " navigator | navigator.smoke | navigator.goto <url>\n"
                  " imgview [file] | osk\n"
                  " shutdown | msgbox <text> | welcome\n"
                  " notify <text> | notify.clear\n"
@@ -581,6 +636,13 @@ using namespace gxos;
         }
         else if (cmd=="navigator.smoke"){
             std::cout << navigatorHostedSmokeDiagnostic();
+        }
+        else if (cmd=="navigator.goto"){
+            if(!requireCompositor()) continue;
+            std::string url;
+            std::getline(iss, url);
+            if(url.size()>0 && url[0]==' ') url.erase(0,1);
+            std::cout << navigatorGotoDiagnostic(url);
         }
         else if (cmd=="imgview"){
             if(!requireCompositor()) continue;

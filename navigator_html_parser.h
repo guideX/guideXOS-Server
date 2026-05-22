@@ -15,11 +15,14 @@
 //   <code>           – inside <pre>: stays in Preformatted; elsewhere: plain text
 //
 // Ignored with content stripped:
-//   <script>  <style>
+//   <script>
+//
+// Parsed for CSS-lite rules by guideWeb:
+//   <style>
 //
 // All other tags: tag token skipped, inner text preserved.
 //
-// No exceptions are thrown; malformed HTML is handled gracefully.
+// No exceptions are thrown; malformed HTML/CSS is handled gracefully.
 // No external dependencies beyond the C++ standard library.
 
 #include "guide_web_html_parser.h"   // resolveRelativeUrl, parseHtml (gxos::web)

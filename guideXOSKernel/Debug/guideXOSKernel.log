@@ -7,21 +7,722 @@
   
   Checking toolchain...
   
-  [ERROR] i686-elf-g++ not found in PATH
+  [OK] Cross-compiler found
   
-  Toolchain not found
+  NASM version 2.16.03 compiled on Mar 28 2026
+  [OK] Assembler found
   
-  Option 1: Install to D:\bkup\elfbin\bin
-    - Download from: https://github.com/lordmilko/i686-elf-tools/releases
-    - Extract so that i686-elf-gcc.exe is at: D:\bkup\elfbin\bin\i686-elf-gcc.exe
+  Creating build directories...
+  [OK] Directories created
   
-  Option 2: Add to PATH manually
-    - Open System Properties > Environment Variables
-    - Add your toolchain bin directory to PATH
+  Assembling boot.asm...
+  [OK] boot.o created
+  Compiling x86 arch.cpp...
+  [OK] arch.o (x86) created
   
-  Option 3: Edit this script
-    - Find the "Toolchain Path Configuration" section
-    - Add your custom path to the detection logic
+  Compiling core source files...
+    Compiling arch.cpp...
+    Compiling architecture_detector.cpp...
+    Compiling ata.cpp...
+    Compiling block_device.cpp...
+    Compiling cxx_runtime.cpp...
+    Compiling desktop.cpp...
+  In file included from core\desktop.cpp:20:
+  core\include/kernel/kernel_app.h: In member function 'virtual bool kernel::app::KernelApp::initWithParam(const char*)':
+core\include/kernel/kernel_app.h(198,44): warning G24ACD1A9: unused parameter 'param' [-Wunused-parameter]
+    198 |     virtual bool initWithParam(const char* param) { return init(); }  // Override for param support
+        |                                ~~~~~~~~~~~~^~~~~
+  core\include/kernel/kernel_app.h: In member function 'virtual void kernel::app::KernelApp::onMouseMove(int, int)':
+core\include/kernel/kernel_app.h(203,34): warning G24ACD1A9: unused parameter 'x' [-Wunused-parameter]
+    203 |     virtual void onMouseMove(int x, int y) {}
+        |                              ~~~~^
+core\include/kernel/kernel_app.h(203,41): warning G24ACD1A9: unused parameter 'y' [-Wunused-parameter]
+    203 |     virtual void onMouseMove(int x, int y) {}
+        |                                     ~~~~^
+  core\include/kernel/kernel_app.h: In member function 'virtual void kernel::app::KernelApp::onMouseDown(int, int, uint8_t)':
+core\include/kernel/kernel_app.h(204,34): warning G24ACD1A9: unused parameter 'x' [-Wunused-parameter]
+    204 |     virtual void onMouseDown(int x, int y, uint8_t button) {}
+        |                              ~~~~^
+core\include/kernel/kernel_app.h(204,41): warning G24ACD1A9: unused parameter 'y' [-Wunused-parameter]
+    204 |     virtual void onMouseDown(int x, int y, uint8_t button) {}
+        |                                     ~~~~^
+core\include/kernel/kernel_app.h(204,52): warning G24ACD1A9: unused parameter 'button' [-Wunused-parameter]
+    204 |     virtual void onMouseDown(int x, int y, uint8_t button) {}
+        |                                            ~~~~~~~~^~~~~~
+  core\include/kernel/kernel_app.h: In member function 'virtual void kernel::app::KernelApp::onMouseUp(int, int, uint8_t)':
+core\include/kernel/kernel_app.h(205,32): warning G24ACD1A9: unused parameter 'x' [-Wunused-parameter]
+    205 |     virtual void onMouseUp(int x, int y, uint8_t button) {}
+        |                            ~~~~^
+core\include/kernel/kernel_app.h(205,39): warning G24ACD1A9: unused parameter 'y' [-Wunused-parameter]
+    205 |     virtual void onMouseUp(int x, int y, uint8_t button) {}
+        |                                   ~~~~^
+core\include/kernel/kernel_app.h(205,50): warning G24ACD1A9: unused parameter 'button' [-Wunused-parameter]
+    205 |     virtual void onMouseUp(int x, int y, uint8_t button) {}
+        |                                          ~~~~~~~~^~~~~~
+  core\include/kernel/kernel_app.h: In member function 'virtual void kernel::app::KernelApp::onKeyDown(uint32_t)':
+core\include/kernel/kernel_app.h(206,37): warning G24ACD1A9: unused parameter 'key' [-Wunused-parameter]
+    206 |     virtual void onKeyDown(uint32_t key) {}
+        |                            ~~~~~~~~~^~~
+  core\include/kernel/kernel_app.h: In member function 'virtual void kernel::app::KernelApp::onKeyUp(uint32_t)':
+core\include/kernel/kernel_app.h(207,35): warning G24ACD1A9: unused parameter 'key' [-Wunused-parameter]
+    207 |     virtual void onKeyUp(uint32_t key) {}
+        |                          ~~~~~~~~~^~~
+  core\include/kernel/kernel_app.h: In member function 'virtual void kernel::app::KernelApp::onKeyChar(char)':
+core\include/kernel/kernel_app.h(208,33): warning G24ACD1A9: unused parameter 'c' [-Wunused-parameter]
+    208 |     virtual void onKeyChar(char c) {}
+        |                            ~~~~~^
+  core\include/kernel/kernel_app.h: In member function 'virtual void kernel::app::KernelApp::onWidgetClick(int)':
+core\include/kernel/kernel_app.h(209,36): warning G24ACD1A9: unused parameter 'widgetId' [-Wunused-parameter]
+    209 |     virtual void onWidgetClick(int widgetId) {}
+        |                                ~~~~^~~~~~~~
+  core\desktop.cpp: At global scope:
+core\desktop.cpp(2285,28): warning GB2FD17C6: 'kernel::desktop::WallpaperPackEntry* kernel::desktop::find_wallpaper_pack_entry(const char*, bool)' defined but not used [-Wunused-function]
+   2285 | static WallpaperPackEntry* find_wallpaper_pack_entry(const char* wallpaperId, bool thumbnail)
+        |                            ^~~~~~~~~~~~~~~~~~~~~~~~~
+core\desktop.cpp(1999,13): warning GACB2A34A: 'void kernel::desktop::set_wallpaper_grid(uint32_t, uint32_t, uint32_t, uint32_t)' defined but not used [-Wunused-function]
+   1999 | static void set_wallpaper_grid(uint32_t topColor, uint32_t bottomColor, uint32_t gridColor, uint32_t spacing)
+        |             ^~~~~~~~~~~~~~~~~~
+core\desktop.cpp(1991,13): warning G476BEFB5: 'void kernel::desktop::toggle_grid()' defined but not used [-Wunused-function]
+   1991 | static void toggle_grid()
+        |             ^~~~~~~~~~~
+core\desktop.cpp(1985,13): warning G5C1A0608: 'void kernel::desktop::toggle_branding()' defined but not used [-Wunused-function]
+   1985 | static void toggle_branding()
+        |             ^~~~~~~~~~~~~~~
+core\desktop.cpp(1978,13): warning GB7E2E7EF: 'void kernel::desktop::set_wallpaper_solid(uint32_t)' defined but not used [-Wunused-function]
+   1978 | static void set_wallpaper_solid(uint32_t color)
+        |             ^~~~~~~~~~~~~~~~~~~
+core\desktop.cpp(1970,13): warning G73295BA6: 'void kernel::desktop::set_wallpaper_gradient(uint32_t, uint32_t)' defined but not used [-Wunused-function]
+   1970 | static void set_wallpaper_gradient(uint32_t topColor, uint32_t bottomColor)
+        |             ^~~~~~~~~~~~~~~~~~~~~~
+core\desktop.cpp(1920,13): warning GB74D7035: 'void kernel::desktop::add_to_start_menu_recent(const char*)' defined but not used [-Wunused-function]
+   1920 | static void add_to_start_menu_recent(const char* appName)
+        |             ^~~~~~~~~~~~~~~~~~~~~~~~
+core\desktop.cpp(1683,13): warning GB0A44E1C: 'void kernel::desktop::save_icon_position(int)' defined but not used [-Wunused-function]
+   1683 | static void save_icon_position(int displayIndex)
+        |             ^~~~~~~~~~~~~~~~~~
+core\desktop.cpp(1639,13): warning GCB72056F: 'void kernel::desktop::unpin_icon(const char*)' defined but not used [-Wunused-function]
+   1639 | static void unpin_icon(const char* appName)
+        |             ^~~~~~~~~~
+core\desktop.cpp(1626,13): warning G6BF0ADBA: 'void kernel::desktop::pin_icon(const char*)' defined but not used [-Wunused-function]
+   1626 | static void pin_icon(const char* appName)
+        |             ^~~~~~~~
+core\desktop.cpp(532,16): warning G8EACD7BB: 'int32_t kernel::desktop::abs_i32(int32_t)' defined but not used [-Wunused-function]
+    532 | static int32_t abs_i32(int32_t value)
+        |                ^~~~~~~
+core\desktop.cpp(420,20): warning GA541B4BD: 'kernel::desktop::s_desktopIconTheme' defined but not used [-Wunused-variable]
+    420 | static const char* s_desktopIconTheme = "Flat";
+        |                    ^~~~~~~~~~~~~~~~~~
+core\desktop.cpp(397,13): warning G27EF45E7: 'kernel::desktop::s_networkConfigUseDHCPforDNS' defined but not used [-Wunused-variable]
+    397 | static bool s_networkConfigUseDHCPforDNS = true;
+        |             ^~~~~~~~~~~~~~~~~~~~~~~~~~~~
+core\desktop.cpp(395,12): warning GEDB4F6D3: 'kernel::desktop::s_networkConfigFocusField' defined but not used [-Wunused-variable]
+    395 | static int s_networkConfigFocusField = -1;  // Which IP octet field is focused
+        |            ^~~~~~~~~~~~~~~~~~~~~~~~~
+core\desktop.cpp(385,12): warning G075C0907: 'kernel::desktop::s_deviceManagerScroll' defined but not used [-Wunused-variable]
+    385 | static int s_deviceManagerScroll = 0;
+        |            ^~~~~~~~~~~~~~~~~~~~~
+core\desktop.cpp(377,20): warning G7B89714F: 'kernel::desktop::s_appModelStatus' defined but not used [-Wunused-variable]
+    377 | static const char* s_appModelStatus = "Ready. Use Up/Down, 1-4, Enter, I, S, Escape.";
+        |                    ^~~~~~~~~~~~~~~~
+core\desktop.cpp(75,13): warning G4F99F0D2: 'bool desktop_starts_with(const char*, const char*)' defined but not used [-Wunused-function]
+     75 | static bool desktop_starts_with(const char* value, const char* prefix)
+        |             ^~~~~~~~~~~~~~~~~~~
+  In function 'void kernel::desktop::draw_app_model_dialog()',
+      inlined from 'void kernel::desktop::_ZN6kernel7desktop4drawEv.part.0()' at core\desktop.cpp:5284:26:
+core\desktop.cpp(1327,21): warning G3C0033BE: writing 1 byte into a region of size 0 [-Wstringop-overflow=]
+   1327 |         line[pos++] = ' ';
+        |         ~~~~~~~~~~~~^~~~~
+  core\desktop.cpp: In function 'void kernel::desktop::_ZN6kernel7desktop4drawEv.part.0()':
+  core\desktop.cpp:1318:14: note: at offset 128 into destination object 'line' of size 128
+   1318 |         char line[128];
+        |              ^~~~
+    Compiling desktop_capabilities.cpp...
+    Compiling desktop_font.cpp...
+    Compiling device_tree.cpp...
+core\device_tree.cpp(43,13): warning GD482325F: 'void kernel::fdt::memcopy(void*, const void*, size_t)' defined but not used [-Wunused-function]
+     43 | static void memcopy(void* dst, const void* src, size_t len)
+        |             ^~~~~~~
+core\device_tree.cpp(19,12): warning GCCCE6508: 'int kernel::fdt::strlen(const char*)' defined but not used [-Wunused-function]
+     19 | static int strlen(const char* s)
+        |            ^~~~~~
+    Compiling dhcp.cpp...
+    Compiling dns.cpp...
+    Compiling ethernet.cpp...
+    Compiling fb_console.cpp...
+  core\fb_console.cpp: In function 'void kernel::fb_console::draw_glyph(uint32_t, uint32_t, char, uint32_t, uint32_t)':
+core\fb_console.cpp(242,24): warning GDEF9DF24: comparison is always true due to limited range of data type [-Wtype-limits]
+    242 |     if (c >= 0x20 && c <= 0x7F) {
+        |                      ~~^~~~~~~
+    Compiling feature_report.cpp...
+    Compiling framebuffer.cpp...
+    Compiling fs_ext4.cpp...
+  core\fs_ext4.cpp: In function 'bool kernel::fs_ext4::read_dir(uint8_t, Ext4DirEntry*)':
+core\fs_ext4.cpp(409,21): warning G19D935B9: comparison is always false due to limited range of data type [-Wtype-limits]
+    409 |         if (nameLen > 255) nameLen = 255;
+        |             ~~~~~~~~^~~~~
+    Compiling fs_fat.cpp...
+    Compiling fs_ntfs.cpp...
+  core\fs_ntfs.cpp: In function 'kernel::fs_ntfs::NtfsStatus kernel::fs_ntfs::read(NtfsFile*, void*, size_t, size_t*)':
+core\fs_ntfs.cpp(437,54): warning G24ACD1A9: unused parameter 'size' [-Wunused-parameter]
+    437 | NtfsStatus read(NtfsFile* file, void* buffer, size_t size, size_t* bytesRead)
+        |                                               ~~~~~~~^~~~
+  core\fs_ntfs.cpp: In function 'kernel::fs_ntfs::NtfsStatus kernel::fs_ntfs::write(NtfsFile*, const void*, size_t, size_t*)':
+core\fs_ntfs.cpp(471,61): warning G24ACD1A9: unused parameter 'size' [-Wunused-parameter]
+    471 | NtfsStatus write(NtfsFile* file, const void* buffer, size_t size, size_t* bytesWritten)
+        |                                                      ~~~~~~~^~~~
+  core\fs_ntfs.cpp: In function 'kernel::fs_ntfs::NtfsStatus kernel::fs_ntfs::list_directory(NtfsVolume*, const char*, NtfsDirCallback, void*)':
+core\fs_ntfs.cpp(549,59): warning G24ACD1A9: unused parameter 'context' [-Wunused-parameter]
+    549 |                           NtfsDirCallback callback, void* context)
+        |                                                     ~~~~~~^~~~~~~
+  core\fs_ntfs.cpp: At global scope:
+core\fs_ntfs.cpp(75,13): warning G12D5DD3B: 'void kernel::fs_ntfs::utf16le_to_ascii(const uint8_t*, int, char*)' defined but not used [-Wunused-function]
+     75 | static void utf16le_to_ascii(const uint8_t* utf16, int charCount, char* ascii)
+        |             ^~~~~~~~~~~~~~~~
+core\fs_ntfs.cpp(68,12): warning G1C375E6B: 'int kernel::fs_ntfs::strcmp(const char*, const char*)' defined but not used [-Wunused-function]
+     68 | static int strcmp(const char* a, const char* b)
+        |            ^~~~~~
+core\fs_ntfs.cpp(61,12): warning G831D21A1: 'int kernel::fs_ntfs::strlen(const char*)' defined but not used [-Wunused-function]
+     61 | static int strlen(const char* s)
+        |            ^~~~~~
+core\fs_ntfs.cpp(52,13): warning G191C9546: 'void kernel::fs_ntfs::memcopy(void*, const void*, size_t)' defined but not used [-Wunused-function]
+     52 | static void memcopy(void* dst, const void* src, size_t len)
+        |             ^~~~~~~
+    Compiling fs_ufs.cpp...
+  core\fs_ufs.cpp: In function 'bool kernel::fs_ufs::read_dir(uint8_t, DirEntry*)':
+core\fs_ufs.cpp(493,21): warning G19D935B9: comparison is always false due to limited range of data type [-Wtype-limits]
+    493 |         if (nameLen > 255) nameLen = 255;
+        |             ~~~~~~~~^~~~~
+    Compiling fs_xfs.cpp...
+  core\fs_xfs.cpp: In function 'kernel::fs_xfs::XfsStatus kernel::fs_xfs::read(XfsFile*, void*, size_t, size_t*)':
+core\fs_xfs.cpp(362,52): warning G24ACD1A9: unused parameter 'size' [-Wunused-parameter]
+    362 | XfsStatus read(XfsFile* file, void* buffer, size_t size, size_t* bytesRead)
+        |                                             ~~~~~~~^~~~
+  core\fs_xfs.cpp: In function 'kernel::fs_xfs::XfsStatus kernel::fs_xfs::write(XfsFile*, const void*, size_t, size_t*)':
+core\fs_xfs.cpp(395,59): warning G24ACD1A9: unused parameter 'size' [-Wunused-parameter]
+    395 | XfsStatus write(XfsFile* file, const void* buffer, size_t size, size_t* bytesWritten)
+        |                                                    ~~~~~~~^~~~
+  core\fs_xfs.cpp: In function 'kernel::fs_xfs::XfsStatus kernel::fs_xfs::list_directory(XfsVolume*, const char*, XfsDirCallback, void*)':
+core\fs_xfs.cpp(468,57): warning G24ACD1A9: unused parameter 'context' [-Wunused-parameter]
+    468 |                          XfsDirCallback callback, void* context)
+        |                                                   ~~~~~~^~~~~~~
+  core\fs_xfs.cpp: At global scope:
+core\fs_xfs.cpp(61,12): warning GC9A38D65: 'int kernel::fs_xfs::strcmp(const char*, const char*)' defined but not used [-Wunused-function]
+     61 | static int strcmp(const char* a, const char* b)
+        |            ^~~~~~
+    Compiling hugepages.cpp...
+    Compiling icmp.cpp...
+    Compiling icmpv6.cpp...
+    Compiling image_adapter.cpp...
+    Compiling input_manager.cpp...
+core\input_manager.cpp(61,16): warning GEC80797B: 'int32_t kernel::input::clamp(int32_t, int32_t, int32_t)' defined but not used [-Wunused-function]
+     61 | static int32_t clamp(int32_t v, int32_t lo, int32_t hi)
+        |                ^~~~~
+    Compiling interrupts.cpp...
+    Compiling ipv4.cpp...
+  core\ipv4.cpp: In function 'bool kernel::ipv4::ip_from_string(const char*, uint32_t*)':
+core\ipv4.cpp(128,23): warning G19D935B9: comparison is always false due to limited range of data type [-Wtype-limits]
+    128 |             if (octet > 255) return false;
+        |                 ~~~~~~^~~~~
+    Compiling ipv6.cpp...
+  core\ipv6.cpp: In function 'bool kernel::ipv6::validate_header(const Header*, size_t)':
+core\ipv6.cpp(297,33): warning G7D6735F0: comparison of integer expressions of different signedness: 'int' and 'size_t' {aka 'long unsigned int'} [-Wsign-compare]
+    297 |     if (HEADER_LEN + payloadLen > totalLen) {
+        |         ~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~
+    Compiling kernel_app.cpp...
+  In file included from core\kernel_app.cpp:7:
+  core\include/kernel/kernel_app.h: In member function 'virtual bool kernel::app::KernelApp::initWithParam(const char*)':
+core\include/kernel/kernel_app.h(198,44): warning G24ACD1A9: unused parameter 'param' [-Wunused-parameter]
+    198 |     virtual bool initWithParam(const char* param) { return init(); }  // Override for param support
+        |                                ~~~~~~~~~~~~^~~~~
+  core\include/kernel/kernel_app.h: In member function 'virtual void kernel::app::KernelApp::onMouseMove(int, int)':
+core\include/kernel/kernel_app.h(203,34): warning G24ACD1A9: unused parameter 'x' [-Wunused-parameter]
+    203 |     virtual void onMouseMove(int x, int y) {}
+        |                              ~~~~^
+core\include/kernel/kernel_app.h(203,41): warning G24ACD1A9: unused parameter 'y' [-Wunused-parameter]
+    203 |     virtual void onMouseMove(int x, int y) {}
+        |                                     ~~~~^
+  core\include/kernel/kernel_app.h: In member function 'virtual void kernel::app::KernelApp::onMouseDown(int, int, uint8_t)':
+core\include/kernel/kernel_app.h(204,34): warning G24ACD1A9: unused parameter 'x' [-Wunused-parameter]
+    204 |     virtual void onMouseDown(int x, int y, uint8_t button) {}
+        |                              ~~~~^
+core\include/kernel/kernel_app.h(204,41): warning G24ACD1A9: unused parameter 'y' [-Wunused-parameter]
+    204 |     virtual void onMouseDown(int x, int y, uint8_t button) {}
+        |                                     ~~~~^
+core\include/kernel/kernel_app.h(204,52): warning G24ACD1A9: unused parameter 'button' [-Wunused-parameter]
+    204 |     virtual void onMouseDown(int x, int y, uint8_t button) {}
+        |                                            ~~~~~~~~^~~~~~
+  core\include/kernel/kernel_app.h: In member function 'virtual void kernel::app::KernelApp::onMouseUp(int, int, uint8_t)':
+core\include/kernel/kernel_app.h(205,32): warning G24ACD1A9: unused parameter 'x' [-Wunused-parameter]
+    205 |     virtual void onMouseUp(int x, int y, uint8_t button) {}
+        |                            ~~~~^
+core\include/kernel/kernel_app.h(205,39): warning G24ACD1A9: unused parameter 'y' [-Wunused-parameter]
+    205 |     virtual void onMouseUp(int x, int y, uint8_t button) {}
+        |                                   ~~~~^
+core\include/kernel/kernel_app.h(205,50): warning G24ACD1A9: unused parameter 'button' [-Wunused-parameter]
+    205 |     virtual void onMouseUp(int x, int y, uint8_t button) {}
+        |                                          ~~~~~~~~^~~~~~
+  core\include/kernel/kernel_app.h: In member function 'virtual void kernel::app::KernelApp::onKeyDown(uint32_t)':
+core\include/kernel/kernel_app.h(206,37): warning G24ACD1A9: unused parameter 'key' [-Wunused-parameter]
+    206 |     virtual void onKeyDown(uint32_t key) {}
+        |                            ~~~~~~~~~^~~
+  core\include/kernel/kernel_app.h: In member function 'virtual void kernel::app::KernelApp::onKeyUp(uint32_t)':
+core\include/kernel/kernel_app.h(207,35): warning G24ACD1A9: unused parameter 'key' [-Wunused-parameter]
+    207 |     virtual void onKeyUp(uint32_t key) {}
+        |                          ~~~~~~~~~^~~
+  core\include/kernel/kernel_app.h: In member function 'virtual void kernel::app::KernelApp::onKeyChar(char)':
+core\include/kernel/kernel_app.h(208,33): warning G24ACD1A9: unused parameter 'c' [-Wunused-parameter]
+    208 |     virtual void onKeyChar(char c) {}
+        |                            ~~~~~^
+  core\include/kernel/kernel_app.h: In member function 'virtual void kernel::app::KernelApp::onWidgetClick(int)':
+core\include/kernel/kernel_app.h(209,36): warning G24ACD1A9: unused parameter 'widgetId' [-Wunused-parameter]
+    209 |     virtual void onWidgetClick(int widgetId) {}
+        |                                ~~~~^~~~~~~~
+    Compiling kernel_apps.cpp...
+  In file included from core\include/kernel/kernel_apps.h:13,
+                   from core\kernel_apps.cpp:7:
+  core/include/kernel/kernel_app.h: In member function 'virtual bool kernel::app::KernelApp::initWithParam(const char*)':
+core/include/kernel/kernel_app.h(198,44): warning G24ACD1A9: unused parameter 'param' [-Wunused-parameter]
+    198 |     virtual bool initWithParam(const char* param) { return init(); }  // Override for param support
+        |                                ~~~~~~~~~~~~^~~~~
+  core/include/kernel/kernel_app.h: In member function 'virtual void kernel::app::KernelApp::onMouseMove(int, int)':
+core/include/kernel/kernel_app.h(203,34): warning G24ACD1A9: unused parameter 'x' [-Wunused-parameter]
+    203 |     virtual void onMouseMove(int x, int y) {}
+        |                              ~~~~^
+core/include/kernel/kernel_app.h(203,41): warning G24ACD1A9: unused parameter 'y' [-Wunused-parameter]
+    203 |     virtual void onMouseMove(int x, int y) {}
+        |                                     ~~~~^
+  core/include/kernel/kernel_app.h: In member function 'virtual void kernel::app::KernelApp::onMouseDown(int, int, uint8_t)':
+core/include/kernel/kernel_app.h(204,34): warning G24ACD1A9: unused parameter 'x' [-Wunused-parameter]
+    204 |     virtual void onMouseDown(int x, int y, uint8_t button) {}
+        |                              ~~~~^
+core/include/kernel/kernel_app.h(204,41): warning G24ACD1A9: unused parameter 'y' [-Wunused-parameter]
+    204 |     virtual void onMouseDown(int x, int y, uint8_t button) {}
+        |                                     ~~~~^
+core/include/kernel/kernel_app.h(204,52): warning G24ACD1A9: unused parameter 'button' [-Wunused-parameter]
+    204 |     virtual void onMouseDown(int x, int y, uint8_t button) {}
+        |                                            ~~~~~~~~^~~~~~
+  core/include/kernel/kernel_app.h: In member function 'virtual void kernel::app::KernelApp::onMouseUp(int, int, uint8_t)':
+core/include/kernel/kernel_app.h(205,32): warning G24ACD1A9: unused parameter 'x' [-Wunused-parameter]
+    205 |     virtual void onMouseUp(int x, int y, uint8_t button) {}
+        |                            ~~~~^
+core/include/kernel/kernel_app.h(205,39): warning G24ACD1A9: unused parameter 'y' [-Wunused-parameter]
+    205 |     virtual void onMouseUp(int x, int y, uint8_t button) {}
+        |                                   ~~~~^
+core/include/kernel/kernel_app.h(205,50): warning G24ACD1A9: unused parameter 'button' [-Wunused-parameter]
+    205 |     virtual void onMouseUp(int x, int y, uint8_t button) {}
+        |                                          ~~~~~~~~^~~~~~
+  core/include/kernel/kernel_app.h: In member function 'virtual void kernel::app::KernelApp::onKeyDown(uint32_t)':
+core/include/kernel/kernel_app.h(206,37): warning G24ACD1A9: unused parameter 'key' [-Wunused-parameter]
+    206 |     virtual void onKeyDown(uint32_t key) {}
+        |                            ~~~~~~~~~^~~
+  core/include/kernel/kernel_app.h: In member function 'virtual void kernel::app::KernelApp::onKeyUp(uint32_t)':
+core/include/kernel/kernel_app.h(207,35): warning G24ACD1A9: unused parameter 'key' [-Wunused-parameter]
+    207 |     virtual void onKeyUp(uint32_t key) {}
+        |                          ~~~~~~~~~^~~
+  core/include/kernel/kernel_app.h: In member function 'virtual void kernel::app::KernelApp::onKeyChar(char)':
+core/include/kernel/kernel_app.h(208,33): warning G24ACD1A9: unused parameter 'c' [-Wunused-parameter]
+    208 |     virtual void onKeyChar(char c) {}
+        |                            ~~~~~^
+  core/include/kernel/kernel_app.h: In member function 'virtual void kernel::app::KernelApp::onWidgetClick(int)':
+core/include/kernel/kernel_app.h(209,36): warning G24ACD1A9: unused parameter 'widgetId' [-Wunused-parameter]
+    209 |     virtual void onWidgetClick(int widgetId) {}
+        |                                ~~~~^~~~~~~~
+  core\kernel_apps.cpp: In member function 'virtual void kernel::apps::NotepadApp::draw(uint32_t, uint32_t, uint32_t, uint32_t)':
+core\kernel_apps.cpp(736,59): warning G7D6735F0: comparison of integer expressions of different signedness: 'int' and 'long unsigned int' [-Wsign-compare]
+    736 |             if (col * (kGlyphW + kGlyphSpacing) + kGlyphW > w - 16) {
+        |                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~
+  core\kernel_apps.cpp: In member function 'virtual void kernel::apps::CalculatorApp::onWidgetClick(int)':
+core\kernel_apps.cpp(2228,17): warning G41AE70B8: unused variable 'btnChars' [-Wunused-variable]
+   2228 |     const char* btnChars = "Cce/%789*456-123++/-0.=";
+        |                 ^~~~~~~~
+  core\kernel_apps.cpp: In member function 'virtual void kernel::apps::TaskManagerApp::onMouseDown(int, int, uint8_t)':
+core\kernel_apps.cpp(2538,38): warning G24ACD1A9: unused parameter 'localX' [-Wunused-parameter]
+   2538 | void TaskManagerApp::onMouseDown(int localX, int localY, uint8_t button) {
+        |                                  ~~~~^~~~~~
+  core\kernel_apps.cpp: In member function 'virtual void kernel::apps::DiskManagerApp::draw(uint32_t, uint32_t, uint32_t, uint32_t)':
+core\kernel_apps.cpp(3831,39): warning GA5864BA6: narrowing conversion of '(48 + ((int)((char)(pi + 1))))' from 'int' to 'char' [-Wnarrowing]
+   3831 |                 char numBuf[4] = {'0' + (char)(pi + 1), '\0', '\0', '\0'};
+        |                                   ~~~~^~~~~~~~~~~~~~~~
+    Compiling kernel_compositor.cpp...
+  In file included from core\include/kernel/kernel_compositor.h:15,
+                   from core\kernel_compositor.cpp:7:
+  core/include/kernel/kernel_app.h: In member function 'virtual bool kernel::app::KernelApp::initWithParam(const char*)':
+core/include/kernel/kernel_app.h(198,44): warning G24ACD1A9: unused parameter 'param' [-Wunused-parameter]
+    198 |     virtual bool initWithParam(const char* param) { return init(); }  // Override for param support
+        |                                ~~~~~~~~~~~~^~~~~
+  core/include/kernel/kernel_app.h: In member function 'virtual void kernel::app::KernelApp::onMouseMove(int, int)':
+core/include/kernel/kernel_app.h(203,34): warning G24ACD1A9: unused parameter 'x' [-Wunused-parameter]
+    203 |     virtual void onMouseMove(int x, int y) {}
+        |                              ~~~~^
+core/include/kernel/kernel_app.h(203,41): warning G24ACD1A9: unused parameter 'y' [-Wunused-parameter]
+    203 |     virtual void onMouseMove(int x, int y) {}
+        |                                     ~~~~^
+  core/include/kernel/kernel_app.h: In member function 'virtual void kernel::app::KernelApp::onMouseDown(int, int, uint8_t)':
+core/include/kernel/kernel_app.h(204,34): warning G24ACD1A9: unused parameter 'x' [-Wunused-parameter]
+    204 |     virtual void onMouseDown(int x, int y, uint8_t button) {}
+        |                              ~~~~^
+core/include/kernel/kernel_app.h(204,41): warning G24ACD1A9: unused parameter 'y' [-Wunused-parameter]
+    204 |     virtual void onMouseDown(int x, int y, uint8_t button) {}
+        |                                     ~~~~^
+core/include/kernel/kernel_app.h(204,52): warning G24ACD1A9: unused parameter 'button' [-Wunused-parameter]
+    204 |     virtual void onMouseDown(int x, int y, uint8_t button) {}
+        |                                            ~~~~~~~~^~~~~~
+  core/include/kernel/kernel_app.h: In member function 'virtual void kernel::app::KernelApp::onMouseUp(int, int, uint8_t)':
+core/include/kernel/kernel_app.h(205,32): warning G24ACD1A9: unused parameter 'x' [-Wunused-parameter]
+    205 |     virtual void onMouseUp(int x, int y, uint8_t button) {}
+        |                            ~~~~^
+core/include/kernel/kernel_app.h(205,39): warning G24ACD1A9: unused parameter 'y' [-Wunused-parameter]
+    205 |     virtual void onMouseUp(int x, int y, uint8_t button) {}
+        |                                   ~~~~^
+core/include/kernel/kernel_app.h(205,50): warning G24ACD1A9: unused parameter 'button' [-Wunused-parameter]
+    205 |     virtual void onMouseUp(int x, int y, uint8_t button) {}
+        |                                          ~~~~~~~~^~~~~~
+  core/include/kernel/kernel_app.h: In member function 'virtual void kernel::app::KernelApp::onKeyDown(uint32_t)':
+core/include/kernel/kernel_app.h(206,37): warning G24ACD1A9: unused parameter 'key' [-Wunused-parameter]
+    206 |     virtual void onKeyDown(uint32_t key) {}
+        |                            ~~~~~~~~~^~~
+  core/include/kernel/kernel_app.h: In member function 'virtual void kernel::app::KernelApp::onKeyUp(uint32_t)':
+core/include/kernel/kernel_app.h(207,35): warning G24ACD1A9: unused parameter 'key' [-Wunused-parameter]
+    207 |     virtual void onKeyUp(uint32_t key) {}
+        |                          ~~~~~~~~~^~~
+  core/include/kernel/kernel_app.h: In member function 'virtual void kernel::app::KernelApp::onKeyChar(char)':
+core/include/kernel/kernel_app.h(208,33): warning G24ACD1A9: unused parameter 'c' [-Wunused-parameter]
+    208 |     virtual void onKeyChar(char c) {}
+        |                            ~~~~~^
+  core/include/kernel/kernel_app.h: In member function 'virtual void kernel::app::KernelApp::onWidgetClick(int)':
+core/include/kernel/kernel_app.h(209,36): warning G24ACD1A9: unused parameter 'widgetId' [-Wunused-parameter]
+    209 |     virtual void onWidgetClick(int widgetId) {}
+        |                                ~~~~^~~~~~~~
+    Compiling kernel_ipc.cpp...
+    Compiling main.cpp...
+  In file included from core\include/kernel/kernel_apps.h:13,
+                   from core\main.cpp:15:
+  core/include/kernel/kernel_app.h: In member function 'virtual bool kernel::app::KernelApp::initWithParam(const char*)':
+core/include/kernel/kernel_app.h(198,44): warning G24ACD1A9: unused parameter 'param' [-Wunused-parameter]
+    198 |     virtual bool initWithParam(const char* param) { return init(); }  // Override for param support
+        |                                ~~~~~~~~~~~~^~~~~
+  core/include/kernel/kernel_app.h: In member function 'virtual void kernel::app::KernelApp::onMouseMove(int, int)':
+core/include/kernel/kernel_app.h(203,34): warning G24ACD1A9: unused parameter 'x' [-Wunused-parameter]
+    203 |     virtual void onMouseMove(int x, int y) {}
+        |                              ~~~~^
+core/include/kernel/kernel_app.h(203,41): warning G24ACD1A9: unused parameter 'y' [-Wunused-parameter]
+    203 |     virtual void onMouseMove(int x, int y) {}
+        |                                     ~~~~^
+  core/include/kernel/kernel_app.h: In member function 'virtual void kernel::app::KernelApp::onMouseDown(int, int, uint8_t)':
+core/include/kernel/kernel_app.h(204,34): warning G24ACD1A9: unused parameter 'x' [-Wunused-parameter]
+    204 |     virtual void onMouseDown(int x, int y, uint8_t button) {}
+        |                              ~~~~^
+core/include/kernel/kernel_app.h(204,41): warning G24ACD1A9: unused parameter 'y' [-Wunused-parameter]
+    204 |     virtual void onMouseDown(int x, int y, uint8_t button) {}
+        |                                     ~~~~^
+core/include/kernel/kernel_app.h(204,52): warning G24ACD1A9: unused parameter 'button' [-Wunused-parameter]
+    204 |     virtual void onMouseDown(int x, int y, uint8_t button) {}
+        |                                            ~~~~~~~~^~~~~~
+  core/include/kernel/kernel_app.h: In member function 'virtual void kernel::app::KernelApp::onMouseUp(int, int, uint8_t)':
+core/include/kernel/kernel_app.h(205,32): warning G24ACD1A9: unused parameter 'x' [-Wunused-parameter]
+    205 |     virtual void onMouseUp(int x, int y, uint8_t button) {}
+        |                            ~~~~^
+core/include/kernel/kernel_app.h(205,39): warning G24ACD1A9: unused parameter 'y' [-Wunused-parameter]
+    205 |     virtual void onMouseUp(int x, int y, uint8_t button) {}
+        |                                   ~~~~^
+core/include/kernel/kernel_app.h(205,50): warning G24ACD1A9: unused parameter 'button' [-Wunused-parameter]
+    205 |     virtual void onMouseUp(int x, int y, uint8_t button) {}
+        |                                          ~~~~~~~~^~~~~~
+  core/include/kernel/kernel_app.h: In member function 'virtual void kernel::app::KernelApp::onKeyDown(uint32_t)':
+core/include/kernel/kernel_app.h(206,37): warning G24ACD1A9: unused parameter 'key' [-Wunused-parameter]
+    206 |     virtual void onKeyDown(uint32_t key) {}
+        |                            ~~~~~~~~~^~~
+  core/include/kernel/kernel_app.h: In member function 'virtual void kernel::app::KernelApp::onKeyUp(uint32_t)':
+core/include/kernel/kernel_app.h(207,35): warning G24ACD1A9: unused parameter 'key' [-Wunused-parameter]
+    207 |     virtual void onKeyUp(uint32_t key) {}
+        |                          ~~~~~~~~~^~~
+  core/include/kernel/kernel_app.h: In member function 'virtual void kernel::app::KernelApp::onKeyChar(char)':
+core/include/kernel/kernel_app.h(208,33): warning G24ACD1A9: unused parameter 'c' [-Wunused-parameter]
+    208 |     virtual void onKeyChar(char c) {}
+        |                            ~~~~~^
+  core/include/kernel/kernel_app.h: In member function 'virtual void kernel::app::KernelApp::onWidgetClick(int)':
+core/include/kernel/kernel_app.h(209,36): warning G24ACD1A9: unused parameter 'widgetId' [-Wunused-parameter]
+    209 |     virtual void onWidgetClick(int widgetId) {}
+        |                                ~~~~^~~~~~~~
+    Compiling msi.cpp...
+    Compiling nic.cpp...
+core\nic.cpp(132,17): warning G476DA286: 'uint16_t kernel::nic::pci_read16(uint8_t, uint8_t, uint8_t, uint8_t)' defined but not used [-Wunused-function]
+    132 | static uint16_t pci_read16(uint8_t bus, uint8_t dev, uint8_t func, uint8_t offset)
+        |                 ^~~~~~~~~~
+core\nic.cpp(120,13): warning G84DAAAF3: 'void kernel::nic::pci_write32(uint8_t, uint8_t, uint8_t, uint8_t, uint32_t)' defined but not used [-Wunused-function]
+    120 | static void pci_write32(uint8_t bus, uint8_t dev, uint8_t func,
+        |             ^~~~~~~~~~~
+    Compiling nvme.cpp...
+    Compiling pci_audio.cpp...
+  core\pci_audio.cpp: In function 'uint16_t kernel::pci_audio::encode_hda_format(uint16_t, uint8_t, uint8_t)':
+core\pci_audio.cpp(421,9): warning G959463F6: case label value exceeds maximum value for type [-Wswitch-outside-range]
+    421 |         case 88200: fmt = 0x4800; break; // 44100 * 2
+        |         ^~~~
+core\pci_audio.cpp(422,9): warning G959463F6: case label value exceeds maximum value for type [-Wswitch-outside-range]
+    422 |         case 96000: fmt = 0x0800; break; // 48000 * 2
+        |         ^~~~
+core\pci_audio.cpp(423,9): warning G959463F6: case label value exceeds maximum value for type [-Wswitch-outside-range]
+    423 |         case 176400: fmt = 0x5800; break; // 44100 * 4
+        |         ^~~~
+core\pci_audio.cpp(424,9): warning G959463F6: case label value exceeds maximum value for type [-Wswitch-outside-range]
+    424 |         case 192000: fmt = 0x1800; break; // 48000 * 4
+        |         ^~~~
+    Compiling pit.cpp...
+    Compiling process.cpp...
+    Compiling ps2keyboard.cpp...
+  core\ps2keyboard.cpp: In function 'void kernel::ps2keyboard::irq_handler()':
+core\ps2keyboard.cpp(211,30): warning GDEF9DF24: comparison is always true due to limited range of data type [-Wtype-limits]
+    211 |                 if (scancode < 256) {
+        |                     ~~~~~~~~~^~~~~
+    Compiling ps2mouse.cpp...
+    Compiling ramdisk.cpp...
+  core\ramdisk.cpp: In function 'uint8_t kernel::ramdisk::create_at(void*, size_t, const char*)':
+core\ramdisk.cpp(353,59): warning G19BE7CC0: right shift count >= width of type [-Wshift-count-overflow]
+    353 |     serial::put_hex32(reinterpret_cast<uintptr_t>(memory) >> 32);
+        |                       ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~
+    Compiling shell.cpp...
+  In file included from core\shell.cpp:21:
+  core\include/kernel/kernel_app.h: In member function 'virtual bool kernel::app::KernelApp::initWithParam(const char*)':
+core\include/kernel/kernel_app.h(198,44): warning G24ACD1A9: unused parameter 'param' [-Wunused-parameter]
+    198 |     virtual bool initWithParam(const char* param) { return init(); }  // Override for param support
+        |                                ~~~~~~~~~~~~^~~~~
+  core\include/kernel/kernel_app.h: In member function 'virtual void kernel::app::KernelApp::onMouseMove(int, int)':
+core\include/kernel/kernel_app.h(203,34): warning G24ACD1A9: unused parameter 'x' [-Wunused-parameter]
+    203 |     virtual void onMouseMove(int x, int y) {}
+        |                              ~~~~^
+core\include/kernel/kernel_app.h(203,41): warning G24ACD1A9: unused parameter 'y' [-Wunused-parameter]
+    203 |     virtual void onMouseMove(int x, int y) {}
+        |                                     ~~~~^
+  core\include/kernel/kernel_app.h: In member function 'virtual void kernel::app::KernelApp::onMouseDown(int, int, uint8_t)':
+core\include/kernel/kernel_app.h(204,34): warning G24ACD1A9: unused parameter 'x' [-Wunused-parameter]
+    204 |     virtual void onMouseDown(int x, int y, uint8_t button) {}
+        |                              ~~~~^
+core\include/kernel/kernel_app.h(204,41): warning G24ACD1A9: unused parameter 'y' [-Wunused-parameter]
+    204 |     virtual void onMouseDown(int x, int y, uint8_t button) {}
+        |                                     ~~~~^
+core\include/kernel/kernel_app.h(204,52): warning G24ACD1A9: unused parameter 'button' [-Wunused-parameter]
+    204 |     virtual void onMouseDown(int x, int y, uint8_t button) {}
+        |                                            ~~~~~~~~^~~~~~
+  core\include/kernel/kernel_app.h: In member function 'virtual void kernel::app::KernelApp::onMouseUp(int, int, uint8_t)':
+core\include/kernel/kernel_app.h(205,32): warning G24ACD1A9: unused parameter 'x' [-Wunused-parameter]
+    205 |     virtual void onMouseUp(int x, int y, uint8_t button) {}
+        |                            ~~~~^
+core\include/kernel/kernel_app.h(205,39): warning G24ACD1A9: unused parameter 'y' [-Wunused-parameter]
+    205 |     virtual void onMouseUp(int x, int y, uint8_t button) {}
+        |                                   ~~~~^
+core\include/kernel/kernel_app.h(205,50): warning G24ACD1A9: unused parameter 'button' [-Wunused-parameter]
+    205 |     virtual void onMouseUp(int x, int y, uint8_t button) {}
+        |                                          ~~~~~~~~^~~~~~
+  core\include/kernel/kernel_app.h: In member function 'virtual void kernel::app::KernelApp::onKeyDown(uint32_t)':
+core\include/kernel/kernel_app.h(206,37): warning G24ACD1A9: unused parameter 'key' [-Wunused-parameter]
+    206 |     virtual void onKeyDown(uint32_t key) {}
+        |                            ~~~~~~~~~^~~
+  core\include/kernel/kernel_app.h: In member function 'virtual void kernel::app::KernelApp::onKeyUp(uint32_t)':
+core\include/kernel/kernel_app.h(207,35): warning G24ACD1A9: unused parameter 'key' [-Wunused-parameter]
+    207 |     virtual void onKeyUp(uint32_t key) {}
+        |                          ~~~~~~~~~^~~
+  core\include/kernel/kernel_app.h: In member function 'virtual void kernel::app::KernelApp::onKeyChar(char)':
+core\include/kernel/kernel_app.h(208,33): warning G24ACD1A9: unused parameter 'c' [-Wunused-parameter]
+    208 |     virtual void onKeyChar(char c) {}
+        |                            ~~~~~^
+  core\include/kernel/kernel_app.h: In member function 'virtual void kernel::app::KernelApp::onWidgetClick(int)':
+core\include/kernel/kernel_app.h(209,36): warning G24ACD1A9: unused parameter 'widgetId' [-Wunused-parameter]
+    209 |     virtual void onWidgetClick(int widgetId) {}
+        |                                ~~~~^~~~~~~~
+  core\shell.cpp: In function 'void kernel::shell::cmd_vfsmount(const char*, const char*)':
+core\shell.cpp(1149,27): warning GA5864BA6: narrowing conversion of '(48 + ((int)idx))' from 'int' to 'char' [-Wnarrowing]
+   1149 |     char numStr[4] = {'0' + idx, '\0'};
+        |                       ~~~~^~~~~
+  core\shell.cpp: In function 'void kernel::shell::cmd_vfstest()':
+core\shell.cpp(1333,29): warning GA5864BA6: narrowing conversion of '(48 + ((int)devCount))' from 'int' to 'char' [-Wnarrowing]
+   1333 |     char countStr[4] = {'0' + devCount, '\0'};
+        |                         ~~~~^~~~~~~~~~
+core\shell.cpp(1348,35): warning GA5864BA6: narrowing conversion of '(48 + ((int)i))' from 'int' to 'char' [-Wnarrowing]
+   1348 |             char idxStr[4] = {'0' + i, ':', ' ', '\0'};
+        |                               ~~~~^~~
+  core\shell.cpp: In function 'void kernel::shell::cmd_vfsinfo()':
+core\shell.cpp(1438,35): warning GA5864BA6: narrowing conversion of '(48 + ((int)i))' from 'int' to 'char' [-Wnarrowing]
+   1438 |             char idxStr[4] = {'0' + i, ']', ' ', '\0'};
+        |                               ~~~~^~~
+core\shell.cpp(1476,35): warning GA5864BA6: narrowing conversion of '(48 + ((int)mp->kernel::vfs::MountPoint::blockDevIndex))' from 'int' to 'char' [-Wnarrowing]
+   1476 |             char devStr[4] = {'0' + mp->blockDevIndex, ')', '\0'};
+        |                               ~~~~^~~~~~~~~~~~~~~~~~~
+  core\shell.cpp: In function 'void kernel::shell::cmd_dhcp(const char**, uint32_t)':
+core\shell.cpp(2553,10): warning G41AE70B8: unused variable 'showStatus' [-Wunused-variable]
+   2553 |     bool showStatus = (argCount <= 1);
+        |          ^~~~~~~~~~
+  core\shell.cpp: In function 'void kernel::shell::draw(uint32_t, uint32_t, uint32_t, uint32_t)':
+core\shell.cpp(3412,14): warning G41AE70B8: unused variable 'charsPerLine' [-Wunused-variable]
+   3412 |     uint32_t charsPerLine = textW / kFontW;
+        |              ^~~~~~~~~~~~
+  core\shell.cpp: At global scope:
+core\shell.cpp(293,13): warning G8A2F72A0: 'void kernel::shell::output_prompt()' defined but not used [-Wunused-function]
+    293 | static void output_prompt() {
+        |             ^~~~~~~~~~~~~
+core\shell.cpp(215,13): warning G95263752: 'bool kernel::shell::str_starts_with(const char*, const char*)' defined but not used [-Wunused-function]
+    215 | static bool str_starts_with(const char* str, const char* prefix) {
+        |             ^~~~~~~~~~~~~~~
+  core\shell.cpp: In function 'void kernel::shell::cmd_nicinfo()':
+core\shell.cpp(1949,17): warning G1D148574: array subscript 8 is above array bounds of 'char [8]' [-Warray-bounds=]
+   1949 |         hexStr[8] = '\0';
+        |         ~~~~~~~~^
+  core\shell.cpp:1891:10: note: while referencing 'hexStr'
+   1891 |     char hexStr[8];
+        |          ^~~~~~
+    Compiling socket.cpp...
+    Compiling tcp.cpp...
+  core\tcp.cpp: In function 'int kernel::tcp::tcp_connect(int, uint32_t, uint16_t)':
+core\tcp.cpp(465,23): warning G19D935B9: comparison is always false due to limited range of data type [-Wtype-limits]
+    465 |         if (ephemeral > 65535) ephemeral = 49152;
+        |             ~~~~~~~~~~^~~~~~~
+    Compiling time.cpp...
+    Compiling udp.cpp...
+    Compiling usb.cpp...
+core\usb.cpp(34,13): warning G8225A89F: 'void kernel::usb::memcopy(void*, const void*, uint32_t)' defined but not used [-Wunused-function]
+     34 | static void memcopy(void* dst, const void* src, uint32_t len)
+        |             ^~~~~~~
+    Compiling usb_audio.cpp...
+    Compiling usb_audio_uac2.cpp...
+    Compiling usb_cdc.cpp...
+    Compiling usb_hid.cpp...
+core\usb_hid.cpp(82,28): warning G6CD210C1: 'kernel::usb::TransferStatus kernel::usb_hid::hid_get_report(uint8_t, uint8_t, uint8_t, uint8_t, void*, uint16_t)' defined but not used [-Wunused-function]
+     82 | static usb::TransferStatus hid_get_report(uint8_t addr,
+        |                            ^~~~~~~~~~~~~~
+    Compiling usb_net.cpp...
+    Compiling usb_net_ecm.cpp...
+core\usb_net_ecm.cpp(34,13): warning GD461DFF4: 'void kernel::usb_net_ecm::memcpy_bytes(void*, const void*, uint32_t)' defined but not used [-Wunused-function]
+     34 | static void memcpy_bytes(void* dst, const void* src, uint32_t len)
+        |             ^~~~~~~~~~~~
+    Compiling usb_net_rndis.cpp...
+    Compiling usb_net_wifi.cpp...
+core\usb_net_wifi.cpp(55,16): warning GB484ED7B: 'uint8_t kernel::usb_net_wifi::str_len(const char*)' defined but not used [-Wunused-function]
+     55 | static uint8_t str_len(const char* s)
+        |                ^~~~~~~
+    Compiling usb_printer.cpp...
+    Compiling usb_storage.cpp...
+    Compiling usb_video.cpp...
+core\usb_video.cpp(63,28): warning GA490CAD7: 'kernel::usb::TransferStatus kernel::usb_video::uvc_get_max(uint8_t, uint8_t, uint8_t, void*, uint16_t)' defined but not used [-Wunused-function]
+     63 | static usb::TransferStatus uvc_get_max(uint8_t addr, uint8_t iface,
+        |                            ^~~~~~~~~~~
+    Compiling usb_video_uvc.cpp...
+    Compiling vesa.cpp...
+    Compiling vfs.cpp...
+    Compiling vga.cpp...
+    Compiling virtio_block.cpp...
+  core\virtio_block.cpp: In member function 'virtual bool kernel::virtio::block::BlockDevice::setupQueue(uint16_t, kernel::virtio::Virtqueue*)':
+core\virtio_block.cpp(268,12): warning G41AE70B8: unused variable 'descSize' [-Wunused-variable]
+    268 |     size_t descSize = queueSize * sizeof(VringDesc);
+        |            ^~~~~~~~
+core\virtio_block.cpp(269,12): warning G41AE70B8: unused variable 'availSize' [-Wunused-variable]
+    269 |     size_t availSize = sizeof(uint16_t) * (2 + queueSize + 1);
+        |            ^~~~~~~~~
+core\virtio_block.cpp(270,12): warning G41AE70B8: unused variable 'usedSize' [-Wunused-variable]
+    270 |     size_t usedSize = sizeof(uint16_t) * 2 + sizeof(VringUsedElem) * queueSize + sizeof(uint16_t);
+        |            ^~~~~~~~
+  core\virtio_block.cpp: In member function 'int kernel::virtio::block::BlockDevice::waitForRequest()':
+core\virtio_block.cpp(348,20): warning G41AE70B8: unused variable 'elem' [-Wunused-variable]
+    348 |     VringUsedElem* elem = &requestQueue.used->ring[requestQueue.lastUsedIdx % requestQueue.size];
+        |                    ^~~~
+  core\virtio_block.cpp: In function 'int kernel::virtio::block::detectMmio(uint64_t, uint64_t)':
+core\virtio_block.cpp(437,44): warning G24ACD1A9: unused parameter 'size' [-Wunused-parameter]
+    437 | int detectMmio(uint64_t baseAddr, uint64_t size)
+        |                                   ~~~~~~~~~^~~~
+    Compiling virtio_gpu.cpp...
+core\virtio_gpu.cpp(45,16): warning GF318D6C4: 'kernel::virtio::gpu::s_respBuffer' defined but not used [-Wunused-variable]
+     45 | static uint8_t s_respBuffer[4096] __attribute__((aligned(4096)));
+        |                ^~~~~~~~~~~~
+    Compiling virtio_input.cpp...
+core\virtio_input.cpp(78,13): warning GB3998135: 'void kernel::virtio_input::process_event(const InputEvent*)' defined but not used [-Wunused-function]
+     78 | static void process_event(const InputEvent* event)
+        |             ^~~~~~~~~~~~~
+    Compiling virtio_net.cpp...
+  core\virtio_net.cpp: In member function 'int kernel::virtio::net::NetDevice::send(const void*, size_t)':
+core\virtio_net.cpp(378,13): warning G7D6735F0: comparison of integer expressions of different signedness: 'size_t' {aka 'long unsigned int'} and 'int' [-Wsign-compare]
+    378 |     if (len > getMtu() + 14) return -3;  // MTU + ethernet header
+        |         ~~~~^~~~~~~~~~~~~~~
+  [OK] All core files compiled
   
+  Linking kernel...
+  i686-elf-ld: build\x86\obj\core\desktop.o: in function `kernel::desktop::draw_argb_icon_buffer(unsigned long const*, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long)':
+  desktop.cpp:(.text+0x18fb): undefined reference to `__udivdi3'
+  i686-elf-ld: desktop.cpp:(.text+0x1a0b): undefined reference to `__udivdi3'
+  i686-elf-ld: build\x86\obj\core\desktop.o: in function `kernel::desktop::draw_background()':
+  desktop.cpp:(.text+0x7429): undefined reference to `__udivdi3'
+  i686-elf-ld: desktop.cpp:(.text+0x749c): undefined reference to `__udivdi3'
+  i686-elf-ld: desktop.cpp:(.text+0x77bc): undefined reference to `__udivdi3'
+  i686-elf-ld: build\x86\obj\core\desktop.o:desktop.cpp:(.text+0x77f2): more undefined references to `__udivdi3' follow
+  i686-elf-ld: build\x86\obj\core\usb.o: in function `kernel::usb::enumerate_device(unsigned char, kernel::usb::DeviceSpeed) [clone .isra.0]':
+  usb.cpp:(.text+0x169): undefined reference to `kernel::usb::hci::control_transfer(unsigned char, kernel::usb::SetupPacket const*, void*, unsigned short)'
+  i686-elf-ld: usb.cpp:(.text+0x1b1): undefined reference to `kernel::usb::hci::control_transfer(unsigned char, kernel::usb::SetupPacket const*, void*, unsigned short)'
+  i686-elf-ld: usb.cpp:(.text+0x228): undefined reference to `kernel::usb::hci::control_transfer(unsigned char, kernel::usb::SetupPacket const*, void*, unsigned short)'
+  i686-elf-ld: usb.cpp:(.text+0x2c2): undefined reference to `kernel::usb::hci::control_transfer(unsigned char, kernel::usb::SetupPacket const*, void*, unsigned short)'
+  i686-elf-ld: usb.cpp:(.text+0x323): undefined reference to `kernel::usb::hci::control_transfer(unsigned char, kernel::usb::SetupPacket const*, void*, unsigned short)'
+  i686-elf-ld: build\x86\obj\core\usb.o:usb.cpp:(.text+0x4cb): more undefined references to `kernel::usb::hci::control_transfer(unsigned char, kernel::usb::SetupPacket const*, void*, unsigned short)' follow
+  i686-elf-ld: build\x86\obj\core\usb.o: in function `kernel::usb::init()':
+  usb.cpp:(.text+0x551): undefined reference to `kernel::usb::hci::init()'
+  i686-elf-ld: usb.cpp:(.text+0x568): undefined reference to `kernel::usb::hci::port_count()'
+  i686-elf-ld: usb.cpp:(.text+0x589): undefined reference to `kernel::usb::hci::port_connected(unsigned char)'
+  i686-elf-ld: usb.cpp:(.text+0x595): undefined reference to `kernel::usb::hci::port_reset(unsigned char)'
+  i686-elf-ld: build\x86\obj\core\usb.o: in function `kernel::usb::poll()':
+  usb.cpp:(.text+0x5c3): undefined reference to `kernel::usb::hci::port_count()'
+  i686-elf-ld: usb.cpp:(.text+0x5e4): undefined reference to `kernel::usb::hci::port_connected(unsigned char)'
+  i686-elf-ld: usb.cpp:(.text+0x643): undefined reference to `kernel::usb::hci::port_reset(unsigned char)'
+  i686-elf-ld: build\x86\obj\core\usb.o: in function `kernel::usb::get_descriptor(unsigned char, unsigned char, unsigned char, unsigned short, void*, unsigned short)':
+  usb.cpp:(.text+0x742): undefined reference to `kernel::usb::hci::control_transfer(unsigned char, kernel::usb::SetupPacket const*, void*, unsigned short)'
+  i686-elf-ld: build\x86\obj\core\usb.o: in function `kernel::usb::set_configuration(unsigned char, unsigned char)':
+  usb.cpp:(.text+0x79f): undefined reference to `kernel::usb::hci::control_transfer(unsigned char, kernel::usb::SetupPacket const*, void*, unsigned short)'
+  i686-elf-ld: build\x86\obj\core\usb.o: in function `kernel::usb::set_address(unsigned char, unsigned char)':
+  usb.cpp:(.text+0x7ff): undefined reference to `kernel::usb::hci::control_transfer(unsigned char, kernel::usb::SetupPacket const*, void*, unsigned short)'
+  i686-elf-ld: build\x86\obj\core\usb.o: in function `kernel::usb::control_transfer(unsigned char, kernel::usb::SetupPacket const*, void*, unsigned short)':
+  usb.cpp:(.text+0x6da): undefined reference to `kernel::usb::hci::control_transfer(unsigned char, kernel::usb::SetupPacket const*, void*, unsigned short)'
+  i686-elf-ld: build\x86\obj\core\usb_audio.o: in function `kernel::usb_audio::playback_write(unsigned char, void const*, unsigned short, unsigned short*)':
+  usb_audio.cpp:(.text+0x901): undefined reference to `kernel::usb::hci::bulk_transfer(unsigned char, unsigned char, void*, unsigned short, unsigned short*)'
+  i686-elf-ld: build\x86\obj\core\usb_audio.o: in function `kernel::usb_audio::capture_read(unsigned char, void*, unsigned short, unsigned short*)':
+  usb_audio.cpp:(.text+0x971): undefined reference to `kernel::usb::hci::bulk_transfer(unsigned char, unsigned char, void*, unsigned short, unsigned short*)'
+  i686-elf-ld: build\x86\obj\core\usb_audio_uac2.o: in function `kernel::usb_audio_uac2::playback_write(unsigned char, void const*, unsigned short, unsigned short*)':
+  usb_audio_uac2.cpp:(.text+0xc84): undefined reference to `kernel::usb::hci::bulk_transfer(unsigned char, unsigned char, void*, unsigned short, unsigned short*)'
+  i686-elf-ld: build\x86\obj\core\usb_audio_uac2.o: in function `kernel::usb_audio_uac2::capture_read(unsigned char, void*, unsigned short, unsigned short*)':
+  usb_audio_uac2.cpp:(.text+0xcf4): undefined reference to `kernel::usb::hci::bulk_transfer(unsigned char, unsigned char, void*, unsigned short, unsigned short*)'
+  i686-elf-ld: build\x86\obj\core\usb_cdc.o: in function `kernel::usb_cdc::acm_write(unsigned char, void const*, unsigned short, unsigned short*)':
+  usb_cdc.cpp:(.text+0x768): undefined reference to `kernel::usb::hci::bulk_transfer(unsigned char, unsigned char, void*, unsigned short, unsigned short*)'
+  i686-elf-ld: build\x86\obj\core\usb_cdc.o:usb_cdc.cpp:(.text+0x7d8): more undefined references to `kernel::usb::hci::bulk_transfer(unsigned char, unsigned char, void*, unsigned short, unsigned short*)' follow
+  i686-elf-ld: build\x86\obj\core\usb_cdc.o: in function `kernel::usb_cdc::acm_poll_notifications(unsigned char)':
+  usb_cdc.cpp:(.text+0x849): undefined reference to `kernel::usb::hci::interrupt_transfer(unsigned char, unsigned char, void*, unsigned short, unsigned short*)'
+  i686-elf-ld: build\x86\obj\core\usb_cdc.o: in function `kernel::usb_cdc::ecm_send(unsigned char, void const*, unsigned short)':
+  usb_cdc.cpp:(.text+0x926): undefined reference to `kernel::usb::hci::bulk_transfer(unsigned char, unsigned char, void*, unsigned short, unsigned short*)'
+  i686-elf-ld: build\x86\obj\core\usb_cdc.o: in function `kernel::usb_cdc::ecm_receive(unsigned char, void*, unsigned short, unsigned short*)':
+  usb_cdc.cpp:(.text+0x9a0): undefined reference to `kernel::usb::hci::bulk_transfer(unsigned char, unsigned char, void*, unsigned short, unsigned short*)'
+  i686-elf-ld: build\x86\obj\core\usb_hid.o: in function `kernel::usb_hid::poll()':
+  usb_hid.cpp:(.text+0x88e): undefined reference to `kernel::usb::hci::interrupt_transfer(unsigned char, unsigned char, void*, unsigned short, unsigned short*)'
+  i686-elf-ld: build\x86\obj\core\usb_net_ecm.o: in function `kernel::usb_net_ecm::poll(unsigned char)':
+  usb_net_ecm.cpp:(.text+0x6ba): undefined reference to `kernel::usb::hci::interrupt_transfer(unsigned char, unsigned char, void*, unsigned short, unsigned short*)'
+  i686-elf-ld: build\x86\obj\core\usb_net_ecm.o: in function `kernel::usb_net_ecm::send(unsigned char, void const*, unsigned short)':
+  usb_net_ecm.cpp:(.text+0x786): undefined reference to `kernel::usb::hci::bulk_transfer(unsigned char, unsigned char, void*, unsigned short, unsigned short*)'
+  i686-elf-ld: usb_net_ecm.cpp:(.text+0x7d7): undefined reference to `kernel::usb::hci::bulk_transfer(unsigned char, unsigned char, void*, unsigned short, unsigned short*)'
+  i686-elf-ld: build\x86\obj\core\usb_net_ecm.o: in function `kernel::usb_net_ecm::receive(unsigned char, void*, unsigned short, unsigned short*)':
+  usb_net_ecm.cpp:(.text+0x858): undefined reference to `kernel::usb::hci::bulk_transfer(unsigned char, unsigned char, void*, unsigned short, unsigned short*)'
+  i686-elf-ld: build\x86\obj\core\usb_net_rndis.o: in function `kernel::usb_net_rndis::rndis_command(kernel::usb_net_rndis::RNDISDevice*, void const*, unsigned short, void*, unsigned short)':
+  usb_net_rndis.cpp:(.text+0xb6): undefined reference to `kernel::usb::hci::interrupt_transfer(unsigned char, unsigned char, void*, unsigned short, unsigned short*)'
+  i686-elf-ld: build\x86\obj\core\usb_net_rndis.o: in function `kernel::usb_net_rndis::poll(unsigned char)':
+  usb_net_rndis.cpp:(.text+0x932): undefined reference to `kernel::usb::hci::interrupt_transfer(unsigned char, unsigned char, void*, unsigned short, unsigned short*)'
+  i686-elf-ld: build\x86\obj\core\usb_net_rndis.o: in function `kernel::usb_net_rndis::send(unsigned char, void const*, unsigned short)':
+  usb_net_rndis.cpp:(.text+0xc04): undefined reference to `kernel::usb::hci::bulk_transfer(unsigned char, unsigned char, void*, unsigned short, unsigned short*)'
+  i686-elf-ld: build\x86\obj\core\usb_net_rndis.o: in function `kernel::usb_net_rndis::receive(unsigned char, void*, unsigned short, unsigned short*)':
+  usb_net_rndis.cpp:(.text+0xcae): undefined reference to `kernel::usb::hci::bulk_transfer(unsigned char, unsigned char, void*, unsigned short, unsigned short*)'
+  i686-elf-ld: build\x86\obj\core\usb_net_wifi.o: in function `kernel::usb_net_wifi::poll(unsigned char)':
+  usb_net_wifi.cpp:(.text+0x65e): undefined reference to `kernel::usb::hci::bulk_transfer(unsigned char, unsigned char, void*, unsigned short, unsigned short*)'
+  i686-elf-ld: usb_net_wifi.cpp:(.text+0x6c7): undefined reference to `kernel::usb::hci::interrupt_transfer(unsigned char, unsigned char, void*, unsigned short, unsigned short*)'
+  i686-elf-ld: build\x86\obj\core\usb_net_wifi.o: in function `kernel::usb_net_wifi::send(unsigned char, void const*, unsigned short)':
+  usb_net_wifi.cpp:(.text+0xfc6): undefined reference to `kernel::usb::hci::bulk_transfer(unsigned char, unsigned char, void*, unsigned short, unsigned short*)'
+  i686-elf-ld: build\x86\obj\core\usb_net_wifi.o: in function `kernel::usb_net_wifi::receive(unsigned char, void*, unsigned short, unsigned short*)':
+  usb_net_wifi.cpp:(.text+0x1058): undefined reference to `kernel::usb::hci::bulk_transfer(unsigned char, unsigned char, void*, unsigned short, unsigned short*)'
+  i686-elf-ld: build\x86\obj\core\usb_printer.o: in function `kernel::usb_printer::write(unsigned char, void const*, unsigned short, unsigned short*)':
+  usb_printer.cpp:(.text+0x7c8): undefined reference to `kernel::usb::hci::bulk_transfer(unsigned char, unsigned char, void*, unsigned short, unsigned short*)'
+  i686-elf-ld: build\x86\obj\core\usb_printer.o: in function `kernel::usb_printer::read(unsigned char, void*, unsigned short, unsigned short*)':
+  usb_printer.cpp:(.text+0x834): undefined reference to `kernel::usb::hci::bulk_transfer(unsigned char, unsigned char, void*, unsigned short, unsigned short*)'
+  i686-elf-ld: build\x86\obj\core\usb_storage.o: in function `kernel::usb_storage::bot_transfer(kernel::usb_storage::StorageDevice*, unsigned char, unsigned char const*, unsigned char, void*, unsigned long)':
+  usb_storage.cpp:(.text+0xad): undefined reference to `kernel::usb::hci::bulk_transfer(unsigned char, unsigned char, void*, unsigned short, unsigned short*)'
+  i686-elf-ld: build\x86\obj\core\usb_storage.o:usb_storage.cpp:(.text+0x10c): more undefined references to `kernel::usb::hci::bulk_transfer(unsigned char, unsigned char, void*, unsigned short, unsigned short*)' follow
+  [ERROR] Failed to link kernel
   Press any key to continue . . . 
 C:\Program Files\Microsoft Visual Studio\18\Community\MSBuild\Microsoft\VC\v170\Microsoft.MakeFile.Targets(45,5): error MSB3073: The command "cd kernel && build-x86.bat" exited with code 1.

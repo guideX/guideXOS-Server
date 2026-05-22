@@ -30,6 +30,7 @@ NavigatorPageMetadata Navigator::s_pageMetadata;
 std::vector<std::string> Navigator::s_backStack;
 std::vector<std::string> Navigator::s_forwardStack;
 std::vector<Bookmark>    Navigator::s_bookmarks;
+static std::vector<DownloadItem> s_recentDownloads;
 bool        Navigator::s_addressFocused = false;
 std::string Navigator::s_addressBuffer;
 int         Navigator::s_addressCaret   = 0;
@@ -83,6 +84,30 @@ namespace {
 	void drawTextAt(uint64_t windowId, int x, int y, const std::string& text)
 	{
 		publish(MsgType::MT_DrawTextAt, packDrawTextAt(windowId, x, y, text));
+	}
+
+	void drawTextAtColored(uint64_t windowId, int x, int y, const std::string& text, int r, int g, int b)
+	{
+		publish(MsgType::MT_DrawTextAtColor, packDrawTextAtColor(windowId, x, y,
+			static_cast<uint8_t>(std::max(0, std::min(255, r))),
+			static_cast<uint8_t>(std::max(0, std::min(255, g))),
+			static_cast<uint8_t>(std::max(0, std::min(255, b))),
+			text));
+	}
+
+	void drawTextAtStyled(uint64_t windowId, int x, int y, const std::string& text, const WebStyle& style)
+	{
+		if (!style.hasColor) {
+			drawTextAt(windowId, x, y, text);
+			return;
+		}
+		int r = 220;
+		int g = 220;
+		int b = 220;
+		r = static_cast<int>((style.color >> 16) & 0xFFu);
+		g = static_cast<int>((style.color >> 8) & 0xFFu);
+		b = static_cast<int>(style.color & 0xFFu);
+		drawTextAtColored(windowId, x, y, text, r, g, b);
 	}
 
 	void drawImage(uint64_t windowId, int x, int y, int w, int h, const std::string& path)
@@ -183,6 +208,14 @@ namespace {
 	static std::unordered_map<std::string, ImageInfo> s_imageCache;
 	static std::vector<std::string> s_remoteImageTempFiles;
 	static const ImageInfo& imageInfoForBlock(const DocBlock& block);
+	static std::string filePathFromUrl(const std::string& url);
+	static std::string pageInfoLine(const std::string& label, const std::string& value);
+	static std::string pageInfoLine(const std::string& label, int value);
+	static DocBlock makeBlock(BlockType type, const std::string& text, const std::string& url = "", const std::string& tagName = "");
+	static int cssMarginOrDefault(const WebStyle& style, int fallbackValue);
+	static int cssPaddingOrDefault(const WebStyle& style, int fallbackValue);
+	static int cssFontSizeOrDefault(const WebStyle& style, int fallbackValue);
+	static bool colorChannels(uint32_t color, int& r, int& g, int& b);
 
 	static std::string toLowerAscii(std::string value)
 	{
@@ -265,6 +298,148 @@ namespace {
 		return doc;
 	}
 
+	static std::string guessedContentTypeForPath(const std::string& path)
+	{
+		std::string ext;
+		size_t dot = path.rfind('.');
+		if (dot != std::string::npos) {
+			ext = toLowerAscii(path.substr(dot));
+		}
+		if (ext == ".html" || ext == ".htm") return "text/html";
+		if (ext == ".txt" || ext == ".text" || ext == ".md" || ext == ".log" ||
+			ext == ".ini" || ext == ".cfg" || ext == ".json" || ext == ".xml" ||
+			ext == ".csv" || ext == ".c" || ext == ".cpp" || ext == ".h" ||
+			ext == ".hpp" || ext == ".bat" || ext == ".ps1" || ext == ".sh") {
+			return "text/plain";
+		}
+		if (ext == ".png") return "image/png";
+		if (ext == ".zip") return "application/zip";
+		if (ext == ".pdf") return "application/pdf";
+		if (ext == ".jpg" || ext == ".jpeg") return "image/jpeg";
+		if (ext == ".gif") return "image/gif";
+		if (ext == ".webp") return "image/webp";
+		if (ext == ".svg") return "image/svg+xml";
+		if (ext == ".bin" || ext == ".exe" || ext == ".dll" || ext == ".iso") return "application/octet-stream";
+		return "text/plain";
+	}
+
+	static bool isNavigatorRenderableFileType(const std::string& contentType)
+	{
+		return contentType == "text/html" || contentType == "text/plain";
+	}
+
+	static std::string fileNameFromUrlPath(const std::string& url)
+	{
+		std::string path;
+		if (url.rfind("http://", 0) == 0) {
+			gxos::web::ParsedHttpUrl parsed = gxos::web::parseHttpUrl(url);
+			path = parsed.valid ? parsed.path : url;
+		} else if (url.rfind("file://", 0) == 0) {
+			path = filePathFromUrl(url);
+		} else {
+			path = url;
+		}
+		size_t slash = path.find_last_of("/\\");
+		std::string name = slash == std::string::npos ? path : path.substr(slash + 1);
+		size_t question = name.find('?');
+		if (question != std::string::npos) name = name.substr(0, question);
+		size_t hash = name.find('#');
+		if (hash != std::string::npos) name = name.substr(0, hash);
+		return name.empty() ? "download.bin" : name;
+	}
+
+	static std::string sanitizeDownloadFileName(const std::string& original)
+	{
+		std::string safe;
+		safe.reserve(original.size());
+		for (unsigned char ch : original) {
+			if (std::isalnum(ch) || ch == '.' || ch == '-' || ch == '_') {
+				safe.push_back(static_cast<char>(ch));
+			} else {
+				safe.push_back('_');
+			}
+		}
+		while (!safe.empty() && safe.front() == '.') safe.erase(safe.begin());
+		if (safe.empty()) safe = "download.bin";
+		if (safe.size() > 96) {
+			size_t dot = safe.rfind('.');
+			std::string ext = (dot != std::string::npos && safe.size() - dot <= 16) ? safe.substr(dot) : "";
+			safe = safe.substr(0, 96 - ext.size()) + ext;
+		}
+		if (safe == "." || safe == "..") safe = "download.bin";
+		return safe;
+	}
+
+	static std::string uniqueDownloadPathForName(const std::string& safeName, std::string& outFinalName)
+	{
+		std::string stem = safeName;
+		std::string ext;
+		size_t dot = safeName.rfind('.');
+		if (dot != std::string::npos && dot > 0) {
+			stem = safeName.substr(0, dot);
+			ext = safeName.substr(dot);
+		}
+		for (int i = 0; i < 1000; ++i) {
+			std::string candidateName = (i == 0)
+				? safeName
+				: stem + "-" + std::to_string(i) + ext;
+			std::string candidatePath = "/downloads/" + candidateName;
+			if (!fileExists(candidatePath)) {
+				outFinalName = candidateName;
+				return candidatePath;
+			}
+		}
+		outFinalName.clear();
+		return "";
+	}
+
+	static void rememberDownload(DownloadItem item)
+	{
+		s_recentDownloads.insert(s_recentDownloads.begin(), std::move(item));
+		constexpr size_t kMaxRecentDownloads = 16;
+		if (s_recentDownloads.size() > kMaxRecentDownloads) {
+			s_recentDownloads.resize(kMaxRecentDownloads);
+		}
+	}
+
+	static WebDocument buildDownloadCompleteDocument(const DownloadItem& item)
+	{
+		WebDocument doc;
+		doc.url = item.finalUrl.empty() ? item.url : item.finalUrl;
+		doc.title = item.success ? "Download Complete" : "Download Unavailable";
+		doc.blocks.push_back({BlockType::Heading, doc.title, ""});
+		doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Filename", item.suggestedFileName), ""});
+		doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Source URL", item.url), ""});
+		doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Final URL", item.finalUrl), ""});
+		doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Content type", item.contentType), ""});
+		doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Byte count", static_cast<int>(item.byteCount)), ""});
+		doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Saved path", item.savedPath), ""});
+		doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Status", item.success ? "success" : "failed"), ""});
+		if (!item.error.empty()) {
+			doc.blocks.push_back({BlockType::Paragraph, item.error, ""});
+		}
+		doc.blocks.push_back({BlockType::Link, "View Downloads", "about:downloads"});
+		doc.blocks.push_back({BlockType::Link, "Page Info", "about:page-info"});
+		doc.blocks.push_back({BlockType::Link, "Go to about:navigator", "about:navigator"});
+		return doc;
+	}
+
+	static WebDocument buildFileNotViewableDocument(const std::string& url,
+		const std::string& path,
+		const std::string& contentType)
+	{
+		WebDocument doc;
+		doc.url = url;
+		doc.title = "File Not Viewable";
+		doc.blocks.push_back({BlockType::Heading, "File Not Viewable", ""});
+		doc.blocks.push_back({BlockType::Paragraph, "Navigator cannot render this file type yet.", ""});
+		doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Path", path), ""});
+		doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Guessed content type", contentType), ""});
+		doc.blocks.push_back({BlockType::Link, "View Downloads", "about:downloads"});
+		doc.blocks.push_back({BlockType::Link, "Go to about:navigator", "about:navigator"});
+		return doc;
+	}
+
 	static std::string yesNo(bool value)
 	{
 		return value ? "yes" : "no";
@@ -291,6 +466,12 @@ namespace {
 		metadata.remoteImageCount = 0;
 		metadata.localImageCount = 0;
 		metadata.lastImageError.clear();
+		metadata.cssDetected = doc.cssDiagnostics.cssDetected;
+		metadata.styleRuleCount = doc.cssDiagnostics.styleRuleCount;
+		metadata.unsupportedExternalStylesheetCount = doc.cssDiagnostics.unsupportedExternalStylesheetCount;
+		metadata.unsupportedCssDeclarationCount = doc.cssDiagnostics.unsupportedDeclarationCount;
+		metadata.cssStyleBlockCapped = doc.cssDiagnostics.styleBlockCapped;
+		metadata.cssStyleBytesProcessed = doc.cssDiagnostics.styleBytesProcessed;
 
 		for (const DocBlock& block : doc.blocks) {
 			if (block.type != BlockType::Image) continue;
@@ -322,6 +503,39 @@ namespace {
 		return label + ": " + std::to_string(value);
 	}
 
+	static DocBlock makeBlock(BlockType type, const std::string& text, const std::string& url, const std::string& tagName)
+	{
+		DocBlock block;
+		block.type = type;
+		block.text = text;
+		block.url = url;
+		block.tagName = tagName;
+		return block;
+	}
+
+	static int cssMarginOrDefault(const WebStyle& style, int fallbackValue)
+	{
+		return style.marginTop >= 0 ? style.marginTop : fallbackValue;
+	}
+
+	static int cssPaddingOrDefault(const WebStyle& style, int fallbackValue)
+	{
+		return style.padding >= 0 ? style.padding : fallbackValue;
+	}
+
+	static int cssFontSizeOrDefault(const WebStyle& style, int fallbackValue)
+	{
+		return style.fontScaleOrSize > 0 ? style.fontScaleOrSize : fallbackValue;
+	}
+
+	static bool colorChannels(uint32_t color, int& r, int& g, int& b)
+	{
+		r = static_cast<int>((color >> 16) & 0xFFu);
+		g = static_cast<int>((color >> 8) & 0xFFu);
+		b = static_cast<int>(color & 0xFFu);
+		return true;
+	}
+
 	struct RuntimeReportEntry {
 		std::string section;
 		std::string label;
@@ -332,7 +546,8 @@ namespace {
 		const std::string& currentUrl,
 		const std::string& currentTitle,
 		int currentBlockCount,
-		const std::string& inspectedUrl)
+		const std::string& inspectedUrl,
+		bool cssDetected)
 	{
 		return {
 			{"Runtime", "Mode", "hosted/compositor"},
@@ -355,9 +570,14 @@ namespace {
 			{"Capabilities", "Local PNG", "enabled"},
 			{"Capabilities", "HTTP", "enabled for http:// via Winsock transport"},
 			{"Capabilities", "Remote PNG", "enabled for http:// PNG images"},
+			{"Capabilities", "Downloads", "enabled for unsupported http:// content within body limit"},
 			{"Capabilities", "Temp files", "enabled for compositor image handoff"},
 			{"Capabilities", "Bookmark persistence", "enabled"},
 			{"Capabilities", "HTTPS/TLS", "unsupported"},
+			{"Capabilities", "CSS-lite embedded <style>", "enabled"},
+			{"Capabilities", "Hosted colored text primitive", "enabled"},
+			{"Capabilities", "CSS text color visible", "enabled"},
+			{"Capabilities", "External stylesheets", "unsupported"},
 
 			{"Backends", "File backend", "navigator_file_io hosted/VFS adapter"},
 			{"Backends", "HTTP backend", "guide_web_http hosted socket path"},
@@ -367,6 +587,7 @@ namespace {
 			{"Current Document", "Title", currentTitle.empty() ? "(none)" : currentTitle},
 			{"Current Document", "Block count", std::to_string(currentBlockCount)},
 			{"Current Document", "Inspected page", inspectedUrl.empty() ? "(none)" : inspectedUrl},
+			{"Current Document", "CSS diagnostics", cssDetected ? "css detected" : "no css detected"},
 		};
 	}
 
@@ -597,7 +818,8 @@ std::string Navigator::SmokeRuntimeReport()
 		s_currentDoc.url,
 		s_currentDoc.title,
 		static_cast<int>(s_currentDoc.blocks.size()),
-		inspected));
+		inspected,
+		s_pageMetadata.cssDetected));
 }
 
 std::string Navigator::SmokeCurrentUrl()
@@ -622,6 +844,7 @@ int Navigator::main(int, char**)
 	s_backStack.clear();
 	s_forwardStack.clear();
 	s_pageMetadata = NavigatorPageMetadata{};
+	s_recentDownloads.clear();
 	s_addressFocused = false;
 	s_addressBuffer.clear();
 	s_addressCaret   = 0;
@@ -823,7 +1046,13 @@ void Navigator::renderDocument()
 	clampScrollOffset();
 
 	// Content area background
-	drawRect(s_windowId, kContentX, kToolbarH + 6, kContentW, kContentH, 245, 247, 250);
+	int pageBgR = 245;
+	int pageBgG = 247;
+	int pageBgB = 250;
+	if (s_currentDoc.bodyStyle.hasBackgroundColor) {
+		colorChannels(s_currentDoc.bodyStyle.backgroundColor, pageBgR, pageBgG, pageBgB);
+	}
+	drawRect(s_windowId, kContentX, kToolbarH + 6, kContentW, kContentH, pageBgR, pageBgG, pageBgB);
 	drawRect(s_windowId, kContentX, kToolbarH + 6, kContentW, 1, 186, 192, 204);
 	// Scroll-track slot
 	drawRect(s_windowId, kContentX + kContentW - 12, kToolbarH + 6, 8, kContentH, 229, 232, 238);
@@ -842,6 +1071,12 @@ void Navigator::renderDocument()
 	for (const DocBlock& block : s_currentDoc.blocks) {
 		int relY  = blockLayoutY(blockIndex);
 		int drawY = kContentY + relY - s_scrollOffset;
+		const int blockMarginTop = block.style.marginTop >= 0 ? block.style.marginTop : (block.type == BlockType::Heading ? 10 : 4);
+		const int blockMarginBottom = block.style.marginBottom >= 0 ? block.style.marginBottom : 8;
+		const int blockMarginLeft = block.style.marginLeft >= 0 ? block.style.marginLeft : 0;
+		const int blockPadding = cssPaddingOrDefault(block.style, block.type == BlockType::Preformatted ? 4 : 0);
+		const int bodyMarginLeft = s_currentDoc.bodyStyle.marginLeft >= 0 ? s_currentDoc.bodyStyle.marginLeft : 0;
+		const int headingFontSize = cssFontSizeOrDefault(block.style, block.tagName == "h1" ? 24 : (block.tagName == "h2" ? 20 : (block.tagName == "h3" ? 18 : 20)));
 
 		// Skip blocks fully above or below the visible viewport
 		int blockH = 0;
@@ -849,16 +1084,16 @@ void Navigator::renderDocument()
 			s_currentDoc.blocks[blockIndex + 1].type == BlockType::Heading);
 		constexpr int kPreGapIfNextHeading = 10;
 		switch (block.type) {
-		case BlockType::Heading:      blockH = kLineH + 4; break;
-		case BlockType::Paragraph:    blockH = wrappedBlockHeight(block.text, kWrapCols)        + (nextIsHeading ? kPreGapIfNextHeading : 0); break;
-		case BlockType::Link:         blockH = wrappedBlockHeight(block.text, kWrapCols)        + (nextIsHeading ? kPreGapIfNextHeading : 0); break;
-		case BlockType::ListItem:     blockH = wrappedBlockHeight(block.text, kListWrapCols)    + (nextIsHeading ? kPreGapIfNextHeading : 0); break;
-		case BlockType::Preformatted: blockH = wrappedBlockHeight(block.text, kPreWrapCols, true); break;
+		case BlockType::Heading:      blockH = blockMarginTop + std::max(kLineH + 4, headingFontSize + 2) + std::max(4, blockMarginBottom); break;
+		case BlockType::Paragraph:    blockH = blockMarginTop + wrappedBlockHeight(block.text, kWrapCols)        + std::max(4, blockMarginBottom) + (nextIsHeading ? kPreGapIfNextHeading : 0); break;
+		case BlockType::Link:         blockH = blockMarginTop + wrappedBlockHeight(block.text, kWrapCols)        + std::max(4, blockMarginBottom) + (nextIsHeading ? kPreGapIfNextHeading : 0); break;
+		case BlockType::ListItem:     blockH = blockMarginTop + wrappedBlockHeight(block.text, kListWrapCols)    + std::max(2, blockMarginBottom) + (nextIsHeading ? kPreGapIfNextHeading : 0); break;
+		case BlockType::Preformatted: blockH = blockMarginTop + wrappedBlockHeight(block.text, kPreWrapCols, true) + blockPadding * 2 + std::max(4, blockMarginBottom); break;
 		case BlockType::Image: {
 			int imageW = 0;
 			int imageH = 0;
 			imageDisplaySize(block, imageW, imageH);
-			blockH = imageH + 4;
+			blockH = blockMarginTop + imageH + std::max(4, blockMarginBottom);
 			break;
 		}
 		}
@@ -870,16 +1105,19 @@ void Navigator::renderDocument()
 		switch (block.type) {
 		case BlockType::Heading:
 			// Slightly larger heading: draw a subtle accent bar then the text
-			drawRect(s_windowId, kContentX + kIndent, drawY + kLineH,
+			drawRect(s_windowId, kContentX + kIndent + bodyMarginLeft + blockMarginLeft, drawY + blockMarginTop + std::max(kLineH, headingFontSize - 4),
 				kContentW - kIndent - 16, 2, 80, 140, 220);
-			drawTextAt(s_windowId, kContentX + kIndent, drawY, block.text);
+			drawTextAtStyled(s_windowId, kContentX + kIndent + bodyMarginLeft + blockMarginLeft, drawY + blockMarginTop, block.text, block.style);
+			if (block.style.bold) {
+				drawTextAtStyled(s_windowId, kContentX + kIndent + bodyMarginLeft + blockMarginLeft + 1, drawY + blockMarginTop, block.text, block.style);
+			}
 			break;
 
 		case BlockType::Paragraph: {
 			auto lines = wrapText(block.text, kWrapCols);
-			int lineY = drawY;
+			int lineY = drawY + blockMarginTop;
 			for (const std::string& ln : lines) {
-				drawTextAt(s_windowId, kContentX + kIndent, lineY, ln);
+				drawTextAtStyled(s_windowId, kContentX + kIndent + bodyMarginLeft + blockMarginLeft, lineY, ln, block.style);
 				lineY += kLineH;
 			}
 			break;
@@ -887,11 +1125,11 @@ void Navigator::renderDocument()
 
 		case BlockType::ListItem: {
 			// Dash bullet + indented wrapped text
-			drawTextAt(s_windowId, kContentX + kIndent, drawY, "-");
+			drawTextAtStyled(s_windowId, kContentX + kIndent + bodyMarginLeft + blockMarginLeft, drawY + blockMarginTop, "-", block.style);
 			auto lines = wrapText(block.text, kListWrapCols);
-			int lineY = drawY;
+			int lineY = drawY + blockMarginTop;
 			for (const std::string& ln : lines) {
-				drawTextAt(s_windowId, kContentX + kListIndent, lineY, ln);
+				drawTextAtStyled(s_windowId, kContentX + kListIndent + bodyMarginLeft + blockMarginLeft, lineY, ln, block.style);
 				lineY += kLineH;
 			}
 			break;
@@ -899,14 +1137,20 @@ void Navigator::renderDocument()
 
 		case BlockType::Preformatted: {
 			// Light background box for the pre block
-			int preH = wrappedBlockHeight(block.text, kPreWrapCols, true);
-			drawRect(s_windowId, kContentX + kPreIndent - 4, drawY - 2,
-				kContentW - kPreIndent - 8, preH + 4, 230, 232, 238);
+			int preH = wrappedBlockHeight(block.text, kPreWrapCols, true) + blockPadding * 2;
+			int preR = 230;
+			int preG = 232;
+			int preB = 238;
+			if (block.style.hasBackgroundColor) {
+				colorChannels(block.style.backgroundColor, preR, preG, preB);
+			}
+			drawRect(s_windowId, kContentX + kPreIndent + bodyMarginLeft + blockMarginLeft - 4, drawY + blockMarginTop - 2,
+				kContentW - kPreIndent - 8, preH + 4, preR, preG, preB);
 			// Draw each line preserving exact content
 			auto lines = splitPreLines(block.text);
-			int lineY = drawY;
+			int lineY = drawY + blockMarginTop + blockPadding;
 			for (const std::string& ln : lines) {
-				drawTextAt(s_windowId, kContentX + kPreIndent, lineY, ln);
+				drawTextAtStyled(s_windowId, kContentX + kPreIndent + bodyMarginLeft + blockMarginLeft, lineY, ln, block.style);
 				lineY += kLineH;
 			}
 			break;
@@ -916,13 +1160,21 @@ void Navigator::renderDocument()
 			// Full wrapped link block: underline + blue text
 			// The entire bounding rect is clickable (TODO: per-line hit testing).
 			auto lines = wrapText(block.text, kWrapCols);
-			int lineY = drawY;
+			int lineY = drawY + blockMarginTop;
+			int linkR = 55;
+			int linkG = 110;
+			int linkB = 210;
+			if (block.style.hasColor) {
+				colorChannels(block.style.color, linkR, linkG, linkB);
+			}
 			for (const std::string& ln : lines) {
 				// Underline under each line
 				int lineW = static_cast<int>(ln.size()) * kCharW;
-				drawRect(s_windowId, kContentX + kIndent, lineY + kLineH - 1,
-					lineW, 1, 55, 110, 210);
-				drawTextAt(s_windowId, kContentX + kIndent, lineY, ln);
+				if (block.style.underline) {
+					drawRect(s_windowId, kContentX + kIndent + bodyMarginLeft + blockMarginLeft, lineY + kLineH - 1,
+						lineW, 1, linkR, linkG, linkB);
+				}
+				drawTextAtColored(s_windowId, kContentX + kIndent + bodyMarginLeft + blockMarginLeft, lineY, ln, linkR, linkG, linkB);
 				lineY += kLineH;
 			}
 			break;
@@ -933,20 +1185,20 @@ void Navigator::renderDocument()
 			int imageH = 0;
 			imageDisplaySize(block, imageW, imageH);
 			const ImageInfo& info = imageInfoForBlock(block);
-			const int imageX = kContentX + kIndent;
+			const int imageX = kContentX + kIndent + bodyMarginLeft + blockMarginLeft;
 			const int viewportTop = kContentY;
 			const int viewportBottom = kToolbarH + 6 + kContentH;
-			if (drawY >= viewportTop && drawY + imageH <= viewportBottom) {
+			if (drawY + blockMarginTop >= viewportTop && drawY + blockMarginTop + imageH <= viewportBottom) {
 				if (info.ok) {
-					drawImage(s_windowId, imageX, drawY, imageW, imageH, info.drawPath);
+					drawImage(s_windowId, imageX, drawY + blockMarginTop, imageW, imageH, info.drawPath);
 				} else {
-					drawRect(s_windowId, imageX, drawY, imageW, imageH, 232, 236, 242);
-					drawRect(s_windowId, imageX, drawY, imageW, 1, 145, 153, 168);
-					drawRect(s_windowId, imageX, drawY + imageH - 1, imageW, 1, 145, 153, 168);
-					drawRect(s_windowId, imageX, drawY, 1, imageH, 145, 153, 168);
-					drawRect(s_windowId, imageX + imageW - 1, drawY, 1, imageH, 145, 153, 168);
-					drawTextAt(s_windowId, imageX + 10, drawY + std::max(8, (imageH - kLineH) / 2),
-						imagePlaceholderText(block, info));
+					drawRect(s_windowId, imageX, drawY + blockMarginTop, imageW, imageH, 232, 236, 242);
+					drawRect(s_windowId, imageX, drawY + blockMarginTop, imageW, 1, 145, 153, 168);
+					drawRect(s_windowId, imageX, drawY + blockMarginTop + imageH - 1, imageW, 1, 145, 153, 168);
+					drawRect(s_windowId, imageX, drawY + blockMarginTop, 1, imageH, 145, 153, 168);
+					drawRect(s_windowId, imageX + imageW - 1, drawY + blockMarginTop, 1, imageH, 145, 153, 168);
+					drawTextAtStyled(s_windowId, imageX + 10, drawY + blockMarginTop + std::max(8, (imageH - kLineH) / 2),
+						imagePlaceholderText(block, info), block.style);
 				}
 			}
 			break;
@@ -1376,6 +1628,8 @@ void Navigator::loadUrl(const std::string& url)
 		metadata.sourceType = "about";
 		metadata.contentType = "generated/about";
 		storePageMetadata(std::move(metadata), doc);
+	} else if (url == "about:downloads") {
+		doc = buildDownloadsDocument();
 	} else if (url == "about:page-info") {
 		doc = buildPageInfoDocument();
 	} else if (url == "about:view-source") {
@@ -1493,6 +1747,7 @@ WebDocument Navigator::buildAboutNavigatorDocument()
 		"Or start a small local HTTP server and open http://127.0.0.1:8080/docs/index.html", ""});
 	doc.blocks.push_back({BlockType::Link, "Open guideXOS Help",   "file:///docs/index.html"});
 	doc.blocks.push_back({BlockType::Link, "View Bookmarks",       "about:bookmarks"});
+	doc.blocks.push_back({BlockType::Link, "View Downloads",       "about:downloads"});
 	doc.blocks.push_back({BlockType::Link, "Page Info",            "about:page-info"});
 	doc.blocks.push_back({BlockType::Link, "View Source",          "about:view-source"});
 	doc.blocks.push_back({BlockType::Link, "Navigator Runtime",    "about:navigator-runtime"});
@@ -1556,6 +1811,15 @@ WebDocument Navigator::buildPageInfoDocument()
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Loaded images", m.loadedImageCount), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Failed images", m.failedImageCount), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Last image error", m.lastImageError), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("CSS detected", yesNo(m.cssDetected)), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Style rule count", m.styleRuleCount), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Unsupported external stylesheets", m.unsupportedExternalStylesheetCount), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Unsupported CSS declarations", m.unsupportedCssDeclarationCount), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("CSS style block capped", yesNo(m.cssStyleBlockCapped)), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("CSS style bytes processed", static_cast<int>(m.cssStyleBytesProcessed)), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Downloaded", yesNo(m.downloaded)), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Download saved path", m.downloadSavedPath), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Download byte count", static_cast<int>(m.downloadByteCount)), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Raw/source bytes", static_cast<int>(m.rawSourceBytes)), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Source preview truncated", yesNo(m.rawSourceTruncated)), ""});
 
@@ -1571,6 +1835,7 @@ WebDocument Navigator::buildPageInfoDocument()
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Remote PNG dimensions", "2048 x 2048 pixels"), ""});
 
 	doc.blocks.push_back({BlockType::Link, "View Source", "about:view-source"});
+	doc.blocks.push_back({BlockType::Link, "View Downloads", "about:downloads"});
 	doc.blocks.push_back({BlockType::Link, "Navigator Runtime", "about:navigator-runtime"});
 	doc.blocks.push_back({BlockType::Link, "Go to about:navigator", "about:navigator"});
 	return doc;
@@ -1608,6 +1873,7 @@ WebDocument Navigator::buildViewSourceDocument()
 
 	doc.blocks.push_back({BlockType::Link, "Page Info", "about:page-info"});
 	doc.blocks.push_back({BlockType::Link, "Navigator Runtime", "about:navigator-runtime"});
+	doc.blocks.push_back({BlockType::Link, "View Downloads", "about:downloads"});
 	doc.blocks.push_back({BlockType::Link, "Go to about:navigator", "about:navigator"});
 	return doc;
 }
@@ -1625,10 +1891,45 @@ WebDocument Navigator::buildRuntimeDocument()
 		s_currentDoc.url,
 		s_currentDoc.title,
 		static_cast<int>(s_currentDoc.blocks.size()),
-		s_pageMetadata.finalUrl));
+		s_pageMetadata.finalUrl,
+		s_pageMetadata.cssDetected));
 
 	doc.blocks.push_back({BlockType::Link, "Page Info", "about:page-info"});
 	doc.blocks.push_back({BlockType::Link, "View Source", "about:view-source"});
+	doc.blocks.push_back({BlockType::Link, "View Downloads", "about:downloads"});
+	doc.blocks.push_back({BlockType::Link, "Go to about:navigator", "about:navigator"});
+	return doc;
+}
+
+WebDocument Navigator::buildDownloadsDocument()
+{
+	WebDocument doc;
+	doc.url = "about:downloads";
+	doc.title = "Downloads";
+	doc.blocks.push_back({BlockType::Heading, "Downloads", ""});
+	doc.blocks.push_back({BlockType::Paragraph,
+		"Recent downloads are kept in memory for this Navigator session.", ""});
+
+	if (s_recentDownloads.empty()) {
+		doc.blocks.push_back({BlockType::Paragraph, "No downloads yet.", ""});
+	} else {
+		for (const DownloadItem& item : s_recentDownloads) {
+			doc.blocks.push_back({BlockType::Heading,
+				item.suggestedFileName.empty() ? "download.bin" : item.suggestedFileName, ""});
+			doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Status", item.success ? "success" : "failed"), ""});
+			doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Source URL", item.url), ""});
+			doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Final URL", item.finalUrl), ""});
+			doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Content type", item.contentType), ""});
+			doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Byte count", static_cast<int>(item.byteCount)), ""});
+			doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Saved path", item.savedPath), ""});
+			if (!item.error.empty()) {
+				doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Error", item.error), ""});
+			}
+		}
+	}
+
+	doc.blocks.push_back({BlockType::Link, "Page Info", "about:page-info"});
+	doc.blocks.push_back({BlockType::Link, "Navigator Runtime", "about:navigator-runtime"});
 	doc.blocks.push_back({BlockType::Link, "Go to about:navigator", "about:navigator"});
 	return doc;
 }
@@ -1733,11 +2034,48 @@ WebDocument Navigator::loadHttpUrl(const std::string& url)
 		return finish(std::move(doc));
 	}
 
-	metadata.errorStatus = "Unsupported content type";
-	return finish(buildSimpleDocument(documentUrl,
-		"Unsupported Content",
-		"Unsupported Content",
-		"Navigator only renders text/html and text/plain HTTP responses. Content-Type was: " + response.contentType));
+	DownloadItem item;
+	item.url = metadata.requestedUrl;
+	item.finalUrl = documentUrl;
+	item.contentType = response.contentType.empty() ? "application/octet-stream" : response.contentType;
+	item.byteCount = response.body.size();
+	item.suggestedFileName = sanitizeDownloadFileName(fileNameFromUrlPath(documentUrl));
+
+	metadata.errorStatus = "Unsupported content type downloaded";
+	metadata.downloaded = true;
+	metadata.downloadByteCount = response.body.size();
+	if (response.body.empty()) {
+		item.success = false;
+		item.error = "Response body was empty; Navigator did not create a download file.";
+		metadata.errorStatus = "Download unavailable: no body";
+		rememberDownload(item);
+		metadata.downloadSavedPath = "";
+		return finish(buildDownloadCompleteDocument(item));
+	}
+
+	std::string finalName;
+	item.savedPath = uniqueDownloadPathForName(item.suggestedFileName, finalName);
+	if (item.savedPath.empty() || finalName.empty()) {
+		item.success = false;
+		item.error = "Navigator could not allocate a safe non-overwriting filename.";
+		metadata.errorStatus = "Download unavailable: unsafe filename";
+		rememberDownload(item);
+		return finish(buildDownloadCompleteDocument(item));
+	}
+	item.suggestedFileName = finalName;
+
+	if (writeBinaryFile(item.savedPath, response.body)) {
+		item.success = true;
+		metadata.downloadSavedPath = item.savedPath;
+		s_statusText = "Downloaded " + item.suggestedFileName;
+	} else {
+		item.success = false;
+		item.error = "Navigator could not write the file to the downloads directory.";
+		metadata.errorStatus = "Download unavailable: file write failed";
+		metadata.downloadSavedPath = item.savedPath;
+	}
+	rememberDownload(item);
+	return finish(buildDownloadCompleteDocument(s_recentDownloads.front()));
 }
 
 // -----------------------------------------------------------------------------
@@ -1748,16 +2086,18 @@ int Navigator::blockLayoutY(int blockIndex)
 {
 	// Returns the Y coordinate of blockIndex relative to kContentY (pre-scroll).
 	// Spacing constants
-	constexpr int kHeadingGap    = 14;  // space after a Heading block
 	constexpr int kHeadingPreGap = 10;  // extra space BEFORE a Heading (except the first)
-	constexpr int kBlockGap      = 8;   // space after other blocks
 	constexpr int kPreWrapCols   = (kContentW - 34) / kCharW;
 	const     int kWrapCols      = (kContentW - 34) / kCharW;
 	const     int kListWrapCols  = (kContentW - 44) / kCharW;
 
-	int y = kHeadingY;
+	int y = kHeadingY + (s_currentDoc.bodyStyle.marginTop >= 0 ? s_currentDoc.bodyStyle.marginTop : 0);
 	for (int i = 0; i < blockIndex && i < static_cast<int>(s_currentDoc.blocks.size()); ++i) {
 		const DocBlock& b    = s_currentDoc.blocks[i];
+		const int marginTop = b.style.marginTop >= 0 ? b.style.marginTop : (b.type == BlockType::Heading ? 10 : 4);
+		const int marginBottom = b.style.marginBottom >= 0 ? b.style.marginBottom : (b.type == BlockType::ListItem ? 4 : 8);
+		const int padding = cssPaddingOrDefault(b.style, b.type == BlockType::Preformatted ? 4 : 0);
+		const int headingHeight = std::max(kLineH + 4, cssFontSizeOrDefault(b.style, 20) + 2);
 		// Apply pre-gap before the *next* block when the next block is a Heading
 		// and the current block is not the first block.
 		bool nextIsHeading = false;
@@ -1768,25 +2108,25 @@ int Navigator::blockLayoutY(int blockIndex)
 		int h = 0;
 		switch (b.type) {
 		case BlockType::Heading:
-			h = (kLineH + 4) + kHeadingGap;
+			h = marginTop + headingHeight + marginBottom;
 			break;
 		case BlockType::Paragraph:
-			h = wrappedBlockHeight(b.text, kWrapCols) + kBlockGap + (nextIsHeading ? kHeadingPreGap : 0);
+			h = marginTop + wrappedBlockHeight(b.text, kWrapCols) + marginBottom + (nextIsHeading ? kHeadingPreGap : 0);
 			break;
 		case BlockType::Link:
-			h = wrappedBlockHeight(b.text, kWrapCols) + kBlockGap + (nextIsHeading ? kHeadingPreGap : 0);
+			h = marginTop + wrappedBlockHeight(b.text, kWrapCols) + marginBottom + (nextIsHeading ? kHeadingPreGap : 0);
 			break;
 		case BlockType::ListItem:
-			h = wrappedBlockHeight(b.text, kListWrapCols) + kBlockGap + (nextIsHeading ? kHeadingPreGap : 0);
+			h = marginTop + wrappedBlockHeight(b.text, kListWrapCols) + marginBottom + (nextIsHeading ? kHeadingPreGap : 0);
 			break;
 		case BlockType::Preformatted:
-			h = wrappedBlockHeight(b.text, kPreWrapCols, true) + 8 + kBlockGap + (nextIsHeading ? kHeadingPreGap : 0);
+			h = marginTop + wrappedBlockHeight(b.text, kPreWrapCols, true) + padding * 2 + marginBottom + (nextIsHeading ? kHeadingPreGap : 0);
 			break;
 		case BlockType::Image: {
 			int imageW = 0;
 			int imageH = 0;
 			imageDisplaySize(b, imageW, imageH);
-			h = imageH + 4 + kBlockGap + (nextIsHeading ? kHeadingPreGap : 0);
+			h = marginTop + imageH + marginBottom + (nextIsHeading ? kHeadingPreGap : 0);
 			break;
 		}
 		}
@@ -1800,56 +2140,60 @@ Navigator::Rect Navigator::linkBlockRect(int blockIndex)
 	// The entire wrapped link height is clickable.
 	// TODO: per-line hit testing when proportional text measurement is available.
 	const int kWrapCols = (kContentW - 34) / kCharW;
+	const DocBlock& block = s_currentDoc.blocks[blockIndex];
+	const int bodyMarginLeft = s_currentDoc.bodyStyle.marginLeft >= 0 ? s_currentDoc.bodyStyle.marginLeft : 0;
+	const int blockMarginLeft = block.style.marginLeft >= 0 ? block.style.marginLeft : 0;
+	const int blockMarginTop = block.style.marginTop >= 0 ? block.style.marginTop : 4;
 	int relY  = blockLayoutY(blockIndex);
-	int drawY = kContentY + relY - s_scrollOffset;
-	int h     = wrappedBlockHeight(s_currentDoc.blocks[blockIndex].text, kWrapCols);
-	int w     = std::min(
-		static_cast<int>(s_currentDoc.blocks[blockIndex].text.size()) * kCharW,
-		kContentW - 34);
-	return Rect{ kContentX + 18, drawY, w, h };
+	int drawY = kContentY + relY - s_scrollOffset + blockMarginTop;
+	int h     = wrappedBlockHeight(block.text, kWrapCols);
+	int w     = std::min(static_cast<int>(block.text.size()) * kCharW, kContentW - 34);
+	return Rect{ kContentX + 18 + bodyMarginLeft + blockMarginLeft, drawY, w, h };
 }
 
 int Navigator::computeDocumentHeight()
 {
-	constexpr int kHeadingGap    = 14;
 	constexpr int kHeadingPreGap = 10;
-	constexpr int kBlockGap      = 8;
 	constexpr int kPreWrapCols   = (kContentW - 34) / kCharW;
 	const     int kWrapCols      = (kContentW - 34) / kCharW;
 	const     int kListWrapCols  = (kContentW - 44) / kCharW;
 
-	int h = kHeadingY;
+	int h = kHeadingY + (s_currentDoc.bodyStyle.marginTop >= 0 ? s_currentDoc.bodyStyle.marginTop : 0);
 	const int n = static_cast<int>(s_currentDoc.blocks.size());
 	for (int idx = 0; idx < n; ++idx) {
 		const DocBlock& block = s_currentDoc.blocks[idx];
-		bool nextIsHeading = (idx + 1 < n &&
-			s_currentDoc.blocks[idx + 1].type == BlockType::Heading);
+		const int marginTop = block.style.marginTop >= 0 ? block.style.marginTop : (block.type == BlockType::Heading ? 10 : 4);
+		const int marginBottom = block.style.marginBottom >= 0 ? block.style.marginBottom : (block.type == BlockType::ListItem ? 4 : 8);
+		const int padding = cssPaddingOrDefault(block.style, block.type == BlockType::Preformatted ? 4 : 0);
+		const int headingFontSize = cssFontSizeOrDefault(block.style, block.tagName == "h1" ? 24 : (block.tagName == "h2" ? 20 : (block.tagName == "h3" ? 18 : 20)));
+		const int headingHeight = std::max(kLineH + 4, headingFontSize + 2);
+		bool nextIsHeading = (idx + 1 < n && s_currentDoc.blocks[idx + 1].type == BlockType::Heading);
 		switch (block.type) {
 		case BlockType::Heading:
-			h += (kLineH + 4) + kHeadingGap;
+			h += marginTop + headingHeight + marginBottom;
 			break;
 		case BlockType::Paragraph:
-			h += wrappedBlockHeight(block.text, kWrapCols) + kBlockGap + (nextIsHeading ? kHeadingPreGap : 0);
+			h += marginTop + wrappedBlockHeight(block.text, kWrapCols) + marginBottom + (nextIsHeading ? kHeadingPreGap : 0);
 			break;
 		case BlockType::Link:
-			h += wrappedBlockHeight(block.text, kWrapCols) + kBlockGap + (nextIsHeading ? kHeadingPreGap : 0);
+			h += marginTop + wrappedBlockHeight(block.text, kWrapCols) + marginBottom + (nextIsHeading ? kHeadingPreGap : 0);
 			break;
 		case BlockType::ListItem:
-			h += wrappedBlockHeight(block.text, kListWrapCols) + kBlockGap + (nextIsHeading ? kHeadingPreGap : 0);
+			h += marginTop + wrappedBlockHeight(block.text, kListWrapCols) + marginBottom + (nextIsHeading ? kHeadingPreGap : 0);
 			break;
 		case BlockType::Preformatted:
-			h += wrappedBlockHeight(block.text, kPreWrapCols, true) + 8 + kBlockGap + (nextIsHeading ? kHeadingPreGap : 0);
+			h += marginTop + wrappedBlockHeight(block.text, kPreWrapCols, true) + padding * 2 + marginBottom + (nextIsHeading ? kHeadingPreGap : 0);
 			break;
 		case BlockType::Image: {
 			int imageW = 0;
 			int imageH = 0;
 			imageDisplaySize(block, imageW, imageH);
-			h += imageH + 4 + kBlockGap + (nextIsHeading ? kHeadingPreGap : 0);
+			h += marginTop + imageH + marginBottom + (nextIsHeading ? kHeadingPreGap : 0);
 			break;
 		}
 		}
 	}
-	return h + kBlockGap;  // trailing padding
+	return h + (s_currentDoc.bodyStyle.marginBottom >= 0 ? s_currentDoc.bodyStyle.marginBottom : 8);
 }
 
 int Navigator::maxScrollOffset()
@@ -1884,26 +2228,23 @@ WebDocument Navigator::loadFileUrl(const std::string& url)
 	Logger::write(LogLevel::Info,
 		std::string("Navigator loadFileUrl: ") + path);
 
-	bool isHtml = false;
-	{
-		std::string ext;
-		size_t dot = path.rfind('.');
-		if (dot != std::string::npos) {
-			ext = path.substr(dot);
-			for (char& ch : ext) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
-		}
-		isHtml = (ext == ".html" || ext == ".htm");
-	}
+	const std::string guessedContentType = guessedContentTypeForPath(path);
+	const bool isHtml = (guessedContentType == "text/html");
 
 	NavigatorPageMetadata metadata;
 	metadata.requestedUrl = url;
 	metadata.finalUrl = url;
 	metadata.sourceType = "file";
-	metadata.contentType = isHtml ? "text/html" : "text/plain";
+	metadata.contentType = guessedContentType;
 	auto finish = [&](WebDocument doc) -> WebDocument {
 		storePageMetadata(metadata, doc);
 		return doc;
 	};
+
+	if (!isNavigatorRenderableFileType(guessedContentType)) {
+		metadata.errorStatus = "File not viewable";
+		return finish(buildFileNotViewableDocument(url, path, guessedContentType));
+	}
 
 	FileReadResult fr = readTextFile(path);
 

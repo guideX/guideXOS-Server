@@ -15,6 +15,36 @@
 #include "kernel/block_device.h"
 #include "kernel/desktop.h"
 
+// Bare-metal Navigator is a capability-limited adapter.  It mirrors the small
+// guideWeb CSS-lite value types it needs without including the hosted
+// std::string/std::vector document model in the freestanding kernel build.
+namespace gxos {
+namespace web {
+struct WebStyle {
+    bool     hasColor = false;
+    uint32_t color = 0;
+    bool     hasBackgroundColor = false;
+    uint32_t backgroundColor = 0;
+    bool     bold = false;
+    bool     underline = false;
+    int      marginTop = -1;
+    int      marginBottom = -1;
+    int      marginLeft = -1;
+    int      padding = -1;
+    int      fontScaleOrSize = -1;
+};
+
+struct CssDiagnostics {
+    bool cssDetected = false;
+    int styleRuleCount = 0;
+    int unsupportedExternalStylesheetCount = 0;
+    int unsupportedDeclarationCount = 0;
+    bool styleBlockCapped = false;
+    unsigned long styleBytesProcessed = 0;
+};
+} // namespace web
+} // namespace gxos
+
 namespace kernel {
 namespace apps {
 
@@ -432,6 +462,7 @@ private:
         int naturalWidth;
         int naturalHeight;
         int imageStatus;
+        gxos::web::WebStyle style;
     };
 
     struct Bookmark {
@@ -480,6 +511,13 @@ private:
     int m_metaRemoteImages;
     int m_metaLocalImages;
     char m_metaLastImageError[128];
+    bool m_metaCssDetected;
+    int m_metaStyleRuleCount;
+    int m_metaUnsupportedExternalStylesheetCount;
+    int m_metaUnsupportedCssDeclarationCount;
+    bool m_metaCssStyleBlockCapped;
+    int m_metaCssStyleBytesProcessed;
+    gxos::web::WebStyle m_bodyStyle;
 
     void setStatus(const char* text);
     void updateButtons();
@@ -492,15 +530,18 @@ private:
     void buildPageInfoDocument();
     void buildViewSourceDocument();
     void buildRuntimeDocument();
+    void buildDownloadsDocument();
     void buildErrorDocument(const char* url, const char* reason);
     void loadFileUrl(const char* url);
     void rememberPageMetadata(const char* requestedUrl, const char* finalUrl, const char* sourceType,
                               const char* contentType, const char* errorStatus,
                               const char* rawSource, int rawSourceBytes,
+                              const gxos::web::CssDiagnostics* cssDiagnostics = nullptr,
+                              const gxos::web::WebStyle* bodyStyle = nullptr,
                               int httpStatusCode = 0, const char* httpReason = "",
                               int redirectCount = 0);
-    void addBlock(BlockKind kind, const char* text, const char* url = "");
-    void addImageBlock(const char* src, const char* alt, const char* resolvedUrl, int width, int height);
+    void addBlock(BlockKind kind, const char* text, const char* url = "", const gxos::web::WebStyle* style = nullptr);
+    void addImageBlock(const char* src, const char* alt, const char* resolvedUrl, int width, int height, const gxos::web::WebStyle* style = nullptr);
     void addBookmark(const char* title, const char* url);
     void loadDefaultBookmarks();
     void drawDocument(uint32_t x, uint32_t y, uint32_t w, uint32_t h);

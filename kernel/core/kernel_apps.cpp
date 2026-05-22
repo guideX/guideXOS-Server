@@ -74,6 +74,34 @@ static uint32_t rgb(uint8_t r, uint8_t g, uint8_t b) {
     return 0xFF000000u | ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)b;
 }
 
+static uint32_t css_color_or(uint32_t fallback, const gxos::web::WebStyle& style) {
+    return style.hasColor ? style.color : fallback;
+}
+
+static uint32_t css_background_or(uint32_t fallback, const gxos::web::WebStyle& style) {
+    return style.hasBackgroundColor ? style.backgroundColor : fallback;
+}
+
+static int css_margin_top_or(const gxos::web::WebStyle& style, int fallback) {
+    return style.marginTop >= 0 ? style.marginTop : fallback;
+}
+
+static int css_margin_bottom_or(const gxos::web::WebStyle& style, int fallback) {
+    return style.marginBottom >= 0 ? style.marginBottom : fallback;
+}
+
+static int css_margin_left_or(const gxos::web::WebStyle& style, int fallback) {
+    return style.marginLeft >= 0 ? style.marginLeft : fallback;
+}
+
+static int css_padding_or(const gxos::web::WebStyle& style, int fallback) {
+    return style.padding >= 0 ? style.padding : fallback;
+}
+
+static int css_font_size_or(const gxos::web::WebStyle& style, int fallback) {
+    return style.fontScaleOrSize > 0 ? style.fontScaleOrSize : fallback;
+}
+
 // Bitmap font constants (same as compositor)
 static const int kGlyphW = 5;
 static const int kGlyphH = 7;
@@ -4467,6 +4495,13 @@ NavigatorApp::NavigatorApp()
     m_metaRemoteImages = 0;
     m_metaLocalImages = 0;
     m_metaLastImageError[0] = '\0';
+    m_metaCssDetected = false;
+    m_metaStyleRuleCount = 0;
+    m_metaUnsupportedExternalStylesheetCount = 0;
+    m_metaUnsupportedCssDeclarationCount = 0;
+    m_metaCssStyleBlockCapped = false;
+    m_metaCssStyleBytesProcessed = 0;
+    m_bodyStyle = gxos::web::WebStyle{};
 }
 
 NavigatorApp::~NavigatorApp() {
@@ -4527,7 +4562,7 @@ void NavigatorApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h)
     uint32_t contentTop = y + TOOLBAR_H + 6;
     uint32_t contentH = h > (uint32_t)(TOOLBAR_H + STATUS_H + 12) ? h - TOOLBAR_H - STATUS_H - 12 : 0;
     if (contentH > 0) {
-        framebuffer::fill_rect(x + CONTENT_X, contentTop, w - CONTENT_X * 2, contentH, 0xFFFAFBFD);
+        framebuffer::fill_rect(x + CONTENT_X, contentTop, w - CONTENT_X * 2, contentH, css_background_or(0xFFFAFBFD, m_bodyStyle));
         drawDocument(x, y, w, h);
     }
 
@@ -4685,7 +4720,7 @@ static void nav_image_file_path_from_url(const char* url, char* out, int outSize
     strcopy(out, path, outSize);
 }
 
-void NavigatorApp::addBlock(BlockKind kind, const char* text, const char* url)
+void NavigatorApp::addBlock(BlockKind kind, const char* text, const char* url, const gxos::web::WebStyle* style)
 {
     if (m_blockCount >= MAX_BLOCKS) return;
     m_blocks[m_blockCount].kind = kind;
@@ -4698,10 +4733,11 @@ void NavigatorApp::addBlock(BlockKind kind, const char* text, const char* url)
     m_blocks[m_blockCount].naturalWidth = 0;
     m_blocks[m_blockCount].naturalHeight = 0;
     m_blocks[m_blockCount].imageStatus = (int)gxos::gui::ImageLoadStatus::Ok;
+    m_blocks[m_blockCount].style = style ? *style : gxos::web::WebStyle{};
     ++m_blockCount;
 }
 
-void NavigatorApp::addImageBlock(const char* src, const char* alt, const char* resolvedUrl, int width, int height)
+void NavigatorApp::addImageBlock(const char* src, const char* alt, const char* resolvedUrl, int width, int height, const gxos::web::WebStyle* style)
 {
     if (m_blockCount >= MAX_BLOCKS) return;
     m_blocks[m_blockCount].kind = BLOCK_IMAGE;
@@ -4718,6 +4754,7 @@ void NavigatorApp::addImageBlock(const char* src, const char* alt, const char* r
     m_blocks[m_blockCount].naturalWidth = (int)probe.width;
     m_blocks[m_blockCount].naturalHeight = (int)probe.height;
     m_blocks[m_blockCount].imageStatus = (int)probe.status;
+    m_blocks[m_blockCount].style = style ? *style : gxos::web::WebStyle{};
 
     ++m_blockCount;
 }
@@ -4759,6 +4796,7 @@ void NavigatorApp::buildAboutNavigatorDocument()
     addBlock(BLOCK_LIST_ITEM, "file:// HTML document loading");
     addBlock(BLOCK_LINK, "Open guideXOS Help", "file:///docs/index.html");
     addBlock(BLOCK_LINK, "View Bookmarks", "about:bookmarks");
+    addBlock(BLOCK_LINK, "View Downloads", "about:downloads");
     addBlock(BLOCK_LINK, "Page Info", "about:page-info");
     addBlock(BLOCK_LINK, "View Source", "about:view-source");
     addBlock(BLOCK_LINK, "Navigator Runtime", "about:navigator-runtime");
@@ -4775,6 +4813,21 @@ void NavigatorApp::buildBookmarksDocument()
         addBlock(BLOCK_LINK, m_bookmarks[i].title, m_bookmarks[i].url);
     }
     rememberPageMetadata("about:bookmarks", "about:bookmarks", "about", "generated/about", "", nullptr, 0);
+}
+
+void NavigatorApp::buildDownloadsDocument()
+{
+    strcopy(m_currentUrl, "about:downloads", MAX_URL_LEN);
+    strcopy(m_title, "Downloads", MAX_TITLE_LEN_NAV);
+    m_blockCount = 0;
+    addBlock(BLOCK_HEADING, "Downloads");
+    addBlock(BLOCK_PARAGRAPH, "Recent downloads are not persisted in this bare-metal adapter yet.");
+    addBlock(BLOCK_PARAGRAPH, "HTTP downloads are unavailable until the bare-metal HTTP transport is connected to Navigator.");
+    addBlock(BLOCK_LIST_ITEM, "Storage path: /downloads when VFS write support is available");
+    addBlock(BLOCK_LIST_ITEM, "Current status: unavailable/in-memory only");
+    addBlock(BLOCK_LINK, "Page Info", "about:page-info");
+    addBlock(BLOCK_LINK, "Navigator Runtime", "about:navigator-runtime");
+    addBlock(BLOCK_LINK, "Go to about:navigator", "about:navigator");
 }
 
 static bool nav_starts_with(const char* value, const char* prefix);
@@ -4799,6 +4852,8 @@ static void nav_int_to_text(int value, char* out, int outSize)
 void NavigatorApp::rememberPageMetadata(const char* requestedUrl, const char* finalUrl, const char* sourceType,
                                         const char* contentType, const char* errorStatus,
                                         const char* rawSource, int rawSourceBytes,
+                                        const gxos::web::CssDiagnostics* cssDiagnostics,
+                                        const gxos::web::WebStyle* bodyStyle,
                                         int httpStatusCode, const char* httpReason,
                                         int redirectCount)
 {
@@ -4812,6 +4867,13 @@ void NavigatorApp::rememberPageMetadata(const char* requestedUrl, const char* fi
     m_metaRedirected = redirectCount > 0;
     strcopy(m_metaErrorStatus, errorStatus ? errorStatus : "", sizeof(m_metaErrorStatus));
     m_metaSourceBytes = rawSourceBytes > 0 ? rawSourceBytes : 0;
+    m_metaCssDetected = cssDiagnostics ? cssDiagnostics->cssDetected : false;
+    m_metaStyleRuleCount = cssDiagnostics ? cssDiagnostics->styleRuleCount : 0;
+    m_metaUnsupportedExternalStylesheetCount = cssDiagnostics ? cssDiagnostics->unsupportedExternalStylesheetCount : 0;
+    m_metaUnsupportedCssDeclarationCount = cssDiagnostics ? cssDiagnostics->unsupportedDeclarationCount : 0;
+    m_metaCssStyleBlockCapped = cssDiagnostics ? cssDiagnostics->styleBlockCapped : false;
+    m_metaCssStyleBytesProcessed = cssDiagnostics ? (int)cssDiagnostics->styleBytesProcessed : 0;
+    m_bodyStyle = bodyStyle ? *bodyStyle : gxos::web::WebStyle{};
     m_metaSourcePreview[0] = '\0';
     m_metaSourceTruncated = false;
     if (rawSource && rawSourceBytes > 0) {
@@ -4876,6 +4938,12 @@ void NavigatorApp::buildPageInfoDocument()
     NAV_INFO_INT("Loaded images: ", m_metaLoadedImages);
     NAV_INFO_INT("Failed images: ", m_metaFailedImages);
     NAV_INFO_TEXT("Last image error: ", m_metaLastImageError[0] ? m_metaLastImageError : "(none)");
+    NAV_INFO_TEXT("CSS detected: ", m_metaCssDetected ? "yes" : "no");
+    NAV_INFO_INT("Style rule count: ", m_metaStyleRuleCount);
+    NAV_INFO_INT("Unsupported external stylesheets: ", m_metaUnsupportedExternalStylesheetCount);
+    NAV_INFO_INT("Unsupported CSS declarations: ", m_metaUnsupportedCssDeclarationCount);
+    NAV_INFO_TEXT("CSS style block capped: ", m_metaCssStyleBlockCapped ? "yes" : "no");
+    NAV_INFO_INT("CSS style bytes processed: ", m_metaCssStyleBytesProcessed);
     NAV_INFO_INT("Raw/source bytes: ", m_metaSourceBytes);
     NAV_INFO_TEXT("Source preview truncated: ", m_metaSourceTruncated ? "yes" : "no");
 #undef NAV_INFO_TEXT
@@ -4949,9 +5017,12 @@ void NavigatorApp::buildRuntimeDocument()
     addBlock(BLOCK_LIST_ITEM, "Local PNG: enabled through shared ImageAdapter where VFS image data exists");
     addBlock(BLOCK_LIST_ITEM, "HTTP: unsupported/network unavailable");
     addBlock(BLOCK_LIST_ITEM, "Remote PNG: unsupported without bare-metal HTTP transport");
+    addBlock(BLOCK_LIST_ITEM, "Downloads: unavailable until HTTP/VFS write path is connected");
     addBlock(BLOCK_LIST_ITEM, "Temp files: unsupported");
     addBlock(BLOCK_LIST_ITEM, "Bookmark persistence: unavailable; bookmarks are in-memory defaults");
     addBlock(BLOCK_LIST_ITEM, "HTTPS/TLS: unsupported");
+    addBlock(BLOCK_LIST_ITEM, "CSS-lite embedded <style>: enabled");
+    addBlock(BLOCK_LIST_ITEM, "External stylesheets: unsupported");
 
     addBlock(BLOCK_HEADING, "Backends");
     addBlock(BLOCK_LIST_ITEM, "File backend: kernel VFS");
@@ -4974,6 +5045,7 @@ void NavigatorApp::buildRuntimeDocument()
     strcopy(line, "Inspected page: ", sizeof(line));
     strappend(line, m_metaFinalUrl[0] ? m_metaFinalUrl : "(none)", sizeof(line));
     addBlock(BLOCK_LIST_ITEM, line);
+    addBlock(BLOCK_LIST_ITEM, m_metaCssDetected ? "CSS diagnostics: css detected" : "CSS diagnostics: no css detected");
 
     addBlock(BLOCK_LINK, "Page Info", "about:page-info");
     addBlock(BLOCK_LINK, "View Source", "about:view-source");
@@ -5162,6 +5234,170 @@ static int nav_parse_positive_int(const char* value)
     }
     return out > 0 ? out : 0;
 }
+
+static int nav_hex_value(char c)
+{
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return 10 + (c - 'a');
+    if (c >= 'A' && c <= 'F') return 10 + (c - 'A');
+    return -1;
+}
+
+static bool nav_parse_css_color(const char* value, uint32_t& out)
+{
+    if (!value) return false;
+    while (*value == ' ' || *value == '\t' || *value == '\r' || *value == '\n') ++value;
+    char lower[24];
+    int n = 0;
+    while (value[n] && value[n] != ' ' && value[n] != '\t' && value[n] != '\r' && value[n] != '\n' && n < 23) { lower[n] = nav_lower(value[n]); ++n; }
+    lower[n] = '\0';
+    if (lower[0] == '#' && n == 7) {
+        int r1 = nav_hex_value(lower[1]); int r2 = nav_hex_value(lower[2]); int g1 = nav_hex_value(lower[3]); int g2 = nav_hex_value(lower[4]); int b1 = nav_hex_value(lower[5]); int b2 = nav_hex_value(lower[6]);
+        if (r1 < 0 || r2 < 0 || g1 < 0 || g2 < 0 || b1 < 0 || b2 < 0) return false;
+        out = 0xFF000000u | (uint32_t)((r1 * 16 + r2) << 16) | (uint32_t)((g1 * 16 + g2) << 8) | (uint32_t)(b1 * 16 + b2);
+        return true;
+    }
+    if (lower[0] == '#' && n == 4) {
+        int r = nav_hex_value(lower[1]); int g = nav_hex_value(lower[2]); int b = nav_hex_value(lower[3]);
+        if (r < 0 || g < 0 || b < 0) return false;
+        out = 0xFF000000u | (uint32_t)(((r * 16 + r) << 16) | ((g * 16 + g) << 8) | (b * 16 + b));
+        return true;
+    }
+    if (streq_local(lower, "black")) { out = 0xFF000000u; return true; }
+    if (streq_local(lower, "white")) { out = 0xFFFFFFFFu; return true; }
+    if (streq_local(lower, "red"))   { out = 0xFFFF0000u; return true; }
+    if (streq_local(lower, "green")) { out = 0xFF008000u; return true; }
+    if (streq_local(lower, "blue"))  { out = 0xFF0000FFu; return true; }
+    if (streq_local(lower, "gray") || streq_local(lower, "grey")) { out = 0xFF808080u; return true; }
+    return false;
+}
+
+static int nav_parse_css_px(const char* value, bool& ok)
+{
+    ok = false;
+    if (!value) return 0;
+    while (*value == ' ' || *value == '\t' || *value == '\r' || *value == '\n') ++value;
+    int result = 0;
+    if (*value < '0' || *value > '9') return 0;
+    while (*value >= '0' && *value <= '9') { result = result * 10 + (*value - '0'); if (result > 4096) result = 4096; ++value; }
+    if (nav_lower(value[0]) == 'p' && nav_lower(value[1]) == 'x') value += 2;
+    while (*value == ' ' || *value == '\t' || *value == '\r' || *value == '\n') ++value;
+    if (*value != '\0') return 0;
+    ok = true;
+    return result;
+}
+
+static void nav_trim_lower_copy(const char* start, const char* end, char* out, int outSize)
+{
+    while (start < end && (*start == ' ' || *start == '\t' || *start == '\r' || *start == '\n')) ++start;
+    while (end > start && (end[-1] == ' ' || end[-1] == '\t' || end[-1] == '\r' || end[-1] == '\n')) --end;
+    int i = 0; while (start < end && i < outSize - 1) out[i++] = nav_lower(*start++); out[i] = '\0';
+}
+
+static void nav_style_merge(gxos::web::WebStyle& base, const gxos::web::WebStyle& overrideStyle)
+{
+    if (overrideStyle.hasColor) { base.hasColor = true; base.color = overrideStyle.color; }
+    if (overrideStyle.hasBackgroundColor) { base.hasBackgroundColor = true; base.backgroundColor = overrideStyle.backgroundColor; }
+    if (overrideStyle.bold) base.bold = true;
+    if (overrideStyle.underline) base.underline = true;
+    if (overrideStyle.marginTop >= 0) base.marginTop = overrideStyle.marginTop;
+    if (overrideStyle.marginBottom >= 0) base.marginBottom = overrideStyle.marginBottom;
+    if (overrideStyle.marginLeft >= 0) base.marginLeft = overrideStyle.marginLeft;
+    if (overrideStyle.padding >= 0) base.padding = overrideStyle.padding;
+    if (overrideStyle.fontScaleOrSize >= 0) base.fontScaleOrSize = overrideStyle.fontScaleOrSize;
+}
+
+static gxos::web::WebStyle nav_default_style_for_tag(const char* tag)
+{
+    gxos::web::WebStyle style{};
+    if (streq_local(tag, "h1")) { style.bold = true; style.marginTop = 10; style.marginBottom = 10; style.fontScaleOrSize = 24; }
+    else if (streq_local(tag, "h2")) { style.bold = true; style.marginTop = 8; style.marginBottom = 8; style.fontScaleOrSize = 20; }
+    else if (streq_local(tag, "h3")) { style.bold = true; style.marginTop = 6; style.marginBottom = 6; style.fontScaleOrSize = 18; }
+    else if (streq_local(tag, "p")) { style.marginTop = 4; style.marginBottom = 8; }
+    else if (streq_local(tag, "a")) { style.hasColor = true; style.color = 0xFF1E5CB8u; style.underline = true; style.marginTop = 4; style.marginBottom = 6; }
+    else if (streq_local(tag, "li")) { style.marginTop = 2; style.marginBottom = 4; style.marginLeft = 12; }
+    else if (streq_local(tag, "pre") || streq_local(tag, "code")) { style.hasBackgroundColor = true; style.backgroundColor = 0xFFE6E8EEu; style.marginTop = 6; style.marginBottom = 8; style.padding = 4; }
+    else if (streq_local(tag, "img")) { style.marginTop = 6; style.marginBottom = 6; }
+    return style;
+}
+
+enum NavCssSelectorType { NAV_CSS_ELEMENT = 0, NAV_CSS_CLASS = 1, NAV_CSS_ID = 2 };
+struct NavCssRule { int selectorType; char selector[32]; gxos::web::WebStyle style; };
+
+static bool nav_supported_css_element(const char* s)
+{
+    return streq_local(s, "body") || streq_local(s, "h1") || streq_local(s, "h2") || streq_local(s, "h3") || streq_local(s, "p") || streq_local(s, "a") || streq_local(s, "li") || streq_local(s, "pre") || streq_local(s, "code") || streq_local(s, "img");
+}
+
+static bool nav_parse_css_selector(const char* start, const char* end, NavCssRule& rule)
+{
+    char selector[32]; nav_trim_lower_copy(start, end, selector, sizeof(selector));
+    if (!selector[0]) return false;
+    if (selector[0] == '.') { rule.selectorType = NAV_CSS_CLASS; strcopy(rule.selector, selector + 1, sizeof(rule.selector)); return rule.selector[0] != '\0'; }
+    if (selector[0] == '#') { rule.selectorType = NAV_CSS_ID; strcopy(rule.selector, selector + 1, sizeof(rule.selector)); return rule.selector[0] != '\0'; }
+    if (!nav_supported_css_element(selector)) return false;
+    rule.selectorType = NAV_CSS_ELEMENT; strcopy(rule.selector, selector, sizeof(rule.selector)); return true;
+}
+
+static void nav_apply_css_decl(gxos::web::WebStyle& style, const char* propStart, const char* propEnd, const char* valueStart, const char* valueEnd, gxos::web::CssDiagnostics& diag)
+{
+    char prop[32]; char value[48]; nav_trim_lower_copy(propStart, propEnd, prop, sizeof(prop)); nav_trim_lower_copy(valueStart, valueEnd, value, sizeof(value));
+    if (!prop[0] || !value[0]) return;
+    uint32_t color = 0; bool ok = false;
+    if (streq_local(prop, "color")) { if (nav_parse_css_color(value, color)) { style.hasColor = true; style.color = color; } else ++diag.unsupportedDeclarationCount; }
+    else if (streq_local(prop, "background-color")) { if (nav_parse_css_color(value, color)) { style.hasBackgroundColor = true; style.backgroundColor = color; } else ++diag.unsupportedDeclarationCount; }
+    else if (streq_local(prop, "font-weight")) { if (streq_local(value, "bold")) style.bold = true; else if (!streq_local(value, "normal")) ++diag.unsupportedDeclarationCount; }
+    else if (streq_local(prop, "text-decoration")) { if (streq_local(value, "underline")) style.underline = true; else if (!streq_local(value, "none")) ++diag.unsupportedDeclarationCount; }
+    else if (streq_local(prop, "margin")) { int px = nav_parse_css_px(value, ok); if (ok) { style.marginTop = px; style.marginBottom = px; style.marginLeft = px; } else ++diag.unsupportedDeclarationCount; }
+    else if (streq_local(prop, "margin-top")) { int px = nav_parse_css_px(value, ok); if (ok) style.marginTop = px; else ++diag.unsupportedDeclarationCount; }
+    else if (streq_local(prop, "margin-bottom")) { int px = nav_parse_css_px(value, ok); if (ok) style.marginBottom = px; else ++diag.unsupportedDeclarationCount; }
+    else if (streq_local(prop, "margin-left")) { int px = nav_parse_css_px(value, ok); if (ok) style.marginLeft = px; else ++diag.unsupportedDeclarationCount; }
+    else if (streq_local(prop, "padding")) { int px = nav_parse_css_px(value, ok); if (ok) style.padding = px; else ++diag.unsupportedDeclarationCount; }
+    else if (streq_local(prop, "font-size")) { int px = nav_parse_css_px(value, ok); if (ok) style.fontScaleOrSize = px; else ++diag.unsupportedDeclarationCount; }
+    else { ++diag.unsupportedDeclarationCount; }
+}
+
+static void nav_parse_css_decls(const char* start, const char* end, gxos::web::WebStyle& style, gxos::web::CssDiagnostics& diag)
+{
+    const char* p = start;
+    while (p < end) { const char* semi = p; while (semi < end && *semi != ';') ++semi; const char* colon = p; while (colon < semi && *colon != ':') ++colon; if (colon < semi) nav_apply_css_decl(style, p, colon, colon + 1, semi, diag); p = semi < end ? semi + 1 : end; }
+}
+
+static void nav_parse_css_block(const char* start, const char* end, NavCssRule* rules, int& ruleCount, int maxRules, gxos::web::CssDiagnostics& diag, gxos::web::WebStyle& bodyStyle)
+{
+    const int kCssLimit = 16 * 1024; int remaining = kCssLimit - (int)diag.styleBytesProcessed; if (remaining <= 0) { diag.styleBlockCapped = true; return; }
+    int blockLen = (int)(end - start); if (blockLen > remaining) { blockLen = remaining; diag.styleBlockCapped = true; } end = start + blockLen; diag.cssDetected = true; diag.styleBytesProcessed += (unsigned long)blockLen;
+    const char* p = start;
+    while (p < end && ruleCount < maxRules) {
+        while (p < end && (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n')) ++p;
+        const char* brace = p; while (brace < end && *brace != '{') ++brace; if (brace >= end) break;
+        const char* close = brace + 1; while (close < end && *close != '}') ++close; if (close >= end) break;
+        const char* selStart = p;
+        while (selStart < brace) { const char* comma = selStart; while (comma < brace && *comma != ',') ++comma; NavCssRule rule{}; if (nav_parse_css_selector(selStart, comma, rule)) { nav_parse_css_decls(brace + 1, close, rule.style, diag); if (rule.selectorType == NAV_CSS_ELEMENT && streq_local(rule.selector, "body")) bodyStyle = rule.style; rules[ruleCount++] = rule; ++diag.styleRuleCount; } else { ++diag.unsupportedDeclarationCount; } selStart = comma < brace ? comma + 1 : brace; }
+        p = close + 1;
+    }
+}
+
+static bool nav_class_matches(const char* classes, const char* selector)
+{
+    const char* p = classes ? classes : "";
+    while (*p) { while (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n') ++p; const char* start = p; while (*p && *p != ' ' && *p != '\t' && *p != '\r' && *p != '\n') ++p; char token[32]; nav_trim_lower_copy(start, p, token, sizeof(token)); if (streq_local(token, selector)) return true; }
+    return false;
+}
+
+static gxos::web::WebStyle nav_style_for_tag(const char* tag, const char* className, const char* id, const gxos::web::WebStyle& bodyStyle, const NavCssRule* rules, int ruleCount)
+{
+    gxos::web::WebStyle style = bodyStyle; gxos::web::WebStyle defaults = nav_default_style_for_tag(tag); nav_style_merge(style, defaults);
+    for (int i = 0; i < ruleCount; ++i) { bool match = false; if (rules[i].selectorType == NAV_CSS_ELEMENT) match = streq_local(tag, rules[i].selector); else if (rules[i].selectorType == NAV_CSS_CLASS) match = nav_class_matches(className, rules[i].selector); else if (rules[i].selectorType == NAV_CSS_ID) match = streq_local(id ? id : "", rules[i].selector); if (match && !(rules[i].selectorType == NAV_CSS_ELEMENT && streq_local(rules[i].selector, "body"))) nav_style_merge(style, rules[i].style); }
+    return style;
+}
+
+static void nav_scan_css(const char* html, NavCssRule* rules, int& ruleCount, int maxRules, gxos::web::CssDiagnostics& diag, gxos::web::WebStyle& bodyStyle)
+{
+    const char* p = html;
+    while (p && *p) { if (*p != '<') { ++p; continue; } const char* tagEnd = nav_find_char(p, '>'); if (!tagEnd) break; if (nav_tag_at(p, "style")) { const char* close = nav_find_close_tag(tagEnd + 1, "style"); if (close) { nav_parse_css_block(tagEnd + 1, close, rules, ruleCount, maxRules, diag, bodyStyle); p = nav_find_char(close, '>'); if (p && *p == '>') ++p; continue; } } else if (nav_tag_at(p, "link")) { char rel[32]; nav_extract_attr(p, tagEnd, "rel", rel, sizeof(rel)); for (int i = 0; rel[i]; ++i) rel[i] = nav_lower(rel[i]); if (streq_local(rel, "stylesheet")) ++diag.unsupportedExternalStylesheetCount; } p = tagEnd + 1; }
+}
+
 void NavigatorApp::resolveHref(const char* baseUrl, const char* href, char* out, int outSize) const
 {
     if (!href || !href[0]) {
@@ -5205,92 +5441,70 @@ void NavigatorApp::parseHtmlDocument(const char* url, const char* html)
     strcopy(m_currentUrl, url ? url : "", MAX_URL_LEN);
     strcopy(m_title, url ? url : "Document", MAX_TITLE_LEN_NAV);
     m_blockCount = 0;
+
+    NavCssRule cssRules[32]{};
+    int cssRuleCount = 0;
+    gxos::web::CssDiagnostics cssDiagnostics{};
+    gxos::web::WebStyle bodyStyle{};
+    nav_scan_css(html ? html : "", cssRules, cssRuleCount, 32, cssDiagnostics, bodyStyle);
+
     const char* p = html;
     while (p && *p && m_blockCount < MAX_BLOCKS) {
         const char* tagEnd = (*p == '<') ? nav_find_char(p, '>') : nullptr;
-        if (!tagEnd) {
-            ++p;
-            continue;
-        }
+        if (!tagEnd) { ++p; continue; }
 
         const char* close = nullptr;
         char text[MAX_BLOCK_TEXT];
+        char className[64];
+        char id[64];
+        nav_extract_attr(p, tagEnd, "class", className, sizeof(className));
+        nav_extract_attr(p, tagEnd, "id", id, sizeof(id));
         if (nav_tag_at(p, "title")) {
             close = nav_find_close_tag(tagEnd + 1, "title");
             if (close) nav_copy_clean_text(tagEnd + 1, close, m_title, MAX_TITLE_LEN_NAV, false);
         } else if (nav_tag_at(p, "h1")) {
             close = nav_find_close_tag(tagEnd + 1, "h1");
-            if (close) {
-                nav_copy_clean_text(tagEnd + 1, close, text, MAX_BLOCK_TEXT, false);
-                addBlock(BLOCK_HEADING, text);
-            }
+            if (close) { nav_copy_clean_text(tagEnd + 1, close, text, MAX_BLOCK_TEXT, false); gxos::web::WebStyle style = nav_style_for_tag("h1", className, id, bodyStyle, cssRules, cssRuleCount); addBlock(BLOCK_HEADING, text, "", &style); }
         } else if (nav_tag_at(p, "h2")) {
             close = nav_find_close_tag(tagEnd + 1, "h2");
-            if (close) {
-                nav_copy_clean_text(tagEnd + 1, close, text, MAX_BLOCK_TEXT, false);
-                addBlock(BLOCK_HEADING, text);
-            }
+            if (close) { nav_copy_clean_text(tagEnd + 1, close, text, MAX_BLOCK_TEXT, false); gxos::web::WebStyle style = nav_style_for_tag("h2", className, id, bodyStyle, cssRules, cssRuleCount); addBlock(BLOCK_HEADING, text, "", &style); }
         } else if (nav_tag_at(p, "h3")) {
             close = nav_find_close_tag(tagEnd + 1, "h3");
-            if (close) {
-                nav_copy_clean_text(tagEnd + 1, close, text, MAX_BLOCK_TEXT, false);
-                addBlock(BLOCK_HEADING, text);
-            }
+            if (close) { nav_copy_clean_text(tagEnd + 1, close, text, MAX_BLOCK_TEXT, false); gxos::web::WebStyle style = nav_style_for_tag("h3", className, id, bodyStyle, cssRules, cssRuleCount); addBlock(BLOCK_HEADING, text, "", &style); }
         } else if (nav_tag_at(p, "p")) {
             close = nav_find_close_tag(tagEnd + 1, "p");
-            if (close) {
-                nav_copy_clean_text(tagEnd + 1, close, text, MAX_BLOCK_TEXT, false);
-                addBlock(BLOCK_PARAGRAPH, text);
-            }
+            if (close) { nav_copy_clean_text(tagEnd + 1, close, text, MAX_BLOCK_TEXT, false); gxos::web::WebStyle style = nav_style_for_tag("p", className, id, bodyStyle, cssRules, cssRuleCount); addBlock(BLOCK_PARAGRAPH, text, "", &style); }
         } else if (nav_tag_at(p, "li")) {
             close = nav_find_close_tag(tagEnd + 1, "li");
-            if (close) {
-                nav_copy_clean_text(tagEnd + 1, close, text, MAX_BLOCK_TEXT, false);
-                addBlock(BLOCK_LIST_ITEM, text);
-            }
+            if (close) { nav_copy_clean_text(tagEnd + 1, close, text, MAX_BLOCK_TEXT, false); gxos::web::WebStyle style = nav_style_for_tag("li", className, id, bodyStyle, cssRules, cssRuleCount); addBlock(BLOCK_LIST_ITEM, text, "", &style); }
         } else if (nav_tag_at(p, "pre")) {
             close = nav_find_close_tag(tagEnd + 1, "pre");
-            if (close) {
-                nav_copy_clean_text(tagEnd + 1, close, text, MAX_BLOCK_TEXT, true);
-                addBlock(BLOCK_PREFORMATTED, text);
-            }
+            if (close) { nav_copy_clean_text(tagEnd + 1, close, text, MAX_BLOCK_TEXT, true); gxos::web::WebStyle style = nav_style_for_tag("pre", className, id, bodyStyle, cssRules, cssRuleCount); addBlock(BLOCK_PREFORMATTED, text, "", &style); }
         } else if (nav_tag_at(p, "script")) {
             close = nav_find_close_tag(tagEnd + 1, "script");
         } else if (nav_tag_at(p, "style")) {
             close = nav_find_close_tag(tagEnd + 1, "style");
         } else if (nav_tag_at(p, "img")) {
-            char src[MAX_URL_LEN];
-            char alt[96];
-            char widthText[16];
-            char heightText[16];
-            char resolved[MAX_URL_LEN];
+            char src[MAX_URL_LEN]; char alt[96]; char widthText[16]; char heightText[16]; char resolved[MAX_URL_LEN];
             nav_extract_attr(p, tagEnd, "src", src, MAX_URL_LEN);
             nav_extract_attr(p, tagEnd, "alt", alt, 96);
             nav_extract_attr(p, tagEnd, "width", widthText, 16);
             nav_extract_attr(p, tagEnd, "height", heightText, 16);
-            if (src[0]) {
-                resolveHref(url, src, resolved, MAX_URL_LEN);
-                addImageBlock(src, alt, resolved, nav_parse_positive_int(widthText), nav_parse_positive_int(heightText));
-            }
+            if (src[0]) { resolveHref(url, src, resolved, MAX_URL_LEN); gxos::web::WebStyle style = nav_style_for_tag("img", className, id, bodyStyle, cssRules, cssRuleCount); addImageBlock(src, alt, resolved, nav_parse_positive_int(widthText), nav_parse_positive_int(heightText), &style); }
         } else if (nav_tag_at(p, "a")) {
             close = nav_find_close_tag(tagEnd + 1, "a");
-            if (close) {
-                char href[MAX_URL_LEN];
-                char resolved[MAX_URL_LEN];
-                nav_extract_href(p, tagEnd, href, MAX_URL_LEN);
-                resolveHref(url, href, resolved, MAX_URL_LEN);
-                nav_copy_clean_text(tagEnd + 1, close, text, MAX_BLOCK_TEXT, false);
-                addBlock(BLOCK_LINK, text, resolved);
-            }
+            if (close) { char href[MAX_URL_LEN]; char resolved[MAX_URL_LEN]; nav_extract_href(p, tagEnd, href, MAX_URL_LEN); resolveHref(url, href, resolved, MAX_URL_LEN); nav_copy_clean_text(tagEnd + 1, close, text, MAX_BLOCK_TEXT, false); gxos::web::WebStyle style = nav_style_for_tag("a", className, id, bodyStyle, cssRules, cssRuleCount); addBlock(BLOCK_LINK, text, resolved, &style); }
         }
         p = close ? nav_find_char(close, '>') : tagEnd;
         if (p && *p == '>') ++p;
     }
     if (m_blockCount == 0) {
-        addBlock(BLOCK_PREFORMATTED, html ? html : "");
+        gxos::web::WebStyle style = nav_style_for_tag("pre", "", "", bodyStyle, cssRules, cssRuleCount);
+        addBlock(BLOCK_PREFORMATTED, html ? html : "", "", &style);
     }
-    rememberPageMetadata(url, url, "file", "text/html", "", html, html ? strlen_local(html) : 0);
+    rememberPageMetadata(url, url, "file", "text/html", "", html, html ? strlen_local(html) : 0, &cssDiagnostics, &bodyStyle);
 }
+
 
 void NavigatorApp::loadFileUrl(const char* url)
 {
@@ -5354,6 +5568,8 @@ void NavigatorApp::loadUrl(const char* url)
         buildAboutNavigatorDocument();
     } else if (streq_local(normalized, "about:bookmarks")) {
         buildBookmarksDocument();
+    } else if (streq_local(normalized, "about:downloads")) {
+        buildDownloadsDocument();
     } else if (streq_local(normalized, "about:page-info")) {
         buildPageInfoDocument();
     } else if (streq_local(normalized, "about:view-source")) {
@@ -5497,16 +5713,17 @@ int NavigatorApp::blockHeight(const DocBlock& block, int maxChars) const
     if (block.kind == BLOCK_IMAGE) {
         int imageH = block.height > 0 ? block.height : (block.naturalHeight > 0 ? block.naturalHeight : 64);
         if (imageH > 420) imageH = 420;
-        return imageH + 12;
+        return css_margin_top_or(block.style, 4) + imageH + css_margin_bottom_or(block.style, 8);
     }
-    int lineH = block.kind == BLOCK_HEADING ? 20 : 16;
+    int lineH = block.kind == BLOCK_HEADING ? (css_font_size_or(block.style, 20) > 22 ? 20 : 16) : 16;
+    int boxPadding = block.kind == BLOCK_PREFORMATTED ? css_padding_or(block.style, 4) * 2 : 0;
     // Extra pre-gap before headings is accounted for in blockY() via the caller.
-    return lines * lineH + 8;
+    return css_margin_top_or(block.style, block.kind == BLOCK_HEADING ? 10 : 4) + lines * lineH + boxPadding + css_margin_bottom_or(block.style, block.kind == BLOCK_LIST_ITEM ? 4 : 8);
 }
 
 int NavigatorApp::blockY(int index, int maxChars) const
 {
-    int y = CONTENT_Y + 12 - m_scrollY;
+    int y = CONTENT_Y + 12 + css_margin_top_or(m_bodyStyle, 0) - m_scrollY;
     for (int i = 0; i < index && i < m_blockCount; ++i) {
         y += blockHeight(m_blocks[i], maxChars);
         // Extra pre-gap before a heading that follows another block.
@@ -5524,10 +5741,11 @@ int NavigatorApp::hitLinkIndex(int x, int y) const
     int maxChars = (m_window->w - CONTENT_X * 2 - 32) / 6;
     for (int i = 0; i < m_blockCount; ++i) {
         if (m_blocks[i].kind != BLOCK_LINK) continue;
-        int by = blockY(i, maxChars);
-        int h = blockHeight(m_blocks[i], maxChars);
+        int by = blockY(i, maxChars) + css_margin_top_or(m_blocks[i].style, 4);
+        int h = blockHeight(m_blocks[i], maxChars) - css_margin_top_or(m_blocks[i].style, 4);
         int tw = strlen_local(m_blocks[i].text) * 6;
-        if (x >= CONTENT_X + 14 && x < CONTENT_X + 14 + tw && y >= by && y < by + h) return i;
+        int left = CONTENT_X + 14 + css_margin_left_or(m_bodyStyle, 0) + css_margin_left_or(m_blocks[i].style, 0);
+        if (x >= left && x < left + tw && y >= by && y < by + h) return i;
     }
     return -1;
 }
@@ -5584,38 +5802,47 @@ void NavigatorApp::drawDocument(uint32_t x, uint32_t y, uint32_t w, uint32_t h)
 {
     int maxChars = ((int)w - CONTENT_X * 2 - 32) / 6;
     int bottom = (int)h - STATUS_H - 8;
+    int bodyMarginLeft = css_margin_left_or(m_bodyStyle, 0);
     for (int i = 0; i < m_blockCount; ++i) {
         int by = blockY(i, maxChars);
         if (by > bottom) continue;
         if (by + blockHeight(m_blocks[i], maxChars) < CONTENT_Y) continue;
         int absY = (int)y + by;
-        uint32_t textX = x + CONTENT_X + 14;
+        int blockMarginTop = css_margin_top_or(m_blocks[i].style, m_blocks[i].kind == BLOCK_HEADING ? 10 : 4);
+        int blockMarginLeft = css_margin_left_or(m_blocks[i].style, 0);
+        int blockPadding = css_padding_or(m_blocks[i].style, m_blocks[i].kind == BLOCK_PREFORMATTED ? 4 : 0);
+        uint32_t textX = x + CONTENT_X + 14 + bodyMarginLeft + blockMarginLeft;
         if (m_blocks[i].kind == BLOCK_HEADING) {
             // Bold-looking heading: draw in a deep navy color, then a 2px accent bar.
-            appDrawText(textX, (uint32_t)absY, m_blocks[i].text, rgb(22, 32, 52));
+            uint32_t color = css_color_or(rgb(22, 32, 52), m_blocks[i].style);
+            appDrawText(textX, (uint32_t)(absY + blockMarginTop), m_blocks[i].text, color);
+            if (m_blocks[i].style.bold) appDrawText(textX + 1, (uint32_t)(absY + blockMarginTop), m_blocks[i].text, color);
             int barW = (int)w - CONTENT_X * 2 - 32;
-            framebuffer::fill_rect(textX, (uint32_t)(absY + 18), (uint32_t)(barW > 0 ? barW : 1), 2, rgb(55, 110, 200));
+            framebuffer::fill_rect(textX, (uint32_t)(absY + blockMarginTop + 18), (uint32_t)(barW > 0 ? barW : 1), 2, rgb(55, 110, 200));
         } else if (m_blocks[i].kind == BLOCK_LINK) {
-            uint32_t color = i == m_hoverLinkIndex ? rgb(10, 84, 160) : rgb(30, 92, 184);
-            int linkOutY = absY;
-            drawWrappedText(textX, (uint32_t)absY, m_blocks[i].text, color, maxChars, linkOutY);
+            uint32_t color = css_color_or(i == m_hoverLinkIndex ? rgb(10, 84, 160) : rgb(30, 92, 184), m_blocks[i].style);
+            int linkOutY = absY + blockMarginTop;
+            drawWrappedText(textX, (uint32_t)(absY + blockMarginTop), m_blocks[i].text, color, maxChars, linkOutY);
             // Underline each rendered line.
-            for (int ly = absY + 13; ly < linkOutY; ly += 16) {
-                int lineCharCount = maxChars < 90 ? maxChars : 90;
-                framebuffer::fill_rect(textX, (uint32_t)ly, (uint32_t)(lineCharCount * 6), 1, color);
+            if (m_blocks[i].style.underline) {
+                for (int ly = absY + blockMarginTop + 13; ly < linkOutY; ly += 16) {
+                    int lineCharCount = maxChars < 90 ? maxChars : 90;
+                    framebuffer::fill_rect(textX, (uint32_t)ly, (uint32_t)(lineCharCount * 6), 1, color);
+                }
             }
         } else if (m_blocks[i].kind == BLOCK_LIST_ITEM) {
-            appDrawText(textX, (uint32_t)absY, "-", rgb(72, 78, 92));
-            int outY = absY;
-            drawWrappedText(textX + 14, (uint32_t)absY, m_blocks[i].text, rgb(54, 60, 72), maxChars - 4, outY);
+            uint32_t color = css_color_or(rgb(54, 60, 72), m_blocks[i].style);
+            appDrawText(textX, (uint32_t)(absY + blockMarginTop), "-", rgb(72, 78, 92));
+            int outY = absY + blockMarginTop;
+            drawWrappedText(textX + 14, (uint32_t)(absY + blockMarginTop), m_blocks[i].text, color, maxChars - 4, outY);
         } else if (m_blocks[i].kind == BLOCK_PREFORMATTED) {
             // Light box background for preformatted blocks.
-            int preH = blockHeight(m_blocks[i], maxChars);
+            int preH = blockHeight(m_blocks[i], maxChars) - css_margin_top_or(m_blocks[i].style, 4) - css_margin_bottom_or(m_blocks[i].style, 8);
             int boxW = (int)w - CONTENT_X * 2 - 28;
             if (boxW > 0 && preH > 0)
-                framebuffer::fill_rect(textX - 4, (uint32_t)(absY - 2), (uint32_t)(boxW), (uint32_t)(preH), rgb(230, 232, 238));
-            int outY = absY;
-            drawWrappedText(textX, (uint32_t)absY, m_blocks[i].text, rgb(40, 50, 68), maxChars, outY);
+                framebuffer::fill_rect(textX - 4, (uint32_t)(absY + blockMarginTop - 2), (uint32_t)(boxW), (uint32_t)(preH + blockPadding * 2), css_background_or(rgb(230, 232, 238), m_blocks[i].style));
+            int outY = absY + blockMarginTop + blockPadding;
+            drawWrappedText(textX, (uint32_t)(absY + blockMarginTop + blockPadding), m_blocks[i].text, css_color_or(rgb(40, 50, 68), m_blocks[i].style), maxChars, outY);
         } else if (m_blocks[i].kind == BLOCK_IMAGE) {
             int imageW = m_blocks[i].width > 0 ? m_blocks[i].width : (m_blocks[i].naturalWidth > 0 ? m_blocks[i].naturalWidth : 220);
             int imageH = m_blocks[i].height > 0 ? m_blocks[i].height : (m_blocks[i].naturalHeight > 0 ? m_blocks[i].naturalHeight : 64);
@@ -5624,25 +5851,25 @@ void NavigatorApp::drawDocument(uint32_t x, uint32_t y, uint32_t w, uint32_t h)
             if (imageW > maxW) imageW = maxW;
             if (imageH > 420) imageH = 420;
             int contentBottom = (int)h - STATUS_H - 8;
-            if (absY >= CONTENT_Y && absY + imageH <= contentBottom) {
+            if (absY + blockMarginTop >= CONTENT_Y && absY + blockMarginTop + imageH <= contentBottom) {
                 char imagePath[MAX_URL_LEN];
                 nav_image_file_path_from_url(m_blocks[i].url, imagePath, MAX_URL_LEN);
                 gxos::gui::ImageBitmap bitmap = gxos::gui::ImageAdapter::LoadFromFile(imagePath);
-                bool drew = gxos::gui::ImageAdapter::DrawToFramebuffer(bitmap, textX, (uint32_t)absY, (uint32_t)imageW, (uint32_t)imageH);
+                bool drew = gxos::gui::ImageAdapter::DrawToFramebuffer(bitmap, textX, (uint32_t)(absY + blockMarginTop), (uint32_t)imageW, (uint32_t)imageH);
                 if (!drew) {
-                    framebuffer::fill_rect(textX, (uint32_t)absY, (uint32_t)imageW, (uint32_t)imageH, rgb(232, 236, 242));
-                    framebuffer::fill_rect(textX, (uint32_t)absY, (uint32_t)imageW, 1, rgb(145, 153, 168));
-                    framebuffer::fill_rect(textX, (uint32_t)(absY + imageH - 1), (uint32_t)imageW, 1, rgb(145, 153, 168));
-                    framebuffer::fill_rect(textX, (uint32_t)absY, 1, (uint32_t)imageH, rgb(145, 153, 168));
-                    framebuffer::fill_rect(textX + (uint32_t)imageW - 1, (uint32_t)absY, 1, (uint32_t)imageH, rgb(145, 153, 168));
+                    framebuffer::fill_rect(textX, (uint32_t)(absY + blockMarginTop), (uint32_t)imageW, (uint32_t)imageH, rgb(232, 236, 242));
+                    framebuffer::fill_rect(textX, (uint32_t)(absY + blockMarginTop), (uint32_t)imageW, 1, rgb(145, 153, 168));
+                    framebuffer::fill_rect(textX, (uint32_t)(absY + blockMarginTop + imageH - 1), (uint32_t)imageW, 1, rgb(145, 153, 168));
+                    framebuffer::fill_rect(textX, (uint32_t)(absY + blockMarginTop), 1, (uint32_t)imageH, rgb(145, 153, 168));
+                    framebuffer::fill_rect(textX + (uint32_t)imageW - 1, (uint32_t)(absY + blockMarginTop), 1, (uint32_t)imageH, rgb(145, 153, 168));
                     gxos::gui::ImageLoadStatus status = bitmap.status != gxos::gui::ImageLoadStatus::Ok ? bitmap.status : (gxos::gui::ImageLoadStatus)m_blocks[i].imageStatus;
                     const char* label = m_blocks[i].alt[0] ? m_blocks[i].alt : gxos::gui::ImageLoadStatusName(status);
-                    appDrawText(textX + 8, (uint32_t)(absY + 8), label, rgb(54, 60, 72));
+                    appDrawText(textX + 8, (uint32_t)(absY + blockMarginTop + 8), label, rgb(54, 60, 72));
                 }
             }
         } else {
-            int outY = absY;
-            drawWrappedText(textX, (uint32_t)absY, m_blocks[i].text, rgb(54, 60, 72), maxChars, outY);
+            int outY = absY + blockMarginTop;
+            drawWrappedText(textX, (uint32_t)(absY + blockMarginTop), m_blocks[i].text, css_color_or(rgb(54, 60, 72), m_blocks[i].style), maxChars, outY);
         }
     }
 }
@@ -5702,6 +5929,9 @@ void printNavigatorRuntimeSmokeReport()
     serial::puts("[NAVIGATOR-SMOKE] capability.local_png=enabled through shared ImageAdapter where VFS image data exists\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.http=unsupported/network unavailable\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.remote_png=unsupported without bare-metal HTTP transport\n");
+    serial::puts("[NAVIGATOR-SMOKE] capability.downloads=unavailable until HTTP/VFS write path is connected\n");
+    serial::puts("[NAVIGATOR-SMOKE] capability.css_lite=enabled for embedded style blocks\n");
+    serial::puts("[NAVIGATOR-SMOKE] capability.external_stylesheets=unsupported\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.bookmark_persistence=unavailable; in-memory defaults only\n");
     serial::puts("[NAVIGATOR-SMOKE] result=PASS\n");
     serial::puts("[NAVIGATOR-SMOKE] END\n");

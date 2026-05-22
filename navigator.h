@@ -17,6 +17,7 @@ namespace apps {
 
 using gxos::web::BlockType;
 using gxos::web::DocBlock;
+using gxos::web::WebStyle;
 using gxos::web::WebDocument;
 
 // =============================================================================
@@ -26,6 +27,17 @@ using gxos::web::WebDocument;
 struct Bookmark {
 	std::string title;
 	std::string url;
+};
+
+struct DownloadItem {
+	std::string url;
+	std::string finalUrl;
+	std::string suggestedFileName;
+	std::string contentType;
+	std::string savedPath;
+	size_t      byteCount = 0;
+	bool        success = false;
+	std::string error;
 };
 
 struct NavigatorPageMetadata {
@@ -48,6 +60,15 @@ struct NavigatorPageMetadata {
 	int         remoteImageCount = 0;
 	int         localImageCount = 0;
 	std::string lastImageError;
+	bool        cssDetected = false;
+	int         styleRuleCount = 0;
+	int         unsupportedExternalStylesheetCount = 0;
+	int         unsupportedCssDeclarationCount = 0;
+	bool        cssStyleBlockCapped = false;
+	size_t      cssStyleBytesProcessed = 0;
+	bool        downloaded = false;
+	std::string downloadSavedPath;
+	size_t      downloadByteCount = 0;
 };
 
 // =============================================================================
@@ -124,6 +145,7 @@ private:
 	static WebDocument buildPageInfoDocument();
 	static WebDocument buildViewSourceDocument();
 	static WebDocument buildRuntimeDocument();
+	static WebDocument buildDownloadsDocument();
 	// Load a file:// URL and convert the raw text to a WebDocument.
 	// Returns an error document if the file cannot be read.
 	static WebDocument loadFileUrl(const std::string& url);

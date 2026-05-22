@@ -116,6 +116,43 @@ BinaryReadResult readBinaryFile(const std::string& absolutePath, uint32_t maxByt
 	return result;
 }
 
+bool fileExists(const std::string& absolutePath)
+{
+	std::ifstream input(toHostPath(absolutePath), std::ios::binary);
+	return static_cast<bool>(input);
+}
+
+bool writeBinaryFile(const std::string& absolutePath, const std::string& bytes)
+{
+	std::string hostPath = toHostPath(absolutePath);
+#if defined(_WIN32)
+	{
+		std::string dir = hostPath;
+		size_t slash = dir.rfind('\\');
+		if (slash != std::string::npos) {
+			dir = dir.substr(0, slash);
+			std::string part;
+			for (size_t i = 0; i <= dir.size(); ++i) {
+				if (i == dir.size() || dir[i] == '\\') {
+					if (!part.empty()) {
+						_mkdir(part.c_str());
+					}
+				}
+				if (i < dir.size()) part += dir[i];
+			}
+		}
+	}
+#endif
+	std::ofstream out(hostPath, std::ios::binary | std::ios::trunc);
+	if (!out) {
+		Logger::write(LogLevel::Warn,
+			std::string("Navigator writeBinaryFile: cannot open for write: ") + hostPath);
+		return false;
+	}
+	out.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+	return out.good();
+}
+
 std::string imageLoaderPathForFile(const std::string& absolutePath)
 {
 	return toHostPath(absolutePath);
@@ -226,6 +263,28 @@ BinaryReadResult readBinaryFile(const std::string& absolutePath, uint32_t maxByt
 		reinterpret_cast<const uint8_t*>(buf) + bytesRead);
 	result.status = FileReadStatus::Ok;
 	return result;
+}
+
+bool fileExists(const std::string& absolutePath)
+{
+	kernel::vfs::FileInfo info{};
+	return kernel::vfs::stat(absolutePath.c_str(), &info) == kernel::vfs::VFS_OK;
+}
+
+bool writeBinaryFile(const std::string& absolutePath, const std::string& bytes)
+{
+	const char* downloadsDir = "/downloads";
+	kernel::vfs::FileInfo info{};
+	if (absolutePath.rfind("/downloads/", 0) == 0 &&
+		kernel::vfs::stat(downloadsDir, &info) != kernel::vfs::VFS_OK) {
+		kernel::vfs::mkdir(downloadsDir);
+	}
+
+	int32_t ret = kernel::vfs::write_file(
+		absolutePath.c_str(),
+		bytes.data(),
+		static_cast<uint32_t>(bytes.size()));
+	return (ret >= 0 && static_cast<uint32_t>(ret) == bytes.size());
 }
 
 std::string imageLoaderPathForFile(const std::string& absolutePath)

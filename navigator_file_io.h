@@ -57,6 +57,14 @@ FileReadResult readTextFile(const std::string& absolutePath);
 // mapping as readTextFile().  |maxBytes| protects Navigator from huge images.
 BinaryReadResult readBinaryFile(const std::string& absolutePath, uint32_t maxBytes = kNavigatorMaxImageBytes);
 
+// Return true when |absolutePath| exists under the same host/VFS mapping used
+// by readTextFile().  Used by Navigator to avoid overwriting downloads.
+bool fileExists(const std::string& absolutePath);
+
+// Write binary data to |absolutePath|, creating the file and any missing
+// intermediate directories where the platform backend supports that.
+bool writeBinaryFile(const std::string& absolutePath, const std::string& bytes);
+
 // Convert an absolute POSIX-style Navigator path into the path a host-side
 // compositor image loader can open.  On bare-metal this returns absolutePath.
 std::string imageLoaderPathForFile(const std::string& absolutePath);

@@ -18,6 +18,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdlib>
+#include <limits>
 #include <sstream>
 #include <utility>
 
@@ -29,6 +30,8 @@ namespace web {
 // ---------------------------------------------------------------------------
 
 namespace {
+
+	constexpr size_t kCssLiteMaxStyleBytes = 16u * 1024u;
 
 // ASCII lower-case without locale dependency.
 static std::string toLower(const std::string& s)
@@ -145,6 +148,410 @@ static int parsePositiveIntAttr(const std::string& tagBody, const std::string& a
 	return result > 0 ? result : 0;
 }
 
+static bool isHexDigit(char c)
+{
+	return (c >= '0' && c <= '9') ||
+		(c >= 'a' && c <= 'f') ||
+		(c >= 'A' && c <= 'F');
+}
+
+static int hexDigitValue(char c)
+{
+	if (c >= '0' && c <= '9') return c - '0';
+	if (c >= 'a' && c <= 'f') return 10 + (c - 'a');
+	if (c >= 'A' && c <= 'F') return 10 + (c - 'A');
+	return 0;
+}
+
+static bool parseCssColor(const std::string& rawValue, uint32_t& outColor)
+{
+	std::string value = toLower(trim(rawValue));
+	if (value.empty()) return false;
+	if (value.size() == 7 && value[0] == '#') {
+		for (size_t i = 1; i < value.size(); ++i) {
+			if (!isHexDigit(value[i])) return false;
+		}
+		int r = hexDigitValue(value[1]) * 16 + hexDigitValue(value[2]);
+		int g = hexDigitValue(value[3]) * 16 + hexDigitValue(value[4]);
+		int b = hexDigitValue(value[5]) * 16 + hexDigitValue(value[6]);
+		outColor = 0xFF000000u | (static_cast<uint32_t>(r) << 16) |
+			(static_cast<uint32_t>(g) << 8) | static_cast<uint32_t>(b);
+		return true;
+	}
+	if (value.size() == 4 && value[0] == '#') {
+		for (size_t i = 1; i < value.size(); ++i) {
+			if (!isHexDigit(value[i])) return false;
+		}
+		int r = hexDigitValue(value[1]); r = r * 16 + r;
+		int g = hexDigitValue(value[2]); g = g * 16 + g;
+		int b = hexDigitValue(value[3]); b = b * 16 + b;
+		outColor = 0xFF000000u | (static_cast<uint32_t>(r) << 16) |
+			(static_cast<uint32_t>(g) << 8) | static_cast<uint32_t>(b);
+		return true;
+	}
+	if (value == "black") { outColor = 0xFF000000u; return true; }
+	if (value == "white") { outColor = 0xFFFFFFFFu; return true; }
+	if (value == "red")   { outColor = 0xFFFF0000u; return true; }
+	if (value == "green") { outColor = 0xFF008000u; return true; }
+	if (value == "blue")  { outColor = 0xFF0000FFu; return true; }
+	if (value == "gray" || value == "grey") { outColor = 0xFF808080u; return true; }
+	return false;
+}
+
+static int parseCssPixelValue(const std::string& rawValue, bool& ok)
+{
+	std::string value = toLower(trim(rawValue));
+	ok = false;
+	if (value.empty()) return 0;
+	if (value.size() > 2 && value.substr(value.size() - 2) == "px") {
+		value = trim(value.substr(0, value.size() - 2));
+	}
+	if (value.empty()) return 0;
+	int sign = 1;
+	size_t pos = 0;
+	if (value[pos] == '-') { sign = -1; ++pos; }
+	else if (value[pos] == '+') { ++pos; }
+	if (pos >= value.size() || !std::isdigit(static_cast<unsigned char>(value[pos]))) return 0;
+	int result = 0;
+	while (pos < value.size() && std::isdigit(static_cast<unsigned char>(value[pos]))) {
+		result = result * 10 + (value[pos] - '0');
+		if (result > 4096) result = 4096;
+		++pos;
+	}
+	if (pos != value.size()) return 0;
+	ok = true;
+	result *= sign;
+	if (result < 0) result = 0;
+	return result;
+}
+
+static bool isSupportedSelectorName(const std::string& selector)
+{
+	return selector == "body" || selector == "h1" || selector == "h2" || selector == "h3" ||
+		selector == "p" || selector == "a" || selector == "li" || selector == "pre" ||
+		selector == "code" || selector == "img";
+}
+
+static bool parseCssSelector(const std::string& rawSelector, WebStyleRule& outRule)
+{
+	std::string selector = toLower(trim(rawSelector));
+	if (selector.empty()) return false;
+	if (selector[0] == '.') {
+		selector = trim(selector.substr(1));
+		if (selector.empty()) return false;
+		outRule.selectorType = StyleSelectorType::Class;
+		outRule.selector = selector;
+		return true;
+	}
+	if (selector[0] == '#') {
+		selector = trim(selector.substr(1));
+		if (selector.empty()) return false;
+		outRule.selectorType = StyleSelectorType::Id;
+		outRule.selector = selector;
+		return true;
+	}
+	if (!isSupportedSelectorName(selector)) return false;
+	outRule.selectorType = StyleSelectorType::Element;
+	outRule.selector = selector;
+	return true;
+}
+
+static void applyStyleDeclaration(WebStyle& style,
+	const std::string& property,
+	const std::string& value,
+	CssDiagnostics& diag)
+{
+	std::string prop = toLower(trim(property));
+	std::string val = trim(value);
+	if (prop.empty() || val.empty()) return;
+
+	uint32_t color = 0;
+	bool parsedInt = false;
+	if (prop == "color") {
+		if (parseCssColor(val, color)) {
+			style.hasColor = true;
+			style.color = color;
+		} else {
+			++diag.unsupportedDeclarationCount;
+		}
+		return;
+	}
+	if (prop == "background-color") {
+		if (parseCssColor(val, color)) {
+			style.hasBackgroundColor = true;
+			style.backgroundColor = color;
+		} else {
+			++diag.unsupportedDeclarationCount;
+		}
+		return;
+	}
+	if (prop == "font-weight") {
+		style.bold = (toLower(val) == "bold");
+		if (!style.bold && toLower(val) != "normal") ++diag.unsupportedDeclarationCount;
+		return;
+	}
+	if (prop == "text-decoration") {
+		std::string lower = toLower(val);
+		style.underline = (lower.find("underline") != std::string::npos);
+		if (!style.underline && lower != "none") ++diag.unsupportedDeclarationCount;
+		return;
+	}
+	if (prop == "margin") {
+		int px = parseCssPixelValue(val, parsedInt);
+		if (parsedInt) {
+			style.marginTop = px;
+			style.marginBottom = px;
+			style.marginLeft = px;
+		} else {
+			++diag.unsupportedDeclarationCount;
+		}
+		return;
+	}
+	if (prop == "margin-top") {
+		style.marginTop = parseCssPixelValue(val, parsedInt);
+		if (!parsedInt) ++diag.unsupportedDeclarationCount;
+		return;
+	}
+	if (prop == "margin-bottom") {
+		style.marginBottom = parseCssPixelValue(val, parsedInt);
+		if (!parsedInt) ++diag.unsupportedDeclarationCount;
+		return;
+	}
+	if (prop == "margin-left") {
+		style.marginLeft = parseCssPixelValue(val, parsedInt);
+		if (!parsedInt) ++diag.unsupportedDeclarationCount;
+		return;
+	}
+	if (prop == "padding") {
+		style.padding = parseCssPixelValue(val, parsedInt);
+		if (!parsedInt) ++diag.unsupportedDeclarationCount;
+		return;
+	}
+	if (prop == "font-size") {
+		style.fontScaleOrSize = parseCssPixelValue(val, parsedInt);
+		if (!parsedInt) ++diag.unsupportedDeclarationCount;
+		return;
+	}
+	++diag.unsupportedDeclarationCount;
+}
+
+static void parseCssDeclarations(const std::string& body, WebStyle& style, CssDiagnostics& diag)
+{
+	size_t cursor = 0;
+	while (cursor < body.size()) {
+		size_t semi = body.find(';', cursor);
+		std::string decl = body.substr(cursor, semi == std::string::npos ? std::string::npos : semi - cursor);
+		size_t colon = decl.find(':');
+		if (colon != std::string::npos) {
+			applyStyleDeclaration(style, decl.substr(0, colon), decl.substr(colon + 1), diag);
+		}
+		cursor = semi == std::string::npos ? body.size() : semi + 1;
+	}
+}
+
+static std::string stripCssComments(const std::string& css)
+{
+	std::string out;
+	out.reserve(css.size());
+	for (size_t i = 0; i < css.size(); ++i) {
+		if (i + 1 < css.size() && css[i] == '/' && css[i + 1] == '*') {
+			i += 2;
+			while (i + 1 < css.size() && !(css[i] == '*' && css[i + 1] == '/')) ++i;
+			if (i + 1 < css.size()) ++i;
+			continue;
+		}
+		out += css[i];
+	}
+	return out;
+}
+
+static void parseEmbeddedCss(WebDocument& doc, const std::string& cssText)
+{
+	if (cssText.empty()) return;
+	doc.cssDiagnostics.cssDetected = true;
+	std::string css = cssText;
+	if (css.size() > kCssLiteMaxStyleBytes) {
+		css.resize(kCssLiteMaxStyleBytes);
+		doc.cssDiagnostics.styleBlockCapped = true;
+	}
+	doc.cssDiagnostics.styleBytesProcessed += css.size();
+	css = stripCssComments(css);
+
+	size_t cursor = 0;
+	while (cursor < css.size()) {
+		size_t brace = css.find('{', cursor);
+		if (brace == std::string::npos) break;
+		size_t endBrace = css.find('}', brace + 1);
+		if (endBrace == std::string::npos) break;
+		std::string selectorText = trim(css.substr(cursor, brace - cursor));
+		std::string bodyText = css.substr(brace + 1, endBrace - brace - 1);
+		cursor = endBrace + 1;
+
+		std::stringstream selectors(selectorText);
+		std::string selector;
+		while (std::getline(selectors, selector, ',')) {
+			WebStyleRule rule;
+			if (!parseCssSelector(selector, rule)) {
+				++doc.cssDiagnostics.unsupportedDeclarationCount;
+				continue;
+			}
+			parseCssDeclarations(bodyText, rule.style, doc.cssDiagnostics);
+			if (rule.selectorType == StyleSelectorType::Element && rule.selector == "body") {
+				doc.bodyStyle = rule.style;
+			}
+			doc.styleRules.push_back(rule);
+			++doc.cssDiagnostics.styleRuleCount;
+		}
+	}
+}
+
+static int mergeStyleInt(int baseValue, int overrideValue)
+{
+	return overrideValue >= 0 ? overrideValue : baseValue;
+}
+
+static WebStyle mergeStyles(const WebStyle& baseStyle, const WebStyle& overrideStyle)
+{
+	WebStyle merged = baseStyle;
+	if (overrideStyle.hasColor) {
+		merged.hasColor = true;
+		merged.color = overrideStyle.color;
+	}
+	if (overrideStyle.hasBackgroundColor) {
+		merged.hasBackgroundColor = true;
+		merged.backgroundColor = overrideStyle.backgroundColor;
+	}
+	merged.bold = overrideStyle.bold ? true : merged.bold;
+	merged.underline = overrideStyle.underline ? true : merged.underline;
+	merged.marginTop = mergeStyleInt(merged.marginTop, overrideStyle.marginTop);
+	merged.marginBottom = mergeStyleInt(merged.marginBottom, overrideStyle.marginBottom);
+	merged.marginLeft = mergeStyleInt(merged.marginLeft, overrideStyle.marginLeft);
+	merged.padding = mergeStyleInt(merged.padding, overrideStyle.padding);
+	merged.fontScaleOrSize = mergeStyleInt(merged.fontScaleOrSize, overrideStyle.fontScaleOrSize);
+	return merged;
+}
+
+static WebStyle defaultStyleForTag(const std::string& tagName)
+{
+	WebStyle style;
+	if (tagName == "body") {
+		style.hasColor = true;
+		style.color = 0xFF303846u;
+		style.hasBackgroundColor = true;
+		style.backgroundColor = 0xFFF5F7FAu;
+		style.marginTop = 0;
+		style.marginBottom = 0;
+		style.marginLeft = 0;
+		style.padding = 0;
+		return style;
+	}
+	if (tagName == "h1") {
+		style.bold = true;
+		style.marginTop = 10;
+		style.marginBottom = 10;
+		style.fontScaleOrSize = 24;
+		return style;
+	}
+	if (tagName == "h2") {
+		style.bold = true;
+		style.marginTop = 8;
+		style.marginBottom = 8;
+		style.fontScaleOrSize = 20;
+		return style;
+	}
+	if (tagName == "h3") {
+		style.bold = true;
+		style.marginTop = 6;
+		style.marginBottom = 6;
+		style.fontScaleOrSize = 18;
+		return style;
+	}
+	if (tagName == "p") {
+		style.marginTop = 4;
+		style.marginBottom = 8;
+		return style;
+	}
+	if (tagName == "a") {
+		style.hasColor = true;
+		style.color = 0xFF1E5CB8u;
+		style.underline = true;
+		style.marginTop = 4;
+		style.marginBottom = 6;
+		return style;
+	}
+	if (tagName == "li") {
+		style.marginTop = 2;
+		style.marginBottom = 4;
+		style.marginLeft = 12;
+		return style;
+	}
+	if (tagName == "pre" || tagName == "code") {
+		style.hasBackgroundColor = true;
+		style.backgroundColor = 0xFFE6E8EEu;
+		style.marginTop = 6;
+		style.marginBottom = 8;
+		style.padding = 4;
+		return style;
+	}
+	if (tagName == "img") {
+		style.marginTop = 6;
+		style.marginBottom = 6;
+		return style;
+	}
+	return style;
+}
+
+static bool blockMatchesRule(const DocBlock& block, const WebStyleRule& rule)
+{
+	if (rule.selectorType == StyleSelectorType::Element) {
+		return toLower(block.tagName) == rule.selector;
+	}
+	if (rule.selectorType == StyleSelectorType::Class) {
+		std::stringstream classes(toLower(block.className));
+		std::string className;
+		while (classes >> className) {
+			if (className == rule.selector) return true;
+		}
+		return false;
+	}
+	if (rule.selectorType == StyleSelectorType::Id) {
+		return toLower(block.id) == rule.selector;
+	}
+	return false;
+}
+
+static void applyDocumentStyles(WebDocument& doc)
+{
+	for (DocBlock& block : doc.blocks) {
+		WebStyle style = doc.bodyStyle;
+		style = mergeStyles(style, defaultStyleForTag(block.tagName));
+		for (const WebStyleRule& rule : doc.styleRules) {
+			if (rule.selectorType == StyleSelectorType::Element && rule.selector == "body") continue;
+			if (blockMatchesRule(block, rule)) {
+				style = mergeStyles(style, rule.style);
+			}
+		}
+		block.style = style;
+	}
+}
+
+static DocBlock makeTextBlock(BlockType type,
+	const std::string& tagName,
+	const std::string& text,
+	const std::string& url,
+	const std::string& className,
+	const std::string& id)
+{
+	DocBlock block;
+	block.type = type;
+	block.tagName = tagName;
+	block.className = className;
+	block.id = id;
+	block.text = text;
+	block.url = url;
+	return block;
+}
+
 // Block-tag context: what block is currently open.
 enum class OpenTag : uint8_t {
 	None  = 0,
@@ -160,6 +567,8 @@ struct ParserState {
 	WebDocument  doc;
 	std::string  textBuf;   // accumulated character data for current block
 	std::string  hrefBuf;   // href of the open <a> tag
+	std::string  classBuf;
+	std::string  idBuf;
 	OpenTag      open    = OpenTag::None;
 	bool         inScript = false;
 	bool         inStyle  = false;
@@ -188,22 +597,27 @@ static void flushText(ParserState& st)
 	case OpenTag::H1:
 	case OpenTag::H2:
 	case OpenTag::H3:
-		st.doc.blocks.push_back({BlockType::Heading, t, ""});
+		st.doc.blocks.push_back(makeTextBlock(BlockType::Heading,
+			st.open == OpenTag::H1 ? "h1" : (st.open == OpenTag::H2 ? "h2" : "h3"),
+			t,
+			"",
+			st.classBuf,
+			st.idBuf));
 		break;
 	case OpenTag::P:
-		st.doc.blocks.push_back({BlockType::Paragraph, t, ""});
+		st.doc.blocks.push_back(makeTextBlock(BlockType::Paragraph, "p", t, "", st.classBuf, st.idBuf));
 		break;
 	case OpenTag::Li:
-		st.doc.blocks.push_back({BlockType::ListItem, t, ""});
+		st.doc.blocks.push_back(makeTextBlock(BlockType::ListItem, "li", t, "", st.classBuf, st.idBuf));
 		break;
 	case OpenTag::Pre:
-		st.doc.blocks.push_back({BlockType::Preformatted, t, ""});
+		st.doc.blocks.push_back(makeTextBlock(BlockType::Preformatted, "pre", t, "", st.classBuf, st.idBuf));
 		break;
 	case OpenTag::A:
 		if (!st.hrefBuf.empty())
-			st.doc.blocks.push_back({BlockType::Link, t, st.hrefBuf});
+			st.doc.blocks.push_back(makeTextBlock(BlockType::Link, "a", t, st.hrefBuf, st.classBuf, st.idBuf));
 		else
-			st.doc.blocks.push_back({BlockType::Paragraph, t, ""});
+			st.doc.blocks.push_back(makeTextBlock(BlockType::Paragraph, "p", t, "", st.classBuf, st.idBuf));
 		break;
 	case OpenTag::Title:
 		st.doc.title = t;
@@ -211,7 +625,7 @@ static void flushText(ParserState& st)
 	default:
 		// Text outside a known block: emit as paragraph if body is active.
 		if (st.bodyReached)
-			st.doc.blocks.push_back({BlockType::Paragraph, t, ""});
+			st.doc.blocks.push_back(makeTextBlock(BlockType::Paragraph, "p", t, "", "", ""));
 		break;
 	}
 }
@@ -230,8 +644,14 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 	// Handle skip-content blocks first.
 	if (name == "script") { flushText(st); st.inScript = true; return; }
 	if (name == "style")  { flushText(st); st.inStyle  = true; return; }
+	if (name == "link") {
+		std::string rel = toLower(trim(extractAttr(tagBody, "rel")));
+		if (rel == "stylesheet") ++st.doc.cssDiagnostics.unsupportedExternalStylesheetCount;
+		return;
+	}
 
-	if (st.inScript || st.inStyle) return;
+	if (st.inScript) return;
+	if (st.inStyle) return;
 
 	// Mark body reached.
 	if (name == "body") { st.bodyReached = true; return; }
@@ -265,16 +685,24 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 		block.url = resolveRelativeUrl(st.doc.url, src);
 		block.src = src;
 		block.alt = alt;
+		block.tagName = "img";
+		block.className = extractAttr(tagBody, "class");
+		block.id = extractAttr(tagBody, "id");
 		block.width = parsePositiveIntAttr(tagBody, "width");
 		block.height = parsePositiveIntAttr(tagBody, "height");
 		st.doc.blocks.push_back(std::move(block));
 		st.open = OpenTag::None;
 		st.hrefBuf.clear();
+		st.classBuf.clear();
+		st.idBuf.clear();
 		return;
 	}
 
 	// Block-level tags: flush any pending text, then open new context.
 	flushText(st);
+
+	st.classBuf = extractAttr(tagBody, "class");
+	st.idBuf = extractAttr(tagBody, "id");
 
 	if (name == "h1")    { st.open = OpenTag::H1;    return; }
 	if (name == "h2")    { st.open = OpenTag::H2;    return; }
@@ -316,7 +744,12 @@ static void handleCloseTag(ParserState& st, const std::string& tagName)
 	std::string name = toLower(tagName);
 
 	if (name == "script") { st.inScript = false; st.textBuf.clear(); return; }
-	if (name == "style")  { st.inStyle  = false; st.textBuf.clear(); return; }
+	if (name == "style")  {
+		parseEmbeddedCss(st.doc, st.textBuf);
+		st.inStyle  = false;
+		st.textBuf.clear();
+		return;
+	}
 
 	// Close block-level contexts.
 	if (name == "h1" || name == "h2" || name == "h3" ||
@@ -324,11 +757,15 @@ static void handleCloseTag(ParserState& st, const std::string& tagName)
 		flushText(st);
 		st.open    = OpenTag::None;
 		st.hrefBuf.clear();
+		st.classBuf.clear();
+		st.idBuf.clear();
 	}
 	if (name == "pre") {
 		flushText(st);
 		st.open  = OpenTag::None;
 		st.inPre = false;
+		st.classBuf.clear();
+		st.idBuf.clear();
 	}
 	// </code> inside <pre>: stay in pre context.
 	// </code> outside: nothing to do.
@@ -437,10 +874,11 @@ WebDocument parseHtml(const std::string& pageUrl, const std::string& htmlText)
 		// ----------------------------------------------------------------
 		// Character data
 		// ----------------------------------------------------------------
-		if (!st.inScript && !st.inStyle) {
+		if (!st.inScript) {
 			// Inside <pre>, preserve all characters including newlines/spaces.
-			// Outside <pre>, collapse the character stream normally; flushText()
-			// will call collapseWs() later.
+			// Inside <style>, preserve the raw stylesheet so CSS-lite can parse
+			// it when </style> closes. Outside <pre>, flushText() will collapse
+			// ordinary document text later.
 			st.textBuf += c;
 		}
 		++i;
@@ -448,6 +886,7 @@ WebDocument parseHtml(const std::string& pageUrl, const std::string& htmlText)
 
 	// Flush any trailing text not closed by a tag.
 	flushText(st);
+	applyDocumentStyles(st.doc);
 
 	// If no title was parsed, use the filename from the URL.
 	if (st.doc.title.empty()) {
