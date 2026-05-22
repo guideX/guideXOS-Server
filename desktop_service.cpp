@@ -824,6 +824,8 @@ namespace gxos {
                 apps::DisplayOptions::Launch();
             }
             else if (appName == "guideXOS Navigator") {
+                // Hosted/compositor Navigator launch path: app-model registration
+                // resolves here, then starts the authoritative Navigator process.
                 apps::Navigator::Launch();
             }
             else if (appName == "Trash") {

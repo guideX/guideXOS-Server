@@ -135,6 +135,92 @@ static std::string nativeAppProcessesDiagnostic() {
     return oss.str();
 }
 
+static std::string navigatorHostedSmokeDiagnostic() {
+    struct Check {
+        std::string name;
+        bool pass;
+        std::string detail;
+    };
+
+    std::vector<Check> checks;
+    auto add = [&](const std::string& name, bool pass, const std::string& detail) {
+        checks.push_back(Check{name, pass, detail});
+    };
+    auto contains = [](const std::string& haystack, const std::string& needle) {
+        return haystack.find(needle) != std::string::npos;
+    };
+
+    std::ostringstream out;
+    out << "NAVIGATOR_SMOKE_BEGIN\n";
+    out << "timestamp_ms=" << gxos::ticks() << "\n";
+    out << "build_mode=hosted/compositor\n";
+
+    const std::string inspect = gxos::gui::DesktopService::InspectNativeAppPipeline("guideXOS Navigator");
+    add("app id resolves", contains(inspect, "appId: guidexos.navigator"), "expected guidexos.navigator");
+    add("launch resolution succeeds", contains(inspect, "resolverSuccess: true"), "DesktopService resolver");
+    add("builtin hosted runtime selected", contains(inspect, "runtime: builtin-hosted"), "expected builtin-hosted");
+    add("builtin entry selected", contains(inspect, "selectedEntryPath: builtin/guideXOS Navigator"), "expected builtin/guideXOS Navigator");
+
+    uint64_t compositorPid = gxos::Lifecycle::ensureCompositor();
+    add("compositor available", compositorPid != 0, "pid=" + std::to_string(compositorPid));
+
+    std::string launchError;
+    bool launched = gxos::gui::DesktopService::LaunchApp("guideXOS Navigator", launchError);
+    add("DesktopService launches Navigator", launched, launched ? "LaunchApp returned true" : launchError);
+
+    gxos::gui::WindowDebugInfo navWindow;
+    bool foundWindow = false;
+    bool toolbarReady = false;
+    for (int attempt = 0; attempt < 50 && !toolbarReady; ++attempt) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        std::vector<gxos::gui::WindowDebugInfo> windows = gxos::gui::Compositor::debugWindowsSnapshot();
+        for (const auto& window : windows) {
+            if (window.title.find("guideXOS Navigator") == std::string::npos) continue;
+            navWindow = window;
+            foundWindow = true;
+            if (window.widgetCount >= 6) toolbarReady = true;
+            break;
+        }
+    }
+
+    add("Navigator window created", foundWindow,
+        foundWindow ? ("id=" + std::to_string(navWindow.id) + " title=" + navWindow.title) : "window not found");
+    add("Navigator window size", foundWindow && navWindow.w == 920 && navWindow.h == 640,
+        foundWindow ? (std::to_string(navWindow.w) + "x" + std::to_string(navWindow.h)) : "window not found");
+    add("toolbar widget count", foundWindow && toolbarReady && navWindow.widgetCount == 6,
+        foundWindow ? ("widgets=" + std::to_string(navWindow.widgetCount)) : "window not found");
+    add("stale four-button toolbar absent", foundWindow && toolbarReady && navWindow.widgetCount > 4,
+        foundWindow ? ("widgets=" + std::to_string(navWindow.widgetCount)) : "window not found");
+
+    bool navigated = gxos::apps::Navigator::SmokeNavigateTo("about:navigator-runtime");
+    std::string currentUrl = gxos::apps::Navigator::SmokeCurrentUrl();
+    std::string runtimeReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    add("runtime URL loads", navigated && currentUrl == "about:navigator-runtime", "currentUrl=" + currentUrl);
+    add("runtime report mode", contains(runtimeReport, "Runtime.Mode=hosted/compositor"), "expected hosted/compositor");
+    add("runtime report launch path", contains(runtimeReport, "DesktopService::LaunchApp -> apps::Navigator::Launch"), "expected DesktopService/apps::Navigator");
+    add("stale placeholder inactive", contains(runtimeReport, "Runtime.Stale placeholder path=not active"), "expected not active");
+    add("file read enabled", contains(runtimeReport, "Capabilities.File read=enabled"), "expected enabled");
+    add("file write enabled", contains(runtimeReport, "Capabilities.File write=enabled"), "expected enabled");
+    add("local PNG enabled", contains(runtimeReport, "Capabilities.Local PNG=enabled"), "expected enabled");
+    add("HTTP enabled", contains(runtimeReport, "Capabilities.HTTP=enabled"), "expected enabled");
+    add("remote PNG enabled", contains(runtimeReport, "Capabilities.Remote PNG=enabled"), "expected enabled");
+    add("bookmark persistence enabled", contains(runtimeReport, "Capabilities.Bookmark persistence=enabled"), "expected enabled");
+
+    bool pass = true;
+    for (const Check& check : checks) {
+        pass = pass && check.pass;
+        out << "CHECK " << (check.pass ? "PASS " : "FAIL ") << check.name << " :: " << check.detail << "\n";
+    }
+
+    out << "runtime_report:\n" << runtimeReport;
+    out << "current_url=" << currentUrl << "\n";
+    out << "current_block_count=" << gxos::apps::Navigator::SmokeCurrentBlockCount() << "\n";
+    out << "toolbar_count=" << (foundWindow ? navWindow.widgetCount : 0) << "\n";
+    out << "NAVIGATOR_SMOKE_RESULT: " << (pass ? "PASS" : "FAIL") << "\n";
+    out << "NAVIGATOR_SMOKE_END\n";
+    return out.str();
+}
+
 static void help(){
     std::cout << "Commands:\n"
                  " mem | alloc <n> | tasks | log\n"
@@ -160,7 +246,7 @@ static void help(){
                  " clock\n"
                  " taskmgr\n"
                  " paint\n"
-                 " navigator\n"
+                 " navigator | navigator.smoke\n"
                  " imgview [file] | osk\n"
                  " shutdown | msgbox <text> | welcome\n"
                  " notify <text> | notify.clear\n"
@@ -492,6 +578,9 @@ using namespace gxos;
             std::string err;
             if(gui::DesktopService::LaunchApp("guideXOS Navigator", err)) std::cout<<"guideXOS Navigator launched"<<std::endl;
             else std::cout<<"guideXOS Navigator launch failed: "<<err<<std::endl;
+        }
+        else if (cmd=="navigator.smoke"){
+            std::cout << navigatorHostedSmokeDiagnostic();
         }
         else if (cmd=="imgview"){
             if(!requireCompositor()) continue;

@@ -12,6 +12,7 @@
 #include "include/kernel/framebuffer.h"
 #include "include/kernel/process.h"
 #include "include/kernel/desktop.h"
+#include "include/kernel/kernel_apps.h"
 #include "include/kernel/interrupts.h"
 #include "include/kernel/ps2mouse.h"
 #include "include/kernel/ps2keyboard.h"
@@ -379,6 +380,7 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::desktop::draw_cursor(kernel::input::mouse_x(),
                                      kernel::input::mouse_y());
         kernel::desktop_capabilities::log_current(true, true);
+        kernel::apps::printNavigatorRuntimeSmokeReport();
         
         kernel::serial::puts("[KERNEL] Entering main loop (waiting for input)...\n");
         
@@ -470,6 +472,7 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::desktop::draw_cursor(kernel::arch::sparc::zs::mouse_x(),
                                      kernel::arch::sparc::zs::mouse_y());
         kernel::desktop_capabilities::log_current(true, true);
+        kernel::apps::printNavigatorRuntimeSmokeReport();
 
         // Main kernel loop — poll mouse state and redraw cursor
         while (1) {
@@ -506,6 +509,7 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::desktop::draw_cursor(kernel::arch::sparc64::zs::mouse_x(),
                                      kernel::arch::sparc64::zs::mouse_y());
         kernel::desktop_capabilities::log_current(true, true);
+        kernel::apps::printNavigatorRuntimeSmokeReport();
 
         while (1) {
             if (kernel::arch::sparc64::zs::mouse_dirty()) {

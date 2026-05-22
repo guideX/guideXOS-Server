@@ -89,12 +89,25 @@ namespace gxos { namespace gui {
         int iy{-1};
     };
     struct AppModelDemoWindowState { uint64_t windowId{0}; std::vector<RegisteredDesktopApp> apps; int selectedIndex{0}; std::string status; };
+    struct WindowDebugInfo {
+        uint64_t id{0};
+        uint64_t ownerPid{0};
+        std::string title;
+        int x{0};
+        int y{0};
+        int w{0};
+        int h{0};
+        int widgetCount{0};
+        bool minimized{false};
+        bool visible{false};
+    };
 
     class Compositor {
     public:
         static uint64_t start();
         static void requestDesktopRefresh();
         static void openDesktopItem(int index);
+        static std::vector<WindowDebugInfo> debugWindowsSnapshot();
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)
         static HWND g_hwnd; // expose for helper drawing
 #endif

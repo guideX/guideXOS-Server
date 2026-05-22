@@ -371,6 +371,12 @@ private:
     static bool drawArgbIconBuffer(const uint32_t* pixels, uint32_t srcW, uint32_t srcH, uint32_t x, uint32_t y, uint32_t width, uint32_t height);
 };
 
+// Bare-metal Navigator adapter.
+//
+// The hosted/compositor Navigator in navigator.cpp is the authoritative full
+// app-model implementation. This kernel-side app keeps the same user-facing
+// shape where platform facilities exist, and reports honest unsupported
+// capability documents/placeholders where they do not.
 class NavigatorApp : public app::KernelApp {
 public:
     NavigatorApp();
@@ -471,6 +477,9 @@ private:
     int m_metaImageBlocks;
     int m_metaLoadedImages;
     int m_metaFailedImages;
+    int m_metaRemoteImages;
+    int m_metaLocalImages;
+    char m_metaLastImageError[128];
 
     void setStatus(const char* text);
     void updateButtons();
@@ -482,6 +491,7 @@ private:
     void buildBookmarksDocument();
     void buildPageInfoDocument();
     void buildViewSourceDocument();
+    void buildRuntimeDocument();
     void buildErrorDocument(const char* url, const char* reason);
     void loadFileUrl(const char* url);
     void rememberPageMetadata(const char* requestedUrl, const char* finalUrl, const char* sourceType,
@@ -624,6 +634,7 @@ private:
 
 // Call this once to register all kernel GUI apps
 void registerKernelApps();
+void printNavigatorRuntimeSmokeReport();
 
 } // namespace apps
 } // namespace kernel

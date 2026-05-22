@@ -9,6 +9,8 @@
 #include "navigator_html_parser.h"
 #include <algorithm>
 #include <cctype>
+#include <cstdio>
+#include <fstream>
 #include <sstream>
 #include <unordered_map>
 
@@ -51,6 +53,10 @@ namespace {
 	constexpr int kContentH = 640 - kToolbarH - kStatusBarH - 24;
 	constexpr int kHeadingY = 24;
 	constexpr size_t kNavigatorMaxSourcePreviewBytes = gxos::web::kHttpMaxBodyBytes;
+	constexpr uint32_t kRemoteImageMaxBytes = 256u * 1024u;
+	constexpr uint32_t kRemoteImageMaxWidth = 2048u;
+	constexpr uint32_t kRemoteImageMaxHeight = 2048u;
+	constexpr uint32_t kRemoteImageMaxPixels = 2048u * 2048u;
 
 	constexpr int kWidgetIdBack = 1;
 	constexpr int kWidgetIdForward = 2;
@@ -171,9 +177,11 @@ namespace {
 		std::string filePath;
 		std::string drawPath;
 		std::string message;
+		std::string errorDetail;
 	};
 
 	static std::unordered_map<std::string, ImageInfo> s_imageCache;
+	static std::vector<std::string> s_remoteImageTempFiles;
 	static const ImageInfo& imageInfoForBlock(const DocBlock& block);
 
 	static std::string toLowerAscii(std::string value)
@@ -188,6 +196,59 @@ namespace {
 	{
 		if (suffix.size() > value.size()) return false;
 		return toLowerAscii(value.substr(value.size() - suffix.size())) == toLowerAscii(suffix);
+	}
+
+	static bool isPngSignature(const std::string& bytes)
+	{
+		static const unsigned char sig[8] = { 0x89, 'P', 'N', 'G', '\r', '\n', 0x1A, '\n' };
+		if (bytes.size() < sizeof(sig)) return false;
+		for (size_t i = 0; i < sizeof(sig); ++i) {
+			if (static_cast<unsigned char>(bytes[i]) != sig[i]) return false;
+		}
+		return true;
+	}
+
+	static bool writeBinaryTempFile(const std::string& path, const std::string& bytes)
+	{
+		std::ofstream out(path, std::ios::binary | std::ios::trunc);
+		if (!out) return false;
+		out.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+		return out.good();
+	}
+
+	static uint64_t fnv1a64(const std::string& value)
+	{
+		uint64_t hash = 1469598103934665603ull;
+		for (unsigned char ch : value) {
+			hash ^= static_cast<uint64_t>(ch);
+			hash *= 1099511628211ull;
+		}
+		return hash;
+	}
+
+	static std::string remoteImageTempPath(const std::string& url)
+	{
+		std::ostringstream oss;
+		oss << "navigator_remote_image_" << std::hex << fnv1a64(url) << ".png";
+		return oss.str();
+	}
+
+	static void cleanupRemoteImageTempFiles()
+	{
+		for (const std::string& path : s_remoteImageTempFiles) {
+			std::remove(path.c_str());
+		}
+		s_remoteImageTempFiles.clear();
+	}
+
+	static gxos::gui::ImageSafetyLimits remoteImageSafetyLimits()
+	{
+		gxos::gui::ImageSafetyLimits limits{};
+		limits.maxBytes = kRemoteImageMaxBytes;
+		limits.maxWidth = kRemoteImageMaxWidth;
+		limits.maxHeight = kRemoteImageMaxHeight;
+		limits.maxPixels = kRemoteImageMaxPixels;
+		return limits;
 	}
 
 	static WebDocument buildSimpleDocument(const std::string& url,
@@ -227,15 +288,26 @@ namespace {
 		metadata.imageBlockCount = 0;
 		metadata.loadedImageCount = 0;
 		metadata.failedImageCount = 0;
+		metadata.remoteImageCount = 0;
+		metadata.localImageCount = 0;
+		metadata.lastImageError.clear();
 
 		for (const DocBlock& block : doc.blocks) {
 			if (block.type != BlockType::Image) continue;
 			++metadata.imageBlockCount;
+			if (block.url.rfind("http://", 0) == 0) {
+				++metadata.remoteImageCount;
+			} else if (block.url.rfind("file://", 0) == 0) {
+				++metadata.localImageCount;
+			}
 			const ImageInfo& info = imageInfoForBlock(block);
 			if (info.ok) {
 				++metadata.loadedImageCount;
 			} else {
 				++metadata.failedImageCount;
+				if (metadata.lastImageError.empty()) {
+					metadata.lastImageError = info.errorDetail.empty() ? info.message : info.errorDetail;
+				}
 			}
 		}
 	}
@@ -248,6 +320,76 @@ namespace {
 	static std::string pageInfoLine(const std::string& label, int value)
 	{
 		return label + ": " + std::to_string(value);
+	}
+
+	struct RuntimeReportEntry {
+		std::string section;
+		std::string label;
+		std::string value;
+	};
+
+	static std::vector<RuntimeReportEntry> hostedRuntimeReportEntries(
+		const std::string& currentUrl,
+		const std::string& currentTitle,
+		int currentBlockCount,
+		const std::string& inspectedUrl)
+	{
+		return {
+			{"Runtime", "Mode", "hosted/compositor"},
+			{"Runtime", "Launch path", "AppRegistry -> DesktopService::LaunchApp -> apps::Navigator::Launch"},
+			{"Runtime", "Process entry", "navigator.cpp Navigator::main"},
+			{"Runtime", "Rendering owner", "navigator.cpp via GUI protocol/compositor"},
+			{"Runtime", "Input owner", "navigator.cpp event loop via compositor messages"},
+			{"Runtime", "Document loading owner", "navigator.cpp + guideWeb adapters"},
+			{"Runtime", "Authoritative path", "hosted Navigator app-model process"},
+			{"Runtime", "Stale placeholder path", "not active"},
+
+			{"Shared Core", "Document model", "guide_web_document.h"},
+			{"Shared Core", "HTML parser", "navigator_html_parser / guideWeb parser layer"},
+			{"Shared Core", "HTTP client", "guide_web_http"},
+			{"Shared Core", "Relative URLs", "gxos::web::resolveRelativeUrl"},
+			{"Shared Core", "Image decode", "shared ImageAdapter"},
+
+			{"Capabilities", "File read", "enabled"},
+			{"Capabilities", "File write", "enabled for bookmark persistence"},
+			{"Capabilities", "Local PNG", "enabled"},
+			{"Capabilities", "HTTP", "enabled for http:// via Winsock transport"},
+			{"Capabilities", "Remote PNG", "enabled for http:// PNG images"},
+			{"Capabilities", "Temp files", "enabled for compositor image handoff"},
+			{"Capabilities", "Bookmark persistence", "enabled"},
+			{"Capabilities", "HTTPS/TLS", "unsupported"},
+
+			{"Backends", "File backend", "navigator_file_io hosted/VFS adapter"},
+			{"Backends", "HTTP backend", "guide_web_http hosted socket path"},
+			{"Backends", "Image backend", "ImageAdapter + compositor drawImage path"},
+
+			{"Current Document", "URL", currentUrl.empty() ? "(none)" : currentUrl},
+			{"Current Document", "Title", currentTitle.empty() ? "(none)" : currentTitle},
+			{"Current Document", "Block count", std::to_string(currentBlockCount)},
+			{"Current Document", "Inspected page", inspectedUrl.empty() ? "(none)" : inspectedUrl},
+		};
+	}
+
+	static void addRuntimeReportBlocks(WebDocument& doc, const std::vector<RuntimeReportEntry>& entries)
+	{
+		std::string section;
+		for (const RuntimeReportEntry& entry : entries) {
+			if (entry.section != section) {
+				section = entry.section;
+				doc.blocks.push_back({BlockType::Heading, section, ""});
+			}
+			doc.blocks.push_back({BlockType::ListItem, pageInfoLine(entry.label, entry.value), ""});
+		}
+	}
+
+	static std::string formatRuntimeReport(const std::vector<RuntimeReportEntry>& entries)
+	{
+		std::ostringstream out;
+		out << "navigator.runtime.report\n";
+		for (const RuntimeReportEntry& entry : entries) {
+			out << entry.section << "." << entry.label << "=" << entry.value << "\n";
+		}
+		return out.str();
 	}
 
 	static std::string filePathFromUrl(const std::string& url)
@@ -266,10 +408,88 @@ namespace {
 
 		ImageInfo info;
 		info.attempted = true;
+
+		if (block.url.rfind("http://", 0) == 0) {
+			gxos::web::HttpResponse response = gxos::web::fetchHttpUrl(block.url);
+			if (!response.ok()) {
+				info.status = gxos::gui::ImageLoadStatus::NotFound;
+				info.message = "[remote image error]";
+				info.errorDetail = std::string("Remote image fetch failed: ") +
+					gxos::web::httpErrorName(response.error);
+				if (!response.errorMessage.empty()) info.errorDetail += ": " + response.errorMessage;
+				auto inserted = s_imageCache.emplace(key, std::move(info));
+				return inserted.first->second;
+			}
+			if (response.statusCode != 200) {
+				info.status = gxos::gui::ImageLoadStatus::NotFound;
+				info.message = "[remote image not found]";
+				info.errorDetail = "Remote image HTTP status " + std::to_string(response.statusCode);
+				auto inserted = s_imageCache.emplace(key, std::move(info));
+				return inserted.first->second;
+			}
+			if (response.body.size() > kRemoteImageMaxBytes) {
+				info.tooLarge = true;
+				info.status = gxos::gui::ImageLoadStatus::TooLarge;
+				info.message = "[image too large]";
+				info.errorDetail = "Remote image exceeds byte limit";
+				auto inserted = s_imageCache.emplace(key, std::move(info));
+				return inserted.first->second;
+			}
+			const bool contentTypePng = response.contentType == "image/png";
+			const bool urlLooksPng = endsWithIgnoreCase(response.finalUrl.empty() ? block.url : response.finalUrl, ".png");
+			if (!contentTypePng && !urlLooksPng) {
+				info.unsupported = true;
+				info.status = gxos::gui::ImageLoadStatus::UnsupportedFormat;
+				info.message = "[unsupported image]";
+				info.errorDetail = "Remote image is not image/png";
+				auto inserted = s_imageCache.emplace(key, std::move(info));
+				return inserted.first->second;
+			}
+			if (!isPngSignature(response.body)) {
+				info.unsupported = true;
+				info.status = gxos::gui::ImageLoadStatus::UnsupportedFormat;
+				info.message = "[unsupported image]";
+				info.errorDetail = "Remote image PNG signature is invalid";
+				auto inserted = s_imageCache.emplace(key, std::move(info));
+				return inserted.first->second;
+			}
+
+			gxos::gui::ImageBitmap decoded = gxos::gui::ImageAdapter::LoadFromBytes(
+				reinterpret_cast<const uint8_t*>(response.body.data()),
+				response.body.size(),
+				response.finalUrl.empty() ? block.url : response.finalUrl,
+				remoteImageSafetyLimits());
+			info.status = decoded.status;
+			if (decoded.status == gxos::gui::ImageLoadStatus::Ok) {
+				const std::string tempPath = remoteImageTempPath(response.finalUrl.empty() ? block.url : response.finalUrl);
+				if (writeBinaryTempFile(tempPath, response.body)) {
+					info.ok = true;
+					info.naturalW = decoded.width;
+					info.naturalH = decoded.height;
+					info.filePath = response.finalUrl.empty() ? block.url : response.finalUrl;
+					info.drawPath = tempPath;
+					s_remoteImageTempFiles.push_back(tempPath);
+				} else {
+					info.status = gxos::gui::ImageLoadStatus::DecodeFailed;
+					info.message = "[image cache error]";
+					info.errorDetail = "Could not write remote image temp file";
+				}
+			} else {
+				info.unsupported = decoded.status == gxos::gui::ImageLoadStatus::UnsupportedFormat;
+				info.tooLarge = decoded.status == gxos::gui::ImageLoadStatus::TooLarge;
+				info.message = std::string("[") + gxos::gui::ImageLoadStatusName(decoded.status) + "]";
+				info.errorDetail = "Remote image decode failed: " + std::string(gxos::gui::ImageLoadStatusName(decoded.status));
+			}
+
+			auto inserted = s_imageCache.emplace(key, std::move(info));
+			return inserted.first->second;
+		}
+
 		if (block.url.rfind("file://", 0) != 0) {
 			info.unsupported = true;
 			info.status = gxos::gui::ImageLoadStatus::UnsupportedFormat;
 			info.message = "[unsupported image]";
+			info.errorDetail = "Unsupported image URL scheme";
 			auto inserted = s_imageCache.emplace(key, std::move(info));
 			return inserted.first->second;
 		}
@@ -279,6 +499,7 @@ namespace {
 			info.unsupported = true;
 			info.status = gxos::gui::ImageLoadStatus::UnsupportedFormat;
 			info.message = "[unsupported image]";
+			info.errorDetail = "Local image is not a PNG";
 			auto inserted = s_imageCache.emplace(key, std::move(info));
 			return inserted.first->second;
 		}
@@ -287,13 +508,16 @@ namespace {
 		if (br.status == FileReadStatus::NotFound) {
 			info.status = gxos::gui::ImageLoadStatus::NotFound;
 			info.message = "[missing image]";
+			info.errorDetail = "Local image file not found";
 		} else if (br.status == FileReadStatus::TooLarge) {
 			info.tooLarge = true;
 			info.status = gxos::gui::ImageLoadStatus::TooLarge;
 			info.message = "[image too large]";
+			info.errorDetail = "Local image exceeds byte limit";
 		} else if (br.status == FileReadStatus::IoError) {
 			info.status = gxos::gui::ImageLoadStatus::DecodeFailed;
 			info.message = "[image read error]";
+			info.errorDetail = "Local image read error";
 		} else {
 			gxos::gui::ImageBitmap decoded = gxos::gui::ImageAdapter::LoadFromBytes(br.bytes, info.filePath);
 			info.status = decoded.status;
@@ -306,6 +530,7 @@ namespace {
 				info.unsupported = decoded.status == gxos::gui::ImageLoadStatus::UnsupportedFormat;
 				info.tooLarge = decoded.status == gxos::gui::ImageLoadStatus::TooLarge;
 				info.message = std::string("[") + gxos::gui::ImageLoadStatusName(decoded.status) + "]";
+				info.errorDetail = "Local image decode failed: " + std::string(gxos::gui::ImageLoadStatusName(decoded.status));
 			}
 		}
 
@@ -356,6 +581,33 @@ uint64_t Navigator::Launch()
 {
 	ProcessSpec spec{"navigator", Navigator::main};
 	return ProcessTable::spawn(spec, {"navigator"});
+}
+
+bool Navigator::SmokeNavigateTo(const std::string& url)
+{
+	if (s_windowId == 0) return false;
+	loadUrl(url);
+	return s_currentDoc.url == url;
+}
+
+std::string Navigator::SmokeRuntimeReport()
+{
+	const std::string inspected = s_pageMetadata.finalUrl.empty() ? "" : s_pageMetadata.finalUrl;
+	return formatRuntimeReport(hostedRuntimeReportEntries(
+		s_currentDoc.url,
+		s_currentDoc.title,
+		static_cast<int>(s_currentDoc.blocks.size()),
+		inspected));
+}
+
+std::string Navigator::SmokeCurrentUrl()
+{
+	return s_currentDoc.url;
+}
+
+int Navigator::SmokeCurrentBlockCount()
+{
+	return static_cast<int>(s_currentDoc.blocks.size());
 }
 
 int Navigator::main(int, char**)
@@ -495,6 +747,7 @@ int Navigator::main(int, char**)
 		}
 	}
 
+	cleanupRemoteImageTempFiles();
 	Logger::write(LogLevel::Info, "guideXOS Navigator terminated");
 	return 0;
 }
@@ -1103,6 +1356,7 @@ WebDocument Navigator::buildBookmarksDocument()
 void Navigator::loadUrl(const std::string& url)
 {
 	Logger::write(LogLevel::Info, std::string("Navigator loadUrl: ") + url);
+	cleanupRemoteImageTempFiles();
 	s_imageCache.clear();
 
 	WebDocument doc;
@@ -1126,6 +1380,8 @@ void Navigator::loadUrl(const std::string& url)
 		doc = buildPageInfoDocument();
 	} else if (url == "about:view-source") {
 		doc = buildViewSourceDocument();
+	} else if (url == "about:navigator-runtime") {
+		doc = buildRuntimeDocument();
 	} else if (url.size() >= 7 && url.substr(0, 7) == "file://") {
 		doc = loadFileUrl(url);
 	} else if (url.rfind("http://", 0) == 0) {
@@ -1239,6 +1495,7 @@ WebDocument Navigator::buildAboutNavigatorDocument()
 	doc.blocks.push_back({BlockType::Link, "View Bookmarks",       "about:bookmarks"});
 	doc.blocks.push_back({BlockType::Link, "Page Info",            "about:page-info"});
 	doc.blocks.push_back({BlockType::Link, "View Source",          "about:view-source"});
+	doc.blocks.push_back({BlockType::Link, "Navigator Runtime",    "about:navigator-runtime"});
 	return doc;
 }
 
@@ -1294,8 +1551,11 @@ WebDocument Navigator::buildPageInfoDocument()
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Error status", m.errorStatus), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Document blocks", m.documentBlockCount), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Image blocks", m.imageBlockCount), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Local images", m.localImageCount), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Remote images", m.remoteImageCount), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Loaded images", m.loadedImageCount), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Failed images", m.failedImageCount), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Last image error", m.lastImageError), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Raw/source bytes", static_cast<int>(m.rawSourceBytes)), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Source preview truncated", yesNo(m.rawSourceTruncated)), ""});
 
@@ -1307,8 +1567,11 @@ WebDocument Navigator::buildPageInfoDocument()
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("HTTP read timeout", gxos::web::kHttpReadTimeoutMs) + " ms", ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("File text limit", static_cast<int>(kNavigatorMaxFileBytes)) + " bytes", ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Source preview limit", static_cast<int>(kNavigatorMaxSourcePreviewBytes)) + " bytes", ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Remote PNG byte limit", static_cast<int>(kRemoteImageMaxBytes)) + " bytes", ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Remote PNG dimensions", "2048 x 2048 pixels"), ""});
 
 	doc.blocks.push_back({BlockType::Link, "View Source", "about:view-source"});
+	doc.blocks.push_back({BlockType::Link, "Navigator Runtime", "about:navigator-runtime"});
 	doc.blocks.push_back({BlockType::Link, "Go to about:navigator", "about:navigator"});
 	return doc;
 }
@@ -1344,6 +1607,28 @@ WebDocument Navigator::buildViewSourceDocument()
 	}
 
 	doc.blocks.push_back({BlockType::Link, "Page Info", "about:page-info"});
+	doc.blocks.push_back({BlockType::Link, "Navigator Runtime", "about:navigator-runtime"});
+	doc.blocks.push_back({BlockType::Link, "Go to about:navigator", "about:navigator"});
+	return doc;
+}
+
+WebDocument Navigator::buildRuntimeDocument()
+{
+	WebDocument doc;
+	doc.url = "about:navigator-runtime";
+	doc.title = "Navigator Runtime";
+	doc.blocks.push_back({BlockType::Heading, "Navigator Runtime", ""});
+	doc.blocks.push_back({BlockType::Paragraph,
+		"This page reports the active Navigator launch path and platform capabilities.", ""});
+
+	addRuntimeReportBlocks(doc, hostedRuntimeReportEntries(
+		s_currentDoc.url,
+		s_currentDoc.title,
+		static_cast<int>(s_currentDoc.blocks.size()),
+		s_pageMetadata.finalUrl));
+
+	doc.blocks.push_back({BlockType::Link, "Page Info", "about:page-info"});
+	doc.blocks.push_back({BlockType::Link, "View Source", "about:view-source"});
 	doc.blocks.push_back({BlockType::Link, "Go to about:navigator", "about:navigator"});
 	return doc;
 }

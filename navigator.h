@@ -45,15 +45,28 @@ struct NavigatorPageMetadata {
 	int         imageBlockCount = 0;
 	int         loadedImageCount = 0;
 	int         failedImageCount = 0;
+	int         remoteImageCount = 0;
+	int         localImageCount = 0;
+	std::string lastImageError;
 };
 
 // =============================================================================
 // Navigator – first-class guideXOS app
+//
+// This hosted/compositor implementation is the authoritative full Navigator
+// path for the guideXOS app model. Keep portable document behavior in guideWeb
+// or small adapters, and keep platform-only transport/rendering details here.
+// The bare-metal NavigatorApp in kernel_apps.* is a thin capability-limited
+// adapter and should not grow a divergent full browser implementation.
 // =============================================================================
 
 class Navigator {
 public:
 	static uint64_t Launch();
+	static bool SmokeNavigateTo(const std::string& url);
+	static std::string SmokeRuntimeReport();
+	static std::string SmokeCurrentUrl();
+	static int SmokeCurrentBlockCount();
 
 private:
 	// -------------------------------------------------------------------------
@@ -110,6 +123,7 @@ private:
 	static WebDocument buildAboutNavigatorDocument();
 	static WebDocument buildPageInfoDocument();
 	static WebDocument buildViewSourceDocument();
+	static WebDocument buildRuntimeDocument();
 	// Load a file:// URL and convert the raw text to a WebDocument.
 	// Returns an error document if the file cannot be read.
 	static WebDocument loadFileUrl(const std::string& url);

@@ -42,7 +42,7 @@ RegisteredApp makeBuiltInApp(const std::string& appName) {
         app.manifest.icon = "trash.empty";
     }
     else if (appName == "guideXOS Navigator") {
-        app.manifest.description = "Native guideXOS browser shell placeholder bundled with the OS app model.";
+        app.manifest.description = "Native guideXOS Navigator browser bundled with the OS app model.";
         app.manifest.icon = "app.generic";
         app.manifest.category = "Internet";
         app.manifest.defaultWindow.width = 920;

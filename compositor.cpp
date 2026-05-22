@@ -2207,6 +2207,31 @@ namespace gxos {
 #endif
             Logger::write(LogLevel::Info, "Compositor service stopping"); return 0;
         }
+        std::vector<WindowDebugInfo> Compositor::debugWindowsSnapshot()
+        {
+            std::vector<WindowDebugInfo> out;
+            std::lock_guard<std::mutex> lk(g_lock);
+            out.reserve(g_z.size());
+            for (uint64_t id : g_z) {
+                auto it = g_windows.find(id);
+                if (it == g_windows.end()) continue;
+                const WinInfo& w = it->second;
+                WindowDebugInfo info;
+                info.id = w.id;
+                info.ownerPid = w.ownerPid;
+                info.title = w.title;
+                info.x = w.x;
+                info.y = w.y;
+                info.w = w.w;
+                info.h = w.h;
+                info.widgetCount = static_cast<int>(w.widgets.size());
+                info.minimized = w.minimized;
+                info.visible = w.visible && !w.tombstoned;
+                out.push_back(info);
+            }
+            return out;
+        }
+
         uint64_t Compositor::start( ) { ProcessSpec spec{ "compositor", Compositor::main }; return ProcessTable::spawn(spec, { "compositor" }); }
 
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)
