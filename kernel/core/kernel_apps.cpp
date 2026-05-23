@@ -263,10 +263,55 @@ static bool endsWithText(const char* value, const char* suffix) {
 static const char* kKernelTrashRootPath = "/Trash";
 static const char* kKernelTrashInfoSuffix = ".trashinfo";
 
-static bool kernel_trash_exists()
+static bool kernel_path_matches_mount(const char* path, const char* mountPath)
+{
+    if (!path || !mountPath || !mountPath[0]) return false;
+    int mountLen = strlen_local(mountPath);
+    for (int i = 0; i < mountLen; ++i) {
+        if (path[i] != mountPath[i]) return false;
+    }
+    return path[mountLen] == '\0' || path[mountLen] == '/' || (mountLen == 1 && mountPath[0] == '/');
+}
+
+static const vfs::MountPoint* kernel_mount_for_path(const char* path)
+{
+    const vfs::MountPoint* best = nullptr;
+    int bestLen = -1;
+    for (uint8_t i = 0; i < vfs::VFS_MAX_MOUNTS; ++i) {
+        const vfs::MountPoint* mp = vfs::get_mount_by_index(i);
+        if (!mp || !mp->active) continue;
+        int len = strlen_local(mp->path);
+        if (len > bestLen && kernel_path_matches_mount(path, mp->path)) {
+            best = mp;
+            bestLen = len;
+        }
+    }
+    return best;
+}
+
+static void kernel_trash_root_for_mount(const char* mountPath, char* out, int outSize)
+{
+    if (!out || outSize <= 0) return;
+    if (!mountPath || !mountPath[0] || (mountPath[0] == '/' && mountPath[1] == '\0')) {
+        strcopy(out, kKernelTrashRootPath, outSize);
+        return;
+    }
+    strcopy(out, mountPath, outSize);
+    strappend(out, "/Trash", outSize);
+}
+
+static bool kernel_trash_root_for_path(const char* sourcePath, char* out, int outSize)
+{
+    const vfs::MountPoint* mp = kernel_mount_for_path(sourcePath);
+    if (!mp) return false;
+    kernel_trash_root_for_mount(mp->path, out, outSize);
+    return out && out[0];
+}
+
+static bool kernel_trash_root_has_items(const char* trashRoot)
 {
     vfs::DirEntry entry{};
-    uint8_t dir = vfs::opendir(kKernelTrashRootPath);
+    uint8_t dir = vfs::opendir(trashRoot);
     if (dir == 0xFF) return false;
     bool hasItems = false;
     while (vfs::readdir(dir, &entry)) {
@@ -276,6 +321,22 @@ static bool kernel_trash_exists()
         break;
     }
     vfs::closedir(dir);
+    return hasItems;
+}
+
+static bool kernel_trash_exists()
+{
+    bool hasItems = false;
+    for (uint8_t i = 0; i < vfs::VFS_MAX_MOUNTS; ++i) {
+        const vfs::MountPoint* mp = vfs::get_mount_by_index(i);
+        if (!mp || !mp->active) continue;
+        char trashRoot[256];
+        kernel_trash_root_for_mount(mp->path, trashRoot, sizeof(trashRoot));
+        if (kernel_trash_root_has_items(trashRoot)) {
+            hasItems = true;
+            break;
+        }
+    }
     serial::puts("[trash] item count computed=");
     serial::puts(hasItems ? "nonzero" : "0");
     serial::puts(" iconKey=");
@@ -283,7 +344,6 @@ static bool kernel_trash_exists()
     serial::puts("\n");
     return hasItems;
 }
-
 static void kernel_write_text_file(const char* path, const char* text)
 {
     if (!path || !text) return;
@@ -449,19 +509,18 @@ static void kernel_make_fat_safe_collision_name(const char* baseName, bool isDir
     }
 }
 
-static void kernel_unique_trash_path(const char* baseName, bool isDir, char* out, int outSize)
+static void kernel_unique_trash_path(const char* trashRoot, const char* baseName, bool isDir, char* out, int outSize)
 {
-    kernel_join_path(kKernelTrashRootPath, baseName, out, outSize);
+    kernel_join_path(trashRoot, baseName, out, outSize);
     if (!vfs::exists(out)) return;
 
     for (int index = 1; index < 100; ++index) {
         char candidate[vfs::VFS_MAX_FILENAME];
         kernel_make_fat_safe_collision_name(baseName, isDir, index, candidate, sizeof(candidate));
-        kernel_join_path(kKernelTrashRootPath, candidate, out, outSize);
+        kernel_join_path(trashRoot, candidate, out, outSize);
         if (!vfs::exists(out)) return;
     }
 }
-
 static bool kernel_move_path_to_trash(const char* sourcePath, const char* sourceName, bool isDir, char* movedPath, int movedPathSize, char* error, int errorSize)
 {
     serial::puts("[trash] delete requested path=");
@@ -471,17 +530,24 @@ static bool kernel_move_path_to_trash(const char* sourcePath, const char* source
     serial::puts(sourceName ? sourceName : "<null>");
     serial::puts("\n");
 
-    if (!kernel_make_directory_if_missing(kKernelTrashRootPath)) {
+    char trashRoot[256];
+    if (!kernel_trash_root_for_path(sourcePath, trashRoot, sizeof(trashRoot))) {
+        strcopy(error, "No mounted filesystem for Trash", errorSize);
+        serial::puts("[trash] no source mount for Trash\n");
+        return false;
+    }
+
+    if (!kernel_make_directory_if_missing(trashRoot)) {
         strcopy(error, "Unable to create Trash directory", errorSize);
         serial::puts("[trash] Trash directory unavailable\n");
         return false;
     }
 
     serial::puts("[trash] selected trash dir=");
-    serial::puts(kKernelTrashRootPath);
+    serial::puts(trashRoot);
     serial::puts("\n");
 
-    kernel_unique_trash_path(sourceName, isDir, movedPath, movedPathSize);
+    kernel_unique_trash_path(trashRoot, sourceName, isDir, movedPath, movedPathSize);
     serial::puts("[trash] collision-safe target=");
     serial::puts(movedPath);
     serial::puts("\n");
@@ -4080,7 +4146,7 @@ void TrashApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h)
         appDrawText(x + 74, y + 94, item.name, rgb(200, 205, 215));
         appDrawText(x + 74, y + 112, typeForEntry(item), rgb(200, 205, 215));
         appDrawText(x + 74, y + 130, item.originalPath, rgb(200, 205, 215));
-        appDrawText(x + 74, y + 148, "Current: /Trash", rgb(200, 205, 215));
+        appDrawText(x + 74, y + 148, item.trashRoot, rgb(200, 205, 215));
         appDrawText(x + 74, y + 166, item.deletedText, rgb(200, 205, 215));
     }
     updateButtons();
@@ -4157,63 +4223,74 @@ void TrashApp::onWidgetClick(int widgetId)
 void TrashApp::refreshEntries()
 {
     m_entryCount = 0;
-    uint8_t dir = vfs::opendir(kKernelTrashRootPath);
-    if (dir == 0xFF) return;
 
-    vfs::DirEntry entry{};
-    while (m_entryCount < MAX_TRASH_ENTRIES && vfs::readdir(dir, &entry)) {
-        if (entry.name[0] == '.' && (entry.name[1] == '\0' || (entry.name[1] == '.' && entry.name[2] == '\0'))) continue;
-        if (endsWithText(entry.name, kKernelTrashInfoSuffix)) continue;
+    for (uint8_t mountIndex = 0; mountIndex < vfs::VFS_MAX_MOUNTS && m_entryCount < MAX_TRASH_ENTRIES; ++mountIndex) {
+        const vfs::MountPoint* mp = vfs::get_mount_by_index(mountIndex);
+        if (!mp || !mp->active) continue;
 
-        TrashEntry& item = m_entries[m_entryCount];
-        strcopy(item.name, entry.name, sizeof(item.name));
-        item.isDir = entry.type == vfs::FILE_TYPE_DIRECTORY;
-        item.size = entry.size;
-        item.originalPath[0] = '\0';
-        item.originalFolder[0] = '\0';
-        item.type[0] = '\0';
-        item.iconKey[0] = '\0';
-        strcopy(item.deletedText, "Unknown", sizeof(item.deletedText));
+        char trashRoot[256];
+        kernel_trash_root_for_mount(mp->path, trashRoot, sizeof(trashRoot));
+        uint8_t dir = vfs::opendir(trashRoot);
+        if (dir == 0xFF) continue;
 
-        char itemPath[256];
-        char infoPath[256];
-        kernel_join_path(kKernelTrashRootPath, entry.name, itemPath, sizeof(itemPath));
-        kernel_trash_info_path_for(itemPath, infoPath, sizeof(infoPath));
-        char metadata[512];
-        int32_t bytesRead = vfs::read_file(infoPath, metadata, sizeof(metadata) - 1);
-        if (bytesRead > 0) {
-            metadata[bytesRead] = '\0';
-            const char* key = "\"originalPath\": \"";
-            for (int i = 0; metadata[i]; ++i) {
-                if (startsWithText(metadata + i, key)) {
-                    i += strlen_local(key);
-                    int pi = 0;
-                    while (metadata[i] && metadata[i] != '"' && pi < (int)sizeof(item.originalPath) - 1) {
-                        item.originalPath[pi++] = metadata[i++];
+        vfs::DirEntry entry{};
+        while (m_entryCount < MAX_TRASH_ENTRIES && vfs::readdir(dir, &entry)) {
+            if (entry.name[0] == '.' && (entry.name[1] == '\0' || (entry.name[1] == '.' && entry.name[2] == '\0'))) continue;
+            if (endsWithText(entry.name, kKernelTrashInfoSuffix)) continue;
+
+            TrashEntry& item = m_entries[m_entryCount];
+            strcopy(item.name, entry.name, sizeof(item.name));
+            strcopy(item.trashRoot, trashRoot, sizeof(item.trashRoot));
+            item.isDir = entry.type == vfs::FILE_TYPE_DIRECTORY;
+            item.size = entry.size;
+            item.originalPath[0] = '\0';
+            item.originalFolder[0] = '\0';
+            item.type[0] = '\0';
+            item.iconKey[0] = '\0';
+            strcopy(item.deletedText, "Unknown", sizeof(item.deletedText));
+
+            char itemPath[256];
+            char infoPath[256];
+            kernel_join_path(item.trashRoot, entry.name, itemPath, sizeof(itemPath));
+            kernel_trash_info_path_for(itemPath, infoPath, sizeof(infoPath));
+            char metadata[512];
+            int32_t bytesRead = vfs::read_file(infoPath, metadata, sizeof(metadata) - 1);
+            if (bytesRead > 0) {
+                metadata[bytesRead] = '\0';
+                const char* key = "\"originalPath\": \"";
+                for (int i = 0; metadata[i]; ++i) {
+                    if (startsWithText(metadata + i, key)) {
+                        i += strlen_local(key);
+                        int pi = 0;
+                        while (metadata[i] && metadata[i] != '"' && pi < (int)sizeof(item.originalPath) - 1) {
+                            item.originalPath[pi++] = metadata[i++];
+                        }
+                        item.originalPath[pi] = '\0';
+                        break;
                     }
-                    item.originalPath[pi] = '\0';
-                    break;
+                }
+                const char* timeKey = "\"trashedAt\": ";
+                for (int i = 0; metadata[i]; ++i) {
+                    if (startsWithText(metadata + i, timeKey)) {
+                        strcopy(item.deletedText, "Recently", sizeof(item.deletedText));
+                        break;
+                    }
                 }
             }
-            const char* timeKey = "\"trashedAt\": ";
-            for (int i = 0; metadata[i]; ++i) {
-                if (startsWithText(metadata + i, timeKey)) {
-                    strcopy(item.deletedText, "Recently", sizeof(item.deletedText));
-                    break;
-                }
+            if (!item.originalPath[0]) {
+                char restoreFolder[256];
+                parentPathOf(item.trashRoot, restoreFolder, sizeof(restoreFolder));
+                kernel_join_path(restoreFolder, entry.name, item.originalPath, sizeof(item.originalPath));
             }
-        }
-        if (!item.originalPath[0]) {
-            strcopy(item.originalPath, "/", sizeof(item.originalPath));
-            strappend(item.originalPath, entry.name, sizeof(item.originalPath));
-        }
-        parentPathOf(item.originalPath, item.originalFolder, sizeof(item.originalFolder));
-        strcopy(item.type, typeForEntry(item), sizeof(item.type));
-        strcopy(item.iconKey, iconForEntry(item), sizeof(item.iconKey));
+            parentPathOf(item.originalPath, item.originalFolder, sizeof(item.originalFolder));
+            strcopy(item.type, typeForEntry(item), sizeof(item.type));
+            strcopy(item.iconKey, iconForEntry(item), sizeof(item.iconKey));
 
-        ++m_entryCount;
+            ++m_entryCount;
+        }
+        vfs::closedir(dir);
     }
-    vfs::closedir(dir);
+
     if (m_selectedIndex >= m_entryCount) m_selectedIndex = m_entryCount - 1;
     if (m_entryCount == 0) m_selectedIndex = -1;
     else if (m_selectedIndex < 0) m_selectedIndex = 0;
@@ -4221,7 +4298,6 @@ void TrashApp::refreshEntries()
     serial_put_dec((uint32_t)m_entryCount);
     serial::puts("\n");
 }
-
 bool TrashApp::purgeContents(int* deletedCount)
 {
     if (deletedCount) *deletedCount = 0;
@@ -4232,10 +4308,11 @@ bool TrashApp::purgeContents(int* deletedCount)
     for (int i = 0; i < m_entryCount; ++i) {
         char itemPath[256];
         char infoPath[256];
-        kernel_join_path(kKernelTrashRootPath, m_entries[i].name, itemPath, sizeof(itemPath));
+        kernel_join_path(m_entries[i].trashRoot, m_entries[i].name, itemPath, sizeof(itemPath));
         kernel_trash_info_path_for(itemPath, infoPath, sizeof(infoPath));
 
-        if (!startsWithText(itemPath, kKernelTrashRootPath) || itemPath[strlen_local(kKernelTrashRootPath)] != '/') {
+        int rootLen = strlen_local(m_entries[i].trashRoot);
+        if (!startsWithText(itemPath, m_entries[i].trashRoot) || itemPath[rootLen] != '/') {
             serial::puts("[trash] refusing unsafe purge path\n");
             ok = false;
             continue;
@@ -4262,10 +4339,14 @@ bool TrashApp::purgeContents(int* deletedCount)
         }
     }
 
-    kernel_make_directory_if_missing(kKernelTrashRootPath);
     int finalCount = 0;
-    uint8_t dir = vfs::opendir(kKernelTrashRootPath);
-    if (dir != 0xFF) {
+    for (uint8_t mountIndex = 0; mountIndex < vfs::VFS_MAX_MOUNTS; ++mountIndex) {
+        const vfs::MountPoint* mp = vfs::get_mount_by_index(mountIndex);
+        if (!mp || !mp->active) continue;
+        char trashRoot[256];
+        kernel_trash_root_for_mount(mp->path, trashRoot, sizeof(trashRoot));
+        uint8_t dir = vfs::opendir(trashRoot);
+        if (dir == 0xFF) continue;
         vfs::DirEntry entry{};
         while (vfs::readdir(dir, &entry)) {
             if (entry.name[0] == '.' && (entry.name[1] == '\0' || (entry.name[1] == '.' && entry.name[2] == '\0'))) continue;
@@ -4279,7 +4360,6 @@ bool TrashApp::purgeContents(int* deletedCount)
     serial::puts("\n");
     return ok;
 }
-
 void TrashApp::updateButtons()
 {
     bool hasSelection = m_selectedIndex >= 0 && m_selectedIndex < m_entryCount;
@@ -4367,7 +4447,7 @@ void TrashApp::deleteSelectedPermanently()
 bool TrashApp::restoreEntry(const TrashEntry& entry)
 {
     char sourcePath[256];
-    kernel_join_path(kKernelTrashRootPath, entry.name, sourcePath, sizeof(sourcePath));
+    kernel_join_path(entry.trashRoot, entry.name, sourcePath, sizeof(sourcePath));
     char targetPath[256];
     makeUniqueRestorePath(entry.originalPath, targetPath, sizeof(targetPath));
     vfs::Status status = vfs::rename(sourcePath, targetPath);
@@ -4386,9 +4466,9 @@ bool TrashApp::deleteEntryPermanently(const TrashEntry& entry)
 {
     char itemPath[256];
     char infoPath[256];
-    kernel_join_path(kKernelTrashRootPath, entry.name, itemPath, sizeof(itemPath));
+    kernel_join_path(entry.trashRoot, entry.name, itemPath, sizeof(itemPath));
     kernel_trash_info_path_for(itemPath, infoPath, sizeof(infoPath));
-    if (!startsWithText(itemPath, kKernelTrashRootPath) || itemPath[strlen_local(kKernelTrashRootPath)] != '/') return false;
+    if (!startsWithText(itemPath, entry.trashRoot) || itemPath[strlen_local(entry.trashRoot)] != '/') return false;
     vfs::Status status = entry.isDir ? vfs::rmdir(itemPath) : vfs::unlink(itemPath);
     if (status != vfs::VFS_OK) return false;
     vfs::unlink(infoPath);

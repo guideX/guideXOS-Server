@@ -647,6 +647,7 @@ private:
     struct TrashEntry {
         char name[vfs::VFS_MAX_FILENAME];
         bool isDir;
+        char trashRoot[256];
         char originalPath[256];
         char originalFolder[256];
         char type[32];

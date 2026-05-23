@@ -3340,6 +3340,47 @@ static bool text_ends_with(const char* value, const char* suffix)
     return true;
 }
 
+static void desktop_trash_root_for_mount(const char* mountPath, char* out, int outSize)
+{
+    if (!out || outSize <= 0) return;
+    if (!mountPath || !mountPath[0] || (mountPath[0] == '/' && mountPath[1] == '\0')) {
+        int pos = 0;
+        const char* rootTrash = "/Trash";
+        while (rootTrash[pos] && pos < outSize - 1) {
+            out[pos] = rootTrash[pos];
+            ++pos;
+        }
+        out[pos] = '\0';
+        return;
+    }
+    int pos = 0;
+    while (mountPath[pos] && pos < outSize - 1) {
+        out[pos] = mountPath[pos];
+        ++pos;
+    }
+    const char* suffix = "/Trash";
+    for (int i = 0; suffix[i] && pos < outSize - 1; ++i) {
+        out[pos++] = suffix[i];
+    }
+    out[pos] = '\0';
+}
+
+static bool desktop_trash_root_has_items(const char* trashRoot)
+{
+    uint8_t dir = vfs::opendir(trashRoot);
+    if (dir == 0xFF) return false;
+    bool hasItems = false;
+    vfs::DirEntry entry{};
+    while (vfs::readdir(dir, &entry)) {
+        if (entry.name[0] == '.' && (entry.name[1] == '\0' || (entry.name[1] == '.' && entry.name[2] == '\0'))) continue;
+        if (text_ends_with(entry.name, ".trashinfo")) continue;
+        hasItems = true;
+        break;
+    }
+    vfs::closedir(dir);
+    return hasItems;
+}
+
 static const char* GetDesktopIconLogicalName(const char* label)
 {
     if (text_equals(label, "Notepad")) return "app.notepad";
@@ -3347,16 +3388,15 @@ static const char* GetDesktopIconLogicalName(const char* label)
     if (text_equals(label, "Console")) return "app.console";
     if (text_equals(label, "Trash")) {
         int count = 0;
-        uint8_t dir = vfs::opendir("/Trash");
-        if (dir != 0xFF) {
-            vfs::DirEntry entry{};
-            while (vfs::readdir(dir, &entry)) {
-                if (entry.name[0] == '.' && (entry.name[1] == '\0' || (entry.name[1] == '.' && entry.name[2] == '\0'))) continue;
-                if (text_ends_with(entry.name, ".trashinfo")) continue;
+        for (uint8_t i = 0; i < vfs::VFS_MAX_MOUNTS; ++i) {
+            const vfs::MountPoint* mp = vfs::get_mount_by_index(i);
+            if (!mp || !mp->active) continue;
+            char trashRoot[256];
+            desktop_trash_root_for_mount(mp->path, trashRoot, sizeof(trashRoot));
+            if (desktop_trash_root_has_items(trashRoot)) {
                 ++count;
                 break;
             }
-            vfs::closedir(dir);
         }
         serial::puts("[desktop] Trash icon state count=");
         serial::puts(count > 0 ? "nonzero" : "0");
