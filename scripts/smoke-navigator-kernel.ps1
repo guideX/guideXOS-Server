@@ -1,6 +1,6 @@
 param(
     [switch]$Build,
-    [int]$TimeoutSeconds = 25
+    [int]$TimeoutSeconds = 40
 )
 
 $ErrorActionPreference = "Stop"
@@ -11,9 +11,37 @@ New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $serialLog = Join-Path $LogDir "navigator-kernel-smoke-$stamp.serial.log"
 
-if ($Build) {
+function Invoke-KernelBuildForSmoke {
+    param([string]$ExtraCFlags)
+    $oldExtra = $env:EXTRA_CFLAGS
+    if ($ExtraCFlags) {
+        $env:EXTRA_CFLAGS = $ExtraCFlags
+    } else {
+        Remove-Item Env:\EXTRA_CFLAGS -ErrorAction SilentlyContinue
+    }
+    Get-ChildItem -Path (Join-Path $Root "kernel\build") -Recurse -Filter "kernel_apps.o" -ErrorAction SilentlyContinue |
+        Remove-Item -Force -ErrorAction SilentlyContinue
     & (Join-Path $Root "build-kernel.bat")
-    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    $buildCode = $LASTEXITCODE
+    if ($null -ne $oldExtra) {
+        $env:EXTRA_CFLAGS = $oldExtra
+    } else {
+        Remove-Item Env:\EXTRA_CFLAGS -ErrorAction SilentlyContinue
+    }
+    if ($buildCode -ne 0) { exit $buildCode }
+}
+
+$activeSmokeBuild = $false
+function Restore-NormalKernelBuild {
+    if ($script:activeSmokeBuild) {
+        Write-Host "Restoring normal kernel build without active Navigator HTTP smoke diagnostics..."
+        Invoke-KernelBuildForSmoke ""
+        $script:activeSmokeBuild = $false
+    }
+}
+
+if ($Build) {
+    Invoke-KernelBuildForSmoke ""
 }
 
 function Find-Qemu {
@@ -32,6 +60,27 @@ function Find-Qemu {
 $qemu = Find-Qemu
 if (-not $qemu) { throw "qemu-system-x86_64 not found." }
 
+function Find-Python {
+    foreach ($candidate in @(
+        "C:\Users\guideX\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe",
+        "$Root\.venv\Scripts\python.exe"
+    )) {
+        if (Test-Path $candidate) { return $candidate }
+    }
+    $python = Get-Command "python" -ErrorAction SilentlyContinue
+    if ($python) { return $python.Source }
+    $py = Get-Command "py" -ErrorAction SilentlyContinue
+    if ($py) { return $py.Source }
+    return $null
+}
+
+$python = Find-Python
+if (-not $python) { throw "python not found; required for local Navigator HTTP smoke server." }
+
+Write-Host "Building kernel with active Navigator HTTP/PNG smoke diagnostics..."
+Invoke-KernelBuildForSmoke "-DGXOS_NAVIGATOR_HTTP_SMOKE_ACTIVE"
+$activeSmokeBuild = $true
+
 $ovmf = "C:\Program Files\qemu\share\edk2-x86_64-code.fd"
 if (-not (Test-Path $ovmf)) { throw "OVMF image not found: $ovmf" }
 
@@ -46,6 +95,16 @@ $createdStartup = $false
 if (-not (Test-Path $startup)) {
     "FS0:\EFI\BOOT\BOOTX64.EFI" | Set-Content -Path $startup -Encoding ASCII
     $createdStartup = $true
+}
+
+$httpLog = Join-Path $LogDir "navigator-kernel-http-$stamp.log"
+$httpErrLog = Join-Path $LogDir "navigator-kernel-http-$stamp.err.log"
+$httpServer = Join-Path $Root "scripts\navigator_kernel_http_server.py"
+$httpArgs = @("`"$httpServer`"", "--port", "8080", "--host", "0.0.0.0", "--root", "`"$Root`"")
+$httpProc = Start-Process -FilePath $python -ArgumentList $httpArgs -PassThru -WindowStyle Hidden -RedirectStandardOutput $httpLog -RedirectStandardError $httpErrLog
+Start-Sleep -Milliseconds 800
+if ($httpProc.HasExited) {
+    throw "local HTTP smoke server exited early; see $httpLog"
 }
 
 $args = @(
@@ -74,12 +133,17 @@ try {
     }
     if (-not $proc.HasExited) {
         Stop-Process -Id $proc.Id -Force
+        Wait-Process -Id $proc.Id -Timeout 5 -ErrorAction SilentlyContinue
     }
 } finally {
     Start-Sleep -Milliseconds 300
+    if ($httpProc -and -not $httpProc.HasExited) {
+        Stop-Process -Id $httpProc.Id -Force
+    }
     if ($createdStartup) {
         Remove-Item $startup -ErrorAction SilentlyContinue
     }
+    Restore-NormalKernelBuild
 }
 
 $output = if (Test-Path $serialLog) { Get-Content $serialLog -Raw } else { "" }
@@ -97,14 +161,30 @@ $checks = @(
     "[NAVIGATOR-SMOKE] capability.dns=unsupported for Navigator HTTP v0.1",
     "[NAVIGATOR-SMOKE] capability.http_redirects=enabled limit 5",
     "[NAVIGATOR-SMOKE] capability.http_chunked=enabled",
-    "[NAVIGATOR-SMOKE] capability.remote_png=unsupported in bare-metal HTTP v0.1",
+    "[NAVIGATOR-SMOKE] capability.remote_png=enabled-basic numeric IPv4 http:// PNG images",
     "[NAVIGATOR-SMOKE] capability.downloads=unavailable for bare-metal HTTP v0.1",
     "[NAVIGATOR-SMOKE] capability.css_lite=enabled for embedded style blocks",
     "[NAVIGATOR-SMOKE] capability.forms_lite=enabled for file/about GET form blocks",
     "[NAVIGATOR-SMOKE] capability.find_in_page=unsupported in bare-metal adapter",
     "[NAVIGATOR-SMOKE] capability.external_stylesheets=unsupported",
     "[NAVIGATOR-SMOKE] capability.bookmark_persistence=unavailable; in-memory defaults only",
-    "[NAVIGATOR-SMOKE] http.active_cases=skipped",
+    "[NAVIGATOR-SMOKE] http.case.basic.result=PASS",
+    "[NAVIGATOR-SMOKE] http.case.relative_redirect.result=PASS",
+    "[NAVIGATOR-SMOKE] http.case.absolute_redirect.result=PASS",
+    "[NAVIGATOR-SMOKE] http.case.redirect_loop.result=PASS",
+    "[NAVIGATOR-SMOKE] http.case.chunked.result=PASS",
+    "[NAVIGATOR-SMOKE] http.case.missing_404.result=PASS",
+    "[NAVIGATOR-SMOKE] http.case.gzip_unsupported.result=PASS",
+    "[NAVIGATOR-SMOKE] http.case.image_relative.result=PASS",
+    "[NAVIGATOR-SMOKE] http.case.image_relative.loaded_images=1",
+    "[NAVIGATOR-SMOKE] http.case.image_absolute.result=PASS",
+    "[NAVIGATOR-SMOKE] http.case.image_absolute.loaded_images=1",
+    "[NAVIGATOR-SMOKE] http.case.image_redirect.result=PASS",
+    "[NAVIGATOR-SMOKE] http.case.image_redirect.loaded_images=1",
+    "[NAVIGATOR-SMOKE] http.case.image_chunked.result=PASS",
+    "[NAVIGATOR-SMOKE] http.case.image_chunked.loaded_images=1",
+    "[NAVIGATOR-SMOKE] http.case.image_nonpng.result=PASS",
+    "[NAVIGATOR-SMOKE] http.case.image_nonpng.failed_images=1",
     "[NAVIGATOR-SMOKE] result=PASS"
 )
 

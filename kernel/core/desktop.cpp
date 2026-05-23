@@ -318,6 +318,17 @@ static void desktop_str_copy(char* dst, const char* src, int dstSize)
     dst[i] = '\0';
 }
 
+static bool desktop_str_starts_with(const char* value, const char* prefix)
+{
+    if (!value || !prefix) return false;
+    while (*prefix) {
+        if (*value != *prefix) return false;
+        ++value;
+        ++prefix;
+    }
+    return true;
+}
+
 static void desktop_append_text(char* dst, int* pos, int dstSize, const char* text)
 {
     if (!dst || !pos || dstSize <= 0 || !text) return;
@@ -611,7 +622,8 @@ static const int kDesktopShortcutStart = kSystemDesktopIconCount + kMaxDesktopFi
 static char s_desktopFileLabels[kMaxDesktopFilesystemEntries][vfs::VFS_MAX_FILENAME];
 static char s_desktopFilePaths[kMaxDesktopFilesystemEntries][vfs::VFS_MAX_PATH];
 static char s_desktopShortcutLabels[kMaxDesktopAppShortcuts][64];
-static char s_desktopShortcutTargetAppIds[kMaxDesktopAppShortcuts][64];
+static char s_desktopShortcutTypes[kMaxDesktopAppShortcuts][8];
+static char s_desktopShortcutTargetAppIds[kMaxDesktopAppShortcuts][vfs::VFS_MAX_PATH];
 
 // Desktop icons: system objects plus fixed VFS-backed slots for /Desktop entries.
 static DesktopIcon s_desktopIcons[] = {
@@ -705,7 +717,14 @@ static void desktop_icon_layout_key(int iconIdx, char* out, int outSize)
     }
 
     if (icon.kind == DesktopItemKind::Shortcut && icon.path[0]) {
-        desktop_append_text(out, &pos, outSize, "shortcut:app:");
+        const char* shortcutType = "App";
+        if (iconIdx >= kDesktopShortcutStart && iconIdx < kDesktopShortcutStart + kMaxDesktopAppShortcuts) {
+            int slot = iconIdx - kDesktopShortcutStart;
+            if (s_desktopShortcutTypes[slot][0]) shortcutType = s_desktopShortcutTypes[slot];
+        }
+        if (desktop_str_eq(shortcutType, "Folder")) desktop_append_text(out, &pos, outSize, "shortcut:folder:");
+        else if (desktop_str_eq(shortcutType, "File")) desktop_append_text(out, &pos, outSize, "shortcut:file:");
+        else desktop_append_text(out, &pos, outSize, "shortcut:app:");
         desktop_append_text(out, &pos, outSize, icon.path);
         return;
     }
@@ -1701,6 +1720,7 @@ static void reset_app_shortcut_slots()
         int iconIdx = kDesktopShortcutStart + i;
         if (iconIdx >= kDesktopIconCount) break;
         s_desktopShortcutLabels[i][0] = '\0';
+        s_desktopShortcutTypes[i][0] = '\0';
         s_desktopShortcutTargetAppIds[i][0] = '\0';
         s_desktopIcons[iconIdx].label = s_desktopShortcutLabels[i];
         s_desktopIcons[iconIdx].path[0] = '\0';
@@ -1714,13 +1734,13 @@ static void reset_app_shortcut_slots()
     }
 }
 
-static bool add_app_shortcut_slot(const char* targetAppId, const char* label)
+static bool add_shortcut_slot(const char* shortcutType, const char* target, const char* label, bool isDirectory, uint32_t color)
 {
-    if (!targetAppId || !targetAppId[0]) return false;
+    if (!shortcutType || !shortcutType[0] || !target || !target[0]) return false;
     for (int i = 0; i < kMaxDesktopAppShortcuts; ++i) {
-        if (desktop_str_eq(s_desktopShortcutTargetAppIds[i], targetAppId)) {
+        if (desktop_str_eq(s_desktopShortcutTypes[i], shortcutType) && desktop_str_eq(s_desktopShortcutTargetAppIds[i], target)) {
             serial::puts("[desktop] Shortcut already exists: ");
-            serial::puts(targetAppId);
+            serial::puts(target);
             serial::puts("\n");
             return false;
         }
@@ -1729,19 +1749,22 @@ static bool add_app_shortcut_slot(const char* targetAppId, const char* label)
         if (s_desktopShortcutTargetAppIds[i][0]) continue;
         int iconIdx = kDesktopShortcutStart + i;
         if (iconIdx >= kDesktopIconCount) break;
-        desktop_str_copy(s_desktopShortcutTargetAppIds[i], targetAppId, (int)sizeof(s_desktopShortcutTargetAppIds[i]));
-        desktop_str_copy(s_desktopShortcutLabels[i], label && label[0] ? label : targetAppId, (int)sizeof(s_desktopShortcutLabels[i]));
+        desktop_str_copy(s_desktopShortcutTypes[i], shortcutType, (int)sizeof(s_desktopShortcutTypes[i]));
+        desktop_str_copy(s_desktopShortcutTargetAppIds[i], target, (int)sizeof(s_desktopShortcutTargetAppIds[i]));
+        desktop_str_copy(s_desktopShortcutLabels[i], label && label[0] ? label : target, (int)sizeof(s_desktopShortcutLabels[i]));
         s_desktopIcons[iconIdx].label = s_desktopShortcutLabels[i];
         desktop_str_copy(s_desktopIcons[iconIdx].path, s_desktopShortcutTargetAppIds[i], (int)sizeof(s_desktopIcons[iconIdx].path));
         s_desktopIcons[iconIdx].pinned = true;
         s_desktopIcons[iconIdx].recent = false;
         s_desktopIcons[iconIdx].kind = DesktopItemKind::Shortcut;
         s_desktopIcons[iconIdx].systemObject = DesktopSystemObjectKind::None;
-        s_desktopIcons[iconIdx].isDirectory = false;
+        s_desktopIcons[iconIdx].isDirectory = isDirectory;
         s_desktopIcons[iconIdx].removable = true;
-        s_desktopIcons[iconIdx].color = color_for_start_menu_app(label && label[0] ? label : targetAppId);
-        serial::puts("[desktop] Shortcut loaded/renderable: shortcut:app:");
-        serial::puts(targetAppId);
+        s_desktopIcons[iconIdx].color = color;
+        serial::puts("[desktop] Shortcut loaded/renderable: ");
+        serial::puts(shortcutType);
+        serial::puts(" ");
+        serial::puts(target);
         serial::puts("\n");
         return true;
     }
@@ -1749,13 +1772,20 @@ static bool add_app_shortcut_slot(const char* targetAppId, const char* label)
     return false;
 }
 
+static bool add_app_shortcut_slot(const char* targetAppId, const char* label)
+{
+    return add_shortcut_slot("App", targetAppId, label, false, color_for_start_menu_app(label && label[0] ? label : targetAppId));
+}
+
 static void persist_app_shortcuts()
 {
-    char buffer[2048];
+    char buffer[8192];
     int pos = 0;
-    desktop_append_text(buffer, &pos, sizeof(buffer), "# guideXOS Desktop App Shortcuts v1\n");
+    desktop_append_text(buffer, &pos, sizeof(buffer), "# guideXOS Desktop Shortcuts v2\n");
     for (int i = 0; i < kMaxDesktopAppShortcuts; ++i) {
         if (!s_desktopShortcutTargetAppIds[i][0]) continue;
+        desktop_append_text(buffer, &pos, sizeof(buffer), s_desktopShortcutTypes[i][0] ? s_desktopShortcutTypes[i] : "App");
+        desktop_append_text(buffer, &pos, sizeof(buffer), "\t");
         desktop_append_text(buffer, &pos, sizeof(buffer), s_desktopShortcutTargetAppIds[i]);
         desktop_append_text(buffer, &pos, sizeof(buffer), "\t");
         desktop_append_text(buffer, &pos, sizeof(buffer), s_desktopShortcutLabels[i]);
@@ -1768,7 +1798,7 @@ static void persist_app_shortcuts()
 static void load_persisted_app_shortcuts()
 {
     reset_app_shortcut_slots();
-    char buffer[2048];
+    char buffer[8192];
     int32_t count = vfs::read_file("/desktop.shortcuts", buffer, sizeof(buffer) - 1);
     if (count <= 0) {
         serial::puts("[desktop] Shortcut loaded: none persisted\n");
@@ -1782,25 +1812,44 @@ static void load_persisted_app_shortcuts()
         while (pos < count && buffer[pos] != '\n' && buffer[pos] != '\r') pos++;
         int lineEnd = pos;
         if (lineEnd <= lineStart || buffer[lineStart] == '#') continue;
-        int tab = -1;
+        int firstTab = -1;
+        int secondTab = -1;
         for (int i = lineStart; i < lineEnd; ++i) {
-            if (buffer[i] == '\t') { tab = i; break; }
+            if (buffer[i] == '\t') {
+                if (firstTab < 0) firstTab = i;
+                else { secondTab = i; break; }
+            }
         }
-        char target[64];
+        char type[8];
+        char target[vfs::VFS_MAX_PATH];
         char label[64];
-        int targetEnd = tab > lineStart ? tab : lineEnd;
-        int targetLen = targetEnd - lineStart;
+        if (secondTab > firstTab) {
+            int typeLen = firstTab - lineStart;
+            if (typeLen >= (int)sizeof(type)) typeLen = (int)sizeof(type) - 1;
+            for (int i = 0; i < typeLen; ++i) type[i] = buffer[lineStart + i];
+            type[typeLen] = '\0';
+        } else {
+            desktop_str_copy(type, "App", sizeof(type));
+        }
+
+        int targetStart = secondTab > firstTab ? firstTab + 1 : lineStart;
+        int targetEnd = secondTab > firstTab ? secondTab : (firstTab > lineStart ? firstTab : lineEnd);
+        int targetLen = targetEnd - targetStart;
         if (targetLen >= (int)sizeof(target)) targetLen = (int)sizeof(target) - 1;
-        for (int i = 0; i < targetLen; ++i) target[i] = buffer[lineStart + i];
+        for (int i = 0; i < targetLen; ++i) target[i] = buffer[targetStart + i];
         target[targetLen] = '\0';
         int labelLen = 0;
-        if (tab > 0) {
-            labelLen = lineEnd - tab - 1;
+        int labelStart = secondTab > firstTab ? secondTab + 1 : (firstTab > lineStart ? firstTab + 1 : lineEnd);
+        if (labelStart < lineEnd) {
+            labelLen = lineEnd - labelStart;
             if (labelLen >= (int)sizeof(label)) labelLen = (int)sizeof(label) - 1;
-            for (int i = 0; i < labelLen; ++i) label[i] = buffer[tab + 1 + i];
+            for (int i = 0; i < labelLen; ++i) label[i] = buffer[labelStart + i];
         }
         label[labelLen] = '\0';
-        add_app_shortcut_slot(target, label[0] ? label : target);
+        bool isFolder = desktop_str_eq(type, "Folder");
+        uint32_t color = desktop_str_eq(type, "App") ? color_for_start_menu_app(label[0] ? label : target) :
+            (isFolder ? 0xFFC8B43C : 0xFF9098A4);
+        add_shortcut_slot(type, target, label[0] ? label : target, isFolder, color);
     }
     serial::puts("[desktop] Shortcut loaded from persistence\n");
 }
@@ -1810,7 +1859,7 @@ static bool is_app_shortcut_pinned_to_desktop(const char* appName)
     const StartMenuApp* app = find_start_menu_app(appName);
     const char* target = app ? app->name : appName;
     for (int i = 0; i < kMaxDesktopAppShortcuts; ++i) {
-        if (desktop_str_eq(s_desktopShortcutTargetAppIds[i], target)) return true;
+        if (desktop_str_eq(s_desktopShortcutTypes[i], "App") && desktop_str_eq(s_desktopShortcutTargetAppIds[i], target)) return true;
     }
     return false;
 }
@@ -1882,13 +1931,133 @@ static bool pin_app_shortcut_to_desktop(const char* appName)
     return true;
 }
 
-static bool remove_app_shortcut_from_desktop(const char* appName)
+static const char* desktop_basename(const char* path)
 {
-    const StartMenuApp* app = find_start_menu_app(appName);
-    const char* target = app ? app->name : appName;
+    if (!path || !path[0]) return path;
+    const char* base = path;
+    for (const char* p = path; *p; ++p) {
+        if (*p == '/' && p[1]) base = p + 1;
+    }
+    return base;
+}
+
+static bool is_filesystem_shortcut_pinned_to_desktop(const char* normalizedPath, bool isDirectory)
+{
+    const char* type = isDirectory ? "Folder" : "File";
     for (int i = 0; i < kMaxDesktopAppShortcuts; ++i) {
-        if (!desktop_str_eq(s_desktopShortcutTargetAppIds[i], target)) continue;
+        if (desktop_str_eq(s_desktopShortcutTypes[i], type) && desktop_str_eq(s_desktopShortcutTargetAppIds[i], normalizedPath)) return true;
+    }
+    return false;
+}
+
+bool pin_filesystem_shortcut_to_desktop(const char* path, bool isDirectory)
+{
+    serial::puts("[desktop] Pin to Desktop selected for filesystem entry: ");
+    serial::puts(path ? path : "(null)");
+    serial::puts("\n");
+    if (!path || !path[0]) return false;
+
+    char normalized[vfs::VFS_MAX_PATH];
+    vfs::normalize_path(path, normalized, sizeof(normalized));
+    if (!normalized[0]) desktop_str_copy(normalized, "/", sizeof(normalized));
+    const char* type = isDirectory ? "Folder" : "File";
+    serial::puts("[desktop] Target path resolved: ");
+    serial::puts(normalized);
+    serial::puts(" kind=");
+    serial::puts(type);
+    serial::puts("\n");
+
+    if (desktop_str_eq(normalized, kDesktopFolderPath) || desktop_str_starts_with(normalized, "/Desktop/")) {
+        serial::puts("[desktop] Pin to Desktop skipped: item is already on desktop\n");
+        s_notification.title = "Pin to Desktop";
+        s_notification.message = "Item is already on desktop";
+        s_notification.visible = true;
+        s_notification.showTime = s_tickCounter;
+        return false;
+    }
+
+    vfs::FileInfo info{};
+    if (vfs::stat(normalized, &info) != vfs::VFS_OK) {
+        serial::puts("[desktop] Shortcut target missing\n");
+        s_notification.title = "Pin to Desktop";
+        s_notification.message = "Shortcut target missing";
+        s_notification.visible = true;
+        s_notification.showTime = s_tickCounter;
+        return false;
+    }
+
+    bool actualIsDir = info.type == vfs::FILE_TYPE_DIRECTORY;
+    if (actualIsDir != isDirectory) {
+        isDirectory = actualIsDir;
+        type = isDirectory ? "Folder" : "File";
+        serial::puts("[desktop] Target kind resolved from VFS\n");
+    }
+
+    if (is_filesystem_shortcut_pinned_to_desktop(normalized, isDirectory)) {
+        serial::puts("[desktop] Shortcut duplicate detected\n");
+        s_notification.title = "Pin to Desktop";
+        s_notification.message = "Shortcut already exists";
+        s_notification.visible = true;
+        s_notification.showTime = s_tickCounter;
+        return false;
+    }
+
+    const char* label = desktop_basename(normalized);
+    uint32_t color = isDirectory ? 0xFFC8B43C : 0xFF9098A4;
+    if (!add_shortcut_slot(type, normalized, label, isDirectory, color)) {
+        s_notification.title = "Pin to Desktop";
+        s_notification.message = "Shortcut list is full";
+        s_notification.visible = true;
+        s_notification.showTime = s_tickCounter;
+        serial::puts("[desktop] Bare-metal shortcut slot/full condition\n");
+        return false;
+    }
+
+    persist_app_shortcuts();
+    refresh_desktop_icons();
+    if (!s_iconPositionsInitialized) {
+        initialize_icon_positions();
+    } else {
+        int shortcutIconIdx = -1;
+        for (int i = 0; i < kMaxDesktopAppShortcuts; ++i) {
+            int iconIdx = kDesktopShortcutStart + i;
+            if (iconIdx >= kDesktopIconCount) break;
+            if (desktop_str_eq(s_desktopShortcutTypes[i], type) && desktop_str_eq(s_desktopIcons[iconIdx].path, normalized)) {
+                shortcutIconIdx = iconIdx;
+                break;
+            }
+        }
+        int displayIdx = display_index_for_icon_id(shortcutIconIdx);
+        if (displayIdx >= 0) {
+            int32_t x = 0;
+            int32_t y = 0;
+            allocate_desktop_icon_slot(shortcutIconIdx, x, y);
+            s_iconPosX[displayIdx] = x;
+            s_iconPosY[displayIdx] = y;
+            s_desktopIcons[shortcutIconIdx].savedX = x;
+            s_desktopIcons[shortcutIconIdx].savedY = y;
+            save_icon_positions();
+            serial::puts("[desktop] Shortcut position allocated/persisted\n");
+        } else {
+            serial::puts("[desktop] Shortcut position persistence skipped; display slot not found\n");
+        }
+    }
+
+    s_notification.title = "Pin to Desktop";
+    s_notification.message = "Shortcut created";
+    s_notification.visible = true;
+    s_notification.showTime = s_tickCounter;
+    serial::puts("[desktop] Shortcut created and persisted\n");
+    return true;
+}
+
+static bool remove_shortcut_from_desktop(const char* shortcutType, const char* target)
+{
+    if (!shortcutType || !target) return false;
+    for (int i = 0; i < kMaxDesktopAppShortcuts; ++i) {
+        if (!desktop_str_eq(s_desktopShortcutTypes[i], shortcutType) || !desktop_str_eq(s_desktopShortcutTargetAppIds[i], target)) continue;
         int iconIdx = kDesktopShortcutStart + i;
+        s_desktopShortcutTypes[i][0] = '\0';
         s_desktopShortcutTargetAppIds[i][0] = '\0';
         s_desktopShortcutLabels[i][0] = '\0';
         s_desktopIcons[iconIdx].label = s_desktopShortcutLabels[i];
@@ -1904,6 +2073,13 @@ static bool remove_app_shortcut_from_desktop(const char* appName)
     }
     serial::puts("[desktop] Shortcut remove skipped; not found\n");
     return false;
+}
+
+static bool remove_app_shortcut_from_desktop(const char* appName)
+{
+    const StartMenuApp* app = find_start_menu_app(appName);
+    const char* target = app ? app->name : appName;
+    return remove_shortcut_from_desktop("App", target);
 }
 
 // Rebuild visible icon list based on pinned and recent status
@@ -3221,6 +3397,19 @@ static const char* GetDesktopIconLogicalNameForIcon(int iconIdx)
         if (text_ends_with(icon.label, ".elf") || text_ends_with(icon.label, ".gxapp")) return "app.generic";
         return "file.unknown";
     }
+    if (icon.kind == DesktopItemKind::Shortcut) {
+        const char* shortcutType = "App";
+        if (iconIdx >= kDesktopShortcutStart && iconIdx < kDesktopShortcutStart + kMaxDesktopAppShortcuts) {
+            int slot = iconIdx - kDesktopShortcutStart;
+            if (s_desktopShortcutTypes[slot][0]) shortcutType = s_desktopShortcutTypes[slot];
+        }
+        if (desktop_str_eq(shortcutType, "Folder")) return "file.folder";
+        if (desktop_str_eq(shortcutType, "File")) {
+            if (desktop_entry_is_text(icon.label)) return "file.text";
+            if (desktop_entry_is_known_image(icon.label)) return "file.image";
+            return "file.unknown";
+        }
+    }
     return GetDesktopIconLogicalName(icon.label);
 }
 
@@ -4274,7 +4463,8 @@ static void draw_right_click_menu()
     draw_rect(mx, my, kContextMenuW, menuH, rgb(80, 90, 110));
 
     int itemCount = kContextMenuCount;
-    if (s_contextMenuMode == ContextMenuMode::StartMenuApp || s_contextMenuMode == ContextMenuMode::DesktopShortcut) itemCount = 2;
+    if (s_contextMenuMode == ContextMenuMode::StartMenuApp) itemCount = 2;
+    if (s_contextMenuMode == ContextMenuMode::DesktopShortcut) itemCount = 2;
     for (int i = 0; i < itemCount; i++) {
         uint32_t itemY = my + kContextMenuPad + (uint32_t)i * kContextMenuItemH;
 
@@ -4353,7 +4543,12 @@ static void handle_context_menu_command(int item)
         } else if (item == 1 && s_contextMenuIconDisplayIndex >= 0 && s_contextMenuIconDisplayIndex < s_visibleIconCount) {
             int iconIdx = s_visibleIconIndices[s_contextMenuIconDisplayIndex];
             if (iconIdx >= 0 && iconIdx < kDesktopIconCount) {
-                remove_app_shortcut_from_desktop(s_desktopIcons[iconIdx].path);
+                const char* shortcutType = "App";
+                if (iconIdx >= kDesktopShortcutStart && iconIdx < kDesktopShortcutStart + kMaxDesktopAppShortcuts) {
+                    int slot = iconIdx - kDesktopShortcutStart;
+                    if (s_desktopShortcutTypes[slot][0]) shortcutType = s_desktopShortcutTypes[slot];
+                }
+                remove_shortcut_from_desktop(shortcutType, s_desktopIcons[iconIdx].path);
             }
         }
         s_contextMenuMode = ContextMenuMode::Desktop;
@@ -6153,9 +6348,44 @@ static void show_icon_notification(int displayIndex)
 
     if (icon.kind == DesktopItemKind::Shortcut) {
         const char* target = icon.path[0] ? icon.path : label;
-        serial::puts("[desktop] Shortcut launched: shortcut:app:");
+        const char* shortcutType = "App";
+        if (iconIdx >= kDesktopShortcutStart && iconIdx < kDesktopShortcutStart + kMaxDesktopAppShortcuts) {
+            int slot = iconIdx - kDesktopShortcutStart;
+            if (s_desktopShortcutTypes[slot][0]) shortcutType = s_desktopShortcutTypes[slot];
+        }
+        serial::puts("[desktop] Shortcut launched: ");
+        serial::puts(shortcutType);
+        serial::puts(" ");
         serial::puts(target);
         serial::puts("\n");
+        if (desktop_str_eq(shortcutType, "File") || desktop_str_eq(shortcutType, "Folder")) {
+            vfs::FileInfo info{};
+            if (vfs::stat(target, &info) != vfs::VFS_OK) {
+                serial::puts("[desktop] Shortcut target missing\n");
+                s_notification.title = label;
+                s_notification.message = "Shortcut target missing";
+                s_notification.visible = true;
+                s_notification.showTime = s_tickCounter;
+                return;
+            }
+            bool targetIsDir = info.type == vfs::FILE_TYPE_DIRECTORY;
+            if (targetIsDir) {
+                if (app::AppManager::launchAppWithParam("Files", target)) return;
+                s_notification.title = label;
+                s_notification.message = "Unable to open folder";
+            } else if (desktop_entry_is_text(label)) {
+                if (app::AppManager::launchAppWithParam("Notepad", target)) return;
+                s_notification.title = label;
+                s_notification.message = "Unable to open file";
+            } else {
+                serial::puts("[desktop] No file handler for shortcut target\n");
+                s_notification.title = label;
+                s_notification.message = "No file handler";
+            }
+            s_notification.visible = true;
+            s_notification.showTime = s_tickCounter;
+            return;
+        }
         if (desktop_str_eq(target, "AppModel")) {
             open_app_model_viewer();
             app::AppLogger::logLaunch(target, app::LaunchResult::NotAvailable);

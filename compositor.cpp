@@ -275,11 +275,16 @@ namespace gxos {
             if (item.kind == DesktopItemKind::SystemObject) return item.action;
             if (item.kind == DesktopItemKind::FilesystemEntry) return std::string(item.isDirectory ? "desktop-folder:" : "desktop-file:") + item.path;
             if (item.kind == DesktopItemKind::Shortcut && item.shortcutType == "App" && !item.targetAppId.empty()) return std::string("shortcut:app:") + item.targetAppId;
+            if (item.kind == DesktopItemKind::Shortcut && (item.shortcutType == "File" || item.shortcutType == "Folder") && !item.path.empty()) return std::string("shortcut:") + (item.shortcutType == "Folder" ? "folder:" : "file:") + item.path;
             return item.action;
         }
 
         static std::string appShortcutLayoutKey(const std::string& appId) {
             return std::string("shortcut:app:") + appId;
+        }
+
+        static std::string filesystemShortcutLayoutKey(const std::string& shortcutType, const std::string& targetPath) {
+            return std::string("shortcut:") + (shortcutType == "Folder" ? "folder:" : "file:") + targetPath;
         }
 
         struct DesktopGridMetrics {
@@ -460,6 +465,19 @@ namespace gxos {
             return out;
         }
 
+        static bool isDesktopFolderPath(const std::string& path) {
+            const std::string normalized = normalizeHostedVirtualPath(path);
+            return normalized == "/Desktop" || startsWithText(normalized, "/Desktop/");
+        }
+
+        static std::string basenameForVirtualPath(const std::string& path) {
+            const std::string normalized = normalizeHostedVirtualPath(path);
+            if (normalized == "/") return "Root";
+            size_t slash = normalized.find_last_of('/');
+            if (slash == std::string::npos || slash + 1 >= normalized.size()) return normalized;
+            return normalized.substr(slash + 1);
+        }
+
         static std::filesystem::path hostedRootPath() {
             return std::filesystem::current_path();
         }
@@ -611,6 +629,29 @@ namespace gxos {
             return item;
         }
 
+        static DesktopItem makeFilesystemShortcutDesktopItem(const DesktopShortcutRec& shortcut) {
+            DesktopItem item;
+            item.kind = DesktopItemKind::Shortcut;
+            item.shortcutType = shortcut.shortcutType == "Folder" ? "Folder" : "File";
+            item.path = normalizeHostedVirtualPath(shortcut.targetPath);
+            item.isDirectory = item.shortcutType == "Folder";
+            item.action = filesystemShortcutLayoutKey(item.shortcutType, item.path);
+            item.label = shortcut.label.empty() ? basenameForVirtualPath(item.path) : shortcut.label;
+            item.iconName = shortcut.iconName;
+            if (item.iconName.empty()) {
+                apps::ExplorerFileEntry entry;
+                entry.name = item.label;
+                entry.fullPath = item.path;
+                entry.kind = item.isDirectory ? apps::ExplorerEntryKind::Directory : apps::ExplorerEntryKind::File;
+                item.iconName = apps::FileIconProvider::logicalIconNameForEntry(entry);
+            }
+            item.removable = true;
+            item.pinned = true;
+            Logger::write(LogLevel::Info, "Desktop shortcut loaded: type=" + item.shortcutType +
+                " targetPath=" + item.path + " label=" + item.label + " icon=" + item.iconName);
+            return item;
+        }
+
         static std::string packMousePayload(int x, int y, int button, const std::string& action, uint64_t ownerPid, uint64_t windowId = 0) {
             std::string payload = std::to_string(x) + "|" + std::to_string(y) + "|" + std::to_string(button) + "|" + action;
 #ifdef GX_ENABLE_EXPERIMENTAL_NATIVE_ELF_EXECUTION
@@ -660,12 +701,18 @@ namespace gxos {
             }
 
             for (const auto& shortcut : g_cfg.desktopShortcuts) {
-                if (!shortcut.shortcutType.empty() && shortcut.shortcutType != "App") continue;
-                if (shortcut.targetAppId.empty()) {
+                std::string shortcutType = shortcut.shortcutType.empty() ? "App" : shortcut.shortcutType;
+                if (shortcutType == "App" && shortcut.targetAppId.empty()) {
                     Logger::write(LogLevel::Warn, "Desktop shortcut skipped: missing targetAppId");
                     continue;
                 }
-                DesktopItem shortcutItem = makeAppShortcutDesktopItem(shortcut);
+                if ((shortcutType == "File" || shortcutType == "Folder") && shortcut.targetPath.empty()) {
+                    Logger::write(LogLevel::Warn, "Desktop shortcut skipped: missing targetPath");
+                    continue;
+                }
+                DesktopItem shortcutItem = shortcutType == "App"
+                    ? makeAppShortcutDesktopItem(shortcut)
+                    : makeFilesystemShortcutDesktopItem(shortcut);
                 g_items.push_back(shortcutItem);
                 Logger::write(LogLevel::Info, "Desktop shortcut rendered: " + desktopLayoutKey(shortcutItem));
             }
@@ -851,6 +898,15 @@ namespace gxos {
             return false;
         }
 
+        bool Compositor::isFilesystemEntryPinnedToDesktop(const std::string& path, bool isDirectory) {
+            const std::string normalized = normalizeHostedVirtualPath(path);
+            const std::string shortcutType = isDirectory ? "Folder" : "File";
+            for (const auto& shortcut : g_cfg.desktopShortcuts) {
+                if (shortcut.shortcutType == shortcutType && normalizeHostedVirtualPath(shortcut.targetPath) == normalized) return true;
+            }
+            return false;
+        }
+
         bool Compositor::pinStartMenuAppToDesktop(const std::string& appName) {
             Logger::write(LogLevel::Info, "Pin to Desktop selected for Start Menu app: " + appName);
             const RegisteredDesktopApp* app = findDesktopAppByNameOrId(appName);
@@ -895,6 +951,74 @@ namespace gxos {
             return true;
         }
 
+        bool Compositor::pinFilesystemEntryToDesktop(const std::string& path, bool isDirectory, const std::string& label, const std::string& iconName) {
+            const std::string normalized = normalizeHostedVirtualPath(path);
+            std::string shortcutType = isDirectory ? "Folder" : "File";
+            Logger::write(LogLevel::Info, "Pin to Desktop selected for filesystem entry: " + normalized +
+                " type=" + shortcutType);
+            Logger::write(LogLevel::Info, "Pin to Desktop target path resolved: " + normalized);
+
+            if (isDesktopFolderPath(normalized)) {
+                Logger::write(LogLevel::Info, "Pin to Desktop skipped: item is already on desktop: " + normalized);
+                NotificationManager::Add("Item is already on desktop", NotificationLevel::Info);
+                return false;
+            }
+
+            std::error_code ec;
+            std::filesystem::path hostPath = hostedPathForVirtual(normalized);
+            if (!std::filesystem::exists(hostPath, ec) || ec) {
+                Logger::write(LogLevel::Warn, "Pin to Desktop failed: target path missing " + normalized);
+                NotificationManager::Add("Shortcut target missing", NotificationLevel::Error);
+                return false;
+            }
+            const bool actualIsDirectory = std::filesystem::is_directory(hostPath, ec) && !ec;
+            if (actualIsDirectory != isDirectory) {
+                isDirectory = actualIsDirectory;
+                shortcutType = isDirectory ? "Folder" : "File";
+                Logger::write(LogLevel::Info, "Pin to Desktop target kind resolved from filesystem: " + shortcutType);
+            }
+            const std::string shortcutKey = filesystemShortcutLayoutKey(shortcutType, normalized);
+
+            if (isFilesystemEntryPinnedToDesktop(normalized, isDirectory)) {
+                Logger::write(LogLevel::Info, "Desktop shortcut already exists: " + shortcutKey);
+                NotificationManager::Add("Shortcut already exists on desktop", NotificationLevel::Info);
+                return false;
+            }
+
+            DesktopShortcutRec shortcut;
+            shortcut.shortcutType = shortcutType;
+            shortcut.targetPath = normalized;
+            shortcut.label = label.empty() ? basenameForVirtualPath(normalized) : label;
+            shortcut.iconName = iconName;
+            if (shortcut.iconName.empty()) {
+                apps::ExplorerFileEntry entry;
+                entry.name = shortcut.label;
+                entry.fullPath = normalized;
+                entry.kind = isDirectory ? apps::ExplorerEntryKind::Directory : apps::ExplorerEntryKind::File;
+                shortcut.iconName = apps::FileIconProvider::logicalIconNameForEntry(entry);
+            }
+            g_cfg.desktopShortcuts.push_back(shortcut);
+            Logger::write(LogLevel::Info, "Desktop shortcut created: " + shortcutKey);
+
+            refreshDesktopItems();
+            for (const auto& item : g_items) {
+                if (desktopLayoutKey(item) == shortcutKey) {
+                    upsertDesktopIconPosition(g_cfg.iconPositions, shortcutKey, item.ix, item.iy);
+                    Logger::write(LogLevel::Info, "Desktop shortcut position persisted: " + shortcutKey +
+                        " x=" + std::to_string(item.ix) + " y=" + std::to_string(item.iy));
+                    break;
+                }
+            }
+            saveDesktopConfig();
+            Logger::write(LogLevel::Info, "Desktop shortcut persisted: " + shortcutKey);
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
+            requestRepaint();
+#else
+            g_needsRedraw = true;
+#endif
+            return true;
+        }
+
         bool Compositor::unpinStartMenuAppFromDesktop(const std::string& appName) {
             const RegisteredDesktopApp* app = findDesktopAppByNameOrId(appName);
             const std::string targetId = app ? app->id : appName;
@@ -919,12 +1043,16 @@ namespace gxos {
         bool Compositor::removeDesktopShortcut(int index) {
             if (index < 0 || index >= (int)g_items.size()) return false;
             const DesktopItem item = g_items[index];
-            if (item.kind != DesktopItemKind::Shortcut || item.shortcutType != "App" || item.targetAppId.empty()) {
+            if (item.kind != DesktopItemKind::Shortcut) {
                 Logger::write(LogLevel::Warn, "Remove from Desktop ignored for non-shortcut desktop item");
                 return false;
             }
             for (auto it = g_cfg.desktopShortcuts.begin(); it != g_cfg.desktopShortcuts.end(); ++it) {
-                if ((it->shortcutType.empty() || it->shortcutType == "App") && it->targetAppId == item.targetAppId) {
+                const std::string recType = it->shortcutType.empty() ? "App" : it->shortcutType;
+                const bool matchesApp = recType == "App" && item.shortcutType == "App" && it->targetAppId == item.targetAppId;
+                const bool matchesFile = (recType == "File" || recType == "Folder") && recType == item.shortcutType &&
+                    normalizeHostedVirtualPath(it->targetPath) == normalizeHostedVirtualPath(item.path);
+                if (matchesApp || matchesFile) {
                     Logger::write(LogLevel::Info, "Shortcut removed from desktop: " + desktopLayoutKey(item));
                     g_cfg.desktopShortcuts.erase(it);
                     refreshDesktopItems();
@@ -939,6 +1067,25 @@ namespace gxos {
             }
             Logger::write(LogLevel::Warn, "Shortcut removal failed; record not found: " + desktopLayoutKey(item));
             return false;
+        }
+
+        bool Compositor::openDesktopShortcutTargetLocation(int index) {
+            if (index < 0 || index >= (int)g_items.size()) return false;
+            const DesktopItem item = g_items[index];
+            if (item.kind != DesktopItemKind::Shortcut || (item.shortcutType != "File" && item.shortcutType != "Folder")) {
+                Logger::write(LogLevel::Warn, "Open Target Location ignored for non-filesystem shortcut");
+                return false;
+            }
+            const std::string normalized = normalizeHostedVirtualPath(item.path);
+            std::string targetLocation = normalized;
+            if (item.shortcutType == "File") {
+                size_t slash = normalized.find_last_of('/');
+                targetLocation = slash == 0 ? "/" : normalized.substr(0, slash);
+            }
+            Logger::write(LogLevel::Info, "Desktop shortcut Open Target Location selected: " + desktopLayoutKey(item) +
+                " location=" + targetLocation);
+            apps::FileExplorer::Launch(targetLocation);
+            return true;
         }
 
         void Compositor::openDesktopItem(int index) {
@@ -975,6 +1122,17 @@ namespace gxos {
                     Logger::write(LogLevel::Info, "Desktop shortcut launched: " + desktopLayoutKey(item) + " -> " + app->displayName);
                     launchAction(app->displayName);
                     return;
+                }
+            } else if (item.kind == DesktopItemKind::Shortcut && (item.shortcutType == "File" || item.shortcutType == "Folder")) {
+                const std::string normalized = normalizeHostedVirtualPath(item.path);
+                std::error_code ec;
+                std::filesystem::path hostPath = hostedPathForVirtual(normalized);
+                if (!std::filesystem::exists(hostPath, ec) || ec) {
+                    err = "Shortcut target missing";
+                } else {
+                    bool isDirectory = item.shortcutType == "Folder";
+                    Logger::write(LogLevel::Info, "Desktop shortcut opened: " + desktopLayoutKey(item));
+                    if (DesktopService::OpenFilesystemEntry(normalized, isDirectory, err)) return;
                 }
             } else {
                 err = "Desktop shortcuts are not implemented yet";

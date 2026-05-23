@@ -1,0 +1,184 @@
+
+D:\dev\guideXOSServer>powershell -ExecutionPolicy Bypass -File build.ps1 
+====================================
+  guideXOS Complete Build System
+====================================
+
+[1b/6] Building wallpaper runtime image...
+      Building wallpaper filesystem image...
+      Building wallpaper runtime filesystem: D:\dev\guideXOSServer\ESP\ramdisk.img
+      added /system/wall/amebgx_t.gxi (41.4 KB)
+      added /system/wall/ameoba.gxi (1665.6 KB)
+      added /system/wall/ameoba.png (2093.5 KB)
+      added /system/wall/ameoba_t.gxi (41.4 KB)
+      added /system/wall/ameoba_thumb.png (17 KB)
+      added /system/wall/ameobagx.gxi (1665.6 KB)
+      added /system/wall/ameobagx.png (2251.7 KB)
+      added /system/wall/ameobagx_thumb.png (17.3 KB)
+      added /system/wall/bluef_t.gxi (41.4 KB)
+      added /system/wall/blueflower.png (1867.6 KB)
+      added /system/wall/blueflower_thumb.png (15.3 KB)
+      added /system/wall/blueflwr.gxi (1665.6 KB)
+      added /system/wall/dinos.gxi (1665.6 KB)
+      added /system/wall/dinos.png (3221.3 KB)
+      added /system/wall/dinos_t.gxi (41.4 KB)
+      added /system/wall/dinos_thumb.png (24.4 KB)
+      added /system/wall/flower.gxi (1665.6 KB)
+      added /system/wall/flower.png (2094.3 KB)
+      added /system/wall/flower_t.gxi (41.4 KB)
+      added /system/wall/flower_thumb.png (22.5 KB)
+      added /system/wall/gspace.gxi (1665.6 KB)
+      added /system/wall/gspace_t.gxi (41.9 KB)
+      added /system/wall/guidexosspace.png (2629.7 KB)
+      added /system/wall/guidexosspace_thumb.png (20.3 KB)
+      added /system/wall/redf_t.gxi (41.4 KB)
+      added /system/wall/redflower.png (1581.9 KB)
+      added /system/wall/redflower_thumb.png (11.2 KB)
+      added /system/wall/redflwr.gxi (1665.6 KB)
+      added /system/wall/tronp_t.gxi (47.3 KB)
+      added /system/wall/tronpor.gxi (1875 KB)
+      added /system/wall/tronporche.png (1149.5 KB)
+      added /system/wall/tronporche_thumb.png (26.3 KB)
+      added /system/wall/wallp2.gxi (1575 KB)
+      added /system/wall/wallp2_t.gxi (56.1 KB)
+      added /system/wall/Wallpaper2.png (1310.9 KB)
+      added /system/wall/Wallpaper2_thumb.png (28.1 KB)
+      Wallpaper runtime filesystem ready at /system/wall/
+
+[2/6] Building UEFI Bootloader...
+      Building with Visual Studio...
+
+cl : command line  warning D9025: overriding '/sdl' with '/GS-' [D:\dev\guideXOSServer\guideXOSBootLoader\guideXOSBootLoader.vcxproj]
+  elf.cpp
+  main.cpp
+  fb_console.cpp
+  guidexOSBootInfo_validation.cpp
+  pci.cpp
+  trampoline_msvc.cpp
+  uefi_guids.cpp
+  paging.cpp
+  Generating Code...
+cl : command line  warning D9025: overriding '/sdl' with '/GS-' [D:\dev\guideXOSServer\guideXOSBootLoader\guideXOSBootLoader.vcxproj]
+cl : command line  warning D9025: overriding '/Oi' with '/Oi-' [D:\dev\guideXOSServer\guideXOSBootLoader\guideXOSBootLoader.vcxproj]
+  intrinsics.cpp
+  guideXOSBootLoader.vcxproj -> D:\dev\guideXOSServer\guideXOSBootLoader\x64\Release\guideXOSBootLoader.exe
+      Bootloader built successfully
+
+[3/6] Building Kernel (amd64)...
+      Using: mingw32-make
+"Compiling core/kernel_apps.cpp..."
+g++ -std=c++14 -ffreestanding -O2 -Wall -Wextra -fno-exceptions -fno-rtti -nostdlib -nostdinc++ -fno-builtin -DGXOS_BARE_METAL -Icore/include -Iarch/amd64/include -m64 -mcmodel=large -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -fno-pic -fno-pie -fno-PIC -fno-PIE -mno-stack-arg-probe -fno-stack-check -fno-stack-protector -D__x86_64__ -c core/kernel_apps.cpp -o build/amd64/obj/core/kernel_apps.o
+In file included from core/include/kernel/kernel_apps.h:13,
+                 from core/kernel_apps.cpp:7:
+core/include/kernel/kernel_app.h: In member function 'virtual bool kernel::app::KernelApp::initWithParam(const char*)':
+core/include/kernel/kernel_app.h:198:44: warning: unused parameter 'param' [-Wunused-parameter]
+  198 |     virtual bool initWithParam(const char* param) { return init(); }  // Override for param support
+      |                                ~~~~~~~~~~~~^~~~~
+core/include/kernel/kernel_app.h: In member function 'virtual void kernel::app::KernelApp::onMouseMove(int, int)':
+core/include/kernel/kernel_app.h:203:34: warning: unused parameter 'x' [-Wunused-parameter]
+  203 |     virtual void onMouseMove(int x, int y) {}
+      |                              ~~~~^
+core/include/kernel/kernel_app.h:203:41: warning: unused parameter 'y' [-Wunused-parameter]
+  203 |     virtual void onMouseMove(int x, int y) {}
+      |                                     ~~~~^
+core/include/kernel/kernel_app.h: In member function 'virtual void kernel::app::KernelApp::onMouseDown(int, int, uint8_t)':
+core/include/kernel/kernel_app.h:204:34: warning: unused parameter 'x' [-Wunused-parameter]
+  204 |     virtual void onMouseDown(int x, int y, uint8_t button) {}
+      |                              ~~~~^
+core/include/kernel/kernel_app.h:204:41: warning: unused parameter 'y' [-Wunused-parameter]
+  204 |     virtual void onMouseDown(int x, int y, uint8_t button) {}
+      |                                     ~~~~^
+core/include/kernel/kernel_app.h:204:52: warning: unused parameter 'button' [-Wunused-parameter]
+  204 |     virtual void onMouseDown(int x, int y, uint8_t button) {}
+      |                                            ~~~~~~~~^~~~~~
+core/include/kernel/kernel_app.h: In member function 'virtual void kernel::app::KernelApp::onMouseUp(int, int, uint8_t)':
+core/include/kernel/kernel_app.h:205:32: warning: unused parameter 'x' [-Wunused-parameter]
+  205 |     virtual void onMouseUp(int x, int y, uint8_t button) {}
+      |                            ~~~~^
+core/include/kernel/kernel_app.h:205:39: warning: unused parameter 'y' [-Wunused-parameter]
+  205 |     virtual void onMouseUp(int x, int y, uint8_t button) {}
+      |                                   ~~~~^
+core/include/kernel/kernel_app.h:205:50: warning: unused parameter 'button' [-Wunused-parameter]
+  205 |     virtual void onMouseUp(int x, int y, uint8_t button) {}
+      |                                          ~~~~~~~~^~~~~~
+core/include/kernel/kernel_app.h: In member function 'virtual void kernel::app::KernelApp::onKeyDown(uint32_t)':
+core/include/kernel/kernel_app.h:206:37: warning: unused parameter 'key' [-Wunused-parameter]
+  206 |     virtual void onKeyDown(uint32_t key) {}
+      |                            ~~~~~~~~~^~~
+core/include/kernel/kernel_app.h: In member function 'virtual void kernel::app::KernelApp::onKeyUp(uint32_t)':
+core/include/kernel/kernel_app.h:207:35: warning: unused parameter 'key' [-Wunused-parameter]
+  207 |     virtual void onKeyUp(uint32_t key) {}
+      |                          ~~~~~~~~~^~~
+core/include/kernel/kernel_app.h: In member function 'virtual void kernel::app::KernelApp::onKeyChar(char)':
+core/include/kernel/kernel_app.h:208:33: warning: unused parameter 'c' [-Wunused-parameter]
+  208 |     virtual void onKeyChar(char c) {}
+      |                            ~~~~~^
+core/include/kernel/kernel_app.h: In member function 'virtual void kernel::app::KernelApp::onWidgetClick(int)':
+core/include/kernel/kernel_app.h:209:36: warning: unused parameter 'widgetId' [-Wunused-parameter]
+  209 |     virtual void onWidgetClick(int widgetId) {}
+      |                                ~~~~^~~~~~~~
+core/kernel_apps.cpp: In member function 'virtual void kernel::apps::NotepadApp::draw(uint32_t, uint32_t, uint32_t, uint32_t)':
+core/kernel_apps.cpp:768:59: warning: comparison of integer expressions of different signedness: 'int' and 'uint32_t' {aka 'unsigned int'} [-Wsign-compare]
+  768 |             if (col * (kGlyphW + kGlyphSpacing) + kGlyphW > w - 16) {
+      |                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~
+core/kernel_apps.cpp: In member function 'virtual void kernel::apps::CalculatorApp::onWidgetClick(int)':
+core/kernel_apps.cpp:2260:17: warning: unused variable 'btnChars' [-Wunused-variable]
+ 2260 |     const char* btnChars = "Cce/%789*456-123++/-0.=";
+      |                 ^~~~~~~~
+core/kernel_apps.cpp: In member function 'virtual void kernel::apps::TaskManagerApp::onMouseDown(int, int, uint8_t)':
+core/kernel_apps.cpp:2570:38: warning: unused parameter 'localX' [-Wunused-parameter]
+ 2570 | void TaskManagerApp::onMouseDown(int localX, int localY, uint8_t button) {
+      |                                  ~~~~^~~~~~
+core/kernel_apps.cpp: In member function 'virtual void kernel::apps::DiskManagerApp::draw(uint32_t, uint32_t, uint32_t, uint32_t)':
+core/kernel_apps.cpp:3878:39: warning: narrowing conversion of '(48 + ((int)((char)(pi + 1))))' from 'int' to 'char' [-Wnarrowing]
+ 3878 |                 char numBuf[4] = {'0' + (char)(pi + 1), '\0', '\0', '\0'};
+      |                                   ~~~~^~~~~~~~~~~~~~~~
+"Linking amd64 kernel (PE format)..."
+ld -Tarch/amd64/linker.ld -no-pie --image-base=0x100000 -o build/amd64/bin/kernel.pe build/amd64/obj/core/arch.o build/amd64/obj/core/architecture_detector.o build/amd64/obj/core/ata.o build/amd64/obj/core/block_device.o build/amd64/obj/core/cxx_runtime.o build/amd64/obj/core/desktop.o build/amd64/obj/core/desktop_capabilities.o build/amd64/obj/core/desktop_font.o build/amd64/obj/core/device_tree.o build/amd64/obj/core/dhcp.o build/amd64/obj/core/dns.o build/amd64/obj/core/ethernet.o build/amd64/obj/core/fb_console.o build/amd64/obj/core/feature_report.o build/amd64/obj/core/framebuffer.o build/amd64/obj/core/fs_ext4.o build/amd64/obj/core/fs_fat.o build/amd64/obj/core/fs_ntfs.o build/amd64/obj/core/fs_ufs.o build/amd64/obj/core/fs_xfs.o build/amd64/obj/core/hugepages.o build/amd64/obj/core/icmp.o build/amd64/obj/core/icmpv6.o build/amd64/obj/core/image_adapter.o build/amd64/obj/core/input_manager.o build/amd64/obj/core/interrupts.o build/amd64/obj/core/ipv4.o build/amd64/obj/core/ipv6.o build/amd64/obj/core/kernel_app.o build/amd64/obj/core/kernel_apps.o build/amd64/obj/core/kernel_compositor.o build/amd64/obj/core/kernel_ipc.o build/amd64/obj/core/main.o build/amd64/obj/core/msi.o build/amd64/obj/core/nic.o build/amd64/obj/core/nvme.o build/amd64/obj/core/pci_audio.o build/amd64/obj/core/pit.o build/amd64/obj/core/process.o build/amd64/obj/core/ps2keyboard.o build/amd64/obj/core/ps2mouse.o build/amd64/obj/core/ramdisk.o build/amd64/obj/core/shell.o build/amd64/obj/core/socket.o build/amd64/obj/core/tcp.o build/amd64/obj/core/time.o build/amd64/obj/core/udp.o build/amd64/obj/core/usb.o build/amd64/obj/core/usb_audio.o build/amd64/obj/core/usb_audio_uac2.o build/amd64/obj/core/usb_cdc.o build/amd64/obj/core/usb_hid.o build/amd64/obj/core/usb_net.o build/amd64/obj/core/usb_net_ecm.o build/amd64/obj/core/usb_net_rndis.o build/amd64/obj/core/usb_net_wifi.o build/amd64/obj/core/usb_printer.o build/amd64/obj/core/usb_storage.o build/amd64/obj/core/usb_video.o build/amd64/obj/core/usb_video_uvc.o build/amd64/obj/core/vesa.o build/amd64/obj/core/vfs.o build/amd64/obj/core/vga.o build/amd64/obj/core/virtio_block.o build/amd64/obj/core/virtio_gpu.o build/amd64/obj/core/virtio_input.o build/amd64/obj/core/virtio_net.o build/amd64/obj/arch/arch.o build/amd64/obj/arch/context_switch.o build/amd64/obj/arch/graphics.o build/amd64/obj/arch/pci_audio.o build/amd64/obj/arch/syscall.o build/amd64/obj/arch/usb_hci.o build/amd64/obj/arch/boot.o 
+"Converting to ELF64 format..."
+objcopy -I pei-x86-64 -O elf64-x86-64 \
+	--change-section-address .boot+0x100000 \
+	--change-section-address .text+0 \
+	--change-section-address .rdata+0 \
+	--change-section-address .data+0 \
+	--change-section-address .bss+0 \
+	--change-section-address .reloc+0 \
+	--set-start 0x100000 build/amd64/bin/kernel.pe build/amd64/bin/kernel.elf
+"Built: build/amd64/bin/kernel.elf"
+      Kernel built successfully
+
+[4/6] Setting up ESP directory...
+      Copied: BOOTX64.EFI (49.5 KB)
+      Copied: kernel.elf (1085.5 KB)
+      ESP directory ready
+
+[5/6] ESP Directory Structure:
+
+ESP/
+ kernel.elf (1.1 MB)
+ NvVars (9.6 KB)
+ ramdisk.img (64 MB)
+ EFI/
+ BOOT/
+ BOOTX64.EFI (49.5 KB)
+
+[6/6] Checking QEMU prerequisites...
+      ? OVMF.fd found
+      ? QEMU found: C:\Program Files\qemu\qemu-system-x86_64.exe
+      ? kernel.elf in ESP
+
+====================================
+  Build Complete!
+====================================
+
+✓ All prerequisites met!
+
+To run in QEMU:
+  .\build.ps1 -RunQemu
+
+To run filesystem tests (canonical path):
+  .\scripts\run-qemu-fs-test.ps1
+
+  NOTE: '.\build.ps1 -RunQemu -FsTest' delegates to the above script.
+  Use scripts\run-qemu-fs-test.ps1 directly for full control.
+

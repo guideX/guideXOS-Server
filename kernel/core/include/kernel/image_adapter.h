@@ -67,6 +67,7 @@ class ImageAdapter {
 public:
     static ImageProbe ProbeFile(const char* path, const ImageSafetyLimits& limits = DefaultImageSafetyLimits());
     static ImageProbe ProbeBytes(const uint8_t* bytes, uint32_t byteCount, const ImageSafetyLimits& limits = DefaultImageSafetyLimits());
+    static ImageBitmap LoadFromBytes(const uint8_t* bytes, uint32_t byteCount, const ImageSafetyLimits& limits = DefaultImageSafetyLimits());
     static ImageBitmap LoadFromFile(const char* path, const ImageSafetyLimits& limits = DefaultImageSafetyLimits());
     static bool DrawToFramebuffer(const ImageBitmap& image, uint32_t x, uint32_t y, uint32_t width, uint32_t height);
 };

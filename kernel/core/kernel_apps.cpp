@@ -2900,20 +2900,22 @@ void FileExplorerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
     appDrawText(x + 8, y + h - 15, m_status, rgb(40, 40, 40));
 
     if (m_contextMenuOpen) {
-        framebuffer::fill_rect(x + m_contextMenuX, y + m_contextMenuY, CONTEXT_MENU_W, CONTEXT_MENU_ITEM_H * 4 + 2, rgb(245, 245, 248));
+        static const int kContextMenuItems = 5;
+        framebuffer::fill_rect(x + m_contextMenuX, y + m_contextMenuY, CONTEXT_MENU_W, CONTEXT_MENU_ITEM_H * kContextMenuItems + 2, rgb(245, 245, 248));
         framebuffer::fill_rect(x + m_contextMenuX, y + m_contextMenuY, CONTEXT_MENU_W, 1, rgb(120, 120, 140));
-        framebuffer::fill_rect(x + m_contextMenuX, y + m_contextMenuY + CONTEXT_MENU_ITEM_H * 4 + 1, CONTEXT_MENU_W, 1, rgb(120, 120, 140));
-        framebuffer::fill_rect(x + m_contextMenuX, y + m_contextMenuY, 1, CONTEXT_MENU_ITEM_H * 4 + 2, rgb(120, 120, 140));
-        framebuffer::fill_rect(x + m_contextMenuX + CONTEXT_MENU_W - 1, y + m_contextMenuY, 1, CONTEXT_MENU_ITEM_H * 4 + 2, rgb(120, 120, 140));
-        for (int i = 0; i < 4; ++i) {
+        framebuffer::fill_rect(x + m_contextMenuX, y + m_contextMenuY + CONTEXT_MENU_ITEM_H * kContextMenuItems + 1, CONTEXT_MENU_W, 1, rgb(120, 120, 140));
+        framebuffer::fill_rect(x + m_contextMenuX, y + m_contextMenuY, 1, CONTEXT_MENU_ITEM_H * kContextMenuItems + 2, rgb(120, 120, 140));
+        framebuffer::fill_rect(x + m_contextMenuX + CONTEXT_MENU_W - 1, y + m_contextMenuY, 1, CONTEXT_MENU_ITEM_H * kContextMenuItems + 2, rgb(120, 120, 140));
+        for (int i = 0; i < kContextMenuItems; ++i) {
             if (m_contextMenuHover == i) {
                 framebuffer::fill_rect(x + m_contextMenuX + 1, y + m_contextMenuY + 1 + i * CONTEXT_MENU_ITEM_H, CONTEXT_MENU_W - 2, CONTEXT_MENU_ITEM_H, rgb(60, 90, 140));
             }
         }
         appDrawText(x + m_contextMenuX + 8, y + m_contextMenuY + 6,  "Open", rgb(20, 20, 20));
-        appDrawText(x + m_contextMenuX + 8, y + m_contextMenuY + 6 + CONTEXT_MENU_ITEM_H, "Rename", rgb(20, 20, 20));
-        appDrawText(x + m_contextMenuX + 8, y + m_contextMenuY + 6 + CONTEXT_MENU_ITEM_H * 2, "Delete", rgb(20, 20, 20));
-        appDrawText(x + m_contextMenuX + 8, y + m_contextMenuY + 6 + CONTEXT_MENU_ITEM_H * 3, "Properties", rgb(20, 20, 20));
+        appDrawText(x + m_contextMenuX + 8, y + m_contextMenuY + 6 + CONTEXT_MENU_ITEM_H, "Pin to Desktop", rgb(20, 20, 20));
+        appDrawText(x + m_contextMenuX + 8, y + m_contextMenuY + 6 + CONTEXT_MENU_ITEM_H * 2, "Rename", rgb(20, 20, 20));
+        appDrawText(x + m_contextMenuX + 8, y + m_contextMenuY + 6 + CONTEXT_MENU_ITEM_H * 3, "Move to Trash", rgb(20, 20, 20));
+        appDrawText(x + m_contextMenuX + 8, y + m_contextMenuY + 6 + CONTEXT_MENU_ITEM_H * 4, "Properties", rgb(20, 20, 20));
     }
 
     if (m_renamePrompt) {
@@ -3360,6 +3362,18 @@ void FileExplorerApp::cancelDelete() {
     invalidate();
 }
 
+void FileExplorerApp::pinSelectedToDesktop() {
+    if (m_selected < 0 || m_selected >= m_entryCount) return;
+    Entry& entry = m_entries[m_selected];
+    char full[MAX_PATH_LEN];
+    joinPath(m_currentPath, entry.name, full, sizeof(full));
+    serial::puts("[fileexplorer-bm] Pin to Desktop selected path=");
+    serial::puts(full);
+    serial::puts(entry.isDir ? " kind=Folder\n" : " kind=File\n");
+    bool pinned = kernel::desktop::pin_filesystem_shortcut_to_desktop(full, entry.isDir);
+    setStatus(pinned ? "Pinned to Desktop" : "Pin to Desktop skipped");
+    invalidate();
+}
 void FileExplorerApp::showPropertiesForSelected() {
     if (m_selected < 0 || m_selected >= m_entryCount) return;
     Entry& entry = m_entries[m_selected];
@@ -3461,7 +3475,7 @@ void FileExplorerApp::pasteClipboard() {
 int FileExplorerApp::hitTestContextMenu(int x, int y) const {
     if (!m_contextMenuOpen) return -1;
     if (x < m_contextMenuX || x >= m_contextMenuX + CONTEXT_MENU_W) return -1;
-    if (y < m_contextMenuY || y >= m_contextMenuY + CONTEXT_MENU_ITEM_H * 4) return -1;
+    if (y < m_contextMenuY || y >= m_contextMenuY + CONTEXT_MENU_ITEM_H * 5) return -1;
     return (y - m_contextMenuY) / CONTEXT_MENU_ITEM_H;
 }
 
@@ -3471,9 +3485,10 @@ bool FileExplorerApp::handleContextMenuClick(int x, int y) {
     m_contextMenuOpen = false;
     switch (item) {
         case 0: openSelected(); break;
-        case 1: beginRenameSelected(); break;
-        case 2: showDeleteConfirmation(); break;
-        case 3: showPropertiesForSelected(); break;
+        case 1: pinSelectedToDesktop(); break;
+        case 2: beginRenameSelected(); break;
+        case 3: showDeleteConfirmation(); break;
+        case 4: showPropertiesForSelected(); break;
         default: break;
     }
     return true;
@@ -4737,6 +4752,8 @@ void NavigatorApp::addBlock(BlockKind kind, const char* text, const char* url, c
     m_blocks[m_blockCount].naturalWidth = 0;
     m_blocks[m_blockCount].naturalHeight = 0;
     m_blocks[m_blockCount].imageStatus = (int)gxos::gui::ImageLoadStatus::Ok;
+    m_blocks[m_blockCount].imagePixels = nullptr;
+    m_blocks[m_blockCount].imageError[0] = '\0';
     m_blocks[m_blockCount].style = style ? *style : gxos::web::WebStyle{};
     ++m_blockCount;
 }
@@ -4758,6 +4775,8 @@ void NavigatorApp::addImageBlock(const char* src, const char* alt, const char* r
     m_blocks[m_blockCount].naturalWidth = (int)probe.width;
     m_blocks[m_blockCount].naturalHeight = (int)probe.height;
     m_blocks[m_blockCount].imageStatus = (int)probe.status;
+    m_blocks[m_blockCount].imagePixels = nullptr;
+    m_blocks[m_blockCount].imageError[0] = '\0';
     m_blocks[m_blockCount].style = style ? *style : gxos::web::WebStyle{};
 
     ++m_blockCount;
@@ -4905,7 +4924,7 @@ void NavigatorApp::rememberPageMetadata(const char* requestedUrl, const char* fi
         if (m_blocks[i].imageStatus == (int)gxos::gui::ImageLoadStatus::Ok) ++m_metaLoadedImages;
         else {
             ++m_metaFailedImages;
-            if (!m_metaLastImageError[0]) strcopy(m_metaLastImageError, gxos::gui::ImageLoadStatusName((gxos::gui::ImageLoadStatus)m_blocks[i].imageStatus), sizeof(m_metaLastImageError));
+            if (!m_metaLastImageError[0]) strcopy(m_metaLastImageError, m_blocks[i].imageError[0] ? m_blocks[i].imageError : gxos::gui::ImageLoadStatusName((gxos::gui::ImageLoadStatus)m_blocks[i].imageStatus), sizeof(m_metaLastImageError));
         }
     }
 }
@@ -4960,6 +4979,8 @@ void NavigatorApp::buildPageInfoDocument()
     addBlock(BLOCK_LIST_ITEM, "HTTP timeouts: 5000 ms connect/read");
     addBlock(BLOCK_LIST_ITEM, "File text/source preview limit: 32768 bytes");
     addBlock(BLOCK_LIST_ITEM, "Stored source preview limit: 2048 bytes");
+    addBlock(BLOCK_LIST_ITEM, "Remote PNG byte limit: 262144 bytes");
+    addBlock(BLOCK_LIST_ITEM, "Remote PNG dimensions: 2048 x 2048 pixels");
     addBlock(BLOCK_LINK, "View Source", "about:view-source");
     addBlock(BLOCK_LINK, "Navigator Runtime", "about:navigator-runtime");
     addBlock(BLOCK_LINK, "Go to about:navigator", "about:navigator");
@@ -5023,7 +5044,7 @@ void NavigatorApp::buildRuntimeDocument()
     addBlock(BLOCK_LIST_ITEM, "DNS: unsupported for Navigator HTTP v0.1");
     addBlock(BLOCK_LIST_ITEM, "HTTP redirects: enabled, limit 5");
     addBlock(BLOCK_LIST_ITEM, "HTTP chunked transfer decoding: enabled");
-    addBlock(BLOCK_LIST_ITEM, "Remote PNG: unsupported in bare-metal HTTP v0.1");
+    addBlock(BLOCK_LIST_ITEM, "Remote PNG: enabled-basic for numeric IPv4 http:// PNG images");
     addBlock(BLOCK_LIST_ITEM, "Downloads: unavailable for bare-metal HTTP v0.1");
     addBlock(BLOCK_LIST_ITEM, "Temp files: unsupported");
     addBlock(BLOCK_LIST_ITEM, "Bookmark persistence: unavailable; bookmarks are in-memory defaults");
@@ -5037,6 +5058,7 @@ void NavigatorApp::buildRuntimeDocument()
     addBlock(BLOCK_LIST_ITEM, "File backend: kernel VFS");
     addBlock(BLOCK_LIST_ITEM, "HTTP backend: kernel TCP client transport + shared guideWeb HTTP parser subset");
     addBlock(BLOCK_LIST_ITEM, "Image backend: shared ImageAdapter + framebuffer/compositor drawing");
+    addBlock(BLOCK_LIST_ITEM, "Remote PNG backend: kernel HTTP fetch + ImageAdapter::LoadFromBytes");
 
     addBlock(BLOCK_HEADING, "Current Document");
     char line[MAX_BLOCK_TEXT];
@@ -5511,6 +5533,7 @@ void NavigatorApp::parseHtmlDocument(const char* url, const char* html, const ch
         gxos::web::WebStyle style = nav_style_for_tag("pre", "", "", bodyStyle, cssRules, cssRuleCount);
         addBlock(BLOCK_PREFORMATTED, html ? html : "", "", &style);
     }
+    prepareImageResources();
     rememberPageMetadata(requestedUrl ? requestedUrl : url, url, sourceType ? sourceType : "file", contentType ? contentType : "text/html", "", html, html ? strlen_local(html) : 0, &cssDiagnostics, &bodyStyle, httpStatusCode, httpReason ? httpReason : "", redirectCount);
 }
 
@@ -5547,6 +5570,7 @@ struct KernelHttpResponse {
 
 static KernelHttpResponse s_kernelHttpResponse;
 static char s_kernelHttpRaw[kKernelHttpRawLimit + 1];
+static char s_kernelHttpDocumentBody[kKernelHttpBodyLimit + 1];
 
 static bool parse_numeric_ipv4_local(const char* text, const char* end, uint32_t* out)
 {
@@ -6012,6 +6036,89 @@ static KernelHttpResponse* kernel_http_fetch(const char* url)
     strcopy(response->error, "HTTP redirect limit exceeded", sizeof(response->error));
     return response;
 }
+
+static gxos::gui::ImageSafetyLimits nav_kernel_remote_png_limits()
+{
+    gxos::gui::ImageSafetyLimits limits{};
+    limits.maxBytes = 256u * 1024u;
+    limits.maxWidth = 2048u;
+    limits.maxHeight = 2048u;
+    limits.maxPixels = 2048u * 2048u;
+    return limits;
+}
+
+static bool nav_url_path_ends_with_png(const char* url)
+{
+    if (!url) return false;
+    char path[kKernelHttpUrlLen];
+    int i = 0;
+    while (url[i] && url[i] != '?' && url[i] != '#' && i < kKernelHttpUrlLen - 1) {
+        path[i] = url[i];
+        ++i;
+    }
+    path[i] = '\0';
+    return endsWithIgnoreCaseLocal(path, ".png");
+}
+
+void NavigatorApp::prepareImageResources()
+{
+    gxos::gui::ImageSafetyLimits localLimits = gxos::gui::DefaultImageSafetyLimits();
+    gxos::gui::ImageSafetyLimits remoteLimits = nav_kernel_remote_png_limits();
+    for (int i = 0; i < m_blockCount; ++i) {
+        if (m_blocks[i].kind != BLOCK_IMAGE) continue;
+        m_blocks[i].imagePixels = nullptr;
+        m_blocks[i].imageError[0] = '\0';
+
+        if (nav_starts_with(m_blocks[i].url, "file://")) {
+            char imagePath[MAX_URL_LEN];
+            nav_image_file_path_from_url(m_blocks[i].url, imagePath, MAX_URL_LEN);
+            gxos::gui::ImageBitmap bitmap = gxos::gui::ImageAdapter::LoadFromFile(imagePath, localLimits);
+            m_blocks[i].imageStatus = (int)bitmap.status;
+            m_blocks[i].naturalWidth = (int)bitmap.width;
+            m_blocks[i].naturalHeight = (int)bitmap.height;
+            m_blocks[i].imagePixels = bitmap.pixels;
+            if (bitmap.status != gxos::gui::ImageLoadStatus::Ok) {
+                strcopy(m_blocks[i].imageError, gxos::gui::ImageLoadStatusName(bitmap.status), sizeof(m_blocks[i].imageError));
+            }
+            continue;
+        }
+
+        if (!nav_starts_with(m_blocks[i].url, "http://")) {
+            m_blocks[i].imageStatus = (int)gxos::gui::ImageLoadStatus::UnsupportedFormat;
+            strcopy(m_blocks[i].imageError, "Unsupported image URL scheme", sizeof(m_blocks[i].imageError));
+            continue;
+        }
+
+        KernelHttpResponse* response = kernel_http_fetch(m_blocks[i].url);
+        if (!response->ok) {
+            m_blocks[i].imageStatus = (int)gxos::gui::ImageLoadStatus::NotFound;
+            strcopy(m_blocks[i].imageError, response->error[0] ? response->error : "Remote image fetch failed", sizeof(m_blocks[i].imageError));
+            continue;
+        }
+        if (response->statusCode != 200) {
+            m_blocks[i].imageStatus = (int)gxos::gui::ImageLoadStatus::NotFound;
+            strcopy(m_blocks[i].imageError, "Remote image HTTP status was not 200", sizeof(m_blocks[i].imageError));
+            continue;
+        }
+        const char* finalUrl = response->finalUrl[0] ? response->finalUrl : m_blocks[i].url;
+        bool contentTypePng = gxos::web::httpSharedEqualsInsensitive(response->contentType, "image/png");
+        bool urlLooksPng = nav_url_path_ends_with_png(finalUrl);
+        if (!contentTypePng && !urlLooksPng) {
+            m_blocks[i].imageStatus = (int)gxos::gui::ImageLoadStatus::UnsupportedFormat;
+            strcopy(m_blocks[i].imageError, "Remote image is not image/png", sizeof(m_blocks[i].imageError));
+            continue;
+        }
+        gxos::gui::ImageBitmap bitmap = gxos::gui::ImageAdapter::LoadFromBytes(
+            reinterpret_cast<const uint8_t*>(response->body), (uint32_t)response->bodyBytes, remoteLimits);
+        m_blocks[i].imageStatus = (int)bitmap.status;
+        m_blocks[i].naturalWidth = (int)bitmap.width;
+        m_blocks[i].naturalHeight = (int)bitmap.height;
+        m_blocks[i].imagePixels = bitmap.pixels;
+        if (bitmap.status != gxos::gui::ImageLoadStatus::Ok) {
+            strcopy(m_blocks[i].imageError, gxos::gui::ImageLoadStatusName(bitmap.status), sizeof(m_blocks[i].imageError));
+        }
+    }
+}
 void NavigatorApp::loadHttpUrl(const char* url)
 {
     KernelHttpResponse* response = kernel_http_fetch(url);
@@ -6025,7 +6132,11 @@ void NavigatorApp::loadHttpUrl(const char* url)
 
     if (response->statusCode == 200) {
         if (gxos::web::httpSharedEqualsInsensitive(response->contentType, "text/html")) {
-            parseHtmlDocument(response->finalUrl[0] ? response->finalUrl : url, response->body, "http", response->contentType, response->statusCode, response->reason, response->requestedUrl[0] ? response->requestedUrl : url, response->redirectCount);
+            int docBytes = response->bodyBytes;
+            if (docBytes > kKernelHttpBodyLimit) docBytes = kKernelHttpBodyLimit;
+            for (int i = 0; i < docBytes; ++i) s_kernelHttpDocumentBody[i] = response->body[i];
+            s_kernelHttpDocumentBody[docBytes] = '\0';
+            parseHtmlDocument(response->finalUrl[0] ? response->finalUrl : url, s_kernelHttpDocumentBody, "http", response->contentType, response->statusCode, response->reason, response->requestedUrl[0] ? response->requestedUrl : url, response->redirectCount);
         } else if (gxos::web::httpSharedEqualsInsensitive(response->contentType, "text/plain")) {
             strcopy(m_currentUrl, response->finalUrl[0] ? response->finalUrl : url, MAX_URL_LEN);
             strcopy(m_title, response->finalUrl[0] ? response->finalUrl : url, MAX_TITLE_LEN_NAV);
@@ -6067,7 +6178,9 @@ void NavigatorApp::loadHttpUrl(const char* url)
 }
 bool NavigatorApp::smokeHttpFetch(const char* url, int* statusCode, char* contentType,
                                   int contentTypeLen, int* bodyBytes, int* parsedBlocks,
-                                  char* error, int errorLen, char* finalUrl, int finalUrlLen, int* redirectCount)
+                                  char* error, int errorLen, char* finalUrl, int finalUrlLen,
+                                  int* redirectCount, int* remoteImages, int* loadedImages,
+                                  int* failedImages)
 {
     if (statusCode) *statusCode = 0;
     if (contentType && contentTypeLen > 0) contentType[0] = '\0';
@@ -6076,6 +6189,9 @@ bool NavigatorApp::smokeHttpFetch(const char* url, int* statusCode, char* conten
     if (error && errorLen > 0) error[0] = '\0';
     if (finalUrl && finalUrlLen > 0) finalUrl[0] = '\0';
     if (redirectCount) *redirectCount = 0;
+    if (remoteImages) *remoteImages = 0;
+    if (loadedImages) *loadedImages = 0;
+    if (failedImages) *failedImages = 0;
 
     KernelHttpResponse* response = kernel_http_fetch(url);
     if (statusCode) *statusCode = response->statusCode;
@@ -6090,15 +6206,23 @@ bool NavigatorApp::smokeHttpFetch(const char* url, int* statusCode, char* conten
 
     NavigatorApp app;
     if (response->statusCode == 200 && gxos::web::httpSharedEqualsInsensitive(response->contentType, "text/html")) {
-        app.parseHtmlDocument(response->finalUrl[0] ? response->finalUrl : url, response->body, "http", response->contentType, response->statusCode, response->reason, response->requestedUrl[0] ? response->requestedUrl : url, response->redirectCount);
+        int docBytes = response->bodyBytes;
+        if (docBytes > kKernelHttpBodyLimit) docBytes = kKernelHttpBodyLimit;
+        for (int i = 0; i < docBytes; ++i) s_kernelHttpDocumentBody[i] = response->body[i];
+        s_kernelHttpDocumentBody[docBytes] = '\0';
+        app.parseHtmlDocument(response->finalUrl[0] ? response->finalUrl : url, s_kernelHttpDocumentBody,
+            "http", response->contentType, response->statusCode, response->reason,
+            response->requestedUrl[0] ? response->requestedUrl : url, response->redirectCount);
     } else if (response->statusCode == 200 && gxos::web::httpSharedEqualsInsensitive(response->contentType, "text/plain")) {
         app.m_blockCount = 0;
         app.addBlock(BLOCK_PREFORMATTED, response->body);
     }
     if (parsedBlocks) *parsedBlocks = app.m_blockCount;
+    if (remoteImages) *remoteImages = app.m_metaRemoteImages;
+    if (loadedImages) *loadedImages = app.m_metaLoadedImages;
+    if (failedImages) *failedImages = app.m_metaFailedImages;
     return response->ok;
 }
-
 void NavigatorApp::loadFileUrl(const char* url)
 {
     if (!nav_starts_with(url, "file://")) {
@@ -6444,9 +6568,11 @@ void NavigatorApp::drawDocument(uint32_t x, uint32_t y, uint32_t w, uint32_t h)
             if (imageH > 420) imageH = 420;
             int contentBottom = (int)h - STATUS_H - 8;
             if (absY + blockMarginTop >= CONTENT_Y && absY + blockMarginTop + imageH <= contentBottom) {
-                char imagePath[MAX_URL_LEN];
-                nav_image_file_path_from_url(m_blocks[i].url, imagePath, MAX_URL_LEN);
-                gxos::gui::ImageBitmap bitmap = gxos::gui::ImageAdapter::LoadFromFile(imagePath);
+                gxos::gui::ImageBitmap bitmap{};
+                bitmap.status = (gxos::gui::ImageLoadStatus)m_blocks[i].imageStatus;
+                bitmap.pixels = m_blocks[i].imagePixels;
+                bitmap.width = (uint32_t)m_blocks[i].naturalWidth;
+                bitmap.height = (uint32_t)m_blocks[i].naturalHeight;
                 bool drew = gxos::gui::ImageAdapter::DrawToFramebuffer(bitmap, textX, (uint32_t)(absY + blockMarginTop), (uint32_t)imageW, (uint32_t)imageH);
                 if (!drew) {
                     framebuffer::fill_rect(textX, (uint32_t)(absY + blockMarginTop), (uint32_t)imageW, (uint32_t)imageH, rgb(232, 236, 242));
@@ -6520,22 +6646,32 @@ static bool nav_smoke_text_equals(const char* a, const char* b)
 
 static bool printNavigatorHttpSmokeCase(const char* name, const char* url, int expectedStatus,
                                         const char* expectedFinalUrl, bool expectedFetchOk,
-                                        bool requireParsedBlocks, bool requireError)
+                                        bool requireParsedBlocks, bool requireError,
+                                        int expectedRemoteImages = -1,
+                                        int expectedLoadedImages = -1,
+                                        int expectedFailedImages = -1)
 {
     int httpStatus = 0;
     int httpBodyBytes = 0;
     int httpBlocks = 0;
     int redirectCount = 0;
+    int remoteImages = 0;
+    int loadedImages = 0;
+    int failedImages = 0;
     char httpContentType[48];
     char httpError[128];
     char finalUrl[160];
     bool fetchOk = NavigatorApp::smokeHttpFetch(url, &httpStatus, httpContentType, sizeof(httpContentType),
-        &httpBodyBytes, &httpBlocks, httpError, sizeof(httpError), finalUrl, sizeof(finalUrl), &redirectCount);
+        &httpBodyBytes, &httpBlocks, httpError, sizeof(httpError), finalUrl, sizeof(finalUrl), &redirectCount,
+        &remoteImages, &loadedImages, &failedImages);
 
     bool pass = (fetchOk == expectedFetchOk) && (httpStatus == expectedStatus);
     if (expectedFinalUrl && expectedFinalUrl[0]) pass = pass && nav_smoke_text_equals(finalUrl, expectedFinalUrl);
     if (requireParsedBlocks) pass = pass && httpBlocks > 0;
     if (requireError) pass = pass && httpError[0] != '\0';
+    if (expectedRemoteImages >= 0) pass = pass && remoteImages == expectedRemoteImages;
+    if (expectedLoadedImages >= 0) pass = pass && loadedImages == expectedLoadedImages;
+    if (expectedFailedImages >= 0) pass = pass && failedImages == expectedFailedImages;
 
     serial::puts("[NAVIGATOR-SMOKE] http.case.");
     serial::puts(name);
@@ -6564,6 +6700,21 @@ static bool printNavigatorHttpSmokeCase(const char* name, const char* url, int e
     serial::puts("\n");
     serial::puts("[NAVIGATOR-SMOKE] http.case.");
     serial::puts(name);
+    serial::puts(".remote_images=");
+    serial_put_dec((uint32_t)remoteImages);
+    serial::puts("\n");
+    serial::puts("[NAVIGATOR-SMOKE] http.case.");
+    serial::puts(name);
+    serial::puts(".loaded_images=");
+    serial_put_dec((uint32_t)loadedImages);
+    serial::puts("\n");
+    serial::puts("[NAVIGATOR-SMOKE] http.case.");
+    serial::puts(name);
+    serial::puts(".failed_images=");
+    serial_put_dec((uint32_t)failedImages);
+    serial::puts("\n");
+    serial::puts("[NAVIGATOR-SMOKE] http.case.");
+    serial::puts(name);
     serial::puts(".final_url=");
     serial::puts(finalUrl[0] ? finalUrl : "(none)");
     serial::puts("\n");
@@ -6584,7 +6735,6 @@ static bool printNavigatorHttpSmokeCase(const char* name, const char* url, int e
     serial::puts(pass ? ".result=PASS\n" : ".result=FAIL\n");
     return pass;
 }
-
 static bool printNavigatorRuntimeSmokePreamble()
 {
     bool registered = app::AppManager::isAppAvailable("guideXOS Navigator");
@@ -6602,7 +6752,7 @@ static bool printNavigatorRuntimeSmokePreamble()
     serial::puts("[NAVIGATOR-SMOKE] capability.dns=unsupported for Navigator HTTP v0.1\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.http_redirects=enabled limit 5\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.http_chunked=enabled\n");
-    serial::puts("[NAVIGATOR-SMOKE] capability.remote_png=unsupported in bare-metal HTTP v0.1\n");
+    serial::puts("[NAVIGATOR-SMOKE] capability.remote_png=enabled-basic numeric IPv4 http:// PNG images\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.downloads=unavailable for bare-metal HTTP v0.1\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.css_lite=enabled for embedded style blocks\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.forms_lite=enabled for file/about GET form blocks\n");
@@ -6629,6 +6779,16 @@ static bool printNavigatorHttpSmokeCases()
         "http://10.0.2.2:8080/navigator-smoke/missing.html", true, false, false) && httpOk;
     httpOk = printNavigatorHttpSmokeCase("gzip_unsupported", "http://10.0.2.2:8080/navigator-smoke/gzip.html", 200,
         "http://10.0.2.2:8080/navigator-smoke/gzip.html", false, false, true) && httpOk;
+    httpOk = printNavigatorHttpSmokeCase("image_relative", "http://10.0.2.2:8080/navigator-smoke/image-relative.html", 200,
+        "http://10.0.2.2:8080/navigator-smoke/image-relative.html", true, true, false, 1, 1, 0) && httpOk;
+    httpOk = printNavigatorHttpSmokeCase("image_absolute", "http://10.0.2.2:8080/navigator-smoke/image-absolute.html", 200,
+        "http://10.0.2.2:8080/navigator-smoke/image-absolute.html", true, true, false, 1, 1, 0) && httpOk;
+    httpOk = printNavigatorHttpSmokeCase("image_redirect", "http://10.0.2.2:8080/navigator-smoke/image-redirect.html", 200,
+        "http://10.0.2.2:8080/navigator-smoke/image-redirect.html", true, true, false, 1, 1, 0) && httpOk;
+    httpOk = printNavigatorHttpSmokeCase("image_chunked", "http://10.0.2.2:8080/navigator-smoke/image-chunked.html", 200,
+        "http://10.0.2.2:8080/navigator-smoke/image-chunked.html", true, true, false, 1, 1, 0) && httpOk;
+    httpOk = printNavigatorHttpSmokeCase("image_nonpng", "http://10.0.2.2:8080/navigator-smoke/image-nonpng.html", 200,
+        "http://10.0.2.2:8080/navigator-smoke/image-nonpng.html", true, true, false, 1, 0, 1) && httpOk;
     return httpOk;
 }
 

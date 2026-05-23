@@ -50,6 +50,9 @@ namespace gxos { namespace apps {
         constexpr int kMainSizeTextX = kLeftPaneW + 350;
         constexpr int kMainTypeTextX = kLeftPaneW + 440;
         constexpr int kMainModifiedTextX = kLeftPaneW + 570;
+        constexpr int kContextMenuW = 170;
+        constexpr int kContextMenuItemH = 22;
+        constexpr int kContextMenuItemCount = 4;
 
         enum PromptMode {
             PromptNone = 0,
@@ -356,6 +359,10 @@ namespace gxos { namespace apps {
     bool FileExplorer::s_showDeleteConfirmation = false;
     std::string FileExplorer::s_deleteTargetPath;
     bool FileExplorer::s_deleteTargetIsDirectory = false;
+    bool FileExplorer::s_contextMenuOpen = false;
+    int FileExplorer::s_contextMenuX = 0;
+    int FileExplorer::s_contextMenuY = 0;
+    int FileExplorer::s_contextMenuHover = -1;
 
     uint64_t FileExplorer::Launch(const std::string& startPath) {
         ProcessSpec spec{"file_explorer", FileExplorer::main};
@@ -384,6 +391,8 @@ namespace gxos { namespace apps {
         s_status = "Ready";
         s_promptMode = PromptNone;
         s_showDeleteConfirmation = false;
+        s_contextMenuOpen = false;
+        s_contextMenuHover = -1;
 
         refresh();
 
@@ -435,6 +444,10 @@ namespace gxos { namespace apps {
                         s_lastKeyCode = 0;
                     }
                     handleKeyPress(keyCode, action);
+                    break;
+                }
+                case MsgType::MT_InputMouse: {
+                    handleMouseInput(message);
                     break;
                 }
                 case MsgType::MT_WidgetEvt: {
@@ -660,6 +673,19 @@ namespace gxos { namespace apps {
         updateDisplay();
     }
 
+    void FileExplorer::pinSelectedToDesktop() {
+        if (s_selectedIndex < 0 || s_selectedIndex >= static_cast<int>(s_entries.size())) return;
+        const ExplorerFileEntry& entry = s_entries[s_selectedIndex];
+        const std::string targetPath = s_fileSystem->normalizePath(entry.fullPath);
+        const std::string iconName = FileIconProvider::logicalIconNameForEntry(entry);
+        Logger::write(LogLevel::Info, "FileExplorer Pin to Desktop selected path=" + targetPath +
+            " kind=" + std::string(entry.isDirectory() ? "Folder" : "File") +
+            " icon=" + iconName);
+        bool pinned = Compositor::pinFilesystemEntryToDesktop(targetPath, entry.isDirectory(), entry.name, iconName);
+        s_status = pinned ? "Pinned to Desktop: " + entry.name : "Pin to Desktop skipped";
+        updateDisplay();
+    }
+
     void FileExplorer::createFolder() {
         beginPrompt(PromptNewFolder, "New folder name", "New Folder");
     }
@@ -733,6 +759,63 @@ namespace gxos { namespace apps {
             navigateToSelectedRoot();
         } else if (keyCode == 76) {
             beginPrompt(PromptAddress, "Address", s_currentPath);
+        }
+    }
+
+    void FileExplorer::handleMouseInput(const std::string& payload) {
+        std::istringstream iss(payload);
+        std::string xText, yText, buttonText, action;
+        std::getline(iss, xText, '|');
+        std::getline(iss, yText, '|');
+        std::getline(iss, buttonText, '|');
+        std::getline(iss, action, '|');
+        if (xText.empty() || yText.empty() || buttonText.empty()) return;
+
+        int x = 0;
+        int y = 0;
+        int button = 0;
+        try {
+            x = std::stoi(xText);
+            y = std::stoi(yText);
+            button = std::stoi(buttonText);
+        } catch (...) {
+            Logger::write(LogLevel::Warn, "FileExplorer mouse payload parse failed: " + payload);
+            return;
+        }
+
+        if (s_contextMenuOpen && action == "move") {
+            int hover = hitTestContextMenu(x, y);
+            if (hover != s_contextMenuHover) {
+                s_contextMenuHover = hover;
+                updateDisplay();
+            }
+            return;
+        }
+
+        if (s_contextMenuOpen && action == "down") {
+            if (button == 1 && handleContextMenuClick(x, y)) return;
+            s_contextMenuOpen = false;
+            s_contextMenuHover = -1;
+            updateDisplay();
+            if (button != 2) return;
+        }
+
+        if (button == 2 && action == "down") {
+            int rowIndex = hitTestEntryRow(x, y);
+            Logger::write(LogLevel::Info, "FileExplorer context menu creation requested row=" + std::to_string(rowIndex));
+            if (rowIndex >= 0) {
+                showContextMenuForRow(rowIndex, x, y);
+                updateDisplay();
+            }
+            return;
+        }
+
+        if (button == 1 && action == "down") {
+            int rowIndex = hitTestEntryRow(x, y);
+            if (rowIndex >= 0 && rowIndex != s_selectedIndex) {
+                s_selectedIndex = rowIndex;
+                updateDisplay();
+            }
         }
     }
 
@@ -887,6 +970,48 @@ namespace gxos { namespace apps {
 #endif
     }
 
+    int FileExplorer::hitTestEntryRow(int x, int y) {
+        if (x < kLeftPaneW || y < kMainRowsStartY) return -1;
+        int row = (y - kMainRowsStartY) / kRowH;
+        if (row < 0 || row >= kVisibleRows) return -1;
+        int index = s_scrollOffset + row;
+        return (index >= 0 && index < static_cast<int>(s_entries.size())) ? index : -1;
+    }
+
+    int FileExplorer::hitTestContextMenu(int x, int y) {
+        if (!s_contextMenuOpen) return -1;
+        if (x < s_contextMenuX || x >= s_contextMenuX + kContextMenuW) return -1;
+        if (y < s_contextMenuY || y >= s_contextMenuY + kContextMenuItemH * kContextMenuItemCount) return -1;
+        return (y - s_contextMenuY) / kContextMenuItemH;
+    }
+
+    void FileExplorer::showContextMenuForRow(int rowIndex, int x, int y) {
+        if (rowIndex < 0 || rowIndex >= static_cast<int>(s_entries.size())) return;
+        s_selectedIndex = rowIndex;
+        s_contextMenuOpen = true;
+        s_contextMenuX = std::min(x, kWindowW - kContextMenuW - 2);
+        s_contextMenuY = std::min(y, kWindowH - (kContextMenuItemH * kContextMenuItemCount) - 28);
+        if (s_contextMenuX < 0) s_contextMenuX = 0;
+        if (s_contextMenuY < 0) s_contextMenuY = 0;
+        s_contextMenuHover = -1;
+        Logger::write(LogLevel::Info, "FileExplorer context menu created for path=" + s_entries[rowIndex].fullPath);
+    }
+
+    bool FileExplorer::handleContextMenuClick(int x, int y) {
+        int item = hitTestContextMenu(x, y);
+        if (item < 0) return false;
+        s_contextMenuOpen = false;
+        s_contextMenuHover = -1;
+        switch (item) {
+            case 0: openSelected(); break;
+            case 1: pinSelectedToDesktop(); break;
+            case 2: renameSelected(); break;
+            case 3: showDeleteConfirmation(); break;
+            default: break;
+        }
+        return true;
+    }
+
     bool FileExplorer::moveEntryToTrash(const ExplorerFileEntry& entry, std::string& error, std::string& trashedPath) {
         Logger::write(LogLevel::Info, std::string("FileExplorer move-to-trash resolved path=") + entry.fullPath);
         const std::string trashPath = trashRootPath();
@@ -944,6 +1069,7 @@ namespace gxos { namespace apps {
         renderNavigationPane();
         renderMainPane();
         renderStatusBar();
+        if (s_contextMenuOpen) renderContextMenu();
 
         if (s_showDeleteConfirmation) {
             std::string itemName = s_deleteTargetPath.substr(s_deleteTargetPath.find_last_of('/') + 1);
@@ -1117,6 +1243,29 @@ namespace gxos { namespace apps {
         if (!s_status.empty()) oss << " | " << s_status;
         if (s_selectedIndex >= 0 && s_selectedIndex < static_cast<int>(s_entries.size())) oss << " | Selected: " << s_entries[s_selectedIndex].name;
         drawTextAt(8, kStatusBarY, oss.str());
+    }
+
+    void FileExplorer::renderContextMenu() {
+        static const char* labels[kContextMenuItemCount] = {
+            "Open",
+            "Pin to Desktop",
+            "Rename",
+            "Move to Trash"
+        };
+        const int menuH = kContextMenuItemCount * kContextMenuItemH;
+        drawRect(s_contextMenuX + 2, s_contextMenuY + 2, kContextMenuW, menuH, 30, 30, 35);
+        drawRect(s_contextMenuX, s_contextMenuY, kContextMenuW, menuH, 245, 245, 248);
+        drawRect(s_contextMenuX, s_contextMenuY, kContextMenuW, 1, 120, 120, 140);
+        drawRect(s_contextMenuX, s_contextMenuY + menuH - 1, kContextMenuW, 1, 120, 120, 140);
+        drawRect(s_contextMenuX, s_contextMenuY, 1, menuH, 120, 120, 140);
+        drawRect(s_contextMenuX + kContextMenuW - 1, s_contextMenuY, 1, menuH, 120, 120, 140);
+        for (int i = 0; i < kContextMenuItemCount; ++i) {
+            const int itemY = s_contextMenuY + i * kContextMenuItemH;
+            if (i == s_contextMenuHover) {
+                drawRect(s_contextMenuX + 1, itemY + 1, kContextMenuW - 2, kContextMenuItemH - 2, 65, 105, 170);
+            }
+            drawTextAt(s_contextMenuX + 8, itemY + 6, labels[i]);
+        }
     }
 
 }} // namespace gxos::apps

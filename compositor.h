@@ -65,7 +65,7 @@ namespace gxos { namespace gui {
     enum class DesktopItemKind {
         SystemObject,
         FilesystemEntry,
-        Shortcut // TODO: future desktop shortcut persistence/creation.
+        Shortcut
     };
     enum class DesktopSystemObjectKind {
         None,
@@ -113,7 +113,10 @@ namespace gxos { namespace gui {
         static bool pinStartMenuAppToDesktop(const std::string& appName);
         static bool unpinStartMenuAppFromDesktop(const std::string& appName);
         static bool isStartMenuAppPinnedToDesktop(const std::string& appName);
+        static bool pinFilesystemEntryToDesktop(const std::string& path, bool isDirectory, const std::string& label = "", const std::string& iconName = "");
+        static bool isFilesystemEntryPinnedToDesktop(const std::string& path, bool isDirectory);
         static bool removeDesktopShortcut(int index);
+        static bool openDesktopShortcutTargetLocation(int index);
         static std::vector<WindowDebugInfo> debugWindowsSnapshot();
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)
         static HWND g_hwnd; // expose for helper drawing

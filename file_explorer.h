@@ -99,9 +99,11 @@ namespace gxos { namespace apps {
         static void showDeleteConfirmation();
         static void confirmDelete();
         static void cancelDelete();
+        static void pinSelectedToDesktop();
         
         // Keyboard handling
         static void handleKeyPress(int keyCode, const std::string& action);
+        static void handleMouseInput(const std::string& payload);
         static char mapKeyToChar(int keyCode);
 
         // UI rendering helpers
@@ -124,6 +126,10 @@ namespace gxos { namespace apps {
         static std::string trashInfoPathFor(const std::string& trashedPath);
         static std::string jsonEscape(const std::string& value);
         static void refreshTrashDesktopState();
+        static int hitTestEntryRow(int x, int y);
+        static int hitTestContextMenu(int x, int y);
+        static void showContextMenuForRow(int rowIndex, int x, int y);
+        static bool handleContextMenuClick(int x, int y);
         
         // UI update
         static void updateDisplay();
@@ -132,6 +138,7 @@ namespace gxos { namespace apps {
         static void renderNavigationPane();
         static void renderMainPane();
         static void renderStatusBar();
+        static void renderContextMenu();
         
         // State
         static uint64_t s_windowId;
@@ -155,6 +162,10 @@ namespace gxos { namespace apps {
         static bool s_showDeleteConfirmation;
         static std::string s_deleteTargetPath;
         static bool s_deleteTargetIsDirectory;
+        static bool s_contextMenuOpen;
+        static int s_contextMenuX;
+        static int s_contextMenuY;
+        static int s_contextMenuHover;
     };
     
 }} // namespace gxos::apps

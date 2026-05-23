@@ -52,6 +52,7 @@ CFLAGS := -std=c++14 -ffreestanding -O2 -Wall -Wextra -fno-exceptions -fno-rtti
 CFLAGS += -nostdlib -nostdinc++ -fno-builtin
 CFLAGS += -DGXOS_BARE_METAL
 CFLAGS += -Icore/include -Iarch/$(ARCH)/include
+CFLAGS += $(EXTRA_CFLAGS)
 # Append architecture-specific flags
 CFLAGS += $(ARCH_CFLAGS)
 

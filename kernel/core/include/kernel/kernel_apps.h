@@ -304,7 +304,7 @@ private:
     static const int ADDRESS_H = 22;
     static const int LEFT_W = 150;
     static const int ROW_H = 16;
-    static const int CONTEXT_MENU_W = 120;
+    static const int CONTEXT_MENU_W = 150;
     static const int CONTEXT_MENU_ITEM_H = 20;
 
     struct Entry {
@@ -376,6 +376,7 @@ private:
     void showDeleteConfirmation();
     void confirmDelete();
     void cancelDelete();
+    void pinSelectedToDesktop();
     void showPropertiesForSelected();
     void closeProperties();
     void beginCopySelected();
@@ -425,7 +426,9 @@ public:
     static bool smokeHttpFetch(const char* url, int* statusCode, char* contentType,
                                int contentTypeLen, int* bodyBytes, int* parsedBlocks,
                                char* error, int errorLen, char* finalUrl = nullptr,
-                               int finalUrlLen = 0, int* redirectCount = nullptr);
+                               int finalUrlLen = 0, int* redirectCount = nullptr,
+                               int* remoteImages = nullptr, int* loadedImages = nullptr,
+                               int* failedImages = nullptr);
 
 private:
     static const int MAX_STATUS_LEN = 128;
@@ -466,6 +469,8 @@ private:
         int naturalWidth;
         int naturalHeight;
         int imageStatus;
+        const uint32_t* imagePixels;
+        char imageError[128];
         gxos::web::WebStyle style;
     };
 
@@ -566,6 +571,7 @@ private:
                            const char* httpReason = "",
                            const char* requestedUrl = nullptr,
                            int redirectCount = 0);
+    void prepareImageResources();
     void resolveHref(const char* baseUrl, const char* href, char* out, int outSize) const;
     int maxScroll() const;
     void clampScroll();

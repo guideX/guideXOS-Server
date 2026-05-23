@@ -92,6 +92,10 @@ void RightClickMenu::buildItems() {
         s_items.push_back({"Open", false, false});
         if (s_desktopItemIndex < (int)Compositor::g_items.size() &&
             Compositor::g_items[s_desktopItemIndex].kind == DesktopItemKind::Shortcut) {
+            const DesktopItem& item = Compositor::g_items[s_desktopItemIndex];
+            if (item.shortcutType == "File" || item.shortcutType == "Folder") {
+                s_items.push_back({"Open Target Location", false, false});
+            }
             s_items.push_back({"Remove from Desktop", false, false});
         }
         return;
@@ -134,6 +138,9 @@ bool RightClickMenu::HandleClick(int mx, int my) {
             if (s_items[idx].label == "Open" && s_desktopItemIndex >= 0) {
                 Logger::write(LogLevel::Info, "Desktop item Open selected");
                 Compositor::openDesktopItem(s_desktopItemIndex);
+            } else if (s_items[idx].label == "Open Target Location" && s_desktopItemIndex >= 0) {
+                Logger::write(LogLevel::Info, "Desktop shortcut Open Target Location selected");
+                Compositor::openDesktopShortcutTargetLocation(s_desktopItemIndex);
             } else if (s_items[idx].label == "Remove from Desktop" && s_desktopItemIndex >= 0) {
                 Logger::write(LogLevel::Info, "Desktop shortcut Remove from Desktop selected");
                 Compositor::removeDesktopShortcut(s_desktopItemIndex);

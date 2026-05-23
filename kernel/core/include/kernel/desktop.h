@@ -97,6 +97,9 @@ void open_terminal();
 // Returns true if app was launched or is already running
 bool launch_app(const char* appName);
 
+// Create a persistent desktop shortcut/reference to an existing VFS file/folder.
+bool pin_filesystem_shortcut_to_desktop(const char* path, bool isDirectory);
+
 // Apply a built-in desktop wallpaper/background id and persist it when possible.
 void set_wallpaper_by_id(const char* wallpaperId);
 
