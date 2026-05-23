@@ -113,6 +113,17 @@ private:
 		size_t length = 0;
 	};
 
+	struct SelectionPosition {
+		int blockIndex = -1;
+		size_t offset = 0;
+	};
+
+	struct SelectionRange {
+		SelectionPosition start;
+		SelectionPosition end;
+		bool valid = false;
+	};
+
 	// -------------------------------------------------------------------------
 	// Input hit-testing
 	// -------------------------------------------------------------------------
@@ -203,6 +214,17 @@ private:
 	static void goToFindMatch(int direction);
 	static std::string findMatchStatusText();
 	static std::string searchableTextForBlock(const DocBlock& block);
+	static bool isSelectableBlock(const DocBlock& block);
+	static void clearSelection();
+	static void beginSelection(int x, int y);
+	static void updateSelection(int x, int y);
+	static void finalizeSelection(int x, int y);
+	static bool hasSelection();
+	static SelectionRange normalizedSelection();
+	static SelectionPosition textPositionFromPoint(int x, int y, bool clampToNearest);
+	static std::string selectedText();
+	static void selectAllDocumentText();
+	static bool copySelectionToClipboard();
 
 	// -------------------------------------------------------------------------
 	// Address bar editing
@@ -221,6 +243,7 @@ private:
 	static int       blockLayoutY(int blockIndex);  // Y relative to kContentY
 	static Rect      linkBlockRect(int blockIndex); // absolute screen rect
 	static Rect      formControlRect(int blockIndex);
+	static Rect      selectableBlockRect(int blockIndex);
 	static int       computeDocumentHeight();
 	static int       maxScrollOffset();
 	static void      clampScrollOffset();
@@ -253,6 +276,20 @@ private:
 	static int         s_findCaret;
 	static std::vector<FindMatch> s_findMatches;
 	static int         s_currentFindMatch;
+	static bool        s_ctrlPressed;
+	static bool        s_mouseLeftDown;
+	static HitTarget   s_mouseDownTarget;
+	static int         s_mouseDownLinkBlockIndex;
+	static bool        s_selectionActive;
+	static bool        s_selectionPending;
+	static bool        s_selectionDragging;
+	static bool        s_selectionMoved;
+	static int         s_selectionStartX;
+	static int         s_selectionStartY;
+	static SelectionPosition s_selectionAnchor;
+	static SelectionPosition s_selectionFocus;
+	static std::string s_navigatorClipboard;
+	static std::string s_clipboardMode;
 };
 
 } // namespace apps

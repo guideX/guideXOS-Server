@@ -418,8 +418,10 @@ public:
     virtual void draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) override;
     virtual void onMouseMove(int x, int y) override;
     virtual void onMouseDown(int x, int y, uint8_t button) override;
+    virtual void onMouseUp(int x, int y, uint8_t button) override;
     virtual void onWidgetClick(int widgetId) override;
     virtual void onKeyDown(uint32_t key) override;
+    virtual void onKeyUp(uint32_t key) override;
     virtual void onKeyChar(char c) override;
 
     static app::KernelApp* create() { return new NavigatorApp(); }
@@ -490,6 +492,11 @@ private:
         char error[128];
     };
 
+    struct SelectionPosition {
+        int blockIndex;
+        int offset;
+    };
+
     char m_status[MAX_STATUS_LEN];
     char m_currentUrl[MAX_URL_LEN];
     char m_title[MAX_TITLE_LEN_NAV];
@@ -506,8 +513,18 @@ private:
     bool m_addressFocused;
     char m_addressBuffer[MAX_URL_LEN];
     int m_addressCaret;
+    bool m_ctrlPressed;
     int m_scrollY;
     int m_hoverLinkIndex;
+    bool m_selectionActive;
+    bool m_selectionDragging;
+    bool m_selectionMoved;
+    bool m_mouseLeftDown;
+    int m_mouseDownLinkIndex;
+    SelectionPosition m_selectionAnchor;
+    SelectionPosition m_selectionFocus;
+    char m_clipboard[MAX_SOURCE_PREVIEW];
+    char m_clipboardMode[48];
     int m_backBtnId;
     int m_forwardBtnId;
     int m_reloadBtnId;
@@ -578,6 +595,17 @@ private:
     void loadDefaultBookmarks();
     void drawDocument(uint32_t x, uint32_t y, uint32_t w, uint32_t h);
     void drawWrappedText(uint32_t x, uint32_t y, const char* text, uint32_t color, int maxChars, int& outY) const;
+    bool isSelectableBlock(const DocBlock& block) const;
+    void clearSelection();
+    bool hasSelection() const;
+    void beginSelection(int x, int y);
+    void updateSelection(int x, int y);
+    void finalizeSelection(int x, int y);
+    bool copySelectionToClipboard();
+    void selectAllDocumentText();
+    SelectionPosition textPositionFromPoint(int x, int y, bool clampToNearest) const;
+    bool selectedText(char* out, int outSize) const;
+    void blockTextForSelection(const DocBlock& block, char* out, int outSize) const;
     int blockHeight(const DocBlock& block, int maxChars) const;
     int blockY(int index, int maxChars) const;
     int hitLinkIndex(int x, int y) const;

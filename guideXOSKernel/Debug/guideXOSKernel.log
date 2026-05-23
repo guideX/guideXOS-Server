@@ -76,65 +76,65 @@ core\include/kernel/kernel_app.h(209,36): warning G24ACD1A9: unused parameter 'w
     209 |     virtual void onWidgetClick(int widgetId) {}
         |                                ~~~~^~~~~~~~
   core\desktop.cpp: At global scope:
-core\desktop.cpp(2285,28): warning GB2FD17C6: 'kernel::desktop::WallpaperPackEntry* kernel::desktop::find_wallpaper_pack_entry(const char*, bool)' defined but not used [-Wunused-function]
-   2285 | static WallpaperPackEntry* find_wallpaper_pack_entry(const char* wallpaperId, bool thumbnail)
+core\desktop.cpp(2817,28): warning GB2FD17C6: 'kernel::desktop::WallpaperPackEntry* kernel::desktop::find_wallpaper_pack_entry(const char*, bool)' defined but not used [-Wunused-function]
+   2817 | static WallpaperPackEntry* find_wallpaper_pack_entry(const char* wallpaperId, bool thumbnail)
         |                            ^~~~~~~~~~~~~~~~~~~~~~~~~
-core\desktop.cpp(1999,13): warning GACB2A34A: 'void kernel::desktop::set_wallpaper_grid(uint32_t, uint32_t, uint32_t, uint32_t)' defined but not used [-Wunused-function]
-   1999 | static void set_wallpaper_grid(uint32_t topColor, uint32_t bottomColor, uint32_t gridColor, uint32_t spacing)
+core\desktop.cpp(2531,13): warning GACB2A34A: 'void kernel::desktop::set_wallpaper_grid(uint32_t, uint32_t, uint32_t, uint32_t)' defined but not used [-Wunused-function]
+   2531 | static void set_wallpaper_grid(uint32_t topColor, uint32_t bottomColor, uint32_t gridColor, uint32_t spacing)
         |             ^~~~~~~~~~~~~~~~~~
-core\desktop.cpp(1991,13): warning G476BEFB5: 'void kernel::desktop::toggle_grid()' defined but not used [-Wunused-function]
-   1991 | static void toggle_grid()
+core\desktop.cpp(2523,13): warning G476BEFB5: 'void kernel::desktop::toggle_grid()' defined but not used [-Wunused-function]
+   2523 | static void toggle_grid()
         |             ^~~~~~~~~~~
-core\desktop.cpp(1985,13): warning G5C1A0608: 'void kernel::desktop::toggle_branding()' defined but not used [-Wunused-function]
-   1985 | static void toggle_branding()
+core\desktop.cpp(2517,13): warning G5C1A0608: 'void kernel::desktop::toggle_branding()' defined but not used [-Wunused-function]
+   2517 | static void toggle_branding()
         |             ^~~~~~~~~~~~~~~
-core\desktop.cpp(1978,13): warning GB7E2E7EF: 'void kernel::desktop::set_wallpaper_solid(uint32_t)' defined but not used [-Wunused-function]
-   1978 | static void set_wallpaper_solid(uint32_t color)
+core\desktop.cpp(2510,13): warning GB7E2E7EF: 'void kernel::desktop::set_wallpaper_solid(uint32_t)' defined but not used [-Wunused-function]
+   2510 | static void set_wallpaper_solid(uint32_t color)
         |             ^~~~~~~~~~~~~~~~~~~
-core\desktop.cpp(1970,13): warning G73295BA6: 'void kernel::desktop::set_wallpaper_gradient(uint32_t, uint32_t)' defined but not used [-Wunused-function]
-   1970 | static void set_wallpaper_gradient(uint32_t topColor, uint32_t bottomColor)
+core\desktop.cpp(2502,13): warning G73295BA6: 'void kernel::desktop::set_wallpaper_gradient(uint32_t, uint32_t)' defined but not used [-Wunused-function]
+   2502 | static void set_wallpaper_gradient(uint32_t topColor, uint32_t bottomColor)
         |             ^~~~~~~~~~~~~~~~~~~~~~
-core\desktop.cpp(1920,13): warning GB74D7035: 'void kernel::desktop::add_to_start_menu_recent(const char*)' defined but not used [-Wunused-function]
-   1920 | static void add_to_start_menu_recent(const char* appName)
+core\desktop.cpp(2426,13): warning GB74D7035: 'void kernel::desktop::add_to_start_menu_recent(const char*)' defined but not used [-Wunused-function]
+   2426 | static void add_to_start_menu_recent(const char* appName)
         |             ^~~~~~~~~~~~~~~~~~~~~~~~
-core\desktop.cpp(1683,13): warning GB0A44E1C: 'void kernel::desktop::save_icon_position(int)' defined but not used [-Wunused-function]
-   1683 | static void save_icon_position(int displayIndex)
+core\desktop.cpp(2189,13): warning GB0A44E1C: 'void kernel::desktop::save_icon_position(int)' defined but not used [-Wunused-function]
+   2189 | static void save_icon_position(int displayIndex)
         |             ^~~~~~~~~~~~~~~~~~
-core\desktop.cpp(1639,13): warning GCB72056F: 'void kernel::desktop::unpin_icon(const char*)' defined but not used [-Wunused-function]
-   1639 | static void unpin_icon(const char* appName)
+core\desktop.cpp(2143,13): warning GCB72056F: 'void kernel::desktop::unpin_icon(const char*)' defined but not used [-Wunused-function]
+   2143 | static void unpin_icon(const char* appName)
         |             ^~~~~~~~~~
-core\desktop.cpp(1626,13): warning G6BF0ADBA: 'void kernel::desktop::pin_icon(const char*)' defined but not used [-Wunused-function]
-   1626 | static void pin_icon(const char* appName)
+core\desktop.cpp(2130,13): warning G6BF0ADBA: 'void kernel::desktop::pin_icon(const char*)' defined but not used [-Wunused-function]
+   2130 | static void pin_icon(const char* appName)
         |             ^~~~~~~~
-core\desktop.cpp(532,16): warning G8EACD7BB: 'int32_t kernel::desktop::abs_i32(int32_t)' defined but not used [-Wunused-function]
-    532 | static int32_t abs_i32(int32_t value)
+core\desktop.cpp(543,16): warning G8EACD7BB: 'int32_t kernel::desktop::abs_i32(int32_t)' defined but not used [-Wunused-function]
+    543 | static int32_t abs_i32(int32_t value)
         |                ^~~~~~~
-core\desktop.cpp(420,20): warning GA541B4BD: 'kernel::desktop::s_desktopIconTheme' defined but not used [-Wunused-variable]
-    420 | static const char* s_desktopIconTheme = "Flat";
+core\desktop.cpp(431,20): warning GA541B4BD: 'kernel::desktop::s_desktopIconTheme' defined but not used [-Wunused-variable]
+    431 | static const char* s_desktopIconTheme = "Flat";
         |                    ^~~~~~~~~~~~~~~~~~
-core\desktop.cpp(397,13): warning G27EF45E7: 'kernel::desktop::s_networkConfigUseDHCPforDNS' defined but not used [-Wunused-variable]
-    397 | static bool s_networkConfigUseDHCPforDNS = true;
+core\desktop.cpp(408,13): warning G27EF45E7: 'kernel::desktop::s_networkConfigUseDHCPforDNS' defined but not used [-Wunused-variable]
+    408 | static bool s_networkConfigUseDHCPforDNS = true;
         |             ^~~~~~~~~~~~~~~~~~~~~~~~~~~~
-core\desktop.cpp(395,12): warning GEDB4F6D3: 'kernel::desktop::s_networkConfigFocusField' defined but not used [-Wunused-variable]
-    395 | static int s_networkConfigFocusField = -1;  // Which IP octet field is focused
+core\desktop.cpp(406,12): warning GEDB4F6D3: 'kernel::desktop::s_networkConfigFocusField' defined but not used [-Wunused-variable]
+    406 | static int s_networkConfigFocusField = -1;  // Which IP octet field is focused
         |            ^~~~~~~~~~~~~~~~~~~~~~~~~
-core\desktop.cpp(385,12): warning G075C0907: 'kernel::desktop::s_deviceManagerScroll' defined but not used [-Wunused-variable]
-    385 | static int s_deviceManagerScroll = 0;
+core\desktop.cpp(396,12): warning G075C0907: 'kernel::desktop::s_deviceManagerScroll' defined but not used [-Wunused-variable]
+    396 | static int s_deviceManagerScroll = 0;
         |            ^~~~~~~~~~~~~~~~~~~~~
-core\desktop.cpp(377,20): warning G7B89714F: 'kernel::desktop::s_appModelStatus' defined but not used [-Wunused-variable]
-    377 | static const char* s_appModelStatus = "Ready. Use Up/Down, 1-4, Enter, I, S, Escape.";
+core\desktop.cpp(388,20): warning G7B89714F: 'kernel::desktop::s_appModelStatus' defined but not used [-Wunused-variable]
+    388 | static const char* s_appModelStatus = "Ready. Use Up/Down, 1-4, Enter, I, S, Escape.";
         |                    ^~~~~~~~~~~~~~~~
 core\desktop.cpp(75,13): warning G4F99F0D2: 'bool desktop_starts_with(const char*, const char*)' defined but not used [-Wunused-function]
      75 | static bool desktop_starts_with(const char* value, const char* prefix)
         |             ^~~~~~~~~~~~~~~~~~~
   In function 'void kernel::desktop::draw_app_model_dialog()',
-      inlined from 'void kernel::desktop::_ZN6kernel7desktop4drawEv.part.0()' at core\desktop.cpp:5284:26:
-core\desktop.cpp(1327,21): warning G3C0033BE: writing 1 byte into a region of size 0 [-Wstringop-overflow=]
-   1327 |         line[pos++] = ' ';
+      inlined from 'void kernel::desktop::_ZN6kernel7desktop4drawEv.part.0()' at core\desktop.cpp:5915:26:
+core\desktop.cpp(1386,21): warning G3C0033BE: writing 1 byte into a region of size 0 [-Wstringop-overflow=]
+   1386 |         line[pos++] = ' ';
         |         ~~~~~~~~~~~~^~~~~
   core\desktop.cpp: In function 'void kernel::desktop::_ZN6kernel7desktop4drawEv.part.0()':
-  core\desktop.cpp:1318:14: note: at offset 128 into destination object 'line' of size 128
-   1318 |         char line[128];
+  core\desktop.cpp:1377:14: note: at offset 128 into destination object 'line' of size 128
+   1377 |         char line[128];
         |              ^~~~
     Compiling desktop_capabilities.cpp...
     Compiling desktop_font.cpp...
@@ -213,6 +213,12 @@ core\fs_xfs.cpp(61,12): warning GC9A38D65: 'int kernel::fs_xfs::strcmp(const cha
     Compiling icmp.cpp...
     Compiling icmpv6.cpp...
     Compiling image_adapter.cpp...
+  In file included from core\image_adapter.cpp:54:
+  core\../../third_party/stb/stb_image.h:386:10: fatal error: stdlib.h: No such file or directory
+    386 | #include <stdlib.h>
+        |          ^~~~~~~~~~
+  compilation terminated.
+    [ERROR] Failed to compile image_adapter.cpp
     Compiling input_manager.cpp...
 core\input_manager.cpp(61,16): warning GEC80797B: 'int32_t kernel::input::clamp(int32_t, int32_t, int32_t)' defined but not used [-Wunused-function]
      61 | static int32_t clamp(int32_t v, int32_t lo, int32_t hi)
@@ -220,8 +226,8 @@ core\input_manager.cpp(61,16): warning GEC80797B: 'int32_t kernel::input::clamp(
     Compiling interrupts.cpp...
     Compiling ipv4.cpp...
   core\ipv4.cpp: In function 'bool kernel::ipv4::ip_from_string(const char*, uint32_t*)':
-core\ipv4.cpp(128,23): warning G19D935B9: comparison is always false due to limited range of data type [-Wtype-limits]
-    128 |             if (octet > 255) return false;
+core\ipv4.cpp(129,23): warning G19D935B9: comparison is always false due to limited range of data type [-Wtype-limits]
+    129 |             if (octet > 255) return false;
         |                 ~~~~~~^~~~~
     Compiling ipv6.cpp...
   core\ipv6.cpp: In function 'bool kernel::ipv6::validate_header(const Header*, size_t)':
@@ -328,21 +334,31 @@ core/include/kernel/kernel_app.h(209,36): warning G24ACD1A9: unused parameter 'w
     209 |     virtual void onWidgetClick(int widgetId) {}
         |                                ~~~~^~~~~~~~
   core\kernel_apps.cpp: In member function 'virtual void kernel::apps::NotepadApp::draw(uint32_t, uint32_t, uint32_t, uint32_t)':
-core\kernel_apps.cpp(736,59): warning G7D6735F0: comparison of integer expressions of different signedness: 'int' and 'long unsigned int' [-Wsign-compare]
-    736 |             if (col * (kGlyphW + kGlyphSpacing) + kGlyphW > w - 16) {
+core\kernel_apps.cpp(1042,59): warning G7D6735F0: comparison of integer expressions of different signedness: 'int' and 'long unsigned int' [-Wsign-compare]
+   1042 |             if (col * (kGlyphW + kGlyphSpacing) + kGlyphW > w - 16) {
         |                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~
   core\kernel_apps.cpp: In member function 'virtual void kernel::apps::CalculatorApp::onWidgetClick(int)':
-core\kernel_apps.cpp(2228,17): warning G41AE70B8: unused variable 'btnChars' [-Wunused-variable]
-   2228 |     const char* btnChars = "Cce/%789*456-123++/-0.=";
+core\kernel_apps.cpp(2534,17): warning G41AE70B8: unused variable 'btnChars' [-Wunused-variable]
+   2534 |     const char* btnChars = "Cce/%789*456-123++/-0.=";
         |                 ^~~~~~~~
   core\kernel_apps.cpp: In member function 'virtual void kernel::apps::TaskManagerApp::onMouseDown(int, int, uint8_t)':
-core\kernel_apps.cpp(2538,38): warning G24ACD1A9: unused parameter 'localX' [-Wunused-parameter]
-   2538 | void TaskManagerApp::onMouseDown(int localX, int localY, uint8_t button) {
+core\kernel_apps.cpp(2844,38): warning G24ACD1A9: unused parameter 'localX' [-Wunused-parameter]
+   2844 | void TaskManagerApp::onMouseDown(int localX, int localY, uint8_t button) {
         |                                  ~~~~^~~~~~
   core\kernel_apps.cpp: In member function 'virtual void kernel::apps::DiskManagerApp::draw(uint32_t, uint32_t, uint32_t, uint32_t)':
-core\kernel_apps.cpp(3831,39): warning GA5864BA6: narrowing conversion of '(48 + ((int)((char)(pi + 1))))' from 'int' to 'char' [-Wnarrowing]
-   3831 |                 char numBuf[4] = {'0' + (char)(pi + 1), '\0', '\0', '\0'};
+core\kernel_apps.cpp(4152,39): warning GA5864BA6: narrowing conversion of '(48 + ((int)((char)(pi + 1))))' from 'int' to 'char' [-Wnarrowing]
+   4152 |                 char numBuf[4] = {'0' + (char)(pi + 1), '\0', '\0', '\0'};
         |                                   ~~~~^~~~~~~~~~~~~~~~
+  core\include/kernel/kernel_apps.h: In constructor 'kernel::apps::NavigatorApp::NavigatorApp()':
+core\include/kernel/kernel_apps.h(512,9): warning G9B656FCD: 'kernel::apps::NavigatorApp::m_forwardCount' will be initialized after [-Wreorder]
+    512 |     int m_forwardCount;
+        |         ^~~~~~~~~~~~~~
+core\include/kernel/kernel_apps.h(508,9): warning G67B99532: 'int kernel::apps::NavigatorApp::m_recentDownloadCount' [-Wreorder]
+    508 |     int m_recentDownloadCount;
+        |         ^~~~~~~~~~~~~~~~~~~~~
+core\kernel_apps.cpp(4776,1): warning GD01C5E17: when initialized here [-Wreorder]
+   4776 | NavigatorApp::NavigatorApp()
+        | ^~~~~~~~~~~~
     Compiling kernel_compositor.cpp...
   In file included from core\include/kernel/kernel_compositor.h:15,
                    from core\kernel_compositor.cpp:7:
@@ -572,8 +588,8 @@ core\shell.cpp(1949,17): warning G1D148574: array subscript 8 is above array bou
     Compiling socket.cpp...
     Compiling tcp.cpp...
   core\tcp.cpp: In function 'int kernel::tcp::tcp_connect(int, uint32_t, uint16_t)':
-core\tcp.cpp(465,23): warning G19D935B9: comparison is always false due to limited range of data type [-Wtype-limits]
-    465 |         if (ephemeral > 65535) ephemeral = 49152;
+core\tcp.cpp(467,23): warning G19D935B9: comparison is always false due to limited range of data type [-Wtype-limits]
+    467 |         if (ephemeral > 65535) ephemeral = 49152;
         |             ~~~~~~~~~~^~~~~~~
     Compiling time.cpp...
     Compiling udp.cpp...
@@ -640,89 +656,7 @@ core\virtio_input.cpp(78,13): warning GB3998135: 'void kernel::virtio_input::pro
 core\virtio_net.cpp(378,13): warning G7D6735F0: comparison of integer expressions of different signedness: 'size_t' {aka 'long unsigned int'} and 'int' [-Wsign-compare]
     378 |     if (len > getMtu() + 14) return -3;  // MTU + ethernet header
         |         ~~~~^~~~~~~~~~~~~~~
-  [OK] All core files compiled
   
-  Linking kernel...
-  i686-elf-ld: build\x86\obj\core\desktop.o: in function `kernel::desktop::draw_argb_icon_buffer(unsigned long const*, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long)':
-  desktop.cpp:(.text+0x18fb): undefined reference to `__udivdi3'
-  i686-elf-ld: desktop.cpp:(.text+0x1a0b): undefined reference to `__udivdi3'
-  i686-elf-ld: build\x86\obj\core\desktop.o: in function `kernel::desktop::draw_background()':
-  desktop.cpp:(.text+0x7429): undefined reference to `__udivdi3'
-  i686-elf-ld: desktop.cpp:(.text+0x749c): undefined reference to `__udivdi3'
-  i686-elf-ld: desktop.cpp:(.text+0x77bc): undefined reference to `__udivdi3'
-  i686-elf-ld: build\x86\obj\core\desktop.o:desktop.cpp:(.text+0x77f2): more undefined references to `__udivdi3' follow
-  i686-elf-ld: build\x86\obj\core\usb.o: in function `kernel::usb::enumerate_device(unsigned char, kernel::usb::DeviceSpeed) [clone .isra.0]':
-  usb.cpp:(.text+0x169): undefined reference to `kernel::usb::hci::control_transfer(unsigned char, kernel::usb::SetupPacket const*, void*, unsigned short)'
-  i686-elf-ld: usb.cpp:(.text+0x1b1): undefined reference to `kernel::usb::hci::control_transfer(unsigned char, kernel::usb::SetupPacket const*, void*, unsigned short)'
-  i686-elf-ld: usb.cpp:(.text+0x228): undefined reference to `kernel::usb::hci::control_transfer(unsigned char, kernel::usb::SetupPacket const*, void*, unsigned short)'
-  i686-elf-ld: usb.cpp:(.text+0x2c2): undefined reference to `kernel::usb::hci::control_transfer(unsigned char, kernel::usb::SetupPacket const*, void*, unsigned short)'
-  i686-elf-ld: usb.cpp:(.text+0x323): undefined reference to `kernel::usb::hci::control_transfer(unsigned char, kernel::usb::SetupPacket const*, void*, unsigned short)'
-  i686-elf-ld: build\x86\obj\core\usb.o:usb.cpp:(.text+0x4cb): more undefined references to `kernel::usb::hci::control_transfer(unsigned char, kernel::usb::SetupPacket const*, void*, unsigned short)' follow
-  i686-elf-ld: build\x86\obj\core\usb.o: in function `kernel::usb::init()':
-  usb.cpp:(.text+0x551): undefined reference to `kernel::usb::hci::init()'
-  i686-elf-ld: usb.cpp:(.text+0x568): undefined reference to `kernel::usb::hci::port_count()'
-  i686-elf-ld: usb.cpp:(.text+0x589): undefined reference to `kernel::usb::hci::port_connected(unsigned char)'
-  i686-elf-ld: usb.cpp:(.text+0x595): undefined reference to `kernel::usb::hci::port_reset(unsigned char)'
-  i686-elf-ld: build\x86\obj\core\usb.o: in function `kernel::usb::poll()':
-  usb.cpp:(.text+0x5c3): undefined reference to `kernel::usb::hci::port_count()'
-  i686-elf-ld: usb.cpp:(.text+0x5e4): undefined reference to `kernel::usb::hci::port_connected(unsigned char)'
-  i686-elf-ld: usb.cpp:(.text+0x643): undefined reference to `kernel::usb::hci::port_reset(unsigned char)'
-  i686-elf-ld: build\x86\obj\core\usb.o: in function `kernel::usb::get_descriptor(unsigned char, unsigned char, unsigned char, unsigned short, void*, unsigned short)':
-  usb.cpp:(.text+0x742): undefined reference to `kernel::usb::hci::control_transfer(unsigned char, kernel::usb::SetupPacket const*, void*, unsigned short)'
-  i686-elf-ld: build\x86\obj\core\usb.o: in function `kernel::usb::set_configuration(unsigned char, unsigned char)':
-  usb.cpp:(.text+0x79f): undefined reference to `kernel::usb::hci::control_transfer(unsigned char, kernel::usb::SetupPacket const*, void*, unsigned short)'
-  i686-elf-ld: build\x86\obj\core\usb.o: in function `kernel::usb::set_address(unsigned char, unsigned char)':
-  usb.cpp:(.text+0x7ff): undefined reference to `kernel::usb::hci::control_transfer(unsigned char, kernel::usb::SetupPacket const*, void*, unsigned short)'
-  i686-elf-ld: build\x86\obj\core\usb.o: in function `kernel::usb::control_transfer(unsigned char, kernel::usb::SetupPacket const*, void*, unsigned short)':
-  usb.cpp:(.text+0x6da): undefined reference to `kernel::usb::hci::control_transfer(unsigned char, kernel::usb::SetupPacket const*, void*, unsigned short)'
-  i686-elf-ld: build\x86\obj\core\usb_audio.o: in function `kernel::usb_audio::playback_write(unsigned char, void const*, unsigned short, unsigned short*)':
-  usb_audio.cpp:(.text+0x901): undefined reference to `kernel::usb::hci::bulk_transfer(unsigned char, unsigned char, void*, unsigned short, unsigned short*)'
-  i686-elf-ld: build\x86\obj\core\usb_audio.o: in function `kernel::usb_audio::capture_read(unsigned char, void*, unsigned short, unsigned short*)':
-  usb_audio.cpp:(.text+0x971): undefined reference to `kernel::usb::hci::bulk_transfer(unsigned char, unsigned char, void*, unsigned short, unsigned short*)'
-  i686-elf-ld: build\x86\obj\core\usb_audio_uac2.o: in function `kernel::usb_audio_uac2::playback_write(unsigned char, void const*, unsigned short, unsigned short*)':
-  usb_audio_uac2.cpp:(.text+0xc84): undefined reference to `kernel::usb::hci::bulk_transfer(unsigned char, unsigned char, void*, unsigned short, unsigned short*)'
-  i686-elf-ld: build\x86\obj\core\usb_audio_uac2.o: in function `kernel::usb_audio_uac2::capture_read(unsigned char, void*, unsigned short, unsigned short*)':
-  usb_audio_uac2.cpp:(.text+0xcf4): undefined reference to `kernel::usb::hci::bulk_transfer(unsigned char, unsigned char, void*, unsigned short, unsigned short*)'
-  i686-elf-ld: build\x86\obj\core\usb_cdc.o: in function `kernel::usb_cdc::acm_write(unsigned char, void const*, unsigned short, unsigned short*)':
-  usb_cdc.cpp:(.text+0x768): undefined reference to `kernel::usb::hci::bulk_transfer(unsigned char, unsigned char, void*, unsigned short, unsigned short*)'
-  i686-elf-ld: build\x86\obj\core\usb_cdc.o:usb_cdc.cpp:(.text+0x7d8): more undefined references to `kernel::usb::hci::bulk_transfer(unsigned char, unsigned char, void*, unsigned short, unsigned short*)' follow
-  i686-elf-ld: build\x86\obj\core\usb_cdc.o: in function `kernel::usb_cdc::acm_poll_notifications(unsigned char)':
-  usb_cdc.cpp:(.text+0x849): undefined reference to `kernel::usb::hci::interrupt_transfer(unsigned char, unsigned char, void*, unsigned short, unsigned short*)'
-  i686-elf-ld: build\x86\obj\core\usb_cdc.o: in function `kernel::usb_cdc::ecm_send(unsigned char, void const*, unsigned short)':
-  usb_cdc.cpp:(.text+0x926): undefined reference to `kernel::usb::hci::bulk_transfer(unsigned char, unsigned char, void*, unsigned short, unsigned short*)'
-  i686-elf-ld: build\x86\obj\core\usb_cdc.o: in function `kernel::usb_cdc::ecm_receive(unsigned char, void*, unsigned short, unsigned short*)':
-  usb_cdc.cpp:(.text+0x9a0): undefined reference to `kernel::usb::hci::bulk_transfer(unsigned char, unsigned char, void*, unsigned short, unsigned short*)'
-  i686-elf-ld: build\x86\obj\core\usb_hid.o: in function `kernel::usb_hid::poll()':
-  usb_hid.cpp:(.text+0x88e): undefined reference to `kernel::usb::hci::interrupt_transfer(unsigned char, unsigned char, void*, unsigned short, unsigned short*)'
-  i686-elf-ld: build\x86\obj\core\usb_net_ecm.o: in function `kernel::usb_net_ecm::poll(unsigned char)':
-  usb_net_ecm.cpp:(.text+0x6ba): undefined reference to `kernel::usb::hci::interrupt_transfer(unsigned char, unsigned char, void*, unsigned short, unsigned short*)'
-  i686-elf-ld: build\x86\obj\core\usb_net_ecm.o: in function `kernel::usb_net_ecm::send(unsigned char, void const*, unsigned short)':
-  usb_net_ecm.cpp:(.text+0x786): undefined reference to `kernel::usb::hci::bulk_transfer(unsigned char, unsigned char, void*, unsigned short, unsigned short*)'
-  i686-elf-ld: usb_net_ecm.cpp:(.text+0x7d7): undefined reference to `kernel::usb::hci::bulk_transfer(unsigned char, unsigned char, void*, unsigned short, unsigned short*)'
-  i686-elf-ld: build\x86\obj\core\usb_net_ecm.o: in function `kernel::usb_net_ecm::receive(unsigned char, void*, unsigned short, unsigned short*)':
-  usb_net_ecm.cpp:(.text+0x858): undefined reference to `kernel::usb::hci::bulk_transfer(unsigned char, unsigned char, void*, unsigned short, unsigned short*)'
-  i686-elf-ld: build\x86\obj\core\usb_net_rndis.o: in function `kernel::usb_net_rndis::rndis_command(kernel::usb_net_rndis::RNDISDevice*, void const*, unsigned short, void*, unsigned short)':
-  usb_net_rndis.cpp:(.text+0xb6): undefined reference to `kernel::usb::hci::interrupt_transfer(unsigned char, unsigned char, void*, unsigned short, unsigned short*)'
-  i686-elf-ld: build\x86\obj\core\usb_net_rndis.o: in function `kernel::usb_net_rndis::poll(unsigned char)':
-  usb_net_rndis.cpp:(.text+0x932): undefined reference to `kernel::usb::hci::interrupt_transfer(unsigned char, unsigned char, void*, unsigned short, unsigned short*)'
-  i686-elf-ld: build\x86\obj\core\usb_net_rndis.o: in function `kernel::usb_net_rndis::send(unsigned char, void const*, unsigned short)':
-  usb_net_rndis.cpp:(.text+0xc04): undefined reference to `kernel::usb::hci::bulk_transfer(unsigned char, unsigned char, void*, unsigned short, unsigned short*)'
-  i686-elf-ld: build\x86\obj\core\usb_net_rndis.o: in function `kernel::usb_net_rndis::receive(unsigned char, void*, unsigned short, unsigned short*)':
-  usb_net_rndis.cpp:(.text+0xcae): undefined reference to `kernel::usb::hci::bulk_transfer(unsigned char, unsigned char, void*, unsigned short, unsigned short*)'
-  i686-elf-ld: build\x86\obj\core\usb_net_wifi.o: in function `kernel::usb_net_wifi::poll(unsigned char)':
-  usb_net_wifi.cpp:(.text+0x65e): undefined reference to `kernel::usb::hci::bulk_transfer(unsigned char, unsigned char, void*, unsigned short, unsigned short*)'
-  i686-elf-ld: usb_net_wifi.cpp:(.text+0x6c7): undefined reference to `kernel::usb::hci::interrupt_transfer(unsigned char, unsigned char, void*, unsigned short, unsigned short*)'
-  i686-elf-ld: build\x86\obj\core\usb_net_wifi.o: in function `kernel::usb_net_wifi::send(unsigned char, void const*, unsigned short)':
-  usb_net_wifi.cpp:(.text+0xfc6): undefined reference to `kernel::usb::hci::bulk_transfer(unsigned char, unsigned char, void*, unsigned short, unsigned short*)'
-  i686-elf-ld: build\x86\obj\core\usb_net_wifi.o: in function `kernel::usb_net_wifi::receive(unsigned char, void*, unsigned short, unsigned short*)':
-  usb_net_wifi.cpp:(.text+0x1058): undefined reference to `kernel::usb::hci::bulk_transfer(unsigned char, unsigned char, void*, unsigned short, unsigned short*)'
-  i686-elf-ld: build\x86\obj\core\usb_printer.o: in function `kernel::usb_printer::write(unsigned char, void const*, unsigned short, unsigned short*)':
-  usb_printer.cpp:(.text+0x7c8): undefined reference to `kernel::usb::hci::bulk_transfer(unsigned char, unsigned char, void*, unsigned short, unsigned short*)'
-  i686-elf-ld: build\x86\obj\core\usb_printer.o: in function `kernel::usb_printer::read(unsigned char, void*, unsigned short, unsigned short*)':
-  usb_printer.cpp:(.text+0x834): undefined reference to `kernel::usb::hci::bulk_transfer(unsigned char, unsigned char, void*, unsigned short, unsigned short*)'
-  i686-elf-ld: build\x86\obj\core\usb_storage.o: in function `kernel::usb_storage::bot_transfer(kernel::usb_storage::StorageDevice*, unsigned char, unsigned char const*, unsigned char, void*, unsigned long)':
-  usb_storage.cpp:(.text+0xad): undefined reference to `kernel::usb::hci::bulk_transfer(unsigned char, unsigned char, void*, unsigned short, unsigned short*)'
-  i686-elf-ld: build\x86\obj\core\usb_storage.o:usb_storage.cpp:(.text+0x10c): more undefined references to `kernel::usb::hci::bulk_transfer(unsigned char, unsigned char, void*, unsigned short, unsigned short*)' follow
-  [ERROR] Failed to link kernel
+  [ERROR] One or more files failed to compile
   Press any key to continue . . . 
 C:\Program Files\Microsoft Visual Studio\18\Community\MSBuild\Microsoft\VC\v170\Microsoft.MakeFile.Targets(45,5): error MSB3073: The command "cd kernel && build-x86.bat" exited with code 1.

@@ -31,6 +31,8 @@ static char s_kernelLastDnsHost[64];
 static char s_kernelLastDnsResolvedIp[16];
 static char s_kernelLastDnsError[64];
 
+static void strappend(char* dst, const char* src, int maxLen);
+
 // ============================================================
 // Helper: string copy
 // ============================================================
@@ -435,8 +437,6 @@ static bool kernel_write_binary_file_bare_metal(const char* path, const char* by
         return false;
     }
     return true;
-}
-    }
 }
 
 static void strappend(char* dst, const char* src, int maxLen) {
@@ -4776,7 +4776,8 @@ const char* TrashApp::typeForEntry(const TrashEntry& entry) const
 NavigatorApp::NavigatorApp()
     : m_blockCount(0), m_bookmarkCount(0), m_backCount(0), m_forwardCount(0),
       m_recentDownloadCount(0),
-      m_addressFocused(false), m_addressCaret(0), m_scrollY(0), m_hoverLinkIndex(-1),
+      m_addressFocused(false), m_addressCaret(0), m_ctrlPressed(false), m_scrollY(0), m_hoverLinkIndex(-1),
+      m_selectionActive(false), m_selectionDragging(false), m_selectionMoved(false), m_mouseLeftDown(false), m_mouseDownLinkIndex(-1),
       m_backBtnId(-1), m_forwardBtnId(-1), m_reloadBtnId(-1), m_homeBtnId(-1),
       m_bookmarksBtnId(-1), m_addBookmarkBtnId(-1)
 {
@@ -4818,6 +4819,12 @@ NavigatorApp::NavigatorApp()
     m_metaDownloadByteCount = 0;
     m_lastDownloadError[0] = '\0';
     m_bodyStyle = gxos::web::WebStyle{};
+    m_selectionAnchor.blockIndex = -1;
+    m_selectionAnchor.offset = 0;
+    m_selectionFocus.blockIndex = -1;
+    m_selectionFocus.offset = 0;
+    m_clipboard[0] = '\0';
+    strcopy(m_clipboardMode, "Navigator internal clipboard", sizeof(m_clipboardMode));
 }
 
 NavigatorApp::~NavigatorApp() {
@@ -4842,6 +4849,9 @@ bool NavigatorApp::init()
     m_state = app::AppState::Running;
 
     loadDefaultBookmarks();
+    clearSelection();
+    m_clipboard[0] = '\0';
+    strcopy(m_clipboardMode, "Navigator internal clipboard", sizeof(m_clipboardMode));
     loadUrl("about:navigator");
     updateButtons();
     invalidate();
@@ -4899,11 +4909,28 @@ void NavigatorApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h)
 
     framebuffer::fill_rect(x, y + h - STATUS_H, w, STATUS_H, 0xFF262A34);
     framebuffer::fill_rect(x, y + h - STATUS_H, w, 1, 0xFF586076);
-    appDrawText(x + 10, y + h - STATUS_H + 8, m_status, rgb(222, 226, 236));
+    char statusLine[160];
+    strcopy(statusLine, m_status, sizeof(statusLine));
+    if (hasSelection()) {
+        char selected[MAX_SOURCE_PREVIEW];
+        if (selectedText(selected, sizeof(selected))) {
+            char number[24];
+            nav_int_to_text(strlen_local(selected), number, sizeof(number));
+            if (statusLine[0]) strappend(statusLine, "   ", sizeof(statusLine));
+            strappend(statusLine, "Selection: ", sizeof(statusLine));
+            strappend(statusLine, number, sizeof(statusLine));
+            strappend(statusLine, " chars", sizeof(statusLine));
+        }
+    }
+    appDrawText(x + 10, y + h - STATUS_H + 8, statusLine, rgb(222, 226, 236));
 }
 
 void NavigatorApp::onMouseMove(int x, int y)
 {
+    if (m_mouseLeftDown && !m_addressFocused) {
+        updateSelection(x, y);
+        invalidate();
+    }
     int linkIndex = hitLinkIndex(x, y);
     if (linkIndex != m_hoverLinkIndex) {
         m_hoverLinkIndex = linkIndex;
@@ -4921,7 +4948,11 @@ void NavigatorApp::onMouseDown(int x, int y, uint8_t button)
 {
     if ((button & 0x01) == 0 && button != 1) return;
 
+    m_mouseLeftDown = true;
+    m_mouseDownLinkIndex = hitLinkIndex(x, y);
+
     if (hitAddressBar(x, y)) {
+        clearSelection();
         focusAddressBar();
         int charOffset = (x - ADDRESS_X - 8) / 6;
         if (charOffset < 0) charOffset = 0;
@@ -4934,10 +4965,31 @@ void NavigatorApp::onMouseDown(int x, int y, uint8_t button)
 
     if (m_addressFocused) blurAddressBar();
 
-    int linkIndex = hitLinkIndex(x, y);
-    if (linkIndex >= 0 && linkIndex < m_blockCount) {
-        navigateTo(m_blocks[linkIndex].url);
+    SelectionPosition textHit = textPositionFromPoint(x, y, false);
+    if (textHit.blockIndex >= 0) {
+        beginSelection(x, y);
+        invalidate();
+    } else {
+        clearSelection();
+        invalidate();
     }
+}
+
+void NavigatorApp::onMouseUp(int x, int y, uint8_t button)
+{
+    if ((button & 0x01) == 0 && button != 1) return;
+    m_mouseLeftDown = false;
+    if (m_selectionDragging) {
+        finalizeSelection(x, y);
+        if (m_mouseDownLinkIndex >= 0 && !m_selectionMoved && !hasSelection()) {
+            navigateTo(m_blocks[m_mouseDownLinkIndex].url);
+        } else {
+            invalidate();
+        }
+    } else if (m_mouseDownLinkIndex >= 0 && m_mouseDownLinkIndex < m_blockCount) {
+        navigateTo(m_blocks[m_mouseDownLinkIndex].url);
+    }
+    m_mouseDownLinkIndex = -1;
 }
 
 void NavigatorApp::onWidgetClick(int widgetId)
@@ -4961,7 +5013,24 @@ void NavigatorApp::onWidgetClick(int widgetId)
 
 void NavigatorApp::onKeyDown(uint32_t key)
 {
+    if (key == 17) {
+        m_ctrlPressed = true;
+        return;
+    }
+
     if (m_addressFocused) {
+        if (m_ctrlPressed && (key == 'c' || key == 'C')) {
+            strcopy(m_clipboard, m_addressBuffer, sizeof(m_clipboard));
+            strcopy(m_clipboardMode, "Navigator internal clipboard", sizeof(m_clipboardMode));
+            setStatus("Copied address to Navigator clipboard");
+            return;
+        }
+        if (m_ctrlPressed && (key == 'a' || key == 'A')) {
+            m_addressCaret = strlen_local(m_addressBuffer);
+            setStatus("Address bar select all is deferred; copy uses the full address");
+            invalidate();
+            return;
+        }
         int len = strlen_local(m_addressBuffer);
         if (key == shell::KEY_HOME) {
             m_addressCaret = 0;
@@ -4994,7 +5063,14 @@ void NavigatorApp::onKeyDown(uint32_t key)
         return;
     }
 
-    if (key == shell::KEY_PGUP) {
+    if (m_ctrlPressed && (key == 'a' || key == 'A')) {
+        selectAllDocumentText();
+        setStatus(hasSelection() ? "Selected all document text" : "No document text to select");
+        invalidate();
+    } else if (m_ctrlPressed && (key == 'c' || key == 'C')) {
+        if (copySelectionToClipboard()) setStatus("Copied to Navigator clipboard");
+        else setStatus("No document selection to copy");
+    } else if (key == shell::KEY_PGUP) {
         m_scrollY -= 48;
         clampScroll();
         setStatus("Scrolled up");
@@ -5006,6 +5082,11 @@ void NavigatorApp::onKeyDown(uint32_t key)
         m_scrollY = 0;
         setStatus("Home position");
     }
+}
+
+void NavigatorApp::onKeyUp(uint32_t key)
+{
+    if (key == 17) m_ctrlPressed = false;
 }
 
 void NavigatorApp::onKeyChar(char c)
@@ -5349,6 +5430,8 @@ void NavigatorApp::buildPageInfoDocument()
     NAV_INFO_INT("Unsupported CSS declarations: ", m_metaUnsupportedCssDeclarationCount);
     NAV_INFO_TEXT("CSS style block capped: ", m_metaCssStyleBlockCapped ? "yes" : "no");
     NAV_INFO_INT("CSS style bytes processed: ", m_metaCssStyleBytesProcessed);
+    NAV_INFO_TEXT("Text selection enabled: ", "yes");
+    NAV_INFO_TEXT("Clipboard mode: ", m_clipboardMode[0] ? m_clipboardMode : "Navigator internal clipboard");
     NAV_INFO_INT("Raw/source bytes: ", m_metaSourceBytes);
     NAV_INFO_TEXT("Source preview truncated: ", m_metaSourceTruncated ? "yes" : "no");
 #undef NAV_INFO_TEXT
@@ -5435,6 +5518,13 @@ void NavigatorApp::buildRuntimeDocument()
     addBlock(BLOCK_LIST_ITEM, "CSS-lite embedded <style>: enabled");
     addBlock(BLOCK_LIST_ITEM, "Forms-lite GET forms: enabled for file/about pages");
     addBlock(BLOCK_LIST_ITEM, "Find in Page: unsupported in bare-metal adapter");
+    addBlock(BLOCK_LIST_ITEM, "Text selection: enabled");
+    {
+        char clipboardLine[96];
+        strcopy(clipboardLine, "Clipboard mode: ", sizeof(clipboardLine));
+        strappend(clipboardLine, m_clipboardMode[0] ? m_clipboardMode : "Navigator internal clipboard", sizeof(clipboardLine));
+        addBlock(BLOCK_LIST_ITEM, clipboardLine);
+    }
     addBlock(BLOCK_LIST_ITEM, "External stylesheets: unsupported");
 
     addBlock(BLOCK_HEADING, "Backends");
@@ -6858,6 +6948,7 @@ void NavigatorApp::loadUrl(const char* url)
 {
     char normalized[MAX_URL_LEN];
     normalizeUrl(url && url[0] ? url : "about:navigator", normalized, MAX_URL_LEN);
+    clearSelection();
     if (streq_local(normalized, "about:navigator")) {
         buildAboutNavigatorDocument();
     } else if (streq_local(normalized, "about:bookmarks")) {
@@ -7014,6 +7105,254 @@ int NavigatorApp::blockHeight(const DocBlock& block, int maxChars) const
     return css_margin_top_or(block.style, block.kind == BLOCK_HEADING ? 10 : 4) + lines * lineH + boxPadding + css_margin_bottom_or(block.style, block.kind == BLOCK_LIST_ITEM ? 4 : 8);
 }
 
+bool NavigatorApp::isSelectableBlock(const DocBlock& block) const
+{
+    return block.kind == BLOCK_HEADING ||
+           block.kind == BLOCK_PARAGRAPH ||
+           block.kind == BLOCK_LINK ||
+           block.kind == BLOCK_LIST_ITEM ||
+           block.kind == BLOCK_PREFORMATTED;
+}
+
+void NavigatorApp::clearSelection()
+{
+    m_selectionActive = false;
+    m_selectionDragging = false;
+    m_selectionMoved = false;
+    m_mouseLeftDown = false;
+    m_mouseDownLinkIndex = -1;
+    m_selectionAnchor.blockIndex = -1;
+    m_selectionAnchor.offset = 0;
+    m_selectionFocus.blockIndex = -1;
+    m_selectionFocus.offset = 0;
+}
+
+bool NavigatorApp::hasSelection() const
+{
+    if (!m_selectionActive) return false;
+    if (m_selectionAnchor.blockIndex < 0 || m_selectionFocus.blockIndex < 0) return false;
+    return m_selectionAnchor.blockIndex != m_selectionFocus.blockIndex ||
+           m_selectionAnchor.offset != m_selectionFocus.offset;
+}
+
+void NavigatorApp::blockTextForSelection(const DocBlock& block, char* out, int outSize) const
+{
+    if (!out || outSize <= 0) return;
+    if (!isSelectableBlock(block)) {
+        out[0] = '\0';
+        return;
+    }
+    strcopy(out, block.text, outSize);
+}
+
+NavigatorApp::SelectionPosition NavigatorApp::textPositionFromPoint(int x, int y, bool clampToNearest) const
+{
+    SelectionPosition nearest{};
+    nearest.blockIndex = -1;
+    nearest.offset = 0;
+    if (!m_window) return nearest;
+
+    int maxChars = (m_window->w - CONTENT_X * 2 - 32) / 6;
+    if (maxChars < 8) maxChars = 8;
+    int nearestDistance = 1 << 30;
+    int bodyMarginLeft = css_margin_left_or(m_bodyStyle, 0);
+    for (int i = 0; i < m_blockCount; ++i) {
+        if (!isSelectableBlock(m_blocks[i])) continue;
+        char text[MAX_BLOCK_TEXT];
+        blockTextForSelection(m_blocks[i], text, sizeof(text));
+        int textLen = strlen_local(text);
+        int blockMarginTop = css_margin_top_or(m_blocks[i].style, m_blocks[i].kind == BLOCK_HEADING ? 10 : 4);
+        int blockMarginLeft = css_margin_left_or(m_blocks[i].style, 0);
+        int blockPadding = css_padding_or(m_blocks[i].style, m_blocks[i].kind == BLOCK_PREFORMATTED ? 4 : 0);
+        int lineH = m_blocks[i].kind == BLOCK_HEADING ? (css_font_size_or(m_blocks[i].style, 20) > 22 ? 20 : 16) : 16;
+        int textX = CONTENT_X + 14 + bodyMarginLeft + blockMarginLeft + (m_blocks[i].kind == BLOCK_LIST_ITEM ? 14 : 0);
+        int textY = blockY(i, maxChars) + blockMarginTop + (m_blocks[i].kind == BLOCK_PREFORMATTED ? blockPadding : 0);
+        int wrapChars = maxChars - (m_blocks[i].kind == BLOCK_LIST_ITEM ? 4 : 0);
+        if (wrapChars < 8) wrapChars = 8;
+
+        int localLineIndex = 0;
+        int localLineStart = 0;
+        int localLineLen = 0;
+        bool foundInside = false;
+        int bestOffset = 0;
+        int parse = 0;
+        while (parse <= textLen) {
+            int lineEnd = parse;
+            while (lineEnd < textLen && text[lineEnd] != '\n') ++lineEnd;
+            if (lineEnd == parse) {
+                int lineTop = textY + localLineIndex * lineH;
+                if (y >= lineTop && y < lineTop + lineH) {
+                    foundInside = true;
+                    bestOffset = parse;
+                    break;
+                }
+                ++localLineIndex;
+            }
+            int pos = parse;
+            while (pos < lineEnd) {
+                int take = wrapChars;
+                if (pos + take > lineEnd) take = lineEnd - pos;
+                int breakAt = take;
+                if (pos + take < lineEnd) {
+                    for (int j = take; j > 0; --j) {
+                        if (text[pos + j] == ' ') { breakAt = j; break; }
+                    }
+                }
+                localLineStart = pos;
+                localLineLen = breakAt;
+                int lineTop = textY + localLineIndex * lineH;
+                if (y >= lineTop && y < lineTop + lineH) {
+                    int charOffset = (x - textX) / 6;
+                    if (charOffset < 0) charOffset = 0;
+                    if (charOffset > localLineLen) charOffset = localLineLen;
+                    bestOffset = localLineStart + charOffset;
+                    foundInside = true;
+                    break;
+                }
+                pos += breakAt;
+                while (pos < lineEnd && text[pos] == ' ') ++pos;
+                ++localLineIndex;
+            }
+            if (foundInside) break;
+            if (lineEnd >= textLen) break;
+            parse = lineEnd + 1;
+        }
+
+        int blockBottom = textY + (localLineIndex + 1) * lineH + css_margin_bottom_or(m_blocks[i].style, m_blocks[i].kind == BLOCK_LIST_ITEM ? 4 : 8);
+        if (foundInside) {
+            nearest.blockIndex = i;
+            nearest.offset = bestOffset;
+            return nearest;
+        }
+
+        if (clampToNearest) {
+            int dx = 0;
+            int minX = textX;
+            int maxX = textX + wrapChars * 6;
+            if (x < minX) dx = minX - x;
+            else if (x > maxX) dx = x - maxX;
+            int dy = 0;
+            if (y < textY) dy = textY - y;
+            else if (y > blockBottom) dy = y - blockBottom;
+            int distance = dx + dy;
+            if (distance < nearestDistance) {
+                nearestDistance = distance;
+                nearest.blockIndex = i;
+                nearest.offset = y < textY ? 0 : textLen;
+            }
+        }
+    }
+    return nearest;
+}
+
+void NavigatorApp::beginSelection(int x, int y)
+{
+    SelectionPosition pos = textPositionFromPoint(x, y, false);
+    if (pos.blockIndex < 0) {
+        clearSelection();
+        return;
+    }
+    m_selectionAnchor = pos;
+    m_selectionFocus = pos;
+    m_selectionActive = true;
+    m_selectionDragging = true;
+    m_selectionMoved = false;
+}
+
+void NavigatorApp::updateSelection(int x, int y)
+{
+    if (!m_selectionDragging) return;
+    SelectionPosition pos = textPositionFromPoint(x, y, true);
+    if (pos.blockIndex < 0) return;
+    if (pos.blockIndex != m_selectionFocus.blockIndex || pos.offset != m_selectionFocus.offset) {
+        m_selectionFocus = pos;
+        m_selectionMoved = true;
+    }
+}
+
+void NavigatorApp::finalizeSelection(int x, int y)
+{
+    if (!m_selectionDragging) return;
+    updateSelection(x, y);
+    m_selectionDragging = false;
+    if (!hasSelection() && !m_selectionMoved) {
+        clearSelection();
+    }
+}
+
+bool NavigatorApp::selectedText(char* out, int outSize) const
+{
+    if (!out || outSize <= 0) return false;
+    out[0] = '\0';
+    if (!hasSelection()) return false;
+
+    SelectionPosition start = m_selectionAnchor;
+    SelectionPosition end = m_selectionFocus;
+    if (start.blockIndex > end.blockIndex ||
+        (start.blockIndex == end.blockIndex && start.offset > end.offset)) {
+        SelectionPosition tmp = start;
+        start = end;
+        end = tmp;
+    }
+
+    for (int i = start.blockIndex; i <= end.blockIndex; ++i) {
+        if (i < 0 || i >= m_blockCount || !isSelectableBlock(m_blocks[i])) continue;
+        char text[MAX_BLOCK_TEXT];
+        blockTextForSelection(m_blocks[i], text, sizeof(text));
+        int textLen = strlen_local(text);
+        int begin = (i == start.blockIndex) ? start.offset : 0;
+        int finish = (i == end.blockIndex) ? end.offset : textLen;
+        if (begin < 0) begin = 0;
+        if (finish > textLen) finish = textLen;
+        if (finish < begin) {
+            int tmp = begin;
+            begin = finish;
+            finish = tmp;
+        }
+        for (int j = begin; j < finish; ++j) {
+            int len = strlen_local(out);
+            if (len >= outSize - 1) break;
+            out[len] = text[j];
+            out[len + 1] = '\0';
+        }
+        if (i != end.blockIndex) strappend(out, "\n", outSize);
+    }
+    return out[0] != '\0';
+}
+
+bool NavigatorApp::copySelectionToClipboard()
+{
+    char text[MAX_SOURCE_PREVIEW];
+    if (!selectedText(text, sizeof(text))) return false;
+    strcopy(m_clipboard, text, sizeof(m_clipboard));
+    strcopy(m_clipboardMode, "Navigator internal clipboard", sizeof(m_clipboardMode));
+    return true;
+}
+
+void NavigatorApp::selectAllDocumentText()
+{
+    int first = -1;
+    int last = -1;
+    for (int i = 0; i < m_blockCount; ++i) {
+        if (!isSelectableBlock(m_blocks[i])) continue;
+        if (first < 0) first = i;
+        last = i;
+    }
+    if (first < 0 || last < 0) {
+        clearSelection();
+        return;
+    }
+    char lastText[MAX_BLOCK_TEXT];
+    blockTextForSelection(m_blocks[last], lastText, sizeof(lastText));
+    m_selectionAnchor.blockIndex = first;
+    m_selectionAnchor.offset = 0;
+    m_selectionFocus.blockIndex = last;
+    m_selectionFocus.offset = strlen_local(lastText);
+    m_selectionActive = true;
+    m_selectionDragging = false;
+    m_selectionMoved = true;
+}
+
 int NavigatorApp::blockY(int index, int maxChars) const
 {
     int y = CONTENT_Y + 12 + css_margin_top_or(m_bodyStyle, 0) - m_scrollY;
@@ -7105,6 +7444,24 @@ void NavigatorApp::drawDocument(uint32_t x, uint32_t y, uint32_t w, uint32_t h)
         int blockMarginLeft = css_margin_left_or(m_blocks[i].style, 0);
         int blockPadding = css_padding_or(m_blocks[i].style, m_blocks[i].kind == BLOCK_PREFORMATTED ? 4 : 0);
         uint32_t textX = x + CONTENT_X + 14 + bodyMarginLeft + blockMarginLeft;
+        if (m_selectionActive && m_selectionAnchor.blockIndex >= 0 && m_selectionFocus.blockIndex >= 0 && isSelectableBlock(m_blocks[i])) {
+            int startBlock = m_selectionAnchor.blockIndex;
+            int endBlock = m_selectionFocus.blockIndex;
+            if (startBlock > endBlock) {
+                int tmp = startBlock;
+                startBlock = endBlock;
+                endBlock = tmp;
+            }
+            if (i >= startBlock && i <= endBlock) {
+                int highlightX = (int)textX - 2;
+                int highlightY = absY + blockMarginTop - 1;
+                int highlightW = (int)w - CONTENT_X * 2 - 32;
+                if (m_blocks[i].kind == BLOCK_LIST_ITEM) highlightX += 14;
+                if (highlightW > 0) {
+                    framebuffer::fill_rect((uint32_t)highlightX, (uint32_t)highlightY, (uint32_t)highlightW, (uint32_t)(blockHeight(m_blocks[i], maxChars) - css_margin_bottom_or(m_blocks[i].style, m_blocks[i].kind == BLOCK_LIST_ITEM ? 4 : 8)), rgb(110, 150, 220));
+                }
+            }
+        }
         if (m_blocks[i].kind == BLOCK_HEADING) {
             // Bold-looking heading: draw in a deep navy color, then a 2px accent bar.
             uint32_t color = css_color_or(rgb(22, 32, 52), m_blocks[i].style);

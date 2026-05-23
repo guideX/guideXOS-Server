@@ -13,6 +13,9 @@
 #include <fstream>
 #include <sstream>
 #include <unordered_map>
+#if defined(_WIN32)
+#include <windows.h>
+#endif
 
 namespace gxos {
 namespace apps {
@@ -42,6 +45,20 @@ std::string Navigator::s_findBuffer;
 int         Navigator::s_findCaret = 0;
 std::vector<Navigator::FindMatch> Navigator::s_findMatches;
 int         Navigator::s_currentFindMatch = -1;
+bool        Navigator::s_ctrlPressed = false;
+bool        Navigator::s_mouseLeftDown = false;
+Navigator::HitTarget Navigator::s_mouseDownTarget = Navigator::HitTarget::None;
+int         Navigator::s_mouseDownLinkBlockIndex = -1;
+bool        Navigator::s_selectionActive = false;
+bool        Navigator::s_selectionPending = false;
+bool        Navigator::s_selectionDragging = false;
+bool        Navigator::s_selectionMoved = false;
+int         Navigator::s_selectionStartX = 0;
+int         Navigator::s_selectionStartY = 0;
+Navigator::SelectionPosition Navigator::s_selectionAnchor;
+Navigator::SelectionPosition Navigator::s_selectionFocus;
+std::string Navigator::s_navigatorClipboard;
+std::string Navigator::s_clipboardMode = "Navigator internal clipboard";
 
 namespace {
 	constexpr int kWindowW = 920;
@@ -229,6 +246,49 @@ namespace {
 	static int cssFontSizeOrDefault(const WebStyle& style, int fallbackValue);
 	static bool colorChannels(uint32_t color, int& r, int& g, int& b);
 	static std::string encodeFormComponent(const std::string& value);
+	static bool tryWriteHostedClipboard(const std::string& text)
+	{
+#if defined(_WIN32)
+		if (!OpenClipboard(nullptr)) return false;
+		if (!EmptyClipboard()) {
+			CloseClipboard();
+			return false;
+		}
+		const int wideLen = MultiByteToWideChar(CP_UTF8, 0, text.c_str(), -1, nullptr, 0);
+		if (wideLen <= 0) {
+			CloseClipboard();
+			return false;
+		}
+		HGLOBAL mem = GlobalAlloc(GMEM_MOVEABLE, static_cast<SIZE_T>(wideLen) * sizeof(wchar_t));
+		if (!mem) {
+			CloseClipboard();
+			return false;
+		}
+		wchar_t* wide = static_cast<wchar_t*>(GlobalLock(mem));
+		if (!wide) {
+			GlobalFree(mem);
+			CloseClipboard();
+			return false;
+		}
+		if (MultiByteToWideChar(CP_UTF8, 0, text.c_str(), -1, wide, wideLen) <= 0) {
+			GlobalUnlock(mem);
+			GlobalFree(mem);
+			CloseClipboard();
+			return false;
+		}
+		GlobalUnlock(mem);
+		if (!SetClipboardData(CF_UNICODETEXT, mem)) {
+			GlobalFree(mem);
+			CloseClipboard();
+			return false;
+		}
+		CloseClipboard();
+		return true;
+#else
+		(void)text;
+		return false;
+#endif
+	}
 
 	static std::string toLowerAscii(std::string value)
 	{
@@ -588,7 +648,8 @@ namespace {
 		const std::string& inspectedUrl,
 		bool cssDetected,
 		int formCount,
-		int formInputCount)
+		int formInputCount,
+		const std::string& clipboardMode)
 	{
 		return {
 			{"Runtime", "Mode", "hosted/compositor"},
@@ -620,6 +681,8 @@ namespace {
 			{"Capabilities", "CSS text color visible", "enabled"},
 			{"Capabilities", "Forms-lite GET forms", "enabled"},
 			{"Capabilities", "Find in Page", "enabled"},
+			{"Capabilities", "Text selection", "enabled"},
+			{"Capabilities", "Clipboard mode", clipboardMode.empty() ? "Navigator internal clipboard" : clipboardMode},
 			{"Capabilities", "External stylesheets", "unsupported"},
 
 			{"Backends", "File backend", "navigator_file_io hosted/VFS adapter"},
@@ -894,7 +957,8 @@ std::string Navigator::SmokeRuntimeReport()
 		inspected,
 		s_pageMetadata.cssDetected,
 		s_pageMetadata.formCount,
-		s_pageMetadata.formInputCount));
+		s_pageMetadata.formInputCount,
+		s_clipboardMode));
 }
 
 std::string Navigator::SmokeCurrentUrl()
@@ -923,6 +987,13 @@ int Navigator::main(int, char**)
 	s_addressFocused = false;
 	s_addressBuffer.clear();
 	s_addressCaret   = 0;
+	s_ctrlPressed = false;
+	s_mouseLeftDown = false;
+	s_mouseDownTarget = HitTarget::None;
+	s_mouseDownLinkBlockIndex = -1;
+	clearSelection();
+	s_navigatorClipboard.clear();
+	s_clipboardMode = "Navigator internal clipboard";
 
 	loadBookmarks();
 
@@ -992,13 +1063,34 @@ int Navigator::main(int, char**)
 				int x = std::stoi(xStr);
 				int y = std::stoi(yStr);
 				int button = std::stoi(buttonStr);
+				constexpr int kSelectionDragThreshold = 4;
 				int linkIdx = -1;
 				HitTarget target = hitTest(x, y, linkIdx);
 				if (button == 0 && action == "move") {
+					if (s_mouseLeftDown && s_mouseDownTarget != HitTarget::AddressBar && s_mouseDownTarget != HitTarget::FormInput && s_mouseDownTarget != HitTarget::FormSubmit) {
+						if (!s_selectionDragging && s_selectionPending) {
+							int dx = x - s_selectionStartX;
+							if (dx < 0) dx = -dx;
+							int dy = y - s_selectionStartY;
+							if (dy < 0) dy = -dy;
+							if (dx >= kSelectionDragThreshold || dy >= kSelectionDragThreshold) {
+								beginSelection(s_selectionStartX, s_selectionStartY);
+							}
+						}
+						if (s_selectionDragging) {
+							updateSelection(x, y);
+							updateDisplay();
+						}
+					}
 					updateHoverStatus(target, linkIdx);
 				} else if (button == 1 && action == "down") {
+					s_mouseLeftDown = true;
+					s_mouseDownTarget = target;
+					s_mouseDownLinkBlockIndex = linkIdx;
+					SelectionPosition textHit = textPositionFromPoint(x, y, false);
 					if (target == HitTarget::AddressBar) {
 							if (s_focusedInputBlockIndex >= 0) blurDocumentInput();
+							clearSelection();
 							if (s_findActive) closeFindMode();
 							focusAddressBar();
 							// Set caret from click X position using the same fixed char width as rendering.
@@ -1015,6 +1107,7 @@ int Navigator::main(int, char**)
 						// Clicking anywhere outside the address bar blurs it.
 						if (s_addressFocused) blurAddressBar();
 						if (target == HitTarget::FormInput) {
+							clearSelection();
 							if (s_findActive) closeFindMode();
 							focusDocumentInput(linkIdx);
 							Rect r = formControlRect(linkIdx);
@@ -1027,11 +1120,35 @@ int Navigator::main(int, char**)
 							updateDisplay();
 						} else {
 							if (s_focusedInputBlockIndex >= 0) blurDocumentInput();
-							if (target == HitTarget::Link || target == HitTarget::FormSubmit) {
-								handleDocumentClick(target, linkIdx);
+							if (target == HitTarget::FormSubmit) {
+								clearSelection();
+							} else if (textHit.blockIndex >= 0) {
+								clearSelection();
+								s_selectionPending = true;
+								s_selectionStartX = x;
+								s_selectionStartY = y;
+								updateDisplay();
+							} else if (target == HitTarget::None) {
+								clearSelection();
+								updateDisplay();
 							}
 						}
 					}
+				} else if (button == 1 && action == "up") {
+					s_mouseLeftDown = false;
+					if (s_selectionDragging) {
+						finalizeSelection(x, y);
+						if (s_mouseDownTarget == HitTarget::Link && !s_selectionMoved && !hasSelection()) {
+							handleDocumentClick(s_mouseDownTarget, s_mouseDownLinkBlockIndex);
+						} else {
+							updateDisplay();
+						}
+					} else if (s_mouseDownTarget == HitTarget::Link || s_mouseDownTarget == HitTarget::FormSubmit) {
+						handleDocumentClick(s_mouseDownTarget, s_mouseDownLinkBlockIndex);
+					}
+					s_selectionPending = false;
+					s_mouseDownTarget = HitTarget::None;
+					s_mouseDownLinkBlockIndex = -1;
 				}
 			} catch (...) {
 			}
@@ -1206,6 +1323,19 @@ void Navigator::renderDocument()
 			drawRect(s_windowId, kContentX + 10, drawY + std::max(0, blockMarginTop - 2),
 				kContentW - 28, std::max(kLineH + 4, blockH - std::max(0, blockMarginTop)),
 				255, 244, 168);
+		}
+
+		SelectionRange selection = normalizedSelection();
+		if (selection.valid && blockIndex >= selection.start.blockIndex && blockIndex <= selection.end.blockIndex && isSelectableBlock(block)) {
+			Rect selectionRect = selectableBlockRect(blockIndex);
+			if (selectionRect.w > 0 && selectionRect.h > 0) {
+				drawRect(s_windowId,
+					selectionRect.x - 2,
+					selectionRect.y - 1,
+					std::min(selectionRect.w + 4, kContentX + kContentW - 18 - (selectionRect.x - 2)),
+					selectionRect.h,
+					96, 146, 224);
+			}
 		}
 
 		switch (block.type) {
@@ -1392,7 +1522,12 @@ void Navigator::renderStatusBar()
 	}
 
 	const std::string& status = s_hoverStatusText.empty() ? s_statusText : s_hoverStatusText;
-	drawTextAt(s_windowId, 12, kWindowH - kStatusBarH + 6, status);
+	std::string shown = status;
+	if (hasSelection()) {
+		const std::string text = selectedText();
+		shown += (shown.empty() ? "" : "   ") + std::string("Selection: ") + std::to_string(text.size()) + " chars";
+	}
+	drawTextAt(s_windowId, 12, kWindowH - kStatusBarH + 6, shown);
 }
 
 void Navigator::updateStatus(const std::string& status)
@@ -1562,6 +1697,234 @@ std::string Navigator::searchableTextForBlock(const DocBlock& block)
 	return std::string();
 }
 
+bool Navigator::isSelectableBlock(const DocBlock& block)
+{
+	switch (block.type) {
+	case BlockType::Heading:
+	case BlockType::Paragraph:
+	case BlockType::Link:
+	case BlockType::ListItem:
+	case BlockType::Preformatted:
+		return true;
+	default:
+		return false;
+	}
+}
+
+void Navigator::clearSelection()
+{
+	s_selectionActive = false;
+	s_selectionPending = false;
+	s_selectionDragging = false;
+	s_selectionMoved = false;
+	s_selectionStartX = 0;
+	s_selectionStartY = 0;
+	s_selectionAnchor = SelectionPosition{};
+	s_selectionFocus = SelectionPosition{};
+}
+
+Navigator::SelectionRange Navigator::normalizedSelection()
+{
+	SelectionRange range;
+	if (!s_selectionActive || s_selectionAnchor.blockIndex < 0 || s_selectionFocus.blockIndex < 0) {
+		return range;
+	}
+	range.start = s_selectionAnchor;
+	range.end = s_selectionFocus;
+	if (range.start.blockIndex > range.end.blockIndex ||
+		(range.start.blockIndex == range.end.blockIndex && range.start.offset > range.end.offset)) {
+		std::swap(range.start, range.end);
+	}
+	range.valid = true;
+	return range;
+}
+
+bool Navigator::hasSelection()
+{
+	SelectionRange range = normalizedSelection();
+	return range.valid &&
+		(range.start.blockIndex != range.end.blockIndex || range.start.offset != range.end.offset);
+}
+
+Navigator::Rect Navigator::selectableBlockRect(int blockIndex)
+{
+	if (blockIndex < 0 || blockIndex >= static_cast<int>(s_currentDoc.blocks.size())) {
+		return Rect{ 0, 0, 0, 0 };
+	}
+	const DocBlock& block = s_currentDoc.blocks[blockIndex];
+	if (!isSelectableBlock(block)) return Rect{ 0, 0, 0, 0 };
+	const int drawY = kContentY + blockLayoutY(blockIndex) - s_scrollOffset;
+	const int bodyMarginLeft = s_currentDoc.bodyStyle.marginLeft >= 0 ? s_currentDoc.bodyStyle.marginLeft : 0;
+	const int blockMarginTop = block.style.marginTop >= 0 ? block.style.marginTop : (block.type == BlockType::Heading ? 10 : 4);
+	const int blockMarginBottom = block.style.marginBottom >= 0 ? block.style.marginBottom : (block.type == BlockType::ListItem ? 4 : 8);
+	const int blockMarginLeft = block.style.marginLeft >= 0 ? block.style.marginLeft : 0;
+	const int blockPadding = cssPaddingOrDefault(block.style, block.type == BlockType::Preformatted ? 4 : 0);
+	const int textX = kContentX + 18 + bodyMarginLeft + blockMarginLeft;
+	int textW = 0;
+	int textH = 0;
+	switch (block.type) {
+	case BlockType::Heading:
+		textW = kContentW - 34;
+		textH = std::max(kLineH + 4, cssFontSizeOrDefault(block.style, 20) + 2);
+		break;
+	case BlockType::Paragraph:
+	case BlockType::Link:
+		textW = kContentW - 34;
+		textH = wrappedBlockHeight(block.text, (kContentW - 34) / kCharW);
+		break;
+	case BlockType::ListItem:
+		textW = kContentW - 44;
+		textH = wrappedBlockHeight(block.text, (kContentW - 44) / kCharW);
+		break;
+	case BlockType::Preformatted:
+		textW = kContentW - 34;
+		textH = wrappedBlockHeight(block.text, (kContentW - 34) / kCharW, true) + blockPadding * 2;
+		break;
+	default:
+		break;
+	}
+	return Rect{ textX, drawY + blockMarginTop, std::max(kCharW, textW), std::max(kLineH, textH + blockMarginBottom) };
+}
+
+Navigator::SelectionPosition Navigator::textPositionFromPoint(int x, int y, bool clampToNearest)
+{
+	SelectionPosition nearest;
+	int nearestDistance = 1 << 30;
+	for (int i = 0; i < static_cast<int>(s_currentDoc.blocks.size()); ++i) {
+		const DocBlock& block = s_currentDoc.blocks[i];
+		if (!isSelectableBlock(block)) continue;
+		Rect rect = selectableBlockRect(i);
+		if (rect.w <= 0 || rect.h <= 0) continue;
+		const std::string text = searchableTextForBlock(block);
+		const int maxChars = (block.type == BlockType::ListItem) ? ((kContentW - 44) / kCharW) : ((kContentW - 34) / kCharW);
+		const std::vector<std::string> lines = (block.type == BlockType::Preformatted) ? splitPreLines(text) : wrapText(text, maxChars);
+		int lineIndex = std::max(0, std::min((y - rect.y) / kLineH, std::max(0, static_cast<int>(lines.size()) - 1)));
+		size_t lineStart = 0;
+		for (int line = 0; line < lineIndex && line < static_cast<int>(lines.size()); ++line) {
+			lineStart += lines[line].size();
+			if (block.type != BlockType::Preformatted) {
+				while (lineStart < text.size() && text[lineStart] == ' ') ++lineStart;
+				if (lineStart < text.size() && text[lineStart] == '\n') ++lineStart;
+			} else if (lineStart < text.size()) {
+				++lineStart;
+			}
+		}
+		size_t offset = lineStart;
+		if (!lines.empty()) {
+			const std::string& lineText = lines[static_cast<size_t>(lineIndex)];
+			int charOffset = std::max(0, std::min((x - rect.x) / kCharW, static_cast<int>(lineText.size())));
+			offset = std::min(text.size(), lineStart + static_cast<size_t>(charOffset));
+		}
+		if (rect.contains(x, y)) {
+			return SelectionPosition{ i, offset };
+		}
+		if (clampToNearest) {
+			int dx = 0;
+			if (x < rect.x) dx = rect.x - x;
+			else if (x >= rect.x + rect.w) dx = x - (rect.x + rect.w - 1);
+			int dy = 0;
+			if (y < rect.y) dy = rect.y - y;
+			else if (y >= rect.y + rect.h) dy = y - (rect.y + rect.h - 1);
+			int distance = dx + dy;
+			if (distance < nearestDistance) {
+				nearestDistance = distance;
+				nearest = SelectionPosition{ i, offset };
+			}
+		}
+	}
+	return nearest;
+}
+
+void Navigator::beginSelection(int x, int y)
+{
+	SelectionPosition pos = textPositionFromPoint(x, y, false);
+	if (pos.blockIndex < 0) {
+		clearSelection();
+		return;
+	}
+	s_selectionAnchor = pos;
+	s_selectionFocus = pos;
+	s_selectionActive = true;
+	s_selectionPending = false;
+	s_selectionDragging = true;
+	s_selectionMoved = false;
+}
+
+void Navigator::updateSelection(int x, int y)
+{
+	if (!s_selectionDragging) return;
+	SelectionPosition pos = textPositionFromPoint(x, y, true);
+	if (pos.blockIndex < 0) return;
+	if (pos.blockIndex != s_selectionFocus.blockIndex || pos.offset != s_selectionFocus.offset) {
+		s_selectionFocus = pos;
+		s_selectionMoved = true;
+	}
+}
+
+void Navigator::finalizeSelection(int x, int y)
+{
+	if (!s_selectionDragging) return;
+	updateSelection(x, y);
+	s_selectionDragging = false;
+	if (!hasSelection()) {
+		if (!s_selectionMoved) {
+			clearSelection();
+		}
+	}
+}
+
+std::string Navigator::selectedText()
+{
+	SelectionRange range = normalizedSelection();
+	if (!range.valid) return std::string();
+	std::string out;
+	for (int i = range.start.blockIndex; i <= range.end.blockIndex; ++i) {
+		if (i < 0 || i >= static_cast<int>(s_currentDoc.blocks.size())) continue;
+		const DocBlock& block = s_currentDoc.blocks[i];
+		if (!isSelectableBlock(block)) continue;
+		const std::string text = searchableTextForBlock(block);
+		size_t begin = (i == range.start.blockIndex) ? std::min(range.start.offset, text.size()) : 0;
+		size_t end = (i == range.end.blockIndex) ? std::min(range.end.offset, text.size()) : text.size();
+		if (end < begin) std::swap(begin, end);
+		if (end > begin) out += text.substr(begin, end - begin);
+		if (i != range.end.blockIndex) out += "\n";
+	}
+	return out;
+}
+
+void Navigator::selectAllDocumentText()
+{
+	int first = -1;
+	int last = -1;
+	for (int i = 0; i < static_cast<int>(s_currentDoc.blocks.size()); ++i) {
+		if (!isSelectableBlock(s_currentDoc.blocks[i])) continue;
+		if (first < 0) first = i;
+		last = i;
+	}
+	if (first < 0 || last < 0) {
+		clearSelection();
+		return;
+	}
+	s_selectionAnchor = SelectionPosition{ first, 0 };
+	s_selectionFocus = SelectionPosition{ last, searchableTextForBlock(s_currentDoc.blocks[last]).size() };
+	s_selectionActive = true;
+	s_selectionDragging = false;
+	s_selectionMoved = true;
+}
+
+bool Navigator::copySelectionToClipboard()
+{
+	std::string text = selectedText();
+	if (text.empty()) return false;
+	s_navigatorClipboard = text;
+	if (tryWriteHostedClipboard(text)) {
+		s_clipboardMode = "hosted system clipboard";
+		return true;
+	}
+	s_clipboardMode = "Navigator internal clipboard";
+	return true;
+}
+
 std::string Navigator::findMatchStatusText()
 {
 	if (s_findBuffer.empty()) return "Type to find";
@@ -1671,10 +2034,33 @@ void Navigator::submitFormForBlock(int blockIndex)
 
 void Navigator::handleKeyPress(int keyCode, const std::string& action)
 {
+	if (keyCode == 17) {
+		s_ctrlPressed = (action == "down");
+		return;
+	}
 	if (action != "down") return;
 
 	// --- Address bar editing mode ---
 	if (s_addressFocused) {
+		if (s_ctrlPressed && (keyCode == 67 || keyCode == 99)) {
+			if (!s_addressBuffer.empty()) {
+				s_navigatorClipboard = s_addressBuffer;
+				if (tryWriteHostedClipboard(s_addressBuffer)) {
+					s_clipboardMode = "hosted system clipboard";
+					updateStatus("Copied address to system clipboard.");
+				} else {
+					s_clipboardMode = "Navigator internal clipboard";
+					updateStatus("Copied address to Navigator clipboard.");
+				}
+			}
+			return;
+		}
+		if (s_ctrlPressed && (keyCode == 65 || keyCode == 97)) {
+			s_addressCaret = static_cast<int>(s_addressBuffer.size());
+			updateStatus("Address bar select all is deferred; copy uses the full address.");
+			renderToolbar();
+			return;
+		}
 		const int bufLen = static_cast<int>(s_addressBuffer.size());
 
 		if (keyCode == 13) {                        // Enter â€“ commit navigation
@@ -1767,6 +2153,10 @@ void Navigator::handleKeyPress(int keyCode, const std::string& action)
 		s_focusedInputBlockIndex < static_cast<int>(s_currentDoc.blocks.size()) &&
 		s_currentDoc.blocks[s_focusedInputBlockIndex].type == BlockType::FormTextInput)
 	{
+		if (s_ctrlPressed && ((keyCode == 67 || keyCode == 99) || (keyCode == 65 || keyCode == 97))) {
+			updateStatus("Form input copy/select all is deferred.");
+			return;
+		}
 		DocBlock& block = s_currentDoc.blocks[s_focusedInputBlockIndex];
 		const int bufLen = static_cast<int>(block.inputValue.size());
 		if (keyCode == 13) {
@@ -1809,7 +2199,17 @@ void Navigator::handleKeyPress(int keyCode, const std::string& action)
 	}
 
 	// --- Normal (unfocused) keyboard shortcuts ---
-	if (keyCode == 33) {
+	if (s_ctrlPressed && (keyCode == 65 || keyCode == 97)) {
+		selectAllDocumentText();
+		updateStatus(hasSelection() ? "Selected all document text." : "No document text to select.");
+		updateDisplay();
+	} else if (s_ctrlPressed && (keyCode == 67 || keyCode == 99)) {
+		if (copySelectionToClipboard()) {
+			updateStatus(s_clipboardMode == "hosted system clipboard" ? "Copied to system clipboard." : "Copied to Navigator clipboard.");
+		} else {
+			updateStatus("No document selection to copy.");
+		}
+	} else if (keyCode == 33) {
 		s_scrollOffset -= 48;
 		clampScrollOffset();
 		updateStatus("Scrolled up.");
@@ -2066,6 +2466,7 @@ void Navigator::loadUrl(const std::string& url)
 	cleanupRemoteImageTempFiles();
 	s_imageCache.clear();
 	blurDocumentInput();
+	clearSelection();
 
 	WebDocument doc;
 	if (url == "about:navigator" || url.empty()) {
@@ -2291,6 +2692,8 @@ WebDocument Navigator::buildPageInfoDocument()
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Unsupported form controls", m.unsupportedFormControlCount), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Unsupported form method", yesNo(m.unsupportedFormMethod)), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Last submitted form URL", m.lastSubmittedFormUrl), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Text selection enabled", "yes"), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Clipboard mode", s_clipboardMode), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Raw/source bytes", static_cast<int>(m.rawSourceBytes)), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Source preview truncated", yesNo(m.rawSourceTruncated)), ""});
 
@@ -2365,7 +2768,8 @@ WebDocument Navigator::buildRuntimeDocument()
 		s_pageMetadata.finalUrl,
 		s_pageMetadata.cssDetected,
 		s_pageMetadata.formCount,
-		s_pageMetadata.formInputCount));
+		s_pageMetadata.formInputCount,
+		s_clipboardMode));
 
 	doc.blocks.push_back({BlockType::Link, "Page Info", "about:page-info"});
 	doc.blocks.push_back({BlockType::Link, "View Source", "about:view-source"});
