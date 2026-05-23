@@ -93,14 +93,18 @@ $checks = @(
     "[NAVIGATOR-SMOKE] current.url=about:navigator-runtime",
     "[NAVIGATOR-SMOKE] stale.placeholder=not active",
     "[NAVIGATOR-SMOKE] capability.file_read=enabled through VFS",
-    "[NAVIGATOR-SMOKE] capability.http=unsupported/network unavailable",
-    "[NAVIGATOR-SMOKE] capability.remote_png=unsupported without bare-metal HTTP transport",
-    "[NAVIGATOR-SMOKE] capability.downloads=unavailable until HTTP/VFS write path is connected",
+    "[NAVIGATOR-SMOKE] capability.http=enabled numeric IPv4 HTTP/1.0 GET with redirects/chunked",
+    "[NAVIGATOR-SMOKE] capability.dns=unsupported for Navigator HTTP v0.1",
+    "[NAVIGATOR-SMOKE] capability.http_redirects=enabled limit 5",
+    "[NAVIGATOR-SMOKE] capability.http_chunked=enabled",
+    "[NAVIGATOR-SMOKE] capability.remote_png=unsupported in bare-metal HTTP v0.1",
+    "[NAVIGATOR-SMOKE] capability.downloads=unavailable for bare-metal HTTP v0.1",
     "[NAVIGATOR-SMOKE] capability.css_lite=enabled for embedded style blocks",
     "[NAVIGATOR-SMOKE] capability.forms_lite=enabled for file/about GET form blocks",
     "[NAVIGATOR-SMOKE] capability.find_in_page=unsupported in bare-metal adapter",
     "[NAVIGATOR-SMOKE] capability.external_stylesheets=unsupported",
     "[NAVIGATOR-SMOKE] capability.bookmark_persistence=unavailable; in-memory defaults only",
+    "[NAVIGATOR-SMOKE] http.active_cases=skipped",
     "[NAVIGATOR-SMOKE] result=PASS"
 )
 

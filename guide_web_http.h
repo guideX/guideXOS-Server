@@ -11,14 +11,16 @@
 #include <string>
 #include <vector>
 
+#include "guide_web_http_shared.h"
+
 namespace gxos {
 namespace web {
 
-constexpr std::size_t kHttpMaxHeaderBytes = 32u * 1024u;
-constexpr std::size_t kHttpMaxBodyBytes = 256u * 1024u;
-constexpr int kHttpConnectTimeoutMs = 5000;
-constexpr int kHttpReadTimeoutMs = 5000;
-constexpr int kHttpMaxRedirects = 5;
+constexpr std::size_t kHttpMaxHeaderBytes = static_cast<std::size_t>(kHttpSharedMaxHeaderBytes);
+constexpr std::size_t kHttpMaxBodyBytes = static_cast<std::size_t>(kHttpSharedMaxBodyBytes);
+constexpr int kHttpConnectTimeoutMs = kHttpSharedConnectTimeoutMs;
+constexpr int kHttpReadTimeoutMs = kHttpSharedReadTimeoutMs;
+constexpr int kHttpMaxRedirects = kHttpSharedMaxRedirects;
 
 struct ParsedHttpUrl {
 	std::string scheme;

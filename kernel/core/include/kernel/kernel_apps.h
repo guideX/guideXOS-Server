@@ -422,6 +422,10 @@ public:
     virtual void onKeyChar(char c) override;
 
     static app::KernelApp* create() { return new NavigatorApp(); }
+    static bool smokeHttpFetch(const char* url, int* statusCode, char* contentType,
+                               int contentTypeLen, int* bodyBytes, int* parsedBlocks,
+                               char* error, int errorLen, char* finalUrl = nullptr,
+                               int finalUrlLen = 0, int* redirectCount = nullptr);
 
 private:
     static const int MAX_STATUS_LEN = 128;
@@ -533,6 +537,7 @@ private:
     void buildDownloadsDocument();
     void buildErrorDocument(const char* url, const char* reason);
     void loadFileUrl(const char* url);
+    void loadHttpUrl(const char* url);
     void rememberPageMetadata(const char* requestedUrl, const char* finalUrl, const char* sourceType,
                               const char* contentType, const char* errorStatus,
                               const char* rawSource, int rawSourceBytes,
@@ -554,7 +559,13 @@ private:
     void blurAddressBar();
     void commitAddressBar();
     void normalizeUrl(const char* input, char* out, int outSize) const;
-    void parseHtmlDocument(const char* url, const char* html);
+    void parseHtmlDocument(const char* url, const char* html,
+                           const char* sourceType = "file",
+                           const char* contentType = "text/html",
+                           int httpStatusCode = 0,
+                           const char* httpReason = "",
+                           const char* requestedUrl = nullptr,
+                           int redirectCount = 0);
     void resolveHref(const char* baseUrl, const char* href, char* out, int outSize) const;
     int maxScroll() const;
     void clampScroll();
@@ -676,6 +687,7 @@ private:
 // Call this once to register all kernel GUI apps
 void registerKernelApps();
 void printNavigatorRuntimeSmokeReport();
+void printNavigatorHttpRuntimeSmokeReport();
 
 } // namespace apps
 } // namespace kernel

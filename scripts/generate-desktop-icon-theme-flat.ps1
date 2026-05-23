@@ -15,6 +15,7 @@ $icons = @(
     @{ Symbol = "Console"; File = "29-Generic_256x256_35387.png" },
     @{ Symbol = "Files"; File = "25-Folder_256x256_35390.png" },
     @{ Symbol = "FileGeneric"; File = "31-Document_256x256_35398.png" },
+    @{ Symbol = "Globe"; File = "39-Globe_256x256_35386.png" },
     @{ Symbol = "Paint"; File = "7-Image_capture_256x256_35382.png" },
     @{ Symbol = "TaskManager"; File = "15-Dashboard__256x256_35400.png" },
     @{ Symbol = "TrashEmpty"; File = "24-Empty_Trash_256x256_35394.png" },

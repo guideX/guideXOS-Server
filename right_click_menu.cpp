@@ -11,6 +11,7 @@ int RightClickMenu::s_x = 0;
 int RightClickMenu::s_y = 0;
 std::vector<RightClickMenu::MenuItem> RightClickMenu::s_items;
 int RightClickMenu::s_desktopItemIndex = -1;
+std::string RightClickMenu::s_startMenuAppName;
 bool RightClickMenu::s_iconSubmenuVisible = false;
 int RightClickMenu::s_iconSubmenuIndex = -1;
 
@@ -19,6 +20,7 @@ void RightClickMenu::Show(int x, int y) {
     s_y = y;
     s_visible = true;
     s_desktopItemIndex = -1;
+    s_startMenuAppName.clear();
     s_iconSubmenuVisible = false;
     buildItems();
     Logger::write(LogLevel::Info, "RightClickMenu shown");
@@ -29,14 +31,27 @@ void RightClickMenu::ShowForDesktopItem(int x, int y, int desktopItemIndex) {
     s_y = y;
     s_visible = true;
     s_desktopItemIndex = desktopItemIndex;
+    s_startMenuAppName.clear();
     s_iconSubmenuVisible = false;
     buildItems();
     Logger::write(LogLevel::Info, "RightClickMenu shown for desktop item");
 }
 
+void RightClickMenu::ShowForStartMenuApp(int x, int y, const std::string& appName) {
+    s_x = x;
+    s_y = y;
+    s_visible = true;
+    s_desktopItemIndex = -1;
+    s_startMenuAppName = appName;
+    s_iconSubmenuVisible = false;
+    buildItems();
+    Logger::write(LogLevel::Info, "Start Menu context menu created for app: " + appName);
+}
+
 void RightClickMenu::Hide() {
     s_visible = false;
     s_desktopItemIndex = -1;
+    s_startMenuAppName.clear();
     s_iconSubmenuVisible = false;
     s_items.clear();
 }
@@ -45,10 +60,40 @@ bool RightClickMenu::IsVisible() {
     return s_visible;
 }
 
+bool RightClickMenu::IsStartMenuAppMenuVisible() {
+    return s_visible && !s_startMenuAppName.empty();
+}
+
+int RightClickMenu::menuHeight() {
+    return (int)s_items.size() * kItemH;
+}
+
+bool RightClickMenu::ContainsPoint(int mx, int my) {
+    if (!s_visible) return false;
+    int menuH = menuHeight();
+    if (mx >= s_x && mx <= s_x + kMenuW && my >= s_y && my <= s_y + menuH) return true;
+    if (s_iconSubmenuVisible && s_iconSubmenuIndex >= 0) {
+        int subX = s_x + kMenuW;
+        int subY = s_y + s_iconSubmenuIndex * kItemH;
+        int subH = kItemH * 5;
+        if (mx >= subX && mx <= subX + kSubMenuW && my >= subY && my <= subY + subH) return true;
+    }
+    return false;
+}
+
 void RightClickMenu::buildItems() {
     s_items.clear();
+    if (!s_startMenuAppName.empty()) {
+        s_items.push_back({"Open", false, false});
+        s_items.push_back({Compositor::isStartMenuAppPinnedToDesktop(s_startMenuAppName) ? "Unpin from Desktop" : "Pin to Desktop", false, false});
+        return;
+    }
     if (s_desktopItemIndex >= 0) {
         s_items.push_back({"Open", false, false});
+        if (s_desktopItemIndex < (int)Compositor::g_items.size() &&
+            Compositor::g_items[s_desktopItemIndex].kind == DesktopItemKind::Shortcut) {
+            s_items.push_back({"Remove from Desktop", false, false});
+        }
         return;
     }
     s_items.push_back({"Refresh", false, false});
@@ -89,6 +134,18 @@ bool RightClickMenu::HandleClick(int mx, int my) {
             if (s_items[idx].label == "Open" && s_desktopItemIndex >= 0) {
                 Logger::write(LogLevel::Info, "Desktop item Open selected");
                 Compositor::openDesktopItem(s_desktopItemIndex);
+            } else if (s_items[idx].label == "Remove from Desktop" && s_desktopItemIndex >= 0) {
+                Logger::write(LogLevel::Info, "Desktop shortcut Remove from Desktop selected");
+                Compositor::removeDesktopShortcut(s_desktopItemIndex);
+            } else if (s_items[idx].label == "Open" && !s_startMenuAppName.empty()) {
+                Logger::write(LogLevel::Info, "Start Menu app Open selected from context menu: " + s_startMenuAppName);
+                Compositor::openStartMenuApp(s_startMenuAppName);
+            } else if (s_items[idx].label == "Pin to Desktop" && !s_startMenuAppName.empty()) {
+                Logger::write(LogLevel::Info, "Start Menu app Pin to Desktop selected: " + s_startMenuAppName);
+                Compositor::pinStartMenuAppToDesktop(s_startMenuAppName);
+            } else if (s_items[idx].label == "Unpin from Desktop" && !s_startMenuAppName.empty()) {
+                Logger::write(LogLevel::Info, "Start Menu app Unpin from Desktop selected: " + s_startMenuAppName);
+                Compositor::unpinStartMenuAppFromDesktop(s_startMenuAppName);
             } else if (s_items[idx].label == "Refresh") {
                 Logger::write(LogLevel::Info, "Desktop Refresh selected");
                 Compositor::requestDesktopRefresh();

@@ -21,12 +21,15 @@ namespace gxos { namespace gui {
         /// Show the right-click menu at the given screen coordinates
         static void Show(int x, int y);
         static void ShowForDesktopItem(int x, int y, int desktopItemIndex);
+        static void ShowForStartMenuApp(int x, int y, const std::string& appName);
 
         /// Hide the menu
         static void Hide();
 
         /// Check if the menu is currently visible
         static bool IsVisible();
+        static bool IsStartMenuAppMenuVisible();
+        static bool ContainsPoint(int mx, int my);
 
         /// Handle a mouse click at the given position
         /// @return true if click was consumed by the menu
@@ -48,12 +51,14 @@ namespace gxos { namespace gui {
         };
 
         static void buildItems();
+        static int menuHeight();
 
         static bool s_visible;
         static int s_x;
         static int s_y;
         static std::vector<MenuItem> s_items;
         static int s_desktopItemIndex;
+        static std::string s_startMenuAppName;
         static bool s_iconSubmenuVisible;
         static int s_iconSubmenuIndex;
 

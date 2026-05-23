@@ -8,12 +8,19 @@
 namespace gxos { namespace gui {
     struct DesktopWindowRec { uint64_t id; std::string title; int x; int y; int w; int h; bool minimized{false}; bool maximized{false}; int z{0}; bool focused{false}; int snap{0}; };
     struct DesktopIconPos { std::string name; int x; int y; };
+    struct DesktopShortcutRec {
+        std::string shortcutType;
+        std::string targetAppId;
+        std::string label;
+        std::string iconName;
+    };
     struct DesktopConfigData {
         std::string wallpaperPath; // may be empty
         std::string wallpaperId; // stable built-in wallpaper id, e.g. desktop.wallpaper.id
         std::string backgroundScaleMode; // fill, fit, stretch, center, or tile
         std::vector<std::string> pinned;
         std::vector<std::string> recent;
+        std::vector<DesktopShortcutRec> desktopShortcuts;
         std::vector<DesktopWindowRec> windows;
         std::vector<DesktopIconPos> iconPositions;
         bool showDesktopTrash{true};
@@ -38,11 +45,13 @@ namespace gxos { namespace gui {
             auto parseStringArray=[&](const std::string& src, std::vector<std::string>& outArr){ outArr.clear(); size_t i=0; skipWS(src,i); if(i>=src.size()||src[i]!='[') return false; ++i; skipWS(src,i); if(i<src.size() && src[i]==']'){ ++i; return true; } while(i<src.size()){ skipWS(src,i); std::string val; if(!parseJSONString(src,i,val)) return false; outArr.push_back(val); skipWS(src,i); if(i<src.size() && src[i]==','){ ++i; continue; } if(i<src.size() && src[i]==']'){ ++i; return true; } return false; } return false; };
             auto parseWindowsArray=[&](const std::string& src, std::vector<DesktopWindowRec>& outWins){ outWins.clear(); size_t i=0; skipWS(src,i); if(i>=src.size() || src[i]!='[') return false; ++i; skipWS(src,i); if(i<src.size() && src[i]==']'){ ++i; return true; } while(i<src.size()){ skipWS(src,i); if(i>=src.size()||src[i]!='{') return false; int depth=0; size_t start=i; size_t j=i; while(j<src.size()){ if(src[j]=='{') depth++; else if(src[j]=='}'){ depth--; if(depth==0){ ++j; break; } } ++j; } if(depth!=0) return false; std::string obj = src.substr(start, j-start); DesktopWindowRec rec{}; auto findStr=[&](const char* key, std::string& outStr){ auto p=obj.find(std::string("\"")+key+"\""); if(p==std::string::npos) return false; auto c=obj.find(':',p); if(c==std::string::npos) return false; size_t ii=c+1; skipWS(obj,ii); if(ii>=obj.size()||obj[ii]!='"') return false; return parseJSONString(obj, ii, outStr); }; auto findInt=[&](const char* key, long long& outVal){ auto p=obj.find(std::string("\"")+key+"\""); if(p==std::string::npos) return false; auto c=obj.find(':',p); if(c==std::string::npos) return false; size_t ii=c+1; skipWS(obj,ii); return parseJSONInt(obj, ii, outVal); }; auto findBool=[&](const char* key, bool& outVal){ auto p=obj.find(std::string("\"")+key+"\""); if(p==std::string::npos) return false; auto c=obj.find(':',p); if(c==std::string::npos) return false; size_t ii=c+1; skipWS(obj,ii); return parseJSONBool(obj, ii, outVal); }; std::string title; long long id=0,x=0,y=0,w=0,h=0,z=0,snap=0; bool minimized=false,maximized=false,focused=false; findInt("id", id); findStr("title", title); findInt("x", x); findInt("y", y); findInt("w", w); findInt("h", h); findBool("minimized", minimized); findBool("maximized", maximized); findInt("z", z); findBool("focused", focused); findInt("snap", snap); DesktopWindowRec r; r.id=(uint64_t)id; r.title=title; r.x=(int)x; r.y=(int)y; r.w=(int)w; r.h=(int)h; r.minimized=minimized; r.maximized=maximized; r.z=(int)z; r.focused=focused; r.snap=(int)snap; outWins.push_back(r); i=j; skipWS(src,i); if(i<src.size() && src[i]==','){ ++i; continue; } if(i<src.size() && src[i]==']'){ ++i; return true; } return false; } return false; };
             auto parseIconPosArray=[&](const std::string& src, std::vector<DesktopIconPos>& outPos){ outPos.clear(); size_t i=0; skipWS(src,i); if(i>=src.size() || src[i]!='[') return false; ++i; skipWS(src,i); if(i<src.size() && src[i]==']'){ ++i; return true; } while(i<src.size()){ skipWS(src,i); if(i>=src.size()||src[i]!='{') return false; int depth=0; size_t start=i; size_t j=i; while(j<src.size()){ if(src[j]=='{') depth++; else if(src[j]=='}'){ depth--; if(depth==0){ ++j; break; } } ++j; } if(depth!=0) return false; std::string obj = src.substr(start, j-start); auto findStr2=[&](const char* key, std::string& outStr){ auto p=obj.find(std::string("\"")+key+"\""); if(p==std::string::npos) return false; auto c=obj.find(':',p); if(c==std::string::npos) return false; size_t ii=c+1; skipWS(obj,ii); if(ii>=obj.size()||obj[ii]!='"') return false; return parseJSONString(obj, ii, outStr); }; auto findInt2=[&](const char* key, long long& outVal){ auto p=obj.find(std::string("\"")+key+"\""); if(p==std::string::npos) return false; auto c=obj.find(':',p); if(c==std::string::npos) return false; size_t ii=c+1; skipWS(obj,ii); return parseJSONInt(obj, ii, outVal); }; DesktopIconPos ip; long long px=0,py=0; findStr2("name", ip.name); findInt2("x", px); findInt2("y", py); ip.x=(int)px; ip.y=(int)py; outPos.push_back(ip); i=j; skipWS(src,i); if(i<src.size() && src[i]==','){ ++i; continue; } if(i<src.size() && src[i]==']'){ ++i; return true; } return false; } return false; };
+            auto parseShortcutArray=[&](const std::string& src, std::vector<DesktopShortcutRec>& outShortcuts){ outShortcuts.clear(); size_t i=0; skipWS(src,i); if(i>=src.size() || src[i]!='[') return false; ++i; skipWS(src,i); if(i<src.size() && src[i]==']'){ ++i; return true; } while(i<src.size()){ skipWS(src,i); if(i>=src.size()||src[i]!='{') return false; int depth=0; size_t start=i; size_t j=i; while(j<src.size()){ if(src[j]=='{') depth++; else if(src[j]=='}'){ depth--; if(depth==0){ ++j; break; } } ++j; } if(depth!=0) return false; std::string obj = src.substr(start, j-start); auto findStr=[&](const char* key, std::string& outStr){ auto p=obj.find(std::string("\"")+key+"\""); if(p==std::string::npos) return false; auto c=obj.find(':',p); if(c==std::string::npos) return false; size_t ii=c+1; skipWS(obj,ii); if(ii>=obj.size()||obj[ii]!='"') return false; return parseJSONString(obj, ii, outStr); }; DesktopShortcutRec rec; findStr("shortcutType", rec.shortcutType); findStr("targetAppId", rec.targetAppId); findStr("label", rec.label); findStr("iconName", rec.iconName); if(!rec.targetAppId.empty()) { if(rec.shortcutType.empty()) rec.shortcutType = "App"; outShortcuts.push_back(rec); } i=j; skipWS(src,i); if(i<src.size() && src[i]==','){ ++i; continue; } if(i<src.size() && src[i]==']'){ ++i; return true; } return false; } return false; };
             std::string section; if(extractSection(txt, "wallpaper", section)){ if(!section.empty() && section[0]=='"'){ size_t i=0; parseJSONString(section, i, out.wallpaperPath); } }
             if(extractSection(txt, "desktop.wallpaper.id", section)){ if(!section.empty() && section[0]=='"'){ size_t i=0; parseJSONString(section, i, out.wallpaperId); } }
             if(extractSection(txt, "desktop.background.scale", section)){ if(!section.empty() && section[0]=='"'){ size_t i=0; parseJSONString(section, i, out.backgroundScaleMode); } }
             if(extractSection(txt, "pinned", section)) parseStringArray(section, out.pinned);
             if(extractSection(txt, "recent", section)) parseStringArray(section, out.recent);
+            if(extractSection(txt, "desktopShortcuts", section)) parseShortcutArray(section, out.desktopShortcuts);
             if(extractSection(txt, "windows", section)) parseWindowsArray(section, out.windows);
             if(extractSection(txt, "iconPositions", section)) parseIconPosArray(section, out.iconPositions);
             if(extractSection(txt, "showDesktopTrash", section)){ size_t i=0; skipWS(section,i); parseJSONBool(section, i, out.showDesktopTrash); }
@@ -60,6 +69,14 @@ namespace gxos { namespace gui {
             f << "  \"desktop.background.scale\": " << jsonEscape(data.backgroundScaleMode.empty() ? "fill" : data.backgroundScaleMode) << ",\n";
             f << "  \"pinned\": ["; for(size_t i=0;i<data.pinned.size();++i){ if(i) f<<","; f<<jsonEscape(data.pinned[i]);} f << "],\n";
             f << "  \"recent\": ["; for(size_t i=0;i<data.recent.size();++i){ if(i) f<<","; f<<jsonEscape(data.recent[i]);} f << "],\n";
+            f << "  \"desktopShortcuts\": [\n";
+            for(size_t i=0;i<data.desktopShortcuts.size();++i){ const auto& sc=data.desktopShortcuts[i]; f << "    {";
+            f << "\"shortcutType\": " << jsonEscape(sc.shortcutType.empty() ? "App" : sc.shortcutType) << ", ";
+            f << "\"targetAppId\": " << jsonEscape(sc.targetAppId) << ", ";
+            f << "\"label\": " << jsonEscape(sc.label) << ", ";
+            f << "\"iconName\": " << jsonEscape(sc.iconName);
+            f << "}"; if(i+1<data.desktopShortcuts.size()) f << ","; f << "\n"; }
+            f << "  ],\n";
             f << "  \"showDesktopTrash\": " << (data.showDesktopTrash ? "true" : "false") << ",\n";
             f << "  \"showDesktopThisSystem\": " << (data.showDesktopThisSystem ? "true" : "false") << ",\n";
             f << "  \"showDesktopFileManager\": " << (data.showDesktopFileManager ? "true" : "false") << ",\n";

@@ -577,7 +577,7 @@ static void apply_taskbar_layout()
 enum class DesktopItemKind : uint8_t {
     SystemObject,
     FilesystemEntry,
-    Shortcut // TODO: future desktop shortcut persistence/creation.
+    Shortcut
 };
 
 enum class DesktopSystemObjectKind : uint8_t {
@@ -605,9 +605,13 @@ struct DesktopIcon {
 static const char* kDesktopFolderPath = "/Desktop";
 static const int kSystemDesktopIconCount = 4;
 static const int kMaxDesktopFilesystemEntries = 32;
+static const int kMaxDesktopAppShortcuts = 16;
+static const int kDesktopShortcutStart = kSystemDesktopIconCount + kMaxDesktopFilesystemEntries;
 
 static char s_desktopFileLabels[kMaxDesktopFilesystemEntries][vfs::VFS_MAX_FILENAME];
 static char s_desktopFilePaths[kMaxDesktopFilesystemEntries][vfs::VFS_MAX_PATH];
+static char s_desktopShortcutLabels[kMaxDesktopAppShortcuts][64];
+static char s_desktopShortcutTargetAppIds[kMaxDesktopAppShortcuts][64];
 
 // Desktop icons: system objects plus fixed VFS-backed slots for /Desktop entries.
 static DesktopIcon s_desktopIcons[] = {
@@ -647,6 +651,22 @@ static DesktopIcon s_desktopIcons[] = {
     {"", 0xFF9098A4, false, false, -1, -1, DesktopItemKind::FilesystemEntry, DesktopSystemObjectKind::None, "", false, true},
     {"", 0xFF9098A4, false, false, -1, -1, DesktopItemKind::FilesystemEntry, DesktopSystemObjectKind::None, "", false, true},
     {"", 0xFF9098A4, false, false, -1, -1, DesktopItemKind::FilesystemEntry, DesktopSystemObjectKind::None, "", false, true},
+    {"", 0xFF4678BE, false, false, -1, -1, DesktopItemKind::Shortcut, DesktopSystemObjectKind::None, "", false, true},
+    {"", 0xFF4678BE, false, false, -1, -1, DesktopItemKind::Shortcut, DesktopSystemObjectKind::None, "", false, true},
+    {"", 0xFF4678BE, false, false, -1, -1, DesktopItemKind::Shortcut, DesktopSystemObjectKind::None, "", false, true},
+    {"", 0xFF4678BE, false, false, -1, -1, DesktopItemKind::Shortcut, DesktopSystemObjectKind::None, "", false, true},
+    {"", 0xFF4678BE, false, false, -1, -1, DesktopItemKind::Shortcut, DesktopSystemObjectKind::None, "", false, true},
+    {"", 0xFF4678BE, false, false, -1, -1, DesktopItemKind::Shortcut, DesktopSystemObjectKind::None, "", false, true},
+    {"", 0xFF4678BE, false, false, -1, -1, DesktopItemKind::Shortcut, DesktopSystemObjectKind::None, "", false, true},
+    {"", 0xFF4678BE, false, false, -1, -1, DesktopItemKind::Shortcut, DesktopSystemObjectKind::None, "", false, true},
+    {"", 0xFF4678BE, false, false, -1, -1, DesktopItemKind::Shortcut, DesktopSystemObjectKind::None, "", false, true},
+    {"", 0xFF4678BE, false, false, -1, -1, DesktopItemKind::Shortcut, DesktopSystemObjectKind::None, "", false, true},
+    {"", 0xFF4678BE, false, false, -1, -1, DesktopItemKind::Shortcut, DesktopSystemObjectKind::None, "", false, true},
+    {"", 0xFF4678BE, false, false, -1, -1, DesktopItemKind::Shortcut, DesktopSystemObjectKind::None, "", false, true},
+    {"", 0xFF4678BE, false, false, -1, -1, DesktopItemKind::Shortcut, DesktopSystemObjectKind::None, "", false, true},
+    {"", 0xFF4678BE, false, false, -1, -1, DesktopItemKind::Shortcut, DesktopSystemObjectKind::None, "", false, true},
+    {"", 0xFF4678BE, false, false, -1, -1, DesktopItemKind::Shortcut, DesktopSystemObjectKind::None, "", false, true},
+    {"", 0xFF4678BE, false, false, -1, -1, DesktopItemKind::Shortcut, DesktopSystemObjectKind::None, "", false, true},
 };
 static const int kDesktopIconCount = sizeof(s_desktopIcons) / sizeof(s_desktopIcons[0]);
 static const int kMaxRecentApps = 5;  // Max recent apps to show
@@ -684,7 +704,12 @@ static void desktop_icon_layout_key(int iconIdx, char* out, int outSize)
         return;
     }
 
-    // TODO: use shortcut IDs once DesktopItemKind::Shortcut is implemented.
+    if (icon.kind == DesktopItemKind::Shortcut && icon.path[0]) {
+        desktop_append_text(out, &pos, outSize, "shortcut:app:");
+        desktop_append_text(out, &pos, outSize, icon.path);
+        return;
+    }
+
     desktop_append_text(out, &pos, outSize, icon.label);
 }
 
@@ -798,9 +823,19 @@ static const char* s_contextMenuItems[] = {
     "TaskManager",
 };
 static const int kContextMenuCount = 6;
-static const uint32_t kContextMenuW = 160;
+static const uint32_t kContextMenuW = 190;
 static const uint32_t kContextMenuItemH = 24;
 static const uint32_t kContextMenuPad = 2;
+
+enum class ContextMenuMode : uint8_t {
+    Desktop,
+    StartMenuApp,
+    DesktopShortcut
+};
+
+static ContextMenuMode s_contextMenuMode = ContextMenuMode::Desktop;
+static char s_contextMenuAppName[64] = {0};
+static int s_contextMenuIconDisplayIndex = -1;
 
 // Notification toast
 struct NotificationToast {
@@ -1127,12 +1162,16 @@ static void refresh_desktop_icons();      // Rebuild visible icon list
 static void add_to_recent(const char* appName);  // Add app to recent list
 static void pin_icon(const char* appName);       // Pin app to desktop
 static void unpin_icon(const char* appName);     // Unpin app from desktop
+static bool pin_app_shortcut_to_desktop(const char* appName);
+static bool remove_app_shortcut_from_desktop(const char* appName);
+static bool is_app_shortcut_pinned_to_desktop(const char* appName);
 static int find_icon_by_name(const char* name);  // Find icon index by name
 static void initialize_icon_positions();         // Set up initial icon grid layout
 static void save_icon_position(int iconIndex);   // Save position after drag
 static bool load_icon_positions();
 static void save_icon_positions();
 static void sync_selected_icon_after_layout();
+static int display_index_for_icon_id(int iconId);
 static bool is_display_icon_selected(int displayIndex);
 static void ClearDesktopIconSelection();
 static void SelectDesktopIcon(int displayIndex, bool additive);
@@ -1204,6 +1243,7 @@ static void forget_cursor_save();
 static void get_context_menu_geometry(uint32_t& menuX, uint32_t& menuY, uint32_t& menuH);
 static int find_nearest_icon_in_direction(int currentIcon, int direction);
 static void show_icon_notification(int iconIndex);
+static void show_start_menu_notification(const char* label);
 static void toggle_show_desktop();
 static bool try_launch_kernel_app(const char* appName);
 
@@ -1578,6 +1618,294 @@ static void enumerate_desktop_folder_items()
     serial::puts("[desktop] Desktop folder enumeration completed\n");
 }
 
+static const StartMenuApp* find_start_menu_app(const char* appName)
+{
+    if (!appName || !appName[0]) return nullptr;
+    for (int i = 0; i < kStartMenuAppCount; ++i) {
+        if (desktop_str_eq(s_startMenuApps[i].name, appName)) return &s_startMenuApps[i];
+    }
+    if (desktop_str_eq(appName, "App Model Demo")) {
+        for (int i = 0; i < kStartMenuAppCount; ++i) {
+            if (desktop_str_eq(s_startMenuApps[i].name, "AppModel")) return &s_startMenuApps[i];
+        }
+    }
+    return nullptr;
+}
+
+static uint32_t color_for_start_menu_app(const char* appName)
+{
+    const StartMenuApp* app = find_start_menu_app(appName);
+    return app ? app->color : 0xFF4678BE;
+}
+
+static bool desktop_cells_overlap(int32_t ax, int32_t ay, int32_t bx, int32_t by)
+{
+    return ax < bx + (int32_t)kIconCellW && ax + (int32_t)kIconCellW > bx &&
+           ay < by + (int32_t)kIconCellH && ay + (int32_t)kIconCellH > by;
+}
+
+static bool allocate_desktop_icon_slot(int ignoreIconId, int32_t& outX, int32_t& outY)
+{
+    DesktopRect work = get_current_work_area();
+    uint32_t usableW = work.w > kIconMargin ? work.w - kIconMargin : work.w;
+    uint32_t usableH = work.h > kIconMargin ? work.h - kIconMargin : work.h;
+    int columns = (int)(usableW / kIconCellW);
+    int rows = (int)(usableH / kIconCellH);
+    if (columns < 1) columns = 1;
+    if (rows < 1) rows = 1;
+
+    serial::puts("[desktop] allocating desktop icon slot occupied=");
+    serial::put_hex32((uint32_t)s_visibleIconCount);
+    serial::puts(" columns=");
+    serial::put_hex32((uint32_t)columns);
+    serial::puts(" rows=");
+    serial::put_hex32((uint32_t)rows);
+    serial::puts("\n");
+
+    for (int row = 0; row < rows; ++row) {
+        for (int col = 0; col < columns; ++col) {
+            int32_t x = (int32_t)work.x + (int32_t)kIconMargin + (int32_t)col * (int32_t)kIconCellW;
+            int32_t y = (int32_t)work.y + (int32_t)kIconMargin + (int32_t)row * (int32_t)kIconCellH;
+            bool collides = false;
+            for (int displayIdx = 0; displayIdx < s_visibleIconCount; ++displayIdx) {
+                int iconId = s_visibleIconIndices[displayIdx];
+                if (iconId == ignoreIconId) continue;
+                if (s_iconPosX[displayIdx] < 0 || s_iconPosY[displayIdx] < 0) continue;
+                if (desktop_cells_overlap(x, y, s_iconPosX[displayIdx], s_iconPosY[displayIdx])) {
+                    collides = true;
+                    break;
+                }
+            }
+            if (!collides) {
+                outX = x;
+                outY = y;
+                serial::puts("[desktop] desktop icon slot selected x=");
+                serial::put_hex32((uint32_t)outX);
+                serial::puts(" y=");
+                serial::put_hex32((uint32_t)outY);
+                serial::puts("\n");
+                return true;
+            }
+        }
+    }
+
+    outX = (int32_t)work.x + (int32_t)kIconMargin;
+    outY = (int32_t)work.y + (int32_t)kIconMargin;
+    serial::puts("[desktop] desktop icon slot fallback; no free slot\n");
+    return false;
+}
+
+static void reset_app_shortcut_slots()
+{
+    for (int i = 0; i < kMaxDesktopAppShortcuts; ++i) {
+        int iconIdx = kDesktopShortcutStart + i;
+        if (iconIdx >= kDesktopIconCount) break;
+        s_desktopShortcutLabels[i][0] = '\0';
+        s_desktopShortcutTargetAppIds[i][0] = '\0';
+        s_desktopIcons[iconIdx].label = s_desktopShortcutLabels[i];
+        s_desktopIcons[iconIdx].path[0] = '\0';
+        s_desktopIcons[iconIdx].pinned = false;
+        s_desktopIcons[iconIdx].recent = false;
+        s_desktopIcons[iconIdx].kind = DesktopItemKind::Shortcut;
+        s_desktopIcons[iconIdx].systemObject = DesktopSystemObjectKind::None;
+        s_desktopIcons[iconIdx].isDirectory = false;
+        s_desktopIcons[iconIdx].removable = true;
+        s_desktopIcons[iconIdx].color = 0xFF4678BE;
+    }
+}
+
+static bool add_app_shortcut_slot(const char* targetAppId, const char* label)
+{
+    if (!targetAppId || !targetAppId[0]) return false;
+    for (int i = 0; i < kMaxDesktopAppShortcuts; ++i) {
+        if (desktop_str_eq(s_desktopShortcutTargetAppIds[i], targetAppId)) {
+            serial::puts("[desktop] Shortcut already exists: ");
+            serial::puts(targetAppId);
+            serial::puts("\n");
+            return false;
+        }
+    }
+    for (int i = 0; i < kMaxDesktopAppShortcuts; ++i) {
+        if (s_desktopShortcutTargetAppIds[i][0]) continue;
+        int iconIdx = kDesktopShortcutStart + i;
+        if (iconIdx >= kDesktopIconCount) break;
+        desktop_str_copy(s_desktopShortcutTargetAppIds[i], targetAppId, (int)sizeof(s_desktopShortcutTargetAppIds[i]));
+        desktop_str_copy(s_desktopShortcutLabels[i], label && label[0] ? label : targetAppId, (int)sizeof(s_desktopShortcutLabels[i]));
+        s_desktopIcons[iconIdx].label = s_desktopShortcutLabels[i];
+        desktop_str_copy(s_desktopIcons[iconIdx].path, s_desktopShortcutTargetAppIds[i], (int)sizeof(s_desktopIcons[iconIdx].path));
+        s_desktopIcons[iconIdx].pinned = true;
+        s_desktopIcons[iconIdx].recent = false;
+        s_desktopIcons[iconIdx].kind = DesktopItemKind::Shortcut;
+        s_desktopIcons[iconIdx].systemObject = DesktopSystemObjectKind::None;
+        s_desktopIcons[iconIdx].isDirectory = false;
+        s_desktopIcons[iconIdx].removable = true;
+        s_desktopIcons[iconIdx].color = color_for_start_menu_app(label && label[0] ? label : targetAppId);
+        serial::puts("[desktop] Shortcut loaded/renderable: shortcut:app:");
+        serial::puts(targetAppId);
+        serial::puts("\n");
+        return true;
+    }
+    serial::puts("[desktop] Bare-metal shortcut slot full\n");
+    return false;
+}
+
+static void persist_app_shortcuts()
+{
+    char buffer[2048];
+    int pos = 0;
+    desktop_append_text(buffer, &pos, sizeof(buffer), "# guideXOS Desktop App Shortcuts v1\n");
+    for (int i = 0; i < kMaxDesktopAppShortcuts; ++i) {
+        if (!s_desktopShortcutTargetAppIds[i][0]) continue;
+        desktop_append_text(buffer, &pos, sizeof(buffer), s_desktopShortcutTargetAppIds[i]);
+        desktop_append_text(buffer, &pos, sizeof(buffer), "\t");
+        desktop_append_text(buffer, &pos, sizeof(buffer), s_desktopShortcutLabels[i]);
+        desktop_append_text(buffer, &pos, sizeof(buffer), "\n");
+    }
+    int32_t written = vfs::write_file("/desktop.shortcuts", buffer, (uint32_t)pos);
+    serial::puts(written == pos ? "[desktop] Shortcut persisted\n" : "[desktop] Shortcut persistence failure\n");
+}
+
+static void load_persisted_app_shortcuts()
+{
+    reset_app_shortcut_slots();
+    char buffer[2048];
+    int32_t count = vfs::read_file("/desktop.shortcuts", buffer, sizeof(buffer) - 1);
+    if (count <= 0) {
+        serial::puts("[desktop] Shortcut loaded: none persisted\n");
+        return;
+    }
+    buffer[count] = '\0';
+    int pos = 0;
+    while (pos < count) {
+        while (pos < count && (buffer[pos] == '\n' || buffer[pos] == '\r')) pos++;
+        int lineStart = pos;
+        while (pos < count && buffer[pos] != '\n' && buffer[pos] != '\r') pos++;
+        int lineEnd = pos;
+        if (lineEnd <= lineStart || buffer[lineStart] == '#') continue;
+        int tab = -1;
+        for (int i = lineStart; i < lineEnd; ++i) {
+            if (buffer[i] == '\t') { tab = i; break; }
+        }
+        char target[64];
+        char label[64];
+        int targetEnd = tab > lineStart ? tab : lineEnd;
+        int targetLen = targetEnd - lineStart;
+        if (targetLen >= (int)sizeof(target)) targetLen = (int)sizeof(target) - 1;
+        for (int i = 0; i < targetLen; ++i) target[i] = buffer[lineStart + i];
+        target[targetLen] = '\0';
+        int labelLen = 0;
+        if (tab > 0) {
+            labelLen = lineEnd - tab - 1;
+            if (labelLen >= (int)sizeof(label)) labelLen = (int)sizeof(label) - 1;
+            for (int i = 0; i < labelLen; ++i) label[i] = buffer[tab + 1 + i];
+        }
+        label[labelLen] = '\0';
+        add_app_shortcut_slot(target, label[0] ? label : target);
+    }
+    serial::puts("[desktop] Shortcut loaded from persistence\n");
+}
+
+static bool is_app_shortcut_pinned_to_desktop(const char* appName)
+{
+    const StartMenuApp* app = find_start_menu_app(appName);
+    const char* target = app ? app->name : appName;
+    for (int i = 0; i < kMaxDesktopAppShortcuts; ++i) {
+        if (desktop_str_eq(s_desktopShortcutTargetAppIds[i], target)) return true;
+    }
+    return false;
+}
+
+static bool pin_app_shortcut_to_desktop(const char* appName)
+{
+    serial::puts("[desktop] Pin to Desktop selected: ");
+    serial::puts(appName ? appName : "(null)");
+    serial::puts("\n");
+    const StartMenuApp* app = find_start_menu_app(appName);
+    if (!app) {
+        serial::puts("[desktop] Shortcut target not found\n");
+        s_notification.title = "Pin to Desktop";
+        s_notification.message = "Shortcut target not found";
+        s_notification.visible = true;
+        s_notification.showTime = s_tickCounter;
+        return false;
+    }
+    serial::puts("[desktop] App ID resolved: ");
+    serial::puts(app->name);
+    serial::puts("\n");
+    if (is_app_shortcut_pinned_to_desktop(app->name)) {
+        serial::puts("[desktop] Shortcut already exists\n");
+        s_notification.title = "Pin to Desktop";
+        s_notification.message = "Shortcut already exists";
+        s_notification.visible = true;
+        s_notification.showTime = s_tickCounter;
+        return false;
+    }
+    if (!add_app_shortcut_slot(app->name, app->name)) {
+        s_notification.title = "Pin to Desktop";
+        s_notification.message = "Shortcut list is full";
+        s_notification.visible = true;
+        s_notification.showTime = s_tickCounter;
+        return false;
+    }
+    persist_app_shortcuts();
+    refresh_desktop_icons();
+    if (!s_iconPositionsInitialized) {
+        initialize_icon_positions();
+    } else {
+        int shortcutIconIdx = -1;
+        for (int i = 0; i < kMaxDesktopAppShortcuts; ++i) {
+            int iconIdx = kDesktopShortcutStart + i;
+            if (iconIdx >= kDesktopIconCount) break;
+            if (desktop_str_eq(s_desktopIcons[iconIdx].path, app->name)) {
+                shortcutIconIdx = iconIdx;
+                break;
+            }
+        }
+        int displayIdx = display_index_for_icon_id(shortcutIconIdx);
+        if (displayIdx >= 0) {
+            int32_t x = 0;
+            int32_t y = 0;
+            allocate_desktop_icon_slot(shortcutIconIdx, x, y);
+            s_iconPosX[displayIdx] = x;
+            s_iconPosY[displayIdx] = y;
+            s_desktopIcons[shortcutIconIdx].savedX = x;
+            s_desktopIcons[shortcutIconIdx].savedY = y;
+            save_icon_positions();
+        } else {
+            serial::puts("[desktop] Shortcut position persistence skipped; display slot not found\n");
+        }
+    }
+    s_notification.title = "Pin to Desktop";
+    s_notification.message = "Shortcut created";
+    s_notification.visible = true;
+    s_notification.showTime = s_tickCounter;
+    return true;
+}
+
+static bool remove_app_shortcut_from_desktop(const char* appName)
+{
+    const StartMenuApp* app = find_start_menu_app(appName);
+    const char* target = app ? app->name : appName;
+    for (int i = 0; i < kMaxDesktopAppShortcuts; ++i) {
+        if (!desktop_str_eq(s_desktopShortcutTargetAppIds[i], target)) continue;
+        int iconIdx = kDesktopShortcutStart + i;
+        s_desktopShortcutTargetAppIds[i][0] = '\0';
+        s_desktopShortcutLabels[i][0] = '\0';
+        s_desktopIcons[iconIdx].label = s_desktopShortcutLabels[i];
+        s_desktopIcons[iconIdx].path[0] = '\0';
+        s_desktopIcons[iconIdx].pinned = false;
+        s_desktopIcons[iconIdx].recent = false;
+        persist_app_shortcuts();
+        refresh_desktop_icons();
+        serial::puts("[desktop] Shortcut removed: ");
+        serial::puts(target);
+        serial::puts("\n");
+        return true;
+    }
+    serial::puts("[desktop] Shortcut remove skipped; not found\n");
+    return false;
+}
+
 // Rebuild visible icon list based on pinned and recent status
 static void refresh_desktop_icons()
 {
@@ -1657,8 +1985,10 @@ static void initialize_icon_positions()
     
     refresh_desktop_icons();  // Build visible icon list first
     load_icon_positions();
-    
-    const int iconsPerRow = 8;
+    for (int i = 0; i < kDesktopIconCount; ++i) {
+        s_iconPosX[i] = -1;
+        s_iconPosY[i] = -1;
+    }
     
     for (int i = 0; i < s_visibleIconCount; i++) {
         int iconIdx = s_visibleIconIndices[i];
@@ -1668,11 +1998,11 @@ static void initialize_icon_positions()
             s_iconPosX[i] = s_desktopIcons[iconIdx].savedX;
             s_iconPosY[i] = s_desktopIcons[iconIdx].savedY;
         } else {
-            // Calculate default grid position
-            int row = i / iconsPerRow;
-            int col = i % iconsPerRow;
-            s_iconPosX[i] = (int32_t)(kIconMargin + col * kIconCellW);
-            s_iconPosY[i] = (int32_t)(kIconMargin + row * kIconCellH);
+            int32_t x = 0;
+            int32_t y = 0;
+            allocate_desktop_icon_slot(iconIdx, x, y);
+            s_iconPosX[i] = x;
+            s_iconPosY[i] = y;
         }
     }
     
@@ -1960,6 +2290,32 @@ static int get_start_menu_item_count()
         
         return count;
     }
+}
+
+static const char* start_menu_left_item_label_for_row(int row)
+{
+    if (row < 0) return "";
+    int itemIndex = row + s_startMenuScroll;
+    if (s_startMenuAllProgs) {
+        return (itemIndex >= 0 && itemIndex < kAllProgramsCount) ? s_allProgramsList[itemIndex] : "";
+    }
+
+    int currentIdx = 0;
+    for (int i = 0; i < kStartMenuAppCount; ++i) {
+        if (!s_startMenuApps[i].pinned) continue;
+        if (currentIdx == itemIndex) return s_startMenuApps[i].name;
+        ++currentIdx;
+    }
+
+    int recentCount = 0;
+    for (int i = 0; i < kStartMenuAppCount && recentCount < kMaxStartMenuRecent; ++i) {
+        if (!s_startMenuApps[i].recent || s_startMenuApps[i].pinned) continue;
+        if (currentIdx == itemIndex) return s_startMenuApps[i].name;
+        ++currentIdx;
+        ++recentCount;
+    }
+
+    return "";
 }
 
 // ============================================================
@@ -2839,6 +3195,7 @@ static const char* GetDesktopIconLogicalName(const char* label)
     if (text_equals(label, "Clock")) return "app.clock";
     if (text_equals(label, "DiskManager")) return "app.diskmanager";
     if (text_equals(label, "HDInstaller")) return "app.installer";
+    if (text_equals(label, "guideXOS Navigator")) return "app.navigator";
     if (text_equals(label, "DisplayOptions")) return "app.settings";
     if (text_equals(label, "Control Panel")) return "app.controlpanel";
     if (text_equals(label, "Settings")) return "app.settings";
@@ -2948,6 +3305,7 @@ static const uint32_t* get_embedded_desktop_icon_pixels(const char* logicalName)
     if (text_equals(logicalName, "app.files"))         return kDesktopThemeIcon_Files;
     if (text_equals(logicalName, "app.paint"))         return kDesktopThemeIcon_Paint;
     if (text_equals(logicalName, "app.clock"))         return kDesktopThemeIcon_Clock;
+    if (text_equals(logicalName, "app.navigator"))     return kDesktopThemeIcon_Globe;
     // Unmapped app icons: use closest available embedded icon as fallback
     if (text_equals(logicalName, "app.diskmanager"))   return kDesktopThemeIcon_Files;
     if (text_equals(logicalName, "app.installer"))     return kDesktopThemeIcon_Files;
@@ -2958,7 +3316,7 @@ static const uint32_t* get_embedded_desktop_icon_pixels(const char* logicalName)
     if (text_equals(logicalName, "place.documents"))   return kDesktopThemeIcon_Notepad;
     if (text_equals(logicalName, "place.pictures"))    return kDesktopThemeIcon_Paint;
     if (text_equals(logicalName, "place.music"))       return kDesktopThemeIcon_Clock;
-    if (text_equals(logicalName, "place.network"))     return kDesktopThemeIcon_Console;
+    if (text_equals(logicalName, "place.network"))     return kDesktopThemeIcon_Globe;
     if (text_equals(logicalName, "file.folder"))       return kDesktopThemeIcon_Files;
     if (text_equals(logicalName, "file.text"))         return kDesktopThemeIcon_Notepad;
     if (text_equals(logicalName, "file.image"))        return kDesktopThemeIcon_Paint;
@@ -3915,7 +4273,9 @@ static void draw_right_click_menu()
     framebuffer::fill_rect(mx, my, kContextMenuW, menuH, rgb(45, 45, 55));
     draw_rect(mx, my, kContextMenuW, menuH, rgb(80, 90, 110));
 
-    for (int i = 0; i < kContextMenuCount; i++) {
+    int itemCount = kContextMenuCount;
+    if (s_contextMenuMode == ContextMenuMode::StartMenuApp || s_contextMenuMode == ContextMenuMode::DesktopShortcut) itemCount = 2;
+    for (int i = 0; i < itemCount; i++) {
         uint32_t itemY = my + kContextMenuPad + (uint32_t)i * kContextMenuItemH;
 
         if (i == hoveredItem) {
@@ -3925,11 +4285,17 @@ static void draw_right_click_menu()
             framebuffer::fill_rect(mx + 1, itemY, kContextMenuW - 2, kContextMenuItemH, rgb(48, 48, 58));
         }
 
+        const char* label = s_contextMenuItems[i];
+        if (s_contextMenuMode == ContextMenuMode::StartMenuApp) {
+            label = (i == 0) ? "Open" : (is_app_shortcut_pinned_to_desktop(s_contextMenuAppName) ? "Unpin from Desktop" : "Pin to Desktop");
+        } else if (s_contextMenuMode == ContextMenuMode::DesktopShortcut) {
+            label = (i == 0) ? "Open" : "Remove from Desktop";
+        }
         draw_text(mx + 12, itemY + (kContextMenuItemH - kGlyphH) / 2,
-                  s_contextMenuItems[i], i == hoveredItem ? rgb(255, 255, 255) : rgb(210, 210, 225), 1);
+                  label, i == hoveredItem ? rgb(255, 255, 255) : rgb(210, 210, 225), 1);
 
         // Separator after "Personalize" (index 2)
-        if (i == 2) {
+        if (s_contextMenuMode == ContextMenuMode::Desktop && i == 2) {
             hline(mx + 4, itemY + kContextMenuItemH - 1, kContextMenuW - 8, rgb(60, 65, 80));
         }
     }
@@ -3937,7 +4303,9 @@ static void draw_right_click_menu()
 
 static void get_context_menu_geometry(uint32_t& menuX, uint32_t& menuY, uint32_t& menuH)
 {
-    menuH = (uint32_t)kContextMenuCount * kContextMenuItemH + kContextMenuPad * 2;
+    int itemCount = kContextMenuCount;
+    if (s_contextMenuMode == ContextMenuMode::StartMenuApp || s_contextMenuMode == ContextMenuMode::DesktopShortcut) itemCount = 2;
+    menuH = (uint32_t)itemCount * kContextMenuItemH + kContextMenuPad * 2;
     menuX = s_rightClickX;
     menuY = s_rightClickY;
 
@@ -3960,11 +4328,38 @@ static int hit_test_context_menu(int32_t mx, int32_t my)
     }
 
     int idx = ((int32_t)my - (int32_t)menuY - (int32_t)kContextMenuPad) / (int32_t)kContextMenuItemH;
-    return (idx >= 0 && idx < kContextMenuCount) ? idx : -1;
+    int itemCount = kContextMenuCount;
+    if (s_contextMenuMode == ContextMenuMode::StartMenuApp || s_contextMenuMode == ContextMenuMode::DesktopShortcut) itemCount = 2;
+    return (idx >= 0 && idx < itemCount) ? idx : -1;
 }
 
 static void handle_context_menu_command(int item)
 {
+    if (s_contextMenuMode == ContextMenuMode::StartMenuApp) {
+        if (item == 0) {
+            serial::puts("[desktop] Start Menu context Open selected\n");
+            show_start_menu_notification(s_contextMenuAppName);
+        } else if (item == 1) {
+            if (is_app_shortcut_pinned_to_desktop(s_contextMenuAppName)) remove_app_shortcut_from_desktop(s_contextMenuAppName);
+            else pin_app_shortcut_to_desktop(s_contextMenuAppName);
+        }
+        s_contextMenuMode = ContextMenuMode::Desktop;
+        return;
+    }
+
+    if (s_contextMenuMode == ContextMenuMode::DesktopShortcut) {
+        if (item == 0) {
+            show_icon_notification(s_contextMenuIconDisplayIndex);
+        } else if (item == 1 && s_contextMenuIconDisplayIndex >= 0 && s_contextMenuIconDisplayIndex < s_visibleIconCount) {
+            int iconIdx = s_visibleIconIndices[s_contextMenuIconDisplayIndex];
+            if (iconIdx >= 0 && iconIdx < kDesktopIconCount) {
+                remove_app_shortcut_from_desktop(s_desktopIcons[iconIdx].path);
+            }
+        }
+        s_contextMenuMode = ContextMenuMode::Desktop;
+        return;
+    }
+
     switch (item) {
         case 0: // Refresh
             refresh_desktop_icons();
@@ -5104,6 +5499,7 @@ void init()
     s_lastClickedIcon = -1;
     s_lastClickTime = 0;
     reload_persisted_system_desktop_icons();
+    load_persisted_app_shortcuts();
     initialize_icon_positions();  // Use new icon management system
     init_time();  // Initialize time only if a real clock source is available
     shell::init();
@@ -5327,15 +5723,47 @@ void show_context_menu(uint32_t x, uint32_t y)
     s_rightClickX = x;
     s_rightClickY = y;
     s_rightClickMenuOpen = true;
+    s_contextMenuMode = ContextMenuMode::Desktop;
+    s_contextMenuAppName[0] = '\0';
+    s_contextMenuIconDisplayIndex = -1;
     s_rightClickHover = hit_test_context_menu((int32_t)x, (int32_t)y);
     // Close start menu when context menu is shown
     s_startMenuOpen = false;
+}
+
+static void show_start_menu_app_context_menu(uint32_t x, uint32_t y, const char* appName)
+{
+    s_rightClickX = x;
+    s_rightClickY = y;
+    s_rightClickMenuOpen = true;
+    s_contextMenuMode = ContextMenuMode::StartMenuApp;
+    desktop_str_copy(s_contextMenuAppName, appName, (int)sizeof(s_contextMenuAppName));
+    s_contextMenuIconDisplayIndex = -1;
+    s_rightClickHover = hit_test_context_menu((int32_t)x, (int32_t)y);
+    serial::puts("[desktop] Start Menu context menu creation: ");
+    serial::puts(s_contextMenuAppName);
+    serial::puts("\n");
+}
+
+static void show_desktop_shortcut_context_menu(uint32_t x, uint32_t y, int displayIndex)
+{
+    s_rightClickX = x;
+    s_rightClickY = y;
+    s_rightClickMenuOpen = true;
+    s_contextMenuMode = ContextMenuMode::DesktopShortcut;
+    s_contextMenuAppName[0] = '\0';
+    s_contextMenuIconDisplayIndex = displayIndex;
+    s_rightClickHover = hit_test_context_menu((int32_t)x, (int32_t)y);
+    serial::puts("[desktop] Desktop shortcut context menu creation\n");
 }
 
 void close_context_menu()
 {
     s_rightClickMenuOpen = false;
     s_rightClickHover = -1;
+    s_contextMenuMode = ContextMenuMode::Desktop;
+    s_contextMenuAppName[0] = '\0';
+    s_contextMenuIconDisplayIndex = -1;
 }
 
 void toggle_start_menu()
@@ -5723,6 +6151,29 @@ static void show_icon_notification(int displayIndex)
     serial::puts(label);
     serial::puts("\n");
 
+    if (icon.kind == DesktopItemKind::Shortcut) {
+        const char* target = icon.path[0] ? icon.path : label;
+        serial::puts("[desktop] Shortcut launched: shortcut:app:");
+        serial::puts(target);
+        serial::puts("\n");
+        if (desktop_str_eq(target, "AppModel")) {
+            open_app_model_viewer();
+            app::AppLogger::logLaunch(target, app::LaunchResult::NotAvailable);
+            return;
+        }
+        if (launch_app(target)) {
+            app::AppLogger::logLaunch(target, app::LaunchResult::Success);
+            return;
+        }
+        serial::puts("[desktop] Shortcut target not found\n");
+        s_notification.title = label;
+        s_notification.message = "Shortcut target not found";
+        s_notification.visible = true;
+        s_notification.showTime = s_tickCounter;
+        app::AppLogger::logLaunch(target, app::LaunchResult::NotAvailable);
+        return;
+    }
+
     if (icon.kind == DesktopItemKind::FilesystemEntry) {
         if (icon.isDirectory) {
             serial::puts("[desktop] Opening desktop folder in File Manager: ");
@@ -5964,7 +6415,8 @@ static void hit_test_start_menu(int32_t mx, int32_t my, int& leftIdx, int& right
 
     // Left column
     if ((uint32_t)mx >= g.menuX && (uint32_t)mx < g.menuX + g.leftColW) {
-        if (itemRow >= 0 && itemRow < kStartMenuAppCount) {
+        int itemIndex = itemRow + s_startMenuScroll;
+        if (itemRow >= 0 && itemRow < kStartMenuMaxRows && itemIndex >= 0 && itemIndex < get_start_menu_item_count()) {
             leftIdx = itemRow;
         }
     }
@@ -6446,6 +6898,10 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
             s_rightClickHover = -1;
             if (menuItem >= 0) {
                 handle_context_menu_command(menuItem);
+            } else {
+                s_contextMenuMode = ContextMenuMode::Desktop;
+                s_contextMenuAppName[0] = '\0';
+                s_contextMenuIconDisplayIndex = -1;
             }
             draw();
             draw_cursor(mx, my);
@@ -6793,7 +7249,7 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
                 // Clicked a left-column app
                 s_clickedMenuLeft = leftHit;
                 s_clickedMenuRight = -1;
-                show_start_menu_notification(s_startMenuApps[leftHit].name);
+                show_start_menu_notification(start_menu_left_item_label_for_row(leftHit));
                 draw();
                 draw_cursor(mx, my);
                 return;
@@ -6984,7 +7440,31 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
 
     // Right button click - show context menu on desktop area
     if (pressed & 0x02) {
+        if (s_startMenuOpen && is_point_in_start_menu(mx, my)) {
+            int leftHit = -1;
+            int rightHit = -1;
+            hit_test_start_menu(mx, my, leftHit, rightHit);
+            if (leftHit >= 0) {
+                s_hoverMenuLeft = leftHit;
+                s_hoverMenuRight = -1;
+                show_start_menu_app_context_menu((uint32_t)mx, (uint32_t)my, start_menu_left_item_label_for_row(leftHit));
+                draw();
+                draw_cursor(mx, my);
+                return;
+            }
+        }
         if (is_point_in_work_area(mx, my)) {
+            int hitIdx = HitTestDesktopIcon(mx, my);
+            if (hitIdx >= 0 && hitIdx < s_visibleIconCount) {
+                int iconId = s_visibleIconIndices[hitIdx];
+                if (iconId >= 0 && iconId < kDesktopIconCount && s_desktopIcons[iconId].kind == DesktopItemKind::Shortcut) {
+                    SelectDesktopIcon(hitIdx, false);
+                    show_desktop_shortcut_context_menu((uint32_t)mx, (uint32_t)my, hitIdx);
+                    draw();
+                    draw_cursor(mx, my);
+                    return;
+                }
+            }
             show_context_menu((uint32_t)mx, (uint32_t)my);
             draw();
             draw_cursor(mx, my);
@@ -6998,6 +7478,10 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
         if (newHover != s_rightClickHover) {
             s_rightClickHover = newHover;
             draw();
+            draw_cursor(mx, my);
+            return;
+        }
+        if (s_contextMenuMode == ContextMenuMode::StartMenuApp) {
             draw_cursor(mx, my);
             return;
         }

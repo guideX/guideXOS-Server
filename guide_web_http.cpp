@@ -63,108 +63,36 @@ static void setError(HttpResponse& response, HttpError error, const std::string&
 
 static std::string firstContentTypeToken(std::string value)
 {
-	size_t semi = value.find(';');
-	if (semi != std::string::npos) value = value.substr(0, semi);
-	return toLowerAscii(trimAscii(value));
+	char normalized[96];
+	httpSharedNormalizeContentType(value.data(), value.data() + value.size(),
+		normalized, static_cast<int>(sizeof(normalized)));
+	return normalized;
 }
 
 static bool hasHeaderToken(const std::string& value, const std::string& token)
 {
-	std::string lower = toLowerAscii(value);
-	std::string needle = toLowerAscii(token);
-	size_t start = 0;
-	while (start <= lower.size()) {
-		size_t comma = lower.find(',', start);
-		size_t end = comma == std::string::npos ? lower.size() : comma;
-		std::string part = lower.substr(start, end - start);
-		size_t semi = part.find(';');
-		if (semi != std::string::npos) part = part.substr(0, semi);
-		part = trimAscii(part);
-		if (part == needle) return true;
-		if (comma == std::string::npos) break;
-		start = comma + 1;
-	}
-	return false;
-}
-
-static bool parseChunkSize(const std::string& line, size_t& outSize)
-{
-	std::string sizeText = line;
-	size_t semi = sizeText.find(';');
-	if (semi != std::string::npos) sizeText = sizeText.substr(0, semi);
-	sizeText = trimAscii(sizeText);
-	if (sizeText.empty()) return false;
-
-	size_t value = 0;
-	for (char ch : sizeText) {
-		unsigned digit = 0;
-		if (ch >= '0' && ch <= '9') digit = static_cast<unsigned>(ch - '0');
-		else if (ch >= 'a' && ch <= 'f') digit = static_cast<unsigned>(10 + ch - 'a');
-		else if (ch >= 'A' && ch <= 'F') digit = static_cast<unsigned>(10 + ch - 'A');
-		else return false;
-		if (value > (static_cast<size_t>(-1) >> 4)) return false;
-		value = (value << 4) + digit;
-	}
-	outSize = value;
-	return true;
+	return httpSharedHeaderHasToken(value.c_str(), token.c_str());
 }
 
 static bool decodeChunkedBody(const std::string& encoded, std::string& decoded, std::string& errorMessage)
 {
-	decoded.clear();
-	size_t pos = 0;
-	for (;;) {
-		size_t lineEnd = encoded.find("\r\n", pos);
-		size_t lineDelimiterLen = 2;
-		if (lineEnd == std::string::npos) {
-			lineEnd = encoded.find('\n', pos);
-			lineDelimiterLen = 1;
-		}
-		if (lineEnd == std::string::npos) {
-			errorMessage = "Chunked response ended before a chunk-size line completed.";
-			return false;
-		}
-
-		std::string sizeLine = encoded.substr(pos, lineEnd - pos);
-		if (!sizeLine.empty() && sizeLine.back() == '\r') sizeLine.pop_back();
-		size_t chunkSize = 0;
-		if (!parseChunkSize(sizeLine, chunkSize)) {
-			errorMessage = "Chunked response included an invalid chunk size.";
-			return false;
-		}
-		pos = lineEnd + lineDelimiterLen;
-
-		if (chunkSize == 0) {
-			// Ignore trailers.  A complete response may end immediately or after
-			// a final blank line/trailer block.
-			return true;
-		}
-		if (decoded.size() + chunkSize > kHttpMaxBodyBytes) {
-			errorMessage = "Decoded chunked response body exceeded the safety limit.";
-			return false;
-		}
-		if (pos + chunkSize > encoded.size()) {
-			errorMessage = "Chunked response ended in the middle of a chunk.";
-			return false;
-		}
-
-		decoded.append(encoded.data() + pos, chunkSize);
-		pos += chunkSize;
-		if (pos + 2 <= encoded.size() && encoded[pos] == '\r' && encoded[pos + 1] == '\n') {
-			pos += 2;
-		} else if (pos < encoded.size() && encoded[pos] == '\n') {
-			pos += 1;
-		} else {
-			errorMessage = "Chunked response was missing the chunk terminator.";
-			return false;
-		}
+	decoded.assign(kHttpMaxBodyBytes, '\0');
+	int decodedLen = 0;
+	char error[160];
+	const bool ok = httpSharedDecodeChunkedBody(encoded.data(), static_cast<int>(encoded.size()),
+		&decoded[0], static_cast<int>(decoded.size()), &decodedLen, error, sizeof(error));
+	if (!ok) {
+		errorMessage = error;
+		decoded.clear();
+		return false;
 	}
+	decoded.resize(static_cast<size_t>(decodedLen));
+	return true;
 }
 
 static bool isRedirectStatus(int statusCode)
 {
-	return statusCode == 301 || statusCode == 302 || statusCode == 303 ||
-		statusCode == 307 || statusCode == 308;
+	return httpSharedIsRedirectStatus(statusCode);
 }
 
 static std::string resolveHttpReference(const std::string& baseUrl, const std::string& ref)

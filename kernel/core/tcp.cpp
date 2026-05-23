@@ -53,16 +53,17 @@ static int s_nextFd = 100;  // Start at 100 to distinguish from UDP sockets
 
 static uint32_t checksum_add(const void* data, uint16_t len)
 {
-    const uint16_t* ptr = static_cast<const uint16_t*>(data);
+    const uint8_t* ptr = static_cast<const uint8_t*>(data);
     uint32_t sum = 0;
     
     while (len > 1) {
-        sum += *ptr++;
+        sum += static_cast<uint16_t>((ptr[0] << 8) | ptr[1]);
+        ptr += 2;
         len -= 2;
     }
     
     if (len > 0) {
-        sum += *reinterpret_cast<const uint8_t*>(ptr);
+        sum += static_cast<uint16_t>(ptr[0] << 8);
     }
     
     return sum;
@@ -92,7 +93,7 @@ uint16_t calculate_checksum(uint32_t srcIP, uint32_t dstIP,
     uint16_t result = checksum_fold(sum);
     if (result == 0) result = 0xFFFF;
     
-    return result;
+    return ethernet::htons(result);
 }
 
 bool verify_checksum(uint32_t srcIP, uint32_t dstIP,
@@ -200,7 +201,8 @@ static Socket* find_socket_for_tcb(TCB* tcb)
 // ================================================================
 
 static Status send_segment(TCB* tcb, uint8_t flags,
-                           const uint8_t* data, uint16_t dataLen)
+                           const uint8_t* data, uint16_t dataLen,
+                           bool advanceSequence = true)
 {
     if (!ipv4::is_configured()) return TCP_ERR_NETDOWN;
     
@@ -247,10 +249,10 @@ static Status send_segment(TCB* tcb, uint8_t flags,
     }
     
     // Update sequence number for data + SYN/FIN
-    if (dataLen > 0) tcb->snd_nxt += dataLen;
-    if (flags & FLAG_SYN) tcb->snd_nxt++;
+    if (advanceSequence && dataLen > 0) tcb->snd_nxt += dataLen;
+    if (advanceSequence && (flags & FLAG_SYN)) tcb->snd_nxt++;
     if (flags & FLAG_FIN) {
-        tcb->snd_nxt++;
+        if (advanceSequence) tcb->snd_nxt++;
         tcb->finSent = true;
     }
     
@@ -1029,15 +1031,15 @@ void process_timers()
                     // Retransmit
                     switch (tcb->state) {
                         case STATE_SYN_SENT:
-                            send_segment(tcb, FLAG_SYN, nullptr, 0);
+                            send_segment(tcb, FLAG_SYN, nullptr, 0, false);
                             break;
                         case STATE_SYN_RCVD:
-                            send_segment(tcb, FLAG_SYN | FLAG_ACK, nullptr, 0);
+                            send_segment(tcb, FLAG_SYN | FLAG_ACK, nullptr, 0, false);
                             break;
                         case STATE_FIN_WAIT_1:
                         case STATE_CLOSING:
                         case STATE_LAST_ACK:
-                            send_segment(tcb, FLAG_FIN | FLAG_ACK, nullptr, 0);
+                            send_segment(tcb, FLAG_FIN | FLAG_ACK, nullptr, 0, false);
                             break;
                         default:
                             break;

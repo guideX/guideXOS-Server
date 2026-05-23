@@ -79,6 +79,8 @@ namespace gxos { namespace gui {
         std::string action;
         std::string iconName;
         std::string path;
+        std::string shortcutType;
+        std::string targetAppId;
         DesktopItemKind kind{DesktopItemKind::SystemObject};
         DesktopSystemObjectKind systemObject{DesktopSystemObjectKind::None};
         bool isDirectory{false};
@@ -107,6 +109,11 @@ namespace gxos { namespace gui {
         static uint64_t start();
         static void requestDesktopRefresh();
         static void openDesktopItem(int index);
+        static void openStartMenuApp(const std::string& appName);
+        static bool pinStartMenuAppToDesktop(const std::string& appName);
+        static bool unpinStartMenuAppFromDesktop(const std::string& appName);
+        static bool isStartMenuAppPinnedToDesktop(const std::string& appName);
+        static bool removeDesktopShortcut(int index);
         static std::vector<WindowDebugInfo> debugWindowsSnapshot();
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)
         static HWND g_hwnd; // expose for helper drawing

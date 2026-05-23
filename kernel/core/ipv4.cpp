@@ -7,6 +7,7 @@
 #include "include/kernel/nic.h"
 #include "include/kernel/ethernet.h"
 #include "include/kernel/serial_debug.h"
+#include "include/kernel/pit.h"
 
 namespace kernel {
 namespace ipv4 {
@@ -368,6 +369,7 @@ static void arp_add(uint32_t ip, const uint8_t* mac)
     s_arpCache[slot].valid = true;
 }
 
+
 static Status send_arp_packet(uint16_t oper, uint32_t targetIP, const uint8_t* targetMAC)
 {
     if (!s_config.configured) return IP_ERR_NOT_CONFIGURED;
@@ -462,7 +464,8 @@ static bool resolve_mac_with_arp(uint32_t ip, uint8_t* mac)
         return false;
     }
 
-    for (int wait = 0; wait < 100; ++wait) {
+    uint32_t startTicks = static_cast<uint32_t>(pit::ticks());
+    while ((static_cast<uint32_t>(pit::ticks()) - startTicks) < 50) {
         poll_network();
         if (resolve_mac(ip, mac)) return true;
         for (volatile int d = 0; d < 10000; ++d) {}
@@ -472,7 +475,8 @@ static bool resolve_mac_with_arp(uint32_t ip, uint8_t* mac)
         if (resolve_mac(s_config.gateway, mac)) return true;
 
         if (send_arp_packet(ARP_OPER_REQUEST, s_config.gateway, nullptr) == IP_OK) {
-            for (int wait = 0; wait < 100; ++wait) {
+            startTicks = static_cast<uint32_t>(pit::ticks());
+            while ((static_cast<uint32_t>(pit::ticks()) - startTicks) < 50) {
                 poll_network();
                 if (resolve_mac(s_config.gateway, mac)) return true;
                 for (volatile int d = 0; d < 10000; ++d) {}

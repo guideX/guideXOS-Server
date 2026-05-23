@@ -4,6 +4,8 @@
   "desktop.background.scale": "fill",
   "pinned": ["ComputerFiles","Trash","App Model Demo","Native App Debug Viewer","Hello World","Resource Viewer","Future GXApp Package","HelloWorld ELF"],
   "recent": ["guideXOS Navigator","Future GXApp Package","HelloWorld ELF","Native App Debug Viewer","Console","ComputerFiles","TaskManager","ControlPanel","HDInstaller","Notepad","Calculator","App Model Demo","Hello World","Resource Viewer"],
+  "desktopShortcuts": [
+  ],
   "showDesktopTrash": true,
   "showDesktopThisSystem": true,
   "showDesktopFileManager": true,

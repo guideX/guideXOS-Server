@@ -274,7 +274,114 @@ namespace gxos {
         static std::string desktopLayoutKey(const DesktopItem& item) {
             if (item.kind == DesktopItemKind::SystemObject) return item.action;
             if (item.kind == DesktopItemKind::FilesystemEntry) return std::string(item.isDirectory ? "desktop-folder:" : "desktop-file:") + item.path;
+            if (item.kind == DesktopItemKind::Shortcut && item.shortcutType == "App" && !item.targetAppId.empty()) return std::string("shortcut:app:") + item.targetAppId;
             return item.action;
+        }
+
+        static std::string appShortcutLayoutKey(const std::string& appId) {
+            return std::string("shortcut:app:") + appId;
+        }
+
+        struct DesktopGridMetrics {
+            int margin{20};
+            int cellW{84};
+            int cellH{94};
+            int workW{1024};
+            int workH{728};
+        };
+
+        struct DesktopCellRect {
+            int left;
+            int top;
+            int right;
+            int bottom;
+        };
+
+        static DesktopGridMetrics desktopGridMetrics() {
+            DesktopGridMetrics metrics;
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
+            RECT cr{0, 0, 1024, 768};
+            if (Compositor::g_hwnd) GetClientRect(Compositor::g_hwnd, &cr);
+            metrics.workW = std::max(1, static_cast<int>(cr.right - cr.left));
+            metrics.workH = std::max(1, static_cast<int>(cr.bottom - cr.top - 40));
+#else
+            if (Compositor::g_videoBackend) {
+                metrics.workW = std::max(1, Compositor::g_videoBackend->getWidth());
+                metrics.workH = std::max(1, Compositor::g_videoBackend->getHeight() - 40);
+            }
+#endif
+            return metrics;
+        }
+
+        static DesktopCellRect desktopCellRect(int x, int y, const DesktopGridMetrics& metrics) {
+            return { x, y, x + metrics.cellW, y + metrics.cellH };
+        }
+
+        static bool desktopRectsOverlap(const DesktopCellRect& a, const DesktopCellRect& b) {
+            return a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+        }
+
+        static bool findNextAvailableDesktopIconPosition(const std::vector<DesktopItem>& items, const std::string& ignoreKey, int& outX, int& outY) {
+            const DesktopGridMetrics metrics = desktopGridMetrics();
+            std::vector<DesktopCellRect> occupied;
+            for (const auto& item : items) {
+                if (item.ix < 0 || item.iy < 0) continue;
+                if (!ignoreKey.empty() && desktopLayoutKey(item) == ignoreKey) continue;
+                occupied.push_back(desktopCellRect(item.ix, item.iy, metrics));
+            }
+
+            const int columns = std::max(1, (metrics.workW - metrics.margin) / metrics.cellW);
+            const int rows = std::max(1, (metrics.workH - metrics.margin) / metrics.cellH);
+            Logger::write(LogLevel::Info, "Desktop icon slot allocation: occupied=" + std::to_string(occupied.size()) +
+                " columns=" + std::to_string(columns) + " rows=" + std::to_string(rows));
+
+            for (int row = 0; row < rows; ++row) {
+                for (int col = 0; col < columns; ++col) {
+                    int x = metrics.margin + col * metrics.cellW;
+                    int y = metrics.margin + row * metrics.cellH;
+                    DesktopCellRect candidate = desktopCellRect(x, y, metrics);
+                    bool collides = false;
+                    for (const auto& rect : occupied) {
+                        if (desktopRectsOverlap(candidate, rect)) {
+                            collides = true;
+                            break;
+                        }
+                    }
+                    if (!collides) {
+                        outX = x;
+                        outY = y;
+                        Logger::write(LogLevel::Info, "Desktop icon slot selected: x=" + std::to_string(outX) + " y=" + std::to_string(outY));
+                        return true;
+                    }
+                }
+            }
+
+            outX = metrics.margin;
+            outY = metrics.margin;
+            Logger::write(LogLevel::Warn, "Desktop icon slot allocation fallback: no free grid slot");
+            return false;
+        }
+
+        static void upsertDesktopIconPosition(std::vector<DesktopIconPos>& positions, const std::string& key, int x, int y) {
+            for (auto& pos : positions) {
+                if (pos.name == key) {
+                    pos.x = x;
+                    pos.y = y;
+                    return;
+                }
+            }
+            DesktopIconPos pos;
+            pos.name = key;
+            pos.x = x;
+            pos.y = y;
+            positions.push_back(pos);
+        }
+
+        static const RegisteredDesktopApp* findDesktopAppByNameOrId(const std::string& value) {
+            for (const auto& app : DesktopService::GetRegisteredApps()) {
+                if (app.id == value || app.displayName == value || app.launchName == value || namesEquivalent(app.displayName, value)) return &app;
+            }
+            return nullptr;
         }
 
         static DesktopItem makeSystemDesktopItem(DesktopSystemObjectKind kind, const char* label, const char* action, const char* iconName) {
@@ -406,7 +513,7 @@ namespace gxos {
             if (label == "Files" || label == "FileExplorer" || label == "File Manager") return "app.files";
             if (label == "Computer" || label == "This System" || label == "Computer Files" || label == "ComputerFiles") return "place.computer";
             if (label == "Paint") return "app.paint";
-            if (label == "guideXOS Navigator") return "app.generic";
+            if (label == "guideXOS Navigator") return "app.navigator";
             if (label == "Clock") return "app.clock";
             if (label == "Documents" || label == "Recent Docs") return "place.documents";
             if (label == "Pictures") return "place.pictures";
@@ -486,6 +593,24 @@ namespace gxos {
             }
         }
 
+        static DesktopItem makeAppShortcutDesktopItem(const DesktopShortcutRec& shortcut) {
+            DesktopItem item;
+            item.kind = DesktopItemKind::Shortcut;
+            item.shortcutType = shortcut.shortcutType.empty() ? "App" : shortcut.shortcutType;
+            item.targetAppId = shortcut.targetAppId;
+            item.action = appShortcutLayoutKey(shortcut.targetAppId);
+            const RegisteredDesktopApp* app = findDesktopAppByNameOrId(shortcut.targetAppId);
+            item.label = app && !app->displayName.empty() ? app->displayName : shortcut.label;
+            if (item.label.empty()) item.label = shortcut.targetAppId;
+            item.iconName = app && !app->icon.empty() ? app->icon : shortcut.iconName;
+            if (item.iconName.empty()) item.iconName = startMenuLogicalIconName(item.label);
+            item.removable = true;
+            item.pinned = true;
+            Logger::write(LogLevel::Info, std::string("Desktop shortcut loaded: type=") + item.shortcutType +
+                " targetAppId=" + item.targetAppId + " label=" + item.label + " icon=" + item.iconName);
+            return item;
+        }
+
         static std::string packMousePayload(int x, int y, int button, const std::string& action, uint64_t ownerPid, uint64_t windowId = 0) {
             std::string payload = std::to_string(x) + "|" + std::to_string(y) + "|" + std::to_string(button) + "|" + action;
 #ifdef GX_ENABLE_EXPERIMENTAL_NATIVE_ELF_EXECUTION
@@ -534,6 +659,17 @@ namespace gxos {
                 g_items.push_back(makeFilesystemDesktopItem(entry));
             }
 
+            for (const auto& shortcut : g_cfg.desktopShortcuts) {
+                if (!shortcut.shortcutType.empty() && shortcut.shortcutType != "App") continue;
+                if (shortcut.targetAppId.empty()) {
+                    Logger::write(LogLevel::Warn, "Desktop shortcut skipped: missing targetAppId");
+                    continue;
+                }
+                DesktopItem shortcutItem = makeAppShortcutDesktopItem(shortcut);
+                g_items.push_back(shortcutItem);
+                Logger::write(LogLevel::Info, "Desktop shortcut rendered: " + desktopLayoutKey(shortcutItem));
+            }
+
             // Apply saved positions from config
             for (auto& item : g_items) {
                 const std::string key = desktopLayoutKey(item);
@@ -545,9 +681,17 @@ namespace gxos {
                     }
                 }
             }
-            // Assign default grid positions to any items that don't have saved positions
-            const int margin = 20; const int iconW = 56; const int iconH = 56; const int cellW = iconW + 28; const int cellH = iconH + 38;
-            int defIdx = 0; for (auto& item : g_items) { if (item.ix < 0 || item.iy < 0) { item.ix = margin + (defIdx % 8) * cellW; item.iy = margin + (defIdx / 8) * cellH; } defIdx++; }
+            // Assign collision-aware grid positions to any items that don't have saved positions.
+            for (auto& item : g_items) {
+                if (item.ix >= 0 && item.iy >= 0) continue;
+                int x = 20;
+                int y = 20;
+                findNextAvailableDesktopIconPosition(g_items, desktopLayoutKey(item), x, y);
+                item.ix = x;
+                item.iy = y;
+                Logger::write(LogLevel::Info, "Desktop icon auto-positioned: " + desktopLayoutKey(item) +
+                    " x=" + std::to_string(item.ix) + " y=" + std::to_string(item.iy));
+            }
             g_selectedDesktopIconIndices.clear( );
             for (int i = 0; i < (int)g_items.size( ); ++i) {
                 bool selected = selectedActions.find(g_items[i].action) != selectedActions.end( );
@@ -585,7 +729,7 @@ namespace gxos {
             logCompositorList("start menu app", g_startMenuAllProgsSorted);
         }
 
-        void Compositor::saveDesktopConfig( ) { std::string err; DesktopConfig::Save("desktop.json", g_cfg, err); }
+        void Compositor::saveDesktopConfig( ) { std::string err; if (!DesktopConfig::Save("desktop.json", g_cfg, err)) Logger::write(LogLevel::Error, "Shortcut persistence failure: " + err); else Logger::write(LogLevel::Info, "Desktop config persisted"); }
         void Compositor::addRecent(const std::string& act) { auto it = std::find(g_cfg.recent.begin( ), g_cfg.recent.end( ), act); if (it != g_cfg.recent.end( )) g_cfg.recent.erase(it); g_cfg.recent.insert(g_cfg.recent.begin( ), act); if (g_cfg.recent.size( ) > 20) g_cfg.recent.pop_back( ); refreshDesktopItems( ); saveDesktopConfig( ); }
         void Compositor::pinAction(const std::string& act) { if (act.empty( )) return; if (std::find(g_cfg.pinned.begin( ), g_cfg.pinned.end( ), act) == g_cfg.pinned.end( )) { g_cfg.pinned.push_back(act); refreshDesktopItems( ); saveDesktopConfig( ); } }
         void Compositor::unpinAction(const std::string& act) { auto it = std::find(g_cfg.pinned.begin( ), g_cfg.pinned.end( ), act); if (it != g_cfg.pinned.end( )) { g_cfg.pinned.erase(it); refreshDesktopItems( ); saveDesktopConfig( ); } }
@@ -687,6 +831,116 @@ namespace gxos {
             }
         }
 
+        void Compositor::openStartMenuApp(const std::string& appName) {
+            Logger::write(LogLevel::Info, "Start Menu context Open selected: " + appName);
+            launchAction(appName);
+            g_startMenuVisible = false;
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
+            requestRepaint();
+#else
+            g_needsRedraw = true;
+#endif
+        }
+
+        bool Compositor::isStartMenuAppPinnedToDesktop(const std::string& appName) {
+            const RegisteredDesktopApp* app = findDesktopAppByNameOrId(appName);
+            const std::string targetId = app ? app->id : appName;
+            for (const auto& shortcut : g_cfg.desktopShortcuts) {
+                if ((shortcut.shortcutType.empty() || shortcut.shortcutType == "App") && shortcut.targetAppId == targetId) return true;
+            }
+            return false;
+        }
+
+        bool Compositor::pinStartMenuAppToDesktop(const std::string& appName) {
+            Logger::write(LogLevel::Info, "Pin to Desktop selected for Start Menu app: " + appName);
+            const RegisteredDesktopApp* app = findDesktopAppByNameOrId(appName);
+            if (!app) {
+                Logger::write(LogLevel::Warn, "Pin to Desktop failed: app id resolved target not found for " + appName);
+                NotificationManager::Add("Shortcut target not found", NotificationLevel::Error);
+                return false;
+            }
+            Logger::write(LogLevel::Info, "Pin to Desktop app ID resolved: " + app->id);
+            for (const auto& shortcut : g_cfg.desktopShortcuts) {
+                if ((shortcut.shortcutType.empty() || shortcut.shortcutType == "App") && shortcut.targetAppId == app->id) {
+                    Logger::write(LogLevel::Info, "Desktop shortcut already exists: " + appShortcutLayoutKey(app->id));
+                    NotificationManager::Add("Shortcut already exists on desktop", NotificationLevel::Info);
+                    return false;
+                }
+            }
+
+            DesktopShortcutRec shortcut;
+            shortcut.shortcutType = "App";
+            shortcut.targetAppId = app->id;
+            shortcut.label = app->displayName;
+            shortcut.iconName = app->icon.empty() ? startMenuLogicalIconName(app->displayName) : app->icon;
+            g_cfg.desktopShortcuts.push_back(shortcut);
+            Logger::write(LogLevel::Info, "Desktop shortcut created: " + appShortcutLayoutKey(app->id));
+            refreshDesktopItems();
+            const std::string shortcutKey = appShortcutLayoutKey(app->id);
+            for (const auto& item : g_items) {
+                if (desktopLayoutKey(item) == shortcutKey) {
+                    upsertDesktopIconPosition(g_cfg.iconPositions, shortcutKey, item.ix, item.iy);
+                    Logger::write(LogLevel::Info, "Desktop shortcut position persisted: " + shortcutKey +
+                        " x=" + std::to_string(item.ix) + " y=" + std::to_string(item.iy));
+                    break;
+                }
+            }
+            saveDesktopConfig();
+            Logger::write(LogLevel::Info, "Desktop shortcut persisted: " + appShortcutLayoutKey(app->id));
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
+            requestRepaint();
+#else
+            g_needsRedraw = true;
+#endif
+            return true;
+        }
+
+        bool Compositor::unpinStartMenuAppFromDesktop(const std::string& appName) {
+            const RegisteredDesktopApp* app = findDesktopAppByNameOrId(appName);
+            const std::string targetId = app ? app->id : appName;
+            for (auto it = g_cfg.desktopShortcuts.begin(); it != g_cfg.desktopShortcuts.end(); ++it) {
+                if ((it->shortcutType.empty() || it->shortcutType == "App") && it->targetAppId == targetId) {
+                    Logger::write(LogLevel::Info, "Desktop shortcut removed: " + appShortcutLayoutKey(targetId));
+                    g_cfg.desktopShortcuts.erase(it);
+                    refreshDesktopItems();
+                    saveDesktopConfig();
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
+                    requestRepaint();
+#else
+                    g_needsRedraw = true;
+#endif
+                    return true;
+                }
+            }
+            Logger::write(LogLevel::Info, "Desktop shortcut remove skipped, not pinned: " + targetId);
+            return false;
+        }
+
+        bool Compositor::removeDesktopShortcut(int index) {
+            if (index < 0 || index >= (int)g_items.size()) return false;
+            const DesktopItem item = g_items[index];
+            if (item.kind != DesktopItemKind::Shortcut || item.shortcutType != "App" || item.targetAppId.empty()) {
+                Logger::write(LogLevel::Warn, "Remove from Desktop ignored for non-shortcut desktop item");
+                return false;
+            }
+            for (auto it = g_cfg.desktopShortcuts.begin(); it != g_cfg.desktopShortcuts.end(); ++it) {
+                if ((it->shortcutType.empty() || it->shortcutType == "App") && it->targetAppId == item.targetAppId) {
+                    Logger::write(LogLevel::Info, "Shortcut removed from desktop: " + desktopLayoutKey(item));
+                    g_cfg.desktopShortcuts.erase(it);
+                    refreshDesktopItems();
+                    saveDesktopConfig();
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
+                    requestRepaint();
+#else
+                    g_needsRedraw = true;
+#endif
+                    return true;
+                }
+            }
+            Logger::write(LogLevel::Warn, "Shortcut removal failed; record not found: " + desktopLayoutKey(item));
+            return false;
+        }
+
         void Compositor::openDesktopItem(int index) {
             if (index < 0 || index >= (int)g_items.size()) return;
             const DesktopItem& item = g_items[index];
@@ -713,6 +967,15 @@ namespace gxos {
                 }
             } else if (item.kind == DesktopItemKind::FilesystemEntry) {
                 if (DesktopService::OpenFilesystemEntry(item.path, item.isDirectory, err)) return;
+            } else if (item.kind == DesktopItemKind::Shortcut && item.shortcutType == "App") {
+                const RegisteredDesktopApp* app = findDesktopAppByNameOrId(item.targetAppId);
+                if (!app) {
+                    err = "Shortcut target not found";
+                } else {
+                    Logger::write(LogLevel::Info, "Desktop shortcut launched: " + desktopLayoutKey(item) + " -> " + app->displayName);
+                    launchAction(app->displayName);
+                    return;
+                }
             } else {
                 err = "Desktop shortcuts are not implemented yet";
             }
@@ -1108,8 +1371,6 @@ namespace gxos {
                         noteY += noteH + 4;
                     }
                 }
-                // Right-click context menu overlay
-                RightClickMenu::Draw(dc);
                 // Taskbar right-click menu (Task Manager, Reboot, Log Off)
                 if (g_taskbarMenuVisible) {
                     const int tmItemH = 28; const int tmMenuW = 180; const int tmPad = 6;
@@ -1158,13 +1419,14 @@ namespace gxos {
                     SetTextColor(dc, RGB(230, 230, 230));
                     int row = 0;
                     int startIndex = g_startMenuScroll;
+                    bool freezeStartMenuHover = RightClickMenu::IsStartMenuAppMenuVisible();
 
                     if (g_startMenuAllProgs) {
                         // Show all programs alphabetically
                         for (size_t i = startIndex; i < g_startMenuAllProgsSorted.size( ) && row < maxRows; ++i) {
                             RECT r{ sm.left + 4, y, sm.left + leftColW - 4, y + rowH };
                             bool isSel = ((int)i == g_startMenuSel);
-                            bool isHover = (cursor.x >= r.left && cursor.x <= r.right && cursor.y >= r.top && cursor.y <= r.bottom);
+                            bool isHover = !freezeStartMenuHover && (cursor.x >= r.left && cursor.x <= r.right && cursor.y >= r.top && cursor.y <= r.bottom);
                             HBRUSH rb = CreateSolidBrush(isSel ? RGB(80, 100, 150) : (isHover ? RGB(70, 90, 130) : RGB(55, 55, 70)));
                             FillRect(dc, &r, rb);
                             DeleteObject(rb);
@@ -1185,7 +1447,7 @@ namespace gxos {
                         for (size_t i = startIndex; i < g_startMenuPinnedRecent.size( ) && row < maxRows; ++i) {
                             RECT r{ sm.left + 4, y, sm.left + leftColW - 4, y + rowH };
                             bool isSel = ((int)i == g_startMenuSel);
-                            bool isHover = (cursor.x >= r.left && cursor.x <= r.right && cursor.y >= r.top && cursor.y <= r.bottom);
+                            bool isHover = !freezeStartMenuHover && (cursor.x >= r.left && cursor.x <= r.right && cursor.y >= r.top && cursor.y <= r.bottom);
                             HBRUSH rb = CreateSolidBrush(isSel ? RGB(80, 100, 150) : (isHover ? RGB(70, 90, 130) : RGB(55, 55, 70)));
                             FillRect(dc, &r, rb);
                             DeleteObject(rb);
@@ -1211,7 +1473,7 @@ namespace gxos {
 
                     // Computer Files shortcut
                     RECT rcComputer{ rcX, rcY, sm.right - 6, rcY + rowH };
-                    bool overComp = (cursor.x >= rcComputer.left && cursor.x <= rcComputer.right && cursor.y >= rcComputer.top && cursor.y <= rcComputer.bottom);
+                    bool overComp = !freezeStartMenuHover && (cursor.x >= rcComputer.left && cursor.x <= rcComputer.right && cursor.y >= rcComputer.top && cursor.y <= rcComputer.bottom);
                     if (overComp) { HBRUSH hb = CreateSolidBrush(RGB(70, 90, 130)); FillRect(dc, &rcComputer, hb); DeleteObject(hb); }
                     int computerTextX = rcComputer.left + 6;
                     drawStartMenuIcon(dc, rcComputer, "Computer Files", computerTextX);
@@ -1220,7 +1482,7 @@ namespace gxos {
 
                     // Console shortcut
                     RECT rcConsole{ rcX, rcY, sm.right - 6, rcY + rowH };
-                    bool overCon = (cursor.x >= rcConsole.left && cursor.x <= rcConsole.right && cursor.y >= rcConsole.top && cursor.y <= rcConsole.bottom);
+                    bool overCon = !freezeStartMenuHover && (cursor.x >= rcConsole.left && cursor.x <= rcConsole.right && cursor.y >= rcConsole.top && cursor.y <= rcConsole.bottom);
                     if (overCon) { HBRUSH hb = CreateSolidBrush(RGB(70, 90, 130)); FillRect(dc, &rcConsole, hb); DeleteObject(hb); }
                     int consoleTextX = rcConsole.left + 6;
                     drawStartMenuIcon(dc, rcConsole, "Console", consoleTextX);
@@ -1229,7 +1491,7 @@ namespace gxos {
 
                     // Recent Documents shortcut
                     RECT rcDocs{ rcX, rcY, sm.right - 6, rcY + rowH };
-                    bool overDocs = (cursor.x >= rcDocs.left && cursor.x <= rcDocs.right && cursor.y >= rcDocs.top && cursor.y <= rcDocs.bottom);
+                    bool overDocs = !freezeStartMenuHover && (cursor.x >= rcDocs.left && cursor.x <= rcDocs.right && cursor.y >= rcDocs.top && cursor.y <= rcDocs.bottom);
                     if (overDocs) { HBRUSH hb = CreateSolidBrush(RGB(70, 90, 130)); FillRect(dc, &rcDocs, hb); DeleteObject(hb); }
                     int docsTextX = rcDocs.left + 6;
                     drawStartMenuIcon(dc, rcDocs, "Recent Docs", docsTextX);
@@ -1238,7 +1500,7 @@ namespace gxos {
                     // Bottom area - "All Programs" toggle button
                     int btnY = sm.bottom - 30;
                     RECT allProgBtn{ sm.left + 6, btnY, sm.left + leftColW - 6, btnY + 24 };
-                    bool overAllProg = (cursor.x >= allProgBtn.left && cursor.x <= allProgBtn.right && cursor.y >= allProgBtn.top && cursor.y <= allProgBtn.bottom);
+                    bool overAllProg = !freezeStartMenuHover && (cursor.x >= allProgBtn.left && cursor.x <= allProgBtn.right && cursor.y >= allProgBtn.top && cursor.y <= allProgBtn.bottom);
                     HBRUSH apb = CreateSolidBrush(overAllProg ? RGB(70, 80, 100) : RGB(60, 60, 75));
                     FillRect(dc, &allProgBtn, apb); DeleteObject(apb);
                     FrameRect(dc, &allProgBtn, (HBRUSH)GetStockObject(WHITE_BRUSH));
@@ -1249,12 +1511,15 @@ namespace gxos {
                     int shutdownBtnW = 80;
                     int shutdownBtnH = 24;
                     RECT shutdownBtn{ sm.right - shutdownBtnW - 30, btnY, sm.right - 30, btnY + shutdownBtnH };
-                    bool overShutdown = (cursor.x >= shutdownBtn.left && cursor.x <= shutdownBtn.right && cursor.y >= shutdownBtn.top && cursor.y <= shutdownBtn.bottom);
+                    bool overShutdown = !freezeStartMenuHover && (cursor.x >= shutdownBtn.left && cursor.x <= shutdownBtn.right && cursor.y >= shutdownBtn.top && cursor.y <= shutdownBtn.bottom);
                     HBRUSH sdb = CreateSolidBrush(overShutdown ? RGB(80, 40, 40) : RGB(60, 60, 75));
                     FillRect(dc, &shutdownBtn, sdb); DeleteObject(sdb);
                     FrameRect(dc, &shutdownBtn, (HBRUSH)GetStockObject(WHITE_BRUSH));
                     TextOutA(dc, shutdownBtn.left + 10, shutdownBtn.top + 6, "Shutdown", 8);
                 }
+
+                // Right-click context menus are top-level popups over Start and desktop surfaces.
+                RightClickMenu::Draw(dc);
 
                 // Capture framebuffer for VNC if server is running.
                 // When using the GDI backend we still capture from the
@@ -1497,7 +1762,24 @@ namespace gxos {
                 Compositor::handleMouse(mx, my, true, false); publishOut(MsgType::MT_InputMouse, Compositor::packMousePayloadForTarget(mx, my, 1, "down", ownerPid, targetWindow), ownerPid); return 0;
             }
             case WM_RBUTTONDOWN: {
-                int mx = GET_X_LPARAM(l); int my = GET_Y_LPARAM(l); { std::lock_guard<std::mutex> lk(g_lock); if (blockInputBehindModal(mx, my)) { requestRepaint( ); return 0; } } if (g_startMenuVisible && mx >= g_startMenuRect.left && mx <= g_startMenuRect.right && my >= g_startMenuRect.top && my <= g_startMenuRect.bottom) { int idx = (my - (g_startMenuRect.top + 4)) / 20 + g_startMenuScroll; if (!g_startMenuAllProgs && idx >= 0 && idx < (int)g_startMenuPinnedRecent.size( )) { const std::string& action = g_startMenuPinnedRecent[idx]; if (hasEquivalentListItem(g_cfg.pinned, action)) unpinAction(action); else pinAction(action); requestRepaint( ); return 0; } }
+                int mx = GET_X_LPARAM(l); int my = GET_Y_LPARAM(l); { std::lock_guard<std::mutex> lk(g_lock); if (blockInputBehindModal(mx, my)) { requestRepaint( ); return 0; } } if (g_startMenuVisible && mx >= g_startMenuRect.left && mx <= g_startMenuRect.right && my >= g_startMenuRect.top && my <= g_startMenuRect.bottom) {
+                    const int leftColW = 260;
+                    const int rowH = 20;
+                    const int listTop = g_startMenuRect.top + 4;
+                    const int btnY = g_startMenuRect.bottom - 30;
+                    if (mx >= g_startMenuRect.left && mx <= g_startMenuRect.left + leftColW && my >= listTop && my <= btnY - 4) {
+                        int idx = (my - listTop) / rowH + g_startMenuScroll;
+                        int itemCount = g_startMenuAllProgs ? (int)g_startMenuAllProgsSorted.size() : (int)g_startMenuPinnedRecent.size();
+                        if (idx >= 0 && idx < itemCount) {
+                            std::string action = g_startMenuAllProgs ? g_startMenuAllProgsSorted[idx] : g_startMenuPinnedRecent[idx];
+                            Logger::write(LogLevel::Info, "Start Menu context menu creation requested for app: " + action);
+                            g_startMenuSel = idx;
+                            RightClickMenu::ShowForStartMenuApp(mx, my, action);
+                            requestRepaint();
+                            return 0;
+                        }
+                    }
+                }
                 // Desktop icon right-click pin/unpin or taskbar right-click menu
                 RECT cr; GetClientRect(h, &cr); int taskbarH = 40;
                 // Taskbar right-click: show context menu
@@ -1577,6 +1859,12 @@ namespace gxos {
             case WM_MOUSEMOVE: {
                 int mx = GET_X_LPARAM(l); int my = GET_Y_LPARAM(l);
                 { std::lock_guard<std::mutex> lk(g_lock); if (blockInputBehindModal(mx, my)) { requestRepaint( ); return 0; } }
+                if (RightClickMenu::IsVisible()) {
+                    if (RightClickMenu::ContainsPoint(mx, my) || RightClickMenu::IsStartMenuAppMenuVisible()) {
+                        requestRepaint();
+                        return 0;
+                    }
+                }
                 if (g_iconSelectionDragPending || g_iconSelectionDragActive) {
                     g_iconSelectionCurrentX = mx;
                     g_iconSelectionCurrentY = my;
