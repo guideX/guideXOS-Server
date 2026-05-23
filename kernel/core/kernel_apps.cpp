@@ -4744,6 +4744,39 @@ void NavigatorApp::onWidgetClick(int widgetId)
 
 void NavigatorApp::onKeyDown(uint32_t key)
 {
+    if (m_addressFocused) {
+        int len = strlen_local(m_addressBuffer);
+        if (key == shell::KEY_HOME) {
+            m_addressCaret = 0;
+            invalidate();
+        } else if (key == shell::KEY_END) {
+            m_addressCaret = len;
+            invalidate();
+        } else if (key == shell::KEY_LEFT) {
+            if (m_addressCaret > 0) --m_addressCaret;
+            invalidate();
+        } else if (key == shell::KEY_RIGHT) {
+            if (m_addressCaret < len) ++m_addressCaret;
+            invalidate();
+        } else if (key == 8) {
+            if (m_addressCaret > 0) {
+                for (int i = m_addressCaret - 1; i < len; ++i) m_addressBuffer[i] = m_addressBuffer[i + 1];
+                --m_addressCaret;
+                invalidate();
+            }
+        } else if (key == shell::KEY_DELETE) {
+            if (m_addressCaret < len) {
+                for (int i = m_addressCaret; i < len; ++i) m_addressBuffer[i] = m_addressBuffer[i + 1];
+                invalidate();
+            }
+        } else if (key == 13 || key == '\n' || key == '\r') {
+            commitAddressBar();
+        } else if (key == 27) {
+            blurAddressBar();
+        }
+        return;
+    }
+
     if (key == shell::KEY_PGUP) {
         m_scrollY -= 48;
         clampScroll();
@@ -4753,24 +4786,8 @@ void NavigatorApp::onKeyDown(uint32_t key)
         clampScroll();
         setStatus("Scrolled down");
     } else if (key == shell::KEY_HOME) {
-        if (m_addressFocused) {
-            m_addressCaret = 0;
-            invalidate();
-        } else {
-            m_scrollY = 0;
-            setStatus("Home position");
-        }
-    } else if (key == 8) {
-        if (m_addressFocused && m_addressCaret > 0) {
-            int len = strlen_local(m_addressBuffer);
-            for (int i = m_addressCaret - 1; i < len; ++i) m_addressBuffer[i] = m_addressBuffer[i + 1];
-            --m_addressCaret;
-            invalidate();
-        }
-    } else if (key == 13) {
-        if (m_addressFocused) commitAddressBar();
-    } else if (key == 27) {
-        if (m_addressFocused) blurAddressBar();
+        m_scrollY = 0;
+        setStatus("Home position");
     }
 }
 
