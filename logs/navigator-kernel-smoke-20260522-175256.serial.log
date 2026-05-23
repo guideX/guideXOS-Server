@@ -1,0 +1,468 @@
+[2J[01;01H[=3h[2J[01;01H[2J[01;01H[=3h[2J[01;01H[2J[01;01H[=3h[2J[01;01HBdsDxe: loading Boot0001 "UEFI QEMU HARDDISK QM00001 " from PciRoot(0x0)/Pci(0x1,0x1)/Ata(Primary,Master,0x0)
+BdsDxe: starting Boot0001 "UEFI QEMU HARDDISK QM00001 " from PciRoot(0x0)/Pci(0x1,0x1)/Ata(Primary,Master,0x0)
+guideXOS UEFI Bootloader
+ACPI RSDP found at 0x000000001F77E000, rev 0
+ELF: vaddr range 0x100000 - 0x25f8000 (size 0x24f8000)
+ELF: Allocated 9464 pages at 0x19674000
+ELF: Loading seg 0: vaddr=0x100000 -> phys=0x19674000 (filesz=0xc900c)
+ELF: Loading seg 1: vaddr=0x1ca000 -> phys=0x1973e000 (filesz=0x3030)
+ELF: Entry point in segment 0 (vaddr 0x100000)
+ELF: Entry vaddr=0x100000, offset=0x0, physEntry=0x19674000
+Kernel entry phys: 0x0000000019674000 virt: 0x0000000000100000
+Kernel loaded at: 0x0000000019674000 - 0x000000001BB6C000
+Ramdisk size: 67108864 bytes
+Ramdisk loaded at 0x0000000015674000
+Stack allocated at 0x0000000000200000, top at 0x0000000000210000 (below kernel)
+
+=== PCI Enumeration ===
+Found 1 network controller(s)
+  [%02x:%02x.0] Vendor=%04x Device=%04x Class=%02x/%02x IRQ=3
+    BAR0: Phys=%016lx Size=81040000 ()
+    ** Supported Intel E1000 NIC **
+
+*** Using NIC at [%02x:%02x.0] ***
+    Vendor: %04x  Device: %04x
+    MMIO Phys: %016lx  Size: 81040000
+    PCI bus mastering enabled
+=========================
+
+Mapping stack: 0x0000000000200000 size 65536
+Mapping framebuffer: 0x0000000080000000 size 4096000
+Mapping ramdisk: 0x0000000015674000 size 67108864
+Mapping ACPI RSDP region: 0x000000001F77E000
+Mapping bootloader: 0x000000001DE33000 size 73728
+Mapping allocator region: 0x4000000 size 64MB
+Mapping low memory stack region: 0x100000 size 2MB
+Mapping NIC MMIO: %016lx size 81040000
+NIC MMIO mapped: Phys=%016lx Virt=%016lx
+Building identity page tables with 13 ranges...
+Page tables built at PML4: 0x000000001DE4F000
+Pre-EBS marker drawn (green square top-left)
+Exiting boot services...
+
+
+=== GuideXOS Boot (Post-ExitBootServices) ===
+
+=== CPU State Check ===
+CR0 = 0x0000000080010033
+CR3 = 0x000000001F801000
+CR4 = 0x0000000000000668
+EFER = 0x0000000000000D00
+  [OK] CR0.PG (Paging) enabled
+  [OK] CR0.PE (Protected Mode) enabled
+  [OK] CR4.PAE enabled
+  [OK] EFER.LME (Long Mode Enable) set
+  [OK] EFER.LMA (Long Mode Active) set
+
+=== BootInfo ===
+Magic: 0x49425847
+Framebuffer: 0x0000000080000000 (0x00000500x0x00000320)
+
+=== Kernel Entry Validation ===
+Entry point: 0x0000000019674000
+First 16 bytes at entry:
+  FA 66 31 C0 8E D8 8E C0 8E E0 8E E8 8E D0 48 BC 
+  [INFO] Unknown prologue pattern
+
+=== Jumping to Kernel (Trampoline) ===
+
+========================================
+=== PRE-HANDOFF VALIDATION ===
+========================================
+
+--- Parameters ---
+Kernel Entry: 0x0000000019674000
+BootInfo:     0x000000001DF47000
+Stack Top:    0x0000000000210000
+PML4 Phys:    0x000000001DE4F000
+
+--- Validating Mappings ---
+
+[1] Kernel Entry:
+Checking mapping for: 0x0000000019674000
+  PML4[0x00000000] = 0x000000001DE4E003
+  PDPT[0x00000000] = 0x000000001DE4D003
+  PD[0x000000CB] = 0x000000001DE4B003
+  PT[0x00000074] = 0x0000000019674003
+  [OK] Maps to physical: 0x0000000019674000
+
+[2] BootInfo:
+Checking mapping for: 0x000000001DF47000
+  PML4[0x00000000] = 0x000000001DE4E003
+  PDPT[0x00000000] = 0x000000001DE4D003
+  PD[0x000000EF] = 0x000000001DDE5003
+  PT[0x00000147] = 0x000000001DF47003
+  [OK] Maps to physical: 0x000000001DF47000
+
+[3] Stack (top - 0x1000):
+Checking mapping for: 0x000000000020F000
+  PML4[0x00000000] = 0x000000001DE4E003
+  PDPT[0x00000000] = 0x000000001DE4D003
+  PD[0x00000001] = 0x000000001DDE6003
+  PT[0x0000000F] = 0x0000000019783003
+  [OK] Maps to physical: 0x0000000019783000
+
+[4] PML4 self-mapping:
+Checking mapping for: 0x000000001DE4F000
+  PML4[0x00000000] = 0x000000001DE4E003
+  PDPT[0x00000000] = 0x000000001DE4D003
+  PD[0x000000EF] = 0x000000001DDE5003
+  PT[0x0000004F] = 0x000000001DE4F003
+  [OK] Maps to physical: 0x000000001DE4F000
+
+[5] Framebuffer:
+Checking mapping for: 0x0000000080000000
+  PML4[0x00000000] = 0x000000001DE4E003
+  PDPT[0x00000002] = 0x000000001DDE3003
+  PD[0x00000000] = 0x000000001DDE2003
+  PT[0x00000000] = 0x0000000080000003
+  [OK] Maps to physical: 0x0000000080000000
+
+========================================
+=== VALIDATION COMPLETE ===
+========================================
+
+
+[BOOT] Validating VIRTUAL kernel entry mapping:
+Checking mapping for: 0x0000000000100000
+  PML4[0x00000000] = 0x000000001DE4E003
+  PDPT[0x00000000] = 0x000000001DE4D003
+  PD[0x00000000] = 0x000000001DE4C003
+  PT[0x00000100] = 0x0000000019674003
+  [OK] Maps to physical: 0x0000000019674000
+[BOOT] About to handoff via trampoline...
+[BOOT] Trampoline at: 0x000000001DE50000
+[BOOT] Kernel entry: 0x0000000019674000
+[BOOT] BootInfo at: 0x000000001DF47000
+[BOOT] Stack top: 0x0000000000210000
+[BOOT] PML4: 0x000000001DE4F000
+
+[BOOT] Validating trampoline mapping:
+Checking mapping for: 0x000000001DE50000
+  PML4[0x00000000] = 0x000000001DE4E003
+  PDPT[0x00000000] = 0x000000001DE4D003
+  PD[0x000000EF] = 0x000000001DDE5003
+  PT[0x00000050] = 0x000000001DE50003
+  [OK] Maps to physical: 0x000000001DE50000
+
+[BOOT] === CALLING TRAMPOLINE NOW ===
+[KERNEL] guideXOS kernel_main entered
+[KERNEL] Boot method: UEFI BootInfo
+[KERNEL] Framebuffer initialized: 00000500x00000320
+[VFS] ERROR: No mount point for path: /desktop.system.icons
+[desktop] system desktop icon settings defaulted: Trash=1 ThisSystem=1 FileManager=1 SystemSettings=0
+[desktop] Desktop folder path selected: /Desktop
+[desktop] Desktop folder creation failed; continuing with system icons
+[desktop] system icon visibility decision: Trash enabled
+[desktop] system icon visibility decision: This System enabled
+[desktop] system icon visibility decision: File Manager enabled
+[desktop] system icon visibility decision: System Settings hidden
+[VFS] ERROR: No mount point for path: /.desktop_icons
+[VFS] ERROR: No mount point for path: /desktop.background.scale
+[desktop] background scale mode default=fill
+[VFS] ERROR: No mount point for path: /desktop.wallpaper.id
+Taskbar: SearchWidget hidden, search provider unavailable
+Taskbar: ClockWidget enabled, RTC/CMOS time available
+Taskbar: NetworkWidget hidden, no network provider available
+Taskbar: VolumeWidget hidden, audio provider unavailable
+Taskbar: BatteryWidget hidden, no battery provider available
+[DESKTOP CAP] begin
+[DESKTOP CAP] architecture=AMD64 (x86-64)
+[DESKTOP CAP] framebuffer_available=true
+[DESKTOP CAP] framebuffer_width=0x00000500
+[DESKTOP CAP] framebuffer_height=0x00000320
+[DESKTOP CAP] framebuffer_pitch=0x00001400
+[DESKTOP CAP] framebuffer_bpp=0x00000020
+[DESKTOP CAP] framebuffer_pixel_format_supported=true
+[DESKTOP CAP] double_buffering_enabled=true
+[DESKTOP CAP] mouse_available=true
+[DESKTOP CAP] keyboard_available=true
+[DESKTOP CAP] timer_tick_available=true
+[DESKTOP CAP] desktop_event_loop_active=false
+[DESKTOP CAP] cursor_rendering_active=false
+[DESKTOP CAP] taskbar_enabled=true
+[DESKTOP CAP] start_menu_enabled=true
+[DESKTOP CAP] window_move_enabled=true
+[DESKTOP CAP] window_resize_enabled=true
+[DESKTOP CAP] desktop_icons_enabled=true
+[DESKTOP CAP] icon_persistence_available=false
+[DESKTOP CAP] shutdown_supported=true
+[DESKTOP CAP] restart_supported=true
+[DESKTOP CAP] end
+[desktop] wallpaper image lookup path=/system/wall/blueflwr.gxi
+[desktop] gximg stat failed: /system/wall/blueflwr.gxi
+[desktop] wallpaper image fallback to gradient
+[desktop] Trash icon state count=0 iconKey=trash.empty
+[KERNEL] Desktop drawn
+[GDT] GDT loaded with 3 entries, segments reloaded
+[IRQ] IDT loaded, PIC remapped, interrupts enabled
+[IRQ] Master PIC mask: 0xFF Slave PIC mask: 0xFF
+[KERNEL] IDT + PIC initialized, interrupts enabled
+[PIT] Timer configured at ~00000064 Hz (divisor=0x00002E9B)
+[IRQ] register_irq called for IRQ 00
+[IRQ] Handler stored, unmasking...
+[IRQ] Registered and unmasked IRQ 00 Master mask: 0xFE Slave mask: 0xFF
+[KERNEL] PIT timer initialized, IRQ0 registered
+[KERNEL] Initializing storage subsystem...
+[KERNEL] Block device layer initialized
+[NTFS] Initializing NTFS filesystem driver...
+[NTFS] NTFS driver initialized
+[XFS] Initializing XFS filesystem driver...
+[XFS] XFS driver initialized
+[KERNEL] Filesystem drivers initialized (FAT32, ext2/4, NTFS, XFS)
+[MSI] Initializing MSI/MSI-X subsystem...
+[MSI] MSI subsystem initialized
+[KERNEL] MSI/MSI-X subsystem initialized
+[VIRTIO-GPU] Initializing VirtIO GPU driver...
+[VIRTIO-GPU] Probing for devices...
+[VIRTIO-GPU] Driver initialized, 00000000 device(s) found
+[KERNEL] VirtIO subsystem initialized
+[ATA] Initializing ATA driver...
+[ATA] Probing channel pri (ioBase=0x01F0)
+[ATA]   Checking master...
+[ATA]   Found device!
+[ATA]   Checking slave...
+[ATA]   No device
+[ATA] Probing channel sec (ioBase=0x0170)
+[ATA]   Checking master...
+[ATA]   No device
+[ATA]   Checking slave...
+[ATA]   No device
+[ATA] PCI scan found IDE controller
+[ATA] Init complete. Devices: 1
+[KERNEL] ATA/SATA driver initialized, 00000001 drive(s) found
+[IRQ] dispatch irq=00
+[IRQ] dispatch irq=00
+[IRQ] dispatch irq=00
+[KERNEL] NVMe driver initialized, 00000000 namespace(s) found
+[RAMDISK] Initialized with 00004000 KB pool
+[RAMDISK] Created 'ram0' with 00002000 sectors (00001000 KB)
+[KERNEL] Created 4MB RAM disk 'ram0'
+[VFS] Initialized
+[KERNEL] VFS layer initialized
+[KERNEL] Total block devices: 00000002
+[KERNEL] Auto-mounting block device 0 to /
+[IRQ] dispatch irq=00
+[VFS] detect_fs: Read sector 0 OK
+[VFS]   Bytes 510-511: 0x55 0xAA
+[VFS]   Found 0x55AA boot signature
+[VFS]   BPB: bps=0x0000 spf16=0x0000 spf32=0x00000000
+[VFS]   MBR partition type: 0x06
+[VFS] ERROR: Could not detect filesystem type
+[KERNEL] WARNING: Failed to auto-mount device 0
+[KERNEL] Attempting to mount block device 1 to /
+[VFS] detect_fs: Read sector 0 OK
+[VFS]   Bytes 510-511: 0x00 0x00
+[VFS] ERROR: Could not detect filesystem type
+[KERNEL] WARNING: Failed to auto-mount device 1
+[KERNEL] WARNING: No filesystem could be mounted automatically
+[KERNEL] Boot wallpaper pack found in ramdisk.img
+[RAMDISK] Attached read-only image 'wallimg' with 00020000 sectors
+[VFS] Mounted FAT32 at '/system'
+[desktop] mounted wallpaper image pack at /system; wallpapers live at /system/wall
+[VFS] ERROR: No mount point for path: /desktop.background.scale
+[desktop] background scale mode default=fill
+[VFS] ERROR: No mount point for path: /desktop.wallpaper.id
+[IRQ] dispatch irq=00
+[desktop] wallpaper image lookup path=/system/wall/blueflwr.gxi
+[VFS] Opened: /system/wall/blueflwr.gxi
+[IRQ] dispatch irq=00
+[IRQ] dispatch irq=00
+[desktop] gximg loaded: /system/wall/blueflwr.gxi
+[desktop] rendering wallpaper image for id=legacy_blue_flower scale=fill
+[IRQ] dispatch irq=00
+[IRQ] dispatch irq=00
+[IRQ] dispatch irq=00
+[desktop] Trash icon state count=0 iconKey=trash.empty
+[KERNEL] Initializing NIC driver...
+[KERNEL] NIC info found in BootInfo, using mapped MMIO
+[NIC] Initializing from BootInfo:
+[NIC]   Vendor: 00008086 Device: 0000100E
+[NIC]   MMIO Phys: 0000000081040000
+[NIC]   MMIO Virt: 0000000081040000
+[NIC] Initializing E1000 hardware...
+[NIC] MAC: 52:54:00:12:34:56
+[NIC] Link: UP
+[NIC] E1000 initialization complete!
+[KERNEL] NIC initialized from BootInfo successfully
+[KERNEL] NIC active, registering IRQ0B
+[IRQ] register_irq called for IRQ 0B
+[IRQ] Handler stored, unmasking...
+[IRQ] Registered and unmasked IRQ 0B Master mask: 0xFA Slave mask: 0xF7
+[IPv4] Layer initialized
+[IPv4] Configured: IP=10.0.2.15 Mask=255.255.255.0 GW=10.0.2.2
+[ICMP] Module initialized
+[UDP] Layer initialized
+[TCP] Stack initialized
+[SOCKET] API initialized
+[DNS] Client initialized, server: 10.0.2.3
+[KERNEL] Attempting DHCP network configuration...
+[DHCP] Sending DISCOVER (xid=0x87985AA5)
+[NIC] send_frame: sending 003C bytes, txCur=0000
+[NIC] TX desc bufferAddr=0x000000001A69A280
+[NIC] TDT updated to 0001, waiting for completion...
+[NIC] TX complete after 00000000 iterations
+[DHCP] UDP send failed
+[NIC] send_frame: sending 003C bytes, txCur=0001
+[NIC] TX desc bufferAddr=0x000000001A69A280
+[NIC] TDT updated to 0002, waiting for completion...
+[NIC] TX complete after 00000000 iterations
+[DHCP] UDP send failed
+[NIC] send_frame: sending 003C bytes, txCur=0002
+[NIC] TX desc bufferAddr=0x000000001A69A280
+[NIC] TDT updated to 0003, waiting for completion...
+[NIC] TX complete after 00000000 iterations
+[DHCP] UDP send failed
+[NIC] send_frame: sending 003C bytes, txCur=0003
+[NIC] TX desc bufferAddr=0x000000001A69A280
+[NIC] TDT updated to 0004, waiting for completion...
+[NIC] TX complete after 00000000 iterations
+[DHCP] UDP send failed
+[DHCP] Discovery failed
+[KERNEL] DHCP failed, keeping static network configuration
+[KERNEL] Initializing PS/2 mouse...
+[PS2] Starting PS/2 mouse init
+[PS2] Controller config before: 0x77
+[PS2] Controller config after: 0x17
+[PS2] Sending mouse reset (0xFF)...
+[PS2] Reset ACK: 0xFA
+[PS2] Self-test result: 0xAA
+[PS2] Device ID: 0x00
+[PS2] IntelliMouse (scroll wheel): yes
+[PS2] Mouse init complete
+[KERNEL] PS/2 mouse init complete
+[IRQ] register_irq called for IRQ 0C
+[IRQ] Handler stored, unmasking...
+[IRQ] Registered and unmasked IRQ 0C Master mask: 0xFA Slave mask: 0xE7
+[KERNEL] IRQ12 handler registered and unmasked
+[KERNEL] Initializing PS/2 keyboard...
+[PS2KB] Initializing PS/2 keyboard...
+[PS2KB] Keyboard initialized (scancode set 2)
+[IRQ] register_irq called for IRQ 01
+[IRQ] Handler stored, unmasking...
+[IRQ] Registered and unmasked IRQ 01 Master mask: 0xF8 Slave mask: 0xE7
+[KERNEL] IRQ1 (keyboard) handler registered
+[KERNEL] Initializing input manager...
+[INPUT] Initializing input manager
+[INPUT] PS/2 mouse available
+[INPUT] Active mouse source: PS/2
+[INPUT] Input manager initialized
+[KERNEL] Input manager initialized
+
+============================================================
+           guideXOS Hardware Feature Report
+============================================================
+
+--- CPU ---
+[OK]   AMD64 (x86-64)
+
+--- Storage ---
+[N/A]  ATA (PIO mode)
+[N/A]  AHCI/SATA
+[N/A]  NVMe
+[N/A]  USB Mass Storage
+[N/A]  VirtIO Block
+[N/A]  RAM Disk
+
+--- Filesystem ---
+[OK]   FAT32
+[N/A]  exFAT
+[OK]   ext2
+[OK]   ext4
+[OK]   NTFS
+[OK]   XFS
+[N/A]  UFS
+
+--- Network ---
+[N/A]  Intel E1000
+[N/A]  VirtIO Network
+[N/A]  IPv4 Stack
+[N/A]  IPv6 Stack
+[N/A]  TCP Protocol
+[N/A]  UDP Protocol
+[N/A]  DHCP Client
+[N/A]  DNS Client
+
+--- Graphics ---
+[N/A]  VGA Text Mode
+[N/A]  VESA/VBE
+[N/A]  UEFI GOP
+[N/A]  VirtIO GPU
+[N/A]  QEMU ramfb
+
+--- Input ---
+[OK]   PS/2 Keyboard
+[OK]   PS/2 Mouse
+[N/A]  USB HID
+[N/A]  VirtIO Input
+[N/A]  Serial Console
+
+--- VirtIO ---
+[N/A]  VirtIO Block
+[N/A]  VirtIO Network
+[N/A]  VirtIO GPU
+[N/A]  VirtIO Input
+[N/A]  VirtIO Console
+
+--- Interrupts ---
+[OK]   8259 PIC
+[N/A]  Local APIC
+[N/A]  I/O APIC
+[OK]   MSI
+[N/A]  MSI-X
+[N/A]  ARM GIC
+[N/A]  RISC-V PLIC
+
+--- Summary ---
+Total features:  0000002C
+Active:          0000000A
+Present:         00000000
+Errors:          00000000
+Disabled:        00000000
+Not present:     00000022
+
+============================================================
+
+[DESKTOP CAP] begin
+[DESKTOP CAP] architecture=AMD64 (x86-64)
+[DESKTOP CAP] framebuffer_available=true
+[DESKTOP CAP] framebuffer_width=0x00000500
+[DESKTOP CAP] framebuffer_height=0x00000320
+[DESKTOP CAP] framebuffer_pitch=0x00001400
+[DESKTOP CAP] framebuffer_bpp=0x00000020
+[DESKTOP CAP] framebuffer_pixel_format_supported=true
+[DESKTOP CAP] double_buffering_enabled=true
+[DESKTOP CAP] mouse_available=true
+[DESKTOP CAP] keyboard_available=true
+[DESKTOP CAP] timer_tick_available=true
+[DESKTOP CAP] desktop_event_loop_active=true
+[DESKTOP CAP] cursor_rendering_active=true
+[DESKTOP CAP] taskbar_enabled=true
+[DESKTOP CAP] start_menu_enabled=true
+[DESKTOP CAP] window_move_enabled=true
+[DESKTOP CAP] window_resize_enabled=true
+[DESKTOP CAP] desktop_icons_enabled=true
+[DESKTOP CAP] icon_persistence_available=false
+[DESKTOP CAP] shutdown_supported=true
+[DESKTOP CAP] restart_supported=true
+[DESKTOP CAP] end
+[NAVIGATOR-SMOKE] BEGIN
+[NAVIGATOR-SMOKE] build_mode=bare-metal/kernel
+[NAVIGATOR-SMOKE] registered=true
+[NAVIGATOR-SMOKE] runtime.mode=bare-metal/kernel
+[NAVIGATOR-SMOKE] launch.path=AppManager::registerApp -> NavigatorApp::create
+[NAVIGATOR-SMOKE] current.url=about:navigator-runtime
+[NAVIGATOR-SMOKE] stale.placeholder=not active
+[NAVIGATOR-SMOKE] capability.file_read=enabled through VFS
+[NAVIGATOR-SMOKE] capability.local_png=enabled through shared ImageAdapter where VFS image data exists
+[NAVIGATOR-SMOKE] capability.http=unsupported/network unavailable
+[NAVIGATOR-SMOKE] capability.remote_png=unsupported without bare-metal HTTP transport
+[NAVIGATOR-SMOKE] capability.downloads=unavailable until HTTP/VFS write path is connected
+[NAVIGATOR-SMOKE] capability.css_lite=enabled for embedded style blocks
+[NAVIGATOR-SMOKE] capability.forms_lite=enabled for file/about GET form blocks
+[NAVIGATOR-SMOKE] capability.find_in_page=unsupported in bare-metal adapter
+[NAVIGATOR-SMOKE] capability.external_stylesheets=unsupported
+[NAVIGATOR-SMOKE] capability.bookmark_persistence=unavailable; in-memory defaults only
+[NAVIGATOR-SMOKE] result=PASS
+[NAVIGATOR-SMOKE] END
+[KERNEL] Entering main loop (waiting for input)...

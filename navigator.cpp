@@ -37,6 +37,11 @@ int         Navigator::s_addressCaret   = 0;
 int         Navigator::s_focusedInputBlockIndex = -1;
 int         Navigator::s_inputCaret = 0;
 std::string Navigator::s_lastSubmittedFormUrl;
+bool        Navigator::s_findActive = false;
+std::string Navigator::s_findBuffer;
+int         Navigator::s_findCaret = 0;
+std::vector<Navigator::FindMatch> Navigator::s_findMatches;
+int         Navigator::s_currentFindMatch = -1;
 
 namespace {
 	constexpr int kWindowW = 920;
@@ -44,10 +49,10 @@ namespace {
 	constexpr int kToolbarH = 64;
 	constexpr int kStatusBarH = 24;
 	constexpr int kButtonY = 12;
-	constexpr int kButtonW = 72;
+	constexpr int kButtonW = 66;
 	constexpr int kButtonH = 26;
-	constexpr int kButtonGap = 10;
-	constexpr int kAddressX = 502;
+	constexpr int kButtonGap = 4;
+	constexpr int kAddressX = 514;
 	constexpr int kAddressY = 12;
 	constexpr int kAddressH = 26;
 	constexpr int kAddressW = 920 - kAddressX - 20;
@@ -71,6 +76,7 @@ namespace {
 	constexpr int kWidgetIdHome = 4;
 	constexpr int kWidgetIdBookmarks = 5;
 	constexpr int kWidgetIdAddBookmark = 6;
+	constexpr int kWidgetIdFind = 7;
 
 	void publish(MsgType type, const std::string& payload)
 	{
@@ -568,6 +574,7 @@ namespace {
 		return out;
 	}
 
+
 	struct RuntimeReportEntry {
 		std::string section;
 		std::string label;
@@ -612,6 +619,7 @@ namespace {
 			{"Capabilities", "Hosted colored text primitive", "enabled"},
 			{"Capabilities", "CSS text color visible", "enabled"},
 			{"Capabilities", "Forms-lite GET forms", "enabled"},
+			{"Capabilities", "Find in Page", "enabled"},
 			{"Capabilities", "External stylesheets", "unsupported"},
 
 			{"Backends", "File backend", "navigator_file_io hosted/VFS adapter"},
@@ -864,6 +872,18 @@ bool Navigator::SmokeSubmitFirstForm(const std::string& value)
 	return false;
 }
 
+int Navigator::SmokeFindInPage(const std::string& query)
+{
+	if (s_windowId == 0) return -1;
+	openFindMode();
+	s_findBuffer = query;
+	s_findCaret = static_cast<int>(s_findBuffer.size());
+	updateFindMatches(false);
+	if (!s_findMatches.empty()) goToFindMatch(0);
+	updateDisplay();
+	return static_cast<int>(s_findMatches.size());
+}
+
 std::string Navigator::SmokeRuntimeReport()
 {
 	const std::string inspected = s_pageMetadata.finalUrl.empty() ? "" : s_pageMetadata.finalUrl;
@@ -979,6 +999,7 @@ int Navigator::main(int, char**)
 				} else if (button == 1 && action == "down") {
 					if (target == HitTarget::AddressBar) {
 							if (s_focusedInputBlockIndex >= 0) blurDocumentInput();
+							if (s_findActive) closeFindMode();
 							focusAddressBar();
 							// Set caret from click X position using the same fixed char width as rendering.
 							// TODO: replace with proportional text measurement when available.
@@ -994,6 +1015,7 @@ int Navigator::main(int, char**)
 						// Clicking anywhere outside the address bar blurs it.
 						if (s_addressFocused) blurAddressBar();
 						if (target == HitTarget::FormInput) {
+							if (s_findActive) closeFindMode();
 							focusDocumentInput(linkIdx);
 							Rect r = formControlRect(linkIdx);
 							constexpr int kCharW = 8;
@@ -1074,6 +1096,7 @@ void Navigator::renderToolbar()
 	addButton(s_windowId, kWidgetIdHome, 20 + 3 * (kButtonW + kButtonGap), kButtonY, kButtonW, kButtonH, "Home");
 	addButton(s_windowId, kWidgetIdBookmarks, 20 + 4 * (kButtonW + kButtonGap), kButtonY, kButtonW, kButtonH, "Bookmarks");
 	addButton(s_windowId, kWidgetIdAddBookmark, 20 + 5 * (kButtonW + kButtonGap), kButtonY, kButtonW, kButtonH, "Add *");
+	addButton(s_windowId, kWidgetIdFind, 20 + 6 * (kButtonW + kButtonGap), kButtonY, kButtonW, kButtonH, "Find");
 
 	drawRect(s_windowId, kAddressX, kAddressY, kAddressW, kAddressH, 18, 22, 30);
 	if (s_addressFocused) {
@@ -1173,6 +1196,16 @@ void Navigator::renderDocument()
 		if (drawY + blockH < kContentY || drawY > kContentY + kContentH) {
 			++blockIndex;
 			continue;
+		}
+
+		if (s_findActive &&
+			s_currentFindMatch >= 0 &&
+			s_currentFindMatch < static_cast<int>(s_findMatches.size()) &&
+			s_findMatches[s_currentFindMatch].blockIndex == blockIndex)
+		{
+			drawRect(s_windowId, kContentX + 10, drawY + std::max(0, blockMarginTop - 2),
+				kContentW - 28, std::max(kLineH + 4, blockH - std::max(0, blockMarginTop)),
+				255, 244, 168);
 		}
 
 		switch (block.type) {
@@ -1342,6 +1375,22 @@ void Navigator::renderStatusBar()
 	drawRect(s_windowId, 0, kWindowH - kStatusBarH, kWindowW, kStatusBarH, 36, 40, 50);
 	drawRect(s_windowId, 0, kWindowH - kStatusBarH, kWindowW, 1, 78, 86, 108);
 
+	if (s_findActive) {
+		drawRect(s_windowId, 8, kWindowH - kStatusBarH + 4, 420, kStatusBarH - 8, 18, 22, 30);
+		drawRect(s_windowId, 8, kWindowH - kStatusBarH + 4, 420, 1, 80, 140, 220);
+		drawRect(s_windowId, 8, kWindowH - kStatusBarH + kStatusBarH - 5, 420, 1, 80, 140, 220);
+		std::string shown = s_findBuffer;
+		const int maxChars = 28;
+		if (static_cast<int>(shown.size()) > maxChars) {
+			shown = shown.substr(shown.size() - static_cast<size_t>(maxChars));
+		}
+		drawTextAt(s_windowId, 16, kWindowH - kStatusBarH + 7, "Find: " + shown);
+		int caretPos = std::min(s_findCaret, maxChars);
+		drawRect(s_windowId, 64 + caretPos * kCharW, kWindowH - kStatusBarH + 7, 1, 14, 200, 220, 255);
+		drawTextAt(s_windowId, 440, kWindowH - kStatusBarH + 6, findMatchStatusText() + "   Enter/Down: next   Up: prev   Esc: close");
+		return;
+	}
+
 	const std::string& status = s_hoverStatusText.empty() ? s_statusText : s_hoverStatusText;
 	drawTextAt(s_windowId, 12, kWindowH - kStatusBarH + 6, status);
 }
@@ -1362,6 +1411,7 @@ void Navigator::updateHoverStatus(HitTarget target, int linkBlockIndex)
 	case HitTarget::Home:        next = "Home button";           break;
 	case HitTarget::Bookmarks:   next = "View Bookmarks";        break;
 	case HitTarget::AddBookmark: next = "Add current page to Bookmarks"; break;
+	case HitTarget::Find:        next = "Find in page";          break;
 	case HitTarget::AddressBar:  next = "Click to edit address"; break;
 	case HitTarget::FormInput:   next = "Click to edit form field"; break;
 	case HitTarget::FormSubmit:  next = "Submit GET form"; break;
@@ -1427,6 +1477,10 @@ void Navigator::handleToolbarAction(int widgetId)
 		}
 		break;
 	}
+	case kWidgetIdFind:
+		openFindMode();
+		updateDisplay();
+		break;
 	default:
 		break;
 	}
@@ -1462,6 +1516,122 @@ void Navigator::blurDocumentInput()
 {
 	s_focusedInputBlockIndex = -1;
 	s_inputCaret = 0;
+}
+
+void Navigator::openFindMode()
+{
+	s_findActive = true;
+	if (s_addressFocused) {
+		s_addressFocused = false;
+		s_addressBuffer.clear();
+		s_addressCaret = 0;
+	}
+	if (s_focusedInputBlockIndex >= 0) {
+		blurDocumentInput();
+	}
+	s_findCaret = std::max(0, std::min(s_findCaret, static_cast<int>(s_findBuffer.size())));
+	updateFindMatches(true);
+}
+
+void Navigator::closeFindMode()
+{
+	s_findActive = false;
+	s_findMatches.clear();
+	s_currentFindMatch = -1;
+	s_statusText = "Find closed.";
+}
+
+std::string Navigator::searchableTextForBlock(const DocBlock& block)
+{
+	switch (block.type) {
+	case BlockType::Heading:
+	case BlockType::Paragraph:
+	case BlockType::Link:
+	case BlockType::ListItem:
+	case BlockType::Preformatted:
+		return block.text;
+	case BlockType::Image:
+		return !block.alt.empty() ? block.alt : block.text;
+	case BlockType::FormTextInput:
+		if (!block.inputValue.empty()) return block.inputValue;
+		if (!block.placeholder.empty()) return block.placeholder;
+		return block.inputName;
+	case BlockType::FormSubmit:
+		return !block.submitLabel.empty() ? block.submitLabel : block.text;
+	}
+	return std::string();
+}
+
+std::string Navigator::findMatchStatusText()
+{
+	if (s_findBuffer.empty()) return "Type to find";
+	if (s_findMatches.empty()) return "No matches";
+	return "Match " + std::to_string(s_currentFindMatch + 1) +
+		" of " + std::to_string(s_findMatches.size());
+}
+
+void Navigator::updateFindMatches(bool keepCurrent)
+{
+	const FindMatch previous =
+		(s_currentFindMatch >= 0 && s_currentFindMatch < static_cast<int>(s_findMatches.size()))
+		? s_findMatches[s_currentFindMatch]
+		: FindMatch{};
+
+	s_findMatches.clear();
+	s_currentFindMatch = -1;
+
+	const std::string needle = toLowerAscii(s_findBuffer);
+	if (!needle.empty()) {
+		for (int i = 0; i < static_cast<int>(s_currentDoc.blocks.size()); ++i) {
+			const std::string haystackOriginal = searchableTextForBlock(s_currentDoc.blocks[i]);
+			const std::string haystack = toLowerAscii(haystackOriginal);
+			size_t pos = haystack.find(needle);
+			while (pos != std::string::npos) {
+				s_findMatches.push_back(FindMatch{i, pos, needle.size()});
+				pos = haystack.find(needle, pos + 1);
+			}
+		}
+	}
+
+	if (!s_findMatches.empty()) {
+		s_currentFindMatch = 0;
+		if (keepCurrent && previous.blockIndex >= 0) {
+			for (int i = 0; i < static_cast<int>(s_findMatches.size()); ++i) {
+				const FindMatch& candidate = s_findMatches[i];
+				if (candidate.blockIndex == previous.blockIndex &&
+					candidate.offset == previous.offset) {
+					s_currentFindMatch = i;
+					break;
+				}
+			}
+		}
+	}
+
+	s_statusText = findMatchStatusText();
+}
+
+void Navigator::goToFindMatch(int direction)
+{
+	if (s_findMatches.empty()) {
+		s_currentFindMatch = -1;
+		s_statusText = findMatchStatusText();
+		return;
+	}
+
+	if (s_currentFindMatch < 0 ||
+		s_currentFindMatch >= static_cast<int>(s_findMatches.size())) {
+		s_currentFindMatch = 0;
+	} else if (direction != 0) {
+		const int count = static_cast<int>(s_findMatches.size());
+		s_currentFindMatch = (s_currentFindMatch + direction + count) % count;
+	}
+
+	const int blockIndex = s_findMatches[s_currentFindMatch].blockIndex;
+	if (blockIndex >= 0 && blockIndex < static_cast<int>(s_currentDoc.blocks.size())) {
+		s_scrollOffset = std::max(0, blockLayoutY(blockIndex) - 18);
+		clampScrollOffset();
+	}
+	s_statusText = findMatchStatusText();
 }
 
 void Navigator::submitFormForBlock(int blockIndex)
@@ -1547,6 +1717,52 @@ void Navigator::handleKeyPress(int keyCode, const std::string& action)
 		return;
 	}
 
+	if (s_findActive) {
+		const int bufLen = static_cast<int>(s_findBuffer.size());
+		if (keyCode == 13 || keyCode == 40 || keyCode == 34) {
+			goToFindMatch(1);
+			updateDisplay();
+		} else if (keyCode == 38 || keyCode == 33) {
+			goToFindMatch(-1);
+			updateDisplay();
+		} else if (keyCode == 27) {
+			closeFindMode();
+			updateDisplay();
+		} else if (keyCode == 8) {
+			if (s_findCaret > 0) {
+				s_findBuffer.erase(static_cast<size_t>(s_findCaret - 1), 1);
+				--s_findCaret;
+				updateFindMatches(true);
+				updateDisplay();
+			}
+		} else if (keyCode == 46) {
+			if (s_findCaret < bufLen) {
+				s_findBuffer.erase(static_cast<size_t>(s_findCaret), 1);
+				updateFindMatches(true);
+				updateDisplay();
+			}
+		} else if (keyCode == 37) {
+			if (s_findCaret > 0) --s_findCaret;
+			updateDisplay();
+		} else if (keyCode == 39) {
+			if (s_findCaret < bufLen) ++s_findCaret;
+			updateDisplay();
+		} else if (keyCode == 36) {
+			s_findCaret = 0;
+			updateDisplay();
+		} else if (keyCode == 35) {
+			s_findCaret = bufLen;
+			updateDisplay();
+		} else if (keyCode >= 32 && keyCode <= 126) {
+			s_findBuffer.insert(static_cast<size_t>(s_findCaret), 1, static_cast<char>(keyCode));
+			++s_findCaret;
+			updateFindMatches(true);
+			goToFindMatch(0);
+			updateDisplay();
+		}
+		return;
+	}
+
 	if (s_focusedInputBlockIndex >= 0 &&
 		s_focusedInputBlockIndex < static_cast<int>(s_currentDoc.blocks.size()) &&
 		s_currentDoc.blocks[s_focusedInputBlockIndex].type == BlockType::FormTextInput)
@@ -1617,6 +1833,7 @@ Navigator::HitTarget Navigator::hitTest(int x, int y, int& outLinkBlockIndex)
 	if (toolbarButtonRect(kWidgetIdHome).contains(x, y))    return HitTarget::Home;
 	if (toolbarButtonRect(kWidgetIdBookmarks).contains(x, y))    return HitTarget::Bookmarks;
 	if (toolbarButtonRect(kWidgetIdAddBookmark).contains(x, y))  return HitTarget::AddBookmark;
+	if (toolbarButtonRect(kWidgetIdFind).contains(x, y))         return HitTarget::Find;
 
 	// Address bar hit region
 	{
@@ -1666,6 +1883,9 @@ Navigator::Rect Navigator::toolbarButtonRect(int widgetId)
 		break;
 	case kWidgetIdAddBookmark:
 		x = 20 + 5 * (kButtonW + kButtonGap);
+		break;
+	case kWidgetIdFind:
+		x = 20 + 6 * (kButtonW + kButtonGap);
 		break;
 	default:
 		break;
@@ -1906,6 +2126,13 @@ void Navigator::loadUrl(const std::string& url)
 	s_hoverStatusText.clear();
 	s_hitLinkBlockIndex = -1;
 	s_statusText      = "Ready";
+	if (s_findActive) {
+		updateFindMatches(false);
+		goToFindMatch(0);
+	} else {
+		s_findMatches.clear();
+		s_currentFindMatch = -1;
+	}
 
 	updateDisplay();
 }
@@ -1977,6 +2204,7 @@ WebDocument Navigator::buildAboutNavigatorDocument()
 	doc.blocks.push_back({BlockType::ListItem,  "Back / Forward / Reload / Home navigation", ""});
 	doc.blocks.push_back({BlockType::ListItem,  "Bookmarks with persistent storage", ""});
 	doc.blocks.push_back({BlockType::ListItem,  "Forms-lite GET forms with editable text fields", ""});
+	doc.blocks.push_back({BlockType::ListItem,  "Find in Page for rendered document text", ""});
 	doc.blocks.push_back({BlockType::Heading,   "Quick Start", ""});
 	doc.blocks.push_back({BlockType::Preformatted,
 		"Type a file:// URL in the address bar and press Enter.\n"

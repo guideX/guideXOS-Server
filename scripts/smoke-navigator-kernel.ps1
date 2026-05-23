@@ -98,6 +98,7 @@ $checks = @(
     "[NAVIGATOR-SMOKE] capability.downloads=unavailable until HTTP/VFS write path is connected",
     "[NAVIGATOR-SMOKE] capability.css_lite=enabled for embedded style blocks",
     "[NAVIGATOR-SMOKE] capability.forms_lite=enabled for file/about GET form blocks",
+    "[NAVIGATOR-SMOKE] capability.find_in_page=unsupported in bare-metal adapter",
     "[NAVIGATOR-SMOKE] capability.external_stylesheets=unsupported",
     "[NAVIGATOR-SMOKE] capability.bookmark_persistence=unavailable; in-memory defaults only",
     "[NAVIGATOR-SMOKE] result=PASS"
@@ -116,3 +117,4 @@ if ($failed.Count -eq 0) {
 Write-Host "Kernel Navigator smoke FAIL. Serial log: $serialLog" -ForegroundColor Red
 foreach ($item in $failed) { Write-Host "Missing: $item" -ForegroundColor Red }
 exit 1
+

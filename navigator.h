@@ -91,6 +91,7 @@ public:
 	static uint64_t Launch();
 	static bool SmokeNavigateTo(const std::string& url);
 	static bool SmokeSubmitFirstForm(const std::string& value);
+	static int SmokeFindInPage(const std::string& query);
 	static std::string SmokeRuntimeReport();
 	static std::string SmokeCurrentUrl();
 	static int SmokeCurrentBlockCount();
@@ -106,6 +107,12 @@ private:
 		}
 	};
 
+	struct FindMatch {
+		int blockIndex = -1;
+		size_t offset = 0;
+		size_t length = 0;
+	};
+
 	// -------------------------------------------------------------------------
 	// Input hit-testing
 	// -------------------------------------------------------------------------
@@ -117,6 +124,7 @@ private:
 		Home,
 		Bookmarks,
 		AddBookmark,
+		Find,
 		AddressBar,
 		Link,   // any Link block; s_hitLinkBlockIndex carries the index
 		FormInput,
@@ -189,6 +197,12 @@ private:
 	static void focusDocumentInput(int blockIndex);
 	static void blurDocumentInput();
 	static void submitFormForBlock(int blockIndex);
+	static void openFindMode();
+	static void closeFindMode();
+	static void updateFindMatches(bool keepCurrent);
+	static void goToFindMatch(int direction);
+	static std::string findMatchStatusText();
+	static std::string searchableTextForBlock(const DocBlock& block);
 
 	// -------------------------------------------------------------------------
 	// Address bar editing
@@ -234,6 +248,11 @@ private:
 	static int         s_focusedInputBlockIndex;
 	static int         s_inputCaret;
 	static std::string s_lastSubmittedFormUrl;
+	static bool        s_findActive;
+	static std::string s_findBuffer;
+	static int         s_findCaret;
+	static std::vector<FindMatch> s_findMatches;
+	static int         s_currentFindMatch;
 };
 
 } // namespace apps

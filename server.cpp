@@ -178,7 +178,7 @@ static std::string navigatorHostedSmokeDiagnostic() {
             if (window.title.find("guideXOS Navigator") == std::string::npos) continue;
             navWindow = window;
             foundWindow = true;
-            if (window.widgetCount >= 6) toolbarReady = true;
+            if (window.widgetCount >= 7) toolbarReady = true;
             break;
         }
     }
@@ -187,7 +187,7 @@ static std::string navigatorHostedSmokeDiagnostic() {
         foundWindow ? ("id=" + std::to_string(navWindow.id) + " title=" + navWindow.title) : "window not found");
     add("Navigator window size", foundWindow && navWindow.w == 920 && navWindow.h == 640,
         foundWindow ? (std::to_string(navWindow.w) + "x" + std::to_string(navWindow.h)) : "window not found");
-    add("toolbar widget count", foundWindow && toolbarReady && navWindow.widgetCount == 6,
+    add("toolbar widget count", foundWindow && toolbarReady && navWindow.widgetCount == 7,
         foundWindow ? ("widgets=" + std::to_string(navWindow.widgetCount)) : "window not found");
     add("stale four-button toolbar absent", foundWindow && toolbarReady && navWindow.widgetCount > 4,
         foundWindow ? ("widgets=" + std::to_string(navWindow.widgetCount)) : "window not found");
@@ -209,6 +209,7 @@ static std::string navigatorHostedSmokeDiagnostic() {
     add("colored text primitive enabled", contains(runtimeReport, "Capabilities.Hosted colored text primitive=enabled"), "expected enabled");
     add("CSS text color visible", contains(runtimeReport, "Capabilities.CSS text color visible=enabled"), "expected enabled");
     add("Forms-lite enabled", contains(runtimeReport, "Capabilities.Forms-lite GET forms=enabled"), "expected enabled");
+    add("Find in Page enabled", contains(runtimeReport, "Capabilities.Find in Page=enabled"), "expected enabled");
     add("external stylesheets unsupported", contains(runtimeReport, "Capabilities.External stylesheets=unsupported"), "expected unsupported");
     add("bookmark persistence enabled", contains(runtimeReport, "Capabilities.Bookmark persistence=enabled"), "expected enabled");
 
@@ -217,6 +218,8 @@ static std::string navigatorHostedSmokeDiagnostic() {
     std::string docsReport = gxos::apps::Navigator::SmokeRuntimeReport();
     add("docs page loads", docsLoaded && docsUrl == "file:///docs/index.html", "currentUrl=" + docsUrl);
     add("docs CSS-lite detected", contains(docsReport, "Current Document.CSS diagnostics=css detected"), "expected css detected");
+    int findMatches = gxos::apps::Navigator::SmokeFindInPage("Navigator");
+    add("find in page matches docs", findMatches > 0, "matches=" + std::to_string(findMatches));
 
     bool formsLoaded = gxos::apps::Navigator::SmokeNavigateTo("file:///docs/forms.html");
     std::string formsUrl = gxos::apps::Navigator::SmokeCurrentUrl();
@@ -242,6 +245,7 @@ static std::string navigatorHostedSmokeDiagnostic() {
     out << "forms_runtime_report:\n" << formsReport;
     out << "current_url=" << currentUrl << "\n";
     out << "docs_url=" << docsUrl << "\n";
+    out << "find_matches=" << findMatches << "\n";
     out << "forms_url=" << formsUrl << "\n";
     out << "submitted_form_url=" << submittedUrl << "\n";
     out << "downloads_url=" << downloadsUrl << "\n";
