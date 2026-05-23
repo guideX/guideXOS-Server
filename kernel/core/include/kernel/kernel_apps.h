@@ -479,6 +479,17 @@ private:
         char url[MAX_URL_LEN];
     };
 
+    struct DownloadRecord {
+        char url[MAX_URL_LEN];
+        char finalUrl[MAX_URL_LEN];
+        char suggestedFileName[vfs::VFS_MAX_FILENAME];
+        char contentType[48];
+        char savedPath[MAX_URL_LEN];
+        int byteCount;
+        bool success;
+        char error[128];
+    };
+
     char m_status[MAX_STATUS_LEN];
     char m_currentUrl[MAX_URL_LEN];
     char m_title[MAX_TITLE_LEN_NAV];
@@ -486,6 +497,8 @@ private:
     int m_blockCount;
     Bookmark m_bookmarks[MAX_BOOKMARKS];
     int m_bookmarkCount;
+    DownloadRecord m_recentDownloads[8];
+    int m_recentDownloadCount;
     char m_backStack[12][MAX_URL_LEN];
     int m_backCount;
     char m_forwardStack[12][MAX_URL_LEN];
@@ -520,12 +533,20 @@ private:
     int m_metaRemoteImages;
     int m_metaLocalImages;
     char m_metaLastImageError[128];
+    bool m_metaDnsUsed;
+    char m_metaDnsHost[64];
+    char m_metaDnsResolvedIp[16];
+    char m_metaDnsError[64];
     bool m_metaCssDetected;
     int m_metaStyleRuleCount;
     int m_metaUnsupportedExternalStylesheetCount;
     int m_metaUnsupportedCssDeclarationCount;
     bool m_metaCssStyleBlockCapped;
     int m_metaCssStyleBytesProcessed;
+    bool m_metaDownloaded;
+    char m_metaDownloadSavedPath[MAX_URL_LEN];
+    int m_metaDownloadByteCount;
+    char m_lastDownloadError[128];
     gxos::web::WebStyle m_bodyStyle;
 
     void setStatus(const char* text);
@@ -540,6 +561,7 @@ private:
     void buildViewSourceDocument();
     void buildRuntimeDocument();
     void buildDownloadsDocument();
+    void buildDownloadResultDocument(const DownloadRecord& record);
     void buildErrorDocument(const char* url, const char* reason);
     void loadFileUrl(const char* url);
     void loadHttpUrl(const char* url);
@@ -573,6 +595,8 @@ private:
                            int redirectCount = 0);
     void prepareImageResources();
     void resolveHref(const char* baseUrl, const char* href, char* out, int outSize) const;
+    void rememberDownload(const DownloadRecord& record);
+    void clearPageDownloadMetadata();
     int maxScroll() const;
     void clampScroll();
 };

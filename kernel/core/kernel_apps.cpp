@@ -18,12 +18,18 @@
 #include "include/kernel/nic.h"
 #include "include/kernel/ipv4.h"
 #include "include/kernel/tcp.h"
+#include "include/kernel/dns.h"
 #include "../../guide_web_http_shared.h"
 
 extern "C" void desktop_request_redraw();
 
 namespace kernel {
 namespace apps {
+
+static bool s_kernelLastDnsUsed = false;
+static char s_kernelLastDnsHost[64];
+static char s_kernelLastDnsResolvedIp[16];
+static char s_kernelLastDnsError[64];
 
 // ============================================================
 // Helper: string copy
@@ -217,6 +223,16 @@ static const uint8_t* getGlyph(char c) {
     return s_glyphs[idx];
 }
 
+static void kernel_join_path(const char* base, const char* name, char* out, int outSize);
+static const char* kernel_vfs_status_text(vfs::Status status);
+static void nav_int_to_text(int value, char* out, int outSize);
+static bool nav_char_is_filename_safe(char c);
+static void nav_copy_basename_without_query(const char* urlOrPath, char* out, int outSize);
+static void nav_make_safe_download_filename(const char* urlOrPath, char* out, int outSize);
+static bool kernel_downloads_directory_ready(char* reason, int reasonSize);
+static bool kernel_make_unique_download_path(const char* finalUrl, char* outPath, int outPathSize, char* outFileName, int outFileNameSize, char* error, int errorSize);
+static bool kernel_write_binary_file_bare_metal(const char* path, const char* bytes, int byteCount, char* error, int errorSize);
+
 // Draw a single character using the bitmap font
 static void drawChar(uint32_t px, uint32_t py, char c, uint32_t color) {
     const uint8_t* g = getGlyph(c);
@@ -228,6 +244,198 @@ static void drawChar(uint32_t px, uint32_t py, char c, uint32_t color) {
                 framebuffer::put_pixel(px + col, py + row, color);
             }
         }
+    }
+}
+
+static bool nav_char_is_filename_safe(char c)
+{
+    return (c >= 'A' && c <= 'Z') ||
+           (c >= 'a' && c <= 'z') ||
+           (c >= '0' && c <= '9') ||
+           c == '.' || c == '-' || c == '_';
+}
+
+static void nav_copy_basename_without_query(const char* urlOrPath, char* out, int outSize)
+{
+    if (!out || outSize <= 0) return;
+    out[0] = '\0';
+    if (!urlOrPath || !urlOrPath[0]) return;
+
+    const char* start = urlOrPath;
+    const char* scheme = nullptr;
+    for (const char* p = urlOrPath; *p; ++p) {
+        if (p[0] == ':' && p[1] == '/' && p[2] == '/') {
+            scheme = p;
+            break;
+        }
+        if (*p == '/' || *p == '?' || *p == '#') break;
+    }
+    if (scheme) {
+        start = scheme + 3;
+        while (*start && *start != '/') ++start;
+    }
+
+    const char* end = start;
+    while (*end && *end != '?' && *end != '#') ++end;
+    const char* base = start;
+    for (const char* p = start; p < end; ++p) {
+        if (*p == '/' || *p == '\\') base = p + 1;
+    }
+
+    int oi = 0;
+    for (const char* p = base; p < end && oi < outSize - 1; ++p) out[oi++] = *p;
+    out[oi] = '\0';
+}
+
+static void nav_make_safe_download_filename(const char* urlOrPath, char* out, int outSize)
+{
+    if (!out || outSize <= 0) return;
+    char base[vfs::VFS_MAX_FILENAME];
+    nav_copy_basename_without_query(urlOrPath, base, sizeof(base));
+
+    int start = 0;
+    while (base[start] == '.' || base[start] == '/' || base[start] == '\\') ++start;
+
+    int oi = 0;
+    bool lastUnderscore = false;
+    for (int i = start; base[i] && oi < outSize - 1; ++i) {
+        char c = base[i];
+        if (nav_char_is_filename_safe(c)) {
+            out[oi++] = c;
+            lastUnderscore = false;
+        } else if (!lastUnderscore) {
+            out[oi++] = '_';
+            lastUnderscore = true;
+        }
+    }
+    while (oi > 0 && (out[oi - 1] == '.' || out[oi - 1] == '_')) --oi;
+    out[oi] = '\0';
+    if (!out[0]) {
+        strcopy(out, "download.bin", outSize);
+        return;
+    }
+
+    const int kMaxFileNameLen = 64;
+    if (oi > kMaxFileNameLen) {
+        int dot = -1;
+        for (int i = oi - 1; i > 0; --i) {
+            if (out[i] == '.') { dot = i; break; }
+        }
+        if (dot > 0 && oi - dot <= 8) {
+            int extLen = oi - dot;
+            int keepStem = kMaxFileNameLen - extLen;
+            if (keepStem < 1) keepStem = 1;
+            for (int i = 0; i < extLen; ++i) out[keepStem + i] = out[dot + i];
+            out[keepStem + extLen] = '\0';
+        } else {
+            out[kMaxFileNameLen] = '\0';
+        }
+    }
+}
+
+static bool kernel_downloads_directory_ready(char* reason, int reasonSize)
+{
+    if (reason && reasonSize > 0) reason[0] = '\0';
+    vfs::FileInfo info{};
+    vfs::Status statStatus = vfs::stat("/downloads", &info);
+    if (statStatus == vfs::VFS_OK) {
+        if (info.type == vfs::FILE_TYPE_DIRECTORY) return true;
+        strcopy(reason, "'/downloads' exists but is not a directory", reasonSize);
+        return false;
+    }
+    vfs::Status mkdirStatus = vfs::mkdir("/downloads");
+    if (mkdirStatus == vfs::VFS_OK) return true;
+    if (mkdirStatus == vfs::VFS_ERR_EXISTS) {
+        if (vfs::stat("/downloads", &info) == vfs::VFS_OK && info.type == vfs::FILE_TYPE_DIRECTORY) return true;
+    }
+    strcopy(reason, kernel_vfs_status_text(mkdirStatus), reasonSize);
+    return false;
+}
+
+static bool kernel_make_unique_download_path(const char* finalUrl, char* outPath, int outPathSize, char* outFileName, int outFileNameSize, char* error, int errorSize)
+{
+    if (outPath && outPathSize > 0) outPath[0] = '\0';
+    if (outFileName && outFileNameSize > 0) outFileName[0] = '\0';
+    if (error && errorSize > 0) error[0] = '\0';
+
+    char safeName[vfs::VFS_MAX_FILENAME];
+    nav_make_safe_download_filename(finalUrl, safeName, sizeof(safeName));
+    if (!safeName[0]) strcopy(safeName, "download.bin", sizeof(safeName));
+
+    kernel_join_path("/downloads", safeName, outPath, outPathSize);
+    if (!vfs::exists(outPath)) {
+        strcopy(outFileName, safeName, outFileNameSize);
+        return true;
+    }
+
+    char stem[vfs::VFS_MAX_FILENAME];
+    char ext[16];
+    stem[0] = '\0';
+    ext[0] = '\0';
+    int dot = -1;
+    int nameLen = strlen_local(safeName);
+    for (int i = nameLen - 1; i > 0; --i) {
+        if (safeName[i] == '.') { dot = i; break; }
+    }
+    if (dot > 0) {
+        int si = 0;
+        while (si < dot && si < (int)sizeof(stem) - 1) {
+            stem[si] = safeName[si];
+            ++si;
+        }
+        stem[si] = '\0';
+        strcopy(ext, safeName + dot, sizeof(ext));
+    } else {
+        strcopy(stem, safeName, sizeof(stem));
+    }
+    if (!stem[0]) strcopy(stem, "download", sizeof(stem));
+
+    for (int index = 1; index < 100; ++index) {
+        char suffix[16];
+        nav_int_to_text(index, suffix, sizeof(suffix));
+        char candidate[vfs::VFS_MAX_FILENAME];
+        candidate[0] = '\0';
+        int stemLen = strlen_local(stem);
+        int extLen = strlen_local(ext);
+        int suffixLen = 1 + strlen_local(suffix);
+        int keepStem = stemLen;
+        const int kMaxFileNameLen = 64;
+        if (keepStem + suffixLen + extLen > kMaxFileNameLen) keepStem = kMaxFileNameLen - suffixLen - extLen;
+        if (keepStem < 1) keepStem = 1;
+        for (int i = 0; i < keepStem && i < (int)sizeof(candidate) - 1; ++i) candidate[i] = stem[i];
+        candidate[keepStem] = '\0';
+        strappend(candidate, "-", sizeof(candidate));
+        strappend(candidate, suffix, sizeof(candidate));
+        strappend(candidate, ext, sizeof(candidate));
+        kernel_join_path("/downloads", candidate, outPath, outPathSize);
+        if (!vfs::exists(outPath)) {
+            strcopy(outFileName, candidate, outFileNameSize);
+            return true;
+        }
+    }
+
+    strcopy(error, "No unique download filename available", errorSize);
+    return false;
+}
+
+static bool kernel_write_binary_file_bare_metal(const char* path, const char* bytes, int byteCount, char* error, int errorSize)
+{
+    if (error && errorSize > 0) error[0] = '\0';
+    if (!path || (!bytes && byteCount > 0)) {
+        strcopy(error, "Invalid download write request", errorSize);
+        return false;
+    }
+    int32_t written = vfs::write_file(path, bytes, (uint32_t)(byteCount > 0 ? byteCount : 0));
+    if (written < 0) {
+        strcopy(error, kernel_vfs_status_text((vfs::Status)written), errorSize);
+        return false;
+    }
+    if (written != byteCount) {
+        strcopy(error, "Partial download write", errorSize);
+        return false;
+    }
+    return true;
+}
     }
 }
 
@@ -4567,6 +4775,7 @@ const char* TrashApp::typeForEntry(const TrashEntry& entry) const
 
 NavigatorApp::NavigatorApp()
     : m_blockCount(0), m_bookmarkCount(0), m_backCount(0), m_forwardCount(0),
+      m_recentDownloadCount(0),
       m_addressFocused(false), m_addressCaret(0), m_scrollY(0), m_hoverLinkIndex(-1),
       m_backBtnId(-1), m_forwardBtnId(-1), m_reloadBtnId(-1), m_homeBtnId(-1),
       m_bookmarksBtnId(-1), m_addBookmarkBtnId(-1)
@@ -4594,12 +4803,20 @@ NavigatorApp::NavigatorApp()
     m_metaRemoteImages = 0;
     m_metaLocalImages = 0;
     m_metaLastImageError[0] = '\0';
+    m_metaDnsUsed = false;
+    m_metaDnsHost[0] = '\0';
+    m_metaDnsResolvedIp[0] = '\0';
+    m_metaDnsError[0] = '\0';
     m_metaCssDetected = false;
     m_metaStyleRuleCount = 0;
     m_metaUnsupportedExternalStylesheetCount = 0;
     m_metaUnsupportedCssDeclarationCount = 0;
     m_metaCssStyleBlockCapped = false;
     m_metaCssStyleBytesProcessed = 0;
+    m_metaDownloaded = false;
+    m_metaDownloadSavedPath[0] = '\0';
+    m_metaDownloadByteCount = 0;
+    m_lastDownloadError[0] = '\0';
     m_bodyStyle = gxos::web::WebStyle{};
 }
 
@@ -4902,6 +5119,29 @@ void NavigatorApp::addBookmark(const char* title, const char* url)
     ++m_bookmarkCount;
 }
 
+void NavigatorApp::rememberDownload(const DownloadRecord& record)
+{
+    if (m_recentDownloadCount >= (int)(sizeof(m_recentDownloads) / sizeof(m_recentDownloads[0]))) {
+        for (int i = m_recentDownloadCount - 1; i > 0; --i) {
+            m_recentDownloads[i] = m_recentDownloads[i - 1];
+        }
+        m_recentDownloads[0] = record;
+        return;
+    }
+    for (int i = m_recentDownloadCount; i > 0; --i) {
+        m_recentDownloads[i] = m_recentDownloads[i - 1];
+    }
+    m_recentDownloads[0] = record;
+    ++m_recentDownloadCount;
+}
+
+void NavigatorApp::clearPageDownloadMetadata()
+{
+    m_metaDownloaded = false;
+    m_metaDownloadSavedPath[0] = '\0';
+    m_metaDownloadByteCount = 0;
+}
+
 void NavigatorApp::buildAboutNavigatorDocument()
 {
     strcopy(m_currentUrl, "about:navigator", MAX_URL_LEN);
@@ -4950,6 +5190,41 @@ void NavigatorApp::buildDownloadsDocument()
     addBlock(BLOCK_LINK, "Go to about:navigator", "about:navigator");
 }
 
+void NavigatorApp::buildDownloadResultDocument(const DownloadRecord& record)
+{
+    strcopy(m_currentUrl, record.finalUrl[0] ? record.finalUrl : record.url, MAX_URL_LEN);
+    strcopy(m_title, record.success ? "Download Complete" : "Download Failed", MAX_TITLE_LEN_NAV);
+    m_blockCount = 0;
+    addBlock(BLOCK_HEADING, m_title);
+
+    char line[MAX_BLOCK_TEXT];
+    strcopy(line, "Filename: ", sizeof(line));
+    strappend(line, record.suggestedFileName[0] ? record.suggestedFileName : "download.bin", sizeof(line));
+    addBlock(BLOCK_LIST_ITEM, line);
+    strcopy(line, "Source URL: ", sizeof(line));
+    strappend(line, record.url, sizeof(line));
+    addBlock(BLOCK_LIST_ITEM, line);
+    strcopy(line, "Final URL: ", sizeof(line));
+    strappend(line, record.finalUrl[0] ? record.finalUrl : record.url, sizeof(line));
+    addBlock(BLOCK_LIST_ITEM, line);
+    strcopy(line, "Content type: ", sizeof(line));
+    strappend(line, record.contentType[0] ? record.contentType : "application/octet-stream", sizeof(line));
+    addBlock(BLOCK_LIST_ITEM, line);
+    char number[24];
+    nav_int_to_text(record.byteCount, number, sizeof(number));
+    strcopy(line, "Byte count: ", sizeof(line));
+    strappend(line, number, sizeof(line));
+    addBlock(BLOCK_LIST_ITEM, line);
+    strcopy(line, "Saved path: ", sizeof(line));
+    strappend(line, record.savedPath[0] ? record.savedPath : "(none)", sizeof(line));
+    addBlock(BLOCK_LIST_ITEM, line);
+    addBlock(BLOCK_LIST_ITEM, record.success ? "Status: success" : "Status: failed");
+    if (record.error[0]) addBlock(BLOCK_PARAGRAPH, record.error);
+    addBlock(BLOCK_LINK, "View Downloads", "about:downloads");
+    addBlock(BLOCK_LINK, "Page Info", "about:page-info");
+    addBlock(BLOCK_LINK, "Go to about:navigator", "about:navigator");
+}
+
 static bool nav_starts_with(const char* value, const char* prefix);
 
 static void nav_int_to_text(int value, char* out, int outSize)
@@ -4986,6 +5261,12 @@ void NavigatorApp::rememberPageMetadata(const char* requestedUrl, const char* fi
     m_metaRedirectCount = redirectCount;
     m_metaRedirected = redirectCount > 0;
     strcopy(m_metaErrorStatus, errorStatus ? errorStatus : "", sizeof(m_metaErrorStatus));
+    strcopy(m_lastDownloadError, errorStatus ? errorStatus : "", sizeof(m_lastDownloadError));
+    bool httpSource = sourceType && streq_local(sourceType, "http");
+    m_metaDnsUsed = httpSource ? s_kernelLastDnsUsed : false;
+    strcopy(m_metaDnsHost, httpSource ? s_kernelLastDnsHost : "", sizeof(m_metaDnsHost));
+    strcopy(m_metaDnsResolvedIp, httpSource ? s_kernelLastDnsResolvedIp : "", sizeof(m_metaDnsResolvedIp));
+    strcopy(m_metaDnsError, httpSource ? s_kernelLastDnsError : "", sizeof(m_metaDnsError));
     m_metaSourceBytes = rawSourceBytes > 0 ? rawSourceBytes : 0;
     m_metaCssDetected = cssDiagnostics ? cssDiagnostics->cssDetected : false;
     m_metaStyleRuleCount = cssDiagnostics ? cssDiagnostics->styleRuleCount : 0;
@@ -5051,6 +5332,10 @@ void NavigatorApp::buildPageInfoDocument()
     NAV_INFO_TEXT("Redirected: ", m_metaRedirected ? "yes" : "no");
     NAV_INFO_INT("Redirect count: ", m_metaRedirectCount);
     NAV_INFO_TEXT("Error status: ", m_metaErrorStatus[0] ? m_metaErrorStatus : "(none)");
+    NAV_INFO_TEXT("DNS used: ", m_metaDnsUsed ? "yes" : "no");
+    NAV_INFO_TEXT("DNS hostname: ", m_metaDnsHost[0] ? m_metaDnsHost : "(none)");
+    NAV_INFO_TEXT("DNS resolved IP: ", m_metaDnsResolvedIp[0] ? m_metaDnsResolvedIp : "(none)");
+    NAV_INFO_TEXT("DNS error: ", m_metaDnsError[0] ? m_metaDnsError : "(none)");
     NAV_INFO_INT("Document blocks: ", m_metaDocumentBlocks);
     NAV_INFO_INT("Image blocks: ", m_metaImageBlocks);
     NAV_INFO_INT("Local images: ", m_metaLocalImages);
@@ -5074,6 +5359,7 @@ void NavigatorApp::buildPageInfoDocument()
     addBlock(BLOCK_LIST_ITEM, "HTTP body limit: 262144 bytes");
     addBlock(BLOCK_LIST_ITEM, "HTTP redirect limit: 5");
     addBlock(BLOCK_LIST_ITEM, "HTTP timeouts: 5000 ms connect/read");
+    addBlock(BLOCK_LIST_ITEM, "DNS lookup: A records only, timeout 3000 ms, retries 3");
     addBlock(BLOCK_LIST_ITEM, "File text/source preview limit: 32768 bytes");
     addBlock(BLOCK_LIST_ITEM, "Stored source preview limit: 2048 bytes");
     addBlock(BLOCK_LIST_ITEM, "Remote PNG byte limit: 262144 bytes");
@@ -5137,11 +5423,11 @@ void NavigatorApp::buildRuntimeDocument()
     addBlock(BLOCK_LIST_ITEM, "File read: enabled through VFS");
     addBlock(BLOCK_LIST_ITEM, "File write: unavailable for bookmark persistence in this adapter");
     addBlock(BLOCK_LIST_ITEM, "Local PNG: enabled through shared ImageAdapter where VFS image data exists");
-    addBlock(BLOCK_LIST_ITEM, "HTTP: enabled for numeric IPv4 HTTP/1.0 GET with redirects and chunked decoding");
-    addBlock(BLOCK_LIST_ITEM, "DNS: unsupported for Navigator HTTP v0.1");
+    addBlock(BLOCK_LIST_ITEM, "HTTP: enabled for numeric IPv4 and hostname HTTP/1.0 GET with redirects and chunked decoding");
+    addBlock(BLOCK_LIST_ITEM, "DNS: enabled-basic for A/IPv4 records");
     addBlock(BLOCK_LIST_ITEM, "HTTP redirects: enabled, limit 5");
     addBlock(BLOCK_LIST_ITEM, "HTTP chunked transfer decoding: enabled");
-    addBlock(BLOCK_LIST_ITEM, "Remote PNG: enabled-basic for numeric IPv4 http:// PNG images");
+    addBlock(BLOCK_LIST_ITEM, "Remote PNG: enabled-basic for numeric IPv4 and hostname http:// PNG images");
     addBlock(BLOCK_LIST_ITEM, "Downloads: unavailable for bare-metal HTTP v0.1");
     addBlock(BLOCK_LIST_ITEM, "Temp files: unsupported");
     addBlock(BLOCK_LIST_ITEM, "Bookmark persistence: unavailable; bookmarks are in-memory defaults");
@@ -5154,6 +5440,12 @@ void NavigatorApp::buildRuntimeDocument()
     addBlock(BLOCK_HEADING, "Backends");
     addBlock(BLOCK_LIST_ITEM, "File backend: kernel VFS");
     addBlock(BLOCK_LIST_ITEM, "HTTP backend: kernel TCP client transport + shared guideWeb HTTP parser subset");
+    char dnsLine[96];
+    char dnsIp[16];
+    kernel::ipv4::ip_to_string(kernel::dns::get_server(), dnsIp);
+    strcopy(dnsLine, "DNS backend: kernel UDP DNS client, server ", sizeof(dnsLine));
+    strappend(dnsLine, kernel::dns::get_server() ? dnsIp : "(none)", sizeof(dnsLine));
+    addBlock(BLOCK_LIST_ITEM, dnsLine);
     addBlock(BLOCK_LIST_ITEM, "Image backend: shared ImageAdapter + framebuffer/compositor drawing");
     addBlock(BLOCK_LIST_ITEM, "Remote PNG backend: kernel HTTP fetch + ImageAdapter::LoadFromBytes");
 
@@ -5644,7 +5936,8 @@ static const int kKernelHttpReadTimeoutMs = gxos::web::kHttpSharedReadTimeoutMs;
 struct KernelHttpUrl {
     uint32_t ip;
     uint16_t port;
-    char host[32];
+    bool hostIsNumeric;
+    char host[64];
     char path[kKernelHttpUrlLen];
     char error[96];
 };
@@ -5659,6 +5952,10 @@ struct KernelHttpResponse {
     char location[kKernelHttpUrlLen];
     int bodyBytes;
     int redirectCount;
+    bool dnsUsed;
+    char dnsHost[64];
+    char dnsResolvedIp[16];
+    char dnsError[64];
     char requestedUrl[kKernelHttpUrlLen];
     char finalUrl[kKernelHttpUrlLen];
     char error[128];
@@ -5697,11 +5994,43 @@ static bool parse_numeric_ipv4_local(const char* text, const char* end, uint32_t
     return true;
 }
 
+static bool nav_hostname_is_valid(const char* start, const char* end)
+{
+    if (!start || !end || start >= end) return false;
+    int labelLen = 0;
+    bool lastWasDot = true;
+    for (const char* p = start; p < end; ++p) {
+        char c = *p;
+        if (c == '.') {
+            if (lastWasDot || labelLen == 0 || labelLen > 63) return false;
+            labelLen = 0;
+            lastWasDot = true;
+            continue;
+        }
+        bool ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                  (c >= '0' && c <= '9') || c == '-';
+        if (!ok) return false;
+        ++labelLen;
+        lastWasDot = false;
+    }
+    return !lastWasDot && labelLen > 0 && labelLen <= 63;
+}
+
+static bool nav_host_chars_are_numeric_ipv4ish(const char* start, const char* end)
+{
+    if (!start || !end || start >= end) return false;
+    for (const char* p = start; p < end; ++p) {
+        if ((*p < '0' || *p > '9') && *p != '.') return false;
+    }
+    return true;
+}
+
 static bool parse_http_url_kernel(const char* url, KernelHttpUrl* parsed)
 {
     if (!url || !parsed) return false;
     parsed->ip = 0;
     parsed->port = 80;
+    parsed->hostIsNumeric = false;
     parsed->host[0] = '\0';
     parsed->path[0] = '/';
     parsed->path[1] = '\0';
@@ -5713,8 +6042,16 @@ static bool parse_http_url_kernel(const char* url, KernelHttpUrl* parsed)
     }
 
     const char* hostStart = url + 7;
+    if (*hostStart == '[') {
+        strcopy(parsed->error, "IPv6 HTTP hosts are not supported in bare-metal Navigator yet", sizeof(parsed->error));
+        return false;
+    }
     const char* p = hostStart;
-    while (*p && *p != ':' && *p != '/' && *p != '?' && (p - hostStart) < 31) ++p;
+    while (*p && *p != ':' && *p != '/' && *p != '?' && (p - hostStart) < (int)sizeof(parsed->host) - 1) ++p;
+    if (*p && *p != ':' && *p != '/' && *p != '?') {
+        strcopy(parsed->error, "HTTP hostname too long", sizeof(parsed->error));
+        return false;
+    }
     const char* hostEnd = p;
     if (hostEnd == hostStart) {
         strcopy(parsed->error, "Missing HTTP host", sizeof(parsed->error));
@@ -5723,9 +6060,18 @@ static bool parse_http_url_kernel(const char* url, KernelHttpUrl* parsed)
     int hi = 0;
     for (const char* h = hostStart; h < hostEnd && hi < (int)sizeof(parsed->host) - 1; ++h) parsed->host[hi++] = *h;
     parsed->host[hi] = '\0';
-    if (!parse_numeric_ipv4_local(hostStart, hostEnd, &parsed->ip)) {
-        strcopy(parsed->error, "Only numeric IPv4 HTTP hosts are supported", sizeof(parsed->error));
-        return false;
+
+    if (parse_numeric_ipv4_local(hostStart, hostEnd, &parsed->ip)) {
+        parsed->hostIsNumeric = true;
+    } else {
+        if (nav_host_chars_are_numeric_ipv4ish(hostStart, hostEnd)) {
+            strcopy(parsed->error, "Invalid numeric IPv4 HTTP host", sizeof(parsed->error));
+            return false;
+        }
+        if (!nav_hostname_is_valid(hostStart, hostEnd)) {
+            strcopy(parsed->error, "Invalid HTTP hostname", sizeof(parsed->error));
+            return false;
+        }
     }
 
     if (*p == ':') {
@@ -5904,6 +6250,71 @@ static bool kernel_http_parse_response(KernelHttpResponse* response, int rawLen)
     return true;
 }
 
+static const char* kernel_dns_error_name(kernel::dns::Status status)
+{
+    switch (status) {
+    case kernel::dns::DNS_OK: return "ok";
+    case kernel::dns::DNS_ERR_INVALID: return "DNS invalid hostname";
+    case kernel::dns::DNS_ERR_TOOLONG: return "DNS hostname too long";
+    case kernel::dns::DNS_ERR_NXDOMAIN: return "DNS name not found";
+    case kernel::dns::DNS_ERR_SERVFAIL: return "DNS server failure";
+    case kernel::dns::DNS_ERR_TIMEOUT: return "DNS timeout";
+    case kernel::dns::DNS_ERR_NETWORK: return "DNS network unavailable";
+    case kernel::dns::DNS_ERR_FORMAT: return "Malformed DNS response";
+    case kernel::dns::DNS_ERR_REFUSED: return "DNS query refused";
+    case kernel::dns::DNS_ERR_NOTFOUND: return "DNS response had no A record";
+    case kernel::dns::DNS_ERR_NOCACHE: return "DNS cache miss";
+    default: return "DNS lookup failed";
+    }
+}
+
+static bool kernel_http_resolve_host(KernelHttpUrl* parsed, KernelHttpResponse* response)
+{
+    if (!parsed || !response) return false;
+    response->dnsUsed = false;
+    response->dnsHost[0] = '\0';
+    response->dnsResolvedIp[0] = '\0';
+    response->dnsError[0] = '\0';
+    s_kernelLastDnsUsed = false;
+    s_kernelLastDnsHost[0] = '\0';
+    s_kernelLastDnsResolvedIp[0] = '\0';
+    s_kernelLastDnsError[0] = '\0';
+    if (parsed->hostIsNumeric) return true;
+
+    response->dnsUsed = true;
+    s_kernelLastDnsUsed = true;
+    strcopy(response->dnsHost, parsed->host, sizeof(response->dnsHost));
+    strcopy(s_kernelLastDnsHost, parsed->host, sizeof(s_kernelLastDnsHost));
+
+#ifdef GXOS_NAVIGATOR_HTTP_SMOKE_ACTIVE
+    if (streq_local(parsed->host, "guidexos.test")) {
+        parsed->ip = kernel::ipv4::make_ip(10, 0, 2, 2);
+        kernel::ipv4::ip_to_string(parsed->ip, response->dnsResolvedIp);
+        strcopy(s_kernelLastDnsResolvedIp, response->dnsResolvedIp, sizeof(s_kernelLastDnsResolvedIp));
+        return true;
+    }
+#endif
+
+    if (kernel::dns::get_server() == 0) {
+        strcopy(response->dnsError, "DNS unavailable: no DNS server configured", sizeof(response->dnsError));
+        strcopy(s_kernelLastDnsError, response->dnsError, sizeof(s_kernelLastDnsError));
+        strcopy(response->error, response->dnsError, sizeof(response->error));
+        return false;
+    }
+
+    uint32_t resolvedIp = 0;
+    kernel::dns::Status dnsStatus = kernel::dns::resolve(parsed->host, &resolvedIp);
+    if (dnsStatus != kernel::dns::DNS_OK || resolvedIp == 0) {
+        strcopy(response->dnsError, kernel_dns_error_name(dnsStatus), sizeof(response->dnsError));
+        strcopy(s_kernelLastDnsError, response->dnsError, sizeof(s_kernelLastDnsError));
+        strcopy(response->error, response->dnsError, sizeof(response->error));
+        return false;
+    }
+    parsed->ip = resolvedIp;
+    kernel::ipv4::ip_to_string(parsed->ip, response->dnsResolvedIp);
+    strcopy(s_kernelLastDnsResolvedIp, response->dnsResolvedIp, sizeof(s_kernelLastDnsResolvedIp));
+    return true;
+}
 static KernelHttpResponse* kernel_http_fetch_once(const char* url)
 {
     KernelHttpResponse* response = &s_kernelHttpResponse;
@@ -5916,6 +6327,14 @@ static KernelHttpResponse* kernel_http_fetch_once(const char* url)
     response->location[0] = '\0';
     response->bodyBytes = 0;
     response->redirectCount = 0;
+    response->dnsUsed = false;
+    response->dnsHost[0] = '\0';
+    response->dnsResolvedIp[0] = '\0';
+    response->dnsError[0] = '\0';
+    s_kernelLastDnsUsed = false;
+    s_kernelLastDnsHost[0] = '\0';
+    s_kernelLastDnsResolvedIp[0] = '\0';
+    s_kernelLastDnsError[0] = '\0';
     response->requestedUrl[0] = '\0';
     response->finalUrl[0] = '\0';
     response->error[0] = '\0';
@@ -5931,7 +6350,9 @@ static KernelHttpResponse* kernel_http_fetch_once(const char* url)
         strcopy(response->error, parsed.error, sizeof(response->error));
         return response;
     }
-
+    if (!kernel_http_resolve_host(&parsed, response)) {
+        return response;
+    }
 
     int sock = kernel::tcp::tcp_socket();
     if (sock < 0) {
@@ -6218,6 +6639,7 @@ void NavigatorApp::prepareImageResources()
 }
 void NavigatorApp::loadHttpUrl(const char* url)
 {
+    clearPageDownloadMetadata();
     KernelHttpResponse* response = kernel_http_fetch(url);
     if (!response->ok) {
         const char* finalUrl = response->finalUrl[0] ? response->finalUrl : url;
@@ -6241,8 +6663,66 @@ void NavigatorApp::loadHttpUrl(const char* url)
             addBlock(BLOCK_PREFORMATTED, response->body);
             rememberPageMetadata(response->requestedUrl[0] ? response->requestedUrl : url, response->finalUrl[0] ? response->finalUrl : url, "http", response->contentType, "", response->body, response->bodyBytes, nullptr, nullptr, response->statusCode, response->reason, response->redirectCount);
         } else {
-            buildErrorDocument(response->finalUrl[0] ? response->finalUrl : url, "This bare-metal Navigator build cannot render this HTTP content type yet. Downloads are unavailable in bare-metal HTTP v0.1.");
-            rememberPageMetadata(response->requestedUrl[0] ? response->requestedUrl : url, response->finalUrl[0] ? response->finalUrl : url, "http", response->contentType, "Unsupported HTTP content type", response->body, response->bodyBytes, nullptr, nullptr, response->statusCode, response->reason, response->redirectCount);
+            DownloadRecord record{};
+            strcopy(record.url, response->requestedUrl[0] ? response->requestedUrl : url, sizeof(record.url));
+            strcopy(record.finalUrl, response->finalUrl[0] ? response->finalUrl : url, sizeof(record.finalUrl));
+            strcopy(record.contentType, response->contentType[0] ? response->contentType : "application/octet-stream", sizeof(record.contentType));
+            record.byteCount = response->bodyBytes;
+            nav_make_safe_download_filename(record.finalUrl, record.suggestedFileName, sizeof(record.suggestedFileName));
+
+            char writeError[128];
+            char uniqueName[vfs::VFS_MAX_FILENAME];
+            char uniquePath[MAX_URL_LEN];
+            if (response->bodyBytes <= 0) {
+                record.success = false;
+                strcopy(record.error, "Response body was empty; Navigator did not create a download file.", sizeof(record.error));
+                rememberDownload(record);
+                buildDownloadResultDocument(record);
+                rememberPageMetadata(record.url, record.finalUrl, "http", record.contentType, "Download unavailable: no body", response->body, response->bodyBytes, nullptr, nullptr, response->statusCode, response->reason, response->redirectCount);
+                return;
+            }
+            if (!kernel_downloads_directory_ready(writeError, sizeof(writeError))) {
+                record.success = false;
+                strcopy(record.error, writeError[0] ? writeError : "Downloads directory is unavailable.", sizeof(record.error));
+                rememberDownload(record);
+                buildDownloadResultDocument(record);
+                rememberPageMetadata(record.url, record.finalUrl, "http", record.contentType, "Download unavailable: downloads directory not writable", response->body, response->bodyBytes, nullptr, nullptr, response->statusCode, response->reason, response->redirectCount);
+                return;
+            }
+            if (!kernel_make_unique_download_path(record.finalUrl, uniquePath, sizeof(uniquePath), uniqueName, sizeof(uniqueName), writeError, sizeof(writeError))) {
+                record.success = false;
+                strcopy(record.error, writeError[0] ? writeError : "Navigator could not allocate a safe non-overwriting filename.", sizeof(record.error));
+                rememberDownload(record);
+                buildDownloadResultDocument(record);
+                rememberPageMetadata(record.url, record.finalUrl, "http", record.contentType, "Download unavailable: unsafe filename", response->body, response->bodyBytes, nullptr, nullptr, response->statusCode, response->reason, response->redirectCount);
+                return;
+            }
+
+            strcopy(record.suggestedFileName, uniqueName, sizeof(record.suggestedFileName));
+            strcopy(record.savedPath, uniquePath, sizeof(record.savedPath));
+            if (!kernel_write_binary_file_bare_metal(record.savedPath, response->body, response->bodyBytes, writeError, sizeof(writeError))) {
+                record.success = false;
+                strcopy(record.error, writeError[0] ? writeError : "Navigator could not write the file to the downloads directory.", sizeof(record.error));
+            } else {
+                vfs::FileInfo info{};
+                vfs::Status statStatus = vfs::stat(record.savedPath, &info);
+                if (statStatus != vfs::VFS_OK || info.type != vfs::FILE_TYPE_REGULAR || (int)info.size != record.byteCount) {
+                    record.success = false;
+                    strcopy(record.error, statStatus == vfs::VFS_OK ? "Download verification failed" : kernel_vfs_status_text(statStatus), sizeof(record.error));
+                } else {
+                    record.success = true;
+                }
+            }
+
+            m_metaDownloaded = record.success;
+            m_metaDownloadByteCount = record.byteCount;
+            strcopy(m_metaDownloadSavedPath, record.savedPath, sizeof(m_metaDownloadSavedPath));
+            strcopy(m_lastDownloadError, record.error, sizeof(m_lastDownloadError));
+            rememberDownload(record);
+            buildDownloadResultDocument(record);
+            rememberPageMetadata(record.url, record.finalUrl, "http", record.contentType,
+                record.success ? "Unsupported content type downloaded" : "Download failed",
+                response->body, response->bodyBytes, nullptr, nullptr, response->statusCode, response->reason, response->redirectCount);
         }
         return;
     }
@@ -6746,7 +7226,8 @@ static bool printNavigatorHttpSmokeCase(const char* name, const char* url, int e
                                         bool requireParsedBlocks, bool requireError,
                                         int expectedRemoteImages = -1,
                                         int expectedLoadedImages = -1,
-                                        int expectedFailedImages = -1)
+                                        int expectedFailedImages = -1,
+                                        const char* expectedDnsIp = nullptr)
 {
     int httpStatus = 0;
     int httpBodyBytes = 0;
@@ -6769,6 +7250,7 @@ static bool printNavigatorHttpSmokeCase(const char* name, const char* url, int e
     if (expectedRemoteImages >= 0) pass = pass && remoteImages == expectedRemoteImages;
     if (expectedLoadedImages >= 0) pass = pass && loadedImages == expectedLoadedImages;
     if (expectedFailedImages >= 0) pass = pass && failedImages == expectedFailedImages;
+    if (expectedDnsIp && expectedDnsIp[0]) pass = pass && nav_smoke_text_equals(s_kernelLastDnsResolvedIp, expectedDnsIp);
 
     serial::puts("[NAVIGATOR-SMOKE] http.case.");
     serial::puts(name);
@@ -6820,6 +7302,21 @@ static bool printNavigatorHttpSmokeCase(const char* name, const char* url, int e
     serial::puts(".redirect_count=");
     serial_put_dec((uint32_t)redirectCount);
     serial::puts("\n");
+    serial::puts("[NAVIGATOR-SMOKE] http.case.");
+    serial::puts(name);
+    serial::puts(".dns_host=");
+    serial::puts(s_kernelLastDnsHost[0] ? s_kernelLastDnsHost : "(none)");
+    serial::puts("\n");
+    serial::puts("[NAVIGATOR-SMOKE] http.case.");
+    serial::puts(name);
+    serial::puts(".dns_resolved_ip=");
+    serial::puts(s_kernelLastDnsResolvedIp[0] ? s_kernelLastDnsResolvedIp : "(none)");
+    serial::puts("\n");
+    serial::puts("[NAVIGATOR-SMOKE] http.case.");
+    serial::puts(name);
+    serial::puts(".dns_error=");
+    serial::puts(s_kernelLastDnsError[0] ? s_kernelLastDnsError : "(none)");
+    serial::puts("\n");
     if (httpError[0]) {
         serial::puts("[NAVIGATOR-SMOKE] http.case.");
         serial::puts(name);
@@ -6845,11 +7342,11 @@ static bool printNavigatorRuntimeSmokePreamble()
     serial::puts("[NAVIGATOR-SMOKE] stale.placeholder=not active\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.file_read=enabled through VFS\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.local_png=enabled through shared ImageAdapter where VFS image data exists\n");
-    serial::puts("[NAVIGATOR-SMOKE] capability.http=enabled numeric IPv4 HTTP/1.0 GET with redirects/chunked\n");
-    serial::puts("[NAVIGATOR-SMOKE] capability.dns=unsupported for Navigator HTTP v0.1\n");
+    serial::puts("[NAVIGATOR-SMOKE] capability.http=enabled numeric IPv4 and hostname HTTP/1.0 GET with redirects/chunked\n");
+    serial::puts("[NAVIGATOR-SMOKE] capability.http_dns=enabled-basic A records\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.http_redirects=enabled limit 5\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.http_chunked=enabled\n");
-    serial::puts("[NAVIGATOR-SMOKE] capability.remote_png=enabled-basic numeric IPv4 http:// PNG images\n");
+    serial::puts("[NAVIGATOR-SMOKE] capability.remote_png=enabled-basic numeric IPv4 and hostname http:// PNG images\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.downloads=unavailable for bare-metal HTTP v0.1\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.css_lite=enabled for embedded style blocks\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.forms_lite=enabled for file/about GET form blocks\n");
@@ -6868,6 +7365,10 @@ static bool printNavigatorHttpSmokeCases()
         "http://10.0.2.2:8080/navigator-smoke/final.html", true, true, false) && httpOk;
     httpOk = printNavigatorHttpSmokeCase("absolute_redirect", "http://10.0.2.2:8080/navigator-smoke/redirect-absolute", 200,
         "http://10.0.2.2:8080/navigator-smoke/final.html", true, true, false) && httpOk;
+    httpOk = printNavigatorHttpSmokeCase("hostname_basic", "http://guidexos.test:8080/navigator-smoke/host-check.html", 200,
+        "http://guidexos.test:8080/navigator-smoke/host-check.html", true, true, false, -1, -1, -1, "10.0.2.2") && httpOk;
+    httpOk = printNavigatorHttpSmokeCase("hostname_redirect", "http://10.0.2.2:8080/navigator-smoke/redirect-hostname", 200,
+        "http://guidexos.test:8080/navigator-smoke/final.html", true, true, false, -1, -1, -1, "10.0.2.2") && httpOk;
     httpOk = printNavigatorHttpSmokeCase("redirect_loop", "http://10.0.2.2:8080/navigator-smoke/redirect-loop", 302,
         "http://10.0.2.2:8080/navigator-smoke/redirect-loop", false, false, true) && httpOk;
     httpOk = printNavigatorHttpSmokeCase("chunked", "http://10.0.2.2:8080/navigator-smoke/chunked.html", 200,
@@ -6886,6 +7387,8 @@ static bool printNavigatorHttpSmokeCases()
         "http://10.0.2.2:8080/navigator-smoke/image-chunked.html", true, true, false, 1, 1, 0) && httpOk;
     httpOk = printNavigatorHttpSmokeCase("image_nonpng", "http://10.0.2.2:8080/navigator-smoke/image-nonpng.html", 200,
         "http://10.0.2.2:8080/navigator-smoke/image-nonpng.html", true, true, false, 1, 0, 1) && httpOk;
+    httpOk = printNavigatorHttpSmokeCase("hostname_image_relative", "http://guidexos.test:8080/navigator-smoke/hostname-image.html", 200,
+        "http://guidexos.test:8080/navigator-smoke/hostname-image.html", true, true, false, 1, 1, 0, "10.0.2.2") && httpOk;
     return httpOk;
 }
 

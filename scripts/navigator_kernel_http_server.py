@@ -51,9 +51,18 @@ class NavigatorSmokeHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         path = self.path.split("?", 1)[0]
+        host = self.headers.get("Host", "")
         if path == "/navigator-smoke/basic.html":
             self.write_bytes(200, "text/html; charset=utf-8",
                              b"<html><body><h1>Kernel HTTP Basic</h1><p>basic html body</p></body></html>")
+            return
+        if path == "/navigator-smoke/host-check.html":
+            if host.split(":", 1)[0].lower() != "guidexos.test":
+                self.write_bytes(421, "text/html; charset=utf-8",
+                                 b"<html><body><h1>Wrong Host</h1><p>expected guidexos.test</p></body></html>")
+                return
+            self.write_bytes(200, "text/html; charset=utf-8",
+                             b"<html><body><h1>Kernel DNS Hostname</h1><p>host header preserved</p></body></html>")
             return
         if path == "/navigator-smoke/final.html":
             self.write_bytes(200, "text/html; charset=utf-8",
@@ -64,6 +73,9 @@ class NavigatorSmokeHandler(BaseHTTPRequestHandler):
             return
         if path == "/navigator-smoke/redirect-absolute":
             self.write_redirect(301, "http://10.0.2.2:8080/navigator-smoke/final.html")
+            return
+        if path == "/navigator-smoke/redirect-hostname":
+            self.write_redirect(302, "http://guidexos.test:8080/navigator-smoke/final.html")
             return
         if path == "/navigator-smoke/redirect-loop":
             self.write_redirect(302, "/navigator-smoke/redirect-loop")
@@ -90,6 +102,10 @@ class NavigatorSmokeHandler(BaseHTTPRequestHandler):
         if path == "/navigator-smoke/image-relative.html":
             self.write_bytes(200, "text/html; charset=utf-8",
                              b"<html><body><h1>Relative PNG</h1><img src=\"logo.png\" alt=\"relative png\"></body></html>")
+            return
+        if path == "/navigator-smoke/hostname-image.html":
+            self.write_bytes(200, "text/html; charset=utf-8",
+                             b"<html><body><h1>Hostname PNG</h1><img src=\"logo.png\" alt=\"hostname png\"></body></html>")
             return
         if path == "/navigator-smoke/image-absolute.html":
             self.write_bytes(200, "text/html; charset=utf-8",
