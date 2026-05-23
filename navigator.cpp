@@ -34,6 +34,9 @@ static std::vector<DownloadItem> s_recentDownloads;
 bool        Navigator::s_addressFocused = false;
 std::string Navigator::s_addressBuffer;
 int         Navigator::s_addressCaret   = 0;
+int         Navigator::s_focusedInputBlockIndex = -1;
+int         Navigator::s_inputCaret = 0;
+std::string Navigator::s_lastSubmittedFormUrl;
 
 namespace {
 	constexpr int kWindowW = 920;
@@ -58,6 +61,9 @@ namespace {
 	constexpr uint32_t kRemoteImageMaxWidth = 2048u;
 	constexpr uint32_t kRemoteImageMaxHeight = 2048u;
 	constexpr uint32_t kRemoteImageMaxPixels = 2048u * 2048u;
+	constexpr int kFormInputW = 320;
+	constexpr int kFormControlH = 26;
+	constexpr int kFormSubmitW = 104;
 
 	constexpr int kWidgetIdBack = 1;
 	constexpr int kWidgetIdForward = 2;
@@ -216,6 +222,7 @@ namespace {
 	static int cssPaddingOrDefault(const WebStyle& style, int fallbackValue);
 	static int cssFontSizeOrDefault(const WebStyle& style, int fallbackValue);
 	static bool colorChannels(uint32_t color, int& r, int& g, int& b);
+	static std::string encodeFormComponent(const std::string& value);
 
 	static std::string toLowerAscii(std::string value)
 	{
@@ -472,6 +479,10 @@ namespace {
 		metadata.unsupportedCssDeclarationCount = doc.cssDiagnostics.unsupportedDeclarationCount;
 		metadata.cssStyleBlockCapped = doc.cssDiagnostics.styleBlockCapped;
 		metadata.cssStyleBytesProcessed = doc.cssDiagnostics.styleBytesProcessed;
+		metadata.formCount = doc.formsDiagnostics.formCount;
+		metadata.formInputCount = doc.formsDiagnostics.textInputCount;
+		metadata.unsupportedFormControlCount = doc.formsDiagnostics.unsupportedControlCount;
+		metadata.unsupportedFormMethod = doc.formsDiagnostics.hasUnsupportedMethod;
 
 		for (const DocBlock& block : doc.blocks) {
 			if (block.type != BlockType::Image) continue;
@@ -536,6 +547,27 @@ namespace {
 		return true;
 	}
 
+	static std::string encodeFormComponent(const std::string& value)
+	{
+		static const char* hex = "0123456789ABCDEF";
+		std::string out;
+		out.reserve(value.size());
+		for (unsigned char ch : value) {
+			if ((ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') ||
+				(ch >= '0' && ch <= '9') || ch == '-' || ch == '_' ||
+				ch == '.' || ch == '~') {
+				out.push_back(static_cast<char>(ch));
+			} else if (ch == ' ') {
+				out.push_back('+');
+			} else {
+				out.push_back('%');
+				out.push_back(hex[(ch >> 4) & 0x0F]);
+				out.push_back(hex[ch & 0x0F]);
+			}
+		}
+		return out;
+	}
+
 	struct RuntimeReportEntry {
 		std::string section;
 		std::string label;
@@ -547,7 +579,9 @@ namespace {
 		const std::string& currentTitle,
 		int currentBlockCount,
 		const std::string& inspectedUrl,
-		bool cssDetected)
+		bool cssDetected,
+		int formCount,
+		int formInputCount)
 	{
 		return {
 			{"Runtime", "Mode", "hosted/compositor"},
@@ -577,6 +611,7 @@ namespace {
 			{"Capabilities", "CSS-lite embedded <style>", "enabled"},
 			{"Capabilities", "Hosted colored text primitive", "enabled"},
 			{"Capabilities", "CSS text color visible", "enabled"},
+			{"Capabilities", "Forms-lite GET forms", "enabled"},
 			{"Capabilities", "External stylesheets", "unsupported"},
 
 			{"Backends", "File backend", "navigator_file_io hosted/VFS adapter"},
@@ -588,6 +623,8 @@ namespace {
 			{"Current Document", "Block count", std::to_string(currentBlockCount)},
 			{"Current Document", "Inspected page", inspectedUrl.empty() ? "(none)" : inspectedUrl},
 			{"Current Document", "CSS diagnostics", cssDetected ? "css detected" : "no css detected"},
+			{"Current Document", "Forms", std::to_string(formCount)},
+			{"Current Document", "Text inputs", std::to_string(formInputCount)},
 		};
 	}
 
@@ -811,6 +848,22 @@ bool Navigator::SmokeNavigateTo(const std::string& url)
 	return s_currentDoc.url == url;
 }
 
+bool Navigator::SmokeSubmitFirstForm(const std::string& value)
+{
+	if (s_windowId == 0) return false;
+	for (int i = 0; i < static_cast<int>(s_currentDoc.blocks.size()); ++i) {
+		DocBlock& block = s_currentDoc.blocks[i];
+		if (block.type != BlockType::FormTextInput) continue;
+		block.inputValue = value;
+		block.text = value;
+		s_focusedInputBlockIndex = i;
+		s_inputCaret = static_cast<int>(block.inputValue.size());
+		submitFormForBlock(i);
+		return true;
+	}
+	return false;
+}
+
 std::string Navigator::SmokeRuntimeReport()
 {
 	const std::string inspected = s_pageMetadata.finalUrl.empty() ? "" : s_pageMetadata.finalUrl;
@@ -819,7 +872,9 @@ std::string Navigator::SmokeRuntimeReport()
 		s_currentDoc.title,
 		static_cast<int>(s_currentDoc.blocks.size()),
 		inspected,
-		s_pageMetadata.cssDetected));
+		s_pageMetadata.cssDetected,
+		s_pageMetadata.formCount,
+		s_pageMetadata.formInputCount));
 }
 
 std::string Navigator::SmokeCurrentUrl()
@@ -923,6 +978,7 @@ int Navigator::main(int, char**)
 					updateHoverStatus(target, linkIdx);
 				} else if (button == 1 && action == "down") {
 					if (target == HitTarget::AddressBar) {
+							if (s_focusedInputBlockIndex >= 0) blurDocumentInput();
 							focusAddressBar();
 							// Set caret from click X position using the same fixed char width as rendering.
 							// TODO: replace with proportional text measurement when available.
@@ -937,7 +993,22 @@ int Navigator::main(int, char**)
 					} else {
 						// Clicking anywhere outside the address bar blurs it.
 						if (s_addressFocused) blurAddressBar();
-						if (target == HitTarget::Link) handleDocumentClick(target, linkIdx);
+						if (target == HitTarget::FormInput) {
+							focusDocumentInput(linkIdx);
+							Rect r = formControlRect(linkIdx);
+							constexpr int kCharW = 8;
+							int charOffset = (x - (r.x + 8)) / kCharW;
+							if (linkIdx >= 0 && linkIdx < static_cast<int>(s_currentDoc.blocks.size())) {
+								s_inputCaret = std::max(0, std::min(charOffset,
+									static_cast<int>(s_currentDoc.blocks[linkIdx].inputValue.size())));
+							}
+							updateDisplay();
+						} else {
+							if (s_focusedInputBlockIndex >= 0) blurDocumentInput();
+							if (target == HitTarget::Link || target == HitTarget::FormSubmit) {
+								handleDocumentClick(target, linkIdx);
+							}
+						}
 					}
 				}
 			} catch (...) {
@@ -1089,6 +1160,8 @@ void Navigator::renderDocument()
 		case BlockType::Link:         blockH = blockMarginTop + wrappedBlockHeight(block.text, kWrapCols)        + std::max(4, blockMarginBottom) + (nextIsHeading ? kPreGapIfNextHeading : 0); break;
 		case BlockType::ListItem:     blockH = blockMarginTop + wrappedBlockHeight(block.text, kListWrapCols)    + std::max(2, blockMarginBottom) + (nextIsHeading ? kPreGapIfNextHeading : 0); break;
 		case BlockType::Preformatted: blockH = blockMarginTop + wrappedBlockHeight(block.text, kPreWrapCols, true) + blockPadding * 2 + std::max(4, blockMarginBottom); break;
+		case BlockType::FormTextInput:
+		case BlockType::FormSubmit:   blockH = blockMarginTop + kFormControlH + std::max(6, blockMarginBottom); break;
 		case BlockType::Image: {
 			int imageW = 0;
 			int imageH = 0;
@@ -1203,6 +1276,51 @@ void Navigator::renderDocument()
 			}
 			break;
 		}
+
+		case BlockType::FormTextInput: {
+			const int inputX = kContentX + kIndent + bodyMarginLeft + blockMarginLeft;
+			const int inputY = drawY + blockMarginTop;
+			const bool focused = (blockIndex == s_focusedInputBlockIndex);
+			drawRect(s_windowId, inputX, inputY, kFormInputW, kFormControlH, 250, 252, 255);
+			drawRect(s_windowId, inputX, inputY, kFormInputW, 1, focused ? 54 : 148, focused ? 118 : 156, focused ? 210 : 170);
+			drawRect(s_windowId, inputX, inputY + kFormControlH - 1, kFormInputW, 1, focused ? 54 : 148, focused ? 118 : 156, focused ? 210 : 170);
+			drawRect(s_windowId, inputX, inputY, 1, kFormControlH, focused ? 54 : 148, focused ? 118 : 156, focused ? 210 : 170);
+			drawRect(s_windowId, inputX + kFormInputW - 1, inputY, 1, kFormControlH, focused ? 54 : 148, focused ? 118 : 156, focused ? 210 : 170);
+			std::string text = block.inputValue;
+			bool placeholder = text.empty() && !block.placeholder.empty();
+			if (placeholder) text = block.placeholder;
+			const int maxChars = (kFormInputW - 16) / kCharW;
+			if (static_cast<int>(text.size()) > maxChars) {
+				text = text.substr(text.size() - static_cast<size_t>(maxChars));
+			}
+			if (placeholder) {
+				drawTextAtColored(s_windowId, inputX + 8, inputY + 7, text, 128, 136, 150);
+			} else {
+				drawTextAtColored(s_windowId, inputX + 8, inputY + 7, text, 35, 45, 60);
+			}
+			if (focused) {
+				int caretPos = std::max(0, std::min(s_inputCaret, static_cast<int>(block.inputValue.size())));
+				int visibleCaret = std::min(caretPos, maxChars);
+				drawRect(s_windowId, inputX + 8 + visibleCaret * kCharW, inputY + 5, 1, kFormControlH - 10, 35, 85, 170);
+			}
+			break;
+		}
+
+		case BlockType::FormSubmit: {
+			const int buttonX = kContentX + kIndent + bodyMarginLeft + blockMarginLeft;
+			const int buttonY = drawY + blockMarginTop;
+			const bool disabled = block.formUnsupported || toLowerAscii(block.formMethod) != "get";
+			drawRect(s_windowId, buttonX, buttonY, kFormSubmitW, kFormControlH, disabled ? 184 : 65, disabled ? 188 : 112, disabled ? 196 : 190);
+			drawRect(s_windowId, buttonX, buttonY, kFormSubmitW, 1, disabled ? 128 : 38, disabled ? 132 : 78, disabled ? 142 : 150);
+			drawRect(s_windowId, buttonX, buttonY + kFormControlH - 1, kFormSubmitW, 1, disabled ? 128 : 38, disabled ? 132 : 78, disabled ? 142 : 150);
+			drawRect(s_windowId, buttonX, buttonY, 1, kFormControlH, disabled ? 128 : 38, disabled ? 132 : 78, disabled ? 142 : 150);
+			drawRect(s_windowId, buttonX + kFormSubmitW - 1, buttonY, 1, kFormControlH, disabled ? 128 : 38, disabled ? 132 : 78, disabled ? 142 : 150);
+			std::string label = block.submitLabel.empty() ? "Submit" : block.submitLabel;
+			int labelMax = (kFormSubmitW - 14) / kCharW;
+			if (static_cast<int>(label.size()) > labelMax) label = label.substr(0, static_cast<size_t>(labelMax));
+			drawTextAtColored(s_windowId, buttonX + 10, buttonY + 7, label, disabled ? 76 : 255, disabled ? 80 : 255, disabled ? 88 : 255);
+			break;
+		}
 		}
 		++blockIndex;
 	}
@@ -1245,6 +1363,8 @@ void Navigator::updateHoverStatus(HitTarget target, int linkBlockIndex)
 	case HitTarget::Bookmarks:   next = "View Bookmarks";        break;
 	case HitTarget::AddBookmark: next = "Add current page to Bookmarks"; break;
 	case HitTarget::AddressBar:  next = "Click to edit address"; break;
+	case HitTarget::FormInput:   next = "Click to edit form field"; break;
+	case HitTarget::FormSubmit:  next = "Submit GET form"; break;
 	case HitTarget::Link:
 		if (linkBlockIndex >= 0 &&
 			linkBlockIndex < static_cast<int>(s_currentDoc.blocks.size()))
@@ -1269,6 +1389,9 @@ void Navigator::handleToolbarAction(int widgetId)
 		s_addressFocused = false;
 		s_addressBuffer.clear();
 		s_addressCaret   = 0;
+	}
+	if (s_focusedInputBlockIndex >= 0) {
+		blurDocumentInput();
 	}
 
 	switch (widgetId) {
@@ -1316,7 +1439,64 @@ void Navigator::handleDocumentClick(HitTarget target, int linkBlockIndex)
 		linkBlockIndex < static_cast<int>(s_currentDoc.blocks.size()))
 	{
 		navigateTo(s_currentDoc.blocks[linkBlockIndex].url);
+	} else if (target == HitTarget::FormSubmit &&
+		linkBlockIndex >= 0 &&
+		linkBlockIndex < static_cast<int>(s_currentDoc.blocks.size()))
+	{
+		submitFormForBlock(linkBlockIndex);
 	}
+}
+
+void Navigator::focusDocumentInput(int blockIndex)
+{
+	if (blockIndex < 0 || blockIndex >= static_cast<int>(s_currentDoc.blocks.size()) ||
+		s_currentDoc.blocks[blockIndex].type != BlockType::FormTextInput) {
+		return;
+	}
+	s_focusedInputBlockIndex = blockIndex;
+	s_inputCaret = static_cast<int>(s_currentDoc.blocks[blockIndex].inputValue.size());
+	s_statusText = "Editing form field";
+}
+
+void Navigator::blurDocumentInput()
+{
+	s_focusedInputBlockIndex = -1;
+	s_inputCaret = 0;
+}
+
+void Navigator::submitFormForBlock(int blockIndex)
+{
+	if (blockIndex < 0 || blockIndex >= static_cast<int>(s_currentDoc.blocks.size())) return;
+	const DocBlock& source = s_currentDoc.blocks[blockIndex];
+	if (source.formUnsupported || toLowerAscii(source.formMethod.empty() ? "get" : source.formMethod) != "get") {
+		blurDocumentInput();
+		updateStatus("Only GET forms are supported.");
+		return;
+	}
+
+	std::string action = source.formAction.empty() ? s_currentDoc.url : source.formAction;
+	if (action.empty()) action = s_currentDoc.url;
+
+	std::ostringstream query;
+	bool first = true;
+	for (const DocBlock& block : s_currentDoc.blocks) {
+		if (block.type != BlockType::FormTextInput || block.formIndex != source.formIndex) continue;
+		if (block.inputName.empty()) continue;
+		if (!first) query << "&";
+		first = false;
+		query << encodeFormComponent(block.inputName) << "=" << encodeFormComponent(block.inputValue);
+	}
+
+	std::string submitUrl = action;
+	const std::string queryText = query.str();
+	if (!queryText.empty()) {
+		submitUrl += (submitUrl.find('?') == std::string::npos) ? "?" : "&";
+		submitUrl += queryText;
+	}
+
+	s_lastSubmittedFormUrl = submitUrl;
+	blurDocumentInput();
+	navigateTo(submitUrl);
 }
 
 void Navigator::handleKeyPress(int keyCode, const std::string& action)
@@ -1367,6 +1547,51 @@ void Navigator::handleKeyPress(int keyCode, const std::string& action)
 		return;
 	}
 
+	if (s_focusedInputBlockIndex >= 0 &&
+		s_focusedInputBlockIndex < static_cast<int>(s_currentDoc.blocks.size()) &&
+		s_currentDoc.blocks[s_focusedInputBlockIndex].type == BlockType::FormTextInput)
+	{
+		DocBlock& block = s_currentDoc.blocks[s_focusedInputBlockIndex];
+		const int bufLen = static_cast<int>(block.inputValue.size());
+		if (keyCode == 13) {
+			submitFormForBlock(s_focusedInputBlockIndex);
+		} else if (keyCode == 27) {
+			blurDocumentInput();
+			updateDisplay();
+		} else if (keyCode == 8) {
+			if (s_inputCaret > 0) {
+				block.inputValue.erase(static_cast<size_t>(s_inputCaret - 1), 1);
+				block.text = block.inputValue;
+				--s_inputCaret;
+				updateDisplay();
+			}
+		} else if (keyCode == 46) {
+			if (s_inputCaret < bufLen) {
+				block.inputValue.erase(static_cast<size_t>(s_inputCaret), 1);
+				block.text = block.inputValue;
+				updateDisplay();
+			}
+		} else if (keyCode == 37) {
+			if (s_inputCaret > 0) --s_inputCaret;
+			updateDisplay();
+		} else if (keyCode == 39) {
+			if (s_inputCaret < bufLen) ++s_inputCaret;
+			updateDisplay();
+		} else if (keyCode == 36) {
+			s_inputCaret = 0;
+			updateDisplay();
+		} else if (keyCode == 35) {
+			s_inputCaret = bufLen;
+			updateDisplay();
+		} else if (keyCode >= 32 && keyCode <= 126) {
+			block.inputValue.insert(static_cast<size_t>(s_inputCaret), 1, static_cast<char>(keyCode));
+			block.text = block.inputValue;
+			++s_inputCaret;
+			updateDisplay();
+		}
+		return;
+	}
+
 	// --- Normal (unfocused) keyboard shortcuts ---
 	if (keyCode == 33) {
 		s_scrollOffset -= 48;
@@ -1400,7 +1625,17 @@ Navigator::HitTarget Navigator::hitTest(int x, int y, int& outLinkBlockIndex)
 	}
 
 	for (int i = 0; i < static_cast<int>(s_currentDoc.blocks.size()); ++i) {
-		if (s_currentDoc.blocks[i].type == BlockType::Link) {
+		if (s_currentDoc.blocks[i].type == BlockType::FormTextInput) {
+			if (formControlRect(i).contains(x, y)) {
+				outLinkBlockIndex = i;
+				return HitTarget::FormInput;
+			}
+		} else if (s_currentDoc.blocks[i].type == BlockType::FormSubmit) {
+			if (formControlRect(i).contains(x, y)) {
+				outLinkBlockIndex = i;
+				return HitTarget::FormSubmit;
+			}
+		} else if (s_currentDoc.blocks[i].type == BlockType::Link) {
 			if (linkBlockRect(i).contains(x, y)) {
 				outLinkBlockIndex = i;
 				return HitTarget::Link;
@@ -1610,6 +1845,7 @@ void Navigator::loadUrl(const std::string& url)
 	Logger::write(LogLevel::Info, std::string("Navigator loadUrl: ") + url);
 	cleanupRemoteImageTempFiles();
 	s_imageCache.clear();
+	blurDocumentInput();
 
 	WebDocument doc;
 	if (url == "about:navigator" || url.empty()) {
@@ -1740,6 +1976,7 @@ WebDocument Navigator::buildAboutNavigatorDocument()
 	doc.blocks.push_back({BlockType::ListItem,  "Basic http:// GET for text/html and text/plain pages", ""});
 	doc.blocks.push_back({BlockType::ListItem,  "Back / Forward / Reload / Home navigation", ""});
 	doc.blocks.push_back({BlockType::ListItem,  "Bookmarks with persistent storage", ""});
+	doc.blocks.push_back({BlockType::ListItem,  "Forms-lite GET forms with editable text fields", ""});
 	doc.blocks.push_back({BlockType::Heading,   "Quick Start", ""});
 	doc.blocks.push_back({BlockType::Preformatted,
 		"Type a file:// URL in the address bar and press Enter.\n"
@@ -1771,6 +2008,7 @@ void Navigator::storePageMetadata(NavigatorPageMetadata metadata, const WebDocum
 	if (metadata.finalUrl.empty()) metadata.finalUrl = doc.url;
 	if (metadata.requestedUrl.empty()) metadata.requestedUrl = metadata.finalUrl;
 	fillDocumentCounts(metadata, doc);
+	metadata.lastSubmittedFormUrl = s_lastSubmittedFormUrl;
 	s_pageMetadata = std::move(metadata);
 }
 
@@ -1820,6 +2058,11 @@ WebDocument Navigator::buildPageInfoDocument()
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Downloaded", yesNo(m.downloaded)), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Download saved path", m.downloadSavedPath), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Download byte count", static_cast<int>(m.downloadByteCount)), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Forms", m.formCount), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Text inputs", m.formInputCount), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Unsupported form controls", m.unsupportedFormControlCount), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Unsupported form method", yesNo(m.unsupportedFormMethod)), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Last submitted form URL", m.lastSubmittedFormUrl), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Raw/source bytes", static_cast<int>(m.rawSourceBytes)), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Source preview truncated", yesNo(m.rawSourceTruncated)), ""});
 
@@ -1892,7 +2135,9 @@ WebDocument Navigator::buildRuntimeDocument()
 		s_currentDoc.title,
 		static_cast<int>(s_currentDoc.blocks.size()),
 		s_pageMetadata.finalUrl,
-		s_pageMetadata.cssDetected));
+		s_pageMetadata.cssDetected,
+		s_pageMetadata.formCount,
+		s_pageMetadata.formInputCount));
 
 	doc.blocks.push_back({BlockType::Link, "Page Info", "about:page-info"});
 	doc.blocks.push_back({BlockType::Link, "View Source", "about:view-source"});
@@ -2122,6 +2367,10 @@ int Navigator::blockLayoutY(int blockIndex)
 		case BlockType::Preformatted:
 			h = marginTop + wrappedBlockHeight(b.text, kPreWrapCols, true) + padding * 2 + marginBottom + (nextIsHeading ? kHeadingPreGap : 0);
 			break;
+		case BlockType::FormTextInput:
+		case BlockType::FormSubmit:
+			h = marginTop + kFormControlH + marginBottom + (nextIsHeading ? kHeadingPreGap : 0);
+			break;
 		case BlockType::Image: {
 			int imageW = 0;
 			int imageH = 0;
@@ -2149,6 +2398,21 @@ Navigator::Rect Navigator::linkBlockRect(int blockIndex)
 	int h     = wrappedBlockHeight(block.text, kWrapCols);
 	int w     = std::min(static_cast<int>(block.text.size()) * kCharW, kContentW - 34);
 	return Rect{ kContentX + 18 + bodyMarginLeft + blockMarginLeft, drawY, w, h };
+}
+
+Navigator::Rect Navigator::formControlRect(int blockIndex)
+{
+	if (blockIndex < 0 || blockIndex >= static_cast<int>(s_currentDoc.blocks.size())) {
+		return Rect{0, 0, 0, 0};
+	}
+	const DocBlock& block = s_currentDoc.blocks[blockIndex];
+	const int bodyMarginLeft = s_currentDoc.bodyStyle.marginLeft >= 0 ? s_currentDoc.bodyStyle.marginLeft : 0;
+	const int blockMarginLeft = block.style.marginLeft >= 0 ? block.style.marginLeft : 0;
+	const int blockMarginTop = block.style.marginTop >= 0 ? block.style.marginTop : 4;
+	const int relY = blockLayoutY(blockIndex);
+	const int drawY = kContentY + relY - s_scrollOffset + blockMarginTop;
+	const int w = block.type == BlockType::FormSubmit ? kFormSubmitW : kFormInputW;
+	return Rect{ kContentX + 18 + bodyMarginLeft + blockMarginLeft, drawY, w, kFormControlH };
 }
 
 int Navigator::computeDocumentHeight()
@@ -2183,6 +2447,10 @@ int Navigator::computeDocumentHeight()
 			break;
 		case BlockType::Preformatted:
 			h += marginTop + wrappedBlockHeight(block.text, kPreWrapCols, true) + padding * 2 + marginBottom + (nextIsHeading ? kHeadingPreGap : 0);
+			break;
+		case BlockType::FormTextInput:
+		case BlockType::FormSubmit:
+			h += marginTop + kFormControlH + marginBottom + (nextIsHeading ? kHeadingPreGap : 0);
 			break;
 		case BlockType::Image: {
 			int imageW = 0;

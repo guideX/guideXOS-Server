@@ -5022,6 +5022,7 @@ void NavigatorApp::buildRuntimeDocument()
     addBlock(BLOCK_LIST_ITEM, "Bookmark persistence: unavailable; bookmarks are in-memory defaults");
     addBlock(BLOCK_LIST_ITEM, "HTTPS/TLS: unsupported");
     addBlock(BLOCK_LIST_ITEM, "CSS-lite embedded <style>: enabled");
+    addBlock(BLOCK_LIST_ITEM, "Forms-lite GET forms: enabled for file/about pages");
     addBlock(BLOCK_LIST_ITEM, "External stylesheets: unsupported");
 
     addBlock(BLOCK_HEADING, "Backends");
@@ -5931,6 +5932,7 @@ void printNavigatorRuntimeSmokeReport()
     serial::puts("[NAVIGATOR-SMOKE] capability.remote_png=unsupported without bare-metal HTTP transport\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.downloads=unavailable until HTTP/VFS write path is connected\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.css_lite=enabled for embedded style blocks\n");
+    serial::puts("[NAVIGATOR-SMOKE] capability.forms_lite=enabled for file/about GET form blocks\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.external_stylesheets=unsupported\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.bookmark_persistence=unavailable; in-memory defaults only\n");
     serial::puts("[NAVIGATOR-SMOKE] result=PASS\n");

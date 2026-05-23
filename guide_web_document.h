@@ -28,6 +28,8 @@ enum class BlockType : uint8_t {
 	ListItem     = 3,   // bullet list item (rendered with a dash prefix and indent)
 	Preformatted = 4,   // whitespace-preserved text (e.g. <pre>, plain .txt files)
 	Image        = 5,   // local image block; url carries the resolved image URL
+	FormTextInput = 6,  // simple text input control for GET forms
+	FormSubmit    = 7,  // submit button for a simple form
 };
 
 enum class StyleSelectorType : uint8_t {
@@ -65,6 +67,14 @@ struct CssDiagnostics {
 	size_t styleBytesProcessed = 0;
 };
 
+struct FormsDiagnostics {
+	int  formCount = 0;
+	int  textInputCount = 0;
+	int  submitCount = 0;
+	int  unsupportedControlCount = 0;
+	bool hasUnsupportedMethod = false;
+};
+
 struct DocBlock {
 	BlockType   type;
 	std::string text;  // display text; for Image this mirrors alt text
@@ -77,6 +87,14 @@ struct DocBlock {
 	std::string className;
 	std::string id;
 	WebStyle    style;
+	int         formIndex = -1;
+	std::string formAction;
+	std::string formMethod;
+	std::string inputName;
+	std::string inputValue;
+	std::string placeholder;
+	std::string submitLabel;
+	bool        formUnsupported = false;
 };
 
 struct WebDocument {
@@ -86,6 +104,7 @@ struct WebDocument {
 	WebStyle              bodyStyle;
 	std::vector<WebStyleRule> styleRules;
 	CssDiagnostics        cssDiagnostics;
+	FormsDiagnostics      formsDiagnostics;
 };
 
 } // namespace web

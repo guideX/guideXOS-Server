@@ -14,6 +14,14 @@
 //   <ul> <ol>        – ignored (structure only; <li> carries the content)
 //   <pre>            – Preformatted block; whitespace/newlines preserved
 //   <code>           – inside <pre>: stays in Preformatted; elsewhere: plain text
+//   <form method="GET" action="...">
+//                    – starts a simple GET form scope
+//   <input type="text" name="..." value="..." placeholder="...">
+//                    – FormTextInput block
+//   <input type="submit" value="...">
+//                    – FormSubmit block
+//   <button type="submit">Text</button>
+//                    – FormSubmit block
 //
 // Ignored with content stripped:
 //   <script>

@@ -561,6 +561,7 @@ enum class OpenTag : uint8_t {
 	Li,
 	Title,
 	Pre,   // <pre> block — whitespace preserved
+	ButtonSubmit,
 };
 
 struct ParserState {
@@ -574,6 +575,11 @@ struct ParserState {
 	bool         inStyle  = false;
 	bool         inPre    = false; // true inside <pre>: preserve whitespace
 	bool         bodyReached = false; // ignore content before <body> except <title>
+	bool         inForm = false;
+	int          currentFormIndex = -1;
+	std::string  currentFormAction;
+	std::string  currentFormMethod;
+	bool         currentFormUnsupported = false;
 };
 
 // Flush textBuf into a DocBlock, if non-empty.
@@ -622,6 +628,20 @@ static void flushText(ParserState& st)
 	case OpenTag::Title:
 		st.doc.title = t;
 		break;
+	case OpenTag::ButtonSubmit: {
+		DocBlock block;
+		block.type = BlockType::FormSubmit;
+		block.tagName = "button";
+		block.text = t.empty() ? "Submit" : t;
+		block.submitLabel = block.text;
+		block.formIndex = st.currentFormIndex;
+		block.formAction = st.currentFormAction.empty() ? st.doc.url : st.currentFormAction;
+		block.formMethod = st.currentFormMethod.empty() ? "get" : st.currentFormMethod;
+		block.formUnsupported = st.currentFormUnsupported || block.formMethod != "get";
+		st.doc.blocks.push_back(std::move(block));
+		++st.doc.formsDiagnostics.submitCount;
+		break;
+	}
 	default:
 		// Text outside a known block: emit as paragraph if body is active.
 		if (st.bodyReached)
@@ -662,6 +682,61 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 		name == "header" || name == "footer" || name == "nav" || name == "main" ||
 		name == "table" || name == "tr" || name == "td" || name == "th")
 		return;
+
+	if (name == "form") {
+		flushText(st);
+		st.inForm = true;
+		st.currentFormIndex = st.doc.formsDiagnostics.formCount++;
+		st.currentFormAction = trim(decodeEntities(extractAttr(tagBody, "action")));
+		if (st.currentFormAction.empty()) st.currentFormAction = st.doc.url;
+		st.currentFormAction = resolveRelativeUrl(st.doc.url, st.currentFormAction);
+		st.currentFormMethod = toLower(trim(extractAttr(tagBody, "method")));
+		if (st.currentFormMethod.empty()) st.currentFormMethod = "get";
+		st.currentFormUnsupported = (st.currentFormMethod != "get");
+		if (st.currentFormUnsupported) st.doc.formsDiagnostics.hasUnsupportedMethod = true;
+		return;
+	}
+
+	if (name == "input") {
+		flushText(st);
+		std::string type = toLower(trim(extractAttr(tagBody, "type")));
+		if (type.empty()) type = "text";
+		if (type == "text" || type == "search") {
+			DocBlock block;
+			block.type = BlockType::FormTextInput;
+			block.tagName = "input";
+			block.className = extractAttr(tagBody, "class");
+			block.id = extractAttr(tagBody, "id");
+			block.formIndex = st.currentFormIndex;
+			block.formAction = st.currentFormAction.empty() ? st.doc.url : st.currentFormAction;
+			block.formMethod = st.currentFormMethod.empty() ? "get" : st.currentFormMethod;
+			block.inputName = decodeEntities(extractAttr(tagBody, "name"));
+			block.inputValue = decodeEntities(extractAttr(tagBody, "value"));
+			block.placeholder = decodeEntities(extractAttr(tagBody, "placeholder"));
+			block.formUnsupported = st.currentFormUnsupported || block.formMethod != "get";
+			block.text = block.inputValue;
+			st.doc.blocks.push_back(std::move(block));
+			++st.doc.formsDiagnostics.textInputCount;
+		} else if (type == "submit") {
+			DocBlock block;
+			block.type = BlockType::FormSubmit;
+			block.tagName = "input";
+			block.className = extractAttr(tagBody, "class");
+			block.id = extractAttr(tagBody, "id");
+			block.formIndex = st.currentFormIndex;
+			block.formAction = st.currentFormAction.empty() ? st.doc.url : st.currentFormAction;
+			block.formMethod = st.currentFormMethod.empty() ? "get" : st.currentFormMethod;
+			block.submitLabel = decodeEntities(extractAttr(tagBody, "value"));
+			if (block.submitLabel.empty()) block.submitLabel = "Submit";
+			block.text = block.submitLabel;
+			block.formUnsupported = st.currentFormUnsupported || block.formMethod != "get";
+			st.doc.blocks.push_back(std::move(block));
+			++st.doc.formsDiagnostics.submitCount;
+		} else {
+			++st.doc.formsDiagnostics.unsupportedControlCount;
+		}
+		return;
+	}
 
 	// <br> – inside <pre> append a newline to the buffer; outside flush as a
 	// line break only if there is pending text (avoids empty Paragraph blocks).
@@ -734,6 +809,16 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 		return;
 	}
 
+	if (name == "button") {
+		std::string type = toLower(trim(extractAttr(tagBody, "type")));
+		if (type.empty() || type == "submit") {
+			st.open = OpenTag::ButtonSubmit;
+		} else {
+			++st.doc.formsDiagnostics.unsupportedControlCount;
+		}
+		return;
+	}
+
 	// Unknown open tag: leave current open context unchanged so text inside
 	// unknown tags flows into the current block.
 }
@@ -753,12 +838,21 @@ static void handleCloseTag(ParserState& st, const std::string& tagName)
 
 	// Close block-level contexts.
 	if (name == "h1" || name == "h2" || name == "h3" ||
-		name == "p"  || name == "li" || name == "a"  || name == "title") {
+		name == "p"  || name == "li" || name == "a"  || name == "title" ||
+		name == "button") {
 		flushText(st);
 		st.open    = OpenTag::None;
 		st.hrefBuf.clear();
 		st.classBuf.clear();
 		st.idBuf.clear();
+	}
+	if (name == "form") {
+		flushText(st);
+		st.inForm = false;
+		st.currentFormIndex = -1;
+		st.currentFormAction.clear();
+		st.currentFormMethod.clear();
+		st.currentFormUnsupported = false;
 	}
 	if (name == "pre") {
 		flushText(st);

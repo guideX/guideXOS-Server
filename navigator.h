@@ -69,6 +69,11 @@ struct NavigatorPageMetadata {
 	bool        downloaded = false;
 	std::string downloadSavedPath;
 	size_t      downloadByteCount = 0;
+	int         formCount = 0;
+	int         formInputCount = 0;
+	int         unsupportedFormControlCount = 0;
+	bool        unsupportedFormMethod = false;
+	std::string lastSubmittedFormUrl;
 };
 
 // =============================================================================
@@ -85,6 +90,7 @@ class Navigator {
 public:
 	static uint64_t Launch();
 	static bool SmokeNavigateTo(const std::string& url);
+	static bool SmokeSubmitFirstForm(const std::string& value);
 	static std::string SmokeRuntimeReport();
 	static std::string SmokeCurrentUrl();
 	static int SmokeCurrentBlockCount();
@@ -113,6 +119,8 @@ private:
 		AddBookmark,
 		AddressBar,
 		Link,   // any Link block; s_hitLinkBlockIndex carries the index
+		FormInput,
+		FormSubmit,
 	};
 
 	// -------------------------------------------------------------------------
@@ -178,6 +186,9 @@ private:
 	static void handleToolbarAction(int widgetId);
 	static void handleDocumentClick(HitTarget target, int linkBlockIndex);
 	static void handleKeyPress(int keyCode, const std::string& action);
+	static void focusDocumentInput(int blockIndex);
+	static void blurDocumentInput();
+	static void submitFormForBlock(int blockIndex);
 
 	// -------------------------------------------------------------------------
 	// Address bar editing
@@ -195,6 +206,7 @@ private:
 	static Rect      toolbarButtonRect(int widgetId);
 	static int       blockLayoutY(int blockIndex);  // Y relative to kContentY
 	static Rect      linkBlockRect(int blockIndex); // absolute screen rect
+	static Rect      formControlRect(int blockIndex);
 	static int       computeDocumentHeight();
 	static int       maxScrollOffset();
 	static void      clampScrollOffset();
@@ -219,6 +231,9 @@ private:
 	static bool        s_addressFocused;   // true while user is typing
 	static std::string s_addressBuffer;    // the editable text
 	static int         s_addressCaret;     // insertion point index into s_addressBuffer
+	static int         s_focusedInputBlockIndex;
+	static int         s_inputCaret;
+	static std::string s_lastSubmittedFormUrl;
 };
 
 } // namespace apps

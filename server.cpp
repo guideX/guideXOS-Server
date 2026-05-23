@@ -208,6 +208,7 @@ static std::string navigatorHostedSmokeDiagnostic() {
     add("CSS-lite enabled", contains(runtimeReport, "Capabilities.CSS-lite embedded <style>=enabled"), "expected enabled");
     add("colored text primitive enabled", contains(runtimeReport, "Capabilities.Hosted colored text primitive=enabled"), "expected enabled");
     add("CSS text color visible", contains(runtimeReport, "Capabilities.CSS text color visible=enabled"), "expected enabled");
+    add("Forms-lite enabled", contains(runtimeReport, "Capabilities.Forms-lite GET forms=enabled"), "expected enabled");
     add("external stylesheets unsupported", contains(runtimeReport, "Capabilities.External stylesheets=unsupported"), "expected unsupported");
     add("bookmark persistence enabled", contains(runtimeReport, "Capabilities.Bookmark persistence=enabled"), "expected enabled");
 
@@ -216,6 +217,15 @@ static std::string navigatorHostedSmokeDiagnostic() {
     std::string docsReport = gxos::apps::Navigator::SmokeRuntimeReport();
     add("docs page loads", docsLoaded && docsUrl == "file:///docs/index.html", "currentUrl=" + docsUrl);
     add("docs CSS-lite detected", contains(docsReport, "Current Document.CSS diagnostics=css detected"), "expected css detected");
+
+    bool formsLoaded = gxos::apps::Navigator::SmokeNavigateTo("file:///docs/forms.html");
+    std::string formsUrl = gxos::apps::Navigator::SmokeCurrentUrl();
+    std::string formsReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    add("forms page loads", formsLoaded && formsUrl == "file:///docs/forms.html", "currentUrl=" + formsUrl);
+    add("forms-lite detected", contains(formsReport, "Current Document.Forms=1") && contains(formsReport, "Current Document.Text inputs=1"), "expected one form/input");
+    bool formSubmitted = gxos::apps::Navigator::SmokeSubmitFirstForm("hello world");
+    std::string submittedUrl = gxos::apps::Navigator::SmokeCurrentUrl();
+    add("forms-lite GET submission", formSubmitted && submittedUrl == "file:///docs/forms-result.html?q=hello+world", "currentUrl=" + submittedUrl);
 
     bool downloadsLoaded = gxos::apps::Navigator::SmokeNavigateTo("about:downloads");
     std::string downloadsUrl = gxos::apps::Navigator::SmokeCurrentUrl();
@@ -229,8 +239,11 @@ static std::string navigatorHostedSmokeDiagnostic() {
 
     out << "runtime_report:\n" << runtimeReport;
     out << "docs_runtime_report:\n" << docsReport;
+    out << "forms_runtime_report:\n" << formsReport;
     out << "current_url=" << currentUrl << "\n";
     out << "docs_url=" << docsUrl << "\n";
+    out << "forms_url=" << formsUrl << "\n";
+    out << "submitted_form_url=" << submittedUrl << "\n";
     out << "downloads_url=" << downloadsUrl << "\n";
     out << "current_block_count=" << gxos::apps::Navigator::SmokeCurrentBlockCount() << "\n";
     out << "toolbar_count=" << (foundWindow ? navWindow.widgetCount : 0) << "\n";
