@@ -1,6 +1,7 @@
 #include "compositor.h"
 #include "compositor.h"
 #include "allocator.h"
+#include "built_in_app_metadata.h"
 #include "desktop_state.h"
 #include "desktop_service.h"
 #include "desktop_folder.h"
@@ -577,31 +578,58 @@ namespace gxos {
             Logger::write(LogLevel::Info, std::string("Compositor include ") + (visiblePreferred ? "desktop/start " : "list ") + "entry from " + sourceLabel + ": " + value);
         }
 
+        static const apps::BuiltInAppMetadata* hostedBuiltInMetadataForIdentity(const std::string& identity) {
+            const apps::BuiltInAppMetadata* metadata = apps::FindBuiltInAppMetadataByIdentity(identity.c_str());
+            if (!metadata || !apps::IsBuiltInAppAvailableInHosted(*metadata)) return nullptr;
+            return metadata;
+        }
+
+        static const apps::BuiltInAppMetadata* hostedBuiltInMetadataForRegisteredApp(const RegisteredDesktopApp* app) {
+            if (!app) return nullptr;
+            const apps::BuiltInAppMetadata* metadata = hostedBuiltInMetadataForIdentity(app->id);
+            if (metadata) return metadata;
+            metadata = hostedBuiltInMetadataForIdentity(app->displayName);
+            if (metadata) return metadata;
+            return hostedBuiltInMetadataForIdentity(app->launchName);
+        }
+
+        static const apps::BuiltInAppMetadata* hostedBuiltInMetadataForLabel(const std::string& label) {
+            // Shared built-in metadata is display/identity-only here; launch still
+            // goes through DesktopService and the existing dispatch branches.
+            const RegisteredDesktopApp* app = findDesktopAppByNameOrId(label);
+            const apps::BuiltInAppMetadata* metadata = hostedBuiltInMetadataForRegisteredApp(app);
+            if (metadata) return metadata;
+            return hostedBuiltInMetadataForIdentity(label);
+        }
+
+        static std::string hostedBuiltInIconKeyForLabel(const std::string& label) {
+            const apps::BuiltInAppMetadata* metadata = hostedBuiltInMetadataForLabel(label);
+            if (metadata && metadata->iconKey) return metadata->iconKey;
+            return std::string();
+        }
+
         static std::string startMenuLogicalIconName(const std::string& label) {
-            if (label == "Calculator") return "app.calculator";
-            if (label == "Notepad") return "app.notepad";
-            if (label == "Console") return "app.console";
             if (label == "Trash") return hostedTrashIconLogicalName();
-            if (label == "TaskManager" || label == "Task Manager") return "app.taskmanager";
-            if (label == "DiskManager") return "app.diskmanager";
-            if (label == "HDInstaller") return "app.installer";
-            if (isAppModelDemoAppLabel(label)) return "app.generic";
-            if (label == "Files" || label == "FileExplorer" || label == "File Manager") return "app.files";
+            const std::string builtInIcon = hostedBuiltInIconKeyForLabel(label);
+            if (!builtInIcon.empty()) return builtInIcon;
+            if (label == "Files" || label == "File Manager") return "app.files";
             if (label == "Computer" || label == "This System" || label == "Computer Files" || label == "ComputerFiles") return "place.computer";
-            if (label == "Paint") return "app.paint";
-            if (label == "guideXOS Navigator") return "app.navigator";
-            if (label == "Clock") return "app.clock";
             if (label == "Documents" || label == "Recent Docs") return "place.documents";
             if (label == "Pictures") return "place.pictures";
             if (label == "Music") return "place.music";
             if (label == "Network") return "place.network";
-            if (label == "Control Panel" || label == "ControlPanel" || label == "System Settings") return "app.controlpanel";
-            if (label == "DisplayOptions" || label == "Display Options" || label == "Display Settings" || label == "Desktop Background" || label == "Wallpaper") return "app.settings";
-            if (label == "Settings") return "app.settings";
+            if (label == "Task Manager") return "app.taskmanager";
+            if (label == "Control Panel" || label == "System Settings") return "app.controlpanel";
+            if (label == "Display Options" || label == "Display Settings" || label == "Desktop Background" || label == "Wallpaper" || label == "Settings") return "app.settings";
+            if (isAppModelDemoAppLabel(label)) return "app.generic";
             return "app.generic";
         }
 
         static COLORREF startMenuFallbackIconColor(const std::string& label) {
+            const apps::BuiltInAppMetadata* metadata = hostedBuiltInMetadataForLabel(label);
+            if (metadata && metadata->kernelIconColor != 0) {
+                return RGB((metadata->kernelIconColor >> 16) & 0xFF, (metadata->kernelIconColor >> 8) & 0xFF, metadata->kernelIconColor & 0xFF);
+            }
             if (label == "Calculator" || label == "Clock") return RGB(70, 140, 200);
             if (label == "Notepad" || label == "Console") return RGB(120, 180, 80);
             if (label == "Trash") return RGB(150, 150, 160);
@@ -669,6 +697,14 @@ namespace gxos {
             }
         }
 
+        static const apps::BuiltInAppMetadata* hostedBuiltInMetadataForShortcut(const DesktopShortcutRec& shortcut, const RegisteredDesktopApp* app) {
+            const apps::BuiltInAppMetadata* metadata = hostedBuiltInMetadataForRegisteredApp(app);
+            if (metadata) return metadata;
+            metadata = hostedBuiltInMetadataForIdentity(shortcut.targetAppId);
+            if (metadata) return metadata;
+            return hostedBuiltInMetadataForIdentity(shortcut.label);
+        }
+
         static DesktopItem makeAppShortcutDesktopItem(const DesktopShortcutRec& shortcut) {
             DesktopItem item;
             item.kind = DesktopItemKind::Shortcut;
@@ -676,9 +712,12 @@ namespace gxos {
             item.targetAppId = shortcut.targetAppId;
             item.action = appShortcutLayoutKey(shortcut.targetAppId);
             const RegisteredDesktopApp* app = findDesktopAppByNameOrId(shortcut.targetAppId);
+            const apps::BuiltInAppMetadata* metadata = hostedBuiltInMetadataForShortcut(shortcut, app);
             item.label = app && !app->displayName.empty() ? app->displayName : shortcut.label;
+            if (item.label.empty() && metadata && metadata->displayName) item.label = metadata->displayName;
             if (item.label.empty()) item.label = shortcut.targetAppId;
             item.iconName = app && !app->icon.empty() ? app->icon : shortcut.iconName;
+            if (item.iconName.empty() && metadata && metadata->iconKey) item.iconName = metadata->iconKey;
             if (item.iconName.empty()) item.iconName = startMenuLogicalIconName(item.label);
             item.removable = true;
             item.pinned = true;
@@ -986,7 +1025,10 @@ namespace gxos {
             shortcut.shortcutType = "App";
             shortcut.targetAppId = app->id;
             shortcut.label = app->displayName;
-            shortcut.iconName = app->icon.empty() ? startMenuLogicalIconName(app->displayName) : app->icon;
+            const apps::BuiltInAppMetadata* metadata = hostedBuiltInMetadataForRegisteredApp(app);
+            shortcut.iconName = app->icon;
+            if (shortcut.iconName.empty() && metadata && metadata->iconKey) shortcut.iconName = metadata->iconKey;
+            if (shortcut.iconName.empty()) shortcut.iconName = startMenuLogicalIconName(app->displayName);
             g_cfg.desktopShortcuts.push_back(shortcut);
             Logger::write(LogLevel::Info, "Desktop shortcut created: " + appShortcutLayoutKey(app->id));
             refreshDesktopItems();
@@ -1345,15 +1387,11 @@ namespace gxos {
                 std::string lbl = it.label;
                 if (!drawDesktopThemedIcon(dc, iconR, it)) {
                     if (!it.iconName.empty()) Logger::write(LogLevel::Warn, "Desktop icon fallback used for " + it.label + " logical=" + it.iconName);
-                    COLORREF iconColor = RGB(90, 100, 120);
-                    if (lbl == "Calculator" || lbl == "Clock") iconColor = RGB(70, 140, 200);
-                    else if (lbl == "Notepad" || lbl == "Console") iconColor = RGB(120, 180, 80);
-                    else if (lbl == "Trash") iconColor = RGB(150, 150, 160);
-                    else if (lbl == "Paint" || lbl == "ImageViewer") iconColor = RGB(200, 120, 60);
-                    else if (lbl == "TaskManager") iconColor = RGB(180, 70, 70);
-                    else if (lbl == "DiskManager" || lbl == "ControlPanel" || lbl == "System Settings") iconColor = RGB(140, 90, 180);
+                    COLORREF iconColor = startMenuFallbackIconColor(lbl);
+                    if (lbl == "ImageViewer") iconColor = RGB(200, 120, 60);
+                    else if (lbl == "System Settings") iconColor = RGB(140, 90, 180);
                     else if (lbl == "Files" || lbl == "ComputerFiles" || lbl == "File Manager" || lbl == "This System" || it.isDirectory) iconColor = RGB(200, 180, 60);
-                    else if (it.pinned) iconColor = RGB(90, 140, 220);
+                    else if (it.pinned && iconColor == RGB(90, 100, 120)) iconColor = RGB(90, 140, 220);
                     HBRUSH ib = CreateSolidBrush(iconColor); FillRect(dc, &iconR, ib); DeleteObject(ib);
                     {
                         int cx = iconR.left + (iconW / 2); int cy = iconR.top + (iconH / 2);
@@ -2937,11 +2975,9 @@ namespace gxos {
                 int ix = item.ix >= 0 ? item.ix : 20 + (iconIdx % 8) * cellW;
                 int iy = item.iy >= 0 ? item.iy : 20 + (iconIdx / 8) * cellH;
                 
-                // Icon background
-                uint32_t iconColor = 0x005A6478; // default gray-blue
-                if (item.label == "Notepad" || item.label == "Console") iconColor = 0x0078B450;
-                else if (item.label == "Calculator" || item.label == "Clock") iconColor = 0x00468CC8;
-                else if (item.label == "TaskManager") iconColor = 0x00B44646;
+                // Icon background follows the hosted Start Menu fallback,
+                // which now consults shared built-in identity metadata first.
+                uint32_t iconColor = startMenuFallbackIconColor32(item.label);
                 
                 int iconX = ix + (cellW - iconW) / 2;
                 int iconY = iy + 6;

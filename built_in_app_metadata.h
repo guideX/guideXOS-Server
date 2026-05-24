@@ -86,5 +86,38 @@ inline const BuiltInAppMetadata* FindBuiltInAppMetadataByAppId(const char* appId
 	return nullptr;
 }
 
+inline const BuiltInAppMetadata* FindBuiltInAppMetadataByLaunchName(const char* launchName) {
+	for (size_t i = 0; i < kBuiltInAppMetadataCount; ++i) {
+		if (detail::builtInTextEquals(kBuiltInAppMetadata[i].launchName, launchName)) return &kBuiltInAppMetadata[i];
+	}
+	return nullptr;
+}
+
+inline const BuiltInAppMetadata* FindBuiltInAppMetadataByKernelAppName(const char* kernelAppName) {
+	for (size_t i = 0; i < kBuiltInAppMetadataCount; ++i) {
+		if (detail::builtInTextEquals(kBuiltInAppMetadata[i].kernelAppName, kernelAppName)) return &kBuiltInAppMetadata[i];
+	}
+	return nullptr;
+}
+
+inline const BuiltInAppMetadata* FindBuiltInAppMetadataByKernelLegacyAlias(const char* kernelLegacyAlias) {
+	for (size_t i = 0; i < kBuiltInAppMetadataCount; ++i) {
+		if (detail::builtInTextEquals(kBuiltInAppMetadata[i].kernelLegacyAlias, kernelLegacyAlias)) return &kBuiltInAppMetadata[i];
+	}
+	return nullptr;
+}
+
+inline const BuiltInAppMetadata* FindBuiltInAppMetadataByIdentity(const char* identity) {
+	const BuiltInAppMetadata* metadata = FindBuiltInAppMetadataByAppId(identity);
+	if (metadata) return metadata;
+	metadata = FindBuiltInAppMetadataByDisplayName(identity);
+	if (metadata) return metadata;
+	metadata = FindBuiltInAppMetadataByLaunchName(identity);
+	if (metadata) return metadata;
+	metadata = FindBuiltInAppMetadataByKernelAppName(identity);
+	if (metadata) return metadata;
+	return FindBuiltInAppMetadataByKernelLegacyAlias(identity);
+}
+
 } // namespace apps
 } // namespace gxos
