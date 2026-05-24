@@ -4777,7 +4777,8 @@ NavigatorApp::NavigatorApp()
     : m_blockCount(0), m_bookmarkCount(0), m_backCount(0), m_forwardCount(0),
       m_recentDownloadCount(0),
       m_addressFocused(false), m_addressCaret(0), m_ctrlPressed(false), m_scrollY(0), m_hoverLinkIndex(-1),
-      m_selectionActive(false), m_selectionDragging(false), m_selectionMoved(false), m_mouseLeftDown(false), m_mouseDownLinkIndex(-1),
+      m_selectionActive(false), m_selectionDragging(false), m_selectionMoved(false), m_mouseLeftDown(false),
+      m_mouseMode(NAV_MOUSE_NONE), m_mouseDownLinkIndex(-1), m_mouseDownX(0), m_mouseDownY(0), m_mouseDragThresholdExceeded(false),
       m_backBtnId(-1), m_forwardBtnId(-1), m_reloadBtnId(-1), m_homeBtnId(-1),
       m_bookmarksBtnId(-1), m_addBookmarkBtnId(-1)
 {
@@ -4928,8 +4929,29 @@ void NavigatorApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h)
 void NavigatorApp::onMouseMove(int x, int y)
 {
     if (m_mouseLeftDown && !m_addressFocused) {
-        updateSelection(x, y);
-        invalidate();
+        int dx = x - m_mouseDownX;
+        if (dx < 0) dx = -dx;
+        int dy = y - m_mouseDownY;
+        if (dy < 0) dy = -dy;
+        if (dx >= 4 || dy >= 4) {
+            m_mouseDragThresholdExceeded = true;
+        }
+
+        if ((m_mouseMode == NAV_MOUSE_POTENTIAL_LINK_CLICK ||
+             m_mouseMode == NAV_MOUSE_POTENTIAL_TEXT_SELECTION) &&
+            m_mouseDragThresholdExceeded) {
+            beginSelection(m_mouseDownX, m_mouseDownY);
+            if (m_selectionDragging) {
+                m_mouseMode = NAV_MOUSE_SELECTING_TEXT;
+            } else {
+                m_mouseMode = NAV_MOUSE_NONE;
+            }
+        }
+
+        if (m_mouseMode == NAV_MOUSE_SELECTING_TEXT) {
+            updateSelection(x, y);
+            invalidate();
+        }
     }
     int linkIndex = hitLinkIndex(x, y);
     if (linkIndex != m_hoverLinkIndex) {
@@ -4949,10 +4971,16 @@ void NavigatorApp::onMouseDown(int x, int y, uint8_t button)
     if ((button & 0x01) == 0 && button != 1) return;
 
     m_mouseLeftDown = true;
+    m_mouseMode = NAV_MOUSE_NONE;
+    m_mouseDownX = x;
+    m_mouseDownY = y;
+    m_mouseDragThresholdExceeded = false;
     m_mouseDownLinkIndex = hitLinkIndex(x, y);
 
     if (hitAddressBar(x, y)) {
         clearSelection();
+        m_mouseLeftDown = true;
+        m_mouseMode = NAV_MOUSE_ADDRESS_BAR_INTERACTION;
         focusAddressBar();
         int charOffset = (x - ADDRESS_X - 8) / 6;
         if (charOffset < 0) charOffset = 0;
@@ -4966,11 +4994,20 @@ void NavigatorApp::onMouseDown(int x, int y, uint8_t button)
     if (m_addressFocused) blurAddressBar();
 
     SelectionPosition textHit = textPositionFromPoint(x, y, false);
-    if (textHit.blockIndex >= 0) {
-        beginSelection(x, y);
+    if (m_mouseDownLinkIndex >= 0 && m_mouseDownLinkIndex < m_blockCount) {
+        clearSelection();
+        m_mouseLeftDown = true;
+        m_mouseMode = NAV_MOUSE_POTENTIAL_LINK_CLICK;
+        m_mouseDownLinkIndex = hitLinkIndex(x, y);
+        invalidate();
+    } else if (textHit.blockIndex >= 0) {
+        clearSelection();
+        m_mouseLeftDown = true;
+        m_mouseMode = NAV_MOUSE_POTENTIAL_TEXT_SELECTION;
         invalidate();
     } else {
         clearSelection();
+        m_mouseLeftDown = true;
         invalidate();
     }
 }
@@ -4978,18 +5015,22 @@ void NavigatorApp::onMouseDown(int x, int y, uint8_t button)
 void NavigatorApp::onMouseUp(int x, int y, uint8_t button)
 {
     if ((button & 0x01) == 0 && button != 1) return;
+    NavigatorMouseMode mode = m_mouseMode;
+    int downLinkIndex = m_mouseDownLinkIndex;
+    int upLinkIndex = hitLinkIndex(x, y);
     m_mouseLeftDown = false;
-    if (m_selectionDragging) {
+    if (mode == NAV_MOUSE_SELECTING_TEXT || m_selectionDragging) {
         finalizeSelection(x, y);
-        if (m_mouseDownLinkIndex >= 0 && !m_selectionMoved && !hasSelection()) {
-            navigateTo(m_blocks[m_mouseDownLinkIndex].url);
-        } else {
-            invalidate();
-        }
-    } else if (m_mouseDownLinkIndex >= 0 && m_mouseDownLinkIndex < m_blockCount) {
-        navigateTo(m_blocks[m_mouseDownLinkIndex].url);
+        invalidate();
+    } else if (mode == NAV_MOUSE_POTENTIAL_LINK_CLICK &&
+               !m_mouseDragThresholdExceeded &&
+               downLinkIndex >= 0 && downLinkIndex < m_blockCount &&
+               upLinkIndex == downLinkIndex) {
+        navigateTo(m_blocks[downLinkIndex].url);
     }
+    m_mouseMode = NAV_MOUSE_NONE;
     m_mouseDownLinkIndex = -1;
+    m_mouseDragThresholdExceeded = false;
 }
 
 void NavigatorApp::onWidgetClick(int widgetId)
@@ -7120,7 +7161,9 @@ void NavigatorApp::clearSelection()
     m_selectionDragging = false;
     m_selectionMoved = false;
     m_mouseLeftDown = false;
+    m_mouseMode = NAV_MOUSE_NONE;
     m_mouseDownLinkIndex = -1;
+    m_mouseDragThresholdExceeded = false;
     m_selectionAnchor.blockIndex = -1;
     m_selectionAnchor.offset = 0;
     m_selectionFocus.blockIndex = -1;

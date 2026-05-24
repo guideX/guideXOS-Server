@@ -15,6 +15,7 @@
 #include "native_app_process_table.h"
 #include "native_elf_executor.h"
 #include "bitmap_font.h"
+#include "kernel/core/include/kernel/system_font.h"
 #include "window_renderer.h"
 #include "special_effects.h"
 #include "window_animator.h"
@@ -231,6 +232,55 @@ namespace gxos {
         static const int kStartMenuIconSize = 16;
         static std::string s_lastLaunchAction;
         static uint64_t s_lastLaunchTicks = 0;
+
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
+#if defined(GXOS_SYSTEM_FONT_DEMO)
+        static void drawSystemFontDemo(HDC dc, RECT cr)
+        {
+            const int panelX = 16;
+            const int panelY = 16;
+            const int panelW = cr.right > 520 ? 520 : (cr.right - 24);
+            const int panelH = 108;
+            if (panelW <= 0 || panelH <= 0) return;
+
+            RECT panel{ panelX, panelY, panelX + panelW, panelY + panelH };
+            HBRUSH panelBrush = CreateSolidBrush(RGB(22, 26, 36));
+            FillRect(dc, &panel, panelBrush);
+            DeleteObject(panelBrush);
+            FrameRect(dc, &panel, (HBRUSH)GetStockObject(WHITE_BRUSH));
+
+            static const char* kLine1 = "Roboto 12 regular: The quick brown fox jumps over lazy glyphs: g j p q y";
+            static const char* kLine2 = "Roboto 12 bold: The quick brown fox jumps over lazy glyphs: g j p q y";
+            static const char* kLine3 = "Roboto 12 italic: The quick brown fox jumps over lazy glyphs: g j p q y";
+            static const char* kLine4 = "Roboto 9 regular: The quick brown fox jumps over lazy glyphs: g j p q y";
+
+            SystemFont::DrawText(dc, panelX + 10, panelY + 10, kLine1, -1, RGB(236, 240, 248), FontRole::Default);
+            SystemFont::DrawText(dc, panelX + 10, panelY + 34, kLine2, -1, RGB(255, 224, 170), FontRole::Title);
+            SystemFont::DrawText(dc, panelX + 10, panelY + 58, kLine3, -1, RGB(196, 220, 255), FontRole::Emphasis);
+            SystemFont::DrawText(dc, panelX + 10, panelY + 82, kLine4, -1, RGB(210, 214, 222), FontRole::Small);
+        }
+#endif
+
+        static int measureUiText(const char* text, int len = -1, FontRole role = FontRole::Default)
+        {
+            return SystemFont::MeasureWidth(role, text, len);
+        }
+
+        static int uiTextHeight(FontRole role = FontRole::Default)
+        {
+            return SystemFont::MeasureHeight(role);
+        }
+
+        static void drawUiText(HDC dc, int x, int y, const char* text, int len, COLORREF color, FontRole role = FontRole::Default)
+        {
+            SystemFont::DrawText(dc, x, y, text, len, color, role);
+        }
+
+        static void drawUiText(HDC dc, int x, int y, const std::string& text, COLORREF color, FontRole role = FontRole::Default)
+        {
+            drawUiText(dc, x, y, text.c_str(), static_cast<int>(text.size()), color, role);
+        }
+#endif
 
         static bool isAppModelDemoAppLabel(const std::string& label) {
             return label == "App Model Demo" ||
@@ -1270,7 +1320,7 @@ namespace gxos {
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)
         uint64_t Compositor::hitTestTaskbarButton(int mx, int my, RECT cr, int taskbarH) {
             int taskbarTop = cr.bottom - taskbarH; if (my < taskbarTop) return 0; int btnX = 216; // leave space for start button + search box
-            for (uint64_t id : g_z) { auto it = g_windows.find(id); if (it == g_windows.end( )) continue; std::string label = it->second.title; SIZE sz; HDC dc = GetDC(g_hwnd); GetTextExtentPoint32A(dc, label.c_str( ), (int)label.size( ), &sz); ReleaseDC(g_hwnd, dc); int bw = sz.cx + 30; int btnTop = taskbarTop + 4; int btnBottom = cr.bottom - 4; if (mx >= btnX && mx <= btnX + bw && my >= btnTop && my <= btnBottom) return id; btnX += bw + 6; } return 0;
+            for (uint64_t id : g_z) { auto it = g_windows.find(id); if (it == g_windows.end( )) continue; std::string label = it->second.title; int bw = measureUiText(label.c_str(), (int)label.size(), FontRole::Small) + 30; int btnTop = taskbarTop + 4; int btnBottom = cr.bottom - 4; if (mx >= btnX && mx <= btnX + bw && my >= btnTop && my <= btnBottom) return id; btnX += bw + 6; } return 0;
         }
         void Compositor::initWindow( ) { WNDCLASSA wc{}; wc.style = CS_OWNDC; wc.lpfnWndProc = Compositor::WndProc; wc.hInstance = GetModuleHandleA(nullptr); wc.lpszClassName = "GXOS_COMPOSITOR"; RegisterClassA(&wc); g_hwnd = CreateWindowExA(0, wc.lpszClassName, "guideXOSCpp Compositor", WS_OVERLAPPEDWINDOW | WS_VISIBLE, CW_USEDEFAULT, CW_USEDEFAULT, 1024, 768, nullptr, nullptr, wc.hInstance, nullptr); g_startBtnBmp = (HBITMAP)LoadImageA(nullptr, "assets/start_button.bmp", IMAGE_BITMAP, 0, 0, LR_LOADFROMFILE | LR_CREATEDIBSECTION); }
         void Compositor::shutdownWindow( ) { if (g_hwnd) { DestroyWindow(g_hwnd); g_hwnd = nullptr; } }
@@ -1305,10 +1355,10 @@ namespace gxos {
                     HPEN iconFrame = CreatePen(PS_SOLID, 1, RGB(180, 180, 200)); HGDIOBJ oP2 = SelectObject(dc, iconFrame); HGDIOBJ oB2 = SelectObject(dc, GetStockObject(NULL_BRUSH)); Rectangle(dc, iconR.left, iconR.top, iconR.right, iconR.bottom); SelectObject(dc, oP2); SelectObject(dc, oB2); DeleteObject(iconFrame);
                 }
                 // Label with text shadow
-                SetTextColor(dc, RGB(0, 0, 0)); TextOutA(dc, x + 5, iconR.bottom + 5, lbl.c_str( ), (int)lbl.size( ));
-                SetTextColor(dc, RGB(230, 230, 240)); TextOutA(dc, x + 4, iconR.bottom + 4, lbl.c_str( ), (int)lbl.size( ));
+                drawUiText(dc, x + 5, iconR.bottom + 5, lbl, RGB(0, 0, 0), FontRole::Small);
+                drawUiText(dc, x + 4, iconR.bottom + 4, lbl, RGB(230, 230, 240), FontRole::Small);
                 // Pin indicator
-                if (it.pinned && it.kind == DesktopItemKind::Shortcut) { SetTextColor(dc, RGB(255, 200, 60)); const char* pin = "*"; TextOutA(dc, iconR.right - 10, iconR.top + 2, pin, 1); }
+                if (it.pinned && it.kind == DesktopItemKind::Shortcut) { const char* pin = "*"; drawUiText(dc, iconR.right - 10, iconR.top + 2, pin, 1, RGB(255, 200, 60), FontRole::SmallBold); }
                 idx++;
             }
             if (g_iconSelectionDragPending || g_iconSelectionDragActive) {
@@ -1337,6 +1387,9 @@ namespace gxos {
             case WM_SIZE: { RECT cr; GetClientRect(h, &cr); std::lock_guard<std::mutex> lk(g_lock); int taskbarH = 40; for (auto& kv : g_windows) { WinInfo& wi = kv.second; if (wi.maximized) { wi.x = cr.left; wi.y = cr.top; wi.w = cr.right - cr.left; wi.h = cr.bottom - taskbarH; wi.dirty = true; } } requestRepaint( ); return 0; }
             case WM_PAINT: {
                 PAINTSTRUCT ps; HDC dc = BeginPaint(h, &ps); RECT cr; GetClientRect(h, &cr); DesktopWallpaper::DrawGradient(dc, cr, g_gradientTopColor, g_gradientBottomColor, g_gradientAccentColor, !g_wallpaperImage); if (g_wallpaperImage && g_wallpaperImage->isValid()) { drawBackgroundImageToHdc(dc, cr, g_wallpaperImage, WallpaperRegistry::ParseScaleMode(g_backgroundScaleMode)); } else { DesktopWallpaper::DrawBranding(dc, cr); } drawDesktopIcons(dc, cr);
+#if defined(GXOS_SYSTEM_FONT_DEMO)
+                drawSystemFontDemo(dc, cr);
+#endif
                 // Draw application windows in Z-order (bottom to top)
                 const int titleBarH = UISettings::DefaultBarHeight; 
                 HFONT font = (HFONT)GetStockObject(ANSI_VAR_FONT); 
@@ -1370,8 +1423,7 @@ namespace gxos {
                     
                     // Draw window title text
                     if (UISettings::EnableWindowTitles) {
-                        SetTextColor(dc, RGB(240, 240, 240)); 
-                        TextOutA(dc, winfo.x + 10, winfo.y + (titleBarH - 16) / 2, winfo.title.c_str( ), (int)winfo.title.size( ));
+                        SystemFont::DrawText(dc, winfo.x + 10, winfo.y + 4, winfo.title.c_str(), (int)winfo.title.size(), RGB(240, 240, 240), FontRole::Title);
                     }
 
                     // Titlebar buttons (matching Legacy: minimize, maximize, tombstone, close from left to right)
@@ -1419,18 +1471,16 @@ namespace gxos {
                         FillRect(dc, &wr, wb); 
                         DeleteObject(wb); 
                         FrameRect(dc, &wr, (HBRUSH)GetStockObject(WHITE_BRUSH)); 
-                        SetTextColor(dc, RGB(240, 240, 240)); 
-                        TextOutA(dc, wr.left + 6, wr.top + 4, wd.text.c_str( ), (int)wd.text.size( )); 
+                        drawUiText(dc, wr.left + 6, wr.top + 4, wd.text, RGB(240, 240, 240), FontRole::Default);
                     }
                     for (const auto& tx : winfo.positionedTexts) {
-                        SetTextColor(dc, tx.hasColor ? RGB(tx.r, tx.g, tx.b) : RGB(220, 220, 220));
-                        TextOutA(dc, winfo.x + tx.x, winfo.y + titleBarH + tx.y, tx.text.c_str(), (int)tx.text.size());
+                        SystemFont::DrawText(dc, winfo.x + tx.x, winfo.y + titleBarH + tx.y, tx.text.c_str(), (int)tx.text.size(),
+                            tx.hasColor ? RGB(tx.r, tx.g, tx.b) : RGB(220, 220, 220), FontRole::Default);
                     }
                     int ty = winfo.y + titleBarH + 8; 
                     for (const auto& tx : winfo.texts) { 
-                        SetTextColor(dc, RGB(220, 220, 220));
-                        TextOutA(dc, winfo.x + 8, ty, tx.c_str( ), (int)tx.size( )); 
-                        ty += 16; 
+                        drawUiText(dc, winfo.x + 8, ty, tx, RGB(220, 220, 220), FontRole::Default);
+                        ty += uiTextHeight(FontRole::Default);
                     }
                     
                     // Draw tombstone overlay
@@ -1452,10 +1502,10 @@ namespace gxos {
                 drawTaskbarSearchBox(dc, 48, cr.bottom - taskbarH + 8, 160, taskbarH - 16);
                 // Taskbar buttons (offset to right of search box)
                 POINT cursor; GetCursorPos(&cursor); ScreenToClient(h, &cursor); int btnX = 216; for (uint64_t id : g_z) {
-                    auto it = g_windows.find(id); if (it == g_windows.end( )) continue; std::string label = it->second.title; SIZE sz; GetTextExtentPoint32A(dc, label.c_str( ), (int)label.size( ), &sz); int bw = sz.cx + 30; if (bw > 180) bw = 180; RECT br{ btnX, cr.bottom - taskbarH + 6, btnX + bw, cr.bottom - 6 }; bool hover = (cursor.x >= br.left && cursor.x <= br.right && cursor.y >= br.top && cursor.y <= br.bottom); HBRUSH bbg = CreateSolidBrush(hover ? RGB(90, 130, 190) : (id == g_focus ? RGB(70, 100, 150) : (it->second.minimized ? RGB(40, 40, 50) : (it->second.tombstoned ? RGB(85, 65, 35) : RGB(55, 58, 70))))); FillRect(dc, &br, bbg); DeleteObject(bbg);
+                    auto it = g_windows.find(id); if (it == g_windows.end( )) continue; std::string label = it->second.title; int bw = measureUiText(label.c_str(), (int)label.size(), FontRole::Small) + 30; if (bw > 180) bw = 180; RECT br{ btnX, cr.bottom - taskbarH + 6, btnX + bw, cr.bottom - 6 }; bool hover = (cursor.x >= br.left && cursor.x <= br.right && cursor.y >= br.top && cursor.y <= br.bottom); HBRUSH bbg = CreateSolidBrush(hover ? RGB(90, 130, 190) : (id == g_focus ? RGB(70, 100, 150) : (it->second.minimized ? RGB(40, 40, 50) : (it->second.tombstoned ? RGB(85, 65, 35) : RGB(55, 58, 70))))); FillRect(dc, &br, bbg); DeleteObject(bbg);
                     // Active indicator line at bottom for focused window
                     if (id == g_focus) { HBRUSH ind = CreateSolidBrush(RGB(100, 160, 240)); RECT indR{ br.left + 2,br.bottom - 3,br.right - 2,br.bottom - 1 }; FillRect(dc, &indR, ind); DeleteObject(ind); }
-                    RECT iconRect{ br.left + 4, br.top + 4, br.left + 20, br.top + 20 }; drawBitmapCentered(dc, it->second.taskbarIcon, iconRect); SetTextColor(dc, RGB(230, 230, 240)); TextOutA(dc, br.left + 24, br.top + 8, label.c_str( ), (int)label.size( )); btnX += bw + 4;
+                    RECT iconRect{ br.left + 4, br.top + 4, br.left + 20, br.top + 20 }; drawBitmapCentered(dc, it->second.taskbarIcon, iconRect); drawUiText(dc, br.left + 24, br.top + 8, label, RGB(230, 230, 240), FontRole::Small); btnX += bw + 4;
                 }
                 // System tray area (before clock)
                 drawSystemTray(dc, cr, taskbarH);
@@ -1472,17 +1522,15 @@ namespace gxos {
                     char timeBuf[16]; char dateBuf[16];
                     std::snprintf(timeBuf, sizeof(timeBuf), "%02d:%02d", ltBuf.tm_hour, ltBuf.tm_min);
                     std::snprintf(dateBuf, sizeof(dateBuf), "%d/%d/%d", ltBuf.tm_mon + 1, ltBuf.tm_mday, ltBuf.tm_year + 1900);
-                    SIZE timeSz, dateSz;
-                    GetTextExtentPoint32A(dc, timeBuf, (int)strlen(timeBuf), &timeSz);
-                    GetTextExtentPoint32A(dc, dateBuf, (int)strlen(dateBuf), &dateSz);
-                    int clockW = (timeSz.cx > dateSz.cx ? timeSz.cx : dateSz.cx) + 16;
+                    int timeW = measureUiText(timeBuf, (int)strlen(timeBuf), FontRole::Small);
+                    int dateW = measureUiText(dateBuf, (int)strlen(dateBuf), FontRole::Small);
+                    int lineH = uiTextHeight(FontRole::Small);
+                    int clockW = (timeW > dateW ? timeW : dateW) + 16;
                     int clockX = cr.right - clockW - 12;
                     int timeY = cr.bottom - taskbarH + 6;
-                    int dateY = timeY + timeSz.cy + 1;
-                    SetTextColor(dc, RGB(200, 200, 210));
-                    TextOutA(dc, clockX + (clockW - timeSz.cx) / 2, timeY, timeBuf, (int)strlen(timeBuf));
-                    SetTextColor(dc, RGB(150, 150, 165));
-                    TextOutA(dc, clockX + (clockW - dateSz.cx) / 2, dateY, dateBuf, (int)strlen(dateBuf));
+                    int dateY = timeY + lineH - 1;
+                    drawUiText(dc, clockX + (clockW - timeW) / 2, timeY, timeBuf, (int)strlen(timeBuf), RGB(200, 200, 210), FontRole::Small);
+                    drawUiText(dc, clockX + (clockW - dateW) / 2, dateY, dateBuf, (int)strlen(dateBuf), RGB(150, 150, 165), FontRole::Small);
                 }
                 // Show Desktop button (thin sliver on far right, matching Legacy)
                 {
@@ -1497,9 +1545,8 @@ namespace gxos {
                     int tbtnX = 216;
                     for (uint64_t id : g_z) {
                         auto it = g_windows.find(id); if (it == g_windows.end( )) continue;
-                        std::string label = it->second.title; SIZE sz;
-                        GetTextExtentPoint32A(dc, label.c_str( ), (int)label.size( ), &sz);
-                        int bw = sz.cx + 30; if (bw > 180) bw = 180;
+                        std::string label = it->second.title;
+                        int bw = measureUiText(label.c_str(), (int)label.size(), FontRole::Small) + 30; if (bw > 180) bw = 180;
                         RECT br2{ tbtnX, cr.bottom - taskbarH + 6, tbtnX + bw, cr.bottom - 6 };
                         bool hov = (cursor.x >= br2.left && cursor.x <= br2.right && cursor.y >= br2.top && cursor.y <= br2.bottom);
                         if (hov) { drawTaskbarTooltip(dc, (br2.left + br2.right) / 2, cr.bottom - taskbarH, label.c_str( )); break; }
@@ -1515,17 +1562,15 @@ namespace gxos {
                     for (size_t ni = 0; ni < notes.size( ); ni++) {
                         const auto& n = notes[ni];
                         if (n.dismissed) continue;
-                        SIZE nsz; const char* nmsg = n.message.c_str( );
-                        GetTextExtentPoint32A(dc, nmsg, (int)n.message.size( ), &nsz);
-                        int noteW = nsz.cx + 24; if (noteW < 160) noteW = 160;
+                        const char* nmsg = n.message.c_str( );
+                        int noteW = measureUiText(nmsg, (int)n.message.size(), FontRole::Default) + 24; if (noteW < 160) noteW = 160;
                         int noteH = 32;
                         int noteX = cr.right - noteW - 8;
                         RECT noteR{ noteX, noteY, noteX + noteW, noteY + noteH };
                         HBRUSH nb = CreateSolidBrush(n.level == NotificationLevel::Error ? RGB(120, 40, 40) : RGB(40, 55, 80));
                         FillRect(dc, &noteR, nb); DeleteObject(nb);
                         FrameRect(dc, &noteR, (HBRUSH)GetStockObject(WHITE_BRUSH));
-                        SetTextColor(dc, RGB(240, 240, 240));
-                        TextOutA(dc, noteX + 12, noteY + 8, nmsg, (int)n.message.size( ));
+                        drawUiText(dc, noteX + 12, noteY + 8, nmsg, (int)n.message.size(), RGB(240, 240, 240), FontRole::Default);
                         noteY += noteH + 4;
                     }
                 }
@@ -1544,13 +1589,13 @@ namespace gxos {
                     HGDIOBJ oldBr2 = SelectObject(dc, GetStockObject(NULL_BRUSH));
                     Rectangle(dc, g_taskbarMenuRect.left, g_taskbarMenuRect.top, g_taskbarMenuRect.right, g_taskbarMenuRect.bottom);
                     SelectObject(dc, oldPen2); SelectObject(dc, oldBr2); DeleteObject(tmBorder);
-                    SetBkMode(dc, TRANSPARENT); SetTextColor(dc, RGB(220, 220, 220));
+                    SetBkMode(dc, TRANSPARENT);
                     for (int tmi = 0; tmi < tmItemCount; ++tmi) {
                         int iy = g_taskbarMenuRect.top + tmPad + tmi * tmItemH;
                         RECT itemR{ g_taskbarMenuRect.left + 1, iy, g_taskbarMenuRect.right - 1, iy + tmItemH };
                         bool hov = (cursor.x >= itemR.left && cursor.x <= itemR.right && cursor.y >= itemR.top && cursor.y <= itemR.bottom);
                         if (tmi == g_taskbarMenuSel || hov) { HBRUSH hb = CreateSolidBrush(RGB(60, 80, 120)); FillRect(dc, &itemR, hb); DeleteObject(hb); }
-                        TextOutA(dc, itemR.left + 8, iy + (tmItemH / 2) - 7, tmLabels[tmi], (int)strlen(tmLabels[tmi]));
+                        drawUiText(dc, itemR.left + 8, iy + (tmItemH - uiTextHeight(FontRole::Default)) / 2, tmLabels[tmi], (int)strlen(tmLabels[tmi]), RGB(220, 220, 220), FontRole::Default);
                     }
                 }
                 // Start menu popup (pinned + recent OR all programs)
@@ -1597,7 +1642,7 @@ namespace gxos {
                             std::string txt = g_startMenuAllProgsSorted[i];
                             int textX = r.left + 4;
                             drawStartMenuIcon(dc, r, txt, textX);
-                            TextOutA(dc, textX, r.top + 4, txt.c_str( ), (int)txt.size( ));
+                            drawUiText(dc, textX, r.top + 4, txt, RGB(230, 230, 230), FontRole::Default);
                             y += rowH; row++;
                         }
                     } else {
@@ -1619,7 +1664,7 @@ namespace gxos {
                             int textX = r.left + 4;
                             drawStartMenuIcon(dc, r, txt, textX);
                             std::string displayText = (hasEquivalentListItem(g_cfg.pinned, txt) ? "* " : "  ") + txt;
-                            TextOutA(dc, textX, r.top + 4, displayText.c_str( ), (int)displayText.size( ));
+                            drawUiText(dc, textX, r.top + 4, displayText, RGB(230, 230, 230), FontRole::Default);
                             y += rowH; row++;
                         }
                     }
@@ -1635,7 +1680,7 @@ namespace gxos {
                     if (overComp) { HBRUSH hb = CreateSolidBrush(RGB(70, 90, 130)); FillRect(dc, &rcComputer, hb); DeleteObject(hb); }
                     int computerTextX = rcComputer.left + 6;
                     drawStartMenuIcon(dc, rcComputer, "Computer Files", computerTextX);
-                    TextOutA(dc, computerTextX, rcComputer.top + 4, "Computer Files", 14);
+                    drawUiText(dc, computerTextX, rcComputer.top + 4, "Computer Files", 14, RGB(200, 200, 200), FontRole::Default);
                     rcY += rowH + 4;
 
                     // Console shortcut
@@ -1644,7 +1689,7 @@ namespace gxos {
                     if (overCon) { HBRUSH hb = CreateSolidBrush(RGB(70, 90, 130)); FillRect(dc, &rcConsole, hb); DeleteObject(hb); }
                     int consoleTextX = rcConsole.left + 6;
                     drawStartMenuIcon(dc, rcConsole, "Console", consoleTextX);
-                    TextOutA(dc, consoleTextX, rcConsole.top + 4, "Console", 7);
+                    drawUiText(dc, consoleTextX, rcConsole.top + 4, "Console", 7, RGB(200, 200, 200), FontRole::Default);
                     rcY += rowH + 4;
 
                     // Recent Documents shortcut
@@ -1653,7 +1698,7 @@ namespace gxos {
                     if (overDocs) { HBRUSH hb = CreateSolidBrush(RGB(70, 90, 130)); FillRect(dc, &rcDocs, hb); DeleteObject(hb); }
                     int docsTextX = rcDocs.left + 6;
                     drawStartMenuIcon(dc, rcDocs, "Recent Docs", docsTextX);
-                    TextOutA(dc, docsTextX, rcDocs.top + 4, "Recent Docs", 11);
+                    drawUiText(dc, docsTextX, rcDocs.top + 4, "Recent Docs", 11, RGB(200, 200, 200), FontRole::Default);
 
                     // Bottom area - "All Programs" toggle button
                     int btnY = sm.bottom - 30;
@@ -1663,7 +1708,7 @@ namespace gxos {
                     FillRect(dc, &allProgBtn, apb); DeleteObject(apb);
                     FrameRect(dc, &allProgBtn, (HBRUSH)GetStockObject(WHITE_BRUSH));
                     const char* btnText = g_startMenuAllProgs ? "< Back" : "All Programs >";
-                    TextOutA(dc, allProgBtn.left + 8, allProgBtn.top + 6, btnText, (int)strlen(btnText));
+                    drawUiText(dc, allProgBtn.left + 8, allProgBtn.top + 5, btnText, (int)strlen(btnText), RGB(230, 230, 230), FontRole::Default);
 
                     // Power menu area (bottom-right)
                     int shutdownBtnW = 80;
@@ -1673,7 +1718,7 @@ namespace gxos {
                     HBRUSH sdb = CreateSolidBrush(overShutdown ? RGB(80, 40, 40) : RGB(60, 60, 75));
                     FillRect(dc, &shutdownBtn, sdb); DeleteObject(sdb);
                     FrameRect(dc, &shutdownBtn, (HBRUSH)GetStockObject(WHITE_BRUSH));
-                    TextOutA(dc, shutdownBtn.left + 10, shutdownBtn.top + 6, "Shutdown", 8);
+                    drawUiText(dc, shutdownBtn.left + 10, shutdownBtn.top + 5, "Shutdown", 8, RGB(230, 230, 230), FontRole::Default);
                 }
 
                 // Right-click context menus are top-level popups over Start and desktop surfaces.
@@ -2710,9 +2755,8 @@ namespace gxos {
             DeleteObject(iconPen);
             // Placeholder text
             SetBkMode(dc, TRANSPARENT);
-            SetTextColor(dc, RGB(100, 105, 120));
             const char* placeholder = "Search apps...";
-            TextOutA(dc, x + 20, y + (h - 14) / 2, placeholder, (int)strlen(placeholder));
+            drawUiText(dc, x + 20, y + (h - uiTextHeight(FontRole::Small)) / 2, placeholder, (int)strlen(placeholder), RGB(100, 105, 120), FontRole::Small);
         }
 
         void Compositor::drawSystemTray(HDC dc, RECT cr, int taskbarH) {
@@ -2723,9 +2767,7 @@ namespace gxos {
             localtime_s(&ltBuf, &now);
             char timeBuf[16];
             std::snprintf(timeBuf, sizeof(timeBuf), "%02d:%02d", ltBuf.tm_hour, ltBuf.tm_min);
-            SIZE timeSz;
-            GetTextExtentPoint32A(dc, timeBuf, (int)strlen(timeBuf), &timeSz);
-            int clockW = timeSz.cx + 32; // approximate clock area width
+            int clockW = measureUiText(timeBuf, (int)strlen(timeBuf), FontRole::Small) + 32; // approximate clock area width
             int trayX = cr.right - clockW - SystemTray::Width( ) - 16;
             int trayY = cr.bottom - taskbarH;
             SystemTray::Draw(dc, trayX, trayY, taskbarH);
@@ -2733,11 +2775,9 @@ namespace gxos {
 
         void Compositor::drawTaskbarTooltip(HDC dc, int x, int y, const char* text) {
             if (!text || !text[0]) return;
-            SIZE sz;
-            GetTextExtentPoint32A(dc, text, (int)strlen(text), &sz);
             int pad = 6;
-            int tipW = sz.cx + pad * 2;
-            int tipH = sz.cy + pad * 2;
+            int tipW = measureUiText(text, (int)strlen(text), FontRole::Small) + pad * 2;
+            int tipH = uiTextHeight(FontRole::Small) + pad * 2;
             // Position above the given point
             int tipX = x - tipW / 2;
             int tipY = y - tipH - 4;
@@ -2755,8 +2795,7 @@ namespace gxos {
             SelectObject(dc, oldBr);
             DeleteObject(border);
             SetBkMode(dc, TRANSPARENT);
-            SetTextColor(dc, RGB(220, 220, 230));
-            TextOutA(dc, tipX + pad, tipY + pad, text, (int)strlen(text));
+            drawUiText(dc, tipX + pad, tipY + pad, text, (int)strlen(text), RGB(220, 220, 230), FontRole::Small);
         }
 #endif
 
@@ -2796,6 +2835,22 @@ namespace gxos {
                 if (x >= 0 && x < bufW) pixels[row * stride + x] = color;
                 if (x + w - 1 >= 0 && x + w - 1 < bufW) pixels[row * stride + x + w - 1] = color;
             }
+        }
+
+        static int fbMeasureText(const char* text, int len = -1, FontRole role = FontRole::Default) {
+            return SystemFont::MeasureWidth(role, text, len);
+        }
+
+        static void fbDrawText(uint32_t* pixels, int pitch, int bufW, int bufH,
+                               int x, int y, const char* text, int len, uint32_t color,
+                               FontRole role = FontRole::Default) {
+            SystemFont::DrawTextToBuffer(pixels, pitch, bufW, bufH, x, y, text, len, color, role);
+        }
+
+        static void fbDrawText(uint32_t* pixels, int pitch, int bufW, int bufH,
+                               int x, int y, const std::string& text, uint32_t color,
+                               FontRole role = FontRole::Default) {
+            fbDrawText(pixels, pitch, bufW, bufH, x, y, text.c_str(), static_cast<int>(text.size()), color, role);
         }
 
         static void fbDrawStartMenuIcon(uint32_t* pixels, int pitch, int bufW, int bufH, int rowX, int rowY, int rowH, const std::string& label, int& textX) {
@@ -2887,13 +2942,13 @@ namespace gxos {
                 
                 // Icon label
                 const char* label = item.label.c_str();
-                int labelW = BitmapFont::MeasureWidth(label);
-                BitmapFont::DrawStringToBuffer(pixels, pitch, fbW, fbH,
-                    ix + (cellW - labelW) / 2, iconY + iconH + 8, label, -1, 0x00E6E6F0);
+                int labelW = fbMeasureText(label, -1, FontRole::Small);
+                fbDrawText(pixels, pitch, fbW, fbH,
+                    ix + (cellW - labelW) / 2, iconY + iconH + 8, label, -1, 0x00E6E6F0, FontRole::Small);
                 
                 if (item.pinned) {
-                    BitmapFont::DrawStringToBuffer(pixels, pitch, fbW, fbH,
-                        iconX + iconW - 6, iconY + 2, "*", 1, 0x00FFC83C);
+                    fbDrawText(pixels, pitch, fbW, fbH,
+                        iconX + iconW - 6, iconY + 2, "*", 1, 0x00FFC83C, FontRole::SmallBold);
                 }
                 
                 iconIdx++;
@@ -2921,8 +2976,8 @@ namespace gxos {
                     fbFillRect(pixels, pitch, fbW, fbH, w.x, w.y, w.w, titleBarH, titleColor);
                     
                     // Title text
-                    BitmapFont::DrawStringToBuffer(pixels, pitch, fbW, fbH,
-                        w.x + 10, w.y + (titleBarH - 7) / 2, w.title.c_str(), -1, 0x00F0F0F0);
+                    fbDrawText(pixels, pitch, fbW, fbH,
+                        w.x + 10, w.y + (titleBarH - SystemFont::MeasureHeight(FontRole::Title)) / 2, w.title, 0x00F0F0F0, FontRole::Title);
                     
                     // Close button (X)
                     int btnSize = titleBarH - 8;
@@ -2952,21 +3007,22 @@ namespace gxos {
                         uint32_t wColor = wd.pressed ? 0x00285090 : (wd.hover ? 0x00465A78 : 0x005A5A64);
                         fbFillRect(pixels, pitch, fbW, fbH, wx, wy, wd.w, wd.h, wColor);
                         fbDrawRect(pixels, pitch, fbW, fbH, wx, wy, wd.w, wd.h, 0x00FFFFFF);
-                        BitmapFont::DrawStringToBuffer(pixels, pitch, fbW, fbH,
-                            wx + 6, wy + (wd.h - 7) / 2, wd.text.c_str(), -1, 0x00F0F0F0);
+                        fbDrawText(pixels, pitch, fbW, fbH,
+                            wx + 6, wy + (wd.h - SystemFont::MeasureHeight(FontRole::Default)) / 2, wd.text, 0x00F0F0F0, FontRole::Default);
                     }
                     for (const auto& tx : w.positionedTexts) {
-                        BitmapFont::DrawStringToBuffer(pixels, pitch, fbW, fbH,
-                            w.x + tx.x, contentY + tx.y, tx.text.c_str(), -1,
-                            tx.hasColor ? ((static_cast<uint32_t>(tx.r) << 16) | (static_cast<uint32_t>(tx.g) << 8) | tx.b) : 0x00DCDCDC);
+                        fbDrawText(pixels, pitch, fbW, fbH,
+                            w.x + tx.x, contentY + tx.y, tx.text,
+                            tx.hasColor ? ((static_cast<uint32_t>(tx.r) << 16) | (static_cast<uint32_t>(tx.g) << 8) | tx.b) : 0x00DCDCDC,
+                            FontRole::Default);
                     }
                     
                     // Draw text lines
                     int ty = contentY + 8;
                     for (const auto& tx : w.texts) {
-                        BitmapFont::DrawStringToBuffer(pixels, pitch, fbW, fbH,
-                            w.x + 8, ty, tx.c_str(), -1, 0x00DCDCDC);
-                        ty += 10;
+                        fbDrawText(pixels, pitch, fbW, fbH,
+                            w.x + 8, ty, tx, 0x00DCDCDC, FontRole::Default);
+                        ty += SystemFont::MeasureHeight(FontRole::Default);
                     }
                     
                     // Tombstone overlay
@@ -2998,7 +3054,7 @@ namespace gxos {
             // Start button
             fbFillRect(pixels, pitch, fbW, fbH, 8, fbH - taskbarH + 6, 32, taskbarH - 12, 0x00374B64);
             fbDrawRect(pixels, pitch, fbW, fbH, 8, fbH - taskbarH + 6, 32, taskbarH - 12, 0x00FFFFFF);
-            BitmapFont::DrawStringToBuffer(pixels, pitch, fbW, fbH, 12, fbH - taskbarH + 14, "S", 1, 0x00FFFFFF);
+            fbDrawText(pixels, pitch, fbW, fbH, 12, fbH - taskbarH + 12, "S", 1, 0x00FFFFFF, FontRole::SmallBold);
 
             if (g_startMenuVisible) {
                 const int smW = 440;
@@ -3027,7 +3083,7 @@ namespace gxos {
                         std::string txt = g_startMenuAllProgsSorted[i];
                         int textX = rowX + 4;
                         fbDrawStartMenuIcon(pixels, pitch, fbW, fbH, rowX, y, rowH, txt, textX);
-                        BitmapFont::DrawStringToBuffer(pixels, pitch, fbW, fbH, textX, y + 6, txt.c_str(), -1, 0x00E6E6E6);
+                        fbDrawText(pixels, pitch, fbW, fbH, textX, y + 4, txt, 0x00E6E6E6, FontRole::Default);
                         y += rowH;
                         row++;
                     }
@@ -3041,7 +3097,7 @@ namespace gxos {
                         int textX = rowX + 4;
                         fbDrawStartMenuIcon(pixels, pitch, fbW, fbH, rowX, y, rowH, txt, textX);
                         std::string displayText = (hasEquivalentListItem(g_cfg.pinned, txt) ? "* " : "  ") + txt;
-                        BitmapFont::DrawStringToBuffer(pixels, pitch, fbW, fbH, textX, y + 6, displayText.c_str(), -1, 0x00E6E6E6);
+                        fbDrawText(pixels, pitch, fbW, fbH, textX, y + 4, displayText, 0x00E6E6E6, FontRole::Default);
                         y += rowH;
                         row++;
                     }
@@ -3051,28 +3107,28 @@ namespace gxos {
                 int rcY = smTop + 6;
                 int computerTextX = rcX + 4;
                 fbDrawStartMenuIcon(pixels, pitch, fbW, fbH, rcX, rcY, rowH, "Computer Files", computerTextX);
-                BitmapFont::DrawStringToBuffer(pixels, pitch, fbW, fbH, computerTextX, rcY + 6, "Computer Files", -1, 0x00C8C8C8);
+                fbDrawText(pixels, pitch, fbW, fbH, computerTextX, rcY + 4, "Computer Files", -1, 0x00C8C8C8, FontRole::Default);
                 rcY += rowH + 4;
 
                 int consoleTextX = rcX + 4;
                 fbDrawStartMenuIcon(pixels, pitch, fbW, fbH, rcX, rcY, rowH, "Console", consoleTextX);
-                BitmapFont::DrawStringToBuffer(pixels, pitch, fbW, fbH, consoleTextX, rcY + 6, "Console", -1, 0x00C8C8C8);
+                fbDrawText(pixels, pitch, fbW, fbH, consoleTextX, rcY + 4, "Console", -1, 0x00C8C8C8, FontRole::Default);
                 rcY += rowH + 4;
 
                 int docsTextX = rcX + 4;
                 fbDrawStartMenuIcon(pixels, pitch, fbW, fbH, rcX, rcY, rowH, "Recent Docs", docsTextX);
-                BitmapFont::DrawStringToBuffer(pixels, pitch, fbW, fbH, docsTextX, rcY + 6, "Recent Docs", -1, 0x00C8C8C8);
+                fbDrawText(pixels, pitch, fbW, fbH, docsTextX, rcY + 4, "Recent Docs", -1, 0x00C8C8C8, FontRole::Default);
 
                 int btnY = smBottom - 30;
                 fbFillRect(pixels, pitch, fbW, fbH, smLeft + 6, btnY, leftColW - 12, 24, 0x003C3C4B);
                 fbDrawRect(pixels, pitch, fbW, fbH, smLeft + 6, btnY, leftColW - 12, 24, 0x00FFFFFF);
                 const char* btnText = g_startMenuAllProgs ? "< Back" : "All Programs >";
-                BitmapFont::DrawStringToBuffer(pixels, pitch, fbW, fbH, smLeft + 14, btnY + 8, btnText, -1, 0x00E6E6E6);
+                fbDrawText(pixels, pitch, fbW, fbH, smLeft + 14, btnY + 5, btnText, -1, 0x00E6E6E6, FontRole::Default);
 
                 int shutdownBtnW = 80;
                 fbFillRect(pixels, pitch, fbW, fbH, smRight - shutdownBtnW - 30, btnY, shutdownBtnW, 24, 0x003C3C4B);
                 fbDrawRect(pixels, pitch, fbW, fbH, smRight - shutdownBtnW - 30, btnY, shutdownBtnW, 24, 0x00FFFFFF);
-                BitmapFont::DrawStringToBuffer(pixels, pitch, fbW, fbH, smRight - shutdownBtnW - 20, btnY + 8, "Shutdown", -1, 0x00E6E6E6);
+                fbDrawText(pixels, pitch, fbW, fbH, smRight - shutdownBtnW - 20, btnY + 5, "Shutdown", -1, 0x00E6E6E6, FontRole::Default);
             }
             
             // Taskbar window buttons
@@ -3086,7 +3142,7 @@ namespace gxos {
                     
                     int labelLen = (int)w.title.size();
                     if (labelLen > 15) labelLen = 15;
-                    int bw = labelLen * 6 + 20;
+                    int bw = fbMeasureText(w.title.c_str(), labelLen, FontRole::Small) + 20;
                     if (bw > 150) bw = 150;
                     
                     uint32_t btnColor = (wid == g_focus) ? 0x00466496 : 
@@ -3099,8 +3155,8 @@ namespace gxos {
                         fbFillRect(pixels, pitch, fbW, fbH, btnX + 2, fbH - 9, bw - 4, 2, 0x0064A0F0);
                     }
                     
-                    BitmapFont::DrawStringToBuffer(pixels, pitch, fbW, fbH,
-                        btnX + 8, fbH - taskbarH + 14, w.title.c_str(), labelLen, 0x00E6E6F0);
+                    fbDrawText(pixels, pitch, fbW, fbH,
+                        btnX + 8, fbH - taskbarH + 12, w.title.c_str(), labelLen, 0x00E6E6F0, FontRole::Small);
                     
                     btnX += bw + 4;
                 }
@@ -3114,12 +3170,12 @@ namespace gxos {
             char timeBuf[16];
             std::snprintf(timeBuf, sizeof(timeBuf), "%02d:%02d", ltBuf.tm_hour, ltBuf.tm_min);
             int clockX = fbW - 60;
-            BitmapFont::DrawStringToBuffer(pixels, pitch, fbW, fbH,
-                clockX, fbH - taskbarH + 10, timeBuf, -1, 0x00C8C8D2);
+            fbDrawText(pixels, pitch, fbW, fbH,
+                clockX, fbH - taskbarH + 8, timeBuf, -1, 0x00C8C8D2, FontRole::Small);
             char dateBuf[16];
             std::snprintf(dateBuf, sizeof(dateBuf), "%d/%d", ltBuf.tm_mon + 1, ltBuf.tm_mday);
-            BitmapFont::DrawStringToBuffer(pixels, pitch, fbW, fbH,
-                clockX, fbH - taskbarH + 22, dateBuf, -1, 0x009696A5);
+            fbDrawText(pixels, pitch, fbW, fbH,
+                clockX, fbH - taskbarH + 22, dateBuf, -1, 0x009696A5, FontRole::Small);
             
             // Present to hardware framebuffer
             g_videoBackend->present();

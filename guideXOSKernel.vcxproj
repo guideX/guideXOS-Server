@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|Win32">
@@ -177,6 +177,8 @@
     <ClInclude Include="kernel\core\include\kernel\desktop.h" />
     <ClInclude Include="kernel\core\include\kernel\desktop_font.h" />
     <ClInclude Include="kernel\core\include\kernel\shell.h" />
+    <ClInclude Include="kernel\core\include\kernel\system_font.h" />
+    <ClInclude Include="kernel\core\include\kernel\generated\system_font_roboto.h" />
     <ClInclude Include="kernel\core\include\kernel\framebuffer.h" />
     <ClInclude Include="kernel\core\include\kernel\interrupts.h" />
     <ClInclude Include="kernel\core\include\kernel\multiboot.h" />
@@ -255,6 +257,7 @@
     <ClCompile Include="native_elf_launch_pipeline.cpp" />
     <ClCompile Include="kernel\core\desktop.cpp" />
     <ClCompile Include="kernel\core\desktop_font.cpp" />
+    <ClCompile Include="kernel\core\system_font.cpp" />
     <ClCompile Include="kernel\core\shell.cpp" />
     <ClCompile Include="kernel\core\interrupts.cpp" />
     <ClCompile Include="kernel\core\ps2mouse.cpp" />
@@ -383,6 +386,7 @@
     <None Include="kernel\build-x86.bat" />
     <None Include="kernel\clean.bat" />
     <None Include="kernel\Makefile" />
+    <None Include="tools\generate_system_fonts.py" />
     <None Include="RUN-KERNEL.bat" />
   </ItemGroup>
   <ItemGroup>
@@ -392,3 +396,4 @@
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>
 </Project>
+

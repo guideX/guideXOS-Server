@@ -220,6 +220,14 @@ static std::string navigatorHostedSmokeDiagnostic() {
     add("docs CSS-lite detected", contains(docsReport, "Current Document.CSS diagnostics=css detected"), "expected css detected");
     int findMatches = gxos::apps::Navigator::SmokeFindInPage("Navigator");
     add("find in page matches docs", findMatches > 0, "matches=" + std::to_string(findMatches));
+    bool docsReloadedForClick = gxos::apps::Navigator::SmokeNavigateTo("file:///docs/index.html");
+    bool linkClickNavigated = gxos::apps::Navigator::SmokeClickFirstLink();
+    std::string clickedLinkUrl = gxos::apps::Navigator::SmokeCurrentUrl();
+    add("link click navigates", docsReloadedForClick && linkClickNavigated && clickedLinkUrl != "file:///docs/index.html", "currentUrl=" + clickedLinkUrl);
+    bool docsReloadedForDrag = gxos::apps::Navigator::SmokeNavigateTo("file:///docs/index.html");
+    bool linkDragSelected = gxos::apps::Navigator::SmokeDragFirstLinkSelectsWithoutNavigation();
+    std::string dragUrl = gxos::apps::Navigator::SmokeCurrentUrl();
+    add("link drag selects and copies without navigating", docsReloadedForDrag && linkDragSelected && dragUrl == "file:///docs/index.html", "currentUrl=" + dragUrl);
 
     bool formsLoaded = gxos::apps::Navigator::SmokeNavigateTo("file:///docs/forms.html");
     std::string formsUrl = gxos::apps::Navigator::SmokeCurrentUrl();
@@ -246,6 +254,8 @@ static std::string navigatorHostedSmokeDiagnostic() {
     out << "current_url=" << currentUrl << "\n";
     out << "docs_url=" << docsUrl << "\n";
     out << "find_matches=" << findMatches << "\n";
+    out << "clicked_link_url=" << clickedLinkUrl << "\n";
+    out << "drag_selection_url=" << dragUrl << "\n";
     out << "forms_url=" << formsUrl << "\n";
     out << "submitted_form_url=" << submittedUrl << "\n";
     out << "downloads_url=" << downloadsUrl << "\n";

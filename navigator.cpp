@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
+#include <cstdlib>
 #include <fstream>
 #include <sstream>
 #include <unordered_map>
@@ -47,8 +48,16 @@ std::vector<Navigator::FindMatch> Navigator::s_findMatches;
 int         Navigator::s_currentFindMatch = -1;
 bool        Navigator::s_ctrlPressed = false;
 bool        Navigator::s_mouseLeftDown = false;
-Navigator::HitTarget Navigator::s_mouseDownTarget = Navigator::HitTarget::None;
+Navigator::MouseMode Navigator::s_mouseMode = Navigator::MouseMode::None;
+Navigator::HitTarget Navigator::s_mouseDownHitTarget = Navigator::HitTarget::None;
 int         Navigator::s_mouseDownLinkBlockIndex = -1;
+std::string Navigator::s_mouseDownLinkUrl;
+int         Navigator::s_mouseDownX = 0;
+int         Navigator::s_mouseDownY = 0;
+int         Navigator::s_mouseCurrentX = 0;
+int         Navigator::s_mouseCurrentY = 0;
+bool        Navigator::s_mouseDragThresholdExceeded = false;
+bool        Navigator::s_selectionBegan = false;
 bool        Navigator::s_selectionActive = false;
 bool        Navigator::s_selectionPending = false;
 bool        Navigator::s_selectionDragging = false;
@@ -86,6 +95,7 @@ namespace {
 	constexpr int kFormInputW = 320;
 	constexpr int kFormControlH = 26;
 	constexpr int kFormSubmitW = 104;
+	constexpr int kMouseDragThreshold = 4;
 
 	constexpr int kWidgetIdBack = 1;
 	constexpr int kWidgetIdForward = 2;
@@ -947,6 +957,44 @@ int Navigator::SmokeFindInPage(const std::string& query)
 	return static_cast<int>(s_findMatches.size());
 }
 
+bool Navigator::SmokeClickFirstLink()
+{
+	if (s_windowId == 0) return false;
+	for (int i = 0; i < static_cast<int>(s_currentDoc.blocks.size()); ++i) {
+		if (s_currentDoc.blocks[i].type != BlockType::Link || s_currentDoc.blocks[i].url.empty()) continue;
+		const std::string before = s_currentDoc.url;
+		s_scrollOffset = std::max(0, blockLayoutY(i) - 12);
+		clampScrollOffset();
+		Rect r = linkBlockRect(i);
+		const int x = r.x + std::min(std::max(2, r.w / 4), std::max(2, r.w - 2));
+		const int y = r.y + std::min(8, std::max(1, r.h - 1));
+		handleMouseInput(x, y, 1, "down");
+		handleMouseInput(x, y, 1, "up");
+		return s_currentDoc.url != before;
+	}
+	return false;
+}
+
+bool Navigator::SmokeDragFirstLinkSelectsWithoutNavigation()
+{
+	if (s_windowId == 0) return false;
+	for (int i = 0; i < static_cast<int>(s_currentDoc.blocks.size()); ++i) {
+		if (s_currentDoc.blocks[i].type != BlockType::Link || s_currentDoc.blocks[i].url.empty()) continue;
+		const std::string before = s_currentDoc.url;
+		s_scrollOffset = std::max(0, blockLayoutY(i) - 12);
+		clampScrollOffset();
+		Rect r = linkBlockRect(i);
+		const int x1 = r.x + std::min(std::max(2, r.w / 4), std::max(2, r.w - 2));
+		const int y1 = r.y + std::min(8, std::max(1, r.h - 1));
+		const int x2 = std::min(r.x + std::max(2, r.w - 2), x1 + std::max(kMouseDragThreshold + 1, kCharW * 3));
+		handleMouseInput(x1, y1, 1, "down");
+		handleMouseInput(x2, y1, 0, "move");
+		handleMouseInput(x2, y1, 1, "up");
+		return s_currentDoc.url == before && hasSelection() && copySelectionToClipboard();
+	}
+	return false;
+}
+
 std::string Navigator::SmokeRuntimeReport()
 {
 	const std::string inspected = s_pageMetadata.finalUrl.empty() ? "" : s_pageMetadata.finalUrl;
@@ -989,8 +1037,16 @@ int Navigator::main(int, char**)
 	s_addressCaret   = 0;
 	s_ctrlPressed = false;
 	s_mouseLeftDown = false;
-	s_mouseDownTarget = HitTarget::None;
+	s_mouseMode = MouseMode::None;
+	s_mouseDownHitTarget = HitTarget::None;
 	s_mouseDownLinkBlockIndex = -1;
+	s_mouseDownLinkUrl.clear();
+	s_mouseDownX = 0;
+	s_mouseDownY = 0;
+	s_mouseCurrentX = 0;
+	s_mouseCurrentY = 0;
+	s_mouseDragThresholdExceeded = false;
+	s_selectionBegan = false;
 	clearSelection();
 	s_navigatorClipboard.clear();
 	s_clipboardMode = "Navigator internal clipboard";
@@ -1063,93 +1119,7 @@ int Navigator::main(int, char**)
 				int x = std::stoi(xStr);
 				int y = std::stoi(yStr);
 				int button = std::stoi(buttonStr);
-				constexpr int kSelectionDragThreshold = 4;
-				int linkIdx = -1;
-				HitTarget target = hitTest(x, y, linkIdx);
-				if (button == 0 && action == "move") {
-					if (s_mouseLeftDown && s_mouseDownTarget != HitTarget::AddressBar && s_mouseDownTarget != HitTarget::FormInput && s_mouseDownTarget != HitTarget::FormSubmit) {
-						if (!s_selectionDragging && s_selectionPending) {
-							int dx = x - s_selectionStartX;
-							if (dx < 0) dx = -dx;
-							int dy = y - s_selectionStartY;
-							if (dy < 0) dy = -dy;
-							if (dx >= kSelectionDragThreshold || dy >= kSelectionDragThreshold) {
-								beginSelection(s_selectionStartX, s_selectionStartY);
-							}
-						}
-						if (s_selectionDragging) {
-							updateSelection(x, y);
-							updateDisplay();
-						}
-					}
-					updateHoverStatus(target, linkIdx);
-				} else if (button == 1 && action == "down") {
-					s_mouseLeftDown = true;
-					s_mouseDownTarget = target;
-					s_mouseDownLinkBlockIndex = linkIdx;
-					SelectionPosition textHit = textPositionFromPoint(x, y, false);
-					if (target == HitTarget::AddressBar) {
-							if (s_focusedInputBlockIndex >= 0) blurDocumentInput();
-							clearSelection();
-							if (s_findActive) closeFindMode();
-							focusAddressBar();
-							// Set caret from click X position using the same fixed char width as rendering.
-							// TODO: replace with proportional text measurement when available.
-							if (s_addressFocused) {
-								constexpr int kCharW = 8;
-								constexpr int kTextX = kAddressX + 10;
-								int charOffset = (x - kTextX) / kCharW;
-								s_addressCaret = std::max(0, std::min(charOffset,
-									static_cast<int>(s_addressBuffer.size())));
-								renderToolbar();
-							}
-					} else {
-						// Clicking anywhere outside the address bar blurs it.
-						if (s_addressFocused) blurAddressBar();
-						if (target == HitTarget::FormInput) {
-							clearSelection();
-							if (s_findActive) closeFindMode();
-							focusDocumentInput(linkIdx);
-							Rect r = formControlRect(linkIdx);
-							constexpr int kCharW = 8;
-							int charOffset = (x - (r.x + 8)) / kCharW;
-							if (linkIdx >= 0 && linkIdx < static_cast<int>(s_currentDoc.blocks.size())) {
-								s_inputCaret = std::max(0, std::min(charOffset,
-									static_cast<int>(s_currentDoc.blocks[linkIdx].inputValue.size())));
-							}
-							updateDisplay();
-						} else {
-							if (s_focusedInputBlockIndex >= 0) blurDocumentInput();
-							if (target == HitTarget::FormSubmit) {
-								clearSelection();
-							} else if (textHit.blockIndex >= 0) {
-								clearSelection();
-								s_selectionPending = true;
-								s_selectionStartX = x;
-								s_selectionStartY = y;
-								updateDisplay();
-							} else if (target == HitTarget::None) {
-								clearSelection();
-								updateDisplay();
-							}
-						}
-					}
-				} else if (button == 1 && action == "up") {
-					s_mouseLeftDown = false;
-					if (s_selectionDragging) {
-						finalizeSelection(x, y);
-						if (s_mouseDownTarget == HitTarget::Link && !s_selectionMoved && !hasSelection()) {
-							handleDocumentClick(s_mouseDownTarget, s_mouseDownLinkBlockIndex);
-						} else {
-							updateDisplay();
-						}
-					} else if (s_mouseDownTarget == HitTarget::Link || s_mouseDownTarget == HitTarget::FormSubmit) {
-						handleDocumentClick(s_mouseDownTarget, s_mouseDownLinkBlockIndex);
-					}
-					s_selectionPending = false;
-					s_mouseDownTarget = HitTarget::None;
-					s_mouseDownLinkBlockIndex = -1;
-				}
+				handleMouseInput(x, y, button, action);
 			} catch (...) {
 			}
 			break;
@@ -1633,6 +1603,182 @@ void Navigator::handleDocumentClick(HitTarget target, int linkBlockIndex)
 		linkBlockIndex < static_cast<int>(s_currentDoc.blocks.size()))
 	{
 		submitFormForBlock(linkBlockIndex);
+	}
+}
+
+void Navigator::handleMouseInput(int x, int y, int button, const std::string& action)
+{
+	int linkIdx = -1;
+	HitTarget target = hitTest(x, y, linkIdx);
+
+	if (button == 0 && action == "move") {
+		s_mouseCurrentX = x;
+		s_mouseCurrentY = y;
+
+		if (s_mouseLeftDown) {
+			const int dx = std::abs(x - s_mouseDownX);
+			const int dy = std::abs(y - s_mouseDownY);
+			if (dx >= kMouseDragThreshold || dy >= kMouseDragThreshold) {
+				s_mouseDragThresholdExceeded = true;
+			}
+
+			if ((s_mouseMode == MouseMode::PotentialLinkClick ||
+				 s_mouseMode == MouseMode::PotentialTextSelection) &&
+				s_mouseDragThresholdExceeded)
+			{
+				beginSelection(s_mouseDownX, s_mouseDownY);
+				if (s_selectionDragging) {
+					s_mouseMode = MouseMode::SelectingText;
+					s_selectionBegan = true;
+				}
+			}
+
+			if (s_mouseMode == MouseMode::SelectingText) {
+				updateSelection(x, y);
+				updateDisplay();
+			}
+		}
+
+		updateHoverStatus(target, linkIdx);
+		return;
+	}
+
+	if (button == 1 && action == "down") {
+		s_mouseLeftDown = true;
+		s_mouseMode = MouseMode::None;
+		s_mouseDownHitTarget = target;
+		s_mouseDownLinkBlockIndex = linkIdx;
+		s_mouseDownLinkUrl.clear();
+		s_mouseDownX = x;
+		s_mouseDownY = y;
+		s_mouseCurrentX = x;
+		s_mouseCurrentY = y;
+		s_mouseDragThresholdExceeded = false;
+		s_selectionBegan = false;
+
+		if (target == HitTarget::Link &&
+			linkIdx >= 0 &&
+			linkIdx < static_cast<int>(s_currentDoc.blocks.size()))
+		{
+			s_mouseDownLinkUrl = s_currentDoc.blocks[linkIdx].url;
+		}
+
+		if (target == HitTarget::AddressBar) {
+			s_mouseMode = MouseMode::AddressBarInteraction;
+			if (s_focusedInputBlockIndex >= 0) blurDocumentInput();
+			clearSelection();
+			if (s_findActive) closeFindMode();
+			focusAddressBar();
+			if (s_addressFocused) {
+				constexpr int kTextX = kAddressX + 10;
+				int charOffset = (x - kTextX) / kCharW;
+				s_addressCaret = std::max(0, std::min(charOffset,
+					static_cast<int>(s_addressBuffer.size())));
+				renderToolbar();
+			}
+			return;
+		}
+
+		if (target == HitTarget::Back ||
+			target == HitTarget::Forward ||
+			target == HitTarget::Reload ||
+			target == HitTarget::Home ||
+			target == HitTarget::Bookmarks ||
+			target == HitTarget::AddBookmark ||
+			target == HitTarget::Find)
+		{
+			s_mouseMode = MouseMode::ToolbarInteraction;
+			return;
+		}
+
+		if (s_addressFocused) blurAddressBar();
+
+		if (target == HitTarget::FormInput) {
+			s_mouseMode = MouseMode::FormInputInteraction;
+			clearSelection();
+			if (s_findActive) closeFindMode();
+			focusDocumentInput(linkIdx);
+			Rect r = formControlRect(linkIdx);
+			int charOffset = (x - (r.x + 8)) / kCharW;
+			if (linkIdx >= 0 && linkIdx < static_cast<int>(s_currentDoc.blocks.size())) {
+				s_inputCaret = std::max(0, std::min(charOffset,
+					static_cast<int>(s_currentDoc.blocks[linkIdx].inputValue.size())));
+			}
+			updateDisplay();
+			return;
+		}
+
+		if (target == HitTarget::FormSubmit) {
+			s_mouseMode = MouseMode::FormInputInteraction;
+			if (s_focusedInputBlockIndex >= 0) blurDocumentInput();
+			clearSelection();
+			updateDisplay();
+			return;
+		}
+
+		if (s_focusedInputBlockIndex >= 0) blurDocumentInput();
+
+		if (target == HitTarget::Link) {
+			s_mouseMode = MouseMode::PotentialLinkClick;
+			clearSelection();
+			s_selectionPending = true;
+			s_selectionStartX = x;
+			s_selectionStartY = y;
+			updateDisplay();
+			return;
+		}
+
+		SelectionPosition textHit = textPositionFromPoint(x, y, false);
+		if (textHit.blockIndex >= 0) {
+			s_mouseMode = MouseMode::PotentialTextSelection;
+			clearSelection();
+			s_selectionPending = true;
+			s_selectionStartX = x;
+			s_selectionStartY = y;
+			updateDisplay();
+		} else {
+			clearSelection();
+			updateDisplay();
+		}
+		return;
+	}
+
+	if (button == 1 && action == "up") {
+		s_mouseCurrentX = x;
+		s_mouseCurrentY = y;
+
+		int upLinkIdx = -1;
+		HitTarget upTarget = hitTest(x, y, upLinkIdx);
+		const MouseMode mode = s_mouseMode;
+		const int downLinkIdx = s_mouseDownLinkBlockIndex;
+
+		s_mouseLeftDown = false;
+
+		if (mode == MouseMode::SelectingText || s_selectionDragging) {
+			finalizeSelection(x, y);
+			updateDisplay();
+		} else if (mode == MouseMode::PotentialLinkClick &&
+			!s_mouseDragThresholdExceeded &&
+			upTarget == HitTarget::Link &&
+			upLinkIdx == downLinkIdx)
+		{
+			handleDocumentClick(HitTarget::Link, downLinkIdx);
+		} else if (mode == MouseMode::FormInputInteraction &&
+			s_mouseDownHitTarget == HitTarget::FormSubmit &&
+			!s_mouseDragThresholdExceeded &&
+			upTarget == HitTarget::FormSubmit &&
+			upLinkIdx == downLinkIdx)
+		{
+			handleDocumentClick(HitTarget::FormSubmit, downLinkIdx);
+		}
+
+		s_mouseMode = MouseMode::None;
+		s_mouseDownHitTarget = HitTarget::None;
+		s_mouseDownLinkBlockIndex = -1;
+		s_mouseDownLinkUrl.clear();
+		s_selectionPending = false;
+		s_mouseDragThresholdExceeded = false;
+		s_selectionBegan = false;
 	}
 }
 

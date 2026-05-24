@@ -273,6 +273,8 @@
     <ClInclude Include="kernel\core\include\kernel\ramdisk.h" />
     <ClInclude Include="kernel\core\include\kernel\serial_debug.h" />
     <ClInclude Include="kernel\core\include\kernel\shell.h" />
+    <ClInclude Include="kernel\core\include\kernel\system_font.h" />
+    <ClInclude Include="kernel\core\include\kernel\generated\system_font_roboto.h" />
     <ClInclude Include="kernel\core\include\kernel\socket.h" />
     <ClInclude Include="kernel\core\include\kernel\tcp.h" />
     <ClInclude Include="kernel\core\include\kernel\time.h" />
@@ -519,6 +521,7 @@
     <ClCompile Include="kernel\core\ps2mouse.cpp" />
     <ClCompile Include="kernel\core\ramdisk.cpp" />
     <ClCompile Include="kernel\core\shell.cpp" />
+    <ClCompile Include="kernel\core\system_font.cpp" />
     <ClCompile Include="kernel\core\socket.cpp" />
     <ClCompile Include="kernel\core\tcp.cpp" />
     <ClCompile Include="kernel\core\time.cpp" />
@@ -724,6 +727,7 @@
     <None Include="tools\gxbuild" />
     <None Include="tools\gxbuild.cmd" />
     <None Include="tools\gxbuild.py" />
+    <None Include="tools\generate_system_fonts.py" />
     <None Include="_fix_filters_audio.py" />
   </ItemGroup>
   <ItemGroup>
@@ -752,4 +756,6 @@
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>
 </Project>
+
+
 

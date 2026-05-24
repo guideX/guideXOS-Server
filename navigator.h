@@ -92,6 +92,8 @@ public:
 	static bool SmokeNavigateTo(const std::string& url);
 	static bool SmokeSubmitFirstForm(const std::string& value);
 	static int SmokeFindInPage(const std::string& query);
+	static bool SmokeClickFirstLink();
+	static bool SmokeDragFirstLinkSelectsWithoutNavigation();
 	static std::string SmokeRuntimeReport();
 	static std::string SmokeCurrentUrl();
 	static int SmokeCurrentBlockCount();
@@ -140,6 +142,16 @@ private:
 		Link,   // any Link block; s_hitLinkBlockIndex carries the index
 		FormInput,
 		FormSubmit,
+	};
+
+	enum class MouseMode : uint8_t {
+		None = 0,
+		PotentialLinkClick,
+		PotentialTextSelection,
+		SelectingText,
+		FormInputInteraction,
+		AddressBarInteraction,
+		ToolbarInteraction,
 	};
 
 	// -------------------------------------------------------------------------
@@ -204,6 +216,7 @@ private:
 	// -------------------------------------------------------------------------
 	static void handleToolbarAction(int widgetId);
 	static void handleDocumentClick(HitTarget target, int linkBlockIndex);
+	static void handleMouseInput(int x, int y, int button, const std::string& action);
 	static void handleKeyPress(int keyCode, const std::string& action);
 	static void focusDocumentInput(int blockIndex);
 	static void blurDocumentInput();
@@ -278,8 +291,16 @@ private:
 	static int         s_currentFindMatch;
 	static bool        s_ctrlPressed;
 	static bool        s_mouseLeftDown;
-	static HitTarget   s_mouseDownTarget;
+	static MouseMode   s_mouseMode;
+	static HitTarget   s_mouseDownHitTarget;
 	static int         s_mouseDownLinkBlockIndex;
+	static std::string s_mouseDownLinkUrl;
+	static int         s_mouseDownX;
+	static int         s_mouseDownY;
+	static int         s_mouseCurrentX;
+	static int         s_mouseCurrentY;
+	static bool        s_mouseDragThresholdExceeded;
+	static bool        s_selectionBegan;
 	static bool        s_selectionActive;
 	static bool        s_selectionPending;
 	static bool        s_selectionDragging;

@@ -56,9 +56,17 @@ static std::string runtimeWallpaperPathToHostPath(const std::string& path)
     return std::string("assets/Backgrounds/") + path.substr(prefix.size());
 }
 
+static std::string runtimeFontPathToHostPath(const std::string& path)
+{
+    const std::string prefix = "/system/fonts/roboto/";
+    if (path.rfind(prefix, 0) != 0) return path;
+    return std::string("assets/Fonts/roboto/") + path.substr(prefix.size());
+}
+
 static std::string relativeHostPath(const std::string& path)
 {
     std::string hostPath = runtimeWallpaperPathToHostPath(path);
+    hostPath = runtimeFontPathToHostPath(hostPath);
     if (!hostPath.empty() && (hostPath[0] == '/' || hostPath[0] == '\\')) {
         hostPath = hostPath.substr(1);
     }

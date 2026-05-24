@@ -4,6 +4,7 @@
 
 #include "include/kernel/desktop_font.h"
 #include "include/kernel/framebuffer.h"
+#include "include/kernel/system_font.h"
 
 namespace kernel {
 namespace desktop {
@@ -139,6 +140,20 @@ void draw_char(uint32_t px, uint32_t py, char c, uint32_t color, int scale)
 
 void draw_text(uint32_t x, uint32_t y, const char* str, uint32_t color, int scale)
 {
+    if (scale == 1 && framebuffer::is_available() && framebuffer::get_bpp() == 32) {
+        uint32_t* target = framebuffer::is_double_buffered() ? framebuffer::get_back_buffer() : framebuffer::get_buffer();
+        if (target) {
+            int pitch = framebuffer::is_double_buffered()
+                ? static_cast<int>(framebuffer::get_width() * sizeof(uint32_t))
+                : static_cast<int>(framebuffer::get_pitch());
+            gxos::gui::SystemFont::DrawTextToBuffer(target, pitch,
+                static_cast<int>(framebuffer::get_width()),
+                static_cast<int>(framebuffer::get_height()),
+                static_cast<int>(x), static_cast<int>(y), str, -1, color, gxos::gui::FontRole::Default);
+            return;
+        }
+    }
+
     uint32_t cx = x;
     while (*str) {
         draw_char(cx, y, *str, color, scale);
@@ -150,8 +165,8 @@ void draw_text(uint32_t x, uint32_t y, const char* str, uint32_t color, int scal
 void draw_text_centered(uint32_t rx, uint32_t ry, uint32_t rw, uint32_t rh,
                         const char* str, uint32_t color, int scale)
 {
-    int tw = measure_text(str) * scale;
-    int th = kGlyphH * scale;
+    int tw = scale == 1 ? gxos::gui::SystemFont::MeasureWidth(gxos::gui::FontRole::Default, str) : measure_text(str) * scale;
+    int th = scale == 1 ? gxos::gui::SystemFont::MeasureHeight(gxos::gui::FontRole::Default) : kGlyphH * scale;
     uint32_t tx = rx + (rw > (uint32_t)tw ? (rw - tw) / 2 : 0);
     uint32_t ty = ry + (rh > (uint32_t)th ? (rh - th) / 2 : 0);
     draw_text(tx, ty, str, color, scale);

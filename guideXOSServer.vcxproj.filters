@@ -360,6 +360,12 @@
     <ClInclude Include="kernel\core\include\kernel\shell.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="kernel\core\include\kernel\system_font.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\core\include\kernel\generated\system_font_roboto.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="kernel\core\include\kernel\ps2keyboard.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -1025,6 +1031,9 @@
     <ClCompile Include="kernel\core\shell.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="kernel\core\system_font.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="kernel\core\ps2keyboard.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -1483,6 +1492,7 @@
     </None>
     <None Include="build.ps1" />
     <None Include="tools\gxbuild.py" />
+    <None Include="tools\generate_system_fonts.py" />
     <None Include="tools\gxbuild.cmd" />
     <None Include="tools\gxbuild" />
     <None Include="docs\GXBUILD.md" />

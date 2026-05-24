@@ -300,6 +300,12 @@
     <ClInclude Include="kernel\core\include\kernel\shell.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="kernel\core\include\kernel\system_font.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\core\include\kernel\generated\system_font_roboto.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="guide_web_document.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -536,6 +542,9 @@
     <ClCompile Include="kernel\core\shell.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="kernel\core\system_font.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="guide_web_html_parser.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -566,6 +575,9 @@
       <Filter>Build Scripts</Filter>
     </None>
     <None Include="kernel\Makefile">
+      <Filter>Build Scripts</Filter>
+    </None>
+    <None Include="tools\generate_system_fonts.py">
       <Filter>Build Scripts</Filter>
     </None>
     <None Include="RUN-KERNEL.bat">

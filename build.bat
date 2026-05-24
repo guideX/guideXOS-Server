@@ -65,6 +65,7 @@ ipc_bus.cpp ^
 guide_web_html_parser.cpp ^
 guide_web_http.cpp ^
 kernel/core/architecture_detector.cpp ^
+kernel/core/system_font.cpp ^
 lifecycle.cpp ^
 logger.cpp ^
 message_box.cpp ^

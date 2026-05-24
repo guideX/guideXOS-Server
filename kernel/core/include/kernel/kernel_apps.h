@@ -433,6 +433,14 @@ public:
                                int* failedImages = nullptr);
 
 private:
+    enum NavigatorMouseMode {
+        NAV_MOUSE_NONE = 0,
+        NAV_MOUSE_POTENTIAL_LINK_CLICK,
+        NAV_MOUSE_POTENTIAL_TEXT_SELECTION,
+        NAV_MOUSE_SELECTING_TEXT,
+        NAV_MOUSE_ADDRESS_BAR_INTERACTION
+    };
+
     static const int MAX_STATUS_LEN = 128;
     static const int MAX_URL_LEN = 160;
     static const int MAX_TITLE_LEN_NAV = 96;
@@ -520,7 +528,11 @@ private:
     bool m_selectionDragging;
     bool m_selectionMoved;
     bool m_mouseLeftDown;
+    NavigatorMouseMode m_mouseMode;
     int m_mouseDownLinkIndex;
+    int m_mouseDownX;
+    int m_mouseDownY;
+    bool m_mouseDragThresholdExceeded;
     SelectionPosition m_selectionAnchor;
     SelectionPosition m_selectionFocus;
     char m_clipboard[MAX_SOURCE_PREVIEW];
