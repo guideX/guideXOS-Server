@@ -229,6 +229,78 @@ void printLaunchTargetDiagnostic(const char* label, LaunchTargetDiagnosticWriter
     printLaunchTargetDiagnostic(resolveLaunchTarget(label), write);
 }
 
+const char* legacyDispatchStringForLaunchTarget(const gxos::apps::LaunchTarget& target, const char** status, const char** reason)
+{
+    const char* localStatus = "unsupported";
+    const char* localReason = "No legacy dispatch mapping for this launch target";
+    const char* dispatch = "";
+
+    switch (target.type) {
+    case gxos::apps::LaunchTargetType::BuiltInApp:
+    case gxos::apps::LaunchTargetType::LegacyAlias:
+    case gxos::apps::LaunchTargetType::ShellAction:
+    case gxos::apps::LaunchTargetType::ManifestApp:
+    case gxos::apps::LaunchTargetType::NativeElfApp:
+    case gxos::apps::LaunchTargetType::GXAppPackage:
+    case gxos::apps::LaunchTargetType::Service:
+    case gxos::apps::LaunchTargetType::HypervisorGuest:
+    case gxos::apps::LaunchTargetType::Script:
+        if (target.dispatchLaunchName && target.dispatchLaunchName[0]) {
+            localStatus = "ok";
+            localReason = "Adapter returns the resolver dispatchLaunchName used by current bare-metal dispatch surfaces";
+            dispatch = target.dispatchLaunchName;
+        }
+        break;
+    case gxos::apps::LaunchTargetType::FileOpen:
+        if (target.dispatchLaunchName && target.dispatchLaunchName[0]) {
+            localStatus = "ok";
+            localReason = "File-open target carries the current handler app name; path remains a separate parameter";
+            dispatch = target.dispatchLaunchName;
+        } else {
+            localStatus = "unsupported";
+            localReason = "File-open target has no current bare-metal handler app";
+        }
+        break;
+    case gxos::apps::LaunchTargetType::CrossArchEmulatedApp:
+        localStatus = "unsupported";
+        localReason = "Cross-arch/emulated launch dispatch is not implemented";
+        break;
+    case gxos::apps::LaunchTargetType::Unknown:
+    default:
+        localStatus = "unsupported";
+        localReason = "Unknown launch target has no legacy dispatch string";
+        break;
+    }
+
+    if (status) *status = localStatus;
+    if (reason) *reason = localReason;
+    return dispatch;
+}
+
+void printLaunchTargetAdapterDiagnostic(const char* label, LaunchTargetDiagnosticWriter write)
+{
+    if (!write) return;
+
+    gxos::apps::LaunchTarget target = resolveLaunchTarget(label);
+    const char* status = "";
+    const char* reason = "";
+    const char* legacyDispatch = legacyDispatchStringForLaunchTarget(target, &status, &reason);
+    const bool matchesResolvedDispatch = legacyDispatch && legacyDispatch[0] && text_equals(legacyDispatch, target.dispatchLaunchName);
+    const bool matchesOriginalLabel = legacyDispatch && legacyDispatch[0] && text_equals(legacyDispatch, label);
+
+    write("[LaunchTargetAdapter]\n");
+    write_pair(write, "originalLabel: ", target.originalLabel);
+    write_pair(write, "resolvedType: ", gxos::apps::ToString(target.type));
+    write_pair(write, "appId: ", target.appId);
+    write_pair(write, "resolvedDispatchName: ", target.dispatchLaunchName);
+    write_pair(write, "adapterLegacyDispatchString: ", legacyDispatch);
+    write_bool_pair(write, "matchesResolvedDispatch: ", matchesResolvedDispatch);
+    write_bool_pair(write, "matchesOriginalLabel: ", matchesOriginalLabel);
+    write_pair(write, "status: ", status);
+    write_pair(write, "reason: ", reason);
+    write_pair(write, "nonFatal: ", "true");
+}
+
 static const char* const kLaunchTargetComparisonLabels[] = {
     "Notepad",
     "gxos.builtin.notepad",

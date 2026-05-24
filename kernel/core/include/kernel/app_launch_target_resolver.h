@@ -11,6 +11,8 @@ typedef void (*LaunchTargetDiagnosticWriter)(const char*);
 gxos::apps::LaunchTarget resolveLaunchTarget(const char* label);
 void printLaunchTargetDiagnostic(const gxos::apps::LaunchTarget& target, LaunchTargetDiagnosticWriter write);
 void printLaunchTargetDiagnostic(const char* label, LaunchTargetDiagnosticWriter write);
+const char* legacyDispatchStringForLaunchTarget(const gxos::apps::LaunchTarget& target, const char** status, const char** reason);
+void printLaunchTargetAdapterDiagnostic(const char* label, LaunchTargetDiagnosticWriter write);
 void printLaunchTargetComparisonDiagnostic(LaunchTargetDiagnosticWriter write);
 
 } // namespace appmodel

@@ -395,6 +395,7 @@ static void cmd_help() {
         output_string("  desktop.apps.verbose - App registry diagnostics\n");
         output_string("  desktop.launch <AppName> - Launch app or show availability\n");
         output_string("  desktop.launch.resolve <label> - Resolve launch target without launching\n");
+        output_string("  desktop.launch.adapt <label> - Adapt resolved target to legacy dispatch string\n");
         output_string("  desktop.launch.compare - Compare hosted/bare-metal launch targets\n");
         output_string("  nativeapp.inspect <AppName> - Inspect native app availability\n");
         output_string("  nativeapp.smoketest <AppName> - Native app smoke-test path\n");
@@ -918,6 +919,15 @@ static void cmd_desktop_launch_resolve(const char* label) {
     }
 
     ::kernel::appmodel::printLaunchTargetDiagnostic(label, output_string);
+}
+
+static void cmd_desktop_launch_adapt(const char* label) {
+    if (!label || label[0] == '\0') {
+        output_string("Usage: desktop.launch.adapt <label>\n");
+        return;
+    }
+
+    ::kernel::appmodel::printLaunchTargetAdapterDiagnostic(label, output_string);
 }
 
 static void cmd_desktop_launch_compare() {
@@ -2948,6 +2958,8 @@ static void execute_command(const char* cmd) {
         cmd_desktop_apps(true);
     } else if (str_eq(command, "desktop.launch.resolve")) {
         cmd_desktop_launch_resolve(command_tail(cmd));
+    } else if (str_eq(command, "desktop.launch.adapt")) {
+        cmd_desktop_launch_adapt(command_tail(cmd));
     } else if (str_eq(command, "desktop.launch.compare")) {
         cmd_desktop_launch_compare();
     } else if (str_eq(command, "desktop.launch")) {

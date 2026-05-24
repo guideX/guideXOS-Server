@@ -1228,6 +1228,72 @@ namespace gxos {
             return oss.str();
         }
 
+        std::string DesktopService::LegacyDispatchStringForLaunchTarget(const apps::LaunchTarget& target, std::string& status, std::string& reason) {
+            status = "unsupported";
+            reason = "No legacy dispatch mapping for this launch target";
+
+            switch (target.type) {
+            case apps::LaunchTargetType::BuiltInApp:
+            case apps::LaunchTargetType::LegacyAlias:
+            case apps::LaunchTargetType::ShellAction:
+            case apps::LaunchTargetType::ManifestApp:
+            case apps::LaunchTargetType::NativeElfApp:
+            case apps::LaunchTargetType::GXAppPackage:
+            case apps::LaunchTargetType::Service:
+            case apps::LaunchTargetType::HypervisorGuest:
+            case apps::LaunchTargetType::Script:
+                if (!target.dispatchLaunchName.empty()) {
+                    status = "ok";
+                    reason = "Adapter returns the resolver dispatchLaunchName used by the current hosted dispatch surface";
+                    return target.dispatchLaunchName;
+                }
+                break;
+            case apps::LaunchTargetType::FileOpen:
+                if (!target.dispatchLaunchName.empty()) {
+                    status = "ok";
+                    reason = "File-open target already carries an explicit dispatchLaunchName";
+                    return target.dispatchLaunchName;
+                }
+                status = "unsupported";
+                reason = "Hosted file-open behavior currently uses OpenFilesystemEntry, not DesktopService::LaunchApp dispatch";
+                return "";
+            case apps::LaunchTargetType::CrossArchEmulatedApp:
+                status = "unsupported";
+                reason = "Cross-arch/emulated launch dispatch is not implemented";
+                return "";
+            case apps::LaunchTargetType::Unknown:
+            default:
+                status = "unsupported";
+                reason = "Unknown launch target has no legacy dispatch string";
+                return "";
+            }
+
+            return "";
+        }
+
+        std::string DesktopService::LaunchTargetAdapterDiagnostic(const std::string& label) {
+            apps::LaunchTarget target = ResolveLaunchTarget(label);
+            std::string adapterStatus;
+            std::string adapterReason;
+            const std::string legacyDispatch = LegacyDispatchStringForLaunchTarget(target, adapterStatus, adapterReason);
+            const bool matchesResolvedDispatch = !legacyDispatch.empty() && legacyDispatch == target.dispatchLaunchName;
+            const bool matchesOriginalLabel = !legacyDispatch.empty() && legacyDispatch == label;
+
+            std::ostringstream oss;
+            oss << "[LaunchTargetAdapter]\n";
+            oss << "originalLabel: " << target.originalLabel << "\n";
+            oss << "resolvedType: " << apps::ToString(target.type) << "\n";
+            oss << "appId: " << target.appId << "\n";
+            oss << "resolvedDispatchName: " << target.dispatchLaunchName << "\n";
+            oss << "adapterLegacyDispatchString: " << legacyDispatch << "\n";
+            oss << "matchesResolvedDispatch: " << diagnosticBool(matchesResolvedDispatch) << "\n";
+            oss << "matchesOriginalLabel: " << diagnosticBool(matchesOriginalLabel) << "\n";
+            oss << "status: " << adapterStatus << "\n";
+            oss << "reason: " << adapterReason << "\n";
+            oss << "nonFatal: true\n";
+            return oss.str();
+        }
+
         std::string DesktopService::LaunchTargetComparisonDiagnostic() {
             ensureDefaultAppsRegistered();
 
