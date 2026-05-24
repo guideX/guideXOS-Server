@@ -148,14 +148,26 @@ namespace gxos {
         }
 
         struct ManifestOrigin {
+            apps::AppSourceKind sourceKind = apps::AppSourceKind::UserApps;
             std::string source;
+            std::filesystem::path sourceRoot;
             std::filesystem::path manifestPath;
+            std::string appId;
             std::string displayName;
             apps::AppKind kind = apps::AppKind::Unknown;
         };
 
-        static std::map<std::string, std::vector<ManifestOrigin>> collectManifestOriginsById() {
-            std::map<std::string, std::vector<ManifestOrigin>> origins;
+        static bool startsWith(const std::string& value, const char* prefix) {
+            const std::string prefixText = prefix ? prefix : "";
+            return value.size() >= prefixText.size() && value.compare(0, prefixText.size(), prefixText) == 0;
+        }
+
+        static std::string normalizedGenericPath(const std::filesystem::path& path) {
+            return path.lexically_normal().generic_string();
+        }
+
+        static std::vector<ManifestOrigin> collectManifestOrigins() {
+            std::vector<ManifestOrigin> origins;
             for (const apps::AppRegistrySource& source : apps::AppRegistry::DefaultSources()) {
                 if (!std::filesystem::exists(source.path)) continue;
 
@@ -181,14 +193,77 @@ namespace gxos {
                     if (!loaded.valid || loaded.manifest.id.empty()) continue;
 
                     ManifestOrigin origin;
+                    origin.sourceKind = source.kind;
                     origin.source = apps::AppRegistry::ToString(source.kind);
+                    origin.sourceRoot = source.path;
                     origin.manifestPath = entry.path();
+                    origin.appId = loaded.manifest.id;
                     origin.displayName = loaded.manifest.displayName;
                     origin.kind = loaded.manifest.kind;
-                    origins[loaded.manifest.id].push_back(origin);
+                    origins.push_back(origin);
                 }
             }
             return origins;
+        }
+
+        static std::map<std::string, std::vector<ManifestOrigin>> collectManifestOriginsById() {
+            std::map<std::string, std::vector<ManifestOrigin>> originsById;
+            for (const ManifestOrigin& origin : collectManifestOrigins()) {
+                originsById[origin.appId].push_back(origin);
+            }
+            return originsById;
+        }
+
+        static bool originIsSdkSample(const ManifestOrigin& origin) {
+            return normalizedGenericPath(origin.sourceRoot) == "sdk/samples";
+        }
+
+        static bool originIsRepoExample(const ManifestOrigin& origin) {
+            return normalizedGenericPath(origin.sourceRoot) == "examples/apps";
+        }
+
+        static bool originIsInstalledPackage(const ManifestOrigin& origin) {
+            return origin.sourceKind == apps::AppSourceKind::Package;
+        }
+
+        static void appendNamespaceWarning(std::ostringstream& oss, const ManifestOrigin& origin, const char* warning) {
+            oss << "  id=" << origin.appId
+                << " displayName=" << origin.displayName
+                << " source=" << origin.source
+                << " sourceRoot=" << origin.sourceRoot.generic_string()
+                << " path=" << origin.manifestPath.string() << "\n";
+            oss << "    warning=" << warning << "\n";
+        }
+
+        static int appendAppIdNamespaceWarnings(std::ostringstream& oss) {
+            int warningCount = 0;
+            oss << "appIdNamespaceWarnings(nonFatal):\n";
+
+            for (const ManifestOrigin& origin : collectManifestOrigins()) {
+                const bool usesBuiltInNamespace = startsWith(origin.appId, "gxos.builtin.");
+                const bool usesSampleNamespace = startsWith(origin.appId, "com.guidexos.samples.");
+                const bool usesExampleNamespace = startsWith(origin.appId, "com.guidexos.examples.");
+
+                if (origin.sourceKind != apps::AppSourceKind::BuiltIn && usesBuiltInNamespace) {
+                    ++warningCount;
+                    appendNamespaceWarning(oss, origin, "non-built-in manifest uses gxos.builtin.*; built-ins own this namespace");
+                }
+                if (originIsSdkSample(origin) && !usesSampleNamespace) {
+                    ++warningCount;
+                    appendNamespaceWarning(oss, origin, "SDK sample manifest should use com.guidexos.samples.*");
+                }
+                if (originIsRepoExample(origin) && !usesExampleNamespace) {
+                    ++warningCount;
+                    appendNamespaceWarning(oss, origin, "repo example manifest should use com.guidexos.examples.*");
+                }
+                if (originIsInstalledPackage(origin) && (usesBuiltInNamespace || usesSampleNamespace || usesExampleNamespace)) {
+                    ++warningCount;
+                    appendNamespaceWarning(oss, origin, "installed /Apps manifest should use a normal installed app id, not builtin/sample/example namespaces");
+                }
+            }
+
+            if (warningCount == 0) oss << "  none\n";
+            return warningCount;
         }
 
         static std::set<std::string> duplicateIdsFromScanIssues(const apps::AppScanResult& a, const apps::AppScanResult& b) {
@@ -653,6 +728,8 @@ namespace gxos {
                     }
                 }
             }
+
+            appendAppIdNamespaceWarnings(oss);
 
             return oss.str();
         }
