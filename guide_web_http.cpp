@@ -361,7 +361,10 @@ std::string HttpResponse::headerValue(const std::string& name) const
 	return "";
 }
 
-static HttpResponse fetchSingleHttpUrl(const std::string& url)
+static HttpResponse sendSingleHttpRequest(const std::string& url,
+	const std::string& method,
+	const std::string& body,
+	const std::string& contentType)
 {
 	HttpResponse response;
 	response.requestedUrl = url;
@@ -431,15 +434,21 @@ static HttpResponse fetchSingleHttpUrl(const std::string& url)
 		return response;
 	}
 
+	const bool isPost = toLowerAscii(method) == "post";
 	std::ostringstream request;
-	request << "GET " << parsed.requestTarget() << " HTTP/1.0\r\n"
+	request << (isPost ? "POST" : "GET") << " " << parsed.requestTarget() << " HTTP/1.0\r\n"
 		<< "Host: " << parsed.host;
 	if (parsed.port != 80) request << ":" << parsed.port;
 	request << "\r\n"
 		<< "User-Agent: guideXOS-Navigator/0.1\r\n"
 		<< "Accept-Encoding: identity\r\n"
-		<< "Connection: close\r\n"
-		<< "\r\n";
+		<< "Connection: close\r\n";
+	if (isPost) {
+		request << "Content-Type: " << (contentType.empty() ? "application/x-www-form-urlencoded" : contentType) << "\r\n"
+			<< "Content-Length: " << body.size() << "\r\n";
+	}
+	request << "\r\n";
+	if (isPost) request << body;
 	const std::string requestText = request.str();
 	size_t sentTotal = 0;
 	while (sentTotal < requestText.size()) {
@@ -506,13 +515,18 @@ static HttpResponse fetchSingleHttpUrl(const std::string& url)
 #endif
 }
 
-HttpResponse fetchHttpUrl(const std::string& url)
+static HttpResponse sendHttpRequestWithRedirects(const std::string& url,
+	const std::string& method,
+	const std::string& body,
+	const std::string& contentType)
 {
 	std::string currentUrl = url;
 	std::vector<std::string> chain;
+	std::string currentMethod = toLowerAscii(method) == "post" ? "post" : "get";
+	std::string currentBody = body;
 
 	for (int redirectCount = 0; redirectCount <= kHttpMaxRedirects; ++redirectCount) {
-		HttpResponse response = fetchSingleHttpUrl(currentUrl);
+		HttpResponse response = sendSingleHttpRequest(currentUrl, currentMethod, currentBody, contentType);
 		response.requestedUrl = url;
 		response.finalUrl = currentUrl;
 		response.redirectCount = redirectCount;
@@ -543,6 +557,10 @@ HttpResponse fetchHttpUrl(const std::string& url)
 		}
 		chain.push_back(nextUrl);
 		currentUrl = nextUrl;
+		if (response.statusCode == 303) {
+			currentMethod = "get";
+			currentBody.clear();
+		}
 	}
 
 	HttpResponse response;
@@ -553,6 +571,16 @@ HttpResponse fetchHttpUrl(const std::string& url)
 	setError(response, HttpError::RedirectLimitExceeded,
 		"HTTP redirect limit exceeded while loading: " + url);
 	return response;
+}
+
+HttpResponse fetchHttpUrl(const std::string& url)
+{
+	return sendHttpRequestWithRedirects(url, "get", "", "");
+}
+
+HttpResponse postHttpUrl(const std::string& url, const std::string& body, const std::string& contentType)
+{
+	return sendHttpRequestWithRedirects(url, "post", body, contentType);
 }
 
 } // namespace web

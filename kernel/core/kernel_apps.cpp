@@ -5558,6 +5558,10 @@ void NavigatorApp::buildRuntimeDocument()
     addBlock(BLOCK_LIST_ITEM, "HTTPS/TLS: unsupported");
     addBlock(BLOCK_LIST_ITEM, "CSS-lite embedded <style>: enabled");
     addBlock(BLOCK_LIST_ITEM, "Forms-lite GET forms: enabled for file/about pages");
+    addBlock(BLOCK_LIST_ITEM, "Forms-lite POST forms hosted: enabled in authoritative hosted Navigator path");
+    addBlock(BLOCK_LIST_ITEM, "Forms-lite POST forms bare-metal: unsupported in this adapter");
+    addBlock(BLOCK_LIST_ITEM, "Forms-lite controls: text, checkbox, radio, textarea, select, submit");
+    addBlock(BLOCK_LIST_ITEM, "Forms-lite focus navigation: Tab/Shift+Tab, Enter, Space where form UI is available");
     addBlock(BLOCK_LIST_ITEM, "Find in Page: unsupported in bare-metal adapter");
     addBlock(BLOCK_LIST_ITEM, "Text selection: enabled");
     {
@@ -7750,6 +7754,10 @@ static bool printNavigatorRuntimeSmokePreamble()
     serial::puts("[NAVIGATOR-SMOKE] capability.downloads=unavailable for bare-metal HTTP v0.1\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.css_lite=enabled for embedded style blocks\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.forms_lite=enabled for file/about GET form blocks\n");
+    serial::puts("[NAVIGATOR-SMOKE] capability.forms_post_hosted=enabled in authoritative hosted Navigator path\n");
+    serial::puts("[NAVIGATOR-SMOKE] capability.forms_post_bare_metal=unsupported in kernel adapter\n");
+    serial::puts("[NAVIGATOR-SMOKE] capability.forms_controls=text, checkbox, radio, textarea, select, submit\n");
+    serial::puts("[NAVIGATOR-SMOKE] capability.forms_focus_navigation=Tab/Shift+Tab, Enter, Space where form UI is available\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.find_in_page=unsupported in bare-metal adapter\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.external_stylesheets=unsupported\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.bookmark_persistence=unavailable; in-memory defaults only\n");

@@ -42,12 +42,15 @@ int         Navigator::s_addressCaret   = 0;
 int         Navigator::s_focusedInputBlockIndex = -1;
 int         Navigator::s_inputCaret = 0;
 std::string Navigator::s_lastSubmittedFormUrl;
+std::string Navigator::s_lastSubmittedFormMethod;
+std::string Navigator::s_lastSubmittedFormStatus;
 bool        Navigator::s_findActive = false;
 std::string Navigator::s_findBuffer;
 int         Navigator::s_findCaret = 0;
 std::vector<Navigator::FindMatch> Navigator::s_findMatches;
 int         Navigator::s_currentFindMatch = -1;
 bool        Navigator::s_ctrlPressed = false;
+bool        Navigator::s_shiftPressed = false;
 bool        Navigator::s_mouseLeftDown = false;
 Navigator::MouseMode Navigator::s_mouseMode = Navigator::MouseMode::None;
 Navigator::HitTarget Navigator::s_mouseDownHitTarget = Navigator::HitTarget::None;
@@ -96,6 +99,8 @@ namespace {
 	constexpr int kFormInputW = 320;
 	constexpr int kFormControlH = 26;
 	constexpr int kFormSubmitW = 104;
+	constexpr int kTextareaMinRows = 3;
+	constexpr int kTextareaMaxRows = 8;
 	constexpr int kMouseDragThreshold = 4;
 
 	constexpr int kWidgetIdBack = 1;
@@ -569,8 +574,15 @@ namespace {
 		metadata.cssStyleBytesProcessed = doc.cssDiagnostics.styleBytesProcessed;
 		metadata.formCount = doc.formsDiagnostics.formCount;
 		metadata.formInputCount = doc.formsDiagnostics.textInputCount;
+		metadata.formCheckboxCount = doc.formsDiagnostics.checkboxCount;
+		metadata.formRadioCount = doc.formsDiagnostics.radioCount;
+		metadata.formTextareaCount = doc.formsDiagnostics.textareaCount;
+		metadata.formSelectCount = doc.formsDiagnostics.selectCount;
 		metadata.unsupportedFormControlCount = doc.formsDiagnostics.unsupportedControlCount;
 		metadata.unsupportedFormMethod = doc.formsDiagnostics.hasUnsupportedMethod;
+		metadata.unsupportedFormEncoding = doc.formsDiagnostics.hasUnsupportedEncoding;
+		metadata.postSupportedHosted = true;
+		metadata.postSupportedBareMetal = false;
 
 		for (const DocBlock& block : doc.blocks) {
 			if (block.type != BlockType::Image) continue;
@@ -656,6 +668,21 @@ namespace {
 		return out;
 	}
 
+	static std::vector<std::string> textareaLines(const std::string& text)
+	{
+		std::vector<std::string> lines;
+		size_t start = 0;
+		while (start <= text.size()) {
+			size_t end = text.find('\n', start);
+			if (end == std::string::npos) end = text.size();
+			lines.push_back(text.substr(start, end - start));
+			if (end == text.size()) break;
+			start = end + 1;
+		}
+		if (lines.empty()) lines.push_back("");
+		return lines;
+	}
+
 
 	struct RuntimeReportEntry {
 		std::string section;
@@ -671,6 +698,15 @@ namespace {
 		bool cssDetected,
 		int formCount,
 		int formInputCount,
+		int checkboxCount,
+		int radioCount,
+		int textareaCount,
+		int selectCount,
+		int unsupportedControls,
+		bool postSupportedHosted,
+		bool postSupportedBareMetal,
+		const std::string& lastFormMethod,
+		const std::string& lastFormStatus,
 		const std::string& clipboardMode)
 	{
 		return {
@@ -702,6 +738,10 @@ namespace {
 			{"Capabilities", "Hosted colored text primitive", "enabled"},
 			{"Capabilities", "CSS text color visible", "enabled"},
 			{"Capabilities", "Forms-lite GET forms", "enabled"},
+			{"Capabilities", "Forms-lite POST forms hosted", postSupportedHosted ? "enabled" : "unsupported"},
+			{"Capabilities", "Forms-lite POST forms bare-metal", postSupportedBareMetal ? "enabled" : "unsupported"},
+			{"Capabilities", "Forms-lite controls", "text, checkbox, radio, textarea, select, submit"},
+			{"Capabilities", "Forms-lite focus navigation", "Tab/Shift+Tab, Enter, Space"},
 			{"Capabilities", "Find in Page", "enabled"},
 			{"Capabilities", "Text selection", "enabled"},
 			{"Capabilities", "Clipboard mode", clipboardMode.empty() ? "Navigator internal clipboard" : clipboardMode},
@@ -718,6 +758,15 @@ namespace {
 			{"Current Document", "CSS diagnostics", cssDetected ? "css detected" : "no css detected"},
 			{"Current Document", "Forms", std::to_string(formCount)},
 			{"Current Document", "Text inputs", std::to_string(formInputCount)},
+			{"Current Document", "Checkboxes", std::to_string(checkboxCount)},
+			{"Current Document", "Radio buttons", std::to_string(radioCount)},
+			{"Current Document", "Textareas", std::to_string(textareaCount)},
+			{"Current Document", "Selects", std::to_string(selectCount)},
+			{"Current Document", "Unsupported form controls", std::to_string(unsupportedControls)},
+			{"Current Document", "POST supported hosted", yesNo(postSupportedHosted)},
+			{"Current Document", "POST supported bare-metal", yesNo(postSupportedBareMetal)},
+			{"Current Document", "Last submitted form method", lastFormMethod.empty() ? "(none)" : lastFormMethod},
+			{"Current Document", "Last submitted form status", lastFormStatus.empty() ? "(none)" : lastFormStatus},
 		};
 	}
 
@@ -1018,6 +1067,15 @@ std::string Navigator::SmokeRuntimeReport()
 		s_pageMetadata.cssDetected,
 		s_pageMetadata.formCount,
 		s_pageMetadata.formInputCount,
+		s_pageMetadata.formCheckboxCount,
+		s_pageMetadata.formRadioCount,
+		s_pageMetadata.formTextareaCount,
+		s_pageMetadata.formSelectCount,
+		s_pageMetadata.unsupportedFormControlCount,
+		s_pageMetadata.postSupportedHosted,
+		s_pageMetadata.postSupportedBareMetal,
+		s_pageMetadata.lastSubmittedFormMethod,
+		s_pageMetadata.lastSubmittedFormStatus,
 		s_clipboardMode));
 }
 
@@ -1043,11 +1101,15 @@ int Navigator::main(int, char**)
 	s_backStack.clear();
 	s_forwardStack.clear();
 	s_pageMetadata = NavigatorPageMetadata{};
+	s_lastSubmittedFormUrl.clear();
+	s_lastSubmittedFormMethod.clear();
+	s_lastSubmittedFormStatus.clear();
 	s_recentDownloads.clear();
 	s_addressFocused = false;
 	s_addressBuffer.clear();
 	s_addressCaret   = 0;
 	s_ctrlPressed = false;
+	s_shiftPressed = false;
 	s_mouseLeftDown = false;
 	s_mouseMode = MouseMode::None;
 	s_mouseDownHitTarget = HitTarget::None;
@@ -1281,7 +1343,11 @@ void Navigator::renderDocument()
 		case BlockType::ListItem:     blockH = blockMarginTop + wrappedBlockHeight(block.text, kListWrapCols)    + std::max(2, blockMarginBottom) + (nextIsHeading ? kPreGapIfNextHeading : 0); break;
 		case BlockType::Preformatted: blockH = blockMarginTop + wrappedBlockHeight(block.text, kPreWrapCols, true) + blockPadding * 2 + std::max(4, blockMarginBottom); break;
 		case BlockType::FormTextInput:
-		case BlockType::FormSubmit:   blockH = blockMarginTop + kFormControlH + std::max(6, blockMarginBottom); break;
+		case BlockType::FormCheckbox:
+		case BlockType::FormRadio:
+		case BlockType::FormTextarea:
+		case BlockType::FormSelect:
+		case BlockType::FormSubmit:   blockH = blockMarginTop + formControlHeight(block) + std::max(6, blockMarginBottom); break;
 		case BlockType::Image: {
 			int imageW = 0;
 			int imageH = 0;
@@ -1449,15 +1515,109 @@ void Navigator::renderDocument()
 			break;
 		}
 
+		case BlockType::FormTextarea: {
+			const int inputX = kContentX + kIndent + bodyMarginLeft + blockMarginLeft;
+			const int inputY = drawY + blockMarginTop;
+			const int inputH = formControlHeight(block);
+			const bool focused = (blockIndex == s_focusedInputBlockIndex);
+			drawRect(s_windowId, inputX, inputY, kFormInputW, inputH, 250, 252, 255);
+			drawRect(s_windowId, inputX, inputY, kFormInputW, 1, focused ? 54 : 148, focused ? 118 : 156, focused ? 210 : 170);
+			drawRect(s_windowId, inputX, inputY + inputH - 1, kFormInputW, 1, focused ? 54 : 148, focused ? 118 : 156, focused ? 210 : 170);
+			drawRect(s_windowId, inputX, inputY, 1, inputH, focused ? 54 : 148, focused ? 118 : 156, focused ? 210 : 170);
+			drawRect(s_windowId, inputX + kFormInputW - 1, inputY, 1, inputH, focused ? 54 : 148, focused ? 118 : 156, focused ? 210 : 170);
+			const bool placeholder = block.inputValue.empty() && !block.placeholder.empty();
+			const std::string rawText = placeholder ? block.placeholder : block.inputValue;
+			const int maxChars = (kFormInputW - 16) / kCharW;
+			const int maxVisibleRows = std::max(1, (inputH - 10) / kLineH);
+			std::vector<std::string> lines = textareaLines(rawText);
+			int firstVisibleLine = 0;
+			if (static_cast<int>(lines.size()) > maxVisibleRows) {
+				firstVisibleLine = static_cast<int>(lines.size()) - maxVisibleRows;
+			}
+			int lineY = inputY + 6;
+			for (int lineIndex = firstVisibleLine;
+				 lineIndex < static_cast<int>(lines.size()) && lineIndex < firstVisibleLine + maxVisibleRows;
+				 ++lineIndex) {
+				std::string lineText = lines[static_cast<size_t>(lineIndex)];
+				if (static_cast<int>(lineText.size()) > maxChars) {
+					lineText = lineText.substr(static_cast<size_t>(std::max(0, static_cast<int>(lineText.size()) - maxChars)));
+				}
+				drawTextAtColored(s_windowId, inputX + 8, lineY, lineText,
+					placeholder ? 128 : 35,
+					placeholder ? 136 : 45,
+					placeholder ? 150 : 60);
+				lineY += kLineH;
+			}
+			if (focused && !placeholder) {
+				int caretPos = std::max(0, std::min(s_inputCaret, static_cast<int>(block.inputValue.size())));
+				int caretLine = 0;
+				int caretColumn = 0;
+				for (int i = 0; i < caretPos; ++i) {
+					if (block.inputValue[static_cast<size_t>(i)] == '\n') {
+						++caretLine;
+						caretColumn = 0;
+					} else {
+						++caretColumn;
+					}
+				}
+				if (caretLine >= firstVisibleLine && caretLine < firstVisibleLine + maxVisibleRows) {
+					int visibleColumn = std::min(caretColumn, maxChars);
+					int caretY = inputY + 5 + (caretLine - firstVisibleLine) * kLineH;
+					drawRect(s_windowId, inputX + 8 + visibleColumn * kCharW, caretY, 1, kLineH - 2, 35, 85, 170);
+				}
+			}
+			break;
+		}
+
+		case BlockType::FormCheckbox:
+		case BlockType::FormRadio: {
+			const int controlX = kContentX + kIndent + bodyMarginLeft + blockMarginLeft;
+			const int controlY = drawY + blockMarginTop;
+			const bool focused = (blockIndex == s_focusedInputBlockIndex);
+			const int box = 14;
+			const int boxY = controlY + (kFormControlH - box) / 2;
+			drawRect(s_windowId, controlX, boxY, box, box, 248, 250, 254);
+			drawRect(s_windowId, controlX, boxY, box, 1, focused ? 54 : 110, focused ? 118 : 118, focused ? 210 : 132);
+			drawRect(s_windowId, controlX, boxY + box - 1, box, 1, focused ? 54 : 110, focused ? 118 : 118, focused ? 210 : 132);
+			drawRect(s_windowId, controlX, boxY, 1, box, focused ? 54 : 110, focused ? 118 : 118, focused ? 210 : 132);
+			drawRect(s_windowId, controlX + box - 1, boxY, 1, box, focused ? 54 : 110, focused ? 118 : 118, focused ? 210 : 132);
+			if (block.checked) {
+				if (block.type == BlockType::FormRadio) {
+					drawRect(s_windowId, controlX + 4, boxY + 4, box - 8, box - 8, 45, 94, 170);
+				} else {
+					drawTextAtColored(s_windowId, controlX + 3, boxY - 2, "x", 35, 85, 170);
+				}
+			}
+			std::string label = block.text.empty() ? block.inputName : block.text;
+			drawTextAtColored(s_windowId, controlX + box + 8, centeredChromeTextY(controlY, kFormControlH), label, 35, 45, 60);
+			break;
+		}
+
+		case BlockType::FormSelect: {
+			const int selectX = kContentX + kIndent + bodyMarginLeft + blockMarginLeft;
+			const int selectY = drawY + blockMarginTop;
+			const bool focused = (blockIndex == s_focusedInputBlockIndex);
+			drawRect(s_windowId, selectX, selectY, kFormInputW, kFormControlH, 250, 252, 255);
+			drawRect(s_windowId, selectX, selectY, kFormInputW, 1, focused ? 54 : 148, focused ? 118 : 156, focused ? 210 : 170);
+			drawRect(s_windowId, selectX, selectY + kFormControlH - 1, kFormInputW, 1, focused ? 54 : 148, focused ? 118 : 156, focused ? 210 : 170);
+			drawRect(s_windowId, selectX, selectY, 1, kFormControlH, focused ? 54 : 148, focused ? 118 : 156, focused ? 210 : 170);
+			drawRect(s_windowId, selectX + kFormInputW - 1, selectY, 1, kFormControlH, focused ? 54 : 148, focused ? 118 : 156, focused ? 210 : 170);
+			std::string label = block.text.empty() ? "(select)" : block.text;
+			drawTextAtColored(s_windowId, selectX + 8, centeredChromeTextY(selectY, kFormControlH), label, 35, 45, 60);
+			drawTextAtColored(s_windowId, selectX + kFormInputW - 20, centeredChromeTextY(selectY, kFormControlH), "v", 70, 78, 96);
+			break;
+		}
+
 		case BlockType::FormSubmit: {
 			const int buttonX = kContentX + kIndent + bodyMarginLeft + blockMarginLeft;
 			const int buttonY = drawY + blockMarginTop;
-			const bool disabled = block.formUnsupported || toLowerAscii(block.formMethod) != "get";
+			const bool focused = (blockIndex == s_focusedInputBlockIndex);
+			const bool disabled = block.formUnsupported;
 			drawRect(s_windowId, buttonX, buttonY, kFormSubmitW, kFormControlH, disabled ? 184 : 65, disabled ? 188 : 112, disabled ? 196 : 190);
-			drawRect(s_windowId, buttonX, buttonY, kFormSubmitW, 1, disabled ? 128 : 38, disabled ? 132 : 78, disabled ? 142 : 150);
-			drawRect(s_windowId, buttonX, buttonY + kFormControlH - 1, kFormSubmitW, 1, disabled ? 128 : 38, disabled ? 132 : 78, disabled ? 142 : 150);
-			drawRect(s_windowId, buttonX, buttonY, 1, kFormControlH, disabled ? 128 : 38, disabled ? 132 : 78, disabled ? 142 : 150);
-			drawRect(s_windowId, buttonX + kFormSubmitW - 1, buttonY, 1, kFormControlH, disabled ? 128 : 38, disabled ? 132 : 78, disabled ? 142 : 150);
+			drawRect(s_windowId, buttonX, buttonY, kFormSubmitW, 1, focused ? 54 : (disabled ? 128 : 38), focused ? 118 : (disabled ? 132 : 78), focused ? 210 : (disabled ? 142 : 150));
+			drawRect(s_windowId, buttonX, buttonY + kFormControlH - 1, kFormSubmitW, 1, focused ? 54 : (disabled ? 128 : 38), focused ? 118 : (disabled ? 132 : 78), focused ? 210 : (disabled ? 142 : 150));
+			drawRect(s_windowId, buttonX, buttonY, 1, kFormControlH, focused ? 54 : (disabled ? 128 : 38), focused ? 118 : (disabled ? 132 : 78), focused ? 210 : (disabled ? 142 : 150));
+			drawRect(s_windowId, buttonX + kFormSubmitW - 1, buttonY, 1, kFormControlH, focused ? 54 : (disabled ? 128 : 38), focused ? 118 : (disabled ? 132 : 78), focused ? 210 : (disabled ? 142 : 150));
 			std::string label = block.submitLabel.empty() ? "Submit" : block.submitLabel;
 			int labelMax = (kFormSubmitW - 14) / kCharW;
 			if (static_cast<int>(label.size()) > labelMax) label = label.substr(0, static_cast<size_t>(labelMax));
@@ -1530,7 +1690,11 @@ void Navigator::updateHoverStatus(HitTarget target, int linkBlockIndex)
 	case HitTarget::Find:        next = "Find in page";          break;
 	case HitTarget::AddressBar:  next = "Click to edit address"; break;
 	case HitTarget::FormInput:   next = "Click to edit form field"; break;
-	case HitTarget::FormSubmit:  next = "Submit GET form"; break;
+	case HitTarget::FormTextarea: next = "Click to edit textarea"; break;
+	case HitTarget::FormCheckbox: next = "Toggle checkbox"; break;
+	case HitTarget::FormRadio:   next = "Select radio option"; break;
+	case HitTarget::FormSelect:  next = "Cycle select option"; break;
+	case HitTarget::FormSubmit:  next = "Submit form"; break;
 	case HitTarget::Link:
 		if (linkBlockIndex >= 0 &&
 			linkBlockIndex < static_cast<int>(s_currentDoc.blocks.size()))
@@ -1609,6 +1773,13 @@ void Navigator::handleDocumentClick(HitTarget target, int linkBlockIndex)
 		linkBlockIndex < static_cast<int>(s_currentDoc.blocks.size()))
 	{
 		navigateTo(s_currentDoc.blocks[linkBlockIndex].url);
+	} else if ((target == HitTarget::FormCheckbox ||
+				target == HitTarget::FormRadio ||
+				target == HitTarget::FormSelect) &&
+		linkBlockIndex >= 0 &&
+		linkBlockIndex < static_cast<int>(s_currentDoc.blocks.size()))
+	{
+		activateFormControl(linkBlockIndex);
 	} else if (target == HitTarget::FormSubmit &&
 		linkBlockIndex >= 0 &&
 		linkBlockIndex < static_cast<int>(s_currentDoc.blocks.size()))
@@ -1704,7 +1875,7 @@ void Navigator::handleMouseInput(int x, int y, int button, const std::string& ac
 
 		if (s_addressFocused) blurAddressBar();
 
-		if (target == HitTarget::FormInput) {
+		if (target == HitTarget::FormInput || target == HitTarget::FormTextarea) {
 			s_mouseMode = MouseMode::FormInputInteraction;
 			clearSelection();
 			if (s_findActive) closeFindMode();
@@ -1719,9 +1890,13 @@ void Navigator::handleMouseInput(int x, int y, int button, const std::string& ac
 			return;
 		}
 
-		if (target == HitTarget::FormSubmit) {
+		if (target == HitTarget::FormCheckbox ||
+			target == HitTarget::FormRadio ||
+			target == HitTarget::FormSelect ||
+			target == HitTarget::FormSubmit) {
 			s_mouseMode = MouseMode::FormInputInteraction;
 			if (s_focusedInputBlockIndex >= 0) blurDocumentInput();
+			if (target != HitTarget::FormSubmit) s_focusedInputBlockIndex = linkIdx;
 			clearSelection();
 			updateDisplay();
 			return;
@@ -1775,12 +1950,11 @@ void Navigator::handleMouseInput(int x, int y, int button, const std::string& ac
 		{
 			handleDocumentClick(HitTarget::Link, downLinkIdx);
 		} else if (mode == MouseMode::FormInputInteraction &&
-			s_mouseDownHitTarget == HitTarget::FormSubmit &&
 			!s_mouseDragThresholdExceeded &&
-			upTarget == HitTarget::FormSubmit &&
+			upTarget == s_mouseDownHitTarget &&
 			upLinkIdx == downLinkIdx)
 		{
-			handleDocumentClick(HitTarget::FormSubmit, downLinkIdx);
+			handleDocumentClick(upTarget, downLinkIdx);
 		}
 
 		s_mouseMode = MouseMode::None;
@@ -1796,12 +1970,15 @@ void Navigator::handleMouseInput(int x, int y, int button, const std::string& ac
 void Navigator::focusDocumentInput(int blockIndex)
 {
 	if (blockIndex < 0 || blockIndex >= static_cast<int>(s_currentDoc.blocks.size()) ||
-		s_currentDoc.blocks[blockIndex].type != BlockType::FormTextInput) {
+		!isFocusableFormControl(s_currentDoc.blocks[blockIndex])) {
 		return;
 	}
 	s_focusedInputBlockIndex = blockIndex;
 	s_inputCaret = static_cast<int>(s_currentDoc.blocks[blockIndex].inputValue.size());
-	s_statusText = "Editing form field";
+	s_statusText = (s_currentDoc.blocks[blockIndex].type == BlockType::FormTextInput ||
+		s_currentDoc.blocks[blockIndex].type == BlockType::FormTextarea)
+		? "Editing form field"
+		: "Form control focused";
 }
 
 void Navigator::blurDocumentInput()
@@ -1845,9 +2022,15 @@ std::string Navigator::searchableTextForBlock(const DocBlock& block)
 	case BlockType::Image:
 		return !block.alt.empty() ? block.alt : block.text;
 	case BlockType::FormTextInput:
+	case BlockType::FormTextarea:
 		if (!block.inputValue.empty()) return block.inputValue;
 		if (!block.placeholder.empty()) return block.placeholder;
 		return block.inputName;
+	case BlockType::FormCheckbox:
+	case BlockType::FormRadio:
+		return block.text.empty() ? block.inputName : block.text;
+	case BlockType::FormSelect:
+		return block.text.empty() ? block.inputName : block.text;
 	case BlockType::FormSubmit:
 		return !block.submitLabel.empty() ? block.submitLabel : block.text;
 	}
@@ -2090,6 +2273,86 @@ std::string Navigator::findMatchStatusText()
 		" of " + std::to_string(s_findMatches.size());
 }
 
+bool Navigator::isFocusableFormControl(const DocBlock& block)
+{
+	return block.type == BlockType::FormTextInput ||
+		block.type == BlockType::FormTextarea ||
+		block.type == BlockType::FormCheckbox ||
+		block.type == BlockType::FormRadio ||
+		block.type == BlockType::FormSelect ||
+		block.type == BlockType::FormSubmit;
+}
+
+int Navigator::formControlHeight(const DocBlock& block)
+{
+	if (block.type == BlockType::FormTextarea) {
+		int rows = block.visibleRows > 0 ? block.visibleRows : 4;
+		rows = std::max(kTextareaMinRows, std::min(kTextareaMaxRows, rows));
+		return std::max(kFormControlH, rows * kLineH + 10);
+	}
+	return kFormControlH;
+}
+
+void Navigator::focusNextFormControl(bool reverse)
+{
+	const int count = static_cast<int>(s_currentDoc.blocks.size());
+	if (count <= 0) return;
+	int start = s_focusedInputBlockIndex;
+	if (start < 0 || start >= count) start = reverse ? 0 : count - 1;
+	for (int step = 1; step <= count; ++step) {
+		int idx = reverse ? (start - step + count) % count : (start + step) % count;
+		if (!isFocusableFormControl(s_currentDoc.blocks[idx])) continue;
+		focusDocumentInput(idx);
+		s_scrollOffset = std::max(0, blockLayoutY(idx) - 24);
+		clampScrollOffset();
+		clearSelection();
+		updateStatus("Form control focused.");
+		updateDisplay();
+		return;
+	}
+}
+
+void Navigator::activateFormControl(int blockIndex)
+{
+	if (blockIndex < 0 || blockIndex >= static_cast<int>(s_currentDoc.blocks.size())) return;
+	DocBlock& block = s_currentDoc.blocks[blockIndex];
+	if (block.type == BlockType::FormCheckbox) {
+		block.checked = !block.checked;
+		s_focusedInputBlockIndex = blockIndex;
+		updateDisplay();
+		return;
+	}
+	if (block.type == BlockType::FormRadio) {
+		for (DocBlock& candidate : s_currentDoc.blocks) {
+			if (candidate.type == BlockType::FormRadio &&
+				candidate.formIndex == block.formIndex &&
+				candidate.inputName == block.inputName) {
+				candidate.checked = false;
+			}
+		}
+		block.checked = true;
+		s_focusedInputBlockIndex = blockIndex;
+		updateDisplay();
+		return;
+	}
+	if (block.type == BlockType::FormSelect) {
+		if (!block.options.empty()) {
+			int next = block.selectedOption < 0 ? 0 : block.selectedOption + 1;
+			if (next >= static_cast<int>(block.options.size())) next = 0;
+			block.selectedOption = next;
+			const gxos::web::FormOption& option = block.options[static_cast<size_t>(next)];
+			block.inputValue = option.value;
+			block.text = option.text;
+		}
+		s_focusedInputBlockIndex = blockIndex;
+		updateDisplay();
+		return;
+	}
+	if (block.type == BlockType::FormSubmit) {
+		submitFormForBlock(blockIndex);
+	}
+}
+
 void Navigator::updateFindMatches(bool keepCurrent)
 {
 	const FindMatch previous =
@@ -2158,9 +2421,17 @@ void Navigator::submitFormForBlock(int blockIndex)
 {
 	if (blockIndex < 0 || blockIndex >= static_cast<int>(s_currentDoc.blocks.size())) return;
 	const DocBlock& source = s_currentDoc.blocks[blockIndex];
-	if (source.formUnsupported || toLowerAscii(source.formMethod.empty() ? "get" : source.formMethod) != "get") {
+	std::string method = toLowerAscii(source.formMethod.empty() ? "get" : source.formMethod);
+	const std::string encoding = toLowerAscii(source.formEncoding.empty() ? "application/x-www-form-urlencoded" : source.formEncoding);
+	if (source.formUnsupported || (method != "get" && method != "post")) {
 		blurDocumentInput();
-		updateStatus("Only GET forms are supported.");
+		s_lastSubmittedFormMethod = method.empty() ? "(none)" : method;
+		s_lastSubmittedFormStatus = encoding != "application/x-www-form-urlencoded"
+			? (std::string("unsupported encoding: ") + encoding)
+			: "unsupported method";
+		updateStatus(encoding != "application/x-www-form-urlencoded"
+			? "Unsupported form encoding."
+			: "Unsupported form method.");
 		return;
 	}
 
@@ -2169,24 +2440,95 @@ void Navigator::submitFormForBlock(int blockIndex)
 
 	std::ostringstream query;
 	bool first = true;
-	for (const DocBlock& block : s_currentDoc.blocks) {
-		if (block.type != BlockType::FormTextInput || block.formIndex != source.formIndex) continue;
-		if (block.inputName.empty()) continue;
+	auto appendField = [&](const std::string& name, const std::string& value) {
+		if (name.empty()) return;
 		if (!first) query << "&";
 		first = false;
-		query << encodeFormComponent(block.inputName) << "=" << encodeFormComponent(block.inputValue);
+		query << encodeFormComponent(name) << "=" << encodeFormComponent(value);
+	};
+	for (const DocBlock& block : s_currentDoc.blocks) {
+		if (block.formIndex != source.formIndex) continue;
+		switch (block.type) {
+		case BlockType::FormTextInput:
+		case BlockType::FormTextarea:
+			appendField(block.inputName, block.inputValue);
+			break;
+		case BlockType::FormCheckbox:
+		case BlockType::FormRadio:
+			if (block.checked) appendField(block.inputName, block.inputValue.empty() ? "on" : block.inputValue);
+			break;
+		case BlockType::FormSelect:
+			if (block.selectedOption >= 0 && block.selectedOption < static_cast<int>(block.options.size())) {
+				appendField(block.inputName, block.options[static_cast<size_t>(block.selectedOption)].value);
+			} else {
+				appendField(block.inputName, block.inputValue);
+			}
+			break;
+		default:
+			break;
+		}
 	}
 
-	std::string submitUrl = action;
 	const std::string queryText = query.str();
-	if (!queryText.empty()) {
-		submitUrl += (submitUrl.find('?') == std::string::npos) ? "?" : "&";
-		submitUrl += queryText;
+	s_lastSubmittedFormMethod = method;
+	s_lastSubmittedFormStatus.clear();
+
+	blurDocumentInput();
+	if (method == "get") {
+		std::string submitUrl = action;
+		if (!queryText.empty()) {
+			submitUrl += (submitUrl.find('?') == std::string::npos) ? "?" : "&";
+			submitUrl += queryText;
+		}
+		s_lastSubmittedFormUrl = submitUrl;
+		s_lastSubmittedFormStatus = "GET submitted";
+		navigateTo(submitUrl);
+		return;
 	}
 
-	s_lastSubmittedFormUrl = submitUrl;
-	blurDocumentInput();
-	navigateTo(submitUrl);
+	s_lastSubmittedFormUrl = action;
+	if (action.rfind("file://", 0) == 0) {
+		WebDocument doc;
+		doc.url = action;
+		doc.title = "Unsupported Local POST";
+		doc.blocks.push_back({BlockType::Heading, "Unsupported Local POST", ""});
+		doc.blocks.push_back({BlockType::Paragraph,
+			"Navigator does not submit POST forms to local file:// documents.", ""});
+		doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Method", method), ""});
+		doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Encoding", encoding), ""});
+		doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Action", action), ""});
+		doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Encoded body", queryText), ""});
+		doc.blocks.push_back({BlockType::Link, "Go to about:navigator", "about:navigator"});
+		NavigatorPageMetadata metadata;
+		metadata.requestedUrl = action;
+		metadata.finalUrl = action;
+		metadata.sourceType = "file";
+		metadata.errorStatus = "Local POST unsupported";
+		setSourcePreview(metadata, queryText);
+		if (!s_currentDoc.url.empty()) s_backStack.push_back(s_currentDoc.url);
+		s_forwardStack.clear();
+		s_currentDoc = std::move(doc);
+		s_documentHeight = computeDocumentHeight();
+		s_lastSubmittedFormStatus = "local POST unsupported";
+		storePageMetadata(metadata, s_currentDoc);
+		updateDisplay();
+		return;
+	}
+	if (action.rfind("http://", 0) != 0) {
+		s_lastSubmittedFormStatus = "unsupported POST action";
+		updateStatus("POST is only supported for http:// forms.");
+		return;
+	}
+
+	gxos::web::HttpResponse response = gxos::web::postHttpUrl(action, queryText, encoding);
+	if (!s_currentDoc.url.empty()) s_backStack.push_back(s_currentDoc.url);
+	s_forwardStack.clear();
+	s_currentDoc = loadHttpResponseDocument(action, response);
+	s_scrollOffset = 0;
+	s_documentHeight = computeDocumentHeight();
+	s_lastSubmittedFormStatus = response.ok() ? "POST submitted" : std::string("POST failed: ") + gxos::web::httpErrorName(response.error);
+	storePageMetadata(s_pageMetadata, s_currentDoc);
+	updateDisplay();
 }
 
 void Navigator::handleKeyPress(int keyCode, const std::string& action)
@@ -2195,7 +2537,16 @@ void Navigator::handleKeyPress(int keyCode, const std::string& action)
 		s_ctrlPressed = (action == "down");
 		return;
 	}
+	if (keyCode == 16) {
+		s_shiftPressed = (action == "down");
+		return;
+	}
 	if (action != "down") return;
+
+	if (keyCode == 9 && !s_addressFocused && !s_findActive) {
+		focusNextFormControl(s_shiftPressed);
+		return;
+	}
 
 	// --- Address bar editing mode ---
 	if (s_addressFocused) {
@@ -2308,7 +2659,24 @@ void Navigator::handleKeyPress(int keyCode, const std::string& action)
 
 	if (s_focusedInputBlockIndex >= 0 &&
 		s_focusedInputBlockIndex < static_cast<int>(s_currentDoc.blocks.size()) &&
-		s_currentDoc.blocks[s_focusedInputBlockIndex].type == BlockType::FormTextInput)
+		(s_currentDoc.blocks[s_focusedInputBlockIndex].type == BlockType::FormCheckbox ||
+		 s_currentDoc.blocks[s_focusedInputBlockIndex].type == BlockType::FormRadio ||
+		 s_currentDoc.blocks[s_focusedInputBlockIndex].type == BlockType::FormSelect ||
+		 s_currentDoc.blocks[s_focusedInputBlockIndex].type == BlockType::FormSubmit))
+	{
+		if (keyCode == 13 || keyCode == 32) {
+			activateFormControl(s_focusedInputBlockIndex);
+		} else if (keyCode == 27) {
+			blurDocumentInput();
+			updateDisplay();
+		}
+		return;
+	}
+
+	if (s_focusedInputBlockIndex >= 0 &&
+		s_focusedInputBlockIndex < static_cast<int>(s_currentDoc.blocks.size()) &&
+		(s_currentDoc.blocks[s_focusedInputBlockIndex].type == BlockType::FormTextInput ||
+		 s_currentDoc.blocks[s_focusedInputBlockIndex].type == BlockType::FormTextarea))
 	{
 		if (s_ctrlPressed && ((keyCode == 67 || keyCode == 99) || (keyCode == 65 || keyCode == 97))) {
 			updateStatus("Form input copy/select all is deferred.");
@@ -2317,7 +2685,14 @@ void Navigator::handleKeyPress(int keyCode, const std::string& action)
 		DocBlock& block = s_currentDoc.blocks[s_focusedInputBlockIndex];
 		const int bufLen = static_cast<int>(block.inputValue.size());
 		if (keyCode == 13) {
-			submitFormForBlock(s_focusedInputBlockIndex);
+			if (block.type == BlockType::FormTextarea) {
+				block.inputValue.insert(static_cast<size_t>(s_inputCaret), 1, '\n');
+				block.text = block.inputValue;
+				++s_inputCaret;
+				updateDisplay();
+			} else {
+				submitFormForBlock(s_focusedInputBlockIndex);
+			}
 		} else if (keyCode == 27) {
 			blurDocumentInput();
 			updateDisplay();
@@ -2399,10 +2774,20 @@ Navigator::HitTarget Navigator::hitTest(int x, int y, int& outLinkBlockIndex)
 	}
 
 	for (int i = 0; i < static_cast<int>(s_currentDoc.blocks.size()); ++i) {
-		if (s_currentDoc.blocks[i].type == BlockType::FormTextInput) {
+		if (s_currentDoc.blocks[i].type == BlockType::FormTextInput ||
+			s_currentDoc.blocks[i].type == BlockType::FormCheckbox ||
+			s_currentDoc.blocks[i].type == BlockType::FormRadio ||
+			s_currentDoc.blocks[i].type == BlockType::FormTextarea ||
+			s_currentDoc.blocks[i].type == BlockType::FormSelect) {
 			if (formControlRect(i).contains(x, y)) {
 				outLinkBlockIndex = i;
-				return HitTarget::FormInput;
+				switch (s_currentDoc.blocks[i].type) {
+				case BlockType::FormCheckbox: return HitTarget::FormCheckbox;
+				case BlockType::FormRadio: return HitTarget::FormRadio;
+				case BlockType::FormTextarea: return HitTarget::FormTextarea;
+				case BlockType::FormSelect: return HitTarget::FormSelect;
+				default: return HitTarget::FormInput;
+				}
 			}
 		} else if (s_currentDoc.blocks[i].type == BlockType::FormSubmit) {
 			if (formControlRect(i).contains(x, y)) {
@@ -2761,7 +3146,7 @@ WebDocument Navigator::buildAboutNavigatorDocument()
 	doc.blocks.push_back({BlockType::ListItem,  "Basic http:// GET for text/html and text/plain pages", ""});
 	doc.blocks.push_back({BlockType::ListItem,  "Back / Forward / Reload / Home navigation", ""});
 	doc.blocks.push_back({BlockType::ListItem,  "Bookmarks with persistent storage", ""});
-	doc.blocks.push_back({BlockType::ListItem,  "Forms-lite GET forms with editable text fields", ""});
+	doc.blocks.push_back({BlockType::ListItem,  "Forms-lite GET/POST forms with text, checkbox, radio, textarea, and select controls", ""});
 	doc.blocks.push_back({BlockType::ListItem,  "Find in Page for rendered document text", ""});
 	doc.blocks.push_back({BlockType::Heading,   "Quick Start", ""});
 	doc.blocks.push_back({BlockType::Preformatted,
@@ -2795,6 +3180,8 @@ void Navigator::storePageMetadata(NavigatorPageMetadata metadata, const WebDocum
 	if (metadata.requestedUrl.empty()) metadata.requestedUrl = metadata.finalUrl;
 	fillDocumentCounts(metadata, doc);
 	metadata.lastSubmittedFormUrl = s_lastSubmittedFormUrl;
+	metadata.lastSubmittedFormMethod = s_lastSubmittedFormMethod;
+	metadata.lastSubmittedFormStatus = s_lastSubmittedFormStatus;
 	s_pageMetadata = std::move(metadata);
 }
 
@@ -2846,9 +3233,18 @@ WebDocument Navigator::buildPageInfoDocument()
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Download byte count", static_cast<int>(m.downloadByteCount)), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Forms", m.formCount), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Text inputs", m.formInputCount), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Checkboxes", m.formCheckboxCount), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Radio buttons", m.formRadioCount), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Textareas", m.formTextareaCount), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Selects", m.formSelectCount), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Unsupported form controls", m.unsupportedFormControlCount), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Unsupported form method", yesNo(m.unsupportedFormMethod)), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Unsupported form encoding", yesNo(m.unsupportedFormEncoding)), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("POST supported hosted", yesNo(m.postSupportedHosted)), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("POST supported bare-metal", yesNo(m.postSupportedBareMetal)), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Last submitted form URL", m.lastSubmittedFormUrl), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Last submitted form method", m.lastSubmittedFormMethod), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Last submitted form status", m.lastSubmittedFormStatus), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Text selection enabled", "yes"), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Clipboard mode", s_clipboardMode), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Raw/source bytes", static_cast<int>(m.rawSourceBytes)), ""});
@@ -2926,6 +3322,15 @@ WebDocument Navigator::buildRuntimeDocument()
 		s_pageMetadata.cssDetected,
 		s_pageMetadata.formCount,
 		s_pageMetadata.formInputCount,
+		s_pageMetadata.formCheckboxCount,
+		s_pageMetadata.formRadioCount,
+		s_pageMetadata.formTextareaCount,
+		s_pageMetadata.formSelectCount,
+		s_pageMetadata.unsupportedFormControlCount,
+		s_pageMetadata.postSupportedHosted,
+		s_pageMetadata.postSupportedBareMetal,
+		s_pageMetadata.lastSubmittedFormMethod,
+		s_pageMetadata.lastSubmittedFormStatus,
 		s_clipboardMode));
 
 	doc.blocks.push_back({BlockType::Link, "Page Info", "about:page-info"});
@@ -2973,6 +3378,11 @@ WebDocument Navigator::loadHttpUrl(const std::string& url)
 	Logger::write(LogLevel::Info, std::string("Navigator loadHttpUrl: ") + url);
 
 	gxos::web::HttpResponse response = gxos::web::fetchHttpUrl(url);
+	return loadHttpResponseDocument(url, response);
+}
+
+WebDocument Navigator::loadHttpResponseDocument(const std::string& url, const gxos::web::HttpResponse& response)
+{
 	NavigatorPageMetadata metadata;
 	metadata.requestedUrl = response.requestedUrl.empty() ? url : response.requestedUrl;
 	metadata.finalUrl = response.finalUrl.empty() ? url : response.finalUrl;
@@ -3157,8 +3567,12 @@ int Navigator::blockLayoutY(int blockIndex)
 			h = marginTop + wrappedBlockHeight(b.text, kPreWrapCols, true) + padding * 2 + marginBottom + (nextIsHeading ? kHeadingPreGap : 0);
 			break;
 		case BlockType::FormTextInput:
+		case BlockType::FormCheckbox:
+		case BlockType::FormRadio:
+		case BlockType::FormTextarea:
+		case BlockType::FormSelect:
 		case BlockType::FormSubmit:
-			h = marginTop + kFormControlH + marginBottom + (nextIsHeading ? kHeadingPreGap : 0);
+			h = marginTop + formControlHeight(b) + marginBottom + (nextIsHeading ? kHeadingPreGap : 0);
 			break;
 		case BlockType::Image: {
 			int imageW = 0;
@@ -3200,8 +3614,10 @@ Navigator::Rect Navigator::formControlRect(int blockIndex)
 	const int blockMarginTop = block.style.marginTop >= 0 ? block.style.marginTop : 4;
 	const int relY = blockLayoutY(blockIndex);
 	const int drawY = kContentY + relY - s_scrollOffset + blockMarginTop;
-	const int w = block.type == BlockType::FormSubmit ? kFormSubmitW : kFormInputW;
-	return Rect{ kContentX + 18 + bodyMarginLeft + blockMarginLeft, drawY, w, kFormControlH };
+	int w = kFormInputW;
+	if (block.type == BlockType::FormSubmit) w = kFormSubmitW;
+	else if (block.type == BlockType::FormCheckbox || block.type == BlockType::FormRadio) w = 260;
+	return Rect{ kContentX + 18 + bodyMarginLeft + blockMarginLeft, drawY, w, formControlHeight(block) };
 }
 
 int Navigator::computeDocumentHeight()
@@ -3238,8 +3654,12 @@ int Navigator::computeDocumentHeight()
 			h += marginTop + wrappedBlockHeight(block.text, kPreWrapCols, true) + padding * 2 + marginBottom + (nextIsHeading ? kHeadingPreGap : 0);
 			break;
 		case BlockType::FormTextInput:
+		case BlockType::FormCheckbox:
+		case BlockType::FormRadio:
+		case BlockType::FormTextarea:
+		case BlockType::FormSelect:
 		case BlockType::FormSubmit:
-			h += marginTop + kFormControlH + marginBottom + (nextIsHeading ? kHeadingPreGap : 0);
+			h += marginTop + formControlHeight(block) + marginBottom + (nextIsHeading ? kHeadingPreGap : 0);
 			break;
 		case BlockType::Image: {
 			int imageW = 0;

@@ -14,10 +14,16 @@
 //   <ul> <ol>        – ignored (structure only; <li> carries the content)
 //   <pre>            – Preformatted block; whitespace/newlines preserved
 //   <code>           – inside <pre>: stays in Preformatted; elsewhere: plain text
-//   <form method="GET" action="...">
+//   <form method="GET|POST" action="...">
 //                    – starts a simple GET form scope
 //   <input type="text" name="..." value="..." placeholder="...">
 //                    – FormTextInput block
+//   <input type="checkbox|radio" name="..." value="..." checked>
+//                    - FormCheckbox/FormRadio block
+//   <textarea name="...">Text</textarea>
+//                    - FormTextarea block
+//   <select name="..."><option value="..." selected>Text</option></select>
+//                    - FormSelect block
 //   <input type="submit" value="...">
 //                    – FormSubmit block
 //   <button type="submit">Text</button>

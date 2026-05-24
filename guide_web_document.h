@@ -30,6 +30,10 @@ enum class BlockType : uint8_t {
 	Image        = 5,   // local image block; url carries the resolved image URL
 	FormTextInput = 6,  // simple text input control for GET forms
 	FormSubmit    = 7,  // submit button for a simple form
+	FormCheckbox  = 8,
+	FormRadio     = 9,
+	FormTextarea  = 10,
+	FormSelect    = 11,
 };
 
 enum class StyleSelectorType : uint8_t {
@@ -70,9 +74,20 @@ struct CssDiagnostics {
 struct FormsDiagnostics {
 	int  formCount = 0;
 	int  textInputCount = 0;
+	int  checkboxCount = 0;
+	int  radioCount = 0;
+	int  textareaCount = 0;
+	int  selectCount = 0;
 	int  submitCount = 0;
 	int  unsupportedControlCount = 0;
 	bool hasUnsupportedMethod = false;
+	bool hasUnsupportedEncoding = false;
+};
+
+struct FormOption {
+	std::string value;
+	std::string text;
+	bool selected = false;
 };
 
 struct DocBlock {
@@ -90,10 +105,17 @@ struct DocBlock {
 	int         formIndex = -1;
 	std::string formAction;
 	std::string formMethod;
+	std::string formEncoding;
 	std::string inputName;
 	std::string inputValue;
+	std::string inputType;
 	std::string placeholder;
 	std::string submitLabel;
+	bool        checked = false;
+	std::vector<FormOption> options;
+	int         selectedOption = -1;
+	int         visibleRows = 0;
+	int         visibleCols = 0;
 	bool        formUnsupported = false;
 };
 

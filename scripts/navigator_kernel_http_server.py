@@ -56,6 +56,19 @@ class NavigatorSmokeHandler(BaseHTTPRequestHandler):
             self.write_bytes(200, "text/html; charset=utf-8",
                              b"<html><body><h1>Kernel HTTP Basic</h1><p>basic html body</p></body></html>")
             return
+        if path == "/navigator-smoke/forms-post.html":
+            self.write_bytes(200, "text/html; charset=utf-8",
+                             b"<html><body><h1>Hosted POST Form</h1>"
+                             b"<p>Exercises Forms-lite v0.2 hosted POST support.</p>"
+                             b"<form method=\"POST\" action=\"/navigator-smoke/post-echo\">"
+                             b"<input type=\"text\" name=\"q\" value=\"\">"
+                             b"<input type=\"checkbox\" name=\"agree\" value=\"yes\" checked>"
+                             b"<input type=\"radio\" name=\"kind\" value=\"alpha\" checked>"
+                             b"<input type=\"radio\" name=\"kind\" value=\"beta\">"
+                             b"<textarea name=\"note\" rows=\"4\" cols=\"24\">hello\nsecond line</textarea>"
+                             b"<select name=\"size\"><option value=\"s\">Small</option><option value=\"m\" selected>Medium</option><option value=\"l\">Large</option></select>"
+                             b"<input type=\"submit\" value=\"Send\"></form></body></html>")
+            return
         if path == "/navigator-smoke/host-check.html":
             if host.split(":", 1)[0].lower() != "guidexos.test":
                 self.write_bytes(421, "text/html; charset=utf-8",
@@ -155,6 +168,24 @@ class NavigatorSmokeHandler(BaseHTTPRequestHandler):
             self.write_bytes(200, content_type, file_path.read_bytes())
             return
         self.write_bytes(404, "text/html", b"<html><body><h1>Missing</h1></body></html>")
+
+    def do_POST(self):
+        path = self.path.split("?", 1)[0]
+        length = int(self.headers.get("Content-Length", "0") or "0")
+        body = self.rfile.read(length)
+        if path == "/navigator-smoke/post-echo":
+            escaped = body.decode("utf-8", "replace").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            method = self.command.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            content_type = self.headers.get("Content-Type", "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            content_length = self.headers.get("Content-Length", "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            page = ("<html><body><h1>POST OK</h1>"
+                    "<p>Method: " + method + "</p>"
+                    "<p>Content-Type: " + content_type + "</p>"
+                    "<p>Content-Length: " + content_length + "</p>"
+                    "<p>Encoded body:</p><pre>" + escaped + "</pre></body></html>").encode("utf-8")
+            self.write_bytes(200, "text/html; charset=utf-8", page)
+            return
+        self.write_bytes(404, "text/html", b"<html><body><h1>Missing POST</h1></body></html>")
 
 
 def main():

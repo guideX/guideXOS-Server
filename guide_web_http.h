@@ -2,7 +2,7 @@
 // guide_web_http.h
 //
 // Small synchronous HTTP/1.x client for guideWeb consumers.
-// This module intentionally supports only plain http:// GET for text
+// This module intentionally supports only plain http:// GET/POST for text
 // documents.  TLS, cookies, compression, caching, and
 // JavaScript are outside this milestone.
 
@@ -81,6 +81,8 @@ struct HttpResponse {
 ParsedHttpUrl parseHttpUrl(const std::string& url);
 const char* httpErrorName(HttpError error);
 HttpResponse fetchHttpUrl(const std::string& url);
+HttpResponse postHttpUrl(const std::string& url, const std::string& body,
+	const std::string& contentType = "application/x-www-form-urlencoded");
 
 } // namespace web
 } // namespace gxos

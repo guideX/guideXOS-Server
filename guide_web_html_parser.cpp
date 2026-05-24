@@ -135,6 +135,33 @@ static std::string extractAttr(const std::string& tagBody, const std::string& at
 	return tagBody.substr(rawPos, end - rawPos);
 }
 
+static bool hasAttr(const std::string& tagBody, const std::string& attr)
+{
+	std::string body = toLower(tagBody);
+	std::string key = toLower(attr);
+	size_t pos = 0;
+	while ((pos = body.find(key, pos)) != std::string::npos) {
+		bool leftOk = (pos == 0) || std::isspace(static_cast<unsigned char>(body[pos - 1])) || body[pos - 1] == '<';
+		size_t end = pos + key.size();
+		bool rightOk = (end >= body.size()) ||
+			std::isspace(static_cast<unsigned char>(body[end])) ||
+			body[end] == '=' || body[end] == '/' || body[end] == '>';
+		if (leftOk && rightOk) return true;
+		pos = end;
+	}
+	return false;
+}
+
+static bool supportedFormMethod(const std::string& method)
+{
+	return method == "get" || method == "post";
+}
+
+static bool supportedFormEncoding(const std::string& encoding)
+{
+	return encoding.empty() || encoding == "application/x-www-form-urlencoded";
+}
+
 static int parsePositiveIntAttr(const std::string& tagBody, const std::string& attr)
 {
 	std::string value = trim(extractAttr(tagBody, attr));
@@ -562,6 +589,8 @@ enum class OpenTag : uint8_t {
 	Title,
 	Pre,   // <pre> block — whitespace preserved
 	ButtonSubmit,
+	Textarea,
+	Option,
 };
 
 struct ParserState {
@@ -579,20 +608,35 @@ struct ParserState {
 	int          currentFormIndex = -1;
 	std::string  currentFormAction;
 	std::string  currentFormMethod;
+	std::string  currentFormEncoding;
 	bool         currentFormUnsupported = false;
+	std::string  currentTextareaName;
+	std::string  currentTextareaClass;
+	std::string  currentTextareaId;
+	int          currentTextareaRows = 0;
+	int          currentTextareaCols = 0;
+	bool         inSelect = false;
+	std::string  currentSelectName;
+	std::string  currentSelectClass;
+	std::string  currentSelectId;
+	std::vector<FormOption> currentSelectOptions;
+	std::string  currentOptionValue;
+	bool         currentOptionSelected = false;
 };
 
 // Flush textBuf into a DocBlock, if non-empty.
 static void flushText(ParserState& st)
 {
 	std::string t;
-	if (st.inPre) {
+	if (st.inPre || st.open == OpenTag::Textarea) {
 		// Inside <pre>: decode entities but preserve whitespace/newlines.
 		t = decodeEntities(st.textBuf);
-		// Strip a single leading newline that immediately follows <pre>
-		if (!t.empty() && t[0] == '\n') t = t.substr(1);
-		// Strip a single trailing newline before </pre>
-		if (!t.empty() && t.back() == '\n') t.pop_back();
+		if (st.inPre) {
+			// Strip a single leading newline that immediately follows <pre>
+			if (!t.empty() && t[0] == '\n') t = t.substr(1);
+			// Strip a single trailing newline before </pre>
+			if (!t.empty() && t.back() == '\n') t.pop_back();
+		}
 	} else {
 		t = trim(collapseWs(decodeEntities(st.textBuf)));
 	}
@@ -637,9 +681,39 @@ static void flushText(ParserState& st)
 		block.formIndex = st.currentFormIndex;
 		block.formAction = st.currentFormAction.empty() ? st.doc.url : st.currentFormAction;
 		block.formMethod = st.currentFormMethod.empty() ? "get" : st.currentFormMethod;
-		block.formUnsupported = st.currentFormUnsupported || block.formMethod != "get";
+		block.formEncoding = st.currentFormEncoding.empty() ? "application/x-www-form-urlencoded" : st.currentFormEncoding;
+		block.formUnsupported = st.currentFormUnsupported;
 		st.doc.blocks.push_back(std::move(block));
 		++st.doc.formsDiagnostics.submitCount;
+		break;
+	}
+	case OpenTag::Textarea: {
+		DocBlock block;
+		block.type = BlockType::FormTextarea;
+		block.tagName = "textarea";
+		block.className = st.currentTextareaClass;
+		block.id = st.currentTextareaId;
+		block.text = t;
+		block.inputValue = t;
+		block.inputName = st.currentTextareaName;
+		block.inputType = "textarea";
+		block.formIndex = st.currentFormIndex;
+		block.formAction = st.currentFormAction.empty() ? st.doc.url : st.currentFormAction;
+		block.formMethod = st.currentFormMethod.empty() ? "get" : st.currentFormMethod;
+		block.formEncoding = st.currentFormEncoding.empty() ? "application/x-www-form-urlencoded" : st.currentFormEncoding;
+		block.visibleRows = st.currentTextareaRows > 0 ? st.currentTextareaRows : 4;
+		block.visibleCols = st.currentTextareaCols > 0 ? st.currentTextareaCols : 40;
+		block.formUnsupported = st.currentFormUnsupported;
+		st.doc.blocks.push_back(std::move(block));
+		++st.doc.formsDiagnostics.textareaCount;
+		break;
+	}
+	case OpenTag::Option: {
+		FormOption option;
+		option.text = t;
+		option.value = st.currentOptionValue.empty() ? t : st.currentOptionValue;
+		option.selected = st.currentOptionSelected;
+		st.currentSelectOptions.push_back(std::move(option));
 		break;
 	}
 	default:
@@ -692,8 +766,13 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 		st.currentFormAction = resolveRelativeUrl(st.doc.url, st.currentFormAction);
 		st.currentFormMethod = toLower(trim(extractAttr(tagBody, "method")));
 		if (st.currentFormMethod.empty()) st.currentFormMethod = "get";
-		st.currentFormUnsupported = (st.currentFormMethod != "get");
-		if (st.currentFormUnsupported) st.doc.formsDiagnostics.hasUnsupportedMethod = true;
+		st.currentFormEncoding = toLower(trim(decodeEntities(extractAttr(tagBody, "enctype"))));
+		if (st.currentFormEncoding.empty()) st.currentFormEncoding = "application/x-www-form-urlencoded";
+		const bool unsupportedMethod = !supportedFormMethod(st.currentFormMethod);
+		const bool unsupportedEncoding = !supportedFormEncoding(st.currentFormEncoding);
+		st.currentFormUnsupported = unsupportedMethod || unsupportedEncoding;
+		if (unsupportedMethod) st.doc.formsDiagnostics.hasUnsupportedMethod = true;
+		if (unsupportedEncoding) st.doc.formsDiagnostics.hasUnsupportedEncoding = true;
 		return;
 	}
 
@@ -710,13 +789,35 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 			block.formIndex = st.currentFormIndex;
 			block.formAction = st.currentFormAction.empty() ? st.doc.url : st.currentFormAction;
 			block.formMethod = st.currentFormMethod.empty() ? "get" : st.currentFormMethod;
+			block.formEncoding = st.currentFormEncoding.empty() ? "application/x-www-form-urlencoded" : st.currentFormEncoding;
 			block.inputName = decodeEntities(extractAttr(tagBody, "name"));
 			block.inputValue = decodeEntities(extractAttr(tagBody, "value"));
+			block.inputType = type;
 			block.placeholder = decodeEntities(extractAttr(tagBody, "placeholder"));
-			block.formUnsupported = st.currentFormUnsupported || block.formMethod != "get";
+			block.formUnsupported = st.currentFormUnsupported;
 			block.text = block.inputValue;
 			st.doc.blocks.push_back(std::move(block));
 			++st.doc.formsDiagnostics.textInputCount;
+		} else if (type == "checkbox" || type == "radio") {
+			DocBlock block;
+			block.type = type == "checkbox" ? BlockType::FormCheckbox : BlockType::FormRadio;
+			block.tagName = "input";
+			block.className = extractAttr(tagBody, "class");
+			block.id = extractAttr(tagBody, "id");
+			block.formIndex = st.currentFormIndex;
+			block.formAction = st.currentFormAction.empty() ? st.doc.url : st.currentFormAction;
+			block.formMethod = st.currentFormMethod.empty() ? "get" : st.currentFormMethod;
+			block.formEncoding = st.currentFormEncoding.empty() ? "application/x-www-form-urlencoded" : st.currentFormEncoding;
+			block.inputName = decodeEntities(extractAttr(tagBody, "name"));
+			block.inputValue = decodeEntities(extractAttr(tagBody, "value"));
+			if (block.inputValue.empty()) block.inputValue = "on";
+			block.inputType = type;
+			block.checked = hasAttr(tagBody, "checked");
+			block.text = block.inputName.empty() ? block.inputValue : block.inputName;
+			block.formUnsupported = st.currentFormUnsupported;
+			st.doc.blocks.push_back(std::move(block));
+			if (type == "checkbox") ++st.doc.formsDiagnostics.checkboxCount;
+			else ++st.doc.formsDiagnostics.radioCount;
 		} else if (type == "submit") {
 			DocBlock block;
 			block.type = BlockType::FormSubmit;
@@ -726,15 +827,48 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 			block.formIndex = st.currentFormIndex;
 			block.formAction = st.currentFormAction.empty() ? st.doc.url : st.currentFormAction;
 			block.formMethod = st.currentFormMethod.empty() ? "get" : st.currentFormMethod;
+			block.formEncoding = st.currentFormEncoding.empty() ? "application/x-www-form-urlencoded" : st.currentFormEncoding;
 			block.submitLabel = decodeEntities(extractAttr(tagBody, "value"));
 			if (block.submitLabel.empty()) block.submitLabel = "Submit";
 			block.text = block.submitLabel;
-			block.formUnsupported = st.currentFormUnsupported || block.formMethod != "get";
+			block.formUnsupported = st.currentFormUnsupported;
 			st.doc.blocks.push_back(std::move(block));
 			++st.doc.formsDiagnostics.submitCount;
 		} else {
 			++st.doc.formsDiagnostics.unsupportedControlCount;
 		}
+		return;
+	}
+
+	if (name == "textarea") {
+		flushText(st);
+		st.open = OpenTag::Textarea;
+		st.currentTextareaName = decodeEntities(extractAttr(tagBody, "name"));
+		st.currentTextareaClass = extractAttr(tagBody, "class");
+		st.currentTextareaId = extractAttr(tagBody, "id");
+		st.currentTextareaRows = parsePositiveIntAttr(tagBody, "rows");
+		st.currentTextareaCols = parsePositiveIntAttr(tagBody, "cols");
+		st.textBuf.clear();
+		return;
+	}
+
+	if (name == "select") {
+		flushText(st);
+		st.inSelect = true;
+		st.currentSelectName = decodeEntities(extractAttr(tagBody, "name"));
+		st.currentSelectClass = extractAttr(tagBody, "class");
+		st.currentSelectId = extractAttr(tagBody, "id");
+		st.currentSelectOptions.clear();
+		st.open = OpenTag::None;
+		return;
+	}
+
+	if (name == "option" && st.inSelect) {
+		flushText(st);
+		st.open = OpenTag::Option;
+		st.currentOptionValue = decodeEntities(extractAttr(tagBody, "value"));
+		st.currentOptionSelected = hasAttr(tagBody, "selected");
+		st.textBuf.clear();
 		return;
 	}
 
@@ -839,12 +973,56 @@ static void handleCloseTag(ParserState& st, const std::string& tagName)
 	// Close block-level contexts.
 	if (name == "h1" || name == "h2" || name == "h3" ||
 		name == "p"  || name == "li" || name == "a"  || name == "title" ||
-		name == "button") {
+		name == "button" || name == "textarea" || name == "option") {
 		flushText(st);
 		st.open    = OpenTag::None;
 		st.hrefBuf.clear();
 		st.classBuf.clear();
 		st.idBuf.clear();
+		if (name == "textarea") {
+			st.currentTextareaName.clear();
+			st.currentTextareaClass.clear();
+			st.currentTextareaId.clear();
+		}
+		if (name == "option") {
+			st.currentOptionValue.clear();
+			st.currentOptionSelected = false;
+		}
+	}
+	if (name == "select") {
+		flushText(st);
+		DocBlock block;
+		block.type = BlockType::FormSelect;
+		block.tagName = "select";
+		block.className = st.currentSelectClass;
+		block.id = st.currentSelectId;
+		block.formIndex = st.currentFormIndex;
+		block.formAction = st.currentFormAction.empty() ? st.doc.url : st.currentFormAction;
+		block.formMethod = st.currentFormMethod.empty() ? "get" : st.currentFormMethod;
+		block.formEncoding = st.currentFormEncoding.empty() ? "application/x-www-form-urlencoded" : st.currentFormEncoding;
+		block.inputName = st.currentSelectName;
+		block.inputType = "select";
+		block.options = st.currentSelectOptions;
+		block.formUnsupported = st.currentFormUnsupported;
+		for (int i = 0; i < static_cast<int>(block.options.size()); ++i) {
+			if (block.options[i].selected) {
+				block.selectedOption = i;
+				break;
+			}
+		}
+		if (block.selectedOption < 0 && !block.options.empty()) block.selectedOption = 0;
+		if (block.selectedOption >= 0 && block.selectedOption < static_cast<int>(block.options.size())) {
+			block.inputValue = block.options[static_cast<size_t>(block.selectedOption)].value;
+			block.text = block.options[static_cast<size_t>(block.selectedOption)].text;
+		}
+		st.doc.blocks.push_back(std::move(block));
+		++st.doc.formsDiagnostics.selectCount;
+		st.inSelect = false;
+		st.currentSelectName.clear();
+		st.currentSelectClass.clear();
+		st.currentSelectId.clear();
+		st.currentSelectOptions.clear();
+		st.open = OpenTag::None;
 	}
 	if (name == "form") {
 		flushText(st);
@@ -852,6 +1030,7 @@ static void handleCloseTag(ParserState& st, const std::string& tagName)
 		st.currentFormIndex = -1;
 		st.currentFormAction.clear();
 		st.currentFormMethod.clear();
+		st.currentFormEncoding.clear();
 		st.currentFormUnsupported = false;
 	}
 	if (name == "pre") {

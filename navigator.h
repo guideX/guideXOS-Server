@@ -8,6 +8,9 @@
 #include <vector>
 
 namespace gxos {
+namespace web {
+struct HttpResponse;
+}
 namespace apps {
 
 // =============================================================================
@@ -71,9 +74,18 @@ struct NavigatorPageMetadata {
 	size_t      downloadByteCount = 0;
 	int         formCount = 0;
 	int         formInputCount = 0;
+	int         formCheckboxCount = 0;
+	int         formRadioCount = 0;
+	int         formTextareaCount = 0;
+	int         formSelectCount = 0;
 	int         unsupportedFormControlCount = 0;
 	bool        unsupportedFormMethod = false;
+	bool        unsupportedFormEncoding = false;
+	bool        postSupportedHosted = true;
+	bool        postSupportedBareMetal = false;
 	std::string lastSubmittedFormUrl;
+	std::string lastSubmittedFormMethod;
+	std::string lastSubmittedFormStatus;
 };
 
 // =============================================================================
@@ -141,6 +153,10 @@ private:
 		AddressBar,
 		Link,   // any Link block; s_hitLinkBlockIndex carries the index
 		FormInput,
+		FormCheckbox,
+		FormRadio,
+		FormTextarea,
+		FormSelect,
 		FormSubmit,
 	};
 
@@ -190,6 +206,7 @@ private:
 	static WebDocument loadFileUrl(const std::string& url);
 	// Load an http:// URL and convert the response body to a WebDocument.
 	static WebDocument loadHttpUrl(const std::string& url);
+	static WebDocument loadHttpResponseDocument(const std::string& url, const gxos::web::HttpResponse& response);
 	// Build a "Page Not Found" error document for the given URL.
 	static WebDocument buildErrorDocument(const std::string& url, const std::string& reason);
 
@@ -221,6 +238,10 @@ private:
 	static void focusDocumentInput(int blockIndex);
 	static void blurDocumentInput();
 	static void submitFormForBlock(int blockIndex);
+	static void focusNextFormControl(bool reverse);
+	static bool isFocusableFormControl(const DocBlock& block);
+	static int formControlHeight(const DocBlock& block);
+	static void activateFormControl(int blockIndex);
 	static void openFindMode();
 	static void closeFindMode();
 	static void updateFindMatches(bool keepCurrent);
@@ -284,12 +305,15 @@ private:
 	static int         s_focusedInputBlockIndex;
 	static int         s_inputCaret;
 	static std::string s_lastSubmittedFormUrl;
+	static std::string s_lastSubmittedFormMethod;
+	static std::string s_lastSubmittedFormStatus;
 	static bool        s_findActive;
 	static std::string s_findBuffer;
 	static int         s_findCaret;
 	static std::vector<FindMatch> s_findMatches;
 	static int         s_currentFindMatch;
 	static bool        s_ctrlPressed;
+	static bool        s_shiftPressed;
 	static bool        s_mouseLeftDown;
 	static MouseMode   s_mouseMode;
 	static HitTarget   s_mouseDownHitTarget;
