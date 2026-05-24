@@ -76,6 +76,11 @@ static bool is_shell_label(const char* label)
            text_equals(label, "System Settings");
 }
 
+static bool is_hosted_shell_label_for_comparison(const char* label)
+{
+    return text_equals(label, "ComputerFiles");
+}
+
 static void fill_shell_label(gxos::apps::LaunchTarget& target, const char* label)
 {
     target.type = gxos::apps::LaunchTargetType::ShellAction;
@@ -222,6 +227,205 @@ void printLaunchTargetDiagnostic(const gxos::apps::LaunchTarget& target, LaunchT
 void printLaunchTargetDiagnostic(const char* label, LaunchTargetDiagnosticWriter write)
 {
     printLaunchTargetDiagnostic(resolveLaunchTarget(label), write);
+}
+
+static const char* const kLaunchTargetComparisonLabels[] = {
+    "Notepad",
+    "gxos.builtin.notepad",
+    "FileExplorer",
+    "Files",
+    "guideXOS Navigator",
+    "ComputerFiles",
+    "AppModel",
+    "TotallyUnknownLaunchThing"
+};
+
+static gxos::apps::LaunchTarget resolveHostedLaunchTargetForComparison(const char* label)
+{
+    gxos::apps::LaunchTarget target;
+    target.originalLabel = label ? label : "";
+
+    if (!label || !label[0]) {
+        target.type = gxos::apps::LaunchTargetType::Unknown;
+        target.diagnosticStatus = "unresolved";
+        target.diagnosticReason = "No launch label supplied";
+        return target;
+    }
+
+    if (text_equals(label, "AppModel")) {
+        if (const gxos::apps::BuiltInAppMetadata* metadata = gxos::apps::FindBuiltInAppMetadataByAppId("gxos.builtin.appmodeldemo")) {
+            fill_from_metadata(target, *metadata);
+        }
+        target.type = gxos::apps::LaunchTargetType::LegacyAlias;
+        target.legacyAlias = "AppModel";
+        target.appId = "gxos.builtin.appmodeldemo";
+        target.displayName = "App Model Demo";
+        target.dispatchLaunchName = "App Model Demo";
+        target.hostedAvailable = true;
+        target.bareMetalAvailable = false;
+        target.diagnosticStatus = "resolved-alias";
+        target.diagnosticReason = "Hosted legacy UI alias for App Model Demo";
+        return target;
+    }
+
+    if (is_hosted_shell_label_for_comparison(label)) {
+        target.type = gxos::apps::LaunchTargetType::ShellAction;
+        target.displayName = "Computer Files";
+        target.dispatchLaunchName = "FileExplorer";
+        target.shellAction = "ComputerFiles";
+        target.hostedAvailable = true;
+        target.bareMetalAvailable = false;
+        target.diagnosticStatus = "resolved-shell";
+        target.diagnosticReason = "Hosted shell/system label currently canonicalizes to FileExplorer";
+        return target;
+    }
+
+    if (is_path_like(label)) {
+        target.type = gxos::apps::LaunchTargetType::FileOpen;
+        target.pathParameter = label;
+        target.hostedAvailable = true;
+        target.bareMetalAvailable = true;
+        target.diagnosticStatus = "resolved-file-open";
+        target.diagnosticReason = "Hosted path-like label mirror for comparison diagnostics";
+        return target;
+    }
+
+    if (const gxos::apps::BuiltInAppMetadata* metadata = gxos::apps::FindBuiltInAppMetadataByIdentity(label)) {
+        target.type = gxos::apps::LaunchTargetType::BuiltInApp;
+        target.appId = metadata->appId ? metadata->appId : "";
+        target.displayName = metadata->displayName ? metadata->displayName : "";
+        target.dispatchLaunchName = metadata->launchName ? metadata->launchName : "";
+        target.hostedAvailable = gxos::apps::IsBuiltInAppAvailableInHosted(*metadata);
+        target.bareMetalAvailable = gxos::apps::IsBuiltInAppAvailableInBareMetal(*metadata);
+        target.diagnosticStatus = "resolved";
+        target.diagnosticReason = "Matched shared built-in metadata in hosted comparison mirror";
+        return target;
+    }
+
+    target.type = gxos::apps::LaunchTargetType::Unknown;
+    target.diagnosticStatus = "unresolved";
+    target.diagnosticReason = "No mirrored hosted target matched";
+    return target;
+}
+
+static bool same_target_core(const gxos::apps::LaunchTarget& a, const gxos::apps::LaunchTarget& b)
+{
+    return a.type == b.type &&
+        text_equals(a.appId, b.appId) &&
+        text_equals(a.dispatchLaunchName, b.dispatchLaunchName) &&
+        text_equals(a.diagnosticStatus, b.diagnosticStatus);
+}
+
+static bool same_non_empty_app_id(const gxos::apps::LaunchTarget& a, const gxos::apps::LaunchTarget& b)
+{
+    return a.appId && a.appId[0] && text_equals(a.appId, b.appId);
+}
+
+static const char* comparison_status(const char* label, const gxos::apps::LaunchTarget& hosted, const gxos::apps::LaunchTarget& bareMetal)
+{
+    if (same_target_core(hosted, bareMetal)) return "exact";
+    if (text_equals(label, "ComputerFiles")) return "intentional-difference";
+    if (text_equals(label, "AppModel")) return "intentional-difference";
+    if (same_non_empty_app_id(hosted, bareMetal) &&
+        (hosted.type == gxos::apps::LaunchTargetType::LegacyAlias ||
+         bareMetal.type == gxos::apps::LaunchTargetType::LegacyAlias)) {
+        return "accepted-alias";
+    }
+    return "unexpected-drift";
+}
+
+static const char* comparison_note(const char* label, const char* status)
+{
+    if (text_equals(status, "exact")) return "hosted and bare-metal diagnostic targets match";
+    if (text_equals(status, "accepted-alias")) return "same app identity with an accepted legacy alias difference";
+    if (text_equals(label, "ComputerFiles")) return "hosted shell/system label; bare-metal uses separate right-column labels and system objects";
+    if (text_equals(label, "AppModel")) return "legacy app-model demo alias has target-specific dispatch names";
+    return "investigate launch target drift before feeding typed targets into dispatch";
+}
+
+static void write_int(LaunchTargetDiagnosticWriter write, int value)
+{
+    char buffer[12];
+    int pos = 0;
+    if (value == 0) {
+        buffer[pos++] = '0';
+    } else {
+        char tmp[12];
+        int tmpPos = 0;
+        int v = value;
+        while (v > 0 && tmpPos < 11) {
+            tmp[tmpPos++] = (char)('0' + (v % 10));
+            v /= 10;
+        }
+        while (tmpPos > 0) buffer[pos++] = tmp[--tmpPos];
+    }
+    buffer[pos] = '\0';
+    write(buffer);
+}
+
+static void write_target_inline(LaunchTargetDiagnosticWriter write, const gxos::apps::LaunchTarget& target)
+{
+    write("{type=");
+    write(gxos::apps::ToString(target.type));
+    write(" status=");
+    write(target.diagnosticStatus);
+    write(" dispatch=");
+    write(target.dispatchLaunchName);
+    write(" appId=");
+    write(target.appId);
+    write("}");
+}
+
+void printLaunchTargetComparisonDiagnostic(LaunchTargetDiagnosticWriter write)
+{
+    if (!write) return;
+
+    int exactCount = 0;
+    int acceptedAliasCount = 0;
+    int intentionalDifferenceCount = 0;
+    int unexpectedDriftCount = 0;
+    const int labelCount = (int)(sizeof(kLaunchTargetComparisonLabels) / sizeof(kLaunchTargetComparisonLabels[0]));
+
+    write("[LaunchTargetComparison]\n");
+    write("labels: ");
+    write_int(write, labelCount);
+    write("\nentries:\n");
+
+    for (int i = 0; i < labelCount; ++i) {
+        const char* label = kLaunchTargetComparisonLabels[i];
+        gxos::apps::LaunchTarget hosted = resolveHostedLaunchTargetForComparison(label);
+        gxos::apps::LaunchTarget bareMetal = resolveLaunchTarget(label);
+        const char* result = comparison_status(label, hosted, bareMetal);
+
+        if (text_equals(result, "exact")) ++exactCount;
+        else if (text_equals(result, "accepted-alias")) ++acceptedAliasCount;
+        else if (text_equals(result, "intentional-difference")) ++intentionalDifferenceCount;
+        else ++unexpectedDriftCount;
+
+        write("  label=");
+        write(label);
+        write(" result=");
+        write(result);
+        write(" hosted");
+        write_target_inline(write, hosted);
+        write(" bareMetal");
+        write_target_inline(write, bareMetal);
+        write(" note=");
+        write(comparison_note(label, result));
+        write("\n");
+    }
+
+    write("exactMatches: ");
+    write_int(write, exactCount);
+    write("\nacceptedAliasMatches: ");
+    write_int(write, acceptedAliasCount);
+    write("\nintentionalDifferences: ");
+    write_int(write, intentionalDifferenceCount);
+    write("\nunexpectedDrift: ");
+    write_int(write, unexpectedDriftCount);
+    write("\noverall: ");
+    write(unexpectedDriftCount == 0 ? "OK" : "WARN");
+    write("\nnonFatal: true\n");
 }
 
 } // namespace appmodel

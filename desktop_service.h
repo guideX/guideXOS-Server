@@ -71,6 +71,7 @@ namespace gxos { namespace gui {
         static std::string BuiltInAppMetadataCoverageDiagnostic();
         static apps::LaunchTarget ResolveLaunchTarget(const std::string& label);
         static std::string ResolveLaunchTargetDiagnostic(const std::string& label);
+        static std::string LaunchTargetComparisonDiagnostic();
         static std::string NativeAppCapabilitiesDiagnostic();
         static std::string InspectNativeAppPipeline(const std::string& appIdOrDisplayName);
         static std::string NativeAppPipelineSmokeTest(const std::string& appIdOrDisplayName);

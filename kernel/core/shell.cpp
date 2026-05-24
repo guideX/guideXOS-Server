@@ -395,6 +395,7 @@ static void cmd_help() {
         output_string("  desktop.apps.verbose - App registry diagnostics\n");
         output_string("  desktop.launch <AppName> - Launch app or show availability\n");
         output_string("  desktop.launch.resolve <label> - Resolve launch target without launching\n");
+        output_string("  desktop.launch.compare - Compare hosted/bare-metal launch targets\n");
         output_string("  nativeapp.inspect <AppName> - Inspect native app availability\n");
         output_string("  nativeapp.smoketest <AppName> - Native app smoke-test path\n");
     output_string("  workspaces     - Workspace info\n");
@@ -917,6 +918,10 @@ static void cmd_desktop_launch_resolve(const char* label) {
     }
 
     ::kernel::appmodel::printLaunchTargetDiagnostic(label, output_string);
+}
+
+static void cmd_desktop_launch_compare() {
+    ::kernel::appmodel::printLaunchTargetComparisonDiagnostic(output_string);
 }
 
 static void cmd_nativeapp_inspect(const char* appName, bool smokeTest) {
@@ -2943,6 +2948,8 @@ static void execute_command(const char* cmd) {
         cmd_desktop_apps(true);
     } else if (str_eq(command, "desktop.launch.resolve")) {
         cmd_desktop_launch_resolve(command_tail(cmd));
+    } else if (str_eq(command, "desktop.launch.compare")) {
+        cmd_desktop_launch_compare();
     } else if (str_eq(command, "desktop.launch")) {
         cmd_desktop_launch(arg1);
     } else if (str_eq(command, "nativeapp.inspect")) {

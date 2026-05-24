@@ -671,6 +671,179 @@ namespace gxos {
             return value ? "true" : "false";
         }
 
+        static const char* const kLaunchTargetComparisonLabels[] = {
+            "Notepad",
+            "gxos.builtin.notepad",
+            "FileExplorer",
+            "Files",
+            "guideXOS Navigator",
+            "ComputerFiles",
+            "AppModel",
+            "TotallyUnknownLaunchThing"
+        };
+
+        static bool isBareMetalShellLabelForComparison(const std::string& label) {
+            return label == "Console" ||
+                label == "Terminal" ||
+                label == "Computer" ||
+                label == "This System" ||
+                label == "Documents" ||
+                label == "Pictures" ||
+                label == "Music" ||
+                label == "Network" ||
+                label == "Control Panel" ||
+                label == "Settings" ||
+                label == "System Settings";
+        }
+
+        static apps::LaunchTarget resolveBareMetalLaunchTargetForComparison(const std::string& label) {
+            apps::LaunchTarget target;
+            target.originalLabel = label;
+
+            if (label.empty()) {
+                target.type = apps::LaunchTargetType::Unknown;
+                target.diagnosticStatus = "unresolved";
+                target.diagnosticReason = "No launch label supplied";
+                return target;
+            }
+
+            if (label == "AppModel") {
+                if (const apps::BuiltInAppMetadata* metadata = apps::FindBuiltInAppMetadataByAppId("gxos.builtin.appmodeldemo")) {
+                    fillLaunchTargetFromMetadata(target, *metadata);
+                }
+                target.type = apps::LaunchTargetType::LegacyAlias;
+                target.legacyAlias = "AppModel";
+                target.appId = "gxos.builtin.appmodeldemo";
+                target.displayName = "App Model Demo";
+                target.dispatchLaunchName = "AppModel";
+                target.hostedAvailable = true;
+                target.bareMetalAvailable = true;
+                target.diagnosticStatus = "resolved-alias";
+                target.diagnosticReason = "Bare-metal AppModel opens the local app-model explanation view";
+                return target;
+            }
+
+            if (label == "Files") {
+                if (const apps::BuiltInAppMetadata* metadata = apps::FindBuiltInAppMetadataByKernelLegacyAlias("Files")) {
+                    fillLaunchTargetFromMetadata(target, *metadata);
+                }
+                target.type = apps::LaunchTargetType::LegacyAlias;
+                target.legacyAlias = "Files";
+                target.displayName = "FileExplorer";
+                target.dispatchLaunchName = "Files";
+                target.bareMetalAvailable = true;
+                target.diagnosticStatus = "resolved-alias";
+                target.diagnosticReason = "Bare-metal legacy alias registered for FileExplorer";
+                return target;
+            }
+
+            if (isBareMetalShellLabelForComparison(label)) {
+                target.type = apps::LaunchTargetType::ShellAction;
+                target.displayName = label;
+                target.shellAction = label;
+                target.hostedAvailable = false;
+                target.bareMetalAvailable = true;
+                target.diagnosticStatus = "resolved-shell";
+                if (label == "Console" || label == "Terminal") {
+                    target.dispatchLaunchName = "Console";
+                } else if (label == "This System") {
+                    target.dispatchLaunchName = "Files";
+                    target.pathParameter = "/";
+                } else if (label == "Control Panel" || label == "Settings" || label == "System Settings") {
+                    target.dispatchLaunchName = "DisplayOptions";
+                }
+                target.diagnosticReason = "Bare-metal shell/system label mirror for comparison diagnostics";
+                return target;
+            }
+
+            if (isPathLikeLaunchLabel(label)) {
+                target.type = apps::LaunchTargetType::FileOpen;
+                target.pathParameter = label;
+                target.hostedAvailable = false;
+                target.bareMetalAvailable = true;
+                target.diagnosticStatus = "file-open-unchecked";
+                target.diagnosticReason = "Hosted comparison mirror cannot stat the bare-metal VFS";
+                return target;
+            }
+
+            if (const apps::BuiltInAppMetadata* metadata = apps::FindBuiltInAppMetadataByIdentity(label.c_str())) {
+                target.type = apps::LaunchTargetType::BuiltInApp;
+                target.appId = metadata->appId ? metadata->appId : "";
+                target.displayName = metadata->displayName ? metadata->displayName : "";
+                target.dispatchLaunchName = metadata->kernelAppName ? metadata->kernelAppName : (metadata->launchName ? metadata->launchName : "");
+                target.hostedAvailable = apps::IsBuiltInAppAvailableInHosted(*metadata);
+                target.bareMetalAvailable = apps::IsBuiltInAppAvailableInBareMetal(*metadata) && currentBareMetalRegistrationExistsForMetadata(*metadata);
+                target.diagnosticStatus = target.bareMetalAvailable ? "resolved" : "unsupported-target";
+                target.diagnosticReason = target.bareMetalAvailable
+                    ? "Matched shared built-in metadata and mirrored bare-metal registration"
+                    : "Matched shared metadata, but no mirrored bare-metal registration exists";
+                return target;
+            }
+
+            target.type = apps::LaunchTargetType::Unknown;
+            target.diagnosticStatus = "unresolved";
+            target.diagnosticReason = "No mirrored bare-metal target matched";
+            return target;
+        }
+
+        static bool sameLaunchTargetCore(const apps::LaunchTarget& a, const apps::LaunchTarget& b) {
+            return a.type == b.type &&
+                a.appId == b.appId &&
+                a.dispatchLaunchName == b.dispatchLaunchName &&
+                a.diagnosticStatus == b.diagnosticStatus;
+        }
+
+        static bool sameAppIdNonEmpty(const apps::LaunchTarget& a, const apps::LaunchTarget& b) {
+            return !a.appId.empty() && a.appId == b.appId;
+        }
+
+        static std::string launchTargetComparisonStatus(const std::string& label, const apps::LaunchTarget& hosted, const apps::LaunchTarget& bareMetal) {
+            if (sameLaunchTargetCore(hosted, bareMetal)) return "exact";
+            if (label == "ComputerFiles") return "intentional-difference";
+            if (label == "AppModel") return "intentional-difference";
+            if (sameAppIdNonEmpty(hosted, bareMetal) &&
+                (hosted.type == apps::LaunchTargetType::LegacyAlias || bareMetal.type == apps::LaunchTargetType::LegacyAlias)) {
+                return "accepted-alias";
+            }
+            return "unexpected-drift";
+        }
+
+        static std::string launchTargetComparisonNote(const std::string& label, const std::string& status) {
+            if (status == "exact") return "hosted and bare-metal diagnostic targets match";
+            if (status == "accepted-alias") return "same app identity with an accepted legacy alias difference";
+            if (label == "ComputerFiles") return "hosted shell/system label; bare-metal uses separate right-column labels and system objects";
+            if (label == "AppModel") return "legacy app-model demo alias has target-specific dispatch names";
+            return "investigate launch target drift before feeding typed targets into dispatch";
+        }
+
+        struct LaunchTargetComparisonCounts {
+            int labels = 0;
+            int exactMatches = 0;
+            int acceptedAliasMatches = 0;
+            int intentionalDifferences = 0;
+            int unexpectedDrift = 0;
+        };
+
+        static void recordLaunchTargetComparisonResult(LaunchTargetComparisonCounts& counts, const std::string& result) {
+            ++counts.labels;
+            if (result == "exact") ++counts.exactMatches;
+            else if (result == "accepted-alias") ++counts.acceptedAliasMatches;
+            else if (result == "intentional-difference") ++counts.intentionalDifferences;
+            else ++counts.unexpectedDrift;
+        }
+
+        static LaunchTargetComparisonCounts launchTargetComparisonCounts() {
+            LaunchTargetComparisonCounts counts;
+            const size_t labelCount = sizeof(kLaunchTargetComparisonLabels) / sizeof(kLaunchTargetComparisonLabels[0]);
+            for (size_t i = 0; i < labelCount; ++i) {
+                const std::string label = kLaunchTargetComparisonLabels[i];
+                const apps::LaunchTarget hosted = DesktopService::ResolveLaunchTarget(label);
+                const apps::LaunchTarget bareMetal = resolveBareMetalLaunchTargetForComparison(label);
+                recordLaunchTargetComparisonResult(counts, launchTargetComparisonStatus(label, hosted, bareMetal));
+            }
+            return counts;
+        }
+
         // Static member initialization
         std::vector<PinnedItem> DesktopService::s_pinned;
         std::vector<RecentProgramEntry> DesktopService::s_recentPrograms;
@@ -883,13 +1056,15 @@ namespace gxos {
             const int bareMetalRegisteredMissingMetadata = bareMetalRegisteredKernelAppsMissingMetadataCount();
             const int metadataWithoutHostedRegistration = metadataWithoutHostedRegistrationCount();
             const int metadataWithoutBareMetalRegistration = metadataWithoutBareMetalRegistrationCount();
+            const LaunchTargetComparisonCounts launchTargetCounts = launchTargetComparisonCounts();
             const bool duplicateOk = duplicateCount == 0;
             const bool namespaceOk = namespaceWarningCount == 0;
             const bool hostedCoverageOk = hostedRegisteredMissingMetadata == 0 && metadataWithoutHostedRegistration == 0;
             const bool bareMetalCoverageOk = bareMetalRegisteredMissingMetadata == 0 && metadataWithoutBareMetalRegistration == 0;
             const bool targetDriftOk = hostedCoverageOk && bareMetalCoverageOk;
             const bool invalidManifestOk = s_lastManifestScanResult.invalidApps.empty();
-            const bool overallOk = duplicateOk && namespaceOk && hostedCoverageOk && bareMetalCoverageOk && invalidManifestOk;
+            const bool launchTargetComparisonOk = launchTargetCounts.unexpectedDrift == 0;
+            const bool overallOk = duplicateOk && namespaceOk && hostedCoverageOk && bareMetalCoverageOk && invalidManifestOk && launchTargetComparisonOk;
 
             std::ostringstream oss;
             oss << "[AppModelSummary]\n";
@@ -912,8 +1087,14 @@ namespace gxos {
                 << " bareMetalMissing=" << metadataWithoutBareMetalRegistration << "\n";
             oss << "invalidManifests: " << statusText(invalidManifestOk)
                 << " count=" << s_lastManifestScanResult.invalidApps.size() << "\n";
+            oss << "launchTargetComparison: " << statusText(launchTargetComparisonOk)
+                << " labels=" << launchTargetCounts.labels
+                << " exact=" << launchTargetCounts.exactMatches
+                << " acceptedAliases=" << launchTargetCounts.acceptedAliasMatches
+                << " intentionalDifferences=" << launchTargetCounts.intentionalDifferences
+                << " unexpectedDrift=" << launchTargetCounts.unexpectedDrift << "\n";
             oss << "overall: " << statusText(overallOk) << "\n";
-            oss << "detailCommands: desktop.appmodel.coverage, desktop.apps.verbose\n";
+            oss << "detailCommands: desktop.appmodel.coverage, desktop.apps.verbose, desktop.launch.compare\n";
             return oss.str();
         }
 
@@ -1018,6 +1199,49 @@ namespace gxos {
             oss << "bareMetalAvailable: " << diagnosticBool(target.bareMetalAvailable) << "\n";
             oss << "status: " << target.diagnosticStatus << "\n";
             oss << "reason: " << target.diagnosticReason << "\n";
+            return oss.str();
+        }
+
+        std::string DesktopService::LaunchTargetComparisonDiagnostic() {
+            ensureDefaultAppsRegistered();
+
+            LaunchTargetComparisonCounts counts;
+
+            std::ostringstream rows;
+            const size_t labelCount = sizeof(kLaunchTargetComparisonLabels) / sizeof(kLaunchTargetComparisonLabels[0]);
+            for (size_t i = 0; i < labelCount; ++i) {
+                const std::string label = kLaunchTargetComparisonLabels[i];
+                apps::LaunchTarget hosted = ResolveLaunchTarget(label);
+                apps::LaunchTarget bareMetal = resolveBareMetalLaunchTargetForComparison(label);
+                const std::string result = launchTargetComparisonStatus(label, hosted, bareMetal);
+
+                recordLaunchTargetComparisonResult(counts, result);
+
+                rows << "  label=" << label
+                    << " result=" << result
+                    << " hosted{type=" << apps::ToString(hosted.type)
+                    << " status=" << hosted.diagnosticStatus
+                    << " dispatch=" << hosted.dispatchLaunchName
+                    << " appId=" << hosted.appId
+                    << "} bareMetal{type=" << apps::ToString(bareMetal.type)
+                    << " status=" << bareMetal.diagnosticStatus
+                    << " dispatch=" << bareMetal.dispatchLaunchName
+                    << " appId=" << bareMetal.appId
+                    << "} note=" << launchTargetComparisonNote(label, result)
+                    << "\n";
+            }
+
+            std::ostringstream oss;
+            oss << "[LaunchTargetComparison]\n";
+            oss << "labels: " << counts.labels << "\n";
+            oss << "exactMatches: " << counts.exactMatches << "\n";
+            oss << "acceptedAliasMatches: " << counts.acceptedAliasMatches << "\n";
+            oss << "intentionalDifferences: " << counts.intentionalDifferences << "\n";
+            oss << "unexpectedDrift: " << counts.unexpectedDrift << "\n";
+            oss << "entries:\n";
+            oss << rows.str();
+            oss << "overall: " << (counts.unexpectedDrift == 0 ? "OK" : "WARN") << "\n";
+            oss << "nonFatal: true\n";
             return oss.str();
         }
 
