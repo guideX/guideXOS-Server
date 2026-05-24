@@ -21,6 +21,7 @@ $Samples = @(
         OutputDir = Join-Path $AppsRoot 'HelloWorld'
         ElfRelativePath = 'bin/amd64/helloworld.elf'
         Manifest = 'app.json'
+        StagedAppId = 'com.guidexos.helloworld'
         Resources = @('resources/message.txt')
     },
     [ordered]@{
@@ -30,6 +31,7 @@ $Samples = @(
         OutputDir = Join-Path $AppsRoot 'ResourceViewer'
         ElfRelativePath = 'bin/amd64/resourceviewer.elf'
         Manifest = 'app.json'
+        StagedAppId = 'com.guidexos.resourceviewer'
         Resources = @('resources/about.txt')
     }
 )
@@ -70,6 +72,16 @@ function Copy-RequiredFile($Source, $Destination) {
     $destinationDir = Split-Path -Parent $Destination
     if (-not (Test-Path $destinationDir)) { New-Item -ItemType Directory -Path $destinationDir -Force | Out-Null }
     Copy-Item -Path $Source -Destination $Destination -Force
+}
+
+function Copy-ManifestWithStagedId($Source, $Destination, $StagedAppId) {
+    $destinationDir = Split-Path -Parent $Destination
+    if (-not (Test-Path $destinationDir)) { New-Item -ItemType Directory -Path $destinationDir -Force | Out-Null }
+
+    $manifest = Get-Content -Path $Source -Raw | ConvertFrom-Json
+    $manifest.id = $StagedAppId
+    $utf8NoBom = New-Object System.Text.UTF8Encoding $false
+    [System.IO.File]::WriteAllText($Destination, (($manifest | ConvertTo-Json -Depth 16) + [Environment]::NewLine), $utf8NoBom)
 }
 
 function Invoke-Checked($FilePath, $Arguments) {
@@ -146,7 +158,7 @@ foreach ($sample in $Samples) {
         $elfDir = Split-Path -Parent $elfPath
         if (-not (Test-Path $elfDir)) { New-Item -ItemType Directory -Path $elfDir -Force | Out-Null }
 
-        Copy-RequiredFile (Join-Path $sample.SourceDir $sample.Manifest) (Join-Path $sample.OutputDir 'app.json')
+        Copy-ManifestWithStagedId (Join-Path $sample.SourceDir $sample.Manifest) (Join-Path $sample.OutputDir 'app.json') $sample.StagedAppId
         foreach ($resource in $sample.Resources) {
             Copy-RequiredFile (Join-Path $sample.SourceDir $resource) (Join-Path $sample.OutputDir $resource)
         }

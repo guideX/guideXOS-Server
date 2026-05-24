@@ -18,6 +18,7 @@ $WallpaperNames = @(
     "dinos",
     "flower",
     "guidexosspace",
+    "guidexosspace2",
     "redflower",
     "ameoba",
     "ameobagx",
@@ -30,6 +31,7 @@ $BareMetalAliases = @{
     "dinos"         = @{ Full = "dinos.gxi";    Thumb = "dinos_t.gxi" }
     "flower"        = @{ Full = "flower.gxi";   Thumb = "flower_t.gxi" }
     "guidexosspace" = @{ Full = "gspace.gxi";   Thumb = "gspace_t.gxi" }
+    "guidexosspace2" = @{ Full = "gspace2.gxi"; Thumb = "gspac2_t.gxi" }
     "redflower"     = @{ Full = "redflwr.gxi";  Thumb = "redf_t.gxi" }
     "ameoba"        = @{ Full = "ameoba.gxi";   Thumb = "ameoba_t.gxi" }
     "ameobagx"      = @{ Full = "ameobagx.gxi"; Thumb = "amebgx_t.gxi" }

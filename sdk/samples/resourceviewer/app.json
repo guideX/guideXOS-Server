@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "id": "com.guidexos.resourceviewer",
+  "id": "com.guidexos.samples.resourceviewer",
   "displayName": "Resource Viewer",
   "version": "0.1.0",
   "publisher": "guideXOS",

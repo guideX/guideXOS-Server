@@ -202,6 +202,19 @@ namespace gxos {
             return ids;
         }
 
+        static const char* duplicateOwnershipHint(const std::string& appId) {
+            if (appId.find("gxos.builtin.") == 0) {
+                return "built-in namespace is owned by shared metadata; sample/example mirrors should use com.guidexos.samples.* or com.guidexos.examples.* ids";
+            }
+            if (appId.find("com.guidexos.samples.") == 0) {
+                return "SDK sample namespace; staged /Apps manifests should normally use installed-app ids instead of sample source ids";
+            }
+            if (appId == "com.guidexos.helloworld" || appId == "com.guidexos.resourceviewer") {
+                return "likely SDK sample source plus staged /Apps mirror sharing an installed-app id; SDK source manifests should use com.guidexos.samples.*";
+            }
+            return "check whether one manifest is a source sample, example, installed mirror, or synthetic built-in registration";
+        }
+
         static void ensureDefaultAppModelPins() {
             const char* defaults[] = {
                 "App Model Demo",
@@ -616,6 +629,7 @@ namespace gxos {
                 std::map<std::string, std::vector<ManifestOrigin>> origins = collectManifestOriginsById();
                 for (const std::string& appId : duplicateIds) {
                     oss << "  id=" << appId << "\n";
+                    oss << "    ownershipHint=" << duplicateOwnershipHint(appId) << "\n";
                     auto originIt = origins.find(appId);
                     if (originIt != origins.end()) {
                         for (const ManifestOrigin& origin : originIt->second) {

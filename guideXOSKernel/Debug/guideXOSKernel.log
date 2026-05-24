@@ -76,35 +76,35 @@ core\include/kernel/kernel_app.h(209,36): warning G24ACD1A9: unused parameter 'w
     209 |     virtual void onWidgetClick(int widgetId) {}
         |                                ~~~~^~~~~~~~
   core\desktop.cpp: At global scope:
-core\desktop.cpp(2824,28): warning GB2FD17C6: 'kernel::desktop::WallpaperPackEntry* kernel::desktop::find_wallpaper_pack_entry(const char*, bool)' defined but not used [-Wunused-function]
-   2824 | static WallpaperPackEntry* find_wallpaper_pack_entry(const char* wallpaperId, bool thumbnail)
+core\desktop.cpp(2825,28): warning GB2FD17C6: 'kernel::desktop::WallpaperPackEntry* kernel::desktop::find_wallpaper_pack_entry(const char*, bool)' defined but not used [-Wunused-function]
+   2825 | static WallpaperPackEntry* find_wallpaper_pack_entry(const char* wallpaperId, bool thumbnail)
         |                            ^~~~~~~~~~~~~~~~~~~~~~~~~
-core\desktop.cpp(2538,13): warning GACB2A34A: 'void kernel::desktop::set_wallpaper_grid(uint32_t, uint32_t, uint32_t, uint32_t)' defined but not used [-Wunused-function]
-   2538 | static void set_wallpaper_grid(uint32_t topColor, uint32_t bottomColor, uint32_t gridColor, uint32_t spacing)
+core\desktop.cpp(2539,13): warning GACB2A34A: 'void kernel::desktop::set_wallpaper_grid(uint32_t, uint32_t, uint32_t, uint32_t)' defined but not used [-Wunused-function]
+   2539 | static void set_wallpaper_grid(uint32_t topColor, uint32_t bottomColor, uint32_t gridColor, uint32_t spacing)
         |             ^~~~~~~~~~~~~~~~~~
-core\desktop.cpp(2530,13): warning G476BEFB5: 'void kernel::desktop::toggle_grid()' defined but not used [-Wunused-function]
-   2530 | static void toggle_grid()
+core\desktop.cpp(2531,13): warning G476BEFB5: 'void kernel::desktop::toggle_grid()' defined but not used [-Wunused-function]
+   2531 | static void toggle_grid()
         |             ^~~~~~~~~~~
-core\desktop.cpp(2524,13): warning G5C1A0608: 'void kernel::desktop::toggle_branding()' defined but not used [-Wunused-function]
-   2524 | static void toggle_branding()
+core\desktop.cpp(2525,13): warning G5C1A0608: 'void kernel::desktop::toggle_branding()' defined but not used [-Wunused-function]
+   2525 | static void toggle_branding()
         |             ^~~~~~~~~~~~~~~
-core\desktop.cpp(2517,13): warning GB7E2E7EF: 'void kernel::desktop::set_wallpaper_solid(uint32_t)' defined but not used [-Wunused-function]
-   2517 | static void set_wallpaper_solid(uint32_t color)
+core\desktop.cpp(2518,13): warning GB7E2E7EF: 'void kernel::desktop::set_wallpaper_solid(uint32_t)' defined but not used [-Wunused-function]
+   2518 | static void set_wallpaper_solid(uint32_t color)
         |             ^~~~~~~~~~~~~~~~~~~
-core\desktop.cpp(2509,13): warning G73295BA6: 'void kernel::desktop::set_wallpaper_gradient(uint32_t, uint32_t)' defined but not used [-Wunused-function]
-   2509 | static void set_wallpaper_gradient(uint32_t topColor, uint32_t bottomColor)
+core\desktop.cpp(2510,13): warning G73295BA6: 'void kernel::desktop::set_wallpaper_gradient(uint32_t, uint32_t)' defined but not used [-Wunused-function]
+   2510 | static void set_wallpaper_gradient(uint32_t topColor, uint32_t bottomColor)
         |             ^~~~~~~~~~~~~~~~~~~~~~
-core\desktop.cpp(2433,13): warning GB74D7035: 'void kernel::desktop::add_to_start_menu_recent(const char*)' defined but not used [-Wunused-function]
-   2433 | static void add_to_start_menu_recent(const char* appName)
+core\desktop.cpp(2434,13): warning GB74D7035: 'void kernel::desktop::add_to_start_menu_recent(const char*)' defined but not used [-Wunused-function]
+   2434 | static void add_to_start_menu_recent(const char* appName)
         |             ^~~~~~~~~~~~~~~~~~~~~~~~
-core\desktop.cpp(2196,13): warning GB0A44E1C: 'void kernel::desktop::save_icon_position(int)' defined but not used [-Wunused-function]
-   2196 | static void save_icon_position(int displayIndex)
+core\desktop.cpp(2197,13): warning GB0A44E1C: 'void kernel::desktop::save_icon_position(int)' defined but not used [-Wunused-function]
+   2197 | static void save_icon_position(int displayIndex)
         |             ^~~~~~~~~~~~~~~~~~
-core\desktop.cpp(2150,13): warning GCB72056F: 'void kernel::desktop::unpin_icon(const char*)' defined but not used [-Wunused-function]
-   2150 | static void unpin_icon(const char* appName)
+core\desktop.cpp(2151,13): warning GCB72056F: 'void kernel::desktop::unpin_icon(const char*)' defined but not used [-Wunused-function]
+   2151 | static void unpin_icon(const char* appName)
         |             ^~~~~~~~~~
-core\desktop.cpp(2137,13): warning G6BF0ADBA: 'void kernel::desktop::pin_icon(const char*)' defined but not used [-Wunused-function]
-   2137 | static void pin_icon(const char* appName)
+core\desktop.cpp(2138,13): warning G6BF0ADBA: 'void kernel::desktop::pin_icon(const char*)' defined but not used [-Wunused-function]
+   2138 | static void pin_icon(const char* appName)
         |             ^~~~~~~~
 core\desktop.cpp(544,16): warning G8EACD7BB: 'int32_t kernel::desktop::abs_i32(int32_t)' defined but not used [-Wunused-function]
     544 | static int32_t abs_i32(int32_t value)
@@ -128,13 +128,13 @@ core\desktop.cpp(76,13): warning G4F99F0D2: 'bool desktop_starts_with(const char
      76 | static bool desktop_starts_with(const char* value, const char* prefix)
         |             ^~~~~~~~~~~~~~~~~~~
   In function 'void kernel::desktop::draw_app_model_dialog()',
-      inlined from 'void kernel::desktop::_ZN6kernel7desktop4drawEv.part.0()' at core\desktop.cpp:5922:26:
-core\desktop.cpp(1393,21): warning G3C0033BE: writing 1 byte into a region of size 0 [-Wstringop-overflow=]
-   1393 |         line[pos++] = ' ';
+      inlined from 'void kernel::desktop::_ZN6kernel7desktop4drawEv.part.0()' at core\desktop.cpp:5923:26:
+core\desktop.cpp(1394,21): warning G3C0033BE: writing 1 byte into a region of size 0 [-Wstringop-overflow=]
+   1394 |         line[pos++] = ' ';
         |         ~~~~~~~~~~~~^~~~~
   core\desktop.cpp: In function 'void kernel::desktop::_ZN6kernel7desktop4drawEv.part.0()':
-  core\desktop.cpp:1384:14: note: at offset 128 into destination object 'line' of size 128
-   1384 |         char line[128];
+  core\desktop.cpp:1385:14: note: at offset 128 into destination object 'line' of size 128
+   1385 |         char line[128];
         |              ^~~~
     Compiling desktop_capabilities.cpp...
     Compiling desktop_font.cpp...
@@ -284,12 +284,81 @@ core\include/kernel/kernel_app.h(209,36): warning G24ACD1A9: unused parameter 'w
     209 |     virtual void onWidgetClick(int widgetId) {}
         |                                ~~~~^~~~~~~~
     Compiling kernel_apps.cpp...
-  In file included from core\kernel_apps.cpp:22:
-  core\../../built_in_app_metadata.h:3:10: fatal error: cstddef: No such file or directory
-      3 | #include <cstddef>
-        |          ^~~~~~~~~
-  compilation terminated.
-    [ERROR] Failed to compile kernel_apps.cpp
+  In file included from core\include/kernel/kernel_apps.h:13,
+                   from core\kernel_apps.cpp:7:
+  core/include/kernel/kernel_app.h: In member function 'virtual bool kernel::app::KernelApp::initWithParam(const char*)':
+core/include/kernel/kernel_app.h(198,44): warning G24ACD1A9: unused parameter 'param' [-Wunused-parameter]
+    198 |     virtual bool initWithParam(const char* param) { return init(); }  // Override for param support
+        |                                ~~~~~~~~~~~~^~~~~
+  core/include/kernel/kernel_app.h: In member function 'virtual void kernel::app::KernelApp::onMouseMove(int, int)':
+core/include/kernel/kernel_app.h(203,34): warning G24ACD1A9: unused parameter 'x' [-Wunused-parameter]
+    203 |     virtual void onMouseMove(int x, int y) {}
+        |                              ~~~~^
+core/include/kernel/kernel_app.h(203,41): warning G24ACD1A9: unused parameter 'y' [-Wunused-parameter]
+    203 |     virtual void onMouseMove(int x, int y) {}
+        |                                     ~~~~^
+  core/include/kernel/kernel_app.h: In member function 'virtual void kernel::app::KernelApp::onMouseDown(int, int, uint8_t)':
+core/include/kernel/kernel_app.h(204,34): warning G24ACD1A9: unused parameter 'x' [-Wunused-parameter]
+    204 |     virtual void onMouseDown(int x, int y, uint8_t button) {}
+        |                              ~~~~^
+core/include/kernel/kernel_app.h(204,41): warning G24ACD1A9: unused parameter 'y' [-Wunused-parameter]
+    204 |     virtual void onMouseDown(int x, int y, uint8_t button) {}
+        |                                     ~~~~^
+core/include/kernel/kernel_app.h(204,52): warning G24ACD1A9: unused parameter 'button' [-Wunused-parameter]
+    204 |     virtual void onMouseDown(int x, int y, uint8_t button) {}
+        |                                            ~~~~~~~~^~~~~~
+  core/include/kernel/kernel_app.h: In member function 'virtual void kernel::app::KernelApp::onMouseUp(int, int, uint8_t)':
+core/include/kernel/kernel_app.h(205,32): warning G24ACD1A9: unused parameter 'x' [-Wunused-parameter]
+    205 |     virtual void onMouseUp(int x, int y, uint8_t button) {}
+        |                            ~~~~^
+core/include/kernel/kernel_app.h(205,39): warning G24ACD1A9: unused parameter 'y' [-Wunused-parameter]
+    205 |     virtual void onMouseUp(int x, int y, uint8_t button) {}
+        |                                   ~~~~^
+core/include/kernel/kernel_app.h(205,50): warning G24ACD1A9: unused parameter 'button' [-Wunused-parameter]
+    205 |     virtual void onMouseUp(int x, int y, uint8_t button) {}
+        |                                          ~~~~~~~~^~~~~~
+  core/include/kernel/kernel_app.h: In member function 'virtual void kernel::app::KernelApp::onKeyDown(uint32_t)':
+core/include/kernel/kernel_app.h(206,37): warning G24ACD1A9: unused parameter 'key' [-Wunused-parameter]
+    206 |     virtual void onKeyDown(uint32_t key) {}
+        |                            ~~~~~~~~~^~~
+  core/include/kernel/kernel_app.h: In member function 'virtual void kernel::app::KernelApp::onKeyUp(uint32_t)':
+core/include/kernel/kernel_app.h(207,35): warning G24ACD1A9: unused parameter 'key' [-Wunused-parameter]
+    207 |     virtual void onKeyUp(uint32_t key) {}
+        |                          ~~~~~~~~~^~~
+  core/include/kernel/kernel_app.h: In member function 'virtual void kernel::app::KernelApp::onKeyChar(char)':
+core/include/kernel/kernel_app.h(208,33): warning G24ACD1A9: unused parameter 'c' [-Wunused-parameter]
+    208 |     virtual void onKeyChar(char c) {}
+        |                            ~~~~~^
+  core/include/kernel/kernel_app.h: In member function 'virtual void kernel::app::KernelApp::onWidgetClick(int)':
+core/include/kernel/kernel_app.h(209,36): warning G24ACD1A9: unused parameter 'widgetId' [-Wunused-parameter]
+    209 |     virtual void onWidgetClick(int widgetId) {}
+        |                                ~~~~^~~~~~~~
+  core\kernel_apps.cpp: In member function 'virtual void kernel::apps::NotepadApp::draw(uint32_t, uint32_t, uint32_t, uint32_t)':
+core\kernel_apps.cpp(1043,59): warning G7D6735F0: comparison of integer expressions of different signedness: 'int' and 'long unsigned int' [-Wsign-compare]
+   1043 |             if (col * (kGlyphW + kGlyphSpacing) + kGlyphW > w - 16) {
+        |                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~
+  core\kernel_apps.cpp: In member function 'virtual void kernel::apps::CalculatorApp::onWidgetClick(int)':
+core\kernel_apps.cpp(2535,17): warning G41AE70B8: unused variable 'btnChars' [-Wunused-variable]
+   2535 |     const char* btnChars = "Cce/%789*456-123++/-0.=";
+        |                 ^~~~~~~~
+  core\kernel_apps.cpp: In member function 'virtual void kernel::apps::TaskManagerApp::onMouseDown(int, int, uint8_t)':
+core\kernel_apps.cpp(2845,38): warning G24ACD1A9: unused parameter 'localX' [-Wunused-parameter]
+   2845 | void TaskManagerApp::onMouseDown(int localX, int localY, uint8_t button) {
+        |                                  ~~~~^~~~~~
+  core\kernel_apps.cpp: In member function 'virtual void kernel::apps::DiskManagerApp::draw(uint32_t, uint32_t, uint32_t, uint32_t)':
+core\kernel_apps.cpp(4153,39): warning GA5864BA6: narrowing conversion of '(48 + ((int)((char)(pi + 1))))' from 'int' to 'char' [-Wnarrowing]
+   4153 |                 char numBuf[4] = {'0' + (char)(pi + 1), '\0', '\0', '\0'};
+        |                                   ~~~~^~~~~~~~~~~~~~~~
+  core\include/kernel/kernel_apps.h: In constructor 'kernel::apps::NavigatorApp::NavigatorApp()':
+core\include/kernel/kernel_apps.h(520,9): warning G9B656FCD: 'kernel::apps::NavigatorApp::m_forwardCount' will be initialized after [-Wreorder]
+    520 |     int m_forwardCount;
+        |         ^~~~~~~~~~~~~~
+core\include/kernel/kernel_apps.h(516,9): warning G67B99532: 'int kernel::apps::NavigatorApp::m_recentDownloadCount' [-Wreorder]
+    516 |     int m_recentDownloadCount;
+        |         ^~~~~~~~~~~~~~~~~~~~~
+core\kernel_apps.cpp(4777,1): warning GD01C5E17: when initialized here [-Wreorder]
+   4777 | NavigatorApp::NavigatorApp()
+        | ^~~~~~~~~~~~
     Compiling kernel_compositor.cpp...
   In file included from core\include/kernel/kernel_compositor.h:15,
                    from core\kernel_compositor.cpp:7:

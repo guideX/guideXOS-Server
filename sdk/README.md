@@ -47,6 +47,8 @@ The script builds and stages the Native ELF SDK samples into the hosted runtime 
 
 The script uses direct LLVM `x86_64-unknown-elf` compilation and `ld.lld` linking when available, so it does not require Visual Studio.
 
+SDK source sample manifests use `com.guidexos.samples.*` app IDs. When staged under `/Apps`, the script writes normal installed app IDs such as `com.guidexos.helloworld` and `com.guidexos.resourceviewer` so hosted diagnostics can distinguish source samples from installed app mirrors.
+
 ## Clean rebuild
 
 ```powershell

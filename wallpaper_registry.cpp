@@ -12,6 +12,7 @@ const std::vector<BackgroundEntry>& backgroundRegistry()
         { "legacy_dinos", "Dinos", BackgroundKind::Image, "/system/wallpapers/dinos.png", "/system/wallpapers/dinos_thumb.png", 0xFF315A25, 0xFF121C10, 0xFFA9D76B, 0xFF315A25 },
         { "legacy_flower", "Flower", BackgroundKind::Image, "/system/wallpapers/flower.png", "/system/wallpapers/flower_thumb.png", 0xFF2C5364, 0xFF0F2027, 0xFF9BD7E4, 0xFF2C5364 },
         { "legacy_guidexos_space", "guideXOS Space", BackgroundKind::Image, "/system/wallpapers/guidexosspace.png", "/system/wallpapers/guidexosspace_thumb.png", 0xFF112B63, 0xFF070B1C, 0xFF4D8DFF, 0xFF112B63 },
+        { "legacy_guidexos_space2", "guideXOS Space 2", BackgroundKind::Image, "/system/wallpapers/guidexosspace2.png", "/system/wallpapers/guidexosspace2_thumb.png", 0xFF112B63, 0xFF070B1C, 0xFF4D8DFF, 0xFF112B63 },
         { "legacy_red_flower", "Red Flower", BackgroundKind::Image, "/system/wallpapers/redflower.png", "/system/wallpapers/redflower_thumb.png", 0xFF5B1115, 0xFF120508, 0xFFFF5B68, 0xFF5B1115 },
         { "legacy_ameoba", "Ameoba", BackgroundKind::Image, "/system/wallpapers/ameoba.png", "/system/wallpapers/ameoba_thumb.png", 0xFF39196B, 0xFF11091F, 0xFF9057EA, 0xFF39196B },
         { "legacy_ameobagx", "Ameoba GX", BackgroundKind::Image, "/system/wallpapers/ameobagx.png", "/system/wallpapers/ameobagx_thumb.png", 0xFF3A1762, 0xFF10091D, 0xFFFF4FC4, 0xFF3A1762 },

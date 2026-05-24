@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "id": "gxos.builtin.notepad",
+  "id": "com.guidexos.examples.notepad",
   "displayName": "Notepad",
   "version": "1.0.0",
   "publisher": "guideXOS",

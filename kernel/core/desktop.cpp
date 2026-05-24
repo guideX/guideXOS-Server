@@ -938,6 +938,7 @@ static const BuiltInWallpaperPalette s_builtInWallpapers[] = {
     {"legacy_dinos", "Dinos", "/system/wall/dinos.gxi", "/system/wall/dinos_t.gxi", 0xFF476020, 0xFFB8A05E, 0xFF70A048},
     {"legacy_flower", "Flower", "/system/wall/flower.gxi", "/system/wall/flower_t.gxi", 0xFF103C50, 0xFF51AFC2, 0xFF88E0F0},
     {"legacy_guidexos_space", "guideXOS Space", "/system/wall/gspace.gxi", "/system/wall/gspace_t.gxi", 0xFF030713, 0xFF102A70, 0xFF2F6BDC},
+    {"legacy_guidexos_space2", "guideXOS Space 2", "/system/wall/gspace2.gxi", "/system/wall/gspac2_t.gxi", 0xFF030713, 0xFF102A70, 0xFF2F6BDC},
     {"legacy_red_flower", "Red Flower", "/system/wall/redflwr.gxi", "/system/wall/redf_t.gxi", 0xFF190202, 0xFF7D1010, 0xFFD82020},
     {"legacy_ameoba", "Ameoba", "/system/wall/ameoba.gxi", "/system/wall/ameoba_t.gxi", 0xFF071044, 0xFF501090, 0xFF7E2DDD},
     {"legacy_ameobagx", "Ameoba GX", "/system/wall/ameobagx.gxi", "/system/wall/amebgx_t.gxi", 0xFF13051F, 0xFF68289A, 0xFFD04DF0},

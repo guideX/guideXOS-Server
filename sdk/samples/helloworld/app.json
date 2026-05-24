@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "id": "com.guidexos.helloworld",
+  "id": "com.guidexos.samples.helloworld",
   "displayName": "Hello World",
   "version": "0.1.0",
   "publisher": "guideXOS SDK",
