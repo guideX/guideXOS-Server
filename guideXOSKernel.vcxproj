@@ -162,6 +162,7 @@
     <ClInclude Include="app_manifest.h" />
     <ClInclude Include="app_manifest_loader.h" />
     <ClInclude Include="app_manifest_validator.h" />
+    <ClInclude Include="built_in_app_metadata.h" />
     <ClInclude Include="executable_memory.h" />
     <ClInclude Include="elf_validator.h" />
     <ClInclude Include="native_app_process_table.h" />
@@ -376,7 +377,9 @@
     <ClCompile Include="welcome.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <None Include="docs\APP_MODEL_CURRENT_STATE.md" />
     <None Include="docs\desktop.html" />
+    <None Include="docs\forms-result.html" />
     <None Include="docs\index.html" />
     <None Include="examples\apps\future-gxapp\app.json" />
     <None Include="examples\apps\helloworld-elf\app.json" />
@@ -396,4 +399,3 @@
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>
 </Project>
-

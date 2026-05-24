@@ -318,6 +318,9 @@
     <ClInclude Include="navigator_html_parser.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="built_in_app_metadata.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="app_registry.cpp">
@@ -585,6 +588,8 @@
     </None>
     <None Include="docs\index.html" />
     <None Include="docs\desktop.html" />
+    <None Include="docs\forms-result.html" />
+    <None Include="docs\APP_MODEL_CURRENT_STATE.md" />
   </ItemGroup>
   <ItemGroup>
     <Text Include="docs\plain.txt" />

@@ -1,6 +1,7 @@
 #include "app_registry.h"
 
 #include "app_manifest_loader.h"
+#include "built_in_app_metadata.h"
 
 namespace gxos {
 namespace apps {
@@ -10,57 +11,33 @@ bool architectureMatches(const std::string& entryArchitecture, const std::string
     return entryArchitecture == currentArchitecture || entryArchitecture == "any" || entryArchitecture == "*";
 }
 
-std::string builtInAppId(const std::string& appName) {
-    std::string id = "gxos.builtin.";
-    for (char c : appName) {
-        if (c >= 'A' && c <= 'Z') {
-            id.push_back(static_cast<char>(c - 'A' + 'a'));
-        } else if (c >= 'a' && c <= 'z') {
-            id.push_back(c);
-        } else if (c >= '0' && c <= '9') {
-            id.push_back(c);
-        } else if (c == '-' || c == '_') {
-            id.push_back(c);
-        }
-    }
-    return id;
-}
-
-RegisteredApp makeBuiltInApp(const std::string& appName) {
+RegisteredApp makeBuiltInApp(const BuiltInAppMetadata& metadata) {
     RegisteredApp app;
     app.sourceKind = AppSourceKind::BuiltIn;
     app.manifest.schemaVersion = kSupportedAppManifestSchemaVersion;
-    app.manifest.id = appName == "guideXOS Navigator" ? "guidexos.navigator" : builtInAppId(appName);
-    app.manifest.displayName = appName;
+    app.manifest.id = metadata.appId ? metadata.appId : std::string();
+    app.manifest.displayName = metadata.displayName ? metadata.displayName : std::string();
     app.manifest.version = "1.0.0";
     app.manifest.publisher = "guideXOS";
-    app.manifest.description = "Built-in guideXOS application.";
-    app.manifest.category = "BuiltIn";
+    app.manifest.description = metadata.description ? metadata.description : "Built-in guideXOS application.";
+    app.manifest.category = metadata.category ? metadata.category : "BuiltIn";
     app.manifest.kind = AppKind::BuiltIn;
-    if (appName == "Trash") {
-        app.manifest.description = "Built-in guideXOS Trash placeholder.";
-        app.manifest.icon = "trash.empty";
-    }
-    else if (appName == "guideXOS Navigator") {
-        app.manifest.description = "Native guideXOS Navigator browser bundled with the OS app model.";
-        app.manifest.icon = "app.navigator";
-        app.manifest.category = "Internet";
-        app.manifest.defaultWindow.width = 920;
-        app.manifest.defaultWindow.height = 640;
-        app.manifest.defaultWindow.resizable = true;
-    }
+    app.manifest.icon = metadata.iconKey ? metadata.iconKey : std::string();
+    app.manifest.defaultWindow.width = metadata.defaultWindowWidth;
+    app.manifest.defaultWindow.height = metadata.defaultWindowHeight;
+    app.manifest.defaultWindow.resizable = metadata.defaultWindowResizable;
     app.manifest.supportedArchitectures.push_back("any");
 
     AppEntry entry;
     entry.architecture = "any";
-    entry.path = "builtin/" + appName;
-    entry.entryPoint = appName;
+    entry.path = std::string("builtin/") + app.manifest.displayName;
+    entry.entryPoint = metadata.launchName ? metadata.launchName : app.manifest.displayName;
     entry.abi = "guidexos-desktop-service-v1";
     entry.runtime = "builtin-hosted";
     app.manifest.entries.push_back(entry);
 
     app.manifest.permissions.push_back("desktop.window");
-    app.manifest.desktopRegistryHints["registeredName"] = appName;
+    app.manifest.desktopRegistryHints["registeredName"] = entry.entryPoint;
     return app;
 }
 
@@ -73,28 +50,13 @@ AppScanIssue makeIssue(AppSourceKind sourceKind, const std::filesystem::path& ma
     return issue;
 }
 
-const std::vector<std::string>& defaultBuiltInAppNames() {
-    static const std::vector<std::string> appNames = {
-        "Notepad",
-        "Calculator",
-        "Clock",
-        "Console",
-        "FileExplorer",
-        "Trash",
-        "TaskManager",
-        "Paint",
-        "ImageViewer",
-        "OnScreenKeyboard",
-        "ShutdownDialog",
-        "DiskManager",
-        "ControlPanel",
-        "DisplayOptions",
-        "guideXOS Navigator",
-        "App Model Demo",
-        "Native App Debug Viewer",
-        "HDInstaller"
-    };
-    return appNames;
+std::vector<const BuiltInAppMetadata*> defaultHostedBuiltInApps() {
+    std::vector<const BuiltInAppMetadata*> apps;
+    for (size_t i = 0; i < kBuiltInAppMetadataCount; ++i) {
+        if (!IsBuiltInAppAvailableInHosted(kBuiltInAppMetadata[i])) continue;
+        apps.push_back(&kBuiltInAppMetadata[i]);
+    }
+    return apps;
 }
 
 } // namespace
@@ -196,14 +158,26 @@ AppScanResult AppRegistry::Scan(const std::vector<AppRegistrySource>& sources) {
 }
 
 AppScanResult AppRegistry::RegisterBuiltInAppsAsManifests() {
-    return RegisterBuiltInAppsAsManifests(defaultBuiltInAppNames());
+    AppScanResult result;
+    const std::vector<const BuiltInAppMetadata*> builtIns = defaultHostedBuiltInApps();
+    for (const BuiltInAppMetadata* metadata : builtIns) {
+        if (!metadata) continue;
+        ++result.scannedManifestCount;
+        RegisterApp(makeBuiltInApp(*metadata), result);
+    }
+
+    result.registeredAppCount = m_apps.size();
+    result.registeredApps = m_apps;
+    return result;
 }
 
 AppScanResult AppRegistry::RegisterBuiltInAppsAsManifests(const std::vector<std::string>& appNames) {
     AppScanResult result;
     for (const std::string& appName : appNames) {
+        const BuiltInAppMetadata* metadata = FindBuiltInAppMetadataByDisplayName(appName.c_str());
+        if (!metadata || !IsBuiltInAppAvailableInHosted(*metadata)) continue;
         ++result.scannedManifestCount;
-        RegisterApp(makeBuiltInApp(appName), result);
+        RegisterApp(makeBuiltInApp(*metadata), result);
     }
 
     result.registeredAppCount = m_apps.size();

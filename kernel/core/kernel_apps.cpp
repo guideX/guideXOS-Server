@@ -19,6 +19,7 @@
 #include "include/kernel/ipv4.h"
 #include "include/kernel/tcp.h"
 #include "include/kernel/dns.h"
+#include "../../built_in_app_metadata.h"
 #include "../../guide_web_http_shared.h"
 
 extern "C" void desktop_request_redraw();
@@ -7601,17 +7602,30 @@ void NavigatorApp::clampScroll()
 void registerKernelApps() {
     app::AppManager::init();
     app::AppLogger::init();
-    
-    // Register available kernel-mode apps
-    app::AppManager::registerApp("Notepad", 0xFF78B450, NotepadApp::create);
-    app::AppManager::registerApp("Calculator", 0xFF4690C8, CalculatorApp::create);
-    app::AppManager::registerApp("DisplayOptions", 0xFF606878, DisplayOptionsApp::create);
-    app::AppManager::registerApp("TaskManager", 0xFFB44646, TaskManagerApp::create);
-    app::AppManager::registerApp("Files", 0xFFC8B43C, FileExplorerApp::create);
-    app::AppManager::registerApp("FileExplorer", 0xFFC8B43C, FileExplorerApp::create);
-    app::AppManager::registerApp("guideXOS Navigator", 0xFF4678BE, NavigatorApp::create);
-    app::AppManager::registerApp("Trash", 0xFF9098A4, TrashApp::create);
-    app::AppManager::registerApp("DiskManager", 0xFF7050C0, DiskManagerApp::create);
+
+    // Register available kernel-mode apps from the shared built-in metadata table.
+    // This remains metadata-only for now; factory selection and launch dispatch stay
+    // in the existing kernel app framework until a later pass.
+    for (size_t i = 0; i < gxos::apps::kBuiltInAppMetadataCount; ++i) {
+        const gxos::apps::BuiltInAppMetadata& metadata = gxos::apps::kBuiltInAppMetadata[i];
+        if (!gxos::apps::IsBuiltInAppAvailableInBareMetal(metadata) || !metadata.kernelAppName) continue;
+
+        app::KernelApp* (*factory)() = nullptr;
+        if (gxos::apps::detail::builtInTextEquals(metadata.kernelAppName, "Notepad")) factory = NotepadApp::create;
+        else if (gxos::apps::detail::builtInTextEquals(metadata.kernelAppName, "Calculator")) factory = CalculatorApp::create;
+        else if (gxos::apps::detail::builtInTextEquals(metadata.kernelAppName, "DisplayOptions")) factory = DisplayOptionsApp::create;
+        else if (gxos::apps::detail::builtInTextEquals(metadata.kernelAppName, "TaskManager")) factory = TaskManagerApp::create;
+        else if (gxos::apps::detail::builtInTextEquals(metadata.kernelAppName, "FileExplorer")) factory = FileExplorerApp::create;
+        else if (gxos::apps::detail::builtInTextEquals(metadata.kernelAppName, "guideXOS Navigator")) factory = NavigatorApp::create;
+        else if (gxos::apps::detail::builtInTextEquals(metadata.kernelAppName, "Trash")) factory = TrashApp::create;
+        else if (gxos::apps::detail::builtInTextEquals(metadata.kernelAppName, "DiskManager")) factory = DiskManagerApp::create;
+
+        if (!factory) continue;
+        app::AppManager::registerApp(metadata.kernelAppName, metadata.kernelIconColor, factory);
+        if (metadata.kernelLegacyAlias && metadata.kernelLegacyAlias[0]) {
+            app::AppManager::registerApp(metadata.kernelLegacyAlias, metadata.kernelIconColor, factory);
+        }
+    }
 }
 
 static bool nav_smoke_text_equals(const char* a, const char* b)
