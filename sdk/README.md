@@ -68,6 +68,7 @@ After staging the apps under the hosted `/Apps` location, run `guideXOSServer.ex
 
 ```text
 desktop.apps.verbose
+desktop.appmodel.summary
 nativeapp.capabilities
 nativeapp.inspect com.guidexos.helloworld
 nativeapp.smoketest com.guidexos.helloworld
@@ -92,6 +93,7 @@ Then in the hosted runtime:
 
 ```text
 desktop.apps.verbose
+desktop.appmodel.summary
 nativeapp.capabilities
 nativeapp.inspect com.guidexos.helloworld
 nativeapp.smoketest com.guidexos.helloworld

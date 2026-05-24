@@ -147,6 +147,32 @@ namespace gxos {
             return false;
         }
 
+        static int hostedAvailableMetadataCount() {
+            int count = 0;
+            for (size_t i = 0; i < apps::kBuiltInAppMetadataCount; ++i) {
+                if (apps::IsBuiltInAppAvailableInHosted(apps::kBuiltInAppMetadata[i])) ++count;
+            }
+            return count;
+        }
+
+        static int bareMetalAvailableMetadataCount() {
+            int count = 0;
+            for (size_t i = 0; i < apps::kBuiltInAppMetadataCount; ++i) {
+                if (apps::IsBuiltInAppAvailableInBareMetal(apps::kBuiltInAppMetadata[i])) ++count;
+            }
+            return count;
+        }
+
+        static int hostedRegisteredBuiltInsMissingMetadataCount() {
+            int count = 0;
+            for (const auto& app : DesktopService::GetRegisteredApps()) {
+                if (app.kind != apps::AppKind::BuiltIn) continue;
+                if (findMetadataForRegisteredDesktopApp(app)) continue;
+                ++count;
+            }
+            return count;
+        }
+
         struct ManifestOrigin {
             apps::AppSourceKind sourceKind = apps::AppSourceKind::UserApps;
             std::string source;
@@ -235,31 +261,46 @@ namespace gxos {
             oss << "    warning=" << warning << "\n";
         }
 
+        static int appendNamespaceWarningsForOrigin(std::ostringstream* oss, const ManifestOrigin& origin) {
+            int warningCount = 0;
+            const bool usesBuiltInNamespace = startsWith(origin.appId, "gxos.builtin.");
+            const bool usesSampleNamespace = startsWith(origin.appId, "com.guidexos.samples.");
+            const bool usesExampleNamespace = startsWith(origin.appId, "com.guidexos.examples.");
+
+            if (origin.sourceKind != apps::AppSourceKind::BuiltIn && usesBuiltInNamespace) {
+                ++warningCount;
+                if (oss) appendNamespaceWarning(*oss, origin, "non-built-in manifest uses gxos.builtin.*; built-ins own this namespace");
+            }
+            if (originIsSdkSample(origin) && !usesSampleNamespace) {
+                ++warningCount;
+                if (oss) appendNamespaceWarning(*oss, origin, "SDK sample manifest should use com.guidexos.samples.*");
+            }
+            if (originIsRepoExample(origin) && !usesExampleNamespace) {
+                ++warningCount;
+                if (oss) appendNamespaceWarning(*oss, origin, "repo example manifest should use com.guidexos.examples.*");
+            }
+            if (originIsInstalledPackage(origin) && (usesBuiltInNamespace || usesSampleNamespace || usesExampleNamespace)) {
+                ++warningCount;
+                if (oss) appendNamespaceWarning(*oss, origin, "installed /Apps manifest should use a normal installed app id, not builtin/sample/example namespaces");
+            }
+
+            return warningCount;
+        }
+
+        static int appIdNamespaceWarningCount() {
+            int warningCount = 0;
+            for (const ManifestOrigin& origin : collectManifestOrigins()) {
+                warningCount += appendNamespaceWarningsForOrigin(nullptr, origin);
+            }
+            return warningCount;
+        }
+
         static int appendAppIdNamespaceWarnings(std::ostringstream& oss) {
             int warningCount = 0;
             oss << "appIdNamespaceWarnings(nonFatal):\n";
 
             for (const ManifestOrigin& origin : collectManifestOrigins()) {
-                const bool usesBuiltInNamespace = startsWith(origin.appId, "gxos.builtin.");
-                const bool usesSampleNamespace = startsWith(origin.appId, "com.guidexos.samples.");
-                const bool usesExampleNamespace = startsWith(origin.appId, "com.guidexos.examples.");
-
-                if (origin.sourceKind != apps::AppSourceKind::BuiltIn && usesBuiltInNamespace) {
-                    ++warningCount;
-                    appendNamespaceWarning(oss, origin, "non-built-in manifest uses gxos.builtin.*; built-ins own this namespace");
-                }
-                if (originIsSdkSample(origin) && !usesSampleNamespace) {
-                    ++warningCount;
-                    appendNamespaceWarning(oss, origin, "SDK sample manifest should use com.guidexos.samples.*");
-                }
-                if (originIsRepoExample(origin) && !usesExampleNamespace) {
-                    ++warningCount;
-                    appendNamespaceWarning(oss, origin, "repo example manifest should use com.guidexos.examples.*");
-                }
-                if (originIsInstalledPackage(origin) && (usesBuiltInNamespace || usesSampleNamespace || usesExampleNamespace)) {
-                    ++warningCount;
-                    appendNamespaceWarning(oss, origin, "installed /Apps manifest should use a normal installed app id, not builtin/sample/example namespaces");
-                }
+                warningCount += appendNamespaceWarningsForOrigin(&oss, origin);
             }
 
             if (warningCount == 0) oss << "  none\n";
@@ -275,6 +316,41 @@ namespace gxos {
                 if (!issue.appId.empty()) ids.insert(issue.appId);
             }
             return ids;
+        }
+
+        static int bareMetalRegisteredKernelAppsMissingMetadataCount() {
+            int count = 0;
+            for (const char* name : currentBareMetalKernelRegistrationNames()) {
+                if (apps::FindBuiltInAppMetadataByIdentity(name)) continue;
+                ++count;
+            }
+            return count;
+        }
+
+        static int metadataWithoutHostedRegistrationCount() {
+            int count = 0;
+            for (size_t i = 0; i < apps::kBuiltInAppMetadataCount; ++i) {
+                const apps::BuiltInAppMetadata& metadata = apps::kBuiltInAppMetadata[i];
+                if (!apps::IsBuiltInAppAvailableInHosted(metadata)) continue;
+                if (currentHostedRegistrationExistsForMetadata(metadata)) continue;
+                ++count;
+            }
+            return count;
+        }
+
+        static int metadataWithoutBareMetalRegistrationCount() {
+            int count = 0;
+            for (size_t i = 0; i < apps::kBuiltInAppMetadataCount; ++i) {
+                const apps::BuiltInAppMetadata& metadata = apps::kBuiltInAppMetadata[i];
+                if (!apps::IsBuiltInAppAvailableInBareMetal(metadata)) continue;
+                if (currentBareMetalRegistrationExistsForMetadata(metadata)) continue;
+                ++count;
+            }
+            return count;
+        }
+
+        static const char* statusText(bool ok) {
+            return ok ? "OK" : "WARN";
         }
 
         static const char* duplicateOwnershipHint(const std::string& appId) {
@@ -618,6 +694,49 @@ namespace gxos {
                     << " launch=" << app.launchName
                     << " source=" << app.source << "\n";
             }
+            return oss.str();
+        }
+
+        std::string DesktopService::AppModelSummaryDiagnostic() {
+            ensureDefaultAppsRegistered();
+
+            const size_t duplicateCount = duplicateIdsFromScanIssues(s_lastManifestScanResult, s_lastBuiltInRegisterResult).size();
+            const int namespaceWarningCount = appIdNamespaceWarningCount();
+            const int hostedRegisteredMissingMetadata = hostedRegisteredBuiltInsMissingMetadataCount();
+            const int bareMetalRegisteredMissingMetadata = bareMetalRegisteredKernelAppsMissingMetadataCount();
+            const int metadataWithoutHostedRegistration = metadataWithoutHostedRegistrationCount();
+            const int metadataWithoutBareMetalRegistration = metadataWithoutBareMetalRegistrationCount();
+            const bool duplicateOk = duplicateCount == 0;
+            const bool namespaceOk = namespaceWarningCount == 0;
+            const bool hostedCoverageOk = hostedRegisteredMissingMetadata == 0 && metadataWithoutHostedRegistration == 0;
+            const bool bareMetalCoverageOk = bareMetalRegisteredMissingMetadata == 0 && metadataWithoutBareMetalRegistration == 0;
+            const bool targetDriftOk = hostedCoverageOk && bareMetalCoverageOk;
+            const bool invalidManifestOk = s_lastManifestScanResult.invalidApps.empty();
+            const bool overallOk = duplicateOk && namespaceOk && hostedCoverageOk && bareMetalCoverageOk && invalidManifestOk;
+
+            std::ostringstream oss;
+            oss << "[AppModelSummary]\n";
+            oss << "registeredApps: " << s_apps.size() << "\n";
+            oss << "manifestScannedApps: " << s_lastManifestScanResult.scannedManifestCount << "\n";
+            oss << "manifestRegisteredApps: " << s_lastManifestScanResult.registeredAppCount << "\n";
+            oss << "syntheticBuiltInCount: " << s_lastBuiltInRegisterResult.scannedManifestCount << "\n";
+            oss << "duplicateAppIds: " << statusText(duplicateOk) << " count=" << duplicateCount << "\n";
+            oss << "namespaceWarnings: " << statusText(namespaceOk) << " count=" << namespaceWarningCount << "\n";
+            oss << "hostedMetadataCoverage: " << statusText(hostedCoverageOk)
+                << " available=" << hostedAvailableMetadataCount()
+                << " missingMetadata=" << hostedRegisteredMissingMetadata
+                << " missingRegistration=" << metadataWithoutHostedRegistration << "\n";
+            oss << "bareMetalMetadataCoverage: " << statusText(bareMetalCoverageOk)
+                << " available=" << bareMetalAvailableMetadataCount()
+                << " missingMetadata=" << bareMetalRegisteredMissingMetadata
+                << " missingRegistration=" << metadataWithoutBareMetalRegistration << "\n";
+            oss << "targetDrift: " << statusText(targetDriftOk)
+                << " hostedMissing=" << metadataWithoutHostedRegistration
+                << " bareMetalMissing=" << metadataWithoutBareMetalRegistration << "\n";
+            oss << "invalidManifests: " << statusText(invalidManifestOk)
+                << " count=" << s_lastManifestScanResult.invalidApps.size() << "\n";
+            oss << "overall: " << statusText(overallOk) << "\n";
+            oss << "detailCommands: desktop.appmodel.coverage, desktop.apps.verbose\n";
             return oss.str();
         }
 

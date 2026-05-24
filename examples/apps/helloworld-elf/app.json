@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "id": "gxos.example.helloworld",
+  "id": "com.guidexos.examples.helloworld",
   "displayName": "HelloWorld ELF",
   "version": "0.1.0",
   "publisher": "guideXOS Samples",
