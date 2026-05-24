@@ -230,6 +230,8 @@ namespace gxos {
 
         static const bool kEnableStartMenuIcons = true;
         static const int kStartMenuIconSize = 16;
+        static const int kStartMenuRowH = 22;
+        static const int kStartMenuRowGap = 4;
         static std::string s_lastLaunchAction;
         static uint64_t s_lastLaunchTicks = 0;
 
@@ -269,6 +271,12 @@ namespace gxos {
         static int uiTextHeight(FontRole role = FontRole::Default)
         {
             return SystemFont::MeasureHeight(role);
+        }
+
+        static int centeredUiTextY(int top, int height, FontRole role = FontRole::Default)
+        {
+            int lineH = uiTextHeight(role);
+            return top + (height > lineH ? (height - lineH) / 2 : 0);
         }
 
         static void drawUiText(HDC dc, int x, int y, const char* text, int len, COLORREF color, FontRole role = FontRole::Default)
@@ -1471,7 +1479,7 @@ namespace gxos {
                         FillRect(dc, &wr, wb); 
                         DeleteObject(wb); 
                         FrameRect(dc, &wr, (HBRUSH)GetStockObject(WHITE_BRUSH)); 
-                        drawUiText(dc, wr.left + 6, wr.top + 4, wd.text, RGB(240, 240, 240), FontRole::Default);
+                        drawUiText(dc, wr.left + 6, centeredUiTextY(wr.top, wd.h), wd.text, RGB(240, 240, 240), FontRole::Default);
                     }
                     for (const auto& tx : winfo.positionedTexts) {
                         SystemFont::DrawText(dc, winfo.x + tx.x, winfo.y + titleBarH + tx.y, tx.text.c_str(), (int)tx.text.size(),
@@ -1602,7 +1610,7 @@ namespace gxos {
                 if (g_startMenuVisible) {
                     int smW = 440; // wider to accommodate two columns
                     int maxRows = 14;
-                    int rowH = 20;
+                    int rowH = kStartMenuRowH;
                     int leftColW = 260; // left list column width
                     int rightColW = 160; // right column for shortcuts
                     int smH = maxRows * rowH + 10;
@@ -1642,7 +1650,7 @@ namespace gxos {
                             std::string txt = g_startMenuAllProgsSorted[i];
                             int textX = r.left + 4;
                             drawStartMenuIcon(dc, r, txt, textX);
-                            drawUiText(dc, textX, r.top + 4, txt, RGB(230, 230, 230), FontRole::Default);
+                            drawUiText(dc, textX, centeredUiTextY(r.top, rowH), txt, RGB(230, 230, 230), FontRole::Default);
                             y += rowH; row++;
                         }
                     } else {
@@ -1664,7 +1672,7 @@ namespace gxos {
                             int textX = r.left + 4;
                             drawStartMenuIcon(dc, r, txt, textX);
                             std::string displayText = (hasEquivalentListItem(g_cfg.pinned, txt) ? "* " : "  ") + txt;
-                            drawUiText(dc, textX, r.top + 4, displayText, RGB(230, 230, 230), FontRole::Default);
+                            drawUiText(dc, textX, centeredUiTextY(r.top, rowH), displayText, RGB(230, 230, 230), FontRole::Default);
                             y += rowH; row++;
                         }
                     }
@@ -1680,8 +1688,8 @@ namespace gxos {
                     if (overComp) { HBRUSH hb = CreateSolidBrush(RGB(70, 90, 130)); FillRect(dc, &rcComputer, hb); DeleteObject(hb); }
                     int computerTextX = rcComputer.left + 6;
                     drawStartMenuIcon(dc, rcComputer, "Computer Files", computerTextX);
-                    drawUiText(dc, computerTextX, rcComputer.top + 4, "Computer Files", 14, RGB(200, 200, 200), FontRole::Default);
-                    rcY += rowH + 4;
+                    drawUiText(dc, computerTextX, centeredUiTextY(rcComputer.top, rowH), "Computer Files", 14, RGB(200, 200, 200), FontRole::Default);
+                    rcY += rowH + kStartMenuRowGap;
 
                     // Console shortcut
                     RECT rcConsole{ rcX, rcY, sm.right - 6, rcY + rowH };
@@ -1689,8 +1697,8 @@ namespace gxos {
                     if (overCon) { HBRUSH hb = CreateSolidBrush(RGB(70, 90, 130)); FillRect(dc, &rcConsole, hb); DeleteObject(hb); }
                     int consoleTextX = rcConsole.left + 6;
                     drawStartMenuIcon(dc, rcConsole, "Console", consoleTextX);
-                    drawUiText(dc, consoleTextX, rcConsole.top + 4, "Console", 7, RGB(200, 200, 200), FontRole::Default);
-                    rcY += rowH + 4;
+                    drawUiText(dc, consoleTextX, centeredUiTextY(rcConsole.top, rowH), "Console", 7, RGB(200, 200, 200), FontRole::Default);
+                    rcY += rowH + kStartMenuRowGap;
 
                     // Recent Documents shortcut
                     RECT rcDocs{ rcX, rcY, sm.right - 6, rcY + rowH };
@@ -1698,7 +1706,7 @@ namespace gxos {
                     if (overDocs) { HBRUSH hb = CreateSolidBrush(RGB(70, 90, 130)); FillRect(dc, &rcDocs, hb); DeleteObject(hb); }
                     int docsTextX = rcDocs.left + 6;
                     drawStartMenuIcon(dc, rcDocs, "Recent Docs", docsTextX);
-                    drawUiText(dc, docsTextX, rcDocs.top + 4, "Recent Docs", 11, RGB(200, 200, 200), FontRole::Default);
+                    drawUiText(dc, docsTextX, centeredUiTextY(rcDocs.top, rowH), "Recent Docs", 11, RGB(200, 200, 200), FontRole::Default);
 
                     // Bottom area - "All Programs" toggle button
                     int btnY = sm.bottom - 30;
@@ -1708,7 +1716,7 @@ namespace gxos {
                     FillRect(dc, &allProgBtn, apb); DeleteObject(apb);
                     FrameRect(dc, &allProgBtn, (HBRUSH)GetStockObject(WHITE_BRUSH));
                     const char* btnText = g_startMenuAllProgs ? "< Back" : "All Programs >";
-                    drawUiText(dc, allProgBtn.left + 8, allProgBtn.top + 5, btnText, (int)strlen(btnText), RGB(230, 230, 230), FontRole::Default);
+                    drawUiText(dc, allProgBtn.left + 8, centeredUiTextY(allProgBtn.top, allProgBtn.bottom - allProgBtn.top), btnText, (int)strlen(btnText), RGB(230, 230, 230), FontRole::Default);
 
                     // Power menu area (bottom-right)
                     int shutdownBtnW = 80;
@@ -1718,7 +1726,7 @@ namespace gxos {
                     HBRUSH sdb = CreateSolidBrush(overShutdown ? RGB(80, 40, 40) : RGB(60, 60, 75));
                     FillRect(dc, &shutdownBtn, sdb); DeleteObject(sdb);
                     FrameRect(dc, &shutdownBtn, (HBRUSH)GetStockObject(WHITE_BRUSH));
-                    drawUiText(dc, shutdownBtn.left + 10, shutdownBtn.top + 5, "Shutdown", 8, RGB(230, 230, 230), FontRole::Default);
+                    drawUiText(dc, shutdownBtn.left + 10, centeredUiTextY(shutdownBtn.top, shutdownBtn.bottom - shutdownBtn.top), "Shutdown", 8, RGB(230, 230, 230), FontRole::Default);
                 }
 
                 // Right-click context menus are top-level popups over Start and desktop surfaces.
@@ -1838,7 +1846,7 @@ namespace gxos {
                     // Check right column shortcuts
                     int rcX = g_startMenuRect.left + leftColW + 4;
                     int rcY = g_startMenuRect.top + 6;
-                    int rowH = 20;
+                    int rowH = kStartMenuRowH;
 
                     // Computer Files
                     RECT rcComputer{ rcX, rcY, g_startMenuRect.right - 6, rcY + rowH };
@@ -1848,7 +1856,7 @@ namespace gxos {
                         requestRepaint( );
                         return 0;
                     }
-                    rcY += rowH + 4;
+                    rcY += rowH + kStartMenuRowGap;
 
                     // Console
                     RECT rcConsole{ rcX, rcY, g_startMenuRect.right - 6, rcY + rowH };
@@ -1858,7 +1866,7 @@ namespace gxos {
                         requestRepaint( );
                         return 0;
                     }
-                    rcY += rowH + 4;
+                    rcY += rowH + kStartMenuRowGap;
 
                     // Recent Documents - just close menu for now
                     RECT rcDocs{ rcX, rcY, g_startMenuRect.right - 6, rcY + rowH };
@@ -1967,7 +1975,7 @@ namespace gxos {
             case WM_RBUTTONDOWN: {
                 int mx = GET_X_LPARAM(l); int my = GET_Y_LPARAM(l); { std::lock_guard<std::mutex> lk(g_lock); if (blockInputBehindModal(mx, my)) { requestRepaint( ); return 0; } } if (g_startMenuVisible && mx >= g_startMenuRect.left && mx <= g_startMenuRect.right && my >= g_startMenuRect.top && my <= g_startMenuRect.bottom) {
                     const int leftColW = 260;
-                    const int rowH = 20;
+                    const int rowH = kStartMenuRowH;
                     const int listTop = g_startMenuRect.top + 4;
                     const int btnY = g_startMenuRect.bottom - 30;
                     if (mx >= g_startMenuRect.left && mx <= g_startMenuRect.left + leftColW && my >= listTop && my <= btnY - 4) {
@@ -3059,7 +3067,7 @@ namespace gxos {
             if (g_startMenuVisible) {
                 const int smW = 440;
                 const int maxRows = 14;
-                const int rowH = 20;
+                const int rowH = kStartMenuRowH;
                 const int leftColW = 260;
                 const int smH = maxRows * rowH + 10;
                 int smLeft = 8;
@@ -3083,7 +3091,7 @@ namespace gxos {
                         std::string txt = g_startMenuAllProgsSorted[i];
                         int textX = rowX + 4;
                         fbDrawStartMenuIcon(pixels, pitch, fbW, fbH, rowX, y, rowH, txt, textX);
-                        fbDrawText(pixels, pitch, fbW, fbH, textX, y + 4, txt, 0x00E6E6E6, FontRole::Default);
+                        fbDrawText(pixels, pitch, fbW, fbH, textX, y + (rowH - SystemFont::MeasureHeight(FontRole::Default)) / 2, txt, 0x00E6E6E6, FontRole::Default);
                         y += rowH;
                         row++;
                     }
@@ -3097,7 +3105,7 @@ namespace gxos {
                         int textX = rowX + 4;
                         fbDrawStartMenuIcon(pixels, pitch, fbW, fbH, rowX, y, rowH, txt, textX);
                         std::string displayText = (hasEquivalentListItem(g_cfg.pinned, txt) ? "* " : "  ") + txt;
-                        fbDrawText(pixels, pitch, fbW, fbH, textX, y + 4, displayText, 0x00E6E6E6, FontRole::Default);
+                        fbDrawText(pixels, pitch, fbW, fbH, textX, y + (rowH - SystemFont::MeasureHeight(FontRole::Default)) / 2, displayText, 0x00E6E6E6, FontRole::Default);
                         y += rowH;
                         row++;
                     }
@@ -3107,28 +3115,28 @@ namespace gxos {
                 int rcY = smTop + 6;
                 int computerTextX = rcX + 4;
                 fbDrawStartMenuIcon(pixels, pitch, fbW, fbH, rcX, rcY, rowH, "Computer Files", computerTextX);
-                fbDrawText(pixels, pitch, fbW, fbH, computerTextX, rcY + 4, "Computer Files", -1, 0x00C8C8C8, FontRole::Default);
-                rcY += rowH + 4;
+                fbDrawText(pixels, pitch, fbW, fbH, computerTextX, rcY + (rowH - SystemFont::MeasureHeight(FontRole::Default)) / 2, "Computer Files", -1, 0x00C8C8C8, FontRole::Default);
+                rcY += rowH + kStartMenuRowGap;
 
                 int consoleTextX = rcX + 4;
                 fbDrawStartMenuIcon(pixels, pitch, fbW, fbH, rcX, rcY, rowH, "Console", consoleTextX);
-                fbDrawText(pixels, pitch, fbW, fbH, consoleTextX, rcY + 4, "Console", -1, 0x00C8C8C8, FontRole::Default);
-                rcY += rowH + 4;
+                fbDrawText(pixels, pitch, fbW, fbH, consoleTextX, rcY + (rowH - SystemFont::MeasureHeight(FontRole::Default)) / 2, "Console", -1, 0x00C8C8C8, FontRole::Default);
+                rcY += rowH + kStartMenuRowGap;
 
                 int docsTextX = rcX + 4;
                 fbDrawStartMenuIcon(pixels, pitch, fbW, fbH, rcX, rcY, rowH, "Recent Docs", docsTextX);
-                fbDrawText(pixels, pitch, fbW, fbH, docsTextX, rcY + 4, "Recent Docs", -1, 0x00C8C8C8, FontRole::Default);
+                fbDrawText(pixels, pitch, fbW, fbH, docsTextX, rcY + (rowH - SystemFont::MeasureHeight(FontRole::Default)) / 2, "Recent Docs", -1, 0x00C8C8C8, FontRole::Default);
 
                 int btnY = smBottom - 30;
                 fbFillRect(pixels, pitch, fbW, fbH, smLeft + 6, btnY, leftColW - 12, 24, 0x003C3C4B);
                 fbDrawRect(pixels, pitch, fbW, fbH, smLeft + 6, btnY, leftColW - 12, 24, 0x00FFFFFF);
                 const char* btnText = g_startMenuAllProgs ? "< Back" : "All Programs >";
-                fbDrawText(pixels, pitch, fbW, fbH, smLeft + 14, btnY + 5, btnText, -1, 0x00E6E6E6, FontRole::Default);
+                fbDrawText(pixels, pitch, fbW, fbH, smLeft + 14, btnY + (24 - SystemFont::MeasureHeight(FontRole::Default)) / 2, btnText, -1, 0x00E6E6E6, FontRole::Default);
 
                 int shutdownBtnW = 80;
                 fbFillRect(pixels, pitch, fbW, fbH, smRight - shutdownBtnW - 30, btnY, shutdownBtnW, 24, 0x003C3C4B);
                 fbDrawRect(pixels, pitch, fbW, fbH, smRight - shutdownBtnW - 30, btnY, shutdownBtnW, 24, 0x00FFFFFF);
-                fbDrawText(pixels, pitch, fbW, fbH, smRight - shutdownBtnW - 20, btnY + 5, "Shutdown", -1, 0x00E6E6E6, FontRole::Default);
+                fbDrawText(pixels, pitch, fbW, fbH, smRight - shutdownBtnW - 20, btnY + (24 - SystemFont::MeasureHeight(FontRole::Default)) / 2, "Shutdown", -1, 0x00E6E6E6, FontRole::Default);
             }
             
             // Taskbar window buttons

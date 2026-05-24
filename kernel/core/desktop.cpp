@@ -23,6 +23,7 @@
 #include "include/kernel/kernel_ipc.h"
 #include "include/kernel/ps2keyboard.h"
 #include "include/kernel/serial_debug.h"
+#include "include/kernel/system_font.h"
 #include "include/kernel/vfs.h"
 #include "include/kernel/desktop_capabilities.h"
 #include "include/kernel/nic.h"
@@ -1211,7 +1212,13 @@ static int s_startMenuSelection = 0;    // Currently selected item (keyboard nav
 static int s_startMenuScroll = 0;       // Scroll offset for long lists
 static bool s_startMenuAllProgs = false; // Toggle between Recent/Pinned vs All Programs
 static const int kStartMenuMaxRows = 14; // Max visible rows before scrolling
-static const int kStartMenuRowH = 20;    // Height of each menu row
+static const int kStartMenuRowH = 22;    // Height of each menu row
+
+static uint32_t start_menu_text_y(uint32_t rowY, uint32_t rowH = kStartMenuRowH)
+{
+    int lineH = gxos::gui::SystemFont::MeasureHeight(gxos::gui::FontRole::Default);
+    return rowY + (rowH > (uint32_t)lineH ? (rowH - (uint32_t)lineH) / 2 : 0);
+}
 
 static bool draw_argb_icon_buffer(const uint32_t* pixels, uint32_t srcW, uint32_t srcH, uint32_t x, uint32_t y, uint32_t width, uint32_t height);
 
@@ -4383,13 +4390,13 @@ static void draw_start_menu()
         
         // Pin indicator (star) if pinned
         if (isPinned) {
-            draw_text(leftX + 20, itemY + 4, "*", rgb(255, 220, 80), 1);
+            draw_text(leftX + 20, start_menu_text_y(itemY), "*", rgb(255, 220, 80), 1);
         }
 
         // App name
         uint32_t textColor = (itemIndex == s_startMenuSelection || i == s_clickedMenuLeft || i == s_hoverMenuLeft)
             ? rgb(255, 255, 255) : rgb(210, 210, 225);
-        draw_text(iconX + iconSize + 6, itemY + 6, appName, textColor, 1);
+        draw_text(iconX + iconSize + 6, start_menu_text_y(itemY), appName, textColor, 1);
     }
     
     // Scroll indicators if needed
@@ -4437,7 +4444,7 @@ static void draw_start_menu()
         // Label
         uint32_t rTextColor = (i == s_clickedMenuRight || i == s_hoverMenuRight)
             ? rgb(255, 255, 255) : rgb(200, 200, 220);
-        draw_text(iconX + iconSize + 6, itemY + 6, s_startMenuRight[i].label, rTextColor, 1);
+        draw_text(iconX + iconSize + 6, start_menu_text_y(itemY), s_startMenuRight[i].label, rTextColor, 1);
     }
 
     // === Footer: "All Programs" toggle + Power buttons ===

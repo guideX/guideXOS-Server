@@ -2,6 +2,7 @@
 #include "logger.h"
 #include "compositor.h"
 #include "desktop_service.h"
+#include "kernel/core/include/kernel/system_font.h"
 #include <cstring>
 
 namespace gxos { namespace gui {
@@ -193,9 +194,7 @@ void RightClickMenu::Draw(HDC dc) {
     DeleteObject(borderPen);
 
     SetBkMode(dc, TRANSPARENT);
-    SetTextColor(dc, RGB(220, 220, 220));
-    HFONT font = (HFONT)GetStockObject(ANSI_VAR_FONT);
-    SelectObject(dc, font);
+    const int lineH = SystemFont::MeasureHeight(FontRole::Default);
 
     POINT cursor;
     GetCursorPos(&cursor);
@@ -214,12 +213,15 @@ void RightClickMenu::Draw(HDC dc) {
             DeleteObject(hov);
         }
 
-        TextOutA(dc, s_x + kPadding, iy + (kItemH / 2) - 7,
-                 s_items[i].label.c_str(), (int)s_items[i].label.size());
+        const int textY = iy + (kItemH > lineH ? (kItemH - lineH) / 2 : 0);
+        SystemFont::DrawText(dc, s_x + kPadding, textY,
+                             s_items[i].label.c_str(), (int)s_items[i].label.size(),
+                             RGB(220, 220, 220), FontRole::Default);
 
         // Submenu arrow indicator
         if (s_items[i].hasSubmenu) {
-            TextOutA(dc, s_x + kMenuW - 20, iy + (kItemH / 2) - 7, ">", 1);
+            SystemFont::DrawText(dc, s_x + kMenuW - 20, textY, ">", 1,
+                                 RGB(220, 220, 220), FontRole::Default);
         }
     }
 
@@ -254,8 +256,10 @@ void RightClickMenu::Draw(HDC dc) {
                 DeleteObject(shov);
             }
 
-            TextOutA(dc, subX + kPadding, sy + (kItemH / 2) - 7,
-                     sizeLabels[i], (int)strlen(sizeLabels[i]));
+            const int subTextY = sy + (kItemH > lineH ? (kItemH - lineH) / 2 : 0);
+            SystemFont::DrawText(dc, subX + kPadding, subTextY,
+                                 sizeLabels[i], (int)strlen(sizeLabels[i]),
+                                 RGB(220, 220, 220), FontRole::Default);
         }
     }
 }

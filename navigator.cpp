@@ -2,6 +2,7 @@
 
 #include "gui_protocol.h"
 #include "kernel/core/include/kernel/image_adapter.h"
+#include "kernel/core/include/kernel/system_font.h"
 #include "ipc_bus.h"
 #include "guide_web_http.h"
 #include "logger.h"
@@ -159,15 +160,26 @@ namespace {
 		publish(MsgType::MT_WidgetAdd, packWidgetAdd(windowId, 1, id, x, y, w, h, text));
 	}
 
+	int chromeLineHeight()
+	{
+		return SystemFont::MeasureHeight(FontRole::Default);
+	}
+
+	int centeredChromeTextY(int top, int height)
+	{
+		const int lineH = chromeLineHeight();
+		return top + (height > lineH ? (height - lineH) / 2 : 0);
+	}
+
 	// -----------------------------------------------------------------------
 	// Word-wrap helpers
 	//
-	// All text is rendered with a fixed-width bitmap font.
-	// kCharW is the approximate glyph advance in pixels.
-	// TODO: replace with proportional text-measurement API when available.
+	// Document text currently uses the compositor text primitive, whose default
+	// sans-serif fallback is SystemFont. Layout and hit testing still use an
+	// approximate fixed advance until Navigator grows document font metrics.
 	// -----------------------------------------------------------------------
 	constexpr int kCharW    = 8;   // approximate character cell width in pixels
-	constexpr int kLineH    = 16;  // single line height in pixels
+	constexpr int kLineH    = 18;  // matches current SystemFont default line box
 
 	// Wrap |text| into lines that fit within |maxChars| characters.
 	// Returns a vector of line strings (may be empty if text is empty).
@@ -1193,12 +1205,10 @@ void Navigator::renderToolbar()
 		drawRect(s_windowId, kAddressX,                 kAddressY,                 1, kAddressH, 80, 140, 220);
 		drawRect(s_windowId, kAddressX + kAddressW - 1, kAddressY,                 1, kAddressH, 80, 140, 220);
 
-		// Draw buffer text split at caret position so we can paint the caret in between.
-		// The UI bitmap font has a fixed cell width; kCharW is the best approximation.
-		// TODO: replace with proportional text-measurement API when available.
-		constexpr int kCharW     = 8;  // approximate glyph advance in pixels
-		constexpr int kTextX     = kAddressX + 10;
-		constexpr int kTextY     = kAddressY + 7;
+		// Caret placement is still approximate until Navigator has proportional
+		// document/chrome text measurement exposed through the GUI protocol.
+		constexpr int kTextX = kAddressX + 10;
+		const int kTextY = centeredChromeTextY(kAddressY, kAddressH);
 
 		// Clamp caret defensively (should already be in range, but guard rendering).
 		int caretPos = std::max(0, std::min(s_addressCaret,
@@ -1218,7 +1228,7 @@ void Navigator::renderToolbar()
 		// Normal: subtle top/bottom border
 		drawRect(s_windowId, kAddressX, kAddressY,                 kAddressW, 1, 110, 120, 142);
 		drawRect(s_windowId, kAddressX, kAddressY + kAddressH - 1, kAddressW, 1,  70,  78,  96);
-		drawTextAt(s_windowId, kAddressX + 10, kAddressY + 7, s_currentDoc.url);
+		drawTextAt(s_windowId, kAddressX + 10, centeredChromeTextY(kAddressY, kAddressH), s_currentDoc.url);
 	}
 }
 
@@ -1427,9 +1437,9 @@ void Navigator::renderDocument()
 				text = text.substr(text.size() - static_cast<size_t>(maxChars));
 			}
 			if (placeholder) {
-				drawTextAtColored(s_windowId, inputX + 8, inputY + 7, text, 128, 136, 150);
+				drawTextAtColored(s_windowId, inputX + 8, centeredChromeTextY(inputY, kFormControlH), text, 128, 136, 150);
 			} else {
-				drawTextAtColored(s_windowId, inputX + 8, inputY + 7, text, 35, 45, 60);
+				drawTextAtColored(s_windowId, inputX + 8, centeredChromeTextY(inputY, kFormControlH), text, 35, 45, 60);
 			}
 			if (focused) {
 				int caretPos = std::max(0, std::min(s_inputCaret, static_cast<int>(block.inputValue.size())));
@@ -1451,7 +1461,7 @@ void Navigator::renderDocument()
 			std::string label = block.submitLabel.empty() ? "Submit" : block.submitLabel;
 			int labelMax = (kFormSubmitW - 14) / kCharW;
 			if (static_cast<int>(label.size()) > labelMax) label = label.substr(0, static_cast<size_t>(labelMax));
-			drawTextAtColored(s_windowId, buttonX + 10, buttonY + 7, label, disabled ? 76 : 255, disabled ? 80 : 255, disabled ? 88 : 255);
+			drawTextAtColored(s_windowId, buttonX + 10, centeredChromeTextY(buttonY, kFormControlH), label, disabled ? 76 : 255, disabled ? 80 : 255, disabled ? 88 : 255);
 			break;
 		}
 		}
@@ -1479,15 +1489,16 @@ void Navigator::renderStatusBar()
 		drawRect(s_windowId, 8, kWindowH - kStatusBarH + 4, 420, kStatusBarH - 8, 18, 22, 30);
 		drawRect(s_windowId, 8, kWindowH - kStatusBarH + 4, 420, 1, 80, 140, 220);
 		drawRect(s_windowId, 8, kWindowH - kStatusBarH + kStatusBarH - 5, 420, 1, 80, 140, 220);
+		const int findTextY = centeredChromeTextY(kWindowH - kStatusBarH + 4, kStatusBarH - 8);
 		std::string shown = s_findBuffer;
 		const int maxChars = 28;
 		if (static_cast<int>(shown.size()) > maxChars) {
 			shown = shown.substr(shown.size() - static_cast<size_t>(maxChars));
 		}
-		drawTextAt(s_windowId, 16, kWindowH - kStatusBarH + 7, "Find: " + shown);
+		drawTextAt(s_windowId, 16, findTextY, "Find: " + shown);
 		int caretPos = std::min(s_findCaret, maxChars);
-		drawRect(s_windowId, 64 + caretPos * kCharW, kWindowH - kStatusBarH + 7, 1, 14, 200, 220, 255);
-		drawTextAt(s_windowId, 440, kWindowH - kStatusBarH + 6, findMatchStatusText() + "   Enter/Down: next   Up: prev   Esc: close");
+		drawRect(s_windowId, 64 + caretPos * kCharW, kWindowH - kStatusBarH + 6, 1, kStatusBarH - 12, 200, 220, 255);
+		drawTextAt(s_windowId, 440, centeredChromeTextY(kWindowH - kStatusBarH, kStatusBarH), findMatchStatusText() + "   Enter/Down: next   Up: prev   Esc: close");
 		return;
 	}
 
@@ -1497,7 +1508,7 @@ void Navigator::renderStatusBar()
 		const std::string text = selectedText();
 		shown += (shown.empty() ? "" : "   ") + std::string("Selection: ") + std::to_string(text.size()) + " chars";
 	}
-	drawTextAt(s_windowId, 12, kWindowH - kStatusBarH + 6, shown);
+	drawTextAt(s_windowId, 12, centeredChromeTextY(kWindowH - kStatusBarH, kStatusBarH), shown);
 }
 
 void Navigator::updateStatus(const std::string& status)
