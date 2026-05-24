@@ -1,4 +1,5 @@
 #pragma once
+#include "app_launch_target.h"
 #include "app_manifest.h"
 
 #include <string>
@@ -68,6 +69,8 @@ namespace gxos { namespace gui {
         static std::string GetRegisteredAppsDiagnostic();
         static std::string AppModelSummaryDiagnostic();
         static std::string BuiltInAppMetadataCoverageDiagnostic();
+        static apps::LaunchTarget ResolveLaunchTarget(const std::string& label);
+        static std::string ResolveLaunchTargetDiagnostic(const std::string& label);
         static std::string NativeAppCapabilitiesDiagnostic();
         static std::string InspectNativeAppPipeline(const std::string& appIdOrDisplayName);
         static std::string NativeAppPipelineSmokeTest(const std::string& appIdOrDisplayName);

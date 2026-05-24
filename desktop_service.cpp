@@ -618,6 +618,59 @@ namespace gxos {
             return name;
         }
 
+        static apps::LaunchTargetType launchTargetTypeForAppKind(apps::AppKind kind) {
+            switch (kind) {
+            case apps::AppKind::BuiltIn: return apps::LaunchTargetType::BuiltInApp;
+            case apps::AppKind::NativeElf: return apps::LaunchTargetType::NativeElfApp;
+            case apps::AppKind::GXAppPackage: return apps::LaunchTargetType::GXAppPackage;
+            case apps::AppKind::Service: return apps::LaunchTargetType::Service;
+            case apps::AppKind::HypervisorGuest: return apps::LaunchTargetType::HypervisorGuest;
+            case apps::AppKind::Script: return apps::LaunchTargetType::Script;
+            case apps::AppKind::Unknown:
+            default: return apps::LaunchTargetType::ManifestApp;
+            }
+        }
+
+        static bool isPathLikeLaunchLabel(const std::string& label) {
+            if (label.find('/') != std::string::npos || label.find('\\') != std::string::npos) return true;
+            return label.size() > 2 && label[1] == ':';
+        }
+
+        static void fillLaunchTargetFromMetadata(apps::LaunchTarget& target, const apps::BuiltInAppMetadata& metadata) {
+            target.type = apps::LaunchTargetType::BuiltInApp;
+            target.appId = metadata.appId ? metadata.appId : "";
+            target.displayName = metadata.displayName ? metadata.displayName : "";
+            target.dispatchLaunchName = metadata.launchName ? metadata.launchName : "";
+            target.hostedAvailable = apps::IsBuiltInAppAvailableInHosted(metadata);
+            target.bareMetalAvailable = apps::IsBuiltInAppAvailableInBareMetal(metadata);
+        }
+
+        static void fillLaunchTargetFromRegisteredApp(apps::LaunchTarget& target, const RegisteredDesktopApp& app) {
+            target.type = launchTargetTypeForAppKind(app.kind);
+            target.appId = app.id;
+            target.displayName = app.displayName;
+            target.dispatchLaunchName = app.launchName;
+            target.hostedAvailable = true;
+            if (const apps::BuiltInAppMetadata* metadata = findMetadataForRegisteredDesktopApp(app)) {
+                target.bareMetalAvailable = apps::IsBuiltInAppAvailableInBareMetal(*metadata);
+            }
+        }
+
+        static void fillLaunchTargetFromRegistryApp(apps::LaunchTarget& target, const apps::RegisteredApp& app) {
+            target.type = launchTargetTypeForAppKind(app.manifest.kind);
+            target.appId = app.manifest.id;
+            target.displayName = app.manifest.displayName;
+            target.dispatchLaunchName = launchNameForApp(app);
+            target.hostedAvailable = true;
+            if (const apps::BuiltInAppMetadata* metadata = apps::FindBuiltInAppMetadataByAppId(app.manifest.id.c_str())) {
+                target.bareMetalAvailable = apps::IsBuiltInAppAvailableInBareMetal(*metadata);
+            }
+        }
+
+        static const char* diagnosticBool(bool value) {
+            return value ? "true" : "false";
+        }
+
         // Static member initialization
         std::vector<PinnedItem> DesktopService::s_pinned;
         std::vector<RecentProgramEntry> DesktopService::s_recentPrograms;
@@ -861,6 +914,110 @@ namespace gxos {
                 << " count=" << s_lastManifestScanResult.invalidApps.size() << "\n";
             oss << "overall: " << statusText(overallOk) << "\n";
             oss << "detailCommands: desktop.appmodel.coverage, desktop.apps.verbose\n";
+            return oss.str();
+        }
+
+        apps::LaunchTarget DesktopService::ResolveLaunchTarget(const std::string& label) {
+            ensureDefaultAppsRegistered();
+
+            apps::LaunchTarget target;
+            target.originalLabel = label;
+
+            if (label.empty()) {
+                target.type = apps::LaunchTargetType::Unknown;
+                target.diagnosticStatus = "unresolved";
+                target.diagnosticReason = "No launch label supplied";
+                return target;
+            }
+
+            // Diagnostic-only legacy alias: keep reporting the old UI label without
+            // changing the current string dispatch path.
+            if (label == "AppModel") {
+                if (const apps::BuiltInAppMetadata* metadata = apps::FindBuiltInAppMetadataByAppId("gxos.builtin.appmodeldemo")) {
+                    fillLaunchTargetFromMetadata(target, *metadata);
+                }
+                target.type = apps::LaunchTargetType::LegacyAlias;
+                target.legacyAlias = "AppModel";
+                if (target.displayName.empty()) target.displayName = "App Model Demo";
+                if (target.dispatchLaunchName.empty()) target.dispatchLaunchName = "App Model Demo";
+                target.diagnosticStatus = "resolved-alias";
+                target.diagnosticReason = "Legacy hosted UI alias for App Model Demo; launch behavior is unchanged";
+                return target;
+            }
+
+            // Diagnostic-only shell/system label. ComputerFiles is a desktop shell
+            // affordance today, not a built-in app metadata identity.
+            if (label == "ComputerFiles") {
+                target.type = apps::LaunchTargetType::ShellAction;
+                target.displayName = "Computer Files";
+                target.dispatchLaunchName = canonicalAppName(label);
+                target.shellAction = "ComputerFiles";
+                target.hostedAvailable = true;
+                target.bareMetalAvailable = false;
+                target.diagnosticStatus = "resolved-shell";
+                target.diagnosticReason = "Shell/system label currently canonicalizes to FileExplorer in hosted dispatch; not a built-in app identity";
+                return target;
+            }
+
+            if (isPathLikeLaunchLabel(label)) {
+                target.type = apps::LaunchTargetType::FileOpen;
+                target.pathParameter = label;
+                target.hostedAvailable = true;
+                target.bareMetalAvailable = true;
+                target.diagnosticStatus = "resolved-file-open";
+                target.diagnosticReason = "Path-like launch label; current file-open handlers remain separate from app launch dispatch";
+                return target;
+            }
+
+            if (const apps::BuiltInAppMetadata* metadata = apps::FindBuiltInAppMetadataByIdentity(label.c_str())) {
+                fillLaunchTargetFromMetadata(target, *metadata);
+                target.diagnosticStatus = "resolved";
+                target.diagnosticReason = "Matched shared built-in app metadata by id, display name, launch name, kernel name, or legacy kernel alias";
+                return target;
+            }
+
+            const RegisteredDesktopApp* desktopApp = findRegisteredApp(label);
+            const std::string canonicalLabel = canonicalAppName(label);
+            if (!desktopApp && canonicalLabel != label) desktopApp = findRegisteredApp(canonicalLabel);
+            if (desktopApp) {
+                fillLaunchTargetFromRegisteredApp(target, *desktopApp);
+                target.diagnosticStatus = "resolved";
+                target.diagnosticReason = "Matched hosted registered desktop app by id, display name, or dispatch launch name";
+                return target;
+            }
+
+            const apps::RegisteredApp* registryApp = s_appRegistry.FindById(label);
+            if (!registryApp) registryApp = s_appRegistry.FindByDisplayName(label);
+            if (registryApp) {
+                fillLaunchTargetFromRegistryApp(target, *registryApp);
+                target.diagnosticStatus = "resolved";
+                target.diagnosticReason = "Matched manifest app registry by id or display name";
+                return target;
+            }
+
+            target.type = apps::LaunchTargetType::Unknown;
+            target.diagnosticStatus = "unresolved";
+            target.diagnosticReason = "No built-in metadata, registered app, manifest app, legacy alias, shell action, or path-like target matched";
+            return target;
+        }
+
+        std::string DesktopService::ResolveLaunchTargetDiagnostic(const std::string& label) {
+            apps::LaunchTarget target = ResolveLaunchTarget(label);
+
+            std::ostringstream oss;
+            oss << "[LaunchTarget]\n";
+            oss << "originalLabel: " << target.originalLabel << "\n";
+            oss << "resolvedType: " << apps::ToString(target.type) << "\n";
+            oss << "appId: " << target.appId << "\n";
+            oss << "displayName: " << target.displayName << "\n";
+            oss << "dispatchLaunchName: " << target.dispatchLaunchName << "\n";
+            oss << "legacyAlias: " << target.legacyAlias << "\n";
+            oss << "shellAction: " << target.shellAction << "\n";
+            oss << "pathParameter: " << target.pathParameter << "\n";
+            oss << "hostedAvailable: " << diagnosticBool(target.hostedAvailable) << "\n";
+            oss << "bareMetalAvailable: " << diagnosticBool(target.bareMetalAvailable) << "\n";
+            oss << "status: " << target.diagnosticStatus << "\n";
+            oss << "reason: " << target.diagnosticReason << "\n";
             return oss.str();
         }
 
