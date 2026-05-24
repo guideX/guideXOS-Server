@@ -895,6 +895,19 @@ namespace gxos {
             }
         }
 
+        static std::string appModelSummaryLineValue(const std::string& summaryText, const std::string& key) {
+            std::istringstream summary(summaryText);
+            std::string line;
+            const std::string prefix = key + ":";
+            while (std::getline(summary, line)) {
+                if (line.rfind(prefix, 0) != 0) continue;
+                std::string value = line.substr(prefix.size());
+                while (!value.empty() && value.front() == ' ') value.erase(value.begin());
+                return value;
+            }
+            return "not reported";
+        }
+
         static void populateAppModelDemoViewerWindow(WinInfo& wi, const std::vector<RegisteredDesktopApp>& demoApps, const std::string& summaryText, const std::string& status) {
             wi.w = 920;
             wi.h = 620;
@@ -916,6 +929,7 @@ namespace gxos {
 #endif
             wi.texts.push_back(std::string("  Native execution: ") + (gxos::apps::NativeElfExecutor::ExperimentalExecutionEnabled() ? "enabled" : "disabled"));
             wi.texts.push_back("  Discovered app-model demo apps: " + std::to_string(demoApps.size()));
+            wi.texts.push_back("  Launch Target Comparison: " + appModelSummaryLineValue(summaryText, "launchTargetComparison"));
             wi.texts.push_back("");
             wi.texts.push_back("App Model Summary:");
             appendAppModelSummaryLines(wi.texts, summaryText);
@@ -1004,6 +1018,29 @@ namespace gxos {
             return false;
         }
 
+        static void logLaunchTargetShadowDiagnostic(const std::string& source, const std::string& uiLabel, const std::string& shortcutTarget, const std::string& dispatchName) {
+            const apps::LaunchTarget target = DesktopService::ResolveLaunchTarget(dispatchName);
+            DesktopService::RecordLaunchTargetShadowObservation(source, target, dispatchName);
+            std::ostringstream oss;
+            oss << "[LaunchTargetShadow] source=" << source
+                << " uiLabel=" << uiLabel;
+            if (!shortcutTarget.empty()) oss << " shortcutTarget=" << shortcutTarget;
+            oss << " actualDispatch=" << dispatchName
+                << " resolvedType=" << apps::ToString(target.type)
+                << " appId=" << target.appId
+                << " resolvedDispatch=" << target.dispatchLaunchName
+                << " status=" << target.diagnosticStatus
+                << " reason=" << target.diagnosticReason;
+            Logger::write(LogLevel::Info, oss.str());
+
+            if (!target.dispatchLaunchName.empty() && target.dispatchLaunchName != dispatchName) {
+                Logger::write(LogLevel::Info,
+                    "[LaunchTargetShadow] nonFatalAliasOrFallback source=" + source +
+                    " actualDispatch=" + dispatchName +
+                    " resolvedDispatch=" + target.dispatchLaunchName);
+            }
+        }
+
         void Compositor::launchAction(const std::string& act) {
             uint64_t now = nowMs();
             if (!act.empty() && act == s_lastLaunchAction && (now - s_lastLaunchTicks) < 350) {
@@ -1028,6 +1065,7 @@ namespace gxos {
 
         void Compositor::openStartMenuApp(const std::string& appName) {
             Logger::write(LogLevel::Info, "Start Menu context Open selected: " + appName);
+            logLaunchTargetShadowDiagnostic("StartMenu", appName, "", appName);
             launchAction(appName);
             g_startMenuVisible = false;
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)
@@ -1271,6 +1309,7 @@ namespace gxos {
                     err = "Shortcut target not found";
                 } else {
                     Logger::write(LogLevel::Info, "Desktop shortcut launched: " + desktopLayoutKey(item) + " -> " + app->displayName);
+                    logLaunchTargetShadowDiagnostic("DesktopShortcut", item.label, item.targetAppId, app->displayName);
                     launchAction(app->displayName);
                     return;
                 }
@@ -1940,6 +1979,7 @@ namespace gxos {
                     // Computer Files
                     RECT rcComputer{ rcX, rcY, g_startMenuRect.right - 6, rcY + rowH };
                     if (mx >= rcComputer.left && mx <= rcComputer.right && my >= rcComputer.top && my <= rcComputer.bottom) {
+                        logLaunchTargetShadowDiagnostic("StartMenu", "ComputerFiles", "", "ComputerFiles");
                         launchAction("ComputerFiles");
                         g_startMenuVisible = false;
                         requestRepaint( );
@@ -1950,6 +1990,7 @@ namespace gxos {
                     // Console
                     RECT rcConsole{ rcX, rcY, g_startMenuRect.right - 6, rcY + rowH };
                     if (mx >= rcConsole.left && mx <= rcConsole.right && my >= rcConsole.top && my <= rcConsole.bottom) {
+                        logLaunchTargetShadowDiagnostic("StartMenu", "Console", "", "Console");
                         launchAction("Console");
                         g_startMenuVisible = false;
                         requestRepaint( );
@@ -1977,6 +2018,7 @@ namespace gxos {
                             if (g_lastItemIndex == idx && (now - g_lastItemClickTicks) < 450) {
                                 // Double-click: launch
                                 std::string action = g_startMenuAllProgs ? g_startMenuAllProgsSorted[idx] : g_startMenuPinnedRecent[idx];
+                                logLaunchTargetShadowDiagnostic("StartMenu", action, "", action);
                                 launchAction(action);
                                 g_startMenuVisible = false;
                             } else {
@@ -2221,6 +2263,7 @@ namespace gxos {
                     if (key == VK_RETURN) {
                         if (g_startMenuSel >= 0 && g_startMenuSel < maxItems) {
                             std::string action = g_startMenuAllProgs ? g_startMenuAllProgsSorted[g_startMenuSel] : g_startMenuPinnedRecent[g_startMenuSel];
+                            logLaunchTargetShadowDiagnostic("StartMenu", action, "", action);
                             launchAction(action);
                             g_startMenuVisible = false;
                             requestRepaint( );

@@ -42,6 +42,21 @@ namespace gxos { namespace gui {
         std::string source;
     };
 
+    struct LaunchTargetShadowCounters {
+        uint64_t totalObservations = 0;
+        uint64_t unresolvedObservations = 0;
+        uint64_t aliasFallbackObservations = 0;
+        uint64_t startMenuObservations = 0;
+        uint64_t startMenuUnresolved = 0;
+        uint64_t startMenuAliasFallback = 0;
+        uint64_t desktopShortcutObservations = 0;
+        uint64_t desktopShortcutUnresolved = 0;
+        uint64_t desktopShortcutAliasFallback = 0;
+        uint64_t otherObservations = 0;
+        uint64_t otherUnresolved = 0;
+        uint64_t otherAliasFallback = 0;
+    };
+
     class DesktopService {
     public:
         // Pinned management
@@ -72,6 +87,9 @@ namespace gxos { namespace gui {
         static apps::LaunchTarget ResolveLaunchTarget(const std::string& label);
         static std::string ResolveLaunchTargetDiagnostic(const std::string& label);
         static std::string LaunchTargetComparisonDiagnostic();
+        static void RecordLaunchTargetShadowObservation(const std::string& source, const apps::LaunchTarget& target, const std::string& actualDispatch);
+        static LaunchTargetShadowCounters GetLaunchTargetShadowCounters();
+        static std::string LaunchTargetShadowDiagnostic();
         static std::string NativeAppCapabilitiesDiagnostic();
         static std::string InspectNativeAppPipeline(const std::string& appIdOrDisplayName);
         static std::string NativeAppPipelineSmokeTest(const std::string& appIdOrDisplayName);

@@ -36,6 +36,7 @@
 #include <fstream>
 #include <iomanip>
 #include <map>
+#include <mutex>
 #include <set>
 #include <sstream>
 #include <chrono>
@@ -54,6 +55,8 @@ namespace gxos {
         static size_t s_appRegistryInitializeCount = 0;
         static apps::AppScanResult s_lastManifestScanResult;
         static apps::AppScanResult s_lastBuiltInRegisterResult;
+        static std::mutex s_launchTargetShadowCountersMutex;
+        static LaunchTargetShadowCounters s_launchTargetShadowCounters;
 
         static void logScanIssues(const char* label, const std::vector<apps::AppScanIssue>& issues) {
             for (const auto& issue : issues) {
@@ -671,6 +674,22 @@ namespace gxos {
             return value ? "true" : "false";
         }
 
+        static bool launchTargetShadowIsUnresolved(const apps::LaunchTarget& target) {
+            return target.type == apps::LaunchTargetType::Unknown ||
+                target.diagnosticStatus.rfind("unresolved", 0) == 0;
+        }
+
+        static bool launchTargetShadowIsAliasFallback(const apps::LaunchTarget& target, const std::string& actualDispatch) {
+            return !target.dispatchLaunchName.empty() && target.dispatchLaunchName != actualDispatch;
+        }
+
+        static void appendLaunchTargetShadowSourceLine(std::ostringstream& oss, const char* source, uint64_t observations, uint64_t unresolved, uint64_t aliasFallback) {
+            oss << "  source=" << source
+                << " observations=" << observations
+                << " unresolved=" << unresolved
+                << " aliasFallback=" << aliasFallback << "\n";
+        }
+
         static const char* const kLaunchTargetComparisonLabels[] = {
             "Notepad",
             "gxos.builtin.notepad",
@@ -1057,6 +1076,7 @@ namespace gxos {
             const int metadataWithoutHostedRegistration = metadataWithoutHostedRegistrationCount();
             const int metadataWithoutBareMetalRegistration = metadataWithoutBareMetalRegistrationCount();
             const LaunchTargetComparisonCounts launchTargetCounts = launchTargetComparisonCounts();
+            const LaunchTargetShadowCounters shadowCounters = GetLaunchTargetShadowCounters();
             const bool duplicateOk = duplicateCount == 0;
             const bool namespaceOk = namespaceWarningCount == 0;
             const bool hostedCoverageOk = hostedRegisteredMissingMetadata == 0 && metadataWithoutHostedRegistration == 0;
@@ -1093,6 +1113,12 @@ namespace gxos {
                 << " acceptedAliases=" << launchTargetCounts.acceptedAliasMatches
                 << " intentionalDifferences=" << launchTargetCounts.intentionalDifferences
                 << " unexpectedDrift=" << launchTargetCounts.unexpectedDrift << "\n";
+            oss << "launchTargetShadow: observations=" << shadowCounters.totalObservations
+                << " unresolved=" << shadowCounters.unresolvedObservations
+                << " aliasFallback=" << shadowCounters.aliasFallbackObservations
+                << " startMenu=" << shadowCounters.startMenuObservations
+                << " desktopShortcut=" << shadowCounters.desktopShortcutObservations
+                << " nonFatal=true\n";
             oss << "overall: " << statusText(overallOk) << "\n";
             oss << "detailCommands: desktop.appmodel.coverage, desktop.apps.verbose, desktop.launch.compare\n";
             return oss.str();
@@ -1245,6 +1271,52 @@ namespace gxos {
             return oss.str();
         }
 
+        void DesktopService::RecordLaunchTargetShadowObservation(const std::string& source, const apps::LaunchTarget& target, const std::string& actualDispatch) {
+            const bool unresolved = launchTargetShadowIsUnresolved(target);
+            const bool aliasFallback = launchTargetShadowIsAliasFallback(target, actualDispatch);
+
+            std::lock_guard<std::mutex> lock(s_launchTargetShadowCountersMutex);
+            ++s_launchTargetShadowCounters.totalObservations;
+            if (unresolved) ++s_launchTargetShadowCounters.unresolvedObservations;
+            if (aliasFallback) ++s_launchTargetShadowCounters.aliasFallbackObservations;
+
+            if (source == "StartMenu") {
+                ++s_launchTargetShadowCounters.startMenuObservations;
+                if (unresolved) ++s_launchTargetShadowCounters.startMenuUnresolved;
+                if (aliasFallback) ++s_launchTargetShadowCounters.startMenuAliasFallback;
+            } else if (source == "DesktopShortcut") {
+                ++s_launchTargetShadowCounters.desktopShortcutObservations;
+                if (unresolved) ++s_launchTargetShadowCounters.desktopShortcutUnresolved;
+                if (aliasFallback) ++s_launchTargetShadowCounters.desktopShortcutAliasFallback;
+            } else {
+                ++s_launchTargetShadowCounters.otherObservations;
+                if (unresolved) ++s_launchTargetShadowCounters.otherUnresolved;
+                if (aliasFallback) ++s_launchTargetShadowCounters.otherAliasFallback;
+            }
+        }
+
+        LaunchTargetShadowCounters DesktopService::GetLaunchTargetShadowCounters() {
+            std::lock_guard<std::mutex> lock(s_launchTargetShadowCountersMutex);
+            return s_launchTargetShadowCounters;
+        }
+
+        std::string DesktopService::LaunchTargetShadowDiagnostic() {
+            const LaunchTargetShadowCounters counters = GetLaunchTargetShadowCounters();
+
+            std::ostringstream oss;
+            oss << "[LaunchTargetShadow]\n";
+            oss << "observations: " << counters.totalObservations << "\n";
+            oss << "unresolved: " << counters.unresolvedObservations << "\n";
+            oss << "aliasFallback: " << counters.aliasFallbackObservations << "\n";
+            oss << "bySource:\n";
+            appendLaunchTargetShadowSourceLine(oss, "StartMenu", counters.startMenuObservations, counters.startMenuUnresolved, counters.startMenuAliasFallback);
+            appendLaunchTargetShadowSourceLine(oss, "DesktopShortcut", counters.desktopShortcutObservations, counters.desktopShortcutUnresolved, counters.desktopShortcutAliasFallback);
+            appendLaunchTargetShadowSourceLine(oss, "Other", counters.otherObservations, counters.otherUnresolved, counters.otherAliasFallback);
+            oss << "reset: not available\n";
+            oss << "nonFatal: true\n";
+            return oss.str();
+        }
+
         std::string DesktopService::BuiltInAppMetadataCoverageDiagnostic() {
             ensureDefaultAppsRegistered();
 
@@ -1355,6 +1427,7 @@ namespace gxos {
 
             appendAppIdNamespaceWarnings(oss);
             appendUiLaunchAliasMetadataDiagnostic(oss);
+            oss << "\n" << LaunchTargetShadowDiagnostic();
 
             return oss.str();
         }
