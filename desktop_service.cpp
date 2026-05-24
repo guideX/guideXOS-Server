@@ -1,6 +1,8 @@
 #include "desktop_service.h"
 #include "app_launch_resolver.h"
+#include "app_manifest_loader.h"
 #include "app_registry.h"
+#include "built_in_app_metadata.h"
 #include "desktop_config.h"
 #include "elf_validator.h"
 #include "fs.h"
@@ -33,6 +35,8 @@
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
+#include <map>
+#include <set>
 #include <sstream>
 #include <chrono>
 #include <thread>
@@ -91,6 +95,111 @@ namespace gxos {
             }
 
             return app.kind == apps::AppKind::NativeElf || app.kind == apps::AppKind::GXAppPackage;
+        }
+
+        static bool registeredDesktopAppMatchesMetadata(const RegisteredDesktopApp& app, const apps::BuiltInAppMetadata& metadata) {
+            return (metadata.appId && app.id == metadata.appId) ||
+                (metadata.displayName && app.displayName == metadata.displayName) ||
+                (metadata.launchName && app.launchName == metadata.launchName);
+        }
+
+        static const apps::BuiltInAppMetadata* findMetadataForRegisteredDesktopApp(const RegisteredDesktopApp& app) {
+            const apps::BuiltInAppMetadata* metadata = apps::FindBuiltInAppMetadataByAppId(app.id.c_str());
+            if (metadata) return metadata;
+            metadata = apps::FindBuiltInAppMetadataByDisplayName(app.displayName.c_str());
+            if (metadata) return metadata;
+            return apps::FindBuiltInAppMetadataByLaunchName(app.launchName.c_str());
+        }
+
+        static bool currentHostedRegistrationExistsForMetadata(const apps::BuiltInAppMetadata& metadata) {
+            for (const auto& app : DesktopService::GetRegisteredApps()) {
+                if (app.kind == apps::AppKind::BuiltIn && registeredDesktopAppMatchesMetadata(app, metadata)) return true;
+            }
+            return false;
+        }
+
+        static bool bareMetalRegistrationNameMatchesMetadata(const char* name, const apps::BuiltInAppMetadata& metadata) {
+            return (metadata.kernelAppName && apps::detail::builtInTextEquals(name, metadata.kernelAppName)) ||
+                (metadata.kernelLegacyAlias && apps::detail::builtInTextEquals(name, metadata.kernelLegacyAlias));
+        }
+
+        static const std::vector<const char*>& currentBareMetalKernelRegistrationNames() {
+            // Diagnostic mirror of kernel/core/kernel_apps.cpp registerKernelApps().
+            // It reports coverage only; it is not a launch source or policy table.
+            static const std::vector<const char*> names = {
+                "Notepad",
+                "Calculator",
+                "DisplayOptions",
+                "TaskManager",
+                "FileExplorer",
+                "Files",
+                "guideXOS Navigator",
+                "Trash",
+                "DiskManager"
+            };
+            return names;
+        }
+
+        static bool currentBareMetalRegistrationExistsForMetadata(const apps::BuiltInAppMetadata& metadata) {
+            for (const char* name : currentBareMetalKernelRegistrationNames()) {
+                if (bareMetalRegistrationNameMatchesMetadata(name, metadata)) return true;
+            }
+            return false;
+        }
+
+        struct ManifestOrigin {
+            std::string source;
+            std::filesystem::path manifestPath;
+            std::string displayName;
+            apps::AppKind kind = apps::AppKind::Unknown;
+        };
+
+        static std::map<std::string, std::vector<ManifestOrigin>> collectManifestOriginsById() {
+            std::map<std::string, std::vector<ManifestOrigin>> origins;
+            for (const apps::AppRegistrySource& source : apps::AppRegistry::DefaultSources()) {
+                if (!std::filesystem::exists(source.path)) continue;
+
+                std::error_code error;
+                std::filesystem::recursive_directory_iterator it(source.path, std::filesystem::directory_options::skip_permission_denied, error);
+                std::filesystem::recursive_directory_iterator end;
+                if (error) continue;
+
+                for (; it != end; it.increment(error)) {
+                    if (error) {
+                        error.clear();
+                        continue;
+                    }
+
+                    const std::filesystem::directory_entry& entry = *it;
+                    if (!entry.is_regular_file(error) || error) {
+                        error.clear();
+                        continue;
+                    }
+
+                    if (entry.path().filename() != "app.json") continue;
+                    apps::AppManifestLoadResult loaded = apps::AppManifestLoader::LoadFromFile(entry.path());
+                    if (!loaded.valid || loaded.manifest.id.empty()) continue;
+
+                    ManifestOrigin origin;
+                    origin.source = apps::AppRegistry::ToString(source.kind);
+                    origin.manifestPath = entry.path();
+                    origin.displayName = loaded.manifest.displayName;
+                    origin.kind = loaded.manifest.kind;
+                    origins[loaded.manifest.id].push_back(origin);
+                }
+            }
+            return origins;
+        }
+
+        static std::set<std::string> duplicateIdsFromScanIssues(const apps::AppScanResult& a, const apps::AppScanResult& b) {
+            std::set<std::string> ids;
+            for (const auto& issue : a.duplicateApps) {
+                if (!issue.appId.empty()) ids.insert(issue.appId);
+            }
+            for (const auto& issue : b.duplicateApps) {
+                if (!issue.appId.empty()) ids.insert(issue.appId);
+            }
+            return ids;
         }
 
         static void ensureDefaultAppModelPins() {
@@ -405,6 +514,7 @@ namespace gxos {
                 oss << "\n";
             }
             oss << "launchPolicy: BuiltIn uses existing hardcoded launch branch; NativeElf/GXAppPackage return: manifest found but execution is not implemented yet\n";
+            oss << "\n" << BuiltInAppMetadataCoverageDiagnostic();
             return oss.str();
         }
 
@@ -420,6 +530,116 @@ namespace gxos {
                     << " launch=" << app.launchName
                     << " source=" << app.source << "\n";
             }
+            return oss.str();
+        }
+
+        std::string DesktopService::BuiltInAppMetadataCoverageDiagnostic() {
+            ensureDefaultAppsRegistered();
+
+            int hostedAvailable = 0;
+            int bareMetalAvailable = 0;
+            for (size_t i = 0; i < apps::kBuiltInAppMetadataCount; ++i) {
+                if (apps::IsBuiltInAppAvailableInHosted(apps::kBuiltInAppMetadata[i])) ++hostedAvailable;
+                if (apps::IsBuiltInAppAvailableInBareMetal(apps::kBuiltInAppMetadata[i])) ++bareMetalAvailable;
+            }
+
+            std::ostringstream oss;
+            oss << "[BuiltInMetadataCoverage]\n";
+            oss << "metadataEntries: " << apps::kBuiltInAppMetadataCount << "\n";
+            oss << "hostedAvailableEntries: " << hostedAvailable << "\n";
+            oss << "bareMetalAvailableEntries: " << bareMetalAvailable << "\n";
+
+            oss << "metadata:\n";
+            for (size_t i = 0; i < apps::kBuiltInAppMetadataCount; ++i) {
+                const apps::BuiltInAppMetadata& metadata = apps::kBuiltInAppMetadata[i];
+                oss << "  id=" << (metadata.appId ? metadata.appId : "")
+                    << " displayName=" << (metadata.displayName ? metadata.displayName : "")
+                    << " launchName=" << (metadata.launchName ? metadata.launchName : "")
+                    << " kernelAppName=" << (metadata.kernelAppName ? metadata.kernelAppName : "")
+                    << " kernelAlias=" << (metadata.kernelLegacyAlias ? metadata.kernelLegacyAlias : "")
+                    << " hosted=" << (apps::IsBuiltInAppAvailableInHosted(metadata) ? "true" : "false")
+                    << " bareMetal=" << (apps::IsBuiltInAppAvailableInBareMetal(metadata) ? "true" : "false")
+                    << "\n";
+            }
+
+            int hostedRegisteredMissingMetadata = 0;
+            oss << "hostedRegisteredBuiltInsMissingMetadata:\n";
+            for (const auto& app : s_apps) {
+                if (app.kind != apps::AppKind::BuiltIn) continue;
+                if (findMetadataForRegisteredDesktopApp(app)) continue;
+                ++hostedRegisteredMissingMetadata;
+                oss << "  id=" << app.id
+                    << " displayName=" << app.displayName
+                    << " launchName=" << app.launchName
+                    << " source=" << app.source << "\n";
+            }
+            if (hostedRegisteredMissingMetadata == 0) oss << "  none\n";
+
+            int bareMetalRegisteredMissingMetadata = 0;
+            oss << "bareMetalRegisteredKernelAppsMissingMetadata:\n";
+            for (const char* name : currentBareMetalKernelRegistrationNames()) {
+                if (apps::FindBuiltInAppMetadataByIdentity(name)) continue;
+                ++bareMetalRegisteredMissingMetadata;
+                oss << "  name=" << name << "\n";
+            }
+            if (bareMetalRegisteredMissingMetadata == 0) oss << "  none\n";
+
+            int metadataWithoutHostedRegistration = 0;
+            oss << "metadataWithNoCurrentHostedRegistration:\n";
+            for (size_t i = 0; i < apps::kBuiltInAppMetadataCount; ++i) {
+                const apps::BuiltInAppMetadata& metadata = apps::kBuiltInAppMetadata[i];
+                if (!apps::IsBuiltInAppAvailableInHosted(metadata)) continue;
+                if (currentHostedRegistrationExistsForMetadata(metadata)) continue;
+                ++metadataWithoutHostedRegistration;
+                oss << "  id=" << (metadata.appId ? metadata.appId : "")
+                    << " displayName=" << (metadata.displayName ? metadata.displayName : "") << "\n";
+            }
+            if (metadataWithoutHostedRegistration == 0) oss << "  none\n";
+
+            int metadataWithoutBareMetalRegistration = 0;
+            oss << "metadataWithNoCurrentBareMetalRegistration:\n";
+            for (size_t i = 0; i < apps::kBuiltInAppMetadataCount; ++i) {
+                const apps::BuiltInAppMetadata& metadata = apps::kBuiltInAppMetadata[i];
+                if (!apps::IsBuiltInAppAvailableInBareMetal(metadata)) continue;
+                if (currentBareMetalRegistrationExistsForMetadata(metadata)) continue;
+                ++metadataWithoutBareMetalRegistration;
+                oss << "  id=" << (metadata.appId ? metadata.appId : "")
+                    << " kernelAppName=" << (metadata.kernelAppName ? metadata.kernelAppName : "") << "\n";
+            }
+            if (metadataWithoutBareMetalRegistration == 0) oss << "  none\n";
+
+            oss << "duplicateAppIdsDiscovered:\n";
+            std::set<std::string> duplicateIds = duplicateIdsFromScanIssues(s_lastManifestScanResult, s_lastBuiltInRegisterResult);
+            if (duplicateIds.empty()) {
+                oss << "  none\n";
+            } else {
+                std::map<std::string, std::vector<ManifestOrigin>> origins = collectManifestOriginsById();
+                for (const std::string& appId : duplicateIds) {
+                    oss << "  id=" << appId << "\n";
+                    auto originIt = origins.find(appId);
+                    if (originIt != origins.end()) {
+                        for (const ManifestOrigin& origin : originIt->second) {
+                            oss << "    manifest source=" << origin.source
+                                << " kind=" << apps::ToString(origin.kind)
+                                << " displayName=" << origin.displayName
+                                << " path=" << origin.manifestPath.string() << "\n";
+                        }
+                    }
+                    for (const auto& issue : s_lastManifestScanResult.duplicateApps) {
+                        if (issue.appId == appId) {
+                            oss << "    duplicateDuring=manifestScan source=" << apps::AppRegistry::ToString(issue.sourceKind)
+                                << " path=" << issue.manifestPath.string() << "\n";
+                        }
+                    }
+                    for (const auto& issue : s_lastBuiltInRegisterResult.duplicateApps) {
+                        if (issue.appId == appId) {
+                            oss << "    duplicateDuring=builtInRegister source=" << apps::AppRegistry::ToString(issue.sourceKind)
+                                << " path=" << issue.manifestPath.string() << "\n";
+                        }
+                    }
+                }
+            }
+
             return oss.str();
         }
 

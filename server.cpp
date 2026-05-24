@@ -351,7 +351,7 @@ static void help(){
                  " gui.btn <win> <id> <x> <y> <w> <h> <text> | gui.pop | gui.wlist | gui.activate <id> | gui.min <id>\n"
                  " gxm.load <path> | gxm.sample | gui.save <path> | gui.load <path>\n"
                  " desktop.wallpaper <path> | desktop.launch <action> | desktop.pin <action> | desktop.unpin <action> | desktop.showconfig\n"
-                 " desktop.apps | desktop.apps.verbose | desktop.pinned | desktop.recent | desktop.pinapp <name> | desktop.pinfile <name> <path>\n"
+                 " desktop.apps | desktop.apps.verbose | desktop.appmodel.coverage | desktop.pinned | desktop.recent | desktop.pinapp <name> | desktop.pinfile <name> <path>\n"
                  " nativeapp.capabilities | nativeapp.inspect <app> | nativeapp.smoketest <app> | nativeapp.processes\n"
                  " taskbar.list | taskbar.activate <id> | taskbar.min <id> | taskbar.close <id>\n"
                  " workspace.switch <n> | workspace.next | workspace.prev | workspace.current\n"
@@ -543,6 +543,9 @@ using namespace gxos;
         }
         else if (cmd=="desktop.apps.verbose"){
             std::cout << gui::DesktopService::GetRegisteredAppsVerboseDiagnostic();
+        }
+        else if (cmd=="desktop.appmodel.coverage"){
+            std::cout << gui::DesktopService::BuiltInAppMetadataCoverageDiagnostic();
         }
         else if (cmd=="desktop.pinned"){
             auto& pinned = gui::DesktopService::GetPinned();
