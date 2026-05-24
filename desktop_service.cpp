@@ -147,6 +147,46 @@ namespace gxos {
             return false;
         }
 
+        struct UiLaunchLabelDiagnostic {
+            std::string label;
+            std::string source;
+            std::string fallbackIdentity;
+            std::string note;
+        };
+
+        static UiLaunchLabelDiagnostic makeUiLaunchLabelDiagnostic(const std::string& label, const std::string& source, const std::string& fallbackIdentity = "", const std::string& note = "") {
+            UiLaunchLabelDiagnostic diagnostic;
+            diagnostic.label = label;
+            diagnostic.source = source;
+            diagnostic.fallbackIdentity = fallbackIdentity;
+            diagnostic.note = note;
+            return diagnostic;
+        }
+
+        static std::vector<UiLaunchLabelDiagnostic> currentCompositorUiLaunchLabelsForDiagnostic() {
+            // Diagnostic mirror of compositor UI labels only. This is not launch policy
+            // and must stay read-only until the app launch rewrite phase.
+            // AppModel and ComputerFiles are intentionally preserved Phase 1 aliases:
+            // document them here so Phase 2 can replace ad hoc UI labels with a
+            // real launch-resolution surface without breaking existing config.
+            return {
+                makeUiLaunchLabelDiagnostic("App Model Demo", "compositor launchAction special-case"),
+                makeUiLaunchLabelDiagnostic("AppModel", "compositor legacy AppModel alias", "App Model Demo", "legacy alias retained for old pins/config"),
+                makeUiLaunchLabelDiagnostic("Trash", "desktop system icon"),
+                makeUiLaunchLabelDiagnostic("ControlPanel", "desktop system/settings entry"),
+                makeUiLaunchLabelDiagnostic("TaskManager", "taskbar/system menu"),
+                makeUiLaunchLabelDiagnostic("Console", "taskbar/start menu shortcut"),
+                makeUiLaunchLabelDiagnostic("ComputerFiles", "desktop/start system file manager entry", "", "shell/system label; not a built-in metadata identity")
+            };
+        }
+
+        static bool uiDiagnosticHasLabel(const std::vector<UiLaunchLabelDiagnostic>& labels, const std::string& label) {
+            for (const auto& entry : labels) {
+                if (entry.label == label) return true;
+            }
+            return false;
+        }
+
         static int hostedAvailableMetadataCount() {
             int count = 0;
             for (size_t i = 0; i < apps::kBuiltInAppMetadataCount; ++i) {
@@ -305,6 +345,90 @@ namespace gxos {
 
             if (warningCount == 0) oss << "  none\n";
             return warningCount;
+        }
+
+        static void appendUiLaunchAliasMetadataDiagnostic(std::ostringstream& oss) {
+            std::vector<UiLaunchLabelDiagnostic> labels = currentCompositorUiLaunchLabelsForDiagnostic();
+
+            for (const auto& app : DesktopService::GetRegisteredApps()) {
+                if (app.kind != apps::AppKind::BuiltIn) continue;
+                const apps::BuiltInAppMetadata* metadata = findMetadataForRegisteredDesktopApp(app);
+                if (!metadata) continue;
+                if (!app.displayName.empty() && !uiDiagnosticHasLabel(labels, app.displayName)) {
+                    labels.push_back(makeUiLaunchLabelDiagnostic(app.displayName, "registered built-in display name"));
+                }
+                if (!app.launchName.empty() && app.launchName != app.displayName && !uiDiagnosticHasLabel(labels, app.launchName)) {
+                    labels.push_back(makeUiLaunchLabelDiagnostic(app.launchName, "registered built-in launch name"));
+                }
+            }
+
+            int cleanCount = 0;
+            int fallbackCount = 0;
+            int missingCount = 0;
+
+            oss << "uiLaunchAliasMetadataCoverage:\n";
+
+            oss << "  cleanMetadataMatches:\n";
+            for (const auto& label : labels) {
+                const apps::BuiltInAppMetadata* metadata = apps::FindBuiltInAppMetadataByIdentity(label.label.c_str());
+                if (!metadata) continue;
+                ++cleanCount;
+                oss << "    label=" << label.label
+                    << " source=" << label.source
+                    << " metadataId=" << (metadata->appId ? metadata->appId : "")
+                    << " match=direct\n";
+            }
+            if (cleanCount == 0) oss << "    none\n";
+
+            oss << "  fallbackOrAliasMatches:\n";
+            for (const auto& label : labels) {
+                if (label.fallbackIdentity.empty()) continue;
+                const apps::BuiltInAppMetadata* metadata = apps::FindBuiltInAppMetadataByIdentity(label.fallbackIdentity.c_str());
+                if (!metadata) continue;
+                ++fallbackCount;
+                oss << "    label=" << label.label
+                    << " source=" << label.source
+                    << " fallbackIdentity=" << label.fallbackIdentity
+                    << " metadataId=" << (metadata->appId ? metadata->appId : "");
+                if (!label.note.empty()) oss << " note=" << label.note;
+                oss << "\n";
+            }
+            if (fallbackCount == 0) oss << "    none\n";
+
+            oss << "  noMetadataMatch:\n";
+            for (const auto& label : labels) {
+                if (apps::FindBuiltInAppMetadataByIdentity(label.label.c_str())) continue;
+                if (!label.fallbackIdentity.empty() && apps::FindBuiltInAppMetadataByIdentity(label.fallbackIdentity.c_str())) continue;
+                ++missingCount;
+                oss << "    label=" << label.label << " source=" << label.source;
+                if (!label.note.empty()) oss << " note=" << label.note;
+                oss << "\n";
+            }
+            if (missingCount == 0) oss << "    none\n";
+
+            int unreachableCount = 0;
+            oss << "  metadataLaunchNamesNotReachableFromCurrentUiPaths:\n";
+            for (size_t i = 0; i < apps::kBuiltInAppMetadataCount; ++i) {
+                const apps::BuiltInAppMetadata& metadata = apps::kBuiltInAppMetadata[i];
+                if (!apps::IsBuiltInAppAvailableInHosted(metadata)) continue;
+                const bool reachable =
+                    (metadata.displayName && uiDiagnosticHasLabel(labels, metadata.displayName)) ||
+                    (metadata.launchName && uiDiagnosticHasLabel(labels, metadata.launchName)) ||
+                    (metadata.appId && uiDiagnosticHasLabel(labels, metadata.appId));
+                if (reachable) continue;
+                ++unreachableCount;
+                oss << "    id=" << (metadata.appId ? metadata.appId : "")
+                    << " displayName=" << (metadata.displayName ? metadata.displayName : "")
+                    << " launchName=" << (metadata.launchName ? metadata.launchName : "") << "\n";
+            }
+            if (unreachableCount == 0) oss << "    none\n";
+
+            oss << "  status: "
+                << (missingCount == 0 && unreachableCount == 0 ? "OK" : "WARN")
+                << " clean=" << cleanCount
+                << " alias=" << fallbackCount
+                << " noMetadata=" << missingCount
+                << " unreachableMetadata=" << unreachableCount << "\n";
         }
 
         static std::set<std::string> duplicateIdsFromScanIssues(const apps::AppScanResult& a, const apps::AppScanResult& b) {
@@ -849,6 +973,7 @@ namespace gxos {
             }
 
             appendAppIdNamespaceWarnings(oss);
+            appendUiLaunchAliasMetadataDiagnostic(oss);
 
             return oss.str();
         }

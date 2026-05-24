@@ -346,7 +346,7 @@ static void help(){
                  " bus.pub <chan> <text> [fanout] | bus.pop <chan> [timeoutMs]\n"
                  " bus.cap <chan> <cap> | bus.stats <chan>\n"
                  " console.start | console.send <text> | console.pop [timeoutMs]\n"
-                 " gui.start | gui.win <title> [w h] | gui.text <id> <text> | gui.close <id>\n"
+                 " gui.start | gui.open.appmodeldemo | gui.win <title> [w h] | gui.text <id> <text> | gui.close <id>\n"
                  " gui.rect <id> <x> <y> <w> <h> <r> <g> <b> | gui.move <id> <x> <y> | gui.resize <id> <w> <h> | gui.title <id> <title>\n"
                  " gui.btn <win> <id> <x> <y> <w> <h> <text> | gui.pop | gui.wlist | gui.activate <id> | gui.min <id>\n"
                  " gxm.load <path> | gxm.sample | gui.save <path> | gui.load <path>\n"
@@ -456,6 +456,38 @@ using namespace gxos;
         if (cmd=="gui.start"){
             uint64_t before = Lifecycle::state().compositorPid;
             if(requireCompositor() && before!=0){ std::cout<<"Compositor already running pid="<<Lifecycle::state().compositorPid<<std::endl; }
+        } else if (cmd=="gui.open.appmodeldemo"){
+            if(!requireCompositor()) continue;
+            const std::string marker = "appmodeldemo." + std::to_string(gxos::ticks());
+            ipc::Message ping;
+            ping.type=(uint32_t)gui::MsgType::MT_Ping;
+            ping.data.assign(marker.begin(), marker.end());
+            ipc::Bus::publish("gui.input", std::move(ping), false);
+
+            bool compositorReady = false;
+            auto readyDeadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(10000);
+            while (std::chrono::steady_clock::now() < readyDeadline) {
+                ipc::Message response;
+                if (!ipc::Bus::pop("gui.output", response, 250)) continue;
+                std::string payload(response.data.begin(), response.data.end());
+                if (response.type == (uint32_t)gui::MsgType::MT_Ping && payload == marker) {
+                    compositorReady = true;
+                    break;
+                }
+            }
+
+            // Diagnostic smoke path only: ask the compositor to use its existing UI launch branch.
+            const std::string action = "App Model Demo";
+            ipc::Message m;
+            m.type=(uint32_t)gui::MsgType::MT_DesktopLaunch;
+            m.data.assign(action.begin(), action.end());
+            ipc::Bus::publish("gui.input", std::move(m), false);
+
+            if (!compositorReady) {
+                std::cout<<"App Model Demo open queued via compositor UI path; compositor readiness ping timed out"<<std::endl;
+            } else {
+                std::cout<<"App Model Demo open queued via compositor UI path"<<std::endl;
+            }
         } else if (cmd=="gui.win"){
             if(!requireCompositor()) continue;
             std::string title; iss>>title; int w=640,h=480; iss>>w>>h; if(title.empty()){ std::cout<<"Usage: gui.win <title> [w h]"<<std::endl; continue; }

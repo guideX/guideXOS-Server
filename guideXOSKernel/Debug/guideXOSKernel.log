@@ -334,20 +334,20 @@ core/include/kernel/kernel_app.h(209,36): warning G24ACD1A9: unused parameter 'w
     209 |     virtual void onWidgetClick(int widgetId) {}
         |                                ~~~~^~~~~~~~
   core\kernel_apps.cpp: In member function 'virtual void kernel::apps::NotepadApp::draw(uint32_t, uint32_t, uint32_t, uint32_t)':
-core\kernel_apps.cpp(1043,59): warning G7D6735F0: comparison of integer expressions of different signedness: 'int' and 'long unsigned int' [-Wsign-compare]
-   1043 |             if (col * (kGlyphW + kGlyphSpacing) + kGlyphW > w - 16) {
+core\kernel_apps.cpp(1045,59): warning G7D6735F0: comparison of integer expressions of different signedness: 'int' and 'long unsigned int' [-Wsign-compare]
+   1045 |             if (col * (kGlyphW + kGlyphSpacing) + kGlyphW > w - 16) {
         |                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~
   core\kernel_apps.cpp: In member function 'virtual void kernel::apps::CalculatorApp::onWidgetClick(int)':
-core\kernel_apps.cpp(2535,17): warning G41AE70B8: unused variable 'btnChars' [-Wunused-variable]
-   2535 |     const char* btnChars = "Cce/%789*456-123++/-0.=";
+core\kernel_apps.cpp(2537,17): warning G41AE70B8: unused variable 'btnChars' [-Wunused-variable]
+   2537 |     const char* btnChars = "Cce/%789*456-123++/-0.=";
         |                 ^~~~~~~~
   core\kernel_apps.cpp: In member function 'virtual void kernel::apps::TaskManagerApp::onMouseDown(int, int, uint8_t)':
-core\kernel_apps.cpp(2845,38): warning G24ACD1A9: unused parameter 'localX' [-Wunused-parameter]
-   2845 | void TaskManagerApp::onMouseDown(int localX, int localY, uint8_t button) {
+core\kernel_apps.cpp(2847,38): warning G24ACD1A9: unused parameter 'localX' [-Wunused-parameter]
+   2847 | void TaskManagerApp::onMouseDown(int localX, int localY, uint8_t button) {
         |                                  ~~~~^~~~~~
   core\kernel_apps.cpp: In member function 'virtual void kernel::apps::DiskManagerApp::draw(uint32_t, uint32_t, uint32_t, uint32_t)':
-core\kernel_apps.cpp(4153,39): warning GA5864BA6: narrowing conversion of '(48 + ((int)((char)(pi + 1))))' from 'int' to 'char' [-Wnarrowing]
-   4153 |                 char numBuf[4] = {'0' + (char)(pi + 1), '\0', '\0', '\0'};
+core\kernel_apps.cpp(4155,39): warning GA5864BA6: narrowing conversion of '(48 + ((int)((char)(pi + 1))))' from 'int' to 'char' [-Wnarrowing]
+   4155 |                 char numBuf[4] = {'0' + (char)(pi + 1), '\0', '\0', '\0'};
         |                                   ~~~~^~~~~~~~~~~~~~~~
   core\include/kernel/kernel_apps.h: In constructor 'kernel::apps::NavigatorApp::NavigatorApp()':
 core\include/kernel/kernel_apps.h(520,9): warning G9B656FCD: 'kernel::apps::NavigatorApp::m_forwardCount' will be initialized after [-Wreorder]
@@ -356,8 +356,8 @@ core\include/kernel/kernel_apps.h(520,9): warning G9B656FCD: 'kernel::apps::Navi
 core\include/kernel/kernel_apps.h(516,9): warning G67B99532: 'int kernel::apps::NavigatorApp::m_recentDownloadCount' [-Wreorder]
     516 |     int m_recentDownloadCount;
         |         ^~~~~~~~~~~~~~~~~~~~~
-core\kernel_apps.cpp(4777,1): warning GD01C5E17: when initialized here [-Wreorder]
-   4777 | NavigatorApp::NavigatorApp()
+core\kernel_apps.cpp(4779,1): warning GD01C5E17: when initialized here [-Wreorder]
+   4779 | NavigatorApp::NavigatorApp()
         | ^~~~~~~~~~~~
     Compiling kernel_compositor.cpp...
   In file included from core\include/kernel/kernel_compositor.h:15,

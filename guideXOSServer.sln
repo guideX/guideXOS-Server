@@ -1,13 +1,17 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 18
-VisualStudioVersion = 18.5.11709.299 stable
+VisualStudioVersion = 18.5.11709.299
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "guideXOSServer", "guideXOSServer.vcxproj", "{CE8E69EE-F8B6-4FA6-A735-9EF2C05327DD}"
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "guideXOSBootLoader", "guideXOSBootLoader\guideXOSBootLoader.vcxproj", "{1FEDF2AD-1078-4F66-AACF-CEA3C8511AD7}"
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "guideXOSKernel", "guideXOSKernel.vcxproj", "{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Website", "Website", "{FAF7B1BF-2A1D-43D2-BD67-5305FA55A8D1}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "guideXOS.com", "..\guideXOS.com\guideXOS.com.csproj", "{E1A63B68-5EA4-9BF9-E3BE-4998D9A45C6D}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -55,9 +59,24 @@ Global
 		{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}.Release|x64.Build.0 = Release|Win32
 		{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}.Release|x86.ActiveCfg = Release|Win32
 		{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}.Release|x86.Build.0 = Release|Win32
+		{E1A63B68-5EA4-9BF9-E3BE-4998D9A45C6D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{E1A63B68-5EA4-9BF9-E3BE-4998D9A45C6D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{E1A63B68-5EA4-9BF9-E3BE-4998D9A45C6D}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{E1A63B68-5EA4-9BF9-E3BE-4998D9A45C6D}.Debug|x64.Build.0 = Debug|Any CPU
+		{E1A63B68-5EA4-9BF9-E3BE-4998D9A45C6D}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{E1A63B68-5EA4-9BF9-E3BE-4998D9A45C6D}.Debug|x86.Build.0 = Debug|Any CPU
+		{E1A63B68-5EA4-9BF9-E3BE-4998D9A45C6D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{E1A63B68-5EA4-9BF9-E3BE-4998D9A45C6D}.Release|Any CPU.Build.0 = Release|Any CPU
+		{E1A63B68-5EA4-9BF9-E3BE-4998D9A45C6D}.Release|x64.ActiveCfg = Release|Any CPU
+		{E1A63B68-5EA4-9BF9-E3BE-4998D9A45C6D}.Release|x64.Build.0 = Release|Any CPU
+		{E1A63B68-5EA4-9BF9-E3BE-4998D9A45C6D}.Release|x86.ActiveCfg = Release|Any CPU
+		{E1A63B68-5EA4-9BF9-E3BE-4998D9A45C6D}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{E1A63B68-5EA4-9BF9-E3BE-4998D9A45C6D} = {FAF7B1BF-2A1D-43D2-BD67-5305FA55A8D1}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {93615F61-90A8-4899-BB05-44ABDA356BEF}

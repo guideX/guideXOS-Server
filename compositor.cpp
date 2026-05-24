@@ -82,6 +82,7 @@ namespace gxos {
         bool Compositor::g_taskbarCycleActive = false; int Compositor::g_taskbarCycleIndex = 0; bool Compositor::g_keyboardMoveActive = false; bool Compositor::g_keyboardSizeActive = false; int Compositor::g_kbOrigX = 0; int Compositor::g_kbOrigY = 0; int Compositor::g_kbOrigW = 0; int Compositor::g_kbOrigH = 0;
 
         DesktopConfigData Compositor::g_cfg{}; std::vector<DesktopItem> Compositor::g_items; uint64_t Compositor::g_lastItemClickTicks = 0; int Compositor::g_lastItemIndex = -1;
+        AppModelDemoWindowState Compositor::g_appModelDemo{};
         std::set<int> Compositor::g_selectedDesktopIconIndices; int Compositor::g_lastSelectedDesktopIconIndex = -1;
         bool Compositor::g_iconDragActive = false; int Compositor::g_iconDragIndex = -1; int Compositor::g_iconDragOffX = 0; int Compositor::g_iconDragOffY = 0; int Compositor::g_iconDragStartX = 0; int Compositor::g_iconDragStartY = 0; bool Compositor::g_iconDragPending = false;
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)
@@ -885,6 +886,59 @@ namespace gxos {
             return "unknown";
         }
 
+        static void appendAppModelSummaryLines(std::vector<std::string>& lines, const std::string& summaryText) {
+            std::istringstream summary(summaryText);
+            std::string line;
+            while (std::getline(summary, line)) {
+                if (line.size() > 112) line = line.substr(0, 109) + "...";
+                lines.push_back("  " + line);
+            }
+        }
+
+        static void populateAppModelDemoViewerWindow(WinInfo& wi, const std::vector<RegisteredDesktopApp>& demoApps, const std::string& summaryText, const std::string& status) {
+            wi.w = 920;
+            wi.h = 620;
+            wi.rects.clear();
+            wi.images.clear();
+            wi.widgets.clear();
+            wi.positionedTexts.clear();
+            wi.texts.clear();
+            wi.rects.push_back(DrawRectItem{0, 0, wi.w, 28, 32, 40, 58});
+            wi.rects.push_back(DrawRectItem{0, 250, wi.w, 2, 64, 80, 110});
+            wi.rects.push_back(DrawRectItem{0, wi.h - 54, wi.w, 24, 32, 40, 58});
+
+            wi.texts.push_back("App Model Demo");
+            wi.texts.push_back("Runtime:");
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
+            wi.texts.push_back("  Mode: Windows compositor/test harness");
+#else
+            wi.texts.push_back("  Mode: compositor / unknown");
+#endif
+            wi.texts.push_back(std::string("  Native execution: ") + (gxos::apps::NativeElfExecutor::ExperimentalExecutionEnabled() ? "enabled" : "disabled"));
+            wi.texts.push_back("  Discovered app-model demo apps: " + std::to_string(demoApps.size()));
+            wi.texts.push_back("");
+            wi.texts.push_back("App Model Summary:");
+            appendAppModelSummaryLines(wi.texts, summaryText);
+            wi.texts.push_back("");
+            wi.texts.push_back("Apps:");
+            wi.texts.push_back("  Display name                 App ID/name                         Type         Status");
+            for (const auto& app : demoApps) {
+                std::ostringstream row;
+                row << "  " << app.displayName;
+                if (app.displayName.size() < 29) row << std::string(29 - app.displayName.size(), ' ');
+                row << app.id;
+                if (app.id.size() < 36) row << std::string(36 - app.id.size(), ' ');
+                row << apps::ToString(app.kind);
+                std::string kind = apps::ToString(app.kind);
+                if (kind.size() < 13) row << std::string(13 - kind.size(), ' ');
+                row << hostedLaunchStatus(app);
+                wi.texts.push_back(row.str());
+            }
+            wi.texts.push_back("");
+            wi.texts.push_back("Actions: R/F5 refresh app-model diagnostics, close window when done.");
+            if (!status.empty()) wi.texts.push_back("Status: " + status);
+        }
+
         void Compositor::openAppModelDemoViewerWindow() {
             std::vector<RegisteredDesktopApp> demoApps = DesktopService::GetAppModelDemoApps();
             bool hasDemo = false;
@@ -905,8 +959,8 @@ namespace gxos {
             WinInfo wi{};
             wi.id = id;
             wi.title = "App Model Demo";
-            wi.w = 860;
-            wi.h = 520;
+            wi.w = 920;
+            wi.h = 620;
             wi.x = 82;
             wi.y = 70;
             wi.visible = true;
@@ -915,42 +969,39 @@ namespace gxos {
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)
             wi.taskbarIcon = Icons::TaskbarIcon(16);
 #endif
-            wi.rects.push_back(DrawRectItem{0, 0, 860, 28, 32, 40, 58});
-            wi.rects.push_back(DrawRectItem{0, 118, 860, 2, 64, 80, 110});
-            wi.rects.push_back(DrawRectItem{0, 466, 860, 24, 32, 40, 58});
-            wi.texts.push_back("APP MODEL VIEWER v3 - OLD TOAST REMOVED");
-            wi.texts.push_back("Runtime:");
-#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
-            wi.texts.push_back("  Mode: Windows compositor/test harness");
-#else
-            wi.texts.push_back("  Mode: compositor / unknown");
-#endif
-            wi.texts.push_back(std::string("  Native execution: ") + (gxos::apps::NativeElfExecutor::ExperimentalExecutionEnabled() ? "enabled" : "disabled"));
-            wi.texts.push_back("  Discovered apps: " + std::to_string(demoApps.size()));
-            wi.texts.push_back("");
-            wi.texts.push_back("Apps:");
-            wi.texts.push_back("  Display name                 App ID/name                         Type         Status");
-            for (const auto& app : demoApps) {
-                std::ostringstream row;
-                row << "  " << app.displayName;
-                if (app.displayName.size() < 29) row << std::string(29 - app.displayName.size(), ' ');
-                row << app.id;
-                if (app.id.size() < 36) row << std::string(36 - app.id.size(), ' ');
-                row << apps::ToString(app.kind);
-                std::string kind = apps::ToString(app.kind);
-                if (kind.size() < 13) row << std::string(13 - kind.size(), ' ');
-                row << hostedLaunchStatus(app);
-                wi.texts.push_back(row.str());
-            }
-            wi.texts.push_back("");
-            wi.texts.push_back("Actions: close window. Use desktop.launch, nativeapp.inspect, nativeapp.smoketest for command actions.");
+            const std::string summaryText = DesktopService::AppModelSummaryDiagnostic();
+            populateAppModelDemoViewerWindow(wi, demoApps, summaryText, "snapshot refreshed");
             {
                 std::lock_guard<std::mutex> lk(g_lock);
                 g_windows[id] = wi;
                 g_z.push_back(id);
                 g_focus = id;
+                g_appModelDemo.windowId = id;
+                g_appModelDemo.apps = demoApps;
+                g_appModelDemo.status = "snapshot refreshed";
             }
             invalidate(id);
+        }
+
+        void Compositor::updateAppModelDemoViewerWindow(const std::string& status) {
+            std::vector<RegisteredDesktopApp> demoApps = DesktopService::GetAppModelDemoApps();
+            const std::string summaryText = DesktopService::AppModelSummaryDiagnostic();
+            std::lock_guard<std::mutex> lk(g_lock);
+            auto it = g_windows.find(g_appModelDemo.windowId);
+            if (it == g_windows.end()) return;
+            g_appModelDemo.apps = demoApps;
+            g_appModelDemo.status = status;
+            populateAppModelDemoViewerWindow(it->second, demoApps, summaryText, status);
+            it->second.dirty = true;
+            invalidate(it->second.id);
+        }
+
+        bool Compositor::handleAppModelDemoKey(int key) {
+            if (key == 82 || key == 114 || key == 116) {
+                updateAppModelDemoViewerWindow("snapshot refreshed");
+                return true;
+            }
+            return false;
         }
 
         void Compositor::launchAction(const std::string& act) {
@@ -2189,6 +2240,17 @@ namespace gxos {
                         requestRepaint( );
                         return 0;
                     }
+                }
+
+                bool appModelDemoFocused = false;
+                {
+                    std::lock_guard<std::mutex> lk(g_lock);
+                    auto it = g_windows.find(g_focus);
+                    appModelDemoFocused = it != g_windows.end() && it->second.title == "App Model Demo";
+                }
+                if (appModelDemoFocused && handleAppModelDemoKey(key)) {
+                    requestRepaint();
+                    return 0;
                 }
 
                 uint64_t ownerPid = 0; { std::lock_guard<std::mutex> lk(g_lock); ownerPid = inputOwnerPid( ); }
