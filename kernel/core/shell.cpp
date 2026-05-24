@@ -19,6 +19,7 @@
 #include "include/kernel/fs_fat.h"
 #include "include/kernel/desktop.h"
 #include "include/kernel/kernel_app.h"
+#include "include/kernel/app_launch_target_resolver.h"
 #include "include/kernel/serial_debug.h"
 
 // Forward declarations for power functions (defined in desktop.cpp, outside any namespace)
@@ -220,6 +221,14 @@ static bool str_starts_with(const char* str, const char* prefix) {
     return true;
 }
 
+static const char* command_tail(const char* cmdLine) {
+    if (!cmdLine) return "";
+    const char* p = cmdLine;
+    while (*p && *p != ' ' && *p != '\t') ++p;
+    while (*p == ' ' || *p == '\t') ++p;
+    return p;
+}
+
 static void append_char(char* dst, uint32_t maxLen, uint32_t* pos, char c) {
     if (!dst || !pos || *pos >= maxLen - 1) return;
     dst[(*pos)++] = c;
@@ -385,6 +394,7 @@ static void cmd_help() {
         output_string("  desktop.apps   - List app model entries\n");
         output_string("  desktop.apps.verbose - App registry diagnostics\n");
         output_string("  desktop.launch <AppName> - Launch app or show availability\n");
+        output_string("  desktop.launch.resolve <label> - Resolve launch target without launching\n");
         output_string("  nativeapp.inspect <AppName> - Inspect native app availability\n");
         output_string("  nativeapp.smoketest <AppName> - Native app smoke-test path\n");
     output_string("  workspaces     - Workspace info\n");
@@ -898,6 +908,15 @@ static void cmd_desktop_launch(const char* appName) {
     if (!::kernel::desktop::launch_app(appName)) {
         output_string("Desktop launch failed or app is unavailable in bare-metal mode.\n");
     }
+}
+
+static void cmd_desktop_launch_resolve(const char* label) {
+    if (!label || label[0] == '\0') {
+        output_string("Usage: desktop.launch.resolve <label>\n");
+        return;
+    }
+
+    ::kernel::appmodel::printLaunchTargetDiagnostic(label, output_string);
 }
 
 static void cmd_nativeapp_inspect(const char* appName, bool smokeTest) {
@@ -2922,6 +2941,8 @@ static void execute_command(const char* cmd) {
         cmd_desktop_apps(false);
     } else if (str_eq(command, "desktop.apps.verbose")) {
         cmd_desktop_apps(true);
+    } else if (str_eq(command, "desktop.launch.resolve")) {
+        cmd_desktop_launch_resolve(command_tail(cmd));
     } else if (str_eq(command, "desktop.launch")) {
         cmd_desktop_launch(arg1);
     } else if (str_eq(command, "nativeapp.inspect")) {
