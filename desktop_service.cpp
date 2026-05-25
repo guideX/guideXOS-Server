@@ -885,6 +885,52 @@ namespace gxos {
             }
         }
 
+        static LaunchStoragePreviewCounts collectLaunchStoragePreviewCounts(
+            bool cfgLoaded,
+            const DesktopConfigData& cfg,
+            const std::vector<std::string>& inMemoryPinned,
+            const std::vector<std::string>& inMemoryRecentPrograms,
+            const std::vector<std::string>& inMemoryRecentDocuments,
+            const std::vector<RegisteredDesktopApp>& registeredApps,
+            std::ostringstream* rows,
+            const size_t maxRows) {
+            LaunchStoragePreviewCounts counts;
+            std::ostringstream sink;
+            std::ostringstream& out = rows ? *rows : sink;
+
+            if (cfgLoaded) {
+                appendLaunchStoragePreviewLabels(out, counts, "desktop.json:pinned", cfg.pinned, "", "medium", maxRows);
+                appendLaunchStoragePreviewLabels(out, counts, "desktop.json:recent", cfg.recent, "", "medium", maxRows);
+
+                for (size_t i = 0; i < cfg.desktopShortcuts.size(); ++i) {
+                    const DesktopShortcutRec& shortcut = cfg.desktopShortcuts[i];
+                    const std::string type = shortcut.shortcutType.empty() ? (shortcut.targetPath.empty() ? "App" : "File") : shortcut.shortcutType;
+                    if (type == "App") {
+                        appendLaunchStoragePreviewRecord(out, counts, "desktop.json:desktopShortcuts.App", i, shortcut.targetAppId, "app ID", "low", maxRows);
+                    } else if (type == "File" || type == "Folder") {
+                        appendLaunchStoragePreviewRecord(out, counts, "desktop.json:desktopShortcuts.FileFolder", i, shortcut.targetPath, "file path", "low", maxRows);
+                    }
+                }
+
+                for (size_t i = 0; i < cfg.iconPositions.size(); ++i) {
+                    appendLaunchStoragePreviewSkip(out, counts, "desktop.json:iconPositions", i, cfg.iconPositions[i].name, "Icon position record stores layout only and should not become a launch target", maxRows);
+                }
+            }
+
+            appendLaunchStoragePreviewLabels(out, counts, "DesktopService:s_pinned", inMemoryPinned, "", "medium", maxRows);
+            appendLaunchStoragePreviewLabels(out, counts, "DesktopService:s_recentPrograms", inMemoryRecentPrograms, "", "medium", maxRows);
+            appendLaunchStoragePreviewLabels(out, counts, "DesktopService:s_recentDocuments", inMemoryRecentDocuments, "file path", "low", maxRows);
+
+            std::vector<std::string> allProgramLabels;
+            for (const RegisteredDesktopApp& app : registeredApps) allProgramLabels.push_back(app.displayName);
+            appendLaunchStoragePreviewLabels(out, counts, "Compositor:g_startMenuAllProgsSorted", allProgramLabels, "display name", "low", maxRows);
+
+            std::vector<std::string> shellLabels = { "ComputerFiles", "Console", "Trash", "ControlPanel", "TaskManager" };
+            appendLaunchStoragePreviewLabels(out, counts, "Compositor:rightColumnAndSystemObjects", shellLabels, "", "medium", maxRows);
+
+            return counts;
+        }
+
         static const char* const kLaunchTargetComparisonLabels[] = {
             "Notepad",
             "gxos.builtin.notepad",
@@ -1272,6 +1318,24 @@ namespace gxos {
             const int metadataWithoutBareMetalRegistration = metadataWithoutBareMetalRegistrationCount();
             const LaunchTargetComparisonCounts launchTargetCounts = launchTargetComparisonCounts();
             const LaunchTargetShadowCounters shadowCounters = GetLaunchTargetShadowCounters();
+            DesktopConfigData storagePreviewCfg;
+            std::string storagePreviewCfgErr;
+            const bool storagePreviewCfgLoaded = DesktopConfig::Load("desktop.json", storagePreviewCfg, storagePreviewCfgErr);
+            std::vector<std::string> storagePreviewPinned;
+            for (const PinnedItem& item : s_pinned) storagePreviewPinned.push_back(item.name);
+            std::vector<std::string> storagePreviewRecentPrograms;
+            for (const RecentProgramEntry& entry : s_recentPrograms) storagePreviewRecentPrograms.push_back(entry.name);
+            std::vector<std::string> storagePreviewRecentDocuments;
+            for (const RecentDocumentEntry& entry : s_recentDocuments) storagePreviewRecentDocuments.push_back(entry.path);
+            const LaunchStoragePreviewCounts storagePreviewCounts = collectLaunchStoragePreviewCounts(
+                storagePreviewCfgLoaded,
+                storagePreviewCfg,
+                storagePreviewPinned,
+                storagePreviewRecentPrograms,
+                storagePreviewRecentDocuments,
+                s_apps,
+                nullptr,
+                0);
             const bool duplicateOk = duplicateCount == 0;
             const bool namespaceOk = namespaceWarningCount == 0;
             const bool hostedCoverageOk = hostedRegisteredMissingMetadata == 0 && metadataWithoutHostedRegistration == 0;
@@ -1279,7 +1343,8 @@ namespace gxos {
             const bool targetDriftOk = hostedCoverageOk && bareMetalCoverageOk;
             const bool invalidManifestOk = s_lastManifestScanResult.invalidApps.empty();
             const bool launchTargetComparisonOk = launchTargetCounts.unexpectedDrift == 0;
-            const bool overallOk = duplicateOk && namespaceOk && hostedCoverageOk && bareMetalCoverageOk && invalidManifestOk && launchTargetComparisonOk;
+            const bool launchStoragePreviewOk = storagePreviewCounts.unresolved == 0 && storagePreviewCounts.highRisk == 0;
+            const bool overallOk = duplicateOk && namespaceOk && hostedCoverageOk && bareMetalCoverageOk && invalidManifestOk && launchTargetComparisonOk && launchStoragePreviewOk;
 
             std::ostringstream oss;
             oss << "[AppModelSummary]\n";
@@ -1317,6 +1382,15 @@ namespace gxos {
                 << " startMenu=" << shadowCounters.startMenuObservations
                 << " desktopShortcut=" << shadowCounters.desktopShortcutObservations
                 << " nonFatal=true\n";
+            oss << "launchStoragePreview: " << statusText(launchStoragePreviewOk)
+                << " total=" << storagePreviewCounts.total
+                << " ready=" << storagePreviewCounts.ready
+                << " alias=" << storagePreviewCounts.alias
+                << " shellAction=" << storagePreviewCounts.shellAction
+                << " unresolved=" << storagePreviewCounts.unresolved
+                << " skippedLayoutOnly=" << storagePreviewCounts.skippedLayoutOnly
+                << " highRisk=" << storagePreviewCounts.highRisk
+                << " writesStorage=false\n";
             oss << "overall: " << statusText(overallOk) << "\n";
             oss << "detailCommands: desktop.appmodel.coverage, desktop.apps.verbose, desktop.launch.compare, desktop.launch.storage, desktop.launch.storage.preview\n";
             return oss.str();
