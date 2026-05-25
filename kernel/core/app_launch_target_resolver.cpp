@@ -146,6 +146,22 @@ gxos::apps::LaunchTarget resolveLaunchTarget(const char* label)
         return target;
     }
 
+    if (text_equals(label, "ImgViewer")) {
+        if (const gxos::apps::BuiltInAppMetadata* metadata = gxos::apps::FindBuiltInAppMetadataByAppId("gxos.builtin.imageviewer")) {
+            fill_from_metadata(target, *metadata);
+        }
+        target.type = gxos::apps::LaunchTargetType::LegacyAlias;
+        target.legacyAlias = "ImgViewer";
+        target.appId = "gxos.builtin.imageviewer";
+        target.displayName = "ImageViewer";
+        target.dispatchLaunchName = "ImgViewer";
+        target.hostedAvailable = true;
+        target.bareMetalAvailable = false;
+        target.diagnosticStatus = "unsupported-target";
+        target.diagnosticReason = "Bare-metal static Start Menu label for hosted ImageViewer; no current bare-metal AppManager registration";
+        return target;
+    }
+
     if (is_shell_label(label)) {
         fill_shell_label(target, label);
         return target;
@@ -965,12 +981,13 @@ void printLaunchStoragePreviewComparisonDiagnostic(LaunchTargetDiagnosticWriter 
     write("writesStorageBareMetal=false\n");
     write_preview_counts_line(write, "hosted", hostedReference, "source=current-hosted-baseline use-hosted-shell-for-live-desktop-json");
     write_preview_counts_line(write, "bareMetal", bareMetalCounts, "source=bare-metal-actual");
-    write("intentionalDifferences: 5\n");
+    write("intentionalDifferences: 6\n");
     write("  difference=hosted-desktop-json note=hosted owns live desktop.json pinned/recent/desktopShortcuts/iconPositions storage\n");
     write("  difference=bare-metal-vfs note=bare-metal owns VFS /desktop.shortcuts, /.desktop_icons, and /desktop.system.icons storage\n");
     write("  difference=start-menu-source note=hosted all-programs are registry-derived while bare-metal Start Menu arrays are static today\n");
     write("  difference=shell-labels note=hosted ComputerFiles is a shell label while bare-metal uses Computer/Documents/Pictures/Music/Network/Settings labels\n");
     write("  difference=dynamic-runtime-sites note=desktop icon/taskbar runtime labels are target-specific and are not migrated in this diagnostic\n");
+    write("  difference=bare-metal-imgviewer note=ImgViewer is a diagnostic-only legacy/static label for hosted ImageViewer and remains unsupported on bare-metal\n");
     write("unexpectedDrift: ");
     write_uint(write, unexpectedDrift);
     write("\n");

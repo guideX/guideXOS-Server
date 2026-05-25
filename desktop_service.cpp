@@ -1057,6 +1057,22 @@ namespace gxos {
                 return target;
             }
 
+            if (label == "ImgViewer") {
+                if (const apps::BuiltInAppMetadata* metadata = apps::FindBuiltInAppMetadataByAppId("gxos.builtin.imageviewer")) {
+                    fillLaunchTargetFromMetadata(target, *metadata);
+                }
+                target.type = apps::LaunchTargetType::LegacyAlias;
+                target.legacyAlias = "ImgViewer";
+                target.appId = "gxos.builtin.imageviewer";
+                target.displayName = "ImageViewer";
+                target.dispatchLaunchName = "ImgViewer";
+                target.hostedAvailable = true;
+                target.bareMetalAvailable = false;
+                target.diagnosticStatus = "unsupported-target";
+                target.diagnosticReason = "Bare-metal static Start Menu label for hosted ImageViewer; no current bare-metal AppManager registration";
+                return target;
+            }
+
             if (isBareMetalShellLabelForComparison(label)) {
                 target.type = apps::LaunchTargetType::ShellAction;
                 target.displayName = label;
@@ -2046,12 +2062,13 @@ namespace gxos {
             oss << "\n";
             appendLaunchStoragePreviewCountsLine(oss, "hosted", hostedCounts, "source=live-hosted");
             appendLaunchStoragePreviewCountsLine(oss, "bareMetal", bareMetalCounts, "source=hosted-static-mirror dynamicVfs=not-inspected-here");
-            oss << "intentionalDifferences: 5\n";
+            oss << "intentionalDifferences: 6\n";
             oss << "  difference=hosted-desktop-json note=hosted owns live desktop.json pinned/recent/desktopShortcuts/iconPositions storage\n";
             oss << "  difference=bare-metal-vfs note=bare-metal owns VFS /desktop.shortcuts, /.desktop_icons, and /desktop.system.icons storage\n";
             oss << "  difference=start-menu-source note=hosted all-programs are registry-derived while bare-metal Start Menu arrays are static today\n";
             oss << "  difference=shell-labels note=hosted ComputerFiles is a shell label while bare-metal uses Computer/Documents/Pictures/Music/Network/Settings labels\n";
             oss << "  difference=dynamic-runtime-sites note=desktop icon/taskbar runtime labels are target-specific and are not migrated in this diagnostic\n";
+            oss << "  difference=bare-metal-imgviewer note=ImgViewer is a diagnostic-only legacy/static label for hosted ImageViewer and remains unsupported on bare-metal\n";
             oss << "unexpectedDrift: " << unexpectedDrift << "\n";
             if (bareMetalCounts.highRisk > 0) {
                 oss << "  drift=bareMetalHighRisk count=" << bareMetalCounts.highRisk
