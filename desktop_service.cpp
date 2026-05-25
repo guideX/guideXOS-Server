@@ -2221,7 +2221,9 @@ namespace gxos {
             int bareMetalAvailable = 0;
             int hostedOnly = 0;
             int bareMetalOnly = 0;
-            int unsupportedOnTarget = 0;
+            int expectedUnsupportedOnTarget = 0;
+            int unexpectedUnsupportedOnTarget = 0;
+            int unknownLabels = 0;
             int totalLabels = 0;
         };
 
@@ -2232,10 +2234,22 @@ namespace gxos {
             int totalBareMetalAvailable = 0;
             int totalHostedOnly = 0;
             int totalBareMetalOnly = 0;
-            int totalUnsupported = 0;
+            int totalExpectedUnsupported = 0;
+            int totalUnexpectedUnsupported = 0;
+            int totalUnknownLabels = 0;
         };
 
         static std::map<apps::LaunchTargetType, LaunchTargetTypeCounts> collectLaunchTargetTypeCoverageCounts(const std::set<std::string>& labels);
+
+        static bool isExpectedUnsupportedLaunchTargetLabel(const std::string& label) {
+            return label == "ImgViewer";
+        }
+
+        static apps::LaunchTargetType launchTargetTypeForCoverageStatus(const apps::LaunchTarget& hostedTarget, const apps::LaunchTarget& bareMetalTarget) {
+            if (hostedTarget.type != apps::LaunchTargetType::Unknown) return hostedTarget.type;
+            if (bareMetalTarget.type != apps::LaunchTargetType::Unknown) return bareMetalTarget.type;
+            return apps::LaunchTargetType::Unknown;
+        }
 
         static LaunchTargetTypeCoverageSummary summarizeLaunchTargetTypeCoverage(const std::map<apps::LaunchTargetType, LaunchTargetTypeCounts>& typeCounts, size_t totalLabels) {
             LaunchTargetTypeCoverageSummary summary;
@@ -2243,14 +2257,17 @@ namespace gxos {
 
             for (const auto& entry : typeCounts) {
                 const LaunchTargetTypeCounts& counts = entry.second;
-                if (counts.totalLabels > 0 || counts.hostedAvailable > 0 || counts.bareMetalAvailable > 0) {
+                if (counts.totalLabels > 0 || counts.hostedAvailable > 0 || counts.bareMetalAvailable > 0 ||
+                    counts.expectedUnsupportedOnTarget > 0 || counts.unexpectedUnsupportedOnTarget > 0 || counts.unknownLabels > 0) {
                     ++summary.coveredTypes;
                 }
                 summary.totalHostedAvailable += counts.hostedAvailable;
                 summary.totalBareMetalAvailable += counts.bareMetalAvailable;
                 summary.totalHostedOnly += counts.hostedOnly;
                 summary.totalBareMetalOnly += counts.bareMetalOnly;
-                summary.totalUnsupported += counts.unsupportedOnTarget;
+                summary.totalExpectedUnsupported += counts.expectedUnsupportedOnTarget;
+                summary.totalUnexpectedUnsupported += counts.unexpectedUnsupportedOnTarget;
+                summary.totalUnknownLabels += counts.unknownLabels;
             }
 
             return summary;
@@ -2262,14 +2279,16 @@ namespace gxos {
             const LaunchTargetTypeCoverageSummary summary = summarizeLaunchTargetTypeCoverage(typeCounts, labels.size());
 
             std::ostringstream oss;
-            oss << "launchTargetTypes: " << statusText(summary.totalUnsupported == 0)
+            oss << "launchTargetTypes: " << statusText(summary.totalUnexpectedUnsupported == 0)
                 << " labels=" << summary.totalLabels
                 << " coveredTypes=" << summary.coveredTypes
                 << " hostedAvailable=" << summary.totalHostedAvailable
                 << " bareMetalAvailable=" << summary.totalBareMetalAvailable
                 << " hostedOnly=" << summary.totalHostedOnly
                 << " bareMetalOnly=" << summary.totalBareMetalOnly
-                << " unsupportedOnTarget=" << summary.totalUnsupported
+                << " expectedUnsupportedOnTarget=" << summary.totalExpectedUnsupported
+                << " unexpectedUnsupportedOnTarget=" << summary.totalUnexpectedUnsupported
+                << " unknownLabels=" << summary.totalUnknownLabels
                 << " nonFatal=true\n";
             return oss.str();
         }
@@ -2321,7 +2340,14 @@ namespace gxos {
                 } else if (!hostedTarget.hostedAvailable && bareMetalTarget.bareMetalAvailable) {
                     typeCounts[bareMetalTarget.type].bareMetalOnly++;
                 } else {
-                    typeCounts[primaryType].unsupportedOnTarget++;
+                    const apps::LaunchTargetType statusType = launchTargetTypeForCoverageStatus(hostedTarget, bareMetalTarget);
+                    if (statusType == apps::LaunchTargetType::Unknown) {
+                        typeCounts[statusType].unknownLabels++;
+                    } else if (isExpectedUnsupportedLaunchTargetLabel(label)) {
+                        typeCounts[statusType].expectedUnsupportedOnTarget++;
+                    } else {
+                        typeCounts[statusType].unexpectedUnsupportedOnTarget++;
+                    }
                 }
             }
 
@@ -2359,14 +2385,17 @@ namespace gxos {
             oss << "\nlaunchTargetTypeCoverage:\n";
             for (apps::LaunchTargetType type : allTypes) {
                 const LaunchTargetTypeCounts& counts = typeCounts.at(type);
-                if (counts.totalLabels == 0 && counts.hostedAvailable == 0 && counts.bareMetalAvailable == 0) continue;
+                if (counts.totalLabels == 0 && counts.hostedAvailable == 0 && counts.bareMetalAvailable == 0 &&
+                    counts.expectedUnsupportedOnTarget == 0 && counts.unexpectedUnsupportedOnTarget == 0 && counts.unknownLabels == 0) continue;
 
                 oss << "  type=" << apps::ToString(type)
                     << " hostedAvailable=" << counts.hostedAvailable
                     << " bareMetalAvailable=" << counts.bareMetalAvailable
                     << " hostedOnly=" << counts.hostedOnly
                     << " bareMetalOnly=" << counts.bareMetalOnly
-                    << " unsupportedOnTarget=" << counts.unsupportedOnTarget
+                    << " expectedUnsupportedOnTarget=" << counts.expectedUnsupportedOnTarget
+                    << " unexpectedUnsupportedOnTarget=" << counts.unexpectedUnsupportedOnTarget
+                    << " unknownLabels=" << counts.unknownLabels
                     << " totalLabels=" << counts.totalLabels << "\n";
             }
 
@@ -2376,10 +2405,12 @@ namespace gxos {
                 << " totalBareMetalAvailable=" << summary.totalBareMetalAvailable
                 << " hostedOnly=" << summary.totalHostedOnly
                 << " bareMetalOnly=" << summary.totalBareMetalOnly
-                << " unsupportedOnTarget=" << summary.totalUnsupported << "\n";
+                << " expectedUnsupportedOnTarget=" << summary.totalExpectedUnsupported
+                << " unexpectedUnsupportedOnTarget=" << summary.totalUnexpectedUnsupported
+                << " unknownLabels=" << summary.totalUnknownLabels << "\n";
 
-            oss << "status: " << (summary.totalUnsupported > 0 ? "WARN" : "OK")
-                << " note: Unknown/unsupported counts are non-fatal and informational\n";
+            oss << "status: " << (summary.totalUnexpectedUnsupported > 0 ? "WARN" : "OK")
+                << " note: Expected target-specific unsupported labels and unknown probe labels are non-fatal and informational\n";
 
             return oss.str();
         }
