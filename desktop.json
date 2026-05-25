@@ -4,7 +4,7 @@
   "desktop.background.scale": "fill",
   "desktop.taskbar.position": "bottom",
   "pinned": ["ComputerFiles","Trash","App Model Demo","Native App Debug Viewer","Hello World","Resource Viewer","Future GXApp Package","HelloWorld ELF"],
-  "recent": ["guideXOS Navigator","Future GXApp Package","HelloWorld ELF","Native App Debug Viewer","Console","ComputerFiles","TaskManager","ControlPanel","HDInstaller","Notepad","Calculator","App Model Demo","Hello World","Resource Viewer"],
+  "recent": ["ComputerFiles","HelloWorld ELF","Native App Debug Viewer","Hello World","Resource Viewer","TaskManager","guideXOS Navigator","Future GXApp Package","Console","ControlPanel","HDInstaller","Notepad","Calculator","App Model Demo"],
   "desktopShortcuts": [
   ],
   "showDesktopTrash": true,
@@ -15,5 +15,6 @@
     {"id": 1000, "title": "Network Timeout - guideXOS Navigator", "x": 300, "y": 300, "w": 920, "h": 640, "minimized": false, "maximized": false, "z": 0, "focused": true, "snap": 0}
   ],
   "iconPositions": [
+    {"name": "shortcut:app:guidexos.navigator", "x": 272, "y": 20}
   ]
 }
