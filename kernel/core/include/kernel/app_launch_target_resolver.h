@@ -14,6 +14,8 @@ void printLaunchTargetDiagnostic(const char* label, LaunchTargetDiagnosticWriter
 const char* legacyDispatchStringForLaunchTarget(const gxos::apps::LaunchTarget& target, const char** status, const char** reason);
 void printLaunchTargetAdapterDiagnostic(const char* label, LaunchTargetDiagnosticWriter write);
 void printLaunchTargetComparisonDiagnostic(LaunchTargetDiagnosticWriter write);
+void printLaunchStorageDiagnostic(LaunchTargetDiagnosticWriter write);
+void printLaunchStoragePreviewDiagnostic(LaunchTargetDiagnosticWriter write);
 
 } // namespace appmodel
 } // namespace kernel

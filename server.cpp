@@ -350,7 +350,7 @@ static void help(){
                  " gui.rect <id> <x> <y> <w> <h> <r> <g> <b> | gui.move <id> <x> <y> | gui.resize <id> <w> <h> | gui.title <id> <title>\n"
                  " gui.btn <win> <id> <x> <y> <w> <h> <text> | gui.pop | gui.wlist | gui.activate <id> | gui.min <id>\n"
                  " gxm.load <path> | gxm.sample | gui.save <path> | gui.load <path>\n"
-                 " desktop.wallpaper <path> | desktop.launch <action> | desktop.launch.resolve <label> | desktop.launch.adapt <label> | desktop.launch.compare | desktop.pin <action> | desktop.unpin <action> | desktop.showconfig\n"
+                 " desktop.wallpaper <path> | desktop.launch <action> | desktop.launch.resolve <label> | desktop.launch.adapt <label> | desktop.launch.compare | desktop.launch.storage | desktop.launch.storage.preview | desktop.pin <action> | desktop.unpin <action> | desktop.showconfig\n"
                  " desktop.apps | desktop.apps.verbose | desktop.appmodel.summary | desktop.appmodel.coverage | desktop.pinned | desktop.recent | desktop.pinapp <name> | desktop.pinfile <name> <path>\n"
                  " nativeapp.capabilities | nativeapp.inspect <app> | nativeapp.smoketest <app> | nativeapp.processes\n"
                  " taskbar.list | taskbar.activate <id> | taskbar.min <id> | taskbar.close <id>\n"
@@ -561,6 +561,12 @@ using namespace gxos;
         }
         else if (cmd=="desktop.launch.compare"){
             std::cout << gui::DesktopService::LaunchTargetComparisonDiagnostic();
+        }
+        else if (cmd=="desktop.launch.storage"){
+            std::cout << gui::DesktopService::LaunchStorageDiagnostic();
+        }
+        else if (cmd=="desktop.launch.storage.preview"){
+            std::cout << gui::DesktopService::LaunchStoragePreviewDiagnostic();
         }
         else if (cmd=="desktop.launch"){
             if(!requireCompositor()) continue;

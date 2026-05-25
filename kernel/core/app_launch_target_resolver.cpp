@@ -206,6 +206,154 @@ static void write_bool_pair(LaunchTargetDiagnosticWriter write, const char* key,
     write_pair(write, key, value ? "true" : "false");
 }
 
+static void write_uint(LaunchTargetDiagnosticWriter write, unsigned int value)
+{
+    char buf[16];
+    int pos = 0;
+    if (value == 0) {
+        buf[pos++] = '0';
+    } else {
+        char tmp[16];
+        int t = 0;
+        while (value && t < 15) {
+            tmp[t++] = (char)('0' + (value % 10));
+            value /= 10;
+        }
+        while (t > 0) buf[pos++] = tmp[--t];
+    }
+    buf[pos] = '\0';
+    write(buf);
+}
+
+static void write_quoted(LaunchTargetDiagnosticWriter write, const char* value)
+{
+    write("\"");
+    write(value ? value : "");
+    write("\"");
+}
+
+struct LaunchStoragePreviewCounters {
+    unsigned int total;
+    unsigned int ready;
+    unsigned int alias;
+    unsigned int shellAction;
+    unsigned int unresolved;
+    unsigned int skippedLayoutOnly;
+    unsigned int highRisk;
+    unsigned int printed;
+    unsigned int truncated;
+};
+
+static const char* preview_status_for_target(const gxos::apps::LaunchTarget& target)
+{
+    if (target.type == gxos::apps::LaunchTargetType::Unknown) return "unresolved";
+    if (target.type == gxos::apps::LaunchTargetType::LegacyAlias) return "alias";
+    if (target.type == gxos::apps::LaunchTargetType::ShellAction) return "shell-action";
+    return "ready";
+}
+
+static const char* preview_risk_for_status(const char* baseRisk, const char* status)
+{
+    if (text_equals(status, "unresolved")) return "high";
+    if (text_equals(status, "alias") || text_equals(status, "shell-action")) return "medium";
+    return baseRisk && baseRisk[0] ? baseRisk : "medium";
+}
+
+static const char* preview_existing_kind(const char* value, const gxos::apps::LaunchTarget& target, const char* hint)
+{
+    if (hint && hint[0]) return hint;
+    if (target.type == gxos::apps::LaunchTargetType::LegacyAlias) return "legacy alias";
+    if (target.type == gxos::apps::LaunchTargetType::ShellAction) return "shell action";
+    if (target.type == gxos::apps::LaunchTargetType::FileOpen || is_path_like(value)) return "file path";
+    if (target.appId && target.appId[0] && text_equals(value, target.appId)) return "app ID";
+    if (target.displayName && target.displayName[0] && text_equals(value, target.displayName)) return "display name";
+    if (target.dispatchLaunchName && target.dispatchLaunchName[0] && text_equals(value, target.dispatchLaunchName)) return "launch name";
+    return target.type == gxos::apps::LaunchTargetType::Unknown ? "unknown" : "launch string";
+}
+
+static void preview_count_status(LaunchStoragePreviewCounters& counters, const char* status, const char* risk)
+{
+    ++counters.total;
+    if (text_equals(status, "ready")) ++counters.ready;
+    else if (text_equals(status, "alias")) ++counters.alias;
+    else if (text_equals(status, "shell-action")) ++counters.shellAction;
+    else if (text_equals(status, "skip-layout-only")) ++counters.skippedLayoutOnly;
+    else ++counters.unresolved;
+    if (text_equals(risk, "high")) ++counters.highRisk;
+}
+
+static void write_preview_record(LaunchTargetDiagnosticWriter write, LaunchStoragePreviewCounters& counters, const char* site, unsigned int index, const char* value, const char* existingKindHint, const char* baseRisk, unsigned int maxRows)
+{
+    gxos::apps::LaunchTarget target = resolveLaunchTarget(value);
+    const char* adapterStatus = "";
+    const char* adapterReason = "";
+    const char* legacyDispatch = legacyDispatchStringForLaunchTarget(target, &adapterStatus, &adapterReason);
+    const char* status = preview_status_for_target(target);
+    const char* risk = preview_risk_for_status(baseRisk, status);
+    preview_count_status(counters, status, risk);
+
+    if (counters.printed >= maxRows) {
+        ++counters.truncated;
+        return;
+    }
+
+    ++counters.printed;
+    write("  record site=");
+    write(site);
+    write(" index=");
+    write_uint(write, index);
+    write(" existing=");
+    write_quoted(write, value);
+    write(" existingKind=");
+    write_quoted(write, preview_existing_kind(value, target, existingKindHint));
+    write(" resolvedType=");
+    write(gxos::apps::ToString(target.type));
+    write(" appId=");
+    write_quoted(write, target.appId);
+    write(" displayName=");
+    write_quoted(write, target.displayName);
+    write(" legacyDispatch=");
+    write_quoted(write, legacyDispatch);
+    write(" proposed={targetType=");
+    write(gxos::apps::ToString(target.type));
+    if (target.appId && target.appId[0]) { write(",appId="); write_quoted(write, target.appId); }
+    if (target.displayName && target.displayName[0]) { write(",displayName="); write_quoted(write, target.displayName); }
+    if (target.dispatchLaunchName && target.dispatchLaunchName[0]) { write(",launchName="); write_quoted(write, target.dispatchLaunchName); }
+    if (target.legacyAlias && target.legacyAlias[0]) { write(",legacyAlias="); write_quoted(write, target.legacyAlias); }
+    if (target.shellAction && target.shellAction[0]) { write(",shellAction="); write_quoted(write, target.shellAction); }
+    if (target.pathParameter && target.pathParameter[0]) { write(",path="); write_quoted(write, target.pathParameter); }
+    write(",hosted=");
+    write(target.hostedAvailable ? "true" : "false");
+    write(",bareMetal=");
+    write(target.bareMetalAvailable ? "true" : "false");
+    write("} risk=");
+    write(risk);
+    write(" status=");
+    write(status);
+    write(" reason=");
+    write_quoted(write, target.diagnosticReason);
+    write("\n");
+}
+
+static void write_preview_skip_record(LaunchTargetDiagnosticWriter write, LaunchStoragePreviewCounters& counters, const char* site, unsigned int index, const char* value, const char* note, unsigned int maxRows)
+{
+    preview_count_status(counters, "skip-layout-only", "low");
+    if (counters.printed >= maxRows) {
+        ++counters.truncated;
+        return;
+    }
+    ++counters.printed;
+    write("  record site=");
+    write(site);
+    write(" index=");
+    write_uint(write, index);
+    write(" existing=");
+    write_quoted(write, value);
+    write(" existingKind=\"layout key\" resolvedType=Unknown appId=\"\" displayName=\"\" legacyDispatch=\"\" proposed={skip=\"layout-only\"} risk=low status=skip-layout-only reason=");
+    write_quoted(write, note);
+    write("\n");
+}
+
 void printLaunchTargetDiagnostic(const gxos::apps::LaunchTarget& target, LaunchTargetDiagnosticWriter write)
 {
     if (!write) return;
@@ -498,6 +646,161 @@ void printLaunchTargetComparisonDiagnostic(LaunchTargetDiagnosticWriter write)
     write("\noverall: ");
     write(unexpectedDriftCount == 0 ? "OK" : "WARN");
     write("\nnonFatal: true\n");
+}
+
+void printLaunchStorageDiagnostic(LaunchTargetDiagnosticWriter write)
+{
+    if (!write) return;
+
+    write("[LaunchStringStorage]\n");
+    write("nonFatal: true\n");
+    write("migrationState: not-started\n");
+    write("hostedReference: desktop.launch.storage in hosted shell reports live desktop.json counts\n");
+    write("bareMetalSites:\n");
+    write("  site=desktop.cpp:s_startMenuApps[].name location=kernel/core/desktop.cpp fields=name,pinned,recent stores=kernel launch name or legacy alias count=14 typedDerivable=mostly risk=medium note=static Start Menu pinned/recent list includes AppModel and Files aliases\n");
+    write("  site=desktop.cpp:s_allProgramsList[] location=kernel/core/desktop.cpp fields=string stores=kernel launch name or legacy alias count=14 typedDerivable=mostly risk=medium note=static All Programs list, not manifest-driven\n");
+    write("  site=VFS:/desktop.shortcuts location=/desktop.shortcuts fields=shortcutType<TAB>target<TAB>label stores=App launch name or File/Folder path plus label count=up-to-16 typedDerivable=yes risk=medium note=bare-metal persisted shortcut format v2\n");
+    write("  site=desktop.cpp:s_desktopIcons[] location=kernel/core/desktop.cpp fields=label,path,pinned,recent,kind,systemObject stores=system labels, app launch names, file paths count=static+dynamic typedDerivable=mostly risk=medium note=runtime desktop source for icon launch and recent flags\n");
+    write("  site=VFS:/.desktop_icons location=/.desktop_icons fields=layoutKey<TAB>x<TAB>y stores=layout key, not launch source count=dynamic typedDerivable=not-applicable risk=low note=position-only storage can keep old string keys through migration\n");
+    write("  site=VFS:/desktop.system.icons location=/desktop.system.icons fields=Trash,ThisSystem,FileManager,SystemSettings stores=system object visibility flags count=4 typedDerivable=not-applicable risk=low note=shell/system affordance visibility, not app identity\n");
+    write("  site=desktop.cpp:s_taskbarEntries[] location=kernel/core/desktop.cpp fields=title,color,active stores=taskbar entry label, currently disabled/static count=0 typedDerivable=not-applicable risk=low note=no separate bare-metal taskbar pin storage found in this pass\n");
+}
+
+static void copy_preview_field(const char* src, int len, char* out, int outSize)
+{
+    if (!out || outSize <= 0) return;
+    int n = len;
+    if (n >= outSize) n = outSize - 1;
+    for (int i = 0; i < n; ++i) out[i] = src[i];
+    out[n] = '\0';
+}
+
+void printLaunchStoragePreviewDiagnostic(LaunchTargetDiagnosticWriter write)
+{
+    if (!write) return;
+
+    const unsigned int maxRows = 96;
+    LaunchStoragePreviewCounters counters{};
+
+    write("[LaunchStringStoragePreview]\n");
+    write("nonFatal: true\n");
+    write("migrationState: preview-only\n");
+    write("writesStorage: false\n");
+    write("target: bare-metal\n");
+    write("rowCap: ");
+    write_uint(write, maxRows);
+    write("\n");
+    write("records:\n");
+
+    const char* startMenuApps[] = {
+        "Calculator", "Notepad", "Console", "Trash", "TaskManager", "DiskManager",
+        "DisplayOptions", "guideXOS Navigator", "HDInstaller", "AppModel", "Paint",
+        "Clock", "Files", "ImgViewer"
+    };
+    for (unsigned int i = 0; i < sizeof(startMenuApps) / sizeof(startMenuApps[0]); ++i) {
+        write_preview_record(write, counters, "desktop.cpp:s_startMenuApps[].name", i, startMenuApps[i], "", "medium", maxRows);
+    }
+
+    const char* allPrograms[] = {
+        "Calculator", "Clock", "Console", "ControlPanel", "DiskManager", "Files",
+        "guideXOS Navigator", "HDInstaller", "ImgViewer", "AppModel", "Notepad",
+        "Paint", "TaskManager", "Trash"
+    };
+    for (unsigned int i = 0; i < sizeof(allPrograms) / sizeof(allPrograms[0]); ++i) {
+        write_preview_record(write, counters, "desktop.cpp:s_allProgramsList[]", i, allPrograms[i], "", "medium", maxRows);
+    }
+
+    const char* rightColumn[] = {
+        "Computer", "Documents", "Pictures", "Music", "Network", "Control Panel", "Settings"
+    };
+    for (unsigned int i = 0; i < sizeof(rightColumn) / sizeof(rightColumn[0]); ++i) {
+        write_preview_record(write, counters, "desktop.cpp:s_startMenuRight[].label", i, rightColumn[i], "shell action", "medium", maxRows);
+    }
+
+    char shortcuts[2048];
+    int32_t shortcutBytes = vfs::read_file("/desktop.shortcuts", shortcuts, sizeof(shortcuts) - 1);
+    if (shortcutBytes > 0) {
+        shortcuts[shortcutBytes] = '\0';
+        unsigned int index = 0;
+        int lineStart = 0;
+        for (int i = 0; i <= shortcutBytes && index < 16; ++i) {
+            if (shortcuts[i] != '\n' && shortcuts[i] != '\0') continue;
+            int lineEnd = i;
+            if (lineEnd > lineStart && shortcuts[lineEnd - 1] == '\r') --lineEnd;
+            if (lineEnd > lineStart) {
+                int tab1 = -1;
+                int tab2 = -1;
+                for (int j = lineStart; j < lineEnd; ++j) {
+                    if (shortcuts[j] == '\t') {
+                        if (tab1 < 0) tab1 = j;
+                        else { tab2 = j; break; }
+                    }
+                }
+                if (tab1 > lineStart && tab2 > tab1) {
+                    char type[16];
+                    char target[160];
+                    copy_preview_field(shortcuts + lineStart, tab1 - lineStart, type, sizeof(type));
+                    copy_preview_field(shortcuts + tab1 + 1, tab2 - tab1 - 1, target, sizeof(target));
+                    const char* kind = (text_equals(type, "App")) ? "launch name" : "file path";
+                    write_preview_record(write, counters, "VFS:/desktop.shortcuts", index, target, kind, "medium", maxRows);
+                    ++index;
+                }
+            }
+            lineStart = i + 1;
+        }
+    }
+
+    const char* systemIconFlags[] = { "Trash", "ThisSystem", "FileManager", "SystemSettings" };
+    for (unsigned int i = 0; i < sizeof(systemIconFlags) / sizeof(systemIconFlags[0]); ++i) {
+        write_preview_skip_record(write, counters, "VFS:/desktop.system.icons", i, systemIconFlags[i], "System icon visibility flag, not a launch target record", maxRows);
+    }
+
+    char iconLayout[2048];
+    int32_t layoutBytes = vfs::read_file("/.desktop_icons", iconLayout, sizeof(iconLayout) - 1);
+    if (layoutBytes > 0) {
+        iconLayout[layoutBytes] = '\0';
+        unsigned int index = 0;
+        int lineStart = 0;
+        for (int i = 0; i <= layoutBytes && index < 32; ++i) {
+            if (iconLayout[i] != '\n' && iconLayout[i] != '\0') continue;
+            int lineEnd = i;
+            if (lineEnd > lineStart && iconLayout[lineEnd - 1] == '\r') --lineEnd;
+            if (lineEnd > lineStart) {
+                int tab = -1;
+                for (int j = lineStart; j < lineEnd; ++j) {
+                    if (iconLayout[j] == '\t') { tab = j; break; }
+                }
+                if (tab > lineStart) {
+                    char key[160];
+                    copy_preview_field(iconLayout + lineStart, tab - lineStart, key, sizeof(key));
+                    write_preview_skip_record(write, counters, "VFS:/.desktop_icons", index, key, "Icon position record stores layout only and should not become a launch target", maxRows);
+                    ++index;
+                }
+            }
+            lineStart = i + 1;
+        }
+    }
+
+    write("summary: totalRecords=");
+    write_uint(write, counters.total);
+    write(" ready=");
+    write_uint(write, counters.ready);
+    write(" alias=");
+    write_uint(write, counters.alias);
+    write(" shellAction=");
+    write_uint(write, counters.shellAction);
+    write(" unresolved=");
+    write_uint(write, counters.unresolved);
+    write(" skippedLayoutOnly=");
+    write_uint(write, counters.skippedLayoutOnly);
+    write(" highRisk=");
+    write_uint(write, counters.highRisk);
+    write(" printed=");
+    write_uint(write, counters.printed);
+    write(" truncated=");
+    write_uint(write, counters.truncated);
+    write("\n");
+    write("notes: desktop.cpp:s_taskbarEntries[] count=0, so no taskbar pin records are previewed\n");
 }
 
 } // namespace appmodel

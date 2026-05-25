@@ -683,11 +683,206 @@ namespace gxos {
             return !target.dispatchLaunchName.empty() && target.dispatchLaunchName != actualDispatch;
         }
 
-        static void appendLaunchTargetShadowSourceLine(std::ostringstream& oss, const char* source, uint64_t observations, uint64_t unresolved, uint64_t aliasFallback) {
+        static bool launchTargetShadowAdapterMismatchIsAccepted(const apps::LaunchTarget& target, const std::string& actualDispatch, const std::string& adapterLegacyDispatch) {
+            if (adapterLegacyDispatch.empty() || adapterLegacyDispatch == actualDispatch) return false;
+            if (target.type == apps::LaunchTargetType::LegacyAlias || target.type == apps::LaunchTargetType::ShellAction) return true;
+            if (target.diagnosticStatus == "resolved-alias" || target.diagnosticStatus == "resolved-shell") return true;
+            return false;
+        }
+
+        static std::string launchTargetShadowAdapterComparisonStatus(const apps::LaunchTarget& target, const std::string& actualDispatch, const std::string& adapterLegacyDispatch) {
+            if (!adapterLegacyDispatch.empty() && adapterLegacyDispatch == actualDispatch) return "match";
+            if (launchTargetShadowAdapterMismatchIsAccepted(target, actualDispatch, adapterLegacyDispatch)) return "accepted-mismatch";
+            return "unexpected-mismatch";
+        }
+
+        static void countLaunchTargetShadowAdapterComparison(uint64_t& matches, uint64_t& acceptedMismatches, uint64_t& unexpectedMismatches, const std::string& comparisonStatus) {
+            if (comparisonStatus == "match") ++matches;
+            else if (comparisonStatus == "accepted-mismatch") ++acceptedMismatches;
+            else ++unexpectedMismatches;
+        }
+
+        static void appendLaunchTargetShadowSourceLine(std::ostringstream& oss, const char* source, uint64_t observations, uint64_t unresolved, uint64_t aliasFallback, uint64_t adapterMatches, uint64_t adapterAcceptedMismatches, uint64_t adapterUnexpectedMismatches) {
             oss << "  source=" << source
                 << " observations=" << observations
                 << " unresolved=" << unresolved
-                << " aliasFallback=" << aliasFallback << "\n";
+                << " aliasFallback=" << aliasFallback
+                << " adapterMatches=" << adapterMatches
+                << " adapterAcceptedMismatches=" << adapterAcceptedMismatches
+                << " adapterUnexpectedMismatches=" << adapterUnexpectedMismatches << "\n";
+        }
+
+        struct LaunchStorageResolutionCounts {
+            size_t total = 0;
+            size_t typedDerivable = 0;
+            size_t unresolved = 0;
+        };
+
+        static void countLaunchStorageLabel(LaunchStorageResolutionCounts& counts, const std::string& label) {
+            if (label.empty()) return;
+            ++counts.total;
+            const apps::LaunchTarget target = DesktopService::ResolveLaunchTarget(label);
+            if (target.type == apps::LaunchTargetType::Unknown) ++counts.unresolved;
+            else ++counts.typedDerivable;
+        }
+
+        static LaunchStorageResolutionCounts countLaunchStorageLabels(const std::vector<std::string>& labels) {
+            LaunchStorageResolutionCounts counts;
+            for (const std::string& label : labels) countLaunchStorageLabel(counts, label);
+            return counts;
+        }
+
+        static void appendLaunchStorageSite(std::ostringstream& oss, const std::string& site, const std::string& location, const std::string& fields, const std::string& stores, const LaunchStorageResolutionCounts& counts, const std::string& risk, const std::string& note) {
+            oss << "  site=" << site
+                << " location=" << location
+                << " fields=" << fields
+                << " stores=" << stores
+                << " count=" << counts.total
+                << " typedDerivable=" << counts.typedDerivable
+                << " unresolved=" << counts.unresolved
+                << " risk=" << risk
+                << " note=" << note << "\n";
+        }
+
+        static void appendLaunchStorageStaticSite(std::ostringstream& oss, const std::string& site, const std::string& location, const std::string& fields, const std::string& stores, const std::string& count, const std::string& typedDerivable, const std::string& risk, const std::string& note) {
+            oss << "  site=" << site
+                << " location=" << location
+                << " fields=" << fields
+                << " stores=" << stores
+                << " count=" << count
+                << " typedDerivable=" << typedDerivable
+                << " risk=" << risk
+                << " note=" << note << "\n";
+        }
+
+        struct LaunchStoragePreviewCounts {
+            size_t total = 0;
+            size_t ready = 0;
+            size_t alias = 0;
+            size_t shellAction = 0;
+            size_t unresolved = 0;
+            size_t skippedLayoutOnly = 0;
+            size_t highRisk = 0;
+            size_t printed = 0;
+            size_t truncated = 0;
+        };
+
+        static std::string quoteDiagnosticValue(const std::string& value) {
+            std::ostringstream out;
+            out << '"';
+            for (char ch : value) {
+                if (ch == '"' || ch == '\\') out << '\\' << ch;
+                else if (ch == '\n') out << "\\n";
+                else if (ch == '\r') out << "\\r";
+                else out << ch;
+            }
+            out << '"';
+            return out.str();
+        }
+
+        static std::string launchStorageExistingKind(const std::string& value, const apps::LaunchTarget& target, const std::string& hint) {
+            if (!hint.empty()) return hint;
+            if (target.type == apps::LaunchTargetType::LegacyAlias) return "legacy alias";
+            if (target.type == apps::LaunchTargetType::ShellAction) return "shell action";
+            if (target.type == apps::LaunchTargetType::FileOpen || isPathLikeLaunchLabel(value)) return "file path";
+            if (!target.appId.empty() && value == target.appId) return "app ID";
+            if (!target.displayName.empty() && value == target.displayName) return "display name";
+            if (!target.dispatchLaunchName.empty() && value == target.dispatchLaunchName) return "launch name";
+            return target.type == apps::LaunchTargetType::Unknown ? "unknown" : "launch string";
+        }
+
+        static std::string launchStoragePreviewStatus(const apps::LaunchTarget& target) {
+            if (target.type == apps::LaunchTargetType::Unknown) return "unresolved";
+            if (target.type == apps::LaunchTargetType::LegacyAlias) return "alias";
+            if (target.type == apps::LaunchTargetType::ShellAction) return "shell-action";
+            return "ready";
+        }
+
+        static std::string launchStoragePreviewRisk(const std::string& baseRisk, const std::string& status) {
+            if (status == "unresolved") return "high";
+            if (status == "alias" || status == "shell-action") return "medium";
+            return baseRisk.empty() ? "medium" : baseRisk;
+        }
+
+        static std::string proposedLaunchTargetRecord(const apps::LaunchTarget& target) {
+            std::ostringstream record;
+            record << "{targetType=" << apps::ToString(target.type);
+            if (!target.appId.empty()) record << ",appId=" << quoteDiagnosticValue(target.appId);
+            if (!target.displayName.empty()) record << ",displayName=" << quoteDiagnosticValue(target.displayName);
+            if (!target.dispatchLaunchName.empty()) record << ",launchName=" << quoteDiagnosticValue(target.dispatchLaunchName);
+            if (!target.legacyAlias.empty()) record << ",legacyAlias=" << quoteDiagnosticValue(target.legacyAlias);
+            if (!target.shellAction.empty()) record << ",shellAction=" << quoteDiagnosticValue(target.shellAction);
+            if (!target.pathParameter.empty()) record << ",path=" << quoteDiagnosticValue(target.pathParameter);
+            record << ",hosted=" << diagnosticBool(target.hostedAvailable)
+                   << ",bareMetal=" << diagnosticBool(target.bareMetalAvailable)
+                   << "}";
+            return record.str();
+        }
+
+        static void countLaunchStoragePreviewStatus(LaunchStoragePreviewCounts& counts, const std::string& status, const std::string& risk) {
+            ++counts.total;
+            if (status == "ready") ++counts.ready;
+            else if (status == "alias") ++counts.alias;
+            else if (status == "shell-action") ++counts.shellAction;
+            else if (status == "skip-layout-only") ++counts.skippedLayoutOnly;
+            else ++counts.unresolved;
+            if (risk == "high") ++counts.highRisk;
+        }
+
+        static void appendLaunchStoragePreviewRecord(std::ostringstream& oss, LaunchStoragePreviewCounts& counts, const std::string& site, size_t index, const std::string& value, const std::string& existingKindHint, const std::string& baseRisk, const size_t maxRows) {
+            const apps::LaunchTarget target = DesktopService::ResolveLaunchTarget(value);
+            std::string adapterStatus;
+            std::string adapterReason;
+            const std::string legacyDispatch = DesktopService::LegacyDispatchStringForLaunchTarget(target, adapterStatus, adapterReason);
+            const std::string status = launchStoragePreviewStatus(target);
+            const std::string risk = launchStoragePreviewRisk(baseRisk, status);
+            countLaunchStoragePreviewStatus(counts, status, risk);
+
+            if (counts.printed >= maxRows) {
+                ++counts.truncated;
+                return;
+            }
+
+            ++counts.printed;
+            oss << "  record site=" << site
+                << " index=" << index
+                << " existing=" << quoteDiagnosticValue(value)
+                << " existingKind=" << quoteDiagnosticValue(launchStorageExistingKind(value, target, existingKindHint))
+                << " resolvedType=" << apps::ToString(target.type)
+                << " appId=" << quoteDiagnosticValue(target.appId)
+                << " displayName=" << quoteDiagnosticValue(target.displayName)
+                << " legacyDispatch=" << quoteDiagnosticValue(legacyDispatch)
+                << " proposed=" << proposedLaunchTargetRecord(target)
+                << " risk=" << risk
+                << " status=" << status;
+            if (!target.diagnosticReason.empty()) oss << " reason=" << quoteDiagnosticValue(target.diagnosticReason);
+            oss << "\n";
+        }
+
+        static void appendLaunchStoragePreviewSkip(std::ostringstream& oss, LaunchStoragePreviewCounts& counts, const std::string& site, size_t index, const std::string& value, const std::string& note, const size_t maxRows) {
+            countLaunchStoragePreviewStatus(counts, "skip-layout-only", "low");
+            if (counts.printed >= maxRows) {
+                ++counts.truncated;
+                return;
+            }
+
+            ++counts.printed;
+            oss << "  record site=" << site
+                << " index=" << index
+                << " existing=" << quoteDiagnosticValue(value)
+                << " existingKind=\"layout key\""
+                << " resolvedType=Unknown"
+                << " appId=\"\" displayName=\"\" legacyDispatch=\"\""
+                << " proposed={skip=\"layout-only\"}"
+                << " risk=low"
+                << " status=skip-layout-only"
+                << " reason=" << quoteDiagnosticValue(note) << "\n";
+        }
+
+        static void appendLaunchStoragePreviewLabels(std::ostringstream& oss, LaunchStoragePreviewCounts& counts, const std::string& site, const std::vector<std::string>& labels, const std::string& existingKindHint, const std::string& risk, const size_t maxRows) {
+            for (size_t i = 0; i < labels.size(); ++i) {
+                appendLaunchStoragePreviewRecord(oss, counts, site, i, labels[i], existingKindHint, risk, maxRows);
+            }
         }
 
         static const char* const kLaunchTargetComparisonLabels[] = {
@@ -1116,11 +1311,14 @@ namespace gxos {
             oss << "launchTargetShadow: observations=" << shadowCounters.totalObservations
                 << " unresolved=" << shadowCounters.unresolvedObservations
                 << " aliasFallback=" << shadowCounters.aliasFallbackObservations
+                << " adapterMatches=" << shadowCounters.adapterMatches
+                << " adapterAcceptedMismatches=" << shadowCounters.adapterAcceptedMismatches
+                << " adapterUnexpectedMismatches=" << shadowCounters.adapterUnexpectedMismatches
                 << " startMenu=" << shadowCounters.startMenuObservations
                 << " desktopShortcut=" << shadowCounters.desktopShortcutObservations
                 << " nonFatal=true\n";
             oss << "overall: " << statusText(overallOk) << "\n";
-            oss << "detailCommands: desktop.appmodel.coverage, desktop.apps.verbose, desktop.launch.compare\n";
+            oss << "detailCommands: desktop.appmodel.coverage, desktop.apps.verbose, desktop.launch.compare, desktop.launch.storage, desktop.launch.storage.preview\n";
             return oss.str();
         }
 
@@ -1337,28 +1535,51 @@ namespace gxos {
             return oss.str();
         }
 
-        void DesktopService::RecordLaunchTargetShadowObservation(const std::string& source, const apps::LaunchTarget& target, const std::string& actualDispatch) {
+        std::string DesktopService::RecordLaunchTargetShadowObservation(const std::string& source, const apps::LaunchTarget& target, const std::string& actualDispatch, const std::string& adapterLegacyDispatch) {
             const bool unresolved = launchTargetShadowIsUnresolved(target);
             const bool aliasFallback = launchTargetShadowIsAliasFallback(target, actualDispatch);
+            const std::string adapterComparisonStatus = launchTargetShadowAdapterComparisonStatus(target, actualDispatch, adapterLegacyDispatch);
 
             std::lock_guard<std::mutex> lock(s_launchTargetShadowCountersMutex);
             ++s_launchTargetShadowCounters.totalObservations;
             if (unresolved) ++s_launchTargetShadowCounters.unresolvedObservations;
             if (aliasFallback) ++s_launchTargetShadowCounters.aliasFallbackObservations;
+            countLaunchTargetShadowAdapterComparison(
+                s_launchTargetShadowCounters.adapterMatches,
+                s_launchTargetShadowCounters.adapterAcceptedMismatches,
+                s_launchTargetShadowCounters.adapterUnexpectedMismatches,
+                adapterComparisonStatus);
 
             if (source == "StartMenu") {
                 ++s_launchTargetShadowCounters.startMenuObservations;
                 if (unresolved) ++s_launchTargetShadowCounters.startMenuUnresolved;
                 if (aliasFallback) ++s_launchTargetShadowCounters.startMenuAliasFallback;
+                countLaunchTargetShadowAdapterComparison(
+                    s_launchTargetShadowCounters.startMenuAdapterMatches,
+                    s_launchTargetShadowCounters.startMenuAdapterAcceptedMismatches,
+                    s_launchTargetShadowCounters.startMenuAdapterUnexpectedMismatches,
+                    adapterComparisonStatus);
             } else if (source == "DesktopShortcut") {
                 ++s_launchTargetShadowCounters.desktopShortcutObservations;
                 if (unresolved) ++s_launchTargetShadowCounters.desktopShortcutUnresolved;
                 if (aliasFallback) ++s_launchTargetShadowCounters.desktopShortcutAliasFallback;
+                countLaunchTargetShadowAdapterComparison(
+                    s_launchTargetShadowCounters.desktopShortcutAdapterMatches,
+                    s_launchTargetShadowCounters.desktopShortcutAdapterAcceptedMismatches,
+                    s_launchTargetShadowCounters.desktopShortcutAdapterUnexpectedMismatches,
+                    adapterComparisonStatus);
             } else {
                 ++s_launchTargetShadowCounters.otherObservations;
                 if (unresolved) ++s_launchTargetShadowCounters.otherUnresolved;
                 if (aliasFallback) ++s_launchTargetShadowCounters.otherAliasFallback;
+                countLaunchTargetShadowAdapterComparison(
+                    s_launchTargetShadowCounters.otherAdapterMatches,
+                    s_launchTargetShadowCounters.otherAdapterAcceptedMismatches,
+                    s_launchTargetShadowCounters.otherAdapterUnexpectedMismatches,
+                    adapterComparisonStatus);
             }
+
+            return adapterComparisonStatus;
         }
 
         LaunchTargetShadowCounters DesktopService::GetLaunchTargetShadowCounters() {
@@ -1374,12 +1595,300 @@ namespace gxos {
             oss << "observations: " << counters.totalObservations << "\n";
             oss << "unresolved: " << counters.unresolvedObservations << "\n";
             oss << "aliasFallback: " << counters.aliasFallbackObservations << "\n";
+            oss << "adapterMatches: " << counters.adapterMatches << "\n";
+            oss << "adapterAcceptedMismatches: " << counters.adapterAcceptedMismatches << "\n";
+            oss << "adapterUnexpectedMismatches: " << counters.adapterUnexpectedMismatches << "\n";
             oss << "bySource:\n";
-            appendLaunchTargetShadowSourceLine(oss, "StartMenu", counters.startMenuObservations, counters.startMenuUnresolved, counters.startMenuAliasFallback);
-            appendLaunchTargetShadowSourceLine(oss, "DesktopShortcut", counters.desktopShortcutObservations, counters.desktopShortcutUnresolved, counters.desktopShortcutAliasFallback);
-            appendLaunchTargetShadowSourceLine(oss, "Other", counters.otherObservations, counters.otherUnresolved, counters.otherAliasFallback);
+            appendLaunchTargetShadowSourceLine(oss, "StartMenu", counters.startMenuObservations, counters.startMenuUnresolved, counters.startMenuAliasFallback, counters.startMenuAdapterMatches, counters.startMenuAdapterAcceptedMismatches, counters.startMenuAdapterUnexpectedMismatches);
+            appendLaunchTargetShadowSourceLine(oss, "DesktopShortcut", counters.desktopShortcutObservations, counters.desktopShortcutUnresolved, counters.desktopShortcutAliasFallback, counters.desktopShortcutAdapterMatches, counters.desktopShortcutAdapterAcceptedMismatches, counters.desktopShortcutAdapterUnexpectedMismatches);
+            appendLaunchTargetShadowSourceLine(oss, "Other", counters.otherObservations, counters.otherUnresolved, counters.otherAliasFallback, counters.otherAdapterMatches, counters.otherAdapterAcceptedMismatches, counters.otherAdapterUnexpectedMismatches);
             oss << "reset: not available\n";
             oss << "nonFatal: true\n";
+            return oss.str();
+        }
+
+        std::string DesktopService::LaunchStorageDiagnostic() {
+            ensureDefaultAppsRegistered();
+
+            DesktopConfigData cfg;
+            std::string cfgErr;
+            const bool cfgLoaded = DesktopConfig::Load("desktop.json", cfg, cfgErr);
+
+            std::vector<std::string> desktopShortcutAppTargets;
+            std::vector<std::string> desktopShortcutFileTargets;
+            if (cfgLoaded) {
+                for (const DesktopShortcutRec& shortcut : cfg.desktopShortcuts) {
+                    const std::string type = shortcut.shortcutType.empty() ? (shortcut.targetPath.empty() ? "App" : "File") : shortcut.shortcutType;
+                    if (type == "App") desktopShortcutAppTargets.push_back(shortcut.targetAppId);
+                    else if (type == "File" || type == "Folder") desktopShortcutFileTargets.push_back(shortcut.targetPath);
+                }
+            }
+
+            std::vector<std::string> inMemoryPinned;
+            for (const PinnedItem& item : s_pinned) inMemoryPinned.push_back(item.name);
+
+            std::vector<std::string> inMemoryRecentPrograms;
+            for (const RecentProgramEntry& entry : s_recentPrograms) inMemoryRecentPrograms.push_back(entry.name);
+
+            std::vector<std::string> inMemoryRecentDocuments;
+            for (const RecentDocumentEntry& entry : s_recentDocuments) inMemoryRecentDocuments.push_back(entry.path);
+
+            std::ostringstream oss;
+            oss << "[LaunchStringStorage]\n";
+            oss << "nonFatal: true\n";
+            oss << "migrationState: not-started\n";
+            oss << "hostedConfig: path=desktop.json loaded=" << diagnosticBool(cfgLoaded);
+            if (!cfgLoaded) oss << " error=" << cfgErr;
+            oss << "\n";
+            oss << "hostedCounts: pinned=" << (cfgLoaded ? cfg.pinned.size() : 0)
+                << " recent=" << (cfgLoaded ? cfg.recent.size() : 0)
+                << " desktopShortcuts=" << (cfgLoaded ? cfg.desktopShortcuts.size() : 0)
+                << " iconPositions=" << (cfgLoaded ? cfg.iconPositions.size() : 0)
+                << " servicePinned=" << s_pinned.size()
+                << " serviceRecentPrograms=" << s_recentPrograms.size()
+                << " serviceRecentDocuments=" << s_recentDocuments.size()
+                << " registeredApps=" << s_apps.size() << "\n";
+
+            oss << "hostedSites:\n";
+            appendLaunchStorageSite(oss,
+                "desktop.json:pinned",
+                "desktop.json",
+                "pinned[]",
+                "mixed displayName|legacyAlias|shellAction",
+                cfgLoaded ? countLaunchStorageLabels(cfg.pinned) : LaunchStorageResolutionCounts{},
+                "medium",
+                "feeds Start Menu pinned/recent and persists user-visible app labels");
+            appendLaunchStorageSite(oss,
+                "desktop.json:recent",
+                "desktop.json",
+                "recent[]",
+                "mixed displayName|legacyAlias|shellAction",
+                cfgLoaded ? countLaunchStorageLabels(cfg.recent) : LaunchStorageResolutionCounts{},
+                "medium",
+                "updated by compositor launchAction using the original dispatch string");
+            appendLaunchStorageSite(oss,
+                "desktop.json:desktopShortcuts.App",
+                "desktop.json",
+                "desktopShortcuts[].shortcutType,targetAppId,label",
+                "targetAppId plus display label",
+                countLaunchStorageLabels(desktopShortcutAppTargets),
+                "low",
+                "already stores stable app id when created from Start Menu");
+            appendLaunchStorageSite(oss,
+                "desktop.json:desktopShortcuts.FileFolder",
+                "desktop.json",
+                "desktopShortcuts[].shortcutType,targetPath,label",
+                "file/folder path plus display label",
+                countLaunchStorageLabels(desktopShortcutFileTargets),
+                "low",
+                "maps naturally to FileOpen typed targets");
+            appendLaunchStorageStaticSite(oss,
+                "desktop.json:iconPositions",
+                "desktop.json",
+                "iconPositions[].name,x,y",
+                "layout key, not launch source",
+                cfgLoaded ? std::to_string(cfg.iconPositions.size()) : "0",
+                "not-applicable",
+                "low",
+                "keys may contain app ids or paths but only restore icon positions");
+            appendLaunchStorageSite(oss,
+                "DesktopService:s_pinned",
+                "memory mirror of desktop.json:pinned",
+                "PinnedItem.name,path,kind",
+                "name currently serialized without kind",
+                countLaunchStorageLabels(inMemoryPinned),
+                "medium",
+                "kind/path are in memory but SaveState currently writes only names");
+            appendLaunchStorageSite(oss,
+                "DesktopService:s_recentPrograms",
+                "memory mirror of desktop.json:recent",
+                "RecentProgramEntry.name",
+                "displayName|legacyAlias|shellAction",
+                countLaunchStorageLabels(inMemoryRecentPrograms),
+                "medium",
+                "program recents persist as strings");
+            appendLaunchStorageSite(oss,
+                "DesktopService:s_recentDocuments",
+                "memory only",
+                "RecentDocumentEntry.path",
+                "file path",
+                countLaunchStorageLabels(inMemoryRecentDocuments),
+                "low",
+                "not currently persisted by DesktopService::SaveState");
+            appendLaunchStorageStaticSite(oss,
+                "Compositor:g_startMenuAllProgsSorted",
+                "memory derived from DesktopService::GetRegisteredApps",
+                "displayName",
+                "registered app display names",
+                std::to_string(s_apps.size()),
+                "yes",
+                "low",
+                "generated each refresh from registry; no persistence");
+            appendLaunchStorageStaticSite(oss,
+                "Compositor:g_startMenuPinnedRecent",
+                "memory derived from desktop.json pinned/recent",
+                "string label",
+                "mixed displayName|legacyAlias|shellAction",
+                cfgLoaded ? std::to_string(cfg.pinned.size() + cfg.recent.size()) : "0",
+                "mostly",
+                "medium",
+                "deduplicated visible list, still string-based");
+            appendLaunchStorageStaticSite(oss,
+                "Compositor:rightColumnAndSystemObjects",
+                "compositor.cpp",
+                "ComputerFiles,Console,Trash,ControlPanel,TaskManager",
+                "shell action or legacy launch name",
+                "5",
+                "yes",
+                "medium",
+                "shell/system labels need typed ShellAction migration");
+            appendLaunchStorageStaticSite(oss,
+                "Compositor:taskbarButtons",
+                "memory derived from open windows",
+                "WinInfo.title,taskbarIcon",
+                "active window title, not persisted launch source",
+                "dynamic",
+                "not-applicable",
+                "low",
+                "no separate hosted taskbar pin storage found in this pass");
+
+            oss << "bareMetalSites:\n";
+            appendLaunchStorageStaticSite(oss,
+                "desktop.cpp:s_startMenuApps[].name",
+                "kernel/core/desktop.cpp",
+                "name,pinned,recent",
+                "kernel launch name or legacy alias",
+                "14",
+                "mostly",
+                "medium",
+                "static Start Menu pinned/recent list includes AppModel and Files aliases");
+            appendLaunchStorageStaticSite(oss,
+                "desktop.cpp:s_allProgramsList[]",
+                "kernel/core/desktop.cpp",
+                "string",
+                "kernel launch name or legacy alias",
+                "14",
+                "mostly",
+                "medium",
+                "static All Programs list, not manifest-driven");
+            appendLaunchStorageStaticSite(oss,
+                "VFS:/desktop.shortcuts",
+                "/desktop.shortcuts",
+                "shortcutType<TAB>target<TAB>label",
+                "App launch name or File/Folder path plus label",
+                "up-to-16",
+                "yes",
+                "medium",
+                "bare-metal persisted shortcut format v2");
+            appendLaunchStorageStaticSite(oss,
+                "desktop.cpp:s_desktopIcons[]",
+                "kernel/core/desktop.cpp",
+                "label,path,pinned,recent,kind,systemObject",
+                "system labels, app launch names, file paths",
+                "static+dynamic",
+                "mostly",
+                "medium",
+                "runtime desktop source for icon launch and recent flags");
+            appendLaunchStorageStaticSite(oss,
+                "VFS:/.desktop_icons",
+                "/.desktop_icons",
+                "layoutKey<TAB>x<TAB>y",
+                "layout key, not launch source",
+                "dynamic",
+                "not-applicable",
+                "low",
+                "position-only storage can keep old string keys through migration");
+            appendLaunchStorageStaticSite(oss,
+                "VFS:/desktop.system.icons",
+                "/desktop.system.icons",
+                "Trash,ThisSystem,FileManager,SystemSettings",
+                "system object visibility flags",
+                "4",
+                "not-applicable",
+                "low",
+                "shell/system affordance visibility, not app identity");
+            appendLaunchStorageStaticSite(oss,
+                "desktop.cpp:s_taskbarEntries[]",
+                "kernel/core/desktop.cpp",
+                "title,color,active",
+                "taskbar entry label, currently disabled/static",
+                "0",
+                "not-applicable",
+                "low",
+                "no separate bare-metal taskbar pin storage found in this pass");
+
+            return oss.str();
+        }
+
+        std::string DesktopService::LaunchStoragePreviewDiagnostic() {
+            ensureDefaultAppsRegistered();
+
+            DesktopConfigData cfg;
+            std::string cfgErr;
+            const bool cfgLoaded = DesktopConfig::Load("desktop.json", cfg, cfgErr);
+            const size_t maxRows = 96;
+
+            LaunchStoragePreviewCounts counts;
+            std::ostringstream rows;
+
+            if (cfgLoaded) {
+                appendLaunchStoragePreviewLabels(rows, counts, "desktop.json:pinned", cfg.pinned, "", "medium", maxRows);
+                appendLaunchStoragePreviewLabels(rows, counts, "desktop.json:recent", cfg.recent, "", "medium", maxRows);
+
+                for (size_t i = 0; i < cfg.desktopShortcuts.size(); ++i) {
+                    const DesktopShortcutRec& shortcut = cfg.desktopShortcuts[i];
+                    const std::string type = shortcut.shortcutType.empty() ? (shortcut.targetPath.empty() ? "App" : "File") : shortcut.shortcutType;
+                    if (type == "App") {
+                        appendLaunchStoragePreviewRecord(rows, counts, "desktop.json:desktopShortcuts.App", i, shortcut.targetAppId, "app ID", "low", maxRows);
+                    } else if (type == "File" || type == "Folder") {
+                        appendLaunchStoragePreviewRecord(rows, counts, "desktop.json:desktopShortcuts.FileFolder", i, shortcut.targetPath, "file path", "low", maxRows);
+                    }
+                }
+
+                for (size_t i = 0; i < cfg.iconPositions.size(); ++i) {
+                    appendLaunchStoragePreviewSkip(rows, counts, "desktop.json:iconPositions", i, cfg.iconPositions[i].name, "Icon position record stores layout only and should not become a launch target", maxRows);
+                }
+            }
+
+            std::vector<std::string> inMemoryPinned;
+            for (const PinnedItem& item : s_pinned) inMemoryPinned.push_back(item.name);
+            appendLaunchStoragePreviewLabels(rows, counts, "DesktopService:s_pinned", inMemoryPinned, "", "medium", maxRows);
+
+            std::vector<std::string> inMemoryRecentPrograms;
+            for (const RecentProgramEntry& entry : s_recentPrograms) inMemoryRecentPrograms.push_back(entry.name);
+            appendLaunchStoragePreviewLabels(rows, counts, "DesktopService:s_recentPrograms", inMemoryRecentPrograms, "", "medium", maxRows);
+
+            std::vector<std::string> inMemoryRecentDocuments;
+            for (const RecentDocumentEntry& entry : s_recentDocuments) inMemoryRecentDocuments.push_back(entry.path);
+            appendLaunchStoragePreviewLabels(rows, counts, "DesktopService:s_recentDocuments", inMemoryRecentDocuments, "file path", "low", maxRows);
+
+            std::vector<std::string> allProgramLabels;
+            for (const RegisteredDesktopApp& app : s_apps) allProgramLabels.push_back(app.displayName);
+            appendLaunchStoragePreviewLabels(rows, counts, "Compositor:g_startMenuAllProgsSorted", allProgramLabels, "display name", "low", maxRows);
+
+            std::vector<std::string> shellLabels = { "ComputerFiles", "Console", "Trash", "ControlPanel", "TaskManager" };
+            appendLaunchStoragePreviewLabels(rows, counts, "Compositor:rightColumnAndSystemObjects", shellLabels, "", "medium", maxRows);
+
+            std::ostringstream oss;
+            oss << "[LaunchStringStoragePreview]\n";
+            oss << "nonFatal: true\n";
+            oss << "migrationState: preview-only\n";
+            oss << "writesStorage: false\n";
+            oss << "hostedConfig: path=desktop.json loaded=" << diagnosticBool(cfgLoaded);
+            if (!cfgLoaded) oss << " error=" << cfgErr;
+            oss << "\n";
+            oss << "summary: totalRecords=" << counts.total
+                << " ready=" << counts.ready
+                << " alias=" << counts.alias
+                << " shellAction=" << counts.shellAction
+                << " unresolved=" << counts.unresolved
+                << " skippedLayoutOnly=" << counts.skippedLayoutOnly
+                << " highRisk=" << counts.highRisk
+                << " printed=" << counts.printed
+                << " truncated=" << counts.truncated << "\n";
+            oss << "rowCap: " << maxRows << "\n";
+            oss << "records:\n";
+            oss << rows.str();
             return oss.str();
         }
 

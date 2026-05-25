@@ -397,6 +397,8 @@ static void cmd_help() {
         output_string("  desktop.launch.resolve <label> - Resolve launch target without launching\n");
         output_string("  desktop.launch.adapt <label> - Adapt resolved target to legacy dispatch string\n");
         output_string("  desktop.launch.compare - Compare hosted/bare-metal launch targets\n");
+        output_string("  desktop.launch.storage - Report launch-string storage sites\n");
+        output_string("  desktop.launch.storage.preview - Preview typed launch storage migration\n");
         output_string("  nativeapp.inspect <AppName> - Inspect native app availability\n");
         output_string("  nativeapp.smoketest <AppName> - Native app smoke-test path\n");
     output_string("  workspaces     - Workspace info\n");
@@ -932,6 +934,14 @@ static void cmd_desktop_launch_adapt(const char* label) {
 
 static void cmd_desktop_launch_compare() {
     ::kernel::appmodel::printLaunchTargetComparisonDiagnostic(output_string);
+}
+
+static void cmd_desktop_launch_storage() {
+    ::kernel::appmodel::printLaunchStorageDiagnostic(output_string);
+}
+
+static void cmd_desktop_launch_storage_preview() {
+    ::kernel::appmodel::printLaunchStoragePreviewDiagnostic(output_string);
 }
 
 static void cmd_nativeapp_inspect(const char* appName, bool smokeTest) {
@@ -2962,6 +2972,10 @@ static void execute_command(const char* cmd) {
         cmd_desktop_launch_adapt(command_tail(cmd));
     } else if (str_eq(command, "desktop.launch.compare")) {
         cmd_desktop_launch_compare();
+    } else if (str_eq(command, "desktop.launch.storage")) {
+        cmd_desktop_launch_storage();
+    } else if (str_eq(command, "desktop.launch.storage.preview")) {
+        cmd_desktop_launch_storage_preview();
     } else if (str_eq(command, "desktop.launch")) {
         cmd_desktop_launch(arg1);
     } else if (str_eq(command, "nativeapp.inspect")) {

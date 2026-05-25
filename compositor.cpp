@@ -1020,7 +1020,11 @@ namespace gxos {
 
         static void logLaunchTargetShadowDiagnostic(const std::string& source, const std::string& uiLabel, const std::string& shortcutTarget, const std::string& dispatchName) {
             const apps::LaunchTarget target = DesktopService::ResolveLaunchTarget(dispatchName);
-            DesktopService::RecordLaunchTargetShadowObservation(source, target, dispatchName);
+            std::string adapterStatus;
+            std::string adapterReason;
+            const std::string adapterLegacyDispatch = DesktopService::LegacyDispatchStringForLaunchTarget(target, adapterStatus, adapterReason);
+            const bool adapterMatchesActual = !adapterLegacyDispatch.empty() && adapterLegacyDispatch == dispatchName;
+            const std::string adapterComparison = DesktopService::RecordLaunchTargetShadowObservation(source, target, dispatchName, adapterLegacyDispatch);
             std::ostringstream oss;
             oss << "[LaunchTargetShadow] source=" << source
                 << " uiLabel=" << uiLabel;
@@ -1029,6 +1033,11 @@ namespace gxos {
                 << " resolvedType=" << apps::ToString(target.type)
                 << " appId=" << target.appId
                 << " resolvedDispatch=" << target.dispatchLaunchName
+                << " adapterLegacyDispatch=" << adapterLegacyDispatch
+                << " adapterMatchesActual=" << (adapterMatchesActual ? "true" : "false")
+                << " adapterComparison=" << adapterComparison
+                << " adapterStatus=" << adapterStatus
+                << " adapterReason=" << adapterReason
                 << " status=" << target.diagnosticStatus
                 << " reason=" << target.diagnosticReason;
             Logger::write(LogLevel::Info, oss.str());

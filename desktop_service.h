@@ -46,15 +46,27 @@ namespace gxos { namespace gui {
         uint64_t totalObservations = 0;
         uint64_t unresolvedObservations = 0;
         uint64_t aliasFallbackObservations = 0;
+        uint64_t adapterMatches = 0;
+        uint64_t adapterAcceptedMismatches = 0;
+        uint64_t adapterUnexpectedMismatches = 0;
         uint64_t startMenuObservations = 0;
         uint64_t startMenuUnresolved = 0;
         uint64_t startMenuAliasFallback = 0;
+        uint64_t startMenuAdapterMatches = 0;
+        uint64_t startMenuAdapterAcceptedMismatches = 0;
+        uint64_t startMenuAdapterUnexpectedMismatches = 0;
         uint64_t desktopShortcutObservations = 0;
         uint64_t desktopShortcutUnresolved = 0;
         uint64_t desktopShortcutAliasFallback = 0;
+        uint64_t desktopShortcutAdapterMatches = 0;
+        uint64_t desktopShortcutAdapterAcceptedMismatches = 0;
+        uint64_t desktopShortcutAdapterUnexpectedMismatches = 0;
         uint64_t otherObservations = 0;
         uint64_t otherUnresolved = 0;
         uint64_t otherAliasFallback = 0;
+        uint64_t otherAdapterMatches = 0;
+        uint64_t otherAdapterAcceptedMismatches = 0;
+        uint64_t otherAdapterUnexpectedMismatches = 0;
     };
 
     class DesktopService {
@@ -89,9 +101,11 @@ namespace gxos { namespace gui {
         static std::string LegacyDispatchStringForLaunchTarget(const apps::LaunchTarget& target, std::string& status, std::string& reason);
         static std::string LaunchTargetAdapterDiagnostic(const std::string& label);
         static std::string LaunchTargetComparisonDiagnostic();
-        static void RecordLaunchTargetShadowObservation(const std::string& source, const apps::LaunchTarget& target, const std::string& actualDispatch);
+        static std::string RecordLaunchTargetShadowObservation(const std::string& source, const apps::LaunchTarget& target, const std::string& actualDispatch, const std::string& adapterLegacyDispatch);
         static LaunchTargetShadowCounters GetLaunchTargetShadowCounters();
         static std::string LaunchTargetShadowDiagnostic();
+        static std::string LaunchStorageDiagnostic();
+        static std::string LaunchStoragePreviewDiagnostic();
         static std::string NativeAppCapabilitiesDiagnostic();
         static std::string InspectNativeAppPipeline(const std::string& appIdOrDisplayName);
         static std::string NativeAppPipelineSmokeTest(const std::string& appIdOrDisplayName);
