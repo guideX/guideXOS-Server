@@ -249,15 +249,26 @@ static void write_quoted(LaunchTargetDiagnosticWriter write, const char* value)
 }
 
 struct LaunchStoragePreviewCounters {
+    struct UnsupportedAliasDetail {
+        const char* target;
+        const char* label;
+        const char* mapsTo;
+        const char* reason;
+        unsigned int count;
+    };
+
     unsigned int total;
     unsigned int ready;
     unsigned int alias;
     unsigned int shellAction;
     unsigned int unresolved;
     unsigned int skippedLayoutOnly;
+    unsigned int targetSpecificUnsupportedAliases;
     unsigned int highRisk;
     unsigned int printed;
     unsigned int truncated;
+    UnsupportedAliasDetail unsupportedAliasDetails[8];
+    unsigned int unsupportedAliasDetailCount;
 };
 
 static const char* preview_status_for_target(const gxos::apps::LaunchTarget& target)
@@ -273,6 +284,20 @@ static const char* preview_risk_for_status(const char* baseRisk, const char* sta
     if (text_equals(status, "unresolved")) return "high";
     if (text_equals(status, "alias") || text_equals(status, "shell-action")) return "medium";
     return baseRisk && baseRisk[0] ? baseRisk : "medium";
+}
+
+static bool is_target_specific_unsupported_alias(const gxos::apps::LaunchTarget& target)
+{
+    return target.type == gxos::apps::LaunchTargetType::LegacyAlias &&
+           text_equals(target.diagnosticStatus, "unsupported-target");
+}
+
+static const char* compact_unsupported_alias_reason(const gxos::apps::LaunchTarget& target)
+{
+    if (text_equals(target.diagnosticStatus, "unsupported-target")) {
+        return "No bare-metal AppManager registration yet";
+    }
+    return target.diagnosticReason;
 }
 
 static const char* preview_existing_kind(const char* value, const gxos::apps::LaunchTarget& target, const char* hint)
@@ -298,6 +323,38 @@ static void preview_count_status(LaunchStoragePreviewCounters& counters, const c
     if (text_equals(risk, "high")) ++counters.highRisk;
 }
 
+static void preview_count_target_specific_alias(LaunchStoragePreviewCounters& counters, const gxos::apps::LaunchTarget& target, const char* targetName)
+{
+    if (!is_target_specific_unsupported_alias(target)) return;
+    ++counters.targetSpecificUnsupportedAliases;
+
+    const char* label = target.legacyAlias && target.legacyAlias[0] ? target.legacyAlias : target.originalLabel;
+    const char* mapsTo = target.displayName && target.displayName[0] ? target.displayName : target.appId;
+    const char* reason = compact_unsupported_alias_reason(target);
+
+    for (unsigned int i = 0; i < counters.unsupportedAliasDetailCount; ++i) {
+        LaunchStoragePreviewCounters::UnsupportedAliasDetail& detail = counters.unsupportedAliasDetails[i];
+        if (text_equals(detail.target, targetName) &&
+            text_equals(detail.label, label) &&
+            text_equals(detail.mapsTo, mapsTo) &&
+            text_equals(detail.reason, reason)) {
+            ++detail.count;
+            return;
+        }
+    }
+
+    if (counters.unsupportedAliasDetailCount >= sizeof(counters.unsupportedAliasDetails) / sizeof(counters.unsupportedAliasDetails[0])) {
+        return;
+    }
+
+    LaunchStoragePreviewCounters::UnsupportedAliasDetail& detail = counters.unsupportedAliasDetails[counters.unsupportedAliasDetailCount++];
+    detail.target = targetName;
+    detail.label = label;
+    detail.mapsTo = mapsTo;
+    detail.reason = reason;
+    detail.count = 1;
+}
+
 static void write_preview_record(LaunchTargetDiagnosticWriter write, LaunchStoragePreviewCounters& counters, const char* site, unsigned int index, const char* value, const char* existingKindHint, const char* baseRisk, unsigned int maxRows)
 {
     gxos::apps::LaunchTarget target = resolveLaunchTarget(value);
@@ -307,6 +364,7 @@ static void write_preview_record(LaunchTargetDiagnosticWriter write, LaunchStora
     const char* status = preview_status_for_target(target);
     const char* risk = preview_risk_for_status(baseRisk, status);
     preview_count_status(counters, status, risk);
+    preview_count_target_specific_alias(counters, target, "bareMetal");
 
     if (counters.printed >= maxRows) {
         ++counters.truncated;
@@ -376,6 +434,7 @@ static void count_preview_value(LaunchStoragePreviewCounters& counters, const ch
     const char* status = preview_status_for_target(target);
     const char* risk = preview_risk_for_status(baseRisk, status);
     preview_count_status(counters, status, risk);
+    preview_count_target_specific_alias(counters, target, "bareMetal");
 }
 
 static void count_preview_skip_only(LaunchStoragePreviewCounters& counters)
@@ -500,6 +559,8 @@ static void write_preview_counts_line(LaunchTargetDiagnosticWriter write, const 
     write_uint(write, counters.unresolved);
     write(" skippedLayoutOnly=");
     write_uint(write, counters.skippedLayoutOnly);
+    write(" targetSpecificUnsupportedAliases=");
+    write_uint(write, counters.targetSpecificUnsupportedAliases);
     write(" highRisk=");
     write_uint(write, counters.highRisk);
     if (extra && extra[0]) {
@@ -507,6 +568,32 @@ static void write_preview_counts_line(LaunchTargetDiagnosticWriter write, const 
         write(extra);
     }
     write("\n");
+}
+
+static void write_preview_unsupported_alias_details(LaunchTargetDiagnosticWriter write, const LaunchStoragePreviewCounters& hostedCounts, const LaunchStoragePreviewCounters& bareMetalCounts)
+{
+    if (!write) return;
+    if (hostedCounts.unsupportedAliasDetailCount == 0 && bareMetalCounts.unsupportedAliasDetailCount == 0) return;
+
+    write("targetSpecificUnsupportedAliasDetails:\n");
+    const LaunchStoragePreviewCounters* allCounts[] = { &hostedCounts, &bareMetalCounts };
+    for (unsigned int c = 0; c < sizeof(allCounts) / sizeof(allCounts[0]); ++c) {
+        const LaunchStoragePreviewCounters& counts = *allCounts[c];
+        for (unsigned int i = 0; i < counts.unsupportedAliasDetailCount; ++i) {
+            const LaunchStoragePreviewCounters::UnsupportedAliasDetail& detail = counts.unsupportedAliasDetails[i];
+            write("  target=");
+            write(detail.target);
+            write(" label=");
+            write_quoted(write, detail.label);
+            write(" count=");
+            write_uint(write, detail.count);
+            write(" mapsTo=");
+            write_quoted(write, detail.mapsTo);
+            write(" reason=");
+            write_quoted(write, detail.reason);
+            write("\n");
+        }
+    }
 }
 
 void printLaunchTargetDiagnostic(const gxos::apps::LaunchTarget& target, LaunchTargetDiagnosticWriter write)
@@ -948,6 +1035,8 @@ void printLaunchStoragePreviewDiagnostic(LaunchTargetDiagnosticWriter write)
     write_uint(write, counters.unresolved);
     write(" skippedLayoutOnly=");
     write_uint(write, counters.skippedLayoutOnly);
+    write(" targetSpecificUnsupportedAliases=");
+    write_uint(write, counters.targetSpecificUnsupportedAliases);
     write(" highRisk=");
     write_uint(write, counters.highRisk);
     write(" printed=");
@@ -981,6 +1070,7 @@ void printLaunchStoragePreviewComparisonDiagnostic(LaunchTargetDiagnosticWriter 
     write("writesStorageBareMetal=false\n");
     write_preview_counts_line(write, "hosted", hostedReference, "source=current-hosted-baseline use-hosted-shell-for-live-desktop-json");
     write_preview_counts_line(write, "bareMetal", bareMetalCounts, "source=bare-metal-actual");
+    write_preview_unsupported_alias_details(write, hostedReference, bareMetalCounts);
     write("intentionalDifferences: 6\n");
     write("  difference=hosted-desktop-json note=hosted owns live desktop.json pinned/recent/desktopShortcuts/iconPositions storage\n");
     write("  difference=bare-metal-vfs note=bare-metal owns VFS /desktop.shortcuts, /.desktop_icons, and /desktop.system.icons storage\n");

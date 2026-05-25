@@ -107,6 +107,7 @@ namespace gxos { namespace gui {
         static std::string LaunchStorageDiagnostic();
         static std::string LaunchStoragePreviewDiagnostic();
         static std::string LaunchStoragePreviewComparisonDiagnostic();
+        static std::string LaunchTargetTypeCoverageDiagnostic();
         static std::string NativeAppCapabilitiesDiagnostic();
         static std::string InspectNativeAppPipeline(const std::string& appIdOrDisplayName);
         static std::string NativeAppPipelineSmokeTest(const std::string& appIdOrDisplayName);

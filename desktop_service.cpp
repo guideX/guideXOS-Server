@@ -58,6 +58,8 @@ namespace gxos {
         static std::mutex s_launchTargetShadowCountersMutex;
         static LaunchTargetShadowCounters s_launchTargetShadowCounters;
 
+        static std::string launchTargetTypeCoverageSummaryLine();
+
         static void logScanIssues(const char* label, const std::vector<apps::AppScanIssue>& issues) {
             for (const auto& issue : issues) {
                 std::string message = std::string(label) + ": ";
@@ -756,15 +758,25 @@ namespace gxos {
         }
 
         struct LaunchStoragePreviewCounts {
+            struct UnsupportedAliasDetail {
+                std::string target;
+                std::string label;
+                std::string mapsTo;
+                std::string reason;
+                size_t count = 0;
+            };
+
             size_t total = 0;
             size_t ready = 0;
             size_t alias = 0;
             size_t shellAction = 0;
             size_t unresolved = 0;
             size_t skippedLayoutOnly = 0;
+            size_t targetSpecificUnsupportedAliases = 0;
             size_t highRisk = 0;
             size_t printed = 0;
             size_t truncated = 0;
+            std::vector<UnsupportedAliasDetail> unsupportedAliasDetails;
         };
 
         static std::string quoteDiagnosticValue(const std::string& value) {
@@ -804,6 +816,18 @@ namespace gxos {
             return baseRisk.empty() ? "medium" : baseRisk;
         }
 
+        static bool isTargetSpecificUnsupportedAlias(const apps::LaunchTarget& target) {
+            return target.type == apps::LaunchTargetType::LegacyAlias &&
+                target.diagnosticStatus == "unsupported-target";
+        }
+
+        static std::string compactUnsupportedAliasReason(const apps::LaunchTarget& target) {
+            if (target.diagnosticStatus == "unsupported-target") {
+                return "No bare-metal AppManager registration yet";
+            }
+            return target.diagnosticReason;
+        }
+
         static std::string proposedLaunchTargetRecord(const apps::LaunchTarget& target) {
             std::ostringstream record;
             record << "{targetType=" << apps::ToString(target.type);
@@ -829,6 +853,29 @@ namespace gxos {
             if (risk == "high") ++counts.highRisk;
         }
 
+        static void countLaunchStoragePreviewTargetSpecificAlias(LaunchStoragePreviewCounts& counts, const apps::LaunchTarget& target, const std::string& targetName) {
+            if (!isTargetSpecificUnsupportedAlias(target)) return;
+            ++counts.targetSpecificUnsupportedAliases;
+
+            const std::string label = target.legacyAlias.empty() ? target.originalLabel : target.legacyAlias;
+            const std::string mapsTo = target.displayName.empty() ? target.appId : target.displayName;
+            const std::string reason = compactUnsupportedAliasReason(target);
+            for (LaunchStoragePreviewCounts::UnsupportedAliasDetail& detail : counts.unsupportedAliasDetails) {
+                if (detail.target == targetName && detail.label == label && detail.mapsTo == mapsTo && detail.reason == reason) {
+                    ++detail.count;
+                    return;
+                }
+            }
+
+            LaunchStoragePreviewCounts::UnsupportedAliasDetail detail;
+            detail.target = targetName;
+            detail.label = label;
+            detail.mapsTo = mapsTo;
+            detail.reason = reason;
+            detail.count = 1;
+            counts.unsupportedAliasDetails.push_back(detail);
+        }
+
         static void appendLaunchStoragePreviewRecord(std::ostringstream& oss, LaunchStoragePreviewCounts& counts, const std::string& site, size_t index, const std::string& value, const std::string& existingKindHint, const std::string& baseRisk, const size_t maxRows) {
             const apps::LaunchTarget target = DesktopService::ResolveLaunchTarget(value);
             std::string adapterStatus;
@@ -837,6 +884,7 @@ namespace gxos {
             const std::string status = launchStoragePreviewStatus(target);
             const std::string risk = launchStoragePreviewRisk(baseRisk, status);
             countLaunchStoragePreviewStatus(counts, status, risk);
+            countLaunchStoragePreviewTargetSpecificAlias(counts, target, "hosted");
 
             if (counts.printed >= maxRows) {
                 ++counts.truncated;
@@ -931,10 +979,11 @@ namespace gxos {
             return counts;
         }
 
-        static void countLaunchStoragePreviewTarget(LaunchStoragePreviewCounts& counts, const apps::LaunchTarget& target, const std::string& baseRisk) {
+        static void countLaunchStoragePreviewTarget(LaunchStoragePreviewCounts& counts, const apps::LaunchTarget& target, const std::string& baseRisk, const std::string& targetName) {
             const std::string status = launchStoragePreviewStatus(target);
             const std::string risk = launchStoragePreviewRisk(baseRisk, status);
             countLaunchStoragePreviewStatus(counts, status, risk);
+            countLaunchStoragePreviewTargetSpecificAlias(counts, target, targetName);
         }
 
         static void countLaunchStoragePreviewSkipOnly(LaunchStoragePreviewCounts& counts) {
@@ -944,7 +993,7 @@ namespace gxos {
         static apps::LaunchTarget resolveBareMetalLaunchTargetForComparison(const std::string& label);
 
         static void countBareMetalPreviewMirrorLabel(LaunchStoragePreviewCounts& counts, const std::string& label, const std::string& baseRisk) {
-            countLaunchStoragePreviewTarget(counts, resolveBareMetalLaunchTargetForComparison(label), baseRisk);
+            countLaunchStoragePreviewTarget(counts, resolveBareMetalLaunchTargetForComparison(label), baseRisk, "bareMetal");
         }
 
         static LaunchStoragePreviewCounts bareMetalStoragePreviewCountsForComparison() {
@@ -986,9 +1035,28 @@ namespace gxos {
                 << " shellAction=" << counts.shellAction
                 << " unresolved=" << counts.unresolved
                 << " skippedLayoutOnly=" << counts.skippedLayoutOnly
+                << " targetSpecificUnsupportedAliases=" << counts.targetSpecificUnsupportedAliases
                 << " highRisk=" << counts.highRisk;
             if (!extra.empty()) oss << " " << extra;
             oss << "\n";
+        }
+
+        static void appendLaunchStoragePreviewUnsupportedAliasDetails(std::ostringstream& oss, const LaunchStoragePreviewCounts& hostedCounts, const LaunchStoragePreviewCounts& bareMetalCounts) {
+            const size_t totalDetails = hostedCounts.unsupportedAliasDetails.size() + bareMetalCounts.unsupportedAliasDetails.size();
+            if (totalDetails == 0) return;
+
+            oss << "targetSpecificUnsupportedAliasDetails:\n";
+            const auto appendDetails = [&oss](const LaunchStoragePreviewCounts& counts) {
+                for (const LaunchStoragePreviewCounts::UnsupportedAliasDetail& detail : counts.unsupportedAliasDetails) {
+                    oss << "  target=" << detail.target
+                        << " label=" << quoteDiagnosticValue(detail.label)
+                        << " count=" << detail.count
+                        << " mapsTo=" << quoteDiagnosticValue(detail.mapsTo)
+                        << " reason=" << quoteDiagnosticValue(detail.reason) << "\n";
+                }
+            };
+            appendDetails(hostedCounts);
+            appendDetails(bareMetalCounts);
         }
 
         static const char* const kLaunchTargetComparisonLabels[] = {
@@ -1412,6 +1480,7 @@ namespace gxos {
                 s_apps,
                 nullptr,
                 0);
+            const LaunchStoragePreviewCounts storagePreviewCompareBareMetalCounts = bareMetalStoragePreviewCountsForComparison();
             const bool duplicateOk = duplicateCount == 0;
             const bool namespaceOk = namespaceWarningCount == 0;
             const bool hostedCoverageOk = hostedRegisteredMissingMetadata == 0 && metadataWithoutHostedRegistration == 0;
@@ -1420,7 +1489,9 @@ namespace gxos {
             const bool invalidManifestOk = s_lastManifestScanResult.invalidApps.empty();
             const bool launchTargetComparisonOk = launchTargetCounts.unexpectedDrift == 0;
             const bool launchStoragePreviewOk = storagePreviewCounts.unresolved == 0 && storagePreviewCounts.highRisk == 0;
-            const bool overallOk = duplicateOk && namespaceOk && hostedCoverageOk && bareMetalCoverageOk && invalidManifestOk && launchTargetComparisonOk && launchStoragePreviewOk;
+            const size_t launchStoragePreviewUnexpectedDrift = storagePreviewCounts.highRisk + storagePreviewCompareBareMetalCounts.highRisk;
+            const bool launchStoragePreviewCompareOk = launchStoragePreviewUnexpectedDrift == 0;
+            const bool overallOk = duplicateOk && namespaceOk && hostedCoverageOk && bareMetalCoverageOk && invalidManifestOk && launchTargetComparisonOk && launchStoragePreviewOk && launchStoragePreviewCompareOk;
 
             std::ostringstream oss;
             oss << "[AppModelSummary]\n";
@@ -1465,10 +1536,17 @@ namespace gxos {
                 << " shellAction=" << storagePreviewCounts.shellAction
                 << " unresolved=" << storagePreviewCounts.unresolved
                 << " skippedLayoutOnly=" << storagePreviewCounts.skippedLayoutOnly
+                << " targetSpecificUnsupportedAliases=" << storagePreviewCounts.targetSpecificUnsupportedAliases
                 << " highRisk=" << storagePreviewCounts.highRisk
                 << " writesStorage=false\n";
+            oss << "launchStoragePreviewCompare: " << statusText(launchStoragePreviewCompareOk)
+                << " hostedTargetSpecificUnsupportedAliases=" << storagePreviewCounts.targetSpecificUnsupportedAliases
+                << " bareMetalTargetSpecificUnsupportedAliases=" << storagePreviewCompareBareMetalCounts.targetSpecificUnsupportedAliases
+                << " unexpectedDrift=" << launchStoragePreviewUnexpectedDrift
+                << " writesStorage=false\n";
+            oss << launchTargetTypeCoverageSummaryLine();
             oss << "overall: " << statusText(overallOk) << "\n";
-            oss << "detailCommands: desktop.appmodel.coverage, desktop.apps.verbose, desktop.launch.compare, desktop.launch.storage, desktop.launch.storage.preview, desktop.launch.storage.preview.compare\n";
+            oss << "detailCommands: desktop.appmodel.coverage, desktop.apps.verbose, desktop.launch.compare, desktop.launch.storage, desktop.launch.storage.preview, desktop.launch.storage.preview.compare, desktop.launch.types\n";
             return oss.str();
         }
 
@@ -2012,6 +2090,7 @@ namespace gxos {
                 << " shellAction=" << counts.shellAction
                 << " unresolved=" << counts.unresolved
                 << " skippedLayoutOnly=" << counts.skippedLayoutOnly
+                << " targetSpecificUnsupportedAliases=" << counts.targetSpecificUnsupportedAliases
                 << " highRisk=" << counts.highRisk
                 << " printed=" << counts.printed
                 << " truncated=" << counts.truncated << "\n";
@@ -2062,6 +2141,7 @@ namespace gxos {
             oss << "\n";
             appendLaunchStoragePreviewCountsLine(oss, "hosted", hostedCounts, "source=live-hosted");
             appendLaunchStoragePreviewCountsLine(oss, "bareMetal", bareMetalCounts, "source=hosted-static-mirror dynamicVfs=not-inspected-here");
+            appendLaunchStoragePreviewUnsupportedAliasDetails(oss, hostedCounts, bareMetalCounts);
             oss << "intentionalDifferences: 6\n";
             oss << "  difference=hosted-desktop-json note=hosted owns live desktop.json pinned/recent/desktopShortcuts/iconPositions storage\n";
             oss << "  difference=bare-metal-vfs note=bare-metal owns VFS /desktop.shortcuts, /.desktop_icons, and /desktop.system.icons storage\n";
@@ -2080,6 +2160,227 @@ namespace gxos {
             }
             oss << "overall: " << statusText(overallOk) << "\n";
             oss << "detailCommands: desktop.launch.storage.preview, desktop.launch.storage\n";
+            return oss.str();
+        }
+
+        static std::set<std::string> collectLaunchTargetTypeCoverageLabels() {
+            std::set<std::string> labels;
+
+            // Registered apps (display names, launch names, app IDs)
+            for (const auto& app : DesktopService::GetRegisteredApps()) {
+                if (!app.displayName.empty()) labels.insert(app.displayName);
+                if (!app.launchName.empty() && app.launchName != app.displayName) labels.insert(app.launchName);
+                if (!app.id.empty()) labels.insert(app.id);
+            }
+
+            // Built-in metadata identities
+            for (size_t i = 0; i < apps::kBuiltInAppMetadataCount; ++i) {
+                const apps::BuiltInAppMetadata& metadata = apps::kBuiltInAppMetadata[i];
+                if (metadata.appId && metadata.appId[0]) labels.insert(metadata.appId);
+                if (metadata.displayName && metadata.displayName[0]) labels.insert(metadata.displayName);
+                if (metadata.launchName && metadata.launchName[0]) labels.insert(metadata.launchName);
+                if (metadata.kernelAppName && metadata.kernelAppName[0]) labels.insert(metadata.kernelAppName);
+                if (metadata.kernelLegacyAlias && metadata.kernelLegacyAlias[0]) labels.insert(metadata.kernelLegacyAlias);
+            }
+
+            // UI launch labels (compositor, desktop, start menu)
+            std::vector<UiLaunchLabelDiagnostic> uiLabels = currentCompositorUiLaunchLabelsForDiagnostic();
+            for (const auto& entry : uiLabels) {
+                if (!entry.label.empty()) labels.insert(entry.label);
+                if (!entry.fallbackIdentity.empty()) labels.insert(entry.fallbackIdentity);
+            }
+
+            // Known bare-metal kernel app names
+            for (const char* name : currentBareMetalKernelRegistrationNames()) {
+                labels.insert(name);
+            }
+
+            // Bare-metal shell/system labels
+            const char* const bareMetalShellLabels[] = {
+                "Console", "Terminal", "Computer", "This System", "Documents",
+                "Pictures", "Music", "Network", "Control Panel", "Settings", "System Settings"
+            };
+            for (const char* label : bareMetalShellLabels) {
+                labels.insert(label);
+            }
+
+            // Known legacy aliases and special cases
+            labels.insert("AppModel");
+            labels.insert("Files");
+            labels.insert("ImgViewer");
+            labels.insert("ComputerFiles");
+
+            // Test unknown case
+            labels.insert("TotallyUnknownLaunchThing");
+
+            return labels;
+        }
+
+        struct LaunchTargetTypeCounts {
+            int hostedAvailable = 0;
+            int bareMetalAvailable = 0;
+            int hostedOnly = 0;
+            int bareMetalOnly = 0;
+            int unsupportedOnTarget = 0;
+            int totalLabels = 0;
+        };
+
+        struct LaunchTargetTypeCoverageSummary {
+            size_t totalLabels = 0;
+            int coveredTypes = 0;
+            int totalHostedAvailable = 0;
+            int totalBareMetalAvailable = 0;
+            int totalHostedOnly = 0;
+            int totalBareMetalOnly = 0;
+            int totalUnsupported = 0;
+        };
+
+        static std::map<apps::LaunchTargetType, LaunchTargetTypeCounts> collectLaunchTargetTypeCoverageCounts(const std::set<std::string>& labels);
+
+        static LaunchTargetTypeCoverageSummary summarizeLaunchTargetTypeCoverage(const std::map<apps::LaunchTargetType, LaunchTargetTypeCounts>& typeCounts, size_t totalLabels) {
+            LaunchTargetTypeCoverageSummary summary;
+            summary.totalLabels = totalLabels;
+
+            for (const auto& entry : typeCounts) {
+                const LaunchTargetTypeCounts& counts = entry.second;
+                if (counts.totalLabels > 0 || counts.hostedAvailable > 0 || counts.bareMetalAvailable > 0) {
+                    ++summary.coveredTypes;
+                }
+                summary.totalHostedAvailable += counts.hostedAvailable;
+                summary.totalBareMetalAvailable += counts.bareMetalAvailable;
+                summary.totalHostedOnly += counts.hostedOnly;
+                summary.totalBareMetalOnly += counts.bareMetalOnly;
+                summary.totalUnsupported += counts.unsupportedOnTarget;
+            }
+
+            return summary;
+        }
+
+        static std::string launchTargetTypeCoverageSummaryLine() {
+            const std::set<std::string> labels = collectLaunchTargetTypeCoverageLabels();
+            const std::map<apps::LaunchTargetType, LaunchTargetTypeCounts> typeCounts = collectLaunchTargetTypeCoverageCounts(labels);
+            const LaunchTargetTypeCoverageSummary summary = summarizeLaunchTargetTypeCoverage(typeCounts, labels.size());
+
+            std::ostringstream oss;
+            oss << "launchTargetTypes: " << statusText(summary.totalUnsupported == 0)
+                << " labels=" << summary.totalLabels
+                << " coveredTypes=" << summary.coveredTypes
+                << " hostedAvailable=" << summary.totalHostedAvailable
+                << " bareMetalAvailable=" << summary.totalBareMetalAvailable
+                << " hostedOnly=" << summary.totalHostedOnly
+                << " bareMetalOnly=" << summary.totalBareMetalOnly
+                << " unsupportedOnTarget=" << summary.totalUnsupported
+                << " nonFatal=true\n";
+            return oss.str();
+        }
+
+        static std::map<apps::LaunchTargetType, LaunchTargetTypeCounts> collectLaunchTargetTypeCoverageCounts(const std::set<std::string>& labels) {
+            std::map<apps::LaunchTargetType, LaunchTargetTypeCounts> typeCounts;
+
+            const apps::LaunchTargetType allTypes[] = {
+                apps::LaunchTargetType::BuiltInApp,
+                apps::LaunchTargetType::ManifestApp,
+                apps::LaunchTargetType::NativeElfApp,
+                apps::LaunchTargetType::GXAppPackage,
+                apps::LaunchTargetType::ShellAction,
+                apps::LaunchTargetType::LegacyAlias,
+                apps::LaunchTargetType::FileOpen,
+                apps::LaunchTargetType::CrossArchEmulatedApp,
+                apps::LaunchTargetType::Service,
+                apps::LaunchTargetType::HypervisorGuest,
+                apps::LaunchTargetType::Script,
+                apps::LaunchTargetType::Unknown
+            };
+
+            for (apps::LaunchTargetType type : allTypes) {
+                typeCounts[type] = LaunchTargetTypeCounts{};
+            }
+
+            for (const std::string& label : labels) {
+                apps::LaunchTarget hostedTarget = DesktopService::ResolveLaunchTarget(label);
+                apps::LaunchTarget bareMetalTarget = resolveBareMetalLaunchTargetForComparison(label);
+
+                if (hostedTarget.hostedAvailable) {
+                    typeCounts[hostedTarget.type].hostedAvailable++;
+                    typeCounts[hostedTarget.type].totalLabels++;
+                }
+
+                if (bareMetalTarget.bareMetalAvailable && bareMetalTarget.type != hostedTarget.type) {
+                    typeCounts[bareMetalTarget.type].bareMetalAvailable++;
+                    if (!hostedTarget.hostedAvailable) {
+                        typeCounts[bareMetalTarget.type].totalLabels++;
+                    }
+                } else if (bareMetalTarget.bareMetalAvailable) {
+                    typeCounts[hostedTarget.type].bareMetalAvailable++;
+                }
+
+                const apps::LaunchTargetType primaryType = hostedTarget.type;
+                if (hostedTarget.hostedAvailable && bareMetalTarget.bareMetalAvailable) {
+                } else if (hostedTarget.hostedAvailable && !bareMetalTarget.bareMetalAvailable) {
+                    typeCounts[primaryType].hostedOnly++;
+                } else if (!hostedTarget.hostedAvailable && bareMetalTarget.bareMetalAvailable) {
+                    typeCounts[bareMetalTarget.type].bareMetalOnly++;
+                } else {
+                    typeCounts[primaryType].unsupportedOnTarget++;
+                }
+            }
+
+            return typeCounts;
+        }
+
+        std::string DesktopService::LaunchTargetTypeCoverageDiagnostic() {
+            ensureDefaultAppsRegistered();
+
+            std::ostringstream oss;
+            oss << "[LaunchTargetTypeCoverage]\n";
+            oss << "nonFatal: true\n";
+            oss << "description: Launch target resolver coverage by LaunchTargetType\n";
+
+            std::set<std::string> labels = collectLaunchTargetTypeCoverageLabels();
+            const std::map<apps::LaunchTargetType, LaunchTargetTypeCounts> typeCounts = collectLaunchTargetTypeCoverageCounts(labels);
+            const LaunchTargetTypeCoverageSummary summary = summarizeLaunchTargetTypeCoverage(typeCounts, labels.size());
+            oss << "totalLabels: " << labels.size() << "\n";
+
+            const apps::LaunchTargetType allTypes[] = {
+                apps::LaunchTargetType::BuiltInApp,
+                apps::LaunchTargetType::ManifestApp,
+                apps::LaunchTargetType::NativeElfApp,
+                apps::LaunchTargetType::GXAppPackage,
+                apps::LaunchTargetType::ShellAction,
+                apps::LaunchTargetType::LegacyAlias,
+                apps::LaunchTargetType::FileOpen,
+                apps::LaunchTargetType::CrossArchEmulatedApp,
+                apps::LaunchTargetType::Service,
+                apps::LaunchTargetType::HypervisorGuest,
+                apps::LaunchTargetType::Script,
+                apps::LaunchTargetType::Unknown
+            };
+
+            oss << "\nlaunchTargetTypeCoverage:\n";
+            for (apps::LaunchTargetType type : allTypes) {
+                const LaunchTargetTypeCounts& counts = typeCounts.at(type);
+                if (counts.totalLabels == 0 && counts.hostedAvailable == 0 && counts.bareMetalAvailable == 0) continue;
+
+                oss << "  type=" << apps::ToString(type)
+                    << " hostedAvailable=" << counts.hostedAvailable
+                    << " bareMetalAvailable=" << counts.bareMetalAvailable
+                    << " hostedOnly=" << counts.hostedOnly
+                    << " bareMetalOnly=" << counts.bareMetalOnly
+                    << " unsupportedOnTarget=" << counts.unsupportedOnTarget
+                    << " totalLabels=" << counts.totalLabels << "\n";
+            }
+
+            oss << "\nsummary:"
+                << " coveredTypes=" << summary.coveredTypes
+                << " totalHostedAvailable=" << summary.totalHostedAvailable
+                << " totalBareMetalAvailable=" << summary.totalBareMetalAvailable
+                << " hostedOnly=" << summary.totalHostedOnly
+                << " bareMetalOnly=" << summary.totalBareMetalOnly
+                << " unsupportedOnTarget=" << summary.totalUnsupported << "\n";
+
+            oss << "status: " << (summary.totalUnsupported > 0 ? "WARN" : "OK")
+                << " note: Unknown/unsupported counts are non-fatal and informational\n";
+
             return oss.str();
         }
 
