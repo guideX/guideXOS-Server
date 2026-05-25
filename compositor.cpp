@@ -30,6 +30,7 @@
 #include <chrono>
 #include <cstring>
 #include <ctime>
+#include <cctype>
 #include <filesystem>
 #include <iostream>
 #include <cstdlib>
@@ -47,6 +48,71 @@ namespace gxos {
         using namespace gxos;
         static const char* kGuiChanIn = "gui.input";
         static const char* kGuiChanOut = "gui.output";
+        static constexpr int kTaskbarSize = 40;
+
+        enum class TaskbarPosition {
+            Bottom,
+            Top,
+            Left,
+            Right
+        };
+
+        static TaskbarPosition g_taskbarPosition = TaskbarPosition::Bottom;
+
+        static std::string taskbarPositionName(TaskbarPosition position) {
+            switch (position) {
+            case TaskbarPosition::Top: return "top";
+            case TaskbarPosition::Left: return "left";
+            case TaskbarPosition::Right: return "right";
+            case TaskbarPosition::Bottom:
+            default: return "bottom";
+            }
+        }
+
+        static TaskbarPosition parseTaskbarPosition(const std::string& value) {
+            std::string lower;
+            lower.reserve(value.size());
+            for (char c : value) lower.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
+            if (lower == "top") return TaskbarPosition::Top;
+            if (lower == "left") return TaskbarPosition::Left;
+            if (lower == "right") return TaskbarPosition::Right;
+            return TaskbarPosition::Bottom;
+        }
+
+        struct WorkRect {
+            int left{0};
+            int top{0};
+            int right{0};
+            int bottom{0};
+        };
+
+        static WorkRect taskbarRectForBounds(int width, int height) {
+            switch (g_taskbarPosition) {
+            case TaskbarPosition::Top:
+                return {0, 0, width, std::min(height, kTaskbarSize)};
+            case TaskbarPosition::Left:
+                return {0, 0, std::min(width, kTaskbarSize), height};
+            case TaskbarPosition::Right:
+                return {std::max(0, width - kTaskbarSize), 0, width, height};
+            case TaskbarPosition::Bottom:
+            default:
+                return {0, std::max(0, height - kTaskbarSize), width, height};
+            }
+        }
+
+        static WorkRect desktopWorkAreaForBounds(int width, int height) {
+            switch (g_taskbarPosition) {
+            case TaskbarPosition::Top:
+                return {0, std::min(height, kTaskbarSize), width, height};
+            case TaskbarPosition::Left:
+                return {std::min(width, kTaskbarSize), 0, width, height};
+            case TaskbarPosition::Right:
+                return {0, 0, std::max(0, width - kTaskbarSize), height};
+            case TaskbarPosition::Bottom:
+            default:
+                return {0, 0, width, std::max(0, height - kTaskbarSize)};
+            }
+        }
 
         // Static member definitions
         std::atomic<uint64_t> Compositor::s_nextWinId{ 1000 };
@@ -290,6 +356,57 @@ namespace gxos {
         {
             drawUiText(dc, x, y, text.c_str(), static_cast<int>(text.size()), color, role);
         }
+
+        static std::vector<std::string> wrapUiTextToWidth(const std::string& text, int maxWidth, FontRole role, size_t maxLines = 3)
+        {
+            std::vector<std::string> lines;
+            if (text.empty() || maxWidth <= 0 || maxLines == 0) return lines;
+
+            size_t pos = 0;
+            while (pos < text.size() && lines.size() < maxLines) {
+                while (pos < text.size() && std::isspace(static_cast<unsigned char>(text[pos]))) ++pos;
+                if (pos >= text.size()) break;
+
+                std::string line;
+                while (pos < text.size()) {
+                    size_t wordStart = pos;
+                    while (pos < text.size() && !std::isspace(static_cast<unsigned char>(text[pos]))) ++pos;
+                    std::string word = text.substr(wordStart, pos - wordStart);
+                    std::string candidate = line.empty() ? word : line + " " + word;
+                    if (measureUiText(candidate.c_str(), static_cast<int>(candidate.size()), role) <= maxWidth) {
+                        line = candidate;
+                    } else {
+                        if (line.empty()) {
+                            std::string piece;
+                            for (char ch : word) {
+                                std::string next = piece + ch;
+                                if (!piece.empty() && measureUiText(next.c_str(), static_cast<int>(next.size()), role) > maxWidth) {
+                                    lines.push_back(piece);
+                                    piece.clear();
+                                    if (lines.size() >= maxLines) return lines;
+                                }
+                                piece.push_back(ch);
+                            }
+                            line = piece;
+                        } else {
+                            pos = wordStart;
+                        }
+                        break;
+                    }
+                    while (pos < text.size() && std::isspace(static_cast<unsigned char>(text[pos]))) ++pos;
+                    if (pos >= text.size()) break;
+                }
+                if (!line.empty()) lines.push_back(line);
+            }
+
+            return lines;
+        }
+
+        static int wrappedUiTextHeight(const std::vector<std::string>& lines, FontRole role)
+        {
+            if (lines.empty()) return 0;
+            return static_cast<int>(lines.size()) * uiTextHeight(role);
+        }
 #endif
 
         static bool isAppModelDemoAppLabel(const std::string& label) {
@@ -351,6 +468,8 @@ namespace gxos {
             int margin{20};
             int cellW{84};
             int cellH{94};
+            int workX{0};
+            int workY{0};
             int workW{1024};
             int workH{728};
         };
@@ -367,12 +486,18 @@ namespace gxos {
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)
             RECT cr{0, 0, 1024, 768};
             if (Compositor::g_hwnd) GetClientRect(Compositor::g_hwnd, &cr);
-            metrics.workW = std::max(1, static_cast<int>(cr.right - cr.left));
-            metrics.workH = std::max(1, static_cast<int>(cr.bottom - cr.top - 40));
+            WorkRect work = desktopWorkAreaForBounds(static_cast<int>(cr.right - cr.left), static_cast<int>(cr.bottom - cr.top));
+            metrics.workX = work.left;
+            metrics.workY = work.top;
+            metrics.workW = std::max(1, work.right - work.left);
+            metrics.workH = std::max(1, work.bottom - work.top);
 #else
             if (Compositor::g_videoBackend) {
-                metrics.workW = std::max(1, Compositor::g_videoBackend->getWidth());
-                metrics.workH = std::max(1, Compositor::g_videoBackend->getHeight() - 40);
+                WorkRect work = desktopWorkAreaForBounds(Compositor::g_videoBackend->getWidth(), Compositor::g_videoBackend->getHeight());
+                metrics.workX = work.left;
+                metrics.workY = work.top;
+                metrics.workW = std::max(1, work.right - work.left);
+                metrics.workH = std::max(1, work.bottom - work.top);
             }
 #endif
             return metrics;
@@ -402,8 +527,8 @@ namespace gxos {
 
             for (int row = 0; row < rows; ++row) {
                 for (int col = 0; col < columns; ++col) {
-                    int x = metrics.margin + col * metrics.cellW;
-                    int y = metrics.margin + row * metrics.cellH;
+                    int x = metrics.workX + metrics.margin + col * metrics.cellW;
+                    int y = metrics.workY + metrics.margin + row * metrics.cellH;
                     DesktopCellRect candidate = desktopCellRect(x, y, metrics);
                     bool collides = false;
                     for (const auto& rect : occupied) {
@@ -421,10 +546,25 @@ namespace gxos {
                 }
             }
 
-            outX = metrics.margin;
-            outY = metrics.margin;
+            outX = metrics.workX + metrics.margin;
+            outY = metrics.workY + metrics.margin;
             Logger::write(LogLevel::Warn, "Desktop icon slot allocation fallback: no free grid slot");
             return false;
+        }
+
+        static bool clampDesktopIconPosition(int& x, int& y) {
+            const DesktopGridMetrics metrics = desktopGridMetrics();
+            int minX = metrics.workX + metrics.margin;
+            int minY = metrics.workY + metrics.margin;
+            int maxX = metrics.workX + metrics.workW - metrics.cellW;
+            int maxY = metrics.workY + metrics.workH - metrics.cellH;
+            if (maxX < minX) maxX = metrics.workX;
+            if (maxY < minY) maxY = metrics.workY;
+            int oldX = x;
+            int oldY = y;
+            x = std::max(minX, std::min(x, maxX));
+            y = std::max(minY, std::min(y, maxY));
+            return x != oldX || y != oldY;
         }
 
         static void upsertDesktopIconPosition(std::vector<DesktopIconPos>& positions, const std::string& key, int x, int y) {
@@ -816,12 +956,18 @@ namespace gxos {
             }
 
             // Apply saved positions from config
+            bool migratedIconPositions = false;
             for (auto& item : g_items) {
                 const std::string key = desktopLayoutKey(item);
                 for (const auto& ip : g_cfg.iconPositions) {
                     if (ip.name == key || ip.name == item.label) {
                         item.ix = ip.x;
                         item.iy = ip.y;
+                        if (clampDesktopIconPosition(item.ix, item.iy)) {
+                            migratedIconPositions = true;
+                            Logger::write(LogLevel::Info, "Desktop icon saved position clamped into work area: " + key +
+                                " x=" + std::to_string(item.ix) + " y=" + std::to_string(item.iy));
+                        }
                         break;
                     }
                 }
@@ -836,6 +982,16 @@ namespace gxos {
                 item.iy = y;
                 Logger::write(LogLevel::Info, "Desktop icon auto-positioned: " + desktopLayoutKey(item) +
                     " x=" + std::to_string(item.ix) + " y=" + std::to_string(item.iy));
+            }
+            if (migratedIconPositions) {
+                g_cfg.iconPositions.clear();
+                for (const auto& di : g_items) {
+                    DesktopIconPos ip;
+                    ip.name = desktopLayoutKey(di);
+                    ip.x = di.ix;
+                    ip.y = di.iy;
+                    g_cfg.iconPositions.push_back(ip);
+                }
             }
             g_selectedDesktopIconIndices.clear( );
             for (int i = 0; i < (int)g_items.size( ); ++i) {
@@ -874,7 +1030,7 @@ namespace gxos {
             logCompositorList("start menu app", g_startMenuAllProgsSorted);
         }
 
-        void Compositor::saveDesktopConfig( ) { std::string err; if (!DesktopConfig::Save("desktop.json", g_cfg, err)) Logger::write(LogLevel::Error, "Shortcut persistence failure: " + err); else Logger::write(LogLevel::Info, "Desktop config persisted"); }
+        void Compositor::saveDesktopConfig( ) { g_cfg.taskbarPosition = taskbarPositionName(g_taskbarPosition); std::string err; if (!DesktopConfig::Save("desktop.json", g_cfg, err)) Logger::write(LogLevel::Error, "Shortcut persistence failure: " + err); else Logger::write(LogLevel::Info, "Desktop config persisted"); }
         void Compositor::addRecent(const std::string& act) { auto it = std::find(g_cfg.recent.begin( ), g_cfg.recent.end( ), act); if (it != g_cfg.recent.end( )) g_cfg.recent.erase(it); g_cfg.recent.insert(g_cfg.recent.begin( ), act); if (g_cfg.recent.size( ) > 20) g_cfg.recent.pop_back( ); refreshDesktopItems( ); saveDesktopConfig( ); }
         void Compositor::pinAction(const std::string& act) { if (act.empty( )) return; if (std::find(g_cfg.pinned.begin( ), g_cfg.pinned.end( ), act) == g_cfg.pinned.end( )) { g_cfg.pinned.push_back(act); refreshDesktopItems( ); saveDesktopConfig( ); } }
         void Compositor::unpinAction(const std::string& act) { auto it = std::find(g_cfg.pinned.begin( ), g_cfg.pinned.end( ), act); if (it != g_cfg.pinned.end( )) { g_cfg.pinned.erase(it); refreshDesktopItems( ); saveDesktopConfig( ); } }
@@ -1421,8 +1577,10 @@ namespace gxos {
         RECT Compositor::GetDesktopIconBounds(int index) {
             const int iconW = 56;
             const int cellW = iconW + 28;
-            const int cellH = 56 + 38;
             if (index < 0 || index >= (int)g_items.size( )) return RECT{ 0,0,0,0 };
+            const int labelMaxW = cellW - 8;
+            const auto labelLines = wrapUiTextToWidth(g_items[index].label, labelMaxW, FontRole::Small, 3);
+            const int cellH = 56 + 18 + std::max(uiTextHeight(FontRole::Small), wrappedUiTextHeight(labelLines, FontRole::Small));
             return RECT{ g_items[index].ix, g_items[index].iy, g_items[index].ix + cellW, g_items[index].iy + cellH };
         }
 
@@ -1468,15 +1626,31 @@ namespace gxos {
         uint64_t Compositor::inputOwnerPid() { uint64_t ownerPid = 0; uint64_t focusId = g_modalWindow ? g_modalWindow : g_focus; auto it = g_windows.find(focusId); if (it != g_windows.end( ) && !it->second.minimized && !it->second.tombstoned) { ownerPid = it->second.ownerPid; } return ownerPid; }
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)
         uint64_t Compositor::hitTestTaskbarButton(int mx, int my, RECT cr, int taskbarH) {
-            int taskbarTop = cr.bottom - taskbarH; if (my < taskbarTop) return 0; int btnX = 216; // leave space for start button + search box
-            for (uint64_t id : g_z) { auto it = g_windows.find(id); if (it == g_windows.end( )) continue; std::string label = it->second.title; int bw = measureUiText(label.c_str(), (int)label.size(), FontRole::Small) + 30; int btnTop = taskbarTop + 4; int btnBottom = cr.bottom - 4; if (mx >= btnX && mx <= btnX + bw && my >= btnTop && my <= btnBottom) return id; btnX += bw + 6; } return 0;
+            (void)taskbarH;
+            WorkRect tb = taskbarRectForBounds(cr.right - cr.left, cr.bottom - cr.top);
+            if (mx < tb.left || mx >= tb.right || my < tb.top || my >= tb.bottom) return 0;
+            bool vertical = g_taskbarPosition == TaskbarPosition::Left || g_taskbarPosition == TaskbarPosition::Right;
+            int btnX = vertical ? tb.left + 4 : 216;
+            int btnY = vertical ? tb.top + 48 : tb.top + 6;
+            for (uint64_t id : g_z) {
+                auto it = g_windows.find(id);
+                if (it == g_windows.end( )) continue;
+                std::string label = it->second.title;
+                int bw = vertical ? (tb.right - tb.left - 8) : measureUiText(label.c_str(), (int)label.size(), FontRole::Small) + 30;
+                if (!vertical && bw > 180) bw = 180;
+                int bh = vertical ? 28 : (tb.bottom - tb.top - 12);
+                RECT br{ btnX, btnY, btnX + bw, btnY + bh };
+                if (mx >= br.left && mx <= br.right && my >= br.top && my <= br.bottom) return id;
+                if (vertical) btnY += bh + 4; else btnX += bw + 6;
+            }
+            return 0;
         }
         void Compositor::initWindow( ) { WNDCLASSA wc{}; wc.style = CS_OWNDC; wc.lpfnWndProc = Compositor::WndProc; wc.hInstance = GetModuleHandleA(nullptr); wc.lpszClassName = "GXOS_COMPOSITOR"; RegisterClassA(&wc); g_hwnd = CreateWindowExA(0, wc.lpszClassName, "guideXOSCpp Compositor", WS_OVERLAPPEDWINDOW | WS_VISIBLE, CW_USEDEFAULT, CW_USEDEFAULT, 1024, 768, nullptr, nullptr, wc.hInstance, nullptr); g_startBtnBmp = (HBITMAP)LoadImageA(nullptr, "assets/start_button.bmp", IMAGE_BITMAP, 0, 0, LR_LOADFROMFILE | LR_CREATEDIBSECTION); }
         void Compositor::shutdownWindow( ) { if (g_hwnd) { DestroyWindow(g_hwnd); g_hwnd = nullptr; } }
         void Compositor::requestRepaint( ) { if (g_hwnd) InvalidateRect(g_hwnd, nullptr, FALSE); }
         void Compositor::drawDesktopIcons(HDC dc, RECT cr) {
-            const int iconW = 56; const int iconH = 56; const int cellW = iconW + 28; const int cellH = iconH + 38; HFONT font = (HFONT)GetStockObject(ANSI_VAR_FONT); SelectObject(dc, font); SetBkMode(dc, TRANSPARENT); POINT cursor; GetCursorPos(&cursor); ScreenToClient(g_hwnd, &cursor); int idx = 0; for (auto& it : g_items) {
-                int x = it.ix; int y = it.iy; RECT cell{ x, y, x + cellW, y + cellH }; bool hover = (cursor.x >= cell.left && cursor.x <= cell.right && cursor.y >= cell.top && cursor.y <= cell.bottom);
+            const int iconW = 56; const int iconH = 56; const int cellW = iconW + 28; const int labelMaxW = cellW - 8; HFONT font = (HFONT)GetStockObject(ANSI_VAR_FONT); SelectObject(dc, font); SetBkMode(dc, TRANSPARENT); POINT cursor; GetCursorPos(&cursor); ScreenToClient(g_hwnd, &cursor); int idx = 0; for (auto& it : g_items) {
+                int x = it.ix; int y = it.iy; std::vector<std::string> labelLines = wrapUiTextToWidth(it.label, labelMaxW, FontRole::Small, 3); int cellH = iconH + 18 + std::max(uiTextHeight(FontRole::Small), wrappedUiTextHeight(labelLines, FontRole::Small)); RECT cell{ x, y, x + cellW, y + cellH }; bool hover = (cursor.x >= cell.left && cursor.x <= cell.right && cursor.y >= cell.top && cursor.y <= cell.bottom);
                 if (it.selected) {
                     HBRUSH sel = CreateSolidBrush(RGB(50, 90, 160)); FillRect(dc, &cell, sel); DeleteObject(sel); 
                     // Draw focus indicator for selected icon
@@ -1500,8 +1674,15 @@ namespace gxos {
                     HPEN iconFrame = CreatePen(PS_SOLID, 1, RGB(180, 180, 200)); HGDIOBJ oP2 = SelectObject(dc, iconFrame); HGDIOBJ oB2 = SelectObject(dc, GetStockObject(NULL_BRUSH)); Rectangle(dc, iconR.left, iconR.top, iconR.right, iconR.bottom); SelectObject(dc, oP2); SelectObject(dc, oB2); DeleteObject(iconFrame);
                 }
                 // Label with text shadow
-                drawUiText(dc, x + 5, iconR.bottom + 5, lbl, RGB(0, 0, 0), FontRole::Small);
-                drawUiText(dc, x + 4, iconR.bottom + 4, lbl, RGB(230, 230, 240), FontRole::Small);
+                int labelY = iconR.bottom + 5;
+                int lineH = uiTextHeight(FontRole::Small);
+                for (const std::string& line : labelLines) {
+                    int lineW = measureUiText(line.c_str(), static_cast<int>(line.size()), FontRole::Small);
+                    int lx = x + (cellW - lineW) / 2;
+                    drawUiText(dc, lx + 1, labelY + 1, line, RGB(0, 0, 0), FontRole::Small);
+                    drawUiText(dc, lx, labelY, line, RGB(230, 230, 240), FontRole::Small);
+                    labelY += lineH;
+                }
                 // Pin indicator
                 if (it.pinned && it.kind == DesktopItemKind::Shortcut) { const char* pin = "*"; drawUiText(dc, iconR.right - 10, iconR.top + 2, pin, 1, RGB(255, 200, 60), FontRole::SmallBold); }
                 idx++;
@@ -1529,7 +1710,7 @@ namespace gxos {
         LRESULT CALLBACK Compositor::WndProc(HWND h, UINT msg, WPARAM w, LPARAM l) {
             switch (msg) {
             case WM_CLOSE: PostQuitMessage(0); return 0;
-            case WM_SIZE: { RECT cr; GetClientRect(h, &cr); std::lock_guard<std::mutex> lk(g_lock); int taskbarH = 40; for (auto& kv : g_windows) { WinInfo& wi = kv.second; if (wi.maximized) { wi.x = cr.left; wi.y = cr.top; wi.w = cr.right - cr.left; wi.h = cr.bottom - taskbarH; wi.dirty = true; } } requestRepaint( ); return 0; }
+            case WM_SIZE: { RECT cr; GetClientRect(h, &cr); WorkRect work = desktopWorkAreaForBounds(cr.right - cr.left, cr.bottom - cr.top); std::lock_guard<std::mutex> lk(g_lock); for (auto& kv : g_windows) { WinInfo& wi = kv.second; if (wi.maximized) { wi.x = work.left; wi.y = work.top; wi.w = work.right - work.left; wi.h = work.bottom - work.top; wi.dirty = true; } } requestRepaint( ); return 0; }
             case WM_PAINT: {
                 PAINTSTRUCT ps; HDC dc = BeginPaint(h, &ps); RECT cr; GetClientRect(h, &cr); DesktopWallpaper::DrawGradient(dc, cr, g_gradientTopColor, g_gradientBottomColor, g_gradientAccentColor, !g_wallpaperImage); if (g_wallpaperImage && g_wallpaperImage->isValid()) { drawBackgroundImageToHdc(dc, cr, g_wallpaperImage, WallpaperRegistry::ParseScaleMode(g_backgroundScaleMode)); } else { DesktopWallpaper::DrawBranding(dc, cr); } drawDesktopIcons(dc, cr);
 #if defined(GXOS_SYSTEM_FONT_DEMO)
@@ -1633,29 +1814,30 @@ namespace gxos {
                         WindowRenderer::DrawTombstoneOverlay(dc, winfo.x, winfo.y, winfo.w, winfo.h);
                     }
                 }
-                int taskbarH = 40; RECT tb{ cr.left,cr.bottom - taskbarH,cr.right,cr.bottom };
+                int taskbarH = kTaskbarSize; WorkRect tbWork = taskbarRectForBounds(cr.right - cr.left, cr.bottom - cr.top); RECT tb{ tbWork.left,tbWork.top,tbWork.right,tbWork.bottom }; bool taskbarVertical = (g_taskbarPosition == TaskbarPosition::Left || g_taskbarPosition == TaskbarPosition::Right);
                 // Taskbar background with subtle gradient
-                for (int ty2 = 0; ty2 < taskbarH; ++ty2) {
-                    float gt = (float)ty2 / (float)(taskbarH > 1 ? taskbarH - 1 : 1);
+                int taskbarSpan = taskbarVertical ? (tb.right - tb.left) : (tb.bottom - tb.top);
+                for (int ty2 = 0; ty2 < taskbarSpan; ++ty2) {
+                    float gt = (float)ty2 / (float)(taskbarSpan > 1 ? taskbarSpan - 1 : 1);
                     int gr = (int)(30 + gt * 10), gg = (int)(30 + gt * 10), gb = (int)(38 + gt * 14);
-                    HBRUSH tbLine = CreateSolidBrush(RGB(gr, gg, gb)); RECT tbLn{ cr.left, cr.bottom - taskbarH + ty2, cr.right, cr.bottom - taskbarH + ty2 + 1 }; FillRect(dc, &tbLn, tbLine); DeleteObject(tbLine);
+                    HBRUSH tbLine = CreateSolidBrush(RGB(gr, gg, gb)); RECT tbLn = taskbarVertical ? RECT{ tb.left + ty2, tb.top, tb.left + ty2 + 1, tb.bottom } : RECT{ tb.left, tb.top + ty2, tb.right, tb.top + ty2 + 1 }; FillRect(dc, &tbLn, tbLine); DeleteObject(tbLine);
                 }
-                // Top edge highlight
-                { HPEN tbEdge = CreatePen(PS_SOLID, 1, RGB(60, 65, 80)); HGDIOBJ oldP = SelectObject(dc, tbEdge); MoveToEx(dc, cr.left, cr.bottom - taskbarH, nullptr); LineTo(dc, cr.right, cr.bottom - taskbarH); SelectObject(dc, oldP); DeleteObject(tbEdge); }
-                RECT startBtn{ 8,cr.bottom - taskbarH + 6,8 + 32,cr.bottom - 6 }; HBRUSH sbg = CreateSolidBrush(g_startMenuVisible ? RGB(80, 110, 160) : RGB(55, 75, 100)); FillRect(dc, &startBtn, sbg); DeleteObject(sbg); FrameRect(dc, &startBtn, (HBRUSH)GetStockObject(WHITE_BRUSH)); drawBitmapCentered(dc, g_startBtnBmp, startBtn);
+                // Edge highlight
+                { HPEN tbEdge = CreatePen(PS_SOLID, 1, RGB(60, 65, 80)); HGDIOBJ oldP = SelectObject(dc, tbEdge); if (taskbarVertical) { int edgeX = (g_taskbarPosition == TaskbarPosition::Left) ? tb.right : tb.left; MoveToEx(dc, edgeX, tb.top, nullptr); LineTo(dc, edgeX, tb.bottom); } else { int edgeY = (g_taskbarPosition == TaskbarPosition::Top) ? tb.bottom : tb.top; MoveToEx(dc, tb.left, edgeY, nullptr); LineTo(dc, tb.right, edgeY); } SelectObject(dc, oldP); DeleteObject(tbEdge); }
+                RECT startBtn{ tb.left + 8,tb.top + 6,tb.left + 40,tb.top + 34 }; HBRUSH sbg = CreateSolidBrush(g_startMenuVisible ? RGB(80, 110, 160) : RGB(55, 75, 100)); FillRect(dc, &startBtn, sbg); DeleteObject(sbg); FrameRect(dc, &startBtn, (HBRUSH)GetStockObject(WHITE_BRUSH)); drawBitmapCentered(dc, g_startBtnBmp, startBtn);
                 // Search box placeholder (after start button)
-                drawTaskbarSearchBox(dc, 48, cr.bottom - taskbarH + 8, 160, taskbarH - 16);
+                if (!taskbarVertical) drawTaskbarSearchBox(dc, tb.left + 48, tb.top + 8, 160, (tb.bottom - tb.top) - 16);
                 // Taskbar buttons (offset to right of search box)
-                POINT cursor; GetCursorPos(&cursor); ScreenToClient(h, &cursor); int btnX = 216; for (uint64_t id : g_z) {
-                    auto it = g_windows.find(id); if (it == g_windows.end( )) continue; std::string label = it->second.title; int bw = measureUiText(label.c_str(), (int)label.size(), FontRole::Small) + 30; if (bw > 180) bw = 180; RECT br{ btnX, cr.bottom - taskbarH + 6, btnX + bw, cr.bottom - 6 }; bool hover = (cursor.x >= br.left && cursor.x <= br.right && cursor.y >= br.top && cursor.y <= br.bottom); HBRUSH bbg = CreateSolidBrush(hover ? RGB(90, 130, 190) : (id == g_focus ? RGB(70, 100, 150) : (it->second.minimized ? RGB(40, 40, 50) : (it->second.tombstoned ? RGB(85, 65, 35) : RGB(55, 58, 70))))); FillRect(dc, &br, bbg); DeleteObject(bbg);
+                POINT cursor; GetCursorPos(&cursor); ScreenToClient(h, &cursor); int btnX = taskbarVertical ? tb.left + 4 : tb.left + 216; int btnY = taskbarVertical ? tb.top + 48 : tb.top + 6; for (uint64_t id : g_z) {
+                    auto it = g_windows.find(id); if (it == g_windows.end( )) continue; std::string label = it->second.title; int bw = taskbarVertical ? (tb.right - tb.left - 8) : measureUiText(label.c_str(), (int)label.size(), FontRole::Small) + 30; if (!taskbarVertical && bw > 180) bw = 180; int bh = taskbarVertical ? 28 : (tb.bottom - tb.top - 12); RECT br{ btnX, btnY, btnX + bw, btnY + bh }; bool hover = (cursor.x >= br.left && cursor.x <= br.right && cursor.y >= br.top && cursor.y <= br.bottom); HBRUSH bbg = CreateSolidBrush(hover ? RGB(90, 130, 190) : (id == g_focus ? RGB(70, 100, 150) : (it->second.minimized ? RGB(40, 40, 50) : (it->second.tombstoned ? RGB(85, 65, 35) : RGB(55, 58, 70))))); FillRect(dc, &br, bbg); DeleteObject(bbg);
                     // Active indicator line at bottom for focused window
                     if (id == g_focus) { HBRUSH ind = CreateSolidBrush(RGB(100, 160, 240)); RECT indR{ br.left + 2,br.bottom - 3,br.right - 2,br.bottom - 1 }; FillRect(dc, &indR, ind); DeleteObject(ind); }
-                    RECT iconRect{ br.left + 4, br.top + 4, br.left + 20, br.top + 20 }; drawBitmapCentered(dc, it->second.taskbarIcon, iconRect); drawUiText(dc, br.left + 24, br.top + 8, label, RGB(230, 230, 240), FontRole::Small); btnX += bw + 4;
+                    RECT iconRect{ br.left + 4, br.top + 4, br.left + 20, br.top + 20 }; drawBitmapCentered(dc, it->second.taskbarIcon, iconRect); if (!taskbarVertical) drawUiText(dc, br.left + 24, br.top + 8, label, RGB(230, 230, 240), FontRole::Small); if (taskbarVertical) btnY += bh + 4; else btnX += bw + 4;
                 }
                 // System tray area (before clock)
-                drawSystemTray(dc, cr, taskbarH);
+                if (!taskbarVertical) drawSystemTray(dc, cr, taskbarH);
                 // Taskbar clock/date display (right side, matching Legacy Taskbar.cs)
-                {
+                if (!taskbarVertical) {
                     std::time_t now = std::time(nullptr);
                     std::tm ltBuf{};
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)
@@ -1671,30 +1853,29 @@ namespace gxos {
                     int dateW = measureUiText(dateBuf, (int)strlen(dateBuf), FontRole::Small);
                     int lineH = uiTextHeight(FontRole::Small);
                     int clockW = (timeW > dateW ? timeW : dateW) + 16;
-                    int clockX = cr.right - clockW - 12;
-                    int timeY = cr.bottom - taskbarH + 6;
+                    int clockX = tb.right - clockW - 12;
+                    int timeY = tb.top + 6;
                     int dateY = timeY + lineH - 1;
                     drawUiText(dc, clockX + (clockW - timeW) / 2, timeY, timeBuf, (int)strlen(timeBuf), RGB(200, 200, 210), FontRole::Small);
                     drawUiText(dc, clockX + (clockW - dateW) / 2, dateY, dateBuf, (int)strlen(dateBuf), RGB(150, 150, 165), FontRole::Small);
                 }
                 // Show Desktop button (thin sliver on far right, matching Legacy)
                 {
-                    int sdW = 6; int sdX = cr.right - sdW;
-                    RECT sdRect{ sdX, cr.bottom - taskbarH, cr.right, cr.bottom };
+                    int sdW = 6; RECT sdRect = taskbarVertical ? RECT{ tb.left, tb.bottom - sdW, tb.right, tb.bottom } : RECT{ tb.right - sdW, tb.top, tb.right, tb.bottom };
                     bool hoverSD = (cursor.x >= sdRect.left && cursor.y >= sdRect.top && cursor.x <= sdRect.right && cursor.y <= sdRect.bottom);
                     HBRUSH sdBrush = CreateSolidBrush(hoverSD ? RGB(70, 80, 100) : RGB(50, 50, 60));
                     FillRect(dc, &sdRect, sdBrush); DeleteObject(sdBrush);
                 }
                 // Taskbar button tooltip (drawn last so it overlaps everything)
-                {
-                    int tbtnX = 216;
+                if (!taskbarVertical) {
+                    int tbtnX = tb.left + 216;
                     for (uint64_t id : g_z) {
                         auto it = g_windows.find(id); if (it == g_windows.end( )) continue;
                         std::string label = it->second.title;
                         int bw = measureUiText(label.c_str(), (int)label.size(), FontRole::Small) + 30; if (bw > 180) bw = 180;
-                        RECT br2{ tbtnX, cr.bottom - taskbarH + 6, tbtnX + bw, cr.bottom - 6 };
+                        RECT br2{ tbtnX, tb.top + 6, tbtnX + bw, tb.bottom - 6 };
                         bool hov = (cursor.x >= br2.left && cursor.x <= br2.right && cursor.y >= br2.top && cursor.y <= br2.bottom);
-                        if (hov) { drawTaskbarTooltip(dc, (br2.left + br2.right) / 2, cr.bottom - taskbarH, label.c_str( )); break; }
+                        if (hov) { drawTaskbarTooltip(dc, (br2.left + br2.right) / 2, tb.top, label.c_str( )); break; }
                         tbtnX += bw + 4;
                     }
                 }
@@ -1751,8 +1932,11 @@ namespace gxos {
                     int leftColW = 260; // left list column width
                     int rightColW = 160; // right column for shortcuts
                     int smH = maxRows * rowH + 10;
-                    RECT sm{ startBtn.left, startBtn.top - smH - 6, startBtn.left + smW, startBtn.top - 6 };
+                    RECT sm = (g_taskbarPosition == TaskbarPosition::Top)
+                        ? RECT{ startBtn.left, startBtn.bottom + 6, startBtn.left + smW, startBtn.bottom + 6 + smH }
+                        : RECT{ startBtn.left, startBtn.top - smH - 6, startBtn.left + smW, startBtn.top - 6 };
                     if (sm.top < 0) { sm.top = 4; sm.bottom = sm.top + smH; }
+                    if (sm.bottom > cr.bottom) { sm.bottom = cr.bottom - 4; sm.top = sm.bottom - smH; }
                     g_startMenuRect = sm;
                     HBRUSH mBg = CreateSolidBrush(RGB(45, 45, 55));
                     FillRect(dc, &sm, mBg);
@@ -1938,8 +2122,9 @@ namespace gxos {
                     requestRepaint( ); return 0;
                 }
                 // Show Desktop button (thin sliver on far right of taskbar)
-                { int sdW = 6; int sdX = cr.right - sdW; if (mx >= sdX && my >= cr.bottom - taskbarH && mx <= cr.right && my <= cr.bottom) { ipc::Message sdm; sdm.type = static_cast<uint32_t>(gui::MsgType::MT_ShowDesktopToggle); handleMessage(sdm); requestRepaint( ); return 0; } }
-                RECT startBtn{ 8,cr.bottom - taskbarH + 6,8 + 32,cr.bottom - 6 }; // Start button toggle
+                WorkRect tbWork = taskbarRectForBounds(cr.right - cr.left, cr.bottom - cr.top); bool taskbarVertical = (g_taskbarPosition == TaskbarPosition::Left || g_taskbarPosition == TaskbarPosition::Right);
+                { int sdW = 6; RECT sdRect = taskbarVertical ? RECT{ tbWork.left, tbWork.bottom - sdW, tbWork.right, tbWork.bottom } : RECT{ tbWork.right - sdW, tbWork.top, tbWork.right, tbWork.bottom }; if (mx >= sdRect.left && my >= sdRect.top && mx <= sdRect.right && my <= sdRect.bottom) { ipc::Message sdm; sdm.type = static_cast<uint32_t>(gui::MsgType::MT_ShowDesktopToggle); handleMessage(sdm); requestRepaint( ); return 0; } }
+                RECT startBtn{ tbWork.left + 8,tbWork.top + 6,tbWork.left + 40,tbWork.top + 34 }; // Start button toggle
                 if (mx >= startBtn.left && mx <= startBtn.right && my >= startBtn.top && my <= startBtn.bottom) {
                     g_startMenuVisible = !g_startMenuVisible;
                     if (g_startMenuVisible) {
@@ -2048,7 +2233,8 @@ namespace gxos {
                 {
                     bool windowAtClick = false;
                     { std::lock_guard<std::mutex> lk(g_lock); windowAtClick = (hitWindowAt(mx, my) != nullptr); }
-                    if (!windowAtClick && my < cr.bottom - taskbarH) {
+                    WorkRect work = desktopWorkAreaForBounds(cr.right - cr.left, cr.bottom - cr.top);
+                    if (!windowAtClick && mx >= work.left && mx < work.right && my >= work.top && my < work.bottom) {
                         int hitIdx = HitTestDesktopIcon(mx, my);
                         bool ctrlDown = IsCtrlDown( );
                         bool shiftDown = IsShiftDown( );
@@ -2132,14 +2318,19 @@ namespace gxos {
                     }
                 }
                 // Desktop icon right-click pin/unpin or taskbar right-click menu
-                RECT cr; GetClientRect(h, &cr); int taskbarH = 40;
+                RECT cr; GetClientRect(h, &cr);
+                WorkRect tbWork = taskbarRectForBounds(cr.right - cr.left, cr.bottom - cr.top);
+                WorkRect work = desktopWorkAreaForBounds(cr.right - cr.left, cr.bottom - cr.top);
+                bool inTaskbar = mx >= tbWork.left && mx < tbWork.right && my >= tbWork.top && my < tbWork.bottom;
+                bool inWorkArea = mx >= work.left && mx < work.right && my >= work.top && my < work.bottom;
                 // Taskbar right-click: show context menu
-                if (my >= cr.bottom - taskbarH) {
+                if (inTaskbar) {
                     const int tmItemH = 28; const int tmItemCount = 3; const int tmPad = 6;
                     int tmH = tmItemH * tmItemCount + tmPad * 2;
                     int tmW = 180;
-                    int tmX = mx; int tmY = cr.bottom - taskbarH - tmH;
+                    int tmX = mx; int tmY = (g_taskbarPosition == TaskbarPosition::Top) ? tbWork.bottom + 4 : tbWork.top - tmH;
                     if (tmX + tmW > cr.right) tmX = cr.right - tmW - 2;
+                    if (tmY + tmH > cr.bottom) tmY = cr.bottom - tmH - 2;
                     if (tmY < 0) tmY = 0;
                     g_taskbarMenuRect = { tmX, tmY, tmX + tmW, tmY + tmH };
                     g_taskbarMenuVisible = true;
@@ -2147,7 +2338,7 @@ namespace gxos {
                     g_startMenuVisible = false;
                     requestRepaint( ); return 0;
                 }
-                if (my < cr.bottom - taskbarH) {
+                if (inWorkArea) {
                     // Check if right-click is on a window
                     WinInfo* hitWin = nullptr;
                     uint64_t ownerPid = 0;
@@ -2232,7 +2423,7 @@ namespace gxos {
                     break;
                 }
                 if (g_iconDragPending && !g_iconDragActive) { if (std::abs(mx - g_iconDragStartX) >= 4 || std::abs(my - g_iconDragStartY) >= 4) { g_iconDragActive = true; } }
-                if (g_iconDragActive && g_iconDragIndex >= 0 && g_iconDragIndex < (int)g_items.size( )) { RECT cr2; GetClientRect(h, &cr2); int taskbarH2 = 40; int nx = mx - g_iconDragOffX; int ny = my - g_iconDragOffY; if (nx < 0) nx = 0; if (ny < 0) ny = 0; const int cellW2 = 84; const int cellH2 = 94; if (nx + cellW2 > cr2.right) nx = cr2.right - cellW2; if (ny + cellH2 > cr2.bottom - taskbarH2) ny = cr2.bottom - taskbarH2 - cellH2; g_items[g_iconDragIndex].ix = nx; g_items[g_iconDragIndex].iy = ny; requestRepaint( ); break; }
+                if (g_iconDragActive && g_iconDragIndex >= 0 && g_iconDragIndex < (int)g_items.size( )) { int nx = mx - g_iconDragOffX; int ny = my - g_iconDragOffY; clampDesktopIconPosition(nx, ny); g_items[g_iconDragIndex].ix = nx; g_items[g_iconDragIndex].iy = ny; requestRepaint( ); break; }
                 if (g_iconDragPending) { break; } // Skip handleMouse while drag is pending
                 uint64_t ownerPid = 0; uint64_t targetWindow = 0; { std::lock_guard<std::mutex> lk(g_lock); WinInfo* hitWin = hitWindowAt(mx, my); if (hitWin) { ownerPid = hitWin->ownerPid; targetWindow = hitWin->id; } else { ownerPid = inputOwnerPid( ); targetWindow = g_modalWindow ? g_modalWindow : g_focus; } }
                 Compositor::handleMouse(mx, my, false, false); publishOut(MsgType::MT_InputMouse, Compositor::packMousePayloadForTarget(mx, my, 0, "move", ownerPid, targetWindow), ownerPid);
@@ -2416,7 +2607,7 @@ namespace gxos {
         void Compositor::emitWidgetEvt(uint64_t winId, int wid, const std::string& evt, const std::string& value) { uint64_t ownerPid = 0; { std::lock_guard<std::mutex> lk(g_lock); auto it = g_windows.find(winId); if (it != g_windows.end( )) ownerPid = it->second.ownerPid; } publishOut(MsgType::MT_WidgetEvt, std::to_string(winId) + "|" + std::to_string(wid) + "|" + evt + "|" + value, ownerPid); }
 
         void Compositor::handleMouse(int mx, int my, bool down, bool up) {
-            std::lock_guard<std::mutex> lk(g_lock); const int titleBarH = 24; const int gripSize = 12; const int taskbarH = 40;
+            std::lock_guard<std::mutex> lk(g_lock); const int titleBarH = 24; const int gripSize = 12;
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)
             RECT cr{ 0,0,1024,768 };
             if (g_hwnd) GetClientRect(g_hwnd, &cr);
@@ -2428,6 +2619,7 @@ namespace gxos {
                 cr.bottom = g_videoBackend->getHeight();
             }
 #endif
+            WorkRect work = desktopWorkAreaForBounds(cr.right - cr.left, cr.bottom - cr.top);
             // On mouse down, record start position and check if we're in a title bar (pending drag)
             if (down) {
                 g_dragStartX = mx; g_dragStartY = my; g_dragPending = false; g_dragPendingWin = 0;
@@ -2502,8 +2694,8 @@ namespace gxos {
 #else
                             RECT crL{ 0,0,1024,768 };
 #endif
-                            int taskbarY = crL.bottom - taskbarH;
-                            topW->x = crL.left; topW->y = crL.top; topW->w = crL.right - crL.left; topW->h = taskbarY - crL.top; topW->maximized = true; topW->snapState = 0; topW->dirty = true;
+                            WorkRect maxWork = desktopWorkAreaForBounds(crL.right - crL.left, crL.bottom - crL.top);
+                            topW->x = maxWork.left; topW->y = maxWork.top; topW->w = maxWork.right - maxWork.left; topW->h = maxWork.bottom - maxWork.top; topW->maximized = true; topW->snapState = 0; topW->dirty = true;
                         } else { // restore
                             topW->x = topW->prevX; topW->y = topW->prevY; topW->w = topW->prevW; topW->h = topW->prevH; topW->maximized = false; topW->dirty = true;
                         }
@@ -2514,10 +2706,10 @@ namespace gxos {
 
             if (topW) { int wx = mx - topW->x; int wy = my - topW->y - titleBarH; for (auto& wd : topW->widgets) { bool over = (wx >= wd.x && wx < wd.x + wd.w && wy >= wd.y && wy < wd.y + wd.h); if (!down && !up) { if (wd.hover != over) { wd.hover = over; invalidate(topW->id); } } else if (down) { if (over) { wd.pressed = true; wd.hover = true; invalidate(topW->id); } } else if (up) { if (wd.pressed) { if (over) { emitWidgetEvt(topW->id, wd.id, "click", ""); Logger::write(LogLevel::Info, std::string("Widget clicked: ") + std::to_string(topW->id) + "/" + std::to_string(wd.id)); } wd.pressed = false; wd.hover = false; invalidate(topW->id); } } } }
             // move while dragging
-            if (g_dragActive && !up) { auto it = g_windows.find(g_dragWin); if (it != g_windows.end( )) { WinInfo& w = it->second; if (!w.maximized && !w.minimized && !w.tombstoned) { int nx = mx - g_dragOffX; int ny = my - g_dragOffY; if (nx < cr.left) nx = cr.left; if (ny < cr.top) ny = cr.top; if (nx + w.w > cr.right) nx = cr.right - w.w; if (ny + w.h > cr.bottom - taskbarH) ny = cr.bottom - taskbarH - w.h; if (nx != w.x || ny != w.y) { w.x = nx; w.y = ny; w.dirty = true; invalidate(w.id); } } } }
-            if (down) { uint64_t t = nowMs( ); for (int idx = (int)g_z.size( ) - 1; idx >= 0; --idx) { uint64_t wid = g_z[idx]; WinInfo& w = g_windows[wid]; if (w.minimized || w.tombstoned) continue; if (mx >= w.x && mx < w.x + w.w && my >= w.y && my < w.y + titleBarH) { if (g_lastClickWin == w.id && (t - g_lastClickTicks) < 450) { if (!w.minimized) { if (!w.maximized) { w.prevX = w.x; w.prevY = w.y; w.prevW = w.w; w.prevH = w.h; w.x = 0; w.y = 0; w.w = cr.right; w.h = cr.bottom - taskbarH; w.maximized = true; } else { w.x = w.prevX; w.y = w.prevY; w.w = w.prevW; w.h = w.prevH; w.maximized = false; } } g_lastClickWin = 0; g_lastClickTicks = 0; invalidate(w.id); return; } g_lastClickWin = w.id; g_lastClickTicks = t; break; } } }
+            if (g_dragActive && !up) { auto it = g_windows.find(g_dragWin); if (it != g_windows.end( )) { WinInfo& w = it->second; if (!w.maximized && !w.minimized && !w.tombstoned) { int nx = mx - g_dragOffX; int ny = my - g_dragOffY; if (nx < work.left) nx = work.left; if (ny < work.top) ny = work.top; if (nx + w.w > work.right) nx = work.right - w.w; if (ny + w.h > work.bottom) ny = work.bottom - w.h; if (nx != w.x || ny != w.y) { w.x = nx; w.y = ny; w.dirty = true; invalidate(w.id); } } } }
+            if (down) { uint64_t t = nowMs( ); for (int idx = (int)g_z.size( ) - 1; idx >= 0; --idx) { uint64_t wid = g_z[idx]; WinInfo& w = g_windows[wid]; if (w.minimized || w.tombstoned) continue; if (mx >= w.x && mx < w.x + w.w && my >= w.y && my < w.y + titleBarH) { if (g_lastClickWin == w.id && (t - g_lastClickTicks) < 450) { if (!w.minimized) { if (!w.maximized) { w.prevX = w.x; w.prevY = w.y; w.prevW = w.w; w.prevH = w.h; w.x = work.left; w.y = work.top; w.w = work.right - work.left; w.h = work.bottom - work.top; w.maximized = true; } else { w.x = w.prevX; w.y = w.prevY; w.w = w.prevW; w.h = w.prevH; w.maximized = false; } } g_lastClickWin = 0; g_lastClickTicks = 0; invalidate(w.id); return; } g_lastClickWin = w.id; g_lastClickTicks = t; break; } } }
             if (down) { for (int idx = (int)g_z.size( ) - 1; idx >= 0; --idx) { WinInfo& w = g_windows[g_z[idx]]; if (w.minimized || w.maximized || w.tombstoned) continue; if (mx >= w.x + w.w - gripSize && mx < w.x + w.w && my >= w.y + w.h - gripSize && my < w.y + w.h) { g_resizeActive = true; g_resizeWin = w.id; g_resizeStartW = w.w; g_resizeStartH = w.h; g_resizeStartMX = mx; g_resizeStartMY = my; break; } } }
-            if (g_dragActive && up) { auto it = g_windows.find(g_dragWin); if (it != g_windows.end( )) { WinInfo& w = it->second; const int snap = 16; bool nearLeft = mx <= snap, nearRight = mx >= cr.right - snap, nearTop = my <= snap; bool nearBottom = my >= cr.bottom - taskbarH - snap; if (nearTop && !(nearLeft || nearRight)) { w.prevX = w.x; w.prevY = w.y; w.prevW = w.w; w.prevH = w.h; w.x = 0; w.y = 0; w.w = cr.right; w.h = cr.bottom - taskbarH; w.maximized = true; w.snapState = 0; } else if (nearLeft) { w.maximized = false; w.x = 0; w.y = 0; w.w = cr.right / 2; w.h = cr.bottom - taskbarH; w.snapState = 1; } else if (nearRight) { w.maximized = false; w.x = cr.right / 2; w.y = 0; w.w = cr.right / 2; w.h = cr.bottom - taskbarH; w.snapState = 2; } w.dirty = true; } g_dragActive = false; g_dragWin = 0; g_snapPreviewActive = false; invalidate(0); }
+            if (g_dragActive && up) { auto it = g_windows.find(g_dragWin); if (it != g_windows.end( )) { WinInfo& w = it->second; const int snap = 16; bool nearLeft = mx <= snap, nearRight = mx >= cr.right - snap, nearTop = my <= snap; if (nearTop && !(nearLeft || nearRight)) { w.prevX = w.x; w.prevY = w.y; w.prevW = w.w; w.prevH = w.h; w.x = work.left; w.y = work.top; w.w = work.right - work.left; w.h = work.bottom - work.top; w.maximized = true; w.snapState = 0; } else if (nearLeft) { w.maximized = false; w.x = work.left; w.y = work.top; w.w = (work.right - work.left) / 2; w.h = work.bottom - work.top; w.snapState = 1; } else if (nearRight) { w.maximized = false; w.x = work.left + (work.right - work.left) / 2; w.y = work.top; w.w = (work.right - work.left) / 2; w.h = work.bottom - work.top; w.snapState = 2; } w.dirty = true; } g_dragActive = false; g_dragWin = 0; g_snapPreviewActive = false; invalidate(0); }
             if (g_resizeActive && !up) { auto it = g_windows.find(g_resizeWin); if (it != g_windows.end( )) { int dw = mx - g_resizeStartMX; int dh = my - g_resizeStartMY; int newW = g_resizeStartW + dw; if (newW < 160) newW = 160; int newH = g_resizeStartH + dh; if (newH < 120) newH = 120; g_resizePreviewActive = true; g_resizePreviewW = newW; g_resizePreviewH = newH; } }
             if (g_resizeActive && up) { auto it = g_windows.find(g_resizeWin); if (it != g_windows.end( )) { int dw = mx - g_resizeStartMX; int dh = my - g_resizeStartMY; int newW = g_resizeStartW + dw; if (newW < 160) newW = 160; int newH = g_resizeStartH + dh; if (newH < 120) newH = 120; it->second.w = newW; it->second.h = newH; it->second.dirty = true; } g_resizeActive = false; g_resizeWin = 0; g_resizePreviewActive = false; }
             if (down) { for (int idx = (int)g_z.size( ) - 1; idx >= 0; --idx) { WinInfo& w = g_windows[g_z[idx]]; if (w.minimized || w.tombstoned) continue; if (g_modalWindow != 0 && w.id != g_modalWindow) continue; if (mx >= w.x && mx < w.x + w.w && my >= w.y && my < w.y + w.h) { g_focus = w.id; for (auto itZ = g_z.begin( ); itZ != g_z.end( ); ++itZ) { if (*itZ == w.id) { g_z.erase(itZ); break; } } g_z.push_back(w.id); sendFocus(w.id); break; } } }
@@ -2594,6 +2786,8 @@ namespace gxos {
                 std::string cfgErr;
                 if (DesktopConfig::Load("desktop.json", cfg, cfgErr)) {
                     g_cfg = cfg;
+                    g_taskbarPosition = parseTaskbarPosition(g_cfg.taskbarPosition);
+                    g_cfg.taskbarPosition = taskbarPositionName(g_taskbarPosition);
                     g_backgroundScaleMode = WallpaperRegistry::NormalizeScaleModeOrDefault(g_cfg.backgroundScaleMode.empty() ? "fill" : g_cfg.backgroundScaleMode);
                     g_cfg.backgroundScaleMode = g_backgroundScaleMode;
                     Logger::write(LogLevel::Info, std::string("Desktop config reloaded for system icon visibility: Trash=") + (g_cfg.showDesktopTrash ? "true" : "false") +
@@ -2787,6 +2981,9 @@ namespace gxos {
             DesktopConfigData cfg; std::string cfgErr; bool cfgOk = DesktopConfig::Load("desktop.json", cfg, cfgErr);
             g_cfg = cfg; // Store config
             Logger::write(LogLevel::Info, std::string("Compositor DesktopConfig loaded=") + (cfgOk ? "true" : "false") + " err=" + cfgErr);
+            g_taskbarPosition = parseTaskbarPosition(g_cfg.taskbarPosition);
+            g_cfg.taskbarPosition = taskbarPositionName(g_taskbarPosition);
+            Logger::write(LogLevel::Info, std::string("Compositor taskbar position=") + g_cfg.taskbarPosition);
             std::string configuredScale = cfg.backgroundScaleMode.empty() ? "fill" : cfg.backgroundScaleMode;
             g_backgroundScaleMode = WallpaperRegistry::NormalizeScaleModeOrDefault(configuredScale);
             if (configuredScale != g_backgroundScaleMode) {
@@ -2929,7 +3126,8 @@ namespace gxos {
             std::snprintf(timeBuf, sizeof(timeBuf), "%02d:%02d", ltBuf.tm_hour, ltBuf.tm_min);
             int clockW = measureUiText(timeBuf, (int)strlen(timeBuf), FontRole::Small) + 32; // approximate clock area width
             int trayX = cr.right - clockW - SystemTray::Width( ) - 16;
-            int trayY = cr.bottom - taskbarH;
+            WorkRect tb = taskbarRectForBounds(cr.right - cr.left, cr.bottom - cr.top);
+            int trayY = tb.top;
             SystemTray::Draw(dc, trayX, trayY, taskbarH);
         }
 
@@ -3011,6 +3209,47 @@ namespace gxos {
                                int x, int y, const std::string& text, uint32_t color,
                                FontRole role = FontRole::Default) {
             fbDrawText(pixels, pitch, bufW, bufH, x, y, text.c_str(), static_cast<int>(text.size()), color, role);
+        }
+
+        static std::vector<std::string> fbWrapTextToWidth(const std::string& text, int maxWidth, FontRole role, size_t maxLines = 3) {
+            std::vector<std::string> lines;
+            if (text.empty() || maxWidth <= 0 || maxLines == 0) return lines;
+            size_t pos = 0;
+            while (pos < text.size() && lines.size() < maxLines) {
+                while (pos < text.size() && std::isspace(static_cast<unsigned char>(text[pos]))) ++pos;
+                if (pos >= text.size()) break;
+                std::string line;
+                while (pos < text.size()) {
+                    size_t wordStart = pos;
+                    while (pos < text.size() && !std::isspace(static_cast<unsigned char>(text[pos]))) ++pos;
+                    std::string word = text.substr(wordStart, pos - wordStart);
+                    std::string candidate = line.empty() ? word : line + " " + word;
+                    if (fbMeasureText(candidate.c_str(), static_cast<int>(candidate.size()), role) <= maxWidth) {
+                        line = candidate;
+                    } else {
+                        if (line.empty()) {
+                            std::string piece;
+                            for (char ch : word) {
+                                std::string next = piece + ch;
+                                if (!piece.empty() && fbMeasureText(next.c_str(), static_cast<int>(next.size()), role) > maxWidth) {
+                                    lines.push_back(piece);
+                                    piece.clear();
+                                    if (lines.size() >= maxLines) return lines;
+                                }
+                                piece.push_back(ch);
+                            }
+                            line = piece;
+                        } else {
+                            pos = wordStart;
+                        }
+                        break;
+                    }
+                    while (pos < text.size() && std::isspace(static_cast<unsigned char>(text[pos]))) ++pos;
+                    if (pos >= text.size()) break;
+                }
+                if (!line.empty()) lines.push_back(line);
+            }
+            return lines;
         }
 
         static void fbDrawStartMenuIcon(uint32_t* pixels, int pitch, int bufW, int bufH, int rowX, int rowY, int rowH, const std::string& label, int& textX) {
@@ -3100,9 +3339,15 @@ namespace gxos {
                 
                 // Icon label
                 const char* label = item.label.c_str();
-                int labelW = fbMeasureText(label, -1, FontRole::Small);
-                fbDrawText(pixels, pitch, fbW, fbH,
-                    ix + (cellW - labelW) / 2, iconY + iconH + 8, label, -1, 0x00E6E6F0, FontRole::Small);
+                std::vector<std::string> labelLines = fbWrapTextToWidth(label, cellW - 8, FontRole::Small, 3);
+                int lineY = iconY + iconH + 8;
+                int lineH = SystemFont::MeasureHeight(FontRole::Small);
+                for (const std::string& line : labelLines) {
+                    int labelW = fbMeasureText(line.c_str(), static_cast<int>(line.size()), FontRole::Small);
+                    fbDrawText(pixels, pitch, fbW, fbH,
+                        ix + (cellW - labelW) / 2, lineY, line, 0x00E6E6F0, FontRole::Small);
+                    lineY += lineH;
+                }
                 
                 if (item.pinned) {
                     fbDrawText(pixels, pitch, fbW, fbH,

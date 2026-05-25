@@ -425,7 +425,7 @@ static const uint32_t kStartMenuW = 420;
 static const uint32_t kStartMenuRightColW = 160;
 static const uint32_t kIconSize = 48;
 static const uint32_t kIconCellW = 80;
-static const uint32_t kIconCellH = 76;
+static const uint32_t kIconCellH = 92;
 static const uint32_t kIconMargin = 24;
 static bool s_enableDesktopIcons = true;
 static uint32_t s_desktopIconSize = kIconSize;
@@ -571,6 +571,46 @@ static TaskbarDockPosition get_nearest_dock_edge(int32_t mouseX, int32_t mouseY,
     if (left < best) { best = left; pos = TaskbarDockPosition::Left; }
     if (right < best) { pos = TaskbarDockPosition::Right; }
     return pos;
+}
+
+static const char* taskbar_position_name(TaskbarDockPosition position)
+{
+    switch (position) {
+        case TaskbarDockPosition::Top: return "top";
+        case TaskbarDockPosition::Left: return "left";
+        case TaskbarDockPosition::Right: return "right";
+        case TaskbarDockPosition::Bottom:
+        default: return "bottom";
+    }
+}
+
+static TaskbarDockPosition parse_taskbar_position(const char* value)
+{
+    if (desktop_str_eq(value, "top")) return TaskbarDockPosition::Top;
+    if (desktop_str_eq(value, "left")) return TaskbarDockPosition::Left;
+    if (desktop_str_eq(value, "right")) return TaskbarDockPosition::Right;
+    return TaskbarDockPosition::Bottom;
+}
+
+static void persist_taskbar_position()
+{
+    const char* value = taskbar_position_name(s_taskbarDockPosition);
+    vfs::write_file("/desktop.taskbar.position", value, (uint32_t)desktop_strlen(value));
+}
+
+static void load_persisted_taskbar_position()
+{
+    char value[16];
+    int32_t count = vfs::read_file("/desktop.taskbar.position", value, sizeof(value) - 1);
+    if (count <= 0) return;
+    value[count] = '\0';
+    while (count > 0 && (value[count - 1] == '\n' || value[count - 1] == '\r' || value[count - 1] == ' ' || value[count - 1] == '\t')) {
+        value[--count] = '\0';
+    }
+    s_taskbarDockPosition = parse_taskbar_position(value);
+    serial::puts("[desktop] loaded taskbar position=");
+    serial::puts(taskbar_position_name(s_taskbarDockPosition));
+    serial::puts("\n");
 }
 
 static void apply_taskbar_layout()
@@ -1722,6 +1762,24 @@ static bool allocate_desktop_icon_slot(int ignoreIconId, int32_t& outX, int32_t&
     return false;
 }
 
+static bool clamp_icon_position_to_work_area(int32_t& x, int32_t& y)
+{
+    DesktopRect work = get_current_work_area();
+    int32_t minX = (int32_t)work.x + (int32_t)kIconMargin;
+    int32_t minY = (int32_t)work.y + (int32_t)kIconMargin;
+    int32_t maxX = (int32_t)(work.x + work.w) - (int32_t)kIconCellW;
+    int32_t maxY = (int32_t)(work.y + work.h) - (int32_t)kIconCellH;
+    if (maxX < minX) maxX = (int32_t)work.x;
+    if (maxY < minY) maxY = (int32_t)work.y;
+    int32_t oldX = x;
+    int32_t oldY = y;
+    if (x < minX) x = minX;
+    if (y < minY) y = minY;
+    if (x > maxX) x = maxX;
+    if (y > maxY) y = maxY;
+    return x != oldX || y != oldY;
+}
+
 static void reset_app_shortcut_slots()
 {
     for (int i = 0; i < kMaxDesktopAppShortcuts; ++i) {
@@ -2174,13 +2232,17 @@ static void initialize_icon_positions()
         s_iconPosY[i] = -1;
     }
     
+    bool migratedSavedPositions = false;
     for (int i = 0; i < s_visibleIconCount; i++) {
         int iconIdx = s_visibleIconIndices[i];
         
         // Check if icon has saved position
         if (s_desktopIcons[iconIdx].savedX >= 0 && s_desktopIcons[iconIdx].savedY >= 0) {
-            s_iconPosX[i] = s_desktopIcons[iconIdx].savedX;
-            s_iconPosY[i] = s_desktopIcons[iconIdx].savedY;
+            int32_t x = s_desktopIcons[iconIdx].savedX;
+            int32_t y = s_desktopIcons[iconIdx].savedY;
+            if (clamp_icon_position_to_work_area(x, y)) migratedSavedPositions = true;
+            s_iconPosX[i] = x;
+            s_iconPosY[i] = y;
         } else {
             int32_t x = 0;
             int32_t y = 0;
@@ -2191,6 +2253,7 @@ static void initialize_icon_positions()
     }
     
     s_iconPositionsInitialized = true;
+    if (migratedSavedPositions) save_icon_positions();
 }
 
 // Save icon position after drag (store in icon structure)
@@ -2202,8 +2265,7 @@ static void save_icon_position(int displayIndex)
     s_desktopIcons[iconIdx].savedX = s_iconPosX[displayIndex];
     s_desktopIcons[iconIdx].savedY = s_iconPosY[displayIndex];
     
-    // In a real system, this would persist to disk/NVRAM
-    // For now, positions are stored in memory only
+    save_icon_positions();
 }
 
 static bool is_ctrl_modifier_down()
@@ -3692,6 +3754,88 @@ static bool draw_themed_desktop_icon(int iconIdx, uint32_t cx, uint32_t iy)
 }
 #endif
 
+static bool desktop_is_space(char c)
+{
+    return c == ' ' || c == '\t' || c == '\n' || c == '\r';
+}
+
+static void copy_label_slice(char* dst, int dstSize, const char* src, int start, int end)
+{
+    if (!dst || dstSize <= 0) return;
+    if (!src || end <= start) {
+        dst[0] = '\0';
+        return;
+    }
+    int len = end - start;
+    if (len >= dstSize) len = dstSize - 1;
+    for (int i = 0; i < len; ++i) dst[i] = src[start + i];
+    dst[len] = '\0';
+}
+
+static int wrap_icon_label(const char* label, uint32_t maxWidth, char lines[][64], int maxLines)
+{
+    if (!label || !label[0] || maxLines <= 0) return 0;
+    int lineCount = 0;
+    int len = desktop_strlen(label);
+    int pos = 0;
+    while (pos < len && lineCount < maxLines) {
+        while (pos < len && desktop_is_space(label[pos])) ++pos;
+        if (pos >= len) break;
+
+        char line[64];
+        line[0] = '\0';
+        int lineLen = 0;
+        while (pos < len) {
+            int wordStart = pos;
+            while (pos < len && !desktop_is_space(label[pos])) ++pos;
+            int wordEnd = pos;
+
+            char candidate[64];
+            if (lineLen > 0) {
+                desktop_str_copy(candidate, line, sizeof(candidate));
+                int cLen = desktop_strlen(candidate);
+                if (cLen < (int)sizeof(candidate) - 1) candidate[cLen++] = ' ';
+                int wordLen = wordEnd - wordStart;
+                for (int i = 0; i < wordLen && cLen < (int)sizeof(candidate) - 1; ++i) candidate[cLen++] = label[wordStart + i];
+                candidate[cLen] = '\0';
+            } else {
+                copy_label_slice(candidate, sizeof(candidate), label, wordStart, wordEnd);
+            }
+
+            if ((uint32_t)measure_text(candidate) <= maxWidth) {
+                desktop_str_copy(line, candidate, sizeof(line));
+                lineLen = desktop_strlen(line);
+            } else {
+                if (lineLen == 0) {
+                    int pieceStart = wordStart;
+                    int pieceEnd = pieceStart;
+                    char piece[64];
+                    while (pieceEnd < wordEnd) {
+                        copy_label_slice(piece, sizeof(piece), label, pieceStart, pieceEnd + 1);
+                        if (pieceEnd > pieceStart && (uint32_t)measure_text(piece) > maxWidth) break;
+                        ++pieceEnd;
+                    }
+                    if (pieceEnd == pieceStart) ++pieceEnd;
+                    copy_label_slice(line, sizeof(line), label, pieceStart, pieceEnd);
+                    pos = pieceEnd;
+                } else {
+                    pos = wordStart;
+                }
+                break;
+            }
+
+            while (pos < len && desktop_is_space(label[pos])) ++pos;
+            if (pos >= len) break;
+        }
+
+        if (line[0]) {
+            desktop_str_copy(lines[lineCount], line, 64);
+            ++lineCount;
+        }
+    }
+    return lineCount;
+}
+
 static void draw_desktop_icon_item(int iconIdx, uint32_t cx, uint32_t cy, bool dragging)
 {
     uint32_t ix = cx + (kIconCellW - kIconSize) / 2;
@@ -3705,10 +3849,16 @@ static void draw_desktop_icon_item(int iconIdx, uint32_t cx, uint32_t cy, bool d
     // TODO: draw shortcut/pin badges when DesktopItemKind::Shortcut is implemented.
 
     uint32_t labelY = iy + kIconSize + 4;
-    int tw = measure_text(lbl);
-    uint32_t lx = cx + (kIconCellW > (uint32_t)tw ? (kIconCellW - tw) / 2 : 0);
-    draw_text(lx + 1, labelY + 1, lbl, rgb(0, 0, 0), 1);
-    draw_text(lx, labelY, lbl, dragging ? rgb(200, 200, 210) : rgb(240, 240, 250), 1);
+    char lines[3][64];
+    int lineCount = wrap_icon_label(lbl, kIconCellW - 8, lines, 3);
+    int lineH = gxos::gui::SystemFont::MeasureHeight(gxos::gui::FontRole::Default);
+    for (int i = 0; i < lineCount; ++i) {
+        int tw = measure_text(lines[i]);
+        uint32_t lx = cx + (kIconCellW > (uint32_t)tw ? (kIconCellW - tw) / 2 : 0);
+        uint32_t ly = labelY + (uint32_t)(i * lineH);
+        draw_text(lx + 1, ly + 1, lines[i], rgb(0, 0, 0), 1);
+        draw_text(lx, ly, lines[i], dragging ? rgb(200, 200, 210) : rgb(240, 240, 250), 1);
+    }
 }
 
 static void draw_desktop_icons()
@@ -5741,6 +5891,8 @@ void init()
     s_tickCounter = 0;
     s_lastClickedIcon = -1;
     s_lastClickTime = 0;
+    load_persisted_taskbar_position();
+    apply_taskbar_layout();
     reload_persisted_system_desktop_icons();
     load_persisted_app_shortcuts();
     initialize_icon_positions();  // Use new icon management system
@@ -5802,9 +5954,13 @@ void tick()
     }
     
     // Auto-hide notifications after 5 seconds (500 ticks at 10ms each)
+    if (s_notification.visible && s_notification.showTime == 0) {
+        s_notification.showTime = s_tickCounter;
+    }
     if (s_notification.visible && s_notification.showTime > 0) {
         if (s_tickCounter - s_notification.showTime >= 500) {
             s_notification.visible = false;
+            s_needsRedraw = true;
         }
     }
     
@@ -6892,6 +7048,12 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
                 if (newPosition != s_taskbarDockPosition) {
                     s_taskbarDockPosition = newPosition;
                     apply_taskbar_layout();
+                    persist_taskbar_position();
+                    bool migratedIcon = false;
+                    for (int displayIdx = 0; displayIdx < s_visibleIconCount; ++displayIdx) {
+                        if (clamp_icon_position_to_work_area(s_iconPosX[displayIdx], s_iconPosY[displayIdx])) migratedIcon = true;
+                    }
+                    if (migratedIcon) save_icon_positions();
                 }
             }
             draw();
@@ -6902,6 +7064,7 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
         if (released & 0x01) {
             s_taskbarDragging = false;
             apply_taskbar_layout();
+            persist_taskbar_position();
             draw();
             draw_cursor(mx, my);
             return;

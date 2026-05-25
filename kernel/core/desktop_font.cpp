@@ -116,10 +116,7 @@ static const uint8_t* glyph(char c)
 
 int measure_text(const char* str)
 {
-    int len = 0;
-    while (str[len]) len++;
-    if (len == 0) return 0;
-    return len * (kGlyphW + kGlyphSpacing) - kGlyphSpacing;
+    return gxos::gui::SystemFont::MeasureWidth(gxos::gui::FontRole::Default, str);
 }
 
 void draw_char(uint32_t px, uint32_t py, char c, uint32_t color, int scale)

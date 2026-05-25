@@ -19,6 +19,7 @@ namespace gxos { namespace gui {
         std::string wallpaperPath; // may be empty
         std::string wallpaperId; // stable built-in wallpaper id, e.g. desktop.wallpaper.id
         std::string backgroundScaleMode; // fill, fit, stretch, center, or tile
+        std::string taskbarPosition; // bottom, top, left, or right
         std::vector<std::string> pinned;
         std::vector<std::string> recent;
         std::vector<DesktopShortcutRec> desktopShortcuts;
@@ -50,6 +51,7 @@ namespace gxos { namespace gui {
             std::string section; if(extractSection(txt, "wallpaper", section)){ if(!section.empty() && section[0]=='"'){ size_t i=0; parseJSONString(section, i, out.wallpaperPath); } }
             if(extractSection(txt, "desktop.wallpaper.id", section)){ if(!section.empty() && section[0]=='"'){ size_t i=0; parseJSONString(section, i, out.wallpaperId); } }
             if(extractSection(txt, "desktop.background.scale", section)){ if(!section.empty() && section[0]=='"'){ size_t i=0; parseJSONString(section, i, out.backgroundScaleMode); } }
+            if(extractSection(txt, "desktop.taskbar.position", section)){ if(!section.empty() && section[0]=='"'){ size_t i=0; parseJSONString(section, i, out.taskbarPosition); } }
             if(extractSection(txt, "pinned", section)) parseStringArray(section, out.pinned);
             if(extractSection(txt, "recent", section)) parseStringArray(section, out.recent);
             if(extractSection(txt, "desktopShortcuts", section)) parseShortcutArray(section, out.desktopShortcuts);
@@ -68,6 +70,7 @@ namespace gxos { namespace gui {
             f << "  \"wallpaper\": " << jsonEscape(data.wallpaperPath) << ",\n";
             f << "  \"desktop.wallpaper.id\": " << jsonEscape(data.wallpaperId) << ",\n";
             f << "  \"desktop.background.scale\": " << jsonEscape(data.backgroundScaleMode.empty() ? "fill" : data.backgroundScaleMode) << ",\n";
+            f << "  \"desktop.taskbar.position\": " << jsonEscape(data.taskbarPosition.empty() ? "bottom" : data.taskbarPosition) << ",\n";
             f << "  \"pinned\": ["; for(size_t i=0;i<data.pinned.size();++i){ if(i) f<<","; f<<jsonEscape(data.pinned[i]);} f << "],\n";
             f << "  \"recent\": ["; for(size_t i=0;i<data.recent.size();++i){ if(i) f<<","; f<<jsonEscape(data.recent[i]);} f << "],\n";
             f << "  \"desktopShortcuts\": [\n";

@@ -1902,46 +1902,25 @@ namespace gxos {
             const bool cfgLoaded = DesktopConfig::Load("desktop.json", cfg, cfgErr);
             const size_t maxRows = 96;
 
-            LaunchStoragePreviewCounts counts;
-            std::ostringstream rows;
-
-            if (cfgLoaded) {
-                appendLaunchStoragePreviewLabels(rows, counts, "desktop.json:pinned", cfg.pinned, "", "medium", maxRows);
-                appendLaunchStoragePreviewLabels(rows, counts, "desktop.json:recent", cfg.recent, "", "medium", maxRows);
-
-                for (size_t i = 0; i < cfg.desktopShortcuts.size(); ++i) {
-                    const DesktopShortcutRec& shortcut = cfg.desktopShortcuts[i];
-                    const std::string type = shortcut.shortcutType.empty() ? (shortcut.targetPath.empty() ? "App" : "File") : shortcut.shortcutType;
-                    if (type == "App") {
-                        appendLaunchStoragePreviewRecord(rows, counts, "desktop.json:desktopShortcuts.App", i, shortcut.targetAppId, "app ID", "low", maxRows);
-                    } else if (type == "File" || type == "Folder") {
-                        appendLaunchStoragePreviewRecord(rows, counts, "desktop.json:desktopShortcuts.FileFolder", i, shortcut.targetPath, "file path", "low", maxRows);
-                    }
-                }
-
-                for (size_t i = 0; i < cfg.iconPositions.size(); ++i) {
-                    appendLaunchStoragePreviewSkip(rows, counts, "desktop.json:iconPositions", i, cfg.iconPositions[i].name, "Icon position record stores layout only and should not become a launch target", maxRows);
-                }
-            }
-
             std::vector<std::string> inMemoryPinned;
             for (const PinnedItem& item : s_pinned) inMemoryPinned.push_back(item.name);
-            appendLaunchStoragePreviewLabels(rows, counts, "DesktopService:s_pinned", inMemoryPinned, "", "medium", maxRows);
 
             std::vector<std::string> inMemoryRecentPrograms;
             for (const RecentProgramEntry& entry : s_recentPrograms) inMemoryRecentPrograms.push_back(entry.name);
-            appendLaunchStoragePreviewLabels(rows, counts, "DesktopService:s_recentPrograms", inMemoryRecentPrograms, "", "medium", maxRows);
 
             std::vector<std::string> inMemoryRecentDocuments;
             for (const RecentDocumentEntry& entry : s_recentDocuments) inMemoryRecentDocuments.push_back(entry.path);
-            appendLaunchStoragePreviewLabels(rows, counts, "DesktopService:s_recentDocuments", inMemoryRecentDocuments, "file path", "low", maxRows);
 
-            std::vector<std::string> allProgramLabels;
-            for (const RegisteredDesktopApp& app : s_apps) allProgramLabels.push_back(app.displayName);
-            appendLaunchStoragePreviewLabels(rows, counts, "Compositor:g_startMenuAllProgsSorted", allProgramLabels, "display name", "low", maxRows);
-
-            std::vector<std::string> shellLabels = { "ComputerFiles", "Console", "Trash", "ControlPanel", "TaskManager" };
-            appendLaunchStoragePreviewLabels(rows, counts, "Compositor:rightColumnAndSystemObjects", shellLabels, "", "medium", maxRows);
+            std::ostringstream rows;
+            const LaunchStoragePreviewCounts counts = collectLaunchStoragePreviewCounts(
+                cfgLoaded,
+                cfg,
+                inMemoryPinned,
+                inMemoryRecentPrograms,
+                inMemoryRecentDocuments,
+                s_apps,
+                &rows,
+                maxRows);
 
             std::ostringstream oss;
             oss << "[LaunchStringStoragePreview]\n";

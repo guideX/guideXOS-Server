@@ -45,7 +45,7 @@ namespace gxos { namespace gui {
         // Tuning constants (match C# legacy)
         static constexpr int kDivide    = 30;
         static constexpr int kThreshold = 50;
-        static constexpr uint64_t kDismissMs = 1000;  // auto-dismiss delay after fully slid in
+        static constexpr uint64_t kDismissMs = 5000;  // auto-dismiss delay after fully slid in
         static constexpr int kFontSize  = 16;         // approximate glyph height
     private:
         static std::vector<Notification> s_notifications;
