@@ -1,0 +1,14 @@
+[AppModelTypedDispatchGateEvidence]
+evidenceVersion=1
+kind=qemuLaunchShadowSmoke
+command=desktop.smoke.launchshadow
+timestampUnixMs=1779743383693
+timestampUtc=2026-05-25T21:09:43Z
+qemuSmokeStatus=PASS
+runtimeLaunchBehaviorChanged=false
+imgViewerExpectedUnsupportedConfirmed=true
+fakeLaunchShadowAppOnlyUnexpectedMismatchConfirmed=true
+unexpectedMismatchRows=1
+serialLogPath=D:\dev\guideXOSServer\logs\appmodel-launchshadow-kernel-smoke-20260525-140906.serial.log
+nonFatal=true
+launchesApps=false

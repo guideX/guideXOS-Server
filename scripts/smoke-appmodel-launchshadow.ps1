@@ -10,6 +10,40 @@ New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 
 $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $serialLog = Join-Path $LogDir "appmodel-launchshadow-kernel-smoke-$stamp.serial.log"
+$evidencePath = Join-Path $LogDir "appmodel-typed-dispatch-gate-qemu.evidence.txt"
+
+function Write-AppModelLaunchShadowEvidence {
+    param(
+        [string]$Status,
+        [bool]$RuntimeLaunchBehaviorUnchanged,
+        [bool]$ImgViewerExpectedUnsupportedConfirmed,
+        [bool]$FakeOnlyUnexpectedMismatchConfirmed,
+        [int]$UnexpectedMismatchRows,
+        [string]$SerialLogPath
+    )
+
+    $runtimeChanged = if ($RuntimeLaunchBehaviorUnchanged) { "false" } else { "true" }
+    $imgViewerConfirmed = if ($ImgViewerExpectedUnsupportedConfirmed) { "true" } else { "false" }
+    $fakeOnlyConfirmed = if ($FakeOnlyUnexpectedMismatchConfirmed) { "true" } else { "false" }
+
+    $lines = @(
+        "[AppModelTypedDispatchGateEvidence]",
+        "evidenceVersion=1",
+        "kind=qemuLaunchShadowSmoke",
+        "command=desktop.smoke.launchshadow",
+        "timestampUnixMs=$([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())",
+        "timestampUtc=$((Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ'))",
+        "qemuSmokeStatus=$Status",
+        "runtimeLaunchBehaviorChanged=$runtimeChanged",
+        "imgViewerExpectedUnsupportedConfirmed=$imgViewerConfirmed",
+        "fakeLaunchShadowAppOnlyUnexpectedMismatchConfirmed=$fakeOnlyConfirmed",
+        "unexpectedMismatchRows=$UnexpectedMismatchRows",
+        "serialLogPath=$SerialLogPath",
+        "nonFatal=true",
+        "launchesApps=false"
+    )
+    Set-Content -Path $script:evidencePath -Value $lines -Encoding ASCII
+}
 
 function Invoke-KernelBuildForSmoke {
     param([string]$ExtraCFlags)
@@ -161,15 +195,39 @@ foreach ($row in $unexpectedRows) {
     }
 }
 
+$runtimeLaunchBehaviorUnchanged = $output.Contains("runtimeLaunchBehaviorChanged: false")
+$imgViewerExpectedUnsupportedConfirmed =
+    $output.Contains("case=ImageViewerStaticAlias") -and
+    $output.Contains("inputLabel=`"ImgViewer`"") -and
+    $output.Contains("comparison=expected-unsupported")
+$fakeOnlyUnexpectedMismatchConfirmed =
+    $unexpectedRows.Count -eq 1 -and
+    $unexpectedRows[0].Value.Contains("case=UnknownProbe") -and
+    $unexpectedRows[0].Value.Contains('inputLabel="FakeLaunchShadowApp"')
+
 if ($unexpectedRows.Count -ne 1) {
     $failed += "Expected exactly one unexpected-mismatch row, found $($unexpectedRows.Count)"
 }
 
 if ($failed.Count -eq 0) {
+    Write-AppModelLaunchShadowEvidence -Status "PASS" `
+        -RuntimeLaunchBehaviorUnchanged $runtimeLaunchBehaviorUnchanged `
+        -ImgViewerExpectedUnsupportedConfirmed $imgViewerExpectedUnsupportedConfirmed `
+        -FakeOnlyUnexpectedMismatchConfirmed $fakeOnlyUnexpectedMismatchConfirmed `
+        -UnexpectedMismatchRows $unexpectedRows.Count `
+        -SerialLogPath $serialLog
     Write-Host "App-model launch shadow kernel smoke PASS. Serial log: $serialLog"
+    Write-Host "App-model typed-dispatch gate evidence: $evidencePath"
     exit 0
 }
 
+Write-AppModelLaunchShadowEvidence -Status "FAIL" `
+    -RuntimeLaunchBehaviorUnchanged $runtimeLaunchBehaviorUnchanged `
+    -ImgViewerExpectedUnsupportedConfirmed $imgViewerExpectedUnsupportedConfirmed `
+    -FakeOnlyUnexpectedMismatchConfirmed $fakeOnlyUnexpectedMismatchConfirmed `
+    -UnexpectedMismatchRows $unexpectedRows.Count `
+    -SerialLogPath $serialLog
 Write-Host "App-model launch shadow kernel smoke FAIL. Serial log: $serialLog" -ForegroundColor Red
+Write-Host "App-model typed-dispatch gate evidence: $evidencePath" -ForegroundColor Red
 foreach ($item in $failed) { Write-Host "Missing/failed: $item" -ForegroundColor Red }
 exit 1

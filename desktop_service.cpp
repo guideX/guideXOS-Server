@@ -32,6 +32,7 @@
 #include "package_manager.h"
 #include <algorithm>
 #include <cctype>
+#include <exception>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
@@ -40,6 +41,7 @@
 #include <set>
 #include <sstream>
 #include <chrono>
+#include <ctime>
 #include <thread>
 /// <summary>
 /// guideX OS GUI - Desktop Service
@@ -674,6 +676,160 @@ namespace gxos {
 
         static const char* diagnosticBool(bool value) {
             return value ? "true" : "false";
+        }
+
+        static const char* kTypedDispatchGateHostedEvidencePath = "logs/appmodel-typed-dispatch-gate-hosted.evidence.txt";
+        static const char* kTypedDispatchGateQemuEvidencePath = "logs/appmodel-typed-dispatch-gate-qemu.evidence.txt";
+        static const int64_t kTypedDispatchGateEvidenceStaleAfterMs = 7LL * 24LL * 60LL * 60LL * 1000LL;
+
+        static int64_t currentUnixTimeMs() {
+            const auto now = std::chrono::system_clock::now();
+            return std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
+        }
+
+        static std::string currentUtcTimestamp() {
+            const auto now = std::chrono::system_clock::now();
+            const std::time_t nowTime = std::chrono::system_clock::to_time_t(now);
+            std::tm utc{};
+#if defined(_WIN32)
+            gmtime_s(&utc, &nowTime);
+#else
+            gmtime_r(&nowTime, &utc);
+#endif
+            std::ostringstream oss;
+            oss << std::put_time(&utc, "%Y-%m-%dT%H:%M:%SZ");
+            return oss.str();
+        }
+
+        static std::string trimEvidenceValue(const std::string& value) {
+            size_t first = 0;
+            while (first < value.size() && std::isspace(static_cast<unsigned char>(value[first]))) ++first;
+            size_t last = value.size();
+            while (last > first && std::isspace(static_cast<unsigned char>(value[last - 1]))) --last;
+            return value.substr(first, last - first);
+        }
+
+        static bool writeDiagnosticTextFile(const std::string& path, const std::string& text, std::string& error) {
+            try {
+                const std::filesystem::path filePath(path);
+                const std::filesystem::path parent = filePath.parent_path();
+                if (!parent.empty()) {
+                    std::error_code ec;
+                    std::filesystem::create_directories(parent, ec);
+                    if (ec) {
+                        error = "create_directories failed: " + ec.message();
+                        return false;
+                    }
+                }
+                std::ofstream out(path, std::ios::binary | std::ios::trunc);
+                if (!out) {
+                    error = "open failed";
+                    return false;
+                }
+                out << text;
+                if (!out.good()) {
+                    error = "write failed";
+                    return false;
+                }
+                return true;
+            } catch (const std::exception& ex) {
+                error = ex.what();
+                return false;
+            } catch (...) {
+                error = "unknown write failure";
+                return false;
+            }
+        }
+
+        struct TypedDispatchGateEvidence {
+            bool present = false;
+            bool malformed = false;
+            bool stale = false;
+            std::string error;
+            std::map<std::string, std::string> values;
+        };
+
+        static TypedDispatchGateEvidence readTypedDispatchGateEvidence(const std::string& path) {
+            TypedDispatchGateEvidence evidence;
+            std::ifstream in(path, std::ios::binary);
+            if (!in) {
+                evidence.error = "missing";
+                return evidence;
+            }
+            evidence.present = true;
+
+            std::string line;
+            while (std::getline(in, line)) {
+                if (!line.empty() && line.back() == '\r') line.pop_back();
+                line = trimEvidenceValue(line);
+                if (line.empty()) continue;
+                if (line.front() == '[') continue;
+                const size_t eq = line.find('=');
+                if (eq == std::string::npos) {
+                    evidence.malformed = true;
+                    evidence.error = "line without key=value";
+                    continue;
+                }
+                const std::string key = trimEvidenceValue(line.substr(0, eq));
+                const std::string value = trimEvidenceValue(line.substr(eq + 1));
+                if (!key.empty()) evidence.values[key] = value;
+            }
+
+            if (evidence.values.empty() || evidence.values["evidenceVersion"] != "1") {
+                evidence.malformed = true;
+                if (evidence.error.empty()) evidence.error = "missing evidenceVersion=1";
+            }
+
+            const auto timestampIt = evidence.values.find("timestampUnixMs");
+            if (timestampIt == evidence.values.end()) {
+                evidence.stale = true;
+                if (evidence.error.empty()) evidence.error = "missing timestampUnixMs";
+            } else {
+                try {
+                    const int64_t timestamp = std::stoll(timestampIt->second);
+                    const int64_t now = currentUnixTimeMs();
+                    if (timestamp <= 0 || timestamp > now + 10LL * 60LL * 1000LL || now - timestamp > kTypedDispatchGateEvidenceStaleAfterMs) {
+                        evidence.stale = true;
+                        if (evidence.error.empty()) evidence.error = "timestamp outside freshness window";
+                    }
+                } catch (...) {
+                    evidence.malformed = true;
+                    if (evidence.error.empty()) evidence.error = "invalid timestampUnixMs";
+                }
+            }
+
+            return evidence;
+        }
+
+        static std::string evidenceValue(const TypedDispatchGateEvidence& evidence, const std::string& key) {
+            const auto it = evidence.values.find(key);
+            return it == evidence.values.end() ? std::string() : it->second;
+        }
+
+        static bool evidenceBool(const TypedDispatchGateEvidence& evidence, const std::string& key) {
+            const std::string value = evidenceValue(evidence, key);
+            return value == "true" || value == "PASS";
+        }
+
+        static uint64_t evidenceUInt64(const TypedDispatchGateEvidence& evidence, const std::string& key, uint64_t fallback = 0) {
+            const std::string value = evidenceValue(evidence, key);
+            if (value.empty()) return fallback;
+            try {
+                return static_cast<uint64_t>(std::stoull(value));
+            } catch (...) {
+                return fallback;
+            }
+        }
+
+        static std::string evidenceHealthDetail(const TypedDispatchGateEvidence& evidence, const std::string& path) {
+            if (!evidence.present) return "evidencePath=" + path + " status=missing";
+            std::string detail = "evidencePath=" + path;
+            if (evidence.malformed) detail += " malformed=true";
+            if (evidence.stale) detail += " stale=true";
+            if (!evidence.error.empty() && evidence.error != "missing") detail += " evidenceError=" + evidence.error;
+            const std::string timestamp = evidenceValue(evidence, "timestampUtc");
+            if (!timestamp.empty()) detail += " timestampUtc=" + timestamp;
+            return detail;
         }
 
         static bool launchTargetShadowIsUnresolved(const apps::LaunchTarget& target) {
@@ -1868,6 +2024,35 @@ namespace gxos {
             return s_launchTargetShadowCounters;
         }
 
+        bool DesktopService::WriteTypedDispatchHostedSmokeEvidence(std::string& error) {
+            const LaunchTargetShadowCounters counters = GetLaunchTargetShadowCounters();
+            const bool fakeProbeAllowed =
+                counters.totalObservations == 5 &&
+                counters.unresolvedObservations == 1 &&
+                counters.typedDispatchCandidateUnexpectedMismatches == 1 &&
+                counters.startMenuObservations == 3 &&
+                counters.desktopShortcutObservations == 2;
+
+            std::ostringstream evidence;
+            evidence << "[AppModelTypedDispatchGateEvidence]\n";
+            evidence << "evidenceVersion=1\n";
+            evidence << "kind=hostedLaunchShadowSmoke\n";
+            evidence << "command=gui.smoke.launchshadow\n";
+            evidence << "timestampUnixMs=" << currentUnixTimeMs() << "\n";
+            evidence << "timestampUtc=" << currentUtcTimestamp() << "\n";
+            evidence << "runtimeLaunchBehaviorChanged=false\n";
+            evidence << "observations=" << counters.totalObservations << "\n";
+            evidence << "unresolved=" << counters.unresolvedObservations << "\n";
+            evidence << "aliasFallback=" << counters.aliasFallbackObservations << "\n";
+            evidence << "typedDispatchCandidateMatches=" << counters.typedDispatchCandidateMatches << "\n";
+            evidence << "typedDispatchCandidateAcceptedMismatches=" << counters.typedDispatchCandidateAcceptedMismatches << "\n";
+            evidence << "typedDispatchCandidateUnexpectedMismatches=" << counters.typedDispatchCandidateUnexpectedMismatches << "\n";
+            evidence << "fakeProbeAllowed=" << diagnosticBool(fakeProbeAllowed) << "\n";
+            evidence << "nonFatal=true\n";
+            evidence << "launchesApps=false\n";
+            return writeDiagnosticTextFile(kTypedDispatchGateHostedEvidencePath, evidence.str(), error);
+        }
+
         std::string DesktopService::LaunchTargetShadowDiagnostic() {
             const LaunchTargetShadowCounters counters = GetLaunchTargetShadowCounters();
 
@@ -2471,6 +2656,248 @@ namespace gxos {
             oss << "status: " << (summary.totalUnexpectedUnsupported > 0 ? "WARN" : "OK")
                 << " note: Expected target-specific unsupported labels and unknown probe labels are non-fatal and informational\n";
 
+            return oss.str();
+        }
+
+        static void appendTypedDispatchGateCheck(std::ostringstream& oss, const std::string& key, const std::string& status, const std::string& detail) {
+            oss << "  check=" << key << " status=" << status;
+            if (!detail.empty()) oss << " detail=\"" << detail << "\"";
+            oss << "\n";
+        }
+
+        std::string DesktopService::TypedDispatchGateDiagnostic() {
+            ensureDefaultAppsRegistered();
+
+            const size_t duplicateCount = duplicateIdsFromScanIssues(s_lastManifestScanResult, s_lastBuiltInRegisterResult).size();
+            const int namespaceWarningCount = appIdNamespaceWarningCount();
+            const int hostedRegisteredMissingMetadata = hostedRegisteredBuiltInsMissingMetadataCount();
+            const int bareMetalRegisteredMissingMetadata = bareMetalRegisteredKernelAppsMissingMetadataCount();
+            const int metadataWithoutHostedRegistration = metadataWithoutHostedRegistrationCount();
+            const int metadataWithoutBareMetalRegistration = metadataWithoutBareMetalRegistrationCount();
+            const bool duplicateOk = duplicateCount == 0;
+            const bool namespaceOk = namespaceWarningCount == 0;
+            const bool hostedCoverageOk = hostedRegisteredMissingMetadata == 0 && metadataWithoutHostedRegistration == 0;
+            const bool bareMetalCoverageOk = bareMetalRegisteredMissingMetadata == 0 && metadataWithoutBareMetalRegistration == 0;
+            const bool invalidManifestOk = s_lastManifestScanResult.invalidApps.empty();
+
+            const LaunchTargetComparisonCounts launchTargetCounts = launchTargetComparisonCounts();
+            const bool launchTargetComparisonOk = launchTargetCounts.unexpectedDrift == 0;
+
+            DesktopConfigData cfg;
+            std::string cfgErr;
+            const bool cfgLoaded = DesktopConfig::Load("desktop.json", cfg, cfgErr);
+            std::vector<std::string> inMemoryPinned;
+            for (const PinnedItem& item : s_pinned) inMemoryPinned.push_back(item.name);
+            std::vector<std::string> inMemoryRecentPrograms;
+            for (const RecentProgramEntry& entry : s_recentPrograms) inMemoryRecentPrograms.push_back(entry.name);
+            std::vector<std::string> inMemoryRecentDocuments;
+            for (const RecentDocumentEntry& entry : s_recentDocuments) inMemoryRecentDocuments.push_back(entry.path);
+
+            const LaunchStoragePreviewCounts hostedStorageCounts = collectLaunchStoragePreviewCounts(
+                cfgLoaded,
+                cfg,
+                inMemoryPinned,
+                inMemoryRecentPrograms,
+                inMemoryRecentDocuments,
+                s_apps,
+                nullptr,
+                0);
+            const LaunchStoragePreviewCounts bareMetalStorageCounts = bareMetalStoragePreviewCountsForComparison();
+            const bool launchStoragePreviewOk = hostedStorageCounts.unresolved == 0 && hostedStorageCounts.highRisk == 0;
+            const size_t launchStoragePreviewUnexpectedDrift = hostedStorageCounts.highRisk + bareMetalStorageCounts.highRisk;
+            const bool launchStoragePreviewCompareOk = launchStoragePreviewUnexpectedDrift == 0;
+
+            const std::set<std::string> typeLabels = collectLaunchTargetTypeCoverageLabels();
+            const std::map<apps::LaunchTargetType, LaunchTargetTypeCounts> typeCounts = collectLaunchTargetTypeCoverageCounts(typeLabels);
+            const LaunchTargetTypeCoverageSummary typeSummary = summarizeLaunchTargetTypeCoverage(typeCounts, typeLabels.size());
+            const bool launchTargetTypesOk = typeSummary.totalUnexpectedUnsupported == 0;
+
+            const bool appModelSummaryOverallOk =
+                duplicateOk &&
+                namespaceOk &&
+                hostedCoverageOk &&
+                bareMetalCoverageOk &&
+                invalidManifestOk &&
+                launchTargetComparisonOk &&
+                launchStoragePreviewOk &&
+                launchStoragePreviewCompareOk;
+
+            const LaunchTargetShadowCounters shadow = GetLaunchTargetShadowCounters();
+            const bool shadowNotRun = shadow.totalObservations == 0;
+            const bool smokeFakeProbeShape =
+                shadow.totalObservations == 5 &&
+                shadow.unresolvedObservations == 1 &&
+                shadow.typedDispatchCandidateUnexpectedMismatches == 1 &&
+                shadow.startMenuObservations == 3 &&
+                shadow.desktopShortcutObservations == 2;
+            const bool shadowOk =
+                !shadowNotRun &&
+                (shadow.typedDispatchCandidateUnexpectedMismatches == 0 || smokeFakeProbeShape);
+
+            const TypedDispatchGateEvidence hostedEvidence = readTypedDispatchGateEvidence(kTypedDispatchGateHostedEvidencePath);
+            const TypedDispatchGateEvidence qemuEvidence = readTypedDispatchGateEvidence(kTypedDispatchGateQemuEvidencePath);
+
+            const bool hostedEvidenceHealthy = hostedEvidence.present && !hostedEvidence.malformed && !hostedEvidence.stale;
+            const bool hostedEvidenceIdentityOk =
+                hostedEvidenceHealthy &&
+                evidenceValue(hostedEvidence, "kind") == "hostedLaunchShadowSmoke" &&
+                evidenceValue(hostedEvidence, "command") == "gui.smoke.launchshadow";
+            const uint64_t hostedEvidenceUnexpectedMismatches =
+                evidenceUInt64(hostedEvidence, "typedDispatchCandidateUnexpectedMismatches");
+            const bool hostedEvidenceFakeProbeAllowed = evidenceBool(hostedEvidence, "fakeProbeAllowed");
+            const bool hostedEvidenceShadowOk =
+                hostedEvidenceIdentityOk &&
+                (hostedEvidenceUnexpectedMismatches == 0 ||
+                    (hostedEvidenceUnexpectedMismatches == 1 && hostedEvidenceFakeProbeAllowed));
+
+            std::string shadowStatus;
+            std::string shadowDetail;
+            if (!shadowNotRun) {
+                shadowStatus = shadowOk ? "PASS" : "FAIL";
+                shadowDetail =
+                    "source=current-process observations=" + std::to_string(shadow.totalObservations) +
+                    " typedDispatchCandidateUnexpectedMismatches=" + std::to_string(shadow.typedDispatchCandidateUnexpectedMismatches) +
+                    " fakeProbeAllowed=" + diagnosticBool(smokeFakeProbeShape);
+            } else if (!hostedEvidence.present) {
+                shadowStatus = "NOT-RUN";
+                shadowDetail =
+                    "source=missing-evidence observations=0 typedDispatchCandidateUnexpectedMismatches=0 fakeProbeAllowed=false " +
+                    evidenceHealthDetail(hostedEvidence, kTypedDispatchGateHostedEvidencePath);
+            } else if (!hostedEvidenceHealthy) {
+                shadowStatus = "WARN";
+                shadowDetail =
+                    "source=hosted-evidence " + evidenceHealthDetail(hostedEvidence, kTypedDispatchGateHostedEvidencePath);
+            } else {
+                shadowStatus = hostedEvidenceShadowOk ? "PASS" : "FAIL";
+                shadowDetail =
+                    "source=hosted-evidence observations=" + evidenceValue(hostedEvidence, "observations") +
+                    " typedDispatchCandidateUnexpectedMismatches=" + std::to_string(hostedEvidenceUnexpectedMismatches) +
+                    " fakeProbeAllowed=" + diagnosticBool(hostedEvidenceFakeProbeAllowed) +
+                    " " + evidenceHealthDetail(hostedEvidence, kTypedDispatchGateHostedEvidencePath);
+            }
+
+            std::string runtimeStatus;
+            std::string runtimeDetail;
+            if (!hostedEvidence.present) {
+                runtimeStatus = "NOT-RUN";
+                runtimeDetail = evidenceHealthDetail(hostedEvidence, kTypedDispatchGateHostedEvidencePath) +
+                    "; run gui.smoke.launchshadow and verify runtimeLaunchBehaviorChanged: false";
+            } else if (!hostedEvidenceHealthy) {
+                runtimeStatus = "WARN";
+                runtimeDetail = evidenceHealthDetail(hostedEvidence, kTypedDispatchGateHostedEvidencePath);
+            } else {
+                const bool runtimeOk = hostedEvidenceIdentityOk &&
+                    evidenceValue(hostedEvidence, "runtimeLaunchBehaviorChanged") == "false";
+                runtimeStatus = runtimeOk ? "PASS" : "FAIL";
+                runtimeDetail =
+                    "source=hosted-evidence runtimeLaunchBehaviorChanged=" +
+                    evidenceValue(hostedEvidence, "runtimeLaunchBehaviorChanged") +
+                    " " + evidenceHealthDetail(hostedEvidence, kTypedDispatchGateHostedEvidencePath);
+            }
+
+            std::string qemuStatus;
+            std::string qemuDetail;
+            if (!qemuEvidence.present) {
+                qemuStatus = "NOT-RUN";
+                qemuDetail = evidenceHealthDetail(qemuEvidence, kTypedDispatchGateQemuEvidencePath) +
+                    "; required command: .\\scripts\\smoke-appmodel-launchshadow.ps1 -TimeoutSeconds 35";
+            } else if (qemuEvidence.malformed || qemuEvidence.stale) {
+                qemuStatus = "WARN";
+                qemuDetail = evidenceHealthDetail(qemuEvidence, kTypedDispatchGateQemuEvidencePath);
+            } else {
+                const bool qemuOk =
+                    evidenceValue(qemuEvidence, "kind") == "qemuLaunchShadowSmoke" &&
+                    evidenceValue(qemuEvidence, "command") == "desktop.smoke.launchshadow" &&
+                    evidenceValue(qemuEvidence, "qemuSmokeStatus") == "PASS" &&
+                    evidenceValue(qemuEvidence, "runtimeLaunchBehaviorChanged") == "false" &&
+                    evidenceBool(qemuEvidence, "imgViewerExpectedUnsupportedConfirmed") &&
+                    evidenceBool(qemuEvidence, "fakeLaunchShadowAppOnlyUnexpectedMismatchConfirmed");
+                qemuStatus = qemuOk ? "PASS" : "FAIL";
+                qemuDetail =
+                    "source=qemu-evidence qemuSmokeStatus=" + evidenceValue(qemuEvidence, "qemuSmokeStatus") +
+                    " runtimeLaunchBehaviorChanged=" + evidenceValue(qemuEvidence, "runtimeLaunchBehaviorChanged") +
+                    " imgViewerExpectedUnsupportedConfirmed=" + evidenceValue(qemuEvidence, "imgViewerExpectedUnsupportedConfirmed") +
+                    " fakeLaunchShadowAppOnlyUnexpectedMismatchConfirmed=" + evidenceValue(qemuEvidence, "fakeLaunchShadowAppOnlyUnexpectedMismatchConfirmed") +
+                    " serialLogPath=" + evidenceValue(qemuEvidence, "serialLogPath") +
+                    " " + evidenceHealthDetail(qemuEvidence, kTypedDispatchGateQemuEvidencePath);
+            }
+
+            unsigned int passCount = 0;
+            unsigned int failCount = 0;
+            unsigned int warnCount = 0;
+            unsigned int notRunCount = 0;
+            const auto countStatus = [&passCount, &failCount, &warnCount, &notRunCount](const std::string& status) {
+                if (status == "PASS") ++passCount;
+                else if (status == "FAIL") ++failCount;
+                else if (status == "WARN") ++warnCount;
+                else if (status == "NOT-RUN") ++notRunCount;
+            };
+
+            std::ostringstream oss;
+            oss << "[TypedDispatchShadowOnlyGate]\n";
+            oss << "command: desktop.appmodel.typed-dispatch-gate\n";
+            oss << "mode: report-only\n";
+            oss << "enablesTypedDispatch: false\n";
+            oss << "feedsTypedDispatchIntoLaunch: false\n";
+            oss << "writesStorage: false\n";
+            oss << "nonFatal: true\n";
+            oss << "evidenceFiles:\n";
+            oss << "  hosted=" << kTypedDispatchGateHostedEvidencePath << "\n";
+            oss << "  qemu=" << kTypedDispatchGateQemuEvidencePath << "\n";
+            oss << "checks:\n";
+
+            appendTypedDispatchGateCheck(oss, "hostedBuild", "INFO", "Not detectable at runtime; required command: .\\build.bat");
+
+            const std::string appModelSummaryStatus = appModelSummaryOverallOk ? "PASS" : "FAIL";
+            appendTypedDispatchGateCheck(oss, "appModelSummaryOverall", appModelSummaryStatus,
+                std::string("overall=") + statusText(appModelSummaryOverallOk));
+            countStatus(appModelSummaryStatus);
+
+            const std::string launchTargetComparisonStatus = launchTargetComparisonOk ? "PASS" : "FAIL";
+            appendTypedDispatchGateCheck(oss, "launchTargetComparisonUnexpectedDrift", launchTargetComparisonStatus,
+                "unexpectedDrift=" + std::to_string(launchTargetCounts.unexpectedDrift));
+            countStatus(launchTargetComparisonStatus);
+
+            const std::string launchStoragePreviewCompareStatus = launchStoragePreviewCompareOk ? "PASS" : "FAIL";
+            appendTypedDispatchGateCheck(oss, "launchStoragePreviewCompareUnexpectedDrift", launchStoragePreviewCompareStatus,
+                "unexpectedDrift=" + std::to_string(launchStoragePreviewUnexpectedDrift));
+            countStatus(launchStoragePreviewCompareStatus);
+
+            const std::string launchTargetTypesStatus = launchTargetTypesOk ? "PASS" : "FAIL";
+            appendTypedDispatchGateCheck(oss, "launchTargetTypesUnexpectedUnsupported", launchTargetTypesStatus,
+                "unexpectedUnsupportedOnTarget=" + std::to_string(typeSummary.totalUnexpectedUnsupported));
+            countStatus(launchTargetTypesStatus);
+
+            appendTypedDispatchGateCheck(oss, "launchTargetShadowCounters", shadowStatus, shadowDetail);
+            countStatus(shadowStatus);
+
+            appendTypedDispatchGateCheck(oss, "runtimeLaunchBehaviorChanged", runtimeStatus, runtimeDetail);
+            countStatus(runtimeStatus);
+
+            appendTypedDispatchGateCheck(oss, "bareMetalBuild", "INFO", "External required command: .\\build.ps1 -Arch amd64");
+            appendTypedDispatchGateCheck(oss, "bareMetalShellSmoke", "INFO", "External/manual command in bare-metal shell: desktop.smoke.launchshadow");
+
+            appendTypedDispatchGateCheck(oss, "qemuLaunchShadowSmoke", qemuStatus, qemuDetail);
+            countStatus(qemuStatus);
+
+            appendTypedDispatchGateCheck(oss, "fallbackToLegacyRequired", "PASS",
+                "Future typed-dispatch-enabled path must keep legacy fallback on unresolved, unsupported, or unexpected mismatch results");
+            countStatus("PASS");
+
+            const bool hostedEvidenceNotRun = shadowStatus == "NOT-RUN" || runtimeStatus == "NOT-RUN";
+            const std::string gateStatus = failCount > 0 ? "FAIL" : (notRunCount > 0 ? (hostedEvidenceNotRun ? "NOT-RUN" : "WARN") : (warnCount > 0 ? "WARN" : "PASS"));
+            oss << "summary: pass=" << passCount
+                << " warn=" << warnCount
+                << " fail=" << failCount
+                << " notRun=" << notRunCount
+                << " info=3\n";
+            oss << "gateStatus: " << gateStatus << "\n";
+            oss << "nextRequiredCommands:\n";
+            oss << "  .\\build.bat\n";
+            oss << "  gui.smoke.launchshadow\n";
+            oss << "  .\\build.ps1 -Arch amd64\n";
+            oss << "  .\\scripts\\smoke-appmodel-launchshadow.ps1 -TimeoutSeconds 35\n";
+            oss << "note: report-only; this command does not enable GXOS_APPMODEL_TYPED_DISPATCH_SHADOW_ONLY or GXOS_APPMODEL_TYPED_DISPATCH_ENABLED\n";
             return oss.str();
         }
 

@@ -1,0 +1,16 @@
+[AppModelTypedDispatchGateEvidence]
+evidenceVersion=1
+kind=hostedLaunchShadowSmoke
+command=gui.smoke.launchshadow
+timestampUnixMs=1779743319767
+timestampUtc=2026-05-25T21:08:39Z
+runtimeLaunchBehaviorChanged=false
+observations=5
+unresolved=1
+aliasFallback=1
+typedDispatchCandidateMatches=3
+typedDispatchCandidateAcceptedMismatches=1
+typedDispatchCandidateUnexpectedMismatches=1
+fakeProbeAllowed=true
+nonFatal=true
+launchesApps=false

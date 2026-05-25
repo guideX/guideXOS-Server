@@ -127,10 +127,12 @@ namespace gxos { namespace gui {
         static std::string RecordLaunchTargetShadowObservation(const std::string& source, const apps::LaunchTarget& target, const std::string& actualDispatch, const std::string& adapterLegacyDispatch);
         static LaunchTargetShadowCounters GetLaunchTargetShadowCounters();
         static std::string LaunchTargetShadowDiagnostic();
+        static bool WriteTypedDispatchHostedSmokeEvidence(std::string& error);
         static std::string LaunchStorageDiagnostic();
         static std::string LaunchStoragePreviewDiagnostic();
         static std::string LaunchStoragePreviewComparisonDiagnostic();
         static std::string LaunchTargetTypeCoverageDiagnostic();
+        static std::string TypedDispatchGateDiagnostic();
         static std::string NativeAppCapabilitiesDiagnostic();
         static std::string InspectNativeAppPipeline(const std::string& appIdOrDisplayName);
         static std::string NativeAppPipelineSmokeTest(const std::string& appIdOrDisplayName);

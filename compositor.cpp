@@ -1263,6 +1263,11 @@ namespace gxos {
             oss << "summary:\n" << DesktopService::AppModelSummaryDiagnostic();
             oss << "coverage:\n" << DesktopService::BuiltInAppMetadataCoverageDiagnostic();
             oss << "runtimeLaunchBehaviorChanged: false\n";
+            std::string evidenceError;
+            const bool evidenceWritten = DesktopService::WriteTypedDispatchHostedSmokeEvidence(evidenceError);
+            oss << "evidencePath: logs/appmodel-typed-dispatch-gate-hosted.evidence.txt\n";
+            oss << "evidenceWritten: " << (evidenceWritten ? "true" : "false") << "\n";
+            if (!evidenceWritten) oss << "evidenceError: " << evidenceError << "\n";
             oss << "nonFatal: true\n";
             return oss.str();
 #endif
