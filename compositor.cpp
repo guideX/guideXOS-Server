@@ -1174,36 +1174,98 @@ namespace gxos {
             return false;
         }
 
-        static void logLaunchTargetShadowDiagnostic(const std::string& source, const std::string& uiLabel, const std::string& shortcutTarget, const std::string& dispatchName) {
-            const apps::LaunchTarget target = DesktopService::ResolveLaunchTarget(dispatchName);
-            std::string adapterStatus;
-            std::string adapterReason;
-            const std::string adapterLegacyDispatch = DesktopService::LegacyDispatchStringForLaunchTarget(target, adapterStatus, adapterReason);
-            const bool adapterMatchesActual = !adapterLegacyDispatch.empty() && adapterLegacyDispatch == dispatchName;
-            const std::string adapterComparison = DesktopService::RecordLaunchTargetShadowObservation(source, target, dispatchName, adapterLegacyDispatch);
+        static std::string buildLaunchTargetShadowDiagnosticLine(const std::string& source, const std::string& uiLabel, const std::string& shortcutTarget, const std::string& dispatchName, std::string* aliasFallbackLine = nullptr) {
+            const TypedDispatchCandidateResult candidate = DesktopService::ComputeTypedDispatchCandidateForUiLaunch(source, uiLabel, shortcutTarget, dispatchName);
+            const std::string adapterComparison = DesktopService::RecordLaunchTargetShadowObservation(source, candidate.target, dispatchName, candidate.typedDispatchCandidate);
             std::ostringstream oss;
             oss << "[LaunchTargetShadow] source=" << source
                 << " uiLabel=" << uiLabel;
             if (!shortcutTarget.empty()) oss << " shortcutTarget=" << shortcutTarget;
             oss << " actualDispatch=" << dispatchName
-                << " resolvedType=" << apps::ToString(target.type)
-                << " appId=" << target.appId
-                << " resolvedDispatch=" << target.dispatchLaunchName
-                << " adapterLegacyDispatch=" << adapterLegacyDispatch
-                << " adapterMatchesActual=" << (adapterMatchesActual ? "true" : "false")
+                << " resolutionInput=" << candidate.resolutionInput
+                << " resolvedType=" << apps::ToString(candidate.target.type)
+                << " appId=" << candidate.target.appId
+                << " resolvedDispatch=" << candidate.target.dispatchLaunchName
+                << " typedDispatchCandidate=" << candidate.typedDispatchCandidate
+                << " typedDispatchCandidateMatchesActual=" << (candidate.typedDispatchCandidateMatchesActual ? "true" : "false")
+                << " typedDispatchCandidateComparison=" << candidate.typedDispatchCandidateComparison
+                << " typedDispatchCandidateStatus=" << candidate.typedDispatchCandidateStatus
+                << " typedDispatchCandidateReason=" << candidate.typedDispatchCandidateReason
                 << " adapterComparison=" << adapterComparison
-                << " adapterStatus=" << adapterStatus
-                << " adapterReason=" << adapterReason
-                << " status=" << target.diagnosticStatus
-                << " reason=" << target.diagnosticReason;
-            Logger::write(LogLevel::Info, oss.str());
+                << " status=" << candidate.target.diagnosticStatus
+                << " reason=" << candidate.target.diagnosticReason;
 
-            if (!target.dispatchLaunchName.empty() && target.dispatchLaunchName != dispatchName) {
-                Logger::write(LogLevel::Info,
-                    "[LaunchTargetShadow] nonFatalAliasOrFallback source=" + source +
-                    " actualDispatch=" + dispatchName +
-                    " resolvedDispatch=" + target.dispatchLaunchName);
+            if (!candidate.target.dispatchLaunchName.empty() && candidate.target.dispatchLaunchName != dispatchName) {
+                if (aliasFallbackLine) {
+                    *aliasFallbackLine = "[LaunchTargetShadow] nonFatalAliasOrFallback source=" + source +
+                        " actualDispatch=" + dispatchName +
+                        " resolvedDispatch=" + candidate.target.dispatchLaunchName;
+                }
             }
+
+            return oss.str();
+        }
+
+        static std::vector<std::string> collectLaunchTargetShadowDiagnosticLines(const std::string& source, const std::string& uiLabel, const std::string& shortcutTarget, const std::string& dispatchName, bool emitLogs) {
+            std::vector<std::string> lines;
+            std::string aliasFallbackLine;
+            lines.push_back(buildLaunchTargetShadowDiagnosticLine(source, uiLabel, shortcutTarget, dispatchName, &aliasFallbackLine));
+            if (!aliasFallbackLine.empty()) lines.push_back(aliasFallbackLine);
+            if (emitLogs) {
+                for (const std::string& line : lines) Logger::write(LogLevel::Info, line);
+            }
+            return lines;
+        }
+
+        static void logLaunchTargetShadowDiagnostic(const std::string& source, const std::string& uiLabel, const std::string& shortcutTarget, const std::string& dispatchName) {
+            collectLaunchTargetShadowDiagnosticLines(source, uiLabel, shortcutTarget, dispatchName, true);
+        }
+
+        std::string Compositor::RunLaunchShadowSmokeDiagnostic() {
+#if !defined(_WIN32) || defined(GXOS_BARE_METAL)
+            return "[LaunchTargetShadowSmoke]\n"
+                "command: gui.smoke.launchshadow\n"
+                "mode: unavailable\n"
+                "reason: hosted-only smoke/test harness path\n"
+                "nonFatal: true\n";
+#else
+            struct SmokeCase {
+                const char* source;
+                const char* uiLabel;
+                const char* shortcutTarget;
+                const char* actualDispatch;
+            };
+
+            static const SmokeCase kSmokeCases[] = {
+                { "StartMenu", "Notepad", "", "Notepad" },
+                { "StartMenu", "ComputerFiles", "", "ComputerFiles" },
+                { "DesktopShortcut", "Notepad", "gxos.builtin.notepad", "Notepad" },
+                { "DesktopShortcut", "FileExplorer", "gxos.builtin.fileexplorer", "FileExplorer" },
+                { "StartMenu", "FakeLaunchShadowApp", "", "FakeLaunchShadowApp" }
+            };
+
+            std::ostringstream oss;
+            oss << "[LaunchTargetShadowSmoke]\n";
+            oss << "command: gui.smoke.launchshadow\n";
+            oss << "mode: diagnostic-only\n";
+            oss << "launchesApps: false\n";
+            oss << "usesExistingUiShadowHelper: true\n";
+            oss << "cases:\n";
+            for (const SmokeCase& smokeCase : kSmokeCases) {
+                std::vector<std::string> lines = collectLaunchTargetShadowDiagnosticLines(
+                    smokeCase.source,
+                    smokeCase.uiLabel,
+                    smokeCase.shortcutTarget,
+                    smokeCase.actualDispatch,
+                    true);
+                for (const std::string& line : lines) oss << "  " << line << "\n";
+            }
+            oss << "summary:\n" << DesktopService::AppModelSummaryDiagnostic();
+            oss << "coverage:\n" << DesktopService::BuiltInAppMetadataCoverageDiagnostic();
+            oss << "runtimeLaunchBehaviorChanged: false\n";
+            oss << "nonFatal: true\n";
+            return oss.str();
+#endif
         }
 
         void Compositor::launchAction(const std::string& act) {

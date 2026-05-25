@@ -49,24 +49,46 @@ namespace gxos { namespace gui {
         uint64_t adapterMatches = 0;
         uint64_t adapterAcceptedMismatches = 0;
         uint64_t adapterUnexpectedMismatches = 0;
+        uint64_t typedDispatchCandidateMatches = 0;
+        uint64_t typedDispatchCandidateAcceptedMismatches = 0;
+        uint64_t typedDispatchCandidateUnexpectedMismatches = 0;
         uint64_t startMenuObservations = 0;
         uint64_t startMenuUnresolved = 0;
         uint64_t startMenuAliasFallback = 0;
         uint64_t startMenuAdapterMatches = 0;
         uint64_t startMenuAdapterAcceptedMismatches = 0;
         uint64_t startMenuAdapterUnexpectedMismatches = 0;
+        uint64_t startMenuTypedDispatchCandidateMatches = 0;
+        uint64_t startMenuTypedDispatchCandidateAcceptedMismatches = 0;
+        uint64_t startMenuTypedDispatchCandidateUnexpectedMismatches = 0;
         uint64_t desktopShortcutObservations = 0;
         uint64_t desktopShortcutUnresolved = 0;
         uint64_t desktopShortcutAliasFallback = 0;
         uint64_t desktopShortcutAdapterMatches = 0;
         uint64_t desktopShortcutAdapterAcceptedMismatches = 0;
         uint64_t desktopShortcutAdapterUnexpectedMismatches = 0;
+        uint64_t desktopShortcutTypedDispatchCandidateMatches = 0;
+        uint64_t desktopShortcutTypedDispatchCandidateAcceptedMismatches = 0;
+        uint64_t desktopShortcutTypedDispatchCandidateUnexpectedMismatches = 0;
         uint64_t otherObservations = 0;
         uint64_t otherUnresolved = 0;
         uint64_t otherAliasFallback = 0;
         uint64_t otherAdapterMatches = 0;
         uint64_t otherAdapterAcceptedMismatches = 0;
         uint64_t otherAdapterUnexpectedMismatches = 0;
+        uint64_t otherTypedDispatchCandidateMatches = 0;
+        uint64_t otherTypedDispatchCandidateAcceptedMismatches = 0;
+        uint64_t otherTypedDispatchCandidateUnexpectedMismatches = 0;
+    };
+
+    struct TypedDispatchCandidateResult {
+        apps::LaunchTarget target;
+        std::string resolutionInput;
+        std::string typedDispatchCandidate;
+        std::string typedDispatchCandidateStatus;
+        std::string typedDispatchCandidateReason;
+        std::string typedDispatchCandidateComparison;
+        bool typedDispatchCandidateMatchesActual = false;
     };
 
     class DesktopService {
@@ -99,6 +121,7 @@ namespace gxos { namespace gui {
         static apps::LaunchTarget ResolveLaunchTarget(const std::string& label);
         static std::string ResolveLaunchTargetDiagnostic(const std::string& label);
         static std::string LegacyDispatchStringForLaunchTarget(const apps::LaunchTarget& target, std::string& status, std::string& reason);
+        static TypedDispatchCandidateResult ComputeTypedDispatchCandidateForUiLaunch(const std::string& source, const std::string& uiLabel, const std::string& shortcutTarget, const std::string& actualDispatch);
         static std::string LaunchTargetAdapterDiagnostic(const std::string& label);
         static std::string LaunchTargetComparisonDiagnostic();
         static std::string RecordLaunchTargetShadowObservation(const std::string& source, const apps::LaunchTarget& target, const std::string& actualDispatch, const std::string& adapterLegacyDispatch);

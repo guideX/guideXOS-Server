@@ -107,6 +107,7 @@ namespace gxos { namespace gui {
     class Compositor {
     public:
         static uint64_t start();
+        static std::string RunLaunchShadowSmokeDiagnostic();
         static void requestDesktopRefresh();
         static void openDesktopItem(int index);
         static void openStartMenuApp(const std::string& appName);

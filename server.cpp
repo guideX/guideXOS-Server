@@ -346,7 +346,7 @@ static void help(){
                  " bus.pub <chan> <text> [fanout] | bus.pop <chan> [timeoutMs]\n"
                  " bus.cap <chan> <cap> | bus.stats <chan>\n"
                  " console.start | console.send <text> | console.pop [timeoutMs]\n"
-                 " gui.start | gui.open.appmodeldemo | gui.win <title> [w h] | gui.text <id> <text> | gui.close <id>\n"
+                 " gui.start | gui.open.appmodeldemo | gui.smoke.launchshadow | gui.win <title> [w h] | gui.text <id> <text> | gui.close <id>\n"
                  " gui.rect <id> <x> <y> <w> <h> <r> <g> <b> | gui.move <id> <x> <y> | gui.resize <id> <w> <h> | gui.title <id> <title>\n"
                  " gui.btn <win> <id> <x> <y> <w> <h> <text> | gui.pop | gui.wlist | gui.activate <id> | gui.min <id>\n"
                  " gxm.load <path> | gxm.sample | gui.save <path> | gui.load <path>\n"
@@ -488,6 +488,9 @@ using namespace gxos;
             } else {
                 std::cout<<"App Model Demo open queued via compositor UI path"<<std::endl;
             }
+        } else if (cmd=="gui.smoke.launchshadow"){
+            if(!requireCompositor()) continue;
+            std::cout << gui::Compositor::RunLaunchShadowSmokeDiagnostic();
         } else if (cmd=="gui.win"){
             if(!requireCompositor()) continue;
             std::string title; iss>>title; int w=640,h=480; iss>>w>>h; if(title.empty()){ std::cout<<"Usage: gui.win <title> [w h]"<<std::endl; continue; }

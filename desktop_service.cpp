@@ -698,6 +698,16 @@ namespace gxos {
             return "unexpected-mismatch";
         }
 
+        static std::string resolveUiLaunchTargetInput(const std::string& source, const std::string& uiLabel, const std::string& shortcutTarget, const std::string& actualDispatch) {
+            if (source == "DesktopShortcut") {
+                if (!shortcutTarget.empty()) return shortcutTarget;
+                if (!uiLabel.empty()) return uiLabel;
+            }
+            if (!uiLabel.empty()) return uiLabel;
+            if (!shortcutTarget.empty()) return shortcutTarget;
+            return actualDispatch;
+        }
+
         static void countLaunchTargetShadowAdapterComparison(uint64_t& matches, uint64_t& acceptedMismatches, uint64_t& unexpectedMismatches, const std::string& comparisonStatus) {
             if (comparisonStatus == "match") ++matches;
             else if (comparisonStatus == "accepted-mismatch") ++acceptedMismatches;
@@ -712,6 +722,13 @@ namespace gxos {
                 << " adapterMatches=" << adapterMatches
                 << " adapterAcceptedMismatches=" << adapterAcceptedMismatches
                 << " adapterUnexpectedMismatches=" << adapterUnexpectedMismatches << "\n";
+        }
+
+        static void appendLaunchTargetShadowCandidateSourceLine(std::ostringstream& oss, const char* source, uint64_t matches, uint64_t acceptedMismatches, uint64_t unexpectedMismatches) {
+            oss << "  typedDispatchCandidate source=" << source
+                << " matches=" << matches
+                << " acceptedMismatches=" << acceptedMismatches
+                << " unexpectedMismatches=" << unexpectedMismatches << "\n";
         }
 
         struct LaunchStorageResolutionCounts {
@@ -1526,8 +1543,13 @@ namespace gxos {
                 << " adapterMatches=" << shadowCounters.adapterMatches
                 << " adapterAcceptedMismatches=" << shadowCounters.adapterAcceptedMismatches
                 << " adapterUnexpectedMismatches=" << shadowCounters.adapterUnexpectedMismatches
+                << " typedDispatchCandidateMatches=" << shadowCounters.typedDispatchCandidateMatches
+                << " typedDispatchCandidateAcceptedMismatches=" << shadowCounters.typedDispatchCandidateAcceptedMismatches
+                << " typedDispatchCandidateUnexpectedMismatches=" << shadowCounters.typedDispatchCandidateUnexpectedMismatches
                 << " startMenu=" << shadowCounters.startMenuObservations
+                << " startMenuTypedMatches=" << shadowCounters.startMenuTypedDispatchCandidateMatches
                 << " desktopShortcut=" << shadowCounters.desktopShortcutObservations
+                << " desktopShortcutTypedMatches=" << shadowCounters.desktopShortcutTypedDispatchCandidateMatches
                 << " nonFatal=true\n";
             oss << "launchStoragePreview: " << statusText(launchStoragePreviewOk)
                 << " total=" << storagePreviewCounts.total
@@ -1697,6 +1719,16 @@ namespace gxos {
             return "";
         }
 
+        TypedDispatchCandidateResult DesktopService::ComputeTypedDispatchCandidateForUiLaunch(const std::string& source, const std::string& uiLabel, const std::string& shortcutTarget, const std::string& actualDispatch) {
+            TypedDispatchCandidateResult result;
+            result.resolutionInput = resolveUiLaunchTargetInput(source, uiLabel, shortcutTarget, actualDispatch);
+            result.target = ResolveLaunchTarget(result.resolutionInput);
+            result.typedDispatchCandidate = LegacyDispatchStringForLaunchTarget(result.target, result.typedDispatchCandidateStatus, result.typedDispatchCandidateReason);
+            result.typedDispatchCandidateMatchesActual = !result.typedDispatchCandidate.empty() && result.typedDispatchCandidate == actualDispatch;
+            result.typedDispatchCandidateComparison = launchTargetShadowAdapterComparisonStatus(result.target, actualDispatch, result.typedDispatchCandidate);
+            return result;
+        }
+
         std::string DesktopService::LaunchTargetAdapterDiagnostic(const std::string& label) {
             apps::LaunchTarget target = ResolveLaunchTarget(label);
             std::string adapterStatus;
@@ -1767,6 +1799,7 @@ namespace gxos {
             const bool unresolved = launchTargetShadowIsUnresolved(target);
             const bool aliasFallback = launchTargetShadowIsAliasFallback(target, actualDispatch);
             const std::string adapterComparisonStatus = launchTargetShadowAdapterComparisonStatus(target, actualDispatch, adapterLegacyDispatch);
+            const std::string typedDispatchCandidateComparisonStatus = launchTargetShadowAdapterComparisonStatus(target, actualDispatch, adapterLegacyDispatch);
 
             std::lock_guard<std::mutex> lock(s_launchTargetShadowCountersMutex);
             ++s_launchTargetShadowCounters.totalObservations;
@@ -1777,6 +1810,11 @@ namespace gxos {
                 s_launchTargetShadowCounters.adapterAcceptedMismatches,
                 s_launchTargetShadowCounters.adapterUnexpectedMismatches,
                 adapterComparisonStatus);
+            countLaunchTargetShadowAdapterComparison(
+                s_launchTargetShadowCounters.typedDispatchCandidateMatches,
+                s_launchTargetShadowCounters.typedDispatchCandidateAcceptedMismatches,
+                s_launchTargetShadowCounters.typedDispatchCandidateUnexpectedMismatches,
+                typedDispatchCandidateComparisonStatus);
 
             if (source == "StartMenu") {
                 ++s_launchTargetShadowCounters.startMenuObservations;
@@ -1787,6 +1825,11 @@ namespace gxos {
                     s_launchTargetShadowCounters.startMenuAdapterAcceptedMismatches,
                     s_launchTargetShadowCounters.startMenuAdapterUnexpectedMismatches,
                     adapterComparisonStatus);
+                countLaunchTargetShadowAdapterComparison(
+                    s_launchTargetShadowCounters.startMenuTypedDispatchCandidateMatches,
+                    s_launchTargetShadowCounters.startMenuTypedDispatchCandidateAcceptedMismatches,
+                    s_launchTargetShadowCounters.startMenuTypedDispatchCandidateUnexpectedMismatches,
+                    typedDispatchCandidateComparisonStatus);
             } else if (source == "DesktopShortcut") {
                 ++s_launchTargetShadowCounters.desktopShortcutObservations;
                 if (unresolved) ++s_launchTargetShadowCounters.desktopShortcutUnresolved;
@@ -1796,6 +1839,11 @@ namespace gxos {
                     s_launchTargetShadowCounters.desktopShortcutAdapterAcceptedMismatches,
                     s_launchTargetShadowCounters.desktopShortcutAdapterUnexpectedMismatches,
                     adapterComparisonStatus);
+                countLaunchTargetShadowAdapterComparison(
+                    s_launchTargetShadowCounters.desktopShortcutTypedDispatchCandidateMatches,
+                    s_launchTargetShadowCounters.desktopShortcutTypedDispatchCandidateAcceptedMismatches,
+                    s_launchTargetShadowCounters.desktopShortcutTypedDispatchCandidateUnexpectedMismatches,
+                    typedDispatchCandidateComparisonStatus);
             } else {
                 ++s_launchTargetShadowCounters.otherObservations;
                 if (unresolved) ++s_launchTargetShadowCounters.otherUnresolved;
@@ -1805,6 +1853,11 @@ namespace gxos {
                     s_launchTargetShadowCounters.otherAdapterAcceptedMismatches,
                     s_launchTargetShadowCounters.otherAdapterUnexpectedMismatches,
                     adapterComparisonStatus);
+                countLaunchTargetShadowAdapterComparison(
+                    s_launchTargetShadowCounters.otherTypedDispatchCandidateMatches,
+                    s_launchTargetShadowCounters.otherTypedDispatchCandidateAcceptedMismatches,
+                    s_launchTargetShadowCounters.otherTypedDispatchCandidateUnexpectedMismatches,
+                    typedDispatchCandidateComparisonStatus);
             }
 
             return adapterComparisonStatus;
@@ -1826,10 +1879,16 @@ namespace gxos {
             oss << "adapterMatches: " << counters.adapterMatches << "\n";
             oss << "adapterAcceptedMismatches: " << counters.adapterAcceptedMismatches << "\n";
             oss << "adapterUnexpectedMismatches: " << counters.adapterUnexpectedMismatches << "\n";
+            oss << "typedDispatchCandidateMatches: " << counters.typedDispatchCandidateMatches << "\n";
+            oss << "typedDispatchCandidateAcceptedMismatches: " << counters.typedDispatchCandidateAcceptedMismatches << "\n";
+            oss << "typedDispatchCandidateUnexpectedMismatches: " << counters.typedDispatchCandidateUnexpectedMismatches << "\n";
             oss << "bySource:\n";
             appendLaunchTargetShadowSourceLine(oss, "StartMenu", counters.startMenuObservations, counters.startMenuUnresolved, counters.startMenuAliasFallback, counters.startMenuAdapterMatches, counters.startMenuAdapterAcceptedMismatches, counters.startMenuAdapterUnexpectedMismatches);
             appendLaunchTargetShadowSourceLine(oss, "DesktopShortcut", counters.desktopShortcutObservations, counters.desktopShortcutUnresolved, counters.desktopShortcutAliasFallback, counters.desktopShortcutAdapterMatches, counters.desktopShortcutAdapterAcceptedMismatches, counters.desktopShortcutAdapterUnexpectedMismatches);
             appendLaunchTargetShadowSourceLine(oss, "Other", counters.otherObservations, counters.otherUnresolved, counters.otherAliasFallback, counters.otherAdapterMatches, counters.otherAdapterAcceptedMismatches, counters.otherAdapterUnexpectedMismatches);
+            appendLaunchTargetShadowCandidateSourceLine(oss, "StartMenu", counters.startMenuTypedDispatchCandidateMatches, counters.startMenuTypedDispatchCandidateAcceptedMismatches, counters.startMenuTypedDispatchCandidateUnexpectedMismatches);
+            appendLaunchTargetShadowCandidateSourceLine(oss, "DesktopShortcut", counters.desktopShortcutTypedDispatchCandidateMatches, counters.desktopShortcutTypedDispatchCandidateAcceptedMismatches, counters.desktopShortcutTypedDispatchCandidateUnexpectedMismatches);
+            appendLaunchTargetShadowCandidateSourceLine(oss, "Other", counters.otherTypedDispatchCandidateMatches, counters.otherTypedDispatchCandidateAcceptedMismatches, counters.otherTypedDispatchCandidateUnexpectedMismatches);
             oss << "reset: not available\n";
             oss << "nonFatal: true\n";
             return oss.str();

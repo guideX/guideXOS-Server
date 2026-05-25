@@ -12,6 +12,7 @@
   "showDesktopFileManager": true,
   "showDesktopSystemSettings": false,
   "windows": [
+    {"id": 1000, "title": "Network Timeout - guideXOS Navigator", "x": 300, "y": 300, "w": 920, "h": 640, "minimized": false, "maximized": false, "z": 0, "focused": true, "snap": 0}
   ],
   "iconPositions": [
     {"name": "shortcut:app:guidexos.navigator", "x": 272, "y": 20}
