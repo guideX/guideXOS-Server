@@ -16,6 +16,7 @@ void printLaunchTargetAdapterDiagnostic(const char* label, LaunchTargetDiagnosti
 void printLaunchTargetComparisonDiagnostic(LaunchTargetDiagnosticWriter write);
 void printLaunchStorageDiagnostic(LaunchTargetDiagnosticWriter write);
 void printLaunchStoragePreviewDiagnostic(LaunchTargetDiagnosticWriter write);
+void printLaunchStoragePreviewComparisonDiagnostic(LaunchTargetDiagnosticWriter write);
 
 } // namespace appmodel
 } // namespace kernel

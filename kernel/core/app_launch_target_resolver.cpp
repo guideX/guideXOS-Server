@@ -354,6 +354,145 @@ static void write_preview_skip_record(LaunchTargetDiagnosticWriter write, Launch
     write("\n");
 }
 
+static void count_preview_value(LaunchStoragePreviewCounters& counters, const char* value, const char* baseRisk)
+{
+    gxos::apps::LaunchTarget target = resolveLaunchTarget(value);
+    const char* status = preview_status_for_target(target);
+    const char* risk = preview_risk_for_status(baseRisk, status);
+    preview_count_status(counters, status, risk);
+}
+
+static void count_preview_skip_only(LaunchStoragePreviewCounters& counters)
+{
+    preview_count_status(counters, "skip-layout-only", "low");
+}
+
+static void copy_preview_field(const char* src, int len, char* out, int outSize);
+
+static void count_shortcut_file_preview_values(LaunchStoragePreviewCounters& counters)
+{
+    char shortcuts[2048];
+    int32_t shortcutBytes = vfs::read_file("/desktop.shortcuts", shortcuts, sizeof(shortcuts) - 1);
+    if (shortcutBytes <= 0) return;
+    shortcuts[shortcutBytes] = '\0';
+
+    unsigned int index = 0;
+    int lineStart = 0;
+    for (int i = 0; i <= shortcutBytes && index < 16; ++i) {
+        if (shortcuts[i] != '\n' && shortcuts[i] != '\0') continue;
+        int lineEnd = i;
+        if (lineEnd > lineStart && shortcuts[lineEnd - 1] == '\r') --lineEnd;
+        if (lineEnd > lineStart) {
+            int tab1 = -1;
+            int tab2 = -1;
+            for (int j = lineStart; j < lineEnd; ++j) {
+                if (shortcuts[j] == '\t') {
+                    if (tab1 < 0) tab1 = j;
+                    else { tab2 = j; break; }
+                }
+            }
+            if (tab1 > lineStart && tab2 > tab1) {
+                char target[160];
+                copy_preview_field(shortcuts + tab1 + 1, tab2 - tab1 - 1, target, sizeof(target));
+                count_preview_value(counters, target, "medium");
+                ++index;
+            }
+        }
+        lineStart = i + 1;
+    }
+}
+
+static void count_icon_layout_preview_values(LaunchStoragePreviewCounters& counters)
+{
+    char iconLayout[2048];
+    int32_t layoutBytes = vfs::read_file("/.desktop_icons", iconLayout, sizeof(iconLayout) - 1);
+    if (layoutBytes <= 0) return;
+    iconLayout[layoutBytes] = '\0';
+
+    unsigned int index = 0;
+    int lineStart = 0;
+    for (int i = 0; i <= layoutBytes && index < 32; ++i) {
+        if (iconLayout[i] != '\n' && iconLayout[i] != '\0') continue;
+        int lineEnd = i;
+        if (lineEnd > lineStart && iconLayout[lineEnd - 1] == '\r') --lineEnd;
+        if (lineEnd > lineStart) {
+            int tab = -1;
+            for (int j = lineStart; j < lineEnd; ++j) {
+                if (iconLayout[j] == '\t') { tab = j; break; }
+            }
+            if (tab > lineStart) {
+                count_preview_skip_only(counters);
+                ++index;
+            }
+        }
+        lineStart = i + 1;
+    }
+}
+
+static LaunchStoragePreviewCounters collect_bare_metal_preview_counts()
+{
+    LaunchStoragePreviewCounters counters{};
+
+    const char* startMenuApps[] = {
+        "Calculator", "Notepad", "Console", "Trash", "TaskManager", "DiskManager",
+        "DisplayOptions", "guideXOS Navigator", "HDInstaller", "AppModel", "Paint",
+        "Clock", "Files", "ImgViewer"
+    };
+    for (unsigned int i = 0; i < sizeof(startMenuApps) / sizeof(startMenuApps[0]); ++i) {
+        count_preview_value(counters, startMenuApps[i], "medium");
+    }
+
+    const char* allPrograms[] = {
+        "Calculator", "Clock", "Console", "ControlPanel", "DiskManager", "Files",
+        "guideXOS Navigator", "HDInstaller", "ImgViewer", "AppModel", "Notepad",
+        "Paint", "TaskManager", "Trash"
+    };
+    for (unsigned int i = 0; i < sizeof(allPrograms) / sizeof(allPrograms[0]); ++i) {
+        count_preview_value(counters, allPrograms[i], "medium");
+    }
+
+    const char* rightColumn[] = {
+        "Computer", "Documents", "Pictures", "Music", "Network", "Control Panel", "Settings"
+    };
+    for (unsigned int i = 0; i < sizeof(rightColumn) / sizeof(rightColumn[0]); ++i) {
+        count_preview_value(counters, rightColumn[i], "medium");
+    }
+
+    count_shortcut_file_preview_values(counters);
+
+    const char* systemIconFlags[] = { "Trash", "ThisSystem", "FileManager", "SystemSettings" };
+    for (unsigned int i = 0; i < sizeof(systemIconFlags) / sizeof(systemIconFlags[0]); ++i) {
+        count_preview_skip_only(counters);
+    }
+
+    count_icon_layout_preview_values(counters);
+    return counters;
+}
+
+static void write_preview_counts_line(LaunchTargetDiagnosticWriter write, const char* label, const LaunchStoragePreviewCounters& counters, const char* extra)
+{
+    write(label);
+    write(" total=");
+    write_uint(write, counters.total);
+    write(" ready=");
+    write_uint(write, counters.ready);
+    write(" alias=");
+    write_uint(write, counters.alias);
+    write(" shellAction=");
+    write_uint(write, counters.shellAction);
+    write(" unresolved=");
+    write_uint(write, counters.unresolved);
+    write(" skippedLayoutOnly=");
+    write_uint(write, counters.skippedLayoutOnly);
+    write(" highRisk=");
+    write_uint(write, counters.highRisk);
+    if (extra && extra[0]) {
+        write(" ");
+        write(extra);
+    }
+    write("\n");
+}
+
 void printLaunchTargetDiagnostic(const gxos::apps::LaunchTarget& target, LaunchTargetDiagnosticWriter write)
 {
     if (!write) return;
@@ -801,6 +940,49 @@ void printLaunchStoragePreviewDiagnostic(LaunchTargetDiagnosticWriter write)
     write_uint(write, counters.truncated);
     write("\n");
     write("notes: desktop.cpp:s_taskbarEntries[] count=0, so no taskbar pin records are previewed\n");
+}
+
+void printLaunchStoragePreviewComparisonDiagnostic(LaunchTargetDiagnosticWriter write)
+{
+    if (!write) return;
+
+    LaunchStoragePreviewCounters hostedReference{};
+    hostedReference.total = 74;
+    hostedReference.ready = 69;
+    hostedReference.alias = 0;
+    hostedReference.shellAction = 5;
+    hostedReference.unresolved = 0;
+    hostedReference.skippedLayoutOnly = 0;
+    hostedReference.highRisk = 0;
+
+    LaunchStoragePreviewCounters bareMetalCounts = collect_bare_metal_preview_counts();
+    const unsigned int unexpectedDrift = hostedReference.highRisk + bareMetalCounts.highRisk;
+
+    write("[LaunchStringStoragePreviewComparison]\n");
+    write("nonFatal: true\n");
+    write("migrationState: preview-only\n");
+    write("writesStorageHosted=false\n");
+    write("writesStorageBareMetal=false\n");
+    write_preview_counts_line(write, "hosted", hostedReference, "source=current-hosted-baseline use-hosted-shell-for-live-desktop-json");
+    write_preview_counts_line(write, "bareMetal", bareMetalCounts, "source=bare-metal-actual");
+    write("intentionalDifferences: 5\n");
+    write("  difference=hosted-desktop-json note=hosted owns live desktop.json pinned/recent/desktopShortcuts/iconPositions storage\n");
+    write("  difference=bare-metal-vfs note=bare-metal owns VFS /desktop.shortcuts, /.desktop_icons, and /desktop.system.icons storage\n");
+    write("  difference=start-menu-source note=hosted all-programs are registry-derived while bare-metal Start Menu arrays are static today\n");
+    write("  difference=shell-labels note=hosted ComputerFiles is a shell label while bare-metal uses Computer/Documents/Pictures/Music/Network/Settings labels\n");
+    write("  difference=dynamic-runtime-sites note=desktop icon/taskbar runtime labels are target-specific and are not migrated in this diagnostic\n");
+    write("unexpectedDrift: ");
+    write_uint(write, unexpectedDrift);
+    write("\n");
+    if (bareMetalCounts.highRisk > 0) {
+        write("  drift=bareMetalHighRisk count=");
+        write_uint(write, bareMetalCounts.highRisk);
+        write(" note=inspect bare-metal desktop.launch.storage.preview for unresolved/high-risk rows\n");
+    }
+    write("overall: ");
+    write(unexpectedDrift == 0 ? "OK" : "WARN");
+    write("\n");
+    write("detailCommands: desktop.launch.storage.preview, desktop.launch.storage\n");
 }
 
 } // namespace appmodel

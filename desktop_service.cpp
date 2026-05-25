@@ -931,6 +931,66 @@ namespace gxos {
             return counts;
         }
 
+        static void countLaunchStoragePreviewTarget(LaunchStoragePreviewCounts& counts, const apps::LaunchTarget& target, const std::string& baseRisk) {
+            const std::string status = launchStoragePreviewStatus(target);
+            const std::string risk = launchStoragePreviewRisk(baseRisk, status);
+            countLaunchStoragePreviewStatus(counts, status, risk);
+        }
+
+        static void countLaunchStoragePreviewSkipOnly(LaunchStoragePreviewCounts& counts) {
+            countLaunchStoragePreviewStatus(counts, "skip-layout-only", "low");
+        }
+
+        static apps::LaunchTarget resolveBareMetalLaunchTargetForComparison(const std::string& label);
+
+        static void countBareMetalPreviewMirrorLabel(LaunchStoragePreviewCounts& counts, const std::string& label, const std::string& baseRisk) {
+            countLaunchStoragePreviewTarget(counts, resolveBareMetalLaunchTargetForComparison(label), baseRisk);
+        }
+
+        static LaunchStoragePreviewCounts bareMetalStoragePreviewCountsForComparison() {
+            LaunchStoragePreviewCounts counts;
+
+            const char* const startMenuApps[] = {
+                "Calculator", "Notepad", "Console", "Trash", "TaskManager", "DiskManager",
+                "DisplayOptions", "guideXOS Navigator", "HDInstaller", "AppModel", "Paint",
+                "Clock", "Files", "ImgViewer"
+            };
+            for (const char* label : startMenuApps) countBareMetalPreviewMirrorLabel(counts, label, "medium");
+
+            const char* const allPrograms[] = {
+                "Calculator", "Clock", "Console", "ControlPanel", "DiskManager", "Files",
+                "guideXOS Navigator", "HDInstaller", "ImgViewer", "AppModel", "Notepad",
+                "Paint", "TaskManager", "Trash"
+            };
+            for (const char* label : allPrograms) countBareMetalPreviewMirrorLabel(counts, label, "medium");
+
+            const char* const rightColumn[] = {
+                "Computer", "Documents", "Pictures", "Music", "Network", "Control Panel", "Settings"
+            };
+            for (const char* label : rightColumn) countBareMetalPreviewMirrorLabel(counts, label, "medium");
+
+            const char* const systemIconFlags[] = { "Trash", "ThisSystem", "FileManager", "SystemSettings" };
+            for (const char* ignored : systemIconFlags) {
+                (void)ignored;
+                countLaunchStoragePreviewSkipOnly(counts);
+            }
+
+            return counts;
+        }
+
+        static void appendLaunchStoragePreviewCountsLine(std::ostringstream& oss, const std::string& label, const LaunchStoragePreviewCounts& counts, const std::string& extra = "") {
+            oss << label
+                << " total=" << counts.total
+                << " ready=" << counts.ready
+                << " alias=" << counts.alias
+                << " shellAction=" << counts.shellAction
+                << " unresolved=" << counts.unresolved
+                << " skippedLayoutOnly=" << counts.skippedLayoutOnly
+                << " highRisk=" << counts.highRisk;
+            if (!extra.empty()) oss << " " << extra;
+            oss << "\n";
+        }
+
         static const char* const kLaunchTargetComparisonLabels[] = {
             "Notepad",
             "gxos.builtin.notepad",
@@ -1392,7 +1452,7 @@ namespace gxos {
                 << " highRisk=" << storagePreviewCounts.highRisk
                 << " writesStorage=false\n";
             oss << "overall: " << statusText(overallOk) << "\n";
-            oss << "detailCommands: desktop.appmodel.coverage, desktop.apps.verbose, desktop.launch.compare, desktop.launch.storage, desktop.launch.storage.preview\n";
+            oss << "detailCommands: desktop.appmodel.coverage, desktop.apps.verbose, desktop.launch.compare, desktop.launch.storage, desktop.launch.storage.preview, desktop.launch.storage.preview.compare\n";
             return oss.str();
         }
 
@@ -1942,6 +2002,67 @@ namespace gxos {
             oss << "rowCap: " << maxRows << "\n";
             oss << "records:\n";
             oss << rows.str();
+            return oss.str();
+        }
+
+        std::string DesktopService::LaunchStoragePreviewComparisonDiagnostic() {
+            ensureDefaultAppsRegistered();
+
+            DesktopConfigData cfg;
+            std::string cfgErr;
+            const bool cfgLoaded = DesktopConfig::Load("desktop.json", cfg, cfgErr);
+
+            std::vector<std::string> inMemoryPinned;
+            for (const PinnedItem& item : s_pinned) inMemoryPinned.push_back(item.name);
+
+            std::vector<std::string> inMemoryRecentPrograms;
+            for (const RecentProgramEntry& entry : s_recentPrograms) inMemoryRecentPrograms.push_back(entry.name);
+
+            std::vector<std::string> inMemoryRecentDocuments;
+            for (const RecentDocumentEntry& entry : s_recentDocuments) inMemoryRecentDocuments.push_back(entry.path);
+
+            const LaunchStoragePreviewCounts hostedCounts = collectLaunchStoragePreviewCounts(
+                cfgLoaded,
+                cfg,
+                inMemoryPinned,
+                inMemoryRecentPrograms,
+                inMemoryRecentDocuments,
+                s_apps,
+                nullptr,
+                0);
+            const LaunchStoragePreviewCounts bareMetalCounts = bareMetalStoragePreviewCountsForComparison();
+
+            const size_t unexpectedDrift = hostedCounts.highRisk + bareMetalCounts.highRisk;
+            const bool overallOk = unexpectedDrift == 0;
+
+            std::ostringstream oss;
+            oss << "[LaunchStringStoragePreviewComparison]\n";
+            oss << "nonFatal: true\n";
+            oss << "migrationState: preview-only\n";
+            oss << "writesStorageHosted=false\n";
+            oss << "writesStorageBareMetal=false\n";
+            oss << "hostedConfig: path=desktop.json loaded=" << diagnosticBool(cfgLoaded);
+            if (!cfgLoaded) oss << " error=" << cfgErr;
+            oss << "\n";
+            appendLaunchStoragePreviewCountsLine(oss, "hosted", hostedCounts, "source=live-hosted");
+            appendLaunchStoragePreviewCountsLine(oss, "bareMetal", bareMetalCounts, "source=hosted-static-mirror dynamicVfs=not-inspected-here");
+            oss << "intentionalDifferences: 5\n";
+            oss << "  difference=hosted-desktop-json note=hosted owns live desktop.json pinned/recent/desktopShortcuts/iconPositions storage\n";
+            oss << "  difference=bare-metal-vfs note=bare-metal owns VFS /desktop.shortcuts, /.desktop_icons, and /desktop.system.icons storage\n";
+            oss << "  difference=start-menu-source note=hosted all-programs are registry-derived while bare-metal Start Menu arrays are static today\n";
+            oss << "  difference=shell-labels note=hosted ComputerFiles is a shell label while bare-metal uses Computer/Documents/Pictures/Music/Network/Settings labels\n";
+            oss << "  difference=dynamic-runtime-sites note=desktop icon/taskbar runtime labels are target-specific and are not migrated in this diagnostic\n";
+            oss << "unexpectedDrift: " << unexpectedDrift << "\n";
+            if (bareMetalCounts.highRisk > 0) {
+                oss << "  drift=bareMetalHighRisk count=" << bareMetalCounts.highRisk
+                    << " note=bare-metal static preview mirror has unresolved/high-risk labels; inspect bare-metal desktop.launch.storage.preview for row detail\n";
+            }
+            if (hostedCounts.highRisk > 0) {
+                oss << "  drift=hostedHighRisk count=" << hostedCounts.highRisk
+                    << " note=hosted preview has unresolved/high-risk labels; inspect desktop.launch.storage.preview for row detail\n";
+            }
+            oss << "overall: " << statusText(overallOk) << "\n";
+            oss << "detailCommands: desktop.launch.storage.preview, desktop.launch.storage\n";
             return oss.str();
         }
 
