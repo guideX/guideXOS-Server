@@ -396,6 +396,7 @@ static void cmd_help() {
         output_string("  desktop.launch <AppName> - Launch app or show availability\n");
         output_string("  desktop.launch.resolve <label> - Resolve launch target without launching\n");
         output_string("  desktop.launch.adapt <label> - Adapt resolved target to legacy dispatch string\n");
+        output_string("  desktop.smoke.launchshadow - Smoke typed launch shadow diagnostics\n");
         output_string("  desktop.launch.compare - Compare hosted/bare-metal launch targets\n");
         output_string("  desktop.launch.storage - Report launch-string storage sites\n");
         output_string("  desktop.launch.storage.preview - Preview typed launch storage migration\n");
@@ -935,6 +936,10 @@ static void cmd_desktop_launch_adapt(const char* label) {
 
 static void cmd_desktop_launch_compare() {
     ::kernel::appmodel::printLaunchTargetComparisonDiagnostic(output_string);
+}
+
+static void cmd_desktop_smoke_launchshadow() {
+    ::kernel::appmodel::printLaunchTargetShadowSmokeDiagnostic(output_string);
 }
 
 static void cmd_desktop_launch_storage() {
@@ -2977,6 +2982,8 @@ static void execute_command(const char* cmd) {
         cmd_desktop_launch_adapt(command_tail(cmd));
     } else if (str_eq(command, "desktop.launch.compare")) {
         cmd_desktop_launch_compare();
+    } else if (str_eq(command, "desktop.smoke.launchshadow")) {
+        cmd_desktop_smoke_launchshadow();
     } else if (str_eq(command, "desktop.launch.storage")) {
         cmd_desktop_launch_storage();
     } else if (str_eq(command, "desktop.launch.storage.preview")) {

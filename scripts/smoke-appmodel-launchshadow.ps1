@@ -1,0 +1,175 @@
+param(
+    [switch]$Build,
+    [int]$TimeoutSeconds = 35
+)
+
+$ErrorActionPreference = "Stop"
+$Root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
+$LogDir = Join-Path $Root "logs"
+New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
+
+$stamp = Get-Date -Format "yyyyMMdd-HHmmss"
+$serialLog = Join-Path $LogDir "appmodel-launchshadow-kernel-smoke-$stamp.serial.log"
+
+function Invoke-KernelBuildForSmoke {
+    param([string]$ExtraCFlags)
+
+    $oldExtra = $env:EXTRA_CFLAGS
+    if ($ExtraCFlags) {
+        $env:EXTRA_CFLAGS = $ExtraCFlags
+    } else {
+        Remove-Item Env:\EXTRA_CFLAGS -ErrorAction SilentlyContinue
+    }
+
+    Get-ChildItem -Path (Join-Path $Root "kernel\build") -Recurse -Filter "main.o" -ErrorAction SilentlyContinue |
+        Remove-Item -Force -ErrorAction SilentlyContinue
+    Get-ChildItem -Path (Join-Path $Root "kernel\build") -Recurse -Filter "app_launch_target_resolver.o" -ErrorAction SilentlyContinue |
+        Remove-Item -Force -ErrorAction SilentlyContinue
+
+    & (Join-Path $Root "build-kernel.bat")
+    $buildCode = $LASTEXITCODE
+
+    if ($null -ne $oldExtra) {
+        $env:EXTRA_CFLAGS = $oldExtra
+    } else {
+        Remove-Item Env:\EXTRA_CFLAGS -ErrorAction SilentlyContinue
+    }
+
+    if ($buildCode -ne 0) { exit $buildCode }
+}
+
+$activeSmokeBuild = $false
+function Restore-NormalKernelBuild {
+    if ($script:activeSmokeBuild) {
+        Write-Host "Restoring normal kernel build without app-model launch shadow smoke diagnostics..."
+        Invoke-KernelBuildForSmoke ""
+        $script:activeSmokeBuild = $false
+    }
+}
+
+function Find-Qemu {
+    $qemu = Get-Command "qemu-system-x86_64" -ErrorAction SilentlyContinue
+    if ($qemu) { return $qemu.Source }
+    foreach ($candidate in @(
+        "C:\Program Files\qemu\qemu-system-x86_64.exe",
+        "C:\Program Files (x86)\qemu\qemu-system-x86_64.exe",
+        "$env:LOCALAPPDATA\Programs\qemu\qemu-system-x86_64.exe",
+        "D:\qemu\qemu-system-x86_64.exe"
+    )) {
+        if (Test-Path $candidate) { return $candidate }
+    }
+    return $null
+}
+
+if ($Build) {
+    Invoke-KernelBuildForSmoke ""
+}
+
+$qemu = Find-Qemu
+if (-not $qemu) { throw "qemu-system-x86_64 not found." }
+
+Write-Host "Building kernel with active app-model launch shadow smoke diagnostics..."
+Invoke-KernelBuildForSmoke "-DGXOS_APPMODEL_LAUNCHSHADOW_SMOKE_ACTIVE"
+$activeSmokeBuild = $true
+
+$ovmf = "C:\Program Files\qemu\share\edk2-x86_64-code.fd"
+if (-not (Test-Path $ovmf)) { throw "OVMF image not found: $ovmf" }
+
+$esp = Join-Path $Root "ESP"
+$bootloader = Join-Path $esp "EFI\BOOT\BOOTX64.EFI"
+if (-not (Test-Path $bootloader)) {
+    throw "ESP/EFI/BOOT/BOOTX64.EFI not found. Run .\build.ps1 -Arch amd64 first or pass -Build."
+}
+
+$fat32Disk = Join-Path $Root "disks\test-fat32.img"
+if (-not (Test-Path $fat32Disk)) {
+    throw "FAT32 test disk not found: $fat32Disk. Run .\scripts\create-test-disks.ps1 first."
+}
+
+$startup = Join-Path $esp "startup.nsh"
+$createdStartup = $false
+if (-not (Test-Path $startup)) {
+    "FS0:\EFI\BOOT\BOOTX64.EFI" | Set-Content -Path $startup -Encoding ASCII
+    $createdStartup = $true
+}
+
+$args = @(
+    "-machine", "pc",
+    "-drive", "if=pflash,format=raw,readonly=on,file=`"$ovmf`"",
+    "-drive", "file=fat:rw:`"$esp`",format=raw,if=ide,index=0",
+    "-drive", "file=`"$fat32Disk`",format=raw,if=ide,index=1,media=disk",
+    "-m", "512M",
+    "-vga", "std",
+    "-display", "none",
+    "-serial", "file:`"$serialLog`"",
+    "-no-reboot"
+)
+
+$proc = Start-Process -FilePath $qemu -ArgumentList $args -PassThru -WindowStyle Hidden
+try {
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    while (-not $proc.HasExited -and (Get-Date) -lt $deadline) {
+        Start-Sleep -Milliseconds 500
+        if (Test-Path $serialLog) {
+            $partial = Get-Content $serialLog -Raw
+            if ($null -eq $partial) { $partial = "" }
+            if ($partial.Contains("[APPMODEL-LAUNCHSHADOW-SMOKE] done")) { break }
+        }
+    }
+
+    if (-not $proc.HasExited) {
+        Stop-Process -Id $proc.Id -Force
+        Wait-Process -Id $proc.Id -Timeout 5 -ErrorAction SilentlyContinue
+    }
+} finally {
+    Start-Sleep -Milliseconds 300
+    if ($createdStartup) {
+        Remove-Item $startup -ErrorAction SilentlyContinue
+    }
+    Restore-NormalKernelBuild
+}
+
+$output = if (Test-Path $serialLog) { Get-Content $serialLog -Raw } else { "" }
+Write-Host $output
+
+$checks = @(
+    "[APPMODEL-LAUNCHSHADOW-SMOKE] issuing command=desktop.smoke.launchshadow",
+    "[LaunchTargetShadowSmoke]",
+    "command: desktop.smoke.launchshadow",
+    "mode: diagnostic-only",
+    "launchesApps: false",
+    "case=ImageViewerStaticAlias",
+    "inputLabel=`"ImgViewer`"",
+    "comparison=expected-unsupported",
+    "case=UnknownProbe",
+    "inputLabel=`"FakeLaunchShadowApp`"",
+    "comparison=unexpected-mismatch",
+    "summary: observations=8 matches=5 acceptedMismatches=1 expectedUnsupported=1 unexpectedMismatches=1 nonFatal=true",
+    "runtimeLaunchBehaviorChanged: false",
+    "[APPMODEL-LAUNCHSHADOW-SMOKE] done"
+)
+
+$failed = @()
+foreach ($check in $checks) {
+    if (-not $output.Contains($check)) { $failed += $check }
+}
+
+$unexpectedRows = [regex]::Matches($output, '^\s*case=.*comparison=unexpected-mismatch.*$', [System.Text.RegularExpressions.RegexOptions]::Multiline)
+foreach ($row in $unexpectedRows) {
+    if (-not $row.Value.Contains('case=UnknownProbe') -or -not $row.Value.Contains('inputLabel="FakeLaunchShadowApp"')) {
+        $failed += "Unexpected mismatch row was not the intentional fake probe: $($row.Value)"
+    }
+}
+
+if ($unexpectedRows.Count -ne 1) {
+    $failed += "Expected exactly one unexpected-mismatch row, found $($unexpectedRows.Count)"
+}
+
+if ($failed.Count -eq 0) {
+    Write-Host "App-model launch shadow kernel smoke PASS. Serial log: $serialLog"
+    exit 0
+}
+
+Write-Host "App-model launch shadow kernel smoke FAIL. Serial log: $serialLog" -ForegroundColor Red
+foreach ($item in $failed) { Write-Host "Missing/failed: $item" -ForegroundColor Red }
+exit 1

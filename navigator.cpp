@@ -470,6 +470,20 @@ namespace {
 		return safe;
 	}
 
+	static std::string safeDownloadFileUrl(const DownloadItem& item)
+	{
+		if (!item.success) return "";
+		if (item.savedPath.rfind("/downloads/", 0) != 0) return "";
+
+		const std::string fileName = item.savedPath.substr(11);
+		if (fileName.empty()) return "";
+		if (fileName.find('/') != std::string::npos || fileName.find('\\') != std::string::npos) return "";
+		if (sanitizeDownloadFileName(fileName) != fileName) return "";
+		if (!item.suggestedFileName.empty() && item.suggestedFileName != fileName) return "";
+
+		return "file:///downloads/" + fileName;
+	}
+
 	static std::string uniqueDownloadPathForName(const std::string& safeName, std::string& outFinalName)
 	{
 		std::string stem = safeName;
@@ -505,18 +519,26 @@ namespace {
 	static WebDocument buildDownloadCompleteDocument(const DownloadItem& item)
 	{
 		WebDocument doc;
+		const std::string fileUrl = safeDownloadFileUrl(item);
 		doc.url = item.finalUrl.empty() ? item.url : item.finalUrl;
 		doc.title = item.success ? "Download Complete" : "Download Unavailable";
 		doc.blocks.push_back({BlockType::Heading, doc.title, ""});
+		doc.blocks.push_back({BlockType::Paragraph,
+			item.success
+				? "Navigator saved this download using its sanitized downloads path."
+				: "Navigator kept a record for this failed download so you can review what happened.", ""});
 		doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Filename", item.suggestedFileName), ""});
+		doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Status", item.success ? "success" : "failed"), ""});
+		doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Saved path", item.savedPath), ""});
 		doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Source URL", item.url), ""});
 		doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Final URL", item.finalUrl), ""});
 		doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Content type", item.contentType), ""});
 		doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Byte count", static_cast<int>(item.byteCount)), ""});
-		doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Saved path", item.savedPath), ""});
-		doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Status", item.success ? "success" : "failed"), ""});
 		if (!item.error.empty()) {
-			doc.blocks.push_back({BlockType::Paragraph, item.error, ""});
+			doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Error", item.error), ""});
+		}
+		if (!fileUrl.empty()) {
+			doc.blocks.push_back({BlockType::Link, "Open downloaded file", fileUrl});
 		}
 		doc.blocks.push_back({BlockType::Link, "View Downloads", "about:downloads"});
 		doc.blocks.push_back({BlockType::Link, "Page Info", "about:page-info"});
@@ -3347,27 +3369,45 @@ WebDocument Navigator::buildDownloadsDocument()
 	doc.title = "Downloads";
 	doc.blocks.push_back({BlockType::Heading, "Downloads", ""});
 	doc.blocks.push_back({BlockType::Paragraph,
-		"Recent downloads are kept in memory for this Navigator session.", ""});
+		"Recent downloads are kept in memory for this Navigator session. Newest downloads appear first.", ""});
+#if defined(GXOS_BARE_METAL)
+	doc.blocks.push_back({BlockType::Paragraph,
+		"Bare-metal downloads use the same saved path shown below, typically under /downloads when writable storage is available.", ""});
+#else
+	doc.blocks.push_back({BlockType::Paragraph,
+		"Hosted Navigator saves downloads to its /downloads path, which maps to the host working directory's downloads folder.", ""});
+	doc.blocks.push_back({BlockType::Paragraph,
+		"TODO: add an Open Downloads Folder action only after Navigator can reuse an existing File Explorer launch path without a special-case app-model bypass.", ""});
+#endif
+	doc.blocks.push_back({BlockType::Paragraph,
+		"Page Info continues to describe the last loaded page or download response; opening about:downloads does not replace that metadata.", ""});
 
 	if (s_recentDownloads.empty()) {
-		doc.blocks.push_back({BlockType::Paragraph, "No downloads yet.", ""});
+		doc.blocks.push_back({BlockType::Paragraph, "No downloads yet. Unsupported HTTP content will appear here after Navigator records it.", ""});
 	} else {
-		for (const DownloadItem& item : s_recentDownloads) {
+		for (size_t i = 0; i < s_recentDownloads.size(); ++i) {
+			const DownloadItem& item = s_recentDownloads[i];
+			const std::string fileUrl = safeDownloadFileUrl(item);
+			const std::string fileName = item.suggestedFileName.empty() ? "download.bin" : item.suggestedFileName;
 			doc.blocks.push_back({BlockType::Heading,
-				item.suggestedFileName.empty() ? "download.bin" : item.suggestedFileName, ""});
+				std::to_string(static_cast<int>(i) + 1) + ". " + fileName, ""});
 			doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Status", item.success ? "success" : "failed"), ""});
+			doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Filename", fileName), ""});
+			doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Saved path", item.savedPath), ""});
 			doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Source URL", item.url), ""});
 			doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Final URL", item.finalUrl), ""});
 			doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Content type", item.contentType), ""});
 			doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Byte count", static_cast<int>(item.byteCount)), ""});
-			doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Saved path", item.savedPath), ""});
+			if (!fileUrl.empty()) {
+				doc.blocks.push_back({BlockType::Link, "Open downloaded file", fileUrl});
+			}
 			if (!item.error.empty()) {
 				doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Error", item.error), ""});
 			}
 		}
 	}
 
-	doc.blocks.push_back({BlockType::Link, "Page Info", "about:page-info"});
+	doc.blocks.push_back({BlockType::Link, "Page Info (last loaded page)", "about:page-info"});
 	doc.blocks.push_back({BlockType::Link, "Navigator Runtime", "about:navigator-runtime"});
 	doc.blocks.push_back({BlockType::Link, "Go to about:navigator", "about:navigator"});
 	return doc;

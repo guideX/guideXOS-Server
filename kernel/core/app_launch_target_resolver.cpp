@@ -691,6 +691,131 @@ void printLaunchTargetAdapterDiagnostic(const char* label, LaunchTargetDiagnosti
     write_pair(write, "nonFatal: ", "true");
 }
 
+struct LaunchTargetShadowSmokeCase {
+    const char* name;
+    const char* source;
+    const char* label;
+    const char* expectedCurrentDispatch;
+};
+
+static bool is_file_explorer_alias_pair(const char* a, const char* b)
+{
+    return (text_equals(a, "Files") && text_equals(b, "FileExplorer")) ||
+           (text_equals(a, "FileExplorer") && text_equals(b, "Files"));
+}
+
+static bool is_expected_unsupported_shadow_target(const gxos::apps::LaunchTarget& target)
+{
+    return text_equals(target.diagnosticStatus, "unsupported-target") ||
+           text_equals(target.diagnosticStatus, "unsupported-file-open");
+}
+
+static const char* launch_target_shadow_smoke_comparison(const gxos::apps::LaunchTarget& target, const char* expectedCurrentDispatch, const char* adapterLegacyDispatch)
+{
+    if (is_expected_unsupported_shadow_target(target)) return "expected-unsupported";
+    if (adapterLegacyDispatch && adapterLegacyDispatch[0] &&
+        expectedCurrentDispatch && expectedCurrentDispatch[0] &&
+        text_equals(adapterLegacyDispatch, expectedCurrentDispatch)) {
+        return "match";
+    }
+    if (target.appId && text_equals(target.appId, "gxos.builtin.fileexplorer") &&
+        is_file_explorer_alias_pair(adapterLegacyDispatch, expectedCurrentDispatch)) {
+        return "accepted-mismatch";
+    }
+    return "unexpected-mismatch";
+}
+
+void printLaunchTargetShadowSmokeDiagnostic(LaunchTargetDiagnosticWriter write)
+{
+    if (!write) return;
+
+    static const LaunchTargetShadowSmokeCase kSmokeCases[] = {
+        { "StartMenuNotepad", "StartMenu", "Notepad", "Notepad" },
+        { "BuiltInAppIdNotepad", "ResolverAppId", "gxos.builtin.notepad", "Notepad" },
+        { "StartMenuFilesAlias", "StartMenu", "Files", "Files" },
+        { "FileExplorerCanonical", "DesktopFileManager", "FileExplorer", "Files" },
+        { "NavigatorKernelApp", "StartMenu", "guideXOS Navigator", "guideXOS Navigator" },
+        { "ImageViewerStaticAlias", "StartMenu", "ImgViewer", "ImgViewer" },
+        { "RootFolderFileOpen", "FileOpen", "/", "Files" },
+        { "UnknownProbe", "SmokeProbe", "FakeLaunchShadowApp", "" }
+    };
+
+    unsigned int observations = 0;
+    unsigned int matches = 0;
+    unsigned int acceptedMismatches = 0;
+    unsigned int expectedUnsupported = 0;
+    unsigned int unexpectedMismatches = 0;
+
+    write("[LaunchTargetShadowSmoke]\n");
+    write("command: desktop.smoke.launchshadow\n");
+    write("mode: diagnostic-only\n");
+    write("launchesApps: false\n");
+    write("counterScope: command-local\n");
+    write("counterReason: real bare-metal desktop launch paths are not instrumented in this smoke pass\n");
+    write("cases:\n");
+
+    for (unsigned int i = 0; i < sizeof(kSmokeCases) / sizeof(kSmokeCases[0]); ++i) {
+        const LaunchTargetShadowSmokeCase& smokeCase = kSmokeCases[i];
+        gxos::apps::LaunchTarget target = resolveLaunchTarget(smokeCase.label);
+        const char* adapterStatus = "";
+        const char* adapterReason = "";
+        const char* adapterLegacyDispatch = legacyDispatchStringForLaunchTarget(target, &adapterStatus, &adapterReason);
+        const char* comparison = launch_target_shadow_smoke_comparison(target, smokeCase.expectedCurrentDispatch, adapterLegacyDispatch);
+        const bool candidateMatchesExpected = adapterLegacyDispatch && adapterLegacyDispatch[0] &&
+            smokeCase.expectedCurrentDispatch && smokeCase.expectedCurrentDispatch[0] &&
+            text_equals(adapterLegacyDispatch, smokeCase.expectedCurrentDispatch);
+
+        ++observations;
+        if (text_equals(comparison, "match")) ++matches;
+        else if (text_equals(comparison, "accepted-mismatch")) ++acceptedMismatches;
+        else if (text_equals(comparison, "expected-unsupported")) ++expectedUnsupported;
+        else ++unexpectedMismatches;
+
+        write("  case=");
+        write(smokeCase.name);
+        write(" source=");
+        write(smokeCase.source);
+        write(" inputLabel=");
+        write_quoted(write, smokeCase.label);
+        write(" expectedCurrentDispatch=");
+        write_quoted(write, smokeCase.expectedCurrentDispatch);
+        write(" resolvedType=");
+        write(gxos::apps::ToString(target.type));
+        write(" appId=");
+        write_quoted(write, target.appId);
+        write(" resolvedDispatch=");
+        write_quoted(write, target.dispatchLaunchName);
+        write(" adapterLegacyDispatch=");
+        write_quoted(write, adapterLegacyDispatch);
+        write(" candidateMatchesExpected=");
+        write(candidateMatchesExpected ? "true" : "false");
+        write(" comparison=");
+        write(comparison);
+        write(" adapterStatus=");
+        write(adapterStatus);
+        write(" adapterReason=");
+        write_quoted(write, adapterReason);
+        write(" status=");
+        write(target.diagnosticStatus);
+        write(" reason=");
+        write_quoted(write, target.diagnosticReason);
+        write(" nonFatal=true\n");
+    }
+
+    write("summary: observations=");
+    write_uint(write, observations);
+    write(" matches=");
+    write_uint(write, matches);
+    write(" acceptedMismatches=");
+    write_uint(write, acceptedMismatches);
+    write(" expectedUnsupported=");
+    write_uint(write, expectedUnsupported);
+    write(" unexpectedMismatches=");
+    write_uint(write, unexpectedMismatches);
+    write(" nonFatal=true\n");
+    write("runtimeLaunchBehaviorChanged: false\n");
+}
+
 static const char* const kLaunchTargetComparisonLabels[] = {
     "Notepad",
     "gxos.builtin.notepad",

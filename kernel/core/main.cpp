@@ -20,6 +20,7 @@
 #include "include/kernel/pit.h"
 #include "include/kernel/serial_debug.h"
 #include "include/kernel/desktop_capabilities.h"
+#include "include/kernel/app_launch_target_resolver.h"
 
 // Storage subsystem
 #include "include/kernel/block_device.h"
@@ -381,6 +382,11 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
                                      kernel::input::mouse_y());
         kernel::desktop_capabilities::log_current(true, true);
         kernel::apps::printNavigatorRuntimeSmokeReport();
+#ifdef GXOS_APPMODEL_LAUNCHSHADOW_SMOKE_ACTIVE
+        kernel::serial::puts("[APPMODEL-LAUNCHSHADOW-SMOKE] issuing command=desktop.smoke.launchshadow\n");
+        kernel::appmodel::printLaunchTargetShadowSmokeDiagnostic(kernel::serial::puts);
+        kernel::serial::puts("[APPMODEL-LAUNCHSHADOW-SMOKE] done\n");
+#endif
         
         kernel::serial::puts("[KERNEL] Entering main loop (waiting for input)...\n");
         

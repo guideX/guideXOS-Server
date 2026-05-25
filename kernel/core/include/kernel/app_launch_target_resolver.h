@@ -13,6 +13,7 @@ void printLaunchTargetDiagnostic(const gxos::apps::LaunchTarget& target, LaunchT
 void printLaunchTargetDiagnostic(const char* label, LaunchTargetDiagnosticWriter write);
 const char* legacyDispatchStringForLaunchTarget(const gxos::apps::LaunchTarget& target, const char** status, const char** reason);
 void printLaunchTargetAdapterDiagnostic(const char* label, LaunchTargetDiagnosticWriter write);
+void printLaunchTargetShadowSmokeDiagnostic(LaunchTargetDiagnosticWriter write);
 void printLaunchTargetComparisonDiagnostic(LaunchTargetDiagnosticWriter write);
 void printLaunchStorageDiagnostic(LaunchTargetDiagnosticWriter write);
 void printLaunchStoragePreviewDiagnostic(LaunchTargetDiagnosticWriter write);
