@@ -11,19 +11,40 @@ New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 
 $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
-$TempBuildBat = Join-Path $OutDir "build-invalid-flags.bat"
-$InvalidExeRelative = "out\appmodel-typed-dispatch-flags\guideXOSServer.invalid-flags.exe"
-$InvalidExe = Join-Path $Root $InvalidExeRelative
 $SmokeLog = Join-Path $LogDir "appmodel-typed-dispatch-flags-smoke-$stamp.log"
 
 if (-not (Test-Path $BuildBat)) {
     throw "build.bat not found: $BuildBat"
 }
 
-$buildText = Get-Content $BuildBat -Raw
-$buildText = $buildText -replace 'set CXXFLAGS=([^\r\n]*)', 'set CXXFLAGS=$1 -DGXOS_APPMODEL_TYPED_DISPATCH_SHADOW_ONLY -DGXOS_APPMODEL_TYPED_DISPATCH_ENABLED'
-$buildText = $buildText -replace 'set OUTPUT=guideXOSServer\.exe', "set OUTPUT=$InvalidExeRelative"
-Set-Content -Path $TempBuildBat -Value $buildText -Encoding ASCII
+function ConvertTo-BatchPath {
+    param([string]$Path)
+    return $Path.Replace((Join-Path $Root ""), "")
+}
+
+function New-TemporaryBuild {
+    param(
+        [string]$CaseName,
+        [string[]]$Defines
+    )
+
+    $tempBuildBat = Join-Path $OutDir "build-$CaseName.bat"
+    $exeRelative = "out\appmodel-typed-dispatch-flags\guideXOSServer.$CaseName.exe"
+    $exe = Join-Path $Root $exeRelative
+    $defineFlags = ($Defines | ForEach-Object { "-D$_" }) -join " "
+
+    $buildText = Get-Content $BuildBat -Raw
+    if ($defineFlags.Length -gt 0) {
+        $buildText = $buildText -replace 'set CXXFLAGS=([^\r\n]*)', "set CXXFLAGS=`$1 $defineFlags"
+    }
+    $buildText = $buildText -replace 'set OUTPUT=guideXOSServer\.exe', "set OUTPUT=$exeRelative"
+    Set-Content -Path $tempBuildBat -Value $buildText -Encoding ASCII
+
+    return @{
+        BuildScript = $tempBuildBat
+        Exe = $exe
+    }
+}
 
 function Invoke-ServerCommands {
     param(
@@ -51,25 +72,74 @@ function Assert-Contains {
     }
 }
 
-Push-Location $Root
-try {
-    Write-Host "Building temporary invalid typed-dispatch flag diagnostic binary..."
-    & cmd.exe /c "`"$TempBuildBat`""
+function Invoke-FlagCase {
+    param(
+        [string]$CaseName,
+        [string[]]$Defines,
+        [string]$SummaryLine,
+        [string]$GateStatus,
+        [string]$GateDetail
+    )
+
+    $build = New-TemporaryBuild -CaseName $CaseName -Defines $Defines
+    Write-Host "Building temporary typed-dispatch flag diagnostic binary: $CaseName"
+    & cmd.exe /c "`"$($build.BuildScript)`""
     if ($LASTEXITCODE -ne 0) {
-        throw "Temporary invalid-flag build failed with exit code $LASTEXITCODE"
+        throw "Temporary flag build failed for ${CaseName} with exit code $LASTEXITCODE"
     }
 
-    Write-Host "Running invalid-flag diagnostics..."
-    $invalidOutput = Invoke-ServerCommands -ExePath $InvalidExe -Commands @(
+    Write-Host "Running typed-dispatch flag diagnostics: $CaseName"
+    $output = Invoke-ServerCommands -ExePath $build.Exe -Commands @(
         "desktop.appmodel.summary",
         "desktop.appmodel.typed-dispatch-gate"
     )
 
-    Assert-Contains $invalidOutput "typedDispatchFlags: shadowOnly=ON enabled=ON behavior=legacy-dispatch status=WARN discoveryOnly=true invalidConfiguration=true" "summary invalid flag line"
-    Assert-Contains $invalidOutput "check=typedDispatchCompileFlags status=WARN" "gate invalid flag status"
-    Assert-Contains $invalidOutput "shadowOnly=ON enabled=ON behavior=legacy-dispatch discoveryOnly=true invalidConfiguration=true" "gate invalid flag detail"
-    Assert-Contains $invalidOutput "enablesTypedDispatch: false" "gate remains report-only"
-    Assert-Contains $invalidOutput "feedsTypedDispatchIntoLaunch: false" "typed dispatch is not fed into launch"
+    Assert-Contains $output $SummaryLine "$CaseName summary flag line"
+    Assert-Contains $output "check=typedDispatchCompileFlags status=$GateStatus" "$CaseName gate flag status"
+    Assert-Contains $output $GateDetail "$CaseName gate flag detail"
+    Assert-Contains $output "enablesTypedDispatch: false" "$CaseName gate remains report-only"
+    Assert-Contains $output "feedsTypedDispatchIntoLaunch: false" "$CaseName typed dispatch is not fed into launch"
+
+    return [pscustomobject]@{
+        CaseName = $CaseName
+        BuildScript = $build.BuildScript
+        Exe = $build.Exe
+        SummaryLine = $SummaryLine
+        GateStatus = $GateStatus
+        Output = $output
+    }
+}
+
+Push-Location $Root
+try {
+    $cases = @(
+        @{
+            CaseName = "shadow-only"
+            Defines = @("GXOS_APPMODEL_TYPED_DISPATCH_SHADOW_ONLY")
+            SummaryLine = "typedDispatchFlags: shadowOnly=ON enabled=OFF behavior=legacy-dispatch status=OK discoveryOnly=true"
+            GateStatus = "PASS"
+            GateDetail = "shadowOnly=ON enabled=OFF behavior=legacy-dispatch discoveryOnly=true"
+        },
+        @{
+            CaseName = "enabled-only"
+            Defines = @("GXOS_APPMODEL_TYPED_DISPATCH_ENABLED")
+            SummaryLine = "typedDispatchFlags: shadowOnly=OFF enabled=ON behavior=legacy-dispatch status=OK discoveryOnly=true"
+            GateStatus = "PASS"
+            GateDetail = "shadowOnly=OFF enabled=ON behavior=legacy-dispatch discoveryOnly=true"
+        },
+        @{
+            CaseName = "both-flags"
+            Defines = @("GXOS_APPMODEL_TYPED_DISPATCH_SHADOW_ONLY", "GXOS_APPMODEL_TYPED_DISPATCH_ENABLED")
+            SummaryLine = "typedDispatchFlags: shadowOnly=ON enabled=ON behavior=legacy-dispatch status=WARN discoveryOnly=true invalidConfiguration=true"
+            GateStatus = "WARN"
+            GateDetail = "shadowOnly=ON enabled=ON behavior=legacy-dispatch discoveryOnly=true invalidConfiguration=true"
+        }
+    )
+
+    $results = New-Object System.Collections.Generic.List[object]
+    foreach ($case in $cases) {
+        [void]$results.Add((Invoke-FlagCase @case))
+    }
 
     $normalOutput = ""
     if (-not $SkipNormalCheck) {
@@ -81,23 +151,33 @@ try {
         Assert-Contains $normalOutput "typedDispatchFlags: shadowOnly=OFF enabled=OFF behavior=legacy-dispatch status=OK discoveryOnly=true" "normal default flag line"
     }
 
-    $report = @(
+    $reportLines = @(
         "[AppModelTypedDispatchFlagsSmoke]",
         "mode=diagnostic-only",
-        "temporaryBuildScript=$TempBuildBat",
-        "temporaryExecutable=$InvalidExe",
-        "permanentBuildFlagsChanged=false",
-        "invalidSummaryLine=typedDispatchFlags: shadowOnly=ON enabled=ON behavior=legacy-dispatch status=WARN discoveryOnly=true invalidConfiguration=true",
-        "invalidGateCheck=check=typedDispatchCompileFlags status=WARN",
-        "launchBehavior=legacy-dispatch",
-        "enablesTypedDispatch=false",
-        "feedsTypedDispatchIntoLaunch=false",
-        "normalDefaultChecked=$((-not $SkipNormalCheck).ToString().ToLowerInvariant())",
-        "normalDefaultLine=typedDispatchFlags: shadowOnly=OFF enabled=OFF behavior=legacy-dispatch status=OK discoveryOnly=true",
-        "result=PASS"
-    ) -join [Environment]::NewLine
+        "temporaryOutputDir=$OutDir",
+        "permanentBuildFlagsChanged=false"
+    )
+    foreach ($result in $results) {
+        $reportLines += "case=$($result.CaseName) summaryLine=$($result.SummaryLine)"
+        $reportLines += "case=$($result.CaseName) gateCheck=check=typedDispatchCompileFlags status=$($result.GateStatus)"
+        $reportLines += "case=$($result.CaseName) launchBehavior=legacy-dispatch enablesTypedDispatch=false feedsTypedDispatchIntoLaunch=false"
+    }
+    $reportLines += "normalDefaultChecked=$((-not $SkipNormalCheck).ToString().ToLowerInvariant())"
+    $reportLines += "normalDefaultLine=typedDispatchFlags: shadowOnly=OFF enabled=OFF behavior=legacy-dispatch status=OK discoveryOnly=true"
+    $reportLines += "result=PASS"
+    $report = $reportLines -join [Environment]::NewLine
 
-    Set-Content -Path $SmokeLog -Value ($report + [Environment]::NewLine + [Environment]::NewLine + "[invalid-output]" + [Environment]::NewLine + ($invalidOutput -join [Environment]::NewLine) + [Environment]::NewLine + "[normal-output]" + [Environment]::NewLine + ($normalOutput -join [Environment]::NewLine)) -Encoding ASCII
+    $logParts = @($report)
+    foreach ($result in $results) {
+        $logParts += ""
+        $logParts += "[$($result.CaseName)-output]"
+        $logParts += ($result.Output -join [Environment]::NewLine)
+    }
+    $logParts += ""
+    $logParts += "[normal-output]"
+    $logParts += ($normalOutput -join [Environment]::NewLine)
+    Set-Content -Path $SmokeLog -Value ($logParts -join [Environment]::NewLine) -Encoding ASCII
+
     Write-Host $report
     Write-Host "Smoke log: $SmokeLog"
     exit 0
