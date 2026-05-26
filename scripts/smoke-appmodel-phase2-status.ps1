@@ -62,7 +62,8 @@ function Text-Contains {
         [object]$Output,
         [string]$Needle
     )
-    return (($Output -join [Environment]::NewLine).Contains($Needle))
+    $text = [string]::Join([Environment]::NewLine, @($Output | ForEach-Object { $_.ToString() }))
+    return $text.Contains($Needle)
 }
 
 function Get-MatchValue {
@@ -84,7 +85,8 @@ function Invoke-ProcessCommand {
     param(
         [string]$Name,
         [string]$FilePath,
-        [string[]]$ArgumentList
+        [string[]]$ArgumentList,
+        [int]$TimeoutSeconds = 900
     )
 
     $stdoutPath = Join-Path $LogDir "appmodel-phase2-status-$stamp-$Name.out.log"
@@ -92,22 +94,36 @@ function Invoke-ProcessCommand {
     $proc = Start-Process -FilePath $FilePath `
         -ArgumentList $ArgumentList `
         -PassThru `
-        -Wait `
         -WindowStyle Hidden `
         -RedirectStandardOutput $stdoutPath `
         -RedirectStandardError $stderrPath
 
-    $output = New-Object System.Collections.Generic.List[string]
+    $timedOut = $false
+    try {
+        Wait-Process -Id $proc.Id -Timeout $TimeoutSeconds -ErrorAction Stop
+    } catch {
+        $timedOut = $true
+        if (-not $proc.HasExited) {
+            Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+            Wait-Process -Id $proc.Id -Timeout 5 -ErrorAction SilentlyContinue
+        }
+    }
+
+    $output = @()
     if (Test-Path $stdoutPath) {
-        foreach ($line in (Get-Content $stdoutPath)) { [void]$output.Add($line) }
+        $output += Get-Content $stdoutPath
     }
     if (Test-Path $stderrPath) {
-        foreach ($line in (Get-Content $stderrPath)) { [void]$output.Add($line) }
+        $output += Get-Content $stderrPath
     }
+
+    $proc.Refresh()
+    $exitCode = $proc.ExitCode
 
     return [pscustomobject]@{
         Output = $output
-        ExitCode = $proc.ExitCode
+        ExitCode = if ($timedOut) { 124 } else { $exitCode }
+        TimedOut = $timedOut
     }
 }
 
@@ -116,12 +132,15 @@ try {
     $hostedBuildCommand = ".\build.bat"
     if ($BuildHosted) {
         [void]$CommandsRun.Add($hostedBuildCommand)
-        $buildResult = Invoke-ProcessCommand -Name "hosted-build" -FilePath "cmd.exe" -ArgumentList @("/c", "`"$(Join-Path $Root "build.bat")`"")
+        $buildResult = Invoke-ProcessCommand -Name "hosted-build" -FilePath "cmd.exe" -ArgumentList @("/c", "`"$(Join-Path $Root "build.bat")`"") -TimeoutSeconds 600
         Add-LogSection "hosted-build-output" $buildResult.Output
-        if ($buildResult.ExitCode -eq 0) {
+        $hostedBuildOk = (-not $buildResult.TimedOut) -and
+            (($null -eq $buildResult.ExitCode) -or $buildResult.ExitCode -eq 0) -and
+            (Text-Contains -Output $buildResult.Output -Needle "Build successful: guideXOSServer.exe")
+        if ($hostedBuildOk) {
             Add-Check "hostedBuild" "PASS" "command=$hostedBuildCommand"
         } else {
-            Add-Check "hostedBuild" "FAIL" "command=$hostedBuildCommand exitCode=$($buildResult.ExitCode)"
+            Add-Check "hostedBuild" "FAIL" "command=$hostedBuildCommand exitCode=$($buildResult.ExitCode) timedOut=$($buildResult.TimedOut.ToString().ToLowerInvariant())"
         }
     } else {
         [void]$CommandsListed.Add("$hostedBuildCommand (pass -BuildHosted to run)")
@@ -139,16 +158,16 @@ try {
         $hostedOutput = Invoke-ServerCommands -Commands $hostedCommands
         Add-LogSection "hosted-appmodel-output" $hostedOutput
 
-        if ((Text-Contains $hostedOutput "command: gui.smoke.launchshadow") -and
-            (Text-Contains $hostedOutput "mode: diagnostic-only") -and
-            (Text-Contains $hostedOutput "launchesApps: false") -and
-            (Text-Contains $hostedOutput "runtimeLaunchBehaviorChanged: false")) {
+        if ((Text-Contains -Output $hostedOutput -Needle "command: gui.smoke.launchshadow") -and
+            (Text-Contains -Output $hostedOutput -Needle "mode: diagnostic-only") -and
+            (Text-Contains -Output $hostedOutput -Needle "launchesApps: false") -and
+            (Text-Contains -Output $hostedOutput -Needle "runtimeLaunchBehaviorChanged: false")) {
             Add-Check "gui.smoke.launchshadow" "PASS" "diagnostic-only runtimeLaunchBehaviorChanged=false"
         } else {
             Add-Check "gui.smoke.launchshadow" "FAIL" "missing required diagnostic-only launch-shadow markers"
         }
 
-        $summaryOverall = Get-MatchValue $hostedOutput '^overall:\s*(\S+)'
+        $summaryOverall = Get-MatchValue -Output $hostedOutput -Pattern '^overall:\s*(\S+)'
         if ($summaryOverall -eq "OK") {
             Add-Check "desktop.appmodel.summary" "PASS" "overall=OK"
         } elseif ($summaryOverall) {
@@ -157,7 +176,7 @@ try {
             Add-Check "desktop.appmodel.summary" "FAIL" "overall line not found"
         }
 
-        $gateStatus = Get-MatchValue $hostedOutput '^gateStatus:\s*(\S+)'
+        $gateStatus = Get-MatchValue -Output $hostedOutput -Pattern '^gateStatus:\s*(\S+)'
         if ($gateStatus -eq "PASS") {
             Add-Check "desktop.appmodel.typed-dispatch-gate" "PASS" "gateStatus=PASS"
         } elseif ($gateStatus -eq "WARN" -or $gateStatus -eq "NOT-RUN") {
@@ -184,12 +203,15 @@ try {
                 "Bypass",
                 "-File",
                 "`"$(Join-Path $Root "scripts\smoke-appmodel-typed-dispatch-flags.ps1")`""
-            )
+            ) -TimeoutSeconds 900
             Add-LogSection "typed-dispatch-flag-smoke-output" $flagResult.Output
-            if ($flagResult.ExitCode -eq 0 -and (Text-Contains $flagResult.Output "result=PASS")) {
+            $flagSmokeOk = (-not $flagResult.TimedOut) -and
+                (($null -eq $flagResult.ExitCode) -or $flagResult.ExitCode -eq 0) -and
+                (Text-Contains -Output $flagResult.Output -Needle "result=PASS")
+            if ($flagSmokeOk) {
                 Add-Check "typedDispatchFlagSmoke" "PASS" "single-flag and invalid-flag diagnostics passed"
             } else {
-                Add-Check "typedDispatchFlagSmoke" "FAIL" "exitCode=$($flagResult.ExitCode) or missing result=PASS"
+                Add-Check "typedDispatchFlagSmoke" "FAIL" "exitCode=$($flagResult.ExitCode) timedOut=$($flagResult.TimedOut.ToString().ToLowerInvariant()) or missing result=PASS"
             }
         } catch {
             Add-Check "typedDispatchFlagSmoke" "FAIL" $_.Exception.Message
@@ -208,12 +230,15 @@ try {
                 "`"$(Join-Path $Root "scripts\smoke-appmodel-launchshadow.ps1")`"",
                 "-TimeoutSeconds",
                 "$TimeoutSeconds"
-            )
+            ) -TimeoutSeconds ([Math]::Max(300, $TimeoutSeconds + 600))
             Add-LogSection "qemu-launchshadow-smoke-output" $qemuResult.Output
-            if ($qemuResult.ExitCode -eq 0 -and (Text-Contains $qemuResult.Output "App-model launch shadow kernel smoke PASS")) {
+            $qemuSmokeOk = (-not $qemuResult.TimedOut) -and
+                (($null -eq $qemuResult.ExitCode) -or $qemuResult.ExitCode -eq 0) -and
+                (Text-Contains -Output $qemuResult.Output -Needle "App-model launch shadow kernel smoke PASS")
+            if ($qemuSmokeOk) {
                 Add-Check "qemuLaunchShadowSmoke" "PASS" "command=$qemuSmokeCommand"
             } else {
-                Add-Check "qemuLaunchShadowSmoke" "FAIL" "exitCode=$($qemuResult.ExitCode) or missing PASS marker"
+                Add-Check "qemuLaunchShadowSmoke" "FAIL" "exitCode=$($qemuResult.ExitCode) timedOut=$($qemuResult.TimedOut.ToString().ToLowerInvariant()) or missing PASS marker"
             }
         } catch {
             Add-Check "qemuLaunchShadowSmoke" "FAIL" $_.Exception.Message
