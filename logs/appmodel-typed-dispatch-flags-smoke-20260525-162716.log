@@ -1,0 +1,311 @@
+[AppModelTypedDispatchFlagsSmoke]
+mode=diagnostic-only
+temporaryBuildScript=D:\dev\guideXOSServer\out\appmodel-typed-dispatch-flags\build-invalid-flags.bat
+temporaryExecutable=D:\dev\guideXOSServer\out\appmodel-typed-dispatch-flags\guideXOSServer.invalid-flags.exe
+permanentBuildFlagsChanged=false
+invalidSummaryLine=typedDispatchFlags: shadowOnly=ON enabled=ON behavior=legacy-dispatch status=WARN discoveryOnly=true invalidConfiguration=true
+invalidGateCheck=check=typedDispatchCompileFlags status=WARN
+launchBehavior=legacy-dispatch
+enablesTypedDispatch=false
+feedsTypedDispatchIntoLaunch=false
+normalDefaultChecked=true
+normalDefaultLine=typedDispatchFlags: shadowOnly=OFF enabled=OFF behavior=legacy-dispatch status=OK discoveryOnly=true
+result=PASS
+
+[invalid-output]
+guideXOSServer server starting...
+[lifecycle] phase -> PlatformDiscovery
+[lifecycle] phase -> MemoryReady
+[lifecycle] phase -> SchedulerReady
+[lifecycle] phase -> IpcReady
+[lifecycle] phase -> DesktopStateReady
+AppRegistry initializing, count=1
+AppRegistry manifest scan succeeded: scanned=7, registered=7
+AppModel registry candidate:  displayName=Hello World id=com.guidexos.samples.helloworld kind=NativeElf source=SystemApps
+Registered app: Hello World
+AppModel registry candidate:  displayName=Resource Viewer id=com.guidexos.samples.resourceviewer kind=NativeElf source=SystemApps
+Registered app: Resource Viewer
+AppModel registry candidate:  displayName=Future GXApp Package id=com.guidexos.examples.futuregxapp kind=GXAppPackage source=SystemApps
+Registered app: Future GXApp Package
+AppModel registry candidate:  displayName=HelloWorld ELF id=com.guidexos.examples.helloworld kind=NativeElf source=SystemApps
+Registered app: HelloWorld ELF
+AppModel registry candidate:  displayName=Notepad id=com.guidexos.examples.notepad kind=BuiltIn source=SystemApps
+Registered app: Notepad
+AppModel registry candidate:  displayName=Hello World id=com.guidexos.helloworld kind=NativeElf source=Package
+Registered app: Hello World
+AppModel registry candidate:  displayName=Resource Viewer id=com.guidexos.resourceviewer kind=NativeElf source=Package
+Registered app: Resource Viewer
+AppModel registry candidate:  displayName=Notepad id=gxos.builtin.notepad kind=BuiltIn source=BuiltIn
+Registered app: Notepad
+AppModel registry candidate:  displayName=Calculator id=gxos.builtin.calculator kind=BuiltIn source=BuiltIn
+Registered app: Calculator
+AppModel registry candidate:  displayName=Clock id=gxos.builtin.clock kind=BuiltIn source=BuiltIn
+Registered app: Clock
+AppModel registry candidate:  displayName=Console id=gxos.builtin.console kind=BuiltIn source=BuiltIn
+Registered app: Console
+AppModel registry candidate:  displayName=FileExplorer id=gxos.builtin.fileexplorer kind=BuiltIn source=BuiltIn
+Registered app: FileExplorer
+AppModel registry candidate:  displayName=Trash id=gxos.builtin.trash kind=BuiltIn source=BuiltIn
+Registered app: Trash
+AppModel registry candidate:  displayName=TaskManager id=gxos.builtin.taskmanager kind=BuiltIn source=BuiltIn
+Registered app: TaskManager
+AppModel registry candidate:  displayName=Paint id=gxos.builtin.paint kind=BuiltIn source=BuiltIn
+Registered app: Paint
+AppModel registry candidate:  displayName=ImageViewer id=gxos.builtin.imageviewer kind=BuiltIn source=BuiltIn
+Registered app: ImageViewer
+AppModel registry candidate:  displayName=OnScreenKeyboard id=gxos.builtin.onscreenkeyboard kind=BuiltIn source=BuiltIn
+Registered app: OnScreenKeyboard
+AppModel registry candidate:  displayName=ShutdownDialog id=gxos.builtin.shutdowndialog kind=BuiltIn source=BuiltIn
+Registered app: ShutdownDialog
+AppModel registry candidate:  displayName=DiskManager id=gxos.builtin.diskmanager kind=BuiltIn source=BuiltIn
+Registered app: DiskManager
+AppModel registry candidate:  displayName=ControlPanel id=gxos.builtin.controlpanel kind=BuiltIn source=BuiltIn
+Registered app: ControlPanel
+AppModel registry candidate:  displayName=DisplayOptions id=gxos.builtin.displayoptions kind=BuiltIn source=BuiltIn
+Registered app: DisplayOptions
+AppModel registry candidate:  displayName=guideXOS Navigator id=guidexos.navigator kind=BuiltIn source=BuiltIn
+Registered app: guideXOS Navigator
+AppModel registry candidate:  displayName=App Model Demo id=gxos.builtin.appmodeldemo kind=BuiltIn source=BuiltIn
+Registered app: App Model Demo
+AppModel registry candidate:  displayName=Native App Debug Viewer id=gxos.builtin.nativeappdebugviewer kind=BuiltIn source=BuiltIn
+Registered app: Native App Debug Viewer
+AppModel registry candidate:  displayName=HDInstaller id=gxos.builtin.hdinstaller kind=BuiltIn source=BuiltIn
+Registered app: HDInstaller
+AppRegistry initialized, desktop apps=25
+Desktop state loaded
+NotificationManager initialized
+Firewall initialized (Normal mode)
+Module registered: Notepad
+Module registered: Calculator
+Module registered: Paint
+Module registered: ImageViewer
+Module registered: Clock
+Module registered: TaskManager
+Module registered: FileExplorer
+Module registered: Console
+Module registered: OnScreenKeyboard
+Module registered: ShutdownDialog
+Built-in modules registered (10)
+[lifecycle] phase -> ServicesReady
+[lifecycle] phase -> Interactive
+Commands:
+ mem | alloc <n> | tasks | log
+ spawn <echo|worker> [args...] | plist
+ send <pid> <text> | recv <pid>
+ bus.sub <chan> <pid> | bus.unsub <chan> <pid>
+ bus.pub <chan> <text> [fanout] | bus.pop <chan> [timeoutMs]
+ bus.cap <chan> <cap> | bus.stats <chan>
+ console.start | console.send <text> | console.pop [timeoutMs]
+ gui.start | gui.open.appmodeldemo | gui.smoke.launchshadow | gui.win <title> [w h] | gui.text <id> <text> | gui.close <id>
+ gui.rect <id> <x> <y> <w> <h> <r> <g> <b> | gui.move <id> <x> <y> | gui.resize <id> <w> <h> | gui.title <id> <title>
+ gui.btn <win> <id> <x> <y> <w> <h> <text> | gui.pop | gui.wlist | gui.activate <id> | gui.min <id>
+ gxm.load <path> | gxm.sample | gui.save <path> | gui.load <path>
+ desktop.wallpaper <path> | desktop.launch <action> | desktop.launch.resolve <label> | desktop.launch.adapt <label> | desktop.launch.compare | desktop.launch.storage | desktop.launch.storage.preview | desktop.launch.storage.preview.compare | desktop.launch.types | desktop.pin <action> | desktop.unpin <action> | desktop.showconfig
+ desktop.apps | desktop.apps.verbose | desktop.appmodel.summary | desktop.appmodel.coverage | desktop.appmodel.typed-dispatch-gate | desktop.pinned | desktop.recent | desktop.pinapp <name> | desktop.pinfile <name> <path>
+ nativeapp.capabilities | nativeapp.inspect <app> | nativeapp.smoketest <app> | nativeapp.processes
+ taskbar.list | taskbar.activate <id> | taskbar.min <id> | taskbar.close <id>
+ workspace.switch <n> | workspace.next | workspace.prev | workspace.current
+ notepad | notepad <file>
+ calculator
+ console | console.start | console.send <text> | console.pop [timeoutMs]
+ files | files <path>
+ clock
+ taskmgr
+ paint
+ navigator | navigator.smoke | navigator.goto <url>
+ imgview [file] | osk
+ shutdown | msgbox <text> | welcome
+ notify <text> | notify.clear
+ fw.mode <normal|block|disabled|auto> | fw.allow <name> | fw.list | fw.alerts
+ modules | module.launch <name>
+ pkg.install <path.gxapp> | pkg.launch <app> | pkg.list | pkg.validate <path.gxapp>
+ proc.wait <pid> [timeoutMs] | proc.status <pid>
+ vfs.mkdir <path> | vfs.write <path> <text> | vfs.read <path> | vfs.ls <path>
+ vnc.start [port] | vnc.stop | vnc.status
+ pbytes | help | quit/exit
+[AppModelSummary]
+registeredApps: 25
+manifestScannedApps: 7
+manifestRegisteredApps: 7
+syntheticBuiltInCount: 18
+duplicateAppIds: OK count=0
+namespaceWarnings: OK count=0
+hostedMetadataCoverage: OK available=18 missingMetadata=0 missingRegistration=0
+bareMetalMetadataCoverage: OK available=8 missingMetadata=0 missingRegistration=0
+targetDrift: OK hostedMissing=0 bareMetalMissing=0
+invalidManifests: OK count=0
+launchTargetComparison: OK labels=8 exact=5 acceptedAliases=1 intentionalDifferences=2 unexpectedDrift=0
+launchTargetShadow: observations=0 unresolved=0 aliasFallback=0 adapterMatches=0 adapterAcceptedMismatches=0 adapterUnexpectedMismatches=0 typedDispatchCandidateMatches=0 typedDispatchCandidateAcceptedMismatches=0 typedDispatchCandidateUnexpectedMismatches=0 startMenu=0 startMenuTypedMatches=0 desktopShortcut=0 desktopShortcutTypedMatches=0 nonFatal=true
+launchStoragePreview: OK total=75 ready=69 alias=0 shellAction=5 unresolved=0 skippedLayoutOnly=1 targetSpecificUnsupportedAliases=0 highRisk=0 writesStorage=false
+launchStoragePreviewCompare: OK hostedTargetSpecificUnsupportedAliases=0 bareMetalTargetSpecificUnsupportedAliases=2 unexpectedDrift=0 writesStorage=false
+launchTargetTypes: OK labels=62 coveredTypes=6 hostedAvailable=50 bareMetalAvailable=29 hostedOnly=31 bareMetalOnly=10 expectedUnsupportedOnTarget=1 unexpectedUnsupportedOnTarget=0 unknownLabels=1 nonFatal=true
+typedDispatchFlags: shadowOnly=ON enabled=ON behavior=legacy-dispatch status=WARN discoveryOnly=true invalidConfiguration=true
+overall: WARN
+detailCommands: desktop.appmodel.coverage, desktop.apps.verbose, desktop.launch.compare, desktop.launch.storage, desktop.launch.storage.preview, desktop.launch.storage.preview.compare, desktop.launch.types
+[TypedDispatchShadowOnlyGate]
+command: desktop.appmodel.typed-dispatch-gate
+mode: report-only
+enablesTypedDispatch: false
+feedsTypedDispatchIntoLaunch: false
+writesStorage: false
+nonFatal: true
+evidenceFiles:
+  hosted=logs/appmodel-typed-dispatch-gate-hosted.evidence.txt
+  qemu=logs/appmodel-typed-dispatch-gate-qemu.evidence.txt
+checks:
+  check=hostedBuild status=INFO detail="Not detectable at runtime; required command: .\build.bat"
+  check=typedDispatchCompileFlags status=WARN detail="shadowOnly=ON enabled=ON behavior=legacy-dispatch discoveryOnly=true invalidConfiguration=true"
+  check=appModelSummaryOverall status=FAIL detail="overall=WARN"
+  check=launchTargetComparisonUnexpectedDrift status=PASS detail="unexpectedDrift=0"
+  check=launchStoragePreviewCompareUnexpectedDrift status=PASS detail="unexpectedDrift=0"
+  check=launchTargetTypesUnexpectedUnsupported status=PASS detail="unexpectedUnsupportedOnTarget=0"
+  check=launchTargetShadowCounters status=PASS detail="source=hosted-evidence observations=5 typedDispatchCandidateUnexpectedMismatches=1 fakeProbeAllowed=true evidencePath=logs/appmodel-typed-dispatch-gate-hosted.evidence.txt timestampUtc=2026-05-25T21:08:39Z"
+  check=runtimeLaunchBehaviorChanged status=PASS detail="source=hosted-evidence runtimeLaunchBehaviorChanged=false evidencePath=logs/appmodel-typed-dispatch-gate-hosted.evidence.txt timestampUtc=2026-05-25T21:08:39Z"
+  check=bareMetalBuild status=INFO detail="External required command: .\build.ps1 -Arch amd64"
+  check=bareMetalShellSmoke status=INFO detail="External/manual command in bare-metal shell: desktop.smoke.launchshadow"
+  check=qemuLaunchShadowSmoke status=PASS detail="source=qemu-evidence qemuSmokeStatus=PASS runtimeLaunchBehaviorChanged=false imgViewerExpectedUnsupportedConfirmed=true fakeLaunchShadowAppOnlyUnexpectedMismatchConfirmed=true serialLogPath=D:\dev\guideXOSServer\logs\appmodel-launchshadow-kernel-smoke-20260525-140906.serial.log evidencePath=logs/appmodel-typed-dispatch-gate-qemu.evidence.txt timestampUtc=2026-05-25T21:09:43Z"
+  check=fallbackToLegacyRequired status=PASS detail="Future typed-dispatch-enabled path must keep legacy fallback on unresolved, unsupported, or unexpected mismatch results"
+summary: pass=7 warn=1 fail=1 notRun=0 info=3
+gateStatus: FAIL
+nextRequiredCommands:
+  .\build.bat
+  gui.smoke.launchshadow
+  .\build.ps1 -Arch amd64
+  .\scripts\smoke-appmodel-launchshadow.ps1 -TimeoutSeconds 35
+note: report-only; this command does not enable GXOS_APPMODEL_TYPED_DISPATCH_SHADOW_ONLY or GXOS_APPMODEL_TYPED_DISPATCH_ENABLED
+[lifecycle] phase -> ShuttingDown
+[lifecycle] phase -> Stopped
+guideXOSServer server exiting.
+[normal-output]
+guideXOSServer server starting...
+[lifecycle] phase -> PlatformDiscovery
+[lifecycle] phase -> MemoryReady
+[lifecycle] phase -> SchedulerReady
+[lifecycle] phase -> IpcReady
+[lifecycle] phase -> DesktopStateReady
+AppRegistry initializing, count=1
+AppRegistry manifest scan succeeded: scanned=7, registered=7
+AppModel registry candidate:  displayName=Hello World id=com.guidexos.samples.helloworld kind=NativeElf source=SystemApps
+Registered app: Hello World
+AppModel registry candidate:  displayName=Resource Viewer id=com.guidexos.samples.resourceviewer kind=NativeElf source=SystemApps
+Registered app: Resource Viewer
+AppModel registry candidate:  displayName=Future GXApp Package id=com.guidexos.examples.futuregxapp kind=GXAppPackage source=SystemApps
+Registered app: Future GXApp Package
+AppModel registry candidate:  displayName=HelloWorld ELF id=com.guidexos.examples.helloworld kind=NativeElf source=SystemApps
+Registered app: HelloWorld ELF
+AppModel registry candidate:  displayName=Notepad id=com.guidexos.examples.notepad kind=BuiltIn source=SystemApps
+Registered app: Notepad
+AppModel registry candidate:  displayName=Hello World id=com.guidexos.helloworld kind=NativeElf source=Package
+Registered app: Hello World
+AppModel registry candidate:  displayName=Resource Viewer id=com.guidexos.resourceviewer kind=NativeElf source=Package
+Registered app: Resource Viewer
+AppModel registry candidate:  displayName=Notepad id=gxos.builtin.notepad kind=BuiltIn source=BuiltIn
+Registered app: Notepad
+AppModel registry candidate:  displayName=Calculator id=gxos.builtin.calculator kind=BuiltIn source=BuiltIn
+Registered app: Calculator
+AppModel registry candidate:  displayName=Clock id=gxos.builtin.clock kind=BuiltIn source=BuiltIn
+Registered app: Clock
+AppModel registry candidate:  displayName=Console id=gxos.builtin.console kind=BuiltIn source=BuiltIn
+Registered app: Console
+AppModel registry candidate:  displayName=FileExplorer id=gxos.builtin.fileexplorer kind=BuiltIn source=BuiltIn
+Registered app: FileExplorer
+AppModel registry candidate:  displayName=Trash id=gxos.builtin.trash kind=BuiltIn source=BuiltIn
+Registered app: Trash
+AppModel registry candidate:  displayName=TaskManager id=gxos.builtin.taskmanager kind=BuiltIn source=BuiltIn
+Registered app: TaskManager
+AppModel registry candidate:  displayName=Paint id=gxos.builtin.paint kind=BuiltIn source=BuiltIn
+Registered app: Paint
+AppModel registry candidate:  displayName=ImageViewer id=gxos.builtin.imageviewer kind=BuiltIn source=BuiltIn
+Registered app: ImageViewer
+AppModel registry candidate:  displayName=OnScreenKeyboard id=gxos.builtin.onscreenkeyboard kind=BuiltIn source=BuiltIn
+Registered app: OnScreenKeyboard
+AppModel registry candidate:  displayName=ShutdownDialog id=gxos.builtin.shutdowndialog kind=BuiltIn source=BuiltIn
+Registered app: ShutdownDialog
+AppModel registry candidate:  displayName=DiskManager id=gxos.builtin.diskmanager kind=BuiltIn source=BuiltIn
+Registered app: DiskManager
+AppModel registry candidate:  displayName=ControlPanel id=gxos.builtin.controlpanel kind=BuiltIn source=BuiltIn
+Registered app: ControlPanel
+AppModel registry candidate:  displayName=DisplayOptions id=gxos.builtin.displayoptions kind=BuiltIn source=BuiltIn
+Registered app: DisplayOptions
+AppModel registry candidate:  displayName=guideXOS Navigator id=guidexos.navigator kind=BuiltIn source=BuiltIn
+Registered app: guideXOS Navigator
+AppModel registry candidate:  displayName=App Model Demo id=gxos.builtin.appmodeldemo kind=BuiltIn source=BuiltIn
+Registered app: App Model Demo
+AppModel registry candidate:  displayName=Native App Debug Viewer id=gxos.builtin.nativeappdebugviewer kind=BuiltIn source=BuiltIn
+Registered app: Native App Debug Viewer
+AppModel registry candidate:  displayName=HDInstaller id=gxos.builtin.hdinstaller kind=BuiltIn source=BuiltIn
+Registered app: HDInstaller
+AppRegistry initialized, desktop apps=25
+Desktop state loaded
+NotificationManager initialized
+Firewall initialized (Normal mode)
+Module registered: Notepad
+Module registered: Calculator
+Module registered: Paint
+Module registered: ImageViewer
+Module registered: Clock
+Module registered: TaskManager
+Module registered: FileExplorer
+Module registered: Console
+Module registered: OnScreenKeyboard
+Module registered: ShutdownDialog
+Built-in modules registered (10)
+[lifecycle] phase -> ServicesReady
+[lifecycle] phase -> Interactive
+Commands:
+ mem | alloc <n> | tasks | log
+ spawn <echo|worker> [args...] | plist
+ send <pid> <text> | recv <pid>
+ bus.sub <chan> <pid> | bus.unsub <chan> <pid>
+ bus.pub <chan> <text> [fanout] | bus.pop <chan> [timeoutMs]
+ bus.cap <chan> <cap> | bus.stats <chan>
+ console.start | console.send <text> | console.pop [timeoutMs]
+ gui.start | gui.open.appmodeldemo | gui.smoke.launchshadow | gui.win <title> [w h] | gui.text <id> <text> | gui.close <id>
+ gui.rect <id> <x> <y> <w> <h> <r> <g> <b> | gui.move <id> <x> <y> | gui.resize <id> <w> <h> | gui.title <id> <title>
+ gui.btn <win> <id> <x> <y> <w> <h> <text> | gui.pop | gui.wlist | gui.activate <id> | gui.min <id>
+ gxm.load <path> | gxm.sample | gui.save <path> | gui.load <path>
+ desktop.wallpaper <path> | desktop.launch <action> | desktop.launch.resolve <label> | desktop.launch.adapt <label> | desktop.launch.compare | desktop.launch.storage | desktop.launch.storage.preview | desktop.launch.storage.preview.compare | desktop.launch.types | desktop.pin <action> | desktop.unpin <action> | desktop.showconfig
+ desktop.apps | desktop.apps.verbose | desktop.appmodel.summary | desktop.appmodel.coverage | desktop.appmodel.typed-dispatch-gate | desktop.pinned | desktop.recent | desktop.pinapp <name> | desktop.pinfile <name> <path>
+ nativeapp.capabilities | nativeapp.inspect <app> | nativeapp.smoketest <app> | nativeapp.processes
+ taskbar.list | taskbar.activate <id> | taskbar.min <id> | taskbar.close <id>
+ workspace.switch <n> | workspace.next | workspace.prev | workspace.current
+ notepad | notepad <file>
+ calculator
+ console | console.start | console.send <text> | console.pop [timeoutMs]
+ files | files <path>
+ clock
+ taskmgr
+ paint
+ navigator | navigator.smoke | navigator.goto <url>
+ imgview [file] | osk
+ shutdown | msgbox <text> | welcome
+ notify <text> | notify.clear
+ fw.mode <normal|block|disabled|auto> | fw.allow <name> | fw.list | fw.alerts
+ modules | module.launch <name>
+ pkg.install <path.gxapp> | pkg.launch <app> | pkg.list | pkg.validate <path.gxapp>
+ proc.wait <pid> [timeoutMs] | proc.status <pid>
+ vfs.mkdir <path> | vfs.write <path> <text> | vfs.read <path> | vfs.ls <path>
+ vnc.start [port] | vnc.stop | vnc.status
+ pbytes | help | quit/exit
+[AppModelSummary]
+registeredApps: 25
+manifestScannedApps: 7
+manifestRegisteredApps: 7
+syntheticBuiltInCount: 18
+duplicateAppIds: OK count=0
+namespaceWarnings: OK count=0
+hostedMetadataCoverage: OK available=18 missingMetadata=0 missingRegistration=0
+bareMetalMetadataCoverage: OK available=8 missingMetadata=0 missingRegistration=0
+targetDrift: OK hostedMissing=0 bareMetalMissing=0
+invalidManifests: OK count=0
+launchTargetComparison: OK labels=8 exact=5 acceptedAliases=1 intentionalDifferences=2 unexpectedDrift=0
+launchTargetShadow: observations=0 unresolved=0 aliasFallback=0 adapterMatches=0 adapterAcceptedMismatches=0 adapterUnexpectedMismatches=0 typedDispatchCandidateMatches=0 typedDispatchCandidateAcceptedMismatches=0 typedDispatchCandidateUnexpectedMismatches=0 startMenu=0 startMenuTypedMatches=0 desktopShortcut=0 desktopShortcutTypedMatches=0 nonFatal=true
+launchStoragePreview: OK total=75 ready=69 alias=0 shellAction=5 unresolved=0 skippedLayoutOnly=1 targetSpecificUnsupportedAliases=0 highRisk=0 writesStorage=false
+launchStoragePreviewCompare: OK hostedTargetSpecificUnsupportedAliases=0 bareMetalTargetSpecificUnsupportedAliases=2 unexpectedDrift=0 writesStorage=false
+launchTargetTypes: OK labels=62 coveredTypes=6 hostedAvailable=50 bareMetalAvailable=29 hostedOnly=31 bareMetalOnly=10 expectedUnsupportedOnTarget=1 unexpectedUnsupportedOnTarget=0 unknownLabels=1 nonFatal=true
+typedDispatchFlags: shadowOnly=OFF enabled=OFF behavior=legacy-dispatch status=OK discoveryOnly=true
+overall: OK
+detailCommands: desktop.appmodel.coverage, desktop.apps.verbose, desktop.launch.compare, desktop.launch.storage, desktop.launch.storage.preview, desktop.launch.storage.preview.compare, desktop.launch.types
+[lifecycle] phase -> ShuttingDown
+[lifecycle] phase -> Stopped
+guideXOSServer server exiting.

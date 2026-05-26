@@ -678,6 +678,41 @@ namespace gxos {
             return value ? "true" : "false";
         }
 
+        struct TypedDispatchCompileFlags {
+            bool shadowOnly = false;
+            bool enabled = false;
+            bool invalid = false;
+            std::string behavior;
+            std::string status;
+        };
+
+        static TypedDispatchCompileFlags typedDispatchCompileFlags() {
+            TypedDispatchCompileFlags flags;
+#if defined(GXOS_APPMODEL_TYPED_DISPATCH_SHADOW_ONLY)
+            flags.shadowOnly = true;
+#endif
+#if defined(GXOS_APPMODEL_TYPED_DISPATCH_ENABLED)
+            flags.enabled = true;
+#endif
+            flags.invalid = flags.shadowOnly && flags.enabled;
+            flags.status = flags.invalid ? "WARN" : "OK";
+            flags.behavior = "legacy-dispatch";
+            return flags;
+        }
+
+        static std::string typedDispatchCompileFlagsSummaryLine() {
+            const TypedDispatchCompileFlags flags = typedDispatchCompileFlags();
+            std::ostringstream oss;
+            oss << "typedDispatchFlags: shadowOnly=" << (flags.shadowOnly ? "ON" : "OFF")
+                << " enabled=" << (flags.enabled ? "ON" : "OFF")
+                << " behavior=" << flags.behavior
+                << " status=" << flags.status
+                << " discoveryOnly=true";
+            if (flags.invalid) oss << " invalidConfiguration=true";
+            oss << "\n";
+            return oss.str();
+        }
+
         static const char* kTypedDispatchGateHostedEvidencePath = "logs/appmodel-typed-dispatch-gate-hosted.evidence.txt";
         static const char* kTypedDispatchGateQemuEvidencePath = "logs/appmodel-typed-dispatch-gate-qemu.evidence.txt";
         static const int64_t kTypedDispatchGateEvidenceStaleAfterMs = 7LL * 24LL * 60LL * 60LL * 1000LL;
@@ -1664,7 +1699,9 @@ namespace gxos {
             const bool launchStoragePreviewOk = storagePreviewCounts.unresolved == 0 && storagePreviewCounts.highRisk == 0;
             const size_t launchStoragePreviewUnexpectedDrift = storagePreviewCounts.highRisk + storagePreviewCompareBareMetalCounts.highRisk;
             const bool launchStoragePreviewCompareOk = launchStoragePreviewUnexpectedDrift == 0;
-            const bool overallOk = duplicateOk && namespaceOk && hostedCoverageOk && bareMetalCoverageOk && invalidManifestOk && launchTargetComparisonOk && launchStoragePreviewOk && launchStoragePreviewCompareOk;
+            const TypedDispatchCompileFlags typedDispatchFlags = typedDispatchCompileFlags();
+            const bool typedDispatchFlagsOk = !typedDispatchFlags.invalid;
+            const bool overallOk = duplicateOk && namespaceOk && hostedCoverageOk && bareMetalCoverageOk && invalidManifestOk && launchTargetComparisonOk && launchStoragePreviewOk && launchStoragePreviewCompareOk && typedDispatchFlagsOk;
 
             std::ostringstream oss;
             oss << "[AppModelSummary]\n";
@@ -1723,6 +1760,7 @@ namespace gxos {
                 << " unexpectedDrift=" << launchStoragePreviewUnexpectedDrift
                 << " writesStorage=false\n";
             oss << launchTargetTypeCoverageSummaryLine();
+            oss << typedDispatchCompileFlagsSummaryLine();
             oss << "overall: " << statusText(overallOk) << "\n";
             oss << "detailCommands: desktop.appmodel.coverage, desktop.apps.verbose, desktop.launch.compare, desktop.launch.storage, desktop.launch.storage.preview, desktop.launch.storage.preview.compare, desktop.launch.types\n";
             return oss.str();
@@ -2706,6 +2744,8 @@ namespace gxos {
             const bool launchStoragePreviewOk = hostedStorageCounts.unresolved == 0 && hostedStorageCounts.highRisk == 0;
             const size_t launchStoragePreviewUnexpectedDrift = hostedStorageCounts.highRisk + bareMetalStorageCounts.highRisk;
             const bool launchStoragePreviewCompareOk = launchStoragePreviewUnexpectedDrift == 0;
+            const TypedDispatchCompileFlags typedDispatchFlags = typedDispatchCompileFlags();
+            const bool typedDispatchFlagsOk = !typedDispatchFlags.invalid;
 
             const std::set<std::string> typeLabels = collectLaunchTargetTypeCoverageLabels();
             const std::map<apps::LaunchTargetType, LaunchTargetTypeCounts> typeCounts = collectLaunchTargetTypeCoverageCounts(typeLabels);
@@ -2720,7 +2760,8 @@ namespace gxos {
                 invalidManifestOk &&
                 launchTargetComparisonOk &&
                 launchStoragePreviewOk &&
-                launchStoragePreviewCompareOk;
+                launchStoragePreviewCompareOk &&
+                typedDispatchFlagsOk;
 
             const LaunchTargetShadowCounters shadow = GetLaunchTargetShadowCounters();
             const bool shadowNotRun = shadow.totalObservations == 0;
@@ -2847,6 +2888,15 @@ namespace gxos {
             oss << "checks:\n";
 
             appendTypedDispatchGateCheck(oss, "hostedBuild", "INFO", "Not detectable at runtime; required command: .\\build.bat");
+
+            const std::string typedDispatchFlagsStatus = typedDispatchFlagsOk ? "PASS" : "WARN";
+            appendTypedDispatchGateCheck(oss, "typedDispatchCompileFlags", typedDispatchFlagsStatus,
+                std::string("shadowOnly=") + (typedDispatchFlags.shadowOnly ? "ON" : "OFF") +
+                " enabled=" + (typedDispatchFlags.enabled ? "ON" : "OFF") +
+                " behavior=" + typedDispatchFlags.behavior +
+                " discoveryOnly=true" +
+                (typedDispatchFlags.invalid ? " invalidConfiguration=true" : ""));
+            countStatus(typedDispatchFlagsStatus);
 
             const std::string appModelSummaryStatus = appModelSummaryOverallOk ? "PASS" : "FAIL";
             appendTypedDispatchGateCheck(oss, "appModelSummaryOverall", appModelSummaryStatus,
