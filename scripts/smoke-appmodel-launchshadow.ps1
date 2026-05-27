@@ -19,6 +19,7 @@ function Write-AppModelLaunchShadowEvidence {
         [bool]$ImgViewerExpectedUnsupportedConfirmed,
         [bool]$FakeOnlyUnexpectedMismatchConfirmed,
         [bool]$FolderFileOpenShadowOnlyConfirmed,
+        [bool]$TextFileOpenShadowOnlyConfirmed,
         [int]$UnexpectedMismatchRows,
         [string]$SerialLogPath
     )
@@ -27,6 +28,7 @@ function Write-AppModelLaunchShadowEvidence {
     $imgViewerConfirmed = if ($ImgViewerExpectedUnsupportedConfirmed) { "true" } else { "false" }
     $fakeOnlyConfirmed = if ($FakeOnlyUnexpectedMismatchConfirmed) { "true" } else { "false" }
     $folderFileOpenConfirmed = if ($FolderFileOpenShadowOnlyConfirmed) { "true" } else { "false" }
+    $textFileOpenConfirmed = if ($TextFileOpenShadowOnlyConfirmed) { "true" } else { "false" }
 
     $lines = @(
         "[AppModelTypedDispatchGateEvidence]",
@@ -40,6 +42,7 @@ function Write-AppModelLaunchShadowEvidence {
         "imgViewerExpectedUnsupportedConfirmed=$imgViewerConfirmed",
         "fakeLaunchShadowAppOnlyUnexpectedMismatchConfirmed=$fakeOnlyConfirmed",
         "folderFileOpenShadowOnlyConfirmed=$folderFileOpenConfirmed",
+        "textFileOpenShadowOnlyConfirmed=$textFileOpenConfirmed",
         "unexpectedMismatchRows=$UnexpectedMismatchRows",
         "serialLogPath=$SerialLogPath",
         "nonFatal=true",
@@ -194,6 +197,15 @@ $checks = @(
     "comparison=match",
     "nonFatal=true shadowOnly=true",
     "[APPMODEL-LAUNCHSHADOW-SMOKE] folder FileOpen SHADOW_ONLY probe done",
+    "[APPMODEL-LAUNCHSHADOW-SMOKE] issuing text FileOpen SHADOW_ONLY probe",
+    "source=SmokeTextFileOpen",
+    "handler=Notepad",
+    "path=/test.txt",
+    "resolvedType=FileOpen",
+    "adapterLegacyDispatch=Notepad",
+    "comparison=match",
+    "nonFatal=true shadowOnly=true",
+    "[APPMODEL-LAUNCHSHADOW-SMOKE] text FileOpen SHADOW_ONLY probe done",
     "[APPMODEL-LAUNCHSHADOW-SMOKE] done"
 )
 
@@ -227,6 +239,15 @@ $folderFileOpenShadowOnlyConfirmed =
     $output.Contains("adapterLegacyDispatch=Files") -and
     $output.Contains("comparison=match") -and
     $output.Contains("nonFatal=true shadowOnly=true")
+$textFileOpenShadowOnlyConfirmed =
+    $output.Contains("[APPMODEL-LAUNCHSHADOW-SMOKE] issuing text FileOpen SHADOW_ONLY probe") -and
+    $output.Contains("source=SmokeTextFileOpen") -and
+    $output.Contains("handler=Notepad") -and
+    $output.Contains("path=/test.txt") -and
+    $output.Contains("resolvedType=FileOpen") -and
+    $output.Contains("adapterLegacyDispatch=Notepad") -and
+    $output.Contains("comparison=match") -and
+    $output.Contains("nonFatal=true shadowOnly=true")
 
 if ($unexpectedRows.Count -ne 1) {
     $failed += "Expected exactly one unexpected-mismatch row, found $($unexpectedRows.Count)"
@@ -238,6 +259,7 @@ if ($failed.Count -eq 0) {
         -ImgViewerExpectedUnsupportedConfirmed $imgViewerExpectedUnsupportedConfirmed `
         -FakeOnlyUnexpectedMismatchConfirmed $fakeOnlyUnexpectedMismatchConfirmed `
         -FolderFileOpenShadowOnlyConfirmed $folderFileOpenShadowOnlyConfirmed `
+        -TextFileOpenShadowOnlyConfirmed $textFileOpenShadowOnlyConfirmed `
         -UnexpectedMismatchRows $unexpectedRows.Count `
         -SerialLogPath $serialLog
     Write-Host "App-model launch shadow kernel smoke PASS. Serial log: $serialLog"
@@ -250,6 +272,7 @@ Write-AppModelLaunchShadowEvidence -Status "FAIL" `
     -ImgViewerExpectedUnsupportedConfirmed $imgViewerExpectedUnsupportedConfirmed `
     -FakeOnlyUnexpectedMismatchConfirmed $fakeOnlyUnexpectedMismatchConfirmed `
     -FolderFileOpenShadowOnlyConfirmed $folderFileOpenShadowOnlyConfirmed `
+    -TextFileOpenShadowOnlyConfirmed $textFileOpenShadowOnlyConfirmed `
     -UnexpectedMismatchRows $unexpectedRows.Count `
     -SerialLogPath $serialLog
 Write-Host "App-model launch shadow kernel smoke FAIL. Serial log: $serialLog" -ForegroundColor Red

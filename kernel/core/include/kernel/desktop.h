@@ -142,6 +142,7 @@ bool is_compositor_available();
 #if defined(GXOS_APPMODEL_LAUNCHSHADOW_SMOKE_ACTIVE) && defined(GXOS_APPMODEL_TYPED_DISPATCH_SHADOW_ONLY)
 // Diagnostic-only smoke hook for SHADOW_ONLY FileOpen observation. Does not launch apps.
 void run_launch_shadow_folder_fileopen_smoke();
+void run_launch_shadow_text_fileopen_smoke();
 #endif
 
 } // namespace desktop

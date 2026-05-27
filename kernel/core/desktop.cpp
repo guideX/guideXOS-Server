@@ -366,7 +366,7 @@ static void log_bare_metal_static_app_shadow_only_observation(const char* origin
     serial::puts(" nonFatal=true shadowOnly=true\n");
 }
 
-static const char* bare_metal_folder_fileopen_shadow_comparison(const gxos::apps::LaunchTarget& target, const char* handlerName, const char* adapterLegacyDispatch)
+static const char* bare_metal_fileopen_shadow_comparison(const gxos::apps::LaunchTarget& target, const char* handlerName, const char* adapterLegacyDispatch)
 {
     if (target.type != gxos::apps::LaunchTargetType::FileOpen) return "unexpected-mismatch";
     if (adapterLegacyDispatch && adapterLegacyDispatch[0] &&
@@ -377,7 +377,7 @@ static const char* bare_metal_folder_fileopen_shadow_comparison(const gxos::apps
     return "unexpected-mismatch";
 }
 
-static void log_bare_metal_folder_fileopen_shadow_only_observation(const char* source, const char* handlerName, const char* path)
+static void log_bare_metal_fileopen_shadow_only_observation(const char* source, const char* handlerName, const char* path)
 {
     if (!handlerName || !handlerName[0] || !path || !path[0]) return;
 
@@ -387,10 +387,10 @@ static void log_bare_metal_folder_fileopen_shadow_only_observation(const char* s
     const char* adapterLegacyDispatch = appmodel::legacyDispatchStringForLaunchTarget(target, &adapterStatus, &adapterReason);
     const bool candidateMatchesHandler = adapterLegacyDispatch && adapterLegacyDispatch[0] &&
         desktop_str_eq(adapterLegacyDispatch, handlerName);
-    const char* comparison = bare_metal_folder_fileopen_shadow_comparison(target, handlerName, adapterLegacyDispatch);
+    const char* comparison = bare_metal_fileopen_shadow_comparison(target, handlerName, adapterLegacyDispatch);
 
     serial::puts("[LaunchTargetShadow] source=");
-    serial::puts(source ? source : "BareMetalFolderFileOpen");
+    serial::puts(source ? source : "BareMetalFileOpen");
     serial::puts(" handler=");
     serial::puts(handlerName);
     serial::puts(" path=");
@@ -6359,8 +6359,17 @@ bool launch_app(const char* appName)
 void run_launch_shadow_folder_fileopen_smoke()
 {
     serial::puts("[APPMODEL-LAUNCHSHADOW-SMOKE] issuing folder FileOpen SHADOW_ONLY probe\n");
-    log_bare_metal_folder_fileopen_shadow_only_observation("SmokeFolderFileOpen", "Files", "/");
+    log_bare_metal_fileopen_shadow_only_observation("SmokeFolderFileOpen", "Files", "/");
     serial::puts("[APPMODEL-LAUNCHSHADOW-SMOKE] folder FileOpen SHADOW_ONLY probe done\n");
+}
+
+void run_launch_shadow_text_fileopen_smoke()
+{
+    serial::puts("[APPMODEL-LAUNCHSHADOW-SMOKE] issuing text FileOpen SHADOW_ONLY probe\n");
+    // Smoke-only observation: this resolves/adapts /test.txt for diagnostics and
+    // never calls launchAppWithParam("Notepad", "/test.txt").
+    log_bare_metal_fileopen_shadow_only_observation("SmokeTextFileOpen", "Notepad", "/test.txt");
+    serial::puts("[APPMODEL-LAUNCHSHADOW-SMOKE] text FileOpen SHADOW_ONLY probe done\n");
 }
 #endif
 
@@ -6710,7 +6719,7 @@ static void show_icon_notification(int displayIndex)
             bool targetIsDir = info.type == vfs::FILE_TYPE_DIRECTORY;
             if (targetIsDir) {
 #if defined(GXOS_APPMODEL_TYPED_DISPATCH_SHADOW_ONLY) && defined(GXOS_BARE_METAL)
-                log_bare_metal_folder_fileopen_shadow_only_observation("DesktopShortcutFolder", "Files", target);
+                log_bare_metal_fileopen_shadow_only_observation("DesktopShortcutFolder", "Files", target);
 #endif
                 // SHADOW_ONLY FileOpen observation above is diagnostic-only; "Files"
                 // remains the authoritative handler and target remains the unmodified path.
@@ -6718,6 +6727,11 @@ static void show_icon_notification(int displayIndex)
                 s_notification.title = label;
                 s_notification.message = "Unable to open folder";
             } else if (desktop_entry_is_text(label)) {
+#if defined(GXOS_APPMODEL_TYPED_DISPATCH_SHADOW_ONLY) && defined(GXOS_BARE_METAL)
+                log_bare_metal_fileopen_shadow_only_observation("DesktopShortcutTextFile", "Notepad", target);
+#endif
+                // SHADOW_ONLY FileOpen observation above is diagnostic-only; "Notepad"
+                // remains the authoritative handler and target remains the unmodified path.
                 if (app::AppManager::launchAppWithParam("Notepad", target)) return;
                 s_notification.title = label;
                 s_notification.message = "Unable to open file";
@@ -6754,7 +6768,7 @@ static void show_icon_notification(int displayIndex)
             serial::puts(icon.path);
             serial::puts("\n");
 #if defined(GXOS_APPMODEL_TYPED_DISPATCH_SHADOW_ONLY) && defined(GXOS_BARE_METAL)
-            log_bare_metal_folder_fileopen_shadow_only_observation("DesktopFilesystemFolder", "Files", icon.path);
+            log_bare_metal_fileopen_shadow_only_observation("DesktopFilesystemFolder", "Files", icon.path);
 #endif
             // SHADOW_ONLY FileOpen observation above is diagnostic-only; "Files"
             // remains the authoritative handler and icon.path remains unmodified.
@@ -6765,6 +6779,11 @@ static void show_icon_notification(int displayIndex)
             serial::puts("[desktop] Opening desktop text file: ");
             serial::puts(icon.path);
             serial::puts("\n");
+#if defined(GXOS_APPMODEL_TYPED_DISPATCH_SHADOW_ONLY) && defined(GXOS_BARE_METAL)
+            log_bare_metal_fileopen_shadow_only_observation("DesktopFilesystemTextFile", "Notepad", icon.path);
+#endif
+            // SHADOW_ONLY FileOpen observation above is diagnostic-only; "Notepad"
+            // remains the authoritative handler and icon.path remains unmodified.
             if (app::AppManager::launchAppWithParam("Notepad", icon.path)) return;
             s_notification.title = label;
             s_notification.message = "Unable to open file";
@@ -6787,7 +6806,7 @@ static void show_icon_notification(int displayIndex)
                 break;
             case DesktopSystemObjectKind::ThisSystem:
 #if defined(GXOS_APPMODEL_TYPED_DISPATCH_SHADOW_ONLY) && defined(GXOS_BARE_METAL)
-                log_bare_metal_folder_fileopen_shadow_only_observation("DesktopSystemObjectRootFolder", "Files", "/");
+                log_bare_metal_fileopen_shadow_only_observation("DesktopSystemObjectRootFolder", "Files", "/");
 #endif
                 // SHADOW_ONLY FileOpen observation above is diagnostic-only; "Files"
                 // remains the authoritative handler and "/" remains the unmodified path.

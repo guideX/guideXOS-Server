@@ -387,6 +387,7 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::appmodel::printLaunchTargetShadowSmokeDiagnostic(kernel::serial::puts);
 #if defined(GXOS_APPMODEL_TYPED_DISPATCH_SHADOW_ONLY)
         kernel::desktop::run_launch_shadow_folder_fileopen_smoke();
+        kernel::desktop::run_launch_shadow_text_fileopen_smoke();
 #endif
         kernel::serial::puts("[APPMODEL-LAUNCHSHADOW-SMOKE] done\n");
 #endif
