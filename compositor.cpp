@@ -1221,6 +1221,28 @@ namespace gxos {
             collectLaunchTargetShadowDiagnosticLines(source, uiLabel, shortcutTarget, dispatchName, true);
         }
 
+        static void logStartMenuLaunchTargetShadowDiagnostic(const std::string& originalLegacyDispatch) {
+#if defined(GXOS_APPMODEL_TYPED_DISPATCH_SHADOW_ONLY) && defined(_WIN32) && !defined(GXOS_BARE_METAL)
+            // SHADOW_ONLY computes and records the typed candidate for Start Menu launches only.
+            // This helper intentionally returns no dispatch string; callers must still launch
+            // with originalLegacyDispatch so legacy dispatch remains authoritative.
+            logLaunchTargetShadowDiagnostic("StartMenu", originalLegacyDispatch, "", originalLegacyDispatch);
+#else
+            logLaunchTargetShadowDiagnostic("StartMenu", originalLegacyDispatch, "", originalLegacyDispatch);
+#endif
+        }
+
+        static void logDesktopShortcutLaunchTargetShadowDiagnostic(const std::string& uiLabel, const std::string& shortcutTarget, const std::string& originalLegacyDispatch) {
+#if defined(GXOS_APPMODEL_TYPED_DISPATCH_SHADOW_ONLY) && defined(_WIN32) && !defined(GXOS_BARE_METAL)
+            // SHADOW_ONLY computes and records the typed candidate for hosted app shortcuts only.
+            // This helper intentionally returns no dispatch string; callers must still launch
+            // with originalLegacyDispatch so legacy desktop shortcut dispatch remains authoritative.
+            logLaunchTargetShadowDiagnostic("DesktopShortcut", uiLabel, shortcutTarget, originalLegacyDispatch);
+#else
+            logLaunchTargetShadowDiagnostic("DesktopShortcut", uiLabel, shortcutTarget, originalLegacyDispatch);
+#endif
+        }
+
         std::string Compositor::RunLaunchShadowSmokeDiagnostic() {
 #if !defined(_WIN32) || defined(GXOS_BARE_METAL)
             return "[LaunchTargetShadowSmoke]\n"
@@ -1297,7 +1319,9 @@ namespace gxos {
 
         void Compositor::openStartMenuApp(const std::string& appName) {
             Logger::write(LogLevel::Info, "Start Menu context Open selected: " + appName);
-            logLaunchTargetShadowDiagnostic("StartMenu", appName, "", appName);
+            logStartMenuLaunchTargetShadowDiagnostic(appName);
+            // SHADOW_ONLY observation above is diagnostic-only; launchAction still receives
+            // the original legacy Start Menu dispatch string.
             launchAction(appName);
             g_startMenuVisible = false;
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)
@@ -1541,7 +1565,9 @@ namespace gxos {
                     err = "Shortcut target not found";
                 } else {
                     Logger::write(LogLevel::Info, "Desktop shortcut launched: " + desktopLayoutKey(item) + " -> " + app->displayName);
-                    logLaunchTargetShadowDiagnostic("DesktopShortcut", item.label, item.targetAppId, app->displayName);
+                    logDesktopShortcutLaunchTargetShadowDiagnostic(item.label, item.targetAppId, app->displayName);
+                    // SHADOW_ONLY observation above is diagnostic-only; launchAction still receives
+                    // the original legacy desktop shortcut dispatch string.
                     launchAction(app->displayName);
                     return;
                 }
@@ -2240,7 +2266,9 @@ namespace gxos {
                     // Computer Files
                     RECT rcComputer{ rcX, rcY, g_startMenuRect.right - 6, rcY + rowH };
                     if (mx >= rcComputer.left && mx <= rcComputer.right && my >= rcComputer.top && my <= rcComputer.bottom) {
-                        logLaunchTargetShadowDiagnostic("StartMenu", "ComputerFiles", "", "ComputerFiles");
+                        logStartMenuLaunchTargetShadowDiagnostic("ComputerFiles");
+                        // SHADOW_ONLY observation above is diagnostic-only; launchAction still receives
+                        // the original legacy Start Menu dispatch string.
                         launchAction("ComputerFiles");
                         g_startMenuVisible = false;
                         requestRepaint( );
@@ -2251,7 +2279,9 @@ namespace gxos {
                     // Console
                     RECT rcConsole{ rcX, rcY, g_startMenuRect.right - 6, rcY + rowH };
                     if (mx >= rcConsole.left && mx <= rcConsole.right && my >= rcConsole.top && my <= rcConsole.bottom) {
-                        logLaunchTargetShadowDiagnostic("StartMenu", "Console", "", "Console");
+                        logStartMenuLaunchTargetShadowDiagnostic("Console");
+                        // SHADOW_ONLY observation above is diagnostic-only; launchAction still receives
+                        // the original legacy Start Menu dispatch string.
                         launchAction("Console");
                         g_startMenuVisible = false;
                         requestRepaint( );
@@ -2279,7 +2309,9 @@ namespace gxos {
                             if (g_lastItemIndex == idx && (now - g_lastItemClickTicks) < 450) {
                                 // Double-click: launch
                                 std::string action = g_startMenuAllProgs ? g_startMenuAllProgsSorted[idx] : g_startMenuPinnedRecent[idx];
-                                logLaunchTargetShadowDiagnostic("StartMenu", action, "", action);
+                                logStartMenuLaunchTargetShadowDiagnostic(action);
+                                // SHADOW_ONLY observation above is diagnostic-only; launchAction still receives
+                                // the original legacy Start Menu dispatch string.
                                 launchAction(action);
                                 g_startMenuVisible = false;
                             } else {
@@ -2530,7 +2562,9 @@ namespace gxos {
                     if (key == VK_RETURN) {
                         if (g_startMenuSel >= 0 && g_startMenuSel < maxItems) {
                             std::string action = g_startMenuAllProgs ? g_startMenuAllProgsSorted[g_startMenuSel] : g_startMenuPinnedRecent[g_startMenuSel];
-                            logLaunchTargetShadowDiagnostic("StartMenu", action, "", action);
+                            logStartMenuLaunchTargetShadowDiagnostic(action);
+                            // SHADOW_ONLY observation above is diagnostic-only; launchAction still receives
+                            // the original legacy Start Menu dispatch string.
                             launchAction(action);
                             g_startMenuVisible = false;
                             requestRepaint( );
