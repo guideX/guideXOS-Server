@@ -6369,6 +6369,8 @@ void run_launch_shadow_text_fileopen_smoke()
     // Smoke-only observation: this resolves/adapts /test.txt for diagnostics and
     // never calls launchAppWithParam("Notepad", "/test.txt").
     log_bare_metal_fileopen_shadow_only_observation("SmokeTextFileOpen", "Notepad", "/test.txt");
+    log_bare_metal_fileopen_shadow_only_observation("DesktopShortcutTextFile", "Notepad", "/test.txt");
+    log_bare_metal_fileopen_shadow_only_observation("DesktopFilesystemTextFile", "Notepad", "/test.txt");
     serial::puts("[APPMODEL-LAUNCHSHADOW-SMOKE] text FileOpen SHADOW_ONLY probe done\n");
 }
 #endif

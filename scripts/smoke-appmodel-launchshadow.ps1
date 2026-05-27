@@ -20,6 +20,8 @@ function Write-AppModelLaunchShadowEvidence {
         [bool]$FakeOnlyUnexpectedMismatchConfirmed,
         [bool]$FolderFileOpenShadowOnlyConfirmed,
         [bool]$TextFileOpenShadowOnlyConfirmed,
+        [bool]$DesktopShortcutTextFileShadowOnlyConfirmed,
+        [bool]$DesktopFilesystemTextFileShadowOnlyConfirmed,
         [int]$UnexpectedMismatchRows,
         [string]$SerialLogPath
     )
@@ -29,6 +31,8 @@ function Write-AppModelLaunchShadowEvidence {
     $fakeOnlyConfirmed = if ($FakeOnlyUnexpectedMismatchConfirmed) { "true" } else { "false" }
     $folderFileOpenConfirmed = if ($FolderFileOpenShadowOnlyConfirmed) { "true" } else { "false" }
     $textFileOpenConfirmed = if ($TextFileOpenShadowOnlyConfirmed) { "true" } else { "false" }
+    $desktopShortcutTextFileConfirmed = if ($DesktopShortcutTextFileShadowOnlyConfirmed) { "true" } else { "false" }
+    $desktopFilesystemTextFileConfirmed = if ($DesktopFilesystemTextFileShadowOnlyConfirmed) { "true" } else { "false" }
 
     $lines = @(
         "[AppModelTypedDispatchGateEvidence]",
@@ -43,6 +47,8 @@ function Write-AppModelLaunchShadowEvidence {
         "fakeLaunchShadowAppOnlyUnexpectedMismatchConfirmed=$fakeOnlyConfirmed",
         "folderFileOpenShadowOnlyConfirmed=$folderFileOpenConfirmed",
         "textFileOpenShadowOnlyConfirmed=$textFileOpenConfirmed",
+        "desktopShortcutTextFileShadowOnlyConfirmed=$desktopShortcutTextFileConfirmed",
+        "desktopFilesystemTextFileShadowOnlyConfirmed=$desktopFilesystemTextFileConfirmed",
         "unexpectedMismatchRows=$UnexpectedMismatchRows",
         "serialLogPath=$SerialLogPath",
         "nonFatal=true",
@@ -205,6 +211,20 @@ $checks = @(
     "adapterLegacyDispatch=Notepad",
     "comparison=match",
     "nonFatal=true shadowOnly=true",
+    "source=DesktopShortcutTextFile",
+    "handler=Notepad",
+    "path=/test.txt",
+    "resolvedType=FileOpen",
+    "adapterLegacyDispatch=Notepad",
+    "comparison=match",
+    "nonFatal=true shadowOnly=true",
+    "source=DesktopFilesystemTextFile",
+    "handler=Notepad",
+    "path=/test.txt",
+    "resolvedType=FileOpen",
+    "adapterLegacyDispatch=Notepad",
+    "comparison=match",
+    "nonFatal=true shadowOnly=true",
     "[APPMODEL-LAUNCHSHADOW-SMOKE] text FileOpen SHADOW_ONLY probe done",
     "[APPMODEL-LAUNCHSHADOW-SMOKE] done"
 )
@@ -248,6 +268,22 @@ $textFileOpenShadowOnlyConfirmed =
     $output.Contains("adapterLegacyDispatch=Notepad") -and
     $output.Contains("comparison=match") -and
     $output.Contains("nonFatal=true shadowOnly=true")
+$desktopShortcutTextFileShadowOnlyConfirmed =
+    $output.Contains("source=DesktopShortcutTextFile") -and
+    $output.Contains("handler=Notepad") -and
+    $output.Contains("path=/test.txt") -and
+    $output.Contains("resolvedType=FileOpen") -and
+    $output.Contains("adapterLegacyDispatch=Notepad") -and
+    $output.Contains("comparison=match") -and
+    $output.Contains("nonFatal=true shadowOnly=true")
+$desktopFilesystemTextFileShadowOnlyConfirmed =
+    $output.Contains("source=DesktopFilesystemTextFile") -and
+    $output.Contains("handler=Notepad") -and
+    $output.Contains("path=/test.txt") -and
+    $output.Contains("resolvedType=FileOpen") -and
+    $output.Contains("adapterLegacyDispatch=Notepad") -and
+    $output.Contains("comparison=match") -and
+    $output.Contains("nonFatal=true shadowOnly=true")
 
 if ($unexpectedRows.Count -ne 1) {
     $failed += "Expected exactly one unexpected-mismatch row, found $($unexpectedRows.Count)"
@@ -260,6 +296,8 @@ if ($failed.Count -eq 0) {
         -FakeOnlyUnexpectedMismatchConfirmed $fakeOnlyUnexpectedMismatchConfirmed `
         -FolderFileOpenShadowOnlyConfirmed $folderFileOpenShadowOnlyConfirmed `
         -TextFileOpenShadowOnlyConfirmed $textFileOpenShadowOnlyConfirmed `
+        -DesktopShortcutTextFileShadowOnlyConfirmed $desktopShortcutTextFileShadowOnlyConfirmed `
+        -DesktopFilesystemTextFileShadowOnlyConfirmed $desktopFilesystemTextFileShadowOnlyConfirmed `
         -UnexpectedMismatchRows $unexpectedRows.Count `
         -SerialLogPath $serialLog
     Write-Host "App-model launch shadow kernel smoke PASS. Serial log: $serialLog"
@@ -273,6 +311,8 @@ Write-AppModelLaunchShadowEvidence -Status "FAIL" `
     -FakeOnlyUnexpectedMismatchConfirmed $fakeOnlyUnexpectedMismatchConfirmed `
     -FolderFileOpenShadowOnlyConfirmed $folderFileOpenShadowOnlyConfirmed `
     -TextFileOpenShadowOnlyConfirmed $textFileOpenShadowOnlyConfirmed `
+    -DesktopShortcutTextFileShadowOnlyConfirmed $desktopShortcutTextFileShadowOnlyConfirmed `
+    -DesktopFilesystemTextFileShadowOnlyConfirmed $desktopFilesystemTextFileShadowOnlyConfirmed `
     -UnexpectedMismatchRows $unexpectedRows.Count `
     -SerialLogPath $serialLog
 Write-Host "App-model launch shadow kernel smoke FAIL. Serial log: $serialLog" -ForegroundColor Red
