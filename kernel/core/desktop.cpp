@@ -365,6 +365,58 @@ static void log_bare_metal_static_app_shadow_only_observation(const char* origin
     serial::puts(target.diagnosticReason);
     serial::puts(" nonFatal=true shadowOnly=true\n");
 }
+
+static const char* bare_metal_folder_fileopen_shadow_comparison(const gxos::apps::LaunchTarget& target, const char* handlerName, const char* adapterLegacyDispatch)
+{
+    if (target.type != gxos::apps::LaunchTargetType::FileOpen) return "unexpected-mismatch";
+    if (adapterLegacyDispatch && adapterLegacyDispatch[0] &&
+        handlerName && handlerName[0] &&
+        desktop_str_eq(adapterLegacyDispatch, handlerName)) {
+        return "match";
+    }
+    return "unexpected-mismatch";
+}
+
+static void log_bare_metal_folder_fileopen_shadow_only_observation(const char* source, const char* handlerName, const char* path)
+{
+    if (!handlerName || !handlerName[0] || !path || !path[0]) return;
+
+    const gxos::apps::LaunchTarget target = appmodel::resolveLaunchTarget(path);
+    const char* adapterStatus = "";
+    const char* adapterReason = "";
+    const char* adapterLegacyDispatch = appmodel::legacyDispatchStringForLaunchTarget(target, &adapterStatus, &adapterReason);
+    const bool candidateMatchesHandler = adapterLegacyDispatch && adapterLegacyDispatch[0] &&
+        desktop_str_eq(adapterLegacyDispatch, handlerName);
+    const char* comparison = bare_metal_folder_fileopen_shadow_comparison(target, handlerName, adapterLegacyDispatch);
+
+    serial::puts("[LaunchTargetShadow] source=");
+    serial::puts(source ? source : "BareMetalFolderFileOpen");
+    serial::puts(" handler=");
+    serial::puts(handlerName);
+    serial::puts(" path=");
+    serial::puts(path);
+    serial::puts(" resolvedType=");
+    serial::puts(gxos::apps::ToString(target.type));
+    serial::puts(" appId=");
+    serial::puts(target.appId);
+    serial::puts(" resolvedDispatch=");
+    serial::puts(target.dispatchLaunchName);
+    serial::puts(" adapterLegacyDispatch=");
+    serial::puts(adapterLegacyDispatch);
+    serial::puts(" candidateMatchesHandler=");
+    serial::puts(candidateMatchesHandler ? "true" : "false");
+    serial::puts(" comparison=");
+    serial::puts(comparison);
+    serial::puts(" adapterStatus=");
+    serial::puts(adapterStatus);
+    serial::puts(" adapterReason=");
+    serial::puts(adapterReason);
+    serial::puts(" status=");
+    serial::puts(target.diagnosticStatus);
+    serial::puts(" reason=");
+    serial::puts(target.diagnosticReason);
+    serial::puts(" nonFatal=true shadowOnly=true\n");
+}
 #endif
 
 static int desktop_strlen(const char* value)
@@ -6303,6 +6355,15 @@ bool launch_app(const char* appName)
     return try_launch_kernel_app(appName);
 }
 
+#if defined(GXOS_APPMODEL_LAUNCHSHADOW_SMOKE_ACTIVE) && defined(GXOS_APPMODEL_TYPED_DISPATCH_SHADOW_ONLY) && defined(GXOS_BARE_METAL)
+void run_launch_shadow_folder_fileopen_smoke()
+{
+    serial::puts("[APPMODEL-LAUNCHSHADOW-SMOKE] issuing folder FileOpen SHADOW_ONLY probe\n");
+    log_bare_metal_folder_fileopen_shadow_only_observation("SmokeFolderFileOpen", "Files", "/");
+    serial::puts("[APPMODEL-LAUNCHSHADOW-SMOKE] folder FileOpen SHADOW_ONLY probe done\n");
+}
+#endif
+
 bool is_bare_metal_mode()
 {
     return app::AppManager::isBareMetal();
@@ -6648,6 +6709,11 @@ static void show_icon_notification(int displayIndex)
             }
             bool targetIsDir = info.type == vfs::FILE_TYPE_DIRECTORY;
             if (targetIsDir) {
+#if defined(GXOS_APPMODEL_TYPED_DISPATCH_SHADOW_ONLY) && defined(GXOS_BARE_METAL)
+                log_bare_metal_folder_fileopen_shadow_only_observation("DesktopShortcutFolder", "Files", target);
+#endif
+                // SHADOW_ONLY FileOpen observation above is diagnostic-only; "Files"
+                // remains the authoritative handler and target remains the unmodified path.
                 if (app::AppManager::launchAppWithParam("Files", target)) return;
                 s_notification.title = label;
                 s_notification.message = "Unable to open folder";
@@ -6687,6 +6753,11 @@ static void show_icon_notification(int displayIndex)
             serial::puts("[desktop] Opening desktop folder in File Manager: ");
             serial::puts(icon.path);
             serial::puts("\n");
+#if defined(GXOS_APPMODEL_TYPED_DISPATCH_SHADOW_ONLY) && defined(GXOS_BARE_METAL)
+            log_bare_metal_folder_fileopen_shadow_only_observation("DesktopFilesystemFolder", "Files", icon.path);
+#endif
+            // SHADOW_ONLY FileOpen observation above is diagnostic-only; "Files"
+            // remains the authoritative handler and icon.path remains unmodified.
             if (app::AppManager::launchAppWithParam("Files", icon.path)) return;
             s_notification.title = label;
             s_notification.message = "Unable to open folder";
@@ -6715,6 +6786,11 @@ static void show_icon_notification(int displayIndex)
                 if (try_launch_kernel_app("Trash")) return;
                 break;
             case DesktopSystemObjectKind::ThisSystem:
+#if defined(GXOS_APPMODEL_TYPED_DISPATCH_SHADOW_ONLY) && defined(GXOS_BARE_METAL)
+                log_bare_metal_folder_fileopen_shadow_only_observation("DesktopSystemObjectRootFolder", "Files", "/");
+#endif
+                // SHADOW_ONLY FileOpen observation above is diagnostic-only; "Files"
+                // remains the authoritative handler and "/" remains the unmodified path.
                 if (app::AppManager::launchAppWithParam("Files", "/")) return;
                 if (try_launch_kernel_app("Files")) return;
                 break;

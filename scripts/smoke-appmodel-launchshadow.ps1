@@ -18,6 +18,7 @@ function Write-AppModelLaunchShadowEvidence {
         [bool]$RuntimeLaunchBehaviorUnchanged,
         [bool]$ImgViewerExpectedUnsupportedConfirmed,
         [bool]$FakeOnlyUnexpectedMismatchConfirmed,
+        [bool]$FolderFileOpenShadowOnlyConfirmed,
         [int]$UnexpectedMismatchRows,
         [string]$SerialLogPath
     )
@@ -25,6 +26,7 @@ function Write-AppModelLaunchShadowEvidence {
     $runtimeChanged = if ($RuntimeLaunchBehaviorUnchanged) { "false" } else { "true" }
     $imgViewerConfirmed = if ($ImgViewerExpectedUnsupportedConfirmed) { "true" } else { "false" }
     $fakeOnlyConfirmed = if ($FakeOnlyUnexpectedMismatchConfirmed) { "true" } else { "false" }
+    $folderFileOpenConfirmed = if ($FolderFileOpenShadowOnlyConfirmed) { "true" } else { "false" }
 
     $lines = @(
         "[AppModelTypedDispatchGateEvidence]",
@@ -37,6 +39,7 @@ function Write-AppModelLaunchShadowEvidence {
         "runtimeLaunchBehaviorChanged=$runtimeChanged",
         "imgViewerExpectedUnsupportedConfirmed=$imgViewerConfirmed",
         "fakeLaunchShadowAppOnlyUnexpectedMismatchConfirmed=$fakeOnlyConfirmed",
+        "folderFileOpenShadowOnlyConfirmed=$folderFileOpenConfirmed",
         "unexpectedMismatchRows=$UnexpectedMismatchRows",
         "serialLogPath=$SerialLogPath",
         "nonFatal=true",
@@ -58,6 +61,8 @@ function Invoke-KernelBuildForSmoke {
     Get-ChildItem -Path (Join-Path $Root "kernel\build") -Recurse -Filter "main.o" -ErrorAction SilentlyContinue |
         Remove-Item -Force -ErrorAction SilentlyContinue
     Get-ChildItem -Path (Join-Path $Root "kernel\build") -Recurse -Filter "app_launch_target_resolver.o" -ErrorAction SilentlyContinue |
+        Remove-Item -Force -ErrorAction SilentlyContinue
+    Get-ChildItem -Path (Join-Path $Root "kernel\build") -Recurse -Filter "desktop.o" -ErrorAction SilentlyContinue |
         Remove-Item -Force -ErrorAction SilentlyContinue
 
     & (Join-Path $Root "build-kernel.bat")
@@ -103,7 +108,7 @@ $qemu = Find-Qemu
 if (-not $qemu) { throw "qemu-system-x86_64 not found." }
 
 Write-Host "Building kernel with active app-model launch shadow smoke diagnostics..."
-Invoke-KernelBuildForSmoke "-DGXOS_APPMODEL_LAUNCHSHADOW_SMOKE_ACTIVE"
+Invoke-KernelBuildForSmoke "-DGXOS_APPMODEL_LAUNCHSHADOW_SMOKE_ACTIVE -DGXOS_APPMODEL_TYPED_DISPATCH_SHADOW_ONLY"
 $activeSmokeBuild = $true
 
 $ovmf = "C:\Program Files\qemu\share\edk2-x86_64-code.fd"
@@ -180,6 +185,15 @@ $checks = @(
     "comparison=unexpected-mismatch",
     "summary: observations=8 matches=5 acceptedMismatches=1 expectedUnsupported=1 unexpectedMismatches=1 nonFatal=true",
     "runtimeLaunchBehaviorChanged: false",
+    "[APPMODEL-LAUNCHSHADOW-SMOKE] issuing folder FileOpen SHADOW_ONLY probe",
+    "source=SmokeFolderFileOpen",
+    "handler=Files",
+    "path=/",
+    "resolvedType=FileOpen",
+    "adapterLegacyDispatch=Files",
+    "comparison=match",
+    "nonFatal=true shadowOnly=true",
+    "[APPMODEL-LAUNCHSHADOW-SMOKE] folder FileOpen SHADOW_ONLY probe done",
     "[APPMODEL-LAUNCHSHADOW-SMOKE] done"
 )
 
@@ -204,6 +218,15 @@ $fakeOnlyUnexpectedMismatchConfirmed =
     $unexpectedRows.Count -eq 1 -and
     $unexpectedRows[0].Value.Contains("case=UnknownProbe") -and
     $unexpectedRows[0].Value.Contains('inputLabel="FakeLaunchShadowApp"')
+$folderFileOpenShadowOnlyConfirmed =
+    $output.Contains("[APPMODEL-LAUNCHSHADOW-SMOKE] issuing folder FileOpen SHADOW_ONLY probe") -and
+    $output.Contains("source=SmokeFolderFileOpen") -and
+    $output.Contains("handler=Files") -and
+    $output.Contains("path=/") -and
+    $output.Contains("resolvedType=FileOpen") -and
+    $output.Contains("adapterLegacyDispatch=Files") -and
+    $output.Contains("comparison=match") -and
+    $output.Contains("nonFatal=true shadowOnly=true")
 
 if ($unexpectedRows.Count -ne 1) {
     $failed += "Expected exactly one unexpected-mismatch row, found $($unexpectedRows.Count)"
@@ -214,6 +237,7 @@ if ($failed.Count -eq 0) {
         -RuntimeLaunchBehaviorUnchanged $runtimeLaunchBehaviorUnchanged `
         -ImgViewerExpectedUnsupportedConfirmed $imgViewerExpectedUnsupportedConfirmed `
         -FakeOnlyUnexpectedMismatchConfirmed $fakeOnlyUnexpectedMismatchConfirmed `
+        -FolderFileOpenShadowOnlyConfirmed $folderFileOpenShadowOnlyConfirmed `
         -UnexpectedMismatchRows $unexpectedRows.Count `
         -SerialLogPath $serialLog
     Write-Host "App-model launch shadow kernel smoke PASS. Serial log: $serialLog"
@@ -225,6 +249,7 @@ Write-AppModelLaunchShadowEvidence -Status "FAIL" `
     -RuntimeLaunchBehaviorUnchanged $runtimeLaunchBehaviorUnchanged `
     -ImgViewerExpectedUnsupportedConfirmed $imgViewerExpectedUnsupportedConfirmed `
     -FakeOnlyUnexpectedMismatchConfirmed $fakeOnlyUnexpectedMismatchConfirmed `
+    -FolderFileOpenShadowOnlyConfirmed $folderFileOpenShadowOnlyConfirmed `
     -UnexpectedMismatchRows $unexpectedRows.Count `
     -SerialLogPath $serialLog
 Write-Host "App-model launch shadow kernel smoke FAIL. Serial log: $serialLog" -ForegroundColor Red
