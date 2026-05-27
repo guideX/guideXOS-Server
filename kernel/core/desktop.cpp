@@ -34,6 +34,9 @@
 #include "include/kernel/time.h"
 #include "include/kernel/ramdisk.h"
 #include "include/kernel/block_device.h"
+#if defined(GXOS_APPMODEL_TYPED_DISPATCH_SHADOW_ONLY) && defined(GXOS_BARE_METAL)
+#include "include/kernel/app_launch_target_resolver.h"
+#endif
 #if !defined(GXOS_BARE_METAL)
 #include "../../icon_theme_manager.h"
 #endif
@@ -297,6 +300,72 @@ static bool desktop_str_eq(const char* a, const char* b)
     }
     return *a == '\0' && *b == '\0';
 }
+
+#if defined(GXOS_APPMODEL_TYPED_DISPATCH_SHADOW_ONLY) && defined(GXOS_BARE_METAL)
+static bool bare_metal_shadow_file_explorer_alias_pair(const char* a, const char* b)
+{
+    return (desktop_str_eq(a, "Files") && desktop_str_eq(b, "FileExplorer")) ||
+           (desktop_str_eq(a, "FileExplorer") && desktop_str_eq(b, "Files"));
+}
+
+static const char* bare_metal_static_launch_shadow_comparison(const gxos::apps::LaunchTarget& target, const char* originalLegacyAppName, const char* typedDispatchCandidate)
+{
+    if (desktop_str_eq(target.diagnosticStatus, "unsupported-target") ||
+        desktop_str_eq(target.diagnosticStatus, "unsupported-file-open")) {
+        return "expected-unsupported";
+    }
+    if (typedDispatchCandidate && typedDispatchCandidate[0] &&
+        originalLegacyAppName && originalLegacyAppName[0] &&
+        desktop_str_eq(typedDispatchCandidate, originalLegacyAppName)) {
+        return "match";
+    }
+    if (target.appId && desktop_str_eq(target.appId, "gxos.builtin.fileexplorer") &&
+        bare_metal_shadow_file_explorer_alias_pair(typedDispatchCandidate, originalLegacyAppName)) {
+        return "accepted-mismatch";
+    }
+    return "unexpected-mismatch";
+}
+
+static void log_bare_metal_static_app_shadow_only_observation(const char* originalLegacyAppName)
+{
+    if (!originalLegacyAppName || !originalLegacyAppName[0]) return;
+
+    const gxos::apps::LaunchTarget target = appmodel::resolveLaunchTarget(originalLegacyAppName);
+    const char* adapterStatus = "";
+    const char* adapterReason = "";
+    const char* typedDispatchCandidate = appmodel::legacyDispatchStringForLaunchTarget(target, &adapterStatus, &adapterReason);
+    const bool candidateMatchesActual = typedDispatchCandidate && typedDispatchCandidate[0] &&
+        desktop_str_eq(typedDispatchCandidate, originalLegacyAppName);
+    const char* comparison = bare_metal_static_launch_shadow_comparison(target, originalLegacyAppName, typedDispatchCandidate);
+
+    serial::puts("[LaunchTargetShadow] source=BareMetalStaticApp");
+    serial::puts(" uiLabel=");
+    serial::puts(originalLegacyAppName);
+    serial::puts(" actualDispatch=");
+    serial::puts(originalLegacyAppName);
+    serial::puts(" resolvedType=");
+    serial::puts(gxos::apps::ToString(target.type));
+    serial::puts(" appId=");
+    serial::puts(target.appId);
+    serial::puts(" resolvedDispatch=");
+    serial::puts(target.dispatchLaunchName);
+    serial::puts(" typedDispatchCandidate=");
+    serial::puts(typedDispatchCandidate);
+    serial::puts(" typedDispatchCandidateMatchesActual=");
+    serial::puts(candidateMatchesActual ? "true" : "false");
+    serial::puts(" typedDispatchCandidateComparison=");
+    serial::puts(comparison);
+    serial::puts(" typedDispatchCandidateStatus=");
+    serial::puts(adapterStatus);
+    serial::puts(" typedDispatchCandidateReason=");
+    serial::puts(adapterReason);
+    serial::puts(" status=");
+    serial::puts(target.diagnosticStatus);
+    serial::puts(" reason=");
+    serial::puts(target.diagnosticReason);
+    serial::puts(" nonFatal=true shadowOnly=true\n");
+}
+#endif
 
 static int desktop_strlen(const char* value)
 {
@@ -5747,6 +5816,11 @@ static bool try_launch_kernel_app(const char* appName)
     
     // Check if app is available in kernel mode
     if (app::AppManager::isAppAvailable(appName)) {
+#if defined(GXOS_APPMODEL_TYPED_DISPATCH_SHADOW_ONLY) && defined(GXOS_BARE_METAL)
+        log_bare_metal_static_app_shadow_only_observation(appName);
+#endif
+        // SHADOW_ONLY observation above is diagnostic-only; AppManager still receives
+        // the original legacy bare-metal app name.
         return app::AppManager::launchApp(appName);
     }
     
@@ -6683,6 +6757,11 @@ static void show_icon_notification(int displayIndex)
     
     // Try to launch as a kernel GUI app
     if (app::AppManager::isAppAvailable(label)) {
+#if defined(GXOS_APPMODEL_TYPED_DISPATCH_SHADOW_ONLY) && defined(GXOS_BARE_METAL)
+        log_bare_metal_static_app_shadow_only_observation(label);
+#endif
+        // SHADOW_ONLY observation above is diagnostic-only; AppManager still receives
+        // the original legacy bare-metal app name.
         if (app::AppManager::launchApp(label)) {
             // App launched successfully
             app::AppLogger::logLaunch(label, app::LaunchResult::Success);
