@@ -125,65 +125,65 @@ core\include/kernel/kernel_app.h(209,36): warning G24ACD1A9: unused parameter 'w
     209 |     virtual void onWidgetClick(int widgetId) {}
         |                                ~~~~^~~~~~~~
   core\desktop.cpp: At global scope:
-core\desktop.cpp(2887,28): warning GB2FD17C6: 'kernel::desktop::WallpaperPackEntry* kernel::desktop::find_wallpaper_pack_entry(const char*, bool)' defined but not used [-Wunused-function]
-   2887 | static WallpaperPackEntry* find_wallpaper_pack_entry(const char* wallpaperId, bool thumbnail)
+core\desktop.cpp(3008,28): warning GB2FD17C6: 'kernel::desktop::WallpaperPackEntry* kernel::desktop::find_wallpaper_pack_entry(const char*, bool)' defined but not used [-Wunused-function]
+   3008 | static WallpaperPackEntry* find_wallpaper_pack_entry(const char* wallpaperId, bool thumbnail)
         |                            ^~~~~~~~~~~~~~~~~~~~~~~~~
-core\desktop.cpp(2601,13): warning GACB2A34A: 'void kernel::desktop::set_wallpaper_grid(uint32_t, uint32_t, uint32_t, uint32_t)' defined but not used [-Wunused-function]
-   2601 | static void set_wallpaper_grid(uint32_t topColor, uint32_t bottomColor, uint32_t gridColor, uint32_t spacing)
+core\desktop.cpp(2722,13): warning GACB2A34A: 'void kernel::desktop::set_wallpaper_grid(uint32_t, uint32_t, uint32_t, uint32_t)' defined but not used [-Wunused-function]
+   2722 | static void set_wallpaper_grid(uint32_t topColor, uint32_t bottomColor, uint32_t gridColor, uint32_t spacing)
         |             ^~~~~~~~~~~~~~~~~~
-core\desktop.cpp(2593,13): warning G476BEFB5: 'void kernel::desktop::toggle_grid()' defined but not used [-Wunused-function]
-   2593 | static void toggle_grid()
+core\desktop.cpp(2714,13): warning G476BEFB5: 'void kernel::desktop::toggle_grid()' defined but not used [-Wunused-function]
+   2714 | static void toggle_grid()
         |             ^~~~~~~~~~~
-core\desktop.cpp(2587,13): warning G5C1A0608: 'void kernel::desktop::toggle_branding()' defined but not used [-Wunused-function]
-   2587 | static void toggle_branding()
+core\desktop.cpp(2708,13): warning G5C1A0608: 'void kernel::desktop::toggle_branding()' defined but not used [-Wunused-function]
+   2708 | static void toggle_branding()
         |             ^~~~~~~~~~~~~~~
-core\desktop.cpp(2580,13): warning GB7E2E7EF: 'void kernel::desktop::set_wallpaper_solid(uint32_t)' defined but not used [-Wunused-function]
-   2580 | static void set_wallpaper_solid(uint32_t color)
+core\desktop.cpp(2701,13): warning GB7E2E7EF: 'void kernel::desktop::set_wallpaper_solid(uint32_t)' defined but not used [-Wunused-function]
+   2701 | static void set_wallpaper_solid(uint32_t color)
         |             ^~~~~~~~~~~~~~~~~~~
-core\desktop.cpp(2572,13): warning G73295BA6: 'void kernel::desktop::set_wallpaper_gradient(uint32_t, uint32_t)' defined but not used [-Wunused-function]
-   2572 | static void set_wallpaper_gradient(uint32_t topColor, uint32_t bottomColor)
+core\desktop.cpp(2693,13): warning G73295BA6: 'void kernel::desktop::set_wallpaper_gradient(uint32_t, uint32_t)' defined but not used [-Wunused-function]
+   2693 | static void set_wallpaper_gradient(uint32_t topColor, uint32_t bottomColor)
         |             ^~~~~~~~~~~~~~~~~~~~~~
-core\desktop.cpp(2496,13): warning GB74D7035: 'void kernel::desktop::add_to_start_menu_recent(const char*)' defined but not used [-Wunused-function]
-   2496 | static void add_to_start_menu_recent(const char* appName)
+core\desktop.cpp(2617,13): warning GB74D7035: 'void kernel::desktop::add_to_start_menu_recent(const char*)' defined but not used [-Wunused-function]
+   2617 | static void add_to_start_menu_recent(const char* appName)
         |             ^~~~~~~~~~~~~~~~~~~~~~~~
-core\desktop.cpp(2260,13): warning GB0A44E1C: 'void kernel::desktop::save_icon_position(int)' defined but not used [-Wunused-function]
-   2260 | static void save_icon_position(int displayIndex)
+core\desktop.cpp(2381,13): warning GB0A44E1C: 'void kernel::desktop::save_icon_position(int)' defined but not used [-Wunused-function]
+   2381 | static void save_icon_position(int displayIndex)
         |             ^~~~~~~~~~~~~~~~~~
-core\desktop.cpp(2209,13): warning GCB72056F: 'void kernel::desktop::unpin_icon(const char*)' defined but not used [-Wunused-function]
-   2209 | static void unpin_icon(const char* appName)
+core\desktop.cpp(2330,13): warning GCB72056F: 'void kernel::desktop::unpin_icon(const char*)' defined but not used [-Wunused-function]
+   2330 | static void unpin_icon(const char* appName)
         |             ^~~~~~~~~~
-core\desktop.cpp(2196,13): warning G6BF0ADBA: 'void kernel::desktop::pin_icon(const char*)' defined but not used [-Wunused-function]
-   2196 | static void pin_icon(const char* appName)
+core\desktop.cpp(2317,13): warning G6BF0ADBA: 'void kernel::desktop::pin_icon(const char*)' defined but not used [-Wunused-function]
+   2317 | static void pin_icon(const char* appName)
         |             ^~~~~~~~
-core\desktop.cpp(544,16): warning G8EACD7BB: 'int32_t kernel::desktop::abs_i32(int32_t)' defined but not used [-Wunused-function]
-    544 | static int32_t abs_i32(int32_t value)
+core\desktop.cpp(665,16): warning G8EACD7BB: 'int32_t kernel::desktop::abs_i32(int32_t)' defined but not used [-Wunused-function]
+    665 | static int32_t abs_i32(int32_t value)
         |                ^~~~~~~
-core\desktop.cpp(432,20): warning GA541B4BD: 'kernel::desktop::s_desktopIconTheme' defined but not used [-Wunused-variable]
-    432 | static const char* s_desktopIconTheme = "Flat";
+core\desktop.cpp(553,20): warning GA541B4BD: 'kernel::desktop::s_desktopIconTheme' defined but not used [-Wunused-variable]
+    553 | static const char* s_desktopIconTheme = "Flat";
         |                    ^~~~~~~~~~~~~~~~~~
-core\desktop.cpp(409,13): warning G27EF45E7: 'kernel::desktop::s_networkConfigUseDHCPforDNS' defined but not used [-Wunused-variable]
-    409 | static bool s_networkConfigUseDHCPforDNS = true;
+core\desktop.cpp(530,13): warning G27EF45E7: 'kernel::desktop::s_networkConfigUseDHCPforDNS' defined but not used [-Wunused-variable]
+    530 | static bool s_networkConfigUseDHCPforDNS = true;
         |             ^~~~~~~~~~~~~~~~~~~~~~~~~~~~
-core\desktop.cpp(407,12): warning GEDB4F6D3: 'kernel::desktop::s_networkConfigFocusField' defined but not used [-Wunused-variable]
-    407 | static int s_networkConfigFocusField = -1;  // Which IP octet field is focused
+core\desktop.cpp(528,12): warning GEDB4F6D3: 'kernel::desktop::s_networkConfigFocusField' defined but not used [-Wunused-variable]
+    528 | static int s_networkConfigFocusField = -1;  // Which IP octet field is focused
         |            ^~~~~~~~~~~~~~~~~~~~~~~~~
-core\desktop.cpp(397,12): warning G075C0907: 'kernel::desktop::s_deviceManagerScroll' defined but not used [-Wunused-variable]
-    397 | static int s_deviceManagerScroll = 0;
+core\desktop.cpp(518,12): warning G075C0907: 'kernel::desktop::s_deviceManagerScroll' defined but not used [-Wunused-variable]
+    518 | static int s_deviceManagerScroll = 0;
         |            ^~~~~~~~~~~~~~~~~~~~~
-core\desktop.cpp(389,20): warning G7B89714F: 'kernel::desktop::s_appModelStatus' defined but not used [-Wunused-variable]
-    389 | static const char* s_appModelStatus = "Ready. Use Up/Down, 1-4, Enter, I, S, Escape.";
+core\desktop.cpp(510,20): warning G7B89714F: 'kernel::desktop::s_appModelStatus' defined but not used [-Wunused-variable]
+    510 | static const char* s_appModelStatus = "Ready. Use Up/Down, 1-4, Enter, I, S, Escape.";
         |                    ^~~~~~~~~~~~~~~~
-core\desktop.cpp(76,13): warning G4F99F0D2: 'bool desktop_starts_with(const char*, const char*)' defined but not used [-Wunused-function]
-     76 | static bool desktop_starts_with(const char* value, const char* prefix)
+core\desktop.cpp(79,13): warning G4F99F0D2: 'bool desktop_starts_with(const char*, const char*)' defined but not used [-Wunused-function]
+     79 | static bool desktop_starts_with(const char* value, const char* prefix)
         |             ^~~~~~~~~~~~~~~~~~~
   In function 'void kernel::desktop::draw_app_model_dialog()',
-      inlined from 'void kernel::desktop::_ZN6kernel7desktop4drawEv.part.0()' at core\desktop.cpp:6079:26:
-core\desktop.cpp(1434,21): warning G3C0033BE: writing 1 byte into a region of size 0 [-Wstringop-overflow=]
-   1434 |         line[pos++] = ' ';
+      inlined from 'void kernel::desktop::_ZN6kernel7desktop4drawEv.part.0()' at core\desktop.cpp:6205:26:
+core\desktop.cpp(1555,21): warning G3C0033BE: writing 1 byte into a region of size 0 [-Wstringop-overflow=]
+   1555 |         line[pos++] = ' ';
         |         ~~~~~~~~~~~~^~~~~
   core\desktop.cpp: In function 'void kernel::desktop::_ZN6kernel7desktop4drawEv.part.0()':
-  core\desktop.cpp:1425:14: note: at offset 128 into destination object 'line' of size 128
-   1425 |         char line[128];
+  core\desktop.cpp:1546:14: note: at offset 128 into destination object 'line' of size 128
+   1546 |         char line[128];
         |              ^~~~
     Compiling desktop_capabilities.cpp...
     Compiling desktop_font.cpp...
