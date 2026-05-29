@@ -29,7 +29,9 @@ function Write-AppModelLaunchShadowEvidence {
         [bool]$RealBranchDesktopSystemObjectRootFolderConfirmed,
         [bool]$RealBranchDesktopStateRestored,
         [bool]$RealBranchFolderDesktopStateRestored,
+        [bool]$RealBranchFolderRestoreVerificationConfirmed,
         [bool]$RealBranchSystemObjectRootFolderDesktopStateRestored,
+        [bool]$RealBranchSystemObjectRootFolderRestoreVerificationConfirmed,
         [bool]$PersistentDesktopStorageWritesAbsent,
         [int]$UnexpectedMismatchRows,
         [string]$SerialLogPath
@@ -49,7 +51,9 @@ function Write-AppModelLaunchShadowEvidence {
     $realBranchDesktopSystemObjectRootFolderConfirmed = if ($RealBranchDesktopSystemObjectRootFolderConfirmed) { "true" } else { "false" }
     $realBranchDesktopStateRestoredFlag = if ($RealBranchDesktopStateRestored) { "true" } else { "false" }
     $realBranchFolderDesktopStateRestoredFlag = if ($RealBranchFolderDesktopStateRestored) { "true" } else { "false" }
+    $realBranchFolderRestoreVerificationConfirmedFlag = if ($RealBranchFolderRestoreVerificationConfirmed) { "true" } else { "false" }
     $realBranchSystemObjectRootFolderDesktopStateRestoredFlag = if ($RealBranchSystemObjectRootFolderDesktopStateRestored) { "true" } else { "false" }
+    $realBranchSystemObjectRootFolderRestoreVerificationConfirmedFlag = if ($RealBranchSystemObjectRootFolderRestoreVerificationConfirmed) { "true" } else { "false" }
     $persistentDesktopStorageWrites = if ($PersistentDesktopStorageWritesAbsent) { "false" } else { "true" }
 
     $lines = @(
@@ -74,7 +78,9 @@ function Write-AppModelLaunchShadowEvidence {
         "realBranchDesktopSystemObjectRootFolderConfirmed=$realBranchDesktopSystemObjectRootFolderConfirmed",
         "realBranchDesktopStateRestored=$realBranchDesktopStateRestoredFlag",
         "realBranchFolderDesktopStateRestored=$realBranchFolderDesktopStateRestoredFlag",
+        "realBranchFolderRestoreVerificationConfirmed=$realBranchFolderRestoreVerificationConfirmedFlag",
         "realBranchSystemObjectRootFolderDesktopStateRestored=$realBranchSystemObjectRootFolderDesktopStateRestoredFlag",
+        "realBranchSystemObjectRootFolderRestoreVerificationConfirmed=$realBranchSystemObjectRootFolderRestoreVerificationConfirmedFlag",
         "persistentDesktopStorageWrites=$persistentDesktopStorageWrites",
         "unexpectedMismatchRows=$UnexpectedMismatchRows",
         "serialLogPath=$SerialLogPath",
@@ -251,6 +257,7 @@ $checks = @(
     "comparison=match",
     "nonFatal=true shadowOnly=true",
     "[APPMODEL-LAUNCHSHADOW-SMOKE] real-branch folder helper before temporary desktop state mutation",
+    "[LaunchShadowRealBranchFolderMutation] phase=before temporaryDesktopStateMutation=true persistentDesktopStorageWrites=false nonFatal=true",
     "[APPMODEL-LAUNCHSHADOW-SMOKE] real-branch folder helper after temporary desktop state restoration",
     "[LaunchShadowRealBranchFolderRestore] realBranchFolderDesktopStateRestored=true",
     "realBranchFolderShortcutSlotRestored=true",
@@ -259,15 +266,18 @@ $checks = @(
     "realBranchFolderNotificationStateRestored=true",
     "realBranchFolderSourceOverrideStateRestored=true",
     "realBranchFolderSuppressLaunchStateRestored=true",
+    "[LaunchShadowRealBranchFolderRestoreVerification] phase=after realBranchFolderDesktopStateRestored=true",
     "persistentDesktopStorageWrites=false",
     "nonFatal=true",
     "[APPMODEL-LAUNCHSHADOW-SMOKE] real-branch system-object root-folder helper before temporary desktop state mutation",
+    "[LaunchShadowRealBranchSystemObjectRootFolderMutation] phase=before temporaryDesktopStateMutation=true persistentDesktopStorageWrites=false nonFatal=true",
     "[APPMODEL-LAUNCHSHADOW-SMOKE] real-branch system-object root-folder helper after temporary desktop state restoration",
     "[LaunchShadowRealBranchSystemObjectRootFolderRestore] realBranchSystemObjectRootFolderDesktopStateRestored=true",
     "realBranchSystemObjectRootFolderVisibleIconStateRestored=true",
     "realBranchSystemObjectRootFolderNotificationStateRestored=true",
     "realBranchSystemObjectRootFolderSourceOverrideStateRestored=true",
     "realBranchSystemObjectRootFolderSuppressLaunchStateRestored=true",
+    "[LaunchShadowRealBranchSystemObjectRootFolderRestoreVerification] phase=after realBranchSystemObjectRootFolderDesktopStateRestored=true",
     "persistentDesktopStorageWrites=false",
     "nonFatal=true",
     "[APPMODEL-LAUNCHSHADOW-SMOKE] folder FileOpen SHADOW_ONLY probe done",
@@ -308,13 +318,17 @@ $checks = @(
     "comparison=match",
     "nonFatal=true shadowOnly=true",
     "[APPMODEL-LAUNCHSHADOW-SMOKE] real-branch helper before temporary desktop state mutation",
+    "[LaunchShadowRealBranchMutation] phase=before temporaryDesktopStateMutation=true persistentDesktopStorageWrites=false nonFatal=true",
     "[APPMODEL-LAUNCHSHADOW-SMOKE] real-branch helper after temporary desktop state restoration",
     "[LaunchShadowRealBranchRestore] realBranchDesktopStateRestored=true",
     "realBranchShortcutSlotRestored=true",
     "realBranchFilesystemSlotRestored=true",
     "realBranchVisibleIconStateRestored=true",
     "realBranchNotificationStateRestored=true",
+    "realBranchSourceOverrideStateRestored=true",
+    "realBranchSuppressLaunchStateRestored=true",
     "realBranchSelectedIconStateRestored=not-checked",
+    "[LaunchShadowRealBranchRestoreVerification] phase=after realBranchDesktopStateRestored=true",
     "persistentDesktopStorageWrites=false",
     "nonFatal=true",
     "[APPMODEL-LAUNCHSHADOW-SMOKE] text FileOpen SHADOW_ONLY probe done",
@@ -418,15 +432,20 @@ $realBranchDesktopSystemObjectRootFolderConfirmed =
     $output.Contains("nonFatal=true shadowOnly=true")
 $realBranchDesktopStateRestored =
     $output.Contains("[APPMODEL-LAUNCHSHADOW-SMOKE] real-branch helper before temporary desktop state mutation") -and
+    $output.Contains("[LaunchShadowRealBranchMutation] phase=before temporaryDesktopStateMutation=true persistentDesktopStorageWrites=false nonFatal=true") -and
     $output.Contains("[APPMODEL-LAUNCHSHADOW-SMOKE] real-branch helper after temporary desktop state restoration") -and
     $output.Contains("[LaunchShadowRealBranchRestore] realBranchDesktopStateRestored=true") -and
     $output.Contains("realBranchShortcutSlotRestored=true") -and
     $output.Contains("realBranchFilesystemSlotRestored=true") -and
     $output.Contains("realBranchVisibleIconStateRestored=true") -and
     $output.Contains("realBranchNotificationStateRestored=true") -and
+    $output.Contains("realBranchSourceOverrideStateRestored=true") -and
+    $output.Contains("realBranchSuppressLaunchStateRestored=true") -and
+    $output.Contains("[LaunchShadowRealBranchRestoreVerification] phase=after realBranchDesktopStateRestored=true") -and
     $output.Contains("realBranchSelectedIconStateRestored=not-checked")
 $realBranchFolderDesktopStateRestored =
     $output.Contains("[APPMODEL-LAUNCHSHADOW-SMOKE] real-branch folder helper before temporary desktop state mutation") -and
+    $output.Contains("[LaunchShadowRealBranchFolderMutation] phase=before temporaryDesktopStateMutation=true persistentDesktopStorageWrites=false nonFatal=true") -and
     $output.Contains("[APPMODEL-LAUNCHSHADOW-SMOKE] real-branch folder helper after temporary desktop state restoration") -and
     $output.Contains("[LaunchShadowRealBranchFolderRestore] realBranchFolderDesktopStateRestored=true") -and
     $output.Contains("realBranchFolderShortcutSlotRestored=true") -and
@@ -435,10 +454,25 @@ $realBranchFolderDesktopStateRestored =
     $output.Contains("realBranchFolderNotificationStateRestored=true") -and
     $output.Contains("realBranchFolderSourceOverrideStateRestored=true") -and
     $output.Contains("realBranchFolderSuppressLaunchStateRestored=true")
+$realBranchFolderRestoreVerificationConfirmed =
+    $output.Contains("[LaunchShadowRealBranchFolderRestoreVerification] phase=after realBranchFolderDesktopStateRestored=true") -and
+    $output.Contains("realBranchFolderShortcutSlotRestored=true") -and
+    $output.Contains("realBranchFolderFilesystemSlotRestored=true") -and
+    $output.Contains("realBranchFolderVisibleIconStateRestored=true") -and
+    $output.Contains("realBranchFolderNotificationStateRestored=true") -and
+    $output.Contains("realBranchFolderSourceOverrideStateRestored=true") -and
+    $output.Contains("realBranchFolderSuppressLaunchStateRestored=true")
 $realBranchSystemObjectRootFolderDesktopStateRestored =
     $output.Contains("[APPMODEL-LAUNCHSHADOW-SMOKE] real-branch system-object root-folder helper before temporary desktop state mutation") -and
+    $output.Contains("[LaunchShadowRealBranchSystemObjectRootFolderMutation] phase=before temporaryDesktopStateMutation=true persistentDesktopStorageWrites=false nonFatal=true") -and
     $output.Contains("[APPMODEL-LAUNCHSHADOW-SMOKE] real-branch system-object root-folder helper after temporary desktop state restoration") -and
     $output.Contains("[LaunchShadowRealBranchSystemObjectRootFolderRestore] realBranchSystemObjectRootFolderDesktopStateRestored=true") -and
+    $output.Contains("realBranchSystemObjectRootFolderVisibleIconStateRestored=true") -and
+    $output.Contains("realBranchSystemObjectRootFolderNotificationStateRestored=true") -and
+    $output.Contains("realBranchSystemObjectRootFolderSourceOverrideStateRestored=true") -and
+    $output.Contains("realBranchSystemObjectRootFolderSuppressLaunchStateRestored=true")
+$realBranchSystemObjectRootFolderRestoreVerificationConfirmed =
+    $output.Contains("[LaunchShadowRealBranchSystemObjectRootFolderRestoreVerification] phase=after realBranchSystemObjectRootFolderDesktopStateRestored=true") -and
     $output.Contains("realBranchSystemObjectRootFolderVisibleIconStateRestored=true") -and
     $output.Contains("realBranchSystemObjectRootFolderNotificationStateRestored=true") -and
     $output.Contains("realBranchSystemObjectRootFolderSourceOverrideStateRestored=true") -and
@@ -466,7 +500,9 @@ if ($failed.Count -eq 0) {
         -RealBranchDesktopSystemObjectRootFolderConfirmed $realBranchDesktopSystemObjectRootFolderConfirmed `
         -RealBranchDesktopStateRestored $realBranchDesktopStateRestored `
         -RealBranchFolderDesktopStateRestored $realBranchFolderDesktopStateRestored `
+        -RealBranchFolderRestoreVerificationConfirmed $realBranchFolderRestoreVerificationConfirmed `
         -RealBranchSystemObjectRootFolderDesktopStateRestored $realBranchSystemObjectRootFolderDesktopStateRestored `
+        -RealBranchSystemObjectRootFolderRestoreVerificationConfirmed $realBranchSystemObjectRootFolderRestoreVerificationConfirmed `
         -PersistentDesktopStorageWritesAbsent $persistentDesktopStorageWritesAbsent `
         -UnexpectedMismatchRows $unexpectedRows.Count `
         -SerialLogPath $serialLog
@@ -490,7 +526,9 @@ Write-AppModelLaunchShadowEvidence -Status "FAIL" `
     -RealBranchDesktopSystemObjectRootFolderConfirmed $realBranchDesktopSystemObjectRootFolderConfirmed `
     -RealBranchDesktopStateRestored $realBranchDesktopStateRestored `
     -RealBranchFolderDesktopStateRestored $realBranchFolderDesktopStateRestored `
+    -RealBranchFolderRestoreVerificationConfirmed $realBranchFolderRestoreVerificationConfirmed `
     -RealBranchSystemObjectRootFolderDesktopStateRestored $realBranchSystemObjectRootFolderDesktopStateRestored `
+    -RealBranchSystemObjectRootFolderRestoreVerificationConfirmed $realBranchSystemObjectRootFolderRestoreVerificationConfirmed `
     -PersistentDesktopStorageWritesAbsent $persistentDesktopStorageWritesAbsent `
     -UnexpectedMismatchRows $unexpectedRows.Count `
     -SerialLogPath $serialLog

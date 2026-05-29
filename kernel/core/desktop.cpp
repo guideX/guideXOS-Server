@@ -6451,6 +6451,7 @@ void run_launch_shadow_folder_fileopen_smoke()
     }
 
     serial::puts("[APPMODEL-LAUNCHSHADOW-SMOKE] real-branch folder helper before temporary desktop state mutation\n");
+    serial::puts("[LaunchShadowRealBranchFolderMutation] phase=before temporaryDesktopStateMutation=true persistentDesktopStorageWrites=false nonFatal=true\n");
     s_launchShadowSuppressRealBranchLaunch = true;
 
     desktop_str_copy(s_desktopShortcutLabels[shortcutSlot], "Root", (int)sizeof(s_desktopShortcutLabels[shortcutSlot]));
@@ -6493,6 +6494,7 @@ void run_launch_shadow_folder_fileopen_smoke()
     s_notification = savedNotification;
 
     serial::puts("[APPMODEL-LAUNCHSHADOW-SMOKE] real-branch system-object root-folder helper before temporary desktop state mutation\n");
+    serial::puts("[LaunchShadowRealBranchSystemObjectRootFolderMutation] phase=before temporaryDesktopStateMutation=true persistentDesktopStorageWrites=false nonFatal=true\n");
     s_visibleIconCount = 1;
     s_visibleIconIndices[0] = systemObjectIconIdx >= 0 ? systemObjectIconIdx : 1;
     s_launchShadowFileOpenSourceOverride = "RealBranchDesktopSystemObjectRootFolder";
@@ -6547,8 +6549,36 @@ void run_launch_shadow_folder_fileopen_smoke()
     serial::puts(suppressLaunchStateRestored ? "true" : "false");
     serial::puts(" persistentDesktopStorageWrites=false");
     serial::puts(" nonFatal=true\n");
+    serial::puts("[LaunchShadowRealBranchFolderRestoreVerification] phase=after realBranchFolderDesktopStateRestored=");
+    serial::puts(desktopStateRestored ? "true" : "false");
+    serial::puts(" realBranchFolderShortcutSlotRestored=");
+    serial::puts(shortcutSlotRestored ? "true" : "false");
+    serial::puts(" realBranchFolderFilesystemSlotRestored=");
+    serial::puts(filesystemSlotRestored ? "true" : "false");
+    serial::puts(" realBranchFolderVisibleIconStateRestored=");
+    serial::puts(visibleIconStateRestored ? "true" : "false");
+    serial::puts(" realBranchFolderNotificationStateRestored=");
+    serial::puts(notificationStateRestored ? "true" : "false");
+    serial::puts(" realBranchFolderSourceOverrideStateRestored=");
+    serial::puts(overrideStateRestored ? "true" : "false");
+    serial::puts(" realBranchFolderSuppressLaunchStateRestored=");
+    serial::puts(suppressLaunchStateRestored ? "true" : "false");
+    serial::puts(" persistentDesktopStorageWrites=false");
+    serial::puts(" nonFatal=true\n");
     serial::puts("[APPMODEL-LAUNCHSHADOW-SMOKE] real-branch system-object root-folder helper after temporary desktop state restoration\n");
     serial::puts("[LaunchShadowRealBranchSystemObjectRootFolderRestore] realBranchSystemObjectRootFolderDesktopStateRestored=");
+    serial::puts(systemObjectRootFolderDesktopStateRestored ? "true" : "false");
+    serial::puts(" realBranchSystemObjectRootFolderVisibleIconStateRestored=");
+    serial::puts(visibleIconStateRestored ? "true" : "false");
+    serial::puts(" realBranchSystemObjectRootFolderNotificationStateRestored=");
+    serial::puts(notificationStateRestored ? "true" : "false");
+    serial::puts(" realBranchSystemObjectRootFolderSourceOverrideStateRestored=");
+    serial::puts(overrideStateRestored ? "true" : "false");
+    serial::puts(" realBranchSystemObjectRootFolderSuppressLaunchStateRestored=");
+    serial::puts(suppressLaunchStateRestored ? "true" : "false");
+    serial::puts(" persistentDesktopStorageWrites=false");
+    serial::puts(" nonFatal=true\n");
+    serial::puts("[LaunchShadowRealBranchSystemObjectRootFolderRestoreVerification] phase=after realBranchSystemObjectRootFolderDesktopStateRestored=");
     serial::puts(systemObjectRootFolderDesktopStateRestored ? "true" : "false");
     serial::puts(" realBranchSystemObjectRootFolderVisibleIconStateRestored=");
     serial::puts(visibleIconStateRestored ? "true" : "false");
@@ -6598,6 +6628,7 @@ void run_launch_shadow_text_fileopen_smoke()
     }
 
     serial::puts("[APPMODEL-LAUNCHSHADOW-SMOKE] real-branch helper before temporary desktop state mutation\n");
+    serial::puts("[LaunchShadowRealBranchMutation] phase=before temporaryDesktopStateMutation=true persistentDesktopStorageWrites=false nonFatal=true\n");
     s_launchShadowSuppressRealBranchLaunch = true;
 
     desktop_str_copy(s_desktopShortcutLabels[shortcutSlot], "test.txt", (int)sizeof(s_desktopShortcutLabels[shortcutSlot]));
@@ -6670,6 +6701,23 @@ void run_launch_shadow_text_fileopen_smoke()
 
     serial::puts("[APPMODEL-LAUNCHSHADOW-SMOKE] real-branch helper after temporary desktop state restoration\n");
     serial::puts("[LaunchShadowRealBranchRestore] realBranchDesktopStateRestored=");
+    serial::puts(desktopStateRestored ? "true" : "false");
+    serial::puts(" realBranchShortcutSlotRestored=");
+    serial::puts(shortcutSlotRestored ? "true" : "false");
+    serial::puts(" realBranchFilesystemSlotRestored=");
+    serial::puts(filesystemSlotRestored ? "true" : "false");
+    serial::puts(" realBranchVisibleIconStateRestored=");
+    serial::puts(visibleIconStateRestored ? "true" : "false");
+    serial::puts(" realBranchNotificationStateRestored=");
+    serial::puts(notificationStateRestored ? "true" : "false");
+    serial::puts(" realBranchSourceOverrideStateRestored=");
+    serial::puts(overrideStateRestored ? "true" : "false");
+    serial::puts(" realBranchSuppressLaunchStateRestored=");
+    serial::puts(suppressLaunchStateRestored ? "true" : "false");
+    serial::puts(" realBranchSelectedIconStateRestored=not-checked");
+    serial::puts(" persistentDesktopStorageWrites=false");
+    serial::puts(" nonFatal=true\n");
+    serial::puts("[LaunchShadowRealBranchRestoreVerification] phase=after realBranchDesktopStateRestored=");
     serial::puts(desktopStateRestored ? "true" : "false");
     serial::puts(" realBranchShortcutSlotRestored=");
     serial::puts(shortcutSlotRestored ? "true" : "false");
