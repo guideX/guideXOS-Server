@@ -22,6 +22,10 @@ function Write-AppModelLaunchShadowEvidence {
         [bool]$TextFileOpenShadowOnlyConfirmed,
         [bool]$DesktopShortcutTextFileShadowOnlyConfirmed,
         [bool]$DesktopFilesystemTextFileShadowOnlyConfirmed,
+        [bool]$RealBranchDesktopShortcutTextFileConfirmed,
+        [bool]$RealBranchDesktopFilesystemTextFileConfirmed,
+        [bool]$RealBranchDesktopStateRestored,
+        [bool]$PersistentDesktopStorageWritesAbsent,
         [int]$UnexpectedMismatchRows,
         [string]$SerialLogPath
     )
@@ -33,6 +37,10 @@ function Write-AppModelLaunchShadowEvidence {
     $textFileOpenConfirmed = if ($TextFileOpenShadowOnlyConfirmed) { "true" } else { "false" }
     $desktopShortcutTextFileConfirmed = if ($DesktopShortcutTextFileShadowOnlyConfirmed) { "true" } else { "false" }
     $desktopFilesystemTextFileConfirmed = if ($DesktopFilesystemTextFileShadowOnlyConfirmed) { "true" } else { "false" }
+    $realBranchDesktopShortcutTextFileConfirmed = if ($RealBranchDesktopShortcutTextFileConfirmed) { "true" } else { "false" }
+    $realBranchDesktopFilesystemTextFileConfirmed = if ($RealBranchDesktopFilesystemTextFileConfirmed) { "true" } else { "false" }
+    $realBranchDesktopStateRestoredFlag = if ($RealBranchDesktopStateRestored) { "true" } else { "false" }
+    $persistentDesktopStorageWrites = if ($PersistentDesktopStorageWritesAbsent) { "false" } else { "true" }
 
     $lines = @(
         "[AppModelTypedDispatchGateEvidence]",
@@ -49,6 +57,10 @@ function Write-AppModelLaunchShadowEvidence {
         "textFileOpenShadowOnlyConfirmed=$textFileOpenConfirmed",
         "desktopShortcutTextFileShadowOnlyConfirmed=$desktopShortcutTextFileConfirmed",
         "desktopFilesystemTextFileShadowOnlyConfirmed=$desktopFilesystemTextFileConfirmed",
+        "realBranchDesktopShortcutTextFileConfirmed=$realBranchDesktopShortcutTextFileConfirmed",
+        "realBranchDesktopFilesystemTextFileConfirmed=$realBranchDesktopFilesystemTextFileConfirmed",
+        "realBranchDesktopStateRestored=$realBranchDesktopStateRestoredFlag",
+        "persistentDesktopStorageWrites=$persistentDesktopStorageWrites",
         "unexpectedMismatchRows=$UnexpectedMismatchRows",
         "serialLogPath=$SerialLogPath",
         "nonFatal=true",
@@ -225,6 +237,30 @@ $checks = @(
     "adapterLegacyDispatch=Notepad",
     "comparison=match",
     "nonFatal=true shadowOnly=true",
+    "source=RealBranchDesktopShortcutTextFile",
+    "handler=Notepad",
+    "path=/test.txt",
+    "resolvedType=FileOpen",
+    "adapterLegacyDispatch=Notepad",
+    "comparison=match",
+    "nonFatal=true shadowOnly=true",
+    "source=RealBranchDesktopFilesystemTextFile",
+    "handler=Notepad",
+    "path=/test.txt",
+    "resolvedType=FileOpen",
+    "adapterLegacyDispatch=Notepad",
+    "comparison=match",
+    "nonFatal=true shadowOnly=true",
+    "[APPMODEL-LAUNCHSHADOW-SMOKE] real-branch helper before temporary desktop state mutation",
+    "[APPMODEL-LAUNCHSHADOW-SMOKE] real-branch helper after temporary desktop state restoration",
+    "[LaunchShadowRealBranchRestore] realBranchDesktopStateRestored=true",
+    "realBranchShortcutSlotRestored=true",
+    "realBranchFilesystemSlotRestored=true",
+    "realBranchVisibleIconStateRestored=true",
+    "realBranchNotificationStateRestored=true",
+    "realBranchSelectedIconStateRestored=not-checked",
+    "persistentDesktopStorageWrites=false",
+    "nonFatal=true",
     "[APPMODEL-LAUNCHSHADOW-SMOKE] text FileOpen SHADOW_ONLY probe done",
     "[APPMODEL-LAUNCHSHADOW-SMOKE] done"
 )
@@ -284,6 +320,33 @@ $desktopFilesystemTextFileShadowOnlyConfirmed =
     $output.Contains("adapterLegacyDispatch=Notepad") -and
     $output.Contains("comparison=match") -and
     $output.Contains("nonFatal=true shadowOnly=true")
+$realBranchDesktopShortcutTextFileConfirmed =
+    $output.Contains("source=RealBranchDesktopShortcutTextFile") -and
+    $output.Contains("handler=Notepad") -and
+    $output.Contains("path=/test.txt") -and
+    $output.Contains("resolvedType=FileOpen") -and
+    $output.Contains("adapterLegacyDispatch=Notepad") -and
+    $output.Contains("comparison=match") -and
+    $output.Contains("nonFatal=true shadowOnly=true")
+$realBranchDesktopFilesystemTextFileConfirmed =
+    $output.Contains("source=RealBranchDesktopFilesystemTextFile") -and
+    $output.Contains("handler=Notepad") -and
+    $output.Contains("path=/test.txt") -and
+    $output.Contains("resolvedType=FileOpen") -and
+    $output.Contains("adapterLegacyDispatch=Notepad") -and
+    $output.Contains("comparison=match") -and
+    $output.Contains("nonFatal=true shadowOnly=true")
+$realBranchDesktopStateRestored =
+    $output.Contains("[APPMODEL-LAUNCHSHADOW-SMOKE] real-branch helper before temporary desktop state mutation") -and
+    $output.Contains("[APPMODEL-LAUNCHSHADOW-SMOKE] real-branch helper after temporary desktop state restoration") -and
+    $output.Contains("[LaunchShadowRealBranchRestore] realBranchDesktopStateRestored=true") -and
+    $output.Contains("realBranchShortcutSlotRestored=true") -and
+    $output.Contains("realBranchFilesystemSlotRestored=true") -and
+    $output.Contains("realBranchVisibleIconStateRestored=true") -and
+    $output.Contains("realBranchNotificationStateRestored=true") -and
+    $output.Contains("realBranchSelectedIconStateRestored=not-checked")
+$persistentDesktopStorageWritesAbsent =
+    $output.Contains("persistentDesktopStorageWrites=false")
 
 if ($unexpectedRows.Count -ne 1) {
     $failed += "Expected exactly one unexpected-mismatch row, found $($unexpectedRows.Count)"
@@ -298,6 +361,10 @@ if ($failed.Count -eq 0) {
         -TextFileOpenShadowOnlyConfirmed $textFileOpenShadowOnlyConfirmed `
         -DesktopShortcutTextFileShadowOnlyConfirmed $desktopShortcutTextFileShadowOnlyConfirmed `
         -DesktopFilesystemTextFileShadowOnlyConfirmed $desktopFilesystemTextFileShadowOnlyConfirmed `
+        -RealBranchDesktopShortcutTextFileConfirmed $realBranchDesktopShortcutTextFileConfirmed `
+        -RealBranchDesktopFilesystemTextFileConfirmed $realBranchDesktopFilesystemTextFileConfirmed `
+        -RealBranchDesktopStateRestored $realBranchDesktopStateRestored `
+        -PersistentDesktopStorageWritesAbsent $persistentDesktopStorageWritesAbsent `
         -UnexpectedMismatchRows $unexpectedRows.Count `
         -SerialLogPath $serialLog
     Write-Host "App-model launch shadow kernel smoke PASS. Serial log: $serialLog"
@@ -313,6 +380,10 @@ Write-AppModelLaunchShadowEvidence -Status "FAIL" `
     -TextFileOpenShadowOnlyConfirmed $textFileOpenShadowOnlyConfirmed `
     -DesktopShortcutTextFileShadowOnlyConfirmed $desktopShortcutTextFileShadowOnlyConfirmed `
     -DesktopFilesystemTextFileShadowOnlyConfirmed $desktopFilesystemTextFileShadowOnlyConfirmed `
+    -RealBranchDesktopShortcutTextFileConfirmed $realBranchDesktopShortcutTextFileConfirmed `
+    -RealBranchDesktopFilesystemTextFileConfirmed $realBranchDesktopFilesystemTextFileConfirmed `
+    -RealBranchDesktopStateRestored $realBranchDesktopStateRestored `
+    -PersistentDesktopStorageWritesAbsent $persistentDesktopStorageWritesAbsent `
     -UnexpectedMismatchRows $unexpectedRows.Count `
     -SerialLogPath $serialLog
 Write-Host "App-model launch shadow kernel smoke FAIL. Serial log: $serialLog" -ForegroundColor Red
