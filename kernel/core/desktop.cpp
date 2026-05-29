@@ -6416,6 +6416,120 @@ void run_launch_shadow_folder_fileopen_smoke()
 {
     serial::puts("[APPMODEL-LAUNCHSHADOW-SMOKE] issuing folder FileOpen SHADOW_ONLY probe\n");
     log_bare_metal_fileopen_shadow_only_observation("SmokeFolderFileOpen", "Files", "/");
+
+    const int shortcutSlot = 0;
+    const int shortcutIconIdx = kDesktopShortcutStart + shortcutSlot;
+    const int filesystemSlot = 0;
+    const int filesystemIconIdx = kSystemDesktopIconCount + filesystemSlot;
+
+    DesktopIcon savedShortcutIcon = s_desktopIcons[shortcutIconIdx];
+    DesktopIcon savedFilesystemIcon = s_desktopIcons[filesystemIconIdx];
+    char savedShortcutLabel[sizeof(s_desktopShortcutLabels[shortcutSlot])];
+    char savedShortcutType[sizeof(s_desktopShortcutTypes[shortcutSlot])];
+    char savedShortcutTarget[sizeof(s_desktopShortcutTargetAppIds[shortcutSlot])];
+    char savedFilesystemLabel[sizeof(s_desktopFileLabels[filesystemSlot])];
+    char savedFilesystemPath[sizeof(s_desktopFilePaths[filesystemSlot])];
+    NotificationToast savedNotification = s_notification;
+    int savedVisibleIconCount = s_visibleIconCount;
+    int savedVisibleIconIndices[kDesktopIconCount];
+
+    desktop_str_copy(savedShortcutLabel, s_desktopShortcutLabels[shortcutSlot], (int)sizeof(savedShortcutLabel));
+    desktop_str_copy(savedShortcutType, s_desktopShortcutTypes[shortcutSlot], (int)sizeof(savedShortcutType));
+    desktop_str_copy(savedShortcutTarget, s_desktopShortcutTargetAppIds[shortcutSlot], (int)sizeof(savedShortcutTarget));
+    desktop_str_copy(savedFilesystemLabel, s_desktopFileLabels[filesystemSlot], (int)sizeof(savedFilesystemLabel));
+    desktop_str_copy(savedFilesystemPath, s_desktopFilePaths[filesystemSlot], (int)sizeof(savedFilesystemPath));
+    for (int i = 0; i < kDesktopIconCount; ++i) {
+        savedVisibleIconIndices[i] = s_visibleIconIndices[i];
+    }
+
+    serial::puts("[APPMODEL-LAUNCHSHADOW-SMOKE] real-branch folder helper before temporary desktop state mutation\n");
+    s_launchShadowSuppressRealBranchLaunch = true;
+
+    desktop_str_copy(s_desktopShortcutLabels[shortcutSlot], "Root", (int)sizeof(s_desktopShortcutLabels[shortcutSlot]));
+    desktop_str_copy(s_desktopShortcutTypes[shortcutSlot], "Folder", (int)sizeof(s_desktopShortcutTypes[shortcutSlot]));
+    desktop_str_copy(s_desktopShortcutTargetAppIds[shortcutSlot], "/", (int)sizeof(s_desktopShortcutTargetAppIds[shortcutSlot]));
+    s_desktopIcons[shortcutIconIdx].label = s_desktopShortcutLabels[shortcutSlot];
+    desktop_str_copy(s_desktopIcons[shortcutIconIdx].path, "/", (int)sizeof(s_desktopIcons[shortcutIconIdx].path));
+    s_desktopIcons[shortcutIconIdx].pinned = true;
+    s_desktopIcons[shortcutIconIdx].recent = false;
+    s_desktopIcons[shortcutIconIdx].savedX = -1;
+    s_desktopIcons[shortcutIconIdx].savedY = -1;
+    s_desktopIcons[shortcutIconIdx].kind = DesktopItemKind::Shortcut;
+    s_desktopIcons[shortcutIconIdx].systemObject = DesktopSystemObjectKind::None;
+    s_desktopIcons[shortcutIconIdx].isDirectory = true;
+    s_desktopIcons[shortcutIconIdx].removable = true;
+    s_desktopIcons[shortcutIconIdx].color = 0xFFF0C75E;
+    s_visibleIconCount = 1;
+    s_visibleIconIndices[0] = shortcutIconIdx;
+    s_launchShadowFileOpenSourceOverride = "RealBranchDesktopShortcutFolder";
+    show_icon_notification(0);
+    s_notification = savedNotification;
+
+    desktop_str_copy(s_desktopFileLabels[filesystemSlot], "Root", (int)sizeof(s_desktopFileLabels[filesystemSlot]));
+    desktop_str_copy(s_desktopFilePaths[filesystemSlot], "/", (int)sizeof(s_desktopFilePaths[filesystemSlot]));
+    s_desktopIcons[filesystemIconIdx].label = s_desktopFileLabels[filesystemSlot];
+    desktop_str_copy(s_desktopIcons[filesystemIconIdx].path, "/", (int)sizeof(s_desktopIcons[filesystemIconIdx].path));
+    s_desktopIcons[filesystemIconIdx].pinned = true;
+    s_desktopIcons[filesystemIconIdx].recent = false;
+    s_desktopIcons[filesystemIconIdx].savedX = -1;
+    s_desktopIcons[filesystemIconIdx].savedY = -1;
+    s_desktopIcons[filesystemIconIdx].kind = DesktopItemKind::FilesystemEntry;
+    s_desktopIcons[filesystemIconIdx].systemObject = DesktopSystemObjectKind::None;
+    s_desktopIcons[filesystemIconIdx].isDirectory = true;
+    s_desktopIcons[filesystemIconIdx].removable = true;
+    s_desktopIcons[filesystemIconIdx].color = 0xFFF0C75E;
+    s_visibleIconCount = 1;
+    s_visibleIconIndices[0] = filesystemIconIdx;
+    s_launchShadowFileOpenSourceOverride = "RealBranchDesktopFilesystemFolder";
+    show_icon_notification(0);
+    s_notification = savedNotification;
+
+    s_launchShadowFileOpenSourceOverride = nullptr;
+    s_launchShadowSuppressRealBranchLaunch = false;
+    s_desktopIcons[shortcutIconIdx] = savedShortcutIcon;
+    s_desktopIcons[filesystemIconIdx] = savedFilesystemIcon;
+    desktop_str_copy(s_desktopShortcutLabels[shortcutSlot], savedShortcutLabel, (int)sizeof(s_desktopShortcutLabels[shortcutSlot]));
+    desktop_str_copy(s_desktopShortcutTypes[shortcutSlot], savedShortcutType, (int)sizeof(s_desktopShortcutTypes[shortcutSlot]));
+    desktop_str_copy(s_desktopShortcutTargetAppIds[shortcutSlot], savedShortcutTarget, (int)sizeof(s_desktopShortcutTargetAppIds[shortcutSlot]));
+    desktop_str_copy(s_desktopFileLabels[filesystemSlot], savedFilesystemLabel, (int)sizeof(s_desktopFileLabels[filesystemSlot]));
+    desktop_str_copy(s_desktopFilePaths[filesystemSlot], savedFilesystemPath, (int)sizeof(s_desktopFilePaths[filesystemSlot]));
+    s_visibleIconCount = savedVisibleIconCount;
+    for (int i = 0; i < kDesktopIconCount; ++i) {
+        s_visibleIconIndices[i] = savedVisibleIconIndices[i];
+    }
+    s_notification = savedNotification;
+
+    const bool shortcutSlotRestored = desktop_str_eq(s_desktopShortcutLabels[shortcutSlot], savedShortcutLabel) &&
+        desktop_str_eq(s_desktopShortcutTypes[shortcutSlot], savedShortcutType) &&
+        desktop_str_eq(s_desktopShortcutTargetAppIds[shortcutSlot], savedShortcutTarget) &&
+        desktop_icon_state_matches(s_desktopIcons[shortcutIconIdx], savedShortcutIcon);
+    const bool filesystemSlotRestored = desktop_str_eq(s_desktopFileLabels[filesystemSlot], savedFilesystemLabel) &&
+        desktop_str_eq(s_desktopFilePaths[filesystemSlot], savedFilesystemPath) &&
+        desktop_icon_state_matches(s_desktopIcons[filesystemIconIdx], savedFilesystemIcon);
+    const bool visibleIconStateRestored = visible_icon_state_matches(savedVisibleIconCount, savedVisibleIconIndices);
+    const bool notificationStateRestored = notification_toast_matches(s_notification, savedNotification);
+    const bool overrideStateRestored = s_launchShadowFileOpenSourceOverride == nullptr;
+    const bool suppressLaunchStateRestored = !s_launchShadowSuppressRealBranchLaunch;
+    const bool desktopStateRestored = shortcutSlotRestored && filesystemSlotRestored && visibleIconStateRestored &&
+        notificationStateRestored && overrideStateRestored && suppressLaunchStateRestored;
+
+    serial::puts("[APPMODEL-LAUNCHSHADOW-SMOKE] real-branch folder helper after temporary desktop state restoration\n");
+    serial::puts("[LaunchShadowRealBranchFolderRestore] realBranchFolderDesktopStateRestored=");
+    serial::puts(desktopStateRestored ? "true" : "false");
+    serial::puts(" realBranchFolderShortcutSlotRestored=");
+    serial::puts(shortcutSlotRestored ? "true" : "false");
+    serial::puts(" realBranchFolderFilesystemSlotRestored=");
+    serial::puts(filesystemSlotRestored ? "true" : "false");
+    serial::puts(" realBranchFolderVisibleIconStateRestored=");
+    serial::puts(visibleIconStateRestored ? "true" : "false");
+    serial::puts(" realBranchFolderNotificationStateRestored=");
+    serial::puts(notificationStateRestored ? "true" : "false");
+    serial::puts(" realBranchFolderSourceOverrideStateRestored=");
+    serial::puts(overrideStateRestored ? "true" : "false");
+    serial::puts(" realBranchFolderSuppressLaunchStateRestored=");
+    serial::puts(suppressLaunchStateRestored ? "true" : "false");
+    serial::puts(" persistentDesktopStorageWrites=false");
+    serial::puts(" nonFatal=true\n");
     serial::puts("[APPMODEL-LAUNCHSHADOW-SMOKE] folder FileOpen SHADOW_ONLY probe done\n");
 }
 
@@ -6893,6 +7007,7 @@ static void show_icon_notification(int displayIndex)
             if (targetIsDir) {
 #if defined(GXOS_APPMODEL_TYPED_DISPATCH_SHADOW_ONLY) && defined(GXOS_BARE_METAL)
                 log_bare_metal_fileopen_shadow_only_observation(bare_metal_active_fileopen_shadow_source("DesktopShortcutFolder"), "Files", target);
+                if (bare_metal_should_suppress_real_branch_launch()) return;
 #endif
                 // SHADOW_ONLY FileOpen observation above is diagnostic-only; "Files"
                 // remains the authoritative handler and target remains the unmodified path.
@@ -6943,6 +7058,7 @@ static void show_icon_notification(int displayIndex)
             serial::puts("\n");
 #if defined(GXOS_APPMODEL_TYPED_DISPATCH_SHADOW_ONLY) && defined(GXOS_BARE_METAL)
             log_bare_metal_fileopen_shadow_only_observation(bare_metal_active_fileopen_shadow_source("DesktopFilesystemFolder"), "Files", icon.path);
+            if (bare_metal_should_suppress_real_branch_launch()) return;
 #endif
             // SHADOW_ONLY FileOpen observation above is diagnostic-only; "Files"
             // remains the authoritative handler and icon.path remains unmodified.

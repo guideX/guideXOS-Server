@@ -24,7 +24,10 @@ function Write-AppModelLaunchShadowEvidence {
         [bool]$DesktopFilesystemTextFileShadowOnlyConfirmed,
         [bool]$RealBranchDesktopShortcutTextFileConfirmed,
         [bool]$RealBranchDesktopFilesystemTextFileConfirmed,
+        [bool]$RealBranchDesktopShortcutFolderConfirmed,
+        [bool]$RealBranchDesktopFilesystemFolderConfirmed,
         [bool]$RealBranchDesktopStateRestored,
+        [bool]$RealBranchFolderDesktopStateRestored,
         [bool]$PersistentDesktopStorageWritesAbsent,
         [int]$UnexpectedMismatchRows,
         [string]$SerialLogPath
@@ -39,7 +42,10 @@ function Write-AppModelLaunchShadowEvidence {
     $desktopFilesystemTextFileConfirmed = if ($DesktopFilesystemTextFileShadowOnlyConfirmed) { "true" } else { "false" }
     $realBranchDesktopShortcutTextFileConfirmed = if ($RealBranchDesktopShortcutTextFileConfirmed) { "true" } else { "false" }
     $realBranchDesktopFilesystemTextFileConfirmed = if ($RealBranchDesktopFilesystemTextFileConfirmed) { "true" } else { "false" }
+    $realBranchDesktopShortcutFolderConfirmed = if ($RealBranchDesktopShortcutFolderConfirmed) { "true" } else { "false" }
+    $realBranchDesktopFilesystemFolderConfirmed = if ($RealBranchDesktopFilesystemFolderConfirmed) { "true" } else { "false" }
     $realBranchDesktopStateRestoredFlag = if ($RealBranchDesktopStateRestored) { "true" } else { "false" }
+    $realBranchFolderDesktopStateRestoredFlag = if ($RealBranchFolderDesktopStateRestored) { "true" } else { "false" }
     $persistentDesktopStorageWrites = if ($PersistentDesktopStorageWritesAbsent) { "false" } else { "true" }
 
     $lines = @(
@@ -59,7 +65,10 @@ function Write-AppModelLaunchShadowEvidence {
         "desktopFilesystemTextFileShadowOnlyConfirmed=$desktopFilesystemTextFileConfirmed",
         "realBranchDesktopShortcutTextFileConfirmed=$realBranchDesktopShortcutTextFileConfirmed",
         "realBranchDesktopFilesystemTextFileConfirmed=$realBranchDesktopFilesystemTextFileConfirmed",
+        "realBranchDesktopShortcutFolderConfirmed=$realBranchDesktopShortcutFolderConfirmed",
+        "realBranchDesktopFilesystemFolderConfirmed=$realBranchDesktopFilesystemFolderConfirmed",
         "realBranchDesktopStateRestored=$realBranchDesktopStateRestoredFlag",
+        "realBranchFolderDesktopStateRestored=$realBranchFolderDesktopStateRestoredFlag",
         "persistentDesktopStorageWrites=$persistentDesktopStorageWrites",
         "unexpectedMismatchRows=$UnexpectedMismatchRows",
         "serialLogPath=$SerialLogPath",
@@ -214,6 +223,31 @@ $checks = @(
     "adapterLegacyDispatch=Files",
     "comparison=match",
     "nonFatal=true shadowOnly=true",
+    "source=RealBranchDesktopShortcutFolder",
+    "handler=Files",
+    "path=/",
+    "resolvedType=FileOpen",
+    "adapterLegacyDispatch=Files",
+    "comparison=match",
+    "nonFatal=true shadowOnly=true",
+    "source=RealBranchDesktopFilesystemFolder",
+    "handler=Files",
+    "path=/",
+    "resolvedType=FileOpen",
+    "adapterLegacyDispatch=Files",
+    "comparison=match",
+    "nonFatal=true shadowOnly=true",
+    "[APPMODEL-LAUNCHSHADOW-SMOKE] real-branch folder helper before temporary desktop state mutation",
+    "[APPMODEL-LAUNCHSHADOW-SMOKE] real-branch folder helper after temporary desktop state restoration",
+    "[LaunchShadowRealBranchFolderRestore] realBranchFolderDesktopStateRestored=true",
+    "realBranchFolderShortcutSlotRestored=true",
+    "realBranchFolderFilesystemSlotRestored=true",
+    "realBranchFolderVisibleIconStateRestored=true",
+    "realBranchFolderNotificationStateRestored=true",
+    "realBranchFolderSourceOverrideStateRestored=true",
+    "realBranchFolderSuppressLaunchStateRestored=true",
+    "persistentDesktopStorageWrites=false",
+    "nonFatal=true",
     "[APPMODEL-LAUNCHSHADOW-SMOKE] folder FileOpen SHADOW_ONLY probe done",
     "[APPMODEL-LAUNCHSHADOW-SMOKE] issuing text FileOpen SHADOW_ONLY probe",
     "source=SmokeTextFileOpen",
@@ -336,6 +370,22 @@ $realBranchDesktopFilesystemTextFileConfirmed =
     $output.Contains("adapterLegacyDispatch=Notepad") -and
     $output.Contains("comparison=match") -and
     $output.Contains("nonFatal=true shadowOnly=true")
+$realBranchDesktopShortcutFolderConfirmed =
+    $output.Contains("source=RealBranchDesktopShortcutFolder") -and
+    $output.Contains("handler=Files") -and
+    $output.Contains("path=/") -and
+    $output.Contains("resolvedType=FileOpen") -and
+    $output.Contains("adapterLegacyDispatch=Files") -and
+    $output.Contains("comparison=match") -and
+    $output.Contains("nonFatal=true shadowOnly=true")
+$realBranchDesktopFilesystemFolderConfirmed =
+    $output.Contains("source=RealBranchDesktopFilesystemFolder") -and
+    $output.Contains("handler=Files") -and
+    $output.Contains("path=/") -and
+    $output.Contains("resolvedType=FileOpen") -and
+    $output.Contains("adapterLegacyDispatch=Files") -and
+    $output.Contains("comparison=match") -and
+    $output.Contains("nonFatal=true shadowOnly=true")
 $realBranchDesktopStateRestored =
     $output.Contains("[APPMODEL-LAUNCHSHADOW-SMOKE] real-branch helper before temporary desktop state mutation") -and
     $output.Contains("[APPMODEL-LAUNCHSHADOW-SMOKE] real-branch helper after temporary desktop state restoration") -and
@@ -345,6 +395,16 @@ $realBranchDesktopStateRestored =
     $output.Contains("realBranchVisibleIconStateRestored=true") -and
     $output.Contains("realBranchNotificationStateRestored=true") -and
     $output.Contains("realBranchSelectedIconStateRestored=not-checked")
+$realBranchFolderDesktopStateRestored =
+    $output.Contains("[APPMODEL-LAUNCHSHADOW-SMOKE] real-branch folder helper before temporary desktop state mutation") -and
+    $output.Contains("[APPMODEL-LAUNCHSHADOW-SMOKE] real-branch folder helper after temporary desktop state restoration") -and
+    $output.Contains("[LaunchShadowRealBranchFolderRestore] realBranchFolderDesktopStateRestored=true") -and
+    $output.Contains("realBranchFolderShortcutSlotRestored=true") -and
+    $output.Contains("realBranchFolderFilesystemSlotRestored=true") -and
+    $output.Contains("realBranchFolderVisibleIconStateRestored=true") -and
+    $output.Contains("realBranchFolderNotificationStateRestored=true") -and
+    $output.Contains("realBranchFolderSourceOverrideStateRestored=true") -and
+    $output.Contains("realBranchFolderSuppressLaunchStateRestored=true")
 $persistentDesktopStorageWritesAbsent =
     $output.Contains("persistentDesktopStorageWrites=false")
 
@@ -363,7 +423,10 @@ if ($failed.Count -eq 0) {
         -DesktopFilesystemTextFileShadowOnlyConfirmed $desktopFilesystemTextFileShadowOnlyConfirmed `
         -RealBranchDesktopShortcutTextFileConfirmed $realBranchDesktopShortcutTextFileConfirmed `
         -RealBranchDesktopFilesystemTextFileConfirmed $realBranchDesktopFilesystemTextFileConfirmed `
+        -RealBranchDesktopShortcutFolderConfirmed $realBranchDesktopShortcutFolderConfirmed `
+        -RealBranchDesktopFilesystemFolderConfirmed $realBranchDesktopFilesystemFolderConfirmed `
         -RealBranchDesktopStateRestored $realBranchDesktopStateRestored `
+        -RealBranchFolderDesktopStateRestored $realBranchFolderDesktopStateRestored `
         -PersistentDesktopStorageWritesAbsent $persistentDesktopStorageWritesAbsent `
         -UnexpectedMismatchRows $unexpectedRows.Count `
         -SerialLogPath $serialLog
@@ -382,7 +445,10 @@ Write-AppModelLaunchShadowEvidence -Status "FAIL" `
     -DesktopFilesystemTextFileShadowOnlyConfirmed $desktopFilesystemTextFileShadowOnlyConfirmed `
     -RealBranchDesktopShortcutTextFileConfirmed $realBranchDesktopShortcutTextFileConfirmed `
     -RealBranchDesktopFilesystemTextFileConfirmed $realBranchDesktopFilesystemTextFileConfirmed `
+    -RealBranchDesktopShortcutFolderConfirmed $realBranchDesktopShortcutFolderConfirmed `
+    -RealBranchDesktopFilesystemFolderConfirmed $realBranchDesktopFilesystemFolderConfirmed `
     -RealBranchDesktopStateRestored $realBranchDesktopStateRestored `
+    -RealBranchFolderDesktopStateRestored $realBranchFolderDesktopStateRestored `
     -PersistentDesktopStorageWritesAbsent $persistentDesktopStorageWritesAbsent `
     -UnexpectedMismatchRows $unexpectedRows.Count `
     -SerialLogPath $serialLog
