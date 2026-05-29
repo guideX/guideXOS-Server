@@ -51,7 +51,9 @@ namespace gxos {
 	/// GUI Namespace
     /// </summary>
     namespace gui {
-
+        /// <summary>
+		/// Desktop service implementation and app registry management. This is the authoritative source for all registered desktop apps, which are collected from various sources and synthesized with built-in app metadata to power launch resolution and diagnostics.
+        /// </summary>
         static apps::AppRegistry s_appRegistry;
         static bool s_appRegistryInitialized = false;
         static size_t s_appRegistryInitializeCount = 0;
