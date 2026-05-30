@@ -6430,7 +6430,11 @@ void run_launch_shadow_folder_fileopen_smoke()
     char savedFilesystemLabel[sizeof(s_desktopFileLabels[filesystemSlot])];
     char savedFilesystemPath[sizeof(s_desktopFilePaths[filesystemSlot])];
     NotificationToast savedNotification = s_notification;
+    int savedSelectedIcon = s_selectedIcon;
+    int savedLastSelectedIconId = s_lastSelectedIconId;
+    int savedFocusedSelectedIconId = s_focusedSelectedIconId;
     int savedVisibleIconCount = s_visibleIconCount;
+    bool savedSelectedIconIds[kDesktopIconCount];
     int savedVisibleIconIndices[kDesktopIconCount];
     int systemObjectIconIdx = -1;
 
@@ -6440,6 +6444,7 @@ void run_launch_shadow_folder_fileopen_smoke()
     desktop_str_copy(savedFilesystemLabel, s_desktopFileLabels[filesystemSlot], (int)sizeof(savedFilesystemLabel));
     desktop_str_copy(savedFilesystemPath, s_desktopFilePaths[filesystemSlot], (int)sizeof(savedFilesystemPath));
     for (int i = 0; i < kDesktopIconCount; ++i) {
+        savedSelectedIconIds[i] = s_selectedIconIds[i];
         savedVisibleIconIndices[i] = s_visibleIconIndices[i];
     }
     for (int i = 0; i < kSystemDesktopIconCount; ++i) {
@@ -6510,8 +6515,12 @@ void run_launch_shadow_folder_fileopen_smoke()
     desktop_str_copy(s_desktopShortcutTargetAppIds[shortcutSlot], savedShortcutTarget, (int)sizeof(s_desktopShortcutTargetAppIds[shortcutSlot]));
     desktop_str_copy(s_desktopFileLabels[filesystemSlot], savedFilesystemLabel, (int)sizeof(s_desktopFileLabels[filesystemSlot]));
     desktop_str_copy(s_desktopFilePaths[filesystemSlot], savedFilesystemPath, (int)sizeof(s_desktopFilePaths[filesystemSlot]));
+    s_selectedIcon = savedSelectedIcon;
+    s_lastSelectedIconId = savedLastSelectedIconId;
+    s_focusedSelectedIconId = savedFocusedSelectedIconId;
     s_visibleIconCount = savedVisibleIconCount;
     for (int i = 0; i < kDesktopIconCount; ++i) {
+        s_selectedIconIds[i] = savedSelectedIconIds[i];
         s_visibleIconIndices[i] = savedVisibleIconIndices[i];
     }
     s_notification = savedNotification;
@@ -6525,10 +6534,22 @@ void run_launch_shadow_folder_fileopen_smoke()
         desktop_icon_state_matches(s_desktopIcons[filesystemIconIdx], savedFilesystemIcon);
     const bool visibleIconStateRestored = visible_icon_state_matches(savedVisibleIconCount, savedVisibleIconIndices);
     const bool notificationStateRestored = notification_toast_matches(s_notification, savedNotification);
+    bool selectedIconIdsRestored = true;
+    for (int i = 0; i < kDesktopIconCount; ++i) {
+        if (s_selectedIconIds[i] != savedSelectedIconIds[i]) {
+            selectedIconIdsRestored = false;
+            break;
+        }
+    }
+    const bool selectedIconStateRestored =
+        s_selectedIcon == savedSelectedIcon &&
+        s_lastSelectedIconId == savedLastSelectedIconId &&
+        s_focusedSelectedIconId == savedFocusedSelectedIconId &&
+        selectedIconIdsRestored;
     const bool overrideStateRestored = s_launchShadowFileOpenSourceOverride == nullptr;
     const bool suppressLaunchStateRestored = !s_launchShadowSuppressRealBranchLaunch;
     const bool desktopStateRestored = shortcutSlotRestored && filesystemSlotRestored && visibleIconStateRestored &&
-        notificationStateRestored && overrideStateRestored && suppressLaunchStateRestored;
+        notificationStateRestored && selectedIconStateRestored && overrideStateRestored && suppressLaunchStateRestored;
     const bool systemObjectRootFolderDesktopStateRestored = visibleIconStateRestored && notificationStateRestored &&
         overrideStateRestored && suppressLaunchStateRestored;
 
@@ -6615,7 +6636,11 @@ void run_launch_shadow_text_fileopen_smoke()
     char savedFilesystemLabel[sizeof(s_desktopFileLabels[filesystemSlot])];
     char savedFilesystemPath[sizeof(s_desktopFilePaths[filesystemSlot])];
     NotificationToast savedNotification = s_notification;
+    int savedSelectedIcon = s_selectedIcon;
+    int savedLastSelectedIconId = s_lastSelectedIconId;
+    int savedFocusedSelectedIconId = s_focusedSelectedIconId;
     int savedVisibleIconCount = s_visibleIconCount;
+    bool savedSelectedIconIds[kDesktopIconCount];
     int savedVisibleIconIndices[kDesktopIconCount];
 
     desktop_str_copy(savedShortcutLabel, s_desktopShortcutLabels[shortcutSlot], (int)sizeof(savedShortcutLabel));
@@ -6624,6 +6649,7 @@ void run_launch_shadow_text_fileopen_smoke()
     desktop_str_copy(savedFilesystemLabel, s_desktopFileLabels[filesystemSlot], (int)sizeof(savedFilesystemLabel));
     desktop_str_copy(savedFilesystemPath, s_desktopFilePaths[filesystemSlot], (int)sizeof(savedFilesystemPath));
     for (int i = 0; i < kDesktopIconCount; ++i) {
+        savedSelectedIconIds[i] = s_selectedIconIds[i];
         savedVisibleIconIndices[i] = s_visibleIconIndices[i];
     }
 
@@ -6679,8 +6705,12 @@ void run_launch_shadow_text_fileopen_smoke()
     desktop_str_copy(s_desktopShortcutTargetAppIds[shortcutSlot], savedShortcutTarget, (int)sizeof(s_desktopShortcutTargetAppIds[shortcutSlot]));
     desktop_str_copy(s_desktopFileLabels[filesystemSlot], savedFilesystemLabel, (int)sizeof(s_desktopFileLabels[filesystemSlot]));
     desktop_str_copy(s_desktopFilePaths[filesystemSlot], savedFilesystemPath, (int)sizeof(s_desktopFilePaths[filesystemSlot]));
+    s_selectedIcon = savedSelectedIcon;
+    s_lastSelectedIconId = savedLastSelectedIconId;
+    s_focusedSelectedIconId = savedFocusedSelectedIconId;
     s_visibleIconCount = savedVisibleIconCount;
     for (int i = 0; i < kDesktopIconCount; ++i) {
+        s_selectedIconIds[i] = savedSelectedIconIds[i];
         s_visibleIconIndices[i] = savedVisibleIconIndices[i];
     }
     s_notification = savedNotification;
@@ -6694,10 +6724,22 @@ void run_launch_shadow_text_fileopen_smoke()
         desktop_icon_state_matches(s_desktopIcons[filesystemIconIdx], savedFilesystemIcon);
     const bool visibleIconStateRestored = visible_icon_state_matches(savedVisibleIconCount, savedVisibleIconIndices);
     const bool notificationStateRestored = notification_toast_matches(s_notification, savedNotification);
+    bool selectedIconIdsRestored = true;
+    for (int i = 0; i < kDesktopIconCount; ++i) {
+        if (s_selectedIconIds[i] != savedSelectedIconIds[i]) {
+            selectedIconIdsRestored = false;
+            break;
+        }
+    }
+    const bool selectedIconStateRestored =
+        s_selectedIcon == savedSelectedIcon &&
+        s_lastSelectedIconId == savedLastSelectedIconId &&
+        s_focusedSelectedIconId == savedFocusedSelectedIconId &&
+        selectedIconIdsRestored;
     const bool overrideStateRestored = s_launchShadowFileOpenSourceOverride == nullptr;
     const bool suppressLaunchStateRestored = !s_launchShadowSuppressRealBranchLaunch;
     const bool desktopStateRestored = shortcutSlotRestored && filesystemSlotRestored && visibleIconStateRestored &&
-        notificationStateRestored && overrideStateRestored && suppressLaunchStateRestored;
+        notificationStateRestored && selectedIconStateRestored && overrideStateRestored && suppressLaunchStateRestored;
 
     serial::puts("[APPMODEL-LAUNCHSHADOW-SMOKE] real-branch helper after temporary desktop state restoration\n");
     serial::puts("[LaunchShadowRealBranchRestore] realBranchDesktopStateRestored=");
@@ -6714,7 +6756,8 @@ void run_launch_shadow_text_fileopen_smoke()
     serial::puts(overrideStateRestored ? "true" : "false");
     serial::puts(" realBranchSuppressLaunchStateRestored=");
     serial::puts(suppressLaunchStateRestored ? "true" : "false");
-    serial::puts(" realBranchSelectedIconStateRestored=not-checked");
+    serial::puts(" realBranchSelectedIconStateRestored=");
+    serial::puts(selectedIconStateRestored ? "true" : "false");
     serial::puts(" persistentDesktopStorageWrites=false");
     serial::puts(" nonFatal=true\n");
     serial::puts("[LaunchShadowRealBranchRestoreVerification] phase=after realBranchDesktopStateRestored=");
@@ -6731,7 +6774,8 @@ void run_launch_shadow_text_fileopen_smoke()
     serial::puts(overrideStateRestored ? "true" : "false");
     serial::puts(" realBranchSuppressLaunchStateRestored=");
     serial::puts(suppressLaunchStateRestored ? "true" : "false");
-    serial::puts(" realBranchSelectedIconStateRestored=not-checked");
+    serial::puts(" realBranchSelectedIconStateRestored=");
+    serial::puts(selectedIconStateRestored ? "true" : "false");
     serial::puts(" persistentDesktopStorageWrites=false");
     serial::puts(" nonFatal=true\n");
     serial::puts("[APPMODEL-LAUNCHSHADOW-SMOKE] text FileOpen SHADOW_ONLY probe done\n");

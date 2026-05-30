@@ -327,7 +327,7 @@ $checks = @(
     "realBranchNotificationStateRestored=true",
     "realBranchSourceOverrideStateRestored=true",
     "realBranchSuppressLaunchStateRestored=true",
-    "realBranchSelectedIconStateRestored=not-checked",
+    "realBranchSelectedIconStateRestored=true",
     "[LaunchShadowRealBranchRestoreVerification] phase=after realBranchDesktopStateRestored=true",
     "persistentDesktopStorageWrites=false",
     "nonFatal=true",
@@ -442,7 +442,7 @@ $realBranchDesktopStateRestored =
     $output.Contains("realBranchSourceOverrideStateRestored=true") -and
     $output.Contains("realBranchSuppressLaunchStateRestored=true") -and
     $output.Contains("[LaunchShadowRealBranchRestoreVerification] phase=after realBranchDesktopStateRestored=true") -and
-    $output.Contains("realBranchSelectedIconStateRestored=not-checked")
+    $output.Contains("realBranchSelectedIconStateRestored=true")
 $realBranchFolderDesktopStateRestored =
     $output.Contains("[APPMODEL-LAUNCHSHADOW-SMOKE] real-branch folder helper before temporary desktop state mutation") -and
     $output.Contains("[LaunchShadowRealBranchFolderMutation] phase=before temporaryDesktopStateMutation=true persistentDesktopStorageWrites=false nonFatal=true") -and
