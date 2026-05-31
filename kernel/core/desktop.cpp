@@ -6928,6 +6928,68 @@ static void run_launch_shadow_start_menu_files_smoke()
     serial::puts(" nonFatal=true\n");
 }
 
+static void run_launch_shadow_start_menu_console_smoke()
+{
+    const bool savedStartMenuOpen = s_startMenuOpen;
+    const NotificationToast savedNotification = s_notification;
+    const char* savedStaticAppSourceOverride = s_launchShadowStaticAppSourceOverride;
+    const bool savedSuppressRealBranchLaunch = s_launchShadowSuppressRealBranchLaunch;
+    const shell::ShellState savedShellState = shell::get_state();
+    const bool savedShellActive = s_shellActive;
+    const bool savedShellMinimized = s_shellMinimized;
+
+    serial::puts("[APPMODEL-LAUNCHSHADOW-SMOKE] real-branch Start Menu Console helper before temporary Start Menu state mutation\n");
+    serial::puts("[LaunchShadowRealBranchStartMenuConsoleMutation] phase=before temporaryStartMenuStateMutation=true persistentDesktopStorageWrites=false nonFatal=true\n");
+    s_startMenuOpen = true;
+    s_launchShadowStaticAppSourceOverride = "RealBranchStartMenuConsole";
+    s_launchShadowSuppressRealBranchLaunch = true;
+    show_start_menu_notification("Console");
+
+    s_startMenuOpen = savedStartMenuOpen;
+    s_notification = savedNotification;
+    s_launchShadowStaticAppSourceOverride = savedStaticAppSourceOverride;
+    s_launchShadowSuppressRealBranchLaunch = savedSuppressRealBranchLaunch;
+
+    const bool startMenuStateRestored = s_startMenuOpen == savedStartMenuOpen;
+    const bool notificationStateRestored = notification_toast_matches(s_notification, savedNotification);
+    const bool sourceOverrideStateRestored = s_launchShadowStaticAppSourceOverride == savedStaticAppSourceOverride;
+    const bool suppressLaunchStateRestored = s_launchShadowSuppressRealBranchLaunch == savedSuppressRealBranchLaunch;
+    const bool shellActionStateRestored = shell::get_state() == savedShellState &&
+        s_shellActive == savedShellActive && s_shellMinimized == savedShellMinimized;
+    const bool stateRestored = startMenuStateRestored && notificationStateRestored &&
+        sourceOverrideStateRestored && suppressLaunchStateRestored && shellActionStateRestored;
+
+    serial::puts("[APPMODEL-LAUNCHSHADOW-SMOKE] real-branch Start Menu Console helper after temporary Start Menu state restoration\n");
+    serial::puts("[LaunchShadowRealBranchStartMenuConsoleRestore] realBranchStartMenuConsoleStateRestored=");
+    serial::puts(stateRestored ? "true" : "false");
+    serial::puts(" realBranchStartMenuConsoleMenuOpenStateRestored=");
+    serial::puts(startMenuStateRestored ? "true" : "false");
+    serial::puts(" realBranchStartMenuConsoleNotificationStateRestored=");
+    serial::puts(notificationStateRestored ? "true" : "false");
+    serial::puts(" realBranchStartMenuConsoleSourceOverrideStateRestored=");
+    serial::puts(sourceOverrideStateRestored ? "true" : "false");
+    serial::puts(" realBranchStartMenuConsoleSuppressLaunchStateRestored=");
+    serial::puts(suppressLaunchStateRestored ? "true" : "false");
+    serial::puts(" realBranchStartMenuConsoleShellActionStateRestored=");
+    serial::puts(shellActionStateRestored ? "true" : "false");
+    serial::puts(" persistentDesktopStorageWrites=false");
+    serial::puts(" nonFatal=true\n");
+    serial::puts("[LaunchShadowRealBranchStartMenuConsoleRestoreVerification] phase=after realBranchStartMenuConsoleStateRestored=");
+    serial::puts(stateRestored ? "true" : "false");
+    serial::puts(" realBranchStartMenuConsoleMenuOpenStateRestored=");
+    serial::puts(startMenuStateRestored ? "true" : "false");
+    serial::puts(" realBranchStartMenuConsoleNotificationStateRestored=");
+    serial::puts(notificationStateRestored ? "true" : "false");
+    serial::puts(" realBranchStartMenuConsoleSourceOverrideStateRestored=");
+    serial::puts(sourceOverrideStateRestored ? "true" : "false");
+    serial::puts(" realBranchStartMenuConsoleSuppressLaunchStateRestored=");
+    serial::puts(suppressLaunchStateRestored ? "true" : "false");
+    serial::puts(" realBranchStartMenuConsoleShellActionStateRestored=");
+    serial::puts(shellActionStateRestored ? "true" : "false");
+    serial::puts(" persistentDesktopStorageWrites=false");
+    serial::puts(" nonFatal=true\n");
+}
+
 void run_launch_shadow_text_fileopen_smoke()
 {
     serial::puts("[APPMODEL-LAUNCHSHADOW-SMOKE] issuing text FileOpen SHADOW_ONLY probe\n");
@@ -7096,6 +7158,7 @@ void run_launch_shadow_text_fileopen_smoke()
     run_launch_shadow_start_menu_smoke();
     run_launch_shadow_start_menu_built_in_apps_smoke();
     run_launch_shadow_start_menu_files_smoke();
+    run_launch_shadow_start_menu_console_smoke();
 }
 #endif
 
@@ -7805,6 +7868,12 @@ static void show_start_menu_notification(const char* label)
     
     if (isConsole) {
         s_startMenuOpen = false;
+#if defined(GXOS_APPMODEL_LAUNCHSHADOW_SMOKE_ACTIVE) && defined(GXOS_APPMODEL_TYPED_DISPATCH_SHADOW_ONLY) && defined(GXOS_BARE_METAL)
+        if (bare_metal_should_suppress_real_branch_launch()) {
+            log_bare_metal_static_app_shadow_only_observation(label, bare_metal_active_static_app_shadow_source("StartMenu"));
+            return;
+        }
+#endif
         shell::open();
         s_shellActive = true;
         s_shellMinimized = false;

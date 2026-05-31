@@ -33,6 +33,7 @@ function Write-AppModelLaunchShadowEvidence {
         [bool]$RealBranchStartMenuNotepadConfirmed,
         [bool]$RealBranchStartMenuBuiltInAppsConfirmed,
         [bool]$RealBranchStartMenuFilesConfirmed,
+        [bool]$RealBranchStartMenuConsoleConfirmed,
         [bool]$RealBranchDesktopStateRestored,
         [bool]$RealBranchFolderDesktopStateRestored,
         [bool]$RealBranchFolderRestoreVerificationConfirmed,
@@ -50,6 +51,8 @@ function Write-AppModelLaunchShadowEvidence {
         [bool]$RealBranchStartMenuBuiltInAppsRestoreVerificationConfirmed,
         [bool]$RealBranchStartMenuFilesStateRestored,
         [bool]$RealBranchStartMenuFilesRestoreVerificationConfirmed,
+        [bool]$RealBranchStartMenuConsoleStateRestored,
+        [bool]$RealBranchStartMenuConsoleRestoreVerificationConfirmed,
         [bool]$PersistentDesktopStorageWritesAbsent,
         [int]$UnexpectedMismatchRows,
         [string]$SerialLogPath
@@ -73,6 +76,7 @@ function Write-AppModelLaunchShadowEvidence {
     $realBranchStartMenuNotepadConfirmedFlag = if ($RealBranchStartMenuNotepadConfirmed) { "true" } else { "false" }
     $realBranchStartMenuBuiltInAppsConfirmedFlag = if ($RealBranchStartMenuBuiltInAppsConfirmed) { "true" } else { "false" }
     $realBranchStartMenuFilesConfirmedFlag = if ($RealBranchStartMenuFilesConfirmed) { "true" } else { "false" }
+    $realBranchStartMenuConsoleConfirmedFlag = if ($RealBranchStartMenuConsoleConfirmed) { "true" } else { "false" }
     $realBranchDesktopStateRestoredFlag = if ($RealBranchDesktopStateRestored) { "true" } else { "false" }
     $realBranchFolderDesktopStateRestoredFlag = if ($RealBranchFolderDesktopStateRestored) { "true" } else { "false" }
     $realBranchFolderRestoreVerificationConfirmedFlag = if ($RealBranchFolderRestoreVerificationConfirmed) { "true" } else { "false" }
@@ -90,6 +94,8 @@ function Write-AppModelLaunchShadowEvidence {
     $realBranchStartMenuBuiltInAppsRestoreVerificationConfirmedFlag = if ($RealBranchStartMenuBuiltInAppsRestoreVerificationConfirmed) { "true" } else { "false" }
     $realBranchStartMenuFilesStateRestoredFlag = if ($RealBranchStartMenuFilesStateRestored) { "true" } else { "false" }
     $realBranchStartMenuFilesRestoreVerificationConfirmedFlag = if ($RealBranchStartMenuFilesRestoreVerificationConfirmed) { "true" } else { "false" }
+    $realBranchStartMenuConsoleStateRestoredFlag = if ($RealBranchStartMenuConsoleStateRestored) { "true" } else { "false" }
+    $realBranchStartMenuConsoleRestoreVerificationConfirmedFlag = if ($RealBranchStartMenuConsoleRestoreVerificationConfirmed) { "true" } else { "false" }
     $persistentDesktopStorageWrites = if ($PersistentDesktopStorageWritesAbsent) { "false" } else { "true" }
 
     $lines = @(
@@ -118,6 +124,7 @@ function Write-AppModelLaunchShadowEvidence {
         "realBranchStartMenuNotepadConfirmed=$realBranchStartMenuNotepadConfirmedFlag",
         "realBranchStartMenuBuiltInAppsConfirmed=$realBranchStartMenuBuiltInAppsConfirmedFlag",
         "realBranchStartMenuFilesConfirmed=$realBranchStartMenuFilesConfirmedFlag",
+        "realBranchStartMenuConsoleConfirmed=$realBranchStartMenuConsoleConfirmedFlag",
         "realBranchDesktopStateRestored=$realBranchDesktopStateRestoredFlag",
         "realBranchFolderDesktopStateRestored=$realBranchFolderDesktopStateRestoredFlag",
         "realBranchFolderRestoreVerificationConfirmed=$realBranchFolderRestoreVerificationConfirmedFlag",
@@ -135,6 +142,8 @@ function Write-AppModelLaunchShadowEvidence {
         "realBranchStartMenuBuiltInAppsRestoreVerificationConfirmed=$realBranchStartMenuBuiltInAppsRestoreVerificationConfirmedFlag",
         "realBranchStartMenuFilesStateRestored=$realBranchStartMenuFilesStateRestoredFlag",
         "realBranchStartMenuFilesRestoreVerificationConfirmed=$realBranchStartMenuFilesRestoreVerificationConfirmedFlag",
+        "realBranchStartMenuConsoleStateRestored=$realBranchStartMenuConsoleStateRestoredFlag",
+        "realBranchStartMenuConsoleRestoreVerificationConfirmed=$realBranchStartMenuConsoleRestoreVerificationConfirmedFlag",
         "persistentDesktopStorageWrites=$persistentDesktopStorageWrites",
         "unexpectedMismatchRows=$UnexpectedMismatchRows",
         "serialLogPath=$SerialLogPath",
@@ -471,6 +480,28 @@ $checks = @(
     "[LaunchShadowRealBranchStartMenuFilesRestoreVerification] phase=after realBranchStartMenuFilesStateRestored=true",
     "persistentDesktopStorageWrites=false",
     "nonFatal=true",
+    "[APPMODEL-LAUNCHSHADOW-SMOKE] real-branch Start Menu Console helper before temporary Start Menu state mutation",
+    "[LaunchShadowRealBranchStartMenuConsoleMutation] phase=before temporaryStartMenuStateMutation=true persistentDesktopStorageWrites=false nonFatal=true",
+    "source=RealBranchStartMenuConsole",
+    "uiLabel=Console",
+    "actualDispatch=Console",
+    "resolvedType=ShellAction",
+    "appId=",
+    "resolvedDispatch=Console",
+    "typedDispatchCandidate=Console",
+    "typedDispatchCandidateMatchesActual=true",
+    "typedDispatchCandidateComparison=match",
+    "nonFatal=true shadowOnly=true",
+    "[APPMODEL-LAUNCHSHADOW-SMOKE] real-branch Start Menu Console helper after temporary Start Menu state restoration",
+    "[LaunchShadowRealBranchStartMenuConsoleRestore] realBranchStartMenuConsoleStateRestored=true",
+    "realBranchStartMenuConsoleMenuOpenStateRestored=true",
+    "realBranchStartMenuConsoleNotificationStateRestored=true",
+    "realBranchStartMenuConsoleSourceOverrideStateRestored=true",
+    "realBranchStartMenuConsoleSuppressLaunchStateRestored=true",
+    "realBranchStartMenuConsoleShellActionStateRestored=true",
+    "[LaunchShadowRealBranchStartMenuConsoleRestoreVerification] phase=after realBranchStartMenuConsoleStateRestored=true",
+    "persistentDesktopStorageWrites=false",
+    "nonFatal=true",
     "[APPMODEL-LAUNCHSHADOW-SMOKE] folder FileOpen SHADOW_ONLY probe done",
     "[APPMODEL-LAUNCHSHADOW-SMOKE] issuing text FileOpen SHADOW_ONLY probe",
     "source=SmokeTextFileOpen",
@@ -665,6 +696,8 @@ $realBranchStartMenuBuiltInAppsConfirmed =
     [regex]::IsMatch($output, 'source=RealBranchStartMenuDiskManager uiLabel=DiskManager actualDispatch=DiskManager resolvedType=BuiltInApp appId=gxos\.builtin\.diskmanager resolvedDispatch=DiskManager typedDispatchCandidate=DiskManager typedDispatchCandidateMatchesActual=true typedDispatchCandidateComparison=match .* nonFatal=true shadowOnly=true')
 $realBranchStartMenuFilesConfirmed =
     [regex]::IsMatch($output, 'source=RealBranchStartMenuFiles uiLabel=Files actualDispatch=Files resolvedType=LegacyAlias appId=gxos\.builtin\.fileexplorer resolvedDispatch=Files typedDispatchCandidate=Files typedDispatchCandidateMatchesActual=true typedDispatchCandidateComparison=match .* nonFatal=true shadowOnly=true')
+$realBranchStartMenuConsoleConfirmed =
+    [regex]::IsMatch($output, 'source=RealBranchStartMenuConsole uiLabel=Console actualDispatch=Console resolvedType=ShellAction appId= resolvedDispatch=Console typedDispatchCandidate=Console typedDispatchCandidateMatchesActual=true typedDispatchCandidateComparison=match .* nonFatal=true shadowOnly=true')
 $realBranchDesktopStateRestored =
     $output.Contains("[APPMODEL-LAUNCHSHADOW-SMOKE] real-branch helper before temporary desktop state mutation") -and
     $output.Contains("[LaunchShadowRealBranchMutation] phase=before temporaryDesktopStateMutation=true persistentDesktopStorageWrites=false nonFatal=true") -and
@@ -812,6 +845,23 @@ $realBranchStartMenuFilesRestoreVerificationConfirmed =
     $output.Contains("realBranchStartMenuFilesNotificationStateRestored=true") -and
     $output.Contains("realBranchStartMenuFilesSourceOverrideStateRestored=true") -and
     $output.Contains("realBranchStartMenuFilesSuppressLaunchStateRestored=true")
+$realBranchStartMenuConsoleStateRestored =
+    $output.Contains("[APPMODEL-LAUNCHSHADOW-SMOKE] real-branch Start Menu Console helper before temporary Start Menu state mutation") -and
+    $output.Contains("[LaunchShadowRealBranchStartMenuConsoleMutation] phase=before temporaryStartMenuStateMutation=true persistentDesktopStorageWrites=false nonFatal=true") -and
+    $output.Contains("[APPMODEL-LAUNCHSHADOW-SMOKE] real-branch Start Menu Console helper after temporary Start Menu state restoration") -and
+    $output.Contains("[LaunchShadowRealBranchStartMenuConsoleRestore] realBranchStartMenuConsoleStateRestored=true") -and
+    $output.Contains("realBranchStartMenuConsoleMenuOpenStateRestored=true") -and
+    $output.Contains("realBranchStartMenuConsoleNotificationStateRestored=true") -and
+    $output.Contains("realBranchStartMenuConsoleSourceOverrideStateRestored=true") -and
+    $output.Contains("realBranchStartMenuConsoleSuppressLaunchStateRestored=true") -and
+    $output.Contains("realBranchStartMenuConsoleShellActionStateRestored=true")
+$realBranchStartMenuConsoleRestoreVerificationConfirmed =
+    $output.Contains("[LaunchShadowRealBranchStartMenuConsoleRestoreVerification] phase=after realBranchStartMenuConsoleStateRestored=true") -and
+    $output.Contains("realBranchStartMenuConsoleMenuOpenStateRestored=true") -and
+    $output.Contains("realBranchStartMenuConsoleNotificationStateRestored=true") -and
+    $output.Contains("realBranchStartMenuConsoleSourceOverrideStateRestored=true") -and
+    $output.Contains("realBranchStartMenuConsoleSuppressLaunchStateRestored=true") -and
+    $output.Contains("realBranchStartMenuConsoleShellActionStateRestored=true")
 $persistentDesktopStorageWritesAbsent =
     $output.Contains("persistentDesktopStorageWrites=false")
 
@@ -836,6 +886,15 @@ if (-not $realBranchStartMenuFilesStateRestored) {
 if (-not $realBranchStartMenuFilesRestoreVerificationConfirmed) {
     $failed += "Start Menu Files post-restore verification evidence was incomplete"
 }
+if (-not $realBranchStartMenuConsoleConfirmed) {
+    $failed += "Start Menu Console real-branch row did not match the expected ShellAction dispatch evidence"
+}
+if (-not $realBranchStartMenuConsoleStateRestored) {
+    $failed += "Start Menu Console state restoration evidence was incomplete"
+}
+if (-not $realBranchStartMenuConsoleRestoreVerificationConfirmed) {
+    $failed += "Start Menu Console post-restore verification evidence was incomplete"
+}
 
 if ($failed.Count -eq 0) {
     Write-AppModelLaunchShadowEvidence -Status "PASS" `
@@ -857,6 +916,7 @@ if ($failed.Count -eq 0) {
         -RealBranchStartMenuNotepadConfirmed $realBranchStartMenuNotepadConfirmed `
         -RealBranchStartMenuBuiltInAppsConfirmed $realBranchStartMenuBuiltInAppsConfirmed `
         -RealBranchStartMenuFilesConfirmed $realBranchStartMenuFilesConfirmed `
+        -RealBranchStartMenuConsoleConfirmed $realBranchStartMenuConsoleConfirmed `
         -RealBranchDesktopStateRestored $realBranchDesktopStateRestored `
         -RealBranchFolderDesktopStateRestored $realBranchFolderDesktopStateRestored `
         -RealBranchFolderRestoreVerificationConfirmed $realBranchFolderRestoreVerificationConfirmed `
@@ -874,6 +934,8 @@ if ($failed.Count -eq 0) {
         -RealBranchStartMenuBuiltInAppsRestoreVerificationConfirmed $realBranchStartMenuBuiltInAppsRestoreVerificationConfirmed `
         -RealBranchStartMenuFilesStateRestored $realBranchStartMenuFilesStateRestored `
         -RealBranchStartMenuFilesRestoreVerificationConfirmed $realBranchStartMenuFilesRestoreVerificationConfirmed `
+        -RealBranchStartMenuConsoleStateRestored $realBranchStartMenuConsoleStateRestored `
+        -RealBranchStartMenuConsoleRestoreVerificationConfirmed $realBranchStartMenuConsoleRestoreVerificationConfirmed `
         -PersistentDesktopStorageWritesAbsent $persistentDesktopStorageWritesAbsent `
         -UnexpectedMismatchRows $unexpectedRows.Count `
         -SerialLogPath $serialLog
@@ -901,6 +963,7 @@ Write-AppModelLaunchShadowEvidence -Status "FAIL" `
     -RealBranchStartMenuNotepadConfirmed $realBranchStartMenuNotepadConfirmed `
     -RealBranchStartMenuBuiltInAppsConfirmed $realBranchStartMenuBuiltInAppsConfirmed `
     -RealBranchStartMenuFilesConfirmed $realBranchStartMenuFilesConfirmed `
+    -RealBranchStartMenuConsoleConfirmed $realBranchStartMenuConsoleConfirmed `
     -RealBranchDesktopStateRestored $realBranchDesktopStateRestored `
     -RealBranchFolderDesktopStateRestored $realBranchFolderDesktopStateRestored `
     -RealBranchFolderRestoreVerificationConfirmed $realBranchFolderRestoreVerificationConfirmed `
@@ -918,6 +981,8 @@ Write-AppModelLaunchShadowEvidence -Status "FAIL" `
     -RealBranchStartMenuBuiltInAppsRestoreVerificationConfirmed $realBranchStartMenuBuiltInAppsRestoreVerificationConfirmed `
     -RealBranchStartMenuFilesStateRestored $realBranchStartMenuFilesStateRestored `
     -RealBranchStartMenuFilesRestoreVerificationConfirmed $realBranchStartMenuFilesRestoreVerificationConfirmed `
+    -RealBranchStartMenuConsoleStateRestored $realBranchStartMenuConsoleStateRestored `
+    -RealBranchStartMenuConsoleRestoreVerificationConfirmed $realBranchStartMenuConsoleRestoreVerificationConfirmed `
     -PersistentDesktopStorageWritesAbsent $persistentDesktopStorageWritesAbsent `
     -UnexpectedMismatchRows $unexpectedRows.Count `
     -SerialLogPath $serialLog
