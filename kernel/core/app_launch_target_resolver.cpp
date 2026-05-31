@@ -99,8 +99,9 @@ static void fill_shell_label(gxos::apps::LaunchTarget& target, const char* label
         target.diagnosticReason = "Desktop system object opens File Manager at the root path";
     } else if (text_equals(label, "Control Panel") || text_equals(label, "Settings") || text_equals(label, "System Settings")) {
         // The bare-metal right-column Start Menu still dispatches "Settings"
-        // literally. Keep this DisplayOptions candidate diagnostic-only until
-        // that legacy path is intentionally migrated.
+        // literally, while "Control Panel" opens embedded panel state. Keep
+        // this DisplayOptions candidate diagnostic-only until those legacy
+        // paths are intentionally migrated.
         target.dispatchLaunchName = "DisplayOptions";
         target.diagnosticReason = "Bare-metal settings/control labels are shell/system affordances, not app metadata identities";
     } else {

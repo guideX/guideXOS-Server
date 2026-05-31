@@ -72,6 +72,7 @@ Navigator::SelectionPosition Navigator::s_selectionAnchor;
 Navigator::SelectionPosition Navigator::s_selectionFocus;
 std::string Navigator::s_navigatorClipboard;
 std::string Navigator::s_clipboardMode = "Navigator internal clipboard";
+std::vector<int> Navigator::s_registeredWidgetIds;
 
 namespace {
 	constexpr int kWindowW = 920;
@@ -163,6 +164,10 @@ namespace {
 	void addButton(uint64_t windowId, int id, int x, int y, int w, int h, const std::string& text)
 	{
 		publish(MsgType::MT_WidgetAdd, packWidgetAdd(windowId, 1, id, x, y, w, h, text));
+		// Track registered widget IDs for smoke/diagnostic access.
+		auto& ids = Navigator::s_registeredWidgetIds;
+		if (std::find(ids.begin(), ids.end(), id) == ids.end())
+			ids.push_back(id);
 	}
 
 	int chromeLineHeight()
@@ -1111,6 +1116,11 @@ int Navigator::SmokeCurrentBlockCount()
 	return static_cast<int>(s_currentDoc.blocks.size());
 }
 
+std::vector<int> Navigator::SmokeToolbarWidgetIds()
+{
+	return s_registeredWidgetIds;
+}
+
 int Navigator::main(int, char**)
 {
 	Logger::write(LogLevel::Info, "guideXOS Navigator starting");
@@ -1146,6 +1156,7 @@ int Navigator::main(int, char**)
 	clearSelection();
 	s_navigatorClipboard.clear();
 	s_clipboardMode = "Navigator internal clipboard";
+	s_registeredWidgetIds.clear();
 
 	loadBookmarks();
 

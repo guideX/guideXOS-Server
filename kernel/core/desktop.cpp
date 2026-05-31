@@ -326,7 +326,7 @@ static const char* bare_metal_static_launch_shadow_comparison(const gxos::apps::
     return "unexpected-mismatch";
 }
 
-static void log_bare_metal_static_app_shadow_only_observation(const char* originalLegacyAppName, const char* source = "BareMetalStaticApp", const char* uiLabel = nullptr)
+static void log_bare_metal_static_app_shadow_only_observation(const char* originalLegacyAppName, const char* source = "BareMetalStaticApp", const char* uiLabel = nullptr, const char* actualBehavior = nullptr)
 {
     if (!originalLegacyAppName || !originalLegacyAppName[0]) return;
 
@@ -364,6 +364,10 @@ static void log_bare_metal_static_app_shadow_only_observation(const char* origin
     serial::puts(target.diagnosticStatus);
     serial::puts(" reason=");
     serial::puts(target.diagnosticReason);
+    if (actualBehavior && actualBehavior[0]) {
+        serial::puts(" actualBehavior=");
+        serial::puts(actualBehavior);
+    }
     serial::puts(" nonFatal=true shadowOnly=true\n");
 }
 
@@ -422,6 +426,7 @@ static void log_bare_metal_fileopen_shadow_only_observation(const char* source, 
 static const char* s_launchShadowFileOpenSourceOverride = nullptr;
 static const char* s_launchShadowStaticAppSourceOverride = nullptr;
 static bool s_launchShadowSuppressRealBranchLaunch = false;
+static bool s_launchShadowSuppressEmbeddedControlPanelAction = false;
 
 static const char* bare_metal_active_fileopen_shadow_source(const char* fallback)
 {
@@ -1401,6 +1406,24 @@ static int s_startMenuScroll = 0;       // Scroll offset for long lists
 static bool s_startMenuAllProgs = false; // Toggle between Recent/Pinned vs All Programs
 static const int kStartMenuMaxRows = 14; // Max visible rows before scrolling
 static const int kStartMenuRowH = 22;    // Height of each menu row
+
+static void activate_start_menu_control_panel()
+{
+    s_clickedMenuRight = 5;
+    s_clickedMenuLeft = -1;
+    s_startMenuOpen = false;
+#if defined(GXOS_APPMODEL_LAUNCHSHADOW_SMOKE_ACTIVE) && defined(GXOS_APPMODEL_TYPED_DISPATCH_SHADOW_ONLY) && defined(GXOS_BARE_METAL)
+    if (s_launchShadowSuppressEmbeddedControlPanelAction) {
+        log_bare_metal_static_app_shadow_only_observation(
+            "Control Panel",
+            bare_metal_active_static_app_shadow_source("StartMenuControlPanel"),
+            "Control Panel",
+            "embedded-control-panel-state");
+        return;
+    }
+#endif
+    s_controlPanelOpen = true;
+}
 
 static uint32_t start_menu_text_y(uint32_t rowY, uint32_t rowH = kStartMenuRowH)
 {
@@ -7147,6 +7170,100 @@ static void run_launch_shadow_start_menu_right_column_shell_actions_smoke()
     serial::puts(" nonFatal=true\n");
 }
 
+static void run_launch_shadow_start_menu_control_panel_smoke()
+{
+    const bool savedStartMenuOpen = s_startMenuOpen;
+    const NotificationToast savedNotification = s_notification;
+    const char* savedStaticAppSourceOverride = s_launchShadowStaticAppSourceOverride;
+    const bool savedSuppressEmbeddedControlPanelAction = s_launchShadowSuppressEmbeddedControlPanelAction;
+    const bool savedControlPanelOpen = s_controlPanelOpen;
+    const int savedControlPanelHover = s_controlPanelHover;
+    const bool savedDeviceManagerOpen = s_deviceManagerOpen;
+    const bool savedNetworkAdaptersOpen = s_networkAdaptersOpen;
+    const bool savedNetworkConfigOpen = s_networkConfigOpen;
+    const int savedClickedMenuLeft = s_clickedMenuLeft;
+    const int savedClickedMenuRight = s_clickedMenuRight;
+    const int savedHoverMenuLeft = s_hoverMenuLeft;
+    const int savedHoverMenuRight = s_hoverMenuRight;
+    const int savedStartMenuSelection = s_startMenuSelection;
+    const int savedStartMenuScroll = s_startMenuScroll;
+    const bool savedStartMenuAllProgs = s_startMenuAllProgs;
+
+    serial::puts("[APPMODEL-LAUNCHSHADOW-SMOKE] real-branch Start Menu Control Panel helper before temporary embedded-action state mutation\n");
+    serial::puts("[LaunchShadowRealBranchStartMenuControlPanelMutation] phase=before temporaryEmbeddedActionStateMutation=true persistentDesktopStorageWrites=false nonFatal=true\n");
+    s_startMenuOpen = true;
+    s_launchShadowStaticAppSourceOverride = "RealBranchStartMenuControlPanel";
+    s_launchShadowSuppressEmbeddedControlPanelAction = true;
+    activate_start_menu_control_panel();
+
+    s_startMenuOpen = savedStartMenuOpen;
+    s_notification = savedNotification;
+    s_launchShadowStaticAppSourceOverride = savedStaticAppSourceOverride;
+    s_launchShadowSuppressEmbeddedControlPanelAction = savedSuppressEmbeddedControlPanelAction;
+    s_controlPanelOpen = savedControlPanelOpen;
+    s_controlPanelHover = savedControlPanelHover;
+    s_deviceManagerOpen = savedDeviceManagerOpen;
+    s_networkAdaptersOpen = savedNetworkAdaptersOpen;
+    s_networkConfigOpen = savedNetworkConfigOpen;
+    s_clickedMenuLeft = savedClickedMenuLeft;
+    s_clickedMenuRight = savedClickedMenuRight;
+    s_hoverMenuLeft = savedHoverMenuLeft;
+    s_hoverMenuRight = savedHoverMenuRight;
+    s_startMenuSelection = savedStartMenuSelection;
+    s_startMenuScroll = savedStartMenuScroll;
+    s_startMenuAllProgs = savedStartMenuAllProgs;
+
+    const bool startMenuStateRestored = s_startMenuOpen == savedStartMenuOpen;
+    const bool notificationStateRestored = notification_toast_matches(s_notification, savedNotification);
+    const bool sourceOverrideStateRestored = s_launchShadowStaticAppSourceOverride == savedStaticAppSourceOverride;
+    const bool suppressEmbeddedActionStateRestored =
+        s_launchShadowSuppressEmbeddedControlPanelAction == savedSuppressEmbeddedControlPanelAction;
+    const bool embeddedStateRestored = s_controlPanelOpen == savedControlPanelOpen &&
+        s_controlPanelHover == savedControlPanelHover && s_deviceManagerOpen == savedDeviceManagerOpen &&
+        s_networkAdaptersOpen == savedNetworkAdaptersOpen && s_networkConfigOpen == savedNetworkConfigOpen;
+    const bool selectionStateRestored = s_clickedMenuLeft == savedClickedMenuLeft &&
+        s_clickedMenuRight == savedClickedMenuRight && s_hoverMenuLeft == savedHoverMenuLeft &&
+        s_hoverMenuRight == savedHoverMenuRight && s_startMenuSelection == savedStartMenuSelection &&
+        s_startMenuScroll == savedStartMenuScroll && s_startMenuAllProgs == savedStartMenuAllProgs;
+    const bool stateRestored = startMenuStateRestored && notificationStateRestored &&
+        sourceOverrideStateRestored && suppressEmbeddedActionStateRestored &&
+        embeddedStateRestored && selectionStateRestored;
+
+    serial::puts("[APPMODEL-LAUNCHSHADOW-SMOKE] real-branch Start Menu Control Panel helper after temporary embedded-action state restoration\n");
+    serial::puts("[LaunchShadowRealBranchStartMenuControlPanelRestore] realBranchStartMenuControlPanelStateRestored=");
+    serial::puts(stateRestored ? "true" : "false");
+    serial::puts(" realBranchStartMenuControlPanelMenuOpenStateRestored=");
+    serial::puts(startMenuStateRestored ? "true" : "false");
+    serial::puts(" realBranchStartMenuControlPanelNotificationStateRestored=");
+    serial::puts(notificationStateRestored ? "true" : "false");
+    serial::puts(" realBranchStartMenuControlPanelSourceOverrideStateRestored=");
+    serial::puts(sourceOverrideStateRestored ? "true" : "false");
+    serial::puts(" realBranchStartMenuControlPanelSuppressEmbeddedActionStateRestored=");
+    serial::puts(suppressEmbeddedActionStateRestored ? "true" : "false");
+    serial::puts(" realBranchStartMenuControlPanelEmbeddedStateRestored=");
+    serial::puts(embeddedStateRestored ? "true" : "false");
+    serial::puts(" realBranchStartMenuControlPanelSelectionStateRestored=");
+    serial::puts(selectionStateRestored ? "true" : "false");
+    serial::puts(" persistentDesktopStorageWrites=false");
+    serial::puts(" nonFatal=true\n");
+    serial::puts("[LaunchShadowRealBranchStartMenuControlPanelRestoreVerification] phase=after realBranchStartMenuControlPanelStateRestored=");
+    serial::puts(stateRestored ? "true" : "false");
+    serial::puts(" realBranchStartMenuControlPanelMenuOpenStateRestored=");
+    serial::puts(startMenuStateRestored ? "true" : "false");
+    serial::puts(" realBranchStartMenuControlPanelNotificationStateRestored=");
+    serial::puts(notificationStateRestored ? "true" : "false");
+    serial::puts(" realBranchStartMenuControlPanelSourceOverrideStateRestored=");
+    serial::puts(sourceOverrideStateRestored ? "true" : "false");
+    serial::puts(" realBranchStartMenuControlPanelSuppressEmbeddedActionStateRestored=");
+    serial::puts(suppressEmbeddedActionStateRestored ? "true" : "false");
+    serial::puts(" realBranchStartMenuControlPanelEmbeddedStateRestored=");
+    serial::puts(embeddedStateRestored ? "true" : "false");
+    serial::puts(" realBranchStartMenuControlPanelSelectionStateRestored=");
+    serial::puts(selectionStateRestored ? "true" : "false");
+    serial::puts(" persistentDesktopStorageWrites=false");
+    serial::puts(" nonFatal=true\n");
+}
+
 void run_launch_shadow_text_fileopen_smoke()
 {
     serial::puts("[APPMODEL-LAUNCHSHADOW-SMOKE] issuing text FileOpen SHADOW_ONLY probe\n");
@@ -7318,6 +7435,7 @@ void run_launch_shadow_text_fileopen_smoke()
     run_launch_shadow_start_menu_console_smoke();
     run_launch_shadow_start_menu_settings_smoke();
     run_launch_shadow_start_menu_right_column_shell_actions_smoke();
+    run_launch_shadow_start_menu_control_panel_smoke();
 }
 #endif
 
@@ -8860,8 +8978,7 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
                 
                 // Handle Control Panel specially (index 5)
                 if (rightHit == 5) {
-                    s_startMenuOpen = false;
-                    s_controlPanelOpen = true;
+                    activate_start_menu_control_panel();
                     draw();
                     draw_cursor(mx, my);
                     return;

@@ -109,6 +109,12 @@ public:
 	static std::string SmokeRuntimeReport();
 	static std::string SmokeCurrentUrl();
 	static int SmokeCurrentBlockCount();
+	// Returns the widget IDs registered with the compositor toolbar.
+	// Used by hosted smoke to verify the full modern toolbar (7 buttons) is
+	// present and that the old stale four-button placeholder is not active.
+	static std::vector<int> SmokeToolbarWidgetIds();
+
+	static std::vector<int> s_registeredWidgetIds;
 
 private:
 	// -------------------------------------------------------------------------

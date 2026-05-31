@@ -74,6 +74,7 @@
 #include "native_elf_executor.h"
 #include "native_app_process_table.h"
 #include <iostream>
+#include <algorithm>
 #include <chrono>
 #include <sstream>
 #include <vector>
@@ -170,15 +171,13 @@ static std::string navigatorHostedSmokeDiagnostic() {
 
     gxos::gui::WindowDebugInfo navWindow;
     bool foundWindow = false;
-    bool toolbarReady = false;
-    for (int attempt = 0; attempt < 50 && !toolbarReady; ++attempt) {
+    for (int attempt = 0; attempt < 50 && !foundWindow; ++attempt) {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
         std::vector<gxos::gui::WindowDebugInfo> windows = gxos::gui::Compositor::debugWindowsSnapshot();
         for (const auto& window : windows) {
             if (window.title.find("guideXOS Navigator") == std::string::npos) continue;
             navWindow = window;
             foundWindow = true;
-            if (window.widgetCount >= 7) toolbarReady = true;
             break;
         }
     }
@@ -187,10 +186,47 @@ static std::string navigatorHostedSmokeDiagnostic() {
         foundWindow ? ("id=" + std::to_string(navWindow.id) + " title=" + navWindow.title) : "window not found");
     add("Navigator window size", foundWindow && navWindow.w == 920 && navWindow.h == 640,
         foundWindow ? (std::to_string(navWindow.w) + "x" + std::to_string(navWindow.h)) : "window not found");
-    add("toolbar widget count", foundWindow && toolbarReady && navWindow.widgetCount == 7,
-        foundWindow ? ("widgets=" + std::to_string(navWindow.widgetCount)) : "window not found");
-    add("stale four-button toolbar absent", foundWindow && toolbarReady && navWindow.widgetCount > 4,
-        foundWindow ? ("widgets=" + std::to_string(navWindow.widgetCount)) : "window not found");
+
+    // Toolbar semantic checks: use in-process Navigator state (not compositor IPC
+    // widget count) to avoid stale-restored-window false negatives.
+    // The Navigator registers 7 toolbar buttons in order: Back(1), Forward(2),
+    // Reload(3), Home(4), Bookmarks(5), AddBookmark(6), Find(7).
+    // A stale four-button placeholder would only have ids 1-4.
+    // Poll until all 7 buttons are registered (renderToolbar runs on Navigator's
+    // thread and may lag slightly behind the window-title appearing).
+    std::vector<int> toolbarIds;
+    for (int attempt = 0; attempt < 50; ++attempt) {
+        toolbarIds = gxos::apps::Navigator::SmokeToolbarWidgetIds();
+        if (static_cast<int>(toolbarIds.size()) >= 7)
+            break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+    auto hasWidget = [&](int id) {
+        return std::find(toolbarIds.begin(), toolbarIds.end(), id) != toolbarIds.end();
+    };
+    std::string toolbarIdStr;
+    for (int id : toolbarIds) { if (!toolbarIdStr.empty()) toolbarIdStr += ","; toolbarIdStr += std::to_string(id); }
+    const bool hasBack        = hasWidget(1);
+    const bool hasForward     = hasWidget(2);
+    const bool hasReload      = hasWidget(3);
+    const bool hasHome        = hasWidget(4);
+    const bool hasBookmarks   = hasWidget(5);
+    const bool hasAddBookmark = hasWidget(6);
+    const bool hasFind        = hasWidget(7);
+    const int  toolbarWidgetCount = static_cast<int>(toolbarIds.size());
+    add("toolbar Back button",        hasBack,        "registered widget ids=[" + toolbarIdStr + "]");
+    add("toolbar Forward button",     hasForward,     "registered widget ids=[" + toolbarIdStr + "]");
+    add("toolbar Reload button",      hasReload,      "registered widget ids=[" + toolbarIdStr + "]");
+    add("toolbar Home button",        hasHome,        "registered widget ids=[" + toolbarIdStr + "]");
+    add("toolbar Bookmarks button",   hasBookmarks,   "registered widget ids=[" + toolbarIdStr + "]");
+    add("toolbar AddBookmark button", hasAddBookmark, "registered widget ids=[" + toolbarIdStr + "]");
+    add("toolbar Find button",        hasFind,        "registered widget ids=[" + toolbarIdStr + "]");
+    // Stale detection: old placeholder had only Back/Forward/Reload/Home (ids 1-4).
+    // Modern toolbar must have all 7; count > 4 distinguishes modern from stale.
+    add("stale four-button toolbar absent",
+        toolbarWidgetCount > 4,
+        "registered_widget_count=" + std::to_string(toolbarWidgetCount) +
+        " ids=[" + toolbarIdStr + "] (stale placeholder has <=4 buttons)");
 
     bool navigated = gxos::apps::Navigator::SmokeNavigateTo("about:navigator-runtime");
     std::string currentUrl = gxos::apps::Navigator::SmokeCurrentUrl();
@@ -294,7 +330,7 @@ static std::string navigatorHostedSmokeDiagnostic() {
     out << "post_submitted_form_url=" << postSubmittedUrl << "\n";
     out << "downloads_url=" << downloadsUrl << "\n";
     out << "current_block_count=" << gxos::apps::Navigator::SmokeCurrentBlockCount() << "\n";
-    out << "toolbar_count=" << (foundWindow ? navWindow.widgetCount : 0) << "\n";
+    out << "toolbar_count=" << toolbarWidgetCount << "\n";
     out << "NAVIGATOR_SMOKE_RESULT: " << (pass ? "PASS" : "FAIL") << "\n";
     out << "NAVIGATOR_SMOKE_END\n";
     return out.str();
