@@ -420,12 +420,21 @@ static void log_bare_metal_fileopen_shadow_only_observation(const char* source, 
 }
 
 static const char* s_launchShadowFileOpenSourceOverride = nullptr;
+static const char* s_launchShadowStaticAppSourceOverride = nullptr;
 static bool s_launchShadowSuppressRealBranchLaunch = false;
 
 static const char* bare_metal_active_fileopen_shadow_source(const char* fallback)
 {
     if (s_launchShadowFileOpenSourceOverride && s_launchShadowFileOpenSourceOverride[0]) {
         return s_launchShadowFileOpenSourceOverride;
+    }
+    return fallback;
+}
+
+static const char* bare_metal_active_static_app_shadow_source(const char* fallback)
+{
+    if (s_launchShadowStaticAppSourceOverride && s_launchShadowStaticAppSourceOverride[0]) {
+        return s_launchShadowStaticAppSourceOverride;
     }
     return fallback;
 }
@@ -6437,6 +6446,7 @@ void run_launch_shadow_folder_fileopen_smoke()
     int savedVisibleIconCount = s_visibleIconCount;
     bool savedSelectedIconIds[kDesktopIconCount];
     int savedVisibleIconIndices[kDesktopIconCount];
+    int trashSystemObjectIconIdx = -1;
     int systemObjectIconIdx = -1;
     int fileManagerSystemObjectIconIdx = -1;
 
@@ -6451,7 +6461,9 @@ void run_launch_shadow_folder_fileopen_smoke()
     }
     for (int i = 0; i < kSystemDesktopIconCount; ++i) {
         if (s_desktopIcons[i].kind == DesktopItemKind::SystemObject) {
-            if (s_desktopIcons[i].systemObject == DesktopSystemObjectKind::ThisSystem) {
+            if (s_desktopIcons[i].systemObject == DesktopSystemObjectKind::Trash) {
+                trashSystemObjectIconIdx = i;
+            } else if (s_desktopIcons[i].systemObject == DesktopSystemObjectKind::ThisSystem) {
                 systemObjectIconIdx = i;
             } else if (s_desktopIcons[i].systemObject == DesktopSystemObjectKind::FileManager) {
                 fileManagerSystemObjectIconIdx = i;
@@ -6514,10 +6526,20 @@ void run_launch_shadow_folder_fileopen_smoke()
     serial::puts("[LaunchShadowRealBranchSystemObjectFileManagerMutation] phase=before temporaryDesktopStateMutation=true persistentDesktopStorageWrites=false nonFatal=true\n");
     s_visibleIconCount = 1;
     s_visibleIconIndices[0] = fileManagerSystemObjectIconIdx >= 0 ? fileManagerSystemObjectIconIdx : 2;
+    s_launchShadowStaticAppSourceOverride = "RealBranchDesktopSystemObjectFileManager";
+    show_icon_notification(0);
+    s_notification = savedNotification;
+
+    serial::puts("[APPMODEL-LAUNCHSHADOW-SMOKE] real-branch system-object Trash helper before temporary desktop state mutation\n");
+    serial::puts("[LaunchShadowRealBranchSystemObjectTrashMutation] phase=before temporaryDesktopStateMutation=true persistentDesktopStorageWrites=false nonFatal=true\n");
+    s_visibleIconCount = 1;
+    s_visibleIconIndices[0] = trashSystemObjectIconIdx >= 0 ? trashSystemObjectIconIdx : 0;
+    s_launchShadowStaticAppSourceOverride = "RealBranchDesktopSystemObjectTrash";
     show_icon_notification(0);
     s_notification = savedNotification;
 
     s_launchShadowFileOpenSourceOverride = nullptr;
+    s_launchShadowStaticAppSourceOverride = nullptr;
     s_launchShadowSuppressRealBranchLaunch = false;
     s_desktopIcons[shortcutIconIdx] = savedShortcutIcon;
     s_desktopIcons[filesystemIconIdx] = savedFilesystemIcon;
@@ -6557,13 +6579,16 @@ void run_launch_shadow_folder_fileopen_smoke()
         s_lastSelectedIconId == savedLastSelectedIconId &&
         s_focusedSelectedIconId == savedFocusedSelectedIconId &&
         selectedIconIdsRestored;
-    const bool overrideStateRestored = s_launchShadowFileOpenSourceOverride == nullptr;
+    const bool overrideStateRestored = s_launchShadowFileOpenSourceOverride == nullptr &&
+        s_launchShadowStaticAppSourceOverride == nullptr;
     const bool suppressLaunchStateRestored = !s_launchShadowSuppressRealBranchLaunch;
     const bool desktopStateRestored = shortcutSlotRestored && filesystemSlotRestored && visibleIconStateRestored &&
         notificationStateRestored && selectedIconStateRestored && overrideStateRestored && suppressLaunchStateRestored;
     const bool systemObjectRootFolderDesktopStateRestored = visibleIconStateRestored && notificationStateRestored &&
         selectedIconStateRestored && overrideStateRestored && suppressLaunchStateRestored;
     const bool systemObjectFileManagerDesktopStateRestored = visibleIconStateRestored && notificationStateRestored &&
+        selectedIconStateRestored && overrideStateRestored && suppressLaunchStateRestored;
+    const bool systemObjectTrashDesktopStateRestored = visibleIconStateRestored && notificationStateRestored &&
         selectedIconStateRestored && overrideStateRestored && suppressLaunchStateRestored;
 
     serial::puts("[APPMODEL-LAUNCHSHADOW-SMOKE] real-branch folder helper after temporary desktop state restoration\n");
@@ -6658,6 +6683,35 @@ void run_launch_shadow_folder_fileopen_smoke()
     serial::puts(" realBranchSystemObjectFileManagerSuppressLaunchStateRestored=");
     serial::puts(suppressLaunchStateRestored ? "true" : "false");
     serial::puts(" realBranchSystemObjectFileManagerSelectedIconStateRestored=");
+    serial::puts(selectedIconStateRestored ? "true" : "false");
+    serial::puts(" persistentDesktopStorageWrites=false");
+    serial::puts(" nonFatal=true\n");
+    serial::puts("[APPMODEL-LAUNCHSHADOW-SMOKE] real-branch system-object Trash helper after temporary desktop state restoration\n");
+    serial::puts("[LaunchShadowRealBranchSystemObjectTrashRestore] realBranchSystemObjectTrashDesktopStateRestored=");
+    serial::puts(systemObjectTrashDesktopStateRestored ? "true" : "false");
+    serial::puts(" realBranchSystemObjectTrashVisibleIconStateRestored=");
+    serial::puts(visibleIconStateRestored ? "true" : "false");
+    serial::puts(" realBranchSystemObjectTrashNotificationStateRestored=");
+    serial::puts(notificationStateRestored ? "true" : "false");
+    serial::puts(" realBranchSystemObjectTrashSourceOverrideStateRestored=");
+    serial::puts(overrideStateRestored ? "true" : "false");
+    serial::puts(" realBranchSystemObjectTrashSuppressLaunchStateRestored=");
+    serial::puts(suppressLaunchStateRestored ? "true" : "false");
+    serial::puts(" realBranchSystemObjectTrashSelectedIconStateRestored=");
+    serial::puts(selectedIconStateRestored ? "true" : "false");
+    serial::puts(" persistentDesktopStorageWrites=false");
+    serial::puts(" nonFatal=true\n");
+    serial::puts("[LaunchShadowRealBranchSystemObjectTrashRestoreVerification] phase=after realBranchSystemObjectTrashDesktopStateRestored=");
+    serial::puts(systemObjectTrashDesktopStateRestored ? "true" : "false");
+    serial::puts(" realBranchSystemObjectTrashVisibleIconStateRestored=");
+    serial::puts(visibleIconStateRestored ? "true" : "false");
+    serial::puts(" realBranchSystemObjectTrashNotificationStateRestored=");
+    serial::puts(notificationStateRestored ? "true" : "false");
+    serial::puts(" realBranchSystemObjectTrashSourceOverrideStateRestored=");
+    serial::puts(overrideStateRestored ? "true" : "false");
+    serial::puts(" realBranchSystemObjectTrashSuppressLaunchStateRestored=");
+    serial::puts(suppressLaunchStateRestored ? "true" : "false");
+    serial::puts(" realBranchSystemObjectTrashSelectedIconStateRestored=");
     serial::puts(selectedIconStateRestored ? "true" : "false");
     serial::puts(" persistentDesktopStorageWrites=false");
     serial::puts(" nonFatal=true\n");
@@ -7265,6 +7319,12 @@ static void show_icon_notification(int displayIndex)
     if (icon.kind == DesktopItemKind::SystemObject) {
         switch (icon.systemObject) {
             case DesktopSystemObjectKind::Trash:
+#if defined(GXOS_APPMODEL_TYPED_DISPATCH_SHADOW_ONLY) && defined(GXOS_BARE_METAL)
+                if (bare_metal_should_suppress_real_branch_launch()) {
+                    log_bare_metal_static_app_shadow_only_observation("Trash", bare_metal_active_static_app_shadow_source("DesktopSystemObjectTrash"));
+                    return;
+                }
+#endif
                 if (try_launch_kernel_app("Trash")) return;
                 break;
             case DesktopSystemObjectKind::ThisSystem:
@@ -7280,7 +7340,7 @@ static void show_icon_notification(int displayIndex)
             case DesktopSystemObjectKind::FileManager:
 #if defined(GXOS_APPMODEL_TYPED_DISPATCH_SHADOW_ONLY) && defined(GXOS_BARE_METAL)
                 if (bare_metal_should_suppress_real_branch_launch()) {
-                    log_bare_metal_static_app_shadow_only_observation("Files", "RealBranchDesktopSystemObjectFileManager");
+                    log_bare_metal_static_app_shadow_only_observation("Files", bare_metal_active_static_app_shadow_source("DesktopSystemObjectFileManager"));
                     return;
                 }
 #endif
