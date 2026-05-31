@@ -6836,6 +6836,14 @@ static void run_launch_shadow_start_menu_built_in_apps_smoke()
     s_launchShadowStaticAppSourceOverride = "RealBranchStartMenuDiskManager";
     show_start_menu_notification("DiskManager");
 
+    s_startMenuOpen = true;
+    s_launchShadowStaticAppSourceOverride = "RealBranchStartMenuTrash";
+    show_start_menu_notification("Trash");
+
+    s_startMenuOpen = true;
+    s_launchShadowStaticAppSourceOverride = "RealBranchStartMenuDisplayOptions";
+    show_start_menu_notification("DisplayOptions");
+
     s_startMenuOpen = savedStartMenuOpen;
     s_notification = savedNotification;
     s_launchShadowStaticAppSourceOverride = savedStaticAppSourceOverride;

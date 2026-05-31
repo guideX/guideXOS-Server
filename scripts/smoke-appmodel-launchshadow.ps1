@@ -461,6 +461,18 @@ $checks = @(
     "appId=gxos.builtin.diskmanager",
     "resolvedDispatch=DiskManager",
     "typedDispatchCandidate=DiskManager",
+    "source=RealBranchStartMenuTrash",
+    "uiLabel=Trash",
+    "actualDispatch=Trash",
+    "appId=gxos.builtin.trash",
+    "resolvedDispatch=Trash",
+    "typedDispatchCandidate=Trash",
+    "source=RealBranchStartMenuDisplayOptions",
+    "uiLabel=DisplayOptions",
+    "actualDispatch=DisplayOptions",
+    "appId=gxos.builtin.displayoptions",
+    "resolvedDispatch=DisplayOptions",
+    "typedDispatchCandidate=DisplayOptions",
     "nonFatal=true shadowOnly=true",
     "[APPMODEL-LAUNCHSHADOW-SMOKE] real-branch Start Menu BuiltInApp helper after temporary Start Menu state restoration",
     "[LaunchShadowRealBranchStartMenuBuiltInAppsRestore] realBranchStartMenuBuiltInAppsStateRestored=true",
@@ -727,7 +739,9 @@ $realBranchStartMenuNotepadConfirmed =
 $realBranchStartMenuBuiltInAppsConfirmed =
     [regex]::IsMatch($output, 'source=RealBranchStartMenuCalculator uiLabel=Calculator actualDispatch=Calculator resolvedType=BuiltInApp appId=gxos\.builtin\.calculator resolvedDispatch=Calculator typedDispatchCandidate=Calculator typedDispatchCandidateMatchesActual=true typedDispatchCandidateComparison=match .* nonFatal=true shadowOnly=true') -and
     [regex]::IsMatch($output, 'source=RealBranchStartMenuTaskManager uiLabel=TaskManager actualDispatch=TaskManager resolvedType=BuiltInApp appId=gxos\.builtin\.taskmanager resolvedDispatch=TaskManager typedDispatchCandidate=TaskManager typedDispatchCandidateMatchesActual=true typedDispatchCandidateComparison=match .* nonFatal=true shadowOnly=true') -and
-    [regex]::IsMatch($output, 'source=RealBranchStartMenuDiskManager uiLabel=DiskManager actualDispatch=DiskManager resolvedType=BuiltInApp appId=gxos\.builtin\.diskmanager resolvedDispatch=DiskManager typedDispatchCandidate=DiskManager typedDispatchCandidateMatchesActual=true typedDispatchCandidateComparison=match .* nonFatal=true shadowOnly=true')
+    [regex]::IsMatch($output, 'source=RealBranchStartMenuDiskManager uiLabel=DiskManager actualDispatch=DiskManager resolvedType=BuiltInApp appId=gxos\.builtin\.diskmanager resolvedDispatch=DiskManager typedDispatchCandidate=DiskManager typedDispatchCandidateMatchesActual=true typedDispatchCandidateComparison=match .* nonFatal=true shadowOnly=true') -and
+    [regex]::IsMatch($output, 'source=RealBranchStartMenuTrash uiLabel=Trash actualDispatch=Trash resolvedType=BuiltInApp appId=gxos\.builtin\.trash resolvedDispatch=Trash typedDispatchCandidate=Trash typedDispatchCandidateMatchesActual=true typedDispatchCandidateComparison=match .* nonFatal=true shadowOnly=true') -and
+    [regex]::IsMatch($output, 'source=RealBranchStartMenuDisplayOptions uiLabel=DisplayOptions actualDispatch=DisplayOptions resolvedType=BuiltInApp appId=gxos\.builtin\.displayoptions resolvedDispatch=DisplayOptions typedDispatchCandidate=DisplayOptions typedDispatchCandidateMatchesActual=true typedDispatchCandidateComparison=match .* nonFatal=true shadowOnly=true')
 $realBranchStartMenuFilesConfirmed =
     [regex]::IsMatch($output, 'source=RealBranchStartMenuFiles uiLabel=Files actualDispatch=Files resolvedType=LegacyAlias appId=gxos\.builtin\.fileexplorer resolvedDispatch=Files typedDispatchCandidate=Files typedDispatchCandidateMatchesActual=true typedDispatchCandidateComparison=match .* nonFatal=true shadowOnly=true')
 $realBranchStartMenuConsoleConfirmed =
@@ -926,7 +940,7 @@ if ($unexpectedRows.Count -ne 1) {
     $failed += "Expected exactly one unexpected-mismatch row, found $($unexpectedRows.Count)"
 }
 if (-not $realBranchStartMenuBuiltInAppsConfirmed) {
-    $failed += "Start Menu BuiltInApp real-branch rows did not match the expected Calculator, TaskManager, and DiskManager dispatch evidence"
+    $failed += "Start Menu BuiltInApp real-branch rows did not match the expected Calculator, TaskManager, DiskManager, Trash, and DisplayOptions dispatch evidence"
 }
 if (-not $realBranchStartMenuBuiltInAppsStateRestored) {
     $failed += "Start Menu BuiltInApp grouped state restoration evidence was incomplete"
