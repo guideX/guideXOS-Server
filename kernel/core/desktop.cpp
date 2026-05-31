@@ -6875,6 +6875,59 @@ static void run_launch_shadow_start_menu_built_in_apps_smoke()
     serial::puts(" nonFatal=true\n");
 }
 
+static void run_launch_shadow_start_menu_files_smoke()
+{
+    const bool savedStartMenuOpen = s_startMenuOpen;
+    const NotificationToast savedNotification = s_notification;
+    const char* savedStaticAppSourceOverride = s_launchShadowStaticAppSourceOverride;
+    const bool savedSuppressRealBranchLaunch = s_launchShadowSuppressRealBranchLaunch;
+
+    serial::puts("[APPMODEL-LAUNCHSHADOW-SMOKE] real-branch Start Menu Files helper before temporary Start Menu state mutation\n");
+    serial::puts("[LaunchShadowRealBranchStartMenuFilesMutation] phase=before temporaryStartMenuStateMutation=true persistentDesktopStorageWrites=false nonFatal=true\n");
+    s_startMenuOpen = true;
+    s_launchShadowStaticAppSourceOverride = "RealBranchStartMenuFiles";
+    s_launchShadowSuppressRealBranchLaunch = true;
+    show_start_menu_notification("Files");
+
+    s_startMenuOpen = savedStartMenuOpen;
+    s_notification = savedNotification;
+    s_launchShadowStaticAppSourceOverride = savedStaticAppSourceOverride;
+    s_launchShadowSuppressRealBranchLaunch = savedSuppressRealBranchLaunch;
+
+    const bool startMenuStateRestored = s_startMenuOpen == savedStartMenuOpen;
+    const bool notificationStateRestored = notification_toast_matches(s_notification, savedNotification);
+    const bool sourceOverrideStateRestored = s_launchShadowStaticAppSourceOverride == savedStaticAppSourceOverride;
+    const bool suppressLaunchStateRestored = s_launchShadowSuppressRealBranchLaunch == savedSuppressRealBranchLaunch;
+    const bool stateRestored = startMenuStateRestored && notificationStateRestored &&
+        sourceOverrideStateRestored && suppressLaunchStateRestored;
+
+    serial::puts("[APPMODEL-LAUNCHSHADOW-SMOKE] real-branch Start Menu Files helper after temporary Start Menu state restoration\n");
+    serial::puts("[LaunchShadowRealBranchStartMenuFilesRestore] realBranchStartMenuFilesStateRestored=");
+    serial::puts(stateRestored ? "true" : "false");
+    serial::puts(" realBranchStartMenuFilesMenuOpenStateRestored=");
+    serial::puts(startMenuStateRestored ? "true" : "false");
+    serial::puts(" realBranchStartMenuFilesNotificationStateRestored=");
+    serial::puts(notificationStateRestored ? "true" : "false");
+    serial::puts(" realBranchStartMenuFilesSourceOverrideStateRestored=");
+    serial::puts(sourceOverrideStateRestored ? "true" : "false");
+    serial::puts(" realBranchStartMenuFilesSuppressLaunchStateRestored=");
+    serial::puts(suppressLaunchStateRestored ? "true" : "false");
+    serial::puts(" persistentDesktopStorageWrites=false");
+    serial::puts(" nonFatal=true\n");
+    serial::puts("[LaunchShadowRealBranchStartMenuFilesRestoreVerification] phase=after realBranchStartMenuFilesStateRestored=");
+    serial::puts(stateRestored ? "true" : "false");
+    serial::puts(" realBranchStartMenuFilesMenuOpenStateRestored=");
+    serial::puts(startMenuStateRestored ? "true" : "false");
+    serial::puts(" realBranchStartMenuFilesNotificationStateRestored=");
+    serial::puts(notificationStateRestored ? "true" : "false");
+    serial::puts(" realBranchStartMenuFilesSourceOverrideStateRestored=");
+    serial::puts(sourceOverrideStateRestored ? "true" : "false");
+    serial::puts(" realBranchStartMenuFilesSuppressLaunchStateRestored=");
+    serial::puts(suppressLaunchStateRestored ? "true" : "false");
+    serial::puts(" persistentDesktopStorageWrites=false");
+    serial::puts(" nonFatal=true\n");
+}
+
 void run_launch_shadow_text_fileopen_smoke()
 {
     serial::puts("[APPMODEL-LAUNCHSHADOW-SMOKE] issuing text FileOpen SHADOW_ONLY probe\n");
@@ -7042,6 +7095,7 @@ void run_launch_shadow_text_fileopen_smoke()
     serial::puts("[APPMODEL-LAUNCHSHADOW-SMOKE] text FileOpen SHADOW_ONLY probe done\n");
     run_launch_shadow_start_menu_smoke();
     run_launch_shadow_start_menu_built_in_apps_smoke();
+    run_launch_shadow_start_menu_files_smoke();
 }
 #endif
 
