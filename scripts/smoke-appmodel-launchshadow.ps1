@@ -27,11 +27,14 @@ function Write-AppModelLaunchShadowEvidence {
         [bool]$RealBranchDesktopShortcutFolderConfirmed,
         [bool]$RealBranchDesktopFilesystemFolderConfirmed,
         [bool]$RealBranchDesktopSystemObjectRootFolderConfirmed,
+        [bool]$RealBranchDesktopSystemObjectFileManagerConfirmed,
         [bool]$RealBranchDesktopStateRestored,
         [bool]$RealBranchFolderDesktopStateRestored,
         [bool]$RealBranchFolderRestoreVerificationConfirmed,
         [bool]$RealBranchSystemObjectRootFolderDesktopStateRestored,
         [bool]$RealBranchSystemObjectRootFolderRestoreVerificationConfirmed,
+        [bool]$RealBranchSystemObjectFileManagerDesktopStateRestored,
+        [bool]$RealBranchSystemObjectFileManagerRestoreVerificationConfirmed,
         [bool]$PersistentDesktopStorageWritesAbsent,
         [int]$UnexpectedMismatchRows,
         [string]$SerialLogPath
@@ -44,16 +47,19 @@ function Write-AppModelLaunchShadowEvidence {
     $textFileOpenConfirmed = if ($TextFileOpenShadowOnlyConfirmed) { "true" } else { "false" }
     $desktopShortcutTextFileConfirmed = if ($DesktopShortcutTextFileShadowOnlyConfirmed) { "true" } else { "false" }
     $desktopFilesystemTextFileConfirmed = if ($DesktopFilesystemTextFileShadowOnlyConfirmed) { "true" } else { "false" }
-    $realBranchDesktopShortcutTextFileConfirmed = if ($RealBranchDesktopShortcutTextFileConfirmed) { "true" } else { "false" }
-    $realBranchDesktopFilesystemTextFileConfirmed = if ($RealBranchDesktopFilesystemTextFileConfirmed) { "true" } else { "false" }
-    $realBranchDesktopShortcutFolderConfirmed = if ($RealBranchDesktopShortcutFolderConfirmed) { "true" } else { "false" }
-    $realBranchDesktopFilesystemFolderConfirmed = if ($RealBranchDesktopFilesystemFolderConfirmed) { "true" } else { "false" }
-    $realBranchDesktopSystemObjectRootFolderConfirmed = if ($RealBranchDesktopSystemObjectRootFolderConfirmed) { "true" } else { "false" }
+    $realBranchDesktopShortcutTextFileConfirmedFlag = if ($RealBranchDesktopShortcutTextFileConfirmed) { "true" } else { "false" }
+    $realBranchDesktopFilesystemTextFileConfirmedFlag = if ($RealBranchDesktopFilesystemTextFileConfirmed) { "true" } else { "false" }
+    $realBranchDesktopShortcutFolderConfirmedFlag = if ($RealBranchDesktopShortcutFolderConfirmed) { "true" } else { "false" }
+    $realBranchDesktopFilesystemFolderConfirmedFlag = if ($RealBranchDesktopFilesystemFolderConfirmed) { "true" } else { "false" }
+    $realBranchDesktopSystemObjectRootFolderConfirmedFlag = if ($RealBranchDesktopSystemObjectRootFolderConfirmed) { "true" } else { "false" }
+    $realBranchDesktopSystemObjectFileManagerConfirmedFlag = if ($RealBranchDesktopSystemObjectFileManagerConfirmed) { "true" } else { "false" }
     $realBranchDesktopStateRestoredFlag = if ($RealBranchDesktopStateRestored) { "true" } else { "false" }
     $realBranchFolderDesktopStateRestoredFlag = if ($RealBranchFolderDesktopStateRestored) { "true" } else { "false" }
     $realBranchFolderRestoreVerificationConfirmedFlag = if ($RealBranchFolderRestoreVerificationConfirmed) { "true" } else { "false" }
     $realBranchSystemObjectRootFolderDesktopStateRestoredFlag = if ($RealBranchSystemObjectRootFolderDesktopStateRestored) { "true" } else { "false" }
     $realBranchSystemObjectRootFolderRestoreVerificationConfirmedFlag = if ($RealBranchSystemObjectRootFolderRestoreVerificationConfirmed) { "true" } else { "false" }
+    $realBranchSystemObjectFileManagerDesktopStateRestoredFlag = if ($RealBranchSystemObjectFileManagerDesktopStateRestored) { "true" } else { "false" }
+    $realBranchSystemObjectFileManagerRestoreVerificationConfirmedFlag = if ($RealBranchSystemObjectFileManagerRestoreVerificationConfirmed) { "true" } else { "false" }
     $persistentDesktopStorageWrites = if ($PersistentDesktopStorageWritesAbsent) { "false" } else { "true" }
 
     $lines = @(
@@ -71,16 +77,19 @@ function Write-AppModelLaunchShadowEvidence {
         "textFileOpenShadowOnlyConfirmed=$textFileOpenConfirmed",
         "desktopShortcutTextFileShadowOnlyConfirmed=$desktopShortcutTextFileConfirmed",
         "desktopFilesystemTextFileShadowOnlyConfirmed=$desktopFilesystemTextFileConfirmed",
-        "realBranchDesktopShortcutTextFileConfirmed=$realBranchDesktopShortcutTextFileConfirmed",
-        "realBranchDesktopFilesystemTextFileConfirmed=$realBranchDesktopFilesystemTextFileConfirmed",
-        "realBranchDesktopShortcutFolderConfirmed=$realBranchDesktopShortcutFolderConfirmed",
-        "realBranchDesktopFilesystemFolderConfirmed=$realBranchDesktopFilesystemFolderConfirmed",
-        "realBranchDesktopSystemObjectRootFolderConfirmed=$realBranchDesktopSystemObjectRootFolderConfirmed",
+        "realBranchDesktopShortcutTextFileConfirmed=$realBranchDesktopShortcutTextFileConfirmedFlag",
+        "realBranchDesktopFilesystemTextFileConfirmed=$realBranchDesktopFilesystemTextFileConfirmedFlag",
+        "realBranchDesktopShortcutFolderConfirmed=$realBranchDesktopShortcutFolderConfirmedFlag",
+        "realBranchDesktopFilesystemFolderConfirmed=$realBranchDesktopFilesystemFolderConfirmedFlag",
+        "realBranchDesktopSystemObjectRootFolderConfirmed=$realBranchDesktopSystemObjectRootFolderConfirmedFlag",
+        "realBranchDesktopSystemObjectFileManagerConfirmed=$realBranchDesktopSystemObjectFileManagerConfirmedFlag",
         "realBranchDesktopStateRestored=$realBranchDesktopStateRestoredFlag",
         "realBranchFolderDesktopStateRestored=$realBranchFolderDesktopStateRestoredFlag",
         "realBranchFolderRestoreVerificationConfirmed=$realBranchFolderRestoreVerificationConfirmedFlag",
         "realBranchSystemObjectRootFolderDesktopStateRestored=$realBranchSystemObjectRootFolderDesktopStateRestoredFlag",
         "realBranchSystemObjectRootFolderRestoreVerificationConfirmed=$realBranchSystemObjectRootFolderRestoreVerificationConfirmedFlag",
+        "realBranchSystemObjectFileManagerDesktopStateRestored=$realBranchSystemObjectFileManagerDesktopStateRestoredFlag",
+        "realBranchSystemObjectFileManagerRestoreVerificationConfirmed=$realBranchSystemObjectFileManagerRestoreVerificationConfirmedFlag",
         "persistentDesktopStorageWrites=$persistentDesktopStorageWrites",
         "unexpectedMismatchRows=$UnexpectedMismatchRows",
         "serialLogPath=$SerialLogPath",
@@ -266,6 +275,7 @@ $checks = @(
     "realBranchFolderNotificationStateRestored=true",
     "realBranchFolderSourceOverrideStateRestored=true",
     "realBranchFolderSuppressLaunchStateRestored=true",
+    "realBranchFolderSelectedIconStateRestored=true",
     "[LaunchShadowRealBranchFolderRestoreVerification] phase=after realBranchFolderDesktopStateRestored=true",
     "persistentDesktopStorageWrites=false",
     "nonFatal=true",
@@ -277,7 +287,27 @@ $checks = @(
     "realBranchSystemObjectRootFolderNotificationStateRestored=true",
     "realBranchSystemObjectRootFolderSourceOverrideStateRestored=true",
     "realBranchSystemObjectRootFolderSuppressLaunchStateRestored=true",
+    "realBranchSystemObjectRootFolderSelectedIconStateRestored=true",
     "[LaunchShadowRealBranchSystemObjectRootFolderRestoreVerification] phase=after realBranchSystemObjectRootFolderDesktopStateRestored=true",
+    "persistentDesktopStorageWrites=false",
+    "nonFatal=true",
+    "[APPMODEL-LAUNCHSHADOW-SMOKE] real-branch system-object File Manager helper before temporary desktop state mutation",
+    "[LaunchShadowRealBranchSystemObjectFileManagerMutation] phase=before temporaryDesktopStateMutation=true persistentDesktopStorageWrites=false nonFatal=true",
+    "source=RealBranchDesktopSystemObjectFileManager",
+    "uiLabel=Files",
+    "actualDispatch=Files",
+    "resolvedType=LegacyAlias",
+    "typedDispatchCandidate=Files",
+    "typedDispatchCandidateComparison=match",
+    "nonFatal=true shadowOnly=true",
+    "[APPMODEL-LAUNCHSHADOW-SMOKE] real-branch system-object File Manager helper after temporary desktop state restoration",
+    "[LaunchShadowRealBranchSystemObjectFileManagerRestore] realBranchSystemObjectFileManagerDesktopStateRestored=true",
+    "realBranchSystemObjectFileManagerVisibleIconStateRestored=true",
+    "realBranchSystemObjectFileManagerNotificationStateRestored=true",
+    "realBranchSystemObjectFileManagerSourceOverrideStateRestored=true",
+    "realBranchSystemObjectFileManagerSuppressLaunchStateRestored=true",
+    "realBranchSystemObjectFileManagerSelectedIconStateRestored=true",
+    "[LaunchShadowRealBranchSystemObjectFileManagerRestoreVerification] phase=after realBranchSystemObjectFileManagerDesktopStateRestored=true",
     "persistentDesktopStorageWrites=false",
     "nonFatal=true",
     "[APPMODEL-LAUNCHSHADOW-SMOKE] folder FileOpen SHADOW_ONLY probe done",
@@ -430,6 +460,14 @@ $realBranchDesktopSystemObjectRootFolderConfirmed =
     $output.Contains("adapterLegacyDispatch=Files") -and
     $output.Contains("comparison=match") -and
     $output.Contains("nonFatal=true shadowOnly=true")
+$realBranchDesktopSystemObjectFileManagerConfirmed =
+    $output.Contains("source=RealBranchDesktopSystemObjectFileManager") -and
+    $output.Contains("uiLabel=Files") -and
+    $output.Contains("actualDispatch=Files") -and
+    $output.Contains("resolvedType=LegacyAlias") -and
+    $output.Contains("typedDispatchCandidate=Files") -and
+    $output.Contains("typedDispatchCandidateComparison=match") -and
+    $output.Contains("nonFatal=true shadowOnly=true")
 $realBranchDesktopStateRestored =
     $output.Contains("[APPMODEL-LAUNCHSHADOW-SMOKE] real-branch helper before temporary desktop state mutation") -and
     $output.Contains("[LaunchShadowRealBranchMutation] phase=before temporaryDesktopStateMutation=true persistentDesktopStorageWrites=false nonFatal=true") -and
@@ -453,7 +491,8 @@ $realBranchFolderDesktopStateRestored =
     $output.Contains("realBranchFolderVisibleIconStateRestored=true") -and
     $output.Contains("realBranchFolderNotificationStateRestored=true") -and
     $output.Contains("realBranchFolderSourceOverrideStateRestored=true") -and
-    $output.Contains("realBranchFolderSuppressLaunchStateRestored=true")
+    $output.Contains("realBranchFolderSuppressLaunchStateRestored=true") -and
+    $output.Contains("realBranchFolderSelectedIconStateRestored=true")
 $realBranchFolderRestoreVerificationConfirmed =
     $output.Contains("[LaunchShadowRealBranchFolderRestoreVerification] phase=after realBranchFolderDesktopStateRestored=true") -and
     $output.Contains("realBranchFolderShortcutSlotRestored=true") -and
@@ -461,7 +500,8 @@ $realBranchFolderRestoreVerificationConfirmed =
     $output.Contains("realBranchFolderVisibleIconStateRestored=true") -and
     $output.Contains("realBranchFolderNotificationStateRestored=true") -and
     $output.Contains("realBranchFolderSourceOverrideStateRestored=true") -and
-    $output.Contains("realBranchFolderSuppressLaunchStateRestored=true")
+    $output.Contains("realBranchFolderSuppressLaunchStateRestored=true") -and
+    $output.Contains("realBranchFolderSelectedIconStateRestored=true")
 $realBranchSystemObjectRootFolderDesktopStateRestored =
     $output.Contains("[APPMODEL-LAUNCHSHADOW-SMOKE] real-branch system-object root-folder helper before temporary desktop state mutation") -and
     $output.Contains("[LaunchShadowRealBranchSystemObjectRootFolderMutation] phase=before temporaryDesktopStateMutation=true persistentDesktopStorageWrites=false nonFatal=true") -and
@@ -470,13 +510,32 @@ $realBranchSystemObjectRootFolderDesktopStateRestored =
     $output.Contains("realBranchSystemObjectRootFolderVisibleIconStateRestored=true") -and
     $output.Contains("realBranchSystemObjectRootFolderNotificationStateRestored=true") -and
     $output.Contains("realBranchSystemObjectRootFolderSourceOverrideStateRestored=true") -and
-    $output.Contains("realBranchSystemObjectRootFolderSuppressLaunchStateRestored=true")
+    $output.Contains("realBranchSystemObjectRootFolderSuppressLaunchStateRestored=true") -and
+    $output.Contains("realBranchSystemObjectRootFolderSelectedIconStateRestored=true")
 $realBranchSystemObjectRootFolderRestoreVerificationConfirmed =
     $output.Contains("[LaunchShadowRealBranchSystemObjectRootFolderRestoreVerification] phase=after realBranchSystemObjectRootFolderDesktopStateRestored=true") -and
     $output.Contains("realBranchSystemObjectRootFolderVisibleIconStateRestored=true") -and
     $output.Contains("realBranchSystemObjectRootFolderNotificationStateRestored=true") -and
     $output.Contains("realBranchSystemObjectRootFolderSourceOverrideStateRestored=true") -and
-    $output.Contains("realBranchSystemObjectRootFolderSuppressLaunchStateRestored=true")
+    $output.Contains("realBranchSystemObjectRootFolderSuppressLaunchStateRestored=true") -and
+    $output.Contains("realBranchSystemObjectRootFolderSelectedIconStateRestored=true")
+$realBranchSystemObjectFileManagerDesktopStateRestored =
+    $output.Contains("[APPMODEL-LAUNCHSHADOW-SMOKE] real-branch system-object File Manager helper before temporary desktop state mutation") -and
+    $output.Contains("[LaunchShadowRealBranchSystemObjectFileManagerMutation] phase=before temporaryDesktopStateMutation=true persistentDesktopStorageWrites=false nonFatal=true") -and
+    $output.Contains("[APPMODEL-LAUNCHSHADOW-SMOKE] real-branch system-object File Manager helper after temporary desktop state restoration") -and
+    $output.Contains("[LaunchShadowRealBranchSystemObjectFileManagerRestore] realBranchSystemObjectFileManagerDesktopStateRestored=true") -and
+    $output.Contains("realBranchSystemObjectFileManagerVisibleIconStateRestored=true") -and
+    $output.Contains("realBranchSystemObjectFileManagerNotificationStateRestored=true") -and
+    $output.Contains("realBranchSystemObjectFileManagerSourceOverrideStateRestored=true") -and
+    $output.Contains("realBranchSystemObjectFileManagerSuppressLaunchStateRestored=true") -and
+    $output.Contains("realBranchSystemObjectFileManagerSelectedIconStateRestored=true")
+$realBranchSystemObjectFileManagerRestoreVerificationConfirmed =
+    $output.Contains("[LaunchShadowRealBranchSystemObjectFileManagerRestoreVerification] phase=after realBranchSystemObjectFileManagerDesktopStateRestored=true") -and
+    $output.Contains("realBranchSystemObjectFileManagerVisibleIconStateRestored=true") -and
+    $output.Contains("realBranchSystemObjectFileManagerNotificationStateRestored=true") -and
+    $output.Contains("realBranchSystemObjectFileManagerSourceOverrideStateRestored=true") -and
+    $output.Contains("realBranchSystemObjectFileManagerSuppressLaunchStateRestored=true") -and
+    $output.Contains("realBranchSystemObjectFileManagerSelectedIconStateRestored=true")
 $persistentDesktopStorageWritesAbsent =
     $output.Contains("persistentDesktopStorageWrites=false")
 
@@ -498,11 +557,14 @@ if ($failed.Count -eq 0) {
         -RealBranchDesktopShortcutFolderConfirmed $realBranchDesktopShortcutFolderConfirmed `
         -RealBranchDesktopFilesystemFolderConfirmed $realBranchDesktopFilesystemFolderConfirmed `
         -RealBranchDesktopSystemObjectRootFolderConfirmed $realBranchDesktopSystemObjectRootFolderConfirmed `
+        -RealBranchDesktopSystemObjectFileManagerConfirmed $realBranchDesktopSystemObjectFileManagerConfirmed `
         -RealBranchDesktopStateRestored $realBranchDesktopStateRestored `
         -RealBranchFolderDesktopStateRestored $realBranchFolderDesktopStateRestored `
         -RealBranchFolderRestoreVerificationConfirmed $realBranchFolderRestoreVerificationConfirmed `
         -RealBranchSystemObjectRootFolderDesktopStateRestored $realBranchSystemObjectRootFolderDesktopStateRestored `
         -RealBranchSystemObjectRootFolderRestoreVerificationConfirmed $realBranchSystemObjectRootFolderRestoreVerificationConfirmed `
+        -RealBranchSystemObjectFileManagerDesktopStateRestored $realBranchSystemObjectFileManagerDesktopStateRestored `
+        -RealBranchSystemObjectFileManagerRestoreVerificationConfirmed $realBranchSystemObjectFileManagerRestoreVerificationConfirmed `
         -PersistentDesktopStorageWritesAbsent $persistentDesktopStorageWritesAbsent `
         -UnexpectedMismatchRows $unexpectedRows.Count `
         -SerialLogPath $serialLog
@@ -524,11 +586,14 @@ Write-AppModelLaunchShadowEvidence -Status "FAIL" `
     -RealBranchDesktopShortcutFolderConfirmed $realBranchDesktopShortcutFolderConfirmed `
     -RealBranchDesktopFilesystemFolderConfirmed $realBranchDesktopFilesystemFolderConfirmed `
     -RealBranchDesktopSystemObjectRootFolderConfirmed $realBranchDesktopSystemObjectRootFolderConfirmed `
+    -RealBranchDesktopSystemObjectFileManagerConfirmed $realBranchDesktopSystemObjectFileManagerConfirmed `
     -RealBranchDesktopStateRestored $realBranchDesktopStateRestored `
     -RealBranchFolderDesktopStateRestored $realBranchFolderDesktopStateRestored `
     -RealBranchFolderRestoreVerificationConfirmed $realBranchFolderRestoreVerificationConfirmed `
     -RealBranchSystemObjectRootFolderDesktopStateRestored $realBranchSystemObjectRootFolderDesktopStateRestored `
     -RealBranchSystemObjectRootFolderRestoreVerificationConfirmed $realBranchSystemObjectRootFolderRestoreVerificationConfirmed `
+    -RealBranchSystemObjectFileManagerDesktopStateRestored $realBranchSystemObjectFileManagerDesktopStateRestored `
+    -RealBranchSystemObjectFileManagerRestoreVerificationConfirmed $realBranchSystemObjectFileManagerRestoreVerificationConfirmed `
     -PersistentDesktopStorageWritesAbsent $persistentDesktopStorageWritesAbsent `
     -UnexpectedMismatchRows $unexpectedRows.Count `
     -SerialLogPath $serialLog
