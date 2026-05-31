@@ -326,7 +326,7 @@ static const char* bare_metal_static_launch_shadow_comparison(const gxos::apps::
     return "unexpected-mismatch";
 }
 
-static void log_bare_metal_static_app_shadow_only_observation(const char* originalLegacyAppName, const char* source = "BareMetalStaticApp")
+static void log_bare_metal_static_app_shadow_only_observation(const char* originalLegacyAppName, const char* source = "BareMetalStaticApp", const char* uiLabel = nullptr)
 {
     if (!originalLegacyAppName || !originalLegacyAppName[0]) return;
 
@@ -341,7 +341,7 @@ static void log_bare_metal_static_app_shadow_only_observation(const char* origin
     serial::puts("[LaunchTargetShadow] source=");
     serial::puts(source ? source : "BareMetalStaticApp");
     serial::puts(" uiLabel=");
-    serial::puts(originalLegacyAppName);
+    serial::puts(uiLabel && uiLabel[0] ? uiLabel : originalLegacyAppName);
     serial::puts(" actualDispatch=");
     serial::puts(originalLegacyAppName);
     serial::puts(" resolvedType=");
@@ -6449,6 +6449,7 @@ void run_launch_shadow_folder_fileopen_smoke()
     int trashSystemObjectIconIdx = -1;
     int systemObjectIconIdx = -1;
     int fileManagerSystemObjectIconIdx = -1;
+    int systemSettingsSystemObjectIconIdx = -1;
 
     desktop_str_copy(savedShortcutLabel, s_desktopShortcutLabels[shortcutSlot], (int)sizeof(savedShortcutLabel));
     desktop_str_copy(savedShortcutType, s_desktopShortcutTypes[shortcutSlot], (int)sizeof(savedShortcutType));
@@ -6467,6 +6468,8 @@ void run_launch_shadow_folder_fileopen_smoke()
                 systemObjectIconIdx = i;
             } else if (s_desktopIcons[i].systemObject == DesktopSystemObjectKind::FileManager) {
                 fileManagerSystemObjectIconIdx = i;
+            } else if (s_desktopIcons[i].systemObject == DesktopSystemObjectKind::SystemSettings) {
+                systemSettingsSystemObjectIconIdx = i;
             }
         }
     }
@@ -6538,6 +6541,14 @@ void run_launch_shadow_folder_fileopen_smoke()
     show_icon_notification(0);
     s_notification = savedNotification;
 
+    serial::puts("[APPMODEL-LAUNCHSHADOW-SMOKE] real-branch system-object System Settings helper before temporary desktop state mutation\n");
+    serial::puts("[LaunchShadowRealBranchSystemObjectSystemSettingsMutation] phase=before temporaryDesktopStateMutation=true persistentDesktopStorageWrites=false nonFatal=true\n");
+    s_visibleIconCount = 1;
+    s_visibleIconIndices[0] = systemSettingsSystemObjectIconIdx >= 0 ? systemSettingsSystemObjectIconIdx : 3;
+    s_launchShadowStaticAppSourceOverride = "RealBranchDesktopSystemObjectSystemSettings";
+    show_icon_notification(0);
+    s_notification = savedNotification;
+
     s_launchShadowFileOpenSourceOverride = nullptr;
     s_launchShadowStaticAppSourceOverride = nullptr;
     s_launchShadowSuppressRealBranchLaunch = false;
@@ -6589,6 +6600,8 @@ void run_launch_shadow_folder_fileopen_smoke()
     const bool systemObjectFileManagerDesktopStateRestored = visibleIconStateRestored && notificationStateRestored &&
         selectedIconStateRestored && overrideStateRestored && suppressLaunchStateRestored;
     const bool systemObjectTrashDesktopStateRestored = visibleIconStateRestored && notificationStateRestored &&
+        selectedIconStateRestored && overrideStateRestored && suppressLaunchStateRestored;
+    const bool systemObjectSystemSettingsDesktopStateRestored = visibleIconStateRestored && notificationStateRestored &&
         selectedIconStateRestored && overrideStateRestored && suppressLaunchStateRestored;
 
     serial::puts("[APPMODEL-LAUNCHSHADOW-SMOKE] real-branch folder helper after temporary desktop state restoration\n");
@@ -6712,6 +6725,35 @@ void run_launch_shadow_folder_fileopen_smoke()
     serial::puts(" realBranchSystemObjectTrashSuppressLaunchStateRestored=");
     serial::puts(suppressLaunchStateRestored ? "true" : "false");
     serial::puts(" realBranchSystemObjectTrashSelectedIconStateRestored=");
+    serial::puts(selectedIconStateRestored ? "true" : "false");
+    serial::puts(" persistentDesktopStorageWrites=false");
+    serial::puts(" nonFatal=true\n");
+    serial::puts("[APPMODEL-LAUNCHSHADOW-SMOKE] real-branch system-object System Settings helper after temporary desktop state restoration\n");
+    serial::puts("[LaunchShadowRealBranchSystemObjectSystemSettingsRestore] realBranchSystemObjectSystemSettingsDesktopStateRestored=");
+    serial::puts(systemObjectSystemSettingsDesktopStateRestored ? "true" : "false");
+    serial::puts(" realBranchSystemObjectSystemSettingsVisibleIconStateRestored=");
+    serial::puts(visibleIconStateRestored ? "true" : "false");
+    serial::puts(" realBranchSystemObjectSystemSettingsNotificationStateRestored=");
+    serial::puts(notificationStateRestored ? "true" : "false");
+    serial::puts(" realBranchSystemObjectSystemSettingsSourceOverrideStateRestored=");
+    serial::puts(overrideStateRestored ? "true" : "false");
+    serial::puts(" realBranchSystemObjectSystemSettingsSuppressLaunchStateRestored=");
+    serial::puts(suppressLaunchStateRestored ? "true" : "false");
+    serial::puts(" realBranchSystemObjectSystemSettingsSelectedIconStateRestored=");
+    serial::puts(selectedIconStateRestored ? "true" : "false");
+    serial::puts(" persistentDesktopStorageWrites=false");
+    serial::puts(" nonFatal=true\n");
+    serial::puts("[LaunchShadowRealBranchSystemObjectSystemSettingsRestoreVerification] phase=after realBranchSystemObjectSystemSettingsDesktopStateRestored=");
+    serial::puts(systemObjectSystemSettingsDesktopStateRestored ? "true" : "false");
+    serial::puts(" realBranchSystemObjectSystemSettingsVisibleIconStateRestored=");
+    serial::puts(visibleIconStateRestored ? "true" : "false");
+    serial::puts(" realBranchSystemObjectSystemSettingsNotificationStateRestored=");
+    serial::puts(notificationStateRestored ? "true" : "false");
+    serial::puts(" realBranchSystemObjectSystemSettingsSourceOverrideStateRestored=");
+    serial::puts(overrideStateRestored ? "true" : "false");
+    serial::puts(" realBranchSystemObjectSystemSettingsSuppressLaunchStateRestored=");
+    serial::puts(suppressLaunchStateRestored ? "true" : "false");
+    serial::puts(" realBranchSystemObjectSystemSettingsSelectedIconStateRestored=");
     serial::puts(selectedIconStateRestored ? "true" : "false");
     serial::puts(" persistentDesktopStorageWrites=false");
     serial::puts(" nonFatal=true\n");
@@ -7347,6 +7389,12 @@ static void show_icon_notification(int displayIndex)
                 if (try_launch_kernel_app("Files")) return;
                 break;
             case DesktopSystemObjectKind::SystemSettings:
+#if defined(GXOS_APPMODEL_TYPED_DISPATCH_SHADOW_ONLY) && defined(GXOS_BARE_METAL)
+                if (bare_metal_should_suppress_real_branch_launch()) {
+                    log_bare_metal_static_app_shadow_only_observation("DisplayOptions", bare_metal_active_static_app_shadow_source("DesktopSystemObjectSystemSettings"), label);
+                    return;
+                }
+#endif
                 if (try_launch_kernel_app("DisplayOptions")) return;
                 break;
             default:
