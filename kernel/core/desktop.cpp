@@ -326,7 +326,14 @@ static const char* bare_metal_static_launch_shadow_comparison(const gxos::apps::
     return "unexpected-mismatch";
 }
 
-static void log_bare_metal_static_app_shadow_only_observation(const char* originalLegacyAppName, const char* source = "BareMetalStaticApp", const char* uiLabel = nullptr, const char* actualBehavior = nullptr)
+static void log_bare_metal_static_app_shadow_only_observation(
+    const char* originalLegacyAppName,
+    const char* source = "BareMetalStaticApp",
+    const char* uiLabel = nullptr,
+    const char* actualBehavior = nullptr,
+    const char* comparisonOverride = nullptr,
+    const char* candidateStatusOverride = nullptr,
+    const char* candidateReasonOverride = nullptr)
 {
     if (!originalLegacyAppName || !originalLegacyAppName[0]) return;
 
@@ -336,7 +343,15 @@ static void log_bare_metal_static_app_shadow_only_observation(const char* origin
     const char* typedDispatchCandidate = appmodel::legacyDispatchStringForLaunchTarget(target, &adapterStatus, &adapterReason);
     const bool candidateMatchesActual = typedDispatchCandidate && typedDispatchCandidate[0] &&
         desktop_str_eq(typedDispatchCandidate, originalLegacyAppName);
-    const char* comparison = bare_metal_static_launch_shadow_comparison(target, originalLegacyAppName, typedDispatchCandidate);
+    const char* comparison = comparisonOverride && comparisonOverride[0]
+        ? comparisonOverride
+        : bare_metal_static_launch_shadow_comparison(target, originalLegacyAppName, typedDispatchCandidate);
+    const char* candidateStatus = candidateStatusOverride && candidateStatusOverride[0]
+        ? candidateStatusOverride
+        : adapterStatus;
+    const char* candidateReason = candidateReasonOverride && candidateReasonOverride[0]
+        ? candidateReasonOverride
+        : adapterReason;
 
     serial::puts("[LaunchTargetShadow] source=");
     serial::puts(source ? source : "BareMetalStaticApp");
@@ -357,9 +372,9 @@ static void log_bare_metal_static_app_shadow_only_observation(const char* origin
     serial::puts(" typedDispatchCandidateComparison=");
     serial::puts(comparison);
     serial::puts(" typedDispatchCandidateStatus=");
-    serial::puts(adapterStatus);
+    serial::puts(candidateStatus);
     serial::puts(" typedDispatchCandidateReason=");
-    serial::puts(adapterReason);
+    serial::puts(candidateReason);
     serial::puts(" status=");
     serial::puts(target.diagnosticStatus);
     serial::puts(" reason=");
@@ -427,6 +442,7 @@ static const char* s_launchShadowFileOpenSourceOverride = nullptr;
 static const char* s_launchShadowStaticAppSourceOverride = nullptr;
 static bool s_launchShadowSuppressRealBranchLaunch = false;
 static bool s_launchShadowSuppressEmbeddedControlPanelAction = false;
+static bool s_launchShadowSuppressEmbeddedAppModelAction = false;
 
 static const char* bare_metal_active_fileopen_shadow_source(const char* fallback)
 {
@@ -7264,6 +7280,76 @@ static void run_launch_shadow_start_menu_control_panel_smoke()
     serial::puts(" nonFatal=true\n");
 }
 
+static void run_launch_shadow_start_menu_app_model_smoke()
+{
+    const bool savedStartMenuOpen = s_startMenuOpen;
+    const NotificationToast savedNotification = s_notification;
+    const char* savedStaticAppSourceOverride = s_launchShadowStaticAppSourceOverride;
+    const bool savedSuppressEmbeddedAppModelAction = s_launchShadowSuppressEmbeddedAppModelAction;
+    const bool savedAppModelDialogOpen = s_appModelDialogOpen;
+    const int savedAppModelDialogHover = s_appModelDialogHover;
+    const int savedAppModelSelectedIndex = s_appModelSelectedIndex;
+    const char* savedAppModelStatus = s_appModelStatus;
+
+    serial::puts("[APPMODEL-LAUNCHSHADOW-SMOKE] real-branch Start Menu AppModel helper before temporary embedded-action state mutation\n");
+    serial::puts("[LaunchShadowRealBranchStartMenuAppModelMutation] phase=before temporaryEmbeddedActionStateMutation=true persistentDesktopStorageWrites=false nonFatal=true\n");
+    s_startMenuOpen = true;
+    s_launchShadowStaticAppSourceOverride = "RealBranchStartMenuAppModel";
+    s_launchShadowSuppressEmbeddedAppModelAction = true;
+    show_start_menu_notification("AppModel");
+
+    s_startMenuOpen = savedStartMenuOpen;
+    s_notification = savedNotification;
+    s_launchShadowStaticAppSourceOverride = savedStaticAppSourceOverride;
+    s_launchShadowSuppressEmbeddedAppModelAction = savedSuppressEmbeddedAppModelAction;
+    s_appModelDialogOpen = savedAppModelDialogOpen;
+    s_appModelDialogHover = savedAppModelDialogHover;
+    s_appModelSelectedIndex = savedAppModelSelectedIndex;
+    s_appModelStatus = savedAppModelStatus;
+
+    const bool startMenuStateRestored = s_startMenuOpen == savedStartMenuOpen;
+    const bool notificationStateRestored = notification_toast_matches(s_notification, savedNotification);
+    const bool sourceOverrideStateRestored = s_launchShadowStaticAppSourceOverride == savedStaticAppSourceOverride;
+    const bool suppressEmbeddedActionStateRestored =
+        s_launchShadowSuppressEmbeddedAppModelAction == savedSuppressEmbeddedAppModelAction;
+    const bool embeddedStateRestored = s_appModelDialogOpen == savedAppModelDialogOpen &&
+        s_appModelDialogHover == savedAppModelDialogHover &&
+        s_appModelSelectedIndex == savedAppModelSelectedIndex &&
+        s_appModelStatus == savedAppModelStatus;
+    const bool stateRestored = startMenuStateRestored && notificationStateRestored &&
+        sourceOverrideStateRestored && suppressEmbeddedActionStateRestored && embeddedStateRestored;
+
+    serial::puts("[APPMODEL-LAUNCHSHADOW-SMOKE] real-branch Start Menu AppModel helper after temporary embedded-action state restoration\n");
+    serial::puts("[LaunchShadowRealBranchStartMenuAppModelRestore] realBranchStartMenuAppModelStateRestored=");
+    serial::puts(stateRestored ? "true" : "false");
+    serial::puts(" realBranchStartMenuAppModelMenuOpenStateRestored=");
+    serial::puts(startMenuStateRestored ? "true" : "false");
+    serial::puts(" realBranchStartMenuAppModelNotificationStateRestored=");
+    serial::puts(notificationStateRestored ? "true" : "false");
+    serial::puts(" realBranchStartMenuAppModelSourceOverrideStateRestored=");
+    serial::puts(sourceOverrideStateRestored ? "true" : "false");
+    serial::puts(" realBranchStartMenuAppModelSuppressEmbeddedActionStateRestored=");
+    serial::puts(suppressEmbeddedActionStateRestored ? "true" : "false");
+    serial::puts(" realBranchStartMenuAppModelEmbeddedStateRestored=");
+    serial::puts(embeddedStateRestored ? "true" : "false");
+    serial::puts(" persistentDesktopStorageWrites=false");
+    serial::puts(" nonFatal=true\n");
+    serial::puts("[LaunchShadowRealBranchStartMenuAppModelRestoreVerification] phase=after realBranchStartMenuAppModelStateRestored=");
+    serial::puts(stateRestored ? "true" : "false");
+    serial::puts(" realBranchStartMenuAppModelMenuOpenStateRestored=");
+    serial::puts(startMenuStateRestored ? "true" : "false");
+    serial::puts(" realBranchStartMenuAppModelNotificationStateRestored=");
+    serial::puts(notificationStateRestored ? "true" : "false");
+    serial::puts(" realBranchStartMenuAppModelSourceOverrideStateRestored=");
+    serial::puts(sourceOverrideStateRestored ? "true" : "false");
+    serial::puts(" realBranchStartMenuAppModelSuppressEmbeddedActionStateRestored=");
+    serial::puts(suppressEmbeddedActionStateRestored ? "true" : "false");
+    serial::puts(" realBranchStartMenuAppModelEmbeddedStateRestored=");
+    serial::puts(embeddedStateRestored ? "true" : "false");
+    serial::puts(" persistentDesktopStorageWrites=false");
+    serial::puts(" nonFatal=true\n");
+}
+
 void run_launch_shadow_text_fileopen_smoke()
 {
     serial::puts("[APPMODEL-LAUNCHSHADOW-SMOKE] issuing text FileOpen SHADOW_ONLY probe\n");
@@ -7436,6 +7522,7 @@ void run_launch_shadow_text_fileopen_smoke()
     run_launch_shadow_start_menu_settings_smoke();
     run_launch_shadow_start_menu_right_column_shell_actions_smoke();
     run_launch_shadow_start_menu_control_panel_smoke();
+    run_launch_shadow_start_menu_app_model_smoke();
 }
 #endif
 
@@ -8131,6 +8218,19 @@ static void show_start_menu_notification(const char* label)
 {
     if (desktop_str_eq(label, "AppModel")) {
         s_startMenuOpen = false;
+#if defined(GXOS_APPMODEL_LAUNCHSHADOW_SMOKE_ACTIVE) && defined(GXOS_APPMODEL_TYPED_DISPATCH_SHADOW_ONLY) && defined(GXOS_BARE_METAL)
+        if (s_launchShadowSuppressEmbeddedAppModelAction) {
+            log_bare_metal_static_app_shadow_only_observation(
+                label,
+                bare_metal_active_static_app_shadow_source("StartMenuAppModel"),
+                label,
+                "embedded-app-model-diagnostic-viewer",
+                "unsupported-embedded-diagnostic-action",
+                "unsupported",
+                "Current adapter only reproduces the AppModel label; it does not encode the embedded app-model diagnostic viewer action");
+            return;
+        }
+#endif
         open_app_model_viewer();
         app::AppLogger::logLaunch(label, app::LaunchResult::NotAvailable);
         return;

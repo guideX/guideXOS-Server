@@ -273,16 +273,23 @@ static std::string navigatorHostedSmokeDiagnostic() {
     std::string formsReport = gxos::apps::Navigator::SmokeRuntimeReport();
     add("forms page loads", formsLoaded && formsUrl == "file:///docs/forms.html", "currentUrl=" + formsUrl);
     add("forms-lite detected", contains(formsReport, "Current Document.Forms=2") &&
-        contains(formsReport, "Current Document.Text inputs=1") &&
-        contains(formsReport, "Current Document.Checkboxes=1") &&
-        contains(formsReport, "Current Document.Radio buttons=2") &&
-        contains(formsReport, "Current Document.Textareas=1") &&
-        contains(formsReport, "Current Document.Selects=1") &&
+        contains(formsReport, "Current Document.Text inputs=2") &&
+        contains(formsReport, "Current Document.Checkboxes=2") &&
+        contains(formsReport, "Current Document.Radio buttons=4") &&
+        contains(formsReport, "Current Document.Textareas=2") &&
+        contains(formsReport, "Current Document.Selects=2") &&
         contains(formsReport, "Current Document.POST supported hosted=yes") &&
-        contains(formsReport, "Current Document.POST supported bare-metal=no"), "expected GET form plus control POST form");
+        contains(formsReport, "Current Document.POST supported bare-metal=no"), "expected GET form plus POST form each with all controls");
     bool formSubmitted = gxos::apps::Navigator::SmokeSubmitFirstForm("hello world");
     std::string submittedUrl = gxos::apps::Navigator::SmokeCurrentUrl();
-    add("forms-lite GET submission", formSubmitted && submittedUrl == "file:///docs/forms-result.html?q=hello+world", "currentUrl=" + submittedUrl);
+    // GET submission includes all form controls: text, checkbox, radio, textarea, select.
+    add("forms-lite GET submission", formSubmitted &&
+        contains(submittedUrl, "file:///docs/forms-result.html") &&
+        contains(submittedUrl, "q=hello+world") &&
+        contains(submittedUrl, "subscribe=yes") &&
+        contains(submittedUrl, "color=blue") &&
+        contains(submittedUrl, "note=") &&
+        contains(submittedUrl, "size=medium"), "currentUrl=" + submittedUrl);
 
     bool postFormLoaded = gxos::apps::Navigator::SmokeNavigateTo("http://127.0.0.1:8080/navigator-smoke/forms-post.html");
     std::string postFormReport = gxos::apps::Navigator::SmokeRuntimeReport();

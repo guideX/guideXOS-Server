@@ -32,7 +32,7 @@ bool DisplayOptions::s_showDesktopSystemSettings = false;
 
 namespace {
     const int kWindowW = 800;
-    const int kWindowH = 560;
+    const int kWindowH = 700;
     const int kTabY = 18;
     const int kTabW = 220;
     const int kTabH = 40;
@@ -46,7 +46,7 @@ namespace {
     const int kGapY = 22;
     const int kCols = 5;
     const int kSelectButtonX = 26;
-    const int kButtonY = 486;
+    const int kButtonY = 638;
     const int kButtonW = 180;
     const int kButtonH = 36;
     const int kDesktopIconsX = 46;
@@ -278,7 +278,7 @@ void DisplayOptions::render()
     drawButton(250, kTabY, kTabW, kTabH, "Desktop Icons", s_activeTab == 2, true);
     drawButton(480, kTabY, kTabW, kTabH, "Gradients", s_activeTab == 1, true);
     drawText(s_windowId, 26, 72, s_activeTab == 2 ? "Choose which system icons appear on the desktop:" : (s_activeTab == 0 ? "Select a background from the gallery:" : "Select a gradient from the gallery:"));
-    drawRect(s_windowId, 20, 92, 742, 372, 22, 22, 24);
+    drawRect(s_windowId, 20, 92, 742, 532, 22, 22, 24);
 
     if (s_activeTab == 0) {
         const auto& backgrounds = WallpaperRegistry::BuiltInBackgrounds();
