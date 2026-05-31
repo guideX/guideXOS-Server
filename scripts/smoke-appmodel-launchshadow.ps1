@@ -35,6 +35,7 @@ function Write-AppModelLaunchShadowEvidence {
         [bool]$RealBranchStartMenuFilesConfirmed,
         [bool]$RealBranchStartMenuConsoleConfirmed,
         [bool]$RealBranchStartMenuSettingsConfirmed,
+        [bool]$RealBranchStartMenuSettingsExpectedNonFatalDriftConfirmed,
         [bool]$RealBranchDesktopStateRestored,
         [bool]$RealBranchFolderDesktopStateRestored,
         [bool]$RealBranchFolderRestoreVerificationConfirmed,
@@ -81,6 +82,7 @@ function Write-AppModelLaunchShadowEvidence {
     $realBranchStartMenuFilesConfirmedFlag = if ($RealBranchStartMenuFilesConfirmed) { "true" } else { "false" }
     $realBranchStartMenuConsoleConfirmedFlag = if ($RealBranchStartMenuConsoleConfirmed) { "true" } else { "false" }
     $realBranchStartMenuSettingsConfirmedFlag = if ($RealBranchStartMenuSettingsConfirmed) { "true" } else { "false" }
+    $realBranchStartMenuSettingsExpectedNonFatalDriftConfirmedFlag = if ($RealBranchStartMenuSettingsExpectedNonFatalDriftConfirmed) { "true" } else { "false" }
     $realBranchDesktopStateRestoredFlag = if ($RealBranchDesktopStateRestored) { "true" } else { "false" }
     $realBranchFolderDesktopStateRestoredFlag = if ($RealBranchFolderDesktopStateRestored) { "true" } else { "false" }
     $realBranchFolderRestoreVerificationConfirmedFlag = if ($RealBranchFolderRestoreVerificationConfirmed) { "true" } else { "false" }
@@ -132,6 +134,7 @@ function Write-AppModelLaunchShadowEvidence {
         "realBranchStartMenuFilesConfirmed=$realBranchStartMenuFilesConfirmedFlag",
         "realBranchStartMenuConsoleConfirmed=$realBranchStartMenuConsoleConfirmedFlag",
         "realBranchStartMenuSettingsConfirmed=$realBranchStartMenuSettingsConfirmedFlag",
+        "realBranchStartMenuSettingsExpectedNonFatalDriftConfirmed=$realBranchStartMenuSettingsExpectedNonFatalDriftConfirmedFlag",
         "realBranchDesktopStateRestored=$realBranchDesktopStateRestoredFlag",
         "realBranchFolderDesktopStateRestored=$realBranchFolderDesktopStateRestoredFlag",
         "realBranchFolderRestoreVerificationConfirmed=$realBranchFolderRestoreVerificationConfirmedFlag",
@@ -731,6 +734,10 @@ $realBranchStartMenuConsoleConfirmed =
     [regex]::IsMatch($output, 'source=RealBranchStartMenuConsole uiLabel=Console actualDispatch=Console resolvedType=ShellAction appId= resolvedDispatch=Console typedDispatchCandidate=Console typedDispatchCandidateMatchesActual=true typedDispatchCandidateComparison=match .* nonFatal=true shadowOnly=true')
 $realBranchStartMenuSettingsConfirmed =
     [regex]::IsMatch($output, 'source=RealBranchStartMenuSettings uiLabel=Settings actualDispatch=Settings resolvedType=ShellAction appId= resolvedDispatch=DisplayOptions typedDispatchCandidate=DisplayOptions typedDispatchCandidateMatchesActual=false typedDispatchCandidateComparison=unexpected-mismatch .* nonFatal=true shadowOnly=true')
+# The right-column Settings affordance still dispatches literal "Settings".
+# DisplayOptions is a diagnostic-only typed candidate until that path is migrated.
+$realBranchStartMenuSettingsExpectedNonFatalDriftConfirmed =
+    $realBranchStartMenuSettingsConfirmed
 $realBranchDesktopStateRestored =
     $output.Contains("[APPMODEL-LAUNCHSHADOW-SMOKE] real-branch helper before temporary desktop state mutation") -and
     $output.Contains("[LaunchShadowRealBranchMutation] phase=before temporaryDesktopStateMutation=true persistentDesktopStorageWrites=false nonFatal=true") -and
@@ -948,6 +955,9 @@ if (-not $realBranchStartMenuConsoleRestoreVerificationConfirmed) {
 if (-not $realBranchStartMenuSettingsConfirmed) {
     $failed += "Start Menu Settings real-branch row did not match the expected nonfatal ShellAction dispatch mismatch evidence"
 }
+if (-not $realBranchStartMenuSettingsExpectedNonFatalDriftConfirmed) {
+    $failed += "Start Menu Settings expected nonfatal Settings-to-DisplayOptions drift evidence was incomplete"
+}
 if (-not $realBranchStartMenuSettingsStateRestored) {
     $failed += "Start Menu Settings state restoration evidence was incomplete"
 }
@@ -977,6 +987,7 @@ if ($failed.Count -eq 0) {
         -RealBranchStartMenuFilesConfirmed $realBranchStartMenuFilesConfirmed `
         -RealBranchStartMenuConsoleConfirmed $realBranchStartMenuConsoleConfirmed `
         -RealBranchStartMenuSettingsConfirmed $realBranchStartMenuSettingsConfirmed `
+        -RealBranchStartMenuSettingsExpectedNonFatalDriftConfirmed $realBranchStartMenuSettingsExpectedNonFatalDriftConfirmed `
         -RealBranchDesktopStateRestored $realBranchDesktopStateRestored `
         -RealBranchFolderDesktopStateRestored $realBranchFolderDesktopStateRestored `
         -RealBranchFolderRestoreVerificationConfirmed $realBranchFolderRestoreVerificationConfirmed `
@@ -1027,6 +1038,7 @@ Write-AppModelLaunchShadowEvidence -Status "FAIL" `
     -RealBranchStartMenuFilesConfirmed $realBranchStartMenuFilesConfirmed `
     -RealBranchStartMenuConsoleConfirmed $realBranchStartMenuConsoleConfirmed `
     -RealBranchStartMenuSettingsConfirmed $realBranchStartMenuSettingsConfirmed `
+    -RealBranchStartMenuSettingsExpectedNonFatalDriftConfirmed $realBranchStartMenuSettingsExpectedNonFatalDriftConfirmed `
     -RealBranchDesktopStateRestored $realBranchDesktopStateRestored `
     -RealBranchFolderDesktopStateRestored $realBranchFolderDesktopStateRestored `
     -RealBranchFolderRestoreVerificationConfirmed $realBranchFolderRestoreVerificationConfirmed `
