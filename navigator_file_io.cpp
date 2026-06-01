@@ -294,6 +294,13 @@ std::string imageLoaderPathForFile(const std::string& absolutePath)
 
 bool writeTextFile(const std::string& absolutePath, const std::string& text)
 {
+	const char* downloadsDir = "/downloads";
+	kernel::vfs::FileInfo info{};
+	if (absolutePath.rfind("/downloads/", 0) == 0 &&
+		kernel::vfs::stat(downloadsDir, &info) != kernel::vfs::VFS_OK) {
+		kernel::vfs::mkdir(downloadsDir);
+	}
+
 	int32_t ret = kernel::vfs::write_file(
 		absolutePath.c_str(),
 		text.c_str(),

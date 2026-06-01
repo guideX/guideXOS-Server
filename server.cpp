@@ -298,21 +298,36 @@ static std::string navigatorHostedSmokeDiagnostic() {
     add("forms-lite POST page loads", postFormLoaded && gxos::apps::Navigator::SmokeCurrentUrl() == "http://127.0.0.1:8080/navigator-smoke/forms-post.html",
         "currentUrl=" + gxos::apps::Navigator::SmokeCurrentUrl());
     add("forms-lite POST controls detected", contains(postFormReport, "Current Document.Forms=1") &&
-        contains(postFormReport, "Current Document.Text inputs=1") &&
-        contains(postFormReport, "Current Document.Checkboxes=1") &&
+        contains(postFormReport, "Current Document.Text inputs=2") &&
+        contains(postFormReport, "Current Document.Checkboxes=2") &&
         contains(postFormReport, "Current Document.Radio buttons=2") &&
         contains(postFormReport, "Current Document.Textareas=1") &&
         contains(postFormReport, "Current Document.Selects=1"), "expected POST controls");
     bool postSubmitted = gxos::apps::Navigator::SmokeSubmitFirstForm("posted value");
     std::string postSubmittedUrl = gxos::apps::Navigator::SmokeCurrentUrl();
+    std::string postResultText = gxos::apps::Navigator::SmokeCurrentDocumentText();
     int postFindMatches = gxos::apps::Navigator::SmokeFindInPage("POST OK");
     std::string postResultReport = gxos::apps::Navigator::SmokeRuntimeReport();
     add("forms-lite POST submission", postSubmitted &&
         postSubmittedUrl == "http://127.0.0.1:8080/navigator-smoke/post-echo" &&
         postFindMatches > 0 &&
+        contains(postResultReport, "Current Document.Last submitted form action=http://127.0.0.1:8080/navigator-smoke/post-echo") &&
         contains(postResultReport, "Current Document.Last submitted form method=post") &&
-        contains(postResultReport, "Current Document.Last submitted form status=POST submitted"),
+        contains(postResultReport, "Current Document.Last submitted form status=POST submitted") &&
+        contains(postResultReport, "Current Document.Last POST HTTP status=200 OK") &&
+        contains(postResultReport, "Current Document.Last POST content type=text/html"),
         "currentUrl=" + postSubmittedUrl + " matches=" + std::to_string(postFindMatches));
+    add("forms-lite POST request headers", contains(postResultText, "Method: POST") &&
+        contains(postResultText, "Content-Type: application/x-www-form-urlencoded") &&
+        contains(postResultText, "Host: 127.0.0.1:8080") &&
+        contains(postResultText, "User-Agent: guideXOS-Navigator/0.1") &&
+        contains(postResultText, "Accept-Encoding: identity") &&
+        contains(postResultText, "Connection: close"), "echo response contains required hosted POST headers");
+    add("forms-lite POST encoded successful controls", contains(postResultText,
+        "q=posted+value&agree=yes&kind=alpha&note=hello%0Asecond+line&size=m") &&
+        !contains(postResultText, "omit=no") &&
+        !contains(postResultText, "unnamed+control+omitted") &&
+        !contains(postResultText, "kind=beta"), "echo response contains encoded successful controls only");
 
     bool downloadsLoaded = gxos::apps::Navigator::SmokeNavigateTo("about:downloads");
     std::string downloadsUrl = gxos::apps::Navigator::SmokeCurrentUrl();
@@ -330,6 +345,19 @@ static std::string navigatorHostedSmokeDiagnostic() {
             if (!std::isalnum(ch) && ch != '.' && ch != '-' && ch != '_') return std::string();
         }
         return "/downloads/" + fileName;
+    };
+    auto fileNameFromDownloadUrl = [](const std::string& fileUrl) {
+        const std::string prefix = "file:///downloads/";
+        return fileUrl.rfind(prefix, 0) == 0 ? fileUrl.substr(prefix.size()) : std::string();
+    };
+    auto hasDuplicateSuffix = [&fileNameFromDownloadUrl](const std::string& firstUrl, const std::string& secondUrl) {
+        const std::string firstName = fileNameFromDownloadUrl(firstUrl);
+        const std::string secondName = fileNameFromDownloadUrl(secondUrl);
+        if (firstName.empty() || secondName.empty()) return false;
+        const size_t dot = firstName.rfind('.');
+        const std::string stem = dot == std::string::npos ? firstName : firstName.substr(0, dot);
+        const std::string ext = dot == std::string::npos ? std::string() : firstName.substr(dot);
+        return secondName == stem + "-1" + ext;
     };
     auto readSavedText = [&](const std::string& fileUrl, std::string& text) {
         const std::string path = safeDownloadPathFromFileUrl(fileUrl);
@@ -369,6 +397,9 @@ static std::string navigatorHostedSmokeDiagnostic() {
         !safeDownloadPathFromFileUrl(duplicateSaveTextFileUrl).empty() &&
         duplicateSaveTextFileUrl != saveTextFileUrl,
         "first=" + saveTextFileUrl + " second=" + duplicateSaveTextFileUrl);
+    add("duplicate save-page-text appends -1 suffix", duplicateSaveTextLoaded &&
+        hasDuplicateSuffix(saveTextFileUrl, duplicateSaveTextFileUrl),
+        "first=" + saveTextFileUrl + " second=" + duplicateSaveTextFileUrl);
 
     bool docsReloadedForSource = gxos::apps::Navigator::SmokeNavigateToQuiet("file:///docs/index.html");
     bool viewSourceLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("about:view-source");
@@ -384,6 +415,13 @@ static std::string navigatorHostedSmokeDiagnostic() {
         contains(savedSource, "<html"), "fileUrl=" + saveSourceFileUrl + " bytes=" + std::to_string(savedSource.size()));
     add("save-page-source uses safe file link", !safeDownloadPathFromFileUrl(saveSourceFileUrl).empty(),
         "fileUrl=" + saveSourceFileUrl);
+
+    bool duplicateSaveSourceLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("about:save-page-source");
+    std::string duplicateSaveSourceFileUrl = gxos::apps::Navigator::SmokeCurrentLinkUrl("Open saved file");
+    add("duplicate save-page-source appends -1 suffix", duplicateSaveSourceLoaded &&
+        !safeDownloadPathFromFileUrl(duplicateSaveSourceFileUrl).empty() &&
+        hasDuplicateSuffix(saveSourceFileUrl, duplicateSaveSourceFileUrl),
+        "first=" + saveSourceFileUrl + " second=" + duplicateSaveSourceFileUrl);
 
     bool downloadsAfterSave = gxos::apps::Navigator::SmokeNavigateToQuiet("about:downloads");
     std::string downloadsAfterSaveUrl = gxos::apps::Navigator::SmokeCurrentUrl();

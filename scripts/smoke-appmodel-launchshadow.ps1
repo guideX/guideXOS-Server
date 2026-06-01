@@ -24,6 +24,7 @@ function Write-AppModelLaunchShadowEvidence {
         [bool]$DesktopFilesystemTextFileShadowOnlyConfirmed,
         [bool]$RealBranchDesktopShortcutTextFileConfirmed,
         [bool]$RealBranchDesktopFilesystemTextFileConfirmed,
+        [bool]$RealBranchFileAssociationsConfirmed,
         [bool]$RealBranchDesktopShortcutFolderConfirmed,
         [bool]$RealBranchDesktopFilesystemFolderConfirmed,
         [bool]$RealBranchDesktopSystemObjectRootFolderConfirmed,
@@ -44,6 +45,8 @@ function Write-AppModelLaunchShadowEvidence {
         [bool]$RealBranchStartMenuAppModelConfirmed,
         [bool]$RealBranchStartMenuAppModelUnsupportedDiagnosticTargetConfirmed,
         [bool]$RealBranchDesktopStateRestored,
+        [bool]$RealBranchFileAssociationsStateRestored,
+        [bool]$RealBranchFileAssociationsRestoreVerificationConfirmed,
         [bool]$RealBranchFolderDesktopStateRestored,
         [bool]$RealBranchFolderRestoreVerificationConfirmed,
         [bool]$RealBranchSystemObjectRootFolderDesktopStateRestored,
@@ -86,6 +89,7 @@ function Write-AppModelLaunchShadowEvidence {
     $desktopFilesystemTextFileConfirmed = if ($DesktopFilesystemTextFileShadowOnlyConfirmed) { "true" } else { "false" }
     $realBranchDesktopShortcutTextFileConfirmedFlag = if ($RealBranchDesktopShortcutTextFileConfirmed) { "true" } else { "false" }
     $realBranchDesktopFilesystemTextFileConfirmedFlag = if ($RealBranchDesktopFilesystemTextFileConfirmed) { "true" } else { "false" }
+    $realBranchFileAssociationsConfirmedFlag = if ($RealBranchFileAssociationsConfirmed) { "true" } else { "false" }
     $realBranchDesktopShortcutFolderConfirmedFlag = if ($RealBranchDesktopShortcutFolderConfirmed) { "true" } else { "false" }
     $realBranchDesktopFilesystemFolderConfirmedFlag = if ($RealBranchDesktopFilesystemFolderConfirmed) { "true" } else { "false" }
     $realBranchDesktopSystemObjectRootFolderConfirmedFlag = if ($RealBranchDesktopSystemObjectRootFolderConfirmed) { "true" } else { "false" }
@@ -106,6 +110,8 @@ function Write-AppModelLaunchShadowEvidence {
     $realBranchStartMenuAppModelConfirmedFlag = if ($RealBranchStartMenuAppModelConfirmed) { "true" } else { "false" }
     $realBranchStartMenuAppModelUnsupportedDiagnosticTargetConfirmedFlag = if ($RealBranchStartMenuAppModelUnsupportedDiagnosticTargetConfirmed) { "true" } else { "false" }
     $realBranchDesktopStateRestoredFlag = if ($RealBranchDesktopStateRestored) { "true" } else { "false" }
+    $realBranchFileAssociationsStateRestoredFlag = if ($RealBranchFileAssociationsStateRestored) { "true" } else { "false" }
+    $realBranchFileAssociationsRestoreVerificationConfirmedFlag = if ($RealBranchFileAssociationsRestoreVerificationConfirmed) { "true" } else { "false" }
     $realBranchFolderDesktopStateRestoredFlag = if ($RealBranchFolderDesktopStateRestored) { "true" } else { "false" }
     $realBranchFolderRestoreVerificationConfirmedFlag = if ($RealBranchFolderRestoreVerificationConfirmed) { "true" } else { "false" }
     $realBranchSystemObjectRootFolderDesktopStateRestoredFlag = if ($RealBranchSystemObjectRootFolderDesktopStateRestored) { "true" } else { "false" }
@@ -153,6 +159,7 @@ function Write-AppModelLaunchShadowEvidence {
         "desktopFilesystemTextFileShadowOnlyConfirmed=$desktopFilesystemTextFileConfirmed",
         "realBranchDesktopShortcutTextFileConfirmed=$realBranchDesktopShortcutTextFileConfirmedFlag",
         "realBranchDesktopFilesystemTextFileConfirmed=$realBranchDesktopFilesystemTextFileConfirmedFlag",
+        "realBranchFileAssociationsConfirmed=$realBranchFileAssociationsConfirmedFlag",
         "realBranchDesktopShortcutFolderConfirmed=$realBranchDesktopShortcutFolderConfirmedFlag",
         "realBranchDesktopFilesystemFolderConfirmed=$realBranchDesktopFilesystemFolderConfirmedFlag",
         "realBranchDesktopSystemObjectRootFolderConfirmed=$realBranchDesktopSystemObjectRootFolderConfirmedFlag",
@@ -173,6 +180,8 @@ function Write-AppModelLaunchShadowEvidence {
         "realBranchStartMenuAppModelConfirmed=$realBranchStartMenuAppModelConfirmedFlag",
         "realBranchStartMenuAppModelUnsupportedDiagnosticTargetConfirmed=$realBranchStartMenuAppModelUnsupportedDiagnosticTargetConfirmedFlag",
         "realBranchDesktopStateRestored=$realBranchDesktopStateRestoredFlag",
+        "realBranchFileAssociationsStateRestored=$realBranchFileAssociationsStateRestoredFlag",
+        "realBranchFileAssociationsRestoreVerificationConfirmed=$realBranchFileAssociationsRestoreVerificationConfirmedFlag",
         "realBranchFolderDesktopStateRestored=$realBranchFolderDesktopStateRestoredFlag",
         "realBranchFolderRestoreVerificationConfirmed=$realBranchFolderRestoreVerificationConfirmedFlag",
         "realBranchSystemObjectRootFolderDesktopStateRestored=$realBranchSystemObjectRootFolderDesktopStateRestoredFlag",
@@ -287,6 +296,96 @@ if (-not (Test-Path $fat32Disk)) {
     throw "FAT32 test disk not found: $fat32Disk. Run .\scripts\create-test-disks.ps1 first."
 }
 
+function New-AppModelFileAssociationFixtureDisk {
+    param(
+        [string]$SourcePath,
+        [string]$DestinationPath
+    )
+
+    Copy-Item -Path $SourcePath -Destination $DestinationPath -Force
+    $stream = [System.IO.File]::Open($DestinationPath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
+    try {
+        $boot = New-Object byte[] 512
+        [void]$stream.Read($boot, 0, $boot.Length)
+        $bytesPerSector = [BitConverter]::ToUInt16($boot, 11)
+        $sectorsPerCluster = $boot[13]
+        $reservedSectors = [BitConverter]::ToUInt16($boot, 14)
+        $fatCount = $boot[16]
+        $fatSectors = [BitConverter]::ToUInt32($boot, 36)
+        $rootCluster = [BitConverter]::ToUInt32($boot, 44)
+        $dataStartSector = $reservedSectors + ($fatCount * $fatSectors)
+
+        function Read-DirectoryCluster([uint32]$Cluster) {
+            $bytes = New-Object byte[] ($script:sectorsPerCluster * $script:bytesPerSector)
+            $script:stream.Position = ($script:dataStartSector + (($Cluster - 2) * $script:sectorsPerCluster)) * $script:bytesPerSector
+            [void]$script:stream.Read($bytes, 0, $bytes.Length)
+            return $bytes
+        }
+
+        function Write-DirectoryCluster([uint32]$Cluster, [byte[]]$Bytes) {
+            $script:stream.Position = ($script:dataStartSector + (($Cluster - 2) * $script:sectorsPerCluster)) * $script:bytesPerSector
+            $script:stream.Write($Bytes, 0, $Bytes.Length)
+        }
+
+        function Find-ShortEntryOffset([byte[]]$Bytes, [string]$ShortName) {
+            for ($offset = 0; $offset -lt $Bytes.Length; $offset += 32) {
+                if ($Bytes[$offset] -eq 0) { break }
+                if ($Bytes[$offset] -eq 0xE5 -or $Bytes[$offset + 11] -eq 0x0F) { continue }
+                if ([Text.Encoding]::ASCII.GetString($Bytes, $offset, 11) -eq $ShortName) { return $offset }
+            }
+            return -1
+        }
+
+        function Find-FreeEntryOffset([byte[]]$Bytes) {
+            for ($offset = 0; $offset -lt $Bytes.Length; $offset += 32) {
+                # Deleted short entries can still have a live long-name entry immediately before them.
+                if ($Bytes[$offset] -eq 0) { return $offset }
+            }
+            return -1
+        }
+
+        $script:stream = $stream
+        $script:bytesPerSector = $bytesPerSector
+        $script:sectorsPerCluster = $sectorsPerCluster
+        $script:dataStartSector = $dataStartSector
+
+        $rootBytes = Read-DirectoryCluster $rootCluster
+        $templateOffset = Find-ShortEntryOffset $rootBytes "README  TXT"
+        $appsOffset = Find-ShortEntryOffset $rootBytes "APPS       "
+        if ($templateOffset -lt 0 -or $appsOffset -lt 0) {
+            throw "Unable to find README.txt or /apps in FAT32 smoke fixture disk."
+        }
+
+        $appsCluster = ([BitConverter]::ToUInt16($rootBytes, $appsOffset + 20) -shl 16) -bor [BitConverter]::ToUInt16($rootBytes, $appsOffset + 26)
+        $appsBytes = Read-DirectoryCluster $appsCluster
+        $template = New-Object byte[] 32
+        [Array]::Copy($rootBytes, $templateOffset, $template, 0, 32)
+
+        foreach ($fixture in @(
+            @{ Bytes = $rootBytes; Cluster = $rootCluster; ShortName = "EVENTS  LOG" },
+            @{ Bytes = $appsBytes; Cluster = $appsCluster; ShortName = "CONFIG  CFG" },
+            @{ Bytes = $appsBytes; Cluster = $appsCluster; ShortName = "CONFIG  INI" }
+        )) {
+            $freeOffset = Find-FreeEntryOffset $fixture.Bytes
+            if ($freeOffset -lt 0) { throw "No FAT32 directory slot available for $($fixture.ShortName)." }
+            [Array]::Copy($template, 0, $fixture.Bytes, $freeOffset, 32)
+            $shortNameBytes = [Text.Encoding]::ASCII.GetBytes($fixture.ShortName)
+            [Array]::Copy($shortNameBytes, 0, $fixture.Bytes, $freeOffset, 11)
+            Write-DirectoryCluster $fixture.Cluster $fixture.Bytes
+        }
+    } catch {
+        $stream.Dispose()
+        Remove-Item $DestinationPath -Force -ErrorAction SilentlyContinue
+        throw
+    } finally {
+        if ($stream) { $stream.Dispose() }
+        Remove-Variable -Scope Script -Name stream,bytesPerSector,sectorsPerCluster,dataStartSector -ErrorAction SilentlyContinue
+    }
+}
+
+$fixtureFat32Disk = Join-Path $LogDir "appmodel-launchshadow-fat32-$stamp.img"
+New-AppModelFileAssociationFixtureDisk -SourcePath $fat32Disk -DestinationPath $fixtureFat32Disk
+
 $startup = Join-Path $esp "startup.nsh"
 $createdStartup = $false
 if (-not (Test-Path $startup)) {
@@ -298,7 +397,7 @@ $args = @(
     "-machine", "pc",
     "-drive", "if=pflash,format=raw,readonly=on,file=`"$ovmf`"",
     "-drive", "file=fat:rw:`"$esp`",format=raw,if=ide,index=0",
-    "-drive", "file=`"$fat32Disk`",format=raw,if=ide,index=1,media=disk",
+    "-drive", "file=`"$fixtureFat32Disk`",format=raw,if=ide,index=1,media=disk",
     "-m", "512M",
     "-vga", "std",
     "-display", "none",
@@ -306,8 +405,9 @@ $args = @(
     "-no-reboot"
 )
 
-$proc = Start-Process -FilePath $qemu -ArgumentList $args -PassThru -WindowStyle Hidden
+$proc = $null
 try {
+    $proc = Start-Process -FilePath $qemu -ArgumentList $args -PassThru -WindowStyle Hidden
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     while (-not $proc.HasExited -and (Get-Date) -lt $deadline) {
         Start-Sleep -Milliseconds 500
@@ -327,6 +427,7 @@ try {
     if ($createdStartup) {
         Remove-Item $startup -ErrorAction SilentlyContinue
     }
+    Remove-Item $fixtureFat32Disk -Force -ErrorAction SilentlyContinue
     Restore-NormalKernelBuild
 }
 
@@ -745,6 +846,37 @@ $checks = @(
     "[LaunchShadowRealBranchRestoreVerification] phase=after realBranchDesktopStateRestored=true",
     "persistentDesktopStorageWrites=false",
     "nonFatal=true",
+    "[APPMODEL-LAUNCHSHADOW-SMOKE] real-branch file associations helper before temporary desktop state mutation",
+    "[LaunchShadowRealBranchFileAssociationsMutation] phase=before temporaryDesktopStateMutation=true temporaryFixtureWrites=false hostPreparedFixtures=true persistentDesktopStorageWrites=false nonFatal=true",
+    "[LaunchShadowRealBranchFileAssociationFixture] path=/events.log ready=true",
+    "[LaunchShadowRealBranchFileAssociationFixture] path=/apps/config.cfg ready=true",
+    "[LaunchShadowRealBranchFileAssociationFixture] path=/apps/config.ini ready=true",
+    "source=RealBranchDesktopShortcutLogFile",
+    "handler=Notepad",
+    "path=/events.log",
+    "source=RealBranchDesktopFilesystemLogFile",
+    "source=RealBranchDesktopShortcutCfgFile",
+    "path=/apps/config.cfg",
+    "source=RealBranchDesktopFilesystemCfgFile",
+    "source=RealBranchDesktopShortcutIniFile",
+    "path=/apps/config.ini",
+    "source=RealBranchDesktopFilesystemIniFile",
+    "resolvedType=FileOpen",
+    "adapterLegacyDispatch=Notepad",
+    "comparison=match",
+    "nonFatal=true shadowOnly=true",
+    "[APPMODEL-LAUNCHSHADOW-SMOKE] real-branch file associations helper after temporary desktop state restoration",
+    "[LaunchShadowRealBranchFileAssociationsRestore] realBranchFileAssociationsStateRestored=true",
+    "realBranchFileAssociationsFixturesReady=true",
+    "realBranchFileAssociationsFixtureWritesRestored=true",
+    "realBranchFileAssociationsShortcutSlotRestored=true",
+    "realBranchFileAssociationsFilesystemSlotRestored=true",
+    "realBranchFileAssociationsVisibleIconStateRestored=true",
+    "realBranchFileAssociationsNotificationStateRestored=true",
+    "realBranchFileAssociationsSourceOverrideStateRestored=true",
+    "realBranchFileAssociationsSuppressLaunchStateRestored=true",
+    "realBranchFileAssociationsSelectedIconStateRestored=true",
+    "[LaunchShadowRealBranchFileAssociationsRestoreVerification] phase=after realBranchFileAssociationsStateRestored=true",
     "[APPMODEL-LAUNCHSHADOW-SMOKE] text FileOpen SHADOW_ONLY probe done",
     "[APPMODEL-LAUNCHSHADOW-SMOKE] done"
 )
@@ -820,6 +952,13 @@ $realBranchDesktopFilesystemTextFileConfirmed =
     $output.Contains("adapterLegacyDispatch=Notepad") -and
     $output.Contains("comparison=match") -and
     $output.Contains("nonFatal=true shadowOnly=true")
+$realBranchFileAssociationsConfirmed =
+    [regex]::IsMatch($output, 'source=RealBranchDesktopShortcutLogFile handler=Notepad path=/events\.log resolvedType=FileOpen .* adapterLegacyDispatch=Notepad .* comparison=match .* nonFatal=true shadowOnly=true') -and
+    [regex]::IsMatch($output, 'source=RealBranchDesktopFilesystemLogFile handler=Notepad path=/events\.log resolvedType=FileOpen .* adapterLegacyDispatch=Notepad .* comparison=match .* nonFatal=true shadowOnly=true') -and
+    [regex]::IsMatch($output, 'source=RealBranchDesktopShortcutCfgFile handler=Notepad path=/apps/config\.cfg resolvedType=FileOpen .* adapterLegacyDispatch=Notepad .* comparison=match .* nonFatal=true shadowOnly=true') -and
+    [regex]::IsMatch($output, 'source=RealBranchDesktopFilesystemCfgFile handler=Notepad path=/apps/config\.cfg resolvedType=FileOpen .* adapterLegacyDispatch=Notepad .* comparison=match .* nonFatal=true shadowOnly=true') -and
+    [regex]::IsMatch($output, 'source=RealBranchDesktopShortcutIniFile handler=Notepad path=/apps/config\.ini resolvedType=FileOpen .* adapterLegacyDispatch=Notepad .* comparison=match .* nonFatal=true shadowOnly=true') -and
+    [regex]::IsMatch($output, 'source=RealBranchDesktopFilesystemIniFile handler=Notepad path=/apps/config\.ini resolvedType=FileOpen .* adapterLegacyDispatch=Notepad .* comparison=match .* nonFatal=true shadowOnly=true')
 $realBranchDesktopShortcutFolderConfirmed =
     $output.Contains("source=RealBranchDesktopShortcutFolder") -and
     $output.Contains("handler=Files") -and
@@ -935,6 +1074,24 @@ $realBranchDesktopStateRestored =
     $output.Contains("realBranchSuppressLaunchStateRestored=true") -and
     $output.Contains("[LaunchShadowRealBranchRestoreVerification] phase=after realBranchDesktopStateRestored=true") -and
     $output.Contains("realBranchSelectedIconStateRestored=true")
+$realBranchFileAssociationsStateRestored =
+    $output.Contains("[APPMODEL-LAUNCHSHADOW-SMOKE] real-branch file associations helper before temporary desktop state mutation") -and
+    $output.Contains("[LaunchShadowRealBranchFileAssociationsMutation] phase=before temporaryDesktopStateMutation=true temporaryFixtureWrites=false hostPreparedFixtures=true persistentDesktopStorageWrites=false nonFatal=true") -and
+    $output.Contains("[APPMODEL-LAUNCHSHADOW-SMOKE] real-branch file associations helper after temporary desktop state restoration") -and
+    $output.Contains("[LaunchShadowRealBranchFileAssociationsRestore] realBranchFileAssociationsStateRestored=true") -and
+    $output.Contains("realBranchFileAssociationsFixturesReady=true") -and
+    $output.Contains("realBranchFileAssociationsFixtureWritesRestored=true") -and
+    $output.Contains("realBranchFileAssociationsShortcutSlotRestored=true") -and
+    $output.Contains("realBranchFileAssociationsFilesystemSlotRestored=true") -and
+    $output.Contains("realBranchFileAssociationsVisibleIconStateRestored=true") -and
+    $output.Contains("realBranchFileAssociationsNotificationStateRestored=true") -and
+    $output.Contains("realBranchFileAssociationsSourceOverrideStateRestored=true") -and
+    $output.Contains("realBranchFileAssociationsSuppressLaunchStateRestored=true") -and
+    $output.Contains("realBranchFileAssociationsSelectedIconStateRestored=true")
+$realBranchFileAssociationsRestoreVerificationConfirmed =
+    $output.Contains("[LaunchShadowRealBranchFileAssociationsRestoreVerification] phase=after realBranchFileAssociationsStateRestored=true") -and
+    $output.Contains("realBranchFileAssociationsFixturesReady=true") -and
+    $output.Contains("realBranchFileAssociationsFixtureWritesRestored=true")
 $realBranchFolderDesktopStateRestored =
     $output.Contains("[APPMODEL-LAUNCHSHADOW-SMOKE] real-branch folder helper before temporary desktop state mutation") -and
     $output.Contains("[LaunchShadowRealBranchFolderMutation] phase=before temporaryDesktopStateMutation=true persistentDesktopStorageWrites=false nonFatal=true") -and
@@ -1179,6 +1336,15 @@ $persistentDesktopStorageWritesAbsent =
 if ($unexpectedRows.Count -ne 1) {
     $failed += "Expected exactly one unexpected-mismatch row, found $($unexpectedRows.Count)"
 }
+if (-not $realBranchFileAssociationsConfirmed) {
+    $failed += "Real-branch .log, .cfg, and .ini shortcut/filesystem rows did not match the expected Notepad FileOpen evidence"
+}
+if (-not $realBranchFileAssociationsStateRestored) {
+    $failed += "Real-branch .log, .cfg, and .ini desktop and fixture restoration evidence was incomplete"
+}
+if (-not $realBranchFileAssociationsRestoreVerificationConfirmed) {
+    $failed += "Real-branch .log, .cfg, and .ini post-restore verification evidence was incomplete"
+}
 if (-not $realBranchPinnedDesktopNotepadConfirmed) {
     $failed += "Pinned desktop Notepad real-branch row did not match the expected BuiltInApp dispatch evidence"
 }
@@ -1275,6 +1441,7 @@ if ($failed.Count -eq 0) {
         -DesktopFilesystemTextFileShadowOnlyConfirmed $desktopFilesystemTextFileShadowOnlyConfirmed `
         -RealBranchDesktopShortcutTextFileConfirmed $realBranchDesktopShortcutTextFileConfirmed `
         -RealBranchDesktopFilesystemTextFileConfirmed $realBranchDesktopFilesystemTextFileConfirmed `
+        -RealBranchFileAssociationsConfirmed $realBranchFileAssociationsConfirmed `
         -RealBranchDesktopShortcutFolderConfirmed $realBranchDesktopShortcutFolderConfirmed `
         -RealBranchDesktopFilesystemFolderConfirmed $realBranchDesktopFilesystemFolderConfirmed `
         -RealBranchDesktopSystemObjectRootFolderConfirmed $realBranchDesktopSystemObjectRootFolderConfirmed `
@@ -1295,6 +1462,8 @@ if ($failed.Count -eq 0) {
         -RealBranchStartMenuAppModelConfirmed $realBranchStartMenuAppModelConfirmed `
         -RealBranchStartMenuAppModelUnsupportedDiagnosticTargetConfirmed $realBranchStartMenuAppModelUnsupportedDiagnosticTargetConfirmed `
         -RealBranchDesktopStateRestored $realBranchDesktopStateRestored `
+        -RealBranchFileAssociationsStateRestored $realBranchFileAssociationsStateRestored `
+        -RealBranchFileAssociationsRestoreVerificationConfirmed $realBranchFileAssociationsRestoreVerificationConfirmed `
         -RealBranchFolderDesktopStateRestored $realBranchFolderDesktopStateRestored `
         -RealBranchFolderRestoreVerificationConfirmed $realBranchFolderRestoreVerificationConfirmed `
         -RealBranchSystemObjectRootFolderDesktopStateRestored $realBranchSystemObjectRootFolderDesktopStateRestored `
@@ -1341,6 +1510,7 @@ Write-AppModelLaunchShadowEvidence -Status "FAIL" `
     -DesktopFilesystemTextFileShadowOnlyConfirmed $desktopFilesystemTextFileShadowOnlyConfirmed `
     -RealBranchDesktopShortcutTextFileConfirmed $realBranchDesktopShortcutTextFileConfirmed `
     -RealBranchDesktopFilesystemTextFileConfirmed $realBranchDesktopFilesystemTextFileConfirmed `
+    -RealBranchFileAssociationsConfirmed $realBranchFileAssociationsConfirmed `
     -RealBranchDesktopShortcutFolderConfirmed $realBranchDesktopShortcutFolderConfirmed `
     -RealBranchDesktopFilesystemFolderConfirmed $realBranchDesktopFilesystemFolderConfirmed `
     -RealBranchDesktopSystemObjectRootFolderConfirmed $realBranchDesktopSystemObjectRootFolderConfirmed `
@@ -1361,6 +1531,8 @@ Write-AppModelLaunchShadowEvidence -Status "FAIL" `
     -RealBranchStartMenuAppModelConfirmed $realBranchStartMenuAppModelConfirmed `
     -RealBranchStartMenuAppModelUnsupportedDiagnosticTargetConfirmed $realBranchStartMenuAppModelUnsupportedDiagnosticTargetConfirmed `
     -RealBranchDesktopStateRestored $realBranchDesktopStateRestored `
+    -RealBranchFileAssociationsStateRestored $realBranchFileAssociationsStateRestored `
+    -RealBranchFileAssociationsRestoreVerificationConfirmed $realBranchFileAssociationsRestoreVerificationConfirmed `
     -RealBranchFolderDesktopStateRestored $realBranchFolderDesktopStateRestored `
     -RealBranchFolderRestoreVerificationConfirmed $realBranchFolderRestoreVerificationConfirmed `
     -RealBranchSystemObjectRootFolderDesktopStateRestored $realBranchSystemObjectRootFolderDesktopStateRestored `

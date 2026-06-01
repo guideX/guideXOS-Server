@@ -85,8 +85,11 @@ struct NavigatorPageMetadata {
 	bool        postSupportedHosted = true;
 	bool        postSupportedBareMetal = false;
 	std::string lastSubmittedFormUrl;
+	std::string lastSubmittedFormAction;
 	std::string lastSubmittedFormMethod;
 	std::string lastSubmittedFormStatus;
+	std::string lastPostHttpStatus;
+	std::string lastPostContentType;
 };
 
 // =============================================================================
@@ -318,8 +321,11 @@ private:
 	static int         s_focusedInputBlockIndex;
 	static int         s_inputCaret;
 	static std::string s_lastSubmittedFormUrl;
+	static std::string s_lastSubmittedFormAction;
 	static std::string s_lastSubmittedFormMethod;
 	static std::string s_lastSubmittedFormStatus;
+	static std::string s_lastPostHttpStatus;
+	static std::string s_lastPostContentType;
 	static bool        s_findActive;
 	static std::string s_findBuffer;
 	static int         s_findCaret;

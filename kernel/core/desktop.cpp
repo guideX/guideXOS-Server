@@ -7450,6 +7450,195 @@ static void run_launch_shadow_pinned_desktop_notepad_smoke()
     serial::puts(" nonFatal=true\n");
 }
 
+static void run_launch_shadow_file_associations_smoke()
+{
+    struct FileAssociationProbe {
+        const char* label;
+        const char* path;
+        const char* shortcutSource;
+        const char* filesystemSource;
+    };
+    static const FileAssociationProbe probes[] = {
+        { "events.log", "/events.log", "RealBranchDesktopShortcutLogFile", "RealBranchDesktopFilesystemLogFile" },
+        { "config.cfg", "/apps/config.cfg", "RealBranchDesktopShortcutCfgFile", "RealBranchDesktopFilesystemCfgFile" },
+        { "config.ini", "/apps/config.ini", "RealBranchDesktopShortcutIniFile", "RealBranchDesktopFilesystemIniFile" },
+    };
+
+    const int shortcutSlot = 0;
+    const int shortcutIconIdx = kDesktopShortcutStart + shortcutSlot;
+    const int filesystemSlot = 0;
+    const int filesystemIconIdx = kSystemDesktopIconCount + filesystemSlot;
+
+    DesktopIcon savedShortcutIcon = s_desktopIcons[shortcutIconIdx];
+    DesktopIcon savedFilesystemIcon = s_desktopIcons[filesystemIconIdx];
+    char savedShortcutLabel[sizeof(s_desktopShortcutLabels[shortcutSlot])];
+    char savedShortcutType[sizeof(s_desktopShortcutTypes[shortcutSlot])];
+    char savedShortcutTarget[sizeof(s_desktopShortcutTargetAppIds[shortcutSlot])];
+    char savedFilesystemLabel[sizeof(s_desktopFileLabels[filesystemSlot])];
+    char savedFilesystemPath[sizeof(s_desktopFilePaths[filesystemSlot])];
+    NotificationToast savedNotification = s_notification;
+    int savedSelectedIcon = s_selectedIcon;
+    int savedLastSelectedIconId = s_lastSelectedIconId;
+    int savedFocusedSelectedIconId = s_focusedSelectedIconId;
+    int savedVisibleIconCount = s_visibleIconCount;
+    bool savedSelectedIconIds[kDesktopIconCount];
+    int savedVisibleIconIndices[kDesktopIconCount];
+    const char* savedFileOpenSourceOverride = s_launchShadowFileOpenSourceOverride;
+    bool savedSuppressRealBranchLaunch = s_launchShadowSuppressRealBranchLaunch;
+    bool fixtureReady[sizeof(probes) / sizeof(probes[0])] = {};
+
+    desktop_str_copy(savedShortcutLabel, s_desktopShortcutLabels[shortcutSlot], (int)sizeof(savedShortcutLabel));
+    desktop_str_copy(savedShortcutType, s_desktopShortcutTypes[shortcutSlot], (int)sizeof(savedShortcutType));
+    desktop_str_copy(savedShortcutTarget, s_desktopShortcutTargetAppIds[shortcutSlot], (int)sizeof(savedShortcutTarget));
+    desktop_str_copy(savedFilesystemLabel, s_desktopFileLabels[filesystemSlot], (int)sizeof(savedFilesystemLabel));
+    desktop_str_copy(savedFilesystemPath, s_desktopFilePaths[filesystemSlot], (int)sizeof(savedFilesystemPath));
+    for (int i = 0; i < kDesktopIconCount; ++i) {
+        savedSelectedIconIds[i] = s_selectedIconIds[i];
+        savedVisibleIconIndices[i] = s_visibleIconIndices[i];
+    }
+
+    serial::puts("[APPMODEL-LAUNCHSHADOW-SMOKE] real-branch file associations helper before temporary desktop state mutation\n");
+    serial::puts("[LaunchShadowRealBranchFileAssociationsMutation] phase=before temporaryDesktopStateMutation=true temporaryFixtureWrites=false hostPreparedFixtures=true persistentDesktopStorageWrites=false nonFatal=true\n");
+    s_launchShadowSuppressRealBranchLaunch = true;
+
+    for (unsigned int i = 0; i < sizeof(probes) / sizeof(probes[0]); ++i) {
+        vfs::FileInfo info{};
+        fixtureReady[i] = vfs::stat(probes[i].path, &info) == vfs::VFS_OK &&
+            info.type == vfs::FILE_TYPE_REGULAR;
+
+        serial::puts("[LaunchShadowRealBranchFileAssociationFixture] path=");
+        serial::puts(probes[i].path);
+        serial::puts(" ready=");
+        serial::puts(fixtureReady[i] ? "true" : "false");
+        serial::puts(" hostPrepared=true");
+        serial::puts(" nonFatal=true\n");
+        if (!fixtureReady[i]) continue;
+
+        desktop_str_copy(s_desktopShortcutLabels[shortcutSlot], probes[i].label, (int)sizeof(s_desktopShortcutLabels[shortcutSlot]));
+        desktop_str_copy(s_desktopShortcutTypes[shortcutSlot], "File", (int)sizeof(s_desktopShortcutTypes[shortcutSlot]));
+        desktop_str_copy(s_desktopShortcutTargetAppIds[shortcutSlot], probes[i].path, (int)sizeof(s_desktopShortcutTargetAppIds[shortcutSlot]));
+        s_desktopIcons[shortcutIconIdx].label = s_desktopShortcutLabels[shortcutSlot];
+        desktop_str_copy(s_desktopIcons[shortcutIconIdx].path, probes[i].path, (int)sizeof(s_desktopIcons[shortcutIconIdx].path));
+        s_desktopIcons[shortcutIconIdx].pinned = true;
+        s_desktopIcons[shortcutIconIdx].recent = false;
+        s_desktopIcons[shortcutIconIdx].savedX = -1;
+        s_desktopIcons[shortcutIconIdx].savedY = -1;
+        s_desktopIcons[shortcutIconIdx].kind = DesktopItemKind::Shortcut;
+        s_desktopIcons[shortcutIconIdx].systemObject = DesktopSystemObjectKind::None;
+        s_desktopIcons[shortcutIconIdx].isDirectory = false;
+        s_desktopIcons[shortcutIconIdx].removable = true;
+        s_desktopIcons[shortcutIconIdx].color = 0xFF9098A4;
+        s_visibleIconCount = 1;
+        s_visibleIconIndices[0] = shortcutIconIdx;
+        s_launchShadowFileOpenSourceOverride = probes[i].shortcutSource;
+        show_icon_notification(0);
+        s_notification = savedNotification;
+
+        desktop_str_copy(s_desktopFileLabels[filesystemSlot], probes[i].label, (int)sizeof(s_desktopFileLabels[filesystemSlot]));
+        desktop_str_copy(s_desktopFilePaths[filesystemSlot], probes[i].path, (int)sizeof(s_desktopFilePaths[filesystemSlot]));
+        s_desktopIcons[filesystemIconIdx].label = s_desktopFileLabels[filesystemSlot];
+        desktop_str_copy(s_desktopIcons[filesystemIconIdx].path, probes[i].path, (int)sizeof(s_desktopIcons[filesystemIconIdx].path));
+        s_desktopIcons[filesystemIconIdx].pinned = true;
+        s_desktopIcons[filesystemIconIdx].recent = false;
+        s_desktopIcons[filesystemIconIdx].savedX = -1;
+        s_desktopIcons[filesystemIconIdx].savedY = -1;
+        s_desktopIcons[filesystemIconIdx].kind = DesktopItemKind::FilesystemEntry;
+        s_desktopIcons[filesystemIconIdx].systemObject = DesktopSystemObjectKind::None;
+        s_desktopIcons[filesystemIconIdx].isDirectory = false;
+        s_desktopIcons[filesystemIconIdx].removable = true;
+        s_desktopIcons[filesystemIconIdx].color = 0xFF9098A4;
+        s_visibleIconCount = 1;
+        s_visibleIconIndices[0] = filesystemIconIdx;
+        s_launchShadowFileOpenSourceOverride = probes[i].filesystemSource;
+        show_icon_notification(0);
+        s_notification = savedNotification;
+    }
+
+    s_launchShadowFileOpenSourceOverride = savedFileOpenSourceOverride;
+    s_launchShadowSuppressRealBranchLaunch = savedSuppressRealBranchLaunch;
+    s_desktopIcons[shortcutIconIdx] = savedShortcutIcon;
+    s_desktopIcons[filesystemIconIdx] = savedFilesystemIcon;
+    desktop_str_copy(s_desktopShortcutLabels[shortcutSlot], savedShortcutLabel, (int)sizeof(s_desktopShortcutLabels[shortcutSlot]));
+    desktop_str_copy(s_desktopShortcutTypes[shortcutSlot], savedShortcutType, (int)sizeof(s_desktopShortcutTypes[shortcutSlot]));
+    desktop_str_copy(s_desktopShortcutTargetAppIds[shortcutSlot], savedShortcutTarget, (int)sizeof(s_desktopShortcutTargetAppIds[shortcutSlot]));
+    desktop_str_copy(s_desktopFileLabels[filesystemSlot], savedFilesystemLabel, (int)sizeof(s_desktopFileLabels[filesystemSlot]));
+    desktop_str_copy(s_desktopFilePaths[filesystemSlot], savedFilesystemPath, (int)sizeof(s_desktopFilePaths[filesystemSlot]));
+    s_selectedIcon = savedSelectedIcon;
+    s_lastSelectedIconId = savedLastSelectedIconId;
+    s_focusedSelectedIconId = savedFocusedSelectedIconId;
+    s_visibleIconCount = savedVisibleIconCount;
+    for (int i = 0; i < kDesktopIconCount; ++i) {
+        s_selectedIconIds[i] = savedSelectedIconIds[i];
+        s_visibleIconIndices[i] = savedVisibleIconIndices[i];
+    }
+    s_notification = savedNotification;
+
+    bool fixturesReady = true;
+    const bool fixtureWritesRestored = true;
+    for (unsigned int i = 0; i < sizeof(probes) / sizeof(probes[0]); ++i) {
+        fixturesReady = fixturesReady && fixtureReady[i];
+    }
+
+    const bool shortcutSlotRestored = desktop_str_eq(s_desktopShortcutLabels[shortcutSlot], savedShortcutLabel) &&
+        desktop_str_eq(s_desktopShortcutTypes[shortcutSlot], savedShortcutType) &&
+        desktop_str_eq(s_desktopShortcutTargetAppIds[shortcutSlot], savedShortcutTarget) &&
+        desktop_icon_state_matches(s_desktopIcons[shortcutIconIdx], savedShortcutIcon);
+    const bool filesystemSlotRestored = desktop_str_eq(s_desktopFileLabels[filesystemSlot], savedFilesystemLabel) &&
+        desktop_str_eq(s_desktopFilePaths[filesystemSlot], savedFilesystemPath) &&
+        desktop_icon_state_matches(s_desktopIcons[filesystemIconIdx], savedFilesystemIcon);
+    const bool visibleIconStateRestored = visible_icon_state_matches(savedVisibleIconCount, savedVisibleIconIndices);
+    const bool notificationStateRestored = notification_toast_matches(s_notification, savedNotification);
+    bool selectedIconIdsRestored = true;
+    for (int i = 0; i < kDesktopIconCount; ++i) {
+        if (s_selectedIconIds[i] != savedSelectedIconIds[i]) {
+            selectedIconIdsRestored = false;
+            break;
+        }
+    }
+    const bool selectedIconStateRestored =
+        s_selectedIcon == savedSelectedIcon &&
+        s_lastSelectedIconId == savedLastSelectedIconId &&
+        s_focusedSelectedIconId == savedFocusedSelectedIconId &&
+        selectedIconIdsRestored;
+    const bool overrideStateRestored = s_launchShadowFileOpenSourceOverride == savedFileOpenSourceOverride;
+    const bool suppressLaunchStateRestored = s_launchShadowSuppressRealBranchLaunch == savedSuppressRealBranchLaunch;
+    const bool stateRestored = fixturesReady && fixtureWritesRestored && shortcutSlotRestored && filesystemSlotRestored &&
+        visibleIconStateRestored && notificationStateRestored && selectedIconStateRestored &&
+        overrideStateRestored && suppressLaunchStateRestored;
+
+    serial::puts("[APPMODEL-LAUNCHSHADOW-SMOKE] real-branch file associations helper after temporary desktop state restoration\n");
+    serial::puts("[LaunchShadowRealBranchFileAssociationsRestore] realBranchFileAssociationsStateRestored=");
+    serial::puts(stateRestored ? "true" : "false");
+    serial::puts(" realBranchFileAssociationsFixturesReady=");
+    serial::puts(fixturesReady ? "true" : "false");
+    serial::puts(" realBranchFileAssociationsFixtureWritesRestored=");
+    serial::puts(fixtureWritesRestored ? "true" : "false");
+    serial::puts(" realBranchFileAssociationsShortcutSlotRestored=");
+    serial::puts(shortcutSlotRestored ? "true" : "false");
+    serial::puts(" realBranchFileAssociationsFilesystemSlotRestored=");
+    serial::puts(filesystemSlotRestored ? "true" : "false");
+    serial::puts(" realBranchFileAssociationsVisibleIconStateRestored=");
+    serial::puts(visibleIconStateRestored ? "true" : "false");
+    serial::puts(" realBranchFileAssociationsNotificationStateRestored=");
+    serial::puts(notificationStateRestored ? "true" : "false");
+    serial::puts(" realBranchFileAssociationsSourceOverrideStateRestored=");
+    serial::puts(overrideStateRestored ? "true" : "false");
+    serial::puts(" realBranchFileAssociationsSuppressLaunchStateRestored=");
+    serial::puts(suppressLaunchStateRestored ? "true" : "false");
+    serial::puts(" realBranchFileAssociationsSelectedIconStateRestored=");
+    serial::puts(selectedIconStateRestored ? "true" : "false");
+    serial::puts(" persistentDesktopStorageWrites=false");
+    serial::puts(" nonFatal=true\n");
+    serial::puts("[LaunchShadowRealBranchFileAssociationsRestoreVerification] phase=after realBranchFileAssociationsStateRestored=");
+    serial::puts(stateRestored ? "true" : "false");
+    serial::puts(" realBranchFileAssociationsFixturesReady=");
+    serial::puts(fixturesReady ? "true" : "false");
+    serial::puts(" realBranchFileAssociationsFixtureWritesRestored=");
+    serial::puts(fixtureWritesRestored ? "true" : "false");
+    serial::puts(" persistentDesktopStorageWrites=false");
+    serial::puts(" nonFatal=true\n");
+}
+
 void run_launch_shadow_text_fileopen_smoke()
 {
     serial::puts("[APPMODEL-LAUNCHSHADOW-SMOKE] issuing text FileOpen SHADOW_ONLY probe\n");
@@ -7614,6 +7803,7 @@ void run_launch_shadow_text_fileopen_smoke()
     serial::puts(selectedIconStateRestored ? "true" : "false");
     serial::puts(" persistentDesktopStorageWrites=false");
     serial::puts(" nonFatal=true\n");
+    run_launch_shadow_file_associations_smoke();
     serial::puts("[APPMODEL-LAUNCHSHADOW-SMOKE] text FileOpen SHADOW_ONLY probe done\n");
     run_launch_shadow_pinned_desktop_notepad_smoke();
     run_launch_shadow_start_menu_smoke();

@@ -43,8 +43,11 @@ int         Navigator::s_addressCaret   = 0;
 int         Navigator::s_focusedInputBlockIndex = -1;
 int         Navigator::s_inputCaret = 0;
 std::string Navigator::s_lastSubmittedFormUrl;
+std::string Navigator::s_lastSubmittedFormAction;
 std::string Navigator::s_lastSubmittedFormMethod;
 std::string Navigator::s_lastSubmittedFormStatus;
+std::string Navigator::s_lastPostHttpStatus;
+std::string Navigator::s_lastPostContentType;
 bool        Navigator::s_findActive = false;
 std::string Navigator::s_findBuffer;
 int         Navigator::s_findCaret = 0;
@@ -742,8 +745,11 @@ namespace {
 		int unsupportedControls,
 		bool postSupportedHosted,
 		bool postSupportedBareMetal,
+		const std::string& lastFormAction,
 		const std::string& lastFormMethod,
 		const std::string& lastFormStatus,
+		const std::string& lastPostHttpStatus,
+		const std::string& lastPostContentType,
 		const std::string& clipboardMode)
 	{
 		return {
@@ -777,6 +783,7 @@ namespace {
 			{"Capabilities", "Forms-lite GET forms", "enabled"},
 			{"Capabilities", "Forms-lite POST forms hosted", postSupportedHosted ? "enabled" : "unsupported"},
 			{"Capabilities", "Forms-lite POST forms bare-metal", postSupportedBareMetal ? "enabled" : "unsupported"},
+			{"Capabilities", "Forms-lite POST redirect policy", "303 becomes GET; 301/302/307/308 preserve POST"},
 			{"Capabilities", "Forms-lite controls", "text, checkbox, radio, textarea, select, submit"},
 			{"Capabilities", "Forms-lite focus navigation", "Tab/Shift+Tab, Enter, Space"},
 			{"Capabilities", "Find in Page", "enabled"},
@@ -802,8 +809,11 @@ namespace {
 			{"Current Document", "Unsupported form controls", std::to_string(unsupportedControls)},
 			{"Current Document", "POST supported hosted", yesNo(postSupportedHosted)},
 			{"Current Document", "POST supported bare-metal", yesNo(postSupportedBareMetal)},
+			{"Current Document", "Last submitted form action", lastFormAction.empty() ? "(none)" : lastFormAction},
 			{"Current Document", "Last submitted form method", lastFormMethod.empty() ? "(none)" : lastFormMethod},
 			{"Current Document", "Last submitted form status", lastFormStatus.empty() ? "(none)" : lastFormStatus},
+			{"Current Document", "Last POST HTTP status", lastPostHttpStatus.empty() ? "(none)" : lastPostHttpStatus},
+			{"Current Document", "Last POST content type", lastPostContentType.empty() ? "(none)" : lastPostContentType},
 		};
 	}
 
@@ -1118,8 +1128,11 @@ std::string Navigator::SmokeRuntimeReport()
 		s_pageMetadata.unsupportedFormControlCount,
 		s_pageMetadata.postSupportedHosted,
 		s_pageMetadata.postSupportedBareMetal,
+		s_pageMetadata.lastSubmittedFormAction,
 		s_pageMetadata.lastSubmittedFormMethod,
 		s_pageMetadata.lastSubmittedFormStatus,
+		s_pageMetadata.lastPostHttpStatus,
+		s_pageMetadata.lastPostContentType,
 		s_clipboardMode));
 }
 
@@ -1167,8 +1180,11 @@ int Navigator::main(int, char**)
 	s_pageMetadata = NavigatorPageMetadata{};
 	s_inspectedDoc = WebDocument{};
 	s_lastSubmittedFormUrl.clear();
+	s_lastSubmittedFormAction.clear();
 	s_lastSubmittedFormMethod.clear();
 	s_lastSubmittedFormStatus.clear();
+	s_lastPostHttpStatus.clear();
+	s_lastPostContentType.clear();
 	s_recentDownloads.clear();
 	s_addressFocused = false;
 	s_addressBuffer.clear();
@@ -2536,6 +2552,7 @@ void Navigator::submitFormForBlock(int blockIndex)
 	}
 
 	const std::string queryText = query.str();
+	s_lastSubmittedFormAction = action;
 	s_lastSubmittedFormMethod = method;
 	s_lastSubmittedFormStatus.clear();
 
@@ -2587,6 +2604,9 @@ void Navigator::submitFormForBlock(int blockIndex)
 	}
 
 	gxos::web::HttpResponse response = gxos::web::postHttpUrl(action, queryText, encoding);
+	s_lastPostHttpStatus = std::to_string(response.statusCode);
+	if (!response.reasonPhrase.empty()) s_lastPostHttpStatus += " " + response.reasonPhrase;
+	s_lastPostContentType = response.contentType;
 	if (!s_currentDoc.url.empty()) s_backStack.push_back(s_currentDoc.url);
 	s_forwardStack.clear();
 	s_currentDoc = loadHttpResponseDocument(action, response);
@@ -3252,8 +3272,11 @@ void Navigator::storePageMetadata(NavigatorPageMetadata metadata, const WebDocum
 	if (metadata.requestedUrl.empty()) metadata.requestedUrl = metadata.finalUrl;
 	fillDocumentCounts(metadata, doc);
 	metadata.lastSubmittedFormUrl = s_lastSubmittedFormUrl;
+	metadata.lastSubmittedFormAction = s_lastSubmittedFormAction;
 	metadata.lastSubmittedFormMethod = s_lastSubmittedFormMethod;
 	metadata.lastSubmittedFormStatus = s_lastSubmittedFormStatus;
+	metadata.lastPostHttpStatus = s_lastPostHttpStatus;
+	metadata.lastPostContentType = s_lastPostContentType;
 	s_pageMetadata = std::move(metadata);
 	s_inspectedDoc = doc;
 }
@@ -3316,8 +3339,11 @@ WebDocument Navigator::buildPageInfoDocument()
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("POST supported hosted", yesNo(m.postSupportedHosted)), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("POST supported bare-metal", yesNo(m.postSupportedBareMetal)), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Last submitted form URL", m.lastSubmittedFormUrl), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Last submitted form action", m.lastSubmittedFormAction), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Last submitted form method", m.lastSubmittedFormMethod), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Last submitted form status", m.lastSubmittedFormStatus), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Last POST HTTP status", m.lastPostHttpStatus), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Last POST content type", m.lastPostContentType), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Text selection enabled", "yes"), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Clipboard mode", s_clipboardMode), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Raw/source bytes", static_cast<int>(m.rawSourceBytes)), ""});
@@ -3411,8 +3437,11 @@ WebDocument Navigator::buildRuntimeDocument()
 		s_pageMetadata.unsupportedFormControlCount,
 		s_pageMetadata.postSupportedHosted,
 		s_pageMetadata.postSupportedBareMetal,
+		s_pageMetadata.lastSubmittedFormAction,
 		s_pageMetadata.lastSubmittedFormMethod,
 		s_pageMetadata.lastSubmittedFormStatus,
+		s_pageMetadata.lastPostHttpStatus,
+		s_pageMetadata.lastPostContentType,
 		s_clipboardMode));
 
 	doc.blocks.push_back({BlockType::Link, "Page Info", "about:page-info"});

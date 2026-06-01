@@ -5,6 +5,8 @@
 // This module intentionally supports only plain http:// GET/POST for text
 // documents.  TLS, cookies, compression, caching, and
 // JavaScript are outside this milestone.
+// POST redirects stay deliberately small: 303 becomes GET, while
+// 301/302/307/308 preserve the POST method and body.
 
 #include <cstddef>
 #include <cstdint>

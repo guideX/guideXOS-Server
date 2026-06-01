@@ -59,10 +59,12 @@ class NavigatorSmokeHandler(BaseHTTPRequestHandler):
         if path == "/navigator-smoke/forms-post.html":
             self.write_bytes(200, "text/html; charset=utf-8",
                              b"<html><body><h1>Hosted POST Form</h1>"
-                             b"<p>Exercises Forms-lite v0.2 hosted POST support.</p>"
+                             b"<p>Exercises Forms-lite POST v0.1 hosted support.</p>"
                              b"<form method=\"POST\" action=\"/navigator-smoke/post-echo\">"
                              b"<input type=\"text\" name=\"q\" value=\"\">"
+                             b"<input type=\"text\" value=\"unnamed control omitted\">"
                              b"<input type=\"checkbox\" name=\"agree\" value=\"yes\" checked>"
+                             b"<input type=\"checkbox\" name=\"omit\" value=\"no\">"
                              b"<input type=\"radio\" name=\"kind\" value=\"alpha\" checked>"
                              b"<input type=\"radio\" name=\"kind\" value=\"beta\">"
                              b"<textarea name=\"note\" rows=\"4\" cols=\"24\">hello\nsecond line</textarea>"
@@ -178,10 +180,18 @@ class NavigatorSmokeHandler(BaseHTTPRequestHandler):
             method = self.command.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
             content_type = self.headers.get("Content-Type", "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
             content_length = self.headers.get("Content-Length", "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            host = self.headers.get("Host", "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            user_agent = self.headers.get("User-Agent", "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            accept_encoding = self.headers.get("Accept-Encoding", "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            connection = self.headers.get("Connection", "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
             page = ("<html><body><h1>POST OK</h1>"
                     "<p>Method: " + method + "</p>"
                     "<p>Content-Type: " + content_type + "</p>"
                     "<p>Content-Length: " + content_length + "</p>"
+                    "<p>Host: " + host + "</p>"
+                    "<p>User-Agent: " + user_agent + "</p>"
+                    "<p>Accept-Encoding: " + accept_encoding + "</p>"
+                    "<p>Connection: " + connection + "</p>"
                     "<p>Encoded body:</p><pre>" + escaped + "</pre></body></html>").encode("utf-8")
             self.write_bytes(200, "text/html; charset=utf-8", page)
             return
