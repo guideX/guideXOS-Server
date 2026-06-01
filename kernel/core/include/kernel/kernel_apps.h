@@ -438,6 +438,14 @@ public:
                                    char* error, int errorLen, char* finalUrl = nullptr,
                                    int finalUrlLen = 0, int* redirectCount = nullptr,
                                    int* submittedBodyBytes = nullptr);
+    static bool smokeInteractiveFormsLitePost(const char* formUrl, int* statusCode,
+                                              char* contentType, int contentTypeLen,
+                                              int* bodyBytes, int* parsedBlocks,
+                                              char* error, int errorLen,
+                                              int* submittedBodyBytes = nullptr);
+    static bool smokeInteractiveFormsLiteGet(const char* formUrl, char* finalUrl,
+                                             int finalUrlLen, int* parsedBlocks,
+                                             char* error, int errorLen);
 
 private:
     enum NavigatorMouseMode {
@@ -455,6 +463,8 @@ private:
     static const int MAX_BLOCK_TEXT = 320;
     static const int MAX_BOOKMARKS = 12;
     static const int MAX_SOURCE_PREVIEW = 2048;
+    static const int MAX_FORM_OPTIONS = 8;
+    static const int MAX_FORM_VALUE = 320;
     static const int TOOLBAR_H = 48;
     static const int STATUS_H = 24;
     static const int BUTTON_W = 64;
@@ -472,7 +482,18 @@ private:
         BLOCK_LINK,
         BLOCK_LIST_ITEM,
         BLOCK_PREFORMATTED,
-        BLOCK_IMAGE
+        BLOCK_IMAGE,
+        BLOCK_FORM_TEXT,
+        BLOCK_FORM_CHECKBOX,
+        BLOCK_FORM_RADIO,
+        BLOCK_FORM_TEXTAREA,
+        BLOCK_FORM_SELECT,
+        BLOCK_FORM_SUBMIT
+    };
+
+    struct FormOption {
+        char text[64];
+        char value[64];
     };
 
     struct DocBlock {
@@ -489,6 +510,21 @@ private:
         const uint32_t* imagePixels;
         char imageError[128];
         gxos::web::WebStyle style;
+        int formIndex;
+        char formAction[MAX_URL_LEN];
+        char formMethod[8];
+        char formEncoding[48];
+        char inputName[64];
+        char inputValue[MAX_FORM_VALUE];
+        char placeholder[96];
+        char submitLabel[64];
+        bool checked;
+        bool disabled;
+        bool formUnsupported;
+        int visibleRows;
+        FormOption options[MAX_FORM_OPTIONS];
+        int optionCount;
+        int selectedOption;
     };
 
     struct Bookmark {
@@ -589,6 +625,17 @@ private:
     char m_lastPostHttpStatus[48];
     char m_lastPostContentType[48];
     int m_lastPostBodyBytes;
+    char m_lastFormError[128];
+    int m_metaFormCount;
+    int m_metaTextInputCount;
+    int m_metaCheckboxCount;
+    int m_metaRadioCount;
+    int m_metaTextareaCount;
+    int m_metaSelectCount;
+    int m_metaSubmitCount;
+    int m_metaUnsupportedFormCount;
+    int m_focusedFormBlock;
+    int m_formCaret;
     gxos::web::WebStyle m_bodyStyle;
 
     void setStatus(const char* text);
@@ -610,6 +657,12 @@ private:
     void loadHttpResponse(const char* url, KernelHttpResponse* response);
     void submitFormsLitePost(const char* action, const char* body, int bodyBytes,
                              const char* contentType = "application/x-www-form-urlencoded");
+    void submitFormForBlock(int blockIndex);
+    void activateFormControl(int blockIndex);
+    bool setFormControlValue(const char* name, const char* value);
+    bool selectFormRadio(const char* name, const char* value);
+    bool selectFormOption(const char* name, const char* value);
+    bool setFormCheckbox(const char* name, bool checked);
     void rememberPageMetadata(const char* requestedUrl, const char* finalUrl, const char* sourceType,
                               const char* contentType, const char* errorStatus,
                               const char* rawSource, int rawSourceBytes,
@@ -637,6 +690,14 @@ private:
     int blockHeight(const DocBlock& block, int maxChars) const;
     int blockY(int index, int maxChars) const;
     int hitLinkIndex(int x, int y) const;
+    int hitFormBlockIndex(int x, int y) const;
+    bool isFormBlock(const DocBlock& block) const;
+    bool isFocusableFormBlock(const DocBlock& block) const;
+    int formControlHeight(const DocBlock& block) const;
+    void focusFormBlock(int blockIndex);
+    void blurFormBlock();
+    void focusNextFormBlock();
+    void formControlRect(int blockIndex, int& x, int& y, int& w, int& h) const;
     bool hitAddressBar(int x, int y) const;
     void focusAddressBar();
     void blurAddressBar();

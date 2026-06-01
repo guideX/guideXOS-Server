@@ -384,6 +384,14 @@ try {
         $taskbarAuditConfirmed
     ).ToString().ToLowerInvariant()
 
+    # Phase 3 typed-dispatch planning audit (report-only; typed dispatch remains disabled)
+    # Derived entirely from Phase 2 validated evidence. Does not enable typed dispatch or change runtime behavior.
+    $phase3PlanningAudit = if ($readyForTypedDispatchPlanning -eq "true") { "pass" } else { "not-ready" }
+    $phase3FirstPilotCandidate = "StartMenuNotepad"
+    $phase3FirstPilotReason = "BuiltInApp;typedDispatchCandidateMatchesActual=true;comparison=match;no-known-drift;no-embedded-special-behavior;validated-in-phase2-launchshadow"
+    $phase3CandidateRanking = "1=StartMenuNotepad(BuiltInApp,match,no-drift);2=PinnedDesktopNotepad(BuiltInApp,match,no-drift);3=StartMenuCalculator(BuiltInApp,match,no-drift);4=StartMenuConsole(ShellAction,match,no-drift);5=StartMenuFiles(LegacyAlias,match,no-drift)"
+    $phase3RejectedCandidates = "Settings(drift:resolves-to-DisplayOptions-not-Settings);ControlPanel(drift:embedded-state-vs-DisplayOptions);AppModel(unsupported-embedded-diagnostic-action);Computer/Documents/Pictures/Music/Network(unsupported-empty-typed-candidate);Navigator(browser-complexity);.md/.wav/.gxapp/.elf/.exe/images(deferred-or-unsupported);anything-with-hosted-bare-metal-mismatch"
+
     $reportLines = @(
         "[AppModelPhase2Status]",
         "mode=validation-report-only",
@@ -407,6 +415,17 @@ try {
         "fileAssociations.deferred=.md,images,.wav,.gxm,.mue,.img,.gxapp,.gxq,.elf,.exe,unknown",
         "knownNonFatalDrifts=Settings->DisplayOptions;Computer/Documents/Pictures/Music/Network->empty-typed-candidate;ControlPanel->embedded-state-vs-DisplayOptions;AppModel->embedded-viewer-unsupported-typed-target",
         "futureWork=.md,image-routing,.wav-media-contract,.gxm/.mue-loaders,.img-DiskManager-workflow,.gxapp/.gxq/.elf/.exe-app-like-paths,unknown-extension-policy",
+        "[AppModelPhase3TypedDispatchPlanningAudit]",
+        "mode=planning-only",
+        "appModelPhase3TypedDispatchPlanningAudit=$phase3PlanningAudit",
+        "appModelPhase3TypedDispatchStillDisabled=true",
+        "appModelPhase3NoRuntimeLaunchBehaviorChanged=true",
+        "appModelPhase3FirstPilotCandidate=$phase3FirstPilotCandidate",
+        "appModelPhase3FirstPilotReason=$phase3FirstPilotReason",
+        "appModelPhase3CandidateRanking=$phase3CandidateRanking",
+        "appModelPhase3RejectedCandidates=$phase3RejectedCandidates",
+        "appModelPhase3KnownDriftsPreservedAsNonfatal=true",
+        "appModelPhase3Note=planning-readiness-only; typed dispatch not enabled; no runtime behavior changed",
         "checks:"
     )
     foreach ($check in $Checks) {

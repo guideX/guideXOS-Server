@@ -25,6 +25,18 @@ def make_smoke_png():
 
 
 SMOKE_PNG = make_smoke_png()
+INTERACTIVE_FORM_CONTROLS = (
+    b"<input type=\"text\" name=\"q\" value=\"\">"
+    b"<input type=\"text\" value=\"unnamed control omitted\">"
+    b"<input type=\"checkbox\" name=\"agree\" value=\"yes\">"
+    b"<input type=\"checkbox\" name=\"omit\" value=\"no\">"
+    b"<input type=\"radio\" name=\"kind\" value=\"alpha\">"
+    b"<input type=\"radio\" name=\"kind\" value=\"beta\" checked>"
+    b"<textarea name=\"note\" rows=\"4\" cols=\"24\"></textarea>"
+    b"<select name=\"size\"><option value=\"s\">Small</option><option value=\"m\">Medium</option><option value=\"l\">Large</option></select>"
+    b"<input type=\"submit\" value=\"Send\">"
+)
+EXPECTED_FORM_BODY = b"q=posted+value&agree=yes&kind=alpha&note=hello%0Asecond+line&size=m"
 
 
 class NavigatorSmokeHandler(BaseHTTPRequestHandler):
@@ -70,6 +82,29 @@ class NavigatorSmokeHandler(BaseHTTPRequestHandler):
                              b"<textarea name=\"note\" rows=\"4\" cols=\"24\">hello\nsecond line</textarea>"
                              b"<select name=\"size\"><option value=\"s\">Small</option><option value=\"m\" selected>Medium</option><option value=\"l\">Large</option></select>"
                              b"<input type=\"submit\" value=\"Send\"></form></body></html>")
+            return
+        if path == "/forms/interactive-post.html":
+            self.write_bytes(200, "text/html; charset=utf-8",
+                             b"<html><body><h1>Bare-metal interactive POST form</h1>"
+                             b"<form method=\"POST\" action=\"/forms/post-echo\">" +
+                             INTERACTIVE_FORM_CONTROLS +
+                             b"</form></body></html>")
+            return
+        if path == "/forms/interactive-get.html":
+            self.write_bytes(200, "text/html; charset=utf-8",
+                             b"<html><body><h1>Bare-metal interactive GET form</h1>"
+                             b"<form method=\"GET\" action=\"/forms/get-echo\">" +
+                             INTERACTIVE_FORM_CONTROLS +
+                             b"</form></body></html>")
+            return
+        if path == "/forms/get-echo":
+            expected_path = b"/forms/get-echo?" + EXPECTED_FORM_BODY
+            if self.path.encode("ascii", "replace") != expected_path:
+                self.write_bytes(400, "text/plain", b"unexpected encoded GET query")
+                return
+            self.write_bytes(200, "text/html; charset=utf-8",
+                             b"<html><body><h1>Bare-metal GET OK</h1>"
+                             b"<p>Exact Forms-lite urlencoded query received.</p></body></html>")
             return
         if path == "/navigator-smoke/host-check.html":
             if host.split(":", 1)[0].lower() != "guidexos.test":
@@ -185,7 +220,7 @@ class NavigatorSmokeHandler(BaseHTTPRequestHandler):
             self.write_redirect(307, "http://guidexos.test:8080/forms/post-echo")
             return
         if path == "/forms/post-echo":
-            expected = b"q=posted+value&agree=yes&kind=alpha&note=hello%0Asecond+line&size=m"
+            expected = EXPECTED_FORM_BODY
             content_type = self.headers.get("Content-Type", "")
             content_length = self.headers.get("Content-Length", "")
             if self.command != "POST":

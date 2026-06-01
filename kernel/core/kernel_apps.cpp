@@ -4783,7 +4783,8 @@ NavigatorApp::NavigatorApp()
       m_selectionActive(false), m_selectionDragging(false), m_selectionMoved(false), m_mouseLeftDown(false),
       m_mouseMode(NAV_MOUSE_NONE), m_mouseDownLinkIndex(-1), m_mouseDownX(0), m_mouseDownY(0), m_mouseDragThresholdExceeded(false),
       m_backBtnId(-1), m_forwardBtnId(-1), m_reloadBtnId(-1), m_homeBtnId(-1),
-      m_bookmarksBtnId(-1), m_addBookmarkBtnId(-1)
+      m_bookmarksBtnId(-1), m_addBookmarkBtnId(-1),
+      m_focusedFormBlock(-1), m_formCaret(0)
 {
     strcopy(m_status, "Ready", MAX_STATUS_LEN);
     strcopy(m_currentUrl, "about:navigator", MAX_URL_LEN);
@@ -4828,6 +4829,15 @@ NavigatorApp::NavigatorApp()
     m_lastPostHttpStatus[0] = '\0';
     m_lastPostContentType[0] = '\0';
     m_lastPostBodyBytes = 0;
+    m_lastFormError[0] = '\0';
+    m_metaFormCount = 0;
+    m_metaTextInputCount = 0;
+    m_metaCheckboxCount = 0;
+    m_metaRadioCount = 0;
+    m_metaTextareaCount = 0;
+    m_metaSelectCount = 0;
+    m_metaSubmitCount = 0;
+    m_metaUnsupportedFormCount = 0;
     m_bodyStyle = gxos::web::WebStyle{};
     m_selectionAnchor.blockIndex = -1;
     m_selectionAnchor.offset = 0;
@@ -4963,10 +4973,17 @@ void NavigatorApp::onMouseMove(int x, int y)
         }
     }
     int linkIndex = hitLinkIndex(x, y);
-    if (linkIndex != m_hoverLinkIndex) {
+    int formIndex = hitFormBlockIndex(x, y);
+    if (linkIndex != m_hoverLinkIndex || formIndex >= 0) {
         m_hoverLinkIndex = linkIndex;
         if (linkIndex >= 0 && linkIndex < m_blockCount) {
             setStatus(m_blocks[linkIndex].url);
+        } else if (formIndex >= 0 && formIndex < m_blockCount) {
+            if (m_blocks[formIndex].kind == BLOCK_FORM_SUBMIT) setStatus("Submit form");
+            else if (m_blocks[formIndex].kind == BLOCK_FORM_SELECT) setStatus("Cycle select option");
+            else if (m_blocks[formIndex].kind == BLOCK_FORM_CHECKBOX) setStatus("Toggle checkbox");
+            else if (m_blocks[formIndex].kind == BLOCK_FORM_RADIO) setStatus("Select radio option");
+            else setStatus("Click to edit form field");
         } else if (hitAddressBar(x, y)) {
             setStatus("Click to edit address");
         } else {
@@ -4990,6 +5007,7 @@ void NavigatorApp::onMouseDown(int x, int y, uint8_t button)
         clearSelection();
         m_mouseLeftDown = true;
         m_mouseMode = NAV_MOUSE_ADDRESS_BAR_INTERACTION;
+        blurFormBlock();
         focusAddressBar();
         int charOffset = (x - ADDRESS_X - 8) / 6;
         if (charOffset < 0) charOffset = 0;
@@ -5001,6 +5019,31 @@ void NavigatorApp::onMouseDown(int x, int y, uint8_t button)
     }
 
     if (m_addressFocused) blurAddressBar();
+
+    int formIndex = hitFormBlockIndex(x, y);
+    if (formIndex >= 0 && formIndex < m_blockCount) {
+        clearSelection();
+        if (m_blocks[formIndex].disabled) {
+            setStatus("Form control disabled");
+        } else {
+            focusFormBlock(formIndex);
+            if (m_blocks[formIndex].kind == BLOCK_FORM_TEXT) {
+                int fx, fy, fw, fh;
+                formControlRect(formIndex, fx, fy, fw, fh);
+                int charOffset = (x - fx - 8) / 6;
+                int len = strlen_local(m_blocks[formIndex].inputValue);
+                if (charOffset < 0) charOffset = 0;
+                if (charOffset > len) charOffset = len;
+                m_formCaret = charOffset;
+            } else if (m_blocks[formIndex].kind != BLOCK_FORM_TEXTAREA) {
+                activateFormControl(formIndex);
+            }
+        }
+        m_mouseLeftDown = false;
+        m_mouseMode = NAV_MOUSE_NONE;
+        invalidate();
+        return;
+    }
 
     SelectionPosition textHit = textPositionFromPoint(x, y, false);
     if (m_mouseDownLinkIndex >= 0 && m_mouseDownLinkIndex < m_blockCount) {
@@ -5113,6 +5156,56 @@ void NavigatorApp::onKeyDown(uint32_t key)
         return;
     }
 
+    if (key == '\t' || key == shell::KEY_TAB) {
+        focusNextFormBlock();
+        invalidate();
+        return;
+    }
+
+    if (m_focusedFormBlock >= 0 && m_focusedFormBlock < m_blockCount &&
+        isFocusableFormBlock(m_blocks[m_focusedFormBlock])) {
+        DocBlock& block = m_blocks[m_focusedFormBlock];
+        int len = strlen_local(block.inputValue);
+        if (block.kind == BLOCK_FORM_CHECKBOX || block.kind == BLOCK_FORM_RADIO ||
+            block.kind == BLOCK_FORM_SELECT || block.kind == BLOCK_FORM_SUBMIT) {
+            if (key == 13 || key == '\n' || key == '\r') activateFormControl(m_focusedFormBlock);
+            else if (key == 27) blurFormBlock();
+            invalidate();
+            return;
+        }
+        if (block.kind == BLOCK_FORM_TEXT || block.kind == BLOCK_FORM_TEXTAREA) {
+            if (key == 13 || key == '\n' || key == '\r') {
+                if (block.kind == BLOCK_FORM_TEXTAREA && len < MAX_FORM_VALUE - 1) {
+                    for (int i = len; i >= m_formCaret; --i) block.inputValue[i + 1] = block.inputValue[i];
+                    block.inputValue[m_formCaret++] = '\n';
+                } else if (block.kind == BLOCK_FORM_TEXT) {
+                    submitFormForBlock(m_focusedFormBlock);
+                }
+            } else if (key == 8) {
+                if (m_formCaret > 0) {
+                    for (int i = m_formCaret - 1; i < len; ++i) block.inputValue[i] = block.inputValue[i + 1];
+                    --m_formCaret;
+                }
+            } else if (key == shell::KEY_DELETE) {
+                if (m_formCaret < len) {
+                    for (int i = m_formCaret; i < len; ++i) block.inputValue[i] = block.inputValue[i + 1];
+                }
+            } else if (key == shell::KEY_LEFT) {
+                if (m_formCaret > 0) --m_formCaret;
+            } else if (key == shell::KEY_RIGHT) {
+                if (m_formCaret < len) ++m_formCaret;
+            } else if (key == shell::KEY_HOME) {
+                m_formCaret = 0;
+            } else if (key == shell::KEY_END) {
+                m_formCaret = len;
+            } else if (key == 27) {
+                blurFormBlock();
+            }
+            invalidate();
+            return;
+        }
+    }
+
     if (m_ctrlPressed && (key == 'a' || key == 'A')) {
         selectAllDocumentText();
         setStatus(hasSelection() ? "Selected all document text" : "No document text to select");
@@ -5141,13 +5234,30 @@ void NavigatorApp::onKeyUp(uint32_t key)
 
 void NavigatorApp::onKeyChar(char c)
 {
-    if (!m_addressFocused) return;
-    if (c < 32 || c > 126) return;
-    int len = strlen_local(m_addressBuffer);
-    if (len >= MAX_URL_LEN - 1) return;
-    for (int i = len; i >= m_addressCaret; --i) m_addressBuffer[i + 1] = m_addressBuffer[i];
-    m_addressBuffer[m_addressCaret] = c;
-    ++m_addressCaret;
+    if (m_addressFocused) {
+        if (c < 32 || c > 126) return;
+        int len = strlen_local(m_addressBuffer);
+        if (len >= MAX_URL_LEN - 1) return;
+        for (int i = len; i >= m_addressCaret; --i) m_addressBuffer[i + 1] = m_addressBuffer[i];
+        m_addressBuffer[m_addressCaret] = c;
+        ++m_addressCaret;
+        invalidate();
+        return;
+    }
+    if (m_focusedFormBlock < 0 || m_focusedFormBlock >= m_blockCount ||
+        !isFocusableFormBlock(m_blocks[m_focusedFormBlock])) return;
+    DocBlock& block = m_blocks[m_focusedFormBlock];
+    if (block.kind == BLOCK_FORM_CHECKBOX || block.kind == BLOCK_FORM_RADIO ||
+        block.kind == BLOCK_FORM_SELECT || block.kind == BLOCK_FORM_SUBMIT) {
+        if (c == ' ') activateFormControl(m_focusedFormBlock);
+        invalidate();
+        return;
+    }
+    if ((block.kind != BLOCK_FORM_TEXT && block.kind != BLOCK_FORM_TEXTAREA) || c < 32 || c > 126) return;
+    int len = strlen_local(block.inputValue);
+    if (len >= MAX_FORM_VALUE - 1) return;
+    for (int i = len; i >= m_formCaret; --i) block.inputValue[i + 1] = block.inputValue[i];
+    block.inputValue[m_formCaret++] = c;
     invalidate();
 }
 
@@ -5187,42 +5297,40 @@ static void nav_image_file_path_from_url(const char* url, char* out, int outSize
 void NavigatorApp::addBlock(BlockKind kind, const char* text, const char* url, const gxos::web::WebStyle* style)
 {
     if (m_blockCount >= MAX_BLOCKS) return;
-    m_blocks[m_blockCount].kind = kind;
-    strcopy(m_blocks[m_blockCount].text, text ? text : "", MAX_BLOCK_TEXT);
-    strcopy(m_blocks[m_blockCount].url, url ? url : "", MAX_URL_LEN);
-    m_blocks[m_blockCount].src[0] = '\0';
-    m_blocks[m_blockCount].alt[0] = '\0';
-    m_blocks[m_blockCount].width = 0;
-    m_blocks[m_blockCount].height = 0;
-    m_blocks[m_blockCount].naturalWidth = 0;
-    m_blocks[m_blockCount].naturalHeight = 0;
-    m_blocks[m_blockCount].imageStatus = (int)gxos::gui::ImageLoadStatus::Ok;
-    m_blocks[m_blockCount].imagePixels = nullptr;
-    m_blocks[m_blockCount].imageError[0] = '\0';
-    m_blocks[m_blockCount].style = style ? *style : gxos::web::WebStyle{};
+    DocBlock& block = m_blocks[m_blockCount];
+    block = DocBlock{};
+    block.kind = kind;
+    strcopy(block.text, text ? text : "", MAX_BLOCK_TEXT);
+    strcopy(block.url, url ? url : "", MAX_URL_LEN);
+    block.imageStatus = (int)gxos::gui::ImageLoadStatus::Ok;
+    block.style = style ? *style : gxos::web::WebStyle{};
+    block.formIndex = -1;
+    block.selectedOption = -1;
     ++m_blockCount;
 }
 
 void NavigatorApp::addImageBlock(const char* src, const char* alt, const char* resolvedUrl, int width, int height, const gxos::web::WebStyle* style)
 {
     if (m_blockCount >= MAX_BLOCKS) return;
-    m_blocks[m_blockCount].kind = BLOCK_IMAGE;
-    strcopy(m_blocks[m_blockCount].text, alt ? alt : "", MAX_BLOCK_TEXT);
-    strcopy(m_blocks[m_blockCount].url, resolvedUrl ? resolvedUrl : "", MAX_URL_LEN);
-    strcopy(m_blocks[m_blockCount].src, src ? src : "", MAX_URL_LEN);
-    strcopy(m_blocks[m_blockCount].alt, alt ? alt : "", 96);
-    m_blocks[m_blockCount].width = width > 0 ? width : 0;
-    m_blocks[m_blockCount].height = height > 0 ? height : 0;
+    DocBlock& block = m_blocks[m_blockCount];
+    block = DocBlock{};
+    block.kind = BLOCK_IMAGE;
+    strcopy(block.text, alt ? alt : "", MAX_BLOCK_TEXT);
+    strcopy(block.url, resolvedUrl ? resolvedUrl : "", MAX_URL_LEN);
+    strcopy(block.src, src ? src : "", MAX_URL_LEN);
+    strcopy(block.alt, alt ? alt : "", 96);
+    block.width = width > 0 ? width : 0;
+    block.height = height > 0 ? height : 0;
 
     char imagePath[MAX_URL_LEN];
     nav_image_file_path_from_url(resolvedUrl, imagePath, MAX_URL_LEN);
     gxos::gui::ImageProbe probe = gxos::gui::ImageAdapter::ProbeFile(imagePath);
-    m_blocks[m_blockCount].naturalWidth = (int)probe.width;
-    m_blocks[m_blockCount].naturalHeight = (int)probe.height;
-    m_blocks[m_blockCount].imageStatus = (int)probe.status;
-    m_blocks[m_blockCount].imagePixels = nullptr;
-    m_blocks[m_blockCount].imageError[0] = '\0';
-    m_blocks[m_blockCount].style = style ? *style : gxos::web::WebStyle{};
+    block.naturalWidth = (int)probe.width;
+    block.naturalHeight = (int)probe.height;
+    block.imageStatus = (int)probe.status;
+    block.style = style ? *style : gxos::web::WebStyle{};
+    block.formIndex = -1;
+    block.selectedOption = -1;
 
     ++m_blockCount;
 }
@@ -5425,15 +5533,38 @@ void NavigatorApp::rememberPageMetadata(const char* requestedUrl, const char* fi
     m_metaRemoteImages = 0;
     m_metaLocalImages = 0;
     m_metaLastImageError[0] = '\0';
+    m_metaFormCount = 0;
+    m_metaTextInputCount = 0;
+    m_metaCheckboxCount = 0;
+    m_metaRadioCount = 0;
+    m_metaTextareaCount = 0;
+    m_metaSelectCount = 0;
+    m_metaSubmitCount = 0;
+    m_metaUnsupportedFormCount = 0;
+    int lastFormIndex = -1;
     for (int i = 0; i < m_blockCount; ++i) {
-        if (m_blocks[i].kind != BLOCK_IMAGE) continue;
-        ++m_metaImageBlocks;
-        if (nav_starts_with(m_blocks[i].url, "http://")) ++m_metaRemoteImages;
-        else if (nav_starts_with(m_blocks[i].url, "file://")) ++m_metaLocalImages;
-        if (m_blocks[i].imageStatus == (int)gxos::gui::ImageLoadStatus::Ok) ++m_metaLoadedImages;
-        else {
-            ++m_metaFailedImages;
-            if (!m_metaLastImageError[0]) strcopy(m_metaLastImageError, m_blocks[i].imageError[0] ? m_blocks[i].imageError : gxos::gui::ImageLoadStatusName((gxos::gui::ImageLoadStatus)m_blocks[i].imageStatus), sizeof(m_metaLastImageError));
+        if (m_blocks[i].kind == BLOCK_IMAGE) {
+            ++m_metaImageBlocks;
+            if (nav_starts_with(m_blocks[i].url, "http://")) ++m_metaRemoteImages;
+            else if (nav_starts_with(m_blocks[i].url, "file://")) ++m_metaLocalImages;
+            if (m_blocks[i].imageStatus == (int)gxos::gui::ImageLoadStatus::Ok) ++m_metaLoadedImages;
+            else {
+                ++m_metaFailedImages;
+                if (!m_metaLastImageError[0]) strcopy(m_metaLastImageError, m_blocks[i].imageError[0] ? m_blocks[i].imageError : gxos::gui::ImageLoadStatusName((gxos::gui::ImageLoadStatus)m_blocks[i].imageStatus), sizeof(m_metaLastImageError));
+            }
+        }
+        if (m_blocks[i].formIndex >= 0) {
+            if (m_blocks[i].formIndex > lastFormIndex) {
+                lastFormIndex = m_blocks[i].formIndex;
+                ++m_metaFormCount;
+                if (m_blocks[i].formUnsupported) ++m_metaUnsupportedFormCount;
+            }
+            if (m_blocks[i].kind == BLOCK_FORM_TEXT) ++m_metaTextInputCount;
+            else if (m_blocks[i].kind == BLOCK_FORM_CHECKBOX) ++m_metaCheckboxCount;
+            else if (m_blocks[i].kind == BLOCK_FORM_RADIO) ++m_metaRadioCount;
+            else if (m_blocks[i].kind == BLOCK_FORM_TEXTAREA) ++m_metaTextareaCount;
+            else if (m_blocks[i].kind == BLOCK_FORM_SELECT) ++m_metaSelectCount;
+            else if (m_blocks[i].kind == BLOCK_FORM_SUBMIT) ++m_metaSubmitCount;
         }
     }
 }
@@ -5482,10 +5613,21 @@ void NavigatorApp::buildPageInfoDocument()
     NAV_INFO_INT("CSS style bytes processed: ", m_metaCssStyleBytesProcessed);
     NAV_INFO_TEXT("Text selection enabled: ", "yes");
     NAV_INFO_TEXT("Clipboard mode: ", m_clipboardMode[0] ? m_clipboardMode : "Navigator internal clipboard");
+    NAV_INFO_TEXT("Forms-lite interactive controls: ", "enabled");
+    NAV_INFO_TEXT("Forms-lite POST interactive: ", "enabled");
     NAV_INFO_TEXT("Forms-lite POST bare-metal: ", "enabled-basic");
+    NAV_INFO_INT("Forms: ", m_metaFormCount);
+    NAV_INFO_INT("Text inputs: ", m_metaTextInputCount);
+    NAV_INFO_INT("Checkboxes: ", m_metaCheckboxCount);
+    NAV_INFO_INT("Radio buttons: ", m_metaRadioCount);
+    NAV_INFO_INT("Textareas: ", m_metaTextareaCount);
+    NAV_INFO_INT("Selects: ", m_metaSelectCount);
+    NAV_INFO_INT("Submit buttons: ", m_metaSubmitCount);
+    NAV_INFO_INT("Unsupported forms: ", m_metaUnsupportedFormCount);
     NAV_INFO_TEXT("Last submitted method: ", m_lastSubmittedFormMethod[0] ? m_lastSubmittedFormMethod : "(none)");
     NAV_INFO_TEXT("Last submitted action: ", m_lastSubmittedFormAction[0] ? m_lastSubmittedFormAction : "(none)");
     NAV_INFO_TEXT("Last submitted status: ", m_lastSubmittedFormStatus[0] ? m_lastSubmittedFormStatus : "(none)");
+    NAV_INFO_TEXT("Last form error: ", m_lastFormError[0] ? m_lastFormError : "(none)");
     NAV_INFO_TEXT("Last POST HTTP status: ", m_lastPostHttpStatus[0] ? m_lastPostHttpStatus : "(none)");
     NAV_INFO_TEXT("Last POST content type: ", m_lastPostContentType[0] ? m_lastPostContentType : "(none)");
     NAV_INFO_INT("Last POST body bytes: ", m_lastPostBodyBytes);
@@ -5574,8 +5716,10 @@ void NavigatorApp::buildRuntimeDocument()
     addBlock(BLOCK_LIST_ITEM, "Bookmark persistence: unavailable; bookmarks are in-memory defaults");
     addBlock(BLOCK_LIST_ITEM, "HTTPS/TLS: unsupported");
     addBlock(BLOCK_LIST_ITEM, "CSS-lite embedded <style>: enabled");
-    addBlock(BLOCK_LIST_ITEM, "Forms-lite GET forms: enabled for file/about pages");
+    addBlock(BLOCK_LIST_ITEM, "Forms-lite GET forms: enabled through interactive document controls");
     addBlock(BLOCK_LIST_ITEM, "Forms-lite POST forms hosted: enabled in authoritative hosted Navigator path");
+    addBlock(BLOCK_LIST_ITEM, "Forms-lite interactive controls: enabled");
+    addBlock(BLOCK_LIST_ITEM, "Forms-lite POST interactive: enabled");
     addBlock(BLOCK_LIST_ITEM, "Forms-lite POST forms bare-metal: enabled-basic application/x-www-form-urlencoded transport");
     addBlock(BLOCK_LIST_ITEM, "Forms-lite POST redirect policy: 303 becomes GET; 301/302/307/308 preserve POST");
     addBlock(BLOCK_LIST_ITEM, "Forms-lite controls: text, checkbox, radio, textarea, select, submit");
@@ -5628,6 +5772,9 @@ void NavigatorApp::buildRuntimeDocument()
     strcopy(line, "Last submitted status: ", sizeof(line));
     strappend(line, m_lastSubmittedFormStatus[0] ? m_lastSubmittedFormStatus : "(none)", sizeof(line));
     addBlock(BLOCK_LIST_ITEM, line);
+    strcopy(line, "Last form error: ", sizeof(line));
+    strappend(line, m_lastFormError[0] ? m_lastFormError : "(none)", sizeof(line));
+    addBlock(BLOCK_LIST_ITEM, line);
     strcopy(line, "Last POST HTTP status: ", sizeof(line));
     strappend(line, m_lastPostHttpStatus[0] ? m_lastPostHttpStatus : "(none)", sizeof(line));
     addBlock(BLOCK_LIST_ITEM, line);
@@ -5673,6 +5820,19 @@ static bool nav_tag_at(const char* p, const char* tag)
     if (!p || *p != '<') return false;
     ++p;
     if (*p == '/') return false;
+    int i = 0;
+    while (tag[i]) {
+        if (nav_lower(p[i]) != tag[i]) return false;
+        ++i;
+    }
+    char end = p[i];
+    return end == '>' || end == ' ' || end == '\t' || end == '\r' || end == '\n';
+}
+
+static bool nav_close_tag_at(const char* p, const char* tag)
+{
+    if (!p || p[0] != '<' || p[1] != '/') return false;
+    p += 2;
     int i = 0;
     while (tag[i]) {
         if (nav_lower(p[i]) != tag[i]) return false;
@@ -5813,6 +5973,22 @@ static void nav_extract_attr(const char* tagStart, const char* tagEnd, const cha
         }
         ++p;
     }
+}
+
+static bool nav_has_attr(const char* tagStart, const char* tagEnd, const char* attr)
+{
+    const char* p = tagStart;
+    while (p && p < tagEnd && *p) {
+        if (nav_attr_name_at(p, attr)) return true;
+        ++p;
+    }
+    return false;
+}
+
+static void nav_lower_string(char* value)
+{
+    if (!value) return;
+    for (int i = 0; value[i]; ++i) value[i] = nav_lower(value[i]);
 }
 
 static int nav_parse_positive_int(const char* value)
@@ -6033,12 +6209,36 @@ void NavigatorApp::parseHtmlDocument(const char* url, const char* html, const ch
     strcopy(m_currentUrl, url ? url : "", MAX_URL_LEN);
     strcopy(m_title, url ? url : "Document", MAX_TITLE_LEN_NAV);
     m_blockCount = 0;
+    blurFormBlock();
 
     NavCssRule cssRules[32]{};
     int cssRuleCount = 0;
     gxos::web::CssDiagnostics cssDiagnostics{};
     gxos::web::WebStyle bodyStyle{};
     nav_scan_css(html ? html : "", cssRules, cssRuleCount, 32, cssDiagnostics, bodyStyle);
+
+    int nextFormIndex = 0;
+    int currentFormIndex = -1;
+    char currentFormAction[MAX_URL_LEN];
+    char currentFormMethod[8];
+    char currentFormEncoding[48];
+    bool currentFormUnsupported = false;
+    currentFormAction[0] = '\0';
+    strcopy(currentFormMethod, "get", sizeof(currentFormMethod));
+    strcopy(currentFormEncoding, "application/x-www-form-urlencoded", sizeof(currentFormEncoding));
+
+    auto addFormBlock = [&](BlockKind kind, const char* tagName) -> DocBlock* {
+        if (currentFormIndex < 0 || m_blockCount >= MAX_BLOCKS) return nullptr;
+        gxos::web::WebStyle style = nav_style_for_tag(tagName, "", "", bodyStyle, cssRules, cssRuleCount);
+        addBlock(kind, "", "", &style);
+        DocBlock& block = m_blocks[m_blockCount - 1];
+        block.formIndex = currentFormIndex;
+        strcopy(block.formAction, currentFormAction[0] ? currentFormAction : url, sizeof(block.formAction));
+        strcopy(block.formMethod, currentFormMethod, sizeof(block.formMethod));
+        strcopy(block.formEncoding, currentFormEncoding, sizeof(block.formEncoding));
+        block.formUnsupported = currentFormUnsupported;
+        return &block;
+    };
 
     const char* p = html;
     while (p && *p && m_blockCount < MAX_BLOCKS) {
@@ -6051,7 +6251,116 @@ void NavigatorApp::parseHtmlDocument(const char* url, const char* html, const ch
         char id[64];
         nav_extract_attr(p, tagEnd, "class", className, sizeof(className));
         nav_extract_attr(p, tagEnd, "id", id, sizeof(id));
-        if (nav_tag_at(p, "title")) {
+        if (nav_close_tag_at(p, "form")) {
+            currentFormIndex = -1;
+            currentFormAction[0] = '\0';
+            strcopy(currentFormMethod, "get", sizeof(currentFormMethod));
+            strcopy(currentFormEncoding, "application/x-www-form-urlencoded", sizeof(currentFormEncoding));
+            currentFormUnsupported = false;
+        } else if (nav_tag_at(p, "form")) {
+            char action[MAX_URL_LEN];
+            nav_extract_attr(p, tagEnd, "action", action, sizeof(action));
+            nav_extract_attr(p, tagEnd, "method", currentFormMethod, sizeof(currentFormMethod));
+            nav_extract_attr(p, tagEnd, "enctype", currentFormEncoding, sizeof(currentFormEncoding));
+            if (!currentFormMethod[0]) strcopy(currentFormMethod, "get", sizeof(currentFormMethod));
+            if (!currentFormEncoding[0]) strcopy(currentFormEncoding, "application/x-www-form-urlencoded", sizeof(currentFormEncoding));
+            nav_lower_string(currentFormMethod);
+            nav_lower_string(currentFormEncoding);
+            resolveHref(url, action[0] ? action : url, currentFormAction, sizeof(currentFormAction));
+            currentFormUnsupported =
+                (!streq_local(currentFormMethod, "get") && !streq_local(currentFormMethod, "post")) ||
+                !streq_local(currentFormEncoding, "application/x-www-form-urlencoded");
+            currentFormIndex = nextFormIndex++;
+        } else if (nav_tag_at(p, "input") && currentFormIndex >= 0) {
+            char type[24];
+            nav_extract_attr(p, tagEnd, "type", type, sizeof(type));
+            nav_lower_string(type);
+            if (!type[0] || streq_local(type, "text")) {
+                DocBlock* block = addFormBlock(BLOCK_FORM_TEXT, "input");
+                if (block) {
+                    nav_extract_attr(p, tagEnd, "name", block->inputName, sizeof(block->inputName));
+                    nav_extract_attr(p, tagEnd, "value", block->inputValue, sizeof(block->inputValue));
+                    nav_extract_attr(p, tagEnd, "placeholder", block->placeholder, sizeof(block->placeholder));
+                    block->disabled = nav_has_attr(p, tagEnd, "disabled");
+                }
+            } else if (streq_local(type, "checkbox") || streq_local(type, "radio")) {
+                DocBlock* block = addFormBlock(streq_local(type, "checkbox") ? BLOCK_FORM_CHECKBOX : BLOCK_FORM_RADIO, "input");
+                if (block) {
+                    nav_extract_attr(p, tagEnd, "name", block->inputName, sizeof(block->inputName));
+                    nav_extract_attr(p, tagEnd, "value", block->inputValue, sizeof(block->inputValue));
+                    if (!block->inputValue[0]) strcopy(block->inputValue, "on", sizeof(block->inputValue));
+                    strcopy(block->text, block->inputName, sizeof(block->text));
+                    block->checked = nav_has_attr(p, tagEnd, "checked");
+                    block->disabled = nav_has_attr(p, tagEnd, "disabled");
+                }
+            } else if (streq_local(type, "submit")) {
+                DocBlock* block = addFormBlock(BLOCK_FORM_SUBMIT, "input");
+                if (block) {
+                    nav_extract_attr(p, tagEnd, "value", block->submitLabel, sizeof(block->submitLabel));
+                    if (!block->submitLabel[0]) strcopy(block->submitLabel, "Submit", sizeof(block->submitLabel));
+                    block->disabled = nav_has_attr(p, tagEnd, "disabled");
+                }
+            }
+        } else if (nav_tag_at(p, "textarea") && currentFormIndex >= 0) {
+            close = nav_find_close_tag(tagEnd + 1, "textarea");
+            DocBlock* block = addFormBlock(BLOCK_FORM_TEXTAREA, "textarea");
+            if (block) {
+                char rows[12];
+                nav_extract_attr(p, tagEnd, "name", block->inputName, sizeof(block->inputName));
+                nav_extract_attr(p, tagEnd, "placeholder", block->placeholder, sizeof(block->placeholder));
+                nav_extract_attr(p, tagEnd, "rows", rows, sizeof(rows));
+                block->visibleRows = nav_parse_positive_int(rows);
+                block->disabled = nav_has_attr(p, tagEnd, "disabled");
+                if (close) nav_copy_clean_text(tagEnd + 1, close, block->inputValue, sizeof(block->inputValue), true);
+            }
+        } else if (nav_tag_at(p, "select") && currentFormIndex >= 0) {
+            close = nav_find_close_tag(tagEnd + 1, "select");
+            DocBlock* block = addFormBlock(BLOCK_FORM_SELECT, "select");
+            if (block) {
+                nav_extract_attr(p, tagEnd, "name", block->inputName, sizeof(block->inputName));
+                block->disabled = nav_has_attr(p, tagEnd, "disabled");
+                const char* option = tagEnd + 1;
+                while (close && option < close && block->optionCount < MAX_FORM_OPTIONS) {
+                    while (option < close && *option != '<') ++option;
+                    if (option >= close) break;
+                    const char* optionEnd = nav_find_char(option, '>');
+                    if (!optionEnd || optionEnd >= close) break;
+                    if (!nav_tag_at(option, "option")) {
+                        option = optionEnd + 1;
+                        continue;
+                    }
+                    const char* optionClose = nav_find_close_tag(optionEnd + 1, "option");
+                    if (!optionClose || optionClose > close) break;
+                    FormOption& formOption = block->options[block->optionCount];
+                    nav_extract_attr(option, optionEnd, "value", formOption.value, sizeof(formOption.value));
+                    nav_copy_clean_text(optionEnd + 1, optionClose, formOption.text, sizeof(formOption.text), false);
+                    if (!formOption.value[0]) strcopy(formOption.value, formOption.text, sizeof(formOption.value));
+                    if (block->selectedOption < 0 || nav_has_attr(option, optionEnd, "selected")) {
+                        block->selectedOption = block->optionCount;
+                    }
+                    ++block->optionCount;
+                    option = nav_find_char(optionClose, '>');
+                    if (option) ++option;
+                }
+                if (block->selectedOption >= 0 && block->selectedOption < block->optionCount) {
+                    strcopy(block->inputValue, block->options[block->selectedOption].value, sizeof(block->inputValue));
+                    strcopy(block->text, block->options[block->selectedOption].text, sizeof(block->text));
+                }
+            }
+        } else if (nav_tag_at(p, "button") && currentFormIndex >= 0) {
+            close = nav_find_close_tag(tagEnd + 1, "button");
+            char type[24];
+            nav_extract_attr(p, tagEnd, "type", type, sizeof(type));
+            nav_lower_string(type);
+            if (!type[0] || streq_local(type, "submit")) {
+                DocBlock* block = addFormBlock(BLOCK_FORM_SUBMIT, "button");
+                if (block) {
+                    if (close) nav_copy_clean_text(tagEnd + 1, close, block->submitLabel, sizeof(block->submitLabel), false);
+                    if (!block->submitLabel[0]) strcopy(block->submitLabel, "Submit", sizeof(block->submitLabel));
+                    block->disabled = nav_has_attr(p, tagEnd, "disabled");
+                }
+            }
+        } else if (nav_tag_at(p, "title")) {
             close = nav_find_close_tag(tagEnd + 1, "title");
             if (close) nav_copy_clean_text(tagEnd + 1, close, m_title, MAX_TITLE_LEN_NAV, false);
         } else if (nav_tag_at(p, "h1")) {
@@ -7010,6 +7319,7 @@ void NavigatorApp::submitFormsLitePost(const char* action, const char* body, int
     m_lastPostHttpStatus[0] = '\0';
     m_lastPostContentType[0] = '\0';
     m_lastPostBodyBytes = bodyBytes > 0 ? bodyBytes : 0;
+    m_lastFormError[0] = '\0';
 
     KernelHttpResponse* response = kernel_http_post(safeAction, body, bodyBytes, contentType);
     if (response->statusCode > 0) {
@@ -7021,6 +7331,7 @@ void NavigatorApp::submitFormsLitePost(const char* action, const char* body, int
     }
     strcopy(m_lastPostContentType, response->contentType, sizeof(m_lastPostContentType));
     strcopy(m_lastSubmittedFormStatus, response->ok ? "POST submitted" : "POST failed", sizeof(m_lastSubmittedFormStatus));
+    if (!response->ok) strcopy(m_lastFormError, response->error[0] ? response->error : "POST failed", sizeof(m_lastFormError));
 
     if (!streq_local(m_currentUrl, safeAction) && m_currentUrl[0]) {
         nav_push_url(m_backStack, m_backCount, m_currentUrl);
@@ -7113,6 +7424,156 @@ static bool nav_form_append_field(char* out, int outSize, int& used, const char*
            nav_form_append_encoded(out, outSize, used, value);
 }
 
+void NavigatorApp::activateFormControl(int blockIndex)
+{
+    if (blockIndex < 0 || blockIndex >= m_blockCount) return;
+    DocBlock& block = m_blocks[blockIndex];
+    if (!isFocusableFormBlock(block)) return;
+    if (block.kind == BLOCK_FORM_CHECKBOX) {
+        block.checked = !block.checked;
+    } else if (block.kind == BLOCK_FORM_RADIO) {
+        for (int i = 0; i < m_blockCount; ++i) {
+            if (m_blocks[i].kind == BLOCK_FORM_RADIO &&
+                m_blocks[i].formIndex == block.formIndex &&
+                streq_local(m_blocks[i].inputName, block.inputName)) {
+                m_blocks[i].checked = false;
+            }
+        }
+        block.checked = true;
+    } else if (block.kind == BLOCK_FORM_SELECT) {
+        if (block.optionCount > 0) {
+            block.selectedOption = block.selectedOption < 0 ? 0 : (block.selectedOption + 1) % block.optionCount;
+            strcopy(block.inputValue, block.options[block.selectedOption].value, sizeof(block.inputValue));
+            strcopy(block.text, block.options[block.selectedOption].text, sizeof(block.text));
+        }
+    } else if (block.kind == BLOCK_FORM_SUBMIT) {
+        submitFormForBlock(blockIndex);
+        return;
+    }
+    m_focusedFormBlock = blockIndex;
+    invalidate();
+}
+
+bool NavigatorApp::setFormControlValue(const char* name, const char* value)
+{
+    for (int i = 0; i < m_blockCount; ++i) {
+        if ((m_blocks[i].kind == BLOCK_FORM_TEXT || m_blocks[i].kind == BLOCK_FORM_TEXTAREA) &&
+            streq_local(m_blocks[i].inputName, name ? name : "")) {
+            strcopy(m_blocks[i].inputValue, value ? value : "", sizeof(m_blocks[i].inputValue));
+            m_focusedFormBlock = i;
+            m_formCaret = strlen_local(m_blocks[i].inputValue);
+            return true;
+        }
+    }
+    return false;
+}
+
+bool NavigatorApp::setFormCheckbox(const char* name, bool checked)
+{
+    for (int i = 0; i < m_blockCount; ++i) {
+        if (m_blocks[i].kind == BLOCK_FORM_CHECKBOX && streq_local(m_blocks[i].inputName, name ? name : "")) {
+            m_blocks[i].checked = checked;
+            return true;
+        }
+    }
+    return false;
+}
+
+bool NavigatorApp::selectFormRadio(const char* name, const char* value)
+{
+    for (int i = 0; i < m_blockCount; ++i) {
+        if (m_blocks[i].kind == BLOCK_FORM_RADIO &&
+            streq_local(m_blocks[i].inputName, name ? name : "") &&
+            streq_local(m_blocks[i].inputValue, value ? value : "")) {
+            activateFormControl(i);
+            return true;
+        }
+    }
+    return false;
+}
+
+bool NavigatorApp::selectFormOption(const char* name, const char* value)
+{
+    for (int i = 0; i < m_blockCount; ++i) {
+        DocBlock& block = m_blocks[i];
+        if (block.kind != BLOCK_FORM_SELECT || !streq_local(block.inputName, name ? name : "")) continue;
+        for (int option = 0; option < block.optionCount; ++option) {
+            if (!streq_local(block.options[option].value, value ? value : "")) continue;
+            block.selectedOption = option;
+            strcopy(block.inputValue, block.options[option].value, sizeof(block.inputValue));
+            strcopy(block.text, block.options[option].text, sizeof(block.text));
+            return true;
+        }
+    }
+    return false;
+}
+
+void NavigatorApp::submitFormForBlock(int blockIndex)
+{
+    if (blockIndex < 0 || blockIndex >= m_blockCount || !isFormBlock(m_blocks[blockIndex])) return;
+    DocBlock& source = m_blocks[blockIndex];
+    const char* method = source.formMethod[0] ? source.formMethod : "get";
+    const char* encoding = source.formEncoding[0] ? source.formEncoding : "application/x-www-form-urlencoded";
+    const char* action = source.formAction[0] ? source.formAction : m_currentUrl;
+    m_lastFormError[0] = '\0';
+    strcopy(m_lastSubmittedFormAction, action, sizeof(m_lastSubmittedFormAction));
+    strcopy(m_lastSubmittedFormMethod, streq_local(method, "post") ? "POST" : "GET", sizeof(m_lastSubmittedFormMethod));
+    if (source.formUnsupported || (!streq_local(method, "get") && !streq_local(method, "post")) ||
+        !streq_local(encoding, "application/x-www-form-urlencoded")) {
+        strcopy(m_lastSubmittedFormStatus, "Unsupported form", sizeof(m_lastSubmittedFormStatus));
+        strcopy(m_lastFormError, "Unsupported form method or encoding", sizeof(m_lastFormError));
+        setStatus(m_lastFormError);
+        return;
+    }
+
+    char body[kKernelHttpPostBodyLimit + 1];
+    int used = 0;
+    body[0] = '\0';
+    for (int i = 0; i < m_blockCount; ++i) {
+        const DocBlock& block = m_blocks[i];
+        if (block.formIndex != source.formIndex || block.disabled || !block.inputName[0]) continue;
+        bool ok = true;
+        if (block.kind == BLOCK_FORM_TEXT || block.kind == BLOCK_FORM_TEXTAREA) {
+            ok = nav_form_append_field(body, sizeof(body), used, block.inputName, block.inputValue);
+        } else if ((block.kind == BLOCK_FORM_CHECKBOX || block.kind == BLOCK_FORM_RADIO) && block.checked) {
+            ok = nav_form_append_field(body, sizeof(body), used, block.inputName, block.inputValue[0] ? block.inputValue : "on");
+        } else if (block.kind == BLOCK_FORM_SELECT) {
+            const char* value = block.inputValue;
+            if (block.selectedOption >= 0 && block.selectedOption < block.optionCount) value = block.options[block.selectedOption].value;
+            ok = nav_form_append_field(body, sizeof(body), used, block.inputName, value);
+        }
+        if (!ok) {
+            strcopy(m_lastSubmittedFormStatus, "Form body too large", sizeof(m_lastSubmittedFormStatus));
+            strcopy(m_lastFormError, "Forms-lite encoded body exceeds 8192 bytes", sizeof(m_lastFormError));
+            setStatus(m_lastFormError);
+            return;
+        }
+    }
+
+    blurFormBlock();
+    if (streq_local(method, "get")) {
+        char submitUrl[MAX_URL_LEN];
+        strcopy(submitUrl, action, sizeof(submitUrl));
+        if (used > 0) {
+            strappend(submitUrl, nav_find_char(submitUrl, '?') ? "&" : "?", sizeof(submitUrl));
+            strappend(submitUrl, body, sizeof(submitUrl));
+        }
+        strcopy(m_lastSubmittedFormStatus, "GET submitted", sizeof(m_lastSubmittedFormStatus));
+        navigateTo(submitUrl);
+        return;
+    }
+
+    if (!nav_starts_with(action, "http://")) {
+        strcopy(m_lastSubmittedFormStatus, "POST action unsupported", sizeof(m_lastSubmittedFormStatus));
+        strcopy(m_lastFormError, "Bare-metal Forms-lite POST supports plain http:// actions only", sizeof(m_lastFormError));
+        buildErrorDocument(action, m_lastFormError);
+        rememberPageMetadata(action, action, "unsupported", encoding, m_lastFormError, body, used);
+        setStatus(m_lastFormError);
+        return;
+    }
+    submitFormsLitePost(action, body, used, encoding);
+}
+
 static bool nav_build_forms_lite_smoke_body(char* out, int outSize, int* bodyBytes)
 {
     if (!out || outSize <= 0) return false;
@@ -7191,6 +7652,135 @@ bool NavigatorApp::smokeFormsLitePost(const char* action, int* statusCode, char*
     }
     return response->ok && diagnosticsOk;
 }
+
+bool NavigatorApp::smokeInteractiveFormsLitePost(const char* formUrl, int* statusCode,
+                                                 char* contentType, int contentTypeLen,
+                                                 int* bodyBytes, int* parsedBlocks,
+                                                 char* error, int errorLen,
+                                                 int* submittedBodyBytes)
+{
+    if (statusCode) *statusCode = 0;
+    if (contentType && contentTypeLen > 0) contentType[0] = '\0';
+    if (bodyBytes) *bodyBytes = 0;
+    if (parsedBlocks) *parsedBlocks = 0;
+    if (error && errorLen > 0) error[0] = '\0';
+    if (submittedBodyBytes) *submittedBodyBytes = 0;
+
+    NavigatorApp app;
+    app.loadUrl(formUrl);
+    auto findControl = [&app](BlockKind kind, const char* name, const char* value = nullptr) {
+        for (int i = 0; i < app.m_blockCount; ++i) {
+            if (app.m_blocks[i].kind != kind) continue;
+            if (name && !streq_local(app.m_blocks[i].inputName, name)) continue;
+            if (value && !streq_local(app.m_blocks[i].inputValue, value)) continue;
+            return i;
+        }
+        return -1;
+    };
+    int agree = findControl(BLOCK_FORM_CHECKBOX, "agree");
+    int alpha = findControl(BLOCK_FORM_RADIO, "kind", "alpha");
+    int size = findControl(BLOCK_FORM_SELECT, "size");
+    int submit = findControl(BLOCK_FORM_SUBMIT, nullptr);
+    bool controlsOk = app.m_metaFormCount == 1 &&
+                      app.m_metaTextInputCount == 2 &&
+                      app.m_metaCheckboxCount == 2 &&
+                      app.m_metaRadioCount == 2 &&
+                      app.m_metaTextareaCount == 1 &&
+                      app.m_metaSelectCount == 1 &&
+                      app.setFormControlValue("q", "posted value") &&
+                      app.setFormControlValue("note", "hello\nsecond line") &&
+                      agree >= 0 && alpha >= 0 && size >= 0 && submit >= 0;
+    if (controlsOk) {
+        if (!app.m_blocks[agree].checked) app.activateFormControl(agree);
+        app.activateFormControl(alpha);
+        int attempts = 0;
+        while (!streq_local(app.m_blocks[size].inputValue, "m") && attempts++ < MAX_FORM_OPTIONS) {
+            app.activateFormControl(size);
+        }
+        controlsOk = streq_local(app.m_blocks[size].inputValue, "m");
+    }
+    if (controlsOk) app.activateFormControl(submit);
+
+    KernelHttpResponse* response = &s_kernelHttpResponse;
+    int renderedBlocks = app.m_blockCount;
+    auto blocksContain = [&app](const char* needle) {
+        for (int i = 0; needle && needle[0] && i < app.m_blockCount; ++i) {
+            const char* text = app.m_blocks[i].text;
+            for (int start = 0; text[start]; ++start) {
+                int j = 0;
+                while (needle[j] && text[start + j] == needle[j]) ++j;
+                if (!needle[j]) return true;
+            }
+        }
+        return false;
+    };
+    bool renderedOk = blocksContain("Bare-metal POST OK");
+    app.buildPageInfoDocument();
+    bool diagnosticsOk = blocksContain("Forms-lite interactive controls: enabled") &&
+                         blocksContain("Forms-lite POST interactive: enabled") &&
+                         blocksContain("Last submitted method: POST") &&
+                         blocksContain("Last POST HTTP status: 200 OK") &&
+                         blocksContain("Last POST content type: text/html") &&
+                         blocksContain("Last POST body bytes: 67");
+    if (statusCode) *statusCode = response->statusCode;
+    if (contentType && contentTypeLen > 0) strcopy(contentType, response->contentType, contentTypeLen);
+    if (bodyBytes) *bodyBytes = response->bodyBytes;
+    if (parsedBlocks) *parsedBlocks = renderedBlocks;
+    if (submittedBodyBytes) *submittedBodyBytes = app.m_lastPostBodyBytes;
+    bool ok = controlsOk && response->ok && response->statusCode == 200 &&
+              app.m_lastPostBodyBytes == 67 && renderedOk && diagnosticsOk;
+    if (!ok && error && errorLen > 0) {
+        strcopy(error, response->error[0] ? response->error : "Interactive Forms-lite POST smoke mismatch", errorLen);
+    }
+    return ok;
+}
+
+bool NavigatorApp::smokeInteractiveFormsLiteGet(const char* formUrl, char* finalUrl,
+                                                int finalUrlLen, int* parsedBlocks,
+                                                char* error, int errorLen)
+{
+    if (finalUrl && finalUrlLen > 0) finalUrl[0] = '\0';
+    if (parsedBlocks) *parsedBlocks = 0;
+    if (error && errorLen > 0) error[0] = '\0';
+    NavigatorApp app;
+    app.loadUrl(formUrl);
+    auto findControl = [&app](BlockKind kind, const char* name, const char* value = nullptr) {
+        for (int i = 0; i < app.m_blockCount; ++i) {
+            if (app.m_blocks[i].kind != kind) continue;
+            if (name && !streq_local(app.m_blocks[i].inputName, name)) continue;
+            if (value && !streq_local(app.m_blocks[i].inputValue, value)) continue;
+            return i;
+        }
+        return -1;
+    };
+    int agree = findControl(BLOCK_FORM_CHECKBOX, "agree");
+    int alpha = findControl(BLOCK_FORM_RADIO, "kind", "alpha");
+    int size = findControl(BLOCK_FORM_SELECT, "size");
+    int submit = findControl(BLOCK_FORM_SUBMIT, nullptr);
+    bool controlsOk = app.setFormControlValue("q", "posted value") &&
+                      app.setFormControlValue("note", "hello\nsecond line") &&
+                      agree >= 0 && alpha >= 0 && size >= 0 && submit >= 0;
+    if (controlsOk) {
+        if (!app.m_blocks[agree].checked) app.activateFormControl(agree);
+        app.activateFormControl(alpha);
+        int attempts = 0;
+        while (!streq_local(app.m_blocks[size].inputValue, "m") && attempts++ < MAX_FORM_OPTIONS) {
+            app.activateFormControl(size);
+        }
+        controlsOk = streq_local(app.m_blocks[size].inputValue, "m");
+    }
+    if (controlsOk) app.activateFormControl(submit);
+    if (finalUrl && finalUrlLen > 0) strcopy(finalUrl, app.m_currentUrl, finalUrlLen);
+    if (parsedBlocks) *parsedBlocks = app.m_blockCount;
+    bool renderedOk = false;
+    for (int i = 0; i < app.m_blockCount; ++i) {
+        if (streq_local(app.m_blocks[i].text, "Bare-metal GET OK")) renderedOk = true;
+    }
+    bool ok = controlsOk && renderedOk && streq_local(app.m_lastSubmittedFormMethod, "GET");
+    if (!ok && error && errorLen > 0) strcopy(error, "Interactive Forms-lite GET smoke mismatch", errorLen);
+    return ok;
+}
+
 void NavigatorApp::loadFileUrl(const char* url)
 {
     if (!nav_starts_with(url, "file://")) {
@@ -7199,7 +7789,14 @@ void NavigatorApp::loadFileUrl(const char* url)
         return;
     }
 
-    const char* path = url + 7;
+    char path[MAX_URL_LEN];
+    int pathLen = 0;
+    const char* urlPath = url + 7;
+    while (urlPath[pathLen] && urlPath[pathLen] != '?' && urlPath[pathLen] != '#' && pathLen < MAX_URL_LEN - 1) {
+        path[pathLen] = urlPath[pathLen];
+        ++pathLen;
+    }
+    path[pathLen] = '\0';
     static char buffer[32768];
     int32_t bytesRead = vfs::read_file(path, buffer, sizeof(buffer) - 1);
     if (bytesRead < 0) {
@@ -7277,6 +7874,7 @@ void NavigatorApp::loadUrl(const char* url)
     m_addressFocused = false;
     m_addressBuffer[0] = '\0';
     m_addressCaret = 0;
+    blurFormBlock();
     setStatus("Ready");
 
 }
@@ -7382,6 +7980,83 @@ bool NavigatorApp::hitAddressBar(int x, int y) const
            y >= ADDRESS_Y && y < ADDRESS_Y + ADDRESS_H;
 }
 
+bool NavigatorApp::isFormBlock(const DocBlock& block) const
+{
+    return block.kind == BLOCK_FORM_TEXT ||
+           block.kind == BLOCK_FORM_CHECKBOX ||
+           block.kind == BLOCK_FORM_RADIO ||
+           block.kind == BLOCK_FORM_TEXTAREA ||
+           block.kind == BLOCK_FORM_SELECT ||
+           block.kind == BLOCK_FORM_SUBMIT;
+}
+
+bool NavigatorApp::isFocusableFormBlock(const DocBlock& block) const
+{
+    return isFormBlock(block) && !block.disabled;
+}
+
+int NavigatorApp::formControlHeight(const DocBlock& block) const
+{
+    if (block.kind == BLOCK_FORM_TEXTAREA) {
+        int rows = block.visibleRows > 0 ? block.visibleRows : 4;
+        if (rows < 2) rows = 2;
+        if (rows > 8) rows = 8;
+        return rows * 16 + 10;
+    }
+    return 24;
+}
+
+void NavigatorApp::formControlRect(int blockIndex, int& x, int& y, int& w, int& h) const
+{
+    x = y = w = h = 0;
+    if (!m_window || blockIndex < 0 || blockIndex >= m_blockCount || !isFormBlock(m_blocks[blockIndex])) return;
+    int maxChars = (m_window->w - CONTENT_X * 2 - 32) / 6;
+    x = CONTENT_X + 14 + css_margin_left_or(m_bodyStyle, 0) + css_margin_left_or(m_blocks[blockIndex].style, 0);
+    y = blockY(blockIndex, maxChars) + css_margin_top_or(m_blocks[blockIndex].style, 4);
+    w = (m_blocks[blockIndex].kind == BLOCK_FORM_SUBMIT) ? 112 :
+        ((m_blocks[blockIndex].kind == BLOCK_FORM_CHECKBOX || m_blocks[blockIndex].kind == BLOCK_FORM_RADIO) ? 260 : 320);
+    h = formControlHeight(m_blocks[blockIndex]);
+}
+
+int NavigatorApp::hitFormBlockIndex(int x, int y) const
+{
+    for (int i = 0; i < m_blockCount; ++i) {
+        if (!isFormBlock(m_blocks[i])) continue;
+        int fx, fy, fw, fh;
+        formControlRect(i, fx, fy, fw, fh);
+        if (x >= fx && x < fx + fw && y >= fy && y < fy + fh) return i;
+    }
+    return -1;
+}
+
+void NavigatorApp::focusFormBlock(int blockIndex)
+{
+    if (blockIndex < 0 || blockIndex >= m_blockCount || !isFocusableFormBlock(m_blocks[blockIndex])) return;
+    m_focusedFormBlock = blockIndex;
+    m_formCaret = strlen_local(m_blocks[blockIndex].inputValue);
+    clearSelection();
+    setStatus("Form control focused");
+}
+
+void NavigatorApp::blurFormBlock()
+{
+    m_focusedFormBlock = -1;
+    m_formCaret = 0;
+}
+
+void NavigatorApp::focusNextFormBlock()
+{
+    if (m_blockCount <= 0) return;
+    int start = m_focusedFormBlock;
+    if (start < 0 || start >= m_blockCount) start = m_blockCount - 1;
+    for (int step = 1; step <= m_blockCount; ++step) {
+        int index = (start + step) % m_blockCount;
+        if (!isFocusableFormBlock(m_blocks[index])) continue;
+        focusFormBlock(index);
+        return;
+    }
+}
+
 int NavigatorApp::blockHeight(const DocBlock& block, int maxChars) const
 {
     int len = strlen_local(block.text);
@@ -7399,6 +8074,9 @@ int NavigatorApp::blockHeight(const DocBlock& block, int maxChars) const
         int imageH = block.height > 0 ? block.height : (block.naturalHeight > 0 ? block.naturalHeight : 64);
         if (imageH > 420) imageH = 420;
         return css_margin_top_or(block.style, 4) + imageH + css_margin_bottom_or(block.style, 8);
+    }
+    if (isFormBlock(block)) {
+        return css_margin_top_or(block.style, 4) + formControlHeight(block) + css_margin_bottom_or(block.style, 6);
     }
     int lineH = block.kind == BLOCK_HEADING ? (css_font_size_or(block.style, 20) > 22 ? 20 : 16) : 16;
     int boxPadding = block.kind == BLOCK_PREFORMATTED ? css_padding_or(block.style, 4) * 2 : 0;
@@ -7796,6 +8474,93 @@ void NavigatorApp::drawDocument(uint32_t x, uint32_t y, uint32_t w, uint32_t h)
                 framebuffer::fill_rect(textX - 4, (uint32_t)(absY + blockMarginTop - 2), (uint32_t)(boxW), (uint32_t)(preH + blockPadding * 2), css_background_or(rgb(230, 232, 238), m_blocks[i].style));
             int outY = absY + blockMarginTop + blockPadding;
             drawWrappedText(textX, (uint32_t)(absY + blockMarginTop + blockPadding), m_blocks[i].text, css_color_or(rgb(40, 50, 68), m_blocks[i].style), maxChars, outY);
+        } else if (isFormBlock(m_blocks[i])) {
+            DocBlock& block = m_blocks[i];
+            int controlX = (int)textX;
+            int controlY = absY + blockMarginTop;
+            int controlW = block.kind == BLOCK_FORM_SUBMIT ? 112 :
+                ((block.kind == BLOCK_FORM_CHECKBOX || block.kind == BLOCK_FORM_RADIO) ? 260 : 320);
+            int controlH = formControlHeight(block);
+            bool focused = i == m_focusedFormBlock;
+            uint32_t border = focused ? rgb(54, 118, 210) : rgb(148, 156, 170);
+            if (block.disabled || block.formUnsupported) border = rgb(142, 146, 154);
+
+            if (block.kind == BLOCK_FORM_CHECKBOX || block.kind == BLOCK_FORM_RADIO) {
+                int box = 14;
+                int boxY = controlY + (controlH - box) / 2;
+                framebuffer::fill_rect((uint32_t)controlX, (uint32_t)boxY, box, box, rgb(248, 250, 254));
+                framebuffer::fill_rect((uint32_t)controlX, (uint32_t)boxY, box, 1, border);
+                framebuffer::fill_rect((uint32_t)controlX, (uint32_t)(boxY + box - 1), box, 1, border);
+                framebuffer::fill_rect((uint32_t)controlX, (uint32_t)boxY, 1, box, border);
+                framebuffer::fill_rect((uint32_t)(controlX + box - 1), (uint32_t)boxY, 1, box, border);
+                if (block.checked) {
+                    if (block.kind == BLOCK_FORM_RADIO) {
+                        framebuffer::fill_rect((uint32_t)(controlX + 4), (uint32_t)(boxY + 4), box - 8, box - 8, rgb(45, 94, 170));
+                    } else {
+                        appDrawText((uint32_t)(controlX + 3), (uint32_t)(boxY - 2), "x", rgb(35, 85, 170));
+                    }
+                }
+                appDrawText((uint32_t)(controlX + box + 8), (uint32_t)(controlY + 7),
+                            block.text[0] ? block.text : block.inputName, rgb(35, 45, 60));
+            } else {
+                uint32_t fill = block.kind == BLOCK_FORM_SUBMIT
+                    ? ((block.disabled || block.formUnsupported) ? rgb(184, 188, 196) : rgb(65, 112, 190))
+                    : rgb(250, 252, 255);
+                framebuffer::fill_rect((uint32_t)controlX, (uint32_t)controlY, (uint32_t)controlW, (uint32_t)controlH, fill);
+                framebuffer::fill_rect((uint32_t)controlX, (uint32_t)controlY, (uint32_t)controlW, 1, border);
+                framebuffer::fill_rect((uint32_t)controlX, (uint32_t)(controlY + controlH - 1), (uint32_t)controlW, 1, border);
+                framebuffer::fill_rect((uint32_t)controlX, (uint32_t)controlY, 1, (uint32_t)controlH, border);
+                framebuffer::fill_rect((uint32_t)(controlX + controlW - 1), (uint32_t)controlY, 1, (uint32_t)controlH, border);
+
+                if (block.kind == BLOCK_FORM_SUBMIT) {
+                    appDrawText((uint32_t)(controlX + 10), (uint32_t)(controlY + 7),
+                                block.submitLabel[0] ? block.submitLabel : "Submit", rgb(255, 255, 255));
+                } else if (block.kind == BLOCK_FORM_SELECT) {
+                    appDrawText((uint32_t)(controlX + 8), (uint32_t)(controlY + 7),
+                                block.text[0] ? block.text : "(select)", rgb(35, 45, 60));
+                    appDrawText((uint32_t)(controlX + controlW - 20), (uint32_t)(controlY + 7), "v", rgb(70, 78, 96));
+                } else if (block.kind == BLOCK_FORM_TEXTAREA) {
+                    const char* value = block.inputValue[0] ? block.inputValue : block.placeholder;
+                    uint32_t color = block.inputValue[0] ? rgb(35, 45, 60) : rgb(128, 136, 150);
+                    char line[52];
+                    int used = 0;
+                    int lineY = controlY + 6;
+                    int rows = (controlH - 10) / 16;
+                    for (const char* ch = value; ; ++ch) {
+                        if (*ch == '\n' || *ch == '\0' || used >= 50) {
+                            line[used] = '\0';
+                            appDrawText((uint32_t)(controlX + 8), (uint32_t)lineY, line, color);
+                            lineY += 16;
+                            used = 0;
+                            if (*ch == '\0' || --rows <= 0) break;
+                            if (*ch != '\n') --ch;
+                        } else {
+                            line[used++] = *ch;
+                        }
+                    }
+                } else {
+                    const char* value = block.inputValue[0] ? block.inputValue : block.placeholder;
+                    appDrawText((uint32_t)(controlX + 8), (uint32_t)(controlY + 7), value,
+                                block.inputValue[0] ? rgb(35, 45, 60) : rgb(128, 136, 150));
+                }
+
+                if (focused && (block.kind == BLOCK_FORM_TEXT || block.kind == BLOCK_FORM_TEXTAREA)) {
+                    int caretColumn = 0;
+                    int caretRow = 0;
+                    for (int ci = 0; ci < m_formCaret && block.inputValue[ci]; ++ci) {
+                        if (block.inputValue[ci] == '\n') {
+                            ++caretRow;
+                            caretColumn = 0;
+                        } else {
+                            ++caretColumn;
+                        }
+                    }
+                    if (caretColumn > 50) caretColumn = 50;
+                    framebuffer::fill_rect((uint32_t)(controlX + 8 + caretColumn * 6),
+                                           (uint32_t)(controlY + 5 + caretRow * 16), 1, 14,
+                                           rgb(35, 85, 170));
+                }
+            }
         } else if (m_blocks[i].kind == BLOCK_IMAGE) {
             int imageW = m_blocks[i].width > 0 ? m_blocks[i].width : (m_blocks[i].naturalWidth > 0 ? m_blocks[i].naturalWidth : 220);
             int imageH = m_blocks[i].height > 0 ? m_blocks[i].height : (m_blocks[i].naturalHeight > 0 ? m_blocks[i].naturalHeight : 64);
@@ -8085,6 +8850,63 @@ static bool printNavigatorFormsLitePostSmokeCase(const char* name, const char* a
     return pass;
 }
 
+static bool printNavigatorInteractiveFormsLitePostSmokeCase()
+{
+    int httpStatus = 0;
+    int httpBodyBytes = 0;
+    int httpBlocks = 0;
+    int submittedBodyBytes = 0;
+    char httpContentType[48];
+    char httpError[128];
+    bool fetchOk = NavigatorApp::smokeInteractiveFormsLitePost(
+        "http://10.0.2.2:8080/forms/interactive-post.html",
+        &httpStatus, httpContentType, sizeof(httpContentType), &httpBodyBytes,
+        &httpBlocks, httpError, sizeof(httpError), &submittedBodyBytes);
+    bool pass = fetchOk && httpStatus == 200 && httpBlocks > 0 &&
+                submittedBodyBytes == 67 &&
+                gxos::web::httpSharedEqualsInsensitive(httpContentType, "text/html");
+    serial::puts("[NAVIGATOR-SMOKE] http.case.forms_post.path=interactive-document-controls\n");
+    serial::puts("[NAVIGATOR-SMOKE] http.case.forms_post.method=POST\n");
+    serial::puts("[NAVIGATOR-SMOKE] http.case.forms_post.status=");
+    serial_put_dec((uint32_t)httpStatus);
+    serial::puts("\n[NAVIGATOR-SMOKE] http.case.forms_post.content_type=");
+    serial::puts(httpContentType[0] ? httpContentType : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] http.case.forms_post.submitted_body_bytes=");
+    serial_put_dec((uint32_t)submittedBodyBytes);
+    serial::puts("\n[NAVIGATOR-SMOKE] http.case.forms_post.parsed_block_count=");
+    serial_put_dec((uint32_t)httpBlocks);
+    if (httpError[0]) {
+        serial::puts("\n[NAVIGATOR-SMOKE] http.case.forms_post.error=");
+        serial::puts(httpError);
+    }
+    serial::puts(pass ? "\n[NAVIGATOR-SMOKE] http.case.forms_post.result=PASS\n"
+                      : "\n[NAVIGATOR-SMOKE] http.case.forms_post.result=FAIL\n");
+    return pass;
+}
+
+static bool printNavigatorInteractiveFormsLiteGetSmokeCase()
+{
+    char finalUrl[160];
+    char error[128];
+    int parsedBlocks = 0;
+    bool ok = NavigatorApp::smokeInteractiveFormsLiteGet(
+        "http://10.0.2.2:8080/forms/interactive-get.html",
+        finalUrl, sizeof(finalUrl), &parsedBlocks, error, sizeof(error));
+    serial::puts("[NAVIGATOR-SMOKE] http.case.forms_get.path=interactive-document-controls\n");
+    serial::puts("[NAVIGATOR-SMOKE] http.case.forms_get.method=GET\n");
+    serial::puts("[NAVIGATOR-SMOKE] http.case.forms_get.final_url=");
+    serial::puts(finalUrl[0] ? finalUrl : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] http.case.forms_get.parsed_block_count=");
+    serial_put_dec((uint32_t)parsedBlocks);
+    if (error[0]) {
+        serial::puts("\n[NAVIGATOR-SMOKE] http.case.forms_get.error=");
+        serial::puts(error);
+    }
+    serial::puts(ok ? "\n[NAVIGATOR-SMOKE] http.case.forms_get.result=PASS\n"
+                    : "\n[NAVIGATOR-SMOKE] http.case.forms_get.result=FAIL\n");
+    return ok;
+}
+
 static bool printNavigatorRuntimeSmokePreamble()
 {
     bool registered = app::AppManager::isAppAvailable("guideXOS Navigator");
@@ -8105,13 +8927,14 @@ static bool printNavigatorRuntimeSmokePreamble()
     serial::puts("[NAVIGATOR-SMOKE] capability.remote_png=enabled-basic numeric IPv4 and hostname http:// PNG images\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.downloads=unavailable for bare-metal HTTP v0.1\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.css_lite=enabled for embedded style blocks\n");
-    serial::puts("[NAVIGATOR-SMOKE] capability.forms_lite=enabled for file/about GET form blocks\n");
+    serial::puts("[NAVIGATOR-SMOKE] capability.forms_lite=enabled interactive GET/POST document controls\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.forms_post_hosted=enabled in authoritative hosted Navigator path\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.forms_post_bare_metal=enabled-basic application/x-www-form-urlencoded\n");
+    serial::puts("[NAVIGATOR-SMOKE] capability.forms_post_interactive=enabled through document controls\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.forms_post_redirect_policy=303 becomes GET; 301/302/307/308 preserve POST\n");
     serial::puts("[NAVIGATOR-SMOKE] page_info.forms_post_bare_metal=enabled-basic\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.forms_controls=text, checkbox, radio, textarea, select, submit\n");
-    serial::puts("[NAVIGATOR-SMOKE] capability.forms_focus_navigation=Tab/Shift+Tab, Enter, Space where form UI is available\n");
+    serial::puts("[NAVIGATOR-SMOKE] capability.forms_focus_navigation=Tab, Enter, Space in bare-metal document controls\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.find_in_page=unsupported in bare-metal adapter\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.external_stylesheets=unsupported\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.bookmark_persistence=unavailable; in-memory defaults only\n");
@@ -8151,8 +8974,8 @@ static bool printNavigatorHttpSmokeCases()
         "http://10.0.2.2:8080/navigator-smoke/image-nonpng.html", true, true, false, 1, 0, 1) && httpOk;
     httpOk = printNavigatorHttpSmokeCase("hostname_image_relative", "http://guidexos.test:8080/navigator-smoke/hostname-image.html", 200,
         "http://guidexos.test:8080/navigator-smoke/hostname-image.html", true, true, false, 1, 1, 0, "10.0.2.2") && httpOk;
-    httpOk = printNavigatorFormsLitePostSmokeCase("forms_post", "http://10.0.2.2:8080/forms/post-echo",
-        "http://10.0.2.2:8080/forms/post-echo", 0) && httpOk;
+    httpOk = printNavigatorInteractiveFormsLitePostSmokeCase() && httpOk;
+    httpOk = printNavigatorInteractiveFormsLiteGetSmokeCase() && httpOk;
     httpOk = printNavigatorFormsLitePostSmokeCase("forms_post_redirect_303", "http://10.0.2.2:8080/forms/post-redirect-303",
         "http://10.0.2.2:8080/navigator-smoke/final.html", 1) && httpOk;
     httpOk = printNavigatorFormsLitePostSmokeCase("forms_post_redirect_307", "http://10.0.2.2:8080/forms/post-redirect-307",
