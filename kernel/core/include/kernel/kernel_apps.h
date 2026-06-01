@@ -408,6 +408,8 @@ private:
 // app-model implementation. This kernel-side app keeps the same user-facing
 // shape where platform facilities exist, and reports honest unsupported
 // capability documents/placeholders where they do not.
+struct KernelHttpResponse;
+
 class NavigatorApp : public app::KernelApp {
 public:
     NavigatorApp();
@@ -431,6 +433,11 @@ public:
                                int finalUrlLen = 0, int* redirectCount = nullptr,
                                int* remoteImages = nullptr, int* loadedImages = nullptr,
                                int* failedImages = nullptr);
+    static bool smokeFormsLitePost(const char* action, int* statusCode, char* contentType,
+                                   int contentTypeLen, int* bodyBytes, int* parsedBlocks,
+                                   char* error, int errorLen, char* finalUrl = nullptr,
+                                   int finalUrlLen = 0, int* redirectCount = nullptr,
+                                   int* submittedBodyBytes = nullptr);
 
 private:
     enum NavigatorMouseMode {
@@ -444,7 +451,7 @@ private:
     static const int MAX_STATUS_LEN = 128;
     static const int MAX_URL_LEN = 160;
     static const int MAX_TITLE_LEN_NAV = 96;
-    static const int MAX_BLOCKS = 40;
+    static const int MAX_BLOCKS = 64;
     static const int MAX_BLOCK_TEXT = 320;
     static const int MAX_BOOKMARKS = 12;
     static const int MAX_SOURCE_PREVIEW = 2048;
@@ -576,6 +583,12 @@ private:
     char m_metaDownloadSavedPath[MAX_URL_LEN];
     int m_metaDownloadByteCount;
     char m_lastDownloadError[128];
+    char m_lastSubmittedFormAction[MAX_URL_LEN];
+    char m_lastSubmittedFormMethod[8];
+    char m_lastSubmittedFormStatus[128];
+    char m_lastPostHttpStatus[48];
+    char m_lastPostContentType[48];
+    int m_lastPostBodyBytes;
     gxos::web::WebStyle m_bodyStyle;
 
     void setStatus(const char* text);
@@ -594,6 +607,9 @@ private:
     void buildErrorDocument(const char* url, const char* reason);
     void loadFileUrl(const char* url);
     void loadHttpUrl(const char* url);
+    void loadHttpResponse(const char* url, KernelHttpResponse* response);
+    void submitFormsLitePost(const char* action, const char* body, int bodyBytes,
+                             const char* contentType = "application/x-www-form-urlencoded");
     void rememberPageMetadata(const char* requestedUrl, const char* finalUrl, const char* sourceType,
                               const char* contentType, const char* errorStatus,
                               const char* rawSource, int rawSourceBytes,

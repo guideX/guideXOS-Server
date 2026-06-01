@@ -175,6 +175,35 @@ class NavigatorSmokeHandler(BaseHTTPRequestHandler):
         path = self.path.split("?", 1)[0]
         length = int(self.headers.get("Content-Length", "0") or "0")
         body = self.rfile.read(length)
+        if path == "/forms/post-redirect-303":
+            self.write_redirect(303, "/navigator-smoke/final.html")
+            return
+        if path == "/forms/post-redirect-307":
+            self.write_redirect(307, "/forms/post-echo")
+            return
+        if path == "/forms/post-redirect-hostname":
+            self.write_redirect(307, "http://guidexos.test:8080/forms/post-echo")
+            return
+        if path == "/forms/post-echo":
+            expected = b"q=posted+value&agree=yes&kind=alpha&note=hello%0Asecond+line&size=m"
+            content_type = self.headers.get("Content-Type", "")
+            content_length = self.headers.get("Content-Length", "")
+            if self.command != "POST":
+                self.write_bytes(405, "text/plain", b"expected POST")
+                return
+            if content_type != "application/x-www-form-urlencoded":
+                self.write_bytes(415, "text/plain", b"unexpected content type")
+                return
+            if content_length != str(len(expected)) or length != len(expected):
+                self.write_bytes(400, "text/plain", b"unexpected content length")
+                return
+            if body != expected:
+                self.write_bytes(400, "text/plain", b"unexpected encoded body")
+                return
+            self.write_bytes(200, "text/html; charset=utf-8",
+                             b"<html><body><h1>Bare-metal POST OK</h1>"
+                             b"<p>Exact Forms-lite urlencoded body received.</p></body></html>")
+            return
         if path == "/navigator-smoke/post-echo":
             escaped = body.decode("utf-8", "replace").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
             method = self.command.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")

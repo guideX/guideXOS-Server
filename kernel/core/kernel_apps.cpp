@@ -4151,7 +4151,7 @@ void DiskManagerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
                 // Small partition color bar
                 framebuffer::fill_rect(rx + 4, pry, 4, kGlyphH, kPartBar);
 
-                // Row text  (manual number GÂ∆ char)
+                // Row text (manual number char)
                 char numBuf[4] = {'0' + (char)(pi + 1), '\0', '\0', '\0'};
                 appDrawText(rx + 10, pry, numBuf, kText);
 
@@ -4822,6 +4822,12 @@ NavigatorApp::NavigatorApp()
     m_metaDownloadSavedPath[0] = '\0';
     m_metaDownloadByteCount = 0;
     m_lastDownloadError[0] = '\0';
+    m_lastSubmittedFormAction[0] = '\0';
+    m_lastSubmittedFormMethod[0] = '\0';
+    m_lastSubmittedFormStatus[0] = '\0';
+    m_lastPostHttpStatus[0] = '\0';
+    m_lastPostContentType[0] = '\0';
+    m_lastPostBodyBytes = 0;
     m_bodyStyle = gxos::web::WebStyle{};
     m_selectionAnchor.blockIndex = -1;
     m_selectionAnchor.offset = 0;
@@ -5476,6 +5482,13 @@ void NavigatorApp::buildPageInfoDocument()
     NAV_INFO_INT("CSS style bytes processed: ", m_metaCssStyleBytesProcessed);
     NAV_INFO_TEXT("Text selection enabled: ", "yes");
     NAV_INFO_TEXT("Clipboard mode: ", m_clipboardMode[0] ? m_clipboardMode : "Navigator internal clipboard");
+    NAV_INFO_TEXT("Forms-lite POST bare-metal: ", "enabled-basic");
+    NAV_INFO_TEXT("Last submitted method: ", m_lastSubmittedFormMethod[0] ? m_lastSubmittedFormMethod : "(none)");
+    NAV_INFO_TEXT("Last submitted action: ", m_lastSubmittedFormAction[0] ? m_lastSubmittedFormAction : "(none)");
+    NAV_INFO_TEXT("Last submitted status: ", m_lastSubmittedFormStatus[0] ? m_lastSubmittedFormStatus : "(none)");
+    NAV_INFO_TEXT("Last POST HTTP status: ", m_lastPostHttpStatus[0] ? m_lastPostHttpStatus : "(none)");
+    NAV_INFO_TEXT("Last POST content type: ", m_lastPostContentType[0] ? m_lastPostContentType : "(none)");
+    NAV_INFO_INT("Last POST body bytes: ", m_lastPostBodyBytes);
     NAV_INFO_INT("Raw/source bytes: ", m_metaSourceBytes);
     NAV_INFO_TEXT("Source preview truncated: ", m_metaSourceTruncated ? "yes" : "no");
 #undef NAV_INFO_TEXT
@@ -5484,6 +5497,7 @@ void NavigatorApp::buildPageInfoDocument()
     addBlock(BLOCK_HEADING, "Safety Limits");
     addBlock(BLOCK_LIST_ITEM, "HTTP header limit: 32768 bytes");
     addBlock(BLOCK_LIST_ITEM, "HTTP body limit: 262144 bytes");
+    addBlock(BLOCK_LIST_ITEM, "Forms-lite POST body limit: 8192 bytes");
     addBlock(BLOCK_LIST_ITEM, "HTTP redirect limit: 5");
     addBlock(BLOCK_LIST_ITEM, "HTTP timeouts: 5000 ms connect/read");
     addBlock(BLOCK_LIST_ITEM, "DNS lookup: A records only, timeout 3000 ms, retries 3");
@@ -5550,7 +5564,7 @@ void NavigatorApp::buildRuntimeDocument()
     addBlock(BLOCK_LIST_ITEM, "File read: enabled through VFS");
     addBlock(BLOCK_LIST_ITEM, "File write: unavailable for bookmark persistence in this adapter");
     addBlock(BLOCK_LIST_ITEM, "Local PNG: enabled through shared ImageAdapter where VFS image data exists");
-    addBlock(BLOCK_LIST_ITEM, "HTTP: enabled for numeric IPv4 and hostname HTTP/1.0 GET with redirects and chunked decoding");
+    addBlock(BLOCK_LIST_ITEM, "HTTP: enabled for numeric IPv4 and hostname HTTP/1.0 GET/POST with redirects and chunked decoding");
     addBlock(BLOCK_LIST_ITEM, "DNS: enabled-basic for A/IPv4 records");
     addBlock(BLOCK_LIST_ITEM, "HTTP redirects: enabled, limit 5");
     addBlock(BLOCK_LIST_ITEM, "HTTP chunked transfer decoding: enabled");
@@ -5562,7 +5576,8 @@ void NavigatorApp::buildRuntimeDocument()
     addBlock(BLOCK_LIST_ITEM, "CSS-lite embedded <style>: enabled");
     addBlock(BLOCK_LIST_ITEM, "Forms-lite GET forms: enabled for file/about pages");
     addBlock(BLOCK_LIST_ITEM, "Forms-lite POST forms hosted: enabled in authoritative hosted Navigator path");
-    addBlock(BLOCK_LIST_ITEM, "Forms-lite POST forms bare-metal: unsupported in this adapter");
+    addBlock(BLOCK_LIST_ITEM, "Forms-lite POST forms bare-metal: enabled-basic application/x-www-form-urlencoded transport");
+    addBlock(BLOCK_LIST_ITEM, "Forms-lite POST redirect policy: 303 becomes GET; 301/302/307/308 preserve POST");
     addBlock(BLOCK_LIST_ITEM, "Forms-lite controls: text, checkbox, radio, textarea, select, submit");
     addBlock(BLOCK_LIST_ITEM, "Forms-lite focus navigation: Tab/Shift+Tab, Enter, Space where form UI is available");
     addBlock(BLOCK_LIST_ITEM, "Find in Page: unsupported in bare-metal adapter");
@@ -5604,6 +5619,25 @@ void NavigatorApp::buildRuntimeDocument()
     strappend(line, m_metaFinalUrl[0] ? m_metaFinalUrl : "(none)", sizeof(line));
     addBlock(BLOCK_LIST_ITEM, line);
     addBlock(BLOCK_LIST_ITEM, m_metaCssDetected ? "CSS diagnostics: css detected" : "CSS diagnostics: no css detected");
+    strcopy(line, "Last submitted method: ", sizeof(line));
+    strappend(line, m_lastSubmittedFormMethod[0] ? m_lastSubmittedFormMethod : "(none)", sizeof(line));
+    addBlock(BLOCK_LIST_ITEM, line);
+    strcopy(line, "Last submitted action: ", sizeof(line));
+    strappend(line, m_lastSubmittedFormAction[0] ? m_lastSubmittedFormAction : "(none)", sizeof(line));
+    addBlock(BLOCK_LIST_ITEM, line);
+    strcopy(line, "Last submitted status: ", sizeof(line));
+    strappend(line, m_lastSubmittedFormStatus[0] ? m_lastSubmittedFormStatus : "(none)", sizeof(line));
+    addBlock(BLOCK_LIST_ITEM, line);
+    strcopy(line, "Last POST HTTP status: ", sizeof(line));
+    strappend(line, m_lastPostHttpStatus[0] ? m_lastPostHttpStatus : "(none)", sizeof(line));
+    addBlock(BLOCK_LIST_ITEM, line);
+    strcopy(line, "Last POST content type: ", sizeof(line));
+    strappend(line, m_lastPostContentType[0] ? m_lastPostContentType : "(none)", sizeof(line));
+    addBlock(BLOCK_LIST_ITEM, line);
+    nav_int_to_text(m_lastPostBodyBytes, number, sizeof(number));
+    strcopy(line, "Last POST body bytes: ", sizeof(line));
+    strappend(line, number, sizeof(line));
+    addBlock(BLOCK_LIST_ITEM, line);
 
     addBlock(BLOCK_LINK, "Page Info", "about:page-info");
     addBlock(BLOCK_LINK, "View Source", "about:view-source");
@@ -6068,6 +6102,7 @@ static const int kKernelHttpUrlLen = 160;
 static const int kKernelHttpHeaderLimit = gxos::web::kHttpSharedMaxHeaderBytes;
 static const int kKernelHttpBodyLimit = gxos::web::kHttpSharedMaxBodyBytes;
 static const int kKernelHttpRawLimit = kKernelHttpHeaderLimit + kKernelHttpBodyLimit;
+static const int kKernelHttpPostBodyLimit = 8 * 1024;
 static const int kKernelHttpConnectTimeoutMs = gxos::web::kHttpSharedConnectTimeoutMs;
 static const int kKernelHttpReadTimeoutMs = gxos::web::kHttpSharedReadTimeoutMs;
 
@@ -6258,6 +6293,31 @@ static const char* kernel_http_error_name(int err)
     case kernel::tcp::TCP_ERR_NETDOWN: return "network down";
     default: return "tcp error";
     }
+}
+
+static bool kernel_http_send_all(int sock, const char* bytes, int byteCount, KernelHttpResponse* response)
+{
+    if (!bytes || byteCount <= 0) return true;
+    int sent = 0;
+    uint32_t startTicks = (uint32_t)kernel::pit::ticks();
+    uint32_t maxTicks = (uint32_t)(kKernelHttpReadTimeoutMs / 10 + 1);
+    while (sent < byteCount) {
+        int n = kernel::tcp::tcp_send(sock, bytes + sent, (uint16_t)(byteCount - sent));
+        if (n > 0) {
+            sent += n;
+            startTicks = (uint32_t)kernel::pit::ticks();
+        } else if (n == kernel::tcp::TCP_ERR_WOULDBLOCK) {
+            kernel_http_poll_once();
+            if (((uint32_t)kernel::pit::ticks() - startTicks) > maxTicks) {
+                strcopy(response->error, "HTTP send timeout", sizeof(response->error));
+                return false;
+            }
+        } else {
+            strcopy(response->error, kernel_http_error_name(n), sizeof(response->error));
+            return false;
+        }
+    }
+    return true;
 }
 
 static bool kernel_http_parse_response(KernelHttpResponse* response, int rawLen)
@@ -6453,7 +6513,9 @@ static bool kernel_http_resolve_host(KernelHttpUrl* parsed, KernelHttpResponse* 
     strcopy(s_kernelLastDnsResolvedIp, response->dnsResolvedIp, sizeof(s_kernelLastDnsResolvedIp));
     return true;
 }
-static KernelHttpResponse* kernel_http_fetch_once(const char* url)
+static KernelHttpResponse* kernel_http_request_once(const char* url, const char* method,
+                                                    const char* body, int bodyBytes,
+                                                    const char* contentType)
 {
     KernelHttpResponse* response = &s_kernelHttpResponse;
     response->ok = false;
@@ -6480,6 +6542,20 @@ static KernelHttpResponse* kernel_http_fetch_once(const char* url)
 
     if (!kernel::nic::is_active() || !kernel::ipv4::is_configured()) {
         strcopy(response->error, "Network unavailable", sizeof(response->error));
+        return response;
+    }
+    bool isPost = method && gxos::web::httpSharedEqualsInsensitive(method, "post");
+    bool isGet = !method || !method[0] || gxos::web::httpSharedEqualsInsensitive(method, "get");
+    if (!isGet && !isPost) {
+        strcopy(response->error, "Unsupported HTTP method", sizeof(response->error));
+        return response;
+    }
+    if (bodyBytes < 0 || (bodyBytes > 0 && !body)) {
+        strcopy(response->error, "Invalid HTTP request body", sizeof(response->error));
+        return response;
+    }
+    if (isPost && bodyBytes > kKernelHttpPostBodyLimit) {
+        strcopy(response->error, "Forms-lite POST body too large", sizeof(response->error));
         return response;
     }
 
@@ -6521,10 +6597,10 @@ static KernelHttpResponse* kernel_http_fetch_once(const char* url)
         }
     }
 
-    char request[512];
+    char request[768];
     int q = 0;
 #define APPEND_REQ(svalue) do { const char* _s = (svalue); while (_s && *_s && q < (int)sizeof(request) - 1) request[q++] = *_s++; } while (0)
-    APPEND_REQ("GET ");
+    APPEND_REQ(isPost ? "POST " : "GET ");
     APPEND_REQ(parsed.path);
     APPEND_REQ(" HTTP/1.0\r\nHost: ");
     APPEND_REQ(parsed.host);
@@ -6534,20 +6610,24 @@ static KernelHttpResponse* kernel_http_fetch_once(const char* url)
         APPEND_REQ(":");
         APPEND_REQ(portText);
     }
-    APPEND_REQ("\r\nUser-Agent: guideXOS-Navigator/0.1\r\nAccept-Encoding: identity\r\nConnection: close\r\n\r\n");
+    APPEND_REQ("\r\nUser-Agent: guideXOS-Navigator/0.1\r\nAccept-Encoding: identity\r\nConnection: close\r\n");
+    if (isPost) {
+        char bodyLengthText[16];
+        nav_int_to_text(bodyBytes, bodyLengthText, sizeof(bodyLengthText));
+        APPEND_REQ("Content-Type: ");
+        APPEND_REQ(contentType && contentType[0] ? contentType : "application/x-www-form-urlencoded");
+        APPEND_REQ("\r\nContent-Length: ");
+        APPEND_REQ(bodyLengthText);
+        APPEND_REQ("\r\n");
+    }
+    APPEND_REQ("\r\n");
 #undef APPEND_REQ
     request[q] = '\0';
 
-    int sent = 0;
-    while (sent < q) {
-        int n = kernel::tcp::tcp_send(sock, request + sent, (uint16_t)(q - sent));
-        if (n > 0) sent += n;
-        else if (n == kernel::tcp::TCP_ERR_WOULDBLOCK) kernel_http_poll_once();
-        else {
-            strcopy(response->error, kernel_http_error_name(n), sizeof(response->error));
-            kernel::tcp::tcp_close(sock);
-            return response;
-        }
+    if (!kernel_http_send_all(sock, request, q, response) ||
+        (isPost && !kernel_http_send_all(sock, body, bodyBytes, response))) {
+        kernel::tcp::tcp_close(sock);
+        return response;
     }
 
     int rawLen = 0;
@@ -6656,12 +6736,18 @@ static bool kernel_http_resolve_redirect(const char* baseUrl, const char* locati
     return true;
 }
 
-static KernelHttpResponse* kernel_http_fetch(const char* url)
+static KernelHttpResponse* kernel_http_request(const char* url, const char* method,
+                                               const char* body, int bodyBytes,
+                                               const char* contentType)
 {
     char current[kKernelHttpUrlLen];
+    char currentMethod[8];
+    const char* currentBody = body;
+    int currentBodyBytes = bodyBytes;
     strcopy(current, url ? url : "", sizeof(current));
+    strcopy(currentMethod, method && gxos::web::httpSharedEqualsInsensitive(method, "post") ? "POST" : "GET", sizeof(currentMethod));
     for (int redirectCount = 0; redirectCount <= gxos::web::kHttpSharedMaxRedirects; ++redirectCount) {
-        KernelHttpResponse* response = kernel_http_fetch_once(current);
+        KernelHttpResponse* response = kernel_http_request_once(current, currentMethod, currentBody, currentBodyBytes, contentType);
         response->redirectCount = redirectCount;
         strcopy(response->requestedUrl, url ? url : "", sizeof(response->requestedUrl));
         strcopy(response->finalUrl, current, sizeof(response->finalUrl));
@@ -6681,6 +6767,11 @@ static KernelHttpResponse* kernel_http_fetch(const char* url)
             return response;
         }
         strcopy(current, next, sizeof(current));
+        if (response->statusCode == 303) {
+            strcopy(currentMethod, "GET", sizeof(currentMethod));
+            currentBody = nullptr;
+            currentBodyBytes = 0;
+        }
     }
     KernelHttpResponse* response = &s_kernelHttpResponse;
     response->ok = false;
@@ -6691,6 +6782,17 @@ static KernelHttpResponse* kernel_http_fetch(const char* url)
     strcopy(response->finalUrl, current, sizeof(response->finalUrl));
     strcopy(response->error, "HTTP redirect limit exceeded", sizeof(response->error));
     return response;
+}
+
+static KernelHttpResponse* kernel_http_fetch(const char* url)
+{
+    return kernel_http_request(url, "GET", nullptr, 0, nullptr);
+}
+
+static KernelHttpResponse* kernel_http_post(const char* url, const char* body, int bodyBytes,
+                                            const char* contentType)
+{
+    return kernel_http_request(url, "POST", body, bodyBytes, contentType);
 }
 
 static gxos::gui::ImageSafetyLimits nav_kernel_remote_png_limits()
@@ -6715,6 +6817,8 @@ static bool nav_url_path_ends_with_png(const char* url)
     path[i] = '\0';
     return endsWithIgnoreCaseLocal(path, ".png");
 }
+
+static void nav_push_url(char stack[][160], int& count, const char* url);
 
 void NavigatorApp::prepareImageResources()
 {
@@ -6778,7 +6882,11 @@ void NavigatorApp::prepareImageResources()
 void NavigatorApp::loadHttpUrl(const char* url)
 {
     clearPageDownloadMetadata();
-    KernelHttpResponse* response = kernel_http_fetch(url);
+    loadHttpResponse(url, kernel_http_fetch(url));
+}
+
+void NavigatorApp::loadHttpResponse(const char* url, KernelHttpResponse* response)
+{
     if (!response->ok) {
         const char* finalUrl = response->finalUrl[0] ? response->finalUrl : url;
         const char* requestedUrl = response->requestedUrl[0] ? response->requestedUrl : url;
@@ -6891,6 +6999,36 @@ void NavigatorApp::loadHttpUrl(const char* url)
     buildErrorDocument(response->finalUrl[0] ? response->finalUrl : url, message);
     rememberPageMetadata(response->requestedUrl[0] ? response->requestedUrl : url, response->finalUrl[0] ? response->finalUrl : url, "http", response->contentType, "HTTP error status", response->body, response->bodyBytes, nullptr, nullptr, response->statusCode, response->reason, response->redirectCount);
 }
+
+void NavigatorApp::submitFormsLitePost(const char* action, const char* body, int bodyBytes, const char* contentType)
+{
+    const char* safeAction = action ? action : "";
+    clearPageDownloadMetadata();
+    strcopy(m_lastSubmittedFormAction, safeAction, sizeof(m_lastSubmittedFormAction));
+    strcopy(m_lastSubmittedFormMethod, "POST", sizeof(m_lastSubmittedFormMethod));
+    m_lastSubmittedFormStatus[0] = '\0';
+    m_lastPostHttpStatus[0] = '\0';
+    m_lastPostContentType[0] = '\0';
+    m_lastPostBodyBytes = bodyBytes > 0 ? bodyBytes : 0;
+
+    KernelHttpResponse* response = kernel_http_post(safeAction, body, bodyBytes, contentType);
+    if (response->statusCode > 0) {
+        nav_int_to_text(response->statusCode, m_lastPostHttpStatus, sizeof(m_lastPostHttpStatus));
+        if (response->reason[0]) {
+            strappend(m_lastPostHttpStatus, " ", sizeof(m_lastPostHttpStatus));
+            strappend(m_lastPostHttpStatus, response->reason, sizeof(m_lastPostHttpStatus));
+        }
+    }
+    strcopy(m_lastPostContentType, response->contentType, sizeof(m_lastPostContentType));
+    strcopy(m_lastSubmittedFormStatus, response->ok ? "POST submitted" : "POST failed", sizeof(m_lastSubmittedFormStatus));
+
+    if (!streq_local(m_currentUrl, safeAction) && m_currentUrl[0]) {
+        nav_push_url(m_backStack, m_backCount, m_currentUrl);
+        m_forwardCount = 0;
+    }
+    loadHttpResponse(safeAction, response);
+}
+
 bool NavigatorApp::smokeHttpFetch(const char* url, int* statusCode, char* contentType,
                                   int contentTypeLen, int* bodyBytes, int* parsedBlocks,
                                   char* error, int errorLen, char* finalUrl, int finalUrlLen,
@@ -6937,6 +7075,121 @@ bool NavigatorApp::smokeHttpFetch(const char* url, int* statusCode, char* conten
     if (loadedImages) *loadedImages = app.m_metaLoadedImages;
     if (failedImages) *failedImages = app.m_metaFailedImages;
     return response->ok;
+}
+
+static bool nav_form_append_char(char* out, int outSize, int& used, char value)
+{
+    if (!out || outSize <= 0 || used >= outSize - 1) return false;
+    out[used++] = value;
+    out[used] = '\0';
+    return true;
+}
+
+static bool nav_form_append_encoded(char* out, int outSize, int& used, const char* value)
+{
+    static const char* hex = "0123456789ABCDEF";
+    for (const unsigned char* p = reinterpret_cast<const unsigned char*>(value ? value : ""); *p; ++p) {
+        unsigned char ch = *p;
+        if ((ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') ||
+            (ch >= '0' && ch <= '9') || ch == '-' || ch == '_' || ch == '.' || ch == '~') {
+            if (!nav_form_append_char(out, outSize, used, (char)ch)) return false;
+        } else if (ch == ' ') {
+            if (!nav_form_append_char(out, outSize, used, '+')) return false;
+        } else {
+            if (!nav_form_append_char(out, outSize, used, '%') ||
+                !nav_form_append_char(out, outSize, used, hex[(ch >> 4) & 0x0F]) ||
+                !nav_form_append_char(out, outSize, used, hex[ch & 0x0F])) return false;
+        }
+    }
+    return true;
+}
+
+static bool nav_form_append_field(char* out, int outSize, int& used, const char* name, const char* value)
+{
+    if (!name || !name[0]) return true;
+    if (used > 0 && !nav_form_append_char(out, outSize, used, '&')) return false;
+    return nav_form_append_encoded(out, outSize, used, name) &&
+           nav_form_append_char(out, outSize, used, '=') &&
+           nav_form_append_encoded(out, outSize, used, value);
+}
+
+static bool nav_build_forms_lite_smoke_body(char* out, int outSize, int* bodyBytes)
+{
+    if (!out || outSize <= 0) return false;
+    int used = 0;
+    out[0] = '\0';
+    bool ok = nav_form_append_field(out, outSize, used, "q", "posted value") &&
+              nav_form_append_field(out, outSize, used, "agree", "yes") &&
+              nav_form_append_field(out, outSize, used, "kind", "alpha") &&
+              nav_form_append_field(out, outSize, used, "note", "hello\nsecond line") &&
+              nav_form_append_field(out, outSize, used, "size", "m");
+    if (bodyBytes) *bodyBytes = used;
+    return ok;
+}
+
+bool NavigatorApp::smokeFormsLitePost(const char* action, int* statusCode, char* contentType,
+                                      int contentTypeLen, int* bodyBytes, int* parsedBlocks,
+                                      char* error, int errorLen, char* finalUrl, int finalUrlLen,
+                                      int* redirectCount, int* submittedBodyBytes)
+{
+    if (statusCode) *statusCode = 0;
+    if (contentType && contentTypeLen > 0) contentType[0] = '\0';
+    if (bodyBytes) *bodyBytes = 0;
+    if (parsedBlocks) *parsedBlocks = 0;
+    if (error && errorLen > 0) error[0] = '\0';
+    if (finalUrl && finalUrlLen > 0) finalUrl[0] = '\0';
+    if (redirectCount) *redirectCount = 0;
+    if (submittedBodyBytes) *submittedBodyBytes = 0;
+
+    char formBody[256];
+    int formBodyBytes = 0;
+    if (!nav_build_forms_lite_smoke_body(formBody, sizeof(formBody), &formBodyBytes)) {
+        if (error && errorLen > 0) strcopy(error, "Could not encode deterministic Forms-lite POST body", errorLen);
+        return false;
+    }
+
+    NavigatorApp app;
+    app.submitFormsLitePost(action, formBody, formBodyBytes, "application/x-www-form-urlencoded");
+    KernelHttpResponse* response = &s_kernelHttpResponse;
+    int renderedBlocks = app.m_blockCount;
+    auto blocksContain = [&app](const char* needle) {
+        if (!needle || !needle[0]) return false;
+        for (int i = 0; i < app.m_blockCount; ++i) {
+            const char* text = app.m_blocks[i].text;
+            for (int start = 0; text[start]; ++start) {
+                int j = 0;
+                while (needle[j] && text[start + j] == needle[j]) ++j;
+                if (!needle[j]) return true;
+            }
+        }
+        return false;
+    };
+    bool diagnosticsOk = streq_local(app.m_lastSubmittedFormMethod, "POST") &&
+                         streq_local(app.m_lastSubmittedFormAction, action) &&
+                         app.m_lastPostBodyBytes == formBodyBytes &&
+                         streq_local(app.m_lastPostContentType, response->contentType);
+    app.buildPageInfoDocument();
+    diagnosticsOk = diagnosticsOk &&
+                    blocksContain("Forms-lite POST bare-metal: enabled-basic") &&
+                    blocksContain("Last submitted method: POST") &&
+                    blocksContain("Last POST body bytes: 67");
+    app.buildRuntimeDocument();
+    diagnosticsOk = diagnosticsOk &&
+                    blocksContain("Forms-lite POST forms bare-metal: enabled-basic") &&
+                    blocksContain("Forms-lite POST redirect policy: 303 becomes GET") &&
+                    blocksContain("Last submitted method: POST") &&
+                    blocksContain("Last POST body bytes: 67");
+    if (statusCode) *statusCode = response->statusCode;
+    if (contentType && contentTypeLen > 0) strcopy(contentType, response->contentType, contentTypeLen);
+    if (bodyBytes) *bodyBytes = response->bodyBytes;
+    if (parsedBlocks) *parsedBlocks = renderedBlocks;
+    if (finalUrl && finalUrlLen > 0) strcopy(finalUrl, response->finalUrl[0] ? response->finalUrl : action, finalUrlLen);
+    if (redirectCount) *redirectCount = response->redirectCount;
+    if (submittedBodyBytes) *submittedBodyBytes = app.m_lastPostBodyBytes;
+    if ((!response->ok || !diagnosticsOk) && error && errorLen > 0) {
+        strcopy(error, response->error[0] ? response->error : "Forms-lite POST diagnostics mismatch", errorLen);
+    }
+    return response->ok && diagnosticsOk;
 }
 void NavigatorApp::loadFileUrl(const char* url)
 {
@@ -7134,7 +7387,7 @@ int NavigatorApp::blockHeight(const DocBlock& block, int maxChars) const
     int len = strlen_local(block.text);
     int lines = 1;
     if (block.kind == BLOCK_PREFORMATTED) {
-        // Count embedded newlines ñ each is a new line in the output.
+        // Count embedded newlines; each is a new line in the output.
         lines = 1;
         for (int i = 0; block.text[i]; ++i) if (block.text[i] == '\n') ++lines;
     } else if (maxChars > 0 && len > 0) {
@@ -7749,6 +8002,89 @@ static bool printNavigatorHttpSmokeCase(const char* name, const char* url, int e
     serial::puts(pass ? ".result=PASS\n" : ".result=FAIL\n");
     return pass;
 }
+
+static bool printNavigatorFormsLitePostSmokeCase(const char* name, const char* action,
+                                                 const char* expectedFinalUrl, int expectedRedirectCount,
+                                                 const char* expectedDnsIp = nullptr)
+{
+    int httpStatus = 0;
+    int httpBodyBytes = 0;
+    int httpBlocks = 0;
+    int redirectCount = 0;
+    int submittedBodyBytes = 0;
+    char httpContentType[48];
+    char httpError[128];
+    char finalUrl[160];
+    bool fetchOk = NavigatorApp::smokeFormsLitePost(action, &httpStatus, httpContentType, sizeof(httpContentType),
+        &httpBodyBytes, &httpBlocks, httpError, sizeof(httpError), finalUrl, sizeof(finalUrl),
+        &redirectCount, &submittedBodyBytes);
+    bool pass = fetchOk && httpStatus == 200 && httpBlocks > 0 &&
+                submittedBodyBytes == 67 && redirectCount == expectedRedirectCount &&
+                gxos::web::httpSharedEqualsInsensitive(httpContentType, "text/html") &&
+                nav_smoke_text_equals(finalUrl, expectedFinalUrl);
+    if (expectedDnsIp && expectedDnsIp[0]) pass = pass && nav_smoke_text_equals(s_kernelLastDnsResolvedIp, expectedDnsIp);
+
+    serial::puts("[NAVIGATOR-SMOKE] http.case.");
+    serial::puts(name);
+    serial::puts(".method=POST\n");
+    serial::puts("[NAVIGATOR-SMOKE] http.case.");
+    serial::puts(name);
+    serial::puts(".action=");
+    serial::puts(action);
+    serial::puts("\n");
+    serial::puts("[NAVIGATOR-SMOKE] http.case.");
+    serial::puts(name);
+    serial::puts(".status=");
+    serial_put_dec((uint32_t)httpStatus);
+    serial::puts("\n");
+    serial::puts("[NAVIGATOR-SMOKE] http.case.");
+    serial::puts(name);
+    serial::puts(".content_type=");
+    serial::puts(httpContentType[0] ? httpContentType : "(none)");
+    serial::puts("\n");
+    serial::puts("[NAVIGATOR-SMOKE] http.case.");
+    serial::puts(name);
+    serial::puts(".submitted_body_bytes=");
+    serial_put_dec((uint32_t)submittedBodyBytes);
+    serial::puts("\n");
+    serial::puts("[NAVIGATOR-SMOKE] http.case.");
+    serial::puts(name);
+    serial::puts(".response_body_bytes=");
+    serial_put_dec((uint32_t)httpBodyBytes);
+    serial::puts("\n");
+    serial::puts("[NAVIGATOR-SMOKE] http.case.");
+    serial::puts(name);
+    serial::puts(".parsed_block_count=");
+    serial_put_dec((uint32_t)httpBlocks);
+    serial::puts("\n");
+    serial::puts("[NAVIGATOR-SMOKE] http.case.");
+    serial::puts(name);
+    serial::puts(".final_url=");
+    serial::puts(finalUrl[0] ? finalUrl : "(none)");
+    serial::puts("\n");
+    serial::puts("[NAVIGATOR-SMOKE] http.case.");
+    serial::puts(name);
+    serial::puts(".redirect_count=");
+    serial_put_dec((uint32_t)redirectCount);
+    serial::puts("\n");
+    serial::puts("[NAVIGATOR-SMOKE] http.case.");
+    serial::puts(name);
+    serial::puts(".dns_resolved_ip=");
+    serial::puts(s_kernelLastDnsResolvedIp[0] ? s_kernelLastDnsResolvedIp : "(none)");
+    serial::puts("\n");
+    if (httpError[0]) {
+        serial::puts("[NAVIGATOR-SMOKE] http.case.");
+        serial::puts(name);
+        serial::puts(".error=");
+        serial::puts(httpError);
+        serial::puts("\n");
+    }
+    serial::puts("[NAVIGATOR-SMOKE] http.case.");
+    serial::puts(name);
+    serial::puts(pass ? ".result=PASS\n" : ".result=FAIL\n");
+    return pass;
+}
+
 static bool printNavigatorRuntimeSmokePreamble()
 {
     bool registered = app::AppManager::isAppAvailable("guideXOS Navigator");
@@ -7762,7 +8098,7 @@ static bool printNavigatorRuntimeSmokePreamble()
     serial::puts("[NAVIGATOR-SMOKE] stale.placeholder=not active\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.file_read=enabled through VFS\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.local_png=enabled through shared ImageAdapter where VFS image data exists\n");
-    serial::puts("[NAVIGATOR-SMOKE] capability.http=enabled numeric IPv4 and hostname HTTP/1.0 GET with redirects/chunked\n");
+    serial::puts("[NAVIGATOR-SMOKE] capability.http=enabled numeric IPv4 and hostname HTTP/1.0 GET/POST with redirects/chunked\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.http_dns=enabled-basic A records\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.http_redirects=enabled limit 5\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.http_chunked=enabled\n");
@@ -7771,7 +8107,9 @@ static bool printNavigatorRuntimeSmokePreamble()
     serial::puts("[NAVIGATOR-SMOKE] capability.css_lite=enabled for embedded style blocks\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.forms_lite=enabled for file/about GET form blocks\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.forms_post_hosted=enabled in authoritative hosted Navigator path\n");
-    serial::puts("[NAVIGATOR-SMOKE] capability.forms_post_bare_metal=unsupported in kernel adapter\n");
+    serial::puts("[NAVIGATOR-SMOKE] capability.forms_post_bare_metal=enabled-basic application/x-www-form-urlencoded\n");
+    serial::puts("[NAVIGATOR-SMOKE] capability.forms_post_redirect_policy=303 becomes GET; 301/302/307/308 preserve POST\n");
+    serial::puts("[NAVIGATOR-SMOKE] page_info.forms_post_bare_metal=enabled-basic\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.forms_controls=text, checkbox, radio, textarea, select, submit\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.forms_focus_navigation=Tab/Shift+Tab, Enter, Space where form UI is available\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.find_in_page=unsupported in bare-metal adapter\n");
@@ -7813,6 +8151,14 @@ static bool printNavigatorHttpSmokeCases()
         "http://10.0.2.2:8080/navigator-smoke/image-nonpng.html", true, true, false, 1, 0, 1) && httpOk;
     httpOk = printNavigatorHttpSmokeCase("hostname_image_relative", "http://guidexos.test:8080/navigator-smoke/hostname-image.html", 200,
         "http://guidexos.test:8080/navigator-smoke/hostname-image.html", true, true, false, 1, 1, 0, "10.0.2.2") && httpOk;
+    httpOk = printNavigatorFormsLitePostSmokeCase("forms_post", "http://10.0.2.2:8080/forms/post-echo",
+        "http://10.0.2.2:8080/forms/post-echo", 0) && httpOk;
+    httpOk = printNavigatorFormsLitePostSmokeCase("forms_post_redirect_303", "http://10.0.2.2:8080/forms/post-redirect-303",
+        "http://10.0.2.2:8080/navigator-smoke/final.html", 1) && httpOk;
+    httpOk = printNavigatorFormsLitePostSmokeCase("forms_post_redirect_307", "http://10.0.2.2:8080/forms/post-redirect-307",
+        "http://10.0.2.2:8080/forms/post-echo", 1) && httpOk;
+    httpOk = printNavigatorFormsLitePostSmokeCase("forms_post_redirect_hostname", "http://10.0.2.2:8080/forms/post-redirect-hostname",
+        "http://guidexos.test:8080/forms/post-echo", 1, "10.0.2.2") && httpOk;
     return httpOk;
 }
 
