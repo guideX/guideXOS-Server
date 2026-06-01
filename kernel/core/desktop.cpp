@@ -7350,6 +7350,106 @@ static void run_launch_shadow_start_menu_app_model_smoke()
     serial::puts(" nonFatal=true\n");
 }
 
+static void run_launch_shadow_pinned_desktop_notepad_smoke()
+{
+    const int shortcutSlot = 0;
+    const int shortcutIconIdx = kDesktopShortcutStart + shortcutSlot;
+
+    DesktopIcon savedShortcutIcon = s_desktopIcons[shortcutIconIdx];
+    char savedShortcutLabel[sizeof(s_desktopShortcutLabels[shortcutSlot])];
+    char savedShortcutType[sizeof(s_desktopShortcutTypes[shortcutSlot])];
+    char savedShortcutTarget[sizeof(s_desktopShortcutTargetAppIds[shortcutSlot])];
+    NotificationToast savedNotification = s_notification;
+    const char* savedStaticAppSourceOverride = s_launchShadowStaticAppSourceOverride;
+    const bool savedSuppressRealBranchLaunch = s_launchShadowSuppressRealBranchLaunch;
+    int savedVisibleIconCount = s_visibleIconCount;
+    int savedVisibleIconIndices[kDesktopIconCount];
+
+    desktop_str_copy(savedShortcutLabel, s_desktopShortcutLabels[shortcutSlot], (int)sizeof(savedShortcutLabel));
+    desktop_str_copy(savedShortcutType, s_desktopShortcutTypes[shortcutSlot], (int)sizeof(savedShortcutType));
+    desktop_str_copy(savedShortcutTarget, s_desktopShortcutTargetAppIds[shortcutSlot], (int)sizeof(savedShortcutTarget));
+    for (int i = 0; i < kDesktopIconCount; ++i) {
+        savedVisibleIconIndices[i] = s_visibleIconIndices[i];
+    }
+
+    serial::puts("[APPMODEL-LAUNCHSHADOW-SMOKE] real-branch pinned desktop Notepad helper before temporary desktop state mutation\n");
+    serial::puts("[LaunchShadowRealBranchPinnedDesktopNotepadMutation] phase=before temporaryDesktopStateMutation=true persistentDesktopStorageWrites=false nonFatal=true\n");
+
+    desktop_str_copy(s_desktopShortcutLabels[shortcutSlot], "Notepad", (int)sizeof(s_desktopShortcutLabels[shortcutSlot]));
+    desktop_str_copy(s_desktopShortcutTypes[shortcutSlot], "App", (int)sizeof(s_desktopShortcutTypes[shortcutSlot]));
+    desktop_str_copy(s_desktopShortcutTargetAppIds[shortcutSlot], "Notepad", (int)sizeof(s_desktopShortcutTargetAppIds[shortcutSlot]));
+    s_desktopIcons[shortcutIconIdx].label = s_desktopShortcutLabels[shortcutSlot];
+    desktop_str_copy(s_desktopIcons[shortcutIconIdx].path, "Notepad", (int)sizeof(s_desktopIcons[shortcutIconIdx].path));
+    s_desktopIcons[shortcutIconIdx].pinned = true;
+    s_desktopIcons[shortcutIconIdx].recent = false;
+    s_desktopIcons[shortcutIconIdx].savedX = -1;
+    s_desktopIcons[shortcutIconIdx].savedY = -1;
+    s_desktopIcons[shortcutIconIdx].kind = DesktopItemKind::Shortcut;
+    s_desktopIcons[shortcutIconIdx].systemObject = DesktopSystemObjectKind::None;
+    s_desktopIcons[shortcutIconIdx].isDirectory = false;
+    s_desktopIcons[shortcutIconIdx].removable = true;
+    s_desktopIcons[shortcutIconIdx].color = 0xFF4678BE;
+    s_visibleIconCount = 1;
+    s_visibleIconIndices[0] = shortcutIconIdx;
+    s_launchShadowStaticAppSourceOverride = "RealBranchPinnedDesktopNotepad";
+    s_launchShadowSuppressRealBranchLaunch = true;
+    show_icon_notification(0);
+
+    s_desktopIcons[shortcutIconIdx] = savedShortcutIcon;
+    desktop_str_copy(s_desktopShortcutLabels[shortcutSlot], savedShortcutLabel, (int)sizeof(s_desktopShortcutLabels[shortcutSlot]));
+    desktop_str_copy(s_desktopShortcutTypes[shortcutSlot], savedShortcutType, (int)sizeof(s_desktopShortcutTypes[shortcutSlot]));
+    desktop_str_copy(s_desktopShortcutTargetAppIds[shortcutSlot], savedShortcutTarget, (int)sizeof(s_desktopShortcutTargetAppIds[shortcutSlot]));
+    s_notification = savedNotification;
+    s_launchShadowStaticAppSourceOverride = savedStaticAppSourceOverride;
+    s_launchShadowSuppressRealBranchLaunch = savedSuppressRealBranchLaunch;
+    s_visibleIconCount = savedVisibleIconCount;
+    for (int i = 0; i < kDesktopIconCount; ++i) {
+        s_visibleIconIndices[i] = savedVisibleIconIndices[i];
+    }
+
+    const bool shortcutSlotRestored =
+        desktop_str_eq(s_desktopShortcutLabels[shortcutSlot], savedShortcutLabel) &&
+        desktop_str_eq(s_desktopShortcutTypes[shortcutSlot], savedShortcutType) &&
+        desktop_str_eq(s_desktopShortcutTargetAppIds[shortcutSlot], savedShortcutTarget) &&
+        desktop_icon_state_matches(s_desktopIcons[shortcutIconIdx], savedShortcutIcon);
+    const bool visibleIconStateRestored = visible_icon_state_matches(savedVisibleIconCount, savedVisibleIconIndices);
+    const bool notificationStateRestored = notification_toast_matches(s_notification, savedNotification);
+    const bool sourceOverrideStateRestored = s_launchShadowStaticAppSourceOverride == savedStaticAppSourceOverride;
+    const bool suppressLaunchStateRestored = s_launchShadowSuppressRealBranchLaunch == savedSuppressRealBranchLaunch;
+    const bool stateRestored = shortcutSlotRestored && visibleIconStateRestored &&
+        notificationStateRestored && sourceOverrideStateRestored && suppressLaunchStateRestored;
+
+    serial::puts("[APPMODEL-LAUNCHSHADOW-SMOKE] real-branch pinned desktop Notepad helper after temporary desktop state restoration\n");
+    serial::puts("[LaunchShadowRealBranchPinnedDesktopNotepadRestore] realBranchPinnedDesktopNotepadStateRestored=");
+    serial::puts(stateRestored ? "true" : "false");
+    serial::puts(" realBranchPinnedDesktopNotepadShortcutSlotRestored=");
+    serial::puts(shortcutSlotRestored ? "true" : "false");
+    serial::puts(" realBranchPinnedDesktopNotepadVisibleIconStateRestored=");
+    serial::puts(visibleIconStateRestored ? "true" : "false");
+    serial::puts(" realBranchPinnedDesktopNotepadNotificationStateRestored=");
+    serial::puts(notificationStateRestored ? "true" : "false");
+    serial::puts(" realBranchPinnedDesktopNotepadSourceOverrideStateRestored=");
+    serial::puts(sourceOverrideStateRestored ? "true" : "false");
+    serial::puts(" realBranchPinnedDesktopNotepadSuppressLaunchStateRestored=");
+    serial::puts(suppressLaunchStateRestored ? "true" : "false");
+    serial::puts(" persistentDesktopStorageWrites=false");
+    serial::puts(" nonFatal=true\n");
+    serial::puts("[LaunchShadowRealBranchPinnedDesktopNotepadRestoreVerification] phase=after realBranchPinnedDesktopNotepadStateRestored=");
+    serial::puts(stateRestored ? "true" : "false");
+    serial::puts(" realBranchPinnedDesktopNotepadShortcutSlotRestored=");
+    serial::puts(shortcutSlotRestored ? "true" : "false");
+    serial::puts(" realBranchPinnedDesktopNotepadVisibleIconStateRestored=");
+    serial::puts(visibleIconStateRestored ? "true" : "false");
+    serial::puts(" realBranchPinnedDesktopNotepadNotificationStateRestored=");
+    serial::puts(notificationStateRestored ? "true" : "false");
+    serial::puts(" realBranchPinnedDesktopNotepadSourceOverrideStateRestored=");
+    serial::puts(sourceOverrideStateRestored ? "true" : "false");
+    serial::puts(" realBranchPinnedDesktopNotepadSuppressLaunchStateRestored=");
+    serial::puts(suppressLaunchStateRestored ? "true" : "false");
+    serial::puts(" persistentDesktopStorageWrites=false");
+    serial::puts(" nonFatal=true\n");
+}
+
 void run_launch_shadow_text_fileopen_smoke()
 {
     serial::puts("[APPMODEL-LAUNCHSHADOW-SMOKE] issuing text FileOpen SHADOW_ONLY probe\n");
@@ -7515,6 +7615,7 @@ void run_launch_shadow_text_fileopen_smoke()
     serial::puts(" persistentDesktopStorageWrites=false");
     serial::puts(" nonFatal=true\n");
     serial::puts("[APPMODEL-LAUNCHSHADOW-SMOKE] text FileOpen SHADOW_ONLY probe done\n");
+    run_launch_shadow_pinned_desktop_notepad_smoke();
     run_launch_shadow_start_menu_smoke();
     run_launch_shadow_start_menu_built_in_apps_smoke();
     run_launch_shadow_start_menu_files_smoke();
@@ -7904,6 +8005,15 @@ static void show_icon_notification(int displayIndex)
             app::AppLogger::logLaunch(target, app::LaunchResult::NotAvailable);
             return;
         }
+#if defined(GXOS_APPMODEL_LAUNCHSHADOW_SMOKE_ACTIVE) && defined(GXOS_APPMODEL_TYPED_DISPATCH_SHADOW_ONLY) && defined(GXOS_BARE_METAL)
+        if (bare_metal_should_suppress_real_branch_launch()) {
+            log_bare_metal_static_app_shadow_only_observation(
+                target,
+                bare_metal_active_static_app_shadow_source("DesktopPinnedShortcut"),
+                label);
+            return;
+        }
+#endif
         if (launch_app(target)) {
             app::AppLogger::logLaunch(target, app::LaunchResult::Success);
             return;

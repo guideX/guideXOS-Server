@@ -61,6 +61,7 @@
 #include "vnc_server.h"
 #include "paint.h"
 #include "navigator.h"
+#include "navigator_file_io.h"
 #include "image_viewer.h"
 #include "onscreen_keyboard.h"
 #include "shutdown_dialog.h"
@@ -75,6 +76,7 @@
 #include "native_app_process_table.h"
 #include <iostream>
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <sstream>
 #include <vector>
@@ -315,6 +317,100 @@ static std::string navigatorHostedSmokeDiagnostic() {
     bool downloadsLoaded = gxos::apps::Navigator::SmokeNavigateTo("about:downloads");
     std::string downloadsUrl = gxos::apps::Navigator::SmokeCurrentUrl();
     add("downloads page loads", downloadsLoaded && downloadsUrl == "about:downloads", "currentUrl=" + downloadsUrl);
+
+    auto safeDownloadPathFromFileUrl = [](const std::string& fileUrl) {
+        const std::string prefix = "file:///downloads/";
+        if (fileUrl.rfind(prefix, 0) != 0) return std::string();
+        const std::string fileName = fileUrl.substr(prefix.size());
+        if (fileName.empty() || fileName == "." || fileName == ".." ||
+            fileName.find('/') != std::string::npos || fileName.find('\\') != std::string::npos) {
+            return std::string();
+        }
+        for (unsigned char ch : fileName) {
+            if (!std::isalnum(ch) && ch != '.' && ch != '-' && ch != '_') return std::string();
+        }
+        return "/downloads/" + fileName;
+    };
+    auto readSavedText = [&](const std::string& fileUrl, std::string& text) {
+        const std::string path = safeDownloadPathFromFileUrl(fileUrl);
+        if (path.empty()) return false;
+        const gxos::apps::FileReadResult result = gxos::apps::readTextFile(path);
+        text = result.text;
+        return result.status == gxos::apps::FileReadStatus::Ok && !text.empty();
+    };
+
+    // --- Save Page smoke checks ---
+    bool docsReloadedForSave = gxos::apps::Navigator::SmokeNavigateToQuiet("file:///docs/index.html");
+    bool pageInfoLoadedForSave = gxos::apps::Navigator::SmokeNavigateToQuiet("about:page-info");
+    std::string pageInfoSaveTextLink = gxos::apps::Navigator::SmokeCurrentLinkUrl("Save Page Text");
+    std::string pageInfoSaveSourceLink = gxos::apps::Navigator::SmokeCurrentLinkUrl("Save Source");
+    add("page-info exposes Save Page Text", docsReloadedForSave && pageInfoLoadedForSave &&
+        pageInfoSaveTextLink == "about:save-page-text", "link=" + pageInfoSaveTextLink);
+    add("page-info exposes Save Source for raw source", pageInfoSaveSourceLink == "about:save-page-source",
+        "link=" + pageInfoSaveSourceLink);
+
+    bool saveTextLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("about:save-page-text");
+    std::string saveTextUrl = gxos::apps::Navigator::SmokeCurrentUrl();
+    int saveTextBlocks = gxos::apps::Navigator::SmokeCurrentBlockCount();
+    std::string saveTextFileUrl = gxos::apps::Navigator::SmokeCurrentLinkUrl("Open saved file");
+    std::string savedText;
+    bool savedTextReadable = readSavedText(saveTextFileUrl, savedText);
+    add("save-page-text loads", docsReloadedForSave && saveTextLoaded && saveTextUrl == "about:save-page-text" && saveTextBlocks > 0,
+        "currentUrl=" + saveTextUrl + " blocks=" + std::to_string(saveTextBlocks));
+    add("save-page-text writes visible document text", savedTextReadable &&
+        contains(savedText, "guideXOS Navigator Help") && !contains(savedText, "Requested URL:"),
+        "fileUrl=" + saveTextFileUrl + " bytes=" + std::to_string(savedText.size()));
+    add("save-page-text uses safe file link", !safeDownloadPathFromFileUrl(saveTextFileUrl).empty(),
+        "fileUrl=" + saveTextFileUrl);
+
+    bool duplicateSaveTextLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("about:save-page-text");
+    std::string duplicateSaveTextFileUrl = gxos::apps::Navigator::SmokeCurrentLinkUrl("Open saved file");
+    add("duplicate save-page-text uses a new filename", duplicateSaveTextLoaded &&
+        !safeDownloadPathFromFileUrl(duplicateSaveTextFileUrl).empty() &&
+        duplicateSaveTextFileUrl != saveTextFileUrl,
+        "first=" + saveTextFileUrl + " second=" + duplicateSaveTextFileUrl);
+
+    bool docsReloadedForSource = gxos::apps::Navigator::SmokeNavigateToQuiet("file:///docs/index.html");
+    bool viewSourceLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("about:view-source");
+    std::string viewSourceSaveLink = gxos::apps::Navigator::SmokeCurrentLinkUrl("Save Source");
+    add("view-source exposes Save Source for raw source", docsReloadedForSource && viewSourceLoaded &&
+        viewSourceSaveLink == "about:save-page-source", "link=" + viewSourceSaveLink);
+
+    bool saveSourceLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("about:save-page-source");
+    std::string saveSourceFileUrl = gxos::apps::Navigator::SmokeCurrentLinkUrl("Open saved file");
+    std::string savedSource;
+    bool savedSourceReadable = readSavedText(saveSourceFileUrl, savedSource);
+    add("save-page-source writes raw source", saveSourceLoaded && savedSourceReadable &&
+        contains(savedSource, "<html"), "fileUrl=" + saveSourceFileUrl + " bytes=" + std::to_string(savedSource.size()));
+    add("save-page-source uses safe file link", !safeDownloadPathFromFileUrl(saveSourceFileUrl).empty(),
+        "fileUrl=" + saveSourceFileUrl);
+
+    bool downloadsAfterSave = gxos::apps::Navigator::SmokeNavigateToQuiet("about:downloads");
+    std::string downloadsAfterSaveUrl = gxos::apps::Navigator::SmokeCurrentUrl();
+    std::string downloadsAfterSaveText = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    const std::string saveTextDownloadPath = safeDownloadPathFromFileUrl(saveTextFileUrl);
+    const std::string saveSourceDownloadPath = safeDownloadPathFromFileUrl(saveSourceFileUrl);
+    add("downloads page represents saved items", downloadsAfterSave && downloadsAfterSaveUrl == "about:downloads" &&
+        !saveTextDownloadPath.empty() && !saveSourceDownloadPath.empty() &&
+        contains(downloadsAfterSaveText, saveTextDownloadPath) &&
+        contains(downloadsAfterSaveText, saveSourceDownloadPath),
+        "currentUrl=" + downloadsAfterSaveUrl);
+
+    bool aboutLoadedForNoSource = gxos::apps::Navigator::SmokeNavigateToQuiet("about:navigator");
+    bool aboutPageInfoLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("about:page-info");
+    std::string aboutPageInfoSaveSourceLink = gxos::apps::Navigator::SmokeCurrentLinkUrl("Save Source");
+    add("page-info hides Save Source for generated about page", aboutLoadedForNoSource && aboutPageInfoLoaded &&
+        aboutPageInfoSaveSourceLink.empty(), "link=" + aboutPageInfoSaveSourceLink);
+    bool aboutViewSourceLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("about:view-source");
+    std::string aboutViewSourceSaveLink = gxos::apps::Navigator::SmokeCurrentLinkUrl("Save Source");
+    add("view-source hides Save Source for generated about page", aboutViewSourceLoaded &&
+        aboutViewSourceSaveLink.empty(), "link=" + aboutViewSourceSaveLink);
+    bool noSourceLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("about:save-page-source");
+    std::string noSourceText = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("save-page-source explains generated about page has no source", noSourceLoaded &&
+        contains(noSourceText, "generated about: pages have no source") &&
+        gxos::apps::Navigator::SmokeCurrentLinkUrl("Open saved file").empty(),
+        "currentUrl=" + gxos::apps::Navigator::SmokeCurrentUrl());
 
     bool pass = true;
     for (const Check& check : checks) {

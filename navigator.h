@@ -54,6 +54,7 @@ struct NavigatorPageMetadata {
 	int         redirectCount = 0;
 	std::string errorStatus;
 	std::string rawSource;
+	std::string rawSourceForSave;
 	size_t      rawSourceBytes = 0;
 	bool        rawSourceTruncated = false;
 	int         documentBlockCount = 0;
@@ -102,6 +103,7 @@ class Navigator {
 public:
 	static uint64_t Launch();
 	static bool SmokeNavigateTo(const std::string& url);
+	static bool SmokeNavigateToQuiet(const std::string& url);
 	static bool SmokeSubmitFirstForm(const std::string& value);
 	static int SmokeFindInPage(const std::string& query);
 	static bool SmokeClickFirstLink();
@@ -109,6 +111,8 @@ public:
 	static std::string SmokeRuntimeReport();
 	static std::string SmokeCurrentUrl();
 	static int SmokeCurrentBlockCount();
+	static std::string SmokeCurrentDocumentText();
+	static std::string SmokeCurrentLinkUrl(const std::string& text);
 	// Returns the widget IDs registered with the compositor toolbar.
 	// Used by hosted smoke to verify the full modern toolbar (7 buttons) is
 	// present and that the old stale four-button placeholder is not active.
@@ -188,7 +192,7 @@ private:
 	// loadUrl() is the raw document-loading engine.  It fetches and renders
 	// the document but does NOT modify history.  All callers that represent
 	// user navigation (links, Home, Back, Forward) go through the helpers below.
-	static void loadUrl(const std::string& url);
+	static void loadUrl(const std::string& url, bool updateDisplayAfterLoad = true);
 
 	// navigateTo() – normal forward navigation (link clicks, Home).
 	//   Pushes the current URL onto the back stack, clears the forward stack,
@@ -223,6 +227,8 @@ private:
 	static void        saveBookmarks();
 	static void        addBookmark(const std::string& title, const std::string& url);
 	static WebDocument buildBookmarksDocument();
+	static WebDocument buildSavePageTextDocument();
+	static WebDocument buildSavePageSourceDocument();
 
 	// -------------------------------------------------------------------------
 	// Rendering
@@ -298,6 +304,7 @@ private:
 	static std::string          s_hoverStatusText;
 	static int                  s_hitLinkBlockIndex; // index of the link under the cursor
 	static WebDocument          s_currentDoc;
+	static WebDocument          s_inspectedDoc;
 	static NavigatorPageMetadata s_pageMetadata;
 	// Navigation history – scheme-agnostic URL stacks.
 	static std::vector<std::string> s_backStack;

@@ -32,21 +32,21 @@ bool DisplayOptions::s_showDesktopSystemSettings = false;
 
 namespace {
     const int kWindowW = 800;
-    const int kWindowH = 700;
+    const int kWindowH = 620;
     const int kTabY = 18;
     const int kTabW = 220;
     const int kTabH = 40;
     const int kGalleryX = 26;
     const int kGalleryY = 100;
     const int kTileW = 130;
-    const int kTileH = 112;
+    const int kTileH = 100;
     const int kThumbW = 116;
-    const int kThumbH = 72;
+    const int kThumbH = 62;
     const int kGapX = 18;
-    const int kGapY = 22;
+    const int kGapY = 12;
     const int kCols = 5;
     const int kSelectButtonX = 26;
-    const int kButtonY = 638;
+    const int kButtonY = 548;
     const int kButtonW = 180;
     const int kButtonH = 36;
     const int kDesktopIconsX = 46;
@@ -278,7 +278,7 @@ void DisplayOptions::render()
     drawButton(250, kTabY, kTabW, kTabH, "Desktop Icons", s_activeTab == 2, true);
     drawButton(480, kTabY, kTabW, kTabH, "Gradients", s_activeTab == 1, true);
     drawText(s_windowId, 26, 72, s_activeTab == 2 ? "Choose which system icons appear on the desktop:" : (s_activeTab == 0 ? "Select a background from the gallery:" : "Select a gradient from the gallery:"));
-    drawRect(s_windowId, 20, 92, 742, 532, 22, 22, 24);
+    drawRect(s_windowId, 20, 92, 742, 456, 22, 22, 24);
 
     if (s_activeTab == 0) {
         const auto& backgrounds = WallpaperRegistry::BuiltInBackgrounds();
@@ -363,7 +363,7 @@ void DisplayOptions::drawWallpaperTile(int index, int x, int y, bool hover, bool
     std::string thumbnailPath = entry.thumbnailPath.empty() ? entry.fullImagePath : entry.thumbnailPath;
     Logger::write(LogLevel::Info, std::string("DisplayOptions thumbnail id=") + entry.id + " path=" + thumbnailPath);
     drawImage(s_windowId, x + 6, y + 8, kThumbW, kThumbH, thumbnailPath);
-    drawText(s_windowId, x + 8, y + 88, entry.displayName + (applied ? " *" : ""));
+    drawText(s_windowId, x + 8, y + 78, entry.displayName + (applied ? " *" : ""));
 }
 
 void DisplayOptions::drawBackgroundTile(int index, int x, int y, bool hover, bool selected, bool applied)
@@ -391,7 +391,7 @@ void DisplayOptions::drawBackgroundTile(int index, int x, int y, bool hover, boo
         drawRect(s_windowId, x + 6, y + 8, kThumbW, 1, (entry.accentColor >> 16) & 0xFF, (entry.accentColor >> 8) & 0xFF, entry.accentColor & 0xFF);
     }
 
-    drawText(s_windowId, x + 8, y + 88, entry.displayName + (applied ? " *" : ""));
+    drawText(s_windowId, x + 8, y + 78, entry.displayName + (applied ? " *" : ""));
 }
 
 void DisplayOptions::drawGradientTile(int index, int x, int y, bool hover, bool selected, bool applied)
@@ -408,7 +408,7 @@ void DisplayOptions::drawGradientTile(int index, int x, int y, bool hover, bool 
         drawRect(s_windowId, x + 6, y + 8 + py, kThumbW, 1, r, g, b);
     }
     drawRect(s_windowId, x + 6, y + 8, kThumbW, 1, (entry.accentColor >> 16) & 0xFF, (entry.accentColor >> 8) & 0xFF, entry.accentColor & 0xFF);
-    drawText(s_windowId, x + 8, y + 88, entry.displayName + (applied ? " *" : ""));
+    drawText(s_windowId, x + 8, y + 78, entry.displayName + (applied ? " *" : ""));
 }
 
 void DisplayOptions::handleMouseMove(int, int)

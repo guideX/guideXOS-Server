@@ -30,6 +30,7 @@ function Write-AppModelLaunchShadowEvidence {
         [bool]$RealBranchDesktopSystemObjectFileManagerConfirmed,
         [bool]$RealBranchDesktopSystemObjectTrashConfirmed,
         [bool]$RealBranchDesktopSystemObjectSystemSettingsConfirmed,
+        [bool]$RealBranchPinnedDesktopNotepadConfirmed,
         [bool]$RealBranchStartMenuNotepadConfirmed,
         [bool]$RealBranchStartMenuBuiltInAppsConfirmed,
         [bool]$RealBranchStartMenuFilesConfirmed,
@@ -53,6 +54,8 @@ function Write-AppModelLaunchShadowEvidence {
         [bool]$RealBranchSystemObjectTrashRestoreVerificationConfirmed,
         [bool]$RealBranchSystemObjectSystemSettingsDesktopStateRestored,
         [bool]$RealBranchSystemObjectSystemSettingsRestoreVerificationConfirmed,
+        [bool]$RealBranchPinnedDesktopNotepadStateRestored,
+        [bool]$RealBranchPinnedDesktopNotepadRestoreVerificationConfirmed,
         [bool]$RealBranchStartMenuNotepadStateRestored,
         [bool]$RealBranchStartMenuNotepadRestoreVerificationConfirmed,
         [bool]$RealBranchStartMenuBuiltInAppsStateRestored,
@@ -89,6 +92,7 @@ function Write-AppModelLaunchShadowEvidence {
     $realBranchDesktopSystemObjectFileManagerConfirmedFlag = if ($RealBranchDesktopSystemObjectFileManagerConfirmed) { "true" } else { "false" }
     $realBranchDesktopSystemObjectTrashConfirmedFlag = if ($RealBranchDesktopSystemObjectTrashConfirmed) { "true" } else { "false" }
     $realBranchDesktopSystemObjectSystemSettingsConfirmedFlag = if ($RealBranchDesktopSystemObjectSystemSettingsConfirmed) { "true" } else { "false" }
+    $realBranchPinnedDesktopNotepadConfirmedFlag = if ($RealBranchPinnedDesktopNotepadConfirmed) { "true" } else { "false" }
     $realBranchStartMenuNotepadConfirmedFlag = if ($RealBranchStartMenuNotepadConfirmed) { "true" } else { "false" }
     $realBranchStartMenuBuiltInAppsConfirmedFlag = if ($RealBranchStartMenuBuiltInAppsConfirmed) { "true" } else { "false" }
     $realBranchStartMenuFilesConfirmedFlag = if ($RealBranchStartMenuFilesConfirmed) { "true" } else { "false" }
@@ -112,6 +116,8 @@ function Write-AppModelLaunchShadowEvidence {
     $realBranchSystemObjectTrashRestoreVerificationConfirmedFlag = if ($RealBranchSystemObjectTrashRestoreVerificationConfirmed) { "true" } else { "false" }
     $realBranchSystemObjectSystemSettingsDesktopStateRestoredFlag = if ($RealBranchSystemObjectSystemSettingsDesktopStateRestored) { "true" } else { "false" }
     $realBranchSystemObjectSystemSettingsRestoreVerificationConfirmedFlag = if ($RealBranchSystemObjectSystemSettingsRestoreVerificationConfirmed) { "true" } else { "false" }
+    $realBranchPinnedDesktopNotepadStateRestoredFlag = if ($RealBranchPinnedDesktopNotepadStateRestored) { "true" } else { "false" }
+    $realBranchPinnedDesktopNotepadRestoreVerificationConfirmedFlag = if ($RealBranchPinnedDesktopNotepadRestoreVerificationConfirmed) { "true" } else { "false" }
     $realBranchStartMenuNotepadStateRestoredFlag = if ($RealBranchStartMenuNotepadStateRestored) { "true" } else { "false" }
     $realBranchStartMenuNotepadRestoreVerificationConfirmedFlag = if ($RealBranchStartMenuNotepadRestoreVerificationConfirmed) { "true" } else { "false" }
     $realBranchStartMenuBuiltInAppsStateRestoredFlag = if ($RealBranchStartMenuBuiltInAppsStateRestored) { "true" } else { "false" }
@@ -153,6 +159,7 @@ function Write-AppModelLaunchShadowEvidence {
         "realBranchDesktopSystemObjectFileManagerConfirmed=$realBranchDesktopSystemObjectFileManagerConfirmedFlag",
         "realBranchDesktopSystemObjectTrashConfirmed=$realBranchDesktopSystemObjectTrashConfirmedFlag",
         "realBranchDesktopSystemObjectSystemSettingsConfirmed=$realBranchDesktopSystemObjectSystemSettingsConfirmedFlag",
+        "realBranchPinnedDesktopNotepadConfirmed=$realBranchPinnedDesktopNotepadConfirmedFlag",
         "realBranchStartMenuNotepadConfirmed=$realBranchStartMenuNotepadConfirmedFlag",
         "realBranchStartMenuBuiltInAppsConfirmed=$realBranchStartMenuBuiltInAppsConfirmedFlag",
         "realBranchStartMenuFilesConfirmed=$realBranchStartMenuFilesConfirmedFlag",
@@ -176,6 +183,8 @@ function Write-AppModelLaunchShadowEvidence {
         "realBranchSystemObjectTrashRestoreVerificationConfirmed=$realBranchSystemObjectTrashRestoreVerificationConfirmedFlag",
         "realBranchSystemObjectSystemSettingsDesktopStateRestored=$realBranchSystemObjectSystemSettingsDesktopStateRestoredFlag",
         "realBranchSystemObjectSystemSettingsRestoreVerificationConfirmed=$realBranchSystemObjectSystemSettingsRestoreVerificationConfirmedFlag",
+        "realBranchPinnedDesktopNotepadStateRestored=$realBranchPinnedDesktopNotepadStateRestoredFlag",
+        "realBranchPinnedDesktopNotepadRestoreVerificationConfirmed=$realBranchPinnedDesktopNotepadRestoreVerificationConfirmedFlag",
         "realBranchStartMenuNotepadStateRestored=$realBranchStartMenuNotepadStateRestoredFlag",
         "realBranchStartMenuNotepadRestoreVerificationConfirmed=$realBranchStartMenuNotepadRestoreVerificationConfirmedFlag",
         "realBranchStartMenuBuiltInAppsStateRestored=$realBranchStartMenuBuiltInAppsStateRestoredFlag",
@@ -451,6 +460,28 @@ $checks = @(
     "realBranchSystemObjectSystemSettingsSuppressLaunchStateRestored=true",
     "realBranchSystemObjectSystemSettingsSelectedIconStateRestored=true",
     "[LaunchShadowRealBranchSystemObjectSystemSettingsRestoreVerification] phase=after realBranchSystemObjectSystemSettingsDesktopStateRestored=true",
+    "persistentDesktopStorageWrites=false",
+    "nonFatal=true",
+    "[APPMODEL-LAUNCHSHADOW-SMOKE] real-branch pinned desktop Notepad helper before temporary desktop state mutation",
+    "[LaunchShadowRealBranchPinnedDesktopNotepadMutation] phase=before temporaryDesktopStateMutation=true persistentDesktopStorageWrites=false nonFatal=true",
+    "source=RealBranchPinnedDesktopNotepad",
+    "uiLabel=Notepad",
+    "actualDispatch=Notepad",
+    "resolvedType=BuiltInApp",
+    "appId=gxos.builtin.notepad",
+    "resolvedDispatch=Notepad",
+    "typedDispatchCandidate=Notepad",
+    "typedDispatchCandidateMatchesActual=true",
+    "typedDispatchCandidateComparison=match",
+    "nonFatal=true shadowOnly=true",
+    "[APPMODEL-LAUNCHSHADOW-SMOKE] real-branch pinned desktop Notepad helper after temporary desktop state restoration",
+    "[LaunchShadowRealBranchPinnedDesktopNotepadRestore] realBranchPinnedDesktopNotepadStateRestored=true",
+    "realBranchPinnedDesktopNotepadShortcutSlotRestored=true",
+    "realBranchPinnedDesktopNotepadVisibleIconStateRestored=true",
+    "realBranchPinnedDesktopNotepadNotificationStateRestored=true",
+    "realBranchPinnedDesktopNotepadSourceOverrideStateRestored=true",
+    "realBranchPinnedDesktopNotepadSuppressLaunchStateRestored=true",
+    "[LaunchShadowRealBranchPinnedDesktopNotepadRestoreVerification] phase=after realBranchPinnedDesktopNotepadStateRestored=true",
     "persistentDesktopStorageWrites=false",
     "nonFatal=true",
     "[APPMODEL-LAUNCHSHADOW-SMOKE] real-branch Start Menu Notepad helper before temporary Start Menu state mutation",
@@ -840,6 +871,8 @@ $realBranchDesktopSystemObjectSystemSettingsConfirmed =
     $output.Contains("typedDispatchCandidateMatchesActual=true") -and
     $output.Contains("typedDispatchCandidateComparison=match") -and
     $output.Contains("nonFatal=true shadowOnly=true")
+$realBranchPinnedDesktopNotepadConfirmed =
+    [regex]::IsMatch($output, 'source=RealBranchPinnedDesktopNotepad uiLabel=Notepad actualDispatch=Notepad resolvedType=BuiltInApp appId=gxos\.builtin\.notepad resolvedDispatch=Notepad typedDispatchCandidate=Notepad typedDispatchCandidateMatchesActual=true typedDispatchCandidateComparison=match .* nonFatal=true shadowOnly=true')
 $realBranchStartMenuNotepadConfirmed =
     $output.Contains("source=RealBranchStartMenuNotepad") -and
     $output.Contains("uiLabel=Notepad") -and
@@ -991,6 +1024,23 @@ $realBranchSystemObjectSystemSettingsRestoreVerificationConfirmed =
     $output.Contains("realBranchSystemObjectSystemSettingsSourceOverrideStateRestored=true") -and
     $output.Contains("realBranchSystemObjectSystemSettingsSuppressLaunchStateRestored=true") -and
     $output.Contains("realBranchSystemObjectSystemSettingsSelectedIconStateRestored=true")
+$realBranchPinnedDesktopNotepadStateRestored =
+    $output.Contains("[APPMODEL-LAUNCHSHADOW-SMOKE] real-branch pinned desktop Notepad helper before temporary desktop state mutation") -and
+    $output.Contains("[LaunchShadowRealBranchPinnedDesktopNotepadMutation] phase=before temporaryDesktopStateMutation=true persistentDesktopStorageWrites=false nonFatal=true") -and
+    $output.Contains("[APPMODEL-LAUNCHSHADOW-SMOKE] real-branch pinned desktop Notepad helper after temporary desktop state restoration") -and
+    $output.Contains("[LaunchShadowRealBranchPinnedDesktopNotepadRestore] realBranchPinnedDesktopNotepadStateRestored=true") -and
+    $output.Contains("realBranchPinnedDesktopNotepadShortcutSlotRestored=true") -and
+    $output.Contains("realBranchPinnedDesktopNotepadVisibleIconStateRestored=true") -and
+    $output.Contains("realBranchPinnedDesktopNotepadNotificationStateRestored=true") -and
+    $output.Contains("realBranchPinnedDesktopNotepadSourceOverrideStateRestored=true") -and
+    $output.Contains("realBranchPinnedDesktopNotepadSuppressLaunchStateRestored=true")
+$realBranchPinnedDesktopNotepadRestoreVerificationConfirmed =
+    $output.Contains("[LaunchShadowRealBranchPinnedDesktopNotepadRestoreVerification] phase=after realBranchPinnedDesktopNotepadStateRestored=true") -and
+    $output.Contains("realBranchPinnedDesktopNotepadShortcutSlotRestored=true") -and
+    $output.Contains("realBranchPinnedDesktopNotepadVisibleIconStateRestored=true") -and
+    $output.Contains("realBranchPinnedDesktopNotepadNotificationStateRestored=true") -and
+    $output.Contains("realBranchPinnedDesktopNotepadSourceOverrideStateRestored=true") -and
+    $output.Contains("realBranchPinnedDesktopNotepadSuppressLaunchStateRestored=true")
 $realBranchStartMenuNotepadStateRestored =
     $output.Contains("[APPMODEL-LAUNCHSHADOW-SMOKE] real-branch Start Menu Notepad helper before temporary Start Menu state mutation") -and
     $output.Contains("[LaunchShadowRealBranchStartMenuNotepadMutation] phase=before temporaryStartMenuStateMutation=true persistentDesktopStorageWrites=false nonFatal=true") -and
@@ -1129,6 +1179,15 @@ $persistentDesktopStorageWritesAbsent =
 if ($unexpectedRows.Count -ne 1) {
     $failed += "Expected exactly one unexpected-mismatch row, found $($unexpectedRows.Count)"
 }
+if (-not $realBranchPinnedDesktopNotepadConfirmed) {
+    $failed += "Pinned desktop Notepad real-branch row did not match the expected BuiltInApp dispatch evidence"
+}
+if (-not $realBranchPinnedDesktopNotepadStateRestored) {
+    $failed += "Pinned desktop Notepad state restoration evidence was incomplete"
+}
+if (-not $realBranchPinnedDesktopNotepadRestoreVerificationConfirmed) {
+    $failed += "Pinned desktop Notepad post-restore verification evidence was incomplete"
+}
 if (-not $realBranchStartMenuBuiltInAppsConfirmed) {
     $failed += "Start Menu BuiltInApp real-branch rows did not match the expected Calculator, TaskManager, DiskManager, Trash, and DisplayOptions dispatch evidence"
 }
@@ -1222,6 +1281,7 @@ if ($failed.Count -eq 0) {
         -RealBranchDesktopSystemObjectFileManagerConfirmed $realBranchDesktopSystemObjectFileManagerConfirmed `
         -RealBranchDesktopSystemObjectTrashConfirmed $realBranchDesktopSystemObjectTrashConfirmed `
         -RealBranchDesktopSystemObjectSystemSettingsConfirmed $realBranchDesktopSystemObjectSystemSettingsConfirmed `
+        -RealBranchPinnedDesktopNotepadConfirmed $realBranchPinnedDesktopNotepadConfirmed `
         -RealBranchStartMenuNotepadConfirmed $realBranchStartMenuNotepadConfirmed `
         -RealBranchStartMenuBuiltInAppsConfirmed $realBranchStartMenuBuiltInAppsConfirmed `
         -RealBranchStartMenuFilesConfirmed $realBranchStartMenuFilesConfirmed `
@@ -1245,6 +1305,8 @@ if ($failed.Count -eq 0) {
         -RealBranchSystemObjectTrashRestoreVerificationConfirmed $realBranchSystemObjectTrashRestoreVerificationConfirmed `
         -RealBranchSystemObjectSystemSettingsDesktopStateRestored $realBranchSystemObjectSystemSettingsDesktopStateRestored `
         -RealBranchSystemObjectSystemSettingsRestoreVerificationConfirmed $realBranchSystemObjectSystemSettingsRestoreVerificationConfirmed `
+        -RealBranchPinnedDesktopNotepadStateRestored $realBranchPinnedDesktopNotepadStateRestored `
+        -RealBranchPinnedDesktopNotepadRestoreVerificationConfirmed $realBranchPinnedDesktopNotepadRestoreVerificationConfirmed `
         -RealBranchStartMenuNotepadStateRestored $realBranchStartMenuNotepadStateRestored `
         -RealBranchStartMenuNotepadRestoreVerificationConfirmed $realBranchStartMenuNotepadRestoreVerificationConfirmed `
         -RealBranchStartMenuBuiltInAppsStateRestored $realBranchStartMenuBuiltInAppsStateRestored `
@@ -1285,6 +1347,7 @@ Write-AppModelLaunchShadowEvidence -Status "FAIL" `
     -RealBranchDesktopSystemObjectFileManagerConfirmed $realBranchDesktopSystemObjectFileManagerConfirmed `
     -RealBranchDesktopSystemObjectTrashConfirmed $realBranchDesktopSystemObjectTrashConfirmed `
     -RealBranchDesktopSystemObjectSystemSettingsConfirmed $realBranchDesktopSystemObjectSystemSettingsConfirmed `
+    -RealBranchPinnedDesktopNotepadConfirmed $realBranchPinnedDesktopNotepadConfirmed `
     -RealBranchStartMenuNotepadConfirmed $realBranchStartMenuNotepadConfirmed `
     -RealBranchStartMenuBuiltInAppsConfirmed $realBranchStartMenuBuiltInAppsConfirmed `
     -RealBranchStartMenuFilesConfirmed $realBranchStartMenuFilesConfirmed `
@@ -1308,6 +1371,8 @@ Write-AppModelLaunchShadowEvidence -Status "FAIL" `
     -RealBranchSystemObjectTrashRestoreVerificationConfirmed $realBranchSystemObjectTrashRestoreVerificationConfirmed `
     -RealBranchSystemObjectSystemSettingsDesktopStateRestored $realBranchSystemObjectSystemSettingsDesktopStateRestored `
     -RealBranchSystemObjectSystemSettingsRestoreVerificationConfirmed $realBranchSystemObjectSystemSettingsRestoreVerificationConfirmed `
+    -RealBranchPinnedDesktopNotepadStateRestored $realBranchPinnedDesktopNotepadStateRestored `
+    -RealBranchPinnedDesktopNotepadRestoreVerificationConfirmed $realBranchPinnedDesktopNotepadRestoreVerificationConfirmed `
     -RealBranchStartMenuNotepadStateRestored $realBranchStartMenuNotepadStateRestored `
     -RealBranchStartMenuNotepadRestoreVerificationConfirmed $realBranchStartMenuNotepadRestoreVerificationConfirmed `
     -RealBranchStartMenuBuiltInAppsStateRestored $realBranchStartMenuBuiltInAppsStateRestored `

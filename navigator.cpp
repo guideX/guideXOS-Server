@@ -31,6 +31,7 @@ std::string        Navigator::s_statusText      = "Ready";
 std::string        Navigator::s_hoverStatusText;
 int                Navigator::s_hitLinkBlockIndex = -1;
 WebDocument        Navigator::s_currentDoc;
+WebDocument        Navigator::s_inspectedDoc;
 NavigatorPageMetadata Navigator::s_pageMetadata;
 std::vector<std::string> Navigator::s_backStack;
 std::vector<std::string> Navigator::s_forwardStack;
@@ -73,6 +74,8 @@ Navigator::SelectionPosition Navigator::s_selectionFocus;
 std::string Navigator::s_navigatorClipboard;
 std::string Navigator::s_clipboardMode = "Navigator internal clipboard";
 std::vector<int> Navigator::s_registeredWidgetIds;
+
+static std::string extractDocumentText(const WebDocument& doc);
 
 namespace {
 	constexpr int kWindowW = 920;
@@ -491,6 +494,12 @@ namespace {
 
 	static std::string uniqueDownloadPathForName(const std::string& safeName, std::string& outFinalName)
 	{
+		if (safeName.empty() || sanitizeDownloadFileName(safeName) != safeName ||
+			safeName.find('/') != std::string::npos || safeName.find('\\') != std::string::npos) {
+			outFinalName.clear();
+			return "";
+		}
+
 		std::string stem = safeName;
 		std::string ext;
 		size_t dot = safeName.rfind('.');
@@ -574,6 +583,7 @@ namespace {
 
 	static void setSourcePreview(NavigatorPageMetadata& metadata, const std::string& source)
 	{
+		metadata.rawSourceForSave = source;
 		metadata.rawSourceBytes = source.size();
 		if (source.size() > kNavigatorMaxSourcePreviewBytes) {
 			metadata.rawSource = source.substr(0, kNavigatorMaxSourcePreviewBytes);
@@ -1017,6 +1027,13 @@ bool Navigator::SmokeNavigateTo(const std::string& url)
 	return s_currentDoc.url == url;
 }
 
+bool Navigator::SmokeNavigateToQuiet(const std::string& url)
+{
+	if (s_windowId == 0) return false;
+	loadUrl(url, false);
+	return s_currentDoc.url == url;
+}
+
 bool Navigator::SmokeSubmitFirstForm(const std::string& value)
 {
 	if (s_windowId == 0) return false;
@@ -1116,6 +1133,21 @@ int Navigator::SmokeCurrentBlockCount()
 	return static_cast<int>(s_currentDoc.blocks.size());
 }
 
+std::string Navigator::SmokeCurrentDocumentText()
+{
+	return extractDocumentText(s_currentDoc);
+}
+
+std::string Navigator::SmokeCurrentLinkUrl(const std::string& text)
+{
+	for (const DocBlock& block : s_currentDoc.blocks) {
+		if (block.type == BlockType::Link && block.text == text) {
+			return block.url;
+		}
+	}
+	return "";
+}
+
 std::vector<int> Navigator::SmokeToolbarWidgetIds()
 {
 	return s_registeredWidgetIds;
@@ -1133,6 +1165,7 @@ int Navigator::main(int, char**)
 	s_backStack.clear();
 	s_forwardStack.clear();
 	s_pageMetadata = NavigatorPageMetadata{};
+	s_inspectedDoc = WebDocument{};
 	s_lastSubmittedFormUrl.clear();
 	s_lastSubmittedFormMethod.clear();
 	s_lastSubmittedFormStatus.clear();
@@ -3035,7 +3068,7 @@ WebDocument Navigator::buildBookmarksDocument()
 // URL loading
 // -----------------------------------------------------------------------------
 
-void Navigator::loadUrl(const std::string& url)
+void Navigator::loadUrl(const std::string& url, bool updateDisplayAfterLoad)
 {
 	Logger::write(LogLevel::Info, std::string("Navigator loadUrl: ") + url);
 	cleanupRemoteImageTempFiles();
@@ -3066,6 +3099,10 @@ void Navigator::loadUrl(const std::string& url)
 		doc = buildPageInfoDocument();
 	} else if (url == "about:view-source") {
 		doc = buildViewSourceDocument();
+	} else if (url == "about:save-page-text") {
+		doc = buildSavePageTextDocument();
+	} else if (url == "about:save-page-source") {
+		doc = buildSavePageSourceDocument();
 	} else if (url == "about:navigator-runtime") {
 		doc = buildRuntimeDocument();
 	} else if (url.size() >= 7 && url.substr(0, 7) == "file://") {
@@ -3110,7 +3147,9 @@ void Navigator::loadUrl(const std::string& url)
 		s_currentFindMatch = -1;
 	}
 
-	updateDisplay();
+	if (updateDisplayAfterLoad) {
+		updateDisplay();
+	}
 }
 
 void Navigator::navigateTo(const std::string& url)
@@ -3216,6 +3255,7 @@ void Navigator::storePageMetadata(NavigatorPageMetadata metadata, const WebDocum
 	metadata.lastSubmittedFormMethod = s_lastSubmittedFormMethod;
 	metadata.lastSubmittedFormStatus = s_lastSubmittedFormStatus;
 	s_pageMetadata = std::move(metadata);
+	s_inspectedDoc = doc;
 }
 
 WebDocument Navigator::buildPageInfoDocument()
@@ -3298,6 +3338,12 @@ WebDocument Navigator::buildPageInfoDocument()
 	doc.blocks.push_back({BlockType::Link, "View Downloads", "about:downloads"});
 	doc.blocks.push_back({BlockType::Link, "Navigator Runtime", "about:navigator-runtime"});
 	doc.blocks.push_back({BlockType::Link, "Go to about:navigator", "about:navigator"});
+
+	doc.blocks.push_back({BlockType::Heading, "Save Page", ""});
+	doc.blocks.push_back({BlockType::Link, "Save Page Text", "about:save-page-text"});
+	if (!s_pageMetadata.rawSourceForSave.empty()) {
+		doc.blocks.push_back({BlockType::Link, "Save Source", "about:save-page-source"});
+	}
 	return doc;
 }
 
@@ -3334,6 +3380,9 @@ WebDocument Navigator::buildViewSourceDocument()
 	doc.blocks.push_back({BlockType::Link, "Page Info", "about:page-info"});
 	doc.blocks.push_back({BlockType::Link, "Navigator Runtime", "about:navigator-runtime"});
 	doc.blocks.push_back({BlockType::Link, "View Downloads", "about:downloads"});
+	if (!s_pageMetadata.rawSourceForSave.empty()) {
+		doc.blocks.push_back({BlockType::Link, "Save Source", "about:save-page-source"});
+	}
 	doc.blocks.push_back({BlockType::Link, "Go to about:navigator", "about:navigator"});
 	return doc;
 }
@@ -3371,6 +3420,236 @@ WebDocument Navigator::buildRuntimeDocument()
 	doc.blocks.push_back({BlockType::Link, "View Downloads", "about:downloads"});
 	doc.blocks.push_back({BlockType::Link, "Go to about:navigator", "about:navigator"});
 	return doc;
+}
+
+// =============================================================================
+// Save Page helpers
+// =============================================================================
+
+// Derive a safe filename stem from the current page URL.
+// e.g. "http://example.com/foo/bar.html" -> "bar"
+// Falls back to "page".
+static std::string saveNameStemFromUrl(const std::string& url)
+{
+	// Strip scheme
+	std::string path = url;
+	size_t schemeEnd = path.find("://");
+	if (schemeEnd != std::string::npos) {
+		path = path.substr(schemeEnd + 3);
+	}
+	// Strip query and fragment
+	size_t q = path.find('?'); if (q != std::string::npos) path = path.substr(0, q);
+	size_t h = path.find('#'); if (h != std::string::npos) path = path.substr(0, h);
+	// Get last path component
+	size_t slash = path.rfind('/');
+	if (slash != std::string::npos) path = path.substr(slash + 1);
+	// Strip extension
+	size_t dot = path.rfind('.');
+	if (dot != std::string::npos && dot > 0) path = path.substr(0, dot);
+	// Sanitize
+	std::string safe;
+	for (unsigned char ch : path) {
+		if (std::isalnum(ch) || ch == '-' || ch == '_') safe.push_back(static_cast<char>(ch));
+		else if (!safe.empty() && safe.back() != '-') safe.push_back('-');
+	}
+	while (!safe.empty() && safe.back() == '-') safe.pop_back();
+	if (safe.empty() || safe == "." || safe == "..") safe = "page";
+	if (safe.size() > 48) safe = safe.substr(0, 48);
+	return safe;
+}
+
+// Extract visible text from the current document blocks.
+static std::string extractDocumentText(const WebDocument& doc)
+{
+	std::ostringstream out;
+	for (const DocBlock& block : doc.blocks) {
+		switch (block.type) {
+		case BlockType::Heading:
+			out << "=== " << block.text << " ===\n\n";
+			break;
+		case BlockType::Paragraph:
+			if (!block.text.empty()) out << block.text << "\n\n";
+			break;
+		case BlockType::ListItem:
+			if (!block.text.empty()) out << "- " << block.text << "\n";
+			break;
+		case BlockType::Preformatted:
+			if (!block.text.empty()) out << block.text << "\n\n";
+			break;
+		case BlockType::Link:
+			if (!block.text.empty()) {
+				out << block.text;
+				if (!block.url.empty() && block.url != block.text) {
+					out << " [" << block.url << "]";
+				}
+				out << "\n";
+			}
+			break;
+		case BlockType::Image:
+			if (!block.alt.empty()) out << "[Image: " << block.alt << "]\n";
+			break;
+		case BlockType::FormTextInput:
+		case BlockType::FormTextarea: {
+			const std::string& text = block.inputValue.empty() ? block.placeholder : block.inputValue;
+			if (!text.empty()) out << text << "\n";
+			break;
+		}
+		case BlockType::FormCheckbox:
+		case BlockType::FormRadio:
+		case BlockType::FormSelect:
+			if (!block.text.empty()) out << block.text << "\n";
+			break;
+		case BlockType::FormSubmit:
+			out << (block.submitLabel.empty() ? "Submit" : block.submitLabel) << "\n";
+			break;
+		default:
+			break;
+		}
+	}
+	return out.str();
+}
+
+WebDocument Navigator::buildSavePageTextDocument()
+{
+	WebDocument result;
+	result.url   = "about:save-page-text";
+	result.title = "Page Saved";
+
+	const std::string& pageUrl = s_pageMetadata.finalUrl.empty()
+		? s_pageMetadata.requestedUrl : s_pageMetadata.finalUrl;
+
+	if (pageUrl.empty()) {
+		result.blocks.push_back({BlockType::Heading, "Save Page Text", ""});
+		result.blocks.push_back({BlockType::Paragraph, "No page has been loaded yet.", ""});
+		result.blocks.push_back({BlockType::Link, "Go to about:navigator", "about:navigator"});
+		return result;
+	}
+
+	const std::string text = extractDocumentText(s_inspectedDoc);
+	if (text.empty()) {
+		result.blocks.push_back({BlockType::Heading, "Save Page Text", ""});
+		result.blocks.push_back({BlockType::Paragraph, "The current page has no visible text to save.", ""});
+		result.blocks.push_back({BlockType::Link, "Page Info", "about:page-info"});
+		result.blocks.push_back({BlockType::Link, "Go to about:navigator", "about:navigator"});
+		return result;
+	}
+
+	const std::string stem = saveNameStemFromUrl(pageUrl);
+	const std::string safeName = sanitizeDownloadFileName(stem + ".txt");
+	std::string finalName;
+	const std::string savePath = uniqueDownloadPathForName(safeName, finalName);
+
+	result.blocks.push_back({BlockType::Heading, "Page Saved", ""});
+
+	if (savePath.empty() || finalName.empty()) {
+		result.blocks.push_back({BlockType::Paragraph, "Save unavailable: could not allocate a safe filename.", ""});
+		result.blocks.push_back({BlockType::Link, "Page Info", "about:page-info"});
+		result.blocks.push_back({BlockType::Link, "Go to about:navigator", "about:navigator"});
+		return result;
+	}
+
+	const bool ok = writeTextFile(savePath, text);
+	if (!ok) {
+		result.blocks.push_back({BlockType::Paragraph, "Save unavailable: could not write to the downloads directory.", ""});
+		result.blocks.push_back({BlockType::Link, "Page Info", "about:page-info"});
+		result.blocks.push_back({BlockType::Link, "Go to about:navigator", "about:navigator"});
+		return result;
+	}
+
+	DownloadItem item;
+	item.url           = pageUrl;
+	item.finalUrl      = pageUrl;
+	item.contentType   = "text/plain";
+	item.suggestedFileName = finalName;
+	item.savedPath     = savePath;
+	item.byteCount     = text.size();
+	item.success       = true;
+	rememberDownload(item);
+
+	const std::string fileUrl = safeDownloadFileUrl(item);
+	result.blocks.push_back({BlockType::ListItem, pageInfoLine("Filename",   finalName),                  ""});
+	result.blocks.push_back({BlockType::ListItem, pageInfoLine("Saved path", savePath),                   ""});
+	result.blocks.push_back({BlockType::ListItem, pageInfoLine("Byte count", static_cast<int>(text.size())), ""});
+	result.blocks.push_back({BlockType::ListItem, pageInfoLine("Mode",       "text"),                     ""});
+	result.blocks.push_back({BlockType::ListItem, pageInfoLine("Source URL", pageUrl),                    ""});
+	if (!fileUrl.empty()) {
+		result.blocks.push_back({BlockType::Link, "Open saved file", fileUrl});
+	}
+	result.blocks.push_back({BlockType::Link, "View Downloads",           "about:downloads"});
+	result.blocks.push_back({BlockType::Link, "Page Info",                "about:page-info"});
+	result.blocks.push_back({BlockType::Link, "Go to about:navigator",   "about:navigator"});
+	return result;
+}
+
+WebDocument Navigator::buildSavePageSourceDocument()
+{
+	WebDocument result;
+	result.url   = "about:save-page-source";
+	result.title = "Page Saved";
+
+	const std::string& pageUrl = s_pageMetadata.finalUrl.empty()
+		? s_pageMetadata.requestedUrl : s_pageMetadata.finalUrl;
+
+	result.blocks.push_back({BlockType::Heading, "Save Source", ""});
+
+	if (pageUrl.empty()) {
+		result.blocks.push_back({BlockType::Paragraph, "No page has been loaded yet.", ""});
+		result.blocks.push_back({BlockType::Link, "Go to about:navigator", "about:navigator"});
+		return result;
+	}
+
+	if (s_pageMetadata.rawSourceForSave.empty()) {
+		result.blocks.push_back({BlockType::Paragraph,
+			"No raw source available for the current page (generated about: pages have no source).", ""});
+		result.blocks.push_back({BlockType::Link, "Page Info",              "about:page-info"});
+		result.blocks.push_back({BlockType::Link, "Go to about:navigator", "about:navigator"});
+		return result;
+	}
+
+	const std::string stem = saveNameStemFromUrl(pageUrl);
+	const std::string safeName = sanitizeDownloadFileName(stem + "-source.html");
+	std::string finalName;
+	const std::string savePath = uniqueDownloadPathForName(safeName, finalName);
+
+	if (savePath.empty() || finalName.empty()) {
+		result.blocks.push_back({BlockType::Paragraph, "Save unavailable: could not allocate a safe filename.", ""});
+		result.blocks.push_back({BlockType::Link, "Page Info",              "about:page-info"});
+		result.blocks.push_back({BlockType::Link, "Go to about:navigator", "about:navigator"});
+		return result;
+	}
+
+	const bool ok = writeTextFile(savePath, s_pageMetadata.rawSourceForSave);
+	if (!ok) {
+		result.blocks.push_back({BlockType::Paragraph, "Save unavailable: could not write to the downloads directory.", ""});
+		result.blocks.push_back({BlockType::Link, "Page Info",              "about:page-info"});
+		result.blocks.push_back({BlockType::Link, "Go to about:navigator", "about:navigator"});
+		return result;
+	}
+
+	DownloadItem item;
+	item.url           = pageUrl;
+	item.finalUrl      = pageUrl;
+	item.contentType   = "text/html";
+	item.suggestedFileName = finalName;
+	item.savedPath     = savePath;
+	item.byteCount     = s_pageMetadata.rawSourceForSave.size();
+	item.success       = true;
+	rememberDownload(item);
+
+	const std::string fileUrl = safeDownloadFileUrl(item);
+	result.blocks.push_back({BlockType::ListItem, pageInfoLine("Filename",   finalName),                                      ""});
+	result.blocks.push_back({BlockType::ListItem, pageInfoLine("Saved path", savePath),                                       ""});
+	result.blocks.push_back({BlockType::ListItem, pageInfoLine("Byte count", static_cast<int>(s_pageMetadata.rawSourceForSave.size())), ""});
+	result.blocks.push_back({BlockType::ListItem, pageInfoLine("Mode",       "source"),                                       ""});
+	result.blocks.push_back({BlockType::ListItem, pageInfoLine("Source URL", pageUrl),                                        ""});
+	if (!fileUrl.empty()) {
+		result.blocks.push_back({BlockType::Link, "Open saved file", fileUrl});
+	}
+	result.blocks.push_back({BlockType::Link, "View Downloads",         "about:downloads"});
+	result.blocks.push_back({BlockType::Link, "View Source",            "about:view-source"});
+	result.blocks.push_back({BlockType::Link, "Page Info",              "about:page-info"});
+	result.blocks.push_back({BlockType::Link, "Go to about:navigator", "about:navigator"});
+	return result;
 }
 
 WebDocument Navigator::buildDownloadsDocument()
