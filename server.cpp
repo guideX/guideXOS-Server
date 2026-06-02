@@ -61,6 +61,7 @@
 #include "vnc_server.h"
 #include "paint.h"
 #include "navigator.h"
+#include "guide_web_http.h"
 #include "navigator_file_io.h"
 #include "image_viewer.h"
 #include "onscreen_keyboard.h"
@@ -241,6 +242,10 @@ static std::string navigatorHostedSmokeDiagnostic() {
     add("file write enabled", contains(runtimeReport, "Capabilities.File write=enabled"), "expected enabled");
     add("local PNG enabled", contains(runtimeReport, "Capabilities.Local PNG=enabled"), "expected enabled");
     add("HTTP enabled", contains(runtimeReport, "Capabilities.HTTP=enabled"), "expected enabled");
+    add("HTTP byte-stream backend enabled", contains(runtimeReport, "Backends.HTTP backend=guide_web_http hosted TCP byte-stream with Schannel TLS wrapper for https"), "expected hosted TCP byte-stream backend");
+    add("TLS backend is Schannel", contains(runtimeReport, "Capabilities.TLS backend=Schannel hosted"), "expected hosted Schannel backend");
+    add("certificate validation enabled", contains(runtimeReport, "Capabilities.Certificate validation=enabled by default through Windows trust and hostname policy"), "expected Windows trust and hostname validation");
+    add("TLS insertion seam active", contains(runtimeReport, "Capabilities.TLS insertion seam=active HttpByteStream wrapper"), "expected active TLS wrapper");
     add("remote PNG enabled", contains(runtimeReport, "Capabilities.Remote PNG=enabled"), "expected enabled");
     add("downloads enabled", contains(runtimeReport, "Capabilities.Downloads=enabled"), "expected enabled");
     add("CSS-lite enabled", contains(runtimeReport, "Capabilities.CSS-lite embedded <style>=enabled"), "expected enabled");
@@ -253,6 +258,108 @@ static std::string navigatorHostedSmokeDiagnostic() {
     add("Find in Page enabled", contains(runtimeReport, "Capabilities.Find in Page=enabled"), "expected enabled");
     add("external stylesheets unsupported", contains(runtimeReport, "Capabilities.External stylesheets=unsupported"), "expected unsupported");
     add("bookmark persistence enabled", contains(runtimeReport, "Capabilities.Bookmark persistence=enabled"), "expected enabled");
+
+    bool basicHttpLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/basic.html");
+    std::string basicHttpText = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("plain HTTP GET still loads", basicHttpLoaded && contains(basicHttpText, "Kernel HTTP Basic"),
+        "currentUrl=" + gxos::apps::Navigator::SmokeCurrentUrl());
+
+    const std::string httpsBasicUrl = "https://localhost:8443/navigator-smoke/basic.html";
+    const std::size_t httpsStreamsBefore = gxos::web::httpPlainTcpByteStreamOpenCount();
+    bool httpsBasicLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet(httpsBasicUrl);
+    const std::size_t httpsStreamsAfter = gxos::web::httpPlainTcpByteStreamOpenCount();
+    std::string httpsBasicText = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    bool httpsPageInfoLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("about:page-info");
+    std::string httpsPageInfo = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("HTTPS GET loads through Schannel", httpsBasicLoaded && contains(httpsBasicText, "Kernel HTTP Basic"),
+        "currentUrl=" + gxos::apps::Navigator::SmokeCurrentUrl());
+    add("HTTPS Page Info exposes Schannel validation", httpsPageInfoLoaded &&
+        contains(httpsPageInfo, "Source type: https") &&
+        contains(httpsPageInfo, "TLS backend: Schannel hosted") &&
+        contains(httpsPageInfo, "Certificate validation: enabled; smoke-only localhost self-signed bypass active") &&
+        contains(httpsPageInfo, "TLS status: connected") &&
+        contains(httpsPageInfo, "TLS smoke bypass active: yes"),
+        "expected visible localhost smoke-only TLS diagnostics");
+    add("HTTPS opens wrapped TCP byte-stream", httpsStreamsAfter == httpsStreamsBefore + 1,
+        "plain_tcp_streams_before=" + std::to_string(httpsStreamsBefore) +
+        " after=" + std::to_string(httpsStreamsAfter));
+
+    bool httpsPostFormLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("https://localhost:8443/navigator-smoke/forms-post.html");
+    bool httpsPostSubmitted = gxos::apps::Navigator::SmokeSubmitFirstForm("posted value");
+    std::string httpsPostUrl = gxos::apps::Navigator::SmokeCurrentUrl();
+    std::string httpsPostText = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("HTTPS POST submits through Schannel", httpsPostFormLoaded && httpsPostSubmitted &&
+        httpsPostUrl == "https://localhost:8443/navigator-smoke/post-echo" &&
+        contains(httpsPostText, "POST OK") &&
+        contains(httpsPostText, "Host: localhost:8443") &&
+        contains(httpsPostText, "q=posted+value&agree=yes&kind=alpha&note=hello%0Asecond+line&size=m"),
+        "currentUrl=" + httpsPostUrl);
+
+    gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/redirect-to-https");
+    std::string redirectHttpsUrl = gxos::apps::Navigator::SmokeCurrentUrl();
+    std::string redirectHttpsText = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    bool redirectHttpsPageInfoLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("about:page-info");
+    std::string redirectHttpsPageInfo = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("HTTP-to-HTTPS redirect follows into Schannel",
+        redirectHttpsUrl == "https://localhost:8443/navigator-smoke/final.html" &&
+        redirectHttpsPageInfoLoaded &&
+        contains(redirectHttpsText, "Kernel HTTP Final"),
+        "currentUrl=" + redirectHttpsUrl);
+    add("HTTP-to-HTTPS redirect Page Info keeps final TLS target", contains(redirectHttpsPageInfo,
+        "Requested URL: http://127.0.0.1:8080/navigator-smoke/redirect-to-https") &&
+        contains(redirectHttpsPageInfo, "Final URL: https://localhost:8443/navigator-smoke/final.html") &&
+        contains(redirectHttpsPageInfo, "Redirect count: 1") &&
+        contains(redirectHttpsPageInfo, "TLS status: connected"),
+        "expected original HTTP URL and final HTTPS target");
+
+    bool httpsGzipLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("https://localhost:8443/navigator-smoke/gzip.html");
+    std::string httpsGzipText = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("HTTPS unsupported compression stays friendly", httpsGzipLoaded &&
+        contains(httpsGzipText, "Unsupported Content Encoding") &&
+        contains(httpsGzipText, "UnsupportedContentEncoding"),
+        "expected existing parser behavior over TLS");
+
+    bool badCertificateLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("https://127.0.0.1:8443/navigator-smoke/basic.html");
+    std::string badCertificateText = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    gxos::apps::Navigator::SmokeNavigateToQuiet("about:page-info");
+    std::string badCertificatePageInfo = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("HTTPS bad certificate renders friendly document", badCertificateLoaded &&
+        contains(badCertificateText, "HTTPS Certificate") &&
+        contains(badCertificatePageInfo, "TLS backend: Schannel hosted") &&
+        contains(badCertificatePageInfo, "TLS status: error") &&
+        contains(badCertificatePageInfo, "TLS smoke bypass active: no"),
+        "expected validation failure for IP host against localhost certificate");
+
+    bool remotePngLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/image-relative.html");
+    bool remotePngPageInfoLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("about:page-info");
+    std::string remotePngPageInfo = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("remote PNG still loads through HTTP", remotePngLoaded && remotePngPageInfoLoaded &&
+        contains(remotePngPageInfo, "Remote images: 1") &&
+        contains(remotePngPageInfo, "Loaded images: 1"),
+        "expected one loaded remote PNG");
+
+    bool httpsRemotePngLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("https://localhost:8443/navigator-smoke/image-relative.html");
+    bool httpsRemotePngPageInfoLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("about:page-info");
+    std::string httpsRemotePngPageInfo = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("remote PNG loads through HTTPS", httpsRemotePngLoaded && httpsRemotePngPageInfoLoaded &&
+        contains(httpsRemotePngPageInfo, "Remote images: 1") &&
+        contains(httpsRemotePngPageInfo, "Loaded images: 1") &&
+        contains(httpsRemotePngPageInfo, "TLS status: connected"),
+        "expected one loaded remote HTTPS PNG");
+
+    bool binaryDownloadLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/download.bin");
+    std::string binaryDownloadText = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("unsupported HTTP content still downloads", binaryDownloadLoaded &&
+        contains(binaryDownloadText, "Download Complete") &&
+        contains(binaryDownloadText, "Content type: application/octet-stream"),
+        "currentUrl=" + gxos::apps::Navigator::SmokeCurrentUrl());
+
+    bool httpsDownloadLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("https://localhost:8443/navigator-smoke/download.bin");
+    std::string httpsDownloadText = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("unsupported HTTPS content still downloads", httpsDownloadLoaded &&
+        contains(httpsDownloadText, "Download Complete") &&
+        contains(httpsDownloadText, "Content type: application/octet-stream"),
+        "currentUrl=" + gxos::apps::Navigator::SmokeCurrentUrl());
 
     bool docsLoaded = gxos::apps::Navigator::SmokeNavigateTo("file:///docs/index.html");
     std::string docsUrl = gxos::apps::Navigator::SmokeCurrentUrl();
@@ -355,9 +462,20 @@ static std::string navigatorHostedSmokeDiagnostic() {
         const std::string secondName = fileNameFromDownloadUrl(secondUrl);
         if (firstName.empty() || secondName.empty()) return false;
         const size_t dot = firstName.rfind('.');
-        const std::string stem = dot == std::string::npos ? firstName : firstName.substr(0, dot);
+        std::string stem = dot == std::string::npos ? firstName : firstName.substr(0, dot);
         const std::string ext = dot == std::string::npos ? std::string() : firstName.substr(dot);
-        return secondName == stem + "-1" + ext;
+        int nextSuffix = 1;
+        const size_t dash = stem.rfind('-');
+        if (dash != std::string::npos && dash + 1 < stem.size()) {
+            const std::string suffix = stem.substr(dash + 1);
+            const bool numeric = std::all_of(suffix.begin(), suffix.end(),
+                [](unsigned char ch) { return std::isdigit(ch) != 0; });
+            if (numeric) {
+                nextSuffix = std::stoi(suffix) + 1;
+                stem = stem.substr(0, dash);
+            }
+        }
+        return secondName == stem + "-" + std::to_string(nextSuffix) + ext;
     };
     auto readSavedText = [&](const std::string& fileUrl, std::string& text) {
         const std::string path = safeDownloadPathFromFileUrl(fileUrl);

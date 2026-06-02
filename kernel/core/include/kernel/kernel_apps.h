@@ -446,6 +446,12 @@ public:
     static bool smokeInteractiveFormsLiteGet(const char* formUrl, char* finalUrl,
                                              int finalUrlLen, int* parsedBlocks,
                                              char* error, int errorLen);
+    static bool smokeHttpsUnsupportedDocument(const char* url, const char* expectedFinalUrl,
+                                              int expectedTcpConnectAttempts,
+                                              char* requestedUrl, int requestedUrlLen,
+                                              char* finalUrl, int finalUrlLen,
+                                              char* error, int errorLen,
+                                              int* tcpConnectAttempts);
 
 private:
     enum NavigatorMouseMode {
@@ -652,6 +658,7 @@ private:
     void buildDownloadsDocument();
     void buildDownloadResultDocument(const DownloadRecord& record);
     void buildErrorDocument(const char* url, const char* reason);
+    void buildHttpsUnsupportedDocument(const char* url, bool redirected);
     void loadFileUrl(const char* url);
     void loadHttpUrl(const char* url);
     void loadHttpResponse(const char* url, KernelHttpResponse* response);

@@ -6,6 +6,7 @@ from pathlib import Path
 import argparse
 import binascii
 import gzip
+import ssl
 import struct
 import zlib
 
@@ -41,6 +42,7 @@ EXPECTED_FORM_BODY = b"q=posted+value&agree=yes&kind=alpha&note=hello%0Asecond+l
 
 class NavigatorSmokeHandler(BaseHTTPRequestHandler):
     root = Path.cwd()
+    https_port = None
 
     def log_message(self, fmt, *args):
         print("%s - - %s" % (self.address_string(), fmt % args), flush=True)
@@ -130,6 +132,12 @@ class NavigatorSmokeHandler(BaseHTTPRequestHandler):
         if path == "/navigator-smoke/redirect-loop":
             self.write_redirect(302, "/navigator-smoke/redirect-loop")
             return
+        if path == "/navigator-smoke/redirect-to-https":
+            if self.https_port:
+                self.write_redirect(302, f"https://localhost:{self.https_port}/navigator-smoke/final.html")
+            else:
+                self.write_redirect(302, "https://example.com/secure")
+            return
         if path == "/navigator-smoke/chunked.html":
             chunks = [b"<html><body><h1>Chunked Kernel HTML</h1>", b"<p>decoded chunk body</p></body></html>"]
             self.send_response(200)
@@ -192,6 +200,9 @@ class NavigatorSmokeHandler(BaseHTTPRequestHandler):
             return
         if path == "/navigator-smoke/not-png.txt":
             self.write_bytes(200, "text/plain", b"this is not a png")
+            return
+        if path == "/navigator-smoke/download.bin":
+            self.write_bytes(200, "application/octet-stream", b"guideXOS download smoke\n")
             return
 
         file_path = (self.root / path.lstrip("/")).resolve()
@@ -267,10 +278,21 @@ def main():
     parser.add_argument("--root", default=".")
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=8080)
+    parser.add_argument("--https-port", type=int)
+    parser.add_argument("--tls-cert")
+    parser.add_argument("--tls-key")
     args = parser.parse_args()
     NavigatorSmokeHandler.root = Path(args.root).resolve()
+    NavigatorSmokeHandler.https_port = args.https_port
     server = ThreadingHTTPServer((args.host, args.port), NavigatorSmokeHandler)
-    print(f"Navigator kernel HTTP smoke server on {args.host}:{args.port} root={NavigatorSmokeHandler.root}", flush=True)
+    if args.tls_cert or args.tls_key:
+        if not args.tls_cert or not args.tls_key:
+            parser.error("--tls-cert and --tls-key must be supplied together")
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.load_cert_chain(args.tls_cert, args.tls_key)
+        server.socket = context.wrap_socket(server.socket, server_side=True)
+    scheme = "HTTPS" if args.tls_cert else "HTTP"
+    print(f"Navigator kernel {scheme} smoke server on {args.host}:{args.port} root={NavigatorSmokeHandler.root}", flush=True)
     server.serve_forever()
 
 

@@ -5,6 +5,8 @@
 // and the bare-metal Navigator adapter.  Keep this file free of STL/Win32
 // dependencies so kernel code can include it directly.
 
+#include <stdint.h>
+
 namespace gxos {
 namespace web {
 
@@ -13,6 +15,16 @@ static const int kHttpSharedMaxBodyBytes = 256 * 1024;
 static const int kHttpSharedConnectTimeoutMs = 5000;
 static const int kHttpSharedReadTimeoutMs = 5000;
 static const int kHttpSharedMaxRedirects = 5;
+
+// Plain HTTP and future TLS adapters expose the same bounded byte-stream
+// contract. TLS can later wrap a connected plain TCP stream without changing
+// the HTTP parser or the hosted/bare-metal request loops.
+struct HttpByteStream {
+    void* context;
+    int (*read)(void* context, uint8_t* buffer, int length);
+    int (*write)(void* context, const uint8_t* buffer, int length);
+    void (*close)(void* context);
+};
 
 enum HttpSharedError {
     HTTP_SHARED_OK = 0,

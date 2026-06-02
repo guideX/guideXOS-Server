@@ -439,10 +439,15 @@ namespace {
 		return contentType == "text/html" || contentType == "text/plain";
 	}
 
+	static bool isRemoteHttpUrl(const std::string& url)
+	{
+		return url.rfind("http://", 0) == 0 || url.rfind("https://", 0) == 0;
+	}
+
 	static std::string fileNameFromUrlPath(const std::string& url)
 	{
 		std::string path;
-		if (url.rfind("http://", 0) == 0) {
+		if (isRemoteHttpUrl(url)) {
 			gxos::web::ParsedHttpUrl parsed = gxos::web::parseHttpUrl(url);
 			path = parsed.valid ? parsed.path : url;
 		} else if (url.rfind("file://", 0) == 0) {
@@ -627,7 +632,7 @@ namespace {
 		for (const DocBlock& block : doc.blocks) {
 			if (block.type != BlockType::Image) continue;
 			++metadata.imageBlockCount;
-			if (block.url.rfind("http://", 0) == 0) {
+			if (isRemoteHttpUrl(block.url)) {
 				++metadata.remoteImageCount;
 			} else if (block.url.rfind("file://", 0) == 0) {
 				++metadata.localImageCount;
@@ -750,7 +755,10 @@ namespace {
 		const std::string& lastFormStatus,
 		const std::string& lastPostHttpStatus,
 		const std::string& lastPostContentType,
-		const std::string& clipboardMode)
+		const std::string& clipboardMode,
+		const std::string& tlsStatus,
+		const std::string& tlsError,
+		bool tlsSmokeSelfSignedBypass)
 	{
 		return {
 			{"Runtime", "Mode", "hosted/compositor"},
@@ -771,12 +779,16 @@ namespace {
 			{"Capabilities", "File read", "enabled"},
 			{"Capabilities", "File write", "enabled for bookmark persistence"},
 			{"Capabilities", "Local PNG", "enabled"},
-			{"Capabilities", "HTTP", "enabled for http:// via Winsock transport"},
-			{"Capabilities", "Remote PNG", "enabled for http:// PNG images"},
-			{"Capabilities", "Downloads", "enabled for unsupported http:// content within body limit"},
+			{"Capabilities", "HTTP", "enabled for http:// and hosted https:// via Winsock transport"},
+			{"Capabilities", "Remote PNG", "enabled for http:// and hosted https:// PNG images"},
+			{"Capabilities", "Downloads", "enabled for unsupported HTTP(S) content within body limit"},
 			{"Capabilities", "Temp files", "enabled for compositor image handoff"},
 			{"Capabilities", "Bookmark persistence", "enabled"},
-			{"Capabilities", "HTTPS/TLS", "unsupported"},
+			{"Capabilities", "HTTPS/TLS", "enabled hosted-only"},
+			{"Capabilities", "TLS backend", "Schannel hosted"},
+			{"Capabilities", "Certificate validation", "enabled by default through Windows trust and hostname policy"},
+			{"Capabilities", "TLS insertion seam", "active HttpByteStream wrapper"},
+			{"Capabilities", "TLS smoke bypass", "localhost self-signed only; disabled unless GXOS_NAVIGATOR_SMOKE_ALLOW_SELF_SIGNED_LOCALHOST=1"},
 			{"Capabilities", "CSS-lite embedded <style>", "enabled"},
 			{"Capabilities", "Hosted colored text primitive", "enabled"},
 			{"Capabilities", "CSS text color visible", "enabled"},
@@ -792,7 +804,7 @@ namespace {
 			{"Capabilities", "External stylesheets", "unsupported"},
 
 			{"Backends", "File backend", "navigator_file_io hosted/VFS adapter"},
-			{"Backends", "HTTP backend", "guide_web_http hosted socket path"},
+			{"Backends", "HTTP backend", "guide_web_http hosted TCP byte-stream with Schannel TLS wrapper for https"},
 			{"Backends", "Image backend", "ImageAdapter + compositor drawImage path"},
 
 			{"Current Document", "URL", currentUrl.empty() ? "(none)" : currentUrl},
@@ -814,6 +826,9 @@ namespace {
 			{"Current Document", "Last submitted form status", lastFormStatus.empty() ? "(none)" : lastFormStatus},
 			{"Current Document", "Last POST HTTP status", lastPostHttpStatus.empty() ? "(none)" : lastPostHttpStatus},
 			{"Current Document", "Last POST content type", lastPostContentType.empty() ? "(none)" : lastPostContentType},
+			{"Current Document", "TLS status", tlsStatus.empty() ? "(none)" : tlsStatus},
+			{"Current Document", "TLS error", tlsError.empty() ? "(none)" : tlsError},
+			{"Current Document", "TLS smoke bypass active", yesNo(tlsSmokeSelfSignedBypass)},
 		};
 	}
 
@@ -856,7 +871,7 @@ namespace {
 		ImageInfo info;
 		info.attempted = true;
 
-		if (block.url.rfind("http://", 0) == 0) {
+		if (isRemoteHttpUrl(block.url)) {
 			gxos::web::HttpResponse response = gxos::web::fetchHttpUrl(block.url);
 			if (!response.ok()) {
 				info.status = gxos::gui::ImageLoadStatus::NotFound;
@@ -1133,7 +1148,10 @@ std::string Navigator::SmokeRuntimeReport()
 		s_pageMetadata.lastSubmittedFormStatus,
 		s_pageMetadata.lastPostHttpStatus,
 		s_pageMetadata.lastPostContentType,
-		s_clipboardMode));
+		s_clipboardMode,
+		s_pageMetadata.tlsStatus,
+		s_pageMetadata.tlsError,
+		s_pageMetadata.tlsSmokeSelfSignedBypass));
 }
 
 std::string Navigator::SmokeCurrentUrl()
@@ -2597,9 +2615,9 @@ void Navigator::submitFormForBlock(int blockIndex)
 		updateDisplay();
 		return;
 	}
-	if (action.rfind("http://", 0) != 0) {
+	if (!isRemoteHttpUrl(action)) {
 		s_lastSubmittedFormStatus = "unsupported POST action";
-		updateStatus("POST is only supported for http:// forms.");
+		updateStatus("POST is only supported for http:// and https:// forms.");
 		return;
 	}
 
@@ -3127,24 +3145,13 @@ void Navigator::loadUrl(const std::string& url, bool updateDisplayAfterLoad)
 		doc = buildRuntimeDocument();
 	} else if (url.size() >= 7 && url.substr(0, 7) == "file://") {
 		doc = loadFileUrl(url);
-	} else if (url.rfind("http://", 0) == 0) {
+	} else if (isRemoteHttpUrl(url)) {
 		doc = loadHttpUrl(url);
-	} else if (url.rfind("https://", 0) == 0) {
-		doc = buildSimpleDocument(url,
-			"HTTPS Unsupported",
-			"HTTPS Unsupported",
-			"Navigator does not support HTTPS or TLS yet. Use a plain http:// URL for this milestone.");
-		NavigatorPageMetadata metadata;
-		metadata.requestedUrl = url;
-		metadata.finalUrl = url;
-		metadata.sourceType = "unsupported";
-		metadata.errorStatus = "HTTPS/TLS unsupported";
-		storePageMetadata(std::move(metadata), doc);
 	} else {
 		doc = buildSimpleDocument(url,
 			"Unsupported URL",
 			"Unsupported URL",
-			"Navigator supports about:, file://, and basic http:// URLs in this build.");
+			"Navigator supports about:, file://, http://, and hosted https:// URLs in this build.");
 		NavigatorPageMetadata metadata;
 		metadata.requestedUrl = url;
 		metadata.finalUrl = url;
@@ -3230,12 +3237,12 @@ WebDocument Navigator::buildAboutNavigatorDocument()
 	doc.blocks.push_back({BlockType::Paragraph,
 		"guideXOS Navigator is the native document viewer and browser shell for guideXOS Server.", ""});
 	doc.blocks.push_back({BlockType::Paragraph,
-		"It renders guideWeb documents and supports local file:// browsing plus basic plain HTTP text pages.", ""});
+		"It renders guideWeb documents and supports local file:// browsing plus hosted HTTP(S) text pages.", ""});
 	doc.blocks.push_back({BlockType::Heading,   "Features", ""});
 	doc.blocks.push_back({BlockType::ListItem,  "Headings, paragraphs, lists, and preformatted blocks", ""});
 	doc.blocks.push_back({BlockType::ListItem,  "Word-wrapped text for readable documents", ""});
-	doc.blocks.push_back({BlockType::ListItem,  "Relative link resolution for file:// and http:// pages", ""});
-	doc.blocks.push_back({BlockType::ListItem,  "Basic http:// GET for text/html and text/plain pages", ""});
+	doc.blocks.push_back({BlockType::ListItem,  "Relative link resolution for file:// and HTTP(S) pages", ""});
+	doc.blocks.push_back({BlockType::ListItem,  "HTTP(S) GET/POST with Schannel TLS on hosted Navigator", ""});
 	doc.blocks.push_back({BlockType::ListItem,  "Back / Forward / Reload / Home navigation", ""});
 	doc.blocks.push_back({BlockType::ListItem,  "Bookmarks with persistent storage", ""});
 	doc.blocks.push_back({BlockType::ListItem,  "Forms-lite GET/POST forms with text, checkbox, radio, textarea, and select controls", ""});
@@ -3311,6 +3318,11 @@ WebDocument Navigator::buildPageInfoDocument()
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Redirected", yesNo(m.redirected)), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Redirect count", m.redirectCount), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Error status", m.errorStatus), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("TLS backend", m.tlsBackend), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Certificate validation", m.tlsCertificateValidation), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("TLS status", m.tlsStatus), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("TLS error", m.tlsError), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("TLS smoke bypass active", yesNo(m.tlsSmokeSelfSignedBypass)), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Document blocks", m.documentBlockCount), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Image blocks", m.imageBlockCount), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Local images", m.localImageCount), ""});
@@ -3442,7 +3454,10 @@ WebDocument Navigator::buildRuntimeDocument()
 		s_pageMetadata.lastSubmittedFormStatus,
 		s_pageMetadata.lastPostHttpStatus,
 		s_pageMetadata.lastPostContentType,
-		s_clipboardMode));
+		s_clipboardMode,
+		s_pageMetadata.tlsStatus,
+		s_pageMetadata.tlsError,
+		s_pageMetadata.tlsSmokeSelfSignedBypass));
 
 	doc.blocks.push_back({BlockType::Link, "Page Info", "about:page-info"});
 	doc.blocks.push_back({BlockType::Link, "View Source", "about:view-source"});
@@ -3745,12 +3760,17 @@ WebDocument Navigator::loadHttpResponseDocument(const std::string& url, const gx
 	NavigatorPageMetadata metadata;
 	metadata.requestedUrl = response.requestedUrl.empty() ? url : response.requestedUrl;
 	metadata.finalUrl = response.finalUrl.empty() ? url : response.finalUrl;
-	metadata.sourceType = "http";
+	metadata.sourceType = metadata.finalUrl.rfind("https://", 0) == 0 ? "https" : "http";
 	metadata.httpStatusCode = response.statusCode;
 	metadata.httpReasonPhrase = response.reasonPhrase;
 	metadata.contentType = response.contentType;
 	metadata.redirectCount = response.redirectCount;
 	metadata.redirected = response.redirectCount > 0 || metadata.requestedUrl != metadata.finalUrl;
+	metadata.tlsBackend = response.tlsBackend;
+	metadata.tlsCertificateValidation = response.tlsCertificateValidation;
+	metadata.tlsStatus = response.tlsStatus;
+	metadata.tlsError = response.tlsError;
+	metadata.tlsSmokeSelfSignedBypass = response.tlsSmokeSelfSignedBypass;
 	if (response.error != gxos::web::HttpError::None) {
 		metadata.errorStatus = gxos::web::httpErrorName(response.error);
 		if (!response.errorMessage.empty()) metadata.errorStatus += ": " + response.errorMessage;
@@ -3779,6 +3799,20 @@ WebDocument Navigator::loadHttpResponseDocument(const std::string& url, const gx
 			title = "Response Too Large";
 		} else if (response.error == gxos::web::HttpError::Timeout) {
 			title = "Network Timeout";
+		} else if (response.error == gxos::web::HttpError::TlsCertificateHostnameMismatch) {
+			title = "HTTPS Certificate Hostname Mismatch";
+		} else if (response.error == gxos::web::HttpError::TlsCertificateExpired) {
+			title = "HTTPS Certificate Expired";
+		} else if (response.error == gxos::web::HttpError::TlsCertificateValidationFailed) {
+			title = "HTTPS Certificate Validation Failed";
+		} else if (response.error == gxos::web::HttpError::TlsProtocolUnsupported) {
+			title = "HTTPS Protocol Unsupported";
+		} else if (response.error == gxos::web::HttpError::TlsHandshakeFailed) {
+			title = "HTTPS Handshake Failed";
+		} else if (response.error == gxos::web::HttpError::TlsReadFailed) {
+			title = "HTTPS Read Failed";
+		} else if (response.error == gxos::web::HttpError::TlsWriteFailed) {
+			title = "HTTPS Write Failed";
 		}
 		return finish(buildSimpleDocument(response.finalUrl.empty() ? url : response.finalUrl,
 			title,

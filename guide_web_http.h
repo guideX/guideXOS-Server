@@ -2,9 +2,8 @@
 // guide_web_http.h
 //
 // Small synchronous HTTP/1.x client for guideWeb consumers.
-// This module intentionally supports only plain http:// GET/POST for text
-// documents.  TLS, cookies, compression, caching, and
-// JavaScript are outside this milestone.
+// Hosted builds support http:// and Schannel-backed https:// GET/POST.
+// Cookies, compression, caching, and JavaScript are outside this milestone.
 // POST redirects stay deliberately small: 303 becomes GET, while
 // 301/302/307/308 preserve the POST method and body.
 
@@ -59,6 +58,13 @@ enum class HttpError {
 	UnsupportedTransferEncoding,
 	UnsupportedContentEncoding,
 	MalformedChunkedEncoding,
+	TlsHandshakeFailed,
+	TlsCertificateValidationFailed,
+	TlsCertificateHostnameMismatch,
+	TlsCertificateExpired,
+	TlsProtocolUnsupported,
+	TlsReadFailed,
+	TlsWriteFailed,
 };
 
 struct HttpResponse {
@@ -75,6 +81,11 @@ struct HttpResponse {
 	std::vector<std::string> redirectChain;
 	HttpError error = HttpError::None;
 	std::string errorMessage;
+	std::string tlsBackend;
+	std::string tlsCertificateValidation;
+	std::string tlsStatus;
+	std::string tlsError;
+	bool tlsSmokeSelfSignedBypass = false;
 
 	bool ok() const { return error == HttpError::None; }
 	std::string headerValue(const std::string& name) const;
@@ -85,6 +96,7 @@ const char* httpErrorName(HttpError error);
 HttpResponse fetchHttpUrl(const std::string& url);
 HttpResponse postHttpUrl(const std::string& url, const std::string& body,
 	const std::string& contentType = "application/x-www-form-urlencoded");
+std::size_t httpPlainTcpByteStreamOpenCount();
 
 } // namespace web
 } // namespace gxos

@@ -40,26 +40,53 @@ if (-not $python) { throw "python not found; required for local Navigator POST s
 $httpLog = Join-Path $LogDir "navigator-hosted-http-$stamp.log"
 $httpErrLog = Join-Path $LogDir "navigator-hosted-http-$stamp.err.log"
 $httpServer = Join-Path $Root "scripts\navigator_kernel_http_server.py"
-$httpArgs = @("`"$httpServer`"", "--port", "8080", "--host", "127.0.0.1", "--root", "`"$Root`"")
+$httpArgs = @("`"$httpServer`"", "--port", "8080", "--https-port", "8443", "--host", "127.0.0.1", "--root", "`"$Root`"")
 $httpProc = Start-Process -FilePath $python -ArgumentList $httpArgs -PassThru -WindowStyle Hidden -RedirectStandardOutput $httpLog -RedirectStandardError $httpErrLog
+$httpsLog = Join-Path $LogDir "navigator-hosted-https-$stamp.log"
+$httpsErrLog = Join-Path $LogDir "navigator-hosted-https-$stamp.err.log"
+$tlsCert = Join-Path $Root "scripts\fixtures\navigator-smoke-localhost.crt"
+$tlsKey = Join-Path $Root "scripts\fixtures\navigator-smoke-localhost.key"
+$httpsArgs = @("`"$httpServer`"", "--port", "8443", "--host", "127.0.0.1", "--root", "`"$Root`"",
+    "--tls-cert", "`"$tlsCert`"", "--tls-key", "`"$tlsKey`"")
+$httpsProc = Start-Process -FilePath $python -ArgumentList $httpsArgs -PassThru -WindowStyle Hidden -RedirectStandardOutput $httpsLog -RedirectStandardError $httpsErrLog
 Start-Sleep -Milliseconds 500
 if ($httpProc.HasExited) {
     throw "local HTTP smoke server exited early; see $httpLog"
+}
+if ($httpsProc.HasExited) {
+    throw "local HTTPS smoke server exited early; see $httpsLog"
 }
 
 $commands = @"
 navigator.smoke
 exit
 "@
+$input = Join-Path $LogDir "navigator-hosted-smoke-$stamp.in"
+$err = Join-Path $LogDir "navigator-hosted-smoke-$stamp.err.log"
+$commands | Set-Content -Path $input -Encoding ASCII
 
 try {
-    $output = $commands | & $exe 2>&1
+    $oldTlsSmokeFlag = $env:GXOS_NAVIGATOR_SMOKE_ALLOW_SELF_SIGNED_LOCALHOST
+    $env:GXOS_NAVIGATOR_SMOKE_ALLOW_SELF_SIGNED_LOCALHOST = "1"
+    $appProc = Start-Process -FilePath $exe -PassThru -WindowStyle Hidden `
+        -RedirectStandardInput $input -RedirectStandardOutput $log -RedirectStandardError $err
+    Wait-Process -Id $appProc.Id
+    $output = Get-Content $log -Raw
 } finally {
+    if ($null -ne $oldTlsSmokeFlag) {
+        $env:GXOS_NAVIGATOR_SMOKE_ALLOW_SELF_SIGNED_LOCALHOST = $oldTlsSmokeFlag
+    } else {
+        Remove-Item Env:\GXOS_NAVIGATOR_SMOKE_ALLOW_SELF_SIGNED_LOCALHOST -ErrorAction SilentlyContinue
+    }
     if ($httpProc -and -not $httpProc.HasExited) {
         Stop-Process -Id $httpProc.Id -Force
     }
+    if ($httpsProc -and -not $httpsProc.HasExited) {
+        Stop-Process -Id $httpsProc.Id -Force
+    }
+    Remove-Item $input -ErrorAction SilentlyContinue
 }
-$output | Tee-Object -FilePath $log
+Write-Host $output
 
 if ($output -match "NAVIGATOR_SMOKE_RESULT: PASS") {
     Write-Host "Hosted Navigator smoke PASS. Log: $log"

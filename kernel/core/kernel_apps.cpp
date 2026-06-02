@@ -5715,6 +5715,10 @@ void NavigatorApp::buildRuntimeDocument()
     addBlock(BLOCK_LIST_ITEM, "Temp files: unsupported");
     addBlock(BLOCK_LIST_ITEM, "Bookmark persistence: unavailable; bookmarks are in-memory defaults");
     addBlock(BLOCK_LIST_ITEM, "HTTPS/TLS: unsupported");
+    addBlock(BLOCK_LIST_ITEM, "TLS backend: none");
+    addBlock(BLOCK_LIST_ITEM, "TLS insertion seam: prepared");
+    addBlock(BLOCK_LIST_ITEM, "Direct https unsupported smoke: covered");
+    addBlock(BLOCK_LIST_ITEM, "HTTP-to-HTTPS redirect unsupported smoke: covered");
     addBlock(BLOCK_LIST_ITEM, "CSS-lite embedded <style>: enabled");
     addBlock(BLOCK_LIST_ITEM, "Forms-lite GET forms: enabled through interactive document controls");
     addBlock(BLOCK_LIST_ITEM, "Forms-lite POST forms hosted: enabled in authoritative hosted Navigator path");
@@ -5736,7 +5740,7 @@ void NavigatorApp::buildRuntimeDocument()
 
     addBlock(BLOCK_HEADING, "Backends");
     addBlock(BLOCK_LIST_ITEM, "File backend: kernel VFS");
-    addBlock(BLOCK_LIST_ITEM, "HTTP backend: kernel TCP client transport + shared guideWeb HTTP parser subset");
+    addBlock(BLOCK_LIST_ITEM, "HTTP backend: kernel plain TCP byte-stream + shared guideWeb HTTP parser subset");
     char dnsLine[96];
     char dnsIp[16];
     kernel::ipv4::ip_to_string(kernel::dns::get_server(), dnsIp);
@@ -5798,6 +5802,19 @@ void NavigatorApp::buildErrorDocument(const char* url, const char* reason)
     m_blockCount = 0;
     addBlock(BLOCK_HEADING, "Page Not Found");
     addBlock(BLOCK_PARAGRAPH, reason ? reason : "Navigator could not load this page.");
+    addBlock(BLOCK_LINK, "Go to about:navigator", "about:navigator");
+}
+
+void NavigatorApp::buildHttpsUnsupportedDocument(const char* url, bool redirected)
+{
+    strcopy(m_currentUrl, url ? url : "", MAX_URL_LEN);
+    strcopy(m_title, redirected ? "HTTPS Redirect Unsupported" : "HTTPS Unsupported", MAX_TITLE_LEN_NAV);
+    m_blockCount = 0;
+    addBlock(BLOCK_HEADING, redirected ? "HTTPS Redirect Unsupported" : "HTTPS Unsupported");
+    addBlock(BLOCK_PARAGRAPH, redirected
+        ? "Navigator received an HTTP redirect to HTTPS, but HTTPS and TLS are not supported yet."
+        : "Navigator does not support HTTPS or TLS yet. Use a plain http:// URL for this milestone.");
+    addBlock(BLOCK_LINK, "Page Info", "about:page-info");
     addBlock(BLOCK_LINK, "Go to about:navigator", "about:navigator");
 }
 
@@ -6588,6 +6605,48 @@ static void kernel_http_poll_once()
     for (volatile int d = 0; d < 20000; ++d) {}
 }
 
+static int s_kernelHttpPlainTcpConnectAttempts = 0;
+
+struct KernelTcpHttpByteStreamContext {
+    int socket;
+};
+
+static int kernel_tcp_http_byte_stream_read(void* context, uint8_t* buffer, int length)
+{
+    KernelTcpHttpByteStreamContext* tcp = static_cast<KernelTcpHttpByteStreamContext*>(context);
+    if (!tcp || tcp->socket < 0 || !buffer || length <= 0) return kernel::tcp::TCP_ERR_INVALID;
+    if (length > 0xFFFF) length = 0xFFFF;
+    return kernel::tcp::tcp_recv(tcp->socket, buffer, (uint16_t)length);
+}
+
+static int kernel_tcp_http_byte_stream_write(void* context, const uint8_t* buffer, int length)
+{
+    KernelTcpHttpByteStreamContext* tcp = static_cast<KernelTcpHttpByteStreamContext*>(context);
+    if (!tcp || tcp->socket < 0 || !buffer || length <= 0) return kernel::tcp::TCP_ERR_INVALID;
+    if (length > 0xFFFF) length = 0xFFFF;
+    return kernel::tcp::tcp_send(tcp->socket, buffer, (uint16_t)length);
+}
+
+static void kernel_tcp_http_byte_stream_close(void* context)
+{
+    KernelTcpHttpByteStreamContext* tcp = static_cast<KernelTcpHttpByteStreamContext*>(context);
+    if (!tcp || tcp->socket < 0) return;
+    kernel::tcp::tcp_close(tcp->socket);
+    tcp->socket = -1;
+}
+
+static gxos::web::HttpByteStream make_kernel_tcp_http_byte_stream(KernelTcpHttpByteStreamContext* context, int socket)
+{
+    context->socket = socket;
+    gxos::web::HttpByteStream stream = {
+        context,
+        kernel_tcp_http_byte_stream_read,
+        kernel_tcp_http_byte_stream_write,
+        kernel_tcp_http_byte_stream_close
+    };
+    return stream;
+}
+
 static const char* kernel_http_error_name(int err)
 {
     switch (err) {
@@ -6604,14 +6663,16 @@ static const char* kernel_http_error_name(int err)
     }
 }
 
-static bool kernel_http_send_all(int sock, const char* bytes, int byteCount, KernelHttpResponse* response)
+static bool kernel_http_send_all(gxos::web::HttpByteStream* stream, const char* bytes, int byteCount, KernelHttpResponse* response)
 {
     if (!bytes || byteCount <= 0) return true;
+    if (!stream || !stream->write) return false;
     int sent = 0;
     uint32_t startTicks = (uint32_t)kernel::pit::ticks();
     uint32_t maxTicks = (uint32_t)(kKernelHttpReadTimeoutMs / 10 + 1);
     while (sent < byteCount) {
-        int n = kernel::tcp::tcp_send(sock, bytes + sent, (uint16_t)(byteCount - sent));
+        int n = stream->write(stream->context,
+            reinterpret_cast<const uint8_t*>(bytes + sent), byteCount - sent);
         if (n > 0) {
             sent += n;
             startTicks = (uint32_t)kernel::pit::ticks();
@@ -6883,6 +6944,7 @@ static KernelHttpResponse* kernel_http_request_once(const char* url, const char*
         return response;
     }
 
+    ++s_kernelHttpPlainTcpConnectAttempts;
     int rc = kernel::tcp::tcp_connect(sock, parsed.ip, parsed.port);
     if (rc < 0) {
         strcopy(response->error, kernel_http_error_name(rc), sizeof(response->error));
@@ -6905,6 +6967,9 @@ static KernelHttpResponse* kernel_http_request_once(const char* url, const char*
             return response;
         }
     }
+
+    KernelTcpHttpByteStreamContext tcpContext;
+    gxos::web::HttpByteStream stream = make_kernel_tcp_http_byte_stream(&tcpContext, sock);
 
     char request[768];
     int q = 0;
@@ -6933,9 +6998,9 @@ static KernelHttpResponse* kernel_http_request_once(const char* url, const char*
 #undef APPEND_REQ
     request[q] = '\0';
 
-    if (!kernel_http_send_all(sock, request, q, response) ||
-        (isPost && !kernel_http_send_all(sock, body, bodyBytes, response))) {
-        kernel::tcp::tcp_close(sock);
+    if (!kernel_http_send_all(&stream, request, q, response) ||
+        (isPost && !kernel_http_send_all(&stream, body, bodyBytes, response))) {
+        stream.close(stream.context);
         return response;
     }
 
@@ -6945,11 +7010,11 @@ static KernelHttpResponse* kernel_http_request_once(const char* url, const char*
     while (true) {
         kernel_http_poll_once();
         char chunk[512];
-        int n = kernel::tcp::tcp_recv(sock, chunk, sizeof(chunk));
+        int n = stream.read(stream.context, reinterpret_cast<uint8_t*>(chunk), sizeof(chunk));
         if (n > 0) {
             if (rawLen + n > kKernelHttpRawLimit) {
                 strcopy(response->error, "HTTP response too large", sizeof(response->error));
-                kernel::tcp::tcp_close(sock);
+                stream.close(stream.context);
                 return response;
             }
             for (int i = 0; i < n; ++i) s_kernelHttpRaw[rawLen++] = chunk[i];
@@ -6959,16 +7024,16 @@ static KernelHttpResponse* kernel_http_request_once(const char* url, const char*
         if (n == 0) break;
         if (n != kernel::tcp::TCP_ERR_WOULDBLOCK) {
             strcopy(response->error, kernel_http_error_name(n), sizeof(response->error));
-            kernel::tcp::tcp_close(sock);
+            stream.close(stream.context);
             return response;
         }
         if (((uint32_t)kernel::pit::ticks() - startTicks) > maxTicks) {
             strcopy(response->error, rawLen > 0 ? "HTTP read timeout after partial response" : "HTTP read timeout", sizeof(response->error));
-            kernel::tcp::tcp_close(sock);
+            stream.close(stream.context);
             return response;
         }
     }
-    kernel::tcp::tcp_close(sock);
+    stream.close(stream.context);
     s_kernelHttpRaw[rawLen] = '\0';
     return kernel_http_parse_response(response, rawLen) ? response : response;
 }
@@ -7072,6 +7137,10 @@ static KernelHttpResponse* kernel_http_request(const char* url, const char* meth
         char redirectError[128];
         if (!kernel_http_resolve_redirect(current, response->location, next, sizeof(next), redirectError, sizeof(redirectError))) {
             response->ok = false;
+            if (nav_starts_with(response->location, "https://")) {
+                strcopy(response->finalUrl, response->location, sizeof(response->finalUrl));
+                response->redirectCount = redirectCount + 1;
+            }
             strcopy(response->error, redirectError[0] ? redirectError : "Invalid redirect Location", sizeof(response->error));
             return response;
         }
@@ -7199,6 +7268,13 @@ void NavigatorApp::loadHttpResponse(const char* url, KernelHttpResponse* respons
     if (!response->ok) {
         const char* finalUrl = response->finalUrl[0] ? response->finalUrl : url;
         const char* requestedUrl = response->requestedUrl[0] ? response->requestedUrl : url;
+        if (nav_starts_with(finalUrl, "https://")) {
+            buildHttpsUnsupportedDocument(finalUrl, true);
+            rememberPageMetadata(requestedUrl, finalUrl, "http", response->contentType,
+                "HTTPS/TLS unsupported redirect", nullptr, 0, nullptr, nullptr,
+                response->statusCode, response->reason, response->redirectCount);
+            return;
+        }
         buildErrorDocument(finalUrl, response->error[0] ? response->error : "HTTP fetch failed.");
         rememberPageMetadata(requestedUrl, finalUrl, "http", response->contentType, response->error, nullptr, 0, nullptr, nullptr, response->statusCode, response->reason, response->redirectCount);
         return;
@@ -7864,7 +7940,7 @@ void NavigatorApp::loadUrl(const char* url)
     } else if (nav_starts_with(normalized, "http://")) {
         loadHttpUrl(normalized);
     } else if (nav_starts_with(normalized, "https://")) {
-        buildErrorDocument(normalized, "HTTPS and TLS are not supported in Navigator yet. Use plain http:// in the hosted runtime.");
+        buildHttpsUnsupportedDocument(normalized, false);
         rememberPageMetadata(normalized, normalized, "unsupported", "", "HTTPS/TLS unsupported", nullptr, 0);
     } else {
         buildErrorDocument(normalized, "Unsupported URL. Use about:, file://, or numeric-IP http://.");
@@ -7877,6 +7953,31 @@ void NavigatorApp::loadUrl(const char* url)
     blurFormBlock();
     setStatus("Ready");
 
+}
+
+bool NavigatorApp::smokeHttpsUnsupportedDocument(const char* url, const char* expectedFinalUrl,
+                                                 int expectedTcpConnectAttempts,
+                                                 char* requestedUrl, int requestedUrlLen,
+                                                 char* finalUrl, int finalUrlLen,
+                                                 char* error, int errorLen,
+                                                 int* tcpConnectAttempts)
+{
+    int attemptsBefore = s_kernelHttpPlainTcpConnectAttempts;
+    NavigatorApp app;
+    app.loadUrl(url);
+    int attempts = s_kernelHttpPlainTcpConnectAttempts - attemptsBefore;
+    if (requestedUrl && requestedUrlLen > 0) strcopy(requestedUrl, app.m_metaRequestedUrl, requestedUrlLen);
+    if (finalUrl && finalUrlLen > 0) strcopy(finalUrl, app.m_metaFinalUrl, finalUrlLen);
+    if (error && errorLen > 0) strcopy(error, app.m_metaErrorStatus, errorLen);
+    if (tcpConnectAttempts) *tcpConnectAttempts = attempts;
+
+    const bool direct = nav_starts_with(url, "https://");
+    return streq_local(app.m_metaRequestedUrl, url) &&
+           streq_local(app.m_metaFinalUrl, expectedFinalUrl) &&
+           nav_starts_with(app.m_metaErrorStatus, "HTTPS/TLS unsupported") &&
+           streq_local(app.m_title, direct ? "HTTPS Unsupported" : "HTTPS Redirect Unsupported") &&
+           app.m_blockCount >= 3 &&
+           attempts == expectedTcpConnectAttempts;
 }
 
 static void nav_push_url(char stack[][160], int& count, const char* url)
@@ -8659,6 +8760,40 @@ static bool nav_smoke_text_equals(const char* a, const char* b)
     return a[i] == '\0' && b[i] == '\0';
 }
 
+static bool printNavigatorHttpsUnsupportedSmokeCase(const char* name, const char* url,
+                                                    const char* expectedFinalUrl,
+                                                    int expectedTcpConnectAttempts)
+{
+    char requestedUrl[160];
+    char finalUrl[160];
+    char error[128];
+    int tcpConnectAttempts = 0;
+    bool pass = NavigatorApp::smokeHttpsUnsupportedDocument(url, expectedFinalUrl,
+        expectedTcpConnectAttempts, requestedUrl, sizeof(requestedUrl), finalUrl, sizeof(finalUrl),
+        error, sizeof(error), &tcpConnectAttempts);
+
+    serial::puts("[NAVIGATOR-SMOKE] https.case.");
+    serial::puts(name);
+    serial::puts(".requested_url=");
+    serial::puts(requestedUrl[0] ? requestedUrl : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.");
+    serial::puts(name);
+    serial::puts(".final_url=");
+    serial::puts(finalUrl[0] ? finalUrl : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.");
+    serial::puts(name);
+    serial::puts(".error=");
+    serial::puts(error[0] ? error : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.");
+    serial::puts(name);
+    serial::puts(".tcp_connect_attempts=");
+    serial_put_dec((uint32_t)tcpConnectAttempts);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.");
+    serial::puts(name);
+    serial::puts(pass ? ".result=PASS\n" : ".result=FAIL\n");
+    return pass;
+}
+
 static bool printNavigatorHttpSmokeCase(const char* name, const char* url, int expectedStatus,
                                         const char* expectedFinalUrl, bool expectedFetchOk,
                                         bool requireParsedBlocks, bool requireError,
@@ -8924,6 +9059,12 @@ static bool printNavigatorRuntimeSmokePreamble()
     serial::puts("[NAVIGATOR-SMOKE] capability.http_dns=enabled-basic A records\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.http_redirects=enabled limit 5\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.http_chunked=enabled\n");
+    serial::puts("[NAVIGATOR-SMOKE] capability.https_tls=unsupported\n");
+    serial::puts("[NAVIGATOR-SMOKE] capability.tls_backend=none\n");
+    serial::puts("[NAVIGATOR-SMOKE] capability.http_transport=plain TCP byte-stream\n");
+    serial::puts("[NAVIGATOR-SMOKE] capability.tls_insertion_seam=prepared\n");
+    serial::puts("[NAVIGATOR-SMOKE] coverage.direct_https_unsupported=covered\n");
+    serial::puts("[NAVIGATOR-SMOKE] coverage.http_to_https_redirect_unsupported=covered\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.remote_png=enabled-basic numeric IPv4 and hostname http:// PNG images\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.downloads=unavailable for bare-metal HTTP v0.1\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.css_lite=enabled for embedded style blocks\n");
@@ -8944,6 +9085,11 @@ static bool printNavigatorRuntimeSmokePreamble()
 static bool printNavigatorHttpSmokeCases()
 {
     bool httpOk = true;
+    httpOk = printNavigatorHttpsUnsupportedSmokeCase("direct_unsupported", "https://example.com/",
+        "https://example.com/", 0) && httpOk;
+    httpOk = printNavigatorHttpsUnsupportedSmokeCase("redirect_unsupported",
+        "http://10.0.2.2:8080/navigator-smoke/redirect-to-https",
+        "https://example.com/secure", 1) && httpOk;
     httpOk = printNavigatorHttpSmokeCase("basic", "http://10.0.2.2:8080/navigator-smoke/basic.html", 200,
         "http://10.0.2.2:8080/navigator-smoke/basic.html", true, true, false) && httpOk;
     httpOk = printNavigatorHttpSmokeCase("relative_redirect", "http://10.0.2.2:8080/navigator-smoke/redirect-relative", 200,

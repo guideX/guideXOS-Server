@@ -1064,10 +1064,10 @@ std::string resolveRelativeUrl(const std::string& base, const std::string& href)
 		if (scheme) return href;
 	}
 
-	// Root-relative: preserve the http origin, or use the existing file:// rule.
+	// Root-relative: preserve the HTTP(S) origin, or use the existing file:// rule.
 	if (href[0] == '/') {
-		if (base.rfind("http://", 0) == 0) {
-			size_t authorityStart = 7;
+		if (base.rfind("http://", 0) == 0 || base.rfind("https://", 0) == 0) {
+			size_t authorityStart = base.find("://") + 3;
 			size_t authorityEnd = base.find('/', authorityStart);
 			if (authorityEnd == std::string::npos) return base + href;
 			return base.substr(0, authorityEnd) + href;

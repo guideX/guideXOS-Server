@@ -53,6 +53,11 @@ struct NavigatorPageMetadata {
 	bool        redirected = false;
 	int         redirectCount = 0;
 	std::string errorStatus;
+	std::string tlsBackend;
+	std::string tlsCertificateValidation;
+	std::string tlsStatus;
+	std::string tlsError;
+	bool        tlsSmokeSelfSignedBypass = false;
 	std::string rawSource;
 	std::string rawSourceForSave;
 	size_t      rawSourceBytes = 0;

@@ -25,7 +25,7 @@ if not defined CXX (
 
 echo Using compiler: %CXX%
 set CXXFLAGS=-std=c++17 -Wall -O2 -iquote .
-set LDFLAGS=-lws2_32 -lgdi32 -luser32 -lmsimg32
+set LDFLAGS=-lws2_32 -lsecur32 -lcrypt32 -lgdi32 -luser32 -lmsimg32
 
 REM Source files (exclude kernel)
 set SOURCES=^
