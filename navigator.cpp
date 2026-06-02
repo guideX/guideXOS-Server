@@ -763,8 +763,10 @@ namespace {
 	{
 		const GxosRandomQuality randomQuality = gxos_random_quality();
 		const GxosClockStatus clockStatus = gxos_wall_clock_status();
+		uint8_t rngSmokeByte = 0;
 		int64_t wallClockSeconds = 0;
 		char wallClockUtc[32] = {};
+		const bool rngReadSmoke = gxos_random_bytes(&rngSmokeByte, sizeof(rngSmokeByte));
 		const bool wallClockAvailable = gxos_wall_clock_unix_seconds(&wallClockSeconds);
 		const bool wallClockUtcAvailable = gxos_wall_clock_utc_text(wallClockUtc, sizeof(wallClockUtc));
 		return {
@@ -818,10 +820,14 @@ namespace {
 
 			{"TLS Prerequisites", "RNG quality", gxos_random_quality_name(randomQuality)},
 			{"TLS Prerequisites", "RNG backend", gxos_random_backend()},
+			{"TLS Prerequisites", "VirtIO RNG detected", gxos_virtio_rng_detected() ? "yes" : "no"},
+			{"TLS Prerequisites", "VirtIO RNG status", gxos_virtio_rng_status()},
+			{"TLS Prerequisites", "Random read smoke", rngReadSmoke ? "PASS" : "FAIL"},
 			{"TLS Prerequisites", "Wall-clock status", gxos_wall_clock_status_name(clockStatus)},
 			{"TLS Prerequisites", "Wall-clock backend", gxos_wall_clock_backend()},
 			{"TLS Prerequisites", "Wall-clock Unix seconds", wallClockAvailable ? std::to_string(wallClockSeconds) : "(unavailable)"},
 			{"TLS Prerequisites", "Wall-clock UTC", wallClockUtcAvailable ? wallClockUtc : "(unavailable)"},
+			{"TLS Prerequisites", "Root CA store", "missing on bare-metal path"},
 			{"TLS Prerequisites", "TLS readiness", "HTTPS hosted: Schannel enabled; HTTPS bare-metal: unsupported, waiting on RNG/clock/TLS backend/root store"},
 
 			{"Current Document", "URL", currentUrl.empty() ? "(none)" : currentUrl},

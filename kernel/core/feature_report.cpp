@@ -413,6 +413,7 @@ void register_standard_features()
     register_feature(VIRTIO_GPU, STATUS_NOT_PRESENT, CAT_VIRTIO, "VirtIO GPU");
     register_feature(VIRTIO_INPUT, STATUS_NOT_PRESENT, CAT_VIRTIO, "VirtIO Input");
     register_feature(VIRTIO_CONSOLE, STATUS_NOT_PRESENT, CAT_VIRTIO, "VirtIO Console");
+    register_feature(VIRTIO_RNG, STATUS_NOT_PRESENT, CAT_VIRTIO, "VirtIO RNG");
     
     // Interrupts
     register_feature(INT_PIC_8259, STATUS_NOT_PRESENT, CAT_INTERRUPT, "8259 PIC");

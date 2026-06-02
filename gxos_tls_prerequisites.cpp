@@ -4,6 +4,7 @@
 
 #include "kernel/core/include/kernel/arch.h"
 #include "kernel/core/include/kernel/time.h"
+#include "kernel/core/include/kernel/virtio_rng.h"
 
 namespace gxos {
 namespace {
@@ -38,19 +39,62 @@ void put_two_digits(char* out, uint8_t value)
 
 bool gxos_random_bytes(void* buffer, size_t len)
 {
-    (void)buffer;
-    (void)len;
-    return false;
+    if (!buffer && len != 0) return false;
+    if (len == 0) return true;
+
+    uint8_t* out = static_cast<uint8_t*>(buffer);
+    while (len != 0) {
+        uint8_t chunk[64];
+        const size_t request = len > sizeof(chunk) ? sizeof(chunk) : len;
+        if (!kernel::virtio::rng::fill(chunk, request)) return false;
+        for (size_t i = 0; i < request; ++i) out[i] = chunk[i];
+        out += request;
+        len -= request;
+    }
+    return true;
 }
 
 GxosRandomQuality gxos_random_quality()
 {
-    return GxosRandomQuality::Unavailable;
+    return kernel::virtio::rng::ready()
+        ? GxosRandomQuality::Secure
+        : GxosRandomQuality::Unavailable;
 }
 
 const char* gxos_random_backend()
 {
-    return "none (secure entropy unavailable; virtio-rng driver pending)";
+    if (kernel::virtio::rng::ready()) {
+        return kernel::virtio::rng::backend_name();
+    }
+
+    switch (kernel::virtio::rng::last_status()) {
+    case kernel::virtio::rng::STATUS_DEVICE_NOT_FOUND:
+        return "none (virtio-rng PCI device not found)";
+    case kernel::virtio::rng::STATUS_UNSUPPORTED_ARCH:
+        return "none (virtio-rng requires x86/AMD64 PCI port I/O)";
+    case kernel::virtio::rng::STATUS_UNSUPPORTED_VIRTIO_MODE:
+        return "none (virtio-rng modern/non-transitional PCI unsupported)";
+    case kernel::virtio::rng::STATUS_QUEUE_SETUP_FAILED:
+        return "none (virtio-rng queue setup failed)";
+    case kernel::virtio::rng::STATUS_REQUEST_TIMEOUT:
+        return "none (virtio-rng request timeout)";
+    case kernel::virtio::rng::STATUS_SHORT_READ:
+        return "none (virtio-rng short read)";
+    case kernel::virtio::rng::STATUS_DEVICE_ERROR:
+        return "none (virtio-rng device error)";
+    default:
+        return "none (secure entropy unavailable)";
+    }
+}
+
+bool gxos_virtio_rng_detected()
+{
+    return kernel::virtio::rng::detected();
+}
+
+const char* gxos_virtio_rng_status()
+{
+    return kernel::virtio::rng::last_status_name();
 }
 
 bool gxos_wall_clock_unix_seconds(int64_t* out)
@@ -168,6 +212,16 @@ const char* gxos_random_backend()
 #else
     return "none (unsupported hosted platform)";
 #endif
+}
+
+bool gxos_virtio_rng_detected()
+{
+    return false;
+}
+
+const char* gxos_virtio_rng_status()
+{
+    return "hosted-not-applicable";
 }
 
 bool gxos_wall_clock_unix_seconds(int64_t* out)

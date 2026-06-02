@@ -19,6 +19,7 @@
 #include "include/kernel/ipv4.h"
 #include "include/kernel/tcp.h"
 #include "include/kernel/dns.h"
+#include "include/kernel/virtio_rng.h"
 #include "../../built_in_app_metadata.h"
 #include "../../gxos_tls_prerequisites.h"
 #include "../../guide_web_http_shared.h"
@@ -5772,12 +5773,23 @@ void NavigatorApp::buildRuntimeDocument()
     char prerequisiteLine[MAX_BLOCK_TEXT];
     int64_t wallClockSeconds = 0;
     char wallClockUtc[32];
+    const gxos::GxosRandomQuality rngQuality = gxos::gxos_random_quality();
+    const bool rngReadSmoke = (rngQuality == gxos::GxosRandomQuality::Secure) &&
+        streq_local(gxos::gxos_virtio_rng_status(), "success");
     const bool wallClockAvailable = gxos::gxos_wall_clock_unix_seconds(&wallClockSeconds);
     const bool wallClockUtcAvailable = gxos::gxos_wall_clock_utc_text(wallClockUtc, sizeof(wallClockUtc));
     strcopy(prerequisiteLine, "RNG: quality=", sizeof(prerequisiteLine));
-    strappend(prerequisiteLine, gxos::gxos_random_quality_name(gxos::gxos_random_quality()), sizeof(prerequisiteLine));
+    strappend(prerequisiteLine, gxos::gxos_random_quality_name(rngQuality), sizeof(prerequisiteLine));
     strappend(prerequisiteLine, "; backend=", sizeof(prerequisiteLine));
     strappend(prerequisiteLine, gxos::gxos_random_backend(), sizeof(prerequisiteLine));
+    addBlock(BLOCK_LIST_ITEM, prerequisiteLine);
+    strcopy(prerequisiteLine, "VirtIO RNG: detected=", sizeof(prerequisiteLine));
+    strappend(prerequisiteLine, gxos::gxos_virtio_rng_detected() ? "yes" : "no", sizeof(prerequisiteLine));
+    strappend(prerequisiteLine, "; status=", sizeof(prerequisiteLine));
+    strappend(prerequisiteLine, gxos::gxos_virtio_rng_status(), sizeof(prerequisiteLine));
+    addBlock(BLOCK_LIST_ITEM, prerequisiteLine);
+    strcopy(prerequisiteLine, "Random read smoke: ", sizeof(prerequisiteLine));
+    strappend(prerequisiteLine, rngReadSmoke ? "PASS" : "FAIL", sizeof(prerequisiteLine));
     addBlock(BLOCK_LIST_ITEM, prerequisiteLine);
     strcopy(prerequisiteLine, "Wall clock: status=", sizeof(prerequisiteLine));
     strappend(prerequisiteLine, gxos::gxos_wall_clock_status_name(gxos::gxos_wall_clock_status()), sizeof(prerequisiteLine));
@@ -5795,6 +5807,8 @@ void NavigatorApp::buildRuntimeDocument()
     strappend(prerequisiteLine, "; utc=", sizeof(prerequisiteLine));
     strappend(prerequisiteLine, wallClockUtcAvailable ? wallClockUtc : "(unavailable)", sizeof(prerequisiteLine));
     addBlock(BLOCK_LIST_ITEM, prerequisiteLine);
+    addBlock(BLOCK_LIST_ITEM, "TLS backend: none");
+    addBlock(BLOCK_LIST_ITEM, "Root CA store: missing");
     addBlock(BLOCK_LIST_ITEM, "TLS readiness: HTTPS bare-metal unsupported, waiting on RNG/clock/TLS backend/root store");
 
     addBlock(BLOCK_HEADING, "Backends");
@@ -9104,15 +9118,33 @@ static bool printNavigatorInteractiveFormsLiteGetSmokeCase()
 static bool printNavigatorRuntimeSmokePreamble()
 {
     bool registered = app::AppManager::isAppAvailable("guideXOS Navigator");
-    uint8_t rngProbe = 0xA5;
-    const bool rngRead = gxos::gxos_random_bytes(&rngProbe, sizeof(rngProbe));
+    uint8_t rngProbe1[16];
+    uint8_t rngProbe2[16];
+    for (size_t i = 0; i < sizeof(rngProbe1); ++i) {
+        rngProbe1[i] = 0xA5;
+        rngProbe2[i] = 0x5A;
+    }
+    const bool rngRead1 = gxos::gxos_random_bytes(rngProbe1, sizeof(rngProbe1));
+    const bool rngRead2 = gxos::gxos_random_bytes(rngProbe2, sizeof(rngProbe2));
     const gxos::GxosRandomQuality rngQuality = gxos::gxos_random_quality();
     int64_t wallClockSeconds = 0;
     char wallClockUtc[32];
     const bool wallClockAvailable = gxos::gxos_wall_clock_unix_seconds(&wallClockSeconds);
     const gxos::GxosClockStatus wallClockStatus = gxos::gxos_wall_clock_status();
     const bool wallClockUtcAvailable = gxos::gxos_wall_clock_utc_text(wallClockUtc, sizeof(wallClockUtc));
-    const bool rngFailsClosed = !rngRead && rngProbe == 0xA5 && rngQuality == gxos::GxosRandomQuality::Unavailable;
+    bool rngReadsIdentical = true;
+    for (size_t i = 0; i < sizeof(rngProbe1); ++i) {
+        if (rngProbe1[i] != rngProbe2[i]) {
+            rngReadsIdentical = false;
+            break;
+        }
+    }
+    const bool rngFailsClosed = !rngRead1 && !rngRead2 &&
+        rngProbe1[0] == 0xA5 && rngProbe2[0] == 0x5A &&
+        rngQuality == gxos::GxosRandomQuality::Unavailable;
+    const bool rngConsistent = (rngQuality == gxos::GxosRandomQuality::Secure)
+        ? (rngRead1 && rngRead2)
+        : rngFailsClosed;
     const bool wallClockPlausible = wallClockAvailable &&
         (wallClockStatus == gxos::GxosClockStatus::Plausible || wallClockStatus == gxos::GxosClockStatus::Verified);
     serial::puts("[NAVIGATOR-SMOKE] BEGIN\n");
@@ -9153,6 +9185,16 @@ static bool printNavigatorRuntimeSmokePreamble()
     serial::puts(gxos::gxos_random_quality_name(rngQuality));
     serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.rng_backend=");
     serial::puts(gxos::gxos_random_backend());
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.virtio_rng_detected=");
+    serial::puts(gxos::gxos_virtio_rng_detected() ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.virtio_rng_status=");
+    serial::puts(gxos::gxos_virtio_rng_status());
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.random_read_1=");
+    serial::puts(rngRead1 ? "PASS" : "FAIL");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.random_read_2=");
+    serial::puts(rngRead2 ? "PASS" : "FAIL");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.random_reads_identical=");
+    serial::puts((rngRead1 && rngRead2) ? (rngReadsIdentical ? "true" : "false") : "unknown");
     serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.rng_fail_closed=");
     serial::puts(rngFailsClosed ? "true" : "false");
     serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.wall_clock_status=");
@@ -9164,8 +9206,10 @@ static bool printNavigatorRuntimeSmokePreamble()
     else serial::puts("(unavailable)");
     serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.wall_clock_utc=");
     serial::puts(wallClockUtcAvailable ? wallClockUtc : "(unavailable)");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.tls_backend=none");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.root_ca_store=missing");
     serial::puts("\n[NAVIGATOR-SMOKE] tls_readiness=HTTPS bare-metal unsupported, waiting on RNG/clock/TLS backend/root store\n");
-    return registered && rngFailsClosed && wallClockPlausible && wallClockUtcAvailable;
+    return registered && rngConsistent && wallClockPlausible && wallClockUtcAvailable;
 }
 
 static bool printNavigatorHttpSmokeCases()

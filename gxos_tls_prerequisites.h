@@ -25,6 +25,8 @@ bool gxos_random_bytes(void* buffer, size_t len);
 GxosRandomQuality gxos_random_quality();
 const char* gxos_random_quality_name(GxosRandomQuality quality);
 const char* gxos_random_backend();
+bool gxos_virtio_rng_detected();
+const char* gxos_virtio_rng_status();
 
 bool gxos_wall_clock_unix_seconds(int64_t* out);
 GxosClockStatus gxos_wall_clock_status();

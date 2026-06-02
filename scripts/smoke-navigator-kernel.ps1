@@ -60,6 +60,15 @@ function Find-Qemu {
 $qemu = Find-Qemu
 if (-not $qemu) { throw "qemu-system-x86_64 not found." }
 
+$qemuObjectHelp = (& $qemu -object help 2>&1 | Out-String)
+if ($LASTEXITCODE -ne 0 -or ($qemuObjectHelp -notmatch 'rng-builtin')) {
+    throw "QEMU environment blocker: rng-builtin object is unavailable."
+}
+$qemuDeviceHelp = (& $qemu -device help | Out-String)
+if ($LASTEXITCODE -ne 0 -or ($qemuDeviceHelp -notmatch 'virtio-rng-pci')) {
+    throw "QEMU environment blocker: virtio-rng-pci device is unavailable."
+}
+
 function Find-Python {
     foreach ($candidate in @(
         "C:\Users\guideX\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe",
@@ -118,7 +127,9 @@ $args = @(
     "-no-reboot",
     "-rtc", "base=utc,clock=host",
     "-netdev", "user,id=net0",
-    "-device", "e1000,netdev=net0"
+    "-device", "e1000,netdev=net0",
+    "-object", "rng-builtin,id=rng0",
+    "-device", "virtio-rng-pci,rng=rng0,disable-modern=on,max-bytes=1024,period=1000"
 )
 
 $proc = Start-Process -FilePath $qemu -ArgumentList $args -PassThru -WindowStyle Hidden
@@ -182,11 +193,18 @@ $checks = @(
     "[NAVIGATOR-SMOKE] capability.find_in_page=unsupported in bare-metal adapter",
     "[NAVIGATOR-SMOKE] capability.external_stylesheets=unsupported",
     "[NAVIGATOR-SMOKE] capability.bookmark_persistence=unavailable; in-memory defaults only",
-    "[NAVIGATOR-SMOKE] tls_prereq.rng_quality=Unavailable",
-    "[NAVIGATOR-SMOKE] tls_prereq.rng_backend=none (secure entropy unavailable; virtio-rng driver pending)",
-    "[NAVIGATOR-SMOKE] tls_prereq.rng_fail_closed=true",
+    "[NAVIGATOR-SMOKE] tls_prereq.rng_quality=Secure",
+    "[NAVIGATOR-SMOKE] tls_prereq.rng_backend=virtio-rng legacy PCI transitional",
+    "[NAVIGATOR-SMOKE] tls_prereq.virtio_rng_detected=yes",
+    "[NAVIGATOR-SMOKE] tls_prereq.virtio_rng_status=success",
+    "[NAVIGATOR-SMOKE] tls_prereq.random_read_1=PASS",
+    "[NAVIGATOR-SMOKE] tls_prereq.random_read_2=PASS",
+    "[NAVIGATOR-SMOKE] tls_prereq.random_reads_identical=false",
+    "[NAVIGATOR-SMOKE] tls_prereq.rng_fail_closed=false",
     "[NAVIGATOR-SMOKE] tls_prereq.wall_clock_status=Plausible",
     "[NAVIGATOR-SMOKE] tls_prereq.wall_clock_backend=CMOS RTC (interpreted as UTC)",
+    "[NAVIGATOR-SMOKE] tls_prereq.tls_backend=none",
+    "[NAVIGATOR-SMOKE] tls_prereq.root_ca_store=missing",
     "[NAVIGATOR-SMOKE] tls_readiness=HTTPS bare-metal unsupported, waiting on RNG/clock/TLS backend/root store",
     "[NAVIGATOR-SMOKE] https.case.direct_unsupported.requested_url=https://example.com/",
     "[NAVIGATOR-SMOKE] https.case.direct_unsupported.final_url=https://example.com/",

@@ -48,6 +48,7 @@
 #include "include/kernel/virtio_block.h"
 #include "include/kernel/virtio_net.h"
 #include "include/kernel/virtio_gpu.h"
+#include "include/kernel/virtio_rng.h"
 
 // Interrupt support
 #include "include/kernel/msi.h"
@@ -108,6 +109,7 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
             is_bootinfo = true;
             kernel::serial::puts("[KERNEL] Boot method: UEFI BootInfo\n");
             kernel::nic::set_kernel_physical_base(bootinfo->KernelPhysicalBase);
+            kernel::virtio::rng::set_kernel_physical_base(bootinfo->KernelPhysicalBase);
         }
     }
     
@@ -190,6 +192,7 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         // Initialize VirtIO subsystem
         kernel::virtio::block::init();
         kernel::virtio::gpu::init();
+        kernel::virtio::rng::init();
         kernel::serial::puts("[KERNEL] VirtIO subsystem initialized\n");
         
         // Initialize ATA/SATA driver (scans for IDE and AHCI controllers)
