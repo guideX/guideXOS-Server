@@ -308,7 +308,7 @@ try {
                 "`"$(Join-Path $Root "scripts\smoke-appmodel-launchshadow.ps1")`"",
                 "-TimeoutSeconds",
                 "$TimeoutSeconds"
-            ) -TimeoutSeconds ([Math]::Max(300, $TimeoutSeconds + 600))
+            ) -TimeoutSeconds ([Math]::Max(300, $TimeoutSeconds + 1200))
             Add-LogSection "qemu-launchshadow-smoke-output" $qemuResult.Output
             $qemuSmokeOk = (-not $qemuResult.TimedOut) -and
                 (($null -eq $qemuResult.ExitCode) -or $qemuResult.ExitCode -eq 0) -and

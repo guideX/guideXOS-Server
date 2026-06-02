@@ -21,6 +21,7 @@
 #include "include/kernel/dns.h"
 #include "include/kernel/virtio_rng.h"
 #include "../../built_in_app_metadata.h"
+#include "../../gxos_tls_foundation.h"
 #include "../../gxos_tls_prerequisites.h"
 #include "../../guide_web_http_shared.h"
 
@@ -5748,8 +5749,8 @@ void NavigatorApp::buildRuntimeDocument()
     addBlock(BLOCK_LIST_ITEM, "Remote PNG: enabled-basic for numeric IPv4 and hostname http:// PNG images");
     addBlock(BLOCK_LIST_ITEM, "Downloads: unavailable for bare-metal HTTP v0.1");
     addBlock(BLOCK_LIST_ITEM, "Bookmark persistence: unavailable; bookmarks are in-memory defaults");
-    addBlock(BLOCK_LIST_ITEM, "HTTPS/TLS: unsupported");
-    addBlock(BLOCK_LIST_ITEM, "TLS backend: none");
+    addBlock(BLOCK_LIST_ITEM, "HTTPS/TLS: friendly unsupported until bare-metal TLS readiness is proven");
+    addBlock(BLOCK_LIST_ITEM, "TLS backend: Mbed TLS scaffold only");
     addBlock(BLOCK_LIST_ITEM, "TLS insertion seam: prepared");
     addBlock(BLOCK_LIST_ITEM, "CSS-lite embedded <style>: enabled");
     addBlock(BLOCK_LIST_ITEM, "Forms-lite GET forms: enabled through interactive document controls");
@@ -5774,6 +5775,13 @@ void NavigatorApp::buildRuntimeDocument()
     int64_t wallClockSeconds = 0;
     char wallClockUtc[32];
     const gxos::GxosRandomQuality rngQuality = gxos::gxos_random_quality();
+    const gxos::GxosTlsBackendInfo tlsBackendInfo = gxos::gxos_tls_backend_info();
+    const gxos::GxosTlsMbedTlsImportInfo tlsImportInfo = gxos::gxos_tls_mbedtls_import_info();
+    const gxos::GxosTlsArenaInfo tlsArenaInfo = gxos::gxos_tls_arena_info();
+    const gxos::GxosCaStoreInfo caStoreInfo = gxos::gxos_ca_store_info();
+    const gxos::GxosTlsHostnameValidationInfo hostnameValidationInfo = gxos::gxos_tls_hostname_validation_info();
+    const bool tlsReady = gxos::gxos_tls_prerequisites_ready();
+    const char* tlsReadinessBlocker = gxos::gxos_tls_prerequisites_blocker_reason();
     const bool rngReadSmoke = (rngQuality == gxos::GxosRandomQuality::Secure) &&
         streq_local(gxos::gxos_virtio_rng_status(), "success");
     const bool wallClockAvailable = gxos::gxos_wall_clock_unix_seconds(&wallClockSeconds);
@@ -5807,9 +5815,50 @@ void NavigatorApp::buildRuntimeDocument()
     strappend(prerequisiteLine, "; utc=", sizeof(prerequisiteLine));
     strappend(prerequisiteLine, wallClockUtcAvailable ? wallClockUtc : "(unavailable)", sizeof(prerequisiteLine));
     addBlock(BLOCK_LIST_ITEM, prerequisiteLine);
-    addBlock(BLOCK_LIST_ITEM, "TLS backend: none");
-    addBlock(BLOCK_LIST_ITEM, "Root CA store: missing");
-    addBlock(BLOCK_LIST_ITEM, "TLS readiness: HTTPS bare-metal unsupported, waiting on RNG/clock/TLS backend/root store");
+    strcopy(prerequisiteLine, "TLS backend: status=", sizeof(prerequisiteLine));
+    strappend(prerequisiteLine, gxos::gxos_tls_backend_status_name(tlsBackendInfo.status), sizeof(prerequisiteLine));
+    strappend(prerequisiteLine, "; name=", sizeof(prerequisiteLine));
+    strappend(prerequisiteLine, tlsBackendInfo.backendName ? tlsBackendInfo.backendName : "(none)", sizeof(prerequisiteLine));
+    addBlock(BLOCK_LIST_ITEM, prerequisiteLine);
+    strcopy(prerequisiteLine, "Mbed TLS import: source=", sizeof(prerequisiteLine));
+    strappend(prerequisiteLine, tlsImportInfo.sourcePresent ? "yes" : "no", sizeof(prerequisiteLine));
+    strappend(prerequisiteLine, "; config=", sizeof(prerequisiteLine));
+    strappend(prerequisiteLine, tlsImportInfo.configPresent ? "yes" : "no", sizeof(prerequisiteLine));
+    strappend(prerequisiteLine, "; version=", sizeof(prerequisiteLine));
+    strappend(prerequisiteLine, tlsImportInfo.detectedVersion ? tlsImportInfo.detectedVersion : "(none)", sizeof(prerequisiteLine));
+    addBlock(BLOCK_LIST_ITEM, prerequisiteLine);
+    strcopy(prerequisiteLine, "TLS arena: status=", sizeof(prerequisiteLine));
+    strappend(prerequisiteLine, gxos::gxos_tls_arena_status_name(tlsArenaInfo.status), sizeof(prerequisiteLine));
+    strappend(prerequisiteLine, "; capacity=", sizeof(prerequisiteLine));
+    char arenaCapacity[24];
+    nav_i64_to_text(static_cast<int64_t>(tlsArenaInfo.capacityBytes), arenaCapacity, sizeof(arenaCapacity));
+    strappend(prerequisiteLine, arenaCapacity, sizeof(prerequisiteLine));
+    strappend(prerequisiteLine, "; high-water=", sizeof(prerequisiteLine));
+    char arenaHighWater[24];
+    nav_i64_to_text(static_cast<int64_t>(tlsArenaInfo.highWaterBytes), arenaHighWater, sizeof(arenaHighWater));
+    strappend(prerequisiteLine, arenaHighWater, sizeof(prerequisiteLine));
+    addBlock(BLOCK_LIST_ITEM, prerequisiteLine);
+    strcopy(prerequisiteLine, "Root CA store: status=", sizeof(prerequisiteLine));
+    strappend(prerequisiteLine, gxos::gxos_ca_store_status_name(caStoreInfo.status), sizeof(prerequisiteLine));
+    strappend(prerequisiteLine, "; parse=", sizeof(prerequisiteLine));
+    strappend(prerequisiteLine, gxos::gxos_ca_parse_status_name(caStoreInfo.parseStatus), sizeof(prerequisiteLine));
+    strappend(prerequisiteLine, "; parsed=", sizeof(prerequisiteLine));
+    char parsedCerts[24];
+    nav_i64_to_text(static_cast<int64_t>(caStoreInfo.parsedCertificateCount), parsedCerts, sizeof(parsedCerts));
+    strappend(prerequisiteLine, parsedCerts, sizeof(prerequisiteLine));
+    addBlock(BLOCK_LIST_ITEM, prerequisiteLine);
+    strcopy(prerequisiteLine, "Hostname validation: available=", sizeof(prerequisiteLine));
+    strappend(prerequisiteLine, hostnameValidationInfo.available ? "yes" : "no", sizeof(prerequisiteLine));
+    strappend(prerequisiteLine, "; SNI=", sizeof(prerequisiteLine));
+    strappend(prerequisiteLine, hostnameValidationInfo.sniSupported ? "yes" : "no", sizeof(prerequisiteLine));
+    strappend(prerequisiteLine, "; original-host=", sizeof(prerequisiteLine));
+    strappend(prerequisiteLine, hostnameValidationInfo.originalHostnameRetained ? "yes" : "no", sizeof(prerequisiteLine));
+    addBlock(BLOCK_LIST_ITEM, prerequisiteLine);
+    strcopy(prerequisiteLine, "TLS readiness: ", sizeof(prerequisiteLine));
+    strappend(prerequisiteLine, tlsReady ? "yes" : "no", sizeof(prerequisiteLine));
+    strappend(prerequisiteLine, "; blocker=", sizeof(prerequisiteLine));
+    strappend(prerequisiteLine, tlsReady ? "(none)" : tlsReadinessBlocker, sizeof(prerequisiteLine));
+    addBlock(BLOCK_LIST_ITEM, prerequisiteLine);
 
     addBlock(BLOCK_HEADING, "Backends");
     addBlock(BLOCK_LIST_ITEM, "File backend: kernel VFS");
@@ -9147,6 +9196,13 @@ static bool printNavigatorRuntimeSmokePreamble()
         : rngFailsClosed;
     const bool wallClockPlausible = wallClockAvailable &&
         (wallClockStatus == gxos::GxosClockStatus::Plausible || wallClockStatus == gxos::GxosClockStatus::Verified);
+    const gxos::GxosTlsBackendInfo tlsBackendInfo = gxos::gxos_tls_backend_info();
+    const gxos::GxosTlsMbedTlsImportInfo tlsImportInfo = gxos::gxos_tls_mbedtls_import_info();
+    const gxos::GxosTlsArenaInfo tlsArenaInfo = gxos::gxos_tls_arena_info();
+    const gxos::GxosCaStoreInfo caStoreInfo = gxos::gxos_ca_store_info();
+    const gxos::GxosTlsHostnameValidationInfo hostnameValidationInfo = gxos::gxos_tls_hostname_validation_info();
+    const bool tlsReady = gxos::gxos_tls_prerequisites_ready();
+    const char* tlsReadinessBlocker = gxos::gxos_tls_prerequisites_blocker_reason();
     serial::puts("[NAVIGATOR-SMOKE] BEGIN\n");
     serial::puts("[NAVIGATOR-SMOKE] build_mode=bare-metal/kernel\n");
     serial::puts("[NAVIGATOR-SMOKE] registered=");
@@ -9161,8 +9217,8 @@ static bool printNavigatorRuntimeSmokePreamble()
     serial::puts("[NAVIGATOR-SMOKE] capability.http_dns=enabled-basic A records\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.http_redirects=enabled limit 5\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.http_chunked=enabled\n");
-    serial::puts("[NAVIGATOR-SMOKE] capability.https_tls=unsupported\n");
-    serial::puts("[NAVIGATOR-SMOKE] capability.tls_backend=none\n");
+    serial::puts("[NAVIGATOR-SMOKE] capability.https_tls=blocked until tls_readiness=yes\n");
+    serial::puts("[NAVIGATOR-SMOKE] capability.tls_backend=foundation-only\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.http_transport=plain TCP byte-stream\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.tls_insertion_seam=prepared\n");
     serial::puts("[NAVIGATOR-SMOKE] coverage.direct_https_unsupported=covered\n");
@@ -9206,9 +9262,67 @@ static bool printNavigatorRuntimeSmokePreamble()
     else serial::puts("(unavailable)");
     serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.wall_clock_utc=");
     serial::puts(wallClockUtcAvailable ? wallClockUtc : "(unavailable)");
-    serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.tls_backend=none");
-    serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.root_ca_store=missing");
-    serial::puts("\n[NAVIGATOR-SMOKE] tls_readiness=HTTPS bare-metal unsupported, waiting on RNG/clock/TLS backend/root store\n");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.tls_backend_status=");
+    serial::puts(gxos::gxos_tls_backend_status_name(tlsBackendInfo.status));
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.tls_backend_name=");
+    serial::puts(tlsBackendInfo.backendName ? tlsBackendInfo.backendName : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.tls_backend_version=");
+    serial::puts(tlsBackendInfo.backendVersion ? tlsBackendInfo.backendVersion : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.tls_backend_error=");
+    serial::puts(tlsBackendInfo.error ? tlsBackendInfo.error : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.mbedtls_import_path=");
+    serial::puts(tlsImportInfo.importPath ? tlsImportInfo.importPath : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.mbedtls_expected_version=");
+    serial::puts(tlsImportInfo.expectedVersion ? tlsImportInfo.expectedVersion : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.mbedtls_detected_version=");
+    serial::puts(tlsImportInfo.detectedVersion ? tlsImportInfo.detectedVersion : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.mbedtls_source_present=");
+    serial::puts(tlsImportInfo.sourcePresent ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.mbedtls_config_present=");
+    serial::puts(tlsImportInfo.configPresent ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.mbedtls_import_detail=");
+    serial::puts(tlsImportInfo.detail ? tlsImportInfo.detail : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.tls_arena_status=");
+    serial::puts(gxos::gxos_tls_arena_status_name(tlsArenaInfo.status));
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.tls_arena_capacity=");
+    serial_put_dec64(static_cast<uint64_t>(tlsArenaInfo.capacityBytes));
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.tls_arena_used=");
+    serial_put_dec64(static_cast<uint64_t>(tlsArenaInfo.bytesInUse));
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.tls_arena_high_water=");
+    serial_put_dec64(static_cast<uint64_t>(tlsArenaInfo.highWaterBytes));
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.tls_arena_detail=");
+    serial::puts(tlsArenaInfo.error ? tlsArenaInfo.error : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.root_ca_path=");
+    serial::puts(caStoreInfo.path ? caStoreInfo.path : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.root_ca_status=");
+    serial::puts(gxos::gxos_ca_store_status_name(caStoreInfo.status));
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.root_ca_parse_status=");
+    serial::puts(gxos::gxos_ca_parse_status_name(caStoreInfo.parseStatus));
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.root_ca_bytes=");
+    serial_put_dec64(static_cast<uint64_t>(caStoreInfo.bytesLoaded));
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.root_ca_pem_blocks=");
+    serial_put_dec64(static_cast<uint64_t>(caStoreInfo.pemBlocksDetected));
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.root_ca_parsed_certs=");
+    serial_put_dec64(static_cast<uint64_t>(caStoreInfo.parsedCertificateCount));
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.root_ca_detail=");
+    serial::puts(caStoreInfo.error ? caStoreInfo.error : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.hostname_validation_available=");
+    serial::puts(hostnameValidationInfo.available ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.hostname_validation_sni=");
+    serial::puts(hostnameValidationInfo.sniSupported ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.hostname_validation_original_host=");
+    serial::puts(hostnameValidationInfo.originalHostnameRetained ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.hostname_validation_numeric_ip=");
+    serial::puts(hostnameValidationInfo.numericIpSupported ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.hostname_validation_policy=");
+    serial::puts(hostnameValidationInfo.policy ? hostnameValidationInfo.policy : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.certificate_validation_policy=");
+    serial::puts(gxos::gxos_tls_certificate_validation_policy());
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_readiness=");
+    serial::puts(tlsReady ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_readiness_blocker=");
+    serial::puts(tlsReady ? "(none)" : tlsReadinessBlocker);
+    serial::puts("\n");
     return registered && rngConsistent && wallClockPlausible && wallClockUtcAvailable;
 }
 

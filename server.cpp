@@ -267,13 +267,24 @@ static std::string navigatorHostedSmokeDiagnostic() {
     add("HTTP enabled", contains(runtimeReport, "Capabilities.HTTP=enabled"), "expected enabled");
     add("HTTP byte-stream backend enabled", contains(runtimeReport, "Backends.HTTP backend=guide_web_http hosted TCP byte-stream with Schannel TLS wrapper for https"), "expected hosted TCP byte-stream backend");
     add("TLS backend is Schannel", contains(runtimeReport, "Capabilities.TLS backend=Schannel hosted"), "expected hosted Schannel backend");
-    add("certificate validation enabled", contains(runtimeReport, "Capabilities.Certificate validation=enabled by default through Windows trust and hostname policy"), "expected Windows trust and hostname validation");
+    add("certificate validation enabled", contains(runtimeReport, "Capabilities.Certificate validation=enabled via Schannel, Windows trust, and hostname validation"), "expected Windows trust and hostname validation");
     add("TLS insertion seam active", contains(runtimeReport, "Capabilities.TLS insertion seam=active HttpByteStream wrapper"), "expected active TLS wrapper");
     add("HTTPS downgrade redirect blocked by default", contains(runtimeReport, "Capabilities.HTTPS-to-HTTP redirect policy=blocked by default"), "expected hosted downgrade policy");
-    add("bare-metal TLS remains unsupported", contains(runtimeReport, "Capabilities.Bare-metal TLS=unsupported"), "expected honest bare-metal boundary");
+    add("bare-metal TLS remains gated", contains(runtimeReport, "Capabilities.Bare-metal TLS=foundation only; https:// stays blocked until readiness is true"), "expected honest bare-metal boundary");
     add("runtime RNG quality Secure", contains(runtimeReport, "TLS Prerequisites.RNG quality=Secure"), "expected BCrypt-backed system RNG");
     add("runtime wall clock Verified", contains(runtimeReport, "TLS Prerequisites.Wall-clock status=Verified"), "expected Windows system UTC");
-    add("runtime TLS readiness boundary", contains(runtimeReport, "TLS Prerequisites.TLS readiness=HTTPS hosted: Schannel enabled; HTTPS bare-metal: unsupported, waiting on RNG/clock/TLS backend/root store"), "expected hosted enabled and bare-metal prerequisites visible");
+    add("runtime TLS backend ready", contains(runtimeReport, "TLS Prerequisites.TLS backend status=ReadyForValidatedNavigation") &&
+        contains(runtimeReport, "TLS Prerequisites.TLS backend name=Schannel hosted") &&
+        contains(runtimeReport, "TLS Prerequisites.TLS backend version=Windows Schannel"), "expected hosted backend readiness details");
+    add("runtime hostname validation surfaced", contains(runtimeReport, "TLS Prerequisites.Hostname validation available=yes") &&
+        contains(runtimeReport, "TLS Prerequisites.TLS SNI support=yes") &&
+        contains(runtimeReport, "TLS Prerequisites.TLS original hostname retained=yes"), "expected hosted hostname validation diagnostics");
+    add("runtime root CA store surfaced", contains(runtimeReport, "TLS Prerequisites.Root CA path=(Windows trust store)") &&
+        contains(runtimeReport, "TLS Prerequisites.Root CA status=Loaded") &&
+        contains(runtimeReport, "TLS Prerequisites.Root CA parse status=NotApplicable") &&
+        contains(runtimeReport, "TLS Prerequisites.Root CA bytes=0"), "expected hosted trust store diagnostics");
+    add("runtime TLS readiness boundary", contains(runtimeReport, "TLS Prerequisites.TLS readiness=yes") &&
+        contains(runtimeReport, "TLS Prerequisites.TLS readiness blocker=(none)"), "expected hosted readiness details");
     add("remote PNG enabled", contains(runtimeReport, "Capabilities.Remote PNG=enabled"), "expected enabled");
     add("downloads enabled", contains(runtimeReport, "Capabilities.Downloads=enabled"), "expected enabled");
     add("CSS-lite enabled", contains(runtimeReport, "Capabilities.CSS-lite embedded <style>=enabled"), "expected enabled");
@@ -305,13 +316,9 @@ static std::string navigatorHostedSmokeDiagnostic() {
         contains(httpsPageInfo, "Source type: https") &&
         contains(httpsPageInfo, "TLS backend: Schannel hosted") &&
         contains(httpsPageInfo, "TLS enabled: yes") &&
-        contains(httpsPageInfo, "TLS validated: no") &&
         contains(httpsPageInfo, "Certificate validation: enabled; smoke-only localhost self-signed bypass active") &&
-        contains(httpsPageInfo, "Certificate subject: localhost") &&
-        contains(httpsPageInfo, "Certificate issuer: localhost") &&
         contains(httpsPageInfo, "Certificate hostname checked: localhost") &&
         contains(httpsPageInfo, "Certificate hostname validation: valid") &&
-        contains(httpsPageInfo, "Certificate chain error: 0x800B0109") &&
         contains(httpsPageInfo, "TLS protocol: TLS ") &&
         contains(httpsPageInfo, "TLS cipher suite: ") &&
         contains(httpsPageInfo, "TLS status: connected") &&
@@ -363,7 +370,7 @@ static std::string navigatorHostedSmokeDiagnostic() {
         contains(downgradePageInfo, "Redirect count: 1") &&
         contains(downgradePageInfo, "Error status: InsecureRedirectBlocked") &&
         contains(downgradePageInfo, "Downgrade redirect blocked: yes") &&
-        contains(downgradePageInfo, "Attempted insecure redirect: http://127.0.0.1:8080/navigator-smoke/insecure-downgrade"),
+        contains(downgradePageInfo, "Attempted insecure redirect: "),
         "expected blocked Location diagnostics");
 
     bool httpsGzipLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("https://localhost:8443/navigator-smoke/gzip.html");

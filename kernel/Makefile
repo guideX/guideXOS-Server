@@ -53,6 +53,7 @@ CFLAGS += -nostdlib -nostdinc++ -fno-builtin
 CFLAGS += -DGXOS_BARE_METAL
 CFLAGS += -I. -I.. -Icore/include -Iarch/$(ARCH)/include
 CFLAGS += $(EXTRA_CFLAGS)
+DEPFLAGS := -MMD -MP
 # Append architecture-specific flags
 CFLAGS += $(ARCH_CFLAGS)
 
@@ -75,6 +76,7 @@ ASM_OBJS := $(patsubst arch/$(ARCH)/%.asm,$(OBJ_DIR)/arch/%.o,$(ASM_SOURCES))
 ASM_OBJS += $(patsubst arch/$(ARCH)/%.s,$(OBJ_DIR)/arch/%.o,$(filter %.s,$(ASM_SOURCES)))
 
 ALL_OBJS := $(CORE_OBJS) $(ARCH_OBJS) $(ASM_OBJS)
+DEPFILES := $(CORE_OBJS:.o=.d) $(ARCH_OBJS:.o=.d)
 
 # Targets
 .PHONY: all clean info
@@ -82,9 +84,9 @@ ALL_OBJS := $(CORE_OBJS) $(ARCH_OBJS) $(ASM_OBJS)
 all: $(KERNEL)
 
 # ----------------------------------------------------------------
-# Link step — architecture-dependent
+# Link step - architecture-dependent
 #
-# amd64 (MinGW): link to PE, then convert PE ? ELF64 with objcopy
+# amd64 (MinGW): link to PE, then convert PE to ELF64 with objcopy
 # Everything else: linker outputs native ELF directly
 # ----------------------------------------------------------------
 
@@ -123,12 +125,22 @@ endif
 $(OBJ_DIR)/core/%.o: core/%.cpp
 	@$(call MKDIR,$(OBJ_DIR)/core)
 	@echo "Compiling $<..."
-	$(CXX) $(CFLAGS) -c $< -o $@
+	$(CXX) $(CFLAGS) $(DEPFLAGS) -c $< -o $@
+
+$(OBJ_DIR)/core/%.d: core/%.cpp
+	@$(call MKDIR,$(OBJ_DIR)/core)
+	@echo "Bootstrapping dependencies for $<..."
+	$(CXX) $(CFLAGS) $(DEPFLAGS) -c $< -o $(OBJ_DIR)/core/$*.o
 
 $(OBJ_DIR)/arch/%.o: arch/$(ARCH)/%.cpp
 	@$(call MKDIR,$(OBJ_DIR)/arch)
 	@echo "Compiling $<..."
-	$(CXX) $(CFLAGS) -c $< -o $@
+	$(CXX) $(CFLAGS) $(DEPFLAGS) -c $< -o $@
+
+$(OBJ_DIR)/arch/%.d: arch/$(ARCH)/%.cpp
+	@$(call MKDIR,$(OBJ_DIR)/arch)
+	@echo "Bootstrapping dependencies for $<..."
+	$(CXX) $(CFLAGS) $(DEPFLAGS) -c $< -o $(OBJ_DIR)/arch/$*.o
 
 $(OBJ_DIR)/arch/%.o: arch/$(ARCH)/%.asm
 	@$(call MKDIR,$(OBJ_DIR)/arch)
@@ -150,3 +162,5 @@ info:
 	@echo "Linker: $(LD)"
 	@echo "Build directory: $(BUILD_DIR)"
 	@echo "Kernel output: $(KERNEL)"
+
+-include $(DEPFILES)

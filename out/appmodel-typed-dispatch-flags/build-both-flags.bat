@@ -55,6 +55,7 @@ fs.cpp ^
 gxapp_container.cpp ^
 gxapp_loader.cpp ^
 gxm_loader.cpp ^
+gxos_tls_foundation.cpp ^
 gxos_tls_prerequisites.cpp ^
 image.cpp ^
 image_adapter.cpp ^

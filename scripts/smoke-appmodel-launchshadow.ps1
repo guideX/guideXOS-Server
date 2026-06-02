@@ -1495,8 +1495,8 @@ if ($failed.Count -eq 0) {
         -PersistentDesktopStorageWritesAbsent $persistentDesktopStorageWritesAbsent `
         -UnexpectedMismatchRows $unexpectedRows.Count `
         -SerialLogPath $serialLog
-    Write-Host "App-model launch shadow kernel smoke PASS. Serial log: $serialLog"
-    Write-Host "App-model typed-dispatch gate evidence: $evidencePath"
+    Write-Output "App-model launch shadow kernel smoke PASS. Serial log: $serialLog"
+    Write-Output "App-model typed-dispatch gate evidence: $evidencePath"
     exit 0
 }
 

@@ -238,6 +238,7 @@
     <ClInclude Include="kernel\arch\x86\include\arch\usb_hci.h" />
     <ClInclude Include="guide_web_document.h" />
     <ClInclude Include="guide_web_html_parser.h" />
+    <ClInclude Include="gxos_tls_foundation.h" />
     <ClInclude Include="navigator_file_io.h" />
     <ClInclude Include="navigator_html_parser.h" />
     <ClInclude Include="system_tray.h" />
@@ -293,6 +294,7 @@
     <ClCompile Include="kernel\core\fs_ufs.cpp" />
     <ClCompile Include="kernel\core\vesa.cpp" />
     <ClCompile Include="kernel\core\fb_console.cpp" />
+    <ClCompile Include="kernel\core\gxos_tls_foundation.cpp" />
     <ClCompile Include="kernel\arch\x86\graphics.cpp">
       <ObjectFileName>$(IntDir)graphics_x86.obj</ObjectFileName>
     </ClCompile>

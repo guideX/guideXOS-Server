@@ -1,6 +1,7 @@
 #include "navigator.h"
 
 #include "gui_protocol.h"
+#include "gxos_tls_foundation.h"
 #include "gxos_tls_prerequisites.h"
 #include "kernel/core/include/kernel/image_adapter.h"
 #include "kernel/core/include/kernel/system_font.h"
@@ -763,6 +764,13 @@ namespace {
 	{
 		const GxosRandomQuality randomQuality = gxos_random_quality();
 		const GxosClockStatus clockStatus = gxos_wall_clock_status();
+		const GxosTlsBackendInfo tlsBackendInfo = gxos_tls_backend_info();
+		const GxosTlsMbedTlsImportInfo tlsImportInfo = gxos_tls_mbedtls_import_info();
+		const GxosTlsArenaInfo tlsArenaInfo = gxos_tls_arena_info();
+		const GxosCaStoreInfo caStoreInfo = gxos_ca_store_info();
+		const GxosTlsHostnameValidationInfo hostnameValidationInfo = gxos_tls_hostname_validation_info();
+		const bool tlsReady = gxos_tls_prerequisites_ready();
+		const char* tlsReadinessBlocker = gxos_tls_prerequisites_blocker_reason();
 		uint8_t rngSmokeByte = 0;
 		int64_t wallClockSeconds = 0;
 		char wallClockUtc[32] = {};
@@ -794,12 +802,12 @@ namespace {
 			{"Capabilities", "Temp files", "enabled for compositor image handoff"},
 			{"Capabilities", "Bookmark persistence", "enabled"},
 			{"Capabilities", "HTTPS/TLS", "enabled hosted-only"},
-			{"Capabilities", "TLS backend", "Schannel hosted"},
-			{"Capabilities", "Certificate validation", "enabled by default through Windows trust and hostname policy"},
+			{"Capabilities", "TLS backend", tlsBackendInfo.backendName ? tlsBackendInfo.backendName : "(none)"},
+			{"Capabilities", "Certificate validation", gxos_tls_certificate_validation_policy()},
 			{"Capabilities", "TLS insertion seam", "active HttpByteStream wrapper"},
 			{"Capabilities", "TLS smoke bypass", "localhost self-signed only; disabled unless GXOS_NAVIGATOR_SMOKE_ALLOW_SELF_SIGNED_LOCALHOST=1"},
 			{"Capabilities", "HTTPS-to-HTTP redirect policy", "blocked by default"},
-			{"Capabilities", "Bare-metal TLS", "unsupported"},
+			{"Capabilities", "Bare-metal TLS", "foundation only; https:// stays blocked until readiness is true"},
 			{"Capabilities", "CSS-lite embedded <style>", "enabled"},
 			{"Capabilities", "Hosted colored text primitive", "enabled"},
 			{"Capabilities", "CSS text color visible", "enabled"},
@@ -827,8 +835,36 @@ namespace {
 			{"TLS Prerequisites", "Wall-clock backend", gxos_wall_clock_backend()},
 			{"TLS Prerequisites", "Wall-clock Unix seconds", wallClockAvailable ? std::to_string(wallClockSeconds) : "(unavailable)"},
 			{"TLS Prerequisites", "Wall-clock UTC", wallClockUtcAvailable ? wallClockUtc : "(unavailable)"},
-			{"TLS Prerequisites", "Root CA store", "missing on bare-metal path"},
-			{"TLS Prerequisites", "TLS readiness", "HTTPS hosted: Schannel enabled; HTTPS bare-metal: unsupported, waiting on RNG/clock/TLS backend/root store"},
+			{"TLS Prerequisites", "TLS backend status", gxos_tls_backend_status_name(tlsBackendInfo.status)},
+			{"TLS Prerequisites", "TLS backend name", tlsBackendInfo.backendName ? tlsBackendInfo.backendName : "(none)"},
+			{"TLS Prerequisites", "TLS backend version", tlsBackendInfo.backendVersion ? tlsBackendInfo.backendVersion : "(none)"},
+			{"TLS Prerequisites", "TLS backend error", tlsBackendInfo.error ? tlsBackendInfo.error : "(none)"},
+			{"TLS Prerequisites", "Mbed TLS import path", tlsImportInfo.importPath ? tlsImportInfo.importPath : "(none)"},
+			{"TLS Prerequisites", "Mbed TLS expected version", tlsImportInfo.expectedVersion ? tlsImportInfo.expectedVersion : "(none)"},
+			{"TLS Prerequisites", "Mbed TLS detected version", tlsImportInfo.detectedVersion ? tlsImportInfo.detectedVersion : "(none)"},
+			{"TLS Prerequisites", "Mbed TLS source present", tlsImportInfo.sourcePresent ? "yes" : "no"},
+			{"TLS Prerequisites", "Mbed TLS config present", tlsImportInfo.configPresent ? "yes" : "no"},
+			{"TLS Prerequisites", "Mbed TLS import detail", tlsImportInfo.detail ? tlsImportInfo.detail : "(none)"},
+			{"TLS Prerequisites", "TLS arena status", gxos_tls_arena_status_name(tlsArenaInfo.status)},
+			{"TLS Prerequisites", "TLS arena capacity", std::to_string(tlsArenaInfo.capacityBytes)},
+			{"TLS Prerequisites", "TLS arena in use", std::to_string(tlsArenaInfo.bytesInUse)},
+			{"TLS Prerequisites", "TLS arena high-water", std::to_string(tlsArenaInfo.highWaterBytes)},
+			{"TLS Prerequisites", "TLS arena detail", tlsArenaInfo.error ? tlsArenaInfo.error : "(none)"},
+			{"TLS Prerequisites", "Root CA path", caStoreInfo.path ? caStoreInfo.path : "(none)"},
+			{"TLS Prerequisites", "Root CA status", gxos_ca_store_status_name(caStoreInfo.status)},
+			{"TLS Prerequisites", "Root CA parse status", gxos_ca_parse_status_name(caStoreInfo.parseStatus)},
+			{"TLS Prerequisites", "Root CA bytes", std::to_string(caStoreInfo.bytesLoaded)},
+			{"TLS Prerequisites", "Root CA PEM blocks", std::to_string(caStoreInfo.pemBlocksDetected)},
+			{"TLS Prerequisites", "Root CA parsed certs", std::to_string(caStoreInfo.parsedCertificateCount)},
+			{"TLS Prerequisites", "Root CA detail", caStoreInfo.error ? caStoreInfo.error : "(none)"},
+			{"TLS Prerequisites", "Hostname validation available", hostnameValidationInfo.available ? "yes" : "no"},
+			{"TLS Prerequisites", "Hostname validation policy", hostnameValidationInfo.policy ? hostnameValidationInfo.policy : "(none)"},
+			{"TLS Prerequisites", "TLS SNI support", hostnameValidationInfo.sniSupported ? "yes" : "no"},
+			{"TLS Prerequisites", "TLS original hostname retained", hostnameValidationInfo.originalHostnameRetained ? "yes" : "no"},
+			{"TLS Prerequisites", "TLS numeric IP validation", hostnameValidationInfo.numericIpSupported ? "yes" : "no"},
+			{"TLS Prerequisites", "Certificate validation policy", gxos_tls_certificate_validation_policy()},
+			{"TLS Prerequisites", "TLS readiness", tlsReady ? "yes" : "no"},
+			{"TLS Prerequisites", "TLS readiness blocker", tlsReady ? "(none)" : tlsReadinessBlocker},
 
 			{"Current Document", "URL", currentUrl.empty() ? "(none)" : currentUrl},
 			{"Current Document", "Title", currentTitle.empty() ? "(none)" : currentTitle},

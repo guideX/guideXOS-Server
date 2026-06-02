@@ -194,7 +194,7 @@ try {
     $logParts += ($normalOutput -join [Environment]::NewLine)
     Set-Content -Path $SmokeLog -Value ($logParts -join [Environment]::NewLine) -Encoding ASCII
 
-    Write-Host $report
+    Write-Output $report
     Write-Host "Smoke log: $SmokeLog"
     exit 0
 } finally {
