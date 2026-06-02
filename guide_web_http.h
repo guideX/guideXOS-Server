@@ -55,6 +55,7 @@ enum class HttpError {
 	BodyTooLarge,
 	MalformedResponse,
 	RedirectLimitExceeded,
+	InsecureRedirectBlocked,
 	UnsupportedTransferEncoding,
 	UnsupportedContentEncoding,
 	MalformedChunkedEncoding,
@@ -85,7 +86,21 @@ struct HttpResponse {
 	std::string tlsCertificateValidation;
 	std::string tlsStatus;
 	std::string tlsError;
+	std::string tlsErrorCode;
+	std::string tlsCertificateSubject;
+	std::string tlsCertificateIssuer;
+	std::string tlsCertificateValidFrom;
+	std::string tlsCertificateValidTo;
+	std::string tlsCertificateHostname;
+	std::string tlsCertificateHostnameValidation;
+	std::string tlsCertificateChainError;
+	std::string tlsProtocol;
+	std::string tlsCipherSuite;
+	bool tlsEnabled = false;
+	bool tlsValidated = false;
 	bool tlsSmokeSelfSignedBypass = false;
+	bool downgradeRedirectBlocked = false;
+	std::string insecureRedirectLocation;
 
 	bool ok() const { return error == HttpError::None; }
 	std::string headerValue(const std::string& name) const;

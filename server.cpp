@@ -246,6 +246,8 @@ static std::string navigatorHostedSmokeDiagnostic() {
     add("TLS backend is Schannel", contains(runtimeReport, "Capabilities.TLS backend=Schannel hosted"), "expected hosted Schannel backend");
     add("certificate validation enabled", contains(runtimeReport, "Capabilities.Certificate validation=enabled by default through Windows trust and hostname policy"), "expected Windows trust and hostname validation");
     add("TLS insertion seam active", contains(runtimeReport, "Capabilities.TLS insertion seam=active HttpByteStream wrapper"), "expected active TLS wrapper");
+    add("HTTPS downgrade redirect blocked by default", contains(runtimeReport, "Capabilities.HTTPS-to-HTTP redirect policy=blocked by default"), "expected hosted downgrade policy");
+    add("bare-metal TLS remains unsupported", contains(runtimeReport, "Capabilities.Bare-metal TLS=unsupported"), "expected honest bare-metal boundary");
     add("remote PNG enabled", contains(runtimeReport, "Capabilities.Remote PNG=enabled"), "expected enabled");
     add("downloads enabled", contains(runtimeReport, "Capabilities.Downloads=enabled"), "expected enabled");
     add("CSS-lite enabled", contains(runtimeReport, "Capabilities.CSS-lite embedded <style>=enabled"), "expected enabled");
@@ -276,7 +278,16 @@ static std::string navigatorHostedSmokeDiagnostic() {
     add("HTTPS Page Info exposes Schannel validation", httpsPageInfoLoaded &&
         contains(httpsPageInfo, "Source type: https") &&
         contains(httpsPageInfo, "TLS backend: Schannel hosted") &&
+        contains(httpsPageInfo, "TLS enabled: yes") &&
+        contains(httpsPageInfo, "TLS validated: no") &&
         contains(httpsPageInfo, "Certificate validation: enabled; smoke-only localhost self-signed bypass active") &&
+        contains(httpsPageInfo, "Certificate subject: localhost") &&
+        contains(httpsPageInfo, "Certificate issuer: localhost") &&
+        contains(httpsPageInfo, "Certificate hostname checked: localhost") &&
+        contains(httpsPageInfo, "Certificate hostname validation: valid") &&
+        contains(httpsPageInfo, "Certificate chain error: 0x800B0109") &&
+        contains(httpsPageInfo, "TLS protocol: TLS ") &&
+        contains(httpsPageInfo, "TLS cipher suite: ") &&
         contains(httpsPageInfo, "TLS status: connected") &&
         contains(httpsPageInfo, "TLS smoke bypass active: yes"),
         "expected visible localhost smoke-only TLS diagnostics");
@@ -311,6 +322,23 @@ static std::string navigatorHostedSmokeDiagnostic() {
         contains(redirectHttpsPageInfo, "Redirect count: 1") &&
         contains(redirectHttpsPageInfo, "TLS status: connected"),
         "expected original HTTP URL and final HTTPS target");
+
+    gxos::apps::Navigator::SmokeNavigateToQuiet("https://localhost:8443/navigator-smoke/redirect-downgrade");
+    std::string downgradeText = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    bool downgradePageInfoLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("about:page-info");
+    std::string downgradePageInfo = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("HTTPS-to-HTTP downgrade redirect renders blocked page", downgradePageInfoLoaded &&
+        contains(downgradeText, "Insecure Redirect Blocked") &&
+        contains(downgradeText, "InsecureRedirectBlocked") &&
+        !contains(downgradeText, "Insecure downgrade target reached"),
+        "expected downgrade redirect policy document");
+    add("HTTPS-to-HTTP downgrade Page Info records insecure Location",
+        contains(downgradePageInfo, "Final URL: https://localhost:8443/navigator-smoke/redirect-downgrade") &&
+        contains(downgradePageInfo, "Redirect count: 1") &&
+        contains(downgradePageInfo, "Error status: InsecureRedirectBlocked") &&
+        contains(downgradePageInfo, "Downgrade redirect blocked: yes") &&
+        contains(downgradePageInfo, "Attempted insecure redirect: http://127.0.0.1:8080/navigator-smoke/insecure-downgrade"),
+        "expected blocked Location diagnostics");
 
     bool httpsGzipLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("https://localhost:8443/navigator-smoke/gzip.html");
     std::string httpsGzipText = gxos::apps::Navigator::SmokeCurrentDocumentText();

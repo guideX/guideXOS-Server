@@ -789,6 +789,8 @@ namespace {
 			{"Capabilities", "Certificate validation", "enabled by default through Windows trust and hostname policy"},
 			{"Capabilities", "TLS insertion seam", "active HttpByteStream wrapper"},
 			{"Capabilities", "TLS smoke bypass", "localhost self-signed only; disabled unless GXOS_NAVIGATOR_SMOKE_ALLOW_SELF_SIGNED_LOCALHOST=1"},
+			{"Capabilities", "HTTPS-to-HTTP redirect policy", "blocked by default"},
+			{"Capabilities", "Bare-metal TLS", "unsupported"},
 			{"Capabilities", "CSS-lite embedded <style>", "enabled"},
 			{"Capabilities", "Hosted colored text primitive", "enabled"},
 			{"Capabilities", "CSS text color visible", "enabled"},
@@ -3305,6 +3307,7 @@ WebDocument Navigator::buildPageInfoDocument()
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Requested URL", m.requestedUrl), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Final URL", m.finalUrl), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Source type", m.sourceType), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Scheme", m.scheme), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Content type", m.contentType), ""});
 
 	if (m.httpStatusCode > 0) {
@@ -3319,10 +3322,25 @@ WebDocument Navigator::buildPageInfoDocument()
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Redirect count", m.redirectCount), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Error status", m.errorStatus), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("TLS backend", m.tlsBackend), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("TLS enabled", yesNo(m.tlsEnabled)), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("TLS validated", yesNo(m.tlsValidated)), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Certificate validation", m.tlsCertificateValidation), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("TLS status", m.tlsStatus), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("TLS error", m.tlsError), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("TLS error code", m.tlsErrorCode), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Certificate subject", m.tlsCertificateSubject), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Certificate issuer", m.tlsCertificateIssuer), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Certificate valid from", m.tlsCertificateValidFrom), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Certificate valid to", m.tlsCertificateValidTo), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Certificate hostname checked", m.tlsCertificateHostname), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Certificate hostname validation", m.tlsCertificateHostnameValidation), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Certificate chain error", m.tlsCertificateChainError), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("TLS protocol", m.tlsProtocol), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("TLS cipher suite", m.tlsCipherSuite), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("TLS smoke bypass active", yesNo(m.tlsSmokeSelfSignedBypass)), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("HTTPS-to-HTTP redirect policy", "blocked by default"), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Downgrade redirect blocked", yesNo(m.downgradeRedirectBlocked)), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Attempted insecure redirect", m.insecureRedirectLocation), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Document blocks", m.documentBlockCount), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Image blocks", m.imageBlockCount), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Local images", m.localImageCount), ""});
@@ -3761,6 +3779,7 @@ WebDocument Navigator::loadHttpResponseDocument(const std::string& url, const gx
 	metadata.requestedUrl = response.requestedUrl.empty() ? url : response.requestedUrl;
 	metadata.finalUrl = response.finalUrl.empty() ? url : response.finalUrl;
 	metadata.sourceType = metadata.finalUrl.rfind("https://", 0) == 0 ? "https" : "http";
+	metadata.scheme = metadata.sourceType;
 	metadata.httpStatusCode = response.statusCode;
 	metadata.httpReasonPhrase = response.reasonPhrase;
 	metadata.contentType = response.contentType;
@@ -3770,7 +3789,21 @@ WebDocument Navigator::loadHttpResponseDocument(const std::string& url, const gx
 	metadata.tlsCertificateValidation = response.tlsCertificateValidation;
 	metadata.tlsStatus = response.tlsStatus;
 	metadata.tlsError = response.tlsError;
+	metadata.tlsErrorCode = response.tlsErrorCode;
+	metadata.tlsCertificateSubject = response.tlsCertificateSubject;
+	metadata.tlsCertificateIssuer = response.tlsCertificateIssuer;
+	metadata.tlsCertificateValidFrom = response.tlsCertificateValidFrom;
+	metadata.tlsCertificateValidTo = response.tlsCertificateValidTo;
+	metadata.tlsCertificateHostname = response.tlsCertificateHostname;
+	metadata.tlsCertificateHostnameValidation = response.tlsCertificateHostnameValidation;
+	metadata.tlsCertificateChainError = response.tlsCertificateChainError;
+	metadata.tlsProtocol = response.tlsProtocol;
+	metadata.tlsCipherSuite = response.tlsCipherSuite;
+	metadata.tlsEnabled = response.tlsEnabled;
+	metadata.tlsValidated = response.tlsValidated;
 	metadata.tlsSmokeSelfSignedBypass = response.tlsSmokeSelfSignedBypass;
+	metadata.downgradeRedirectBlocked = response.downgradeRedirectBlocked;
+	metadata.insecureRedirectLocation = response.insecureRedirectLocation;
 	if (response.error != gxos::web::HttpError::None) {
 		metadata.errorStatus = gxos::web::httpErrorName(response.error);
 		if (!response.errorMessage.empty()) metadata.errorStatus += ": " + response.errorMessage;
@@ -3795,6 +3828,8 @@ WebDocument Navigator::loadHttpResponseDocument(const std::string& url, const gx
 			title = "Malformed Chunked Response";
 		} else if (response.error == gxos::web::HttpError::RedirectLimitExceeded) {
 			title = "Redirect Limit Exceeded";
+		} else if (response.error == gxos::web::HttpError::InsecureRedirectBlocked) {
+			title = "Insecure Redirect Blocked";
 		} else if (response.error == gxos::web::HttpError::BodyTooLarge) {
 			title = "Response Too Large";
 		} else if (response.error == gxos::web::HttpError::Timeout) {
@@ -3814,10 +3849,27 @@ WebDocument Navigator::loadHttpResponseDocument(const std::string& url, const gx
 		} else if (response.error == gxos::web::HttpError::TlsWriteFailed) {
 			title = "HTTPS Write Failed";
 		}
-		return finish(buildSimpleDocument(response.finalUrl.empty() ? url : response.finalUrl,
-			title,
-			title,
-			std::string(gxos::web::httpErrorName(response.error)) + ": " + response.errorMessage));
+		WebDocument doc;
+		doc.url = response.finalUrl.empty() ? url : response.finalUrl;
+		doc.title = title;
+		doc.blocks.push_back({BlockType::Heading, title, ""});
+		doc.blocks.push_back({BlockType::Paragraph,
+			response.error == gxos::web::HttpError::InsecureRedirectBlocked
+				? "Navigator blocked an HTTPS-to-HTTP redirect because it would continue navigation over an insecure connection."
+				: "Navigator could not load the requested URL.", ""});
+		doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Attempted URL", url), ""});
+		if (!response.insecureRedirectLocation.empty()) {
+			doc.blocks.push_back({BlockType::ListItem,
+				pageInfoLine("Attempted insecure Location", response.insecureRedirectLocation), ""});
+		}
+		doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Technical error",
+			std::string(gxos::web::httpErrorName(response.error)) + ": " + response.errorMessage), ""});
+		if (!response.tlsErrorCode.empty()) {
+			doc.blocks.push_back({BlockType::ListItem, pageInfoLine("TLS error code", response.tlsErrorCode), ""});
+		}
+		doc.blocks.push_back({BlockType::Link, "Page Info", "about:page-info"});
+		doc.blocks.push_back({BlockType::Link, "Go to about:navigator", "about:navigator"});
+		return finish(std::move(doc));
 	}
 
 	const std::string documentUrl = response.finalUrl.empty() ? url : response.finalUrl;

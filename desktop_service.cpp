@@ -686,6 +686,9 @@ namespace gxos {
             bool invalid = false;
             std::string behavior;
             std::string status;
+            // Phase 3 pilot flags (default-off; no runtime hook implemented yet)
+            bool pilotStartMenuNotepad = false;
+            bool pilotFallbackToLegacy = false;
         };
 
         static TypedDispatchCompileFlags typedDispatchCompileFlags() {
@@ -699,6 +702,13 @@ namespace gxos {
             flags.invalid = flags.shadowOnly && flags.enabled;
             flags.status = flags.invalid ? "WARN" : "OK";
             flags.behavior = "legacy-dispatch";
+            // Phase 3 pilot compile-flag discovery (default-off; scaffolding only)
+#if defined(GXOS_APPMODEL_TYPED_DISPATCH_PILOT_START_MENU_NOTEPAD)
+            flags.pilotStartMenuNotepad = true;
+#endif
+#if defined(GXOS_APPMODEL_TYPED_DISPATCH_PILOT_FALLBACK_TO_LEGACY)
+            flags.pilotFallbackToLegacy = true;
+#endif
             return flags;
         }
 
@@ -712,6 +722,22 @@ namespace gxos {
                 << " discoveryOnly=true";
             if (flags.invalid) oss << " invalidConfiguration=true";
             oss << "\n";
+            return oss.str();
+        }
+
+        // Phase 3 pilot scaffolding status line (default-off; no runtime hook implemented)
+        // All markers are default-off in normal builds. Flags feed no typed dispatch into launch.
+        static std::string phase3PilotSummaryLine() {
+            const TypedDispatchCompileFlags flags = typedDispatchCompileFlags();
+            std::ostringstream oss;
+            oss << "appModelPhase3PilotCandidate=StartMenuNotepad"
+                << " appModelPhase3PilotStartMenuNotepadFlag=" << (flags.pilotStartMenuNotepad ? "ON" : "OFF")
+                << " appModelPhase3PilotFallbackToLegacyFlag=" << (flags.pilotFallbackToLegacy ? "ON" : "OFF")
+                << " appModelPhase3PilotEnabled=false"
+                << " appModelPhase3PilotFeedsTypedDispatchIntoLaunch=false"
+                << " appModelPhase3PilotRuntimeLaunchBehaviorChanged=false"
+                << " appModelPhase3PilotScopedToStartMenuNotepad=true"
+                << " appModelPhase3PilotDefaultBuildSafe=true\n";
             return oss.str();
         }
 
@@ -1763,6 +1789,7 @@ namespace gxos {
                 << " writesStorage=false\n";
             oss << launchTargetTypeCoverageSummaryLine();
             oss << typedDispatchCompileFlagsSummaryLine();
+            oss << phase3PilotSummaryLine();
             oss << "overall: " << statusText(overallOk) << "\n";
             oss << "detailCommands: desktop.appmodel.coverage, desktop.apps.verbose, desktop.launch.compare, desktop.launch.storage, desktop.launch.storage.preview, desktop.launch.storage.preview.compare, desktop.launch.types\n";
             return oss.str();
@@ -2950,6 +2977,18 @@ namespace gxos {
             oss << "  .\\build.ps1 -Arch amd64\n";
             oss << "  .\\scripts\\smoke-appmodel-launchshadow.ps1 -TimeoutSeconds 35\n";
             oss << "note: report-only; this command does not enable GXOS_APPMODEL_TYPED_DISPATCH_SHADOW_ONLY or GXOS_APPMODEL_TYPED_DISPATCH_ENABLED\n";
+
+            // Phase 3 pilot scaffolding markers (default-off; discovery/evidence only)
+            oss << "[AppModelPhase3PilotScaffolding]\n";
+            oss << "appModelPhase3PilotCandidate=StartMenuNotepad\n";
+            oss << "appModelPhase3PilotStartMenuNotepadFlag=" << (typedDispatchFlags.pilotStartMenuNotepad ? "ON" : "OFF") << "\n";
+            oss << "appModelPhase3PilotFallbackToLegacyFlag=" << (typedDispatchFlags.pilotFallbackToLegacy ? "ON" : "OFF") << "\n";
+            oss << "appModelPhase3PilotEnabled=false\n";
+            oss << "appModelPhase3PilotFeedsTypedDispatchIntoLaunch=false\n";
+            oss << "appModelPhase3PilotRuntimeLaunchBehaviorChanged=false\n";
+            oss << "appModelPhase3PilotScopedToStartMenuNotepad=true\n";
+            oss << "appModelPhase3PilotDefaultBuildSafe=true\n";
+            oss << "note: Phase 3 pilot scaffolding only; runtime hook not implemented; typed dispatch not fed into any launch path\n";
             return oss.str();
         }
 

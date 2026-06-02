@@ -301,9 +301,20 @@ struct HostedTlsByteStreamContext {
 	bool contextReady = false;
 	bool closed = false;
 	bool smokeSelfSignedBypass = false;
+	bool validated = false;
 	HttpError lastError = HttpError::None;
 	std::string lastErrorMessage;
+	std::string lastErrorCode;
 	std::string certificateValidation = "enabled";
+	std::string certificateSubject = "unavailable";
+	std::string certificateIssuer = "unavailable";
+	std::string certificateValidFrom = "unavailable";
+	std::string certificateValidTo = "unavailable";
+	std::string certificateHostname = "unavailable";
+	std::string certificateHostnameValidation = "unavailable";
+	std::string certificateChainError = "unavailable";
+	std::string protocol = "unavailable";
+	std::string cipherSuite = "unavailable";
 	std::string status = "not started";
 	std::vector<uint8_t> encrypted;
 	std::vector<uint8_t> plaintext;
@@ -317,15 +328,93 @@ static std::string securityStatusHex(SECURITY_STATUS status)
 	return out.str();
 }
 
+static std::string windowsStatusHex(DWORD status)
+{
+	std::ostringstream out;
+	out << "0x" << std::hex << std::uppercase << status;
+	return out.str();
+}
+
 static void setTlsError(HostedTlsByteStreamContext& tls, HttpError error,
 	const std::string& message, SECURITY_STATUS status = SEC_E_OK)
 {
 	tls.lastError = error;
 	tls.lastErrorMessage = message;
 	if (status != SEC_E_OK) {
+		tls.lastErrorCode = securityStatusHex(status);
 		tls.lastErrorMessage += " (Schannel " + securityStatusHex(status) + ")";
 	}
 	tls.status = "error";
+}
+
+static std::string certificateDisplayName(PCCERT_CONTEXT certificate, DWORD flags)
+{
+	DWORD count = CertGetNameStringA(certificate, CERT_NAME_SIMPLE_DISPLAY_TYPE,
+		flags, nullptr, nullptr, 0);
+	if (count <= 1) return "unavailable";
+	std::vector<char> name(count);
+	if (CertGetNameStringA(certificate, CERT_NAME_SIMPLE_DISPLAY_TYPE,
+		flags, nullptr, name.data(), count) <= 1) {
+		return "unavailable";
+	}
+	return std::string(name.data());
+}
+
+static std::string fileTimeUtc(const FILETIME& value)
+{
+	SYSTEMTIME utc = {};
+	if (!FileTimeToSystemTime(&value, &utc)) return "unavailable";
+	std::ostringstream out;
+	out << std::setfill('0')
+		<< std::setw(4) << utc.wYear << "-"
+		<< std::setw(2) << utc.wMonth << "-"
+		<< std::setw(2) << utc.wDay << " "
+		<< std::setw(2) << utc.wHour << ":"
+		<< std::setw(2) << utc.wMinute << ":"
+		<< std::setw(2) << utc.wSecond << " UTC";
+	return out.str();
+}
+
+static std::string wideAscii(const WCHAR* value)
+{
+	std::string text;
+	for (size_t i = 0; value && value[i] != L'\0'; ++i) {
+		const WCHAR ch = value[i];
+		text.push_back(ch <= 0x7f ? static_cast<char>(ch) : '?');
+	}
+	return text;
+}
+
+static std::string tlsProtocolName(DWORD protocol)
+{
+	switch (protocol) {
+	case SP_PROT_TLS1_0_CLIENT: return "TLS 1.0";
+	case SP_PROT_TLS1_1_CLIENT: return "TLS 1.1";
+	case SP_PROT_TLS1_2_CLIENT: return "TLS 1.2";
+	case SP_PROT_TLS1_3_CLIENT: return "TLS 1.3";
+	default: return "unavailable";
+	}
+}
+
+static void captureHostedTlsConnectionInfo(HostedTlsByteStreamContext& tls)
+{
+	SecPkgContext_ConnectionInfo connection = {};
+	if (QueryContextAttributes(&tls.securityContext,
+		SECPKG_ATTR_CONNECTION_INFO, &connection) == SEC_E_OK) {
+		tls.protocol = tlsProtocolName(connection.dwProtocol);
+		std::ostringstream cipher;
+		cipher << "algorithm " << windowsStatusHex(connection.aiCipher)
+			<< " (" << connection.dwCipherStrength << " bits)";
+		tls.cipherSuite = cipher.str();
+	}
+
+	SecPkgContext_CipherInfo cipher = {};
+	cipher.dwVersion = SECPKGCONTEXT_CIPHERINFO_V1;
+	if (QueryContextAttributes(&tls.securityContext,
+		SECPKG_ATTR_CIPHER_INFO, &cipher) == SEC_E_OK) {
+		const std::string suite = wideAscii(cipher.szCipherSuite);
+		if (!suite.empty()) tls.cipherSuite = suite;
+	}
 }
 
 static bool tcpWriteAll(HttpByteStream& stream, const uint8_t* bytes, size_t byteCount)
@@ -356,6 +445,12 @@ static bool verifyHostedTlsCertificate(HostedTlsByteStreamContext& tls, const st
 			"TLS certificate validation failed because the server certificate was unavailable.", query);
 		return false;
 	}
+	tls.certificateSubject = certificateDisplayName(certificate, 0);
+	tls.certificateIssuer = certificateDisplayName(certificate, CERT_NAME_ISSUER_FLAG);
+	tls.certificateValidFrom = fileTimeUtc(certificate->pCertInfo->NotBefore);
+	tls.certificateValidTo = fileTimeUtc(certificate->pCertInfo->NotAfter);
+	tls.certificateHostname = hostname;
+	tls.certificateHostnameValidation = "pending";
 
 	CERT_CHAIN_PARA chainParameters = {};
 	chainParameters.cbSize = sizeof(chainParameters);
@@ -363,6 +458,7 @@ static bool verifyHostedTlsCertificate(HostedTlsByteStreamContext& tls, const st
 	BOOL chainOk = CertGetCertificateChain(nullptr, certificate, nullptr,
 		certificate->hCertStore, &chainParameters, 0, nullptr, &chain);
 	if (!chainOk || !chain) {
+		tls.lastErrorCode = windowsStatusHex(GetLastError());
 		CertFreeCertificateContext(certificate);
 		setTlsError(tls, HttpError::TlsCertificateValidationFailed,
 			"TLS certificate validation failed while building the Windows certificate chain.");
@@ -384,19 +480,28 @@ static bool verifyHostedTlsCertificate(HostedTlsByteStreamContext& tls, const st
 		chain, &policyParameters, &policyStatus);
 
 	bool accepted = policyOk && policyStatus.dwError == 0;
+	tls.certificateChainError = policyStatus.dwError == 0
+		? "none" : windowsStatusHex(policyStatus.dwError);
+	if (accepted) {
+		tls.validated = true;
+		tls.certificateHostnameValidation = "valid";
+	}
 	if (!accepted && allowSmokeSelfSignedLocalhost(hostname) &&
 		policyStatus.dwError == static_cast<DWORD>(CERT_E_UNTRUSTEDROOT)) {
 		accepted = true;
 		tls.smokeSelfSignedBypass = true;
+		tls.certificateHostnameValidation = "valid";
 		tls.certificateValidation = "enabled; smoke-only localhost self-signed bypass active";
 	}
 
 	if (!accepted) {
 		const DWORD error = policyStatus.dwError;
+		tls.lastErrorCode = windowsStatusHex(error);
 		std::ostringstream detail;
 		detail << "TLS certificate validation failed for " << hostname
 			<< " (Windows trust error 0x" << std::hex << std::uppercase << error << ").";
 		if (error == static_cast<DWORD>(CERT_E_CN_NO_MATCH)) {
+			tls.certificateHostnameValidation = "invalid";
 			setTlsError(tls, HttpError::TlsCertificateHostnameMismatch,
 				"TLS certificate hostname mismatch for " + hostname + ".");
 		} else if (error == static_cast<DWORD>(CERT_E_EXPIRED) ||
@@ -538,6 +643,7 @@ static bool hostedTlsHandshake(HostedTlsByteStreamContext& tls, const std::strin
 			"TLS handshake completed but Schannel stream sizes were unavailable.", status);
 		return false;
 	}
+	captureHostedTlsConnectionInfo(tls);
 	if (!verifyHostedTlsCertificate(tls, hostname)) return false;
 	tls.status = "connected";
 	return true;
@@ -665,9 +771,21 @@ static bool createHostedTlsStream(HostedTlsByteStreamContext& context,
 static void copyTlsDiagnostics(HttpResponse& response, const HostedTlsByteStreamContext& tls)
 {
 	response.tlsBackend = "Schannel hosted";
+	response.tlsEnabled = true;
+	response.tlsValidated = tls.validated;
 	response.tlsCertificateValidation = tls.certificateValidation;
 	response.tlsStatus = tls.status;
 	response.tlsError = tls.lastErrorMessage;
+	response.tlsErrorCode = tls.lastErrorCode;
+	response.tlsCertificateSubject = tls.certificateSubject;
+	response.tlsCertificateIssuer = tls.certificateIssuer;
+	response.tlsCertificateValidFrom = tls.certificateValidFrom;
+	response.tlsCertificateValidTo = tls.certificateValidTo;
+	response.tlsCertificateHostname = tls.certificateHostname;
+	response.tlsCertificateHostnameValidation = tls.certificateHostnameValidation;
+	response.tlsCertificateChainError = tls.certificateChainError;
+	response.tlsProtocol = tls.protocol;
+	response.tlsCipherSuite = tls.cipherSuite;
 	response.tlsSmokeSelfSignedBypass = tls.smokeSelfSignedBypass;
 }
 #endif
@@ -777,6 +895,7 @@ const char* httpErrorName(HttpError error)
 	case HttpError::BodyTooLarge: return "BodyTooLarge";
 	case HttpError::MalformedResponse: return "MalformedResponse";
 	case HttpError::RedirectLimitExceeded: return "RedirectLimitExceeded";
+	case HttpError::InsecureRedirectBlocked: return "InsecureRedirectBlocked";
 	case HttpError::UnsupportedTransferEncoding: return "UnsupportedTransferEncoding";
 	case HttpError::UnsupportedContentEncoding: return "UnsupportedContentEncoding";
 	case HttpError::MalformedChunkedEncoding: return "MalformedChunkedEncoding";
@@ -1037,6 +1156,17 @@ static HttpResponse sendHttpRequestWithRedirects(const std::string& url,
 			setError(response,
 				parsedNext.scheme.empty() || isSupportedHttpScheme(parsedNext.scheme) ? HttpError::InvalidUrl : HttpError::UnsupportedScheme,
 				"Redirect Location is unsupported or invalid: " + location);
+			return response;
+		}
+		ParsedHttpUrl parsedCurrent = parseHttpUrl(currentUrl);
+		if (parsedCurrent.valid && parsedCurrent.scheme == "https" && parsedNext.scheme == "http") {
+			chain.push_back(nextUrl);
+			response.redirectCount = redirectCount + 1;
+			response.redirectChain = chain;
+			response.downgradeRedirectBlocked = true;
+			response.insecureRedirectLocation = nextUrl;
+			setError(response, HttpError::InsecureRedirectBlocked,
+				"Navigator blocked an insecure redirect from " + currentUrl + " to " + nextUrl + ".");
 			return response;
 		}
 		chain.push_back(nextUrl);

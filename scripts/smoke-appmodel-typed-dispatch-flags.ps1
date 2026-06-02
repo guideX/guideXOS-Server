@@ -146,9 +146,17 @@ try {
         $NormalExe = Join-Path $Root "guideXOSServer.exe"
         Write-Host "Checking normal hosted binary still reports default flags..."
         $normalOutput = Invoke-ServerCommands -ExePath $NormalExe -Commands @(
-            "desktop.appmodel.summary"
+            "desktop.appmodel.summary",
+            "desktop.appmodel.typed-dispatch-gate"
         )
         Assert-Contains $normalOutput "typedDispatchFlags: shadowOnly=OFF enabled=OFF behavior=legacy-dispatch status=OK discoveryOnly=true" "normal default flag line"
+        # Phase 3 pilot flags must be OFF in default build
+        Assert-Contains $normalOutput "appModelPhase3PilotStartMenuNotepadFlag=OFF" "Phase 3 pilot StartMenuNotepad flag default-off"
+        Assert-Contains $normalOutput "appModelPhase3PilotFallbackToLegacyFlag=OFF" "Phase 3 pilot FallbackToLegacy flag default-off"
+        Assert-Contains $normalOutput "appModelPhase3PilotEnabled=false" "Phase 3 pilot enabled=false"
+        Assert-Contains $normalOutput "appModelPhase3PilotFeedsTypedDispatchIntoLaunch=false" "Phase 3 pilot does not feed typed dispatch into launch"
+        Assert-Contains $normalOutput "appModelPhase3PilotRuntimeLaunchBehaviorChanged=false" "Phase 3 pilot does not change runtime launch behavior"
+        Assert-Contains $normalOutput "appModelPhase3PilotDefaultBuildSafe=true" "Phase 3 pilot default-build-safe"
     }
 
     $reportLines = @(
@@ -164,6 +172,14 @@ try {
     }
     $reportLines += "normalDefaultChecked=$((-not $SkipNormalCheck).ToString().ToLowerInvariant())"
     $reportLines += "normalDefaultLine=typedDispatchFlags: shadowOnly=OFF enabled=OFF behavior=legacy-dispatch status=OK discoveryOnly=true"
+    $reportLines += "appModelPhase3PilotCandidate=StartMenuNotepad"
+    $reportLines += "appModelPhase3PilotStartMenuNotepadFlag=OFF"
+    $reportLines += "appModelPhase3PilotFallbackToLegacyFlag=OFF"
+    $reportLines += "appModelPhase3PilotEnabled=false"
+    $reportLines += "appModelPhase3PilotFeedsTypedDispatchIntoLaunch=false"
+    $reportLines += "appModelPhase3PilotRuntimeLaunchBehaviorChanged=false"
+    $reportLines += "appModelPhase3PilotScopedToStartMenuNotepad=true"
+    $reportLines += "appModelPhase3PilotDefaultBuildSafe=true"
     $reportLines += "result=PASS"
     $report = $reportLines -join [Environment]::NewLine
 

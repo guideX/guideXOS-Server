@@ -41,6 +41,39 @@
 #include "../../icon_theme_manager.h"
 #endif
 
+// ------------------------------------------------------------
+// Phase 3 typed-dispatch pilot compile-flag discovery
+// (default-off; scaffolding/evidence only; no runtime hook)
+//
+// GXOS_APPMODEL_TYPED_DISPATCH_PILOT_START_MENU_NOTEPAD
+//   Future bare-metal-only pilot flag, scoped to label == "Notepad"
+//   inside show_start_menu_notification(). Not defined in normal builds.
+//   When defined: would enable the first typed-dispatch pilot hook.
+//   Status: OFF in default build. Runtime hook not implemented yet.
+//
+// GXOS_APPMODEL_TYPED_DISPATCH_PILOT_FALLBACK_TO_LEGACY
+//   Required companion flag for any typed-dispatch pilot path.
+//   Guarantees fallback to legacy dispatch on unresolved, unsupported,
+//   empty (target.dispatchLaunchName[0] != '\0' check fails), stale,
+//   malformed, or unexpected-mismatch cases.
+//   Not defined in normal builds.
+//   Status: OFF in default build. Runtime hook not implemented yet.
+//
+// Neither flag feeds typed dispatch into any launch path in this pass.
+// Neither flag changes runtime behavior of show_start_menu_notification(),
+// try_launch_kernel_app(), AppManager::launchApp(), or launchAppWithParam().
+// ------------------------------------------------------------
+#if defined(GXOS_APPMODEL_TYPED_DISPATCH_PILOT_START_MENU_NOTEPAD)
+// Phase 3 pilot flag GXOS_APPMODEL_TYPED_DISPATCH_PILOT_START_MENU_NOTEPAD is defined.
+// Scaffolding only: no runtime hook is wired in this pass.
+// appModelPhase3PilotStartMenuNotepadFlag=ON (non-default build only)
+#endif
+#if defined(GXOS_APPMODEL_TYPED_DISPATCH_PILOT_FALLBACK_TO_LEGACY)
+// Phase 3 pilot flag GXOS_APPMODEL_TYPED_DISPATCH_PILOT_FALLBACK_TO_LEGACY is defined.
+// Scaffolding only: no runtime hook is wired in this pass.
+// appModelPhase3PilotFallbackToLegacyFlag=ON (non-default build only)
+#endif
+
 #if defined(_MSC_VER)
 #include <intrin.h>  // For MSVC intrinsics (__outbyte, __halt, etc.)
 #endif

@@ -43,6 +43,7 @@ EXPECTED_FORM_BODY = b"q=posted+value&agree=yes&kind=alpha&note=hello%0Asecond+l
 class NavigatorSmokeHandler(BaseHTTPRequestHandler):
     root = Path.cwd()
     https_port = None
+    http_port = None
 
     def log_message(self, fmt, *args):
         print("%s - - %s" % (self.address_string(), fmt % args), flush=True)
@@ -137,6 +138,14 @@ class NavigatorSmokeHandler(BaseHTTPRequestHandler):
                 self.write_redirect(302, f"https://localhost:{self.https_port}/navigator-smoke/final.html")
             else:
                 self.write_redirect(302, "https://example.com/secure")
+            return
+        if path == "/navigator-smoke/redirect-downgrade":
+            port = self.http_port or 8080
+            self.write_redirect(302, f"http://127.0.0.1:{port}/navigator-smoke/insecure-downgrade")
+            return
+        if path == "/navigator-smoke/insecure-downgrade":
+            self.write_bytes(200, "text/html; charset=utf-8",
+                             b"<html><body><h1>Insecure downgrade target reached</h1></body></html>")
             return
         if path == "/navigator-smoke/chunked.html":
             chunks = [b"<html><body><h1>Chunked Kernel HTML</h1>", b"<p>decoded chunk body</p></body></html>"]
@@ -279,11 +288,13 @@ def main():
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=8080)
     parser.add_argument("--https-port", type=int)
+    parser.add_argument("--http-port", type=int)
     parser.add_argument("--tls-cert")
     parser.add_argument("--tls-key")
     args = parser.parse_args()
     NavigatorSmokeHandler.root = Path(args.root).resolve()
     NavigatorSmokeHandler.https_port = args.https_port
+    NavigatorSmokeHandler.http_port = args.http_port
     server = ThreadingHTTPServer((args.host, args.port), NavigatorSmokeHandler)
     if args.tls_cert or args.tls_key:
         if not args.tls_cert or not args.tls_key:

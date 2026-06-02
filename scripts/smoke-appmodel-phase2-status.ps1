@@ -249,6 +249,20 @@ try {
         } else {
             Add-Check "taskbarAudit" "FAIL" "desktop.launch.storage did not preserve the audited taskbar window-management-only inventory"
         }
+
+        # Phase 3 pilot scaffolding default-off assertions
+        $phase3PilotMarkersOk =
+            (Text-Contains -Output $hostedOutput -Needle "appModelPhase3PilotStartMenuNotepadFlag=OFF") -and
+            (Text-Contains -Output $hostedOutput -Needle "appModelPhase3PilotFallbackToLegacyFlag=OFF") -and
+            (Text-Contains -Output $hostedOutput -Needle "appModelPhase3PilotEnabled=false") -and
+            (Text-Contains -Output $hostedOutput -Needle "appModelPhase3PilotFeedsTypedDispatchIntoLaunch=false") -and
+            (Text-Contains -Output $hostedOutput -Needle "appModelPhase3PilotRuntimeLaunchBehaviorChanged=false") -and
+            (Text-Contains -Output $hostedOutput -Needle "appModelPhase3PilotDefaultBuildSafe=true")
+        if ($phase3PilotMarkersOk) {
+            Add-Check "phase3PilotScaffoldingDefaultOff" "PASS" "all Phase 3 pilot flags OFF; no typed dispatch fed into launch; runtime behavior unchanged"
+        } else {
+            Add-Check "phase3PilotScaffoldingDefaultOff" "FAIL" "one or more Phase 3 pilot default-off markers missing from hosted output"
+        }
     } catch {
         Add-Check "hostedDiagnostics" "FAIL" $_.Exception.Message
     }
@@ -426,6 +440,16 @@ try {
         "appModelPhase3RejectedCandidates=$phase3RejectedCandidates",
         "appModelPhase3KnownDriftsPreservedAsNonfatal=true",
         "appModelPhase3Note=planning-readiness-only; typed dispatch not enabled; no runtime behavior changed",
+        "[AppModelPhase3PilotScaffolding]",
+        "appModelPhase3PilotCandidate=StartMenuNotepad",
+        "appModelPhase3PilotStartMenuNotepadFlag=OFF",
+        "appModelPhase3PilotFallbackToLegacyFlag=OFF",
+        "appModelPhase3PilotEnabled=false",
+        "appModelPhase3PilotFeedsTypedDispatchIntoLaunch=false",
+        "appModelPhase3PilotRuntimeLaunchBehaviorChanged=false",
+        "appModelPhase3PilotScopedToStartMenuNotepad=true",
+        "appModelPhase3PilotDefaultBuildSafe=true",
+        "appModelPhase3PilotScaffoldingNote=default-off scaffolding only; runtime hook not implemented; no launch path changed",
         "checks:"
     )
     foreach ($check in $Checks) {

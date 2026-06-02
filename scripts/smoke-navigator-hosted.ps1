@@ -47,7 +47,7 @@ $httpsErrLog = Join-Path $LogDir "navigator-hosted-https-$stamp.err.log"
 $tlsCert = Join-Path $Root "scripts\fixtures\navigator-smoke-localhost.crt"
 $tlsKey = Join-Path $Root "scripts\fixtures\navigator-smoke-localhost.key"
 $httpsArgs = @("`"$httpServer`"", "--port", "8443", "--host", "127.0.0.1", "--root", "`"$Root`"",
-    "--tls-cert", "`"$tlsCert`"", "--tls-key", "`"$tlsKey`"")
+    "--http-port", "8080", "--tls-cert", "`"$tlsCert`"", "--tls-key", "`"$tlsKey`"")
 $httpsProc = Start-Process -FilePath $python -ArgumentList $httpsArgs -PassThru -WindowStyle Hidden -RedirectStandardOutput $httpsLog -RedirectStandardError $httpsErrLog
 Start-Sleep -Milliseconds 500
 if ($httpProc.HasExited) {
