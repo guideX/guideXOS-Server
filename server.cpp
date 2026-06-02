@@ -50,6 +50,7 @@
 #include "gui_protocol.h"
 #include "vfs.h"
 #include "gxm_loader.h"
+#include "gxos_tls_prerequisites.h"
 #include "desktop_config.h"
 #include "desktop_service.h"
 #include "notepad.h"
@@ -159,6 +160,28 @@ static std::string navigatorHostedSmokeDiagnostic() {
     out << "timestamp_ms=" << gxos::ticks() << "\n";
     out << "build_mode=hosted/compositor\n";
 
+    uint8_t randomA[32] = {};
+    uint8_t randomB[32] = {};
+    const bool randomAOk = gxos::gxos_random_bytes(randomA, sizeof(randomA));
+    const bool randomBOk = gxos::gxos_random_bytes(randomB, sizeof(randomB));
+    bool randomDiffers = randomAOk && randomBOk;
+    if (randomDiffers) {
+        randomDiffers = false;
+        for (size_t i = 0; i < sizeof(randomA); ++i) {
+            if (randomA[i] != randomB[i]) {
+                randomDiffers = true;
+                break;
+            }
+        }
+    }
+    int64_t wallClockSeconds = 0;
+    const bool wallClockOk = gxos::gxos_wall_clock_unix_seconds(&wallClockSeconds);
+    add("hosted RNG quality Secure", gxos::gxos_random_quality() == gxos::GxosRandomQuality::Secure,
+        gxos::gxos_random_backend());
+    add("hosted RNG reads differ", randomDiffers, randomDiffers ? "two 32-byte reads differ" : "system RNG read failed or repeated");
+    add("hosted wall clock Verified", gxos::gxos_wall_clock_status() == gxos::GxosClockStatus::Verified && wallClockOk,
+        gxos::gxos_wall_clock_backend() + std::string(" epoch=") + std::to_string(wallClockSeconds));
+
     const std::string inspect = gxos::gui::DesktopService::InspectNativeAppPipeline("guideXOS Navigator");
     add("app id resolves", contains(inspect, "appId: guidexos.navigator"), "expected guidexos.navigator");
     add("launch resolution succeeds", contains(inspect, "resolverSuccess: true"), "DesktopService resolver");
@@ -248,6 +271,9 @@ static std::string navigatorHostedSmokeDiagnostic() {
     add("TLS insertion seam active", contains(runtimeReport, "Capabilities.TLS insertion seam=active HttpByteStream wrapper"), "expected active TLS wrapper");
     add("HTTPS downgrade redirect blocked by default", contains(runtimeReport, "Capabilities.HTTPS-to-HTTP redirect policy=blocked by default"), "expected hosted downgrade policy");
     add("bare-metal TLS remains unsupported", contains(runtimeReport, "Capabilities.Bare-metal TLS=unsupported"), "expected honest bare-metal boundary");
+    add("runtime RNG quality Secure", contains(runtimeReport, "TLS Prerequisites.RNG quality=Secure"), "expected BCrypt-backed system RNG");
+    add("runtime wall clock Verified", contains(runtimeReport, "TLS Prerequisites.Wall-clock status=Verified"), "expected Windows system UTC");
+    add("runtime TLS readiness boundary", contains(runtimeReport, "TLS Prerequisites.TLS readiness=HTTPS hosted: Schannel enabled; HTTPS bare-metal: unsupported, waiting on RNG/clock/TLS backend/root store"), "expected hosted enabled and bare-metal prerequisites visible");
     add("remote PNG enabled", contains(runtimeReport, "Capabilities.Remote PNG=enabled"), "expected enabled");
     add("downloads enabled", contains(runtimeReport, "Capabilities.Downloads=enabled"), "expected enabled");
     add("CSS-lite enabled", contains(runtimeReport, "Capabilities.CSS-lite embedded <style>=enabled"), "expected enabled");

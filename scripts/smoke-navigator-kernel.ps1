@@ -116,6 +116,7 @@ $args = @(
     "-display", "none",
     "-serial", "file:`"$serialLog`"",
     "-no-reboot",
+    "-rtc", "base=utc,clock=host",
     "-netdev", "user,id=net0",
     "-device", "e1000,netdev=net0"
 )
@@ -181,6 +182,12 @@ $checks = @(
     "[NAVIGATOR-SMOKE] capability.find_in_page=unsupported in bare-metal adapter",
     "[NAVIGATOR-SMOKE] capability.external_stylesheets=unsupported",
     "[NAVIGATOR-SMOKE] capability.bookmark_persistence=unavailable; in-memory defaults only",
+    "[NAVIGATOR-SMOKE] tls_prereq.rng_quality=Unavailable",
+    "[NAVIGATOR-SMOKE] tls_prereq.rng_backend=none (secure entropy unavailable; virtio-rng driver pending)",
+    "[NAVIGATOR-SMOKE] tls_prereq.rng_fail_closed=true",
+    "[NAVIGATOR-SMOKE] tls_prereq.wall_clock_status=Plausible",
+    "[NAVIGATOR-SMOKE] tls_prereq.wall_clock_backend=CMOS RTC (interpreted as UTC)",
+    "[NAVIGATOR-SMOKE] tls_readiness=HTTPS bare-metal unsupported, waiting on RNG/clock/TLS backend/root store",
     "[NAVIGATOR-SMOKE] https.case.direct_unsupported.requested_url=https://example.com/",
     "[NAVIGATOR-SMOKE] https.case.direct_unsupported.final_url=https://example.com/",
     "[NAVIGATOR-SMOKE] https.case.direct_unsupported.error=HTTPS/TLS unsupported",
@@ -243,6 +250,12 @@ $checks = @(
 $failed = @()
 foreach ($check in $checks) {
     if (-not $output.Contains($check)) { $failed += $check }
+}
+if (-not [regex]::IsMatch($output, '\[NAVIGATOR-SMOKE\] tls_prereq\.wall_clock_epoch=[1-9][0-9]+')) {
+    $failed += "[NAVIGATOR-SMOKE] tls_prereq.wall_clock_epoch=<positive Unix seconds>"
+}
+if (-not [regex]::IsMatch($output, '\[NAVIGATOR-SMOKE\] tls_prereq\.wall_clock_utc=20[2-9][0-9]-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z')) {
+    $failed += "[NAVIGATOR-SMOKE] tls_prereq.wall_clock_utc=<plausible UTC date>"
 }
 
 if ($failed.Count -eq 0) {

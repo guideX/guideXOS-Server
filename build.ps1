@@ -493,6 +493,7 @@ if ($AllReady) {
                 "-vga", "std",
                 "-serial", "stdio",
                 "-no-reboot",
+                "-rtc", "base=utc,clock=host",
                 "-netdev", "user,id=net0",
                 "-device", "e1000,netdev=net0"
             )

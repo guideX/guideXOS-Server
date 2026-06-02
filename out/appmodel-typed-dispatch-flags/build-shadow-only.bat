@@ -25,7 +25,7 @@ if not defined CXX (
 
 echo Using compiler: %CXX%
 set CXXFLAGS=-std=c++17 -Wall -O2 -iquote . -DGXOS_APPMODEL_TYPED_DISPATCH_SHADOW_ONLY
-set LDFLAGS=-lws2_32 -lsecur32 -lcrypt32 -lgdi32 -luser32 -lmsimg32
+set LDFLAGS=-lws2_32 -lsecur32 -lcrypt32 -lbcrypt -lgdi32 -luser32 -lmsimg32
 
 REM Source files (exclude kernel)
 set SOURCES=^
@@ -55,6 +55,7 @@ fs.cpp ^
 gxapp_container.cpp ^
 gxapp_loader.cpp ^
 gxm_loader.cpp ^
+gxos_tls_prerequisites.cpp ^
 image.cpp ^
 image_adapter.cpp ^
 image_renderer.cpp ^

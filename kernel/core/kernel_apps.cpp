@@ -20,6 +20,7 @@
 #include "include/kernel/tcp.h"
 #include "include/kernel/dns.h"
 #include "../../built_in_app_metadata.h"
+#include "../../gxos_tls_prerequisites.h"
 #include "../../guide_web_http_shared.h"
 
 extern "C" void desktop_request_redraw();
@@ -5261,6 +5262,22 @@ void NavigatorApp::onKeyChar(char c)
     invalidate();
 }
 
+static void serial_put_dec64(uint64_t value) {
+    char buffer[24];
+    int index = 0;
+    if (value == 0) {
+        serial::putc('0');
+        return;
+    }
+    while (value > 0 && index < (int)(sizeof(buffer) - 1)) {
+        buffer[index++] = (char)('0' + (value % 10));
+        value /= 10;
+    }
+    while (index > 0) {
+        serial::putc(buffer[--index]);
+    }
+}
+
 void NavigatorApp::setStatus(const char* text)
 {
     strcopy(m_status, text ? text : "", MAX_STATUS_LEN);
@@ -5475,6 +5492,24 @@ static void nav_int_to_text(int value, char* out, int outSize)
     unsigned int v = neg ? (unsigned int)(-value) : (unsigned int)value;
     if (v == 0) tmp[pos++] = '0';
     while (v > 0 && pos < 15) {
+        tmp[pos++] = (char)('0' + (v % 10));
+        v /= 10;
+    }
+    int outPos = 0;
+    if (neg && outPos < outSize - 1) out[outPos++] = '-';
+    while (pos > 0 && outPos < outSize - 1) out[outPos++] = tmp[--pos];
+    out[outPos] = '\0';
+}
+
+static void nav_i64_to_text(int64_t value, char* out, int outSize)
+{
+    if (!out || outSize <= 0) return;
+    char tmp[24];
+    int pos = 0;
+    bool neg = value < 0;
+    uint64_t v = neg ? static_cast<uint64_t>(-(value + 1)) + 1 : static_cast<uint64_t>(value);
+    if (v == 0) tmp[pos++] = '0';
+    while (v > 0 && pos < (int)(sizeof(tmp) - 1)) {
         tmp[pos++] = (char)('0' + (v % 10));
         v /= 10;
     }
@@ -5704,7 +5739,6 @@ void NavigatorApp::buildRuntimeDocument()
 
     addBlock(BLOCK_HEADING, "Capabilities");
     addBlock(BLOCK_LIST_ITEM, "File read: enabled through VFS");
-    addBlock(BLOCK_LIST_ITEM, "File write: unavailable for bookmark persistence in this adapter");
     addBlock(BLOCK_LIST_ITEM, "Local PNG: enabled through shared ImageAdapter where VFS image data exists");
     addBlock(BLOCK_LIST_ITEM, "HTTP: enabled for numeric IPv4 and hostname HTTP/1.0 GET/POST with redirects and chunked decoding");
     addBlock(BLOCK_LIST_ITEM, "DNS: enabled-basic for A/IPv4 records");
@@ -5712,17 +5746,13 @@ void NavigatorApp::buildRuntimeDocument()
     addBlock(BLOCK_LIST_ITEM, "HTTP chunked transfer decoding: enabled");
     addBlock(BLOCK_LIST_ITEM, "Remote PNG: enabled-basic for numeric IPv4 and hostname http:// PNG images");
     addBlock(BLOCK_LIST_ITEM, "Downloads: unavailable for bare-metal HTTP v0.1");
-    addBlock(BLOCK_LIST_ITEM, "Temp files: unsupported");
     addBlock(BLOCK_LIST_ITEM, "Bookmark persistence: unavailable; bookmarks are in-memory defaults");
     addBlock(BLOCK_LIST_ITEM, "HTTPS/TLS: unsupported");
     addBlock(BLOCK_LIST_ITEM, "TLS backend: none");
     addBlock(BLOCK_LIST_ITEM, "TLS insertion seam: prepared");
-    addBlock(BLOCK_LIST_ITEM, "Direct https unsupported smoke: covered");
-    addBlock(BLOCK_LIST_ITEM, "HTTP-to-HTTPS redirect unsupported smoke: covered");
     addBlock(BLOCK_LIST_ITEM, "CSS-lite embedded <style>: enabled");
     addBlock(BLOCK_LIST_ITEM, "Forms-lite GET forms: enabled through interactive document controls");
     addBlock(BLOCK_LIST_ITEM, "Forms-lite POST forms hosted: enabled in authoritative hosted Navigator path");
-    addBlock(BLOCK_LIST_ITEM, "Forms-lite interactive controls: enabled");
     addBlock(BLOCK_LIST_ITEM, "Forms-lite POST interactive: enabled");
     addBlock(BLOCK_LIST_ITEM, "Forms-lite POST forms bare-metal: enabled-basic application/x-www-form-urlencoded transport");
     addBlock(BLOCK_LIST_ITEM, "Forms-lite POST redirect policy: 303 becomes GET; 301/302/307/308 preserve POST");
@@ -5737,6 +5767,35 @@ void NavigatorApp::buildRuntimeDocument()
         addBlock(BLOCK_LIST_ITEM, clipboardLine);
     }
     addBlock(BLOCK_LIST_ITEM, "External stylesheets: unsupported");
+
+    addBlock(BLOCK_HEADING, "TLS Prerequisites");
+    char prerequisiteLine[MAX_BLOCK_TEXT];
+    int64_t wallClockSeconds = 0;
+    char wallClockUtc[32];
+    const bool wallClockAvailable = gxos::gxos_wall_clock_unix_seconds(&wallClockSeconds);
+    const bool wallClockUtcAvailable = gxos::gxos_wall_clock_utc_text(wallClockUtc, sizeof(wallClockUtc));
+    strcopy(prerequisiteLine, "RNG: quality=", sizeof(prerequisiteLine));
+    strappend(prerequisiteLine, gxos::gxos_random_quality_name(gxos::gxos_random_quality()), sizeof(prerequisiteLine));
+    strappend(prerequisiteLine, "; backend=", sizeof(prerequisiteLine));
+    strappend(prerequisiteLine, gxos::gxos_random_backend(), sizeof(prerequisiteLine));
+    addBlock(BLOCK_LIST_ITEM, prerequisiteLine);
+    strcopy(prerequisiteLine, "Wall clock: status=", sizeof(prerequisiteLine));
+    strappend(prerequisiteLine, gxos::gxos_wall_clock_status_name(gxos::gxos_wall_clock_status()), sizeof(prerequisiteLine));
+    strappend(prerequisiteLine, "; backend=", sizeof(prerequisiteLine));
+    strappend(prerequisiteLine, gxos::gxos_wall_clock_backend(), sizeof(prerequisiteLine));
+    addBlock(BLOCK_LIST_ITEM, prerequisiteLine);
+    strcopy(prerequisiteLine, "Wall clock time: epoch=", sizeof(prerequisiteLine));
+    if (wallClockAvailable) {
+        char epoch[24];
+        nav_i64_to_text(wallClockSeconds, epoch, sizeof(epoch));
+        strappend(prerequisiteLine, epoch, sizeof(prerequisiteLine));
+    } else {
+        strappend(prerequisiteLine, "(unavailable)", sizeof(prerequisiteLine));
+    }
+    strappend(prerequisiteLine, "; utc=", sizeof(prerequisiteLine));
+    strappend(prerequisiteLine, wallClockUtcAvailable ? wallClockUtc : "(unavailable)", sizeof(prerequisiteLine));
+    addBlock(BLOCK_LIST_ITEM, prerequisiteLine);
+    addBlock(BLOCK_LIST_ITEM, "TLS readiness: HTTPS bare-metal unsupported, waiting on RNG/clock/TLS backend/root store");
 
     addBlock(BLOCK_HEADING, "Backends");
     addBlock(BLOCK_LIST_ITEM, "File backend: kernel VFS");
@@ -9045,6 +9104,17 @@ static bool printNavigatorInteractiveFormsLiteGetSmokeCase()
 static bool printNavigatorRuntimeSmokePreamble()
 {
     bool registered = app::AppManager::isAppAvailable("guideXOS Navigator");
+    uint8_t rngProbe = 0xA5;
+    const bool rngRead = gxos::gxos_random_bytes(&rngProbe, sizeof(rngProbe));
+    const gxos::GxosRandomQuality rngQuality = gxos::gxos_random_quality();
+    int64_t wallClockSeconds = 0;
+    char wallClockUtc[32];
+    const bool wallClockAvailable = gxos::gxos_wall_clock_unix_seconds(&wallClockSeconds);
+    const gxos::GxosClockStatus wallClockStatus = gxos::gxos_wall_clock_status();
+    const bool wallClockUtcAvailable = gxos::gxos_wall_clock_utc_text(wallClockUtc, sizeof(wallClockUtc));
+    const bool rngFailsClosed = !rngRead && rngProbe == 0xA5 && rngQuality == gxos::GxosRandomQuality::Unavailable;
+    const bool wallClockPlausible = wallClockAvailable &&
+        (wallClockStatus == gxos::GxosClockStatus::Plausible || wallClockStatus == gxos::GxosClockStatus::Verified);
     serial::puts("[NAVIGATOR-SMOKE] BEGIN\n");
     serial::puts("[NAVIGATOR-SMOKE] build_mode=bare-metal/kernel\n");
     serial::puts("[NAVIGATOR-SMOKE] registered=");
@@ -9079,7 +9149,23 @@ static bool printNavigatorRuntimeSmokePreamble()
     serial::puts("[NAVIGATOR-SMOKE] capability.find_in_page=unsupported in bare-metal adapter\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.external_stylesheets=unsupported\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.bookmark_persistence=unavailable; in-memory defaults only\n");
-    return registered;
+    serial::puts("[NAVIGATOR-SMOKE] tls_prereq.rng_quality=");
+    serial::puts(gxos::gxos_random_quality_name(rngQuality));
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.rng_backend=");
+    serial::puts(gxos::gxos_random_backend());
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.rng_fail_closed=");
+    serial::puts(rngFailsClosed ? "true" : "false");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.wall_clock_status=");
+    serial::puts(gxos::gxos_wall_clock_status_name(wallClockStatus));
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.wall_clock_backend=");
+    serial::puts(gxos::gxos_wall_clock_backend());
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.wall_clock_epoch=");
+    if (wallClockAvailable) serial_put_dec64(static_cast<uint64_t>(wallClockSeconds));
+    else serial::puts("(unavailable)");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.wall_clock_utc=");
+    serial::puts(wallClockUtcAvailable ? wallClockUtc : "(unavailable)");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_readiness=HTTPS bare-metal unsupported, waiting on RNG/clock/TLS backend/root store\n");
+    return registered && rngFailsClosed && wallClockPlausible && wallClockUtcAvailable;
 }
 
 static bool printNavigatorHttpSmokeCases()

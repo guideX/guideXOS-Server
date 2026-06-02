@@ -1,6 +1,7 @@
 #include "navigator.h"
 
 #include "gui_protocol.h"
+#include "gxos_tls_prerequisites.h"
 #include "kernel/core/include/kernel/image_adapter.h"
 #include "kernel/core/include/kernel/system_font.h"
 #include "ipc_bus.h"
@@ -760,6 +761,12 @@ namespace {
 		const std::string& tlsError,
 		bool tlsSmokeSelfSignedBypass)
 	{
+		const GxosRandomQuality randomQuality = gxos_random_quality();
+		const GxosClockStatus clockStatus = gxos_wall_clock_status();
+		int64_t wallClockSeconds = 0;
+		char wallClockUtc[32] = {};
+		const bool wallClockAvailable = gxos_wall_clock_unix_seconds(&wallClockSeconds);
+		const bool wallClockUtcAvailable = gxos_wall_clock_utc_text(wallClockUtc, sizeof(wallClockUtc));
 		return {
 			{"Runtime", "Mode", "hosted/compositor"},
 			{"Runtime", "Launch path", "AppRegistry -> DesktopService::LaunchApp -> apps::Navigator::Launch"},
@@ -808,6 +815,14 @@ namespace {
 			{"Backends", "File backend", "navigator_file_io hosted/VFS adapter"},
 			{"Backends", "HTTP backend", "guide_web_http hosted TCP byte-stream with Schannel TLS wrapper for https"},
 			{"Backends", "Image backend", "ImageAdapter + compositor drawImage path"},
+
+			{"TLS Prerequisites", "RNG quality", gxos_random_quality_name(randomQuality)},
+			{"TLS Prerequisites", "RNG backend", gxos_random_backend()},
+			{"TLS Prerequisites", "Wall-clock status", gxos_wall_clock_status_name(clockStatus)},
+			{"TLS Prerequisites", "Wall-clock backend", gxos_wall_clock_backend()},
+			{"TLS Prerequisites", "Wall-clock Unix seconds", wallClockAvailable ? std::to_string(wallClockSeconds) : "(unavailable)"},
+			{"TLS Prerequisites", "Wall-clock UTC", wallClockUtcAvailable ? wallClockUtc : "(unavailable)"},
+			{"TLS Prerequisites", "TLS readiness", "HTTPS hosted: Schannel enabled; HTTPS bare-metal: unsupported, waiting on RNG/clock/TLS backend/root store"},
 
 			{"Current Document", "URL", currentUrl.empty() ? "(none)" : currentUrl},
 			{"Current Document", "Title", currentTitle.empty() ? "(none)" : currentTitle},

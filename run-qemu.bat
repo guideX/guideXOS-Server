@@ -167,6 +167,7 @@ if "%SPLIT_PFLASH%"=="1" (
         -display gtk ^
         -vnc :0 ^
         -serial stdio ^
+        -rtc base=utc,clock=host ^
         -no-reboot
 ) else (
     echo Using combined pflash: OVMF.fd
@@ -181,6 +182,7 @@ if "%SPLIT_PFLASH%"=="1" (
         -display gtk ^
         -vnc :0 ^
         -serial stdio ^
+        -rtc base=utc,clock=host ^
         -no-reboot
 )
 

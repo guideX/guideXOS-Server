@@ -26,6 +26,18 @@ static uint8_t bcd_to_binary(uint8_t value)
 }
 
 #if ARCH_HAS_PORT_IO
+static bool is_leap_year(uint16_t year)
+{
+    return (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0);
+}
+
+static uint8_t days_in_month(uint16_t year, uint8_t month)
+{
+    static const uint8_t days[] = { 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
+    if (month == 2 && is_leap_year(year)) return 29;
+    return days[month - 1];
+}
+
 static uint8_t read_cmos(uint8_t reg)
 {
     arch::outb(CMOS_ADDR_PORT, static_cast<uint8_t>(0x80 | reg));
@@ -39,9 +51,9 @@ static bool rtc_update_in_progress()
 
 static bool valid_datetime(const DateTime& dt)
 {
-    if (dt.year < 2020 || dt.year > 2099) return false;
+    if (dt.year < 2024 || dt.year > 2100) return false;
     if (dt.month < 1 || dt.month > 12) return false;
-    if (dt.day < 1 || dt.day > 31) return false;
+    if (dt.day < 1 || dt.day > days_in_month(dt.year, dt.month)) return false;
     if (dt.hour > 23) return false;
     if (dt.minute > 59) return false;
     if (dt.second > 59) return false;
@@ -60,6 +72,7 @@ bool get_current_datetime(DateTime& out)
     uint8_t month = read_cmos(RTC_REG_MONTH);
     uint8_t year = read_cmos(RTC_REG_YEAR);
     uint8_t statusB = read_cmos(RTC_REG_STATUS_B);
+    bool stable = false;
 
     for (int attempt = 0; attempt < 3; attempt++) {
         for (int i = 0; i < 100000 && rtc_update_in_progress(); i++) {}
@@ -75,6 +88,7 @@ bool get_current_datetime(DateTime& out)
 
         if (second == second2 && minute == minute2 && hour == hour2 &&
             day == day2 && month == month2 && year == year2 && statusB == statusB2) {
+            stable = true;
             break;
         }
 
@@ -85,6 +99,10 @@ bool get_current_datetime(DateTime& out)
         month = month2;
         year = year2;
         statusB = statusB2;
+    }
+    if (!stable) {
+        serial::puts("[TIME] RTC did not stabilize\n");
+        return false;
     }
 
     bool binary = (statusB & RTC_BINARY) != 0;

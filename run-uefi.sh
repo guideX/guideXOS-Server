@@ -122,6 +122,7 @@ if [ "$SPLIT_PFLASH" = "1" ]; then
         -display gtk \
         -vnc :0 \
         -serial stdio \
+        -rtc base=utc,clock=host \
         -no-reboot
 else
     echo -e "${CYAN}Using combined pflash: OVMF.fd${NC}"
@@ -136,6 +137,7 @@ else
         -display gtk \
         -vnc :0 \
         -serial stdio \
+        -rtc base=utc,clock=host \
         -no-reboot
 fi
 

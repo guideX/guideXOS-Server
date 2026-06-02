@@ -594,6 +594,9 @@
     <ClInclude Include="navigator.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="gxos_tls_prerequisites.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="guide_web_http.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -1323,6 +1326,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="navigator.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="gxos_tls_prerequisites.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="guide_web_http.cpp">
