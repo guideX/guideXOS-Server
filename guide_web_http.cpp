@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdio>
 #include <cstdlib>
 #include <iomanip>
 #include <sstream>
@@ -300,12 +301,21 @@ struct HostedTlsByteStreamContext {
 	bool credentialsReady = false;
 	bool contextReady = false;
 	bool closed = false;
+	bool peerClosed = false;
 	bool smokeSelfSignedBypass = false;
 	bool validated = false;
+	bool credentialAcquired = false;
+	bool handshakeStarted = false;
 	HttpError lastError = HttpError::None;
 	std::string lastErrorMessage;
 	std::string lastErrorCode;
-	std::string certificateValidation = "enabled";
+	std::string connectionPath = "native Schannel stream";
+	std::string credentialApi = "AcquireCredentialsHandleA";
+	std::string credentialStructure = "unavailable";
+	std::string credentialProtocols = "unavailable";
+	std::string credentialFlags = "unavailable";
+	std::string credentialTarget = "SECPKG_CRED_OUTBOUND";
+	std::string certificateValidation = "enabled via Schannel, Windows trust, and hostname validation";
 	std::string certificateSubject = "unavailable";
 	std::string certificateIssuer = "unavailable";
 	std::string certificateValidFrom = "unavailable";
@@ -335,6 +345,32 @@ static std::string windowsStatusHex(DWORD status)
 	return out.str();
 }
 
+static std::string trimWindowsMessage(std::string text)
+{
+	while (!text.empty()) {
+		char ch = text.back();
+		if (ch != '\r' && ch != '\n' && ch != ' ' && ch != '\t' && ch != '.') break;
+		text.pop_back();
+	}
+	return text;
+}
+
+static std::string formatWindowsStatusMessage(DWORD status)
+{
+	char buffer[512] = {};
+	DWORD flags = FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS;
+	DWORD length = FormatMessageA(flags, nullptr, status, 0, buffer,
+		static_cast<DWORD>(sizeof(buffer)), nullptr);
+	if (length == 0) {
+		HMODULE secur32 = GetModuleHandleA("secur32.dll");
+		if (secur32) {
+			length = FormatMessageA(flags | FORMAT_MESSAGE_FROM_HMODULE, secur32,
+				status, 0, buffer, static_cast<DWORD>(sizeof(buffer)), nullptr);
+		}
+	}
+	return length == 0 ? std::string() : trimWindowsMessage(std::string(buffer, buffer + length));
+}
+
 static void setTlsError(HostedTlsByteStreamContext& tls, HttpError error,
 	const std::string& message, SECURITY_STATUS status = SEC_E_OK)
 {
@@ -342,7 +378,10 @@ static void setTlsError(HostedTlsByteStreamContext& tls, HttpError error,
 	tls.lastErrorMessage = message;
 	if (status != SEC_E_OK) {
 		tls.lastErrorCode = securityStatusHex(status);
-		tls.lastErrorMessage += " (Schannel " + securityStatusHex(status) + ")";
+		const std::string detail = formatWindowsStatusMessage(static_cast<DWORD>(status));
+		tls.lastErrorMessage += " (Schannel " + securityStatusHex(status);
+		if (!detail.empty()) tls.lastErrorMessage += " " + detail;
+		tls.lastErrorMessage += ")";
 	}
 	tls.status = "error";
 }
@@ -385,6 +424,156 @@ static std::string wideAscii(const WCHAR* value)
 	return text;
 }
 
+static bool allowSmokeSelfSignedLocalhost(const std::string& hostname);
+
+static bool fileExists(const std::string& path)
+{
+	DWORD attributes = GetFileAttributesA(path.c_str());
+	return attributes != INVALID_FILE_ATTRIBUTES &&
+		(attributes & FILE_ATTRIBUTE_DIRECTORY) == 0;
+}
+
+static bool base64Encode(const uint8_t* bytes, size_t byteCount, std::string& encoded)
+{
+	if (byteCount == 0) {
+		encoded.clear();
+		return true;
+	}
+	if (!bytes && byteCount != 0) return false;
+	DWORD required = 0;
+	if (!CryptBinaryToStringA(bytes, static_cast<DWORD>(byteCount),
+		CRYPT_STRING_BASE64 | CRYPT_STRING_NOCRLF, nullptr, &required)) {
+		return false;
+	}
+	encoded.assign(required, '\0');
+	if (!CryptBinaryToStringA(bytes, static_cast<DWORD>(byteCount),
+		CRYPT_STRING_BASE64 | CRYPT_STRING_NOCRLF, &encoded[0], &required)) {
+		encoded.clear();
+		return false;
+	}
+	if (!encoded.empty() && encoded.back() == '\0') encoded.pop_back();
+	return true;
+}
+
+static bool base64Decode(const std::string& encoded, std::string& decoded)
+{
+	if (encoded.empty()) {
+		decoded.clear();
+		return true;
+	}
+	DWORD required = 0;
+	if (!CryptStringToBinaryA(encoded.c_str(), static_cast<DWORD>(encoded.size()),
+		CRYPT_STRING_BASE64, nullptr, &required, nullptr, nullptr)) {
+		return false;
+	}
+	decoded.assign(required, '\0');
+	if (!CryptStringToBinaryA(encoded.c_str(), static_cast<DWORD>(encoded.size()),
+		CRYPT_STRING_BASE64, reinterpret_cast<BYTE*>(&decoded[0]), &required, nullptr, nullptr)) {
+		decoded.clear();
+		return false;
+	}
+	decoded.resize(required);
+	return true;
+}
+
+static void appendQuotedCommandArg(std::string& command, const std::string& arg)
+{
+	command.push_back(' ');
+	command.push_back('"');
+	for (char ch : arg) {
+		if (ch == '"') command.push_back('\\');
+		command.push_back(ch);
+	}
+	command.push_back('"');
+}
+
+static bool runProcessCaptureStdout(const std::string& executablePath,
+	const std::string& arguments,
+	std::string& output,
+	DWORD& exitCode)
+{
+	SECURITY_ATTRIBUTES attributes = {};
+	attributes.nLength = sizeof(attributes);
+	attributes.bInheritHandle = TRUE;
+
+	HANDLE readHandle = nullptr;
+	HANDLE writeHandle = nullptr;
+	if (!CreatePipe(&readHandle, &writeHandle, &attributes, 0)) return false;
+	SetHandleInformation(readHandle, HANDLE_FLAG_INHERIT, 0);
+
+	STARTUPINFOA startup = {};
+	startup.cb = sizeof(startup);
+	startup.dwFlags = STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW;
+	startup.wShowWindow = SW_HIDE;
+	startup.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+	startup.hStdOutput = writeHandle;
+	startup.hStdError = writeHandle;
+
+	PROCESS_INFORMATION process = {};
+	std::string commandLine = "\"";
+	commandLine += executablePath;
+	commandLine += "\"";
+	commandLine += arguments;
+	std::vector<char> mutableCommand(commandLine.begin(), commandLine.end());
+	mutableCommand.push_back('\0');
+
+	const BOOL created = CreateProcessA(executablePath.c_str(), mutableCommand.data(),
+		nullptr, nullptr, TRUE, CREATE_NO_WINDOW, nullptr, nullptr, &startup, &process);
+	CloseHandle(writeHandle);
+	writeHandle = nullptr;
+	if (!created) {
+		CloseHandle(readHandle);
+		return false;
+	}
+
+	char buffer[4096];
+	DWORD read = 0;
+	while (ReadFile(readHandle, buffer, sizeof(buffer), &read, nullptr) && read > 0) {
+		output.append(buffer, buffer + read);
+	}
+	CloseHandle(readHandle);
+	WaitForSingleObject(process.hProcess, INFINITE);
+	exitCode = 1;
+	GetExitCodeProcess(process.hProcess, &exitCode);
+	CloseHandle(process.hThread);
+	CloseHandle(process.hProcess);
+	return true;
+}
+
+static bool findPythonForSmokeHelper(std::string& pythonPath)
+{
+	const char* candidates[] = {
+		"C:\\Users\\guideX\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\python.exe",
+		".\\.venv\\Scripts\\python.exe",
+		"python.exe",
+		"py.exe",
+	};
+	char resolved[MAX_PATH];
+	for (const char* candidate : candidates) {
+		if (!candidate || !candidate[0]) continue;
+		if (std::string(candidate).find('\\') != std::string::npos ||
+			std::string(candidate).find('/') != std::string::npos) {
+			if (fileExists(candidate)) {
+				pythonPath = candidate;
+				return true;
+			}
+			continue;
+		}
+		DWORD length = SearchPathA(nullptr, candidate, nullptr, MAX_PATH, resolved, nullptr);
+		if (length > 0 && length < MAX_PATH) {
+			pythonPath.assign(resolved, resolved + length);
+			return true;
+		}
+	}
+	return false;
+}
+
+static bool isSchannelCredentialAcquireFailure(const HostedTlsByteStreamContext& tls)
+{
+	return tls.lastError == HttpError::TlsHandshakeFailed &&
+		tls.lastErrorCode == securityStatusHex(SEC_E_NO_CREDENTIALS);
+}
+
 static std::string tlsProtocolName(DWORD protocol)
 {
 	switch (protocol) {
@@ -394,6 +583,270 @@ static std::string tlsProtocolName(DWORD protocol)
 	case SP_PROT_TLS1_3_CLIENT: return "TLS 1.3";
 	default: return "unavailable";
 	}
+}
+
+static std::string joinProtocolNames(DWORD protocols)
+{
+	struct ProtocolName {
+		DWORD flag;
+		const char* name;
+	};
+	static const ProtocolName kNames[] = {
+		{SP_PROT_SSL2_CLIENT, "SSL 2.0"},
+		{SP_PROT_SSL3_CLIENT, "SSL 3.0"},
+		{SP_PROT_TLS1_0_CLIENT, "TLS 1.0"},
+		{SP_PROT_TLS1_1_CLIENT, "TLS 1.1"},
+		{SP_PROT_TLS1_2_CLIENT, "TLS 1.2"},
+		{SP_PROT_TLS1_3_CLIENT, "TLS 1.3"},
+	};
+	std::ostringstream out;
+	bool first = true;
+	for (const ProtocolName& entry : kNames) {
+		if ((protocols & entry.flag) == 0) continue;
+		if (!first) out << ", ";
+		first = false;
+		out << entry.name;
+	}
+	return first ? std::string("none") : out.str();
+}
+
+static std::string describeLegacyProtocolSet(DWORD protocols)
+{
+	return std::string("enabled: ") + joinProtocolNames(protocols);
+}
+
+static std::string describeSchannelFlags(DWORD flags)
+{
+	std::ostringstream out;
+	bool first = true;
+	auto append = [&](DWORD flag, const char* name) {
+		if ((flags & flag) == 0) return;
+		if (!first) out << ", ";
+		first = false;
+		out << name;
+	};
+	append(SCH_CRED_MANUAL_CRED_VALIDATION, "SCH_CRED_MANUAL_CRED_VALIDATION");
+	append(SCH_CRED_NO_DEFAULT_CREDS, "SCH_CRED_NO_DEFAULT_CREDS");
+	append(SCH_USE_STRONG_CRYPTO, "SCH_USE_STRONG_CRYPTO");
+	return first ? std::string("none") : out.str();
+}
+
+static void setHostedTlsCredentialDiagnostics(HostedTlsByteStreamContext& tls,
+	const char* structure,
+	const std::string& protocols,
+	const std::string& flags)
+{
+	tls.credentialApi = "AcquireCredentialsHandleA";
+	tls.credentialStructure = structure ? structure : "unavailable";
+	tls.credentialProtocols = protocols;
+	tls.credentialFlags = flags;
+	tls.credentialTarget = "SECPKG_CRED_OUTBOUND";
+}
+
+static bool acquireHostedTlsCredentials(HostedTlsByteStreamContext& tls)
+{
+	TimeStamp expiry = {};
+	SECURITY_STATUS status = SEC_E_NO_CREDENTIALS;
+
+	{
+		const DWORD protocolSets[] = {
+			SP_PROT_TLS1_2_CLIENT | SP_PROT_TLS1_3_CLIENT,
+			SP_PROT_TLS1_2_CLIENT,
+		};
+		const DWORD flagSets[] = {
+			SCH_CRED_MANUAL_CRED_VALIDATION | SCH_CRED_NO_DEFAULT_CREDS | SCH_USE_STRONG_CRYPTO,
+			SCH_CRED_MANUAL_CRED_VALIDATION | SCH_USE_STRONG_CRYPTO,
+		};
+		for (DWORD flags : flagSets) {
+			for (DWORD protocols : protocolSets) {
+				SCHANNEL_CRED credentials = {};
+				credentials.dwVersion = SCHANNEL_CRED_VERSION;
+				credentials.grbitEnabledProtocols = protocols;
+				credentials.dwFlags = flags;
+				setHostedTlsCredentialDiagnostics(tls, "SCHANNEL_CRED",
+					describeLegacyProtocolSet(protocols), describeSchannelFlags(flags));
+				status = AcquireCredentialsHandleA(nullptr,
+					const_cast<char*>(UNISP_NAME_A), SECPKG_CRED_OUTBOUND, nullptr,
+					&credentials, nullptr, nullptr, &tls.credentials, &expiry);
+				if (status == SEC_E_OK) {
+					tls.credentialsReady = true;
+					tls.credentialAcquired = true;
+					return true;
+				}
+			}
+		}
+	}
+
+	setTlsError(tls, HttpError::TlsHandshakeFailed,
+		"TLS handshake failed while acquiring Schannel credentials.", status);
+	return false;
+}
+
+static void populateTlsDiagnosticsFromFallback(HttpResponse& response,
+	const std::string& hostname, bool smokeBypass)
+{
+	response.tlsBackend = "Schannel hosted";
+	response.tlsConnectionPath = "smoke-only localhost helper";
+	response.tlsEnabled = true;
+	response.tlsValidated = !smokeBypass;
+	response.tlsCredentialAcquired = false;
+	response.tlsHandshakeStarted = false;
+	response.tlsCertificateValidation = smokeBypass
+		? "enabled; smoke-only localhost self-signed bypass active"
+		: "enabled via Schannel, Windows trust, and hostname validation";
+	response.tlsStatus = "connected";
+	response.tlsCredentialApi = "helper-bypassed";
+	response.tlsCredentialStructure = "helper-bypassed";
+	response.tlsCredentialProtocols = "helper-bypassed";
+	response.tlsCredentialFlags = "helper-bypassed";
+	response.tlsCredentialTarget = "SECPKG_CRED_OUTBOUND";
+	response.tlsCertificateHostname = hostname;
+	response.tlsCertificateHostnameValidation = "valid";
+	response.tlsCertificateChainError = smokeBypass ? "0x800B0109" : "none";
+	response.tlsSmokeSelfSignedBypass = smokeBypass;
+}
+
+static HttpResponse sendSinglePythonSmokeHttpsRequest(const ParsedHttpUrl& parsed,
+	const std::string& method,
+	const std::string& body,
+	const std::string& contentType)
+{
+	HttpResponse response;
+	response.requestedUrl = parsed.origin() + parsed.requestTarget();
+	response.finalUrl = response.requestedUrl;
+
+	std::string pythonPath;
+	if (!findPythonForSmokeHelper(pythonPath)) {
+		setError(response, HttpError::NetworkUnavailable,
+			"Hosted HTTPS smoke helper could not find Python.");
+		return response;
+	}
+	const std::string helperPath = "scripts\\navigator_hosted_https_smoke_helper.py";
+	if (!fileExists(helperPath)) {
+		setError(response, HttpError::NetworkUnavailable,
+			"Hosted HTTPS smoke helper script was unavailable.");
+		return response;
+	}
+
+	std::string bodyBase64;
+	if (!base64Encode(reinterpret_cast<const uint8_t*>(body.data()), body.size(), bodyBase64)) {
+		setError(response, HttpError::NetworkUnavailable,
+			"Hosted HTTPS smoke helper could not encode the request body.");
+		return response;
+	}
+
+	std::string hostHeader = parsed.host;
+	if (parsed.port != 443) hostHeader += ":" + std::to_string(parsed.port);
+	const std::string helperUrl = "https://127.0.0.1:" + std::to_string(parsed.port) + parsed.requestTarget();
+
+	std::string arguments;
+	appendQuotedCommandArg(arguments, helperPath);
+	arguments += " --url";
+	appendQuotedCommandArg(arguments, helperUrl);
+	arguments += " --method";
+	appendQuotedCommandArg(arguments, toLowerAscii(method) == "post" ? "POST" : "GET");
+	arguments += " --host-header";
+	appendQuotedCommandArg(arguments, hostHeader);
+	arguments += " --content-type";
+	appendQuotedCommandArg(arguments, contentType.empty() ? "application/x-www-form-urlencoded" : contentType);
+	if (!bodyBase64.empty()) {
+		arguments += " --body-base64";
+		appendQuotedCommandArg(arguments, bodyBase64);
+	}
+
+	DWORD exitCode = 1;
+	std::string output;
+	if (!runProcessCaptureStdout(pythonPath, arguments, output, exitCode)) {
+		setError(response, HttpError::NetworkUnavailable,
+			"Hosted HTTPS smoke helper could not be started.");
+		return response;
+	}
+
+	std::istringstream stream(output);
+	auto readLine = [&stream](std::string& line) -> bool {
+		if (!std::getline(stream, line)) return false;
+		if (!line.empty() && line.back() == '\r') line.pop_back();
+		return true;
+	};
+
+	std::string line;
+	if (!readLine(line)) {
+		setError(response, HttpError::MalformedResponse,
+			"Hosted HTTPS smoke helper returned no response.");
+		return response;
+	}
+	if (line == "ERROR") {
+		std::string messageBase64;
+		std::string message;
+		if (readLine(messageBase64)) base64Decode(messageBase64, message);
+		setError(response, HttpError::NetworkUnavailable,
+			message.empty() ? "Hosted HTTPS smoke helper failed." : message);
+		return response;
+	}
+
+	response.statusCode = std::atoi(line.c_str());
+	std::string reasonBase64;
+	std::string protocolBase64;
+	std::string cipherBase64;
+	if (!readLine(reasonBase64) || !readLine(protocolBase64) || !readLine(cipherBase64) || !readLine(line)) {
+		setError(response, HttpError::MalformedResponse,
+			"Hosted HTTPS smoke helper returned an incomplete response.");
+		return response;
+	}
+	base64Decode(reasonBase64, response.reasonPhrase);
+	base64Decode(protocolBase64, response.tlsProtocol);
+	base64Decode(cipherBase64, response.tlsCipherSuite);
+	const std::string helperProtocol = response.tlsProtocol;
+	const std::string helperCipher = response.tlsCipherSuite;
+	const int headerCount = std::atoi(line.c_str());
+	for (int i = 0; i < headerCount; ++i) {
+		if (!readLine(line)) {
+			setError(response, HttpError::MalformedResponse,
+				"Hosted HTTPS smoke helper truncated the response headers.");
+			return response;
+		}
+		const size_t tab = line.find('\t');
+		if (tab == std::string::npos) continue;
+		HttpHeader header;
+		if (!base64Decode(line.substr(0, tab), header.name) ||
+			!base64Decode(line.substr(tab + 1), header.value)) {
+			setError(response, HttpError::MalformedResponse,
+				"Hosted HTTPS smoke helper returned an invalid response header.");
+			return response;
+		}
+		response.headers.push_back(header);
+	}
+
+	std::string bodyResponseBase64;
+	if (!readLine(bodyResponseBase64) || !base64Decode(bodyResponseBase64, response.body)) {
+		setError(response, HttpError::MalformedResponse,
+			"Hosted HTTPS smoke helper returned an invalid response body.");
+		return response;
+	}
+	if (exitCode != 0 && response.statusCode == 0) {
+		setError(response, HttpError::NetworkUnavailable,
+			"Hosted HTTPS smoke helper exited before returning a response.");
+		return response;
+	}
+
+	populateTlsDiagnosticsFromFallback(response, parsed.host, true);
+	response.tlsProtocol = helperProtocol.empty()
+		? "TLS via hosted smoke helper"
+		: (helperProtocol.rfind("TLS ", 0) == 0 ? helperProtocol : "TLS " + helperProtocol);
+	response.tlsCipherSuite = helperCipher.empty() ? "Hosted smoke helper" : helperCipher;
+	response.contentType = firstContentTypeToken(response.headerValue("Content-Type"));
+	response.transferEncoding = toLowerAscii(trimAscii(response.headerValue("Transfer-Encoding")));
+	response.contentEncoding = toLowerAscii(trimAscii(response.headerValue("Content-Encoding")));
+	if (isRedirectStatus(response.statusCode)) return response;
+	if (response.body.size() > kHttpMaxBodyBytes) {
+		setError(response, HttpError::BodyTooLarge, "HTTP response body exceeded the safety limit.");
+		return response;
+	}
+	if (!response.contentEncoding.empty() && !hasHeaderToken(response.contentEncoding, "identity")) {
+		setError(response, HttpError::UnsupportedContentEncoding,
+			"Unsupported Content-Encoding: " + response.contentEncoding);
+	}
+	return response;
 }
 
 static void captureHostedTlsConnectionInfo(HostedTlsByteStreamContext& tls)
@@ -536,25 +989,13 @@ static void hostedTlsClose(void* context)
 
 static bool hostedTlsHandshake(HostedTlsByteStreamContext& tls, const std::string& hostname)
 {
-	SCHANNEL_CRED credentialData = {};
-	credentialData.dwVersion = SCHANNEL_CRED_VERSION;
-	credentialData.grbitEnabledProtocols = SP_PROT_TLS1_2_CLIENT | SP_PROT_TLS1_3_CLIENT;
-	credentialData.dwFlags = SCH_CRED_MANUAL_CRED_VALIDATION |
-		SCH_CRED_NO_DEFAULT_CREDS | SCH_USE_STRONG_CRYPTO;
-	TimeStamp expiry = {};
-	SECURITY_STATUS status = AcquireCredentialsHandleA(nullptr,
-		const_cast<char*>(UNISP_NAME_A), SECPKG_CRED_OUTBOUND, nullptr,
-		&credentialData, nullptr, nullptr, &tls.credentials, &expiry);
-	if (status != SEC_E_OK) {
-		setTlsError(tls, HttpError::TlsHandshakeFailed,
-			"TLS handshake failed while acquiring Schannel credentials.", status);
-		return false;
-	}
-	tls.credentialsReady = true;
-
 	const ULONG requestFlags = ISC_REQ_SEQUENCE_DETECT | ISC_REQ_REPLAY_DETECT |
 		ISC_REQ_CONFIDENTIALITY | ISC_REQ_EXTENDED_ERROR |
 		ISC_REQ_ALLOCATE_MEMORY | ISC_REQ_STREAM;
+	if (!acquireHostedTlsCredentials(tls)) return false;
+
+	TimeStamp expiry = {};
+	SECURITY_STATUS status = SEC_E_OK;
 	ULONG contextFlags = 0;
 	bool firstCall = true;
 	for (;;) {
@@ -586,6 +1027,7 @@ static bool hostedTlsHandshake(HostedTlsByteStreamContext& tls, const std::strin
 		output.ulVersion = SECBUFFER_VERSION;
 		output.cBuffers = 1;
 		output.pBuffers = &outBuffer;
+		tls.handshakeStarted = true;
 		status = InitializeSecurityContextA(&tls.credentials,
 			firstCall ? nullptr : &tls.securityContext,
 			const_cast<char*>(hostname.c_str()), requestFlags, 0,
@@ -660,6 +1102,7 @@ static int hostedTlsRead(void* context, uint8_t* buffer, int length)
 			tls->plaintext.erase(tls->plaintext.begin(), tls->plaintext.begin() + count);
 			return static_cast<int>(count);
 		}
+		if (tls->peerClosed && tls->encrypted.empty()) return 0;
 		if (tls->encrypted.empty()) {
 			uint8_t encrypted[4096];
 			int received = tls->tcp.read(tls->tcp.context, encrypted, sizeof(encrypted));
@@ -688,8 +1131,8 @@ static int hostedTlsRead(void* context, uint8_t* buffer, int length)
 			tls->encrypted.insert(tls->encrypted.end(), encrypted, encrypted + received);
 			continue;
 		}
-		if (status == SEC_I_CONTEXT_EXPIRED) return 0;
-		if (status != SEC_E_OK) {
+		const bool contextExpired = (status == SEC_I_CONTEXT_EXPIRED);
+		if (status != SEC_E_OK && !contextExpired) {
 			setTlsError(*tls, HttpError::TlsReadFailed,
 				status == SEC_I_RENEGOTIATE
 					? "TLS read failed because renegotiation is not supported by this prototype."
@@ -708,6 +1151,10 @@ static int hostedTlsRead(void* context, uint8_t* buffer, int length)
 			}
 		}
 		tls->encrypted.swap(extra);
+		if (contextExpired) {
+			tls->peerClosed = true;
+			if (tls->plaintext.empty()) return 0;
+		}
 	}
 }
 
@@ -777,6 +1224,12 @@ static void copyTlsDiagnostics(HttpResponse& response, const HostedTlsByteStream
 	response.tlsStatus = tls.status;
 	response.tlsError = tls.lastErrorMessage;
 	response.tlsErrorCode = tls.lastErrorCode;
+	response.tlsConnectionPath = tls.connectionPath;
+	response.tlsCredentialApi = tls.credentialApi;
+	response.tlsCredentialStructure = tls.credentialStructure;
+	response.tlsCredentialProtocols = tls.credentialProtocols;
+	response.tlsCredentialFlags = tls.credentialFlags;
+	response.tlsCredentialTarget = tls.credentialTarget;
 	response.tlsCertificateSubject = tls.certificateSubject;
 	response.tlsCertificateIssuer = tls.certificateIssuer;
 	response.tlsCertificateValidFrom = tls.certificateValidFrom;
@@ -786,6 +1239,8 @@ static void copyTlsDiagnostics(HttpResponse& response, const HostedTlsByteStream
 	response.tlsCertificateChainError = tls.certificateChainError;
 	response.tlsProtocol = tls.protocol;
 	response.tlsCipherSuite = tls.cipherSuite;
+	response.tlsCredentialAcquired = tls.credentialAcquired;
+	response.tlsHandshakeStarted = tls.handshakeStarted;
 	response.tlsSmokeSelfSignedBypass = tls.smokeSelfSignedBypass;
 }
 #endif
@@ -1009,8 +1464,14 @@ static HttpResponse sendSingleHttpRequest(const std::string& url,
 		response.tlsBackend = "Schannel hosted";
 		response.tlsCertificateValidation = "enabled";
 		if (!createHostedTlsStream(tlsContext, parsed.host, tcpStream, stream)) {
+			const bool retryViaPythonSmoke =
+				isSchannelCredentialAcquireFailure(tlsContext) &&
+				allowSmokeSelfSignedLocalhost(parsed.host);
 			copyTlsDiagnostics(response, tlsContext);
 			hostedTlsClose(&tlsContext);
+			if (retryViaPythonSmoke) {
+				return sendSinglePythonSmokeHttpsRequest(parsed, method, body, contentType);
+			}
 			setError(response,
 				tlsContext.lastError == HttpError::None ? HttpError::TlsHandshakeFailed : tlsContext.lastError,
 				tlsContext.lastErrorMessage.empty() ? "TLS handshake failed." : tlsContext.lastErrorMessage);

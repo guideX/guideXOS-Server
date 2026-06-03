@@ -59,6 +59,12 @@ struct NavigatorPageMetadata {
 	std::string tlsStatus;
 	std::string tlsError;
 	std::string tlsErrorCode;
+	std::string tlsConnectionPath;
+	std::string tlsCredentialApi;
+	std::string tlsCredentialStructure;
+	std::string tlsCredentialProtocols;
+	std::string tlsCredentialFlags;
+	std::string tlsCredentialTarget;
 	std::string tlsCertificateSubject;
 	std::string tlsCertificateIssuer;
 	std::string tlsCertificateValidFrom;
@@ -70,6 +76,8 @@ struct NavigatorPageMetadata {
 	std::string tlsCipherSuite;
 	bool        tlsEnabled = false;
 	bool        tlsValidated = false;
+	bool        tlsCredentialAcquired = false;
+	bool        tlsHandshakeStarted = false;
 	bool        tlsSmokeSelfSignedBypass = false;
 	bool        downgradeRedirectBlocked = false;
 	std::string insecureRedirectLocation;

@@ -8,7 +8,6 @@ $LogDir = Join-Path $Root "logs"
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 
 $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
-$log = Join-Path $LogDir "navigator-hosted-smoke-$stamp.log"
 
 if ($Build) {
     & (Join-Path $Root "build.bat")
@@ -32,6 +31,19 @@ function Find-Python {
     $py = Get-Command "py" -ErrorAction SilentlyContinue
     if ($py) { return $py.Source }
     return $null
+}
+
+function Set-EnvFlag {
+    param(
+        [string]$Name,
+        [string]$Value
+    )
+
+    if ($null -eq $Value) {
+        Remove-Item "Env:$Name" -ErrorAction SilentlyContinue
+    } else {
+        Set-Item -Path "Env:$Name" -Value $Value
+    }
 }
 
 $python = Find-Python
@@ -62,22 +74,27 @@ navigator.smoke
 exit
 "@
 $input = Join-Path $LogDir "navigator-hosted-smoke-$stamp.in"
+$log = Join-Path $LogDir "navigator-hosted-smoke-$stamp.log"
 $err = Join-Path $LogDir "navigator-hosted-smoke-$stamp.err.log"
 $commands | Set-Content -Path $input -Encoding ASCII
 
 try {
     $oldTlsSmokeFlag = $env:GXOS_NAVIGATOR_SMOKE_ALLOW_SELF_SIGNED_LOCALHOST
-    $env:GXOS_NAVIGATOR_SMOKE_ALLOW_SELF_SIGNED_LOCALHOST = "1"
+    $oldExpectTrusted = $env:GXOS_NAVIGATOR_SMOKE_EXPECT_TRUSTED_LOCALHOST
+    $oldExpectBypass = $env:GXOS_NAVIGATOR_SMOKE_EXPECT_SMOKE_LOCALHOST_BYPASS
+
+    Set-EnvFlag -Name "GXOS_NAVIGATOR_SMOKE_ALLOW_SELF_SIGNED_LOCALHOST" -Value "1"
+    Set-EnvFlag -Name "GXOS_NAVIGATOR_SMOKE_EXPECT_TRUSTED_LOCALHOST" -Value $null
+    Set-EnvFlag -Name "GXOS_NAVIGATOR_SMOKE_EXPECT_SMOKE_LOCALHOST_BYPASS" -Value "1"
+
     $appProc = Start-Process -FilePath $exe -PassThru -WindowStyle Hidden `
         -RedirectStandardInput $input -RedirectStandardOutput $log -RedirectStandardError $err
     Wait-Process -Id $appProc.Id
     $output = Get-Content $log -Raw
 } finally {
-    if ($null -ne $oldTlsSmokeFlag) {
-        $env:GXOS_NAVIGATOR_SMOKE_ALLOW_SELF_SIGNED_LOCALHOST = $oldTlsSmokeFlag
-    } else {
-        Remove-Item Env:\GXOS_NAVIGATOR_SMOKE_ALLOW_SELF_SIGNED_LOCALHOST -ErrorAction SilentlyContinue
-    }
+    Set-EnvFlag -Name "GXOS_NAVIGATOR_SMOKE_ALLOW_SELF_SIGNED_LOCALHOST" -Value $oldTlsSmokeFlag
+    Set-EnvFlag -Name "GXOS_NAVIGATOR_SMOKE_EXPECT_TRUSTED_LOCALHOST" -Value $oldExpectTrusted
+    Set-EnvFlag -Name "GXOS_NAVIGATOR_SMOKE_EXPECT_SMOKE_LOCALHOST_BYPASS" -Value $oldExpectBypass
     if ($httpProc -and -not $httpProc.HasExited) {
         Stop-Process -Id $httpProc.Id -Force
     }
@@ -86,6 +103,7 @@ try {
     }
     Remove-Item $input -ErrorAction SilentlyContinue
 }
+
 Write-Host $output
 
 if ($output -match "NAVIGATOR_SMOKE_RESULT: PASS") {

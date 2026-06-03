@@ -760,6 +760,11 @@ namespace {
 		const std::string& clipboardMode,
 		const std::string& tlsStatus,
 		const std::string& tlsError,
+		const std::string& tlsConnectionPath,
+		const std::string& tlsCredentialApi,
+		const std::string& tlsCredentialStructure,
+		bool tlsCredentialAcquired,
+		bool tlsHandshakeStarted,
 		bool tlsSmokeSelfSignedBypass)
 	{
 		const GxosRandomQuality randomQuality = gxos_random_quality();
@@ -887,6 +892,11 @@ namespace {
 			{"Current Document", "Last POST content type", lastPostContentType.empty() ? "(none)" : lastPostContentType},
 			{"Current Document", "TLS status", tlsStatus.empty() ? "(none)" : tlsStatus},
 			{"Current Document", "TLS error", tlsError.empty() ? "(none)" : tlsError},
+			{"Current Document", "TLS connection path", tlsConnectionPath.empty() ? "(none)" : tlsConnectionPath},
+			{"Current Document", "TLS credential API", tlsCredentialApi.empty() ? "(none)" : tlsCredentialApi},
+			{"Current Document", "TLS credential structure", tlsCredentialStructure.empty() ? "(none)" : tlsCredentialStructure},
+			{"Current Document", "TLS credential acquired", yesNo(tlsCredentialAcquired)},
+			{"Current Document", "TLS handshake started", yesNo(tlsHandshakeStarted)},
 			{"Current Document", "TLS smoke bypass active", yesNo(tlsSmokeSelfSignedBypass)},
 		};
 	}
@@ -1210,6 +1220,11 @@ std::string Navigator::SmokeRuntimeReport()
 		s_clipboardMode,
 		s_pageMetadata.tlsStatus,
 		s_pageMetadata.tlsError,
+		s_pageMetadata.tlsConnectionPath,
+		s_pageMetadata.tlsCredentialApi,
+		s_pageMetadata.tlsCredentialStructure,
+		s_pageMetadata.tlsCredentialAcquired,
+		s_pageMetadata.tlsHandshakeStarted,
 		s_pageMetadata.tlsSmokeSelfSignedBypass));
 }
 
@@ -3385,6 +3400,14 @@ WebDocument Navigator::buildPageInfoDocument()
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("TLS status", m.tlsStatus), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("TLS error", m.tlsError), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("TLS error code", m.tlsErrorCode), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("TLS connection path", m.tlsConnectionPath), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("TLS credential API", m.tlsCredentialApi), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("TLS credential structure", m.tlsCredentialStructure), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("TLS credential target", m.tlsCredentialTarget), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("TLS credential protocols", m.tlsCredentialProtocols), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("TLS credential flags", m.tlsCredentialFlags), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("TLS credential acquired", yesNo(m.tlsCredentialAcquired)), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("TLS handshake started", yesNo(m.tlsHandshakeStarted)), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Certificate subject", m.tlsCertificateSubject), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Certificate issuer", m.tlsCertificateIssuer), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Certificate valid from", m.tlsCertificateValidFrom), ""});
@@ -3532,6 +3555,11 @@ WebDocument Navigator::buildRuntimeDocument()
 		s_clipboardMode,
 		s_pageMetadata.tlsStatus,
 		s_pageMetadata.tlsError,
+		s_pageMetadata.tlsConnectionPath,
+		s_pageMetadata.tlsCredentialApi,
+		s_pageMetadata.tlsCredentialStructure,
+		s_pageMetadata.tlsCredentialAcquired,
+		s_pageMetadata.tlsHandshakeStarted,
 		s_pageMetadata.tlsSmokeSelfSignedBypass));
 
 	doc.blocks.push_back({BlockType::Link, "Page Info", "about:page-info"});
@@ -3847,6 +3875,12 @@ WebDocument Navigator::loadHttpResponseDocument(const std::string& url, const gx
 	metadata.tlsStatus = response.tlsStatus;
 	metadata.tlsError = response.tlsError;
 	metadata.tlsErrorCode = response.tlsErrorCode;
+	metadata.tlsConnectionPath = response.tlsConnectionPath;
+	metadata.tlsCredentialApi = response.tlsCredentialApi;
+	metadata.tlsCredentialStructure = response.tlsCredentialStructure;
+	metadata.tlsCredentialProtocols = response.tlsCredentialProtocols;
+	metadata.tlsCredentialFlags = response.tlsCredentialFlags;
+	metadata.tlsCredentialTarget = response.tlsCredentialTarget;
 	metadata.tlsCertificateSubject = response.tlsCertificateSubject;
 	metadata.tlsCertificateIssuer = response.tlsCertificateIssuer;
 	metadata.tlsCertificateValidFrom = response.tlsCertificateValidFrom;
@@ -3858,6 +3892,8 @@ WebDocument Navigator::loadHttpResponseDocument(const std::string& url, const gx
 	metadata.tlsCipherSuite = response.tlsCipherSuite;
 	metadata.tlsEnabled = response.tlsEnabled;
 	metadata.tlsValidated = response.tlsValidated;
+	metadata.tlsCredentialAcquired = response.tlsCredentialAcquired;
+	metadata.tlsHandshakeStarted = response.tlsHandshakeStarted;
 	metadata.tlsSmokeSelfSignedBypass = response.tlsSmokeSelfSignedBypass;
 	metadata.downgradeRedirectBlocked = response.downgradeRedirectBlocked;
 	metadata.insecureRedirectLocation = response.insecureRedirectLocation;

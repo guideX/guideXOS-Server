@@ -58,6 +58,8 @@
 #include "console_window.h"
 #include "file_explorer.h"
 #include "clock.h"
+
+#include <cstdlib>
 #include "task_manager.h"
 #include "vnc_server.h"
 #include "paint.h"
@@ -154,11 +156,42 @@ static std::string navigatorHostedSmokeDiagnostic() {
     auto contains = [](const std::string& haystack, const std::string& needle) {
         return haystack.find(needle) != std::string::npos;
     };
+    auto yesNo = [](bool value) {
+        return value ? "yes" : "no";
+    };
+    auto summarizeText = [](const std::string& text, size_t limit) {
+        std::string compact;
+        compact.reserve(std::min(text.size(), limit) + 3);
+        bool lastWasSpace = false;
+        for (char ch : text) {
+            const bool isSpace = ch == '\r' || ch == '\n' || ch == '\t' || ch == ' ';
+            if (isSpace) {
+                if (lastWasSpace) continue;
+                compact.push_back(' ');
+                lastWasSpace = true;
+            } else {
+                compact.push_back(ch);
+                lastWasSpace = false;
+            }
+            if (compact.size() >= limit) break;
+        }
+        while (!compact.empty() && compact.back() == ' ') compact.pop_back();
+        if (text.size() > compact.size()) compact += "...";
+        return compact;
+    };
+    auto envIsOne = [](const char* name) {
+        const char* value = std::getenv(name);
+        return value && std::string(value) == "1";
+    };
+    const bool expectTrustedLocalhost = envIsOne("GXOS_NAVIGATOR_SMOKE_EXPECT_TRUSTED_LOCALHOST");
+    const bool expectSmokeBypassLocalhost = envIsOne("GXOS_NAVIGATOR_SMOKE_EXPECT_SMOKE_LOCALHOST_BYPASS");
 
     std::ostringstream out;
     out << "NAVIGATOR_SMOKE_BEGIN\n";
     out << "timestamp_ms=" << gxos::ticks() << "\n";
     out << "build_mode=hosted/compositor\n";
+    out << "expect_trusted_localhost=" << (expectTrustedLocalhost ? "yes" : "no") << "\n";
+    out << "expect_smoke_bypass_localhost=" << (expectSmokeBypassLocalhost ? "yes" : "no") << "\n";
 
     uint8_t randomA[32] = {};
     uint8_t randomB[32] = {};
@@ -303,6 +336,29 @@ static std::string navigatorHostedSmokeDiagnostic() {
     add("plain HTTP GET still loads", basicHttpLoaded && contains(basicHttpText, "Kernel HTTP Basic"),
         "currentUrl=" + gxos::apps::Navigator::SmokeCurrentUrl());
 
+    const std::string trustedHttpsUrl = "https://example.com/";
+    bool trustedHttpsLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet(trustedHttpsUrl);
+    std::string trustedHttpsText = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    bool trustedHttpsPageInfoLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("about:page-info");
+    std::string trustedHttpsPageInfo = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("trusted HTTPS GET loads through native Schannel", trustedHttpsLoaded &&
+        contains(trustedHttpsText, "Example Domain"),
+        "currentUrl=" + gxos::apps::Navigator::SmokeCurrentUrl());
+    add("trusted HTTPS Page Info proves real Schannel credential path", trustedHttpsPageInfoLoaded &&
+        contains(trustedHttpsPageInfo, "Requested URL: https://example.com/") &&
+        contains(trustedHttpsPageInfo, "TLS backend: Schannel hosted") &&
+        contains(trustedHttpsPageInfo, "TLS connection path: native Schannel stream") &&
+        contains(trustedHttpsPageInfo, "Certificate validation: enabled via Schannel, Windows trust, and hostname validation") &&
+        contains(trustedHttpsPageInfo, "TLS credential API: AcquireCredentialsHandleA") &&
+        contains(trustedHttpsPageInfo, "TLS credential structure: SCHANNEL_CRED") &&
+        contains(trustedHttpsPageInfo, "TLS credential acquired: yes") &&
+        contains(trustedHttpsPageInfo, "TLS handshake started: yes") &&
+        contains(trustedHttpsPageInfo, "TLS status: connected") &&
+        contains(trustedHttpsPageInfo, "TLS smoke bypass active: no"),
+        "page_info_loaded=" + std::string(yesNo(trustedHttpsPageInfoLoaded)) +
+        " body=\"" + summarizeText(trustedHttpsText, 160) +
+        "\" page_info=\"" + summarizeText(trustedHttpsPageInfo, 700) + "\"");
+
     const std::string httpsBasicUrl = "https://localhost:8443/navigator-smoke/basic.html";
     const std::size_t httpsStreamsBefore = gxos::web::httpPlainTcpByteStreamOpenCount();
     bool httpsBasicLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet(httpsBasicUrl);
@@ -310,20 +366,34 @@ static std::string navigatorHostedSmokeDiagnostic() {
     std::string httpsBasicText = gxos::apps::Navigator::SmokeCurrentDocumentText();
     bool httpsPageInfoLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("about:page-info");
     std::string httpsPageInfo = gxos::apps::Navigator::SmokeCurrentDocumentText();
-    add("HTTPS GET loads through Schannel", httpsBasicLoaded && contains(httpsBasicText, "Kernel HTTP Basic"),
+    const std::string expectedLocalhostValidation = expectSmokeBypassLocalhost
+        ? "Certificate validation: enabled; smoke-only localhost self-signed bypass active"
+        : "Certificate validation: enabled via Schannel, Windows trust, and hostname validation";
+    const std::string expectedLocalhostBypass = std::string("TLS smoke bypass active: ") +
+        (expectSmokeBypassLocalhost ? "yes" : "no");
+    add(expectSmokeBypassLocalhost
+            ? "HTTPS GET loads through native Schannel with explicit localhost smoke bypass"
+            : "HTTPS GET loads through native Schannel",
+        httpsBasicLoaded && contains(httpsBasicText, "Kernel HTTP Basic"),
         "currentUrl=" + gxos::apps::Navigator::SmokeCurrentUrl());
-    add("HTTPS Page Info exposes Schannel validation", httpsPageInfoLoaded &&
+    add("HTTPS Page Info exposes native Schannel credential diagnostics", httpsPageInfoLoaded &&
         contains(httpsPageInfo, "Source type: https") &&
         contains(httpsPageInfo, "TLS backend: Schannel hosted") &&
+        contains(httpsPageInfo, "TLS connection path: native Schannel stream") &&
         contains(httpsPageInfo, "TLS enabled: yes") &&
-        contains(httpsPageInfo, "Certificate validation: enabled; smoke-only localhost self-signed bypass active") &&
+        contains(httpsPageInfo, expectedLocalhostValidation) &&
+        contains(httpsPageInfo, "TLS credential API: AcquireCredentialsHandleA") &&
+        contains(httpsPageInfo, "TLS credential structure: SCHANNEL_CRED") &&
+        contains(httpsPageInfo, "TLS credential target: SECPKG_CRED_OUTBOUND") &&
+        contains(httpsPageInfo, "TLS credential acquired: yes") &&
+        contains(httpsPageInfo, "TLS handshake started: yes") &&
         contains(httpsPageInfo, "Certificate hostname checked: localhost") &&
         contains(httpsPageInfo, "Certificate hostname validation: valid") &&
         contains(httpsPageInfo, "TLS protocol: TLS ") &&
         contains(httpsPageInfo, "TLS cipher suite: ") &&
         contains(httpsPageInfo, "TLS status: connected") &&
-        contains(httpsPageInfo, "TLS smoke bypass active: yes"),
-        "expected visible localhost smoke-only TLS diagnostics");
+        contains(httpsPageInfo, expectedLocalhostBypass),
+        "expected visible native Schannel credential and localhost validation diagnostics");
     add("HTTPS opens wrapped TCP byte-stream", httpsStreamsAfter == httpsStreamsBefore + 1,
         "plain_tcp_streams_before=" + std::to_string(httpsStreamsBefore) +
         " after=" + std::to_string(httpsStreamsAfter));
@@ -382,14 +452,25 @@ static std::string navigatorHostedSmokeDiagnostic() {
 
     bool badCertificateLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("https://127.0.0.1:8443/navigator-smoke/basic.html");
     std::string badCertificateText = gxos::apps::Navigator::SmokeCurrentDocumentText();
-    gxos::apps::Navigator::SmokeNavigateToQuiet("about:page-info");
+    bool badCertificatePageInfoLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("about:page-info");
     std::string badCertificatePageInfo = gxos::apps::Navigator::SmokeCurrentDocumentText();
-    add("HTTPS bad certificate renders friendly document", badCertificateLoaded &&
-        contains(badCertificateText, "HTTPS Certificate") &&
+    add("HTTPS exact-localhost bypass stays blocked for 127.0.0.1", badCertificateLoaded &&
+        contains(badCertificateText, "HTTPS Certificate Validation Failed") &&
+        badCertificatePageInfoLoaded &&
         contains(badCertificatePageInfo, "TLS backend: Schannel hosted") &&
+        contains(badCertificatePageInfo, "TLS validated: no") &&
+        contains(badCertificatePageInfo, "Certificate validation: enabled via Schannel, Windows trust, and hostname validation") &&
         contains(badCertificatePageInfo, "TLS status: error") &&
+        contains(badCertificatePageInfo, "TLS connection path: native Schannel stream") &&
+        contains(badCertificatePageInfo, "TLS credential acquired: yes") &&
+        contains(badCertificatePageInfo, "TLS handshake started: yes") &&
+        contains(badCertificatePageInfo, "Certificate hostname checked: 127.0.0.1") &&
+        contains(badCertificatePageInfo, "Certificate chain error: 0x800B0109") &&
         contains(badCertificatePageInfo, "TLS smoke bypass active: no"),
-        "expected validation failure for IP host against localhost certificate");
+        "loaded=" + std::string(yesNo(badCertificateLoaded)) +
+        " page_info_loaded=" + std::string(yesNo(badCertificatePageInfoLoaded)) +
+        " body=\"" + summarizeText(badCertificateText, 220) +
+        "\" page_info=\"" + summarizeText(badCertificatePageInfo, 700) + "\"");
 
     bool remotePngLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/image-relative.html");
     bool remotePngPageInfoLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("about:page-info");

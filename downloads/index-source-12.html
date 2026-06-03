@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>guideXOS Navigator Help</title>
+<style>
+body { background-color: #f7f9fc; color: #2f3b46; }
+h1 { color: #1f4f8c; margin-bottom: 10px; }
+h2 { color: #305f9a; margin-top: 10px; margin-bottom: 8px; }
+h3 { color: #446a97; margin-top: 8px; }
+p { margin-bottom: 8px; }
+a { color: #0f4fa8; text-decoration: underline; }
+li { margin-left: 12px; margin-bottom: 4px; }
+pre { background-color: #e8edf5; padding: 4px; margin-left: 8px; }
+code { background-color: #e8edf5; padding: 4px; }
+img { margin-top: 6px; margin-bottom: 8px; }
+</style>
+</head>
+<body>
+<h1>guideXOS Navigator Help</h1>
+
+<p>Welcome to guideXOS Navigator &ndash; the built-in document viewer and browser shell for guideXOS Server.</p>
+
+<p>Navigator renders local guideWeb documents from the filesystem without requiring CSS, JavaScript, or a network connection.</p>
+
+<img src="/assets/Images/BlueVelvet/48/web.png" alt="guideXOS image">
+
+<h2>Getting Started</h2>
+
+<p>Use the toolbar buttons to navigate:</p>
+<ul>
+<li>Back &amp; Forward &ndash; navigate page history</li>
+<li>Reload &ndash; re-read the current page from disk</li>
+<li>Home &ndash; return to the about:navigator page</li>
+<li>Bookmarks &ndash; view saved bookmarks</li>
+<li>Add &#9733; &ndash; bookmark the current page</li>
+</ul>
+
+<h2>Address Bar</h2>
+
+<p>Click the address bar to edit the URL. Type a new address and press Enter to navigate.</p>
+
+<p>CSS-lite v0.1 lets simple pages influence <code>headings</code>, links, list spacing, and preformatted blocks without requiring a full browser engine.</p>
+
+<pre>Examples:
+  file:///docs/index.html
+  file:///docs/desktop.html
+  about:navigator
+  about:bookmarks</pre>
+
+<h2>Keyboard Shortcuts</h2>
+
+<ul>
+<li>Page Up / Page Down &ndash; scroll the document</li>
+<li>Home &ndash; scroll to the top (when address bar is not focused)</li>
+<li>Enter &ndash; navigate to typed URL (address bar focused)</li>
+<li>Escape &ndash; cancel address editing</li>
+<li>Left / Right arrow &ndash; move address-bar caret</li>
+</ul>
+
+<h2>Supported HTML Elements</h2>
+
+<p>The guideWeb parser understands these tags:</p>
+<ul>
+<li>&lt;h1&gt; &lt;h2&gt; &lt;h3&gt; &ndash; headings</li>
+<li>&lt;p&gt; &ndash; paragraph</li>
+<li>&lt;a href&gt; &ndash; clickable link</li>
+<li>&lt;img src&gt; &ndash; local PNG image</li>
+<li>&lt;li&gt; &ndash; list item with bullet</li>
+<li>&lt;pre&gt; &ndash; preformatted / code block</li>
+<li>&lt;br&gt; &ndash; line break</li>
+</ul>
+
+<h3>Code Example</h3>
+
+<pre>{
+  "name": "MyApp",
+  "entry": "myapp.elf",
+  "version": "1.0"
+}</pre>
+
+<h2>Topics</h2>
+
+<p>Learn more about the guideXOS desktop environment:</p>
+
+<a href="desktop.html">guideXOS Desktop Guide</a>
+<a href="forms.html">Forms Test</a>
+
+<p>guideXOS Navigator is a first-class OS application, not a plugin or external browser.</p>
+</body>
+</html>
