@@ -117,6 +117,86 @@ int memcmp(const void* s1, const void* s2, size_t n)
     return 0;
 }
 
+size_t strlen(const char* s)
+{
+    size_t len = 0;
+    if (!s) return 0;
+    while (s[len] != '\0') {
+        ++len;
+    }
+    return len;
+}
+
+int strcmp(const char* a, const char* b)
+{
+    if (a == b) return 0;
+    if (!a) return -1;
+    if (!b) return 1;
+    while (*a && *b && *a == *b) {
+        ++a;
+        ++b;
+    }
+    return static_cast<unsigned char>(*a) - static_cast<unsigned char>(*b);
+}
+
+int strncmp(const char* a, const char* b, size_t n)
+{
+    if (n == 0 || a == b) return 0;
+    if (!a) return -1;
+    if (!b) return 1;
+    for (size_t i = 0; i < n; ++i) {
+        const unsigned char ca = static_cast<unsigned char>(a[i]);
+        const unsigned char cb = static_cast<unsigned char>(b[i]);
+        if (ca != cb || ca == '\0' || cb == '\0') {
+            return ca - cb;
+        }
+    }
+    return 0;
+}
+
+char* strchr(const char* s, int c)
+{
+    if (!s) return nullptr;
+    const char target = static_cast<char>(c);
+    while (*s) {
+        if (*s == target) return const_cast<char*>(s);
+        ++s;
+    }
+    return target == '\0' ? const_cast<char*>(s) : nullptr;
+}
+
+char* strrchr(const char* s, int c)
+{
+    if (!s) return nullptr;
+    const char target = static_cast<char>(c);
+    const char* last = nullptr;
+    while (*s) {
+        if (*s == target) last = s;
+        ++s;
+    }
+    if (target == '\0') return const_cast<char*>(s);
+    return const_cast<char*>(last);
+}
+
+char* strstr(const char* haystack, const char* needle)
+{
+    if (!haystack || !needle) return nullptr;
+    if (*needle == '\0') return const_cast<char*>(haystack);
+
+    for (const char* h = haystack; *h; ++h) {
+        const char* a = h;
+        const char* b = needle;
+        while (*a && *b && *a == *b) {
+            ++a;
+            ++b;
+        }
+        if (*b == '\0') {
+            return const_cast<char*>(h);
+        }
+    }
+    return nullptr;
+}
+
 } // extern "C"
 
 // ============================================================================

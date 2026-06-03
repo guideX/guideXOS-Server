@@ -49,14 +49,28 @@ include arch/$(ARCH)/Makefile.arch
 CC ?= $(subst g++,gcc,$(CXX))
 
 MBEDTLS_GUIDEXOS_ENABLED := 0
+MBEDTLS_GUIDEXOS_COMPILE_PROBE_ENABLED := 0
+MBEDTLS_GUIDEXOS_LINK_ENABLED := 0
 MBEDTLS_GUIDEXOS_MANIFEST := ../third_party/mbedtls/guidexos/mbedtls_sources.mk
 MBEDTLS_GUIDEXOS_VERSION_HEADER := ../third_party/mbedtls/include/mbedtls/version.h
 ifneq ($(wildcard $(MBEDTLS_GUIDEXOS_MANIFEST)),)
-ifneq ($(wildcard $(MBEDTLS_GUIDEXOS_VERSION_HEADER)),)
 include $(MBEDTLS_GUIDEXOS_MANIFEST)
+ifeq ($(MBEDTLS_GUIDEXOS_COMPILE_READY),1)
+MBEDTLS_GUIDEXOS_COMPILE_PROBE_ENABLED := 1
 MBEDTLS_GUIDEXOS_ENABLED := 1
 endif
+ifeq ($(MBEDTLS_GUIDEXOS_LINK_READY),1)
+MBEDTLS_GUIDEXOS_LINK_ENABLED := 1
 endif
+endif
+
+MBEDTLS_GUIDEXOS_IMPORT_STATE_DEPS := \
+	../third_party/mbedtls \
+	../third_party/mbedtls/guidexos \
+	../third_party/mbedtls/include \
+	../third_party/mbedtls/include/mbedtls \
+	../third_party/mbedtls/library \
+	../third_party/mbedtls/tf-psa-crypto
 
 # Common compiler flags
 CFLAGS := -std=c++14 -ffreestanding -O2 -Wall -Wextra -fno-exceptions -fno-rtti
@@ -64,7 +78,7 @@ CFLAGS += -nostdlib -nostdinc++ -fno-builtin
 CFLAGS += -DGXOS_BARE_METAL
 CFLAGS += -I. -I.. -Icore/include -Iarch/$(ARCH)/include
 CFLAGS += $(EXTRA_CFLAGS)
-ifneq ($(MBEDTLS_GUIDEXOS_ENABLED),0)
+ifneq ($(MBEDTLS_GUIDEXOS_COMPILE_PROBE_ENABLED),0)
 CFLAGS += $(MBEDTLS_GUIDEXOS_CFLAGS)
 endif
 DEPFLAGS := -MMD -MP
@@ -82,7 +96,8 @@ LDFLAGS := $(LINKER_SCRIPT_FLAG)arch/$(ARCH)/linker.ld $(ARCH_LDFLAGS)
 CORE_SOURCES := $(wildcard core/*.cpp)
 ARCH_SOURCES := $(wildcard arch/$(ARCH)/*.cpp)
 ASM_SOURCES := $(wildcard arch/$(ARCH)/*.asm) $(wildcard arch/$(ARCH)/*.s)
-MBEDTLS_C_SOURCES := $(if $(filter 1,$(MBEDTLS_GUIDEXOS_ENABLED)),$(MBEDTLS_GUIDEXOS_C_SOURCES))
+MBEDTLS_C_SOURCES := $(if $(filter 1,$(MBEDTLS_GUIDEXOS_LINK_ENABLED)),$(MBEDTLS_GUIDEXOS_C_SOURCES))
+MBEDTLS_COMPILE_PROBE_C_SOURCES := $(if $(filter 1,$(MBEDTLS_GUIDEXOS_COMPILE_PROBE_ENABLED)),$(MBEDTLS_GUIDEXOS_COMPILE_PROBE_C_SOURCES))
 
 # Object files
 CORE_OBJS := $(patsubst core/%.cpp,$(OBJ_DIR)/core/%.o,$(CORE_SOURCES))
@@ -90,14 +105,22 @@ ARCH_OBJS := $(patsubst arch/$(ARCH)/%.cpp,$(OBJ_DIR)/arch/%.o,$(ARCH_SOURCES))
 ASM_OBJS := $(patsubst arch/$(ARCH)/%.asm,$(OBJ_DIR)/arch/%.o,$(ASM_SOURCES))
 ASM_OBJS += $(patsubst arch/$(ARCH)/%.s,$(OBJ_DIR)/arch/%.o,$(filter %.s,$(ASM_SOURCES)))
 MBEDTLS_C_OBJS := $(patsubst ../third_party/%.c,$(OBJ_DIR)/third_party/%.o,$(MBEDTLS_C_SOURCES))
+MBEDTLS_COMPILE_PROBE_C_OBJS := $(patsubst ../third_party/%.c,$(OBJ_DIR)/third_party/%.o,$(MBEDTLS_COMPILE_PROBE_C_SOURCES))
 
 ALL_OBJS := $(CORE_OBJS) $(ARCH_OBJS) $(ASM_OBJS) $(MBEDTLS_C_OBJS)
-DEPFILES := $(CORE_OBJS:.o=.d) $(ARCH_OBJS:.o=.d) $(MBEDTLS_C_OBJS:.o=.d)
+DEPFILES := $(CORE_OBJS:.o=.d) $(ARCH_OBJS:.o=.d) $(MBEDTLS_COMPILE_PROBE_C_OBJS:.o=.d)
 
 # Targets
-.PHONY: all clean info
+.PHONY: all clean info mbedtls-guidexos-compile-probe
 
-all: $(KERNEL)
+all: mbedtls-guidexos-compile-probe $(KERNEL)
+
+ifneq ($(MBEDTLS_GUIDEXOS_COMPILE_PROBE_ENABLED),0)
+mbedtls-guidexos-compile-probe: $(MBEDTLS_COMPILE_PROBE_C_OBJS)
+	@echo "Mbed TLS/TF-PSA freestanding compile probe complete."
+else
+mbedtls-guidexos-compile-probe:
+endif
 
 # ----------------------------------------------------------------
 # Link step - architecture-dependent
@@ -143,6 +166,10 @@ $(OBJ_DIR)/core/%.o: core/%.cpp
 	@echo "Compiling $<..."
 	$(CXX) $(CFLAGS) $(DEPFLAGS) -c $< -o $@
 
+$(OBJ_DIR)/core/gxos_tls_foundation.o: $(MBEDTLS_GUIDEXOS_IMPORT_STATE_DEPS)
+
+$(OBJ_DIR)/core/kernel_apps.o: $(MBEDTLS_GUIDEXOS_IMPORT_STATE_DEPS)
+
 $(OBJ_DIR)/core/%.d: core/%.cpp
 	@$(call MKDIR,$(OBJ_DIR)/core)
 	@echo "Bootstrapping dependencies for $<..."
@@ -171,7 +198,7 @@ $(OBJ_DIR)/arch/%.o: arch/$(ARCH)/%.s
 $(OBJ_DIR)/third_party/%.o: ../third_party/%.c
 	@$(call MKDIR,$(dir $@))
 	@echo "Compiling $<..."
-	$(CC) $(filter-out -std=c++14 -fno-exceptions -fno-rtti -nostdinc++,$(CFLAGS)) $(DEPFLAGS) -c $< -o $@
+	$(CXX) -x c $(filter-out -std=c++14 -fno-exceptions -fno-rtti -nostdinc++,$(CFLAGS)) $(DEPFLAGS) -c $< -o $@
 
 clean:
 	@$(call RM,build/$(ARCH))

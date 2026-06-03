@@ -15,12 +15,17 @@ static constexpr size_t kGxosTlsArenaCapacityBytes = 256u * 1024u;
 enum class GxosTlsBackendStatus {
     Unavailable,
     SourceMissing,
-    BuildConfigured,
-    CaLoadedNotParsed,
+    CompileProbeReady,
+    AllocatorUnavailable,
+    AllocatorReady,
+    RngCallbackUnavailable,
+    RngCallbackReady,
+    ClockCallbackUnavailable,
+    ClockCallbackReady,
+    CaMissing,
+    CaParseFailed,
     CaParsed,
-    RngUnavailable,
-    ClockUnavailable,
-    ArenaUnavailable,
+    HostnameValidationReady,
     ReadyForLocalHandshake,
     ReadyForValidatedNavigation,
     Error
@@ -39,12 +44,18 @@ GxosTlsBackendInfo gxos_tls_backend_info();
 
 struct GxosTlsMbedTlsImportInfo {
     bool sourcePresent;
+    bool sourceReadyForCompile;
     bool configPresent;
+    bool cryptoConfigPresent;
+    bool tfPsaDependencyPresent;
     const char* importPath;
     const char* configPath;
+    const char* cryptoConfigPath;
+    const char* tfPsaPath;
     const char* buildPlanPath;
     const char* expectedVersion;
     const char* detectedVersion;
+    const char* tfPsaDetectedVersion;
     size_t plannedSourceCount;
     const char* plannedSubset;
     const char* detail;
@@ -87,6 +98,7 @@ GxosCaStoreInfo gxos_ca_store_info();
 
 enum class GxosTlsArenaStatus {
     NotApplicable,
+    Pending,
     Ready,
     Unavailable,
     Exhausted
@@ -102,6 +114,28 @@ struct GxosTlsArenaInfo {
 
 const char* gxos_tls_arena_status_name(GxosTlsArenaStatus status);
 GxosTlsArenaInfo gxos_tls_arena_info();
+
+enum class GxosTlsHookStatus {
+    NotApplicable,
+    Pending,
+    Ready,
+    Unavailable,
+    Error
+};
+
+struct GxosTlsRuntimeHookInfo {
+    GxosTlsHookStatus allocatorStatus;
+    GxosTlsHookStatus rngCallbackStatus;
+    GxosTlsHookStatus timeCallbackStatus;
+    GxosTlsHookStatus psaInitStatus;
+    const char* allocatorDetail;
+    const char* rngDetail;
+    const char* timeDetail;
+    const char* psaDetail;
+};
+
+const char* gxos_tls_hook_status_name(GxosTlsHookStatus status);
+GxosTlsRuntimeHookInfo gxos_tls_runtime_hook_info();
 
 struct GxosTlsHostnameValidationInfo {
     bool available;

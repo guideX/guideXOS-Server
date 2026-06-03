@@ -8,19 +8,297 @@
 #if defined(__has_include)
 #if __has_include("third_party/mbedtls/include/mbedtls/version.h")
 #define GXOS_TLS_MBEDTLS_SOURCE_PRESENT 1
-#include "third_party/mbedtls/include/mbedtls/version.h"
+#endif
+#if __has_include("third_party/mbedtls/tf-psa-crypto/include/mbedtls/platform.h")
+#define GXOS_TLS_MBEDTLS_PLATFORM_HEADER_PRESENT 1
+#endif
+#if __has_include("third_party/mbedtls/tf-psa-crypto/include/mbedtls/platform_util.h")
+#define GXOS_TLS_MBEDTLS_PLATFORM_UTIL_HEADER_PRESENT 1
+#endif
+#if __has_include("third_party/mbedtls/tf-psa-crypto/include/mbedtls/constant_time.h")
+#define GXOS_TLS_MBEDTLS_CONSTANT_TIME_HEADER_PRESENT 1
+#endif
+#if __has_include("third_party/mbedtls/tf-psa-crypto/include/mbedtls/psa_util.h")
+#define GXOS_TLS_MBEDTLS_PSA_UTIL_HEADER_PRESENT 1
+#endif
+#if __has_include("third_party/mbedtls/tf-psa-crypto/drivers/builtin/src/md_psa.h")
+#define GXOS_TLS_MBEDTLS_MD_PSA_HEADER_PRESENT 1
+#endif
+#if __has_include("third_party/mbedtls/tf-psa-crypto/include/tf-psa-crypto/build_info.h")
+#define GXOS_TLS_MBEDTLS_TF_PSA_BUILD_INFO_PRESENT 1
+#endif
+#if __has_include("third_party/mbedtls/tf-psa-crypto/include/psa/crypto_config.h")
+#define GXOS_TLS_MBEDTLS_TF_PSA_CRYPTO_CONFIG_PRESENT 1
+#endif
+#if __has_include("third_party/mbedtls/tf-psa-crypto/core/psa_crypto.c")
+#define GXOS_TLS_MBEDTLS_TF_PSA_CORE_PRESENT 1
+#endif
+#if __has_include("third_party/mbedtls/tf-psa-crypto/core/psa_crypto_driver_wrappers.h")
+#define GXOS_TLS_MBEDTLS_TF_PSA_WRAPPERS_PRESENT 1
+#endif
+#if __has_include("third_party/mbedtls/library/mbedtls_config_check_before.h")
+#define GXOS_TLS_MBEDTLS_CONFIG_CHECKS_PRESENT 1
+#endif
+#if __has_include("third_party/mbedtls/tf-psa-crypto/core/tf_psa_crypto_config_check_before.h")
+#define GXOS_TLS_MBEDTLS_TF_PSA_CONFIG_CHECKS_PRESENT 1
 #endif
 #if __has_include("third_party/mbedtls/guidexos/mbedtls_config.h")
 #define GXOS_TLS_MBEDTLS_CONFIG_PRESENT 1
 #endif
+#if __has_include("third_party/mbedtls/guidexos/crypto_config.h")
+#define GXOS_TLS_MBEDTLS_CRYPTO_CONFIG_PRESENT 1
+#endif
+#if defined(GXOS_TLS_MBEDTLS_SOURCE_PRESENT) && defined(GXOS_TLS_MBEDTLS_TF_PSA_BUILD_INFO_PRESENT)
+#define GXOS_TLS_MBEDTLS_VERSION_INCLUDED 1
+#define GXOS_TLS_TF_PSA_VERSION_INCLUDED 1
+#include "third_party/mbedtls/include/mbedtls/version.h"
+#include "third_party/mbedtls/tf-psa-crypto/include/tf-psa-crypto/build_info.h"
+#endif
+#endif
+
+#if defined(GXOS_BARE_METAL) && \
+    GXOS_TLS_MBEDTLS_SOURCE_PRESENT && \
+    GXOS_TLS_MBEDTLS_PLATFORM_HEADER_PRESENT && \
+    GXOS_TLS_MBEDTLS_PLATFORM_UTIL_HEADER_PRESENT && \
+    GXOS_TLS_MBEDTLS_PSA_UTIL_HEADER_PRESENT && \
+    GXOS_TLS_MBEDTLS_CONFIG_PRESENT && \
+    GXOS_TLS_MBEDTLS_CRYPTO_CONFIG_PRESENT
+#define GXOS_TLS_MBEDTLS_RUNTIME_INCLUDED 1
+#include "mbedtls/memory_buffer_alloc.h"
+#include "mbedtls/platform.h"
+#include "mbedtls/platform_time.h"
+#include "mbedtls/platform_util.h"
+#include "mbedtls/x509_crt.h"
+#include "psa/crypto.h"
+#include "psa/crypto_extra.h"
+#include <stdarg.h>
+#include <stdio.h>
+#include <time.h>
+#else
+#define GXOS_TLS_MBEDTLS_RUNTIME_INCLUDED 0
 #endif
 
 #ifndef GXOS_TLS_MBEDTLS_SOURCE_PRESENT
 #define GXOS_TLS_MBEDTLS_SOURCE_PRESENT 0
 #endif
 
+#ifndef GXOS_TLS_MBEDTLS_PLATFORM_HEADER_PRESENT
+#define GXOS_TLS_MBEDTLS_PLATFORM_HEADER_PRESENT 0
+#endif
+
+#ifndef GXOS_TLS_MBEDTLS_PLATFORM_UTIL_HEADER_PRESENT
+#define GXOS_TLS_MBEDTLS_PLATFORM_UTIL_HEADER_PRESENT 0
+#endif
+
+#ifndef GXOS_TLS_MBEDTLS_CONSTANT_TIME_HEADER_PRESENT
+#define GXOS_TLS_MBEDTLS_CONSTANT_TIME_HEADER_PRESENT 0
+#endif
+
+#ifndef GXOS_TLS_MBEDTLS_PSA_UTIL_HEADER_PRESENT
+#define GXOS_TLS_MBEDTLS_PSA_UTIL_HEADER_PRESENT 0
+#endif
+
+#ifndef GXOS_TLS_MBEDTLS_MD_PSA_HEADER_PRESENT
+#define GXOS_TLS_MBEDTLS_MD_PSA_HEADER_PRESENT 0
+#endif
+
+#ifndef GXOS_TLS_MBEDTLS_TF_PSA_BUILD_INFO_PRESENT
+#define GXOS_TLS_MBEDTLS_TF_PSA_BUILD_INFO_PRESENT 0
+#endif
+
+#ifndef GXOS_TLS_MBEDTLS_TF_PSA_CRYPTO_CONFIG_PRESENT
+#define GXOS_TLS_MBEDTLS_TF_PSA_CRYPTO_CONFIG_PRESENT 0
+#endif
+
+#ifndef GXOS_TLS_MBEDTLS_TF_PSA_CORE_PRESENT
+#define GXOS_TLS_MBEDTLS_TF_PSA_CORE_PRESENT 0
+#endif
+
+#ifndef GXOS_TLS_MBEDTLS_TF_PSA_WRAPPERS_PRESENT
+#define GXOS_TLS_MBEDTLS_TF_PSA_WRAPPERS_PRESENT 0
+#endif
+
+#ifndef GXOS_TLS_MBEDTLS_CONFIG_CHECKS_PRESENT
+#define GXOS_TLS_MBEDTLS_CONFIG_CHECKS_PRESENT 0
+#endif
+
+#ifndef GXOS_TLS_MBEDTLS_TF_PSA_CONFIG_CHECKS_PRESENT
+#define GXOS_TLS_MBEDTLS_TF_PSA_CONFIG_CHECKS_PRESENT 0
+#endif
+
 #ifndef GXOS_TLS_MBEDTLS_CONFIG_PRESENT
 #define GXOS_TLS_MBEDTLS_CONFIG_PRESENT 0
+#endif
+
+#ifndef GXOS_TLS_MBEDTLS_CRYPTO_CONFIG_PRESENT
+#define GXOS_TLS_MBEDTLS_CRYPTO_CONFIG_PRESENT 0
+#endif
+
+#ifndef GXOS_TLS_MBEDTLS_VERSION_INCLUDED
+#define GXOS_TLS_MBEDTLS_VERSION_INCLUDED 0
+#endif
+
+#ifndef GXOS_TLS_TF_PSA_VERSION_INCLUDED
+#define GXOS_TLS_TF_PSA_VERSION_INCLUDED 0
+#endif
+
+#if GXOS_TLS_MBEDTLS_RUNTIME_INCLUDED
+extern "C" {
+void* gxos_mbedtls_platform_calloc_uninit(size_t, size_t)
+{
+    return nullptr;
+}
+
+void gxos_mbedtls_platform_free_uninit(void*)
+{
+}
+
+int gxos_mbedtls_platform_snprintf_noop(char* s, size_t n, const char*, ...)
+{
+    if (s != nullptr && n != 0) s[0] = '\0';
+    return 0;
+}
+
+int gxos_mbedtls_platform_vsnprintf_noop(char* s, size_t n, const char*, va_list)
+{
+    if (s != nullptr && n != 0) s[0] = '\0';
+    return 0;
+}
+
+int gxos_mbedtls_platform_fprintf_noop(FILE*, const char*, ...)
+{
+    return 0;
+}
+
+void gxos_mbedtls_platform_exit_noop(int)
+{
+}
+}
+#endif
+
+#if GXOS_TLS_MBEDTLS_RUNTIME_INCLUDED
+extern "C" void mbedtls_platform_zeroize(void* buf, size_t len)
+{
+    volatile unsigned char* bytes = static_cast<volatile unsigned char*>(buf);
+    while (len-- > 0) {
+        *bytes++ = 0;
+    }
+}
+
+extern "C" void mbedtls_zeroize_and_free(void* buf, size_t len)
+{
+    if (buf != nullptr) {
+        mbedtls_platform_zeroize(buf, len);
+        mbedtls_free(buf);
+    }
+}
+
+static bool gxos_mbedtls_is_leap_year(int year)
+{
+    return (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0);
+}
+
+static int gxos_mbedtls_days_in_month(int year, int month)
+{
+    static const int kDays[12] = { 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
+    if (month == 2 && gxos_mbedtls_is_leap_year(year)) return 29;
+    return kDays[month - 1];
+}
+
+static bool gxos_mbedtls_utc_tm_from_unix_seconds(long long seconds, struct tm* out_tm)
+{
+    if (!out_tm || seconds < 0) return false;
+
+    long long days = seconds / 86400ll;
+    long long rem = seconds % 86400ll;
+    if (rem < 0) {
+        rem += 86400ll;
+        --days;
+    }
+
+    out_tm->tm_hour = static_cast<int>(rem / 3600ll);
+    rem %= 3600ll;
+    out_tm->tm_min = static_cast<int>(rem / 60ll);
+    out_tm->tm_sec = static_cast<int>(rem % 60ll);
+
+    int year = 1970;
+    while (true) {
+        const int year_days = gxos_mbedtls_is_leap_year(year) ? 366 : 365;
+        if (days < year_days) break;
+        days -= year_days;
+        ++year;
+    }
+
+    int month = 1;
+    while (true) {
+        const int month_days = gxos_mbedtls_days_in_month(year, month);
+        if (days < month_days) break;
+        days -= month_days;
+        ++month;
+    }
+
+    out_tm->tm_year = year - 1900;
+    out_tm->tm_mon = month - 1;
+    out_tm->tm_mday = static_cast<int>(days) + 1;
+    out_tm->tm_wday = static_cast<int>((4 + (seconds / 86400ll)) % 7ll);
+    if (out_tm->tm_wday < 0) out_tm->tm_wday += 7;
+    out_tm->tm_yday = 0;
+    for (int m = 1; m < month; ++m) {
+        out_tm->tm_yday += gxos_mbedtls_days_in_month(year, m);
+    }
+    out_tm->tm_yday += out_tm->tm_mday - 1;
+    out_tm->tm_isdst = 0;
+    return true;
+}
+
+extern "C" mbedtls_time_t gxos_mbedtls_time_callback(mbedtls_time_t* timer)
+{
+    int64_t seconds = 0;
+    if (!gxos::gxos_wall_clock_unix_seconds(&seconds)) {
+        if (timer) *timer = static_cast<mbedtls_time_t>(0);
+        return static_cast<mbedtls_time_t>(0);
+    }
+
+    const mbedtls_time_t value = static_cast<mbedtls_time_t>(seconds);
+    if (timer) *timer = value;
+    return value;
+}
+
+extern "C" mbedtls_ms_time_t mbedtls_ms_time(void)
+{
+    int64_t seconds = 0;
+    if (!gxos::gxos_wall_clock_unix_seconds(&seconds) || seconds <= 0) {
+        return static_cast<mbedtls_ms_time_t>(0);
+    }
+
+    return static_cast<mbedtls_ms_time_t>(seconds) * 1000;
+}
+
+extern "C" struct tm* mbedtls_platform_gmtime_r(const mbedtls_time_t* tt, struct tm* tm_buf)
+{
+    if (!tt || !tm_buf) return nullptr;
+    return gxos_mbedtls_utc_tm_from_unix_seconds(static_cast<long long>(*tt), tm_buf) ? tm_buf : nullptr;
+}
+
+extern "C" psa_status_t mbedtls_psa_external_get_random(
+    mbedtls_psa_external_random_context_t*,
+    uint8_t* output,
+    size_t output_size,
+    size_t* output_length)
+{
+    if (!output_length) return PSA_ERROR_INVALID_ARGUMENT;
+    *output_length = 0;
+
+    if ((output == nullptr && output_size != 0) || gxos::gxos_random_quality() != gxos::GxosRandomQuality::Secure) {
+        return PSA_ERROR_INSUFFICIENT_ENTROPY;
+    }
+    if (!gxos::gxos_random_bytes(output, output_size)) {
+        return PSA_ERROR_HARDWARE_FAILURE;
+    }
+
+    *output_length = output_size;
+    return PSA_SUCCESS;
+}
 #endif
 
 namespace gxos {
@@ -29,12 +307,15 @@ namespace {
 constexpr const char* kBareMetalCaBundlePath = "/certs/ca-bundle.pem";
 constexpr const char* kHostedCaBundlePath = "(Windows trust store)";
 constexpr const char* kBareMetalMbedTlsImportPath = "third_party/mbedtls";
-constexpr const char* kBareMetalMbedTlsExpectedVersion = "official Mbed TLS 2.28.9 LTS source tree";
+constexpr const char* kBareMetalMbedTlsExpectedVersion =
+    "official Mbed TLS 4.1.0 source tree with populated TF-PSA-Crypto dependency";
 constexpr const char* kBareMetalConfigPath = "third_party/mbedtls/guidexos/mbedtls_config.h";
+constexpr const char* kBareMetalCryptoConfigPath = "third_party/mbedtls/guidexos/crypto_config.h";
+constexpr const char* kBareMetalTfPsaPath = "third_party/mbedtls/tf-psa-crypto";
 constexpr const char* kBareMetalBuildPlanPath = "third_party/mbedtls/guidexos/mbedtls_sources.mk";
 constexpr const char* kBareMetalPlannedSubset =
-    "minimal TLS 1.2 client + X.509/PEM + bounded entropy/DRBG + SHA/AES/RSA/ECC";
-constexpr size_t kBareMetalPlannedSourceCount = 37;
+    "runtime-linked Mbed TLS 4.1.0 TLS/X.509 prerequisite subset with bounded allocator hooks, PSA external RNG, wall-clock callbacks, and one-shot CA parsing; Navigator handshakes remain gated";
+constexpr size_t kBareMetalPlannedSourceCount = 55;
 
 size_t token_length(const char* token)
 {
@@ -87,7 +368,7 @@ bool is_clock_ready(GxosClockStatus status)
 
 const char* detected_mbedtls_version()
 {
-#if GXOS_TLS_MBEDTLS_SOURCE_PRESENT
+#if GXOS_TLS_MBEDTLS_VERSION_INCLUDED
 #if defined(MBEDTLS_VERSION_STRING_FULL)
     return MBEDTLS_VERSION_STRING_FULL;
 #elif defined(MBEDTLS_VERSION_STRING)
@@ -95,77 +376,170 @@ const char* detected_mbedtls_version()
 #else
     return "source-present (version macro unavailable)";
 #endif
+#elif GXOS_TLS_MBEDTLS_SOURCE_PRESENT
+    return "version.h present, but compile-time version import is blocked by missing include paths or split-config prerequisites";
 #else
     return "(not imported)";
 #endif
 }
 
+const char* detected_tf_psa_version()
+{
+#if GXOS_TLS_TF_PSA_VERSION_INCLUDED
+#if defined(TF_PSA_CRYPTO_VERSION_STRING_FULL)
+    return TF_PSA_CRYPTO_VERSION_STRING_FULL;
+#elif defined(TF_PSA_CRYPTO_VERSION_STRING)
+    return TF_PSA_CRYPTO_VERSION_STRING;
+#else
+    return "source-present (TF-PSA version macro unavailable)";
+#endif
+#elif GXOS_TLS_MBEDTLS_TF_PSA_BUILD_INFO_PRESENT
+    return "build_info.h present, but compile-time TF-PSA version import is blocked by missing split-config prerequisites";
+#else
+    return "(not imported)";
+#endif
+}
+
+constexpr bool kBareMetalCoreCompileHeadersPresent =
+    GXOS_TLS_MBEDTLS_PLATFORM_HEADER_PRESENT &&
+    GXOS_TLS_MBEDTLS_PLATFORM_UTIL_HEADER_PRESENT &&
+    GXOS_TLS_MBEDTLS_CONSTANT_TIME_HEADER_PRESENT &&
+    GXOS_TLS_MBEDTLS_PSA_UTIL_HEADER_PRESENT &&
+    GXOS_TLS_MBEDTLS_MD_PSA_HEADER_PRESENT &&
+    GXOS_TLS_MBEDTLS_CONFIG_CHECKS_PRESENT &&
+    GXOS_TLS_MBEDTLS_TF_PSA_CONFIG_CHECKS_PRESENT;
+
+constexpr bool kBareMetalTfPsaDependencyPresent =
+    GXOS_TLS_MBEDTLS_TF_PSA_BUILD_INFO_PRESENT &&
+    GXOS_TLS_MBEDTLS_TF_PSA_CRYPTO_CONFIG_PRESENT &&
+    GXOS_TLS_MBEDTLS_TF_PSA_CORE_PRESENT &&
+    GXOS_TLS_MBEDTLS_TF_PSA_WRAPPERS_PRESENT;
+
+constexpr bool kBareMetalSourceReadyForCompile =
+    GXOS_TLS_MBEDTLS_SOURCE_PRESENT &&
+    kBareMetalCoreCompileHeadersPresent &&
+    kBareMetalTfPsaDependencyPresent &&
+    GXOS_TLS_MBEDTLS_CONFIG_PRESENT &&
+    GXOS_TLS_MBEDTLS_CRYPTO_CONFIG_PRESENT;
+
 GxosTlsMbedTlsImportInfo make_mbedtls_import_info()
 {
 #if defined(GXOS_BARE_METAL)
-    if (!GXOS_TLS_MBEDTLS_SOURCE_PRESENT && !GXOS_TLS_MBEDTLS_CONFIG_PRESENT) {
+    if (!GXOS_TLS_MBEDTLS_SOURCE_PRESENT &&
+        !GXOS_TLS_MBEDTLS_CONFIG_PRESENT &&
+        !GXOS_TLS_MBEDTLS_CRYPTO_CONFIG_PRESENT) {
         return {
+            false,
+            false,
+            false,
             false,
             false,
             kBareMetalMbedTlsImportPath,
             kBareMetalConfigPath,
+            kBareMetalCryptoConfigPath,
+            kBareMetalTfPsaPath,
             kBareMetalBuildPlanPath,
             kBareMetalMbedTlsExpectedVersion,
             "(not imported)",
+            "(not imported)",
             kBareMetalPlannedSourceCount,
             kBareMetalPlannedSubset,
-            "Official Mbed TLS source and guideXOS bare-metal config are both missing."
+            "Official Mbed TLS source and the guideXOS 4.x config pair are both missing."
         };
     }
     if (!GXOS_TLS_MBEDTLS_SOURCE_PRESENT) {
         return {
             false,
+            false,
             true,
-            kBareMetalMbedTlsImportPath,
-            kBareMetalConfigPath,
-            kBareMetalBuildPlanPath,
-            kBareMetalMbedTlsExpectedVersion,
-            "(not imported)",
-            kBareMetalPlannedSourceCount,
-            kBareMetalPlannedSubset,
-            "guideXOS bare-metal config is present, but the official Mbed TLS source tree has not been imported yet."
-        };
-    }
-    if (!GXOS_TLS_MBEDTLS_CONFIG_PRESENT) {
-        return {
-            true,
+            GXOS_TLS_MBEDTLS_CRYPTO_CONFIG_PRESENT,
             false,
             kBareMetalMbedTlsImportPath,
             kBareMetalConfigPath,
+            kBareMetalCryptoConfigPath,
+            kBareMetalTfPsaPath,
+            kBareMetalBuildPlanPath,
+            kBareMetalMbedTlsExpectedVersion,
+            "(not imported)",
+            "(not imported)",
+            kBareMetalPlannedSourceCount,
+            kBareMetalPlannedSubset,
+            "guideXOS 4.x config scaffolding is present, but the official Mbed TLS 4.x source tree has not been imported yet."
+        };
+    }
+    if (!GXOS_TLS_MBEDTLS_CONFIG_PRESENT || !GXOS_TLS_MBEDTLS_CRYPTO_CONFIG_PRESENT) {
+        return {
+            true,
+            false,
+            GXOS_TLS_MBEDTLS_CONFIG_PRESENT,
+            GXOS_TLS_MBEDTLS_CRYPTO_CONFIG_PRESENT,
+            kBareMetalTfPsaDependencyPresent,
+            kBareMetalMbedTlsImportPath,
+            kBareMetalConfigPath,
+            kBareMetalCryptoConfigPath,
+            kBareMetalTfPsaPath,
             kBareMetalBuildPlanPath,
             kBareMetalMbedTlsExpectedVersion,
             detected_mbedtls_version(),
+            detected_tf_psa_version(),
             kBareMetalPlannedSourceCount,
             kBareMetalPlannedSubset,
-            "Official Mbed TLS headers were found, but the guideXOS bare-metal config is missing."
+            "Official Mbed TLS 4.x headers were found, but the guideXOS split config pair is incomplete."
+        };
+    }
+    if (!kBareMetalCoreCompileHeadersPresent || !kBareMetalTfPsaDependencyPresent) {
+        return {
+            true,
+            false,
+            true,
+            true,
+            kBareMetalTfPsaDependencyPresent,
+            kBareMetalMbedTlsImportPath,
+            kBareMetalConfigPath,
+            kBareMetalCryptoConfigPath,
+            kBareMetalTfPsaPath,
+            kBareMetalBuildPlanPath,
+            kBareMetalMbedTlsExpectedVersion,
+            detected_mbedtls_version(),
+            detected_tf_psa_version(),
+            kBareMetalPlannedSourceCount,
+            kBareMetalPlannedSubset,
+            "Mbed TLS 4.x source import is incomplete for the freestanding runtime-linked subset: required helper headers, generated config-check headers, or TF-PSA-Crypto support files are missing."
         };
     }
     return {
         true,
         true,
+        true,
+        true,
+        true,
         kBareMetalMbedTlsImportPath,
         kBareMetalConfigPath,
+        kBareMetalCryptoConfigPath,
+        kBareMetalTfPsaPath,
         kBareMetalBuildPlanPath,
         kBareMetalMbedTlsExpectedVersion,
         detected_mbedtls_version(),
+        detected_tf_psa_version(),
         kBareMetalPlannedSourceCount,
         kBareMetalPlannedSubset,
-        "Official Mbed TLS source and guideXOS config are present; Navigator handshake wiring remains gated."
+        "Official Mbed TLS 4.1.0 source, generated runtime helpers, and the guideXOS split config are present; the freestanding runtime-linked subset can build while Navigator handshakes remain gated."
     };
 #else
     return {
         false,
         false,
+        false,
+        false,
+        false,
+        "(not applicable in hosted Schannel mode)",
+        "(not applicable in hosted Schannel mode)",
         "(not applicable in hosted Schannel mode)",
         "(not applicable in hosted Schannel mode)",
         "(not applicable in hosted Schannel mode)",
         "(not applicable in hosted Schannel mode)",
         "Schannel hosted",
+        "(not applicable in hosted Schannel mode)",
         0,
         "Hosted Navigator does not compile the bare-metal Mbed TLS subset.",
         "Hosted Navigator uses Schannel; Mbed TLS import scaffolding is bare-metal only."
@@ -174,6 +548,41 @@ GxosTlsMbedTlsImportInfo make_mbedtls_import_info()
 }
 
 #if defined(GXOS_BARE_METAL)
+void copy_text(char* dst, size_t dst_size, const char* src)
+{
+    if (!dst || dst_size == 0) return;
+    if (!src) src = "";
+
+    size_t i = 0;
+    while (i + 1 < dst_size && src[i] != '\0') {
+        dst[i] = src[i];
+        ++i;
+    }
+    dst[i] = '\0';
+}
+
+struct BareMetalTlsRuntimeState {
+    bool hooksAttempted = false;
+    bool allocatorInitialized = false;
+    bool psaInitAttempted = false;
+    bool psaInitialized = false;
+    bool caChainInitialized = false;
+    bool allocatorExhausted = false;
+    GxosTlsHookStatus allocatorStatus = GxosTlsHookStatus::Pending;
+    GxosTlsHookStatus rngStatus = GxosTlsHookStatus::Pending;
+    GxosTlsHookStatus timeStatus = GxosTlsHookStatus::Pending;
+    GxosTlsHookStatus psaStatus = GxosTlsHookStatus::Pending;
+    char allocatorDetail[160] = "Allocator hook has not been attempted yet.";
+    char rngDetail[160] = "RNG callback has not been evaluated yet.";
+    char timeDetail[160] = "Time callback has not been evaluated yet.";
+    char psaDetail[160] = "psa_crypto_init() is deferred until CA parsing starts.";
+    uint8_t arena[kGxosTlsArenaCapacityBytes] = {};
+    uint8_t bytes[kGxosMaxCaStoreBytes + 1] = {};
+#if GXOS_TLS_MBEDTLS_RUNTIME_INCLUDED
+    mbedtls_x509_crt caChain;
+#endif
+};
+
 struct BareMetalCaStoreState {
     bool attempted = false;
     GxosCaStoreInfo info{
@@ -185,14 +594,37 @@ struct BareMetalCaStoreState {
         kBareMetalCaBundlePath,
         "Root CA bundle has not been checked yet."
     };
-    uint8_t bytes[kGxosMaxCaStoreBytes];
 };
+
+BareMetalTlsRuntimeState& runtime_state()
+{
+    static BareMetalTlsRuntimeState state;
+    return state;
+}
 
 BareMetalCaStoreState& ca_store_state()
 {
     static BareMetalCaStoreState state;
     return state;
 }
+
+bool hook_ready(GxosTlsHookStatus status)
+{
+    return status == GxosTlsHookStatus::Ready;
+}
+
+#if GXOS_TLS_MBEDTLS_RUNTIME_INCLUDED
+size_t count_ca_chain(const mbedtls_x509_crt* crt)
+{
+    size_t count = 0;
+    for (const mbedtls_x509_crt* cur = crt; cur != nullptr; cur = cur->next) {
+        if (cur->raw.p != nullptr && cur->raw.len != 0) {
+            ++count;
+        }
+    }
+    return count;
+}
+#endif
 #endif
 
 const char* readiness_blocker_for_ca_store(const GxosCaStoreInfo& info)
@@ -214,9 +646,9 @@ const char* readiness_blocker_for_ca_store(const GxosCaStoreInfo& info)
 
     switch (info.parseStatus) {
     case GxosCaParseStatus::SourceMissing:
-        return "Official Mbed TLS source tree is missing at third_party/mbedtls";
+        return "Mbed TLS source import is incomplete at third_party/mbedtls";
     case GxosCaParseStatus::ConfigMissing:
-        return "guideXOS Mbed TLS config is missing at third_party/mbedtls/guidexos/mbedtls_config.h";
+        return "guideXOS Mbed TLS 4.x config pair is incomplete under third_party/mbedtls/guidexos";
     case GxosCaParseStatus::ParseError:
         return info.error ? info.error : "Root CA bundle could not be parsed";
     default:
@@ -224,16 +656,189 @@ const char* readiness_blocker_for_ca_store(const GxosCaStoreInfo& info)
     }
 }
 
+GxosTlsRuntimeHookInfo make_runtime_hook_info()
+{
+#if defined(GXOS_BARE_METAL)
+    const GxosTlsMbedTlsImportInfo importInfo = make_mbedtls_import_info();
+    if (!importInfo.sourcePresent) {
+        return {
+            GxosTlsHookStatus::Unavailable,
+            GxosTlsHookStatus::Unavailable,
+            GxosTlsHookStatus::Unavailable,
+            GxosTlsHookStatus::Unavailable,
+            "Allocator hook is unavailable until the vendored Mbed TLS source tree is imported.",
+            "RNG callback is unavailable until the vendored Mbed TLS source tree is imported.",
+            "Time callback is unavailable until the vendored Mbed TLS source tree is imported.",
+            "psa_crypto_init() is unavailable until the vendored Mbed TLS source tree is imported."
+        };
+    }
+    if (!importInfo.sourceReadyForCompile || !importInfo.configPresent || !importInfo.cryptoConfigPresent ||
+        !GXOS_TLS_MBEDTLS_RUNTIME_INCLUDED) {
+        return {
+            GxosTlsHookStatus::Unavailable,
+            GxosTlsHookStatus::Unavailable,
+            GxosTlsHookStatus::Unavailable,
+            GxosTlsHookStatus::Unavailable,
+            "Allocator hook is unavailable while the Mbed TLS 4.x runtime-linked subset is incomplete.",
+            "RNG callback is unavailable while the Mbed TLS 4.x runtime-linked subset is incomplete.",
+            "Time callback is unavailable while the Mbed TLS 4.x runtime-linked subset is incomplete.",
+            "psa_crypto_init() is unavailable while the Mbed TLS 4.x runtime-linked subset is incomplete."
+        };
+    }
+
+    BareMetalTlsRuntimeState& state = runtime_state();
+    if (!state.hooksAttempted) {
+        state.hooksAttempted = true;
+#if GXOS_TLS_MBEDTLS_RUNTIME_INCLUDED
+        if (!state.caChainInitialized) {
+            mbedtls_x509_crt_init(&state.caChain);
+            state.caChainInitialized = true;
+        }
+        mbedtls_memory_buffer_alloc_init(state.arena, sizeof(state.arena));
+        mbedtls_platform_set_fprintf(gxos_mbedtls_platform_fprintf_noop);
+        mbedtls_platform_set_exit(gxos_mbedtls_platform_exit_noop);
+        mbedtls_platform_set_time(gxos_mbedtls_time_callback);
+        state.allocatorInitialized = mbedtls_memory_buffer_alloc_verify() == 0;
+        if (state.allocatorInitialized) {
+            state.allocatorStatus = GxosTlsHookStatus::Ready;
+            copy_text(state.allocatorDetail, sizeof(state.allocatorDetail),
+                "Bounded Mbed TLS memory_buffer_alloc arena is active for bare-metal TLS prerequisites.");
+        } else {
+            state.allocatorStatus = GxosTlsHookStatus::Error;
+            copy_text(state.allocatorDetail, sizeof(state.allocatorDetail),
+                "Bounded Mbed TLS arena initialization failed integrity verification.");
+        }
+#endif
+    }
+
+    if (!state.allocatorInitialized) {
+        state.allocatorStatus = GxosTlsHookStatus::Unavailable;
+        if (state.allocatorDetail[0] == '\0') {
+            copy_text(state.allocatorDetail, sizeof(state.allocatorDetail),
+                "Allocator hook is not active.");
+        }
+    }
+
+    if (gxos_random_quality() == GxosRandomQuality::Secure) {
+        state.rngStatus = GxosTlsHookStatus::Ready;
+        copy_text(state.rngDetail, sizeof(state.rngDetail),
+            "PSA external RNG callback is wired to gxos_random_bytes() and requires Secure entropy.");
+    } else {
+        state.rngStatus = GxosTlsHookStatus::Unavailable;
+        copy_text(state.rngDetail, sizeof(state.rngDetail),
+            "PSA external RNG callback is wired, but guideXOS does not currently report Secure entropy.");
+    }
+
+    if (is_clock_ready(gxos_wall_clock_status())) {
+        state.timeStatus = GxosTlsHookStatus::Ready;
+        copy_text(state.timeDetail, sizeof(state.timeDetail),
+            "mbedtls_time() and UTC gmtime_r() are wired to the guideXOS wall clock and fail closed when time is implausible.");
+    } else {
+        state.timeStatus = GxosTlsHookStatus::Unavailable;
+        copy_text(state.timeDetail, sizeof(state.timeDetail),
+            "Wall clock callback is wired, but guideXOS does not currently report a plausible UTC time.");
+    }
+
+    return {
+        state.allocatorStatus,
+        state.rngStatus,
+        state.timeStatus,
+        state.psaStatus,
+        state.allocatorDetail,
+        state.rngDetail,
+        state.timeDetail,
+        state.psaDetail
+    };
+#else
+    return {
+        GxosTlsHookStatus::NotApplicable,
+        GxosTlsHookStatus::NotApplicable,
+        GxosTlsHookStatus::NotApplicable,
+        GxosTlsHookStatus::NotApplicable,
+        "Hosted Schannel path does not use the bare-metal Mbed TLS allocator hook.",
+        "Hosted Schannel path does not use the bare-metal PSA RNG callback.",
+        "Hosted Schannel path does not use the bare-metal Mbed TLS time callback.",
+        "Hosted Schannel path does not use bare-metal psa_crypto_init()."
+    };
+#endif
+}
+
+#if defined(GXOS_BARE_METAL) && GXOS_TLS_MBEDTLS_RUNTIME_INCLUDED
+bool ensure_psa_initialized()
+{
+    BareMetalTlsRuntimeState& state = runtime_state();
+    const GxosTlsRuntimeHookInfo hooks = make_runtime_hook_info();
+
+    if (!hook_ready(hooks.allocatorStatus)) {
+        state.psaStatus = GxosTlsHookStatus::Unavailable;
+        copy_text(state.psaDetail, sizeof(state.psaDetail),
+            hooks.allocatorDetail ? hooks.allocatorDetail : "Allocator hook is unavailable.");
+        return false;
+    }
+    if (!hook_ready(hooks.rngCallbackStatus)) {
+        state.psaStatus = GxosTlsHookStatus::Unavailable;
+        copy_text(state.psaDetail, sizeof(state.psaDetail),
+            hooks.rngDetail ? hooks.rngDetail : "RNG callback is unavailable.");
+        return false;
+    }
+
+    if (state.psaInitialized) {
+        state.psaStatus = GxosTlsHookStatus::Ready;
+        copy_text(state.psaDetail, sizeof(state.psaDetail),
+            "psa_crypto_init() completed successfully for CA parsing.");
+        return true;
+    }
+
+    state.psaInitAttempted = true;
+    const psa_status_t status = psa_crypto_init();
+    if (status != PSA_SUCCESS) {
+        state.psaStatus = GxosTlsHookStatus::Error;
+        copy_text(state.psaDetail, sizeof(state.psaDetail),
+            "psa_crypto_init() failed, so CA parsing remains disabled.");
+        return false;
+    }
+
+    state.psaInitialized = true;
+    state.psaStatus = GxosTlsHookStatus::Ready;
+    copy_text(state.psaDetail, sizeof(state.psaDetail),
+        "psa_crypto_init() completed successfully for CA parsing.");
+    return true;
+}
+#endif
+
 GxosTlsArenaInfo make_tls_arena_info()
 {
 #if defined(GXOS_BARE_METAL)
+    const GxosTlsRuntimeHookInfo hooks = make_runtime_hook_info();
+    if (!hook_ready(hooks.allocatorStatus)) {
+        return {
+            hooks.allocatorStatus == GxosTlsHookStatus::Pending
+                ? GxosTlsArenaStatus::Pending
+                : GxosTlsArenaStatus::Unavailable,
+            kGxosTlsArenaCapacityBytes,
+            0,
+            0,
+            hooks.allocatorDetail
+        };
+    }
+
+#if GXOS_TLS_MBEDTLS_RUNTIME_INCLUDED
     return {
         GxosTlsArenaStatus::Ready,
         kGxosTlsArenaCapacityBytes,
         0,
         0,
-        nullptr
+        "Bounded TLS arena is initialized; live usage counters stay disabled in the freestanding build."
     };
+#else
+    return {
+        GxosTlsArenaStatus::Unavailable,
+        kGxosTlsArenaCapacityBytes,
+        0,
+        0,
+        "Allocator telemetry is unavailable because the Mbed TLS runtime-linked subset is incomplete."
+    };
+#endif
 #else
     return {
         GxosTlsArenaStatus::NotApplicable,
@@ -258,21 +863,21 @@ GxosTlsHostnameValidationInfo make_hostname_validation_info()
             "scaffolded only; original URL host is retained for future SNI and certificate checks, but Mbed TLS source import is still missing"
         };
     }
-    if (!importInfo.configPresent) {
+    if (!importInfo.sourceReadyForCompile) {
         return {
             false,
             true,
             true,
             false,
-            "scaffolded only; original URL host is retained, but the guideXOS Mbed TLS config is missing"
+            "scaffolded only; original URL host is retained, but the Mbed TLS 4.x import is still incomplete for freestanding compile"
         };
     }
     return {
-        false,
         true,
         true,
+        true,
         false,
-        "scaffolded only; SNI and original-host retention are planned, but certificate hostname verification is not active until handshake wiring lands"
+        "scaffold ready; original URL host and future SNI host are retained, numeric-IP validation stays disabled, and hostname enforcement remains gated on transport handshake insertion"
     };
 #else
     return {
@@ -289,6 +894,7 @@ GxosTlsBackendInfo make_backend_info()
 {
 #if defined(GXOS_BARE_METAL)
     const GxosTlsMbedTlsImportInfo importInfo = make_mbedtls_import_info();
+    const GxosTlsRuntimeHookInfo hooks = make_runtime_hook_info();
     const GxosTlsArenaInfo arenaInfo = make_tls_arena_info();
 
     if (!importInfo.sourcePresent) {
@@ -299,33 +905,50 @@ GxosTlsBackendInfo make_backend_info()
             "Vendored Mbed TLS source tree is missing at third_party/mbedtls; handshake support stays disabled."
         };
     }
-    if (!importInfo.configPresent) {
+    if (!importInfo.sourceReadyForCompile) {
+        return {
+            GxosTlsBackendStatus::SourceMissing,
+            "Mbed TLS bare-metal scaffold",
+            importInfo.detectedVersion,
+            "Vendored Mbed TLS 4.x import is incomplete; required compile headers, generated helpers, or TF-PSA-Crypto support files are missing, so handshake support stays disabled."
+        };
+    }
+    if (!importInfo.configPresent || !importInfo.cryptoConfigPresent) {
         return {
             GxosTlsBackendStatus::Error,
             "Mbed TLS bare-metal scaffold",
             importInfo.detectedVersion,
-            "guideXOS bare-metal Mbed TLS config is missing; handshake support stays disabled."
+            "guideXOS split Mbed TLS 4.x config is missing; handshake support stays disabled."
         };
     }
-    if (gxos_random_quality() != GxosRandomQuality::Secure) {
+
+    if (!hook_ready(hooks.allocatorStatus)) {
         return {
-            GxosTlsBackendStatus::RngUnavailable,
+            GxosTlsBackendStatus::AllocatorUnavailable,
             "Mbed TLS bare-metal scaffold",
             importInfo.detectedVersion,
-            "Secure RNG is unavailable; TLS cannot start."
+            hooks.allocatorDetail ? hooks.allocatorDetail : "Bounded TLS allocator hook is unavailable."
         };
     }
-    if (!is_clock_ready(gxos_wall_clock_status())) {
+    if (!hook_ready(hooks.rngCallbackStatus)) {
         return {
-            GxosTlsBackendStatus::ClockUnavailable,
+            GxosTlsBackendStatus::RngCallbackUnavailable,
             "Mbed TLS bare-metal scaffold",
             importInfo.detectedVersion,
-            "Wall clock is not plausible enough for certificate validation."
+            hooks.rngDetail ? hooks.rngDetail : "Secure RNG callback is unavailable."
+        };
+    }
+    if (!hook_ready(hooks.timeCallbackStatus)) {
+        return {
+            GxosTlsBackendStatus::ClockCallbackUnavailable,
+            "Mbed TLS bare-metal scaffold",
+            importInfo.detectedVersion,
+            hooks.timeDetail ? hooks.timeDetail : "Wall clock callback is unavailable."
         };
     }
     if (arenaInfo.status != GxosTlsArenaStatus::Ready) {
         return {
-            GxosTlsBackendStatus::ArenaUnavailable,
+            GxosTlsBackendStatus::AllocatorUnavailable,
             "Mbed TLS bare-metal scaffold",
             importInfo.detectedVersion,
             arenaInfo.error ? arenaInfo.error : "TLS arena is unavailable."
@@ -333,6 +956,33 @@ GxosTlsBackendInfo make_backend_info()
     }
 
     const GxosCaStoreInfo caInfo = gxos_ca_store_info();
+    if (caInfo.status == GxosCaStoreStatus::Missing) {
+        return {
+            GxosTlsBackendStatus::CaMissing,
+            "Mbed TLS bare-metal scaffold",
+            importInfo.detectedVersion,
+            caInfo.error ? caInfo.error : "Root CA bundle is missing."
+        };
+    }
+    if (caInfo.status != GxosCaStoreStatus::Loaded || caInfo.parseStatus != GxosCaParseStatus::Parsed) {
+        return {
+            GxosTlsBackendStatus::CaParseFailed,
+            "Mbed TLS bare-metal scaffold",
+            importInfo.detectedVersion,
+            caInfo.error ? caInfo.error : "Root CA bundle is not parsed."
+        };
+    }
+
+    const GxosTlsHostnameValidationInfo hostnameInfo = gxos_tls_hostname_validation_info();
+    if (hostnameInfo.available) {
+        return {
+            GxosTlsBackendStatus::HostnameValidationReady,
+            "Mbed TLS bare-metal scaffold",
+            importInfo.detectedVersion,
+            "Allocator, PSA RNG/time callbacks, and root CA parsing are ready; hostname validation scaffolding is present, but Navigator handshakes remain gated."
+        };
+    }
+
     if (caInfo.status == GxosCaStoreStatus::Loaded && caInfo.parseStatus == GxosCaParseStatus::Parsed) {
         return {
             GxosTlsBackendStatus::CaParsed,
@@ -341,19 +991,11 @@ GxosTlsBackendInfo make_backend_info()
             "Root CA bundle is parsed, but Navigator handshake wiring remains disabled."
         };
     }
-    if (caInfo.status == GxosCaStoreStatus::Loaded) {
-        return {
-            GxosTlsBackendStatus::CaLoadedNotParsed,
-            "Mbed TLS bare-metal scaffold",
-            importInfo.detectedVersion,
-            caInfo.error ? caInfo.error : "Root CA bundle is loaded, but X.509 parsing is not complete."
-        };
-    }
     return {
-        GxosTlsBackendStatus::BuildConfigured,
+        GxosTlsBackendStatus::ClockCallbackReady,
         "Mbed TLS bare-metal scaffold",
         importInfo.detectedVersion,
-        caInfo.error ? caInfo.error : "Bare-metal TLS scaffolding is configured, but the root CA bundle is not ready."
+        "Allocator, RNG callback, and wall-clock callback are ready; CA parsing has not completed yet."
     };
 #else
     return {
@@ -367,24 +1009,21 @@ GxosTlsBackendInfo make_backend_info()
 
 const char* compute_tls_prerequisites_blocker()
 {
-    if (gxos_random_quality() != GxosRandomQuality::Secure) {
-        return "Secure RNG is unavailable";
-    }
-
-    if (!is_clock_ready(gxos_wall_clock_status())) {
-        return "Wall clock is not plausible enough for TLS validation";
-    }
-
     const GxosTlsBackendInfo backend = gxos_tls_backend_info();
     if (!gxos_tls_backend_available()) {
         switch (backend.status) {
         case GxosTlsBackendStatus::SourceMissing:
-        case GxosTlsBackendStatus::BuildConfigured:
-        case GxosTlsBackendStatus::CaLoadedNotParsed:
+        case GxosTlsBackendStatus::CompileProbeReady:
+        case GxosTlsBackendStatus::AllocatorUnavailable:
+        case GxosTlsBackendStatus::AllocatorReady:
+        case GxosTlsBackendStatus::RngCallbackUnavailable:
+        case GxosTlsBackendStatus::RngCallbackReady:
+        case GxosTlsBackendStatus::ClockCallbackUnavailable:
+        case GxosTlsBackendStatus::ClockCallbackReady:
+        case GxosTlsBackendStatus::CaMissing:
+        case GxosTlsBackendStatus::CaParseFailed:
         case GxosTlsBackendStatus::CaParsed:
-        case GxosTlsBackendStatus::RngUnavailable:
-        case GxosTlsBackendStatus::ClockUnavailable:
-        case GxosTlsBackendStatus::ArenaUnavailable:
+        case GxosTlsBackendStatus::HostnameValidationReady:
         case GxosTlsBackendStatus::Error:
             return backend.error ? backend.error : "TLS backend is not ready";
         case GxosTlsBackendStatus::Unavailable:
@@ -422,12 +1061,17 @@ const char* gxos_tls_backend_status_name(GxosTlsBackendStatus status)
     switch (status) {
     case GxosTlsBackendStatus::Unavailable: return "Unavailable";
     case GxosTlsBackendStatus::SourceMissing: return "SourceMissing";
-    case GxosTlsBackendStatus::BuildConfigured: return "BuildConfigured";
-    case GxosTlsBackendStatus::CaLoadedNotParsed: return "CaLoadedNotParsed";
+    case GxosTlsBackendStatus::CompileProbeReady: return "CompileProbeReady";
+    case GxosTlsBackendStatus::AllocatorUnavailable: return "AllocatorUnavailable";
+    case GxosTlsBackendStatus::AllocatorReady: return "AllocatorReady";
+    case GxosTlsBackendStatus::RngCallbackUnavailable: return "RngCallbackUnavailable";
+    case GxosTlsBackendStatus::RngCallbackReady: return "RngCallbackReady";
+    case GxosTlsBackendStatus::ClockCallbackUnavailable: return "ClockCallbackUnavailable";
+    case GxosTlsBackendStatus::ClockCallbackReady: return "ClockCallbackReady";
+    case GxosTlsBackendStatus::CaMissing: return "CaMissing";
+    case GxosTlsBackendStatus::CaParseFailed: return "CaParseFailed";
     case GxosTlsBackendStatus::CaParsed: return "CaParsed";
-    case GxosTlsBackendStatus::RngUnavailable: return "RngUnavailable";
-    case GxosTlsBackendStatus::ClockUnavailable: return "ClockUnavailable";
-    case GxosTlsBackendStatus::ArenaUnavailable: return "ArenaUnavailable";
+    case GxosTlsBackendStatus::HostnameValidationReady: return "HostnameValidationReady";
     case GxosTlsBackendStatus::ReadyForLocalHandshake: return "ReadyForLocalHandshake";
     case GxosTlsBackendStatus::ReadyForValidatedNavigation: return "ReadyForValidatedNavigation";
     case GxosTlsBackendStatus::Error: return "Error";
@@ -483,7 +1127,8 @@ bool gxos_ca_store_load_once()
 #if defined(GXOS_BARE_METAL)
     BareMetalCaStoreState& state = ca_store_state();
     if (state.attempted) {
-        return state.info.status == GxosCaStoreStatus::Loaded;
+        return state.info.status == GxosCaStoreStatus::Loaded &&
+            state.info.parseStatus == GxosCaParseStatus::Parsed;
     }
     state.attempted = true;
 
@@ -553,7 +1198,7 @@ bool gxos_ca_store_load_once()
 
     const int32_t bytesRead = kernel::vfs::read_file(
         kBareMetalCaBundlePath,
-        state.bytes,
+        runtime_state().bytes,
         static_cast<uint32_t>(kGxosMaxCaStoreBytes));
     if (bytesRead < 0 || static_cast<uint64_t>(bytesRead) != info.size) {
         state.info = {
@@ -569,11 +1214,12 @@ bool gxos_ca_store_load_once()
     }
 
     const size_t loaded = static_cast<size_t>(bytesRead);
-    const size_t pemBegins = count_token_occurrences(state.bytes, loaded, "-----BEGIN CERTIFICATE-----");
-    const size_t pemEnds = count_token_occurrences(state.bytes, loaded, "-----END CERTIFICATE-----");
+    runtime_state().bytes[loaded] = 0;
+    const size_t pemBegins = count_token_occurrences(runtime_state().bytes, loaded, "-----BEGIN CERTIFICATE-----");
+    const size_t pemEnds = count_token_occurrences(runtime_state().bytes, loaded, "-----END CERTIFICATE-----");
     if (pemBegins == 0 || pemBegins != pemEnds ||
-        !buffer_contains_token(state.bytes, loaded, "-----BEGIN CERTIFICATE-----") ||
-        !buffer_contains_token(state.bytes, loaded, "-----END CERTIFICATE-----")) {
+        !buffer_contains_token(runtime_state().bytes, loaded, "-----BEGIN CERTIFICATE-----") ||
+        !buffer_contains_token(runtime_state().bytes, loaded, "-----END CERTIFICATE-----")) {
         state.info = {
             GxosCaStoreStatus::Invalid,
             GxosCaParseStatus::NotAttempted,
@@ -587,7 +1233,7 @@ bool gxos_ca_store_load_once()
     }
 
     const GxosTlsMbedTlsImportInfo importInfo = make_mbedtls_import_info();
-    if (!importInfo.sourcePresent) {
+    if (!importInfo.sourcePresent || !importInfo.sourceReadyForCompile) {
         state.info = {
             GxosCaStoreStatus::Loaded,
             GxosCaParseStatus::SourceMissing,
@@ -595,11 +1241,11 @@ bool gxos_ca_store_load_once()
             pemBegins,
             0,
             kBareMetalCaBundlePath,
-            "Root CA bundle is loaded, but the official Mbed TLS source tree is missing so X.509 parsing cannot begin."
+            "Root CA bundle is loaded, but the Mbed TLS 4.x source import is incomplete so X.509 parsing cannot begin."
         };
         return true;
     }
-    if (!importInfo.configPresent) {
+    if (!importInfo.configPresent || !importInfo.cryptoConfigPresent) {
         state.info = {
             GxosCaStoreStatus::Loaded,
             GxosCaParseStatus::ConfigMissing,
@@ -607,11 +1253,98 @@ bool gxos_ca_store_load_once()
             pemBegins,
             0,
             kBareMetalCaBundlePath,
-            "Root CA bundle is loaded, but the guideXOS Mbed TLS config is missing so X.509 parsing cannot begin."
+            "Root CA bundle is loaded, but the guideXOS Mbed TLS 4.x config pair is incomplete so X.509 parsing cannot begin."
         };
         return true;
     }
+#if GXOS_TLS_MBEDTLS_RUNTIME_INCLUDED
+    const GxosTlsRuntimeHookInfo hooks = gxos_tls_runtime_hook_info();
+    if (!hook_ready(hooks.allocatorStatus)) {
+        state.info = {
+            GxosCaStoreStatus::Loaded,
+            GxosCaParseStatus::ParseError,
+            loaded,
+            pemBegins,
+            0,
+            kBareMetalCaBundlePath,
+            hooks.allocatorDetail
+        };
+        return false;
+    }
+    if (!hook_ready(hooks.rngCallbackStatus)) {
+        state.info = {
+            GxosCaStoreStatus::Loaded,
+            GxosCaParseStatus::ParseError,
+            loaded,
+            pemBegins,
+            0,
+            kBareMetalCaBundlePath,
+            hooks.rngDetail
+        };
+        return false;
+    }
+    if (!hook_ready(hooks.timeCallbackStatus)) {
+        state.info = {
+            GxosCaStoreStatus::Loaded,
+            GxosCaParseStatus::ParseError,
+            loaded,
+            pemBegins,
+            0,
+            kBareMetalCaBundlePath,
+            hooks.timeDetail
+        };
+        return false;
+    }
+    if (!ensure_psa_initialized()) {
+        state.info = {
+            GxosCaStoreStatus::Loaded,
+            GxosCaParseStatus::ParseError,
+            loaded,
+            pemBegins,
+            0,
+            kBareMetalCaBundlePath,
+            runtime_state().psaDetail
+        };
+        return false;
+    }
 
+    BareMetalTlsRuntimeState& runtime = runtime_state();
+    mbedtls_x509_crt_free(&runtime.caChain);
+    mbedtls_x509_crt_init(&runtime.caChain);
+
+    const int parseResult = mbedtls_x509_crt_parse(&runtime.caChain, runtime.bytes, loaded + 1);
+    const size_t parsedCount = count_ca_chain(&runtime.caChain);
+    if (parseResult != 0 || parsedCount == 0) {
+        if (parseResult == MBEDTLS_ERR_ASN1_ALLOC_FAILED) {
+            runtime.allocatorExhausted = true;
+        }
+        mbedtls_x509_crt_free(&runtime.caChain);
+        mbedtls_x509_crt_init(&runtime.caChain);
+        state.info = {
+            GxosCaStoreStatus::Loaded,
+            GxosCaParseStatus::ParseError,
+            loaded,
+            pemBegins,
+            0,
+            kBareMetalCaBundlePath,
+            parseResult > 0
+                ? "Root CA bundle was only partially parsed; guideXOS fails closed until every certificate parses cleanly."
+                : "Mbed TLS rejected the root CA bundle during X.509 parsing."
+        };
+        return false;
+    }
+
+    state.info = {
+        GxosCaStoreStatus::Loaded,
+        GxosCaParseStatus::Parsed,
+        loaded,
+        pemBegins,
+        parsedCount,
+        kBareMetalCaBundlePath,
+        "Root CA bundle loaded once and parsed successfully through Mbed TLS."
+    };
+    return true;
+#else
     state.info = {
         GxosCaStoreStatus::Loaded,
         GxosCaParseStatus::ParseError,
@@ -619,9 +1352,10 @@ bool gxos_ca_store_load_once()
         pemBegins,
         0,
         kBareMetalCaBundlePath,
-        "Root CA bundle is loaded, but Mbed TLS X.509 parser wiring is not linked into this build yet."
+        "Root CA bundle is loaded, but the Mbed TLS runtime-linked parser subset is unavailable in this build."
     };
-    return true;
+    return false;
+#endif
 #else
     return true;
 #endif
@@ -650,6 +1384,7 @@ const char* gxos_tls_arena_status_name(GxosTlsArenaStatus status)
 {
     switch (status) {
     case GxosTlsArenaStatus::NotApplicable: return "NotApplicable";
+    case GxosTlsArenaStatus::Pending: return "Pending";
     case GxosTlsArenaStatus::Ready: return "Ready";
     case GxosTlsArenaStatus::Unavailable: return "Unavailable";
     case GxosTlsArenaStatus::Exhausted: return "Exhausted";
@@ -660,6 +1395,23 @@ const char* gxos_tls_arena_status_name(GxosTlsArenaStatus status)
 GxosTlsArenaInfo gxos_tls_arena_info()
 {
     return make_tls_arena_info();
+}
+
+const char* gxos_tls_hook_status_name(GxosTlsHookStatus status)
+{
+    switch (status) {
+    case GxosTlsHookStatus::NotApplicable: return "NotApplicable";
+    case GxosTlsHookStatus::Pending: return "Pending";
+    case GxosTlsHookStatus::Ready: return "Ready";
+    case GxosTlsHookStatus::Unavailable: return "Unavailable";
+    case GxosTlsHookStatus::Error: return "Error";
+    default: return "Unknown";
+    }
+}
+
+GxosTlsRuntimeHookInfo gxos_tls_runtime_hook_info()
+{
+    return make_runtime_hook_info();
 }
 
 GxosTlsHostnameValidationInfo gxos_tls_hostname_validation_info()
@@ -690,10 +1442,13 @@ const char* gxos_tls_certificate_validation_policy()
     if (!importInfo.sourcePresent) {
         return "disabled; original URL host is retained for future SNI and hostname checks, but Mbed TLS source import is missing";
     }
-    if (!importInfo.configPresent) {
-        return "disabled; original URL host retention is scaffolded, but the guideXOS Mbed TLS config is missing";
+    if (!importInfo.sourceReadyForCompile) {
+        return "disabled; original URL host retention is scaffolded, but the Mbed TLS 4.x source import is incomplete";
     }
-    return "disabled; original URL host retention and bounded TLS scaffolding are present, but X.509 parsing and handshake wiring are not active";
+    if (!importInfo.configPresent || !importInfo.cryptoConfigPresent) {
+        return "disabled; original URL host retention is scaffolded, but the guideXOS Mbed TLS 4.x config pair is incomplete";
+    }
+    return "disabled; allocator, RNG/time callbacks, and CA parsing may be wired, but certificate enforcement stays fail-closed until Navigator handshake insertion lands";
 #else
     return "enabled via Schannel, Windows trust, and hostname validation";
 #endif

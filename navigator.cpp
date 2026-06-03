@@ -771,6 +771,7 @@ namespace {
 		const GxosClockStatus clockStatus = gxos_wall_clock_status();
 		const GxosTlsBackendInfo tlsBackendInfo = gxos_tls_backend_info();
 		const GxosTlsMbedTlsImportInfo tlsImportInfo = gxos_tls_mbedtls_import_info();
+		const GxosTlsRuntimeHookInfo tlsHookInfo = gxos_tls_runtime_hook_info();
 		const GxosTlsArenaInfo tlsArenaInfo = gxos_tls_arena_info();
 		const GxosCaStoreInfo caStoreInfo = gxos_ca_store_info();
 		const GxosTlsHostnameValidationInfo hostnameValidationInfo = gxos_tls_hostname_validation_info();
@@ -846,14 +847,28 @@ namespace {
 			{"TLS Prerequisites", "TLS backend error", tlsBackendInfo.error ? tlsBackendInfo.error : "(none)"},
 			{"TLS Prerequisites", "Mbed TLS import path", tlsImportInfo.importPath ? tlsImportInfo.importPath : "(none)"},
 			{"TLS Prerequisites", "Mbed TLS config path", tlsImportInfo.configPath ? tlsImportInfo.configPath : "(none)"},
+			{"TLS Prerequisites", "Mbed TLS crypto config path", tlsImportInfo.cryptoConfigPath ? tlsImportInfo.cryptoConfigPath : "(none)"},
+			{"TLS Prerequisites", "Mbed TLS TF-PSA path", tlsImportInfo.tfPsaPath ? tlsImportInfo.tfPsaPath : "(none)"},
 			{"TLS Prerequisites", "Mbed TLS build plan", tlsImportInfo.buildPlanPath ? tlsImportInfo.buildPlanPath : "(none)"},
 			{"TLS Prerequisites", "Mbed TLS expected version", tlsImportInfo.expectedVersion ? tlsImportInfo.expectedVersion : "(none)"},
 			{"TLS Prerequisites", "Mbed TLS detected version", tlsImportInfo.detectedVersion ? tlsImportInfo.detectedVersion : "(none)"},
+			{"TLS Prerequisites", "TF-PSA detected version", tlsImportInfo.tfPsaDetectedVersion ? tlsImportInfo.tfPsaDetectedVersion : "(none)"},
 			{"TLS Prerequisites", "Mbed TLS planned source count", std::to_string(tlsImportInfo.plannedSourceCount)},
 			{"TLS Prerequisites", "Mbed TLS planned subset", tlsImportInfo.plannedSubset ? tlsImportInfo.plannedSubset : "(none)"},
 			{"TLS Prerequisites", "Mbed TLS source present", tlsImportInfo.sourcePresent ? "yes" : "no"},
+			{"TLS Prerequisites", "Mbed TLS source compile-ready", tlsImportInfo.sourceReadyForCompile ? "yes" : "no"},
 			{"TLS Prerequisites", "Mbed TLS config present", tlsImportInfo.configPresent ? "yes" : "no"},
+			{"TLS Prerequisites", "Mbed TLS crypto config present", tlsImportInfo.cryptoConfigPresent ? "yes" : "no"},
+			{"TLS Prerequisites", "Mbed TLS TF-PSA dependency present", tlsImportInfo.tfPsaDependencyPresent ? "yes" : "no"},
 			{"TLS Prerequisites", "Mbed TLS import detail", tlsImportInfo.detail ? tlsImportInfo.detail : "(none)"},
+			{"TLS Prerequisites", "Allocator hook status", gxos_tls_hook_status_name(tlsHookInfo.allocatorStatus)},
+			{"TLS Prerequisites", "Allocator hook detail", tlsHookInfo.allocatorDetail ? tlsHookInfo.allocatorDetail : "(none)"},
+			{"TLS Prerequisites", "RNG callback status", gxos_tls_hook_status_name(tlsHookInfo.rngCallbackStatus)},
+			{"TLS Prerequisites", "RNG callback detail", tlsHookInfo.rngDetail ? tlsHookInfo.rngDetail : "(none)"},
+			{"TLS Prerequisites", "Time callback status", gxos_tls_hook_status_name(tlsHookInfo.timeCallbackStatus)},
+			{"TLS Prerequisites", "Time callback detail", tlsHookInfo.timeDetail ? tlsHookInfo.timeDetail : "(none)"},
+			{"TLS Prerequisites", "PSA init status", gxos_tls_hook_status_name(tlsHookInfo.psaInitStatus)},
+			{"TLS Prerequisites", "PSA init detail", tlsHookInfo.psaDetail ? tlsHookInfo.psaDetail : "(none)"},
 			{"TLS Prerequisites", "TLS arena status", gxos_tls_arena_status_name(tlsArenaInfo.status)},
 			{"TLS Prerequisites", "TLS arena capacity", std::to_string(tlsArenaInfo.capacityBytes)},
 			{"TLS Prerequisites", "TLS arena in use", std::to_string(tlsArenaInfo.bytesInUse)},

@@ -24,7 +24,7 @@ if not defined CXX (
 )
 
 echo Using compiler: %CXX%
-set CXXFLAGS=-std=c++17 -Wall -O2 -iquote .
+set CXXFLAGS=-std=c++17 -Wall -O2 -iquote . -Ithird_party/mbedtls/include -Ithird_party/mbedtls/tf-psa-crypto/include -Ithird_party/mbedtls/tf-psa-crypto/drivers/builtin/include -Ithird_party/mbedtls/tf-psa-crypto/drivers/builtin/src -Ithird_party/mbedtls/tf-psa-crypto/dispatch -Ithird_party/mbedtls/tf-psa-crypto/extras -Ithird_party/mbedtls/tf-psa-crypto/platform -Ithird_party/mbedtls/tf-psa-crypto/utilities -DMBEDTLS_CONFIG_FILE=\"third_party/mbedtls/guidexos/mbedtls_config.h\" -DTF_PSA_CRYPTO_CONFIG_FILE=\"third_party/mbedtls/guidexos/crypto_config.h\"
 set LDFLAGS=-lws2_32 -lsecur32 -lcrypt32 -lbcrypt -lgdi32 -luser32 -lmsimg32
 
 REM Source files (exclude kernel)

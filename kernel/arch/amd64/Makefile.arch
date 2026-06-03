@@ -47,8 +47,8 @@ ASFLAGS := -f win64
 ARCH_LDFLAGS := -no-pie --image-base=0x100000
 # Plain ld is used as the linker for amd64, so the linker script flag is -T directly.
 LINKER_SCRIPT_FLAG := -T
-# Plain ld cannot search for -lgcc; runtime support comes from the compiled objects.
-LIBS :=
+# Plain ld cannot search for -lgcc; pass the compiler runtime archive explicitly.
+LIBS := $(shell $(CXX) -print-libgcc-file-name)
 
 # Target information
 ARCH_BITS := 64
