@@ -7,9 +7,11 @@ $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $LogDir = Join-Path $Root "logs"
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
+. (Join-Path $Root "scripts\navigator_smoke_repo_hygiene.ps1")
 
 $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $serialLog = Join-Path $LogDir "navigator-kernel-smoke-$stamp.serial.log"
+$downloadsState = Save-NavigatorSmokeDirectoryState -LiteralPath (Join-Path $Root "downloads")
 
 function Invoke-KernelBuildForSmoke {
     param([string]$ExtraCFlags)
@@ -156,6 +158,7 @@ try {
         Remove-Item $startup -ErrorAction SilentlyContinue
     }
     Restore-NormalKernelBuild
+    Restore-NavigatorSmokeDirectoryState -State $downloadsState
 }
 
 $output = if (Test-Path $serialLog) { Get-Content $serialLog -Raw } else { "" }
@@ -208,8 +211,12 @@ $checks = @(
     "[NAVIGATOR-SMOKE] tls_prereq.tls_backend_version=(not imported)",
     "[NAVIGATOR-SMOKE] tls_prereq.tls_backend_error=Vendored Mbed TLS source tree is missing at third_party/mbedtls; handshake support stays disabled.",
     "[NAVIGATOR-SMOKE] tls_prereq.mbedtls_import_path=third_party/mbedtls",
+    "[NAVIGATOR-SMOKE] tls_prereq.mbedtls_config_path=third_party/mbedtls/guidexos/mbedtls_config.h",
+    "[NAVIGATOR-SMOKE] tls_prereq.mbedtls_build_plan_path=third_party/mbedtls/guidexos/mbedtls_sources.mk",
     "[NAVIGATOR-SMOKE] tls_prereq.mbedtls_expected_version=official Mbed TLS 2.28.9 LTS source tree",
     "[NAVIGATOR-SMOKE] tls_prereq.mbedtls_detected_version=(not imported)",
+    "[NAVIGATOR-SMOKE] tls_prereq.mbedtls_planned_source_count=37",
+    "[NAVIGATOR-SMOKE] tls_prereq.mbedtls_planned_subset=minimal TLS 1.2 client + X.509/PEM + bounded entropy/DRBG + SHA/AES/RSA/ECC",
     "[NAVIGATOR-SMOKE] tls_prereq.mbedtls_source_present=no",
     "[NAVIGATOR-SMOKE] tls_prereq.mbedtls_config_present=yes",
     "[NAVIGATOR-SMOKE] tls_prereq.mbedtls_import_detail=guideXOS bare-metal config is present, but the official Mbed TLS source tree has not been imported yet.",

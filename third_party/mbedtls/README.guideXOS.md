@@ -25,5 +25,6 @@ Import steps for a future local source drop:
 1. Unpack the official release so `third_party/mbedtls/include/mbedtls/version.h` exists.
 2. Preserve `third_party/mbedtls/guidexos/mbedtls_config.h`.
 3. Keep the upstream tree isolated under `third_party/mbedtls`; do not scatter files into `kernel/` or shared app code.
-4. Wire only the required library subset for TLS client, X.509, PEM, entropy, time, and bounded allocator hooks.
-5. Keep public bare-metal HTTPS navigation disabled until local handshake and validation smokes pass deterministically.
+4. Keep the guideXOS build plan in `third_party/mbedtls/guidexos/mbedtls_sources.mk`; `kernel/Makefile` consumes it only after `include/mbedtls/version.h` is present.
+5. Wire only the required library subset for TLS client, X.509, PEM, entropy, time, and bounded allocator hooks.
+6. Keep public bare-metal HTTPS navigation disabled until local handshake and validation smokes pass deterministically.

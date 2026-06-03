@@ -41,8 +41,12 @@ struct GxosTlsMbedTlsImportInfo {
     bool sourcePresent;
     bool configPresent;
     const char* importPath;
+    const char* configPath;
+    const char* buildPlanPath;
     const char* expectedVersion;
     const char* detectedVersion;
+    size_t plannedSourceCount;
+    const char* plannedSubset;
     const char* detail;
 };
 

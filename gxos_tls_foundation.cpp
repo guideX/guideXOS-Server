@@ -31,6 +31,10 @@ constexpr const char* kHostedCaBundlePath = "(Windows trust store)";
 constexpr const char* kBareMetalMbedTlsImportPath = "third_party/mbedtls";
 constexpr const char* kBareMetalMbedTlsExpectedVersion = "official Mbed TLS 2.28.9 LTS source tree";
 constexpr const char* kBareMetalConfigPath = "third_party/mbedtls/guidexos/mbedtls_config.h";
+constexpr const char* kBareMetalBuildPlanPath = "third_party/mbedtls/guidexos/mbedtls_sources.mk";
+constexpr const char* kBareMetalPlannedSubset =
+    "minimal TLS 1.2 client + X.509/PEM + bounded entropy/DRBG + SHA/AES/RSA/ECC";
+constexpr size_t kBareMetalPlannedSourceCount = 37;
 
 size_t token_length(const char* token)
 {
@@ -104,8 +108,12 @@ GxosTlsMbedTlsImportInfo make_mbedtls_import_info()
             false,
             false,
             kBareMetalMbedTlsImportPath,
+            kBareMetalConfigPath,
+            kBareMetalBuildPlanPath,
             kBareMetalMbedTlsExpectedVersion,
             "(not imported)",
+            kBareMetalPlannedSourceCount,
+            kBareMetalPlannedSubset,
             "Official Mbed TLS source and guideXOS bare-metal config are both missing."
         };
     }
@@ -114,8 +122,12 @@ GxosTlsMbedTlsImportInfo make_mbedtls_import_info()
             false,
             true,
             kBareMetalMbedTlsImportPath,
+            kBareMetalConfigPath,
+            kBareMetalBuildPlanPath,
             kBareMetalMbedTlsExpectedVersion,
             "(not imported)",
+            kBareMetalPlannedSourceCount,
+            kBareMetalPlannedSubset,
             "guideXOS bare-metal config is present, but the official Mbed TLS source tree has not been imported yet."
         };
     }
@@ -124,8 +136,12 @@ GxosTlsMbedTlsImportInfo make_mbedtls_import_info()
             true,
             false,
             kBareMetalMbedTlsImportPath,
+            kBareMetalConfigPath,
+            kBareMetalBuildPlanPath,
             kBareMetalMbedTlsExpectedVersion,
             detected_mbedtls_version(),
+            kBareMetalPlannedSourceCount,
+            kBareMetalPlannedSubset,
             "Official Mbed TLS headers were found, but the guideXOS bare-metal config is missing."
         };
     }
@@ -133,8 +149,12 @@ GxosTlsMbedTlsImportInfo make_mbedtls_import_info()
         true,
         true,
         kBareMetalMbedTlsImportPath,
+        kBareMetalConfigPath,
+        kBareMetalBuildPlanPath,
         kBareMetalMbedTlsExpectedVersion,
         detected_mbedtls_version(),
+        kBareMetalPlannedSourceCount,
+        kBareMetalPlannedSubset,
         "Official Mbed TLS source and guideXOS config are present; Navigator handshake wiring remains gated."
     };
 #else
@@ -143,7 +163,11 @@ GxosTlsMbedTlsImportInfo make_mbedtls_import_info()
         false,
         "(not applicable in hosted Schannel mode)",
         "(not applicable in hosted Schannel mode)",
+        "(not applicable in hosted Schannel mode)",
+        "(not applicable in hosted Schannel mode)",
         "Schannel hosted",
+        0,
+        "Hosted Navigator does not compile the bare-metal Mbed TLS subset.",
         "Hosted Navigator uses Schannel; Mbed TLS import scaffolding is bare-metal only."
     };
 #endif

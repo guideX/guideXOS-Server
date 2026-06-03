@@ -46,6 +46,17 @@ KERNEL := $(BIN_DIR)/kernel.elf
 
 # Architecture-specific settings (sets CXX, AS, LD, and ARCH_CFLAGS)
 include arch/$(ARCH)/Makefile.arch
+CC ?= $(subst g++,gcc,$(CXX))
+
+MBEDTLS_GUIDEXOS_ENABLED := 0
+MBEDTLS_GUIDEXOS_MANIFEST := ../third_party/mbedtls/guidexos/mbedtls_sources.mk
+MBEDTLS_GUIDEXOS_VERSION_HEADER := ../third_party/mbedtls/include/mbedtls/version.h
+ifneq ($(wildcard $(MBEDTLS_GUIDEXOS_MANIFEST)),)
+ifneq ($(wildcard $(MBEDTLS_GUIDEXOS_VERSION_HEADER)),)
+include $(MBEDTLS_GUIDEXOS_MANIFEST)
+MBEDTLS_GUIDEXOS_ENABLED := 1
+endif
+endif
 
 # Common compiler flags
 CFLAGS := -std=c++14 -ffreestanding -O2 -Wall -Wextra -fno-exceptions -fno-rtti
@@ -53,6 +64,9 @@ CFLAGS += -nostdlib -nostdinc++ -fno-builtin
 CFLAGS += -DGXOS_BARE_METAL
 CFLAGS += -I. -I.. -Icore/include -Iarch/$(ARCH)/include
 CFLAGS += $(EXTRA_CFLAGS)
+ifneq ($(MBEDTLS_GUIDEXOS_ENABLED),0)
+CFLAGS += $(MBEDTLS_GUIDEXOS_CFLAGS)
+endif
 DEPFLAGS := -MMD -MP
 # Append architecture-specific flags
 CFLAGS += $(ARCH_CFLAGS)
@@ -68,15 +82,17 @@ LDFLAGS := $(LINKER_SCRIPT_FLAG)arch/$(ARCH)/linker.ld $(ARCH_LDFLAGS)
 CORE_SOURCES := $(wildcard core/*.cpp)
 ARCH_SOURCES := $(wildcard arch/$(ARCH)/*.cpp)
 ASM_SOURCES := $(wildcard arch/$(ARCH)/*.asm) $(wildcard arch/$(ARCH)/*.s)
+MBEDTLS_C_SOURCES := $(if $(filter 1,$(MBEDTLS_GUIDEXOS_ENABLED)),$(MBEDTLS_GUIDEXOS_C_SOURCES))
 
 # Object files
 CORE_OBJS := $(patsubst core/%.cpp,$(OBJ_DIR)/core/%.o,$(CORE_SOURCES))
 ARCH_OBJS := $(patsubst arch/$(ARCH)/%.cpp,$(OBJ_DIR)/arch/%.o,$(ARCH_SOURCES))
 ASM_OBJS := $(patsubst arch/$(ARCH)/%.asm,$(OBJ_DIR)/arch/%.o,$(ASM_SOURCES))
 ASM_OBJS += $(patsubst arch/$(ARCH)/%.s,$(OBJ_DIR)/arch/%.o,$(filter %.s,$(ASM_SOURCES)))
+MBEDTLS_C_OBJS := $(patsubst ../third_party/%.c,$(OBJ_DIR)/third_party/%.o,$(MBEDTLS_C_SOURCES))
 
-ALL_OBJS := $(CORE_OBJS) $(ARCH_OBJS) $(ASM_OBJS)
-DEPFILES := $(CORE_OBJS:.o=.d) $(ARCH_OBJS:.o=.d)
+ALL_OBJS := $(CORE_OBJS) $(ARCH_OBJS) $(ASM_OBJS) $(MBEDTLS_C_OBJS)
+DEPFILES := $(CORE_OBJS:.o=.d) $(ARCH_OBJS:.o=.d) $(MBEDTLS_C_OBJS:.o=.d)
 
 # Targets
 .PHONY: all clean info
@@ -152,12 +168,18 @@ $(OBJ_DIR)/arch/%.o: arch/$(ARCH)/%.s
 	@echo "Assembling $<..."
 	$(AS) $(ASFLAGS) $< -o $@
 
+$(OBJ_DIR)/third_party/%.o: ../third_party/%.c
+	@$(call MKDIR,$(dir $@))
+	@echo "Compiling $<..."
+	$(CC) $(filter-out -std=c++14 -fno-exceptions -fno-rtti -nostdinc++,$(CFLAGS)) $(DEPFLAGS) -c $< -o $@
+
 clean:
 	@$(call RM,build/$(ARCH))
 
 info:
 	@echo "Architecture: $(ARCH)"
 	@echo "Compiler: $(CXX)"
+	@echo "C compiler: $(CC)"
 	@echo "Assembler: $(AS)"
 	@echo "Linker: $(LD)"
 	@echo "Build directory: $(BUILD_DIR)"

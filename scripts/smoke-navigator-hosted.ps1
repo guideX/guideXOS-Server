@@ -6,8 +6,10 @@ $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $LogDir = Join-Path $Root "logs"
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
+. (Join-Path $Root "scripts\navigator_smoke_repo_hygiene.ps1")
 
 $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
+$downloadsState = Save-NavigatorSmokeDirectoryState -LiteralPath (Join-Path $Root "downloads")
 
 if ($Build) {
     & (Join-Path $Root "build.bat")
@@ -102,6 +104,7 @@ try {
         Stop-Process -Id $httpsProc.Id -Force
     }
     Remove-Item $input -ErrorAction SilentlyContinue
+    Restore-NavigatorSmokeDirectoryState -State $downloadsState
 }
 
 Write-Host $output
