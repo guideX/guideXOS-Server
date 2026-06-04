@@ -91,7 +91,10 @@ $python = Find-Python
 if (-not $python) { throw "python not found; required for local Navigator HTTP smoke server." }
 
 Write-Host "Building kernel with active Navigator HTTP/PNG smoke diagnostics..."
+$oldSmokeCaFixture = $env:GXOS_NAVIGATOR_SMOKE_CA_FIXTURE
+$env:GXOS_NAVIGATOR_SMOKE_CA_FIXTURE = "1"
 Invoke-KernelBuildForSmoke "-DGXOS_NAVIGATOR_HTTP_SMOKE_ACTIVE"
+$env:GXOS_NAVIGATOR_SMOKE_CA_FIXTURE = $oldSmokeCaFixture
 $activeSmokeBuild = $true
 
 $ovmf = "C:\Program Files\qemu\share\edk2-x86_64-code.fd"
@@ -102,6 +105,29 @@ $bootloader = Join-Path $esp "EFI\BOOT\BOOTX64.EFI"
 if (-not (Test-Path $bootloader)) {
     throw "ESP/EFI/BOOT/BOOTX64.EFI not found. Run build-kernel.bat first or pass -Build."
 }
+
+$smokeCaFixture = Join-Path $Root "scripts\fixtures\navigator-smoke-root-ca-bundle.pem"
+if (-not (Test-Path $smokeCaFixture)) {
+    throw "Navigator smoke CA fixture not found: $smokeCaFixture"
+}
+
+$espCertsDir = Join-Path $esp "certs"
+$guestSmokeCaPath = Join-Path $espCertsDir "ca-bundle.pem"
+$createdEspCertsDir = $false
+$restoredGuestSmokeCa = $false
+$savedGuestSmokeCa = $null
+
+if (-not (Test-Path $espCertsDir)) {
+    New-Item -ItemType Directory -Path $espCertsDir | Out-Null
+    $createdEspCertsDir = $true
+}
+
+if (Test-Path $guestSmokeCaPath) {
+    $savedGuestSmokeCa = [System.IO.File]::ReadAllBytes($guestSmokeCaPath)
+}
+
+Copy-Item -LiteralPath $smokeCaFixture -Destination $guestSmokeCaPath -Force
+Write-Host "Kernel smoke CA fixture mounted from $smokeCaFixture to guest path /certs/ca-bundle.pem"
 
 $startup = Join-Path $esp "startup.nsh"
 $createdStartup = $false
@@ -156,6 +182,15 @@ try {
     if ($httpProc -and -not $httpProc.HasExited) {
         Stop-Process -Id $httpProc.Id -Force
     }
+    if ($null -ne $savedGuestSmokeCa) {
+        [System.IO.File]::WriteAllBytes($guestSmokeCaPath, $savedGuestSmokeCa)
+        $restoredGuestSmokeCa = $true
+    } else {
+        Remove-Item $guestSmokeCaPath -ErrorAction SilentlyContinue
+    }
+    if ($createdEspCertsDir) {
+        Remove-Item $espCertsDir -Force -ErrorAction SilentlyContinue
+    }
     if ($createdStartup) {
         Remove-Item $startup -ErrorAction SilentlyContinue
     }
@@ -208,10 +243,10 @@ $checks = @(
     "[NAVIGATOR-SMOKE] tls_prereq.rng_fail_closed=false",
     "[NAVIGATOR-SMOKE] tls_prereq.wall_clock_status=Plausible",
     "[NAVIGATOR-SMOKE] tls_prereq.wall_clock_backend=CMOS RTC (interpreted as UTC)",
-    "[NAVIGATOR-SMOKE] tls_prereq.tls_backend_status=CaMissing",
+    "[NAVIGATOR-SMOKE] tls_prereq.tls_backend_status=ReadyForLocalHandshake",
     "[NAVIGATOR-SMOKE] tls_prereq.tls_backend_name=Mbed TLS bare-metal scaffold",
     "[NAVIGATOR-SMOKE] tls_prereq.tls_backend_version=Mbed TLS 4.1.0",
-    "[NAVIGATOR-SMOKE] tls_prereq.tls_backend_error=Root CA bundle not found at /certs/ca-bundle.pem.",
+    "[NAVIGATOR-SMOKE] tls_prereq.tls_backend_error=Allocator, PSA RNG/time callbacks, root CA parsing, and hostname validation scaffolding are ready; Navigator handshake transport insertion remains gated.",
     "[NAVIGATOR-SMOKE] tls_prereq.mbedtls_import_path=third_party/mbedtls",
     "[NAVIGATOR-SMOKE] tls_prereq.mbedtls_config_path=third_party/mbedtls/guidexos/mbedtls_config.h",
     "[NAVIGATOR-SMOKE] tls_prereq.mbedtls_crypto_config_path=third_party/mbedtls/guidexos/crypto_config.h",
@@ -242,20 +277,22 @@ $checks = @(
     "[NAVIGATOR-SMOKE] tls_prereq.tls_arena_high_water=0",
     "[NAVIGATOR-SMOKE] tls_prereq.tls_arena_detail=Bounded TLS arena is initialized; live usage counters stay disabled in the freestanding build.",
     "[NAVIGATOR-SMOKE] tls_prereq.root_ca_path=/certs/ca-bundle.pem",
-    "[NAVIGATOR-SMOKE] tls_prereq.root_ca_status=Missing",
-    "[NAVIGATOR-SMOKE] tls_prereq.root_ca_parse_status=NotAttempted",
-    "[NAVIGATOR-SMOKE] tls_prereq.root_ca_bytes=0",
-    "[NAVIGATOR-SMOKE] tls_prereq.root_ca_pem_blocks=0",
-    "[NAVIGATOR-SMOKE] tls_prereq.root_ca_parsed_certs=0",
-    "[NAVIGATOR-SMOKE] tls_prereq.root_ca_detail=Root CA bundle not found at /certs/ca-bundle.pem.",
+    "[NAVIGATOR-SMOKE] tls_prereq.root_ca_status=Loaded",
+    "[NAVIGATOR-SMOKE] tls_prereq.root_ca_parse_status=Parsed",
+    "[NAVIGATOR-SMOKE] tls_prereq.root_ca_pem_blocks=1",
+    "[NAVIGATOR-SMOKE] tls_prereq.root_ca_parsed_certs=1",
+    "[NAVIGATOR-SMOKE] tls_prereq.root_ca_fixture=smoke-only",
+    "[NAVIGATOR-SMOKE] tls_prereq.root_ca_detail=Root CA bundle loaded once and parsed successfully through Mbed TLS (smoke-only test fixture; not production trust).",
+    "[NAVIGATOR-SMOKE] tls_prereq.root_ca_missing_probe_status=Missing",
+    "[NAVIGATOR-SMOKE] tls_prereq.root_ca_missing_probe_detail=Smoke-only missing CA probe correctly fails closed.",
     "[NAVIGATOR-SMOKE] tls_prereq.hostname_validation_available=yes",
     "[NAVIGATOR-SMOKE] tls_prereq.hostname_validation_sni=yes",
     "[NAVIGATOR-SMOKE] tls_prereq.hostname_validation_original_host=yes",
     "[NAVIGATOR-SMOKE] tls_prereq.hostname_validation_numeric_ip=no",
     "[NAVIGATOR-SMOKE] tls_prereq.hostname_validation_policy=scaffold ready; original URL host and future SNI host are retained, numeric-IP validation stays disabled, and hostname enforcement remains gated on transport handshake insertion",
     "[NAVIGATOR-SMOKE] tls_prereq.certificate_validation_policy=disabled; allocator, RNG/time callbacks, and CA parsing may be wired, but certificate enforcement stays fail-closed until Navigator handshake insertion lands",
-    "[NAVIGATOR-SMOKE] tls_readiness=no",
-    "[NAVIGATOR-SMOKE] tls_readiness_blocker=Root CA bundle not found at /certs/ca-bundle.pem.",
+    "[NAVIGATOR-SMOKE] tls_readiness=yes",
+    "[NAVIGATOR-SMOKE] tls_readiness_blocker=(none)",
     "[NAVIGATOR-SMOKE] https.case.direct_unsupported.requested_url=https://example.com/",
     "[NAVIGATOR-SMOKE] https.case.direct_unsupported.final_url=https://example.com/",
     "[NAVIGATOR-SMOKE] https.case.direct_unsupported.error=HTTPS/TLS unsupported",
@@ -321,6 +358,9 @@ foreach ($check in $checks) {
 }
 if (-not [regex]::IsMatch($output, '\[NAVIGATOR-SMOKE\] tls_prereq\.wall_clock_epoch=[1-9][0-9]+')) {
     $failed += "[NAVIGATOR-SMOKE] tls_prereq.wall_clock_epoch=<positive Unix seconds>"
+}
+if (-not [regex]::IsMatch($output, '\[NAVIGATOR-SMOKE\] tls_prereq\.root_ca_bytes=[1-9][0-9]*')) {
+    $failed += "[NAVIGATOR-SMOKE] tls_prereq.root_ca_bytes=<positive bytes>"
 }
 if (-not [regex]::IsMatch($output, '\[NAVIGATOR-SMOKE\] tls_prereq\.wall_clock_utc=20[2-9][0-9]-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z')) {
     $failed += "[NAVIGATOR-SMOKE] tls_prereq.wall_clock_utc=<plausible UTC date>"

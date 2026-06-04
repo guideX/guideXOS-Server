@@ -48,7 +48,12 @@ function Build-WallpaperRuntimeImage {
     $WallpaperPackScript = Join-Path $RootDir "scripts\generate-wallpaper-pack.ps1"
     if (Test-Path $WallpaperPackScript) {
         Write-Host "      Building wallpaper filesystem image..." -ForegroundColor Cyan
-        & $WallpaperPackScript -InputDir (Join-Path $RootDir "assets\Backgrounds") -OutputDir (Join-Path $RootDir "out\wallpaper-pack") -OutputImage $Ramdisk
+        $smokeCaFixture = $env:GXOS_NAVIGATOR_SMOKE_CA_FIXTURE -eq "1"
+        if ($smokeCaFixture) {
+            & $WallpaperPackScript -InputDir (Join-Path $RootDir "assets\Backgrounds") -OutputDir (Join-Path $RootDir "out\wallpaper-pack") -OutputImage $Ramdisk -SmokeCaFixture
+        } else {
+            & $WallpaperPackScript -InputDir (Join-Path $RootDir "assets\Backgrounds") -OutputDir (Join-Path $RootDir "out\wallpaper-pack") -OutputImage $Ramdisk
+        }
         $script:WallpaperRuntimeImageBuilt = $true
     } elseif (!(Test-Path $Ramdisk)) {
         $emptyRamdisk = New-Object byte[] 1048576

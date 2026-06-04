@@ -37,6 +37,35 @@ static char s_kernelLastDnsError[64];
 
 static void strappend(char* dst, const char* src, int maxLen);
 
+static gxos::GxosCaStoreInfo probe_missing_ca_path()
+{
+    const char* probePath = "/certs/ca-bundle.missing";
+    kernel::vfs::FileInfo info{};
+    const kernel::vfs::Status statStatus = kernel::vfs::stat(probePath, &info);
+    if (statStatus == kernel::vfs::VFS_ERR_NOT_FOUND || statStatus == kernel::vfs::VFS_ERR_NOT_MOUNT) {
+        return {
+            gxos::GxosCaStoreStatus::Missing,
+            gxos::GxosCaParseStatus::NotAttempted,
+            0,
+            0,
+            0,
+            false,
+            probePath,
+            "Smoke-only missing CA probe correctly fails closed."
+        };
+    }
+    return {
+        gxos::GxosCaStoreStatus::ReadError,
+        gxos::GxosCaParseStatus::NotAttempted,
+        0,
+        0,
+        0,
+        false,
+        probePath,
+        "Smoke-only missing CA probe did not fail closed."
+    };
+}
+
 // ============================================================
 // Helper: string copy
 // ============================================================
@@ -5834,6 +5863,7 @@ void NavigatorApp::buildRuntimeDocument()
     const gxos::GxosTlsRuntimeHookInfo tlsHookInfo = gxos::gxos_tls_runtime_hook_info();
     const gxos::GxosTlsArenaInfo tlsArenaInfo = gxos::gxos_tls_arena_info();
     const gxos::GxosCaStoreInfo caStoreInfo = gxos::gxos_ca_store_info();
+    const gxos::GxosCaStoreInfo caMissingProbeInfo = probe_missing_ca_path();
     const gxos::GxosTlsHostnameValidationInfo hostnameValidationInfo = gxos::gxos_tls_hostname_validation_info();
     const bool tlsReady = gxos::gxos_tls_prerequisites_ready();
     const char* tlsReadinessBlocker = gxos::gxos_tls_prerequisites_blocker_reason();
@@ -5933,6 +5963,8 @@ void NavigatorApp::buildRuntimeDocument()
     char parsedCerts[24];
     nav_i64_to_text(static_cast<int64_t>(caStoreInfo.parsedCertificateCount), parsedCerts, sizeof(parsedCerts));
     strappend(prerequisiteLine, parsedCerts, sizeof(prerequisiteLine));
+    strappend(prerequisiteLine, "; fixture=", sizeof(prerequisiteLine));
+    strappend(prerequisiteLine, caStoreInfo.testOnlyFixture ? "smoke-only" : "normal", sizeof(prerequisiteLine));
     addBlock(BLOCK_LIST_ITEM, prerequisiteLine);
     strcopy(prerequisiteLine, "Hostname validation: available=", sizeof(prerequisiteLine));
     strappend(prerequisiteLine, hostnameValidationInfo.available ? "yes" : "no", sizeof(prerequisiteLine));
@@ -9248,6 +9280,7 @@ static bool printNavigatorRuntimeSmokePreamble()
     const gxos::GxosTlsRuntimeHookInfo tlsHookInfo = gxos::gxos_tls_runtime_hook_info();
     const gxos::GxosTlsArenaInfo tlsArenaInfo = gxos::gxos_tls_arena_info();
     const gxos::GxosCaStoreInfo caStoreInfo = gxos::gxos_ca_store_info();
+    const gxos::GxosCaStoreInfo caMissingProbeInfo = probe_missing_ca_path();
     const gxos::GxosTlsHostnameValidationInfo hostnameValidationInfo = gxos::gxos_tls_hostname_validation_info();
     const bool tlsReady = gxos::gxos_tls_prerequisites_ready();
     const char* tlsReadinessBlocker = gxos::gxos_tls_prerequisites_blocker_reason();
@@ -9388,8 +9421,14 @@ static bool printNavigatorRuntimeSmokePreamble()
     serial_put_dec64(static_cast<uint64_t>(caStoreInfo.pemBlocksDetected));
     serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.root_ca_parsed_certs=");
     serial_put_dec64(static_cast<uint64_t>(caStoreInfo.parsedCertificateCount));
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.root_ca_fixture=");
+    serial::puts(caStoreInfo.testOnlyFixture ? "smoke-only" : "normal");
     serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.root_ca_detail=");
     serial::puts(caStoreInfo.error ? caStoreInfo.error : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.root_ca_missing_probe_status=");
+    serial::puts(gxos::gxos_ca_store_status_name(caMissingProbeInfo.status));
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.root_ca_missing_probe_detail=");
+    serial::puts(caMissingProbeInfo.error ? caMissingProbeInfo.error : "(none)");
     serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.hostname_validation_available=");
     serial::puts(hostnameValidationInfo.available ? "yes" : "no");
     serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.hostname_validation_sni=");

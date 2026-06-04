@@ -87,6 +87,7 @@ struct GxosCaStoreInfo {
     size_t bytesLoaded;
     size_t pemBlocksDetected;
     size_t parsedCertificateCount;
+    bool testOnlyFixture;
     const char* path;
     const char* error;
 };

@@ -2,7 +2,8 @@ param(
     [string]$InputDir = "assets/Backgrounds",
     [string]$OutputDir = "out/wallpaper-pack",
     [string]$OutputImage = "ESP/ramdisk.img",
-    [int]$ImageSizeMB = 64
+    [int]$ImageSizeMB = 64,
+    [switch]$SmokeCaFixture
 )
 
 $ErrorActionPreference = "Stop"
@@ -179,7 +180,7 @@ function Add-DirectoryRecord([System.Collections.Generic.List[byte[]]]$Entries, 
     $Entries.Add((New-DirectoryEntry $ShortRaw $Attr $Cluster $Size))
 }
 
-function Write-Fat32Image([string]$ImagePath, [string]$WallpaperDir, [array]$Files, [int]$SizeMB) {
+function Write-Fat32Image([string]$ImagePath, [string]$WallpaperDir, [array]$Files, [int]$SizeMB, [switch]$SmokeCaFixture) {
     $bytesPerSector = 512
     $sectorsPerCluster = 8
     $reservedSectors = 32
@@ -195,8 +196,16 @@ function Write-Fat32Image([string]$ImagePath, [string]$WallpaperDir, [array]$Fil
 
     $rootCluster = $nextCluster++
     $wallpaperCluster = $nextCluster++
+    $certsCluster = $null
+    $enableSmokeCaFixture = $SmokeCaFixture -or $env:GXOS_NAVIGATOR_SMOKE_CA_FIXTURE -eq "1" -or ($Files | Where-Object { $_.FullName -match '[\\/]certs[\\/]' } | Select-Object -First 1)
+    if ($enableSmokeCaFixture) {
+        $certsCluster = $nextCluster++
+    }
     $fat[$rootCluster] = 0x0FFFFFFF
     $fat[$wallpaperCluster] = 0x0FFFFFFF
+    if ($null -ne $certsCluster) {
+        $fat[$certsCluster] = 0x0FFFFFFF
+    }
 
     $fileRecords = @()
     foreach ($file in $Files) {
@@ -249,14 +258,24 @@ function Write-Fat32Image([string]$ImagePath, [string]$WallpaperDir, [array]$Fil
             $stream.Write($fatBytes, 0, $fatBytes.Length)
         }
 
-        $rootEntries = New-Object 'System.Collections.Generic.List[byte[]]'
+    $rootEntries = New-Object 'System.Collections.Generic.List[byte[]]'
         $usedRoot = @{}
         Add-DirectoryRecord $rootEntries "wall" (Get-ShortName "wall" $usedRoot) 0x10 $wallpaperCluster 0
+    if ($null -ne $certsCluster) {
+        Add-DirectoryRecord $rootEntries "certs" (Get-ShortName "certs" $usedRoot) 0x10 $certsCluster 0
+    }
 
         $wallEntries = New-Object 'System.Collections.Generic.List[byte[]]'
         $usedWall = @{}
+    $certEntries = if ($null -ne $certsCluster) { New-Object 'System.Collections.Generic.List[byte[]]' } else { $null }
+    $usedCert = @{}
         foreach ($record in $fileRecords) {
-            Add-DirectoryRecord $wallEntries $record.Name (Get-ShortName $record.Name $usedWall) 0x20 $record.Cluster $record.Size
+            $parentName = Split-Path -Leaf (Split-Path -Parent $record.FullName)
+            if ($null -ne $certEntries -and $parentName -eq "certs") {
+                Add-DirectoryRecord $certEntries $record.Name (Get-ShortName $record.Name $usedCert) 0x20 $record.Cluster $record.Size
+            } else {
+                Add-DirectoryRecord $wallEntries $record.Name (Get-ShortName $record.Name $usedWall) 0x20 $record.Cluster $record.Size
+            }
         }
 
         foreach ($pair in @(@($rootCluster, $rootEntries), @($wallpaperCluster, $wallEntries))) {
@@ -265,6 +284,18 @@ function Write-Fat32Image([string]$ImagePath, [string]$WallpaperDir, [array]$Fil
             $dirBytes = New-Object byte[] $clusterBytes
             $offset = 0
             foreach ($entry in $entries) {
+                [Array]::Copy($entry, 0, $dirBytes, $offset, 32)
+                $offset += 32
+            }
+            $stream.Position = ($dataStartSector + (($cluster - 2) * $sectorsPerCluster)) * $bytesPerSector
+            $stream.Write($dirBytes, 0, $dirBytes.Length)
+        }
+
+        if ($null -ne $certEntries) {
+            $cluster = [uint32]$certsCluster
+            $dirBytes = New-Object byte[] $clusterBytes
+            $offset = 0
+            foreach ($entry in $certEntries) {
                 [Array]::Copy($entry, 0, $dirBytes, $offset, 32)
                 $offset += 32
             }
@@ -283,13 +314,26 @@ function Write-Fat32Image([string]$ImagePath, [string]$WallpaperDir, [array]$Fil
     }
 }
 
+$staged = @()
 New-Item -ItemType Directory -Force -Path $OutputDir | Out-Null
 $wallpaperDir = Join-Path $OutputDir "wall"
 if (Test-Path $wallpaperDir) { Remove-Item -Recurse -Force $wallpaperDir }
 New-Item -ItemType Directory -Force -Path $wallpaperDir | Out-Null
 New-Item -ItemType Directory -Force -Path (Split-Path -Parent $OutputImage) | Out-Null
 
-$staged = @()
+if ($SmokeCaFixture -or $env:GXOS_NAVIGATOR_SMOKE_CA_FIXTURE -eq "1") {
+    $smokeCaFixturePath = Join-Path (Split-Path -Parent $ScriptDir) "scripts\fixtures\navigator-smoke-root-ca-bundle.pem"
+    if (-not (Test-Path $smokeCaFixturePath)) {
+        throw "Smoke CA fixture not found: $smokeCaFixturePath"
+    }
+    $certsDir = Join-Path $OutputDir "certs"
+    if (Test-Path $certsDir) { Remove-Item -Recurse -Force $certsDir }
+    New-Item -ItemType Directory -Force -Path $certsDir | Out-Null
+    $targetCa = Join-Path $certsDir "ca-bundle.pem"
+    Copy-Item -LiteralPath $smokeCaFixturePath -Destination $targetCa -Force
+    $staged += Get-Item $targetCa
+    Write-Host "      staged smoke-only CA bundle at /certs/ca-bundle.pem" -ForegroundColor Yellow
+}
 foreach ($name in $WallpaperNames) {
     foreach ($suffix in @("", "_thumb")) {
         $pngName = "$name$suffix.png"
@@ -324,5 +368,5 @@ if ($ImageSizeMB -lt $minimumMB) {
 }
 
 Write-Host "      Building wallpaper runtime filesystem: $OutputImage" -ForegroundColor Cyan
-Write-Fat32Image $OutputImage $wallpaperDir ($staged | Sort-Object Name) $ImageSizeMB
+Write-Fat32Image $OutputImage $wallpaperDir ($staged | Sort-Object Name) $ImageSizeMB -SmokeCaFixture:$SmokeCaFixture
 Write-Host "      Wallpaper runtime filesystem ready at /system/wall/" -ForegroundColor Green

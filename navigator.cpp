@@ -880,6 +880,7 @@ namespace {
 			{"TLS Prerequisites", "Root CA bytes", std::to_string(caStoreInfo.bytesLoaded)},
 			{"TLS Prerequisites", "Root CA PEM blocks", std::to_string(caStoreInfo.pemBlocksDetected)},
 			{"TLS Prerequisites", "Root CA parsed certs", std::to_string(caStoreInfo.parsedCertificateCount)},
+			{"TLS Prerequisites", "Root CA fixture", caStoreInfo.testOnlyFixture ? "smoke-only test fixture" : "normal runtime path"},
 			{"TLS Prerequisites", "Root CA detail", caStoreInfo.error ? caStoreInfo.error : "(none)"},
 			{"TLS Prerequisites", "Hostname validation available", hostnameValidationInfo.available ? "yes" : "no"},
 			{"TLS Prerequisites", "Hostname validation policy", hostnameValidationInfo.policy ? hostnameValidationInfo.policy : "(none)"},

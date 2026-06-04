@@ -305,6 +305,8 @@ namespace gxos {
 namespace {
 
 constexpr const char* kBareMetalCaBundlePath = "/certs/ca-bundle.pem";
+constexpr const char* kBareMetalMissingCaProbePath = "/certs/ca-bundle.missing";
+constexpr const char* kBareMetalSmokeFixtureMarker = "guideXOS Navigator smoke-only root CA fixture";
 constexpr const char* kHostedCaBundlePath = "(Windows trust store)";
 constexpr const char* kBareMetalMbedTlsImportPath = "third_party/mbedtls";
 constexpr const char* kBareMetalMbedTlsExpectedVersion =
@@ -380,6 +382,47 @@ const char* detected_mbedtls_version()
     return "version.h present, but compile-time version import is blocked by missing include paths or split-config prerequisites";
 #else
     return "(not imported)";
+#endif
+}
+
+GxosCaStoreInfo gxos_ca_store_probe_missing_path()
+{
+#if defined(GXOS_BARE_METAL)
+    kernel::vfs::FileInfo info{};
+    const kernel::vfs::Status statStatus = kernel::vfs::stat(kBareMetalMissingCaProbePath, &info);
+    if (statStatus == kernel::vfs::VFS_ERR_NOT_FOUND || statStatus == kernel::vfs::VFS_ERR_NOT_MOUNT) {
+        return {
+            GxosCaStoreStatus::Missing,
+            GxosCaParseStatus::NotAttempted,
+            0,
+            0,
+            0,
+            false,
+            kBareMetalMissingCaProbePath,
+            "Smoke-only missing CA probe correctly fails closed."
+        };
+    }
+    return {
+        GxosCaStoreStatus::ReadError,
+        GxosCaParseStatus::NotAttempted,
+        0,
+        0,
+        0,
+        false,
+        kBareMetalMissingCaProbePath,
+        "Smoke-only missing CA probe did not fail closed."
+    };
+#else
+    return {
+        GxosCaStoreStatus::Missing,
+        GxosCaParseStatus::NotAttempted,
+        0,
+        0,
+        0,
+        false,
+        kBareMetalMissingCaProbePath,
+        "Smoke-only missing CA probe is not applicable in hosted mode."
+    };
 #endif
 }
 
@@ -591,6 +634,7 @@ struct BareMetalCaStoreState {
         0,
         0,
         0,
+        false,
         kBareMetalCaBundlePath,
         "Root CA bundle has not been checked yet."
     };
@@ -600,6 +644,11 @@ BareMetalTlsRuntimeState& runtime_state()
 {
     static BareMetalTlsRuntimeState state;
     return state;
+}
+
+bool is_smoke_only_ca_fixture(const uint8_t* buffer, size_t buffer_len)
+{
+    return buffer_contains_token(buffer, buffer_len, kBareMetalSmokeFixtureMarker);
 }
 
 BareMetalCaStoreState& ca_store_state()
@@ -976,10 +1025,10 @@ GxosTlsBackendInfo make_backend_info()
     const GxosTlsHostnameValidationInfo hostnameInfo = gxos_tls_hostname_validation_info();
     if (hostnameInfo.available) {
         return {
-            GxosTlsBackendStatus::HostnameValidationReady,
+            GxosTlsBackendStatus::ReadyForLocalHandshake,
             "Mbed TLS bare-metal scaffold",
             importInfo.detectedVersion,
-            "Allocator, PSA RNG/time callbacks, and root CA parsing are ready; hostname validation scaffolding is present, but Navigator handshakes remain gated."
+            "Allocator, PSA RNG/time callbacks, root CA parsing, and hostname validation scaffolding are ready; Navigator handshake transport insertion remains gated."
         };
     }
 
@@ -1142,6 +1191,7 @@ bool gxos_ca_store_load_once()
             0,
             0,
             0,
+            false,
             kBareMetalCaBundlePath,
             "Root CA bundle not found at /certs/ca-bundle.pem."
         };
@@ -1154,6 +1204,7 @@ bool gxos_ca_store_load_once()
             0,
             0,
             0,
+            false,
             kBareMetalCaBundlePath,
             "Could not stat the root CA bundle through the VFS."
         };
@@ -1166,6 +1217,7 @@ bool gxos_ca_store_load_once()
             0,
             0,
             0,
+            false,
             kBareMetalCaBundlePath,
             "Root CA bundle path does not point to a regular file."
         };
@@ -1178,6 +1230,7 @@ bool gxos_ca_store_load_once()
             0,
             0,
             0,
+            false,
             kBareMetalCaBundlePath,
             "Root CA bundle is empty."
         };
@@ -1190,6 +1243,7 @@ bool gxos_ca_store_load_once()
             0,
             0,
             0,
+            false,
             kBareMetalCaBundlePath,
             "Root CA bundle exceeds the 512 KiB safety cap."
         };
@@ -1207,6 +1261,7 @@ bool gxos_ca_store_load_once()
             0,
             0,
             0,
+            false,
             kBareMetalCaBundlePath,
             "Root CA bundle read did not complete successfully."
         };
@@ -1215,6 +1270,7 @@ bool gxos_ca_store_load_once()
 
     const size_t loaded = static_cast<size_t>(bytesRead);
     runtime_state().bytes[loaded] = 0;
+    const bool testOnlyFixture = is_smoke_only_ca_fixture(runtime_state().bytes, loaded);
     const size_t pemBegins = count_token_occurrences(runtime_state().bytes, loaded, "-----BEGIN CERTIFICATE-----");
     const size_t pemEnds = count_token_occurrences(runtime_state().bytes, loaded, "-----END CERTIFICATE-----");
     if (pemBegins == 0 || pemBegins != pemEnds ||
@@ -1226,6 +1282,7 @@ bool gxos_ca_store_load_once()
             loaded,
             pemBegins,
             0,
+            testOnlyFixture,
             kBareMetalCaBundlePath,
             "Root CA bundle does not look like a PEM certificate bundle."
         };
@@ -1240,6 +1297,7 @@ bool gxos_ca_store_load_once()
             loaded,
             pemBegins,
             0,
+            testOnlyFixture,
             kBareMetalCaBundlePath,
             "Root CA bundle is loaded, but the Mbed TLS 4.x source import is incomplete so X.509 parsing cannot begin."
         };
@@ -1252,6 +1310,7 @@ bool gxos_ca_store_load_once()
             loaded,
             pemBegins,
             0,
+            testOnlyFixture,
             kBareMetalCaBundlePath,
             "Root CA bundle is loaded, but the guideXOS Mbed TLS 4.x config pair is incomplete so X.509 parsing cannot begin."
         };
@@ -1266,6 +1325,7 @@ bool gxos_ca_store_load_once()
             loaded,
             pemBegins,
             0,
+            testOnlyFixture,
             kBareMetalCaBundlePath,
             hooks.allocatorDetail
         };
@@ -1278,6 +1338,7 @@ bool gxos_ca_store_load_once()
             loaded,
             pemBegins,
             0,
+            testOnlyFixture,
             kBareMetalCaBundlePath,
             hooks.rngDetail
         };
@@ -1290,6 +1351,7 @@ bool gxos_ca_store_load_once()
             loaded,
             pemBegins,
             0,
+            testOnlyFixture,
             kBareMetalCaBundlePath,
             hooks.timeDetail
         };
@@ -1302,6 +1364,7 @@ bool gxos_ca_store_load_once()
             loaded,
             pemBegins,
             0,
+            testOnlyFixture,
             kBareMetalCaBundlePath,
             runtime_state().psaDetail
         };
@@ -1326,6 +1389,7 @@ bool gxos_ca_store_load_once()
             loaded,
             pemBegins,
             0,
+            testOnlyFixture,
             kBareMetalCaBundlePath,
             parseResult > 0
                 ? "Root CA bundle was only partially parsed; guideXOS fails closed until every certificate parses cleanly."
@@ -1340,8 +1404,11 @@ bool gxos_ca_store_load_once()
         loaded,
         pemBegins,
         parsedCount,
+        testOnlyFixture,
         kBareMetalCaBundlePath,
-        "Root CA bundle loaded once and parsed successfully through Mbed TLS."
+        testOnlyFixture
+            ? "Root CA bundle loaded once and parsed successfully through Mbed TLS (smoke-only test fixture; not production trust)."
+            : "Root CA bundle loaded once and parsed successfully through Mbed TLS."
     };
     return true;
 #else
@@ -1351,6 +1418,7 @@ bool gxos_ca_store_load_once()
         loaded,
         pemBegins,
         0,
+        testOnlyFixture,
         kBareMetalCaBundlePath,
         "Root CA bundle is loaded, but the Mbed TLS runtime-linked parser subset is unavailable in this build."
     };
@@ -1373,6 +1441,7 @@ GxosCaStoreInfo gxos_ca_store_info()
         0,
         0,
         0,
+        false,
         kHostedCaBundlePath,
         nullptr
     };
