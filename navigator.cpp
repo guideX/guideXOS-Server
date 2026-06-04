@@ -774,7 +774,11 @@ namespace {
 		const GxosTlsRuntimeHookInfo tlsHookInfo = gxos_tls_runtime_hook_info();
 		const GxosTlsArenaInfo tlsArenaInfo = gxos_tls_arena_info();
 		const GxosCaStoreInfo caStoreInfo = gxos_ca_store_info();
+		const GxosTrustStorePolicyInfo trustStorePolicy = gxos_tls_trust_store_policy_info();
+		const GxosValidatedHttpsPolicyInfo httpsPolicy = gxos_validated_https_policy_info();
 		const GxosTlsHostnameValidationInfo hostnameValidationInfo = gxos_tls_hostname_validation_info();
+		const bool localSmokeTlsReady = gxos_tls_local_smoke_https_ready();
+		const char* localSmokeTlsBlocker = gxos_tls_local_smoke_https_blocker_reason();
 		const bool tlsReady = gxos_tls_prerequisites_ready();
 		const char* tlsReadinessBlocker = gxos_tls_prerequisites_blocker_reason();
 		uint8_t rngSmokeByte = 0;
@@ -882,6 +886,12 @@ namespace {
 			{"TLS Prerequisites", "Root CA parsed certs", std::to_string(caStoreInfo.parsedCertificateCount)},
 			{"TLS Prerequisites", "Root CA fixture", caStoreInfo.testOnlyFixture ? "smoke-only test fixture" : "normal runtime path"},
 			{"TLS Prerequisites", "Root CA detail", caStoreInfo.error ? caStoreInfo.error : "(none)"},
+			{"TLS Prerequisites", "Trust store policy", gxos_trust_store_policy_state_name(trustStorePolicy.state)},
+			{"TLS Prerequisites", "Trust store source", gxos_trust_store_source_name(trustStorePolicy.source)},
+			{"TLS Prerequisites", "Trust store production-ready", trustStorePolicy.productionReady ? "yes" : "no"},
+			{"TLS Prerequisites", "HTTPS policy state", gxos_validated_https_policy_state_name(httpsPolicy.state)},
+			{"TLS Prerequisites", "Local smoke HTTPS readiness", localSmokeTlsReady ? "yes" : "no"},
+			{"TLS Prerequisites", "Local smoke HTTPS blocker", localSmokeTlsReady ? "(none)" : localSmokeTlsBlocker},
 			{"TLS Prerequisites", "Hostname validation available", hostnameValidationInfo.available ? "yes" : "no"},
 			{"TLS Prerequisites", "Hostname validation policy", hostnameValidationInfo.policy ? hostnameValidationInfo.policy : "(none)"},
 			{"TLS Prerequisites", "TLS SNI support", hostnameValidationInfo.sniSupported ? "yes" : "no"},

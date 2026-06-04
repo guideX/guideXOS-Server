@@ -1,3 +1,6 @@
+# Normalize inherited Windows process environments that contain both `Path`
+# and `PATH`, which causes Start-Process/MSBuild dictionary collisions in
+# PowerShell's case-insensitive environment handling.
 function Get-NormalizedPathValue {
     param(
         [System.Collections.IDictionary]$EnvironmentTable

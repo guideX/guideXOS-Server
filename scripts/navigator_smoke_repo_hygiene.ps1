@@ -52,3 +52,50 @@ function Restore-NavigatorSmokeDirectoryState {
         Remove-Item -LiteralPath $State.SnapshotRoot -Recurse -Force -ErrorAction SilentlyContinue
     }
 }
+
+function Save-NavigatorSmokeFileState {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$LiteralPath
+    )
+
+    $fullPath = [System.IO.Path]::GetFullPath($LiteralPath)
+    $snapshotRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("guidexos-smoke-file-" + [Guid]::NewGuid().ToString("N"))
+    $snapshotPath = Join-Path $snapshotRoot "saved.bin"
+    $exists = Test-Path -LiteralPath $fullPath
+
+    New-Item -ItemType Directory -Force -Path $snapshotRoot | Out-Null
+    if ($exists) {
+        Copy-Item -LiteralPath $fullPath -Destination $snapshotPath -Force
+    }
+
+    return [PSCustomObject]@{
+        Path = $fullPath
+        Exists = $exists
+        SnapshotRoot = $snapshotRoot
+        SnapshotPath = $snapshotPath
+    }
+}
+
+function Restore-NavigatorSmokeFileState {
+    param(
+        [Parameter(Mandatory = $true)]
+        $State
+    )
+
+    if ($State.Exists) {
+        $parent = Split-Path -Parent $State.Path
+        if ($parent -and -not (Test-Path -LiteralPath $parent)) {
+            New-Item -ItemType Directory -Force -Path $parent | Out-Null
+        }
+        if (Test-Path -LiteralPath $State.SnapshotPath) {
+            Copy-Item -LiteralPath $State.SnapshotPath -Destination $State.Path -Force
+        }
+    } elseif (Test-Path -LiteralPath $State.Path) {
+        Remove-Item -LiteralPath $State.Path -Force -ErrorAction SilentlyContinue
+    }
+
+    if (Test-Path -LiteralPath $State.SnapshotRoot) {
+        Remove-Item -LiteralPath $State.SnapshotRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}

@@ -14,6 +14,7 @@ Normalize-ProcessEnvironment
 $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $serialLog = Join-Path $LogDir "navigator-kernel-smoke-$stamp.serial.log"
 $downloadsState = Save-NavigatorSmokeDirectoryState -LiteralPath (Join-Path $Root "downloads")
+$ramdiskState = Save-NavigatorSmokeFileState -LiteralPath (Join-Path $Root "ESP\\ramdisk.img")
 
 function Invoke-KernelBuildForSmoke {
     param([string]$ExtraCFlags)
@@ -233,6 +234,7 @@ try {
     }
     Restore-NormalKernelBuild
     Restore-NavigatorSmokeDirectoryState -State $downloadsState
+    Restore-NavigatorSmokeFileState -State $ramdiskState
 }
 
 $output = if (Test-Path $serialLog) { Get-Content $serialLog -Raw } else { "" }
@@ -335,16 +337,27 @@ $checks = @(
     "[NAVIGATOR-SMOKE] tls_prereq.root_ca_parsed_certs=1",
     "[NAVIGATOR-SMOKE] tls_prereq.root_ca_fixture=smoke-only",
     "[NAVIGATOR-SMOKE] tls_prereq.root_ca_detail=Root CA bundle loaded once and parsed successfully through Mbed TLS (smoke-only test fixture; not production trust).",
+    "[NAVIGATOR-SMOKE] tls_prereq.trust_store_policy=TrustStoreParsed",
+    "[NAVIGATOR-SMOKE] tls_prereq.trust_store_source=SmokeFixtureTrust",
+    "[NAVIGATOR-SMOKE] tls_prereq.trust_store_source_detail=Navigator smoke fixture staged at /certs/ca-bundle.pem",
+    "[NAVIGATOR-SMOKE] tls_prereq.trust_store_production_ready=no",
     "[NAVIGATOR-SMOKE] tls_prereq.root_ca_missing_probe_status=Missing",
     "[NAVIGATOR-SMOKE] tls_prereq.root_ca_missing_probe_detail=Smoke-only missing CA probe correctly fails closed.",
+    "[NAVIGATOR-SMOKE] tls_prereq.root_ca_missing_probe_policy=ProductionTrustStoreUnavailable",
     "[NAVIGATOR-SMOKE] tls_prereq.hostname_validation_available=yes",
     "[NAVIGATOR-SMOKE] tls_prereq.hostname_validation_sni=yes",
     "[NAVIGATOR-SMOKE] tls_prereq.hostname_validation_original_host=yes",
     "[NAVIGATOR-SMOKE] tls_prereq.hostname_validation_numeric_ip=no",
     "[NAVIGATOR-SMOKE] tls_prereq.hostname_validation_policy=scaffold ready; original URL host and future SNI host are retained, numeric-IP validation stays disabled, and bare-metal hostname enforcement stays gated outside the controlled local-only HTTPS path",
-    "[NAVIGATOR-SMOKE] tls_prereq.certificate_validation_policy=disabled for general navigation; controlled local-only Navigator HTTPS enforces CA and hostname validation, but broad bare-metal https:// remains fail-closed until full transport policy lands",
+    "[NAVIGATOR-SMOKE] tls_prereq.certificate_validation_policy=local-smoke-only; controlled guidexos.test HTTPS enforces CA and hostname validation, but broader bare-metal https:// remains disabled until a non-smoke trust store policy is enabled",
+    "[NAVIGATOR-SMOKE] tls_prereq.https_policy_state=LocalSmokeOnly",
+    "[NAVIGATOR-SMOKE] tls_prereq.https_policy_local_ready=yes",
+    "[NAVIGATOR-SMOKE] tls_prereq.https_policy_local_blocker=(none)",
+    "[NAVIGATOR-SMOKE] tls_prereq.https_policy_broad_public_enabled=no",
+    "[NAVIGATOR-SMOKE] tls_prereq.https_policy_production_ready=no",
+    "[NAVIGATOR-SMOKE] tls_prereq.https_policy_blocker=Broad validated Navigator https:// remains disabled until a non-smoke trust store policy is explicitly enabled.",
     "[NAVIGATOR-SMOKE] tls_readiness=no",
-    "[NAVIGATOR-SMOKE] tls_readiness_blocker=Certificate validation policy is not enabled yet",
+    "[NAVIGATOR-SMOKE] tls_readiness_blocker=Broad validated Navigator https:// remains disabled until a non-smoke trust store policy is explicitly enabled.",
     "[NAVIGATOR-SMOKE] tls_smoke.url=https://guidexos.test:8443/navigator-smoke/tls-basic.html",
     "[NAVIGATOR-SMOKE] tls_smoke.load_path=NavigatorApp::loadUrl -> loadHttpUrl -> kernel_http_request",
     "[NAVIGATOR-SMOKE] tls_smoke.dns_host=guidexos.test",

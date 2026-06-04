@@ -5858,7 +5858,11 @@ void NavigatorApp::buildRuntimeDocument()
     const gxos::GxosTlsArenaInfo tlsArenaInfo = gxos::gxos_tls_arena_info();
     const gxos::GxosCaStoreInfo caStoreInfo = gxos::gxos_ca_store_info();
     const gxos::GxosCaStoreInfo caMissingProbeInfo = probe_missing_ca_path();
+    const gxos::GxosTrustStorePolicyInfo trustStorePolicy = gxos::gxos_tls_trust_store_policy_info();
+    const gxos::GxosValidatedHttpsPolicyInfo httpsPolicy = gxos::gxos_validated_https_policy_info();
     const gxos::GxosTlsHostnameValidationInfo hostnameValidationInfo = gxos::gxos_tls_hostname_validation_info();
+    const bool localSmokeTlsReady = gxos::gxos_tls_local_smoke_https_ready();
+    const char* localSmokeTlsBlocker = gxos::gxos_tls_local_smoke_https_blocker_reason();
     const bool tlsReady = gxos::gxos_tls_prerequisites_ready();
     const char* tlsReadinessBlocker = gxos::gxos_tls_prerequisites_blocker_reason();
     const bool rngReadSmoke = (rngQuality == gxos::GxosRandomQuality::Secure) &&
@@ -5960,6 +5964,34 @@ void NavigatorApp::buildRuntimeDocument()
     strappend(prerequisiteLine, "; fixture=", sizeof(prerequisiteLine));
     strappend(prerequisiteLine, caStoreInfo.testOnlyFixture ? "smoke-only" : "normal", sizeof(prerequisiteLine));
     addBlock(BLOCK_LIST_ITEM, prerequisiteLine);
+    strcopy(prerequisiteLine, "Missing-CA probe: policy=", sizeof(prerequisiteLine));
+    strappend(prerequisiteLine,
+        caMissingProbeInfo.status == gxos::GxosCaStoreStatus::Missing
+            ? "fails-closed"
+            : "unexpected-state",
+        sizeof(prerequisiteLine));
+    strappend(prerequisiteLine, "; detail=", sizeof(prerequisiteLine));
+    strappend(prerequisiteLine, caMissingProbeInfo.error ? caMissingProbeInfo.error : "(none)", sizeof(prerequisiteLine));
+    addBlock(BLOCK_LIST_ITEM, prerequisiteLine);
+    strcopy(prerequisiteLine, "Trust store policy: state=", sizeof(prerequisiteLine));
+    strappend(prerequisiteLine, gxos::gxos_trust_store_policy_state_name(trustStorePolicy.state), sizeof(prerequisiteLine));
+    strappend(prerequisiteLine, "; source=", sizeof(prerequisiteLine));
+    strappend(prerequisiteLine, gxos::gxos_trust_store_source_name(trustStorePolicy.source), sizeof(prerequisiteLine));
+    strappend(prerequisiteLine, "; production-ready=", sizeof(prerequisiteLine));
+    strappend(prerequisiteLine, trustStorePolicy.productionReady ? "yes" : "no", sizeof(prerequisiteLine));
+    addBlock(BLOCK_LIST_ITEM, prerequisiteLine);
+    strcopy(prerequisiteLine, "HTTPS policy: state=", sizeof(prerequisiteLine));
+    strappend(prerequisiteLine, gxos::gxos_validated_https_policy_state_name(httpsPolicy.state), sizeof(prerequisiteLine));
+    strappend(prerequisiteLine, "; local-smoke=", sizeof(prerequisiteLine));
+    strappend(prerequisiteLine, localSmokeTlsReady ? "ready" : "blocked", sizeof(prerequisiteLine));
+    strappend(prerequisiteLine, "; public=", sizeof(prerequisiteLine));
+    strappend(prerequisiteLine, httpsPolicy.broadPublicHttpsEnabled ? "enabled" : "disabled", sizeof(prerequisiteLine));
+    addBlock(BLOCK_LIST_ITEM, prerequisiteLine);
+    if (!localSmokeTlsReady) {
+        strcopy(prerequisiteLine, "Local smoke HTTPS blocker: ", sizeof(prerequisiteLine));
+        strappend(prerequisiteLine, localSmokeTlsBlocker ? localSmokeTlsBlocker : "(none)", sizeof(prerequisiteLine));
+        addBlock(BLOCK_LIST_ITEM, prerequisiteLine);
+    }
     strcopy(prerequisiteLine, "Hostname validation: available=", sizeof(prerequisiteLine));
     strappend(prerequisiteLine, hostnameValidationInfo.available ? "yes" : "no", sizeof(prerequisiteLine));
     strappend(prerequisiteLine, "; SNI=", sizeof(prerequisiteLine));
@@ -10323,11 +10355,15 @@ static bool printNavigatorRuntimeSmokePreamble()
     const gxos::GxosTlsArenaInfo tlsArenaInfo = gxos::gxos_tls_arena_info();
     const gxos::GxosCaStoreInfo caStoreInfo = gxos::gxos_ca_store_info();
     const gxos::GxosCaStoreInfo caMissingProbeInfo = probe_missing_ca_path();
+    const gxos::GxosTrustStorePolicyInfo trustStorePolicy = gxos::gxos_tls_trust_store_policy_info();
+    const gxos::GxosValidatedHttpsPolicyInfo httpsPolicy = gxos::gxos_validated_https_policy_info();
     const gxos::GxosTlsHostnameValidationInfo hostnameValidationInfo = gxos::gxos_tls_hostname_validation_info();
     const kernel::vfs::MountPoint* rootMount = kernel::vfs::get_mount("/");
     const kernel::vfs::MountPoint* systemMount = kernel::vfs::get_mount("/system");
     const NavigatorSmokePathProbe certsProbe = probe_navigator_smoke_path("/certs", false);
     const NavigatorSmokePathProbe caBundleProbe = probe_navigator_smoke_path("/certs/ca-bundle.pem", true);
+    const bool localSmokeTlsReady = gxos::gxos_tls_local_smoke_https_ready();
+    const char* localSmokeTlsBlocker = gxos::gxos_tls_local_smoke_https_blocker_reason();
     const bool tlsReady = gxos::gxos_tls_prerequisites_ready();
     const char* tlsReadinessBlocker = gxos::gxos_tls_prerequisites_blocker_reason();
     serial::puts("[NAVIGATOR-SMOKE] BEGIN\n");
@@ -10510,10 +10546,22 @@ static bool printNavigatorRuntimeSmokePreamble()
     serial::puts(caStoreInfo.testOnlyFixture ? "smoke-only" : "normal");
     serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.root_ca_detail=");
     serial::puts(caStoreInfo.error ? caStoreInfo.error : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.trust_store_policy=");
+    serial::puts(gxos::gxos_trust_store_policy_state_name(trustStorePolicy.state));
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.trust_store_source=");
+    serial::puts(gxos::gxos_trust_store_source_name(trustStorePolicy.source));
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.trust_store_source_detail=");
+    serial::puts(trustStorePolicy.sourceDetail ? trustStorePolicy.sourceDetail : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.trust_store_production_ready=");
+    serial::puts(trustStorePolicy.productionReady ? "yes" : "no");
     serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.root_ca_missing_probe_status=");
     serial::puts(gxos::gxos_ca_store_status_name(caMissingProbeInfo.status));
     serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.root_ca_missing_probe_detail=");
     serial::puts(caMissingProbeInfo.error ? caMissingProbeInfo.error : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.root_ca_missing_probe_policy=");
+    serial::puts(caMissingProbeInfo.status == gxos::GxosCaStoreStatus::Missing
+        ? "ProductionTrustStoreUnavailable"
+        : "TrustStoreMalformed");
     serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.hostname_validation_available=");
     serial::puts(hostnameValidationInfo.available ? "yes" : "no");
     serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.hostname_validation_sni=");
@@ -10526,6 +10574,18 @@ static bool printNavigatorRuntimeSmokePreamble()
     serial::puts(hostnameValidationInfo.policy ? hostnameValidationInfo.policy : "(none)");
     serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.certificate_validation_policy=");
     serial::puts(gxos::gxos_tls_certificate_validation_policy());
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.https_policy_state=");
+    serial::puts(gxos::gxos_validated_https_policy_state_name(httpsPolicy.state));
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.https_policy_local_ready=");
+    serial::puts(localSmokeTlsReady ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.https_policy_local_blocker=");
+    serial::puts(localSmokeTlsReady ? "(none)" : (localSmokeTlsBlocker ? localSmokeTlsBlocker : "(none)"));
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.https_policy_broad_public_enabled=");
+    serial::puts(httpsPolicy.broadPublicHttpsEnabled ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.https_policy_production_ready=");
+    serial::puts(httpsPolicy.productionReady ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.https_policy_blocker=");
+    serial::puts(httpsPolicy.blocker ? httpsPolicy.blocker : "(none)");
     serial::puts("\n[NAVIGATOR-SMOKE] tls_readiness=");
     serial::puts(tlsReady ? "yes" : "no");
     serial::puts("\n[NAVIGATOR-SMOKE] tls_readiness_blocker=");

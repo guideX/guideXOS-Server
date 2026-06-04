@@ -99,6 +99,58 @@ const char* gxos_ca_parse_status_name(GxosCaParseStatus status);
 bool gxos_ca_store_load_once();
 GxosCaStoreInfo gxos_ca_store_info();
 
+enum class GxosTrustStoreSource {
+    None,
+    SmokeFixtureTrust,
+    UserProvidedTrustStore,
+    WindowsSystemTrustStore
+};
+
+enum class GxosTrustStorePolicyState {
+    NoTrustStore,
+    ProductionTrustStoreUnavailable,
+    TrustStoreMalformed,
+    TrustStoreParsed
+};
+
+struct GxosTrustStorePolicyInfo {
+    GxosTrustStorePolicyState state;
+    GxosTrustStoreSource source;
+    const char* path;
+    const char* sourceDetail;
+    size_t sizeBytes;
+    size_t parsedCertificateCount;
+    bool smokeTestOnly;
+    bool productionReady;
+    const char* error;
+};
+
+const char* gxos_trust_store_source_name(GxosTrustStoreSource source);
+const char* gxos_trust_store_policy_state_name(GxosTrustStorePolicyState state);
+GxosTrustStorePolicyInfo gxos_tls_trust_store_policy_info();
+
+enum class GxosValidatedHttpsPolicyState {
+    Disabled,
+    LocalSmokeOnly,
+    UserTrustStoreDevMode,
+    ProductionValidated
+};
+
+struct GxosValidatedHttpsPolicyInfo {
+    GxosValidatedHttpsPolicyState state;
+    bool localAllowlistEnabled;
+    bool localSmokeReady;
+    bool broadPublicHttpsEnabled;
+    bool productionReady;
+    const char* detail;
+    const char* blocker;
+};
+
+const char* gxos_validated_https_policy_state_name(GxosValidatedHttpsPolicyState state);
+GxosValidatedHttpsPolicyInfo gxos_validated_https_policy_info();
+bool gxos_tls_local_smoke_https_ready();
+const char* gxos_tls_local_smoke_https_blocker_reason();
+
 enum class GxosTlsArenaStatus {
     NotApplicable,
     Pending,

@@ -327,6 +327,12 @@ constexpr const char* kBareMetalCaBundlePath = "/certs/ca-bundle.pem";
 constexpr const char* kBareMetalMissingCaProbePath = "/certs/ca-bundle.missing";
 constexpr const char* kBareMetalSmokeFixtureMarker = "guideXOS Navigator smoke-only root CA fixture";
 constexpr const char* kHostedCaBundlePath = "(Windows trust store)";
+constexpr const char* kHostedTrustStoreDetail = "Windows system trust store managed by Schannel";
+constexpr const char* kSmokeFixtureTrustStoreDetail = "Navigator smoke fixture staged at /certs/ca-bundle.pem";
+constexpr const char* kUserProvidedTrustStoreDetail = "User-provided trust store loaded from /certs/ca-bundle.pem";
+constexpr const char* kNoTrustStoreDetail = "No bare-metal trust store is provisioned at /certs/ca-bundle.pem";
+constexpr const char* kLocalSmokeOnlyPolicyBlocker =
+    "Broad validated Navigator https:// remains disabled until a non-smoke trust store policy is explicitly enabled.";
 constexpr const char* kBareMetalMbedTlsImportPath = "third_party/mbedtls";
 constexpr const char* kBareMetalMbedTlsExpectedVersion =
     "official Mbed TLS 4.1.0 source tree with populated TF-PSA-Crypto dependency";
@@ -346,6 +352,7 @@ size_t token_length(const char* token)
     return len;
 }
 
+#if defined(GXOS_BARE_METAL)
 bool buffer_contains_token(const uint8_t* buffer, size_t buffer_len, const char* token)
 {
     const size_t len = token_length(token);
@@ -404,47 +411,6 @@ const char* detected_mbedtls_version()
 #endif
 }
 
-GxosCaStoreInfo gxos_ca_store_probe_missing_path()
-{
-#if defined(GXOS_BARE_METAL)
-    kernel::vfs::FileInfo info{};
-    const kernel::vfs::Status statStatus = kernel::vfs::stat(kBareMetalMissingCaProbePath, &info);
-    if (statStatus == kernel::vfs::VFS_ERR_NOT_FOUND || statStatus == kernel::vfs::VFS_ERR_NOT_MOUNT) {
-        return {
-            GxosCaStoreStatus::Missing,
-            GxosCaParseStatus::NotAttempted,
-            0,
-            0,
-            0,
-            false,
-            kBareMetalMissingCaProbePath,
-            "Smoke-only missing CA probe correctly fails closed."
-        };
-    }
-    return {
-        GxosCaStoreStatus::ReadError,
-        GxosCaParseStatus::NotAttempted,
-        0,
-        0,
-        0,
-        false,
-        kBareMetalMissingCaProbePath,
-        "Smoke-only missing CA probe did not fail closed."
-    };
-#else
-    return {
-        GxosCaStoreStatus::Missing,
-        GxosCaParseStatus::NotAttempted,
-        0,
-        0,
-        0,
-        false,
-        kBareMetalMissingCaProbePath,
-        "Smoke-only missing CA probe is not applicable in hosted mode."
-    };
-#endif
-}
-
 const char* detected_tf_psa_version()
 {
 #if GXOS_TLS_TF_PSA_VERSION_INCLUDED
@@ -461,6 +427,7 @@ const char* detected_tf_psa_version()
     return "(not imported)";
 #endif
 }
+#endif
 
 constexpr bool kBareMetalCoreCompileHeadersPresent =
     GXOS_TLS_MBEDTLS_PLATFORM_HEADER_PRESENT &&
@@ -751,6 +718,170 @@ const char* readiness_blocker_for_ca_store(const GxosCaStoreInfo& info)
     }
 }
 
+ #if defined(GXOS_BARE_METAL)
+GxosTrustStoreSource trust_store_source_from_ca_info(const GxosCaStoreInfo& info)
+{
+    if (info.status == GxosCaStoreStatus::Missing && info.bytesLoaded == 0 && !info.testOnlyFixture) {
+        return GxosTrustStoreSource::None;
+    }
+    return info.testOnlyFixture
+        ? GxosTrustStoreSource::SmokeFixtureTrust
+        : GxosTrustStoreSource::UserProvidedTrustStore;
+}
+
+const char* trust_store_source_detail(GxosTrustStoreSource source)
+{
+    switch (source) {
+    case GxosTrustStoreSource::SmokeFixtureTrust: return kSmokeFixtureTrustStoreDetail;
+    case GxosTrustStoreSource::UserProvidedTrustStore: return kUserProvidedTrustStoreDetail;
+    case GxosTrustStoreSource::WindowsSystemTrustStore: return kHostedTrustStoreDetail;
+    case GxosTrustStoreSource::None:
+    default:
+        return kNoTrustStoreDetail;
+    }
+}
+#endif
+
+GxosTrustStorePolicyInfo make_trust_store_policy_info()
+{
+#if defined(GXOS_BARE_METAL)
+    const GxosCaStoreInfo caInfo = gxos_ca_store_info();
+    const GxosTrustStoreSource source = trust_store_source_from_ca_info(caInfo);
+
+    if (caInfo.status == GxosCaStoreStatus::Missing) {
+        return {
+            GxosTrustStorePolicyState::ProductionTrustStoreUnavailable,
+            GxosTrustStoreSource::None,
+            caInfo.path,
+            kNoTrustStoreDetail,
+            0,
+            0,
+            false,
+            false,
+            caInfo.error ? caInfo.error : "Root CA bundle not found."
+        };
+    }
+
+    if (caInfo.status == GxosCaStoreStatus::Loaded &&
+        caInfo.parseStatus == GxosCaParseStatus::Parsed) {
+        return {
+            GxosTrustStorePolicyState::TrustStoreParsed,
+            source,
+            caInfo.path,
+            trust_store_source_detail(source),
+            caInfo.bytesLoaded,
+            caInfo.parsedCertificateCount,
+            caInfo.testOnlyFixture,
+            source == GxosTrustStoreSource::UserProvidedTrustStore,
+            caInfo.error
+        };
+    }
+
+    return {
+        GxosTrustStorePolicyState::TrustStoreMalformed,
+        source,
+        caInfo.path,
+        trust_store_source_detail(source),
+        caInfo.bytesLoaded,
+        caInfo.parsedCertificateCount,
+        caInfo.testOnlyFixture,
+        false,
+        caInfo.error ? caInfo.error : "Trust store is present but not usable."
+    };
+#else
+    return {
+        GxosTrustStorePolicyState::TrustStoreParsed,
+        GxosTrustStoreSource::WindowsSystemTrustStore,
+        kHostedCaBundlePath,
+        kHostedTrustStoreDetail,
+        0,
+        0,
+        false,
+        true,
+        nullptr
+    };
+#endif
+}
+
+const char* compute_local_smoke_https_blocker()
+{
+#if defined(GXOS_BARE_METAL)
+    const GxosTlsBackendInfo backend = gxos_tls_backend_info();
+    if (!gxos_tls_backend_available()) {
+        return backend.error ? backend.error : "Controlled local HTTPS prerequisites are not ready yet.";
+    }
+
+    const GxosTrustStorePolicyInfo trustPolicy = make_trust_store_policy_info();
+    if (trustPolicy.state != GxosTrustStorePolicyState::TrustStoreParsed) {
+        return trustPolicy.error ? trustPolicy.error : "Controlled local HTTPS trust store is unavailable.";
+    }
+
+    const GxosTlsHostnameValidationInfo hostnameInfo = gxos_tls_hostname_validation_info();
+    if (!hostnameInfo.available) {
+        return "Controlled local HTTPS hostname validation is not active yet.";
+    }
+
+    return nullptr;
+#else
+    return nullptr;
+#endif
+}
+
+GxosValidatedHttpsPolicyInfo make_validated_https_policy_info()
+{
+#if defined(GXOS_BARE_METAL)
+    const GxosTrustStorePolicyInfo trustPolicy = make_trust_store_policy_info();
+    const bool localSmokeReady = compute_local_smoke_https_blocker() == nullptr;
+
+    if (trustPolicy.state == GxosTrustStorePolicyState::TrustStoreParsed &&
+        trustPolicy.source == GxosTrustStoreSource::SmokeFixtureTrust &&
+        localSmokeReady) {
+        return {
+            GxosValidatedHttpsPolicyState::LocalSmokeOnly,
+            true,
+            true,
+            false,
+            false,
+            "Controlled guidexos.test HTTPS is validated through the smoke-only trust fixture; broader bare-metal https:// remains disabled.",
+            kLocalSmokeOnlyPolicyBlocker
+        };
+    }
+
+    if (trustPolicy.state == GxosTrustStorePolicyState::TrustStoreParsed &&
+        trustPolicy.source == GxosTrustStoreSource::UserProvidedTrustStore) {
+        return {
+            GxosValidatedHttpsPolicyState::Disabled,
+            localSmokeReady,
+            localSmokeReady,
+            false,
+            false,
+            "A non-smoke trust store is parsed, but broader validated bare-metal https:// policy is still disabled.",
+            "UserTrustStoreDevMode and ProductionValidated remain off in this milestone."
+        };
+    }
+
+    return {
+        GxosValidatedHttpsPolicyState::Disabled,
+        false,
+        localSmokeReady,
+        false,
+        false,
+        "Broader validated bare-metal https:// policy is disabled while trust-store prerequisites remain incomplete.",
+        trustPolicy.error ? trustPolicy.error : "Trust-store policy is not ready."
+    };
+#else
+    return {
+        GxosValidatedHttpsPolicyState::ProductionValidated,
+        true,
+        true,
+        true,
+        true,
+        "Hosted Navigator uses Schannel with the Windows trust store for validated HTTPS.",
+        nullptr
+    };
+#endif
+}
+
 GxosTlsRuntimeHookInfo make_runtime_hook_info()
 {
 #if defined(GXOS_BARE_METAL)
@@ -911,8 +1042,6 @@ void tls_trace_stage(const char* stage);
 void tls_set_transport_status(GxosTlsLocalHandshakeResult* result,
                               gxos::web::HttpByteStreamTlsStatus status,
                               const char* errorText = nullptr);
-gxos::web::HttpByteStreamTlsStatus tls_status_from_backend_status(GxosTlsBackendStatus status);
-gxos::web::HttpByteStreamTlsStatus tls_status_from_verify_flags(uint32_t verifyFlags);
 
 #if defined(GXOS_BARE_METAL) && GXOS_TLS_MBEDTLS_RUNTIME_INCLUDED
 constexpr uint32_t kGxosTlsSmokeHandshakeTimeoutMs = 5000;
@@ -1162,35 +1291,6 @@ void tls_set_transport_status(GxosTlsLocalHandshakeResult* result,
         copy_text(result->error, sizeof(result->error), errorText);
     }
 }
-
-gxos::web::HttpByteStreamTlsStatus tls_status_from_backend_status(GxosTlsBackendStatus status)
-{
-    switch (status) {
-    case GxosTlsBackendStatus::RngCallbackUnavailable:
-        return gxos::web::HttpByteStreamTlsStatus::RngUnavailable;
-    case GxosTlsBackendStatus::ClockCallbackUnavailable:
-        return gxos::web::HttpByteStreamTlsStatus::ClockUnavailable;
-    case GxosTlsBackendStatus::CaMissing:
-        return gxos::web::HttpByteStreamTlsStatus::CaMissing;
-    case GxosTlsBackendStatus::CaParseFailed:
-    case GxosTlsBackendStatus::CaParsed:
-        return gxos::web::HttpByteStreamTlsStatus::CaParseFailed;
-    default:
-        return gxos::web::HttpByteStreamTlsStatus::HandshakeFailed;
-    }
-}
-
-gxos::web::HttpByteStreamTlsStatus tls_status_from_verify_flags(uint32_t verifyFlags)
-{
-#ifdef MBEDTLS_X509_BADCERT_CN_MISMATCH
-    return (verifyFlags & MBEDTLS_X509_BADCERT_CN_MISMATCH) != 0
-        ? gxos::web::HttpByteStreamTlsStatus::HostnameMismatch
-        : gxos::web::HttpByteStreamTlsStatus::CertificateVerifyFailed;
-#else
-    (void)verifyFlags;
-    return gxos::web::HttpByteStreamTlsStatus::CertificateVerifyFailed;
-#endif
-}
 #endif
 
 GxosTlsArenaInfo make_tls_arena_info()
@@ -1430,8 +1530,9 @@ const char* compute_tls_prerequisites_blocker()
         return "Certificate hostname validation is not active yet";
     }
 
-    if (!gxos_tls_certificate_validation_policy_enabled()) {
-        return "Certificate validation policy is not enabled yet";
+    const GxosValidatedHttpsPolicyInfo httpsPolicy = make_validated_https_policy_info();
+    if (httpsPolicy.state != GxosValidatedHttpsPolicyState::ProductionValidated) {
+        return httpsPolicy.blocker ? httpsPolicy.blocker : "Broader validated HTTPS policy is disabled.";
     }
 
     if (backend.status != GxosTlsBackendStatus::ReadyForValidatedNavigation) {
@@ -1787,6 +1888,60 @@ GxosCaStoreInfo gxos_ca_store_info()
 #endif
 }
 
+const char* gxos_trust_store_source_name(GxosTrustStoreSource source)
+{
+    switch (source) {
+    case GxosTrustStoreSource::None: return "None";
+    case GxosTrustStoreSource::SmokeFixtureTrust: return "SmokeFixtureTrust";
+    case GxosTrustStoreSource::UserProvidedTrustStore: return "UserProvidedTrustStore";
+    case GxosTrustStoreSource::WindowsSystemTrustStore: return "WindowsSystemTrustStore";
+    default: return "Unknown";
+    }
+}
+
+const char* gxos_trust_store_policy_state_name(GxosTrustStorePolicyState state)
+{
+    switch (state) {
+    case GxosTrustStorePolicyState::NoTrustStore: return "NoTrustStore";
+    case GxosTrustStorePolicyState::ProductionTrustStoreUnavailable: return "ProductionTrustStoreUnavailable";
+    case GxosTrustStorePolicyState::TrustStoreMalformed: return "TrustStoreMalformed";
+    case GxosTrustStorePolicyState::TrustStoreParsed: return "TrustStoreParsed";
+    default: return "Unknown";
+    }
+}
+
+GxosTrustStorePolicyInfo gxos_tls_trust_store_policy_info()
+{
+    return make_trust_store_policy_info();
+}
+
+const char* gxos_validated_https_policy_state_name(GxosValidatedHttpsPolicyState state)
+{
+    switch (state) {
+    case GxosValidatedHttpsPolicyState::Disabled: return "Disabled";
+    case GxosValidatedHttpsPolicyState::LocalSmokeOnly: return "LocalSmokeOnly";
+    case GxosValidatedHttpsPolicyState::UserTrustStoreDevMode: return "UserTrustStoreDevMode";
+    case GxosValidatedHttpsPolicyState::ProductionValidated: return "ProductionValidated";
+    default: return "Unknown";
+    }
+}
+
+GxosValidatedHttpsPolicyInfo gxos_validated_https_policy_info()
+{
+    return make_validated_https_policy_info();
+}
+
+bool gxos_tls_local_smoke_https_ready()
+{
+    return compute_local_smoke_https_blocker() == nullptr;
+}
+
+const char* gxos_tls_local_smoke_https_blocker_reason()
+{
+    const char* blocker = compute_local_smoke_https_blocker();
+    return blocker ? blocker : "none";
+}
+
 const char* gxos_tls_arena_status_name(GxosTlsArenaStatus status)
 {
     switch (status) {
@@ -2097,14 +2252,7 @@ bool gxos_tls_smoke_https_request(const char* sniHostname,
 bool gxos_tls_certificate_validation_policy_enabled()
 {
 #if defined(GXOS_BARE_METAL)
-    const GxosCaStoreInfo caInfo = gxos_ca_store_info();
-    const GxosTlsHostnameValidationInfo hostnameInfo = gxos_tls_hostname_validation_info();
-    return caInfo.status == GxosCaStoreStatus::Loaded &&
-        caInfo.parseStatus == GxosCaParseStatus::Parsed &&
-        hostnameInfo.available &&
-        is_clock_ready(gxos_wall_clock_status()) &&
-        gxos_random_quality() == GxosRandomQuality::Secure &&
-        gxos_tls_backend_info().status == GxosTlsBackendStatus::ReadyForValidatedNavigation;
+    return gxos_validated_https_policy_info().state == GxosValidatedHttpsPolicyState::ProductionValidated;
 #else
     return true;
 #endif
@@ -2113,6 +2261,19 @@ bool gxos_tls_certificate_validation_policy_enabled()
 const char* gxos_tls_certificate_validation_policy()
 {
 #if defined(GXOS_BARE_METAL)
+    const GxosValidatedHttpsPolicyInfo policy = gxos_validated_https_policy_info();
+    switch (policy.state) {
+    case GxosValidatedHttpsPolicyState::LocalSmokeOnly:
+        return "local-smoke-only; controlled guidexos.test HTTPS enforces CA and hostname validation, but broader bare-metal https:// remains disabled until a non-smoke trust store policy is enabled";
+    case GxosValidatedHttpsPolicyState::UserTrustStoreDevMode:
+        return "dev-mode scaffolded; a non-smoke trust store may be present, but broader validated bare-metal https:// is still intentionally disabled";
+    case GxosValidatedHttpsPolicyState::ProductionValidated:
+        return "enabled for validated bare-metal HTTPS";
+    case GxosValidatedHttpsPolicyState::Disabled:
+    default:
+        break;
+    }
+
     const GxosTlsMbedTlsImportInfo importInfo = gxos_tls_mbedtls_import_info();
     if (!importInfo.sourcePresent) {
         return "disabled; original URL host is retained for future SNI and hostname checks, but Mbed TLS source import is missing";
@@ -2123,7 +2284,7 @@ const char* gxos_tls_certificate_validation_policy()
     if (!importInfo.configPresent || !importInfo.cryptoConfigPresent) {
         return "disabled; original URL host retention is scaffolded, but the guideXOS Mbed TLS 4.x config pair is incomplete";
     }
-    return "disabled for general navigation; controlled local-only Navigator HTTPS enforces CA and hostname validation, but broad bare-metal https:// remains fail-closed until full transport policy lands";
+    return "disabled; trust-store policy is not production-ready, so broader bare-metal https:// remains fail-closed";
 #else
     return "enabled via Schannel, Windows trust, and hostname validation";
 #endif
