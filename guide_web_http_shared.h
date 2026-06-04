@@ -26,6 +26,78 @@ struct HttpByteStream {
     void (*close)(void* context);
 };
 
+enum class HttpByteStreamTransportSelection {
+    UnsupportedScheme = 0,
+    PlainTcpHttp,
+    LocalAllowlistedTlsHttps,
+    BlockedHttpsGeneral,
+    BlockedPolicy,
+};
+
+enum class HttpByteStreamTlsStatus {
+    NotApplicable = 0,
+    NotStarted,
+    PolicyBlocked,
+    RngUnavailable,
+    ClockUnavailable,
+    CaMissing,
+    CaParseFailed,
+    TcpConnectFailed,
+    HandshakeFailed,
+    CertificateVerifyFailed,
+    HostnameMismatch,
+    TlsWriteFailed,
+    TlsReadFailed,
+    ResponseTooLarge,
+    Success,
+};
+
+struct HttpTransportPolicyDecision {
+    HttpByteStreamTransportSelection selection;
+    HttpByteStreamTlsStatus tlsStatus;
+    bool allowlistMatched;
+    bool tcpAttemptAllowed;
+    bool tlsAttemptAllowed;
+    bool hostnameValidationRequired;
+    bool certificateValidationRequired;
+    const char* expectedTlsBackend;
+    const char* reason;
+};
+
+inline const char* httpSharedTransportSelectionName(HttpByteStreamTransportSelection selection)
+{
+    switch (selection) {
+    case HttpByteStreamTransportSelection::UnsupportedScheme: return "UnsupportedScheme";
+    case HttpByteStreamTransportSelection::PlainTcpHttp: return "PlainTcpHttp";
+    case HttpByteStreamTransportSelection::LocalAllowlistedTlsHttps: return "LocalAllowlistedTlsHttps";
+    case HttpByteStreamTransportSelection::BlockedHttpsGeneral: return "BlockedHttpsGeneral";
+    case HttpByteStreamTransportSelection::BlockedPolicy: return "BlockedPolicy";
+    default: return "Unknown";
+    }
+}
+
+inline const char* httpSharedTlsStatusName(HttpByteStreamTlsStatus status)
+{
+    switch (status) {
+    case HttpByteStreamTlsStatus::NotApplicable: return "NotApplicable";
+    case HttpByteStreamTlsStatus::NotStarted: return "NotStarted";
+    case HttpByteStreamTlsStatus::PolicyBlocked: return "PolicyBlocked";
+    case HttpByteStreamTlsStatus::RngUnavailable: return "RngUnavailable";
+    case HttpByteStreamTlsStatus::ClockUnavailable: return "ClockUnavailable";
+    case HttpByteStreamTlsStatus::CaMissing: return "CaMissing";
+    case HttpByteStreamTlsStatus::CaParseFailed: return "CaParseFailed";
+    case HttpByteStreamTlsStatus::TcpConnectFailed: return "TcpConnectFailed";
+    case HttpByteStreamTlsStatus::HandshakeFailed: return "HandshakeFailed";
+    case HttpByteStreamTlsStatus::CertificateVerifyFailed: return "CertificateVerifyFailed";
+    case HttpByteStreamTlsStatus::HostnameMismatch: return "HostnameMismatch";
+    case HttpByteStreamTlsStatus::TlsWriteFailed: return "TlsWriteFailed";
+    case HttpByteStreamTlsStatus::TlsReadFailed: return "TlsReadFailed";
+    case HttpByteStreamTlsStatus::ResponseTooLarge: return "ResponseTooLarge";
+    case HttpByteStreamTlsStatus::Success: return "Success";
+    default: return "Unknown";
+    }
+}
+
 enum HttpSharedError {
     HTTP_SHARED_OK = 0,
     HTTP_SHARED_HEADER_TOO_LARGE,

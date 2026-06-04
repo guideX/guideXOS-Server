@@ -640,6 +640,7 @@ void zero_local_handshake_result(GxosTlsLocalHandshakeResult* result)
     result->transportError = 0;
     result->mbedtlsError = 0;
     result->mbedtlsState = 0;
+    result->transportStatus = gxos::web::HttpByteStreamTlsStatus::NotStarted;
     result->sniHost[0] = '\0';
     result->stage[0] = '\0';
     result->protocol[0] = '\0';
@@ -906,6 +907,13 @@ void tls_set_stage(GxosTlsLocalHandshakeResult* result, const char* stage)
     copy_text(result->stage, sizeof(result->stage), stage ? stage : "(none)");
 }
 
+void tls_trace_stage(const char* stage);
+void tls_set_transport_status(GxosTlsLocalHandshakeResult* result,
+                              gxos::web::HttpByteStreamTlsStatus status,
+                              const char* errorText = nullptr);
+gxos::web::HttpByteStreamTlsStatus tls_status_from_backend_status(GxosTlsBackendStatus status);
+gxos::web::HttpByteStreamTlsStatus tls_status_from_verify_flags(uint32_t verifyFlags);
+
 #if defined(GXOS_BARE_METAL) && GXOS_TLS_MBEDTLS_RUNTIME_INCLUDED
 constexpr uint32_t kGxosTlsSmokeHandshakeTimeoutMs = 5000;
 constexpr uint32_t kGxosTlsSmokeIoTimeoutMs = 5000;
@@ -980,6 +988,208 @@ void tls_copy_runtime_strings(mbedtls_ssl_context* ssl, GxosTlsLocalHandshakeRes
     if (!ssl || !result) return;
     copy_text(result->protocol, sizeof(result->protocol), mbedtls_ssl_get_version(ssl));
     copy_text(result->cipherSuite, sizeof(result->cipherSuite), mbedtls_ssl_get_ciphersuite(ssl));
+}
+
+struct GxosTlsHttpByteStreamSession {
+    GxosTlsByteStream tcpStream{};
+    GxosTlsLocalHandshakeResult* result = nullptr;
+    GxosTlsSmokeIoContext io{};
+    mbedtls_ssl_context ssl;
+    mbedtls_ssl_config conf;
+    bool sslInitialized = false;
+    bool confInitialized = false;
+    bool closed = false;
+};
+
+void tls_set_transport_status(GxosTlsLocalHandshakeResult* result,
+                              gxos::web::HttpByteStreamTlsStatus status,
+                              const char* errorText)
+{
+    if (!result) return;
+    result->transportStatus = status;
+    if (errorText && errorText[0]) {
+        copy_text(result->error, sizeof(result->error), errorText);
+    }
+}
+
+gxos::web::HttpByteStreamTlsStatus tls_status_from_backend_status(GxosTlsBackendStatus status)
+{
+    switch (status) {
+    case GxosTlsBackendStatus::RngCallbackUnavailable:
+        return gxos::web::HttpByteStreamTlsStatus::RngUnavailable;
+    case GxosTlsBackendStatus::ClockCallbackUnavailable:
+        return gxos::web::HttpByteStreamTlsStatus::ClockUnavailable;
+    case GxosTlsBackendStatus::CaMissing:
+        return gxos::web::HttpByteStreamTlsStatus::CaMissing;
+    case GxosTlsBackendStatus::CaParseFailed:
+    case GxosTlsBackendStatus::CaParsed:
+        return gxos::web::HttpByteStreamTlsStatus::CaParseFailed;
+    default:
+        return gxos::web::HttpByteStreamTlsStatus::HandshakeFailed;
+    }
+}
+
+gxos::web::HttpByteStreamTlsStatus tls_status_from_verify_flags(uint32_t verifyFlags)
+{
+#ifdef MBEDTLS_X509_BADCERT_CN_MISMATCH
+    return (verifyFlags & MBEDTLS_X509_BADCERT_CN_MISMATCH) != 0
+        ? gxos::web::HttpByteStreamTlsStatus::HostnameMismatch
+        : gxos::web::HttpByteStreamTlsStatus::CertificateVerifyFailed;
+#else
+    (void)verifyFlags;
+    return gxos::web::HttpByteStreamTlsStatus::CertificateVerifyFailed;
+#endif
+}
+
+void tls_close_http_byte_stream_session(GxosTlsHttpByteStreamSession* session)
+{
+    if (!session || session->closed) return;
+    session->closed = true;
+    (void)mbedtls_ssl_close_notify(&session->ssl);
+    if (session->tcpStream.close) session->tcpStream.close(session->tcpStream.context);
+    if (session->sslInitialized) {
+        mbedtls_ssl_free(&session->ssl);
+        session->sslInitialized = false;
+    }
+    if (session->confInitialized) {
+        mbedtls_ssl_config_free(&session->conf);
+        session->confInitialized = false;
+    }
+    mbedtls_free(session);
+}
+
+int tls_http_byte_stream_read(void* context, uint8_t* buffer, int length)
+{
+    GxosTlsHttpByteStreamSession* session = static_cast<GxosTlsHttpByteStreamSession*>(context);
+    if (!session || !session->result || !buffer || length <= 0) return -1;
+
+    tls_set_stage(session->result, "response_read");
+    uint32_t ioStartTicks = static_cast<uint32_t>(kernel::pit::ticks());
+    const uint32_t ioTimeout = tls_timeout_ticks(kGxosTlsSmokeIoTimeoutMs);
+    for (;;) {
+        const int ret = mbedtls_ssl_read(&session->ssl,
+            reinterpret_cast<unsigned char*>(buffer), (size_t)length);
+        if (ret > 0) {
+            session->result->responseReadSuccess = true;
+            session->result->responseBytesRead += (size_t)ret;
+            session->result->mbedtlsError = 0;
+            session->result->mbedtlsState = session->ssl.MBEDTLS_PRIVATE(state);
+            session->result->transportStatus = gxos::web::HttpByteStreamTlsStatus::Success;
+            return ret;
+        }
+
+        session->result->mbedtlsError = ret;
+        session->result->mbedtlsState = session->ssl.MBEDTLS_PRIVATE(state);
+        if (ret == 0 || ret == MBEDTLS_ERR_SSL_PEER_CLOSE_NOTIFY || ret == MBEDTLS_ERR_SSL_CONN_EOF) {
+            session->result->mbedtlsError = 0;
+            return 0;
+        }
+        if (ret == MBEDTLS_ERR_SSL_WANT_READ || ret == MBEDTLS_ERR_SSL_WANT_WRITE) {
+            if (!tls_wait_until_ready(&session->tcpStream, ioStartTicks, ioTimeout)) {
+                tls_set_transport_status(session->result, gxos::web::HttpByteStreamTlsStatus::TlsReadFailed,
+                    "TLS response read timed out.");
+                return -1;
+            }
+            continue;
+        }
+
+        session->result->transportError = session->io.lastTransportError;
+        tls_set_transport_status(session->result, gxos::web::HttpByteStreamTlsStatus::TlsReadFailed,
+            "TLS response read failed.");
+        return -1;
+    }
+}
+
+int tls_http_byte_stream_write(void* context, const uint8_t* buffer, int length)
+{
+    GxosTlsHttpByteStreamSession* session = static_cast<GxosTlsHttpByteStreamSession*>(context);
+    if (!session || !session->result || !buffer || length <= 0) return -1;
+
+    tls_set_stage(session->result, "request_write");
+    int offset = 0;
+    uint32_t ioStartTicks = static_cast<uint32_t>(kernel::pit::ticks());
+    const uint32_t ioTimeout = tls_timeout_ticks(kGxosTlsSmokeIoTimeoutMs);
+    while (offset < length) {
+        const int ret = mbedtls_ssl_write(&session->ssl,
+            reinterpret_cast<const unsigned char*>(buffer + offset),
+            (size_t)(length - offset));
+        if (ret > 0) {
+            offset += ret;
+            session->result->requestWriteSuccess = true;
+            session->result->requestBytesWritten += (size_t)ret;
+            session->result->mbedtlsError = 0;
+            session->result->mbedtlsState = session->ssl.MBEDTLS_PRIVATE(state);
+            session->result->transportStatus = gxos::web::HttpByteStreamTlsStatus::Success;
+            ioStartTicks = static_cast<uint32_t>(kernel::pit::ticks());
+            continue;
+        }
+
+        session->result->mbedtlsError = ret;
+        session->result->mbedtlsState = session->ssl.MBEDTLS_PRIVATE(state);
+        if (ret == MBEDTLS_ERR_SSL_WANT_READ || ret == MBEDTLS_ERR_SSL_WANT_WRITE) {
+            if (!tls_wait_until_ready(&session->tcpStream, ioStartTicks, ioTimeout)) {
+                tls_set_transport_status(session->result, gxos::web::HttpByteStreamTlsStatus::TlsWriteFailed,
+                    "TLS request write timed out.");
+                return -1;
+            }
+            continue;
+        }
+
+        session->result->transportError = session->io.lastTransportError;
+        tls_set_transport_status(session->result, gxos::web::HttpByteStreamTlsStatus::TlsWriteFailed,
+            "TLS request write failed.");
+        return -1;
+    }
+    return offset;
+}
+
+void tls_http_byte_stream_close(void* context)
+{
+    tls_close_http_byte_stream_session(static_cast<GxosTlsHttpByteStreamSession*>(context));
+}
+#endif
+
+#if !defined(GXOS_BARE_METAL) || !GXOS_TLS_MBEDTLS_RUNTIME_INCLUDED
+void tls_trace_stage(const char*) {}
+
+void tls_set_transport_status(GxosTlsLocalHandshakeResult* result,
+                              gxos::web::HttpByteStreamTlsStatus status,
+                              const char* errorText)
+{
+    if (!result) return;
+    result->transportStatus = status;
+    if (errorText && errorText[0]) {
+        copy_text(result->error, sizeof(result->error), errorText);
+    }
+}
+
+gxos::web::HttpByteStreamTlsStatus tls_status_from_backend_status(GxosTlsBackendStatus status)
+{
+    switch (status) {
+    case GxosTlsBackendStatus::RngCallbackUnavailable:
+        return gxos::web::HttpByteStreamTlsStatus::RngUnavailable;
+    case GxosTlsBackendStatus::ClockCallbackUnavailable:
+        return gxos::web::HttpByteStreamTlsStatus::ClockUnavailable;
+    case GxosTlsBackendStatus::CaMissing:
+        return gxos::web::HttpByteStreamTlsStatus::CaMissing;
+    case GxosTlsBackendStatus::CaParseFailed:
+    case GxosTlsBackendStatus::CaParsed:
+        return gxos::web::HttpByteStreamTlsStatus::CaParseFailed;
+    default:
+        return gxos::web::HttpByteStreamTlsStatus::HandshakeFailed;
+    }
+}
+
+gxos::web::HttpByteStreamTlsStatus tls_status_from_verify_flags(uint32_t verifyFlags)
+{
+#ifdef MBEDTLS_X509_BADCERT_CN_MISMATCH
+    return (verifyFlags & MBEDTLS_X509_BADCERT_CN_MISMATCH) != 0
+        ? gxos::web::HttpByteStreamTlsStatus::HostnameMismatch
+        : gxos::web::HttpByteStreamTlsStatus::CertificateVerifyFailed;
+#else
+    (void)verifyFlags;
+    return gxos::web::HttpByteStreamTlsStatus::CertificateVerifyFailed;
+#endif
 }
 #endif
 
@@ -1616,6 +1826,197 @@ GxosTlsHostnameValidationInfo gxos_tls_hostname_validation_info()
     return make_hostname_validation_info();
 }
 
+bool gxos_tls_open_http_byte_stream(const char* sniHostname,
+                                    GxosTlsByteStream tcpStream,
+                                    gxos::web::HttpByteStream* outStream,
+                                    GxosTlsLocalHandshakeResult* result)
+{
+    if (outStream) {
+        outStream->context = nullptr;
+        outStream->read = nullptr;
+        outStream->write = nullptr;
+        outStream->close = nullptr;
+    }
+    zero_local_handshake_result(result);
+    if (!result || !outStream || !sniHostname || !sniHostname[0] ||
+        !tcpStream.read || !tcpStream.write || !tcpStream.close) {
+        if (result) {
+            tls_set_transport_status(result, gxos::web::HttpByteStreamTlsStatus::HandshakeFailed,
+                "Invalid TLS byte-stream parameters.");
+        }
+        return false;
+    }
+
+    result->attempted = true;
+    copy_text(result->sniHost, sizeof(result->sniHost), sniHostname);
+    result->tcpConnected = true;
+    tls_set_stage(result, "parameter_validation");
+
+#if defined(GXOS_BARE_METAL) && GXOS_TLS_MBEDTLS_RUNTIME_INCLUDED
+    const GxosTlsBackendInfo backend = gxos_tls_backend_info();
+    tls_set_stage(result, "backend_ready_check");
+    if (backend.status != GxosTlsBackendStatus::ReadyForLocalHandshake &&
+        backend.status != GxosTlsBackendStatus::ReadyForValidatedNavigation) {
+        tls_set_transport_status(result, tls_status_from_backend_status(backend.status),
+            backend.error ? backend.error : "Bare-metal TLS backend is unavailable.");
+        return false;
+    }
+
+    const GxosCaStoreInfo caInfo = gxos_ca_store_info();
+    tls_set_stage(result, "ca_ready_check");
+    if (caInfo.status != GxosCaStoreStatus::Loaded || caInfo.parseStatus != GxosCaParseStatus::Parsed) {
+        tls_set_transport_status(result,
+            caInfo.status == GxosCaStoreStatus::Missing
+                ? gxos::web::HttpByteStreamTlsStatus::CaMissing
+                : gxos::web::HttpByteStreamTlsStatus::CaParseFailed,
+            caInfo.error ? caInfo.error : "Root CA bundle is unavailable for TLS byte-stream setup.");
+        return false;
+    }
+
+    tls_set_stage(result, "psa_ready_check");
+    if (!ensure_psa_initialized()) {
+        tls_set_transport_status(result, gxos::web::HttpByteStreamTlsStatus::HandshakeFailed,
+            runtime_state().psaDetail);
+        return false;
+    }
+
+    BareMetalTlsRuntimeState& runtime = runtime_state();
+    GxosTlsHttpByteStreamSession* session =
+        static_cast<GxosTlsHttpByteStreamSession*>(mbedtls_calloc(1, sizeof(GxosTlsHttpByteStreamSession)));
+    if (!session) {
+        tls_set_transport_status(result, gxos::web::HttpByteStreamTlsStatus::HandshakeFailed,
+            "TLS byte-stream allocation failed.");
+        if (tcpStream.close) tcpStream.close(tcpStream.context);
+        return false;
+    }
+
+    session->tcpStream = tcpStream;
+    session->result = result;
+    session->io.stream = tcpStream;
+    mbedtls_ssl_init(&session->ssl);
+    session->sslInitialized = true;
+    mbedtls_ssl_config_init(&session->conf);
+    session->confInitialized = true;
+
+    bool success = false;
+    int ret = 0;
+
+    do {
+        tls_set_stage(result, "config_defaults");
+        tls_trace_stage("config_defaults");
+        ret = mbedtls_ssl_config_defaults(&session->conf, MBEDTLS_SSL_IS_CLIENT,
+                                          MBEDTLS_SSL_TRANSPORT_STREAM,
+                                          MBEDTLS_SSL_PRESET_DEFAULT);
+        if (ret != 0) {
+            result->mbedtlsError = ret;
+            tls_set_transport_status(result, gxos::web::HttpByteStreamTlsStatus::HandshakeFailed,
+                "Mbed TLS client config defaults failed for the TLS byte-stream.");
+            break;
+        }
+
+        mbedtls_ssl_conf_authmode(&session->conf, MBEDTLS_SSL_VERIFY_REQUIRED);
+        mbedtls_ssl_conf_ca_chain(&session->conf, &runtime.caChain, nullptr);
+
+        tls_set_stage(result, "ssl_setup");
+        tls_trace_stage("ssl_setup");
+        ret = mbedtls_ssl_setup(&session->ssl, &session->conf);
+        if (ret != 0) {
+            result->mbedtlsError = ret;
+            tls_set_transport_status(result, gxos::web::HttpByteStreamTlsStatus::HandshakeFailed,
+                "Mbed TLS SSL setup failed for the TLS byte-stream.");
+            break;
+        }
+
+        tls_set_stage(result, "set_hostname");
+        tls_trace_stage("set_hostname");
+        ret = mbedtls_ssl_set_hostname(&session->ssl, sniHostname);
+        if (ret != 0) {
+            result->mbedtlsError = ret;
+            tls_set_transport_status(result, gxos::web::HttpByteStreamTlsStatus::HandshakeFailed,
+                "Mbed TLS could not set the TLS SNI/hostname.");
+            break;
+        }
+        result->usedSniHostname = true;
+
+        mbedtls_ssl_set_bio(&session->ssl, &session->io, gxos_tls_stream_send, gxos_tls_stream_recv, nullptr);
+
+        tls_set_stage(result, "handshake");
+        tls_trace_stage("handshake");
+        uint32_t startTicks = static_cast<uint32_t>(kernel::pit::ticks());
+        const uint32_t handshakeTimeout = tls_timeout_ticks(kGxosTlsSmokeHandshakeTimeoutMs);
+        while ((ret = mbedtls_ssl_handshake(&session->ssl)) != 0) {
+            result->mbedtlsError = ret;
+            result->mbedtlsState = session->ssl.MBEDTLS_PRIVATE(state);
+            if (ret == MBEDTLS_ERR_SSL_WANT_READ || ret == MBEDTLS_ERR_SSL_WANT_WRITE) {
+                if (!tls_wait_until_ready(&session->tcpStream, startTicks, handshakeTimeout)) {
+                    tls_set_transport_status(result, gxos::web::HttpByteStreamTlsStatus::HandshakeFailed,
+                        "TLS handshake timed out.");
+                    ret = -1;
+                    break;
+                }
+                continue;
+            }
+            break;
+        }
+        if (ret != 0) {
+            result->mbedtlsState = session->ssl.MBEDTLS_PRIVATE(state);
+            result->verifyFlags = static_cast<uint32_t>(mbedtls_ssl_get_verify_result(&session->ssl));
+            result->certificateValidationSuccess = result->verifyFlags == 0;
+            result->hostnameValidationSuccess = result->certificateValidationSuccess &&
+                (result->verifyFlags & MBEDTLS_X509_BADCERT_CN_MISMATCH) == 0;
+            if (result->transportStatus == gxos::web::HttpByteStreamTlsStatus::NotStarted ||
+                result->transportStatus == gxos::web::HttpByteStreamTlsStatus::Success) {
+                if (result->verifyFlags != 0) {
+                    tls_set_transport_status(result, tls_status_from_verify_flags(result->verifyFlags),
+                        (result->verifyFlags & MBEDTLS_X509_BADCERT_CN_MISMATCH) != 0
+                            ? "TLS hostname validation failed."
+                            : "TLS certificate validation failed.");
+                } else {
+                    tls_set_transport_status(result, gxos::web::HttpByteStreamTlsStatus::HandshakeFailed,
+                        "TLS handshake failed.");
+                }
+            }
+            break;
+        }
+
+        result->handshakeSuccess = true;
+        result->mbedtlsState = session->ssl.MBEDTLS_PRIVATE(state);
+        tls_copy_runtime_strings(&session->ssl, result);
+        tls_set_stage(result, "peer_validation");
+        tls_trace_stage("peer_validation");
+        result->verifyFlags = static_cast<uint32_t>(mbedtls_ssl_get_verify_result(&session->ssl));
+        result->certificateValidationSuccess = result->verifyFlags == 0;
+        result->hostnameValidationSuccess =
+            result->certificateValidationSuccess &&
+            (result->verifyFlags & MBEDTLS_X509_BADCERT_CN_MISMATCH) == 0;
+        if (!result->certificateValidationSuccess) {
+            tls_set_transport_status(result, tls_status_from_verify_flags(result->verifyFlags),
+                (result->verifyFlags & MBEDTLS_X509_BADCERT_CN_MISMATCH) != 0
+                    ? "TLS hostname validation failed."
+                    : "TLS certificate validation failed.");
+            break;
+        }
+
+        result->transportStatus = gxos::web::HttpByteStreamTlsStatus::Success;
+        outStream->context = session;
+        outStream->read = tls_http_byte_stream_read;
+        outStream->write = tls_http_byte_stream_write;
+        outStream->close = tls_http_byte_stream_close;
+        success = true;
+    } while (false);
+
+    if (!success) {
+        if (session->io.lastTransportError != 0) result->transportError = session->io.lastTransportError;
+        tls_close_http_byte_stream_session(session);
+    }
+    return success;
+#else
+    tls_set_transport_status(result, gxos::web::HttpByteStreamTlsStatus::HandshakeFailed,
+        "Local TLS byte-stream is unavailable in this runtime.");
+    return false;
+#endif
+}
+
 bool gxos_tls_smoke_https_request(const char* sniHostname,
                                   const char* requestBytes,
                                   size_t requestLength,
@@ -1626,234 +2027,71 @@ bool gxos_tls_smoke_https_request(const char* sniHostname,
                                   GxosTlsLocalHandshakeResult* result)
 {
     if (responseBytesOut) *responseBytesOut = 0;
-    zero_local_handshake_result(result);
     if (responseBuffer && responseBufferSize > 0) responseBuffer[0] = '\0';
-    if (!result || !sniHostname || !sniHostname[0] || !requestBytes || requestLength == 0 ||
-        !stream.read || !stream.write || !stream.close || !responseBuffer || responseBufferSize < 2) {
-        if (result) copy_text(result->error, sizeof(result->error), "Invalid TLS smoke request parameters.");
+    if (!result || !requestBytes || requestLength == 0 || !responseBuffer || responseBufferSize < 2) {
+        if (result) {
+            zero_local_handshake_result(result);
+            tls_set_transport_status(result, gxos::web::HttpByteStreamTlsStatus::HandshakeFailed,
+                "Invalid TLS smoke request parameters.");
+        }
         return false;
     }
 
-    result->attempted = true;
-    copy_text(result->sniHost, sizeof(result->sniHost), sniHostname);
-    tls_set_stage(result, "parameter_validation");
-
-#if defined(GXOS_BARE_METAL) && GXOS_TLS_MBEDTLS_RUNTIME_INCLUDED
-    const GxosTlsBackendInfo backend = gxos_tls_backend_info();
-    tls_set_stage(result, "backend_ready_check");
-    if (backend.status != GxosTlsBackendStatus::ReadyForLocalHandshake &&
-        backend.status != GxosTlsBackendStatus::ReadyForValidatedNavigation) {
-        copy_text(result->error, sizeof(result->error),
-            backend.error ? backend.error : "Bare-metal TLS backend is unavailable.");
+    gxos::web::HttpByteStream tlsStream{};
+    if (!gxos_tls_open_http_byte_stream(sniHostname, stream, &tlsStream, result)) {
         return false;
     }
 
-    const GxosCaStoreInfo caInfo = gxos_ca_store_info();
-    tls_set_stage(result, "ca_ready_check");
-    if (caInfo.status != GxosCaStoreStatus::Loaded || caInfo.parseStatus != GxosCaParseStatus::Parsed) {
-        copy_text(result->error, sizeof(result->error),
-            caInfo.error ? caInfo.error : "Root CA bundle is unavailable for TLS smoke.");
-        return false;
-    }
-
-    tls_set_stage(result, "psa_ready_check");
-    if (!ensure_psa_initialized()) {
-        copy_text(result->error, sizeof(result->error), runtime_state().psaDetail);
-        return false;
-    }
-
-    GxosTlsSmokeIoContext io{};
-    io.stream = stream;
-    result->tcpConnected = true;
-
-    BareMetalTlsRuntimeState& runtime = runtime_state();
-    mbedtls_ssl_context ssl;
-    mbedtls_ssl_config conf;
-    mbedtls_ssl_init(&ssl);
-    mbedtls_ssl_config_init(&conf);
     bool success = false;
-    int ret = 0;
-
+    size_t totalRead = 0;
     do {
-        tls_set_stage(result, "config_defaults");
-        tls_trace_stage("config_defaults");
-        ret = mbedtls_ssl_config_defaults(&conf, MBEDTLS_SSL_IS_CLIENT,
-                                          MBEDTLS_SSL_TRANSPORT_STREAM,
-                                          MBEDTLS_SSL_PRESET_DEFAULT);
-        if (ret != 0) {
-            result->mbedtlsError = ret;
-            copy_text(result->error, sizeof(result->error),
-                "Mbed TLS client config defaults failed for local smoke.");
-            break;
-        }
-
-        mbedtls_ssl_conf_authmode(&conf, MBEDTLS_SSL_VERIFY_REQUIRED);
-        mbedtls_ssl_conf_ca_chain(&conf, &runtime.caChain, nullptr);
-
-        tls_set_stage(result, "ssl_setup");
-        tls_trace_stage("ssl_setup");
-        ret = mbedtls_ssl_setup(&ssl, &conf);
-        if (ret != 0) {
-            result->mbedtlsError = ret;
-            copy_text(result->error, sizeof(result->error),
-                "Mbed TLS SSL setup failed for local smoke.");
-            break;
-        }
-
-        tls_set_stage(result, "set_hostname");
-        tls_trace_stage("set_hostname");
-        ret = mbedtls_ssl_set_hostname(&ssl, sniHostname);
-        if (ret != 0) {
-            result->mbedtlsError = ret;
-            copy_text(result->error, sizeof(result->error),
-                "Mbed TLS could not set the TLS smoke SNI/hostname.");
-            break;
-        }
-        result->usedSniHostname = true;
-
-        mbedtls_ssl_set_bio(&ssl, &io, gxos_tls_stream_send, gxos_tls_stream_recv, nullptr);
-
-        tls_set_stage(result, "handshake");
-        tls_trace_stage("handshake");
-        uint32_t startTicks = static_cast<uint32_t>(kernel::pit::ticks());
-        const uint32_t handshakeTimeout = tls_timeout_ticks(kGxosTlsSmokeHandshakeTimeoutMs);
-        while ((ret = mbedtls_ssl_handshake(&ssl)) != 0) {
-            result->mbedtlsError = ret;
-            result->mbedtlsState = ssl.MBEDTLS_PRIVATE(state);
-            if (ret == MBEDTLS_ERR_SSL_WANT_READ || ret == MBEDTLS_ERR_SSL_WANT_WRITE) {
-                if (!tls_wait_until_ready(&stream, startTicks, handshakeTimeout)) {
-                    copy_text(result->error, sizeof(result->error), "TLS smoke handshake timed out.");
-                    ret = -1;
-                    break;
+        int sent = 0;
+        while ((size_t)sent < requestLength) {
+            const int written = tlsStream.write(tlsStream.context,
+                reinterpret_cast<const uint8_t*>(requestBytes + sent),
+                (int)(requestLength - (size_t)sent));
+            if (written <= 0) {
+                if (!result->error[0]) {
+                    tls_set_transport_status(result, gxos::web::HttpByteStreamTlsStatus::TlsWriteFailed,
+                        "TLS smoke request write failed.");
                 }
-                continue;
+                break;
             }
-            break;
+            sent += written;
         }
-        if (ret != 0) {
-            result->mbedtlsState = ssl.MBEDTLS_PRIVATE(state);
-            result->verifyFlags = static_cast<uint32_t>(mbedtls_ssl_get_verify_result(&ssl));
-            result->certificateValidationSuccess = result->verifyFlags == 0;
-            result->hostnameValidationSuccess = result->certificateValidationSuccess &&
-                (result->verifyFlags & MBEDTLS_X509_BADCERT_CN_MISMATCH) == 0;
-            copy_text(result->error, sizeof(result->error),
-                (result->verifyFlags & MBEDTLS_X509_BADCERT_CN_MISMATCH) != 0
-                    ? "TLS smoke hostname validation failed."
-                    : "TLS smoke handshake failed.");
-            break;
-        }
+        if ((size_t)sent != requestLength) break;
 
-        result->handshakeSuccess = true;
-        result->mbedtlsState = ssl.MBEDTLS_PRIVATE(state);
-        tls_copy_runtime_strings(&ssl, result);
-        tls_set_stage(result, "peer_validation");
-        tls_trace_stage("peer_validation");
-        result->verifyFlags = static_cast<uint32_t>(mbedtls_ssl_get_verify_result(&ssl));
-        result->certificateValidationSuccess = result->verifyFlags == 0;
-        result->hostnameValidationSuccess =
-            result->certificateValidationSuccess &&
-            (result->verifyFlags & MBEDTLS_X509_BADCERT_CN_MISMATCH) == 0;
-        if (!result->certificateValidationSuccess) {
-            copy_text(result->error, sizeof(result->error),
-                (result->verifyFlags & MBEDTLS_X509_BADCERT_CN_MISMATCH) != 0
-                    ? "TLS smoke hostname validation failed."
-                    : "TLS smoke certificate validation failed.");
-            break;
-        }
-
-        size_t written = 0;
-        tls_set_stage(result, "request_write");
-        tls_trace_stage("request_write");
-        uint32_t ioStartTicks = static_cast<uint32_t>(kernel::pit::ticks());
-        const uint32_t ioTimeout = tls_timeout_ticks(kGxosTlsSmokeIoTimeoutMs);
-        while (written < requestLength) {
-            ret = mbedtls_ssl_write(&ssl,
-                reinterpret_cast<const unsigned char*>(requestBytes + written),
-                requestLength - written);
-            if (ret > 0) {
-                written += static_cast<size_t>(ret);
-                result->requestBytesWritten = written;
-                ioStartTicks = static_cast<uint32_t>(kernel::pit::ticks());
-                continue;
-            }
-            result->mbedtlsError = ret;
-            result->mbedtlsState = ssl.MBEDTLS_PRIVATE(state);
-            if (ret == MBEDTLS_ERR_SSL_WANT_READ || ret == MBEDTLS_ERR_SSL_WANT_WRITE) {
-                if (!tls_wait_until_ready(&stream, ioStartTicks, ioTimeout)) {
-                    copy_text(result->error, sizeof(result->error), "TLS smoke request write timed out.");
-                    ret = -1;
-                    break;
-                }
-                continue;
-            }
-            copy_text(result->error, sizeof(result->error), "TLS smoke request write failed.");
-            break;
-        }
-        if (written != requestLength) break;
-        result->requestWriteSuccess = true;
-
-        size_t totalRead = 0;
-        tls_set_stage(result, "response_read");
-        tls_trace_stage("response_read");
-        ioStartTicks = static_cast<uint32_t>(kernel::pit::ticks());
         while (true) {
             if (totalRead + 1 >= responseBufferSize) {
-                copy_text(result->error, sizeof(result->error),
+                tls_set_transport_status(result, gxos::web::HttpByteStreamTlsStatus::ResponseTooLarge,
                     "TLS smoke response exceeded the bounded buffer.");
-                ret = -1;
                 break;
             }
-            ret = mbedtls_ssl_read(&ssl,
-                reinterpret_cast<unsigned char*>(responseBuffer + totalRead),
-                responseBufferSize - totalRead - 1);
-            if (ret > 0) {
-                totalRead += static_cast<size_t>(ret);
-                result->responseBytesRead = totalRead;
+            const int received = tlsStream.read(tlsStream.context,
+                reinterpret_cast<uint8_t*>(responseBuffer + totalRead),
+                (int)(responseBufferSize - totalRead - 1));
+            if (received < 0) break;
+            if (received == 0) {
                 responseBuffer[totalRead] = '\0';
-                ioStartTicks = static_cast<uint32_t>(kernel::pit::ticks());
-                continue;
-            }
-            result->mbedtlsError = ret;
-            result->mbedtlsState = ssl.MBEDTLS_PRIVATE(state);
-            if (ret == 0 || ret == MBEDTLS_ERR_SSL_PEER_CLOSE_NOTIFY || ret == MBEDTLS_ERR_SSL_CONN_EOF) {
-                result->mbedtlsError = 0;
-                responseBuffer[totalRead] = '\0';
-                break;
-            }
-            if (ret == MBEDTLS_ERR_SSL_WANT_READ || ret == MBEDTLS_ERR_SSL_WANT_WRITE) {
-                if (!tls_wait_until_ready(&stream, ioStartTicks, ioTimeout)) {
-                    copy_text(result->error, sizeof(result->error), "TLS smoke response read timed out.");
-                    ret = -1;
+                if (totalRead == 0) {
+                    tls_set_transport_status(result, gxos::web::HttpByteStreamTlsStatus::TlsReadFailed,
+                        "TLS smoke response was empty.");
                     break;
                 }
-                continue;
+                if (responseBytesOut) *responseBytesOut = totalRead;
+                tls_set_stage(result, "complete");
+                tls_trace_stage("complete");
+                result->transportStatus = gxos::web::HttpByteStreamTlsStatus::Success;
+                success = true;
+                break;
             }
-            copy_text(result->error, sizeof(result->error), "TLS smoke response read failed.");
-            break;
+            totalRead += (size_t)received;
+            responseBuffer[totalRead] = '\0';
         }
-        if (ret != 0 && ret != MBEDTLS_ERR_SSL_PEER_CLOSE_NOTIFY && ret != MBEDTLS_ERR_SSL_CONN_EOF) break;
-        if (totalRead == 0) {
-            copy_text(result->error, sizeof(result->error), "TLS smoke response was empty.");
-            break;
-        }
-
-        result->responseReadSuccess = true;
-        if (responseBytesOut) *responseBytesOut = totalRead;
-        tls_set_stage(result, "complete");
-        tls_trace_stage("complete");
-        success = true;
     } while (false);
 
-    (void)mbedtls_ssl_close_notify(&ssl);
-    if (stream.close) stream.close(stream.context);
-    if (io.lastTransportError != 0) result->transportError = io.lastTransportError;
-    mbedtls_ssl_free(&ssl);
-    mbedtls_ssl_config_free(&conf);
+    tlsStream.close(tlsStream.context);
     return success;
-#else
-    copy_text(result->error, sizeof(result->error), "Local TLS smoke is unavailable in this runtime.");
-    return false;
-#endif
 }
 
 bool gxos_tls_certificate_validation_policy_enabled()

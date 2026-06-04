@@ -4905,6 +4905,9 @@ NavigatorApp::NavigatorApp()
     m_metaTlsAllowlistLocalOnly = false;
     m_metaTlsVerifyFlags = 0;
     m_metaTlsBackend[0] = '\0';
+    m_metaTransportSelection[0] = '\0';
+    m_metaTlsStatus[0] = '\0';
+    m_metaTransportPolicyReason[0] = '\0';
     m_metaTlsHostname[0] = '\0';
     m_metaTlsSniHost[0] = '\0';
     m_metaTlsProtocol[0] = '\0';
@@ -5643,7 +5646,10 @@ void NavigatorApp::buildPageInfoDocument()
     NAV_INFO_TEXT("DNS hostname: ", m_metaDnsHost[0] ? m_metaDnsHost : "(none)");
     NAV_INFO_TEXT("DNS resolved IP: ", m_metaDnsResolvedIp[0] ? m_metaDnsResolvedIp : "(none)");
     NAV_INFO_TEXT("DNS error: ", m_metaDnsError[0] ? m_metaDnsError : "(none)");
+    NAV_INFO_TEXT("Transport selection: ", m_metaTransportSelection[0] ? m_metaTransportSelection : "(none)");
+    NAV_INFO_TEXT("Transport policy: ", m_metaTransportPolicyReason[0] ? m_metaTransportPolicyReason : "(none)");
     NAV_INFO_TEXT("TLS backend: ", m_metaTlsUsed ? (m_metaTlsBackend[0] ? m_metaTlsBackend : "(none)") : "not used");
+    NAV_INFO_TEXT("TLS status: ", m_metaTlsUsed || m_metaTlsStatus[0] ? (m_metaTlsStatus[0] ? m_metaTlsStatus : "(none)") : "not used");
     NAV_INFO_TEXT("TLS validation: ", m_metaTlsUsed ? (m_metaTlsValidated ? "success" : "failure") : "not used");
     NAV_INFO_TEXT("TLS hostname validation: ", m_metaTlsUsed ? (m_metaTlsHostnameValidated ? "success" : "failure") : "not used");
     NAV_INFO_TEXT("TLS allowlist mode: ", m_metaTlsAllowlistLocalOnly ? "local-only controlled HTTPS" : "not used");
@@ -5786,7 +5792,7 @@ void NavigatorApp::buildRuntimeDocument()
     addBlock(BLOCK_LIST_ITEM, "Remote PNG: enabled-basic for numeric IPv4 and hostname http:// PNG images; Downloads: unavailable for bare-metal HTTP v0.1");
     addBlock(BLOCK_LIST_ITEM, "Bookmark persistence: unavailable; bookmarks are in-memory defaults; HTTPS/TLS: local-only controlled guidexos.test:8443/navigator-smoke/ path enabled, public bare-metal https:// still blocked");
     addBlock(BLOCK_LIST_ITEM, "TLS backend: local-only Mbed TLS bare-metal transport ready with CA and hostname validation");
-    addBlock(BLOCK_LIST_ITEM, "TLS insertion seam: controlled local HTTPS transport active in the regular Navigator request path; general Navigator https:// stays gated");
+    addBlock(BLOCK_LIST_ITEM, "TLS policy layer: shared HttpByteStream transport policy selects plain TCP HTTP or the controlled local Mbed TLS wrapper; general Navigator https:// stays gated");
     addBlock(BLOCK_LIST_ITEM, "CSS-lite embedded <style>: enabled");
     addBlock(BLOCK_LIST_ITEM, "Forms-lite GET forms: enabled through interactive document controls; Forms-lite POST forms hosted: enabled in authoritative hosted Navigator path");
     addBlock(BLOCK_LIST_ITEM, "Forms-lite POST interactive: enabled");
@@ -5969,7 +5975,7 @@ void NavigatorApp::buildRuntimeDocument()
 
     addBlock(BLOCK_HEADING, "Backends");
     addBlock(BLOCK_LIST_ITEM, "File backend: kernel VFS");
-    addBlock(BLOCK_LIST_ITEM, "HTTP backend: kernel plain TCP byte-stream plus controlled local Mbed TLS insertion at the regular Navigator request path");
+    addBlock(BLOCK_LIST_ITEM, "HTTP backend: kernel shared HttpByteStream policy layer with plain TCP HTTP and controlled local Mbed TLS");
     char dnsLine[96];
     char dnsIp[16];
     kernel::ipv4::ip_to_string(kernel::dns::get_server(), dnsIp);
@@ -6656,6 +6662,9 @@ struct KernelHttpResponse {
     char finalUrl[kKernelHttpUrlLen];
     char error[128];
     char scheme[8];
+    gxos::web::HttpByteStreamTransportSelection transportSelection;
+    gxos::web::HttpByteStreamTlsStatus tlsStatus;
+    char transportPolicyReason[128];
     bool tlsUsed;
     bool tlsAllowlistLocalOnly;
     char tlsBackend[48];
@@ -6687,6 +6696,9 @@ static void kernel_http_reset_response(KernelHttpResponse* response)
     response->finalUrl[0] = '\0';
     response->error[0] = '\0';
     response->scheme[0] = '\0';
+    response->transportSelection = gxos::web::HttpByteStreamTransportSelection::UnsupportedScheme;
+    response->tlsStatus = gxos::web::HttpByteStreamTlsStatus::NotApplicable;
+    response->transportPolicyReason[0] = '\0';
     response->tlsUsed = false;
     response->tlsAllowlistLocalOnly = false;
     response->tlsBackend[0] = '\0';
@@ -6733,6 +6745,19 @@ void NavigatorApp::rememberPageMetadata(const char* requestedUrl, const char* fi
     strcopy(m_metaTlsBackend,
         networkResponse && networkResponse->tlsBackend[0] ? networkResponse->tlsBackend : "",
         sizeof(m_metaTlsBackend));
+    strcopy(m_metaTransportSelection,
+        networkResponse
+            ? gxos::web::httpSharedTransportSelectionName(networkResponse->transportSelection)
+            : "",
+        sizeof(m_metaTransportSelection));
+    strcopy(m_metaTlsStatus,
+        networkResponse
+            ? gxos::web::httpSharedTlsStatusName(networkResponse->tlsStatus)
+            : "",
+        sizeof(m_metaTlsStatus));
+    strcopy(m_metaTransportPolicyReason,
+        networkResponse ? networkResponse->transportPolicyReason : "",
+        sizeof(m_metaTransportPolicyReason));
     strcopy(m_metaTlsHostname, httpSource ? m_metaDnsHost : "", sizeof(m_metaTlsHostname));
     strcopy(m_metaTlsSniHost, networkResponse ? networkResponse->tlsResult.sniHost : "", sizeof(m_metaTlsSniHost));
     strcopy(m_metaTlsProtocol, networkResponse ? networkResponse->tlsResult.protocol : "", sizeof(m_metaTlsProtocol));
@@ -6994,7 +7019,7 @@ static gxos::web::HttpByteStream make_kernel_tcp_http_byte_stream(KernelTcpHttpB
     return stream;
 }
 
-static gxos::GxosTlsByteStream make_kernel_tls_smoke_byte_stream(KernelTcpHttpByteStreamContext* context, int socket)
+static gxos::GxosTlsByteStream make_kernel_tcp_tls_byte_stream(KernelTcpHttpByteStreamContext* context, int socket)
 {
     context->socket = socket;
     gxos::GxosTlsByteStream stream = {
@@ -7006,6 +7031,11 @@ static gxos::GxosTlsByteStream make_kernel_tls_smoke_byte_stream(KernelTcpHttpBy
     };
     return stream;
 }
+
+struct KernelHttpStreamOpenResult {
+    gxos::web::HttpByteStream stream;
+    KernelTcpHttpByteStreamContext tcpContext;
+};
 
 static bool kernel_https_path_has_allowed_prefix(const char* path)
 {
@@ -7019,6 +7049,8 @@ static bool kernel_https_allowlist_match(const KernelHttpUrl& parsed)
         parsed.port == kNavigatorControlledHttpsPort &&
         kernel_https_path_has_allowed_prefix(parsed.path);
 }
+
+static bool parse_https_url_kernel(const char* url, KernelHttpUrl* parsed);
 
 static void kernel_https_allowlist_reason(const KernelHttpUrl& parsed, char* out, int outSize)
 {
@@ -7040,6 +7072,132 @@ static void kernel_https_allowlist_reason(const KernelHttpUrl& parsed, char* out
         return;
     }
     strcopy(out, "HTTPS/TLS unsupported: outside controlled local HTTPS allowlist", outSize);
+}
+
+static gxos::web::HttpTransportPolicyDecision kernel_http_plain_transport_policy()
+{
+    return {
+        gxos::web::HttpByteStreamTransportSelection::PlainTcpHttp,
+        gxos::web::HttpByteStreamTlsStatus::NotApplicable,
+        false,
+        true,
+        false,
+        false,
+        false,
+        "Plain TCP bare-metal",
+        "HTTP uses the plain TCP HttpByteStream path."
+    };
+}
+
+static gxos::web::HttpTransportPolicyDecision kernel_http_allowlisted_tls_transport_policy()
+{
+    return {
+        gxos::web::HttpByteStreamTransportSelection::LocalAllowlistedTlsHttps,
+        gxos::web::HttpByteStreamTlsStatus::NotStarted,
+        true,
+        true,
+        true,
+        true,
+        true,
+        "Mbed TLS bare-metal",
+        "Controlled local HTTPS allowlist matched."
+    };
+}
+
+static gxos::web::HttpTransportPolicyDecision kernel_http_blocked_https_transport_policy(const char* reason)
+{
+    return {
+        gxos::web::HttpByteStreamTransportSelection::BlockedHttpsGeneral,
+        gxos::web::HttpByteStreamTlsStatus::PolicyBlocked,
+        false,
+        false,
+        false,
+        true,
+        true,
+        "Mbed TLS bare-metal",
+        reason ? reason : "General bare-metal HTTPS is disabled by policy."
+    };
+}
+
+static gxos::web::HttpTransportPolicyDecision kernel_http_blocked_policy_transport_policy(const char* reason)
+{
+    return {
+        gxos::web::HttpByteStreamTransportSelection::BlockedPolicy,
+        gxos::web::HttpByteStreamTlsStatus::PolicyBlocked,
+        false,
+        false,
+        false,
+        false,
+        false,
+        nullptr,
+        reason ? reason : "Navigation was blocked by transport policy."
+    };
+}
+
+static void kernel_http_apply_transport_policy(KernelHttpResponse* response,
+                                               const gxos::web::HttpTransportPolicyDecision& policy,
+                                               const char* reason = nullptr)
+{
+    if (!response) return;
+    response->transportSelection = policy.selection;
+    response->tlsStatus = policy.tlsStatus;
+    response->tlsAllowlistLocalOnly = policy.allowlistMatched;
+    strcopy(response->transportPolicyReason,
+        reason && reason[0] ? reason : (policy.reason ? policy.reason : ""),
+        sizeof(response->transportPolicyReason));
+    if (policy.expectedTlsBackend) {
+        strcopy(response->tlsBackend, policy.expectedTlsBackend, sizeof(response->tlsBackend));
+    }
+}
+
+static gxos::web::HttpTransportPolicyDecision kernel_http_transport_policy_for_https(
+    const KernelHttpUrl& parsed, char* reason, int reasonSize)
+{
+    if (kernel_https_allowlist_match(parsed)) {
+        if (reason && reasonSize > 0) strcopy(reason, "Controlled local HTTPS allowlist matched.", reasonSize);
+        return kernel_http_allowlisted_tls_transport_policy();
+    }
+    kernel_https_allowlist_reason(parsed, reason, reasonSize);
+    return kernel_http_blocked_https_transport_policy(reason);
+}
+
+static void kernel_http_apply_redirect_failure_policy(KernelHttpResponse* response,
+                                                      const char* resolvedTargetUrl,
+                                                      const char* redirectError)
+{
+    if (!response) return;
+
+    const char* targetUrl = (resolvedTargetUrl && resolvedTargetUrl[0])
+        ? resolvedTargetUrl
+        : (response->location[0] ? response->location : "");
+    if (!targetUrl[0]) return;
+
+    if (nav_starts_with(targetUrl, "https://")) {
+        KernelHttpUrl parsed;
+        char policyReason[128];
+        policyReason[0] = '\0';
+        if (parse_https_url_kernel(targetUrl, &parsed)) {
+            const gxos::web::HttpTransportPolicyDecision policy =
+                kernel_http_transport_policy_for_https(parsed, policyReason, sizeof(policyReason));
+            kernel_http_apply_transport_policy(response, policy, policyReason);
+        } else {
+            const gxos::web::HttpTransportPolicyDecision policy =
+                kernel_http_blocked_policy_transport_policy(
+                    redirectError && redirectError[0] ? redirectError : parsed.error);
+            kernel_http_apply_transport_policy(response, policy,
+                redirectError && redirectError[0] ? redirectError : parsed.error);
+        }
+        strcopy(response->scheme, "https", sizeof(response->scheme));
+        return;
+    }
+
+    if (nav_starts_with(targetUrl, "http://") &&
+        redirectError && streq_local(redirectError, "HTTPS downgrade redirect blocked")) {
+        const gxos::web::HttpTransportPolicyDecision policy =
+            kernel_http_blocked_policy_transport_policy(redirectError);
+        kernel_http_apply_transport_policy(response, policy, redirectError);
+        strcopy(response->scheme, "http", sizeof(response->scheme));
+    }
 }
 
 static const char* kernel_http_error_name(int err)
@@ -7076,6 +7234,32 @@ static bool kernel_tcp_wait_connected(int sock, char* error, int errorSize)
     return true;
 }
 
+static void kernel_http_sync_tls_status(KernelHttpResponse* response)
+{
+    if (!response) return;
+    if (response->tlsUsed || response->tlsAllowlistLocalOnly) {
+        response->tlsStatus = response->tlsResult.transportStatus;
+    }
+}
+
+static void kernel_http_set_stream_error(KernelHttpResponse* response,
+                                         const char* fallbackError,
+                                         gxos::web::HttpByteStreamTlsStatus tlsStatus)
+{
+    if (!response) return;
+    if (response->transportSelection == gxos::web::HttpByteStreamTransportSelection::LocalAllowlistedTlsHttps) {
+        if (response->tlsResult.transportStatus == gxos::web::HttpByteStreamTlsStatus::NotStarted) {
+            response->tlsResult.transportStatus = tlsStatus;
+        }
+        kernel_http_sync_tls_status(response);
+        strcopy(response->error,
+            response->tlsResult.error[0] ? response->tlsResult.error : (fallbackError ? fallbackError : "TLS stream error"),
+            sizeof(response->error));
+        return;
+    }
+    strcopy(response->error, fallbackError ? fallbackError : "HTTP stream error", sizeof(response->error));
+}
+
 static bool kernel_http_send_all(gxos::web::HttpByteStream* stream, const char* bytes, int byteCount, KernelHttpResponse* response)
 {
     if (!bytes || byteCount <= 0) return true;
@@ -7092,11 +7276,13 @@ static bool kernel_http_send_all(gxos::web::HttpByteStream* stream, const char* 
         } else if (n == kernel::tcp::TCP_ERR_WOULDBLOCK) {
             kernel_http_poll_once();
             if (((uint32_t)kernel::pit::ticks() - startTicks) > maxTicks) {
-                strcopy(response->error, "HTTP send timeout", sizeof(response->error));
+                kernel_http_set_stream_error(response, "HTTP send timeout",
+                    gxos::web::HttpByteStreamTlsStatus::TlsWriteFailed);
                 return false;
             }
         } else {
-            strcopy(response->error, kernel_http_error_name(n), sizeof(response->error));
+            kernel_http_set_stream_error(response, kernel_http_error_name(n),
+                gxos::web::HttpByteStreamTlsStatus::TlsWriteFailed);
             return false;
         }
     }
@@ -7407,7 +7593,7 @@ static bool kernel_http_build_request(const char* method, const KernelHttpUrl& p
     return true;
 }
 
-static bool kernel_http_read_plain_response(gxos::web::HttpByteStream* stream, KernelHttpResponse* response)
+static bool kernel_http_read_response(gxos::web::HttpByteStream* stream, KernelHttpResponse* response)
 {
     if (!stream || !response) return false;
     int rawLen = 0;
@@ -7419,7 +7605,8 @@ static bool kernel_http_read_plain_response(gxos::web::HttpByteStream* stream, K
         int n = stream->read(stream->context, reinterpret_cast<uint8_t*>(chunk), sizeof(chunk));
         if (n > 0) {
             if (rawLen + n > kKernelHttpRawLimit) {
-                strcopy(response->error, "HTTP response too large", sizeof(response->error));
+                kernel_http_set_stream_error(response, "HTTP response too large",
+                    gxos::web::HttpByteStreamTlsStatus::ResponseTooLarge);
                 return false;
             }
             for (int i = 0; i < n; ++i) s_kernelHttpRaw[rawLen++] = chunk[i];
@@ -7428,11 +7615,14 @@ static bool kernel_http_read_plain_response(gxos::web::HttpByteStream* stream, K
         }
         if (n == 0) break;
         if (n != kernel::tcp::TCP_ERR_WOULDBLOCK) {
-            strcopy(response->error, kernel_http_error_name(n), sizeof(response->error));
+            kernel_http_set_stream_error(response, kernel_http_error_name(n),
+                gxos::web::HttpByteStreamTlsStatus::TlsReadFailed);
             return false;
         }
         if (((uint32_t)kernel::pit::ticks() - startTicks) > maxTicks) {
-            strcopy(response->error, rawLen > 0 ? "HTTP read timeout after partial response" : "HTTP read timeout", sizeof(response->error));
+            kernel_http_set_stream_error(response,
+                rawLen > 0 ? "HTTP read timeout after partial response" : "HTTP read timeout",
+                gxos::web::HttpByteStreamTlsStatus::TlsReadFailed);
             return false;
         }
     }
@@ -7440,113 +7630,146 @@ static bool kernel_http_read_plain_response(gxos::web::HttpByteStream* stream, K
     return kernel_http_parse_response(response, rawLen);
 }
 
-static KernelHttpResponse* kernel_https_request_once(const char* url, const char* method,
-                                                     const char* body, int bodyBytes,
-                                                     const char* contentType,
-                                                     const char* sniHostnameOverride = nullptr)
+struct KernelHttpActiveStream {
+    gxos::web::HttpByteStream stream;
+    KernelTcpHttpByteStreamContext tcpContext;
+};
+
+static bool kernel_http_error_contains_too_large(const char* error)
 {
-    (void)body;
-    KernelHttpResponse* response = &s_kernelHttpResponse;
-    kernel_http_reset_response(response);
-    strcopy(response->scheme, "https", sizeof(response->scheme));
-    strcopy(response->requestedUrl, url ? url : "", sizeof(response->requestedUrl));
-    strcopy(response->finalUrl, url ? url : "", sizeof(response->finalUrl));
-    s_kernelLastDnsUsed = false;
-    s_kernelLastDnsHost[0] = '\0';
-    s_kernelLastDnsResolvedIp[0] = '\0';
-    s_kernelLastDnsError[0] = '\0';
+    if (!error || !error[0]) return false;
+    for (const char* p = error; *p; ++p) {
+        if (p[0] == 't' && p[1] == 'o' && p[2] == 'o' && p[3] == ' ' &&
+            p[4] == 'l' && p[5] == 'a' && p[6] == 'r' && p[7] == 'g' && p[8] == 'e') {
+            return true;
+        }
+    }
+    return false;
+}
 
-    const bool isPost = method && gxos::web::httpSharedEqualsInsensitive(method, "post");
-    if (isPost) {
-        strcopy(response->error, "Controlled local HTTPS POST is not implemented in this milestone", sizeof(response->error));
-        return response;
+static void kernel_http_mark_tls_failure(KernelHttpResponse* response,
+                                         gxos::web::HttpByteStreamTlsStatus status,
+                                         const char* error,
+                                         int transportError = 0)
+{
+    if (!response) return;
+    response->tlsResult.transportStatus = status;
+    response->tlsResult.transportError = transportError;
+    if (error && error[0]) {
+        strcopy(response->tlsResult.error, error, sizeof(response->tlsResult.error));
+        strcopy(response->error, error, sizeof(response->error));
     }
-    KernelHttpUrl parsed;
-    if (!parse_https_url_kernel(url, &parsed)) {
-        strcopy(response->error, parsed.error, sizeof(response->error));
-        return response;
-    }
-    if (!kernel_https_allowlist_match(parsed)) {
-        kernel_https_allowlist_reason(parsed, response->error, sizeof(response->error));
-        return response;
-    }
-    ++s_kernelHttpControlledLocalHttpsLoads;
-    response->tlsAllowlistLocalOnly = true;
-    strcopy(response->tlsBackend, "Mbed TLS bare-metal", sizeof(response->tlsBackend));
+    kernel_http_sync_tls_status(response);
+}
 
-    if (!kernel_http_resolve_host(&parsed, response)) {
-        return response;
+static void kernel_http_finalize_tls_status(KernelHttpResponse* response, bool parsedOk)
+{
+    if (!response || response->transportSelection != gxos::web::HttpByteStreamTransportSelection::LocalAllowlistedTlsHttps) {
+        return;
+    }
+    response->tlsUsed = response->tlsResult.attempted || response->tlsUsed;
+    response->tlsResult.parserAcceptedResponse = parsedOk;
+    if (!parsedOk) {
+        if (!response->tlsResult.error[0] && response->error[0]) {
+            strcopy(response->tlsResult.error, response->error, sizeof(response->tlsResult.error));
+        }
+        if (response->tlsResult.transportStatus == gxos::web::HttpByteStreamTlsStatus::Success ||
+            response->tlsResult.transportStatus == gxos::web::HttpByteStreamTlsStatus::NotStarted) {
+            response->tlsResult.transportStatus = kernel_http_error_contains_too_large(response->error)
+                ? gxos::web::HttpByteStreamTlsStatus::ResponseTooLarge
+                : gxos::web::HttpByteStreamTlsStatus::TlsReadFailed;
+        }
+    } else if (response->tlsResult.transportStatus == gxos::web::HttpByteStreamTlsStatus::NotStarted) {
+        response->tlsResult.transportStatus = gxos::web::HttpByteStreamTlsStatus::Success;
+    }
+    kernel_http_sync_tls_status(response);
+}
+
+static bool kernel_http_open_stream(KernelHttpUrl* parsed,
+                                    const gxos::web::HttpTransportPolicyDecision& policy,
+                                    const char* sniHostnameOverride,
+                                    KernelHttpResponse* response,
+                                    KernelHttpActiveStream* activeStream)
+{
+    if (!parsed || !response || !activeStream) return false;
+    activeStream->stream = gxos::web::HttpByteStream{};
+    activeStream->tcpContext.socket = -1;
+
+    if (!kernel_http_resolve_host(parsed, response)) {
+        return false;
     }
 
     int sock = kernel::tcp::tcp_socket();
     if (sock < 0) {
-        strcopy(response->error, "Could not create TCP socket", sizeof(response->error));
-        return response;
+        if (policy.selection == gxos::web::HttpByteStreamTransportSelection::LocalAllowlistedTlsHttps) {
+            kernel_http_mark_tls_failure(response, gxos::web::HttpByteStreamTlsStatus::TcpConnectFailed,
+                "Could not create TCP socket");
+        } else {
+            strcopy(response->error, "Could not create TCP socket", sizeof(response->error));
+        }
+        return false;
     }
 
-    ++s_kernelHttpTlsConnectAttempts;
-    int rc = kernel::tcp::tcp_connect(sock, parsed.ip, parsed.port);
+    if (policy.selection == gxos::web::HttpByteStreamTransportSelection::LocalAllowlistedTlsHttps) {
+        ++s_kernelHttpTlsConnectAttempts;
+    } else {
+        ++s_kernelHttpPlainTcpConnectAttempts;
+    }
+
+    const int rc = kernel::tcp::tcp_connect(sock, parsed->ip, parsed->port);
     if (rc < 0) {
-        strcopy(response->error, kernel_http_error_name(rc), sizeof(response->error));
-        response->tlsResult.transportError = rc;
+        if (policy.selection == gxos::web::HttpByteStreamTransportSelection::LocalAllowlistedTlsHttps) {
+            kernel_http_mark_tls_failure(response, gxos::web::HttpByteStreamTlsStatus::TcpConnectFailed,
+                kernel_http_error_name(rc), rc);
+        } else {
+            strcopy(response->error, kernel_http_error_name(rc), sizeof(response->error));
+        }
         kernel::tcp::tcp_close(sock);
-        return response;
+        return false;
     }
     if (!kernel_tcp_wait_connected(sock, response->error, sizeof(response->error))) {
+        if (policy.selection == gxos::web::HttpByteStreamTransportSelection::LocalAllowlistedTlsHttps) {
+            kernel_http_mark_tls_failure(response, gxos::web::HttpByteStreamTlsStatus::TcpConnectFailed,
+                response->error[0] ? response->error : "TCP connect failed");
+        }
         kernel::tcp::tcp_close(sock);
-        return response;
+        return false;
     }
 
-    KernelTcpHttpByteStreamContext tcpContext;
-    gxos::GxosTlsByteStream tlsStream = make_kernel_tls_smoke_byte_stream(&tcpContext, sock);
-
-    char request[768];
-    int requestBytes = 0;
-    if (!kernel_http_build_request(method, parsed, contentType, bodyBytes, request, sizeof(request), &requestBytes)) {
-        strcopy(response->error, "Could not build HTTPS request", sizeof(response->error));
-        kernel::tcp::tcp_close(sock);
-        return response;
+    if (policy.selection == gxos::web::HttpByteStreamTransportSelection::PlainTcpHttp) {
+        activeStream->stream = make_kernel_tcp_http_byte_stream(&activeStream->tcpContext, sock);
+        return true;
+    }
+    if (policy.selection == gxos::web::HttpByteStreamTransportSelection::LocalAllowlistedTlsHttps) {
+        const char* sniHost = (sniHostnameOverride && sniHostnameOverride[0]) ? sniHostnameOverride : parsed->host;
+        gxos::GxosTlsByteStream tcpTlsStream = make_kernel_tcp_tls_byte_stream(&activeStream->tcpContext, sock);
+        if (!gxos::gxos_tls_open_http_byte_stream(sniHost, tcpTlsStream, &activeStream->stream, &response->tlsResult)) {
+            response->tlsUsed = response->tlsResult.attempted;
+            kernel_http_sync_tls_status(response);
+            strcopy(response->error,
+                response->tlsResult.error[0] ? response->tlsResult.error : "Controlled local HTTPS request failed",
+                sizeof(response->error));
+            return false;
+        }
+        response->tlsUsed = response->tlsResult.attempted;
+        kernel_http_sync_tls_status(response);
+        return true;
     }
 
-    size_t responseBytes = 0;
-    const bool tlsOk = gxos::gxos_tls_smoke_https_request(
-        sniHostnameOverride && sniHostnameOverride[0] ? sniHostnameOverride : parsed.host,
-        request,
-        static_cast<size_t>(requestBytes),
-        tlsStream,
-        s_kernelHttpRaw,
-        sizeof(s_kernelHttpRaw),
-        &responseBytes,
-        &response->tlsResult);
-    response->tlsUsed = response->tlsResult.attempted;
-    if (!tlsOk) {
-        strcopy(response->error,
-            response->tlsResult.error[0] ? response->tlsResult.error : "Controlled local HTTPS request failed",
-            sizeof(response->error));
-        return response;
-    }
-
-    if (responseBytes == 0 || responseBytes > (size_t)kKernelHttpRawLimit) {
-        strcopy(response->error, "Controlled local HTTPS response size was invalid", sizeof(response->error));
-        return response;
-    }
-
-    s_kernelHttpRaw[responseBytes] = '\0';
-    response->tlsUsed = true;
-    const bool parsedOk = kernel_http_parse_response(response, static_cast<int>(responseBytes));
-    response->tlsResult.parserAcceptedResponse = parsedOk;
-    if (!parsedOk && !response->tlsResult.error[0] && response->error[0]) {
-        strcopy(response->tlsResult.error, response->error, sizeof(response->tlsResult.error));
-    }
-    return parsedOk ? response : response;
+    kernel::tcp::tcp_close(sock);
+    strcopy(response->error, "HTTP transport policy could not open a stream", sizeof(response->error));
+    return false;
 }
 
-static KernelHttpResponse* kernel_http_request_once(const char* url, const char* method,
-                                                    const char* body, int bodyBytes,
-                                                    const char* contentType)
+static KernelHttpResponse* kernel_http_request_once_internal(const char* url, const char* method,
+                                                             const char* body, int bodyBytes,
+                                                             const char* contentType,
+                                                             const char* sniHostnameOverride)
 {
     KernelHttpResponse* response = &s_kernelHttpResponse;
     kernel_http_reset_response(response);
+    strcopy(response->requestedUrl, url ? url : "", sizeof(response->requestedUrl));
+    strcopy(response->finalUrl, url ? url : "", sizeof(response->finalUrl));
     s_kernelLastDnsUsed = false;
     s_kernelLastDnsHost[0] = '\0';
     s_kernelLastDnsResolvedIp[0] = '\0';
@@ -7570,56 +7793,82 @@ static KernelHttpResponse* kernel_http_request_once(const char* url, const char*
         strcopy(response->error, "Forms-lite POST body too large", sizeof(response->error));
         return response;
     }
-    if (nav_starts_with(url, "https://")) {
-        return kernel_https_request_once(url, method, body, bodyBytes, contentType);
-    }
 
     KernelHttpUrl parsed;
-    if (!parse_http_url_kernel(url, &parsed)) {
-        strcopy(response->error, parsed.error, sizeof(response->error));
-        return response;
+    gxos::web::HttpTransportPolicyDecision policy = kernel_http_plain_transport_policy();
+    char policyReason[128];
+    policyReason[0] = '\0';
+    const bool isHttps = nav_starts_with(url, "https://");
+    if (isHttps) {
+        strcopy(response->scheme, "https", sizeof(response->scheme));
+        if (!parse_https_url_kernel(url, &parsed)) {
+            strcopy(response->error, parsed.error, sizeof(response->error));
+            return response;
+        }
+        policy = kernel_http_transport_policy_for_https(parsed, policyReason, sizeof(policyReason));
+    } else {
+        strcopy(response->scheme, "http", sizeof(response->scheme));
+        if (!parse_http_url_kernel(url, &parsed)) {
+            strcopy(response->error, parsed.error, sizeof(response->error));
+            return response;
+        }
+        policy = kernel_http_plain_transport_policy();
+        strcopy(policyReason, policy.reason ? policy.reason : "", sizeof(policyReason));
     }
-    strcopy(response->scheme, "http", sizeof(response->scheme));
-    if (!kernel_http_resolve_host(&parsed, response)) {
+    kernel_http_apply_transport_policy(response, policy, policyReason);
+    if (policy.selection == gxos::web::HttpByteStreamTransportSelection::LocalAllowlistedTlsHttps) {
+        ++s_kernelHttpControlledLocalHttpsLoads;
+    }
+    if (!policy.tcpAttemptAllowed) {
+        strcopy(response->error,
+            response->transportPolicyReason[0] ? response->transportPolicyReason : "HTTPS/TLS unsupported",
+            sizeof(response->error));
         return response;
     }
 
-    int sock = kernel::tcp::tcp_socket();
-    if (sock < 0) {
-        strcopy(response->error, "Could not create TCP socket", sizeof(response->error));
+    KernelHttpActiveStream activeStream{};
+    if (!kernel_http_open_stream(&parsed, policy, sniHostnameOverride, response, &activeStream)) {
         return response;
     }
-
-    ++s_kernelHttpPlainTcpConnectAttempts;
-    int rc = kernel::tcp::tcp_connect(sock, parsed.ip, parsed.port);
-    if (rc < 0) {
-        strcopy(response->error, kernel_http_error_name(rc), sizeof(response->error));
-        kernel::tcp::tcp_close(sock);
-        return response;
-    }
-    if (!kernel_tcp_wait_connected(sock, response->error, sizeof(response->error))) {
-        kernel::tcp::tcp_close(sock);
-        return response;
-    }
-
-    KernelTcpHttpByteStreamContext tcpContext;
-    gxos::web::HttpByteStream stream = make_kernel_tcp_http_byte_stream(&tcpContext, sock);
 
     char request[768];
     int requestBytes = 0;
     if (!kernel_http_build_request(method, parsed, contentType, bodyBytes, request, sizeof(request), &requestBytes)) {
-        strcopy(response->error, "Could not build HTTP request", sizeof(response->error));
-        stream.close(stream.context);
+        strcopy(response->error, isHttps ? "Could not build HTTPS request" : "Could not build HTTP request",
+            sizeof(response->error));
+        activeStream.stream.close(activeStream.stream.context);
+        kernel_http_finalize_tls_status(response, false);
         return response;
     }
-    if (!kernel_http_send_all(&stream, request, requestBytes, response) ||
-        (isPost && !kernel_http_send_all(&stream, body, bodyBytes, response))) {
-        stream.close(stream.context);
+    const bool sentOk =
+        kernel_http_send_all(&activeStream.stream, request, requestBytes, response) &&
+        (!isPost || kernel_http_send_all(&activeStream.stream, body, bodyBytes, response));
+    if (!sentOk) {
+        activeStream.stream.close(activeStream.stream.context);
+        kernel_http_finalize_tls_status(response, false);
         return response;
     }
-    const bool parsedOk = kernel_http_read_plain_response(&stream, response);
-    stream.close(stream.context);
-    return parsedOk ? response : response;
+
+    const bool parsedOk = kernel_http_read_response(&activeStream.stream, response);
+    activeStream.stream.close(activeStream.stream.context);
+    kernel_http_finalize_tls_status(response, parsedOk);
+    return response;
+}
+
+static KernelHttpResponse* kernel_https_request_once(const char* url, const char* method,
+                                                     const char* body, int bodyBytes,
+                                                     const char* contentType,
+                                                     const char* sniHostnameOverride = nullptr)
+{
+    return kernel_http_request_once_internal(
+        url, method, body, bodyBytes, contentType, sniHostnameOverride);
+}
+
+static KernelHttpResponse* kernel_http_request_once(const char* url, const char* method,
+                                                    const char* body, int bodyBytes,
+                                                    const char* contentType)
+{
+    return kernel_http_request_once_internal(url, method, body, bodyBytes, contentType, nullptr);
 }
 
 static void kernel_http_origin(const KernelHttpUrl& parsed, const char* scheme, char* out, int outSize)
@@ -7752,11 +8001,18 @@ static KernelHttpResponse* kernel_http_request(const char* url, const char* meth
         char redirectError[128];
         if (!kernel_http_resolve_redirect(current, response->location, next, sizeof(next), redirectError, sizeof(redirectError))) {
             response->ok = false;
-            if (nav_starts_with(response->location, "https://") || nav_starts_with(response->location, "http://")) {
+            const bool blockedHttpsTarget =
+                (next[0] && nav_starts_with(next, "https://")) ||
+                nav_starts_with(response->location, "https://");
+            if (next[0]) {
+                strcopy(response->finalUrl, next, sizeof(response->finalUrl));
+                response->redirectCount = redirectCount + 1;
+            } else if (nav_starts_with(response->location, "https://") || nav_starts_with(response->location, "http://")) {
                 strcopy(response->finalUrl, response->location, sizeof(response->finalUrl));
                 response->redirectCount = redirectCount + 1;
             }
-            if (nav_starts_with(response->location, "https://")) {
+            kernel_http_apply_redirect_failure_policy(response, next, redirectError);
+            if (blockedHttpsTarget) {
                 strcopy(response->error,
                     "HTTPS/TLS unsupported redirect: outside controlled local HTTPS allowlist",
                     sizeof(response->error));
@@ -8138,6 +8394,10 @@ bool NavigatorApp::smokeControlledLocalHttpsNavigation(const char* url,
                                                        char* tlsSniHost, int tlsSniHostLen,
                                                        char* tlsProtocol, int tlsProtocolLen,
                                                        char* tlsCipherSuite, int tlsCipherSuiteLen,
+                                                       char* transportSelection,
+                                                       int transportSelectionLen,
+                                                       char* tlsStatus,
+                                                       int tlsStatusLen,
                                                        bool* tlsValidated,
                                                        bool* tlsHostnameValidated,
                                                        bool* tlsAllowlistLocalOnly,
@@ -8156,6 +8416,8 @@ bool NavigatorApp::smokeControlledLocalHttpsNavigation(const char* url,
     if (tlsSniHost && tlsSniHostLen > 0) tlsSniHost[0] = '\0';
     if (tlsProtocol && tlsProtocolLen > 0) tlsProtocol[0] = '\0';
     if (tlsCipherSuite && tlsCipherSuiteLen > 0) tlsCipherSuite[0] = '\0';
+    if (transportSelection && transportSelectionLen > 0) transportSelection[0] = '\0';
+    if (tlsStatus && tlsStatusLen > 0) tlsStatus[0] = '\0';
     if (tlsValidated) *tlsValidated = false;
     if (tlsHostnameValidated) *tlsHostnameValidated = false;
     if (tlsAllowlistLocalOnly) *tlsAllowlistLocalOnly = false;
@@ -8183,6 +8445,8 @@ bool NavigatorApp::smokeControlledLocalHttpsNavigation(const char* url,
     if (tlsSniHost && tlsSniHostLen > 0) strcopy(tlsSniHost, app.m_metaTlsSniHost, tlsSniHostLen);
     if (tlsProtocol && tlsProtocolLen > 0) strcopy(tlsProtocol, app.m_metaTlsProtocol, tlsProtocolLen);
     if (tlsCipherSuite && tlsCipherSuiteLen > 0) strcopy(tlsCipherSuite, app.m_metaTlsCipherSuite, tlsCipherSuiteLen);
+    if (transportSelection && transportSelectionLen > 0) strcopy(transportSelection, app.m_metaTransportSelection, transportSelectionLen);
+    if (tlsStatus && tlsStatusLen > 0) strcopy(tlsStatus, app.m_metaTlsStatus, tlsStatusLen);
     if (tlsValidated) *tlsValidated = app.m_metaTlsValidated;
     if (tlsHostnameValidated) *tlsHostnameValidated = app.m_metaTlsHostnameValidated;
     if (tlsAllowlistLocalOnly) *tlsAllowlistLocalOnly = app.m_metaTlsAllowlistLocalOnly;
@@ -8190,6 +8454,8 @@ bool NavigatorApp::smokeControlledLocalHttpsNavigation(const char* url,
 
     return streq_local(app.m_metaRequestedUrl, url ? url : "") &&
         streq_local(app.m_metaSourceType, "https") &&
+        streq_local(app.m_metaTransportSelection, "LocalAllowlistedTlsHttps") &&
+        streq_local(app.m_metaTlsStatus, "Success") &&
         app.m_metaTlsUsed &&
         app.m_metaTlsAllowlistLocalOnly &&
         app.m_metaTlsValidated &&
@@ -9556,6 +9822,8 @@ static bool printNavigatorLocalTlsSmokeCase()
     char tlsSniHost[64];
     char tlsProtocol[32];
     char tlsCipherSuite[64];
+    char transportSelection[40];
+    char tlsStatus[40];
     char sourceType[24];
     bool tlsValidated = false;
     bool tlsHostnameValidated = false;
@@ -9565,7 +9833,8 @@ static bool printNavigatorLocalTlsSmokeCase()
         error, sizeof(error), finalUrl, sizeof(finalUrl), &redirectCount,
         &plainTcpConnectAttempts, &tlsTcpConnectAttempts, &verifyFlags,
         tlsSniHost, sizeof(tlsSniHost), tlsProtocol, sizeof(tlsProtocol),
-        tlsCipherSuite, sizeof(tlsCipherSuite), &tlsValidated, &tlsHostnameValidated,
+        tlsCipherSuite, sizeof(tlsCipherSuite), transportSelection, sizeof(transportSelection),
+        tlsStatus, sizeof(tlsStatus), &tlsValidated, &tlsHostnameValidated,
         &tlsAllowlistLocalOnly, sourceType, sizeof(sourceType));
     const bool contentTypeOk =
         gxos::web::httpSharedEqualsInsensitive(contentType, "text/html") ||
@@ -9582,6 +9851,8 @@ static bool printNavigatorLocalTlsSmokeCase()
         tlsValidated &&
         tlsHostnameValidated &&
         tlsAllowlistLocalOnly &&
+        nav_smoke_text_equals(transportSelection, "LocalAllowlistedTlsHttps") &&
+        nav_smoke_text_equals(tlsStatus, "Success") &&
         nav_smoke_text_equals(tlsSniHost, "guidexos.test") &&
         nav_smoke_text_equals(sourceType, "https") &&
         nav_smoke_text_equals(s_kernelLastDnsResolvedIp, "10.0.2.2");
@@ -9609,6 +9880,11 @@ static bool printNavigatorLocalTlsSmokeCase()
     serial::puts(tlsHostnameValidated ? "success" : "failure");
     serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.allowlist_mode=");
     serial::puts(tlsAllowlistLocalOnly ? "local-only controlled HTTPS" : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.transport_selection=");
+    serial::puts(transportSelection[0] ? transportSelection : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.tls_status=");
+    serial::puts(tlsStatus[0] ? tlsStatus : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.byte_stream=shared TLS HttpByteStream policy layer");
     serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.tls_backend=Mbed TLS bare-metal");
     serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.sni_host=");
     serial::puts(tlsSniHost[0] ? tlsSniHost : "(none)");
@@ -9653,6 +9929,8 @@ static bool printNavigatorLocalTlsRedirectCase()
     char tlsSniHost[64];
     char tlsProtocol[32];
     char tlsCipherSuite[64];
+    char transportSelection[40];
+    char tlsStatus[40];
     char sourceType[24];
     bool tlsValidated = false;
     bool tlsHostnameValidated = false;
@@ -9662,7 +9940,8 @@ static bool printNavigatorLocalTlsRedirectCase()
         error, sizeof(error), finalUrl, sizeof(finalUrl), &redirectCount,
         &plainTcpConnectAttempts, &tlsTcpConnectAttempts, &verifyFlags,
         tlsSniHost, sizeof(tlsSniHost), tlsProtocol, sizeof(tlsProtocol),
-        tlsCipherSuite, sizeof(tlsCipherSuite), &tlsValidated, &tlsHostnameValidated,
+        tlsCipherSuite, sizeof(tlsCipherSuite), transportSelection, sizeof(transportSelection),
+        tlsStatus, sizeof(tlsStatus), &tlsValidated, &tlsHostnameValidated,
         &tlsAllowlistLocalOnly, sourceType, sizeof(sourceType));
     const bool pass = requestOk &&
         statusCode == 200 &&
@@ -9674,6 +9953,8 @@ static bool printNavigatorLocalTlsRedirectCase()
         tlsValidated &&
         tlsHostnameValidated &&
         tlsAllowlistLocalOnly &&
+        nav_smoke_text_equals(transportSelection, "LocalAllowlistedTlsHttps") &&
+        nav_smoke_text_equals(tlsStatus, "Success") &&
         nav_smoke_text_equals(finalUrl, "https://guidexos.test:8443/navigator-smoke/tls-basic.html") &&
         nav_smoke_text_equals(tlsSniHost, "guidexos.test") &&
         nav_smoke_text_equals(sourceType, "https");
@@ -9696,6 +9977,10 @@ static bool printNavigatorLocalTlsRedirectCase()
     serial_put_dec64((uint64_t)verifyFlags);
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.redirect_allowlisted.sni_host=");
     serial::puts(tlsSniHost[0] ? tlsSniHost : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.redirect_allowlisted.transport_selection=");
+    serial::puts(transportSelection[0] ? transportSelection : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.redirect_allowlisted.tls_status=");
+    serial::puts(tlsStatus[0] ? tlsStatus : "(none)");
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.redirect_allowlisted.protocol=");
     serial::puts(tlsProtocol[0] ? tlsProtocol : "(none)");
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.redirect_allowlisted.cipher_suite=");
@@ -10062,8 +10347,8 @@ static bool printNavigatorRuntimeSmokePreamble()
     serial::puts("[NAVIGATOR-SMOKE] capability.https_tls=controlled local-only HTTPS enabled for guidexos.test:8443/navigator-smoke/; general navigation still gated until tls_readiness=yes\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.tls_backend=local-only Mbed TLS transport ready with CA and hostname validation\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.tls_smoke_local=enabled wrong-host and direct hook diagnostics remain available\n");
-    serial::puts("[NAVIGATOR-SMOKE] capability.http_transport=plain TCP byte-stream\n");
-    serial::puts("[NAVIGATOR-SMOKE] capability.tls_insertion_seam=controlled local HTTPS active in regular Navigator request path; public https:// gated\n");
+    serial::puts("[NAVIGATOR-SMOKE] capability.http_transport=shared HttpByteStream policy layer (PlainTcpHttp + LocalAllowlistedTlsHttps)\n");
+    serial::puts("[NAVIGATOR-SMOKE] capability.tls_policy_layer=shared HttpByteStream transport policy layer selects plain TCP HTTP or local allowlisted Mbed TLS; public https:// gated\n");
     serial::puts("[NAVIGATOR-SMOKE] coverage.direct_https_allowlist=covered\n");
     serial::puts("[NAVIGATOR-SMOKE] coverage.direct_https_unsupported=covered\n");
     serial::puts("[NAVIGATOR-SMOKE] coverage.http_to_https_redirect_policy=exact local allowlist target covered\n");

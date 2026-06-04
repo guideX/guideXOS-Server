@@ -7,6 +7,8 @@
 #include <cstdint>
 #endif
 
+#include "guide_web_http_shared.h"
+
 namespace gxos {
 
 static constexpr size_t kGxosMaxCaStoreBytes = 512u * 1024u;
@@ -172,12 +174,18 @@ struct GxosTlsLocalHandshakeResult {
     int transportError;
     int mbedtlsError;
     int mbedtlsState;
+    gxos::web::HttpByteStreamTlsStatus transportStatus;
     char sniHost[64];
     char stage[48];
     char protocol[32];
     char cipherSuite[64];
     char error[160];
 };
+
+bool gxos_tls_open_http_byte_stream(const char* sniHostname,
+                                    GxosTlsByteStream tcpStream,
+                                    gxos::web::HttpByteStream* outStream,
+                                    GxosTlsLocalHandshakeResult* result);
 
 bool gxos_tls_smoke_https_request(const char* sniHostname,
                                   const char* requestBytes,

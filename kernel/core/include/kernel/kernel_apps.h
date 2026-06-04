@@ -461,6 +461,10 @@ public:
                                                     int tlsProtocolLen = 0,
                                                     char* tlsCipherSuite = nullptr,
                                                     int tlsCipherSuiteLen = 0,
+                                                    char* transportSelection = nullptr,
+                                                    int transportSelectionLen = 0,
+                                                    char* tlsStatus = nullptr,
+                                                    int tlsStatusLen = 0,
                                                     bool* tlsValidated = nullptr,
                                                     bool* tlsHostnameValidated = nullptr,
                                                     bool* tlsAllowlistLocalOnly = nullptr,
@@ -644,6 +648,9 @@ private:
     bool m_metaTlsAllowlistLocalOnly;
     uint32_t m_metaTlsVerifyFlags;
     char m_metaTlsBackend[48];
+    char m_metaTransportSelection[40];
+    char m_metaTlsStatus[40];
+    char m_metaTransportPolicyReason[128];
     char m_metaTlsHostname[64];
     char m_metaTlsSniHost[64];
     char m_metaTlsProtocol[32];
