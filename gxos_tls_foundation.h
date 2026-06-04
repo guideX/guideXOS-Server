@@ -103,6 +103,7 @@ enum class GxosTrustStoreSource {
     None,
     SmokeFixtureTrust,
     UserProvidedTrustStore,
+    ProductionBundle,
     WindowsSystemTrustStore
 };
 
@@ -138,12 +139,17 @@ enum class GxosValidatedHttpsPolicyState {
 
 struct GxosValidatedHttpsPolicyInfo {
     GxosValidatedHttpsPolicyState state;
+    GxosValidatedHttpsPolicyState selectedState;
     bool localAllowlistEnabled;
     bool localSmokeReady;
     bool broadPublicHttpsEnabled;
     bool productionReady;
+    const char* configPath;
+    const char* configSource;
+    const char* localAllowReason;
     const char* detail;
     const char* blocker;
+    const char* error;
 };
 
 const char* gxos_validated_https_policy_state_name(GxosValidatedHttpsPolicyState state);

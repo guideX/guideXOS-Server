@@ -14,6 +14,27 @@ $InputDir = if ([System.IO.Path]::IsPathRooted($InputDir)) { $InputDir } else { 
 $OutputDir = if ([System.IO.Path]::IsPathRooted($OutputDir)) { $OutputDir } else { Join-Path $RootDir $OutputDir }
 $OutputImage = if ([System.IO.Path]::IsPathRooted($OutputImage)) { $OutputImage } else { Join-Path $RootDir $OutputImage }
 
+function Resolve-StagedSourcePath([string]$PathValue) {
+    if ([string]::IsNullOrWhiteSpace($PathValue)) { return $null }
+    $candidate = $PathValue.Trim()
+    if (-not [System.IO.Path]::IsPathRooted($candidate)) {
+        $candidate = Join-Path $RootDir $candidate
+    }
+    return $candidate
+}
+
+function Get-StagedRelativePath([string]$BasePath, [string]$FullPath) {
+    $baseFull = [System.IO.Path]::GetFullPath($BasePath)
+    $fileFull = [System.IO.Path]::GetFullPath($FullPath)
+    if (-not $baseFull.EndsWith([System.IO.Path]::DirectorySeparatorChar)) {
+        $baseFull += [System.IO.Path]::DirectorySeparatorChar
+    }
+    if (-not $fileFull.StartsWith($baseFull, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "Staged file is outside the wallpaper pack output directory: $fileFull"
+    }
+    return $fileFull.Substring($baseFull.Length).Replace('\', '/')
+}
+
 $WallpaperNames = @(
     "blueflower",
     "dinos",
@@ -196,27 +217,88 @@ function Write-Fat32Image([string]$ImagePath, [string]$WallpaperDir, [array]$Fil
 
     $rootCluster = $nextCluster++
     $wallpaperCluster = $nextCluster++
-    $certsCluster = $null
-    $enableSmokeCaFixture = $SmokeCaFixture -or $env:GXOS_NAVIGATOR_SMOKE_CA_FIXTURE -eq "1" -or ($Files | Where-Object { $_.FullName -match '[\\/]certs[\\/]' } | Select-Object -First 1)
-    if ($enableSmokeCaFixture) {
-        $certsCluster = $nextCluster++
-    }
     $fat[$rootCluster] = 0x0FFFFFFF
     $fat[$wallpaperCluster] = 0x0FFFFFFF
-    if ($null -ne $certsCluster) {
+
+    $pendingFiles = @()
+    $hasCerts = $false
+    $hasConfig = $false
+    $hasConfigCerts = $false
+    $hasConfigNavigator = $false
+    foreach ($file in $Files) {
+        $fullPath = [System.IO.Path]::GetFullPath($file.FullName)
+        $relativePath = Get-StagedRelativePath $OutputDir $fullPath
+        $directory = [System.IO.Path]::GetDirectoryName($relativePath)
+        if ($null -eq $directory) { $directory = "" }
+        $directory = $directory.Replace('\', '/')
+        switch -Regex ($directory) {
+            '^wall$' {
+                break
+            }
+            '^certs$' {
+                $hasCerts = $true
+                break
+            }
+            '^config/certs$' {
+                $hasConfig = $true
+                $hasConfigCerts = $true
+                break
+            }
+            '^config/navigator$' {
+                $hasConfig = $true
+                $hasConfigNavigator = $true
+                break
+            }
+            default {
+                throw "Unexpected staged file path for ramdisk image: $relativePath"
+            }
+        }
+        $pendingFiles += [pscustomobject]@{
+            Name = $file.Name
+            FullName = $fullPath
+            RelativePath = $relativePath
+            Directory = $directory
+            Size = [uint32](Get-Item $fullPath).Length
+        }
+    }
+
+    $certsCluster = $null
+    $configCluster = $null
+    $configCertsCluster = $null
+    $configNavigatorCluster = $null
+    if ($hasCerts) {
+        $certsCluster = $nextCluster++
         $fat[$certsCluster] = 0x0FFFFFFF
+    }
+    if ($hasConfig) {
+        $configCluster = $nextCluster++
+        $fat[$configCluster] = 0x0FFFFFFF
+    }
+    if ($hasConfigCerts) {
+        $configCertsCluster = $nextCluster++
+        $fat[$configCertsCluster] = 0x0FFFFFFF
+    }
+    if ($hasConfigNavigator) {
+        $configNavigatorCluster = $nextCluster++
+        $fat[$configNavigatorCluster] = 0x0FFFFFFF
     }
 
     $fileRecords = @()
-    foreach ($file in $Files) {
-        $length = (Get-Item $file.FullName).Length
-        $clusters = [Math]::Max(1, [Math]::Ceiling($length / $clusterBytes))
+    foreach ($pending in $pendingFiles) {
+        $clusters = [Math]::Max(1, [Math]::Ceiling($pending.Size / $clusterBytes))
         $start = $nextCluster
         for ($i = 0; $i -lt $clusters; $i++) {
             $cluster = $nextCluster++
             $fat[$cluster] = if ($i -eq $clusters - 1) { 0x0FFFFFFF } else { [uint32]($cluster + 1) }
         }
-        $fileRecords += [pscustomobject]@{ Name = $file.Name; FullName = $file.FullName; Size = [uint32]$length; Cluster = [uint32]$start }
+        $fileRecords += [pscustomobject]@{
+            Name = $pending.Name
+            FullName = $pending.FullName
+            RelativePath = $pending.RelativePath
+            Directory = $pending.Directory
+            Size = $pending.Size
+            Cluster = [uint32]$start
+        }
     }
 
     $stream = [System.IO.File]::Open($ImagePath, [System.IO.FileMode]::Create, [System.IO.FileAccess]::ReadWrite)
@@ -258,27 +340,66 @@ function Write-Fat32Image([string]$ImagePath, [string]$WallpaperDir, [array]$Fil
             $stream.Write($fatBytes, 0, $fatBytes.Length)
         }
 
-    $rootEntries = New-Object 'System.Collections.Generic.List[byte[]]'
+        $rootEntries = New-Object 'System.Collections.Generic.List[byte[]]'
         $usedRoot = @{}
         Add-DirectoryRecord $rootEntries "wall" (Get-ShortName "wall" $usedRoot) 0x10 $wallpaperCluster 0
-    if ($null -ne $certsCluster) {
-        Add-DirectoryRecord $rootEntries "certs" (Get-ShortName "certs" $usedRoot) 0x10 $certsCluster 0
-    }
+        if ($null -ne $certsCluster) {
+            Add-DirectoryRecord $rootEntries "certs" (Get-ShortName "certs" $usedRoot) 0x10 $certsCluster 0
+        }
+        if ($null -ne $configCluster) {
+            Add-DirectoryRecord $rootEntries "config" (Get-ShortName "config" $usedRoot) 0x10 $configCluster 0
+        }
 
         $wallEntries = New-Object 'System.Collections.Generic.List[byte[]]'
         $usedWall = @{}
-    $certEntries = if ($null -ne $certsCluster) { New-Object 'System.Collections.Generic.List[byte[]]' } else { $null }
-    $usedCert = @{}
-        foreach ($record in $fileRecords) {
-            $parentName = Split-Path -Leaf (Split-Path -Parent $record.FullName)
-            if ($null -ne $certEntries -and $parentName -eq "certs") {
-                Add-DirectoryRecord $certEntries $record.Name (Get-ShortName $record.Name $usedCert) 0x20 $record.Cluster $record.Size
-            } else {
-                Add-DirectoryRecord $wallEntries $record.Name (Get-ShortName $record.Name $usedWall) 0x20 $record.Cluster $record.Size
+        $certEntries = if ($null -ne $certsCluster) { New-Object 'System.Collections.Generic.List[byte[]]' } else { $null }
+        $usedCert = @{}
+        $configEntries = if ($null -ne $configCluster) { New-Object 'System.Collections.Generic.List[byte[]]' } else { $null }
+        $usedConfig = @{}
+        $configCertEntries = if ($null -ne $configCertsCluster) { New-Object 'System.Collections.Generic.List[byte[]]' } else { $null }
+        $usedConfigCert = @{}
+        $configNavigatorEntries = if ($null -ne $configNavigatorCluster) { New-Object 'System.Collections.Generic.List[byte[]]' } else { $null }
+        $usedConfigNavigator = @{}
+
+        if ($null -ne $configEntries) {
+            if ($null -ne $configCertsCluster) {
+                Add-DirectoryRecord $configEntries "certs" (Get-ShortName "certs" $usedConfig) 0x10 $configCertsCluster 0
+            }
+            if ($null -ne $configNavigatorCluster) {
+                Add-DirectoryRecord $configEntries "navigator" (Get-ShortName "navigator" $usedConfig) 0x10 $configNavigatorCluster 0
             }
         }
 
-        foreach ($pair in @(@($rootCluster, $rootEntries), @($wallpaperCluster, $wallEntries))) {
+        foreach ($record in $fileRecords) {
+            switch ($record.Directory) {
+                "wall" {
+                    Add-DirectoryRecord $wallEntries $record.Name (Get-ShortName $record.Name $usedWall) 0x20 $record.Cluster $record.Size
+                    break
+                }
+                "certs" {
+                    Add-DirectoryRecord $certEntries $record.Name (Get-ShortName $record.Name $usedCert) 0x20 $record.Cluster $record.Size
+                    break
+                }
+                "config/certs" {
+                    Add-DirectoryRecord $configCertEntries $record.Name (Get-ShortName $record.Name $usedConfigCert) 0x20 $record.Cluster $record.Size
+                    break
+                }
+                "config/navigator" {
+                    Add-DirectoryRecord $configNavigatorEntries $record.Name (Get-ShortName $record.Name $usedConfigNavigator) 0x20 $record.Cluster $record.Size
+                    break
+                }
+            }
+        }
+
+        foreach ($pair in @(
+            @($rootCluster, $rootEntries),
+            @($wallpaperCluster, $wallEntries),
+            @($certsCluster, $certEntries),
+            @($configCluster, $configEntries),
+            @($configCertsCluster, $configCertEntries),
+            @($configNavigatorCluster, $configNavigatorEntries)
+        )) {
+            if ($null -eq $pair[0] -or $null -eq $pair[1]) { continue }
             $cluster = [uint32]$pair[0]
             $entries = $pair[1]
             $dirBytes = New-Object byte[] $clusterBytes
@@ -291,23 +412,11 @@ function Write-Fat32Image([string]$ImagePath, [string]$WallpaperDir, [array]$Fil
             $stream.Write($dirBytes, 0, $dirBytes.Length)
         }
 
-        if ($null -ne $certEntries) {
-            $cluster = [uint32]$certsCluster
-            $dirBytes = New-Object byte[] $clusterBytes
-            $offset = 0
-            foreach ($entry in $certEntries) {
-                [Array]::Copy($entry, 0, $dirBytes, $offset, 32)
-                $offset += 32
-            }
-            $stream.Position = ($dataStartSector + (($cluster - 2) * $sectorsPerCluster)) * $bytesPerSector
-            $stream.Write($dirBytes, 0, $dirBytes.Length)
-        }
-
         foreach ($record in $fileRecords) {
             $data = [System.IO.File]::ReadAllBytes($record.FullName)
             $stream.Position = ($dataStartSector + (($record.Cluster - 2) * $sectorsPerCluster)) * $bytesPerSector
             $stream.Write($data, 0, $data.Length)
-            Write-Host "      added /system/wall/$($record.Name) ($([Math]::Round($record.Size / 1KB, 1)) KB)" -ForegroundColor Gray
+            Write-Host "      added /$($record.RelativePath.Replace('\', '/')) ($([Math]::Round($record.Size / 1KB, 1)) KB)" -ForegroundColor Gray
         }
     } finally {
         $stream.Dispose()
@@ -317,7 +426,11 @@ function Write-Fat32Image([string]$ImagePath, [string]$WallpaperDir, [array]$Fil
 $staged = @()
 New-Item -ItemType Directory -Force -Path $OutputDir | Out-Null
 $wallpaperDir = Join-Path $OutputDir "wall"
-if (Test-Path $wallpaperDir) { Remove-Item -Recurse -Force $wallpaperDir }
+$certsDir = Join-Path $OutputDir "certs"
+$configDir = Join-Path $OutputDir "config"
+foreach ($stagingDir in @($wallpaperDir, $certsDir, $configDir)) {
+    if (Test-Path $stagingDir) { Remove-Item -Recurse -Force $stagingDir }
+}
 New-Item -ItemType Directory -Force -Path $wallpaperDir | Out-Null
 New-Item -ItemType Directory -Force -Path (Split-Path -Parent $OutputImage) | Out-Null
 
@@ -326,14 +439,48 @@ if ($SmokeCaFixture -or $env:GXOS_NAVIGATOR_SMOKE_CA_FIXTURE -eq "1") {
     if (-not (Test-Path $smokeCaFixturePath)) {
         throw "Smoke CA fixture not found: $smokeCaFixturePath"
     }
-    $certsDir = Join-Path $OutputDir "certs"
-    if (Test-Path $certsDir) { Remove-Item -Recurse -Force $certsDir }
     New-Item -ItemType Directory -Force -Path $certsDir | Out-Null
     $targetCa = Join-Path $certsDir "ca-bundle.pem"
     Copy-Item -LiteralPath $smokeCaFixturePath -Destination $targetCa -Force
     $staged += Get-Item $targetCa
     Write-Host "      staged smoke-only CA bundle at /certs/ca-bundle.pem" -ForegroundColor Yellow
+} else {
+    $productionCaSource = Resolve-StagedSourcePath $env:GXOS_NAVIGATOR_PRODUCTION_CA_BUNDLE_SOURCE
+    if ($productionCaSource) {
+        if (-not (Test-Path $productionCaSource)) {
+            throw "Production CA bundle source not found: $productionCaSource"
+        }
+        New-Item -ItemType Directory -Force -Path $certsDir | Out-Null
+        $targetCa = Join-Path $certsDir "ca-bundle.pem"
+        Copy-Item -LiteralPath $productionCaSource -Destination $targetCa -Force
+        $staged += Get-Item $targetCa
+        Write-Host "      staged production CA bundle at /certs/ca-bundle.pem" -ForegroundColor Yellow
+    }
 }
+
+$userCaSource = Resolve-StagedSourcePath $env:GXOS_NAVIGATOR_USER_CA_BUNDLE_SOURCE
+if ($userCaSource) {
+    if (-not (Test-Path $userCaSource)) {
+        throw "User CA bundle source not found: $userCaSource"
+    }
+    $configCertsDir = Join-Path $configDir "certs"
+    New-Item -ItemType Directory -Force -Path $configCertsDir | Out-Null
+    $targetUserCa = Join-Path $configCertsDir "ca-bundle.pem"
+    Copy-Item -LiteralPath $userCaSource -Destination $targetUserCa -Force
+    $staged += Get-Item $targetUserCa
+    Write-Host "      staged user CA bundle at /config/certs/ca-bundle.pem" -ForegroundColor Yellow
+}
+
+$httpsPolicyToken = if ([string]::IsNullOrWhiteSpace($env:GXOS_NAVIGATOR_HTTPS_POLICY)) { $null } else { $env:GXOS_NAVIGATOR_HTTPS_POLICY.Trim() }
+if ($httpsPolicyToken) {
+    $configNavigatorDir = Join-Path $configDir "navigator"
+    New-Item -ItemType Directory -Force -Path $configNavigatorDir | Out-Null
+    $targetPolicy = Join-Path $configNavigatorDir "https-policy.txt"
+    [System.IO.File]::WriteAllText($targetPolicy, $httpsPolicyToken, [System.Text.Encoding]::ASCII)
+    $staged += Get-Item $targetPolicy
+    Write-Host "      staged HTTPS policy config at /config/navigator/https-policy.txt ($httpsPolicyToken)" -ForegroundColor Yellow
+}
+
 foreach ($name in $WallpaperNames) {
     foreach ($suffix in @("", "_thumb")) {
         $pngName = "$name$suffix.png"
