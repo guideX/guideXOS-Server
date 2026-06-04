@@ -4862,8 +4862,8 @@ const char* TrashApp::typeForEntry(const TrashEntry& entry) const
 // ============================================================
 
 NavigatorApp::NavigatorApp()
-    : m_blockCount(0), m_bookmarkCount(0), m_backCount(0), m_forwardCount(0),
-      m_recentDownloadCount(0),
+    : m_blockCount(0), m_bookmarkCount(0), m_recentDownloadCount(0), m_backCount(0),
+      m_forwardCount(0),
       m_addressFocused(false), m_addressCaret(0), m_ctrlPressed(false), m_scrollY(0), m_hoverLinkIndex(-1),
       m_selectionActive(false), m_selectionDragging(false), m_selectionMoved(false), m_mouseLeftDown(false),
       m_mouseMode(NAV_MOUSE_NONE), m_mouseDownLinkIndex(-1), m_mouseDownX(0), m_mouseDownY(0), m_mouseDragThresholdExceeded(false),
@@ -4894,10 +4894,21 @@ NavigatorApp::NavigatorApp()
     m_metaRemoteImages = 0;
     m_metaLocalImages = 0;
     m_metaLastImageError[0] = '\0';
+    m_metaScheme[0] = '\0';
     m_metaDnsUsed = false;
     m_metaDnsHost[0] = '\0';
     m_metaDnsResolvedIp[0] = '\0';
     m_metaDnsError[0] = '\0';
+    m_metaTlsUsed = false;
+    m_metaTlsValidated = false;
+    m_metaTlsHostnameValidated = false;
+    m_metaTlsAllowlistLocalOnly = false;
+    m_metaTlsVerifyFlags = 0;
+    m_metaTlsBackend[0] = '\0';
+    m_metaTlsHostname[0] = '\0';
+    m_metaTlsSniHost[0] = '\0';
+    m_metaTlsProtocol[0] = '\0';
+    m_metaTlsCipherSuite[0] = '\0';
     m_metaCssDetected = false;
     m_metaStyleRuleCount = 0;
     m_metaUnsupportedExternalStylesheetCount = 0;
@@ -5602,92 +5613,6 @@ static void nav_i64_to_text(int64_t value, char* out, int outSize)
     while (pos > 0 && outPos < outSize - 1) out[outPos++] = tmp[--pos];
     out[outPos] = '\0';
 }
-void NavigatorApp::rememberPageMetadata(const char* requestedUrl, const char* finalUrl, const char* sourceType,
-                                        const char* contentType, const char* errorStatus,
-                                        const char* rawSource, int rawSourceBytes,
-                                        const gxos::web::CssDiagnostics* cssDiagnostics,
-                                        const gxos::web::WebStyle* bodyStyle,
-                                        int httpStatusCode, const char* httpReason,
-                                        int redirectCount)
-{
-    strcopy(m_metaRequestedUrl, requestedUrl ? requestedUrl : "", MAX_URL_LEN);
-    strcopy(m_metaFinalUrl, finalUrl ? finalUrl : m_metaRequestedUrl, MAX_URL_LEN);
-    strcopy(m_metaSourceType, sourceType ? sourceType : "", sizeof(m_metaSourceType));
-    m_metaHttpStatusCode = httpStatusCode;
-    strcopy(m_metaHttpReason, httpReason ? httpReason : "", sizeof(m_metaHttpReason));
-    strcopy(m_metaContentType, contentType ? contentType : "", sizeof(m_metaContentType));
-    m_metaRedirectCount = redirectCount;
-    m_metaRedirected = redirectCount > 0;
-    strcopy(m_metaErrorStatus, errorStatus ? errorStatus : "", sizeof(m_metaErrorStatus));
-    strcopy(m_lastDownloadError, errorStatus ? errorStatus : "", sizeof(m_lastDownloadError));
-    bool httpSource = sourceType && streq_local(sourceType, "http");
-    m_metaDnsUsed = httpSource ? s_kernelLastDnsUsed : false;
-    strcopy(m_metaDnsHost, httpSource ? s_kernelLastDnsHost : "", sizeof(m_metaDnsHost));
-    strcopy(m_metaDnsResolvedIp, httpSource ? s_kernelLastDnsResolvedIp : "", sizeof(m_metaDnsResolvedIp));
-    strcopy(m_metaDnsError, httpSource ? s_kernelLastDnsError : "", sizeof(m_metaDnsError));
-    m_metaSourceBytes = rawSourceBytes > 0 ? rawSourceBytes : 0;
-    m_metaCssDetected = cssDiagnostics ? cssDiagnostics->cssDetected : false;
-    m_metaStyleRuleCount = cssDiagnostics ? cssDiagnostics->styleRuleCount : 0;
-    m_metaUnsupportedExternalStylesheetCount = cssDiagnostics ? cssDiagnostics->unsupportedExternalStylesheetCount : 0;
-    m_metaUnsupportedCssDeclarationCount = cssDiagnostics ? cssDiagnostics->unsupportedDeclarationCount : 0;
-    m_metaCssStyleBlockCapped = cssDiagnostics ? cssDiagnostics->styleBlockCapped : false;
-    m_metaCssStyleBytesProcessed = cssDiagnostics ? (int)cssDiagnostics->styleBytesProcessed : 0;
-    m_bodyStyle = bodyStyle ? *bodyStyle : gxos::web::WebStyle{};
-    m_metaSourcePreview[0] = '\0';
-    m_metaSourceTruncated = false;
-    if (rawSource && rawSourceBytes > 0) {
-        int copyLen = rawSourceBytes;
-        if (copyLen > MAX_SOURCE_PREVIEW - 1) {
-            copyLen = MAX_SOURCE_PREVIEW - 1;
-            m_metaSourceTruncated = true;
-        }
-        for (int i = 0; i < copyLen; ++i) m_metaSourcePreview[i] = rawSource[i];
-        m_metaSourcePreview[copyLen] = '\0';
-    }
-
-    m_metaDocumentBlocks = m_blockCount;
-    m_metaImageBlocks = 0;
-    m_metaLoadedImages = 0;
-    m_metaFailedImages = 0;
-    m_metaRemoteImages = 0;
-    m_metaLocalImages = 0;
-    m_metaLastImageError[0] = '\0';
-    m_metaFormCount = 0;
-    m_metaTextInputCount = 0;
-    m_metaCheckboxCount = 0;
-    m_metaRadioCount = 0;
-    m_metaTextareaCount = 0;
-    m_metaSelectCount = 0;
-    m_metaSubmitCount = 0;
-    m_metaUnsupportedFormCount = 0;
-    int lastFormIndex = -1;
-    for (int i = 0; i < m_blockCount; ++i) {
-        if (m_blocks[i].kind == BLOCK_IMAGE) {
-            ++m_metaImageBlocks;
-            if (nav_starts_with(m_blocks[i].url, "http://")) ++m_metaRemoteImages;
-            else if (nav_starts_with(m_blocks[i].url, "file://")) ++m_metaLocalImages;
-            if (m_blocks[i].imageStatus == (int)gxos::gui::ImageLoadStatus::Ok) ++m_metaLoadedImages;
-            else {
-                ++m_metaFailedImages;
-                if (!m_metaLastImageError[0]) strcopy(m_metaLastImageError, m_blocks[i].imageError[0] ? m_blocks[i].imageError : gxos::gui::ImageLoadStatusName((gxos::gui::ImageLoadStatus)m_blocks[i].imageStatus), sizeof(m_metaLastImageError));
-            }
-        }
-        if (m_blocks[i].formIndex >= 0) {
-            if (m_blocks[i].formIndex > lastFormIndex) {
-                lastFormIndex = m_blocks[i].formIndex;
-                ++m_metaFormCount;
-                if (m_blocks[i].formUnsupported) ++m_metaUnsupportedFormCount;
-            }
-            if (m_blocks[i].kind == BLOCK_FORM_TEXT) ++m_metaTextInputCount;
-            else if (m_blocks[i].kind == BLOCK_FORM_CHECKBOX) ++m_metaCheckboxCount;
-            else if (m_blocks[i].kind == BLOCK_FORM_RADIO) ++m_metaRadioCount;
-            else if (m_blocks[i].kind == BLOCK_FORM_TEXTAREA) ++m_metaTextareaCount;
-            else if (m_blocks[i].kind == BLOCK_FORM_SELECT) ++m_metaSelectCount;
-            else if (m_blocks[i].kind == BLOCK_FORM_SUBMIT) ++m_metaSubmitCount;
-        }
-    }
-}
-
 void NavigatorApp::buildPageInfoDocument()
 {
     strcopy(m_currentUrl, "about:page-info", MAX_URL_LEN);
@@ -5713,10 +5638,20 @@ void NavigatorApp::buildPageInfoDocument()
     NAV_INFO_TEXT("Redirected: ", m_metaRedirected ? "yes" : "no");
     NAV_INFO_INT("Redirect count: ", m_metaRedirectCount);
     NAV_INFO_TEXT("Error status: ", m_metaErrorStatus[0] ? m_metaErrorStatus : "(none)");
+    NAV_INFO_TEXT("URL scheme: ", m_metaScheme[0] ? m_metaScheme : "(none)");
     NAV_INFO_TEXT("DNS used: ", m_metaDnsUsed ? "yes" : "no");
     NAV_INFO_TEXT("DNS hostname: ", m_metaDnsHost[0] ? m_metaDnsHost : "(none)");
     NAV_INFO_TEXT("DNS resolved IP: ", m_metaDnsResolvedIp[0] ? m_metaDnsResolvedIp : "(none)");
     NAV_INFO_TEXT("DNS error: ", m_metaDnsError[0] ? m_metaDnsError : "(none)");
+    NAV_INFO_TEXT("TLS backend: ", m_metaTlsUsed ? (m_metaTlsBackend[0] ? m_metaTlsBackend : "(none)") : "not used");
+    NAV_INFO_TEXT("TLS validation: ", m_metaTlsUsed ? (m_metaTlsValidated ? "success" : "failure") : "not used");
+    NAV_INFO_TEXT("TLS hostname validation: ", m_metaTlsUsed ? (m_metaTlsHostnameValidated ? "success" : "failure") : "not used");
+    NAV_INFO_TEXT("TLS allowlist mode: ", m_metaTlsAllowlistLocalOnly ? "local-only controlled HTTPS" : "not used");
+    NAV_INFO_TEXT("TLS hostname: ", m_metaTlsHostname[0] ? m_metaTlsHostname : "(none)");
+    NAV_INFO_TEXT("TLS SNI: ", m_metaTlsSniHost[0] ? m_metaTlsSniHost : "(none)");
+    if (m_metaTlsUsed) NAV_INFO_INT("TLS verify flags: ", (int)m_metaTlsVerifyFlags);
+    NAV_INFO_TEXT("TLS protocol: ", m_metaTlsProtocol[0] ? m_metaTlsProtocol : "(none)");
+    NAV_INFO_TEXT("TLS cipher suite: ", m_metaTlsCipherSuite[0] ? m_metaTlsCipherSuite : "(none)");
     NAV_INFO_INT("Document blocks: ", m_metaDocumentBlocks);
     strcopy(line, "Image stats: blocks=", sizeof(line));
     nav_int_to_text(m_metaImageBlocks, number, sizeof(number));
@@ -5849,9 +5784,9 @@ void NavigatorApp::buildRuntimeDocument()
     addBlock(BLOCK_LIST_ITEM, "HTTP: enabled for numeric IPv4 and hostname HTTP/1.0 GET/POST with redirects and chunked decoding");
     addBlock(BLOCK_LIST_ITEM, "DNS: enabled-basic for A/IPv4 records; HTTP redirects: enabled, limit 5; HTTP chunked transfer decoding: enabled");
     addBlock(BLOCK_LIST_ITEM, "Remote PNG: enabled-basic for numeric IPv4 and hostname http:// PNG images; Downloads: unavailable for bare-metal HTTP v0.1");
-    addBlock(BLOCK_LIST_ITEM, "Bookmark persistence: unavailable; bookmarks are in-memory defaults; HTTPS/TLS: friendly unsupported until bare-metal TLS readiness is proven");
-    addBlock(BLOCK_LIST_ITEM, "TLS backend: Mbed TLS scaffold only");
-    addBlock(BLOCK_LIST_ITEM, "TLS insertion seam: prepared");
+    addBlock(BLOCK_LIST_ITEM, "Bookmark persistence: unavailable; bookmarks are in-memory defaults; HTTPS/TLS: local-only controlled guidexos.test:8443/navigator-smoke/ path enabled, public bare-metal https:// still blocked");
+    addBlock(BLOCK_LIST_ITEM, "TLS backend: local-only Mbed TLS bare-metal transport ready with CA and hostname validation");
+    addBlock(BLOCK_LIST_ITEM, "TLS insertion seam: controlled local HTTPS transport active in the regular Navigator request path; general Navigator https:// stays gated");
     addBlock(BLOCK_LIST_ITEM, "CSS-lite embedded <style>: enabled");
     addBlock(BLOCK_LIST_ITEM, "Forms-lite GET forms: enabled through interactive document controls; Forms-lite POST forms hosted: enabled in authoritative hosted Navigator path");
     addBlock(BLOCK_LIST_ITEM, "Forms-lite POST interactive: enabled");
@@ -6034,7 +5969,7 @@ void NavigatorApp::buildRuntimeDocument()
 
     addBlock(BLOCK_HEADING, "Backends");
     addBlock(BLOCK_LIST_ITEM, "File backend: kernel VFS");
-    addBlock(BLOCK_LIST_ITEM, "HTTP backend: kernel plain TCP byte-stream + shared guideWeb HTTP parser subset");
+    addBlock(BLOCK_LIST_ITEM, "HTTP backend: kernel plain TCP byte-stream plus controlled local Mbed TLS insertion at the regular Navigator request path");
     char dnsLine[96];
     char dnsIp[16];
     kernel::ipv4::ip_to_string(kernel::dns::get_server(), dnsIp);
@@ -6059,15 +5994,16 @@ void NavigatorApp::buildErrorDocument(const char* url, const char* reason)
     addBlock(BLOCK_LINK, "Go to about:navigator", "about:navigator");
 }
 
-void NavigatorApp::buildHttpsUnsupportedDocument(const char* url, bool redirected)
+void NavigatorApp::buildHttpsUnsupportedDocument(const char* url, bool redirected, const char* detail)
 {
     strcopy(m_currentUrl, url ? url : "", MAX_URL_LEN);
     strcopy(m_title, redirected ? "HTTPS Redirect Unsupported" : "HTTPS Unsupported", MAX_TITLE_LEN_NAV);
     m_blockCount = 0;
     addBlock(BLOCK_HEADING, redirected ? "HTTPS Redirect Unsupported" : "HTTPS Unsupported");
     addBlock(BLOCK_PARAGRAPH, redirected
-        ? "Navigator received an HTTP redirect to HTTPS, but HTTPS and TLS are not supported yet."
-        : "Navigator does not support HTTPS or TLS yet. Use a plain http:// URL for this milestone.");
+        ? "Navigator only follows a controlled local HTTPS allowlist in this milestone. Other HTTP-to-HTTPS redirects stay blocked."
+        : "Navigator only enables controlled local HTTPS for guidexos.test:8443/navigator-smoke/ in this milestone. General bare-metal https:// stays disabled.");
+    if (detail && detail[0]) addBlock(BLOCK_PARAGRAPH, detail);
     addBlock(BLOCK_LINK, "Page Info", "about:page-info");
     addBlock(BLOCK_LINK, "Go to about:navigator", "about:navigator");
 }
@@ -6475,7 +6411,7 @@ void NavigatorApp::resolveHref(const char* baseUrl, const char* href, char* out,
     strcopy(out + len, href, outSize - len);
 }
 
-void NavigatorApp::parseHtmlDocument(const char* url, const char* html, const char* sourceType, const char* contentType, int httpStatusCode, const char* httpReason, const char* requestedUrl, int redirectCount)
+void NavigatorApp::parseHtmlDocument(const char* url, const char* html, const char* sourceType, const char* contentType, int httpStatusCode, const char* httpReason, const char* requestedUrl, int redirectCount, const KernelHttpResponse* networkResponse)
 {
     strcopy(m_currentUrl, url ? url : "", MAX_URL_LEN);
     strcopy(m_title, url ? url : "Document", MAX_TITLE_LEN_NAV);
@@ -6675,7 +6611,10 @@ void NavigatorApp::parseHtmlDocument(const char* url, const char* html, const ch
         addBlock(BLOCK_PREFORMATTED, html ? html : "", "", &style);
     }
     prepareImageResources();
-    rememberPageMetadata(requestedUrl ? requestedUrl : url, url, sourceType ? sourceType : "file", contentType ? contentType : "text/html", "", html, html ? strlen_local(html) : 0, &cssDiagnostics, &bodyStyle, httpStatusCode, httpReason ? httpReason : "", redirectCount);
+    rememberPageMetadata(requestedUrl ? requestedUrl : url, url, sourceType ? sourceType : "file",
+        contentType ? contentType : "text/html", "", html, html ? strlen_local(html) : 0,
+        &cssDiagnostics, &bodyStyle, httpStatusCode, httpReason ? httpReason : "", redirectCount,
+        networkResponse);
 }
 
 static const int kKernelHttpUrlLen = 160;
@@ -6685,6 +6624,10 @@ static const int kKernelHttpRawLimit = kKernelHttpHeaderLimit + kKernelHttpBodyL
 static const int kKernelHttpPostBodyLimit = 8 * 1024;
 static const int kKernelHttpConnectTimeoutMs = gxos::web::kHttpSharedConnectTimeoutMs;
 static const int kKernelHttpReadTimeoutMs = gxos::web::kHttpSharedReadTimeoutMs;
+static const uint32_t kNavigatorTlsSmokeCnMismatchFlag = 0x04u;
+static const char* kNavigatorControlledHttpsHost = "guidexos.test";
+static const uint16_t kNavigatorControlledHttpsPort = 8443;
+static const char* kNavigatorControlledHttpsPathPrefix = "/navigator-smoke/";
 
 struct KernelHttpUrl {
     uint32_t ip;
@@ -6712,12 +6655,155 @@ struct KernelHttpResponse {
     char requestedUrl[kKernelHttpUrlLen];
     char finalUrl[kKernelHttpUrlLen];
     char error[128];
+    char scheme[8];
+    bool tlsUsed;
+    bool tlsAllowlistLocalOnly;
+    char tlsBackend[48];
+    gxos::GxosTlsLocalHandshakeResult tlsResult;
     char body[kKernelHttpBodyLimit + 1];
 };
 
 static KernelHttpResponse s_kernelHttpResponse;
 static char s_kernelHttpRaw[kKernelHttpRawLimit + 1];
 static char s_kernelHttpDocumentBody[kKernelHttpBodyLimit + 1];
+
+static void kernel_http_reset_response(KernelHttpResponse* response)
+{
+    if (!response) return;
+    response->ok = false;
+    response->statusCode = 0;
+    response->reason[0] = '\0';
+    response->contentType[0] = '\0';
+    response->transferEncoding[0] = '\0';
+    response->contentEncoding[0] = '\0';
+    response->location[0] = '\0';
+    response->bodyBytes = 0;
+    response->redirectCount = 0;
+    response->dnsUsed = false;
+    response->dnsHost[0] = '\0';
+    response->dnsResolvedIp[0] = '\0';
+    response->dnsError[0] = '\0';
+    response->requestedUrl[0] = '\0';
+    response->finalUrl[0] = '\0';
+    response->error[0] = '\0';
+    response->scheme[0] = '\0';
+    response->tlsUsed = false;
+    response->tlsAllowlistLocalOnly = false;
+    response->tlsBackend[0] = '\0';
+    response->tlsResult = gxos::GxosTlsLocalHandshakeResult{};
+    response->body[0] = '\0';
+}
+
+void NavigatorApp::rememberPageMetadata(const char* requestedUrl, const char* finalUrl, const char* sourceType,
+                                        const char* contentType, const char* errorStatus,
+                                        const char* rawSource, int rawSourceBytes,
+                                        const gxos::web::CssDiagnostics* cssDiagnostics,
+                                        const gxos::web::WebStyle* bodyStyle,
+                                        int httpStatusCode, const char* httpReason,
+                                        int redirectCount,
+                                        const KernelHttpResponse* networkResponse)
+{
+    strcopy(m_metaRequestedUrl, requestedUrl ? requestedUrl : "", MAX_URL_LEN);
+    strcopy(m_metaFinalUrl, finalUrl ? finalUrl : m_metaRequestedUrl, MAX_URL_LEN);
+    strcopy(m_metaSourceType, sourceType ? sourceType : "", sizeof(m_metaSourceType));
+    m_metaHttpStatusCode = httpStatusCode;
+    strcopy(m_metaHttpReason, httpReason ? httpReason : "", sizeof(m_metaHttpReason));
+    strcopy(m_metaContentType, contentType ? contentType : "", sizeof(m_metaContentType));
+    m_metaRedirectCount = redirectCount;
+    m_metaRedirected = redirectCount > 0;
+    strcopy(m_metaErrorStatus, errorStatus ? errorStatus : "", sizeof(m_metaErrorStatus));
+    strcopy(m_lastDownloadError, errorStatus ? errorStatus : "", sizeof(m_lastDownloadError));
+    bool httpSource = sourceType &&
+        (streq_local(sourceType, "http") || streq_local(sourceType, "https"));
+    strcopy(m_metaScheme,
+        networkResponse && networkResponse->scheme[0]
+            ? networkResponse->scheme
+            : (streq_local(m_metaSourceType, "https") ? "https" :
+                (streq_local(m_metaSourceType, "http") ? "http" : "")),
+        sizeof(m_metaScheme));
+    m_metaDnsUsed = httpSource ? s_kernelLastDnsUsed : false;
+    strcopy(m_metaDnsHost, httpSource ? s_kernelLastDnsHost : "", sizeof(m_metaDnsHost));
+    strcopy(m_metaDnsResolvedIp, httpSource ? s_kernelLastDnsResolvedIp : "", sizeof(m_metaDnsResolvedIp));
+    strcopy(m_metaDnsError, httpSource ? s_kernelLastDnsError : "", sizeof(m_metaDnsError));
+    m_metaTlsUsed = networkResponse ? networkResponse->tlsUsed : false;
+    m_metaTlsValidated = networkResponse ? networkResponse->tlsResult.certificateValidationSuccess : false;
+    m_metaTlsHostnameValidated = networkResponse ? networkResponse->tlsResult.hostnameValidationSuccess : false;
+    m_metaTlsAllowlistLocalOnly = networkResponse ? networkResponse->tlsAllowlistLocalOnly : false;
+    m_metaTlsVerifyFlags = networkResponse ? networkResponse->tlsResult.verifyFlags : 0u;
+    strcopy(m_metaTlsBackend,
+        networkResponse && networkResponse->tlsBackend[0] ? networkResponse->tlsBackend : "",
+        sizeof(m_metaTlsBackend));
+    strcopy(m_metaTlsHostname, httpSource ? m_metaDnsHost : "", sizeof(m_metaTlsHostname));
+    strcopy(m_metaTlsSniHost, networkResponse ? networkResponse->tlsResult.sniHost : "", sizeof(m_metaTlsSniHost));
+    strcopy(m_metaTlsProtocol, networkResponse ? networkResponse->tlsResult.protocol : "", sizeof(m_metaTlsProtocol));
+    strcopy(m_metaTlsCipherSuite, networkResponse ? networkResponse->tlsResult.cipherSuite : "", sizeof(m_metaTlsCipherSuite));
+    m_metaSourceBytes = rawSourceBytes > 0 ? rawSourceBytes : 0;
+    m_metaCssDetected = cssDiagnostics ? cssDiagnostics->cssDetected : false;
+    m_metaStyleRuleCount = cssDiagnostics ? cssDiagnostics->styleRuleCount : 0;
+    m_metaUnsupportedExternalStylesheetCount = cssDiagnostics ? cssDiagnostics->unsupportedExternalStylesheetCount : 0;
+    m_metaUnsupportedCssDeclarationCount = cssDiagnostics ? cssDiagnostics->unsupportedDeclarationCount : 0;
+    m_metaCssStyleBlockCapped = cssDiagnostics ? cssDiagnostics->styleBlockCapped : false;
+    m_metaCssStyleBytesProcessed = cssDiagnostics ? (int)cssDiagnostics->styleBytesProcessed : 0;
+    m_bodyStyle = bodyStyle ? *bodyStyle : gxos::web::WebStyle{};
+    m_metaSourcePreview[0] = '\0';
+    m_metaSourceTruncated = false;
+    if (rawSource && rawSourceBytes > 0) {
+        int copyLen = rawSourceBytes;
+        if (copyLen > MAX_SOURCE_PREVIEW - 1) {
+            copyLen = MAX_SOURCE_PREVIEW - 1;
+            m_metaSourceTruncated = true;
+        }
+        for (int i = 0; i < copyLen; ++i) m_metaSourcePreview[i] = rawSource[i];
+        m_metaSourcePreview[copyLen] = '\0';
+    }
+
+    m_metaDocumentBlocks = m_blockCount;
+    m_metaImageBlocks = 0;
+    m_metaLoadedImages = 0;
+    m_metaFailedImages = 0;
+    m_metaRemoteImages = 0;
+    m_metaLocalImages = 0;
+    m_metaLastImageError[0] = '\0';
+    m_metaFormCount = 0;
+    m_metaTextInputCount = 0;
+    m_metaCheckboxCount = 0;
+    m_metaRadioCount = 0;
+    m_metaTextareaCount = 0;
+    m_metaSelectCount = 0;
+    m_metaSubmitCount = 0;
+    m_metaUnsupportedFormCount = 0;
+    int lastFormIndex = -1;
+    for (int i = 0; i < m_blockCount; ++i) {
+        if (m_blocks[i].kind == BLOCK_IMAGE) {
+            ++m_metaImageBlocks;
+            if (nav_starts_with(m_blocks[i].url, "http://")) ++m_metaRemoteImages;
+            else if (nav_starts_with(m_blocks[i].url, "file://")) ++m_metaLocalImages;
+            if (m_blocks[i].imageStatus == (int)gxos::gui::ImageLoadStatus::Ok) ++m_metaLoadedImages;
+            else {
+                ++m_metaFailedImages;
+                if (!m_metaLastImageError[0]) {
+                    strcopy(m_metaLastImageError,
+                        m_blocks[i].imageError[0] ? m_blocks[i].imageError :
+                        gxos::gui::ImageLoadStatusName((gxos::gui::ImageLoadStatus)m_blocks[i].imageStatus),
+                        sizeof(m_metaLastImageError));
+                }
+            }
+        }
+        if (m_blocks[i].formIndex >= 0) {
+            if (m_blocks[i].formIndex > lastFormIndex) {
+                lastFormIndex = m_blocks[i].formIndex;
+                ++m_metaFormCount;
+                if (m_blocks[i].formUnsupported) ++m_metaUnsupportedFormCount;
+            }
+            if (m_blocks[i].kind == BLOCK_FORM_TEXT) ++m_metaTextInputCount;
+            else if (m_blocks[i].kind == BLOCK_FORM_CHECKBOX) ++m_metaCheckboxCount;
+            else if (m_blocks[i].kind == BLOCK_FORM_RADIO) ++m_metaRadioCount;
+            else if (m_blocks[i].kind == BLOCK_FORM_TEXTAREA) ++m_metaTextareaCount;
+            else if (m_blocks[i].kind == BLOCK_FORM_SELECT) ++m_metaSelectCount;
+            else if (m_blocks[i].kind == BLOCK_FORM_SUBMIT) ++m_metaSubmitCount;
+        }
+    }
+}
 
 static bool parse_numeric_ipv4_local(const char* text, const char* end, uint32_t* out)
 {
@@ -6860,6 +6946,8 @@ static void kernel_http_poll_once()
 }
 
 static int s_kernelHttpPlainTcpConnectAttempts = 0;
+static int s_kernelHttpTlsConnectAttempts = 0;
+static int s_kernelHttpControlledLocalHttpsLoads = 0;
 
 struct KernelTcpHttpByteStreamContext {
     int socket;
@@ -6889,6 +6977,11 @@ static void kernel_tcp_http_byte_stream_close(void* context)
     tcp->socket = -1;
 }
 
+static void kernel_tls_smoke_poll(void*)
+{
+    kernel_http_poll_once();
+}
+
 static gxos::web::HttpByteStream make_kernel_tcp_http_byte_stream(KernelTcpHttpByteStreamContext* context, int socket)
 {
     context->socket = socket;
@@ -6899,6 +6992,54 @@ static gxos::web::HttpByteStream make_kernel_tcp_http_byte_stream(KernelTcpHttpB
         kernel_tcp_http_byte_stream_close
     };
     return stream;
+}
+
+static gxos::GxosTlsByteStream make_kernel_tls_smoke_byte_stream(KernelTcpHttpByteStreamContext* context, int socket)
+{
+    context->socket = socket;
+    gxos::GxosTlsByteStream stream = {
+        context,
+        kernel_tcp_http_byte_stream_read,
+        kernel_tcp_http_byte_stream_write,
+        kernel_tcp_http_byte_stream_close,
+        kernel_tls_smoke_poll
+    };
+    return stream;
+}
+
+static bool kernel_https_path_has_allowed_prefix(const char* path)
+{
+    return path && nav_starts_with(path, kNavigatorControlledHttpsPathPrefix);
+}
+
+static bool kernel_https_allowlist_match(const KernelHttpUrl& parsed)
+{
+    return !parsed.hostIsNumeric &&
+        streq_local(parsed.host, kNavigatorControlledHttpsHost) &&
+        parsed.port == kNavigatorControlledHttpsPort &&
+        kernel_https_path_has_allowed_prefix(parsed.path);
+}
+
+static void kernel_https_allowlist_reason(const KernelHttpUrl& parsed, char* out, int outSize)
+{
+    if (!out || outSize <= 0) return;
+    if (parsed.hostIsNumeric) {
+        strcopy(out, "HTTPS/TLS unsupported: controlled local HTTPS does not allow numeric-IP hosts", outSize);
+        return;
+    }
+    if (!streq_local(parsed.host, kNavigatorControlledHttpsHost)) {
+        strcopy(out, "HTTPS/TLS unsupported: outside controlled local HTTPS allowlist (host)", outSize);
+        return;
+    }
+    if (parsed.port != kNavigatorControlledHttpsPort) {
+        strcopy(out, "HTTPS/TLS unsupported: outside controlled local HTTPS allowlist (port)", outSize);
+        return;
+    }
+    if (!kernel_https_path_has_allowed_prefix(parsed.path)) {
+        strcopy(out, "HTTPS/TLS unsupported: outside controlled local HTTPS allowlist (path)", outSize);
+        return;
+    }
+    strcopy(out, "HTTPS/TLS unsupported: outside controlled local HTTPS allowlist", outSize);
 }
 
 static const char* kernel_http_error_name(int err)
@@ -6915,6 +7056,24 @@ static const char* kernel_http_error_name(int err)
     case kernel::tcp::TCP_ERR_NETDOWN: return "network down";
     default: return "tcp error";
     }
+}
+
+static bool kernel_tcp_wait_connected(int sock, char* error, int errorSize)
+{
+    uint32_t startTicks = (uint32_t)kernel::pit::ticks();
+    uint32_t maxTicks = (uint32_t)(kKernelHttpConnectTimeoutMs / 10 + 1);
+    while (!kernel::tcp::tcp_isconnected(sock)) {
+        kernel_http_poll_once();
+        if (kernel::tcp::tcp_getstate(sock) == kernel::tcp::STATE_CLOSED) {
+            strcopy(error, "TCP connect failed", errorSize);
+            return false;
+        }
+        if (((uint32_t)kernel::pit::ticks() - startTicks) > maxTicks) {
+            strcopy(error, "TCP connect timeout", errorSize);
+            return false;
+        }
+    }
+    return true;
 }
 
 static bool kernel_http_send_all(gxos::web::HttpByteStream* stream, const char* bytes, int byteCount, KernelHttpResponse* response)
@@ -6940,6 +7099,80 @@ static bool kernel_http_send_all(gxos::web::HttpByteStream* stream, const char* 
             strcopy(response->error, kernel_http_error_name(n), sizeof(response->error));
             return false;
         }
+    }
+    return true;
+}
+
+static bool parse_https_url_kernel(const char* url, KernelHttpUrl* parsed)
+{
+    if (!url || !parsed) return false;
+    parsed->ip = 0;
+    parsed->port = 443;
+    parsed->hostIsNumeric = false;
+    parsed->host[0] = '\0';
+    parsed->path[0] = '/';
+    parsed->path[1] = '\0';
+    parsed->error[0] = '\0';
+
+    if (!nav_starts_with(url, "https://")) {
+        strcopy(parsed->error, "Only https:// URLs are supported", sizeof(parsed->error));
+        return false;
+    }
+
+    const char* hostStart = url + 8;
+    if (*hostStart == '[') {
+        strcopy(parsed->error, "IPv6 HTTPS hosts are not supported in bare-metal Navigator smoke yet", sizeof(parsed->error));
+        return false;
+    }
+    const char* p = hostStart;
+    while (*p && *p != ':' && *p != '/' && *p != '?' && (p - hostStart) < (int)sizeof(parsed->host) - 1) ++p;
+    if (*p && *p != ':' && *p != '/' && *p != '?') {
+        strcopy(parsed->error, "HTTPS hostname too long", sizeof(parsed->error));
+        return false;
+    }
+    const char* hostEnd = p;
+    if (hostEnd == hostStart) {
+        strcopy(parsed->error, "Missing HTTPS host", sizeof(parsed->error));
+        return false;
+    }
+    int hi = 0;
+    for (const char* h = hostStart; h < hostEnd && hi < (int)sizeof(parsed->host) - 1; ++h) parsed->host[hi++] = *h;
+    parsed->host[hi] = '\0';
+
+    if (parse_numeric_ipv4_local(hostStart, hostEnd, &parsed->ip)) {
+        parsed->hostIsNumeric = true;
+    } else {
+        if (nav_host_chars_are_numeric_ipv4ish(hostStart, hostEnd)) {
+            strcopy(parsed->error, "Invalid numeric IPv4 HTTPS host", sizeof(parsed->error));
+            return false;
+        }
+        if (!nav_hostname_is_valid(hostStart, hostEnd)) {
+            strcopy(parsed->error, "Invalid HTTPS hostname", sizeof(parsed->error));
+            return false;
+        }
+    }
+
+    if (*p == ':') {
+        ++p;
+        uint32_t port = 0;
+        int digits = 0;
+        while (*p >= '0' && *p <= '9') {
+            port = port * 10u + (uint32_t)(*p - '0');
+            ++digits;
+            ++p;
+        }
+        if (digits == 0 || port == 0 || port > 65535u) {
+            strcopy(parsed->error, "Invalid HTTPS port", sizeof(parsed->error));
+            return false;
+        }
+        parsed->port = (uint16_t)port;
+    }
+
+    if (*p == '/' || *p == '?') {
+        int oi = 0;
+        if (*p == '?') parsed->path[oi++] = '/';
+        while (*p && oi < kKernelHttpUrlLen - 1) parsed->path[oi++] = *p++;
+        parsed->path[oi] = '\0';
     }
     return true;
 }
@@ -7137,39 +7370,194 @@ static bool kernel_http_resolve_host(KernelHttpUrl* parsed, KernelHttpResponse* 
     strcopy(s_kernelLastDnsResolvedIp, response->dnsResolvedIp, sizeof(s_kernelLastDnsResolvedIp));
     return true;
 }
+static bool kernel_http_build_request(const char* method, const KernelHttpUrl& parsed,
+                                      const char* contentType, int bodyBytes,
+                                      char* request, int requestSize, int* requestBytesOut)
+{
+    if (requestBytesOut) *requestBytesOut = 0;
+    if (!request || requestSize <= 0) return false;
+    const bool isPost = method && gxos::web::httpSharedEqualsInsensitive(method, "post");
+    const bool isHttps = parsed.port == 443 || parsed.port == kNavigatorControlledHttpsPort;
+    int q = 0;
+#define APPEND_REQ(svalue) do { const char* _s = (svalue); while (_s && *_s && q < requestSize - 1) request[q++] = *_s++; } while (0)
+    APPEND_REQ(isPost ? "POST " : "GET ");
+    APPEND_REQ(parsed.path);
+    APPEND_REQ(" HTTP/1.0\r\nHost: ");
+    APPEND_REQ(parsed.host);
+    if ((!isHttps && parsed.port != 80) || (isHttps && parsed.port != 443)) {
+        char portText[12];
+        nav_int_to_text(parsed.port, portText, sizeof(portText));
+        APPEND_REQ(":");
+        APPEND_REQ(portText);
+    }
+    APPEND_REQ("\r\nUser-Agent: guideXOS-Navigator/0.1\r\nAccept: text/html, text/plain\r\nAccept-Encoding: identity\r\nConnection: close\r\n");
+    if (isPost) {
+        char bodyLengthText[16];
+        nav_int_to_text(bodyBytes, bodyLengthText, sizeof(bodyLengthText));
+        APPEND_REQ("Content-Type: ");
+        APPEND_REQ(contentType && contentType[0] ? contentType : "application/x-www-form-urlencoded");
+        APPEND_REQ("\r\nContent-Length: ");
+        APPEND_REQ(bodyLengthText);
+        APPEND_REQ("\r\n");
+    }
+    APPEND_REQ("\r\n");
+#undef APPEND_REQ
+    request[q] = '\0';
+    if (requestBytesOut) *requestBytesOut = q;
+    return true;
+}
+
+static bool kernel_http_read_plain_response(gxos::web::HttpByteStream* stream, KernelHttpResponse* response)
+{
+    if (!stream || !response) return false;
+    int rawLen = 0;
+    uint32_t startTicks = (uint32_t)kernel::pit::ticks();
+    uint32_t maxTicks = (uint32_t)(kKernelHttpReadTimeoutMs / 10 + 1);
+    while (true) {
+        kernel_http_poll_once();
+        char chunk[512];
+        int n = stream->read(stream->context, reinterpret_cast<uint8_t*>(chunk), sizeof(chunk));
+        if (n > 0) {
+            if (rawLen + n > kKernelHttpRawLimit) {
+                strcopy(response->error, "HTTP response too large", sizeof(response->error));
+                return false;
+            }
+            for (int i = 0; i < n; ++i) s_kernelHttpRaw[rawLen++] = chunk[i];
+            startTicks = (uint32_t)kernel::pit::ticks();
+            continue;
+        }
+        if (n == 0) break;
+        if (n != kernel::tcp::TCP_ERR_WOULDBLOCK) {
+            strcopy(response->error, kernel_http_error_name(n), sizeof(response->error));
+            return false;
+        }
+        if (((uint32_t)kernel::pit::ticks() - startTicks) > maxTicks) {
+            strcopy(response->error, rawLen > 0 ? "HTTP read timeout after partial response" : "HTTP read timeout", sizeof(response->error));
+            return false;
+        }
+    }
+    s_kernelHttpRaw[rawLen] = '\0';
+    return kernel_http_parse_response(response, rawLen);
+}
+
+static KernelHttpResponse* kernel_https_request_once(const char* url, const char* method,
+                                                     const char* body, int bodyBytes,
+                                                     const char* contentType,
+                                                     const char* sniHostnameOverride = nullptr)
+{
+    (void)body;
+    KernelHttpResponse* response = &s_kernelHttpResponse;
+    kernel_http_reset_response(response);
+    strcopy(response->scheme, "https", sizeof(response->scheme));
+    strcopy(response->requestedUrl, url ? url : "", sizeof(response->requestedUrl));
+    strcopy(response->finalUrl, url ? url : "", sizeof(response->finalUrl));
+    s_kernelLastDnsUsed = false;
+    s_kernelLastDnsHost[0] = '\0';
+    s_kernelLastDnsResolvedIp[0] = '\0';
+    s_kernelLastDnsError[0] = '\0';
+
+    const bool isPost = method && gxos::web::httpSharedEqualsInsensitive(method, "post");
+    if (isPost) {
+        strcopy(response->error, "Controlled local HTTPS POST is not implemented in this milestone", sizeof(response->error));
+        return response;
+    }
+    KernelHttpUrl parsed;
+    if (!parse_https_url_kernel(url, &parsed)) {
+        strcopy(response->error, parsed.error, sizeof(response->error));
+        return response;
+    }
+    if (!kernel_https_allowlist_match(parsed)) {
+        kernel_https_allowlist_reason(parsed, response->error, sizeof(response->error));
+        return response;
+    }
+    ++s_kernelHttpControlledLocalHttpsLoads;
+    response->tlsAllowlistLocalOnly = true;
+    strcopy(response->tlsBackend, "Mbed TLS bare-metal", sizeof(response->tlsBackend));
+
+    if (!kernel_http_resolve_host(&parsed, response)) {
+        return response;
+    }
+
+    int sock = kernel::tcp::tcp_socket();
+    if (sock < 0) {
+        strcopy(response->error, "Could not create TCP socket", sizeof(response->error));
+        return response;
+    }
+
+    ++s_kernelHttpTlsConnectAttempts;
+    int rc = kernel::tcp::tcp_connect(sock, parsed.ip, parsed.port);
+    if (rc < 0) {
+        strcopy(response->error, kernel_http_error_name(rc), sizeof(response->error));
+        response->tlsResult.transportError = rc;
+        kernel::tcp::tcp_close(sock);
+        return response;
+    }
+    if (!kernel_tcp_wait_connected(sock, response->error, sizeof(response->error))) {
+        kernel::tcp::tcp_close(sock);
+        return response;
+    }
+
+    KernelTcpHttpByteStreamContext tcpContext;
+    gxos::GxosTlsByteStream tlsStream = make_kernel_tls_smoke_byte_stream(&tcpContext, sock);
+
+    char request[768];
+    int requestBytes = 0;
+    if (!kernel_http_build_request(method, parsed, contentType, bodyBytes, request, sizeof(request), &requestBytes)) {
+        strcopy(response->error, "Could not build HTTPS request", sizeof(response->error));
+        kernel::tcp::tcp_close(sock);
+        return response;
+    }
+
+    size_t responseBytes = 0;
+    const bool tlsOk = gxos::gxos_tls_smoke_https_request(
+        sniHostnameOverride && sniHostnameOverride[0] ? sniHostnameOverride : parsed.host,
+        request,
+        static_cast<size_t>(requestBytes),
+        tlsStream,
+        s_kernelHttpRaw,
+        sizeof(s_kernelHttpRaw),
+        &responseBytes,
+        &response->tlsResult);
+    response->tlsUsed = response->tlsResult.attempted;
+    if (!tlsOk) {
+        strcopy(response->error,
+            response->tlsResult.error[0] ? response->tlsResult.error : "Controlled local HTTPS request failed",
+            sizeof(response->error));
+        return response;
+    }
+
+    if (responseBytes == 0 || responseBytes > (size_t)kKernelHttpRawLimit) {
+        strcopy(response->error, "Controlled local HTTPS response size was invalid", sizeof(response->error));
+        return response;
+    }
+
+    s_kernelHttpRaw[responseBytes] = '\0';
+    response->tlsUsed = true;
+    const bool parsedOk = kernel_http_parse_response(response, static_cast<int>(responseBytes));
+    response->tlsResult.parserAcceptedResponse = parsedOk;
+    if (!parsedOk && !response->tlsResult.error[0] && response->error[0]) {
+        strcopy(response->tlsResult.error, response->error, sizeof(response->tlsResult.error));
+    }
+    return parsedOk ? response : response;
+}
+
 static KernelHttpResponse* kernel_http_request_once(const char* url, const char* method,
                                                     const char* body, int bodyBytes,
                                                     const char* contentType)
 {
     KernelHttpResponse* response = &s_kernelHttpResponse;
-    response->ok = false;
-    response->statusCode = 0;
-    response->reason[0] = '\0';
-    response->contentType[0] = '\0';
-    response->transferEncoding[0] = '\0';
-    response->contentEncoding[0] = '\0';
-    response->location[0] = '\0';
-    response->bodyBytes = 0;
-    response->redirectCount = 0;
-    response->dnsUsed = false;
-    response->dnsHost[0] = '\0';
-    response->dnsResolvedIp[0] = '\0';
-    response->dnsError[0] = '\0';
+    kernel_http_reset_response(response);
     s_kernelLastDnsUsed = false;
     s_kernelLastDnsHost[0] = '\0';
     s_kernelLastDnsResolvedIp[0] = '\0';
     s_kernelLastDnsError[0] = '\0';
-    response->requestedUrl[0] = '\0';
-    response->finalUrl[0] = '\0';
-    response->error[0] = '\0';
-    response->body[0] = '\0';
 
     if (!kernel::nic::is_active() || !kernel::ipv4::is_configured()) {
         strcopy(response->error, "Network unavailable", sizeof(response->error));
         return response;
     }
-    bool isPost = method && gxos::web::httpSharedEqualsInsensitive(method, "post");
-    bool isGet = !method || !method[0] || gxos::web::httpSharedEqualsInsensitive(method, "get");
+    const bool isPost = method && gxos::web::httpSharedEqualsInsensitive(method, "post");
+    const bool isGet = !method || !method[0] || gxos::web::httpSharedEqualsInsensitive(method, "get");
     if (!isGet && !isPost) {
         strcopy(response->error, "Unsupported HTTP method", sizeof(response->error));
         return response;
@@ -7182,12 +7570,16 @@ static KernelHttpResponse* kernel_http_request_once(const char* url, const char*
         strcopy(response->error, "Forms-lite POST body too large", sizeof(response->error));
         return response;
     }
+    if (nav_starts_with(url, "https://")) {
+        return kernel_https_request_once(url, method, body, bodyBytes, contentType);
+    }
 
     KernelHttpUrl parsed;
     if (!parse_http_url_kernel(url, &parsed)) {
         strcopy(response->error, parsed.error, sizeof(response->error));
         return response;
     }
+    strcopy(response->scheme, "http", sizeof(response->scheme));
     if (!kernel_http_resolve_host(&parsed, response)) {
         return response;
     }
@@ -7205,98 +7597,37 @@ static KernelHttpResponse* kernel_http_request_once(const char* url, const char*
         kernel::tcp::tcp_close(sock);
         return response;
     }
-
-    uint32_t startTicks = (uint32_t)kernel::pit::ticks();
-    uint32_t maxTicks = (uint32_t)(kKernelHttpConnectTimeoutMs / 10 + 1);
-    while (!kernel::tcp::tcp_isconnected(sock)) {
-        kernel_http_poll_once();
-        if (kernel::tcp::tcp_getstate(sock) == kernel::tcp::STATE_CLOSED) {
-            strcopy(response->error, "TCP connect failed", sizeof(response->error));
-            kernel::tcp::tcp_close(sock);
-            return response;
-        }
-        if (((uint32_t)kernel::pit::ticks() - startTicks) > maxTicks) {
-            strcopy(response->error, "TCP connect timeout", sizeof(response->error));
-            kernel::tcp::tcp_close(sock);
-            return response;
-        }
+    if (!kernel_tcp_wait_connected(sock, response->error, sizeof(response->error))) {
+        kernel::tcp::tcp_close(sock);
+        return response;
     }
 
     KernelTcpHttpByteStreamContext tcpContext;
     gxos::web::HttpByteStream stream = make_kernel_tcp_http_byte_stream(&tcpContext, sock);
 
     char request[768];
-    int q = 0;
-#define APPEND_REQ(svalue) do { const char* _s = (svalue); while (_s && *_s && q < (int)sizeof(request) - 1) request[q++] = *_s++; } while (0)
-    APPEND_REQ(isPost ? "POST " : "GET ");
-    APPEND_REQ(parsed.path);
-    APPEND_REQ(" HTTP/1.0\r\nHost: ");
-    APPEND_REQ(parsed.host);
-    if (parsed.port != 80) {
-        char portText[12];
-        nav_int_to_text(parsed.port, portText, sizeof(portText));
-        APPEND_REQ(":");
-        APPEND_REQ(portText);
+    int requestBytes = 0;
+    if (!kernel_http_build_request(method, parsed, contentType, bodyBytes, request, sizeof(request), &requestBytes)) {
+        strcopy(response->error, "Could not build HTTP request", sizeof(response->error));
+        stream.close(stream.context);
+        return response;
     }
-    APPEND_REQ("\r\nUser-Agent: guideXOS-Navigator/0.1\r\nAccept-Encoding: identity\r\nConnection: close\r\n");
-    if (isPost) {
-        char bodyLengthText[16];
-        nav_int_to_text(bodyBytes, bodyLengthText, sizeof(bodyLengthText));
-        APPEND_REQ("Content-Type: ");
-        APPEND_REQ(contentType && contentType[0] ? contentType : "application/x-www-form-urlencoded");
-        APPEND_REQ("\r\nContent-Length: ");
-        APPEND_REQ(bodyLengthText);
-        APPEND_REQ("\r\n");
-    }
-    APPEND_REQ("\r\n");
-#undef APPEND_REQ
-    request[q] = '\0';
-
-    if (!kernel_http_send_all(&stream, request, q, response) ||
+    if (!kernel_http_send_all(&stream, request, requestBytes, response) ||
         (isPost && !kernel_http_send_all(&stream, body, bodyBytes, response))) {
         stream.close(stream.context);
         return response;
     }
-
-    int rawLen = 0;
-    startTicks = (uint32_t)kernel::pit::ticks();
-    maxTicks = (uint32_t)(kKernelHttpReadTimeoutMs / 10 + 1);
-    while (true) {
-        kernel_http_poll_once();
-        char chunk[512];
-        int n = stream.read(stream.context, reinterpret_cast<uint8_t*>(chunk), sizeof(chunk));
-        if (n > 0) {
-            if (rawLen + n > kKernelHttpRawLimit) {
-                strcopy(response->error, "HTTP response too large", sizeof(response->error));
-                stream.close(stream.context);
-                return response;
-            }
-            for (int i = 0; i < n; ++i) s_kernelHttpRaw[rawLen++] = chunk[i];
-            startTicks = (uint32_t)kernel::pit::ticks();
-            continue;
-        }
-        if (n == 0) break;
-        if (n != kernel::tcp::TCP_ERR_WOULDBLOCK) {
-            strcopy(response->error, kernel_http_error_name(n), sizeof(response->error));
-            stream.close(stream.context);
-            return response;
-        }
-        if (((uint32_t)kernel::pit::ticks() - startTicks) > maxTicks) {
-            strcopy(response->error, rawLen > 0 ? "HTTP read timeout after partial response" : "HTTP read timeout", sizeof(response->error));
-            stream.close(stream.context);
-            return response;
-        }
-    }
+    const bool parsedOk = kernel_http_read_plain_response(&stream, response);
     stream.close(stream.context);
-    s_kernelHttpRaw[rawLen] = '\0';
-    return kernel_http_parse_response(response, rawLen) ? response : response;
+    return parsedOk ? response : response;
 }
 
-static void kernel_http_origin(const KernelHttpUrl& parsed, char* out, int outSize)
+static void kernel_http_origin(const KernelHttpUrl& parsed, const char* scheme, char* out, int outSize)
 {
-    strcopy(out, "http://", outSize);
+    strcopy(out, scheme ? scheme : "http://", outSize);
     strappend(out, parsed.host, outSize);
-    if (parsed.port != 80) {
+    const bool https = scheme && streq_local(scheme, "https://");
+    if ((!https && parsed.port != 80) || (https && parsed.port != 443)) {
         char portText[12];
         nav_int_to_text(parsed.port, portText, sizeof(portText));
         strappend(out, ":", outSize);
@@ -7312,7 +7643,12 @@ static bool kernel_http_resolve_redirect(const char* baseUrl, const char* locati
         strcopy(error, "Redirect Location header is empty", errorSize);
         return false;
     }
+    const bool baseIsHttps = nav_starts_with(baseUrl, "https://");
     if (nav_starts_with(location, "http://")) {
+        if (baseIsHttps) {
+            strcopy(error, "HTTPS downgrade redirect blocked", errorSize);
+            return false;
+        }
         KernelHttpUrl parsed;
         if (!parse_http_url_kernel(location, &parsed)) {
             strcopy(error, parsed.error, errorSize);
@@ -7322,17 +7658,33 @@ static bool kernel_http_resolve_redirect(const char* baseUrl, const char* locati
         return true;
     }
     if (nav_starts_with(location, "https://")) {
-        strcopy(error, "Redirect Location uses unsupported HTTPS", errorSize);
-        return false;
+        KernelHttpUrl parsed;
+        if (!parse_https_url_kernel(location, &parsed)) {
+            strcopy(error, parsed.error, errorSize);
+            return false;
+        }
+        if (!kernel_https_allowlist_match(parsed)) {
+            strcopy(error, "Redirect Location uses unsupported HTTPS", errorSize);
+            return false;
+        }
+        strcopy(out, location, outSize);
+        return true;
     }
 
     KernelHttpUrl base;
-    if (!parse_http_url_kernel(baseUrl, &base)) {
+    const char* baseScheme = "http://";
+    if (baseIsHttps) {
+        if (!parse_https_url_kernel(baseUrl, &base)) {
+            strcopy(error, base.error, errorSize);
+            return false;
+        }
+        baseScheme = "https://";
+    } else if (!parse_http_url_kernel(baseUrl, &base)) {
         strcopy(error, base.error, errorSize);
         return false;
     }
     char origin[kKernelHttpUrlLen];
-    kernel_http_origin(base, origin, sizeof(origin));
+    kernel_http_origin(base, baseScheme, origin, sizeof(origin));
     if (location[0] == '/') {
         strcopy(out, origin, outSize);
         strappend(out, location, outSize);
@@ -7357,7 +7709,16 @@ static bool kernel_http_resolve_redirect(const char* baseUrl, const char* locati
     }
 
     KernelHttpUrl parsedOut;
-    if (!parse_http_url_kernel(out, &parsedOut)) {
+    if (nav_starts_with(out, "https://")) {
+        if (!parse_https_url_kernel(out, &parsedOut)) {
+            strcopy(error, parsedOut.error, errorSize);
+            return false;
+        }
+        if (!kernel_https_allowlist_match(parsedOut)) {
+            strcopy(error, "Redirect Location uses unsupported HTTPS", errorSize);
+            return false;
+        }
+    } else if (!parse_http_url_kernel(out, &parsedOut)) {
         strcopy(error, parsedOut.error, errorSize);
         return false;
     }
@@ -7391,11 +7752,17 @@ static KernelHttpResponse* kernel_http_request(const char* url, const char* meth
         char redirectError[128];
         if (!kernel_http_resolve_redirect(current, response->location, next, sizeof(next), redirectError, sizeof(redirectError))) {
             response->ok = false;
-            if (nav_starts_with(response->location, "https://")) {
+            if (nav_starts_with(response->location, "https://") || nav_starts_with(response->location, "http://")) {
                 strcopy(response->finalUrl, response->location, sizeof(response->finalUrl));
                 response->redirectCount = redirectCount + 1;
             }
-            strcopy(response->error, redirectError[0] ? redirectError : "Invalid redirect Location", sizeof(response->error));
+            if (nav_starts_with(response->location, "https://")) {
+                strcopy(response->error,
+                    "HTTPS/TLS unsupported redirect: outside controlled local HTTPS allowlist",
+                    sizeof(response->error));
+            } else {
+                strcopy(response->error, redirectError[0] ? redirectError : "Invalid redirect Location", sizeof(response->error));
+            }
             return response;
         }
         strcopy(current, next, sizeof(current));
@@ -7425,6 +7792,21 @@ static KernelHttpResponse* kernel_http_post(const char* url, const char* body, i
                                             const char* contentType)
 {
     return kernel_http_request(url, "POST", body, bodyBytes, contentType);
+}
+
+static bool kernel_tls_smoke_request_once(const char* url,
+                                          const char* sniHostname,
+                                          KernelHttpResponse* response,
+                                          gxos::GxosTlsLocalHandshakeResult* tlsResult)
+{
+    if (!response || !tlsResult) return false;
+    KernelHttpResponse* internal = kernel_https_request_once(url, "GET", nullptr, 0, nullptr, sniHostname);
+    *response = *internal;
+    *tlsResult = internal->tlsResult;
+    if (!internal->ok && !tlsResult->error[0] && internal->error[0]) {
+        strcopy(tlsResult->error, internal->error, sizeof(tlsResult->error));
+    }
+    return internal->ok;
 }
 
 static gxos::gui::ImageSafetyLimits nav_kernel_remote_png_limits()
@@ -7519,18 +7901,25 @@ void NavigatorApp::loadHttpUrl(const char* url)
 
 void NavigatorApp::loadHttpResponse(const char* url, KernelHttpResponse* response)
 {
+    const char* transportSource = response && response->scheme[0] ? response->scheme : "http";
     if (!response->ok) {
         const char* finalUrl = response->finalUrl[0] ? response->finalUrl : url;
         const char* requestedUrl = response->requestedUrl[0] ? response->requestedUrl : url;
-        if (nav_starts_with(finalUrl, "https://")) {
-            buildHttpsUnsupportedDocument(finalUrl, true);
-            rememberPageMetadata(requestedUrl, finalUrl, "http", response->contentType,
-                "HTTPS/TLS unsupported redirect", nullptr, 0, nullptr, nullptr,
-                response->statusCode, response->reason, response->redirectCount);
+        const bool requestedHttps = nav_starts_with(requestedUrl, "https://");
+        const bool finalHttps = nav_starts_with(finalUrl, "https://");
+        if ((requestedHttps || finalHttps) &&
+            nav_starts_with(response->error, "HTTPS/TLS unsupported")) {
+            buildHttpsUnsupportedDocument(finalUrl, !requestedHttps || response->redirectCount > 0, response->error);
+            rememberPageMetadata(requestedUrl, finalUrl, finalHttps ? "https" : transportSource, response->contentType,
+                requestedHttps ? "HTTPS/TLS unsupported" : "HTTPS/TLS unsupported redirect",
+                nullptr, 0, nullptr, nullptr, response->statusCode, response->reason,
+                response->redirectCount, response);
             return;
         }
         buildErrorDocument(finalUrl, response->error[0] ? response->error : "HTTP fetch failed.");
-        rememberPageMetadata(requestedUrl, finalUrl, "http", response->contentType, response->error, nullptr, 0, nullptr, nullptr, response->statusCode, response->reason, response->redirectCount);
+        rememberPageMetadata(requestedUrl, finalUrl, finalHttps ? "https" : transportSource, response->contentType,
+            response->error, nullptr, 0, nullptr, nullptr, response->statusCode, response->reason,
+            response->redirectCount, response);
         return;
     }
 
@@ -7540,13 +7929,18 @@ void NavigatorApp::loadHttpResponse(const char* url, KernelHttpResponse* respons
             if (docBytes > kKernelHttpBodyLimit) docBytes = kKernelHttpBodyLimit;
             for (int i = 0; i < docBytes; ++i) s_kernelHttpDocumentBody[i] = response->body[i];
             s_kernelHttpDocumentBody[docBytes] = '\0';
-            parseHtmlDocument(response->finalUrl[0] ? response->finalUrl : url, s_kernelHttpDocumentBody, "http", response->contentType, response->statusCode, response->reason, response->requestedUrl[0] ? response->requestedUrl : url, response->redirectCount);
+            parseHtmlDocument(response->finalUrl[0] ? response->finalUrl : url, s_kernelHttpDocumentBody,
+                transportSource, response->contentType, response->statusCode, response->reason,
+                response->requestedUrl[0] ? response->requestedUrl : url, response->redirectCount, response);
         } else if (gxos::web::httpSharedEqualsInsensitive(response->contentType, "text/plain")) {
             strcopy(m_currentUrl, response->finalUrl[0] ? response->finalUrl : url, MAX_URL_LEN);
             strcopy(m_title, response->finalUrl[0] ? response->finalUrl : url, MAX_TITLE_LEN_NAV);
             m_blockCount = 0;
             addBlock(BLOCK_PREFORMATTED, response->body);
-            rememberPageMetadata(response->requestedUrl[0] ? response->requestedUrl : url, response->finalUrl[0] ? response->finalUrl : url, "http", response->contentType, "", response->body, response->bodyBytes, nullptr, nullptr, response->statusCode, response->reason, response->redirectCount);
+            rememberPageMetadata(response->requestedUrl[0] ? response->requestedUrl : url,
+                response->finalUrl[0] ? response->finalUrl : url, transportSource, response->contentType, "",
+                response->body, response->bodyBytes, nullptr, nullptr, response->statusCode, response->reason,
+                response->redirectCount, response);
         } else {
             DownloadRecord record{};
             strcopy(record.url, response->requestedUrl[0] ? response->requestedUrl : url, sizeof(record.url));
@@ -7563,7 +7957,9 @@ void NavigatorApp::loadHttpResponse(const char* url, KernelHttpResponse* respons
                 strcopy(record.error, "Response body was empty; Navigator did not create a download file.", sizeof(record.error));
                 rememberDownload(record);
                 buildDownloadResultDocument(record);
-                rememberPageMetadata(record.url, record.finalUrl, "http", record.contentType, "Download unavailable: no body", response->body, response->bodyBytes, nullptr, nullptr, response->statusCode, response->reason, response->redirectCount);
+                rememberPageMetadata(record.url, record.finalUrl, transportSource, record.contentType,
+                    "Download unavailable: no body", response->body, response->bodyBytes, nullptr, nullptr,
+                    response->statusCode, response->reason, response->redirectCount, response);
                 return;
             }
             if (!kernel_downloads_directory_ready(writeError, sizeof(writeError))) {
@@ -7571,7 +7967,9 @@ void NavigatorApp::loadHttpResponse(const char* url, KernelHttpResponse* respons
                 strcopy(record.error, writeError[0] ? writeError : "Downloads directory is unavailable.", sizeof(record.error));
                 rememberDownload(record);
                 buildDownloadResultDocument(record);
-                rememberPageMetadata(record.url, record.finalUrl, "http", record.contentType, "Download unavailable: downloads directory not writable", response->body, response->bodyBytes, nullptr, nullptr, response->statusCode, response->reason, response->redirectCount);
+                rememberPageMetadata(record.url, record.finalUrl, transportSource, record.contentType,
+                    "Download unavailable: downloads directory not writable", response->body, response->bodyBytes,
+                    nullptr, nullptr, response->statusCode, response->reason, response->redirectCount, response);
                 return;
             }
             if (!kernel_make_unique_download_path(record.finalUrl, uniquePath, sizeof(uniquePath), uniqueName, sizeof(uniqueName), writeError, sizeof(writeError))) {
@@ -7579,7 +7977,9 @@ void NavigatorApp::loadHttpResponse(const char* url, KernelHttpResponse* respons
                 strcopy(record.error, writeError[0] ? writeError : "Navigator could not allocate a safe non-overwriting filename.", sizeof(record.error));
                 rememberDownload(record);
                 buildDownloadResultDocument(record);
-                rememberPageMetadata(record.url, record.finalUrl, "http", record.contentType, "Download unavailable: unsafe filename", response->body, response->bodyBytes, nullptr, nullptr, response->statusCode, response->reason, response->redirectCount);
+                rememberPageMetadata(record.url, record.finalUrl, transportSource, record.contentType,
+                    "Download unavailable: unsafe filename", response->body, response->bodyBytes, nullptr, nullptr,
+                    response->statusCode, response->reason, response->redirectCount, response);
                 return;
             }
 
@@ -7605,9 +8005,10 @@ void NavigatorApp::loadHttpResponse(const char* url, KernelHttpResponse* respons
             strcopy(m_lastDownloadError, record.error, sizeof(m_lastDownloadError));
             rememberDownload(record);
             buildDownloadResultDocument(record);
-            rememberPageMetadata(record.url, record.finalUrl, "http", record.contentType,
+            rememberPageMetadata(record.url, record.finalUrl, transportSource, record.contentType,
                 record.success ? "Unsupported content type downloaded" : "Download failed",
-                response->body, response->bodyBytes, nullptr, nullptr, response->statusCode, response->reason, response->redirectCount);
+                response->body, response->bodyBytes, nullptr, nullptr, response->statusCode, response->reason,
+                response->redirectCount, response);
         }
         return;
     }
@@ -7621,7 +8022,10 @@ void NavigatorApp::loadHttpResponse(const char* url, KernelHttpResponse* respons
         addBlock(BLOCK_PARAGRAPH, "Navigator could not follow this redirect because the Location header was missing or unsupported.");
         if (response->location[0]) addBlock(BLOCK_LINK, response->location, response->location);
         addBlock(BLOCK_LINK, "Page Info", "about:page-info");
-        rememberPageMetadata(response->requestedUrl[0] ? response->requestedUrl : url, response->finalUrl[0] ? response->finalUrl : url, "http", response->contentType, "Redirect not followed", response->body, response->bodyBytes, nullptr, nullptr, response->statusCode, response->reason, response->redirectCount);
+        rememberPageMetadata(response->requestedUrl[0] ? response->requestedUrl : url,
+            response->finalUrl[0] ? response->finalUrl : url, transportSource, response->contentType,
+            "Redirect not followed", response->body, response->bodyBytes, nullptr, nullptr,
+            response->statusCode, response->reason, response->redirectCount, response);
         return;
     }
 
@@ -7636,7 +8040,10 @@ void NavigatorApp::loadHttpResponse(const char* url, KernelHttpResponse* respons
         message[len] = '\0';
     }
     buildErrorDocument(response->finalUrl[0] ? response->finalUrl : url, message);
-    rememberPageMetadata(response->requestedUrl[0] ? response->requestedUrl : url, response->finalUrl[0] ? response->finalUrl : url, "http", response->contentType, "HTTP error status", response->body, response->bodyBytes, nullptr, nullptr, response->statusCode, response->reason, response->redirectCount);
+    rememberPageMetadata(response->requestedUrl[0] ? response->requestedUrl : url,
+        response->finalUrl[0] ? response->finalUrl : url, transportSource, response->contentType,
+        "HTTP error status", response->body, response->bodyBytes, nullptr, nullptr,
+        response->statusCode, response->reason, response->redirectCount, response);
 }
 
 void NavigatorApp::submitFormsLitePost(const char* action, const char* body, int bodyBytes, const char* contentType)
@@ -7705,8 +8112,9 @@ bool NavigatorApp::smokeHttpFetch(const char* url, int* statusCode, char* conten
         for (int i = 0; i < docBytes; ++i) s_kernelHttpDocumentBody[i] = response->body[i];
         s_kernelHttpDocumentBody[docBytes] = '\0';
         app.parseHtmlDocument(response->finalUrl[0] ? response->finalUrl : url, s_kernelHttpDocumentBody,
-            "http", response->contentType, response->statusCode, response->reason,
-            response->requestedUrl[0] ? response->requestedUrl : url, response->redirectCount);
+            response->scheme[0] ? response->scheme : "http", response->contentType, response->statusCode,
+            response->reason, response->requestedUrl[0] ? response->requestedUrl : url,
+            response->redirectCount, response);
     } else if (response->statusCode == 200 && gxos::web::httpSharedEqualsInsensitive(response->contentType, "text/plain")) {
         app.m_blockCount = 0;
         app.addBlock(BLOCK_PREFORMATTED, response->body);
@@ -7716,6 +8124,80 @@ bool NavigatorApp::smokeHttpFetch(const char* url, int* statusCode, char* conten
     if (loadedImages) *loadedImages = app.m_metaLoadedImages;
     if (failedImages) *failedImages = app.m_metaFailedImages;
     return response->ok;
+}
+
+bool NavigatorApp::smokeControlledLocalHttpsNavigation(const char* url,
+                                                       int* statusCode, char* contentType,
+                                                       int contentTypeLen, int* bodyBytes,
+                                                       int* parsedBlocks, char* error,
+                                                       int errorLen, char* finalUrl,
+                                                       int finalUrlLen, int* redirectCount,
+                                                       int* plainTcpConnectAttempts,
+                                                       int* tlsTcpConnectAttempts,
+                                                       uint32_t* tlsVerifyFlags,
+                                                       char* tlsSniHost, int tlsSniHostLen,
+                                                       char* tlsProtocol, int tlsProtocolLen,
+                                                       char* tlsCipherSuite, int tlsCipherSuiteLen,
+                                                       bool* tlsValidated,
+                                                       bool* tlsHostnameValidated,
+                                                       bool* tlsAllowlistLocalOnly,
+                                                       char* sourceType, int sourceTypeLen)
+{
+    if (statusCode) *statusCode = 0;
+    if (contentType && contentTypeLen > 0) contentType[0] = '\0';
+    if (bodyBytes) *bodyBytes = 0;
+    if (parsedBlocks) *parsedBlocks = 0;
+    if (error && errorLen > 0) error[0] = '\0';
+    if (finalUrl && finalUrlLen > 0) finalUrl[0] = '\0';
+    if (redirectCount) *redirectCount = 0;
+    if (plainTcpConnectAttempts) *plainTcpConnectAttempts = 0;
+    if (tlsTcpConnectAttempts) *tlsTcpConnectAttempts = 0;
+    if (tlsVerifyFlags) *tlsVerifyFlags = 0;
+    if (tlsSniHost && tlsSniHostLen > 0) tlsSniHost[0] = '\0';
+    if (tlsProtocol && tlsProtocolLen > 0) tlsProtocol[0] = '\0';
+    if (tlsCipherSuite && tlsCipherSuiteLen > 0) tlsCipherSuite[0] = '\0';
+    if (tlsValidated) *tlsValidated = false;
+    if (tlsHostnameValidated) *tlsHostnameValidated = false;
+    if (tlsAllowlistLocalOnly) *tlsAllowlistLocalOnly = false;
+    if (sourceType && sourceTypeLen > 0) sourceType[0] = '\0';
+
+    const int plainAttemptsBefore = s_kernelHttpPlainTcpConnectAttempts;
+    const int tlsAttemptsBefore = s_kernelHttpTlsConnectAttempts;
+    const int httpsLoadsBefore = s_kernelHttpControlledLocalHttpsLoads;
+    NavigatorApp app;
+    app.loadUrl(url);
+    const int plainAttempts = s_kernelHttpPlainTcpConnectAttempts - plainAttemptsBefore;
+    const int tlsAttempts = s_kernelHttpTlsConnectAttempts - tlsAttemptsBefore;
+    const int httpsLoads = s_kernelHttpControlledLocalHttpsLoads - httpsLoadsBefore;
+
+    if (statusCode) *statusCode = app.m_metaHttpStatusCode;
+    if (contentType && contentTypeLen > 0) strcopy(contentType, app.m_metaContentType, contentTypeLen);
+    if (bodyBytes) *bodyBytes = app.m_metaSourceBytes;
+    if (parsedBlocks) *parsedBlocks = app.m_blockCount;
+    if (error && errorLen > 0) strcopy(error, app.m_metaErrorStatus, errorLen);
+    if (finalUrl && finalUrlLen > 0) strcopy(finalUrl, app.m_metaFinalUrl, finalUrlLen);
+    if (redirectCount) *redirectCount = app.m_metaRedirectCount;
+    if (plainTcpConnectAttempts) *plainTcpConnectAttempts = plainAttempts;
+    if (tlsTcpConnectAttempts) *tlsTcpConnectAttempts = tlsAttempts;
+    if (tlsVerifyFlags) *tlsVerifyFlags = app.m_metaTlsVerifyFlags;
+    if (tlsSniHost && tlsSniHostLen > 0) strcopy(tlsSniHost, app.m_metaTlsSniHost, tlsSniHostLen);
+    if (tlsProtocol && tlsProtocolLen > 0) strcopy(tlsProtocol, app.m_metaTlsProtocol, tlsProtocolLen);
+    if (tlsCipherSuite && tlsCipherSuiteLen > 0) strcopy(tlsCipherSuite, app.m_metaTlsCipherSuite, tlsCipherSuiteLen);
+    if (tlsValidated) *tlsValidated = app.m_metaTlsValidated;
+    if (tlsHostnameValidated) *tlsHostnameValidated = app.m_metaTlsHostnameValidated;
+    if (tlsAllowlistLocalOnly) *tlsAllowlistLocalOnly = app.m_metaTlsAllowlistLocalOnly;
+    if (sourceType && sourceTypeLen > 0) strcopy(sourceType, app.m_metaSourceType, sourceTypeLen);
+
+    return streq_local(app.m_metaRequestedUrl, url ? url : "") &&
+        streq_local(app.m_metaSourceType, "https") &&
+        app.m_metaTlsUsed &&
+        app.m_metaTlsAllowlistLocalOnly &&
+        app.m_metaTlsValidated &&
+        app.m_metaTlsHostnameValidated &&
+        app.m_metaHttpStatusCode == 200 &&
+        app.m_blockCount > 0 &&
+        tlsAttempts == 1 &&
+        httpsLoads == 1;
 }
 
 static bool nav_form_append_char(char* out, int outSize, int& used, char value)
@@ -8191,11 +8673,8 @@ void NavigatorApp::loadUrl(const char* url)
         buildRuntimeDocument();
     } else if (nav_starts_with(normalized, "file://")) {
         loadFileUrl(normalized);
-    } else if (nav_starts_with(normalized, "http://")) {
+    } else if (nav_starts_with(normalized, "http://") || nav_starts_with(normalized, "https://")) {
         loadHttpUrl(normalized);
-    } else if (nav_starts_with(normalized, "https://")) {
-        buildHttpsUnsupportedDocument(normalized, false);
-        rememberPageMetadata(normalized, normalized, "unsupported", "", "HTTPS/TLS unsupported", nullptr, 0);
     } else {
         buildErrorDocument(normalized, "Unsupported URL. Use about:, file://, or numeric-IP http://.");
         rememberPageMetadata(normalized, normalized, "unsupported", "", "Unsupported URL scheme", nullptr, 0);
@@ -8210,20 +8689,25 @@ void NavigatorApp::loadUrl(const char* url)
 }
 
 bool NavigatorApp::smokeHttpsUnsupportedDocument(const char* url, const char* expectedFinalUrl,
-                                                 int expectedTcpConnectAttempts,
+                                                 int expectedPlainTcpConnectAttempts,
+                                                 int expectedTlsTcpConnectAttempts,
                                                  char* requestedUrl, int requestedUrlLen,
                                                  char* finalUrl, int finalUrlLen,
                                                  char* error, int errorLen,
-                                                 int* tcpConnectAttempts)
+                                                 int* plainTcpConnectAttempts,
+                                                 int* tlsTcpConnectAttempts)
 {
-    int attemptsBefore = s_kernelHttpPlainTcpConnectAttempts;
+    int plainAttemptsBefore = s_kernelHttpPlainTcpConnectAttempts;
+    int tlsAttemptsBefore = s_kernelHttpTlsConnectAttempts;
     NavigatorApp app;
     app.loadUrl(url);
-    int attempts = s_kernelHttpPlainTcpConnectAttempts - attemptsBefore;
+    int plainAttempts = s_kernelHttpPlainTcpConnectAttempts - plainAttemptsBefore;
+    int tlsAttempts = s_kernelHttpTlsConnectAttempts - tlsAttemptsBefore;
     if (requestedUrl && requestedUrlLen > 0) strcopy(requestedUrl, app.m_metaRequestedUrl, requestedUrlLen);
     if (finalUrl && finalUrlLen > 0) strcopy(finalUrl, app.m_metaFinalUrl, finalUrlLen);
     if (error && errorLen > 0) strcopy(error, app.m_metaErrorStatus, errorLen);
-    if (tcpConnectAttempts) *tcpConnectAttempts = attempts;
+    if (plainTcpConnectAttempts) *plainTcpConnectAttempts = plainAttempts;
+    if (tlsTcpConnectAttempts) *tlsTcpConnectAttempts = tlsAttempts;
 
     const bool direct = nav_starts_with(url, "https://");
     return streq_local(app.m_metaRequestedUrl, url) &&
@@ -8231,7 +8715,8 @@ bool NavigatorApp::smokeHttpsUnsupportedDocument(const char* url, const char* ex
            nav_starts_with(app.m_metaErrorStatus, "HTTPS/TLS unsupported") &&
            streq_local(app.m_title, direct ? "HTTPS Unsupported" : "HTTPS Redirect Unsupported") &&
            app.m_blockCount >= 3 &&
-           attempts == expectedTcpConnectAttempts;
+           plainAttempts == expectedPlainTcpConnectAttempts &&
+           tlsAttempts == expectedTlsTcpConnectAttempts;
 }
 
 static void nav_push_url(char stack[][160], int& count, const char* url)
@@ -9016,15 +9501,18 @@ static bool nav_smoke_text_equals(const char* a, const char* b)
 
 static bool printNavigatorHttpsUnsupportedSmokeCase(const char* name, const char* url,
                                                     const char* expectedFinalUrl,
-                                                    int expectedTcpConnectAttempts)
+                                                    int expectedPlainTcpConnectAttempts,
+                                                    int expectedTlsTcpConnectAttempts)
 {
     char requestedUrl[160];
     char finalUrl[160];
     char error[128];
-    int tcpConnectAttempts = 0;
+    int plainTcpConnectAttempts = 0;
+    int tlsTcpConnectAttempts = 0;
     bool pass = NavigatorApp::smokeHttpsUnsupportedDocument(url, expectedFinalUrl,
-        expectedTcpConnectAttempts, requestedUrl, sizeof(requestedUrl), finalUrl, sizeof(finalUrl),
-        error, sizeof(error), &tcpConnectAttempts);
+        expectedPlainTcpConnectAttempts, expectedTlsTcpConnectAttempts,
+        requestedUrl, sizeof(requestedUrl), finalUrl, sizeof(finalUrl),
+        error, sizeof(error), &plainTcpConnectAttempts, &tlsTcpConnectAttempts);
 
     serial::puts("[NAVIGATOR-SMOKE] https.case.");
     serial::puts(name);
@@ -9040,11 +9528,227 @@ static bool printNavigatorHttpsUnsupportedSmokeCase(const char* name, const char
     serial::puts(error[0] ? error : "(none)");
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.");
     serial::puts(name);
-    serial::puts(".tcp_connect_attempts=");
-    serial_put_dec((uint32_t)tcpConnectAttempts);
+    serial::puts(".plain_tcp_connect_attempts=");
+    serial_put_dec((uint32_t)plainTcpConnectAttempts);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.");
+    serial::puts(name);
+    serial::puts(".tls_tcp_connect_attempts=");
+    serial_put_dec((uint32_t)tlsTcpConnectAttempts);
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.");
     serial::puts(name);
     serial::puts(pass ? ".result=PASS\n" : ".result=FAIL\n");
+    return pass;
+}
+
+static bool printNavigatorLocalTlsSmokeCase()
+{
+    const char* url = "https://guidexos.test:8443/navigator-smoke/tls-basic.html";
+    int statusCode = 0;
+    int bodyBytes = 0;
+    int parsedBlocks = 0;
+    int redirectCount = 0;
+    int plainTcpConnectAttempts = 0;
+    int tlsTcpConnectAttempts = 0;
+    uint32_t verifyFlags = 0;
+    char contentType[48];
+    char error[128];
+    char finalUrl[160];
+    char tlsSniHost[64];
+    char tlsProtocol[32];
+    char tlsCipherSuite[64];
+    char sourceType[24];
+    bool tlsValidated = false;
+    bool tlsHostnameValidated = false;
+    bool tlsAllowlistLocalOnly = false;
+    const bool requestOk = NavigatorApp::smokeControlledLocalHttpsNavigation(
+        url, &statusCode, contentType, sizeof(contentType), &bodyBytes, &parsedBlocks,
+        error, sizeof(error), finalUrl, sizeof(finalUrl), &redirectCount,
+        &plainTcpConnectAttempts, &tlsTcpConnectAttempts, &verifyFlags,
+        tlsSniHost, sizeof(tlsSniHost), tlsProtocol, sizeof(tlsProtocol),
+        tlsCipherSuite, sizeof(tlsCipherSuite), &tlsValidated, &tlsHostnameValidated,
+        &tlsAllowlistLocalOnly, sourceType, sizeof(sourceType));
+    const bool contentTypeOk =
+        gxos::web::httpSharedEqualsInsensitive(contentType, "text/html") ||
+        gxos::web::httpSharedEqualsInsensitive(contentType, "text/plain");
+    const bool pass = requestOk &&
+        statusCode == 200 &&
+        contentTypeOk &&
+        bodyBytes > 0 &&
+        parsedBlocks > 0 &&
+        redirectCount == 0 &&
+        plainTcpConnectAttempts == 0 &&
+        tlsTcpConnectAttempts == 1 &&
+        verifyFlags == 0 &&
+        tlsValidated &&
+        tlsHostnameValidated &&
+        tlsAllowlistLocalOnly &&
+        nav_smoke_text_equals(tlsSniHost, "guidexos.test") &&
+        nav_smoke_text_equals(sourceType, "https") &&
+        nav_smoke_text_equals(s_kernelLastDnsResolvedIp, "10.0.2.2");
+
+    serial::puts("[NAVIGATOR-SMOKE] tls_smoke.url=");
+    serial::puts(url);
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.load_path=NavigatorApp::loadUrl -> loadHttpUrl -> kernel_http_request");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.dns_host=");
+    serial::puts(s_kernelLastDnsHost[0] ? s_kernelLastDnsHost : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.dns_resolved_ip=");
+    serial::puts(s_kernelLastDnsResolvedIp[0] ? s_kernelLastDnsResolvedIp : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.dns_error=");
+    serial::puts(s_kernelLastDnsError[0] ? s_kernelLastDnsError : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.source_type=");
+    serial::puts(sourceType[0] ? sourceType : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.plain_tcp_connect_attempts=");
+    serial_put_dec((uint32_t)plainTcpConnectAttempts);
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.tls_tcp_connect_attempts=");
+    serial_put_dec((uint32_t)tlsTcpConnectAttempts);
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.handshake=");
+    serial::puts(requestOk ? "success" : "failure");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.validation=");
+    serial::puts(tlsValidated ? "success" : "failure");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.hostname_validation=");
+    serial::puts(tlsHostnameValidated ? "success" : "failure");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.allowlist_mode=");
+    serial::puts(tlsAllowlistLocalOnly ? "local-only controlled HTTPS" : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.tls_backend=Mbed TLS bare-metal");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.sni_host=");
+    serial::puts(tlsSniHost[0] ? tlsSniHost : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.protocol=");
+    serial::puts(tlsProtocol[0] ? tlsProtocol : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.cipher_suite=");
+    serial::puts(tlsCipherSuite[0] ? tlsCipherSuite : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.http_status=");
+    serial_put_dec((uint32_t)statusCode);
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.content_type=");
+    serial::puts(contentType[0] ? contentType : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.body_bytes=");
+    serial_put_dec((uint32_t)bodyBytes);
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.parsed_blocks=");
+    serial_put_dec((uint32_t)parsedBlocks);
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.final_url=");
+    serial::puts(finalUrl[0] ? finalUrl : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.redirect_count=");
+    serial_put_dec((uint32_t)redirectCount);
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.verify_flags=");
+    serial_put_dec64((uint64_t)verifyFlags);
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.error=");
+    serial::puts((requestOk && !error[0]) ? "(none)" : (error[0] ? error : "(none)"));
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.result=");
+    serial::puts(pass ? "PASS\n" : "FAIL\n");
+    return pass;
+}
+
+static bool printNavigatorLocalTlsRedirectCase()
+{
+    const char* url = "http://10.0.2.2:8080/navigator-smoke/redirect-to-https";
+    int statusCode = 0;
+    int bodyBytes = 0;
+    int parsedBlocks = 0;
+    int redirectCount = 0;
+    int plainTcpConnectAttempts = 0;
+    int tlsTcpConnectAttempts = 0;
+    uint32_t verifyFlags = 0;
+    char contentType[48];
+    char error[128];
+    char finalUrl[160];
+    char tlsSniHost[64];
+    char tlsProtocol[32];
+    char tlsCipherSuite[64];
+    char sourceType[24];
+    bool tlsValidated = false;
+    bool tlsHostnameValidated = false;
+    bool tlsAllowlistLocalOnly = false;
+    const bool requestOk = NavigatorApp::smokeControlledLocalHttpsNavigation(
+        url, &statusCode, contentType, sizeof(contentType), &bodyBytes, &parsedBlocks,
+        error, sizeof(error), finalUrl, sizeof(finalUrl), &redirectCount,
+        &plainTcpConnectAttempts, &tlsTcpConnectAttempts, &verifyFlags,
+        tlsSniHost, sizeof(tlsSniHost), tlsProtocol, sizeof(tlsProtocol),
+        tlsCipherSuite, sizeof(tlsCipherSuite), &tlsValidated, &tlsHostnameValidated,
+        &tlsAllowlistLocalOnly, sourceType, sizeof(sourceType));
+    const bool pass = requestOk &&
+        statusCode == 200 &&
+        parsedBlocks > 0 &&
+        redirectCount == 1 &&
+        plainTcpConnectAttempts == 1 &&
+        tlsTcpConnectAttempts == 1 &&
+        verifyFlags == 0 &&
+        tlsValidated &&
+        tlsHostnameValidated &&
+        tlsAllowlistLocalOnly &&
+        nav_smoke_text_equals(finalUrl, "https://guidexos.test:8443/navigator-smoke/tls-basic.html") &&
+        nav_smoke_text_equals(tlsSniHost, "guidexos.test") &&
+        nav_smoke_text_equals(sourceType, "https");
+
+    serial::puts("[NAVIGATOR-SMOKE] https.case.redirect_allowlisted.requested_url=");
+    serial::puts(url);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.redirect_allowlisted.final_url=");
+    serial::puts(finalUrl[0] ? finalUrl : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.redirect_allowlisted.http_status=");
+    serial_put_dec((uint32_t)statusCode);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.redirect_allowlisted.content_type=");
+    serial::puts(contentType[0] ? contentType : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.redirect_allowlisted.redirect_count=");
+    serial_put_dec((uint32_t)redirectCount);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.redirect_allowlisted.plain_tcp_connect_attempts=");
+    serial_put_dec((uint32_t)plainTcpConnectAttempts);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.redirect_allowlisted.tls_tcp_connect_attempts=");
+    serial_put_dec((uint32_t)tlsTcpConnectAttempts);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.redirect_allowlisted.verify_flags=");
+    serial_put_dec64((uint64_t)verifyFlags);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.redirect_allowlisted.sni_host=");
+    serial::puts(tlsSniHost[0] ? tlsSniHost : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.redirect_allowlisted.protocol=");
+    serial::puts(tlsProtocol[0] ? tlsProtocol : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.redirect_allowlisted.cipher_suite=");
+    serial::puts(tlsCipherSuite[0] ? tlsCipherSuite : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.redirect_allowlisted.error=");
+    serial::puts((requestOk && !error[0]) ? "(none)" : (error[0] ? error : "(none)"));
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.redirect_allowlisted.result=");
+    serial::puts(pass ? "PASS\n" : "FAIL\n");
+    return pass;
+}
+
+static bool printNavigatorLocalTlsWrongHostnameFailureCase()
+{
+    const char* url = "https://guidexos.test:8443/navigator-smoke/tls-basic.html";
+    KernelHttpResponse response{};
+    gxos::GxosTlsLocalHandshakeResult tlsResult{};
+    const bool requestOk = kernel_tls_smoke_request_once(url, "wrong.guidexos.test", &response, &tlsResult);
+    const bool hostnameFailed = !tlsResult.hostnameValidationSuccess &&
+        ((tlsResult.verifyFlags & kNavigatorTlsSmokeCnMismatchFlag) != 0 ||
+         nav_smoke_text_equals(tlsResult.error, "TLS smoke hostname validation failed."));
+    const bool pass = !requestOk &&
+        tlsResult.attempted &&
+        tlsResult.tcpConnected &&
+        tlsResult.usedSniHostname &&
+        nav_smoke_text_equals(tlsResult.sniHost, "wrong.guidexos.test") &&
+        !tlsResult.certificateValidationSuccess &&
+        hostnameFailed;
+
+    serial::puts("[NAVIGATOR-SMOKE] tls_smoke.failure_case=wrong_hostname\n");
+    serial::puts("[NAVIGATOR-SMOKE] tls_smoke.failure.url=");
+    serial::puts(url);
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.failure.dns_host=");
+    serial::puts(s_kernelLastDnsHost[0] ? s_kernelLastDnsHost : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.failure.dns_resolved_ip=");
+    serial::puts(s_kernelLastDnsResolvedIp[0] ? s_kernelLastDnsResolvedIp : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.failure.tcp_connect=");
+    serial::puts(tlsResult.tcpConnected ? "success" : "failure");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.failure.handshake=");
+    serial::puts(tlsResult.handshakeSuccess ? "success" : "failure");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.failure.validation=");
+    serial::puts(tlsResult.certificateValidationSuccess ? "success" : "failure");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.failure.hostname_validation=");
+    serial::puts(tlsResult.hostnameValidationSuccess ? "success" : "failure");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.failure.stage=");
+    serial::puts(tlsResult.stage[0] ? tlsResult.stage : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.failure.sni_host=");
+    serial::puts(tlsResult.sniHost[0] ? tlsResult.sniHost : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.failure.verify_flags=");
+    serial_put_dec64((uint64_t)tlsResult.verifyFlags);
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.failure.error=");
+    serial::puts(tlsResult.error[0] ? tlsResult.error : (response.error[0] ? response.error : "(none)"));
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.failure.result=");
+    serial::puts(pass ? "PASS\n" : "FAIL\n");
     return pass;
 }
 
@@ -9355,12 +10059,14 @@ static bool printNavigatorRuntimeSmokePreamble()
     serial::puts("[NAVIGATOR-SMOKE] capability.http_dns=enabled-basic A records\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.http_redirects=enabled limit 5\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.http_chunked=enabled\n");
-    serial::puts("[NAVIGATOR-SMOKE] capability.https_tls=blocked until tls_readiness=yes\n");
-    serial::puts("[NAVIGATOR-SMOKE] capability.tls_backend=foundation-only\n");
+    serial::puts("[NAVIGATOR-SMOKE] capability.https_tls=controlled local-only HTTPS enabled for guidexos.test:8443/navigator-smoke/; general navigation still gated until tls_readiness=yes\n");
+    serial::puts("[NAVIGATOR-SMOKE] capability.tls_backend=local-only Mbed TLS transport ready with CA and hostname validation\n");
+    serial::puts("[NAVIGATOR-SMOKE] capability.tls_smoke_local=enabled wrong-host and direct hook diagnostics remain available\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.http_transport=plain TCP byte-stream\n");
-    serial::puts("[NAVIGATOR-SMOKE] capability.tls_insertion_seam=prepared\n");
+    serial::puts("[NAVIGATOR-SMOKE] capability.tls_insertion_seam=controlled local HTTPS active in regular Navigator request path; public https:// gated\n");
+    serial::puts("[NAVIGATOR-SMOKE] coverage.direct_https_allowlist=covered\n");
     serial::puts("[NAVIGATOR-SMOKE] coverage.direct_https_unsupported=covered\n");
-    serial::puts("[NAVIGATOR-SMOKE] coverage.http_to_https_redirect_unsupported=covered\n");
+    serial::puts("[NAVIGATOR-SMOKE] coverage.http_to_https_redirect_policy=exact local allowlist target covered\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.remote_png=enabled-basic numeric IPv4 and hostname http:// PNG images\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.downloads=unavailable for bare-metal HTTP v0.1\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.css_lite=enabled for embedded style blocks\n");
@@ -9546,11 +10252,14 @@ static bool printNavigatorRuntimeSmokePreamble()
 static bool printNavigatorHttpSmokeCases()
 {
     bool httpOk = true;
+    httpOk = printNavigatorLocalTlsSmokeCase() && httpOk;
+    httpOk = printNavigatorLocalTlsRedirectCase() && httpOk;
+    httpOk = printNavigatorLocalTlsWrongHostnameFailureCase() && httpOk;
     httpOk = printNavigatorHttpsUnsupportedSmokeCase("direct_unsupported", "https://example.com/",
-        "https://example.com/", 0) && httpOk;
-    httpOk = printNavigatorHttpsUnsupportedSmokeCase("redirect_unsupported",
-        "http://10.0.2.2:8080/navigator-smoke/redirect-to-https",
-        "https://localhost:8443/navigator-smoke/final.html", 1) && httpOk;
+        "https://example.com/", 0, 0) && httpOk;
+    httpOk = printNavigatorHttpsUnsupportedSmokeCase("redirect_public_unsupported",
+        "http://10.0.2.2:8080/navigator-smoke/redirect-to-public-https",
+        "https://example.com/secure", 1, 0) && httpOk;
     httpOk = printNavigatorHttpSmokeCase("basic", "http://10.0.2.2:8080/navigator-smoke/basic.html", 200,
         "http://10.0.2.2:8080/navigator-smoke/basic.html", true, true, false) && httpOk;
     httpOk = printNavigatorHttpSmokeCase("relative_redirect", "http://10.0.2.2:8080/navigator-smoke/redirect-relative", 200,

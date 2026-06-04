@@ -3,6 +3,7 @@
 #if defined(GXOS_BARE_METAL)
 
 #include "kernel/core/include/kernel/arch.h"
+#include "kernel/core/include/kernel/serial_debug.h"
 #include "kernel/core/include/kernel/time.h"
 #include "kernel/core/include/kernel/virtio_rng.h"
 
@@ -42,9 +43,15 @@ bool gxos_random_bytes(void* buffer, size_t len)
     if (!buffer && len != 0) return false;
     if (len == 0) return true;
 
+    // The current bare-metal virtio-rng transitional path is stable with
+    // small bounded reads during early boot and TLS smoke. Chunk larger TLS
+    // entropy requests so the handshake stays deterministic without changing
+    // the underlying secure entropy source or validation policy.
+    static const size_t kEntropyChunkBytes = 16;
+
     uint8_t* out = static_cast<uint8_t*>(buffer);
     while (len != 0) {
-        uint8_t chunk[64];
+        uint8_t chunk[kEntropyChunkBytes];
         const size_t request = len > sizeof(chunk) ? sizeof(chunk) : len;
         if (!kernel::virtio::rng::fill(chunk, request)) return false;
         for (size_t i = 0; i < request; ++i) out[i] = chunk[i];

@@ -148,6 +148,46 @@ struct GxosTlsHostnameValidationInfo {
 
 GxosTlsHostnameValidationInfo gxos_tls_hostname_validation_info();
 
+struct GxosTlsByteStream {
+    void* context;
+    int (*read)(void* context, uint8_t* buffer, int length);
+    int (*write)(void* context, const uint8_t* buffer, int length);
+    void (*close)(void* context);
+    void (*poll)(void* context);
+};
+
+struct GxosTlsLocalHandshakeResult {
+    bool attempted;
+    bool tcpConnected;
+    bool handshakeSuccess;
+    bool certificateValidationSuccess;
+    bool hostnameValidationSuccess;
+    bool requestWriteSuccess;
+    bool responseReadSuccess;
+    bool parserAcceptedResponse;
+    bool usedSniHostname;
+    size_t requestBytesWritten;
+    size_t responseBytesRead;
+    uint32_t verifyFlags;
+    int transportError;
+    int mbedtlsError;
+    int mbedtlsState;
+    char sniHost[64];
+    char stage[48];
+    char protocol[32];
+    char cipherSuite[64];
+    char error[160];
+};
+
+bool gxos_tls_smoke_https_request(const char* sniHostname,
+                                  const char* requestBytes,
+                                  size_t requestLength,
+                                  GxosTlsByteStream stream,
+                                  char* responseBuffer,
+                                  size_t responseBufferSize,
+                                  size_t* responseBytesOut,
+                                  GxosTlsLocalHandshakeResult* result);
+
 bool gxos_tls_certificate_validation_policy_enabled();
 const char* gxos_tls_certificate_validation_policy();
 

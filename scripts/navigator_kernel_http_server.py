@@ -117,6 +117,14 @@ class NavigatorSmokeHandler(BaseHTTPRequestHandler):
             self.write_bytes(200, "text/html; charset=utf-8",
                              b"<html><body><h1>Kernel DNS Hostname</h1><p>host header preserved</p></body></html>")
             return
+        if path == "/navigator-smoke/tls-basic.html":
+            if host.split(":", 1)[0].lower() != "guidexos.test":
+                self.write_bytes(421, "text/html; charset=utf-8",
+                                 b"<html><body><h1>Wrong TLS Host</h1><p>expected guidexos.test</p></body></html>")
+                return
+            self.write_bytes(200, "text/html; charset=utf-8",
+                             b"<html><body><h1>Kernel TLS Basic</h1><p>local handshake ok</p></body></html>")
+            return
         if path == "/navigator-smoke/final.html":
             self.write_bytes(200, "text/html; charset=utf-8",
                              b"<html><body><h1>Kernel HTTP Final</h1><p>redirect target</p></body></html>")
@@ -135,9 +143,18 @@ class NavigatorSmokeHandler(BaseHTTPRequestHandler):
             return
         if path == "/navigator-smoke/redirect-to-https":
             if self.https_port:
-                self.write_redirect(302, f"https://localhost:{self.https_port}/navigator-smoke/final.html")
+                redirect_host = "guidexos.test"
+                redirect_path = "/navigator-smoke/tls-basic.html"
+                request_host = host.split(":", 1)[0].lower()
+                if request_host in ("127.0.0.1", "localhost"):
+                    redirect_host = "localhost"
+                    redirect_path = "/navigator-smoke/final.html"
+                self.write_redirect(302, f"https://{redirect_host}:{self.https_port}{redirect_path}")
             else:
                 self.write_redirect(302, "https://example.com/secure")
+            return
+        if path == "/navigator-smoke/redirect-to-public-https":
+            self.write_redirect(302, "https://example.com/secure")
             return
         if path == "/navigator-smoke/redirect-downgrade":
             port = self.http_port or 8080
@@ -282,6 +299,38 @@ class NavigatorSmokeHandler(BaseHTTPRequestHandler):
         self.write_bytes(404, "text/html", b"<html><body><h1>Missing POST</h1></body></html>")
 
 
+class NavigatorTlsSmokeServer(ThreadingHTTPServer):
+    def __init__(self, server_address, request_handler_class, ssl_context):
+        super().__init__(server_address, request_handler_class)
+        self._ssl_context = ssl_context
+
+    def get_request(self):
+        raw_socket, client_address = super().get_request()
+        print("TLS accept from %s:%s" % (client_address[0], client_address[1]), flush=True)
+        try:
+            tls_socket = self._ssl_context.wrap_socket(raw_socket, server_side=True)
+            print(
+                "TLS handshake ok from %s:%s sni=%s protocol=%s cipher=%s"
+                % (
+                    client_address[0],
+                    client_address[1],
+                    getattr(tls_socket, "_guidexos_sni", None),
+                    tls_socket.version(),
+                    tls_socket.cipher()[0] if tls_socket.cipher() else None,
+                ),
+                flush=True,
+            )
+            return tls_socket, client_address
+        except ssl.SSLError as exc:
+            print(
+                "TLS handshake failed from %s:%s error=%s"
+                % (client_address[0], client_address[1], exc),
+                flush=True,
+            )
+            raw_socket.close()
+            raise
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", default=".")
@@ -295,13 +344,24 @@ def main():
     NavigatorSmokeHandler.root = Path(args.root).resolve()
     NavigatorSmokeHandler.https_port = args.https_port
     NavigatorSmokeHandler.http_port = args.http_port
-    server = ThreadingHTTPServer((args.host, args.port), NavigatorSmokeHandler)
+    server = None
     if args.tls_cert or args.tls_key:
         if not args.tls_cert or not args.tls_key:
             parser.error("--tls-cert and --tls-key must be supplied together")
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
+        context.maximum_version = ssl.TLSVersion.TLSv1_2
+        context.options |= getattr(ssl, "OP_NO_COMPRESSION", 0)
+        context.options |= getattr(ssl, "OP_NO_TICKET", 0)
+        context.set_ciphers("ECDHE-RSA-AES128-GCM-SHA256")
         context.load_cert_chain(args.tls_cert, args.tls_key)
-        server.socket = context.wrap_socket(server.socket, server_side=True)
+        def on_server_name(sock, server_name, _ctx):
+            setattr(sock, "_guidexos_sni", server_name)
+            print(f"TLS clienthello sni={server_name}", flush=True)
+        context.set_servername_callback(on_server_name)
+        server = NavigatorTlsSmokeServer((args.host, args.port), NavigatorSmokeHandler, context)
+    else:
+        server = ThreadingHTTPServer((args.host, args.port), NavigatorSmokeHandler)
     scheme = "HTTPS" if args.tls_cert else "HTTP"
     print(f"Navigator kernel {scheme} smoke server on {args.host}:{args.port} root={NavigatorSmokeHandler.root}", flush=True)
     server.serve_forever()

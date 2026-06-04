@@ -302,6 +302,26 @@ static bool initialize_legacy_device()
     return true;
 }
 
+static bool ensure_request_queue_ready()
+{
+    if (!s_state.driverReady) {
+        return init();
+    }
+
+    if (s_queue.desc == nullptr || s_queue.avail == nullptr || s_queue.used == nullptr || s_queue.size == 0) {
+        return initialize_legacy_device();
+    }
+
+    // The bare-metal TLS path can arrive after queue storage was cleared while
+    // the device transport remained present. Re-arm the legacy queue when the
+    // remembered last-used slot has moved ahead of the current ring state.
+    if (s_queue.lastUsedIdx > s_queue.used->idx) {
+        return initialize_legacy_device();
+    }
+
+    return true;
+}
+
 static bool wait_for_request_completion(uint16_t expectedUsedIdx)
 {
     const uint64_t startTick = pit::ticks();
@@ -367,7 +387,7 @@ bool fill(void* buffer, size_t len)
         update_feature_report_status();
         return false;
     }
-    if (!init()) return false;
+    if (!ensure_request_queue_ready()) return false;
 
     memzero(buffer, len);
     memzero(s_requestBuffer, sizeof(s_requestBuffer));

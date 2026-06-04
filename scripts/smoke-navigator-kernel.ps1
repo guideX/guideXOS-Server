@@ -89,6 +89,50 @@ function Find-Python {
     return $null
 }
 
+function Get-NavigatorKernelSmokePortOwners {
+    param([int[]]$Ports)
+
+    $connections = Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue |
+        Where-Object { $_.LocalPort -in $Ports }
+    if (-not $connections) { return @() }
+
+    $owners = @()
+    foreach ($connection in $connections) {
+        $process = Get-CimInstance Win32_Process -Filter "ProcessId = $($connection.OwningProcess)" -ErrorAction SilentlyContinue
+        $owners += [pscustomobject]@{
+            LocalAddress = $connection.LocalAddress
+            LocalPort = $connection.LocalPort
+            OwningProcess = $connection.OwningProcess
+            Name = if ($process) { $process.Name } else { $null }
+            CommandLine = if ($process) { $process.CommandLine } else { $null }
+        }
+    }
+    return $owners
+}
+
+function Clear-NavigatorKernelSmokePortConflicts {
+    param([int[]]$Ports)
+
+    $owners = Get-NavigatorKernelSmokePortOwners -Ports $Ports
+    foreach ($owner in $owners) {
+        $commandLine = $owner.CommandLine
+        if ($commandLine -and $commandLine -match 'navigator_kernel_http_server\.py') {
+            Stop-Process -Id $owner.OwningProcess -Force -ErrorAction SilentlyContinue
+            continue
+        }
+        throw "Navigator kernel smoke port conflict on $($owner.LocalAddress):$($owner.LocalPort) owned by PID $($owner.OwningProcess) ($($owner.Name))."
+    }
+
+    Start-Sleep -Milliseconds 300
+    $remaining = Get-NavigatorKernelSmokePortOwners -Ports $Ports
+    if ($remaining) {
+        $detail = ($remaining | ForEach-Object {
+            "$($_.LocalAddress):$($_.LocalPort) pid=$($_.OwningProcess)"
+        }) -join ", "
+        throw "Navigator kernel smoke could not clear stale listeners: $detail"
+    }
+}
+
 $python = Find-Python
 if (-not $python) { throw "python not found; required for local Navigator HTTP smoke server." }
 
@@ -123,12 +167,24 @@ if (-not (Test-Path $startup)) {
 
 $httpLog = Join-Path $LogDir "navigator-kernel-http-$stamp.log"
 $httpErrLog = Join-Path $LogDir "navigator-kernel-http-$stamp.err.log"
+$httpsLog = Join-Path $LogDir "navigator-kernel-https-$stamp.log"
+$httpsErrLog = Join-Path $LogDir "navigator-kernel-https-$stamp.err.log"
 $httpServer = Join-Path $Root "scripts\navigator_kernel_http_server.py"
-$httpArgs = @("`"$httpServer`"", "--port", "8080", "--host", "0.0.0.0", "--root", "`"$Root`"")
+$httpsCert = Join-Path $Root "scripts\fixtures\navigator-smoke-guidexos.test.crt"
+$httpsKey = Join-Path $Root "scripts\fixtures\navigator-smoke-guidexos.test.key"
+if (-not (Test-Path $httpsCert)) { throw "Navigator TLS smoke certificate not found: $httpsCert" }
+if (-not (Test-Path $httpsKey)) { throw "Navigator TLS smoke private key not found: $httpsKey" }
+Clear-NavigatorKernelSmokePortConflicts -Ports @(8080, 8443)
+$httpArgs = @("`"$httpServer`"", "--port", "8080", "--host", "0.0.0.0", "--root", "`"$Root`"", "--http-port", "8080", "--https-port", "8443")
 $httpProc = Start-Process -FilePath $python -ArgumentList $httpArgs -PassThru -WindowStyle Hidden -RedirectStandardOutput $httpLog -RedirectStandardError $httpErrLog
+$httpsArgs = @("`"$httpServer`"", "--port", "8443", "--host", "0.0.0.0", "--root", "`"$Root`"", "--http-port", "8080", "--https-port", "8443", "--tls-cert", "`"$httpsCert`"", "--tls-key", "`"$httpsKey`"")
+$httpsProc = Start-Process -FilePath $python -ArgumentList $httpsArgs -PassThru -WindowStyle Hidden -RedirectStandardOutput $httpsLog -RedirectStandardError $httpsErrLog
 Start-Sleep -Milliseconds 800
 if ($httpProc.HasExited) {
     throw "local HTTP smoke server exited early; see $httpLog"
+}
+if ($httpsProc.HasExited) {
+    throw "local HTTPS smoke server exited early; see $httpsLog"
 }
 
 $args = @(
@@ -167,6 +223,9 @@ try {
     if ($httpProc -and -not $httpProc.HasExited) {
         Stop-Process -Id $httpProc.Id -Force
     }
+    if ($httpsProc -and -not $httpsProc.HasExited) {
+        Stop-Process -Id $httpsProc.Id -Force
+    }
     if ($createdStartup) {
         Remove-Item $startup -ErrorAction SilentlyContinue
     }
@@ -189,12 +248,14 @@ $checks = @(
     "[NAVIGATOR-SMOKE] capability.http_dns=enabled-basic A records",
     "[NAVIGATOR-SMOKE] capability.http_redirects=enabled limit 5",
     "[NAVIGATOR-SMOKE] capability.http_chunked=enabled",
-    "[NAVIGATOR-SMOKE] capability.https_tls=blocked until tls_readiness=yes",
-    "[NAVIGATOR-SMOKE] capability.tls_backend=foundation-only",
+    "[NAVIGATOR-SMOKE] capability.https_tls=controlled local-only HTTPS enabled for guidexos.test:8443/navigator-smoke/; general navigation still gated until tls_readiness=yes",
+    "[NAVIGATOR-SMOKE] capability.tls_backend=local-only Mbed TLS transport ready with CA and hostname validation",
+    "[NAVIGATOR-SMOKE] capability.tls_smoke_local=enabled wrong-host and direct hook diagnostics remain available",
     "[NAVIGATOR-SMOKE] capability.http_transport=plain TCP byte-stream",
-    "[NAVIGATOR-SMOKE] capability.tls_insertion_seam=prepared",
+    "[NAVIGATOR-SMOKE] capability.tls_insertion_seam=controlled local HTTPS active in regular Navigator request path; public https:// gated",
+    "[NAVIGATOR-SMOKE] coverage.direct_https_allowlist=covered",
     "[NAVIGATOR-SMOKE] coverage.direct_https_unsupported=covered",
-    "[NAVIGATOR-SMOKE] coverage.http_to_https_redirect_unsupported=covered",
+    "[NAVIGATOR-SMOKE] coverage.http_to_https_redirect_policy=exact local allowlist target covered",
     "[NAVIGATOR-SMOKE] capability.remote_png=enabled-basic numeric IPv4 and hostname http:// PNG images",
     "[NAVIGATOR-SMOKE] capability.downloads=unavailable for bare-metal HTTP v0.1",
     "[NAVIGATOR-SMOKE] capability.css_lite=enabled for embedded style blocks",
@@ -235,7 +296,7 @@ $checks = @(
     "[NAVIGATOR-SMOKE] tls_prereq.tls_backend_status=ReadyForLocalHandshake",
     "[NAVIGATOR-SMOKE] tls_prereq.tls_backend_name=Mbed TLS bare-metal scaffold",
     "[NAVIGATOR-SMOKE] tls_prereq.tls_backend_version=Mbed TLS 4.1.0",
-    "[NAVIGATOR-SMOKE] tls_prereq.tls_backend_error=Allocator, PSA RNG/time callbacks, root CA parsing, and hostname validation scaffolding are ready; Navigator handshake transport insertion remains gated.",
+    "[NAVIGATOR-SMOKE] tls_prereq.tls_backend_error=Allocator, PSA RNG/time callbacks, root CA parsing, hostname validation, and controlled local-only Navigator HTTPS transport are ready; general Navigator https:// navigation remains gated.",
     "[NAVIGATOR-SMOKE] tls_prereq.mbedtls_import_path=third_party/mbedtls",
     "[NAVIGATOR-SMOKE] tls_prereq.mbedtls_config_path=third_party/mbedtls/guidexos/mbedtls_config.h",
     "[NAVIGATOR-SMOKE] tls_prereq.mbedtls_crypto_config_path=third_party/mbedtls/guidexos/crypto_config.h",
@@ -245,13 +306,13 @@ $checks = @(
     "[NAVIGATOR-SMOKE] tls_prereq.mbedtls_detected_version=Mbed TLS 4.1.0",
     "[NAVIGATOR-SMOKE] tls_prereq.tf_psa_detected_version=TF-PSA-Crypto 1.1.0",
     "[NAVIGATOR-SMOKE] tls_prereq.mbedtls_planned_source_count=55",
-    "[NAVIGATOR-SMOKE] tls_prereq.mbedtls_planned_subset=runtime-linked Mbed TLS 4.1.0 TLS/X.509 prerequisite subset with bounded allocator hooks, PSA external RNG, wall-clock callbacks, and one-shot CA parsing; Navigator handshakes remain gated",
+    "[NAVIGATOR-SMOKE] tls_prereq.mbedtls_planned_subset=runtime-linked Mbed TLS 4.1.0 TLS/X.509 subset with bounded allocator hooks, PSA external RNG, wall-clock callbacks, one-shot CA parsing, and smoke-only local handshake coverage; general Navigator https:// remains gated",
     "[NAVIGATOR-SMOKE] tls_prereq.mbedtls_source_present=yes",
     "[NAVIGATOR-SMOKE] tls_prereq.mbedtls_source_compile_ready=yes",
     "[NAVIGATOR-SMOKE] tls_prereq.mbedtls_config_present=yes",
     "[NAVIGATOR-SMOKE] tls_prereq.mbedtls_crypto_config_present=yes",
     "[NAVIGATOR-SMOKE] tls_prereq.mbedtls_tf_psa_present=yes",
-    "[NAVIGATOR-SMOKE] tls_prereq.mbedtls_import_detail=Official Mbed TLS 4.1.0 source, generated runtime helpers, and the guideXOS split config are present; the freestanding runtime-linked subset can build while Navigator handshakes remain gated.",
+    "[NAVIGATOR-SMOKE] tls_prereq.mbedtls_import_detail=Official Mbed TLS 4.1.0 source, generated runtime helpers, and the guideXOS split config are present; the freestanding runtime-linked subset can build while general Navigator https:// remains gated.",
     "[NAVIGATOR-SMOKE] tls_prereq.allocator_hook_status=Ready",
     "[NAVIGATOR-SMOKE] tls_prereq.allocator_hook_detail=Bounded Mbed TLS memory_buffer_alloc arena is active for bare-metal TLS prerequisites.",
     "[NAVIGATOR-SMOKE] tls_prereq.rng_callback_status=Ready",
@@ -278,20 +339,61 @@ $checks = @(
     "[NAVIGATOR-SMOKE] tls_prereq.hostname_validation_sni=yes",
     "[NAVIGATOR-SMOKE] tls_prereq.hostname_validation_original_host=yes",
     "[NAVIGATOR-SMOKE] tls_prereq.hostname_validation_numeric_ip=no",
-    "[NAVIGATOR-SMOKE] tls_prereq.hostname_validation_policy=scaffold ready; original URL host and future SNI host are retained, numeric-IP validation stays disabled, and hostname enforcement remains gated on transport handshake insertion",
-    "[NAVIGATOR-SMOKE] tls_prereq.certificate_validation_policy=disabled; allocator, RNG/time callbacks, and CA parsing may be wired, but certificate enforcement stays fail-closed until Navigator handshake insertion lands",
+    "[NAVIGATOR-SMOKE] tls_prereq.hostname_validation_policy=scaffold ready; original URL host and future SNI host are retained, numeric-IP validation stays disabled, and bare-metal hostname enforcement stays gated outside the controlled local-only HTTPS path",
+    "[NAVIGATOR-SMOKE] tls_prereq.certificate_validation_policy=disabled for general navigation; controlled local-only Navigator HTTPS enforces CA and hostname validation, but broad bare-metal https:// remains fail-closed until full transport policy lands",
     "[NAVIGATOR-SMOKE] tls_readiness=no",
     "[NAVIGATOR-SMOKE] tls_readiness_blocker=Certificate validation policy is not enabled yet",
+    "[NAVIGATOR-SMOKE] tls_smoke.url=https://guidexos.test:8443/navigator-smoke/tls-basic.html",
+    "[NAVIGATOR-SMOKE] tls_smoke.load_path=NavigatorApp::loadUrl -> loadHttpUrl -> kernel_http_request",
+    "[NAVIGATOR-SMOKE] tls_smoke.dns_host=guidexos.test",
+    "[NAVIGATOR-SMOKE] tls_smoke.dns_resolved_ip=10.0.2.2",
+    "[NAVIGATOR-SMOKE] tls_smoke.source_type=https",
+    "[NAVIGATOR-SMOKE] tls_smoke.plain_tcp_connect_attempts=0",
+    "[NAVIGATOR-SMOKE] tls_smoke.tls_tcp_connect_attempts=1",
+    "[NAVIGATOR-SMOKE] tls_smoke.handshake=success",
+    "[NAVIGATOR-SMOKE] tls_smoke.validation=success",
+    "[NAVIGATOR-SMOKE] tls_smoke.hostname_validation=success",
+    "[NAVIGATOR-SMOKE] tls_smoke.allowlist_mode=local-only controlled HTTPS",
+    "[NAVIGATOR-SMOKE] tls_smoke.tls_backend=Mbed TLS bare-metal",
+    "[NAVIGATOR-SMOKE] tls_smoke.sni_host=guidexos.test",
+    "[NAVIGATOR-SMOKE] tls_smoke.http_status=200",
+    "[NAVIGATOR-SMOKE] tls_smoke.content_type=text/html",
+    "[NAVIGATOR-SMOKE] tls_smoke.final_url=https://guidexos.test:8443/navigator-smoke/tls-basic.html",
+    "[NAVIGATOR-SMOKE] tls_smoke.redirect_count=0",
+    "[NAVIGATOR-SMOKE] tls_smoke.error=(none)",
+    "[NAVIGATOR-SMOKE] tls_smoke.result=PASS",
+    "[NAVIGATOR-SMOKE] https.case.redirect_allowlisted.requested_url=http://10.0.2.2:8080/navigator-smoke/redirect-to-https",
+    "[NAVIGATOR-SMOKE] https.case.redirect_allowlisted.final_url=https://guidexos.test:8443/navigator-smoke/tls-basic.html",
+    "[NAVIGATOR-SMOKE] https.case.redirect_allowlisted.http_status=200",
+    "[NAVIGATOR-SMOKE] https.case.redirect_allowlisted.redirect_count=1",
+    "[NAVIGATOR-SMOKE] https.case.redirect_allowlisted.plain_tcp_connect_attempts=1",
+    "[NAVIGATOR-SMOKE] https.case.redirect_allowlisted.tls_tcp_connect_attempts=1",
+    "[NAVIGATOR-SMOKE] https.case.redirect_allowlisted.verify_flags=0",
+    "[NAVIGATOR-SMOKE] https.case.redirect_allowlisted.sni_host=guidexos.test",
+    "[NAVIGATOR-SMOKE] https.case.redirect_allowlisted.error=(none)",
+    "[NAVIGATOR-SMOKE] https.case.redirect_allowlisted.result=PASS",
+    "[NAVIGATOR-SMOKE] tls_smoke.failure_case=wrong_hostname",
+    "[NAVIGATOR-SMOKE] tls_smoke.failure.dns_host=guidexos.test",
+    "[NAVIGATOR-SMOKE] tls_smoke.failure.dns_resolved_ip=10.0.2.2",
+    "[NAVIGATOR-SMOKE] tls_smoke.failure.tcp_connect=success",
+    "[NAVIGATOR-SMOKE] tls_smoke.failure.handshake=failure",
+    "[NAVIGATOR-SMOKE] tls_smoke.failure.validation=failure",
+    "[NAVIGATOR-SMOKE] tls_smoke.failure.hostname_validation=failure",
+    "[NAVIGATOR-SMOKE] tls_smoke.failure.sni_host=wrong.guidexos.test",
+    "[NAVIGATOR-SMOKE] tls_smoke.failure.error=TLS smoke hostname validation failed.",
+    "[NAVIGATOR-SMOKE] tls_smoke.failure.result=PASS",
     "[NAVIGATOR-SMOKE] https.case.direct_unsupported.requested_url=https://example.com/",
     "[NAVIGATOR-SMOKE] https.case.direct_unsupported.final_url=https://example.com/",
     "[NAVIGATOR-SMOKE] https.case.direct_unsupported.error=HTTPS/TLS unsupported",
-    "[NAVIGATOR-SMOKE] https.case.direct_unsupported.tcp_connect_attempts=0",
+    "[NAVIGATOR-SMOKE] https.case.direct_unsupported.plain_tcp_connect_attempts=0",
+    "[NAVIGATOR-SMOKE] https.case.direct_unsupported.tls_tcp_connect_attempts=0",
     "[NAVIGATOR-SMOKE] https.case.direct_unsupported.result=PASS",
-    "[NAVIGATOR-SMOKE] https.case.redirect_unsupported.requested_url=http://10.0.2.2:8080/navigator-smoke/redirect-to-https",
-    "[NAVIGATOR-SMOKE] https.case.redirect_unsupported.final_url=https://localhost:8443/navigator-smoke/final.html",
-    "[NAVIGATOR-SMOKE] https.case.redirect_unsupported.error=HTTPS/TLS unsupported redirect",
-    "[NAVIGATOR-SMOKE] https.case.redirect_unsupported.tcp_connect_attempts=1",
-    "[NAVIGATOR-SMOKE] https.case.redirect_unsupported.result=PASS",
+    "[NAVIGATOR-SMOKE] https.case.redirect_public_unsupported.requested_url=http://10.0.2.2:8080/navigator-smoke/redirect-to-public-https",
+    "[NAVIGATOR-SMOKE] https.case.redirect_public_unsupported.final_url=https://example.com/secure",
+    "[NAVIGATOR-SMOKE] https.case.redirect_public_unsupported.error=HTTPS/TLS unsupported redirect",
+    "[NAVIGATOR-SMOKE] https.case.redirect_public_unsupported.plain_tcp_connect_attempts=1",
+    "[NAVIGATOR-SMOKE] https.case.redirect_public_unsupported.tls_tcp_connect_attempts=0",
+    "[NAVIGATOR-SMOKE] https.case.redirect_public_unsupported.result=PASS",
     "[NAVIGATOR-SMOKE] http.case.basic.result=PASS",
     "[NAVIGATOR-SMOKE] http.case.relative_redirect.result=PASS",
     "[NAVIGATOR-SMOKE] http.case.absolute_redirect.result=PASS",
@@ -362,6 +464,21 @@ if (-not [regex]::IsMatch($output, '\[NAVIGATOR-SMOKE\] vfs\.certs_file_read_byt
 }
 if (-not [regex]::IsMatch($output, '\[NAVIGATOR-SMOKE\] tls_prereq\.wall_clock_utc=20[2-9][0-9]-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z')) {
     $failed += "[NAVIGATOR-SMOKE] tls_prereq.wall_clock_utc=<plausible UTC date>"
+}
+if (-not [regex]::IsMatch($output, '\[NAVIGATOR-SMOKE\] tls_smoke\.protocol=TLSv1\.[23]')) {
+    $failed += "[NAVIGATOR-SMOKE] tls_smoke.protocol=<TLSv1.2 or TLSv1.3>"
+}
+if (-not [regex]::IsMatch($output, '\[NAVIGATOR-SMOKE\] tls_smoke\.cipher_suite=.+')) {
+    $failed += "[NAVIGATOR-SMOKE] tls_smoke.cipher_suite=<non-empty cipher suite>"
+}
+if (-not [regex]::IsMatch($output, '\[NAVIGATOR-SMOKE\] tls_smoke\.body_bytes=[1-9][0-9]*')) {
+    $failed += "[NAVIGATOR-SMOKE] tls_smoke.body_bytes=<positive bytes>"
+}
+if (-not [regex]::IsMatch($output, '\[NAVIGATOR-SMOKE\] tls_smoke\.verify_flags=0')) {
+    $failed += "[NAVIGATOR-SMOKE] tls_smoke.verify_flags=0"
+}
+if (-not [regex]::IsMatch($output, '\[NAVIGATOR-SMOKE\] tls_smoke\.failure\.verify_flags=[1-9][0-9]*')) {
+    $failed += "[NAVIGATOR-SMOKE] tls_smoke.failure.verify_flags=<positive mismatch flags>"
 }
 
 if ($failed.Count -eq 0) {

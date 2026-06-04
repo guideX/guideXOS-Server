@@ -446,12 +446,34 @@ public:
     static bool smokeInteractiveFormsLiteGet(const char* formUrl, char* finalUrl,
                                              int finalUrlLen, int* parsedBlocks,
                                              char* error, int errorLen);
+    static bool smokeControlledLocalHttpsNavigation(const char* url,
+                                                    int* statusCode, char* contentType,
+                                                    int contentTypeLen, int* bodyBytes,
+                                                    int* parsedBlocks, char* error,
+                                                    int errorLen, char* finalUrl = nullptr,
+                                                    int finalUrlLen = 0, int* redirectCount = nullptr,
+                                                    int* plainTcpConnectAttempts = nullptr,
+                                                    int* tlsTcpConnectAttempts = nullptr,
+                                                    uint32_t* tlsVerifyFlags = nullptr,
+                                                    char* tlsSniHost = nullptr,
+                                                    int tlsSniHostLen = 0,
+                                                    char* tlsProtocol = nullptr,
+                                                    int tlsProtocolLen = 0,
+                                                    char* tlsCipherSuite = nullptr,
+                                                    int tlsCipherSuiteLen = 0,
+                                                    bool* tlsValidated = nullptr,
+                                                    bool* tlsHostnameValidated = nullptr,
+                                                    bool* tlsAllowlistLocalOnly = nullptr,
+                                                    char* sourceType = nullptr,
+                                                    int sourceTypeLen = 0);
     static bool smokeHttpsUnsupportedDocument(const char* url, const char* expectedFinalUrl,
-                                              int expectedTcpConnectAttempts,
+                                              int expectedPlainTcpConnectAttempts,
+                                              int expectedTlsTcpConnectAttempts,
                                               char* requestedUrl, int requestedUrlLen,
                                               char* finalUrl, int finalUrlLen,
                                               char* error, int errorLen,
-                                              int* tcpConnectAttempts);
+                                              int* plainTcpConnectAttempts,
+                                              int* tlsTcpConnectAttempts);
 
 private:
     enum NavigatorMouseMode {
@@ -611,10 +633,21 @@ private:
     int m_metaRemoteImages;
     int m_metaLocalImages;
     char m_metaLastImageError[128];
+    char m_metaScheme[8];
     bool m_metaDnsUsed;
     char m_metaDnsHost[64];
     char m_metaDnsResolvedIp[16];
     char m_metaDnsError[64];
+    bool m_metaTlsUsed;
+    bool m_metaTlsValidated;
+    bool m_metaTlsHostnameValidated;
+    bool m_metaTlsAllowlistLocalOnly;
+    uint32_t m_metaTlsVerifyFlags;
+    char m_metaTlsBackend[48];
+    char m_metaTlsHostname[64];
+    char m_metaTlsSniHost[64];
+    char m_metaTlsProtocol[32];
+    char m_metaTlsCipherSuite[64];
     bool m_metaCssDetected;
     int m_metaStyleRuleCount;
     int m_metaUnsupportedExternalStylesheetCount;
@@ -658,7 +691,7 @@ private:
     void buildDownloadsDocument();
     void buildDownloadResultDocument(const DownloadRecord& record);
     void buildErrorDocument(const char* url, const char* reason);
-    void buildHttpsUnsupportedDocument(const char* url, bool redirected);
+    void buildHttpsUnsupportedDocument(const char* url, bool redirected, const char* detail = nullptr);
     void loadFileUrl(const char* url);
     void loadHttpUrl(const char* url);
     void loadHttpResponse(const char* url, KernelHttpResponse* response);
@@ -676,7 +709,8 @@ private:
                               const gxos::web::CssDiagnostics* cssDiagnostics = nullptr,
                               const gxos::web::WebStyle* bodyStyle = nullptr,
                               int httpStatusCode = 0, const char* httpReason = "",
-                              int redirectCount = 0);
+                              int redirectCount = 0,
+                              const KernelHttpResponse* networkResponse = nullptr);
     void addBlock(BlockKind kind, const char* text, const char* url = "", const gxos::web::WebStyle* style = nullptr);
     void addImageBlock(const char* src, const char* alt, const char* resolvedUrl, int width, int height, const gxos::web::WebStyle* style = nullptr);
     void addBookmark(const char* title, const char* url);
@@ -716,7 +750,8 @@ private:
                            int httpStatusCode = 0,
                            const char* httpReason = "",
                            const char* requestedUrl = nullptr,
-                           int redirectCount = 0);
+                           int redirectCount = 0,
+                           const KernelHttpResponse* networkResponse = nullptr);
     void prepareImageResources();
     void resolveHref(const char* baseUrl, const char* href, char* out, int outSize) const;
     void rememberDownload(const DownloadRecord& record);

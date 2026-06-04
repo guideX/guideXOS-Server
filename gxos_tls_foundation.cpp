@@ -2,6 +2,9 @@
 #include "gxos_tls_prerequisites.h"
 
 #if defined(GXOS_BARE_METAL)
+#include "kernel/core/include/kernel/pit.h"
+#include "kernel/core/include/kernel/serial_debug.h"
+#include "kernel/core/include/kernel/tcp.h"
 #include "kernel/core/include/kernel/vfs.h"
 #endif
 
@@ -65,9 +68,11 @@
     GXOS_TLS_MBEDTLS_CRYPTO_CONFIG_PRESENT
 #define GXOS_TLS_MBEDTLS_RUNTIME_INCLUDED 1
 #include "mbedtls/memory_buffer_alloc.h"
+#include "mbedtls/ssl.h"
 #include "mbedtls/platform.h"
 #include "mbedtls/platform_time.h"
 #include "mbedtls/platform_util.h"
+#include "mbedtls/x509.h"
 #include "mbedtls/x509_crt.h"
 #include "psa/crypto.h"
 #include "psa/crypto_extra.h"
@@ -172,6 +177,12 @@ int gxos_mbedtls_platform_fprintf_noop(FILE*, const char*, ...)
 
 void gxos_mbedtls_platform_exit_noop(int)
 {
+}
+
+void gxos_tls_smoke_debug_trace(const char* event, uint32_t value)
+{
+    (void) event;
+    (void) value;
 }
 }
 #endif
@@ -299,6 +310,14 @@ extern "C" psa_status_t mbedtls_psa_external_get_random(
     *output_length = output_size;
     return PSA_SUCCESS;
 }
+
+extern "C" int gxos_mbedtls_ssl_random(void*, unsigned char* output, size_t output_len)
+{
+    if ((output == nullptr && output_len != 0) || gxos::gxos_random_quality() != gxos::GxosRandomQuality::Secure) {
+        return -1;
+    }
+    return gxos::gxos_random_bytes(output, output_len) ? 0 : -1;
+}
 #endif
 
 namespace gxos {
@@ -316,7 +335,7 @@ constexpr const char* kBareMetalCryptoConfigPath = "third_party/mbedtls/guidexos
 constexpr const char* kBareMetalTfPsaPath = "third_party/mbedtls/tf-psa-crypto";
 constexpr const char* kBareMetalBuildPlanPath = "third_party/mbedtls/guidexos/mbedtls_sources.mk";
 constexpr const char* kBareMetalPlannedSubset =
-    "runtime-linked Mbed TLS 4.1.0 TLS/X.509 prerequisite subset with bounded allocator hooks, PSA external RNG, wall-clock callbacks, and one-shot CA parsing; Navigator handshakes remain gated";
+    "runtime-linked Mbed TLS 4.1.0 TLS/X.509 subset with bounded allocator hooks, PSA external RNG, wall-clock callbacks, one-shot CA parsing, and smoke-only local handshake coverage; general Navigator https:// remains gated";
 constexpr size_t kBareMetalPlannedSourceCount = 55;
 
 size_t token_length(const char* token)
@@ -566,7 +585,7 @@ GxosTlsMbedTlsImportInfo make_mbedtls_import_info()
         detected_tf_psa_version(),
         kBareMetalPlannedSourceCount,
         kBareMetalPlannedSubset,
-        "Official Mbed TLS 4.1.0 source, generated runtime helpers, and the guideXOS split config are present; the freestanding runtime-linked subset can build while Navigator handshakes remain gated."
+        "Official Mbed TLS 4.1.0 source, generated runtime helpers, and the guideXOS split config are present; the freestanding runtime-linked subset can build while general Navigator https:// remains gated."
     };
 #else
     return {
@@ -590,7 +609,6 @@ GxosTlsMbedTlsImportInfo make_mbedtls_import_info()
 #endif
 }
 
-#if defined(GXOS_BARE_METAL)
 void copy_text(char* dst, size_t dst_size, const char* src)
 {
     if (!dst || dst_size == 0) return;
@@ -603,6 +621,33 @@ void copy_text(char* dst, size_t dst_size, const char* src)
     }
     dst[i] = '\0';
 }
+
+void zero_local_handshake_result(GxosTlsLocalHandshakeResult* result)
+{
+    if (!result) return;
+    result->attempted = false;
+    result->tcpConnected = false;
+    result->handshakeSuccess = false;
+    result->certificateValidationSuccess = false;
+    result->hostnameValidationSuccess = false;
+    result->requestWriteSuccess = false;
+    result->responseReadSuccess = false;
+    result->parserAcceptedResponse = false;
+    result->usedSniHostname = false;
+    result->requestBytesWritten = 0;
+    result->responseBytesRead = 0;
+    result->verifyFlags = 0;
+    result->transportError = 0;
+    result->mbedtlsError = 0;
+    result->mbedtlsState = 0;
+    result->sniHost[0] = '\0';
+    result->stage[0] = '\0';
+    result->protocol[0] = '\0';
+    result->cipherSuite[0] = '\0';
+    result->error[0] = '\0';
+}
+
+#if defined(GXOS_BARE_METAL)
 
 struct BareMetalTlsRuntimeState {
     bool hooksAttempted = false;
@@ -855,6 +900,89 @@ bool ensure_psa_initialized()
 }
 #endif
 
+void tls_set_stage(GxosTlsLocalHandshakeResult* result, const char* stage)
+{
+    if (!result) return;
+    copy_text(result->stage, sizeof(result->stage), stage ? stage : "(none)");
+}
+
+#if defined(GXOS_BARE_METAL) && GXOS_TLS_MBEDTLS_RUNTIME_INCLUDED
+constexpr uint32_t kGxosTlsSmokeHandshakeTimeoutMs = 5000;
+constexpr uint32_t kGxosTlsSmokeIoTimeoutMs = 5000;
+
+struct GxosTlsSmokeIoContext {
+    GxosTlsByteStream stream{};
+    int lastTransportError = 0;
+    bool tracedSend = false;
+    bool tracedRecv = false;
+    uint32_t sendCalls = 0;
+    uint32_t recvCalls = 0;
+};
+
+void tls_trace_stage(const char*) {}
+void tls_trace_stream_io(const char*, uint32_t, int, int) {}
+
+uint32_t tls_timeout_ticks(uint32_t timeoutMs)
+{
+    return static_cast<uint32_t>(timeoutMs / 10u + 1u);
+}
+
+bool tls_wait_until_ready(GxosTlsByteStream* stream, uint32_t startTicks, uint32_t timeoutTicks)
+{
+    if (stream && stream->poll) stream->poll(stream->context);
+    return (static_cast<uint32_t>(kernel::pit::ticks()) - startTicks) <= timeoutTicks;
+}
+
+int gxos_tls_stream_send(void* context, const unsigned char* buffer, size_t length)
+{
+    GxosTlsSmokeIoContext* io = static_cast<GxosTlsSmokeIoContext*>(context);
+    if (!io || !io->stream.write || (buffer == nullptr && length != 0)) return MBEDTLS_ERR_SSL_INTERNAL_ERROR;
+    ++io->sendCalls;
+    if (!io->tracedSend) {
+        io->tracedSend = true;
+        tls_trace_stage("stream_send");
+    }
+    int requestLength = static_cast<int>(length > 0x7FFFu ? 0x7FFFu : length);
+    if (requestLength <= 0 && length != 0) requestLength = 0x7FFF;
+    const int sent = io->stream.write(io->stream.context, buffer, requestLength);
+    if (io->sendCalls <= 8u) {
+        tls_trace_stream_io("stream_send_io", io->sendCalls, requestLength, sent);
+    }
+    if (sent > 0) return sent;
+    if (sent == 0) return MBEDTLS_ERR_SSL_INTERNAL_ERROR;
+    io->lastTransportError = sent;
+    return sent == kernel::tcp::TCP_ERR_WOULDBLOCK ? MBEDTLS_ERR_SSL_WANT_WRITE : MBEDTLS_ERR_SSL_INTERNAL_ERROR;
+}
+
+int gxos_tls_stream_recv(void* context, unsigned char* buffer, size_t length)
+{
+    GxosTlsSmokeIoContext* io = static_cast<GxosTlsSmokeIoContext*>(context);
+    if (!io || !io->stream.read || (buffer == nullptr && length != 0)) return MBEDTLS_ERR_SSL_INTERNAL_ERROR;
+    ++io->recvCalls;
+    if (!io->tracedRecv) {
+        io->tracedRecv = true;
+        tls_trace_stage("stream_recv");
+    }
+    int requestLength = static_cast<int>(length > 0x7FFFu ? 0x7FFFu : length);
+    if (requestLength <= 0 && length != 0) requestLength = 0x7FFF;
+    const int received = io->stream.read(io->stream.context, buffer, requestLength);
+    if (io->recvCalls <= 16u || received > 0) {
+        tls_trace_stream_io("stream_recv_io", io->recvCalls, requestLength, received);
+    }
+    if (received > 0) return received;
+    if (received == 0) return MBEDTLS_ERR_SSL_CONN_EOF;
+    io->lastTransportError = received;
+    return received == kernel::tcp::TCP_ERR_WOULDBLOCK ? MBEDTLS_ERR_SSL_WANT_READ : MBEDTLS_ERR_SSL_INTERNAL_ERROR;
+}
+
+void tls_copy_runtime_strings(mbedtls_ssl_context* ssl, GxosTlsLocalHandshakeResult* result)
+{
+    if (!ssl || !result) return;
+    copy_text(result->protocol, sizeof(result->protocol), mbedtls_ssl_get_version(ssl));
+    copy_text(result->cipherSuite, sizeof(result->cipherSuite), mbedtls_ssl_get_ciphersuite(ssl));
+}
+#endif
+
 GxosTlsArenaInfo make_tls_arena_info()
 {
 #if defined(GXOS_BARE_METAL)
@@ -926,7 +1054,7 @@ GxosTlsHostnameValidationInfo make_hostname_validation_info()
         true,
         true,
         false,
-        "scaffold ready; original URL host and future SNI host are retained, numeric-IP validation stays disabled, and hostname enforcement remains gated on transport handshake insertion"
+        "scaffold ready; original URL host and future SNI host are retained, numeric-IP validation stays disabled, and bare-metal hostname enforcement stays gated outside the controlled local-only HTTPS path"
     };
 #else
     return {
@@ -1028,7 +1156,7 @@ GxosTlsBackendInfo make_backend_info()
             GxosTlsBackendStatus::ReadyForLocalHandshake,
             "Mbed TLS bare-metal scaffold",
             importInfo.detectedVersion,
-            "Allocator, PSA RNG/time callbacks, root CA parsing, and hostname validation scaffolding are ready; Navigator handshake transport insertion remains gated."
+            "Allocator, PSA RNG/time callbacks, root CA parsing, hostname validation, and controlled local-only Navigator HTTPS transport are ready; general Navigator https:// navigation remains gated."
         };
     }
 
@@ -1488,6 +1616,246 @@ GxosTlsHostnameValidationInfo gxos_tls_hostname_validation_info()
     return make_hostname_validation_info();
 }
 
+bool gxos_tls_smoke_https_request(const char* sniHostname,
+                                  const char* requestBytes,
+                                  size_t requestLength,
+                                  GxosTlsByteStream stream,
+                                  char* responseBuffer,
+                                  size_t responseBufferSize,
+                                  size_t* responseBytesOut,
+                                  GxosTlsLocalHandshakeResult* result)
+{
+    if (responseBytesOut) *responseBytesOut = 0;
+    zero_local_handshake_result(result);
+    if (responseBuffer && responseBufferSize > 0) responseBuffer[0] = '\0';
+    if (!result || !sniHostname || !sniHostname[0] || !requestBytes || requestLength == 0 ||
+        !stream.read || !stream.write || !stream.close || !responseBuffer || responseBufferSize < 2) {
+        if (result) copy_text(result->error, sizeof(result->error), "Invalid TLS smoke request parameters.");
+        return false;
+    }
+
+    result->attempted = true;
+    copy_text(result->sniHost, sizeof(result->sniHost), sniHostname);
+    tls_set_stage(result, "parameter_validation");
+
+#if defined(GXOS_BARE_METAL) && GXOS_TLS_MBEDTLS_RUNTIME_INCLUDED
+    const GxosTlsBackendInfo backend = gxos_tls_backend_info();
+    tls_set_stage(result, "backend_ready_check");
+    if (backend.status != GxosTlsBackendStatus::ReadyForLocalHandshake &&
+        backend.status != GxosTlsBackendStatus::ReadyForValidatedNavigation) {
+        copy_text(result->error, sizeof(result->error),
+            backend.error ? backend.error : "Bare-metal TLS backend is unavailable.");
+        return false;
+    }
+
+    const GxosCaStoreInfo caInfo = gxos_ca_store_info();
+    tls_set_stage(result, "ca_ready_check");
+    if (caInfo.status != GxosCaStoreStatus::Loaded || caInfo.parseStatus != GxosCaParseStatus::Parsed) {
+        copy_text(result->error, sizeof(result->error),
+            caInfo.error ? caInfo.error : "Root CA bundle is unavailable for TLS smoke.");
+        return false;
+    }
+
+    tls_set_stage(result, "psa_ready_check");
+    if (!ensure_psa_initialized()) {
+        copy_text(result->error, sizeof(result->error), runtime_state().psaDetail);
+        return false;
+    }
+
+    GxosTlsSmokeIoContext io{};
+    io.stream = stream;
+    result->tcpConnected = true;
+
+    BareMetalTlsRuntimeState& runtime = runtime_state();
+    mbedtls_ssl_context ssl;
+    mbedtls_ssl_config conf;
+    mbedtls_ssl_init(&ssl);
+    mbedtls_ssl_config_init(&conf);
+    bool success = false;
+    int ret = 0;
+
+    do {
+        tls_set_stage(result, "config_defaults");
+        tls_trace_stage("config_defaults");
+        ret = mbedtls_ssl_config_defaults(&conf, MBEDTLS_SSL_IS_CLIENT,
+                                          MBEDTLS_SSL_TRANSPORT_STREAM,
+                                          MBEDTLS_SSL_PRESET_DEFAULT);
+        if (ret != 0) {
+            result->mbedtlsError = ret;
+            copy_text(result->error, sizeof(result->error),
+                "Mbed TLS client config defaults failed for local smoke.");
+            break;
+        }
+
+        mbedtls_ssl_conf_authmode(&conf, MBEDTLS_SSL_VERIFY_REQUIRED);
+        mbedtls_ssl_conf_ca_chain(&conf, &runtime.caChain, nullptr);
+
+        tls_set_stage(result, "ssl_setup");
+        tls_trace_stage("ssl_setup");
+        ret = mbedtls_ssl_setup(&ssl, &conf);
+        if (ret != 0) {
+            result->mbedtlsError = ret;
+            copy_text(result->error, sizeof(result->error),
+                "Mbed TLS SSL setup failed for local smoke.");
+            break;
+        }
+
+        tls_set_stage(result, "set_hostname");
+        tls_trace_stage("set_hostname");
+        ret = mbedtls_ssl_set_hostname(&ssl, sniHostname);
+        if (ret != 0) {
+            result->mbedtlsError = ret;
+            copy_text(result->error, sizeof(result->error),
+                "Mbed TLS could not set the TLS smoke SNI/hostname.");
+            break;
+        }
+        result->usedSniHostname = true;
+
+        mbedtls_ssl_set_bio(&ssl, &io, gxos_tls_stream_send, gxos_tls_stream_recv, nullptr);
+
+        tls_set_stage(result, "handshake");
+        tls_trace_stage("handshake");
+        uint32_t startTicks = static_cast<uint32_t>(kernel::pit::ticks());
+        const uint32_t handshakeTimeout = tls_timeout_ticks(kGxosTlsSmokeHandshakeTimeoutMs);
+        while ((ret = mbedtls_ssl_handshake(&ssl)) != 0) {
+            result->mbedtlsError = ret;
+            result->mbedtlsState = ssl.MBEDTLS_PRIVATE(state);
+            if (ret == MBEDTLS_ERR_SSL_WANT_READ || ret == MBEDTLS_ERR_SSL_WANT_WRITE) {
+                if (!tls_wait_until_ready(&stream, startTicks, handshakeTimeout)) {
+                    copy_text(result->error, sizeof(result->error), "TLS smoke handshake timed out.");
+                    ret = -1;
+                    break;
+                }
+                continue;
+            }
+            break;
+        }
+        if (ret != 0) {
+            result->mbedtlsState = ssl.MBEDTLS_PRIVATE(state);
+            result->verifyFlags = static_cast<uint32_t>(mbedtls_ssl_get_verify_result(&ssl));
+            result->certificateValidationSuccess = result->verifyFlags == 0;
+            result->hostnameValidationSuccess = result->certificateValidationSuccess &&
+                (result->verifyFlags & MBEDTLS_X509_BADCERT_CN_MISMATCH) == 0;
+            copy_text(result->error, sizeof(result->error),
+                (result->verifyFlags & MBEDTLS_X509_BADCERT_CN_MISMATCH) != 0
+                    ? "TLS smoke hostname validation failed."
+                    : "TLS smoke handshake failed.");
+            break;
+        }
+
+        result->handshakeSuccess = true;
+        result->mbedtlsState = ssl.MBEDTLS_PRIVATE(state);
+        tls_copy_runtime_strings(&ssl, result);
+        tls_set_stage(result, "peer_validation");
+        tls_trace_stage("peer_validation");
+        result->verifyFlags = static_cast<uint32_t>(mbedtls_ssl_get_verify_result(&ssl));
+        result->certificateValidationSuccess = result->verifyFlags == 0;
+        result->hostnameValidationSuccess =
+            result->certificateValidationSuccess &&
+            (result->verifyFlags & MBEDTLS_X509_BADCERT_CN_MISMATCH) == 0;
+        if (!result->certificateValidationSuccess) {
+            copy_text(result->error, sizeof(result->error),
+                (result->verifyFlags & MBEDTLS_X509_BADCERT_CN_MISMATCH) != 0
+                    ? "TLS smoke hostname validation failed."
+                    : "TLS smoke certificate validation failed.");
+            break;
+        }
+
+        size_t written = 0;
+        tls_set_stage(result, "request_write");
+        tls_trace_stage("request_write");
+        uint32_t ioStartTicks = static_cast<uint32_t>(kernel::pit::ticks());
+        const uint32_t ioTimeout = tls_timeout_ticks(kGxosTlsSmokeIoTimeoutMs);
+        while (written < requestLength) {
+            ret = mbedtls_ssl_write(&ssl,
+                reinterpret_cast<const unsigned char*>(requestBytes + written),
+                requestLength - written);
+            if (ret > 0) {
+                written += static_cast<size_t>(ret);
+                result->requestBytesWritten = written;
+                ioStartTicks = static_cast<uint32_t>(kernel::pit::ticks());
+                continue;
+            }
+            result->mbedtlsError = ret;
+            result->mbedtlsState = ssl.MBEDTLS_PRIVATE(state);
+            if (ret == MBEDTLS_ERR_SSL_WANT_READ || ret == MBEDTLS_ERR_SSL_WANT_WRITE) {
+                if (!tls_wait_until_ready(&stream, ioStartTicks, ioTimeout)) {
+                    copy_text(result->error, sizeof(result->error), "TLS smoke request write timed out.");
+                    ret = -1;
+                    break;
+                }
+                continue;
+            }
+            copy_text(result->error, sizeof(result->error), "TLS smoke request write failed.");
+            break;
+        }
+        if (written != requestLength) break;
+        result->requestWriteSuccess = true;
+
+        size_t totalRead = 0;
+        tls_set_stage(result, "response_read");
+        tls_trace_stage("response_read");
+        ioStartTicks = static_cast<uint32_t>(kernel::pit::ticks());
+        while (true) {
+            if (totalRead + 1 >= responseBufferSize) {
+                copy_text(result->error, sizeof(result->error),
+                    "TLS smoke response exceeded the bounded buffer.");
+                ret = -1;
+                break;
+            }
+            ret = mbedtls_ssl_read(&ssl,
+                reinterpret_cast<unsigned char*>(responseBuffer + totalRead),
+                responseBufferSize - totalRead - 1);
+            if (ret > 0) {
+                totalRead += static_cast<size_t>(ret);
+                result->responseBytesRead = totalRead;
+                responseBuffer[totalRead] = '\0';
+                ioStartTicks = static_cast<uint32_t>(kernel::pit::ticks());
+                continue;
+            }
+            result->mbedtlsError = ret;
+            result->mbedtlsState = ssl.MBEDTLS_PRIVATE(state);
+            if (ret == 0 || ret == MBEDTLS_ERR_SSL_PEER_CLOSE_NOTIFY || ret == MBEDTLS_ERR_SSL_CONN_EOF) {
+                result->mbedtlsError = 0;
+                responseBuffer[totalRead] = '\0';
+                break;
+            }
+            if (ret == MBEDTLS_ERR_SSL_WANT_READ || ret == MBEDTLS_ERR_SSL_WANT_WRITE) {
+                if (!tls_wait_until_ready(&stream, ioStartTicks, ioTimeout)) {
+                    copy_text(result->error, sizeof(result->error), "TLS smoke response read timed out.");
+                    ret = -1;
+                    break;
+                }
+                continue;
+            }
+            copy_text(result->error, sizeof(result->error), "TLS smoke response read failed.");
+            break;
+        }
+        if (ret != 0 && ret != MBEDTLS_ERR_SSL_PEER_CLOSE_NOTIFY && ret != MBEDTLS_ERR_SSL_CONN_EOF) break;
+        if (totalRead == 0) {
+            copy_text(result->error, sizeof(result->error), "TLS smoke response was empty.");
+            break;
+        }
+
+        result->responseReadSuccess = true;
+        if (responseBytesOut) *responseBytesOut = totalRead;
+        tls_set_stage(result, "complete");
+        tls_trace_stage("complete");
+        success = true;
+    } while (false);
+
+    (void)mbedtls_ssl_close_notify(&ssl);
+    if (stream.close) stream.close(stream.context);
+    if (io.lastTransportError != 0) result->transportError = io.lastTransportError;
+    mbedtls_ssl_free(&ssl);
+    mbedtls_ssl_config_free(&conf);
+    return success;
+#else
+    copy_text(result->error, sizeof(result->error), "Local TLS smoke is unavailable in this runtime.");
+    return false;
+#endif
+}
+
 bool gxos_tls_certificate_validation_policy_enabled()
 {
 #if defined(GXOS_BARE_METAL)
@@ -1517,7 +1885,7 @@ const char* gxos_tls_certificate_validation_policy()
     if (!importInfo.configPresent || !importInfo.cryptoConfigPresent) {
         return "disabled; original URL host retention is scaffolded, but the guideXOS Mbed TLS 4.x config pair is incomplete";
     }
-    return "disabled; allocator, RNG/time callbacks, and CA parsing may be wired, but certificate enforcement stays fail-closed until Navigator handshake insertion lands";
+    return "disabled for general navigation; controlled local-only Navigator HTTPS enforces CA and hostname validation, but broad bare-metal https:// remains fail-closed until full transport policy lands";
 #else
     return "enabled via Schannel, Windows trust, and hostname validation";
 #endif
