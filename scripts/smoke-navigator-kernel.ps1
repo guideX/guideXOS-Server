@@ -7,6 +7,8 @@ $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $LogDir = Join-Path $Root "logs"
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
+. (Join-Path $Root "scripts\process_environment.ps1")
+Normalize-ProcessEnvironment
 . (Join-Path $Root "scripts\navigator_smoke_repo_hygiene.ps1")
 
 $stamp = Get-Date -Format "yyyyMMdd-HHmmss"

@@ -28,6 +28,9 @@ Write-Host "====================================" -ForegroundColor Cyan
 Write-Host ""
 
 $RootDir = $PSScriptRoot
+$ProcessEnvironmentScript = Join-Path $RootDir "scripts\process_environment.ps1"
+. $ProcessEnvironmentScript
+Normalize-ProcessEnvironment
 $ESPDir = Join-Path $RootDir "ESP"
 $KernelDir = Join-Path $RootDir "kernel"
 $BootloaderDir = Join-Path $RootDir "guideXOSBootLoader"
