@@ -1,4 +1,4 @@
-// Kernel Virtual File System (VFS) Layer — Implementation
+// Kernel Virtual File System (VFS) Layer â€” Implementation
 //
 // Provides unified filesystem access by delegating to the appropriate
 // filesystem driver (FAT32, ext4, UFS) based on mount points.
@@ -74,6 +74,8 @@ static void strcopy(char* dst, const char* src, size_t maxLen)
     dst[i] = '\0';
 }
 
+void join_path(const char* base, const char* name, char* output, size_t outputSize);
+
 static int strcmp(const char* s1, const char* s2)
 {
     while (*s1 && (*s1 == *s2)) {
@@ -146,6 +148,31 @@ static const char* get_relative_path(const char* fullPath, const MountPoint* mou
     }
     
     return relative;
+}
+
+static bool has_source_prefix(const MountPoint* mount)
+{
+    return mount && mount->sourcePrefix[0] != '\0' &&
+        !(mount->sourcePrefix[0] == '/' && mount->sourcePrefix[1] == '\0');
+}
+
+static const char* resolve_relative_path(const char* fullPath,
+                                         const MountPoint* mount,
+                                         char* resolvedPath,
+                                         size_t resolvedPathSize)
+{
+    const char* relative = get_relative_path(fullPath, mount);
+    if (!relative || !mount) return relative;
+    if (!mount->alias || !has_source_prefix(mount)) return relative;
+    if (!resolvedPath || resolvedPathSize == 0) return nullptr;
+
+    if ((relative[0] == '/' && relative[1] == '\0') || relative[0] == '\0') {
+        strcopy(resolvedPath, mount->sourcePrefix, resolvedPathSize);
+        return resolvedPath;
+    }
+
+    join_path(mount->sourcePrefix, relative, resolvedPath, resolvedPathSize);
+    return resolvedPath;
 }
 
 // Detect filesystem type from block device
@@ -278,7 +305,7 @@ static FSType detect_fs_type(uint8_t blockDevIndex)
 }
 
 // ================================================================
-// Public API — Initialization
+// Public API â€” Initialization
 // ================================================================
 
 void init()
@@ -297,7 +324,7 @@ void init()
 }
 
 // ================================================================
-// Public API — Mount Management
+// Public API â€” Mount Management
 // ================================================================
 
 uint8_t mount(const char* path, uint8_t blockDevIndex)
@@ -398,6 +425,8 @@ uint8_t mount_type(const char* path, uint8_t blockDevIndex, FSType fsType)
     mp.blockDevIndex = blockDevIndex;
     mp.fsVolumeIndex = fsVolume;
     mp.readOnly = false;
+    mp.alias = false;
+    mp.sourcePrefix[0] = '\0';
     
     ++s_mountCount;
     
@@ -409,6 +438,84 @@ uint8_t mount_type(const char* path, uint8_t blockDevIndex, FSType fsType)
     serial::puts("'\n");
 #endif
     
+    return index;
+}
+
+uint8_t mount_alias(const char* path, const char* sourcePath)
+{
+    if (!s_initialized) {
+        init();
+    }
+
+    if (!path || strlen(path) == 0 || !sourcePath || strlen(sourcePath) == 0) {
+        return 0xFF;
+    }
+
+    for (uint8_t i = 0; i < VFS_MAX_MOUNTS; ++i) {
+        if (s_mounts[i].active && strcmp(s_mounts[i].path, path) == 0) {
+#if defined(__GNUC__) || defined(__clang__)
+            serial::puts("[VFS] ERROR: Alias path already mounted\n");
+#endif
+            return 0xFF;
+        }
+    }
+
+    MountPoint* sourceMount = find_mount_for_path(sourcePath);
+    if (!sourceMount) {
+#if defined(__GNUC__) || defined(__clang__)
+        serial::puts("[VFS] ERROR: No source mount point for alias path\n");
+#endif
+        return 0xFF;
+    }
+
+    FileInfo info{};
+    if (stat(sourcePath, &info) != VFS_OK || info.type != FILE_TYPE_DIRECTORY) {
+#if defined(__GNUC__) || defined(__clang__)
+        serial::puts("[VFS] ERROR: Alias source path is not a directory\n");
+#endif
+        return 0xFF;
+    }
+
+    const char* sourceRelative = get_relative_path(sourcePath, sourceMount);
+    if (!sourceRelative) {
+        return 0xFF;
+    }
+
+    uint8_t index = 0xFF;
+    for (uint8_t i = 0; i < VFS_MAX_MOUNTS; ++i) {
+        if (!s_mounts[i].active) {
+            index = i;
+            break;
+        }
+    }
+
+    if (index == 0xFF) {
+#if defined(__GNUC__) || defined(__clang__)
+        serial::puts("[VFS] ERROR: No free mount slots for alias\n");
+#endif
+        return 0xFF;
+    }
+
+    MountPoint& mp = s_mounts[index];
+    mp.active = true;
+    strcopy(mp.path, path, sizeof(mp.path));
+    mp.fsType = sourceMount->fsType;
+    mp.blockDevIndex = sourceMount->blockDevIndex;
+    mp.fsVolumeIndex = sourceMount->fsVolumeIndex;
+    mp.readOnly = sourceMount->readOnly;
+    mp.alias = true;
+    strcopy(mp.sourcePrefix, sourceRelative, sizeof(mp.sourcePrefix));
+
+    ++s_mountCount;
+
+#if defined(__GNUC__) || defined(__clang__)
+    serial::puts("[VFS] Mounted alias '");
+    serial::puts(path);
+    serial::puts("' -> '");
+    serial::puts(sourcePath);
+    serial::puts("'\n");
+#endif
+
     return index;
 }
 
@@ -475,7 +582,7 @@ uint8_t mount_count()
 }
 
 // ================================================================
-// Public API — Path Operations
+// Public API â€” Path Operations
 // ================================================================
 
 void normalize_path(const char* input, char* output, size_t outputSize)
@@ -634,7 +741,7 @@ void join_path(const char* base, const char* name, char* output, size_t outputSi
 }
 
 // ================================================================
-// Public API — File Operations
+// Public API â€” File Operations
 // ================================================================
 
 uint8_t open(const char* path, uint16_t flags)
@@ -668,7 +775,8 @@ uint8_t open(const char* path, uint16_t flags)
     }
     
     // Get path relative to mount point
-    const char* relPath = get_relative_path(path, mount);
+    char resolvedPath[VFS_MAX_PATH];
+    const char* relPath = resolve_relative_path(path, mount, resolvedPath, sizeof(resolvedPath));
     
     // Open via filesystem driver
     uint8_t fsHandle = 0xFF;
@@ -917,7 +1025,7 @@ const FileHandle* get_handle(uint8_t handle)
 }
 
 // ================================================================
-// Public API — Directory Operations
+// Public API â€” Directory Operations
 // ================================================================
 
 uint8_t opendir(const char* path)
@@ -946,7 +1054,8 @@ uint8_t opendir(const char* path)
     di.index = 0;
     
     // Get path relative to mount point
-    const char* relPath = get_relative_path(path, mount);
+    char resolvedPath[VFS_MAX_PATH];
+    const char* relPath = resolve_relative_path(path, mount, resolvedPath, sizeof(resolvedPath));
     
     switch (mount->fsType) {
         case FS_TYPE_FAT32:
@@ -1061,7 +1170,8 @@ Status mkdir(const char* path)
     if (!mount) return VFS_ERR_NOT_MOUNT;
     if (mount->readOnly) return VFS_ERR_READ_ONLY;
 
-    const char* relPath = get_relative_path(path, mount);
+    char resolvedPath[VFS_MAX_PATH];
+    const char* relPath = resolve_relative_path(path, mount, resolvedPath, sizeof(resolvedPath));
     switch (mount->fsType) {
         case FS_TYPE_FAT32:
             return fs_fat::create_directory_path(mount->fsVolumeIndex, relPath) ? VFS_OK : VFS_ERR_NOT_SUPPORTED;
@@ -1081,7 +1191,8 @@ Status rmdir(const char* path)
     if (!mount) return VFS_ERR_NOT_MOUNT;
     if (mount->readOnly) return VFS_ERR_READ_ONLY;
 
-    const char* relPath = get_relative_path(path, mount);
+    char resolvedPath[VFS_MAX_PATH];
+    const char* relPath = resolve_relative_path(path, mount, resolvedPath, sizeof(resolvedPath));
     switch (mount->fsType) {
         case FS_TYPE_FAT32:
             return fs_fat::delete_path(mount->fsVolumeIndex, relPath, true) ? VFS_OK : VFS_ERR_NOT_SUPPORTED;
@@ -1094,7 +1205,7 @@ Status rmdir(const char* path)
 }
 
 // ================================================================
-// Public API — File/Directory Management
+// Public API â€” File/Directory Management
 // ================================================================
 
 bool exists(const char* path)
@@ -1111,7 +1222,8 @@ Status stat(const char* path, FileInfo* info)
     if (!mount) return VFS_ERR_NOT_MOUNT;
     
     // Get path relative to mount point
-    const char* relPath = get_relative_path(path, mount);
+    char resolvedPath[VFS_MAX_PATH];
+    const char* relPath = resolve_relative_path(path, mount, resolvedPath, sizeof(resolvedPath));
     
     // Zero-initialize the output
     memzero(info, sizeof(FileInfo));
@@ -1159,7 +1271,8 @@ Status unlink(const char* path)
     if (!mount) return VFS_ERR_NOT_MOUNT;
     if (mount->readOnly) return VFS_ERR_READ_ONLY;
 
-    const char* relPath = get_relative_path(path, mount);
+    char resolvedPath[VFS_MAX_PATH];
+    const char* relPath = resolve_relative_path(path, mount, resolvedPath, sizeof(resolvedPath));
     switch (mount->fsType) {
         case FS_TYPE_FAT32:
             return fs_fat::delete_path(mount->fsVolumeIndex, relPath, false) ? VFS_OK : VFS_ERR_NOT_SUPPORTED;
@@ -1181,8 +1294,10 @@ Status rename(const char* oldPath, const char* newPath)
     if (oldMount != newMount) return VFS_ERR_INVALID;
     if (oldMount->readOnly) return VFS_ERR_READ_ONLY;
 
-    const char* relOldPath = get_relative_path(oldPath, oldMount);
-    const char* relNewPath = get_relative_path(newPath, newMount);
+    char resolvedOldPath[VFS_MAX_PATH];
+    char resolvedNewPath[VFS_MAX_PATH];
+    const char* relOldPath = resolve_relative_path(oldPath, oldMount, resolvedOldPath, sizeof(resolvedOldPath));
+    const char* relNewPath = resolve_relative_path(newPath, newMount, resolvedNewPath, sizeof(resolvedNewPath));
     switch (oldMount->fsType) {
         case FS_TYPE_FAT32:
             return fs_fat::rename_path(oldMount->fsVolumeIndex, relOldPath, relNewPath) ? VFS_OK : VFS_ERR_NOT_SUPPORTED;
@@ -1195,7 +1310,7 @@ Status rename(const char* oldPath, const char* newPath)
 }
 
 // ================================================================
-// Public API — High-Level Convenience Functions
+// Public API â€” High-Level Convenience Functions
 // ================================================================
 
 int32_t read_file(const char* path, void* buffer, uint32_t maxSize)
@@ -1217,7 +1332,8 @@ int32_t write_file(const char* path, const void* buffer, uint32_t size)
     if (!mount) return VFS_ERR_NOT_MOUNT;
     if (mount->readOnly) return VFS_ERR_READ_ONLY;
 
-    const char* relPath = get_relative_path(path, mount);
+    char resolvedPath[VFS_MAX_PATH];
+    const char* relPath = resolve_relative_path(path, mount, resolvedPath, sizeof(resolvedPath));
     switch (mount->fsType) {
         case FS_TYPE_FAT32:
             if (fs_fat::overwrite_path(mount->fsVolumeIndex, relPath, buffer, size) ||
@@ -1243,7 +1359,7 @@ int32_t append_file(const char* path, const void* buffer, uint32_t size)
 }
 
 // ================================================================
-// Public API — Filesystem Information
+// Public API â€” Filesystem Information
 // ================================================================
 
 uint64_t total_space(const char* mountPath)

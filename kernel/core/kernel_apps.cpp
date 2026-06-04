@@ -66,6 +66,59 @@ static gxos::GxosCaStoreInfo probe_missing_ca_path()
     };
 }
 
+struct NavigatorSmokePathProbe {
+    const kernel::vfs::MountPoint* mount = nullptr;
+    kernel::vfs::Status statStatus = kernel::vfs::VFS_ERR_INVALID;
+    kernel::vfs::FileType type = kernel::vfs::FILE_TYPE_REGULAR;
+    int32_t readStatus = kernel::vfs::VFS_ERR_INVALID;
+    size_t bytesRead = 0;
+    bool pemHeaderPresent = false;
+};
+
+static bool buffer_contains_token_local(const uint8_t* buffer, size_t len, const char* token)
+{
+    if (!buffer || !token) return false;
+    size_t tokenLen = 0;
+    while (token[tokenLen]) ++tokenLen;
+    if (tokenLen == 0 || len < tokenLen) return false;
+    for (size_t offset = 0; offset + tokenLen <= len; ++offset) {
+        bool match = true;
+        for (size_t i = 0; i < tokenLen; ++i) {
+            if (buffer[offset + i] != static_cast<uint8_t>(token[i])) {
+                match = false;
+                break;
+            }
+        }
+        if (match) return true;
+    }
+    return false;
+}
+
+static NavigatorSmokePathProbe probe_navigator_smoke_path(const char* path, bool readFile)
+{
+    NavigatorSmokePathProbe probe{};
+    probe.mount = kernel::vfs::get_mount(path);
+
+    kernel::vfs::FileInfo info{};
+    probe.statStatus = kernel::vfs::stat(path, &info);
+    if (probe.statStatus == kernel::vfs::VFS_OK) {
+        probe.type = info.type;
+    }
+
+    if (!readFile || probe.statStatus != kernel::vfs::VFS_OK || info.type != kernel::vfs::FILE_TYPE_REGULAR) {
+        return probe;
+    }
+
+    uint8_t buffer[256] = {};
+    probe.readStatus = kernel::vfs::read_file(path, buffer, sizeof(buffer));
+    if (probe.readStatus > 0) {
+        probe.bytesRead = static_cast<size_t>(probe.readStatus);
+        probe.pemHeaderPresent = buffer_contains_token_local(buffer, probe.bytesRead, "-----BEGIN CERTIFICATE-----");
+    }
+
+    return probe;
+}
+
 // ============================================================
 // Helper: string copy
 // ============================================================
@@ -9282,6 +9335,10 @@ static bool printNavigatorRuntimeSmokePreamble()
     const gxos::GxosCaStoreInfo caStoreInfo = gxos::gxos_ca_store_info();
     const gxos::GxosCaStoreInfo caMissingProbeInfo = probe_missing_ca_path();
     const gxos::GxosTlsHostnameValidationInfo hostnameValidationInfo = gxos::gxos_tls_hostname_validation_info();
+    const kernel::vfs::MountPoint* rootMount = kernel::vfs::get_mount("/");
+    const kernel::vfs::MountPoint* systemMount = kernel::vfs::get_mount("/system");
+    const NavigatorSmokePathProbe certsProbe = probe_navigator_smoke_path("/certs", false);
+    const NavigatorSmokePathProbe caBundleProbe = probe_navigator_smoke_path("/certs/ca-bundle.pem", true);
     const bool tlsReady = gxos::gxos_tls_prerequisites_ready();
     const char* tlsReadinessBlocker = gxos::gxos_tls_prerequisites_blocker_reason();
     serial::puts("[NAVIGATOR-SMOKE] BEGIN\n");
@@ -9318,7 +9375,44 @@ static bool printNavigatorRuntimeSmokePreamble()
     serial::puts("[NAVIGATOR-SMOKE] capability.find_in_page=unsupported in bare-metal adapter\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.external_stylesheets=unsupported\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.bookmark_persistence=unavailable; in-memory defaults only\n");
-    serial::puts("[NAVIGATOR-SMOKE] tls_prereq.rng_quality=");
+    serial::puts("[NAVIGATOR-SMOKE] vfs.root_mount=");
+    serial::puts(rootMount ? rootMount->path : "(absent)");
+    serial::puts("\n[NAVIGATOR-SMOKE] vfs.root_fs_type=");
+    serial::puts(rootMount ? kernel::vfs::fs_type_name(rootMount->fsType) : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] vfs.root_block_device=");
+    if (rootMount) serial_put_dec64(static_cast<uint64_t>(rootMount->blockDevIndex));
+    else serial::puts("(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] vfs.system_mount=");
+    serial::puts(systemMount ? systemMount->path : "(absent)");
+    serial::puts("\n[NAVIGATOR-SMOKE] vfs.system_fs_type=");
+    serial::puts(systemMount ? kernel::vfs::fs_type_name(systemMount->fsType) : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] vfs.system_block_device=");
+    if (systemMount) serial_put_dec64(static_cast<uint64_t>(systemMount->blockDevIndex));
+    else serial::puts("(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] vfs.system_source_prefix=");
+    serial::puts((systemMount && systemMount->alias && systemMount->sourcePrefix[0]) ? systemMount->sourcePrefix : "/");
+    serial::puts("\n[NAVIGATOR-SMOKE] vfs.certs_mount=");
+    serial::puts(certsProbe.mount ? certsProbe.mount->path : "(absent)");
+    serial::puts("\n[NAVIGATOR-SMOKE] vfs.certs_fs_type=");
+    serial::puts(certsProbe.mount ? kernel::vfs::fs_type_name(certsProbe.mount->fsType) : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] vfs.certs_block_device=");
+    if (certsProbe.mount) serial_put_dec64(static_cast<uint64_t>(certsProbe.mount->blockDevIndex));
+    else serial::puts("(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] vfs.certs_source_prefix=");
+    serial::puts((certsProbe.mount && certsProbe.mount->sourcePrefix[0]) ? certsProbe.mount->sourcePrefix : "/");
+    serial::puts("\n[NAVIGATOR-SMOKE] vfs.certs_exists=");
+    serial::puts(certsProbe.statStatus == kernel::vfs::VFS_OK ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] vfs.certs_file_exists=");
+    serial::puts(caBundleProbe.statStatus == kernel::vfs::VFS_OK ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] vfs.certs_file_read_status=");
+    if (caBundleProbe.readStatus > 0) serial::puts("success");
+    else if (caBundleProbe.statStatus != kernel::vfs::VFS_OK) serial::puts("not_found");
+    else serial::puts("read_error");
+    serial::puts("\n[NAVIGATOR-SMOKE] vfs.certs_file_read_bytes=");
+    serial_put_dec64(static_cast<uint64_t>(caBundleProbe.bytesRead));
+    serial::puts("\n[NAVIGATOR-SMOKE] vfs.certs_file_pem_header=");
+    serial::puts(caBundleProbe.pemHeaderPresent ? "present" : "absent");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.rng_quality=");
     serial::puts(gxos::gxos_random_quality_name(rngQuality));
     serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.rng_backend=");
     serial::puts(gxos::gxos_random_backend());

@@ -25,6 +25,8 @@ function Invoke-KernelBuildForSmoke {
         Remove-Item -Force -ErrorAction SilentlyContinue
     Get-ChildItem -Path (Join-Path $Root "kernel\build") -Recurse -Filter "gxos_tls_foundation.o" -ErrorAction SilentlyContinue |
         Remove-Item -Force -ErrorAction SilentlyContinue
+    Get-ChildItem -Path (Join-Path $Root "kernel\build") -Recurse -Filter "main.o" -ErrorAction SilentlyContinue |
+        Remove-Item -Force -ErrorAction SilentlyContinue
     & (Join-Path $Root "build-kernel.bat")
     $buildCode = $LASTEXITCODE
     if ($null -ne $oldExtra) {
@@ -110,24 +112,7 @@ $smokeCaFixture = Join-Path $Root "scripts\fixtures\navigator-smoke-root-ca-bund
 if (-not (Test-Path $smokeCaFixture)) {
     throw "Navigator smoke CA fixture not found: $smokeCaFixture"
 }
-
-$espCertsDir = Join-Path $esp "certs"
-$guestSmokeCaPath = Join-Path $espCertsDir "ca-bundle.pem"
-$createdEspCertsDir = $false
-$restoredGuestSmokeCa = $false
-$savedGuestSmokeCa = $null
-
-if (-not (Test-Path $espCertsDir)) {
-    New-Item -ItemType Directory -Path $espCertsDir | Out-Null
-    $createdEspCertsDir = $true
-}
-
-if (Test-Path $guestSmokeCaPath) {
-    $savedGuestSmokeCa = [System.IO.File]::ReadAllBytes($guestSmokeCaPath)
-}
-
-Copy-Item -LiteralPath $smokeCaFixture -Destination $guestSmokeCaPath -Force
-Write-Host "Kernel smoke CA fixture mounted from $smokeCaFixture to guest path /certs/ca-bundle.pem"
+Write-Host "Kernel smoke CA fixture staged from $smokeCaFixture into boot ramdisk.img and exposed in guest at /certs/ca-bundle.pem"
 
 $startup = Join-Path $esp "startup.nsh"
 $createdStartup = $false
@@ -182,15 +167,6 @@ try {
     if ($httpProc -and -not $httpProc.HasExited) {
         Stop-Process -Id $httpProc.Id -Force
     }
-    if ($null -ne $savedGuestSmokeCa) {
-        [System.IO.File]::WriteAllBytes($guestSmokeCaPath, $savedGuestSmokeCa)
-        $restoredGuestSmokeCa = $true
-    } else {
-        Remove-Item $guestSmokeCaPath -ErrorAction SilentlyContinue
-    }
-    if ($createdEspCertsDir) {
-        Remove-Item $espCertsDir -Force -ErrorAction SilentlyContinue
-    }
     if ($createdStartup) {
         Remove-Item $startup -ErrorAction SilentlyContinue
     }
@@ -233,6 +209,19 @@ $checks = @(
     "[NAVIGATOR-SMOKE] capability.find_in_page=unsupported in bare-metal adapter",
     "[NAVIGATOR-SMOKE] capability.external_stylesheets=unsupported",
     "[NAVIGATOR-SMOKE] capability.bookmark_persistence=unavailable; in-memory defaults only",
+    "[NAVIGATOR-SMOKE] vfs.root_mount=(absent)",
+    "[NAVIGATOR-SMOKE] vfs.root_fs_type=(none)",
+    "[NAVIGATOR-SMOKE] vfs.root_block_device=(none)",
+    "[NAVIGATOR-SMOKE] vfs.system_mount=/system",
+    "[NAVIGATOR-SMOKE] vfs.system_fs_type=FAT32",
+    "[NAVIGATOR-SMOKE] vfs.system_source_prefix=/",
+    "[NAVIGATOR-SMOKE] vfs.certs_mount=/certs",
+    "[NAVIGATOR-SMOKE] vfs.certs_fs_type=FAT32",
+    "[NAVIGATOR-SMOKE] vfs.certs_source_prefix=/certs",
+    "[NAVIGATOR-SMOKE] vfs.certs_exists=yes",
+    "[NAVIGATOR-SMOKE] vfs.certs_file_exists=yes",
+    "[NAVIGATOR-SMOKE] vfs.certs_file_read_status=success",
+    "[NAVIGATOR-SMOKE] vfs.certs_file_pem_header=present",
     "[NAVIGATOR-SMOKE] tls_prereq.rng_quality=Secure",
     "[NAVIGATOR-SMOKE] tls_prereq.rng_backend=virtio-rng legacy PCI transitional",
     "[NAVIGATOR-SMOKE] tls_prereq.virtio_rng_detected=yes",
@@ -269,8 +258,8 @@ $checks = @(
     "[NAVIGATOR-SMOKE] tls_prereq.rng_callback_detail=PSA external RNG callback is wired to gxos_random_bytes() and requires Secure entropy.",
     "[NAVIGATOR-SMOKE] tls_prereq.time_callback_status=Ready",
     "[NAVIGATOR-SMOKE] tls_prereq.time_callback_detail=mbedtls_time() and UTC gmtime_r() are wired to the guideXOS wall clock and fail closed when time is implausible.",
-    "[NAVIGATOR-SMOKE] tls_prereq.psa_init_status=Pending",
-    "[NAVIGATOR-SMOKE] tls_prereq.psa_init_detail=psa_crypto_init() is deferred until CA parsing starts.",
+    "[NAVIGATOR-SMOKE] tls_prereq.psa_init_status=Ready",
+    "[NAVIGATOR-SMOKE] tls_prereq.psa_init_detail=psa_crypto_init() completed successfully for CA parsing.",
     "[NAVIGATOR-SMOKE] tls_prereq.tls_arena_status=Ready",
     "[NAVIGATOR-SMOKE] tls_prereq.tls_arena_capacity=262144",
     "[NAVIGATOR-SMOKE] tls_prereq.tls_arena_used=0",
@@ -291,8 +280,8 @@ $checks = @(
     "[NAVIGATOR-SMOKE] tls_prereq.hostname_validation_numeric_ip=no",
     "[NAVIGATOR-SMOKE] tls_prereq.hostname_validation_policy=scaffold ready; original URL host and future SNI host are retained, numeric-IP validation stays disabled, and hostname enforcement remains gated on transport handshake insertion",
     "[NAVIGATOR-SMOKE] tls_prereq.certificate_validation_policy=disabled; allocator, RNG/time callbacks, and CA parsing may be wired, but certificate enforcement stays fail-closed until Navigator handshake insertion lands",
-    "[NAVIGATOR-SMOKE] tls_readiness=yes",
-    "[NAVIGATOR-SMOKE] tls_readiness_blocker=(none)",
+    "[NAVIGATOR-SMOKE] tls_readiness=no",
+    "[NAVIGATOR-SMOKE] tls_readiness_blocker=Certificate validation policy is not enabled yet",
     "[NAVIGATOR-SMOKE] https.case.direct_unsupported.requested_url=https://example.com/",
     "[NAVIGATOR-SMOKE] https.case.direct_unsupported.final_url=https://example.com/",
     "[NAVIGATOR-SMOKE] https.case.direct_unsupported.error=HTTPS/TLS unsupported",
@@ -361,6 +350,15 @@ if (-not [regex]::IsMatch($output, '\[NAVIGATOR-SMOKE\] tls_prereq\.wall_clock_e
 }
 if (-not [regex]::IsMatch($output, '\[NAVIGATOR-SMOKE\] tls_prereq\.root_ca_bytes=[1-9][0-9]*')) {
     $failed += "[NAVIGATOR-SMOKE] tls_prereq.root_ca_bytes=<positive bytes>"
+}
+if (-not [regex]::IsMatch($output, '\[NAVIGATOR-SMOKE\] vfs\.system_block_device=[0-9]+')) {
+    $failed += "[NAVIGATOR-SMOKE] vfs.system_block_device=<numeric block device>"
+}
+if (-not [regex]::IsMatch($output, '\[NAVIGATOR-SMOKE\] vfs\.certs_block_device=[0-9]+')) {
+    $failed += "[NAVIGATOR-SMOKE] vfs.certs_block_device=<numeric block device>"
+}
+if (-not [regex]::IsMatch($output, '\[NAVIGATOR-SMOKE\] vfs\.certs_file_read_bytes=[1-9][0-9]*')) {
+    $failed += "[NAVIGATOR-SMOKE] vfs.certs_file_read_bytes=<positive bytes>"
 }
 if (-not [regex]::IsMatch($output, '\[NAVIGATOR-SMOKE\] tls_prereq\.wall_clock_utc=20[2-9][0-9]-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z')) {
     $failed += "[NAVIGATOR-SMOKE] tls_prereq.wall_clock_utc=<plausible UTC date>"

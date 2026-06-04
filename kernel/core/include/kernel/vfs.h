@@ -12,7 +12,7 @@
 //   - UFS (via fs_ufs)
 //   - Future: ISO9660, NTFS, etc.
 //
-// Architecture-independent — works on all platforms.
+// Architecture-independent â€” works on all platforms.
 //
 // Copyright (c) 2026 guideXOS Server
 //
@@ -148,6 +148,8 @@ struct MountPoint {
     uint8_t  blockDevIndex;           // Block device index
     uint8_t  fsVolumeIndex;           // FS-specific volume index
     bool     readOnly;
+    bool     alias;
+    char     sourcePrefix[VFS_MAX_PATH]; // Optional subdirectory inside the source FS
 };
 
 // ================================================================
@@ -176,14 +178,14 @@ struct DirIterator {
 };
 
 // ================================================================
-// Public API — Initialization
+// Public API â€” Initialization
 // ================================================================
 
 // Initialize the VFS layer (call once at boot).
 void init();
 
 // ================================================================
-// Public API — Mount Management
+// Public API â€” Mount Management
 // ================================================================
 
 // Auto-detect and mount a filesystem on a block device.
@@ -198,6 +200,9 @@ uint8_t mount_partition(const char* path, uint8_t blockDevIndex, uint8_t partiti
 // Mount with explicit filesystem type.
 uint8_t mount_type(const char* path, uint8_t blockDevIndex, FSType fsType);
 
+// Mount an existing filesystem subdirectory at a different VFS path.
+uint8_t mount_alias(const char* path, const char* sourcePath);
+
 // Unmount a filesystem.
 Status unmount(const char* path);
 
@@ -211,7 +216,7 @@ const MountPoint* get_mount_by_index(uint8_t index);
 uint8_t mount_count();
 
 // ================================================================
-// Public API — Path Operations
+// Public API â€” Path Operations
 // ================================================================
 
 // Normalize a path (resolve ., .., multiple slashes).
@@ -230,7 +235,7 @@ bool is_absolute(const char* path);
 void join_path(const char* base, const char* name, char* output, size_t outputSize);
 
 // ================================================================
-// Public API — File Operations
+// Public API â€” File Operations
 // ================================================================
 
 // Open a file.  Returns file handle index, or 0xFF on failure.
@@ -261,7 +266,7 @@ Status flush(uint8_t handle);
 const FileHandle* get_handle(uint8_t handle);
 
 // ================================================================
-// Public API — Directory Operations
+// Public API â€” Directory Operations
 // ================================================================
 
 // Open a directory for iteration.
@@ -282,7 +287,7 @@ Status mkdir(const char* path);
 Status rmdir(const char* path);
 
 // ================================================================
-// Public API — File/Directory Management
+// Public API â€” File/Directory Management
 // ================================================================
 
 // Check if a path exists.
@@ -298,7 +303,7 @@ Status unlink(const char* path);
 Status rename(const char* oldPath, const char* newPath);
 
 // ================================================================
-// Public API — High-Level Convenience Functions
+// Public API â€” High-Level Convenience Functions
 // ================================================================
 
 // Read entire file into buffer.
@@ -313,7 +318,7 @@ int32_t write_file(const char* path, const void* buffer, uint32_t size);
 int32_t append_file(const char* path, const void* buffer, uint32_t size);
 
 // ================================================================
-// Public API — Filesystem Information
+// Public API â€” Filesystem Information
 // ================================================================
 
 // Get total space on a mount point (in bytes).

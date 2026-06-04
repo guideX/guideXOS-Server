@@ -82,11 +82,35 @@
 #include <arch/graphics.h>
 #endif
 
+#if defined(GXOS_NAVIGATOR_HTTP_SMOKE_ACTIVE)
+static void mount_navigator_smoke_ca_fixture_if_available()
+{
+    kernel::vfs::FileInfo info{};
+    const kernel::vfs::Status certsStatus = kernel::vfs::stat("/system/certs", &info);
+    if (certsStatus != kernel::vfs::VFS_OK || info.type != kernel::vfs::FILE_TYPE_DIRECTORY) {
+        kernel::serial::puts("[KERNEL] Navigator smoke CA source directory unavailable at /system/certs\n");
+        return;
+    }
+
+    if (kernel::vfs::get_mount("/certs")) {
+        kernel::serial::puts("[KERNEL] Navigator smoke /certs mount already active\n");
+        return;
+    }
+
+    if (kernel::vfs::mount_alias("/certs", "/system/certs") == 0xFF) {
+        kernel::serial::puts("[KERNEL] Navigator smoke failed to mount /certs from /system/certs\n");
+        return;
+    }
+
+    kernel::serial::puts("[KERNEL] Navigator smoke mounted /certs from boot ramdisk path /system/certs\n");
+}
+#endif
+
 extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
 {
 #if ARCH_HAS_PIC_8259
     // ============================================================
-    // x86 / amd64 boot path  —  Multiboot (BIOS) or BootInfo (UEFI)
+    // x86 / amd64 boot path  â€”  Multiboot (BIOS) or BootInfo (UEFI)
     // ============================================================
 
     // Initialize serial debug output early
@@ -258,6 +282,9 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         if (is_bootinfo && bootinfo && bootinfo->RamdiskBase != 0 && bootinfo->RamdiskSize != 0) {
             kernel::serial::puts("[KERNEL] Boot wallpaper pack found in ramdisk.img\n");
             kernel::desktop::set_wallpaper_image_pack(reinterpret_cast<const void*>(static_cast<uintptr_t>(bootinfo->RamdiskBase)), bootinfo->RamdiskSize);
+#if defined(GXOS_NAVIGATOR_HTTP_SMOKE_ACTIVE)
+            mount_navigator_smoke_ca_fixture_if_available();
+#endif
         }
 
         kernel::desktop::reload_persisted_wallpaper();
@@ -398,7 +425,7 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::serial::puts("[KERNEL] Entering main loop (waiting for input)...\n");
         
         
-        // Main kernel loop — poll input and redraw cursor
+        // Main kernel loop â€” poll input and redraw cursor
         while (1) {
             // Poll input manager for updates (handles USB HID polling)
             kernel::input::poll();
@@ -487,7 +514,7 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::desktop_capabilities::log_current(true, true);
         kernel::apps::printNavigatorRuntimeSmokeReport();
 
-        // Main kernel loop — poll mouse state and redraw cursor
+        // Main kernel loop â€” poll mouse state and redraw cursor
         while (1) {
             if (kernel::arch::sparc::zs::mouse_dirty()) {
                 kernel::arch::sparc::zs::mouse_clear_dirty();
