@@ -123,6 +123,7 @@ struct GxosTrustStorePolicyInfo {
     size_t parsedCertificateCount;
     bool smokeTestOnly;
     bool productionReady;
+    bool publicInternetReady;
     const char* error;
 };
 

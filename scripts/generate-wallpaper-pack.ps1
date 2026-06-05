@@ -476,7 +476,14 @@ if ($userCaSource) {
 
 $httpsPolicyToken = if ([string]::IsNullOrWhiteSpace($env:GXOS_NAVIGATOR_HTTPS_POLICY)) { $null } else { $env:GXOS_NAVIGATOR_HTTPS_POLICY.Trim() }
 $httpsFaultModeToken = if ([string]::IsNullOrWhiteSpace($env:GXOS_NAVIGATOR_HTTPS_FAULT_MODE)) { $null } else { $env:GXOS_NAVIGATOR_HTTPS_FAULT_MODE.Trim() }
-if ($httpsPolicyToken -or $httpsFaultModeToken) {
+$realPublicProbeEnabled = $env:GXOS_NAVIGATOR_SMOKE_ENABLE_REAL_PUBLIC_HTTPS -eq "1"
+$realPublicProbeRequired = $env:GXOS_NAVIGATOR_SMOKE_REQUIRE_REAL_PUBLIC_HTTPS -eq "1"
+$realPublicProbeTarget = if ([string]::IsNullOrWhiteSpace($env:GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_TARGET)) {
+    "https://sha256.badssl.com/"
+} else {
+    $env:GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_TARGET.Trim()
+}
+if ($httpsPolicyToken -or $httpsFaultModeToken -or $realPublicProbeEnabled -or $realPublicProbeRequired) {
     $configNavigatorDir = Join-Path $configDir "navigator"
     New-Item -ItemType Directory -Force -Path $configNavigatorDir | Out-Null
 }
@@ -497,6 +504,24 @@ if ($httpsFaultModeToken) {
     [System.IO.File]::WriteAllText($targetFaultModeCompat, $httpsFaultModeToken, [System.Text.Encoding]::ASCII)
     $staged += Get-Item $targetFaultModeCompat
     Write-Host "      staged HTTPS smoke fault mode at /config/navigator/https-fault-mode.txt ($httpsFaultModeToken)" -ForegroundColor Yellow
+}
+if ($realPublicProbeEnabled) {
+    $targetProbeUrl = Join-Path $configNavigatorDir "real-public-https-probe-url.txt"
+    [System.IO.File]::WriteAllText($targetProbeUrl, $realPublicProbeTarget, [System.Text.Encoding]::ASCII)
+    $staged += Get-Item $targetProbeUrl
+    $targetProbeUrlCompat = Join-Path $configNavigatorDir "RPUBURL.TXT"
+    [System.IO.File]::WriteAllText($targetProbeUrlCompat, $realPublicProbeTarget, [System.Text.Encoding]::ASCII)
+    $staged += Get-Item $targetProbeUrlCompat
+    Write-Host "      staged real public HTTPS probe target at /config/navigator/real-public-https-probe-url.txt ($realPublicProbeTarget)" -ForegroundColor Yellow
+}
+if ($realPublicProbeRequired) {
+    $targetProbeRequire = Join-Path $configNavigatorDir "real-public-https-probe-required.txt"
+    [System.IO.File]::WriteAllText($targetProbeRequire, "required", [System.Text.Encoding]::ASCII)
+    $staged += Get-Item $targetProbeRequire
+    $targetProbeRequireCompat = Join-Path $configNavigatorDir "RPUBRQ.TXT"
+    [System.IO.File]::WriteAllText($targetProbeRequireCompat, "required", [System.Text.Encoding]::ASCII)
+    $staged += Get-Item $targetProbeRequireCompat
+    Write-Host "      staged real public HTTPS probe requirement at /config/navigator/real-public-https-probe-required.txt" -ForegroundColor Yellow
 }
 
 foreach ($name in $WallpaperNames) {

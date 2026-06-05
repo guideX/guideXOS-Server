@@ -6759,6 +6759,11 @@ static const char* kNavigatorPublicPilotHttpsHost = "public-pilot.guidexos.test"
 static const char* kNavigatorPublicPilotPathPrefix = "/navigator-public-pilot/";
 static const char* kNavigatorHttpsSmokeFaultModePath = "/config/navigator/https-fault-mode.txt";
 static const char* kNavigatorHttpsSmokeFaultModeCompatPath = "/config/navigator/HTTPSFLT.TXT";
+static const char* kNavigatorRealPublicProbeTargetPath = "/config/navigator/real-public-https-probe-url.txt";
+static const char* kNavigatorRealPublicProbeTargetCompatPath = "/config/navigator/RPUBURL.TXT";
+static const char* kNavigatorRealPublicProbeRequirePath = "/config/navigator/real-public-https-probe-required.txt";
+static const char* kNavigatorRealPublicProbeRequireCompatPath = "/config/navigator/RPUBRQ.TXT";
+static const char* kNavigatorRealPublicProbeDefaultTarget = "https://sha256.badssl.com/";
 
 enum class NavigatorHttpsSmokeFaultMode {
     None = 0,
@@ -10060,7 +10065,7 @@ static bool nav_smoke_text_equals_insensitive(const char* a, const char* b)
     return gxos::web::httpSharedEqualsInsensitive(a, b);
 }
 
-static void nav_smoke_copy_trimmed_ascii_token(const char* text, char* out, int outSize)
+static void nav_smoke_copy_trimmed_ascii_text(const char* text, char* out, int outSize, bool lowerCase)
 {
     if (!out || outSize <= 0) return;
     out[0] = '\0';
@@ -10073,15 +10078,18 @@ static void nav_smoke_copy_trimmed_ascii_token(const char* text, char* out, int 
     int oi = 0;
     for (int i = start; i < end && oi < outSize - 1; ++i) {
         char ch = text[i];
-        out[oi++] = (ch >= 'A' && ch <= 'Z') ? static_cast<char>(ch - 'A' + 'a') : ch;
+        out[oi++] = lowerCase && ch >= 'A' && ch <= 'Z'
+            ? static_cast<char>(ch - 'A' + 'a')
+            : ch;
     }
     out[oi] = '\0';
 }
 
-static bool nav_smoke_read_vfs_token_file(const char* primaryPath,
-                                          const char* compatPath,
-                                          char* out,
-                                          int outSize)
+static bool nav_smoke_read_vfs_text_file(const char* primaryPath,
+                                         const char* compatPath,
+                                         char* out,
+                                         int outSize,
+                                         bool lowerCase)
 {
     if (!out || outSize <= 1 || !primaryPath || !primaryPath[0]) return false;
     out[0] = '\0';
@@ -10106,8 +10114,16 @@ static bool nav_smoke_read_vfs_token_file(const char* primaryPath,
         reinterpret_cast<uint8_t*>(buffer), 256u);
     if (bytesRead <= 0) return false;
     buffer[bytesRead < 256 ? bytesRead : 256] = '\0';
-    nav_smoke_copy_trimmed_ascii_token(buffer, out, outSize);
+    nav_smoke_copy_trimmed_ascii_text(buffer, out, outSize, lowerCase);
     return out[0] != '\0';
+}
+
+static bool nav_smoke_read_vfs_token_file(const char* primaryPath,
+                                          const char* compatPath,
+                                          char* out,
+                                          int outSize)
+{
+    return nav_smoke_read_vfs_text_file(primaryPath, compatPath, out, outSize, true);
 }
 
 static NavigatorHttpsSmokeFaultMode navigator_https_smoke_fault_mode()
@@ -10149,6 +10165,89 @@ static const char* navigator_https_smoke_fault_mode_name(NavigatorHttpsSmokeFaul
     default:
         return "None";
     }
+}
+
+struct NavigatorRealPublicProbeConfig {
+    bool enabled;
+    bool requireSuccess;
+    char targetUrl[160];
+};
+
+static NavigatorRealPublicProbeConfig navigator_real_public_probe_config()
+{
+    static bool initialized = false;
+    static NavigatorRealPublicProbeConfig config{};
+    if (initialized) return config;
+    initialized = true;
+
+    strcopy(config.targetUrl, kNavigatorRealPublicProbeDefaultTarget, sizeof(config.targetUrl));
+
+    char target[160];
+    if (nav_smoke_read_vfs_text_file(kNavigatorRealPublicProbeTargetPath,
+            kNavigatorRealPublicProbeTargetCompatPath, target, sizeof(target), false)) {
+        strcopy(config.targetUrl, target, sizeof(config.targetUrl));
+        config.enabled = true;
+    }
+
+    char requireToken[32];
+    if (nav_smoke_read_vfs_token_file(kNavigatorRealPublicProbeRequirePath,
+            kNavigatorRealPublicProbeRequireCompatPath, requireToken, sizeof(requireToken))) {
+        config.requireSuccess =
+            nav_smoke_text_equals_insensitive(requireToken, "1") ||
+            nav_smoke_text_equals_insensitive(requireToken, "true") ||
+            nav_smoke_text_equals_insensitive(requireToken, "yes") ||
+            nav_smoke_text_equals_insensitive(requireToken, "required") ||
+            nav_smoke_text_equals_insensitive(requireToken, "enabled");
+    }
+
+    return config;
+}
+
+static bool navigator_real_public_probe_environment_blocked(const char* error,
+                                                            const char* tlsStatus,
+                                                            const char* dnsError)
+{
+    if (dnsError && dnsError[0]) return true;
+    if (nav_smoke_text_equals(tlsStatus, "TcpConnectFailed")) return true;
+    if (!error || !error[0]) return false;
+
+    return nav_smoke_text_equals(error, "Network unavailable") ||
+        nav_smoke_text_equals(error, "TCP connect failed") ||
+        nav_smoke_text_equals(error, "TCP connect timeout") ||
+        nav_smoke_text_equals(error, "connection refused") ||
+        nav_smoke_text_equals(error, "connection reset") ||
+        nav_smoke_text_equals(error, "network down");
+}
+
+static const char* navigator_real_public_probe_prerequisite_blocker(
+    const gxos::GxosValidatedHttpsPolicyInfo& httpsPolicy,
+    const gxos::GxosTrustStorePolicyInfo& trustStorePolicy,
+    bool pilotEnabled)
+{
+    if (!pilotEnabled) {
+        return
+            httpsPolicy.publicHttpsPilotReason && httpsPolicy.publicHttpsPilotReason[0]
+                ? httpsPolicy.publicHttpsPilotReason
+                : "Real public HTTPS probe requires ProductionValidated plus public-https-pilot=enabled.";
+    }
+
+    if (trustStorePolicy.state != gxos::GxosTrustStorePolicyState::TrustStoreParsed) {
+        return
+            trustStorePolicy.error && trustStorePolicy.error[0]
+                ? trustStorePolicy.error
+                : "Real public HTTPS probe requires a parsed production CA bundle.";
+    }
+
+    if (trustStorePolicy.source != gxos::GxosTrustStoreSource::ProductionBundle) {
+        return "Real public HTTPS probe requires a production CA bundle at /certs/ca-bundle.pem.";
+    }
+
+    if (!trustStorePolicy.publicInternetReady) {
+        return
+            "Real public HTTPS probe requires an opt-in public-root production CA bundle; deterministic validated fixture trust is not public internet trust.";
+    }
+
+    return nullptr;
 }
 
 static bool navigator_https_policy_state_enabled(gxos::GxosValidatedHttpsPolicyState state)
@@ -10231,7 +10330,20 @@ void NavigatorApp::smokeCaptureHttpsNavigation(const char* url,
                                                bool* tlsValidated,
                                                bool* tlsHostnameValidated,
                                                bool* tlsAllowlistLocalOnly,
-                                               char* sourceType, int sourceTypeLen)
+                                               char* sourceType, int sourceTypeLen,
+                                               char* contentEncoding,
+                                               int contentEncodingLen,
+                                               bool* dnsUsed,
+                                               char* dnsHost,
+                                               int dnsHostLen,
+                                               char* dnsResolvedIp,
+                                               int dnsResolvedIpLen,
+                                               char* dnsError,
+                                               int dnsErrorLen,
+                                               char* tlsBackend,
+                                               int tlsBackendLen,
+                                               char* transportPolicyReason,
+                                               int transportPolicyReasonLen)
 {
     if (requestedUrl && requestedUrlLen > 0) requestedUrl[0] = '\0';
     if (statusCode) *statusCode = 0;
@@ -10253,6 +10365,13 @@ void NavigatorApp::smokeCaptureHttpsNavigation(const char* url,
     if (tlsHostnameValidated) *tlsHostnameValidated = false;
     if (tlsAllowlistLocalOnly) *tlsAllowlistLocalOnly = false;
     if (sourceType && sourceTypeLen > 0) sourceType[0] = '\0';
+    if (contentEncoding && contentEncodingLen > 0) contentEncoding[0] = '\0';
+    if (dnsUsed) *dnsUsed = false;
+    if (dnsHost && dnsHostLen > 0) dnsHost[0] = '\0';
+    if (dnsResolvedIp && dnsResolvedIpLen > 0) dnsResolvedIp[0] = '\0';
+    if (dnsError && dnsErrorLen > 0) dnsError[0] = '\0';
+    if (tlsBackend && tlsBackendLen > 0) tlsBackend[0] = '\0';
+    if (transportPolicyReason && transportPolicyReasonLen > 0) transportPolicyReason[0] = '\0';
 
     const int plainAttemptsBefore = s_kernelHttpPlainTcpConnectAttempts;
     const int tlsAttemptsBefore = s_kernelHttpTlsConnectAttempts;
@@ -10281,6 +10400,15 @@ void NavigatorApp::smokeCaptureHttpsNavigation(const char* url,
     if (tlsHostnameValidated) *tlsHostnameValidated = app.m_metaTlsHostnameValidated;
     if (tlsAllowlistLocalOnly) *tlsAllowlistLocalOnly = app.m_metaTlsAllowlistLocalOnly;
     if (sourceType && sourceTypeLen > 0) strcopy(sourceType, app.m_metaSourceType, sourceTypeLen);
+    if (contentEncoding && contentEncodingLen > 0) strcopy(contentEncoding, app.m_metaContentEncoding, contentEncodingLen);
+    if (dnsUsed) *dnsUsed = app.m_metaDnsUsed;
+    if (dnsHost && dnsHostLen > 0) strcopy(dnsHost, app.m_metaDnsHost, dnsHostLen);
+    if (dnsResolvedIp && dnsResolvedIpLen > 0) strcopy(dnsResolvedIp, app.m_metaDnsResolvedIp, dnsResolvedIpLen);
+    if (dnsError && dnsErrorLen > 0) strcopy(dnsError, app.m_metaDnsError, dnsErrorLen);
+    if (tlsBackend && tlsBackendLen > 0) strcopy(tlsBackend, app.m_metaTlsBackend, tlsBackendLen);
+    if (transportPolicyReason && transportPolicyReasonLen > 0) {
+        strcopy(transportPolicyReason, app.m_metaTransportPolicyReason, transportPolicyReasonLen);
+    }
 }
 
 static bool printNavigatorHttpsUnsupportedSmokeCase(const char* name, const char* url,
@@ -10989,6 +11117,7 @@ static bool printNavigatorRuntimeSmokePreamble()
     serial::puts("[NAVIGATOR-SMOKE] coverage.direct_https_allowlist=covered\n");
     serial::puts("[NAVIGATOR-SMOKE] coverage.direct_https_unsupported=covered\n");
     serial::puts("[NAVIGATOR-SMOKE] coverage.http_to_https_redirect_policy=local allowlist, validated fixture HTTPS, and controlled public HTTPS pilot redirect policy are covered\n");
+    serial::puts("[NAVIGATOR-SMOKE] coverage.real_public_https_probe=opt-in only; sha256.badssl.com production-public HTTPS probe reports pass, skip, or fail without weakening validation\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.remote_png=enabled-basic numeric IPv4 and hostname http:// PNG images\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.downloads=unavailable for bare-metal HTTP v0.1\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.css_lite=enabled for embedded style blocks\n");
@@ -11765,7 +11894,7 @@ static bool printNavigatorPublicPilotDecisionCase()
     const bool pilotEnabled =
         httpsPolicy.state == gxos::GxosValidatedHttpsPolicyState::ProductionValidated &&
         httpsPolicy.broadPublicHttpsEnabled;
-    const char* url = "https://example.com/";
+    const char* url = kNavigatorRealPublicProbeDefaultTarget;
     KernelHttpUrl parsed{};
     char reason[160];
     reason[0] = '\0';
@@ -11790,6 +11919,204 @@ static bool printNavigatorPublicPilotDecisionCase()
     serial::puts(reason[0] ? reason : "(none)");
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.public_pilot_decision.result=");
     serial::puts(pass ? "PASS\n" : "FAIL\n");
+    return pass;
+}
+
+static bool printNavigatorRealPublicHttpsProbeCase()
+{
+    const NavigatorRealPublicProbeConfig probeConfig = navigator_real_public_probe_config();
+    const gxos::GxosValidatedHttpsPolicyInfo httpsPolicy = gxos::gxos_validated_https_policy_info();
+    const gxos::GxosTrustStorePolicyInfo trustStorePolicy = gxos::gxos_tls_trust_store_policy_info();
+    const bool pilotEnabled =
+        httpsPolicy.state == gxos::GxosValidatedHttpsPolicyState::ProductionValidated &&
+        httpsPolicy.broadPublicHttpsEnabled;
+    const char* prerequisiteBlocker =
+        navigator_real_public_probe_prerequisite_blocker(httpsPolicy, trustStorePolicy, pilotEnabled);
+
+    char requestedUrl[160] = {};
+    char finalUrl[160] = {};
+    char contentType[48] = {};
+    char contentEncoding[32] = {};
+    char error[128] = {};
+    char dnsHost[64] = {};
+    char dnsResolvedIp[16] = {};
+    char dnsError[64] = {};
+    char tlsSniHost[64] = {};
+    char tlsProtocol[32] = {};
+    char tlsCipherSuite[64] = {};
+    char transportSelection[40] = {};
+    char tlsStatus[40] = {};
+    char sourceType[24] = {};
+    char tlsBackend[48] = {};
+    char transportPolicyReason[128] = {};
+    int statusCode = 0;
+    int bodyBytes = 0;
+    int parsedBlocks = 0;
+    int redirectCount = 0;
+    int plainTcpConnectAttempts = 0;
+    int tlsTcpConnectAttempts = 0;
+    uint32_t verifyFlags = 0;
+    bool tlsValidated = false;
+    bool tlsHostnameValidated = false;
+    bool tlsAllowlistLocalOnly = false;
+    bool dnsUsed = false;
+    bool attempted = false;
+    const char* resultLabel = "SKIP";
+    const char* skipReason = "(none)";
+    bool pass = true;
+
+    serial::puts("[NAVIGATOR-SMOKE] https.case.real_public_probe.enabled=");
+    serial::puts(probeConfig.enabled ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.required=");
+    serial::puts(probeConfig.requireSuccess ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.target=");
+    serial::puts(probeConfig.targetUrl[0] ? probeConfig.targetUrl : kNavigatorRealPublicProbeDefaultTarget);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.policy_enabled=");
+    serial::puts(pilotEnabled ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.public_trust_ready=");
+    serial::puts(trustStorePolicy.publicInternetReady ? "yes" : "no");
+    serial::puts("\n");
+
+    if (!probeConfig.enabled) {
+        skipReason = "Opt-in real public HTTPS probe is disabled.";
+    } else if (prerequisiteBlocker) {
+        skipReason = prerequisiteBlocker;
+        if (probeConfig.requireSuccess) {
+            resultLabel = "FAIL";
+            pass = false;
+        }
+    } else {
+        attempted = true;
+        serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.attempted=yes\n");
+        NavigatorApp::smokeCaptureHttpsNavigation(
+            probeConfig.targetUrl,
+            requestedUrl, sizeof(requestedUrl),
+            &statusCode,
+            contentType, sizeof(contentType),
+            &bodyBytes,
+            &parsedBlocks,
+            error, sizeof(error),
+            finalUrl, sizeof(finalUrl),
+            &redirectCount,
+            &plainTcpConnectAttempts,
+            &tlsTcpConnectAttempts,
+            &verifyFlags,
+            tlsSniHost, sizeof(tlsSniHost),
+            tlsProtocol, sizeof(tlsProtocol),
+            tlsCipherSuite, sizeof(tlsCipherSuite),
+            transportSelection, sizeof(transportSelection),
+            tlsStatus, sizeof(tlsStatus),
+            &tlsValidated,
+            &tlsHostnameValidated,
+            &tlsAllowlistLocalOnly,
+            sourceType, sizeof(sourceType),
+            contentEncoding, sizeof(contentEncoding),
+            &dnsUsed,
+            dnsHost, sizeof(dnsHost),
+            dnsResolvedIp, sizeof(dnsResolvedIp),
+            dnsError, sizeof(dnsError),
+            tlsBackend, sizeof(tlsBackend),
+            transportPolicyReason, sizeof(transportPolicyReason));
+
+        const bool tlsSuccess =
+            tlsTcpConnectAttempts >= 1 &&
+            verifyFlags == 0 &&
+            tlsValidated &&
+            tlsHostnameValidated &&
+            !tlsAllowlistLocalOnly &&
+            nav_smoke_text_equals(transportSelection, "PolicyValidatedTlsHttps") &&
+            nav_smoke_text_equals(tlsStatus, "Success") &&
+            nav_smoke_text_equals(sourceType, "https");
+        const bool unsupportedContentEncoding =
+            nav_smoke_text_equals(error, "Unsupported content encoding");
+        const bool environmentBlocked =
+            navigator_real_public_probe_environment_blocked(error, tlsStatus, dnsError);
+
+        if (tlsSuccess && (statusCode > 0 || unsupportedContentEncoding)) {
+            resultLabel = "PASS";
+            pass = true;
+        } else if (environmentBlocked && !probeConfig.requireSuccess) {
+            resultLabel = "SKIP";
+            skipReason = error[0] ? error : (dnsError[0] ? dnsError : "Outbound public HTTPS environment is unavailable.");
+            pass = true;
+        } else {
+            resultLabel = "FAIL";
+            pass = false;
+        }
+    }
+
+    serial::puts("[NAVIGATOR-SMOKE] https.case.real_public_probe.enabled=");
+    serial::puts(probeConfig.enabled ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.required=");
+    serial::puts(probeConfig.requireSuccess ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.target=");
+    serial::puts(probeConfig.targetUrl[0] ? probeConfig.targetUrl : kNavigatorRealPublicProbeDefaultTarget);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.policy_enabled=");
+    serial::puts(pilotEnabled ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.public_trust_ready=");
+    serial::puts(trustStorePolicy.publicInternetReady ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.attempted=");
+    serial::puts(attempted ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.requested_url=");
+    serial::puts(requestedUrl[0] ? requestedUrl : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.final_url=");
+    serial::puts(finalUrl[0] ? finalUrl : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.redirect_count=");
+    serial_put_dec((uint32_t)redirectCount);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.dns_used=");
+    serial::puts(dnsUsed ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.dns_host=");
+    serial::puts(dnsHost[0] ? dnsHost : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.dns_resolved_ip=");
+    serial::puts(dnsResolvedIp[0] ? dnsResolvedIp : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.dns_error=");
+    serial::puts(dnsError[0] ? dnsError : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.plain_tcp_connect_attempts=");
+    serial_put_dec((uint32_t)plainTcpConnectAttempts);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tls_tcp_connect_attempts=");
+    serial_put_dec((uint32_t)tlsTcpConnectAttempts);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.transport_selection=");
+    serial::puts(transportSelection[0] ? transportSelection : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.transport_policy_reason=");
+    serial::puts(transportPolicyReason[0] ? transportPolicyReason : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tls_status=");
+    serial::puts(tlsStatus[0] ? tlsStatus : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tls_validated=");
+    serial::puts(tlsValidated ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.hostname_validated=");
+    serial::puts(tlsHostnameValidated ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.verify_flags=");
+    serial_put_dec64((uint64_t)verifyFlags);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tls_backend=");
+    serial::puts(tlsBackend[0] ? tlsBackend : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.sni_host=");
+    serial::puts(tlsSniHost[0] ? tlsSniHost : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.protocol=");
+    serial::puts(tlsProtocol[0] ? tlsProtocol : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.cipher_suite=");
+    serial::puts(tlsCipherSuite[0] ? tlsCipherSuite : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.http_status=");
+    serial_put_dec((uint32_t)statusCode);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.body_bytes=");
+    serial_put_dec((uint32_t)bodyBytes);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.parsed_blocks=");
+    serial_put_dec((uint32_t)parsedBlocks);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.content_type=");
+    serial::puts(contentType[0] ? contentType : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.content_encoding=");
+    serial::puts(contentEncoding[0] ? contentEncoding : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.source_type=");
+    serial::puts(sourceType[0] ? sourceType : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.unsupported_reason=");
+    serial::puts(nav_smoke_text_equals(error, "Unsupported content encoding") ? error : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.error=");
+    serial::puts(error[0] ? error : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.skip_reason=");
+    serial::puts(nav_smoke_text_equals(resultLabel, "SKIP") ? skipReason : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.plaintext_fallback=no");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.result=");
+    serial::puts(pass ? resultLabel : "FAIL");
+    serial::puts("\n");
     return pass;
 }
 
@@ -12107,6 +12434,7 @@ static bool printNavigatorHttpSmokeCases()
         "http://10.0.2.2:8080/forms/post-echo", 1) && httpOk;
     httpOk = printNavigatorFormsLitePostSmokeCase("forms_post_redirect_hostname", "http://10.0.2.2:8080/forms/post-redirect-hostname",
         "http://guidexos.test:8080/forms/post-echo", 1, "10.0.2.2") && httpOk;
+    httpOk = printNavigatorRealPublicHttpsProbeCase() && httpOk;
     return httpOk;
 }
 

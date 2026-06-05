@@ -64,3 +64,11 @@ Bare-metal HTTPS smoke certificate/key pair signed by the validated smoke CA but
 ## navigator-malformed-ca-bundle.pem / navigator-empty-ca-bundle.pem
 
 Smoke-only malformed and empty CA bundle fixtures for deterministic fail-closed trust-store parser coverage.
+
+## Opt-in real public HTTPS probe
+
+- `scripts/smoke-navigator-kernel.ps1` keeps the real public HTTPS probe off by default.
+- Set `GXOS_NAVIGATOR_SMOKE_ENABLE_REAL_PUBLIC_HTTPS=1` to enable the optional bare-metal public probe.
+- Optionally set `GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_TARGET` to override the default target `https://sha256.badssl.com/`.
+- Optionally set `GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_CA_BUNDLE_SOURCE` to a public-root PEM bundle; the harness merges that bundle with the deterministic validated fixture roots and marks the staged `/certs/ca-bundle.pem` as public-trust-ready for the probe.
+- Set `GXOS_NAVIGATOR_SMOKE_REQUIRE_REAL_PUBLIC_HTTPS=1` to make probe blockers or failures fail the smoke run instead of reporting `SKIP`.

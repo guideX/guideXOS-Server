@@ -498,7 +498,20 @@ public:
                                             bool* tlsValidated,
                                             bool* tlsHostnameValidated,
                                             bool* tlsAllowlistLocalOnly,
-                                            char* sourceType, int sourceTypeLen);
+                                            char* sourceType, int sourceTypeLen,
+                                            char* contentEncoding = nullptr,
+                                            int contentEncodingLen = 0,
+                                            bool* dnsUsed = nullptr,
+                                            char* dnsHost = nullptr,
+                                            int dnsHostLen = 0,
+                                            char* dnsResolvedIp = nullptr,
+                                            int dnsResolvedIpLen = 0,
+                                            char* dnsError = nullptr,
+                                            int dnsErrorLen = 0,
+                                            char* tlsBackend = nullptr,
+                                            int tlsBackendLen = 0,
+                                            char* transportPolicyReason = nullptr,
+                                            int transportPolicyReasonLen = 0);
 
 private:
     enum NavigatorMouseMode {

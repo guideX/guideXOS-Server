@@ -330,6 +330,7 @@ constexpr const char* kBareMetalUserCaBundleCompatPath = "/config/certs/CABUNDLE
 constexpr const char* kBareMetalHttpsPolicyCompatPath = "/config/navigator/HTTPSPOL.TXT";
 constexpr const char* kBareMetalMissingCaProbePath = "/certs/ca-bundle.missing";
 constexpr const char* kBareMetalSmokeFixtureMarker = "guideXOS Navigator smoke-only root CA fixture";
+constexpr const char* kBareMetalPublicInternetTrustMarker = "guideXOS Navigator real public HTTPS probe trust bundle";
 constexpr const char* kHostedCaBundlePath = "(Windows trust store)";
 constexpr const char* kHostedTrustStoreDetail = "Windows system trust store managed by Schannel";
 constexpr const char* kSmokeFixtureTrustStoreDetail = "Navigator smoke fixture staged at /certs/ca-bundle.pem";
@@ -380,38 +381,6 @@ bool text_equals_insensitive(const char* a, const char* b)
         ++i;
     }
     return a[i] == '\0' && b[i] == '\0';
-}
-
-const char* skip_ascii_space(const char* text)
-{
-    if (!text) return "";
-    while (*text == ' ' || *text == '\t' || *text == '\r' || *text == '\n') {
-        ++text;
-    }
-    return text;
-}
-
-void copy_trimmed_ascii_token(char* dst, size_t dstSize, const char* text)
-{
-    if (!dst || dstSize == 0) return;
-    dst[0] = '\0';
-    if (!text) return;
-
-    const char* start = skip_ascii_space(text);
-    const char* end = start;
-    while (*end != '\0' && *end != '\r' && *end != '\n') {
-        ++end;
-    }
-    while (end > start && (end[-1] == ' ' || end[-1] == '\t')) {
-        --end;
-    }
-
-    size_t count = 0;
-    while (start + count < end && count + 1 < dstSize) {
-        dst[count] = start[count];
-        ++count;
-    }
-    dst[count] = '\0';
 }
 
 void copy_trimmed_ascii_span(char* dst, size_t dstSize, const char* begin, const char* end)
@@ -774,6 +743,11 @@ bool is_smoke_only_ca_fixture(const uint8_t* buffer, size_t buffer_len)
     return buffer_contains_token(buffer, buffer_len, kBareMetalSmokeFixtureMarker);
 }
 
+bool is_public_internet_trust_bundle(const uint8_t* buffer, size_t buffer_len)
+{
+    return buffer_contains_token(buffer, buffer_len, kBareMetalPublicInternetTrustMarker);
+}
+
 BareMetalCaStoreState& ca_store_state()
 {
     static BareMetalCaStoreState state;
@@ -1114,12 +1088,17 @@ GxosTrustStorePolicyInfo make_trust_store_policy_info()
             0,
             false,
             false,
+            false,
             caInfo.error ? caInfo.error : "Root CA bundle not found."
         };
     }
 
     if (caInfo.status == GxosCaStoreStatus::Loaded &&
         caInfo.parseStatus == GxosCaParseStatus::Parsed) {
+        const bool publicInternetReady =
+            source == GxosTrustStoreSource::ProductionBundle &&
+            !caInfo.testOnlyFixture &&
+            is_public_internet_trust_bundle(runtime_state().bytes, caInfo.bytesLoaded);
         return {
             GxosTrustStorePolicyState::TrustStoreParsed,
             source,
@@ -1129,6 +1108,7 @@ GxosTrustStorePolicyInfo make_trust_store_policy_info()
             caInfo.parsedCertificateCount,
             caInfo.testOnlyFixture,
             source == GxosTrustStoreSource::ProductionBundle,
+            publicInternetReady,
             caInfo.error
         };
     }
@@ -1142,6 +1122,7 @@ GxosTrustStorePolicyInfo make_trust_store_policy_info()
         caInfo.parsedCertificateCount,
         caInfo.testOnlyFixture,
         false,
+        false,
         caInfo.error ? caInfo.error : "Trust store is present but not usable."
     };
 #else
@@ -1153,6 +1134,7 @@ GxosTrustStorePolicyInfo make_trust_store_policy_info()
         0,
         0,
         false,
+        true,
         true,
         nullptr
     };
