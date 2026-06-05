@@ -1,6 +1,7 @@
 param(
     [switch]$Build,
-    [int]$TimeoutSeconds = 40
+    [int]$TimeoutSeconds = 40,
+    [string[]]$ScenarioFilter
 )
 
 $ErrorActionPreference = "Stop"
@@ -1208,7 +1209,37 @@ $scenarioDefinitions = @(
     }
 )
 
-foreach ($scenario in $scenarioDefinitions) {
+$selectedScenarios = @($scenarioDefinitions)
+if ($ScenarioFilter -and $ScenarioFilter.Count -gt 0) {
+    $requestedScenarioNames = @()
+    foreach ($scenarioName in $ScenarioFilter) {
+        if (-not [string]::IsNullOrWhiteSpace($scenarioName)) {
+            $requestedScenarioNames += $scenarioName.Trim()
+        }
+    }
+    if ($requestedScenarioNames.Count -le 0) {
+        throw "ScenarioFilter was provided but did not include any scenario names."
+    }
+
+    $selectedScenarios = @()
+    $missingScenarioNames = @()
+    foreach ($requestedScenarioName in $requestedScenarioNames) {
+        $match = $scenarioDefinitions | Where-Object {
+            [string]::Equals([string]$_.Name, $requestedScenarioName, [System.StringComparison]::OrdinalIgnoreCase)
+        } | Select-Object -First 1
+        if ($null -eq $match) {
+            $missingScenarioNames += $requestedScenarioName
+            continue
+        }
+        $selectedScenarios += $match
+    }
+
+    if ($missingScenarioNames.Count -gt 0) {
+        throw "Unknown kernel smoke scenario filter(s): $($missingScenarioNames -join ', ')"
+    }
+}
+
+foreach ($scenario in $selectedScenarios) {
     if ($scenario.PSObject.Properties.Match("PublicPilotEnabled").Count -gt 0 -and $scenario.PublicPilotEnabled) {
         $scenario.Checks = @($scenario.Checks + $publicPilotEnabledChecks)
         if (-not $realPublicProbeEnabled) {
@@ -1223,7 +1254,7 @@ $scenarioFailures = @()
 $activeServers = $null
 
 try {
-    foreach ($scenario in $scenarioDefinitions) {
+    foreach ($scenario in $selectedScenarios) {
         Write-Host "Running kernel smoke scenario '$($scenario.Name)'..."
         $enableRealPublicProbeForScenario =
             $realPublicProbeEnabled -and
