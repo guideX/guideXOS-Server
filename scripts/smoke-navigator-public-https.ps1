@@ -321,6 +321,45 @@ function New-NavigatorPublicHttpsSetupNotes {
     )
 }
 
+function Write-NavigatorPublicHttpsConsoleSummary {
+    param(
+        [Parameter(Mandatory = $true)][string]$FinalResult,
+        [Parameter(Mandatory = $true)][int]$ExitCode,
+        [Parameter(Mandatory = $true)][System.Collections.Specialized.OrderedDictionary]$Fields,
+        [string[]]$Notes = @()
+    )
+
+    Write-Host "Dedicated real public HTTPS smoke summary:"
+    Write-Host "  target: $($Fields["target_url"])"
+    Write-Host "  CA source: $($Fields["public_ca_source_path"]) [$($Fields["public_ca_resolution"])]"
+    Write-Host "  CA bytes: $($Fields["public_ca_bytes"])"
+    Write-Host "  parsed cert count: $($Fields["public_ca_parsed_certs"])"
+    Write-Host "  DNS result: $($Fields["dns_result"])"
+    Write-Host "  TCP result: $($Fields["tcp_result"])"
+    Write-Host "  TLS result: $($Fields["tls_result"])"
+    Write-Host "  certificate validation: $($Fields["certificate_validation_result"])"
+    Write-Host "  hostname validation: $($Fields["hostname_validation_result"])"
+    Write-Host "  HTTP status: $($Fields["http_status"])"
+    Write-Host "  unsupported content reason: $($Fields["unsupported_reason"])"
+    Write-Host "  plaintext_fallback: $($Fields["plaintext_fallback"])"
+    if ($Fields.Contains("skip_reason") -and -not [string]::IsNullOrWhiteSpace($Fields["skip_reason"]) -and $Fields["skip_reason"] -ne "(none)") {
+        Write-Host "  skip reason: $($Fields["skip_reason"])"
+    }
+    if ($Fields.Contains("failure_reason") -and -not [string]::IsNullOrWhiteSpace($Fields["failure_reason"]) -and $Fields["failure_reason"] -ne "(none)") {
+        Write-Host "  failure reason: $($Fields["failure_reason"])"
+    }
+    foreach ($note in $Notes) {
+        Write-Host "  note: $note"
+    }
+
+    $finalLine = "  final result: $FinalResult (exit $ExitCode)"
+    switch ($FinalResult) {
+        "PASS" { Write-Host $finalLine -ForegroundColor Green }
+        "SKIP" { Write-Host $finalLine -ForegroundColor Yellow }
+        default { Write-Host $finalLine -ForegroundColor Red }
+    }
+}
+
 $exitCode = 1
 $finalResult = "FAIL"
 $kernelSerialPath = $null
@@ -344,6 +383,8 @@ $fields = [ordered]@{
     content_encoding = "(not-attempted)"
     unsupported_reason = "(not-attempted)"
     plaintext_fallback = "no"
+    skip_reason = "(none)"
+    failure_reason = "(none)"
     probe_result = "SKIP"
 }
 
@@ -377,6 +418,7 @@ try {
             -KernelSerialOutput $null `
             -Fields $fields `
             -Notes $notes
+        Write-NavigatorPublicHttpsConsoleSummary -FinalResult $finalResult -ExitCode $exitCode -Fields $fields -Notes $notes
         exit $exitCode
     }
 
@@ -394,6 +436,7 @@ try {
             -KernelSerialOutput $null `
             -Fields $fields `
             -Notes $notes
+        Write-NavigatorPublicHttpsConsoleSummary -FinalResult $finalResult -ExitCode $exitCode -Fields $fields -Notes $notes
         exit $exitCode
     }
 
@@ -413,6 +456,7 @@ try {
             -KernelSerialOutput $null `
             -Fields $fields `
             -Notes $notes
+        Write-NavigatorPublicHttpsConsoleSummary -FinalResult $finalResult -ExitCode $exitCode -Fields $fields -Notes $notes
         exit $exitCode
     }
     $fields["public_ca_source_path"] = $bundleInfo.Path
@@ -470,6 +514,7 @@ try {
             -KernelSerialOutput $null `
             -Fields $fields `
             -Notes $notes
+        Write-NavigatorPublicHttpsConsoleSummary -FinalResult $finalResult -ExitCode $exitCode -Fields $fields -Notes $notes
         exit $exitCode
     }
 
@@ -489,20 +534,29 @@ try {
         "content_encoding",
         "unsupported_reason",
         "plaintext_fallback",
+        "skip_reason",
+        "error",
         "result"
     )) {
         $value = Get-NavigatorPublicProbeValue -Output $kernelSerialOutput -Name $fieldName
         if ($null -ne $value) {
             switch ($fieldName) {
                 "public_ca_bundle_source" { $fields["public_ca_source_path"] = $value }
+                "error" { $fields["failure_reason"] = $value }
                 "result" { $fields["probe_result"] = $value }
                 default { $fields[$fieldName] = $value }
             }
         }
     }
 
-    $fields["target_url"] = $(Get-NavigatorPublicProbeValue -Output $kernelSerialOutput -Name "target")
-    $fields["target_host"] = $(Get-NavigatorPublicProbeValue -Output $kernelSerialOutput -Name "dns_host")
+    $parsedTarget = Get-NavigatorPublicProbeValue -Output $kernelSerialOutput -Name "target"
+    if ($parsedTarget) {
+        $fields["target_url"] = $parsedTarget
+    }
+    $parsedTargetHost = Get-NavigatorPublicProbeValue -Output $kernelSerialOutput -Name "dns_host"
+    if ($parsedTargetHost) {
+        $fields["target_host"] = $parsedTargetHost
+    }
 
     $guestProbeResult = $fields["probe_result"]
     $notes = @("Kernel smoke exit code: $kernelExitCode")
@@ -521,7 +575,7 @@ try {
         "SKIP" {
             $finalResult = "SKIP"
             $exitCode = 3
-            $skipReason = Get-NavigatorPublicProbeValue -Output $kernelSerialOutput -Name "skip_reason"
+            $skipReason = $fields["skip_reason"]
             if ($skipReason) {
                 $notes += "Guest skip reason: $skipReason"
             }
@@ -529,7 +583,7 @@ try {
         default {
             $finalResult = "FAIL"
             $exitCode = 1
-            $failureReason = Get-NavigatorPublicProbeValue -Output $kernelSerialOutput -Name "error"
+            $failureReason = $fields["failure_reason"]
             if ($failureReason -and $failureReason -ne "(none)") {
                 $notes += "Guest failure reason: $failureReason"
             }
@@ -545,6 +599,7 @@ try {
         -KernelSerialOutput $kernelSerialOutput `
         -Fields $fields `
         -Notes $notes
+    Write-NavigatorPublicHttpsConsoleSummary -FinalResult $finalResult -ExitCode $exitCode -Fields $fields -Notes $notes
 
     if ($finalResult -eq "PASS") {
         Write-Host "Dedicated real public HTTPS smoke PASS. Serial log: $dedicatedSerialLog"
@@ -568,6 +623,7 @@ try {
         -KernelSerialOutput $kernelSerialOutput `
         -Fields $fields `
         -Notes $notes
+    Write-NavigatorPublicHttpsConsoleSummary -FinalResult $finalResult -ExitCode $exitCode -Fields $fields -Notes $notes
     Write-Host "Dedicated real public HTTPS smoke FAIL. Summary log: $dedicatedSummaryLog" -ForegroundColor Red
     exit $exitCode
 } finally {

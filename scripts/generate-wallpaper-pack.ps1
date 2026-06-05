@@ -13,6 +13,12 @@ $RootDir = Split-Path -Parent $ScriptDir
 $InputDir = if ([System.IO.Path]::IsPathRooted($InputDir)) { $InputDir } else { Join-Path $RootDir $InputDir }
 $OutputDir = if ([System.IO.Path]::IsPathRooted($OutputDir)) { $OutputDir } else { Join-Path $RootDir $OutputDir }
 $OutputImage = if ([System.IO.Path]::IsPathRooted($OutputImage)) { $OutputImage } else { Join-Path $RootDir $OutputImage }
+$TrackedOutputRootCaBundlePath = Join-Path $OutputDir "certs\ca-bundle.pem"
+$TrackedOutputRootCaBundleBytes = if (Test-Path -LiteralPath $TrackedOutputRootCaBundlePath -PathType Leaf) {
+    [System.IO.File]::ReadAllBytes($TrackedOutputRootCaBundlePath)
+} else {
+    $null
+}
 
 $NavigatorCaBundleSizeCapBytes = 512KB
 $NavigatorRealPublicProbeDefaultTarget = "https://sha256.badssl.com/"
@@ -509,6 +515,7 @@ function Write-Fat32Image([string]$ImagePath, [string]$WallpaperDir, [array]$Fil
 }
 
 $staged = @()
+$stagedRootCaBundle = $false
 New-Item -ItemType Directory -Force -Path $OutputDir | Out-Null
 $wallpaperDir = Join-Path $OutputDir "wall"
 $certsDir = Join-Path $OutputDir "certs"
@@ -543,6 +550,7 @@ if ($SmokeCaFixture -or $env:GXOS_NAVIGATOR_SMOKE_CA_FIXTURE -eq "1") {
     $targetCa = Join-Path $certsDir "ca-bundle.pem"
     Copy-Item -LiteralPath $smokeCaFixturePath -Destination $targetCa -Force
     $staged += Get-Item $targetCa
+    $stagedRootCaBundle = $true
     Write-Host "      staged smoke-only CA bundle at /certs/ca-bundle.pem" -ForegroundColor Yellow
 } else {
     $productionCaSource = Resolve-StagedSourcePath $env:GXOS_NAVIGATOR_PRODUCTION_CA_BUNDLE_SOURCE
@@ -580,6 +588,7 @@ if ($SmokeCaFixture -or $env:GXOS_NAVIGATOR_SMOKE_CA_FIXTURE -eq "1") {
             Copy-Item -LiteralPath $productionCaSource -Destination $targetCa -Force
         }
         $staged += Get-Item $targetCa
+        $stagedRootCaBundle = $true
         if ($realPublicProbeCaBundleInfo) {
             Write-Host "      staged production CA bundle at /certs/ca-bundle.pem with explicit public-root opt-in material" -ForegroundColor Yellow
         } else {
@@ -711,4 +720,9 @@ if ($ImageSizeMB -lt $minimumMB) {
 
 Write-Host "      Building wallpaper runtime filesystem: $OutputImage" -ForegroundColor Cyan
 Write-Fat32Image $OutputImage $wallpaperDir ($staged | Sort-Object Name) $ImageSizeMB -SmokeCaFixture:$SmokeCaFixture
+if (-not $stagedRootCaBundle -and $null -ne $TrackedOutputRootCaBundleBytes) {
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $TrackedOutputRootCaBundlePath) | Out-Null
+    [System.IO.File]::WriteAllBytes($TrackedOutputRootCaBundlePath, $TrackedOutputRootCaBundleBytes)
+    Write-Host "      restored tracked output-only /certs/ca-bundle.pem after image generation" -ForegroundColor DarkGray
+}
 Write-Host "      Wallpaper runtime filesystem ready at /system/wall/" -ForegroundColor Green
