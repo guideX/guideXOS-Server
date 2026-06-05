@@ -326,6 +326,8 @@ namespace {
 constexpr const char* kBareMetalCaBundlePath = "/certs/ca-bundle.pem";
 constexpr const char* kBareMetalUserCaBundlePath = "/config/certs/ca-bundle.pem";
 constexpr const char* kBareMetalHttpsPolicyPath = "/config/navigator/https-policy.txt";
+constexpr const char* kBareMetalUserCaBundleCompatPath = "/config/certs/CABUNDLE.PEM";
+constexpr const char* kBareMetalHttpsPolicyCompatPath = "/config/navigator/HTTPSPOL.TXT";
 constexpr const char* kBareMetalMissingCaProbePath = "/certs/ca-bundle.missing";
 constexpr const char* kBareMetalSmokeFixtureMarker = "guideXOS Navigator smoke-only root CA fixture";
 constexpr const char* kHostedCaBundlePath = "(Windows trust store)";
@@ -336,8 +338,6 @@ constexpr const char* kProductionBundleTrustStoreDetail = "Production trust stor
 constexpr const char* kNoTrustStoreDetail = "No bare-metal trust store is provisioned at the selected CA bundle path.";
 constexpr const char* kLocalSmokeOnlyPolicyBlocker =
     "Broad validated Navigator https:// remains disabled until a non-smoke trust store policy is explicitly enabled.";
-constexpr const char* kTransportPolicyDeferredBlocker =
-    "Broader validated Navigator https:// transport is still gated in this milestone.";
 constexpr const char* kBareMetalHttpsPolicyDefaultSource = "default-safe policy (no /config/navigator/https-policy.txt)";
 constexpr const char* kBareMetalHttpsPolicyFileSource = "VFS config file /config/navigator/https-policy.txt";
 constexpr const char* kHostedHttpsPolicySource = "hosted Schannel default";
@@ -761,6 +761,14 @@ bool hook_ready(GxosTlsHookStatus status)
     return status == GxosTlsHookStatus::Ready;
 }
 
+#if defined(GXOS_BARE_METAL)
+const char* compat_ca_bundle_path_for_policy(GxosValidatedHttpsPolicyState state);
+const char* fallback_path_if_missing(const char* primaryPath,
+                                     const char* compatPath,
+                                     kernel::vfs::FileInfo* info,
+                                     kernel::vfs::Status* statStatus);
+#endif
+
 #if GXOS_TLS_MBEDTLS_RUNTIME_INCLUDED
 size_t count_ca_chain(const mbedtls_x509_crt* crt)
 {
@@ -814,7 +822,12 @@ BareMetalHttpsPolicyConfigInfo bare_metal_https_policy_config_info()
     state.info.selectedState = GxosValidatedHttpsPolicyState::Disabled;
 
     kernel::vfs::FileInfo info{};
-    const kernel::vfs::Status statStatus = kernel::vfs::stat(kBareMetalHttpsPolicyPath, &info);
+    kernel::vfs::Status statStatus = kernel::vfs::VFS_ERR_INVALID;
+    const char* configReadPath = fallback_path_if_missing(
+        kBareMetalHttpsPolicyPath,
+        kBareMetalHttpsPolicyCompatPath,
+        &info,
+        &statStatus);
     if (statStatus == kernel::vfs::VFS_ERR_NOT_FOUND || statStatus == kernel::vfs::VFS_ERR_NOT_MOUNT) {
         return state.info;
     }
@@ -834,7 +847,7 @@ BareMetalHttpsPolicyConfigInfo bare_metal_https_policy_config_info()
     }
 
     char buffer[4097];
-    const int32_t bytesRead = kernel::vfs::read_file(kBareMetalHttpsPolicyPath,
+    const int32_t bytesRead = kernel::vfs::read_file(configReadPath,
         reinterpret_cast<uint8_t*>(buffer), 4096u);
     if (bytesRead <= 0) {
         copy_text(state.error, sizeof(state.error),
@@ -876,6 +889,32 @@ const char* selected_ca_bundle_path_for_policy(GxosValidatedHttpsPolicyState sta
     return policy_state_supports_user_trust(state)
         ? kBareMetalUserCaBundlePath
         : kBareMetalCaBundlePath;
+}
+
+const char* compat_ca_bundle_path_for_policy(GxosValidatedHttpsPolicyState state)
+{
+    return policy_state_supports_user_trust(state)
+        ? kBareMetalUserCaBundleCompatPath
+        : nullptr;
+}
+
+const char* fallback_path_if_missing(const char* primaryPath,
+                                     const char* compatPath,
+                                     kernel::vfs::FileInfo* info,
+                                     kernel::vfs::Status* statStatus)
+{
+    if (!primaryPath || !info || !statStatus) return primaryPath;
+
+    *statStatus = kernel::vfs::stat(primaryPath, info);
+    if ((*statStatus == kernel::vfs::VFS_ERR_NOT_FOUND ||
+         *statStatus == kernel::vfs::VFS_ERR_NOT_MOUNT) &&
+        compatPath && compatPath[0] != '\0') {
+        *statStatus = kernel::vfs::stat(compatPath, info);
+        if (*statStatus == kernel::vfs::VFS_OK) {
+            return compatPath;
+        }
+    }
+    return primaryPath;
 }
 #endif
 
@@ -1044,16 +1083,18 @@ GxosValidatedHttpsPolicyInfo make_validated_https_policy_info()
     const GxosTrustStorePolicyInfo trustPolicy = make_trust_store_policy_info();
     const bool localSmokeReady = compute_local_smoke_https_blocker() == nullptr;
     const bool nonSmokeReady = non_smoke_https_prerequisites_ready(trustPolicy);
-    GxosValidatedHttpsPolicyState selectedState = config.selectedState;
+    const GxosValidatedHttpsPolicyState reportedSelectedState = config.selectedState;
+    GxosValidatedHttpsPolicyState effectiveSelection = config.selectedState;
     if (!config.explicitSelection &&
         trustPolicy.state == GxosTrustStorePolicyState::TrustStoreParsed &&
         trustPolicy.source == GxosTrustStoreSource::SmokeFixtureTrust &&
         localSmokeReady) {
-        selectedState = GxosValidatedHttpsPolicyState::LocalSmokeOnly;
+        effectiveSelection = GxosValidatedHttpsPolicyState::LocalSmokeOnly;
     }
 
     GxosValidatedHttpsPolicyState effectiveState = GxosValidatedHttpsPolicyState::Disabled;
     bool localAllowlistEnabled = false;
+    bool broadPublicHttpsEnabled = false;
     bool productionReady = false;
     const char* localAllowReason = localSmokeReady
         ? "Local smoke HTTPS prerequisites are satisfied."
@@ -1062,7 +1103,7 @@ GxosValidatedHttpsPolicyInfo make_validated_https_policy_info()
     const char* blocker = trustPolicy.error ? trustPolicy.error : "Trust-store policy is not ready.";
     const char* error = config.error;
 
-    if (selectedState == GxosValidatedHttpsPolicyState::LocalSmokeOnly &&
+    if (effectiveSelection == GxosValidatedHttpsPolicyState::LocalSmokeOnly &&
         trustPolicy.state == GxosTrustStorePolicyState::TrustStoreParsed &&
         trustPolicy.source == GxosTrustStoreSource::SmokeFixtureTrust &&
         localSmokeReady) {
@@ -1071,7 +1112,7 @@ GxosValidatedHttpsPolicyInfo make_validated_https_policy_info()
         detail = "Controlled guidexos.test HTTPS is validated through the smoke-only trust fixture; broader bare-metal https:// remains disabled.";
         blocker = kLocalSmokeOnlyPolicyBlocker;
         localAllowReason = "Smoke fixture trust and the controlled local HTTPS allowlist are both active.";
-    } else if (selectedState == GxosValidatedHttpsPolicyState::UserTrustStoreDevMode) {
+    } else if (effectiveSelection == GxosValidatedHttpsPolicyState::UserTrustStoreDevMode) {
         if (trustPolicy.source != GxosTrustStoreSource::UserProvidedTrustStore) {
             detail = "User/dev HTTPS policy is selected, but the active trust store is not the user bundle path.";
             blocker = "User/dev HTTPS policy requires /config/certs/ca-bundle.pem.";
@@ -1080,10 +1121,10 @@ GxosValidatedHttpsPolicyInfo make_validated_https_policy_info()
             blocker = trustPolicy.error ? trustPolicy.error : "User/dev HTTPS prerequisites are incomplete.";
         } else {
             effectiveState = GxosValidatedHttpsPolicyState::UserTrustStoreDevMode;
-            detail = "User/dev HTTPS policy is selected and the user CA bundle parsed successfully, but broader non-smoke HTTPS transport remains gated in this milestone.";
-            blocker = kTransportPolicyDeferredBlocker;
+            detail = "User/dev HTTPS policy is selected, the user CA bundle parsed successfully, and validated bare-metal HTTPS is enabled for explicit dev/test policy scope targets.";
+            blocker = nullptr;
         }
-    } else if (selectedState == GxosValidatedHttpsPolicyState::ProductionValidated) {
+    } else if (effectiveSelection == GxosValidatedHttpsPolicyState::ProductionValidated) {
         if (trustPolicy.source != GxosTrustStoreSource::ProductionBundle) {
             detail = "Production HTTPS policy is selected, but the active trust store is not a production bundle.";
             blocker = "Production HTTPS policy requires a non-smoke bundle at /certs/ca-bundle.pem.";
@@ -1094,9 +1135,10 @@ GxosValidatedHttpsPolicyInfo make_validated_https_policy_info()
             detail = "Production HTTPS policy is selected, but bare-metal TLS prerequisites are not yet complete.";
             blocker = trustPolicy.error ? trustPolicy.error : "Production HTTPS prerequisites are incomplete.";
         } else {
+            effectiveState = GxosValidatedHttpsPolicyState::ProductionValidated;
             productionReady = true;
-            detail = "Production HTTPS prerequisites are satisfied, but broader Navigator HTTPS transport remains gated in this milestone.";
-            blocker = kTransportPolicyDeferredBlocker;
+            detail = "Production HTTPS prerequisites are satisfied and validated bare-metal HTTPS is enabled for explicit policy-scoped targets.";
+            blocker = nullptr;
         }
     } else {
         if (trustPolicy.state == GxosTrustStorePolicyState::TrustStoreParsed &&
@@ -1113,10 +1155,10 @@ GxosValidatedHttpsPolicyInfo make_validated_https_policy_info()
 
     return {
         effectiveState,
-        selectedState,
+        reportedSelectedState,
         localAllowlistEnabled,
         localSmokeReady,
-        false,
+        broadPublicHttpsEnabled,
         productionReady,
         config.configPath,
         config.configSource,
@@ -1793,11 +1835,10 @@ const char* compute_tls_prerequisites_blocker()
 
     const GxosValidatedHttpsPolicyInfo httpsPolicy = make_validated_https_policy_info();
     if (httpsPolicy.state != GxosValidatedHttpsPolicyState::ProductionValidated) {
+        if (httpsPolicy.state == GxosValidatedHttpsPolicyState::UserTrustStoreDevMode) {
+            return "Validated HTTPS is enabled only for explicit dev/test policy scope; production TLS readiness remains disabled.";
+        }
         return httpsPolicy.blocker ? httpsPolicy.blocker : "Broader validated HTTPS policy is disabled.";
-    }
-
-    if (backend.status != GxosTlsBackendStatus::ReadyForValidatedNavigation) {
-        return "TLS handshake is not wired into Navigator yet";
     }
 
     return nullptr;
@@ -1884,9 +1925,15 @@ bool gxos_ca_store_load_once()
     const GxosValidatedHttpsPolicyState selectedPolicyState =
         config.explicitSelection ? config.selectedState : GxosValidatedHttpsPolicyState::Disabled;
     const char* activeCaBundlePath = selected_ca_bundle_path_for_policy(selectedPolicyState);
+    const char* activeCaBundleReadPath = activeCaBundlePath;
 
     kernel::vfs::FileInfo info{};
-    const kernel::vfs::Status statStatus = kernel::vfs::stat(activeCaBundlePath, &info);
+    kernel::vfs::Status statStatus = kernel::vfs::VFS_ERR_INVALID;
+    activeCaBundleReadPath = fallback_path_if_missing(
+        activeCaBundlePath,
+        compat_ca_bundle_path_for_policy(selectedPolicyState),
+        &info,
+        &statStatus);
     if (statStatus == kernel::vfs::VFS_ERR_NOT_FOUND ||
         statStatus == kernel::vfs::VFS_ERR_NOT_MOUNT) {
         state.info = {
@@ -1957,7 +2004,7 @@ bool gxos_ca_store_load_once()
     }
 
     const int32_t bytesRead = kernel::vfs::read_file(
-        activeCaBundlePath,
+        activeCaBundleReadPath,
         runtime_state().bytes,
         static_cast<uint32_t>(kGxosMaxCaStoreBytes));
     if (bytesRead < 0 || static_cast<uint64_t>(bytesRead) != info.size) {
@@ -2520,7 +2567,7 @@ bool gxos_tls_smoke_https_request(const char* sniHostname,
 bool gxos_tls_certificate_validation_policy_enabled()
 {
 #if defined(GXOS_BARE_METAL)
-    return gxos_validated_https_policy_info().state == GxosValidatedHttpsPolicyState::ProductionValidated;
+    return gxos_validated_https_policy_info().state != GxosValidatedHttpsPolicyState::Disabled;
 #else
     return true;
 #endif
@@ -2535,11 +2582,11 @@ const char* gxos_tls_certificate_validation_policy()
     }
     if (policy.selectedState == GxosValidatedHttpsPolicyState::UserTrustStoreDevMode &&
         policy.state == GxosValidatedHttpsPolicyState::UserTrustStoreDevMode) {
-        return "dev-mode scaffolded; a non-smoke trust store may be present, but broader validated bare-metal https:// is still intentionally disabled";
+        return "dev-mode enabled; validated bare-metal HTTPS requires the user trust store, secure RNG, plausible wall clock, CA chain validation, hostname validation, and remains restricted to explicit dev/test policy scope targets";
     }
     if (policy.selectedState == GxosValidatedHttpsPolicyState::ProductionValidated &&
         policy.productionReady) {
-        return "production-selected; CA, hostname, RNG, and wall-clock prerequisites are satisfied, but broader validated bare-metal https:// remains intentionally gated in this milestone";
+        return "production validated HTTPS enabled; production CA, hostname validation, secure RNG, and plausible wall clock are required, and plaintext fallback remains disabled";
     }
     if (policy.selectedState == GxosValidatedHttpsPolicyState::ProductionValidated) {
         return "production-selected but not effective; broader validated bare-metal https:// remains fail-closed until the production CA bundle and TLS prerequisites are complete";

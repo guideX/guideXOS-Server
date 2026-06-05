@@ -83,26 +83,97 @@
 #endif
 
 #if defined(GXOS_NAVIGATOR_HTTP_SMOKE_ACTIVE)
-static void mount_navigator_smoke_ca_fixture_if_available()
+static bool navigator_smoke_mount_path_exists_exact(const char* path)
+{
+    if (!path) return false;
+    const uint8_t mountCount = kernel::vfs::mount_count();
+    for (uint8_t index = 0; index < mountCount; ++index) {
+        const kernel::vfs::MountPoint* mount = kernel::vfs::get_mount_by_index(index);
+        if (!mount || !mount->active) continue;
+        const char* mountPath = mount->path;
+        if (!mountPath) continue;
+
+        size_t mountLen = 0;
+        while (mountPath[mountLen]) ++mountLen;
+
+        size_t pathLen = 0;
+        while (path[pathLen]) ++pathLen;
+
+        if (mountLen != pathLen) continue;
+
+        bool same = true;
+        for (size_t i = 0; i < mountLen; ++i) {
+            if (mountPath[i] != path[i]) {
+                same = false;
+                break;
+            }
+        }
+        if (same) return true;
+    }
+    return false;
+}
+
+static void mount_navigator_smoke_alias_if_available(const char* aliasPath,
+                                                     const char* sourcePath,
+                                                     const char* missingMessage,
+                                                     const char* alreadyMountedMessage,
+                                                     const char* failureMessage,
+                                                     const char* successMessage)
 {
     kernel::vfs::FileInfo info{};
-    const kernel::vfs::Status certsStatus = kernel::vfs::stat("/system/certs", &info);
-    if (certsStatus != kernel::vfs::VFS_OK || info.type != kernel::vfs::FILE_TYPE_DIRECTORY) {
-        kernel::serial::puts("[KERNEL] Navigator smoke CA source directory unavailable at /system/certs\n");
+    const kernel::vfs::Status sourceStatus = kernel::vfs::stat(sourcePath, &info);
+    if (sourceStatus != kernel::vfs::VFS_OK || info.type != kernel::vfs::FILE_TYPE_DIRECTORY) {
+        kernel::serial::puts(missingMessage);
         return;
     }
 
-    if (kernel::vfs::get_mount("/certs")) {
-        kernel::serial::puts("[KERNEL] Navigator smoke /certs mount already active\n");
+    if (navigator_smoke_mount_path_exists_exact(aliasPath)) {
+        kernel::serial::puts(alreadyMountedMessage);
         return;
     }
 
-    if (kernel::vfs::mount_alias("/certs", "/system/certs") == 0xFF) {
-        kernel::serial::puts("[KERNEL] Navigator smoke failed to mount /certs from /system/certs\n");
+    if (kernel::vfs::mount_alias(aliasPath, sourcePath) == 0xFF) {
+        kernel::serial::puts(failureMessage);
         return;
     }
 
-    kernel::serial::puts("[KERNEL] Navigator smoke mounted /certs from boot ramdisk path /system/certs\n");
+    kernel::serial::puts(successMessage);
+}
+
+static void mount_navigator_smoke_ca_fixture_if_available()
+{
+    mount_navigator_smoke_alias_if_available(
+        "/certs",
+        "/system/certs",
+        "[KERNEL] Navigator smoke CA source directory unavailable at /system/certs\n",
+        "[KERNEL] Navigator smoke /certs mount already active\n",
+        "[KERNEL] Navigator smoke failed to mount /certs from /system/certs\n",
+        "[KERNEL] Navigator smoke mounted /certs from boot ramdisk path /system/certs\n");
+}
+
+static void mount_navigator_smoke_config_if_available()
+{
+    mount_navigator_smoke_alias_if_available(
+        "/config",
+        "/system/config",
+        "[KERNEL] Navigator smoke config source directory unavailable at /system/config\n",
+        "[KERNEL] Navigator smoke /config mount already active\n",
+        "[KERNEL] Navigator smoke failed to mount /config from /system/config\n",
+        "[KERNEL] Navigator smoke mounted /config from boot ramdisk path /system/config\n");
+    mount_navigator_smoke_alias_if_available(
+        "/config/certs",
+        "/system/config/certs",
+        "[KERNEL] Navigator smoke config certs directory unavailable at /system/config/certs\n",
+        "[KERNEL] Navigator smoke /config/certs mount already active\n",
+        "[KERNEL] Navigator smoke failed to mount /config/certs from /system/config/certs\n",
+        "[KERNEL] Navigator smoke mounted /config/certs from boot ramdisk path /system/config/certs\n");
+    mount_navigator_smoke_alias_if_available(
+        "/config/navigator",
+        "/system/config/navigator",
+        "[KERNEL] Navigator smoke config navigator directory unavailable at /system/config/navigator\n",
+        "[KERNEL] Navigator smoke /config/navigator mount already active\n",
+        "[KERNEL] Navigator smoke failed to mount /config/navigator from /system/config/navigator\n",
+        "[KERNEL] Navigator smoke mounted /config/navigator from boot ramdisk path /system/config/navigator\n");
 }
 #endif
 
@@ -284,6 +355,7 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
             kernel::desktop::set_wallpaper_image_pack(reinterpret_cast<const void*>(static_cast<uintptr_t>(bootinfo->RamdiskBase)), bootinfo->RamdiskSize);
 #if defined(GXOS_NAVIGATOR_HTTP_SMOKE_ACTIVE)
             mount_navigator_smoke_ca_fixture_if_available();
+            mount_navigator_smoke_config_if_available();
 #endif
         }
 

@@ -125,6 +125,18 @@ class NavigatorSmokeHandler(BaseHTTPRequestHandler):
             self.write_bytes(200, "text/html; charset=utf-8",
                              b"<html><body><h1>Kernel TLS Basic</h1><p>local handshake ok</p></body></html>")
             return
+        if path == "/policy-validated/ok.html":
+            if host.split(":", 1)[0].lower() != "guidexos.test":
+                self.write_bytes(421, "text/html; charset=utf-8",
+                                 b"<html><body><h1>Wrong TLS Host</h1><p>expected guidexos.test</p></body></html>")
+                return
+            self.write_bytes(200, "text/html; charset=utf-8",
+                             b"<html><body><h1>Policy Validated TLS OK</h1><p>explicit HTTPS policy path exercised</p></body></html>")
+            return
+        if path == "/policy-validated/redirect-downgrade":
+            port = self.http_port or 8080
+            self.write_redirect(302, f"http://10.0.2.2:{port}/navigator-smoke/insecure-downgrade")
+            return
         if path == "/navigator-smoke/final.html":
             self.write_bytes(200, "text/html; charset=utf-8",
                              b"<html><body><h1>Kernel HTTP Final</h1><p>redirect target</p></body></html>")
@@ -150,6 +162,12 @@ class NavigatorSmokeHandler(BaseHTTPRequestHandler):
                     redirect_host = "localhost"
                     redirect_path = "/navigator-smoke/final.html"
                 self.write_redirect(302, f"https://{redirect_host}:{self.https_port}{redirect_path}")
+            else:
+                self.write_redirect(302, "https://example.com/secure")
+            return
+        if path == "/navigator-smoke/redirect-to-policy-validated-https":
+            if self.https_port:
+                self.write_redirect(302, f"https://guidexos.test:{self.https_port}/policy-validated/ok.html")
             else:
                 self.write_redirect(302, "https://example.com/secure")
             return

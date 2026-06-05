@@ -478,6 +478,27 @@ public:
                                               char* error, int errorLen,
                                               int* plainTcpConnectAttempts,
                                               int* tlsTcpConnectAttempts);
+    static void smokeCaptureHttpsNavigation(const char* url,
+                                            char* requestedUrl, int requestedUrlLen,
+                                            int* statusCode,
+                                            char* contentType, int contentTypeLen,
+                                            int* bodyBytes,
+                                            int* parsedBlocks,
+                                            char* error, int errorLen,
+                                            char* finalUrl, int finalUrlLen,
+                                            int* redirectCount,
+                                            int* plainTcpConnectAttempts,
+                                            int* tlsTcpConnectAttempts,
+                                            uint32_t* tlsVerifyFlags,
+                                            char* tlsSniHost, int tlsSniHostLen,
+                                            char* tlsProtocol, int tlsProtocolLen,
+                                            char* tlsCipherSuite, int tlsCipherSuiteLen,
+                                            char* transportSelection, int transportSelectionLen,
+                                            char* tlsStatus, int tlsStatusLen,
+                                            bool* tlsValidated,
+                                            bool* tlsHostnameValidated,
+                                            bool* tlsAllowlistLocalOnly,
+                                            char* sourceType, int sourceTypeLen);
 
 private:
     enum NavigatorMouseMode {

@@ -30,6 +30,7 @@ enum class HttpByteStreamTransportSelection {
     UnsupportedScheme = 0,
     PlainTcpHttp,
     LocalAllowlistedTlsHttps,
+    PolicyValidatedTlsHttps,
     BlockedHttpsGeneral,
     BlockedPolicy,
 };
@@ -70,6 +71,7 @@ inline const char* httpSharedTransportSelectionName(HttpByteStreamTransportSelec
     case HttpByteStreamTransportSelection::UnsupportedScheme: return "UnsupportedScheme";
     case HttpByteStreamTransportSelection::PlainTcpHttp: return "PlainTcpHttp";
     case HttpByteStreamTransportSelection::LocalAllowlistedTlsHttps: return "LocalAllowlistedTlsHttps";
+    case HttpByteStreamTransportSelection::PolicyValidatedTlsHttps: return "PolicyValidatedTlsHttps";
     case HttpByteStreamTransportSelection::BlockedHttpsGeneral: return "BlockedHttpsGeneral";
     case HttpByteStreamTransportSelection::BlockedPolicy: return "BlockedPolicy";
     default: return "Unknown";

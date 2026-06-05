@@ -468,6 +468,9 @@ if ($userCaSource) {
     $targetUserCa = Join-Path $configCertsDir "ca-bundle.pem"
     Copy-Item -LiteralPath $userCaSource -Destination $targetUserCa -Force
     $staged += Get-Item $targetUserCa
+    $targetUserCaCompat = Join-Path $configCertsDir "CABUNDLE.PEM"
+    Copy-Item -LiteralPath $userCaSource -Destination $targetUserCaCompat -Force
+    $staged += Get-Item $targetUserCaCompat
     Write-Host "      staged user CA bundle at /config/certs/ca-bundle.pem" -ForegroundColor Yellow
 }
 
@@ -478,6 +481,9 @@ if ($httpsPolicyToken) {
     $targetPolicy = Join-Path $configNavigatorDir "https-policy.txt"
     [System.IO.File]::WriteAllText($targetPolicy, $httpsPolicyToken, [System.Text.Encoding]::ASCII)
     $staged += Get-Item $targetPolicy
+    $targetPolicyCompat = Join-Path $configNavigatorDir "HTTPSPOL.TXT"
+    [System.IO.File]::WriteAllText($targetPolicyCompat, $httpsPolicyToken, [System.Text.Encoding]::ASCII)
+    $staged += Get-Item $targetPolicyCompat
     Write-Host "      staged HTTPS policy config at /config/navigator/https-policy.txt ($httpsPolicyToken)" -ForegroundColor Yellow
 }
 
