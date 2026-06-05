@@ -475,9 +475,12 @@ if ($userCaSource) {
 }
 
 $httpsPolicyToken = if ([string]::IsNullOrWhiteSpace($env:GXOS_NAVIGATOR_HTTPS_POLICY)) { $null } else { $env:GXOS_NAVIGATOR_HTTPS_POLICY.Trim() }
-if ($httpsPolicyToken) {
+$httpsFaultModeToken = if ([string]::IsNullOrWhiteSpace($env:GXOS_NAVIGATOR_HTTPS_FAULT_MODE)) { $null } else { $env:GXOS_NAVIGATOR_HTTPS_FAULT_MODE.Trim() }
+if ($httpsPolicyToken -or $httpsFaultModeToken) {
     $configNavigatorDir = Join-Path $configDir "navigator"
     New-Item -ItemType Directory -Force -Path $configNavigatorDir | Out-Null
+}
+if ($httpsPolicyToken) {
     $targetPolicy = Join-Path $configNavigatorDir "https-policy.txt"
     [System.IO.File]::WriteAllText($targetPolicy, $httpsPolicyToken, [System.Text.Encoding]::ASCII)
     $staged += Get-Item $targetPolicy
@@ -485,6 +488,15 @@ if ($httpsPolicyToken) {
     [System.IO.File]::WriteAllText($targetPolicyCompat, $httpsPolicyToken, [System.Text.Encoding]::ASCII)
     $staged += Get-Item $targetPolicyCompat
     Write-Host "      staged HTTPS policy config at /config/navigator/https-policy.txt ($httpsPolicyToken)" -ForegroundColor Yellow
+}
+if ($httpsFaultModeToken) {
+    $targetFaultMode = Join-Path $configNavigatorDir "https-fault-mode.txt"
+    [System.IO.File]::WriteAllText($targetFaultMode, $httpsFaultModeToken, [System.Text.Encoding]::ASCII)
+    $staged += Get-Item $targetFaultMode
+    $targetFaultModeCompat = Join-Path $configNavigatorDir "HTTPSFLT.TXT"
+    [System.IO.File]::WriteAllText($targetFaultModeCompat, $httpsFaultModeToken, [System.Text.Encoding]::ASCII)
+    $staged += Get-Item $targetFaultModeCompat
+    Write-Host "      staged HTTPS smoke fault mode at /config/navigator/https-fault-mode.txt ($httpsFaultModeToken)" -ForegroundColor Yellow
 }
 
 foreach ($name in $WallpaperNames) {

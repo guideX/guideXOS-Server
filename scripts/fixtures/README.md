@@ -24,3 +24,19 @@ Hosted HTTPS smoke server certificate/key pair for localhost-only test coverage.
 ## navigator-smoke-guidexos.test.crt / navigator-smoke-guidexos.test.key
 
 Bare-metal local HTTPS smoke server certificate/key pair for the QEMU-reachable `guidexos.test` hostname.
+
+## navigator-fault-untrusted-guidexos.test.crt / navigator-fault-untrusted-guidexos.test.key
+
+Bare-metal HTTPS smoke certificate/key pair for deterministic untrusted-root validation failure coverage against the same `guidexos.test` host.
+
+## navigator-fault-expired-guidexos.test.crt / navigator-fault-expired-guidexos.test.key
+
+Bare-metal HTTPS smoke certificate/key pair signed by the validated smoke CA but already expired relative to the QEMU RTC used by kernel smoke.
+
+## navigator-fault-future-guidexos.test.crt / navigator-fault-future-guidexos.test.key
+
+Bare-metal HTTPS smoke certificate/key pair signed by the validated smoke CA but not yet valid. Reserved for future/not-yet-valid fault coverage.
+
+## navigator-malformed-ca-bundle.pem / navigator-empty-ca-bundle.pem
+
+Smoke-only malformed and empty CA bundle fixtures for deterministic fail-closed trust-store parser coverage.

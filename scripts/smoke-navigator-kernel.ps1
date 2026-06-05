@@ -15,6 +15,7 @@ $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $downloadsState = Save-NavigatorSmokeDirectoryState -LiteralPath (Join-Path $Root "downloads")
 $ramdiskState = Save-NavigatorSmokeFileState -LiteralPath (Join-Path $Root "ESP\\ramdisk.img")
 $wallpaperPackState = Save-NavigatorSmokeDirectoryState -LiteralPath (Join-Path $Root "out\\wallpaper-pack")
+$wallpaperPackCaBundleState = Save-NavigatorSmokeFileState -LiteralPath (Join-Path $Root "out\\wallpaper-pack\\certs\\ca-bundle.pem")
 
 function Invoke-KernelBuildForSmoke {
     param([string]$ExtraCFlags)
@@ -163,9 +164,30 @@ $validatedCaFixture = Join-Path $Root "scripts\fixtures\navigator-validated-root
 if (-not (Test-Path $validatedCaFixture)) {
     throw "Navigator validated CA fixture not found: $validatedCaFixture"
 }
+$emptyCaFixture = Join-Path $Root "scripts\fixtures\navigator-empty-ca-bundle.pem"
+if (-not (Test-Path $emptyCaFixture)) {
+    throw "Navigator empty CA fixture not found: $emptyCaFixture"
+}
+$malformedCaFixture = Join-Path $Root "scripts\fixtures\navigator-malformed-ca-bundle.pem"
+if (-not (Test-Path $malformedCaFixture)) {
+    throw "Navigator malformed CA fixture not found: $malformedCaFixture"
+}
+$defaultHttpsCert = Join-Path $Root "scripts\fixtures\navigator-smoke-guidexos.test.crt"
+$defaultHttpsKey = Join-Path $Root "scripts\fixtures\navigator-smoke-guidexos.test.key"
+$untrustedHttpsCert = Join-Path $Root "scripts\fixtures\navigator-fault-untrusted-guidexos.test.crt"
+$untrustedHttpsKey = Join-Path $Root "scripts\fixtures\navigator-fault-untrusted-guidexos.test.key"
+$expiredHttpsCert = Join-Path $Root "scripts\fixtures\navigator-fault-expired-guidexos.test.crt"
+$expiredHttpsKey = Join-Path $Root "scripts\fixtures\navigator-fault-expired-guidexos.test.key"
+foreach ($path in @($defaultHttpsCert, $defaultHttpsKey, $untrustedHttpsCert, $untrustedHttpsKey, $expiredHttpsCert, $expiredHttpsKey)) {
+    if (-not (Test-Path $path)) {
+        throw "Navigator HTTPS smoke fixture not found: $path"
+    }
+}
 Write-Host "Kernel smoke fixtures available:"
 Write-Host "  smoke-only CA bundle: $smokeCaFixture"
 Write-Host "  validated policy CA bundle: $validatedCaFixture"
+Write-Host "  malformed CA bundle: $malformedCaFixture"
+Write-Host "  empty CA bundle: $emptyCaFixture"
 
 $startup = Join-Path $esp "startup.nsh"
 $createdStartup = $false
@@ -174,26 +196,51 @@ if (-not (Test-Path $startup)) {
     $createdStartup = $true
 }
 
-$httpLog = Join-Path $LogDir "navigator-kernel-http-$stamp.log"
-$httpErrLog = Join-Path $LogDir "navigator-kernel-http-$stamp.err.log"
-$httpsLog = Join-Path $LogDir "navigator-kernel-https-$stamp.log"
-$httpsErrLog = Join-Path $LogDir "navigator-kernel-https-$stamp.err.log"
 $httpServer = Join-Path $Root "scripts\navigator_kernel_http_server.py"
-$httpsCert = Join-Path $Root "scripts\fixtures\navigator-smoke-guidexos.test.crt"
-$httpsKey = Join-Path $Root "scripts\fixtures\navigator-smoke-guidexos.test.key"
-if (-not (Test-Path $httpsCert)) { throw "Navigator TLS smoke certificate not found: $httpsCert" }
-if (-not (Test-Path $httpsKey)) { throw "Navigator TLS smoke private key not found: $httpsKey" }
-Clear-NavigatorKernelSmokePortConflicts -Ports @(8080, 8443)
-$httpArgs = @("`"$httpServer`"", "--port", "8080", "--host", "0.0.0.0", "--root", "`"$Root`"", "--http-port", "8080", "--https-port", "8443")
-$httpProc = Start-Process -FilePath $python -ArgumentList $httpArgs -PassThru -WindowStyle Hidden -RedirectStandardOutput $httpLog -RedirectStandardError $httpErrLog
-$httpsArgs = @("`"$httpServer`"", "--port", "8443", "--host", "0.0.0.0", "--root", "`"$Root`"", "--http-port", "8080", "--https-port", "8443", "--tls-cert", "`"$httpsCert`"", "--tls-key", "`"$httpsKey`"")
-$httpsProc = Start-Process -FilePath $python -ArgumentList $httpsArgs -PassThru -WindowStyle Hidden -RedirectStandardOutput $httpsLog -RedirectStandardError $httpsErrLog
-Start-Sleep -Milliseconds 800
-if ($httpProc.HasExited) {
-    throw "local HTTP smoke server exited early; see $httpLog"
+
+function Start-NavigatorKernelSmokeServers {
+    param(
+        [Parameter(Mandatory = $true)][string]$ScenarioName,
+        [Parameter(Mandatory = $true)][string]$TlsCert,
+        [Parameter(Mandatory = $true)][string]$TlsKey
+    )
+
+    Clear-NavigatorKernelSmokePortConflicts -Ports @(8080, 8443)
+
+    $httpLog = Join-Path $LogDir "navigator-kernel-http-$stamp-$ScenarioName.log"
+    $httpErrLog = Join-Path $LogDir "navigator-kernel-http-$stamp-$ScenarioName.err.log"
+    $httpsLog = Join-Path $LogDir "navigator-kernel-https-$stamp-$ScenarioName.log"
+    $httpsErrLog = Join-Path $LogDir "navigator-kernel-https-$stamp-$ScenarioName.err.log"
+
+    $httpArgs = @("`"$httpServer`"", "--port", "8080", "--host", "0.0.0.0", "--root", "`"$Root`"", "--http-port", "8080", "--https-port", "8443")
+    $httpProc = Start-Process -FilePath $python -ArgumentList $httpArgs -PassThru -WindowStyle Hidden -RedirectStandardOutput $httpLog -RedirectStandardError $httpErrLog
+    $httpsArgs = @("`"$httpServer`"", "--port", "8443", "--host", "0.0.0.0", "--root", "`"$Root`"", "--http-port", "8080", "--https-port", "8443", "--tls-cert", "`"$TlsCert`"", "--tls-key", "`"$TlsKey`"")
+    $httpsProc = Start-Process -FilePath $python -ArgumentList $httpsArgs -PassThru -WindowStyle Hidden -RedirectStandardOutput $httpsLog -RedirectStandardError $httpsErrLog
+    Start-Sleep -Milliseconds 800
+    if ($httpProc.HasExited) {
+        throw "local HTTP smoke server exited early; see $httpLog"
+    }
+    if ($httpsProc.HasExited) {
+        throw "local HTTPS smoke server exited early; see $httpsLog"
+    }
+
+    return [pscustomobject]@{
+        HttpProcess = $httpProc
+        HttpsProcess = $httpsProc
+        HttpLog = $httpLog
+        HttpsLog = $httpsLog
+    }
 }
-if ($httpsProc.HasExited) {
-    throw "local HTTPS smoke server exited early; see $httpsLog"
+
+function Stop-NavigatorKernelSmokeServers {
+    param($Servers)
+
+    if ($Servers -and $Servers.HttpProcess -and -not $Servers.HttpProcess.HasExited) {
+        Stop-Process -Id $Servers.HttpProcess.Id -Force -ErrorAction SilentlyContinue
+    }
+    if ($Servers -and $Servers.HttpsProcess -and -not $Servers.HttpsProcess.HasExited) {
+        Stop-Process -Id $Servers.HttpsProcess.Id -Force -ErrorAction SilentlyContinue
+    }
 }
 
 function Set-ProcessEnvValue {
@@ -212,6 +259,7 @@ function Set-ProcessEnvValue {
 $navigatorSmokeEnvNames = @(
     "GXOS_NAVIGATOR_SMOKE_CA_FIXTURE",
     "GXOS_NAVIGATOR_HTTPS_POLICY",
+    "GXOS_NAVIGATOR_HTTPS_FAULT_MODE",
     "GXOS_NAVIGATOR_USER_CA_BUNDLE_SOURCE",
     "GXOS_NAVIGATOR_PRODUCTION_CA_BUNDLE_SOURCE"
 )
@@ -229,6 +277,7 @@ function Restore-NavigatorKernelSmokeEnvironment {
 function Invoke-NavigatorKernelSmokeRamdiskStage {
     param(
         [AllowNull()][string]$HttpsPolicy,
+        [AllowNull()][string]$HttpsFaultMode,
         [AllowNull()][string]$UserCaSource,
         [AllowNull()][string]$ProductionCaSource,
         [bool]$UseSmokeFixture
@@ -236,9 +285,11 @@ function Invoke-NavigatorKernelSmokeRamdiskStage {
 
     Set-ProcessEnvValue -Name "GXOS_NAVIGATOR_SMOKE_CA_FIXTURE" -Value ($(if ($UseSmokeFixture) { "1" } else { $null }))
     Set-ProcessEnvValue -Name "GXOS_NAVIGATOR_HTTPS_POLICY" -Value $HttpsPolicy
+    Set-ProcessEnvValue -Name "GXOS_NAVIGATOR_HTTPS_FAULT_MODE" -Value $HttpsFaultMode
     Set-ProcessEnvValue -Name "GXOS_NAVIGATOR_USER_CA_BUNDLE_SOURCE" -Value $UserCaSource
     Set-ProcessEnvValue -Name "GXOS_NAVIGATOR_PRODUCTION_CA_BUNDLE_SOURCE" -Value $ProductionCaSource
 
+    Wait-NavigatorSmokeFileUnlock -LiteralPath (Join-Path $Root "ESP\\ramdisk.img")
     $packScript = Join-Path $Root "scripts\generate-wallpaper-pack.ps1"
     & $packScript -InputDir (Join-Path $Root "assets\Backgrounds") `
         -OutputDir (Join-Path $Root "out\wallpaper-pack") `
@@ -291,6 +342,7 @@ function Invoke-NavigatorKernelSmokeQemuPass {
             Wait-Process -Id $proc.Id -Timeout 5 -ErrorAction SilentlyContinue
         }
     } finally {
+        Wait-NavigatorSmokeFileUnlock -LiteralPath (Join-Path $Root "ESP\\ramdisk.img")
         Start-Sleep -Milliseconds 300
     }
 
@@ -300,6 +352,44 @@ function Invoke-NavigatorKernelSmokeQemuPass {
         SerialLog = $serialLog
         Output = $output
     }
+}
+
+function New-NavigatorOversizedCaBundleFixture {
+    $fixturePath = Join-Path $LogDir "navigator-oversized-ca-bundle-$stamp.pem"
+    $seed = Get-Content -Raw $validatedCaFixture
+    $builder = New-Object System.Text.StringBuilder
+    while ($builder.Length -le (540KB)) {
+        [void]$builder.Append($seed)
+    }
+    [System.IO.File]::WriteAllText($fixturePath, $builder.ToString(), [System.Text.Encoding]::ASCII)
+    return $fixturePath
+}
+
+function Wait-NavigatorSmokeFileUnlock {
+    param(
+        [Parameter(Mandatory = $true)][string]$LiteralPath,
+        [int]$TimeoutMilliseconds = 10000
+    )
+
+    if (-not (Test-Path -LiteralPath $LiteralPath)) {
+        return
+    }
+
+    $deadline = (Get-Date).AddMilliseconds($TimeoutMilliseconds)
+    do {
+        try {
+            $stream = [System.IO.File]::Open($LiteralPath,
+                [System.IO.FileMode]::Open,
+                [System.IO.FileAccess]::ReadWrite,
+                [System.IO.FileShare]::None)
+            $stream.Dispose()
+            return
+        } catch {
+            Start-Sleep -Milliseconds 200
+        }
+    } while ((Get-Date) -lt $deadline)
+
+    throw "Timed out waiting for file unlock: $LiteralPath"
 }
 
 function Test-NavigatorKernelSmokeOutput {
@@ -358,8 +448,10 @@ $commonChecks = @(
     "[NAVIGATOR-SMOKE] tls_smoke.result=PASS",
     "[NAVIGATOR-SMOKE] https.case.redirect_allowlisted.result=PASS",
     "[NAVIGATOR-SMOKE] tls_smoke.failure.result=PASS",
+    "[NAVIGATOR-SMOKE] https.case.local_scope_block.result=PASS",
     "[NAVIGATOR-SMOKE] https.case.direct_unsupported.result=PASS",
     "[NAVIGATOR-SMOKE] https.case.redirect_public_unsupported.result=PASS",
+    "[NAVIGATOR-SMOKE] https.case.policy_scope_redirect_block.result=PASS",
     "[NAVIGATOR-SMOKE] http.case.basic.result=PASS",
     "[NAVIGATOR-SMOKE] http.case.relative_redirect.result=PASS",
     "[NAVIGATOR-SMOKE] http.case.absolute_redirect.result=PASS",
@@ -386,23 +478,43 @@ $commonChecks = @(
 $commonRegexChecks = @{
     '\[NAVIGATOR-SMOKE\] tls_prereq\.wall_clock_epoch=[1-9][0-9]+' = "[NAVIGATOR-SMOKE] tls_prereq.wall_clock_epoch=<positive Unix seconds>"
     '\[NAVIGATOR-SMOKE\] tls_prereq\.wall_clock_utc=20[2-9][0-9]-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z' = "[NAVIGATOR-SMOKE] tls_prereq.wall_clock_utc=<plausible UTC date>"
+}
+
+$localTlsSuccessRegexChecks = @{
     '\[NAVIGATOR-SMOKE\] tls_smoke\.protocol=TLSv1\.[23]' = "[NAVIGATOR-SMOKE] tls_smoke.protocol=<TLSv1.2 or TLSv1.3>"
     '\[NAVIGATOR-SMOKE\] tls_smoke\.cipher_suite=.+' = "[NAVIGATOR-SMOKE] tls_smoke.cipher_suite=<non-empty cipher suite>"
     '\[NAVIGATOR-SMOKE\] tls_smoke\.verify_flags=0' = "[NAVIGATOR-SMOKE] tls_smoke.verify_flags=0"
     '\[NAVIGATOR-SMOKE\] tls_smoke\.failure\.verify_flags=[1-9][0-9]*' = "[NAVIGATOR-SMOKE] tls_smoke.failure.verify_flags=<positive mismatch flags>"
 }
 
+$localTlsSelectedBlockedRegexChecks = @{
+    '\[NAVIGATOR-SMOKE\] tls_smoke\.verify_flags=0' = "[NAVIGATOR-SMOKE] tls_smoke.verify_flags=0"
+    '\[NAVIGATOR-SMOKE\] tls_smoke\.failure\.verify_flags=0' = "[NAVIGATOR-SMOKE] tls_smoke.failure.verify_flags=0"
+}
+
+$localTlsCertFaultRegexChecks = @{
+    '\[NAVIGATOR-SMOKE\] tls_smoke\.verify_flags=[1-9][0-9]*' = "[NAVIGATOR-SMOKE] tls_smoke.verify_flags=<positive failure flags>"
+    '\[NAVIGATOR-SMOKE\] tls_smoke\.failure\.verify_flags=[1-9][0-9]*' = "[NAVIGATOR-SMOKE] tls_smoke.failure.verify_flags=<positive mismatch flags>"
+    '\[NAVIGATOR-SMOKE\] https\.case\.redirect_allowlisted\.verify_flags=[1-9][0-9]*' = "[NAVIGATOR-SMOKE] https.case.redirect_allowlisted.verify_flags=<positive failure flags>"
+}
+
+$oversizedCaFixture = New-NavigatorOversizedCaBundleFixture
+
 $scenarioDefinitions = @(
     [pscustomobject]@{
         Name = "no_policy"
         HttpsPolicy = $null
+        HttpsFaultMode = $null
         UseSmokeFixture = $true
         UserCaSource = $null
         ProductionCaSource = $null
+        TlsCert = $defaultHttpsCert
+        TlsKey = $defaultHttpsKey
         Checks = $commonChecks + @(
             "[NAVIGATOR-SMOKE] tls_prereq.root_ca_path=/certs/ca-bundle.pem",
             "[NAVIGATOR-SMOKE] tls_prereq.root_ca_fixture=smoke-only",
             "[NAVIGATOR-SMOKE] tls_prereq.trust_store_source=SmokeFixtureTrust",
+            "[NAVIGATOR-SMOKE] tls_prereq.https_smoke_fault_mode=None",
             "[NAVIGATOR-SMOKE] tls_prereq.https_policy_selected_state=Disabled",
             "[NAVIGATOR-SMOKE] tls_prereq.https_policy_effective_state=LocalSmokeOnly",
             "[NAVIGATOR-SMOKE] tls_prereq.https_policy_config_source=default-safe policy (no /config/navigator/https-policy.txt)",
@@ -419,20 +531,24 @@ $scenarioDefinitions = @(
             "[NAVIGATOR-SMOKE] https.case.policy_validated_downgrade.enabled=no",
             "[NAVIGATOR-SMOKE] https.case.policy_validated_downgrade.result=PASS"
         )
-        RegexChecks = Merge-CheckMaps -Base $commonRegexChecks -Extra @{
+        RegexChecks = Merge-CheckMaps -Base $commonRegexChecks -Extra (Merge-CheckMaps -Base $localTlsSuccessRegexChecks -Extra @{
             '\[NAVIGATOR-SMOKE\] tls_prereq\.root_ca_bytes=[1-9][0-9]*' = "[NAVIGATOR-SMOKE] tls_prereq.root_ca_bytes=<positive bytes>"
             '\[NAVIGATOR-SMOKE\] vfs\.system_block_device=[0-9]+' = "[NAVIGATOR-SMOKE] vfs.system_block_device=<numeric block device>"
             '\[NAVIGATOR-SMOKE\] vfs\.certs_block_device=[0-9]+' = "[NAVIGATOR-SMOKE] vfs.certs_block_device=<numeric block device>"
             '\[NAVIGATOR-SMOKE\] vfs\.certs_file_read_bytes=[1-9][0-9]*' = "[NAVIGATOR-SMOKE] vfs.certs_file_read_bytes=<positive bytes>"
-        }
+        })
     },
     [pscustomobject]@{
         Name = "invalid_policy"
         HttpsPolicy = "definitely-invalid"
+        HttpsFaultMode = $null
         UseSmokeFixture = $true
         UserCaSource = $null
         ProductionCaSource = $null
+        TlsCert = $defaultHttpsCert
+        TlsKey = $defaultHttpsKey
         Checks = $commonChecks + @(
+            "[NAVIGATOR-SMOKE] tls_prereq.https_smoke_fault_mode=None",
             "[NAVIGATOR-SMOKE] tls_prereq.https_policy_selected_state=Disabled",
             "[NAVIGATOR-SMOKE] tls_prereq.https_policy_effective_state=LocalSmokeOnly",
             "[NAVIGATOR-SMOKE] tls_prereq.https_policy_config_source=default-safe policy (no /config/navigator/https-policy.txt)",
@@ -447,19 +563,113 @@ $scenarioDefinitions = @(
             "[NAVIGATOR-SMOKE] https.case.policy_validated_downgrade.enabled=no",
             "[NAVIGATOR-SMOKE] https.case.policy_validated_downgrade.result=PASS"
         )
-        RegexChecks = $commonRegexChecks
+        RegexChecks = Merge-CheckMaps -Base $commonRegexChecks -Extra $localTlsSuccessRegexChecks
+    },
+    [pscustomobject]@{
+        Name = "user_dev_missing_ca"
+        HttpsPolicy = "user-trust-dev-mode"
+        HttpsFaultMode = $null
+        UseSmokeFixture = $true
+        UserCaSource = $null
+        ProductionCaSource = $null
+        TlsCert = $defaultHttpsCert
+        TlsKey = $defaultHttpsKey
+        Checks = $commonChecks + @(
+            "[NAVIGATOR-SMOKE] tls_prereq.root_ca_path=/config/certs/ca-bundle.pem",
+            "[NAVIGATOR-SMOKE] tls_prereq.root_ca_status=Missing",
+            "[NAVIGATOR-SMOKE] tls_prereq.trust_store_source=None",
+            "[NAVIGATOR-SMOKE] tls_prereq.https_smoke_fault_mode=None",
+            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_selected_state=UserTrustStoreDevMode",
+            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_effective_state=Disabled",
+            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_config_source=VFS config file /config/navigator/https-policy.txt",
+            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_blocker=User/dev HTTPS policy requires /config/certs/ca-bundle.pem.",
+            "[NAVIGATOR-SMOKE] tls_readiness=no",
+            "[NAVIGATOR-SMOKE] https.case.policy_validated.enabled=no",
+            "[NAVIGATOR-SMOKE] https.case.policy_validated.result=PASS",
+            "[NAVIGATOR-SMOKE] https.case.policy_validated_redirect.enabled=no",
+            "[NAVIGATOR-SMOKE] https.case.policy_validated_redirect.result=PASS"
+        )
+        RegexChecks = Merge-CheckMaps -Base $commonRegexChecks -Extra $localTlsSelectedBlockedRegexChecks
+    },
+    [pscustomobject]@{
+        Name = "user_dev_malformed_ca"
+        HttpsPolicy = "user-trust-dev-mode"
+        HttpsFaultMode = $null
+        UseSmokeFixture = $false
+        UserCaSource = $malformedCaFixture
+        ProductionCaSource = $null
+        TlsCert = $defaultHttpsCert
+        TlsKey = $defaultHttpsKey
+        Checks = $commonChecks + @(
+            "[NAVIGATOR-SMOKE] tls_prereq.root_ca_path=/config/certs/ca-bundle.pem",
+            "[NAVIGATOR-SMOKE] tls_prereq.root_ca_status=Invalid",
+            "[NAVIGATOR-SMOKE] tls_prereq.root_ca_parse_status=NotAttempted",
+            "[NAVIGATOR-SMOKE] tls_prereq.root_ca_detail=Root CA bundle does not look like a PEM certificate bundle.",
+            "[NAVIGATOR-SMOKE] tls_prereq.trust_store_source=UserProvidedTrustStore",
+            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_selected_state=UserTrustStoreDevMode",
+            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_effective_state=Disabled",
+            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_blocker=Root CA bundle does not look like a PEM certificate bundle.",
+            "[NAVIGATOR-SMOKE] tls_readiness=no"
+        )
+        RegexChecks = Merge-CheckMaps -Base $commonRegexChecks -Extra $localTlsSelectedBlockedRegexChecks
+    },
+    [pscustomobject]@{
+        Name = "user_dev_empty_ca"
+        HttpsPolicy = "user-trust-dev-mode"
+        HttpsFaultMode = $null
+        UseSmokeFixture = $false
+        UserCaSource = $emptyCaFixture
+        ProductionCaSource = $null
+        TlsCert = $defaultHttpsCert
+        TlsKey = $defaultHttpsKey
+        Checks = $commonChecks + @(
+            "[NAVIGATOR-SMOKE] tls_prereq.root_ca_path=/config/certs/ca-bundle.pem",
+            "[NAVIGATOR-SMOKE] tls_prereq.root_ca_status=Invalid",
+            "[NAVIGATOR-SMOKE] tls_prereq.root_ca_detail=Root CA bundle is empty.",
+            "[NAVIGATOR-SMOKE] tls_prereq.trust_store_source=UserProvidedTrustStore",
+            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_selected_state=UserTrustStoreDevMode",
+            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_effective_state=Disabled",
+            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_blocker=Root CA bundle is empty.",
+            "[NAVIGATOR-SMOKE] tls_readiness=no"
+        )
+        RegexChecks = Merge-CheckMaps -Base $commonRegexChecks -Extra $localTlsSelectedBlockedRegexChecks
+    },
+    [pscustomobject]@{
+        Name = "user_dev_oversized_ca"
+        HttpsPolicy = "user-trust-dev-mode"
+        HttpsFaultMode = $null
+        UseSmokeFixture = $false
+        UserCaSource = $oversizedCaFixture
+        ProductionCaSource = $null
+        TlsCert = $defaultHttpsCert
+        TlsKey = $defaultHttpsKey
+        Checks = $commonChecks + @(
+            "[NAVIGATOR-SMOKE] tls_prereq.root_ca_path=/config/certs/ca-bundle.pem",
+            "[NAVIGATOR-SMOKE] tls_prereq.root_ca_status=TooLarge",
+            "[NAVIGATOR-SMOKE] tls_prereq.root_ca_detail=Root CA bundle exceeds the 512 KiB safety cap.",
+            "[NAVIGATOR-SMOKE] tls_prereq.trust_store_source=UserProvidedTrustStore",
+            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_selected_state=UserTrustStoreDevMode",
+            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_effective_state=Disabled",
+            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_blocker=Root CA bundle exceeds the 512 KiB safety cap.",
+            "[NAVIGATOR-SMOKE] tls_readiness=no"
+        )
+        RegexChecks = Merge-CheckMaps -Base $commonRegexChecks -Extra $localTlsSelectedBlockedRegexChecks
     },
     [pscustomobject]@{
         Name = "user_dev_policy"
         HttpsPolicy = "user-trust-dev-mode"
+        HttpsFaultMode = $null
         UseSmokeFixture = $false
         UserCaSource = $validatedCaFixture
         ProductionCaSource = $null
+        TlsCert = $defaultHttpsCert
+        TlsKey = $defaultHttpsKey
         Checks = $commonChecks + @(
             "[NAVIGATOR-SMOKE] tls_prereq.root_ca_path=/config/certs/ca-bundle.pem",
             "[NAVIGATOR-SMOKE] tls_prereq.root_ca_fixture=normal",
             "[NAVIGATOR-SMOKE] tls_prereq.trust_store_source=UserProvidedTrustStore",
             "[NAVIGATOR-SMOKE] tls_prereq.trust_store_source_detail=User-provided trust store loaded from /config/certs/ca-bundle.pem",
+            "[NAVIGATOR-SMOKE] tls_prereq.https_smoke_fault_mode=None",
             "[NAVIGATOR-SMOKE] tls_prereq.https_policy_selected_state=UserTrustStoreDevMode",
             "[NAVIGATOR-SMOKE] tls_prereq.https_policy_effective_state=UserTrustStoreDevMode",
             "[NAVIGATOR-SMOKE] tls_prereq.https_policy_config_source=VFS config file /config/navigator/https-policy.txt",
@@ -468,33 +678,63 @@ $scenarioDefinitions = @(
             "[NAVIGATOR-SMOKE] tls_readiness=no",
             "[NAVIGATOR-SMOKE] tls_readiness_blocker=Validated HTTPS is enabled only for explicit dev/test policy scope; production TLS readiness remains disabled.",
             "[NAVIGATOR-SMOKE] https.case.policy_validated.enabled=yes",
+            "[NAVIGATOR-SMOKE] https.case.policy_validated.fault_mode=None",
             "[NAVIGATOR-SMOKE] https.case.policy_validated.transport_selection=PolicyValidatedTlsHttps",
             "[NAVIGATOR-SMOKE] https.case.policy_validated.result=PASS",
             "[NAVIGATOR-SMOKE] https.case.policy_validated_redirect.enabled=yes",
+            "[NAVIGATOR-SMOKE] https.case.policy_validated_redirect.fault_mode=None",
             "[NAVIGATOR-SMOKE] https.case.policy_validated_redirect.transport_selection=PolicyValidatedTlsHttps",
             "[NAVIGATOR-SMOKE] https.case.policy_validated_redirect.result=PASS",
             "[NAVIGATOR-SMOKE] https.case.policy_validated_wrong_host.enabled=yes",
             "[NAVIGATOR-SMOKE] https.case.policy_validated_wrong_host.result=PASS",
             "[NAVIGATOR-SMOKE] https.case.policy_validated_downgrade.enabled=yes",
+            "[NAVIGATOR-SMOKE] https.case.policy_validated_downgrade.fault_mode=None",
             "[NAVIGATOR-SMOKE] https.case.policy_validated_downgrade.result=PASS"
         )
-        RegexChecks = Merge-CheckMaps -Base $commonRegexChecks -Extra @{
+        RegexChecks = Merge-CheckMaps -Base $commonRegexChecks -Extra (Merge-CheckMaps -Base $localTlsSuccessRegexChecks -Extra @{
             '\[NAVIGATOR-SMOKE\] tls_prereq\.root_ca_bytes=[1-9][0-9]*' = "[NAVIGATOR-SMOKE] tls_prereq.root_ca_bytes=<positive bytes>"
             '\[NAVIGATOR-SMOKE\] https\.case\.policy_validated\.protocol=TLSv1\.[23]' = "[NAVIGATOR-SMOKE] https.case.policy_validated.protocol=<TLSv1.2 or TLSv1.3>"
             '\[NAVIGATOR-SMOKE\] https\.case\.policy_validated\.cipher_suite=.+' = "[NAVIGATOR-SMOKE] https.case.policy_validated.cipher_suite=<non-empty cipher suite>"
-        }
+        })
+    },
+    [pscustomobject]@{
+        Name = "production_missing_ca_user_only"
+        HttpsPolicy = "production-validated"
+        HttpsFaultMode = $null
+        UseSmokeFixture = $false
+        UserCaSource = $validatedCaFixture
+        ProductionCaSource = $null
+        TlsCert = $defaultHttpsCert
+        TlsKey = $defaultHttpsKey
+        Checks = $commonChecks + @(
+            "[NAVIGATOR-SMOKE] tls_prereq.root_ca_path=/certs/ca-bundle.pem",
+            "[NAVIGATOR-SMOKE] tls_prereq.root_ca_status=Missing",
+            "[NAVIGATOR-SMOKE] tls_prereq.trust_store_source=None",
+            "[NAVIGATOR-SMOKE] tls_prereq.https_smoke_fault_mode=None",
+            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_selected_state=ProductionValidated",
+            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_effective_state=Disabled",
+            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_blocker=Production HTTPS policy requires a non-smoke bundle at /certs/ca-bundle.pem.",
+            "[NAVIGATOR-SMOKE] tls_readiness=no",
+            "[NAVIGATOR-SMOKE] https.case.policy_validated.enabled=no",
+            "[NAVIGATOR-SMOKE] https.case.policy_validated.result=PASS"
+        )
+        RegexChecks = Merge-CheckMaps -Base $commonRegexChecks -Extra $localTlsSelectedBlockedRegexChecks
     },
     [pscustomobject]@{
         Name = "production_validated"
         HttpsPolicy = "production-validated"
+        HttpsFaultMode = $null
         UseSmokeFixture = $false
         UserCaSource = $null
         ProductionCaSource = $validatedCaFixture
+        TlsCert = $defaultHttpsCert
+        TlsKey = $defaultHttpsKey
         Checks = $commonChecks + @(
             "[NAVIGATOR-SMOKE] tls_prereq.root_ca_path=/certs/ca-bundle.pem",
             "[NAVIGATOR-SMOKE] tls_prereq.root_ca_fixture=normal",
             "[NAVIGATOR-SMOKE] tls_prereq.trust_store_source=ProductionBundle",
             "[NAVIGATOR-SMOKE] tls_prereq.trust_store_source_detail=Production trust store loaded from /certs/ca-bundle.pem",
+            "[NAVIGATOR-SMOKE] tls_prereq.https_smoke_fault_mode=None",
             "[NAVIGATOR-SMOKE] tls_prereq.https_policy_selected_state=ProductionValidated",
             "[NAVIGATOR-SMOKE] tls_prereq.https_policy_effective_state=ProductionValidated",
             "[NAVIGATOR-SMOKE] tls_prereq.https_policy_config_source=VFS config file /config/navigator/https-policy.txt",
@@ -503,58 +743,126 @@ $scenarioDefinitions = @(
             "[NAVIGATOR-SMOKE] tls_readiness=yes",
             "[NAVIGATOR-SMOKE] tls_readiness_blocker=(none)",
             "[NAVIGATOR-SMOKE] https.case.policy_validated.enabled=yes",
+            "[NAVIGATOR-SMOKE] https.case.policy_validated.fault_mode=None",
             "[NAVIGATOR-SMOKE] https.case.policy_validated.transport_selection=PolicyValidatedTlsHttps",
             "[NAVIGATOR-SMOKE] https.case.policy_validated.result=PASS",
             "[NAVIGATOR-SMOKE] https.case.policy_validated_redirect.enabled=yes",
+            "[NAVIGATOR-SMOKE] https.case.policy_validated_redirect.fault_mode=None",
             "[NAVIGATOR-SMOKE] https.case.policy_validated_redirect.transport_selection=PolicyValidatedTlsHttps",
             "[NAVIGATOR-SMOKE] https.case.policy_validated_redirect.result=PASS",
             "[NAVIGATOR-SMOKE] https.case.policy_validated_wrong_host.enabled=yes",
             "[NAVIGATOR-SMOKE] https.case.policy_validated_wrong_host.result=PASS",
             "[NAVIGATOR-SMOKE] https.case.policy_validated_downgrade.enabled=yes",
+            "[NAVIGATOR-SMOKE] https.case.policy_validated_downgrade.fault_mode=None",
             "[NAVIGATOR-SMOKE] https.case.policy_validated_downgrade.result=PASS"
         )
-        RegexChecks = Merge-CheckMaps -Base $commonRegexChecks -Extra @{
+        RegexChecks = Merge-CheckMaps -Base $commonRegexChecks -Extra (Merge-CheckMaps -Base $localTlsSuccessRegexChecks -Extra @{
             '\[NAVIGATOR-SMOKE\] tls_prereq\.root_ca_bytes=[1-9][0-9]*' = "[NAVIGATOR-SMOKE] tls_prereq.root_ca_bytes=<positive bytes>"
             '\[NAVIGATOR-SMOKE\] https\.case\.policy_validated\.protocol=TLSv1\.[23]' = "[NAVIGATOR-SMOKE] https.case.policy_validated.protocol=<TLSv1.2 or TLSv1.3>"
             '\[NAVIGATOR-SMOKE\] https\.case\.policy_validated\.cipher_suite=.+' = "[NAVIGATOR-SMOKE] https.case.policy_validated.cipher_suite=<non-empty cipher suite>"
-        }
+        })
+    },
+    [pscustomobject]@{
+        Name = "production_untrusted_root"
+        HttpsPolicy = "production-validated"
+        HttpsFaultMode = "untrusted-root"
+        UseSmokeFixture = $false
+        UserCaSource = $null
+        ProductionCaSource = $validatedCaFixture
+        TlsCert = $untrustedHttpsCert
+        TlsKey = $untrustedHttpsKey
+        Checks = $commonChecks + @(
+            "[NAVIGATOR-SMOKE] tls_prereq.https_smoke_fault_mode=UntrustedRoot",
+            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_effective_state=ProductionValidated",
+            "[NAVIGATOR-SMOKE] tls_readiness=yes",
+            "[NAVIGATOR-SMOKE] tls_smoke.tls_status=CertificateVerifyFailed",
+            "[NAVIGATOR-SMOKE] https.case.redirect_allowlisted.tls_status=CertificateVerifyFailed",
+            "[NAVIGATOR-SMOKE] https.case.policy_validated.enabled=yes",
+            "[NAVIGATOR-SMOKE] https.case.policy_validated.fault_mode=UntrustedRoot",
+            "[NAVIGATOR-SMOKE] https.case.policy_validated.tls_status=CertificateVerifyFailed",
+            "[NAVIGATOR-SMOKE] https.case.policy_validated.result=PASS",
+            "[NAVIGATOR-SMOKE] https.case.policy_validated_redirect.fault_mode=UntrustedRoot",
+            "[NAVIGATOR-SMOKE] https.case.policy_validated_redirect.tls_status=CertificateVerifyFailed",
+            "[NAVIGATOR-SMOKE] https.case.policy_validated_redirect.result=PASS",
+            "[NAVIGATOR-SMOKE] https.case.policy_validated_downgrade.fault_mode=UntrustedRoot",
+            "[NAVIGATOR-SMOKE] https.case.policy_validated_downgrade.tls_status=CertificateVerifyFailed",
+            "[NAVIGATOR-SMOKE] https.case.policy_validated_downgrade.result=PASS"
+        )
+        RegexChecks = Merge-CheckMaps -Base $commonRegexChecks -Extra (Merge-CheckMaps -Base $localTlsCertFaultRegexChecks -Extra @{
+            '\[NAVIGATOR-SMOKE\] https\.case\.policy_validated\.verify_flags=[1-9][0-9]*' = "[NAVIGATOR-SMOKE] https.case.policy_validated.verify_flags=<positive failure flags>"
+            '\[NAVIGATOR-SMOKE\] https\.case\.policy_validated_redirect\.verify_flags=[1-9][0-9]*' = "[NAVIGATOR-SMOKE] https.case.policy_validated_redirect.verify_flags=<positive failure flags>"
+        })
+    },
+    [pscustomobject]@{
+        Name = "production_expired_cert"
+        HttpsPolicy = "production-validated"
+        HttpsFaultMode = "expired-cert"
+        UseSmokeFixture = $false
+        UserCaSource = $null
+        ProductionCaSource = $validatedCaFixture
+        TlsCert = $expiredHttpsCert
+        TlsKey = $expiredHttpsKey
+        Checks = $commonChecks + @(
+            "[NAVIGATOR-SMOKE] tls_prereq.https_smoke_fault_mode=ExpiredCertificate",
+            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_effective_state=ProductionValidated",
+            "[NAVIGATOR-SMOKE] tls_readiness=yes",
+            "[NAVIGATOR-SMOKE] tls_smoke.tls_status=CertificateVerifyFailed",
+            "[NAVIGATOR-SMOKE] https.case.redirect_allowlisted.tls_status=CertificateVerifyFailed",
+            "[NAVIGATOR-SMOKE] https.case.policy_validated.enabled=yes",
+            "[NAVIGATOR-SMOKE] https.case.policy_validated.fault_mode=ExpiredCertificate",
+            "[NAVIGATOR-SMOKE] https.case.policy_validated.tls_status=CertificateVerifyFailed",
+            "[NAVIGATOR-SMOKE] https.case.policy_validated.result=PASS",
+            "[NAVIGATOR-SMOKE] https.case.policy_validated_redirect.fault_mode=ExpiredCertificate",
+            "[NAVIGATOR-SMOKE] https.case.policy_validated_redirect.tls_status=CertificateVerifyFailed",
+            "[NAVIGATOR-SMOKE] https.case.policy_validated_redirect.result=PASS",
+            "[NAVIGATOR-SMOKE] https.case.policy_validated_downgrade.fault_mode=ExpiredCertificate",
+            "[NAVIGATOR-SMOKE] https.case.policy_validated_downgrade.tls_status=CertificateVerifyFailed",
+            "[NAVIGATOR-SMOKE] https.case.policy_validated_downgrade.result=PASS"
+        )
+        RegexChecks = Merge-CheckMaps -Base $commonRegexChecks -Extra (Merge-CheckMaps -Base $localTlsCertFaultRegexChecks -Extra @{
+            '\[NAVIGATOR-SMOKE\] https\.case\.policy_validated\.verify_flags=[1-9][0-9]*' = "[NAVIGATOR-SMOKE] https.case.policy_validated.verify_flags=<positive failure flags>"
+            '\[NAVIGATOR-SMOKE\] https\.case\.policy_validated_redirect\.verify_flags=[1-9][0-9]*' = "[NAVIGATOR-SMOKE] https.case.policy_validated_redirect.verify_flags=<positive failure flags>"
+        })
     }
 )
 
 $scenarioFailures = @()
+$activeServers = $null
 
 try {
     foreach ($scenario in $scenarioDefinitions) {
         Write-Host "Running kernel smoke scenario '$($scenario.Name)'..."
         Invoke-NavigatorKernelSmokeRamdiskStage -HttpsPolicy $scenario.HttpsPolicy `
+            -HttpsFaultMode $scenario.HttpsFaultMode `
             -UserCaSource $scenario.UserCaSource `
             -ProductionCaSource $scenario.ProductionCaSource `
             -UseSmokeFixture $scenario.UseSmokeFixture
 
-        $run = Invoke-NavigatorKernelSmokeQemuPass -ScenarioName $scenario.Name
-        Write-Host $run.Output
-        $missing = Test-NavigatorKernelSmokeOutput -Output $run.Output -Contains $scenario.Checks -RegexChecks $scenario.RegexChecks
-        if ($missing.Count -eq 0) {
-            Write-Host "Kernel Navigator smoke scenario '$($scenario.Name)' PASS. Serial log: $($run.SerialLog)"
-        } else {
-            Write-Host "Kernel Navigator smoke scenario '$($scenario.Name)' FAIL. Serial log: $($run.SerialLog)" -ForegroundColor Red
-            foreach ($item in $missing) {
-                Write-Host "Missing [$($scenario.Name)]: $item" -ForegroundColor Red
+        try {
+            $activeServers = Start-NavigatorKernelSmokeServers -ScenarioName $scenario.Name -TlsCert $scenario.TlsCert -TlsKey $scenario.TlsKey
+            $run = Invoke-NavigatorKernelSmokeQemuPass -ScenarioName $scenario.Name
+            Write-Host $run.Output
+            $missing = Test-NavigatorKernelSmokeOutput -Output $run.Output -Contains $scenario.Checks -RegexChecks $scenario.RegexChecks
+            if ($missing.Count -eq 0) {
+                Write-Host "Kernel Navigator smoke scenario '$($scenario.Name)' PASS. Serial log: $($run.SerialLog)"
+            } else {
+                Write-Host "Kernel Navigator smoke scenario '$($scenario.Name)' FAIL. Serial log: $($run.SerialLog)" -ForegroundColor Red
+                foreach ($item in $missing) {
+                    Write-Host "Missing [$($scenario.Name)]: $item" -ForegroundColor Red
+                }
+                $scenarioFailures += [pscustomobject]@{
+                    Name = $scenario.Name
+                    SerialLog = $run.SerialLog
+                    Missing = $missing
+                }
             }
-            $scenarioFailures += [pscustomobject]@{
-                Name = $scenario.Name
-                SerialLog = $run.SerialLog
-                Missing = $missing
-            }
+        } finally {
+            Stop-NavigatorKernelSmokeServers -Servers $activeServers
+            $activeServers = $null
         }
     }
 } finally {
-    if ($httpProc -and -not $httpProc.HasExited) {
-        Stop-Process -Id $httpProc.Id -Force
-    }
-    if ($httpsProc -and -not $httpsProc.HasExited) {
-        Stop-Process -Id $httpsProc.Id -Force
-    }
+    Stop-NavigatorKernelSmokeServers -Servers $activeServers
     if ($createdStartup) {
         Remove-Item $startup -ErrorAction SilentlyContinue
     }
@@ -563,6 +871,10 @@ try {
     Restore-NavigatorSmokeDirectoryState -State $downloadsState
     Restore-NavigatorSmokeFileState -State $ramdiskState
     Restore-NavigatorSmokeDirectoryState -State $wallpaperPackState
+    Restore-NavigatorSmokeFileState -State $wallpaperPackCaBundleState
+    if (Test-Path $oversizedCaFixture) {
+        Remove-Item -LiteralPath $oversizedCaFixture -Force -ErrorAction SilentlyContinue
+    }
 }
 
 if ($scenarioFailures.Count -eq 0) {

@@ -171,6 +171,12 @@ class NavigatorSmokeHandler(BaseHTTPRequestHandler):
             else:
                 self.write_redirect(302, "https://example.com/secure")
             return
+        if path == "/navigator-smoke/redirect-to-policy-disallowed-https":
+            if self.https_port:
+                self.write_redirect(302, f"https://wrong.guidexos.test:{self.https_port}/policy-validated/ok.html")
+            else:
+                self.write_redirect(302, "https://example.com/secure")
+            return
         if path == "/navigator-smoke/redirect-to-public-https":
             self.write_redirect(302, "https://example.com/secure")
             return
