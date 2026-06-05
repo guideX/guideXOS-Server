@@ -349,7 +349,7 @@ constexpr const char* kBareMetalCryptoConfigPath = "third_party/mbedtls/guidexos
 constexpr const char* kBareMetalTfPsaPath = "third_party/mbedtls/tf-psa-crypto";
 constexpr const char* kBareMetalBuildPlanPath = "third_party/mbedtls/guidexos/mbedtls_sources.mk";
 constexpr const char* kBareMetalPlannedSubset =
-    "runtime-linked Mbed TLS 4.1.0 TLS/X.509 subset with bounded allocator hooks, PSA external RNG, wall-clock callbacks, one-shot CA parsing, and smoke-only local handshake coverage; general Navigator https:// remains gated";
+    "runtime-linked Mbed TLS 4.1.0 TLS/X.509 subset with bounded allocator hooks, PSA external RNG, wall-clock callbacks, one-shot CA parsing, smoke-only local handshake coverage, and explicit-policy validated HTTPS enablement.";
 constexpr size_t kBareMetalPlannedSourceCount = 55;
 
 size_t token_length(const char* token)
@@ -409,6 +409,33 @@ void copy_trimmed_ascii_token(char* dst, size_t dstSize, const char* text)
     size_t count = 0;
     while (start + count < end && count + 1 < dstSize) {
         dst[count] = start[count];
+        ++count;
+    }
+    dst[count] = '\0';
+}
+
+void copy_trimmed_ascii_span(char* dst, size_t dstSize, const char* begin, const char* end)
+{
+    if (!dst || dstSize == 0) return;
+    dst[0] = '\0';
+    if (!begin || !end || end <= begin) return;
+
+    while (begin < end &&
+        (*begin == ' ' || *begin == '\t' || *begin == '\r' || *begin == '\n')) {
+        ++begin;
+    }
+    while (end > begin &&
+        (end[-1] == ' ' || end[-1] == '\t' || end[-1] == '\r' || end[-1] == '\n')) {
+        --end;
+    }
+
+    size_t count = 0;
+    while (begin + count < end && count + 1 < dstSize) {
+        const char ch = begin[count];
+        if (static_cast<unsigned char>(ch) < 0x20 || static_cast<unsigned char>(ch) > 0x7e) {
+            break;
+        }
+        dst[count] = ch;
         ++count;
     }
     dst[count] = '\0';
@@ -721,6 +748,7 @@ struct BareMetalHttpsPolicyConfigInfo {
     bool explicitSelection = false;
     bool invalid = false;
     GxosValidatedHttpsPolicyState selectedState = GxosValidatedHttpsPolicyState::Disabled;
+    bool publicHttpsPilotRequested = false;
     const char* configPath = kBareMetalHttpsPolicyPath;
     const char* configSource = kBareMetalHttpsPolicyDefaultSource;
     const char* error = nullptr;
@@ -730,6 +758,8 @@ struct BareMetalHttpsPolicyConfigState {
     bool attempted = false;
     BareMetalHttpsPolicyConfigInfo info{};
     char token[64] = {};
+    char key[64] = {};
+    char value[64] = {};
     char error[160] = {};
 };
 
@@ -858,8 +888,100 @@ BareMetalHttpsPolicyConfigInfo bare_metal_https_policy_config_info()
     }
     buffer[bytesRead < 4096 ? bytesRead : 4096] = '\0';
 
-    copy_trimmed_ascii_token(state.token, sizeof(state.token), buffer);
-    if (state.token[0] == '\0') {
+    bool sawContent = false;
+    bool sawPolicy = false;
+    bool sawPublicPilot = false;
+    GxosValidatedHttpsPolicyState parsedPolicy = GxosValidatedHttpsPolicyState::Disabled;
+    const char* cursor = buffer;
+    while (*cursor != '\0') {
+        const char* lineStart = cursor;
+        while (*cursor != '\0' && *cursor != '\r' && *cursor != '\n') {
+            ++cursor;
+        }
+        const char* lineEnd = cursor;
+        if (*cursor == '\r') ++cursor;
+        if (*cursor == '\n') ++cursor;
+
+        state.token[0] = '\0';
+        copy_trimmed_ascii_span(state.token, sizeof(state.token), lineStart, lineEnd);
+        if (state.token[0] == '\0') {
+            continue;
+        }
+
+        sawContent = true;
+        const char* equals = nullptr;
+        for (const char* scan = state.token; *scan; ++scan) {
+            if (*scan == '=') {
+                equals = scan;
+                break;
+            }
+        }
+
+        if (!equals) {
+            if (sawPolicy) {
+                copy_text(state.error, sizeof(state.error),
+                    "HTTPS policy config contains multiple policy tokens; falling back to the default-safe policy.");
+                state.info.invalid = true;
+                state.info.error = state.error;
+                return state.info;
+            }
+            bool valid = false;
+            parsedPolicy = parse_https_policy_token(state.token, &valid);
+            if (!valid) {
+                copy_text(state.error, sizeof(state.error),
+                    "HTTPS policy config is invalid; falling back to the default-safe policy.");
+                state.info.invalid = true;
+                state.info.error = state.error;
+                return state.info;
+            }
+            sawPolicy = true;
+            continue;
+        }
+
+        copy_trimmed_ascii_span(state.key, sizeof(state.key), state.token, equals);
+        const char* tokenEnd = state.token;
+        while (*tokenEnd != '\0') ++tokenEnd;
+        copy_trimmed_ascii_span(state.value, sizeof(state.value), equals + 1, tokenEnd);
+        if (state.key[0] == '\0' || state.value[0] == '\0') {
+            copy_text(state.error, sizeof(state.error),
+                "HTTPS policy config contains an empty key/value setting; falling back to the default-safe policy.");
+            state.info.invalid = true;
+            state.info.error = state.error;
+            return state.info;
+        }
+
+        if (text_equals_insensitive(state.key, "public-https-pilot") ||
+            text_equals_insensitive(state.key, "publichttpspilot")) {
+            if (sawPublicPilot) {
+                copy_text(state.error, sizeof(state.error),
+                    "HTTPS policy config repeats public-https-pilot; falling back to the default-safe policy.");
+                state.info.invalid = true;
+                state.info.error = state.error;
+                return state.info;
+            }
+            if (text_equals_insensitive(state.value, "enabled")) {
+                state.info.publicHttpsPilotRequested = true;
+            } else if (text_equals_insensitive(state.value, "disabled")) {
+                state.info.publicHttpsPilotRequested = false;
+            } else {
+                copy_text(state.error, sizeof(state.error),
+                    "HTTPS policy config has an invalid public-https-pilot value; falling back to the default-safe policy.");
+                state.info.invalid = true;
+                state.info.error = state.error;
+                return state.info;
+            }
+            sawPublicPilot = true;
+            continue;
+        }
+
+        copy_text(state.error, sizeof(state.error),
+            "HTTPS policy config contains an unknown setting; falling back to the default-safe policy.");
+        state.info.invalid = true;
+        state.info.error = state.error;
+        return state.info;
+    }
+
+    if (!sawContent || !sawPolicy) {
         copy_text(state.error, sizeof(state.error),
             "HTTPS policy config is empty after trimming; falling back to the default-safe policy.");
         state.info.invalid = true;
@@ -867,18 +989,18 @@ BareMetalHttpsPolicyConfigInfo bare_metal_https_policy_config_info()
         return state.info;
     }
 
-    bool valid = false;
-    const GxosValidatedHttpsPolicyState parsed = parse_https_policy_token(state.token, &valid);
-    if (!valid) {
+    if (state.info.publicHttpsPilotRequested &&
+        parsedPolicy != GxosValidatedHttpsPolicyState::ProductionValidated) {
         copy_text(state.error, sizeof(state.error),
-            "HTTPS policy config is invalid; falling back to the default-safe policy.");
+            "HTTPS policy config is invalid: public-https-pilot requires ProductionValidated.");
         state.info.invalid = true;
         state.info.error = state.error;
+        state.info.publicHttpsPilotRequested = false;
         return state.info;
     }
 
     state.info.explicitSelection = true;
-    state.info.selectedState = parsed;
+    state.info.selectedState = parsedPolicy;
     state.info.configSource = kBareMetalHttpsPolicyFileSource;
     state.info.error = nullptr;
     return state.info;
@@ -1094,12 +1216,15 @@ GxosValidatedHttpsPolicyInfo make_validated_https_policy_info()
 
     GxosValidatedHttpsPolicyState effectiveState = GxosValidatedHttpsPolicyState::Disabled;
     bool localAllowlistEnabled = false;
+    bool validatedNavigationEnabled = false;
     bool broadPublicHttpsEnabled = false;
+    const bool publicHttpsPilotRequested = config.publicHttpsPilotRequested;
     bool productionReady = false;
     const char* localAllowReason = localSmokeReady
         ? "Local smoke HTTPS prerequisites are satisfied."
         : compute_local_smoke_https_blocker();
-    const char* detail = "Broader validated bare-metal https:// policy is disabled while trust-store prerequisites remain incomplete.";
+    const char* detail = "Validated bare-metal HTTPS stays fail-closed until an explicit policy and trust-store prerequisites are satisfied.";
+    const char* publicHttpsPilotReason = "Public HTTPS pilot is off by default.";
     const char* blocker = trustPolicy.error ? trustPolicy.error : "Trust-store policy is not ready.";
     const char* error = config.error;
 
@@ -1110,45 +1235,63 @@ GxosValidatedHttpsPolicyInfo make_validated_https_policy_info()
         effectiveState = GxosValidatedHttpsPolicyState::LocalSmokeOnly;
         localAllowlistEnabled = true;
         detail = "Controlled guidexos.test HTTPS is validated through the smoke-only trust fixture; broader bare-metal https:// remains disabled.";
+        publicHttpsPilotReason = "Public HTTPS pilot is disabled while the smoke-only trust fixture is active.";
         blocker = kLocalSmokeOnlyPolicyBlocker;
         localAllowReason = "Smoke fixture trust and the controlled local HTTPS allowlist are both active.";
     } else if (effectiveSelection == GxosValidatedHttpsPolicyState::UserTrustStoreDevMode) {
         if (trustPolicy.source != GxosTrustStoreSource::UserProvidedTrustStore) {
             detail = "User/dev HTTPS policy is selected, but the active trust store is not the user bundle path.";
+            publicHttpsPilotReason = "Public HTTPS pilot requires a production CA bundle at /certs/ca-bundle.pem.";
             blocker = "User/dev HTTPS policy requires /config/certs/ca-bundle.pem.";
         } else if (!nonSmokeReady) {
             detail = "User/dev HTTPS policy is selected, but bare-metal TLS prerequisites are not yet complete.";
+            publicHttpsPilotReason = "Public HTTPS pilot requires ProductionValidated and complete production TLS prerequisites.";
             blocker = trustPolicy.error ? trustPolicy.error : "User/dev HTTPS prerequisites are incomplete.";
         } else {
             effectiveState = GxosValidatedHttpsPolicyState::UserTrustStoreDevMode;
-            detail = "User/dev HTTPS policy is selected, the user CA bundle parsed successfully, and validated bare-metal HTTPS is enabled for explicit dev/test policy scope targets.";
+            validatedNavigationEnabled = true;
+            detail = "User/dev HTTPS policy is selected, the user CA bundle parsed successfully, and explicit validated fixture HTTPS navigation is enabled with dev-mode trust diagnostics while public HTTPS pilot stays disabled.";
+            publicHttpsPilotReason = "Public HTTPS pilot is unavailable in UserTrustStoreDevMode.";
             blocker = nullptr;
         }
     } else if (effectiveSelection == GxosValidatedHttpsPolicyState::ProductionValidated) {
         if (trustPolicy.source != GxosTrustStoreSource::ProductionBundle) {
             detail = "Production HTTPS policy is selected, but the active trust store is not a production bundle.";
+            publicHttpsPilotReason = "Public HTTPS pilot requires a non-smoke production CA bundle at /certs/ca-bundle.pem.";
             blocker = "Production HTTPS policy requires a non-smoke bundle at /certs/ca-bundle.pem.";
         } else if (trustPolicy.smokeTestOnly) {
             detail = "Production HTTPS policy is selected, but the production CA path currently contains the smoke-only fixture.";
+            publicHttpsPilotReason = "Smoke fixture trust cannot enable the public HTTPS pilot.";
             blocker = "Smoke fixture trust cannot satisfy ProductionValidated policy.";
         } else if (!nonSmokeReady) {
             detail = "Production HTTPS policy is selected, but bare-metal TLS prerequisites are not yet complete.";
+            publicHttpsPilotReason = trustPolicy.error ? trustPolicy.error : "Production HTTPS prerequisites are incomplete.";
             blocker = trustPolicy.error ? trustPolicy.error : "Production HTTPS prerequisites are incomplete.";
         } else {
             effectiveState = GxosValidatedHttpsPolicyState::ProductionValidated;
+            validatedNavigationEnabled = true;
             productionReady = true;
-            detail = "Production HTTPS prerequisites are satisfied and validated bare-metal HTTPS is enabled for explicit policy-scoped targets.";
+            if (publicHttpsPilotRequested) {
+                broadPublicHttpsEnabled = true;
+                detail = "Production HTTPS prerequisites are satisfied, explicit validated fixture HTTPS navigation is enabled, and the controlled public HTTPS pilot is enabled.";
+                publicHttpsPilotReason = "Public HTTPS pilot is enabled for hostname-only HTTPS targets under ProductionValidated.";
+            } else {
+                detail = "Production HTTPS prerequisites are satisfied and explicit validated fixture HTTPS navigation is enabled; public HTTPS pilot remains disabled until public-https-pilot=enabled.";
+                publicHttpsPilotReason = "Public HTTPS pilot requires public-https-pilot=enabled under ProductionValidated.";
+            }
             blocker = nullptr;
         }
     } else {
         if (trustPolicy.state == GxosTrustStorePolicyState::TrustStoreParsed &&
             trustPolicy.source == GxosTrustStoreSource::UserProvidedTrustStore) {
             detail = "A user CA bundle is parsed, but UserTrustStoreDevMode is not selected.";
+            publicHttpsPilotReason = "Public HTTPS pilot requires ProductionValidated.";
             blocker = "User/dev HTTPS policy is off by default.";
         } else if (trustPolicy.state == GxosTrustStorePolicyState::TrustStoreParsed &&
             trustPolicy.source == GxosTrustStoreSource::ProductionBundle &&
             !trustPolicy.smokeTestOnly) {
             detail = "A production CA bundle is parsed, but ProductionValidated is not selected.";
+            publicHttpsPilotReason = "Public HTTPS pilot requires ProductionValidated and public-https-pilot=enabled.";
             blocker = "Production HTTPS policy is off by default.";
         }
     }
@@ -1158,12 +1301,15 @@ GxosValidatedHttpsPolicyInfo make_validated_https_policy_info()
         reportedSelectedState,
         localAllowlistEnabled,
         localSmokeReady,
+        validatedNavigationEnabled,
         broadPublicHttpsEnabled,
+        publicHttpsPilotRequested,
         productionReady,
         config.configPath,
         config.configSource,
         localAllowReason ? localAllowReason : "(none)",
         detail,
+        publicHttpsPilotReason,
         blocker,
         error
     };
@@ -1175,10 +1321,13 @@ GxosValidatedHttpsPolicyInfo make_validated_https_policy_info()
         true,
         true,
         true,
+        true,
+        true,
         "(Windows trust store)",
         kHostedHttpsPolicySource,
         "Hosted HTTPS is enabled through Schannel.",
         "Hosted Navigator uses Schannel with the Windows trust store for validated HTTPS.",
+        "Hosted public HTTPS is enabled through Schannel.",
         nullptr,
         nullptr
     };
@@ -1769,7 +1918,7 @@ GxosTlsBackendInfo make_backend_info()
             GxosTlsBackendStatus::ReadyForLocalHandshake,
             "Mbed TLS bare-metal scaffold",
             importInfo.detectedVersion,
-            "Allocator, PSA RNG/time callbacks, root CA parsing, hostname validation, and controlled local-only Navigator HTTPS transport are ready; general Navigator https:// navigation remains gated."
+            "Allocator, PSA RNG/time callbacks, root CA parsing, hostname validation, and the shared bare-metal TLS transport path are ready; explicit validated HTTPS still requires policy selection."
         };
     }
 
@@ -1834,10 +1983,8 @@ const char* compute_tls_prerequisites_blocker()
     }
 
     const GxosValidatedHttpsPolicyInfo httpsPolicy = make_validated_https_policy_info();
-    if (httpsPolicy.state != GxosValidatedHttpsPolicyState::ProductionValidated) {
-        if (httpsPolicy.state == GxosValidatedHttpsPolicyState::UserTrustStoreDevMode) {
-            return "Validated HTTPS is enabled only for explicit dev/test policy scope; production TLS readiness remains disabled.";
-        }
+    if (httpsPolicy.state != GxosValidatedHttpsPolicyState::ProductionValidated &&
+        httpsPolicy.state != GxosValidatedHttpsPolicyState::UserTrustStoreDevMode) {
         return httpsPolicy.blocker ? httpsPolicy.blocker : "Broader validated HTTPS policy is disabled.";
     }
 
@@ -2582,11 +2729,16 @@ const char* gxos_tls_certificate_validation_policy()
     }
     if (policy.selectedState == GxosValidatedHttpsPolicyState::UserTrustStoreDevMode &&
         policy.state == GxosValidatedHttpsPolicyState::UserTrustStoreDevMode) {
-        return "dev-mode enabled; validated bare-metal HTTPS requires the user trust store, secure RNG, plausible wall clock, CA chain validation, hostname validation, and remains restricted to explicit dev/test policy scope targets";
+        return "dev-mode enabled; explicit validated fixture HTTPS requires the user trust store, secure RNG, plausible wall clock, CA chain validation, hostname validation, and explicit policy selection, while public HTTPS pilot remains disabled";
+    }
+    if (policy.selectedState == GxosValidatedHttpsPolicyState::ProductionValidated &&
+        policy.productionReady &&
+        policy.broadPublicHttpsEnabled) {
+        return "production validated HTTPS pilot enabled; production CA, hostname validation, secure RNG, plausible wall clock, and explicit public-pilot selection are required, and plaintext fallback remains disabled";
     }
     if (policy.selectedState == GxosValidatedHttpsPolicyState::ProductionValidated &&
         policy.productionReady) {
-        return "production validated HTTPS enabled; production CA, hostname validation, secure RNG, and plausible wall clock are required, and plaintext fallback remains disabled";
+        return "production validated fixture HTTPS enabled; production CA, hostname validation, secure RNG, and plausible wall clock are required, public HTTPS pilot remains opt-in, and plaintext fallback remains disabled";
     }
     if (policy.selectedState == GxosValidatedHttpsPolicyState::ProductionValidated) {
         return "production-selected but not effective; broader validated bare-metal https:// remains fail-closed until the production CA bundle and TLS prerequisites are complete";

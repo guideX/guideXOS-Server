@@ -15,7 +15,7 @@ These files are test-only assets for Navigator smoke coverage.
 - Purpose: deterministic non-smoke CA bundle fixture for explicit `UserTrustStoreDevMode` and `ProductionValidated` policy coverage.
 - Use: copied by `scripts/smoke-navigator-kernel.ps1` to `/config/certs/ca-bundle.pem` or `/certs/ca-bundle.pem` depending on the scenario under test.
 - Scope: fixture-only policy coverage for repository smoke, not a public internet trust bundle.
-- Provenance: same CA certificate material as the `guidexos.test` deterministic HTTPS fixture, but without the smoke-only marker used to classify `SmokeFixtureTrust`.
+- Provenance: dedicated validated-policy root CA for the `dev.guidexos.test` and `prod.guidexos.test` deterministic HTTPS fixtures.
 
 ## navigator-smoke-localhost.crt / navigator-smoke-localhost.key
 
@@ -25,13 +25,37 @@ Hosted HTTPS smoke server certificate/key pair for localhost-only test coverage.
 
 Bare-metal local HTTPS smoke server certificate/key pair for the QEMU-reachable `guidexos.test` hostname.
 
+## navigator-policy-dev.guidexos.test.crt / navigator-policy-dev.guidexos.test.key
+
+Bare-metal validated HTTPS fixture certificate/key pair for `UserTrustStoreDevMode` smoke coverage against the QEMU-reachable `dev.guidexos.test` hostname.
+
+## navigator-policy-prod.guidexos.test.crt / navigator-policy-prod.guidexos.test.key
+
+Bare-metal validated HTTPS fixture certificate/key pair for `ProductionValidated` smoke coverage against the QEMU-reachable `prod.guidexos.test` hostname.
+
+## navigator-public-pilot.guidexos.test.crt / navigator-public-pilot.guidexos.test.key
+
+Bare-metal controlled public HTTPS pilot fixture certificate/key pair for deterministic `ProductionValidated + public-https-pilot=enabled` smoke coverage against the QEMU-reachable `public-pilot.guidexos.test` hostname.
+
 ## navigator-fault-untrusted-guidexos.test.crt / navigator-fault-untrusted-guidexos.test.key
 
 Bare-metal HTTPS smoke certificate/key pair for deterministic untrusted-root validation failure coverage against the same `guidexos.test` host.
 
+## navigator-fault-untrusted-dev.guidexos.test.crt / navigator-fault-untrusted-dev.guidexos.test.key
+
+Bare-metal validated HTTPS fixture certificate/key pair for deterministic `UserTrustStoreDevMode` untrusted-root failure coverage against `dev.guidexos.test`.
+
+## navigator-fault-untrusted-prod.guidexos.test.crt / navigator-fault-untrusted-prod.guidexos.test.key
+
+Bare-metal validated HTTPS fixture certificate/key pair for deterministic `ProductionValidated` untrusted-root failure coverage against `prod.guidexos.test`.
+
 ## navigator-fault-expired-guidexos.test.crt / navigator-fault-expired-guidexos.test.key
 
 Bare-metal HTTPS smoke certificate/key pair signed by the validated smoke CA but already expired relative to the QEMU RTC used by kernel smoke.
+
+## navigator-fault-expired-prod.guidexos.test.crt / navigator-fault-expired-prod.guidexos.test.key
+
+Bare-metal validated HTTPS fixture certificate/key pair signed by the validated-policy CA but already expired relative to the QEMU RTC used by kernel smoke.
 
 ## navigator-fault-future-guidexos.test.crt / navigator-fault-future-guidexos.test.key
 

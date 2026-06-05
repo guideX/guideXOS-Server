@@ -44,6 +44,9 @@ class NavigatorSmokeHandler(BaseHTTPRequestHandler):
     root = Path.cwd()
     https_port = None
     http_port = None
+    policy_host = "dev.guidexos.test"
+    policy_wrong_host = "wrong.guidexos.test"
+    public_pilot_host = "public-pilot.guidexos.test"
 
     def log_message(self, fmt, *args):
         print("%s - - %s" % (self.address_string(), fmt % args), flush=True)
@@ -67,6 +70,7 @@ class NavigatorSmokeHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         path = self.path.split("?", 1)[0]
         host = self.headers.get("Host", "")
+        host_name = host.split(":", 1)[0].lower()
         if path == "/navigator-smoke/basic.html":
             self.write_bytes(200, "text/html; charset=utf-8",
                              b"<html><body><h1>Kernel HTTP Basic</h1><p>basic html body</p></body></html>")
@@ -110,7 +114,7 @@ class NavigatorSmokeHandler(BaseHTTPRequestHandler):
                              b"<p>Exact Forms-lite urlencoded query received.</p></body></html>")
             return
         if path == "/navigator-smoke/host-check.html":
-            if host.split(":", 1)[0].lower() != "guidexos.test":
+            if host_name != "guidexos.test":
                 self.write_bytes(421, "text/html; charset=utf-8",
                                  b"<html><body><h1>Wrong Host</h1><p>expected guidexos.test</p></body></html>")
                 return
@@ -118,22 +122,36 @@ class NavigatorSmokeHandler(BaseHTTPRequestHandler):
                              b"<html><body><h1>Kernel DNS Hostname</h1><p>host header preserved</p></body></html>")
             return
         if path == "/navigator-smoke/tls-basic.html":
-            if host.split(":", 1)[0].lower() != "guidexos.test":
+            if host_name != "guidexos.test":
                 self.write_bytes(421, "text/html; charset=utf-8",
                                  b"<html><body><h1>Wrong TLS Host</h1><p>expected guidexos.test</p></body></html>")
                 return
             self.write_bytes(200, "text/html; charset=utf-8",
                              b"<html><body><h1>Kernel TLS Basic</h1><p>local handshake ok</p></body></html>")
             return
-        if path == "/policy-validated/ok.html":
-            if host.split(":", 1)[0].lower() != "guidexos.test":
+        if path in ("/navigator-policy/ok.html", "/policy-validated/ok.html"):
+            expected = self.policy_host.lower()
+            if host_name != expected:
                 self.write_bytes(421, "text/html; charset=utf-8",
-                                 b"<html><body><h1>Wrong TLS Host</h1><p>expected guidexos.test</p></body></html>")
+                                 ("<html><body><h1>Wrong TLS Host</h1><p>expected %s</p></body></html>" % expected).encode("utf-8"))
                 return
             self.write_bytes(200, "text/html; charset=utf-8",
-                             b"<html><body><h1>Policy Validated TLS OK</h1><p>explicit HTTPS policy path exercised</p></body></html>")
+                             b"<html><body><h1>Policy Validated TLS OK</h1><p>explicit HTTPS policy navigation exercised</p></body></html>")
             return
-        if path == "/policy-validated/redirect-downgrade":
+        if path in ("/navigator-policy/redirect-downgrade", "/policy-validated/redirect-downgrade"):
+            port = self.http_port or 8080
+            self.write_redirect(302, f"http://10.0.2.2:{port}/navigator-smoke/insecure-downgrade")
+            return
+        if path == "/navigator-public-pilot/ok.html":
+            expected = self.public_pilot_host.lower()
+            if host_name != expected:
+                self.write_bytes(421, "text/html; charset=utf-8",
+                                 ("<html><body><h1>Wrong TLS Host</h1><p>expected %s</p></body></html>" % expected).encode("utf-8"))
+                return
+            self.write_bytes(200, "text/html; charset=utf-8",
+                             b"<html><body><h1>Public HTTPS Pilot OK</h1><p>controlled public HTTPS pilot fixture exercised</p></body></html>")
+            return
+        if path == "/navigator-public-pilot/redirect-downgrade":
             port = self.http_port or 8080
             self.write_redirect(302, f"http://10.0.2.2:{port}/navigator-smoke/insecure-downgrade")
             return
@@ -167,18 +185,30 @@ class NavigatorSmokeHandler(BaseHTTPRequestHandler):
             return
         if path == "/navigator-smoke/redirect-to-policy-validated-https":
             if self.https_port:
-                self.write_redirect(302, f"https://guidexos.test:{self.https_port}/policy-validated/ok.html")
+                self.write_redirect(302, f"https://{self.policy_host}:{self.https_port}/navigator-policy/ok.html")
             else:
                 self.write_redirect(302, "https://example.com/secure")
             return
         if path == "/navigator-smoke/redirect-to-policy-disallowed-https":
             if self.https_port:
-                self.write_redirect(302, f"https://wrong.guidexos.test:{self.https_port}/policy-validated/ok.html")
+                self.write_redirect(302, f"https://{self.policy_wrong_host}:{self.https_port}/navigator-policy/ok.html")
             else:
                 self.write_redirect(302, "https://example.com/secure")
             return
+        if path == "/navigator-smoke/redirect-to-numeric-https":
+            if self.https_port:
+                self.write_redirect(302, f"https://10.0.2.2:{self.https_port}/navigator-smoke/tls-basic.html")
+            else:
+                self.write_redirect(302, "https://10.0.2.2/secure")
+            return
         if path == "/navigator-smoke/redirect-to-public-https":
             self.write_redirect(302, "https://example.com/secure")
+            return
+        if path == "/navigator-smoke/redirect-to-public-pilot-https":
+            if self.https_port:
+                self.write_redirect(302, f"https://{self.public_pilot_host}:{self.https_port}/navigator-public-pilot/ok.html")
+            else:
+                self.write_redirect(302, "https://example.com/secure")
             return
         if path == "/navigator-smoke/redirect-downgrade":
             port = self.http_port or 8080
@@ -356,6 +386,16 @@ class NavigatorTlsSmokeServer(ThreadingHTTPServer):
 
 
 def main():
+    def build_ssl_context(cert_path, key_path):
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
+        context.maximum_version = ssl.TLSVersion.TLSv1_2
+        context.options |= getattr(ssl, "OP_NO_COMPRESSION", 0)
+        context.options |= getattr(ssl, "OP_NO_TICKET", 0)
+        context.set_ciphers("ECDHE-RSA-AES128-GCM-SHA256")
+        context.load_cert_chain(cert_path, key_path)
+        return context
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", default=".")
     parser.add_argument("--host", default="0.0.0.0")
@@ -364,29 +404,51 @@ def main():
     parser.add_argument("--http-port", type=int)
     parser.add_argument("--tls-cert")
     parser.add_argument("--tls-key")
+    parser.add_argument("--local-tls-cert")
+    parser.add_argument("--local-tls-key")
+    parser.add_argument("--policy-host", default="dev.guidexos.test")
+    parser.add_argument("--policy-wrong-host", default="wrong.guidexos.test")
+    parser.add_argument("--policy-tls-cert")
+    parser.add_argument("--policy-tls-key")
+    parser.add_argument("--public-pilot-host", default="public-pilot.guidexos.test")
+    parser.add_argument("--public-pilot-tls-cert")
+    parser.add_argument("--public-pilot-tls-key")
     args = parser.parse_args()
     NavigatorSmokeHandler.root = Path(args.root).resolve()
     NavigatorSmokeHandler.https_port = args.https_port
     NavigatorSmokeHandler.http_port = args.http_port
+    NavigatorSmokeHandler.policy_host = args.policy_host
+    NavigatorSmokeHandler.policy_wrong_host = args.policy_wrong_host
+    NavigatorSmokeHandler.public_pilot_host = args.public_pilot_host
     server = None
-    if args.tls_cert or args.tls_key:
-        if not args.tls_cert or not args.tls_key:
-            parser.error("--tls-cert and --tls-key must be supplied together")
-        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-        context.minimum_version = ssl.TLSVersion.TLSv1_2
-        context.maximum_version = ssl.TLSVersion.TLSv1_2
-        context.options |= getattr(ssl, "OP_NO_COMPRESSION", 0)
-        context.options |= getattr(ssl, "OP_NO_TICKET", 0)
-        context.set_ciphers("ECDHE-RSA-AES128-GCM-SHA256")
-        context.load_cert_chain(args.tls_cert, args.tls_key)
+    local_tls_cert = args.local_tls_cert or args.tls_cert
+    local_tls_key = args.local_tls_key or args.tls_key
+    if local_tls_cert or local_tls_key or args.policy_tls_cert or args.policy_tls_key or args.public_pilot_tls_cert or args.public_pilot_tls_key:
+        if not local_tls_cert or not local_tls_key:
+            parser.error("--local-tls-cert/--local-tls-key (or --tls-cert/--tls-key) must be supplied together")
+        if bool(args.policy_tls_cert) != bool(args.policy_tls_key):
+            parser.error("--policy-tls-cert and --policy-tls-key must be supplied together")
+        if bool(args.public_pilot_tls_cert) != bool(args.public_pilot_tls_key):
+            parser.error("--public-pilot-tls-cert and --public-pilot-tls-key must be supplied together")
+        local_context = build_ssl_context(local_tls_cert, local_tls_key)
+        policy_context = build_ssl_context(args.policy_tls_cert, args.policy_tls_key) if args.policy_tls_cert else None
+        public_pilot_context = build_ssl_context(args.public_pilot_tls_cert, args.public_pilot_tls_key) if args.public_pilot_tls_cert else None
+
         def on_server_name(sock, server_name, _ctx):
             setattr(sock, "_guidexos_sni", server_name)
+            chosen = local_context
+            if policy_context and server_name and server_name.lower() == args.policy_host.lower():
+                chosen = policy_context
+            elif public_pilot_context and server_name and server_name.lower() == args.public_pilot_host.lower():
+                chosen = public_pilot_context
+            sock.context = chosen
             print(f"TLS clienthello sni={server_name}", flush=True)
-        context.set_servername_callback(on_server_name)
-        server = NavigatorTlsSmokeServer((args.host, args.port), NavigatorSmokeHandler, context)
+
+        local_context.set_servername_callback(on_server_name)
+        server = NavigatorTlsSmokeServer((args.host, args.port), NavigatorSmokeHandler, local_context)
     else:
         server = ThreadingHTTPServer((args.host, args.port), NavigatorSmokeHandler)
-    scheme = "HTTPS" if args.tls_cert else "HTTP"
+    scheme = "HTTPS" if local_tls_cert else "HTTP"
     print(f"Navigator kernel {scheme} smoke server on {args.host}:{args.port} root={NavigatorSmokeHandler.root}", flush=True)
     server.serve_forever()
 

@@ -142,12 +142,15 @@ struct GxosValidatedHttpsPolicyInfo {
     GxosValidatedHttpsPolicyState selectedState;
     bool localAllowlistEnabled;
     bool localSmokeReady;
+    bool validatedNavigationEnabled;
     bool broadPublicHttpsEnabled;
+    bool publicHttpsPilotRequested;
     bool productionReady;
     const char* configPath;
     const char* configSource;
     const char* localAllowReason;
     const char* detail;
+    const char* publicHttpsPilotReason;
     const char* blocker;
     const char* error;
 };

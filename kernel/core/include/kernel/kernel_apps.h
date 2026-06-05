@@ -645,6 +645,7 @@ private:
     int m_metaHttpStatusCode;
     char m_metaHttpReason[48];
     char m_metaContentType[48];
+    char m_metaContentEncoding[32];
     bool m_metaRedirected;
     int m_metaRedirectCount;
     char m_metaErrorStatus[128];
@@ -720,6 +721,7 @@ private:
     void buildDownloadResultDocument(const DownloadRecord& record);
     void buildErrorDocument(const char* url, const char* reason);
     void buildHttpsUnsupportedDocument(const char* url, bool redirected, const char* detail = nullptr);
+    void buildUnsupportedContentEncodingDocument(const char* url, const char* encoding);
     void loadFileUrl(const char* url);
     void loadHttpUrl(const char* url);
     void loadHttpResponse(const char* url, KernelHttpResponse* response);

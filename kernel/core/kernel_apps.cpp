@@ -4881,6 +4881,7 @@ NavigatorApp::NavigatorApp()
     m_metaHttpStatusCode = 0;
     m_metaHttpReason[0] = '\0';
     m_metaContentType[0] = '\0';
+    m_metaContentEncoding[0] = '\0';
     m_metaRedirected = false;
     m_metaRedirectCount = 0;
     m_metaErrorStatus[0] = '\0';
@@ -5636,6 +5637,7 @@ void NavigatorApp::buildPageInfoDocument()
     NAV_INFO_TEXT("Final URL: ", m_metaFinalUrl);
     NAV_INFO_TEXT("Source type: ", m_metaSourceType);
     NAV_INFO_TEXT("Content type: ", m_metaContentType[0] ? m_metaContentType : "(none)");
+    NAV_INFO_TEXT("Content encoding: ", m_metaContentEncoding[0] ? m_metaContentEncoding : "(none)");
     if (m_metaHttpStatusCode > 0) NAV_INFO_INT("HTTP status: ", m_metaHttpStatusCode);
     else NAV_INFO_TEXT("HTTP status: ", "not applicable");
     NAV_INFO_TEXT("Redirected: ", m_metaRedirected ? "yes" : "no");
@@ -5654,7 +5656,7 @@ void NavigatorApp::buildPageInfoDocument()
     NAV_INFO_TEXT("TLS hostname validation: ", m_metaTlsUsed ? (m_metaTlsHostnameValidated ? "success" : "failure") : "not used");
     NAV_INFO_TEXT("TLS allowlist mode: ",
         m_metaTlsUsed
-            ? (m_metaTlsAllowlistLocalOnly ? "local-only controlled HTTPS" : "policy-scoped validated HTTPS")
+            ? (m_metaTlsAllowlistLocalOnly ? "local-only controlled HTTPS" : "explicit-policy validated HTTPS")
             : "not used");
     NAV_INFO_TEXT("TLS hostname: ", m_metaTlsHostname[0] ? m_metaTlsHostname : "(none)");
     NAV_INFO_TEXT("TLS SNI: ", m_metaTlsSniHost[0] ? m_metaTlsSniHost : "(none)");
@@ -5671,6 +5673,18 @@ void NavigatorApp::buildPageInfoDocument()
         NAV_INFO_TEXT("Trust store path: ", trustStorePolicy.path ? trustStorePolicy.path : "(none)");
         NAV_INFO_TEXT("Trust store source: ",
             gxos::gxos_trust_store_source_name(trustStorePolicy.source));
+        NAV_INFO_INT("Trust store parsed certs: ", (int)trustStorePolicy.parsedCertificateCount);
+        NAV_INFO_TEXT("Validated fixture HTTPS: ",
+            httpsPolicy.validatedNavigationEnabled ? "enabled" : "disabled");
+        NAV_INFO_TEXT("Public HTTPS pilot: ",
+            httpsPolicy.broadPublicHttpsEnabled ? "enabled" : "disabled");
+        NAV_INFO_TEXT("Public HTTPS pilot requested: ",
+            httpsPolicy.publicHttpsPilotRequested ? "yes" : "no");
+        NAV_INFO_TEXT("Public HTTPS pilot reason: ",
+            httpsPolicy.publicHttpsPilotReason ? httpsPolicy.publicHttpsPilotReason : "(none)");
+        NAV_INFO_TEXT("HTTPS dev mode: ",
+            httpsPolicy.state == gxos::GxosValidatedHttpsPolicyState::UserTrustStoreDevMode ? "yes" : "no");
+        NAV_INFO_TEXT("HTTPS production validated: ", httpsPolicy.productionReady ? "yes" : "no");
     }
     NAV_INFO_TEXT("Plaintext fallback: ", "no");
     NAV_INFO_INT("Document blocks: ", m_metaDocumentBlocks);
@@ -5805,7 +5819,8 @@ void NavigatorApp::buildRuntimeDocument()
     addBlock(BLOCK_LIST_ITEM, "HTTP: enabled for numeric IPv4 and hostname HTTP/1.0 GET/POST with redirects and chunked decoding");
     addBlock(BLOCK_LIST_ITEM, "DNS: enabled-basic for A/IPv4 records; HTTP redirects: enabled, limit 5; HTTP chunked transfer decoding: enabled");
     addBlock(BLOCK_LIST_ITEM, "Remote PNG: enabled-basic for numeric IPv4 and hostname http:// PNG images; Downloads: unavailable for bare-metal HTTP v0.1");
-    addBlock(BLOCK_LIST_ITEM, "Bookmark persistence: unavailable; bookmarks are in-memory defaults; HTTPS/TLS: local-only controlled guidexos.test:8443/navigator-smoke/ remains available for smoke, explicit dev/prod trust-store policy can also enable deterministic validated fixture HTTPS, unrestricted public bare-metal https:// still stays blocked");
+    addBlock(BLOCK_LIST_ITEM, "Bookmark persistence: unavailable; bookmarks are in-memory defaults; HTTPS/TLS: local-only controlled guidexos.test:8443/navigator-smoke/ remains available for smoke, and explicit dev/prod trust-store policy can enable validated bare-metal https:// navigation without plaintext fallback");
+    addBlock(BLOCK_LIST_ITEM, "Public HTTPS pilot: production-only, explicit opt-in through the HTTPS policy config, hostname-only, and still fail-closed without a real production CA bundle");
     addBlock(BLOCK_LIST_ITEM, "TLS backend: Mbed TLS bare-metal transport is ready with CA and hostname validation");
     addBlock(BLOCK_LIST_ITEM, "TLS policy layer: shared HttpByteStream transport policy selects plain TCP HTTP, local allowlisted Mbed TLS, or policy-validated Mbed TLS; plaintext fallback stays disabled");
     addBlock(BLOCK_LIST_ITEM, "CSS-lite embedded <style>: enabled");
@@ -6006,7 +6021,9 @@ void NavigatorApp::buildRuntimeDocument()
     strappend(prerequisiteLine, gxos::gxos_validated_https_policy_state_name(httpsPolicy.state), sizeof(prerequisiteLine));
     strappend(prerequisiteLine, "; local-smoke=", sizeof(prerequisiteLine));
     strappend(prerequisiteLine, localSmokeTlsReady ? "ready" : "blocked", sizeof(prerequisiteLine));
-    strappend(prerequisiteLine, "; public=", sizeof(prerequisiteLine));
+    strappend(prerequisiteLine, "; fixture-navigation=", sizeof(prerequisiteLine));
+    strappend(prerequisiteLine, httpsPolicy.validatedNavigationEnabled ? "enabled" : "disabled", sizeof(prerequisiteLine));
+    strappend(prerequisiteLine, "; public-pilot=", sizeof(prerequisiteLine));
     strappend(prerequisiteLine, httpsPolicy.broadPublicHttpsEnabled ? "enabled" : "disabled", sizeof(prerequisiteLine));
     addBlock(BLOCK_LIST_ITEM, prerequisiteLine);
     strcopy(prerequisiteLine, "HTTPS policy config: path=", sizeof(prerequisiteLine));
@@ -6018,6 +6035,9 @@ void NavigatorApp::buildRuntimeDocument()
     strappend(prerequisiteLine, httpsPolicy.localAllowReason ? httpsPolicy.localAllowReason : "(none)", sizeof(prerequisiteLine));
     strappend(prerequisiteLine, "; blocker=", sizeof(prerequisiteLine));
     strappend(prerequisiteLine, httpsPolicy.blocker ? httpsPolicy.blocker : "(none)", sizeof(prerequisiteLine));
+    addBlock(BLOCK_LIST_ITEM, prerequisiteLine);
+    strcopy(prerequisiteLine, "Public HTTPS pilot reason: ", sizeof(prerequisiteLine));
+    strappend(prerequisiteLine, httpsPolicy.publicHttpsPilotReason ? httpsPolicy.publicHttpsPilotReason : "(none)", sizeof(prerequisiteLine));
     addBlock(BLOCK_LIST_ITEM, prerequisiteLine);
     strcopy(prerequisiteLine, "HTTPS policy error: ", sizeof(prerequisiteLine));
     strappend(prerequisiteLine, httpsPolicy.error ? httpsPolicy.error : "(none)", sizeof(prerequisiteLine));
@@ -6074,9 +6094,26 @@ void NavigatorApp::buildHttpsUnsupportedDocument(const char* url, bool redirecte
     m_blockCount = 0;
     addBlock(BLOCK_HEADING, redirected ? "HTTPS Redirect Unsupported" : "HTTPS Unsupported");
     addBlock(BLOCK_PARAGRAPH, redirected
-        ? "Navigator only follows a controlled local HTTPS allowlist in this milestone. Other HTTP-to-HTTPS redirects stay blocked."
-        : "Navigator only enables controlled local HTTPS for guidexos.test:8443/navigator-smoke/ in this milestone. General bare-metal https:// stays disabled.");
+        ? "Navigator only follows HTTPS redirects that satisfy the active bare-metal TLS policy. Targets outside the local smoke allowlist, explicit validated fixture policy, or the controlled public HTTPS pilot stay blocked."
+        : "Bare-metal Navigator https:// requires either the controlled local smoke allowlist, an explicit validated fixture policy, or the controlled public HTTPS pilot with production trust prerequisites. Otherwise navigation fails closed.");
     if (detail && detail[0]) addBlock(BLOCK_PARAGRAPH, detail);
+    addBlock(BLOCK_LINK, "Page Info", "about:page-info");
+    addBlock(BLOCK_LINK, "Go to about:navigator", "about:navigator");
+}
+
+void NavigatorApp::buildUnsupportedContentEncodingDocument(const char* url, const char* encoding)
+{
+    strcopy(m_currentUrl, url ? url : "", MAX_URL_LEN);
+    strcopy(m_title, "Unsupported Content Encoding", MAX_TITLE_LEN_NAV);
+    m_blockCount = 0;
+    addBlock(BLOCK_HEADING, "Unsupported Content Encoding");
+    addBlock(BLOCK_PARAGRAPH, "Navigator completed the HTTP/TLS transport successfully, but this bare-metal adapter cannot decode compressed response bodies yet.");
+    if (encoding && encoding[0]) {
+        char line[MAX_BLOCK_TEXT];
+        strcopy(line, "Reported Content-Encoding: ", sizeof(line));
+        strappend(line, encoding, sizeof(line));
+        addBlock(BLOCK_LIST_ITEM, line);
+    }
     addBlock(BLOCK_LINK, "Page Info", "about:page-info");
     addBlock(BLOCK_LINK, "Go to about:navigator", "about:navigator");
 }
@@ -6086,6 +6123,20 @@ static bool nav_starts_with(const char* value, const char* prefix)
     if (!value || !prefix) return false;
     for (int i = 0; prefix[i]; ++i) {
         if (value[i] != prefix[i]) return false;
+    }
+    return true;
+}
+
+static bool nav_ends_with(const char* value, const char* suffix)
+{
+    if (!value || !suffix) return false;
+    int valueLen = 0;
+    while (value[valueLen]) ++valueLen;
+    int suffixLen = 0;
+    while (suffix[suffixLen]) ++suffixLen;
+    if (suffixLen > valueLen) return false;
+    for (int i = 0; i < suffixLen; ++i) {
+        if (value[valueLen - suffixLen + i] != suffix[i]) return false;
     }
     return true;
 }
@@ -6701,7 +6752,11 @@ static const uint32_t kNavigatorTlsSmokeCnMismatchFlag = 0x04u;
 static const char* kNavigatorControlledHttpsHost = "guidexos.test";
 static const uint16_t kNavigatorControlledHttpsPort = 8443;
 static const char* kNavigatorControlledHttpsPathPrefix = "/navigator-smoke/";
-static const char* kNavigatorPolicyValidatedHttpsPathPrefix = "/policy-validated/";
+static const char* kNavigatorPolicyDevHttpsHost = "dev.guidexos.test";
+static const char* kNavigatorPolicyProdHttpsHost = "prod.guidexos.test";
+static const char* kNavigatorPolicyValidatedPathPrefix = "/navigator-policy/";
+static const char* kNavigatorPublicPilotHttpsHost = "public-pilot.guidexos.test";
+static const char* kNavigatorPublicPilotPathPrefix = "/navigator-public-pilot/";
 static const char* kNavigatorHttpsSmokeFaultModePath = "/config/navigator/https-fault-mode.txt";
 static const char* kNavigatorHttpsSmokeFaultModeCompatPath = "/config/navigator/HTTPSFLT.TXT";
 
@@ -6798,6 +6853,7 @@ void NavigatorApp::rememberPageMetadata(const char* requestedUrl, const char* fi
     m_metaHttpStatusCode = httpStatusCode;
     strcopy(m_metaHttpReason, httpReason ? httpReason : "", sizeof(m_metaHttpReason));
     strcopy(m_metaContentType, contentType ? contentType : "", sizeof(m_metaContentType));
+    strcopy(m_metaContentEncoding, networkResponse ? networkResponse->contentEncoding : "", sizeof(m_metaContentEncoding));
     m_metaRedirectCount = redirectCount;
     m_metaRedirected = redirectCount > 0;
     strcopy(m_metaErrorStatus, errorStatus ? errorStatus : "", sizeof(m_metaErrorStatus));
@@ -7119,11 +7175,6 @@ static bool kernel_https_path_has_allowed_prefix(const char* path)
     return path && nav_starts_with(path, kNavigatorControlledHttpsPathPrefix);
 }
 
-static bool kernel_https_path_has_policy_validated_prefix(const char* path)
-{
-    return path && nav_starts_with(path, kNavigatorPolicyValidatedHttpsPathPrefix);
-}
-
 static bool kernel_https_allowlist_match(const KernelHttpUrl& parsed)
 {
     return !parsed.hostIsNumeric &&
@@ -7132,12 +7183,20 @@ static bool kernel_https_allowlist_match(const KernelHttpUrl& parsed)
         kernel_https_path_has_allowed_prefix(parsed.path);
 }
 
-static bool kernel_https_policy_scope_match(const KernelHttpUrl& parsed)
+static bool kernel_https_policy_fixture_match(const KernelHttpUrl& parsed)
 {
     return !parsed.hostIsNumeric &&
-        streq_local(parsed.host, kNavigatorControlledHttpsHost) &&
         parsed.port == kNavigatorControlledHttpsPort &&
-        kernel_https_path_has_policy_validated_prefix(parsed.path);
+        nav_ends_with(parsed.host, ".guidexos.test") &&
+        nav_starts_with(parsed.path, kNavigatorPolicyValidatedPathPrefix);
+}
+
+static bool kernel_https_public_pilot_fixture_match(const KernelHttpUrl& parsed)
+{
+    return !parsed.hostIsNumeric &&
+        streq_local(parsed.host, kNavigatorPublicPilotHttpsHost) &&
+        parsed.port == kNavigatorControlledHttpsPort &&
+        nav_starts_with(parsed.path, kNavigatorPublicPilotPathPrefix);
 }
 
 static bool kernel_http_transport_uses_tls(gxos::web::HttpByteStreamTransportSelection selection)
@@ -7170,26 +7229,40 @@ static void kernel_https_allowlist_reason(const KernelHttpUrl& parsed, char* out
     strcopy(out, "HTTPS/TLS unsupported: outside controlled local HTTPS allowlist", outSize);
 }
 
-static void kernel_https_policy_scope_reason(const KernelHttpUrl& parsed, char* out, int outSize)
+static bool kernel_https_explicit_policy_target_allowed(const KernelHttpUrl& parsed, char* out, int outSize)
 {
-    if (!out || outSize <= 0) return;
+    if (out && outSize > 0) out[0] = '\0';
     if (parsed.hostIsNumeric) {
-        strcopy(out, "HTTPS/TLS unsupported: validated HTTPS policy scope does not allow numeric-IP hosts", outSize);
-        return;
+        if (out && outSize > 0) {
+            strcopy(out, "HTTPS/TLS unsupported: explicit validated HTTPS policy does not allow numeric-IP hosts", outSize);
+        }
+        return false;
     }
-    if (!streq_local(parsed.host, kNavigatorControlledHttpsHost)) {
-        strcopy(out, "HTTPS/TLS unsupported: outside validated HTTPS policy scope (host)", outSize);
-        return;
+    return true;
+}
+
+static bool kernel_https_public_pilot_target_allowed(const KernelHttpUrl& parsed,
+                                                     const gxos::GxosValidatedHttpsPolicyInfo& httpsPolicy,
+                                                     char* out, int outSize)
+{
+    if (out && outSize > 0) out[0] = '\0';
+    if (parsed.hostIsNumeric) {
+        if (out && outSize > 0) {
+            strcopy(out, "HTTPS/TLS unsupported: public HTTPS pilot does not allow numeric-IP hosts", outSize);
+        }
+        return false;
     }
-    if (parsed.port != kNavigatorControlledHttpsPort) {
-        strcopy(out, "HTTPS/TLS unsupported: outside validated HTTPS policy scope (port)", outSize);
-        return;
+    if (!httpsPolicy.broadPublicHttpsEnabled) {
+        if (out && outSize > 0) {
+            strcopy(out,
+                httpsPolicy.publicHttpsPilotReason && httpsPolicy.publicHttpsPilotReason[0]
+                    ? httpsPolicy.publicHttpsPilotReason
+                    : "Public HTTPS pilot is disabled by policy.",
+                outSize);
+        }
+        return false;
     }
-    if (!kernel_https_path_has_policy_validated_prefix(parsed.path)) {
-        strcopy(out, "HTTPS/TLS unsupported: outside validated HTTPS policy scope (path)", outSize);
-        return;
-    }
-    strcopy(out, "HTTPS/TLS unsupported: outside validated HTTPS policy scope", outSize);
+    return true;
 }
 
 static gxos::web::HttpTransportPolicyDecision kernel_http_plain_transport_policy()
@@ -7233,7 +7306,7 @@ static gxos::web::HttpTransportPolicyDecision kernel_http_policy_validated_tls_t
         true,
         true,
         "Mbed TLS bare-metal",
-        reason ? reason : "Validated HTTPS policy scope matched."
+        reason ? reason : "Explicit validated HTTPS policy matched."
     };
 }
 
@@ -7295,19 +7368,46 @@ static gxos::web::HttpTransportPolicyDecision kernel_http_transport_policy_for_h
     const bool policyValidatedEnabled =
         httpsPolicy.state == gxos::GxosValidatedHttpsPolicyState::UserTrustStoreDevMode ||
         httpsPolicy.state == gxos::GxosValidatedHttpsPolicyState::ProductionValidated;
-    if (policyValidatedEnabled) {
-        if (kernel_https_policy_scope_match(parsed)) {
+    const bool productionValidated =
+        httpsPolicy.state == gxos::GxosValidatedHttpsPolicyState::ProductionValidated;
+    if (policyValidatedEnabled && kernel_https_policy_fixture_match(parsed)) {
+        if (kernel_https_explicit_policy_target_allowed(parsed, reason, reasonSize)) {
             if (reason && reasonSize > 0) {
                 strcopy(reason,
                     httpsPolicy.state == gxos::GxosValidatedHttpsPolicyState::UserTrustStoreDevMode
-                        ? "Validated HTTPS dev/test policy scope matched."
-                        : "Validated HTTPS production policy scope matched.",
+                        ? "Explicit validated HTTPS dev-mode fixture matched."
+                        : "Explicit validated HTTPS production fixture matched.",
                     reasonSize);
             }
             return kernel_http_policy_validated_tls_transport_policy(reason);
         }
-        kernel_https_policy_scope_reason(parsed, reason, reasonSize);
         return kernel_http_blocked_https_transport_policy(reason);
+    }
+    if (productionValidated &&
+        (kernel_https_public_pilot_fixture_match(parsed) || !kernel_https_policy_fixture_match(parsed))) {
+        if (kernel_https_public_pilot_target_allowed(parsed, httpsPolicy, reason, reasonSize)) {
+            if (reason && reasonSize > 0) {
+                if (kernel_https_public_pilot_fixture_match(parsed)) {
+                    strcopy(reason, "Controlled public HTTPS pilot fixture matched.", reasonSize);
+                } else {
+                    strcopy(reason, "ProductionValidated public HTTPS pilot matched.", reasonSize);
+                }
+            }
+            return kernel_http_policy_validated_tls_transport_policy(reason);
+        }
+        return kernel_http_blocked_policy_transport_policy(reason);
+    }
+    if (policyValidatedEnabled) {
+        if (reason && reasonSize > 0) {
+            strcopy(reason,
+                httpsPolicy.state == gxos::GxosValidatedHttpsPolicyState::UserTrustStoreDevMode
+                    ? "HTTPS/TLS unsupported: UserTrustStoreDevMode only allows explicit validated fixture hosts."
+                    : (httpsPolicy.publicHttpsPilotReason && httpsPolicy.publicHttpsPilotReason[0]
+                        ? httpsPolicy.publicHttpsPilotReason
+                        : "HTTPS/TLS unsupported: ProductionValidated currently allows explicit fixture hosts only."),
+                reasonSize);
+        }
+        return kernel_http_blocked_policy_transport_policy(reason);
     }
 
     if ((httpsPolicy.selectedState == gxos::GxosValidatedHttpsPolicyState::UserTrustStoreDevMode ||
@@ -7688,7 +7788,8 @@ static bool kernel_http_resolve_host(KernelHttpUrl* parsed, KernelHttpResponse* 
     strcopy(s_kernelLastDnsHost, parsed->host, sizeof(s_kernelLastDnsHost));
 
 #ifdef GXOS_NAVIGATOR_HTTP_SMOKE_ACTIVE
-    if (streq_local(parsed->host, "guidexos.test")) {
+    if (streq_local(parsed->host, kNavigatorControlledHttpsHost) ||
+        nav_ends_with(parsed->host, ".guidexos.test")) {
         parsed->ip = kernel::ipv4::make_ip(10, 0, 2, 2);
         kernel::ipv4::ip_to_string(parsed->ip, response->dnsResolvedIp);
         strcopy(s_kernelLastDnsResolvedIp, response->dnsResolvedIp, sizeof(s_kernelLastDnsResolvedIp));
@@ -8339,6 +8440,13 @@ void NavigatorApp::loadHttpResponse(const char* url, KernelHttpResponse* respons
             rememberPageMetadata(requestedUrl, finalUrl, finalHttps ? "https" : transportSource, response->contentType,
                 requestedHttps ? "HTTPS/TLS unsupported" : "HTTPS/TLS unsupported redirect",
                 nullptr, 0, nullptr, nullptr, response->statusCode, response->reason,
+                response->redirectCount, response);
+            return;
+        }
+        if (streq_local(response->error, "Unsupported content encoding")) {
+            buildUnsupportedContentEncodingDocument(finalUrl, response->contentEncoding);
+            rememberPageMetadata(requestedUrl, finalUrl, finalHttps ? "https" : transportSource, response->contentType,
+                "Unsupported content encoding", nullptr, 0, nullptr, nullptr, response->statusCode, response->reason,
                 response->redirectCount, response);
             return;
         }
@@ -9112,7 +9220,7 @@ void NavigatorApp::loadUrl(const char* url)
     } else if (nav_starts_with(normalized, "http://") || nav_starts_with(normalized, "https://")) {
         loadHttpUrl(normalized);
     } else {
-        buildErrorDocument(normalized, "Unsupported URL. Use about:, file://, or numeric-IP http://.");
+        buildErrorDocument(normalized, "Unsupported URL. Use about:, file://, http://, or a policy-gated https:// URL.");
         rememberPageMetadata(normalized, normalized, "unsupported", "", "Unsupported URL scheme", nullptr, 0);
     }
     m_scrollY = 0;
@@ -10073,6 +10181,36 @@ static bool navigator_https_cert_fault_expected(NavigatorHttpsSmokeFaultMode mod
         mode == NavigatorHttpsSmokeFaultMode::FutureCertificate;
 }
 
+static const char* navigator_https_policy_host_for_info(const gxos::GxosValidatedHttpsPolicyInfo& info)
+{
+    if (info.selectedState == gxos::GxosValidatedHttpsPolicyState::ProductionValidated ||
+        info.state == gxos::GxosValidatedHttpsPolicyState::ProductionValidated) {
+        return kNavigatorPolicyProdHttpsHost;
+    }
+    return kNavigatorPolicyDevHttpsHost;
+}
+
+static void navigator_https_policy_url(const gxos::GxosValidatedHttpsPolicyInfo& info,
+                                       const char* path,
+                                       char* out,
+                                       int outSize)
+{
+    if (!out || outSize <= 0) return;
+    strcopy(out, "https://", outSize);
+    strappend(out, navigator_https_policy_host_for_info(info), outSize);
+    strappend(out, ":8443", outSize);
+    strappend(out, path, outSize);
+}
+
+static void navigator_public_pilot_fixture_url(char* out, int outSize, const char* path)
+{
+    if (!out || outSize <= 0) return;
+    strcopy(out, "https://", outSize);
+    strappend(out, kNavigatorPublicPilotHttpsHost, outSize);
+    strappend(out, ":8443", outSize);
+    strappend(out, path ? path : kNavigatorPublicPilotPathPrefix, outSize);
+}
+
 void NavigatorApp::smokeCaptureHttpsNavigation(const char* url,
                                                char* requestedUrl, int requestedUrlLen,
                                                int* statusCode,
@@ -10189,6 +10327,8 @@ static bool printNavigatorHttpsUnsupportedSmokeCase(const char* name, const char
 static bool printNavigatorLocalTlsSmokeCase()
 {
     const bool localReady = gxos::gxos_tls_local_smoke_https_ready();
+    const gxos::GxosTrustStorePolicyInfo trustPolicy = gxos::gxos_tls_trust_store_policy_info();
+    const bool localTrustExpected = trustPolicy.source == gxos::GxosTrustStoreSource::SmokeFixtureTrust;
     const NavigatorHttpsSmokeFaultMode faultMode = navigator_https_smoke_fault_mode();
     const bool certFaultExpected = navigator_https_cert_fault_expected(faultMode);
     const char* url = "https://guidexos.test:8443/navigator-smoke/tls-basic.html";
@@ -10225,7 +10365,21 @@ static bool printNavigatorLocalTlsSmokeCase()
     const bool prereqFailed = nav_smoke_text_equals(tlsStatus, "CaMissing") ||
         nav_smoke_text_equals(tlsStatus, "CaParseFailed");
     const bool pass = localReady
-        ? (certFaultExpected
+        ? (!localTrustExpected
+            ? !requestOk &&
+                statusCode == 0 &&
+                redirectCount == 0 &&
+                plainTcpConnectAttempts == 0 &&
+                tlsTcpConnectAttempts == 1 &&
+                verifyFlags != 0 &&
+                !tlsValidated &&
+                !tlsHostnameValidated &&
+                tlsAllowlistLocalOnly &&
+                nav_smoke_text_equals(transportSelection, "LocalAllowlistedTlsHttps") &&
+                nav_smoke_text_equals(tlsStatus, "CertificateVerifyFailed") &&
+                nav_smoke_text_equals(tlsSniHost, "guidexos.test") &&
+                error[0] != '\0'
+            : certFaultExpected
             ? !requestOk &&
                 statusCode == 0 &&
                 redirectCount == 0 &&
@@ -10331,6 +10485,8 @@ static bool printNavigatorLocalTlsSmokeCase()
 static bool printNavigatorLocalTlsRedirectCase()
 {
     const bool localReady = gxos::gxos_tls_local_smoke_https_ready();
+    const gxos::GxosTrustStorePolicyInfo trustPolicy = gxos::gxos_tls_trust_store_policy_info();
+    const bool localTrustExpected = trustPolicy.source == gxos::GxosTrustStoreSource::SmokeFixtureTrust;
     const NavigatorHttpsSmokeFaultMode faultMode = navigator_https_smoke_fault_mode();
     const bool certFaultExpected = navigator_https_cert_fault_expected(faultMode);
     const char* url = "http://10.0.2.2:8080/navigator-smoke/redirect-to-https";
@@ -10364,7 +10520,22 @@ static bool printNavigatorLocalTlsRedirectCase()
     const bool prereqFailed = nav_smoke_text_equals(tlsStatus, "CaMissing") ||
         nav_smoke_text_equals(tlsStatus, "CaParseFailed");
     const bool pass = localReady
-        ? (certFaultExpected
+        ? (!localTrustExpected
+            ? !requestOk &&
+                statusCode == 0 &&
+                redirectCount == 1 &&
+                plainTcpConnectAttempts == 1 &&
+                tlsTcpConnectAttempts == 1 &&
+                verifyFlags != 0 &&
+                !tlsValidated &&
+                !tlsHostnameValidated &&
+                tlsAllowlistLocalOnly &&
+                nav_smoke_text_equals(transportSelection, "LocalAllowlistedTlsHttps") &&
+                nav_smoke_text_equals(tlsStatus, "CertificateVerifyFailed") &&
+                nav_smoke_text_equals(finalUrl, "https://guidexos.test:8443/navigator-smoke/tls-basic.html") &&
+                nav_smoke_text_equals(tlsSniHost, "guidexos.test") &&
+                error[0] != '\0'
+            : certFaultExpected
             ? !requestOk &&
                 statusCode == 0 &&
                 redirectCount == 1 &&
@@ -10795,6 +10966,7 @@ static bool printNavigatorRuntimeSmokePreamble()
     const char* localSmokeTlsBlocker = gxos::gxos_tls_local_smoke_https_blocker_reason();
     const bool tlsReady = gxos::gxos_tls_prerequisites_ready();
     const char* tlsReadinessBlocker = gxos::gxos_tls_prerequisites_blocker_reason();
+    const NavigatorHttpsSmokeFaultMode faultMode = navigator_https_smoke_fault_mode();
     serial::puts("[NAVIGATOR-SMOKE] BEGIN\n");
     serial::puts("[NAVIGATOR-SMOKE] build_mode=bare-metal/kernel\n");
     serial::puts("[NAVIGATOR-SMOKE] registered=");
@@ -10809,14 +10981,14 @@ static bool printNavigatorRuntimeSmokePreamble()
     serial::puts("[NAVIGATOR-SMOKE] capability.http_dns=enabled-basic A records\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.http_redirects=enabled limit 5\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.http_chunked=enabled\n");
-    serial::puts("[NAVIGATOR-SMOKE] capability.https_tls=controlled local-only HTTPS remains enabled for guidexos.test:8443/navigator-smoke/; explicit dev/prod trust-store policy can also enable deterministic validated fixture HTTPS; unrestricted public navigation stays blocked\n");
+    serial::puts("[NAVIGATOR-SMOKE] capability.https_tls=controlled local-only HTTPS remains enabled for guidexos.test:8443/navigator-smoke/; explicit dev/prod trust-store policy can enable validated fixture HTTPS, and ProductionValidated plus public-https-pilot=enabled can enable a controlled public HTTPS pilot with CA and hostname checks and no plaintext fallback\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.tls_backend=Mbed TLS transport ready with CA and hostname validation\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.tls_smoke_local=enabled wrong-host and direct hook diagnostics remain available\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.http_transport=shared HttpByteStream policy layer (PlainTcpHttp + LocalAllowlistedTlsHttps + PolicyValidatedTlsHttps)\n");
-    serial::puts("[NAVIGATOR-SMOKE] capability.tls_policy_layer=shared HttpByteStream transport policy layer selects plain TCP HTTP, local allowlisted Mbed TLS, or policy-validated Mbed TLS; plaintext fallback stays disabled and unrestricted public https:// remains blocked\n");
+    serial::puts("[NAVIGATOR-SMOKE] capability.tls_policy_layer=shared HttpByteStream transport policy layer selects plain TCP HTTP, local allowlisted Mbed TLS, or policy-validated Mbed TLS; validated fixture hosts stay policy-gated, public HTTPS stays pilot-gated, plaintext fallback stays disabled, and policy stays fail-closed by default\n");
     serial::puts("[NAVIGATOR-SMOKE] coverage.direct_https_allowlist=covered\n");
     serial::puts("[NAVIGATOR-SMOKE] coverage.direct_https_unsupported=covered\n");
-    serial::puts("[NAVIGATOR-SMOKE] coverage.http_to_https_redirect_policy=local allowlist and policy-scoped validated HTTPS targets covered\n");
+    serial::puts("[NAVIGATOR-SMOKE] coverage.http_to_https_redirect_policy=local allowlist, validated fixture HTTPS, and controlled public HTTPS pilot redirect policy are covered\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.remote_png=enabled-basic numeric IPv4 and hostname http:// PNG images\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.downloads=unavailable for bare-metal HTTP v0.1\n");
     serial::puts("[NAVIGATOR-SMOKE] capability.css_lite=enabled for embedded style blocks\n");
@@ -11016,7 +11188,7 @@ static bool printNavigatorRuntimeSmokePreamble()
     serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.https_policy_config_source=");
     serial::puts(httpsPolicy.configSource ? httpsPolicy.configSource : "(none)");
     serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.https_smoke_fault_mode=");
-    serial::puts(navigator_https_smoke_fault_mode_name(navigator_https_smoke_fault_mode()));
+    serial::puts(navigator_https_smoke_fault_mode_name(faultMode));
     serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.https_policy_error=");
     serial::puts(httpsPolicy.error ? httpsPolicy.error : "(none)");
     serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.https_policy_local_ready=");
@@ -11025,10 +11197,16 @@ static bool printNavigatorRuntimeSmokePreamble()
     serial::puts(localSmokeTlsReady ? "(none)" : (localSmokeTlsBlocker ? localSmokeTlsBlocker : "(none)"));
     serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.https_policy_local_reason=");
     serial::puts(httpsPolicy.localAllowReason ? httpsPolicy.localAllowReason : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.https_policy_validated_navigation_enabled=");
+    serial::puts(httpsPolicy.validatedNavigationEnabled ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.https_policy_public_pilot_requested=");
+    serial::puts(httpsPolicy.publicHttpsPilotRequested ? "yes" : "no");
     serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.https_policy_broad_public_enabled=");
     serial::puts(httpsPolicy.broadPublicHttpsEnabled ? "yes" : "no");
     serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.https_policy_production_ready=");
     serial::puts(httpsPolicy.productionReady ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.https_policy_public_pilot_reason=");
+    serial::puts(httpsPolicy.publicHttpsPilotReason ? httpsPolicy.publicHttpsPilotReason : "(none)");
     serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.https_policy_blocker=");
     serial::puts(httpsPolicy.blocker ? httpsPolicy.blocker : "(none)");
     serial::puts("\n[NAVIGATOR-SMOKE] tls_readiness=");
@@ -11045,7 +11223,9 @@ static bool printNavigatorPolicyValidatedTlsSmokeCase()
     const bool policyEnabled = navigator_https_policy_effectively_enabled(httpsPolicy);
     const NavigatorHttpsSmokeFaultMode faultMode = navigator_https_smoke_fault_mode();
     const bool certFaultExpected = navigator_https_cert_fault_expected(faultMode);
-    const char* url = "https://guidexos.test:8443/policy-validated/ok.html";
+    char url[160];
+    navigator_https_policy_url(httpsPolicy, "/navigator-policy/ok.html", url, sizeof(url));
+    const char* expectedHost = navigator_https_policy_host_for_info(httpsPolicy);
     char requestedUrl[160];
     int statusCode = 0;
     int bodyBytes = 0;
@@ -11091,7 +11271,7 @@ static bool printNavigatorPolicyValidatedTlsSmokeCase()
                 !tlsAllowlistLocalOnly &&
                 nav_smoke_text_equals(transportSelection, "PolicyValidatedTlsHttps") &&
                 nav_smoke_text_equals(tlsStatus, "CertificateVerifyFailed") &&
-                nav_smoke_text_equals(tlsSniHost, "guidexos.test") &&
+                nav_smoke_text_equals(tlsSniHost, expectedHost) &&
                 error[0] != '\0'
             : nav_smoke_text_equals(requestedUrl, url) &&
                 statusCode == 200 &&
@@ -11107,7 +11287,7 @@ static bool printNavigatorPolicyValidatedTlsSmokeCase()
                 !tlsAllowlistLocalOnly &&
                 nav_smoke_text_equals(transportSelection, "PolicyValidatedTlsHttps") &&
                 nav_smoke_text_equals(tlsStatus, "Success") &&
-                nav_smoke_text_equals(tlsSniHost, "guidexos.test") &&
+                nav_smoke_text_equals(tlsSniHost, expectedHost) &&
                 nav_smoke_text_equals(sourceType, "https"))
         : nav_smoke_text_equals(requestedUrl, url) &&
             nav_smoke_text_equals(finalUrl, url) &&
@@ -11142,7 +11322,7 @@ static bool printNavigatorPolicyValidatedTlsSmokeCase()
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.policy_validated.tls_status=");
     serial::puts(tlsStatus[0] ? tlsStatus : "(none)");
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.policy_validated.allowlist_mode=");
-    serial::puts(tlsAllowlistLocalOnly ? "local-only controlled HTTPS" : "policy-scoped validated HTTPS");
+    serial::puts(tlsAllowlistLocalOnly ? "local-only controlled HTTPS" : "explicit-policy validated HTTPS");
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.policy_validated.protocol=");
     serial::puts(tlsProtocol[0] ? tlsProtocol : "(none)");
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.policy_validated.cipher_suite=");
@@ -11188,20 +11368,46 @@ static bool printNavigatorLocalTlsBlockedHostCase()
         tlsProtocol, sizeof(tlsProtocol), tlsCipherSuite, sizeof(tlsCipherSuite),
         transportSelection, sizeof(transportSelection), tlsStatus, sizeof(tlsStatus),
         &tlsValidated, &tlsHostnameValidated, &tlsAllowlistLocalOnly, sourceType, sizeof(sourceType));
-
-    const bool pass = nav_smoke_text_equals(requestedUrl, url) &&
-        nav_smoke_text_equals(finalUrl, url) &&
-        statusCode == 0 &&
-        redirectCount == 0 &&
+    const bool hostRejected = nav_smoke_text_equals(tlsStatus, "CertificateVerifyFailed") ||
+        nav_smoke_text_equals(tlsStatus, "HostnameMismatch");
+    const bool failClosedPolicyBlocked = nav_smoke_text_equals(transportSelection, "BlockedPolicy") &&
+        nav_smoke_text_equals(tlsStatus, "PolicyBlocked") &&
         plainTcpConnectAttempts == 0 &&
         tlsTcpConnectAttempts == 0 &&
         verifyFlags == 0 &&
         !tlsValidated &&
         !tlsHostnameValidated &&
         !tlsAllowlistLocalOnly &&
-        nav_smoke_text_equals(transportSelection, selectedButBlocked ? "BlockedPolicy" : "BlockedHttpsGeneral") &&
-        nav_smoke_text_equals(tlsStatus, "PolicyBlocked") &&
         error[0] != '\0';
+
+    const bool pass = policyEnabled
+        ? nav_smoke_text_equals(requestedUrl, url) &&
+            nav_smoke_text_equals(finalUrl, url) &&
+            statusCode == 0 &&
+            redirectCount == 0 &&
+            (failClosedPolicyBlocked ||
+                (plainTcpConnectAttempts == 0 &&
+                    tlsTcpConnectAttempts == 1 &&
+                    verifyFlags != 0 &&
+                    !tlsValidated &&
+                    !tlsHostnameValidated &&
+                    !tlsAllowlistLocalOnly &&
+                    nav_smoke_text_equals(transportSelection, "PolicyValidatedTlsHttps") &&
+                    hostRejected &&
+                    error[0] != '\0'))
+        : nav_smoke_text_equals(requestedUrl, url) &&
+            nav_smoke_text_equals(finalUrl, url) &&
+            statusCode == 0 &&
+            redirectCount == 0 &&
+            plainTcpConnectAttempts == 0 &&
+            tlsTcpConnectAttempts == 0 &&
+            verifyFlags == 0 &&
+            !tlsValidated &&
+            !tlsHostnameValidated &&
+            !tlsAllowlistLocalOnly &&
+            nav_smoke_text_equals(transportSelection, selectedButBlocked ? "BlockedPolicy" : "BlockedHttpsGeneral") &&
+            nav_smoke_text_equals(tlsStatus, "PolicyBlocked") &&
+            error[0] != '\0';
 
     serial::puts("[NAVIGATOR-SMOKE] https.case.local_scope_block.enabled=");
     serial::puts(policyEnabled ? "yes" : "no");
@@ -11230,6 +11436,7 @@ static bool printNavigatorPolicyValidatedScopeBlockedRedirectCase()
     const bool policyEnabled = navigator_https_policy_effectively_enabled(httpsPolicy);
     const bool selectedButBlocked = navigator_https_policy_selected_but_blocked(httpsPolicy);
     const char* url = "http://10.0.2.2:8080/navigator-smoke/redirect-to-policy-disallowed-https";
+    const char* expectedFinalUrl = "https://wrong.guidexos.test:8443/navigator-policy/ok.html";
     char requestedUrl[160];
     int statusCode = 0;
     int bodyBytes = 0;
@@ -11258,15 +11465,27 @@ static bool printNavigatorPolicyValidatedScopeBlockedRedirectCase()
         tlsProtocol, sizeof(tlsProtocol), tlsCipherSuite, sizeof(tlsCipherSuite),
         transportSelection, sizeof(transportSelection), tlsStatus, sizeof(tlsStatus),
         &tlsValidated, &tlsHostnameValidated, &tlsAllowlistLocalOnly, sourceType, sizeof(sourceType));
+    const bool hostRejected = nav_smoke_text_equals(tlsStatus, "CertificateVerifyFailed") ||
+        nav_smoke_text_equals(tlsStatus, "HostnameMismatch");
 
-    const bool pass = nav_smoke_text_equals(requestedUrl, url) &&
-        nav_smoke_text_equals(finalUrl, "https://wrong.guidexos.test:8443/policy-validated/ok.html") &&
-        redirectCount == 1 &&
-        plainTcpConnectAttempts == 1 &&
-        tlsTcpConnectAttempts == 0 &&
-        nav_smoke_text_equals(transportSelection, selectedButBlocked ? "BlockedPolicy" : "BlockedHttpsGeneral") &&
-        nav_smoke_text_equals(tlsStatus, "PolicyBlocked") &&
-        error[0] != '\0';
+    const bool pass = policyEnabled
+        ? nav_smoke_text_equals(requestedUrl, url) &&
+            nav_smoke_text_equals(finalUrl, expectedFinalUrl) &&
+            redirectCount == 1 &&
+            plainTcpConnectAttempts == 1 &&
+            tlsTcpConnectAttempts == 1 &&
+            verifyFlags != 0 &&
+            nav_smoke_text_equals(transportSelection, "PolicyValidatedTlsHttps") &&
+            hostRejected &&
+            error[0] != '\0'
+        : nav_smoke_text_equals(requestedUrl, url) &&
+            nav_smoke_text_equals(finalUrl, expectedFinalUrl) &&
+            redirectCount == 1 &&
+            plainTcpConnectAttempts == 1 &&
+            tlsTcpConnectAttempts == 0 &&
+            nav_smoke_text_equals(transportSelection, selectedButBlocked ? "BlockedPolicy" : "BlockedHttpsGeneral") &&
+            nav_smoke_text_equals(tlsStatus, "PolicyBlocked") &&
+            error[0] != '\0';
 
     serial::puts("[NAVIGATOR-SMOKE] https.case.policy_scope_redirect_block.enabled=");
     serial::puts(policyEnabled ? "yes" : "no");
@@ -11298,6 +11517,8 @@ static bool printNavigatorPolicyValidatedRedirectCase()
     const NavigatorHttpsSmokeFaultMode faultMode = navigator_https_smoke_fault_mode();
     const bool certFaultExpected = navigator_https_cert_fault_expected(faultMode);
     const char* url = "http://10.0.2.2:8080/navigator-smoke/redirect-to-policy-validated-https";
+    char expectedFinalUrl[160];
+    navigator_https_policy_url(httpsPolicy, "/navigator-policy/ok.html", expectedFinalUrl, sizeof(expectedFinalUrl));
     char requestedUrl[160];
     int statusCode = 0;
     int bodyBytes = 0;
@@ -11330,7 +11551,7 @@ static bool printNavigatorPolicyValidatedRedirectCase()
     const bool pass = policyEnabled
         ? (certFaultExpected
             ? nav_smoke_text_equals(requestedUrl, url) &&
-                nav_smoke_text_equals(finalUrl, "https://guidexos.test:8443/policy-validated/ok.html") &&
+                nav_smoke_text_equals(finalUrl, expectedFinalUrl) &&
                 statusCode == 0 &&
                 redirectCount == 1 &&
                 plainTcpConnectAttempts == 1 &&
@@ -11342,7 +11563,7 @@ static bool printNavigatorPolicyValidatedRedirectCase()
                 nav_smoke_text_equals(tlsStatus, "CertificateVerifyFailed") &&
                 error[0] != '\0'
             : nav_smoke_text_equals(requestedUrl, url) &&
-                nav_smoke_text_equals(finalUrl, "https://guidexos.test:8443/policy-validated/ok.html") &&
+                nav_smoke_text_equals(finalUrl, expectedFinalUrl) &&
                 statusCode == 200 &&
                 redirectCount == 1 &&
                 plainTcpConnectAttempts == 1 &&
@@ -11355,7 +11576,7 @@ static bool printNavigatorPolicyValidatedRedirectCase()
                 nav_smoke_text_equals(tlsStatus, "Success") &&
                 nav_smoke_text_equals(sourceType, "https"))
         : nav_smoke_text_equals(requestedUrl, url) &&
-            nav_smoke_text_equals(finalUrl, "https://guidexos.test:8443/policy-validated/ok.html") &&
+            nav_smoke_text_equals(finalUrl, expectedFinalUrl) &&
             error[0] != '\0' &&
             redirectCount == 1 &&
             plainTcpConnectAttempts == 1 &&
@@ -11398,7 +11619,8 @@ static bool printNavigatorPolicyValidatedWrongHostnameFailureCase()
     const bool policyEnabled = navigator_https_policy_effectively_enabled(httpsPolicy);
     const NavigatorHttpsSmokeFaultMode faultMode = navigator_https_smoke_fault_mode();
     const bool certFaultExpected = navigator_https_cert_fault_expected(faultMode);
-    const char* url = "https://guidexos.test:8443/policy-validated/ok.html";
+    char url[160];
+    navigator_https_policy_url(httpsPolicy, "/navigator-policy/ok.html", url, sizeof(url));
     KernelHttpResponse response{};
     gxos::GxosTlsLocalHandshakeResult tlsResult{};
     const bool requestOk = kernel_tls_smoke_request_once(url, "wrong.guidexos.test", &response, &tlsResult);
@@ -11457,7 +11679,8 @@ static bool printNavigatorPolicyValidatedDowngradeCase()
     const bool policyEnabled = navigator_https_policy_effectively_enabled(httpsPolicy);
     const NavigatorHttpsSmokeFaultMode faultMode = navigator_https_smoke_fault_mode();
     const bool certFaultExpected = navigator_https_cert_fault_expected(faultMode);
-    const char* url = "https://guidexos.test:8443/policy-validated/redirect-downgrade";
+    char url[160];
+    navigator_https_policy_url(httpsPolicy, "/navigator-policy/redirect-downgrade", url, sizeof(url));
     char requestedUrl[160];
     int statusCode = 0;
     int bodyBytes = 0;
@@ -11536,6 +11759,295 @@ static bool printNavigatorPolicyValidatedDowngradeCase()
     return pass;
 }
 
+static bool printNavigatorPublicPilotDecisionCase()
+{
+    const gxos::GxosValidatedHttpsPolicyInfo httpsPolicy = gxos::gxos_validated_https_policy_info();
+    const bool pilotEnabled =
+        httpsPolicy.state == gxos::GxosValidatedHttpsPolicyState::ProductionValidated &&
+        httpsPolicy.broadPublicHttpsEnabled;
+    const char* url = "https://example.com/";
+    KernelHttpUrl parsed{};
+    char reason[160];
+    reason[0] = '\0';
+    const bool parseOk = parse_https_url_kernel(url, &parsed);
+    const gxos::web::HttpTransportPolicyDecision policy = parseOk
+        ? kernel_http_transport_policy_for_https(parsed, reason, sizeof(reason))
+        : kernel_http_blocked_https_transport_policy("HTTPS/TLS unsupported: public pilot decision URL could not be parsed");
+    const bool allow = policy.selection == gxos::web::HttpByteStreamTransportSelection::PolicyValidatedTlsHttps;
+    const bool pass = parseOk &&
+        (allow == pilotEnabled) &&
+        (pilotEnabled
+            ? nav_smoke_text_equals(reason, "ProductionValidated public HTTPS pilot matched.")
+            : reason[0] != '\0');
+
+    serial::puts("[NAVIGATOR-SMOKE] https.case.public_pilot_decision.enabled=");
+    serial::puts(pilotEnabled ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.public_pilot_decision.requested_url=");
+    serial::puts(url);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.public_pilot_decision.transport_selection=");
+    serial::puts(gxos::web::httpSharedTransportSelectionName(policy.selection));
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.public_pilot_decision.reason=");
+    serial::puts(reason[0] ? reason : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.public_pilot_decision.result=");
+    serial::puts(pass ? "PASS\n" : "FAIL\n");
+    return pass;
+}
+
+static bool printNavigatorPublicPilotFixtureCase()
+{
+    const gxos::GxosValidatedHttpsPolicyInfo httpsPolicy = gxos::gxos_validated_https_policy_info();
+    const bool pilotEnabled =
+        httpsPolicy.state == gxos::GxosValidatedHttpsPolicyState::ProductionValidated &&
+        httpsPolicy.broadPublicHttpsEnabled;
+    char url[160];
+    navigator_public_pilot_fixture_url(url, sizeof(url), "/navigator-public-pilot/ok.html");
+    char requestedUrl[160];
+    int statusCode = 0;
+    int bodyBytes = 0;
+    int parsedBlocks = 0;
+    int redirectCount = 0;
+    int plainTcpConnectAttempts = 0;
+    int tlsTcpConnectAttempts = 0;
+    uint32_t verifyFlags = 0;
+    char contentType[48];
+    char error[128];
+    char finalUrl[160];
+    char tlsSniHost[64];
+    char tlsProtocol[32];
+    char tlsCipherSuite[64];
+    char transportSelection[40];
+    char tlsStatus[40];
+    char sourceType[24];
+    bool tlsValidated = false;
+    bool tlsHostnameValidated = false;
+    bool tlsAllowlistLocalOnly = false;
+    NavigatorApp::smokeCaptureHttpsNavigation(
+        url, requestedUrl, sizeof(requestedUrl), &statusCode,
+        contentType, sizeof(contentType), &bodyBytes, &parsedBlocks, error, sizeof(error),
+        finalUrl, sizeof(finalUrl), &redirectCount, &plainTcpConnectAttempts,
+        &tlsTcpConnectAttempts, &verifyFlags, tlsSniHost, sizeof(tlsSniHost),
+        tlsProtocol, sizeof(tlsProtocol), tlsCipherSuite, sizeof(tlsCipherSuite),
+        transportSelection, sizeof(transportSelection), tlsStatus, sizeof(tlsStatus),
+        &tlsValidated, &tlsHostnameValidated, &tlsAllowlistLocalOnly, sourceType, sizeof(sourceType));
+
+    const bool contentTypeOk =
+        gxos::web::httpSharedEqualsInsensitive(contentType, "text/html") ||
+        gxos::web::httpSharedEqualsInsensitive(contentType, "text/plain");
+    const bool pass = pilotEnabled
+        ? nav_smoke_text_equals(requestedUrl, url) &&
+            nav_smoke_text_equals(finalUrl, url) &&
+            statusCode == 200 &&
+            contentTypeOk &&
+            bodyBytes > 0 &&
+            parsedBlocks > 0 &&
+            redirectCount == 0 &&
+            plainTcpConnectAttempts == 0 &&
+            tlsTcpConnectAttempts == 1 &&
+            verifyFlags == 0 &&
+            tlsValidated &&
+            tlsHostnameValidated &&
+            !tlsAllowlistLocalOnly &&
+            nav_smoke_text_equals(transportSelection, "PolicyValidatedTlsHttps") &&
+            nav_smoke_text_equals(tlsStatus, "Success") &&
+            nav_smoke_text_equals(tlsSniHost, kNavigatorPublicPilotHttpsHost) &&
+            nav_smoke_text_equals(sourceType, "https")
+        : nav_smoke_text_equals(requestedUrl, url) &&
+            nav_smoke_text_equals(finalUrl, url) &&
+            statusCode == 0 &&
+            redirectCount == 0 &&
+            plainTcpConnectAttempts == 0 &&
+            tlsTcpConnectAttempts == 0 &&
+            !tlsValidated &&
+            !tlsHostnameValidated &&
+            !tlsAllowlistLocalOnly &&
+            !nav_smoke_text_equals(transportSelection, "PolicyValidatedTlsHttps") &&
+            error[0] != '\0';
+
+    serial::puts("[NAVIGATOR-SMOKE] https.case.public_pilot_fixture.enabled=");
+    serial::puts(pilotEnabled ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.public_pilot_fixture.requested_url=");
+    serial::puts(requestedUrl[0] ? requestedUrl : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.public_pilot_fixture.final_url=");
+    serial::puts(finalUrl[0] ? finalUrl : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.public_pilot_fixture.http_status=");
+    serial_put_dec((uint32_t)statusCode);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.public_pilot_fixture.tls_tcp_connect_attempts=");
+    serial_put_dec((uint32_t)tlsTcpConnectAttempts);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.public_pilot_fixture.verify_flags=");
+    serial_put_dec64((uint64_t)verifyFlags);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.public_pilot_fixture.sni_host=");
+    serial::puts(tlsSniHost[0] ? tlsSniHost : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.public_pilot_fixture.transport_selection=");
+    serial::puts(transportSelection[0] ? transportSelection : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.public_pilot_fixture.tls_status=");
+    serial::puts(tlsStatus[0] ? tlsStatus : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.public_pilot_fixture.error=");
+    serial::puts(error[0] ? error : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.public_pilot_fixture.result=");
+    serial::puts(pass ? "PASS\n" : "FAIL\n");
+    return pass;
+}
+
+static bool printNavigatorPublicPilotRedirectCase()
+{
+    const gxos::GxosValidatedHttpsPolicyInfo httpsPolicy = gxos::gxos_validated_https_policy_info();
+    const bool pilotEnabled =
+        httpsPolicy.state == gxos::GxosValidatedHttpsPolicyState::ProductionValidated &&
+        httpsPolicy.broadPublicHttpsEnabled;
+    const char* url = "http://10.0.2.2:8080/navigator-smoke/redirect-to-public-pilot-https";
+    char expectedFinalUrl[160];
+    navigator_public_pilot_fixture_url(expectedFinalUrl, sizeof(expectedFinalUrl), "/navigator-public-pilot/ok.html");
+    char requestedUrl[160];
+    int statusCode = 0;
+    int bodyBytes = 0;
+    int parsedBlocks = 0;
+    int redirectCount = 0;
+    int plainTcpConnectAttempts = 0;
+    int tlsTcpConnectAttempts = 0;
+    uint32_t verifyFlags = 0;
+    char contentType[48];
+    char error[128];
+    char finalUrl[160];
+    char tlsSniHost[64];
+    char tlsProtocol[32];
+    char tlsCipherSuite[64];
+    char transportSelection[40];
+    char tlsStatus[40];
+    char sourceType[24];
+    bool tlsValidated = false;
+    bool tlsHostnameValidated = false;
+    bool tlsAllowlistLocalOnly = false;
+    NavigatorApp::smokeCaptureHttpsNavigation(
+        url, requestedUrl, sizeof(requestedUrl), &statusCode,
+        contentType, sizeof(contentType), &bodyBytes, &parsedBlocks, error, sizeof(error),
+        finalUrl, sizeof(finalUrl), &redirectCount, &plainTcpConnectAttempts,
+        &tlsTcpConnectAttempts, &verifyFlags, tlsSniHost, sizeof(tlsSniHost),
+        tlsProtocol, sizeof(tlsProtocol), tlsCipherSuite, sizeof(tlsCipherSuite),
+        transportSelection, sizeof(transportSelection), tlsStatus, sizeof(tlsStatus),
+        &tlsValidated, &tlsHostnameValidated, &tlsAllowlistLocalOnly, sourceType, sizeof(sourceType));
+
+    const bool pass = pilotEnabled
+        ? nav_smoke_text_equals(requestedUrl, url) &&
+            nav_smoke_text_equals(finalUrl, expectedFinalUrl) &&
+            statusCode == 200 &&
+            redirectCount == 1 &&
+            plainTcpConnectAttempts == 1 &&
+            tlsTcpConnectAttempts == 1 &&
+            verifyFlags == 0 &&
+            tlsValidated &&
+            tlsHostnameValidated &&
+            !tlsAllowlistLocalOnly &&
+            nav_smoke_text_equals(transportSelection, "PolicyValidatedTlsHttps") &&
+            nav_smoke_text_equals(tlsStatus, "Success") &&
+            nav_smoke_text_equals(sourceType, "https")
+        : nav_smoke_text_equals(requestedUrl, url) &&
+            nav_smoke_text_equals(finalUrl, expectedFinalUrl) &&
+            error[0] != '\0' &&
+            redirectCount == 1 &&
+            plainTcpConnectAttempts == 1 &&
+            tlsTcpConnectAttempts == 0 &&
+            !nav_smoke_text_equals(transportSelection, "PolicyValidatedTlsHttps");
+
+    serial::puts("[NAVIGATOR-SMOKE] https.case.public_pilot_redirect.enabled=");
+    serial::puts(pilotEnabled ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.public_pilot_redirect.requested_url=");
+    serial::puts(requestedUrl[0] ? requestedUrl : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.public_pilot_redirect.final_url=");
+    serial::puts(finalUrl[0] ? finalUrl : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.public_pilot_redirect.http_status=");
+    serial_put_dec((uint32_t)statusCode);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.public_pilot_redirect.redirect_count=");
+    serial_put_dec((uint32_t)redirectCount);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.public_pilot_redirect.plain_tcp_connect_attempts=");
+    serial_put_dec((uint32_t)plainTcpConnectAttempts);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.public_pilot_redirect.tls_tcp_connect_attempts=");
+    serial_put_dec((uint32_t)tlsTcpConnectAttempts);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.public_pilot_redirect.transport_selection=");
+    serial::puts(transportSelection[0] ? transportSelection : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.public_pilot_redirect.tls_status=");
+    serial::puts(tlsStatus[0] ? tlsStatus : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.public_pilot_redirect.error=");
+    serial::puts(error[0] ? error : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.public_pilot_redirect.result=");
+    serial::puts(pass ? "PASS\n" : "FAIL\n");
+    return pass;
+}
+
+static bool printNavigatorPublicPilotDowngradeCase()
+{
+    const gxos::GxosValidatedHttpsPolicyInfo httpsPolicy = gxos::gxos_validated_https_policy_info();
+    const bool pilotEnabled =
+        httpsPolicy.state == gxos::GxosValidatedHttpsPolicyState::ProductionValidated &&
+        httpsPolicy.broadPublicHttpsEnabled;
+    char url[160];
+    navigator_public_pilot_fixture_url(url, sizeof(url), "/navigator-public-pilot/redirect-downgrade");
+    char requestedUrl[160];
+    int statusCode = 0;
+    int bodyBytes = 0;
+    int parsedBlocks = 0;
+    int redirectCount = 0;
+    int plainTcpConnectAttempts = 0;
+    int tlsTcpConnectAttempts = 0;
+    uint32_t verifyFlags = 0;
+    char contentType[48];
+    char error[128];
+    char finalUrl[160];
+    char tlsSniHost[64];
+    char tlsProtocol[32];
+    char tlsCipherSuite[64];
+    char transportSelection[40];
+    char tlsStatus[40];
+    char sourceType[24];
+    bool tlsValidated = false;
+    bool tlsHostnameValidated = false;
+    bool tlsAllowlistLocalOnly = false;
+    NavigatorApp::smokeCaptureHttpsNavigation(
+        url, requestedUrl, sizeof(requestedUrl), &statusCode,
+        contentType, sizeof(contentType), &bodyBytes, &parsedBlocks, error, sizeof(error),
+        finalUrl, sizeof(finalUrl), &redirectCount, &plainTcpConnectAttempts,
+        &tlsTcpConnectAttempts, &verifyFlags, tlsSniHost, sizeof(tlsSniHost),
+        tlsProtocol, sizeof(tlsProtocol), tlsCipherSuite, sizeof(tlsCipherSuite),
+        transportSelection, sizeof(transportSelection), tlsStatus, sizeof(tlsStatus),
+        &tlsValidated, &tlsHostnameValidated, &tlsAllowlistLocalOnly, sourceType, sizeof(sourceType));
+
+    const bool pass = pilotEnabled
+        ? nav_smoke_text_equals(requestedUrl, url) &&
+            nav_smoke_text_equals(finalUrl, "http://10.0.2.2:8080/navigator-smoke/insecure-downgrade") &&
+            redirectCount == 1 &&
+            plainTcpConnectAttempts == 0 &&
+            tlsTcpConnectAttempts == 1 &&
+            nav_smoke_text_equals(transportSelection, "BlockedPolicy") &&
+            nav_smoke_text_equals(tlsStatus, "PolicyBlocked") &&
+            nav_smoke_text_equals(error, "HTTPS downgrade redirect blocked")
+        : nav_smoke_text_equals(requestedUrl, url) &&
+            nav_smoke_text_equals(finalUrl, url) &&
+            plainTcpConnectAttempts == 0 &&
+            tlsTcpConnectAttempts == 0 &&
+            error[0] != '\0';
+
+    serial::puts("[NAVIGATOR-SMOKE] https.case.public_pilot_downgrade.enabled=");
+    serial::puts(pilotEnabled ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.public_pilot_downgrade.requested_url=");
+    serial::puts(requestedUrl[0] ? requestedUrl : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.public_pilot_downgrade.final_url=");
+    serial::puts(finalUrl[0] ? finalUrl : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.public_pilot_downgrade.redirect_count=");
+    serial_put_dec((uint32_t)redirectCount);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.public_pilot_downgrade.plain_tcp_connect_attempts=");
+    serial_put_dec((uint32_t)plainTcpConnectAttempts);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.public_pilot_downgrade.tls_tcp_connect_attempts=");
+    serial_put_dec((uint32_t)tlsTcpConnectAttempts);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.public_pilot_downgrade.transport_selection=");
+    serial::puts(transportSelection[0] ? transportSelection : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.public_pilot_downgrade.tls_status=");
+    serial::puts(tlsStatus[0] ? tlsStatus : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.public_pilot_downgrade.error=");
+    serial::puts(error[0] ? error : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.public_pilot_downgrade.result=");
+    serial::puts(pass ? "PASS\n" : "FAIL\n");
+    return pass;
+}
+
 static bool printNavigatorHttpSmokeCases()
 {
     bool httpOk = true;
@@ -11548,11 +12060,15 @@ static bool printNavigatorHttpSmokeCases()
     httpOk = printNavigatorPolicyValidatedScopeBlockedRedirectCase() && httpOk;
     httpOk = printNavigatorPolicyValidatedWrongHostnameFailureCase() && httpOk;
     httpOk = printNavigatorPolicyValidatedDowngradeCase() && httpOk;
-    httpOk = printNavigatorHttpsUnsupportedSmokeCase("direct_unsupported", "https://example.com/",
-        "https://example.com/", 0, 0) && httpOk;
+    httpOk = printNavigatorPublicPilotDecisionCase() && httpOk;
+    httpOk = printNavigatorPublicPilotFixtureCase() && httpOk;
+    httpOk = printNavigatorPublicPilotRedirectCase() && httpOk;
+    httpOk = printNavigatorPublicPilotDowngradeCase() && httpOk;
+    httpOk = printNavigatorHttpsUnsupportedSmokeCase("direct_unsupported", "https://10.0.2.2:8443/navigator-smoke/tls-basic.html",
+        "https://10.0.2.2:8443/navigator-smoke/tls-basic.html", 0, 0) && httpOk;
     httpOk = printNavigatorHttpsUnsupportedSmokeCase("redirect_public_unsupported",
-        "http://10.0.2.2:8080/navigator-smoke/redirect-to-public-https",
-        "https://example.com/secure", 1, 0) && httpOk;
+        "http://10.0.2.2:8080/navigator-smoke/redirect-to-numeric-https",
+        "https://10.0.2.2:8443/navigator-smoke/tls-basic.html", 1, 0) && httpOk;
     httpOk = printNavigatorHttpSmokeCase("basic", "http://10.0.2.2:8080/navigator-smoke/basic.html", 200,
         "http://10.0.2.2:8080/navigator-smoke/basic.html", true, true, false) && httpOk;
     httpOk = printNavigatorHttpSmokeCase("relative_redirect", "http://10.0.2.2:8080/navigator-smoke/redirect-relative", 200,
