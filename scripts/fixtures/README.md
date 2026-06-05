@@ -69,6 +69,34 @@ Smoke-only malformed and empty CA bundle fixtures for deterministic fail-closed 
 
 - `scripts/smoke-navigator-kernel.ps1` keeps the real public HTTPS probe off by default.
 - Set `GXOS_NAVIGATOR_SMOKE_ENABLE_REAL_PUBLIC_HTTPS=1` to enable the optional bare-metal public probe.
-- Optionally set `GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_TARGET` to override the default target `https://sha256.badssl.com/`.
-- Optionally set `GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_CA_BUNDLE_SOURCE` to a public-root PEM bundle; the harness merges that bundle with the deterministic validated fixture roots and marks the staged `/certs/ca-bundle.pem` as public-trust-ready for the probe.
+- Optionally set `GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_URL` to override the default target `https://sha256.badssl.com/`. The older `GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_TARGET` name is still accepted for compatibility.
+- Provide a public-root PEM bundle explicitly through either:
+  - `GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_CA_BUNDLE_SOURCE=C:\path\to\ca-bundle.pem`, or
+  - the conventional ignored local file `scripts/fixtures/public-roots/ca-bundle.pem.local` (copy `scripts/fixtures/public-roots/ca-bundle.pem.example` and replace its placeholder text with real roots).
+- The staging flow validates the explicit public-root PEM locally before building the ramdisk:
+  - the file must exist and be readable;
+  - it must stay within the existing 512 KiB CA bundle safety cap;
+  - it must contain at least one PEM certificate;
+  - each PEM certificate must decode as an X.509 certificate.
+- When a valid public-root bundle is provided for the real public probe, the packer appends it to the deterministic validated fixture roots for smoke coverage, stages the merged result at `/certs/ca-bundle.pem`, and writes companion `/config/navigator/real-public-https-ca-bundle-*.txt` metadata so the guest only marks `public_trust_ready=yes` for the explicit opt-in path.
+- With only deterministic fixture roots staged, the optional real public probe stays `SKIP` and reports that deterministic smoke trust is not public internet trust.
 - Set `GXOS_NAVIGATOR_SMOKE_REQUIRE_REAL_PUBLIC_HTTPS=1` to make probe blockers or failures fail the smoke run instead of reporting `SKIP`.
+- `PASS` means DNS, TCP, TLS handshake, certificate validation, hostname validation, and the policy-validated Navigator HTTPS path all succeeded without plaintext fallback.
+- `SKIP` means the probe was not enabled, the explicit public-root bundle was not staged, or the environment/network was unavailable and the probe was not required.
+- `FAIL` means the probe was required or attempted and a blocker, validation error, or transport failure prevented success.
+
+### Example commands
+
+- PowerShell manual smoke with the conventional local bundle path:
+  - `$env:GXOS_NAVIGATOR_SMOKE_ENABLE_REAL_PUBLIC_HTTPS="1"`
+  - `$env:GXOS_NAVIGATOR_SMOKE_REQUIRE_REAL_PUBLIC_HTTPS="1"`
+  - `.\scripts\smoke-navigator-kernel.ps1`
+- PowerShell manual smoke with an explicit bundle path:
+  - `$env:GXOS_NAVIGATOR_SMOKE_ENABLE_REAL_PUBLIC_HTTPS="1"`
+  - `$env:GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_CA_BUNDLE_SOURCE="C:\path\to\ca-bundle.pem"`
+  - `$env:GXOS_NAVIGATOR_SMOKE_REQUIRE_REAL_PUBLIC_HTTPS="1"`
+  - `.\scripts\smoke-navigator-kernel.ps1`
+- Optional target override:
+  - `$env:GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_URL="https://sha256.badssl.com/"`
+
+This probe is still smoke/manual validation only. It does not enable default public HTTPS browsing in bare-metal Navigator.

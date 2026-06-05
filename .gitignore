@@ -25,3 +25,4 @@
 /guideXOSServer.experimental.exe
 /logs
 /third_party
+/scripts/fixtures/public-roots/*.local

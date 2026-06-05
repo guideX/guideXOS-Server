@@ -14,6 +14,12 @@ $InputDir = if ([System.IO.Path]::IsPathRooted($InputDir)) { $InputDir } else { 
 $OutputDir = if ([System.IO.Path]::IsPathRooted($OutputDir)) { $OutputDir } else { Join-Path $RootDir $OutputDir }
 $OutputImage = if ([System.IO.Path]::IsPathRooted($OutputImage)) { $OutputImage } else { Join-Path $RootDir $OutputImage }
 
+$NavigatorCaBundleSizeCapBytes = 512KB
+$NavigatorRealPublicProbeDefaultTarget = "https://sha256.badssl.com/"
+$NavigatorRealPublicProbeTrustMarker = "# guideXOS Navigator real public HTTPS probe trust bundle"
+$NavigatorRealPublicProbeTrustDetail = "# deterministic validated fixture roots are retained for smoke coverage; explicit public internet roots are appended below."
+$NavigatorRealPublicProbeLocalBundlePath = Join-Path $ScriptDir "fixtures\public-roots\ca-bundle.pem.local"
+
 function Resolve-StagedSourcePath([string]$PathValue) {
     if ([string]::IsNullOrWhiteSpace($PathValue)) { return $null }
     $candidate = $PathValue.Trim()
@@ -33,6 +39,85 @@ function Get-StagedRelativePath([string]$BasePath, [string]$FullPath) {
         throw "Staged file is outside the wallpaper pack output directory: $fileFull"
     }
     return $fileFull.Substring($baseFull.Length).Replace('\', '/')
+}
+
+function Get-NavigatorRealPublicProbeTarget {
+    $urlValue = $env:GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_URL
+    if (-not [string]::IsNullOrWhiteSpace($urlValue)) {
+        return $urlValue.Trim()
+    }
+
+    $targetValue = $env:GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_TARGET
+    if (-not [string]::IsNullOrWhiteSpace($targetValue)) {
+        return $targetValue.Trim()
+    }
+
+    return $NavigatorRealPublicProbeDefaultTarget
+}
+
+function Get-NavigatorRealPublicProbeCaBundleSource {
+    $source = Resolve-StagedSourcePath $env:GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_CA_BUNDLE_SOURCE
+    if ($source) {
+        return $source
+    }
+    if (Test-Path -LiteralPath $NavigatorRealPublicProbeLocalBundlePath -PathType Leaf) {
+        return [System.IO.Path]::GetFullPath($NavigatorRealPublicProbeLocalBundlePath)
+    }
+    return $null
+}
+
+function Get-NavigatorPemBundleInfo {
+    param(
+        [Parameter(Mandatory = $true)][string]$LiteralPath,
+        [Parameter(Mandatory = $true)][string]$Label
+    )
+
+    if (-not (Test-Path -LiteralPath $LiteralPath -PathType Leaf)) {
+        throw "$Label source not found: $LiteralPath"
+    }
+
+    $item = Get-Item -LiteralPath $LiteralPath
+    if ($item.Length -le 0) {
+        throw "$Label is empty: $LiteralPath"
+    }
+    if ($item.Length -gt $NavigatorCaBundleSizeCapBytes) {
+        throw "$Label exceeds the 512 KiB safety cap: $LiteralPath"
+    }
+
+    $text = [System.IO.File]::ReadAllText($item.FullName, [System.Text.Encoding]::ASCII)
+    $matches = [regex]::Matches(
+        $text,
+        '-----BEGIN CERTIFICATE-----(?<body>[\s\S]*?)-----END CERTIFICATE-----',
+        [System.Text.RegularExpressions.RegexOptions]::Singleline)
+    if ($matches.Count -le 0) {
+        throw "$Label does not contain any PEM certificates: $LiteralPath"
+    }
+
+    $parsedCount = 0
+    foreach ($match in $matches) {
+        $base64 = ($match.Groups["body"].Value -replace '\s', '')
+        if ([string]::IsNullOrWhiteSpace($base64)) {
+            throw "$Label contains an empty PEM certificate block: $LiteralPath"
+        }
+        try {
+            $bytes = [Convert]::FromBase64String($base64)
+            $cert = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($bytes)
+            $parsedCount++
+            $cert.Dispose()
+        } catch {
+            throw "$Label contains a malformed PEM certificate that the smoke harness refused to stage: $LiteralPath"
+        }
+    }
+    if ($parsedCount -le 0) {
+        throw "$Label parsed zero certificates: $LiteralPath"
+    }
+
+    return [pscustomobject]@{
+        Path = $item.FullName
+        Bytes = [int64]$item.Length
+        ParsedCertCount = [int]$parsedCount
+        Text = $text
+    }
 }
 
 $WallpaperNames = @(
@@ -434,6 +519,21 @@ foreach ($stagingDir in @($wallpaperDir, $certsDir, $configDir)) {
 New-Item -ItemType Directory -Force -Path $wallpaperDir | Out-Null
 New-Item -ItemType Directory -Force -Path (Split-Path -Parent $OutputImage) | Out-Null
 
+$httpsPolicyToken = if ([string]::IsNullOrWhiteSpace($env:GXOS_NAVIGATOR_HTTPS_POLICY)) { $null } else { $env:GXOS_NAVIGATOR_HTTPS_POLICY.Trim() }
+$httpsFaultModeToken = if ([string]::IsNullOrWhiteSpace($env:GXOS_NAVIGATOR_HTTPS_FAULT_MODE)) { $null } else { $env:GXOS_NAVIGATOR_HTTPS_FAULT_MODE.Trim() }
+$realPublicProbeEnabled = $env:GXOS_NAVIGATOR_SMOKE_ENABLE_REAL_PUBLIC_HTTPS -eq "1"
+$realPublicProbeRequired = $env:GXOS_NAVIGATOR_SMOKE_REQUIRE_REAL_PUBLIC_HTTPS -eq "1"
+if ($realPublicProbeRequired) {
+    $realPublicProbeEnabled = $true
+}
+$realPublicProbeTarget = Get-NavigatorRealPublicProbeTarget
+$realPublicProbeCaBundleSource = if ($realPublicProbeEnabled) { Get-NavigatorRealPublicProbeCaBundleSource } else { $null }
+$realPublicProbeCaBundleInfo = if ($realPublicProbeCaBundleSource) {
+    Get-NavigatorPemBundleInfo -LiteralPath $realPublicProbeCaBundleSource -Label "Real public HTTPS probe CA bundle"
+} else {
+    $null
+}
+
 if ($SmokeCaFixture -or $env:GXOS_NAVIGATOR_SMOKE_CA_FIXTURE -eq "1") {
     $smokeCaFixturePath = Join-Path (Split-Path -Parent $ScriptDir) "scripts\fixtures\navigator-smoke-root-ca-bundle.pem"
     if (-not (Test-Path $smokeCaFixturePath)) {
@@ -446,15 +546,45 @@ if ($SmokeCaFixture -or $env:GXOS_NAVIGATOR_SMOKE_CA_FIXTURE -eq "1") {
     Write-Host "      staged smoke-only CA bundle at /certs/ca-bundle.pem" -ForegroundColor Yellow
 } else {
     $productionCaSource = Resolve-StagedSourcePath $env:GXOS_NAVIGATOR_PRODUCTION_CA_BUNDLE_SOURCE
-    if ($productionCaSource) {
-        if (-not (Test-Path $productionCaSource)) {
+    if ($productionCaSource -or $realPublicProbeCaBundleInfo) {
+        if ($productionCaSource -and -not (Test-Path -LiteralPath $productionCaSource -PathType Leaf)) {
             throw "Production CA bundle source not found: $productionCaSource"
         }
         New-Item -ItemType Directory -Force -Path $certsDir | Out-Null
         $targetCa = Join-Path $certsDir "ca-bundle.pem"
-        Copy-Item -LiteralPath $productionCaSource -Destination $targetCa -Force
+        if ($realPublicProbeCaBundleInfo) {
+            if ($productionCaSource) {
+                $baseBundle = [System.IO.File]::ReadAllText($productionCaSource, [System.Text.Encoding]::ASCII).Trim()
+                $merged = @(
+                    $NavigatorRealPublicProbeTrustMarker
+                    $NavigatorRealPublicProbeTrustDetail
+                    $baseBundle
+                    $realPublicProbeCaBundleInfo.Text.Trim()
+                    ""
+                ) -join "`r`n"
+            } else {
+                $merged = @(
+                    $NavigatorRealPublicProbeTrustMarker
+                    "# explicit public-root bundle staged without deterministic validated fixture roots."
+                    $realPublicProbeCaBundleInfo.Text.Trim()
+                    ""
+                ) -join "`r`n"
+            }
+
+            $mergedBytes = [System.Text.Encoding]::ASCII.GetByteCount($merged)
+            if ($mergedBytes -gt $NavigatorCaBundleSizeCapBytes) {
+                throw "Merged production/public CA bundle exceeds the 512 KiB safety cap."
+            }
+            [System.IO.File]::WriteAllText($targetCa, $merged, [System.Text.Encoding]::ASCII)
+        } else {
+            Copy-Item -LiteralPath $productionCaSource -Destination $targetCa -Force
+        }
         $staged += Get-Item $targetCa
-        Write-Host "      staged production CA bundle at /certs/ca-bundle.pem" -ForegroundColor Yellow
+        if ($realPublicProbeCaBundleInfo) {
+            Write-Host "      staged production CA bundle at /certs/ca-bundle.pem with explicit public-root opt-in material" -ForegroundColor Yellow
+        } else {
+            Write-Host "      staged production CA bundle at /certs/ca-bundle.pem" -ForegroundColor Yellow
+        }
     }
 }
 
@@ -474,15 +604,6 @@ if ($userCaSource) {
     Write-Host "      staged user CA bundle at /config/certs/ca-bundle.pem" -ForegroundColor Yellow
 }
 
-$httpsPolicyToken = if ([string]::IsNullOrWhiteSpace($env:GXOS_NAVIGATOR_HTTPS_POLICY)) { $null } else { $env:GXOS_NAVIGATOR_HTTPS_POLICY.Trim() }
-$httpsFaultModeToken = if ([string]::IsNullOrWhiteSpace($env:GXOS_NAVIGATOR_HTTPS_FAULT_MODE)) { $null } else { $env:GXOS_NAVIGATOR_HTTPS_FAULT_MODE.Trim() }
-$realPublicProbeEnabled = $env:GXOS_NAVIGATOR_SMOKE_ENABLE_REAL_PUBLIC_HTTPS -eq "1"
-$realPublicProbeRequired = $env:GXOS_NAVIGATOR_SMOKE_REQUIRE_REAL_PUBLIC_HTTPS -eq "1"
-$realPublicProbeTarget = if ([string]::IsNullOrWhiteSpace($env:GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_TARGET)) {
-    "https://sha256.badssl.com/"
-} else {
-    $env:GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_TARGET.Trim()
-}
 if ($httpsPolicyToken -or $httpsFaultModeToken -or $realPublicProbeEnabled -or $realPublicProbeRequired) {
     $configNavigatorDir = Join-Path $configDir "navigator"
     New-Item -ItemType Directory -Force -Path $configNavigatorDir | Out-Null
@@ -522,6 +643,37 @@ if ($realPublicProbeRequired) {
     [System.IO.File]::WriteAllText($targetProbeRequireCompat, "required", [System.Text.Encoding]::ASCII)
     $staged += Get-Item $targetProbeRequireCompat
     Write-Host "      staged real public HTTPS probe requirement at /config/navigator/real-public-https-probe-required.txt" -ForegroundColor Yellow
+}
+if ($realPublicProbeCaBundleInfo) {
+    $targetProbeCaSource = Join-Path $configNavigatorDir "real-public-https-ca-bundle-source.txt"
+    [System.IO.File]::WriteAllText($targetProbeCaSource, $realPublicProbeCaBundleInfo.Path, [System.Text.Encoding]::ASCII)
+    $staged += Get-Item $targetProbeCaSource
+    $targetProbeCaSourceCompat = Join-Path $configNavigatorDir "RPUBCAS.TXT"
+    [System.IO.File]::WriteAllText($targetProbeCaSourceCompat, $realPublicProbeCaBundleInfo.Path, [System.Text.Encoding]::ASCII)
+    $staged += Get-Item $targetProbeCaSourceCompat
+
+    $targetProbeCaBytes = Join-Path $configNavigatorDir "real-public-https-ca-bundle-bytes.txt"
+    [System.IO.File]::WriteAllText($targetProbeCaBytes, $realPublicProbeCaBundleInfo.Bytes.ToString(), [System.Text.Encoding]::ASCII)
+    $staged += Get-Item $targetProbeCaBytes
+    $targetProbeCaBytesCompat = Join-Path $configNavigatorDir "RPUBCABY.TXT"
+    [System.IO.File]::WriteAllText($targetProbeCaBytesCompat, $realPublicProbeCaBundleInfo.Bytes.ToString(), [System.Text.Encoding]::ASCII)
+    $staged += Get-Item $targetProbeCaBytesCompat
+
+    $targetProbeCaCerts = Join-Path $configNavigatorDir "real-public-https-ca-bundle-certs.txt"
+    [System.IO.File]::WriteAllText($targetProbeCaCerts, $realPublicProbeCaBundleInfo.ParsedCertCount.ToString(), [System.Text.Encoding]::ASCII)
+    $staged += Get-Item $targetProbeCaCerts
+    $targetProbeCaCertsCompat = Join-Path $configNavigatorDir "RPUBCART.TXT"
+    [System.IO.File]::WriteAllText($targetProbeCaCertsCompat, $realPublicProbeCaBundleInfo.ParsedCertCount.ToString(), [System.Text.Encoding]::ASCII)
+    $staged += Get-Item $targetProbeCaCertsCompat
+
+    $targetProbeCaEnabled = Join-Path $configNavigatorDir "real-public-https-ca-bundle-enabled.txt"
+    [System.IO.File]::WriteAllText($targetProbeCaEnabled, "enabled", [System.Text.Encoding]::ASCII)
+    $staged += Get-Item $targetProbeCaEnabled
+    $targetProbeCaEnabledCompat = Join-Path $configNavigatorDir "RPUBCAEN.TXT"
+    [System.IO.File]::WriteAllText($targetProbeCaEnabledCompat, "enabled", [System.Text.Encoding]::ASCII)
+    $staged += Get-Item $targetProbeCaEnabledCompat
+
+    Write-Host "      staged real public CA metadata at /config/navigator/real-public-https-ca-bundle-*.txt" -ForegroundColor Yellow
 }
 
 foreach ($name in $WallpaperNames) {

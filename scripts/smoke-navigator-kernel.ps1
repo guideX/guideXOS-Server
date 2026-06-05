@@ -315,6 +315,7 @@ $navigatorSmokeEnvNames = @(
     "GXOS_NAVIGATOR_PRODUCTION_CA_BUNDLE_SOURCE",
     "GXOS_NAVIGATOR_SMOKE_ENABLE_REAL_PUBLIC_HTTPS",
     "GXOS_NAVIGATOR_SMOKE_REQUIRE_REAL_PUBLIC_HTTPS",
+    "GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_URL",
     "GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_TARGET",
     "GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_CA_BUNDLE_SOURCE"
 )
@@ -348,6 +349,7 @@ function Invoke-NavigatorKernelSmokeRamdiskStage {
     Set-ProcessEnvValue -Name "GXOS_NAVIGATOR_PRODUCTION_CA_BUNDLE_SOURCE" -Value $ProductionCaSource
     Set-ProcessEnvValue -Name "GXOS_NAVIGATOR_SMOKE_ENABLE_REAL_PUBLIC_HTTPS" -Value ($(if ($EnableRealPublicProbe) { "1" } else { $null }))
     Set-ProcessEnvValue -Name "GXOS_NAVIGATOR_SMOKE_REQUIRE_REAL_PUBLIC_HTTPS" -Value ($(if ($RequireRealPublicProbe) { "1" } else { $null }))
+    Set-ProcessEnvValue -Name "GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_URL" -Value ($(if ($EnableRealPublicProbe) { $RealPublicProbeTarget } else { $null }))
     Set-ProcessEnvValue -Name "GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_TARGET" -Value ($(if ($EnableRealPublicProbe) { $RealPublicProbeTarget } else { $null }))
 
     Wait-NavigatorSmokeFileUnlock -LiteralPath (Join-Path $Root "ESP\\ramdisk.img")
@@ -435,29 +437,6 @@ function New-NavigatorOversizedCaBundleFixture {
         [void]$builder.Append($seed)
     }
     [System.IO.File]::WriteAllText($fixturePath, $builder.ToString(), [System.Text.Encoding]::ASCII)
-    return $fixturePath
-}
-
-function New-NavigatorRealPublicProbeCaBundleFixture {
-    param(
-        [Parameter(Mandatory = $true)][string]$BaseBundlePath,
-        [Parameter(Mandatory = $true)][string]$PublicBundlePath
-    )
-
-    if (-not (Test-Path $BaseBundlePath)) {
-        throw "Base production CA bundle source not found: $BaseBundlePath"
-    }
-    if (-not (Test-Path $PublicBundlePath)) {
-        throw "Real public HTTPS probe CA bundle source not found: $PublicBundlePath"
-    }
-
-    $fixturePath = Join-Path $LogDir "navigator-real-public-ca-bundle-$stamp.pem"
-    $baseBundle = [System.IO.File]::ReadAllText($BaseBundlePath)
-    $publicBundle = [System.IO.File]::ReadAllText($PublicBundlePath)
-    $marker = "# guideXOS Navigator real public HTTPS probe trust bundle`r`n"
-    $detail = "# deterministic validated fixture roots are retained for smoke coverage; public internet roots are appended below.`r`n"
-    $merged = $marker + $detail + $baseBundle.Trim() + "`r`n" + $publicBundle.Trim() + "`r`n"
-    [System.IO.File]::WriteAllText($fixturePath, $merged, [System.Text.Encoding]::ASCII)
     return $fixturePath
 }
 
@@ -554,6 +533,9 @@ function Test-NavigatorKernelSmokeRealPublicProbeOutput {
         "[NAVIGATOR-SMOKE] https.case.real_public_probe.enabled=yes",
         "[NAVIGATOR-SMOKE] https.case.real_public_probe.required=$(if ($RequireSuccess) { 'yes' } else { 'no' })",
         "[NAVIGATOR-SMOKE] https.case.real_public_probe.target=$Target",
+        "[NAVIGATOR-SMOKE] https.case.real_public_probe.public_ca_bundle_source=",
+        "[NAVIGATOR-SMOKE] https.case.real_public_probe.public_ca_bytes=",
+        "[NAVIGATOR-SMOKE] https.case.real_public_probe.public_ca_parsed_certs=",
         "[NAVIGATOR-SMOKE] https.case.real_public_probe.plaintext_fallback=no"
     )) {
         if (-not $Output.Contains($check)) {
@@ -588,8 +570,13 @@ function Test-NavigatorKernelSmokeRealPublicProbeOutput {
                 '\[NAVIGATOR-SMOKE\] https\.case\.real_public_probe\.public_trust_ready=yes',
                 '\[NAVIGATOR-SMOKE\] https\.case\.real_public_probe\.transport_selection=PolicyValidatedTlsHttps',
                 '\[NAVIGATOR-SMOKE\] https\.case\.real_public_probe\.tls_status=Success',
+                '\[NAVIGATOR-SMOKE\] https\.case\.real_public_probe\.dns_result=PASS',
+                '\[NAVIGATOR-SMOKE\] https\.case\.real_public_probe\.tcp_result=PASS',
+                '\[NAVIGATOR-SMOKE\] https\.case\.real_public_probe\.tls_result=PASS',
                 '\[NAVIGATOR-SMOKE\] https\.case\.real_public_probe\.tls_validated=yes',
+                '\[NAVIGATOR-SMOKE\] https\.case\.real_public_probe\.certificate_validation_result=PASS',
                 '\[NAVIGATOR-SMOKE\] https\.case\.real_public_probe\.hostname_validated=yes',
+                '\[NAVIGATOR-SMOKE\] https\.case\.real_public_probe\.hostname_validation_result=PASS',
                 '\[NAVIGATOR-SMOKE\] https\.case\.real_public_probe\.verify_flags=0',
                 '\[NAVIGATOR-SMOKE\] https\.case\.real_public_probe\.tls_tcp_connect_attempts=[1-9][0-9]*',
                 '\[NAVIGATOR-SMOKE\] https\.case\.real_public_probe\.source_type=https'
@@ -674,7 +661,10 @@ $realPublicProbeRequired = Test-NavigatorSmokeEnvFlag ([Environment]::GetEnviron
 if ($realPublicProbeRequired) {
     $realPublicProbeEnabled = $true
 }
-$realPublicProbeTarget = [Environment]::GetEnvironmentVariable("GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_TARGET", "Process")
+$realPublicProbeTarget = [Environment]::GetEnvironmentVariable("GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_URL", "Process")
+if ([string]::IsNullOrWhiteSpace($realPublicProbeTarget)) {
+    $realPublicProbeTarget = [Environment]::GetEnvironmentVariable("GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_TARGET", "Process")
+}
 if ([string]::IsNullOrWhiteSpace($realPublicProbeTarget)) {
     $realPublicProbeTarget = "https://sha256.badssl.com/"
 } else {
@@ -799,7 +789,6 @@ $realPublicProbeDisabledChecks = @(
 )
 
 $oversizedCaFixture = New-NavigatorOversizedCaBundleFixture
-$realPublicProbeMergedCaFixture = $null
 
 $scenarioDefinitions = @(
     [pscustomobject]@{
@@ -1241,18 +1230,6 @@ try {
             $scenario.PSObject.Properties.Match("PublicPilotEnabled").Count -gt 0 -and
             $scenario.PublicPilotEnabled
         $effectiveProductionCaSource = $scenario.ProductionCaSource
-        if ($realPublicProbeMergedCaFixture -and (Test-Path $realPublicProbeMergedCaFixture)) {
-            Remove-Item -LiteralPath $realPublicProbeMergedCaFixture -Force -ErrorAction SilentlyContinue
-            $realPublicProbeMergedCaFixture = $null
-        }
-        if ($enableRealPublicProbeForScenario -and
-            -not [string]::IsNullOrWhiteSpace($realPublicProbeCaBundleSource) -and
-            -not [string]::IsNullOrWhiteSpace($effectiveProductionCaSource)) {
-            $realPublicProbeMergedCaFixture = New-NavigatorRealPublicProbeCaBundleFixture `
-                -BaseBundlePath $effectiveProductionCaSource `
-                -PublicBundlePath $realPublicProbeCaBundleSource
-            $effectiveProductionCaSource = $realPublicProbeMergedCaFixture
-        }
         Invoke-NavigatorKernelSmokeRamdiskStage -HttpsPolicy $scenario.HttpsPolicy `
             -HttpsFaultMode $scenario.HttpsFaultMode `
             -UserCaSource $scenario.UserCaSource `
@@ -1325,9 +1302,6 @@ try {
     Restore-NavigatorSmokeFileState -State $wallpaperPackCaBundleState
     if (Test-Path $oversizedCaFixture) {
         Remove-Item -LiteralPath $oversizedCaFixture -Force -ErrorAction SilentlyContinue
-    }
-    if ($realPublicProbeMergedCaFixture -and (Test-Path $realPublicProbeMergedCaFixture)) {
-        Remove-Item -LiteralPath $realPublicProbeMergedCaFixture -Force -ErrorAction SilentlyContinue
     }
 }
 

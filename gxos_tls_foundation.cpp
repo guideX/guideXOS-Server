@@ -331,11 +331,15 @@ constexpr const char* kBareMetalHttpsPolicyCompatPath = "/config/navigator/HTTPS
 constexpr const char* kBareMetalMissingCaProbePath = "/certs/ca-bundle.missing";
 constexpr const char* kBareMetalSmokeFixtureMarker = "guideXOS Navigator smoke-only root CA fixture";
 constexpr const char* kBareMetalPublicInternetTrustMarker = "guideXOS Navigator real public HTTPS probe trust bundle";
+constexpr const char* kBareMetalPublicInternetTrustOptInPath = "/config/navigator/real-public-https-ca-bundle-enabled.txt";
+constexpr const char* kBareMetalPublicInternetTrustOptInCompatPath = "/config/navigator/RPUBCAEN.TXT";
 constexpr const char* kHostedCaBundlePath = "(Windows trust store)";
 constexpr const char* kHostedTrustStoreDetail = "Windows system trust store managed by Schannel";
 constexpr const char* kSmokeFixtureTrustStoreDetail = "Navigator smoke fixture staged at /certs/ca-bundle.pem";
 constexpr const char* kUserProvidedTrustStoreDetail = "User-provided trust store loaded from /config/certs/ca-bundle.pem";
 constexpr const char* kProductionBundleTrustStoreDetail = "Production trust store loaded from /certs/ca-bundle.pem";
+constexpr const char* kProductionPublicBundleTrustStoreDetail =
+    "Production trust store loaded from /certs/ca-bundle.pem via explicit opt-in public-root staging";
 constexpr const char* kNoTrustStoreDetail = "No bare-metal trust store is provisioned at the selected CA bundle path.";
 constexpr const char* kLocalSmokeOnlyPolicyBlocker =
     "Broad validated Navigator https:// remains disabled until a non-smoke trust store policy is explicitly enabled.";
@@ -771,6 +775,7 @@ const char* fallback_path_if_missing(const char* primaryPath,
                                      const char* compatPath,
                                      kernel::vfs::FileInfo* info,
                                      kernel::vfs::Status* statStatus);
+bool public_internet_trust_opt_in_enabled();
 #endif
 
 #if GXOS_TLS_MBEDTLS_RUNTIME_INCLUDED
@@ -1012,6 +1017,50 @@ const char* fallback_path_if_missing(const char* primaryPath,
     }
     return primaryPath;
 }
+
+bool public_internet_trust_opt_in_enabled()
+{
+    kernel::vfs::FileInfo info{};
+    kernel::vfs::Status statStatus = kernel::vfs::VFS_ERR_INVALID;
+    const char* readPath = fallback_path_if_missing(
+        kBareMetalPublicInternetTrustOptInPath,
+        kBareMetalPublicInternetTrustOptInCompatPath,
+        &info,
+        &statStatus);
+    if (statStatus != kernel::vfs::VFS_OK ||
+        info.type != kernel::vfs::FILE_TYPE_REGULAR ||
+        info.size == 0 ||
+        info.size > 32u) {
+        return false;
+    }
+
+    char buffer[33];
+    const int32_t bytesRead = kernel::vfs::read_file(
+        readPath,
+        reinterpret_cast<uint8_t*>(buffer),
+        32u);
+    if (bytesRead <= 0) return false;
+    buffer[bytesRead < 32 ? bytesRead : 32] = '\0';
+
+    const char* begin = buffer;
+    const char* end = buffer;
+    while (*end != '\0') ++end;
+    while (begin < end &&
+        (*begin == ' ' || *begin == '\t' || *begin == '\r' || *begin == '\n')) {
+        ++begin;
+    }
+    while (end > begin &&
+        (end[-1] == ' ' || end[-1] == '\t' || end[-1] == '\r' || end[-1] == '\n')) {
+        --end;
+    }
+
+    char token[33];
+    copy_trimmed_ascii_span(token, sizeof(token), begin, end);
+    return text_equals_insensitive(token, "enabled") ||
+        text_equals_insensitive(token, "1") ||
+        text_equals_insensitive(token, "true") ||
+        text_equals_insensitive(token, "yes");
+}
 #endif
 
 const char* readiness_blocker_for_ca_store(const GxosCaStoreInfo& info)
@@ -1058,12 +1107,13 @@ GxosTrustStoreSource trust_store_source_from_ca_info(const GxosCaStoreInfo& info
     return GxosTrustStoreSource::ProductionBundle;
 }
 
-const char* trust_store_source_detail(GxosTrustStoreSource source)
+const char* trust_store_source_detail(GxosTrustStoreSource source, bool publicInternetReady)
 {
     switch (source) {
     case GxosTrustStoreSource::SmokeFixtureTrust: return kSmokeFixtureTrustStoreDetail;
     case GxosTrustStoreSource::UserProvidedTrustStore: return kUserProvidedTrustStoreDetail;
-    case GxosTrustStoreSource::ProductionBundle: return kProductionBundleTrustStoreDetail;
+    case GxosTrustStoreSource::ProductionBundle:
+        return publicInternetReady ? kProductionPublicBundleTrustStoreDetail : kProductionBundleTrustStoreDetail;
     case GxosTrustStoreSource::WindowsSystemTrustStore: return kHostedTrustStoreDetail;
     case GxosTrustStoreSource::None:
     default:
@@ -1098,12 +1148,13 @@ GxosTrustStorePolicyInfo make_trust_store_policy_info()
         const bool publicInternetReady =
             source == GxosTrustStoreSource::ProductionBundle &&
             !caInfo.testOnlyFixture &&
+            public_internet_trust_opt_in_enabled() &&
             is_public_internet_trust_bundle(runtime_state().bytes, caInfo.bytesLoaded);
         return {
             GxosTrustStorePolicyState::TrustStoreParsed,
             source,
             caInfo.path,
-            trust_store_source_detail(source),
+            trust_store_source_detail(source, publicInternetReady),
             caInfo.bytesLoaded,
             caInfo.parsedCertificateCount,
             caInfo.testOnlyFixture,
@@ -1117,7 +1168,7 @@ GxosTrustStorePolicyInfo make_trust_store_policy_info()
         GxosTrustStorePolicyState::TrustStoreMalformed,
         source,
         caInfo.path,
-        trust_store_source_detail(source),
+        trust_store_source_detail(source, false),
         caInfo.bytesLoaded,
         caInfo.parsedCertificateCount,
         caInfo.testOnlyFixture,
