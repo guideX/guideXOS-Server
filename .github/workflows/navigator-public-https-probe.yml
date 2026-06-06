@@ -1,0 +1,128 @@
+name: Navigator Public HTTPS Probe
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_url:
+        description: Optional HTTPS target override for the dedicated real public probe.
+        required: false
+        default: https://sha256.badssl.com/
+
+jobs:
+  navigator-public-https-probe:
+    name: Manual Secret-Gated Public HTTPS Probe
+    runs-on: windows-2022
+    timeout-minutes: 90
+    env:
+      GXOS_NAVIGATOR_SMOKE_ENABLE_REAL_PUBLIC_HTTPS: "1"
+      GXOS_NAVIGATOR_SMOKE_REQUIRE_REAL_PUBLIC_HTTPS: "1"
+      GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_URL: ${{ inputs.target_url }}
+      GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_TARGET: ${{ inputs.target_url }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install MinGW toolchain
+        shell: powershell
+        run: |
+          choco install mingw --no-progress -y
+
+          $gppCommand = Get-Command g++.exe -ErrorAction SilentlyContinue
+          $gppPath = if ($null -ne $gppCommand) { $gppCommand.Source } else { $null }
+          if ([string]::IsNullOrWhiteSpace($gppPath)) {
+            foreach ($candidate in @(
+              "C:\ProgramData\chocolatey\lib\mingw\tools\install\mingw64\bin\g++.exe",
+              "C:\tools\mingw64\bin\g++.exe",
+              "C:\mingw64\bin\g++.exe"
+            )) {
+              if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+                $gppPath = $candidate
+                break
+              }
+            }
+          }
+          if ([string]::IsNullOrWhiteSpace($gppPath)) {
+            throw "Unable to locate g++.exe after installing MinGW."
+          }
+
+          $mingwBin = Split-Path -Parent $gppPath
+          $mingwBin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Install QEMU
+        shell: powershell
+        run: |
+          choco install qemu --no-progress -y
+
+          $qemuCommand = Get-Command qemu-system-x86_64.exe -ErrorAction SilentlyContinue
+          $qemuPath = if ($null -ne $qemuCommand) { $qemuCommand.Source } else { $null }
+          if ([string]::IsNullOrWhiteSpace($qemuPath)) {
+            $qemuCandidate = Join-Path ${env:ProgramFiles} "qemu\qemu-system-x86_64.exe"
+            if (Test-Path -LiteralPath $qemuCandidate -PathType Leaf) {
+              $qemuPath = $qemuCandidate
+            }
+          }
+          if ([string]::IsNullOrWhiteSpace($qemuPath)) {
+            throw "Unable to locate qemu-system-x86_64.exe after installing QEMU."
+          }
+
+          $qemuBin = Split-Path -Parent $qemuPath
+          $qemuBin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Materialize public CA bundle secret
+        shell: powershell
+        env:
+          GXOS_NAVIGATOR_PUBLIC_CA_BUNDLE_PEM: ${{ secrets.GXOS_NAVIGATOR_PUBLIC_CA_BUNDLE_PEM }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:GXOS_NAVIGATOR_PUBLIC_CA_BUNDLE_PEM)) {
+            throw "Repository secret GXOS_NAVIGATOR_PUBLIC_CA_BUNDLE_PEM is required for this manual workflow."
+          }
+
+          $bundlePath = Join-Path $env:RUNNER_TEMP "guidexos-navigator-public-ca-bundle.pem"
+          [System.IO.File]::WriteAllText($bundlePath, $env:GXOS_NAVIGATOR_PUBLIC_CA_BUNDLE_PEM, [System.Text.Encoding]::ASCII)
+
+          if (-not (Test-Path -LiteralPath $bundlePath -PathType Leaf)) {
+            throw "Failed to materialize the public CA bundle secret."
+          }
+
+          "GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_CA_BUNDLE_SOURCE=$bundlePath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "GXOS_NAVIGATOR_PUBLIC_CA_BUNDLE_TEMP_PATH=$bundlePath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Run dedicated public HTTPS probe
+        shell: powershell
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\smoke-navigator-public-https.ps1 -Build
+
+      - name: Summarize dedicated probe result
+        if: always()
+        shell: powershell
+        run: |
+          $summary = Get-ChildItem -LiteralPath .\logs -Filter "navigator-public-https-*.summary.log" -ErrorAction SilentlyContinue |
+            Sort-Object LastWriteTimeUtc -Descending |
+            Select-Object -First 1
+
+          if ($null -eq $summary) {
+            Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "No navigator public HTTPS summary log was produced."
+            exit 0
+          }
+
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "## Navigator Public HTTPS Probe"
+          Get-Content -LiteralPath $summary.FullName | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY
+
+      - name: Upload dedicated probe logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: navigator-public-https-${{ github.run_id }}
+          if-no-files-found: warn
+          path: |
+            logs/navigator-public-https-*.summary.log
+            logs/navigator-public-https-*.serial.log
+
+      - name: Remove temporary CA bundle
+        if: always()
+        shell: powershell
+        run: |
+          if (-not [string]::IsNullOrWhiteSpace($env:GXOS_NAVIGATOR_PUBLIC_CA_BUNDLE_TEMP_PATH) -and
+              (Test-Path -LiteralPath $env:GXOS_NAVIGATOR_PUBLIC_CA_BUNDLE_TEMP_PATH -PathType Leaf)) {
+            Remove-Item -LiteralPath $env:GXOS_NAVIGATOR_PUBLIC_CA_BUNDLE_TEMP_PATH -Force -ErrorAction Stop
+          }

@@ -264,10 +264,13 @@ function Write-NavigatorPublicHttpsLogs {
         [string[]]$Notes = @()
     )
 
+    $resultMarker = Get-NavigatorPublicHttpsResultMarker -FinalResult $FinalResult -ExitCode $ExitCode
+
     if (-not (Test-Path -LiteralPath $SerialPath)) {
         $serialLines = @(
             "[NAVIGATOR-PUBLIC-HTTPS] final_result=$FinalResult",
-            "[NAVIGATOR-PUBLIC-HTTPS] exit_code=$ExitCode"
+            "[NAVIGATOR-PUBLIC-HTTPS] exit_code=$ExitCode",
+            "[NAVIGATOR-PUBLIC-HTTPS] result_marker=$resultMarker"
         )
         foreach ($fieldKey in $Fields.Keys) {
             $serialLines += "[NAVIGATOR-PUBLIC-HTTPS] $fieldKey=$($Fields[$fieldKey])"
@@ -281,6 +284,7 @@ function Write-NavigatorPublicHttpsLogs {
     $summaryLines = @(
         "[NAVIGATOR-PUBLIC-HTTPS] final_result=$FinalResult",
         "[NAVIGATOR-PUBLIC-HTTPS] exit_code=$ExitCode",
+        "[NAVIGATOR-PUBLIC-HTTPS] result_marker=$resultMarker",
         "[NAVIGATOR-PUBLIC-HTTPS] dedicated_serial_log=$SerialPath",
         "[NAVIGATOR-PUBLIC-HTTPS] dedicated_summary_log=$SummaryPath",
         "[NAVIGATOR-PUBLIC-HTTPS] kernel_serial_log=$(if ($KernelSerialPath) { $KernelSerialPath } else { '(none)' })"
@@ -321,6 +325,28 @@ function New-NavigatorPublicHttpsSetupNotes {
     )
 }
 
+function Get-NavigatorPublicHttpsResultMarker {
+    param(
+        [Parameter(Mandatory = $true)][string]$FinalResult,
+        [Parameter(Mandatory = $true)][int]$ExitCode
+    )
+
+    switch ($ExitCode) {
+        0 { return "PASS" }
+        2 { return "SETUP_BLOCKED" }
+        3 { return "SKIP" }
+        default {
+            if ([string]::Equals($FinalResult, "PASS", [System.StringComparison]::OrdinalIgnoreCase)) {
+                return "PASS"
+            }
+            if ([string]::Equals($FinalResult, "SKIP", [System.StringComparison]::OrdinalIgnoreCase)) {
+                return "SKIP"
+            }
+            return "FAIL"
+        }
+    }
+}
+
 function Write-NavigatorPublicHttpsConsoleSummary {
     param(
         [Parameter(Mandatory = $true)][string]$FinalResult,
@@ -353,6 +379,8 @@ function Write-NavigatorPublicHttpsConsoleSummary {
     }
 
     $finalLine = "  final result: $FinalResult (exit $ExitCode)"
+    $resultMarker = Get-NavigatorPublicHttpsResultMarker -FinalResult $FinalResult -ExitCode $ExitCode
+    Write-Host "  result marker: $resultMarker"
     switch ($FinalResult) {
         "PASS" { Write-Host $finalLine -ForegroundColor Green }
         "SKIP" { Write-Host $finalLine -ForegroundColor Yellow }

@@ -93,7 +93,11 @@ Smoke-only malformed and empty CA bundle fixtures for deterministic fail-closed 
   - exit `3`: the guest probe reported `SKIP`, which is not accepted as proof by the dedicated entrypoint;
   - exit `1`: the guest probe reported `FAIL` or the harness could not complete.
 - The dedicated script rejects non-`https://` targets and numeric-IP targets before QEMU launches.
-- The dedicated script prints a compact final summary for manual runs and CI logs, including the target, CA source resolution, CA bytes, parsed cert count, DNS/TCP/TLS, certificate and hostname validation, HTTP status, unsupported-content reason, `plaintext_fallback=no`, and the final result.
+- The dedicated script prints a compact final summary for manual runs and CI logs, including the target, CA source resolution, CA bytes, parsed cert count, DNS/TCP/TLS, certificate and hostname validation, HTTP status, unsupported-content reason, `plaintext_fallback=no`, the final result, and a machine-checkable `result_marker`:
+  - `PASS`
+  - `FAIL`
+  - `SKIP`
+  - `SETUP_BLOCKED`
 - Dedicated logs are written as:
   - `logs/navigator-public-https-<timestamp>.serial.log`
   - `logs/navigator-public-https-<timestamp>.summary.log`
@@ -107,6 +111,13 @@ Smoke-only malformed and empty CA bundle fixtures for deterministic fail-closed 
 - When both the env var path and the ignored local fallback exist, the env var wins and the dedicated script prints that precedence explicitly.
 - Public roots are never downloaded by the harness and the `.local` fallback remains ignored by git.
 - Deterministic fixture roots in this repository do not count as public trust and must never be treated as sufficient for the real public probe.
+- This repository now includes an opt-in GitHub Actions workflow at `.github/workflows/navigator-public-https-probe.yml` for approved environments that can inject the repository secret `GXOS_NAVIGATOR_PUBLIC_CA_BUNDLE_PEM`.
+- The workflow is manual-only via `workflow_dispatch`, not push-triggered, and uploads:
+  - `logs/navigator-public-https-*.summary.log`
+  - `logs/navigator-public-https-*.serial.log`
+- The workflow writes the secret to a temporary runner file, points `GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_CA_BUNDLE_SOURCE` at that file, and removes the file after the run where practical.
+- The workflow can accept an optional manual `target_url` override; otherwise it uses `https://sha256.badssl.com/`.
+- If `GXOS_NAVIGATOR_PUBLIC_CA_BUNDLE_PEM` is missing, the workflow fails clearly before the probe runs.
 
 ### Example commands
 
@@ -118,6 +129,11 @@ Smoke-only malformed and empty CA bundle fixtures for deterministic fail-closed 
   - `.\scripts\smoke-navigator-public-https.ps1`
 - Dedicated public probe smoke through the wrapper:
   - `.\scripts\smoke-navigator-public-https.bat`
+- Manual GitHub Actions execution:
+  - Open the `Navigator Public HTTPS Probe` workflow in GitHub Actions.
+  - Add or confirm the repository secret `GXOS_NAVIGATOR_PUBLIC_CA_BUNDLE_PEM`.
+  - Optionally override `target_url`.
+  - Start the manual run and review the uploaded summary/serial logs.
 - Dedicated public probe smoke with an explicit bundle path:
   - `$env:GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_CA_BUNDLE_SOURCE="C:\path\to\ca-bundle.pem"`
   - `.\scripts\smoke-navigator-public-https.ps1`
