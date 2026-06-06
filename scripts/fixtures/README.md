@@ -96,6 +96,9 @@ Trust source distinction in this repository today:
 - production/public roots
   - explicit operator-supplied roots for the dedicated public probe
   - must be validated explicitly and recorded in a manifest before proof is accepted
+- shipped-root candidates
+  - explicit operator-supplied root bundles proposed for later runtime shipping review
+  - prepared as commit-safe metadata plus manifest/evidence records without enabling default public HTTPS
 - local secret CI roots
   - materialized from `GXOS_NAVIGATOR_PUBLIC_CA_BUNDLE_PEM` into a temporary runner file
   - validated and archived as manifest evidence during the manual workflow
@@ -108,6 +111,7 @@ Trust source distinction in this repository today:
 - `scripts/smoke-navigator-kernel.ps1` now defaults to the deterministic kernel smoke lane only, so the normal hosted/kernel smoke stays internet-independent and green without any secret/public-root material.
 - Use `scripts/smoke-navigator-kernel.ps1 -IncludePublicPilot` when you intentionally want the broader kernel matrix to include the public-pilot scenario lane for debugging.
 - Use `scripts/smoke-navigator-kernel.ps1 -ScenarioGroup PublicPilot` when you want only the public-pilot kernel lane without the rest of the deterministic matrix.
+- Use `scripts/smoke-navigator-kernel.ps1 -ScenarioGroup PublicPilot -CandidateBundlePath C:\path\to\candidate.pem -CandidateRotationId candidate-2026-06` when you intentionally want to stage a shipped-root candidate in the public-pilot lane for reviewed runtime verification.
 - `scripts/smoke-navigator-public-https.ps1` is the dedicated single-purpose entrypoint when you want to prove the real public HTTPS probe path itself.
 - `scripts/smoke-navigator-public-https.bat` is the Windows convenience wrapper; it forwards to the PowerShell entrypoint with `-NoProfile -ExecutionPolicy Bypass` and does not duplicate logic.
 - Set `GXOS_NAVIGATOR_SMOKE_ENABLE_REAL_PUBLIC_HTTPS=1` to enable the optional bare-metal public probe.
@@ -236,6 +240,44 @@ Review notes:
   - do not enable default public HTTPS browsing as part of this rotation step
 - The helper does not download roots, does not normalize PEM contents, and does not mark deterministic fixtures as production-ready.
 
+## Shipped-root candidate review workflow
+
+- Candidate metadata is kept separate from the runtime CA manifest so reviewer-only fields do not expand the runtime parsing contract.
+- The candidate metadata schema is `guidexos.navigator.shipped-root-candidate.v0.1`.
+- Commit-safe candidate metadata may be archived under `scripts/fixtures/public-roots/candidates/`.
+- The helper `scripts/prepare-navigator-shipped-root-candidate.ps1` defaults to writing local preparation artifacts under `logs/navigator-shipped-root-candidates/<candidate-id>/`.
+- Candidate metadata records:
+  - `candidate_id`
+  - `rotation_id`
+  - `bundle_sha256`
+  - `root_count`
+  - `pem_bytes`
+  - `bundle_type=shipped-root-candidate`
+  - `production_ready`
+  - `test_only`
+  - `proposed_utc`
+  - `reviewed_utc`
+  - `reviewer`
+  - `source_description`
+  - `evidence_required`
+  - `evidence_status`
+  - `last_public_probe_target`
+  - `last_public_probe_utc`
+  - `last_public_probe_result`
+  - `notes`
+- Candidate metadata must not include PEM contents, private keys, or secret local paths.
+- Candidate metadata does not authorize default public HTTPS browsing.
+- The helper `scripts/promote-navigator-public-https-evidence.ps1` links PASS public HTTPS evidence to candidate metadata without mutating the source metadata destructively.
+- Evidence linking verifies:
+  - `evidence_status=PASS`
+  - `pass_contract_assertion_result=PASS`
+  - approved target URL
+  - trust bundle type compatibility
+  - candidate hash direct match when the evidence trust bundle is the candidate itself
+  - rotation-ID lineage when the evidence trust bundle is the merged public-probe bundle
+- If the public probe used a merged candidate-plus-public bundle, direct SHA-256 equality is not expected; the review link falls back to `runtime_manifest_rotation_id` lineage and records that the merged bundle was not directly hash-comparable to the base candidate.
+- The public proof path itself stays opt-in and still requires explicit public-root input even when a shipped-root candidate is under review.
+
 ### First-Run Operator Checklist
 
 Use this when collecting the first GitHub-hosted PASS artifact for a branch, release note, or milestone checkpoint:
@@ -362,6 +404,12 @@ Operator warnings:
   - `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\export-navigator-public-https-evidence.ps1 -SummaryPath .\logs\navigator-public-https-<timestamp>.summary.log`
 - Manual CA bundle validation and manifest generation:
   - `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\validate-navigator-ca-bundle.ps1 -BundlePath C:\path\to\ca-bundle.pem -BundleType production-public-source`
+- Candidate preparation:
+  - `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\prepare-navigator-shipped-root-candidate.ps1 -BundlePath C:\path\to\candidate.pem -CandidateId candidate-2026-06 -SourceDescription manual-review-bundle`
+- Dedicated public probe smoke against a shipped-root candidate:
+  - `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\smoke-navigator-public-https.ps1 -CandidateBundlePath C:\path\to\candidate.pem -CandidateRotationId candidate-2026-06`
+- Candidate evidence linking after a PASS public proof:
+  - `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\promote-navigator-public-https-evidence.ps1 -CandidateMetadataPath .\logs\navigator-shipped-root-candidates\candidate-2026-06\candidate-2026-06.candidate.json -EvidencePath .\logs\navigator-public-https-<timestamp>.evidence.json`
 - Manual kernel smoke with the public probe enabled inside the broader deterministic suite:
   - `$env:GXOS_NAVIGATOR_SMOKE_ENABLE_REAL_PUBLIC_HTTPS="1"`
   - `$env:GXOS_NAVIGATOR_SMOKE_REQUIRE_REAL_PUBLIC_HTTPS="1"`
@@ -375,3 +423,13 @@ Operator warnings:
   - `$env:GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_URL="https://sha256.badssl.com/"`
 
 This probe remains smoke/manual validation only. It does not enable default public HTTPS browsing in bare-metal Navigator, and it does not download public roots for you.
+
+Candidate rotation process in this pass:
+
+1. Obtain the candidate bundle locally and keep the PEM outside git.
+2. Validate and fingerprint it with `scripts/prepare-navigator-shipped-root-candidate.ps1`.
+3. Run the dedicated public HTTPS proof path with explicit public roots and the candidate bundle only when intentional.
+4. Export or review the resulting `navigator-public-https-*.evidence.json`.
+5. Link PASS evidence to the candidate with `scripts/promote-navigator-public-https-evidence.ps1`.
+6. Archive the candidate metadata, manifest, summary, serial log, and evidence link together.
+7. Make any future shipped-root or default-policy decision separately from this evidence workflow.

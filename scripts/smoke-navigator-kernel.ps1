@@ -4,6 +4,9 @@ param(
     [ValidateSet("Deterministic", "PublicPilot", "All")]
     [string]$ScenarioGroup = "Deterministic",
     [switch]$IncludePublicPilot,
+    [string]$CandidateBundlePath,
+    [string]$CandidateRotationId,
+    [switch]$CandidateReviewed,
     [string[]]$ScenarioFilter
 )
 
@@ -338,6 +341,20 @@ function Restore-NavigatorKernelSmokeEnvironment {
     foreach ($envName in $navigatorSmokeEnvNames) {
         Set-ProcessEnvValue -Name $envName -Value $navigatorSmokeEnvOriginal[$envName]
     }
+}
+
+function Resolve-NavigatorKernelSmokeOptionalPath {
+    param([AllowNull()][string]$PathValue)
+
+    if ([string]::IsNullOrWhiteSpace($PathValue)) {
+        return $null
+    }
+
+    $candidate = $PathValue.Trim()
+    if (-not [System.IO.Path]::IsPathRooted($candidate)) {
+        $candidate = Join-Path $Root $candidate
+    }
+    return [System.IO.Path]::GetFullPath($candidate)
 }
 
 function Invoke-NavigatorKernelSmokeRamdiskStage {
@@ -1496,6 +1513,24 @@ if ($ScenarioFilter -and $ScenarioFilter.Count -gt 0) {
     throw "ScenarioGroup '$effectiveScenarioGroup' did not select any kernel smoke scenarios."
 }
 
+if ((-not [string]::IsNullOrWhiteSpace($CandidateRotationId)) -and [string]::IsNullOrWhiteSpace($CandidateBundlePath)) {
+    throw "CandidateRotationId requires CandidateBundlePath."
+}
+if ($CandidateReviewed -and [string]::IsNullOrWhiteSpace($CandidateBundlePath)) {
+    throw "CandidateReviewed requires CandidateBundlePath."
+}
+
+$resolvedCandidateBundlePath = Resolve-NavigatorKernelSmokeOptionalPath -PathValue $CandidateBundlePath
+$effectiveCandidateRotationId = $(if ([string]::IsNullOrWhiteSpace($CandidateRotationId)) { $null } else { $CandidateRotationId.Trim() })
+if ($resolvedCandidateBundlePath) {
+    $nonPublicPilotScenarios = @($selectedScenarios | Where-Object {
+        (Get-NavigatorKernelSmokeScenarioLane -Scenario $_) -ne "PublicPilot"
+    })
+    if ($nonPublicPilotScenarios.Count -gt 0) {
+        throw "CandidateBundlePath is only supported for the PublicPilot lane. Use -ScenarioGroup PublicPilot, -IncludePublicPilot with ScenarioFilter, or filter directly to public-pilot scenarios."
+    }
+}
+
 Write-Host "Kernel smoke scenario selection: group=$effectiveScenarioGroup count=$($selectedScenarios.Count)"
 
 foreach ($scenario in $selectedScenarios) {
@@ -1519,14 +1554,20 @@ try {
             $realPublicProbeEnabled -and
             $scenario.PSObject.Properties.Match("PublicPilotEnabled").Count -gt 0 -and
             $scenario.PublicPilotEnabled
-        $effectiveProductionCaSource = $scenario.ProductionCaSource
+        $scenarioCandidateCaSource = $(if ($scenario.PSObject.Properties.Match("CandidateCaSource").Count -gt 0) { $scenario.CandidateCaSource } else { $null })
+        $scenarioCandidateRotationId = $(if ($scenario.PSObject.Properties.Match("CandidateRotationId").Count -gt 0) { $scenario.CandidateRotationId } else { $null })
+        $scenarioCandidateProductionReady = $(if ($scenario.PSObject.Properties.Match("CandidateProductionReady").Count -gt 0) { [bool]$scenario.CandidateProductionReady } else { $false })
+        $effectiveCandidateCaSource = $(if ($resolvedCandidateBundlePath) { $resolvedCandidateBundlePath } else { $scenarioCandidateCaSource })
+        $effectiveCandidateRotationIdForScenario = $(if ($effectiveCandidateRotationId) { $effectiveCandidateRotationId } else { $scenarioCandidateRotationId })
+        $effectiveCandidateProductionReadyForScenario = $(if ($resolvedCandidateBundlePath) { [bool]$CandidateReviewed } else { $scenarioCandidateProductionReady })
+        $effectiveProductionCaSource = $(if ($effectiveCandidateCaSource) { $null } else { $scenario.ProductionCaSource })
         $stageInfo = Invoke-NavigatorKernelSmokeRamdiskStage -HttpsPolicy $scenario.HttpsPolicy `
             -HttpsFaultMode $scenario.HttpsFaultMode `
             -UserCaSource $scenario.UserCaSource `
             -ProductionCaSource $effectiveProductionCaSource `
-            -CandidateCaSource $scenario.CandidateCaSource `
-            -CandidateRotationId $scenario.CandidateRotationId `
-            -CandidateProductionReady:([bool]$scenario.CandidateProductionReady) `
+            -CandidateCaSource $effectiveCandidateCaSource `
+            -CandidateRotationId $effectiveCandidateRotationIdForScenario `
+            -CandidateProductionReady:$effectiveCandidateProductionReadyForScenario `
             -UserManifestMode $(if ($scenario.UserManifestMode) { [string]$scenario.UserManifestMode } else { "normal" }) `
             -ProductionManifestMode $(if ($scenario.ProductionManifestMode) { [string]$scenario.ProductionManifestMode } else { "normal" }) `
             -UseSmokeFixture $scenario.UseSmokeFixture `

@@ -1,6 +1,9 @@
 param(
     [switch]$Build,
-    [int]$TimeoutSeconds = 40
+    [int]$TimeoutSeconds = 40,
+    [string]$CandidateBundlePath,
+    [string]$CandidateRotationId,
+    [switch]$CandidateReviewed
 )
 
 $ErrorActionPreference = "Stop"
@@ -699,6 +702,15 @@ try {
     )
     if ($Build) {
         $kernelArgs += "-Build"
+    }
+    if (-not [string]::IsNullOrWhiteSpace($CandidateBundlePath)) {
+        $kernelArgs += @("-CandidateBundlePath", $CandidateBundlePath)
+    }
+    if (-not [string]::IsNullOrWhiteSpace($CandidateRotationId)) {
+        $kernelArgs += @("-CandidateRotationId", $CandidateRotationId)
+    }
+    if ($CandidateReviewed) {
+        $kernelArgs += "-CandidateReviewed"
     }
 
     & powershell @kernelArgs
