@@ -46,6 +46,7 @@ $activeSmokeBuild = $false
 function Restore-NormalKernelBuild {
     if ($script:activeSmokeBuild) {
         Write-Host "Restoring normal kernel build without active Navigator HTTP smoke diagnostics..."
+        Wait-NavigatorSmokeFileUnlock -LiteralPath (Join-Path $Root "ESP\\ramdisk.img")
         Invoke-KernelBuildForSmoke ""
         $script:activeSmokeBuild = $false
     }
@@ -805,6 +806,18 @@ $commonChecks = @(
     "[NAVIGATOR-SMOKE] result=PASS"
 )
 
+$manifestBlockedChecks = @(
+    $commonChecks | Where-Object {
+        $_ -ne "[NAVIGATOR-SMOKE] tls_smoke.result=PASS" -and
+        $_ -ne "[NAVIGATOR-SMOKE] https.case.redirect_allowlisted.result=PASS" -and
+        $_ -ne "[NAVIGATOR-SMOKE] result=PASS"
+    }
+) + @(
+    "[NAVIGATOR-SMOKE] tls_smoke.result=FAIL",
+    "[NAVIGATOR-SMOKE] https.case.redirect_allowlisted.result=FAIL",
+    "[NAVIGATOR-SMOKE] result=FAIL"
+)
+
 $commonRegexChecks = @{
     '\[NAVIGATOR-SMOKE\] tls_prereq\.wall_clock_epoch=[1-9][0-9]+' = "[NAVIGATOR-SMOKE] tls_prereq.wall_clock_epoch=<positive Unix seconds>"
     '\[NAVIGATOR-SMOKE\] tls_prereq\.wall_clock_utc=20[2-9][0-9]-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z' = "[NAVIGATOR-SMOKE] tls_prereq.wall_clock_utc=<plausible UTC date>"
@@ -1107,7 +1120,7 @@ $scenarioDefinitions = @(
         ProductionCaSource = $null
         TlsCert = $defaultHttpsCert
         TlsKey = $defaultHttpsKey
-        Checks = $commonChecks + @(
+        Checks = $manifestBlockedChecks + @(
             "[NAVIGATOR-SMOKE] tls_prereq.root_ca_path=/config/certs/ca-bundle.pem",
             "[NAVIGATOR-SMOKE] tls_prereq.trust_store_source=UserProvidedTrustStore",
             "[NAVIGATOR-SMOKE] tls_prereq.root_ca_manifest_status=Loaded",
@@ -1118,9 +1131,11 @@ $scenarioDefinitions = @(
             "[NAVIGATOR-SMOKE] tls_prereq.https_policy_selected_state=UserTrustStoreDevMode",
             "[NAVIGATOR-SMOKE] tls_prereq.https_policy_effective_state=Disabled",
             "[NAVIGATOR-SMOKE] tls_prereq.https_policy_blocker=CA bundle manifest sha256 does not match the loaded PEM bytes.",
-            "[NAVIGATOR-SMOKE] tls_readiness=no"
+            "[NAVIGATOR-SMOKE] tls_readiness=no",
+            "[NAVIGATOR-SMOKE] tls_smoke.tls_status=CertificateVerifyFailed",
+            "[NAVIGATOR-SMOKE] https.case.redirect_allowlisted.tls_status=CertificateVerifyFailed"
         )
-        RegexChecks = Merge-CheckMaps -Base $commonRegexChecks -Extra $localTlsSelectedBlockedRegexChecks
+        RegexChecks = Merge-CheckMaps -Base $commonRegexChecks -Extra $localTlsExplicitPolicyTrustMismatchRegexChecks
     },
     [pscustomobject]@{
         Name = "user_dev_untrusted_root"
@@ -1250,7 +1265,7 @@ $scenarioDefinitions = @(
         ProductionManifestMode = "missing"
         TlsCert = $defaultHttpsCert
         TlsKey = $defaultHttpsKey
-        Checks = $commonChecks + @(
+        Checks = $manifestBlockedChecks + @(
             "[NAVIGATOR-SMOKE] tls_prereq.root_ca_path=/certs/ca-bundle.pem",
             "[NAVIGATOR-SMOKE] tls_prereq.trust_store_source=ProductionRootStore",
             "[NAVIGATOR-SMOKE] tls_prereq.root_ca_manifest_status=Missing",
@@ -1259,9 +1274,11 @@ $scenarioDefinitions = @(
             "[NAVIGATOR-SMOKE] tls_prereq.https_policy_effective_state=Disabled",
             "[NAVIGATOR-SMOKE] tls_prereq.https_policy_blocker=CA bundle manifest not found at /certs/ca-bundle.manifest.",
             "[NAVIGATOR-SMOKE] tls_prereq.trust_store_readiness_blocker=CA bundle manifest not found at /certs/ca-bundle.manifest.",
-            "[NAVIGATOR-SMOKE] tls_readiness=no"
+            "[NAVIGATOR-SMOKE] tls_readiness=no",
+            "[NAVIGATOR-SMOKE] tls_smoke.tls_status=CertificateVerifyFailed",
+            "[NAVIGATOR-SMOKE] https.case.redirect_allowlisted.tls_status=CertificateVerifyFailed"
         )
-        RegexChecks = Merge-CheckMaps -Base $commonRegexChecks -Extra $localTlsSelectedBlockedRegexChecks
+        RegexChecks = Merge-CheckMaps -Base $commonRegexChecks -Extra $localTlsExplicitPolicyTrustMismatchRegexChecks
     },
     [pscustomobject]@{
         Name = "production_manifest_test_only"
@@ -1273,7 +1290,7 @@ $scenarioDefinitions = @(
         ProductionManifestMode = "test-only"
         TlsCert = $defaultHttpsCert
         TlsKey = $defaultHttpsKey
-        Checks = $commonChecks + @(
+        Checks = $manifestBlockedChecks + @(
             "[NAVIGATOR-SMOKE] tls_prereq.root_ca_path=/certs/ca-bundle.pem",
             "[NAVIGATOR-SMOKE] tls_prereq.trust_store_source=ProductionRootStore",
             "[NAVIGATOR-SMOKE] tls_prereq.root_ca_manifest_status=Loaded",
@@ -1283,9 +1300,11 @@ $scenarioDefinitions = @(
             "[NAVIGATOR-SMOKE] tls_prereq.https_policy_effective_state=Disabled",
             "[NAVIGATOR-SMOKE] tls_prereq.https_policy_blocker=CA bundle manifest is marked test_only=yes; broader validated HTTPS remains fail-closed.",
             "[NAVIGATOR-SMOKE] tls_prereq.trust_store_readiness_blocker=CA bundle manifest is marked test_only=yes; broader validated HTTPS remains fail-closed.",
-            "[NAVIGATOR-SMOKE] tls_readiness=no"
+            "[NAVIGATOR-SMOKE] tls_readiness=no",
+            "[NAVIGATOR-SMOKE] tls_smoke.tls_status=CertificateVerifyFailed",
+            "[NAVIGATOR-SMOKE] https.case.redirect_allowlisted.tls_status=CertificateVerifyFailed"
         )
-        RegexChecks = Merge-CheckMaps -Base $commonRegexChecks -Extra $localTlsSelectedBlockedRegexChecks
+        RegexChecks = Merge-CheckMaps -Base $commonRegexChecks -Extra $localTlsExplicitPolicyTrustMismatchRegexChecks
     },
     [pscustomobject]@{
         Name = "production_manifest_hash_mismatch"
@@ -1297,7 +1316,7 @@ $scenarioDefinitions = @(
         ProductionManifestMode = "hash-mismatch"
         TlsCert = $defaultHttpsCert
         TlsKey = $defaultHttpsKey
-        Checks = $commonChecks + @(
+        Checks = $manifestBlockedChecks + @(
             "[NAVIGATOR-SMOKE] tls_prereq.root_ca_path=/certs/ca-bundle.pem",
             "[NAVIGATOR-SMOKE] tls_prereq.trust_store_source=ProductionRootStore",
             "[NAVIGATOR-SMOKE] tls_prereq.root_ca_manifest_status=Loaded",
@@ -1308,9 +1327,11 @@ $scenarioDefinitions = @(
             "[NAVIGATOR-SMOKE] tls_prereq.https_policy_effective_state=Disabled",
             "[NAVIGATOR-SMOKE] tls_prereq.https_policy_blocker=CA bundle manifest sha256 does not match the loaded PEM bytes.",
             "[NAVIGATOR-SMOKE] tls_prereq.trust_store_readiness_blocker=CA bundle manifest sha256 does not match the loaded PEM bytes.",
-            "[NAVIGATOR-SMOKE] tls_readiness=no"
+            "[NAVIGATOR-SMOKE] tls_readiness=no",
+            "[NAVIGATOR-SMOKE] tls_smoke.tls_status=CertificateVerifyFailed",
+            "[NAVIGATOR-SMOKE] https.case.redirect_allowlisted.tls_status=CertificateVerifyFailed"
         )
-        RegexChecks = Merge-CheckMaps -Base $commonRegexChecks -Extra $localTlsSelectedBlockedRegexChecks
+        RegexChecks = Merge-CheckMaps -Base $commonRegexChecks -Extra $localTlsExplicitPolicyTrustMismatchRegexChecks
     },
     [pscustomobject]@{
         Name = "production_public_pilot_enabled"

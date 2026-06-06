@@ -745,14 +745,17 @@ if ($SmokeCaFixture -or $env:GXOS_NAVIGATOR_SMOKE_CA_FIXTURE -eq "1") {
     $targetCa = Join-Path $certsDir "ca-bundle.pem"
     Copy-Item -LiteralPath $smokeCaFixturePath -Destination $targetCa -Force
     $targetCaManifest = Join-Path $certsDir "ca-bundle.manifest"
+    $targetCaManifestCompat = Join-Path $certsDir "CABUNDLE.MAN"
     $smokeManifestProfile = Get-NavigatorCaBundleManifestProfile -Role "smoke" -SourcePath $smokeCaFixturePath -ExplicitPublicProbeMaterial:$false
     $smokeManifest = Invoke-NavigatorCaBundleManifestValidation `
         -BundlePath $targetCa `
         -BundleType $smokeManifestProfile.BundleType `
         -OutputManifestPath $targetCaManifest `
         -SourceDescription $smokeManifestProfile.SourceDescription
+    Copy-Item -LiteralPath $targetCaManifest -Destination $targetCaManifestCompat -Force
     $staged += Get-Item $targetCa
     $staged += Get-Item $targetCaManifest
+    $staged += Get-Item $targetCaManifestCompat
     $stagedRootCaBundle = $true
     Write-Host "      staged smoke-only CA bundle at /certs/ca-bundle.pem" -ForegroundColor Yellow
     Write-Host "      staged CA manifest at /certs/ca-bundle.manifest (type=$($smokeManifest.Manifest.bundle_type), production_ready=$($smokeManifest.Manifest.production_ready), test_only=$($smokeManifest.Manifest.test_only))" -ForegroundColor Yellow
@@ -792,6 +795,7 @@ if ($SmokeCaFixture -or $env:GXOS_NAVIGATOR_SMOKE_CA_FIXTURE -eq "1") {
             Copy-Item -LiteralPath $productionBundleSource -Destination $targetCa -Force
         }
         $targetCaManifest = Join-Path $certsDir "ca-bundle.manifest"
+        $targetCaManifestCompat = Join-Path $certsDir "CABUNDLE.MAN"
         $productionRole = if ($candidateCaSource) { "candidate" } else { "production" }
         $productionManifestProfile = Get-NavigatorCaBundleManifestProfile `
             -Role $productionRole `
@@ -813,10 +817,12 @@ if ($SmokeCaFixture -or $env:GXOS_NAVIGATOR_SMOKE_CA_FIXTURE -eq "1") {
                 Manifest = Get-Content -LiteralPath $targetCaManifest -Raw | ConvertFrom-Json
                 Output = $productionManifest.Output
             }
+            Copy-Item -LiteralPath $targetCaManifest -Destination $targetCaManifestCompat -Force
         }
         $staged += Get-Item $targetCa
         if (Test-Path -LiteralPath $targetCaManifest -PathType Leaf) {
             $staged += Get-Item $targetCaManifest
+            $staged += Get-Item $targetCaManifestCompat
         }
         $stagedRootCaBundle = $true
         if ($realPublicProbeCaBundleInfo) {
@@ -847,6 +853,7 @@ if ($userCaSource) {
     $targetUserCa = Join-Path $configCertsDir "ca-bundle.pem"
     Copy-Item -LiteralPath $userCaSource -Destination $targetUserCa -Force
     $targetUserManifest = Join-Path $configCertsDir "ca-bundle.manifest"
+    $targetUserManifestCompat = Join-Path $configCertsDir "CABUNDLE.MAN"
     $staged += Get-Item $targetUserCa
     $targetUserCaCompat = Join-Path $configCertsDir "CABUNDLE.PEM"
     Copy-Item -LiteralPath $userCaSource -Destination $targetUserCaCompat -Force
@@ -868,12 +875,14 @@ if ($userCaSource) {
             -ProductionReady $userManifestProfile.ProductionReady
         Update-NavigatorCaBundleManifestMode -ManifestPath $targetUserManifest -Mode $userManifestMode
         if (Test-Path -LiteralPath $targetUserManifest -PathType Leaf) {
+            Copy-Item -LiteralPath $targetUserManifest -Destination $targetUserManifestCompat -Force
             $userManifest = [pscustomobject]@{
                 ManifestPath = [System.IO.Path]::GetFullPath($targetUserManifest)
                 Manifest = Get-Content -LiteralPath $targetUserManifest -Raw | ConvertFrom-Json
                 Output = $userManifest.Output
             }
             $staged += Get-Item $targetUserManifest
+            $staged += Get-Item $targetUserManifestCompat
             Write-Host "      staged CA manifest at /config/certs/ca-bundle.manifest (type=$($userManifest.Manifest.bundle_type), production_ready=$($userManifest.Manifest.production_ready), test_only=$($userManifest.Manifest.test_only))" -ForegroundColor Yellow
             if ($userManifestMode -ne "normal") {
                 Write-Host "      applied user/dev manifest mode override: $userManifestMode" -ForegroundColor DarkYellow

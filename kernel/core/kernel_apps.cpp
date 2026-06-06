@@ -5686,38 +5686,73 @@ void NavigatorApp::buildPageInfoDocument()
         const gxos::GxosValidatedHttpsPolicyInfo httpsPolicy = gxos::gxos_validated_https_policy_info();
         const gxos::GxosTrustStorePolicyInfo trustStorePolicy = gxos::gxos_tls_trust_store_policy_info();
         const gxos::GxosCaStoreInfo caStoreInfo = gxos::gxos_ca_store_info();
-        NAV_INFO_TEXT("HTTPS policy selected: ",
-            gxos::gxos_validated_https_policy_state_name(httpsPolicy.selectedState));
-        NAV_INFO_TEXT("HTTPS policy effective: ",
-            gxos::gxos_validated_https_policy_state_name(httpsPolicy.state));
-        NAV_INFO_TEXT("Trust store path: ", trustStorePolicy.path ? trustStorePolicy.path : "(none)");
-        NAV_INFO_TEXT("Trust store source: ",
-            gxos::gxos_trust_store_source_name(trustStorePolicy.source));
-        NAV_INFO_INT("Trust store parsed certs: ", (int)trustStorePolicy.parsedCertificateCount);
-        NAV_INFO_TEXT("Validated fixture HTTPS: ",
-            httpsPolicy.validatedNavigationEnabled ? "enabled" : "disabled");
-        NAV_INFO_TEXT("Public HTTPS pilot: ",
-            httpsPolicy.broadPublicHttpsEnabled ? "enabled" : "disabled");
-        NAV_INFO_TEXT("Public HTTPS pilot requested: ",
-            httpsPolicy.publicHttpsPilotRequested ? "yes" : "no");
-        NAV_INFO_TEXT("Public HTTPS pilot reason: ",
-            httpsPolicy.publicHttpsPilotReason ? httpsPolicy.publicHttpsPilotReason : "(none)");
-        NAV_INFO_TEXT("HTTPS dev mode: ",
-            httpsPolicy.state == gxos::GxosValidatedHttpsPolicyState::UserTrustStoreDevMode ? "yes" : "no");
-        NAV_INFO_TEXT("HTTPS production validated: ", httpsPolicy.productionReady ? "yes" : "no");
-        NAV_INFO_TEXT("Trust manifest present: ", caStoreInfo.manifest.present ? "yes" : "no");
-        NAV_INFO_TEXT("Trust manifest schema: ", caStoreInfo.manifest.schemaVersion ? caStoreInfo.manifest.schemaVersion : "(none)");
-        NAV_INFO_TEXT("Trust bundle type: ", caStoreInfo.manifest.bundleType ? caStoreInfo.manifest.bundleType : "(none)");
-        NAV_INFO_TEXT("Trust rotation id: ", caStoreInfo.manifest.rotationId ? caStoreInfo.manifest.rotationId : "(none)");
-        NAV_INFO_TEXT("Trust manifest SHA-256: ", caStoreInfo.manifest.manifestSha256 ? caStoreInfo.manifest.manifestSha256 : "(none)");
-        NAV_INFO_TEXT("Trust computed SHA-256: ", caStoreInfo.manifest.computedSha256 ? caStoreInfo.manifest.computedSha256 : "(none)");
-        NAV_INFO_TEXT("Trust manifest hash match: ", caStoreInfo.manifest.hashMatch ? "yes" : "no");
-        NAV_INFO_INT("Trust manifest root count: ", (int)caStoreInfo.manifest.rootCount);
-        NAV_INFO_INT("Trust manifest PEM bytes: ", (int)caStoreInfo.manifest.pemBytes);
-        NAV_INFO_TEXT("Trust manifest production ready: ", caStoreInfo.manifest.productionReady ? "yes" : "no");
-        NAV_INFO_TEXT("Trust manifest test only: ", caStoreInfo.manifest.testOnly ? "yes" : "no");
-        NAV_INFO_TEXT("Public trust ready: ", trustStorePolicy.publicInternetReady ? "yes" : "no");
-        NAV_INFO_TEXT("Trust readiness blocker: ", trustStorePolicy.error ? trustStorePolicy.error : "(none)");
+        // Keep manifest/hash diagnostics visible without pushing POST smoke markers past the block cap.
+        strcopy(line, "HTTPS policy: selected=", sizeof(line));
+        strappend(line, gxos::gxos_validated_https_policy_state_name(httpsPolicy.selectedState), sizeof(line));
+        strappend(line, "; effective=", sizeof(line));
+        strappend(line, gxos::gxos_validated_https_policy_state_name(httpsPolicy.state), sizeof(line));
+        strappend(line, "; dev_mode=", sizeof(line));
+        strappend(line, httpsPolicy.state == gxos::GxosValidatedHttpsPolicyState::UserTrustStoreDevMode ? "yes" : "no", sizeof(line));
+        strappend(line, "; production_validated=", sizeof(line));
+        strappend(line, httpsPolicy.productionReady ? "yes" : "no", sizeof(line));
+        addBlock(BLOCK_LIST_ITEM, line);
+
+        strcopy(line, "Trust store: source=", sizeof(line));
+        strappend(line, gxos::gxos_trust_store_source_name(trustStorePolicy.source), sizeof(line));
+        strappend(line, "; parsed_certs=", sizeof(line));
+        nav_int_to_text((int)trustStorePolicy.parsedCertificateCount, number, sizeof(number));
+        strappend(line, number, sizeof(line));
+        strappend(line, "; path=", sizeof(line));
+        strappend(line, trustStorePolicy.path ? trustStorePolicy.path : "(none)", sizeof(line));
+        addBlock(BLOCK_LIST_ITEM, line);
+
+        strcopy(line, "Validated fixture HTTPS: ", sizeof(line));
+        strappend(line, httpsPolicy.validatedNavigationEnabled ? "enabled" : "disabled", sizeof(line));
+        strappend(line, "; Public HTTPS pilot: ", sizeof(line));
+        strappend(line, httpsPolicy.broadPublicHttpsEnabled ? "enabled" : "disabled", sizeof(line));
+        strappend(line, "; requested=", sizeof(line));
+        strappend(line, httpsPolicy.publicHttpsPilotRequested ? "yes" : "no", sizeof(line));
+        addBlock(BLOCK_LIST_ITEM, line);
+
+        strcopy(line, "Public HTTPS pilot reason: ", sizeof(line));
+        strappend(line, httpsPolicy.publicHttpsPilotReason ? httpsPolicy.publicHttpsPilotReason : "(none)", sizeof(line));
+        addBlock(BLOCK_LIST_ITEM, line);
+
+        strcopy(line, "Trust manifest: present=", sizeof(line));
+        strappend(line, caStoreInfo.manifest.present ? "yes" : "no", sizeof(line));
+        strappend(line, "; schema=", sizeof(line));
+        strappend(line, caStoreInfo.manifest.schemaVersion ? caStoreInfo.manifest.schemaVersion : "(none)", sizeof(line));
+        strappend(line, "; bundle_type=", sizeof(line));
+        strappend(line, caStoreInfo.manifest.bundleType ? caStoreInfo.manifest.bundleType : "(none)", sizeof(line));
+        strappend(line, "; rotation_id=", sizeof(line));
+        strappend(line, caStoreInfo.manifest.rotationId ? caStoreInfo.manifest.rotationId : "(none)", sizeof(line));
+        addBlock(BLOCK_LIST_ITEM, line);
+
+        strcopy(line, "Trust hashes: manifest=", sizeof(line));
+        strappend(line, caStoreInfo.manifest.manifestSha256 ? caStoreInfo.manifest.manifestSha256 : "(none)", sizeof(line));
+        strappend(line, "; computed=", sizeof(line));
+        strappend(line, caStoreInfo.manifest.computedSha256 ? caStoreInfo.manifest.computedSha256 : "(none)", sizeof(line));
+        strappend(line, "; match=", sizeof(line));
+        strappend(line, caStoreInfo.manifest.hashMatch ? "yes" : "no", sizeof(line));
+        addBlock(BLOCK_LIST_ITEM, line);
+
+        strcopy(line, "Trust manifest roots: count=", sizeof(line));
+        nav_int_to_text((int)caStoreInfo.manifest.rootCount, number, sizeof(number));
+        strappend(line, number, sizeof(line));
+        strappend(line, "; pem_bytes=", sizeof(line));
+        nav_int_to_text((int)caStoreInfo.manifest.pemBytes, number, sizeof(number));
+        strappend(line, number, sizeof(line));
+        strappend(line, "; production_ready=", sizeof(line));
+        strappend(line, caStoreInfo.manifest.productionReady ? "yes" : "no", sizeof(line));
+        strappend(line, "; test_only=", sizeof(line));
+        strappend(line, caStoreInfo.manifest.testOnly ? "yes" : "no", sizeof(line));
+        addBlock(BLOCK_LIST_ITEM, line);
+
+        strcopy(line, "Trust readiness: public_ready=", sizeof(line));
+        strappend(line, trustStorePolicy.publicInternetReady ? "yes" : "no", sizeof(line));
+        strappend(line, "; blocker=", sizeof(line));
+        strappend(line, trustStorePolicy.error ? trustStorePolicy.error : "(none)", sizeof(line));
+        addBlock(BLOCK_LIST_ITEM, line);
     }
     NAV_INFO_TEXT("Plaintext fallback: ", "no");
     NAV_INFO_INT("Document blocks: ", m_metaDocumentBlocks);

@@ -328,6 +328,8 @@ constexpr const char* kBareMetalCaBundleManifestPath = "/certs/ca-bundle.manifes
 constexpr const char* kBareMetalUserCaBundlePath = "/config/certs/ca-bundle.pem";
 constexpr const char* kBareMetalUserCaBundleManifestPath = "/config/certs/ca-bundle.manifest";
 constexpr const char* kBareMetalHttpsPolicyPath = "/config/navigator/https-policy.txt";
+constexpr const char* kBareMetalCaBundleManifestCompatPath = "/certs/CABUNDLE.MAN";
+constexpr const char* kBareMetalUserCaBundleManifestCompatPath = "/config/certs/CABUNDLE.MAN";
 constexpr const char* kBareMetalUserCaBundleCompatPath = "/config/certs/CABUNDLE.PEM";
 constexpr const char* kBareMetalHttpsPolicyCompatPath = "/config/navigator/HTTPSPOL.TXT";
 constexpr const char* kBareMetalMissingCaProbePath = "/certs/ca-bundle.missing";
@@ -1290,6 +1292,11 @@ void set_ca_manifest_error(BareMetalCaStoreState& state,
     state.info.manifest.error = state.manifestError;
 }
 
+const char* fallback_path_if_missing(const char* primaryPath,
+                                     const char* compatPath,
+                                     kernel::vfs::FileInfo* info,
+                                     kernel::vfs::Status* statStatus);
+
 bool compute_loaded_ca_bundle_sha256(const uint8_t* bytes,
                                      size_t byteCount,
                                      char* outHex,
@@ -1319,7 +1326,9 @@ bool compute_loaded_ca_bundle_sha256(const uint8_t* bytes,
 #endif
 }
 
-bool load_selected_ca_bundle_manifest(BareMetalCaStoreState& state, const char* manifestPath)
+bool load_selected_ca_bundle_manifest(BareMetalCaStoreState& state,
+                                      const char* manifestPath,
+                                      const char* compatManifestPath)
 {
     reset_ca_manifest_info(state, manifestPath);
 
@@ -1330,7 +1339,12 @@ bool load_selected_ca_bundle_manifest(BareMetalCaStoreState& state, const char* 
     }
 
     kernel::vfs::FileInfo manifestFileInfo{};
-    const kernel::vfs::Status manifestStatus = kernel::vfs::stat(manifestPath, &manifestFileInfo);
+    kernel::vfs::Status manifestStatus = kernel::vfs::VFS_ERR_INVALID;
+    const char* manifestReadPath = fallback_path_if_missing(
+        manifestPath,
+        compatManifestPath,
+        &manifestFileInfo,
+        &manifestStatus);
     if (manifestStatus == kernel::vfs::VFS_ERR_NOT_FOUND ||
         manifestStatus == kernel::vfs::VFS_ERR_NOT_MOUNT) {
         char buffer[160];
@@ -1366,7 +1380,7 @@ bool load_selected_ca_bundle_manifest(BareMetalCaStoreState& state, const char* 
     }
 
     const int32_t manifestBytesRead = kernel::vfs::read_file(
-        manifestPath,
+        manifestReadPath,
         state.manifestBytes,
         static_cast<uint32_t>(kGxosMaxCaManifestBytes));
     if (manifestBytesRead < 0 || static_cast<uint64_t>(manifestBytesRead) != manifestFileInfo.size) {
@@ -1642,6 +1656,13 @@ const char* selected_ca_bundle_manifest_path_for_policy(GxosValidatedHttpsPolicy
     return policy_state_supports_user_trust(state)
         ? kBareMetalUserCaBundleManifestPath
         : kBareMetalCaBundleManifestPath;
+}
+
+const char* compat_ca_bundle_manifest_path_for_policy(GxosValidatedHttpsPolicyState state)
+{
+    return policy_state_supports_user_trust(state)
+        ? kBareMetalUserCaBundleManifestCompatPath
+        : kBareMetalCaBundleManifestCompatPath;
 }
 
 const char* compat_ca_bundle_path_for_policy(GxosValidatedHttpsPolicyState state)
@@ -2823,6 +2844,7 @@ bool gxos_ca_store_load_once()
         config.explicitSelection ? config.selectedState : GxosValidatedHttpsPolicyState::Disabled;
     const char* activeCaBundlePath = selected_ca_bundle_path_for_policy(selectedPolicyState);
     const char* activeManifestPath = selected_ca_bundle_manifest_path_for_policy(selectedPolicyState);
+    const char* activeCompatManifestPath = compat_ca_bundle_manifest_path_for_policy(selectedPolicyState);
     const char* activeCaBundleReadPath = activeCaBundlePath;
     reset_ca_manifest_info(state, activeManifestPath);
 
@@ -2948,7 +2970,7 @@ bool gxos_ca_store_load_once()
         return false;
     }
 
-    load_selected_ca_bundle_manifest(state, activeManifestPath);
+    load_selected_ca_bundle_manifest(state, activeManifestPath, activeCompatManifestPath);
 
     const GxosTlsMbedTlsImportInfo importInfo = make_mbedtls_import_info();
     if (!importInfo.sourcePresent || !importInfo.sourceReadyForCompile) {
