@@ -109,6 +109,9 @@ make qemu
 
 The bare-metal Navigator public HTTPS probe is a separate proof workflow, not a default browsing mode.
 
+* Deterministic kernel smoke: `.\scripts\smoke-navigator-kernel.ps1`
+* Dedicated public HTTPS proof: `.\scripts\smoke-navigator-public-https.ps1`
+* Optional combined debug matrix: `.\scripts\smoke-navigator-kernel.ps1 -IncludePublicPilot`
 * Workflow: `.github/workflows/navigator-public-https-probe.yml`
 * Secret: `GXOS_NAVIGATOR_PUBLIC_CA_BUNDLE_PEM`
 * Default target: `https://sha256.badssl.com/`
@@ -117,7 +120,7 @@ The bare-metal Navigator public HTTPS probe is a separate proof workflow, not a 
 * Public-root validator/manifest helper: `scripts/validate-navigator-ca-bundle.ps1`
 * Review/operator contract: `scripts/fixtures/README.md`
 
-Normal hosted and kernel smoke remain deterministic and internet-independent unless you explicitly opt into this probe path. Automated PASS assertion and evidence JSON promotion complement, but do not replace, human artifact review. The manual GitHub Actions workflow currently fail-closes to the approved target allowlist, which defaults to `https://sha256.badssl.com/`.
+Normal hosted and default kernel smoke remain deterministic and internet-independent unless you explicitly opt into the public-pilot lane or the dedicated proof path. Automated PASS assertion and evidence JSON promotion complement, but do not replace, human artifact review. The manual GitHub Actions workflow currently fail-closes to the approved target allowlist, which defaults to `https://sha256.badssl.com/`.
 
 Public-root provisioning is still explicit and operator-driven in this pass. The harness now validates supplied CA bundles, writes a manifest sidecar with SHA-256, root count, bundle type, and `production_ready` / `test_only` flags, and expects dedicated public probe evidence to archive those facts before any trust-bundle rotation is treated as complete. Default public HTTPS browsing remains off, and the repo still does not download public roots automatically.
 

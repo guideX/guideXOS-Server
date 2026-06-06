@@ -105,7 +105,9 @@ Trust source distinction in this repository today:
 
 ## Opt-in real public HTTPS probe
 
-- `scripts/smoke-navigator-kernel.ps1` keeps the real public HTTPS probe off by default so the normal deterministic hosted/kernel smoke stays internet-independent and green without any secret/public-root material.
+- `scripts/smoke-navigator-kernel.ps1` now defaults to the deterministic kernel smoke lane only, so the normal hosted/kernel smoke stays internet-independent and green without any secret/public-root material.
+- Use `scripts/smoke-navigator-kernel.ps1 -IncludePublicPilot` when you intentionally want the broader kernel matrix to include the public-pilot scenario lane for debugging.
+- Use `scripts/smoke-navigator-kernel.ps1 -ScenarioGroup PublicPilot` when you want only the public-pilot kernel lane without the rest of the deterministic matrix.
 - `scripts/smoke-navigator-public-https.ps1` is the dedicated single-purpose entrypoint when you want to prove the real public HTTPS probe path itself.
 - `scripts/smoke-navigator-public-https.bat` is the Windows convenience wrapper; it forwards to the PowerShell entrypoint with `-NoProfile -ExecutionPolicy Bypass` and does not duplicate logic.
 - Set `GXOS_NAVIGATOR_SMOKE_ENABLE_REAL_PUBLIC_HTTPS=1` to enable the optional bare-metal public probe.
@@ -328,6 +330,10 @@ Operator warnings:
 
 - Deterministic smoke only, still internet-independent:
   - `.\scripts\smoke-navigator-kernel.ps1`
+- Deterministic kernel smoke plus the explicit public-pilot lane:
+  - `.\scripts\smoke-navigator-kernel.ps1 -IncludePublicPilot`
+- Public-pilot kernel lane only:
+  - `.\scripts\smoke-navigator-kernel.ps1 -ScenarioGroup PublicPilot`
 - Dedicated public probe smoke with the conventional ignored local bundle path:
   - `Copy-Item .\scripts\fixtures\public-roots\ca-bundle.pem.example .\scripts\fixtures\public-roots\ca-bundle.pem.local`
   - Replace the placeholder contents in `scripts\fixtures\public-roots\ca-bundle.pem.local` with real public roots.
@@ -359,12 +365,12 @@ Operator warnings:
 - Manual kernel smoke with the public probe enabled inside the broader deterministic suite:
   - `$env:GXOS_NAVIGATOR_SMOKE_ENABLE_REAL_PUBLIC_HTTPS="1"`
   - `$env:GXOS_NAVIGATOR_SMOKE_REQUIRE_REAL_PUBLIC_HTTPS="1"`
-  - `.\scripts\smoke-navigator-kernel.ps1`
+  - `.\scripts\smoke-navigator-kernel.ps1 -IncludePublicPilot`
 - Manual kernel smoke with an explicit bundle path:
   - `$env:GXOS_NAVIGATOR_SMOKE_ENABLE_REAL_PUBLIC_HTTPS="1"`
   - `$env:GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_CA_BUNDLE_SOURCE="C:\path\to\ca-bundle.pem"`
   - `$env:GXOS_NAVIGATOR_SMOKE_REQUIRE_REAL_PUBLIC_HTTPS="1"`
-  - `.\scripts\smoke-navigator-kernel.ps1`
+  - `.\scripts\smoke-navigator-kernel.ps1 -IncludePublicPilot`
 - Optional target override:
   - `$env:GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_URL="https://sha256.badssl.com/"`
 

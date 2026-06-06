@@ -18,6 +18,7 @@ $dedicatedSerialLog = Join-Path $LogDir "navigator-public-https-$stamp.serial.lo
 $dedicatedSummaryLog = Join-Path $LogDir "navigator-public-https-$stamp.summary.log"
 $dedicatedEvidenceLog = Join-Path $LogDir "navigator-public-https-$stamp.evidence.json"
 $dedicatedTrustManifestLog = Join-Path $LogDir "navigator-public-https-$stamp.ca-bundle.manifest"
+$kernelScenarioGroup = "PublicPilot"
 $kernelScenarioName = "production_public_pilot_enabled"
 $kernelSmokeScript = Join-Path $Root "scripts\smoke-navigator-kernel.ps1"
 $passAssertionScript = Join-Path $Root "scripts\assert-navigator-public-https-pass.ps1"
@@ -693,6 +694,7 @@ try {
         "-ExecutionPolicy", "Bypass",
         "-File", $kernelSmokeScript,
         "-TimeoutSeconds", $TimeoutSeconds.ToString(),
+        "-ScenarioGroup", $kernelScenarioGroup,
         "-ScenarioFilter", $kernelScenarioName
     )
     if ($Build) {

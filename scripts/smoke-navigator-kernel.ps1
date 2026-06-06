@@ -1,6 +1,9 @@
 param(
     [switch]$Build,
     [int]$TimeoutSeconds = 40,
+    [ValidateSet("Deterministic", "PublicPilot", "All")]
+    [string]$ScenarioGroup = "Deterministic",
+    [switch]$IncludePublicPilot,
     [string[]]$ScenarioFilter
 )
 
@@ -1431,7 +1434,37 @@ $scenarioDefinitions = @(
     }
 )
 
-$selectedScenarios = @($scenarioDefinitions)
+$publicPilotScenarioNames = @(
+    "production_public_pilot_enabled"
+)
+
+function Get-NavigatorKernelSmokeScenarioLane {
+    param([Parameter(Mandatory = $true)]$Scenario)
+
+    if ($publicPilotScenarioNames -contains [string]$Scenario.Name) {
+        return "PublicPilot"
+    }
+    return "Deterministic"
+}
+
+function Test-NavigatorKernelSmokeScenarioMatchesGroup {
+    param(
+        [Parameter(Mandatory = $true)]$Scenario,
+        [Parameter(Mandatory = $true)][string]$EffectiveScenarioGroup
+    )
+
+    $lane = Get-NavigatorKernelSmokeScenarioLane -Scenario $Scenario
+    switch ($EffectiveScenarioGroup) {
+        "All" { return $true }
+        "PublicPilot" { return $lane -eq "PublicPilot" }
+        default { return $lane -eq "Deterministic" }
+    }
+}
+
+$effectiveScenarioGroup = if ($IncludePublicPilot) { "All" } else { $ScenarioGroup }
+$selectedScenarios = @($scenarioDefinitions | Where-Object {
+    Test-NavigatorKernelSmokeScenarioMatchesGroup -Scenario $_ -EffectiveScenarioGroup $effectiveScenarioGroup
+})
 if ($ScenarioFilter -and $ScenarioFilter.Count -gt 0) {
     $requestedScenarioNames = @()
     foreach ($scenarioName in $ScenarioFilter) {
@@ -1459,7 +1492,11 @@ if ($ScenarioFilter -and $ScenarioFilter.Count -gt 0) {
     if ($missingScenarioNames.Count -gt 0) {
         throw "Unknown kernel smoke scenario filter(s): $($missingScenarioNames -join ', ')"
     }
+} elseif ($selectedScenarios.Count -le 0) {
+    throw "ScenarioGroup '$effectiveScenarioGroup' did not select any kernel smoke scenarios."
 }
+
+Write-Host "Kernel smoke scenario selection: group=$effectiveScenarioGroup count=$($selectedScenarios.Count)"
 
 foreach ($scenario in $selectedScenarios) {
     if ($scenario.PSObject.Properties.Match("PublicPilotEnabled").Count -gt 0 -and $scenario.PublicPilotEnabled) {
