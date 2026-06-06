@@ -113,9 +113,10 @@ The bare-metal Navigator public HTTPS probe is a separate proof workflow, not a 
 * Secret: `GXOS_NAVIGATOR_PUBLIC_CA_BUNDLE_PEM`
 * Default target: `https://sha256.badssl.com/`
 * Automated artifact assertion: `scripts/assert-navigator-public-https-pass.ps1`
+* Structured evidence export: `scripts/export-navigator-public-https-evidence.ps1`
 * Review/operator contract: `scripts/fixtures/README.md`
 
-Normal hosted and kernel smoke remain deterministic and internet-independent unless you explicitly opt into this probe path. Automated PASS assertion complements, but does not replace, human artifact review.
+Normal hosted and kernel smoke remain deterministic and internet-independent unless you explicitly opt into this probe path. Automated PASS assertion and evidence JSON promotion complement, but do not replace, human artifact review. The manual GitHub Actions workflow currently fail-closes to the approved target allowlist, which defaults to `https://sha256.badssl.com/`.
 
 ### Experimental Native ELF hosted runtime
 

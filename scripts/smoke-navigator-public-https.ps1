@@ -16,9 +16,11 @@ Normalize-ProcessEnvironment
 $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $dedicatedSerialLog = Join-Path $LogDir "navigator-public-https-$stamp.serial.log"
 $dedicatedSummaryLog = Join-Path $LogDir "navigator-public-https-$stamp.summary.log"
+$dedicatedEvidenceLog = Join-Path $LogDir "navigator-public-https-$stamp.evidence.json"
 $kernelScenarioName = "production_public_pilot_enabled"
 $kernelSmokeScript = Join-Path $Root "scripts\smoke-navigator-kernel.ps1"
 $passAssertionScript = Join-Path $Root "scripts\assert-navigator-public-https-pass.ps1"
+$evidenceExportScript = Join-Path $Root "scripts\export-navigator-public-https-evidence.ps1"
 $publicLocalBundlePath = Join-Path $Root "scripts\fixtures\public-roots\ca-bundle.pem.local"
 $publicExampleBundlePath = Join-Path $Root "scripts\fixtures\public-roots\ca-bundle.pem.example"
 $publicProbeDefaultTarget = "https://sha256.badssl.com/"
@@ -247,6 +249,30 @@ function Invoke-NavigatorPublicHttpsPassAssertion {
     }
 }
 
+function Invoke-NavigatorPublicHttpsEvidenceExport {
+    param(
+        [Parameter(Mandatory = $true)][string]$SummaryPath,
+        [Parameter(Mandatory = $true)][string]$OutputPath
+    )
+
+    if (-not (Test-Path -LiteralPath $evidenceExportScript -PathType Leaf)) {
+        return [pscustomobject]@{
+            ExitCode = 1
+            Output = @("Navigator public HTTPS evidence export helper not found: $evidenceExportScript")
+            EvidencePath = $OutputPath
+        }
+    }
+
+    $output = @(& powershell -NoProfile -ExecutionPolicy Bypass -File $evidenceExportScript -SummaryPath $SummaryPath -OutputPath $OutputPath 2>&1)
+    $exitCode = $LASTEXITCODE
+
+    return [pscustomobject]@{
+        ExitCode = $exitCode
+        Output = @($output | ForEach-Object { "$_" })
+        EvidencePath = $OutputPath
+    }
+}
+
 function Find-NavigatorKernelScenarioSerialLog {
     param(
         [Parameter(Mandatory = $true)][hashtable]$ExistingLogs,
@@ -413,10 +439,24 @@ function Write-NavigatorPublicHttpsConsoleSummary {
     }
 }
 
+function Write-NavigatorPublicHttpsEvidenceReport {
+    param([Parameter(Mandatory = $true)]$EvidenceResult)
+
+    foreach ($evidenceLine in $EvidenceResult.Output) {
+        Write-Host $evidenceLine
+    }
+    if ($EvidenceResult.ExitCode -eq 0) {
+        Write-Host "Dedicated real public HTTPS evidence JSON: $($EvidenceResult.EvidencePath)"
+    } else {
+        Write-Host "Dedicated real public HTTPS evidence export failed for $($EvidenceResult.EvidencePath)" -ForegroundColor Yellow
+    }
+}
+
 $exitCode = 1
 $finalResult = "FAIL"
 $kernelSerialPath = $null
 $kernelSerialOutput = $null
+$evidenceOutputPath = $null
 $fields = [ordered]@{
     target_url = "(unknown)"
     target_host = "(unknown)"
@@ -477,6 +517,9 @@ try {
             -KernelSerialOutput $null `
             -Fields $fields `
             -Notes $notes
+        $evidenceResult = Invoke-NavigatorPublicHttpsEvidenceExport -SummaryPath $dedicatedSummaryLog -OutputPath $dedicatedEvidenceLog
+        $evidenceOutputPath = $evidenceResult.EvidencePath
+        Write-NavigatorPublicHttpsEvidenceReport -EvidenceResult $evidenceResult
         Write-NavigatorPublicHttpsConsoleSummary -FinalResult $finalResult -ExitCode $exitCode -Fields $fields -Notes $notes
         exit $exitCode
     }
@@ -495,6 +538,9 @@ try {
             -KernelSerialOutput $null `
             -Fields $fields `
             -Notes $notes
+        $evidenceResult = Invoke-NavigatorPublicHttpsEvidenceExport -SummaryPath $dedicatedSummaryLog -OutputPath $dedicatedEvidenceLog
+        $evidenceOutputPath = $evidenceResult.EvidencePath
+        Write-NavigatorPublicHttpsEvidenceReport -EvidenceResult $evidenceResult
         Write-NavigatorPublicHttpsConsoleSummary -FinalResult $finalResult -ExitCode $exitCode -Fields $fields -Notes $notes
         exit $exitCode
     }
@@ -515,6 +561,9 @@ try {
             -KernelSerialOutput $null `
             -Fields $fields `
             -Notes $notes
+        $evidenceResult = Invoke-NavigatorPublicHttpsEvidenceExport -SummaryPath $dedicatedSummaryLog -OutputPath $dedicatedEvidenceLog
+        $evidenceOutputPath = $evidenceResult.EvidencePath
+        Write-NavigatorPublicHttpsEvidenceReport -EvidenceResult $evidenceResult
         Write-NavigatorPublicHttpsConsoleSummary -FinalResult $finalResult -ExitCode $exitCode -Fields $fields -Notes $notes
         exit $exitCode
     }
@@ -573,6 +622,9 @@ try {
             -KernelSerialOutput $null `
             -Fields $fields `
             -Notes $notes
+        $evidenceResult = Invoke-NavigatorPublicHttpsEvidenceExport -SummaryPath $dedicatedSummaryLog -OutputPath $dedicatedEvidenceLog
+        $evidenceOutputPath = $evidenceResult.EvidencePath
+        Write-NavigatorPublicHttpsEvidenceReport -EvidenceResult $evidenceResult
         Write-NavigatorPublicHttpsConsoleSummary -FinalResult $finalResult -ExitCode $exitCode -Fields $fields -Notes $notes
         exit $exitCode
     }
@@ -690,6 +742,10 @@ try {
             -Notes $notes
     }
 
+    $evidenceResult = Invoke-NavigatorPublicHttpsEvidenceExport -SummaryPath $dedicatedSummaryLog -OutputPath $dedicatedEvidenceLog
+    $evidenceOutputPath = $evidenceResult.EvidencePath
+    Write-NavigatorPublicHttpsEvidenceReport -EvidenceResult $evidenceResult
+
     Write-NavigatorPublicHttpsConsoleSummary -FinalResult $finalResult -ExitCode $exitCode -Fields $fields -Notes $notes
 
     if ($finalResult -eq "PASS") {
@@ -714,6 +770,9 @@ try {
         -KernelSerialOutput $kernelSerialOutput `
         -Fields $fields `
         -Notes $notes
+    $evidenceResult = Invoke-NavigatorPublicHttpsEvidenceExport -SummaryPath $dedicatedSummaryLog -OutputPath $dedicatedEvidenceLog
+    $evidenceOutputPath = $evidenceResult.EvidencePath
+    Write-NavigatorPublicHttpsEvidenceReport -EvidenceResult $evidenceResult
     Write-NavigatorPublicHttpsConsoleSummary -FinalResult $finalResult -ExitCode $exitCode -Fields $fields -Notes $notes
     Write-Host "Dedicated real public HTTPS smoke FAIL. Summary log: $dedicatedSummaryLog" -ForegroundColor Red
     exit $exitCode

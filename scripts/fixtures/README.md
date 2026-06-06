@@ -101,8 +101,11 @@ Smoke-only malformed and empty CA bundle fixtures for deterministic fail-closed 
 - Dedicated logs are written as:
   - `logs/navigator-public-https-<timestamp>.serial.log`
   - `logs/navigator-public-https-<timestamp>.summary.log`
+- Structured evidence is promoted to:
+  - `logs/navigator-public-https-<timestamp>.evidence.json`
 - The summary log uses stable `[NAVIGATOR-PUBLIC-HTTPS] key=value` lines for machine checks. PASS-critical fields include `final_result`, `result_marker`, `target_url`, `target_host`, `public_ca_source_marker`, `public_trust_ready`, `public_ca_parsed_certs`, `dns_result`, `tcp_result`, `tls_result`, `certificate_validation_result`, `hostname_validation_result`, `verify_flags`, `sni_host`, `http_status`, `plaintext_fallback`, and the automated `pass_contract_assertion_result`.
 - The automated validator lives at `scripts/assert-navigator-public-https-pass.ps1`. It verifies the PASS contract, exits `0` only for valid proof, and can be run manually against any uploaded summary artifact.
+- The structured evidence exporter lives at `scripts/export-navigator-public-https-evidence.ps1`. It converts the summary artifact into JSON milestone evidence without copying PEM contents or any private material.
 
 ### CI and manual-secret contract
 
@@ -116,10 +119,13 @@ Smoke-only malformed and empty CA bundle fixtures for deterministic fail-closed 
 - The workflow is manual-only via `workflow_dispatch`, not push-triggered, and uploads:
   - `logs/navigator-public-https-*.summary.log`
   - `logs/navigator-public-https-*.serial.log`
+  - `logs/navigator-public-https-*.evidence.json`
 - The workflow writes the secret to a temporary runner file, points `GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_CA_BUNDLE_SOURCE` at that file, and removes the file after the run where practical.
-- The workflow can accept an optional manual `target_url` override; otherwise it uses `https://sha256.badssl.com/`.
+- The workflow accepts `target_url` only when it matches the approved manual allowlist, which currently contains `https://sha256.badssl.com/`.
+- If you need another public target in GitHub Actions, update the workflow allowlist intentionally instead of bypassing the guard.
 - If `GXOS_NAVIGATOR_PUBLIC_CA_BUNDLE_PEM` is missing, the workflow fails clearly before the probe runs.
 - When the dedicated probe exits `0`, the workflow replays `scripts/assert-navigator-public-https-pass.ps1` against the latest summary artifact and adds the assertion report to `GITHUB_STEP_SUMMARY`.
+- The workflow also surfaces the latest evidence JSON path and contents in `GITHUB_STEP_SUMMARY` when present.
 
 ### Public HTTPS PASS Artifact Checklist
 
@@ -148,6 +154,7 @@ Review notes:
 - A content/browser limitation after TLS success, such as unsupported content encoding or unsupported compression handling, must not be mistaken for a CA, certificate, hostname, or TLS transport failure.
 - Deterministic fixture roots still do not count as public trust, even if another field in the same log looks healthy.
 - Automated PASS assertion failing is also not proof, even if some individual fields look healthy in the same artifact.
+- The evidence JSON is a structured promotion of the same proof and is useful for milestone tracking, but the PASS artifact checklist still applies to the underlying summary log.
 
 ### First-Run Operator Checklist
 
@@ -192,6 +199,42 @@ Operator warnings:
   - `content_encoding` may still be unsupported after successful TLS proof.
   - `unsupported_reason` may still be populated after successful TLS proof.
 
+### Structured Evidence JSON
+
+- Manual command:
+  - `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\export-navigator-public-https-evidence.ps1 -SummaryPath .\logs\navigator-public-https-<timestamp>.summary.log`
+- Optional explicit output path:
+  - `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\export-navigator-public-https-evidence.ps1 -SummaryPath .\logs\navigator-public-https-<timestamp>.summary.log -OutputPath .\logs\navigator-public-https-custom.evidence.json`
+- The JSON schema currently includes:
+  - `schema_version`
+  - `generated_utc`
+  - `source_summary`
+  - `result_marker`
+  - `final_result`
+  - `target_url`
+  - `target_host`
+  - `public_trust_ready`
+  - `public_ca_source_marker`
+  - `public_ca_bytes`
+  - `public_ca_parsed_certs`
+  - `dns_result`
+  - `tcp_result`
+  - `tls_result`
+  - `certificate_validation_result`
+  - `hostname_validation_result`
+  - `verify_flags`
+  - `sni_host`
+  - `http_status`
+  - `content_type`
+  - `content_encoding`
+  - `unsupported_reason`
+  - `plaintext_fallback`
+  - `pass_contract_assertion_result`
+  - `pass_contract_assertion_exit_code`
+  - `evidence_status`
+- `evidence_status=PASS` only when the summary itself is PASS and the automated PASS contract assertion succeeded.
+- The evidence JSON is not a secret, but it must never include PEM contents, raw CA bundle material, or private keys.
+
 ### Example commands
 
 - Deterministic smoke only, still internet-independent:
@@ -206,9 +249,9 @@ Operator warnings:
   - Open the `Navigator Public HTTPS Probe` workflow in GitHub Actions.
   - Push the branch first if the workflow is new on that branch.
   - Add or confirm the repository secret `GXOS_NAVIGATOR_PUBLIC_CA_BUNDLE_PEM`.
-  - Use a real public-root PEM bundle suitable for the selected target.
-  - Optionally override `target_url`.
-  - Start the manual run, download the uploaded summary/serial logs, and confirm the PASS artifact checklist.
+  - Use a real public-root PEM bundle suitable for the selected approved target.
+  - The workflow allowlist currently approves `https://sha256.badssl.com/` only.
+  - Start the manual run, download the uploaded summary/serial/evidence artifacts, and confirm the PASS artifact checklist.
 - Dedicated public probe smoke with an explicit bundle path:
   - `$env:GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_CA_BUNDLE_SOURCE="C:\path\to\ca-bundle.pem"`
   - `.\scripts\smoke-navigator-public-https.ps1`
@@ -220,6 +263,8 @@ Operator warnings:
   - `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\assert-navigator-public-https-pass.ps1 -SummaryPath .\logs\navigator-public-https-<timestamp>.summary.log`
 - Manual PASS assertion self-test:
   - `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\assert-navigator-public-https-pass.ps1 -SelfTest`
+- Manual evidence promotion against a saved summary:
+  - `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\export-navigator-public-https-evidence.ps1 -SummaryPath .\logs\navigator-public-https-<timestamp>.summary.log`
 - Manual kernel smoke with the public probe enabled inside the broader deterministic suite:
   - `$env:GXOS_NAVIGATOR_SMOKE_ENABLE_REAL_PUBLIC_HTTPS="1"`
   - `$env:GXOS_NAVIGATOR_SMOKE_REQUIRE_REAL_PUBLIC_HTTPS="1"`
