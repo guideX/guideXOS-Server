@@ -361,6 +361,16 @@ function Invoke-NavigatorKernelSmokeRamdiskStage {
     if ($LASTEXITCODE -ne 0) {
         throw "generate-wallpaper-pack.ps1 failed for the current smoke scenario."
     }
+
+    $productionManifestPath = Join-Path $Root "out\wallpaper-pack\certs\ca-bundle.manifest"
+    $userManifestPath = Join-Path $Root "out\wallpaper-pack\config\certs\ca-bundle.manifest"
+
+    return [pscustomobject]@{
+        ProductionManifestPath = $productionManifestPath
+        ProductionManifest = Get-NavigatorKernelSmokeCaManifest -LiteralPath $productionManifestPath
+        UserManifestPath = $userManifestPath
+        UserManifest = Get-NavigatorKernelSmokeCaManifest -LiteralPath $userManifestPath
+    }
 }
 
 function Invoke-NavigatorKernelSmokeQemuPass {
@@ -439,6 +449,49 @@ function New-NavigatorOversizedCaBundleFixture {
     }
     [System.IO.File]::WriteAllText($fixturePath, $builder.ToString(), [System.Text.Encoding]::ASCII)
     return $fixturePath
+}
+
+function Get-NavigatorKernelSmokeCaManifest {
+    param([AllowNull()][string]$LiteralPath)
+
+    if ([string]::IsNullOrWhiteSpace($LiteralPath)) {
+        return $null
+    }
+    if (-not (Test-Path -LiteralPath $LiteralPath -PathType Leaf)) {
+        return $null
+    }
+
+    return (Get-Content -LiteralPath $LiteralPath -Raw | ConvertFrom-Json)
+}
+
+function Add-NavigatorKernelSmokeRealPublicProbeManifestLines {
+    param(
+        [Parameter(Mandatory = $true)][string]$SerialLogPath,
+        [Parameter(Mandatory = $true)][string]$Output,
+        [AllowNull()]$StageInfo
+    )
+
+    $manifest = if ($StageInfo) { $StageInfo.ProductionManifest } else { $null }
+    $lines = @()
+    if ($null -eq $manifest) {
+        $lines += "[NAVIGATOR-SMOKE] https.case.real_public_probe.trust_bundle_manifest_present=no"
+        $lines += "[NAVIGATOR-SMOKE] https.case.real_public_probe.trust_bundle_sha256=(not-available)"
+        $lines += "[NAVIGATOR-SMOKE] https.case.real_public_probe.trust_bundle_type=(not-available)"
+        $lines += "[NAVIGATOR-SMOKE] https.case.real_public_probe.trust_bundle_root_count=(not-available)"
+        $lines += "[NAVIGATOR-SMOKE] https.case.real_public_probe.trust_bundle_production_ready=no"
+        $lines += "[NAVIGATOR-SMOKE] https.case.real_public_probe.trust_bundle_test_only=(not-available)"
+    } else {
+        $lines += "[NAVIGATOR-SMOKE] https.case.real_public_probe.trust_bundle_manifest_present=yes"
+        $lines += "[NAVIGATOR-SMOKE] https.case.real_public_probe.trust_bundle_sha256=$($manifest.sha256)"
+        $lines += "[NAVIGATOR-SMOKE] https.case.real_public_probe.trust_bundle_type=$($manifest.bundle_type)"
+        $lines += "[NAVIGATOR-SMOKE] https.case.real_public_probe.trust_bundle_root_count=$($manifest.root_count)"
+        $lines += "[NAVIGATOR-SMOKE] https.case.real_public_probe.trust_bundle_production_ready=$($manifest.production_ready)"
+        $lines += "[NAVIGATOR-SMOKE] https.case.real_public_probe.trust_bundle_test_only=$($manifest.test_only)"
+    }
+
+    Add-Content -LiteralPath $SerialLogPath -Value $lines
+    $suffix = ($lines -join [Environment]::NewLine) + [Environment]::NewLine
+    return $Output + $suffix
 }
 
 function Wait-NavigatorSmokeFileUnlock {
@@ -569,6 +622,12 @@ function Test-NavigatorKernelSmokeRealPublicProbeOutput {
             $passPatterns = @(
                 '\[NAVIGATOR-SMOKE\] https\.case\.real_public_probe\.attempted=yes',
                 '\[NAVIGATOR-SMOKE\] https\.case\.real_public_probe\.public_trust_ready=yes',
+                '\[NAVIGATOR-SMOKE\] https\.case\.real_public_probe\.trust_bundle_manifest_present=yes',
+                '\[NAVIGATOR-SMOKE\] https\.case\.real_public_probe\.trust_bundle_sha256=[0-9a-f]{64}',
+                '\[NAVIGATOR-SMOKE\] https\.case\.real_public_probe\.trust_bundle_type=production-public-probe-merged',
+                '\[NAVIGATOR-SMOKE\] https\.case\.real_public_probe\.trust_bundle_root_count=[1-9][0-9]*',
+                '\[NAVIGATOR-SMOKE\] https\.case\.real_public_probe\.trust_bundle_production_ready=yes',
+                '\[NAVIGATOR-SMOKE\] https\.case\.real_public_probe\.trust_bundle_test_only=no',
                 '\[NAVIGATOR-SMOKE\] https\.case\.real_public_probe\.transport_selection=PolicyValidatedTlsHttps',
                 '\[NAVIGATOR-SMOKE\] https\.case\.real_public_probe\.tls_status=Success',
                 '\[NAVIGATOR-SMOKE\] https\.case\.real_public_probe\.dns_result=PASS',
@@ -1261,7 +1320,7 @@ try {
             $scenario.PSObject.Properties.Match("PublicPilotEnabled").Count -gt 0 -and
             $scenario.PublicPilotEnabled
         $effectiveProductionCaSource = $scenario.ProductionCaSource
-        Invoke-NavigatorKernelSmokeRamdiskStage -HttpsPolicy $scenario.HttpsPolicy `
+        $stageInfo = Invoke-NavigatorKernelSmokeRamdiskStage -HttpsPolicy $scenario.HttpsPolicy `
             -HttpsFaultMode $scenario.HttpsFaultMode `
             -UserCaSource $scenario.UserCaSource `
             -ProductionCaSource $effectiveProductionCaSource `
@@ -1286,15 +1345,23 @@ try {
                 -PublicPilotTlsCert $publicPilotCertPair[0] `
                 -PublicPilotTlsKey $publicPilotCertPair[1]
             $run = Invoke-NavigatorKernelSmokeQemuPass -ScenarioName $scenario.Name
-            Write-Host $run.Output
+            $runOutput = $run.Output
+            if ($enableRealPublicProbeForScenario) {
+                $runOutput = Add-NavigatorKernelSmokeRealPublicProbeManifestLines `
+                    -SerialLogPath $run.SerialLog `
+                    -Output $runOutput `
+                    -StageInfo $stageInfo
+            }
+
+            Write-Host $runOutput
             $scenarioChecks = @($scenario.Checks)
             if ($enableRealPublicProbeForScenario) {
                 $scenarioChecks = @($scenarioChecks | Where-Object { $_ -ne "[NAVIGATOR-SMOKE] result=PASS" })
             }
-            $missing = Test-NavigatorKernelSmokeOutput -Output $run.Output -Contains $scenarioChecks -RegexChecks $scenario.RegexChecks
+            $missing = Test-NavigatorKernelSmokeOutput -Output $runOutput -Contains $scenarioChecks -RegexChecks $scenario.RegexChecks
             if ($enableRealPublicProbeForScenario) {
                 $probeCheck = Test-NavigatorKernelSmokeRealPublicProbeOutput `
-                    -Output $run.Output `
+                    -Output $runOutput `
                     -Target $realPublicProbeTarget `
                     -RequireSuccess:$realPublicProbeRequired
                 $missing += $probeCheck.Missing

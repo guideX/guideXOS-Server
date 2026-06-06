@@ -17,10 +17,12 @@ $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $dedicatedSerialLog = Join-Path $LogDir "navigator-public-https-$stamp.serial.log"
 $dedicatedSummaryLog = Join-Path $LogDir "navigator-public-https-$stamp.summary.log"
 $dedicatedEvidenceLog = Join-Path $LogDir "navigator-public-https-$stamp.evidence.json"
+$dedicatedTrustManifestLog = Join-Path $LogDir "navigator-public-https-$stamp.ca-bundle.manifest"
 $kernelScenarioName = "production_public_pilot_enabled"
 $kernelSmokeScript = Join-Path $Root "scripts\smoke-navigator-kernel.ps1"
 $passAssertionScript = Join-Path $Root "scripts\assert-navigator-public-https-pass.ps1"
 $evidenceExportScript = Join-Path $Root "scripts\export-navigator-public-https-evidence.ps1"
+$caBundleValidationScript = Join-Path $Root "scripts\validate-navigator-ca-bundle.ps1"
 $publicLocalBundlePath = Join-Path $Root "scripts\fixtures\public-roots\ca-bundle.pem.local"
 $publicExampleBundlePath = Join-Path $Root "scripts\fixtures\public-roots\ca-bundle.pem.example"
 $publicProbeDefaultTarget = "https://sha256.badssl.com/"
@@ -273,6 +275,42 @@ function Invoke-NavigatorPublicHttpsEvidenceExport {
     }
 }
 
+function Invoke-NavigatorCaBundleValidation {
+    param(
+        [Parameter(Mandatory = $true)][string]$BundlePath,
+        [Parameter(Mandatory = $true)][string]$BundleType,
+        [Parameter(Mandatory = $true)][string]$OutputManifestPath,
+        [Parameter(Mandatory = $true)][string]$SourceDescription
+    )
+
+    if (-not (Test-Path -LiteralPath $caBundleValidationScript -PathType Leaf)) {
+        return [pscustomobject]@{
+            ExitCode = 1
+            Output = @("Navigator CA bundle validation helper not found: $caBundleValidationScript")
+            ManifestPath = $OutputManifestPath
+            Manifest = $null
+        }
+    }
+
+    $output = @(& powershell -NoProfile -ExecutionPolicy Bypass -File $caBundleValidationScript `
+        -BundlePath $BundlePath `
+        -BundleType $BundleType `
+        -OutputManifestPath $OutputManifestPath `
+        -SourceDescription $SourceDescription 2>&1)
+    $exitCode = $LASTEXITCODE
+    $manifest = $null
+    if ($exitCode -eq 0 -and (Test-Path -LiteralPath $OutputManifestPath -PathType Leaf)) {
+        $manifest = Get-Content -LiteralPath $OutputManifestPath -Raw | ConvertFrom-Json
+    }
+
+    return [pscustomobject]@{
+        ExitCode = $exitCode
+        Output = @($output | ForEach-Object { "$_" })
+        ManifestPath = $OutputManifestPath
+        Manifest = $manifest
+    }
+}
+
 function Find-NavigatorKernelScenarioSerialLog {
     param(
         [Parameter(Mandatory = $true)][hashtable]$ExistingLogs,
@@ -408,6 +446,12 @@ function Write-NavigatorPublicHttpsConsoleSummary {
     Write-Host "  public trust ready: $($Fields["public_trust_ready"])"
     Write-Host "  CA bytes: $($Fields["public_ca_bytes"])"
     Write-Host "  parsed cert count: $($Fields["public_ca_parsed_certs"])"
+    Write-Host "  trust manifest present: $($Fields["trust_bundle_manifest_present"])"
+    Write-Host "  trust bundle type: $($Fields["trust_bundle_type"])"
+    Write-Host "  trust bundle root count: $($Fields["trust_bundle_root_count"])"
+    Write-Host "  trust bundle sha256: $($Fields["trust_bundle_sha256"])"
+    Write-Host "  trust bundle production_ready: $($Fields["trust_bundle_production_ready"])"
+    Write-Host "  trust bundle test_only: $($Fields["trust_bundle_test_only"])"
     Write-Host "  DNS result: $($Fields["dns_result"])"
     Write-Host "  TCP result: $($Fields["tcp_result"])"
     Write-Host "  TLS result: $($Fields["tls_result"])"
@@ -466,6 +510,12 @@ $fields = [ordered]@{
     public_ca_source_path = "(unknown)"
     public_ca_bytes = "(unknown)"
     public_ca_parsed_certs = "(unknown)"
+    trust_bundle_manifest_present = "no"
+    trust_bundle_sha256 = "(not-available)"
+    trust_bundle_type = "(not-available)"
+    trust_bundle_root_count = "(not-available)"
+    trust_bundle_production_ready = "no"
+    trust_bundle_test_only = "(not-available)"
     dns_result = "not-attempted"
     tcp_result = "not-attempted"
     tls_result = "not-attempted"
@@ -571,6 +621,44 @@ try {
     $fields["public_ca_bytes"] = $bundleInfo.Bytes
     $fields["public_ca_parsed_certs"] = $bundleInfo.ParsedCertCount
 
+    $manifestValidation = Invoke-NavigatorCaBundleValidation `
+        -BundlePath $bundleInfo.Path `
+        -BundleType "production-public-source" `
+        -OutputManifestPath $dedicatedTrustManifestLog `
+        -SourceDescription "explicit-public-root-input"
+    if ($manifestValidation.ExitCode -ne 0 -or $null -eq $manifestValidation.Manifest) {
+        $finalResult = "SKIP"
+        $exitCode = 2
+        $notes = New-NavigatorPublicHttpsSetupNotes -Reason "Refused to start the dedicated real public HTTPS smoke: the public-root manifest contract could not be generated."
+        foreach ($line in $manifestValidation.Output) {
+            Write-Host $line -ForegroundColor Yellow
+            $notes += "manifest: $line"
+        }
+        Write-NavigatorPublicHttpsLogs `
+            -SerialPath $dedicatedSerialLog `
+            -SummaryPath $dedicatedSummaryLog `
+            -FinalResult $finalResult `
+            -ExitCode $exitCode `
+            -KernelSerialPath $null `
+            -KernelSerialOutput $null `
+            -Fields $fields `
+            -Notes $notes
+        $evidenceResult = Invoke-NavigatorPublicHttpsEvidenceExport -SummaryPath $dedicatedSummaryLog -OutputPath $dedicatedEvidenceLog
+        $evidenceOutputPath = $evidenceResult.EvidencePath
+        Write-NavigatorPublicHttpsEvidenceReport -EvidenceResult $evidenceResult
+        Write-NavigatorPublicHttpsConsoleSummary -FinalResult $finalResult -ExitCode $exitCode -Fields $fields -Notes $notes
+        exit $exitCode
+    }
+    foreach ($line in $manifestValidation.Output) {
+        Write-Host $line
+    }
+    $fields["trust_bundle_manifest_present"] = "yes"
+    $fields["trust_bundle_sha256"] = $manifestValidation.Manifest.sha256
+    $fields["trust_bundle_type"] = $manifestValidation.Manifest.bundle_type
+    $fields["trust_bundle_root_count"] = $manifestValidation.Manifest.root_count
+    $fields["trust_bundle_production_ready"] = $manifestValidation.Manifest.production_ready
+    $fields["trust_bundle_test_only"] = $manifestValidation.Manifest.test_only
+
     Write-Host "Dedicated real public HTTPS smoke target: $target"
     Write-Host "Dedicated real public HTTPS smoke CA bundle: $($bundleInfo.Path) [$($caResolution.Resolution)]"
 
@@ -634,6 +722,12 @@ try {
         "public_ca_bundle_source",
         "public_ca_bytes",
         "public_ca_parsed_certs",
+        "trust_bundle_manifest_present",
+        "trust_bundle_sha256",
+        "trust_bundle_type",
+        "trust_bundle_root_count",
+        "trust_bundle_production_ready",
+        "trust_bundle_test_only",
         "dns_result",
         "tcp_result",
         "tls_result",

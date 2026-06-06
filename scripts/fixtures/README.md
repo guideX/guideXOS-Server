@@ -65,6 +65,44 @@ Bare-metal HTTPS smoke certificate/key pair signed by the validated smoke CA but
 
 Smoke-only malformed and empty CA bundle fixtures for deterministic fail-closed trust-store parser coverage.
 
+## Trust material paths
+
+- `/certs/ca-bundle.pem`
+  - Guest-visible production-side trust bundle path.
+  - Used for deterministic smoke fixture coverage and `ProductionValidated` policy staging.
+  - During the opt-in real public probe, the packer stages a merged bundle here and now writes `/certs/ca-bundle.manifest` beside it.
+- `/config/certs/ca-bundle.pem`
+  - Guest-visible user/dev trust bundle path.
+  - Used only for explicit `UserTrustStoreDevMode` coverage.
+  - The packer now writes `/config/certs/ca-bundle.manifest` beside it when a user/dev bundle is staged.
+- `/config/navigator/https-policy.txt`
+  - Policy selector for bare-metal Navigator HTTPS mode.
+  - Missing or invalid policy keeps the default-safe behavior; it does not silently broaden public trust.
+- `scripts/generate-wallpaper-pack.ps1`
+  - Host-side staging entrypoint that decides which trust bundle lands in the ramdisk.
+  - It now validates staged CA bundles and emits manifest sidecars with `bundle_type`, SHA-256, root count, and `production_ready` / `test_only` status.
+- `scripts/fixtures/public-roots/ca-bundle.pem.local`
+  - Ignored local convention for explicit public-root material.
+  - This is for manual/dev or intentionally secret-injected proof runs only; it is not a shipped trust store.
+
+Trust source distinction in this repository today:
+
+- smoke/test roots
+  - checked-in deterministic fixtures such as `navigator-smoke-root-ca-bundle.pem`
+  - marked `test_only=yes`
+- user/dev roots
+  - explicit operator-supplied roots staged at `/config/certs/ca-bundle.pem`
+  - not default trust and not treated as production-ready
+- production/public roots
+  - explicit operator-supplied roots for the dedicated public probe
+  - must be validated explicitly and recorded in a manifest before proof is accepted
+- local secret CI roots
+  - materialized from `GXOS_NAVIGATOR_PUBLIC_CA_BUNDLE_PEM` into a temporary runner file
+  - validated and archived as manifest evidence during the manual workflow
+- future shipped roots
+  - not implemented in this pass
+  - would require a reviewed provisioning and lifecycle policy before default public HTTPS changes
+
 ## Opt-in real public HTTPS probe
 
 - `scripts/smoke-navigator-kernel.ps1` keeps the real public HTTPS probe off by default so the normal deterministic hosted/kernel smoke stays internet-independent and green without any secret/public-root material.
@@ -81,7 +119,8 @@ Smoke-only malformed and empty CA bundle fixtures for deterministic fail-closed 
   - it must stay within the existing 512 KiB CA bundle safety cap;
   - it must contain at least one PEM certificate;
   - each PEM certificate must decode as an X.509 certificate.
-- When a valid public-root bundle is provided for the real public probe, the packer appends it to the deterministic validated fixture roots for smoke coverage, stages the merged result at `/certs/ca-bundle.pem`, and writes companion `/config/navigator/real-public-https-ca-bundle-*.txt` metadata so the guest only marks `public_trust_ready=yes` for the explicit opt-in path.
+- `scripts/validate-navigator-ca-bundle.ps1` is the explicit host-side validator and manifest generator for this contract. It never prints PEM bodies and writes a manifest sidecar that records the bundle SHA-256, root count, optional subject/date summary, bundle type, and `production_ready` / `test_only` flags.
+- When a valid public-root bundle is provided for the real public probe, the packer appends it to the deterministic validated fixture roots for smoke coverage, stages the merged result at `/certs/ca-bundle.pem`, and writes `/certs/ca-bundle.manifest` beside the staged PEM.
 - With only deterministic fixture roots staged, the optional real public probe stays `SKIP` and reports that deterministic smoke trust is not public internet trust.
 - Set `GXOS_NAVIGATOR_SMOKE_REQUIRE_REAL_PUBLIC_HTTPS=1` to make probe blockers or failures fail the smoke run instead of reporting `SKIP`.
 - `PASS` means DNS, TCP, TLS handshake, certificate validation, hostname validation, and the policy-validated Navigator HTTPS path all succeeded without plaintext fallback.
@@ -101,9 +140,11 @@ Smoke-only malformed and empty CA bundle fixtures for deterministic fail-closed 
 - Dedicated logs are written as:
   - `logs/navigator-public-https-<timestamp>.serial.log`
   - `logs/navigator-public-https-<timestamp>.summary.log`
+- Dedicated root-manifest evidence is written as:
+  - `logs/navigator-public-https-<timestamp>.ca-bundle.manifest`
 - Structured evidence is promoted to:
   - `logs/navigator-public-https-<timestamp>.evidence.json`
-- The summary log uses stable `[NAVIGATOR-PUBLIC-HTTPS] key=value` lines for machine checks. PASS-critical fields include `final_result`, `result_marker`, `target_url`, `target_host`, `public_ca_source_marker`, `public_trust_ready`, `public_ca_parsed_certs`, `dns_result`, `tcp_result`, `tls_result`, `certificate_validation_result`, `hostname_validation_result`, `verify_flags`, `sni_host`, `http_status`, `plaintext_fallback`, and the automated `pass_contract_assertion_result`.
+- The summary log uses stable `[NAVIGATOR-PUBLIC-HTTPS] key=value` lines for machine checks. PASS-critical fields include `final_result`, `result_marker`, `target_url`, `target_host`, `public_ca_source_marker`, `public_trust_ready`, `public_ca_parsed_certs`, `trust_bundle_manifest_present`, `trust_bundle_sha256`, `trust_bundle_type`, `trust_bundle_root_count`, `trust_bundle_production_ready`, `trust_bundle_test_only`, `dns_result`, `tcp_result`, `tls_result`, `certificate_validation_result`, `hostname_validation_result`, `verify_flags`, `sni_host`, `http_status`, `plaintext_fallback`, and the automated `pass_contract_assertion_result`.
 - The automated validator lives at `scripts/assert-navigator-public-https-pass.ps1`. It verifies the PASS contract, exits `0` only for valid proof, and can be run manually against any uploaded summary artifact.
 - The structured evidence exporter lives at `scripts/export-navigator-public-https-evidence.ps1`. It converts the summary artifact into JSON milestone evidence without copying PEM contents or any private material.
 
@@ -117,15 +158,17 @@ Smoke-only malformed and empty CA bundle fixtures for deterministic fail-closed 
 - Deterministic fixture roots in this repository do not count as public trust and must never be treated as sufficient for the real public probe.
 - This repository now includes an opt-in GitHub Actions workflow at `.github/workflows/navigator-public-https-probe.yml` for approved environments that can inject the repository secret `GXOS_NAVIGATOR_PUBLIC_CA_BUNDLE_PEM`.
 - The workflow is manual-only via `workflow_dispatch`, not push-triggered, and uploads:
+  - `logs/navigator-public-https-workflow-input.ca-bundle.manifest`
   - `logs/navigator-public-https-*.summary.log`
   - `logs/navigator-public-https-*.serial.log`
+  - `logs/navigator-public-https-*.ca-bundle.manifest`
   - `logs/navigator-public-https-*.evidence.json`
-- The workflow writes the secret to a temporary runner file, points `GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_CA_BUNDLE_SOURCE` at that file, and removes the file after the run where practical.
+- The workflow writes the secret to a temporary runner file, validates it immediately with `scripts/validate-navigator-ca-bundle.ps1`, points `GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_CA_BUNDLE_SOURCE` at that file, and removes the file after the run where practical.
 - The workflow accepts `target_url` only when it matches the approved manual allowlist, which currently contains `https://sha256.badssl.com/`.
 - If you need another public target in GitHub Actions, update the workflow allowlist intentionally instead of bypassing the guard.
 - If `GXOS_NAVIGATOR_PUBLIC_CA_BUNDLE_PEM` is missing, the workflow fails clearly before the probe runs.
 - When the dedicated probe exits `0`, the workflow replays `scripts/assert-navigator-public-https-pass.ps1` against the latest summary artifact and adds the assertion report to `GITHUB_STEP_SUMMARY`.
-- The workflow also surfaces the latest evidence JSON path and contents in `GITHUB_STEP_SUMMARY` when present.
+- The workflow also surfaces the workflow input manifest plus the latest evidence JSON path and contents in `GITHUB_STEP_SUMMARY` when present.
 
 ### Public HTTPS PASS Artifact Checklist
 
@@ -137,6 +180,12 @@ Review the uploaded `navigator-public-https-*.summary.log` and treat the run as 
 - `public_trust_ready=yes`
 - `public_ca_source_marker=` shows an explicit source such as `env-var`, `env-var-preferred-over-local`, or `local-fallback-file`.
 - `public_ca_parsed_certs=` is greater than `0`.
+- `trust_bundle_manifest_present=yes`
+- `trust_bundle_sha256=` is a 64-character lowercase hex digest.
+- `trust_bundle_type=production-public-probe-merged`
+- `trust_bundle_root_count=` is greater than `0`.
+- `trust_bundle_production_ready=yes`
+- `trust_bundle_test_only=no`
 - `dns_result=PASS`
 - `tcp_result=PASS`
 - `tls_result=PASS`
@@ -156,6 +205,35 @@ Review notes:
 - Automated PASS assertion failing is also not proof, even if some individual fields look healthy in the same artifact.
 - The evidence JSON is a structured promotion of the same proof and is useful for milestone tracking, but the PASS artifact checklist still applies to the underlying summary log.
 
+### CA bundle validation and rotation
+
+- Manual validator command:
+  - `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\validate-navigator-ca-bundle.ps1 -BundlePath C:\path\to\ca-bundle.pem -BundleType production-public-source`
+- Explicit output path example:
+  - `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\validate-navigator-ca-bundle.ps1 -BundlePath C:\path\to\ca-bundle.pem -BundleType production-public-source -OutputManifestPath .\logs\candidate-public-ca.manifest`
+- Current manifest fields:
+  - `schema_version`
+  - `bundle_type`
+  - `source`
+  - `generated_utc`
+  - `root_count`
+  - `pem_bytes`
+  - `sha256`
+  - `subject_summary`
+  - `not_before_min`
+  - `not_after_max`
+  - `production_ready`
+  - `test_only`
+  - `rotation_id`
+- Rotation policy for v0.1:
+  - supply a new public-root bundle explicitly
+  - validate it and generate a manifest
+  - run the dedicated public HTTPS probe and require PASS
+  - archive the summary, manifest, serial log, and evidence JSON together
+  - record the outgoing manifest hash or retain the prior manifest in notes
+  - do not enable default public HTTPS browsing as part of this rotation step
+- The helper does not download roots, does not normalize PEM contents, and does not mark deterministic fixtures as production-ready.
+
 ### First-Run Operator Checklist
 
 Use this when collecting the first GitHub-hosted PASS artifact for a branch, release note, or milestone checkpoint:
@@ -166,9 +244,9 @@ Use this when collecting the first GitHub-hosted PASS artifact for a branch, rel
 4. Use a real public-root PEM bundle that is appropriate for the chosen target URL.
 5. Start the workflow manually with `workflow_dispatch`.
 6. Leave the default target `https://sha256.badssl.com/` unless you intentionally need another HTTPS URL.
-7. Download or inspect the uploaded `navigator-public-https-*.summary.log` and `navigator-public-https-*.serial.log` artifacts.
+7. Download or inspect the uploaded workflow input manifest plus the `navigator-public-https-*.summary.log`, `navigator-public-https-*.serial.log`, `navigator-public-https-*.ca-bundle.manifest`, and `navigator-public-https-*.evidence.json` artifacts.
 8. Confirm the full PASS artifact checklist above.
-9. Archive or attach the summary artifact in release notes, development notes, or the milestone thread.
+9. Archive or attach the manifest hash and the summary/evidence artifacts in release notes, development notes, or the milestone thread.
 
 Operator warnings:
 
@@ -190,6 +268,11 @@ Operator warnings:
   - `public_trust_ready` not equal to `yes`
   - misleading `public_ca_source_marker` such as deterministic-only or legacy `ignored-local-file`
   - `public_ca_parsed_certs <= 0`
+  - missing or malformed `trust_bundle_sha256`
+  - `trust_bundle_manifest_present` not equal to `yes`
+  - `trust_bundle_type` not equal to `production-public-probe-merged`
+  - `trust_bundle_production_ready` not equal to `yes`
+  - `trust_bundle_test_only` not equal to `no`
   - any non-`PASS` DNS/TCP/TLS/certificate/hostname result
   - `verify_flags` not equal to `0`
   - missing or mismatched `sni_host`
@@ -217,6 +300,12 @@ Operator warnings:
   - `public_ca_source_marker`
   - `public_ca_bytes`
   - `public_ca_parsed_certs`
+  - `trust_bundle_manifest_present`
+  - `trust_bundle_sha256`
+  - `trust_bundle_type`
+  - `trust_bundle_root_count`
+  - `trust_bundle_production_ready`
+  - `trust_bundle_test_only`
   - `dns_result`
   - `tcp_result`
   - `tls_result`
@@ -265,6 +354,8 @@ Operator warnings:
   - `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\assert-navigator-public-https-pass.ps1 -SelfTest`
 - Manual evidence promotion against a saved summary:
   - `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\export-navigator-public-https-evidence.ps1 -SummaryPath .\logs\navigator-public-https-<timestamp>.summary.log`
+- Manual CA bundle validation and manifest generation:
+  - `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\validate-navigator-ca-bundle.ps1 -BundlePath C:\path\to\ca-bundle.pem -BundleType production-public-source`
 - Manual kernel smoke with the public probe enabled inside the broader deterministic suite:
   - `$env:GXOS_NAVIGATOR_SMOKE_ENABLE_REAL_PUBLIC_HTTPS="1"`
   - `$env:GXOS_NAVIGATOR_SMOKE_REQUIRE_REAL_PUBLIC_HTTPS="1"`

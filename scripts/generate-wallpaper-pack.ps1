@@ -14,6 +14,7 @@ $InputDir = if ([System.IO.Path]::IsPathRooted($InputDir)) { $InputDir } else { 
 $OutputDir = if ([System.IO.Path]::IsPathRooted($OutputDir)) { $OutputDir } else { Join-Path $RootDir $OutputDir }
 $OutputImage = if ([System.IO.Path]::IsPathRooted($OutputImage)) { $OutputImage } else { Join-Path $RootDir $OutputImage }
 $TrackedOutputRootCaBundlePath = Join-Path $OutputDir "certs\ca-bundle.pem"
+$NavigatorCaBundleManifestScript = Join-Path $ScriptDir "validate-navigator-ca-bundle.ps1"
 $TrackedOutputRootCaBundleBytes = if (Test-Path -LiteralPath $TrackedOutputRootCaBundlePath -PathType Leaf) {
     [System.IO.File]::ReadAllBytes($TrackedOutputRootCaBundlePath)
 } else {
@@ -123,6 +124,108 @@ function Get-NavigatorPemBundleInfo {
         Bytes = [int64]$item.Length
         ParsedCertCount = [int]$parsedCount
         Text = $text
+    }
+}
+
+function Test-NavigatorPathWithin {
+    param(
+        [Parameter(Mandatory = $true)][string]$BasePath,
+        [Parameter(Mandatory = $true)][string]$CandidatePath
+    )
+
+    $baseFull = [System.IO.Path]::GetFullPath($BasePath)
+    $candidateFull = [System.IO.Path]::GetFullPath($CandidatePath)
+    if (-not $baseFull.EndsWith([System.IO.Path]::DirectorySeparatorChar)) {
+        $baseFull += [System.IO.Path]::DirectorySeparatorChar
+    }
+    return $candidateFull.StartsWith($baseFull, [System.StringComparison]::OrdinalIgnoreCase)
+}
+
+function Get-NavigatorRepoRelativePath {
+    param([Parameter(Mandatory = $true)][string]$LiteralPath)
+
+    $rootFull = [System.IO.Path]::GetFullPath($RootDir)
+    $pathFull = [System.IO.Path]::GetFullPath($LiteralPath)
+    if (-not $rootFull.EndsWith([System.IO.Path]::DirectorySeparatorChar)) {
+        $rootFull += [System.IO.Path]::DirectorySeparatorChar
+    }
+    if ($pathFull.StartsWith($rootFull, [System.StringComparison]::OrdinalIgnoreCase)) {
+        return $pathFull.Substring($rootFull.Length).Replace('\', '/')
+    }
+    return $pathFull
+}
+
+function Get-NavigatorCaBundleManifestProfile {
+    param(
+        [Parameter(Mandatory = $true)]
+        [ValidateSet("smoke", "user", "production")]
+        [string]$Role,
+        [AllowNull()][string]$SourcePath,
+        [bool]$ExplicitPublicProbeMaterial
+    )
+
+    $fixtureRoot = Join-Path $ScriptDir "fixtures"
+    $sourceIsFixture = $false
+    if ($SourcePath) {
+        $sourceIsFixture = Test-NavigatorPathWithin -BasePath $fixtureRoot -CandidatePath $SourcePath
+    }
+
+    if ($Role -eq "smoke") {
+        return [pscustomobject]@{
+            BundleType = "smoke-fixture"
+            SourceDescription = "repo-fixture:" + (Get-NavigatorRepoRelativePath -LiteralPath $SourcePath)
+        }
+    }
+    if ($ExplicitPublicProbeMaterial) {
+        return [pscustomobject]@{
+            BundleType = "production-public-probe-merged"
+            SourceDescription = $(if ($SourcePath) { "merged:explicit-public-root-input+" + (Get-NavigatorRepoRelativePath -LiteralPath $SourcePath) } else { "merged:explicit-public-root-input" })
+        }
+    }
+    if ($sourceIsFixture) {
+        return [pscustomobject]@{
+            BundleType = "validated-fixture"
+            SourceDescription = "repo-fixture:" + (Get-NavigatorRepoRelativePath -LiteralPath $SourcePath)
+        }
+    }
+    if ($Role -eq "user") {
+        return [pscustomobject]@{
+            BundleType = "user-dev"
+            SourceDescription = "GXOS_NAVIGATOR_USER_CA_BUNDLE_SOURCE"
+        }
+    }
+    return [pscustomobject]@{
+        BundleType = "production-source"
+        SourceDescription = "GXOS_NAVIGATOR_PRODUCTION_CA_BUNDLE_SOURCE"
+    }
+}
+
+function Invoke-NavigatorCaBundleManifestValidation {
+    param(
+        [Parameter(Mandatory = $true)][string]$BundlePath,
+        [Parameter(Mandatory = $true)][string]$BundleType,
+        [Parameter(Mandatory = $true)][string]$OutputManifestPath,
+        [Parameter(Mandatory = $true)][string]$SourceDescription
+    )
+
+    if (-not (Test-Path -LiteralPath $NavigatorCaBundleManifestScript -PathType Leaf)) {
+        throw "Navigator CA bundle manifest helper not found: $NavigatorCaBundleManifestScript"
+    }
+
+    $output = @(& powershell -NoProfile -ExecutionPolicy Bypass -File $NavigatorCaBundleManifestScript `
+        -BundlePath $BundlePath `
+        -BundleType $BundleType `
+        -OutputManifestPath $OutputManifestPath `
+        -SourceDescription $SourceDescription 2>&1)
+    if ($LASTEXITCODE -ne 0) {
+        throw "Navigator CA bundle manifest helper failed for $BundlePath."
+    }
+
+    $manifest = Get-Content -LiteralPath $OutputManifestPath -Raw | ConvertFrom-Json
+    return [pscustomobject]@{
+        ManifestPath = [System.IO.Path]::GetFullPath($OutputManifestPath)
+        Manifest = $manifest
+        Output = @($output | ForEach-Object { "$_" })
     }
 }
 
@@ -549,9 +652,18 @@ if ($SmokeCaFixture -or $env:GXOS_NAVIGATOR_SMOKE_CA_FIXTURE -eq "1") {
     New-Item -ItemType Directory -Force -Path $certsDir | Out-Null
     $targetCa = Join-Path $certsDir "ca-bundle.pem"
     Copy-Item -LiteralPath $smokeCaFixturePath -Destination $targetCa -Force
+    $targetCaManifest = Join-Path $certsDir "ca-bundle.manifest"
+    $smokeManifestProfile = Get-NavigatorCaBundleManifestProfile -Role "smoke" -SourcePath $smokeCaFixturePath -ExplicitPublicProbeMaterial:$false
+    $smokeManifest = Invoke-NavigatorCaBundleManifestValidation `
+        -BundlePath $targetCa `
+        -BundleType $smokeManifestProfile.BundleType `
+        -OutputManifestPath $targetCaManifest `
+        -SourceDescription $smokeManifestProfile.SourceDescription
     $staged += Get-Item $targetCa
+    $staged += Get-Item $targetCaManifest
     $stagedRootCaBundle = $true
     Write-Host "      staged smoke-only CA bundle at /certs/ca-bundle.pem" -ForegroundColor Yellow
+    Write-Host "      staged CA manifest at /certs/ca-bundle.manifest (type=$($smokeManifest.Manifest.bundle_type), production_ready=$($smokeManifest.Manifest.production_ready), test_only=$($smokeManifest.Manifest.test_only))" -ForegroundColor Yellow
 } else {
     $productionCaSource = Resolve-StagedSourcePath $env:GXOS_NAVIGATOR_PRODUCTION_CA_BUNDLE_SOURCE
     if ($productionCaSource -or $realPublicProbeCaBundleInfo) {
@@ -587,13 +699,25 @@ if ($SmokeCaFixture -or $env:GXOS_NAVIGATOR_SMOKE_CA_FIXTURE -eq "1") {
         } else {
             Copy-Item -LiteralPath $productionCaSource -Destination $targetCa -Force
         }
+        $targetCaManifest = Join-Path $certsDir "ca-bundle.manifest"
+        $productionManifestProfile = Get-NavigatorCaBundleManifestProfile `
+            -Role "production" `
+            -SourcePath $productionCaSource `
+            -ExplicitPublicProbeMaterial:([bool]$realPublicProbeCaBundleInfo)
+        $productionManifest = Invoke-NavigatorCaBundleManifestValidation `
+            -BundlePath $targetCa `
+            -BundleType $productionManifestProfile.BundleType `
+            -OutputManifestPath $targetCaManifest `
+            -SourceDescription $productionManifestProfile.SourceDescription
         $staged += Get-Item $targetCa
+        $staged += Get-Item $targetCaManifest
         $stagedRootCaBundle = $true
         if ($realPublicProbeCaBundleInfo) {
             Write-Host "      staged production CA bundle at /certs/ca-bundle.pem with explicit public-root opt-in material" -ForegroundColor Yellow
         } else {
             Write-Host "      staged production CA bundle at /certs/ca-bundle.pem" -ForegroundColor Yellow
         }
+        Write-Host "      staged CA manifest at /certs/ca-bundle.manifest (type=$($productionManifest.Manifest.bundle_type), production_ready=$($productionManifest.Manifest.production_ready), test_only=$($productionManifest.Manifest.test_only))" -ForegroundColor Yellow
     }
 }
 
@@ -606,11 +730,25 @@ if ($userCaSource) {
     New-Item -ItemType Directory -Force -Path $configCertsDir | Out-Null
     $targetUserCa = Join-Path $configCertsDir "ca-bundle.pem"
     Copy-Item -LiteralPath $userCaSource -Destination $targetUserCa -Force
+    $targetUserManifest = Join-Path $configCertsDir "ca-bundle.manifest"
     $staged += Get-Item $targetUserCa
     $targetUserCaCompat = Join-Path $configCertsDir "CABUNDLE.PEM"
     Copy-Item -LiteralPath $userCaSource -Destination $targetUserCaCompat -Force
     $staged += Get-Item $targetUserCaCompat
     Write-Host "      staged user CA bundle at /config/certs/ca-bundle.pem" -ForegroundColor Yellow
+    try {
+        $userManifestProfile = Get-NavigatorCaBundleManifestProfile -Role "user" -SourcePath $userCaSource -ExplicitPublicProbeMaterial:$false
+        $userManifest = Invoke-NavigatorCaBundleManifestValidation `
+            -BundlePath $targetUserCa `
+            -BundleType $userManifestProfile.BundleType `
+            -OutputManifestPath $targetUserManifest `
+            -SourceDescription $userManifestProfile.SourceDescription
+        $staged += Get-Item $targetUserManifest
+        Write-Host "      staged CA manifest at /config/certs/ca-bundle.manifest (type=$($userManifest.Manifest.bundle_type), production_ready=$($userManifest.Manifest.production_ready), test_only=$($userManifest.Manifest.test_only))" -ForegroundColor Yellow
+    } catch {
+        Write-Host "      user/dev CA manifest unavailable; continuing with explicit negative-fixture staging ($($_.Exception.Message))" -ForegroundColor DarkYellow
+        $global:LASTEXITCODE = 0
+    }
 }
 
 if ($httpsPolicyToken -or $httpsFaultModeToken -or $realPublicProbeEnabled -or $realPublicProbeRequired) {

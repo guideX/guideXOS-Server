@@ -125,6 +125,31 @@ function Test-NavigatorPublicHttpsPassContract {
     $parsedCertCountPassed = [int]::TryParse($parsedCertCount, [ref]$parsedCertCountValue) -and ($parsedCertCountValue -gt 0)
     Add-NavigatorPublicHttpsAssertionCheck -Checks $checks -Name "public_ca_parsed_certs" -Passed $parsedCertCountPassed -Detail $(if ($parsedCertCountPassed) { "Parsed public CA certificates: $parsedCertCountValue" } else { "public_ca_parsed_certs must be a positive integer, got '$parsedCertCount'." })
 
+    $trustManifestPresent = Get-NavigatorPublicHttpsFieldValue -Fields $fields -Name "trust_bundle_manifest_present"
+    $trustManifestPresentPassed = [string]::Equals($trustManifestPresent, "yes", [System.StringComparison]::OrdinalIgnoreCase)
+    Add-NavigatorPublicHttpsAssertionCheck -Checks $checks -Name "trust_bundle_manifest_present" -Passed $trustManifestPresentPassed -Detail "Expected trust_bundle_manifest_present=yes, got '$trustManifestPresent'."
+
+    $trustBundleSha256 = Get-NavigatorPublicHttpsFieldValue -Fields $fields -Name "trust_bundle_sha256"
+    $trustBundleSha256Passed = -not [string]::IsNullOrWhiteSpace($trustBundleSha256) -and [regex]::IsMatch($trustBundleSha256, '^[0-9a-f]{64}$')
+    Add-NavigatorPublicHttpsAssertionCheck -Checks $checks -Name "trust_bundle_sha256" -Passed $trustBundleSha256Passed -Detail $(if ($trustBundleSha256Passed) { "trust_bundle_sha256 is a 64-character lowercase hex digest." } else { "trust_bundle_sha256 must be a 64-character lowercase hex digest, got '$trustBundleSha256'." })
+
+    $trustBundleType = Get-NavigatorPublicHttpsFieldValue -Fields $fields -Name "trust_bundle_type"
+    $trustBundleTypePassed = [string]::Equals($trustBundleType, "production-public-probe-merged", [System.StringComparison]::OrdinalIgnoreCase)
+    Add-NavigatorPublicHttpsAssertionCheck -Checks $checks -Name "trust_bundle_type" -Passed $trustBundleTypePassed -Detail "Expected trust_bundle_type=production-public-probe-merged, got '$trustBundleType'."
+
+    $trustBundleRootCount = Get-NavigatorPublicHttpsFieldValue -Fields $fields -Name "trust_bundle_root_count"
+    $trustBundleRootCountValue = 0
+    $trustBundleRootCountPassed = [int]::TryParse($trustBundleRootCount, [ref]$trustBundleRootCountValue) -and ($trustBundleRootCountValue -gt 0)
+    Add-NavigatorPublicHttpsAssertionCheck -Checks $checks -Name "trust_bundle_root_count" -Passed $trustBundleRootCountPassed -Detail $(if ($trustBundleRootCountPassed) { "trust_bundle_root_count is positive: $trustBundleRootCountValue" } else { "trust_bundle_root_count must be a positive integer, got '$trustBundleRootCount'." })
+
+    $trustBundleProductionReady = Get-NavigatorPublicHttpsFieldValue -Fields $fields -Name "trust_bundle_production_ready"
+    $trustBundleProductionReadyPassed = [string]::Equals($trustBundleProductionReady, "yes", [System.StringComparison]::OrdinalIgnoreCase)
+    Add-NavigatorPublicHttpsAssertionCheck -Checks $checks -Name "trust_bundle_production_ready" -Passed $trustBundleProductionReadyPassed -Detail "Expected trust_bundle_production_ready=yes, got '$trustBundleProductionReady'."
+
+    $trustBundleTestOnly = Get-NavigatorPublicHttpsFieldValue -Fields $fields -Name "trust_bundle_test_only"
+    $trustBundleTestOnlyPassed = [string]::Equals($trustBundleTestOnly, "no", [System.StringComparison]::OrdinalIgnoreCase)
+    Add-NavigatorPublicHttpsAssertionCheck -Checks $checks -Name "trust_bundle_test_only" -Passed $trustBundleTestOnlyPassed -Detail "Expected trust_bundle_test_only=no, got '$trustBundleTestOnly'."
+
     foreach ($fieldName in @(
         "dns_result",
         "tcp_result",
@@ -202,6 +227,12 @@ function Invoke-NavigatorPublicHttpsAssertionSelfTest {
             "[NAVIGATOR-PUBLIC-HTTPS] public_ca_source_marker=env-var",
             "[NAVIGATOR-PUBLIC-HTTPS] public_trust_ready=yes",
             "[NAVIGATOR-PUBLIC-HTTPS] public_ca_parsed_certs=2",
+            "[NAVIGATOR-PUBLIC-HTTPS] trust_bundle_manifest_present=yes",
+            "[NAVIGATOR-PUBLIC-HTTPS] trust_bundle_sha256=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "[NAVIGATOR-PUBLIC-HTTPS] trust_bundle_type=production-public-probe-merged",
+            "[NAVIGATOR-PUBLIC-HTTPS] trust_bundle_root_count=4",
+            "[NAVIGATOR-PUBLIC-HTTPS] trust_bundle_production_ready=yes",
+            "[NAVIGATOR-PUBLIC-HTTPS] trust_bundle_test_only=no",
             "[NAVIGATOR-PUBLIC-HTTPS] dns_result=PASS",
             "[NAVIGATOR-PUBLIC-HTTPS] tcp_result=PASS",
             "[NAVIGATOR-PUBLIC-HTTPS] tls_result=PASS",
@@ -267,6 +298,16 @@ function Invoke-NavigatorPublicHttpsAssertionSelfTest {
                     param([string[]]$Lines)
                     return @($Lines | ForEach-Object {
                         if ($_ -match ' public_trust_ready=') { "[NAVIGATOR-PUBLIC-HTTPS] public_trust_ready=no" } else { $_ }
+                    })
+                }
+            },
+            [pscustomobject]@{
+                Name = "trust-bundle-not-production-ready"
+                ExpectedPass = $false
+                Mutator = {
+                    param([string[]]$Lines)
+                    return @($Lines | ForEach-Object {
+                        if ($_ -match ' trust_bundle_production_ready=') { "[NAVIGATOR-PUBLIC-HTTPS] trust_bundle_production_ready=no" } else { $_ }
                     })
                 }
             }

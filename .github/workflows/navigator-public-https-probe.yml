@@ -107,6 +107,20 @@ jobs:
           "GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_CA_BUNDLE_SOURCE=$bundlePath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "GXOS_NAVIGATOR_PUBLIC_CA_BUNDLE_TEMP_PATH=$bundlePath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
+      - name: Validate public CA bundle secret contract
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Force -Path .\logs | Out-Null
+          $manifestPath = Join-Path (Resolve-Path .\logs) "navigator-public-https-workflow-input.ca-bundle.manifest"
+
+          powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\validate-navigator-ca-bundle.ps1 `
+            -BundlePath $env:GXOS_NAVIGATOR_PUBLIC_CA_BUNDLE_TEMP_PATH `
+            -BundleType production-public-source `
+            -OutputManifestPath $manifestPath `
+            -SourceDescription github-actions-secret:GXOS_NAVIGATOR_PUBLIC_CA_BUNDLE_PEM
+
+          "GXOS_NAVIGATOR_PUBLIC_CA_BUNDLE_MANIFEST_PATH=$manifestPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
       - name: Run dedicated public HTTPS probe
         id: public_probe
         shell: powershell
@@ -175,9 +189,21 @@ jobs:
           Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value ""
           Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "## PASS Review Contract"
           Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "- Treat the run as proof only when result_marker=PASS and final_result=PASS."
-          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "- Confirm public_trust_ready=yes, public_ca_parsed_certs > 0, dns_result=PASS, tcp_result=PASS, tls_result=PASS, certificate_validation_result=PASS, hostname_validation_result=PASS, verify_flags=0, and plaintext_fallback=no."
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "- Confirm public_trust_ready=yes, public_ca_parsed_certs > 0, trust_bundle_manifest_present=yes, trust_bundle_production_ready=yes, trust_bundle_test_only=no, dns_result=PASS, tcp_result=PASS, tls_result=PASS, certificate_validation_result=PASS, hostname_validation_result=PASS, verify_flags=0, and plaintext_fallback=no."
           Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "- Confirm sni_host matches the target hostname and http_status shows a real HTTPS response."
           Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "- SETUP_BLOCKED, SKIP, and FAIL are not proof of working public HTTPS."
+
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value ""
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "## Root Bundle Manifest"
+          if (-not [string]::IsNullOrWhiteSpace($env:GXOS_NAVIGATOR_PUBLIC_CA_BUNDLE_MANIFEST_PATH) -and
+              (Test-Path -LiteralPath $env:GXOS_NAVIGATOR_PUBLIC_CA_BUNDLE_MANIFEST_PATH -PathType Leaf)) {
+            Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "Workflow input manifest path: $($env:GXOS_NAVIGATOR_PUBLIC_CA_BUNDLE_MANIFEST_PATH)"
+            Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "```json"
+            Get-Content -LiteralPath $env:GXOS_NAVIGATOR_PUBLIC_CA_BUNDLE_MANIFEST_PATH | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY
+            Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "```"
+          } else {
+            Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "No workflow input CA bundle manifest was produced."
+          }
 
           Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value ""
           Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "## Structured Evidence"
@@ -197,8 +223,10 @@ jobs:
           name: navigator-public-https-${{ github.run_id }}
           if-no-files-found: warn
           path: |
+            logs/navigator-public-https-workflow-input.ca-bundle.manifest
             logs/navigator-public-https-*.summary.log
             logs/navigator-public-https-*.serial.log
+            logs/navigator-public-https-*.ca-bundle.manifest
             logs/navigator-public-https-*.evidence.json
 
       - name: Remove temporary CA bundle
