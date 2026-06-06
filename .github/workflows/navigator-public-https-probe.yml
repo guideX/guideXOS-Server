@@ -88,9 +88,49 @@ jobs:
           "GXOS_NAVIGATOR_PUBLIC_CA_BUNDLE_TEMP_PATH=$bundlePath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Run dedicated public HTTPS probe
+        id: public_probe
         shell: powershell
         run: |
           powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\smoke-navigator-public-https.ps1 -Build
+
+      - name: Surface PASS assertion report
+        if: always()
+        shell: powershell
+        run: |
+          $summary = Get-ChildItem -LiteralPath .\logs -Filter "navigator-public-https-*.summary.log" -ErrorAction SilentlyContinue |
+            Sort-Object LastWriteTimeUtc -Descending |
+            Select-Object -First 1
+
+          if ($null -eq $summary) {
+            Write-Output "No navigator public HTTPS summary log was produced, so no PASS assertion could run."
+            Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "## PASS Assertion"
+            Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "No navigator public HTTPS summary log was produced, so no PASS assertion could run."
+            exit 0
+          }
+
+          if ("${{ steps.public_probe.outcome }}" -ne "success") {
+            Write-Output "Dedicated public HTTPS probe did not exit 0; PASS assertion replay skipped."
+            Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "## PASS Assertion"
+            Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "Dedicated public HTTPS probe did not exit 0; PASS assertion replay skipped."
+            exit 0
+          }
+
+          $assertOutput = @(& powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\assert-navigator-public-https-pass.ps1 -SummaryPath $summary.FullName 2>&1)
+          $assertExitCode = $LASTEXITCODE
+          foreach ($line in $assertOutput) {
+            Write-Output "$line"
+          }
+
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "## PASS Assertion"
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "```text"
+          foreach ($line in $assertOutput) {
+            Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "$line"
+          }
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "```"
+
+          if ($assertExitCode -ne 0) {
+            throw "Navigator public HTTPS PASS assertion replay failed for $($summary.FullName)."
+          }
 
       - name: Summarize dedicated probe result
         if: always()
@@ -106,7 +146,9 @@ jobs:
           }
 
           Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "## Navigator Public HTTPS Probe"
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "```text"
           Get-Content -LiteralPath $summary.FullName | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "```"
           Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value ""
           Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "## PASS Review Contract"
           Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "- Treat the run as proof only when result_marker=PASS and final_result=PASS."

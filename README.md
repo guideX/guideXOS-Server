@@ -112,9 +112,10 @@ The bare-metal Navigator public HTTPS probe is a separate proof workflow, not a 
 * Workflow: `.github/workflows/navigator-public-https-probe.yml`
 * Secret: `GXOS_NAVIGATOR_PUBLIC_CA_BUNDLE_PEM`
 * Default target: `https://sha256.badssl.com/`
+* Automated artifact assertion: `scripts/assert-navigator-public-https-pass.ps1`
 * Review/operator contract: `scripts/fixtures/README.md`
 
-Normal hosted and kernel smoke remain deterministic and internet-independent unless you explicitly opt into this probe path.
+Normal hosted and kernel smoke remain deterministic and internet-independent unless you explicitly opt into this probe path. Automated PASS assertion complements, but does not replace, human artifact review.
 
 ### Experimental Native ELF hosted runtime
 

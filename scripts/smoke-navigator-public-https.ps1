@@ -18,6 +18,7 @@ $dedicatedSerialLog = Join-Path $LogDir "navigator-public-https-$stamp.serial.lo
 $dedicatedSummaryLog = Join-Path $LogDir "navigator-public-https-$stamp.summary.log"
 $kernelScenarioName = "production_public_pilot_enabled"
 $kernelSmokeScript = Join-Path $Root "scripts\smoke-navigator-kernel.ps1"
+$passAssertionScript = Join-Path $Root "scripts\assert-navigator-public-https-pass.ps1"
 $publicLocalBundlePath = Join-Path $Root "scripts\fixtures\public-roots\ca-bundle.pem.local"
 $publicExampleBundlePath = Join-Path $Root "scripts\fixtures\public-roots\ca-bundle.pem.example"
 $publicProbeDefaultTarget = "https://sha256.badssl.com/"
@@ -149,7 +150,7 @@ function Get-NavigatorRealPublicProbeCaBundleResolution {
     if ($localExists) {
         return [pscustomobject]@{
             SourcePath = $localSource
-            Resolution = "ignored-local-file"
+            Resolution = "local-fallback-file"
             LocalBundleAvailable = $true
             EnvBundleProvided = $false
         }
@@ -228,6 +229,22 @@ function Get-NavigatorPublicProbeValue {
         }
     }
     return $latestValue
+}
+
+function Invoke-NavigatorPublicHttpsPassAssertion {
+    param([Parameter(Mandatory = $true)][string]$SummaryPath)
+
+    if (-not (Test-Path -LiteralPath $passAssertionScript -PathType Leaf)) {
+        throw "Navigator public HTTPS PASS assertion helper not found: $passAssertionScript"
+    }
+
+    $output = @(& powershell -NoProfile -ExecutionPolicy Bypass -File $passAssertionScript -SummaryPath $SummaryPath 2>&1)
+    $exitCode = $LASTEXITCODE
+
+    return [pscustomobject]@{
+        ExitCode = $exitCode
+        Output = @($output | ForEach-Object { "$_" })
+    }
 }
 
 function Find-NavigatorKernelScenarioSerialLog {
@@ -373,6 +390,9 @@ function Write-NavigatorPublicHttpsConsoleSummary {
     Write-Host "  HTTP status: $($Fields["http_status"])"
     Write-Host "  unsupported content reason: $($Fields["unsupported_reason"])"
     Write-Host "  plaintext_fallback: $($Fields["plaintext_fallback"])"
+    if ($Fields.Contains("pass_contract_assertion_result")) {
+        Write-Host "  pass contract assertion: $($Fields["pass_contract_assertion_result"])"
+    }
     if ($Fields.Contains("skip_reason") -and -not [string]::IsNullOrWhiteSpace($Fields["skip_reason"]) -and $Fields["skip_reason"] -ne "(none)") {
         Write-Host "  skip reason: $($Fields["skip_reason"])"
     }
@@ -418,6 +438,8 @@ $fields = [ordered]@{
     content_encoding = "(not-attempted)"
     unsupported_reason = "(not-attempted)"
     plaintext_fallback = "no"
+    pass_contract_assertion_result = "not-run"
+    pass_contract_assertion_exit_code = "(not-run)"
     skip_reason = "(none)"
     failure_reason = "(none)"
     probe_result = "SKIP"
@@ -637,6 +659,37 @@ try {
         -KernelSerialOutput $kernelSerialOutput `
         -Fields $fields `
         -Notes $notes
+
+    if ($finalResult -eq "PASS") {
+        $assertionResult = Invoke-NavigatorPublicHttpsPassAssertion -SummaryPath $dedicatedSummaryLog
+        $fields["pass_contract_assertion_result"] = $(if ($assertionResult.ExitCode -eq 0) { "PASS" } else { "FAIL" })
+        $fields["pass_contract_assertion_exit_code"] = $assertionResult.ExitCode
+
+        foreach ($assertionLine in $assertionResult.Output) {
+            Write-Host $assertionLine
+        }
+
+        if ($assertionResult.ExitCode -ne 0) {
+            $finalResult = "FAIL"
+            $exitCode = 1
+            $fields["failure_reason"] = "PASS artifact assertion failed"
+            $notes += "PASS artifact assertion failed."
+            foreach ($assertionLine in $assertionResult.Output) {
+                $notes += "assertion: $assertionLine"
+            }
+        }
+
+        Write-NavigatorPublicHttpsLogs `
+            -SerialPath $dedicatedSerialLog `
+            -SummaryPath $dedicatedSummaryLog `
+            -FinalResult $finalResult `
+            -ExitCode $exitCode `
+            -KernelSerialPath $kernelSerialPath `
+            -KernelSerialOutput $kernelSerialOutput `
+            -Fields $fields `
+            -Notes $notes
+    }
+
     Write-NavigatorPublicHttpsConsoleSummary -FinalResult $finalResult -ExitCode $exitCode -Fields $fields -Notes $notes
 
     if ($finalResult -eq "PASS") {

@@ -93,7 +93,7 @@ Smoke-only malformed and empty CA bundle fixtures for deterministic fail-closed 
   - exit `3`: the guest probe reported `SKIP`, which is not accepted as proof by the dedicated entrypoint;
   - exit `1`: the guest probe reported `FAIL` or the harness could not complete.
 - The dedicated script rejects non-`https://` targets and numeric-IP targets before QEMU launches.
-- The dedicated script prints a compact final summary for manual runs and CI logs, including the target, CA source resolution, a sanitized CA source marker, CA bytes, parsed cert count, DNS/TCP/TLS, certificate and hostname validation, HTTP status, unsupported-content reason, `plaintext_fallback=no`, the final result, and a machine-checkable `result_marker`:
+- The dedicated script prints a compact final summary for manual runs and CI logs, including the target, CA source resolution, a sanitized CA source marker, `public_trust_ready`, CA bytes, parsed cert count, DNS/TCP/TLS, certificate and hostname validation, HTTP status, unsupported-content reason, `plaintext_fallback=no`, automated PASS assertion status, the final result, and a machine-checkable `result_marker`:
   - `PASS`
   - `FAIL`
   - `SKIP`
@@ -101,7 +101,8 @@ Smoke-only malformed and empty CA bundle fixtures for deterministic fail-closed 
 - Dedicated logs are written as:
   - `logs/navigator-public-https-<timestamp>.serial.log`
   - `logs/navigator-public-https-<timestamp>.summary.log`
-- The summary log records the target URL, public CA source path, CA bytes, parsed cert count, DNS/TCP/TLS results, certificate and hostname validation results, verify flags, SNI host, HTTP status, content type, content encoding, unsupported-content reason, `plaintext_fallback=no`, and the final `PASS`/`SKIP`/`FAIL` outcome.
+- The summary log uses stable `[NAVIGATOR-PUBLIC-HTTPS] key=value` lines for machine checks. PASS-critical fields include `final_result`, `result_marker`, `target_url`, `target_host`, `public_ca_source_marker`, `public_trust_ready`, `public_ca_parsed_certs`, `dns_result`, `tcp_result`, `tls_result`, `certificate_validation_result`, `hostname_validation_result`, `verify_flags`, `sni_host`, `http_status`, `plaintext_fallback`, and the automated `pass_contract_assertion_result`.
+- The automated validator lives at `scripts/assert-navigator-public-https-pass.ps1`. It verifies the PASS contract, exits `0` only for valid proof, and can be run manually against any uploaded summary artifact.
 
 ### CI and manual-secret contract
 
@@ -118,6 +119,7 @@ Smoke-only malformed and empty CA bundle fixtures for deterministic fail-closed 
 - The workflow writes the secret to a temporary runner file, points `GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_CA_BUNDLE_SOURCE` at that file, and removes the file after the run where practical.
 - The workflow can accept an optional manual `target_url` override; otherwise it uses `https://sha256.badssl.com/`.
 - If `GXOS_NAVIGATOR_PUBLIC_CA_BUNDLE_PEM` is missing, the workflow fails clearly before the probe runs.
+- When the dedicated probe exits `0`, the workflow replays `scripts/assert-navigator-public-https-pass.ps1` against the latest summary artifact and adds the assertion report to `GITHUB_STEP_SUMMARY`.
 
 ### Public HTTPS PASS Artifact Checklist
 
@@ -127,7 +129,7 @@ Review the uploaded `navigator-public-https-*.summary.log` and treat the run as 
 - `final_result=PASS`
 - `target_url=` is the expected `https://` URL for the run.
 - `public_trust_ready=yes`
-- `public_ca_source_marker=` shows an explicit source such as `env-var` or `env-var-preferred-over-local`.
+- `public_ca_source_marker=` shows an explicit source such as `env-var`, `env-var-preferred-over-local`, or `local-fallback-file`.
 - `public_ca_parsed_certs=` is greater than `0`.
 - `dns_result=PASS`
 - `tcp_result=PASS`
@@ -138,12 +140,14 @@ Review the uploaded `navigator-public-https-*.summary.log` and treat the run as 
 - `sni_host=` matches the target hostname.
 - `http_status=` shows that an HTTPS response was actually received.
 - `plaintext_fallback=no`
+- `pass_contract_assertion_result=PASS`
 
 Review notes:
 
 - `SETUP_BLOCKED`, `SKIP`, and `FAIL` are useful diagnostics but are not proof of a working public HTTPS path.
 - A content/browser limitation after TLS success, such as unsupported content encoding or unsupported compression handling, must not be mistaken for a CA, certificate, hostname, or TLS transport failure.
 - Deterministic fixture roots still do not count as public trust, even if another field in the same log looks healthy.
+- Automated PASS assertion failing is also not proof, even if some individual fields look healthy in the same artifact.
 
 ### First-Run Operator Checklist
 
@@ -165,6 +169,28 @@ Operator warnings:
 - Do not commit the PEM or any derived local `.local` bundle.
 - Do not treat `SETUP_BLOCKED` or `SKIP` as evidence that public HTTPS is working.
 - Do not enable default public bare-metal HTTPS based on a single PASS artifact alone.
+
+### Automated PASS Assertion
+
+- Manual command:
+  - `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\assert-navigator-public-https-pass.ps1 -SummaryPath .\logs\navigator-public-https-<timestamp>.summary.log`
+- Self-test command:
+  - `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\assert-navigator-public-https-pass.ps1 -SelfTest`
+- The assertion helper fails proof when required PASS fields are missing, wrong, or misleading. Common failures include:
+  - missing `result_marker=PASS`
+  - `final_result` not equal to `PASS`
+  - non-HTTPS or numeric-IP `target_url`
+  - `public_trust_ready` not equal to `yes`
+  - misleading `public_ca_source_marker` such as deterministic-only or legacy `ignored-local-file`
+  - `public_ca_parsed_certs <= 0`
+  - any non-`PASS` DNS/TCP/TLS/certificate/hostname result
+  - `verify_flags` not equal to `0`
+  - missing or mismatched `sni_host`
+  - non-numeric `http_status`
+  - `plaintext_fallback` not equal to `no`
+- Content limitations do not invalidate TLS proof by themselves:
+  - `content_encoding` may still be unsupported after successful TLS proof.
+  - `unsupported_reason` may still be populated after successful TLS proof.
 
 ### Example commands
 
@@ -190,6 +216,10 @@ Operator warnings:
   - `$env:GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_CA_BUNDLE_SOURCE="C:\path\to\ca-bundle.pem"`
   - `$env:GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_URL="https://sha256.badssl.com/"`
   - `.\scripts\smoke-navigator-public-https.ps1`
+- Manual PASS artifact assertion against a saved summary:
+  - `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\assert-navigator-public-https-pass.ps1 -SummaryPath .\logs\navigator-public-https-<timestamp>.summary.log`
+- Manual PASS assertion self-test:
+  - `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\assert-navigator-public-https-pass.ps1 -SelfTest`
 - Manual kernel smoke with the public probe enabled inside the broader deterministic suite:
   - `$env:GXOS_NAVIGATOR_SMOKE_ENABLE_REAL_PUBLIC_HTTPS="1"`
   - `$env:GXOS_NAVIGATOR_SMOKE_REQUIRE_REAL_PUBLIC_HTTPS="1"`
