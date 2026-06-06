@@ -40,6 +40,23 @@ static void strappend(char* dst, const char* src, int maxLen);
 static gxos::GxosCaStoreInfo probe_missing_ca_path()
 {
     const char* probePath = "/certs/ca-bundle.missing";
+    const gxos::GxosCaManifestInfo manifestInfo = {
+        gxos::GxosCaManifestStatus::NotApplicable,
+        "/certs/ca-bundle.manifest",
+        0,
+        false,
+        nullptr,
+        nullptr,
+        nullptr,
+        nullptr,
+        nullptr,
+        0,
+        0,
+        false,
+        false,
+        false,
+        nullptr
+    };
     kernel::vfs::FileInfo info{};
     const kernel::vfs::Status statStatus = kernel::vfs::stat(probePath, &info);
     if (statStatus == kernel::vfs::VFS_ERR_NOT_FOUND || statStatus == kernel::vfs::VFS_ERR_NOT_MOUNT) {
@@ -51,7 +68,8 @@ static gxos::GxosCaStoreInfo probe_missing_ca_path()
             0,
             false,
             probePath,
-            "Smoke-only missing CA probe correctly fails closed."
+            "Smoke-only missing CA probe correctly fails closed.",
+            manifestInfo
         };
     }
     return {
@@ -62,7 +80,8 @@ static gxos::GxosCaStoreInfo probe_missing_ca_path()
         0,
         false,
         probePath,
-        "Smoke-only missing CA probe did not fail closed."
+        "Smoke-only missing CA probe did not fail closed.",
+        manifestInfo
     };
 }
 
@@ -5666,6 +5685,7 @@ void NavigatorApp::buildPageInfoDocument()
     {
         const gxos::GxosValidatedHttpsPolicyInfo httpsPolicy = gxos::gxos_validated_https_policy_info();
         const gxos::GxosTrustStorePolicyInfo trustStorePolicy = gxos::gxos_tls_trust_store_policy_info();
+        const gxos::GxosCaStoreInfo caStoreInfo = gxos::gxos_ca_store_info();
         NAV_INFO_TEXT("HTTPS policy selected: ",
             gxos::gxos_validated_https_policy_state_name(httpsPolicy.selectedState));
         NAV_INFO_TEXT("HTTPS policy effective: ",
@@ -5685,6 +5705,19 @@ void NavigatorApp::buildPageInfoDocument()
         NAV_INFO_TEXT("HTTPS dev mode: ",
             httpsPolicy.state == gxos::GxosValidatedHttpsPolicyState::UserTrustStoreDevMode ? "yes" : "no");
         NAV_INFO_TEXT("HTTPS production validated: ", httpsPolicy.productionReady ? "yes" : "no");
+        NAV_INFO_TEXT("Trust manifest present: ", caStoreInfo.manifest.present ? "yes" : "no");
+        NAV_INFO_TEXT("Trust manifest schema: ", caStoreInfo.manifest.schemaVersion ? caStoreInfo.manifest.schemaVersion : "(none)");
+        NAV_INFO_TEXT("Trust bundle type: ", caStoreInfo.manifest.bundleType ? caStoreInfo.manifest.bundleType : "(none)");
+        NAV_INFO_TEXT("Trust rotation id: ", caStoreInfo.manifest.rotationId ? caStoreInfo.manifest.rotationId : "(none)");
+        NAV_INFO_TEXT("Trust manifest SHA-256: ", caStoreInfo.manifest.manifestSha256 ? caStoreInfo.manifest.manifestSha256 : "(none)");
+        NAV_INFO_TEXT("Trust computed SHA-256: ", caStoreInfo.manifest.computedSha256 ? caStoreInfo.manifest.computedSha256 : "(none)");
+        NAV_INFO_TEXT("Trust manifest hash match: ", caStoreInfo.manifest.hashMatch ? "yes" : "no");
+        NAV_INFO_INT("Trust manifest root count: ", (int)caStoreInfo.manifest.rootCount);
+        NAV_INFO_INT("Trust manifest PEM bytes: ", (int)caStoreInfo.manifest.pemBytes);
+        NAV_INFO_TEXT("Trust manifest production ready: ", caStoreInfo.manifest.productionReady ? "yes" : "no");
+        NAV_INFO_TEXT("Trust manifest test only: ", caStoreInfo.manifest.testOnly ? "yes" : "no");
+        NAV_INFO_TEXT("Public trust ready: ", trustStorePolicy.publicInternetReady ? "yes" : "no");
+        NAV_INFO_TEXT("Trust readiness blocker: ", trustStorePolicy.error ? trustStorePolicy.error : "(none)");
     }
     NAV_INFO_TEXT("Plaintext fallback: ", "no");
     NAV_INFO_INT("Document blocks: ", m_metaDocumentBlocks);
@@ -10318,7 +10351,7 @@ static const char* navigator_real_public_probe_prerequisite_blocker(
                 : "Real public HTTPS probe requires a parsed production CA bundle.";
     }
 
-    if (trustStorePolicy.source != gxos::GxosTrustStoreSource::ProductionBundle) {
+    if (trustStorePolicy.source != gxos::GxosTrustStoreSource::ProductionPublicProbeTrust) {
         return "Real public HTTPS probe requires a production CA bundle at /certs/ca-bundle.pem.";
     }
 
@@ -11358,6 +11391,34 @@ static bool printNavigatorRuntimeSmokePreamble()
     serial::puts(caStoreInfo.testOnlyFixture ? "smoke-only" : "normal");
     serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.root_ca_detail=");
     serial::puts(caStoreInfo.error ? caStoreInfo.error : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.root_ca_manifest_path=");
+    serial::puts(caStoreInfo.manifest.path ? caStoreInfo.manifest.path : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.root_ca_manifest_status=");
+    serial::puts(gxos::gxos_ca_manifest_status_name(caStoreInfo.manifest.status));
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.root_ca_manifest_present=");
+    serial::puts(caStoreInfo.manifest.present ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.root_ca_manifest_schema=");
+    serial::puts(caStoreInfo.manifest.schemaVersion ? caStoreInfo.manifest.schemaVersion : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.root_ca_manifest_bundle_type=");
+    serial::puts(caStoreInfo.manifest.bundleType ? caStoreInfo.manifest.bundleType : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.root_ca_manifest_rotation_id=");
+    serial::puts(caStoreInfo.manifest.rotationId ? caStoreInfo.manifest.rotationId : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.root_ca_manifest_sha256=");
+    serial::puts(caStoreInfo.manifest.manifestSha256 ? caStoreInfo.manifest.manifestSha256 : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.root_ca_computed_sha256=");
+    serial::puts(caStoreInfo.manifest.computedSha256 ? caStoreInfo.manifest.computedSha256 : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.root_ca_manifest_hash_match=");
+    serial::puts(caStoreInfo.manifest.hashMatch ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.root_ca_manifest_root_count=");
+    serial_put_dec64(static_cast<uint64_t>(caStoreInfo.manifest.rootCount));
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.root_ca_manifest_pem_bytes=");
+    serial_put_dec64(static_cast<uint64_t>(caStoreInfo.manifest.pemBytes));
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.root_ca_manifest_production_ready=");
+    serial::puts(caStoreInfo.manifest.productionReady ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.root_ca_manifest_test_only=");
+    serial::puts(caStoreInfo.manifest.testOnly ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.root_ca_manifest_error=");
+    serial::puts(caStoreInfo.manifest.error ? caStoreInfo.manifest.error : "(none)");
     serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.trust_store_policy=");
     serial::puts(gxos::gxos_trust_store_policy_state_name(trustStorePolicy.state));
     serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.trust_store_source=");
@@ -11366,6 +11427,10 @@ static bool printNavigatorRuntimeSmokePreamble()
     serial::puts(trustStorePolicy.sourceDetail ? trustStorePolicy.sourceDetail : "(none)");
     serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.trust_store_production_ready=");
     serial::puts(trustStorePolicy.productionReady ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.trust_store_public_ready=");
+    serial::puts(trustStorePolicy.publicInternetReady ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.trust_store_readiness_blocker=");
+    serial::puts(trustStorePolicy.error ? trustStorePolicy.error : "(none)");
     serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.root_ca_missing_probe_status=");
     serial::puts(gxos::gxos_ca_store_status_name(caMissingProbeInfo.status));
     serial::puts("\n[NAVIGATOR-SMOKE] tls_prereq.root_ca_missing_probe_detail=");
@@ -12007,6 +12072,7 @@ static bool printNavigatorRealPublicHttpsProbeCase()
     const NavigatorRealPublicProbeConfig probeConfig = navigator_real_public_probe_config();
     const gxos::GxosValidatedHttpsPolicyInfo httpsPolicy = gxos::gxos_validated_https_policy_info();
     const gxos::GxosTrustStorePolicyInfo trustStorePolicy = gxos::gxos_tls_trust_store_policy_info();
+    const gxos::GxosCaStoreInfo caStoreInfo = gxos::gxos_ca_store_info();
     const bool pilotEnabled =
         httpsPolicy.state == gxos::GxosValidatedHttpsPolicyState::ProductionValidated &&
         httpsPolicy.broadPublicHttpsEnabled;
@@ -12061,6 +12127,22 @@ static bool printNavigatorRealPublicHttpsProbeCase()
     serial_put_dec64(static_cast<uint64_t>(probeConfig.publicCaBytes));
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.public_ca_parsed_certs=");
     serial_put_dec64(static_cast<uint64_t>(probeConfig.publicCaParsedCertCount));
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.runtime_manifest_present=");
+    serial::puts(caStoreInfo.manifest.present ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.runtime_manifest_hash_match=");
+    serial::puts(caStoreInfo.manifest.hashMatch ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.runtime_manifest_bundle_type=");
+    serial::puts(caStoreInfo.manifest.bundleType ? caStoreInfo.manifest.bundleType : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.runtime_manifest_rotation_id=");
+    serial::puts(caStoreInfo.manifest.rotationId ? caStoreInfo.manifest.rotationId : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.runtime_manifest_production_ready=");
+    serial::puts(caStoreInfo.manifest.productionReady ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.runtime_manifest_test_only=");
+    serial::puts(caStoreInfo.manifest.testOnly ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.runtime_manifest_root_count=");
+    serial_put_dec64(static_cast<uint64_t>(caStoreInfo.manifest.rootCount));
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.runtime_manifest_sha256=");
+    serial::puts(caStoreInfo.manifest.manifestSha256 ? caStoreInfo.manifest.manifestSha256 : "(none)");
     serial::puts("\n");
 
     if (!probeConfig.enabled) {
@@ -12177,6 +12259,22 @@ static bool printNavigatorRealPublicHttpsProbeCase()
     serial_put_dec64(static_cast<uint64_t>(probeConfig.publicCaBytes));
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.public_ca_parsed_certs=");
     serial_put_dec64(static_cast<uint64_t>(probeConfig.publicCaParsedCertCount));
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.runtime_manifest_present=");
+    serial::puts(caStoreInfo.manifest.present ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.runtime_manifest_hash_match=");
+    serial::puts(caStoreInfo.manifest.hashMatch ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.runtime_manifest_bundle_type=");
+    serial::puts(caStoreInfo.manifest.bundleType ? caStoreInfo.manifest.bundleType : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.runtime_manifest_rotation_id=");
+    serial::puts(caStoreInfo.manifest.rotationId ? caStoreInfo.manifest.rotationId : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.runtime_manifest_production_ready=");
+    serial::puts(caStoreInfo.manifest.productionReady ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.runtime_manifest_test_only=");
+    serial::puts(caStoreInfo.manifest.testOnly ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.runtime_manifest_root_count=");
+    serial_put_dec64(static_cast<uint64_t>(caStoreInfo.manifest.rootCount));
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.runtime_manifest_sha256=");
+    serial::puts(caStoreInfo.manifest.manifestSha256 ? caStoreInfo.manifest.manifestSha256 : "(none)");
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.attempted=");
     serial::puts(attempted ? "yes" : "no");
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.requested_url=");

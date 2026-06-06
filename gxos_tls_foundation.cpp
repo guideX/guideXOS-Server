@@ -324,7 +324,9 @@ namespace gxos {
 namespace {
 
 constexpr const char* kBareMetalCaBundlePath = "/certs/ca-bundle.pem";
+constexpr const char* kBareMetalCaBundleManifestPath = "/certs/ca-bundle.manifest";
 constexpr const char* kBareMetalUserCaBundlePath = "/config/certs/ca-bundle.pem";
+constexpr const char* kBareMetalUserCaBundleManifestPath = "/config/certs/ca-bundle.manifest";
 constexpr const char* kBareMetalHttpsPolicyPath = "/config/navigator/https-policy.txt";
 constexpr const char* kBareMetalUserCaBundleCompatPath = "/config/certs/CABUNDLE.PEM";
 constexpr const char* kBareMetalHttpsPolicyCompatPath = "/config/navigator/HTTPSPOL.TXT";
@@ -337,10 +339,15 @@ constexpr const char* kHostedCaBundlePath = "(Windows trust store)";
 constexpr const char* kHostedTrustStoreDetail = "Windows system trust store managed by Schannel";
 constexpr const char* kSmokeFixtureTrustStoreDetail = "Navigator smoke fixture staged at /certs/ca-bundle.pem";
 constexpr const char* kUserProvidedTrustStoreDetail = "User-provided trust store loaded from /config/certs/ca-bundle.pem";
-constexpr const char* kProductionBundleTrustStoreDetail = "Production trust store loaded from /certs/ca-bundle.pem";
-constexpr const char* kProductionPublicBundleTrustStoreDetail =
-    "Production trust store loaded from /certs/ca-bundle.pem via explicit opt-in public-root staging";
+constexpr const char* kProductionPublicProbeTrustStoreDetail =
+    "Production public-probe trust bundle loaded from /certs/ca-bundle.pem via explicit opt-in public-root staging";
+constexpr const char* kShippedRootCandidateTrustStoreDetail =
+    "Shipped-root candidate trust bundle loaded from /certs/ca-bundle.pem for reviewed runtime verification only.";
+constexpr const char* kProductionRootStoreTrustStoreDetail =
+    "Production root store loaded from /certs/ca-bundle.pem.";
 constexpr const char* kNoTrustStoreDetail = "No bare-metal trust store is provisioned at the selected CA bundle path.";
+constexpr const char* kCaBundleManifestSchemaVersion = "guidexos.navigator.ca-bundle-manifest.v0.1";
+constexpr const char* kShippedRootCandidateBundleType = "shipped-root-candidate";
 constexpr const char* kLocalSmokeOnlyPolicyBlocker =
     "Broad validated Navigator https:// remains disabled until a non-smoke trust store policy is explicitly enabled.";
 constexpr const char* kBareMetalHttpsPolicyDefaultSource = "default-safe policy (no /config/navigator/https-policy.txt)";
@@ -415,6 +422,455 @@ void copy_trimmed_ascii_span(char* dst, size_t dstSize, const char* begin, const
 }
 
 void copy_text(char* dst, size_t dst_size, const char* src);
+
+bool is_decimal_digit(char ch)
+{
+    return ch >= '0' && ch <= '9';
+}
+
+bool is_lower_hex_char(char ch)
+{
+    return (ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f');
+}
+
+bool is_upper_hex_char(char ch)
+{
+    return ch >= 'A' && ch <= 'F';
+}
+
+char lower_ascii_hex(char ch)
+{
+    if (is_upper_hex_char(ch)) {
+        return static_cast<char>(ch - 'A' + 'a');
+    }
+    return ch;
+}
+
+void bytes_to_lower_hex(const uint8_t* bytes, size_t byteCount, char* dst, size_t dstSize)
+{
+    static constexpr char kHex[] = "0123456789abcdef";
+    if (!dst || dstSize == 0) return;
+    dst[0] = '\0';
+    if (!bytes || dstSize < (byteCount * 2u + 1u)) return;
+
+    for (size_t i = 0; i < byteCount; ++i) {
+        dst[i * 2u] = kHex[(bytes[i] >> 4) & 0x0F];
+        dst[i * 2u + 1u] = kHex[bytes[i] & 0x0F];
+    }
+    dst[byteCount * 2u] = '\0';
+}
+
+bool normalize_sha256_hex_in_place(char* text)
+{
+    if (!text) return false;
+    size_t length = 0;
+    while (text[length] != '\0') {
+        text[length] = lower_ascii_hex(text[length]);
+        if (!is_lower_hex_char(text[length])) {
+            return false;
+        }
+        ++length;
+    }
+    return length == 64u;
+}
+
+bool json_is_whitespace(char ch)
+{
+    return ch == ' ' || ch == '\t' || ch == '\r' || ch == '\n';
+}
+
+void json_skip_whitespace(const char*& cursor, const char* end)
+{
+    while (cursor < end && json_is_whitespace(*cursor)) {
+        ++cursor;
+    }
+}
+
+bool json_consume_literal(const char*& cursor, const char* end, const char* literal)
+{
+    if (!literal) return false;
+    const char* probe = cursor;
+    while (*literal != '\0') {
+        if (probe >= end || *probe != *literal) {
+            return false;
+        }
+        ++probe;
+        ++literal;
+    }
+    cursor = probe;
+    return true;
+}
+
+bool json_parse_string(const char*& cursor, const char* end, char* dst, size_t dstSize)
+{
+    if (!dst || dstSize == 0 || cursor >= end || *cursor != '"') return false;
+    dst[0] = '\0';
+    ++cursor;
+
+    size_t written = 0;
+    while (cursor < end) {
+        char ch = *cursor++;
+        if (ch == '"') {
+            dst[written] = '\0';
+            return true;
+        }
+        if (ch == '\\') {
+            if (cursor >= end) return false;
+            const char esc = *cursor++;
+            switch (esc) {
+            case '"': ch = '"'; break;
+            case '\\': ch = '\\'; break;
+            case '/': ch = '/'; break;
+            case 'b': ch = '\b'; break;
+            case 'f': ch = '\f'; break;
+            case 'n': ch = '\n'; break;
+            case 'r': ch = '\r'; break;
+            case 't': ch = '\t'; break;
+            case 'u':
+                for (int i = 0; i < 4; ++i) {
+                    if (cursor >= end) return false;
+                    const char hex = *cursor++;
+                    if (!is_decimal_digit(hex) &&
+                        !(hex >= 'a' && hex <= 'f') &&
+                        !(hex >= 'A' && hex <= 'F')) {
+                        return false;
+                    }
+                }
+                ch = '?';
+                break;
+            default:
+                return false;
+            }
+        }
+        if (written + 1u >= dstSize) return false;
+        dst[written++] = ch;
+    }
+    return false;
+}
+
+bool json_skip_string(const char*& cursor, const char* end)
+{
+    if (cursor >= end || *cursor != '"') return false;
+    ++cursor;
+    while (cursor < end) {
+        const char ch = *cursor++;
+        if (ch == '"') {
+            return true;
+        }
+        if (ch == '\\') {
+            if (cursor >= end) return false;
+            const char esc = *cursor++;
+            if (esc == 'u') {
+                for (int i = 0; i < 4; ++i) {
+                    if (cursor >= end) return false;
+                    const char hex = *cursor++;
+                    if (!is_decimal_digit(hex) &&
+                        !(hex >= 'a' && hex <= 'f') &&
+                        !(hex >= 'A' && hex <= 'F')) {
+                        return false;
+                    }
+                }
+            }
+        }
+    }
+    return false;
+}
+
+bool json_parse_unsigned(const char*& cursor, const char* end, uint64_t* valueOut)
+{
+    if (!valueOut || cursor >= end || !is_decimal_digit(*cursor)) return false;
+
+    uint64_t value = 0;
+    while (cursor < end && is_decimal_digit(*cursor)) {
+        value = value * 10u + static_cast<uint64_t>(*cursor - '0');
+        ++cursor;
+    }
+    *valueOut = value;
+    return true;
+}
+
+bool json_skip_number(const char*& cursor, const char* end)
+{
+    if (cursor >= end) return false;
+    const char* start = cursor;
+    if (*cursor == '-') ++cursor;
+    if (cursor >= end || !is_decimal_digit(*cursor)) return false;
+    while (cursor < end && is_decimal_digit(*cursor)) ++cursor;
+    if (cursor < end && *cursor == '.') {
+        ++cursor;
+        if (cursor >= end || !is_decimal_digit(*cursor)) return false;
+        while (cursor < end && is_decimal_digit(*cursor)) ++cursor;
+    }
+    if (cursor < end && (*cursor == 'e' || *cursor == 'E')) {
+        ++cursor;
+        if (cursor < end && (*cursor == '+' || *cursor == '-')) ++cursor;
+        if (cursor >= end || !is_decimal_digit(*cursor)) return false;
+        while (cursor < end && is_decimal_digit(*cursor)) ++cursor;
+    }
+    return cursor > start;
+}
+
+bool json_skip_value(const char*& cursor, const char* end, int depth);
+
+bool json_skip_array(const char*& cursor, const char* end, int depth)
+{
+    if (cursor >= end || *cursor != '[' || depth > 8) return false;
+    ++cursor;
+    json_skip_whitespace(cursor, end);
+    if (cursor < end && *cursor == ']') {
+        ++cursor;
+        return true;
+    }
+    while (cursor < end) {
+        if (!json_skip_value(cursor, end, depth + 1)) return false;
+        json_skip_whitespace(cursor, end);
+        if (cursor >= end) return false;
+        if (*cursor == ']') {
+            ++cursor;
+            return true;
+        }
+        if (*cursor != ',') return false;
+        ++cursor;
+        json_skip_whitespace(cursor, end);
+    }
+    return false;
+}
+
+bool json_skip_object(const char*& cursor, const char* end, int depth)
+{
+    if (cursor >= end || *cursor != '{' || depth > 8) return false;
+    ++cursor;
+    json_skip_whitespace(cursor, end);
+    if (cursor < end && *cursor == '}') {
+        ++cursor;
+        return true;
+    }
+    while (cursor < end) {
+        if (!json_skip_string(cursor, end)) return false;
+        json_skip_whitespace(cursor, end);
+        if (cursor >= end || *cursor != ':') return false;
+        ++cursor;
+        json_skip_whitespace(cursor, end);
+        if (!json_skip_value(cursor, end, depth + 1)) return false;
+        json_skip_whitespace(cursor, end);
+        if (cursor >= end) return false;
+        if (*cursor == '}') {
+            ++cursor;
+            return true;
+        }
+        if (*cursor != ',') return false;
+        ++cursor;
+        json_skip_whitespace(cursor, end);
+    }
+    return false;
+}
+
+bool json_skip_value(const char*& cursor, const char* end, int depth)
+{
+    json_skip_whitespace(cursor, end);
+    if (cursor >= end || depth > 8) return false;
+    if (*cursor == '"') return json_skip_string(cursor, end);
+    if (*cursor == '{') return json_skip_object(cursor, end, depth);
+    if (*cursor == '[') return json_skip_array(cursor, end, depth);
+    if (*cursor == '-' || is_decimal_digit(*cursor)) return json_skip_number(cursor, end);
+    if (json_consume_literal(cursor, end, "true")) return true;
+    if (json_consume_literal(cursor, end, "false")) return true;
+    if (json_consume_literal(cursor, end, "null")) return true;
+    return false;
+}
+
+bool json_parse_yes_no_or_bool(const char*& cursor, const char* end, bool* valueOut)
+{
+    if (!valueOut) return false;
+    if (cursor >= end) return false;
+
+    if (*cursor == '"') {
+        char token[8];
+        if (!json_parse_string(cursor, end, token, sizeof(token))) return false;
+        if (text_equals_insensitive(token, "yes") || text_equals_insensitive(token, "true")) {
+            *valueOut = true;
+            return true;
+        }
+        if (text_equals_insensitive(token, "no") || text_equals_insensitive(token, "false")) {
+            *valueOut = false;
+            return true;
+        }
+        return false;
+    }
+    if (json_consume_literal(cursor, end, "true")) {
+        *valueOut = true;
+        return true;
+    }
+    if (json_consume_literal(cursor, end, "false")) {
+        *valueOut = false;
+        return true;
+    }
+    return false;
+}
+
+struct ParsedCaBundleManifest {
+    bool hasSchemaVersion = false;
+    bool hasBundleType = false;
+    bool hasSha256 = false;
+    bool hasRootCount = false;
+    bool hasPemBytes = false;
+    bool hasProductionReady = false;
+    bool hasTestOnly = false;
+    char schemaVersion[64] = {};
+    char bundleType[64] = {};
+    char rotationId[96] = {};
+    char sha256[65] = {};
+    uint64_t rootCount = 0;
+    uint64_t pemBytes = 0;
+    bool productionReady = false;
+    bool testOnly = false;
+};
+
+bool parse_ca_bundle_manifest_json(const uint8_t* bytes,
+                                   size_t byteCount,
+                                   ParsedCaBundleManifest* manifest,
+                                   char* error,
+                                   size_t errorSize)
+{
+    if (!bytes || !manifest || !error || errorSize == 0) return false;
+    error[0] = '\0';
+
+    const char* cursor = reinterpret_cast<const char*>(bytes);
+    const char* end = cursor + byteCount;
+    json_skip_whitespace(cursor, end);
+    if (cursor >= end || *cursor != '{') {
+        copy_text(error, errorSize, "CA bundle manifest is not a JSON object.");
+        return false;
+    }
+    ++cursor;
+    json_skip_whitespace(cursor, end);
+
+    while (cursor < end && *cursor != '}') {
+        char key[64];
+        if (!json_parse_string(cursor, end, key, sizeof(key))) {
+            copy_text(error, errorSize, "CA bundle manifest has an invalid property name.");
+            return false;
+        }
+        json_skip_whitespace(cursor, end);
+        if (cursor >= end || *cursor != ':') {
+            copy_text(error, errorSize, "CA bundle manifest is missing ':' after a property name.");
+            return false;
+        }
+        ++cursor;
+        json_skip_whitespace(cursor, end);
+
+        if (text_equals(key, "schema_version")) {
+            if (!json_parse_string(cursor, end, manifest->schemaVersion, sizeof(manifest->schemaVersion))) {
+                copy_text(error, errorSize, "CA bundle manifest schema_version must be a JSON string.");
+                return false;
+            }
+            manifest->hasSchemaVersion = true;
+        } else if (text_equals(key, "bundle_type")) {
+            if (!json_parse_string(cursor, end, manifest->bundleType, sizeof(manifest->bundleType))) {
+                copy_text(error, errorSize, "CA bundle manifest bundle_type must be a JSON string.");
+                return false;
+            }
+            manifest->hasBundleType = true;
+        } else if (text_equals(key, "sha256")) {
+            if (!json_parse_string(cursor, end, manifest->sha256, sizeof(manifest->sha256))) {
+                copy_text(error, errorSize, "CA bundle manifest sha256 must be a JSON string.");
+                return false;
+            }
+            manifest->hasSha256 = true;
+        } else if (text_equals(key, "root_count")) {
+            if (!json_parse_unsigned(cursor, end, &manifest->rootCount)) {
+                copy_text(error, errorSize, "CA bundle manifest root_count must be an unsigned integer.");
+                return false;
+            }
+            manifest->hasRootCount = true;
+        } else if (text_equals(key, "pem_bytes")) {
+            if (!json_parse_unsigned(cursor, end, &manifest->pemBytes)) {
+                copy_text(error, errorSize, "CA bundle manifest pem_bytes must be an unsigned integer.");
+                return false;
+            }
+            manifest->hasPemBytes = true;
+        } else if (text_equals(key, "production_ready")) {
+            if (!json_parse_yes_no_or_bool(cursor, end, &manifest->productionReady)) {
+                copy_text(error, errorSize, "CA bundle manifest production_ready must be yes/no.");
+                return false;
+            }
+            manifest->hasProductionReady = true;
+        } else if (text_equals(key, "test_only")) {
+            if (!json_parse_yes_no_or_bool(cursor, end, &manifest->testOnly)) {
+                copy_text(error, errorSize, "CA bundle manifest test_only must be yes/no.");
+                return false;
+            }
+            manifest->hasTestOnly = true;
+        } else if (text_equals(key, "rotation_id")) {
+            if (!json_parse_string(cursor, end, manifest->rotationId, sizeof(manifest->rotationId))) {
+                copy_text(error, errorSize, "CA bundle manifest rotation_id must be a JSON string.");
+                return false;
+            }
+        } else {
+            if (!json_skip_value(cursor, end, 0)) {
+                copy_text(error, errorSize, "CA bundle manifest contains an unsupported JSON value.");
+                return false;
+            }
+        }
+
+        json_skip_whitespace(cursor, end);
+        if (cursor >= end) {
+            copy_text(error, errorSize, "CA bundle manifest ended unexpectedly.");
+            return false;
+        }
+        if (*cursor == ',') {
+            ++cursor;
+            json_skip_whitespace(cursor, end);
+            continue;
+        }
+        if (*cursor != '}') {
+            copy_text(error, errorSize, "CA bundle manifest is missing ',' or '}'.");
+            return false;
+        }
+    }
+
+    if (cursor >= end || *cursor != '}') {
+        copy_text(error, errorSize, "CA bundle manifest is missing its closing '}'.");
+        return false;
+    }
+    ++cursor;
+    json_skip_whitespace(cursor, end);
+    if (cursor != end) {
+        copy_text(error, errorSize, "CA bundle manifest has trailing data.");
+        return false;
+    }
+
+    if (!manifest->hasSchemaVersion || !text_equals(manifest->schemaVersion, kCaBundleManifestSchemaVersion)) {
+        copy_text(error, errorSize, "CA bundle manifest schema_version is missing or unsupported.");
+        return false;
+    }
+    if (!manifest->hasBundleType || manifest->bundleType[0] == '\0') {
+        copy_text(error, errorSize, "CA bundle manifest bundle_type is missing.");
+        return false;
+    }
+    if (!manifest->hasSha256 || !normalize_sha256_hex_in_place(manifest->sha256)) {
+        copy_text(error, errorSize, "CA bundle manifest sha256 must be a 64-character lowercase hex digest.");
+        return false;
+    }
+    if (!manifest->hasRootCount) {
+        copy_text(error, errorSize, "CA bundle manifest root_count is missing.");
+        return false;
+    }
+    if (!manifest->hasPemBytes) {
+        copy_text(error, errorSize, "CA bundle manifest pem_bytes is missing.");
+        return false;
+    }
+    if (!manifest->hasProductionReady) {
+        copy_text(error, errorSize, "CA bundle manifest production_ready is missing.");
+        return false;
+    }
+    if (!manifest->hasTestOnly) {
+        copy_text(error, errorSize, "CA bundle manifest test_only is missing.");
+        return false;
+    }
+
+    return true;
+}
 
 #if defined(GXOS_BARE_METAL)
 bool buffer_contains_token(const uint8_t* buffer, size_t buffer_len, const char* token)
@@ -713,8 +1169,33 @@ struct BareMetalCaStoreState {
         0,
         false,
         kBareMetalCaBundlePath,
-        "Root CA bundle has not been checked yet."
+        "Root CA bundle has not been checked yet.",
+        {
+            GxosCaManifestStatus::Missing,
+            nullptr,
+            0,
+            false,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            0,
+            0,
+            false,
+            false,
+            false,
+            "CA bundle manifest has not been checked yet."
+        }
     };
+    char manifestPath[96] = {};
+    char manifestSchemaVersion[64] = {};
+    char manifestBundleType[64] = {};
+    char manifestRotationId[96] = {};
+    char manifestSha256[65] = {};
+    char computedSha256[65] = {};
+    char manifestError[160] = {};
+    uint8_t manifestBytes[kGxosMaxCaManifestBytes + 1] = {};
 };
 
 struct BareMetalHttpsPolicyConfigInfo {
@@ -762,6 +1243,170 @@ BareMetalHttpsPolicyConfigState& https_policy_config_state()
 {
     static BareMetalHttpsPolicyConfigState state;
     return state;
+}
+
+void reset_ca_manifest_info(BareMetalCaStoreState& state, const char* manifestPath)
+{
+    state.manifestPath[0] = '\0';
+    state.manifestSchemaVersion[0] = '\0';
+    state.manifestBundleType[0] = '\0';
+    state.manifestRotationId[0] = '\0';
+    state.manifestSha256[0] = '\0';
+    state.computedSha256[0] = '\0';
+    state.manifestError[0] = '\0';
+    state.manifestBytes[0] = 0;
+
+    if (manifestPath) {
+        copy_text(state.manifestPath, sizeof(state.manifestPath), manifestPath);
+    }
+
+    state.info.manifest = {
+        GxosCaManifestStatus::Missing,
+        state.manifestPath[0] ? state.manifestPath : nullptr,
+        0,
+        false,
+        nullptr,
+        nullptr,
+        nullptr,
+        nullptr,
+        nullptr,
+        0,
+        0,
+        false,
+        false,
+        false,
+        "CA bundle manifest has not been checked yet."
+    };
+}
+
+void set_ca_manifest_error(BareMetalCaStoreState& state,
+                           GxosCaManifestStatus status,
+                           bool present,
+                           const char* message)
+{
+    state.info.manifest.status = status;
+    state.info.manifest.present = present;
+    copy_text(state.manifestError, sizeof(state.manifestError), message);
+    state.info.manifest.error = state.manifestError;
+}
+
+bool compute_loaded_ca_bundle_sha256(const uint8_t* bytes,
+                                     size_t byteCount,
+                                     char* outHex,
+                                     size_t outHexSize)
+{
+#if GXOS_TLS_MBEDTLS_RUNTIME_INCLUDED
+    if (!bytes || !outHex || outHexSize < 65u) return false;
+    uint8_t digest[32] = {};
+    size_t digestLength = 0;
+    const psa_status_t status = psa_hash_compute(
+        PSA_ALG_SHA_256,
+        bytes,
+        byteCount,
+        digest,
+        sizeof(digest),
+        &digestLength);
+    if (status != PSA_SUCCESS || digestLength != sizeof(digest)) {
+        outHex[0] = '\0';
+        return false;
+    }
+    bytes_to_lower_hex(digest, sizeof(digest), outHex, outHexSize);
+    return true;
+#else
+    (void)outHex;
+    (void)outHexSize;
+    return false;
+#endif
+}
+
+bool load_selected_ca_bundle_manifest(BareMetalCaStoreState& state, const char* manifestPath)
+{
+    reset_ca_manifest_info(state, manifestPath);
+
+    if (!manifestPath || !manifestPath[0]) {
+        set_ca_manifest_error(state, GxosCaManifestStatus::Missing, false,
+            "CA bundle manifest path is unavailable.");
+        return false;
+    }
+
+    kernel::vfs::FileInfo manifestFileInfo{};
+    const kernel::vfs::Status manifestStatus = kernel::vfs::stat(manifestPath, &manifestFileInfo);
+    if (manifestStatus == kernel::vfs::VFS_ERR_NOT_FOUND ||
+        manifestStatus == kernel::vfs::VFS_ERR_NOT_MOUNT) {
+        char buffer[160];
+        copy_text(buffer, sizeof(buffer), "CA bundle manifest not found at ");
+        size_t used = token_length(buffer);
+        if (used + token_length(manifestPath) + 2u < sizeof(buffer)) {
+            copy_text(buffer + used, sizeof(buffer) - used, manifestPath);
+            used = token_length(buffer);
+            copy_text(buffer + used, sizeof(buffer) - used, ".");
+        }
+        set_ca_manifest_error(state, GxosCaManifestStatus::Missing, false, buffer);
+        return false;
+    }
+    if (manifestStatus != kernel::vfs::VFS_OK) {
+        set_ca_manifest_error(state, GxosCaManifestStatus::ReadError, false,
+            "CA bundle manifest could not be stat()'d through the VFS.");
+        return false;
+    }
+    if (manifestFileInfo.type != kernel::vfs::FILE_TYPE_REGULAR) {
+        set_ca_manifest_error(state, GxosCaManifestStatus::Invalid, true,
+            "CA bundle manifest path does not point to a regular file.");
+        return false;
+    }
+    if (manifestFileInfo.size == 0) {
+        set_ca_manifest_error(state, GxosCaManifestStatus::Invalid, true,
+            "CA bundle manifest is empty.");
+        return false;
+    }
+    if (manifestFileInfo.size > static_cast<uint64_t>(kGxosMaxCaManifestBytes)) {
+        set_ca_manifest_error(state, GxosCaManifestStatus::TooLarge, true,
+            "CA bundle manifest exceeds the 16 KiB safety cap.");
+        return false;
+    }
+
+    const int32_t manifestBytesRead = kernel::vfs::read_file(
+        manifestPath,
+        state.manifestBytes,
+        static_cast<uint32_t>(kGxosMaxCaManifestBytes));
+    if (manifestBytesRead < 0 || static_cast<uint64_t>(manifestBytesRead) != manifestFileInfo.size) {
+        set_ca_manifest_error(state, GxosCaManifestStatus::ReadError, true,
+            "CA bundle manifest read did not complete successfully.");
+        return false;
+    }
+
+    const size_t manifestLoaded = static_cast<size_t>(manifestBytesRead);
+    state.manifestBytes[manifestLoaded] = 0;
+    state.info.manifest.status = GxosCaManifestStatus::Loaded;
+    state.info.manifest.bytesLoaded = manifestLoaded;
+    state.info.manifest.present = true;
+
+    ParsedCaBundleManifest parsed{};
+    if (!parse_ca_bundle_manifest_json(state.manifestBytes,
+            manifestLoaded,
+            &parsed,
+            state.manifestError,
+            sizeof(state.manifestError))) {
+        state.info.manifest.status = GxosCaManifestStatus::Invalid;
+        state.info.manifest.error = state.manifestError;
+        return false;
+    }
+
+    copy_text(state.manifestSchemaVersion, sizeof(state.manifestSchemaVersion), parsed.schemaVersion);
+    copy_text(state.manifestBundleType, sizeof(state.manifestBundleType), parsed.bundleType);
+    copy_text(state.manifestRotationId, sizeof(state.manifestRotationId), parsed.rotationId);
+    copy_text(state.manifestSha256, sizeof(state.manifestSha256), parsed.sha256);
+
+    state.info.manifest.schemaVersion = state.manifestSchemaVersion;
+    state.info.manifest.bundleType = state.manifestBundleType;
+    state.info.manifest.rotationId = state.manifestRotationId[0] ? state.manifestRotationId : nullptr;
+    state.info.manifest.manifestSha256 = state.manifestSha256;
+    state.info.manifest.rootCount = static_cast<size_t>(parsed.rootCount);
+    state.info.manifest.pemBytes = static_cast<size_t>(parsed.pemBytes);
+    state.info.manifest.productionReady = parsed.productionReady;
+    state.info.manifest.testOnly = parsed.testOnly;
+    state.info.manifest.error = nullptr;
+    return true;
 }
 
 bool hook_ready(GxosTlsHookStatus status)
@@ -992,6 +1637,13 @@ const char* selected_ca_bundle_path_for_policy(GxosValidatedHttpsPolicyState sta
         : kBareMetalCaBundlePath;
 }
 
+const char* selected_ca_bundle_manifest_path_for_policy(GxosValidatedHttpsPolicyState state)
+{
+    return policy_state_supports_user_trust(state)
+        ? kBareMetalUserCaBundleManifestPath
+        : kBareMetalCaBundleManifestPath;
+}
+
 const char* compat_ca_bundle_path_for_policy(GxosValidatedHttpsPolicyState state)
 {
     return policy_state_supports_user_trust(state)
@@ -1093,7 +1745,14 @@ const char* readiness_blocker_for_ca_store(const GxosCaStoreInfo& info)
 }
 
 #if defined(GXOS_BARE_METAL)
-GxosTrustStoreSource trust_store_source_from_ca_info(const GxosCaStoreInfo& info)
+bool trust_source_is_production_policy_source(GxosTrustStoreSource source)
+{
+    return source == GxosTrustStoreSource::ProductionPublicProbeTrust ||
+        source == GxosTrustStoreSource::ShippedRootCandidate ||
+        source == GxosTrustStoreSource::ProductionRootStore;
+}
+
+GxosTrustStoreSource trust_store_source_from_ca_info(const GxosCaStoreInfo& info, bool publicProbeBundle)
 {
     if (info.status == GxosCaStoreStatus::Missing && info.bytesLoaded == 0 && !info.testOnlyFixture) {
         return GxosTrustStoreSource::None;
@@ -1104,20 +1763,51 @@ GxosTrustStoreSource trust_store_source_from_ca_info(const GxosCaStoreInfo& info
     if (text_equals(info.path, kBareMetalUserCaBundlePath)) {
         return GxosTrustStoreSource::UserProvidedTrustStore;
     }
-    return GxosTrustStoreSource::ProductionBundle;
+    if (publicProbeBundle) {
+        return GxosTrustStoreSource::ProductionPublicProbeTrust;
+    }
+    if (info.manifest.bundleType &&
+        text_equals(info.manifest.bundleType, kShippedRootCandidateBundleType)) {
+        return GxosTrustStoreSource::ShippedRootCandidate;
+    }
+    return GxosTrustStoreSource::ProductionRootStore;
 }
 
-const char* trust_store_source_detail(GxosTrustStoreSource source, bool publicInternetReady)
+const char* trust_store_source_detail(GxosTrustStoreSource source)
 {
     switch (source) {
     case GxosTrustStoreSource::SmokeFixtureTrust: return kSmokeFixtureTrustStoreDetail;
     case GxosTrustStoreSource::UserProvidedTrustStore: return kUserProvidedTrustStoreDetail;
-    case GxosTrustStoreSource::ProductionBundle:
-        return publicInternetReady ? kProductionPublicBundleTrustStoreDetail : kProductionBundleTrustStoreDetail;
+    case GxosTrustStoreSource::ProductionPublicProbeTrust: return kProductionPublicProbeTrustStoreDetail;
+    case GxosTrustStoreSource::ShippedRootCandidate: return kShippedRootCandidateTrustStoreDetail;
+    case GxosTrustStoreSource::ProductionRootStore: return kProductionRootStoreTrustStoreDetail;
     case GxosTrustStoreSource::WindowsSystemTrustStore: return kHostedTrustStoreDetail;
     case GxosTrustStoreSource::None:
     default:
         return kNoTrustStoreDetail;
+    }
+}
+
+const char* trust_store_manifest_blocker(const GxosCaStoreInfo& caInfo)
+{
+    const GxosCaManifestInfo& manifest = caInfo.manifest;
+    switch (manifest.status) {
+    case GxosCaManifestStatus::Missing:
+    case GxosCaManifestStatus::TooLarge:
+    case GxosCaManifestStatus::ReadError:
+    case GxosCaManifestStatus::Invalid:
+        return manifest.error ? manifest.error : "CA bundle manifest is unavailable.";
+    case GxosCaManifestStatus::Loaded:
+        if (!manifest.hashMatch) {
+            return manifest.error ? manifest.error : "CA bundle manifest sha256 does not match the loaded PEM bytes.";
+        }
+        if (manifest.testOnly) {
+            return "CA bundle manifest is marked test_only=yes; broader validated HTTPS remains fail-closed.";
+        }
+        return nullptr;
+    case GxosCaManifestStatus::NotApplicable:
+    default:
+        return nullptr;
     }
 }
 #endif
@@ -1126,7 +1816,8 @@ GxosTrustStorePolicyInfo make_trust_store_policy_info()
 {
 #if defined(GXOS_BARE_METAL)
     const GxosCaStoreInfo caInfo = gxos_ca_store_info();
-    const GxosTrustStoreSource source = trust_store_source_from_ca_info(caInfo);
+    const bool publicProbeBundle = is_public_internet_trust_bundle(runtime_state().bytes, caInfo.bytesLoaded);
+    const GxosTrustStoreSource source = trust_store_source_from_ca_info(caInfo, publicProbeBundle);
 
     if (caInfo.status == GxosCaStoreStatus::Missing) {
         return {
@@ -1145,20 +1836,38 @@ GxosTrustStorePolicyInfo make_trust_store_policy_info()
 
     if (caInfo.status == GxosCaStoreStatus::Loaded &&
         caInfo.parseStatus == GxosCaParseStatus::Parsed) {
+        const char* manifestBlocker =
+            source == GxosTrustStoreSource::SmokeFixtureTrust
+                ? nullptr
+                : trust_store_manifest_blocker(caInfo);
         const bool publicInternetReady =
-            source == GxosTrustStoreSource::ProductionBundle &&
-            !caInfo.testOnlyFixture &&
+            source == GxosTrustStoreSource::ProductionPublicProbeTrust &&
+            manifestBlocker == nullptr &&
             public_internet_trust_opt_in_enabled() &&
-            is_public_internet_trust_bundle(runtime_state().bytes, caInfo.bytesLoaded);
+            caInfo.manifest.productionReady;
+        if (manifestBlocker) {
+            return {
+                GxosTrustStorePolicyState::TrustStoreMalformed,
+                source,
+                caInfo.path,
+                trust_store_source_detail(source),
+                caInfo.bytesLoaded,
+                caInfo.parsedCertificateCount,
+                caInfo.testOnlyFixture || caInfo.manifest.testOnly,
+                false,
+                false,
+                manifestBlocker
+            };
+        }
         return {
             GxosTrustStorePolicyState::TrustStoreParsed,
             source,
             caInfo.path,
-            trust_store_source_detail(source, publicInternetReady),
+            trust_store_source_detail(source),
             caInfo.bytesLoaded,
             caInfo.parsedCertificateCount,
-            caInfo.testOnlyFixture,
-            source == GxosTrustStoreSource::ProductionBundle,
+            caInfo.testOnlyFixture || caInfo.manifest.testOnly,
+            trust_source_is_production_policy_source(source),
             publicInternetReady,
             caInfo.error
         };
@@ -1168,10 +1877,10 @@ GxosTrustStorePolicyInfo make_trust_store_policy_info()
         GxosTrustStorePolicyState::TrustStoreMalformed,
         source,
         caInfo.path,
-        trust_store_source_detail(source, false),
+        trust_store_source_detail(source),
         caInfo.bytesLoaded,
         caInfo.parsedCertificateCount,
-        caInfo.testOnlyFixture,
+        caInfo.testOnlyFixture || caInfo.manifest.testOnly,
         false,
         false,
         caInfo.error ? caInfo.error : "Trust store is present but not usable."
@@ -1288,14 +1997,10 @@ GxosValidatedHttpsPolicyInfo make_validated_https_policy_info()
             blocker = nullptr;
         }
     } else if (effectiveSelection == GxosValidatedHttpsPolicyState::ProductionValidated) {
-        if (trustPolicy.source != GxosTrustStoreSource::ProductionBundle) {
+        if (!trust_source_is_production_policy_source(trustPolicy.source)) {
             detail = "Production HTTPS policy is selected, but the active trust store is not a production bundle.";
             publicHttpsPilotReason = "Public HTTPS pilot requires a non-smoke production CA bundle at /certs/ca-bundle.pem.";
             blocker = "Production HTTPS policy requires a non-smoke bundle at /certs/ca-bundle.pem.";
-        } else if (trustPolicy.smokeTestOnly) {
-            detail = "Production HTTPS policy is selected, but the production CA path currently contains the smoke-only fixture.";
-            publicHttpsPilotReason = "Smoke fixture trust cannot enable the public HTTPS pilot.";
-            blocker = "Smoke fixture trust cannot satisfy ProductionValidated policy.";
         } else if (!nonSmokeReady) {
             detail = "Production HTTPS policy is selected, but bare-metal TLS prerequisites are not yet complete.";
             publicHttpsPilotReason = trustPolicy.error ? trustPolicy.error : "Production HTTPS prerequisites are incomplete.";
@@ -1321,8 +2026,7 @@ GxosValidatedHttpsPolicyInfo make_validated_https_policy_info()
             publicHttpsPilotReason = "Public HTTPS pilot requires ProductionValidated.";
             blocker = "User/dev HTTPS policy is off by default.";
         } else if (trustPolicy.state == GxosTrustStorePolicyState::TrustStoreParsed &&
-            trustPolicy.source == GxosTrustStoreSource::ProductionBundle &&
-            !trustPolicy.smokeTestOnly) {
+            trust_source_is_production_policy_source(trustPolicy.source)) {
             detail = "A production CA bundle is parsed, but ProductionValidated is not selected.";
             publicHttpsPilotReason = "Public HTTPS pilot requires ProductionValidated and public-https-pilot=enabled.";
             blocker = "Production HTTPS policy is off by default.";
@@ -2092,6 +2796,19 @@ const char* gxos_ca_parse_status_name(GxosCaParseStatus status)
     }
 }
 
+const char* gxos_ca_manifest_status_name(GxosCaManifestStatus status)
+{
+    switch (status) {
+    case GxosCaManifestStatus::NotApplicable: return "NotApplicable";
+    case GxosCaManifestStatus::Missing: return "Missing";
+    case GxosCaManifestStatus::Loaded: return "Loaded";
+    case GxosCaManifestStatus::TooLarge: return "TooLarge";
+    case GxosCaManifestStatus::ReadError: return "ReadError";
+    case GxosCaManifestStatus::Invalid: return "Invalid";
+    default: return "Unknown";
+    }
+}
+
 bool gxos_ca_store_load_once()
 {
 #if defined(GXOS_BARE_METAL)
@@ -2105,7 +2822,9 @@ bool gxos_ca_store_load_once()
     const GxosValidatedHttpsPolicyState selectedPolicyState =
         config.explicitSelection ? config.selectedState : GxosValidatedHttpsPolicyState::Disabled;
     const char* activeCaBundlePath = selected_ca_bundle_path_for_policy(selectedPolicyState);
+    const char* activeManifestPath = selected_ca_bundle_manifest_path_for_policy(selectedPolicyState);
     const char* activeCaBundleReadPath = activeCaBundlePath;
+    reset_ca_manifest_info(state, activeManifestPath);
 
     kernel::vfs::FileInfo info{};
     kernel::vfs::Status statStatus = kernel::vfs::VFS_ERR_INVALID;
@@ -2126,7 +2845,8 @@ bool gxos_ca_store_load_once()
             activeCaBundlePath,
             policy_state_supports_user_trust(selectedPolicyState)
                 ? "Root CA bundle not found at /config/certs/ca-bundle.pem."
-                : "Root CA bundle not found at /certs/ca-bundle.pem."
+                : "Root CA bundle not found at /certs/ca-bundle.pem.",
+            state.info.manifest
         };
         return false;
     }
@@ -2139,7 +2859,8 @@ bool gxos_ca_store_load_once()
             0,
             false,
             activeCaBundlePath,
-            "Could not stat the root CA bundle through the VFS."
+            "Could not stat the root CA bundle through the VFS.",
+            state.info.manifest
         };
         return false;
     }
@@ -2152,7 +2873,8 @@ bool gxos_ca_store_load_once()
             0,
             false,
             activeCaBundlePath,
-            "Root CA bundle path does not point to a regular file."
+            "Root CA bundle path does not point to a regular file.",
+            state.info.manifest
         };
         return false;
     }
@@ -2165,7 +2887,8 @@ bool gxos_ca_store_load_once()
             0,
             false,
             activeCaBundlePath,
-            "Root CA bundle is empty."
+            "Root CA bundle is empty.",
+            state.info.manifest
         };
         return false;
     }
@@ -2178,7 +2901,8 @@ bool gxos_ca_store_load_once()
             0,
             false,
             activeCaBundlePath,
-            "Root CA bundle exceeds the 512 KiB safety cap."
+            "Root CA bundle exceeds the 512 KiB safety cap.",
+            state.info.manifest
         };
         return false;
     }
@@ -2196,7 +2920,8 @@ bool gxos_ca_store_load_once()
             0,
             false,
             activeCaBundlePath,
-            "Root CA bundle read did not complete successfully."
+            "Root CA bundle read did not complete successfully.",
+            state.info.manifest
         };
         return false;
     }
@@ -2217,10 +2942,13 @@ bool gxos_ca_store_load_once()
             0,
             testOnlyFixture,
             activeCaBundlePath,
-            "Root CA bundle does not look like a PEM certificate bundle."
+            "Root CA bundle does not look like a PEM certificate bundle.",
+            state.info.manifest
         };
         return false;
     }
+
+    load_selected_ca_bundle_manifest(state, activeManifestPath);
 
     const GxosTlsMbedTlsImportInfo importInfo = make_mbedtls_import_info();
     if (!importInfo.sourcePresent || !importInfo.sourceReadyForCompile) {
@@ -2232,7 +2960,8 @@ bool gxos_ca_store_load_once()
             0,
             testOnlyFixture,
             activeCaBundlePath,
-            "Root CA bundle is loaded, but the Mbed TLS 4.x source import is incomplete so X.509 parsing cannot begin."
+            "Root CA bundle is loaded, but the Mbed TLS 4.x source import is incomplete so X.509 parsing cannot begin.",
+            state.info.manifest
         };
         return true;
     }
@@ -2245,7 +2974,8 @@ bool gxos_ca_store_load_once()
             0,
             testOnlyFixture,
             activeCaBundlePath,
-            "Root CA bundle is loaded, but the guideXOS Mbed TLS 4.x config pair is incomplete so X.509 parsing cannot begin."
+            "Root CA bundle is loaded, but the guideXOS Mbed TLS 4.x config pair is incomplete so X.509 parsing cannot begin.",
+            state.info.manifest
         };
         return true;
     }
@@ -2260,7 +2990,8 @@ bool gxos_ca_store_load_once()
             0,
             testOnlyFixture,
             activeCaBundlePath,
-            hooks.allocatorDetail
+            hooks.allocatorDetail,
+            state.info.manifest
         };
         return false;
     }
@@ -2273,7 +3004,8 @@ bool gxos_ca_store_load_once()
             0,
             testOnlyFixture,
             activeCaBundlePath,
-            hooks.rngDetail
+            hooks.rngDetail,
+            state.info.manifest
         };
         return false;
     }
@@ -2286,7 +3018,8 @@ bool gxos_ca_store_load_once()
             0,
             testOnlyFixture,
             activeCaBundlePath,
-            hooks.timeDetail
+            hooks.timeDetail,
+            state.info.manifest
         };
         return false;
     }
@@ -2299,9 +3032,29 @@ bool gxos_ca_store_load_once()
             0,
             testOnlyFixture,
             activeCaBundlePath,
-            runtime_state().psaDetail
+            runtime_state().psaDetail,
+            state.info.manifest
         };
         return false;
+    }
+
+    if (compute_loaded_ca_bundle_sha256(runtime_state().bytes, loaded, state.computedSha256, sizeof(state.computedSha256))) {
+        state.info.manifest.computedSha256 = state.computedSha256;
+        if (state.info.manifest.status == GxosCaManifestStatus::Loaded &&
+            state.info.manifest.manifestSha256 &&
+            text_equals(state.info.manifest.manifestSha256, state.info.manifest.computedSha256)) {
+            state.info.manifest.hashMatch = true;
+            state.info.manifest.error = nullptr;
+        } else if (state.info.manifest.status == GxosCaManifestStatus::Loaded) {
+            state.info.manifest.hashMatch = false;
+            copy_text(state.manifestError, sizeof(state.manifestError),
+                "CA bundle manifest sha256 does not match the loaded PEM bytes.");
+            state.info.manifest.error = state.manifestError;
+        }
+    } else {
+        copy_text(state.manifestError, sizeof(state.manifestError),
+            "Runtime SHA-256 verification for the loaded CA bundle is unavailable.");
+        state.info.manifest.error = state.manifestError;
     }
 
     BareMetalTlsRuntimeState& runtime = runtime_state();
@@ -2326,7 +3079,8 @@ bool gxos_ca_store_load_once()
             activeCaBundlePath,
             parseResult > 0
                 ? "Root CA bundle was only partially parsed; guideXOS fails closed until every certificate parses cleanly."
-                : "Mbed TLS rejected the root CA bundle during X.509 parsing."
+                : "Mbed TLS rejected the root CA bundle during X.509 parsing.",
+            state.info.manifest
         };
         return false;
     }
@@ -2341,7 +3095,10 @@ bool gxos_ca_store_load_once()
         activeCaBundlePath,
         testOnlyFixture
             ? "Root CA bundle loaded once and parsed successfully through Mbed TLS (smoke-only test fixture; not production trust)."
-            : "Root CA bundle loaded once and parsed successfully through Mbed TLS."
+            : (state.info.manifest.hashMatch
+                ? "Root CA bundle manifest matched the loaded PEM bytes and the CA bundle parsed successfully through Mbed TLS."
+                : "Root CA bundle loaded once and parsed successfully through Mbed TLS."),
+        state.info.manifest
     };
     return true;
 #else
@@ -2353,7 +3110,8 @@ bool gxos_ca_store_load_once()
         0,
         testOnlyFixture,
         activeCaBundlePath,
-        "Root CA bundle is loaded, but the Mbed TLS runtime-linked parser subset is unavailable in this build."
+        "Root CA bundle is loaded, but the Mbed TLS runtime-linked parser subset is unavailable in this build.",
+        state.info.manifest
     };
     return false;
 #endif
@@ -2376,7 +3134,24 @@ GxosCaStoreInfo gxos_ca_store_info()
         0,
         false,
         kHostedCaBundlePath,
-        nullptr
+        nullptr,
+        {
+            GxosCaManifestStatus::NotApplicable,
+            "(not applicable in hosted Schannel mode)",
+            0,
+            false,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr,
+            0,
+            0,
+            false,
+            false,
+            false,
+            nullptr
+        }
     };
     return info;
 #endif
@@ -2388,7 +3163,9 @@ const char* gxos_trust_store_source_name(GxosTrustStoreSource source)
     case GxosTrustStoreSource::None: return "None";
     case GxosTrustStoreSource::SmokeFixtureTrust: return "SmokeFixtureTrust";
     case GxosTrustStoreSource::UserProvidedTrustStore: return "UserProvidedTrustStore";
-    case GxosTrustStoreSource::ProductionBundle: return "ProductionBundle";
+    case GxosTrustStoreSource::ProductionPublicProbeTrust: return "ProductionPublicProbeTrust";
+    case GxosTrustStoreSource::ShippedRootCandidate: return "ShippedRootCandidate";
+    case GxosTrustStoreSource::ProductionRootStore: return "ProductionRootStore";
     case GxosTrustStoreSource::WindowsSystemTrustStore: return "WindowsSystemTrustStore";
     default: return "Unknown";
     }

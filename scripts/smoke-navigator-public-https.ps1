@@ -452,6 +452,12 @@ function Write-NavigatorPublicHttpsConsoleSummary {
     Write-Host "  trust bundle sha256: $($Fields["trust_bundle_sha256"])"
     Write-Host "  trust bundle production_ready: $($Fields["trust_bundle_production_ready"])"
     Write-Host "  trust bundle test_only: $($Fields["trust_bundle_test_only"])"
+    Write-Host "  runtime manifest present: $($Fields["runtime_manifest_present"])"
+    Write-Host "  runtime manifest hash match: $($Fields["runtime_manifest_hash_match"])"
+    Write-Host "  runtime manifest bundle type: $($Fields["runtime_manifest_bundle_type"])"
+    Write-Host "  runtime manifest rotation_id: $($Fields["runtime_manifest_rotation_id"])"
+    Write-Host "  runtime manifest root count: $($Fields["runtime_manifest_root_count"])"
+    Write-Host "  runtime manifest sha256: $($Fields["runtime_manifest_sha256"])"
     Write-Host "  DNS result: $($Fields["dns_result"])"
     Write-Host "  TCP result: $($Fields["tcp_result"])"
     Write-Host "  TLS result: $($Fields["tls_result"])"
@@ -516,6 +522,14 @@ $fields = [ordered]@{
     trust_bundle_root_count = "(not-available)"
     trust_bundle_production_ready = "no"
     trust_bundle_test_only = "(not-available)"
+    runtime_manifest_present = "no"
+    runtime_manifest_hash_match = "no"
+    runtime_manifest_bundle_type = "(not-available)"
+    runtime_manifest_rotation_id = "(not-available)"
+    runtime_manifest_production_ready = "no"
+    runtime_manifest_test_only = "(not-available)"
+    runtime_manifest_root_count = "(not-available)"
+    runtime_manifest_sha256 = "(not-available)"
     dns_result = "not-attempted"
     tcp_result = "not-attempted"
     tls_result = "not-attempted"
@@ -728,6 +742,14 @@ try {
         "trust_bundle_root_count",
         "trust_bundle_production_ready",
         "trust_bundle_test_only",
+        "runtime_manifest_present",
+        "runtime_manifest_hash_match",
+        "runtime_manifest_bundle_type",
+        "runtime_manifest_rotation_id",
+        "runtime_manifest_production_ready",
+        "runtime_manifest_test_only",
+        "runtime_manifest_root_count",
+        "runtime_manifest_sha256",
         "dns_result",
         "tcp_result",
         "tls_result",

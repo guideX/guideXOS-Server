@@ -150,6 +150,30 @@ function Test-NavigatorPublicHttpsPassContract {
     $trustBundleTestOnlyPassed = [string]::Equals($trustBundleTestOnly, "no", [System.StringComparison]::OrdinalIgnoreCase)
     Add-NavigatorPublicHttpsAssertionCheck -Checks $checks -Name "trust_bundle_test_only" -Passed $trustBundleTestOnlyPassed -Detail "Expected trust_bundle_test_only=no, got '$trustBundleTestOnly'."
 
+    $runtimeManifestPresent = Get-NavigatorPublicHttpsFieldValue -Fields $fields -Name "runtime_manifest_present"
+    Add-NavigatorPublicHttpsAssertionCheck -Checks $checks -Name "runtime_manifest_present" -Passed ([string]::Equals($runtimeManifestPresent, "yes", [System.StringComparison]::OrdinalIgnoreCase)) -Detail "Expected runtime_manifest_present=yes, got '$runtimeManifestPresent'."
+
+    $runtimeManifestHashMatch = Get-NavigatorPublicHttpsFieldValue -Fields $fields -Name "runtime_manifest_hash_match"
+    Add-NavigatorPublicHttpsAssertionCheck -Checks $checks -Name "runtime_manifest_hash_match" -Passed ([string]::Equals($runtimeManifestHashMatch, "yes", [System.StringComparison]::OrdinalIgnoreCase)) -Detail "Expected runtime_manifest_hash_match=yes, got '$runtimeManifestHashMatch'."
+
+    $runtimeManifestBundleType = Get-NavigatorPublicHttpsFieldValue -Fields $fields -Name "runtime_manifest_bundle_type"
+    Add-NavigatorPublicHttpsAssertionCheck -Checks $checks -Name "runtime_manifest_bundle_type" -Passed ([string]::Equals($runtimeManifestBundleType, "production-public-probe-merged", [System.StringComparison]::OrdinalIgnoreCase)) -Detail "Expected runtime_manifest_bundle_type=production-public-probe-merged, got '$runtimeManifestBundleType'."
+
+    $runtimeManifestProductionReady = Get-NavigatorPublicHttpsFieldValue -Fields $fields -Name "runtime_manifest_production_ready"
+    Add-NavigatorPublicHttpsAssertionCheck -Checks $checks -Name "runtime_manifest_production_ready" -Passed ([string]::Equals($runtimeManifestProductionReady, "yes", [System.StringComparison]::OrdinalIgnoreCase)) -Detail "Expected runtime_manifest_production_ready=yes, got '$runtimeManifestProductionReady'."
+
+    $runtimeManifestTestOnly = Get-NavigatorPublicHttpsFieldValue -Fields $fields -Name "runtime_manifest_test_only"
+    Add-NavigatorPublicHttpsAssertionCheck -Checks $checks -Name "runtime_manifest_test_only" -Passed ([string]::Equals($runtimeManifestTestOnly, "no", [System.StringComparison]::OrdinalIgnoreCase)) -Detail "Expected runtime_manifest_test_only=no, got '$runtimeManifestTestOnly'."
+
+    $runtimeManifestRootCount = Get-NavigatorPublicHttpsFieldValue -Fields $fields -Name "runtime_manifest_root_count"
+    $runtimeManifestRootCountValue = 0
+    $runtimeManifestRootCountPassed = [int]::TryParse($runtimeManifestRootCount, [ref]$runtimeManifestRootCountValue) -and ($runtimeManifestRootCountValue -gt 0)
+    Add-NavigatorPublicHttpsAssertionCheck -Checks $checks -Name "runtime_manifest_root_count" -Passed $runtimeManifestRootCountPassed -Detail $(if ($runtimeManifestRootCountPassed) { "runtime_manifest_root_count is positive: $runtimeManifestRootCountValue" } else { "runtime_manifest_root_count must be a positive integer, got '$runtimeManifestRootCount'." })
+
+    $runtimeManifestSha256 = Get-NavigatorPublicHttpsFieldValue -Fields $fields -Name "runtime_manifest_sha256"
+    $runtimeManifestSha256Passed = -not [string]::IsNullOrWhiteSpace($runtimeManifestSha256) -and [regex]::IsMatch($runtimeManifestSha256, '^[0-9a-f]{64}$')
+    Add-NavigatorPublicHttpsAssertionCheck -Checks $checks -Name "runtime_manifest_sha256" -Passed $runtimeManifestSha256Passed -Detail $(if ($runtimeManifestSha256Passed) { "runtime_manifest_sha256 is a 64-character lowercase hex digest." } else { "runtime_manifest_sha256 must be a 64-character lowercase hex digest, got '$runtimeManifestSha256'." })
+
     foreach ($fieldName in @(
         "dns_result",
         "tcp_result",
@@ -233,6 +257,14 @@ function Invoke-NavigatorPublicHttpsAssertionSelfTest {
             "[NAVIGATOR-PUBLIC-HTTPS] trust_bundle_root_count=4",
             "[NAVIGATOR-PUBLIC-HTTPS] trust_bundle_production_ready=yes",
             "[NAVIGATOR-PUBLIC-HTTPS] trust_bundle_test_only=no",
+            "[NAVIGATOR-PUBLIC-HTTPS] runtime_manifest_present=yes",
+            "[NAVIGATOR-PUBLIC-HTTPS] runtime_manifest_hash_match=yes",
+            "[NAVIGATOR-PUBLIC-HTTPS] runtime_manifest_bundle_type=production-public-probe-merged",
+            "[NAVIGATOR-PUBLIC-HTTPS] runtime_manifest_rotation_id=sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "[NAVIGATOR-PUBLIC-HTTPS] runtime_manifest_production_ready=yes",
+            "[NAVIGATOR-PUBLIC-HTTPS] runtime_manifest_test_only=no",
+            "[NAVIGATOR-PUBLIC-HTTPS] runtime_manifest_root_count=4",
+            "[NAVIGATOR-PUBLIC-HTTPS] runtime_manifest_sha256=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
             "[NAVIGATOR-PUBLIC-HTTPS] dns_result=PASS",
             "[NAVIGATOR-PUBLIC-HTTPS] tcp_result=PASS",
             "[NAVIGATOR-PUBLIC-HTTPS] tls_result=PASS",

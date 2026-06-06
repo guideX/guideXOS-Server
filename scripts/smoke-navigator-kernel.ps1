@@ -314,6 +314,11 @@ $navigatorSmokeEnvNames = @(
     "GXOS_NAVIGATOR_HTTPS_FAULT_MODE",
     "GXOS_NAVIGATOR_USER_CA_BUNDLE_SOURCE",
     "GXOS_NAVIGATOR_PRODUCTION_CA_BUNDLE_SOURCE",
+    "GXOS_NAVIGATOR_SHIPPED_ROOT_CANDIDATE_CA_BUNDLE_SOURCE",
+    "GXOS_NAVIGATOR_SHIPPED_ROOT_CANDIDATE_ROTATION_ID",
+    "GXOS_NAVIGATOR_SHIPPED_ROOT_CANDIDATE_PRODUCTION_READY",
+    "GXOS_NAVIGATOR_USER_CA_MANIFEST_MODE",
+    "GXOS_NAVIGATOR_PRODUCTION_CA_MANIFEST_MODE",
     "GXOS_NAVIGATOR_SMOKE_ENABLE_REAL_PUBLIC_HTTPS",
     "GXOS_NAVIGATOR_SMOKE_REQUIRE_REAL_PUBLIC_HTTPS",
     "GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_URL",
@@ -337,6 +342,11 @@ function Invoke-NavigatorKernelSmokeRamdiskStage {
         [AllowNull()][string]$HttpsFaultMode,
         [AllowNull()][string]$UserCaSource,
         [AllowNull()][string]$ProductionCaSource,
+        [AllowNull()][string]$CandidateCaSource,
+        [AllowNull()][string]$CandidateRotationId,
+        [bool]$CandidateProductionReady = $false,
+        [string]$UserManifestMode = "normal",
+        [string]$ProductionManifestMode = "normal",
         [bool]$UseSmokeFixture,
         [bool]$EnableRealPublicProbe = $false,
         [bool]$RequireRealPublicProbe = $false,
@@ -348,6 +358,11 @@ function Invoke-NavigatorKernelSmokeRamdiskStage {
     Set-ProcessEnvValue -Name "GXOS_NAVIGATOR_HTTPS_FAULT_MODE" -Value $HttpsFaultMode
     Set-ProcessEnvValue -Name "GXOS_NAVIGATOR_USER_CA_BUNDLE_SOURCE" -Value $UserCaSource
     Set-ProcessEnvValue -Name "GXOS_NAVIGATOR_PRODUCTION_CA_BUNDLE_SOURCE" -Value $ProductionCaSource
+    Set-ProcessEnvValue -Name "GXOS_NAVIGATOR_SHIPPED_ROOT_CANDIDATE_CA_BUNDLE_SOURCE" -Value $CandidateCaSource
+    Set-ProcessEnvValue -Name "GXOS_NAVIGATOR_SHIPPED_ROOT_CANDIDATE_ROTATION_ID" -Value $CandidateRotationId
+    Set-ProcessEnvValue -Name "GXOS_NAVIGATOR_SHIPPED_ROOT_CANDIDATE_PRODUCTION_READY" -Value ($(if ($CandidateProductionReady) { "1" } else { $null }))
+    Set-ProcessEnvValue -Name "GXOS_NAVIGATOR_USER_CA_MANIFEST_MODE" -Value $UserManifestMode
+    Set-ProcessEnvValue -Name "GXOS_NAVIGATOR_PRODUCTION_CA_MANIFEST_MODE" -Value $ProductionManifestMode
     Set-ProcessEnvValue -Name "GXOS_NAVIGATOR_SMOKE_ENABLE_REAL_PUBLIC_HTTPS" -Value ($(if ($EnableRealPublicProbe) { "1" } else { $null }))
     Set-ProcessEnvValue -Name "GXOS_NAVIGATOR_SMOKE_REQUIRE_REAL_PUBLIC_HTTPS" -Value ($(if ($RequireRealPublicProbe) { "1" } else { $null }))
     Set-ProcessEnvValue -Name "GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_URL" -Value ($(if ($EnableRealPublicProbe) { $RealPublicProbeTarget } else { $null }))
@@ -590,6 +605,9 @@ function Test-NavigatorKernelSmokeRealPublicProbeOutput {
         "[NAVIGATOR-SMOKE] https.case.real_public_probe.public_ca_bundle_source=",
         "[NAVIGATOR-SMOKE] https.case.real_public_probe.public_ca_bytes=",
         "[NAVIGATOR-SMOKE] https.case.real_public_probe.public_ca_parsed_certs=",
+        "[NAVIGATOR-SMOKE] https.case.real_public_probe.runtime_manifest_present=",
+        "[NAVIGATOR-SMOKE] https.case.real_public_probe.runtime_manifest_hash_match=",
+        "[NAVIGATOR-SMOKE] https.case.real_public_probe.runtime_manifest_bundle_type=",
         "[NAVIGATOR-SMOKE] https.case.real_public_probe.plaintext_fallback=no"
     )) {
         if (-not $Output.Contains($check)) {
@@ -628,6 +646,13 @@ function Test-NavigatorKernelSmokeRealPublicProbeOutput {
                 '\[NAVIGATOR-SMOKE\] https\.case\.real_public_probe\.trust_bundle_root_count=[1-9][0-9]*',
                 '\[NAVIGATOR-SMOKE\] https\.case\.real_public_probe\.trust_bundle_production_ready=yes',
                 '\[NAVIGATOR-SMOKE\] https\.case\.real_public_probe\.trust_bundle_test_only=no',
+                '\[NAVIGATOR-SMOKE\] https\.case\.real_public_probe\.runtime_manifest_present=yes',
+                '\[NAVIGATOR-SMOKE\] https\.case\.real_public_probe\.runtime_manifest_hash_match=yes',
+                '\[NAVIGATOR-SMOKE\] https\.case\.real_public_probe\.runtime_manifest_bundle_type=production-public-probe-merged',
+                '\[NAVIGATOR-SMOKE\] https\.case\.real_public_probe\.runtime_manifest_production_ready=yes',
+                '\[NAVIGATOR-SMOKE\] https\.case\.real_public_probe\.runtime_manifest_test_only=no',
+                '\[NAVIGATOR-SMOKE\] https\.case\.real_public_probe\.runtime_manifest_root_count=[1-9][0-9]*',
+                '\[NAVIGATOR-SMOKE\] https\.case\.real_public_probe\.runtime_manifest_sha256=[0-9a-f]{64}',
                 '\[NAVIGATOR-SMOKE\] https\.case\.real_public_probe\.transport_selection=PolicyValidatedTlsHttps',
                 '\[NAVIGATOR-SMOKE\] https\.case\.real_public_probe\.tls_status=Success',
                 '\[NAVIGATOR-SMOKE\] https\.case\.real_public_probe\.dns_result=PASS',
@@ -1028,6 +1053,14 @@ $scenarioDefinitions = @(
             "[NAVIGATOR-SMOKE] tls_prereq.root_ca_fixture=normal",
             "[NAVIGATOR-SMOKE] tls_prereq.trust_store_source=UserProvidedTrustStore",
             "[NAVIGATOR-SMOKE] tls_prereq.trust_store_source_detail=User-provided trust store loaded from /config/certs/ca-bundle.pem",
+            "[NAVIGATOR-SMOKE] tls_prereq.root_ca_manifest_path=/config/certs/ca-bundle.manifest",
+            "[NAVIGATOR-SMOKE] tls_prereq.root_ca_manifest_status=Loaded",
+            "[NAVIGATOR-SMOKE] tls_prereq.root_ca_manifest_present=yes",
+            "[NAVIGATOR-SMOKE] tls_prereq.root_ca_manifest_bundle_type=user-dev",
+            "[NAVIGATOR-SMOKE] tls_prereq.root_ca_manifest_hash_match=yes",
+            "[NAVIGATOR-SMOKE] tls_prereq.root_ca_manifest_production_ready=no",
+            "[NAVIGATOR-SMOKE] tls_prereq.root_ca_manifest_test_only=no",
+            "[NAVIGATOR-SMOKE] tls_prereq.trust_store_public_ready=no",
             "[NAVIGATOR-SMOKE] tls_prereq.https_smoke_fault_mode=None",
             "[NAVIGATOR-SMOKE] tls_prereq.https_policy_selected_state=UserTrustStoreDevMode",
             "[NAVIGATOR-SMOKE] tls_prereq.https_policy_effective_state=UserTrustStoreDevMode",
@@ -1058,9 +1091,36 @@ $scenarioDefinitions = @(
         )
         RegexChecks = Merge-CheckMaps -Base $commonRegexChecks -Extra (Merge-CheckMaps -Base $localTlsExplicitPolicyTrustMismatchRegexChecks -Extra @{
             '\[NAVIGATOR-SMOKE\] tls_prereq\.root_ca_bytes=[1-9][0-9]*' = "[NAVIGATOR-SMOKE] tls_prereq.root_ca_bytes=<positive bytes>"
+            '\[NAVIGATOR-SMOKE\] tls_prereq\.root_ca_manifest_sha256=[0-9a-f]{64}' = "[NAVIGATOR-SMOKE] tls_prereq.root_ca_manifest_sha256=<64 hex>"
+            '\[NAVIGATOR-SMOKE\] tls_prereq\.root_ca_computed_sha256=[0-9a-f]{64}' = "[NAVIGATOR-SMOKE] tls_prereq.root_ca_computed_sha256=<64 hex>"
             '\[NAVIGATOR-SMOKE\] https\.case\.policy_validated\.protocol=TLSv1\.[23]' = "[NAVIGATOR-SMOKE] https.case.policy_validated.protocol=<TLSv1.2 or TLSv1.3>"
             '\[NAVIGATOR-SMOKE\] https\.case\.policy_validated\.cipher_suite=.+' = "[NAVIGATOR-SMOKE] https.case.policy_validated.cipher_suite=<non-empty cipher suite>"
         })
+    },
+    [pscustomobject]@{
+        Name = "user_dev_manifest_hash_mismatch"
+        HttpsPolicy = "user-trust-dev-mode"
+        HttpsFaultMode = $null
+        UseSmokeFixture = $false
+        UserCaSource = $validatedCaFixture
+        UserManifestMode = "hash-mismatch"
+        ProductionCaSource = $null
+        TlsCert = $defaultHttpsCert
+        TlsKey = $defaultHttpsKey
+        Checks = $commonChecks + @(
+            "[NAVIGATOR-SMOKE] tls_prereq.root_ca_path=/config/certs/ca-bundle.pem",
+            "[NAVIGATOR-SMOKE] tls_prereq.trust_store_source=UserProvidedTrustStore",
+            "[NAVIGATOR-SMOKE] tls_prereq.root_ca_manifest_status=Loaded",
+            "[NAVIGATOR-SMOKE] tls_prereq.root_ca_manifest_present=yes",
+            "[NAVIGATOR-SMOKE] tls_prereq.root_ca_manifest_hash_match=no",
+            "[NAVIGATOR-SMOKE] tls_prereq.root_ca_manifest_error=CA bundle manifest sha256 does not match the loaded PEM bytes.",
+            "[NAVIGATOR-SMOKE] tls_prereq.trust_store_readiness_blocker=CA bundle manifest sha256 does not match the loaded PEM bytes.",
+            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_selected_state=UserTrustStoreDevMode",
+            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_effective_state=Disabled",
+            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_blocker=CA bundle manifest sha256 does not match the loaded PEM bytes.",
+            "[NAVIGATOR-SMOKE] tls_readiness=no"
+        )
+        RegexChecks = Merge-CheckMaps -Base $commonRegexChecks -Extra $localTlsSelectedBlockedRegexChecks
     },
     [pscustomobject]@{
         Name = "user_dev_untrusted_root"
@@ -1134,8 +1194,16 @@ $scenarioDefinitions = @(
         Checks = $commonChecks + @(
             "[NAVIGATOR-SMOKE] tls_prereq.root_ca_path=/certs/ca-bundle.pem",
             "[NAVIGATOR-SMOKE] tls_prereq.root_ca_fixture=normal",
-            "[NAVIGATOR-SMOKE] tls_prereq.trust_store_source=ProductionBundle",
-            "[NAVIGATOR-SMOKE] tls_prereq.trust_store_source_detail=Production trust store loaded from /certs/ca-bundle.pem",
+            "[NAVIGATOR-SMOKE] tls_prereq.trust_store_source=ProductionRootStore",
+            "[NAVIGATOR-SMOKE] tls_prereq.trust_store_source_detail=Production root store loaded from /certs/ca-bundle.pem.",
+            "[NAVIGATOR-SMOKE] tls_prereq.root_ca_manifest_path=/certs/ca-bundle.manifest",
+            "[NAVIGATOR-SMOKE] tls_prereq.root_ca_manifest_status=Loaded",
+            "[NAVIGATOR-SMOKE] tls_prereq.root_ca_manifest_present=yes",
+            "[NAVIGATOR-SMOKE] tls_prereq.root_ca_manifest_bundle_type=production-source",
+            "[NAVIGATOR-SMOKE] tls_prereq.root_ca_manifest_hash_match=yes",
+            "[NAVIGATOR-SMOKE] tls_prereq.root_ca_manifest_production_ready=no",
+            "[NAVIGATOR-SMOKE] tls_prereq.root_ca_manifest_test_only=no",
+            "[NAVIGATOR-SMOKE] tls_prereq.trust_store_public_ready=no",
             "[NAVIGATOR-SMOKE] tls_prereq.https_smoke_fault_mode=None",
             "[NAVIGATOR-SMOKE] tls_prereq.https_policy_selected_state=ProductionValidated",
             "[NAVIGATOR-SMOKE] tls_prereq.https_policy_effective_state=ProductionValidated",
@@ -1166,9 +1234,83 @@ $scenarioDefinitions = @(
         )
         RegexChecks = Merge-CheckMaps -Base $commonRegexChecks -Extra (Merge-CheckMaps -Base $localTlsExplicitPolicyTrustMismatchRegexChecks -Extra @{
             '\[NAVIGATOR-SMOKE\] tls_prereq\.root_ca_bytes=[1-9][0-9]*' = "[NAVIGATOR-SMOKE] tls_prereq.root_ca_bytes=<positive bytes>"
+            '\[NAVIGATOR-SMOKE\] tls_prereq\.root_ca_manifest_sha256=[0-9a-f]{64}' = "[NAVIGATOR-SMOKE] tls_prereq.root_ca_manifest_sha256=<64 hex>"
+            '\[NAVIGATOR-SMOKE\] tls_prereq\.root_ca_computed_sha256=[0-9a-f]{64}' = "[NAVIGATOR-SMOKE] tls_prereq.root_ca_computed_sha256=<64 hex>"
             '\[NAVIGATOR-SMOKE\] https\.case\.policy_validated\.protocol=TLSv1\.[23]' = "[NAVIGATOR-SMOKE] https.case.policy_validated.protocol=<TLSv1.2 or TLSv1.3>"
             '\[NAVIGATOR-SMOKE\] https\.case\.policy_validated\.cipher_suite=.+' = "[NAVIGATOR-SMOKE] https.case.policy_validated.cipher_suite=<non-empty cipher suite>"
         })
+    },
+    [pscustomobject]@{
+        Name = "production_missing_manifest"
+        HttpsPolicy = "production-validated"
+        HttpsFaultMode = $null
+        UseSmokeFixture = $false
+        UserCaSource = $null
+        ProductionCaSource = $validatedCaFixture
+        ProductionManifestMode = "missing"
+        TlsCert = $defaultHttpsCert
+        TlsKey = $defaultHttpsKey
+        Checks = $commonChecks + @(
+            "[NAVIGATOR-SMOKE] tls_prereq.root_ca_path=/certs/ca-bundle.pem",
+            "[NAVIGATOR-SMOKE] tls_prereq.trust_store_source=ProductionRootStore",
+            "[NAVIGATOR-SMOKE] tls_prereq.root_ca_manifest_status=Missing",
+            "[NAVIGATOR-SMOKE] tls_prereq.root_ca_manifest_present=no",
+            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_selected_state=ProductionValidated",
+            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_effective_state=Disabled",
+            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_blocker=CA bundle manifest not found at /certs/ca-bundle.manifest.",
+            "[NAVIGATOR-SMOKE] tls_prereq.trust_store_readiness_blocker=CA bundle manifest not found at /certs/ca-bundle.manifest.",
+            "[NAVIGATOR-SMOKE] tls_readiness=no"
+        )
+        RegexChecks = Merge-CheckMaps -Base $commonRegexChecks -Extra $localTlsSelectedBlockedRegexChecks
+    },
+    [pscustomobject]@{
+        Name = "production_manifest_test_only"
+        HttpsPolicy = "production-validated"
+        HttpsFaultMode = $null
+        UseSmokeFixture = $false
+        UserCaSource = $null
+        ProductionCaSource = $validatedCaFixture
+        ProductionManifestMode = "test-only"
+        TlsCert = $defaultHttpsCert
+        TlsKey = $defaultHttpsKey
+        Checks = $commonChecks + @(
+            "[NAVIGATOR-SMOKE] tls_prereq.root_ca_path=/certs/ca-bundle.pem",
+            "[NAVIGATOR-SMOKE] tls_prereq.trust_store_source=ProductionRootStore",
+            "[NAVIGATOR-SMOKE] tls_prereq.root_ca_manifest_status=Loaded",
+            "[NAVIGATOR-SMOKE] tls_prereq.root_ca_manifest_present=yes",
+            "[NAVIGATOR-SMOKE] tls_prereq.root_ca_manifest_test_only=yes",
+            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_selected_state=ProductionValidated",
+            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_effective_state=Disabled",
+            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_blocker=CA bundle manifest is marked test_only=yes; broader validated HTTPS remains fail-closed.",
+            "[NAVIGATOR-SMOKE] tls_prereq.trust_store_readiness_blocker=CA bundle manifest is marked test_only=yes; broader validated HTTPS remains fail-closed.",
+            "[NAVIGATOR-SMOKE] tls_readiness=no"
+        )
+        RegexChecks = Merge-CheckMaps -Base $commonRegexChecks -Extra $localTlsSelectedBlockedRegexChecks
+    },
+    [pscustomobject]@{
+        Name = "production_manifest_hash_mismatch"
+        HttpsPolicy = "production-validated"
+        HttpsFaultMode = $null
+        UseSmokeFixture = $false
+        UserCaSource = $null
+        ProductionCaSource = $validatedCaFixture
+        ProductionManifestMode = "hash-mismatch"
+        TlsCert = $defaultHttpsCert
+        TlsKey = $defaultHttpsKey
+        Checks = $commonChecks + @(
+            "[NAVIGATOR-SMOKE] tls_prereq.root_ca_path=/certs/ca-bundle.pem",
+            "[NAVIGATOR-SMOKE] tls_prereq.trust_store_source=ProductionRootStore",
+            "[NAVIGATOR-SMOKE] tls_prereq.root_ca_manifest_status=Loaded",
+            "[NAVIGATOR-SMOKE] tls_prereq.root_ca_manifest_present=yes",
+            "[NAVIGATOR-SMOKE] tls_prereq.root_ca_manifest_hash_match=no",
+            "[NAVIGATOR-SMOKE] tls_prereq.root_ca_manifest_error=CA bundle manifest sha256 does not match the loaded PEM bytes.",
+            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_selected_state=ProductionValidated",
+            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_effective_state=Disabled",
+            "[NAVIGATOR-SMOKE] tls_prereq.https_policy_blocker=CA bundle manifest sha256 does not match the loaded PEM bytes.",
+            "[NAVIGATOR-SMOKE] tls_prereq.trust_store_readiness_blocker=CA bundle manifest sha256 does not match the loaded PEM bytes.",
+            "[NAVIGATOR-SMOKE] tls_readiness=no"
+        )
+        RegexChecks = Merge-CheckMaps -Base $commonRegexChecks -Extra $localTlsSelectedBlockedRegexChecks
     },
     [pscustomobject]@{
         Name = "production_public_pilot_enabled"
@@ -1183,7 +1325,7 @@ $scenarioDefinitions = @(
         Checks = $commonChecks + @(
             "[NAVIGATOR-SMOKE] tls_prereq.root_ca_path=/certs/ca-bundle.pem",
             "[NAVIGATOR-SMOKE] tls_prereq.root_ca_fixture=normal",
-            "[NAVIGATOR-SMOKE] tls_prereq.trust_store_source=ProductionBundle",
+            "[NAVIGATOR-SMOKE] tls_prereq.trust_store_source=ProductionRootStore",
             "[NAVIGATOR-SMOKE] tls_prereq.https_smoke_fault_mode=None",
             "[NAVIGATOR-SMOKE] tls_prereq.https_policy_selected_state=ProductionValidated",
             "[NAVIGATOR-SMOKE] tls_prereq.https_policy_effective_state=ProductionValidated",
@@ -1324,6 +1466,11 @@ try {
             -HttpsFaultMode $scenario.HttpsFaultMode `
             -UserCaSource $scenario.UserCaSource `
             -ProductionCaSource $effectiveProductionCaSource `
+            -CandidateCaSource $scenario.CandidateCaSource `
+            -CandidateRotationId $scenario.CandidateRotationId `
+            -CandidateProductionReady:([bool]$scenario.CandidateProductionReady) `
+            -UserManifestMode $(if ($scenario.UserManifestMode) { [string]$scenario.UserManifestMode } else { "normal" }) `
+            -ProductionManifestMode $(if ($scenario.ProductionManifestMode) { [string]$scenario.ProductionManifestMode } else { "normal" }) `
             -UseSmokeFixture $scenario.UseSmokeFixture `
             -EnableRealPublicProbe:$enableRealPublicProbeForScenario `
             -RequireRealPublicProbe:($enableRealPublicProbeForScenario -and $realPublicProbeRequired) `

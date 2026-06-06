@@ -12,6 +12,7 @@
 namespace gxos {
 
 static constexpr size_t kGxosMaxCaStoreBytes = 512u * 1024u;
+static constexpr size_t kGxosMaxCaManifestBytes = 16u * 1024u;
 static constexpr size_t kGxosTlsArenaCapacityBytes = 256u * 1024u;
 
 enum class GxosTlsBackendStatus {
@@ -83,6 +84,33 @@ enum class GxosCaParseStatus {
     ParseError
 };
 
+enum class GxosCaManifestStatus {
+    NotApplicable,
+    Missing,
+    Loaded,
+    TooLarge,
+    ReadError,
+    Invalid
+};
+
+struct GxosCaManifestInfo {
+    GxosCaManifestStatus status;
+    const char* path;
+    size_t bytesLoaded;
+    bool present;
+    const char* schemaVersion;
+    const char* bundleType;
+    const char* rotationId;
+    const char* manifestSha256;
+    const char* computedSha256;
+    size_t rootCount;
+    size_t pemBytes;
+    bool productionReady;
+    bool testOnly;
+    bool hashMatch;
+    const char* error;
+};
+
 struct GxosCaStoreInfo {
     GxosCaStoreStatus status;
     GxosCaParseStatus parseStatus;
@@ -92,10 +120,12 @@ struct GxosCaStoreInfo {
     bool testOnlyFixture;
     const char* path;
     const char* error;
+    GxosCaManifestInfo manifest;
 };
 
 const char* gxos_ca_store_status_name(GxosCaStoreStatus status);
 const char* gxos_ca_parse_status_name(GxosCaParseStatus status);
+const char* gxos_ca_manifest_status_name(GxosCaManifestStatus status);
 bool gxos_ca_store_load_once();
 GxosCaStoreInfo gxos_ca_store_info();
 
@@ -103,7 +133,9 @@ enum class GxosTrustStoreSource {
     None,
     SmokeFixtureTrust,
     UserProvidedTrustStore,
-    ProductionBundle,
+    ProductionPublicProbeTrust,
+    ShippedRootCandidate,
+    ProductionRootStore,
     WindowsSystemTrustStore
 };
 
