@@ -511,7 +511,13 @@ public:
                                             char* tlsBackend = nullptr,
                                             int tlsBackendLen = 0,
                                             char* transportPolicyReason = nullptr,
-                                            int transportPolicyReasonLen = 0);
+                                            int transportPolicyReasonLen = 0,
+                                            char* unsupportedReason = nullptr,
+                                            int unsupportedReasonLen = 0,
+                                            bool* headerCapHit = nullptr,
+                                            bool* bodyCapHit = nullptr,
+                                            bool* downgradeRedirectBlocked = nullptr,
+                                            bool* tlsSucceededBeforeContentFailure = nullptr);
 
 private:
     enum NavigatorMouseMode {
@@ -659,9 +665,14 @@ private:
     char m_metaHttpReason[48];
     char m_metaContentType[48];
     char m_metaContentEncoding[32];
+    char m_metaUnsupportedReason[128];
     bool m_metaRedirected;
     int m_metaRedirectCount;
     char m_metaErrorStatus[128];
+    bool m_metaHeaderCapHit;
+    bool m_metaBodyCapHit;
+    bool m_metaTlsSucceededBeforeContentFailure;
+    bool m_metaDowngradeRedirectBlocked;
     char m_metaSourcePreview[MAX_SOURCE_PREVIEW];
     int m_metaSourceBytes;
     bool m_metaSourceTruncated;

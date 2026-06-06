@@ -50,9 +50,14 @@ struct NavigatorPageMetadata {
 	int         httpStatusCode = 0;
 	std::string httpReasonPhrase;
 	std::string contentType;
+	std::string contentEncoding;
 	bool        redirected = false;
 	int         redirectCount = 0;
 	std::string errorStatus;
+	std::string unsupportedReason;
+	bool        headerCapHit = false;
+	bool        bodyCapHit = false;
+	bool        tlsSucceededBeforeContentFailure = false;
 	std::string scheme;
 	std::string tlsBackend;
 	std::string tlsCertificateValidation;

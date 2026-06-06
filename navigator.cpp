@@ -3421,6 +3421,7 @@ WebDocument Navigator::buildPageInfoDocument()
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Source type", m.sourceType), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Scheme", m.scheme), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Content type", m.contentType), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Content encoding", m.contentEncoding), ""});
 
 	if (m.httpStatusCode > 0) {
 		std::string status = std::to_string(m.httpStatusCode);
@@ -3433,6 +3434,10 @@ WebDocument Navigator::buildPageInfoDocument()
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Redirected", yesNo(m.redirected)), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Redirect count", m.redirectCount), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Error status", m.errorStatus), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Unsupported reason", m.unsupportedReason), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Header cap hit", yesNo(m.headerCapHit)), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Body cap hit", yesNo(m.bodyCapHit)), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("TLS succeeded before content failure", yesNo(m.tlsSucceededBeforeContentFailure)), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("TLS backend", m.tlsBackend), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("TLS enabled", yesNo(m.tlsEnabled)), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("TLS validated", yesNo(m.tlsValidated)), ""});
@@ -3908,8 +3913,11 @@ WebDocument Navigator::loadHttpResponseDocument(const std::string& url, const gx
 	metadata.httpStatusCode = response.statusCode;
 	metadata.httpReasonPhrase = response.reasonPhrase;
 	metadata.contentType = response.contentType;
+	metadata.contentEncoding = response.contentEncoding;
 	metadata.redirectCount = response.redirectCount;
 	metadata.redirected = response.redirectCount > 0 || metadata.requestedUrl != metadata.finalUrl;
+	metadata.headerCapHit = response.headerCapHit;
+	metadata.bodyCapHit = response.bodyCapHit;
 	metadata.tlsBackend = response.tlsBackend;
 	metadata.tlsCertificateValidation = response.tlsCertificateValidation;
 	metadata.tlsStatus = response.tlsStatus;
@@ -3937,6 +3945,23 @@ WebDocument Navigator::loadHttpResponseDocument(const std::string& url, const gx
 	metadata.tlsSmokeSelfSignedBypass = response.tlsSmokeSelfSignedBypass;
 	metadata.downgradeRedirectBlocked = response.downgradeRedirectBlocked;
 	metadata.insecureRedirectLocation = response.insecureRedirectLocation;
+	metadata.tlsSucceededBeforeContentFailure =
+		response.tlsEnabled && response.tlsHandshakeStarted &&
+		(response.headerCapHit || response.bodyCapHit ||
+			response.error == gxos::web::HttpError::UnsupportedContentEncoding ||
+			response.error == gxos::web::HttpError::UnsupportedTransferEncoding ||
+			response.error == gxos::web::HttpError::MalformedChunkedEncoding);
+	if (response.error == gxos::web::HttpError::UnsupportedContentEncoding) {
+		metadata.unsupportedReason = response.contentEncoding.empty()
+			? "Unsupported content encoding"
+			: ("Unsupported content encoding: " + response.contentEncoding);
+	} else if (response.error == gxos::web::HttpError::UnsupportedTransferEncoding) {
+		metadata.unsupportedReason = response.transferEncoding.empty()
+			? "Unsupported transfer encoding"
+			: ("Unsupported transfer encoding: " + response.transferEncoding);
+	} else if (response.error == gxos::web::HttpError::MalformedChunkedEncoding) {
+		metadata.unsupportedReason = "Malformed chunked transfer encoding";
+	}
 	if (response.error != gxos::web::HttpError::None) {
 		metadata.errorStatus = gxos::web::httpErrorName(response.error);
 		if (!response.errorMessage.empty()) metadata.errorStatus += ": " + response.errorMessage;
@@ -3951,20 +3976,74 @@ WebDocument Navigator::loadHttpResponseDocument(const std::string& url, const gx
 		return doc;
 	};
 
+	auto buildCompatibilityErrorDocument = [&](const std::string& title,
+		const std::string& summary) -> WebDocument {
+		WebDocument doc;
+		doc.url = response.finalUrl.empty() ? url : response.finalUrl;
+		doc.title = title;
+		doc.blocks.push_back({BlockType::Heading, title, ""});
+		doc.blocks.push_back({BlockType::Paragraph, summary, ""});
+		doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Requested URL", metadata.requestedUrl), ""});
+		doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Final URL", metadata.finalUrl), ""});
+		doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Scheme", metadata.scheme), ""});
+		if (response.statusCode > 0) {
+			std::ostringstream status;
+			status << response.statusCode;
+			if (!response.reasonPhrase.empty()) status << " " << response.reasonPhrase;
+			doc.blocks.push_back({BlockType::ListItem, pageInfoLine("HTTP status", status.str()), ""});
+		}
+		doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Content type",
+			response.contentType.empty() ? "(none)" : response.contentType), ""});
+		doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Content encoding",
+			response.contentEncoding.empty() ? "(none)" : response.contentEncoding), ""});
+		doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Redirect count", response.redirectCount), ""});
+		if (!metadata.unsupportedReason.empty()) {
+			doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Unsupported reason", metadata.unsupportedReason), ""});
+		}
+		if (response.headerCapHit) {
+			doc.blocks.push_back({BlockType::ListItem,
+				pageInfoLine("Header limit hit", std::to_string(gxos::web::kHttpMaxHeaderBytes) + " bytes"), ""});
+		}
+		if (response.bodyCapHit) {
+			doc.blocks.push_back({BlockType::ListItem,
+				pageInfoLine("Body limit hit", std::to_string(gxos::web::kHttpMaxBodyBytes) + " bytes"), ""});
+		}
+		doc.blocks.push_back({BlockType::ListItem, pageInfoLine("TLS succeeded before content failure",
+			yesNo(metadata.tlsSucceededBeforeContentFailure)), ""});
+		doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Technical error",
+			std::string(gxos::web::httpErrorName(response.error)) + ": " + response.errorMessage), ""});
+		if (!response.tlsErrorCode.empty()) {
+			doc.blocks.push_back({BlockType::ListItem, pageInfoLine("TLS error code", response.tlsErrorCode), ""});
+		}
+		doc.blocks.push_back({BlockType::Link, "Page Info", "about:page-info"});
+		doc.blocks.push_back({BlockType::Link, "Go to about:navigator", "about:navigator"});
+		return doc;
+	};
+
 	if (!response.ok()) {
 		std::string title = "HTTP Error";
+		std::string summary = "Navigator could not load the requested URL.";
 		if (response.error == gxos::web::HttpError::UnsupportedContentEncoding) {
 			title = "Unsupported Content Encoding";
+			summary = "TLS succeeded, but Navigator cannot display this compressed response body yet.";
 		} else if (response.error == gxos::web::HttpError::UnsupportedTransferEncoding) {
 			title = "Unsupported Transfer Encoding";
+			summary = "TLS succeeded, but Navigator cannot display this transfer encoding yet.";
 		} else if (response.error == gxos::web::HttpError::MalformedChunkedEncoding) {
 			title = "Malformed Chunked Response";
+			summary = "TLS succeeded, but the server's chunked response could not be decoded safely.";
 		} else if (response.error == gxos::web::HttpError::RedirectLimitExceeded) {
 			title = "Redirect Limit Exceeded";
+			summary = "Navigator stopped following redirects after hitting its safety limit.";
 		} else if (response.error == gxos::web::HttpError::InsecureRedirectBlocked) {
 			title = "Insecure Redirect Blocked";
+			summary = "Navigator blocked an HTTPS-to-HTTP redirect because it would continue over an insecure connection.";
 		} else if (response.error == gxos::web::HttpError::BodyTooLarge) {
 			title = "Response Too Large";
+			summary = "TLS may have succeeded, but Navigator stopped before rendering because the response body exceeded the configured safety limit.";
+		} else if (response.error == gxos::web::HttpError::HeaderTooLarge) {
+			title = "Headers Too Large";
+			summary = "Navigator stopped before rendering because the response headers exceeded the configured safety limit.";
 		} else if (response.error == gxos::web::HttpError::Timeout) {
 			title = "Network Timeout";
 		} else if (response.error == gxos::web::HttpError::TlsCertificateHostnameMismatch) {
@@ -3982,26 +4061,11 @@ WebDocument Navigator::loadHttpResponseDocument(const std::string& url, const gx
 		} else if (response.error == gxos::web::HttpError::TlsWriteFailed) {
 			title = "HTTPS Write Failed";
 		}
-		WebDocument doc;
-		doc.url = response.finalUrl.empty() ? url : response.finalUrl;
-		doc.title = title;
-		doc.blocks.push_back({BlockType::Heading, title, ""});
-		doc.blocks.push_back({BlockType::Paragraph,
-			response.error == gxos::web::HttpError::InsecureRedirectBlocked
-				? "Navigator blocked an HTTPS-to-HTTP redirect because it would continue navigation over an insecure connection."
-				: "Navigator could not load the requested URL.", ""});
-		doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Attempted URL", url), ""});
+		WebDocument doc = buildCompatibilityErrorDocument(title, summary);
 		if (!response.insecureRedirectLocation.empty()) {
-			doc.blocks.push_back({BlockType::ListItem,
+			doc.blocks.insert(doc.blocks.begin() + 3, {BlockType::ListItem,
 				pageInfoLine("Attempted insecure Location", response.insecureRedirectLocation), ""});
 		}
-		doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Technical error",
-			std::string(gxos::web::httpErrorName(response.error)) + ": " + response.errorMessage), ""});
-		if (!response.tlsErrorCode.empty()) {
-			doc.blocks.push_back({BlockType::ListItem, pageInfoLine("TLS error code", response.tlsErrorCode), ""});
-		}
-		doc.blocks.push_back({BlockType::Link, "Page Info", "about:page-info"});
-		doc.blocks.push_back({BlockType::Link, "Go to about:navigator", "about:navigator"});
 		return finish(std::move(doc));
 	}
 
@@ -4028,11 +4092,28 @@ WebDocument Navigator::loadHttpResponseDocument(const std::string& url, const gx
 	}
 
 	if (response.statusCode < 200 || response.statusCode >= 300) {
-		std::ostringstream reason;
-		reason << "HTTP " << response.statusCode;
-		if (!response.reasonPhrase.empty()) reason << " " << response.reasonPhrase;
-		if (metadata.errorStatus.empty()) metadata.errorStatus = reason.str();
-		return finish(buildErrorDocument(documentUrl, reason.str()));
+		std::ostringstream status;
+		status << "HTTP " << response.statusCode;
+		if (!response.reasonPhrase.empty()) status << " " << response.reasonPhrase;
+		if (metadata.errorStatus.empty()) metadata.errorStatus = status.str();
+		WebDocument doc;
+		doc.url = documentUrl;
+		doc.title = status.str();
+		doc.blocks.push_back({BlockType::Heading, status.str(), ""});
+		doc.blocks.push_back({BlockType::Paragraph,
+			response.statusCode == 404
+				? "The server replied, but the requested page was not found."
+				: (response.statusCode >= 500
+					? "The server reported an internal failure after Navigator reached it successfully."
+					: "The server replied with a non-success HTTP status."), ""});
+		doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Requested URL", metadata.requestedUrl), ""});
+		doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Final URL", metadata.finalUrl), ""});
+		doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Content type",
+			response.contentType.empty() ? "(none)" : response.contentType), ""});
+		doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Redirect count", response.redirectCount), ""});
+		doc.blocks.push_back({BlockType::Link, "Page Info", "about:page-info"});
+		doc.blocks.push_back({BlockType::Link, "Go to about:navigator", "about:navigator"});
+		return finish(std::move(doc));
 	}
 
 	if (response.contentType == "text/html") {
@@ -4060,11 +4141,14 @@ WebDocument Navigator::loadHttpResponseDocument(const std::string& url, const gx
 	item.url = metadata.requestedUrl;
 	item.finalUrl = documentUrl;
 	item.contentType = response.contentType.empty() ? "application/octet-stream" : response.contentType;
-	item.byteCount = response.body.size();
-	item.suggestedFileName = sanitizeDownloadFileName(fileNameFromUrlPath(documentUrl));
+		item.byteCount = response.body.size();
+		item.suggestedFileName = sanitizeDownloadFileName(fileNameFromUrlPath(documentUrl));
 
-	metadata.errorStatus = "Unsupported content type downloaded";
-	metadata.downloaded = true;
+		metadata.errorStatus = "Unsupported content type downloaded";
+		metadata.unsupportedReason = response.contentType.empty()
+			? "Unsupported or missing content type"
+			: ("Unsupported content type: " + response.contentType);
+		metadata.downloaded = true;
 	metadata.downloadByteCount = response.body.size();
 	if (response.body.empty()) {
 		item.success = false;

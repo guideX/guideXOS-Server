@@ -6,9 +6,9 @@ from pathlib import Path
 import argparse
 import binascii
 import gzip
+import zlib
 import ssl
 import struct
-import zlib
 
 
 def png_chunk(kind, data):
@@ -71,7 +71,13 @@ class NavigatorSmokeHandler(BaseHTTPRequestHandler):
         path = self.path.split("?", 1)[0]
         host = self.headers.get("Host", "")
         host_name = host.split(":", 1)[0].lower()
-        if path == "/navigator-smoke/basic.html":
+        compat_prefix = "/navigator-smoke/"
+        compat_path = path
+        if path.startswith("/navigator-policy/") and path not in ("/navigator-policy/ok.html", "/navigator-policy/redirect-downgrade"):
+            compat_prefix = "/navigator-policy/"
+            compat_path = "/navigator-smoke/" + path[len("/navigator-policy/"):]
+
+        if compat_path == "/navigator-smoke/basic.html":
             self.write_bytes(200, "text/html; charset=utf-8",
                              b"<html><body><h1>Kernel HTTP Basic</h1><p>basic html body</p></body></html>")
             return
@@ -129,6 +135,10 @@ class NavigatorSmokeHandler(BaseHTTPRequestHandler):
             self.write_bytes(200, "text/html; charset=utf-8",
                              b"<html><body><h1>Kernel TLS Basic</h1><p>local handshake ok</p></body></html>")
             return
+        if compat_path == "/navigator-smoke/plain.txt":
+            self.write_bytes(200, "text/plain; charset=utf-8",
+                             b"Navigator HTTPS text fixture\nsecond line\n")
+            return
         if path in ("/navigator-policy/ok.html", "/policy-validated/ok.html"):
             expected = self.policy_host.lower()
             if host_name != expected:
@@ -155,12 +165,12 @@ class NavigatorSmokeHandler(BaseHTTPRequestHandler):
             port = self.http_port or 8080
             self.write_redirect(302, f"http://10.0.2.2:{port}/navigator-smoke/insecure-downgrade")
             return
-        if path == "/navigator-smoke/final.html":
+        if compat_path == "/navigator-smoke/final.html":
             self.write_bytes(200, "text/html; charset=utf-8",
                              b"<html><body><h1>Kernel HTTP Final</h1><p>redirect target</p></body></html>")
             return
-        if path == "/navigator-smoke/redirect-relative":
-            self.write_redirect(302, "/navigator-smoke/final.html")
+        if compat_path == "/navigator-smoke/redirect-relative":
+            self.write_redirect(302, f"{compat_prefix}final.html")
             return
         if path == "/navigator-smoke/redirect-absolute":
             self.write_redirect(301, "http://10.0.2.2:8080/navigator-smoke/final.html")
@@ -170,6 +180,19 @@ class NavigatorSmokeHandler(BaseHTTPRequestHandler):
             return
         if path == "/navigator-smoke/redirect-loop":
             self.write_redirect(302, "/navigator-smoke/redirect-loop")
+            return
+        if compat_path == "/navigator-smoke/tls-redirect-relative":
+            self.write_redirect(302, f"{compat_prefix}final.html")
+            return
+        if compat_path == "/navigator-smoke/tls-redirect-absolute":
+            request_host = host.split(":", 1)[0]
+            if self.https_port:
+                self.write_redirect(301, f"https://{request_host}:{self.https_port}{compat_prefix}final.html")
+            else:
+                self.write_redirect(301, f"https://{request_host}{compat_prefix}final.html")
+            return
+        if compat_path == "/navigator-smoke/tls-redirect-loop":
+            self.write_redirect(302, f"{compat_prefix}tls-redirect-loop")
             return
         if path == "/navigator-smoke/redirect-to-https":
             if self.https_port:
@@ -229,13 +252,36 @@ class NavigatorSmokeHandler(BaseHTTPRequestHandler):
                 self.wfile.write(chunk + b"\r\n")
             self.wfile.write(b"0\r\n\r\n")
             return
-        if path == "/navigator-smoke/gzip.html":
+        if compat_path == "/navigator-smoke/gzip.html":
             body = gzip.compress(b"<html><body><h1>Compressed</h1></body></html>")
             self.write_bytes(200, "text/html; charset=utf-8", body, {"Content-Encoding": "gzip"})
             return
-        if path == "/navigator-smoke/missing.html":
+        if compat_path == "/navigator-smoke/br.html":
+            self.write_bytes(200, "text/html; charset=utf-8",
+                             b"not-really-brotli",
+                             {"Content-Encoding": "br"})
+            return
+        if compat_path == "/navigator-smoke/deflate.html":
+            body = zlib.compress(b"<html><body><h1>Deflate</h1></body></html>")
+            self.write_bytes(200, "text/html; charset=utf-8", body, {"Content-Encoding": "deflate"})
+            return
+        if compat_path == "/navigator-smoke/missing.html":
             self.write_bytes(404, "text/html; charset=utf-8",
                              b"<html><body><h1>Missing</h1><p>not found</p></body></html>")
+            return
+        if compat_path == "/navigator-smoke/error-500.html":
+            self.write_bytes(500, "text/html; charset=utf-8",
+                             b"<html><body><h1>Server Error</h1><p>fixture 500</p></body></html>")
+            return
+        if compat_path == "/navigator-smoke/large-body.txt":
+            self.write_bytes(200, "text/plain; charset=utf-8", b"A" * (264 * 1024))
+            return
+        if compat_path == "/navigator-smoke/large-headers.html":
+            headers = {}
+            for index in range(8):
+                headers[f"X-Smoke-{index:02d}"] = "B" * 4096
+            self.write_bytes(200, "text/html; charset=utf-8",
+                             b"<html><body><h1>Large Headers</h1></body></html>", headers)
             return
         if path == "/navigator-smoke/image-relative.html":
             self.write_bytes(200, "text/html; charset=utf-8",
@@ -281,7 +327,7 @@ class NavigatorSmokeHandler(BaseHTTPRequestHandler):
         if path == "/navigator-smoke/not-png.txt":
             self.write_bytes(200, "text/plain", b"this is not a png")
             return
-        if path == "/navigator-smoke/download.bin":
+        if compat_path == "/navigator-smoke/download.bin":
             self.write_bytes(200, "application/octet-stream", b"guideXOS download smoke\n")
             return
 

@@ -80,6 +80,8 @@ struct HttpResponse {
 	std::string contentEncoding;
 	int redirectCount = 0;
 	std::vector<std::string> redirectChain;
+	bool headerCapHit = false;
+	bool bodyCapHit = false;
 	HttpError error = HttpError::None;
 	std::string errorMessage;
 	std::string tlsBackend;

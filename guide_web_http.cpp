@@ -191,6 +191,9 @@ static bool parseHttpResponse(const std::string& raw, HttpResponse& response)
 			std::string decoded;
 			std::string chunkError;
 			if (!decodeChunkedBody(response.body, decoded, chunkError)) {
+				if (chunkError.find("safety limit") != std::string::npos) {
+					response.bodyCapHit = true;
+				}
 				setError(response, chunkError.find("safety limit") != std::string::npos
 					? HttpError::BodyTooLarge
 					: HttpError::MalformedChunkedEncoding,
@@ -204,6 +207,7 @@ static bool parseHttpResponse(const std::string& raw, HttpResponse& response)
 			return false;
 		}
 	} else if (response.body.size() > kHttpMaxBodyBytes) {
+		response.bodyCapHit = true;
 		setError(response, HttpError::BodyTooLarge, "HTTP response body exceeded the safety limit.");
 		return false;
 	}
@@ -1552,14 +1556,18 @@ static HttpResponse sendSingleHttpRequest(const std::string& url,
 				rawChunked = toLowerAscii(raw.substr(0, end)).find("transfer-encoding:") != std::string::npos &&
 					toLowerAscii(raw.substr(0, end)).find("chunked") != std::string::npos;
 			} else if (raw.size() > kHttpMaxHeaderBytes) {
+				if (activeTls) copyTlsDiagnostics(response, *activeTls);
 				stream.close(stream.context);
+				response.headerCapHit = true;
 				setError(response, HttpError::HeaderTooLarge, "HTTP response headers exceeded the safety limit.");
 				return response;
 			}
 		}
 		const size_t rawBodyLimit = kHttpMaxBodyBytes + (rawChunked ? kHttpMaxHeaderBytes : 0u);
 		if (sawHeaderEnd && raw.size() > headerBytes + rawBodyLimit) {
+			if (activeTls) copyTlsDiagnostics(response, *activeTls);
 			stream.close(stream.context);
+			response.bodyCapHit = true;
 			setError(response, HttpError::BodyTooLarge, "HTTP response body exceeded the safety limit.");
 			return response;
 		}

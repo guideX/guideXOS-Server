@@ -468,6 +468,10 @@ function Write-NavigatorPublicHttpsConsoleSummary {
     Write-Host "  certificate validation: $($Fields["certificate_validation_result"])"
     Write-Host "  hostname validation: $($Fields["hostname_validation_result"])"
     Write-Host "  HTTP status: $($Fields["http_status"])"
+    Write-Host "  header cap hit: $($Fields["header_cap_hit"])"
+    Write-Host "  body cap hit: $($Fields["body_cap_hit"])"
+    Write-Host "  downgrade blocked: $($Fields["downgrade_blocked"])"
+    Write-Host "  TLS succeeded before content failure: $($Fields["tls_succeeded_before_content_failure"])"
     Write-Host "  unsupported content reason: $($Fields["unsupported_reason"])"
     Write-Host "  plaintext_fallback: $($Fields["plaintext_fallback"])"
     if ($Fields.Contains("pass_contract_assertion_result")) {
@@ -544,6 +548,10 @@ $fields = [ordered]@{
     http_status = "(not-attempted)"
     content_type = "(not-attempted)"
     content_encoding = "(not-attempted)"
+    header_cap_hit = "no"
+    body_cap_hit = "no"
+    downgrade_blocked = "no"
+    tls_succeeded_before_content_failure = "no"
     unsupported_reason = "(not-attempted)"
     plaintext_fallback = "no"
     pass_contract_assertion_result = "not-run"
@@ -774,6 +782,10 @@ try {
         "http_status",
         "content_type",
         "content_encoding",
+        "header_cap_hit",
+        "body_cap_hit",
+        "downgrade_blocked",
+        "tls_succeeded_before_content_failure",
         "unsupported_reason",
         "plaintext_fallback",
         "skip_reason",

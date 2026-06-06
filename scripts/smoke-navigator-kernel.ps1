@@ -685,7 +685,12 @@ function Test-NavigatorKernelSmokeRealPublicProbeOutput {
                 '\[NAVIGATOR-SMOKE\] https\.case\.real_public_probe\.hostname_validation_result=PASS',
                 '\[NAVIGATOR-SMOKE\] https\.case\.real_public_probe\.verify_flags=0',
                 '\[NAVIGATOR-SMOKE\] https\.case\.real_public_probe\.tls_tcp_connect_attempts=[1-9][0-9]*',
-                '\[NAVIGATOR-SMOKE\] https\.case\.real_public_probe\.source_type=https'
+                '\[NAVIGATOR-SMOKE\] https\.case\.real_public_probe\.source_type=https',
+                '\[NAVIGATOR-SMOKE\] https\.case\.real_public_probe\.header_cap_hit=(yes|no)',
+                '\[NAVIGATOR-SMOKE\] https\.case\.real_public_probe\.body_cap_hit=(yes|no)',
+                '\[NAVIGATOR-SMOKE\] https\.case\.real_public_probe\.downgrade_blocked=(yes|no)',
+                '\[NAVIGATOR-SMOKE\] https\.case\.real_public_probe\.tls_succeeded_before_content_failure=(yes|no)',
+                '\[NAVIGATOR-SMOKE\] https\.case\.real_public_probe\.unsupported_reason=.*'
             )
             foreach ($pattern in $passPatterns) {
                 if (-not [regex]::IsMatch($Output, $pattern)) {
@@ -803,6 +808,19 @@ $commonChecks = @(
     "[NAVIGATOR-SMOKE] https.case.public_pilot_fixture.result=PASS",
     "[NAVIGATOR-SMOKE] https.case.public_pilot_redirect.result=PASS",
     "[NAVIGATOR-SMOKE] https.case.public_pilot_downgrade.result=PASS",
+    "[NAVIGATOR-SMOKE] https.case.compat_html_200.result=PASS",
+    "[NAVIGATOR-SMOKE] https.case.compat_text_200.result=PASS",
+    "[NAVIGATOR-SMOKE] https.case.compat_404.result=PASS",
+    "[NAVIGATOR-SMOKE] https.case.compat_500.result=PASS",
+    "[NAVIGATOR-SMOKE] https.case.compat_download.result=PASS",
+    "[NAVIGATOR-SMOKE] https.case.compat_gzip.result=PASS",
+    "[NAVIGATOR-SMOKE] https.case.compat_br.result=PASS",
+    "[NAVIGATOR-SMOKE] https.case.compat_deflate.result=PASS",
+    "[NAVIGATOR-SMOKE] https.case.compat_redirect_relative.result=PASS",
+    "[NAVIGATOR-SMOKE] https.case.compat_redirect_absolute.result=PASS",
+    "[NAVIGATOR-SMOKE] https.case.compat_redirect_loop.result=PASS",
+    "[NAVIGATOR-SMOKE] https.case.compat_large_body.result=PASS",
+    "[NAVIGATOR-SMOKE] https.case.compat_large_headers.result=PASS",
     "[NAVIGATOR-SMOKE] http.case.basic.result=PASS",
     "[NAVIGATOR-SMOKE] http.case.relative_redirect.result=PASS",
     "[NAVIGATOR-SMOKE] http.case.absolute_redirect.result=PASS",
@@ -842,6 +860,19 @@ $commonRegexChecks = @{
     '\[NAVIGATOR-SMOKE\] tls_prereq\.wall_clock_epoch=[1-9][0-9]+' = "[NAVIGATOR-SMOKE] tls_prereq.wall_clock_epoch=<positive Unix seconds>"
     '\[NAVIGATOR-SMOKE\] tls_prereq\.wall_clock_utc=20[2-9][0-9]-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z' = "[NAVIGATOR-SMOKE] tls_prereq.wall_clock_utc=<plausible UTC date>"
     '\[NAVIGATOR-SMOKE\] tls_prereq\.tls_backend_status=(ReadyForLocalHandshake|CaMissing|CaParseFailed)' = "[NAVIGATOR-SMOKE] tls_prereq.tls_backend_status=<expected backend status>"
+    '\[NAVIGATOR-SMOKE\] https\.case\.compat_html_200\.enabled=(yes|no)' = "[NAVIGATOR-SMOKE] https.case.compat_html_200.enabled=<yes|no>"
+    '\[NAVIGATOR-SMOKE\] https\.case\.compat_text_200\.enabled=(yes|no)' = "[NAVIGATOR-SMOKE] https.case.compat_text_200.enabled=<yes|no>"
+    '\[NAVIGATOR-SMOKE\] https\.case\.compat_404\.enabled=(yes|no)' = "[NAVIGATOR-SMOKE] https.case.compat_404.enabled=<yes|no>"
+    '\[NAVIGATOR-SMOKE\] https\.case\.compat_500\.enabled=(yes|no)' = "[NAVIGATOR-SMOKE] https.case.compat_500.enabled=<yes|no>"
+    '\[NAVIGATOR-SMOKE\] https\.case\.compat_download\.enabled=(yes|no)' = "[NAVIGATOR-SMOKE] https.case.compat_download.enabled=<yes|no>"
+    '\[NAVIGATOR-SMOKE\] https\.case\.compat_gzip\.enabled=(yes|no)' = "[NAVIGATOR-SMOKE] https.case.compat_gzip.enabled=<yes|no>"
+    '\[NAVIGATOR-SMOKE\] https\.case\.compat_br\.enabled=(yes|no)' = "[NAVIGATOR-SMOKE] https.case.compat_br.enabled=<yes|no>"
+    '\[NAVIGATOR-SMOKE\] https\.case\.compat_deflate\.enabled=(yes|no)' = "[NAVIGATOR-SMOKE] https.case.compat_deflate.enabled=<yes|no>"
+    '\[NAVIGATOR-SMOKE\] https\.case\.compat_redirect_relative\.enabled=(yes|no)' = "[NAVIGATOR-SMOKE] https.case.compat_redirect_relative.enabled=<yes|no>"
+    '\[NAVIGATOR-SMOKE\] https\.case\.compat_redirect_absolute\.enabled=(yes|no)' = "[NAVIGATOR-SMOKE] https.case.compat_redirect_absolute.enabled=<yes|no>"
+    '\[NAVIGATOR-SMOKE\] https\.case\.compat_redirect_loop\.enabled=(yes|no)' = "[NAVIGATOR-SMOKE] https.case.compat_redirect_loop.enabled=<yes|no>"
+    '\[NAVIGATOR-SMOKE\] https\.case\.compat_large_body\.enabled=(yes|no)' = "[NAVIGATOR-SMOKE] https.case.compat_large_body.enabled=<yes|no>"
+    '\[NAVIGATOR-SMOKE\] https\.case\.compat_large_headers\.enabled=(yes|no)' = "[NAVIGATOR-SMOKE] https.case.compat_large_headers.enabled=<yes|no>"
 }
 
 $localTlsSuccessRegexChecks = @{

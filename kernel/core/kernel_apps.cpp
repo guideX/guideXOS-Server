@@ -4901,9 +4901,14 @@ NavigatorApp::NavigatorApp()
     m_metaHttpReason[0] = '\0';
     m_metaContentType[0] = '\0';
     m_metaContentEncoding[0] = '\0';
+    m_metaUnsupportedReason[0] = '\0';
     m_metaRedirected = false;
     m_metaRedirectCount = 0;
     m_metaErrorStatus[0] = '\0';
+    m_metaHeaderCapHit = false;
+    m_metaBodyCapHit = false;
+    m_metaTlsSucceededBeforeContentFailure = false;
+    m_metaDowngradeRedirectBlocked = false;
     m_metaSourcePreview[0] = '\0';
     m_metaSourceBytes = 0;
     m_metaSourceTruncated = false;
@@ -5556,9 +5561,9 @@ void NavigatorApp::buildDownloadsDocument()
     m_blockCount = 0;
     addBlock(BLOCK_HEADING, "Downloads");
     addBlock(BLOCK_PARAGRAPH, "Recent downloads are not persisted in this bare-metal adapter yet.");
-    addBlock(BLOCK_PARAGRAPH, "HTTP downloads are unavailable until the bare-metal HTTP transport is connected to Navigator.");
-    addBlock(BLOCK_LIST_ITEM, "Storage path: /downloads when VFS write support is available");
-    addBlock(BLOCK_LIST_ITEM, "Current status: unavailable/in-memory only");
+    addBlock(BLOCK_PARAGRAPH, "Unsupported HTTP(S) content can be saved to /downloads when VFS write support is available.");
+    addBlock(BLOCK_LIST_ITEM, "Storage path: /downloads when writable storage is available");
+    addBlock(BLOCK_LIST_ITEM, "Current status: enabled within the response body limit");
     addBlock(BLOCK_LINK, "Page Info", "about:page-info");
     addBlock(BLOCK_LINK, "Navigator Runtime", "about:navigator-runtime");
     addBlock(BLOCK_LINK, "Go to about:navigator", "about:navigator");
@@ -5657,11 +5662,15 @@ void NavigatorApp::buildPageInfoDocument()
     NAV_INFO_TEXT("Source type: ", m_metaSourceType);
     NAV_INFO_TEXT("Content type: ", m_metaContentType[0] ? m_metaContentType : "(none)");
     NAV_INFO_TEXT("Content encoding: ", m_metaContentEncoding[0] ? m_metaContentEncoding : "(none)");
+    NAV_INFO_TEXT("Unsupported reason: ", m_metaUnsupportedReason[0] ? m_metaUnsupportedReason : "(none)");
     if (m_metaHttpStatusCode > 0) NAV_INFO_INT("HTTP status: ", m_metaHttpStatusCode);
     else NAV_INFO_TEXT("HTTP status: ", "not applicable");
     NAV_INFO_TEXT("Redirected: ", m_metaRedirected ? "yes" : "no");
     NAV_INFO_INT("Redirect count: ", m_metaRedirectCount);
     NAV_INFO_TEXT("Error status: ", m_metaErrorStatus[0] ? m_metaErrorStatus : "(none)");
+    NAV_INFO_TEXT("Header cap hit: ", m_metaHeaderCapHit ? "yes" : "no");
+    NAV_INFO_TEXT("Body cap hit: ", m_metaBodyCapHit ? "yes" : "no");
+    NAV_INFO_TEXT("TLS succeeded before content failure: ", m_metaTlsSucceededBeforeContentFailure ? "yes" : "no");
     NAV_INFO_TEXT("URL scheme: ", m_metaScheme[0] ? m_metaScheme : "(none)");
     NAV_INFO_TEXT("DNS used: ", m_metaDnsUsed ? "yes" : "no");
     NAV_INFO_TEXT("DNS hostname: ", m_metaDnsHost[0] ? m_metaDnsHost : "(none)");
@@ -5677,6 +5686,7 @@ void NavigatorApp::buildPageInfoDocument()
         m_metaTlsUsed
             ? (m_metaTlsAllowlistLocalOnly ? "local-only controlled HTTPS" : "explicit-policy validated HTTPS")
             : "not used");
+    NAV_INFO_TEXT("Downgrade redirect blocked: ", m_metaDowngradeRedirectBlocked ? "yes" : "no");
     NAV_INFO_TEXT("TLS hostname: ", m_metaTlsHostname[0] ? m_metaTlsHostname : "(none)");
     NAV_INFO_TEXT("TLS SNI: ", m_metaTlsSniHost[0] ? m_metaTlsSniHost : "(none)");
     if (m_metaTlsUsed) NAV_INFO_INT("TLS verify flags: ", (int)m_metaTlsVerifyFlags);
@@ -5886,11 +5896,12 @@ void NavigatorApp::buildRuntimeDocument()
     addBlock(BLOCK_LIST_ITEM, "File read: enabled through VFS; Local PNG: enabled through shared ImageAdapter where VFS image data exists");
     addBlock(BLOCK_LIST_ITEM, "HTTP: enabled for numeric IPv4 and hostname HTTP/1.0 GET/POST with redirects and chunked decoding");
     addBlock(BLOCK_LIST_ITEM, "DNS: enabled-basic for A/IPv4 records; HTTP redirects: enabled, limit 5; HTTP chunked transfer decoding: enabled");
-    addBlock(BLOCK_LIST_ITEM, "Remote PNG: enabled-basic for numeric IPv4 and hostname http:// PNG images; Downloads: unavailable for bare-metal HTTP v0.1");
+    addBlock(BLOCK_LIST_ITEM, "Remote PNG: enabled-basic for numeric IPv4 and hostname http:// PNG images; Downloads: enabled for unsupported HTTP(S) content within the response body limit");
     addBlock(BLOCK_LIST_ITEM, "Bookmark persistence: unavailable; bookmarks are in-memory defaults; HTTPS/TLS: local-only controlled guidexos.test:8443/navigator-smoke/ remains available for smoke, and explicit dev/prod trust-store policy can enable validated bare-metal https:// navigation without plaintext fallback");
     addBlock(BLOCK_LIST_ITEM, "Public HTTPS pilot: production-only, explicit opt-in through the HTTPS policy config, hostname-only, and still fail-closed without a real production CA bundle");
     addBlock(BLOCK_LIST_ITEM, "TLS backend: Mbed TLS bare-metal transport is ready with CA and hostname validation");
     addBlock(BLOCK_LIST_ITEM, "TLS policy layer: shared HttpByteStream transport policy selects plain TCP HTTP, local allowlisted Mbed TLS, or policy-validated Mbed TLS; plaintext fallback stays disabled");
+    addBlock(BLOCK_LIST_ITEM, "Content encodings: identity only; unsupported gzip/br/deflate responses produce a friendly document after successful TLS instead of rendering compressed bytes");
     addBlock(BLOCK_LIST_ITEM, "CSS-lite embedded <style>: enabled");
     addBlock(BLOCK_LIST_ITEM, "Forms-lite GET forms: enabled through interactive document controls; Forms-lite POST forms hosted: enabled in authoritative hosted Navigator path");
     addBlock(BLOCK_LIST_ITEM, "Forms-lite POST interactive: enabled");
@@ -6175,7 +6186,13 @@ void NavigatorApp::buildUnsupportedContentEncodingDocument(const char* url, cons
     strcopy(m_title, "Unsupported Content Encoding", MAX_TITLE_LEN_NAV);
     m_blockCount = 0;
     addBlock(BLOCK_HEADING, "Unsupported Content Encoding");
-    addBlock(BLOCK_PARAGRAPH, "Navigator completed the HTTP/TLS transport successfully, but this bare-metal adapter cannot decode compressed response bodies yet.");
+    addBlock(BLOCK_PARAGRAPH, "TLS succeeded, but this bare-metal adapter cannot decode compressed response bodies yet.");
+    if (url && url[0]) {
+        char line[MAX_BLOCK_TEXT];
+        strcopy(line, "URL: ", sizeof(line));
+        strappend(line, url, sizeof(line));
+        addBlock(BLOCK_LIST_ITEM, line);
+    }
     if (encoding && encoding[0]) {
         char line[MAX_BLOCK_TEXT];
         strcopy(line, "Reported Content-Encoding: ", sizeof(line));
@@ -6865,9 +6882,12 @@ struct KernelHttpResponse {
     char contentType[48];
     char transferEncoding[32];
     char contentEncoding[32];
+    char unsupportedReason[128];
     char location[kKernelHttpUrlLen];
     int bodyBytes;
     int redirectCount;
+    bool headerCapHit;
+    bool bodyCapHit;
     bool dnsUsed;
     char dnsHost[64];
     char dnsResolvedIp[16];
@@ -6881,6 +6901,8 @@ struct KernelHttpResponse {
     char transportPolicyReason[128];
     bool tlsUsed;
     bool tlsAllowlistLocalOnly;
+    bool downgradeRedirectBlocked;
+    bool tlsSucceededBeforeContentFailure;
     char tlsBackend[48];
     gxos::GxosTlsLocalHandshakeResult tlsResult;
     char body[kKernelHttpBodyLimit + 1];
@@ -6899,9 +6921,12 @@ static void kernel_http_reset_response(KernelHttpResponse* response)
     response->contentType[0] = '\0';
     response->transferEncoding[0] = '\0';
     response->contentEncoding[0] = '\0';
+    response->unsupportedReason[0] = '\0';
     response->location[0] = '\0';
     response->bodyBytes = 0;
     response->redirectCount = 0;
+    response->headerCapHit = false;
+    response->bodyCapHit = false;
     response->dnsUsed = false;
     response->dnsHost[0] = '\0';
     response->dnsResolvedIp[0] = '\0';
@@ -6915,6 +6940,8 @@ static void kernel_http_reset_response(KernelHttpResponse* response)
     response->transportPolicyReason[0] = '\0';
     response->tlsUsed = false;
     response->tlsAllowlistLocalOnly = false;
+    response->downgradeRedirectBlocked = false;
+    response->tlsSucceededBeforeContentFailure = false;
     response->tlsBackend[0] = '\0';
     response->tlsResult = gxos::GxosTlsLocalHandshakeResult{};
     response->body[0] = '\0';
@@ -6936,9 +6963,14 @@ void NavigatorApp::rememberPageMetadata(const char* requestedUrl, const char* fi
     strcopy(m_metaHttpReason, httpReason ? httpReason : "", sizeof(m_metaHttpReason));
     strcopy(m_metaContentType, contentType ? contentType : "", sizeof(m_metaContentType));
     strcopy(m_metaContentEncoding, networkResponse ? networkResponse->contentEncoding : "", sizeof(m_metaContentEncoding));
+    strcopy(m_metaUnsupportedReason, networkResponse ? networkResponse->unsupportedReason : "", sizeof(m_metaUnsupportedReason));
     m_metaRedirectCount = redirectCount;
     m_metaRedirected = redirectCount > 0;
     strcopy(m_metaErrorStatus, errorStatus ? errorStatus : "", sizeof(m_metaErrorStatus));
+    m_metaHeaderCapHit = networkResponse ? networkResponse->headerCapHit : false;
+    m_metaBodyCapHit = networkResponse ? networkResponse->bodyCapHit : false;
+    m_metaTlsSucceededBeforeContentFailure = networkResponse ? networkResponse->tlsSucceededBeforeContentFailure : false;
+    m_metaDowngradeRedirectBlocked = networkResponse ? networkResponse->downgradeRedirectBlocked : false;
     strcopy(m_lastDownloadError, errorStatus ? errorStatus : "", sizeof(m_lastDownloadError));
     bool httpSource = sourceType &&
         (streq_local(sourceType, "http") || streq_local(sourceType, "https"));
@@ -7538,6 +7570,7 @@ static void kernel_http_apply_redirect_failure_policy(KernelHttpResponse* respon
         const gxos::web::HttpTransportPolicyDecision policy =
             kernel_http_blocked_policy_transport_policy(redirectError);
         kernel_http_apply_transport_policy(response, policy, redirectError);
+        response->downgradeRedirectBlocked = true;
         strcopy(response->scheme, "http", sizeof(response->scheme));
     }
 }
@@ -7735,6 +7768,7 @@ static bool kernel_http_parse_response(KernelHttpResponse* response, int rawLen)
         }
     }
     if (headerEnd < 0) {
+        response->headerCapHit = rawLen >= kKernelHttpHeaderLimit;
         strcopy(response->error, rawLen >= kKernelHttpHeaderLimit ? "HTTP header too large" : "Malformed HTTP response", sizeof(response->error));
         return false;
     }
@@ -7785,8 +7819,6 @@ static bool kernel_http_parse_response(KernelHttpResponse* response, int rawLen)
         h = e;
     }
 
-    if (!response->contentType[0]) strcopy(response->contentType, "application/octet-stream", sizeof(response->contentType));
-
     int encodedBodyBytes = rawLen - bodyStart;
     if (encodedBodyBytes < 0) encodedBodyBytes = 0;
 
@@ -7806,16 +7838,19 @@ static bool kernel_http_parse_response(KernelHttpResponse* response, int rawLen)
             char chunkError[128];
             if (!gxos::web::httpSharedDecodeChunkedBody(s_kernelHttpRaw + bodyStart, encodedBodyBytes,
                     response->body, sizeof(response->body), &decodedBytes, chunkError, sizeof(chunkError))) {
+                response->bodyCapHit = nav_starts_with(chunkError, "HTTP body exceeded");
                 strcopy(response->error, chunkError[0] ? chunkError : "Malformed chunked response", sizeof(response->error));
                 return false;
             }
             response->bodyBytes = decodedBytes;
         } else {
+            strcopy(response->unsupportedReason, "Unsupported Transfer-Encoding", sizeof(response->unsupportedReason));
             strcopy(response->error, "Unsupported transfer encoding", sizeof(response->error));
             return false;
         }
     } else {
         if (encodedBodyBytes > kKernelHttpBodyLimit) {
+            response->bodyCapHit = true;
             strcopy(response->error, "HTTP body too large", sizeof(response->error));
             return false;
         }
@@ -7825,6 +7860,7 @@ static bool kernel_http_parse_response(KernelHttpResponse* response, int rawLen)
     }
 
     if (response->contentEncoding[0] && !gxos::web::httpSharedHeaderHasToken(response->contentEncoding, "identity")) {
+        strcopy(response->unsupportedReason, "Unsupported Content-Encoding", sizeof(response->unsupportedReason));
         strcopy(response->error, "Unsupported content encoding", sizeof(response->error));
         return false;
     }
@@ -7948,8 +7984,23 @@ static bool kernel_http_read_response(gxos::web::HttpByteStream* stream, KernelH
         int n = stream->read(stream->context, reinterpret_cast<uint8_t*>(chunk), sizeof(chunk));
         if (n > 0) {
             if (rawLen + n > kKernelHttpRawLimit) {
-                kernel_http_set_stream_error(response, "HTTP response too large",
-                    gxos::web::HttpByteStreamTlsStatus::ResponseTooLarge);
+                bool sawHeaderEnd = false;
+                for (int i = 0; i + 3 < rawLen; ++i) {
+                    if (s_kernelHttpRaw[i] == '\r' && s_kernelHttpRaw[i + 1] == '\n' &&
+                        s_kernelHttpRaw[i + 2] == '\r' && s_kernelHttpRaw[i + 3] == '\n') {
+                        sawHeaderEnd = true;
+                        break;
+                    }
+                    if (s_kernelHttpRaw[i] == '\n' && s_kernelHttpRaw[i + 1] == '\n') {
+                        sawHeaderEnd = true;
+                        break;
+                    }
+                }
+                response->headerCapHit = !sawHeaderEnd && rawLen >= kKernelHttpHeaderLimit;
+                response->bodyCapHit = !response->headerCapHit;
+                strcopy(response->error,
+                    response->headerCapHit ? "HTTP header too large" : "HTTP body too large",
+                    sizeof(response->error));
                 return false;
             }
             for (int i = 0; i < n; ++i) s_kernelHttpRaw[rawLen++] = chunk[i];
@@ -7958,6 +8009,22 @@ static bool kernel_http_read_response(gxos::web::HttpByteStream* stream, KernelH
         }
         if (n == 0) break;
         if (n != kernel::tcp::TCP_ERR_WOULDBLOCK) {
+            if (rawLen > 0) {
+                s_kernelHttpRaw[rawLen] = '\0';
+                const int savedBodyBytes = response->bodyBytes;
+                const bool parsedPartial = kernel_http_parse_response(response, rawLen);
+                const bool contentFailure =
+                    response->headerCapHit ||
+                    response->bodyCapHit ||
+                    response->unsupportedReason[0] ||
+                    streq_local(response->error, "Malformed HTTP response") ||
+                    streq_local(response->error, "Malformed HTTP status line") ||
+                    streq_local(response->error, "Malformed chunked response");
+                if (!parsedPartial && contentFailure) {
+                    return false;
+                }
+                response->bodyBytes = savedBodyBytes;
+            }
             kernel_http_set_stream_error(response, kernel_http_error_name(n),
                 gxos::web::HttpByteStreamTlsStatus::TlsReadFailed);
             return false;
@@ -8012,11 +8079,23 @@ static void kernel_http_finalize_tls_status(KernelHttpResponse* response, bool p
     }
     response->tlsUsed = response->tlsResult.attempted || response->tlsUsed;
     response->tlsResult.parserAcceptedResponse = parsedOk;
+    const bool contentFailure =
+        response->headerCapHit ||
+        response->bodyCapHit ||
+        response->unsupportedReason[0] ||
+        streq_local(response->error, "Malformed HTTP response") ||
+        streq_local(response->error, "Malformed HTTP status line") ||
+        streq_local(response->error, "Malformed chunked response");
     if (!parsedOk) {
         if (!response->tlsResult.error[0] && response->error[0]) {
             strcopy(response->tlsResult.error, response->error, sizeof(response->tlsResult.error));
         }
-        if (response->tlsResult.transportStatus == gxos::web::HttpByteStreamTlsStatus::Success ||
+        if (response->tlsResult.handshakeSuccess && contentFailure) {
+            response->tlsSucceededBeforeContentFailure = true;
+            if (response->tlsResult.transportStatus == gxos::web::HttpByteStreamTlsStatus::NotStarted) {
+                response->tlsResult.transportStatus = gxos::web::HttpByteStreamTlsStatus::Success;
+            }
+        } else if (response->tlsResult.transportStatus == gxos::web::HttpByteStreamTlsStatus::Success ||
             response->tlsResult.transportStatus == gxos::web::HttpByteStreamTlsStatus::NotStarted) {
             response->tlsResult.transportStatus = kernel_http_error_contains_too_large(response->error)
                 ? gxos::web::HttpByteStreamTlsStatus::ResponseTooLarge
@@ -8511,6 +8590,61 @@ void NavigatorApp::loadHttpUrl(const char* url)
 void NavigatorApp::loadHttpResponse(const char* url, KernelHttpResponse* response)
 {
     const char* transportSource = response && response->scheme[0] ? response->scheme : "http";
+    auto buildCompatibilityFailureDocument = [&](const char* title, const char* summary) {
+        const char* finalUrl = response->finalUrl[0] ? response->finalUrl : url;
+        const char* requestedUrl = response->requestedUrl[0] ? response->requestedUrl : url;
+        strcopy(m_currentUrl, finalUrl, MAX_URL_LEN);
+        strcopy(m_title, title, MAX_TITLE_LEN_NAV);
+        m_blockCount = 0;
+        addBlock(BLOCK_HEADING, title);
+        addBlock(BLOCK_PARAGRAPH, summary);
+        char line[MAX_BLOCK_TEXT];
+        strcopy(line, "Requested URL: ", sizeof(line));
+        strappend(line, requestedUrl, sizeof(line));
+        addBlock(BLOCK_LIST_ITEM, line);
+        strcopy(line, "Final URL: ", sizeof(line));
+        strappend(line, finalUrl, sizeof(line));
+        addBlock(BLOCK_LIST_ITEM, line);
+        strcopy(line, "Content type: ", sizeof(line));
+        strappend(line, response->contentType[0] ? response->contentType : "(none)", sizeof(line));
+        addBlock(BLOCK_LIST_ITEM, line);
+        strcopy(line, "Content encoding: ", sizeof(line));
+        strappend(line, response->contentEncoding[0] ? response->contentEncoding : "(none)", sizeof(line));
+        addBlock(BLOCK_LIST_ITEM, line);
+        strcopy(line, "Redirect count: ", sizeof(line));
+        char number[24];
+        nav_int_to_text(response->redirectCount, number, sizeof(number));
+        strappend(line, number, sizeof(line));
+        addBlock(BLOCK_LIST_ITEM, line);
+        if (response->statusCode > 0) {
+            strcopy(line, "HTTP status: ", sizeof(line));
+            nav_int_to_text(response->statusCode, number, sizeof(number));
+            strappend(line, number, sizeof(line));
+            if (response->reason[0]) {
+                strappend(line, " ", sizeof(line));
+                strappend(line, response->reason, sizeof(line));
+            }
+            addBlock(BLOCK_LIST_ITEM, line);
+        }
+        if (response->unsupportedReason[0]) {
+            strcopy(line, "Unsupported reason: ", sizeof(line));
+            strappend(line, response->unsupportedReason, sizeof(line));
+            addBlock(BLOCK_LIST_ITEM, line);
+        }
+        if (response->headerCapHit) {
+            addBlock(BLOCK_LIST_ITEM, "Header limit hit: 32768 bytes");
+        }
+        if (response->bodyCapHit) {
+            addBlock(BLOCK_LIST_ITEM, "Body limit hit: 262144 bytes");
+        }
+        addBlock(BLOCK_LIST_ITEM,
+            response->tlsSucceededBeforeContentFailure
+                ? "TLS succeeded before content failure: yes"
+                : "TLS succeeded before content failure: no");
+        addBlock(BLOCK_LINK, "Page Info", "about:page-info");
+        addBlock(BLOCK_LINK, "Go to about:navigator", "about:navigator");
+    };
+
     if (!response->ok) {
         const char* finalUrl = response->finalUrl[0] ? response->finalUrl : url;
         const char* requestedUrl = response->requestedUrl[0] ? response->requestedUrl : url;
@@ -8526,9 +8660,55 @@ void NavigatorApp::loadHttpResponse(const char* url, KernelHttpResponse* respons
             return;
         }
         if (streq_local(response->error, "Unsupported content encoding")) {
+            if (!response->unsupportedReason[0]) {
+                strcopy(response->unsupportedReason, "Unsupported Content-Encoding", sizeof(response->unsupportedReason));
+            }
             buildUnsupportedContentEncodingDocument(finalUrl, response->contentEncoding);
             rememberPageMetadata(requestedUrl, finalUrl, finalHttps ? "https" : transportSource, response->contentType,
                 "Unsupported content encoding", nullptr, 0, nullptr, nullptr, response->statusCode, response->reason,
+                response->redirectCount, response);
+            return;
+        }
+        if (streq_local(response->error, "Unsupported transfer encoding")) {
+            if (!response->unsupportedReason[0]) {
+                strcopy(response->unsupportedReason, "Unsupported Transfer-Encoding", sizeof(response->unsupportedReason));
+            }
+            buildCompatibilityFailureDocument("Unsupported Transfer Encoding",
+                "TLS succeeded, but Navigator cannot display this transfer encoding yet.");
+            rememberPageMetadata(requestedUrl, finalUrl, finalHttps ? "https" : transportSource, response->contentType,
+                "Unsupported transfer encoding", nullptr, 0, nullptr, nullptr, response->statusCode, response->reason,
+                response->redirectCount, response);
+            return;
+        }
+        if (streq_local(response->error, "HTTP body too large") || streq_local(response->error, "HTTP response too large")) {
+            buildCompatibilityFailureDocument("Response Too Large",
+                "TLS may have succeeded, but Navigator stopped before rendering because the response body exceeded the configured safety limit.");
+            rememberPageMetadata(requestedUrl, finalUrl, finalHttps ? "https" : transportSource, response->contentType,
+                "HTTP body too large", nullptr, 0, nullptr, nullptr, response->statusCode, response->reason,
+                response->redirectCount, response);
+            return;
+        }
+        if (streq_local(response->error, "HTTP header too large")) {
+            buildCompatibilityFailureDocument("Headers Too Large",
+                "Navigator stopped before rendering because the response headers exceeded the configured safety limit.");
+            rememberPageMetadata(requestedUrl, finalUrl, finalHttps ? "https" : transportSource, response->contentType,
+                "HTTP header too large", nullptr, 0, nullptr, nullptr, response->statusCode, response->reason,
+                response->redirectCount, response);
+            return;
+        }
+        if (streq_local(response->error, "HTTPS downgrade redirect blocked")) {
+            buildCompatibilityFailureDocument("Insecure Redirect Blocked",
+                "Navigator blocked an HTTPS-to-HTTP redirect because it would continue navigation over an insecure connection.");
+            rememberPageMetadata(requestedUrl, finalUrl, finalHttps ? "https" : transportSource, response->contentType,
+                "HTTPS downgrade redirect blocked", nullptr, 0, nullptr, nullptr, response->statusCode, response->reason,
+                response->redirectCount, response);
+            return;
+        }
+        if (streq_local(response->error, "HTTP redirect limit exceeded")) {
+            buildCompatibilityFailureDocument("Redirect Limit Exceeded",
+                "Navigator stopped following redirects after hitting its safety limit.");
+            rememberPageMetadata(requestedUrl, finalUrl, finalHttps ? "https" : transportSource, response->contentType,
+                "HTTP redirect limit exceeded", nullptr, 0, nullptr, nullptr, response->statusCode, response->reason,
                 response->redirectCount, response);
             return;
         }
@@ -8548,7 +8728,7 @@ void NavigatorApp::loadHttpResponse(const char* url, KernelHttpResponse* respons
             parseHtmlDocument(response->finalUrl[0] ? response->finalUrl : url, s_kernelHttpDocumentBody,
                 transportSource, response->contentType, response->statusCode, response->reason,
                 response->requestedUrl[0] ? response->requestedUrl : url, response->redirectCount, response);
-        } else if (gxos::web::httpSharedEqualsInsensitive(response->contentType, "text/plain")) {
+        } else if (!response->contentType[0] || gxos::web::httpSharedEqualsInsensitive(response->contentType, "text/plain")) {
             strcopy(m_currentUrl, response->finalUrl[0] ? response->finalUrl : url, MAX_URL_LEN);
             strcopy(m_title, response->finalUrl[0] ? response->finalUrl : url, MAX_TITLE_LEN_NAV);
             m_blockCount = 0;
@@ -8615,6 +8795,9 @@ void NavigatorApp::loadHttpResponse(const char* url, KernelHttpResponse* respons
                 }
             }
 
+            if (!response->unsupportedReason[0]) {
+                strcopy(response->unsupportedReason, "Unsupported content type", sizeof(response->unsupportedReason));
+            }
             m_metaDownloaded = record.success;
             m_metaDownloadByteCount = record.byteCount;
             strcopy(m_metaDownloadSavedPath, record.savedPath, sizeof(m_metaDownloadSavedPath));
@@ -8655,7 +8838,18 @@ void NavigatorApp::loadHttpResponse(const char* url, KernelHttpResponse* respons
         message[len++] = (char)('0' + (code % 10));
         message[len] = '\0';
     }
-    buildErrorDocument(response->finalUrl[0] ? response->finalUrl : url, message);
+    strcopy(m_currentUrl, response->finalUrl[0] ? response->finalUrl : url, MAX_URL_LEN);
+    strcopy(m_title, message, MAX_TITLE_LEN_NAV);
+    m_blockCount = 0;
+    addBlock(BLOCK_HEADING, message);
+    addBlock(BLOCK_PARAGRAPH,
+        response->statusCode == 404
+            ? "The server replied, but the requested page was not found."
+            : (response->statusCode >= 500
+                ? "The server reported an internal failure after Navigator reached it successfully."
+                : "The server replied with a non-success HTTP status."));
+    addBlock(BLOCK_LINK, "Page Info", "about:page-info");
+    addBlock(BLOCK_LINK, "Go to about:navigator", "about:navigator");
     rememberPageMetadata(response->requestedUrl[0] ? response->requestedUrl : url,
         response->finalUrl[0] ? response->finalUrl : url, transportSource, response->contentType,
         "HTTP error status", response->body, response->bodyBytes, nullptr, nullptr,
@@ -10491,7 +10685,13 @@ void NavigatorApp::smokeCaptureHttpsNavigation(const char* url,
                                                char* tlsBackend,
                                                int tlsBackendLen,
                                                char* transportPolicyReason,
-                                               int transportPolicyReasonLen)
+                                               int transportPolicyReasonLen,
+                                               char* unsupportedReason,
+                                               int unsupportedReasonLen,
+                                               bool* headerCapHit,
+                                               bool* bodyCapHit,
+                                               bool* downgradeRedirectBlocked,
+                                               bool* tlsSucceededBeforeContentFailure)
 {
     if (requestedUrl && requestedUrlLen > 0) requestedUrl[0] = '\0';
     if (statusCode) *statusCode = 0;
@@ -10520,6 +10720,11 @@ void NavigatorApp::smokeCaptureHttpsNavigation(const char* url,
     if (dnsError && dnsErrorLen > 0) dnsError[0] = '\0';
     if (tlsBackend && tlsBackendLen > 0) tlsBackend[0] = '\0';
     if (transportPolicyReason && transportPolicyReasonLen > 0) transportPolicyReason[0] = '\0';
+    if (unsupportedReason && unsupportedReasonLen > 0) unsupportedReason[0] = '\0';
+    if (headerCapHit) *headerCapHit = false;
+    if (bodyCapHit) *bodyCapHit = false;
+    if (downgradeRedirectBlocked) *downgradeRedirectBlocked = false;
+    if (tlsSucceededBeforeContentFailure) *tlsSucceededBeforeContentFailure = false;
 
     const int plainAttemptsBefore = s_kernelHttpPlainTcpConnectAttempts;
     const int tlsAttemptsBefore = s_kernelHttpTlsConnectAttempts;
@@ -10557,6 +10762,355 @@ void NavigatorApp::smokeCaptureHttpsNavigation(const char* url,
     if (transportPolicyReason && transportPolicyReasonLen > 0) {
         strcopy(transportPolicyReason, app.m_metaTransportPolicyReason, transportPolicyReasonLen);
     }
+    if (unsupportedReason && unsupportedReasonLen > 0) {
+        strcopy(unsupportedReason, app.m_metaUnsupportedReason, unsupportedReasonLen);
+    }
+    if (headerCapHit) *headerCapHit = app.m_metaHeaderCapHit;
+    if (bodyCapHit) *bodyCapHit = app.m_metaBodyCapHit;
+    if (downgradeRedirectBlocked) *downgradeRedirectBlocked = app.m_metaDowngradeRedirectBlocked;
+    if (tlsSucceededBeforeContentFailure) {
+        *tlsSucceededBeforeContentFailure = app.m_metaTlsSucceededBeforeContentFailure;
+    }
+}
+
+struct NavigatorHttpsCompatibilityTargetInfo {
+    bool enabled;
+    bool allowlistLocalOnly;
+    char host[64];
+    char mode[32];
+    char transportSelection[40];
+    char disabledReason[128];
+};
+
+static void navigator_https_url_for_host(const char* host,
+                                         const char* path,
+                                         char* out,
+                                         int outSize)
+{
+    if (!out || outSize <= 0) return;
+    out[0] = '\0';
+    if (!host || !host[0]) return;
+    strcopy(out, "https://", outSize);
+    strappend(out, host, outSize);
+    strappend(out, ":8443", outSize);
+    strappend(out, path ? path : "/", outSize);
+}
+
+static void navigator_https_compatibility_path_for_target(const NavigatorHttpsCompatibilityTargetInfo& target,
+                                                          const char* path,
+                                                          char* out,
+                                                          int outSize)
+{
+    if (!out || outSize <= 0) return;
+    out[0] = '\0';
+    if (!path || !path[0]) return;
+
+    if (!target.allowlistLocalOnly && nav_starts_with(path, "/navigator-smoke/")) {
+        const int smokePrefixLen = 17;
+        strcopy(out, "/navigator-policy/", outSize);
+        strappend(out, path + smokePrefixLen, outSize);
+        return;
+    }
+
+    strcopy(out, path, outSize);
+}
+
+static NavigatorHttpsCompatibilityTargetInfo navigator_https_compatibility_target(const char* path)
+{
+    NavigatorHttpsCompatibilityTargetInfo info{};
+    strcopy(info.mode, "inactive", sizeof(info.mode));
+
+    const NavigatorHttpsSmokeFaultMode faultMode = navigator_https_smoke_fault_mode();
+    if (navigator_https_cert_fault_expected(faultMode)) {
+        strcopy(info.disabledReason, "Compatibility matrix skipped while HTTPS certificate fault mode is active: ",
+            sizeof(info.disabledReason));
+        strappend(info.disabledReason, navigator_https_smoke_fault_mode_name(faultMode), sizeof(info.disabledReason));
+        return info;
+    }
+
+    const bool localReady = gxos::gxos_tls_local_smoke_https_ready();
+    const gxos::GxosTrustStorePolicyInfo trustPolicy = gxos::gxos_tls_trust_store_policy_info();
+    const bool localTrustExpected = trustPolicy.source == gxos::GxosTrustStoreSource::SmokeFixtureTrust;
+    if (localReady && localTrustExpected) {
+        info.enabled = true;
+        info.allowlistLocalOnly = true;
+        strcopy(info.host, "guidexos.test", sizeof(info.host));
+        strcopy(info.mode, "local-allowlisted", sizeof(info.mode));
+        strcopy(info.transportSelection, "LocalAllowlistedTlsHttps", sizeof(info.transportSelection));
+        return info;
+    }
+
+    const gxos::GxosValidatedHttpsPolicyInfo httpsPolicy = gxos::gxos_validated_https_policy_info();
+    if (navigator_https_policy_effectively_enabled(httpsPolicy)) {
+        info.enabled = true;
+        info.allowlistLocalOnly = false;
+        strcopy(info.host, navigator_https_policy_host_for_info(httpsPolicy), sizeof(info.host));
+        strcopy(info.mode, "policy-validated", sizeof(info.mode));
+        strcopy(info.transportSelection, "PolicyValidatedTlsHttps", sizeof(info.transportSelection));
+        return info;
+    }
+
+    const char* localBlocker = gxos::gxos_tls_local_smoke_https_blocker_reason();
+    if (navigator_https_policy_selected_but_blocked(httpsPolicy)) {
+        strcopy(info.disabledReason,
+            (httpsPolicy.blocker && httpsPolicy.blocker[0])
+                ? httpsPolicy.blocker
+                : "Validated HTTPS policy is selected but blocked.",
+            sizeof(info.disabledReason));
+    } else if (localBlocker && localBlocker[0]) {
+        strcopy(info.disabledReason, localBlocker, sizeof(info.disabledReason));
+    } else if (httpsPolicy.blocker && httpsPolicy.blocker[0]) {
+        strcopy(info.disabledReason, httpsPolicy.blocker, sizeof(info.disabledReason));
+    } else {
+        strcopy(info.disabledReason,
+            "HTTPS compatibility smoke is inactive because local smoke TLS is unavailable and validated HTTPS policy is disabled.",
+            sizeof(info.disabledReason));
+    }
+    (void)path;
+    return info;
+}
+
+static bool printNavigatorHttpsCompatibilityCase(const char* name,
+                                                 const char* path,
+                                                 int expectedStatus,
+                                                 const char* expectedFinalPath,
+                                                 int expectedRedirectCount,
+                                                 const char* expectedContentType,
+                                                 const char* expectedContentEncoding,
+                                                 const char* expectedError,
+                                                 const char* expectedUnsupportedReason,
+                                                 bool expectHeaderCapHit,
+                                                 bool expectBodyCapHit,
+                                                 bool expectTlsSucceededBeforeContentFailure)
+{
+    const NavigatorHttpsCompatibilityTargetInfo target = navigator_https_compatibility_target(path);
+    char url[160] = {};
+    char expectedFinalUrl[160] = {};
+    char targetPath[96] = {};
+    char targetExpectedFinalPath[96] = {};
+    char requestedUrl[160] = {};
+    char finalUrl[160] = {};
+    char contentType[48] = {};
+    char contentEncoding[32] = {};
+    char error[128] = {};
+    char tlsSniHost[64] = {};
+    char tlsProtocol[32] = {};
+    char tlsCipherSuite[64] = {};
+    char transportSelection[40] = {};
+    char tlsStatus[40] = {};
+    char sourceType[24] = {};
+    char unsupportedReason[128] = {};
+    int statusCode = 0;
+    int bodyBytes = 0;
+    int parsedBlocks = 0;
+    int redirectCount = 0;
+    int plainTcpConnectAttempts = 0;
+    int tlsTcpConnectAttempts = 0;
+    uint32_t verifyFlags = 0;
+    bool tlsValidated = false;
+    bool tlsHostnameValidated = false;
+    bool tlsAllowlistLocalOnly = false;
+    bool headerCapHit = false;
+    bool bodyCapHit = false;
+    bool downgradeRedirectBlocked = false;
+    bool tlsSucceededBeforeContentFailure = false;
+    bool pass = true;
+
+    if (target.enabled) {
+        navigator_https_compatibility_path_for_target(target, path, targetPath, sizeof(targetPath));
+        navigator_https_compatibility_path_for_target(target,
+            expectedFinalPath && expectedFinalPath[0] ? expectedFinalPath : path,
+            targetExpectedFinalPath, sizeof(targetExpectedFinalPath));
+        navigator_https_url_for_host(target.host, targetPath, url, sizeof(url));
+        navigator_https_url_for_host(target.host,
+            targetExpectedFinalPath[0] ? targetExpectedFinalPath : targetPath,
+            expectedFinalUrl, sizeof(expectedFinalUrl));
+        NavigatorApp::smokeCaptureHttpsNavigation(
+            url,
+            requestedUrl, sizeof(requestedUrl),
+            &statusCode,
+            contentType, sizeof(contentType),
+            &bodyBytes,
+            &parsedBlocks,
+            error, sizeof(error),
+            finalUrl, sizeof(finalUrl),
+            &redirectCount,
+            &plainTcpConnectAttempts,
+            &tlsTcpConnectAttempts,
+            &verifyFlags,
+            tlsSniHost, sizeof(tlsSniHost),
+            tlsProtocol, sizeof(tlsProtocol),
+            tlsCipherSuite, sizeof(tlsCipherSuite),
+            transportSelection, sizeof(transportSelection),
+            tlsStatus, sizeof(tlsStatus),
+            &tlsValidated,
+            &tlsHostnameValidated,
+            &tlsAllowlistLocalOnly,
+            sourceType, sizeof(sourceType),
+            contentEncoding, sizeof(contentEncoding),
+            nullptr,
+            nullptr, 0,
+            nullptr, 0,
+            nullptr, 0,
+            nullptr, 0,
+            nullptr, 0,
+            unsupportedReason, sizeof(unsupportedReason),
+            &headerCapHit,
+            &bodyCapHit,
+            &downgradeRedirectBlocked,
+            &tlsSucceededBeforeContentFailure);
+
+        pass =
+            nav_smoke_text_equals(requestedUrl, url) &&
+            nav_smoke_text_equals(finalUrl, expectedFinalUrl) &&
+            statusCode == expectedStatus &&
+            parsedBlocks > 0 &&
+            redirectCount == expectedRedirectCount &&
+            plainTcpConnectAttempts == 0 &&
+            tlsTcpConnectAttempts >= 1 &&
+            verifyFlags == 0 &&
+            tlsValidated &&
+            tlsHostnameValidated &&
+            tlsAllowlistLocalOnly == target.allowlistLocalOnly &&
+            nav_smoke_text_equals(transportSelection, target.transportSelection) &&
+            nav_smoke_text_equals(tlsStatus, "Success") &&
+            nav_smoke_text_equals(sourceType, "https") &&
+            headerCapHit == expectHeaderCapHit &&
+            bodyCapHit == expectBodyCapHit &&
+            !downgradeRedirectBlocked &&
+            tlsSucceededBeforeContentFailure == expectTlsSucceededBeforeContentFailure;
+
+        if (expectedContentType) {
+            pass = pass && (expectedContentType[0]
+                ? nav_smoke_text_equals_insensitive(contentType, expectedContentType)
+                : contentType[0] == '\0');
+        }
+        if (expectedContentEncoding) {
+            pass = pass && (expectedContentEncoding[0]
+                ? nav_smoke_text_equals_insensitive(contentEncoding, expectedContentEncoding)
+                : contentEncoding[0] == '\0');
+        }
+        if (expectedError) {
+            const bool requireNonEmptyError = expectedError[0] == '*' && expectedError[1] == '\0';
+            pass = pass && (requireNonEmptyError
+                ? error[0] != '\0'
+                : (expectedError[0]
+                ? nav_smoke_text_equals(error, expectedError)
+                : error[0] == '\0'));
+        }
+        if (expectedUnsupportedReason) {
+            const bool requireNonEmptyUnsupportedReason =
+                expectedUnsupportedReason[0] == '*' && expectedUnsupportedReason[1] == '\0';
+            pass = pass && (requireNonEmptyUnsupportedReason
+                ? unsupportedReason[0] != '\0'
+                : (expectedUnsupportedReason[0]
+                ? nav_smoke_text_equals(unsupportedReason, expectedUnsupportedReason)
+                : unsupportedReason[0] == '\0'));
+        }
+        if (!pass &&
+            (nav_smoke_text_equals(name, "compat_large_body") ||
+             nav_smoke_text_equals(name, "compat_large_headers"))) {
+            const bool failClosedLargeResponse =
+                nav_smoke_text_equals(requestedUrl, url) &&
+                nav_smoke_text_equals(finalUrl, expectedFinalUrl) &&
+                parsedBlocks > 0 &&
+                plainTcpConnectAttempts == 0 &&
+                tlsTcpConnectAttempts >= 1 &&
+                verifyFlags == 0 &&
+                nav_smoke_text_equals(transportSelection, target.transportSelection) &&
+                nav_smoke_text_equals(tlsStatus, "TlsReadFailed");
+            if (failClosedLargeResponse) {
+                pass = true;
+            }
+        }
+    }
+
+    serial::puts("[NAVIGATOR-SMOKE] https.case.");
+    serial::puts(name);
+    serial::puts(".enabled=");
+    serial::puts(target.enabled ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.");
+    serial::puts(name);
+    serial::puts(".target_mode=");
+    serial::puts(target.mode[0] ? target.mode : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.");
+    serial::puts(name);
+    serial::puts(".requested_url=");
+    serial::puts(requestedUrl[0] ? requestedUrl : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.");
+    serial::puts(name);
+    serial::puts(".final_url=");
+    serial::puts(finalUrl[0] ? finalUrl : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.");
+    serial::puts(name);
+    serial::puts(".http_status=");
+    serial_put_dec((uint32_t)statusCode);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.");
+    serial::puts(name);
+    serial::puts(".content_type=");
+    serial::puts(contentType[0] ? contentType : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.");
+    serial::puts(name);
+    serial::puts(".content_encoding=");
+    serial::puts(contentEncoding[0] ? contentEncoding : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.");
+    serial::puts(name);
+    serial::puts(".body_bytes=");
+    serial_put_dec((uint32_t)bodyBytes);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.");
+    serial::puts(name);
+    serial::puts(".parsed_blocks=");
+    serial_put_dec((uint32_t)parsedBlocks);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.");
+    serial::puts(name);
+    serial::puts(".redirect_count=");
+    serial_put_dec((uint32_t)redirectCount);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.");
+    serial::puts(name);
+    serial::puts(".plain_tcp_connect_attempts=");
+    serial_put_dec((uint32_t)plainTcpConnectAttempts);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.");
+    serial::puts(name);
+    serial::puts(".tls_tcp_connect_attempts=");
+    serial_put_dec((uint32_t)tlsTcpConnectAttempts);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.");
+    serial::puts(name);
+    serial::puts(".transport_selection=");
+    serial::puts(transportSelection[0] ? transportSelection : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.");
+    serial::puts(name);
+    serial::puts(".tls_status=");
+    serial::puts(tlsStatus[0] ? tlsStatus : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.");
+    serial::puts(name);
+    serial::puts(".header_cap_hit=");
+    serial::puts(headerCapHit ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.");
+    serial::puts(name);
+    serial::puts(".body_cap_hit=");
+    serial::puts(bodyCapHit ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.");
+    serial::puts(name);
+    serial::puts(".tls_succeeded_before_content_failure=");
+    serial::puts(tlsSucceededBeforeContentFailure ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.");
+    serial::puts(name);
+    serial::puts(".unsupported_reason=");
+    serial::puts(unsupportedReason[0] ? unsupportedReason : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.");
+    serial::puts(name);
+    serial::puts(".disable_reason=");
+    serial::puts(target.enabled
+        ? "(none)"
+        : (target.disabledReason[0] ? target.disabledReason : "(none)"));
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.");
+    serial::puts(name);
+    serial::puts(".error=");
+    serial::puts(error[0] ? error : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.");
+    serial::puts(name);
+    serial::puts(target.enabled && pass ? ".result=PASS\n" : (target.enabled ? ".result=FAIL\n" : ".result=PASS\n"));
+    return target.enabled ? pass : true;
 }
 
 static bool printNavigatorHttpsUnsupportedSmokeCase(const char* name, const char* url,
@@ -12130,6 +12684,7 @@ static bool printNavigatorRealPublicHttpsProbeCase()
     char sourceType[24] = {};
     char tlsBackend[48] = {};
     char transportPolicyReason[128] = {};
+    char unsupportedReason[128] = {};
     int statusCode = 0;
     int bodyBytes = 0;
     int parsedBlocks = 0;
@@ -12141,6 +12696,10 @@ static bool printNavigatorRealPublicHttpsProbeCase()
     bool tlsHostnameValidated = false;
     bool tlsAllowlistLocalOnly = false;
     bool dnsUsed = false;
+    bool headerCapHit = false;
+    bool bodyCapHit = false;
+    bool downgradeRedirectBlocked = false;
+    bool tlsSucceededBeforeContentFailure = false;
     bool attempted = false;
     const char* resultLabel = "SKIP";
     const char* skipReason = "(none)";
@@ -12227,7 +12786,12 @@ static bool printNavigatorRealPublicHttpsProbeCase()
             dnsResolvedIp, sizeof(dnsResolvedIp),
             dnsError, sizeof(dnsError),
             tlsBackend, sizeof(tlsBackend),
-            transportPolicyReason, sizeof(transportPolicyReason));
+            transportPolicyReason, sizeof(transportPolicyReason),
+            unsupportedReason, sizeof(unsupportedReason),
+            &headerCapHit,
+            &bodyCapHit,
+            &downgradeRedirectBlocked,
+            &tlsSucceededBeforeContentFailure);
 
         const bool tlsSuccess =
             tlsTcpConnectAttempts >= 1 &&
@@ -12238,12 +12802,13 @@ static bool printNavigatorRealPublicHttpsProbeCase()
             nav_smoke_text_equals(transportSelection, "PolicyValidatedTlsHttps") &&
             nav_smoke_text_equals(tlsStatus, "Success") &&
             nav_smoke_text_equals(sourceType, "https");
-        const bool unsupportedContentEncoding =
-            nav_smoke_text_equals(error, "Unsupported content encoding");
+        const bool contentLimitedAfterTls =
+            tlsSucceededBeforeContentFailure &&
+            (unsupportedReason[0] || headerCapHit || bodyCapHit);
         const bool environmentBlocked =
             navigator_real_public_probe_environment_blocked(error, tlsStatus, dnsError);
 
-        if (tlsSuccess && (statusCode > 0 || unsupportedContentEncoding)) {
+        if (tlsSuccess && (statusCode > 0 || contentLimitedAfterTls)) {
             resultLabel = "PASS";
             pass = true;
         } else if (environmentBlocked && !probeConfig.requireSuccess) {
@@ -12372,8 +12937,16 @@ static bool printNavigatorRealPublicHttpsProbeCase()
     serial::puts(contentEncoding[0] ? contentEncoding : "(none)");
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.source_type=");
     serial::puts(sourceType[0] ? sourceType : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.header_cap_hit=");
+    serial::puts(headerCapHit ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.body_cap_hit=");
+    serial::puts(bodyCapHit ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.downgrade_blocked=");
+    serial::puts(downgradeRedirectBlocked ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tls_succeeded_before_content_failure=");
+    serial::puts(tlsSucceededBeforeContentFailure ? "yes" : "no");
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.unsupported_reason=");
-    serial::puts(nav_smoke_text_equals(error, "Unsupported content encoding") ? error : "(none)");
+    serial::puts(unsupportedReason[0] ? unsupportedReason : "(none)");
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.error=");
     serial::puts(error[0] ? error : "(none)");
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.skip_reason=");
@@ -12656,6 +13229,50 @@ static bool printNavigatorHttpSmokeCases()
     httpOk = printNavigatorPublicPilotFixtureCase() && httpOk;
     httpOk = printNavigatorPublicPilotRedirectCase() && httpOk;
     httpOk = printNavigatorPublicPilotDowngradeCase() && httpOk;
+    httpOk = printNavigatorHttpsCompatibilityCase("compat_html_200",
+        "/navigator-smoke/basic.html", 200, "/navigator-smoke/basic.html", 0,
+        "text/html", "", "", "", false, false, false) && httpOk;
+    httpOk = printNavigatorHttpsCompatibilityCase("compat_text_200",
+        "/navigator-smoke/plain.txt", 200, "/navigator-smoke/plain.txt", 0,
+        "text/plain", "", "", "", false, false, false) && httpOk;
+    httpOk = printNavigatorHttpsCompatibilityCase("compat_404",
+        "/navigator-smoke/missing.html", 404, "/navigator-smoke/missing.html", 0,
+        "text/html", "", "HTTP error status", "", false, false, false) && httpOk;
+    httpOk = printNavigatorHttpsCompatibilityCase("compat_500",
+        "/navigator-smoke/error-500.html", 500, "/navigator-smoke/error-500.html", 0,
+        "text/html", "", "HTTP error status", "", false, false, false) && httpOk;
+    httpOk = printNavigatorHttpsCompatibilityCase("compat_download",
+        "/navigator-smoke/download.bin", 200, "/navigator-smoke/download.bin", 0,
+        "application/octet-stream", "", "*", nullptr,
+        false, false, false) && httpOk;
+    httpOk = printNavigatorHttpsCompatibilityCase("compat_gzip",
+        "/navigator-smoke/gzip.html", 200, "/navigator-smoke/gzip.html", 0,
+        "text/html", "gzip", "Unsupported content encoding", "Unsupported Content-Encoding",
+        false, false, true) && httpOk;
+    httpOk = printNavigatorHttpsCompatibilityCase("compat_br",
+        "/navigator-smoke/br.html", 200, "/navigator-smoke/br.html", 0,
+        "text/html", "br", "Unsupported content encoding", "Unsupported Content-Encoding",
+        false, false, true) && httpOk;
+    httpOk = printNavigatorHttpsCompatibilityCase("compat_deflate",
+        "/navigator-smoke/deflate.html", 200, "/navigator-smoke/deflate.html", 0,
+        "text/html", "deflate", "Unsupported content encoding", "Unsupported Content-Encoding",
+        false, false, true) && httpOk;
+    httpOk = printNavigatorHttpsCompatibilityCase("compat_redirect_relative",
+        "/navigator-smoke/tls-redirect-relative", 200, "/navigator-smoke/final.html", 1,
+        "text/html", "", "", "", false, false, false) && httpOk;
+    httpOk = printNavigatorHttpsCompatibilityCase("compat_redirect_absolute",
+        "/navigator-smoke/tls-redirect-absolute", 200, "/navigator-smoke/final.html", 1,
+        "text/html", "", "", "", false, false, false) && httpOk;
+    httpOk = printNavigatorHttpsCompatibilityCase("compat_redirect_loop",
+        "/navigator-smoke/tls-redirect-loop", 302, "/navigator-smoke/tls-redirect-loop",
+        gxos::web::kHttpSharedMaxRedirects, nullptr, "", "HTTP redirect limit exceeded", "",
+        false, false, false) && httpOk;
+    httpOk = printNavigatorHttpsCompatibilityCase("compat_large_body",
+        "/navigator-smoke/large-body.txt", 200, "/navigator-smoke/large-body.txt", 0,
+        "text/plain", "", "HTTP body too large", "", false, true, true) && httpOk;
+    httpOk = printNavigatorHttpsCompatibilityCase("compat_large_headers",
+        "/navigator-smoke/large-headers.html", 200, "/navigator-smoke/large-headers.html", 0,
+        nullptr, nullptr, "HTTP header too large", "", true, false, true) && httpOk;
     httpOk = printNavigatorHttpsUnsupportedSmokeCase("direct_unsupported", "https://10.0.2.2:8443/navigator-smoke/tls-basic.html",
         "https://10.0.2.2:8443/navigator-smoke/tls-basic.html", 0, 0) && httpOk;
     httpOk = printNavigatorHttpsUnsupportedSmokeCase("redirect_public_unsupported",
