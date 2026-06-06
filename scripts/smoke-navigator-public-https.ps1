@@ -218,13 +218,16 @@ function Get-NavigatorPublicProbeValue {
         [Parameter(Mandatory = $true)][string]$Name
     )
 
-    $matches = [regex]::Matches(
-        $Output,
-        "(?m)^\\[NAVIGATOR-SMOKE\\] https\\.case\\.real_public_probe\\.$([regex]::Escape($Name))=(.*)$")
-    if ($matches.Count -le 0) {
-        return $null
+    # Parse line-by-line so large serial captures still resolve the latest
+    # real_public_probe field deterministically without relying on a broad regex scan.
+    $prefix = "[NAVIGATOR-SMOKE] https.case.real_public_probe.$Name="
+    $latestValue = $null
+    foreach ($line in ($Output -split "`r?`n")) {
+        if ($line.StartsWith($prefix, [System.StringComparison]::Ordinal)) {
+            $latestValue = $line.Substring($prefix.Length).Trim()
+        }
     }
-    return $matches[$matches.Count - 1].Groups[1].Value.Trim()
+    return $latestValue
 }
 
 function Find-NavigatorKernelScenarioSerialLog {
@@ -358,6 +361,7 @@ function Write-NavigatorPublicHttpsConsoleSummary {
     Write-Host "Dedicated real public HTTPS smoke summary:"
     Write-Host "  target: $($Fields["target_url"])"
     Write-Host "  CA source: $($Fields["public_ca_source_path"]) [$($Fields["public_ca_resolution"])]"
+    Write-Host "  CA source marker: $($Fields["public_ca_source_marker"])"
     Write-Host "  CA bytes: $($Fields["public_ca_bytes"])"
     Write-Host "  parsed cert count: $($Fields["public_ca_parsed_certs"])"
     Write-Host "  DNS result: $($Fields["dns_result"])"
@@ -396,6 +400,7 @@ $fields = [ordered]@{
     target_url = "(unknown)"
     target_host = "(unknown)"
     public_ca_resolution = "(unknown)"
+    public_ca_source_marker = "(unknown)"
     public_ca_source_path = "(unknown)"
     public_ca_bytes = "(unknown)"
     public_ca_parsed_certs = "(unknown)"
@@ -428,6 +433,7 @@ try {
     $fields["target_url"] = $target
     $fields["target_host"] = $(if ($targetValidation.Host) { $targetValidation.Host } else { "(none)" })
     $fields["public_ca_resolution"] = $caResolution.Resolution
+    $fields["public_ca_source_marker"] = $caResolution.Resolution
     $fields["public_ca_source_path"] = $(if ($caResolution.SourcePath) { $caResolution.SourcePath } else { "(none)" })
     $fields["public_ca_bytes"] = "(not-validated)"
     $fields["public_ca_parsed_certs"] = "(not-validated)"

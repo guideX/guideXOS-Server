@@ -93,7 +93,7 @@ Smoke-only malformed and empty CA bundle fixtures for deterministic fail-closed 
   - exit `3`: the guest probe reported `SKIP`, which is not accepted as proof by the dedicated entrypoint;
   - exit `1`: the guest probe reported `FAIL` or the harness could not complete.
 - The dedicated script rejects non-`https://` targets and numeric-IP targets before QEMU launches.
-- The dedicated script prints a compact final summary for manual runs and CI logs, including the target, CA source resolution, CA bytes, parsed cert count, DNS/TCP/TLS, certificate and hostname validation, HTTP status, unsupported-content reason, `plaintext_fallback=no`, the final result, and a machine-checkable `result_marker`:
+- The dedicated script prints a compact final summary for manual runs and CI logs, including the target, CA source resolution, a sanitized CA source marker, CA bytes, parsed cert count, DNS/TCP/TLS, certificate and hostname validation, HTTP status, unsupported-content reason, `plaintext_fallback=no`, the final result, and a machine-checkable `result_marker`:
   - `PASS`
   - `FAIL`
   - `SKIP`
@@ -102,6 +102,24 @@ Smoke-only malformed and empty CA bundle fixtures for deterministic fail-closed 
   - `logs/navigator-public-https-<timestamp>.serial.log`
   - `logs/navigator-public-https-<timestamp>.summary.log`
 - The summary log records the target URL, public CA source path, CA bytes, parsed cert count, DNS/TCP/TLS results, certificate and hostname validation results, verify flags, SNI host, HTTP status, content type, content encoding, unsupported-content reason, `plaintext_fallback=no`, and the final `PASS`/`SKIP`/`FAIL` outcome.
+- For trustworthy PASS evidence, inspect the uploaded `navigator-public-https-*.summary.log` for at least:
+  - `result_marker=PASS`
+  - `final_result=PASS`
+  - `target_url=...`
+  - `public_ca_source_marker=env-var` or another explicit source marker
+  - `public_ca_bytes=...`
+  - `public_ca_parsed_certs=...`
+  - `dns_result=PASS`
+  - `tcp_result=PASS`
+  - `tls_result=PASS`
+  - `certificate_validation_result=PASS`
+  - `hostname_validation_result=PASS`
+  - `verify_flags=0`
+  - `sni_host=...`
+  - `http_status=200`
+  - `content_type=...`
+  - `content_encoding=(none)` or another explicit value
+  - `plaintext_fallback=no`
 
 ### CI and manual-secret contract
 
