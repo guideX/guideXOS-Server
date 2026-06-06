@@ -107,6 +107,12 @@ jobs:
 
           Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "## Navigator Public HTTPS Probe"
           Get-Content -LiteralPath $summary.FullName | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value ""
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "## PASS Review Contract"
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "- Treat the run as proof only when result_marker=PASS and final_result=PASS."
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "- Confirm public_trust_ready=yes, public_ca_parsed_certs > 0, dns_result=PASS, tcp_result=PASS, tls_result=PASS, certificate_validation_result=PASS, hostname_validation_result=PASS, verify_flags=0, and plaintext_fallback=no."
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "- Confirm sni_host matches the target hostname and http_status shows a real HTTPS response."
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "- SETUP_BLOCKED, SKIP, and FAIL are not proof of working public HTTPS."
 
       - name: Upload dedicated probe logs
         if: always()

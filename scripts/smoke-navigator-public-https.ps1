@@ -362,6 +362,7 @@ function Write-NavigatorPublicHttpsConsoleSummary {
     Write-Host "  target: $($Fields["target_url"])"
     Write-Host "  CA source: $($Fields["public_ca_source_path"]) [$($Fields["public_ca_resolution"])]"
     Write-Host "  CA source marker: $($Fields["public_ca_source_marker"])"
+    Write-Host "  public trust ready: $($Fields["public_trust_ready"])"
     Write-Host "  CA bytes: $($Fields["public_ca_bytes"])"
     Write-Host "  parsed cert count: $($Fields["public_ca_parsed_certs"])"
     Write-Host "  DNS result: $($Fields["dns_result"])"
@@ -401,6 +402,7 @@ $fields = [ordered]@{
     target_host = "(unknown)"
     public_ca_resolution = "(unknown)"
     public_ca_source_marker = "(unknown)"
+    public_trust_ready = "(unknown)"
     public_ca_source_path = "(unknown)"
     public_ca_bytes = "(unknown)"
     public_ca_parsed_certs = "(unknown)"
@@ -434,6 +436,7 @@ try {
     $fields["target_host"] = $(if ($targetValidation.Host) { $targetValidation.Host } else { "(none)" })
     $fields["public_ca_resolution"] = $caResolution.Resolution
     $fields["public_ca_source_marker"] = $caResolution.Resolution
+    $fields["public_trust_ready"] = $(if ($caResolution.SourcePath) { "pending-guest-check" } else { "no" })
     $fields["public_ca_source_path"] = $(if ($caResolution.SourcePath) { $caResolution.SourcePath } else { "(none)" })
     $fields["public_ca_bytes"] = "(not-validated)"
     $fields["public_ca_parsed_certs"] = "(not-validated)"
@@ -553,6 +556,7 @@ try {
     }
 
     foreach ($fieldName in @(
+        "public_trust_ready",
         "public_ca_bundle_source",
         "public_ca_bytes",
         "public_ca_parsed_certs",

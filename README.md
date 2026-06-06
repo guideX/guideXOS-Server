@@ -105,6 +105,17 @@ make amd64
 make qemu
 ```
 
+### Opt-In Public HTTPS Probe
+
+The bare-metal Navigator public HTTPS probe is a separate proof workflow, not a default browsing mode.
+
+* Workflow: `.github/workflows/navigator-public-https-probe.yml`
+* Secret: `GXOS_NAVIGATOR_PUBLIC_CA_BUNDLE_PEM`
+* Default target: `https://sha256.badssl.com/`
+* Review/operator contract: `scripts/fixtures/README.md`
+
+Normal hosted and kernel smoke remain deterministic and internet-independent unless you explicitly opt into this probe path.
+
 ### Experimental Native ELF hosted runtime
 
 Native ELF execution in the hosted runtime is experimental. Normal `build.bat` does not enable execution. `build-native-experimental.bat` builds `guideXOSServer.experimental.exe` with experimental execution enabled for trusted local validation only.

@@ -102,24 +102,6 @@ Smoke-only malformed and empty CA bundle fixtures for deterministic fail-closed 
   - `logs/navigator-public-https-<timestamp>.serial.log`
   - `logs/navigator-public-https-<timestamp>.summary.log`
 - The summary log records the target URL, public CA source path, CA bytes, parsed cert count, DNS/TCP/TLS results, certificate and hostname validation results, verify flags, SNI host, HTTP status, content type, content encoding, unsupported-content reason, `plaintext_fallback=no`, and the final `PASS`/`SKIP`/`FAIL` outcome.
-- For trustworthy PASS evidence, inspect the uploaded `navigator-public-https-*.summary.log` for at least:
-  - `result_marker=PASS`
-  - `final_result=PASS`
-  - `target_url=...`
-  - `public_ca_source_marker=env-var` or another explicit source marker
-  - `public_ca_bytes=...`
-  - `public_ca_parsed_certs=...`
-  - `dns_result=PASS`
-  - `tcp_result=PASS`
-  - `tls_result=PASS`
-  - `certificate_validation_result=PASS`
-  - `hostname_validation_result=PASS`
-  - `verify_flags=0`
-  - `sni_host=...`
-  - `http_status=200`
-  - `content_type=...`
-  - `content_encoding=(none)` or another explicit value
-  - `plaintext_fallback=no`
 
 ### CI and manual-secret contract
 
@@ -137,6 +119,53 @@ Smoke-only malformed and empty CA bundle fixtures for deterministic fail-closed 
 - The workflow can accept an optional manual `target_url` override; otherwise it uses `https://sha256.badssl.com/`.
 - If `GXOS_NAVIGATOR_PUBLIC_CA_BUNDLE_PEM` is missing, the workflow fails clearly before the probe runs.
 
+### Public HTTPS PASS Artifact Checklist
+
+Review the uploaded `navigator-public-https-*.summary.log` and treat the run as proof only when all of the following are true:
+
+- `result_marker=PASS`
+- `final_result=PASS`
+- `target_url=` is the expected `https://` URL for the run.
+- `public_trust_ready=yes`
+- `public_ca_source_marker=` shows an explicit source such as `env-var` or `env-var-preferred-over-local`.
+- `public_ca_parsed_certs=` is greater than `0`.
+- `dns_result=PASS`
+- `tcp_result=PASS`
+- `tls_result=PASS`
+- `certificate_validation_result=PASS`
+- `hostname_validation_result=PASS`
+- `verify_flags=0`
+- `sni_host=` matches the target hostname.
+- `http_status=` shows that an HTTPS response was actually received.
+- `plaintext_fallback=no`
+
+Review notes:
+
+- `SETUP_BLOCKED`, `SKIP`, and `FAIL` are useful diagnostics but are not proof of a working public HTTPS path.
+- A content/browser limitation after TLS success, such as unsupported content encoding or unsupported compression handling, must not be mistaken for a CA, certificate, hostname, or TLS transport failure.
+- Deterministic fixture roots still do not count as public trust, even if another field in the same log looks healthy.
+
+### First-Run Operator Checklist
+
+Use this when collecting the first GitHub-hosted PASS artifact for a branch, release note, or milestone checkpoint:
+
+1. Push the branch that contains `.github/workflows/navigator-public-https-probe.yml`.
+2. Confirm the `Navigator Public HTTPS Probe` workflow is visible in GitHub Actions for that branch or the default branch workflow view.
+3. Add or confirm the repository secret `GXOS_NAVIGATOR_PUBLIC_CA_BUNDLE_PEM`.
+4. Use a real public-root PEM bundle that is appropriate for the chosen target URL.
+5. Start the workflow manually with `workflow_dispatch`.
+6. Leave the default target `https://sha256.badssl.com/` unless you intentionally need another HTTPS URL.
+7. Download or inspect the uploaded `navigator-public-https-*.summary.log` and `navigator-public-https-*.serial.log` artifacts.
+8. Confirm the full PASS artifact checklist above.
+9. Archive or attach the summary artifact in release notes, development notes, or the milestone thread.
+
+Operator warnings:
+
+- Do not paste the secret PEM into logs, issues, pull requests, or release notes.
+- Do not commit the PEM or any derived local `.local` bundle.
+- Do not treat `SETUP_BLOCKED` or `SKIP` as evidence that public HTTPS is working.
+- Do not enable default public bare-metal HTTPS based on a single PASS artifact alone.
+
 ### Example commands
 
 - Deterministic smoke only, still internet-independent:
@@ -149,9 +178,11 @@ Smoke-only malformed and empty CA bundle fixtures for deterministic fail-closed 
   - `.\scripts\smoke-navigator-public-https.bat`
 - Manual GitHub Actions execution:
   - Open the `Navigator Public HTTPS Probe` workflow in GitHub Actions.
+  - Push the branch first if the workflow is new on that branch.
   - Add or confirm the repository secret `GXOS_NAVIGATOR_PUBLIC_CA_BUNDLE_PEM`.
+  - Use a real public-root PEM bundle suitable for the selected target.
   - Optionally override `target_url`.
-  - Start the manual run and review the uploaded summary/serial logs.
+  - Start the manual run, download the uploaded summary/serial logs, and confirm the PASS artifact checklist.
 - Dedicated public probe smoke with an explicit bundle path:
   - `$env:GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_CA_BUNDLE_SOURCE="C:\path\to\ca-bundle.pem"`
   - `.\scripts\smoke-navigator-public-https.ps1`
