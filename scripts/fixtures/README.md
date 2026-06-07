@@ -138,7 +138,7 @@ Trust source distinction in this repository today:
   - exit `2`: setup/preflight blocker such as missing roots or an invalid target URL;
   - exit `3`: the guest probe reported `SKIP`, which is not accepted as proof by the dedicated entrypoint;
   - exit `1`: the guest probe reported `FAIL` or the harness could not complete.
-- The dedicated script rejects non-`https://` targets and numeric-IP targets before QEMU launches.
+- The dedicated script rejects non-`https://` targets, numeric-IP targets, and non-reviewed public targets before QEMU launches unless you intentionally use the explicit reviewed override path.
 - The dedicated script prints a compact final summary for manual runs and CI logs, including the target, CA source resolution, a sanitized CA source marker, `public_trust_ready`, CA bytes, parsed cert count, DNS/TCP/TLS, certificate and hostname validation, HTTP status, compatibility-limit markers such as `header_cap_hit`, `body_cap_hit`, `downgrade_blocked`, `tls_succeeded_before_content_failure`, unsupported-content reason, `plaintext_fallback=no`, automated PASS assertion status, the final result, and a machine-checkable `result_marker`:
   - `PASS`
   - `FAIL`
@@ -171,8 +171,11 @@ Trust source distinction in this repository today:
   - `logs/navigator-public-https-*.ca-bundle.manifest`
   - `logs/navigator-public-https-*.evidence.json`
 - The workflow writes the secret to a temporary runner file, validates it immediately with `scripts/validate-navigator-ca-bundle.ps1`, points `GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_CA_BUNDLE_SOURCE` at that file, and removes the file after the run where practical.
-- The workflow accepts `target_url` only when it matches the approved manual allowlist, which currently contains `https://sha256.badssl.com/`.
-- If you need another public target in GitHub Actions, update the workflow allowlist intentionally instead of bypassing the guard.
+- The reviewed target allowlist for public-pilot hardening v0.2 currently contains:
+  - `https://sha256.badssl.com/`
+    Stable badssl DNS-hosted HTTPS endpoint used to prove real-world DNS, TCP, TLS, certificate, and hostname validation without opening arbitrary browsing.
+- The workflow accepts `target_url` only when it matches the approved reviewed allowlist.
+- If you need another public target in GitHub Actions, update the reviewed allowlist intentionally instead of bypassing the guard.
 - If `GXOS_NAVIGATOR_PUBLIC_CA_BUNDLE_PEM` is missing, the workflow fails clearly before the probe runs.
 - When the dedicated probe exits `0`, the workflow replays `scripts/assert-navigator-public-https-pass.ps1` against the latest summary artifact and adds the assertion report to `GITHUB_STEP_SUMMARY`.
 - The workflow also surfaces the workflow input manifest plus the latest evidence JSON path and contents in `GITHUB_STEP_SUMMARY` when present.
@@ -207,6 +210,8 @@ Review the uploaded `navigator-public-https-*.summary.log` and treat the run as 
 Review notes:
 
 - `SETUP_BLOCKED`, `SKIP`, and `FAIL` are useful diagnostics but are not proof of a working public HTTPS path.
+- `tls_transport_proof_result=PASS` means Navigator completed DNS, TCP, TLS, certificate, and hostname validation successfully for the reviewed public target.
+- `page_render_result=RENDERED` is stricter than transport proof; unsupported compression, unsupported content, redirect policy blocks, downgrade blocks, or response caps can keep rendering from succeeding after TLS proof has already succeeded.
 - A content/browser limitation after TLS success, such as unsupported content encoding or unsupported compression handling, must not be mistaken for a CA, certificate, hostname, or TLS transport failure.
 - Deterministic fixture roots still do not count as public trust, even if another field in the same log looks healthy.
 - Automated PASS assertion failing is also not proof, even if some individual fields look healthy in the same artifact.
@@ -342,6 +347,11 @@ Operator warnings:
   - `final_result`
   - `target_url`
   - `target_host`
+  - `reviewed_target_policy`
+  - `reviewed_target_allowlist`
+  - `reviewed_target_match`
+  - `reviewed_target_override`
+  - `reviewed_target_reason`
   - `public_trust_ready`
   - `public_ca_source_marker`
   - `public_ca_bytes`
@@ -359,6 +369,9 @@ Operator warnings:
   - `hostname_validation_result`
   - `verify_flags`
   - `sni_host`
+  - `requested_url`
+  - `final_url`
+  - `redirect_count`
   - `http_status`
   - `content_type`
   - `content_encoding`
@@ -367,6 +380,10 @@ Operator warnings:
   - `downgrade_blocked`
   - `tls_succeeded_before_content_failure`
   - `unsupported_reason`
+  - `tls_transport_proof_result`
+  - `content_compatibility_result`
+  - `page_render_result`
+  - `real_world_compatibility_note`
   - `plaintext_fallback`
   - `pass_contract_assertion_result`
   - `pass_contract_assertion_exit_code`
@@ -388,12 +405,14 @@ Operator warnings:
   - `.\scripts\smoke-navigator-public-https.ps1`
 - Dedicated public probe smoke through the wrapper:
   - `.\scripts\smoke-navigator-public-https.bat`
+- Reviewed allowlist matrix helper:
+  - `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\smoke-navigator-public-https-allowlist.ps1`
 - Manual GitHub Actions execution:
   - Open the `Navigator Public HTTPS Probe` workflow in GitHub Actions.
   - Push the branch first if the workflow is new on that branch.
   - Add or confirm the repository secret `GXOS_NAVIGATOR_PUBLIC_CA_BUNDLE_PEM`.
   - Use a real public-root PEM bundle suitable for the selected approved target.
-  - The workflow allowlist currently approves `https://sha256.badssl.com/` only.
+  - The reviewed allowlist currently approves `https://sha256.badssl.com/` only.
   - Start the manual run, download the uploaded summary/serial/evidence artifacts, and confirm the PASS artifact checklist.
 - Dedicated public probe smoke with an explicit bundle path:
   - `$env:GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_CA_BUNDLE_SOURCE="C:\path\to\ca-bundle.pem"`
@@ -402,6 +421,10 @@ Operator warnings:
   - `$env:GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_CA_BUNDLE_SOURCE="C:\path\to\ca-bundle.pem"`
   - `$env:GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_URL="https://sha256.badssl.com/"`
   - `.\scripts\smoke-navigator-public-https.ps1`
+- Dedicated public probe smoke with an explicit reviewed override for a one-off target:
+  - `$env:GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_CA_BUNDLE_SOURCE="C:\path\to\ca-bundle.pem"`
+  - `$env:GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_URL="https://example.com/"`
+  - `.\scripts\smoke-navigator-public-https.ps1 -ReviewedTargetOverride`
 - Manual PASS artifact assertion against a saved summary:
   - `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\assert-navigator-public-https-pass.ps1 -SummaryPath .\logs\navigator-public-https-<timestamp>.summary.log`
 - Manual PASS assertion self-test:

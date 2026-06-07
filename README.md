@@ -111,10 +111,13 @@ The bare-metal Navigator public HTTPS probe is a separate proof workflow, not a 
 
 * Deterministic kernel smoke: `.\scripts\smoke-navigator-kernel.ps1`
 * Dedicated public HTTPS proof: `.\scripts\smoke-navigator-public-https.ps1`
+* Reviewed target matrix helper: `.\scripts\smoke-navigator-public-https-allowlist.ps1`
 * Optional combined debug matrix: `.\scripts\smoke-navigator-kernel.ps1 -IncludePublicPilot`
 * Workflow: `.github/workflows/navigator-public-https-probe.yml`
 * Secret: `GXOS_NAVIGATOR_PUBLIC_CA_BUNDLE_PEM`
 * Default target: `https://sha256.badssl.com/`
+* Reviewed public target allowlist v0.2:
+  * `https://sha256.badssl.com/` because it is a stable badssl DNS-hosted HTTPS endpoint that proves DNS, TCP, TLS, certificate, and hostname validation without opening general public browsing
 * Candidate prep helper: `scripts/prepare-navigator-shipped-root-candidate.ps1`
 * Candidate evidence linker: `scripts/promote-navigator-public-https-evidence.ps1`
 * Automated artifact assertion: `scripts/assert-navigator-public-https-pass.ps1`
@@ -122,9 +125,9 @@ The bare-metal Navigator public HTTPS probe is a separate proof workflow, not a 
 * Public-root validator/manifest helper: `scripts/validate-navigator-ca-bundle.ps1`
 * Review/operator contract: `scripts/fixtures/README.md`
 
-Normal hosted and default kernel smoke remain deterministic and internet-independent unless you explicitly opt into the public-pilot lane or the dedicated proof path. Automated PASS assertion and evidence JSON promotion complement, but do not replace, human artifact review. The manual GitHub Actions workflow currently fail-closes to the approved target allowlist, which defaults to `https://sha256.badssl.com/`.
+Normal hosted and default kernel smoke remain deterministic and internet-independent unless you explicitly opt into the public-pilot lane or the dedicated proof path. Automated PASS assertion and evidence JSON promotion complement, but do not replace, human artifact review. The local dedicated proof script, reviewed-target matrix helper, candidate evidence linker, and manual GitHub Actions workflow all now fail-closed to the reviewed public target allowlist unless you intentionally use the explicit reviewed override path for a one-off run.
 
-The default bare-metal kernel smoke now also runs a deterministic HTTPS compatibility matrix against controlled fixtures, covering friendly `404`/`500` pages, text/plain rendering, redirects, unsupported content-encoding UX, unsupported-content downloads, and response/header safety caps without enabling default public browsing.
+The default bare-metal kernel smoke now also runs a deterministic HTTPS compatibility matrix against controlled fixtures, covering friendly `404`/`500` pages, text/plain rendering, redirects, unsupported content-encoding UX, unsupported-content downloads, and response/header safety caps without enabling default public browsing. Dedicated public-proof artifacts separately classify TLS transport proof versus content compatibility, so a run can prove real-world DNS/TCP/TLS/certificate/hostname behavior even when unsupported compression or response caps prevent a full page-render success.
 
 Public-root provisioning is still explicit and operator-driven in this pass. The harness now validates supplied CA bundles, writes a manifest sidecar with SHA-256, root count, bundle type, and `production_ready` / `test_only` flags, and expects dedicated public probe evidence to archive those facts before any trust-bundle rotation is treated as complete. Default public HTTPS browsing remains off, and the repo still does not download public roots automatically.
 

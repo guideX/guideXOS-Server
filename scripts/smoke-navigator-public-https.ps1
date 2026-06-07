@@ -3,7 +3,9 @@ param(
     [int]$TimeoutSeconds = 40,
     [string]$CandidateBundlePath,
     [string]$CandidateRotationId,
-    [switch]$CandidateReviewed
+    [switch]$CandidateReviewed,
+    [string]$TargetUrl,
+    [switch]$ReviewedTargetOverride
 )
 
 $ErrorActionPreference = "Stop"
@@ -15,6 +17,7 @@ New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 . (Join-Path $Root "scripts\process_environment.ps1")
 Normalize-ProcessEnvironment
 . (Join-Path $Root "scripts\navigator_smoke_repo_hygiene.ps1")
+. (Join-Path $Root "scripts\navigator-public-https-reviewed-targets.ps1")
 
 $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $dedicatedSerialLog = Join-Path $LogDir "navigator-public-https-$stamp.serial.log"
@@ -29,7 +32,8 @@ $evidenceExportScript = Join-Path $Root "scripts\export-navigator-public-https-e
 $caBundleValidationScript = Join-Path $Root "scripts\validate-navigator-ca-bundle.ps1"
 $publicLocalBundlePath = Join-Path $Root "scripts\fixtures\public-roots\ca-bundle.pem.local"
 $publicExampleBundlePath = Join-Path $Root "scripts\fixtures\public-roots\ca-bundle.pem.example"
-$publicProbeDefaultTarget = "https://sha256.badssl.com/"
+$publicProbeDefaultTarget = Get-NavigatorPublicHttpsDefaultTarget
+$publicProbeReviewedAllowlistName = Get-NavigatorPublicHttpsReviewedAllowlistName
 $publicProbeBundleCapBytes = 512KB
 
 function Set-ProcessEnvValue {
@@ -50,7 +54,8 @@ $publicSmokeEnvNames = @(
     "GXOS_NAVIGATOR_SMOKE_REQUIRE_REAL_PUBLIC_HTTPS",
     "GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_URL",
     "GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_TARGET",
-    "GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_CA_BUNDLE_SOURCE"
+    "GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_CA_BUNDLE_SOURCE",
+    "GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_REVIEWED_OVERRIDE"
 )
 $publicSmokeEnvOriginal = @{}
 foreach ($envName in $publicSmokeEnvNames) {
@@ -77,7 +82,28 @@ function Resolve-StagedSourcePath {
     return [System.IO.Path]::GetFullPath($candidate)
 }
 
+function Test-NavigatorTruthyToken {
+    param([AllowNull()][string]$Value)
+
+    if ([string]::IsNullOrWhiteSpace($Value)) {
+        return $false
+    }
+
+    switch ($Value.Trim().ToLowerInvariant()) {
+        "1" { return $true }
+        "true" { return $true }
+        "yes" { return $true }
+        "enabled" { return $true }
+        "required" { return $true }
+        default { return $false }
+    }
+}
+
 function Get-NavigatorRealPublicProbeTarget {
+    if (-not [string]::IsNullOrWhiteSpace($TargetUrl)) {
+        return $TargetUrl.Trim()
+    }
+
     $urlValue = [Environment]::GetEnvironmentVariable("GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_URL", "Process")
     if (-not [string]::IsNullOrWhiteSpace($urlValue)) {
         return $urlValue.Trim()
@@ -91,8 +117,21 @@ function Get-NavigatorRealPublicProbeTarget {
     return $publicProbeDefaultTarget
 }
 
+function Get-NavigatorRealPublicProbeReviewedOverrideEnabled {
+    if ($ReviewedTargetOverride) {
+        return $true
+    }
+
+    return Test-NavigatorTruthyToken ([Environment]::GetEnvironmentVariable(
+            "GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_REVIEWED_OVERRIDE",
+            "Process"))
+}
+
 function Test-NavigatorRealPublicProbeTarget {
-    param([Parameter(Mandatory = $true)][string]$Target)
+    param(
+        [Parameter(Mandatory = $true)][string]$Target,
+        [bool]$ReviewedOverrideEnabled = $false
+    )
 
     try {
         $uri = [System.Uri]$Target
@@ -101,6 +140,12 @@ function Test-NavigatorRealPublicProbeTarget {
             Valid = $false
             Error = "Target is not a valid absolute URL."
             Host = $null
+            CanonicalTarget = $Target
+            ReviewedTargetPolicy = "rejected"
+            ReviewedTargetMatch = "no"
+            ReviewedTargetOverride = $(if ($ReviewedOverrideEnabled) { "yes" } else { "no" })
+            ReviewedTargetAllowlist = $publicProbeReviewedAllowlistName
+            ReviewedTargetReason = "The requested target could not be parsed as an absolute HTTPS URL."
         }
     }
 
@@ -109,6 +154,12 @@ function Test-NavigatorRealPublicProbeTarget {
             Valid = $false
             Error = "Target must be an absolute URL."
             Host = $null
+            CanonicalTarget = $Target
+            ReviewedTargetPolicy = "rejected"
+            ReviewedTargetMatch = "no"
+            ReviewedTargetOverride = $(if ($ReviewedOverrideEnabled) { "yes" } else { "no" })
+            ReviewedTargetAllowlist = $publicProbeReviewedAllowlistName
+            ReviewedTargetReason = "The requested target must be an absolute HTTPS URL."
         }
     }
     if (-not [string]::Equals($uri.Scheme, "https", [System.StringComparison]::OrdinalIgnoreCase)) {
@@ -116,6 +167,12 @@ function Test-NavigatorRealPublicProbeTarget {
             Valid = $false
             Error = "Target must use https://."
             Host = $null
+            CanonicalTarget = $uri.AbsoluteUri
+            ReviewedTargetPolicy = "rejected"
+            ReviewedTargetMatch = "no"
+            ReviewedTargetOverride = $(if ($ReviewedOverrideEnabled) { "yes" } else { "no" })
+            ReviewedTargetAllowlist = $publicProbeReviewedAllowlistName
+            ReviewedTargetReason = "Only HTTPS targets are eligible for the reviewed public probe."
         }
     }
     if ([string]::IsNullOrWhiteSpace($uri.Host)) {
@@ -123,6 +180,12 @@ function Test-NavigatorRealPublicProbeTarget {
             Valid = $false
             Error = "Target must include a DNS hostname."
             Host = $null
+            CanonicalTarget = $uri.AbsoluteUri
+            ReviewedTargetPolicy = "rejected"
+            ReviewedTargetMatch = "no"
+            ReviewedTargetOverride = $(if ($ReviewedOverrideEnabled) { "yes" } else { "no" })
+            ReviewedTargetAllowlist = $publicProbeReviewedAllowlistName
+            ReviewedTargetReason = "The reviewed public probe requires an HTTPS DNS hostname."
         }
     }
 
@@ -132,13 +195,56 @@ function Test-NavigatorRealPublicProbeTarget {
             Valid = $false
             Error = "Target must use a DNS hostname, not a numeric IP literal."
             Host = $uri.Host
+            CanonicalTarget = $uri.AbsoluteUri
+            ReviewedTargetPolicy = "rejected"
+            ReviewedTargetMatch = "no"
+            ReviewedTargetOverride = $(if ($ReviewedOverrideEnabled) { "yes" } else { "no" })
+            ReviewedTargetAllowlist = $publicProbeReviewedAllowlistName
+            ReviewedTargetReason = "Numeric IP literals are never approved for the reviewed public HTTPS probe."
         }
     }
 
+    $canonicalTarget = $uri.AbsoluteUri
+    $reviewedTarget = Find-NavigatorPublicHttpsReviewedTarget -TargetUrl $canonicalTarget
+    if ($null -ne $reviewedTarget) {
+        return [pscustomobject]@{
+            Valid = $true
+            Error = $null
+            Host = $uri.Host
+            CanonicalTarget = $canonicalTarget
+            ReviewedTargetPolicy = "reviewed-allowlist"
+            ReviewedTargetMatch = "yes"
+            ReviewedTargetOverride = $(if ($ReviewedOverrideEnabled) { "yes" } else { "no" })
+            ReviewedTargetAllowlist = $publicProbeReviewedAllowlistName
+            ReviewedTargetReason = [string]$reviewedTarget.Reason
+        }
+    }
+
+    if ($ReviewedOverrideEnabled) {
+        return [pscustomobject]@{
+            Valid = $true
+            Error = $null
+            Host = $uri.Host
+            CanonicalTarget = $canonicalTarget
+            ReviewedTargetPolicy = "explicit-reviewed-override"
+            ReviewedTargetMatch = "no"
+            ReviewedTargetOverride = "yes"
+            ReviewedTargetAllowlist = $publicProbeReviewedAllowlistName
+            ReviewedTargetReason = "Accepted only because an explicit reviewed target override was requested for this one-off public proof run."
+        }
+    }
+
+    $approvedTargets = [string]::Join(", ", (Get-NavigatorPublicHttpsReviewedTargetUrls))
     return [pscustomobject]@{
-        Valid = $true
-        Error = $null
+        Valid = $false
+        Error = "Target must match the reviewed public HTTPS allowlist ($approvedTargets) unless an explicit reviewed override path is used."
         Host = $uri.Host
+        CanonicalTarget = $canonicalTarget
+        ReviewedTargetPolicy = "rejected"
+        ReviewedTargetMatch = "no"
+        ReviewedTargetOverride = "no"
+        ReviewedTargetAllowlist = $publicProbeReviewedAllowlistName
+        ReviewedTargetReason = "The requested target is outside the reviewed public HTTPS allowlist for v0.2."
     }
 }
 
@@ -352,6 +458,7 @@ function Write-NavigatorPublicHttpsLogs {
         [string[]]$Notes = @()
     )
 
+    Set-NavigatorPublicHttpsDerivedClassification -FinalResult $FinalResult -ExitCode $ExitCode -Fields $Fields
     $resultMarker = Get-NavigatorPublicHttpsResultMarker -FinalResult $FinalResult -ExitCode $ExitCode
 
     if (-not (Test-Path -LiteralPath $SerialPath)) {
@@ -403,8 +510,11 @@ function Write-NavigatorPublicHttpsLogs {
 function New-NavigatorPublicHttpsSetupNotes {
     param([Parameter(Mandatory = $true)][string]$Reason)
 
+    $approvedTargets = [string]::Join(", ", (Get-NavigatorPublicHttpsReviewedTargetUrls))
+
     return @(
         $Reason,
+        "Reviewed target allowlist ($publicProbeReviewedAllowlistName): $approvedTargets",
         "Provide a real public-root PEM bundle with one of these options:",
         "  1. Copy real roots to $publicLocalBundlePath",
         "  2. Set GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_CA_BUNDLE_SOURCE=C:\path\to\ca-bundle.pem",
@@ -435,6 +545,135 @@ function Get-NavigatorPublicHttpsResultMarker {
     }
 }
 
+function Get-NavigatorFieldYesNo {
+    param(
+        [Parameter(Mandatory = $true)][System.Collections.IDictionary]$Fields,
+        [Parameter(Mandatory = $true)][string]$Name
+    )
+
+    if (-not $Fields.Contains($Name)) {
+        return $false
+    }
+    return [string]::Equals([string]$Fields[$Name], "yes", [System.StringComparison]::OrdinalIgnoreCase)
+}
+
+function Get-NavigatorFieldInt {
+    param(
+        [Parameter(Mandatory = $true)][System.Collections.IDictionary]$Fields,
+        [Parameter(Mandatory = $true)][string]$Name
+    )
+
+    $parsed = 0
+    if ($Fields.Contains($Name) -and [int]::TryParse([string]$Fields[$Name], [ref]$parsed)) {
+        return $parsed
+    }
+    return $null
+}
+
+function Set-NavigatorPublicHttpsDerivedClassification {
+    param(
+        [Parameter(Mandatory = $true)][string]$FinalResult,
+        [Parameter(Mandatory = $true)][int]$ExitCode,
+        [Parameter(Mandatory = $true)][System.Collections.Specialized.OrderedDictionary]$Fields
+    )
+
+    $resultMarker = Get-NavigatorPublicHttpsResultMarker -FinalResult $FinalResult -ExitCode $ExitCode
+    $tlsPass = [string]::Equals($Fields["tls_result"], "PASS", [System.StringComparison]::OrdinalIgnoreCase) -and
+        [string]::Equals($Fields["certificate_validation_result"], "PASS", [System.StringComparison]::OrdinalIgnoreCase) -and
+        [string]::Equals($Fields["hostname_validation_result"], "PASS", [System.StringComparison]::OrdinalIgnoreCase)
+    $headerCapHit = Get-NavigatorFieldYesNo -Fields $Fields -Name "header_cap_hit"
+    $bodyCapHit = Get-NavigatorFieldYesNo -Fields $Fields -Name "body_cap_hit"
+    $downgradeBlocked = Get-NavigatorFieldYesNo -Fields $Fields -Name "downgrade_blocked"
+    $tlsSucceededBeforeContentFailure = Get-NavigatorFieldYesNo -Fields $Fields -Name "tls_succeeded_before_content_failure"
+    $unsupportedReason = [string]$Fields["unsupported_reason"]
+    $contentEncoding = [string]$Fields["content_encoding"]
+    $redirectCount = Get-NavigatorFieldInt -Fields $Fields -Name "redirect_count"
+    $httpStatus = Get-NavigatorFieldInt -Fields $Fields -Name "http_status"
+    $failureReason = [string]$Fields["failure_reason"]
+    $skipReason = [string]$Fields["skip_reason"]
+    $redirectPolicyBlocked = $false
+
+    if (($failureReason -match "redirect" -or $skipReason -match "redirect") -and -not $downgradeBlocked) {
+        $redirectPolicyBlocked = $true
+    } elseif ($null -ne $redirectCount -and $redirectCount -ge 5 -and -not $downgradeBlocked -and -not $tlsPass) {
+        $redirectPolicyBlocked = $true
+    }
+
+    switch ($resultMarker) {
+        "SETUP_BLOCKED" {
+            $Fields["tls_transport_proof_result"] = "POLICY_OR_SETUP_BLOCKED"
+            $Fields["content_compatibility_result"] = "NOT_ATTEMPTED"
+            $Fields["page_render_result"] = "NOT_ATTEMPTED_POLICY_OR_SETUP_BLOCKED"
+            $Fields["real_world_compatibility_note"] = "The reviewed public HTTPS proof did not run because setup, policy, target review, or trust prerequisites blocked it before transport proof."
+            return
+        }
+        "SKIP" {
+            $Fields["tls_transport_proof_result"] = "ENVIRONMENT_UNAVAILABLE"
+            $Fields["content_compatibility_result"] = "NOT_ATTEMPTED"
+            $Fields["page_render_result"] = "NOT_ATTEMPTED_ENVIRONMENT_BLOCKED"
+            $Fields["real_world_compatibility_note"] = "The reviewed public HTTPS proof stayed opt-in but skipped because outbound environment prerequisites were unavailable for this run."
+            return
+        }
+    }
+
+    if ($tlsPass) {
+        $Fields["tls_transport_proof_result"] = "PASS"
+
+        if ($downgradeBlocked) {
+            $Fields["content_compatibility_result"] = "DOWNGRADE_BLOCKED"
+            $Fields["page_render_result"] = "NOT_RENDERED_DOWNGRADE_BLOCKED"
+            $Fields["real_world_compatibility_note"] = "TLS transport succeeded, but Navigator blocked an HTTPS-to-HTTP downgrade redirect before rendering content."
+        } elseif ($redirectPolicyBlocked) {
+            $Fields["content_compatibility_result"] = "REDIRECT_POLICY_BLOCKED"
+            $Fields["page_render_result"] = "NOT_RENDERED_REDIRECT_POLICY_BLOCKED"
+            $Fields["real_world_compatibility_note"] = "TLS transport succeeded, but Navigator stopped at a redirect policy boundary instead of rendering the final page."
+        } elseif ($headerCapHit -or $bodyCapHit) {
+            $Fields["content_compatibility_result"] = "RESPONSE_CAP_HIT_AFTER_TLS"
+            $Fields["page_render_result"] = "NOT_RENDERED_CAP_HIT_AFTER_TLS"
+            $Fields["real_world_compatibility_note"] = "TLS transport succeeded, but Navigator hit a response safety cap before full page rendering completed."
+        } elseif (-not [string]::IsNullOrWhiteSpace($unsupportedReason) -and $unsupportedReason -ne "(none)" -and $unsupportedReason -ne "(not-attempted)") {
+            if (($unsupportedReason -match "ContentEncoding") -or
+                ($contentEncoding -and $contentEncoding -ne "(none)" -and $contentEncoding -ne "(not-attempted)" -and $contentEncoding -ne "identity")) {
+                $Fields["content_compatibility_result"] = "UNSUPPORTED_COMPRESSION_AFTER_TLS"
+                $Fields["page_render_result"] = "NOT_RENDERED_UNSUPPORTED_COMPRESSION_AFTER_TLS"
+                $Fields["real_world_compatibility_note"] = "TLS transport succeeded, but the page relied on unsupported content encoding after HTTPS validation completed."
+            } else {
+                $Fields["content_compatibility_result"] = "UNSUPPORTED_CONTENT_AFTER_TLS"
+                $Fields["page_render_result"] = "NOT_RENDERED_UNSUPPORTED_CONTENT_AFTER_TLS"
+                $Fields["real_world_compatibility_note"] = "TLS transport succeeded, but Navigator does not yet support the returned content shape well enough to render the page."
+            }
+        } elseif ($null -ne $httpStatus -and $httpStatus -gt 0) {
+            $Fields["content_compatibility_result"] = "PASS"
+            $Fields["page_render_result"] = "RENDERED"
+            $Fields["real_world_compatibility_note"] = "TLS transport succeeded and Navigator rendered a supported HTTPS response."
+        } elseif ($tlsSucceededBeforeContentFailure) {
+            $Fields["content_compatibility_result"] = "UNSUPPORTED_CONTENT_AFTER_TLS"
+            $Fields["page_render_result"] = "NOT_RENDERED_UNSUPPORTED_CONTENT_AFTER_TLS"
+            $Fields["real_world_compatibility_note"] = "TLS transport succeeded before Navigator stopped on a post-handshake content limitation."
+        } else {
+            $Fields["content_compatibility_result"] = "TLS_TRANSPORT_PROVED_NO_RENDER"
+            $Fields["page_render_result"] = "NOT_RENDERED_AFTER_TLS_SUCCESS"
+            $Fields["real_world_compatibility_note"] = "TLS transport succeeded, but the final page-render outcome was incomplete."
+        }
+        return
+    }
+
+    $Fields["tls_transport_proof_result"] = "FAIL"
+    if ($downgradeBlocked) {
+        $Fields["content_compatibility_result"] = "DOWNGRADE_BLOCKED"
+        $Fields["page_render_result"] = "NOT_RENDERED_DOWNGRADE_BLOCKED"
+        $Fields["real_world_compatibility_note"] = "Navigator blocked an HTTPS-to-HTTP downgrade and did not permit plaintext fallback."
+    } elseif ($redirectPolicyBlocked) {
+        $Fields["content_compatibility_result"] = "REDIRECT_POLICY_BLOCKED"
+        $Fields["page_render_result"] = "NOT_RENDERED_REDIRECT_POLICY_BLOCKED"
+        $Fields["real_world_compatibility_note"] = "The public HTTPS probe stopped at a redirect policy guard before successful page rendering."
+    } else {
+        $Fields["content_compatibility_result"] = "TLS_TRANSPORT_FAILED"
+        $Fields["page_render_result"] = "NOT_RENDERED_TLS_TRANSPORT_FAILED"
+        $Fields["real_world_compatibility_note"] = "The real-world HTTPS proof failed before Navigator established a fully validated TLS transport."
+    }
+}
+
 function Write-NavigatorPublicHttpsConsoleSummary {
     param(
         [Parameter(Mandatory = $true)][string]$FinalResult,
@@ -445,6 +684,11 @@ function Write-NavigatorPublicHttpsConsoleSummary {
 
     Write-Host "Dedicated real public HTTPS smoke summary:"
     Write-Host "  target: $($Fields["target_url"])"
+    Write-Host "  reviewed target policy: $($Fields["reviewed_target_policy"])"
+    Write-Host "  reviewed target allowlist: $($Fields["reviewed_target_allowlist"])"
+    Write-Host "  reviewed target match: $($Fields["reviewed_target_match"])"
+    Write-Host "  reviewed override: $($Fields["reviewed_target_override"])"
+    Write-Host "  reviewed target reason: $($Fields["reviewed_target_reason"])"
     Write-Host "  CA source: $($Fields["public_ca_source_path"]) [$($Fields["public_ca_resolution"])]"
     Write-Host "  CA source marker: $($Fields["public_ca_source_marker"])"
     Write-Host "  public trust ready: $($Fields["public_trust_ready"])"
@@ -468,11 +712,17 @@ function Write-NavigatorPublicHttpsConsoleSummary {
     Write-Host "  certificate validation: $($Fields["certificate_validation_result"])"
     Write-Host "  hostname validation: $($Fields["hostname_validation_result"])"
     Write-Host "  HTTP status: $($Fields["http_status"])"
+    Write-Host "  final URL: $($Fields["final_url"])"
+    Write-Host "  redirect count: $($Fields["redirect_count"])"
     Write-Host "  header cap hit: $($Fields["header_cap_hit"])"
     Write-Host "  body cap hit: $($Fields["body_cap_hit"])"
     Write-Host "  downgrade blocked: $($Fields["downgrade_blocked"])"
     Write-Host "  TLS succeeded before content failure: $($Fields["tls_succeeded_before_content_failure"])"
     Write-Host "  unsupported content reason: $($Fields["unsupported_reason"])"
+    Write-Host "  TLS transport proof: $($Fields["tls_transport_proof_result"])"
+    Write-Host "  content compatibility: $($Fields["content_compatibility_result"])"
+    Write-Host "  page render result: $($Fields["page_render_result"])"
+    Write-Host "  compatibility note: $($Fields["real_world_compatibility_note"])"
     Write-Host "  plaintext_fallback: $($Fields["plaintext_fallback"])"
     if ($Fields.Contains("pass_contract_assertion_result")) {
         Write-Host "  pass contract assertion: $($Fields["pass_contract_assertion_result"])"
@@ -518,6 +768,11 @@ $evidenceOutputPath = $null
 $fields = [ordered]@{
     target_url = "(unknown)"
     target_host = "(unknown)"
+    reviewed_target_policy = "(unknown)"
+    reviewed_target_allowlist = $publicProbeReviewedAllowlistName
+    reviewed_target_match = "no"
+    reviewed_target_override = "no"
+    reviewed_target_reason = "(none)"
     public_ca_resolution = "(unknown)"
     public_ca_source_marker = "(unknown)"
     public_trust_ready = "(unknown)"
@@ -546,6 +801,9 @@ $fields = [ordered]@{
     verify_flags = "(not-attempted)"
     sni_host = "(not-attempted)"
     http_status = "(not-attempted)"
+    requested_url = "(not-attempted)"
+    final_url = "(not-attempted)"
+    redirect_count = "0"
     content_type = "(not-attempted)"
     content_encoding = "(not-attempted)"
     header_cap_hit = "no"
@@ -553,6 +811,10 @@ $fields = [ordered]@{
     downgrade_blocked = "no"
     tls_succeeded_before_content_failure = "no"
     unsupported_reason = "(not-attempted)"
+    tls_transport_proof_result = "NOT_ATTEMPTED"
+    content_compatibility_result = "NOT_ATTEMPTED"
+    page_render_result = "NOT_ATTEMPTED"
+    real_world_compatibility_note = "The reviewed public HTTPS proof has not run yet."
     plaintext_fallback = "no"
     pass_contract_assertion_result = "not-run"
     pass_contract_assertion_exit_code = "(not-run)"
@@ -563,15 +825,21 @@ $fields = [ordered]@{
 
 try {
     $target = Get-NavigatorRealPublicProbeTarget
-    $targetValidation = Test-NavigatorRealPublicProbeTarget -Target $target
+    $reviewedOverrideEnabled = Get-NavigatorRealPublicProbeReviewedOverrideEnabled
+    $targetValidation = Test-NavigatorRealPublicProbeTarget -Target $target -ReviewedOverrideEnabled:$reviewedOverrideEnabled
     $caResolution = Get-NavigatorRealPublicProbeCaBundleResolution
 
     if ($caResolution.EnvBundleProvided -and $caResolution.LocalBundleAvailable) {
         Write-Host "Using public CA bundle from GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_CA_BUNDLE_SOURCE and ignoring the local fallback file."
     }
 
-    $fields["target_url"] = $target
+    $fields["target_url"] = $(if ($targetValidation.CanonicalTarget) { $targetValidation.CanonicalTarget } else { $target })
     $fields["target_host"] = $(if ($targetValidation.Host) { $targetValidation.Host } else { "(none)" })
+    $fields["reviewed_target_policy"] = $targetValidation.ReviewedTargetPolicy
+    $fields["reviewed_target_allowlist"] = $targetValidation.ReviewedTargetAllowlist
+    $fields["reviewed_target_match"] = $targetValidation.ReviewedTargetMatch
+    $fields["reviewed_target_override"] = $targetValidation.ReviewedTargetOverride
+    $fields["reviewed_target_reason"] = $targetValidation.ReviewedTargetReason
     $fields["public_ca_resolution"] = $caResolution.Resolution
     $fields["public_ca_source_marker"] = $caResolution.Resolution
     $fields["public_trust_ready"] = $(if ($caResolution.SourcePath) { "pending-guest-check" } else { "no" })
@@ -685,14 +953,15 @@ try {
     $fields["trust_bundle_production_ready"] = $manifestValidation.Manifest.production_ready
     $fields["trust_bundle_test_only"] = $manifestValidation.Manifest.test_only
 
-    Write-Host "Dedicated real public HTTPS smoke target: $target"
+    Write-Host "Dedicated real public HTTPS smoke target: $($fields["target_url"])"
     Write-Host "Dedicated real public HTTPS smoke CA bundle: $($bundleInfo.Path) [$($caResolution.Resolution)]"
 
     Set-ProcessEnvValue -Name "GXOS_NAVIGATOR_SMOKE_ENABLE_REAL_PUBLIC_HTTPS" -Value "1"
     Set-ProcessEnvValue -Name "GXOS_NAVIGATOR_SMOKE_REQUIRE_REAL_PUBLIC_HTTPS" -Value "1"
-    Set-ProcessEnvValue -Name "GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_URL" -Value $target
-    Set-ProcessEnvValue -Name "GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_TARGET" -Value $target
+    Set-ProcessEnvValue -Name "GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_URL" -Value $fields["target_url"]
+    Set-ProcessEnvValue -Name "GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_TARGET" -Value $fields["target_url"]
     Set-ProcessEnvValue -Name "GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_CA_BUNDLE_SOURCE" -Value $bundleInfo.Path
+    Set-ProcessEnvValue -Name "GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_REVIEWED_OVERRIDE" -Value $(if ($reviewedOverrideEnabled) { "1" } else { $null })
 
     $existingKernelSerialLogs = @{}
     Get-ChildItem -LiteralPath $LogDir -Filter "navigator-kernel-smoke-*-$kernelScenarioName.serial.log" -ErrorAction SilentlyContinue | ForEach-Object {
@@ -754,6 +1023,11 @@ try {
     }
 
     foreach ($fieldName in @(
+        "reviewed_target_policy",
+        "reviewed_target_allowlist",
+        "reviewed_target_match",
+        "reviewed_target_override",
+        "reviewed_target_reason",
         "public_trust_ready",
         "public_ca_bundle_source",
         "public_ca_bytes",
@@ -779,6 +1053,9 @@ try {
         "hostname_validation_result",
         "verify_flags",
         "sni_host",
+        "requested_url",
+        "final_url",
+        "redirect_count",
         "http_status",
         "content_type",
         "content_encoding",
@@ -796,6 +1073,11 @@ try {
         if ($null -ne $value) {
             switch ($fieldName) {
                 "public_ca_bundle_source" { $fields["public_ca_source_path"] = $value }
+                "reviewed_target_policy" { $fields["reviewed_target_policy"] = $value }
+                "reviewed_target_allowlist" { $fields["reviewed_target_allowlist"] = $value }
+                "reviewed_target_match" { $fields["reviewed_target_match"] = $value }
+                "reviewed_target_override" { $fields["reviewed_target_override"] = $value }
+                "reviewed_target_reason" { $fields["reviewed_target_reason"] = $value }
                 "error" { $fields["failure_reason"] = $value }
                 "result" { $fields["probe_result"] = $value }
                 default { $fields[$fieldName] = $value }

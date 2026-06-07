@@ -6848,6 +6848,8 @@ static const char* kNavigatorRealPublicProbeTargetPath = "/config/navigator/real
 static const char* kNavigatorRealPublicProbeTargetCompatPath = "/config/navigator/RPUBURL.TXT";
 static const char* kNavigatorRealPublicProbeRequirePath = "/config/navigator/real-public-https-probe-required.txt";
 static const char* kNavigatorRealPublicProbeRequireCompatPath = "/config/navigator/RPUBRQ.TXT";
+static const char* kNavigatorRealPublicProbeReviewedOverridePath = "/config/navigator/real-public-https-reviewed-override.txt";
+static const char* kNavigatorRealPublicProbeReviewedOverrideCompatPath = "/config/navigator/RPUBROV.TXT";
 static const char* kNavigatorRealPublicProbeCaSourcePath = "/config/navigator/real-public-https-ca-bundle-source.txt";
 static const char* kNavigatorRealPublicProbeCaSourceCompatPath = "/config/navigator/RPUBCAS.TXT";
 static const char* kNavigatorRealPublicProbeCaBytesPath = "/config/navigator/real-public-https-ca-bundle-bytes.txt";
@@ -6857,6 +6859,7 @@ static const char* kNavigatorRealPublicProbeCaCertsCompatPath = "/config/navigat
 static const char* kNavigatorRealPublicProbeCaEnabledPath = "/config/navigator/real-public-https-ca-bundle-enabled.txt";
 static const char* kNavigatorRealPublicProbeCaEnabledCompatPath = "/config/navigator/RPUBCAEN.TXT";
 static const char* kNavigatorRealPublicProbeDefaultTarget = "https://sha256.badssl.com/";
+static const char* kNavigatorRealPublicProbeReviewedAllowlistName = "guidexos-reviewed-public-https-v0.2";
 static const uint32_t kNavigatorSmokeTextFileMaxBytes = 512u;
 
 enum class NavigatorHttpsSmokeFaultMode {
@@ -10470,12 +10473,45 @@ struct NavigatorRealPublicProbeConfig {
     bool requireSuccess;
     bool targetValid;
     bool publicCaOptInEnabled;
+    bool reviewedOverrideEnabled;
+    bool reviewedTargetMatched;
     char targetUrl[160];
     char targetError[128];
+    char reviewedTargetPolicy[40];
+    char reviewedTargetReason[160];
     char publicCaSourcePath[260];
     uint32_t publicCaBytes;
     uint32_t publicCaParsedCertCount;
 };
+
+struct NavigatorReviewedPublicTarget {
+    const char* url;
+    const char* host;
+    uint16_t port;
+    const char* path;
+    const char* reason;
+};
+
+static const NavigatorReviewedPublicTarget kNavigatorReviewedPublicTargets[] = {
+    {
+        "https://sha256.badssl.com/",
+        "sha256.badssl.com",
+        443,
+        "/",
+        "Stable badssl DNS-hosted HTTPS endpoint used to prove real-world DNS, TCP, TLS, certificate, and hostname validation without enabling arbitrary public browsing."
+    }
+};
+
+static const NavigatorReviewedPublicTarget* navigator_find_reviewed_public_target(const KernelHttpUrl& parsed)
+{
+    for (const NavigatorReviewedPublicTarget& target : kNavigatorReviewedPublicTargets) {
+        if (!nav_smoke_text_equals_insensitive(parsed.host, target.host)) continue;
+        if (parsed.port != target.port) continue;
+        if (!nav_smoke_text_equals(parsed.path, target.path)) continue;
+        return &target;
+    }
+    return nullptr;
+}
 
 static NavigatorRealPublicProbeConfig navigator_real_public_probe_config()
 {
@@ -10514,6 +10550,18 @@ static NavigatorRealPublicProbeConfig navigator_real_public_probe_config()
             nav_smoke_text_equals_insensitive(enabledToken, "yes") ||
             nav_smoke_text_equals_insensitive(enabledToken, "enabled");
     }
+    char reviewedOverrideToken[32];
+    if (nav_smoke_read_vfs_token_file(kNavigatorRealPublicProbeReviewedOverridePath,
+            kNavigatorRealPublicProbeReviewedOverrideCompatPath,
+            reviewedOverrideToken,
+            sizeof(reviewedOverrideToken))) {
+        config.reviewedOverrideEnabled =
+            nav_smoke_text_equals_insensitive(reviewedOverrideToken, "1") ||
+            nav_smoke_text_equals_insensitive(reviewedOverrideToken, "true") ||
+            nav_smoke_text_equals_insensitive(reviewedOverrideToken, "yes") ||
+            nav_smoke_text_equals_insensitive(reviewedOverrideToken, "enabled") ||
+            nav_smoke_text_equals_insensitive(reviewedOverrideToken, "required");
+    }
     nav_smoke_read_vfs_text_file(kNavigatorRealPublicProbeCaSourcePath,
         kNavigatorRealPublicProbeCaSourceCompatPath,
         config.publicCaSourcePath,
@@ -10535,11 +10583,40 @@ static NavigatorRealPublicProbeConfig navigator_real_public_probe_config()
         strcopy(config.targetError, "Real public HTTPS probe target is invalid: ", sizeof(config.targetError));
         strappend(config.targetError, parsed.error[0] ? parsed.error : "parse failure", sizeof(config.targetError));
         config.targetValid = false;
+        strcopy(config.reviewedTargetPolicy, "rejected", sizeof(config.reviewedTargetPolicy));
+        strcopy(config.reviewedTargetReason,
+            "The requested target could not be parsed as a reviewed HTTPS target.",
+            sizeof(config.reviewedTargetReason));
     } else if (parsed.hostIsNumeric) {
         strcopy(config.targetError,
             "Real public HTTPS probe target requires a DNS hostname, not a numeric IP literal.",
             sizeof(config.targetError));
         config.targetValid = false;
+        strcopy(config.reviewedTargetPolicy, "rejected", sizeof(config.reviewedTargetPolicy));
+        strcopy(config.reviewedTargetReason,
+            "Numeric IP literals are never approved for the reviewed public HTTPS probe.",
+            sizeof(config.reviewedTargetReason));
+    } else {
+        const NavigatorReviewedPublicTarget* reviewedTarget = navigator_find_reviewed_public_target(parsed);
+        if (reviewedTarget) {
+        config.reviewedTargetMatched = true;
+        strcopy(config.reviewedTargetPolicy, "reviewed-allowlist", sizeof(config.reviewedTargetPolicy));
+        strcopy(config.reviewedTargetReason, reviewedTarget->reason, sizeof(config.reviewedTargetReason));
+        } else if (config.reviewedOverrideEnabled) {
+            strcopy(config.reviewedTargetPolicy, "explicit-reviewed-override", sizeof(config.reviewedTargetPolicy));
+            strcopy(config.reviewedTargetReason,
+                "Accepted only because an explicit reviewed target override was staged for this one-off public proof run.",
+                sizeof(config.reviewedTargetReason));
+        } else {
+            strcopy(config.targetError,
+                "Real public HTTPS probe target is outside the reviewed allowlist and no explicit reviewed override was staged.",
+                sizeof(config.targetError));
+            config.targetValid = false;
+            strcopy(config.reviewedTargetPolicy, "rejected", sizeof(config.reviewedTargetPolicy));
+            strcopy(config.reviewedTargetReason,
+                "The requested target is outside the reviewed public HTTPS allowlist for v0.2.",
+                sizeof(config.reviewedTargetReason));
+        }
     }
 
     return config;
@@ -12711,6 +12788,16 @@ static bool printNavigatorRealPublicHttpsProbeCase()
     serial::puts(probeConfig.requireSuccess ? "yes" : "no");
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.target=");
     serial::puts(probeConfig.targetUrl[0] ? probeConfig.targetUrl : kNavigatorRealPublicProbeDefaultTarget);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.reviewed_target_policy=");
+    serial::puts(probeConfig.reviewedTargetPolicy[0] ? probeConfig.reviewedTargetPolicy : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.reviewed_target_allowlist=");
+    serial::puts(kNavigatorRealPublicProbeReviewedAllowlistName);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.reviewed_target_match=");
+    serial::puts(probeConfig.reviewedTargetMatched ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.reviewed_target_override=");
+    serial::puts(probeConfig.reviewedOverrideEnabled ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.reviewed_target_reason=");
+    serial::puts(probeConfig.reviewedTargetReason[0] ? probeConfig.reviewedTargetReason : "(none)");
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.policy_enabled=");
     serial::puts(pilotEnabled ? "yes" : "no");
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.public_trust_ready=");
@@ -12849,6 +12936,16 @@ static bool printNavigatorRealPublicHttpsProbeCase()
     serial::puts(probeConfig.requireSuccess ? "yes" : "no");
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.target=");
     serial::puts(probeConfig.targetUrl[0] ? probeConfig.targetUrl : kNavigatorRealPublicProbeDefaultTarget);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.reviewed_target_policy=");
+    serial::puts(probeConfig.reviewedTargetPolicy[0] ? probeConfig.reviewedTargetPolicy : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.reviewed_target_allowlist=");
+    serial::puts(kNavigatorRealPublicProbeReviewedAllowlistName);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.reviewed_target_match=");
+    serial::puts(probeConfig.reviewedTargetMatched ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.reviewed_target_override=");
+    serial::puts(probeConfig.reviewedOverrideEnabled ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.reviewed_target_reason=");
+    serial::puts(probeConfig.reviewedTargetReason[0] ? probeConfig.reviewedTargetReason : "(none)");
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.policy_enabled=");
     serial::puts(pilotEnabled ? "yes" : "no");
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.public_trust_ready=");

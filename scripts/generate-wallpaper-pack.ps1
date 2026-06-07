@@ -14,15 +14,22 @@ $InputDir = if ([System.IO.Path]::IsPathRooted($InputDir)) { $InputDir } else { 
 $OutputDir = if ([System.IO.Path]::IsPathRooted($OutputDir)) { $OutputDir } else { Join-Path $RootDir $OutputDir }
 $OutputImage = if ([System.IO.Path]::IsPathRooted($OutputImage)) { $OutputImage } else { Join-Path $RootDir $OutputImage }
 $TrackedOutputRootCaBundlePath = Join-Path $OutputDir "certs\ca-bundle.pem"
+$TrackedOutputRootCaManifestCompatPath = Join-Path $OutputDir "certs\CABUNDLE.MAN"
 $NavigatorCaBundleManifestScript = Join-Path $ScriptDir "validate-navigator-ca-bundle.ps1"
+. (Join-Path $ScriptDir "navigator-public-https-reviewed-targets.ps1")
 $TrackedOutputRootCaBundleBytes = if (Test-Path -LiteralPath $TrackedOutputRootCaBundlePath -PathType Leaf) {
     [System.IO.File]::ReadAllBytes($TrackedOutputRootCaBundlePath)
 } else {
     $null
 }
+$TrackedOutputRootCaManifestCompatBytes = if (Test-Path -LiteralPath $TrackedOutputRootCaManifestCompatPath -PathType Leaf) {
+    [System.IO.File]::ReadAllBytes($TrackedOutputRootCaManifestCompatPath)
+} else {
+    $null
+}
 
 $NavigatorCaBundleSizeCapBytes = 512KB
-$NavigatorRealPublicProbeDefaultTarget = "https://sha256.badssl.com/"
+$NavigatorRealPublicProbeDefaultTarget = Get-NavigatorPublicHttpsDefaultTarget
 $NavigatorRealPublicProbeTrustMarker = "# guideXOS Navigator real public HTTPS probe trust bundle"
 $NavigatorRealPublicProbeTrustDetail = "# deterministic validated fixture roots are retained for smoke coverage; explicit public internet roots are appended below."
 $NavigatorRealPublicProbeLocalBundlePath = Join-Path $ScriptDir "fixtures\public-roots\ca-bundle.pem.local"
@@ -715,6 +722,7 @@ $httpsPolicyToken = if ([string]::IsNullOrWhiteSpace($env:GXOS_NAVIGATOR_HTTPS_P
 $httpsFaultModeToken = if ([string]::IsNullOrWhiteSpace($env:GXOS_NAVIGATOR_HTTPS_FAULT_MODE)) { $null } else { $env:GXOS_NAVIGATOR_HTTPS_FAULT_MODE.Trim() }
 $realPublicProbeEnabled = $env:GXOS_NAVIGATOR_SMOKE_ENABLE_REAL_PUBLIC_HTTPS -eq "1"
 $realPublicProbeRequired = $env:GXOS_NAVIGATOR_SMOKE_REQUIRE_REAL_PUBLIC_HTTPS -eq "1"
+$realPublicProbeReviewedOverrideEnabled = $env:GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_REVIEWED_OVERRIDE -eq "1"
 if ($realPublicProbeRequired) {
     $realPublicProbeEnabled = $true
 }
@@ -896,7 +904,7 @@ if ($userCaSource) {
     }
 }
 
-if ($httpsPolicyToken -or $httpsFaultModeToken -or $realPublicProbeEnabled -or $realPublicProbeRequired) {
+if ($httpsPolicyToken -or $httpsFaultModeToken -or $realPublicProbeEnabled -or $realPublicProbeRequired -or $realPublicProbeReviewedOverrideEnabled) {
     $configNavigatorDir = Join-Path $configDir "navigator"
     New-Item -ItemType Directory -Force -Path $configNavigatorDir | Out-Null
 }
@@ -935,6 +943,15 @@ if ($realPublicProbeRequired) {
     [System.IO.File]::WriteAllText($targetProbeRequireCompat, "required", [System.Text.Encoding]::ASCII)
     $staged += Get-Item $targetProbeRequireCompat
     Write-Host "      staged real public HTTPS probe requirement at /config/navigator/real-public-https-probe-required.txt" -ForegroundColor Yellow
+}
+if ($realPublicProbeReviewedOverrideEnabled) {
+    $targetReviewedOverride = Join-Path $configNavigatorDir "real-public-https-reviewed-override.txt"
+    [System.IO.File]::WriteAllText($targetReviewedOverride, "enabled", [System.Text.Encoding]::ASCII)
+    $staged += Get-Item $targetReviewedOverride
+    $targetReviewedOverrideCompat = Join-Path $configNavigatorDir "RPUBROV.TXT"
+    [System.IO.File]::WriteAllText($targetReviewedOverrideCompat, "enabled", [System.Text.Encoding]::ASCII)
+    $staged += Get-Item $targetReviewedOverrideCompat
+    Write-Host "      staged reviewed target override at /config/navigator/real-public-https-reviewed-override.txt" -ForegroundColor Yellow
 }
 if ($realPublicProbeCaBundleInfo) {
     $targetProbeCaSource = Join-Path $configNavigatorDir "real-public-https-ca-bundle-source.txt"
@@ -1007,5 +1024,10 @@ if (-not $stagedRootCaBundle -and $null -ne $TrackedOutputRootCaBundleBytes) {
     New-Item -ItemType Directory -Force -Path (Split-Path -Parent $TrackedOutputRootCaBundlePath) | Out-Null
     [System.IO.File]::WriteAllBytes($TrackedOutputRootCaBundlePath, $TrackedOutputRootCaBundleBytes)
     Write-Host "      restored tracked output-only /certs/ca-bundle.pem after image generation" -ForegroundColor DarkGray
+}
+if (-not $stagedRootCaBundle -and $null -ne $TrackedOutputRootCaManifestCompatBytes) {
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $TrackedOutputRootCaManifestCompatPath) | Out-Null
+    [System.IO.File]::WriteAllBytes($TrackedOutputRootCaManifestCompatPath, $TrackedOutputRootCaManifestCompatBytes)
+    Write-Host "      restored tracked output-only /certs/CABUNDLE.MAN after image generation" -ForegroundColor DarkGray
 }
 Write-Host "      Wallpaper runtime filesystem ready at /system/wall/" -ForegroundColor Green

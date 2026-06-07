@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       target_url:
-        description: Optional HTTPS target override for the dedicated real public probe. Must be in the approved workflow allowlist.
+        description: Optional reviewed HTTPS target override for the dedicated real public probe. Must be in the approved workflow allowlist.
         required: false
         default: https://sha256.badssl.com/
 
@@ -25,10 +25,10 @@ jobs:
       - name: Validate approved public HTTPS target
         shell: powershell
         run: |
+          . .\scripts\navigator-public-https-reviewed-targets.ps1
+
           $requestedTarget = "${{ inputs.target_url }}".Trim()
-          $approvedTargets = @(
-            "https://sha256.badssl.com/"
-          )
+          $approvedTargets = @(Get-NavigatorPublicHttpsReviewedTargetUrls)
 
           $isApproved = $false
           foreach ($approvedTarget in $approvedTargets) {
@@ -40,6 +40,12 @@ jobs:
 
           if (-not $isApproved) {
             throw "Requested target_url '$requestedTarget' is not in the approved manual workflow allowlist. Approved targets: $($approvedTargets -join ', ')"
+          }
+
+          $reviewedTarget = Find-NavigatorPublicHttpsReviewedTarget -TargetUrl $requestedTarget
+          Write-Output "Reviewed target allowlist: $(Get-NavigatorPublicHttpsReviewedAllowlistName)"
+          if ($null -ne $reviewedTarget) {
+            Write-Output "Reviewed target reason: $($reviewedTarget.Reason)"
           }
 
       - name: Install MinGW toolchain
@@ -191,6 +197,7 @@ jobs:
           Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "- Treat the run as proof only when result_marker=PASS and final_result=PASS."
           Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "- Confirm public_trust_ready=yes, public_ca_parsed_certs > 0, trust_bundle_manifest_present=yes, trust_bundle_production_ready=yes, trust_bundle_test_only=no, dns_result=PASS, tcp_result=PASS, tls_result=PASS, certificate_validation_result=PASS, hostname_validation_result=PASS, verify_flags=0, and plaintext_fallback=no."
           Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "- Confirm sni_host matches the target hostname and http_status shows a real HTTPS response."
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "- Use tls_transport_proof_result, content_compatibility_result, page_render_result, and real_world_compatibility_note to distinguish transport proof from content/render compatibility."
           Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "- SETUP_BLOCKED, SKIP, and FAIL are not proof of working public HTTPS."
 
           Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value ""

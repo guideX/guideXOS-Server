@@ -2,10 +2,13 @@ param(
     [Parameter(Mandatory = $true)][string]$CandidateMetadataPath,
     [Parameter(Mandatory = $true)][string]$EvidencePath,
     [string]$OutputPath,
-    [string[]]$ApprovedTarget = @("https://sha256.badssl.com/")
+    [string[]]$ApprovedTarget = @()
 )
 
 $ErrorActionPreference = "Stop"
+
+$Root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
+. (Join-Path $Root "scripts\navigator-public-https-reviewed-targets.ps1")
 
 function Resolve-NavigatorPromotionPath {
     param([Parameter(Mandatory = $true)][string]$PathValue)
@@ -39,6 +42,10 @@ function Test-NavigatorApprovedTarget {
 $candidateMetadataFullPath = Resolve-NavigatorPromotionPath -PathValue $CandidateMetadataPath
 $evidenceFullPath = Resolve-NavigatorPromotionPath -PathValue $EvidencePath
 
+if ($ApprovedTarget.Count -le 0) {
+    $ApprovedTarget = @(Get-NavigatorPublicHttpsReviewedTargetUrls)
+}
+
 $candidate = Read-NavigatorJsonFile -LiteralPath $candidateMetadataFullPath
 $evidence = Read-NavigatorJsonFile -LiteralPath $evidenceFullPath
 
@@ -66,6 +73,7 @@ $targetUrl = [string]$evidence.target_url
 if (-not (Test-NavigatorApprovedTarget -TargetUrl $targetUrl -Allowlist $ApprovedTarget)) {
     throw "Evidence target_url '$targetUrl' is not in the approved allowlist."
 }
+$reviewedTarget = Find-NavigatorPublicHttpsReviewedTarget -TargetUrl $targetUrl
 
 $trustBundleType = [string]$evidence.trust_bundle_type
 if (@("production-public-probe-merged", "shipped-root-candidate") -notcontains $trustBundleType) {
@@ -143,6 +151,8 @@ $record = [ordered]@{
     evidence_status = [string]$evidence.evidence_status
     evidence_target_url = $targetUrl
     evidence_target_host = [string]$evidence.target_host
+    evidence_target_allowlist = Get-NavigatorPublicHttpsReviewedAllowlistName
+    evidence_target_reason = $(if ($null -ne $reviewedTarget) { [string]$reviewedTarget.Reason } else { "Approved through explicit caller allowlist." })
     evidence_result_marker = [string]$evidence.result_marker
     evidence_final_result = [string]$evidence.final_result
     evidence_trust_bundle_type = $trustBundleType
