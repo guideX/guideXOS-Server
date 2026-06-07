@@ -70,7 +70,7 @@ function Write-NavigatorPublicHttpsProofPack {
     New-Item -ItemType Directory -Force -Path $ProofPackDir | Out-Null
 
     $proofSummary = [ordered]@{
-        schema_version = "guidexos.navigator.public-https-proof-pack.v0.1"
+        schema_version = "guidexos.navigator.public-https-proof-pack.v0.4"
         generated_utc = ([datetime]::UtcNow.ToString("o"))
         reviewed_allowlist_name = $publicProbeReviewedAllowlistName
         reviewed_allowlist_version = Get-NavigatorPublicHttpsReviewedAllowlistVersion
@@ -119,7 +119,8 @@ $publicSmokeEnvNames = @(
     "GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_URL",
     "GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_TARGET",
     "GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_CA_BUNDLE_SOURCE",
-    "GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_REVIEWED_OVERRIDE"
+    "GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_REVIEWED_OVERRIDE",
+    "GXOS_NAVIGATOR_HTTPS_POLICY"
 )
 $publicSmokeEnvOriginal = @{}
 foreach ($envName in $publicSmokeEnvNames) {
@@ -1281,6 +1282,7 @@ try {
     Set-ProcessEnvValue -Name "GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_TARGET" -Value $fields["target_url"]
     Set-ProcessEnvValue -Name "GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_CA_BUNDLE_SOURCE" -Value $bundleInfo.Path
     Set-ProcessEnvValue -Name "GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_REVIEWED_OVERRIDE" -Value $(if ($reviewedOverrideEnabled) { "1" } else { $null })
+    Set-ProcessEnvValue -Name "GXOS_NAVIGATOR_HTTPS_POLICY" -Value "production-validated`npublic-https-pilot=enabled"
 
     $existingKernelSerialLogs = @{}
     Get-ChildItem -LiteralPath $LogDir -Filter "navigator-kernel-smoke-*-$kernelScenarioName.serial.log" -ErrorAction SilentlyContinue | ForEach-Object {
@@ -1347,6 +1349,16 @@ try {
         "reviewed_target_match",
         "reviewed_target_override",
         "reviewed_target_reason",
+        "policy_enabled",
+        "policy_blocker",
+        "policy_config_path",
+        "policy_config_source",
+        "public_pilot_token_present",
+        "public_pilot_token_path",
+        "public_pilot_token_value",
+        "public_proof_lane_active",
+        "scenario_group",
+        "scenario_name",
         "public_trust_ready",
         "public_ca_bundle_source",
         "public_ca_bytes",
@@ -1413,6 +1425,16 @@ try {
                 "reviewed_target_match" { $fields["reviewed_target_match"] = $value }
                 "reviewed_target_override" { $fields["reviewed_target_override"] = $value }
                 "reviewed_target_reason" { $fields["reviewed_target_reason"] = $value }
+                "policy_enabled" { $fields["policy_enabled"] = $value }
+                "policy_blocker" { $fields["policy_blocker"] = $value }
+                "policy_config_path" { $fields["policy_config_path"] = $value }
+                "policy_config_source" { $fields["policy_config_source"] = $value }
+                "public_pilot_token_present" { $fields["public_pilot_token_present"] = $value }
+                "public_pilot_token_path" { $fields["public_pilot_token_path"] = $value }
+                "public_pilot_token_value" { $fields["public_pilot_token_value"] = $value }
+                "public_proof_lane_active" { $fields["public_proof_lane_active"] = $value }
+                "scenario_group" { $fields["scenario_group"] = $value }
+                "scenario_name" { $fields["scenario_name"] = $value }
                 "error" { $fields["failure_reason"] = $value }
                 "result" { $fields["probe_result"] = $value }
                 default { $fields[$fieldName] = $value }

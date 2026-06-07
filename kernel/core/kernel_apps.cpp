@@ -6860,7 +6860,7 @@ static const char* kNavigatorRealPublicProbeCaCertsCompatPath = "/config/navigat
 static const char* kNavigatorRealPublicProbeCaEnabledPath = "/config/navigator/real-public-https-ca-bundle-enabled.txt";
 static const char* kNavigatorRealPublicProbeCaEnabledCompatPath = "/config/navigator/RPUBCAEN.TXT";
 static const char* kNavigatorRealPublicProbeDefaultTarget = "https://sha256.badssl.com/";
-static const char* kNavigatorRealPublicProbeReviewedAllowlistName = "guidexos-reviewed-public-https-v0.2";
+static const char* kNavigatorRealPublicProbeReviewedAllowlistName = "guidexos-reviewed-public-https-v0.4";
 static const uint32_t kNavigatorSmokeTextFileMaxBytes = 512u;
 
 enum class NavigatorHttpsSmokeFaultMode {
@@ -12948,6 +12948,24 @@ static bool printNavigatorRealPublicHttpsProbeCase()
     serial::puts(probeConfig.reviewedTargetReason[0] ? probeConfig.reviewedTargetReason : "(none)");
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.policy_enabled=");
     serial::puts(pilotEnabled ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.policy_blocker=");
+    serial::puts(pilotEnabled ? "(none)" : (prerequisiteBlocker ? prerequisiteBlocker : "production_public_pilot_enabled requires public-https-pilot=enabled."));
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.policy_config_path=");
+    serial::puts(httpsPolicy.configPath ? httpsPolicy.configPath : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.policy_config_source=");
+    serial::puts(httpsPolicy.configSource ? httpsPolicy.configSource : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.public_pilot_token_present=");
+    serial::puts(httpsPolicy.publicHttpsPilotRequested ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.public_pilot_token_path=");
+    serial::puts(httpsPolicy.configPath ? httpsPolicy.configPath : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.public_pilot_token_value=");
+    serial::puts(httpsPolicy.publicHttpsPilotRequested ? "enabled" : "disabled");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.public_proof_lane_active=");
+    serial::puts(probeConfig.enabled ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.scenario_group=");
+    serial::puts("PublicPilot");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.scenario_name=");
+    serial::puts("production_public_pilot_enabled");
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.public_trust_ready=");
     serial::puts(trustStorePolicy.publicInternetReady ? "yes" : "no");
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.public_trust_source_allowed=");
