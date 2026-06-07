@@ -111,6 +111,18 @@ struct GxosCaManifestInfo {
     const char* error;
 };
 
+struct GxosCaStoreParseInfo {
+    size_t inputCertificateCount;
+    size_t parsedCertificateCount;
+    size_t skippedCertificateCount;
+    size_t parseErrorCount;
+    int firstParseErrorCode;
+    size_t firstParseErrorIndex;
+    bool filteredParse;
+    const char* parseMode;
+    const char* error;
+};
+
 struct GxosCaStoreInfo {
     GxosCaStoreStatus status;
     GxosCaParseStatus parseStatus;
@@ -128,6 +140,7 @@ const char* gxos_ca_parse_status_name(GxosCaParseStatus status);
 const char* gxos_ca_manifest_status_name(GxosCaManifestStatus status);
 bool gxos_ca_store_load_once();
 GxosCaStoreInfo gxos_ca_store_info();
+GxosCaStoreParseInfo gxos_ca_store_parse_info();
 
 enum class GxosTrustStoreSource {
     None,

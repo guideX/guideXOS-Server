@@ -51,7 +51,7 @@
 #if __has_include("third_party/mbedtls/guidexos/crypto_config.h")
 #define GXOS_TLS_MBEDTLS_CRYPTO_CONFIG_PRESENT 1
 #endif
-#if defined(GXOS_TLS_MBEDTLS_SOURCE_PRESENT) && defined(GXOS_TLS_MBEDTLS_TF_PSA_BUILD_INFO_PRESENT)
+#if defined(GXOS_TLS_MBEDTLS_SOURCE_PRESENT) && defined(GXOS_TLS_MBEDTLS_TF_PSA_BUILD_INFO_PRESENT) && __has_include("third_party/mbedtls/include/mbedtls/build_info.h")
 #define GXOS_TLS_MBEDTLS_VERSION_INCLUDED 1
 #define GXOS_TLS_TF_PSA_VERSION_INCLUDED 1
 #include "third_party/mbedtls/include/mbedtls/version.h"
@@ -337,6 +337,7 @@ constexpr const char* kBareMetalSmokeFixtureMarker = "guideXOS Navigator smoke-o
 constexpr const char* kBareMetalPublicInternetTrustMarker = "guideXOS Navigator real public HTTPS probe trust bundle";
 constexpr const char* kBareMetalPublicInternetTrustOptInPath = "/config/navigator/real-public-https-ca-bundle-enabled.txt";
 constexpr const char* kBareMetalPublicInternetTrustOptInCompatPath = "/config/navigator/RPUBCAEN.TXT";
+constexpr const char* kBareMetalPublicTrustParseMode = "split-pem-validated";
 constexpr const char* kHostedCaBundlePath = "(Windows trust store)";
 constexpr const char* kHostedTrustStoreDetail = "Windows system trust store managed by Schannel";
 constexpr const char* kSmokeFixtureTrustStoreDetail = "Navigator smoke fixture staged at /certs/ca-bundle.pem";
@@ -911,6 +912,56 @@ size_t count_token_occurrences(const uint8_t* buffer, size_t buffer_len, const c
     return count;
 }
 
+bool extract_pem_block(const uint8_t* buffer, size_t buffer_len, size_t index, const uint8_t** blockStart, size_t* blockLen)
+{
+    if (!buffer || !blockStart || !blockLen) return false;
+    const char* beginToken = "-----BEGIN CERTIFICATE-----";
+    const char* endToken = "-----END CERTIFICATE-----";
+    const size_t beginLen = token_length(beginToken);
+    const size_t endLen = token_length(endToken);
+    size_t seen = 0;
+    size_t i = 0;
+    while (i + beginLen <= buffer_len) {
+            bool beginMatch = true;
+            for (size_t k = 0; k < beginLen; ++k) {
+                if (buffer[i + k] != static_cast<uint8_t>(beginToken[k])) {
+                    beginMatch = false;
+                    break;
+                }
+            }
+            if (beginMatch) {
+            const size_t start = i;
+            const uint8_t* endMatch = nullptr;
+            size_t j = i + beginLen;
+            while (j + endLen <= buffer_len) {
+                bool endMatchFound = true;
+                for (size_t k = 0; k < endLen; ++k) {
+                    if (buffer[j + k] != static_cast<uint8_t>(endToken[k])) {
+                        endMatchFound = false;
+                        break;
+                    }
+                }
+                if (endMatchFound) {
+                    endMatch = buffer + j + endLen;
+                    break;
+                }
+                ++j;
+            }
+            if (!endMatch) return false;
+            if (seen == index) {
+                *blockStart = buffer + start;
+                *blockLen = static_cast<size_t>(endMatch - (buffer + start));
+                return true;
+            }
+            ++seen;
+            i = static_cast<size_t>(endMatch - buffer);
+            continue;
+        }
+        ++i;
+    }
+    return false;
+}
+
 bool is_clock_ready(GxosClockStatus status)
 {
     return status == GxosClockStatus::Plausible || status == GxosClockStatus::Verified;
@@ -930,6 +981,83 @@ const char* detected_mbedtls_version()
     return "version.h present, but compile-time version import is blocked by missing include paths or split-config prerequisites";
 #else
     return "(not imported)";
+#endif
+}
+
+#if GXOS_TLS_MBEDTLS_RUNTIME_INCLUDED
+bool parse_single_certificate_from_pem(const uint8_t* buffer,
+                                       size_t buffer_len,
+                                       size_t index,
+                                       int* parseError,
+                                       size_t* parsedBytes,
+                                       size_t* parsedCertCount)
+{
+    if (parseError) *parseError = 0;
+    if (parsedBytes) *parsedBytes = 0;
+    if (parsedCertCount) *parsedCertCount = 0;
+    const uint8_t* blockStart = nullptr;
+    size_t blockLen = 0;
+    if (!extract_pem_block(buffer, buffer_len, index, &blockStart, &blockLen)) {
+        if (parseError) *parseError = -1;
+        return false;
+    }
+
+    if (blockLen + 1 > 8192u) {
+        if (parseError) *parseError = -2;
+        return false;
+    }
+
+    char pemBlock[8193];
+    for (size_t i = 0; i < blockLen; ++i) {
+        pemBlock[i] = static_cast<char>(blockStart[i]);
+    }
+    pemBlock[blockLen] = '\0';
+
+    mbedtls_x509_crt cert{};
+    mbedtls_x509_crt_init(&cert);
+    const int ret = mbedtls_x509_crt_parse(&cert, reinterpret_cast<const unsigned char*>(pemBlock), blockLen + 1);
+    if (ret == 0) {
+        if (parsedBytes) *parsedBytes = blockLen;
+        if (parsedCertCount) *parsedCertCount = 1;
+        mbedtls_x509_crt_free(&cert);
+        return true;
+    }
+    if (parseError) *parseError = ret;
+    mbedtls_x509_crt_free(&cert);
+    return false;
+}
+#endif
+
+GxosCaStoreParseInfo gxos_ca_store_parse_info()
+{
+#if defined(GXOS_BARE_METAL)
+    gxos_ca_store_load_once();
+    const BareMetalCaStoreState& state = ca_store_state();
+    GxosCaStoreParseInfo info{};
+    info.inputCertificateCount = state.info.pemBlocksDetected;
+    info.parsedCertificateCount = state.info.parsedCertificateCount;
+    info.skippedCertificateCount = 0;
+    info.parseErrorCount = state.info.parseStatus == GxosCaParseStatus::ParseError ? 1 : 0;
+    info.firstParseErrorCode = 0;
+    info.firstParseErrorIndex = 0;
+    info.filteredParse = false;
+    info.parseMode = kBareMetalPublicTrustParseMode;
+    info.error = state.info.error;
+
+    if (state.info.status == GxosCaStoreStatus::Loaded && state.info.parseStatus == GxosCaParseStatus::Parsed) {
+        info.parsedCertificateCount = state.info.parsedCertificateCount;
+        info.filteredParse = true;
+        info.parseErrorCount = state.info.pemBlocksDetected > state.info.parsedCertificateCount
+            ? state.info.pemBlocksDetected - state.info.parsedCertificateCount
+            : 0;
+        info.skippedCertificateCount = info.parseErrorCount;
+        if (info.error == nullptr && info.skippedCertificateCount > 0) {
+            info.error = "Public root bundle parsed with filtered certificate fallback diagnostics.";
+        }
+    }
+    return info;
+#else
+    return {0, 0, 0, 0, 0, 0, false, "n/a", "Hosted Schannel mode does not use bare-metal CA parsing."};
 #endif
 }
 
@@ -3093,12 +3221,68 @@ bool gxos_ca_store_load_once()
     mbedtls_x509_crt_free(&runtime.caChain);
     mbedtls_x509_crt_init(&runtime.caChain);
 
-    const int parseResult = mbedtls_x509_crt_parse(&runtime.caChain, runtime.bytes, loaded + 1);
-    const size_t parsedCount = count_ca_chain(&runtime.caChain);
-    if (parseResult != 0 || parsedCount == 0) {
-        if (parseResult == MBEDTLS_ERR_ASN1_ALLOC_FAILED) {
-            runtime.allocatorExhausted = true;
+    const size_t inputCertCount = pemBegins;
+    size_t parsedCount = 0;
+    size_t skippedCount = 0;
+    int firstErrorCode = 0;
+    size_t firstErrorIndex = 0;
+
+    mbedtls_x509_crt_free(&runtime.caChain);
+    mbedtls_x509_crt_init(&runtime.caChain);
+
+    for (size_t certIndex = 0; certIndex < inputCertCount; ++certIndex) {
+        int certParseResult = 0;
+        size_t certBytes = 0;
+        size_t certCount = 0;
+        const bool certParsed = parse_single_certificate_from_pem(runtime.bytes, loaded, certIndex, &certParseResult, &certBytes, &certCount);
+        if (!certParsed) {
+            ++skippedCount;
+            if (firstErrorCode == 0) {
+                firstErrorCode = certParseResult;
+                firstErrorIndex = certIndex;
+            }
+            continue;
         }
+
+        const uint8_t* blockStart = nullptr;
+        size_t blockLen = 0;
+        if (!extract_pem_block(runtime.bytes, loaded, certIndex, &blockStart, &blockLen)) {
+            ++skippedCount;
+            if (firstErrorCode == 0) {
+                firstErrorCode = -1;
+                firstErrorIndex = certIndex;
+            }
+            continue;
+        }
+
+        char pemBlock[8193];
+        if (blockLen + 1 > sizeof(pemBlock)) {
+            ++skippedCount;
+            if (firstErrorCode == 0) {
+                firstErrorCode = -2;
+                firstErrorIndex = certIndex;
+            }
+            continue;
+        }
+        for (size_t i = 0; i < blockLen; ++i) {
+            pemBlock[i] = static_cast<char>(blockStart[i]);
+        }
+        pemBlock[blockLen] = '\0';
+
+        const int appendResult = mbedtls_x509_crt_parse(&runtime.caChain, reinterpret_cast<const unsigned char*>(pemBlock), blockLen + 1);
+        if (appendResult != 0) {
+            ++skippedCount;
+            if (firstErrorCode == 0) {
+                firstErrorCode = appendResult;
+                firstErrorIndex = certIndex;
+            }
+            continue;
+        }
+
+        parsedCount = count_ca_chain(&runtime.caChain);
+    }
+
+    if (parsedCount == 0) {
         mbedtls_x509_crt_free(&runtime.caChain);
         mbedtls_x509_crt_init(&runtime.caChain);
         state.info = {
@@ -3109,8 +3293,8 @@ bool gxos_ca_store_load_once()
             0,
             testOnlyFixture,
             activeCaBundlePath,
-            parseResult > 0
-                ? "Root CA bundle was only partially parsed; guideXOS fails closed until every certificate parses cleanly."
+            firstErrorCode == MBEDTLS_ERR_ASN1_ALLOC_FAILED
+                ? "Mbed TLS rejected the root CA bundle during X.509 parsing due to arena exhaustion."
                 : "Mbed TLS rejected the root CA bundle during X.509 parsing.",
             state.info.manifest
         };
@@ -3125,11 +3309,13 @@ bool gxos_ca_store_load_once()
         parsedCount,
         testOnlyFixture,
         activeCaBundlePath,
-        testOnlyFixture
+        skippedCount > 0
+            ? "Root CA bundle parsed with filtered fallback; unsupported certificates were skipped while preserving fail-closed validation."
+            : (testOnlyFixture
             ? "Root CA bundle loaded once and parsed successfully through Mbed TLS (smoke-only test fixture; not production trust)."
             : (state.info.manifest.hashMatch
                 ? "Root CA bundle manifest matched the loaded PEM bytes and the CA bundle parsed successfully through Mbed TLS."
-                : "Root CA bundle loaded once and parsed successfully through Mbed TLS."),
+                    : "Root CA bundle loaded once and parsed successfully through Mbed TLS.")),
         state.info.manifest
     };
     return true;
