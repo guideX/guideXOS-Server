@@ -10692,9 +10692,9 @@ static NavigatorRealPublicProbeConfig navigator_real_public_probe_config()
     } else {
         const NavigatorReviewedPublicTarget* reviewedTarget = navigator_find_reviewed_public_target(parsed);
         if (reviewedTarget) {
-        config.reviewedTargetMatched = true;
-        strcopy(config.reviewedTargetPolicy, "reviewed-allowlist", sizeof(config.reviewedTargetPolicy));
-        strcopy(config.reviewedTargetReason, reviewedTarget->reason, sizeof(config.reviewedTargetReason));
+            config.reviewedTargetMatched = true;
+            strcopy(config.reviewedTargetPolicy, "reviewed-allowlist", sizeof(config.reviewedTargetPolicy));
+            strcopy(config.reviewedTargetReason, reviewedTarget->reason, sizeof(config.reviewedTargetReason));
         } else if (config.reviewedOverrideEnabled) {
             strcopy(config.reviewedTargetPolicy, "explicit-reviewed-override", sizeof(config.reviewedTargetPolicy));
             strcopy(config.reviewedTargetReason,
