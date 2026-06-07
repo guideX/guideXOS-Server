@@ -2384,7 +2384,11 @@ void tls_close_http_byte_stream_session(GxosTlsHttpByteStreamSession* session)
 {
     if (!session || session->closed) return;
     session->closed = true;
-    (void)mbedtls_ssl_close_notify(&session->ssl);
+    // Failed handshakes and validation failures may not have a usable TLS session
+    // to shut down cleanly; aborting the TCP stream is sufficient for those cases.
+    if (session->result && session->result->handshakeSuccess) {
+        (void)mbedtls_ssl_close_notify(&session->ssl);
+    }
     if (session->tcpStream.close) session->tcpStream.close(session->tcpStream.context);
     if (session->sslInitialized) {
         mbedtls_ssl_free(&session->ssl);

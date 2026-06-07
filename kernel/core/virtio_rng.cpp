@@ -40,7 +40,9 @@ static const uint16_t kMaxQueueSize = 128;
 static const size_t kQueueStorageBytes = 16384;
 static const size_t kMaxRequestBytes = 256;
 static const uint64_t kRequestTimeoutTicks = 3;
-static const uint32_t kBusyWaitLimit = 5000000;
+// Keep the fail-closed backstop short so a wedged queue can be re-armed
+// promptly instead of stalling the entire TLS smoke lane.
+static const uint32_t kBusyWaitLimit = 250000;
 
 struct DeviceState {
     bool initAttempted;
@@ -280,7 +282,7 @@ static bool scan_pci_for_device()
     return false;
 }
 
-static bool initialize_legacy_device()
+static bool initialize_legacy_device(bool announce = true)
 {
     reset_device();
     io_write8(s_state.ioBase, kLegacyOffsetDeviceStatus, STATUS_ACKNOWLEDGE);
@@ -298,7 +300,9 @@ static bool initialize_legacy_device()
     s_state.driverReady = true;
     set_last_status(STATUS_SUCCESS);
     update_feature_report_status();
-    serial::puts("[VIRTIO-RNG] Initialized via legacy PCI transport\n");
+    if (announce) {
+        serial::puts("[VIRTIO-RNG] Initialized via legacy PCI transport\n");
+    }
     return true;
 }
 
@@ -309,7 +313,7 @@ static bool ensure_request_queue_ready()
     }
 
     if (s_queue.desc == nullptr || s_queue.avail == nullptr || s_queue.used == nullptr || s_queue.size == 0) {
-        return initialize_legacy_device();
+        return initialize_legacy_device(false);
     }
 
     // The bare-metal TLS path can arrive after queue storage was cleared while
@@ -333,6 +337,48 @@ static bool wait_for_request_completion(uint16_t expectedUsedIdx)
         if ((pit::ticks() - startTick) >= kRequestTimeoutTicks) return false;
         if (++spins >= kBusyWaitLimit) return false;
     }
+}
+
+static bool submit_entropy_request(void* buffer, size_t len)
+{
+    memzero(buffer, len);
+    memzero(s_requestBuffer, sizeof(s_requestBuffer));
+    s_queue.desc[0].addr = dma_address(&s_requestBuffer[0]);
+    s_queue.desc[0].len = static_cast<uint32_t>(len);
+    s_queue.desc[0].flags = VRING_DESC_F_WRITE;
+    s_queue.desc[0].next = 0;
+
+    const uint16_t availSlot = static_cast<uint16_t>(s_queue.avail->idx % s_queue.size);
+    const uint16_t expectedUsedIdx = s_queue.used->idx;
+    s_queue.avail->ring[availSlot] = 0;
+    barrier();
+    s_queue.avail->idx = static_cast<uint16_t>(s_queue.avail->idx + 1);
+    barrier();
+    io_write16(s_state.ioBase, kLegacyOffsetQueueNotify, 0);
+
+    if (!wait_for_request_completion(expectedUsedIdx)) {
+        set_last_status(STATUS_REQUEST_TIMEOUT);
+        update_feature_report_status();
+        return false;
+    }
+
+    const VringUsedElem& usedElem = s_queue.used->ring[s_queue.lastUsedIdx % s_queue.size];
+    s_queue.lastUsedIdx = s_queue.used->idx;
+
+    if (usedElem.id != 0) {
+        set_last_status(STATUS_DEVICE_ERROR);
+        update_feature_report_status();
+        return false;
+    }
+    if (usedElem.len < len) {
+        set_last_status(STATUS_SHORT_READ);
+        update_feature_report_status();
+        return false;
+    }
+
+    uint8_t* dst = static_cast<uint8_t*>(buffer);
+    for (size_t i = 0; i < len; ++i) dst[i] = s_requestBuffer[i];
+    return true;
 }
 
 } // namespace
@@ -388,44 +434,20 @@ bool fill(void* buffer, size_t len)
         return false;
     }
     if (!ensure_request_queue_ready()) return false;
-
-    memzero(buffer, len);
-    memzero(s_requestBuffer, sizeof(s_requestBuffer));
-    s_queue.desc[0].addr = dma_address(&s_requestBuffer[0]);
-    s_queue.desc[0].len = static_cast<uint32_t>(len);
-    s_queue.desc[0].flags = VRING_DESC_F_WRITE;
-    s_queue.desc[0].next = 0;
-
-    const uint16_t availSlot = static_cast<uint16_t>(s_queue.avail->idx % s_queue.size);
-    const uint16_t expectedUsedIdx = s_queue.used->idx;
-    s_queue.avail->ring[availSlot] = 0;
-    barrier();
-    s_queue.avail->idx = static_cast<uint16_t>(s_queue.avail->idx + 1);
-    barrier();
-    io_write16(s_state.ioBase, kLegacyOffsetQueueNotify, 0);
-
-    if (!wait_for_request_completion(expectedUsedIdx)) {
-        set_last_status(STATUS_REQUEST_TIMEOUT);
-        update_feature_report_status();
+    if (!initialize_legacy_device(false)) return false;
+    if (!submit_entropy_request(buffer, len)) {
+        const Status firstFailure = s_state.lastStatus;
+        if ((firstFailure == STATUS_REQUEST_TIMEOUT ||
+             firstFailure == STATUS_SHORT_READ ||
+             firstFailure == STATUS_DEVICE_ERROR) &&
+            initialize_legacy_device(false) &&
+            submit_entropy_request(buffer, len)) {
+            set_last_status(STATUS_SUCCESS);
+            update_feature_report_status();
+            return true;
+        }
         return false;
     }
-
-    const VringUsedElem& usedElem = s_queue.used->ring[s_queue.lastUsedIdx % s_queue.size];
-    s_queue.lastUsedIdx = s_queue.used->idx;
-
-    if (usedElem.id != 0) {
-        set_last_status(STATUS_DEVICE_ERROR);
-        update_feature_report_status();
-        return false;
-    }
-    if (usedElem.len < len) {
-        set_last_status(STATUS_SHORT_READ);
-        update_feature_report_status();
-        return false;
-    }
-
-    uint8_t* dst = static_cast<uint8_t*>(buffer);
-    for (size_t i = 0; i < len; ++i) dst[i] = s_requestBuffer[i];
 
     set_last_status(STATUS_SUCCESS);
     update_feature_report_status();

@@ -244,7 +244,7 @@ function Test-NavigatorRealPublicProbeTarget {
         ReviewedTargetMatch = "no"
         ReviewedTargetOverride = "no"
         ReviewedTargetAllowlist = $publicProbeReviewedAllowlistName
-        ReviewedTargetReason = "The requested target is outside the reviewed public HTTPS allowlist for v0.2."
+        ReviewedTargetReason = "The requested target is outside the reviewed public HTTPS allowlist for v0.3."
     }
 }
 
@@ -570,6 +570,58 @@ function Get-NavigatorFieldInt {
     return $null
 }
 
+function Get-NavigatorPublicHttpsTlsFailureClassification {
+    param(
+        [Parameter(Mandatory = $true)][string]$ResultMarker,
+        [Parameter(Mandatory = $true)][System.Collections.IDictionary]$Fields
+    )
+
+    switch ($ResultMarker) {
+        "SETUP_BLOCKED" { return "POLICY_OR_SETUP_BLOCKED" }
+        "SKIP" { return "ENVIRONMENT_UNAVAILABLE" }
+    }
+
+    $dnsResult = [string]$Fields["dns_result"]
+    $tcpResult = [string]$Fields["tcp_result"]
+    $tlsResult = [string]$Fields["tls_result"]
+    $tlsStatus = [string]$Fields["tls_status"]
+    $certificateValidationResult = [string]$Fields["certificate_validation_result"]
+
+    if ([string]::Equals($dnsResult, "FAIL", [System.StringComparison]::OrdinalIgnoreCase)) {
+        return "DNS_FAILURE"
+    }
+    if ([string]::Equals($tcpResult, "FAIL", [System.StringComparison]::OrdinalIgnoreCase)) {
+        return "TCP_FAILURE"
+    }
+    if ([string]::Equals($tlsResult, "PASS", [System.StringComparison]::OrdinalIgnoreCase)) {
+        return "NONE"
+    }
+
+    switch ($tlsStatus) {
+        "PolicyBlocked" { return "POLICY_BLOCKED" }
+        "RngUnavailable" { return "RNG_UNAVAILABLE" }
+        "ClockUnavailable" { return "CLOCK_UNAVAILABLE" }
+        "CaMissing" { return "CA_MISSING" }
+        "CaParseFailed" { return "CA_PARSE_FAILED" }
+        "TcpConnectFailed" { return "TCP_FAILURE" }
+        "HostnameMismatch" { return "HOSTNAME_FAILURE" }
+        "CertificateVerifyFailed" { return "CERTIFICATE_VERIFICATION_FAILURE" }
+        "TlsWriteFailed" { return "TLS_WRITE_FAILURE" }
+        "TlsReadFailed" { return "TLS_READ_FAILURE" }
+        "ResponseTooLarge" { return "RESPONSE_CAP_HIT_AFTER_TLS" }
+        "HandshakeFailed" { return "TLS_HANDSHAKE_FAILURE" }
+    }
+
+    if ([string]::Equals($certificateValidationResult, "FAIL", [System.StringComparison]::OrdinalIgnoreCase)) {
+        return "CERTIFICATE_VERIFICATION_FAILURE"
+    }
+    if ([string]::Equals($tlsResult, "FAIL", [System.StringComparison]::OrdinalIgnoreCase)) {
+        return "TLS_TRANSPORT_FAILURE"
+    }
+
+    return "UNKNOWN_FAILURE"
+}
+
 function Set-NavigatorPublicHttpsDerivedClassification {
     param(
         [Parameter(Mandatory = $true)][string]$FinalResult,
@@ -587,17 +639,21 @@ function Set-NavigatorPublicHttpsDerivedClassification {
     $tlsSucceededBeforeContentFailure = Get-NavigatorFieldYesNo -Fields $Fields -Name "tls_succeeded_before_content_failure"
     $unsupportedReason = [string]$Fields["unsupported_reason"]
     $contentEncoding = [string]$Fields["content_encoding"]
+    $sourceType = [string]$Fields["source_type"]
     $redirectCount = Get-NavigatorFieldInt -Fields $Fields -Name "redirect_count"
     $httpStatus = Get-NavigatorFieldInt -Fields $Fields -Name "http_status"
     $failureReason = [string]$Fields["failure_reason"]
     $skipReason = [string]$Fields["skip_reason"]
     $redirectPolicyBlocked = $false
+    $failureClassification = Get-NavigatorPublicHttpsTlsFailureClassification -ResultMarker $resultMarker -Fields $Fields
 
     if (($failureReason -match "redirect" -or $skipReason -match "redirect") -and -not $downgradeBlocked) {
         $redirectPolicyBlocked = $true
     } elseif ($null -ne $redirectCount -and $redirectCount -ge 5 -and -not $downgradeBlocked -and -not $tlsPass) {
         $redirectPolicyBlocked = $true
     }
+
+    $Fields["tls_failure_classification"] = $failureClassification
 
     switch ($resultMarker) {
         "SETUP_BLOCKED" {
@@ -627,16 +683,30 @@ function Set-NavigatorPublicHttpsDerivedClassification {
             $Fields["content_compatibility_result"] = "REDIRECT_POLICY_BLOCKED"
             $Fields["page_render_result"] = "NOT_RENDERED_REDIRECT_POLICY_BLOCKED"
             $Fields["real_world_compatibility_note"] = "TLS transport succeeded, but Navigator stopped at a redirect policy boundary instead of rendering the final page."
-        } elseif ($headerCapHit -or $bodyCapHit) {
-            $Fields["content_compatibility_result"] = "RESPONSE_CAP_HIT_AFTER_TLS"
-            $Fields["page_render_result"] = "NOT_RENDERED_CAP_HIT_AFTER_TLS"
-            $Fields["real_world_compatibility_note"] = "TLS transport succeeded, but Navigator hit a response safety cap before full page rendering completed."
+        } elseif ($headerCapHit -and $bodyCapHit) {
+            $Fields["content_compatibility_result"] = "HEADER_AND_BODY_CAP_HIT_AFTER_TLS"
+            $Fields["page_render_result"] = "NOT_RENDERED_HEADER_AND_BODY_CAP_HIT_AFTER_TLS"
+            $Fields["real_world_compatibility_note"] = "TLS transport succeeded, but Navigator hit both header and body safety caps before full page rendering completed."
+        } elseif ($headerCapHit) {
+            $Fields["content_compatibility_result"] = "HEADER_CAP_HIT_AFTER_TLS"
+            $Fields["page_render_result"] = "NOT_RENDERED_HEADER_CAP_HIT_AFTER_TLS"
+            $Fields["real_world_compatibility_note"] = "TLS transport succeeded, but Navigator hit the response-header safety cap before full page rendering completed."
+        } elseif ($bodyCapHit) {
+            $Fields["content_compatibility_result"] = "BODY_CAP_HIT_AFTER_TLS"
+            $Fields["page_render_result"] = "NOT_RENDERED_BODY_CAP_HIT_AFTER_TLS"
+            $Fields["real_world_compatibility_note"] = "TLS transport succeeded, but Navigator hit the response-body safety cap before full page rendering completed."
         } elseif (-not [string]::IsNullOrWhiteSpace($unsupportedReason) -and $unsupportedReason -ne "(none)" -and $unsupportedReason -ne "(not-attempted)") {
             if (($unsupportedReason -match "ContentEncoding") -or
                 ($contentEncoding -and $contentEncoding -ne "(none)" -and $contentEncoding -ne "(not-attempted)" -and $contentEncoding -ne "identity")) {
-                $Fields["content_compatibility_result"] = "UNSUPPORTED_COMPRESSION_AFTER_TLS"
-                $Fields["page_render_result"] = "NOT_RENDERED_UNSUPPORTED_COMPRESSION_AFTER_TLS"
+                $Fields["content_compatibility_result"] = "UNSUPPORTED_CONTENT_ENCODING_AFTER_TLS"
+                $Fields["page_render_result"] = "NOT_RENDERED_UNSUPPORTED_CONTENT_ENCODING_AFTER_TLS"
                 $Fields["real_world_compatibility_note"] = "TLS transport succeeded, but the page relied on unsupported content encoding after HTTPS validation completed."
+            } elseif (($unsupportedReason -match "content type") -or
+                ($unsupportedReason -match "download") -or
+                ($sourceType -and $sourceType -eq "download")) {
+                $Fields["content_compatibility_result"] = "UNSUPPORTED_CONTENT_TYPE_DOWNLOAD_AFTER_TLS"
+                $Fields["page_render_result"] = "NOT_RENDERED_UNSUPPORTED_CONTENT_TYPE_DOWNLOAD_AFTER_TLS"
+                $Fields["real_world_compatibility_note"] = "TLS transport succeeded, but the response was treated as an unsupported content type or download instead of a renderable page."
             } else {
                 $Fields["content_compatibility_result"] = "UNSUPPORTED_CONTENT_AFTER_TLS"
                 $Fields["page_render_result"] = "NOT_RENDERED_UNSUPPORTED_CONTENT_AFTER_TLS"
@@ -658,7 +728,7 @@ function Set-NavigatorPublicHttpsDerivedClassification {
         return
     }
 
-    $Fields["tls_transport_proof_result"] = "FAIL"
+    $Fields["tls_transport_proof_result"] = $failureClassification
     if ($downgradeBlocked) {
         $Fields["content_compatibility_result"] = "DOWNGRADE_BLOCKED"
         $Fields["page_render_result"] = "NOT_RENDERED_DOWNGRADE_BLOCKED"
@@ -668,9 +738,25 @@ function Set-NavigatorPublicHttpsDerivedClassification {
         $Fields["page_render_result"] = "NOT_RENDERED_REDIRECT_POLICY_BLOCKED"
         $Fields["real_world_compatibility_note"] = "The public HTTPS probe stopped at a redirect policy guard before successful page rendering."
     } else {
-        $Fields["content_compatibility_result"] = "TLS_TRANSPORT_FAILED"
-        $Fields["page_render_result"] = "NOT_RENDERED_TLS_TRANSPORT_FAILED"
-        $Fields["real_world_compatibility_note"] = "The real-world HTTPS proof failed before Navigator established a fully validated TLS transport."
+        $Fields["content_compatibility_result"] = "NOT_PROVED"
+        $Fields["page_render_result"] = "NOT_RENDERED_$failureClassification"
+        switch ($failureClassification) {
+            "DNS_FAILURE" {
+                $Fields["real_world_compatibility_note"] = "The real-world HTTPS proof failed during DNS resolution before Navigator could establish a validated TLS transport."
+            }
+            "TCP_FAILURE" {
+                $Fields["real_world_compatibility_note"] = "The real-world HTTPS proof failed while opening the TCP transport for HTTPS."
+            }
+            "CERTIFICATE_VERIFICATION_FAILURE" {
+                $Fields["real_world_compatibility_note"] = "Navigator reached the HTTPS endpoint, but certificate verification failed before proof could be accepted."
+            }
+            "HOSTNAME_FAILURE" {
+                $Fields["real_world_compatibility_note"] = "Navigator reached the HTTPS endpoint, but hostname validation failed before proof could be accepted."
+            }
+            default {
+                $Fields["real_world_compatibility_note"] = "The real-world HTTPS proof failed before Navigator established a fully validated TLS transport."
+            }
+        }
     }
 }
 
@@ -709,6 +795,18 @@ function Write-NavigatorPublicHttpsConsoleSummary {
     Write-Host "  DNS result: $($Fields["dns_result"])"
     Write-Host "  TCP result: $($Fields["tcp_result"])"
     Write-Host "  TLS result: $($Fields["tls_result"])"
+    Write-Host "  TLS connect attempts: $($Fields["tls_connect_attempts"])"
+    Write-Host "  TLS retry count: $($Fields["tls_retry_count"])"
+    Write-Host "  TLS retry reason: $($Fields["tls_retry_reason"])"
+    Write-Host "  TLS bytes written before retry: $($Fields["tls_bytes_written_before_retry"])"
+    Write-Host "  TLS handshake error code: $($Fields["tls_handshake_error_code"])"
+    Write-Host "  TLS transport error code: $($Fields["tls_transport_error_code"])"
+    Write-Host "  TLS request bytes written: $($Fields["tls_request_bytes_written"])"
+    Write-Host "  TLS response bytes read: $($Fields["tls_response_bytes_read"])"
+    Write-Host "  redirect hop index: $($Fields["redirect_hop_index"])"
+    Write-Host "  redirect hop URL: $($Fields["redirect_hop_url"])"
+    Write-Host "  redirected HTTPS retry used: $($Fields["redirected_https_retry_used"])"
+    Write-Host "  tcp_abort_used: $($Fields["tcp_abort_used"])"
     Write-Host "  certificate validation: $($Fields["certificate_validation_result"])"
     Write-Host "  hostname validation: $($Fields["hostname_validation_result"])"
     Write-Host "  HTTP status: $($Fields["http_status"])"
@@ -719,6 +817,7 @@ function Write-NavigatorPublicHttpsConsoleSummary {
     Write-Host "  downgrade blocked: $($Fields["downgrade_blocked"])"
     Write-Host "  TLS succeeded before content failure: $($Fields["tls_succeeded_before_content_failure"])"
     Write-Host "  unsupported content reason: $($Fields["unsupported_reason"])"
+    Write-Host "  TLS failure classification: $($Fields["tls_failure_classification"])"
     Write-Host "  TLS transport proof: $($Fields["tls_transport_proof_result"])"
     Write-Host "  content compatibility: $($Fields["content_compatibility_result"])"
     Write-Host "  page render result: $($Fields["page_render_result"])"
@@ -796,10 +895,27 @@ $fields = [ordered]@{
     dns_result = "not-attempted"
     tcp_result = "not-attempted"
     tls_result = "not-attempted"
+    transport_selection = "(not-attempted)"
+    transport_policy_reason = "(not-attempted)"
+    tls_status = "(not-attempted)"
+    tls_connect_attempts = "0"
+    tls_retry_count = "0"
+    tls_retry_reason = "(none)"
+    tls_bytes_written_before_retry = "0"
+    tls_handshake_error_code = "(not-attempted)"
+    tls_transport_error_code = "(not-attempted)"
+    tls_request_bytes_written = "0"
+    tls_response_bytes_read = "0"
+    tls_failure_classification = "NOT_ATTEMPTED"
+    tcp_abort_used = "no"
+    redirected_https_retry_used = "no"
+    redirect_hop_index = "0"
+    redirect_hop_url = "(not-attempted)"
     certificate_validation_result = "not-attempted"
     hostname_validation_result = "not-attempted"
     verify_flags = "(not-attempted)"
     sni_host = "(not-attempted)"
+    source_type = "(not-attempted)"
     http_status = "(not-attempted)"
     requested_url = "(not-attempted)"
     final_url = "(not-attempted)"
@@ -1049,10 +1165,26 @@ try {
         "dns_result",
         "tcp_result",
         "tls_result",
+        "transport_selection",
+        "transport_policy_reason",
+        "tls_status",
+        "tls_connect_attempts",
+        "tls_retry_count",
+        "tls_retry_reason",
+        "tls_bytes_written_before_retry",
+        "tls_handshake_error_code",
+        "tls_transport_error_code",
+        "tls_request_bytes_written",
+        "tls_response_bytes_read",
+        "tcp_abort_used",
+        "redirected_https_retry_used",
+        "redirect_hop_index",
+        "redirect_hop_url",
         "certificate_validation_result",
         "hostname_validation_result",
         "verify_flags",
         "sni_host",
+        "source_type",
         "requested_url",
         "final_url",
         "redirect_count",

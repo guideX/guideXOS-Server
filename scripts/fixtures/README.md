@@ -139,7 +139,7 @@ Trust source distinction in this repository today:
   - exit `3`: the guest probe reported `SKIP`, which is not accepted as proof by the dedicated entrypoint;
   - exit `1`: the guest probe reported `FAIL` or the harness could not complete.
 - The dedicated script rejects non-`https://` targets, numeric-IP targets, and non-reviewed public targets before QEMU launches unless you intentionally use the explicit reviewed override path.
-- The dedicated script prints a compact final summary for manual runs and CI logs, including the target, CA source resolution, a sanitized CA source marker, `public_trust_ready`, CA bytes, parsed cert count, DNS/TCP/TLS, certificate and hostname validation, HTTP status, compatibility-limit markers such as `header_cap_hit`, `body_cap_hit`, `downgrade_blocked`, `tls_succeeded_before_content_failure`, unsupported-content reason, `plaintext_fallback=no`, automated PASS assertion status, the final result, and a machine-checkable `result_marker`:
+- The dedicated script prints a compact final summary for manual runs and CI logs, including the target, CA source resolution, a sanitized CA source marker, `public_trust_ready`, CA bytes, parsed cert count, DNS/TCP/TLS, certificate and hostname validation, compact transport diagnostics such as `tls_connect_attempts`, `tls_retry_count`, `tls_retry_reason`, `tls_bytes_written_before_retry`, `tls_handshake_error_code`, `tls_transport_error_code`, `tcp_abort_used`, `redirected_https_retry_used`, `redirect_hop_index`, and `redirect_hop_url`, plus HTTP status, compatibility-limit markers such as `header_cap_hit`, `body_cap_hit`, `downgrade_blocked`, `tls_succeeded_before_content_failure`, unsupported-content reason, `plaintext_fallback=no`, automated PASS assertion status, the final result, and a machine-checkable `result_marker`:
   - `PASS`
   - `FAIL`
   - `SKIP`
@@ -152,6 +152,13 @@ Trust source distinction in this repository today:
 - Structured evidence is promoted to:
   - `logs/navigator-public-https-<timestamp>.evidence.json`
 - The summary log uses stable `[NAVIGATOR-PUBLIC-HTTPS] key=value` lines for machine checks. PASS-critical fields include `final_result`, `result_marker`, `target_url`, `target_host`, `public_ca_source_marker`, `public_trust_ready`, `public_ca_parsed_certs`, `trust_bundle_manifest_present`, `trust_bundle_sha256`, `trust_bundle_type`, `trust_bundle_root_count`, `trust_bundle_production_ready`, `trust_bundle_test_only`, `dns_result`, `tcp_result`, `tls_result`, `certificate_validation_result`, `hostname_validation_result`, `verify_flags`, `sni_host`, `http_status`, `header_cap_hit`, `body_cap_hit`, `downgrade_blocked`, `tls_succeeded_before_content_failure`, `plaintext_fallback`, and the automated `pass_contract_assertion_result`.
+- Public pilot v0.3 classification fields separate transport proof from content/render compatibility:
+  - `tls_failure_classification`
+  - `tls_transport_proof_result`
+  - `content_compatibility_result`
+  - `page_render_result`
+  - `real_world_compatibility_note`
+- The reviewed-target matrix helper now emits one copied summary log and one copied evidence JSON per reviewed target, plus an aggregate allowlist summary log at `logs/navigator-public-https-allowlist-<timestamp>.summary.log`.
 - The automated validator lives at `scripts/assert-navigator-public-https-pass.ps1`. It verifies the PASS contract, exits `0` only for valid proof, and can be run manually against any uploaded summary artifact.
 - The structured evidence exporter lives at `scripts/export-navigator-public-https-evidence.ps1`. It converts the summary artifact into JSON milestone evidence without copying PEM contents or any private material.
 
@@ -171,7 +178,7 @@ Trust source distinction in this repository today:
   - `logs/navigator-public-https-*.ca-bundle.manifest`
   - `logs/navigator-public-https-*.evidence.json`
 - The workflow writes the secret to a temporary runner file, validates it immediately with `scripts/validate-navigator-ca-bundle.ps1`, points `GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_CA_BUNDLE_SOURCE` at that file, and removes the file after the run where practical.
-- The reviewed target allowlist for public-pilot hardening v0.2 currently contains:
+- The reviewed target allowlist for public-pilot hardening v0.3 currently contains:
   - `https://sha256.badssl.com/`
     Stable badssl DNS-hosted HTTPS endpoint used to prove real-world DNS, TCP, TLS, certificate, and hostname validation without opening arbitrary browsing.
 - The workflow accepts `target_url` only when it matches the approved reviewed allowlist.
@@ -211,6 +218,7 @@ Review notes:
 
 - `SETUP_BLOCKED`, `SKIP`, and `FAIL` are useful diagnostics but are not proof of a working public HTTPS path.
 - `tls_transport_proof_result=PASS` means Navigator completed DNS, TCP, TLS, certificate, and hostname validation successfully for the reviewed public target.
+- `tls_failure_classification` makes failures more specific than a generic TLS miss. Expect values such as `DNS_FAILURE`, `TCP_FAILURE`, `TLS_HANDSHAKE_FAILURE`, `CERTIFICATE_VERIFICATION_FAILURE`, `HOSTNAME_FAILURE`, `POLICY_OR_SETUP_BLOCKED`, or `ENVIRONMENT_UNAVAILABLE`.
 - `page_render_result=RENDERED` is stricter than transport proof; unsupported compression, unsupported content, redirect policy blocks, downgrade blocks, or response caps can keep rendering from succeeding after TLS proof has already succeeded.
 - A content/browser limitation after TLS success, such as unsupported content encoding or unsupported compression handling, must not be mistaken for a CA, certificate, hostname, or TLS transport failure.
 - Deterministic fixture roots still do not count as public trust, even if another field in the same log looks healthy.
@@ -332,6 +340,7 @@ Operator warnings:
   - `content_encoding` may still be unsupported after successful TLS proof.
   - `unsupported_reason` may still be populated after successful TLS proof.
   - `header_cap_hit`, `body_cap_hit`, and `tls_succeeded_before_content_failure` can record that TLS succeeded before Navigator stopped on a compatibility limit.
+  - `tls_retry_count`, `tls_retry_reason`, `tls_bytes_written_before_retry`, `redirected_https_retry_used`, and `redirect_hop_url` can show that a redirected HTTPS hop retried once after a pre-write transport-open failure without weakening certificate or hostname validation.
 
 ### Structured Evidence JSON
 
@@ -365,10 +374,27 @@ Operator warnings:
   - `dns_result`
   - `tcp_result`
   - `tls_result`
+  - `transport_selection`
+  - `transport_policy_reason`
+  - `tls_status`
+  - `tls_connect_attempts`
+  - `tls_retry_count`
+  - `tls_retry_reason`
+  - `tls_bytes_written_before_retry`
+  - `tls_handshake_error_code`
+  - `tls_transport_error_code`
+  - `tls_request_bytes_written`
+  - `tls_response_bytes_read`
+  - `tls_failure_classification`
+  - `tcp_abort_used`
+  - `redirected_https_retry_used`
+  - `redirect_hop_index`
+  - `redirect_hop_url`
   - `certificate_validation_result`
   - `hostname_validation_result`
   - `verify_flags`
   - `sni_host`
+  - `source_type`
   - `requested_url`
   - `final_url`
   - `redirect_count`
@@ -407,6 +433,8 @@ Operator warnings:
   - `.\scripts\smoke-navigator-public-https.bat`
 - Reviewed allowlist matrix helper:
   - `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\smoke-navigator-public-https-allowlist.ps1`
+- Reviewed allowlist matrix helper for one approved target only:
+  - `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\smoke-navigator-public-https-allowlist.ps1 -TargetUrl https://sha256.badssl.com/`
 - Manual GitHub Actions execution:
   - Open the `Navigator Public HTTPS Probe` workflow in GitHub Actions.
   - Push the branch first if the workflow is new on that branch.

@@ -333,6 +333,7 @@ static const uint8_t* getGlyph(char c) {
 static void kernel_join_path(const char* base, const char* name, char* out, int outSize);
 static const char* kernel_vfs_status_text(vfs::Status status);
 static void nav_int_to_text(int value, char* out, int outSize);
+static void nav_i64_to_text(int64_t value, char* out, int outSize);
 static bool nav_char_is_filename_safe(char c);
 static void nav_copy_basename_without_query(const char* urlOrPath, char* out, int outSize);
 static void nav_make_safe_download_filename(const char* urlOrPath, char* out, int outSize);
@@ -6906,6 +6907,13 @@ struct KernelHttpResponse {
     bool tlsAllowlistLocalOnly;
     bool downgradeRedirectBlocked;
     bool tlsSucceededBeforeContentFailure;
+    int tlsRetryCount;
+    char tlsRetryReason[96];
+    int tlsBytesWrittenBeforeRetry;
+    bool tcpAbortUsed;
+    bool redirectedHttpsRetryUsed;
+    int redirectHopIndex;
+    char redirectHopUrl[kKernelHttpUrlLen];
     char tlsBackend[48];
     gxos::GxosTlsLocalHandshakeResult tlsResult;
     char body[kKernelHttpBodyLimit + 1];
@@ -6945,6 +6953,13 @@ static void kernel_http_reset_response(KernelHttpResponse* response)
     response->tlsAllowlistLocalOnly = false;
     response->downgradeRedirectBlocked = false;
     response->tlsSucceededBeforeContentFailure = false;
+    response->tlsRetryCount = 0;
+    response->tlsRetryReason[0] = '\0';
+    response->tlsBytesWrittenBeforeRetry = 0;
+    response->tcpAbortUsed = false;
+    response->redirectedHttpsRetryUsed = false;
+    response->redirectHopIndex = 0;
+    response->redirectHopUrl[0] = '\0';
     response->tlsBackend[0] = '\0';
     response->tlsResult = gxos::GxosTlsLocalHandshakeResult{};
     response->body[0] = '\0';
@@ -6992,6 +7007,17 @@ void NavigatorApp::rememberPageMetadata(const char* requestedUrl, const char* fi
     m_metaTlsHostnameValidated = networkResponse ? networkResponse->tlsResult.hostnameValidationSuccess : false;
     m_metaTlsAllowlistLocalOnly = networkResponse ? networkResponse->tlsAllowlistLocalOnly : false;
     m_metaTlsVerifyFlags = networkResponse ? networkResponse->tlsResult.verifyFlags : 0u;
+    m_metaTlsHandshakeErrorCode = networkResponse ? networkResponse->tlsResult.mbedtlsError : 0;
+    m_metaTlsTransportErrorCode = networkResponse ? networkResponse->tlsResult.transportError : 0;
+    m_metaTlsRequestBytesWritten = networkResponse ? (int)networkResponse->tlsResult.requestBytesWritten : 0;
+    m_metaTlsResponseBytesRead = networkResponse ? (int)networkResponse->tlsResult.responseBytesRead : 0;
+    m_metaTlsRetryCount = networkResponse ? networkResponse->tlsRetryCount : 0;
+    strcopy(m_metaTlsRetryReason, networkResponse ? networkResponse->tlsRetryReason : "", sizeof(m_metaTlsRetryReason));
+    m_metaTlsBytesWrittenBeforeRetry = networkResponse ? networkResponse->tlsBytesWrittenBeforeRetry : 0;
+    m_metaTcpAbortUsed = networkResponse ? networkResponse->tcpAbortUsed : false;
+    m_metaRedirectedHttpsRetryUsed = networkResponse ? networkResponse->redirectedHttpsRetryUsed : false;
+    m_metaRedirectHopIndex = networkResponse ? networkResponse->redirectHopIndex : 0;
+    strcopy(m_metaRedirectHopUrl, networkResponse ? networkResponse->redirectHopUrl : "", sizeof(m_metaRedirectHopUrl));
     strcopy(m_metaTlsBackend,
         networkResponse && networkResponse->tlsBackend[0] ? networkResponse->tlsBackend : "",
         sizeof(m_metaTlsBackend));
@@ -7226,6 +7252,7 @@ static int s_kernelHttpControlledLocalHttpsLoads = 0;
 
 struct KernelTcpHttpByteStreamContext {
     int socket;
+    bool* abortUsedFlag;
 };
 
 static int kernel_tcp_http_byte_stream_read(void* context, uint8_t* buffer, int length)
@@ -7251,6 +7278,9 @@ static void kernel_tcp_http_byte_stream_close(void* context)
     // Navigator request streams are one-shot HTTP/1.0 connections that are fully
     // consumed before close. Abort frees the TCB immediately so redirect hops do
     // not inherit linger/TIME_WAIT pressure from the previous socket.
+    if (tcp->abortUsedFlag) {
+        *tcp->abortUsedFlag = true;
+    }
     kernel::tcp::tcp_abort(tcp->socket);
     tcp->socket = -1;
 }
@@ -8122,6 +8152,8 @@ static bool kernel_http_open_stream(KernelHttpUrl* parsed,
     if (!parsed || !response || !activeStream) return false;
     activeStream->stream = gxos::web::HttpByteStream{};
     activeStream->tcpContext.socket = -1;
+    activeStream->tcpContext.abortUsedFlag = &response->tcpAbortUsed;
+    response->tcpAbortUsed = false;
 
     if (!kernel_http_resolve_host(parsed, response)) {
         return false;
@@ -8440,8 +8472,15 @@ static KernelHttpResponse* kernel_http_request(const char* url, const char* meth
     char currentMethod[8];
     const char* currentBody = body;
     int currentBodyBytes = bodyBytes;
+    int totalTlsRetryCount = 0;
+    int lastTlsBytesWrittenBeforeRetry = 0;
+    int lastRetryHopIndex = 0;
+    char lastTlsRetryReason[96];
+    char lastRetryHopUrl[kKernelHttpUrlLen];
     strcopy(current, url ? url : "", sizeof(current));
     strcopy(currentMethod, method && gxos::web::httpSharedEqualsInsensitive(method, "post") ? "POST" : "GET", sizeof(currentMethod));
+    lastTlsRetryReason[0] = '\0';
+    lastRetryHopUrl[0] = '\0';
     for (int redirectCount = 0; redirectCount <= gxos::web::kHttpSharedMaxRedirects; ++redirectCount) {
         KernelHttpResponse* response = nullptr;
         for (int attempt = 0; attempt < 2; ++attempt) {
@@ -8449,13 +8488,32 @@ static KernelHttpResponse* kernel_http_request(const char* url, const char* meth
             response->redirectCount = redirectCount;
             strcopy(response->requestedUrl, url ? url : "", sizeof(response->requestedUrl));
             strcopy(response->finalUrl, current, sizeof(response->finalUrl));
+            response->redirectHopIndex = redirectCount;
+            strcopy(response->redirectHopUrl, current, sizeof(response->redirectHopUrl));
             if (attempt == 0 &&
                 kernel_http_should_retry_redirected_tls_open(
                     response, current, currentMethod, redirectCount, currentBodyBytes)) {
+                ++totalTlsRetryCount;
+                lastTlsBytesWrittenBeforeRetry = (int)response->tlsResult.requestBytesWritten;
+                lastRetryHopIndex = redirectCount;
+                strcopy(lastRetryHopUrl, current, sizeof(lastRetryHopUrl));
+                strcopy(lastTlsRetryReason,
+                    "redirected-https-prewrite-open-failure",
+                    sizeof(lastTlsRetryReason));
                 kernel_http_poll_once();
                 continue;
             }
             break;
+        }
+        if (response) {
+            response->tlsRetryCount = totalTlsRetryCount;
+            response->redirectedHttpsRetryUsed = totalTlsRetryCount > 0;
+            response->tlsBytesWrittenBeforeRetry = lastTlsBytesWrittenBeforeRetry;
+            strcopy(response->tlsRetryReason, lastTlsRetryReason, sizeof(response->tlsRetryReason));
+            if (totalTlsRetryCount > 0) {
+                response->redirectHopIndex = lastRetryHopIndex;
+                strcopy(response->redirectHopUrl, lastRetryHopUrl, sizeof(response->redirectHopUrl));
+            }
         }
         if (!response->ok) return response;
         if (!gxos::web::httpSharedIsRedirectStatus(response->statusCode)) return response;
@@ -10803,7 +10861,20 @@ void NavigatorApp::smokeCaptureHttpsNavigation(const char* url,
                                                bool* headerCapHit,
                                                bool* bodyCapHit,
                                                bool* downgradeRedirectBlocked,
-                                               bool* tlsSucceededBeforeContentFailure)
+                                               bool* tlsSucceededBeforeContentFailure,
+                                               int* tlsHandshakeErrorCode,
+                                               int* tlsTransportErrorCode,
+                                               int* tlsRequestBytesWritten,
+                                               int* tlsResponseBytesRead,
+                                               int* tlsRetryCount,
+                                               char* tlsRetryReason,
+                                               int tlsRetryReasonLen,
+                                               int* tlsBytesWrittenBeforeRetry,
+                                               bool* tcpAbortUsed,
+                                               bool* redirectedHttpsRetryUsed,
+                                               int* redirectHopIndex,
+                                               char* redirectHopUrl,
+                                               int redirectHopUrlLen)
 {
     if (requestedUrl && requestedUrlLen > 0) requestedUrl[0] = '\0';
     if (statusCode) *statusCode = 0;
@@ -10837,6 +10908,17 @@ void NavigatorApp::smokeCaptureHttpsNavigation(const char* url,
     if (bodyCapHit) *bodyCapHit = false;
     if (downgradeRedirectBlocked) *downgradeRedirectBlocked = false;
     if (tlsSucceededBeforeContentFailure) *tlsSucceededBeforeContentFailure = false;
+    if (tlsHandshakeErrorCode) *tlsHandshakeErrorCode = 0;
+    if (tlsTransportErrorCode) *tlsTransportErrorCode = 0;
+    if (tlsRequestBytesWritten) *tlsRequestBytesWritten = 0;
+    if (tlsResponseBytesRead) *tlsResponseBytesRead = 0;
+    if (tlsRetryCount) *tlsRetryCount = 0;
+    if (tlsRetryReason && tlsRetryReasonLen > 0) tlsRetryReason[0] = '\0';
+    if (tlsBytesWrittenBeforeRetry) *tlsBytesWrittenBeforeRetry = 0;
+    if (tcpAbortUsed) *tcpAbortUsed = false;
+    if (redirectedHttpsRetryUsed) *redirectedHttpsRetryUsed = false;
+    if (redirectHopIndex) *redirectHopIndex = 0;
+    if (redirectHopUrl && redirectHopUrlLen > 0) redirectHopUrl[0] = '\0';
 
     const int plainAttemptsBefore = s_kernelHttpPlainTcpConnectAttempts;
     const int tlsAttemptsBefore = s_kernelHttpTlsConnectAttempts;
@@ -10882,6 +10964,21 @@ void NavigatorApp::smokeCaptureHttpsNavigation(const char* url,
     if (downgradeRedirectBlocked) *downgradeRedirectBlocked = app.m_metaDowngradeRedirectBlocked;
     if (tlsSucceededBeforeContentFailure) {
         *tlsSucceededBeforeContentFailure = app.m_metaTlsSucceededBeforeContentFailure;
+    }
+    if (tlsHandshakeErrorCode) *tlsHandshakeErrorCode = app.m_metaTlsHandshakeErrorCode;
+    if (tlsTransportErrorCode) *tlsTransportErrorCode = app.m_metaTlsTransportErrorCode;
+    if (tlsRequestBytesWritten) *tlsRequestBytesWritten = app.m_metaTlsRequestBytesWritten;
+    if (tlsResponseBytesRead) *tlsResponseBytesRead = app.m_metaTlsResponseBytesRead;
+    if (tlsRetryCount) *tlsRetryCount = app.m_metaTlsRetryCount;
+    if (tlsRetryReason && tlsRetryReasonLen > 0) {
+        strcopy(tlsRetryReason, app.m_metaTlsRetryReason, tlsRetryReasonLen);
+    }
+    if (tlsBytesWrittenBeforeRetry) *tlsBytesWrittenBeforeRetry = app.m_metaTlsBytesWrittenBeforeRetry;
+    if (tcpAbortUsed) *tcpAbortUsed = app.m_metaTcpAbortUsed;
+    if (redirectedHttpsRetryUsed) *redirectedHttpsRetryUsed = app.m_metaRedirectedHttpsRetryUsed;
+    if (redirectHopIndex) *redirectHopIndex = app.m_metaRedirectHopIndex;
+    if (redirectHopUrl && redirectHopUrlLen > 0) {
+        strcopy(redirectHopUrl, app.m_metaRedirectHopUrl, redirectHopUrlLen);
     }
 }
 
@@ -12802,12 +12899,21 @@ static bool printNavigatorRealPublicHttpsProbeCase()
     char tlsBackend[48] = {};
     char transportPolicyReason[128] = {};
     char unsupportedReason[128] = {};
+    char tlsRetryReason[96] = {};
+    char redirectHopUrl[160] = {};
     int statusCode = 0;
     int bodyBytes = 0;
     int parsedBlocks = 0;
     int redirectCount = 0;
+    int redirectHopIndex = 0;
     int plainTcpConnectAttempts = 0;
     int tlsTcpConnectAttempts = 0;
+    int tlsHandshakeErrorCode = 0;
+    int tlsTransportErrorCode = 0;
+    int tlsRequestBytesWritten = 0;
+    int tlsResponseBytesRead = 0;
+    int tlsRetryCount = 0;
+    int tlsBytesWrittenBeforeRetry = 0;
     uint32_t verifyFlags = 0;
     bool tlsValidated = false;
     bool tlsHostnameValidated = false;
@@ -12817,6 +12923,8 @@ static bool printNavigatorRealPublicHttpsProbeCase()
     bool bodyCapHit = false;
     bool downgradeRedirectBlocked = false;
     bool tlsSucceededBeforeContentFailure = false;
+    bool tcpAbortUsed = false;
+    bool redirectedHttpsRetryUsed = false;
     bool attempted = false;
     const char* resultLabel = "SKIP";
     const char* skipReason = "(none)";
@@ -12918,7 +13026,18 @@ static bool printNavigatorRealPublicHttpsProbeCase()
             &headerCapHit,
             &bodyCapHit,
             &downgradeRedirectBlocked,
-            &tlsSucceededBeforeContentFailure);
+            &tlsSucceededBeforeContentFailure,
+            &tlsHandshakeErrorCode,
+            &tlsTransportErrorCode,
+            &tlsRequestBytesWritten,
+            &tlsResponseBytesRead,
+            &tlsRetryCount,
+            tlsRetryReason, sizeof(tlsRetryReason),
+            &tlsBytesWrittenBeforeRetry,
+            &tcpAbortUsed,
+            &redirectedHttpsRetryUsed,
+            &redirectHopIndex,
+            redirectHopUrl, sizeof(redirectHopUrl));
 
         const bool tlsSuccess =
             tlsTcpConnectAttempts >= 1 &&
@@ -13044,6 +13163,30 @@ static bool printNavigatorRealPublicHttpsProbeCase()
     serial::puts(tlsStatus[0] ? tlsStatus : "(none)");
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tls_result=");
     serial::puts(tlsResult);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tls_connect_attempts=");
+    serial_put_dec((uint32_t)tlsTcpConnectAttempts);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tls_retry_count=");
+    serial_put_dec((uint32_t)(tlsRetryCount > 0 ? tlsRetryCount : 0));
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tls_retry_reason=");
+    serial::puts(tlsRetryReason[0] ? tlsRetryReason : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tls_bytes_written_before_retry=");
+    serial_put_dec((uint32_t)(tlsBytesWrittenBeforeRetry > 0 ? tlsBytesWrittenBeforeRetry : 0));
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tls_handshake_error_code=");
+    {
+        char signedNumber[32];
+        nav_i64_to_text((int64_t)tlsHandshakeErrorCode, signedNumber, sizeof(signedNumber));
+        serial::puts(signedNumber);
+    }
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tls_transport_error_code=");
+    {
+        char signedNumber[32];
+        nav_i64_to_text((int64_t)tlsTransportErrorCode, signedNumber, sizeof(signedNumber));
+        serial::puts(signedNumber);
+    }
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tls_request_bytes_written=");
+    serial_put_dec((uint32_t)(tlsRequestBytesWritten > 0 ? tlsRequestBytesWritten : 0));
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tls_response_bytes_read=");
+    serial_put_dec((uint32_t)(tlsResponseBytesRead > 0 ? tlsResponseBytesRead : 0));
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tls_validated=");
     serial::puts(tlsValidated ? "yes" : "no");
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.certificate_validation_result=");
@@ -13062,6 +13205,14 @@ static bool printNavigatorRealPublicHttpsProbeCase()
     serial::puts(tlsProtocol[0] ? tlsProtocol : "(none)");
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.cipher_suite=");
     serial::puts(tlsCipherSuite[0] ? tlsCipherSuite : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tcp_abort_used=");
+    serial::puts(tcpAbortUsed ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.redirected_https_retry_used=");
+    serial::puts(redirectedHttpsRetryUsed ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.redirect_hop_index=");
+    serial_put_dec((uint32_t)(redirectHopIndex > 0 ? redirectHopIndex : 0));
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.redirect_hop_url=");
+    serial::puts(redirectHopUrl[0] ? redirectHopUrl : "(none)");
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.http_status=");
     serial_put_dec((uint32_t)statusCode);
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.body_bytes=");

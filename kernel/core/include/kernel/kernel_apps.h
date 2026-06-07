@@ -517,7 +517,20 @@ public:
                                             bool* headerCapHit = nullptr,
                                             bool* bodyCapHit = nullptr,
                                             bool* downgradeRedirectBlocked = nullptr,
-                                            bool* tlsSucceededBeforeContentFailure = nullptr);
+                                            bool* tlsSucceededBeforeContentFailure = nullptr,
+                                            int* tlsHandshakeErrorCode = nullptr,
+                                            int* tlsTransportErrorCode = nullptr,
+                                            int* tlsRequestBytesWritten = nullptr,
+                                            int* tlsResponseBytesRead = nullptr,
+                                            int* tlsRetryCount = nullptr,
+                                            char* tlsRetryReason = nullptr,
+                                            int tlsRetryReasonLen = 0,
+                                            int* tlsBytesWrittenBeforeRetry = nullptr,
+                                            bool* tcpAbortUsed = nullptr,
+                                            bool* redirectedHttpsRetryUsed = nullptr,
+                                            int* redirectHopIndex = nullptr,
+                                            char* redirectHopUrl = nullptr,
+                                            int redirectHopUrlLen = 0);
 
 private:
     enum NavigatorMouseMode {
@@ -693,6 +706,17 @@ private:
     bool m_metaTlsHostnameValidated;
     bool m_metaTlsAllowlistLocalOnly;
     uint32_t m_metaTlsVerifyFlags;
+    int m_metaTlsHandshakeErrorCode;
+    int m_metaTlsTransportErrorCode;
+    int m_metaTlsRequestBytesWritten;
+    int m_metaTlsResponseBytesRead;
+    int m_metaTlsRetryCount;
+    char m_metaTlsRetryReason[96];
+    int m_metaTlsBytesWrittenBeforeRetry;
+    bool m_metaTcpAbortUsed;
+    bool m_metaRedirectedHttpsRetryUsed;
+    int m_metaRedirectHopIndex;
+    char m_metaRedirectHopUrl[MAX_URL_LEN];
     char m_metaTlsBackend[48];
     char m_metaTransportSelection[40];
     char m_metaTlsStatus[40];

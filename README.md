@@ -116,7 +116,7 @@ The bare-metal Navigator public HTTPS probe is a separate proof workflow, not a 
 * Workflow: `.github/workflows/navigator-public-https-probe.yml`
 * Secret: `GXOS_NAVIGATOR_PUBLIC_CA_BUNDLE_PEM`
 * Default target: `https://sha256.badssl.com/`
-* Reviewed public target allowlist v0.2:
+* Reviewed public target allowlist v0.3:
   * `https://sha256.badssl.com/` because it is a stable badssl DNS-hosted HTTPS endpoint that proves DNS, TCP, TLS, certificate, and hostname validation without opening general public browsing
 * Candidate prep helper: `scripts/prepare-navigator-shipped-root-candidate.ps1`
 * Candidate evidence linker: `scripts/promote-navigator-public-https-evidence.ps1`
@@ -128,6 +128,8 @@ The bare-metal Navigator public HTTPS probe is a separate proof workflow, not a 
 Normal hosted and default kernel smoke remain deterministic and internet-independent unless you explicitly opt into the public-pilot lane or the dedicated proof path. Automated PASS assertion and evidence JSON promotion complement, but do not replace, human artifact review. The local dedicated proof script, reviewed-target matrix helper, candidate evidence linker, and manual GitHub Actions workflow all now fail-closed to the reviewed public target allowlist unless you intentionally use the explicit reviewed override path for a one-off run.
 
 The default bare-metal kernel smoke now also runs a deterministic HTTPS compatibility matrix against controlled fixtures, covering friendly `404`/`500` pages, text/plain rendering, redirects, unsupported content-encoding UX, unsupported-content downloads, and response/header safety caps without enabling default public browsing. Dedicated public-proof artifacts separately classify TLS transport proof versus content compatibility, so a run can prove real-world DNS/TCP/TLS/certificate/hostname behavior even when unsupported compression or response caps prevent a full page-render success.
+
+Public pilot hardening v0.3 adds compact transport diagnostics to the dedicated proof lane, including TLS connect/retry counts, retry reason, pre-write retry bytes, handshake/transport error codes, failure classification, TCP-abort visibility, and redirect-hop context. The reviewed-target matrix helper now also preserves one copied summary/evidence pair per reviewed target plus an aggregate allowlist summary log, while keeping the public lane explicit and separate from deterministic smoke.
 
 Public-root provisioning is still explicit and operator-driven in this pass. The harness now validates supplied CA bundles, writes a manifest sidecar with SHA-256, root count, bundle type, and `production_ready` / `test_only` flags, and expects dedicated public probe evidence to archive those facts before any trust-bundle rotation is treated as complete. Default public HTTPS browsing remains off, and the repo still does not download public roots automatically.
 
