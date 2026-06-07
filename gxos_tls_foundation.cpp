@@ -3415,7 +3415,7 @@ bool gxos_tls_open_http_byte_stream(const char* sniHostname,
                 (result->verifyFlags & MBEDTLS_X509_BADCERT_CN_MISMATCH) == 0;
             if (result->transportStatus == gxos::web::HttpByteStreamTlsStatus::NotStarted ||
                 result->transportStatus == gxos::web::HttpByteStreamTlsStatus::Success) {
-                if (result->verifyFlags != 0) {
+                if (ret == MBEDTLS_ERR_X509_CERT_VERIFY_FAILED && result->verifyFlags != 0) {
                     tls_set_transport_status(result, tls_status_from_verify_flags(result->verifyFlags),
                         (result->verifyFlags & MBEDTLS_X509_BADCERT_CN_MISMATCH) != 0
                             ? "TLS hostname validation failed."

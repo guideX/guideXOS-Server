@@ -7248,7 +7248,10 @@ static void kernel_tcp_http_byte_stream_close(void* context)
 {
     KernelTcpHttpByteStreamContext* tcp = static_cast<KernelTcpHttpByteStreamContext*>(context);
     if (!tcp || tcp->socket < 0) return;
-    kernel::tcp::tcp_close(tcp->socket);
+    // Navigator request streams are one-shot HTTP/1.0 connections that are fully
+    // consumed before close. Abort frees the TCB immediately so redirect hops do
+    // not inherit linger/TIME_WAIT pressure from the previous socket.
+    kernel::tcp::tcp_abort(tcp->socket);
     tcp->socket = -1;
 }
 
@@ -8296,6 +8299,28 @@ static KernelHttpResponse* kernel_http_request_once(const char* url, const char*
     return kernel_http_request_once_internal(url, method, body, bodyBytes, contentType, nullptr);
 }
 
+static bool kernel_http_should_retry_redirected_tls_open(const KernelHttpResponse* response,
+                                                         const char* currentUrl,
+                                                         const char* currentMethod,
+                                                         int redirectCount,
+                                                         int currentBodyBytes)
+{
+    if (!response || !currentUrl || !currentMethod) return false;
+    if (redirectCount <= 0) return false;
+    if (!nav_starts_with(currentUrl, "https://")) return false;
+    if (!gxos::web::httpSharedEqualsInsensitive(currentMethod, "GET")) return false;
+    if (currentBodyBytes != 0) return false;
+    if (response->ok) return false;
+    if (!kernel_http_transport_uses_tls(response->transportSelection)) return false;
+    if (response->tlsStatus != gxos::web::HttpByteStreamTlsStatus::HandshakeFailed) return false;
+    if (!response->tlsResult.attempted || !response->tlsResult.tcpConnected) return false;
+    if (response->tlsResult.handshakeSuccess) return false;
+    if (response->tlsResult.verifyFlags != 0) return false;
+    if (response->tlsResult.requestBytesWritten != 0) return false;
+    if (response->tlsResult.responseBytesRead != 0) return false;
+    return true;
+}
+
 static void kernel_http_origin(const KernelHttpUrl& parsed, const char* scheme, char* out, int outSize)
 {
     strcopy(out, scheme ? scheme : "http://", outSize);
@@ -8418,10 +8443,20 @@ static KernelHttpResponse* kernel_http_request(const char* url, const char* meth
     strcopy(current, url ? url : "", sizeof(current));
     strcopy(currentMethod, method && gxos::web::httpSharedEqualsInsensitive(method, "post") ? "POST" : "GET", sizeof(currentMethod));
     for (int redirectCount = 0; redirectCount <= gxos::web::kHttpSharedMaxRedirects; ++redirectCount) {
-        KernelHttpResponse* response = kernel_http_request_once(current, currentMethod, currentBody, currentBodyBytes, contentType);
-        response->redirectCount = redirectCount;
-        strcopy(response->requestedUrl, url ? url : "", sizeof(response->requestedUrl));
-        strcopy(response->finalUrl, current, sizeof(response->finalUrl));
+        KernelHttpResponse* response = nullptr;
+        for (int attempt = 0; attempt < 2; ++attempt) {
+            response = kernel_http_request_once(current, currentMethod, currentBody, currentBodyBytes, contentType);
+            response->redirectCount = redirectCount;
+            strcopy(response->requestedUrl, url ? url : "", sizeof(response->requestedUrl));
+            strcopy(response->finalUrl, current, sizeof(response->finalUrl));
+            if (attempt == 0 &&
+                kernel_http_should_retry_redirected_tls_open(
+                    response, current, currentMethod, redirectCount, currentBodyBytes)) {
+                kernel_http_poll_once();
+                continue;
+            }
+            break;
+        }
         if (!response->ok) return response;
         if (!gxos::web::httpSharedIsRedirectStatus(response->statusCode)) return response;
         if (!response->location[0]) return response;
@@ -11477,13 +11512,18 @@ static bool printNavigatorLocalTlsRedirectCase()
             redirectCount == 1 &&
             plainTcpConnectAttempts == 1 &&
             tlsTcpConnectAttempts == 1 &&
-            verifyFlags == 0 &&
             !tlsValidated &&
             !tlsHostnameValidated &&
             tlsAllowlistLocalOnly &&
             nav_smoke_text_equals(transportSelection, "LocalAllowlistedTlsHttps") &&
             prereqFailed &&
+            nav_smoke_text_equals(tlsSniHost, "guidexos.test") &&
             nav_smoke_text_equals(finalUrl, "https://guidexos.test:8443/navigator-smoke/tls-basic.html") &&
+            ((verifyFlags == 0 &&
+              (nav_smoke_text_equals(tlsStatus, "CaMissing") ||
+               nav_smoke_text_equals(tlsStatus, "CaParseFailed"))) ||
+             (verifyFlags > 0 &&
+              nav_smoke_text_equals(tlsStatus, "CertificateVerifyFailed"))) &&
             error[0] != '\0';
 
     serial::puts("[NAVIGATOR-SMOKE] https.case.redirect_allowlisted.requested_url=");
