@@ -4,6 +4,8 @@ param(
     [string]$CandidateBundlePath,
     [string]$CandidateRotationId,
     [switch]$CandidateReviewed,
+    [string]$CandidateMetadataPath,
+    [string]$PromotionRecordPath,
     [string]$TargetUrl,
     [switch]$ReviewedTargetOverride
 )
@@ -24,6 +26,7 @@ $dedicatedSerialLog = Join-Path $LogDir "navigator-public-https-$stamp.serial.lo
 $dedicatedSummaryLog = Join-Path $LogDir "navigator-public-https-$stamp.summary.log"
 $dedicatedEvidenceLog = Join-Path $LogDir "navigator-public-https-$stamp.evidence.json"
 $dedicatedTrustManifestLog = Join-Path $LogDir "navigator-public-https-$stamp.ca-bundle.manifest"
+$dedicatedProofPackDir = Join-Path $LogDir "navigator-public-https-proof-pack-$stamp"
 $kernelScenarioGroup = "PublicPilot"
 $kernelScenarioName = "production_public_pilot_enabled"
 $kernelSmokeScript = Join-Path $Root "scripts\smoke-navigator-kernel.ps1"
@@ -47,6 +50,67 @@ function Set-ProcessEnvValue {
     } else {
         Set-Item "Env:$Name" $Value
     }
+}
+
+function Write-NavigatorPublicHttpsProofPack {
+    param(
+        [Parameter(Mandatory = $true)][string]$ProofPackDir,
+        [Parameter(Mandatory = $true)][string]$FinalResult,
+        [Parameter(Mandatory = $true)][int]$ExitCode,
+        [Parameter(Mandatory = $true)][System.Collections.Specialized.OrderedDictionary]$Fields,
+        [AllowNull()][string]$SummaryPath,
+        [AllowNull()][string]$SerialPath,
+        [AllowNull()][string]$EvidencePath,
+        [AllowNull()][string]$CandidateMetadataPath,
+        [AllowNull()][string]$ManifestPath,
+        [AllowNull()][string]$PromotionRecordPath,
+        [string[]]$Notes = @()
+    )
+
+    New-Item -ItemType Directory -Force -Path $ProofPackDir | Out-Null
+
+    $proofSummary = [ordered]@{
+        schema_version = "guidexos.navigator.public-https-proof-pack.v0.1"
+        generated_utc = ([datetime]::UtcNow.ToString("o"))
+        reviewed_allowlist_name = $publicProbeReviewedAllowlistName
+        reviewed_allowlist_version = Get-NavigatorPublicHttpsReviewedAllowlistVersion
+        target_url = [string]$Fields["target_url"]
+        final_url = [string]$Fields["final_url"]
+        final_result = $FinalResult
+        exit_code = $ExitCode
+        result_marker = Get-NavigatorPublicHttpsResultMarker -FinalResult $FinalResult -ExitCode $ExitCode
+        summary_log = $(if ($SummaryPath) { [System.IO.Path]::GetFullPath($SummaryPath) } else { $null })
+        serial_log = $(if ($SerialPath) { [System.IO.Path]::GetFullPath($SerialPath) } else { $null })
+        evidence_json = $(if ($EvidencePath) { [System.IO.Path]::GetFullPath($EvidencePath) } else { $null })
+        candidate_metadata = $(if ($CandidateMetadataPath) { [System.IO.Path]::GetFullPath($CandidateMetadataPath) } else { $null })
+        ca_bundle_manifest = $(if ($ManifestPath) { [System.IO.Path]::GetFullPath($ManifestPath) } else { $null })
+        promotion_record = $(if ($PromotionRecordPath) { [System.IO.Path]::GetFullPath($PromotionRecordPath) } else { $null })
+        notes = @($Notes)
+    }
+
+    $proofSummaryPath = Join-Path $ProofPackDir "proof-pack-summary.json"
+    [System.IO.File]::WriteAllText($proofSummaryPath, ($proofSummary | ConvertTo-Json -Depth 6) + [Environment]::NewLine, [System.Text.Encoding]::ASCII)
+
+    if ($SummaryPath -and (Test-Path -LiteralPath $SummaryPath -PathType Leaf)) {
+        Copy-Item -LiteralPath $SummaryPath -Destination (Join-Path $ProofPackDir (Split-Path -Leaf $SummaryPath)) -Force
+    }
+    if ($SerialPath -and (Test-Path -LiteralPath $SerialPath -PathType Leaf)) {
+        Copy-Item -LiteralPath $SerialPath -Destination (Join-Path $ProofPackDir (Split-Path -Leaf $SerialPath)) -Force
+    }
+    if ($EvidencePath -and (Test-Path -LiteralPath $EvidencePath -PathType Leaf)) {
+        Copy-Item -LiteralPath $EvidencePath -Destination (Join-Path $ProofPackDir (Split-Path -Leaf $EvidencePath)) -Force
+    }
+    if ($CandidateMetadataPath -and (Test-Path -LiteralPath $CandidateMetadataPath -PathType Leaf)) {
+        Copy-Item -LiteralPath $CandidateMetadataPath -Destination (Join-Path $ProofPackDir (Split-Path -Leaf $CandidateMetadataPath)) -Force
+    }
+    if ($ManifestPath -and (Test-Path -LiteralPath $ManifestPath -PathType Leaf)) {
+        Copy-Item -LiteralPath $ManifestPath -Destination (Join-Path $ProofPackDir (Split-Path -Leaf $ManifestPath)) -Force
+    }
+    if ($PromotionRecordPath -and (Test-Path -LiteralPath $PromotionRecordPath -PathType Leaf)) {
+        Copy-Item -LiteralPath $PromotionRecordPath -Destination (Join-Path $ProofPackDir (Split-Path -Leaf $PromotionRecordPath)) -Force
+    }
+
+    return $proofSummaryPath
 }
 
 $publicSmokeEnvNames = @(
@@ -244,8 +308,67 @@ function Test-NavigatorRealPublicProbeTarget {
         ReviewedTargetMatch = "no"
         ReviewedTargetOverride = "no"
         ReviewedTargetAllowlist = $publicProbeReviewedAllowlistName
-        ReviewedTargetReason = "The requested target is outside the reviewed public HTTPS allowlist for v0.3."
+        ReviewedTargetReason = "The requested target is outside the reviewed public HTTPS allowlist for v0.4."
     }
+}
+
+function Test-NavigatorPublicHttpsTrustSourceAllowed {
+    param([AllowNull()][string]$Marker)
+
+    switch ($Marker) {
+        "env-var" { return $true }
+        "env-var-preferred-over-local" { return $true }
+        "local-fallback-file" { return $true }
+        default { return $false }
+    }
+}
+
+function Get-NavigatorPublicHttpsTrustBlocker {
+    param([Parameter(Mandatory = $true)][System.Collections.IDictionary]$Fields)
+
+    if ([string]::Equals([string]$Fields["public_trust_ready"], "yes", [System.StringComparison]::OrdinalIgnoreCase)) {
+        return "(none)"
+    }
+
+    if ([string]::Equals([string]$Fields["reviewed_target_match"], "no", [System.StringComparison]::OrdinalIgnoreCase) -and
+        -not [string]::Equals([string]$Fields["reviewed_target_override"], "yes", [System.StringComparison]::OrdinalIgnoreCase)) {
+        return "reviewed target is not on the reviewed public HTTPS allowlist."
+    }
+
+    if (-not (Test-NavigatorPublicHttpsTrustSourceAllowed -Marker ([string]$Fields["public_ca_source_marker"]))) {
+        return "public CA source marker is not an explicit public proof source."
+    }
+
+    if (-not [string]::Equals([string]$Fields["trust_bundle_manifest_present"], "yes", [System.StringComparison]::OrdinalIgnoreCase)) {
+        return "public trust manifest is missing."
+    }
+
+    if (-not [string]::Equals([string]$Fields["trust_bundle_type"], "production-public-probe-merged", [System.StringComparison]::OrdinalIgnoreCase)) {
+        return "public trust manifest is not the merged production public probe bundle."
+    }
+
+    if (-not [string]::Equals([string]$Fields["trust_bundle_production_ready"], "yes", [System.StringComparison]::OrdinalIgnoreCase)) {
+        return "public trust manifest is not marked production_ready=yes."
+    }
+
+    if (-not [string]::Equals([string]$Fields["trust_bundle_test_only"], "no", [System.StringComparison]::OrdinalIgnoreCase)) {
+        return "public trust manifest is marked test_only=yes."
+    }
+
+    if (-not [string]::Equals([string]$Fields["runtime_manifest_present"], "yes", [System.StringComparison]::OrdinalIgnoreCase)) {
+        return "runtime trust manifest is missing."
+    }
+
+    if (-not [string]::Equals([string]$Fields["runtime_manifest_hash_match"], "yes", [System.StringComparison]::OrdinalIgnoreCase)) {
+        return "runtime trust manifest hash does not match the staged bundle."
+    }
+
+    $parsedCerts = 0
+    if (-not [int]::TryParse([string]$Fields["public_ca_parsed_certs"], [ref]$parsedCerts) -or $parsedCerts -le 0) {
+        return "public CA bundle parsed zero certificates."
+    }
+
+    return "public trust readiness is blocked by an unrecognized policy/setup condition."
 }
 
 function Get-NavigatorRealPublicProbeCaBundleResolution {
@@ -640,6 +763,18 @@ function Set-NavigatorPublicHttpsDerivedClassification {
     $unsupportedReason = [string]$Fields["unsupported_reason"]
     $contentEncoding = [string]$Fields["content_encoding"]
     $sourceType = [string]$Fields["source_type"]
+    $publicTrustReady = [string]$Fields["public_trust_ready"]
+    $publicTrustSourceAllowed = Test-NavigatorPublicHttpsTrustSourceAllowed -Marker ([string]$Fields["public_ca_source_marker"])
+    $publicTrustManifestReady = [string]::Equals([string]$Fields["trust_bundle_manifest_present"], "yes", [System.StringComparison]::OrdinalIgnoreCase) -and
+        [string]::Equals([string]$Fields["runtime_manifest_present"], "yes", [System.StringComparison]::OrdinalIgnoreCase) -and
+        [string]::Equals([string]$Fields["runtime_manifest_hash_match"], "yes", [System.StringComparison]::OrdinalIgnoreCase)
+    $publicTrustTestOnly = [string]$Fields["trust_bundle_test_only"]
+    $publicTrustReason = if ([string]::Equals($publicTrustReady, "yes", [System.StringComparison]::OrdinalIgnoreCase)) {
+        "Public trust readiness requirements were satisfied for the reviewed public proof lane."
+    } else {
+        Get-NavigatorPublicHttpsTrustBlocker -Fields $Fields
+    }
+    $publicTrustBlocker = if ([string]::Equals($publicTrustReady, "yes", [System.StringComparison]::OrdinalIgnoreCase)) { "(none)" } else { $publicTrustReason }
     $redirectCount = Get-NavigatorFieldInt -Fields $Fields -Name "redirect_count"
     $httpStatus = Get-NavigatorFieldInt -Fields $Fields -Name "http_status"
     $failureReason = [string]$Fields["failure_reason"]
@@ -654,6 +789,14 @@ function Set-NavigatorPublicHttpsDerivedClassification {
     }
 
     $Fields["tls_failure_classification"] = $failureClassification
+    $Fields["public_trust_source_allowed"] = $(if ($publicTrustSourceAllowed) { "yes" } else { "no" })
+    $Fields["public_trust_manifest_ready"] = $(if ($publicTrustManifestReady) { "yes" } else { "no" })
+    $Fields["public_trust_runtime_hash_match"] = [string]$Fields["runtime_manifest_hash_match"]
+    $Fields["public_trust_test_only"] = [string]$publicTrustTestOnly
+    $Fields["public_trust_source_marker"] = [string]$Fields["public_ca_source_marker"]
+    $Fields["public_trust_lane"] = "dedicated-reviewed-public-proof"
+    $Fields["public_trust_reason"] = $publicTrustReason
+    $Fields["public_trust_blocker"] = $publicTrustBlocker
 
     switch ($resultMarker) {
         "SETUP_BLOCKED" {
@@ -661,6 +804,9 @@ function Set-NavigatorPublicHttpsDerivedClassification {
             $Fields["content_compatibility_result"] = "NOT_ATTEMPTED"
             $Fields["page_render_result"] = "NOT_ATTEMPTED_POLICY_OR_SETUP_BLOCKED"
             $Fields["real_world_compatibility_note"] = "The reviewed public HTTPS proof did not run because setup, policy, target review, or trust prerequisites blocked it before transport proof."
+            if ([string]::Equals($Fields["public_trust_ready"], "no", [System.StringComparison]::OrdinalIgnoreCase)) {
+                $Fields["public_trust_reason"] = $publicTrustBlocker
+            }
             return
         }
         "SKIP" {
@@ -867,6 +1013,8 @@ $evidenceOutputPath = $null
 $fields = [ordered]@{
     target_url = "(unknown)"
     target_host = "(unknown)"
+    reviewed_allowlist_name = $publicProbeReviewedAllowlistName
+    reviewed_allowlist_version = Get-NavigatorPublicHttpsReviewedAllowlistVersion
     reviewed_target_policy = "(unknown)"
     reviewed_target_allowlist = $publicProbeReviewedAllowlistName
     reviewed_target_match = "no"
@@ -875,6 +1023,14 @@ $fields = [ordered]@{
     public_ca_resolution = "(unknown)"
     public_ca_source_marker = "(unknown)"
     public_trust_ready = "(unknown)"
+    public_trust_source_allowed = "(unknown)"
+    public_trust_manifest_ready = "(unknown)"
+    public_trust_runtime_hash_match = "(unknown)"
+    public_trust_test_only = "(unknown)"
+    public_trust_source_marker = "(unknown)"
+    public_trust_lane = "(unknown)"
+    public_trust_reason = "(none)"
+    public_trust_blocker = "(none)"
     public_ca_source_path = "(unknown)"
     public_ca_bytes = "(unknown)"
     public_ca_parsed_certs = "(unknown)"
@@ -980,6 +1136,19 @@ try {
         $evidenceResult = Invoke-NavigatorPublicHttpsEvidenceExport -SummaryPath $dedicatedSummaryLog -OutputPath $dedicatedEvidenceLog
         $evidenceOutputPath = $evidenceResult.EvidencePath
         Write-NavigatorPublicHttpsEvidenceReport -EvidenceResult $evidenceResult
+        $proofPackSummaryPath = Write-NavigatorPublicHttpsProofPack `
+            -ProofPackDir $dedicatedProofPackDir `
+            -FinalResult $finalResult `
+            -ExitCode $exitCode `
+            -Fields $fields `
+            -SummaryPath $dedicatedSummaryLog `
+            -SerialPath $dedicatedSerialLog `
+            -EvidencePath $dedicatedEvidenceLog `
+            -CandidateMetadataPath $(if ($CandidateMetadataPath) { [System.IO.Path]::GetFullPath($CandidateMetadataPath) } else { $null }) `
+            -ManifestPath $null `
+            -PromotionRecordPath $(if ($PromotionRecordPath) { [System.IO.Path]::GetFullPath($PromotionRecordPath) } else { $null }) `
+            -Notes @($notes + "Proof pack retains the blocked real-root state for review.")
+        Write-Host "Dedicated real public HTTPS proof pack summary: $proofPackSummaryPath"
         Write-NavigatorPublicHttpsConsoleSummary -FinalResult $finalResult -ExitCode $exitCode -Fields $fields -Notes $notes
         exit $exitCode
     }
@@ -1001,6 +1170,19 @@ try {
         $evidenceResult = Invoke-NavigatorPublicHttpsEvidenceExport -SummaryPath $dedicatedSummaryLog -OutputPath $dedicatedEvidenceLog
         $evidenceOutputPath = $evidenceResult.EvidencePath
         Write-NavigatorPublicHttpsEvidenceReport -EvidenceResult $evidenceResult
+        $proofPackSummaryPath = Write-NavigatorPublicHttpsProofPack `
+            -ProofPackDir $dedicatedProofPackDir `
+            -FinalResult $finalResult `
+            -ExitCode $exitCode `
+            -Fields $fields `
+            -SummaryPath $dedicatedSummaryLog `
+            -SerialPath $dedicatedSerialLog `
+            -EvidencePath $dedicatedEvidenceLog `
+            -CandidateMetadataPath $(if ($CandidateMetadataPath) { [System.IO.Path]::GetFullPath($CandidateMetadataPath) } else { $null }) `
+            -ManifestPath $null `
+            -PromotionRecordPath $(if ($PromotionRecordPath) { [System.IO.Path]::GetFullPath($PromotionRecordPath) } else { $null }) `
+            -Notes @($notes + "Proof pack retains the missing-root blocked state for review.")
+        Write-Host "Dedicated real public HTTPS proof pack summary: $proofPackSummaryPath"
         Write-NavigatorPublicHttpsConsoleSummary -FinalResult $finalResult -ExitCode $exitCode -Fields $fields -Notes $notes
         exit $exitCode
     }
@@ -1024,6 +1206,19 @@ try {
         $evidenceResult = Invoke-NavigatorPublicHttpsEvidenceExport -SummaryPath $dedicatedSummaryLog -OutputPath $dedicatedEvidenceLog
         $evidenceOutputPath = $evidenceResult.EvidencePath
         Write-NavigatorPublicHttpsEvidenceReport -EvidenceResult $evidenceResult
+        $proofPackSummaryPath = Write-NavigatorPublicHttpsProofPack `
+            -ProofPackDir $dedicatedProofPackDir `
+            -FinalResult $finalResult `
+            -ExitCode $exitCode `
+            -Fields $fields `
+            -SummaryPath $dedicatedSummaryLog `
+            -SerialPath $dedicatedSerialLog `
+            -EvidencePath $dedicatedEvidenceLog `
+            -CandidateMetadataPath $(if ($CandidateMetadataPath) { [System.IO.Path]::GetFullPath($CandidateMetadataPath) } else { $null }) `
+            -ManifestPath $(if ($manifestValidation.Manifest) { $dedicatedTrustManifestLog } else { $null }) `
+            -PromotionRecordPath $(if ($PromotionRecordPath) { [System.IO.Path]::GetFullPath($PromotionRecordPath) } else { $null }) `
+            -Notes @($notes + "Proof pack retains the setup-blocked state for review.")
+        Write-Host "Dedicated real public HTTPS proof pack summary: $proofPackSummaryPath"
         Write-NavigatorPublicHttpsConsoleSummary -FinalResult $finalResult -ExitCode $exitCode -Fields $fields -Notes $notes
         exit $exitCode
     }
@@ -1068,6 +1263,14 @@ try {
     $fields["trust_bundle_root_count"] = $manifestValidation.Manifest.root_count
     $fields["trust_bundle_production_ready"] = $manifestValidation.Manifest.production_ready
     $fields["trust_bundle_test_only"] = $manifestValidation.Manifest.test_only
+    $fields["public_trust_source_allowed"] = $(if (Test-NavigatorPublicHttpsTrustSourceAllowed -Marker $caResolution.Resolution) { "yes" } else { "no" })
+    $fields["public_trust_manifest_ready"] = $(if ([string]::Equals($manifestValidation.Manifest.production_ready, "yes", [System.StringComparison]::OrdinalIgnoreCase) -and [string]::Equals($manifestValidation.Manifest.test_only, "no", [System.StringComparison]::OrdinalIgnoreCase)) { "yes" } else { "no" })
+    $fields["public_trust_runtime_hash_match"] = "(pending-kernel-check)"
+    $fields["public_trust_test_only"] = $manifestValidation.Manifest.test_only
+    $fields["public_trust_source_marker"] = $caResolution.Resolution
+    $fields["public_trust_lane"] = "dedicated-reviewed-public-proof"
+    $fields["public_trust_reason"] = "Public trust readiness is pending the kernel-side trust policy check."
+    $fields["public_trust_blocker"] = $(if ($fields["public_trust_source_allowed"] -eq "no") { "public CA source marker is not an explicit public proof source." } elseif ($fields["public_trust_manifest_ready"] -eq "no") { "public trust manifest is not production-ready." } else { "(pending-kernel-check)" })
 
     Write-Host "Dedicated real public HTTPS smoke target: $($fields["target_url"])"
     Write-Host "Dedicated real public HTTPS smoke CA bundle: $($bundleInfo.Path) [$($caResolution.Resolution)]"
@@ -1301,6 +1504,25 @@ try {
     $evidenceResult = Invoke-NavigatorPublicHttpsEvidenceExport -SummaryPath $dedicatedSummaryLog -OutputPath $dedicatedEvidenceLog
     $evidenceOutputPath = $evidenceResult.EvidencePath
     Write-NavigatorPublicHttpsEvidenceReport -EvidenceResult $evidenceResult
+
+    $proofPackNotes = @($notes)
+    $proofPackNotes += "Proof pack keeps the dedicated public HTTPS lane separate from deterministic smoke."
+    $proofPackNotes += "Default public HTTPS browsing remains off."
+    $proofPackManifestPath = $(if ($fields.Contains("trust_bundle_manifest_present") -and $fields["trust_bundle_manifest_present"] -eq "yes") { $dedicatedTrustManifestLog } else { $null })
+    $proofPackSummaryPath = Write-NavigatorPublicHttpsProofPack `
+        -ProofPackDir $dedicatedProofPackDir `
+        -FinalResult $finalResult `
+        -ExitCode $exitCode `
+        -Fields $fields `
+        -SummaryPath $dedicatedSummaryLog `
+        -SerialPath $dedicatedSerialLog `
+        -EvidencePath $dedicatedEvidenceLog `
+        -CandidateMetadataPath $(if ($CandidateMetadataPath) { [System.IO.Path]::GetFullPath($CandidateMetadataPath) } else { $null }) `
+        -ManifestPath $proofPackManifestPath `
+        -PromotionRecordPath $(if ($PromotionRecordPath) { [System.IO.Path]::GetFullPath($PromotionRecordPath) } else { $null }) `
+        -Notes $proofPackNotes
+
+    Write-Host "Dedicated real public HTTPS proof pack summary: $proofPackSummaryPath"
 
     Write-NavigatorPublicHttpsConsoleSummary -FinalResult $finalResult -ExitCode $exitCode -Fields $fields -Notes $notes
 

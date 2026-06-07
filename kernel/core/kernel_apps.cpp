@@ -10707,7 +10707,7 @@ static NavigatorRealPublicProbeConfig navigator_real_public_probe_config()
             config.targetValid = false;
             strcopy(config.reviewedTargetPolicy, "rejected", sizeof(config.reviewedTargetPolicy));
             strcopy(config.reviewedTargetReason,
-                "The requested target is outside the reviewed public HTTPS allowlist for v0.2.",
+                "The requested target is outside the reviewed public HTTPS allowlist for v0.4.",
                 sizeof(config.reviewedTargetReason));
         }
     }
@@ -12950,6 +12950,25 @@ static bool printNavigatorRealPublicHttpsProbeCase()
     serial::puts(pilotEnabled ? "yes" : "no");
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.public_trust_ready=");
     serial::puts(trustStorePolicy.publicInternetReady ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.public_trust_source_allowed=");
+    serial::puts(trustStorePolicy.source == gxos::GxosTrustStoreSource::ProductionPublicProbeTrust ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.public_trust_manifest_ready=");
+    serial::puts((trustStorePolicy.source == gxos::GxosTrustStoreSource::ProductionPublicProbeTrust &&
+        trustStorePolicy.productionReady && !trustStorePolicy.smokeTestOnly) ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.public_trust_runtime_hash_match=");
+    serial::puts(caStoreInfo.manifest.hashMatch ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.public_trust_test_only=");
+    serial::puts(caStoreInfo.manifest.testOnly ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.public_trust_source_marker=");
+    serial::puts(probeConfig.publicCaSourcePath[0] ? probeConfig.publicCaSourcePath : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.public_trust_lane=");
+    serial::puts("dedicated-reviewed-public-proof");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.public_trust_reason=");
+    serial::puts(trustStorePolicy.publicInternetReady ? "Public trust readiness satisfied for the reviewed public proof lane." :
+        (prerequisiteBlocker ? prerequisiteBlocker : "public trust readiness blocked before network attempt."));
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.public_trust_blocker=");
+    serial::puts(trustStorePolicy.publicInternetReady ? "(none)" :
+        (prerequisiteBlocker ? prerequisiteBlocker : "public trust readiness blocked before network attempt."));
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.public_ca_bundle_source=");
     serial::puts(probeConfig.publicCaSourcePath[0] ? probeConfig.publicCaSourcePath : "(none)");
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.public_ca_bytes=");

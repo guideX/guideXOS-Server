@@ -156,7 +156,7 @@ foreach ($target in $reviewedTargets) {
     }
 
     $startedAtUtc = [datetime]::UtcNow
-    $probeOutput = @(& powershell @args 2>&1)
+    $probeOutput = @(& powershell.exe @args 2>&1)
     $exitCode = $LASTEXITCODE
 
     foreach ($line in $probeOutput) {

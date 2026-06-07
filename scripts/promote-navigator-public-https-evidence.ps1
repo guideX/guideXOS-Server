@@ -41,6 +41,8 @@ function Test-NavigatorApprovedTarget {
 
 $candidateMetadataFullPath = Resolve-NavigatorPromotionPath -PathValue $CandidateMetadataPath
 $evidenceFullPath = Resolve-NavigatorPromotionPath -PathValue $EvidencePath
+$allowlistName = Get-NavigatorPublicHttpsReviewedAllowlistName
+$allowlistVersion = Get-NavigatorPublicHttpsReviewedAllowlistVersion
 
 if ($ApprovedTarget.Count -le 0) {
     $ApprovedTarget = @(Get-NavigatorPublicHttpsReviewedTargetUrls)
@@ -67,6 +69,10 @@ if (-not [string]::Equals([string]$evidence.pass_contract_assertion_result, "PAS
 if (-not [string]::Equals([string]$evidence.result_marker, "PASS", [System.StringComparison]::OrdinalIgnoreCase) -or
     -not [string]::Equals([string]$evidence.final_result, "PASS", [System.StringComparison]::OrdinalIgnoreCase)) {
     throw "Navigator public HTTPS evidence must report result_marker=PASS and final_result=PASS."
+}
+if (-not [string]::Equals([string]$evidence.reviewed_allowlist_name, $allowlistName, [System.StringComparison]::OrdinalIgnoreCase) -or
+    -not [string]::Equals([string]$evidence.reviewed_allowlist_version, $allowlistVersion, [System.StringComparison]::OrdinalIgnoreCase)) {
+    throw "Navigator public HTTPS evidence must record reviewed allowlist $allowlistName $allowlistVersion."
 }
 
 $targetUrl = [string]$evidence.target_url
@@ -136,6 +142,8 @@ if (-not [string]::IsNullOrWhiteSpace($outputDirectory)) {
 $record = [ordered]@{
     schema_version = "guidexos.navigator.shipped-root-candidate-evidence.v0.1"
     generated_utc = ([datetime]::UtcNow.ToString("o"))
+    reviewed_allowlist_name = $allowlistName
+    reviewed_allowlist_version = $allowlistVersion
     candidate_id = [string]$candidate.candidate_id
     rotation_id = $rotationId
     candidate_bundle_type = [string]$candidate.bundle_type
@@ -151,7 +159,8 @@ $record = [ordered]@{
     evidence_status = [string]$evidence.evidence_status
     evidence_target_url = $targetUrl
     evidence_target_host = [string]$evidence.target_host
-    evidence_target_allowlist = Get-NavigatorPublicHttpsReviewedAllowlistName
+    evidence_target_allowlist = $allowlistName
+    evidence_target_allowlist_version = $allowlistVersion
     evidence_target_reason = $(if ($null -ne $reviewedTarget) { [string]$reviewedTarget.Reason } else { "Approved through explicit caller allowlist." })
     evidence_result_marker = [string]$evidence.result_marker
     evidence_final_result = [string]$evidence.final_result

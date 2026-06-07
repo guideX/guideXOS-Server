@@ -151,14 +151,19 @@ Trust source distinction in this repository today:
   - `logs/navigator-public-https-<timestamp>.ca-bundle.manifest`
 - Structured evidence is promoted to:
   - `logs/navigator-public-https-<timestamp>.evidence.json`
+- Reviewed real-root proof packs are written under:
+  - `logs/navigator-public-https-proof-pack-<timestamp>/`
+  - The pack includes the summary log, serial log, evidence JSON, candidate metadata when supplied, the CA bundle manifest when available, and any commit-safe promotion record.
 - The summary log uses stable `[NAVIGATOR-PUBLIC-HTTPS] key=value` lines for machine checks. PASS-critical fields include `final_result`, `result_marker`, `target_url`, `target_host`, `public_ca_source_marker`, `public_trust_ready`, `public_ca_parsed_certs`, `trust_bundle_manifest_present`, `trust_bundle_sha256`, `trust_bundle_type`, `trust_bundle_root_count`, `trust_bundle_production_ready`, `trust_bundle_test_only`, `dns_result`, `tcp_result`, `tls_result`, `certificate_validation_result`, `hostname_validation_result`, `verify_flags`, `sni_host`, `http_status`, `header_cap_hit`, `body_cap_hit`, `downgrade_blocked`, `tls_succeeded_before_content_failure`, `plaintext_fallback`, and the automated `pass_contract_assertion_result`.
-- Public pilot v0.3 classification fields separate transport proof from content/render compatibility:
+- Public pilot v0.4 classification fields separate transport proof from content/render compatibility:
   - `tls_failure_classification`
   - `tls_transport_proof_result`
   - `content_compatibility_result`
   - `page_render_result`
   - `real_world_compatibility_note`
+- The summary and evidence now also record `reviewed_allowlist_name` and `reviewed_allowlist_version` so proof packs can be tied to the exact reviewed target contract.
 - The reviewed-target matrix helper now emits one copied summary log and one copied evidence JSON per reviewed target, plus an aggregate allowlist summary log at `logs/navigator-public-https-allowlist-<timestamp>.summary.log`.
+- If the real-root PEM is absent, the reviewed-target matrix remains `SETUP_BLOCKED` and the proof pack records that state instead of inventing a PASS.
 - The automated validator lives at `scripts/assert-navigator-public-https-pass.ps1`. It verifies the PASS contract, exits `0` only for valid proof, and can be run manually against any uploaded summary artifact.
 - The structured evidence exporter lives at `scripts/export-navigator-public-https-evidence.ps1`. It converts the summary artifact into JSON milestone evidence without copying PEM contents or any private material.
 
@@ -166,7 +171,7 @@ Trust source distinction in this repository today:
 
 - Normal deterministic CI should keep using `scripts/smoke-navigator-kernel.ps1` and `scripts/smoke-navigator-hosted.ps1`; it should not make the dedicated public probe a required step.
 - CI with no secret public-root bundle should expect `scripts/smoke-navigator-public-https.ps1` to exit `2` for setup/preflight blockers such as missing roots, so that step must stay optional unless secret material is injected intentionally.
-- CI or manual runs that do want required proof of the public HTTPS path must provide real public-root PEM input through `GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_CA_BUNDLE_SOURCE` or the ignored local fallback `scripts/fixtures/public-roots/ca-bundle.pem.local`.
+- CI or manual runs that do want required proof of the public HTTPS path must provide real public-root PEM input through `GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_CA_BUNDLE_SOURCE` or the explicit local fallback `scripts/fixtures/public-roots/ca-bundle.pem.local`.
 - When both the env var path and the ignored local fallback exist, the env var wins and the dedicated script prints that precedence explicitly.
 - Public roots are never downloaded by the harness and the `.local` fallback remains ignored by git.
 - Deterministic fixture roots in this repository do not count as public trust and must never be treated as sufficient for the real public probe.
@@ -178,7 +183,7 @@ Trust source distinction in this repository today:
   - `logs/navigator-public-https-*.ca-bundle.manifest`
   - `logs/navigator-public-https-*.evidence.json`
 - The workflow writes the secret to a temporary runner file, validates it immediately with `scripts/validate-navigator-ca-bundle.ps1`, points `GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_CA_BUNDLE_SOURCE` at that file, and removes the file after the run where practical.
-- The reviewed target allowlist for public-pilot hardening v0.3 currently contains:
+- The reviewed target allowlist for public-pilot hardening v0.4 currently contains:
   - `https://sha256.badssl.com/`
     Stable badssl DNS-hosted HTTPS endpoint used to prove real-world DNS, TCP, TLS, certificate, and hostname validation without opening arbitrary browsing.
 - The workflow accepts `target_url` only when it matches the approved reviewed allowlist.
@@ -186,6 +191,7 @@ Trust source distinction in this repository today:
 - If `GXOS_NAVIGATOR_PUBLIC_CA_BUNDLE_PEM` is missing, the workflow fails clearly before the probe runs.
 - When the dedicated probe exits `0`, the workflow replays `scripts/assert-navigator-public-https-pass.ps1` against the latest summary artifact and adds the assertion report to `GITHUB_STEP_SUMMARY`.
 - The workflow also surfaces the workflow input manifest plus the latest evidence JSON path and contents in `GITHUB_STEP_SUMMARY` when present.
+- Evidence promotion is intentionally strict: it only accepts `PASS` evidence, requires the PASS assertion, validates the candidate hash/rotation linkage, and records the reviewed allowlist name/version in a commit-safe promotion record.
 
 ### Public HTTPS PASS Artifact Checklist
 
@@ -196,6 +202,7 @@ Review the uploaded `navigator-public-https-*.summary.log` and treat the run as 
 - `target_url=` is the expected `https://` URL for the run.
 - `public_trust_ready=yes`
 - `public_ca_source_marker=` shows an explicit source such as `env-var`, `env-var-preferred-over-local`, or `local-fallback-file`.
+- `public_trust_reason`, `public_trust_blocker`, `public_trust_source_allowed`, `public_trust_manifest_ready`, `public_trust_runtime_hash_match`, `public_trust_test_only`, and `public_trust_lane` explain why the dedicated public proof did or did not reach trust readiness.
 - `public_ca_parsed_certs=` is greater than `0`.
 - `trust_bundle_manifest_present=yes`
 - `trust_bundle_sha256=` is a 64-character lowercase hex digest.

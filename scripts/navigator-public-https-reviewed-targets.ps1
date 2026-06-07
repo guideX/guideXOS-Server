@@ -1,6 +1,7 @@
 Set-StrictMode -Version Latest
 
-$script:NavigatorPublicHttpsReviewedTargetAllowlistName = "guidexos-reviewed-public-https-v0.3"
+$script:NavigatorPublicHttpsReviewedTargetAllowlistName = "guidexos-reviewed-public-https-v0.4"
+$script:NavigatorPublicHttpsReviewedTargetAllowlistVersion = "v0.4"
 $script:NavigatorPublicHttpsReviewedTargets = @(
     [pscustomobject]@{
         Url = "https://sha256.badssl.com/"
@@ -12,6 +13,10 @@ $script:NavigatorPublicHttpsReviewedTargets = @(
 
 function Get-NavigatorPublicHttpsReviewedAllowlistName {
     return $script:NavigatorPublicHttpsReviewedTargetAllowlistName
+}
+
+function Get-NavigatorPublicHttpsReviewedAllowlistVersion {
+    return $script:NavigatorPublicHttpsReviewedTargetAllowlistVersion
 }
 
 function Get-NavigatorPublicHttpsReviewedTargets {

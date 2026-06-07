@@ -5,6 +5,8 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+. (Join-Path (Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)) "scripts\navigator-public-https-reviewed-targets.ps1")
+
 function Get-NavigatorPublicHttpsSummaryFields {
     param([Parameter(Mandatory = $true)][string]$LiteralPath)
 
@@ -105,6 +107,8 @@ $evidence = [ordered]@{
     schema_version = "guidexos.navigator.public-https-evidence.v0.7"
     generated_utc = ([datetime]::UtcNow.ToString("o"))
     source_summary = $summaryFullPath
+    reviewed_allowlist_name = Get-NavigatorPublicHttpsReviewedAllowlistName
+    reviewed_allowlist_version = Get-NavigatorPublicHttpsReviewedAllowlistVersion
     result_marker = Get-NavigatorPublicHttpsFieldValue -Fields $fields -Name "result_marker"
     final_result = Get-NavigatorPublicHttpsFieldValue -Fields $fields -Name "final_result"
     target_url = Get-NavigatorPublicHttpsFieldValue -Fields $fields -Name "target_url"
@@ -116,6 +120,14 @@ $evidence = [ordered]@{
     reviewed_target_reason = Get-NavigatorPublicHttpsFieldValue -Fields $fields -Name "reviewed_target_reason"
     public_trust_ready = Get-NavigatorPublicHttpsFieldValue -Fields $fields -Name "public_trust_ready"
     public_ca_source_marker = Get-NavigatorPublicHttpsFieldValue -Fields $fields -Name "public_ca_source_marker"
+    public_trust_source_allowed = Get-NavigatorPublicHttpsFieldValue -Fields $fields -Name "public_trust_source_allowed"
+    public_trust_manifest_ready = Get-NavigatorPublicHttpsFieldValue -Fields $fields -Name "public_trust_manifest_ready"
+    public_trust_runtime_hash_match = Get-NavigatorPublicHttpsFieldValue -Fields $fields -Name "public_trust_runtime_hash_match"
+    public_trust_test_only = Get-NavigatorPublicHttpsFieldValue -Fields $fields -Name "public_trust_test_only"
+    public_trust_source_marker = Get-NavigatorPublicHttpsFieldValue -Fields $fields -Name "public_trust_source_marker"
+    public_trust_lane = Get-NavigatorPublicHttpsFieldValue -Fields $fields -Name "public_trust_lane"
+    public_trust_reason = Get-NavigatorPublicHttpsFieldValue -Fields $fields -Name "public_trust_reason"
+    public_trust_blocker = Get-NavigatorPublicHttpsFieldValue -Fields $fields -Name "public_trust_blocker"
     public_ca_bytes = ConvertTo-NavigatorNullableLong (Get-NavigatorPublicHttpsFieldValue -Fields $fields -Name "public_ca_bytes")
     public_ca_parsed_certs = ConvertTo-NavigatorNullableInt (Get-NavigatorPublicHttpsFieldValue -Fields $fields -Name "public_ca_parsed_certs")
     trust_bundle_manifest_present = Get-NavigatorPublicHttpsFieldValue -Fields $fields -Name "trust_bundle_manifest_present"

@@ -1784,7 +1784,13 @@ GxosTrustStoreSource trust_store_source_from_ca_info(const GxosCaStoreInfo& info
     if (text_equals(info.path, kBareMetalUserCaBundlePath)) {
         return GxosTrustStoreSource::UserProvidedTrustStore;
     }
-    if (publicProbeBundle) {
+    if (publicProbeBundle ||
+        (info.manifest.status == GxosCaManifestStatus::Loaded &&
+            info.manifest.bundleType &&
+            text_equals(info.manifest.bundleType, "production-public-probe-merged") &&
+            info.manifest.productionReady &&
+            !info.manifest.testOnly &&
+            info.manifest.hashMatch)) {
         return GxosTrustStoreSource::ProductionPublicProbeTrust;
     }
     if (info.manifest.bundleType &&
