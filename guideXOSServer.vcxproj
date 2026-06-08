@@ -166,6 +166,7 @@
     <ClInclude Include="gxm_loader.h" />
     <ClInclude Include="hd_installer.h" />
     <ClInclude Include="image.h" />
+    <ClInclude Include="kernel\core\include\inttypes.h" />
     <ClInclude Include="kernel\core\include\kernel\image_adapter.h" />
     <ClInclude Include="image_renderer.h" />
     <ClInclude Include="image_viewer.h" />
@@ -303,6 +304,9 @@
     <ClInclude Include="kernel\core\include\kernel\virtio_gpu.h" />
     <ClInclude Include="kernel\core\include\kernel\virtio_input.h" />
     <ClInclude Include="kernel\core\include\kernel\virtio_net.h" />
+    <ClInclude Include="kernel\core\include\stdio.h" />
+    <ClInclude Include="kernel\core\include\stdlib.h" />
+    <ClInclude Include="kernel\core\include\time.h" />
     <ClInclude Include="launchSettings.json" />
     <ClInclude Include="icons.h" />
     <ClInclude Include="ipc.h" />
@@ -345,6 +349,7 @@
     <ClInclude Include="sdk\include\guidexos\types.h" />
     <ClInclude Include="sdk\include\guidexos\ui.h" />
     <ClInclude Include="special_effects.h" />
+    <ClInclude Include="third_party\mbedtls\include\mbedtls\mbedtls\build_info.h" />
     <ClInclude Include="trash.h" />
     <ClInclude Include="ui_settings.h" />
     <ClInclude Include="universal_app_loader.h" />

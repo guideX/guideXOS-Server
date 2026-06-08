@@ -1235,6 +1235,22 @@ void zero_local_handshake_result(GxosTlsLocalHandshakeResult* result)
     result->mbedtlsError = 0;
     result->mbedtlsState = 0;
     result->transportStatus = gxos::web::HttpByteStreamTlsStatus::NotStarted;
+    result->allocatorStatus = GxosTlsHookStatus::Pending;
+    result->rngCallbackStatus = GxosTlsHookStatus::Pending;
+    result->timeCallbackStatus = GxosTlsHookStatus::Pending;
+    result->psaInitStatus = GxosTlsHookStatus::Pending;
+    result->caChainReady = false;
+    result->caChainCertCount = 0;
+    result->sslConfigDefaultsStatus = 0;
+    result->sslSetupStatus = 0;
+    result->sslHostnameStatus = 0;
+    result->sslBioStatus = 0;
+    result->sslAuthmode = 0;
+    result->sslEndpointMode = 0;
+    result->sslTransportMode = 0;
+    result->tlsSetupStep[0] = '\0';
+    result->tlsSetupErrorCode = 0;
+    result->tlsSetupErrorName[0] = '\0';
     result->sniHost[0] = '\0';
     result->stage[0] = '\0';
     result->protocol[0] = '\0';
@@ -1532,6 +1548,35 @@ bool hook_ready(GxosTlsHookStatus status)
 {
     return status == GxosTlsHookStatus::Ready;
 }
+
+#if defined(GXOS_BARE_METAL) && GXOS_TLS_MBEDTLS_RUNTIME_INCLUDED
+bool ensure_allocator_initialized()
+{
+    BareMetalTlsRuntimeState& state = runtime_state();
+    if (state.allocatorInitialized) {
+        state.allocatorStatus = GxosTlsHookStatus::Ready;
+        return true;
+    }
+
+    mbedtls_memory_buffer_alloc_init(state.arena, sizeof(state.arena));
+    (void)mbedtls_platform_set_calloc_free(mbedtls_calloc, mbedtls_free);
+    mbedtls_platform_set_fprintf(gxos_mbedtls_platform_fprintf_noop);
+    mbedtls_platform_set_exit(gxos_mbedtls_platform_exit_noop);
+    mbedtls_platform_set_time(gxos_mbedtls_time_callback);
+    state.allocatorInitialized = mbedtls_memory_buffer_alloc_verify() == 0;
+    if (state.allocatorInitialized) {
+        state.allocatorStatus = GxosTlsHookStatus::Ready;
+        copy_text(state.allocatorDetail, sizeof(state.allocatorDetail),
+            "Bounded Mbed TLS memory_buffer_alloc arena is active for bare-metal TLS prerequisites.");
+        return true;
+    }
+
+    state.allocatorStatus = GxosTlsHookStatus::Error;
+    copy_text(state.allocatorDetail, sizeof(state.allocatorDetail),
+        "Bounded Mbed TLS arena initialization failed integrity verification.");
+    return false;
+}
+#endif
 
 #if defined(GXOS_BARE_METAL)
 const char* compat_ca_bundle_path_for_policy(GxosValidatedHttpsPolicyState state);
@@ -2274,20 +2319,7 @@ GxosTlsRuntimeHookInfo make_runtime_hook_info()
             mbedtls_x509_crt_init(&state.caChain);
             state.caChainInitialized = true;
         }
-        mbedtls_memory_buffer_alloc_init(state.arena, sizeof(state.arena));
-        mbedtls_platform_set_fprintf(gxos_mbedtls_platform_fprintf_noop);
-        mbedtls_platform_set_exit(gxos_mbedtls_platform_exit_noop);
-        mbedtls_platform_set_time(gxos_mbedtls_time_callback);
-        state.allocatorInitialized = mbedtls_memory_buffer_alloc_verify() == 0;
-        if (state.allocatorInitialized) {
-            state.allocatorStatus = GxosTlsHookStatus::Ready;
-            copy_text(state.allocatorDetail, sizeof(state.allocatorDetail),
-                "Bounded Mbed TLS memory_buffer_alloc arena is active for bare-metal TLS prerequisites.");
-        } else {
-            state.allocatorStatus = GxosTlsHookStatus::Error;
-            copy_text(state.allocatorDetail, sizeof(state.allocatorDetail),
-                "Bounded Mbed TLS arena initialization failed integrity verification.");
-        }
+        (void)ensure_allocator_initialized();
 #endif
     }
 
@@ -2347,8 +2379,14 @@ GxosTlsRuntimeHookInfo make_runtime_hook_info()
 bool ensure_psa_initialized()
 {
     BareMetalTlsRuntimeState& state = runtime_state();
-    const GxosTlsRuntimeHookInfo hooks = make_runtime_hook_info();
+    if (!ensure_allocator_initialized()) {
+        state.psaStatus = GxosTlsHookStatus::Unavailable;
+        copy_text(state.psaDetail, sizeof(state.psaDetail),
+            state.allocatorDetail[0] ? state.allocatorDetail : "Allocator hook is unavailable.");
+        return false;
+    }
 
+    const GxosTlsRuntimeHookInfo hooks = make_runtime_hook_info();
     if (!hook_ready(hooks.allocatorStatus)) {
         state.psaStatus = GxosTlsHookStatus::Unavailable;
         copy_text(state.psaDetail, sizeof(state.psaDetail),
@@ -2396,6 +2434,36 @@ void tls_trace_stage(const char* stage);
 void tls_set_transport_status(GxosTlsLocalHandshakeResult* result,
                               gxos::web::HttpByteStreamTlsStatus status,
                               const char* errorText = nullptr);
+
+const char* tls_setup_error_name(int code)
+{
+    switch (code) {
+#ifdef MBEDTLS_ERR_SSL_BAD_INPUT_DATA
+    case MBEDTLS_ERR_SSL_BAD_INPUT_DATA: return "MBEDTLS_ERR_SSL_BAD_INPUT_DATA";
+#endif
+#ifdef MBEDTLS_ERR_SSL_ALLOC_FAILED
+    case MBEDTLS_ERR_SSL_ALLOC_FAILED: return "MBEDTLS_ERR_SSL_ALLOC_FAILED";
+#endif
+#ifdef MBEDTLS_ERR_SSL_FEATURE_UNAVAILABLE
+    case MBEDTLS_ERR_SSL_FEATURE_UNAVAILABLE: return "MBEDTLS_ERR_SSL_FEATURE_UNAVAILABLE";
+#endif
+#ifdef MBEDTLS_ERR_SSL_INTERNAL_ERROR
+    case MBEDTLS_ERR_SSL_INTERNAL_ERROR: return "MBEDTLS_ERR_SSL_INTERNAL_ERROR";
+#endif
+#ifdef MBEDTLS_ERR_SSL_WAITING_SERVER_HELLO_RENEGO
+    case MBEDTLS_ERR_SSL_WAITING_SERVER_HELLO_RENEGO: return "MBEDTLS_ERR_SSL_WAITING_SERVER_HELLO_RENEGO";
+#endif
+    default: return "MBEDTLS_ERR_UNKNOWN";
+    }
+}
+
+void tls_set_setup_error(GxosTlsLocalHandshakeResult* result, int code, const char* step)
+{
+    if (!result) return;
+    result->tlsSetupErrorCode = code;
+    copy_text(result->tlsSetupStep, sizeof(result->tlsSetupStep), step ? step : "(none)");
+    copy_text(result->tlsSetupErrorName, sizeof(result->tlsSetupErrorName), tls_setup_error_name(code));
+}
 
 #if defined(GXOS_BARE_METAL) && GXOS_TLS_MBEDTLS_RUNTIME_INCLUDED
 constexpr uint32_t kGxosTlsSmokeHandshakeTimeoutMs = 5000;
@@ -3517,6 +3585,12 @@ bool gxos_tls_open_http_byte_stream(const char* sniHostname,
         return false;
     }
 
+    const GxosTlsRuntimeHookInfo hooks = gxos_tls_runtime_hook_info();
+    result->allocatorStatus = hooks.allocatorStatus;
+    result->rngCallbackStatus = hooks.rngCallbackStatus;
+    result->timeCallbackStatus = hooks.timeCallbackStatus;
+    result->psaInitStatus = hooks.psaInitStatus;
+
     const GxosCaStoreInfo caInfo = gxos_ca_store_info();
     tls_set_stage(result, "ca_ready_check");
     if (caInfo.status != GxosCaStoreStatus::Loaded || caInfo.parseStatus != GxosCaParseStatus::Parsed) {
@@ -3530,6 +3604,7 @@ bool gxos_tls_open_http_byte_stream(const char* sniHostname,
 
     tls_set_stage(result, "psa_ready_check");
     if (!ensure_psa_initialized()) {
+        result->psaInitStatus = runtime_state().psaStatus;
         tls_set_transport_status(result, gxos::web::HttpByteStreamTlsStatus::HandshakeFailed,
             runtime_state().psaDetail);
         return false;
@@ -3562,20 +3637,32 @@ bool gxos_tls_open_http_byte_stream(const char* sniHostname,
         ret = mbedtls_ssl_config_defaults(&session->conf, MBEDTLS_SSL_IS_CLIENT,
                                           MBEDTLS_SSL_TRANSPORT_STREAM,
                                           MBEDTLS_SSL_PRESET_DEFAULT);
+        result->sslEndpointMode = MBEDTLS_SSL_IS_CLIENT;
+        result->sslTransportMode = MBEDTLS_SSL_TRANSPORT_STREAM;
+        result->tlsSetupErrorCode = ret;
+        copy_text(result->tlsSetupStep, sizeof(result->tlsSetupStep), "ssl_config_defaults");
         if (ret != 0) {
+            result->sslConfigDefaultsStatus = ret;
+            tls_set_setup_error(result, ret, "ssl_config_defaults");
             result->mbedtlsError = ret;
             tls_set_transport_status(result, gxos::web::HttpByteStreamTlsStatus::HandshakeFailed,
                 "Mbed TLS client config defaults failed for the TLS byte-stream.");
             break;
         }
+        result->sslConfigDefaultsStatus = ret;
+        result->sslAuthmode = MBEDTLS_SSL_VERIFY_REQUIRED;
 
         mbedtls_ssl_conf_authmode(&session->conf, MBEDTLS_SSL_VERIFY_REQUIRED);
         mbedtls_ssl_conf_ca_chain(&session->conf, &runtime.caChain, nullptr);
+        result->caChainReady = runtime.caChainInitialized;
+        result->caChainCertCount = count_ca_chain(&runtime.caChain);
 
         tls_set_stage(result, "ssl_setup");
         tls_trace_stage("ssl_setup");
         ret = mbedtls_ssl_setup(&session->ssl, &session->conf);
+        result->sslSetupStatus = ret;
         if (ret != 0) {
+            tls_set_setup_error(result, ret, "ssl_setup");
             result->mbedtlsError = ret;
             tls_set_transport_status(result, gxos::web::HttpByteStreamTlsStatus::HandshakeFailed,
                 "Mbed TLS SSL setup failed for the TLS byte-stream.");
@@ -3585,7 +3672,9 @@ bool gxos_tls_open_http_byte_stream(const char* sniHostname,
         tls_set_stage(result, "set_hostname");
         tls_trace_stage("set_hostname");
         ret = mbedtls_ssl_set_hostname(&session->ssl, sniHostname);
+        result->sslHostnameStatus = ret;
         if (ret != 0) {
+            tls_set_setup_error(result, ret, "set_hostname");
             result->mbedtlsError = ret;
             tls_set_transport_status(result, gxos::web::HttpByteStreamTlsStatus::HandshakeFailed,
                 "Mbed TLS could not set the TLS SNI/hostname.");
@@ -3594,6 +3683,7 @@ bool gxos_tls_open_http_byte_stream(const char* sniHostname,
         result->usedSniHostname = true;
 
         mbedtls_ssl_set_bio(&session->ssl, &session->io, gxos_tls_stream_send, gxos_tls_stream_recv, nullptr);
+        result->sslBioStatus = 0;
 
         tls_set_stage(result, "handshake");
         tls_trace_stage("handshake");

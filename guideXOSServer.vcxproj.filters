@@ -702,6 +702,24 @@
     <ClInclude Include="trash.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="gxos_tls_foundation.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="third_party\mbedtls\include\mbedtls\mbedtls\build_info.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\core\include\time.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\core\include\stdio.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\core\include\stdlib.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel\core\include\inttypes.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="allocator.cpp">
@@ -1337,6 +1355,9 @@
     <ClCompile Include="trash.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="gxos_tls_foundation.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <None Include="kernel\arch\amd64\boot.asm">
@@ -1544,4 +1565,3 @@
     <Page Include="GuideXOS.FileExplorer\Views\InputDialog.xaml" />
   </ItemGroup>
 </Project>
-

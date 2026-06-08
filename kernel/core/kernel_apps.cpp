@@ -11700,6 +11700,36 @@ static bool printNavigatorLocalTlsWrongHostnameFailureCase()
     serial::puts(tlsResult.certificateValidationSuccess ? "success" : "failure");
     serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.failure.hostname_validation=");
     serial::puts(tlsResult.hostnameValidationSuccess ? "success" : "failure");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.failure.tls_setup_step=");
+    serial::puts(tlsResult.tlsSetupStep[0] ? tlsResult.tlsSetupStep : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.failure.tls_setup_error_code=");
+    serial_put_dec64((uint64_t)tlsResult.tlsSetupErrorCode);
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.failure.tls_setup_error_name=");
+    serial::puts(tlsResult.tlsSetupErrorName[0] ? tlsResult.tlsSetupErrorName : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.failure.ssl_config_defaults_status=");
+    serial_put_dec64((uint64_t)tlsResult.sslConfigDefaultsStatus);
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.failure.ssl_setup_status=");
+    serial_put_dec64((uint64_t)tlsResult.sslSetupStatus);
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.failure.ssl_hostname_status=");
+    serial_put_dec64((uint64_t)tlsResult.sslHostnameStatus);
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.failure.ssl_bio_status=");
+    serial_put_dec64((uint64_t)tlsResult.sslBioStatus);
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.failure.ssl_authmode=");
+    serial_put_dec64((uint64_t)tlsResult.sslAuthmode);
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.failure.ssl_endpoint_mode=");
+    serial_put_dec64((uint64_t)tlsResult.sslEndpointMode);
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.failure.ssl_transport_mode=");
+    serial_put_dec64((uint64_t)tlsResult.sslTransportMode);
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.failure.psa_init_status=");
+    serial::puts(gxos::gxos_tls_hook_status_name(tlsResult.psaInitStatus));
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.failure.rng_callback_status=");
+    serial::puts(gxos::gxos_tls_hook_status_name(tlsResult.rngCallbackStatus));
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.failure.time_callback_status=");
+    serial::puts(gxos::gxos_tls_hook_status_name(tlsResult.timeCallbackStatus));
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.failure.ca_chain_ready=");
+    serial::puts(tlsResult.caChainReady ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.failure.ca_chain_cert_count=");
+    serial_put_dec64((uint64_t)tlsResult.caChainCertCount);
     serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.failure.stage=");
     serial::puts(tlsResult.stage[0] ? tlsResult.stage : "(none)");
     serial::puts("\n[NAVIGATOR-SMOKE] tls_smoke.failure.sni_host=");
@@ -12926,6 +12956,8 @@ static bool printNavigatorRealPublicHttpsProbeCase()
     bool tcpAbortUsed = false;
     bool redirectedHttpsRetryUsed = false;
     bool attempted = false;
+    KernelHttpResponse tlsProbeResponse{};
+    gxos::GxosTlsLocalHandshakeResult tlsResult{};
     const char* resultLabel = "SKIP";
     const char* skipReason = "(none)";
     bool pass = true;
@@ -13075,6 +13107,7 @@ static bool printNavigatorRealPublicHttpsProbeCase()
             &redirectedHttpsRetryUsed,
             &redirectHopIndex,
             redirectHopUrl, sizeof(redirectHopUrl));
+        kernel_tls_smoke_request_once(probeConfig.targetUrl, tlsSniHost, &tlsProbeResponse, &tlsResult);
 
         const bool tlsSuccess =
             tlsTcpConnectAttempts >= 1 &&
@@ -13116,7 +13149,7 @@ static bool printNavigatorRealPublicHttpsProbeCase()
     const char* tcpResult = !attempted
         ? "not-attempted"
         : (tcpConnected ? "PASS" : "FAIL");
-    const char* tlsResult = !attempted
+    const char* tlsResultLabel = !attempted
         ? "not-attempted"
         : (nav_smoke_text_equals(tlsStatus, "Success") ? "PASS" : "FAIL");
     const char* certificateValidationResult = !attempted
@@ -13198,8 +13231,58 @@ static bool printNavigatorRealPublicHttpsProbeCase()
     serial::puts(transportPolicyReason[0] ? transportPolicyReason : "(none)");
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tls_status=");
     serial::puts(tlsStatus[0] ? tlsStatus : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tls_setup_step=");
+    serial::puts(attempted ? (tlsResult.tlsSetupStep[0] ? tlsResult.tlsSetupStep : "(none)") : "(not-attempted)");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tls_setup_error_code=");
+    {
+        char signedNumber[32];
+        nav_i64_to_text((int64_t)tlsResult.tlsSetupErrorCode, signedNumber, sizeof(signedNumber));
+        serial::puts(signedNumber);
+    }
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tls_setup_error_name=");
+    serial::puts(tlsResult.tlsSetupErrorName[0] ? tlsResult.tlsSetupErrorName : "(none)");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.psa_init_status=");
+    serial::puts(gxos::gxos_tls_hook_status_name(tlsResult.psaInitStatus));
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.rng_callback_status=");
+    serial::puts(gxos::gxos_tls_hook_status_name(tlsResult.rngCallbackStatus));
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.time_callback_status=");
+    serial::puts(gxos::gxos_tls_hook_status_name(tlsResult.timeCallbackStatus));
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.ca_chain_ready=");
+    serial::puts(tlsResult.caChainReady ? "yes" : "no");
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.ca_chain_cert_count=");
+    serial_put_dec64(static_cast<uint64_t>(tlsResult.caChainCertCount));
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.ssl_config_defaults_status=");
+    {
+        char signedNumber[32];
+        nav_i64_to_text((int64_t)tlsResult.sslConfigDefaultsStatus, signedNumber, sizeof(signedNumber));
+        serial::puts(signedNumber);
+    }
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.ssl_setup_status=");
+    {
+        char signedNumber[32];
+        nav_i64_to_text((int64_t)tlsResult.sslSetupStatus, signedNumber, sizeof(signedNumber));
+        serial::puts(signedNumber);
+    }
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.ssl_hostname_status=");
+    {
+        char signedNumber[32];
+        nav_i64_to_text((int64_t)tlsResult.sslHostnameStatus, signedNumber, sizeof(signedNumber));
+        serial::puts(signedNumber);
+    }
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.ssl_bio_status=");
+    {
+        char signedNumber[32];
+        nav_i64_to_text((int64_t)tlsResult.sslBioStatus, signedNumber, sizeof(signedNumber));
+        serial::puts(signedNumber);
+    }
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.ssl_authmode=");
+    serial_put_dec((uint32_t)tlsResult.sslAuthmode);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.ssl_endpoint_mode=");
+    serial_put_dec((uint32_t)tlsResult.sslEndpointMode);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.ssl_transport_mode=");
+    serial_put_dec((uint32_t)tlsResult.sslTransportMode);
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tls_result=");
-    serial::puts(tlsResult);
+    serial::puts(tlsResultLabel);
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tls_connect_attempts=");
     serial_put_dec((uint32_t)tlsTcpConnectAttempts);
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tls_retry_count=");
