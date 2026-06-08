@@ -79,7 +79,7 @@ REM Compiler flags (using relative paths from kernel directory)
 set "CFLAGS=-std=c++14 -ffreestanding -O2 -Wall -Wextra -fno-exceptions -fno-rtti"
 set "CFLAGS=%CFLAGS% -nostdlib -nostdinc++ -fno-builtin -DGXOS_BARE_METAL"
 set "CFLAGS=%CFLAGS% -m32 -march=i686"
-set "CFLAGS=%CFLAGS% -I. -I.. -Icore/include -Iarch/%ARCH%/include"
+set "CFLAGS=%CFLAGS% -I. -I.. -Icore/include -Iarch/%ARCH%/include -I..\third_party\mbedtls\include -I..\third_party\mbedtls\tf-psa-crypto\include -I..\third_party\mbedtls\tf-psa-crypto\drivers\builtin\include -DMBEDTLS_CONFIG_FILE=\"..\third_party\mbedtls\guidexos\mbedtls_config.h\" -DTF_PSA_CRYPTO_CONFIG_FILE=\"..\third_party\mbedtls\guidexos\crypto_config.h\""
 
 REM Assembler flags
 set "ASFLAGS=-f elf32"

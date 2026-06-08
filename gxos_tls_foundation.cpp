@@ -262,15 +262,15 @@ static bool gxos_mbedtls_utc_tm_from_unix_seconds(long long seconds, struct tm* 
     return true;
 }
 
-extern "C" mbedtls_time_t gxos_mbedtls_time_callback(mbedtls_time_t* timer)
+extern "C" int64_t gxos_mbedtls_time_callback(int64_t* timer)
 {
     int64_t seconds = 0;
     if (!gxos::gxos_wall_clock_unix_seconds(&seconds)) {
-        if (timer) *timer = static_cast<mbedtls_time_t>(0);
-        return static_cast<mbedtls_time_t>(0);
+        if (timer) *timer = static_cast<int64_t>(0);
+        return static_cast<int64_t>(0);
     }
 
-    const mbedtls_time_t value = static_cast<mbedtls_time_t>(seconds);
+    const int64_t value = static_cast<int64_t>(seconds);
     if (timer) *timer = value;
     return value;
 }
