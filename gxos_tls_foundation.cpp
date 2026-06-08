@@ -67,6 +67,16 @@
     GXOS_TLS_MBEDTLS_CONFIG_PRESENT && \
     GXOS_TLS_MBEDTLS_CRYPTO_CONFIG_PRESENT
 #define GXOS_TLS_MBEDTLS_RUNTIME_INCLUDED 1
+#define MBEDTLS_SSL_TLS_C
+#define MBEDTLS_SSL_CLI_C
+#define MBEDTLS_SSL_PROTO_TLS1_2
+#define MBEDTLS_SSL_SERVER_NAME_INDICATION
+#define MBEDTLS_X509_USE_C
+#define MBEDTLS_X509_CRT_PARSE_C
+#define MBEDTLS_X509_REMOVE_INFO
+#define MBEDTLS_PLATFORM_FPRINTF_ALT
+#define MBEDTLS_PLATFORM_EXIT_ALT
+#define MBEDTLS_PLATFORM_TIME_ALT
 #include "mbedtls/memory_buffer_alloc.h"
 #include "mbedtls/ssl.h"
 #include "mbedtls/platform.h"
@@ -1028,39 +1038,6 @@ bool parse_single_certificate_from_pem(const uint8_t* buffer,
 }
 #endif
 
-GxosCaStoreParseInfo gxos_ca_store_parse_info()
-{
-#if defined(GXOS_BARE_METAL)
-    gxos_ca_store_load_once();
-    const BareMetalCaStoreState& state = ca_store_state();
-    GxosCaStoreParseInfo info{};
-    info.inputCertificateCount = state.info.pemBlocksDetected;
-    info.parsedCertificateCount = state.info.parsedCertificateCount;
-    info.skippedCertificateCount = 0;
-    info.parseErrorCount = state.info.parseStatus == GxosCaParseStatus::ParseError ? 1 : 0;
-    info.firstParseErrorCode = 0;
-    info.firstParseErrorIndex = 0;
-    info.filteredParse = false;
-    info.parseMode = kBareMetalPublicTrustParseMode;
-    info.error = state.info.error;
-
-    if (state.info.status == GxosCaStoreStatus::Loaded && state.info.parseStatus == GxosCaParseStatus::Parsed) {
-        info.parsedCertificateCount = state.info.parsedCertificateCount;
-        info.filteredParse = true;
-        info.parseErrorCount = state.info.pemBlocksDetected > state.info.parsedCertificateCount
-            ? state.info.pemBlocksDetected - state.info.parsedCertificateCount
-            : 0;
-        info.skippedCertificateCount = info.parseErrorCount;
-        if (info.error == nullptr && info.skippedCertificateCount > 0) {
-            info.error = "Public root bundle parsed with filtered certificate fallback diagnostics.";
-        }
-    }
-    return info;
-#else
-    return {0, 0, 0, 0, 0, 0, false, "n/a", "Hosted Schannel mode does not use bare-metal CA parsing."};
-#endif
-}
-
 const char* detected_tf_psa_version()
 {
 #if GXOS_TLS_TF_PSA_VERSION_INCLUDED
@@ -1863,6 +1840,39 @@ bool public_internet_trust_opt_in_enabled()
         text_equals_insensitive(token, "yes");
 }
 #endif
+
+GxosCaStoreParseInfo gxos_ca_store_parse_info()
+{
+#if defined(GXOS_BARE_METAL)
+    gxos_ca_store_load_once();
+    const BareMetalCaStoreState& state = ca_store_state();
+    GxosCaStoreParseInfo info{};
+    info.inputCertificateCount = state.info.pemBlocksDetected;
+    info.parsedCertificateCount = state.info.parsedCertificateCount;
+    info.skippedCertificateCount = 0;
+    info.parseErrorCount = state.info.parseStatus == GxosCaParseStatus::ParseError ? 1 : 0;
+    info.firstParseErrorCode = 0;
+    info.firstParseErrorIndex = 0;
+    info.filteredParse = false;
+    info.parseMode = kBareMetalPublicTrustParseMode;
+    info.error = state.info.error;
+
+    if (state.info.status == GxosCaStoreStatus::Loaded && state.info.parseStatus == GxosCaParseStatus::Parsed) {
+        info.parsedCertificateCount = state.info.parsedCertificateCount;
+        info.filteredParse = true;
+        info.parseErrorCount = state.info.pemBlocksDetected > state.info.parsedCertificateCount
+            ? state.info.pemBlocksDetected - state.info.parsedCertificateCount
+            : 0;
+        info.skippedCertificateCount = info.parseErrorCount;
+        if (info.error == nullptr && info.skippedCertificateCount > 0) {
+            info.error = "Public root bundle parsed with filtered certificate fallback diagnostics.";
+        }
+    }
+    return info;
+#else
+    return {0, 0, 0, 0, 0, 0, false, "n/a", "Hosted Schannel mode does not use bare-metal CA parsing."};
+#endif
+}
 
 const char* readiness_blocker_for_ca_store(const GxosCaStoreInfo& info)
 {

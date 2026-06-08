@@ -1,2 +1,0 @@
-production-validated
-public-https-pilot=enabled

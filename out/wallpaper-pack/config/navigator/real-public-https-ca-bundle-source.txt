@@ -1,1 +1,0 @@
-D:\dev\guideXOSServer\scripts\fixtures\public-roots\ca-bundle.pem.local

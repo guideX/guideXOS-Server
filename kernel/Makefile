@@ -81,6 +81,9 @@ CFLAGS += $(EXTRA_CFLAGS)
 ifneq ($(MBEDTLS_GUIDEXOS_COMPILE_PROBE_ENABLED),0)
 CFLAGS += $(MBEDTLS_GUIDEXOS_CFLAGS)
 endif
+ifneq ($(wildcard mbedtls-guidexos-defines.h),)
+CFLAGS += -imacros mbedtls-guidexos-defines.h
+endif
 DEPFLAGS := -MMD -MP
 # Append architecture-specific flags
 CFLAGS += $(ARCH_CFLAGS)

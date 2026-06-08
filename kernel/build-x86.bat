@@ -79,7 +79,12 @@ REM Compiler flags (using relative paths from kernel directory)
 set "CFLAGS=-std=c++14 -ffreestanding -O2 -Wall -Wextra -fno-exceptions -fno-rtti"
 set "CFLAGS=%CFLAGS% -nostdlib -nostdinc++ -fno-builtin -DGXOS_BARE_METAL"
 set "CFLAGS=%CFLAGS% -m32 -march=i686"
-set "CFLAGS=%CFLAGS% -I. -I.. -Icore/include -Iarch/%ARCH%/include -I..\third_party\mbedtls\include -I..\third_party\mbedtls\tf-psa-crypto\include -I..\third_party\mbedtls\tf-psa-crypto\drivers\builtin\include -DMBEDTLS_CONFIG_FILE=\"..\third_party\mbedtls\guidexos\mbedtls_config.h\" -DTF_PSA_CRYPTO_CONFIG_FILE=\"..\third_party\mbedtls\guidexos\crypto_config.h\""
+set "CFLAGS=%CFLAGS% -I. -I.. -Icore/include -Iarch/%ARCH%/include"
+set "CFLAGS=%CFLAGS% -I..\third_party\mbedtls\include -I..\third_party\mbedtls\library"
+set "CFLAGS=%CFLAGS% -I..\third_party\mbedtls\tf-psa-crypto -I..\third_party\mbedtls\tf-psa-crypto\core -I..\third_party\mbedtls\tf-psa-crypto\include"
+set "CFLAGS=%CFLAGS% -I..\third_party\mbedtls\tf-psa-crypto\drivers\builtin\include -I..\third_party\mbedtls\tf-psa-crypto\drivers\p256-m\p256-m\include -I..\third_party\mbedtls\tf-psa-crypto\drivers\p256-m\p256-m\include\p256-m"
+set "CFLAGS=%CFLAGS% -I..\third_party\mbedtls\tf-psa-crypto\drivers\p256-m\p256-m_driver_interface -I..\third_party\mbedtls\tf-psa-crypto\dispatch -I..\third_party\mbedtls\tf-psa-crypto\extras -I..\third_party\mbedtls\tf-psa-crypto\platform -I..\third_party\mbedtls\tf-psa-crypto\utilities"
+set "CFLAGS=%CFLAGS% -imacros mbedtls-guidexos-defines.h"
 
 REM Assembler flags
 set "ASFLAGS=-f elf32"
