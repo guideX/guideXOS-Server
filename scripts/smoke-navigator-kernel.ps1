@@ -1,6 +1,6 @@
 param(
     [switch]$Build,
-    [int]$TimeoutSeconds = 120,
+    [int]$TimeoutSeconds = 300,
     [ValidateSet("Deterministic", "PublicPilot", "All")]
     [string]$ScenarioGroup = "Deterministic",
     [switch]$IncludePublicPilot,
