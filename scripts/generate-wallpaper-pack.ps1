@@ -584,7 +584,18 @@ function Write-Fat32Image([string]$ImagePath, [string]$WallpaperDir, [array]$Fil
         }
     }
 
-    $stream = [System.IO.File]::Open($ImagePath, [System.IO.FileMode]::Create, [System.IO.FileAccess]::ReadWrite)
+    $imageOpenDeadline = (Get-Date).AddSeconds(10)
+    do {
+        try {
+            $stream = [System.IO.File]::Open($ImagePath, [System.IO.FileMode]::Create, [System.IO.FileAccess]::ReadWrite)
+            break
+        } catch [System.IO.IOException] {
+            if ((Get-Date) -ge $imageOpenDeadline) {
+                throw
+            }
+            Start-Sleep -Milliseconds 200
+        }
+    } while ($true)
     try {
         $stream.SetLength($SizeMB * 1024 * 1024)
         $sector = New-Object byte[] $bytesPerSector
@@ -713,7 +724,20 @@ $wallpaperDir = Join-Path $OutputDir "wall"
 $certsDir = Join-Path $OutputDir "certs"
 $configDir = Join-Path $OutputDir "config"
 foreach ($stagingDir in @($wallpaperDir, $certsDir, $configDir)) {
-    if (Test-Path $stagingDir) { Remove-Item -Recurse -Force $stagingDir }
+    if (-not (Test-Path -LiteralPath $stagingDir)) { continue }
+
+    $removeDeadline = (Get-Date).AddSeconds(10)
+    do {
+        try {
+            Remove-Item -LiteralPath $stagingDir -Recurse -Force -ErrorAction Stop
+            break
+        } catch [System.IO.IOException] {
+            if ((Get-Date) -ge $removeDeadline) {
+                throw
+            }
+            Start-Sleep -Milliseconds 200
+        }
+    } while ($true)
 }
 New-Item -ItemType Directory -Force -Path $wallpaperDir | Out-Null
 New-Item -ItemType Directory -Force -Path (Split-Path -Parent $OutputImage) | Out-Null

@@ -77,6 +77,29 @@ function Save-NavigatorSmokeFileState {
     }
 }
 
+function Copy-NavigatorSmokeFileWithRetry {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Source,
+        [Parameter(Mandatory = $true)]
+        [string]$Destination,
+        [int]$TimeoutMilliseconds = 10000
+    )
+
+    $deadline = (Get-Date).AddMilliseconds($TimeoutMilliseconds)
+    do {
+        try {
+            Copy-Item -LiteralPath $Source -Destination $Destination -Force
+            return
+        } catch [System.IO.IOException] {
+            if ((Get-Date) -ge $deadline) {
+                throw
+            }
+            Start-Sleep -Milliseconds 200
+        }
+    } while ($true)
+}
+
 function Restore-NavigatorSmokeFileState {
     param(
         [Parameter(Mandatory = $true)]
@@ -89,7 +112,7 @@ function Restore-NavigatorSmokeFileState {
             New-Item -ItemType Directory -Force -Path $parent | Out-Null
         }
         if (Test-Path -LiteralPath $State.SnapshotPath) {
-            Copy-Item -LiteralPath $State.SnapshotPath -Destination $State.Path -Force
+            Copy-NavigatorSmokeFileWithRetry -Source $State.SnapshotPath -Destination $State.Path
         }
     } elseif (Test-Path -LiteralPath $State.Path) {
         Remove-Item -LiteralPath $State.Path -Force -ErrorAction SilentlyContinue

@@ -998,6 +998,8 @@ const char* detected_mbedtls_version()
 bool parse_single_certificate_from_pem(const uint8_t* buffer,
                                        size_t buffer_len,
                                        size_t index,
+                                       char* pemScratch,
+                                       size_t pemScratchSize,
                                        int* parseError,
                                        size_t* parsedBytes,
                                        size_t* parsedCertCount)
@@ -1012,20 +1014,19 @@ bool parse_single_certificate_from_pem(const uint8_t* buffer,
         return false;
     }
 
-    if (blockLen + 1 > 8192u) {
+    if (!pemScratch || blockLen + 1 > pemScratchSize) {
         if (parseError) *parseError = -2;
         return false;
     }
 
-    char pemBlock[8193];
     for (size_t i = 0; i < blockLen; ++i) {
-        pemBlock[i] = static_cast<char>(blockStart[i]);
+        pemScratch[i] = static_cast<char>(blockStart[i]);
     }
-    pemBlock[blockLen] = '\0';
+    pemScratch[blockLen] = '\0';
 
     mbedtls_x509_crt cert{};
     mbedtls_x509_crt_init(&cert);
-    const int ret = mbedtls_x509_crt_parse(&cert, reinterpret_cast<const unsigned char*>(pemBlock), blockLen + 1);
+    const int ret = mbedtls_x509_crt_parse(&cert, reinterpret_cast<const unsigned char*>(pemScratch), blockLen + 1);
     if (ret == 0) {
         if (parsedBytes) *parsedBytes = blockLen;
         if (parsedCertCount) *parsedCertCount = 1;
@@ -1277,6 +1278,7 @@ struct BareMetalTlsRuntimeState {
     char psaDetail[160] = "psa_crypto_init() is deferred until CA parsing starts.";
     uint8_t arena[kGxosTlsArenaCapacityBytes] = {};
     uint8_t bytes[kGxosMaxCaStoreBytes + 1] = {};
+    char pemScratch[8193] = {};
 #if GXOS_TLS_MBEDTLS_RUNTIME_INCLUDED
     mbedtls_x509_crt caChain;
 #endif
@@ -1559,7 +1561,6 @@ bool ensure_allocator_initialized()
     }
 
     mbedtls_memory_buffer_alloc_init(state.arena, sizeof(state.arena));
-    (void)mbedtls_platform_set_calloc_free(mbedtls_calloc, mbedtls_free);
     mbedtls_platform_set_fprintf(gxos_mbedtls_platform_fprintf_noop);
     mbedtls_platform_set_exit(gxos_mbedtls_platform_exit_noop);
     mbedtls_platform_set_time(gxos_mbedtls_time_callback);
@@ -2547,8 +2548,6 @@ struct GxosTlsHttpByteStreamSession {
     GxosTlsSmokeIoContext io{};
     mbedtls_ssl_context ssl;
     mbedtls_ssl_config conf;
-    bool sslInitialized = false;
-    bool confInitialized = false;
     bool closed = false;
 };
 
@@ -2602,14 +2601,8 @@ void tls_close_http_byte_stream_session(GxosTlsHttpByteStreamSession* session)
         (void)mbedtls_ssl_close_notify(&session->ssl);
     }
     if (session->tcpStream.close) session->tcpStream.close(session->tcpStream.context);
-    if (session->sslInitialized) {
-        mbedtls_ssl_free(&session->ssl);
-        session->sslInitialized = false;
-    }
-    if (session->confInitialized) {
-        mbedtls_ssl_config_free(&session->conf);
-        session->confInitialized = false;
-    }
+    mbedtls_ssl_free(&session->ssl);
+    mbedtls_ssl_config_free(&session->conf);
     mbedtls_free(session);
 }
 
@@ -3312,7 +3305,15 @@ bool gxos_ca_store_load_once()
         int certParseResult = 0;
         size_t certBytes = 0;
         size_t certCount = 0;
-        const bool certParsed = parse_single_certificate_from_pem(runtime.bytes, loaded, certIndex, &certParseResult, &certBytes, &certCount);
+        const bool certParsed = parse_single_certificate_from_pem(
+            runtime.bytes,
+            loaded,
+            certIndex,
+            runtime.pemScratch,
+            sizeof(runtime.pemScratch),
+            &certParseResult,
+            &certBytes,
+            &certCount);
         if (!certParsed) {
             ++skippedCount;
             if (firstErrorCode == 0) {
@@ -3333,8 +3334,7 @@ bool gxos_ca_store_load_once()
             continue;
         }
 
-        char pemBlock[8193];
-        if (blockLen + 1 > sizeof(pemBlock)) {
+        if (blockLen + 1 > sizeof(runtime.pemScratch)) {
             ++skippedCount;
             if (firstErrorCode == 0) {
                 firstErrorCode = -2;
@@ -3343,11 +3343,14 @@ bool gxos_ca_store_load_once()
             continue;
         }
         for (size_t i = 0; i < blockLen; ++i) {
-            pemBlock[i] = static_cast<char>(blockStart[i]);
+            runtime.pemScratch[i] = static_cast<char>(blockStart[i]);
         }
-        pemBlock[blockLen] = '\0';
+        runtime.pemScratch[blockLen] = '\0';
 
-        const int appendResult = mbedtls_x509_crt_parse(&runtime.caChain, reinterpret_cast<const unsigned char*>(pemBlock), blockLen + 1);
+        const int appendResult = mbedtls_x509_crt_parse(
+            &runtime.caChain,
+            reinterpret_cast<const unsigned char*>(runtime.pemScratch),
+            blockLen + 1);
         if (appendResult != 0) {
             ++skippedCount;
             if (firstErrorCode == 0) {
@@ -3624,9 +3627,7 @@ bool gxos_tls_open_http_byte_stream(const char* sniHostname,
     session->result = result;
     session->io.stream = tcpStream;
     mbedtls_ssl_init(&session->ssl);
-    session->sslInitialized = true;
     mbedtls_ssl_config_init(&session->conf);
-    session->confInitialized = true;
 
     bool success = false;
     int ret = 0;
