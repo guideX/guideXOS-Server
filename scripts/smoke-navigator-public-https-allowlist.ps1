@@ -91,7 +91,7 @@ function Get-NavigatorPublicHttpsTargetMatrix {
 }
 
 function Write-NavigatorMatrixOutputLine {
-    param([Parameter(Mandatory = $true)][string]$Line)
+    param([Parameter(Mandatory = $true)][AllowEmptyString()][string]$Line)
 
     if ($Line -match '^\s*CA source:\s+') {
         Write-Host "  CA source: (redacted in matrix wrapper)"
@@ -156,8 +156,17 @@ foreach ($target in $reviewedTargets) {
     }
 
     $startedAtUtc = [datetime]::UtcNow
-    $probeOutput = @(& powershell.exe @args 2>&1)
-    $exitCode = $LASTEXITCODE
+    $savedErrorActionPreference = $ErrorActionPreference
+    try {
+        # The probe can emit successful build warnings on stderr. Capture them and
+        # use the native exit code to classify the result.
+        $ErrorActionPreference = "Continue"
+        $probeOutput = @(& powershell.exe @args 2>&1)
+        $exitCode = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $savedErrorActionPreference
+    }
 
     foreach ($line in $probeOutput) {
         Write-NavigatorMatrixOutputLine -Line "$line"

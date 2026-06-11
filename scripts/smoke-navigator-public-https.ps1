@@ -1050,6 +1050,23 @@ $fields = [ordered]@{
     runtime_manifest_root_count = "(not-available)"
     runtime_manifest_sha256 = "(not-available)"
     dns_result = "not-attempted"
+    dns_server = "(not-attempted)"
+    dns_query_id = "0"
+    dns_source_port = "0"
+    dns_destination_port = "0"
+    dns_query_bytes = "0"
+    dns_send_attempts = "0"
+    dns_last_send_result = "(not-attempted)"
+    dns_reply_bytes = "0"
+    dns_reply_rcode = "0"
+    dns_reply_answer_count = "0"
+    dns_ipv4_rx_packets = "0"
+    dns_ipv4_rx_errors = "0"
+    dns_ipv4_checksum_errors = "0"
+    dns_udp_rx_datagrams = "0"
+    dns_udp_rx_errors = "0"
+    dns_udp_checksum_errors = "0"
+    dns_udp_no_port_errors = "0"
     tcp_result = "not-attempted"
     tls_result = "not-attempted"
     transport_selection = "(not-attempted)"
@@ -1378,6 +1395,23 @@ try {
         "runtime_manifest_root_count",
         "runtime_manifest_sha256",
         "dns_result",
+        "dns_server",
+        "dns_query_id",
+        "dns_source_port",
+        "dns_destination_port",
+        "dns_query_bytes",
+        "dns_send_attempts",
+        "dns_last_send_result",
+        "dns_reply_bytes",
+        "dns_reply_rcode",
+        "dns_reply_answer_count",
+        "dns_ipv4_rx_packets",
+        "dns_ipv4_rx_errors",
+        "dns_ipv4_checksum_errors",
+        "dns_udp_rx_datagrams",
+        "dns_udp_rx_errors",
+        "dns_udp_checksum_errors",
+        "dns_udp_no_port_errors",
         "tcp_result",
         "tls_result",
         "transport_selection",

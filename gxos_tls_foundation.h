@@ -13,7 +13,7 @@ namespace gxos {
 
 static constexpr size_t kGxosMaxCaStoreBytes = 512u * 1024u;
 static constexpr size_t kGxosMaxCaManifestBytes = 16u * 1024u;
-static constexpr size_t kGxosTlsArenaCapacityBytes = 256u * 1024u;
+static constexpr size_t kGxosTlsArenaCapacityBytes = 1024u * 1024u;
 
 enum class GxosTlsBackendStatus {
     Unavailable,

@@ -71,6 +71,7 @@ static bool str_eq_case_insensitive(const char* a, const char* b)
 static uint32_t s_dnsServer = DNS_GOOGLE_PRIMARY;  // Default to Google DNS
 static CacheEntry s_cache[MAX_CACHE_ENTRIES];
 static Statistics s_stats;
+static QueryDiagnostics s_lastQueryDiagnostics;
 static uint16_t s_nextQueryId = 1;
 static uint32_t s_systemTicks = 0;  // Simple tick counter for TTL
 
@@ -106,6 +107,7 @@ void init()
 {
     memzero(s_cache, sizeof(s_cache));
     memzero(&s_stats, sizeof(s_stats));
+    memzero(&s_lastQueryDiagnostics, sizeof(s_lastQueryDiagnostics));
     s_nextQueryId = 1;
     s_systemTicks = 0;
     
@@ -561,7 +563,7 @@ uint32_t cache_size()
 Status resolve(const char* domain, uint32_t* ipv4)
 {
     if (!domain || !ipv4) return DNS_ERR_INVALID;
-    
+
     *ipv4 = 0;
     
     // Check cache first
@@ -575,6 +577,12 @@ Status resolve(const char* domain, uint32_t* ipv4)
         *ipv4 = directIP;
         return DNS_OK;
     }
+
+    memzero(&s_lastQueryDiagnostics, sizeof(s_lastQueryDiagnostics));
+    s_lastQueryDiagnostics.serverIP = s_dnsServer;
+    s_lastQueryDiagnostics.destinationPort = DNS_PORT;
+    s_lastQueryDiagnostics.lastSendResult = -1;
+    s_lastQueryDiagnostics.result = DNS_ERR_INVALID;
     
     // Need to perform DNS query
     if (!ipv4::is_configured()) {
@@ -585,6 +593,7 @@ Status resolve(const char* domain, uint32_t* ipv4)
     uint8_t queryPacket[MAX_PACKET_SIZE];
     uint16_t queryLen;
     uint16_t queryId = s_nextQueryId++;
+    s_lastQueryDiagnostics.queryId = queryId;
     
     Status status = build_query(queryPacket, MAX_PACKET_SIZE, domain, TYPE_A, queryId, &queryLen);
     if (status != DNS_OK) {
@@ -608,6 +617,11 @@ Status resolve(const char* domain, uint32_t* ipv4)
     }
     
     socket::udp_bind(sock, localPort);
+    s_lastQueryDiagnostics.sourcePort = localPort;
+    s_lastQueryDiagnostics.queryBytes = queryLen;
+
+    const ipv4::Statistics ipv4StatsBefore = *ipv4::get_stats();
+    const udp::Statistics udpStatsBefore = *udp::get_stats();
     
     // Try up to MAX_RETRIES times
     uint8_t responsePacket[MAX_PACKET_SIZE];
@@ -618,6 +632,8 @@ Status resolve(const char* domain, uint32_t* ipv4)
         // Send query
         socket::SockAddr dnsAddr = socket::make_sockaddr(s_dnsServer, DNS_PORT);
         int sent = socket::udp_sendto(sock, queryPacket, queryLen, &dnsAddr);
+        s_lastQueryDiagnostics.sendAttempts++;
+        s_lastQueryDiagnostics.lastSendResult = sent;
         
         if (sent < 0) {
             continue;
@@ -637,9 +653,12 @@ Status resolve(const char* domain, uint32_t* ipv4)
             
             if (recvLen > 0) {
                 s_stats.responsesReceived++;
+                s_lastQueryDiagnostics.replyBytes = static_cast<uint16_t>(recvLen);
                 
                 // Parse response
                 status = parse_response(responsePacket, recvLen, queryId, &result);
+                s_lastQueryDiagnostics.replyRcode = result.rcode;
+                s_lastQueryDiagnostics.replyAnswerCount = result.answerCount;
                 if (status == DNS_OK) {
                     gotResponse = true;
                 }
@@ -658,8 +677,22 @@ Status resolve(const char* domain, uint32_t* ipv4)
     // Cleanup
     socket::udp_close(sock);
     udp::free_ephemeral_port(localPort);
+
+    const ipv4::Statistics ipv4StatsAfter = *ipv4::get_stats();
+    const udp::Statistics udpStatsAfter = *udp::get_stats();
+    s_lastQueryDiagnostics.ipv4RxPackets = ipv4StatsAfter.rxPackets - ipv4StatsBefore.rxPackets;
+    s_lastQueryDiagnostics.ipv4RxErrors = ipv4StatsAfter.rxErrors - ipv4StatsBefore.rxErrors;
+    s_lastQueryDiagnostics.ipv4ChecksumErrors =
+        ipv4StatsAfter.checksumErrors - ipv4StatsBefore.checksumErrors;
+    s_lastQueryDiagnostics.udpRxDatagrams = udpStatsAfter.rxDatagrams - udpStatsBefore.rxDatagrams;
+    s_lastQueryDiagnostics.udpRxErrors = udpStatsAfter.rxErrors - udpStatsBefore.rxErrors;
+    s_lastQueryDiagnostics.udpChecksumErrors =
+        udpStatsAfter.checksumErrors - udpStatsBefore.checksumErrors;
+    s_lastQueryDiagnostics.udpNoPortErrors =
+        udpStatsAfter.noPortErrors - udpStatsBefore.noPortErrors;
     
     if (!gotResponse) {
+        s_lastQueryDiagnostics.result = DNS_ERR_TIMEOUT;
         return DNS_ERR_TIMEOUT;
     }
     
@@ -671,6 +704,7 @@ Status resolve(const char* domain, uint32_t* ipv4)
             // Add to cache
             cache_add(domain, *ipv4, result.answers[i].ttl);
             
+            s_lastQueryDiagnostics.result = DNS_OK;
             return DNS_OK;
         }
     }
@@ -689,11 +723,13 @@ Status resolve(const char* domain, uint32_t* ipv4)
                     // Cache original domain as well
                     cache_add(domain, *ipv4, result.answers[i].ttl);
                 }
+                s_lastQueryDiagnostics.result = status;
                 return status;
             }
         }
     }
     
+    s_lastQueryDiagnostics.result = DNS_ERR_NOTFOUND;
     return DNS_ERR_NOTFOUND;
 }
 
@@ -846,6 +882,11 @@ const char* rcode_to_string(uint16_t rcode)
 const Statistics* get_stats()
 {
     return &s_stats;
+}
+
+const QueryDiagnostics* get_last_query_diagnostics()
+{
+    return &s_lastQueryDiagnostics;
 }
 
 void reset_stats()

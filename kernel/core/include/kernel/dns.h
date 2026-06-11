@@ -197,6 +197,27 @@ struct Statistics {
     uint32_t errors;
 };
 
+struct QueryDiagnostics {
+    uint32_t serverIP;
+    uint16_t queryId;
+    uint16_t sourcePort;
+    uint16_t destinationPort;
+    uint16_t queryBytes;
+    uint16_t replyBytes;
+    uint16_t replyRcode;
+    uint16_t replyAnswerCount;
+    uint8_t sendAttempts;
+    int32_t lastSendResult;
+    Status result;
+    uint32_t ipv4RxPackets;
+    uint32_t ipv4RxErrors;
+    uint32_t ipv4ChecksumErrors;
+    uint32_t udpRxDatagrams;
+    uint32_t udpRxErrors;
+    uint32_t udpChecksumErrors;
+    uint32_t udpNoPortErrors;
+};
+
 // ================================================================
 // Initialization
 // ================================================================
@@ -307,6 +328,7 @@ const char* rcode_to_string(uint16_t rcode);
 // ================================================================
 
 const Statistics* get_stats();
+const QueryDiagnostics* get_last_query_diagnostics();
 void reset_stats();
 
 } // namespace dns

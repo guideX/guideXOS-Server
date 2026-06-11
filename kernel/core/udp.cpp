@@ -41,20 +41,20 @@ static uint16_t s_nextEphemeral = EPHEMERAL_START;
 // Checksum calculation
 // ================================================================
 
-// Internal: calculate one's complement sum
-static uint32_t checksum_add(const void* data, uint16_t len)
+// Internal: calculate one's-complement sum in network byte order.
+static uint32_t checksum_add(uint32_t sum, const void* data, uint16_t len)
 {
-    const uint16_t* ptr = static_cast<const uint16_t*>(data);
-    uint32_t sum = 0;
+    const uint8_t* ptr = static_cast<const uint8_t*>(data);
     
     while (len > 1) {
-        sum += *ptr++;
+        sum += (static_cast<uint16_t>(ptr[0]) << 8) | ptr[1];
+        ptr += 2;
         len -= 2;
     }
     
     // Add remaining byte (if any)
     if (len > 0) {
-        sum += *reinterpret_cast<const uint8_t*>(ptr);
+        sum += static_cast<uint16_t>(ptr[0]) << 8;
     }
     
     return sum;
@@ -84,10 +84,10 @@ uint16_t calculate_checksum(uint32_t srcIP, uint32_t dstIP,
     pseudo.udpLength = ethernet::htons(udpLen);
     
     // Sum pseudo-header
-    uint32_t sum = checksum_add(&pseudo, sizeof(PseudoHeader));
+    uint32_t sum = checksum_add(0, &pseudo, sizeof(PseudoHeader));
     
     // Sum UDP header and data
-    sum += checksum_add(udpPacket, udpLen);
+    sum = checksum_add(sum, udpPacket, udpLen);
     
     // Fold and complement
     uint16_t result = checksum_fold(sum);
@@ -97,7 +97,7 @@ uint16_t calculate_checksum(uint32_t srcIP, uint32_t dstIP,
         result = 0xFFFF;
     }
     
-    return result;
+    return ethernet::htons(result);
 }
 
 bool verify_checksum(uint32_t srcIP, uint32_t dstIP,
@@ -121,8 +121,8 @@ bool verify_checksum(uint32_t srcIP, uint32_t dstIP,
     pseudo.protocol = ipv4::PROTO_UDP;
     pseudo.udpLength = ethernet::htons(udpLen);
     
-    uint32_t sum = checksum_add(&pseudo, sizeof(PseudoHeader));
-    sum += checksum_add(udpPacket, udpLen);
+    uint32_t sum = checksum_add(0, &pseudo, sizeof(PseudoHeader));
+    sum = checksum_add(sum, udpPacket, udpLen);
     
     uint16_t result = checksum_fold(sum);
     
@@ -322,9 +322,7 @@ Status send(uint16_t srcPort, uint32_t dstIP, uint16_t dstPort,
         memcopy(packet + HEADER_LEN, data, len);
     }
     
-    // IPv4 UDP permits a zero checksum. Keep it disabled for compatibility
-    // with the early network stack and simple DNS/DHCP traffic.
-    hdr->checksum = 0;
+    hdr->checksum = calculate_checksum(ipv4::get_config()->ipAddr, dstIP, packet, udpLen);
     
     // Send via IPv4
     ipv4::Status ipStatus = ipv4::send_packet(

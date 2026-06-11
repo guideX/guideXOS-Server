@@ -13158,6 +13158,8 @@ static bool printNavigatorRealPublicHttpsProbeCase()
     const char* hostnameValidationResult = !attempted
         ? "not-attempted"
         : (tlsHostnameValidated ? "PASS" : "FAIL");
+    const kernel::dns::QueryDiagnostics* dnsDiagnostics =
+        kernel::dns::get_last_query_diagnostics();
 
     serial::puts("[NAVIGATOR-SMOKE] https.case.real_public_probe.enabled=");
     serial::puts(probeConfig.enabled ? "yes" : "no");
@@ -13219,6 +13221,48 @@ static bool printNavigatorRealPublicHttpsProbeCase()
     serial::puts(dnsError[0] ? dnsError : "(none)");
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.dns_result=");
     serial::puts(dnsResult);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.dns_server=");
+    {
+        char dnsServer[16];
+        kernel::ipv4::ip_to_string(dnsDiagnostics->serverIP, dnsServer);
+        serial::puts(dnsServer);
+    }
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.dns_query_id=");
+    serial_put_dec(dnsDiagnostics->queryId);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.dns_source_port=");
+    serial_put_dec(dnsDiagnostics->sourcePort);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.dns_destination_port=");
+    serial_put_dec(dnsDiagnostics->destinationPort);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.dns_query_bytes=");
+    serial_put_dec(dnsDiagnostics->queryBytes);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.dns_send_attempts=");
+    serial_put_dec(dnsDiagnostics->sendAttempts);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.dns_last_send_result=");
+    {
+        char signedNumber[32];
+        nav_i64_to_text((int64_t)dnsDiagnostics->lastSendResult, signedNumber, sizeof(signedNumber));
+        serial::puts(signedNumber);
+    }
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.dns_reply_bytes=");
+    serial_put_dec(dnsDiagnostics->replyBytes);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.dns_reply_rcode=");
+    serial_put_dec(dnsDiagnostics->replyRcode);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.dns_reply_answer_count=");
+    serial_put_dec(dnsDiagnostics->replyAnswerCount);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.dns_ipv4_rx_packets=");
+    serial_put_dec(dnsDiagnostics->ipv4RxPackets);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.dns_ipv4_rx_errors=");
+    serial_put_dec(dnsDiagnostics->ipv4RxErrors);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.dns_ipv4_checksum_errors=");
+    serial_put_dec(dnsDiagnostics->ipv4ChecksumErrors);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.dns_udp_rx_datagrams=");
+    serial_put_dec(dnsDiagnostics->udpRxDatagrams);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.dns_udp_rx_errors=");
+    serial_put_dec(dnsDiagnostics->udpRxErrors);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.dns_udp_checksum_errors=");
+    serial_put_dec(dnsDiagnostics->udpChecksumErrors);
+    serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.dns_udp_no_port_errors=");
+    serial_put_dec(dnsDiagnostics->udpNoPortErrors);
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.plain_tcp_connect_attempts=");
     serial_put_dec((uint32_t)plainTcpConnectAttempts);
     serial::puts("\n[NAVIGATOR-SMOKE] https.case.real_public_probe.tls_tcp_connect_attempts=");
