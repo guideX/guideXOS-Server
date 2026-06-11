@@ -185,6 +185,22 @@ function Test-NavigatorPublicHttpsPassContract {
         Add-NavigatorPublicHttpsAssertionCheck -Checks $checks -Name $fieldName -Passed ([string]::Equals($value, "PASS", [System.StringComparison]::OrdinalIgnoreCase)) -Detail "Expected $fieldName=PASS, got '$value'."
     }
 
+    $dnsResolvedIp = Get-NavigatorPublicHttpsFieldValue -Fields $fields -Name "dns_resolved_ip"
+    $dnsResolvedIpPassed = -not [string]::IsNullOrWhiteSpace($dnsResolvedIp) -and $dnsResolvedIp -ne "(not-attempted)"
+    Add-NavigatorPublicHttpsAssertionCheck -Checks $checks -Name "dns_resolved_ip" -Passed $dnsResolvedIpPassed -Detail $(if ($dnsResolvedIpPassed) { "Resolved IP recorded: $dnsResolvedIp" } else { "dns_resolved_ip must be present." })
+
+    $tlsBackend = Get-NavigatorPublicHttpsFieldValue -Fields $fields -Name "tls_backend"
+    Add-NavigatorPublicHttpsAssertionCheck -Checks $checks -Name "tls_backend" -Passed ([string]::Equals($tlsBackend, "Mbed TLS bare-metal", [System.StringComparison]::Ordinal)) -Detail "Expected tls_backend=Mbed TLS bare-metal, got '$tlsBackend'."
+
+    $tlsProtocol = Get-NavigatorPublicHttpsFieldValue -Fields $fields -Name "tls_protocol"
+    $tlsProtocolPassed = -not [string]::IsNullOrWhiteSpace($tlsProtocol) -and $tlsProtocol -match '^TLSv1\.[23]$'
+    Add-NavigatorPublicHttpsAssertionCheck -Checks $checks -Name "tls_protocol" -Passed $tlsProtocolPassed -Detail $(if ($tlsProtocolPassed) { "TLS version recorded: $tlsProtocol" } else { "Expected TLSv1.2 or TLSv1.3, got '$tlsProtocol'." })
+
+    foreach ($fieldName in @("policy_enabled", "public_pilot_token_present", "public_proof_lane_active")) {
+        $value = Get-NavigatorPublicHttpsFieldValue -Fields $fields -Name $fieldName
+        Add-NavigatorPublicHttpsAssertionCheck -Checks $checks -Name $fieldName -Passed ([string]::Equals($value, "yes", [System.StringComparison]::OrdinalIgnoreCase)) -Detail "Expected $fieldName=yes for the explicit proof lane, got '$value'."
+    }
+
     $verifyFlags = Get-NavigatorPublicHttpsFieldValue -Fields $fields -Name "verify_flags"
     $verifyFlagsValue = -1
     $verifyFlagsPassed = [int]::TryParse($verifyFlags, [ref]$verifyFlagsValue) -and ($verifyFlagsValue -eq 0)
@@ -248,6 +264,9 @@ function Invoke-NavigatorPublicHttpsAssertionSelfTest {
             "[NAVIGATOR-PUBLIC-HTTPS] result_marker=PASS",
             "[NAVIGATOR-PUBLIC-HTTPS] target_url=https://sha256.badssl.com/",
             "[NAVIGATOR-PUBLIC-HTTPS] target_host=sha256.badssl.com",
+            "[NAVIGATOR-PUBLIC-HTTPS] policy_enabled=yes",
+            "[NAVIGATOR-PUBLIC-HTTPS] public_pilot_token_present=yes",
+            "[NAVIGATOR-PUBLIC-HTTPS] public_proof_lane_active=yes",
             "[NAVIGATOR-PUBLIC-HTTPS] public_ca_source_marker=env-var",
             "[NAVIGATOR-PUBLIC-HTTPS] public_trust_ready=yes",
             "[NAVIGATOR-PUBLIC-HTTPS] public_ca_parsed_certs=2",
@@ -266,8 +285,11 @@ function Invoke-NavigatorPublicHttpsAssertionSelfTest {
             "[NAVIGATOR-PUBLIC-HTTPS] runtime_manifest_root_count=4",
             "[NAVIGATOR-PUBLIC-HTTPS] runtime_manifest_sha256=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
             "[NAVIGATOR-PUBLIC-HTTPS] dns_result=PASS",
+            "[NAVIGATOR-PUBLIC-HTTPS] dns_resolved_ip=104.154.89.105",
             "[NAVIGATOR-PUBLIC-HTTPS] tcp_result=PASS",
             "[NAVIGATOR-PUBLIC-HTTPS] tls_result=PASS",
+            "[NAVIGATOR-PUBLIC-HTTPS] tls_backend=Mbed TLS bare-metal",
+            "[NAVIGATOR-PUBLIC-HTTPS] tls_protocol=TLSv1.2",
             "[NAVIGATOR-PUBLIC-HTTPS] certificate_validation_result=PASS",
             "[NAVIGATOR-PUBLIC-HTTPS] hostname_validation_result=PASS",
             "[NAVIGATOR-PUBLIC-HTTPS] verify_flags=0",

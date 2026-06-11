@@ -70,7 +70,7 @@ function Write-NavigatorPublicHttpsProofPack {
     New-Item -ItemType Directory -Force -Path $ProofPackDir | Out-Null
 
     $proofSummary = [ordered]@{
-        schema_version = "guidexos.navigator.public-https-proof-pack.v0.4"
+        schema_version = "guidexos.navigator.public-https-proof-pack.v0.5"
         generated_utc = ([datetime]::UtcNow.ToString("o"))
         reviewed_allowlist_name = $publicProbeReviewedAllowlistName
         reviewed_allowlist_version = Get-NavigatorPublicHttpsReviewedAllowlistVersion
@@ -79,6 +79,31 @@ function Write-NavigatorPublicHttpsProofPack {
         final_result = $FinalResult
         exit_code = $ExitCode
         result_marker = Get-NavigatorPublicHttpsResultMarker -FinalResult $FinalResult -ExitCode $ExitCode
+        dns_server = [string]$Fields["dns_server"]
+        resolved_ip = [string]$Fields["dns_resolved_ip"]
+        dns_result = [string]$Fields["dns_result"]
+        tcp_result = [string]$Fields["tcp_result"]
+        tls_result = [string]$Fields["tls_result"]
+        tls_status = [string]$Fields["tls_status"]
+        tls_backend = [string]$Fields["tls_backend"]
+        tls_version = [string]$Fields["tls_protocol"]
+        certificate_validation_result = [string]$Fields["certificate_validation_result"]
+        hostname_validation_result = [string]$Fields["hostname_validation_result"]
+        verify_flags = [string]$Fields["verify_flags"]
+        http_status = [string]$Fields["http_status"]
+        content_type = [string]$Fields["content_type"]
+        page_render_result = [string]$Fields["page_render_result"]
+        plaintext_fallback = [string]$Fields["plaintext_fallback"]
+        public_https_opt_in = [string]$Fields["public_proof_lane_active"]
+        policy_enabled = [string]$Fields["policy_enabled"]
+        public_pilot_token_present = [string]$Fields["public_pilot_token_present"]
+        reviewed_target_policy = [string]$Fields["reviewed_target_policy"]
+        reviewed_target_match = [string]$Fields["reviewed_target_match"]
+        trust_bundle_manifest_present = [string]$Fields["trust_bundle_manifest_present"]
+        trust_bundle_manifest_hash_match = [string]$Fields["runtime_manifest_hash_match"]
+        trust_bundle_type = [string]$Fields["trust_bundle_type"]
+        trust_bundle_production_ready = [string]$Fields["trust_bundle_production_ready"]
+        trust_bundle_test_only = [string]$Fields["trust_bundle_test_only"]
         summary_log = $(if ($SummaryPath) { [System.IO.Path]::GetFullPath($SummaryPath) } else { $null })
         serial_log = $(if ($SerialPath) { [System.IO.Path]::GetFullPath($SerialPath) } else { $null })
         evidence_json = $(if ($EvidencePath) { [System.IO.Path]::GetFullPath($EvidencePath) } else { $null })
@@ -940,8 +965,12 @@ function Write-NavigatorPublicHttpsConsoleSummary {
     Write-Host "  runtime manifest root count: $($Fields["runtime_manifest_root_count"])"
     Write-Host "  runtime manifest sha256: $($Fields["runtime_manifest_sha256"])"
     Write-Host "  DNS result: $($Fields["dns_result"])"
+    Write-Host "  DNS server: $($Fields["dns_server"])"
+    Write-Host "  resolved IP: $($Fields["dns_resolved_ip"])"
     Write-Host "  TCP result: $($Fields["tcp_result"])"
     Write-Host "  TLS result: $($Fields["tls_result"])"
+    Write-Host "  TLS backend: $($Fields["tls_backend"])"
+    Write-Host "  TLS version: $($Fields["tls_protocol"])"
     Write-Host "  TLS connect attempts: $($Fields["tls_connect_attempts"])"
     Write-Host "  TLS retry count: $($Fields["tls_retry_count"])"
     Write-Host "  TLS retry reason: $($Fields["tls_retry_reason"])"
@@ -1021,6 +1050,10 @@ $fields = [ordered]@{
     reviewed_target_match = "no"
     reviewed_target_override = "no"
     reviewed_target_reason = "(none)"
+    policy_enabled = "no"
+    public_pilot_token_present = "no"
+    public_pilot_token_value = "(none)"
+    public_proof_lane_active = "no"
     public_ca_resolution = "(unknown)"
     public_ca_source_marker = "(unknown)"
     public_trust_ready = "(unknown)"
@@ -1051,6 +1084,7 @@ $fields = [ordered]@{
     runtime_manifest_sha256 = "(not-available)"
     dns_result = "not-attempted"
     dns_server = "(not-attempted)"
+    dns_resolved_ip = "(not-attempted)"
     dns_query_id = "0"
     dns_source_port = "0"
     dns_destination_port = "0"
@@ -1072,6 +1106,8 @@ $fields = [ordered]@{
     transport_selection = "(not-attempted)"
     transport_policy_reason = "(not-attempted)"
     tls_status = "(not-attempted)"
+    tls_backend = "(not-attempted)"
+    tls_protocol = "(not-attempted)"
     tls_connect_attempts = "0"
     tls_retry_count = "0"
     tls_retry_reason = "(none)"
@@ -1396,6 +1432,7 @@ try {
         "runtime_manifest_sha256",
         "dns_result",
         "dns_server",
+        "dns_resolved_ip",
         "dns_query_id",
         "dns_source_port",
         "dns_destination_port",
@@ -1417,6 +1454,8 @@ try {
         "transport_selection",
         "transport_policy_reason",
         "tls_status",
+        "tls_backend",
+        "protocol",
         "tls_connect_attempts",
         "tls_retry_count",
         "tls_retry_reason",
@@ -1467,6 +1506,7 @@ try {
                 "public_pilot_token_path" { $fields["public_pilot_token_path"] = $value }
                 "public_pilot_token_value" { $fields["public_pilot_token_value"] = $value }
                 "public_proof_lane_active" { $fields["public_proof_lane_active"] = $value }
+                "protocol" { $fields["tls_protocol"] = $value }
                 "scenario_group" { $fields["scenario_group"] = $value }
                 "scenario_name" { $fields["scenario_name"] = $value }
                 "error" { $fields["failure_reason"] = $value }

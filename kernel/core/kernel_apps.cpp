@@ -5676,13 +5676,21 @@ void NavigatorApp::buildPageInfoDocument()
     NAV_INFO_TEXT("DNS used: ", m_metaDnsUsed ? "yes" : "no");
     NAV_INFO_TEXT("DNS hostname: ", m_metaDnsHost[0] ? m_metaDnsHost : "(none)");
     NAV_INFO_TEXT("DNS resolved IP: ", m_metaDnsResolvedIp[0] ? m_metaDnsResolvedIp : "(none)");
-    NAV_INFO_TEXT("DNS error: ", m_metaDnsError[0] ? m_metaDnsError : "(none)");
-    NAV_INFO_TEXT("Transport selection: ", m_metaTransportSelection[0] ? m_metaTransportSelection : "(none)");
+    strcopy(line, "DNS result: ", sizeof(line));
+    strappend(line, !m_metaDnsUsed ? "not used" : (m_metaDnsResolvedIp[0] && !m_metaDnsError[0] ? "PASS" : "FAIL"), sizeof(line));
+    strappend(line, "; error=", sizeof(line));
+    strappend(line, m_metaDnsError[0] ? m_metaDnsError : "(none)", sizeof(line));
+    addBlock(BLOCK_LIST_ITEM, line);
+    strcopy(line, "TCP result: ", sizeof(line));
+    strappend(line, !m_metaTlsUsed ? "not recorded" : (streq_local(m_metaTlsStatus, "TcpConnectFailed") ? "FAIL" : "PASS"), sizeof(line));
+    strappend(line, "; selection=", sizeof(line));
+    strappend(line, m_metaTransportSelection[0] ? m_metaTransportSelection : "(none)", sizeof(line));
+    addBlock(BLOCK_LIST_ITEM, line);
     NAV_INFO_TEXT("Transport policy: ", m_metaTransportPolicyReason[0] ? m_metaTransportPolicyReason : "(none)");
     NAV_INFO_TEXT("TLS backend: ", m_metaTlsUsed ? (m_metaTlsBackend[0] ? m_metaTlsBackend : "(none)") : "not used");
     NAV_INFO_TEXT("TLS status: ", m_metaTlsUsed || m_metaTlsStatus[0] ? (m_metaTlsStatus[0] ? m_metaTlsStatus : "(none)") : "not used");
-    NAV_INFO_TEXT("TLS validation: ", m_metaTlsUsed ? (m_metaTlsValidated ? "success" : "failure") : "not used");
-    NAV_INFO_TEXT("TLS hostname validation: ", m_metaTlsUsed ? (m_metaTlsHostnameValidated ? "success" : "failure") : "not used");
+    NAV_INFO_TEXT("Certificate validation: ", m_metaTlsUsed ? (m_metaTlsValidated ? "PASS" : "FAIL") : "not used");
+    NAV_INFO_TEXT("Hostname validation: ", m_metaTlsUsed ? (m_metaTlsHostnameValidated ? "PASS" : "FAIL") : "not used");
     NAV_INFO_TEXT("TLS allowlist mode: ",
         m_metaTlsUsed
             ? (m_metaTlsAllowlistLocalOnly ? "local-only controlled HTTPS" : "explicit-policy validated HTTPS")

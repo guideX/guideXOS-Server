@@ -108,6 +108,7 @@ make qemu
 ### Opt-In Public HTTPS Probe
 
 The bare-metal Navigator public HTTPS probe is a separate proof workflow, not a default browsing mode.
+Current milestone: bare-metal Navigator can render a reviewed real public HTTPS page through opt-in public proof mode.
 
 * Deterministic kernel smoke: `.\scripts\smoke-navigator-kernel.ps1`
 * Dedicated public HTTPS proof: `.\scripts\smoke-navigator-public-https.ps1`
@@ -124,6 +125,15 @@ The bare-metal Navigator public HTTPS probe is a separate proof workflow, not a 
 * Structured evidence export: `scripts/export-navigator-public-https-evidence.ps1`
 * Public-root validator/manifest helper: `scripts/validate-navigator-ca-bundle.ps1`
 * Review/operator contract: `scripts/fixtures/README.md`
+* Interactive screenshot launch: `.\scripts\run-navigator-public-https-screenshot.ps1`
+
+The screenshot launcher defaults to `https://sha256.badssl.com/`, rejects targets outside the reviewed allowlist, and stages the same explicit proof policy and trust material as the passing proof:
+
+```powershell
+.\scripts\run-navigator-public-https-screenshot.ps1
+```
+
+It requires the untracked local public root bundle at `scripts/fixtures/public-roots/ca-bundle.pem.local`. For a non-interactive staging check, use `.\scripts\run-navigator-public-https-screenshot.ps1 -StageOnly`.
 
 Reviewed real-root proof packs are written under `logs/navigator-public-https-proof-pack-<timestamp>/`. The pack keeps the summary log, serial log, evidence JSON, optional candidate metadata, optional promotion record, and the CA bundle manifest sidecar together without copying PEM contents or secret source paths. If a real public-root PEM is unavailable, the dedicated proof path stays `SETUP_BLOCKED` and the proof pack records that blocked state instead of claiming PASS.
 
@@ -136,6 +146,8 @@ Public pilot hardening v0.4 adds compact transport diagnostics to the dedicated 
 Public-root provisioning is still explicit and operator-driven in this pass. The harness now validates supplied CA bundles, writes a manifest sidecar with SHA-256, root count, bundle type, and `production_ready` / `test_only` flags, and expects dedicated public probe evidence to archive those facts before any trust-bundle rotation is treated as complete. Default public HTTPS browsing remains off, and the repo still does not download public roots automatically.
 
 Shipped-root candidate review is also explicit. Candidate preparation and evidence linking can validate, fingerprint, and archive a proposed bundle for later review without enabling default public HTTPS.
+
+Public HTTPS remains opt-in because DHCP cleanup, root lifecycle and rotation, revocation, broader content compatibility, decompression, cookies, cache, JavaScript, and HTTP/2 remain future work. The next planned visible GUI pass is toolbar button icons, a loading throbber, and Roboto/font descender cleanup.
 
 ### Experimental Native ELF hosted runtime
 
