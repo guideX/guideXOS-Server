@@ -87,6 +87,11 @@ function Restore-NavigatorScreenshotHostStage {
     }
 }
 
+function Clear-NavigatorScreenshotMainObject {
+    Get-ChildItem -Path (Join-Path $Root "kernel\build") -Recurse -Filter "main.o" -ErrorAction SilentlyContinue |
+        Remove-Item -Force -ErrorAction SilentlyContinue
+}
+
 $requestedTarget = if ([string]::IsNullOrWhiteSpace($TargetUrl)) {
     Get-NavigatorPublicHttpsDefaultTarget
 } else {
@@ -122,6 +127,7 @@ $stagingEnvironment = [ordered]@{
     GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_TARGET = $canonicalTarget
     GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_CA_BUNDLE_SOURCE = $PublicBundlePath
     GXOS_NAVIGATOR_SMOKE_REAL_PUBLIC_HTTPS_REVIEWED_OVERRIDE = $null
+    EXTRA_CFLAGS = "-DGXOS_NAVIGATOR_BOOT_STAGED_CONFIG_ACTIVE"
 }
 $originalEnvironment = @{}
 foreach ($name in $stagingEnvironment.Keys) {
@@ -158,6 +164,7 @@ try {
         Set-NavigatorScreenshotEnv -Name $name -Value $stagingEnvironment[$name]
     }
 
+    Clear-NavigatorScreenshotMainObject
     & $BuildScript
     if ($LASTEXITCODE -ne 0) {
         throw "build.ps1 failed while preparing the interactive screenshot launch."
@@ -204,6 +211,7 @@ finally {
 }
 
 if ($StageOnly) {
+    Clear-NavigatorScreenshotMainObject
     Write-Host "StageOnly complete; QEMU was not launched." -ForegroundColor Green
     exit 0
 }
@@ -243,4 +251,5 @@ try {
 }
 finally {
     Pop-Location
+    Clear-NavigatorScreenshotMainObject
 }
