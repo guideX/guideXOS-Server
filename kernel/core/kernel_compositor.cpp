@@ -7,6 +7,7 @@
 #include "include/kernel/kernel_compositor.h"
 #include "include/kernel/kernel_ipc.h"
 #include "include/kernel/framebuffer.h"
+#include "include/kernel/image_adapter.h"
 
 namespace kernel {
 namespace compositor {
@@ -868,7 +869,13 @@ void KernelCompositor::drawWidget(app::Widget* widget, uint32_t winX, uint32_t w
                                widget->hover ? rgb(60, 80, 120) : widget->bgColor;
             fillRect(x, y, w, h, bgColor);
             drawRect(x, y, w, h, rgb(80, 100, 140));
-            drawTextCentered(x, y, w, h, widget->text, widget->fgColor);
+            if (widget->iconPixels && widget->iconWidth > 0 && widget->iconHeight > 0) {
+                gxos::gui::ImageBitmap icon{gxos::gui::ImageLoadStatus::Ok, widget->iconPixels, widget->iconWidth, widget->iconHeight};
+                gxos::gui::ImageAdapter::DrawToFramebuffer(icon, x + 4, y + (h - 16) / 2, 16, 16);
+                drawText(x + 24, y + (h - kGlyphH) / 2, widget->text, widget->fgColor);
+            } else {
+                drawTextCentered(x, y, w, h, widget->text, widget->fgColor);
+            }
             break;
         }
         

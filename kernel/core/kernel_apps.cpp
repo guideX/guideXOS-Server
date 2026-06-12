@@ -4889,6 +4889,7 @@ NavigatorApp::NavigatorApp()
       m_mouseMode(NAV_MOUSE_NONE), m_mouseDownLinkIndex(-1), m_mouseDownX(0), m_mouseDownY(0), m_mouseDragThresholdExceeded(false),
       m_backBtnId(-1), m_forwardBtnId(-1), m_reloadBtnId(-1), m_homeBtnId(-1),
       m_bookmarksBtnId(-1), m_addBookmarkBtnId(-1),
+      m_loading(false), m_throbberFrame(0), m_throbberTick(0),
       m_focusedFormBlock(-1), m_formCaret(0)
 {
     strcopy(m_status, "Ready", MAX_STATUS_LEN);
@@ -4994,6 +4995,7 @@ bool NavigatorApp::init()
     m_state = app::AppState::Running;
 
     loadDefaultBookmarks();
+    loadChromeImages();
     clearSelection();
     m_clipboard[0] = '\0';
     strcopy(m_clipboardMode, "Navigator internal clipboard", sizeof(m_clipboardMode));
@@ -5004,6 +5006,16 @@ bool NavigatorApp::init()
 }
 
 void NavigatorApp::shutdown() {
+}
+
+void NavigatorApp::update()
+{
+    if (!m_loading) return;
+    if (++m_throbberTick >= 6) {
+        m_throbberTick = 0;
+        m_throbberFrame = (m_throbberFrame + 1) % 12;
+        invalidate();
+    }
 }
 
 void NavigatorApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h)
@@ -5028,6 +5040,11 @@ void NavigatorApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h)
                 framebuffer::fill_rect(x + (uint32_t)caretX, y + ADDRESS_Y + 4, 1, ADDRESS_H - 8, 0xFFE8ECF6);
             }
         }
+    }
+
+    if (m_loading && m_throbberFrames[m_throbberFrame].status == gxos::gui::ImageLoadStatus::Ok) {
+        gxos::gui::ImageAdapter::DrawToFramebuffer(m_throbberFrames[m_throbberFrame],
+                                                   x + w - 46, y + ADDRESS_Y, 22, 22);
     }
 
     uint32_t contentTop = y + TOOLBAR_H + 6;
@@ -5330,7 +5347,6 @@ void NavigatorApp::onKeyDown(uint32_t key)
             return;
         }
     }
-
     if (m_ctrlPressed && (key == 'a' || key == 'A')) {
         selectAllDocumentText();
         setStatus(hasSelection() ? "Selected all document text" : "No document text to select");
@@ -5413,12 +5429,37 @@ void NavigatorApp::updateButtons()
     if (!m_window) return;
     m_window->widgetCount = 0;
     int x = 16;
-    m_backBtnId = addButton(x, 12, BUTTON_W, BUTTON_H, "Back"); x += BUTTON_W + BUTTON_GAP;
-    m_forwardBtnId = addButton(x, 12, BUTTON_W, BUTTON_H, "Forward"); x += BUTTON_W + BUTTON_GAP;
-    m_reloadBtnId = addButton(x, 12, BUTTON_W, BUTTON_H, "Reload"); x += BUTTON_W + BUTTON_GAP;
-    m_homeBtnId = addButton(x, 12, BUTTON_W, BUTTON_H, "Home"); x += BUTTON_W + BUTTON_GAP;
-    m_bookmarksBtnId = addButton(x, 12, BUTTON_W, BUTTON_H, "Bookmarks"); x += BUTTON_W + BUTTON_GAP;
-    m_addBookmarkBtnId = addButton(x, 12, BUTTON_W, BUTTON_H, "Add *");
+    m_backBtnId = addButton(x, 12, BUTTON_W, BUTTON_H, "Back"); setButtonIcon(m_backBtnId, m_toolbarIcons[0]); x += BUTTON_W + BUTTON_GAP;
+    m_forwardBtnId = addButton(x, 12, BUTTON_W, BUTTON_H, "Next"); setButtonIcon(m_forwardBtnId, m_toolbarIcons[1]); x += BUTTON_W + BUTTON_GAP;
+    m_reloadBtnId = addButton(x, 12, BUTTON_W, BUTTON_H, "Reload"); setButtonIcon(m_reloadBtnId, m_toolbarIcons[2]); x += BUTTON_W + BUTTON_GAP;
+    m_homeBtnId = addButton(x, 12, BUTTON_W, BUTTON_H, "Home"); setButtonIcon(m_homeBtnId, m_toolbarIcons[3]); x += BUTTON_W + BUTTON_GAP;
+    m_bookmarksBtnId = addButton(x, 12, BUTTON_W, BUTTON_H, "Marks"); setButtonIcon(m_bookmarksBtnId, m_toolbarIcons[4]); x += BUTTON_W + BUTTON_GAP;
+    m_addBookmarkBtnId = addButton(x, 12, BUTTON_W, BUTTON_H, "Add"); setButtonIcon(m_addBookmarkBtnId, m_toolbarIcons[5]);
+}
+
+void NavigatorApp::loadChromeImages()
+{
+    static const char* toolbarPaths[6] = {
+        "/config/navigator/nav-back.png", "/config/navigator/nav-next.png",
+        "/config/navigator/nav-reload.png", "/config/navigator/nav-home.png",
+        "/config/navigator/nav-bookmarks.png", "/config/navigator/nav-add.png"
+    };
+    for (int i = 0; i < 6; ++i) m_toolbarIcons[i] = gxos::gui::ImageAdapter::LoadFromFile(toolbarPaths[i]);
+    for (int i = 0; i < 12; ++i) {
+        char path[48] = "/config/navigator/surfer-00.png";
+        path[25] = (char)('0' + (i / 10));
+        path[26] = (char)('0' + (i % 10));
+        m_throbberFrames[i] = gxos::gui::ImageAdapter::LoadFromFile(path);
+    }
+}
+
+void NavigatorApp::setButtonIcon(int widgetId, const gxos::gui::ImageBitmap& image)
+{
+    app::Widget* widget = getWidget(widgetId);
+    if (!widget || image.status != gxos::gui::ImageLoadStatus::Ok) return;
+    widget->iconPixels = image.pixels;
+    widget->iconWidth = image.width;
+    widget->iconHeight = image.height;
 }
 
 static void nav_image_file_path_from_url(const char* url, char* out, int outSize)
@@ -9580,6 +9621,10 @@ void NavigatorApp::loadFileUrl(const char* url)
 
 void NavigatorApp::loadUrl(const char* url)
 {
+    m_loading = true;
+    m_throbberFrame = 0;
+    m_throbberTick = 0;
+    invalidate();
     char normalized[MAX_URL_LEN];
     normalizeUrl(url && url[0] ? url : "about:navigator", normalized, MAX_URL_LEN);
     clearSelection();
@@ -9609,6 +9654,7 @@ void NavigatorApp::loadUrl(const char* url)
     m_addressCaret = 0;
     blurFormBlock();
     setStatus("Ready");
+    m_loading = false;
 
 }
 

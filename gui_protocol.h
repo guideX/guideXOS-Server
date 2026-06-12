@@ -38,7 +38,9 @@ namespace gxos {
             MT_DrawImage = 26,           // payload: <winId>|<x>|<y>|<path>
             MT_DrawTextAt = 27,          // payload: <winId>|<x>|<y>|<text>
             MT_DesktopConfigReload = 28, // payload empty; reload desktop.json and rebuild desktop items
-            MT_DrawTextAtColor = 29      // payload: <winId>|<x>|<y>|<r>|<g>|<b>|<text>
+            MT_DrawTextAtColor = 29,     // payload: <winId>|<x>|<y>|<r>|<g>|<b>|<text>
+            MT_DrawImageAnimated = 30,   // payload: DrawImageSpec, path contains {frame}
+            MT_WidgetSetIcon = 31        // payload: <winId>|<widgetId>|<path>
         };
         struct WindowDesc { uint64_t id; std::string title; int w; int h; };
         struct Rect { int x; int y; int w; int h; };
@@ -74,6 +76,7 @@ namespace gxos {
         }
         // Helper for building widget add payloads: <winId>|<type>|<id>|<x>|<y>|<w>|<h>|<text>
         inline std::string packWidgetAdd(uint64_t winId, int type, int id, int x, int y, int w, int h, const std::string& text) { std::ostringstream oss; oss << winId << "|" << type << "|" << id << "|" << x << "|" << y << "|" << w << "|" << h << "|" << text; return oss.str( ); }
+        inline std::string packWidgetSetIcon(uint64_t winId, int id, const std::string& path) { std::ostringstream oss; oss << winId << "|" << id << "|" << path; return oss.str( ); }
         inline std::string packDrawImage(uint64_t winId, int x, int y, const std::string& path) { std::ostringstream oss; oss << winId << "|" << x << "|" << y << "|-1|-1|" << path; return oss.str( ); }
         inline std::string packDrawImage(uint64_t winId, int x, int y, int w, int h, const std::string& path) { std::ostringstream oss; oss << winId << "|" << x << "|" << y << "|" << w << "|" << h << "|" << path; return oss.str( ); }
         inline bool unpackDrawImage(const std::string& payload, DrawImageSpec& spec) {

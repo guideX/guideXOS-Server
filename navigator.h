@@ -360,6 +360,7 @@ private:
 	static std::string s_lastPostHttpStatus;
 	static std::string s_lastPostContentType;
 	static bool        s_findActive;
+	static bool        s_loading;
 	static std::string s_findBuffer;
 	static int         s_findCaret;
 	static std::vector<FindMatch> s_findMatches;

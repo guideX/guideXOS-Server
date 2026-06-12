@@ -51,6 +51,7 @@ std::string Navigator::s_lastSubmittedFormStatus;
 std::string Navigator::s_lastPostHttpStatus;
 std::string Navigator::s_lastPostContentType;
 bool        Navigator::s_findActive = false;
+bool        Navigator::s_loading = false;
 std::string Navigator::s_findBuffer;
 int         Navigator::s_findCaret = 0;
 std::vector<Navigator::FindMatch> Navigator::s_findMatches;
@@ -169,9 +170,15 @@ namespace {
 		publish(MsgType::MT_DrawImage, packDrawImage(windowId, x, y, w, h, path));
 	}
 
-	void addButton(uint64_t windowId, int id, int x, int y, int w, int h, const std::string& text)
+	void drawAnimatedImage(uint64_t windowId, int x, int y, int w, int h, const std::string& pathPattern)
+	{
+		publish(MsgType::MT_DrawImageAnimated, packDrawImage(windowId, x, y, w, h, pathPattern));
+	}
+
+	void addButton(uint64_t windowId, int id, int x, int y, int w, int h, const std::string& text, const std::string& iconPath = {})
 	{
 		publish(MsgType::MT_WidgetAdd, packWidgetAdd(windowId, 1, id, x, y, w, h, text));
+		if (!iconPath.empty()) publish(MsgType::MT_WidgetSetIcon, packWidgetSetIcon(windowId, id, iconPath));
 		// Track registered widget IDs for smoke/diagnostic access.
 		auto& ids = Navigator::s_registeredWidgetIds;
 		if (std::find(ids.begin(), ids.end(), id) == ids.end())
@@ -1462,15 +1469,16 @@ void Navigator::updateDisplay()
 
 void Navigator::renderToolbar()
 {
+	static const char* kIconRoot = "assets/Images/NuoveXT/PNG/32/";
 	drawRect(s_windowId, 0, 0, kWindowW, kToolbarH, 42, 46, 58);
 	drawRect(s_windowId, 0, kToolbarH - 1, kWindowW, 1, 78, 86, 108);
 
-	addButton(s_windowId, kWidgetIdBack, 20, kButtonY, kButtonW, kButtonH, "Back");
-	addButton(s_windowId, kWidgetIdForward, 20 + (kButtonW + kButtonGap), kButtonY, kButtonW, kButtonH, "Forward");
-	addButton(s_windowId, kWidgetIdReload, 20 + 2 * (kButtonW + kButtonGap), kButtonY, kButtonW, kButtonH, "Reload");
-	addButton(s_windowId, kWidgetIdHome, 20 + 3 * (kButtonW + kButtonGap), kButtonY, kButtonW, kButtonH, "Home");
-	addButton(s_windowId, kWidgetIdBookmarks, 20 + 4 * (kButtonW + kButtonGap), kButtonY, kButtonW, kButtonH, "Bookmarks");
-	addButton(s_windowId, kWidgetIdAddBookmark, 20 + 5 * (kButtonW + kButtonGap), kButtonY, kButtonW, kButtonH, "Add *");
+	addButton(s_windowId, kWidgetIdBack, 20, kButtonY, kButtonW, kButtonH, "Back", std::string(kIconRoot) + "above_thearrow_10194.png");
+	addButton(s_windowId, kWidgetIdForward, 20 + (kButtonW + kButtonGap), kButtonY, kButtonW, kButtonH, "Next", std::string(kIconRoot) + "Next_arrow_10211.png");
+	addButton(s_windowId, kWidgetIdReload, 20 + 2 * (kButtonW + kButtonGap), kButtonY, kButtonW, kButtonH, "Reload", std::string(kIconRoot) + "refresh_arrow_10190.png");
+	addButton(s_windowId, kWidgetIdHome, 20 + 3 * (kButtonW + kButtonGap), kButtonY, kButtonW, kButtonH, "Home", std::string(kIconRoot) + "gohome_action_ir_10235.png");
+	addButton(s_windowId, kWidgetIdBookmarks, 20 + 4 * (kButtonW + kButtonGap), kButtonY, kButtonW, kButtonH, "Marks", std::string(kIconRoot) + "markers_list_add_favorites_10275.png");
+	addButton(s_windowId, kWidgetIdAddBookmark, 20 + 5 * (kButtonW + kButtonGap), kButtonY, kButtonW, kButtonH, "Add", std::string(kIconRoot) + "edit_add_10261.png");
 	addButton(s_windowId, kWidgetIdFind, 20 + 6 * (kButtonW + kButtonGap), kButtonY, kButtonW, kButtonH, "Find");
 
 	drawRect(s_windowId, kAddressX, kAddressY, kAddressW, kAddressH, 18, 22, 30);
@@ -1505,6 +1513,10 @@ void Navigator::renderToolbar()
 		drawRect(s_windowId, kAddressX, kAddressY,                 kAddressW, 1, 110, 120, 142);
 		drawRect(s_windowId, kAddressX, kAddressY + kAddressH - 1, kAddressW, 1,  70,  78,  96);
 		drawTextAt(s_windowId, kAddressX + 10, centeredChromeTextY(kAddressY, kAddressH), s_currentDoc.url);
+	}
+	if (s_loading) {
+		drawAnimatedImage(s_windowId, kAddressX + kAddressW - 24, kAddressY + 2, 22, 22,
+			"assets/Images/SurfThrobber/PNG/surfer_{frame}.png");
 	}
 }
 
@@ -3223,6 +3235,8 @@ WebDocument Navigator::buildBookmarksDocument()
 void Navigator::loadUrl(const std::string& url, bool updateDisplayAfterLoad)
 {
 	Logger::write(LogLevel::Info, std::string("Navigator loadUrl: ") + url);
+	s_loading = true;
+	if (s_windowId != 0) updateDisplay();
 	cleanupRemoteImageTempFiles();
 	s_imageCache.clear();
 	blurDocumentInput();
@@ -3288,6 +3302,7 @@ void Navigator::loadUrl(const std::string& url, bool updateDisplayAfterLoad)
 		s_currentFindMatch = -1;
 	}
 
+	s_loading = false;
 	if (updateDisplayAfterLoad) {
 		updateDisplay();
 	}

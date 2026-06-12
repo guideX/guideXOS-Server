@@ -29,10 +29,10 @@
 
 namespace gxos { namespace gui {
     struct DrawRectItem { int x; int y; int w; int h; uint8_t r; uint8_t g; uint8_t b; };
-    struct DrawImageItem { int x; int y; int w; int h; std::string path; ImageBitmap image; };
+    struct DrawImageItem { int x; int y; int w; int h; std::string path; ImageBitmap image; std::vector<ImageBitmap> frames; };
     struct DrawTextItem { int x; int y; std::string text; bool hasColor{false}; uint8_t r{220}; uint8_t g{220}; uint8_t b{220}; };
     enum class WidgetType { Button=1 };
-    struct Widget { WidgetType type; int id; int x; int y; int w; int h; std::string text; bool hover=false; bool pressed=false; };
+    struct Widget { WidgetType type; int id; int x; int y; int w; int h; std::string text; std::string iconPath; ImageBitmap icon; bool hover=false; bool pressed=false; };
     struct WinInfo { 
         uint64_t id; 
         std::string title; 

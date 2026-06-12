@@ -14,6 +14,7 @@
 #include "kernel/vfs.h"
 #include "kernel/block_device.h"
 #include "kernel/desktop.h"
+#include "kernel/image_adapter.h"
 
 // Bare-metal Navigator is a capability-limited adapter.  It mirrors the small
 // guideWeb CSS-lite value types it needs without including the hosted
@@ -417,6 +418,7 @@ public:
 
     virtual bool init() override;
     virtual void shutdown() override;
+    virtual void update() override;
     virtual void draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) override;
     virtual void onMouseMove(int x, int y) override;
     virtual void onMouseDown(int x, int y, uint8_t button) override;
@@ -671,6 +673,11 @@ private:
     int m_homeBtnId;
     int m_bookmarksBtnId;
     int m_addBookmarkBtnId;
+    gxos::gui::ImageBitmap m_toolbarIcons[6];
+    gxos::gui::ImageBitmap m_throbberFrames[12];
+    bool m_loading;
+    int m_throbberFrame;
+    int m_throbberTick;
     char m_metaRequestedUrl[MAX_URL_LEN];
     char m_metaFinalUrl[MAX_URL_LEN];
     char m_metaSourceType[24];
@@ -756,6 +763,8 @@ private:
 
     void setStatus(const char* text);
     void updateButtons();
+    void loadChromeImages();
+    void setButtonIcon(int widgetId, const gxos::gui::ImageBitmap& image);
     void loadUrl(const char* url);
     void navigateTo(const char* url);
     void goBack();

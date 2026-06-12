@@ -928,9 +928,30 @@ if ($userCaSource) {
     }
 }
 
-if ($httpsPolicyToken -or $httpsFaultModeToken -or $realPublicProbeEnabled -or $realPublicProbeRequired -or $realPublicProbeReviewedOverrideEnabled) {
-    $configNavigatorDir = Join-Path $configDir "navigator"
-    New-Item -ItemType Directory -Force -Path $configNavigatorDir | Out-Null
+$configNavigatorDir = Join-Path $configDir "navigator"
+New-Item -ItemType Directory -Force -Path $configNavigatorDir | Out-Null
+
+$navigatorChromeAssets = [ordered]@{
+    "nav-back.png"      = "assets\Images\NuoveXT\PNG\32\above_thearrow_10194.png"
+    "nav-next.png"      = "assets\Images\NuoveXT\PNG\32\Next_arrow_10211.png"
+    "nav-reload.png"    = "assets\Images\NuoveXT\PNG\32\refresh_arrow_10190.png"
+    "nav-home.png"      = "assets\Images\NuoveXT\PNG\32\gohome_action_ir_10235.png"
+    "nav-bookmarks.png" = "assets\Images\NuoveXT\PNG\32\markers_list_add_favorites_10275.png"
+    "nav-add.png"       = "assets\Images\NuoveXT\PNG\32\edit_add_10261.png"
+}
+for ($frame = 0; $frame -lt 12; $frame++) {
+    $navigatorChromeAssets[("surfer-{0:D2}.png" -f $frame)] =
+        ("assets\Images\SurfThrobber\PNG\surfer_{0:D2}.png" -f $frame)
+}
+foreach ($asset in $navigatorChromeAssets.GetEnumerator()) {
+    $source = Join-Path $RootDir $asset.Value
+    if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
+        Write-Host "      Navigator chrome asset missing; graceful fallback will be used: $($asset.Value)" -ForegroundColor DarkYellow
+        continue
+    }
+    $target = Join-Path $configNavigatorDir $asset.Key
+    Copy-Item -LiteralPath $source -Destination $target -Force
+    $staged += Get-Item $target
 }
 if ($httpsPolicyToken) {
     $targetPolicy = Join-Path $configNavigatorDir "https-policy.txt"

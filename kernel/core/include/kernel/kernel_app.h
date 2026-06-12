@@ -89,10 +89,14 @@ struct Widget {
     bool hover;
     bool pressed;
     int value;  // For checkboxes, progress bars, etc.
+    const uint32_t* iconPixels;
+    uint32_t iconWidth;
+    uint32_t iconHeight;
     
     Widget() : id(0), type(WidgetType::None), x(0), y(0), w(0), h(0),
                bgColor(0xFF404040), fgColor(0xFFFFFFFF), enabled(true),
-               visible(true), hover(false), pressed(false), value(0) {
+               visible(true), hover(false), pressed(false), value(0),
+               iconPixels(nullptr), iconWidth(0), iconHeight(0) {
         text[0] = '\0';
     }
 };

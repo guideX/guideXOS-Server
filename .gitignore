@@ -28,3 +28,4 @@
 /out/wallpaper-pack/certs/ca-bundle.manifest
 /out/wallpaper-pack/config/certs/ca-bundle.manifest
 /scripts/fixtures/public-roots/*.local
+/bkup/gfx
