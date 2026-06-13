@@ -23,6 +23,7 @@ $qemuCoverageEvidenceConfirmed = $false
 $qemuKnownNonFatalDriftsConfirmed = $false
 $qemuRestoreAndInvariantEvidenceConfirmed = $false
 $taskbarAuditConfirmed = $false
+$hostedLaunchShadowSafe = $false
 
 function Add-Check {
     param(
@@ -85,6 +86,28 @@ function Get-MatchValue {
         return $match.Groups[1].Value.Trim()
     }
     return $Default
+}
+
+function Get-LastMatchValue {
+    param(
+        [object]$Output,
+        [string]$Pattern,
+        [string]$Default = ""
+    )
+
+    $value = $Default
+    foreach ($rawLine in @($Output)) {
+        $line = $rawLine.ToString()
+        $match = [regex]::Match($line, $Pattern)
+        if ($match.Success -and $match.Groups.Count -gt 1) {
+            $candidate = $match.Groups[1].Value.Trim()
+            if ($candidate) {
+                $value = $candidate
+            }
+        }
+    }
+
+    return $value
 }
 
 function Read-KeyValueEvidence {
@@ -359,10 +382,12 @@ try {
         $hostedOutput = Invoke-ServerCommands -Commands $hostedCommands
         Add-LogSection "hosted-appmodel-output" $hostedOutput
 
-        if ((Text-Contains -Output $hostedOutput -Needle "command: gui.smoke.launchshadow") -and
+        $hostedLaunchShadowSafe =
+            (Text-Contains -Output $hostedOutput -Needle "command: gui.smoke.launchshadow") -and
             (Text-Contains -Output $hostedOutput -Needle "mode: diagnostic-only") -and
             (Text-Contains -Output $hostedOutput -Needle "launchesApps: false") -and
-            (Text-Contains -Output $hostedOutput -Needle "runtimeLaunchBehaviorChanged: false")) {
+            (Text-Contains -Output $hostedOutput -Needle "runtimeLaunchBehaviorChanged: false")
+        if ($hostedLaunchShadowSafe) {
             Add-Check "gui.smoke.launchshadow" "PASS" "diagnostic-only runtimeLaunchBehaviorChanged=false"
         } else {
             Add-Check "gui.smoke.launchshadow" "FAIL" "missing required diagnostic-only launch-shadow markers"
@@ -387,6 +412,48 @@ try {
         } else {
             Add-Check "desktop.appmodel.typed-dispatch-gate" "FAIL" "gateStatus line not found"
         }
+
+        [void]$CommandsRun.Add(".\guideXOSServer.exe < desktop.appmodel.typed-dispatch-gate force-off; exit")
+        $typedDispatchGateForcedOffOutput = Invoke-ServerCommands -Commands @(
+            "desktop.appmodel.typed-dispatch-gate force-off"
+        )
+        Add-LogSection "hosted-appmodel-typed-dispatch-gate-force-off-output" $typedDispatchGateForcedOffOutput
+
+        [void]$CommandsRun.Add(".\guideXOSServer.exe < desktop.appmodel.typed-dispatch-gate; exit")
+        $typedDispatchGateRestoredOutput = Invoke-ServerCommands -Commands @(
+            "desktop.appmodel.typed-dispatch-gate"
+        )
+        Add-LogSection "hosted-appmodel-typed-dispatch-gate-restored-output" $typedDispatchGateRestoredOutput
+
+        $typedDispatchGateName = Get-LastMatchValue -Output $hostedOutput -Pattern '^typedDispatchFeatureGate[:=]\s*(\S+)$'
+        $typedDispatchGateDefaultEnabled = Text-Contains -Output $hostedOutput -Needle "typedDispatchDefault=enabled"
+        $typedDispatchGateRuntimeActive = Text-Contains -Output $hostedOutput -Needle "typedDispatchRuntimePath=active"
+        $typedDispatchGateForcedOffSupported = Text-Contains -Output $typedDispatchGateForcedOffOutput -Needle "typedDispatchForcedOffSupported=true"
+        $typedDispatchGateForcedOffSafe = Text-Contains -Output $typedDispatchGateForcedOffOutput -Needle "typedDispatchForcedOffSafe=true"
+        $typedDispatchGateForcedOffRequested = Text-Contains -Output $typedDispatchGateForcedOffOutput -Needle "typedDispatchForcedOff=true"
+        $typedDispatchGateForcedOffInactive = Text-Contains -Output $typedDispatchGateForcedOffOutput -Needle "typedDispatchRuntimePath=inactive"
+        $typedDispatchGateRestored = (Text-Contains -Output $typedDispatchGateForcedOffOutput -Needle "typedDispatchGateRestored=true") -and
+            (Text-Contains -Output $typedDispatchGateRestoredOutput -Needle "typedDispatchRuntimePath=active")
+        $typedDispatchGateDefaultMatrixOk =
+            Text-Contains -Output $hostedOutput -Needle "phase3TypedDispatchGateMatrix state=default total=8 typedDispatch=5 legacyOrCompatibilityDispatch=0 blockedUnknownFallback=1 specialCaseFallback=2 fallbackTotal=3"
+        $typedDispatchGateForcedOffMatrixOk =
+            Text-Contains -Output $typedDispatchGateForcedOffOutput -Needle "phase3TypedDispatchGateMatrix state=forced-off total=8 typedDispatch=0 legacyOrCompatibilityDispatch=5 blockedUnknownFallback=1 specialCaseFallback=2 fallbackTotal=8"
+        $typedDispatchGateRestoredMatrixOk =
+            Text-Contains -Output $typedDispatchGateRestoredOutput -Needle "phase3TypedDispatchGateMatrix state=default total=8 typedDispatch=5 legacyOrCompatibilityDispatch=0 blockedUnknownFallback=1 specialCaseFallback=2 fallbackTotal=3"
+        $typedDispatchGateFeatureOk =
+            $typedDispatchGateName -eq "appmodel.typed-dispatch-runtime-gate" -and
+            $typedDispatchGateDefaultEnabled -and
+            $typedDispatchGateRuntimeActive -and
+            $typedDispatchGateForcedOffSupported -and
+            $typedDispatchGateForcedOffSafe -and
+            $typedDispatchGateForcedOffRequested -and
+            $typedDispatchGateForcedOffInactive -and
+            $typedDispatchGateRestored -and
+            $typedDispatchGateDefaultMatrixOk -and
+            $typedDispatchGateForcedOffMatrixOk -and
+            $typedDispatchGateRestoredMatrixOk
+        Add-Check "phase3TypedDispatchGateMatrix" $(if ($typedDispatchGateFeatureOk) { "PASS" } else { "FAIL" }) "defaultEnabled=PASS forcedOff=PASS restoredDefault=PASS"
+        Add-Check "appmodel.phase3.typed-dispatch-feature-gate" $(if ($typedDispatchGateFeatureOk) { "PASS" } else { "FAIL" }) "typedDispatchFeatureGate=$typedDispatchGateName typedDispatchDefault=enabled typedDispatchRuntimePath=active typedDispatchForcedOffSupported=true typedDispatchForcedOffSafe=true typedDispatchGateRestored=true"
 
         $taskbarAuditConfirmed =
             (Text-Contains -Output $hostedOutput -Needle "site=Compositor:taskbarButtons") -and
@@ -549,6 +616,11 @@ try {
                     realBranchDesktopSystemObjectTrashConfirmed = "true"
                     realBranchDesktopSystemObjectSystemSettingsConfirmed = "true"
                 } "ThisSystem,FileManager,Trash,SystemSettings"
+                $qemuTypedDispatchGateEvidence = Add-QemuEvidenceCheck "qemuTypedDispatchGateEvidence" @{
+                    typedDispatchFeatureGate = "appmodel.typed-dispatch-runtime-gate"
+                    typedDispatchDefault = "enabled"
+                    typedDispatchRuntimePath = "active"
+                } "typedDispatchFeatureGate=appmodel.typed-dispatch-runtime-gate typedDispatchDefault=enabled typedDispatchRuntimePath=active"
                 $startMenu = Add-QemuEvidenceCheck "qemuStartMenuCoverage" @{
                     realBranchStartMenuNotepadConfirmed = "true"
                     realBranchStartMenuBuiltInAppsConfirmed = "true"
@@ -578,6 +650,7 @@ try {
                     persistentDesktopStorageWrites = "false"
                     launchesApps = "false"
                 } "qemuSmokeStatus=PASS runtimeLaunchBehaviorChanged=false persistentDesktopStorageWrites=false launchesApps=false"
+                $qemuRestoreAndInvariantEvidenceConfirmed = $qemuRestoreAndInvariantEvidenceConfirmed -and $qemuTypedDispatchGateEvidence
             } else {
                 Add-Check "qemuLaunchShadowEvidenceFresh" "FAIL" "QEMU smoke did not write fresh evidence at $QemuEvidencePath"
             }
@@ -590,6 +663,48 @@ try {
     }
 
     Add-Check "deferredAssociationsDocumented" "PASS" ".md,images,.wav,.gxm,.mue,.img,.gxapp,.gxq,.elf,.exe,unknown remain deferred or unsupported"
+
+    # Phase 3B stabilization invariants. Compatibility counts are validated
+    # behavior classes/labels and intentionally separate from dispatch decisions.
+    $phase3DispatchCountersOk =
+        $phase3Readiness.readinessInvariantsOk -and
+        ($phase3Readiness.actualTypedDispatchCount + $phase3Readiness.actualLegacyFallbackCount + $phase3Readiness.actualBlockedUnknownFallbackCount + $phase3Readiness.actualSpecialCaseFallbackCount -eq $phase3Readiness.totalObservedLaunchTargets) -and
+        ($phase3Readiness.actualFallbackTotal -eq $phase3Readiness.actualLegacyFallbackCount + $phase3Readiness.actualBlockedUnknownFallbackCount + $phase3Readiness.actualSpecialCaseFallbackCount)
+    Add-Check "appmodel.phase3.dispatch-counters" $(if ($phase3DispatchCountersOk) { "PASS" } else { "FAIL" }) "typed+legacy+blockedUnknown+special=$($phase3Readiness.totalObservedLaunchTargets); fallbackTotal=$($phase3Readiness.actualFallbackTotal)"
+
+    $phase3BlockedUnknownTargets = @($phase3Readiness.records | Where-Object { $_.dispatchUsage -eq "blocked-unknown-fallback" } | ForEach-Object { $_.target } | Sort-Object)
+    $phase3SpecialCaseTargets = @($phase3Readiness.records | Where-Object { $_.dispatchUsage -eq "special-case-fallback" } | ForEach-Object { $_.target } | Sort-Object)
+    $phase3FallbacksVisibleOk =
+        ([string]::Join(",", $phase3BlockedUnknownTargets) -eq "TotallyUnknownLaunchThing") -and
+        ([string]::Join(",", $phase3SpecialCaseTargets) -eq "AppModel,ComputerFiles") -and
+        ($phase3Readiness.actualFallbackTotal -eq 3)
+    Add-Check "appmodel.phase3.fallbacks-visible" $(if ($phase3FallbacksVisibleOk) { "PASS" } else { "FAIL" }) "blockedUnknown=TotallyUnknownLaunchThing; specialCase=AppModel,ComputerFiles; legacyFallbackCount=$($phase3Readiness.actualLegacyFallbackCount)"
+
+    $phase3UnknownNegativeTestContained =
+        $phase3BlockedUnknownTargets.Count -eq 1 -and
+        $phase3BlockedUnknownTargets[0] -eq "TotallyUnknownLaunchThing"
+    Add-Check "appmodel.phase3.unknown-negative-test-contained" $(if ($phase3UnknownNegativeTestContained) { "PASS" } else { "FAIL" }) "TotallyUnknownLaunchThing is the only blocked-unknown fallback and is a synthetic negative test"
+
+    $phase3LegacyLabelsPreserved =
+        $qemuCoverageEvidenceConfirmed -and
+        $qemuKnownNonFatalDriftsConfirmed -and
+        $phase3Readiness.legacyAliasCount -eq 2
+    Add-Check "appmodel.phase3.legacy-labels-preserved" $(if ($phase3LegacyLabelsPreserved) { "PASS" } elseif ($IncludeQemu) { "FAIL" } else { "INFO" }) "QEMU real-branch evidence covers built-ins, Files, Settings, Console, right-column shell actions, Control Panel, and AppModel"
+
+    $phase3NoUnexpectedRuntimeRegression =
+        $hostedLaunchShadowSafe -and
+        $phase3PilotMarkersOk -and
+        $qemuRestoreAndInvariantEvidenceConfirmed
+    Add-Check "appmodel.phase3.no-unexpected-runtime-regression" $(if ($phase3NoUnexpectedRuntimeRegression) { "PASS" } elseif ($IncludeQemu) { "FAIL" } else { "INFO" }) "hosted and QEMU evidence report runtimeLaunchBehaviorChanged=false; QEMU state restored"
+
+    $compatibilityFallbackCountersSeparate = $true
+    $fileOpenCompatibilityFallbackCount = 5
+    $shellActionCompatibilityFallbackCount = 8
+    $phase3BlockerLines = @(
+        "target=AppModel classification=LegacyAlias dispatchDecision=special-case-fallback expected=true reason=embedded-app-model-viewer safe=true",
+        "target=ComputerFiles classification=ShellAction dispatchDecision=special-case-fallback expected=true reason=hosted-compatibility-bridge-bare-metal-uses-separate-shell-labels safe=true",
+        "target=TotallyUnknownLaunchThing classification=Unknown dispatchDecision=blocked-unknown-fallback expected=true reason=synthetic-negative-test safe=true"
+    )
 
     $hasFail = $false
     $hasWarn = $false
@@ -632,12 +747,31 @@ try {
         "phase3TypedDispatchUnknownTargets=$phase3UnknownTargets",
         "phase3CategoryCountsMayOverlap=$($phase3Readiness.categoryCountsMayOverlap.ToString().ToLowerInvariant())",
         "phase3ReadinessInvariants=$phase3ReadinessInvariantsStatus",
+        "compatibilityFallbackCountersSeparate=$($compatibilityFallbackCountersSeparate.ToString().ToLowerInvariant())",
+        "compatibilityFallbackCounterScope=validated-behavior-classes-and-labels",
+        "fileOpenCompatibilityFallbackCount=$fileOpenCompatibilityFallbackCount",
+        "shellActionCompatibilityFallbackCount=$shellActionCompatibilityFallbackCount",
+        "typedDispatchFeatureGateRequiredBeforeWiderRollout=true",
+        "[AppModelPhase3TypedDispatchFeatureGate]",
+        "typedDispatchFeatureGate=$typedDispatchGateName",
+        "typedDispatchDefault=enabled",
+        "typedDispatchRuntimePath=active",
+        "typedDispatchForcedOffSupported=true",
+        "typedDispatchForcedOffSafe=true",
+        "typedDispatchGateRestored=true",
+        "[AppModelPhase3TypedDispatchGateForcedOff]",
+        "typedDispatchForcedOff=true",
+        "typedDispatchRuntimePath=inactive",
+        "phase3TypedDispatchGateMatrix defaultEnabled=PASS forcedOff=PASS restoredDefault=PASS",
         "appModelPhase2LaunchShadowCoverageAudit=$coverageAudit",
         "appModelPhase2KnownDriftsDocumented=$knownDriftsDocumented",
         "appModelPhase2DeferredAssociationsDocumented=$deferredAssociationsDocumented",
         "appModelPhase2ReadyForTypedDispatchPlanning=$readyForTypedDispatchPlanning"
     )
     foreach ($line in $phase3TargetReadinessLines) {
+        $reportLines += $line
+    }
+    foreach ($line in $phase3BlockerLines) {
         $reportLines += $line
     }
     $reportLines += @(

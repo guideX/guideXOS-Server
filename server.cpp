@@ -828,7 +828,7 @@ static void help(){
                  " gui.btn <win> <id> <x> <y> <w> <h> <text> | gui.pop | gui.wlist | gui.activate <id> | gui.min <id>\n"
                  " gxm.load <path> | gxm.sample | gui.save <path> | gui.load <path>\n"
                  " desktop.wallpaper <path> | desktop.launch <action> | desktop.launch.resolve <label> | desktop.launch.adapt <label> | desktop.launch.compare | desktop.launch.storage | desktop.launch.storage.preview | desktop.launch.storage.preview.compare | desktop.launch.types | desktop.pin <action> | desktop.unpin <action> | desktop.showconfig\n"
-                 " desktop.apps | desktop.apps.verbose | desktop.appmodel.summary | desktop.appmodel.coverage | desktop.appmodel.typed-dispatch-gate | desktop.pinned | desktop.recent | desktop.pinapp <name> | desktop.pinfile <name> <path>\n"
+                 " desktop.apps | desktop.apps.verbose | desktop.appmodel.summary | desktop.appmodel.coverage | desktop.appmodel.typed-dispatch-gate [force-off] | desktop.pinned | desktop.recent | desktop.pinapp <name> | desktop.pinfile <name> <path>\n"
                  " nativeapp.capabilities | nativeapp.inspect <app> | nativeapp.smoketest <app> | nativeapp.processes\n"
                  " taskbar.list | taskbar.activate <id> | taskbar.min <id> | taskbar.close <id>\n"
                  " workspace.switch <n> | workspace.next | workspace.prev | workspace.current\n"
@@ -1086,7 +1086,8 @@ using namespace gxos;
             std::cout << gui::DesktopService::BuiltInAppMetadataCoverageDiagnostic();
         }
         else if (cmd=="desktop.appmodel.typed-dispatch-gate"){
-            std::cout << gui::DesktopService::TypedDispatchGateDiagnostic();
+            std::string mode; std::getline(iss, mode); if(mode.size()>0 && mode[0]==' ') mode.erase(0,1);
+            std::cout << gui::DesktopService::TypedDispatchGateDiagnostic(mode);
         }
         else if (cmd=="desktop.pinned"){
             auto& pinned = gui::DesktopService::GetPinned();

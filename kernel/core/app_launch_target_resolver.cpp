@@ -4,6 +4,29 @@
 #include "include/kernel/kernel_app.h"
 #include "include/kernel/vfs.h"
 
+namespace gxos {
+namespace apps {
+namespace {
+    static bool s_typedDispatchRuntimeEnabled = true;
+}
+
+const char* TypedDispatchFeatureGateName()
+{
+    return "appmodel.typed-dispatch-runtime-gate";
+}
+
+bool TypedDispatchRuntimeEnabled()
+{
+    return s_typedDispatchRuntimeEnabled;
+}
+
+void SetTypedDispatchRuntimeEnabledForDiagnostics(bool enabled)
+{
+    s_typedDispatchRuntimeEnabled = enabled;
+}
+} // namespace apps
+} // namespace gxos
+
 namespace kernel {
 namespace appmodel {
 
@@ -738,7 +761,8 @@ static gxos::apps::LaunchDispatchUsage launch_target_shadow_dispatch_usage(const
         is_expected_unsupported_shadow_target(target)) {
         return gxos::apps::LaunchDispatchUsage::BlockedUnknownFallback;
     }
-    if ((target.type == gxos::apps::LaunchTargetType::BuiltInApp ||
+    if (gxos::apps::TypedDispatchRuntimeEnabled() &&
+        (target.type == gxos::apps::LaunchTargetType::BuiltInApp ||
          target.type == gxos::apps::LaunchTargetType::LegacyAlias) &&
         adapterLegacyDispatch && adapterLegacyDispatch[0]) {
         return gxos::apps::LaunchDispatchUsage::TypedDispatch;
@@ -774,6 +798,12 @@ void printLaunchTargetShadowSmokeDiagnostic(LaunchTargetDiagnosticWriter write)
     write("[LaunchTargetShadowSmoke]\n");
     write("command: desktop.smoke.launchshadow\n");
     write("mode: diagnostic-only\n");
+    write("typedDispatchFeatureGate=");
+    write(gxos::apps::TypedDispatchFeatureGateName());
+    write("\n");
+    write("typedDispatchRuntimePath=");
+    write(gxos::apps::TypedDispatchRuntimeEnabled() ? "active" : "inactive");
+    write("\n");
     write("launchesApps: false\n");
     write("counterScope: command-local\n");
     write("counterReason: real bare-metal desktop launch paths are not instrumented in this smoke pass\n");

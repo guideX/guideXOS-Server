@@ -47,6 +47,27 @@
 /// guideX OS GUI - Desktop Service
 /// </summary>
 namespace gxos {
+    namespace apps {
+        namespace {
+            static std::mutex s_typedDispatchRuntimeEnabledMutex;
+            static bool s_typedDispatchRuntimeEnabled = true;
+        }
+
+        const char* TypedDispatchFeatureGateName() {
+            return "appmodel.typed-dispatch-runtime-gate";
+        }
+
+        bool TypedDispatchRuntimeEnabled() {
+            std::lock_guard<std::mutex> lock(s_typedDispatchRuntimeEnabledMutex);
+            return s_typedDispatchRuntimeEnabled;
+        }
+
+        void SetTypedDispatchRuntimeEnabledForDiagnostics(bool enabled) {
+            std::lock_guard<std::mutex> lock(s_typedDispatchRuntimeEnabledMutex);
+            s_typedDispatchRuntimeEnabled = enabled;
+        }
+    }
+
     /// <summary>
 	/// GUI Namespace
     /// </summary>
@@ -1496,6 +1517,29 @@ namespace gxos {
             return counts;
         }
 
+        struct TypedDispatchGateMatrixCounts {
+            uint64_t total = 0;
+            uint64_t typedDispatch = 0;
+            uint64_t legacyOrCompatibilityDispatch = 0;
+            uint64_t blockedUnknownFallback = 0;
+            uint64_t specialCaseFallback = 0;
+        };
+
+        static TypedDispatchGateMatrixCounts typedDispatchGateMatrixCounts() {
+            TypedDispatchGateMatrixCounts counts;
+            const size_t labelCount = sizeof(kLaunchTargetComparisonLabels) / sizeof(kLaunchTargetComparisonLabels[0]);
+            for (size_t i = 0; i < labelCount; ++i) {
+                const std::string label = kLaunchTargetComparisonLabels[i];
+                const LaunchDispatchDecision decision = DesktopService::SelectLaunchDispatch(label);
+                ++counts.total;
+                if (decision.usage == apps::LaunchDispatchUsage::TypedDispatch) ++counts.typedDispatch;
+                else if (decision.usage == apps::LaunchDispatchUsage::LegacyFallback) ++counts.legacyOrCompatibilityDispatch;
+                else if (decision.usage == apps::LaunchDispatchUsage::BlockedUnknownFallback) ++counts.blockedUnknownFallback;
+                else if (decision.usage == apps::LaunchDispatchUsage::SpecialCaseFallback) ++counts.specialCaseFallback;
+            }
+            return counts;
+        }
+
         // Static member initialization
         std::vector<PinnedItem> DesktopService::s_pinned;
         std::vector<RecentProgramEntry> DesktopService::s_recentPrograms;
@@ -1978,7 +2022,7 @@ namespace gxos {
                        decision.target.diagnosticStatus.rfind("unsupported", 0) == 0) {
                 decision.usage = apps::LaunchDispatchUsage::BlockedUnknownFallback;
                 decision.reason = "Target is blocked, unsupported, unknown, or unclassified";
-            } else if (isTypedDispatchReadyTarget(decision.target)) {
+            } else if (apps::TypedDispatchRuntimeEnabled() && isTypedDispatchReadyTarget(decision.target)) {
                 decision.usage = apps::LaunchDispatchUsage::TypedDispatch;
                 const bool compatibilityDispatchRequired = decision.target.dispatchLaunchName != originalDispatch;
                 decision.selectedDispatch = compatibilityDispatchRequired
@@ -1989,7 +2033,9 @@ namespace gxos {
                     : "Resolver classified target as typed-dispatch ready";
             } else {
                 decision.usage = apps::LaunchDispatchUsage::LegacyFallback;
-                decision.reason = "Known target type is not yet enabled for typed dispatch";
+                decision.reason = apps::TypedDispatchRuntimeEnabled()
+                    ? "Known target type is not yet enabled for typed dispatch"
+                    : "Typed dispatch runtime gate is disabled";
             }
             return decision;
         }
@@ -2028,6 +2074,8 @@ namespace gxos {
             const LaunchDispatchUsageCounters counters = GetLaunchDispatchUsageCounters();
             std::ostringstream oss;
             oss << "[LaunchDispatchUsage]\n";
+            oss << "typedDispatchFeatureGate=" << apps::TypedDispatchFeatureGateName() << "\n";
+            oss << "typedDispatchRuntimePath=" << (apps::TypedDispatchRuntimeEnabled() ? "active" : "inactive") << "\n";
             oss << "total: " << counters.total << "\n";
             oss << "typedDispatch: " << counters.typedDispatch << "\n";
             oss << "legacyFallback: " << counters.legacyFallback << "\n";
@@ -2818,7 +2866,19 @@ namespace gxos {
             oss << "\n";
         }
 
-        std::string DesktopService::TypedDispatchGateDiagnostic() {
+        static std::string typedDispatchGateMatrixLine(const char* state, const TypedDispatchGateMatrixCounts& counts) {
+            std::ostringstream oss;
+            oss << "phase3TypedDispatchGateMatrix state=" << state
+                << " total=" << counts.total
+                << " typedDispatch=" << counts.typedDispatch
+                << " legacyOrCompatibilityDispatch=" << counts.legacyOrCompatibilityDispatch
+                << " blockedUnknownFallback=" << counts.blockedUnknownFallback
+                << " specialCaseFallback=" << counts.specialCaseFallback
+                << " fallbackTotal=" << (counts.legacyOrCompatibilityDispatch + counts.blockedUnknownFallback + counts.specialCaseFallback);
+            return oss.str();
+        }
+
+        std::string DesktopService::TypedDispatchGateDiagnostic(const std::string& mode) {
             ensureDefaultAppsRegistered();
 
             const size_t duplicateCount = duplicateIdsFromScanIssues(s_lastManifestScanResult, s_lastBuiltInRegisterResult).size();
@@ -2978,6 +3038,25 @@ namespace gxos {
                     " " + evidenceHealthDetail(qemuEvidence, kTypedDispatchGateQemuEvidencePath);
             }
 
+            const bool gateRestoreEnabled = apps::TypedDispatchRuntimeEnabled();
+            const bool forceOffRequested = mode == "force-off" || mode == "forced-off" || mode == "off";
+            if (forceOffRequested) {
+                apps::SetTypedDispatchRuntimeEnabledForDiagnostics(false);
+            }
+            const bool runtimeGateEnabled = apps::TypedDispatchRuntimeEnabled();
+            const TypedDispatchGateMatrixCounts gateMatrix = typedDispatchGateMatrixCounts();
+            const bool forcedOffSupported = true;
+            const bool forcedOffSafe =
+                gateMatrix.total == 8 &&
+                gateMatrix.typedDispatch == (runtimeGateEnabled ? 5 : 0) &&
+                gateMatrix.legacyOrCompatibilityDispatch == (runtimeGateEnabled ? 0 : 5) &&
+                gateMatrix.blockedUnknownFallback == 1 &&
+                gateMatrix.specialCaseFallback == 2;
+            if (forceOffRequested) {
+                apps::SetTypedDispatchRuntimeEnabledForDiagnostics(gateRestoreEnabled);
+            }
+            const bool gateRestored = apps::TypedDispatchRuntimeEnabled() == gateRestoreEnabled;
+
             unsigned int passCount = 0;
             unsigned int failCount = 0;
             unsigned int warnCount = 0;
@@ -2992,7 +3071,17 @@ namespace gxos {
             std::ostringstream oss;
             oss << "[TypedDispatchShadowOnlyGate]\n";
             oss << "command: desktop.appmodel.typed-dispatch-gate\n";
-            oss << "mode: typed-ready-active\n";
+            oss << "mode: " << (forceOffRequested ? "typed-ready-force-off" : "typed-ready-active") << "\n";
+            oss << "typedDispatchFeatureGate=" << apps::TypedDispatchFeatureGateName() << "\n";
+            oss << "typedDispatchDefault=enabled\n";
+            oss << "typedDispatchRuntimePath=" << (runtimeGateEnabled ? "active" : "inactive") << "\n";
+            oss << "typedDispatchForcedOffSupported=" << (forcedOffSupported ? "true" : "false") << "\n";
+            oss << "typedDispatchForcedOffSafe=" << (forcedOffSafe ? "true" : "false") << "\n";
+            oss << "typedDispatchGateRestored=" << (gateRestored ? "true" : "false") << "\n";
+            if (forceOffRequested) {
+                oss << "typedDispatchForcedOff=true\n";
+            }
+            oss << typedDispatchGateMatrixLine(runtimeGateEnabled ? "default" : "forced-off", gateMatrix) << "\n";
             oss << "enablesTypedDispatch: true\n";
             oss << "feedsTypedDispatchIntoLaunch: true\n";
             oss << "writesStorage: false\n";

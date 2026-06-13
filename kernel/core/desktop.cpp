@@ -6005,7 +6005,8 @@ static const char* select_bare_metal_launch_dispatch(const char* originalAppName
                desktop_str_eq(target.diagnosticStatus, "unsupported-target")) {
         usage = gxos::apps::LaunchDispatchUsage::BlockedUnknownFallback;
         reason = "Target is blocked, unsupported, unknown, or unclassified";
-    } else if ((target.type == gxos::apps::LaunchTargetType::BuiltInApp ||
+    } else if (gxos::apps::TypedDispatchRuntimeEnabled() &&
+               (target.type == gxos::apps::LaunchTargetType::BuiltInApp ||
                 target.type == gxos::apps::LaunchTargetType::LegacyAlias) &&
                target.dispatchLaunchName && target.dispatchLaunchName[0]) {
         usage = gxos::apps::LaunchDispatchUsage::TypedDispatch;
@@ -6015,6 +6016,10 @@ static const char* select_bare_metal_launch_dispatch(const char* originalAppName
         } else {
             reason = "Resolver classified alias as typed-ready; compatibility alias remains the selected dispatch";
         }
+    } else if (!gxos::apps::TypedDispatchRuntimeEnabled() &&
+               (target.type == gxos::apps::LaunchTargetType::BuiltInApp ||
+                target.type == gxos::apps::LaunchTargetType::LegacyAlias)) {
+        reason = "Typed dispatch runtime gate is disabled";
     }
 
     serial::puts("[LaunchDispatch] source=");
