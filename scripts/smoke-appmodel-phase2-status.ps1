@@ -107,17 +107,7 @@ function Get-LaunchTargetComparisonReadinessSummary {
 
     # The buckets below are diagnostic overlays, not a strict partition.
     # One comparison row may contribute to a type bucket and a special-case bucket.
-    $summary = [ordered]@{
-        totalObservedLaunchTargets = 0
-        typedDispatchReadyCount = 0
-        typedDispatchBlockedCount = 0
-        unknownOrUnclassifiedCount = 0
-        legacyAliasCount = 0
-        builtInAppCount = 0
-        shellActionCount = 0
-        fileOpenCount = 0
-        specialCaseCount = 0
-    }
+    $records = New-Object System.Collections.Generic.List[object]
 
     $inComparisonSection = $false
     foreach ($rawLine in @($Output)) {
@@ -132,36 +122,109 @@ function Get-LaunchTargetComparisonReadinessSummary {
         if (-not $inComparisonSection) {
             continue
         }
-        if ($line -notmatch '^\s+label=.*\sresult=') {
+        if ($line -notmatch '^\s*label=.*\sresult=') {
             continue
         }
 
-        $summary.totalObservedLaunchTargets++
-
-        $result = ""
-        $hostedType = ""
-        $bareMetalType = ""
-        if ($line -match 'result=([^\s]+)') { $result = $matches[1] }
-        if ($line -match 'hosted\{type=([^\s]+)') { $hostedType = $matches[1] }
-        if ($line -match 'bareMetal\{type=([^\s]+)') { $bareMetalType = $matches[1] }
-
-        switch ($result) {
-            "exact" { $summary.typedDispatchReadyCount++ }
-            "accepted-alias" { $summary.typedDispatchReadyCount++ }
-            "intentional-difference" { $summary.typedDispatchBlockedCount++; $summary.specialCaseCount++ }
-            "unexpected-drift" { $summary.typedDispatchBlockedCount++ }
-            default { $summary.typedDispatchBlockedCount++ }
+        $match = [regex]::Match(
+            $line,
+            '^\s*label=(.*?) result=([^ ]+) hosted\{type=([^ ]+) status=([^ ]+) dispatch=(.*?) appId=(.*?)\} bareMetal\{type=([^ ]+) status=([^ ]+) dispatch=(.*?) appId=(.*?)\} note=(.*)$'
+        )
+        if (-not $match.Success) {
+            continue
         }
 
-        if ($hostedType -eq "Unknown" -or $bareMetalType -eq "Unknown") { $summary.unknownOrUnclassifiedCount++ }
-        if ($hostedType -eq "LegacyAlias" -or $bareMetalType -eq "LegacyAlias") { $summary.legacyAliasCount++ }
-        if ($hostedType -eq "BuiltInApp" -or $bareMetalType -eq "BuiltInApp") { $summary.builtInAppCount++ }
-        if ($hostedType -eq "ShellAction" -or $bareMetalType -eq "ShellAction") { $summary.shellActionCount++ }
-        if ($hostedType -eq "FileOpen" -or $bareMetalType -eq "FileOpen") { $summary.fileOpenCount++ }
+        $label = $match.Groups[1].Value.Trim()
+        $result = $match.Groups[2].Value.Trim()
+        $hostedType = $match.Groups[3].Value.Trim()
+        $hostedDispatch = $match.Groups[5].Value.Trim()
+        $hostedAppId = $match.Groups[6].Value.Trim()
+        $bareMetalType = $match.Groups[7].Value.Trim()
+        $bareMetalDispatch = $match.Groups[8].Value.Trim()
+        $bareMetalAppId = $match.Groups[9].Value.Trim()
+
+        $isUnknown = ($hostedType -eq "Unknown") -or ($bareMetalType -eq "Unknown")
+        $isReady = (-not $isUnknown) -and ($result -eq "exact" -or $result -eq "accepted-alias")
+        $readiness = if ($isReady) { "ready" } else { "blocked" }
+        $blockReason = "none"
+        if (-not $isReady) {
+            if ($isUnknown) {
+                $blockReason = "unknownOrUnclassified"
+            } else {
+                $blockReason = "knownIntentionalDrift"
+            }
+        }
+        $isSpecialCase = $label -eq "ComputerFiles" -or $label -eq "AppModel"
+
+        $record = [pscustomobject]@{
+            target = $label
+            resolvedType = $hostedType
+            appId = $hostedAppId
+            actualDispatch = $bareMetalDispatch
+            typedDispatchCandidate = $hostedDispatch
+            typedDispatchCandidateComparison = $result
+            readiness = $readiness
+            blockReason = $blockReason
+            unknownOrUnclassified = $isUnknown
+            specialCase = $isSpecialCase
+            builtInApp = ($hostedType -eq "BuiltInApp" -or $bareMetalType -eq "BuiltInApp")
+            legacyAlias = ($hostedType -eq "LegacyAlias" -or $bareMetalType -eq "LegacyAlias")
+            shellAction = ($hostedType -eq "ShellAction" -or $bareMetalType -eq "ShellAction")
+            fileOpen = ($hostedType -eq "FileOpen" -or $bareMetalType -eq "FileOpen")
+        }
+        [void]$records.Add($record)
     }
 
-    $summary.phase3TypedDispatchReadiness = if ($summary.totalObservedLaunchTargets -gt 0) { "report-only" } else { "not-observed" }
-    return [pscustomobject]$summary
+    $sortedRecords = @($records | Sort-Object -Property target)
+
+    $summary = [ordered]@{
+        totalObservedLaunchTargets = 0
+        typedDispatchReadyCount = 0
+        typedDispatchBlockedCount = 0
+        unknownOrUnclassifiedCount = 0
+        legacyAliasCount = 0
+        builtInAppCount = 0
+        shellActionCount = 0
+        fileOpenCount = 0
+        specialCaseCount = 0
+    }
+
+    foreach ($record in $sortedRecords) {
+        $summary.totalObservedLaunchTargets++
+        if ($record.readiness -eq "ready") { $summary.typedDispatchReadyCount++ }
+        else { $summary.typedDispatchBlockedCount++ }
+        if ($record.unknownOrUnclassified -and $record.readiness -eq "blocked") { $summary.unknownOrUnclassifiedCount++ }
+        if ($record.legacyAlias) { $summary.legacyAliasCount++ }
+        if ($record.builtInApp) { $summary.builtInAppCount++ }
+        if ($record.shellAction) { $summary.shellActionCount++ }
+        if ($record.fileOpen) { $summary.fileOpenCount++ }
+        if ($record.specialCase) { $summary.specialCaseCount++ }
+    }
+
+    $blockedTargets = @($sortedRecords | Where-Object { $_.readiness -eq "blocked" } | ForEach-Object { $_.target })
+    $unknownTargets = @($sortedRecords | Where-Object { $_.readiness -eq "blocked" -and $_.unknownOrUnclassified } | ForEach-Object { $_.target })
+    $categoryCountsMayOverlap = $true
+    $readinessInvariantsOk =
+        ($summary.typedDispatchReadyCount + $summary.typedDispatchBlockedCount -eq $summary.totalObservedLaunchTargets) -and
+        ($summary.unknownOrUnclassifiedCount -le $summary.typedDispatchBlockedCount)
+
+    return [pscustomobject]@{
+        totalObservedLaunchTargets = $summary.totalObservedLaunchTargets
+        typedDispatchReadyCount = $summary.typedDispatchReadyCount
+        typedDispatchBlockedCount = $summary.typedDispatchBlockedCount
+        unknownOrUnclassifiedCount = $summary.unknownOrUnclassifiedCount
+        legacyAliasCount = $summary.legacyAliasCount
+        builtInAppCount = $summary.builtInAppCount
+        shellActionCount = $summary.shellActionCount
+        fileOpenCount = $summary.fileOpenCount
+        specialCaseCount = $summary.specialCaseCount
+        phase3TypedDispatchReadiness = if ($summary.totalObservedLaunchTargets -gt 0) { "report-only" } else { "not-observed" }
+        categoryCountsMayOverlap = $categoryCountsMayOverlap
+        readinessInvariantsOk = $readinessInvariantsOk
+        records = $sortedRecords
+        blockedTargets = $blockedTargets
+        unknownTargets = $unknownTargets
+    }
 }
 
 function Test-EvidenceValues {
@@ -328,22 +391,48 @@ try {
         }
 
         $phase3Readiness = Get-LaunchTargetComparisonReadinessSummary -Output $hostedOutput
+        $phase3TargetReadinessLines = New-Object System.Collections.Generic.List[string]
+        foreach ($record in $phase3Readiness.records) {
+            $contributesTo = New-Object System.Collections.Generic.List[string]
+            [void]$contributesTo.Add($record.readiness)
+            if ($record.builtInApp) { [void]$contributesTo.Add("builtInApp") }
+            if ($record.legacyAlias) { [void]$contributesTo.Add("legacyAlias") }
+            if ($record.shellAction) { [void]$contributesTo.Add("shellAction") }
+            if ($record.fileOpen) { [void]$contributesTo.Add("fileOpen") }
+            if ($record.unknownOrUnclassified) { [void]$contributesTo.Add("unknownOrUnclassified") }
+            if ($record.specialCase) { [void]$contributesTo.Add("specialCase") }
+            [void]$phase3TargetReadinessLines.Add(
+                "phase3TargetReadiness target=$($record.target) resolvedType=$($record.resolvedType) appId=$($record.appId) actualDispatch=$($record.actualDispatch) typedDispatchCandidate=$($record.typedDispatchCandidate) typedDispatchCandidateComparison=$($record.typedDispatchCandidateComparison) readiness=$($record.readiness) blockReason=$($record.blockReason) contributesTo=$([string]::Join(',', $contributesTo))"
+            )
+        }
+        $phase3BlockedTargets = [string]::Join(",", @($phase3Readiness.blockedTargets | Sort-Object))
+        $phase3UnknownTargets = [string]::Join(",", @($phase3Readiness.unknownTargets | Sort-Object))
+        $phase3ReadinessInvariantsOk = $phase3Readiness.readinessInvariantsOk
+        if ($phase3ReadinessInvariantsOk) {
+            Add-Check "phase3ReadinessInvariants" "PASS" "typedDispatchReadyCount+typedDispatchBlockedCount=$($phase3Readiness.typedDispatchReadyCount + $phase3Readiness.typedDispatchBlockedCount) totalObservedLaunchTargets=$($phase3Readiness.totalObservedLaunchTargets); unknownOrUnclassifiedCount=$($phase3Readiness.unknownOrUnclassifiedCount) blockedCount=$($phase3Readiness.typedDispatchBlockedCount); typedDispatchEnabled=false feedsTypedDispatchIntoLaunch=false runtimeLaunchBehaviorChanged=false"
+        } else {
+            Add-Check "phase3ReadinessInvariants" "FAIL" "one or more Phase 3A invariants failed; expected typedDispatchReadyCount+typedDispatchBlockedCount==totalObservedLaunchTargets, unknownOrUnclassifiedCount<=typedDispatchBlockedCount, and report-only typed dispatch disabled/runtime-unchanged markers"
+        }
         $phase3ReadinessOk =
             $phase3Readiness.phase3TypedDispatchReadiness -eq "report-only" -and
             $phase3Readiness.totalObservedLaunchTargets -eq 8 -and
-            $phase3Readiness.typedDispatchReadyCount -eq 6 -and
-            $phase3Readiness.typedDispatchBlockedCount -eq 2 -and
+            $phase3Readiness.typedDispatchReadyCount -eq 5 -and
+            $phase3Readiness.typedDispatchBlockedCount -eq 3 -and
             $phase3Readiness.specialCaseCount -eq 2 -and
             $phase3Readiness.legacyAliasCount -eq 2 -and
             $phase3Readiness.builtInAppCount -eq 5 -and
             $phase3Readiness.shellActionCount -eq 1 -and
             $phase3Readiness.fileOpenCount -eq 0 -and
-            $phase3Readiness.unknownOrUnclassifiedCount -eq 2
+            $phase3Readiness.unknownOrUnclassifiedCount -eq 2 -and
+            $phase3Readiness.categoryCountsMayOverlap -eq $true -and
+            $phase3BlockedTargets -eq "AppModel,ComputerFiles,TotallyUnknownLaunchThing" -and
+            $phase3UnknownTargets -eq "ComputerFiles,TotallyUnknownLaunchThing"
         if ($phase3ReadinessOk) {
-            Add-Check "phase3TypedDispatchReadiness" "PASS" "phase3TypedDispatchReadiness=report-only totalObservedLaunchTargets=8 typedDispatchReadyCount=6 typedDispatchBlockedCount=2 unknownOrUnclassifiedCount=2 legacyAliasCount=2 builtInAppCount=5 shellActionCount=1 fileOpenCount=0 specialCaseCount=2"
+            Add-Check "phase3TypedDispatchReadiness" "PASS" "phase3TypedDispatchReadiness=report-only totalObservedLaunchTargets=8 typedDispatchReadyCount=5 typedDispatchBlockedCount=3 unknownOrUnclassifiedCount=2 legacyAliasCount=2 builtInAppCount=5 shellActionCount=1 fileOpenCount=0 specialCaseCount=2 phase3TypedDispatchBlockedTargets=$phase3BlockedTargets phase3TypedDispatchUnknownTargets=$phase3UnknownTargets phase3CategoryCountsMayOverlap=true"
         } else {
             Add-Check "phase3TypedDispatchReadiness" "FAIL" "missing or unexpected Phase 3A readiness summary in hosted appmodel output"
         }
+        $phase3ReadinessInvariantsStatus = if ($phase3ReadinessInvariantsOk) { "PASS" } else { "FAIL" }
     } catch {
         Add-Check "hostedDiagnostics" "FAIL" $_.Exception.Message
     }
@@ -498,10 +587,19 @@ try {
         "qemuOptional=true",
         "status=$overall",
         "phase3TypedDispatchReadiness=$($phase3Readiness.phase3TypedDispatchReadiness) totalObservedLaunchTargets=$($phase3Readiness.totalObservedLaunchTargets) typedDispatchReadyCount=$($phase3Readiness.typedDispatchReadyCount) typedDispatchBlockedCount=$($phase3Readiness.typedDispatchBlockedCount) unknownOrUnclassifiedCount=$($phase3Readiness.unknownOrUnclassifiedCount) legacyAliasCount=$($phase3Readiness.legacyAliasCount) builtInAppCount=$($phase3Readiness.builtInAppCount) shellActionCount=$($phase3Readiness.shellActionCount) fileOpenCount=$($phase3Readiness.fileOpenCount) specialCaseCount=$($phase3Readiness.specialCaseCount)",
+        "phase3TypedDispatchBlockedTargets=$phase3BlockedTargets",
+        "phase3TypedDispatchUnknownTargets=$phase3UnknownTargets",
+        "phase3CategoryCountsMayOverlap=$($phase3Readiness.categoryCountsMayOverlap.ToString().ToLowerInvariant())",
+        "phase3ReadinessInvariants=$phase3ReadinessInvariantsStatus",
         "appModelPhase2LaunchShadowCoverageAudit=$coverageAudit",
         "appModelPhase2KnownDriftsDocumented=$knownDriftsDocumented",
         "appModelPhase2DeferredAssociationsDocumented=$deferredAssociationsDocumented",
-        "appModelPhase2ReadyForTypedDispatchPlanning=$readyForTypedDispatchPlanning",
+        "appModelPhase2ReadyForTypedDispatchPlanning=$readyForTypedDispatchPlanning"
+    )
+    foreach ($line in $phase3TargetReadinessLines) {
+        $reportLines += $line
+    }
+    $reportLines += @(
         "coverage.desktopFileFolder=folder,.txt,.log,.cfg,.ini",
         "coverage.desktopSystemObjects=ThisSystem,FileManager,Trash,SystemSettings",
         "coverage.startMenu=BuiltInApp(Notepad,Calculator,TaskManager,DiskManager,Trash,DisplayOptions);LegacyAlias(Files);ShellAction(Console,Settings,Computer,Documents,Pictures,Music,Network);embeddedDiagnostic(ControlPanel,AppModel)",
