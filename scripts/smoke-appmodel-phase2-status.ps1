@@ -140,8 +140,8 @@ function Get-LaunchTargetComparisonReadinessSummary {
         $hostedDispatch = $match.Groups[5].Value.Trim()
         $hostedAppId = $match.Groups[6].Value.Trim()
         $bareMetalType = $match.Groups[7].Value.Trim()
-        $bareMetalDispatch = $match.Groups[8].Value.Trim()
-        $bareMetalAppId = $match.Groups[9].Value.Trim()
+        $bareMetalDispatch = $match.Groups[9].Value.Trim()
+        $bareMetalAppId = $match.Groups[10].Value.Trim()
 
         $isUnknown = ($hostedType -eq "Unknown") -or ($bareMetalType -eq "Unknown")
         $isReady = (-not $isUnknown) -and ($result -eq "exact" -or $result -eq "accepted-alias")
@@ -155,6 +155,15 @@ function Get-LaunchTargetComparisonReadinessSummary {
             }
         }
         $isSpecialCase = $label -eq "ComputerFiles" -or $label -eq "AppModel"
+        $dispatchUsage = if ($isReady) {
+            "typed-dispatch"
+        } elseif ($isSpecialCase) {
+            "special-case-fallback"
+        } elseif ($isUnknown) {
+            "blocked-unknown-fallback"
+        } else {
+            "legacy-fallback"
+        }
 
         $record = [pscustomobject]@{
             target = $label
@@ -167,6 +176,7 @@ function Get-LaunchTargetComparisonReadinessSummary {
             blockReason = $blockReason
             unknownOrUnclassified = $isUnknown
             specialCase = $isSpecialCase
+            dispatchUsage = $dispatchUsage
             builtInApp = ($hostedType -eq "BuiltInApp" -or $bareMetalType -eq "BuiltInApp")
             legacyAlias = ($hostedType -eq "LegacyAlias" -or $bareMetalType -eq "LegacyAlias")
             shellAction = ($hostedType -eq "ShellAction" -or $bareMetalType -eq "ShellAction")
@@ -187,6 +197,10 @@ function Get-LaunchTargetComparisonReadinessSummary {
         shellActionCount = 0
         fileOpenCount = 0
         specialCaseCount = 0
+        actualTypedDispatchCount = 0
+        actualLegacyFallbackCount = 0
+        actualBlockedUnknownFallbackCount = 0
+        actualSpecialCaseFallbackCount = 0
     }
 
     foreach ($record in $sortedRecords) {
@@ -199,6 +213,10 @@ function Get-LaunchTargetComparisonReadinessSummary {
         if ($record.shellAction) { $summary.shellActionCount++ }
         if ($record.fileOpen) { $summary.fileOpenCount++ }
         if ($record.specialCase) { $summary.specialCaseCount++ }
+        if ($record.dispatchUsage -eq "typed-dispatch") { $summary.actualTypedDispatchCount++ }
+        elseif ($record.dispatchUsage -eq "legacy-fallback") { $summary.actualLegacyFallbackCount++ }
+        elseif ($record.dispatchUsage -eq "blocked-unknown-fallback") { $summary.actualBlockedUnknownFallbackCount++ }
+        elseif ($record.dispatchUsage -eq "special-case-fallback") { $summary.actualSpecialCaseFallbackCount++ }
     }
 
     $blockedTargets = @($sortedRecords | Where-Object { $_.readiness -eq "blocked" } | ForEach-Object { $_.target })
@@ -206,7 +224,8 @@ function Get-LaunchTargetComparisonReadinessSummary {
     $categoryCountsMayOverlap = $true
     $readinessInvariantsOk =
         ($summary.typedDispatchReadyCount + $summary.typedDispatchBlockedCount -eq $summary.totalObservedLaunchTargets) -and
-        ($summary.unknownOrUnclassifiedCount -le $summary.typedDispatchBlockedCount)
+        ($summary.unknownOrUnclassifiedCount -le $summary.typedDispatchBlockedCount) -and
+        ($summary.actualTypedDispatchCount + $summary.actualLegacyFallbackCount + $summary.actualBlockedUnknownFallbackCount + $summary.actualSpecialCaseFallbackCount -eq $summary.totalObservedLaunchTargets)
 
     return [pscustomobject]@{
         totalObservedLaunchTargets = $summary.totalObservedLaunchTargets
@@ -218,7 +237,12 @@ function Get-LaunchTargetComparisonReadinessSummary {
         shellActionCount = $summary.shellActionCount
         fileOpenCount = $summary.fileOpenCount
         specialCaseCount = $summary.specialCaseCount
-        phase3TypedDispatchReadiness = if ($summary.totalObservedLaunchTargets -gt 0) { "report-only" } else { "not-observed" }
+        actualTypedDispatchCount = $summary.actualTypedDispatchCount
+        actualLegacyFallbackCount = $summary.actualLegacyFallbackCount
+        actualBlockedUnknownFallbackCount = $summary.actualBlockedUnknownFallbackCount
+        actualSpecialCaseFallbackCount = $summary.actualSpecialCaseFallbackCount
+        actualFallbackTotal = $summary.actualLegacyFallbackCount + $summary.actualBlockedUnknownFallbackCount + $summary.actualSpecialCaseFallbackCount
+        phase3TypedDispatchReadiness = if ($summary.totalObservedLaunchTargets -gt 0) { "active" } else { "not-observed" }
         categoryCountsMayOverlap = $categoryCountsMayOverlap
         readinessInvariantsOk = $readinessInvariantsOk
         records = $sortedRecords
@@ -376,18 +400,18 @@ try {
             Add-Check "taskbarAudit" "FAIL" "desktop.launch.storage did not preserve the audited taskbar window-management-only inventory"
         }
 
-        # Phase 3 pilot scaffolding default-off assertions
+        # Phase 3 ready-only typed dispatch assertions; historical pilot flags remain default-off.
         $phase3PilotMarkersOk =
             (Text-Contains -Output $hostedOutput -Needle "appModelPhase3PilotStartMenuNotepadFlag=OFF") -and
             (Text-Contains -Output $hostedOutput -Needle "appModelPhase3PilotFallbackToLegacyFlag=OFF") -and
-            (Text-Contains -Output $hostedOutput -Needle "appModelPhase3PilotEnabled=false") -and
-            (Text-Contains -Output $hostedOutput -Needle "appModelPhase3PilotFeedsTypedDispatchIntoLaunch=false") -and
+            (Text-Contains -Output $hostedOutput -Needle "appModelPhase3PilotEnabled=true") -and
+            (Text-Contains -Output $hostedOutput -Needle "appModelPhase3PilotFeedsTypedDispatchIntoLaunch=true") -and
             (Text-Contains -Output $hostedOutput -Needle "appModelPhase3PilotRuntimeLaunchBehaviorChanged=false") -and
             (Text-Contains -Output $hostedOutput -Needle "appModelPhase3PilotDefaultBuildSafe=true")
         if ($phase3PilotMarkersOk) {
-            Add-Check "phase3PilotScaffoldingDefaultOff" "PASS" "all Phase 3 pilot flags OFF; no typed dispatch fed into launch; runtime behavior unchanged"
+            Add-Check "phase3TypedDispatchActive" "PASS" "ready-only typed dispatch active; historical pilot flags remain OFF; user-visible launch behavior unchanged"
         } else {
-            Add-Check "phase3PilotScaffoldingDefaultOff" "FAIL" "one or more Phase 3 pilot default-off markers missing from hosted output"
+            Add-Check "phase3TypedDispatchActive" "FAIL" "one or more Phase 3 active dispatch markers missing from hosted output"
         }
 
         $phase3Readiness = Get-LaunchTargetComparisonReadinessSummary -Output $hostedOutput
@@ -402,19 +426,19 @@ try {
             if ($record.unknownOrUnclassified) { [void]$contributesTo.Add("unknownOrUnclassified") }
             if ($record.specialCase) { [void]$contributesTo.Add("specialCase") }
             [void]$phase3TargetReadinessLines.Add(
-                "phase3TargetReadiness target=$($record.target) resolvedType=$($record.resolvedType) appId=$($record.appId) actualDispatch=$($record.actualDispatch) typedDispatchCandidate=$($record.typedDispatchCandidate) typedDispatchCandidateComparison=$($record.typedDispatchCandidateComparison) readiness=$($record.readiness) blockReason=$($record.blockReason) contributesTo=$([string]::Join(',', $contributesTo))"
+                "phase3TargetReadiness target=$($record.target) resolvedType=$($record.resolvedType) appId=$($record.appId) actualDispatch=$($record.actualDispatch) typedDispatchCandidate=$($record.typedDispatchCandidate) typedDispatchCandidateComparison=$($record.typedDispatchCandidateComparison) readiness=$($record.readiness) dispatchUsage=$($record.dispatchUsage) blockReason=$($record.blockReason) contributesTo=$([string]::Join(',', $contributesTo))"
             )
         }
         $phase3BlockedTargets = [string]::Join(",", @($phase3Readiness.blockedTargets | Sort-Object))
         $phase3UnknownTargets = [string]::Join(",", @($phase3Readiness.unknownTargets | Sort-Object))
         $phase3ReadinessInvariantsOk = $phase3Readiness.readinessInvariantsOk
         if ($phase3ReadinessInvariantsOk) {
-            Add-Check "phase3ReadinessInvariants" "PASS" "typedDispatchReadyCount+typedDispatchBlockedCount=$($phase3Readiness.typedDispatchReadyCount + $phase3Readiness.typedDispatchBlockedCount) totalObservedLaunchTargets=$($phase3Readiness.totalObservedLaunchTargets); unknownOrUnclassifiedCount=$($phase3Readiness.unknownOrUnclassifiedCount) blockedCount=$($phase3Readiness.typedDispatchBlockedCount); typedDispatchEnabled=false feedsTypedDispatchIntoLaunch=false runtimeLaunchBehaviorChanged=false"
+            Add-Check "phase3ReadinessInvariants" "PASS" "typedDispatchReadyCount+typedDispatchBlockedCount=$($phase3Readiness.typedDispatchReadyCount + $phase3Readiness.typedDispatchBlockedCount) totalObservedLaunchTargets=$($phase3Readiness.totalObservedLaunchTargets); actualTypedDispatchCount=$($phase3Readiness.actualTypedDispatchCount) actualFallbackTotal=$($phase3Readiness.actualFallbackTotal); typedDispatchEnabled=true feedsTypedDispatchIntoLaunch=true runtimeLaunchBehaviorChanged=false"
         } else {
-            Add-Check "phase3ReadinessInvariants" "FAIL" "one or more Phase 3A invariants failed; expected typedDispatchReadyCount+typedDispatchBlockedCount==totalObservedLaunchTargets, unknownOrUnclassifiedCount<=typedDispatchBlockedCount, and report-only typed dispatch disabled/runtime-unchanged markers"
+            Add-Check "phase3ReadinessInvariants" "FAIL" "one or more Phase 3 invariants failed"
         }
         $phase3ReadinessOk =
-            $phase3Readiness.phase3TypedDispatchReadiness -eq "report-only" -and
+            $phase3Readiness.phase3TypedDispatchReadiness -eq "active" -and
             $phase3Readiness.totalObservedLaunchTargets -eq 8 -and
             $phase3Readiness.typedDispatchReadyCount -eq 5 -and
             $phase3Readiness.typedDispatchBlockedCount -eq 3 -and
@@ -424,13 +448,30 @@ try {
             $phase3Readiness.shellActionCount -eq 1 -and
             $phase3Readiness.fileOpenCount -eq 0 -and
             $phase3Readiness.unknownOrUnclassifiedCount -eq 2 -and
+            $phase3Readiness.actualTypedDispatchCount -eq 5 -and
+            $phase3Readiness.actualLegacyFallbackCount -eq 0 -and
+            $phase3Readiness.actualBlockedUnknownFallbackCount -eq 1 -and
+            $phase3Readiness.actualSpecialCaseFallbackCount -eq 2 -and
+            $phase3Readiness.actualFallbackTotal -eq 3 -and
             $phase3Readiness.categoryCountsMayOverlap -eq $true -and
             $phase3BlockedTargets -eq "AppModel,ComputerFiles,TotallyUnknownLaunchThing" -and
             $phase3UnknownTargets -eq "ComputerFiles,TotallyUnknownLaunchThing"
         if ($phase3ReadinessOk) {
-            Add-Check "phase3TypedDispatchReadiness" "PASS" "phase3TypedDispatchReadiness=report-only totalObservedLaunchTargets=8 typedDispatchReadyCount=5 typedDispatchBlockedCount=3 unknownOrUnclassifiedCount=2 legacyAliasCount=2 builtInAppCount=5 shellActionCount=1 fileOpenCount=0 specialCaseCount=2 phase3TypedDispatchBlockedTargets=$phase3BlockedTargets phase3TypedDispatchUnknownTargets=$phase3UnknownTargets phase3CategoryCountsMayOverlap=true"
+            Add-Check "phase3TypedDispatchReadiness" "PASS" "phase3TypedDispatchReadiness=active totalObservedLaunchTargets=8 typedDispatchReadyCount=5 typedDispatchBlockedCount=3 actualTypedDispatchCount=5 actualLegacyFallbackCount=0 actualBlockedUnknownFallbackCount=1 actualSpecialCaseFallbackCount=2 actualFallbackTotal=3 phase3TypedDispatchBlockedTargets=$phase3BlockedTargets"
         } else {
             Add-Check "phase3TypedDispatchReadiness" "FAIL" "missing or unexpected Phase 3A readiness summary in hosted appmodel output"
+        }
+        $hostedDispatchUsageOk =
+            (Text-Contains -Output $hostedOutput -Needle "[LaunchDispatchUsage]") -and
+            (Text-Contains -Output $hostedOutput -Needle "typedDispatch: 3") -and
+            (Text-Contains -Output $hostedOutput -Needle "legacyFallback: 0") -and
+            (Text-Contains -Output $hostedOutput -Needle "blockedUnknownFallback: 1") -and
+            (Text-Contains -Output $hostedOutput -Needle "specialCaseFallback: 1") -and
+            (Text-Contains -Output $hostedOutput -Needle "fallbackTotal: 2")
+        if ($hostedDispatchUsageOk) {
+            Add-Check "phase3HostedDispatchUsage" "PASS" "launch-shadow selector usage typedDispatch=3 legacyFallback=0 blockedUnknownFallback=1 specialCaseFallback=1 fallbackTotal=2"
+        } else {
+            Add-Check "phase3HostedDispatchUsage" "FAIL" "hosted launch-shadow output did not contain expected actual dispatch selector usage"
         }
         $phase3ReadinessInvariantsStatus = if ($phase3ReadinessInvariantsOk) { "PASS" } else { "FAIL" }
     } catch {
@@ -568,8 +609,7 @@ try {
         $taskbarAuditConfirmed
     ).ToString().ToLowerInvariant()
 
-    # Phase 3 typed-dispatch planning audit (report-only; typed dispatch remains disabled)
-    # Derived entirely from Phase 2 validated evidence. Does not enable typed dispatch or change runtime behavior.
+    # Phase 3 ready-only typed dispatch audit. User-visible behavior remains unchanged.
     $phase3PlanningAudit = if ($readyForTypedDispatchPlanning -eq "true") { "pass" } else { "not-ready" }
     $phase3FirstPilotCandidate = "StartMenuNotepad"
     $phase3FirstPilotReason = "BuiltInApp;typedDispatchCandidateMatchesActual=true;comparison=match;no-known-drift;no-embedded-special-behavior;validated-in-phase2-launchshadow"
@@ -578,15 +618,16 @@ try {
 
     $reportLines = @(
         "[AppModelPhase2Status]",
-        "mode=validation-report-only",
-        "typedDispatchEnabled=false",
-        "feedsTypedDispatchIntoLaunch=false",
+        "mode=typed-ready-dispatch-validation",
+        "typedDispatchEnabled=true",
+        "feedsTypedDispatchIntoLaunch=true",
         "runtimeLaunchBehaviorChanged=false",
         "persistentDesktopStorageWrites=false",
         "launchesApps=false",
         "qemuOptional=true",
         "status=$overall",
         "phase3TypedDispatchReadiness=$($phase3Readiness.phase3TypedDispatchReadiness) totalObservedLaunchTargets=$($phase3Readiness.totalObservedLaunchTargets) typedDispatchReadyCount=$($phase3Readiness.typedDispatchReadyCount) typedDispatchBlockedCount=$($phase3Readiness.typedDispatchBlockedCount) unknownOrUnclassifiedCount=$($phase3Readiness.unknownOrUnclassifiedCount) legacyAliasCount=$($phase3Readiness.legacyAliasCount) builtInAppCount=$($phase3Readiness.builtInAppCount) shellActionCount=$($phase3Readiness.shellActionCount) fileOpenCount=$($phase3Readiness.fileOpenCount) specialCaseCount=$($phase3Readiness.specialCaseCount)",
+        "phase3ActualDispatchUsage actualTypedDispatchCount=$($phase3Readiness.actualTypedDispatchCount) actualLegacyFallbackCount=$($phase3Readiness.actualLegacyFallbackCount) actualBlockedUnknownFallbackCount=$($phase3Readiness.actualBlockedUnknownFallbackCount) actualSpecialCaseFallbackCount=$($phase3Readiness.actualSpecialCaseFallbackCount) actualFallbackTotal=$($phase3Readiness.actualFallbackTotal)",
         "phase3TypedDispatchBlockedTargets=$phase3BlockedTargets",
         "phase3TypedDispatchUnknownTargets=$phase3UnknownTargets",
         "phase3CategoryCountsMayOverlap=$($phase3Readiness.categoryCountsMayOverlap.ToString().ToLowerInvariant())",
@@ -610,26 +651,26 @@ try {
         "knownNonFatalDrifts=Settings->DisplayOptions;Computer/Documents/Pictures/Music/Network->empty-typed-candidate;ControlPanel->embedded-state-vs-DisplayOptions;AppModel->embedded-viewer-unsupported-typed-target",
         "futureWork=.md,image-routing,.wav-media-contract,.gxm/.mue-loaders,.img-DiskManager-workflow,.gxapp/.gxq/.elf/.exe-app-like-paths,unknown-extension-policy",
         "[AppModelPhase3TypedDispatchPlanningAudit]",
-        "mode=planning-only",
+        "mode=typed-ready-active",
         "appModelPhase3TypedDispatchPlanningAudit=$phase3PlanningAudit",
-        "appModelPhase3TypedDispatchStillDisabled=true",
+        "appModelPhase3TypedDispatchStillDisabled=false",
         "appModelPhase3NoRuntimeLaunchBehaviorChanged=true",
         "appModelPhase3FirstPilotCandidate=$phase3FirstPilotCandidate",
         "appModelPhase3FirstPilotReason=$phase3FirstPilotReason",
         "appModelPhase3CandidateRanking=$phase3CandidateRanking",
         "appModelPhase3RejectedCandidates=$phase3RejectedCandidates",
         "appModelPhase3KnownDriftsPreservedAsNonfatal=true",
-        "appModelPhase3Note=planning-readiness-only; typed dispatch not enabled; no runtime behavior changed",
+        "appModelPhase3Note=typed-ready targets use typed dispatch; legacy, blocked, unknown, and special-case fallbacks preserve behavior",
         "[AppModelPhase3PilotScaffolding]",
         "appModelPhase3PilotCandidate=StartMenuNotepad",
         "appModelPhase3PilotStartMenuNotepadFlag=OFF",
         "appModelPhase3PilotFallbackToLegacyFlag=OFF",
-        "appModelPhase3PilotEnabled=false",
-        "appModelPhase3PilotFeedsTypedDispatchIntoLaunch=false",
+        "appModelPhase3PilotEnabled=true",
+        "appModelPhase3PilotFeedsTypedDispatchIntoLaunch=true",
         "appModelPhase3PilotRuntimeLaunchBehaviorChanged=false",
-        "appModelPhase3PilotScopedToStartMenuNotepad=true",
+        "appModelPhase3PilotScopedToStartMenuNotepad=false",
         "appModelPhase3PilotDefaultBuildSafe=true",
-        "appModelPhase3PilotScaffoldingNote=default-off scaffolding only; runtime hook not implemented; no launch path changed",
+        "appModelPhase3PilotScaffoldingNote=historical pilot flags remain default-off; ready-only typed dispatch is active with compatibility fallbacks",
         "checks:"
     )
     foreach ($check in $Checks) {

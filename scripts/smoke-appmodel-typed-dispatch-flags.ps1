@@ -97,8 +97,8 @@ function Invoke-FlagCase {
     Assert-Contains $output $SummaryLine "$CaseName summary flag line"
     Assert-Contains $output "check=typedDispatchCompileFlags status=$GateStatus" "$CaseName gate flag status"
     Assert-Contains $output $GateDetail "$CaseName gate flag detail"
-    Assert-Contains $output "enablesTypedDispatch: false" "$CaseName gate remains report-only"
-    Assert-Contains $output "feedsTypedDispatchIntoLaunch: false" "$CaseName typed dispatch is not fed into launch"
+    Assert-Contains $output "enablesTypedDispatch: true" "$CaseName typed-ready dispatch is enabled"
+    Assert-Contains $output "feedsTypedDispatchIntoLaunch: true" "$CaseName typed-ready dispatch feeds launch"
 
     return [pscustomobject]@{
         CaseName = $CaseName
@@ -116,23 +116,23 @@ try {
         @{
             CaseName = "shadow-only"
             Defines = @("GXOS_APPMODEL_TYPED_DISPATCH_SHADOW_ONLY")
-            SummaryLine = "typedDispatchFlags: shadowOnly=ON enabled=OFF behavior=legacy-dispatch status=OK discoveryOnly=true"
+            SummaryLine = "typedDispatchFlags: shadowOnly=ON enabled=OFF behavior=typed-ready-dispatch status=OK discoveryOnly=false"
             GateStatus = "PASS"
-            GateDetail = "shadowOnly=ON enabled=OFF behavior=legacy-dispatch discoveryOnly=true"
+            GateDetail = "shadowOnly=ON enabled=OFF behavior=typed-ready-dispatch discoveryOnly=false"
         },
         @{
             CaseName = "enabled-only"
             Defines = @("GXOS_APPMODEL_TYPED_DISPATCH_ENABLED")
-            SummaryLine = "typedDispatchFlags: shadowOnly=OFF enabled=ON behavior=legacy-dispatch status=OK discoveryOnly=true"
+            SummaryLine = "typedDispatchFlags: shadowOnly=OFF enabled=ON behavior=typed-ready-dispatch status=OK discoveryOnly=false"
             GateStatus = "PASS"
-            GateDetail = "shadowOnly=OFF enabled=ON behavior=legacy-dispatch discoveryOnly=true"
+            GateDetail = "shadowOnly=OFF enabled=ON behavior=typed-ready-dispatch discoveryOnly=false"
         },
         @{
             CaseName = "both-flags"
             Defines = @("GXOS_APPMODEL_TYPED_DISPATCH_SHADOW_ONLY", "GXOS_APPMODEL_TYPED_DISPATCH_ENABLED")
-            SummaryLine = "typedDispatchFlags: shadowOnly=ON enabled=ON behavior=legacy-dispatch status=WARN discoveryOnly=true invalidConfiguration=true"
+            SummaryLine = "typedDispatchFlags: shadowOnly=ON enabled=ON behavior=typed-ready-dispatch status=WARN discoveryOnly=false invalidConfiguration=true"
             GateStatus = "WARN"
-            GateDetail = "shadowOnly=ON enabled=ON behavior=legacy-dispatch discoveryOnly=true invalidConfiguration=true"
+            GateDetail = "shadowOnly=ON enabled=ON behavior=typed-ready-dispatch discoveryOnly=false invalidConfiguration=true"
         }
     )
 
@@ -149,12 +149,12 @@ try {
             "desktop.appmodel.summary",
             "desktop.appmodel.typed-dispatch-gate"
         )
-        Assert-Contains $normalOutput "typedDispatchFlags: shadowOnly=OFF enabled=OFF behavior=legacy-dispatch status=OK discoveryOnly=true" "normal default flag line"
+        Assert-Contains $normalOutput "typedDispatchFlags: shadowOnly=OFF enabled=OFF behavior=typed-ready-dispatch status=OK discoveryOnly=false" "normal default flag line"
         # Phase 3 pilot flags must be OFF in default build
         Assert-Contains $normalOutput "appModelPhase3PilotStartMenuNotepadFlag=OFF" "Phase 3 pilot StartMenuNotepad flag default-off"
         Assert-Contains $normalOutput "appModelPhase3PilotFallbackToLegacyFlag=OFF" "Phase 3 pilot FallbackToLegacy flag default-off"
-        Assert-Contains $normalOutput "appModelPhase3PilotEnabled=false" "Phase 3 pilot enabled=false"
-        Assert-Contains $normalOutput "appModelPhase3PilotFeedsTypedDispatchIntoLaunch=false" "Phase 3 pilot does not feed typed dispatch into launch"
+        Assert-Contains $normalOutput "appModelPhase3PilotEnabled=true" "Phase 3 ready-only dispatch enabled=true"
+        Assert-Contains $normalOutput "appModelPhase3PilotFeedsTypedDispatchIntoLaunch=true" "Phase 3 ready-only dispatch feeds launch"
         Assert-Contains $normalOutput "appModelPhase3PilotRuntimeLaunchBehaviorChanged=false" "Phase 3 pilot does not change runtime launch behavior"
         Assert-Contains $normalOutput "appModelPhase3PilotDefaultBuildSafe=true" "Phase 3 pilot default-build-safe"
     }
@@ -168,17 +168,17 @@ try {
     foreach ($result in $results) {
         $reportLines += "case=$($result.CaseName) summaryLine=$($result.SummaryLine)"
         $reportLines += "case=$($result.CaseName) gateCheck=check=typedDispatchCompileFlags status=$($result.GateStatus)"
-        $reportLines += "case=$($result.CaseName) launchBehavior=legacy-dispatch enablesTypedDispatch=false feedsTypedDispatchIntoLaunch=false"
+        $reportLines += "case=$($result.CaseName) launchBehavior=typed-ready-dispatch enablesTypedDispatch=true feedsTypedDispatchIntoLaunch=true"
     }
     $reportLines += "normalDefaultChecked=$((-not $SkipNormalCheck).ToString().ToLowerInvariant())"
-    $reportLines += "normalDefaultLine=typedDispatchFlags: shadowOnly=OFF enabled=OFF behavior=legacy-dispatch status=OK discoveryOnly=true"
+    $reportLines += "normalDefaultLine=typedDispatchFlags: shadowOnly=OFF enabled=OFF behavior=typed-ready-dispatch status=OK discoveryOnly=false"
     $reportLines += "appModelPhase3PilotCandidate=StartMenuNotepad"
     $reportLines += "appModelPhase3PilotStartMenuNotepadFlag=OFF"
     $reportLines += "appModelPhase3PilotFallbackToLegacyFlag=OFF"
-    $reportLines += "appModelPhase3PilotEnabled=false"
-    $reportLines += "appModelPhase3PilotFeedsTypedDispatchIntoLaunch=false"
+    $reportLines += "appModelPhase3PilotEnabled=true"
+    $reportLines += "appModelPhase3PilotFeedsTypedDispatchIntoLaunch=true"
     $reportLines += "appModelPhase3PilotRuntimeLaunchBehaviorChanged=false"
-    $reportLines += "appModelPhase3PilotScopedToStartMenuNotepad=true"
+    $reportLines += "appModelPhase3PilotScopedToStartMenuNotepad=false"
     $reportLines += "appModelPhase3PilotDefaultBuildSafe=true"
     $reportLines += "result=PASS"
     $report = $reportLines -join [Environment]::NewLine

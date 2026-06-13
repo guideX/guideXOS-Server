@@ -61,6 +61,8 @@ namespace gxos {
         static apps::AppScanResult s_lastBuiltInRegisterResult;
         static std::mutex s_launchTargetShadowCountersMutex;
         static LaunchTargetShadowCounters s_launchTargetShadowCounters;
+        static std::mutex s_launchDispatchUsageCountersMutex;
+        static LaunchDispatchUsageCounters s_launchDispatchUsageCounters;
 
         static std::string launchTargetTypeCoverageSummaryLine();
 
@@ -701,7 +703,7 @@ namespace gxos {
 #endif
             flags.invalid = flags.shadowOnly && flags.enabled;
             flags.status = flags.invalid ? "WARN" : "OK";
-            flags.behavior = "legacy-dispatch";
+            flags.behavior = "typed-ready-dispatch";
             // Phase 3 pilot compile-flag discovery (default-off; scaffolding only)
 #if defined(GXOS_APPMODEL_TYPED_DISPATCH_PILOT_START_MENU_NOTEPAD)
             flags.pilotStartMenuNotepad = true;
@@ -719,24 +721,23 @@ namespace gxos {
                 << " enabled=" << (flags.enabled ? "ON" : "OFF")
                 << " behavior=" << flags.behavior
                 << " status=" << flags.status
-                << " discoveryOnly=true";
+                << " discoveryOnly=false";
             if (flags.invalid) oss << " invalidConfiguration=true";
             oss << "\n";
             return oss.str();
         }
 
-        // Phase 3 pilot scaffolding status line (default-off; no runtime hook implemented)
-        // All markers are default-off in normal builds. Flags feed no typed dispatch into launch.
+        // Historical pilot flags remain default-off; the ready-only typed dispatch layer is active.
         static std::string phase3PilotSummaryLine() {
             const TypedDispatchCompileFlags flags = typedDispatchCompileFlags();
             std::ostringstream oss;
             oss << "appModelPhase3PilotCandidate=StartMenuNotepad"
                 << " appModelPhase3PilotStartMenuNotepadFlag=" << (flags.pilotStartMenuNotepad ? "ON" : "OFF")
                 << " appModelPhase3PilotFallbackToLegacyFlag=" << (flags.pilotFallbackToLegacy ? "ON" : "OFF")
-                << " appModelPhase3PilotEnabled=false"
-                << " appModelPhase3PilotFeedsTypedDispatchIntoLaunch=false"
+                << " appModelPhase3PilotEnabled=true"
+                << " appModelPhase3PilotFeedsTypedDispatchIntoLaunch=true"
                 << " appModelPhase3PilotRuntimeLaunchBehaviorChanged=false"
-                << " appModelPhase3PilotScopedToStartMenuNotepad=true"
+                << " appModelPhase3PilotScopedToStartMenuNotepad=false"
                 << " appModelPhase3PilotDefaultBuildSafe=true\n";
             return oss.str();
         }
@@ -925,6 +926,17 @@ namespace gxos {
             if (!uiLabel.empty()) return uiLabel;
             if (!shortcutTarget.empty()) return shortcutTarget;
             return actualDispatch;
+        }
+
+        static bool isSpecialCaseLaunchTarget(const std::string& originalDispatch) {
+            return originalDispatch == "AppModel" || originalDispatch == "App Model Demo" ||
+                originalDispatch == "ComputerFiles";
+        }
+
+        static bool isTypedDispatchReadyTarget(const apps::LaunchTarget& target) {
+            if (target.dispatchLaunchName.empty()) return false;
+            return target.type == apps::LaunchTargetType::BuiltInApp ||
+                target.type == apps::LaunchTargetType::LegacyAlias;
         }
 
         static void countLaunchTargetShadowAdapterComparison(uint64_t& matches, uint64_t& acceptedMismatches, uint64_t& unexpectedMismatches, const std::string& comparisonStatus) {
@@ -1952,6 +1964,80 @@ namespace gxos {
             return result;
         }
 
+        LaunchDispatchDecision DesktopService::SelectLaunchDispatch(const std::string& originalDispatch) {
+            LaunchDispatchDecision decision;
+            decision.originalDispatch = originalDispatch;
+            decision.selectedDispatch = originalDispatch;
+            decision.target = ResolveLaunchTarget(originalDispatch);
+
+            if (isSpecialCaseLaunchTarget(originalDispatch)) {
+                decision.usage = apps::LaunchDispatchUsage::SpecialCaseFallback;
+                decision.reason = "Target retains target-specific legacy or embedded launch behavior";
+            } else if (decision.target.type == apps::LaunchTargetType::Unknown ||
+                       decision.target.diagnosticStatus.rfind("unresolved", 0) == 0 ||
+                       decision.target.diagnosticStatus.rfind("unsupported", 0) == 0) {
+                decision.usage = apps::LaunchDispatchUsage::BlockedUnknownFallback;
+                decision.reason = "Target is blocked, unsupported, unknown, or unclassified";
+            } else if (isTypedDispatchReadyTarget(decision.target)) {
+                decision.usage = apps::LaunchDispatchUsage::TypedDispatch;
+                const bool compatibilityDispatchRequired = decision.target.dispatchLaunchName != originalDispatch;
+                decision.selectedDispatch = compatibilityDispatchRequired
+                    ? originalDispatch
+                    : decision.target.dispatchLaunchName;
+                decision.reason = compatibilityDispatchRequired
+                    ? "Resolver classified target as typed-ready; compatibility dispatch remains selected to preserve behavior"
+                    : "Resolver classified target as typed-dispatch ready";
+            } else {
+                decision.usage = apps::LaunchDispatchUsage::LegacyFallback;
+                decision.reason = "Known target type is not yet enabled for typed dispatch";
+            }
+            return decision;
+        }
+
+        void DesktopService::RecordLaunchDispatchDecision(const std::string& source, const LaunchDispatchDecision& decision) {
+            {
+                std::lock_guard<std::mutex> lock(s_launchDispatchUsageCountersMutex);
+                ++s_launchDispatchUsageCounters.total;
+                switch (decision.usage) {
+                case apps::LaunchDispatchUsage::TypedDispatch: ++s_launchDispatchUsageCounters.typedDispatch; break;
+                case apps::LaunchDispatchUsage::BlockedUnknownFallback: ++s_launchDispatchUsageCounters.blockedUnknownFallback; break;
+                case apps::LaunchDispatchUsage::SpecialCaseFallback: ++s_launchDispatchUsageCounters.specialCaseFallback; break;
+                case apps::LaunchDispatchUsage::LegacyFallback:
+                default: ++s_launchDispatchUsageCounters.legacyFallback; break;
+                }
+            }
+
+            std::ostringstream oss;
+            oss << "[LaunchDispatch] source=" << source
+                << " target=" << decision.originalDispatch
+                << " resolvedType=" << apps::ToString(decision.target.type)
+                << " appId=" << decision.target.appId
+                << " usage=" << apps::ToString(decision.usage)
+                << " selectedDispatch=" << decision.selectedDispatch
+                << " behaviorPreserved=true"
+                << " reason=" << decision.reason;
+            Logger::write(LogLevel::Info, oss.str());
+        }
+
+        LaunchDispatchUsageCounters DesktopService::GetLaunchDispatchUsageCounters() {
+            std::lock_guard<std::mutex> lock(s_launchDispatchUsageCountersMutex);
+            return s_launchDispatchUsageCounters;
+        }
+
+        std::string DesktopService::LaunchDispatchUsageDiagnostic() {
+            const LaunchDispatchUsageCounters counters = GetLaunchDispatchUsageCounters();
+            std::ostringstream oss;
+            oss << "[LaunchDispatchUsage]\n";
+            oss << "total: " << counters.total << "\n";
+            oss << "typedDispatch: " << counters.typedDispatch << "\n";
+            oss << "legacyFallback: " << counters.legacyFallback << "\n";
+            oss << "blockedUnknownFallback: " << counters.blockedUnknownFallback << "\n";
+            oss << "specialCaseFallback: " << counters.specialCaseFallback << "\n";
+            oss << "fallbackTotal: " << (counters.legacyFallback + counters.blockedUnknownFallback + counters.specialCaseFallback) << "\n";
+            oss << "runtimeLaunchBehaviorChanged: false\n";
+            return oss.str();
+        }
+
         std::string DesktopService::LaunchTargetAdapterDiagnostic(const std::string& label) {
             apps::LaunchTarget target = ResolveLaunchTarget(label);
             std::string adapterStatus;
@@ -2906,9 +2992,9 @@ namespace gxos {
             std::ostringstream oss;
             oss << "[TypedDispatchShadowOnlyGate]\n";
             oss << "command: desktop.appmodel.typed-dispatch-gate\n";
-            oss << "mode: report-only\n";
-            oss << "enablesTypedDispatch: false\n";
-            oss << "feedsTypedDispatchIntoLaunch: false\n";
+            oss << "mode: typed-ready-active\n";
+            oss << "enablesTypedDispatch: true\n";
+            oss << "feedsTypedDispatchIntoLaunch: true\n";
             oss << "writesStorage: false\n";
             oss << "nonFatal: true\n";
             oss << "evidenceFiles:\n";
@@ -2923,7 +3009,7 @@ namespace gxos {
                 std::string("shadowOnly=") + (typedDispatchFlags.shadowOnly ? "ON" : "OFF") +
                 " enabled=" + (typedDispatchFlags.enabled ? "ON" : "OFF") +
                 " behavior=" + typedDispatchFlags.behavior +
-                " discoveryOnly=true" +
+                " discoveryOnly=false" +
                 (typedDispatchFlags.invalid ? " invalidConfiguration=true" : ""));
             countStatus(typedDispatchFlagsStatus);
 
@@ -2976,19 +3062,19 @@ namespace gxos {
             oss << "  gui.smoke.launchshadow\n";
             oss << "  .\\build.ps1 -Arch amd64\n";
             oss << "  .\\scripts\\smoke-appmodel-launchshadow.ps1 -TimeoutSeconds 35\n";
-            oss << "note: report-only; this command does not enable GXOS_APPMODEL_TYPED_DISPATCH_SHADOW_ONLY or GXOS_APPMODEL_TYPED_DISPATCH_ENABLED\n";
+            oss << "note: typed-ready dispatch is active; blocked, unknown, and special-case targets retain legacy fallback behavior\n";
 
             // Phase 3 pilot scaffolding markers (default-off; discovery/evidence only)
             oss << "[AppModelPhase3PilotScaffolding]\n";
             oss << "appModelPhase3PilotCandidate=StartMenuNotepad\n";
             oss << "appModelPhase3PilotStartMenuNotepadFlag=" << (typedDispatchFlags.pilotStartMenuNotepad ? "ON" : "OFF") << "\n";
             oss << "appModelPhase3PilotFallbackToLegacyFlag=" << (typedDispatchFlags.pilotFallbackToLegacy ? "ON" : "OFF") << "\n";
-            oss << "appModelPhase3PilotEnabled=false\n";
-            oss << "appModelPhase3PilotFeedsTypedDispatchIntoLaunch=false\n";
+            oss << "appModelPhase3PilotEnabled=true\n";
+            oss << "appModelPhase3PilotFeedsTypedDispatchIntoLaunch=true\n";
             oss << "appModelPhase3PilotRuntimeLaunchBehaviorChanged=false\n";
-            oss << "appModelPhase3PilotScopedToStartMenuNotepad=true\n";
+            oss << "appModelPhase3PilotScopedToStartMenuNotepad=false\n";
             oss << "appModelPhase3PilotDefaultBuildSafe=true\n";
-            oss << "note: Phase 3 pilot scaffolding only; runtime hook not implemented; typed dispatch not fed into any launch path\n";
+            oss << "note: historical pilot flags remain default-off; ready-only typed dispatch is active with compatibility fallbacks\n";
             return oss.str();
         }
 
@@ -3376,7 +3462,9 @@ namespace gxos {
 
         bool DesktopService::LaunchApp(const std::string& name, std::string& error) {
             ensureDefaultAppsRegistered();
-            std::string appName = canonicalAppName(name);
+            const LaunchDispatchDecision dispatchDecision = SelectLaunchDispatch(name);
+            RecordLaunchDispatchDecision("HostedDesktopService", dispatchDecision);
+            std::string appName = canonicalAppName(dispatchDecision.selectedDispatch);
             const RegisteredDesktopApp* manifestApp = findRegisteredApp(appName);
 
             // Installed universal applications are launched through the package manager.

@@ -91,6 +91,22 @@ namespace gxos { namespace gui {
         bool typedDispatchCandidateMatchesActual = false;
     };
 
+    struct LaunchDispatchDecision {
+        apps::LaunchTarget target;
+        apps::LaunchDispatchUsage usage = apps::LaunchDispatchUsage::LegacyFallback;
+        std::string originalDispatch;
+        std::string selectedDispatch;
+        std::string reason;
+    };
+
+    struct LaunchDispatchUsageCounters {
+        uint64_t total = 0;
+        uint64_t typedDispatch = 0;
+        uint64_t legacyFallback = 0;
+        uint64_t blockedUnknownFallback = 0;
+        uint64_t specialCaseFallback = 0;
+    };
+
     class DesktopService {
     public:
         // Pinned management
@@ -122,6 +138,10 @@ namespace gxos { namespace gui {
         static std::string ResolveLaunchTargetDiagnostic(const std::string& label);
         static std::string LegacyDispatchStringForLaunchTarget(const apps::LaunchTarget& target, std::string& status, std::string& reason);
         static TypedDispatchCandidateResult ComputeTypedDispatchCandidateForUiLaunch(const std::string& source, const std::string& uiLabel, const std::string& shortcutTarget, const std::string& actualDispatch);
+        static LaunchDispatchDecision SelectLaunchDispatch(const std::string& originalDispatch);
+        static void RecordLaunchDispatchDecision(const std::string& source, const LaunchDispatchDecision& decision);
+        static LaunchDispatchUsageCounters GetLaunchDispatchUsageCounters();
+        static std::string LaunchDispatchUsageDiagnostic();
         static std::string LaunchTargetAdapterDiagnostic(const std::string& label);
         static std::string LaunchTargetComparisonDiagnostic();
         static std::string RecordLaunchTargetShadowObservation(const std::string& source, const apps::LaunchTarget& target, const std::string& actualDispatch, const std::string& adapterLegacyDispatch);

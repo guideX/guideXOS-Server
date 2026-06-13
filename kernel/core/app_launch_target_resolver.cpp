@@ -729,6 +729,23 @@ static const char* launch_target_shadow_smoke_comparison(const gxos::apps::Launc
     return "unexpected-mismatch";
 }
 
+static gxos::apps::LaunchDispatchUsage launch_target_shadow_dispatch_usage(const gxos::apps::LaunchTarget& target, const char* label, const char* adapterLegacyDispatch)
+{
+    if (text_equals(label, "AppModel") || target.type == gxos::apps::LaunchTargetType::ShellAction) {
+        return gxos::apps::LaunchDispatchUsage::SpecialCaseFallback;
+    }
+    if (target.type == gxos::apps::LaunchTargetType::Unknown ||
+        is_expected_unsupported_shadow_target(target)) {
+        return gxos::apps::LaunchDispatchUsage::BlockedUnknownFallback;
+    }
+    if ((target.type == gxos::apps::LaunchTargetType::BuiltInApp ||
+         target.type == gxos::apps::LaunchTargetType::LegacyAlias) &&
+        adapterLegacyDispatch && adapterLegacyDispatch[0]) {
+        return gxos::apps::LaunchDispatchUsage::TypedDispatch;
+    }
+    return gxos::apps::LaunchDispatchUsage::LegacyFallback;
+}
+
 void printLaunchTargetShadowSmokeDiagnostic(LaunchTargetDiagnosticWriter write)
 {
     if (!write) return;
@@ -749,6 +766,10 @@ void printLaunchTargetShadowSmokeDiagnostic(LaunchTargetDiagnosticWriter write)
     unsigned int acceptedMismatches = 0;
     unsigned int expectedUnsupported = 0;
     unsigned int unexpectedMismatches = 0;
+    unsigned int typedDispatch = 0;
+    unsigned int legacyFallback = 0;
+    unsigned int blockedUnknownFallback = 0;
+    unsigned int specialCaseFallback = 0;
 
     write("[LaunchTargetShadowSmoke]\n");
     write("command: desktop.smoke.launchshadow\n");
@@ -768,12 +789,18 @@ void printLaunchTargetShadowSmokeDiagnostic(LaunchTargetDiagnosticWriter write)
         const bool candidateMatchesExpected = adapterLegacyDispatch && adapterLegacyDispatch[0] &&
             smokeCase.expectedCurrentDispatch && smokeCase.expectedCurrentDispatch[0] &&
             text_equals(adapterLegacyDispatch, smokeCase.expectedCurrentDispatch);
+        const gxos::apps::LaunchDispatchUsage dispatchUsage =
+            launch_target_shadow_dispatch_usage(target, smokeCase.label, adapterLegacyDispatch);
 
         ++observations;
         if (text_equals(comparison, "match")) ++matches;
         else if (text_equals(comparison, "accepted-mismatch")) ++acceptedMismatches;
         else if (text_equals(comparison, "expected-unsupported")) ++expectedUnsupported;
         else ++unexpectedMismatches;
+        if (dispatchUsage == gxos::apps::LaunchDispatchUsage::TypedDispatch) ++typedDispatch;
+        else if (dispatchUsage == gxos::apps::LaunchDispatchUsage::BlockedUnknownFallback) ++blockedUnknownFallback;
+        else if (dispatchUsage == gxos::apps::LaunchDispatchUsage::SpecialCaseFallback) ++specialCaseFallback;
+        else ++legacyFallback;
 
         write("  case=");
         write(smokeCase.name);
@@ -795,6 +822,8 @@ void printLaunchTargetShadowSmokeDiagnostic(LaunchTargetDiagnosticWriter write)
         write(candidateMatchesExpected ? "true" : "false");
         write(" comparison=");
         write(comparison);
+        write(" dispatchUsage=");
+        write(gxos::apps::ToString(dispatchUsage));
         write(" adapterStatus=");
         write(adapterStatus);
         write(" adapterReason=");
@@ -816,6 +845,14 @@ void printLaunchTargetShadowSmokeDiagnostic(LaunchTargetDiagnosticWriter write)
     write_uint(write, expectedUnsupported);
     write(" unexpectedMismatches=");
     write_uint(write, unexpectedMismatches);
+    write(" typedDispatch=");
+    write_uint(write, typedDispatch);
+    write(" legacyFallback=");
+    write_uint(write, legacyFallback);
+    write(" blockedUnknownFallback=");
+    write_uint(write, blockedUnknownFallback);
+    write(" specialCaseFallback=");
+    write_uint(write, specialCaseFallback);
     write(" nonFatal=true\n");
     write("runtimeLaunchBehaviorChanged: false\n");
 }

@@ -24,6 +24,13 @@ enum class LaunchTargetType {
     Script
 };
 
+enum class LaunchDispatchUsage {
+    TypedDispatch = 0,
+    LegacyFallback,
+    BlockedUnknownFallback,
+    SpecialCaseFallback
+};
+
 struct LaunchTarget {
 #ifdef GXOS_BARE_METAL
     const char* originalLabel = "";
@@ -75,6 +82,16 @@ inline const char* ToString(LaunchTargetType type) {
     case LaunchTargetType::Script: return "Script";
     case LaunchTargetType::Unknown:
     default: return "Unknown";
+    }
+}
+
+inline const char* ToString(LaunchDispatchUsage usage) {
+    switch (usage) {
+    case LaunchDispatchUsage::TypedDispatch: return "typed-dispatch";
+    case LaunchDispatchUsage::LegacyFallback: return "legacy-fallback";
+    case LaunchDispatchUsage::BlockedUnknownFallback: return "blocked-unknown-fallback";
+    case LaunchDispatchUsage::SpecialCaseFallback: return "special-case-fallback";
+    default: return "legacy-fallback";
     }
 }
 

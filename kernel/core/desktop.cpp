@@ -36,7 +36,7 @@
 #include "include/kernel/time.h"
 #include "include/kernel/ramdisk.h"
 #include "include/kernel/block_device.h"
-#if defined(GXOS_APPMODEL_TYPED_DISPATCH_SHADOW_ONLY) && defined(GXOS_BARE_METAL)
+#if defined(GXOS_BARE_METAL)
 #include "include/kernel/app_launch_target_resolver.h"
 #endif
 #if !defined(GXOS_BARE_METAL)
@@ -44,8 +44,8 @@
 #endif
 
 // ------------------------------------------------------------
-// Phase 3 typed-dispatch pilot compile-flag discovery
-// (default-off; scaffolding/evidence only; no runtime hook)
+// Phase 3 typed dispatch keeps legacy and special-case fallbacks authoritative
+// while resolver-ready built-in targets flow through a typed launch decision.
 //
 // GXOS_APPMODEL_TYPED_DISPATCH_PILOT_START_MENU_NOTEPAD
 //   Future bare-metal-only pilot flag, scoped to label == "Notepad"
@@ -61,9 +61,8 @@
 //   Not defined in normal builds.
 //   Status: OFF in default build. Runtime hook not implemented yet.
 //
-// Neither flag feeds typed dispatch into any launch path in this pass.
-// Neither flag changes runtime behavior of show_start_menu_notification(),
-// try_launch_kernel_app(), AppManager::launchApp(), or launchAppWithParam().
+// These historical pilot flags remain discoverable for compatibility. Typed-ready
+// dispatch is now enabled independently and preserves the legacy fallback path.
 // ------------------------------------------------------------
 #if defined(GXOS_APPMODEL_TYPED_DISPATCH_PILOT_START_MENU_NOTEPAD)
 // Phase 3 pilot flag GXOS_APPMODEL_TYPED_DISPATCH_PILOT_START_MENU_NOTEPAD is defined.
@@ -387,6 +386,23 @@ static void log_bare_metal_static_app_shadow_only_observation(
     const char* candidateReason = candidateReasonOverride && candidateReasonOverride[0]
         ? candidateReasonOverride
         : adapterReason;
+    gxos::apps::LaunchDispatchUsage dispatchUsage = gxos::apps::LaunchDispatchUsage::LegacyFallback;
+    const char* selectedDispatch = originalLegacyAppName;
+    if (desktop_str_eq(originalLegacyAppName, "AppModel") ||
+        target.type == gxos::apps::LaunchTargetType::ShellAction) {
+        dispatchUsage = gxos::apps::LaunchDispatchUsage::SpecialCaseFallback;
+    } else if (target.type == gxos::apps::LaunchTargetType::Unknown ||
+               desktop_str_eq(target.diagnosticStatus, "unresolved") ||
+               desktop_str_eq(target.diagnosticStatus, "unsupported-target")) {
+        dispatchUsage = gxos::apps::LaunchDispatchUsage::BlockedUnknownFallback;
+    } else if ((target.type == gxos::apps::LaunchTargetType::BuiltInApp ||
+                target.type == gxos::apps::LaunchTargetType::LegacyAlias) &&
+               typedDispatchCandidate && typedDispatchCandidate[0]) {
+        dispatchUsage = gxos::apps::LaunchDispatchUsage::TypedDispatch;
+        if (target.type != gxos::apps::LaunchTargetType::LegacyAlias) {
+            selectedDispatch = typedDispatchCandidate;
+        }
+    }
 
     serial::puts("[LaunchTargetShadow] source=");
     serial::puts(source ? source : "BareMetalStaticApp");
@@ -410,6 +426,11 @@ static void log_bare_metal_static_app_shadow_only_observation(
     serial::puts(candidateStatus);
     serial::puts(" typedDispatchCandidateReason=");
     serial::puts(candidateReason);
+    serial::puts(" dispatchUsage=");
+    serial::puts(gxos::apps::ToString(dispatchUsage));
+    serial::puts(" selectedDispatch=");
+    serial::puts(selectedDispatch);
+    serial::puts(" behaviorPreserved=true");
     serial::puts(" status=");
     serial::puts(target.diagnosticStatus);
     serial::puts(" reason=");
@@ -466,6 +487,9 @@ static void log_bare_metal_fileopen_shadow_only_observation(const char* source, 
     serial::puts(adapterStatus);
     serial::puts(" adapterReason=");
     serial::puts(adapterReason);
+    serial::puts(" dispatchUsage=legacy-fallback selectedDispatch=");
+    serial::puts(handlerName);
+    serial::puts(" behaviorPreserved=true");
     serial::puts(" status=");
     serial::puts(target.diagnosticStatus);
     serial::puts(" reason=");
@@ -5962,24 +5986,72 @@ static bool load_icon_positions()
 }
 
 // Helper: try to launch an app using the kernel app framework
+static const char* select_bare_metal_launch_dispatch(const char* originalAppName, const char* source)
+{
+    if (!originalAppName || !originalAppName[0]) return originalAppName;
+
+    const gxos::apps::LaunchTarget target = appmodel::resolveLaunchTarget(originalAppName);
+    const bool specialCase = desktop_str_eq(originalAppName, "AppModel") ||
+        desktop_str_eq(originalAppName, "ComputerFiles");
+    gxos::apps::LaunchDispatchUsage usage = gxos::apps::LaunchDispatchUsage::LegacyFallback;
+    const char* selectedDispatch = originalAppName;
+    const char* reason = "Known target type is not yet enabled for typed dispatch";
+
+    if (specialCase) {
+        usage = gxos::apps::LaunchDispatchUsage::SpecialCaseFallback;
+        reason = "Target retains target-specific legacy or embedded launch behavior";
+    } else if (target.type == gxos::apps::LaunchTargetType::Unknown ||
+               desktop_str_eq(target.diagnosticStatus, "unresolved") ||
+               desktop_str_eq(target.diagnosticStatus, "unsupported-target")) {
+        usage = gxos::apps::LaunchDispatchUsage::BlockedUnknownFallback;
+        reason = "Target is blocked, unsupported, unknown, or unclassified";
+    } else if ((target.type == gxos::apps::LaunchTargetType::BuiltInApp ||
+                target.type == gxos::apps::LaunchTargetType::LegacyAlias) &&
+               target.dispatchLaunchName && target.dispatchLaunchName[0]) {
+        usage = gxos::apps::LaunchDispatchUsage::TypedDispatch;
+        if (target.type != gxos::apps::LaunchTargetType::LegacyAlias) {
+            selectedDispatch = target.dispatchLaunchName;
+            reason = "Resolver classified target as typed-dispatch ready";
+        } else {
+            reason = "Resolver classified alias as typed-ready; compatibility alias remains the selected dispatch";
+        }
+    }
+
+    serial::puts("[LaunchDispatch] source=");
+    serial::puts(source ? source : "BareMetalKernelApp");
+    serial::puts(" target=");
+    serial::puts(originalAppName);
+    serial::puts(" resolvedType=");
+    serial::puts(gxos::apps::ToString(target.type));
+    serial::puts(" appId=");
+    serial::puts(target.appId);
+    serial::puts(" usage=");
+    serial::puts(gxos::apps::ToString(usage));
+    serial::puts(" selectedDispatch=");
+    serial::puts(selectedDispatch);
+    serial::puts(" behaviorPreserved=true reason=");
+    serial::puts(reason);
+    serial::puts("\n");
+    return selectedDispatch;
+}
+
 static bool try_launch_kernel_app(const char* appName)
 {
     if (!appName) return false;
+    const char* selectedDispatch = select_bare_metal_launch_dispatch(appName, "BareMetalKernelApp");
     
     // Check if app is available in kernel mode
-    if (app::AppManager::isAppAvailable(appName)) {
+    if (app::AppManager::isAppAvailable(selectedDispatch)) {
 #if defined(GXOS_APPMODEL_TYPED_DISPATCH_SHADOW_ONLY) && defined(GXOS_BARE_METAL)
         log_bare_metal_static_app_shadow_only_observation(appName);
 #endif
-        // SHADOW_ONLY observation above is diagnostic-only; AppManager still receives
-        // the original legacy bare-metal app name.
-        return app::AppManager::launchApp(appName);
+        return app::AppManager::launchApp(selectedDispatch);
     }
     
     // Debug: Check registered app count to see if registration worked
     int regCount = 0;
     for (int i = 0; i < app::MAX_APPS; i++) {
-        const app::AppInfo* info = app::AppManager::getAppInfo(appName);
+        const app::AppInfo* info = app::AppManager::getAppInfo(selectedDispatch);
         if (info) {
             regCount++;
             break;

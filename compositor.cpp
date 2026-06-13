@@ -1228,6 +1228,19 @@ namespace gxos {
             std::string aliasFallbackLine;
             lines.push_back(buildLaunchTargetShadowDiagnosticLine(source, uiLabel, shortcutTarget, dispatchName, &aliasFallbackLine));
             if (!aliasFallbackLine.empty()) lines.push_back(aliasFallbackLine);
+            const LaunchDispatchDecision dispatchDecision = DesktopService::SelectLaunchDispatch(dispatchName);
+            DesktopService::RecordLaunchDispatchDecision("HostedLaunchShadowSmoke", dispatchDecision);
+            std::ostringstream dispatchLine;
+            dispatchLine << "[LaunchDispatch] source=" << source
+                << " target=" << dispatchDecision.originalDispatch
+                << " resolvedType=" << apps::ToString(dispatchDecision.target.type)
+                << " appId=" << dispatchDecision.target.appId
+                << " usage=" << apps::ToString(dispatchDecision.usage)
+                << " selectedDispatch=" << dispatchDecision.selectedDispatch
+                << " behaviorPreserved=true"
+                << " smokeSelectionOnly=true"
+                << " reason=" << dispatchDecision.reason;
+            lines.push_back(dispatchLine.str());
             if (emitLogs) {
                 for (const std::string& line : lines) Logger::write(LogLevel::Info, line);
             }
@@ -1300,6 +1313,7 @@ namespace gxos {
                 for (const std::string& line : lines) oss << "  " << line << "\n";
             }
             oss << "summary:\n" << DesktopService::AppModelSummaryDiagnostic();
+            oss << "dispatchUsage:\n" << DesktopService::LaunchDispatchUsageDiagnostic();
             oss << "coverage:\n" << DesktopService::BuiltInAppMetadataCoverageDiagnostic();
             oss << "runtimeLaunchBehaviorChanged: false\n";
             std::string evidenceError;
@@ -1323,6 +1337,8 @@ namespace gxos {
             Logger::write(LogLevel::Info, std::string("Desktop launch: ") + act);
             addRecent(act);
             if (act == "App Model Demo" || act == "AppModel") {
+                const LaunchDispatchDecision dispatchDecision = DesktopService::SelectLaunchDispatch(act);
+                DesktopService::RecordLaunchDispatchDecision("HostedCompositorEmbeddedAction", dispatchDecision);
                 openAppModelDemoViewerWindow();
                 return;
             }

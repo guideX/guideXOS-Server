@@ -446,7 +446,7 @@ $checks = @(
     "case=UnknownProbe",
     "inputLabel=`"FakeLaunchShadowApp`"",
     "comparison=unexpected-mismatch",
-    "summary: observations=8 matches=5 acceptedMismatches=1 expectedUnsupported=1 unexpectedMismatches=1 nonFatal=true",
+    "summary: observations=8 matches=5 acceptedMismatches=1 expectedUnsupported=1 unexpectedMismatches=1 typedDispatch=5 legacyFallback=1 blockedUnknownFallback=2 specialCaseFallback=0 nonFatal=true",
     "runtimeLaunchBehaviorChanged: false",
     "[APPMODEL-LAUNCHSHADOW-SMOKE] issuing folder FileOpen SHADOW_ONLY probe",
     "source=SmokeFolderFileOpen",
@@ -894,6 +894,10 @@ foreach ($row in $unexpectedRows) {
 }
 
 $runtimeLaunchBehaviorUnchanged = $output.Contains("runtimeLaunchBehaviorChanged: false")
+$typedDispatchUsageConfirmed = $output.Contains("dispatchUsage=typed-dispatch")
+$legacyFallbackUsageConfirmed = $output.Contains("dispatchUsage=legacy-fallback")
+$blockedUnknownFallbackUsageConfirmed = $output.Contains("dispatchUsage=blocked-unknown-fallback")
+$specialCaseFallbackUsageConfirmed = $output.Contains("dispatchUsage=special-case-fallback")
 $imgViewerExpectedUnsupportedConfirmed =
     $output.Contains("case=ImageViewerStaticAlias") -and
     $output.Contains("inputLabel=`"ImgViewer`"") -and
@@ -1335,6 +1339,18 @@ $persistentDesktopStorageWritesAbsent =
 
 if ($unexpectedRows.Count -ne 1) {
     $failed += "Expected exactly one unexpected-mismatch row, found $($unexpectedRows.Count)"
+}
+if (-not $typedDispatchUsageConfirmed) {
+    $failed += "Typed dispatch usage evidence was not observed"
+}
+if (-not $legacyFallbackUsageConfirmed) {
+    $failed += "Legacy fallback usage evidence was not observed"
+}
+if (-not $blockedUnknownFallbackUsageConfirmed) {
+    $failed += "Blocked/unknown fallback usage evidence was not observed"
+}
+if (-not $specialCaseFallbackUsageConfirmed) {
+    $failed += "Special-case fallback usage evidence was not observed"
 }
 if (-not $realBranchFileAssociationsConfirmed) {
     $failed += "Real-branch .log, .cfg, and .ini shortcut/filesystem rows did not match the expected Notepad FileOpen evidence"
