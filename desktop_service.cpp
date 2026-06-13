@@ -66,6 +66,21 @@ namespace gxos {
             std::lock_guard<std::mutex> lock(s_typedDispatchRuntimeEnabledMutex);
             s_typedDispatchRuntimeEnabled = enabled;
         }
+
+        class TypedDispatchRuntimeGateOverride {
+        public:
+            explicit TypedDispatchRuntimeGateOverride(bool enabled)
+                : m_restoreEnabled(TypedDispatchRuntimeEnabled()) {
+                SetTypedDispatchRuntimeEnabledForDiagnostics(enabled);
+            }
+
+            ~TypedDispatchRuntimeGateOverride() {
+                SetTypedDispatchRuntimeEnabledForDiagnostics(m_restoreEnabled);
+            }
+
+        private:
+            bool m_restoreEnabled;
+        };
     }
 
     /// <summary>
@@ -3040,11 +3055,15 @@ namespace gxos {
 
             const bool gateRestoreEnabled = apps::TypedDispatchRuntimeEnabled();
             const bool forceOffRequested = mode == "force-off" || mode == "forced-off" || mode == "off";
+            bool runtimeGateEnabled = gateRestoreEnabled;
+            TypedDispatchGateMatrixCounts gateMatrix;
             if (forceOffRequested) {
-                apps::SetTypedDispatchRuntimeEnabledForDiagnostics(false);
+                apps::TypedDispatchRuntimeGateOverride gateOverride(false);
+                runtimeGateEnabled = apps::TypedDispatchRuntimeEnabled();
+                gateMatrix = typedDispatchGateMatrixCounts();
+            } else {
+                gateMatrix = typedDispatchGateMatrixCounts();
             }
-            const bool runtimeGateEnabled = apps::TypedDispatchRuntimeEnabled();
-            const TypedDispatchGateMatrixCounts gateMatrix = typedDispatchGateMatrixCounts();
             const bool forcedOffSupported = true;
             const bool forcedOffSafe =
                 gateMatrix.total == 8 &&
@@ -3052,9 +3071,6 @@ namespace gxos {
                 gateMatrix.legacyOrCompatibilityDispatch == (runtimeGateEnabled ? 0 : 5) &&
                 gateMatrix.blockedUnknownFallback == 1 &&
                 gateMatrix.specialCaseFallback == 2;
-            if (forceOffRequested) {
-                apps::SetTypedDispatchRuntimeEnabledForDiagnostics(gateRestoreEnabled);
-            }
             const bool gateRestored = apps::TypedDispatchRuntimeEnabled() == gateRestoreEnabled;
 
             unsigned int passCount = 0;
