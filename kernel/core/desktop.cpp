@@ -21,6 +21,8 @@
 #include "include/kernel/kernel_apps.h"
 #include "include/kernel/kernel_compositor.h"
 #include "include/kernel/kernel_ipc.h"
+#include "include/kernel/input_manager.h"
+#include "include/kernel/pit.h"
 #include "include/kernel/ps2keyboard.h"
 #include "include/kernel/serial_debug.h"
 #include "include/kernel/system_font.h"
@@ -6195,6 +6197,40 @@ void tick()
     
     // Update taskbar buttons for kernel apps
     compositor::TaskbarManager::updateButtons();
+}
+
+void cooperative_yield()
+{
+    static bool pumping = false;
+    static bool logged = false;
+    static uint32_t lastPresentTick = 0;
+    if (pumping || !s_initialized) return;
+    pumping = true;
+
+    if (!logged) {
+        serial::puts("[DESKTOP] cooperative_ui_pump=input+render\n");
+        logged = true;
+    }
+
+    input::poll();
+    if (input::mouse_dirty()) {
+        input::mouse_clear_dirty();
+        handle_mouse(input::mouse_x(), input::mouse_y(), input::mouse_buttons());
+    }
+
+    if (ps2keyboard::has_key()) {
+        uint32_t key = ps2keyboard::get_key();
+        if (key != 0) handle_key(key);
+    }
+
+    const uint32_t now = (uint32_t)pit::ticks();
+    if (now - lastPresentTick >= 10) {
+        lastPresentTick = now;
+        draw();
+        draw_cursor(input::mouse_x(), input::mouse_y());
+    }
+
+    pumping = false;
 }
 
 

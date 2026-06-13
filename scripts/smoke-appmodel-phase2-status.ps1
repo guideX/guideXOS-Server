@@ -102,6 +102,68 @@ function Read-KeyValueEvidence {
     return $values
 }
 
+function Get-LaunchTargetComparisonReadinessSummary {
+    param([object]$Output)
+
+    # The buckets below are diagnostic overlays, not a strict partition.
+    # One comparison row may contribute to a type bucket and a special-case bucket.
+    $summary = [ordered]@{
+        totalObservedLaunchTargets = 0
+        typedDispatchReadyCount = 0
+        typedDispatchBlockedCount = 0
+        unknownOrUnclassifiedCount = 0
+        legacyAliasCount = 0
+        builtInAppCount = 0
+        shellActionCount = 0
+        fileOpenCount = 0
+        specialCaseCount = 0
+    }
+
+    $inComparisonSection = $false
+    foreach ($rawLine in @($Output)) {
+        $line = $rawLine.ToString()
+        if ($line -eq "[LaunchTargetComparison]") {
+            $inComparisonSection = $true
+            continue
+        }
+        if ($inComparisonSection -and $line.StartsWith("overall:")) {
+            break
+        }
+        if (-not $inComparisonSection) {
+            continue
+        }
+        if ($line -notmatch '^\s+label=.*\sresult=') {
+            continue
+        }
+
+        $summary.totalObservedLaunchTargets++
+
+        $result = ""
+        $hostedType = ""
+        $bareMetalType = ""
+        if ($line -match 'result=([^\s]+)') { $result = $matches[1] }
+        if ($line -match 'hosted\{type=([^\s]+)') { $hostedType = $matches[1] }
+        if ($line -match 'bareMetal\{type=([^\s]+)') { $bareMetalType = $matches[1] }
+
+        switch ($result) {
+            "exact" { $summary.typedDispatchReadyCount++ }
+            "accepted-alias" { $summary.typedDispatchReadyCount++ }
+            "intentional-difference" { $summary.typedDispatchBlockedCount++; $summary.specialCaseCount++ }
+            "unexpected-drift" { $summary.typedDispatchBlockedCount++ }
+            default { $summary.typedDispatchBlockedCount++ }
+        }
+
+        if ($hostedType -eq "Unknown" -or $bareMetalType -eq "Unknown") { $summary.unknownOrUnclassifiedCount++ }
+        if ($hostedType -eq "LegacyAlias" -or $bareMetalType -eq "LegacyAlias") { $summary.legacyAliasCount++ }
+        if ($hostedType -eq "BuiltInApp" -or $bareMetalType -eq "BuiltInApp") { $summary.builtInAppCount++ }
+        if ($hostedType -eq "ShellAction" -or $bareMetalType -eq "ShellAction") { $summary.shellActionCount++ }
+        if ($hostedType -eq "FileOpen" -or $bareMetalType -eq "FileOpen") { $summary.fileOpenCount++ }
+    }
+
+    $summary.phase3TypedDispatchReadiness = if ($summary.totalObservedLaunchTargets -gt 0) { "report-only" } else { "not-observed" }
+    return [pscustomobject]$summary
+}
+
 function Test-EvidenceValues {
     param(
         [hashtable]$Evidence,
@@ -201,10 +263,11 @@ try {
         "gui.start",
         "gui.smoke.launchshadow",
         "desktop.appmodel.summary",
+        "desktop.launch.compare",
         "desktop.appmodel.typed-dispatch-gate",
         "desktop.launch.storage"
     )
-    [void]$CommandsRun.Add(".\guideXOSServer.exe < gui.start; gui.smoke.launchshadow; desktop.appmodel.summary; desktop.appmodel.typed-dispatch-gate; desktop.launch.storage; exit")
+    [void]$CommandsRun.Add(".\guideXOSServer.exe < gui.start; gui.smoke.launchshadow; desktop.appmodel.summary; desktop.launch.compare; desktop.appmodel.typed-dispatch-gate; desktop.launch.storage; exit")
     try {
         $hostedOutput = Invoke-ServerCommands -Commands $hostedCommands
         Add-LogSection "hosted-appmodel-output" $hostedOutput
@@ -262,6 +325,24 @@ try {
             Add-Check "phase3PilotScaffoldingDefaultOff" "PASS" "all Phase 3 pilot flags OFF; no typed dispatch fed into launch; runtime behavior unchanged"
         } else {
             Add-Check "phase3PilotScaffoldingDefaultOff" "FAIL" "one or more Phase 3 pilot default-off markers missing from hosted output"
+        }
+
+        $phase3Readiness = Get-LaunchTargetComparisonReadinessSummary -Output $hostedOutput
+        $phase3ReadinessOk =
+            $phase3Readiness.phase3TypedDispatchReadiness -eq "report-only" -and
+            $phase3Readiness.totalObservedLaunchTargets -eq 8 -and
+            $phase3Readiness.typedDispatchReadyCount -eq 6 -and
+            $phase3Readiness.typedDispatchBlockedCount -eq 2 -and
+            $phase3Readiness.specialCaseCount -eq 2 -and
+            $phase3Readiness.legacyAliasCount -eq 2 -and
+            $phase3Readiness.builtInAppCount -eq 5 -and
+            $phase3Readiness.shellActionCount -eq 1 -and
+            $phase3Readiness.fileOpenCount -eq 0 -and
+            $phase3Readiness.unknownOrUnclassifiedCount -eq 2
+        if ($phase3ReadinessOk) {
+            Add-Check "phase3TypedDispatchReadiness" "PASS" "phase3TypedDispatchReadiness=report-only totalObservedLaunchTargets=8 typedDispatchReadyCount=6 typedDispatchBlockedCount=2 unknownOrUnclassifiedCount=2 legacyAliasCount=2 builtInAppCount=5 shellActionCount=1 fileOpenCount=0 specialCaseCount=2"
+        } else {
+            Add-Check "phase3TypedDispatchReadiness" "FAIL" "missing or unexpected Phase 3A readiness summary in hosted appmodel output"
         }
     } catch {
         Add-Check "hostedDiagnostics" "FAIL" $_.Exception.Message
@@ -416,6 +497,7 @@ try {
         "launchesApps=false",
         "qemuOptional=true",
         "status=$overall",
+        "phase3TypedDispatchReadiness=$($phase3Readiness.phase3TypedDispatchReadiness) totalObservedLaunchTargets=$($phase3Readiness.totalObservedLaunchTargets) typedDispatchReadyCount=$($phase3Readiness.typedDispatchReadyCount) typedDispatchBlockedCount=$($phase3Readiness.typedDispatchBlockedCount) unknownOrUnclassifiedCount=$($phase3Readiness.unknownOrUnclassifiedCount) legacyAliasCount=$($phase3Readiness.legacyAliasCount) builtInAppCount=$($phase3Readiness.builtInAppCount) shellActionCount=$($phase3Readiness.shellActionCount) fileOpenCount=$($phase3Readiness.fileOpenCount) specialCaseCount=$($phase3Readiness.specialCaseCount)",
         "appModelPhase2LaunchShadowCoverageAudit=$coverageAudit",
         "appModelPhase2KnownDriftsDocumented=$knownDriftsDocumented",
         "appModelPhase2DeferredAssociationsDocumented=$deferredAssociationsDocumented",

@@ -20,6 +20,6 @@
   Compiling x86 arch.cpp...
 <command-line> : fatal error : mbedtls-guidexos-defines.h: No such file or directory
   [ERROR] Failed to compile x86 arch.cpp
-  Press any key to continue . . . 
   compilation terminated.
+  Press any key to continue . . . 
 C:\Program Files\Microsoft Visual Studio\18\Community\MSBuild\Microsoft\VC\v170\Microsoft.MakeFile.Targets(45,5): error MSB3073: The command "cd kernel && build-x86.bat" exited with code 1.

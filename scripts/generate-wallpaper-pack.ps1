@@ -934,9 +934,9 @@ New-Item -ItemType Directory -Force -Path $configNavigatorDir | Out-Null
 $navigatorChromeAssets = [ordered]@{
     "nav-back.png"      = "assets\Images\NuoveXT\PNG\32\above_thearrow_10194.png"
     "nav-next.png"      = "assets\Images\NuoveXT\PNG\32\Next_arrow_10211.png"
-    "nav-reload.png"    = "assets\Images\NuoveXT\PNG\32\refresh_arrow_10190.png"
+    "reload.png"        = "assets\Images\NuoveXT\PNG\32\refresh_arrow_10190.png"
     "nav-home.png"      = "assets\Images\NuoveXT\PNG\32\gohome_action_ir_10235.png"
-    "nav-bookmarks.png" = "assets\Images\NuoveXT\PNG\32\markers_list_add_favorites_10275.png"
+    "marks.png"         = "assets\Images\NuoveXT\PNG\32\markers_list_add_favorites_10275.png"
     "nav-add.png"       = "assets\Images\NuoveXT\PNG\32\edit_add_10261.png"
 }
 for ($frame = 0; $frame -lt 12; $frame++) {

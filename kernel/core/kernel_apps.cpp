@@ -4889,7 +4889,7 @@ NavigatorApp::NavigatorApp()
       m_mouseMode(NAV_MOUSE_NONE), m_mouseDownLinkIndex(-1), m_mouseDownX(0), m_mouseDownY(0), m_mouseDragThresholdExceeded(false),
       m_backBtnId(-1), m_forwardBtnId(-1), m_reloadBtnId(-1), m_homeBtnId(-1),
       m_bookmarksBtnId(-1), m_addBookmarkBtnId(-1),
-      m_loading(false), m_throbberFrame(0), m_throbberTick(0),
+      m_loading(false), m_throbberFrame(0), m_loadingStartTick(0),
       m_focusedFormBlock(-1), m_formCaret(0)
 {
     strcopy(m_status, "Ready", MAX_STATUS_LEN);
@@ -5011,9 +5011,10 @@ void NavigatorApp::shutdown() {
 void NavigatorApp::update()
 {
     if (!m_loading) return;
-    if (++m_throbberTick >= 6) {
-        m_throbberTick = 0;
-        m_throbberFrame = (m_throbberFrame + 1) % 12;
+    const uint32_t now = (uint32_t)kernel::pit::ticks();
+    const int frame = (int)(((now - m_loadingStartTick) / 10u) % 12u);
+    if (frame != m_throbberFrame) {
+        m_throbberFrame = frame;
         invalidate();
     }
 }
@@ -5042,8 +5043,11 @@ void NavigatorApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h)
         }
     }
 
-    if (m_loading && m_throbberFrames[m_throbberFrame].status == gxos::gui::ImageLoadStatus::Ok) {
-        gxos::gui::ImageAdapter::DrawToFramebuffer(m_throbberFrames[m_throbberFrame],
+    const int throbberFrame = m_loading
+        ? (int)((((uint32_t)kernel::pit::ticks() - m_loadingStartTick) / 10u) % 12u)
+        : 0;
+    if (m_loading && m_throbberFrames[throbberFrame].status == gxos::gui::ImageLoadStatus::Ok) {
+        gxos::gui::ImageAdapter::DrawToFramebuffer(m_throbberFrames[throbberFrame],
                                                    x + w - 46, y + ADDRESS_Y, 22, 22);
     }
 
@@ -5439,18 +5443,41 @@ void NavigatorApp::updateButtons()
 
 void NavigatorApp::loadChromeImages()
 {
-    static const char* toolbarPaths[6] = {
-        "/config/navigator/nav-back.png", "/config/navigator/nav-next.png",
-        "/config/navigator/nav-reload.png", "/config/navigator/nav-home.png",
-        "/config/navigator/nav-bookmarks.png", "/config/navigator/nav-add.png"
+    static const char* toolbarNames[6] = {
+        "nav-back.png", "nav-next.png", "reload.png",
+        "nav-home.png", "marks.png", "nav-add.png"
     };
-    for (int i = 0; i < 6; ++i) m_toolbarIcons[i] = gxos::gui::ImageAdapter::LoadFromFile(toolbarPaths[i]);
-    for (int i = 0; i < 12; ++i) {
-        char path[48] = "/config/navigator/surfer-00.png";
-        path[25] = (char)('0' + (i / 10));
-        path[26] = (char)('0' + (i % 10));
-        m_throbberFrames[i] = gxos::gui::ImageAdapter::LoadFromFile(path);
+    int toolbarLoaded = 0;
+    int throbberLoaded = 0;
+    for (int i = 0; i < 6; ++i) {
+        char path[64] = "/system/config/navigator/";
+        strappend(path, toolbarNames[i], sizeof(path));
+        m_toolbarIcons[i] = gxos::gui::ImageAdapter::LoadFromFile(path);
+        if (m_toolbarIcons[i].status != gxos::gui::ImageLoadStatus::Ok) {
+            strcopy(path, "/config/navigator/", sizeof(path));
+            strappend(path, toolbarNames[i], sizeof(path));
+            m_toolbarIcons[i] = gxos::gui::ImageAdapter::LoadFromFile(path);
+        }
+        if (m_toolbarIcons[i].status == gxos::gui::ImageLoadStatus::Ok) ++toolbarLoaded;
     }
+    for (int i = 0; i < 12; ++i) {
+        char path[48] = "/system/config/navigator/surfer-00.png";
+        path[32] = (char)('0' + (i / 10));
+        path[33] = (char)('0' + (i % 10));
+        m_throbberFrames[i] = gxos::gui::ImageAdapter::LoadFromFile(path);
+        if (m_throbberFrames[i].status != gxos::gui::ImageLoadStatus::Ok) {
+            strcopy(path, "/config/navigator/surfer-00.png", sizeof(path));
+            path[25] = (char)('0' + (i / 10));
+            path[26] = (char)('0' + (i % 10));
+            m_throbberFrames[i] = gxos::gui::ImageAdapter::LoadFromFile(path);
+        }
+        if (m_throbberFrames[i].status == gxos::gui::ImageLoadStatus::Ok) ++throbberLoaded;
+    }
+    serial::puts("[NAVIGATOR] toolbar_icons_loaded=");
+    serial_put_dec64((uint64_t)toolbarLoaded);
+    serial::puts("/6 throbber_frames_loaded=");
+    serial_put_dec64((uint64_t)throbberLoaded);
+    serial::puts("/12\n");
 }
 
 void NavigatorApp::setButtonIcon(int widgetId, const gxos::gui::ImageBitmap& image)
@@ -7292,6 +7319,9 @@ static void kernel_http_poll_once()
 {
     kernel::ipv4::poll_network();
     kernel::tcp::process_timers();
+    // TODO: Move bare-metal HTTP to a worker/job model. Until then, give the
+    // desktop a cooperative input/render cycle without owning Navigator animation.
+    kernel::desktop::cooperative_yield();
     for (volatile int d = 0; d < 20000; ++d) {}
 }
 
@@ -9621,9 +9651,18 @@ void NavigatorApp::loadFileUrl(const char* url)
 
 void NavigatorApp::loadUrl(const char* url)
 {
+    if (m_loading) {
+        setStatus("Navigation already in progress");
+        return;
+    }
+    static bool animationOwnerLogged = false;
+    if (!animationOwnerLogged) {
+        serial::puts("[NAVIGATOR] throbber_animation=passive_elapsed_time\n");
+        animationOwnerLogged = true;
+    }
     m_loading = true;
     m_throbberFrame = 0;
-    m_throbberTick = 0;
+    m_loadingStartTick = (uint32_t)kernel::pit::ticks();
     invalidate();
     char normalized[MAX_URL_LEN];
     normalizeUrl(url && url[0] ? url : "about:navigator", normalized, MAX_URL_LEN);

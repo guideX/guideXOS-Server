@@ -46,6 +46,10 @@ void draw();
 // Also updates IPC, running apps, and taskbar
 void tick();
 
+// Let a synchronous long-running kernel job cooperatively service input and
+// present the desktop without taking ownership of app animation state.
+void cooperative_yield();
+
 // Check if redraw is needed (called from main loop)
 bool needs_redraw();
 

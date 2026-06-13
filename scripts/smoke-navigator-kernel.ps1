@@ -788,6 +788,8 @@ if (-not [string]::IsNullOrWhiteSpace($realPublicProbeCaBundleSource)) {
 
 $commonChecks = @(
     "[NAVIGATOR-SMOKE] BEGIN",
+    "[NAVIGATOR] throbber_animation=passive_elapsed_time",
+    "[DESKTOP] cooperative_ui_pump=input+render",
     "[NAVIGATOR-SMOKE] registered=true",
     "[NAVIGATOR-SMOKE] runtime.mode=bare-metal/kernel",
     "[NAVIGATOR-SMOKE] launch.path=AppManager::registerApp -> NavigatorApp::create",

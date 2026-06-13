@@ -677,7 +677,7 @@ private:
     gxos::gui::ImageBitmap m_throbberFrames[12];
     bool m_loading;
     int m_throbberFrame;
-    int m_throbberTick;
+    uint32_t m_loadingStartTick;
     char m_metaRequestedUrl[MAX_URL_LEN];
     char m_metaFinalUrl[MAX_URL_LEN];
     char m_metaSourceType[24];
