@@ -274,6 +274,20 @@ function Get-LaunchTargetComparisonReadinessSummary {
     }
 }
 
+function Join-OrNone {
+    param([object[]]$Items)
+
+    $values = @(
+        $Items |
+            Where-Object { $null -ne $_ -and $_.ToString().Length -gt 0 } |
+            ForEach-Object { $_.ToString() }
+    )
+    if ($values.Count -eq 0) {
+        return "none"
+    }
+    return ($values -join ",")
+}
+
 function Test-EvidenceValues {
     param(
         [hashtable]$Evidence,
@@ -744,6 +758,57 @@ try {
     $phase3CandidateRanking = "1=StartMenuNotepad(BuiltInApp,match,no-drift);2=PinnedDesktopNotepad(BuiltInApp,match,no-drift);3=StartMenuCalculator(BuiltInApp,match,no-drift);4=StartMenuConsole(ShellAction,match,no-drift);5=StartMenuFiles(LegacyAlias,match,no-drift)"
     $phase3RejectedCandidates = "Settings(drift:resolves-to-DisplayOptions-not-Settings);ControlPanel(drift:embedded-state-vs-DisplayOptions);AppModel(unsupported-embedded-diagnostic-action);Computer/Documents/Pictures/Music/Network(unsupported-empty-typed-candidate);Navigator(browser-complexity);.md/.wav/.gxapp/.elf/.exe/images(deferred-or-unsupported);anything-with-hosted-bare-metal-mismatch"
 
+    # App Model v1 consolidation stays diagnostic-only and reuses existing smoke evidence.
+    $appmodelV1CoveredLaunchSurfaces = Join-OrNone @($phase3Readiness.records | ForEach-Object { $_.target })
+    $appmodelV1TypedReadyTargets = Join-OrNone @($phase3Readiness.records | Where-Object { $_.readiness -eq "ready" } | ForEach-Object { $_.target })
+    $appmodelV1LegacyFallbackTargets = Join-OrNone @($phase3Readiness.records | Where-Object { $_.dispatchUsage -eq "legacy-fallback" } | ForEach-Object { $_.target })
+    $appmodelV1SpecialCaseTargets = Join-OrNone @($phase3Readiness.records | Where-Object { $_.dispatchUsage -eq "special-case-fallback" } | ForEach-Object { $_.target })
+    $appmodelV1SyntheticNegativeTargets = Join-OrNone @($phase3Readiness.records | Where-Object { $_.dispatchUsage -eq "blocked-unknown-fallback" } | ForEach-Object { $_.target })
+    $appmodelV1CompatibilityFallbackClasses = Join-OrNone @(
+        $phase3Readiness.records |
+            Where-Object { $_.dispatchUsage -ne "typed-dispatch" } |
+            ForEach-Object {
+                switch ($_.target) {
+                    "AppModel" { "LegacyAlias" }
+                    "ComputerFiles" { "CompatibilityBridge" }
+                    "TotallyUnknownLaunchThing" { "Unknown" }
+                    default { $_.resolvedType }
+                }
+            } |
+            Sort-Object -Unique
+    )
+    $appmodelV1UnexplainedBlockers = @(
+        $phase3Readiness.blockedTargets |
+            Where-Object { $_ -notin @("AppModel", "ComputerFiles", "TotallyUnknownLaunchThing") } |
+            Sort-Object -Unique
+    )
+    $appmodelV1RuntimeBehaviorChanged = -not $hostedLaunchShadowSafe
+    $appmodelV1QemuCoverageStatus = if ($coverageAudit -eq "pass") { "PASS" } elseif ($IncludeQemu) { "FAIL" } else { "NOT-RUN" }
+    $appmodelV1NotReadyReasons = New-Object System.Collections.Generic.List[string]
+    if ($overall -ne "PASS") { [void]$appmodelV1NotReadyReasons.Add("normalSmokeStatus=$overall") }
+    if ([string]::IsNullOrWhiteSpace($typedDispatchGateName)) { [void]$appmodelV1NotReadyReasons.Add("featureGateMissing") }
+    if (-not $typedDispatchGateDefaultEnabled) { [void]$appmodelV1NotReadyReasons.Add("typedDispatchDefault=disabled") }
+    if (-not $typedDispatchGateForcedOffSafe) { [void]$appmodelV1NotReadyReasons.Add("featureGateForcedOffSafe=false") }
+    if (-not $typedDispatchGateRestored) { [void]$appmodelV1NotReadyReasons.Add("featureGateRestored=false") }
+    if (-not $phase3DispatchCountersOk) { [void]$appmodelV1NotReadyReasons.Add("dispatchCountersMismatch") }
+    if (-not $phase3LegacyLabelsPreserved) { [void]$appmodelV1NotReadyReasons.Add("legacyLabelsPreserved=false") }
+    if (-not $phase3ComputerFilesBridgeObserved) { [void]$appmodelV1NotReadyReasons.Add("ComputerFilesUnexplained") }
+    if (-not $phase3AppModelSpecialCaseObserved) { [void]$appmodelV1NotReadyReasons.Add("AppModelUnexplained") }
+    if (-not $phase3UnknownNegativeTestContained) { [void]$appmodelV1NotReadyReasons.Add("syntheticNegativeTargetsIncomplete") }
+    if ($appmodelV1UnexplainedBlockers.Count -gt 0) {
+        [void]$appmodelV1NotReadyReasons.Add("unexplainedBlockers=$([string]::Join(',', $appmodelV1UnexplainedBlockers))")
+    }
+    if ($appmodelV1QemuCoverageStatus -ne "PASS") { [void]$appmodelV1NotReadyReasons.Add("qemuLaunchShadowCoverage=$appmodelV1QemuCoverageStatus") }
+    if ($appmodelV1RuntimeBehaviorChanged) { [void]$appmodelV1NotReadyReasons.Add("runtimeBehaviorChanged=true") }
+    $appmodelV1Status = if ($appmodelV1NotReadyReasons.Count -eq 0) { "ready" } else { "not-ready" }
+    $appmodelV1ConsolidationPass = $appmodelV1Status -eq "ready"
+    $appmodelV1CompatibilityFallbacksPreserved =
+        $phase3LegacyLabelsPreserved -and
+        $phase3ComputerFilesBridgeObserved -and
+        $phase3AppModelSpecialCaseObserved -and
+        $phase3UnknownNegativeTestContained -and
+        ($phase3Readiness.actualFallbackTotal -eq 3)
+
     $reportLines = @(
         "[AppModelPhase2Status]",
         "mode=typed-ready-dispatch-validation",
@@ -825,6 +890,32 @@ try {
         "appModelPhase3PilotScopedToStartMenuNotepad=false",
         "appModelPhase3PilotDefaultBuildSafe=true",
         "appModelPhase3PilotScaffoldingNote=historical pilot flags remain default-off; ready-only typed dispatch is active with compatibility fallbacks",
+        "[AppModelV1StatusConsolidation]",
+        "appmodel.v1.status=$appmodelV1Status",
+        "appmodel.v1.notReadyReasons=$(if ($appmodelV1Status -eq 'not-ready') { [string]::Join(',', $appmodelV1NotReadyReasons) } else { 'none' })",
+        "appmodel.v1.status-consolidation: $(if ($appmodelV1ConsolidationPass) { 'PASS' } else { 'FAIL' })",
+        "appmodel.v1.normalSmokeStatus=$overall",
+        "appmodel.v1.qemuLaunchShadowCoverage=$appmodelV1QemuCoverageStatus",
+        "appmodel.v1.typedDispatchFeatureGate=$typedDispatchGateName",
+        "appmodel.v1.typedDispatchDefault=enabled",
+        "appmodel.v1.typedDispatchRuntimePath=active",
+        "appmodel.v1.totalDispatchDecisions=$($phase3Readiness.totalObservedLaunchTargets)",
+        "appmodel.v1.typedDispatchCount=$($phase3Readiness.actualTypedDispatchCount)",
+        "appmodel.v1.legacyFallbackCount=$($phase3Readiness.actualLegacyFallbackCount)",
+        "appmodel.v1.blockedUnknownFallbackCount=$($phase3Readiness.actualBlockedUnknownFallbackCount)",
+        "appmodel.v1.specialCaseFallbackCount=$($phase3Readiness.actualSpecialCaseFallbackCount)",
+        "appmodel.v1.totalFallbackCount=$($phase3Readiness.actualFallbackTotal)",
+        "appmodel.v1.coveredLaunchSurfaces=$appmodelV1CoveredLaunchSurfaces",
+        "appmodel.v1.typedReadyTargets=$appmodelV1TypedReadyTargets",
+        "appmodel.v1.legacyFallbackTargets=$appmodelV1LegacyFallbackTargets",
+        "appmodel.v1.specialCaseTargets=$appmodelV1SpecialCaseTargets",
+        "appmodel.v1.syntheticNegativeTargets=$appmodelV1SyntheticNegativeTargets",
+        "appmodel.v1.compatibilityFallbackClasses=$appmodelV1CompatibilityFallbackClasses",
+        "appmodel.v1.unexplainedBlockers=$(Join-OrNone $appmodelV1UnexplainedBlockers)",
+        "appmodel.v1.runtimeBehaviorChanged=$($appmodelV1RuntimeBehaviorChanged.ToString().ToLowerInvariant())",
+        "appmodel.v1.featureGateForcedOffSafe=$($typedDispatchGateForcedOffSafe.ToString().ToLowerInvariant())",
+        "appmodel.v1.featureGateRestored=$($typedDispatchGateRestored.ToString().ToLowerInvariant())",
+        "appmodel.v1.compatibilityFallbacksPreserved=$($appmodelV1CompatibilityFallbacksPreserved.ToString().ToLowerInvariant())",
         "checks:"
     )
     foreach ($check in $Checks) {
