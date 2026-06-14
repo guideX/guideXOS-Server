@@ -213,9 +213,9 @@ namespace gxos {
         static std::vector<UiLaunchLabelDiagnostic> currentCompositorUiLaunchLabelsForDiagnostic() {
             // Diagnostic mirror of compositor UI labels only. This is not launch policy
             // and must stay read-only until the app launch rewrite phase.
-            // AppModel and ComputerFiles are intentionally preserved Phase 1 aliases:
-            // document them here so Phase 2 can replace ad hoc UI labels with a
-            // real launch-resolution surface without breaking existing config.
+            // AppModel and ComputerFiles are intentionally preserved compatibility
+            // bridge labels: document them here so later phases can replace ad hoc UI
+            // labels with a real launch-resolution surface without breaking config.
             return {
                 makeUiLaunchLabelDiagnostic("App Model Demo", "compositor launchAction special-case"),
                 makeUiLaunchLabelDiagnostic("AppModel", "compositor legacy AppModel alias", "App Model Demo", "legacy alias retained for old pins/config"),
@@ -223,7 +223,7 @@ namespace gxos {
                 makeUiLaunchLabelDiagnostic("ControlPanel", "desktop system/settings entry"),
                 makeUiLaunchLabelDiagnostic("TaskManager", "taskbar/system menu"),
                 makeUiLaunchLabelDiagnostic("Console", "taskbar/start menu shortcut"),
-                makeUiLaunchLabelDiagnostic("ComputerFiles", "desktop/start system file manager entry", "", "shell/system label; not a built-in metadata identity")
+                makeUiLaunchLabelDiagnostic("ComputerFiles", "desktop/start compatibility bridge to FileExplorer", "", "shell/system label; compatibility bridge, not a built-in metadata identity")
             };
         }
 
@@ -1499,7 +1499,7 @@ namespace gxos {
         static std::string launchTargetComparisonNote(const std::string& label, const std::string& status) {
             if (status == "exact") return "hosted and bare-metal diagnostic targets match";
             if (status == "accepted-alias") return "same app identity with an accepted legacy alias difference";
-            if (label == "ComputerFiles") return "hosted shell/system label; bare-metal uses separate right-column labels and system objects";
+            if (label == "ComputerFiles") return "hosted compatibility bridge to FileExplorer; bare-metal uses separate right-column labels and system objects";
             if (label == "AppModel") return "legacy app-model demo alias has target-specific dispatch names";
             return "investigate launch target drift before feeding typed targets into dispatch";
         }
@@ -1894,8 +1894,8 @@ namespace gxos {
                 return target;
             }
 
-            // Diagnostic-only shell/system label. ComputerFiles is a desktop shell
-            // affordance today, not a built-in app metadata identity.
+            // Diagnostic-only shell/system label. ComputerFiles is a compatibility
+            // bridge to FileExplorer behavior, not a built-in app metadata identity.
             if (label == "ComputerFiles") {
                 target.type = apps::LaunchTargetType::ShellAction;
                 target.displayName = "Computer Files";
@@ -1904,7 +1904,7 @@ namespace gxos {
                 target.hostedAvailable = true;
                 target.bareMetalAvailable = false;
                 target.diagnosticStatus = "resolved-shell";
-                target.diagnosticReason = "Shell/system label currently canonicalizes to FileExplorer in hosted dispatch; not a built-in app identity";
+                target.diagnosticReason = "Compatibility bridge canonicalizes to FileExplorer in hosted dispatch; not a built-in app identity";
                 return target;
             }
 
@@ -2031,7 +2031,9 @@ namespace gxos {
 
             if (isSpecialCaseLaunchTarget(originalDispatch)) {
                 decision.usage = apps::LaunchDispatchUsage::SpecialCaseFallback;
-                decision.reason = "Target retains target-specific legacy or embedded launch behavior";
+                decision.reason = originalDispatch == "ComputerFiles"
+                    ? "Compatibility bridge preserves the legacy ComputerFiles shell label while FileExplorer remains the canonical file-manager app"
+                    : "Target retains target-specific legacy or embedded launch behavior";
             } else if (decision.target.type == apps::LaunchTargetType::Unknown ||
                        decision.target.diagnosticStatus.rfind("unresolved", 0) == 0 ||
                        decision.target.diagnosticStatus.rfind("unsupported", 0) == 0) {
@@ -2606,7 +2608,7 @@ namespace gxos {
             oss << "  difference=hosted-desktop-json note=hosted owns live desktop.json pinned/recent/desktopShortcuts/iconPositions storage\n";
             oss << "  difference=bare-metal-vfs note=bare-metal owns VFS /desktop.shortcuts, /.desktop_icons, and /desktop.system.icons storage\n";
             oss << "  difference=start-menu-source note=hosted all-programs are registry-derived while bare-metal Start Menu arrays are static today\n";
-            oss << "  difference=shell-labels note=hosted ComputerFiles is a shell label while bare-metal uses Computer/Documents/Pictures/Music/Network/Settings labels\n";
+            oss << "  difference=compatibility-bridge note=hosted ComputerFiles bridges to FileExplorer while bare-metal uses Computer/Documents/Pictures/Music/Network/Settings labels\n";
             oss << "  difference=dynamic-runtime-sites note=desktop icon/taskbar runtime labels are target-specific and are not migrated in this diagnostic\n";
             oss << "  difference=bare-metal-imgviewer note=ImgViewer is a diagnostic-only legacy/static label for hosted ImageViewer and remains unsupported on bare-metal\n";
             oss << "unexpectedDrift: " << unexpectedDrift << "\n";

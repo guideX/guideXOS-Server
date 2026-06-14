@@ -5991,6 +5991,9 @@ static const char* select_bare_metal_launch_dispatch(const char* originalAppName
     if (!originalAppName || !originalAppName[0]) return originalAppName;
 
     const gxos::apps::LaunchTarget target = appmodel::resolveLaunchTarget(originalAppName);
+    // AppModel stays a true special case. ComputerFiles is a compatibility bridge
+    // label that preserves the legacy shell entry while FileExplorer remains the
+    // canonical file-manager app.
     const bool specialCase = desktop_str_eq(originalAppName, "AppModel") ||
         desktop_str_eq(originalAppName, "ComputerFiles");
     gxos::apps::LaunchDispatchUsage usage = gxos::apps::LaunchDispatchUsage::LegacyFallback;
@@ -5999,7 +6002,9 @@ static const char* select_bare_metal_launch_dispatch(const char* originalAppName
 
     if (specialCase) {
         usage = gxos::apps::LaunchDispatchUsage::SpecialCaseFallback;
-        reason = "Target retains target-specific legacy or embedded launch behavior";
+        reason = desktop_str_eq(originalAppName, "ComputerFiles")
+            ? "Compatibility bridge preserves the legacy ComputerFiles shell label while FileExplorer remains the canonical file-manager app"
+            : "Target retains target-specific legacy or embedded launch behavior";
     } else if (target.type == gxos::apps::LaunchTargetType::Unknown ||
                desktop_str_eq(target.diagnosticStatus, "unresolved") ||
                desktop_str_eq(target.diagnosticStatus, "unsupported-target")) {

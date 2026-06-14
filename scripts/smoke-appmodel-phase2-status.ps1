@@ -680,6 +680,11 @@ try {
         ($phase3Readiness.actualFallbackTotal -eq 3)
     Add-Check "appmodel.phase3.fallbacks-visible" $(if ($phase3FallbacksVisibleOk) { "PASS" } else { "FAIL" }) "blockedUnknown=TotallyUnknownLaunchThing; specialCase=AppModel,ComputerFiles; legacyFallbackCount=$($phase3Readiness.actualLegacyFallbackCount)"
 
+    $phase3ComputerFilesBridgeObserved =
+        (Text-Contains -Output $hostedOutput -Needle "label=ComputerFiles result=intentional-difference") -and
+        (Text-Contains -Output $hostedOutput -Needle "note=hosted compatibility bridge to FileExplorer; bare-metal uses separate right-column labels and system objects")
+    Add-Check "appmodel.phase3.computerfiles-bridge" $(if ($phase3ComputerFilesBridgeObserved) { "PASS" } else { "FAIL" }) "target=ComputerFiles classification=CompatibilityBridge dispatchDecision=special-case-fallback canonicalTarget=FileExplorer appId=gxos.builtin.fileexplorer actualDispatch=ComputerFiles expected=true safe=true reason=compatibility bridge preserves FileExplorer behavior"
+
     $phase3UnknownNegativeTestContained =
         $phase3BlockedUnknownTargets.Count -eq 1 -and
         $phase3BlockedUnknownTargets[0] -eq "TotallyUnknownLaunchThing"
@@ -702,7 +707,7 @@ try {
     $shellActionCompatibilityFallbackCount = 8
     $phase3BlockerLines = @(
         "target=AppModel classification=LegacyAlias dispatchDecision=special-case-fallback expected=true reason=embedded-app-model-viewer safe=true",
-        "target=ComputerFiles classification=ShellAction dispatchDecision=special-case-fallback expected=true reason=hosted-compatibility-bridge-bare-metal-uses-separate-shell-labels safe=true",
+        "target=ComputerFiles classification=CompatibilityBridge dispatchDecision=special-case-fallback canonicalTarget=FileExplorer appId=gxos.builtin.fileexplorer actualDispatch=ComputerFiles expected=true safe=true reason=compatibility bridge preserves FileExplorer behavior",
         "target=TotallyUnknownLaunchThing classification=Unknown dispatchDecision=blocked-unknown-fallback expected=true reason=synthetic-negative-test safe=true"
     )
 
@@ -766,7 +771,10 @@ try {
         "appModelPhase2LaunchShadowCoverageAudit=$coverageAudit",
         "appModelPhase2KnownDriftsDocumented=$knownDriftsDocumented",
         "appModelPhase2DeferredAssociationsDocumented=$deferredAssociationsDocumented",
-        "appModelPhase2ReadyForTypedDispatchPlanning=$readyForTypedDispatchPlanning"
+        "appModelPhase2ReadyForTypedDispatchPlanning=$readyForTypedDispatchPlanning",
+        "ComputerFilesSpecialCaseFallbackPreserved=$($phase3ComputerFilesBridgeObserved.ToString().ToLowerInvariant())",
+        "ComputerFilesSpecialCaseFallbackReason=compatibility bridge preserves FileExplorer behavior while keeping the legacy ComputerFiles shell label",
+        "ComputerFilesBehaviorPreserved=$($phase3ComputerFilesBridgeObserved.ToString().ToLowerInvariant())"
     )
     foreach ($line in $phase3TargetReadinessLines) {
         $reportLines += $line

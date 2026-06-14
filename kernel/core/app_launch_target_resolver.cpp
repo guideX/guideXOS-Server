@@ -934,7 +934,7 @@ static gxos::apps::LaunchTarget resolveHostedLaunchTargetForComparison(const cha
         target.hostedAvailable = true;
         target.bareMetalAvailable = false;
         target.diagnosticStatus = "resolved-shell";
-        target.diagnosticReason = "Hosted shell/system label currently canonicalizes to FileExplorer";
+        target.diagnosticReason = "Hosted compatibility bridge to FileExplorer; not a built-in app identity";
         return target;
     }
 
@@ -996,7 +996,7 @@ static const char* comparison_note(const char* label, const char* status)
 {
     if (text_equals(status, "exact")) return "hosted and bare-metal diagnostic targets match";
     if (text_equals(status, "accepted-alias")) return "same app identity with an accepted legacy alias difference";
-    if (text_equals(label, "ComputerFiles")) return "hosted shell/system label; bare-metal uses separate right-column labels and system objects";
+    if (text_equals(label, "ComputerFiles")) return "hosted compatibility bridge to FileExplorer; bare-metal uses separate right-column labels and system objects";
     if (text_equals(label, "AppModel")) return "legacy app-model demo alias has target-specific dispatch names";
     return "investigate launch target drift before feeding typed targets into dispatch";
 }
@@ -1271,7 +1271,7 @@ void printLaunchStoragePreviewComparisonDiagnostic(LaunchTargetDiagnosticWriter 
     write("  difference=hosted-desktop-json note=hosted owns live desktop.json pinned/recent/desktopShortcuts/iconPositions storage\n");
     write("  difference=bare-metal-vfs note=bare-metal owns VFS /desktop.shortcuts, /.desktop_icons, and /desktop.system.icons storage\n");
     write("  difference=start-menu-source note=hosted all-programs are registry-derived while bare-metal Start Menu arrays are static today\n");
-    write("  difference=shell-labels note=hosted ComputerFiles is a shell label while bare-metal uses Computer/Documents/Pictures/Music/Network/Settings labels\n");
+    write("  difference=compatibility-bridge note=hosted ComputerFiles bridges to FileExplorer while bare-metal uses Computer/Documents/Pictures/Music/Network/Settings labels\n");
     write("  difference=dynamic-runtime-sites note=desktop icon/taskbar runtime labels are target-specific and are not migrated in this diagnostic\n");
     write("  difference=bare-metal-imgviewer note=ImgViewer is a diagnostic-only legacy/static label for hosted ImageViewer and remains unsupported on bare-metal\n");
     write("unexpectedDrift: ");
