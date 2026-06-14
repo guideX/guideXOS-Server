@@ -126,6 +126,7 @@ namespace gxos { namespace apps {
         // Performance helpers
         static std::string formatMemory(uint64_t bytes);
         static std::string formatUptime(uint64_t ticks);
+        static void recordPerformanceSnapshot(const TaskManagerSnapshot& snapshot);
         
         // State
         static uint64_t s_windowId;
@@ -150,6 +151,10 @@ namespace gxos { namespace apps {
         static int s_diskPct;
         static int s_netPct;
         static int s_perfCategoryIndex; // 0=CPU, 1=Memory, 2=Disk, 3=Network
+        static const int kMemoryHistoryMax = 48;
+        static uint64_t s_memoryHistory[kMemoryHistoryMax];
+        static int s_memoryHistoryCount;
+        static int s_memoryHistoryHead;
         
         // System stats
         static uint64_t s_totalMemory;

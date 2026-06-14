@@ -40,6 +40,9 @@ namespace gxos { namespace apps {
     int TaskManager::s_diskPct = 0;
     int TaskManager::s_netPct = 0;
     int TaskManager::s_perfCategoryIndex = 0;
+    uint64_t TaskManager::s_memoryHistory[TaskManager::kMemoryHistoryMax] = {};
+    int TaskManager::s_memoryHistoryCount = 0;
+    int TaskManager::s_memoryHistoryHead = 0;
     
     // Memory Details tab
     uint64_t TaskManager::s_cumulativeAllocated = 0;
@@ -55,6 +58,109 @@ namespace gxos { namespace apps {
     }
 
     namespace {
+        static void publishTextAt(uint64_t windowId, int x, int y, const std::string& text) {
+            ipc::Message msg;
+            msg.type = (uint32_t)MsgType::MT_DrawTextAt;
+            std::ostringstream oss;
+            oss << windowId << "|" << x << "|" << y << "|" << text;
+            const std::string payload = oss.str();
+            msg.data.assign(payload.begin(), payload.end());
+            ipc::Bus::publish("gui.input", std::move(msg), false);
+        }
+
+        static void publishTextAtColor(uint64_t windowId, int x, int y, uint8_t r, uint8_t g, uint8_t b, const std::string& text) {
+            ipc::Message msg;
+            msg.type = (uint32_t)MsgType::MT_DrawTextAtColor;
+            std::ostringstream oss;
+            oss << windowId << "|" << x << "|" << y << "|" << static_cast<int>(r) << "|" << static_cast<int>(g) << "|" << static_cast<int>(b) << "|" << text;
+            const std::string payload = oss.str();
+            msg.data.assign(payload.begin(), payload.end());
+            ipc::Bus::publish("gui.input", std::move(msg), false);
+        }
+
+        static void publishRect(uint64_t windowId, int x, int y, int w, int h, uint8_t r, uint8_t g, uint8_t b) {
+            ipc::Message msg;
+            msg.type = (uint32_t)MsgType::MT_DrawRect;
+            std::ostringstream oss;
+            oss << windowId << "|" << x << "|" << y << "|" << w << "|" << h << "|"
+                << static_cast<int>(r) << "|" << static_cast<int>(g) << "|" << static_cast<int>(b);
+            const std::string payload = oss.str();
+            msg.data.assign(payload.begin(), payload.end());
+            ipc::Bus::publish("gui.input", std::move(msg), false);
+        }
+
+        static void clearWindow(uint64_t windowId) {
+            ipc::Message msg;
+            msg.type = (uint32_t)MsgType::MT_DrawText;
+            const std::string payload = std::to_string(windowId) + "|\f";
+            msg.data.assign(payload.begin(), payload.end());
+            ipc::Bus::publish("gui.input", std::move(msg), false);
+        }
+
+        static std::string pctOrNa(bool available, int pct) {
+            if (!available) return "N/A";
+            return std::to_string(pct) + "%";
+        }
+
+        static std::string trimDisplayName(const std::string& text, size_t maxChars) {
+            if (text.size() <= maxChars) return text;
+            if (maxChars <= 3) return text.substr(0, maxChars);
+            return text.substr(0, maxChars - 3) + "...";
+        }
+
+        static void drawGraphBox(uint64_t windowId,
+                                 int x,
+                                 int y,
+                                 int w,
+                                 int h,
+                                 const std::string& title,
+                                 const std::string& valueText,
+                                 bool hasData,
+                                 const uint64_t* history,
+                                 int historyCount,
+                                 int historyHead,
+                                 uint8_t accentR,
+                                 uint8_t accentG,
+                                 uint8_t accentB) {
+            publishRect(windowId, x, y, w, h, 0x22, 0x22, 0x22);
+            publishRect(windowId, x, y, w, 1, 0x44, 0x44, 0x44);
+            publishRect(windowId, x, y + h - 1, w, 1, 0x44, 0x44, 0x44);
+            publishRect(windowId, x, y, 1, h, 0x44, 0x44, 0x44);
+            publishRect(windowId, x + w - 1, y, 1, h, 0x44, 0x44, 0x44);
+            publishTextAtColor(windowId, x + 8, y + 6, accentR, accentG, accentB, title);
+            publishTextAt(windowId, x + w - 72, y + 6, valueText);
+
+            const int plotX = x + 8;
+            const int plotY = y + 22;
+            const int plotW = w - 16;
+            const int plotH = h - 30;
+
+            if (!hasData || historyCount <= 0 || plotW <= 0 || plotH <= 0) {
+                publishRect(windowId, plotX, plotY, plotW, plotH, 0x1B, 0x1B, 0x1B);
+                publishTextAtColor(windowId, plotX + 12, plotY + plotH / 2 - 4, 160, 160, 160, "N/A");
+                return;
+            }
+
+            publishRect(windowId, plotX, plotY, plotW, plotH, 0x19, 0x19, 0x19);
+            if (historyCount < 2) {
+                publishTextAtColor(windowId, plotX + 12, plotY + plotH / 2 - 4, accentR, accentG, accentB, valueText);
+                return;
+            }
+
+            const int barCount = historyCount < plotW ? historyCount : plotW;
+            const int columnWidth = barCount > 0 ? std::max(1, plotW / barCount) : 1;
+            const int start = historyCount < barCount ? 0 : historyCount - barCount;
+            constexpr int kHistoryMax = 48;
+            for (int i = 0; i < barCount; ++i) {
+                const int idx = (historyHead - historyCount + start + i + kHistoryMax) % kHistoryMax;
+                const int valuePct = static_cast<int>(history[idx]);
+                const int barHeight = std::max(1, (plotH * valuePct) / 100);
+                const int barX = plotX + i * columnWidth;
+                const int barY = plotY + plotH - barHeight;
+                publishRect(windowId, barX, barY, std::max(1, columnWidth - 1), barHeight, accentR, accentG, accentB);
+            }
+        }
+
         static std::string normalizeIdentityLabel(const std::string& value) {
             std::string normalized;
             normalized.reserve(value.size());
@@ -264,7 +370,7 @@ namespace gxos { namespace apps {
                 } else {
                     tombstone.reason = "stopped";
                 }
-                tombstone.restoreSupported = true;
+                tombstone.restoreSupported = false;
                 tombstone.endSupported = true;
                 snapshot.tombstoned.push_back(tombstone);
             }
@@ -279,6 +385,10 @@ namespace gxos { namespace apps {
         std::ostringstream oss;
         oss << "tabs=Processes,Performance,Tombstoned,Memory Details\n";
         oss << "title=Task Manager\n";
+        oss << "processColumns=Name,CPU%,Memory,Disk%,Network%\n";
+        oss << "performanceCategories=CPU,Memory,Disk,Network\n";
+        oss << "memoryDetailsSections=Memory Allocator Details;Free() Call Statistics;Heap Allocator\n";
+        oss << "tombstonedColumns=Name,PID,App ID,Reason,Restore,End\n";
         oss << "processes=" << snapshot.performance.processCount << "\n";
         oss << "memoryUsed=" << snapshot.memory.usedBytes << "\n";
         if (snapshot.memory.totalAvailable) {
@@ -297,6 +407,19 @@ namespace gxos { namespace apps {
         oss << "disk=N/A\n";
         oss << "network=N/A\n";
         oss << "tombstoned=" << snapshot.tombstoned.size() << "\n";
+        if (!snapshot.tombstoned.empty()) {
+            bool allRestoreSupported = true;
+            bool allEndSupported = true;
+            for (const auto& tomb : snapshot.tombstoned) {
+                allRestoreSupported = allRestoreSupported && tomb.restoreSupported;
+                allEndSupported = allEndSupported && tomb.endSupported;
+            }
+            oss << "tombstonedRestoreSupported=" << (allRestoreSupported ? "true" : "false") << "\n";
+            oss << "tombstonedEndSupported=" << (allEndSupported ? "true" : "false") << "\n";
+        } else {
+            oss << "tombstonedRestoreSupported=N/A\n";
+            oss << "tombstonedEndSupported=N/A\n";
+        }
         oss << "syntheticCounters=" << (snapshot.syntheticCounters ? "true" : "false") << "\n";
         return oss.str();
     }
@@ -321,6 +444,11 @@ namespace gxos { namespace apps {
             s_diskPct = 0;
             s_netPct = 0;
             s_perfCategoryIndex = 0;
+            s_memoryHistoryCount = 0;
+            s_memoryHistoryHead = 0;
+            for (int i = 0; i < kMemoryHistoryMax; ++i) {
+                s_memoryHistory[i] = 0;
+            }
             s_cumulativeAllocated = 0;
             s_cumulativeFreed = 0;
             s_lastMemDetailUpdate = 0;
@@ -531,6 +659,7 @@ namespace gxos { namespace apps {
     
     void TaskManager::refreshProcessList() {
         s_snapshot = BuildTaskManagerSnapshot();
+        recordPerformanceSnapshot(s_snapshot);
         s_processes.clear();
         s_processes.reserve(s_snapshot.processes.size());
         for (const auto& process : s_snapshot.processes) {
@@ -556,6 +685,18 @@ namespace gxos { namespace apps {
         }
         
         Logger::write(LogLevel::Info, std::string("TaskManager: Refreshed ") + std::to_string(s_processes.size()) + " processes");
+    }
+
+    void TaskManager::recordPerformanceSnapshot(const TaskManagerSnapshot& snapshot) {
+        if (!snapshot.memory.heapUtilPctAvailable) {
+            return;
+        }
+
+        s_memoryHistory[s_memoryHistoryHead] = static_cast<uint64_t>(std::max(0, std::min(100, snapshot.memory.heapUtilPct)));
+        s_memoryHistoryHead = (s_memoryHistoryHead + 1) % kMemoryHistoryMax;
+        if (s_memoryHistoryCount < kMemoryHistoryMax) {
+            ++s_memoryHistoryCount;
+        }
     }
     
     void TaskManager::endSelectedProcess() {
@@ -656,8 +797,8 @@ namespace gxos { namespace apps {
         else if (keyCode == 40) { // Down
             if (s_selectedIndex < (int)s_processes.size() - 1) {
                 s_selectedIndex++;
-                if (s_selectedIndex >= s_scrollOffset + 12) {
-                    s_scrollOffset = s_selectedIndex - 11;
+                if (s_selectedIndex >= s_scrollOffset + 11) {
+                    s_scrollOffset = s_selectedIndex - 10;
                 }
                 updateDisplay();
             }
@@ -678,7 +819,7 @@ namespace gxos { namespace apps {
             }
         }
         else if (keyCode == 34) { // Page Down
-            int maxScroll = (int)s_processes.size() - 12;
+            int maxScroll = (int)s_processes.size() - 11;
             if (maxScroll < 0) maxScroll = 0;
             s_scrollOffset += 10;
             if (s_scrollOffset > maxScroll) s_scrollOffset = maxScroll;
@@ -687,130 +828,102 @@ namespace gxos { namespace apps {
     }
     
     void TaskManager::updateHeader() {
-        const char* kGuiChanIn = "gui.input";
         const MemorySnapshot& mem = s_snapshot.memory;
-        
-        // System stats header
-        {
-            ipc::Message msg;
-            msg.type = (uint32_t)MsgType::MT_DrawText;
-            std::ostringstream oss;
-            oss << s_windowId << "|System Monitor";
-            std::string payload = oss.str();
-            msg.data.assign(payload.begin(), payload.end());
-            ipc::Bus::publish(kGuiChanIn, std::move(msg), false);
+        const int x = 12;
+        const int y = 58;
+        const int w = 736;
+        const int h = 92;
+
+        publishRect(s_windowId, x, y, w, h, 0x1A, 0x1A, 0x1A);
+        publishRect(s_windowId, x, y, w, 1, 0x44, 0x44, 0x44);
+        publishRect(s_windowId, x, y + h - 1, w, 1, 0x44, 0x44, 0x44);
+        publishRect(s_windowId, x, y, 1, h, 0x44, 0x44, 0x44);
+        publishRect(s_windowId, x + w - 1, y, 1, h, 0x44, 0x44, 0x44);
+
+        publishTextAtColor(s_windowId, x + 12, y + 10, 240, 244, 248, "Task Manager");
+
+        std::ostringstream memoryLine;
+        memoryLine << "Memory: " << formatMemory(mem.usedBytes);
+        if (mem.totalAvailable) {
+            memoryLine << " / " << formatMemory(mem.totalBytes) << " (allocator heap total)";
+        } else {
+            memoryLine << " / N/A";
         }
-        
-        // Memory usage
-        {
-            ipc::Message msg;
-            msg.type = (uint32_t)MsgType::MT_DrawText;
-            std::ostringstream oss;
-            oss << s_windowId << "|Memory: " << formatMemory(mem.usedBytes);
-            if (mem.totalAvailable) {
-                oss << " / " << formatMemory(mem.totalBytes) << " (allocator heap total)";
-            } else {
-                oss << " / N/A";
-            }
-            oss << " (Peak: " << formatMemory(mem.peakBytes) << ")";
-            std::string payload = oss.str();
-            msg.data.assign(payload.begin(), payload.end());
-            ipc::Bus::publish(kGuiChanIn, std::move(msg), false);
-        }
-        
-        // Tasks executed
-        {
-            ipc::Message msg;
-            msg.type = (uint32_t)MsgType::MT_DrawText;
-            std::ostringstream oss;
-            oss << s_windowId << "|Tasks Executed: " << s_tasksExecuted;
-            std::string payload = oss.str();
-            msg.data.assign(payload.begin(), payload.end());
-            ipc::Bus::publish(kGuiChanIn, std::move(msg), false);
-        }
-        
-        // Column headers
-        {
-            ipc::Message msg;
-            msg.type = (uint32_t)MsgType::MT_DrawText;
-            std::ostringstream oss;
-            oss << s_windowId << "|   PID  Name              Status       CPU     Memory       Disk     Net";
-            std::string payload = oss.str();
-            msg.data.assign(payload.begin(), payload.end());
-            ipc::Bus::publish(kGuiChanIn, std::move(msg), false);
-        }
+        memoryLine << "  Peak: " << formatMemory(mem.peakBytes);
+        publishTextAt(s_windowId, x + 12, y + 30, memoryLine.str());
+
+        std::ostringstream statsLine;
+        statsLine << "Processes: " << s_snapshot.performance.processCount
+                  << "  Windows: " << s_snapshot.performance.windowCount
+                  << "  Tasks Executed: " << s_tasksExecuted;
+        publishTextAt(s_windowId, x + 12, y + 48, statsLine.str());
+
+        std::ostringstream footerLine;
+        footerLine << "CPU: ";
+        footerLine << (s_snapshot.performance.cpuAvailable ? std::to_string(s_snapshot.performance.cpuPct) + "%" : std::string("N/A"));
+        footerLine << "  Disk: N/A  Network: N/A";
+        publishTextAtColor(s_windowId, x + 12, y + 66, 170, 176, 186, footerLine.str());
     }
     
     void TaskManager::updateDisplay() {
-        const char* kGuiChanIn = "gui.input";
-        
-        // Clear previous text by sending a clear-texts message
-        {
-            ipc::Message clr;
-            clr.type = (uint32_t)MsgType::MT_DrawText;
-            std::ostringstream oss;
-            oss << s_windowId << "|\x01CLEAR";
-            auto payload = oss.str();
-            clr.data.assign(payload.begin(), payload.end());
-            ipc::Bus::publish(kGuiChanIn, std::move(clr), false);
-        }
-        
-        // Tab header line
-        {
-            ipc::Message msg;
-            msg.type = (uint32_t)MsgType::MT_DrawText;
-            std::ostringstream oss;
-            oss << s_windowId << "|";
-            const char* tabNames[] = { "Processes", "Performance", "Tombstoned", "Memory Details" };
-            for (int t = 0; t < kTabCount; t++) {
-                if (t == s_currentTab) oss << "[" << tabNames[t] << "]";
-                else oss << " " << tabNames[t] << " ";
-                if (t < kTabCount - 1) oss << "  ";
-            }
-            auto payload = oss.str();
-            msg.data.assign(payload.begin(), payload.end());
-            ipc::Bus::publish(kGuiChanIn, std::move(msg), false);
-        }
-        
+        clearWindow(s_windowId);
+
         if (s_currentTab == 0) {
-            // Processes tab
             updateHeader();
-            
-            int visibleCount = 12;
-            int startIndex = s_scrollOffset;
-            int endIndex = std::min((int)s_snapshot.processes.size(), startIndex + visibleCount);
-            
-            for (int i = startIndex; i < endIndex; i++) {
+            const int tableX = 12;
+            const int tableY = 160;
+            const int tableW = 736;
+            const int headerH = 22;
+            const int rowH = 24;
+            const int rowY = tableY + headerH;
+            const int visibleRows = 11;
+            const int rowCount = static_cast<int>(s_snapshot.processes.size());
+            const int startIndex = std::max(0, std::min(s_scrollOffset, std::max(0, rowCount - visibleRows)));
+            const int endIndex = std::min(rowCount, startIndex + visibleRows);
+
+            publishRect(s_windowId, tableX, tableY, tableW, headerH, 0x24, 0x24, 0x24);
+            publishRect(s_windowId, tableX, tableY, tableW, 1, 0x44, 0x44, 0x44);
+            publishRect(s_windowId, tableX, tableY + headerH - 1, tableW, 1, 0x44, 0x44, 0x44);
+            publishRect(s_windowId, tableX, tableY, 1, headerH, 0x44, 0x44, 0x44);
+            publishRect(s_windowId, tableX + tableW - 1, tableY, 1, headerH, 0x44, 0x44, 0x44);
+
+            publishTextAtColor(s_windowId, tableX + 12, tableY + 3, 236, 240, 248, "Name");
+            publishTextAtColor(s_windowId, tableX + 330, tableY + 3, 236, 240, 248, "CPU%");
+            publishTextAtColor(s_windowId, tableX + 394, tableY + 3, 236, 240, 248, "Memory");
+            publishTextAtColor(s_windowId, tableX + 534, tableY + 3, 236, 240, 248, "Disk%");
+            publishTextAtColor(s_windowId, tableX + 606, tableY + 3, 236, 240, 248, "Network%");
+
+            publishRect(s_windowId, tableX, rowY - 2, tableW, visibleRows * rowH + 4, 0x18, 0x18, 0x18);
+
+            for (int i = startIndex; i < endIndex; ++i) {
                 const ProcessSnapshot& proc = s_snapshot.processes[i];
-                
-                ipc::Message msg;
-                msg.type = (uint32_t)MsgType::MT_DrawText;
-                
-                std::ostringstream oss;
-                oss << s_windowId << "|";
-                
-                if (i == s_selectedIndex) oss << "> ";
-                else oss << "  ";
-                
-                oss << std::setw(5) << std::right << proc.pid << " ";
-                
-                std::string name = proc.displayName;
-                if (name.length() > 18) name = name.substr(0, 15) + "...";
-                oss << std::setw(18) << std::left << name << " ";
-                
-                std::string status = proc.running ? "Running" : ("Stopped:" + std::to_string(proc.exitCode));
-                if (status.length() > 12) status = status.substr(0, 12);
-                oss << std::setw(12) << std::left << status << " ";
-                oss << std::setw(8) << std::left << (proc.cpuPctAvailable ? std::to_string(proc.cpuPct) + "%" : "N/A") << " ";
-                oss << std::setw(12) << std::left << formatMemory(proc.memoryBytes) << " ";
-                oss << std::setw(8) << std::left << (proc.diskPctAvailable ? std::to_string(proc.diskPct) + "%" : "N/A") << " ";
-                oss << std::setw(8) << std::left << (proc.networkPctAvailable ? std::to_string(proc.networkPct) + "%" : "N/A");
-                
-                auto payload = oss.str();
-                msg.data.assign(payload.begin(), payload.end());
-                ipc::Bus::publish(kGuiChanIn, std::move(msg), false);
+                const int y = rowY + (i - startIndex) * rowH;
+                if (i == s_selectedIndex) {
+                    publishRect(s_windowId, tableX + 1, y, tableW - 2, rowH - 1, 0x2A, 0x3B, 0x52);
+                }
+
+                publishTextAt(s_windowId, tableX + 8, y + 5, i == s_selectedIndex ? "> " : "  ");
+                publishTextAt(s_windowId, tableX + 24, y + 5, trimDisplayName(proc.displayName, 30));
+                publishTextAtColor(s_windowId, tableX + 330, y + 5, 224, 228, 238, pctOrNa(proc.cpuPctAvailable, proc.cpuPct));
+                publishTextAt(s_windowId, tableX + 394, y + 5, formatMemory(proc.memoryBytes));
+                publishTextAtColor(s_windowId, tableX + 534, y + 5, 224, 228, 238, proc.diskPctAvailable ? std::to_string(proc.diskPct) + "%" : "N/A");
+                publishTextAtColor(s_windowId, tableX + 606, y + 5, 224, 228, 238, proc.networkPctAvailable ? std::to_string(proc.networkPct) + "%" : "N/A");
             }
-            
+
+            publishRect(s_windowId, tableX, 456, tableW, 1, 0x44, 0x44, 0x44);
+            std::ostringstream selectedLine;
+            if (s_selectedIndex >= 0 && s_selectedIndex < static_cast<int>(s_snapshot.processes.size())) {
+                const ProcessSnapshot& proc = s_snapshot.processes[s_selectedIndex];
+                selectedLine << "Selected: " << trimDisplayName(proc.displayName, 28)
+                             << " | PID " << proc.pid
+                             << " | Status " << (proc.running ? "Running" : "Stopped");
+                if (!proc.appId.empty()) {
+                    selectedLine << " | App ID " << proc.appId;
+                }
+            } else {
+                selectedLine << "Selected: N/A";
+            }
+            publishTextAt(s_windowId, tableX + 12, 462, selectedLine.str());
             updateStatusBar();
         } else if (s_currentTab == 1) {
             updatePerformanceTab();
@@ -822,7 +935,6 @@ namespace gxos { namespace apps {
     }
     
     void TaskManager::updatePerformanceTab() {
-        const char* kGuiChanIn = "gui.input";
         const PerformanceSnapshot& perf = s_snapshot.performance;
         const MemorySnapshot& mem = s_snapshot.memory;
         s_tasksExecuted = perf.schedulerTasksExecuted;
@@ -830,168 +942,208 @@ namespace gxos { namespace apps {
         s_memPct = perf.memoryAvailable ? perf.memoryPct : 0;
         s_diskPct = perf.diskAvailable ? perf.diskPct : 0;
         s_netPct = perf.networkAvailable ? perf.networkPct : 0;
-        
-        auto sendLine = [&](const std::string& text) {
-            ipc::Message msg;
-            msg.type = (uint32_t)MsgType::MT_DrawText;
-            std::string payload = std::to_string(s_windowId) + "|" + text;
-            msg.data.assign(payload.begin(), payload.end());
-            ipc::Bus::publish(kGuiChanIn, std::move(msg), false);
+
+        const int x = 12;
+        const int y = 58;
+        const int w = 736;
+        const int h = 452;
+        const int navW = 210;
+        const int gap = 12;
+        const int detailX = x + navW + gap;
+        const int detailW = w - navW - gap;
+        const int navItemH = 88;
+        const int navStartY = y + 34;
+
+        publishRect(s_windowId, x, y, navW, h, 0x1A, 0x1A, 0x1A);
+        publishRect(s_windowId, detailX, y, detailW, h, 0x1A, 0x1A, 0x1A);
+        publishRect(s_windowId, x, y, navW, 1, 0x44, 0x44, 0x44);
+        publishRect(s_windowId, detailX, y, detailW, 1, 0x44, 0x44, 0x44);
+        publishRect(s_windowId, x, y + h - 1, navW, 1, 0x44, 0x44, 0x44);
+        publishRect(s_windowId, detailX, y + h - 1, detailW, 1, 0x44, 0x44, 0x44);
+        publishRect(s_windowId, x, y, 1, h, 0x44, 0x44, 0x44);
+        publishRect(s_windowId, detailX, y, 1, h, 0x44, 0x44, 0x44);
+        publishRect(s_windowId, x + navW - 1, y, 1, h, 0x44, 0x44, 0x44);
+        publishRect(s_windowId, detailX + detailW - 1, y, 1, h, 0x44, 0x44, 0x44);
+
+        publishTextAtColor(s_windowId, x + 12, y + 10, 240, 244, 248, "Performance");
+        publishTextAtColor(s_windowId, detailX + 12, y + 10, 240, 244, 248, s_perfCategoryIndex == 0 ? "CPU" : s_perfCategoryIndex == 1 ? "Memory" : s_perfCategoryIndex == 2 ? "Disk" : "Network");
+
+        const char* navLabels[] = { "CPU", "Memory", "Disk", "Network" };
+        const bool navAvailable[] = { perf.cpuAvailable, perf.memoryAvailable, perf.diskAvailable, perf.networkAvailable };
+        const int navValues[] = { perf.cpuPct, perf.memoryPct, perf.diskPct, perf.networkPct };
+        const uint8_t navColors[4][3] = {
+            { 93, 173, 226 },
+            { 88, 214, 141 },
+            { 230, 126, 34 },
+            { 155, 89, 182 }
         };
-        
-        sendLine("--- Performance ---");
-        sendLine("");
-        
-        // Category labels (4 categories matching Legacy)
-        const char* catLabels[] = { "CPU", "Memory", "Disk", "Network" };
-        const bool catAvailable[] = { perf.cpuAvailable, perf.memoryAvailable, perf.diskAvailable, perf.networkAvailable };
-        const int catValues[] = { perf.cpuPct, perf.memoryPct, perf.diskPct, perf.networkPct };
-        
-        // Navigation hint
-        {
-            std::ostringstream oss;
-            oss << "Category: ";
-            for (int c = 0; c < 4; c++) {
-                if (c == s_perfCategoryIndex) oss << "[" << catLabels[c] << "]";
-                else oss << " " << catLabels[c] << " ";
-                if (c < 3) oss << "  ";
+
+        for (int i = 0; i < 4; ++i) {
+            const int itemY = navStartY + i * 96;
+            if (i == s_perfCategoryIndex) {
+                publishRect(s_windowId, x + 8, itemY - 2, navW - 16, navItemH + 2, 0x25, 0x32, 0x44);
             }
-            oss << "    (Left/Right to switch)";
-            sendLine(oss.str());
+            const bool showHistory = i == 1 && navAvailable[i] && s_memoryHistoryCount > 0;
+            drawGraphBox(
+                s_windowId,
+                x + 10,
+                itemY,
+                navW - 20,
+                navItemH,
+                navLabels[i],
+                navAvailable[i] ? std::to_string(navValues[i]) + "%" : std::string("N/A"),
+                showHistory,
+                s_memoryHistory,
+                s_memoryHistoryCount,
+                s_memoryHistoryHead,
+                navColors[i][0],
+                navColors[i][1],
+                navColors[i][2]
+            );
         }
-        sendLine("");
-        
-        // ASCII bar chart for selected category
-        int val = catAvailable[s_perfCategoryIndex] ? catValues[s_perfCategoryIndex] : 0;
-        {
-            std::ostringstream oss;
-            if (catAvailable[s_perfCategoryIndex]) {
-                oss << catLabels[s_perfCategoryIndex] << ": " << val << "%";
-            } else {
-                oss << catLabels[s_perfCategoryIndex] << ": N/A";
-            }
-            sendLine(oss.str());
-        }
-        if (catAvailable[s_perfCategoryIndex]) {
-            int filled = val * 40 / 100;
-            std::string bar = "[";
-            for (int b = 0; b < 40; b++) bar += (b < filled ? '#' : '.');
-            bar += "]";
-            sendLine(bar);
-        } else {
-            sendLine("[N/A]");
-        }
-        sendLine("");
-        
-        // Detail stats for selected category
+
+        const bool detailHasHistory = (s_perfCategoryIndex == 1) && mem.heapUtilPctAvailable && s_memoryHistoryCount > 0;
+        const char* detailLabels[] = { "CPU", "Memory", "Disk", "Network" };
+        const uint8_t detailColors[4][3] = {
+            { 93, 173, 226 },
+            { 88, 214, 141 },
+            { 230, 126, 34 },
+            { 155, 89, 182 }
+        };
+        const bool detailHasData[] = {
+            perf.cpuAvailable,
+            perf.memoryAvailable && mem.heapUtilPctAvailable,
+            perf.diskAvailable,
+            perf.networkAvailable
+        };
+        const std::string detailValue = s_perfCategoryIndex == 1 ? pctOrNa(mem.heapUtilPctAvailable, mem.heapUtilPct)
+                                                                 : (detailHasData[s_perfCategoryIndex] ? std::to_string(navValues[s_perfCategoryIndex]) + "%" : std::string("N/A"));
+        drawGraphBox(
+            s_windowId,
+            detailX + 10,
+            y + 34,
+            detailW - 20,
+            210,
+            detailLabels[s_perfCategoryIndex],
+            detailValue,
+            detailHasHistory,
+            s_memoryHistory,
+            s_memoryHistoryCount,
+            s_memoryHistoryHead,
+            detailColors[s_perfCategoryIndex][0],
+            detailColors[s_perfCategoryIndex][1],
+            detailColors[s_perfCategoryIndex][2]
+        );
+
+        const int detailTop = y + 256;
+        const int labelX = detailX + 14;
+        const int valueX = detailX + detailW / 2;
+        const int lineH = 18;
+        auto detailRow = [&](int row, const std::string& label, const std::string& value) {
+            const int rowY = detailTop + row * lineH;
+            publishTextAt(s_windowId, labelX, rowY, label);
+            publishTextAt(s_windowId, valueX, rowY, value);
+        };
+
         if (s_perfCategoryIndex == 0) {
-            // CPU details
-            sendLine("Utilization: N/A");
-            sendLine("Processes: " + std::to_string(perf.processCount));
-            sendLine("Windows: " + std::to_string(perf.windowCount));
-            sendLine("Tasks Executed: " + std::to_string(s_tasksExecuted));
-            sendLine("Machine time: " + formatUptime((uint64_t)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count()));
+            detailRow(0, "Utilization:", "N/A");
+            detailRow(1, "Processes:", std::to_string(perf.processCount));
+            detailRow(2, "Windows:", std::to_string(perf.windowCount));
+            detailRow(3, "Tasks Executed:", std::to_string(s_tasksExecuted));
+            detailRow(4, "Machine time:", formatUptime((uint64_t)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count()));
         } else if (s_perfCategoryIndex == 1) {
-            // Memory details
-            uint64_t avail = mem.freeBytes;
-            sendLine("In Use: " + formatMemory(mem.usedBytes) + " (" + std::to_string(mem.heapUtilPctAvailable ? mem.heapUtilPct : 0) + "%)");
-            sendLine("Available: " + (mem.totalAvailable ? formatMemory(avail) : std::string("N/A")));
-            sendLine("Total: " + (mem.totalAvailable ? formatMemory(mem.totalBytes) + " (allocator heap)" : std::string("N/A")));
-            sendLine("Peak: " + formatMemory(mem.peakBytes));
-            if (mem.freeAllocRatioAvailable) {
-                sendLine("Free/Alloc Ratio: " + std::to_string(mem.freeAllocRatioPct) + "%");
-            } else {
-                sendLine("Free/Alloc Ratio: N/A");
-            }
-            if (mem.topTagAvailable) {
-                sendLine("Top Tag: " + mem.topTagName + " (" + formatMemory(mem.topTagBytes) + ")");
-            }
-            if (mem.topOwnerAvailable) {
-                sendLine("Top Owner: PID " + std::to_string(mem.topOwnerPid) + " (" + formatMemory(mem.topOwnerBytes) + ")");
-            }
+            detailRow(0, "In Use:", formatMemory(mem.usedBytes) + " (" + std::to_string(mem.heapUtilPctAvailable ? mem.heapUtilPct : 0) + "%)");
+            detailRow(1, "Available:", mem.totalAvailable ? formatMemory(mem.freeBytes) : std::string("N/A"));
+            detailRow(2, "Total:", mem.totalAvailable ? formatMemory(mem.totalBytes) + " (allocator heap)" : std::string("N/A"));
+            detailRow(3, "Peak:", formatMemory(mem.peakBytes));
+            detailRow(4, "Free/Alloc Ratio:", mem.freeAllocRatioAvailable ? std::to_string(mem.freeAllocRatioPct) + "%" : std::string("N/A"));
+            detailRow(5, "Top Tag:", mem.topTagAvailable ? mem.topTagName + " (" + formatMemory(mem.topTagBytes) + ")" : std::string("N/A"));
+            detailRow(6, "Top Owner:", mem.topOwnerAvailable ? std::string("PID ") + std::to_string(mem.topOwnerPid) + " (" + formatMemory(mem.topOwnerBytes) + ")" : std::string("N/A"));
         } else if (s_perfCategoryIndex == 2) {
-            // Disk details
-            sendLine("Active time: N/A");
-            sendLine("Avg response time: N/A");
-            sendLine("Read speed: N/A");
-            sendLine("Write speed: N/A");
-            sendLine("Real counter: unavailable");
+            detailRow(0, "Active time:", "N/A");
+            detailRow(1, "Avg response time:", "N/A");
+            detailRow(2, "Read speed:", "N/A");
+            detailRow(3, "Write speed:", "N/A");
+            detailRow(4, "Real counter:", "unavailable");
         } else if (s_perfCategoryIndex == 3) {
-            // Network details
-            sendLine("Send: N/A");
-            sendLine("Receive: N/A");
-            sendLine("Sent bytes: N/A");
-            sendLine("Received bytes: N/A");
-            sendLine("Real counter: unavailable");
+            detailRow(0, "Send:", "N/A");
+            detailRow(1, "Receive:", "N/A");
+            detailRow(2, "Sent bytes:", "N/A");
+            detailRow(3, "Received bytes:", "N/A");
+            detailRow(4, "Real counter:", "unavailable");
         }
-        
-        sendLine("");
-        sendLine("Auto-refresh every 2s | F5=Refresh | Tab=Switch Tab");
+
+        publishTextAtColor(s_windowId, detailX + 12, y + h - 22, 160, 166, 176, "Left/Right switches categories");
     }
     
     void TaskManager::updateTombstonedTab() {
-        const char* kGuiChanIn = "gui.input";
-        
-        auto sendLine = [&](const std::string& text) {
-            ipc::Message msg;
-            msg.type = (uint32_t)MsgType::MT_DrawText;
-            std::string payload = std::to_string(s_windowId) + "|" + text;
-            msg.data.assign(payload.begin(), payload.end());
-            ipc::Bus::publish(kGuiChanIn, std::move(msg), false);
-        };
-        
-        sendLine("--- Tombstoned Apps ---");
-        sendLine("");
-        sendLine("   PID  Name               Reason");
-        
-        int count = 0;
-        for (size_t tombIdx = 0; tombIdx < s_snapshot.tombstoned.size(); ++tombIdx) {
-            const TombstoneSnapshot& tomb = s_snapshot.tombstoned[tombIdx];
-            {
-                std::ostringstream oss;
-                if ((int)tombIdx == s_selectedTombIndex) oss << "> ";
-                else oss << "  ";
-                oss << std::setw(5) << std::right << tomb.pid << "  "
-                    << std::setw(18) << std::left << tomb.displayName << " "
-                    << (tomb.reason.empty() ? "stopped" : tomb.reason);
-                sendLine(oss.str());
-                count++;
+        const int x = 12;
+        const int y = 58;
+        const int w = 736;
+        const int h = 452;
+        const int headerY = y + 34;
+        const int rowY = headerY + 24;
+        const int rowH = 24;
+        const int visibleRows = 13;
+        const int rowCount = static_cast<int>(s_snapshot.tombstoned.size());
+
+        if (s_selectedTombIndex >= rowCount) {
+            s_selectedTombIndex = rowCount - 1;
+        }
+        if (s_selectedTombIndex < -1) {
+            s_selectedTombIndex = -1;
+        }
+
+        publishRect(s_windowId, x, y, w, h, 0x1A, 0x1A, 0x1A);
+        publishRect(s_windowId, x, y, w, 1, 0x44, 0x44, 0x44);
+        publishRect(s_windowId, x, y + h - 1, w, 1, 0x44, 0x44, 0x44);
+        publishRect(s_windowId, x, y, 1, h, 0x44, 0x44, 0x44);
+        publishRect(s_windowId, x + w - 1, y, 1, h, 0x44, 0x44, 0x44);
+        publishTextAtColor(s_windowId, x + 12, y + 10, 240, 244, 248, "Tombstoned");
+
+        publishRect(s_windowId, x + 10, headerY, w - 20, 22, 0x24, 0x24, 0x24);
+        publishTextAtColor(s_windowId, x + 22, headerY + 3, 236, 240, 248, "Name");
+        publishTextAtColor(s_windowId, x + 200, headerY + 3, 236, 240, 248, "PID");
+        publishTextAtColor(s_windowId, x + 272, headerY + 3, 236, 240, 248, "App ID");
+        publishTextAtColor(s_windowId, x + 420, headerY + 3, 236, 240, 248, "Reason");
+        publishTextAtColor(s_windowId, x + 620, headerY + 3, 236, 240, 248, "Restore");
+        publishTextAtColor(s_windowId, x + 682, headerY + 3, 236, 240, 248, "End");
+
+        publishRect(s_windowId, x + 10, rowY - 2, w - 20, visibleRows * rowH + 4, 0x18, 0x18, 0x18);
+
+        for (int i = 0; i < rowCount && i < visibleRows; ++i) {
+            const TombstoneSnapshot& tomb = s_snapshot.tombstoned[i];
+            const int row = rowY + i * rowH;
+            if (i == s_selectedTombIndex) {
+                publishRect(s_windowId, x + 11, row, w - 22, rowH - 1, 0x30, 0x30, 0x46);
             }
+            publishTextAt(s_windowId, x + 20, row + 5, i == s_selectedTombIndex ? "> " : "  ");
+            publishTextAt(s_windowId, x + 36, row + 5, trimDisplayName(tomb.displayName, 24));
+            publishTextAt(s_windowId, x + 200, row + 5, std::to_string(tomb.pid));
+            publishTextAt(s_windowId, x + 272, row + 5, trimDisplayName(tomb.appId.empty() ? std::string("N/A") : tomb.appId, 26));
+            publishTextAt(s_windowId, x + 420, row + 5, trimDisplayName(tomb.reason.empty() ? std::string("stopped") : tomb.reason, 22));
+            publishTextAtColor(s_windowId, x + 620, row + 5, 224, 228, 238, tomb.restoreSupported ? "Yes" : "N/A");
+            publishTextAtColor(s_windowId, x + 682, row + 5, 224, 228, 238, tomb.endSupported ? "Yes" : "N/A");
         }
-        
-        if (count == 0) {
-            sendLine("");
-            sendLine("  No tombstoned apps.");
-        }
-        
-        // Ensure selection is valid
-        if (s_selectedTombIndex >= count) {
-            s_selectedTombIndex = count - 1;
-        }
-        
-        sendLine("");
-        sendLine(std::to_string(count) + " tombstoned | Up/Down=Select | R=Restore | Del/E=End | Tab=Switch");
+
+        const int footerY = y + h - 20;
+        std::ostringstream footer;
+        footer << rowCount << " tombstoned | Up/Down=Select | Restore=";
+        footer << (rowCount > 0 && s_selectedTombIndex >= 0 && s_selectedTombIndex < rowCount && s_snapshot.tombstoned[s_selectedTombIndex].restoreSupported ? "Yes" : "N/A");
+        footer << " | Del/E=End";
+        publishTextAtColor(s_windowId, x + 12, footerY, 160, 166, 176, footer.str());
     }
     
     void TaskManager::updateStatusBar() {
-        const char* kGuiChanIn = "gui.input";
-        
-        ipc::Message msg;
-        msg.type = (uint32_t)MsgType::MT_DrawText;
-        
         std::ostringstream oss;
-        oss << s_windowId << "|" << s_snapshot.performance.processCount << " processes";
-        
+        oss << s_snapshot.performance.processCount << " processes";
         if (s_selectedIndex >= 0 && s_selectedIndex < (int)s_snapshot.processes.size()) {
             const ProcessSnapshot& proc = s_snapshot.processes[s_selectedIndex];
-            oss << " | Selected: PID " << proc.pid;
+            oss << " | Selected: " << trimDisplayName(proc.displayName, 24) << " (PID " << proc.pid << ")";
         }
-        
         oss << " | F5=Refresh | Del/E=End";
-        
         std::string payload = oss.str();
-        msg.data.assign(payload.begin(), payload.end());
-        ipc::Bus::publish(kGuiChanIn, std::move(msg), false);
+        publishTextAtColor(s_windowId, 12, 496, 160, 166, 176, payload);
     }
     
     // --- Tombstoned management (matching Legacy TaskManager.cs) ---
@@ -1004,6 +1156,12 @@ namespace gxos { namespace apps {
         if (s_selectedTombIndex < 0) return;
         if (s_selectedTombIndex >= (int)s_snapshot.tombstoned.size()) return;
         const TombstoneSnapshot& tomb = s_snapshot.tombstoned[s_selectedTombIndex];
+        if (!tomb.restoreSupported) {
+            Logger::write(LogLevel::Info, std::string("TaskManager: Restore unsupported for tombstoned PID ") + std::to_string(tomb.pid));
+            updateDisplay();
+            updateStatusBar();
+            return;
+        }
         Logger::write(LogLevel::Info, std::string("TaskManager: Restoring tombstoned PID ") + std::to_string(tomb.pid));
         Logger::write(LogLevel::Info, "TaskManager: Process restore requested (server-side restart)");
         refreshProcessList();
@@ -1016,6 +1174,12 @@ namespace gxos { namespace apps {
         if (s_selectedTombIndex < 0) return;
         if (s_selectedTombIndex >= (int)s_snapshot.tombstoned.size()) return;
         const TombstoneSnapshot& tomb = s_snapshot.tombstoned[s_selectedTombIndex];
+        if (!tomb.endSupported) {
+            Logger::write(LogLevel::Info, std::string("TaskManager: End unsupported for tombstoned PID ") + std::to_string(tomb.pid));
+            updateDisplay();
+            updateStatusBar();
+            return;
+        }
         Logger::write(LogLevel::Info, std::string("TaskManager: Ending tombstoned PID ") + std::to_string(tomb.pid));
         ProcessTable::terminate(tomb.pid);
         s_selectedTombIndex = -1;
@@ -1028,108 +1192,112 @@ namespace gxos { namespace apps {
     // --- Memory Details tab (matching Legacy TaskManager.cs DrawMemoryDetails) ---
     
     void TaskManager::updateMemoryDetailsTab() {
-        const char* kGuiChanIn = "gui.input";
-        
-        auto sendLine = [&](const std::string& text) {
-            ipc::Message msg;
-            msg.type = (uint32_t)MsgType::MT_DrawText;
-            std::string payload = std::to_string(s_windowId) + "|" + text;
-            msg.data.assign(payload.begin(), payload.end());
-            ipc::Bus::publish(kGuiChanIn, std::move(msg), false);
-        };
-        
-        // Update memory stats
         auto now = std::chrono::steady_clock::now();
         uint64_t nowTicks = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
         
         if (nowTicks - s_lastMemDetailUpdate >= 1000) {
             s_lastMemDetailUpdate = nowTicks;
-
             refreshProcessList();
+        }
 
-            // Track cumulative allocated/freed using snapshot data
-            s_usedMemory = s_snapshot.memory.usedBytes;
-            s_peakMemory = s_snapshot.memory.peakBytes;
-            s_cumulativeFreed = s_snapshot.memory.totalFreedBytes;
-            s_cumulativeAllocated = s_usedMemory + s_cumulativeFreed;
+        const MemorySnapshot& mem = s_snapshot.memory;
+        const uint64_t usedBytes = mem.usedBytes;
+        const uint64_t freedBytes = mem.totalFreedBytes;
+        const uint64_t allocatedBytes = usedBytes + freedBytes;
+        const uint64_t currentPages = usedBytes / gxos::PageSize;
+        const uint64_t freedPages = freedBytes / gxos::PageSize;
+        const uint64_t allocatedPages = currentPages + freedPages;
+        const uint64_t heapTotal = mem.totalAvailable ? mem.totalBytes : 0;
+        const uint64_t heapFree = heapTotal > usedBytes ? heapTotal - usedBytes : 0;
+        const int heapUtilPct = mem.heapUtilPctAvailable ? mem.heapUtilPct : 0;
 
-            // Leak detection (matching Legacy)
-            int64_t netGrowth = (int64_t)s_cumulativeAllocated - (int64_t)s_cumulativeFreed;
-            s_leakHistory.push_back((uint64_t)netGrowth);
-            
-            if ((int)s_leakHistory.size() > kLeakHistoryMax) {
-                s_leakHistory.erase(s_leakHistory.begin());
-            }
-            
-            if (s_leakHistory.size() >= 2) {
-                uint64_t prev = s_leakHistory[s_leakHistory.size() - 2];
-                uint64_t curr = s_leakHistory[s_leakHistory.size() - 1];
-                
-                if (curr > prev) {
-                    s_leakGrowthCounter++;
-                    if (s_leakGrowthCounter >= kLeakThreshold) {
-                        s_leakExists = true;
-                    }
-                } else {
-                    s_leakGrowthCounter = 0;
-                    if ((int)s_leakHistory.size() >= kLeakHistoryMax) {
-                        uint64_t first = s_leakHistory[0];
-                        uint64_t last = s_leakHistory[s_leakHistory.size() - 1];
-                        if (last <= first + 100) {
-                            s_leakExists = false;
-                        }
+        s_usedMemory = usedBytes;
+        s_peakMemory = mem.peakBytes;
+        s_cumulativeFreed = freedBytes;
+        s_cumulativeAllocated = allocatedBytes;
+
+        s_leakHistory.push_back(usedBytes);
+        if ((int)s_leakHistory.size() > kLeakHistoryMax) {
+            s_leakHistory.erase(s_leakHistory.begin());
+        }
+        if (s_leakHistory.size() >= 2) {
+            const uint64_t prev = s_leakHistory[s_leakHistory.size() - 2];
+            const uint64_t curr = s_leakHistory[s_leakHistory.size() - 1];
+            if (curr > prev) {
+                ++s_leakGrowthCounter;
+                if (s_leakGrowthCounter >= kLeakThreshold) {
+                    s_leakExists = true;
+                }
+            } else {
+                s_leakGrowthCounter = 0;
+                if ((int)s_leakHistory.size() >= kLeakHistoryMax) {
+                    const uint64_t first = s_leakHistory.front();
+                    const uint64_t last = s_leakHistory.back();
+                    if (last <= first + (100 * 1024ULL)) {
+                        s_leakExists = false;
                     }
                 }
             }
         }
-        
-        sendLine("=== Memory Allocator Details ===");
-        sendLine("");
-        
-        // Allocated / Freed
-        sendLine("Allocated (cumulative):  " + formatMemory(s_cumulativeAllocated));
-        sendLine("Freed (cumulative):      " + formatMemory(s_cumulativeFreed));
-        sendLine("Currently In Use:        " + formatMemory(s_usedMemory));
-        
-        int64_t netGrowth = (int64_t)s_cumulativeAllocated - (int64_t)s_cumulativeFreed;
-        sendLine("Net Growth (Alloc-Free): " + std::to_string(netGrowth) + " bytes");
-        sendLine("");
-        
-        // Leak detection
-        std::string leakStr = s_leakExists ? "*** TRUE ***" : "FALSE";
-        sendLine("Leak Exists: " + leakStr);
-        sendLine("");
-        
-        // Free/Alloc ratio
-        if (s_cumulativeAllocated > 0) {
-            int freePct = (int)(s_cumulativeFreed * 100 / s_cumulativeAllocated);
-            sendLine("Free/Alloc Ratio: " + std::to_string(freePct) + "%");
-        } else {
-            sendLine("Free/Alloc Ratio: N/A");
-        }
-        sendLine("");
-        
-        // Heap stats
-        sendLine("=== Heap Allocator ===");
-        uint64_t heapTotal = s_snapshot.memory.totalAvailable ? s_snapshot.memory.totalBytes : 0;
-        uint64_t heapUsed = s_snapshot.memory.usedBytes;
-        uint64_t heapFree = heapTotal > heapUsed ? heapTotal - heapUsed : 0;
-        int heapUtilPct = heapTotal > 0 ? (int)(heapUsed * 100 / heapTotal) : 0;
-        
-        sendLine("Total Heap Size:   " + (heapTotal > 0 ? formatMemory(heapTotal) + " (allocator heap)" : std::string("N/A")));
-        sendLine("Heap In Use:       " + formatMemory(heapUsed));
-        sendLine("Heap Free:         " + (heapTotal > 0 ? formatMemory(heapFree) : std::string("N/A")));
-        sendLine("Heap Utilization:  " + (heapTotal > 0 ? std::to_string(heapUtilPct) + "%" : std::string("N/A")));
-        sendLine("");
-        sendLine("Peak Memory:       " + formatMemory(s_peakMemory));
-        if (s_snapshot.memory.topTagAvailable) {
-            sendLine("Top Tag:           " + s_snapshot.memory.topTagName + " (" + formatMemory(s_snapshot.memory.topTagBytes) + ")");
-        }
-        if (s_snapshot.memory.topOwnerAvailable) {
-            sendLine("Top Owner:         PID " + std::to_string(s_snapshot.memory.topOwnerPid) + " (" + formatMemory(s_snapshot.memory.topOwnerBytes) + ")");
-        }
-        sendLine("");
-        sendLine("F5=Refresh | Tab=Switch Tab");
+
+        const int x = 12;
+        const int y = 58;
+        const int w = 736;
+        const int h = 452;
+
+        publishRect(s_windowId, x, y, w, h, 0x1A, 0x1A, 0x1A);
+        publishRect(s_windowId, x, y, w, 1, 0x44, 0x44, 0x44);
+        publishRect(s_windowId, x, y + h - 1, w, 1, 0x44, 0x44, 0x44);
+        publishRect(s_windowId, x, y, 1, h, 0x44, 0x44, 0x44);
+        publishRect(s_windowId, x + w - 1, y, 1, h, 0x44, 0x44, 0x44);
+        publishTextAtColor(s_windowId, x + 12, y + 10, 240, 244, 248, "Memory Details");
+
+        publishTextAtColor(s_windowId, x + 12, y + 34, 236, 240, 248, "=== Memory Allocator Details ===");
+        publishTextAtColor(s_windowId, x + 12, y + 52, 236, 240, 248, "=== Free() Call Statistics ===");
+
+        const int labelX = x + 12;
+        const int valueX = x + 300;
+        const int rowH = 18;
+        int rowY = y + 70;
+        auto row = [&](const std::string& label, const std::string& value, bool highlight = false) {
+            publishTextAt(s_windowId, labelX, rowY, label);
+            if (highlight) {
+                publishTextAtColor(s_windowId, valueX, rowY, 208, 92, 92, value);
+            } else {
+                publishTextAt(s_windowId, valueX, rowY, value);
+            }
+            rowY += rowH;
+        };
+
+        row("Total Free() Calls:", "N/A");
+        row("Successful Frees:", "N/A");
+        row("Failed Invalid Ptr:", "N/A");
+        row("Failed No Pages:", "N/A");
+
+        publishRect(s_windowId, x + 12, rowY + 2, w - 24, 1, 0x44, 0x44, 0x44);
+        rowY += 12;
+
+        row("Allocated Pages:", std::to_string(allocatedPages));
+        row("Freed Pages:", std::to_string(freedPages));
+        row("Current Pages in Use:", std::to_string(currentPages));
+        row("Net Growth:", formatMemory(usedBytes) + " (" + std::to_string(currentPages) + " pages)");
+        row("Leak Exists:", mem.leakStateAvailable ? (mem.leakState ? std::string("Yes") : std::string("No")) : std::string("N/A"), mem.leakStateAvailable && mem.leakState);
+        row("Free/Alloc Ratio:", allocatedPages > 0 ? std::to_string((freedPages * 100ULL) / allocatedPages) + "%" : std::string("N/A"));
+
+        publishRect(s_windowId, x + 12, rowY + 2, w - 24, 1, 0x44, 0x44, 0x44);
+        rowY += 12;
+
+        publishTextAtColor(s_windowId, x + 12, rowY, 236, 240, 248, "=== Heap Allocator ===");
+        rowY += 18;
+        row("Total Heap Size:", heapTotal > 0 ? formatMemory(heapTotal) + " (allocator heap)" : std::string("N/A"));
+        row("Heap In Use:", formatMemory(usedBytes));
+        row("Heap Free:", heapTotal > 0 ? formatMemory(heapFree) : std::string("N/A"));
+        row("Heap Utilization:", heapTotal > 0 ? std::to_string(heapUtilPct) + "%" : std::string("N/A"));
+        row("Peak Memory:", formatMemory(mem.peakBytes));
+        row("Top Tag:", mem.topTagAvailable ? mem.topTagName + " (" + formatMemory(mem.topTagBytes) + ")" : std::string("N/A"));
+        row("Top Owner:", mem.topOwnerAvailable ? std::string("PID ") + std::to_string(mem.topOwnerPid) + " (" + formatMemory(mem.topOwnerBytes) + ")" : std::string("N/A"));
+
+        publishTextAtColor(s_windowId, x + 12, y + h - 20, 160, 166, 176, "F5=Refresh | Tab=Switch Tab");
     }
     
     // --- Helper functions ---
