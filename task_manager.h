@@ -6,6 +6,77 @@
 #include <cstdint>
 
 namespace gxos { namespace apps {
+
+    struct ProcessSnapshot {
+        uint64_t pid = 0;
+        std::string displayName;
+        std::string appId;
+        std::string windowTitle;
+        bool running = false;
+        int exitCode = 0;
+        uint64_t memoryBytes = 0;
+        bool cpuPctAvailable = false;
+        int cpuPct = 0;
+        bool diskPctAvailable = false;
+        int diskPct = 0;
+        bool networkPctAvailable = false;
+        int networkPct = 0;
+    };
+
+    struct MemorySnapshot {
+        bool totalAvailable = false;
+        uint64_t totalBytes = 0;
+        uint64_t usedBytes = 0;
+        uint64_t freeBytes = 0;
+        uint64_t peakBytes = 0;
+        bool totalFreedAvailable = false;
+        uint64_t totalFreedBytes = 0;
+        bool heapUtilPctAvailable = false;
+        int heapUtilPct = 0;
+        bool leakStateAvailable = false;
+        bool leakState = false;
+        bool freeAllocRatioAvailable = false;
+        int freeAllocRatioPct = 0;
+        bool topTagAvailable = false;
+        std::string topTagName;
+        uint64_t topTagBytes = 0;
+        bool topOwnerAvailable = false;
+        uint64_t topOwnerPid = 0;
+        uint64_t topOwnerBytes = 0;
+    };
+
+    struct PerformanceSnapshot {
+        bool cpuAvailable = false;
+        int cpuPct = 0;
+        bool memoryAvailable = false;
+        int memoryPct = 0;
+        bool diskAvailable = false;
+        int diskPct = 0;
+        bool networkAvailable = false;
+        int networkPct = 0;
+        uint64_t processCount = 0;
+        uint64_t nativeProcessCount = 0;
+        uint64_t windowCount = 0;
+        uint64_t schedulerTasksExecuted = 0;
+        bool syntheticCounters = false;
+    };
+
+    struct TombstoneSnapshot {
+        std::string displayName;
+        std::string appId;
+        uint64_t pid = 0;
+        std::string reason;
+        bool restoreSupported = false;
+        bool endSupported = true;
+    };
+
+    struct TaskManagerSnapshot {
+        std::vector<ProcessSnapshot> processes;
+        MemorySnapshot memory;
+        PerformanceSnapshot performance;
+        std::vector<TombstoneSnapshot> tombstoned;
+        bool syntheticCounters = false;
+    };
     
     struct ProcessInfo {
         uint64_t pid;
@@ -25,6 +96,8 @@ namespace gxos { namespace apps {
     class TaskManager {
     public:
         static uint64_t Launch();
+        static TaskManagerSnapshot BuildTaskManagerSnapshot();
+        static std::string SnapshotDiagnostic();
         
     private:
         // Main entry point
@@ -50,14 +123,13 @@ namespace gxos { namespace apps {
         // Keyboard handling
         static void handleKeyPress(int keyCode);
         
-        // Performance helpers (matching Legacy synthetic counters)
-        static int wavePct(uint64_t ticks, int period);
+        // Performance helpers
         static std::string formatMemory(uint64_t bytes);
-        static std::string formatTransferRate(int kbps);
         static std::string formatUptime(uint64_t ticks);
         
         // State
         static uint64_t s_windowId;
+        static TaskManagerSnapshot s_snapshot;
         static std::vector<ProcessInfo> s_processes;
         static int s_selectedIndex;
         static int s_scrollOffset;
@@ -78,16 +150,6 @@ namespace gxos { namespace apps {
         static int s_diskPct;
         static int s_netPct;
         static int s_perfCategoryIndex; // 0=CPU, 1=Memory, 2=Disk, 3=Network
-        
-        // Synthetic disk/network counters (matching Legacy)
-        static int s_diskActivePct;
-        static int s_diskReadKBps;
-        static int s_diskWriteKBps;
-        static int s_diskRespMs;
-        static int s_netSendKBps;
-        static int s_netRecvKBps;
-        static uint64_t s_bytesSent;
-        static uint64_t s_bytesRecv;
         
         // System stats
         static uint64_t s_totalMemory;

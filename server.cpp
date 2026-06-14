@@ -837,6 +837,7 @@ static void help(){
                  " console | console.start | console.send <text> | console.pop [timeoutMs]\n"
                  " files | files <path>\n"
                  " clock\n"
+                 " taskmanager.snapshot\n"
                  " taskmgr\n"
                  " paint\n"
                  " navigator | navigator.smoke | navigator.goto <url>\n"
@@ -1223,6 +1224,9 @@ using namespace gxos;
             if(!requireCompositor()) continue;
             uint64_t pid = apps::Clock::Launch();
             std::cout<<"Clock launched, pid="<<pid<<std::endl;
+        }
+        else if (cmd=="taskmanager.snapshot"){
+            std::cout << apps::TaskManager::SnapshotDiagnostic();
         }
         else if (cmd=="taskmgr"){
             if(!requireCompositor()) continue;

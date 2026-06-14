@@ -3,11 +3,16 @@
 #include "logger.h"
 #include "allocator.h"
 #include "scheduler.h"
+#include "compositor.h"
+#include "desktop_service.h"
+#include "native_app_process_table.h"
 #include <sstream>
 #include <algorithm>
 #include <iomanip>
 #include <chrono>
 #include <cmath>
+#include <cctype>
+#include <unordered_map>
 
 namespace gxos { namespace apps {
     
@@ -15,6 +20,7 @@ namespace gxos { namespace apps {
     
     // Static member initialization
     uint64_t TaskManager::s_windowId = 0;
+    TaskManagerSnapshot TaskManager::s_snapshot{};
     std::vector<ProcessInfo> TaskManager::s_processes;
     int TaskManager::s_selectedIndex = 0;
     int TaskManager::s_scrollOffset = 0;
@@ -35,16 +41,6 @@ namespace gxos { namespace apps {
     int TaskManager::s_netPct = 0;
     int TaskManager::s_perfCategoryIndex = 0;
     
-    // Synthetic disk/network counters
-    int TaskManager::s_diskActivePct = 0;
-    int TaskManager::s_diskReadKBps = 0;
-    int TaskManager::s_diskWriteKBps = 0;
-    int TaskManager::s_diskRespMs = 0;
-    int TaskManager::s_netSendKBps = 0;
-    int TaskManager::s_netRecvKBps = 0;
-    uint64_t TaskManager::s_bytesSent = 0;
-    uint64_t TaskManager::s_bytesRecv = 0;
-    
     // Memory Details tab
     uint64_t TaskManager::s_cumulativeAllocated = 0;
     uint64_t TaskManager::s_cumulativeFreed = 0;
@@ -57,13 +53,261 @@ namespace gxos { namespace apps {
         ProcessSpec spec{"task_manager", TaskManager::main};
         return ProcessTable::spawn(spec, {"task_manager"});
     }
-    
+
+    namespace {
+        static std::string normalizeIdentityLabel(const std::string& value) {
+            std::string normalized;
+            normalized.reserve(value.size());
+            for (char ch : value) {
+                if (std::isalnum(static_cast<unsigned char>(ch))) {
+                    normalized.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(ch))));
+                }
+            }
+            return normalized;
+        }
+
+        static const gxos::gui::RegisteredDesktopApp* findRegisteredAppForLabel(const std::string& label) {
+            if (label.empty()) return nullptr;
+            const std::string normalizedLabel = normalizeIdentityLabel(label);
+            if (normalizedLabel.empty()) return nullptr;
+
+            for (const auto& app : gxos::gui::DesktopService::GetRegisteredApps()) {
+                if (normalizeIdentityLabel(app.displayName) == normalizedLabel) return &app;
+                if (normalizeIdentityLabel(app.launchName) == normalizedLabel) return &app;
+                if (normalizeIdentityLabel(app.id) == normalizedLabel) return &app;
+            }
+            return nullptr;
+        }
+
+        static std::string allocTagName(gxos::AllocTag tag) {
+            switch (tag) {
+                case gxos::AllocTag::Unknown: return "Unknown";
+                case gxos::AllocTag::ThreadMeta: return "ThreadMeta";
+                case gxos::AllocTag::ThreadStack: return "ThreadStack";
+                case gxos::AllocTag::ExecImage: return "ExecImage";
+                case gxos::AllocTag::Image: return "Image";
+                case gxos::AllocTag::FileBuffer: return "FileBuffer";
+                case gxos::AllocTag::Temp: return "Temp";
+                case gxos::AllocTag::Count: break;
+            }
+            return "Unknown";
+        }
+    }
+
+    TaskManagerSnapshot TaskManager::BuildTaskManagerSnapshot() {
+        TaskManagerSnapshot snapshot;
+
+        const std::vector<uint64_t> pidList = ProcessTable::list();
+        const std::vector<gxos::apps::NativeAppProcessInfo> nativeProcesses = NativeAppProcessTable::List();
+        const std::vector<gxos::gui::WindowDebugInfo> windows = gxos::gui::Compositor::debugWindowsSnapshot();
+        const std::vector<std::pair<uint64_t, uint64_t>> pidBytes = Allocator::listPidBytes();
+
+        std::unordered_map<uint64_t, uint64_t> bytesByPid;
+        for (const auto& entry : pidBytes) {
+            bytesByPid[entry.first] = entry.second;
+        }
+
+        std::unordered_map<uint64_t, const gxos::apps::NativeAppProcessInfo*> nativeByPid;
+        for (const auto& process : nativeProcesses) {
+            if (process.nativePid != 0) nativeByPid[process.nativePid] = &process;
+            if (process.runtimeId != 0) nativeByPid[process.runtimeId] = &process;
+        }
+
+        std::unordered_map<uint64_t, std::string> windowTitleByPid;
+        for (const auto& window : windows) {
+            if (window.ownerPid == 0 || window.title.empty()) continue;
+            auto it = windowTitleByPid.find(window.ownerPid);
+            if (it == windowTitleByPid.end() || it->second.empty()) {
+                windowTitleByPid[window.ownerPid] = window.title;
+            }
+        }
+
+        snapshot.memory.totalBytes = Allocator::totalSize();
+        snapshot.memory.totalAvailable = snapshot.memory.totalBytes > 0;
+        snapshot.memory.usedBytes = Allocator::bytesInUse();
+        snapshot.memory.peakBytes = Allocator::peakBytes();
+        snapshot.memory.freeBytes = snapshot.memory.totalBytes > snapshot.memory.usedBytes
+            ? snapshot.memory.totalBytes - snapshot.memory.usedBytes
+            : 0;
+        snapshot.memory.totalFreedBytes = Allocator::totalFreed();
+        snapshot.memory.totalFreedAvailable = true;
+        snapshot.memory.heapUtilPctAvailable = snapshot.memory.totalAvailable && snapshot.memory.totalBytes > 0;
+        if (snapshot.memory.heapUtilPctAvailable) {
+            snapshot.memory.heapUtilPct = static_cast<int>((snapshot.memory.usedBytes * 100) / snapshot.memory.totalBytes);
+        }
+        snapshot.memory.leakStateAvailable = true;
+        snapshot.memory.leakState = s_leakExists;
+        if (snapshot.memory.totalFreedAvailable) {
+            const uint64_t allocatedBytes = snapshot.memory.usedBytes + snapshot.memory.totalFreedBytes;
+            if (allocatedBytes > 0) {
+                snapshot.memory.freeAllocRatioAvailable = true;
+                snapshot.memory.freeAllocRatioPct = static_cast<int>((snapshot.memory.totalFreedBytes * 100) / allocatedBytes);
+            }
+        }
+
+        uint64_t maxTagBytes = 0;
+        gxos::AllocTag maxTag = gxos::AllocTag::Unknown;
+        for (int tagIndex = 0; tagIndex < static_cast<int>(gxos::AllocTag::Count); ++tagIndex) {
+            gxos::AllocTag tag = static_cast<gxos::AllocTag>(tagIndex);
+            uint64_t tagBytes = Allocator::tagBytes(tag);
+            if (tagBytes > maxTagBytes) {
+                maxTagBytes = tagBytes;
+                maxTag = tag;
+            }
+        }
+        if (maxTagBytes > 0) {
+            snapshot.memory.topTagAvailable = true;
+            snapshot.memory.topTagName = allocTagName(maxTag);
+            snapshot.memory.topTagBytes = maxTagBytes;
+        }
+
+        uint64_t topOwnerPid = 0;
+        uint64_t topOwnerBytes = 0;
+        for (const auto& entry : pidBytes) {
+            if (entry.second > topOwnerBytes) {
+                topOwnerPid = entry.first;
+                topOwnerBytes = entry.second;
+            }
+        }
+        if (topOwnerBytes > 0) {
+            snapshot.memory.topOwnerAvailable = true;
+            snapshot.memory.topOwnerPid = topOwnerPid;
+            snapshot.memory.topOwnerBytes = topOwnerBytes;
+        }
+
+        snapshot.performance.processCount = pidList.size();
+        snapshot.performance.nativeProcessCount = nativeProcesses.size();
+        snapshot.performance.windowCount = windows.size();
+        snapshot.performance.schedulerTasksExecuted = Scheduler::tasksExecuted();
+        snapshot.performance.memoryAvailable = snapshot.memory.totalAvailable;
+        snapshot.performance.memoryPct = snapshot.memory.heapUtilPctAvailable ? snapshot.memory.heapUtilPct : 0;
+        snapshot.performance.cpuAvailable = false;
+        snapshot.performance.diskAvailable = false;
+        snapshot.performance.networkAvailable = false;
+        snapshot.performance.syntheticCounters = false;
+
+        for (uint64_t pid : pidList) {
+            ProcessSnapshot info;
+            info.pid = pid;
+
+            bool running = false;
+            int exitCode = 0;
+            if (ProcessTable::getStatus(pid, running, exitCode)) {
+                info.running = running;
+                info.exitCode = exitCode;
+            }
+
+            auto bytesIt = bytesByPid.find(pid);
+            if (bytesIt != bytesByPid.end()) {
+                info.memoryBytes = bytesIt->second;
+            }
+
+            auto nativeIt = nativeByPid.find(pid);
+            if (nativeIt != nativeByPid.end() && nativeIt->second) {
+                const auto& native = *nativeIt->second;
+                info.appId = native.appId;
+                info.displayName = !native.displayName.empty() ? native.displayName :
+                                   (!native.appId.empty() ? native.appId : std::string());
+                auto windowTitleIt = windowTitleByPid.find(pid);
+                if (windowTitleIt != windowTitleByPid.end()) {
+                    info.windowTitle = windowTitleIt->second;
+                }
+            } else {
+                auto windowTitleIt = windowTitleByPid.find(pid);
+                if (windowTitleIt != windowTitleByPid.end()) {
+                    info.windowTitle = windowTitleIt->second;
+                    info.displayName = windowTitleIt->second;
+                    if (const auto* app = findRegisteredAppForLabel(windowTitleIt->second)) {
+                        if (!app->id.empty()) info.appId = app->id;
+                    }
+                }
+            }
+
+            if (info.displayName.empty()) {
+                if (!info.windowTitle.empty()) {
+                    info.displayName = info.windowTitle;
+                } else if (!info.appId.empty()) {
+                    info.displayName = info.appId;
+                } else {
+                    info.displayName = std::string("Process-") + std::to_string(pid);
+                }
+            }
+
+            if (info.appId.empty()) {
+                if (const auto* app = findRegisteredAppForLabel(info.displayName)) {
+                    info.appId = app->id;
+                    if (info.windowTitle.empty() && !app->displayName.empty()) {
+                        info.displayName = app->displayName;
+                    }
+                }
+            }
+
+            info.cpuPctAvailable = false;
+            info.diskPctAvailable = false;
+            info.networkPctAvailable = false;
+            snapshot.processes.push_back(info);
+        }
+
+        std::sort(snapshot.processes.begin(), snapshot.processes.end(),
+            [](const ProcessSnapshot& a, const ProcessSnapshot& b) {
+                return a.pid < b.pid;
+            });
+
+        for (const ProcessSnapshot& process : snapshot.processes) {
+            if (!process.running) {
+                TombstoneSnapshot tombstone;
+                tombstone.displayName = process.displayName;
+                tombstone.appId = process.appId;
+                tombstone.pid = process.pid;
+                if (process.exitCode != 0) {
+                    tombstone.reason = std::string("exitCode=") + std::to_string(process.exitCode);
+                } else {
+                    tombstone.reason = "stopped";
+                }
+                tombstone.restoreSupported = true;
+                tombstone.endSupported = true;
+                snapshot.tombstoned.push_back(tombstone);
+            }
+        }
+
+        snapshot.syntheticCounters = false;
+        return snapshot;
+    }
+
+    std::string TaskManager::SnapshotDiagnostic() {
+        TaskManagerSnapshot snapshot = BuildTaskManagerSnapshot();
+        std::ostringstream oss;
+        oss << "tabs=Processes,Performance,Tombstoned,Memory Details\n";
+        oss << "title=Task Manager\n";
+        oss << "processes=" << snapshot.performance.processCount << "\n";
+        oss << "memoryUsed=" << snapshot.memory.usedBytes << "\n";
+        if (snapshot.memory.totalAvailable) {
+            oss << "memoryTotal=" << snapshot.memory.totalBytes << "\n";
+            oss << "memoryTotalSource=allocatorHeap\n";
+            oss << "memoryTotalDerived=true\n";
+        } else {
+            oss << "memoryTotal=N/A\n";
+            oss << "memoryTotalDerived=false\n";
+        }
+        if (snapshot.performance.cpuAvailable) {
+            oss << "cpu=" << snapshot.performance.cpuPct << "\n";
+        } else {
+            oss << "cpu=N/A\n";
+        }
+        oss << "disk=N/A\n";
+        oss << "network=N/A\n";
+        oss << "tombstoned=" << snapshot.tombstoned.size() << "\n";
+        oss << "syntheticCounters=" << (snapshot.syntheticCounters ? "true" : "false") << "\n";
+        return oss.str();
+    }
+
     int TaskManager::main(int argc, char** argv) {
         try {
             Logger::write(LogLevel::Info, "TaskManager starting...");
             
             // Initialize state
             s_windowId = 0;
+            s_snapshot = TaskManagerSnapshot{};
             s_processes.clear();
             s_selectedIndex = 0;
             s_scrollOffset = 0;
@@ -77,14 +321,6 @@ namespace gxos { namespace apps {
             s_diskPct = 0;
             s_netPct = 0;
             s_perfCategoryIndex = 0;
-            s_diskActivePct = 0;
-            s_diskReadKBps = 0;
-            s_diskWriteKBps = 0;
-            s_diskRespMs = 0;
-            s_netSendKBps = 0;
-            s_netRecvKBps = 0;
-            s_bytesSent = 0;
-            s_bytesRecv = 0;
             s_cumulativeAllocated = 0;
             s_cumulativeFreed = 0;
             s_lastMemDetailUpdate = 0;
@@ -92,8 +328,6 @@ namespace gxos { namespace apps {
             s_leakGrowthCounter = 0;
             s_leakHistory.clear();
             
-            // Get initial system stats
-            s_totalMemory = 512 * 1024 * 1024; // 512MB (from platform info)
             refreshProcessList();
             
             // Subscribe to IPC channels
@@ -296,55 +530,22 @@ namespace gxos { namespace apps {
     }
     
     void TaskManager::refreshProcessList() {
+        s_snapshot = BuildTaskManagerSnapshot();
         s_processes.clear();
-        
-        // Get list of process IDs
-        auto pidList = ProcessTable::list();
-        
-        // Get memory allocation info per PID
-        auto memList = Allocator::listPidBytes();
-        
-        // Build process info list
-        for (uint64_t pid : pidList) {
+        s_processes.reserve(s_snapshot.processes.size());
+        for (const auto& process : s_snapshot.processes) {
             ProcessInfo info;
-            info.pid = pid;
-            
-            // Get process status
-            bool running;
-            int exitCode;
-            if (ProcessTable::getStatus(pid, running, exitCode)) {
-                info.running = running;
-                info.exitCode = exitCode;
-            } else {
-                info.running = false;
-                info.exitCode = 0;
-            }
-            
-            // Get process name (we'll use pid as name for now since we don't store names)
-            info.name = "Process-" + std::to_string(pid);
-            
-            // Get memory usage
-            info.memoryBytes = 0;
-            for (const auto& memPair : memList) {
-                if (memPair.first == pid) {
-                    info.memoryBytes = memPair.second;
-                    break;
-                }
-            }
-            
+            info.pid = process.pid;
+            info.name = process.displayName;
+            info.running = process.running;
+            info.exitCode = process.exitCode;
+            info.memoryBytes = process.memoryBytes;
             s_processes.push_back(info);
         }
-        
-        // Sort by PID
-        std::sort(s_processes.begin(), s_processes.end(), 
-            [](const ProcessInfo& a, const ProcessInfo& b) {
-                return a.pid < b.pid;
-            });
-        
-        // Update system stats
-        s_usedMemory = Allocator::bytesInUse();
-        s_peakMemory = Allocator::peakBytes();
-        s_tasksExecuted = Scheduler::tasksExecuted();
+        s_totalMemory = s_snapshot.memory.totalAvailable ? s_snapshot.memory.totalBytes : 0;
+        s_usedMemory = s_snapshot.memory.usedBytes;
+        s_peakMemory = s_snapshot.memory.peakBytes;
+        s_tasksExecuted = s_snapshot.performance.schedulerTasksExecuted;
         
         // Ensure selected index is valid
         if (s_selectedIndex >= (int)s_processes.size()) {
@@ -487,6 +688,7 @@ namespace gxos { namespace apps {
     
     void TaskManager::updateHeader() {
         const char* kGuiChanIn = "gui.input";
+        const MemorySnapshot& mem = s_snapshot.memory;
         
         // System stats header
         {
@@ -504,8 +706,13 @@ namespace gxos { namespace apps {
             ipc::Message msg;
             msg.type = (uint32_t)MsgType::MT_DrawText;
             std::ostringstream oss;
-            oss << s_windowId << "|Memory: " << (s_usedMemory / 1024) << " KB / " 
-                << (s_totalMemory / 1024) << " KB (Peak: " << (s_peakMemory / 1024) << " KB)";
+            oss << s_windowId << "|Memory: " << formatMemory(mem.usedBytes);
+            if (mem.totalAvailable) {
+                oss << " / " << formatMemory(mem.totalBytes) << " (allocator heap total)";
+            } else {
+                oss << " / N/A";
+            }
+            oss << " (Peak: " << formatMemory(mem.peakBytes) << ")";
             std::string payload = oss.str();
             msg.data.assign(payload.begin(), payload.end());
             ipc::Bus::publish(kGuiChanIn, std::move(msg), false);
@@ -527,7 +734,7 @@ namespace gxos { namespace apps {
             ipc::Message msg;
             msg.type = (uint32_t)MsgType::MT_DrawText;
             std::ostringstream oss;
-            oss << s_windowId << "|   PID  Name              Status    Memory";
+            oss << s_windowId << "|   PID  Name              Status       CPU     Memory       Disk     Net";
             std::string payload = oss.str();
             msg.data.assign(payload.begin(), payload.end());
             ipc::Bus::publish(kGuiChanIn, std::move(msg), false);
@@ -571,10 +778,10 @@ namespace gxos { namespace apps {
             
             int visibleCount = 12;
             int startIndex = s_scrollOffset;
-            int endIndex = std::min((int)s_processes.size(), startIndex + visibleCount);
+            int endIndex = std::min((int)s_snapshot.processes.size(), startIndex + visibleCount);
             
             for (int i = startIndex; i < endIndex; i++) {
-                const ProcessInfo& proc = s_processes[i];
+                const ProcessSnapshot& proc = s_snapshot.processes[i];
                 
                 ipc::Message msg;
                 msg.type = (uint32_t)MsgType::MT_DrawText;
@@ -587,15 +794,17 @@ namespace gxos { namespace apps {
                 
                 oss << std::setw(5) << std::right << proc.pid << " ";
                 
-                std::string name = proc.name;
+                std::string name = proc.displayName;
                 if (name.length() > 18) name = name.substr(0, 15) + "...";
                 oss << std::setw(18) << std::left << name << " ";
                 
                 std::string status = proc.running ? "Running" : ("Stopped:" + std::to_string(proc.exitCode));
-                if (status.length() > 10) status = status.substr(0, 10);
-                oss << std::setw(10) << std::left << status << " ";
-                
-                oss << formatMemory(proc.memoryBytes);
+                if (status.length() > 12) status = status.substr(0, 12);
+                oss << std::setw(12) << std::left << status << " ";
+                oss << std::setw(8) << std::left << (proc.cpuPctAvailable ? std::to_string(proc.cpuPct) + "%" : "N/A") << " ";
+                oss << std::setw(12) << std::left << formatMemory(proc.memoryBytes) << " ";
+                oss << std::setw(8) << std::left << (proc.diskPctAvailable ? std::to_string(proc.diskPct) + "%" : "N/A") << " ";
+                oss << std::setw(8) << std::left << (proc.networkPctAvailable ? std::to_string(proc.networkPct) + "%" : "N/A");
                 
                 auto payload = oss.str();
                 msg.data.assign(payload.begin(), payload.end());
@@ -614,33 +823,13 @@ namespace gxos { namespace apps {
     
     void TaskManager::updatePerformanceTab() {
         const char* kGuiChanIn = "gui.input";
-        
-        // Compute live percentages
-        s_usedMemory = Allocator::bytesInUse();
-        s_peakMemory = Allocator::peakBytes();
-        uint64_t totalMem = s_totalMemory > 0 ? s_totalMemory : 1;
-        s_memPct = (int)(s_usedMemory * 100 / totalMem);
-        if (s_memPct > 100) s_memPct = 100;
-        
-        // CPU approximation from scheduler
-        s_tasksExecuted = Scheduler::tasksExecuted();
-        s_cpuPct = (int)(s_tasksExecuted % 100);
-        
-        // Synthetic disk/network counters (matching Legacy wave animation)
-        auto now = std::chrono::steady_clock::now();
-        uint64_t ticks = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
-        
-        s_diskPct = wavePct(ticks, 24000);
-        s_diskActivePct = wavePct(ticks + 6000, 30000);
-        s_diskReadKBps = s_diskPct * 4;
-        s_diskWriteKBps = s_diskActivePct * 3 / 2;
-        s_diskRespMs = 1 + s_diskActivePct / 10;
-        
-        s_netPct = wavePct(ticks + 12000, 28000);
-        s_netSendKBps = s_netPct * 2;
-        s_netRecvKBps = (100 - s_netPct) * 2;
-        s_bytesSent += (uint64_t)(s_netSendKBps * 1024 / 10);
-        s_bytesRecv += (uint64_t)(s_netRecvKBps * 1024 / 10);
+        const PerformanceSnapshot& perf = s_snapshot.performance;
+        const MemorySnapshot& mem = s_snapshot.memory;
+        s_tasksExecuted = perf.schedulerTasksExecuted;
+        s_cpuPct = perf.cpuAvailable ? perf.cpuPct : 0;
+        s_memPct = perf.memoryAvailable ? perf.memoryPct : 0;
+        s_diskPct = perf.diskAvailable ? perf.diskPct : 0;
+        s_netPct = perf.networkAvailable ? perf.networkPct : 0;
         
         auto sendLine = [&](const std::string& text) {
             ipc::Message msg;
@@ -655,7 +844,8 @@ namespace gxos { namespace apps {
         
         // Category labels (4 categories matching Legacy)
         const char* catLabels[] = { "CPU", "Memory", "Disk", "Network" };
-        int catValues[] = { s_cpuPct, s_memPct, s_diskPct, s_netPct };
+        const bool catAvailable[] = { perf.cpuAvailable, perf.memoryAvailable, perf.diskAvailable, perf.networkAvailable };
+        const int catValues[] = { perf.cpuPct, perf.memoryPct, perf.diskPct, perf.networkPct };
         
         // Navigation hint
         {
@@ -672,47 +862,67 @@ namespace gxos { namespace apps {
         sendLine("");
         
         // ASCII bar chart for selected category
-        int val = catValues[s_perfCategoryIndex];
+        int val = catAvailable[s_perfCategoryIndex] ? catValues[s_perfCategoryIndex] : 0;
         {
             std::ostringstream oss;
-            oss << catLabels[s_perfCategoryIndex] << ": " << val << "%";
+            if (catAvailable[s_perfCategoryIndex]) {
+                oss << catLabels[s_perfCategoryIndex] << ": " << val << "%";
+            } else {
+                oss << catLabels[s_perfCategoryIndex] << ": N/A";
+            }
             sendLine(oss.str());
         }
-        {
+        if (catAvailable[s_perfCategoryIndex]) {
             int filled = val * 40 / 100;
             std::string bar = "[";
             for (int b = 0; b < 40; b++) bar += (b < filled ? '#' : '.');
             bar += "]";
             sendLine(bar);
+        } else {
+            sendLine("[N/A]");
         }
         sendLine("");
         
         // Detail stats for selected category
         if (s_perfCategoryIndex == 0) {
             // CPU details
-            sendLine("Utilization: " + std::to_string(s_cpuPct) + "%");
-            sendLine("Processes: " + std::to_string(s_processes.size()));
+            sendLine("Utilization: N/A");
+            sendLine("Processes: " + std::to_string(perf.processCount));
+            sendLine("Windows: " + std::to_string(perf.windowCount));
             sendLine("Tasks Executed: " + std::to_string(s_tasksExecuted));
-            sendLine("Machine time: " + formatUptime(ticks));
+            sendLine("Machine time: " + formatUptime((uint64_t)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count()));
         } else if (s_perfCategoryIndex == 1) {
             // Memory details
-            uint64_t avail = s_totalMemory > s_usedMemory ? s_totalMemory - s_usedMemory : 0;
-            sendLine("In Use: " + formatMemory(s_usedMemory) + " (" + std::to_string(s_memPct) + "%)");
-            sendLine("Available: " + formatMemory(avail));
-            sendLine("Total: " + formatMemory(s_totalMemory));
-            sendLine("Peak: " + formatMemory(s_peakMemory));
+            uint64_t avail = mem.freeBytes;
+            sendLine("In Use: " + formatMemory(mem.usedBytes) + " (" + std::to_string(mem.heapUtilPctAvailable ? mem.heapUtilPct : 0) + "%)");
+            sendLine("Available: " + (mem.totalAvailable ? formatMemory(avail) : std::string("N/A")));
+            sendLine("Total: " + (mem.totalAvailable ? formatMemory(mem.totalBytes) + " (allocator heap)" : std::string("N/A")));
+            sendLine("Peak: " + formatMemory(mem.peakBytes));
+            if (mem.freeAllocRatioAvailable) {
+                sendLine("Free/Alloc Ratio: " + std::to_string(mem.freeAllocRatioPct) + "%");
+            } else {
+                sendLine("Free/Alloc Ratio: N/A");
+            }
+            if (mem.topTagAvailable) {
+                sendLine("Top Tag: " + mem.topTagName + " (" + formatMemory(mem.topTagBytes) + ")");
+            }
+            if (mem.topOwnerAvailable) {
+                sendLine("Top Owner: PID " + std::to_string(mem.topOwnerPid) + " (" + formatMemory(mem.topOwnerBytes) + ")");
+            }
         } else if (s_perfCategoryIndex == 2) {
-            // Disk details (synthetic, matching Legacy)
-            sendLine("Active time: " + std::to_string(s_diskActivePct) + "%");
-            sendLine("Avg response time: " + std::to_string(s_diskRespMs) + " ms");
-            sendLine("Read speed: " + formatTransferRate(s_diskReadKBps));
-            sendLine("Write speed: " + formatTransferRate(s_diskWriteKBps));
+            // Disk details
+            sendLine("Active time: N/A");
+            sendLine("Avg response time: N/A");
+            sendLine("Read speed: N/A");
+            sendLine("Write speed: N/A");
+            sendLine("Real counter: unavailable");
         } else if (s_perfCategoryIndex == 3) {
-            // Network details (synthetic, matching Legacy)
-            sendLine("Send: " + formatTransferRate(s_netSendKBps));
-            sendLine("Receive: " + formatTransferRate(s_netRecvKBps));
-            sendLine("Sent bytes: " + std::to_string(s_bytesSent));
-            sendLine("Received bytes: " + std::to_string(s_bytesRecv));
+            // Network details
+            sendLine("Send: N/A");
+            sendLine("Receive: N/A");
+            sendLine("Sent bytes: N/A");
+            sendLine("Received bytes: N/A");
+            sendLine("Real counter: unavailable");
         }
         
         sendLine("");
@@ -732,21 +942,20 @@ namespace gxos { namespace apps {
         
         sendLine("--- Tombstoned Apps ---");
         sendLine("");
-        sendLine("   PID  Name               Status");
+        sendLine("   PID  Name               Reason");
         
         int count = 0;
-        int tombIdx = 0;
-        for (const auto& proc : s_processes) {
-            if (!proc.running) {
+        for (size_t tombIdx = 0; tombIdx < s_snapshot.tombstoned.size(); ++tombIdx) {
+            const TombstoneSnapshot& tomb = s_snapshot.tombstoned[tombIdx];
+            {
                 std::ostringstream oss;
-                if (tombIdx == s_selectedTombIndex) oss << "> ";
+                if ((int)tombIdx == s_selectedTombIndex) oss << "> ";
                 else oss << "  ";
-                oss << std::setw(5) << std::right << proc.pid << "  "
-                    << std::setw(18) << std::left << proc.name << " "
-                    << "Stopped:" << proc.exitCode;
+                oss << std::setw(5) << std::right << tomb.pid << "  "
+                    << std::setw(18) << std::left << tomb.displayName << " "
+                    << (tomb.reason.empty() ? "stopped" : tomb.reason);
                 sendLine(oss.str());
                 count++;
-                tombIdx++;
             }
         }
         
@@ -771,10 +980,10 @@ namespace gxos { namespace apps {
         msg.type = (uint32_t)MsgType::MT_DrawText;
         
         std::ostringstream oss;
-        oss << s_windowId << "|" << s_processes.size() << " processes";
+        oss << s_windowId << "|" << s_snapshot.performance.processCount << " processes";
         
-        if (s_selectedIndex >= 0 && s_selectedIndex < (int)s_processes.size()) {
-            const ProcessInfo& proc = s_processes[s_selectedIndex];
+        if (s_selectedIndex >= 0 && s_selectedIndex < (int)s_snapshot.processes.size()) {
+            const ProcessSnapshot& proc = s_snapshot.processes[s_selectedIndex];
             oss << " | Selected: PID " << proc.pid;
         }
         
@@ -788,54 +997,32 @@ namespace gxos { namespace apps {
     // --- Tombstoned management (matching Legacy TaskManager.cs) ---
     
     int TaskManager::countTombstoned() {
-        int count = 0;
-        for (const auto& proc : s_processes) {
-            if (!proc.running) count++;
-        }
-        return count;
+        return (int)s_snapshot.tombstoned.size();
     }
     
     void TaskManager::restoreTombstoned() {
         if (s_selectedTombIndex < 0) return;
-        
-        // Find the Nth tombstoned process
-        int tombIdx = 0;
-        for (const auto& proc : s_processes) {
-            if (!proc.running) {
-                if (tombIdx == s_selectedTombIndex) {
-                    Logger::write(LogLevel::Info, std::string("TaskManager: Restoring tombstoned PID ") + std::to_string(proc.pid));
-                    // Attempt to restart/restore the process
-                    // In the server model, "restore" means re-launching the process
-                    // For now, log the action
-                    Logger::write(LogLevel::Info, "TaskManager: Process restore requested (server-side restart)");
-                    refreshProcessList();
-                    updateDisplay();
-                    updateStatusBar();
-                    return;
-                }
-                tombIdx++;
-            }
-        }
+        if (s_selectedTombIndex >= (int)s_snapshot.tombstoned.size()) return;
+        const TombstoneSnapshot& tomb = s_snapshot.tombstoned[s_selectedTombIndex];
+        Logger::write(LogLevel::Info, std::string("TaskManager: Restoring tombstoned PID ") + std::to_string(tomb.pid));
+        Logger::write(LogLevel::Info, "TaskManager: Process restore requested (server-side restart)");
+        refreshProcessList();
+        updateDisplay();
+        updateStatusBar();
+        return;
     }
     
     void TaskManager::endTombstoned() {
         if (s_selectedTombIndex < 0) return;
-        
-        int tombIdx = 0;
-        for (const auto& proc : s_processes) {
-            if (!proc.running) {
-                if (tombIdx == s_selectedTombIndex) {
-                    Logger::write(LogLevel::Info, std::string("TaskManager: Ending tombstoned PID ") + std::to_string(proc.pid));
-                    ProcessTable::terminate(proc.pid);
-                    s_selectedTombIndex = -1;
-                    refreshProcessList();
-                    updateDisplay();
-                    updateStatusBar();
-                    return;
-                }
-                tombIdx++;
-            }
-        }
+        if (s_selectedTombIndex >= (int)s_snapshot.tombstoned.size()) return;
+        const TombstoneSnapshot& tomb = s_snapshot.tombstoned[s_selectedTombIndex];
+        Logger::write(LogLevel::Info, std::string("TaskManager: Ending tombstoned PID ") + std::to_string(tomb.pid));
+        ProcessTable::terminate(tomb.pid);
+        s_selectedTombIndex = -1;
+        refreshProcessList();
+        updateDisplay();
+        updateStatusBar();
+        return;
     }
     
     // --- Memory Details tab (matching Legacy TaskManager.cs DrawMemoryDetails) ---
@@ -857,13 +1044,15 @@ namespace gxos { namespace apps {
         
         if (nowTicks - s_lastMemDetailUpdate >= 1000) {
             s_lastMemDetailUpdate = nowTicks;
-            
-            // Track cumulative allocated/freed
-            s_usedMemory = Allocator::bytesInUse();
-            s_peakMemory = Allocator::peakBytes();
-            s_cumulativeFreed = Allocator::totalFreed();
+
+            refreshProcessList();
+
+            // Track cumulative allocated/freed using snapshot data
+            s_usedMemory = s_snapshot.memory.usedBytes;
+            s_peakMemory = s_snapshot.memory.peakBytes;
+            s_cumulativeFreed = s_snapshot.memory.totalFreedBytes;
             s_cumulativeAllocated = s_usedMemory + s_cumulativeFreed;
-            
+
             // Leak detection (matching Legacy)
             int64_t netGrowth = (int64_t)s_cumulativeAllocated - (int64_t)s_cumulativeFreed;
             s_leakHistory.push_back((uint64_t)netGrowth);
@@ -922,30 +1111,29 @@ namespace gxos { namespace apps {
         
         // Heap stats
         sendLine("=== Heap Allocator ===");
-        uint64_t heapTotal = Allocator::totalSize();
-        uint64_t heapUsed = Allocator::bytesInUse();
+        uint64_t heapTotal = s_snapshot.memory.totalAvailable ? s_snapshot.memory.totalBytes : 0;
+        uint64_t heapUsed = s_snapshot.memory.usedBytes;
         uint64_t heapFree = heapTotal > heapUsed ? heapTotal - heapUsed : 0;
         int heapUtilPct = heapTotal > 0 ? (int)(heapUsed * 100 / heapTotal) : 0;
         
-        sendLine("Total Heap Size:   " + formatMemory(heapTotal));
+        sendLine("Total Heap Size:   " + (heapTotal > 0 ? formatMemory(heapTotal) + " (allocator heap)" : std::string("N/A")));
         sendLine("Heap In Use:       " + formatMemory(heapUsed));
-        sendLine("Heap Free:         " + formatMemory(heapFree));
-        sendLine("Heap Utilization:  " + std::to_string(heapUtilPct) + "%");
+        sendLine("Heap Free:         " + (heapTotal > 0 ? formatMemory(heapFree) : std::string("N/A")));
+        sendLine("Heap Utilization:  " + (heapTotal > 0 ? std::to_string(heapUtilPct) + "%" : std::string("N/A")));
         sendLine("");
         sendLine("Peak Memory:       " + formatMemory(s_peakMemory));
+        if (s_snapshot.memory.topTagAvailable) {
+            sendLine("Top Tag:           " + s_snapshot.memory.topTagName + " (" + formatMemory(s_snapshot.memory.topTagBytes) + ")");
+        }
+        if (s_snapshot.memory.topOwnerAvailable) {
+            sendLine("Top Owner:         PID " + std::to_string(s_snapshot.memory.topOwnerPid) + " (" + formatMemory(s_snapshot.memory.topOwnerBytes) + ")");
+        }
         sendLine("");
         sendLine("F5=Refresh | Tab=Switch Tab");
     }
     
     // --- Helper functions ---
-    
-    int TaskManager::wavePct(uint64_t ticks, int period) {
-        int t = (int)(ticks % (uint64_t)period);
-        int up = period / 2;
-        if (t < up) return t * 100 / up;
-        else return (period - t) * 100 / up;
-    }
-    
+
     std::string TaskManager::formatMemory(uint64_t bytes) {
         if (bytes >= 1024ULL * 1024ULL * 1024ULL) {
             double gb = (double)bytes / (1024.0 * 1024.0 * 1024.0);
@@ -962,15 +1150,6 @@ namespace gxos { namespace apps {
         } else {
             return std::to_string(bytes) + " B";
         }
-    }
-    
-    std::string TaskManager::formatTransferRate(int kbps) {
-        if (kbps >= 1024) {
-            std::ostringstream oss;
-            oss << std::fixed << std::setprecision(1) << ((double)kbps / 1024.0) << " MB/s";
-            return oss.str();
-        }
-        return std::to_string(kbps) + " KB/s";
     }
     
     std::string TaskManager::formatUptime(uint64_t ticks) {
