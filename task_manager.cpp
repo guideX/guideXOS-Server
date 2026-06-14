@@ -36,6 +36,9 @@ namespace gxos { namespace apps {
     int TaskManager::s_currentTab = 0;
     int TaskManager::s_selectedTombIndex = -1;
     int TaskManager::s_cpuPct = 0;
+    uint64_t TaskManager::s_cpuHistory[TaskManager::kCpuHistoryMax] = {};
+    int TaskManager::s_cpuHistoryCount = 0;
+    int TaskManager::s_cpuHistoryHead = 0;
     int TaskManager::s_memPct = 0;
     int TaskManager::s_diskPct = 0;
     int TaskManager::s_netPct = 0;
@@ -100,6 +103,15 @@ namespace gxos { namespace apps {
         static std::string pctOrNa(bool available, int pct) {
             if (!available) return "N/A";
             return std::to_string(pct) + "%";
+        }
+
+        static void appendHistorySample(uint64_t* history, int historyMax, int& count, int& head, int value) {
+            if (historyMax <= 0) return;
+            history[head] = static_cast<uint64_t>(std::max(0, std::min(100, value)));
+            head = (head + 1) % historyMax;
+            if (count < historyMax) {
+                ++count;
+            }
         }
 
         static std::string trimDisplayName(const std::string& text, size_t maxChars) {
@@ -287,7 +299,13 @@ namespace gxos { namespace apps {
         snapshot.performance.schedulerTasksExecuted = Scheduler::tasksExecuted();
         snapshot.performance.memoryAvailable = snapshot.memory.totalAvailable;
         snapshot.performance.memoryPct = snapshot.memory.heapUtilPctAvailable ? snapshot.memory.heapUtilPct : 0;
-        snapshot.performance.cpuAvailable = false;
+        const CpuTelemetrySnapshot cpuTelemetry = Scheduler::cpuTelemetrySnapshot();
+        snapshot.performance.cpuAvailable = cpuTelemetry.available;
+        snapshot.performance.cpuPct = cpuTelemetry.available ? cpuTelemetry.utilizationPct : 0;
+        snapshot.performance.cpuSource = cpuTelemetry.available ? cpuTelemetry.source : "N/A";
+        snapshot.performance.cpuSampleWindowMs = cpuTelemetry.available ? cpuTelemetry.sampleWindowMs : 0;
+        snapshot.performance.cpuBusyTimeMs = cpuTelemetry.available ? cpuTelemetry.busyTimeMs : 0;
+        snapshot.performance.cpuIdleTimeMs = cpuTelemetry.available ? cpuTelemetry.idleTimeMs : 0;
         snapshot.performance.diskAvailable = false;
         snapshot.performance.networkAvailable = false;
         snapshot.performance.syntheticCounters = false;
@@ -348,6 +366,7 @@ namespace gxos { namespace apps {
                 }
             }
 
+            // Phase 3B: per-process CPU remains N/A until we have a real process-level counter.
             info.cpuPctAvailable = false;
             info.diskPctAvailable = false;
             info.networkPctAvailable = false;
@@ -400,9 +419,19 @@ namespace gxos { namespace apps {
             oss << "memoryTotalDerived=false\n";
         }
         if (snapshot.performance.cpuAvailable) {
-            oss << "cpu=" << snapshot.performance.cpuPct << "\n";
+            oss << "cpu=" << snapshot.performance.cpuPct << "%\n";
+            oss << "cpuAvailable=true\n";
+            oss << "cpuSource=" << snapshot.performance.cpuSource << "\n";
+            oss << "cpuSampleWindowMs=" << snapshot.performance.cpuSampleWindowMs << "\n";
+            oss << "cpuBusyTimeMs=" << snapshot.performance.cpuBusyTimeMs << "\n";
+            oss << "cpuIdleTimeMs=" << snapshot.performance.cpuIdleTimeMs << "\n";
         } else {
             oss << "cpu=N/A\n";
+            oss << "cpuAvailable=false\n";
+            oss << "cpuSource=N/A\n";
+            oss << "cpuSampleWindowMs=N/A\n";
+            oss << "cpuBusyTimeMs=N/A\n";
+            oss << "cpuIdleTimeMs=N/A\n";
         }
         oss << "disk=N/A\n";
         oss << "network=N/A\n";
@@ -440,6 +469,11 @@ namespace gxos { namespace apps {
             s_currentTab = 0;
             s_selectedTombIndex = -1;
             s_cpuPct = 0;
+            s_cpuHistoryCount = 0;
+            s_cpuHistoryHead = 0;
+            for (int i = 0; i < kCpuHistoryMax; ++i) {
+                s_cpuHistory[i] = 0;
+            }
             s_memPct = 0;
             s_diskPct = 0;
             s_netPct = 0;
@@ -688,14 +722,12 @@ namespace gxos { namespace apps {
     }
 
     void TaskManager::recordPerformanceSnapshot(const TaskManagerSnapshot& snapshot) {
-        if (!snapshot.memory.heapUtilPctAvailable) {
-            return;
+        if (snapshot.performance.cpuAvailable) {
+            appendHistorySample(s_cpuHistory, kCpuHistoryMax, s_cpuHistoryCount, s_cpuHistoryHead, snapshot.performance.cpuPct);
         }
 
-        s_memoryHistory[s_memoryHistoryHead] = static_cast<uint64_t>(std::max(0, std::min(100, snapshot.memory.heapUtilPct)));
-        s_memoryHistoryHead = (s_memoryHistoryHead + 1) % kMemoryHistoryMax;
-        if (s_memoryHistoryCount < kMemoryHistoryMax) {
-            ++s_memoryHistoryCount;
+        if (snapshot.memory.heapUtilPctAvailable) {
+            appendHistorySample(s_memoryHistory, kMemoryHistoryMax, s_memoryHistoryCount, s_memoryHistoryHead, snapshot.memory.heapUtilPct);
         }
     }
     
@@ -971,6 +1003,9 @@ namespace gxos { namespace apps {
         const char* navLabels[] = { "CPU", "Memory", "Disk", "Network" };
         const bool navAvailable[] = { perf.cpuAvailable, perf.memoryAvailable, perf.diskAvailable, perf.networkAvailable };
         const int navValues[] = { perf.cpuPct, perf.memoryPct, perf.diskPct, perf.networkPct };
+        const uint64_t* navHistories[] = { s_cpuHistory, s_memoryHistory, nullptr, nullptr };
+        const int navHistoryCounts[] = { s_cpuHistoryCount, s_memoryHistoryCount, 0, 0 };
+        const int navHistoryHeads[] = { s_cpuHistoryHead, s_memoryHistoryHead, 0, 0 };
         const uint8_t navColors[4][3] = {
             { 93, 173, 226 },
             { 88, 214, 141 },
@@ -983,7 +1018,7 @@ namespace gxos { namespace apps {
             if (i == s_perfCategoryIndex) {
                 publishRect(s_windowId, x + 8, itemY - 2, navW - 16, navItemH + 2, 0x25, 0x32, 0x44);
             }
-            const bool showHistory = i == 1 && navAvailable[i] && s_memoryHistoryCount > 0;
+            const bool showHistory = navAvailable[i] && navHistoryCounts[i] > 0;
             drawGraphBox(
                 s_windowId,
                 x + 10,
@@ -993,16 +1028,17 @@ namespace gxos { namespace apps {
                 navLabels[i],
                 navAvailable[i] ? std::to_string(navValues[i]) + "%" : std::string("N/A"),
                 showHistory,
-                s_memoryHistory,
-                s_memoryHistoryCount,
-                s_memoryHistoryHead,
+                navHistories[i],
+                navHistoryCounts[i],
+                navHistoryHeads[i],
                 navColors[i][0],
                 navColors[i][1],
                 navColors[i][2]
             );
         }
 
-        const bool detailHasHistory = (s_perfCategoryIndex == 1) && mem.heapUtilPctAvailable && s_memoryHistoryCount > 0;
+        const bool detailHasHistory = (s_perfCategoryIndex == 0 && perf.cpuAvailable && s_cpuHistoryCount > 0) ||
+                                      (s_perfCategoryIndex == 1 && mem.heapUtilPctAvailable && s_memoryHistoryCount > 0);
         const char* detailLabels[] = { "CPU", "Memory", "Disk", "Network" };
         const uint8_t detailColors[4][3] = {
             { 93, 173, 226 },
@@ -1016,6 +1052,15 @@ namespace gxos { namespace apps {
             perf.diskAvailable,
             perf.networkAvailable
         };
+        const uint64_t* detailHistory = s_perfCategoryIndex == 0 ? s_cpuHistory
+                                      : s_perfCategoryIndex == 1 ? s_memoryHistory
+                                      : nullptr;
+        const int detailHistoryCount = s_perfCategoryIndex == 0 ? s_cpuHistoryCount
+                                     : s_perfCategoryIndex == 1 ? s_memoryHistoryCount
+                                     : 0;
+        const int detailHistoryHead = s_perfCategoryIndex == 0 ? s_cpuHistoryHead
+                                    : s_perfCategoryIndex == 1 ? s_memoryHistoryHead
+                                    : 0;
         const std::string detailValue = s_perfCategoryIndex == 1 ? pctOrNa(mem.heapUtilPctAvailable, mem.heapUtilPct)
                                                                  : (detailHasData[s_perfCategoryIndex] ? std::to_string(navValues[s_perfCategoryIndex]) + "%" : std::string("N/A"));
         drawGraphBox(
@@ -1027,9 +1072,9 @@ namespace gxos { namespace apps {
             detailLabels[s_perfCategoryIndex],
             detailValue,
             detailHasHistory,
-            s_memoryHistory,
-            s_memoryHistoryCount,
-            s_memoryHistoryHead,
+            detailHistory,
+            detailHistoryCount,
+            detailHistoryHead,
             detailColors[s_perfCategoryIndex][0],
             detailColors[s_perfCategoryIndex][1],
             detailColors[s_perfCategoryIndex][2]
@@ -1046,11 +1091,11 @@ namespace gxos { namespace apps {
         };
 
         if (s_perfCategoryIndex == 0) {
-            detailRow(0, "Utilization:", "N/A");
-            detailRow(1, "Processes:", std::to_string(perf.processCount));
-            detailRow(2, "Windows:", std::to_string(perf.windowCount));
-            detailRow(3, "Tasks Executed:", std::to_string(s_tasksExecuted));
-            detailRow(4, "Machine time:", formatUptime((uint64_t)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count()));
+            detailRow(0, "Utilization:", pctOrNa(perf.cpuAvailable, perf.cpuPct));
+            detailRow(1, "Sample window:", perf.cpuAvailable ? std::to_string(perf.cpuSampleWindowMs) + " ms" : std::string("N/A"));
+            detailRow(2, "Source:", perf.cpuAvailable ? perf.cpuSource : std::string("N/A"));
+            detailRow(3, "Busy time:", perf.cpuAvailable ? std::to_string(perf.cpuBusyTimeMs) + " ms" : std::string("N/A"));
+            detailRow(4, "Idle time:", perf.cpuAvailable ? std::to_string(perf.cpuIdleTimeMs) + " ms" : std::string("N/A"));
         } else if (s_perfCategoryIndex == 1) {
             detailRow(0, "In Use:", formatMemory(mem.usedBytes) + " (" + std::to_string(mem.heapUtilPctAvailable ? mem.heapUtilPct : 0) + "%)");
             detailRow(1, "Available:", mem.totalAvailable ? formatMemory(mem.freeBytes) : std::string("N/A"));

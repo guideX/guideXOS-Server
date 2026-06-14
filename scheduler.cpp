@@ -1,6 +1,7 @@
 #include "scheduler.h"
 #include "logger.h"
 #include <condition_variable>
+#include <chrono>
 
 namespace gxos {
     std::vector<std::thread> Scheduler::g_threads; 
@@ -8,10 +9,36 @@ namespace gxos {
     std::mutex Scheduler::g_lock; 
     std::atomic<bool> Scheduler::g_stop{false}; 
     std::atomic<uint64_t> Scheduler::g_executed{0};
+    std::atomic<uint64_t> Scheduler::g_busyMicros{0};
+    std::atomic<uint64_t> Scheduler::g_idleMicros{0};
+    std::mutex Scheduler::g_telemetryLock;
+    uint64_t Scheduler::g_lastSampleBusyMicros = 0;
+    uint64_t Scheduler::g_lastSampleIdleMicros = 0;
+    uint64_t Scheduler::g_lastSampleWallMicros = 0;
     static std::condition_variable g_cv;
 
+    namespace {
+        static uint64_t durationMicros(const std::chrono::steady_clock::duration& duration) {
+            return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(duration).count());
+        }
+
+        static uint64_t microsToMillisCeil(uint64_t micros) {
+            return micros == 0 ? 0 : ((micros + 999) / 1000);
+        }
+    }
+
     void Scheduler::init(unsigned workers){
-        g_stop=false; g_executed=0;
+        g_stop = false;
+        g_executed = 0;
+        g_busyMicros = 0;
+        g_idleMicros = 0;
+        g_lastSampleBusyMicros = 0;
+        g_lastSampleIdleMicros = 0;
+        g_lastSampleWallMicros = durationMicros(std::chrono::steady_clock::now().time_since_epoch());
+        {
+            std::lock_guard<std::mutex> lk(g_lock);
+            g_queue.clear();
+        }
         for (unsigned i=0;i<workers;i++){
             g_threads.emplace_back(loop);
         }
@@ -20,16 +47,48 @@ namespace gxos {
     void Scheduler::shutdown(){ g_stop=true; g_cv.notify_all(); for(auto& th: g_threads){ if(th.joinable()) th.join(); } g_threads.clear(); }
     uint64_t Scheduler::tasksExecuted(){ return g_executed.load(); }
 
+    CpuTelemetrySnapshot Scheduler::cpuTelemetrySnapshot() {
+        CpuTelemetrySnapshot snapshot;
+        snapshot.source = "schedulerIdleBusy";
+
+        const uint64_t busyTotalMicros = g_busyMicros.load(std::memory_order_relaxed);
+        const uint64_t idleTotalMicros = g_idleMicros.load(std::memory_order_relaxed);
+        const uint64_t nowMicros = durationMicros(std::chrono::steady_clock::now().time_since_epoch());
+
+        std::lock_guard<std::mutex> lk(g_telemetryLock);
+        const uint64_t busyDeltaMicros = busyTotalMicros - g_lastSampleBusyMicros;
+        const uint64_t windowMicros = nowMicros - g_lastSampleWallMicros;
+        g_lastSampleBusyMicros = busyTotalMicros;
+        g_lastSampleIdleMicros = idleTotalMicros;
+        g_lastSampleWallMicros = nowMicros;
+        if (windowMicros == 0) {
+            return snapshot;
+        }
+
+        snapshot.available = true;
+        snapshot.utilizationPct = static_cast<int>((busyDeltaMicros * 100) / windowMicros);
+        snapshot.busyTimeMs = microsToMillisCeil(busyDeltaMicros);
+        snapshot.idleTimeMs = microsToMillisCeil(windowMicros > busyDeltaMicros ? windowMicros - busyDeltaMicros : 0);
+        snapshot.sampleWindowMs = microsToMillisCeil(windowMicros);
+        return snapshot;
+    }
+
     void Scheduler::loop(){
         std::unique_lock<std::mutex> lk(g_lock, std::defer_lock);
         while(!g_stop){
             lk.lock();
+            const auto waitStart = std::chrono::steady_clock::now();
             g_cv.wait(lk, []{ return g_stop || !g_queue.empty(); });
+            const auto waitEnd = std::chrono::steady_clock::now();
+            g_idleMicros.fetch_add(durationMicros(waitEnd - waitStart), std::memory_order_relaxed);
             if (g_stop){ lk.unlock(); break; }
             Task t = g_queue.back(); g_queue.pop_back();
             lk.unlock();
+            const auto runStart = std::chrono::steady_clock::now();
             try{ t.fn(); g_executed++; }
             catch(...){ Logger::write(LogLevel::Error, "Task threw exception"); }
+            const auto runEnd = std::chrono::steady_clock::now();
+            g_busyMicros.fetch_add(durationMicros(runEnd - runStart), std::memory_order_relaxed);
         }
     }
 }

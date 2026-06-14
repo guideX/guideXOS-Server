@@ -48,6 +48,10 @@ namespace gxos { namespace apps {
     struct PerformanceSnapshot {
         bool cpuAvailable = false;
         int cpuPct = 0;
+        std::string cpuSource = "N/A";
+        uint64_t cpuSampleWindowMs = 0;
+        uint64_t cpuBusyTimeMs = 0;
+        uint64_t cpuIdleTimeMs = 0;
         bool memoryAvailable = false;
         int memoryPct = 0;
         bool diskAvailable = false;
@@ -147,6 +151,10 @@ namespace gxos { namespace apps {
         
         // Performance tab: 4 categories (CPU, Memory, Disk, Network)
         static int s_cpuPct;
+        static const int kCpuHistoryMax = 48;
+        static uint64_t s_cpuHistory[kCpuHistoryMax];
+        static int s_cpuHistoryCount;
+        static int s_cpuHistoryHead;
         static int s_memPct;
         static int s_diskPct;
         static int s_netPct;
