@@ -685,6 +685,14 @@ try {
         (Text-Contains -Output $hostedOutput -Needle "note=hosted compatibility bridge to FileExplorer; bare-metal uses separate right-column labels and system objects")
     Add-Check "appmodel.phase3.computerfiles-bridge" $(if ($phase3ComputerFilesBridgeObserved) { "PASS" } else { "FAIL" }) "target=ComputerFiles classification=CompatibilityBridge dispatchDecision=special-case-fallback canonicalTarget=FileExplorer appId=gxos.builtin.fileexplorer actualDispatch=ComputerFiles expected=true safe=true reason=compatibility bridge preserves FileExplorer behavior"
 
+    $phase3AppModelRecord = $phase3Readiness.records | Where-Object { $_.target -eq "AppModel" } | Select-Object -First 1
+    $phase3AppModelSpecialCaseObserved =
+        $null -ne $phase3AppModelRecord -and
+        $phase3AppModelRecord.dispatchUsage -eq "special-case-fallback" -and
+        $phase3AppModelRecord.actualDispatch -eq "AppModel" -and
+        $phase3AppModelRecord.appId -eq "gxos.builtin.appmodeldemo"
+    Add-Check "appmodel.phase3.appmodel-special-case" $(if ($phase3AppModelSpecialCaseObserved) { "PASS" } else { "FAIL" }) "target=AppModel classification=LegacyAlias dispatchDecision=special-case-fallback canonicalTarget=AppModel appId=gxos.builtin.appmodeldemo actualDispatch=AppModel expected=true safe=true reason=embedded-app-model-viewer"
+
     $phase3UnknownNegativeTestContained =
         $phase3BlockedUnknownTargets.Count -eq 1 -and
         $phase3BlockedUnknownTargets[0] -eq "TotallyUnknownLaunchThing"
@@ -706,7 +714,7 @@ try {
     $fileOpenCompatibilityFallbackCount = 5
     $shellActionCompatibilityFallbackCount = 8
     $phase3BlockerLines = @(
-        "target=AppModel classification=LegacyAlias dispatchDecision=special-case-fallback expected=true reason=embedded-app-model-viewer safe=true",
+        "target=AppModel classification=LegacyAlias dispatchDecision=special-case-fallback canonicalTarget=AppModel appId=gxos.builtin.appmodeldemo actualDispatch=AppModel expected=true safe=true reason=embedded-app-model-viewer",
         "target=ComputerFiles classification=CompatibilityBridge dispatchDecision=special-case-fallback canonicalTarget=FileExplorer appId=gxos.builtin.fileexplorer actualDispatch=ComputerFiles expected=true safe=true reason=compatibility bridge preserves FileExplorer behavior",
         "target=TotallyUnknownLaunchThing classification=Unknown dispatchDecision=blocked-unknown-fallback expected=true reason=synthetic-negative-test safe=true"
     )
@@ -772,6 +780,10 @@ try {
         "appModelPhase2KnownDriftsDocumented=$knownDriftsDocumented",
         "appModelPhase2DeferredAssociationsDocumented=$deferredAssociationsDocumented",
         "appModelPhase2ReadyForTypedDispatchPlanning=$readyForTypedDispatchPlanning",
+        "AppModelSpecialCaseFallbackPreserved=$($phase3AppModelSpecialCaseObserved.ToString().ToLowerInvariant())",
+        "AppModelSpecialCaseFallbackReason=embedded-app-model-viewer",
+        "AppModelBehaviorPreserved=$($phase3AppModelSpecialCaseObserved.ToString().ToLowerInvariant())",
+        "appmodel.phase3.appmodel-special-case=$(if ($phase3AppModelSpecialCaseObserved) { 'PASS' } else { 'FAIL' })",
         "ComputerFilesSpecialCaseFallbackPreserved=$($phase3ComputerFilesBridgeObserved.ToString().ToLowerInvariant())",
         "ComputerFilesSpecialCaseFallbackReason=compatibility bridge preserves FileExplorer behavior while keeping the legacy ComputerFiles shell label",
         "ComputerFilesBehaviorPreserved=$($phase3ComputerFilesBridgeObserved.ToString().ToLowerInvariant())"
