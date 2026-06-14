@@ -21,6 +21,7 @@ taskmanager.snapshot
 quit
 "@
 $output = $commandInput | & $ServerExe 2>&1
+$output = $output | Out-String
 
 $checks = @(
     @{ Name = "task manager launch"; Match = ($output -match "Task Manager launched, pid=\d+") },
@@ -36,9 +37,13 @@ $checks = @(
     @{ Name = "memory used present"; Match = ($output -match "memoryUsed=\d+") },
     @{ Name = "memory total derived"; Match = ($output -match "memoryTotalDerived=true") },
     @{ Name = "memory total source"; Match = ($output -match "memoryTotalSource=allocatorHeap") },
-    @{ Name = "cpu available field present"; Match = ($output -match "cpuAvailable=(true|false)") },
-    @{ Name = "cpu source field present"; Match = ($output -match "cpuSource=(N/A|[^\s\r\n]+)") },
-    @{ Name = "cpu sample window field present"; Match = ($output -match "cpuSampleWindowMs=(N/A|\d+)") },
+    @{ Name = "cpu available field present"; Match = ($output -match "(?m)^\s*cpuAvailable=(true|false)\s*$") },
+    @{ Name = "cpu source field present"; Match = ($output -match "(?m)^\s*cpuSource=(N/A|[^\s\r\n]+)\s*$") },
+    @{ Name = "cpu sample window field present"; Match = ($output -match "(?m)^\s*cpuSampleWindowMs=(N/A|\d+)\s*$") },
+    @{ Name = "process cpu available field present"; Match = ($output -match "(?m)^\s*processCpuAvailable=(true|false)\s*$") },
+    @{ Name = "process cpu source field present"; Match = ($output -match "(?m)^\s*processCpuSource=(N/A|[^\s\r\n]+)\s*$") },
+    @{ Name = "process cpu sample window field present"; Match = ($output -match "(?m)^\s*processCpuSampleWindowMs=(N/A|\d+)\s*$") },
+    @{ Name = "process cpu rows field present"; Match = ($output -match "(?m)^\s*processCpuRowsWithCpu=\d+\s*$") },
     @{ Name = "disk unavailable"; Match = ($output -match "disk=N/A") },
     @{ Name = "network unavailable"; Match = ($output -match "network=N/A") },
     @{ Name = "synthetic counters disabled"; Match = ($output -match "syntheticCounters=false") }
@@ -60,13 +65,19 @@ if ($failed.Count -gt 0) {
     exit 1
 }
 
-$cpuAvailable = $output -match "cpuAvailable=true"
-$cpuUnavailable = $output -match "cpuAvailable=false"
-$cpuValueMatch = [regex]::Match($output, "cpu=(?<value>\d+)%")
-$cpuSourceMatch = [regex]::Match($output, "cpuSource=(?<source>[^\s\r\n]+)")
-$cpuSampleWindowMatch = [regex]::Match($output, "cpuSampleWindowMs=(?<window>N/A|\d+)")
-$cpuBusyMatch = [regex]::Match($output, "cpuBusyTimeMs=(?<busy>N/A|\d+)")
-$cpuIdleMatch = [regex]::Match($output, "cpuIdleTimeMs=(?<idle>N/A|\d+)")
+$cpuAvailable = $output -match "(?m)^\s*cpuAvailable=true\s*$"
+$cpuUnavailable = $output -match "(?m)^\s*cpuAvailable=false\s*$"
+$cpuValueMatch = [regex]::Match($output, "(?m)^\s*cpu=(?<value>\d+)%\s*$")
+$cpuSourceMatch = [regex]::Match($output, "(?m)^\s*cpuSource=(?<source>[^\s\r\n]+)\s*$")
+$cpuSampleWindowMatch = [regex]::Match($output, "(?m)^\s*cpuSampleWindowMs=(?<window>N/A|\d+)\s*$")
+$cpuBusyMatch = [regex]::Match($output, "(?m)^\s*cpuBusyTimeMs=(?<busy>N/A|\d+)\s*$")
+$cpuIdleMatch = [regex]::Match($output, "(?m)^\s*cpuIdleTimeMs=(?<idle>N/A|\d+)\s*$")
+$processCpuAvailable = $output -match "(?m)^\s*processCpuAvailable=true\s*$"
+$processCpuUnavailable = $output -match "(?m)^\s*processCpuAvailable=false\s*$"
+$processCpuSourceMatch = [regex]::Match($output, "(?m)^\s*processCpuSource=(?<source>[^\s\r\n]+)\s*$")
+$processCpuSampleWindowMatch = [regex]::Match($output, "(?m)^\s*processCpuSampleWindowMs=(?<window>N/A|\d+)\s*$")
+$processCpuRowsMatch = [regex]::Match($output, "(?m)^\s*processCpuRowsWithCpu=(?<rows>\d+)\s*$")
+$processCpuPctMatches = [regex]::Matches($output, "processRow .*?cpuPct=(?<value>\d+)%")
 
 if ($cpuAvailable) {
     if (-not $cpuValueMatch.Success) {
@@ -132,6 +143,77 @@ if ($cpuAvailable) {
     }
 } else {
     throw "CPU availability flag was missing."
+}
+
+if ($processCpuAvailable) {
+    if (-not $processCpuSourceMatch.Success) {
+        throw "Process CPU availability was reported but processCpuSource was missing."
+    }
+
+    $processCpuSource = $processCpuSourceMatch.Groups["source"].Value
+    if ($processCpuSource -match '(?i)(synthetic|modulo|wave|placeholder|fake|simulated)') {
+        throw "Process CPU source looks synthetic: $processCpuSource"
+    }
+
+    if (-not $processCpuSampleWindowMatch.Success -or $processCpuSampleWindowMatch.Groups["window"].Value -eq "N/A") {
+        throw "Process CPU availability was reported but processCpuSampleWindowMs was missing."
+    }
+
+    $processCpuSampleWindow = [int]$processCpuSampleWindowMatch.Groups["window"].Value
+    if ($processCpuSampleWindow -le 0) {
+        throw "Process CPU sample window must be positive when available: $processCpuSampleWindow"
+    }
+    if ($processCpuSampleWindow -lt 500) {
+        throw "Process CPU sample window is too short for a stable display sample: $processCpuSampleWindow"
+    }
+
+    if (-not $processCpuRowsMatch.Success) {
+        throw "Process CPU availability was reported but processCpuRowsWithCpu was missing."
+    }
+    $processCpuRows = [int]$processCpuRowsMatch.Groups["rows"].Value
+    if ($processCpuRows -le 0) {
+        throw "Process CPU availability was reported but no process rows had CPU data."
+    }
+    if ($processCpuPctMatches.Count -ne $processCpuRows) {
+        throw "Process CPU rows with data did not match the emitted CPU percentages: rows=$processCpuRows emitted=$($processCpuPctMatches.Count)"
+    }
+    foreach ($match in $processCpuPctMatches) {
+        $value = [int]$match.Groups["value"].Value
+        if ($value -lt 0 -or $value -gt 100) {
+            throw "Per-process CPU utilization out of range: $value"
+        }
+    }
+} elseif ($processCpuUnavailable) {
+    if (-not $processCpuSourceMatch.Success) {
+        throw "Process CPU was unavailable but processCpuSource was missing."
+    }
+
+    $processCpuSource = $processCpuSourceMatch.Groups["source"].Value
+    if ($processCpuSource -match '(?i)(synthetic|modulo|wave|placeholder|fake|simulated)') {
+        throw "Process CPU source looks synthetic: $processCpuSource"
+    }
+    if ($processCpuSource -ne "N/A" -and $processCpuSource -notmatch '(?i)warmup') {
+        throw "Process CPU was unavailable but source did not indicate warmup: $processCpuSource"
+    }
+
+    if ($processCpuRowsMatch.Success) {
+        $processCpuRows = [int]$processCpuRowsMatch.Groups["rows"].Value
+        if ($processCpuRows -ne 0) {
+            throw "Process CPU was unavailable but processCpuRowsWithCpu was nonzero: $processCpuRows"
+        }
+    }
+
+    if ($processCpuSampleWindowMatch.Success -and $processCpuSampleWindowMatch.Groups["window"].Value -ne "N/A") {
+        $processCpuSampleWindow = [int]$processCpuSampleWindowMatch.Groups["window"].Value
+        if ($processCpuSampleWindow -lt 0) {
+            throw "Process CPU warmup sample window must not be negative: $processCpuSampleWindow"
+        }
+        if ($processCpuSampleWindow -ge 500) {
+            throw "Process CPU warmup sample window was unexpectedly large: $processCpuSampleWindow"
+        }
+    }
+} else {
+    throw "Process CPU availability flag was missing."
 }
 
 Write-Host "Task Manager snapshot smoke PASS"

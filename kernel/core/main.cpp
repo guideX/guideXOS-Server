@@ -499,6 +499,8 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         
         // Main kernel loop — poll input and redraw cursor
         while (1) {
+            uint64_t workStartTicks = kernel::pit::ticks();
+
             // Poll input manager for updates (handles USB HID polling)
             kernel::input::poll();
             
@@ -524,7 +526,9 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
                         kernel::input::mouse_y());
                 }
             }
-            
+
+            kernel::desktop::tick();
+
             // Check if any other source triggered a redraw
             if (kernel::desktop::needs_redraw()) {
                 kernel::desktop::draw();
@@ -532,9 +536,21 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
                     kernel::input::mouse_x(),
                     kernel::input::mouse_y());
             }
+
+            uint64_t workEndTicks = kernel::pit::ticks();
+            if (workEndTicks >= workStartTicks) {
+                kernel::desktop::record_cpu_busy_ticks(workEndTicks - workStartTicks);
+            }
             
+            uint64_t idleStartTicks = kernel::pit::ticks();
+
             // Halt CPU until next interrupt (saves power)
             kernel::arch::halt();
+
+            uint64_t idleEndTicks = kernel::pit::ticks();
+            if (idleEndTicks >= idleStartTicks) {
+                kernel::desktop::record_cpu_idle_ticks(idleEndTicks - idleStartTicks);
+            }
         }
     }
     else {
@@ -595,6 +611,7 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
                     kernel::arch::sparc::zs::mouse_y(),
                     kernel::arch::sparc::zs::mouse_buttons());
             }
+            kernel::desktop::tick();
             kernel::arch::halt();
         }
     }
@@ -631,6 +648,7 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
                     kernel::arch::sparc64::zs::mouse_y(),
                     kernel::arch::sparc64::zs::mouse_buttons());
             }
+            kernel::desktop::tick();
             kernel::arch::halt();
         }
     }
@@ -658,6 +676,7 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
     // Enable interrupts and idle
     kernel::interrupts::init();
     while (1) {
+        kernel::desktop::tick();
         kernel::arch::halt();
     }
 #endif // ARCH_IA64
@@ -714,6 +733,7 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
     // Enable interrupts and idle
     kernel::interrupts::init();
     while (1) {
+        kernel::desktop::tick();
         kernel::arch::halt();
     }
 #endif // ARCH_RISCV64
@@ -722,6 +742,7 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
     kernel::desktop_capabilities::log_current(false, false);
     kernel::interrupts::init();
     while (1) {
+        kernel::desktop::tick();
         kernel::arch::halt();
     }
 #endif // ARCH_HAS_PIC_8259

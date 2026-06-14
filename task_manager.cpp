@@ -54,7 +54,104 @@ namespace gxos { namespace apps {
     bool TaskManager::s_leakExists = false;
     int TaskManager::s_leakGrowthCounter = 0;
     std::vector<uint64_t> TaskManager::s_leakHistory;
-    
+
+    namespace {
+        constexpr uint64_t kProcessCpuTelemetryDisplayWindowMicros = 1000ULL * 1000ULL;
+
+        struct ProcessCpuSampleState {
+            uint64_t lastWallMicros = 0;
+            uint64_t lastCpuMicros = 0;
+            uint64_t pendingWindowMicros = 0;
+            uint64_t pendingCpuMicros = 0;
+            bool hasLastSample = false;
+            bool hasStableSample = false;
+            int stablePct = 0;
+            uint64_t stableWindowMs = 0;
+            std::string stableSource = "processThreadCpuTimeWarmup";
+        };
+
+        static std::unordered_map<uint64_t, ProcessCpuSampleState> s_processCpuSamples;
+
+        static uint64_t steadyClockMicros() {
+            return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(
+                std::chrono::steady_clock::now().time_since_epoch()).count());
+        }
+
+        static uint64_t microsToMillisCeil(uint64_t micros) {
+            return micros == 0 ? 0 : ((micros + 999ULL) / 1000ULL);
+        }
+
+        static std::string processCpuPctOrNa(bool available, int pct) {
+            if (!available) return "N/A";
+            return std::to_string(pct) + "%";
+        }
+
+        static void updateProcessCpuSample(uint64_t pid,
+                                           const gxos::ProcessCpuTelemetry& telemetry,
+                                           ProcessSnapshot& out,
+                                           uint64_t nowMicros) {
+            ProcessCpuSampleState& state = s_processCpuSamples[pid];
+
+            if (!telemetry.available) {
+                out.cpuPctAvailable = false;
+                out.cpuPct = 0;
+                out.cpuSampleWindowMs = 0;
+                out.cpuSource = "N/A";
+                if (state.hasStableSample) {
+                    out.cpuPctAvailable = true;
+                    out.cpuPct = state.stablePct;
+                    out.cpuSampleWindowMs = state.stableWindowMs;
+                    out.cpuSource = state.stableSource;
+                }
+                return;
+            }
+
+            if (!state.hasLastSample) {
+                state.hasLastSample = true;
+                state.lastWallMicros = telemetry.startWallMicros ? telemetry.startWallMicros : nowMicros;
+                state.lastCpuMicros = 0;
+            }
+
+            const uint64_t wallDeltaMicros = nowMicros > state.lastWallMicros ? nowMicros - state.lastWallMicros : 0;
+            const uint64_t cpuDeltaMicros = telemetry.cpuMicros > state.lastCpuMicros ? telemetry.cpuMicros - state.lastCpuMicros : 0;
+            state.lastWallMicros = nowMicros;
+            state.lastCpuMicros = telemetry.cpuMicros;
+            state.pendingWindowMicros += wallDeltaMicros;
+            state.pendingCpuMicros += cpuDeltaMicros;
+
+            if (state.pendingWindowMicros >= kProcessCpuTelemetryDisplayWindowMicros) {
+                const uint64_t displayWindowMicros = state.pendingWindowMicros;
+                const uint64_t displayCpuMicros = state.pendingCpuMicros > displayWindowMicros ? displayWindowMicros : state.pendingCpuMicros;
+                const uint64_t rawPct = displayWindowMicros == 0 ? 0 : ((displayCpuMicros * 100ULL) / displayWindowMicros);
+                state.stablePct = static_cast<int>(std::min<uint64_t>(100ULL, rawPct));
+                state.stableWindowMs = microsToMillisCeil(displayWindowMicros);
+                state.stableSource = telemetry.source ? telemetry.source : "processThreadCpuTime";
+                state.hasStableSample = true;
+                state.pendingWindowMicros = 0;
+                state.pendingCpuMicros = 0;
+
+                out.cpuPctAvailable = true;
+                out.cpuPct = state.stablePct;
+                out.cpuSampleWindowMs = state.stableWindowMs;
+                out.cpuSource = state.stableSource;
+                return;
+            }
+
+            if (state.hasStableSample) {
+                out.cpuPctAvailable = true;
+                out.cpuPct = state.stablePct;
+                out.cpuSampleWindowMs = state.stableWindowMs;
+                out.cpuSource = state.stableSource;
+                return;
+            }
+
+            out.cpuPctAvailable = false;
+            out.cpuPct = 0;
+            out.cpuSampleWindowMs = microsToMillisCeil(state.pendingWindowMicros);
+            out.cpuSource = "processThreadCpuTimeWarmup";
+        }
+    } // namespace
+
     uint64_t TaskManager::Launch() {
         ProcessSpec spec{"task_manager", TaskManager::main};
         return ProcessTable::spawn(spec, {"task_manager"});
@@ -306,9 +403,19 @@ namespace gxos { namespace apps {
         snapshot.performance.cpuSampleWindowMs = cpuTelemetry.sampleWindowMs;
         snapshot.performance.cpuBusyTimeMs = cpuTelemetry.busyTimeMs;
         snapshot.performance.cpuIdleTimeMs = cpuTelemetry.idleTimeMs;
+        snapshot.performance.processCpuAvailable = false;
+        snapshot.performance.processCpuSource = "N/A";
+        snapshot.performance.processCpuSampleWindowMs = 0;
+        snapshot.performance.processCpuRowsWithCpu = 0;
         snapshot.performance.diskAvailable = false;
         snapshot.performance.networkAvailable = false;
         snapshot.performance.syntheticCounters = false;
+        const uint64_t nowMicros = steadyClockMicros();
+
+        std::unordered_map<uint64_t, bool> livePids;
+        for (uint64_t pid : pidList) {
+            livePids[pid] = true;
+        }
 
         for (uint64_t pid : pidList) {
             ProcessSnapshot info;
@@ -366,11 +473,37 @@ namespace gxos { namespace apps {
                 }
             }
 
-            // Phase 3B: per-process CPU remains N/A until we have a real process-level counter.
-            info.cpuPctAvailable = false;
+            gxos::ProcessCpuTelemetry processCpuTelemetry;
+            if (ProcessTable::cpuTelemetry(pid, processCpuTelemetry)) {
+                updateProcessCpuSample(pid, processCpuTelemetry, info, nowMicros);
+            } else {
+                info.cpuPctAvailable = false;
+                info.cpuPct = 0;
+                info.cpuSampleWindowMs = 0;
+                info.cpuSource = "N/A";
+            }
+
+            if (info.cpuPctAvailable) {
+                ++snapshot.performance.processCpuRowsWithCpu;
+                snapshot.performance.processCpuAvailable = true;
+                snapshot.performance.processCpuSource = info.cpuSource;
+                snapshot.performance.processCpuSampleWindowMs = info.cpuSampleWindowMs;
+            } else if (snapshot.performance.processCpuSource == "N/A" && info.cpuSource != "N/A") {
+                snapshot.performance.processCpuSource = info.cpuSource;
+                snapshot.performance.processCpuSampleWindowMs = info.cpuSampleWindowMs;
+            }
+
             info.diskPctAvailable = false;
             info.networkPctAvailable = false;
             snapshot.processes.push_back(info);
+        }
+
+        for (auto it = s_processCpuSamples.begin(); it != s_processCpuSamples.end();) {
+            if (livePids.find(it->first) == livePids.end()) {
+                it = s_processCpuSamples.erase(it);
+            } else {
+                ++it;
+            }
         }
 
         std::sort(snapshot.processes.begin(), snapshot.processes.end(),
@@ -418,6 +551,14 @@ namespace gxos { namespace apps {
             oss << "memoryTotal=N/A\n";
             oss << "memoryTotalDerived=false\n";
         }
+        oss << "processCpuAvailable=" << (snapshot.performance.processCpuAvailable ? "true" : "false") << "\n";
+        oss << "processCpuSource=" << snapshot.performance.processCpuSource << "\n";
+        if (snapshot.performance.processCpuAvailable) {
+            oss << "processCpuSampleWindowMs=" << snapshot.performance.processCpuSampleWindowMs << "\n";
+        } else {
+            oss << "processCpuSampleWindowMs=N/A\n";
+        }
+        oss << "processCpuRowsWithCpu=" << snapshot.performance.processCpuRowsWithCpu << "\n";
         if (snapshot.performance.cpuAvailable) {
             oss << "cpu=" << snapshot.performance.cpuPct << "%\n";
             oss << "cpuAvailable=true\n";
@@ -448,6 +589,15 @@ namespace gxos { namespace apps {
         } else {
             oss << "tombstonedRestoreSupported=N/A\n";
             oss << "tombstonedEndSupported=N/A\n";
+        }
+        for (const auto& process : snapshot.processes) {
+            oss << "processRow pid=" << process.pid
+                << " cpuPctAvailable=" << (process.cpuPctAvailable ? "true" : "false")
+                << " cpuPct=" << processCpuPctOrNa(process.cpuPctAvailable, process.cpuPct)
+                << " cpuSampleWindowMs=" << (process.cpuPctAvailable ? std::to_string(process.cpuSampleWindowMs) : std::string("N/A"))
+                << " cpuSource=" << (process.cpuPctAvailable ? process.cpuSource : std::string("N/A"))
+                << " running=" << (process.running ? "true" : "false")
+                << "\n";
         }
         oss << "syntheticCounters=" << (snapshot.syntheticCounters ? "true" : "false") << "\n";
         return oss.str();
@@ -489,6 +639,7 @@ namespace gxos { namespace apps {
             s_leakExists = false;
             s_leakGrowthCounter = 0;
             s_leakHistory.clear();
+            s_processCpuSamples.clear();
             
             refreshProcessList();
             

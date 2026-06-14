@@ -555,6 +555,36 @@ static void strappend(char* dst, const char* src, int maxLen) {
     dst[len] = '\0';
 }
 
+static void uint64_to_text(uint64_t value, char* out, int outSize) {
+    if (!out || outSize <= 0) return;
+    char tmp[32];
+    int pos = 0;
+    do {
+        tmp[pos++] = static_cast<char>('0' + (value % 10ULL));
+        value /= 10ULL;
+    } while (value != 0 && pos < static_cast<int>(sizeof(tmp)));
+
+    int outPos = 0;
+    while (pos > 0 && outPos < outSize - 1) {
+        out[outPos++] = tmp[--pos];
+    }
+    out[outPos] = '\0';
+}
+
+static void int_to_text(int value, char* out, int outSize) {
+    if (!out || outSize <= 0) return;
+    if (value < 0) {
+        if (outSize < 2) {
+            out[0] = '\0';
+            return;
+        }
+        out[0] = '-';
+        uint64_to_text(static_cast<uint64_t>(-(int64_t)value), out + 1, outSize - 1);
+        return;
+    }
+    uint64_to_text(static_cast<uint64_t>(value), out, outSize);
+}
+
 static bool startsWithText(const char* value, const char* prefix) {
     if (!value || !prefix) return false;
     while (*prefix) {
@@ -2902,9 +2932,16 @@ void TaskManagerApp::shutdown() {
 void TaskManagerApp::update() {
     // Auto-refresh every 100 ticks
     m_lastUpdate++;
+    bool shouldInvalidate = false;
     if (m_lastUpdate >= 100) {
         refreshList();
         m_lastUpdate = 0;
+        shouldInvalidate = true;
+    } else if ((m_lastUpdate % 10) == 0) {
+        shouldInvalidate = true;
+    }
+
+    if (shouldInvalidate) {
         invalidate();
     }
 }
@@ -2947,6 +2984,33 @@ void TaskManagerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
         const char* status = m_entries[i].running ? "Running" : "Stopped";
         appDrawText(x + w - 68, textY, status, rgb(210, 215, 225));
     }
+
+    // CPU telemetry summary from the kernel desktop loop.
+    const kernel::desktop::CpuTelemetrySnapshot cpu = kernel::desktop::cpu_telemetry_snapshot();
+    char cpuLine1[128];
+    char cpuLine2[128];
+    if (cpu.available) {
+        char pctBuf[16];
+        char windowBuf[24];
+        int_to_text(cpu.utilizationPct, pctBuf, sizeof(pctBuf));
+        strappend(pctBuf, "%", sizeof(pctBuf));
+        uint64_to_text(cpu.sampleWindowMs, windowBuf, sizeof(windowBuf));
+        strcopy(cpuLine1, "CPU: ", sizeof(cpuLine1));
+        strappend(cpuLine1, pctBuf, sizeof(cpuLine1));
+        strappend(cpuLine1, " | Window: ", sizeof(cpuLine1));
+        strappend(cpuLine1, windowBuf, sizeof(cpuLine1));
+        strappend(cpuLine1, " ms", sizeof(cpuLine1));
+    } else {
+        char windowBuf[24];
+        uint64_to_text(cpu.sampleWindowMs, windowBuf, sizeof(windowBuf));
+        strcopy(cpuLine1, "CPU: N/A | Window: ", sizeof(cpuLine1));
+        strappend(cpuLine1, windowBuf, sizeof(cpuLine1));
+        strappend(cpuLine1, " ms", sizeof(cpuLine1));
+    }
+    strcopy(cpuLine2, "Source: ", sizeof(cpuLine2));
+    strappend(cpuLine2, cpu.source ? cpu.source : "N/A", sizeof(cpuLine2));
+    appDrawText(x + 15, y + 220, cpuLine1, rgb(180, 200, 220));
+    appDrawText(x + 15, y + 232, cpuLine2, rgb(160, 170, 185));
 }
 
 void TaskManagerApp::onMouseDown(int localX, int localY, uint8_t button) {

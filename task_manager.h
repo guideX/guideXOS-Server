@@ -17,6 +17,8 @@ namespace gxos { namespace apps {
         uint64_t memoryBytes = 0;
         bool cpuPctAvailable = false;
         int cpuPct = 0;
+        uint64_t cpuSampleWindowMs = 0;
+        std::string cpuSource = "N/A";
         bool diskPctAvailable = false;
         int diskPct = 0;
         bool networkPctAvailable = false;
@@ -62,6 +64,10 @@ namespace gxos { namespace apps {
         uint64_t nativeProcessCount = 0;
         uint64_t windowCount = 0;
         uint64_t schedulerTasksExecuted = 0;
+        bool processCpuAvailable = false;
+        std::string processCpuSource = "N/A";
+        uint64_t processCpuSampleWindowMs = 0;
+        uint64_t processCpuRowsWithCpu = 0;
         bool syntheticCounters = false;
     };
 

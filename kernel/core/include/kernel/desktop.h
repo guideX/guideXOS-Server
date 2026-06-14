@@ -30,6 +30,15 @@ struct SystemDesktopIconVisibility {
     bool showSystemSettings;
 };
 
+struct CpuTelemetrySnapshot {
+    bool available = false;
+    int utilizationPct = 0;
+    uint64_t sampleWindowMs = 0;
+    uint64_t busyTimeMs = 0;
+    uint64_t idleTimeMs = 0;
+    const char* source = "kernelMainLoopIdleBusyWarmup";
+};
+
 // ================================================================
 // Initialization & Core Loop
 // ================================================================
@@ -45,6 +54,11 @@ void draw();
 // Update tick counter for timing (call from main loop, e.g., every 10ms)
 // Also updates IPC, running apps, and taskbar
 void tick();
+
+// Bare-metal CPU telemetry helpers fed by the main loop.
+void record_cpu_busy_ticks(uint64_t tickCount);
+void record_cpu_idle_ticks(uint64_t tickCount);
+CpuTelemetrySnapshot cpu_telemetry_snapshot();
 
 // Let a synchronous long-running kernel job cooperatively service input and
 // present the desktop without taking ownership of app animation state.

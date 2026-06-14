@@ -7,19 +7,39 @@
 #include <unordered_map>
 #include <mutex>
 #include <condition_variable>
+#include <thread>
+#include <atomic>
 #include "ipc.h"
 
 namespace gxos {
     using ProcessFn = std::function<int(int,char**)>; // simplified entry point
+    #if defined(_WIN32)
+    using ProcessThreadHandle = void*;
+    #else
+    using ProcessThreadHandle = std::thread::native_handle_type;
+    #endif
 
     struct ProcessSpec { std::string name; ProcessFn entry; };
 
+    struct ProcessCpuTelemetry {
+        bool available = false;
+        bool running = false;
+        uint64_t cpuMicros = 0;
+        uint64_t startWallMicros = 0;
+        const char* source = "processThreadCpuTime";
+    };
+
     class Process {
     public:
-        uint64_t pid; std::string name; ipc::Mailbox mbox; ProcessFn entry; bool running=false; int exitCode=0;
+        uint64_t pid; std::string name; ipc::Mailbox mbox; ProcessFn entry; std::atomic<bool> running{false}; int exitCode=0;
         // phase 1: completion signalling
-        std::mutex mu; std::condition_variable cv; bool finished=false;
+        std::mutex mu; std::condition_variable cv; std::atomic<bool> finished{false};
+        std::atomic<bool> cpuSampleValid{false};
+        std::atomic<uint64_t> cpuFinalMicros{0};
+        ProcessThreadHandle cpuThreadHandle{};
+        uint64_t startWallMicros = 0;
         Process(uint64_t id, const std::string& n, ProcessFn fn): pid(id), name(n), mbox(), entry(fn){}
+        ~Process();
     };
 
     class ProcessTable {
@@ -33,6 +53,7 @@ namespace gxos {
         // phase 1: join/wait and status
         static bool wait(uint64_t pid, uint64_t timeoutMs, int* exitCodeOut=nullptr);
         static bool getStatus(uint64_t pid, bool& runningOut, int& exitCodeOut);
+        static bool cpuTelemetry(uint64_t pid, ProcessCpuTelemetry& out);
     private:
         static std::unordered_map<uint64_t, std::shared_ptr<Process>> g_proc;
         static uint64_t g_nextPid;

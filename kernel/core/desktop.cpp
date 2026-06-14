@@ -1444,6 +1444,12 @@ static int s_lastClickedIcon = -1;
 static uint32_t s_lastClickTime = 0;
 static const uint32_t kDoubleClickMs = 500;  // Max ms between clicks for double-click
 static uint32_t s_tickCounter = 0;  // Incremented by main loop
+static const uint64_t kCpuTelemetryDisplayWindowMs = 1000;
+static const uint64_t kCpuTelemetryTickMs = 10;
+static uint64_t s_cpuTelemetryPendingBusyMs = 0;
+static uint64_t s_cpuTelemetryPendingIdleMs = 0;
+static bool s_cpuTelemetryHasStableSample = false;
+static CpuTelemetrySnapshot s_cpuTelemetryLastStableSample{};
 
 // Icon management function prototypes
 static void refresh_desktop_icons();      // Rebuild visible icon list
@@ -1468,6 +1474,10 @@ static void SelectDesktopIconRange(int startDisplayIndex, int endDisplayIndex);
 static int GetSelectedDesktopIconIndices(int* outIndices, int maxIndices);
 static int HitTestDesktopIcon(int32_t mx, int32_t my);
 static void SelectIconsInRectangle(int32_t left, int32_t top, int32_t right, int32_t bottom, bool additive);
+static inline uint64_t ticks_to_ms(uint64_t tickCount)
+{
+    return tickCount * kCpuTelemetryTickMs;
+}
 
 // Start menu state and navigation
 static int s_hoverMenuLeft  = -1;   // hovered left-column item index
@@ -6279,6 +6289,61 @@ void tick()
     
     // Update taskbar buttons for kernel apps
     compositor::TaskbarManager::updateButtons();
+}
+
+void record_cpu_busy_ticks(uint64_t tickCount)
+{
+    if (tickCount == 0) {
+        return;
+    }
+    s_cpuTelemetryPendingBusyMs += ticks_to_ms(tickCount);
+}
+
+void record_cpu_idle_ticks(uint64_t tickCount)
+{
+    if (tickCount == 0) {
+        return;
+    }
+    s_cpuTelemetryPendingIdleMs += ticks_to_ms(tickCount);
+}
+
+CpuTelemetrySnapshot cpu_telemetry_snapshot()
+{
+    CpuTelemetrySnapshot snapshot;
+    const uint64_t totalMs = s_cpuTelemetryPendingBusyMs + s_cpuTelemetryPendingIdleMs;
+
+    if (totalMs >= kCpuTelemetryDisplayWindowMs) {
+        const uint64_t busyMs = s_cpuTelemetryPendingBusyMs > totalMs ? totalMs : s_cpuTelemetryPendingBusyMs;
+        const uint64_t idleMs = totalMs > busyMs ? totalMs - busyMs : 0;
+        int utilizationPct = totalMs == 0 ? 0 : static_cast<int>((busyMs * 100ULL) / totalMs);
+        if (utilizationPct < 0) utilizationPct = 0;
+        if (utilizationPct > 100) utilizationPct = 100;
+
+        snapshot.available = true;
+        snapshot.utilizationPct = utilizationPct;
+        snapshot.sampleWindowMs = totalMs;
+        snapshot.busyTimeMs = busyMs;
+        snapshot.idleTimeMs = idleMs;
+        snapshot.source = "kernelMainLoopIdleBusy";
+
+        s_cpuTelemetryLastStableSample = snapshot;
+        s_cpuTelemetryHasStableSample = true;
+        s_cpuTelemetryPendingBusyMs = 0;
+        s_cpuTelemetryPendingIdleMs = 0;
+        return snapshot;
+    }
+
+    snapshot.sampleWindowMs = totalMs;
+    snapshot.busyTimeMs = s_cpuTelemetryPendingBusyMs;
+    snapshot.idleTimeMs = s_cpuTelemetryPendingIdleMs;
+
+    if (s_cpuTelemetryHasStableSample) {
+        return s_cpuTelemetryLastStableSample;
+    }
+
+    snapshot.available = false;
+    snapshot.source = "kernelMainLoopIdleBusyWarmup";
+    return snapshot;
 }
 
 void cooperative_yield()
