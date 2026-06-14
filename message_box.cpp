@@ -25,6 +25,7 @@ uint64_t MessageBox::Launch(const std::string& title, const std::string& message
     s_lastKeyCode = 0;
     s_keyDown = false;
     ProcessSpec spec{"MessageBox", &MessageBox::main};
+    spec.appId = "gxos.dialog.messagebox";
     return ProcessTable::spawn(spec, {});
 }
 

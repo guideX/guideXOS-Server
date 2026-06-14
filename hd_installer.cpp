@@ -50,6 +50,7 @@ bool HDInstaller::s_mouseDown = false;
 
 uint64_t HDInstaller::Launch() {
     ProcessSpec spec{"hdinstaller", HDInstaller::main};
+    spec.appId = "gxos.builtin.hdinstaller";
     return ProcessTable::spawn(spec, {"hdinstaller"});
 }
 

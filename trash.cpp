@@ -202,6 +202,7 @@ namespace {
 
 uint64_t Trash::Launch() {
     ProcessSpec spec{"trash", Trash::main};
+    spec.appId = "gxos.builtin.trash";
     return ProcessTable::spawn(spec, {"trash"});
 }
 

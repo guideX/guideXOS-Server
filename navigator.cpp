@@ -1158,6 +1158,7 @@ namespace {
 uint64_t Navigator::Launch()
 {
 	ProcessSpec spec{"navigator", Navigator::main};
+	spec.appId = "guidexos.navigator";
 	return ProcessTable::spawn(spec, {"navigator"});
 }
 

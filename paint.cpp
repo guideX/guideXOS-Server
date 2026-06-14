@@ -49,6 +49,7 @@ uint64_t Paint::Launch() {
     s_lastKeyCode = 0;
     s_keyDown = false;
     ProcessSpec spec{"Paint", &Paint::main};
+    spec.appId = "gxos.builtin.paint";
     return ProcessTable::spawn(spec, {});
 }
 

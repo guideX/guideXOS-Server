@@ -32,6 +32,7 @@ void OpenDialog::Show(int /*ownerX*/, int /*ownerY*/,
     s_lastKeyCode = 0;
     s_keyDown = false;
     ProcessSpec spec{"OpenDialog", &OpenDialog::main};
+    spec.appId = "gxos.dialog.opendialog";
     ProcessTable::spawn(spec, {});
 }
 

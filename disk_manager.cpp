@@ -64,6 +64,7 @@ int DiskManager::s_bxRescanImagesX = 0, DiskManager::s_bxRescanImagesY = 0;
 
 uint64_t DiskManager::Launch() {
     ProcessSpec spec{"diskmanager", DiskManager::main};
+    spec.appId = "gxos.builtin.diskmanager";
     return ProcessTable::spawn(spec, {"diskmanager"});
 }
 

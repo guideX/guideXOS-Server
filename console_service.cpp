@@ -94,5 +94,5 @@ namespace gxos { namespace svc {
         return 0;
     }
 
-    uint64_t ConsoleService::start(){ ProcessSpec spec{"console", ConsoleService::main}; return ProcessTable::spawn(spec, {"console"}); }
+    uint64_t ConsoleService::start(){ ProcessSpec spec{"console", ConsoleService::main}; spec.appId = "gxos.system.console"; return ProcessTable::spawn(spec, {"console"}); }
 } }

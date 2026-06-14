@@ -24,6 +24,7 @@ namespace gxos { namespace apps {
 
     uint64_t NativeAppDebugViewer::Launch() {
         ProcessSpec spec{"native_app_debug_viewer", NativeAppDebugViewer::main};
+        spec.appId = "gxos.builtin.nativeappdebugviewer";
         return ProcessTable::spawn(spec, {"native_app_debug_viewer"});
     }
 

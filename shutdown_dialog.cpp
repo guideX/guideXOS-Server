@@ -33,15 +33,31 @@ uint64_t ShutdownDialog::Launch() {
     s_lastKeyCode = 0;
     s_keyDown = false;
     ProcessSpec spec{"ShutdownDialog", &ShutdownDialog::main};
+    spec.appId = "gxos.builtin.shutdowndialog";
     return ProcessTable::spawn(spec, {});
 }
 
-int ShutdownDialog::main(int /*argc*/, char** /*argv*/) {
+uint64_t ShutdownDialog::LaunchSmokeExit() {
+    std::cout << "[ShutdownDialog] LaunchSmokeExit() called" << std::endl;
+    s_confirmed = false;
+    s_lastKeyCode = 0;
+    s_keyDown = false;
+    ProcessSpec spec{"ShutdownDialog", &ShutdownDialog::main};
+    spec.appId = "gxos.builtin.shutdowndialog";
+    return ProcessTable::spawn(spec, {"ShutdownDialog", "--smoke-exit"});
+}
+
+int ShutdownDialog::main(int argc, char** argv) {
     std::cout << "[ShutdownDialog] main() starting, pid=" << gxos::Allocator::currentPid() << std::endl;
     Logger::write(LogLevel::Info, "ShutdownDialog starting");
     
     // Reset static state for this run
     s_windowId = 0;
+
+    if (argc > 1 && argv && argv[1] && std::string(argv[1]) == "--smoke-exit") {
+        Logger::write(LogLevel::Info, "ShutdownDialog smoke-exit mode returning immediately");
+        return 0;
+    }
 
     // Ensure IPC channels exist
     ipc::Bus::ensure("gui.input");

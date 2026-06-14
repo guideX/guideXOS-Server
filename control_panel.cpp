@@ -29,6 +29,7 @@ bool ControlPanel::s_mouseDown = false;
 
 uint64_t ControlPanel::Launch() {
     ProcessSpec spec{"controlpanel", ControlPanel::main};
+    spec.appId = "gxos.builtin.controlpanel";
     return ProcessTable::spawn(spec, {"controlpanel"});
 }
 

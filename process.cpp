@@ -3,6 +3,7 @@
 #include "scheduler.h"
 #include "logger.h"
 #include "allocator.h"
+#include "built_in_app_metadata.h"
 #include <algorithm>
 #include <chrono>
 #include <cstring>
@@ -110,6 +111,7 @@ namespace gxos {
             ProcessTombstoneRecord record;
             record.pid = proc.pid;
             record.displayName = proc.name;
+            record.appId = proc.appId;
             record.reason = reason.empty() ? std::string("Unknown") : reason;
             record.exitCodeAvailable = exitCodeAvailable;
             record.exitCode = exitCode;
@@ -132,6 +134,20 @@ namespace gxos {
 
             record.finalMemoryBytesAvailable = true;
             record.finalMemoryBytes = Allocator::pidBytes(proc.pid);
+
+            if (record.appId.empty()) {
+                record.appTombstoneCapabilityKnown = false;
+                record.appTombstoneCapable = false;
+                record.appTombstoneCapabilitySource = "N/A";
+            } else if (const apps::BuiltInAppMetadata* metadata = apps::FindBuiltInAppMetadataByAppId(record.appId.c_str())) {
+                record.appTombstoneCapabilityKnown = true;
+                record.appTombstoneCapable = apps::CanBuiltInAppTombstone(*metadata);
+                record.appTombstoneCapabilitySource = "appModelMetadata";
+            } else {
+                record.appTombstoneCapabilityKnown = false;
+                record.appTombstoneCapable = false;
+                record.appTombstoneCapabilitySource = "UnknownApp";
+            }
             return record;
         }
 
@@ -157,7 +173,7 @@ namespace gxos {
         {
             std::lock_guard<std::mutex> _g(g_lock);
             pid = g_nextPid++;
-            p = std::make_shared<Process>(pid, spec.name, spec.entry);
+            p = std::make_shared<Process>(pid, spec.name, spec.appId, spec.entry);
             p->startWallMicros = steady_clock_micros();
             g_proc[pid] = p;
         }
@@ -287,6 +303,20 @@ namespace gxos {
             out.available = true;
             out.cpuMicros = cpuMicros;
         }
+        return true;
+    }
+
+    bool ProcessTable::getIdentity(uint64_t pid, std::string& nameOut, std::string& appIdOut) {
+        std::shared_ptr<Process> proc;
+        {
+            std::lock_guard<std::mutex> _g(g_lock);
+            auto it = g_proc.find(pid);
+            if (it == g_proc.end()) return false;
+            proc = it->second;
+        }
+
+        nameOut = proc ? proc->name : std::string();
+        appIdOut = proc ? proc->appId : std::string();
         return true;
     }
 

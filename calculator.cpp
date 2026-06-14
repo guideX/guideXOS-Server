@@ -22,6 +22,7 @@ namespace gxos { namespace apps {
     
     uint64_t Calculator::Launch() {
         ProcessSpec spec{"calculator", Calculator::main};
+        spec.appId = "gxos.builtin.calculator";
         return ProcessTable::spawn(spec, {"calculator"});
     }
     

@@ -40,6 +40,7 @@ namespace gxos { namespace dialogs {
         
         // Launch dialog as a new process
         ProcessSpec spec{"save_dialog", SaveDialog::main};
+        spec.appId = "gxos.dialog.savedialog";
         std::string xStr = std::to_string(ownerX + 40);
         std::string yStr = std::to_string(ownerY + 40);
         ProcessTable::spawn(spec, {"save_dialog", xStr.c_str(), yStr.c_str()});

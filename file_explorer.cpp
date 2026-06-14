@@ -383,6 +383,7 @@ namespace gxos { namespace apps {
 
     uint64_t FileExplorer::Launch(const std::string& startPath) {
         ProcessSpec spec{"file_explorer", FileExplorer::main};
+        spec.appId = "gxos.builtin.fileexplorer";
         return startPath.empty()
             ? ProcessTable::spawn(spec, {"file_explorer"})
             : ProcessTable::spawn(spec, {"file_explorer", startPath});

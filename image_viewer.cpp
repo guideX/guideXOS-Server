@@ -30,6 +30,7 @@ uint64_t ImageViewer::Launch(const std::string& filePath) {
     s_lastKeyCode = 0;
     s_keyDown = false;
     ProcessSpec spec{"ImageViewer", &ImageViewer::main};
+    spec.appId = "gxos.builtin.imageviewer";
     std::vector<std::string> args;
     if (!filePath.empty()) args.push_back(filePath);
     return ProcessTable::spawn(spec, args);

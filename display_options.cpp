@@ -124,6 +124,7 @@ namespace {
 uint64_t DisplayOptions::Launch()
 {
     ProcessSpec spec{"displayoptions", DisplayOptions::main};
+    spec.appId = "gxos.builtin.displayoptions";
     return ProcessTable::spawn(spec, {"displayoptions"});
 }
 

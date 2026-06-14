@@ -38,7 +38,9 @@ $checks = @(
     @{ Name = "tombstone capability source present"; Match = ($output -match "(?m)^\s*tombstoneCapabilitySource=appModelMetadata\s*$") },
     @{ Name = "tombstone restore implemented false"; Match = ($output -match "(?m)^\s*tombstoneRestoreImplemented=false\s*$") },
     @{ Name = "tombstone history capacity present"; Match = ($output -match "(?m)^\s*tombstoneHistoryCapacity=\d+\s*$") },
-    @{ Name = "tombstone app capability known present"; Match = ($output -match "(?m)^\s*tombstoneAppCapabilityKnown=\d+\s*$") },
+    @{ Name = "tombstone app capability known present"; Match = ($output -match "(?m)^\s*tombstoneAppCapabilityKnown=1\s*$") },
+    @{ Name = "tombstone rows with app id present"; Match = ($output -match "(?m)^\s*tombstoneRowsWithAppId=1\s*$") },
+    @{ Name = "tombstone rows with policy present"; Match = ($output -match "(?m)^\s*tombstoneRowsWithPolicy=1\s*$") },
     @{ Name = "tombstone columns present"; Match = ($output -match "tombstoneColumns=Name,PID,App ID,Reason,Exit,Runtime,Restore,End") },
     @{ Name = "tombstone reason values present"; Match = ($output -match "tombstoneReasonValues=NormalExit,Terminated,Crashed,Unknown") },
     @{ Name = "tombstone restore support present"; Match = ($output -match "(?m)^\s*tombstoneRestoreSupported=false\s*$") },
@@ -62,9 +64,13 @@ $checks = @(
     @{ Name = "synthetic counters disabled"; Match = ($output -match "syntheticCounters=false") },
     @{ Name = "deterministic tombstone smoke passed"; Match = ($output -match "(?m)^\s*tombstoneTest=passed\s*$") },
     @{ Name = "deterministic tombstone reason normal exit"; Match = ($output -match "(?m)^\s*tombstoneReason=NormalExit\s*$") },
+    @{ Name = "deterministic tombstone app id propagated"; Match = ($output -match "(?m)^\s*appId=gxos\.builtin\.shutdowndialog\s*$") },
+    @{ Name = "deterministic tombstone app capability known"; Match = ($output -match "(?m)^\s*appTombstoneCapabilityKnown=true\s*$") },
+    @{ Name = "deterministic tombstone capability false"; Match = ($output -match "(?m)^\s*appTombstoneCapable=false\s*$") },
+    @{ Name = "deterministic tombstone capability source"; Match = ($output -match "(?m)^\s*appTombstoneCapabilitySource=appModelMetadata\s*$") },
     @{ Name = "deterministic tombstone restore unsupported"; Match = ($output -match "(?m)^\s*restoreSupported=false\s*$") },
     @{ Name = "deterministic tombstone history count present"; Match = ($output -match "(?m)^\s*tombstoneHistoryCount=\d+\s*$") },
-    @{ Name = "deterministic tombstone row present"; Match = ($output -match "(?m)^\s*tombstoneRow pid=\d+ displayName=taskmanager\.tombstone-test .* reason=NormalExit .* appTombstoneCapable=N/A .* restoreSupported=false.*$") }
+    @{ Name = "deterministic tombstone row present"; Match = ($output -match "(?m)^\s*tombstoneRow pid=\d+ displayName=ShutdownDialog appId=gxos\.builtin\.shutdowndialog reason=NormalExit .* appTombstoneCapable=false appTombstoneCapabilitySource=appModelMetadata restoreSupported=false.*$") }
 )
 
 $failed = @()

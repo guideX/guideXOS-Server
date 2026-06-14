@@ -86,6 +86,8 @@ namespace gxos { namespace apps {
         bool tombstoneRestoreSupported = false;
         uint32_t tombstoneHistoryCapacity = 0;
         uint32_t tombstoneAppCapabilityKnown = 0;
+        uint32_t tombstoneRowsWithAppId = 0;
+        uint32_t tombstoneRowsWithPolicy = 0;
         bool syntheticCounters = false;
     };
     

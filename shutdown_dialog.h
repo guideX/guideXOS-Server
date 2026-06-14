@@ -12,6 +12,7 @@ namespace gxos { namespace apps {
         /// Launch the shutdown dialog as a GUI window
         /// @return PID of the dialog process
         static uint64_t Launch();
+        static uint64_t LaunchSmokeExit();
 
     private:
         static int main(int argc, char** argv);

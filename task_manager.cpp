@@ -155,6 +155,7 @@ namespace gxos { namespace apps {
 
     uint64_t TaskManager::Launch() {
         ProcessSpec spec{"task_manager", TaskManager::main};
+        spec.appId = "gxos.builtin.taskmanager";
         return ProcessTable::spawn(spec, {"task_manager"});
     }
 
@@ -271,30 +272,6 @@ namespace gxos { namespace apps {
             }
         }
 
-        static std::string normalizeIdentityLabel(const std::string& value) {
-            std::string normalized;
-            normalized.reserve(value.size());
-            for (char ch : value) {
-                if (std::isalnum(static_cast<unsigned char>(ch))) {
-                    normalized.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(ch))));
-                }
-            }
-            return normalized;
-        }
-
-        static const gxos::gui::RegisteredDesktopApp* findRegisteredAppForLabel(const std::string& label) {
-            if (label.empty()) return nullptr;
-            const std::string normalizedLabel = normalizeIdentityLabel(label);
-            if (normalizedLabel.empty()) return nullptr;
-
-            for (const auto& app : gxos::gui::DesktopService::GetRegisteredApps()) {
-                if (normalizeIdentityLabel(app.displayName) == normalizedLabel) return &app;
-                if (normalizeIdentityLabel(app.launchName) == normalizedLabel) return &app;
-                if (normalizeIdentityLabel(app.id) == normalizedLabel) return &app;
-            }
-            return nullptr;
-        }
-
         struct TombstoneCapabilityStatus {
             bool known = false;
             bool capable = false;
@@ -302,23 +279,17 @@ namespace gxos { namespace apps {
         };
 
         static const apps::BuiltInAppMetadata* findBuiltInMetadataForTombstone(const gxos::ProcessTombstoneRecord& tombstone) {
-            const apps::BuiltInAppMetadata* metadata = nullptr;
-            if (!tombstone.appId.empty()) {
-                metadata = apps::FindBuiltInAppMetadataByIdentity(tombstone.appId.c_str());
-            }
-            if (!metadata && !tombstone.displayName.empty()) {
-                metadata = apps::FindBuiltInAppMetadataByIdentity(tombstone.displayName.c_str());
-            }
-            if (!metadata && !tombstone.windowTitle.empty()) {
-                metadata = apps::FindBuiltInAppMetadataByIdentity(tombstone.windowTitle.c_str());
-            }
-            return metadata;
+            if (tombstone.appId.empty()) return nullptr;
+            return apps::FindBuiltInAppMetadataByAppId(tombstone.appId.c_str());
         }
 
         static TombstoneCapabilityStatus resolveTombstoneCapability(const gxos::ProcessTombstoneRecord& tombstone) {
             TombstoneCapabilityStatus status;
             const apps::BuiltInAppMetadata* metadata = findBuiltInMetadataForTombstone(tombstone);
-            if (!metadata) return status;
+            if (!metadata) {
+                status.source = tombstone.appId.empty() ? "N/A" : "UnknownApp";
+                return status;
+            }
 
             status.known = true;
             status.capable = apps::CanBuiltInAppTombstone(*metadata);
@@ -326,9 +297,14 @@ namespace gxos { namespace apps {
             return status;
         }
 
-        static std::string formatTombstoneCapability(const gxos::ProcessTombstoneRecord& tombstone) {
+        static std::string formatTombstoneCapabilityText(const gxos::ProcessTombstoneRecord& tombstone) {
             if (!tombstone.appTombstoneCapabilityKnown) return "N/A";
             return tombstone.appTombstoneCapable ? "Supported" : "Unsupported";
+        }
+
+        static std::string formatTombstoneCapabilityFlag(const gxos::ProcessTombstoneRecord& tombstone) {
+            if (!tombstone.appTombstoneCapabilityKnown) return "N/A";
+            return tombstone.appTombstoneCapable ? "true" : "false";
         }
 
         static std::string allocTagName(gxos::AllocTag tag) {
@@ -448,6 +424,9 @@ namespace gxos { namespace apps {
         snapshot.performance.networkAvailable = false;
         snapshot.performance.syntheticCounters = false;
         const uint64_t nowMicros = steadyClockMicros();
+        snapshot.tombstoneAppCapabilityKnown = 0;
+        snapshot.tombstoneRowsWithAppId = 0;
+        snapshot.tombstoneRowsWithPolicy = 0;
 
         std::unordered_map<uint64_t, bool> livePids;
         for (uint64_t pid : pidList) {
@@ -470,6 +449,13 @@ namespace gxos { namespace apps {
                 info.memoryBytes = bytesIt->second;
             }
 
+            std::string processName;
+            std::string processAppId;
+            if (ProcessTable::getIdentity(pid, processName, processAppId)) {
+                if (!processName.empty()) info.displayName = processName;
+                if (!processAppId.empty()) info.appId = processAppId;
+            }
+
             auto nativeIt = nativeByPid.find(pid);
             if (nativeIt != nativeByPid.end() && nativeIt->second) {
                 const auto& native = *nativeIt->second;
@@ -484,9 +470,14 @@ namespace gxos { namespace apps {
                 auto windowTitleIt = windowTitleByPid.find(pid);
                 if (windowTitleIt != windowTitleByPid.end()) {
                     info.windowTitle = windowTitleIt->second;
-                    info.displayName = windowTitleIt->second;
-                    if (const auto* app = findRegisteredAppForLabel(windowTitleIt->second)) {
-                        if (!app->id.empty()) info.appId = app->id;
+                    if (info.displayName.empty()) info.displayName = windowTitleIt->second;
+                }
+            }
+
+            if (!info.appId.empty()) {
+                if (const apps::BuiltInAppMetadata* metadata = apps::FindBuiltInAppMetadataByAppId(info.appId.c_str())) {
+                    if (metadata->displayName && metadata->displayName[0] != '\0') {
+                        info.displayName = metadata->displayName;
                     }
                 }
             }
@@ -498,15 +489,6 @@ namespace gxos { namespace apps {
                     info.displayName = info.appId;
                 } else {
                     info.displayName = std::string("Process-") + std::to_string(pid);
-                }
-            }
-
-            if (info.appId.empty()) {
-                if (const auto* app = findRegisteredAppForLabel(info.displayName)) {
-                    info.appId = app->id;
-                    if (info.windowTitle.empty() && !app->displayName.empty()) {
-                        info.displayName = app->displayName;
-                    }
                 }
             }
 
@@ -607,6 +589,10 @@ namespace gxos { namespace apps {
             tombstone.appTombstoneCapabilitySource = capability.source;
             if (capability.known) {
                 ++snapshot.tombstoneAppCapabilityKnown;
+                ++snapshot.tombstoneRowsWithPolicy;
+            }
+            if (!tombstone.appId.empty()) {
+                ++snapshot.tombstoneRowsWithAppId;
             }
         }
 
@@ -629,6 +615,8 @@ namespace gxos { namespace apps {
         oss << "tombstoneRestoreImplemented=" << (snapshot.tombstoneRestoreImplemented ? "true" : "false") << "\n";
         oss << "tombstoneHistoryCapacity=" << snapshot.tombstoneHistoryCapacity << "\n";
         oss << "tombstoneAppCapabilityKnown=" << snapshot.tombstoneAppCapabilityKnown << "\n";
+        oss << "tombstoneRowsWithAppId=" << snapshot.tombstoneRowsWithAppId << "\n";
+        oss << "tombstoneRowsWithPolicy=" << snapshot.tombstoneRowsWithPolicy << "\n";
         oss << "tombstoneColumns=Name,PID,App ID,Reason,Exit,Runtime,Restore,End\n";
         oss << "tombstoneReasonValues=NormalExit,Terminated,Crashed,Unknown\n";
         oss << "processes=" << snapshot.performance.processCount << "\n";
@@ -679,7 +667,7 @@ namespace gxos { namespace apps {
                 << " reason=" << (tomb.reason.empty() ? std::string("Unknown") : tomb.reason)
                 << " exitCode=" << (tomb.exitCodeAvailable ? std::to_string(tomb.exitCode) : std::string("N/A"))
                 << " runtimeMs=" << (tomb.runtimeMsAvailable ? std::to_string(tomb.runtimeMs) : std::string("N/A"))
-                << " appTombstoneCapable=" << formatTombstoneCapability(tomb)
+                << " appTombstoneCapable=" << formatTombstoneCapabilityFlag(tomb)
                 << " appTombstoneCapabilitySource=" << tomb.appTombstoneCapabilitySource
                 << " restoreSupported=" << (tomb.restoreSupported ? "true" : "false")
                 << " windowTitle=" << (tomb.windowTitle.empty() ? std::string("N/A") : tomb.windowTitle)
@@ -688,6 +676,7 @@ namespace gxos { namespace apps {
         }
         for (const auto& process : snapshot.processes) {
             oss << "processRow pid=" << process.pid
+                << " appId=" << (process.appId.empty() ? std::string("N/A") : process.appId)
                 << " cpuPctAvailable=" << (process.cpuPctAvailable ? "true" : "false")
                 << " cpuPct=" << processCpuPctOrNa(process.cpuPctAvailable, process.cpuPct)
                 << " cpuSampleWindowMs=" << (process.cpuPctAvailable ? std::to_string(process.cpuSampleWindowMs) : std::string("N/A"))
@@ -1451,7 +1440,7 @@ namespace gxos { namespace apps {
             detailRow("Runtime:", selected->runtimeMsAvailable ? formatUptime(selected->runtimeMs) : std::string("N/A"));
             detailRow("Final Memory:", selected->finalMemoryBytesAvailable ? formatMemory(selected->finalMemoryBytes) : std::string("N/A"));
             detailRow("Final CPU:", selected->finalCpuPctAvailable ? std::to_string(selected->finalCpuPct) + "%" : std::string("N/A"));
-            detailRow("App Tombstone:", formatTombstoneCapability(*selected));
+            detailRow("App Tombstone:", formatTombstoneCapabilityText(*selected));
             detailRow("Policy Source:", selected->appTombstoneCapabilityKnown ? selected->appTombstoneCapabilitySource : std::string("N/A"));
             detailRow("Restore:", selected->restoreSupported ? "Supported" : "Unsupported");
             detailRow("Last Message:", selected->lastMessage.empty() ? std::string("N/A") : trimDisplayName(selected->lastMessage, 44));

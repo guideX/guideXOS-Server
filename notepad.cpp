@@ -88,11 +88,13 @@ namespace gxos { namespace apps {
     
     uint64_t Notepad::Launch() {
         ProcessSpec spec{"notepad", Notepad::main};
+        spec.appId = "gxos.builtin.notepad";
         return ProcessTable::spawn(spec, {"notepad"});
     }
     
     uint64_t Notepad::LaunchWithFile(const std::string& filePath) {
         ProcessSpec spec{"notepad", Notepad::main};
+        spec.appId = "gxos.builtin.notepad";
         return ProcessTable::spawn(spec, {"notepad", filePath});
     }
     

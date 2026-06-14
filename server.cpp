@@ -1230,8 +1230,7 @@ using namespace gxos;
         }
         else if (cmd=="taskmanager.tombstone-test"){
             const uint32_t beforeCount = static_cast<uint32_t>(ProcessTable::tombstones().size());
-            ProcessSpec spec{"taskmanager.tombstone-test", [](int, char**) { return 0; }};
-            const uint64_t pid = ProcessTable::spawn(spec, {"taskmanager.tombstone-test"});
+            const uint64_t pid = apps::ShutdownDialog::LaunchSmokeExit();
             int exitCode = 0;
             const bool completed = ProcessTable::wait(pid, 1000, &exitCode);
 
@@ -1247,6 +1246,7 @@ using namespace gxos;
             const uint32_t afterCount = static_cast<uint32_t>(tombstones.size());
             const uint32_t delta = afterCount >= beforeCount ? afterCount - beforeCount : 0;
             const bool passed = completed && record && record->reason == "NormalExit" && exitCode == 0;
+            const bool appPolicyKnown = record && record->appTombstoneCapabilityKnown;
 
             std::cout << "tombstoneTest=" << (passed ? "passed" : "failed") << "\n";
             std::cout << "tombstoneHistoryBefore=" << beforeCount << "\n";
@@ -1254,6 +1254,8 @@ using namespace gxos;
             std::cout << "tombstoneHistoryDelta=" << delta << "\n";
             std::cout << "tombstoneHistoryCapacity=" << ProcessTable::kTombstoneHistoryMax << "\n";
             std::cout << "tombstoneReason=" << (record ? record->reason : std::string("N/A")) << "\n";
+            std::cout << "appId=" << (record && !record->appId.empty() ? record->appId : std::string("N/A")) << "\n";
+            std::cout << "appTombstoneCapabilityKnown=" << (appPolicyKnown ? "true" : "false") << "\n";
             std::cout << "appTombstoneCapable=" << (record ? (record->appTombstoneCapabilityKnown ? (record->appTombstoneCapable ? "true" : "false") : "N/A") : "N/A") << "\n";
             std::cout << "appTombstoneCapabilitySource=" << (record ? record->appTombstoneCapabilitySource : std::string("N/A")) << "\n";
             std::cout << "restoreSupported=" << (record && record->restoreSupported ? "true" : "false") << "\n";

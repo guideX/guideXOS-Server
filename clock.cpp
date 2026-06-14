@@ -16,6 +16,7 @@ namespace gxos { namespace apps {
     
     uint64_t Clock::Launch() {
         ProcessSpec spec{"clock", Clock::main};
+        spec.appId = "gxos.builtin.clock";
         return ProcessTable::spawn(spec, {"clock"});
     }
     

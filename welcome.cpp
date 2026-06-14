@@ -17,6 +17,7 @@ uint64_t Welcome::Launch() {
     s_lastKeyCode = 0;
     s_keyDown = false;
     ProcessSpec spec{"Welcome", &Welcome::main};
+    spec.appId = "gxos.dialog.welcome";
     return ProcessTable::spawn(spec, {});
 }
 

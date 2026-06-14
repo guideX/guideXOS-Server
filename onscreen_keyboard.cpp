@@ -35,6 +35,7 @@ uint64_t OnScreenKeyboard::Launch() {
     s_lastKeyCode = 0;
     s_keyDown = false;
     ProcessSpec spec{"OnScreenKeyboard", &OnScreenKeyboard::main};
+    spec.appId = "gxos.builtin.onscreenkeyboard";
     return ProcessTable::spawn(spec, {});
 }
 

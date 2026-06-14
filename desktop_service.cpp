@@ -591,6 +591,7 @@ namespace gxos {
         static uint64_t launchNativeElfProcess(const apps::RegisteredApp& registryApp, const apps::LaunchDecision& launchDecision) {
             ProcessSpec spec;
             spec.name = std::string("nativeelf:") + (registryApp.manifest.id.empty() ? registryApp.manifest.displayName : registryApp.manifest.id);
+            spec.appId = registryApp.manifest.id;
             spec.entry = [registryApp, launchDecision](int, char**) -> int {
                 apps::NativeElfLaunchResult nativeElfResult = apps::NativeElfLaunchPipeline::PrepareLaunch(registryApp, launchDecision);
                 if (!nativeElfResult.success) {

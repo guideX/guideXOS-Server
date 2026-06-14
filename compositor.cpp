@@ -3240,7 +3240,7 @@ namespace gxos {
             return out;
         }
 
-        uint64_t Compositor::start( ) { ProcessSpec spec{ "compositor", Compositor::main }; return ProcessTable::spawn(spec, { "compositor" }); }
+        uint64_t Compositor::start( ) { ProcessSpec spec{ "compositor", Compositor::main }; spec.appId = "gxos.system.compositor"; return ProcessTable::spawn(spec, { "compositor" }); }
 
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)
         void Compositor::drawTaskbarSearchBox(HDC dc, int x, int y, int w, int h) {

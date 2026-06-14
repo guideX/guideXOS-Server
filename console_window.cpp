@@ -21,6 +21,7 @@ namespace gxos { namespace apps {
     
     uint64_t ConsoleWindow::Launch() {
         ProcessSpec spec{"console_window", ConsoleWindow::main};
+        spec.appId = "gxos.builtin.console";
         return ProcessTable::spawn(spec, {"console_window"});
     }
     

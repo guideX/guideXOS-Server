@@ -19,7 +19,11 @@ namespace gxos {
     using ProcessThreadHandle = std::thread::native_handle_type;
     #endif
 
-    struct ProcessSpec { std::string name; ProcessFn entry; };
+    struct ProcessSpec {
+        std::string name;
+        ProcessFn entry;
+        std::string appId;
+    };
 
     struct ProcessTombstoneRecord {
         uint64_t pid = 0;
@@ -57,7 +61,7 @@ namespace gxos {
 
     class Process {
     public:
-        uint64_t pid; std::string name; ipc::Mailbox mbox; ProcessFn entry; std::atomic<bool> running{false}; int exitCode=0;
+        uint64_t pid; std::string name; std::string appId; ipc::Mailbox mbox; ProcessFn entry; std::atomic<bool> running{false}; int exitCode=0;
         // phase 1: completion signalling
         std::mutex mu; std::condition_variable cv; std::atomic<bool> finished{false};
         std::atomic<bool> tombstoneCaptured{false};
@@ -65,7 +69,7 @@ namespace gxos {
         std::atomic<uint64_t> cpuFinalMicros{0};
         ProcessThreadHandle cpuThreadHandle{};
         uint64_t startWallMicros = 0;
-        Process(uint64_t id, const std::string& n, ProcessFn fn): pid(id), name(n), mbox(), entry(fn){}
+        Process(uint64_t id, const std::string& n, const std::string& a, ProcessFn fn): pid(id), name(n), appId(a), mbox(), entry(fn){}
         ~Process();
     };
 
@@ -81,6 +85,7 @@ namespace gxos {
         static bool wait(uint64_t pid, uint64_t timeoutMs, int* exitCodeOut=nullptr);
         static bool getStatus(uint64_t pid, bool& runningOut, int& exitCodeOut);
         static bool cpuTelemetry(uint64_t pid, ProcessCpuTelemetry& out);
+        static bool getIdentity(uint64_t pid, std::string& nameOut, std::string& appIdOut);
         static void recordTombstone(const ProcessTombstoneRecord& record);
         static std::vector<ProcessTombstoneRecord> tombstones();
         static bool claimTombstoneCapture(uint64_t pid);
