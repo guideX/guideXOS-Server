@@ -71,20 +71,15 @@ namespace gxos { namespace apps {
         bool syntheticCounters = false;
     };
 
-    struct TombstoneSnapshot {
-        std::string displayName;
-        std::string appId;
-        uint64_t pid = 0;
-        std::string reason;
-        bool restoreSupported = false;
-        bool endSupported = true;
-    };
+    using TombstoneSnapshot = gxos::ProcessTombstoneRecord;
 
     struct TaskManagerSnapshot {
         std::vector<ProcessSnapshot> processes;
         MemorySnapshot memory;
         PerformanceSnapshot performance;
         std::vector<TombstoneSnapshot> tombstoned;
+        bool tombstoneDetailsAvailable = false;
+        uint32_t tombstoneHistoryCapacity = 0;
         bool syntheticCounters = false;
     };
     

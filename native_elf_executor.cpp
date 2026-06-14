@@ -1,13 +1,16 @@
 #include "native_elf_executor.h"
 
 #include "app_launch_resolver.h"
+#include "allocator.h"
 #include "executable_memory.h"
 #include "logger.h"
 #include "native_app_debug_log.h"
 #include "native_app_process_table.h"
+#include "process.h"
 #include "native_elf_trampoline_win64.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cstring>
 #include <exception>
 #include <iomanip>
@@ -49,6 +52,57 @@ std::string pointerToString(void* address) {
     std::ostringstream oss;
     oss << "0x" << std::hex << reinterpret_cast<uintptr_t>(address);
     return oss.str();
+}
+
+uint64_t steadyClockMillis() {
+    return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count());
+}
+
+gxos::ProcessTombstoneRecord makeNativeTombstoneRecord(
+    const NativeAppRuntimeContext& runtimeContext,
+    bool executionFailed,
+    const std::string& failureReason) {
+    gxos::ProcessTombstoneRecord record;
+    record.pid = runtimeContext.processId != 0 ? runtimeContext.processId : Allocator::currentPid();
+    record.displayName = runtimeContext.displayName.empty() ? runtimeContext.appId : runtimeContext.displayName;
+    record.appId = runtimeContext.appId;
+    record.windowTitle = runtimeContext.lastRequestedWindowTitle;
+    record.reason = "NormalExit";
+    if (executionFailed) {
+        if (failureReason.find("exception") != std::string::npos || failureReason.find("Exception") != std::string::npos) {
+            record.reason = "Crashed";
+        } else {
+            record.reason = "Unknown";
+        }
+    }
+    record.exitCodeAvailable = true;
+    record.exitCode = runtimeContext.exitCode;
+    if (runtimeContext.startTime.time_since_epoch().count() != 0) {
+        record.startedAtMsAvailable = true;
+        record.startedAtMs = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+            runtimeContext.startTime.time_since_epoch()).count());
+    }
+    if (runtimeContext.endTime.time_since_epoch().count() != 0) {
+        record.endedAtMsAvailable = true;
+        record.endedAtMs = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+            runtimeContext.endTime.time_since_epoch()).count());
+    } else {
+        record.endedAtMsAvailable = true;
+        record.endedAtMs = steadyClockMillis();
+    }
+    if (record.startedAtMsAvailable && record.endedAtMs >= record.startedAtMs) {
+        record.runtimeMsAvailable = true;
+        record.runtimeMs = record.endedAtMs - record.startedAtMs;
+    }
+    record.finalMemoryBytesAvailable = true;
+    record.finalMemoryBytes = Allocator::pidBytes(record.pid);
+    record.lastMessage = failureReason.empty()
+        ? (executionFailed ? std::string("native app ended without a recorded failure reason") : std::string("native app exited"))
+        : failureReason;
+    record.restoreSupported = false;
+    record.endSupported = false;
+    return record;
 }
 
 bool isSupportedStaticImage(const NativeElfImage& image) {
@@ -326,6 +380,10 @@ NativeElfExecutionResult NativeElfExecutor::Execute(
     NativeAppRuntime::EndHostCallDispatch(runtimeContext);
     if (runtimeContext.lastWaitResult == GX_ERROR_TIMEOUT && result.exitCode == GX_OK) addDiagnostic(result, "wait_for_close timed out; cleaning up remaining owned windows");
     NativeAppRuntime::Cleanup(runtimeContext, (executionFailed || result.exitCode != GX_OK) ? NativeAppLifecycleState::Failed : NativeAppLifecycleState::Exited, result.exitCode, failureReason);
+    const gxos::ProcessTombstoneRecord tombstone = makeNativeTombstoneRecord(runtimeContext, executionFailed, failureReason);
+    if (ProcessTable::claimTombstoneCapture(tombstone.pid)) {
+        ProcessTable::recordTombstone(tombstone);
+    }
     NativeAppProcessTable::UpdateFromRuntime(runtimeContext);
     NativeAppProcessTable::MarkCompleted(runtimeContext.runtimeId, runtimeContext.lifecycleState, runtimeContext.exitCode, runtimeContext.failureReason);
     result.success = result.exitCode == GX_OK && !executionFailed;

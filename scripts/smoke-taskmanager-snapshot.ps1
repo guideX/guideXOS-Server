@@ -30,9 +30,15 @@ $checks = @(
     @{ Name = "process columns present"; Match = ($output -match "processColumns=Name,CPU%,Memory,Disk%,Network%") },
     @{ Name = "performance categories present"; Match = ($output -match "performanceCategories=CPU,Memory,Disk,Network") },
     @{ Name = "memory details sections present"; Match = ($output -match "memoryDetailsSections=Memory Allocator Details;Free\(\) Call Statistics;Heap Allocator") },
-    @{ Name = "tombstoned columns present"; Match = ($output -match "tombstonedColumns=Name,PID,App ID,Reason,Restore,End") },
-    @{ Name = "tombstoned restore support present"; Match = ($output -match "tombstonedRestoreSupported=(true|false|N/A)") },
-    @{ Name = "tombstoned end support present"; Match = ($output -match "tombstonedEndSupported=(true|false|N/A)") },
+    @{ Name = "tombstone details available"; Match = ($output -match "(?m)^\s*tombstoneDetailsAvailable=true\s*$") },
+    @{ Name = "tombstone history capacity present"; Match = ($output -match "(?m)^\s*tombstoneHistoryCapacity=\d+\s*$") },
+    @{ Name = "tombstone columns present"; Match = ($output -match "tombstoneColumns=Name,PID,App ID,Reason,Exit,Runtime,Restore,End") },
+    @{ Name = "tombstone reason values present"; Match = ($output -match "tombstoneReasonValues=NormalExit,Terminated,Crashed,Unknown") },
+    @{ Name = "tombstone restore support present"; Match = ($output -match "(?m)^\s*tombstoneRestoreSupported=false\s*$") },
+    @{ Name = "tombstone end support present"; Match = ($output -match "(?m)^\s*tombstoneEndSupported=false\s*$") },
+    @{ Name = "tombstoned columns present"; Match = ($output -match "tombstonedColumns=Name,PID,App ID,Reason,Exit,Runtime,Restore,End") },
+    @{ Name = "tombstoned restore support present"; Match = ($output -match "(?m)^\s*tombstonedRestoreSupported=false\s*$") },
+    @{ Name = "tombstoned end support present"; Match = ($output -match "(?m)^\s*tombstonedEndSupported=false\s*$") },
     @{ Name = "process count present"; Match = ($output -match "processes=\d+") },
     @{ Name = "memory used present"; Match = ($output -match "memoryUsed=\d+") },
     @{ Name = "memory total derived"; Match = ($output -match "memoryTotalDerived=true") },
@@ -63,6 +69,27 @@ if ($failed.Count -gt 0) {
         Write-Host "Missing/failed: $item" -ForegroundColor Red
     }
     exit 1
+}
+
+$capacityMatch = [regex]::Match($output, "(?m)^\s*tombstoneHistoryCapacity=(?<capacity>\d+)\s*$")
+if (-not $capacityMatch.Success) {
+    throw "Tombstone history capacity was missing."
+}
+$capacity = [int]$capacityMatch.Groups["capacity"].Value
+if ($capacity -le 0) {
+    throw "Tombstone history capacity must be greater than zero: $capacity"
+}
+if ($capacity -gt 64) {
+    throw "Tombstone history capacity must remain bounded at 64 or below: $capacity"
+}
+
+$reasonValuesMatch = [regex]::Match($output, "(?m)^\s*tombstoneReasonValues=(?<values>[^\r\n]+)\s*$")
+if (-not $reasonValuesMatch.Success) {
+    throw "Tombstone reason values were missing."
+}
+$reasonValues = $reasonValuesMatch.Groups["values"].Value
+if ($reasonValues -match '(?i)(synthetic|modulo|wave|placeholder|fake|simulated)') {
+    throw "Tombstone reason values look synthetic: $reasonValues"
 }
 
 $cpuAvailable = $output -match "(?m)^\s*cpuAvailable=true\s*$"

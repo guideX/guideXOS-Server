@@ -511,20 +511,52 @@ namespace gxos { namespace apps {
                 return a.pid < b.pid;
             });
 
-        for (const ProcessSnapshot& process : snapshot.processes) {
-            if (!process.running) {
-                TombstoneSnapshot tombstone;
-                tombstone.displayName = process.displayName;
-                tombstone.appId = process.appId;
-                tombstone.pid = process.pid;
-                if (process.exitCode != 0) {
-                    tombstone.reason = std::string("exitCode=") + std::to_string(process.exitCode);
-                } else {
-                    tombstone.reason = "stopped";
+        std::unordered_map<uint64_t, const ProcessSnapshot*> processByPid;
+        for (const auto& process : snapshot.processes) {
+            processByPid[process.pid] = &process;
+        }
+
+        snapshot.tombstoneDetailsAvailable = true;
+        snapshot.tombstoneHistoryCapacity = ProcessTable::kTombstoneHistoryMax;
+        snapshot.tombstoned = ProcessTable::tombstones();
+        for (auto& tombstone : snapshot.tombstoned) {
+            auto processIt = processByPid.find(tombstone.pid);
+            if (processIt != processByPid.end() && processIt->second) {
+                const ProcessSnapshot& process = *processIt->second;
+                if (tombstone.displayName.empty()) tombstone.displayName = process.displayName;
+                if (tombstone.appId.empty()) tombstone.appId = process.appId;
+                if (tombstone.windowTitle.empty()) tombstone.windowTitle = process.windowTitle;
+                tombstone.finalMemoryBytesAvailable = true;
+                tombstone.finalMemoryBytes = process.memoryBytes;
+                if (process.cpuPctAvailable) {
+                    tombstone.finalCpuPctAvailable = true;
+                    tombstone.finalCpuPct = process.cpuPct;
                 }
-                tombstone.restoreSupported = false;
-                tombstone.endSupported = true;
-                snapshot.tombstoned.push_back(tombstone);
+                if (!tombstone.exitCodeAvailable && !process.running) {
+                    tombstone.exitCodeAvailable = true;
+                    tombstone.exitCode = process.exitCode;
+                }
+            }
+
+            if (tombstone.windowTitle.empty()) {
+                auto windowTitleIt = windowTitleByPid.find(tombstone.pid);
+                if (windowTitleIt != windowTitleByPid.end()) {
+                    tombstone.windowTitle = windowTitleIt->second;
+                }
+            }
+
+            if (tombstone.displayName.empty()) {
+                if (!tombstone.windowTitle.empty()) {
+                    tombstone.displayName = tombstone.windowTitle;
+                } else if (!tombstone.appId.empty()) {
+                    tombstone.displayName = tombstone.appId;
+                } else {
+                    tombstone.displayName = std::string("Process-") + std::to_string(tombstone.pid);
+                }
+            }
+
+            if (tombstone.reason.empty()) {
+                tombstone.reason = "Unknown";
             }
         }
 
@@ -540,7 +572,10 @@ namespace gxos { namespace apps {
         oss << "processColumns=Name,CPU%,Memory,Disk%,Network%\n";
         oss << "performanceCategories=CPU,Memory,Disk,Network\n";
         oss << "memoryDetailsSections=Memory Allocator Details;Free() Call Statistics;Heap Allocator\n";
-        oss << "tombstonedColumns=Name,PID,App ID,Reason,Restore,End\n";
+        oss << "tombstoneDetailsAvailable=" << (snapshot.tombstoneDetailsAvailable ? "true" : "false") << "\n";
+        oss << "tombstoneHistoryCapacity=" << snapshot.tombstoneHistoryCapacity << "\n";
+        oss << "tombstoneColumns=Name,PID,App ID,Reason,Exit,Runtime,Restore,End\n";
+        oss << "tombstoneReasonValues=NormalExit,Terminated,Crashed,Unknown\n";
         oss << "processes=" << snapshot.performance.processCount << "\n";
         oss << "memoryUsed=" << snapshot.memory.usedBytes << "\n";
         if (snapshot.memory.totalAvailable) {
@@ -577,18 +612,21 @@ namespace gxos { namespace apps {
         oss << "disk=N/A\n";
         oss << "network=N/A\n";
         oss << "tombstoned=" << snapshot.tombstoned.size() << "\n";
-        if (!snapshot.tombstoned.empty()) {
-            bool allRestoreSupported = true;
-            bool allEndSupported = true;
-            for (const auto& tomb : snapshot.tombstoned) {
-                allRestoreSupported = allRestoreSupported && tomb.restoreSupported;
-                allEndSupported = allEndSupported && tomb.endSupported;
-            }
-            oss << "tombstonedRestoreSupported=" << (allRestoreSupported ? "true" : "false") << "\n";
-            oss << "tombstonedEndSupported=" << (allEndSupported ? "true" : "false") << "\n";
-        } else {
-            oss << "tombstonedRestoreSupported=N/A\n";
-            oss << "tombstonedEndSupported=N/A\n";
+        oss << "tombstoneRestoreSupported=false\n";
+        oss << "tombstoneEndSupported=false\n";
+        oss << "tombstonedColumns=Name,PID,App ID,Reason,Exit,Runtime,Restore,End\n";
+        oss << "tombstonedRestoreSupported=false\n";
+        oss << "tombstonedEndSupported=false\n";
+        for (const auto& tomb : snapshot.tombstoned) {
+            oss << "tombstoneRow pid=" << tomb.pid
+                << " displayName=" << tomb.displayName
+                << " appId=" << (tomb.appId.empty() ? std::string("N/A") : tomb.appId)
+                << " reason=" << (tomb.reason.empty() ? std::string("Unknown") : tomb.reason)
+                << " exitCode=" << (tomb.exitCodeAvailable ? std::to_string(tomb.exitCode) : std::string("N/A"))
+                << " runtimeMs=" << (tomb.runtimeMsAvailable ? std::to_string(tomb.runtimeMs) : std::string("N/A"))
+                << " windowTitle=" << (tomb.windowTitle.empty() ? std::string("N/A") : tomb.windowTitle)
+                << " lastMessage=" << (tomb.lastMessage.empty() ? std::string("N/A") : tomb.lastMessage)
+                << "\n";
         }
         for (const auto& process : snapshot.processes) {
             oss << "processRow pid=" << process.pid
@@ -1280,9 +1318,12 @@ namespace gxos { namespace apps {
         const int headerY = y + 34;
         const int rowY = headerY + 24;
         const int rowH = 24;
-        const int visibleRows = 13;
+        const int visibleRows = 9;
         const int rowCount = static_cast<int>(s_snapshot.tombstoned.size());
 
+        if (rowCount > 0 && s_selectedTombIndex < 0) {
+            s_selectedTombIndex = 0;
+        }
         if (s_selectedTombIndex >= rowCount) {
             s_selectedTombIndex = rowCount - 1;
         }
@@ -1299,11 +1340,13 @@ namespace gxos { namespace apps {
 
         publishRect(s_windowId, x + 10, headerY, w - 20, 22, 0x24, 0x24, 0x24);
         publishTextAtColor(s_windowId, x + 22, headerY + 3, 236, 240, 248, "Name");
-        publishTextAtColor(s_windowId, x + 200, headerY + 3, 236, 240, 248, "PID");
-        publishTextAtColor(s_windowId, x + 272, headerY + 3, 236, 240, 248, "App ID");
-        publishTextAtColor(s_windowId, x + 420, headerY + 3, 236, 240, 248, "Reason");
-        publishTextAtColor(s_windowId, x + 620, headerY + 3, 236, 240, 248, "Restore");
-        publishTextAtColor(s_windowId, x + 682, headerY + 3, 236, 240, 248, "End");
+        publishTextAtColor(s_windowId, x + 168, headerY + 3, 236, 240, 248, "PID");
+        publishTextAtColor(s_windowId, x + 238, headerY + 3, 236, 240, 248, "App ID");
+        publishTextAtColor(s_windowId, x + 352, headerY + 3, 236, 240, 248, "Reason");
+        publishTextAtColor(s_windowId, x + 488, headerY + 3, 236, 240, 248, "Exit");
+        publishTextAtColor(s_windowId, x + 552, headerY + 3, 236, 240, 248, "Runtime");
+        publishTextAtColor(s_windowId, x + 624, headerY + 3, 236, 240, 248, "Restore");
+        publishTextAtColor(s_windowId, x + 688, headerY + 3, 236, 240, 248, "End");
 
         publishRect(s_windowId, x + 10, rowY - 2, w - 20, visibleRows * rowH + 4, 0x18, 0x18, 0x18);
 
@@ -1314,19 +1357,58 @@ namespace gxos { namespace apps {
                 publishRect(s_windowId, x + 11, row, w - 22, rowH - 1, 0x30, 0x30, 0x46);
             }
             publishTextAt(s_windowId, x + 20, row + 5, i == s_selectedTombIndex ? "> " : "  ");
-            publishTextAt(s_windowId, x + 36, row + 5, trimDisplayName(tomb.displayName, 24));
-            publishTextAt(s_windowId, x + 200, row + 5, std::to_string(tomb.pid));
-            publishTextAt(s_windowId, x + 272, row + 5, trimDisplayName(tomb.appId.empty() ? std::string("N/A") : tomb.appId, 26));
-            publishTextAt(s_windowId, x + 420, row + 5, trimDisplayName(tomb.reason.empty() ? std::string("stopped") : tomb.reason, 22));
-            publishTextAtColor(s_windowId, x + 620, row + 5, 224, 228, 238, tomb.restoreSupported ? "Yes" : "N/A");
-            publishTextAtColor(s_windowId, x + 682, row + 5, 224, 228, 238, tomb.endSupported ? "Yes" : "N/A");
+            publishTextAt(s_windowId, x + 36, row + 5, trimDisplayName(tomb.displayName, 20));
+            publishTextAt(s_windowId, x + 168, row + 5, std::to_string(tomb.pid));
+            publishTextAt(s_windowId, x + 238, row + 5, trimDisplayName(tomb.appId.empty() ? std::string("N/A") : tomb.appId, 17));
+            publishTextAt(s_windowId, x + 352, row + 5, trimDisplayName(tomb.reason.empty() ? std::string("Unknown") : tomb.reason, 18));
+            publishTextAt(s_windowId, x + 488, row + 5, tomb.exitCodeAvailable ? std::to_string(tomb.exitCode) : std::string("N/A"));
+            publishTextAt(s_windowId, x + 552, row + 5, tomb.runtimeMsAvailable ? formatUptime(tomb.runtimeMs) : std::string("N/A"));
+            publishTextAtColor(s_windowId, x + 624, row + 5, 224, 228, 238, tomb.restoreSupported ? "Yes" : "No");
+            publishTextAtColor(s_windowId, x + 688, row + 5, 224, 228, 238, tomb.endSupported ? "Yes" : "No");
+        }
+
+        const int detailY = rowY + visibleRows * rowH + 10;
+        publishRect(s_windowId, x + 10, detailY - 6, w - 20, h - (detailY - 6) - 28, 0x16, 0x16, 0x16);
+        publishRect(s_windowId, x + 10, detailY - 6, w - 20, 1, 0x44, 0x44, 0x44);
+        publishTextAtColor(s_windowId, x + 22, detailY + 2, 236, 240, 248, "Selected Tombstone Details");
+
+        const TombstoneSnapshot* selected = (rowCount > 0 && s_selectedTombIndex >= 0 && s_selectedTombIndex < rowCount)
+            ? &s_snapshot.tombstoned[s_selectedTombIndex]
+            : nullptr;
+        const int detailLabelX = x + 22;
+        const int detailValueX = x + 220;
+        const int detailRowH = 15;
+        int detailRowY = detailY + 22;
+        auto detailRow = [&](const std::string& label, const std::string& value) {
+            publishTextAt(s_windowId, detailLabelX, detailRowY, label);
+            publishTextAt(s_windowId, detailValueX, detailRowY, value);
+            detailRowY += detailRowH;
+        };
+        if (selected) {
+            detailRow("Name:", trimDisplayName(selected->displayName, 38) + " (PID " + std::to_string(selected->pid) + ")");
+            detailRow("App ID:", selected->appId.empty() ? std::string("N/A") : selected->appId);
+            detailRow("Window Title:", selected->windowTitle.empty() ? std::string("N/A") : selected->windowTitle);
+            detailRow("Reason:", selected->reason.empty() ? std::string("Unknown") : selected->reason);
+            detailRow("Exit Code:", selected->exitCodeAvailable ? std::to_string(selected->exitCode) : std::string("N/A"));
+            detailRow("Runtime:", selected->runtimeMsAvailable ? formatUptime(selected->runtimeMs) : std::string("N/A"));
+            detailRow("Final Memory:", selected->finalMemoryBytesAvailable ? formatMemory(selected->finalMemoryBytes) : std::string("N/A"));
+            detailRow("Final CPU:", selected->finalCpuPctAvailable ? std::to_string(selected->finalCpuPct) + "%" : std::string("N/A"));
+            detailRow("Last Message:", selected->lastMessage.empty() ? std::string("N/A") : trimDisplayName(selected->lastMessage, 44));
+        } else {
+            detailRow("Name:", "N/A");
+            detailRow("App ID:", "N/A");
+            detailRow("Window Title:", "N/A");
+            detailRow("Reason:", "N/A");
+            detailRow("Exit Code:", "N/A");
+            detailRow("Runtime:", "N/A");
+            detailRow("Final Memory:", "N/A");
+            detailRow("Final CPU:", "N/A");
+            detailRow("Last Message:", "N/A");
         }
 
         const int footerY = y + h - 20;
         std::ostringstream footer;
-        footer << rowCount << " tombstoned | Up/Down=Select | Restore=";
-        footer << (rowCount > 0 && s_selectedTombIndex >= 0 && s_selectedTombIndex < rowCount && s_snapshot.tombstoned[s_selectedTombIndex].restoreSupported ? "Yes" : "N/A");
-        footer << " | Del/E=End";
+        footer << rowCount << " tombstoned | Up/Down=Select | Restore=No | Del/E=End";
         publishTextAtColor(s_windowId, x + 12, footerY, 160, 166, 176, footer.str());
     }
     

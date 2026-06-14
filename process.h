@@ -21,6 +21,29 @@ namespace gxos {
 
     struct ProcessSpec { std::string name; ProcessFn entry; };
 
+    struct ProcessTombstoneRecord {
+        uint64_t pid = 0;
+        std::string displayName;
+        std::string appId;
+        std::string windowTitle;
+        std::string reason;
+        bool exitCodeAvailable = false;
+        int exitCode = 0;
+        bool runtimeMsAvailable = false;
+        uint64_t runtimeMs = 0;
+        bool startedAtMsAvailable = false;
+        uint64_t startedAtMs = 0;
+        bool endedAtMsAvailable = false;
+        uint64_t endedAtMs = 0;
+        bool finalMemoryBytesAvailable = false;
+        uint64_t finalMemoryBytes = 0;
+        bool finalCpuPctAvailable = false;
+        int finalCpuPct = 0;
+        std::string lastMessage;
+        bool restoreSupported = false;
+        bool endSupported = false;
+    };
+
     struct ProcessCpuTelemetry {
         bool available = false;
         bool running = false;
@@ -34,6 +57,7 @@ namespace gxos {
         uint64_t pid; std::string name; ipc::Mailbox mbox; ProcessFn entry; std::atomic<bool> running{false}; int exitCode=0;
         // phase 1: completion signalling
         std::mutex mu; std::condition_variable cv; std::atomic<bool> finished{false};
+        std::atomic<bool> tombstoneCaptured{false};
         std::atomic<bool> cpuSampleValid{false};
         std::atomic<uint64_t> cpuFinalMicros{0};
         ProcessThreadHandle cpuThreadHandle{};
@@ -54,9 +78,15 @@ namespace gxos {
         static bool wait(uint64_t pid, uint64_t timeoutMs, int* exitCodeOut=nullptr);
         static bool getStatus(uint64_t pid, bool& runningOut, int& exitCodeOut);
         static bool cpuTelemetry(uint64_t pid, ProcessCpuTelemetry& out);
+        static void recordTombstone(const ProcessTombstoneRecord& record);
+        static std::vector<ProcessTombstoneRecord> tombstones();
+        static bool claimTombstoneCapture(uint64_t pid);
+        static constexpr uint32_t kTombstoneHistoryMax = 64;
     private:
         static std::unordered_map<uint64_t, std::shared_ptr<Process>> g_proc;
+        static std::vector<ProcessTombstoneRecord> g_tombstones;
         static uint64_t g_nextPid;
         static std::mutex g_lock;
+        static std::mutex g_tombstoneLock;
     };
 }
