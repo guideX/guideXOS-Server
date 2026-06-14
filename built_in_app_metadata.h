@@ -26,6 +26,7 @@ struct BuiltInAppMetadata {
 	int defaultWindowWidth;
 	int defaultWindowHeight;
 	bool defaultWindowResizable;
+	bool canTombstone = false; // App policy: can this built-in app participate in tombstone/restore flows later?
 };
 
 namespace detail {
@@ -70,6 +71,10 @@ inline bool IsBuiltInAppAvailableInHosted(const BuiltInAppMetadata& metadata) {
 
 inline bool IsBuiltInAppAvailableInBareMetal(const BuiltInAppMetadata& metadata) {
 	return (metadata.availability & BuiltInAvailabilityBareMetal) != 0;
+}
+
+inline bool CanBuiltInAppTombstone(const BuiltInAppMetadata& metadata) {
+	return metadata.canTombstone;
 }
 
 inline const BuiltInAppMetadata* FindBuiltInAppMetadataByDisplayName(const char* displayName) {

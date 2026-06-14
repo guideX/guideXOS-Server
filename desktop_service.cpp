@@ -1967,6 +1967,19 @@ namespace gxos {
             oss << "pathParameter: " << target.pathParameter << "\n";
             oss << "hostedAvailable: " << diagnosticBool(target.hostedAvailable) << "\n";
             oss << "bareMetalAvailable: " << diagnosticBool(target.bareMetalAvailable) << "\n";
+            const apps::BuiltInAppMetadata* tombstoneMetadata = nullptr;
+            if (!target.appId.empty()) {
+                tombstoneMetadata = apps::FindBuiltInAppMetadataByIdentity(target.appId.c_str());
+            }
+            if (!tombstoneMetadata && !target.displayName.empty()) {
+                tombstoneMetadata = apps::FindBuiltInAppMetadataByIdentity(target.displayName.c_str());
+            }
+            if (!tombstoneMetadata && !target.dispatchLaunchName.empty()) {
+                tombstoneMetadata = apps::FindBuiltInAppMetadataByIdentity(target.dispatchLaunchName.c_str());
+            }
+            if (tombstoneMetadata) {
+                oss << "tombstoneSupported: " << diagnosticBool(apps::CanBuiltInAppTombstone(*tombstoneMetadata)) << "\n";
+            }
             oss << "status: " << target.diagnosticStatus << "\n";
             oss << "reason: " << target.diagnosticReason << "\n";
             return oss.str();
@@ -3192,9 +3205,11 @@ namespace gxos {
 
             int hostedAvailable = 0;
             int bareMetalAvailable = 0;
+            int tombstoneSupported = 0;
             for (size_t i = 0; i < apps::kBuiltInAppMetadataCount; ++i) {
                 if (apps::IsBuiltInAppAvailableInHosted(apps::kBuiltInAppMetadata[i])) ++hostedAvailable;
                 if (apps::IsBuiltInAppAvailableInBareMetal(apps::kBuiltInAppMetadata[i])) ++bareMetalAvailable;
+                if (apps::CanBuiltInAppTombstone(apps::kBuiltInAppMetadata[i])) ++tombstoneSupported;
             }
 
             std::ostringstream oss;
@@ -3202,6 +3217,7 @@ namespace gxos {
             oss << "metadataEntries: " << apps::kBuiltInAppMetadataCount << "\n";
             oss << "hostedAvailableEntries: " << hostedAvailable << "\n";
             oss << "bareMetalAvailableEntries: " << bareMetalAvailable << "\n";
+            oss << "tombstoneSupportedEntries: " << tombstoneSupported << "\n";
 
             oss << "metadata:\n";
             for (size_t i = 0; i < apps::kBuiltInAppMetadataCount; ++i) {
@@ -3213,6 +3229,7 @@ namespace gxos {
                     << " kernelAlias=" << (metadata.kernelLegacyAlias ? metadata.kernelLegacyAlias : "")
                     << " hosted=" << (apps::IsBuiltInAppAvailableInHosted(metadata) ? "true" : "false")
                     << " bareMetal=" << (apps::IsBuiltInAppAvailableInBareMetal(metadata) ? "true" : "false")
+                    << " tombstoneSupported=" << (apps::CanBuiltInAppTombstone(metadata) ? "true" : "false")
                     << "\n";
             }
 
