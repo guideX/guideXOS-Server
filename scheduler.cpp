@@ -2,6 +2,7 @@
 #include "logger.h"
 #include <condition_variable>
 #include <chrono>
+#include <algorithm>
 
 namespace gxos {
     std::vector<std::thread> Scheduler::g_threads; 
@@ -16,14 +17,24 @@ namespace gxos {
     uint64_t Scheduler::g_lastSampleIdleMicros = 0;
     uint64_t Scheduler::g_lastSampleWallMicros = 0;
     static std::condition_variable g_cv;
+    static uint64_t g_pendingSampleBusyMicros = 0;
+    static uint64_t g_pendingSampleWindowMicros = 0;
+    static bool g_hasStableCpuSample = false;
+    static CpuTelemetrySnapshot g_lastStableCpuSample{};
 
     namespace {
+        constexpr uint64_t kCpuTelemetryDisplayWindowMicros = 1000ULL * 1000ULL;
+
         static uint64_t durationMicros(const std::chrono::steady_clock::duration& duration) {
             return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(duration).count());
         }
 
         static uint64_t microsToMillisCeil(uint64_t micros) {
             return micros == 0 ? 0 : ((micros + 999) / 1000);
+        }
+
+        static uint64_t clampBusyMicros(uint64_t busyMicros, uint64_t windowMicros) {
+            return busyMicros > windowMicros ? windowMicros : busyMicros;
         }
     }
 
@@ -35,6 +46,10 @@ namespace gxos {
         g_lastSampleBusyMicros = 0;
         g_lastSampleIdleMicros = 0;
         g_lastSampleWallMicros = durationMicros(std::chrono::steady_clock::now().time_since_epoch());
+        g_pendingSampleBusyMicros = 0;
+        g_pendingSampleWindowMicros = 0;
+        g_hasStableCpuSample = false;
+        g_lastStableCpuSample = CpuTelemetrySnapshot{};
         {
             std::lock_guard<std::mutex> lk(g_lock);
             g_queue.clear();
@@ -49,7 +64,7 @@ namespace gxos {
 
     CpuTelemetrySnapshot Scheduler::cpuTelemetrySnapshot() {
         CpuTelemetrySnapshot snapshot;
-        snapshot.source = "schedulerIdleBusy";
+        snapshot.source = "schedulerIdleBusyWarmup";
 
         const uint64_t busyTotalMicros = g_busyMicros.load(std::memory_order_relaxed);
         const uint64_t idleTotalMicros = g_idleMicros.load(std::memory_order_relaxed);
@@ -61,15 +76,37 @@ namespace gxos {
         g_lastSampleBusyMicros = busyTotalMicros;
         g_lastSampleIdleMicros = idleTotalMicros;
         g_lastSampleWallMicros = nowMicros;
-        if (windowMicros == 0) {
+        g_pendingSampleBusyMicros += busyDeltaMicros;
+        g_pendingSampleWindowMicros += windowMicros;
+
+        if (g_pendingSampleWindowMicros >= kCpuTelemetryDisplayWindowMicros) {
+            const uint64_t displayWindowMicros = g_pendingSampleWindowMicros;
+            const uint64_t displayBusyMicros = clampBusyMicros(g_pendingSampleBusyMicros, displayWindowMicros);
+            const uint64_t displayIdleMicros = displayWindowMicros > displayBusyMicros ? displayWindowMicros - displayBusyMicros : 0;
+            const uint64_t rawPct = displayWindowMicros == 0 ? 0 : ((displayBusyMicros * 100ULL) / displayWindowMicros);
+
+            snapshot.available = true;
+            snapshot.source = "schedulerIdleBusy";
+            snapshot.utilizationPct = static_cast<int>(std::min<uint64_t>(100ULL, rawPct));
+            snapshot.busyTimeMs = microsToMillisCeil(displayBusyMicros);
+            snapshot.idleTimeMs = microsToMillisCeil(displayIdleMicros);
+            snapshot.sampleWindowMs = microsToMillisCeil(displayWindowMicros);
+
+            g_lastStableCpuSample = snapshot;
+            g_hasStableCpuSample = true;
+            g_pendingSampleBusyMicros = 0;
+            g_pendingSampleWindowMicros = 0;
             return snapshot;
         }
 
-        snapshot.available = true;
-        snapshot.utilizationPct = static_cast<int>((busyDeltaMicros * 100) / windowMicros);
-        snapshot.busyTimeMs = microsToMillisCeil(busyDeltaMicros);
-        snapshot.idleTimeMs = microsToMillisCeil(windowMicros > busyDeltaMicros ? windowMicros - busyDeltaMicros : 0);
-        snapshot.sampleWindowMs = microsToMillisCeil(windowMicros);
+        snapshot.busyTimeMs = microsToMillisCeil(g_pendingSampleBusyMicros);
+        snapshot.idleTimeMs = microsToMillisCeil(g_pendingSampleWindowMicros > g_pendingSampleBusyMicros ? g_pendingSampleWindowMicros - g_pendingSampleBusyMicros : 0);
+        snapshot.sampleWindowMs = microsToMillisCeil(g_pendingSampleWindowMicros);
+
+        if (g_hasStableCpuSample) {
+            return g_lastStableCpuSample;
+        }
+
         return snapshot;
     }
 

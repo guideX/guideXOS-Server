@@ -301,11 +301,11 @@ namespace gxos { namespace apps {
         snapshot.performance.memoryPct = snapshot.memory.heapUtilPctAvailable ? snapshot.memory.heapUtilPct : 0;
         const CpuTelemetrySnapshot cpuTelemetry = Scheduler::cpuTelemetrySnapshot();
         snapshot.performance.cpuAvailable = cpuTelemetry.available;
-        snapshot.performance.cpuPct = cpuTelemetry.available ? cpuTelemetry.utilizationPct : 0;
-        snapshot.performance.cpuSource = cpuTelemetry.available ? cpuTelemetry.source : "N/A";
-        snapshot.performance.cpuSampleWindowMs = cpuTelemetry.available ? cpuTelemetry.sampleWindowMs : 0;
-        snapshot.performance.cpuBusyTimeMs = cpuTelemetry.available ? cpuTelemetry.busyTimeMs : 0;
-        snapshot.performance.cpuIdleTimeMs = cpuTelemetry.available ? cpuTelemetry.idleTimeMs : 0;
+        snapshot.performance.cpuPct = cpuTelemetry.utilizationPct;
+        snapshot.performance.cpuSource = cpuTelemetry.source;
+        snapshot.performance.cpuSampleWindowMs = cpuTelemetry.sampleWindowMs;
+        snapshot.performance.cpuBusyTimeMs = cpuTelemetry.busyTimeMs;
+        snapshot.performance.cpuIdleTimeMs = cpuTelemetry.idleTimeMs;
         snapshot.performance.diskAvailable = false;
         snapshot.performance.networkAvailable = false;
         snapshot.performance.syntheticCounters = false;
@@ -428,10 +428,10 @@ namespace gxos { namespace apps {
         } else {
             oss << "cpu=N/A\n";
             oss << "cpuAvailable=false\n";
-            oss << "cpuSource=N/A\n";
-            oss << "cpuSampleWindowMs=N/A\n";
-            oss << "cpuBusyTimeMs=N/A\n";
-            oss << "cpuIdleTimeMs=N/A\n";
+            oss << "cpuSource=" << snapshot.performance.cpuSource << "\n";
+            oss << "cpuSampleWindowMs=" << snapshot.performance.cpuSampleWindowMs << "\n";
+            oss << "cpuBusyTimeMs=" << snapshot.performance.cpuBusyTimeMs << "\n";
+            oss << "cpuIdleTimeMs=" << snapshot.performance.cpuIdleTimeMs << "\n";
         }
         oss << "disk=N/A\n";
         oss << "network=N/A\n";

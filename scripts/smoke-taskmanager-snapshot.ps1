@@ -95,6 +95,9 @@ if ($cpuAvailable) {
     if ($cpuSampleWindow -le 0) {
         throw "CPU sample window must be positive when available: $cpuSampleWindow"
     }
+    if ($cpuSampleWindow -lt 500) {
+        throw "CPU sample window is too short for a stable display sample: $cpuSampleWindow"
+    }
 
     if (-not $cpuBusyMatch.Success -or $cpuBusyMatch.Groups["busy"].Value -eq "N/A") {
         throw "CPU availability was reported but cpuBusyTimeMs was missing."
@@ -106,8 +109,26 @@ if ($cpuAvailable) {
     if (-not ($output -match "cpu=N/A")) {
         throw "CPU was unavailable but cpu=N/A was not reported."
     }
-    if (-not ($output -match "cpuSource=N/A")) {
-        throw "CPU was unavailable but cpuSource=N/A was not reported."
+    if (-not $cpuSourceMatch.Success) {
+        throw "CPU was unavailable but cpuSource was missing."
+    }
+
+    $cpuSource = $cpuSourceMatch.Groups["source"].Value
+    if ($cpuSource -match '(?i)(synthetic|modulo|wave|placeholder|fake|simulated)') {
+        throw "CPU source looks synthetic: $cpuSource"
+    }
+    if ($cpuSource -notmatch '(?i)warmup' -and $cpuSource -ne "N/A") {
+        throw "CPU was unavailable but cpuSource did not indicate warmup: $cpuSource"
+    }
+
+    if ($cpuSampleWindowMatch.Success -and $cpuSampleWindowMatch.Groups["window"].Value -ne "N/A") {
+        $cpuSampleWindow = [int]$cpuSampleWindowMatch.Groups["window"].Value
+        if ($cpuSampleWindow -lt 0) {
+            throw "CPU warmup sample window must not be negative: $cpuSampleWindow"
+        }
+        if ($cpuSampleWindow -ge 500) {
+            throw "CPU warmup sample window was unexpectedly large: $cpuSampleWindow"
+        }
     }
 } else {
     throw "CPU availability flag was missing."
