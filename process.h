@@ -27,6 +27,9 @@ namespace gxos {
         std::string appId;
         std::string windowTitle;
         std::string reason;
+        bool appTombstoneCapabilityKnown = false;
+        bool appTombstoneCapable = false;
+        std::string appTombstoneCapabilitySource = "N/A";
         bool exitCodeAvailable = false;
         int exitCode = 0;
         bool runtimeMsAvailable = false;

@@ -79,7 +79,13 @@ namespace gxos { namespace apps {
         PerformanceSnapshot performance;
         std::vector<TombstoneSnapshot> tombstoned;
         bool tombstoneDetailsAvailable = false;
+        bool tombstoneDiagnosticHistoryAvailable = false;
+        bool appTombstonePolicyAvailable = false;
+        std::string tombstoneCapabilitySource = "N/A";
+        bool tombstoneRestoreImplemented = false;
+        bool tombstoneRestoreSupported = false;
         uint32_t tombstoneHistoryCapacity = 0;
+        uint32_t tombstoneAppCapabilityKnown = 0;
         bool syntheticCounters = false;
     };
     

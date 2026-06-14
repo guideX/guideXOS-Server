@@ -5,6 +5,7 @@
 #include "scheduler.h"
 #include "compositor.h"
 #include "desktop_service.h"
+#include "built_in_app_metadata.h"
 #include "native_app_process_table.h"
 #include <sstream>
 #include <algorithm>
@@ -294,6 +295,42 @@ namespace gxos { namespace apps {
             return nullptr;
         }
 
+        struct TombstoneCapabilityStatus {
+            bool known = false;
+            bool capable = false;
+            std::string source = "N/A";
+        };
+
+        static const apps::BuiltInAppMetadata* findBuiltInMetadataForTombstone(const gxos::ProcessTombstoneRecord& tombstone) {
+            const apps::BuiltInAppMetadata* metadata = nullptr;
+            if (!tombstone.appId.empty()) {
+                metadata = apps::FindBuiltInAppMetadataByIdentity(tombstone.appId.c_str());
+            }
+            if (!metadata && !tombstone.displayName.empty()) {
+                metadata = apps::FindBuiltInAppMetadataByIdentity(tombstone.displayName.c_str());
+            }
+            if (!metadata && !tombstone.windowTitle.empty()) {
+                metadata = apps::FindBuiltInAppMetadataByIdentity(tombstone.windowTitle.c_str());
+            }
+            return metadata;
+        }
+
+        static TombstoneCapabilityStatus resolveTombstoneCapability(const gxos::ProcessTombstoneRecord& tombstone) {
+            TombstoneCapabilityStatus status;
+            const apps::BuiltInAppMetadata* metadata = findBuiltInMetadataForTombstone(tombstone);
+            if (!metadata) return status;
+
+            status.known = true;
+            status.capable = apps::CanBuiltInAppTombstone(*metadata);
+            status.source = "appModelMetadata";
+            return status;
+        }
+
+        static std::string formatTombstoneCapability(const gxos::ProcessTombstoneRecord& tombstone) {
+            if (!tombstone.appTombstoneCapabilityKnown) return "N/A";
+            return tombstone.appTombstoneCapable ? "Supported" : "Unsupported";
+        }
+
         static std::string allocTagName(gxos::AllocTag tag) {
             switch (tag) {
                 case gxos::AllocTag::Unknown: return "Unknown";
@@ -517,6 +554,11 @@ namespace gxos { namespace apps {
         }
 
         snapshot.tombstoneDetailsAvailable = true;
+        snapshot.tombstoneDiagnosticHistoryAvailable = true;
+        snapshot.appTombstonePolicyAvailable = apps::kBuiltInAppMetadataCount > 0;
+        snapshot.tombstoneCapabilitySource = snapshot.appTombstonePolicyAvailable ? "appModelMetadata" : "N/A";
+        snapshot.tombstoneRestoreImplemented = false;
+        snapshot.tombstoneRestoreSupported = false;
         snapshot.tombstoneHistoryCapacity = ProcessTable::kTombstoneHistoryMax;
         snapshot.tombstoned = ProcessTable::tombstones();
         for (auto& tombstone : snapshot.tombstoned) {
@@ -558,6 +600,14 @@ namespace gxos { namespace apps {
             if (tombstone.reason.empty()) {
                 tombstone.reason = "Unknown";
             }
+
+            const TombstoneCapabilityStatus capability = resolveTombstoneCapability(tombstone);
+            tombstone.appTombstoneCapabilityKnown = capability.known;
+            tombstone.appTombstoneCapable = capability.capable;
+            tombstone.appTombstoneCapabilitySource = capability.source;
+            if (capability.known) {
+                ++snapshot.tombstoneAppCapabilityKnown;
+            }
         }
 
         snapshot.syntheticCounters = false;
@@ -573,7 +623,12 @@ namespace gxos { namespace apps {
         oss << "performanceCategories=CPU,Memory,Disk,Network\n";
         oss << "memoryDetailsSections=Memory Allocator Details;Free() Call Statistics;Heap Allocator\n";
         oss << "tombstoneDetailsAvailable=" << (snapshot.tombstoneDetailsAvailable ? "true" : "false") << "\n";
+        oss << "tombstoneDiagnosticHistoryAvailable=" << (snapshot.tombstoneDiagnosticHistoryAvailable ? "true" : "false") << "\n";
+        oss << "appTombstonePolicyAvailable=" << (snapshot.appTombstonePolicyAvailable ? "true" : "false") << "\n";
+        oss << "tombstoneCapabilitySource=" << snapshot.tombstoneCapabilitySource << "\n";
+        oss << "tombstoneRestoreImplemented=" << (snapshot.tombstoneRestoreImplemented ? "true" : "false") << "\n";
         oss << "tombstoneHistoryCapacity=" << snapshot.tombstoneHistoryCapacity << "\n";
+        oss << "tombstoneAppCapabilityKnown=" << snapshot.tombstoneAppCapabilityKnown << "\n";
         oss << "tombstoneColumns=Name,PID,App ID,Reason,Exit,Runtime,Restore,End\n";
         oss << "tombstoneReasonValues=NormalExit,Terminated,Crashed,Unknown\n";
         oss << "processes=" << snapshot.performance.processCount << "\n";
@@ -612,7 +667,7 @@ namespace gxos { namespace apps {
         oss << "disk=N/A\n";
         oss << "network=N/A\n";
         oss << "tombstoned=" << snapshot.tombstoned.size() << "\n";
-        oss << "tombstoneRestoreSupported=false\n";
+        oss << "tombstoneRestoreSupported=" << (snapshot.tombstoneRestoreSupported ? "true" : "false") << "\n";
         oss << "tombstoneEndSupported=false\n";
         oss << "tombstonedColumns=Name,PID,App ID,Reason,Exit,Runtime,Restore,End\n";
         oss << "tombstonedRestoreSupported=false\n";
@@ -624,6 +679,9 @@ namespace gxos { namespace apps {
                 << " reason=" << (tomb.reason.empty() ? std::string("Unknown") : tomb.reason)
                 << " exitCode=" << (tomb.exitCodeAvailable ? std::to_string(tomb.exitCode) : std::string("N/A"))
                 << " runtimeMs=" << (tomb.runtimeMsAvailable ? std::to_string(tomb.runtimeMs) : std::string("N/A"))
+                << " appTombstoneCapable=" << formatTombstoneCapability(tomb)
+                << " appTombstoneCapabilitySource=" << tomb.appTombstoneCapabilitySource
+                << " restoreSupported=" << (tomb.restoreSupported ? "true" : "false")
                 << " windowTitle=" << (tomb.windowTitle.empty() ? std::string("N/A") : tomb.windowTitle)
                 << " lastMessage=" << (tomb.lastMessage.empty() ? std::string("N/A") : tomb.lastMessage)
                 << "\n";
@@ -1393,6 +1451,9 @@ namespace gxos { namespace apps {
             detailRow("Runtime:", selected->runtimeMsAvailable ? formatUptime(selected->runtimeMs) : std::string("N/A"));
             detailRow("Final Memory:", selected->finalMemoryBytesAvailable ? formatMemory(selected->finalMemoryBytes) : std::string("N/A"));
             detailRow("Final CPU:", selected->finalCpuPctAvailable ? std::to_string(selected->finalCpuPct) + "%" : std::string("N/A"));
+            detailRow("App Tombstone:", formatTombstoneCapability(*selected));
+            detailRow("Policy Source:", selected->appTombstoneCapabilityKnown ? selected->appTombstoneCapabilitySource : std::string("N/A"));
+            detailRow("Restore:", selected->restoreSupported ? "Supported" : "Unsupported");
             detailRow("Last Message:", selected->lastMessage.empty() ? std::string("N/A") : trimDisplayName(selected->lastMessage, 44));
         } else {
             detailRow("Name:", "N/A");
@@ -1403,6 +1464,9 @@ namespace gxos { namespace apps {
             detailRow("Runtime:", "N/A");
             detailRow("Final Memory:", "N/A");
             detailRow("Final CPU:", "N/A");
+            detailRow("App Tombstone:", "N/A");
+            detailRow("Policy Source:", "N/A");
+            detailRow("Restore:", "N/A");
             detailRow("Last Message:", "N/A");
         }
 

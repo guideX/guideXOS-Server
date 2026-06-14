@@ -18,6 +18,8 @@ if (-not (Test-Path $ServerExe)) {
 $commandInput = @"
 taskmgr
 taskmanager.snapshot
+taskmanager.tombstone-test
+taskmanager.snapshot
 quit
 "@
 $output = $commandInput | & $ServerExe 2>&1
@@ -31,7 +33,12 @@ $checks = @(
     @{ Name = "performance categories present"; Match = ($output -match "performanceCategories=CPU,Memory,Disk,Network") },
     @{ Name = "memory details sections present"; Match = ($output -match "memoryDetailsSections=Memory Allocator Details;Free\(\) Call Statistics;Heap Allocator") },
     @{ Name = "tombstone details available"; Match = ($output -match "(?m)^\s*tombstoneDetailsAvailable=true\s*$") },
+    @{ Name = "tombstone diagnostic history available"; Match = ($output -match "(?m)^\s*tombstoneDiagnosticHistoryAvailable=true\s*$") },
+    @{ Name = "app tombstone policy available"; Match = ($output -match "(?m)^\s*appTombstonePolicyAvailable=true\s*$") },
+    @{ Name = "tombstone capability source present"; Match = ($output -match "(?m)^\s*tombstoneCapabilitySource=appModelMetadata\s*$") },
+    @{ Name = "tombstone restore implemented false"; Match = ($output -match "(?m)^\s*tombstoneRestoreImplemented=false\s*$") },
     @{ Name = "tombstone history capacity present"; Match = ($output -match "(?m)^\s*tombstoneHistoryCapacity=\d+\s*$") },
+    @{ Name = "tombstone app capability known present"; Match = ($output -match "(?m)^\s*tombstoneAppCapabilityKnown=\d+\s*$") },
     @{ Name = "tombstone columns present"; Match = ($output -match "tombstoneColumns=Name,PID,App ID,Reason,Exit,Runtime,Restore,End") },
     @{ Name = "tombstone reason values present"; Match = ($output -match "tombstoneReasonValues=NormalExit,Terminated,Crashed,Unknown") },
     @{ Name = "tombstone restore support present"; Match = ($output -match "(?m)^\s*tombstoneRestoreSupported=false\s*$") },
@@ -52,7 +59,12 @@ $checks = @(
     @{ Name = "process cpu rows field present"; Match = ($output -match "(?m)^\s*processCpuRowsWithCpu=\d+\s*$") },
     @{ Name = "disk unavailable"; Match = ($output -match "disk=N/A") },
     @{ Name = "network unavailable"; Match = ($output -match "network=N/A") },
-    @{ Name = "synthetic counters disabled"; Match = ($output -match "syntheticCounters=false") }
+    @{ Name = "synthetic counters disabled"; Match = ($output -match "syntheticCounters=false") },
+    @{ Name = "deterministic tombstone smoke passed"; Match = ($output -match "(?m)^\s*tombstoneTest=passed\s*$") },
+    @{ Name = "deterministic tombstone reason normal exit"; Match = ($output -match "(?m)^\s*tombstoneReason=NormalExit\s*$") },
+    @{ Name = "deterministic tombstone restore unsupported"; Match = ($output -match "(?m)^\s*restoreSupported=false\s*$") },
+    @{ Name = "deterministic tombstone history count present"; Match = ($output -match "(?m)^\s*tombstoneHistoryCount=\d+\s*$") },
+    @{ Name = "deterministic tombstone row present"; Match = ($output -match "(?m)^\s*tombstoneRow pid=\d+ displayName=taskmanager\.tombstone-test .* reason=NormalExit .* appTombstoneCapable=N/A .* restoreSupported=false.*$") }
 )
 
 $failed = @()

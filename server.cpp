@@ -837,7 +837,7 @@ static void help(){
                  " console | console.start | console.send <text> | console.pop [timeoutMs]\n"
                  " files | files <path>\n"
                  " clock\n"
-                 " taskmanager.snapshot\n"
+                 " taskmanager.snapshot | taskmanager.tombstone-test\n"
                  " taskmgr\n"
                  " paint\n"
                  " navigator | navigator.smoke | navigator.goto <url>\n"
@@ -1227,6 +1227,50 @@ using namespace gxos;
         }
         else if (cmd=="taskmanager.snapshot"){
             std::cout << apps::TaskManager::SnapshotDiagnostic();
+        }
+        else if (cmd=="taskmanager.tombstone-test"){
+            const uint32_t beforeCount = static_cast<uint32_t>(ProcessTable::tombstones().size());
+            ProcessSpec spec{"taskmanager.tombstone-test", [](int, char**) { return 0; }};
+            const uint64_t pid = ProcessTable::spawn(spec, {"taskmanager.tombstone-test"});
+            int exitCode = 0;
+            const bool completed = ProcessTable::wait(pid, 1000, &exitCode);
+
+            const std::vector<ProcessTombstoneRecord> tombstones = ProcessTable::tombstones();
+            const ProcessTombstoneRecord* record = nullptr;
+            for (const auto& tombstone : tombstones) {
+                if (tombstone.pid == pid) {
+                    record = &tombstone;
+                    break;
+                }
+            }
+
+            const uint32_t afterCount = static_cast<uint32_t>(tombstones.size());
+            const uint32_t delta = afterCount >= beforeCount ? afterCount - beforeCount : 0;
+            const bool passed = completed && record && record->reason == "NormalExit" && exitCode == 0;
+
+            std::cout << "tombstoneTest=" << (passed ? "passed" : "failed") << "\n";
+            std::cout << "tombstoneHistoryBefore=" << beforeCount << "\n";
+            std::cout << "tombstoneHistoryCount=" << afterCount << "\n";
+            std::cout << "tombstoneHistoryDelta=" << delta << "\n";
+            std::cout << "tombstoneHistoryCapacity=" << ProcessTable::kTombstoneHistoryMax << "\n";
+            std::cout << "tombstoneReason=" << (record ? record->reason : std::string("N/A")) << "\n";
+            std::cout << "appTombstoneCapable=" << (record ? (record->appTombstoneCapabilityKnown ? (record->appTombstoneCapable ? "true" : "false") : "N/A") : "N/A") << "\n";
+            std::cout << "appTombstoneCapabilitySource=" << (record ? record->appTombstoneCapabilitySource : std::string("N/A")) << "\n";
+            std::cout << "restoreSupported=" << (record && record->restoreSupported ? "true" : "false") << "\n";
+            if (record) {
+                std::cout << "tombstoneRow pid=" << record->pid
+                          << " displayName=" << (record->displayName.empty() ? std::string("N/A") : record->displayName)
+                          << " appId=" << (record->appId.empty() ? std::string("N/A") : record->appId)
+                          << " reason=" << record->reason
+                          << " appTombstoneCapable=" << (record->appTombstoneCapabilityKnown ? (record->appTombstoneCapable ? "true" : "false") : "N/A")
+                          << " appTombstoneCapabilitySource=" << record->appTombstoneCapabilitySource
+                          << " restoreSupported=" << (record->restoreSupported ? "true" : "false")
+                          << " exitCode=" << (record->exitCodeAvailable ? std::to_string(record->exitCode) : std::string("N/A"))
+                          << " runtimeMs=" << (record->runtimeMsAvailable ? std::to_string(record->runtimeMs) : std::string("N/A"))
+                          << " windowTitle=" << (record->windowTitle.empty() ? std::string("N/A") : record->windowTitle)
+                          << " lastMessage=" << (record->lastMessage.empty() ? std::string("N/A") : record->lastMessage)
+                          << "\n";
+            }
         }
         else if (cmd=="taskmgr"){
             if(!requireCompositor()) continue;
