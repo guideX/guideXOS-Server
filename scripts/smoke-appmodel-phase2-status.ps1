@@ -449,11 +449,11 @@ try {
         $typedDispatchGateRestored = (Text-Contains -Output $typedDispatchGateForcedOffOutput -Needle "typedDispatchGateRestored=true") -and
             (Text-Contains -Output $typedDispatchGateRestoredOutput -Needle "typedDispatchRuntimePath=active")
         $typedDispatchGateDefaultMatrixOk =
-            Text-Contains -Output $hostedOutput -Needle "phase3TypedDispatchGateMatrix state=default total=8 typedDispatch=5 legacyOrCompatibilityDispatch=0 blockedUnknownFallback=1 specialCaseFallback=2 fallbackTotal=3"
+            Text-Contains -Output $hostedOutput -Needle "phase3TypedDispatchGateMatrix state=default total=9 typedDispatch=6 legacyOrCompatibilityDispatch=0 blockedUnknownFallback=1 specialCaseFallback=2 fallbackTotal=3"
         $typedDispatchGateForcedOffMatrixOk =
-            Text-Contains -Output $typedDispatchGateForcedOffOutput -Needle "phase3TypedDispatchGateMatrix state=forced-off total=8 typedDispatch=0 legacyOrCompatibilityDispatch=5 blockedUnknownFallback=1 specialCaseFallback=2 fallbackTotal=8"
+            Text-Contains -Output $typedDispatchGateForcedOffOutput -Needle "phase3TypedDispatchGateMatrix state=forced-off total=9 typedDispatch=0 legacyOrCompatibilityDispatch=6 blockedUnknownFallback=1 specialCaseFallback=2 fallbackTotal=9"
         $typedDispatchGateRestoredMatrixOk =
-            Text-Contains -Output $typedDispatchGateRestoredOutput -Needle "phase3TypedDispatchGateMatrix state=default total=8 typedDispatch=5 legacyOrCompatibilityDispatch=0 blockedUnknownFallback=1 specialCaseFallback=2 fallbackTotal=3"
+            Text-Contains -Output $typedDispatchGateRestoredOutput -Needle "phase3TypedDispatchGateMatrix state=default total=9 typedDispatch=6 legacyOrCompatibilityDispatch=0 blockedUnknownFallback=1 specialCaseFallback=2 fallbackTotal=3"
         $typedDispatchGateFeatureOk =
             $typedDispatchGateName -eq "appmodel.typed-dispatch-runtime-gate" -and
             $typedDispatchGateDefaultEnabled -and
@@ -520,16 +520,16 @@ try {
         }
         $phase3ReadinessOk =
             $phase3Readiness.phase3TypedDispatchReadiness -eq "active" -and
-            $phase3Readiness.totalObservedLaunchTargets -eq 8 -and
-            $phase3Readiness.typedDispatchReadyCount -eq 5 -and
+            $phase3Readiness.totalObservedLaunchTargets -eq 9 -and
+            $phase3Readiness.typedDispatchReadyCount -eq 6 -and
             $phase3Readiness.typedDispatchBlockedCount -eq 3 -and
             $phase3Readiness.specialCaseCount -eq 2 -and
             $phase3Readiness.legacyAliasCount -eq 2 -and
-            $phase3Readiness.builtInAppCount -eq 5 -and
+            $phase3Readiness.builtInAppCount -eq 6 -and
             $phase3Readiness.shellActionCount -eq 1 -and
             $phase3Readiness.fileOpenCount -eq 0 -and
             $phase3Readiness.unknownOrUnclassifiedCount -eq 2 -and
-            $phase3Readiness.actualTypedDispatchCount -eq 5 -and
+            $phase3Readiness.actualTypedDispatchCount -eq 6 -and
             $phase3Readiness.actualLegacyFallbackCount -eq 0 -and
             $phase3Readiness.actualBlockedUnknownFallbackCount -eq 1 -and
             $phase3Readiness.actualSpecialCaseFallbackCount -eq 2 -and
@@ -538,7 +538,7 @@ try {
             $phase3BlockedTargets -eq "AppModel,ComputerFiles,TotallyUnknownLaunchThing" -and
             $phase3UnknownTargets -eq "ComputerFiles,TotallyUnknownLaunchThing"
         if ($phase3ReadinessOk) {
-            Add-Check "phase3TypedDispatchReadiness" "PASS" "phase3TypedDispatchReadiness=active totalObservedLaunchTargets=8 typedDispatchReadyCount=5 typedDispatchBlockedCount=3 actualTypedDispatchCount=5 actualLegacyFallbackCount=0 actualBlockedUnknownFallbackCount=1 actualSpecialCaseFallbackCount=2 actualFallbackTotal=3 phase3TypedDispatchBlockedTargets=$phase3BlockedTargets"
+            Add-Check "phase3TypedDispatchReadiness" "PASS" "phase3TypedDispatchReadiness=active totalObservedLaunchTargets=9 typedDispatchReadyCount=6 typedDispatchBlockedCount=3 actualTypedDispatchCount=6 actualLegacyFallbackCount=0 actualBlockedUnknownFallbackCount=1 actualSpecialCaseFallbackCount=2 actualFallbackTotal=3 phase3TypedDispatchBlockedTargets=$phase3BlockedTargets"
         } else {
             Add-Check "phase3TypedDispatchReadiness" "FAIL" "missing or unexpected Phase 3A readiness summary in hosted appmodel output"
         }
@@ -808,6 +808,15 @@ try {
         $phase3AppModelSpecialCaseObserved -and
         $phase3UnknownNegativeTestContained -and
         ($phase3Readiness.actualFallbackTotal -eq 3)
+    $calculatorRecord = $phase3Readiness.records | Where-Object { $_.target -eq "Calculator" } | Select-Object -First 1
+    $calculatorTypedDispatchReady =
+        $null -ne $calculatorRecord -and
+        $calculatorRecord.readiness -eq "ready" -and
+        $calculatorRecord.dispatchUsage -eq "typed-dispatch" -and
+        $calculatorRecord.resolvedType -eq "BuiltInApp" -and
+        $calculatorRecord.appId -eq "gxos.builtin.calculator" -and
+        $calculatorRecord.actualDispatch -eq "Calculator"
+    Add-Check "appmodel.v1_1.additionalTypedTarget" $(if ($calculatorTypedDispatchReady) { "PASS" } else { "FAIL" }) "appmodel.v1_1.additionalTypedTarget=Calculator CalculatorTypedDispatchReady=$($calculatorTypedDispatchReady.ToString().ToLowerInvariant()) CalculatorBehaviorPreserved=$($calculatorTypedDispatchReady.ToString().ToLowerInvariant()) target=Calculator classification=BuiltInApp dispatchDecision=typed-dispatch appId=gxos.builtin.calculator actualDispatch=Calculator expected=true safe=true reason=normal-built-in-app"
 
     $reportLines = @(
         "[AppModelPhase2Status]",
@@ -905,6 +914,10 @@ try {
         "appmodel.v1.blockedUnknownFallbackCount=$($phase3Readiness.actualBlockedUnknownFallbackCount)",
         "appmodel.v1.specialCaseFallbackCount=$($phase3Readiness.actualSpecialCaseFallbackCount)",
         "appmodel.v1.totalFallbackCount=$($phase3Readiness.actualFallbackTotal)",
+        "appmodel.v1_1.additionalTypedTarget=Calculator",
+        "appmodel.v1_1.calculatorTypedDispatchReady=$($calculatorTypedDispatchReady.ToString().ToLowerInvariant())",
+        "appmodel.v1_1.calculatorBehaviorPreserved=$($calculatorTypedDispatchReady.ToString().ToLowerInvariant())",
+        "appmodel.v1_1.calculatorStatus=target=Calculator classification=BuiltInApp dispatchDecision=typed-dispatch appId=gxos.builtin.calculator actualDispatch=Calculator expected=true safe=true reason=normal-built-in-app",
         "appmodel.v1.coveredLaunchSurfaces=$appmodelV1CoveredLaunchSurfaces",
         "appmodel.v1.typedReadyTargets=$appmodelV1TypedReadyTargets",
         "appmodel.v1.legacyFallbackTargets=$appmodelV1LegacyFallbackTargets",

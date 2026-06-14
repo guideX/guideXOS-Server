@@ -1345,6 +1345,7 @@ namespace gxos {
 
         static const char* const kLaunchTargetComparisonLabels[] = {
             "Notepad",
+            "Calculator",
             "gxos.builtin.notepad",
             "FileExplorer",
             "Files",
@@ -3068,9 +3069,9 @@ namespace gxos {
             }
             const bool forcedOffSupported = true;
             const bool forcedOffSafe =
-                gateMatrix.total == 8 &&
-                gateMatrix.typedDispatch == (runtimeGateEnabled ? 5 : 0) &&
-                gateMatrix.legacyOrCompatibilityDispatch == (runtimeGateEnabled ? 0 : 5) &&
+                gateMatrix.total == 9 &&
+                gateMatrix.typedDispatch == (runtimeGateEnabled ? 6 : 0) &&
+                gateMatrix.legacyOrCompatibilityDispatch == (runtimeGateEnabled ? 0 : 6) &&
                 gateMatrix.blockedUnknownFallback == 1 &&
                 gateMatrix.specialCaseFallback == 2;
             const bool gateRestored = apps::TypedDispatchRuntimeEnabled() == gateRestoreEnabled;
