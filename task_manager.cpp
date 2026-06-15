@@ -608,6 +608,7 @@ namespace gxos { namespace apps {
         oss << "processColumns=Name,CPU%,Memory,Disk%,Network%\n";
         oss << "performanceCategories=CPU,Memory,Disk,Network\n";
         oss << "memoryDetailsSections=Memory Allocator Details;Free() Call Statistics;Heap Allocator\n";
+        oss << "taskManagerPolishCheckpoint=true\n";
         oss << "tombstoneDetailsAvailable=" << (snapshot.tombstoneDetailsAvailable ? "true" : "false") << "\n";
         oss << "tombstoneDiagnosticHistoryAvailable=" << (snapshot.tombstoneDiagnosticHistoryAvailable ? "true" : "false") << "\n";
         oss << "appTombstonePolicyAvailable=" << (snapshot.appTombstonePolicyAvailable ? "true" : "false") << "\n";
@@ -618,6 +619,7 @@ namespace gxos { namespace apps {
         oss << "tombstoneRowsWithAppId=" << snapshot.tombstoneRowsWithAppId << "\n";
         oss << "tombstoneRowsWithPolicy=" << snapshot.tombstoneRowsWithPolicy << "\n";
         oss << "tombstoneColumns=Name,PID,App ID,Reason,Exit,Runtime,Restore,End\n";
+        oss << "tombstoneDetailsPane=true\n";
         oss << "tombstoneReasonValues=NormalExit,Terminated,Crashed,Unknown\n";
         oss << "processes=" << snapshot.performance.processCount << "\n";
         oss << "memoryUsed=" << snapshot.memory.usedBytes << "\n";
@@ -654,6 +656,7 @@ namespace gxos { namespace apps {
         }
         oss << "disk=N/A\n";
         oss << "network=N/A\n";
+        oss << "unavailableGraphLabel=N/A\n";
         oss << "tombstoned=" << snapshot.tombstoned.size() << "\n";
         oss << "tombstoneRestoreSupported=" << (snapshot.tombstoneRestoreSupported ? "true" : "false") << "\n";
         oss << "tombstoneEndSupported=false\n";
@@ -1364,7 +1367,7 @@ namespace gxos { namespace apps {
         const int h = 452;
         const int headerY = y + 34;
         const int rowY = headerY + 24;
-        const int rowH = 24;
+        const int rowH = 22;
         const int visibleRows = 9;
         const int rowCount = static_cast<int>(s_snapshot.tombstoned.size());
 
@@ -1422,41 +1425,66 @@ namespace gxos { namespace apps {
         const TombstoneSnapshot* selected = (rowCount > 0 && s_selectedTombIndex >= 0 && s_selectedTombIndex < rowCount)
             ? &s_snapshot.tombstoned[s_selectedTombIndex]
             : nullptr;
-        const int detailLabelX = x + 22;
-        const int detailValueX = x + 220;
-        const int detailRowH = 15;
-        int detailRowY = detailY + 22;
-        auto detailRow = [&](const std::string& label, const std::string& value) {
-            publishTextAt(s_windowId, detailLabelX, detailRowY, label);
-            publishTextAt(s_windowId, detailValueX, detailRowY, value);
+        const int detailLeftLabelX = x + 22;
+        const int detailLeftValueX = x + 136;
+        const int detailRightLabelX = x + 364;
+        const int detailRightValueX = x + 470;
+        const int detailRowH = 14;
+        int detailRowY = detailY + 18;
+        auto detailPairRow = [&](const std::string& leftLabel,
+                                 const std::string& leftValue,
+                                 const std::string& rightLabel,
+                                 const std::string& rightValue) {
+            publishTextAt(s_windowId, detailLeftLabelX, detailRowY, leftLabel);
+            publishTextAt(s_windowId, detailLeftValueX, detailRowY, leftValue);
+            publishTextAt(s_windowId, detailRightLabelX, detailRowY, rightLabel);
+            publishTextAt(s_windowId, detailRightValueX, detailRowY, rightValue);
             detailRowY += detailRowH;
         };
         if (selected) {
-            detailRow("Name:", trimDisplayName(selected->displayName, 38) + " (PID " + std::to_string(selected->pid) + ")");
-            detailRow("App ID:", selected->appId.empty() ? std::string("N/A") : selected->appId);
-            detailRow("Window Title:", selected->windowTitle.empty() ? std::string("N/A") : selected->windowTitle);
-            detailRow("Reason:", selected->reason.empty() ? std::string("Unknown") : selected->reason);
-            detailRow("Exit Code:", selected->exitCodeAvailable ? std::to_string(selected->exitCode) : std::string("N/A"));
-            detailRow("Runtime:", selected->runtimeMsAvailable ? formatUptime(selected->runtimeMs) : std::string("N/A"));
-            detailRow("Final Memory:", selected->finalMemoryBytesAvailable ? formatMemory(selected->finalMemoryBytes) : std::string("N/A"));
-            detailRow("Final CPU:", selected->finalCpuPctAvailable ? std::to_string(selected->finalCpuPct) + "%" : std::string("N/A"));
-            detailRow("App Tombstone:", formatTombstoneCapabilityText(*selected));
-            detailRow("Policy Source:", selected->appTombstoneCapabilityKnown ? selected->appTombstoneCapabilitySource : std::string("N/A"));
-            detailRow("Restore:", selected->restoreSupported ? "Supported" : "Unsupported");
-            detailRow("Last Message:", selected->lastMessage.empty() ? std::string("N/A") : trimDisplayName(selected->lastMessage, 44));
+            detailPairRow(
+                "Name:",
+                trimDisplayName(selected->displayName, 28) + " (PID " + std::to_string(selected->pid) + ")",
+                "App ID:",
+                trimDisplayName(selected->appId.empty() ? std::string("N/A") : selected->appId, 28)
+            );
+            detailPairRow(
+                "Window Title:",
+                trimDisplayName(selected->windowTitle.empty() ? std::string("N/A") : selected->windowTitle, 28),
+                "Reason:",
+                trimDisplayName(selected->reason.empty() ? std::string("Unknown") : selected->reason, 20)
+            );
+            detailPairRow(
+                "Exit Code:",
+                selected->exitCodeAvailable ? std::to_string(selected->exitCode) : std::string("N/A"),
+                "Runtime:",
+                selected->runtimeMsAvailable ? formatUptime(selected->runtimeMs) : std::string("N/A")
+            );
+            detailPairRow(
+                "Final Memory:",
+                selected->finalMemoryBytesAvailable ? formatMemory(selected->finalMemoryBytes) : std::string("N/A"),
+                "Final CPU:",
+                selected->finalCpuPctAvailable ? std::to_string(selected->finalCpuPct) + "%" : std::string("N/A")
+            );
+            detailPairRow(
+                "App Tombstone:",
+                formatTombstoneCapabilityText(*selected),
+                "Policy Source:",
+                selected->appTombstoneCapabilityKnown ? trimDisplayName(selected->appTombstoneCapabilitySource, 24) : std::string("N/A")
+            );
+            detailPairRow(
+                "Restore:",
+                selected->restoreSupported ? "Supported" : "Unsupported",
+                "Last Message:",
+                selected->lastMessage.empty() ? std::string("N/A") : trimDisplayName(selected->lastMessage, 30)
+            );
         } else {
-            detailRow("Name:", "N/A");
-            detailRow("App ID:", "N/A");
-            detailRow("Window Title:", "N/A");
-            detailRow("Reason:", "N/A");
-            detailRow("Exit Code:", "N/A");
-            detailRow("Runtime:", "N/A");
-            detailRow("Final Memory:", "N/A");
-            detailRow("Final CPU:", "N/A");
-            detailRow("App Tombstone:", "N/A");
-            detailRow("Policy Source:", "N/A");
-            detailRow("Restore:", "N/A");
-            detailRow("Last Message:", "N/A");
+            detailPairRow("Name:", "N/A", "App ID:", "N/A");
+            detailPairRow("Window Title:", "N/A", "Reason:", "N/A");
+            detailPairRow("Exit Code:", "N/A", "Runtime:", "N/A");
+            detailPairRow("Final Memory:", "N/A", "Final CPU:", "N/A");
+            detailPairRow("App Tombstone:", "N/A", "Policy Source:", "N/A");
+            detailPairRow("Restore:", "N/A", "Last Message:", "N/A");
         }
 
         const int footerY = y + h - 20;
