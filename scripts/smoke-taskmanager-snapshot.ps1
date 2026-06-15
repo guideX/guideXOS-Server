@@ -61,7 +61,14 @@ $checks = @(
     @{ Name = "process cpu source field present"; Match = ($output -match "(?m)^\s*processCpuSource=(N/A|[^\s\r\n]+)\s*$") },
     @{ Name = "process cpu sample window field present"; Match = ($output -match "(?m)^\s*processCpuSampleWindowMs=(N/A|\d+)\s*$") },
     @{ Name = "process cpu rows field present"; Match = ($output -match "(?m)^\s*processCpuRowsWithCpu=\d+\s*$") },
-    @{ Name = "disk unavailable"; Match = ($output -match "disk=N/A") },
+    @{ Name = "disk available field present"; Match = ($output -match "(?m)^\s*diskAvailable=(true|false)\s*$") },
+    @{ Name = "disk field present"; Match = ($output -match "(?m)^\s*disk=(N/A|\d+%)\s*$") },
+    @{ Name = "disk source field present"; Match = ($output -match "(?m)^\s*diskSource=(N/A|[^\s\r\n]+)\s*$") },
+    @{ Name = "disk sample window field present"; Match = ($output -match "(?m)^\s*diskSampleWindowMs=(N/A|\d+)\s*$") },
+    @{ Name = "disk read rate field present"; Match = ($output -match "(?m)^\s*diskReadKBps=(N/A|\d+)\s*$") },
+    @{ Name = "disk write rate field present"; Match = ($output -match "(?m)^\s*diskWriteKBps=(N/A|\d+)\s*$") },
+    @{ Name = "disk active pct availability field present"; Match = ($output -match "(?m)^\s*diskActivePctAvailable=(true|false)\s*$") },
+    @{ Name = "process disk availability field present"; Match = ($output -match "(?m)^\s*processDiskAvailable=(true|false)\s*$") },
     @{ Name = "network unavailable"; Match = ($output -match "network=N/A") },
     @{ Name = "unavailable graph label present"; Match = ($output -match "(?m)^\s*unavailableGraphLabel=N/A\s*$") },
     @{ Name = "synthetic counters disabled"; Match = ($output -match "syntheticCounters=false") },
@@ -126,6 +133,17 @@ $processCpuSourceMatch = [regex]::Match($output, "(?m)^\s*processCpuSource=(?<so
 $processCpuSampleWindowMatch = [regex]::Match($output, "(?m)^\s*processCpuSampleWindowMs=(?<window>N/A|\d+)\s*$")
 $processCpuRowsMatch = [regex]::Match($output, "(?m)^\s*processCpuRowsWithCpu=(?<rows>\d+)\s*$")
 $processCpuPctMatches = [regex]::Matches($output, "processRow .*?cpuPct=(?<value>\d+)%")
+$diskAvailable = $output -match "(?m)^\s*diskAvailable=true\s*$"
+$diskUnavailable = $output -match "(?m)^\s*diskAvailable=false\s*$"
+$diskValueMatch = [regex]::Match($output, "(?m)^\s*disk=(?<value>N/A|\d+%)\s*$")
+$diskSourceMatch = [regex]::Match($output, "(?m)^\s*diskSource=(?<source>[^\s\r\n]+)\s*$")
+$diskSampleWindowMatch = [regex]::Match($output, "(?m)^\s*diskSampleWindowMs=(?<window>N/A|\d+)\s*$")
+$diskReadRateMatch = [regex]::Match($output, "(?m)^\s*diskReadKBps=(?<rate>N/A|\d+)\s*$")
+$diskWriteRateMatch = [regex]::Match($output, "(?m)^\s*diskWriteKBps=(?<rate>N/A|\d+)\s*$")
+$diskActivePctAvailable = $output -match "(?m)^\s*diskActivePctAvailable=true\s*$"
+$diskActivePctUnavailable = $output -match "(?m)^\s*diskActivePctAvailable=false\s*$"
+$processDiskAvailable = $output -match "(?m)^\s*processDiskAvailable=true\s*$"
+$processDiskUnavailable = $output -match "(?m)^\s*processDiskAvailable=false\s*$"
 
 if ($cpuAvailable) {
     if (-not $cpuValueMatch.Success) {
@@ -262,6 +280,87 @@ if ($processCpuAvailable) {
     }
 } else {
     throw "Process CPU availability flag was missing."
+}
+
+if ($diskAvailable) {
+    if (-not $diskSourceMatch.Success) {
+        throw "Disk availability was reported but diskSource was missing."
+    }
+
+    $diskSource = $diskSourceMatch.Groups["source"].Value
+    if ($diskSource -match '(?i)(synthetic|modulo|wave|placeholder|fake|simulated)') {
+        throw "Disk source looks synthetic: $diskSource"
+    }
+
+    if (-not $diskSampleWindowMatch.Success -or $diskSampleWindowMatch.Groups["window"].Value -eq "N/A") {
+        throw "Disk availability was reported but diskSampleWindowMs was missing."
+    }
+
+    $diskSampleWindow = [int]$diskSampleWindowMatch.Groups["window"].Value
+    if ($diskSampleWindow -le 0) {
+        throw "Disk sample window must be positive when available: $diskSampleWindow"
+    }
+
+    if (-not $diskReadRateMatch.Success -or $diskReadRateMatch.Groups["rate"].Value -eq "N/A") {
+        throw "Disk availability was reported but diskReadKBps was missing."
+    }
+    if (-not $diskWriteRateMatch.Success -or $diskWriteRateMatch.Groups["rate"].Value -eq "N/A") {
+        throw "Disk availability was reported but diskWriteKBps was missing."
+    }
+
+    $diskReadRate = [int64]$diskReadRateMatch.Groups["rate"].Value
+    $diskWriteRate = [int64]$diskWriteRateMatch.Groups["rate"].Value
+    if ($diskReadRate -lt 0 -or $diskWriteRate -lt 0) {
+        throw "Disk KBps values must be non-negative."
+    }
+
+    if ($diskActivePctAvailable) {
+        if (-not $diskValueMatch.Success -or $diskValueMatch.Groups["value"].Value -eq "N/A") {
+            throw "Disk active utilization was reported but disk=<value>% was missing."
+        }
+
+        $diskValue = [int]($diskValueMatch.Groups["value"].Value.TrimEnd('%'))
+        if ($diskValue -lt 0 -or $diskValue -gt 100) {
+            throw "Disk utilization out of range: $diskValue"
+        }
+    } elseif ($diskActivePctUnavailable) {
+        if (-not $diskValueMatch.Success -or $diskValueMatch.Groups["value"].Value -ne "N/A") {
+            throw "Disk active utilization was unavailable but disk=N/A was not reported."
+        }
+    } else {
+        throw "Disk active availability flag was missing."
+    }
+} elseif ($diskUnavailable) {
+    if (-not $diskValueMatch.Success -or $diskValueMatch.Groups["value"].Value -ne "N/A") {
+        throw "Disk was unavailable but disk=N/A was not reported."
+    }
+    if (-not $diskSourceMatch.Success) {
+        throw "Disk was unavailable but diskSource was missing."
+    }
+
+    $diskSource = $diskSourceMatch.Groups["source"].Value
+    if ($diskSource -ne "N/A") {
+        throw "Disk was unavailable but diskSource was not N/A: $diskSource"
+    }
+
+    if ($diskSampleWindowMatch.Success -and $diskSampleWindowMatch.Groups["window"].Value -ne "N/A") {
+        throw "Disk was unavailable but diskSampleWindowMs was not N/A."
+    }
+    if ($diskReadRateMatch.Success -and $diskReadRateMatch.Groups["rate"].Value -ne "N/A") {
+        throw "Disk was unavailable but diskReadKBps was not N/A."
+    }
+    if ($diskWriteRateMatch.Success -and $diskWriteRateMatch.Groups["rate"].Value -ne "N/A") {
+        throw "Disk was unavailable but diskWriteKBps was not N/A."
+    }
+    if ($diskActivePctAvailable) {
+        throw "Disk was unavailable but diskActivePctAvailable=true was reported."
+    }
+} else {
+    throw "Disk availability flag was missing."
+}
+
+if ($processDiskAvailable) {
+    throw "processDiskAvailable must remain false until real per-process disk telemetry exists."
 }
 
 Write-Host "Task Manager snapshot smoke PASS"

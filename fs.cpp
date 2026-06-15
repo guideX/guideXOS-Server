@@ -5,6 +5,8 @@
 #include <cstdint>
 #include <cstring>
 #include <limits>
+#include <atomic>
+#include <chrono>
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -18,6 +20,18 @@
 #endif
 
 namespace gxos {
+    namespace {
+        std::atomic<uint64_t> s_readBytesTotal{0};
+        std::atomic<uint64_t> s_writeBytesTotal{0};
+        const uint64_t s_telemetryStartMicros = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count());
+
+        static uint64_t steadyClockMicros() {
+            return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(
+                std::chrono::steady_clock::now().time_since_epoch()).count());
+        }
+    }
+
     std::vector<FileInfo> FS::list(const std::string& path){
         std::vector<FileInfo> v;
 #ifdef _WIN32
@@ -41,8 +55,8 @@ namespace gxos {
         return v;
     }
     bool FS::readAll(const std::string& path, std::vector<uint8_t>& out){ return readAll(path, out, static_cast<uint64_t>(std::numeric_limits<size_t>::max())).success; }
-    FSResult FS::readAll(const std::string& path, std::vector<uint8_t>& out, uint64_t maxBytes){ out.clear(); std::ifstream f(path.c_str(), std::ios::binary); if(!f) return {false, "open failed"}; f.seekg(0, std::ios::end); std::streamoff n = f.tellg(); if(n<0) return {false, "size query failed"}; uint64_t size = static_cast<uint64_t>(n); if(size > maxBytes) return {false, "file exceeds maximum size"}; if(size > static_cast<uint64_t>(std::numeric_limits<size_t>::max())) return {false, "file too large for address space"}; f.seekg(0); if(!f) return {false, "seek failed"}; out.resize(static_cast<size_t>(size)); if(size != 0){ f.read(reinterpret_cast<char*>(out.data()), static_cast<std::streamsize>(size)); if(!f || static_cast<uint64_t>(f.gcount()) != size){ out.clear(); return {false, "short read"}; } } return {true, std::string()}; }
-    bool FS::writeAll(const std::string& path, const std::vector<uint8_t>& data){ std::ofstream f(path.c_str(), std::ios::binary); if(!f) return false; if(!data.empty()) f.write((const char*)data.data(), data.size()); return f.good(); }
+    FSResult FS::readAll(const std::string& path, std::vector<uint8_t>& out, uint64_t maxBytes){ out.clear(); std::ifstream f(path.c_str(), std::ios::binary); if(!f) return {false, "open failed"}; f.seekg(0, std::ios::end); std::streamoff n = f.tellg(); if(n<0) return {false, "size query failed"}; uint64_t size = static_cast<uint64_t>(n); if(size > maxBytes) return {false, "file exceeds maximum size"}; if(size > static_cast<uint64_t>(std::numeric_limits<size_t>::max())) return {false, "file too large for address space"}; f.seekg(0); if(!f) return {false, "seek failed"}; out.resize(static_cast<size_t>(size)); if(size != 0){ f.read(reinterpret_cast<char*>(out.data()), static_cast<std::streamsize>(size)); if(!f || static_cast<uint64_t>(f.gcount()) != size){ out.clear(); return {false, "short read"}; } } s_readBytesTotal.fetch_add(size, std::memory_order_relaxed); return {true, std::string()}; }
+    bool FS::writeAll(const std::string& path, const std::vector<uint8_t>& data){ std::ofstream f(path.c_str(), std::ios::binary); if(!f) return false; if(!data.empty()) f.write((const char*)data.data(), data.size()); if(!f.good()) return false; s_writeBytesTotal.fetch_add(static_cast<uint64_t>(data.size()), std::memory_order_relaxed); return true; }
     bool FS::exists(const std::string& path){
 #ifdef _WIN32
         return GetFileAttributesA(path.c_str()) != INVALID_FILE_ATTRIBUTES;
@@ -87,5 +101,29 @@ namespace gxos {
 #else
         return std::remove(path.c_str()) == 0 || !exists(path);
 #endif
+    }
+
+    DiskTelemetrySnapshot FS::telemetrySnapshot() {
+        DiskTelemetrySnapshot snapshot;
+        const uint64_t readBytes = s_readBytesTotal.load(std::memory_order_relaxed);
+        const uint64_t writeBytes = s_writeBytesTotal.load(std::memory_order_relaxed);
+        const uint64_t totalBytes = readBytes + writeBytes;
+        if (totalBytes == 0) {
+            return snapshot;
+        }
+
+        const uint64_t nowMicros = steadyClockMicros();
+        const uint64_t elapsedMicros = nowMicros > s_telemetryStartMicros ? nowMicros - s_telemetryStartMicros : 0;
+        const uint64_t sampleWindowMs = elapsedMicros == 0 ? 1ULL : ((elapsedMicros + 999ULL) / 1000ULL);
+        snapshot.available = true;
+        snapshot.source = "hostedFileIoCounters";
+        snapshot.sampleWindowMs = sampleWindowMs;
+        snapshot.readBytesTotal = readBytes;
+        snapshot.writeBytesTotal = writeBytes;
+        snapshot.readKBps = (readBytes / 1024ULL) * 1000ULL / sampleWindowMs;
+        snapshot.writeKBps = (writeBytes / 1024ULL) * 1000ULL / sampleWindowMs;
+        snapshot.activePctAvailable = false;
+        snapshot.activePct = 0;
+        return snapshot;
     }
 }

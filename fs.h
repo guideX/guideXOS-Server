@@ -2,6 +2,7 @@
 #include <string>
 #include <vector>
 #include <cstdint>
+#include "disk_telemetry.h"
 namespace gxos {
     struct FileInfo { std::string name; uint64_t size; bool isDir; };
     struct FSResult { bool success; std::string message; };
@@ -15,5 +16,6 @@ namespace gxos {
         static bool createDirectories(const std::string& path);
         static bool renameFile(const std::string& from, const std::string& to, bool replaceExisting);
         static bool removeFile(const std::string& path);
+        static DiskTelemetrySnapshot telemetrySnapshot();
     };
 }

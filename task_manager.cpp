@@ -7,6 +7,7 @@
 #include "desktop_service.h"
 #include "built_in_app_metadata.h"
 #include "native_app_process_table.h"
+#include "fs.h"
 #include <sstream>
 #include <algorithm>
 #include <iomanip>
@@ -42,6 +43,9 @@ namespace gxos { namespace apps {
     int TaskManager::s_cpuHistoryHead = 0;
     int TaskManager::s_memPct = 0;
     int TaskManager::s_diskPct = 0;
+    uint64_t TaskManager::s_diskHistory[TaskManager::kDiskHistoryMax] = {};
+    int TaskManager::s_diskHistoryCount = 0;
+    int TaskManager::s_diskHistoryHead = 0;
     int TaskManager::s_netPct = 0;
     int TaskManager::s_perfCategoryIndex = 0;
     uint64_t TaskManager::s_memoryHistory[TaskManager::kMemoryHistoryMax] = {};
@@ -85,6 +89,18 @@ namespace gxos { namespace apps {
         static std::string processCpuPctOrNa(bool available, int pct) {
             if (!available) return "N/A";
             return std::to_string(pct) + "%";
+        }
+
+        static std::string diskRateSummary(const gxos::apps::PerformanceSnapshot& perf) {
+            if (!perf.diskAvailable) return "N/A";
+            if (perf.diskActivePctAvailable) return std::to_string(perf.diskPct) + "%";
+            return std::to_string(perf.diskReadKBps) + "/" + std::to_string(perf.diskWriteKBps) + " KB/s";
+        }
+
+        static std::string diskRateDetail(const gxos::apps::PerformanceSnapshot& perf, bool readRate) {
+            if (!perf.diskAvailable) return "N/A";
+            const uint64_t kbps = readRate ? perf.diskReadKBps : perf.diskWriteKBps;
+            return std::to_string(kbps) + " KB/s";
         }
 
         static void updateProcessCpuSample(uint64_t pid,
@@ -420,7 +436,17 @@ namespace gxos { namespace apps {
         snapshot.performance.processCpuSource = "N/A";
         snapshot.performance.processCpuSampleWindowMs = 0;
         snapshot.performance.processCpuRowsWithCpu = 0;
-        snapshot.performance.diskAvailable = false;
+        const gxos::DiskTelemetrySnapshot diskTelemetry = gxos::FS::telemetrySnapshot();
+        snapshot.performance.diskAvailable = diskTelemetry.available;
+        snapshot.performance.diskSource = diskTelemetry.available ? diskTelemetry.source : "N/A";
+        snapshot.performance.diskSampleWindowMs = diskTelemetry.available ? diskTelemetry.sampleWindowMs : 0;
+        snapshot.performance.diskReadBytesTotal = diskTelemetry.readBytesTotal;
+        snapshot.performance.diskWriteBytesTotal = diskTelemetry.writeBytesTotal;
+        snapshot.performance.diskReadKBps = diskTelemetry.available ? diskTelemetry.readKBps : 0;
+        snapshot.performance.diskWriteKBps = diskTelemetry.available ? diskTelemetry.writeKBps : 0;
+        snapshot.performance.diskActivePctAvailable = diskTelemetry.activePctAvailable;
+        snapshot.performance.diskPct = diskTelemetry.activePct;
+        snapshot.performance.processDiskAvailable = false;
         snapshot.performance.networkAvailable = false;
         snapshot.performance.syntheticCounters = false;
         const uint64_t nowMicros = steadyClockMicros();
@@ -654,7 +680,23 @@ namespace gxos { namespace apps {
             oss << "cpuBusyTimeMs=" << snapshot.performance.cpuBusyTimeMs << "\n";
             oss << "cpuIdleTimeMs=" << snapshot.performance.cpuIdleTimeMs << "\n";
         }
-        oss << "disk=N/A\n";
+        oss << "diskAvailable=" << (snapshot.performance.diskAvailable ? "true" : "false") << "\n";
+        if (snapshot.performance.diskAvailable) {
+            oss << "disk=" << (snapshot.performance.diskActivePctAvailable ? std::to_string(snapshot.performance.diskPct) + "%" : std::string("N/A")) << "\n";
+            oss << "diskSource=" << snapshot.performance.diskSource << "\n";
+            oss << "diskSampleWindowMs=" << snapshot.performance.diskSampleWindowMs << "\n";
+            oss << "diskReadKBps=" << snapshot.performance.diskReadKBps << "\n";
+            oss << "diskWriteKBps=" << snapshot.performance.diskWriteKBps << "\n";
+            oss << "diskActivePctAvailable=" << (snapshot.performance.diskActivePctAvailable ? "true" : "false") << "\n";
+        } else {
+            oss << "disk=N/A\n";
+            oss << "diskSource=N/A\n";
+            oss << "diskSampleWindowMs=N/A\n";
+            oss << "diskReadKBps=N/A\n";
+            oss << "diskWriteKBps=N/A\n";
+            oss << "diskActivePctAvailable=false\n";
+        }
+        oss << "processDiskAvailable=" << (snapshot.performance.processDiskAvailable ? "true" : "false") << "\n";
         oss << "network=N/A\n";
         oss << "unavailableGraphLabel=N/A\n";
         oss << "tombstoned=" << snapshot.tombstoned.size() << "\n";
@@ -714,6 +756,11 @@ namespace gxos { namespace apps {
             }
             s_memPct = 0;
             s_diskPct = 0;
+            s_diskHistoryCount = 0;
+            s_diskHistoryHead = 0;
+            for (int i = 0; i < kDiskHistoryMax; ++i) {
+                s_diskHistory[i] = 0;
+            }
             s_netPct = 0;
             s_perfCategoryIndex = 0;
             s_memoryHistoryCount = 0;
@@ -968,6 +1015,10 @@ namespace gxos { namespace apps {
         if (snapshot.memory.heapUtilPctAvailable) {
             appendHistorySample(s_memoryHistory, kMemoryHistoryMax, s_memoryHistoryCount, s_memoryHistoryHead, snapshot.memory.heapUtilPct);
         }
+
+        if (snapshot.performance.diskAvailable && snapshot.performance.diskActivePctAvailable) {
+            appendHistorySample(s_diskHistory, kDiskHistoryMax, s_diskHistoryCount, s_diskHistoryHead, snapshot.performance.diskPct);
+        }
     }
     
     void TaskManager::endSelectedProcess() {
@@ -1211,7 +1262,7 @@ namespace gxos { namespace apps {
         s_tasksExecuted = perf.schedulerTasksExecuted;
         s_cpuPct = perf.cpuAvailable ? perf.cpuPct : 0;
         s_memPct = perf.memoryAvailable ? perf.memoryPct : 0;
-        s_diskPct = perf.diskAvailable ? perf.diskPct : 0;
+        s_diskPct = perf.diskActivePctAvailable ? perf.diskPct : 0;
         s_netPct = perf.networkAvailable ? perf.networkPct : 0;
 
         const int x = 12;
@@ -1241,10 +1292,15 @@ namespace gxos { namespace apps {
 
         const char* navLabels[] = { "CPU", "Memory", "Disk", "Network" };
         const bool navAvailable[] = { perf.cpuAvailable, perf.memoryAvailable, perf.diskAvailable, perf.networkAvailable };
-        const int navValues[] = { perf.cpuPct, perf.memoryPct, perf.diskPct, perf.networkPct };
-        const uint64_t* navHistories[] = { s_cpuHistory, s_memoryHistory, nullptr, nullptr };
-        const int navHistoryCounts[] = { s_cpuHistoryCount, s_memoryHistoryCount, 0, 0 };
-        const int navHistoryHeads[] = { s_cpuHistoryHead, s_memoryHistoryHead, 0, 0 };
+        const std::string navValueTexts[] = {
+            pctOrNa(perf.cpuAvailable, perf.cpuPct),
+            pctOrNa(perf.memoryAvailable, perf.memoryPct),
+            diskRateSummary(perf),
+            pctOrNa(perf.networkAvailable, perf.networkPct)
+        };
+        const uint64_t* navHistories[] = { s_cpuHistory, s_memoryHistory, s_diskHistory, nullptr };
+        const int navHistoryCounts[] = { s_cpuHistoryCount, s_memoryHistoryCount, s_diskHistoryCount, 0 };
+        const int navHistoryHeads[] = { s_cpuHistoryHead, s_memoryHistoryHead, s_diskHistoryHead, 0 };
         const uint8_t navColors[4][3] = {
             { 93, 173, 226 },
             { 88, 214, 141 },
@@ -1265,7 +1321,7 @@ namespace gxos { namespace apps {
                 navW - 20,
                 navItemH,
                 navLabels[i],
-                navAvailable[i] ? std::to_string(navValues[i]) + "%" : std::string("N/A"),
+                navValueTexts[i],
                 showHistory,
                 navHistories[i],
                 navHistoryCounts[i],
@@ -1277,7 +1333,8 @@ namespace gxos { namespace apps {
         }
 
         const bool detailHasHistory = (s_perfCategoryIndex == 0 && perf.cpuAvailable && s_cpuHistoryCount > 0) ||
-                                      (s_perfCategoryIndex == 1 && mem.heapUtilPctAvailable && s_memoryHistoryCount > 0);
+                                      (s_perfCategoryIndex == 1 && mem.heapUtilPctAvailable && s_memoryHistoryCount > 0) ||
+                                      (s_perfCategoryIndex == 2 && perf.diskAvailable && perf.diskActivePctAvailable && s_diskHistoryCount > 0);
         const char* detailLabels[] = { "CPU", "Memory", "Disk", "Network" };
         const uint8_t detailColors[4][3] = {
             { 93, 173, 226 },
@@ -1285,23 +1342,23 @@ namespace gxos { namespace apps {
             { 230, 126, 34 },
             { 155, 89, 182 }
         };
-        const bool detailHasData[] = {
-            perf.cpuAvailable,
-            perf.memoryAvailable && mem.heapUtilPctAvailable,
-            perf.diskAvailable,
-            perf.networkAvailable
-        };
         const uint64_t* detailHistory = s_perfCategoryIndex == 0 ? s_cpuHistory
                                       : s_perfCategoryIndex == 1 ? s_memoryHistory
+                                      : s_perfCategoryIndex == 2 ? s_diskHistory
                                       : nullptr;
         const int detailHistoryCount = s_perfCategoryIndex == 0 ? s_cpuHistoryCount
                                      : s_perfCategoryIndex == 1 ? s_memoryHistoryCount
+                                     : s_perfCategoryIndex == 2 ? s_diskHistoryCount
                                      : 0;
         const int detailHistoryHead = s_perfCategoryIndex == 0 ? s_cpuHistoryHead
                                     : s_perfCategoryIndex == 1 ? s_memoryHistoryHead
+                                    : s_perfCategoryIndex == 2 ? s_diskHistoryHead
                                     : 0;
-        const std::string detailValue = s_perfCategoryIndex == 1 ? pctOrNa(mem.heapUtilPctAvailable, mem.heapUtilPct)
-                                                                 : (detailHasData[s_perfCategoryIndex] ? std::to_string(navValues[s_perfCategoryIndex]) + "%" : std::string("N/A"));
+        const std::string detailValue =
+            s_perfCategoryIndex == 0 ? pctOrNa(perf.cpuAvailable, perf.cpuPct)
+            : s_perfCategoryIndex == 1 ? pctOrNa(mem.heapUtilPctAvailable, mem.heapUtilPct)
+            : s_perfCategoryIndex == 2 ? diskRateSummary(perf)
+            : pctOrNa(perf.networkAvailable, perf.networkPct);
         drawGraphBox(
             s_windowId,
             detailX + 10,
@@ -1344,11 +1401,13 @@ namespace gxos { namespace apps {
             detailRow(5, "Top Tag:", mem.topTagAvailable ? mem.topTagName + " (" + formatMemory(mem.topTagBytes) + ")" : std::string("N/A"));
             detailRow(6, "Top Owner:", mem.topOwnerAvailable ? std::string("PID ") + std::to_string(mem.topOwnerPid) + " (" + formatMemory(mem.topOwnerBytes) + ")" : std::string("N/A"));
         } else if (s_perfCategoryIndex == 2) {
-            detailRow(0, "Active time:", "N/A");
-            detailRow(1, "Avg response time:", "N/A");
-            detailRow(2, "Read speed:", "N/A");
-            detailRow(3, "Write speed:", "N/A");
-            detailRow(4, "Real counter:", "unavailable");
+            detailRow(0, "Utilization:", perf.diskActivePctAvailable ? std::to_string(perf.diskPct) + "%" : std::string("N/A"));
+            detailRow(1, "Read speed:", diskRateDetail(perf, true));
+            detailRow(2, "Write speed:", diskRateDetail(perf, false));
+            detailRow(3, "Sample window:", perf.diskAvailable ? std::to_string(perf.diskSampleWindowMs) + " ms" : std::string("N/A"));
+            detailRow(4, "Source:", perf.diskAvailable ? perf.diskSource : std::string("N/A"));
+            detailRow(5, "Read bytes:", perf.diskAvailable ? std::to_string(perf.diskReadBytesTotal) : std::string("N/A"));
+            detailRow(6, "Write bytes:", perf.diskAvailable ? std::to_string(perf.diskWriteBytesTotal) : std::string("N/A"));
         } else if (s_perfCategoryIndex == 3) {
             detailRow(0, "Send:", "N/A");
             detailRow(1, "Receive:", "N/A");

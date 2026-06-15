@@ -2,8 +2,9 @@
 #include <string>
 #include <vector>
 #include <cstdint>
-#include <fstream>
+#include <limits>
 #include <sstream>
+#include "fs.h"
 
 namespace gxos { namespace gui {
     struct DesktopWindowRec { uint64_t id; std::string title; int x; int y; int w; int h; bool minimized{false}; bool maximized{false}; int z{0}; bool focused{false}; int snap{0}; };
@@ -35,8 +36,11 @@ namespace gxos { namespace gui {
         // Load JSON from path. Extremely small permissive parser; expects correct schema.
         static inline bool Load(const std::string& path, DesktopConfigData& out, std::string& err){
             err.clear();
-            auto readAll=[&](const std::string& p){ std::ifstream f(p, std::ios::binary); if(!f) return std::string(); std::ostringstream ss; ss<<f.rdbuf(); return ss.str(); };
-            auto txt = readAll(path); if(txt.empty()){ err = "open fail"; return false; }
+            std::vector<uint8_t> bytes;
+            FSResult readResult = FS::readAll(path, bytes, std::numeric_limits<uint64_t>::max());
+            if (!readResult.success) { err = readResult.message.empty() ? "open fail" : readResult.message; return false; }
+            std::string txt(bytes.begin(), bytes.end());
+            if(txt.empty()){ err = "open fail"; return false; }
             auto trim=[](const std::string& s){ size_t a=0; while(a<s.size() && (s[a]==' '||s[a]=='\n'||s[a]=='\r'||s[a]=='\t')) ++a; size_t b=s.size(); while(b>a && (s[b-1]==' '||s[b-1]=='\n'||s[b-1]=='\r'||s[b-1]=='\t')) --b; return s.substr(a,b-a); };
             auto skipWS=[&](const std::string& s, size_t& i){ while(i<s.size() && (s[i]==' '||s[i]=='\n'||s[i]=='\r'||s[i]=='\t')) ++i; };
             auto parseJSONString=[&](const std::string& src, size_t& i, std::string& outS){ outS.clear(); if(i>=src.size()||src[i]!='"') return false; ++i; while(i<src.size()){ char c=src[i++]; if(c=='\\'){ if(i>=src.size()) break; char e=src[i++]; if(e=='"'||e=='\\'||e=='/') outS.push_back(e); else if(e=='b') outS.push_back('\b'); else if(e=='f') outS.push_back('\f'); else if(e=='n') outS.push_back('\n'); else if(e=='r') outS.push_back('\r'); else if(e=='t') outS.push_back('\t'); else outS.push_back(e); }
@@ -64,8 +68,8 @@ namespace gxos { namespace gui {
             return true;
         }
         static inline bool Save(const std::string& path, const DesktopConfigData& data, std::string& err){
-            std::ofstream f(path, std::ios::binary|std::ios::trunc); if(!f){ err="open fail"; return false; }
             auto jsonEscape=[&](const std::string& s){ std::ostringstream o; o<<'"'; for(char c: s){ switch(c){ case '"': o<<"\\\""; break; case '\\': o<<"\\\\"; break; case '\n': o<<"\\n"; break; case '\r': o<<"\\r"; break; case '\t': o<<"\\t"; break; default: o<<c; break; } } o<<'"'; return o.str(); };
+            std::ostringstream f;
             f << "{\n";
             f << "  \"wallpaper\": " << jsonEscape(data.wallpaperPath) << ",\n";
             f << "  \"desktop.wallpaper.id\": " << jsonEscape(data.wallpaperId) << ",\n";
@@ -99,6 +103,9 @@ namespace gxos { namespace gui {
             f << "}"; if(i+1<data.iconPositions.size()) f << ","; f << "\n"; }
             f << "  ]\n";
             f << "}\n";
+            const std::string serialized = f.str();
+            std::vector<uint8_t> bytes(serialized.begin(), serialized.end());
+            if (!FS::writeAll(path, bytes)) { err = "write fail"; return false; }
             return true;
         }
     };

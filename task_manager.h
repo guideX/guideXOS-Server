@@ -57,6 +57,13 @@ namespace gxos { namespace apps {
         bool memoryAvailable = false;
         int memoryPct = 0;
         bool diskAvailable = false;
+        std::string diskSource = "N/A";
+        uint64_t diskSampleWindowMs = 0;
+        uint64_t diskReadBytesTotal = 0;
+        uint64_t diskWriteBytesTotal = 0;
+        uint64_t diskReadKBps = 0;
+        uint64_t diskWriteKBps = 0;
+        bool diskActivePctAvailable = false;
         int diskPct = 0;
         bool networkAvailable = false;
         int networkPct = 0;
@@ -68,6 +75,7 @@ namespace gxos { namespace apps {
         std::string processCpuSource = "N/A";
         uint64_t processCpuSampleWindowMs = 0;
         uint64_t processCpuRowsWithCpu = 0;
+        bool processDiskAvailable = false;
         bool syntheticCounters = false;
     };
 
@@ -166,6 +174,10 @@ namespace gxos { namespace apps {
         static int s_cpuHistoryHead;
         static int s_memPct;
         static int s_diskPct;
+        static const int kDiskHistoryMax = 48;
+        static uint64_t s_diskHistory[kDiskHistoryMax];
+        static int s_diskHistoryCount;
+        static int s_diskHistoryHead;
         static int s_netPct;
         static int s_perfCategoryIndex; // 0=CPU, 1=Memory, 2=Disk, 3=Network
         static const int kMemoryHistoryMax = 48;
