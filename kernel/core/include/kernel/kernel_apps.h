@@ -256,16 +256,25 @@ public:
     
     static app::KernelApp* create() { return new TaskManagerApp(); }
     
-private:
-    int m_selectedApp;
-    int m_refreshBtnId;
-    int m_endTaskBtnId;
-    uint32_t m_lastUpdate;
-    
-    struct AppEntry {
-        char name[app::MAX_APP_NAME];
-        int windowCount;
-        bool running;
+    private:
+        int m_selectedApp;
+        int m_activeTab;
+        int m_refreshBtnId;
+        int m_endTaskBtnId;
+        uint32_t m_lastUpdate;
+        static const int kHistoryMax = 48;
+        uint8_t m_cpuHistory[kHistoryMax];
+        uint8_t m_heapHistory[kHistoryMax];
+        int m_cpuHistoryCount;
+        int m_cpuHistoryHead;
+        int m_heapHistoryCount;
+        int m_heapHistoryHead;
+        
+        struct AppEntry {
+            char name[app::MAX_APP_NAME];
+            int windowCount;
+            bool running;
+            bool isShell;
     };
     static const int MAX_ENTRIES = 16;
     AppEntry m_entries[MAX_ENTRIES];

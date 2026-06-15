@@ -2890,10 +2890,64 @@ void CalculatorApp::clearEntry() {
 // TaskManagerApp Implementation
 // ============================================================
 
+extern "C" size_t gxos_kernel_heap_total_bytes();
+extern "C" size_t gxos_kernel_heap_used_bytes();
+extern "C" size_t gxos_kernel_heap_free_bytes();
+
+namespace {
+    static int clampInt(int value, int minValue, int maxValue) {
+        if (value < minValue) return minValue;
+        if (value > maxValue) return maxValue;
+        return value;
+    }
+
+    static void drawRoundedPanel(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t fillColor, uint32_t borderColor) {
+        framebuffer::fill_rect(x, y, w, h, fillColor);
+        framebuffer::fill_rect(x, y, w, 1, borderColor);
+        framebuffer::fill_rect(x, y + h - 1, w, 1, borderColor);
+        framebuffer::fill_rect(x, y, 1, h, borderColor);
+        framebuffer::fill_rect(x + w - 1, y, 1, h, borderColor);
+    }
+
+    static void drawTabButton(uint32_t x, uint32_t y, uint32_t w, uint32_t h, const char* label, bool active) {
+        drawRoundedPanel(x, y, w, h, active ? rgb(52, 62, 80) : rgb(34, 36, 44), active ? rgb(92, 130, 196) : rgb(64, 68, 80));
+        uint32_t textX = x + 12;
+        uint32_t textY = y + (h - kGlyphH) / 2;
+        appDrawText(textX, textY, label, active ? rgb(240, 244, 250) : rgb(168, 174, 186));
+    }
+
+    static void drawHistoryGraph(uint32_t x, uint32_t y, uint32_t w, uint32_t h, const uint8_t* history, int count, int head, uint32_t accentColor) {
+        drawRoundedPanel(x, y, w, h, rgb(28, 30, 36), rgb(72, 78, 92));
+        if (!history || count <= 0) {
+            appDrawText(x + 12, y + (h - kGlyphH) / 2, "N/A", rgb(160, 166, 176));
+            return;
+        }
+
+        const int bars = (count < (int)w - 16) ? count : (int)w - 16;
+        const int plotX = (int)x + 8;
+        const int plotY = (int)y + 10;
+        const int plotW = (int)w - 16;
+        const int plotH = (int)h - 16;
+        const int colW = bars > 0 ? (plotW / bars > 0 ? plotW / bars : 1) : 1;
+        for (int i = 0; i < bars; ++i) {
+            const int idx = (head - count + i + 48) % 48;
+            const int pct = clampInt((int)history[idx], 0, 100);
+            const int barH = (plotH * pct) / 100 > 0 ? (plotH * pct) / 100 : 1;
+            const int barX = plotX + i * colW;
+            const int barY = plotY + plotH - barH;
+            framebuffer::fill_rect(barX, barY, (colW - 1) > 0 ? (colW - 1) : 1, barH, accentColor);
+        }
+    }
+}
+
 TaskManagerApp::TaskManagerApp() 
-    : m_selectedApp(-1), m_refreshBtnId(-1), m_endTaskBtnId(-1), 
-      m_lastUpdate(0), m_entryCount(0) {
+    : m_selectedApp(-1), m_activeTab(0), m_refreshBtnId(-1), m_endTaskBtnId(-1), 
+      m_lastUpdate(0), m_cpuHistoryCount(0), m_cpuHistoryHead(0), m_heapHistoryCount(0), m_heapHistoryHead(0), m_entryCount(0) {
     strcopy(m_name, "TaskManager", app::MAX_APP_NAME);
+    for (int i = 0; i < kHistoryMax; ++i) {
+        m_cpuHistory[i] = 0;
+        m_heapHistory[i] = 0;
+    }
 }
 
 TaskManagerApp::~TaskManagerApp() {
@@ -2902,10 +2956,10 @@ TaskManagerApp::~TaskManagerApp() {
 bool TaskManagerApp::init() {
     m_window = new app::KernelWindow();
     strcopy(m_window->title, "Task Manager", app::MAX_TITLE_LEN);
-    m_window->x = 150;
-    m_window->y = 60;
-    m_window->w = 350;
-    m_window->h = 300;
+    m_window->x = 120;
+    m_window->y = 48;
+    m_window->w = 760;
+    m_window->h = 520;
     m_window->flags = app::WF_VISIBLE | app::WF_TITLEBAR | app::WF_CLOSABLE | app::WF_RESIZABLE | app::WF_FOCUSED;
     m_window->owner = this;
     
@@ -2916,8 +2970,8 @@ bool TaskManagerApp::init() {
     }
     
     // Create buttons
-    m_refreshBtnId = addButton(10, 240, 80, 28, "Refresh");
-    m_endTaskBtnId = addButton(100, 240, 80, 28, "End Task");
+    m_refreshBtnId = addButton(10, m_window->h - 42, 92, 28, "Refresh");
+    m_endTaskBtnId = addButton(110, m_window->h - 42, 92, 28, "End Task");
     
     refreshList();
     
@@ -2941,84 +2995,233 @@ void TaskManagerApp::update() {
         shouldInvalidate = true;
     }
 
+    const kernel::desktop::CpuTelemetrySnapshot cpu = kernel::desktop::cpu_telemetry_snapshot();
+    const uint8_t cpuPct = cpu.available ? static_cast<uint8_t>(clampInt(cpu.utilizationPct, 0, 100)) : 0;
+    m_cpuHistory[m_cpuHistoryHead] = cpuPct;
+    m_cpuHistoryHead = (m_cpuHistoryHead + 1) % kHistoryMax;
+    if (m_cpuHistoryCount < kHistoryMax) ++m_cpuHistoryCount;
+
+    const uint64_t heapTotal = gxos_kernel_heap_total_bytes();
+    const uint64_t heapUsed = gxos_kernel_heap_used_bytes();
+    const uint8_t heapPct = heapTotal > 0 ? static_cast<uint8_t>(((heapUsed * 100ULL) / heapTotal) > 100ULL ? 100ULL : ((heapUsed * 100ULL) / heapTotal)) : 0;
+    m_heapHistory[m_heapHistoryHead] = heapPct;
+    m_heapHistoryHead = (m_heapHistoryHead + 1) % kHistoryMax;
+    if (m_heapHistoryCount < kHistoryMax) ++m_heapHistoryCount;
+
     if (shouldInvalidate) {
         invalidate();
     }
 }
 
 void TaskManagerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
-    // Header
-    framebuffer::fill_rect(x + 10, y + 10, w - 20, 24, rgb(40, 50, 65));
-    
-    // Column headers
-    uint32_t headerY = y + 10 + (24 - kGlyphH) / 2;
-    appDrawText(x + 15, headerY, "Application", rgb(220, 225, 240));
-    appDrawText(x + w - 95, headerY, "Status", rgb(220, 225, 240));
-    
-    // List background
-    uint32_t listY = y + 40;
-    uint32_t listH = h - 90;
-    framebuffer::fill_rect(x + 10, listY, w - 20, listH, rgb(30, 30, 38));
-    
-    // Draw entries
-    uint32_t rowH = 24;
-    for (int i = 0; i < m_entryCount && (uint32_t)i * rowH < listH - rowH; i++) {
-        uint32_t rowY = listY + i * rowH;
-        
-        // Selection highlight
-        if (i == m_selectedApp) {
-            framebuffer::fill_rect(x + 11, rowY + 1, w - 22, rowH - 2, rgb(50, 70, 100));
-        } else if (i % 2 == 0) {
-            framebuffer::fill_rect(x + 11, rowY + 1, w - 22, rowH - 2, rgb(35, 35, 43));
-        }
-        
-        // App name
-        uint32_t textY = rowY + (rowH - kGlyphH) / 2;
-        appDrawText(x + 15, textY, m_entries[i].name, rgb(235, 235, 245));
-        
-        // Status indicator
-        uint32_t statusColor = m_entries[i].running ? rgb(80, 180, 100) : rgb(180, 80, 80);
-        framebuffer::fill_rect(x + w - 80, textY, 8, 8, statusColor);
-        
-        // Status text
-        const char* status = m_entries[i].running ? "Running" : "Stopped";
-        appDrawText(x + w - 68, textY, status, rgb(210, 215, 225));
+    drawRoundedPanel(x + 10, y + 10, w - 20, h - 20, rgb(24, 26, 31), rgb(54, 60, 74));
+    appDrawText(x + 18, y + 14, "Task Manager", rgb(240, 244, 250));
+
+    const uint32_t tabY = y + 34;
+    const uint32_t tabH = 28;
+    const uint32_t tabW = (w - 28) / 4;
+    const char* tabLabels[] = { "Processes", "Performance", "Tombstoned", "Memory Details" };
+    for (int i = 0; i < 4; ++i) {
+        drawTabButton(x + 14 + i * tabW, tabY, tabW - 4, tabH, tabLabels[i], i == m_activeTab);
     }
 
-    // CPU telemetry summary from the kernel desktop loop.
+    const uint32_t contentX = x + 14;
+    const uint32_t contentY = y + 68;
+    const uint32_t contentW = w - 28;
+    const uint32_t contentH = h - 118;
+
+    if (m_activeTab == 0) {
+        drawRoundedPanel(contentX, contentY, contentW, contentH, rgb(27, 29, 35), rgb(60, 68, 82));
+        const uint32_t headerH = 24;
+        framebuffer::fill_rect(contentX + 1, contentY + 1, contentW - 2, headerH, rgb(40, 44, 54));
+        appDrawText(contentX + 12, contentY + 7, "Application", rgb(226, 232, 242));
+        appDrawText(contentX + contentW - 112, contentY + 7, "Windows", rgb(226, 232, 242));
+        appDrawText(contentX + contentW - 56, contentY + 7, "Status", rgb(226, 232, 242));
+
+        const uint32_t rowH = 24;
+        const uint32_t listTop = contentY + headerH + 2;
+        for (int i = 0; i < m_entryCount && (uint32_t)i * rowH < contentH - 80; ++i) {
+            const uint32_t rowY = listTop + i * rowH;
+            if (i == m_selectedApp) {
+                framebuffer::fill_rect(contentX + 1, rowY, contentW - 2, rowH - 1, rgb(48, 64, 90));
+            } else if (i % 2 == 0) {
+                framebuffer::fill_rect(contentX + 1, rowY, contentW - 2, rowH - 1, rgb(31, 34, 41));
+            }
+
+            appDrawText(contentX + 12, rowY + 5, m_entries[i].name, rgb(236, 240, 248));
+            char windowsText[8];
+            int_to_text(m_entries[i].windowCount, windowsText, sizeof(windowsText));
+            appDrawText(contentX + contentW - 108, rowY + 5, windowsText, rgb(212, 218, 228));
+            const char* status = m_entries[i].running ? "Running" : "Stopped";
+            uint32_t statusColor = m_entries[i].running ? rgb(84, 185, 110) : rgb(180, 88, 88);
+            framebuffer::fill_rect(contentX + contentW - 58, rowY + 7, 8, 8, statusColor);
+            appDrawText(contentX + contentW - 44, rowY + 5, status, rgb(212, 218, 228));
+        }
+
+        const uint32_t detailY = contentY + contentH - 92;
+        framebuffer::fill_rect(contentX + 1, detailY, contentW - 2, 1, rgb(68, 74, 88));
+        char detailLine[160];
+        if (m_selectedApp >= 0 && m_selectedApp < m_entryCount) {
+            strcopy(detailLine, "Selected: ", sizeof(detailLine));
+            strappend(detailLine, m_entries[m_selectedApp].name, sizeof(detailLine));
+            strappend(detailLine, " | Windows ", sizeof(detailLine));
+            char countText[16];
+            int_to_text(m_entries[m_selectedApp].windowCount, countText, sizeof(countText));
+            strappend(detailLine, countText, sizeof(detailLine));
+            strappend(detailLine, " | ", sizeof(detailLine));
+            strappend(detailLine, m_entries[m_selectedApp].running ? "Running" : "Stopped", sizeof(detailLine));
+        } else {
+            strcopy(detailLine, "Selected: N/A", sizeof(detailLine));
+        }
+        appDrawText(contentX + 12, detailY + 12, detailLine, rgb(200, 206, 218));
+        appDrawText(contentX + 12, detailY + 30, "Bare-metal view: processes are kernel apps and shell windows.", rgb(156, 164, 178));
+        appDrawText(contentX + 12, detailY + 48, "Refresh updates the list; End Task closes the selected app.", rgb(156, 164, 178));
+    } else if (m_activeTab == 1) {
+        drawRoundedPanel(contentX, contentY, contentW, contentH, rgb(27, 29, 35), rgb(60, 68, 82));
+        appDrawText(contentX + 12, contentY + 10, "Performance", rgb(240, 244, 250));
+
+        const kernel::desktop::CpuTelemetrySnapshot cpu = kernel::desktop::cpu_telemetry_snapshot();
+        const int runningApps = app::AppManager::getRunningAppCount();
+        const int windowCount = compositor::KernelCompositor::getWindowCount();
+        const uint64_t heapTotal = gxos_kernel_heap_total_bytes();
+        const uint64_t heapUsed = gxos_kernel_heap_used_bytes();
+        const uint64_t heapFree = gxos_kernel_heap_free_bytes();
+        const int heapPct = heapTotal > 0 ? static_cast<int>((heapUsed * 100ULL) / heapTotal) : 0;
+
+        drawHistoryGraph(contentX + 10, contentY + 34, 160, 84, m_cpuHistory, m_cpuHistoryCount, m_cpuHistoryHead, rgb(96, 163, 228));
+        drawHistoryGraph(contentX + 10, contentY + 126, 160, 84, m_heapHistory, m_heapHistoryCount, m_heapHistoryHead, rgb(96, 196, 126));
+        drawRoundedPanel(contentX + 184, contentY + 34, contentW - 196, contentH - 46, rgb(24, 26, 31), rgb(58, 64, 78));
+
+        appDrawText(contentX + 198, contentY + 44, "CPU", rgb(236, 240, 248));
+        appDrawText(contentX + 198, contentY + 104, "Apps", rgb(236, 240, 248));
+        appDrawText(contentX + 198, contentY + 164, "Windows", rgb(236, 240, 248));
+        appDrawText(contentX + 198, contentY + 224, "Heap", rgb(236, 240, 248));
+
+        char cpuPctText[16];
+        char cpuWinText[24];
+        int_to_text(cpu.available ? cpu.utilizationPct : 0, cpuPctText, sizeof(cpuPctText));
+        uint64_to_text(cpu.sampleWindowMs, cpuWinText, sizeof(cpuWinText));
+        char appCountText[16];
+        char windowCountText[16];
+        char heapUsedText[32];
+        char heapTotalText[32];
+        char heapFreeText[32];
+        char heapPctText[16];
+        int_to_text(runningApps, appCountText, sizeof(appCountText));
+        int_to_text(windowCount, windowCountText, sizeof(windowCountText));
+        uint64_to_text(heapUsed, heapUsedText, sizeof(heapUsedText));
+        uint64_to_text(heapTotal, heapTotalText, sizeof(heapTotalText));
+        uint64_to_text(heapFree, heapFreeText, sizeof(heapFreeText));
+        int_to_text(heapPct, heapPctText, sizeof(heapPctText));
+
+        appDrawText(contentX + 280, contentY + 44, cpu.available ? cpuPctText : "N/A", rgb(96, 163, 228));
+        appDrawText(contentX + 340, contentY + 44, cpu.available ? "percent" : "warmup", rgb(160, 166, 176));
+        appDrawText(contentX + 280, contentY + 62, "Window: ", rgb(160, 166, 176));
+        appDrawText(contentX + 340, contentY + 62, cpuWinText, rgb(212, 218, 228));
+        appDrawText(contentX + 198, contentY + 122, appCountText, rgb(96, 196, 126));
+        appDrawText(contentX + 198, contentY + 182, windowCountText, rgb(230, 173, 74));
+        appDrawText(contentX + 198, contentY + 242, heapUsedText, rgb(232, 236, 244));
+        appDrawText(contentX + 280, contentY + 242, "used of ", rgb(160, 166, 176));
+        appDrawText(contentX + 340, contentY + 242, heapTotalText, rgb(212, 218, 228));
+        appDrawText(contentX + 280, contentY + 260, heapFreeText, rgb(160, 166, 176));
+        appDrawText(contentX + 340, contentY + 260, "free", rgb(160, 166, 176));
+        appDrawText(contentX + 280, contentY + 278, heapPctText, rgb(96, 196, 126));
+        appDrawText(contentX + 340, contentY + 278, "% heap used", rgb(160, 166, 176));
+
+        appDrawText(contentX + 198, contentY + contentH - 44, cpu.source ? cpu.source : "N/A", rgb(160, 166, 176));
+        appDrawText(contentX + 198, contentY + contentH - 26, "Kernel heap is a 1 MB bump allocator.", rgb(160, 166, 176));
+    } else if (m_activeTab == 2) {
+        drawRoundedPanel(contentX, contentY, contentW, contentH, rgb(27, 29, 35), rgb(60, 68, 82));
+        appDrawText(contentX + 12, contentY + 10, "Tombstoned", rgb(240, 244, 250));
+        appDrawText(contentX + 12, contentY + 46, "Bare-metal build does not collect app tombstones yet.", rgb(218, 222, 232));
+        appDrawText(contentX + 12, contentY + 66, "Use the hosted/server Task Manager for tombstone policy details.", rgb(160, 166, 176));
+        drawRoundedPanel(contentX + 12, contentY + 100, contentW - 24, 110, rgb(22, 24, 29), rgb(58, 64, 78));
+        appDrawText(contentX + 24, contentY + 118, "Available fields:", rgb(236, 240, 248));
+        appDrawText(contentX + 24, contentY + 138, "Name, PID, reason, exit code, runtime", rgb(160, 166, 176));
+        appDrawText(contentX + 24, contentY + 156, "App ID-backed tombstones are implemented in the hosted build.", rgb(160, 166, 176));
+    } else {
+        drawRoundedPanel(contentX, contentY, contentW, contentH, rgb(27, 29, 35), rgb(60, 68, 82));
+        appDrawText(contentX + 12, contentY + 10, "Memory Details", rgb(240, 244, 250));
+
+        const uint64_t heapTotal = gxos_kernel_heap_total_bytes();
+        const uint64_t heapUsed = gxos_kernel_heap_used_bytes();
+        const uint64_t heapFree = gxos_kernel_heap_free_bytes();
+        const int heapPct = heapTotal > 0 ? static_cast<int>((heapUsed * 100ULL) / heapTotal) : 0;
+
+        drawHistoryGraph(contentX + 12, contentY + 34, 220, 88, m_heapHistory, m_heapHistoryCount, m_heapHistoryHead, rgb(96, 196, 126));
+        drawRoundedPanel(contentX + 248, contentY + 34, contentW - 260, contentH - 46, rgb(24, 26, 31), rgb(58, 64, 78));
+
+        char heapUsedText[32];
+        char heapFreeText[32];
+        char heapTotalText[32];
+        char heapPctText[16];
+        uint64_to_text(heapUsed, heapUsedText, sizeof(heapUsedText));
+        uint64_to_text(heapFree, heapFreeText, sizeof(heapFreeText));
+        uint64_to_text(heapTotal, heapTotalText, sizeof(heapTotalText));
+        int_to_text(heapPct, heapPctText, sizeof(heapPctText));
+
+        appDrawText(contentX + 262, contentY + 46, "Total heap:", rgb(236, 240, 248));
+        appDrawText(contentX + 262, contentY + 66, heapTotalText, rgb(212, 218, 228));
+        appDrawText(contentX + 262, contentY + 96, "Used:", rgb(236, 240, 248));
+        appDrawText(contentX + 262, contentY + 116, heapUsedText, rgb(212, 218, 228));
+        appDrawText(contentX + 262, contentY + 146, "Free:", rgb(236, 240, 248));
+        appDrawText(contentX + 262, contentY + 166, heapFreeText, rgb(212, 218, 228));
+        appDrawText(contentX + 262, contentY + 196, "Utilization:", rgb(236, 240, 248));
+        appDrawText(contentX + 262, contentY + 216, heapPctText, rgb(96, 196, 126));
+        appDrawText(contentX + 282, contentY + 216, "%", rgb(96, 196, 126));
+        appDrawText(contentX + 262, contentY + 250, "Heap is a kernel bump allocator; allocations are not freed.", rgb(160, 166, 176));
+        appDrawText(contentX + 262, contentY + 270, "That makes the total fixed and the used value monotonic.", rgb(160, 166, 176));
+    }
+
+    // Bottom status strip. The real controls are the widget buttons created in init().
+    framebuffer::fill_rect(x + 14, y + h - 54, w - 28, 1, rgb(70, 76, 90));
+    uint32_t bottomY = y + h - 42;
+    char cpuLine[128];
     const kernel::desktop::CpuTelemetrySnapshot cpu = kernel::desktop::cpu_telemetry_snapshot();
-    char cpuLine1[128];
-    char cpuLine2[128];
     if (cpu.available) {
         char pctBuf[16];
         char windowBuf[24];
         int_to_text(cpu.utilizationPct, pctBuf, sizeof(pctBuf));
         strappend(pctBuf, "%", sizeof(pctBuf));
         uint64_to_text(cpu.sampleWindowMs, windowBuf, sizeof(windowBuf));
-        strcopy(cpuLine1, "CPU: ", sizeof(cpuLine1));
-        strappend(cpuLine1, pctBuf, sizeof(cpuLine1));
-        strappend(cpuLine1, " | Window: ", sizeof(cpuLine1));
-        strappend(cpuLine1, windowBuf, sizeof(cpuLine1));
-        strappend(cpuLine1, " ms", sizeof(cpuLine1));
+        strcopy(cpuLine, "CPU: ", sizeof(cpuLine));
+        strappend(cpuLine, pctBuf, sizeof(cpuLine));
+        strappend(cpuLine, " | Window: ", sizeof(cpuLine));
+        strappend(cpuLine, windowBuf, sizeof(cpuLine));
+        strappend(cpuLine, " ms", sizeof(cpuLine));
     } else {
         char windowBuf[24];
         uint64_to_text(cpu.sampleWindowMs, windowBuf, sizeof(windowBuf));
-        strcopy(cpuLine1, "CPU: N/A | Window: ", sizeof(cpuLine1));
-        strappend(cpuLine1, windowBuf, sizeof(cpuLine1));
-        strappend(cpuLine1, " ms", sizeof(cpuLine1));
+        strcopy(cpuLine, "CPU: N/A | Window: ", sizeof(cpuLine));
+        strappend(cpuLine, windowBuf, sizeof(cpuLine));
+        strappend(cpuLine, " ms", sizeof(cpuLine));
     }
-    strcopy(cpuLine2, "Source: ", sizeof(cpuLine2));
-    strappend(cpuLine2, cpu.source ? cpu.source : "N/A", sizeof(cpuLine2));
-    appDrawText(x + 15, y + 220, cpuLine1, rgb(180, 200, 220));
-    appDrawText(x + 15, y + 232, cpuLine2, rgb(160, 170, 185));
+    appDrawText(x + 230, bottomY + 8, cpuLine, rgb(180, 200, 220));
+    appDrawText(x + 230, bottomY + 18, cpu.source ? cpu.source : "N/A", rgb(160, 170, 185));
+    appDrawText(x + w - 196, bottomY + 8, "Use the task buttons below the strip.", rgb(160, 170, 185));
 }
 
 void TaskManagerApp::onMouseDown(int localX, int localY, uint8_t button) {
     (void)button;
     
+    if (localY >= 34 && localY < 62) {
+        const int tabWidth = (m_window->w - 28) / 4;
+        const int relX = localX - 14;
+        if (relX >= 0) {
+            const int tabIndex = relX / tabWidth;
+            if (tabIndex >= 0 && tabIndex < 4) {
+                m_activeTab = tabIndex;
+                invalidate();
+                return;
+            }
+        }
+    }
+
     // Check if clicked in list area
-    if (localY >= 40 && localY < 240) {
-        int row = (localY - 40) / 24;
+    const int listTop = 94;
+    const int listBottom = m_window ? (int)m_window->h - 54 : 404;
+    if (m_activeTab == 0 && localY >= listTop && localY < listBottom) {
+        int row = (localY - listTop) / 24;
         if (row >= 0 && row < m_entryCount) {
             m_selectedApp = row;
             invalidate();
@@ -3032,13 +3235,20 @@ void TaskManagerApp::onWidgetClick(int widgetId) {
         invalidate();
     } else if (widgetId == m_endTaskBtnId) {
         if (m_selectedApp >= 0 && m_selectedApp < m_entryCount) {
-            // Find and close the app
-            app::KernelApp* app = app::AppManager::getRunningApp(m_selectedApp);
-            if (app && app != this) {  // Don't close self
-                app::AppManager::closeApp(app);
+            if (m_entries[m_selectedApp].isShell) {
+                shell::close();
                 m_selectedApp = -1;
                 refreshList();
                 invalidate();
+            } else {
+                // Find and close the app
+                app::KernelApp* app = app::AppManager::getRunningApp(m_selectedApp);
+                if (app && app != this) {  // Don't close self
+                    app::AppManager::closeApp(app);
+                    m_selectedApp = -1;
+                    refreshList();
+                    invalidate();
+                }
             }
         }
     }
@@ -3055,6 +3265,7 @@ void TaskManagerApp::refreshList() {
             strcopy(m_entries[m_entryCount].name, runApp->getName(), app::MAX_APP_NAME);
             m_entries[m_entryCount].running = true;
             m_entries[m_entryCount].windowCount = 1;
+            m_entries[m_entryCount].isShell = false;
             m_entryCount++;
         }
     }
@@ -3064,6 +3275,7 @@ void TaskManagerApp::refreshList() {
         strcopy(m_entries[m_entryCount].name, "Terminal", app::MAX_APP_NAME);
         m_entries[m_entryCount].running = true;
         m_entries[m_entryCount].windowCount = 1;
+        m_entries[m_entryCount].isShell = true;
         m_entryCount++;
     }
     

@@ -256,6 +256,21 @@ void operator delete[](void*, size_t) noexcept
 {
 }
 
+extern "C" size_t gxos_kernel_heap_total_bytes()
+{
+    return KERNEL_HEAP_SIZE;
+}
+
+extern "C" size_t gxos_kernel_heap_used_bytes()
+{
+    return g_heapOffset;
+}
+
+extern "C" size_t gxos_kernel_heap_free_bytes()
+{
+    return KERNEL_HEAP_SIZE - g_heapOffset;
+}
+
 // GCC emits references to __dso_handle for static object destruction
 // registration (__cxa_atexit).  In a freestanding kernel there is no
 // dynamic linker, so define it as a weak null symbol so the linker is
