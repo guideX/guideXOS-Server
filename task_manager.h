@@ -66,6 +66,13 @@ namespace gxos { namespace apps {
         bool diskActivePctAvailable = false;
         int diskPct = 0;
         bool networkAvailable = false;
+        std::string networkSource = "N/A";
+        uint64_t networkSampleWindowMs = 0;
+        uint64_t networkBytesSentTotal = 0;
+        uint64_t networkBytesReceivedTotal = 0;
+        uint64_t networkSendKBps = 0;
+        uint64_t networkReceiveKBps = 0;
+        bool networkUtilizationAvailable = false;
         int networkPct = 0;
         uint64_t processCount = 0;
         uint64_t nativeProcessCount = 0;
@@ -76,6 +83,7 @@ namespace gxos { namespace apps {
         uint64_t processCpuSampleWindowMs = 0;
         uint64_t processCpuRowsWithCpu = 0;
         bool processDiskAvailable = false;
+        bool processNetworkAvailable = false;
         bool syntheticCounters = false;
     };
 

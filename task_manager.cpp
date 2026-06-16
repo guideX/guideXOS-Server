@@ -8,6 +8,7 @@
 #include "built_in_app_metadata.h"
 #include "native_app_process_table.h"
 #include "fs.h"
+#include "network_telemetry.h"
 #include <sstream>
 #include <algorithm>
 #include <iomanip>
@@ -100,6 +101,18 @@ namespace gxos { namespace apps {
         static std::string diskRateDetail(const gxos::apps::PerformanceSnapshot& perf, bool readRate) {
             if (!perf.diskAvailable) return "N/A";
             const uint64_t kbps = readRate ? perf.diskReadKBps : perf.diskWriteKBps;
+            return std::to_string(kbps) + " KB/s";
+        }
+
+        static std::string networkRateSummary(const gxos::apps::PerformanceSnapshot& perf) {
+            if (!perf.networkAvailable) return "N/A";
+            if (perf.networkUtilizationAvailable) return std::to_string(perf.networkPct) + "%";
+            return std::to_string(perf.networkSendKBps) + "/" + std::to_string(perf.networkReceiveKBps) + " KB/s";
+        }
+
+        static std::string networkRateDetail(const gxos::apps::PerformanceSnapshot& perf, bool sendRate) {
+            if (!perf.networkAvailable) return "N/A";
+            const uint64_t kbps = sendRate ? perf.networkSendKBps : perf.networkReceiveKBps;
             return std::to_string(kbps) + " KB/s";
         }
 
@@ -446,8 +459,18 @@ namespace gxos { namespace apps {
         snapshot.performance.diskWriteKBps = diskTelemetry.available ? diskTelemetry.writeKBps : 0;
         snapshot.performance.diskActivePctAvailable = diskTelemetry.activePctAvailable;
         snapshot.performance.diskPct = diskTelemetry.activePct;
+        const gxos::net::NetworkTelemetrySnapshot networkTelemetry = gxos::net::networkTelemetrySnapshot();
+        snapshot.performance.networkAvailable = networkTelemetry.available;
+        snapshot.performance.networkSource = networkTelemetry.available ? networkTelemetry.source : "N/A";
+        snapshot.performance.networkSampleWindowMs = networkTelemetry.available ? networkTelemetry.sampleWindowMs : 0;
+        snapshot.performance.networkBytesSentTotal = networkTelemetry.bytesSentTotal;
+        snapshot.performance.networkBytesReceivedTotal = networkTelemetry.bytesReceivedTotal;
+        snapshot.performance.networkSendKBps = networkTelemetry.available ? networkTelemetry.sendKBps : 0;
+        snapshot.performance.networkReceiveKBps = networkTelemetry.available ? networkTelemetry.receiveKBps : 0;
+        snapshot.performance.networkUtilizationAvailable = networkTelemetry.available && networkTelemetry.utilizationPctAvailable;
+        snapshot.performance.networkPct = networkTelemetry.utilizationPct;
         snapshot.performance.processDiskAvailable = false;
-        snapshot.performance.networkAvailable = false;
+        snapshot.performance.processNetworkAvailable = false;
         snapshot.performance.syntheticCounters = false;
         const uint64_t nowMicros = steadyClockMicros();
         snapshot.tombstoneAppCapabilityKnown = 0;
@@ -697,7 +720,22 @@ namespace gxos { namespace apps {
             oss << "diskActivePctAvailable=false\n";
         }
         oss << "processDiskAvailable=" << (snapshot.performance.processDiskAvailable ? "true" : "false") << "\n";
-        oss << "network=N/A\n";
+        oss << "networkAvailable=" << (snapshot.performance.networkAvailable ? "true" : "false") << "\n";
+        oss << "networkUtilizationAvailable=" << (snapshot.performance.networkUtilizationAvailable ? "true" : "false") << "\n";
+        if (snapshot.performance.networkAvailable) {
+            oss << "network=" << (snapshot.performance.networkUtilizationAvailable ? std::to_string(snapshot.performance.networkPct) + "%" : std::string("N/A")) << "\n";
+            oss << "networkSource=" << snapshot.performance.networkSource << "\n";
+            oss << "networkSampleWindowMs=" << snapshot.performance.networkSampleWindowMs << "\n";
+            oss << "networkSendKBps=" << snapshot.performance.networkSendKBps << "\n";
+            oss << "networkReceiveKBps=" << snapshot.performance.networkReceiveKBps << "\n";
+        } else {
+            oss << "network=N/A\n";
+            oss << "networkSource=N/A\n";
+            oss << "networkSampleWindowMs=N/A\n";
+            oss << "networkSendKBps=N/A\n";
+            oss << "networkReceiveKBps=N/A\n";
+        }
+        oss << "processNetworkAvailable=" << (snapshot.performance.processNetworkAvailable ? "true" : "false") << "\n";
         oss << "unavailableGraphLabel=N/A\n";
         oss << "tombstoned=" << snapshot.tombstoned.size() << "\n";
         oss << "tombstoneRestoreSupported=" << (snapshot.tombstoneRestoreSupported ? "true" : "false") << "\n";
@@ -1183,7 +1221,8 @@ namespace gxos { namespace apps {
         std::ostringstream footerLine;
         footerLine << "CPU: ";
         footerLine << (s_snapshot.performance.cpuAvailable ? std::to_string(s_snapshot.performance.cpuPct) + "%" : std::string("N/A"));
-        footerLine << "  Disk: N/A  Network: N/A";
+        footerLine << "  Disk: " << diskRateSummary(s_snapshot.performance);
+        footerLine << "  Network: " << networkRateSummary(s_snapshot.performance);
         publishTextAtColor(s_windowId, x + 12, y + 66, 170, 176, 186, footerLine.str());
     }
     
@@ -1263,7 +1302,7 @@ namespace gxos { namespace apps {
         s_cpuPct = perf.cpuAvailable ? perf.cpuPct : 0;
         s_memPct = perf.memoryAvailable ? perf.memoryPct : 0;
         s_diskPct = perf.diskActivePctAvailable ? perf.diskPct : 0;
-        s_netPct = perf.networkAvailable ? perf.networkPct : 0;
+        s_netPct = perf.networkUtilizationAvailable ? perf.networkPct : 0;
 
         const int x = 12;
         const int y = 58;
@@ -1296,7 +1335,7 @@ namespace gxos { namespace apps {
             pctOrNa(perf.cpuAvailable, perf.cpuPct),
             pctOrNa(perf.memoryAvailable, perf.memoryPct),
             diskRateSummary(perf),
-            pctOrNa(perf.networkAvailable, perf.networkPct)
+            networkRateSummary(perf)
         };
         const uint64_t* navHistories[] = { s_cpuHistory, s_memoryHistory, s_diskHistory, nullptr };
         const int navHistoryCounts[] = { s_cpuHistoryCount, s_memoryHistoryCount, s_diskHistoryCount, 0 };
@@ -1358,7 +1397,7 @@ namespace gxos { namespace apps {
             s_perfCategoryIndex == 0 ? pctOrNa(perf.cpuAvailable, perf.cpuPct)
             : s_perfCategoryIndex == 1 ? pctOrNa(mem.heapUtilPctAvailable, mem.heapUtilPct)
             : s_perfCategoryIndex == 2 ? diskRateSummary(perf)
-            : pctOrNa(perf.networkAvailable, perf.networkPct);
+            : networkRateSummary(perf);
         drawGraphBox(
             s_windowId,
             detailX + 10,
@@ -1409,11 +1448,13 @@ namespace gxos { namespace apps {
             detailRow(5, "Read bytes:", perf.diskAvailable ? std::to_string(perf.diskReadBytesTotal) : std::string("N/A"));
             detailRow(6, "Write bytes:", perf.diskAvailable ? std::to_string(perf.diskWriteBytesTotal) : std::string("N/A"));
         } else if (s_perfCategoryIndex == 3) {
-            detailRow(0, "Send:", "N/A");
-            detailRow(1, "Receive:", "N/A");
-            detailRow(2, "Sent bytes:", "N/A");
-            detailRow(3, "Received bytes:", "N/A");
-            detailRow(4, "Real counter:", "unavailable");
+            detailRow(0, "Utilization:", perf.networkUtilizationAvailable ? std::to_string(perf.networkPct) + "%" : std::string("N/A"));
+            detailRow(1, "Send speed:", networkRateDetail(perf, true));
+            detailRow(2, "Receive speed:", networkRateDetail(perf, false));
+            detailRow(3, "Sample window:", perf.networkAvailable ? std::to_string(perf.networkSampleWindowMs) + " ms" : std::string("N/A"));
+            detailRow(4, "Source:", perf.networkAvailable ? perf.networkSource : std::string("N/A"));
+            detailRow(5, "Sent bytes:", perf.networkAvailable ? std::to_string(perf.networkBytesSentTotal) : std::string("N/A"));
+            detailRow(6, "Received bytes:", perf.networkAvailable ? std::to_string(perf.networkBytesReceivedTotal) : std::string("N/A"));
         }
 
         publishTextAtColor(s_windowId, detailX + 12, y + h - 22, 160, 166, 176, "Left/Right switches categories");

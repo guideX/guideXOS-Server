@@ -2,6 +2,7 @@
 #include "vnc_server.h"
 #include "compositor.h"
 #include "logger.h"
+#include "network_telemetry.h"
 #include <cstring>
 #include <algorithm>
 
@@ -28,6 +29,32 @@ namespace vnc {
 constexpr uint8_t RFB_VERSION_3_8[] = "RFB 003.008\n";
 constexpr uint8_t SECURITY_TYPE_NONE = 1;
 constexpr uint8_t SECURITY_RESULT_OK[4] = {0, 0, 0, 0};
+
+namespace {
+    inline int sendTracked(SOCKET socket, const void* buffer, int length, int flags) {
+#ifdef _WIN32
+        const int result = ::send(socket, reinterpret_cast<const char*>(buffer), length, flags);
+#else
+        const int result = ::send(socket, buffer, length, flags);
+#endif
+        if (result > 0) {
+            gxos::net::recordNetworkBytesSent(static_cast<uint64_t>(result));
+        }
+        return result;
+    }
+
+    inline int recvTracked(SOCKET socket, void* buffer, int length, int flags) {
+#ifdef _WIN32
+        const int result = ::recv(socket, reinterpret_cast<char*>(buffer), length, flags);
+#else
+        const int result = ::recv(socket, buffer, length, flags);
+#endif
+        if (result > 0) {
+            gxos::net::recordNetworkBytesReceived(static_cast<uint64_t>(result));
+        }
+        return result;
+    }
+}
 
 // Static member initialization
 std::atomic<bool> VncServer::s_running{false};
@@ -208,11 +235,11 @@ void VncServer::ServerThread() {
 
 void VncServer::HandleClient(int clientSocket) {
     // Send RFB version
-    send(clientSocket, (const char*)RFB_VERSION_3_8, 12, 0);
+    sendTracked(clientSocket, (const char*)RFB_VERSION_3_8, 12, 0);
     
     // Receive client version
     char clientVersion[12];
-    if (recv(clientSocket, clientVersion, 12, 0) != 12) {
+    if (recvTracked(clientSocket, clientVersion, 12, 0) != 12) {
         Logger::write(LogLevel::Warn, "VNC: Client version handshake failed");
         closesocket(clientSocket);
         return;
@@ -220,22 +247,22 @@ void VncServer::HandleClient(int clientSocket) {
     
     // Send security type (None)
     uint8_t secTypes[2] = {1, SECURITY_TYPE_NONE};
-    send(clientSocket, (const char*)secTypes, 2, 0);
+    sendTracked(clientSocket, (const char*)secTypes, 2, 0);
     
     // Receive client security choice
     uint8_t secChoice;
-    if (recv(clientSocket, (char*)&secChoice, 1, 0) != 1) {
+    if (recvTracked(clientSocket, (char*)&secChoice, 1, 0) != 1) {
         Logger::write(LogLevel::Warn, "VNC: Client security handshake failed");
         closesocket(clientSocket);
         return;
     }
     
     // Send security result (OK)
-    send(clientSocket, (const char*)SECURITY_RESULT_OK, 4, 0);
+    sendTracked(clientSocket, (const char*)SECURITY_RESULT_OK, 4, 0);
     
     // Receive ClientInit
     uint8_t clientInit;
-    if (recv(clientSocket, (char*)&clientInit, 1, 0) != 1) {
+    if (recvTracked(clientSocket, (char*)&clientInit, 1, 0) != 1) {
         Logger::write(LogLevel::Warn, "VNC: ClientInit failed");
         closesocket(clientSocket);
         return;
@@ -277,7 +304,7 @@ void VncServer::HandleClient(int clientSocket) {
     serverInit.nameLength = htonl(11);
     std::memcpy(serverInit.name, "guideXOS VM", 11);
     
-    send(clientSocket, (const char*)&serverInit, sizeof(serverInit), 0);
+    sendTracked(clientSocket, (const char*)&serverInit, sizeof(serverInit), 0);
     
     Logger::write(LogLevel::Info, "VNC: Client initialized, entering main loop");
     
@@ -295,7 +322,7 @@ void VncServer::HandleClient(int clientSocket) {
         if (result > 0) {
             // Receive client message
             uint8_t msgType;
-            if (recv(clientSocket, (char*)&msgType, 1, 0) != 1) {
+            if (recvTracked(clientSocket, (char*)&msgType, 1, 0) != 1) {
                 break;
             }
             
@@ -305,30 +332,30 @@ void VncServer::HandleClient(int clientSocket) {
                 {
                     uint8_t pad[3];
                     uint8_t pixelFormat[16];
-                    recv(clientSocket, (char*)pad, 3, 0);
-                    recv(clientSocket, (char*)pixelFormat, 16, 0);
+                    recvTracked(clientSocket, (char*)pad, 3, 0);
+                    recvTracked(clientSocket, (char*)pixelFormat, 16, 0);
                     break;
                 }
                 case 2: // SetEncodings
                 {
                     uint8_t pad;
                     uint16_t numEncodings;
-                    recv(clientSocket, (char*)&pad, 1, 0);
-                    recv(clientSocket, (char*)&numEncodings, 2, 0);
+                    recvTracked(clientSocket, (char*)&pad, 1, 0);
+                    recvTracked(clientSocket, (char*)&numEncodings, 2, 0);
                     numEncodings = ntohs(numEncodings);
                     std::vector<int32_t> encodings(numEncodings);
-                    recv(clientSocket, (char*)encodings.data(), numEncodings * 4, 0);
+                    recvTracked(clientSocket, (char*)encodings.data(), numEncodings * 4, 0);
                     break;
                 }
                 case 3: // FramebufferUpdateRequest
                 {
                     uint8_t incremental;
                     uint16_t x, y, w, h;
-                    recv(clientSocket, (char*)&incremental, 1, 0);
-                    recv(clientSocket, (char*)&x, 2, 0);
-                    recv(clientSocket, (char*)&y, 2, 0);
-                    recv(clientSocket, (char*)&w, 2, 0);
-                    recv(clientSocket, (char*)&h, 2, 0);
+                    recvTracked(clientSocket, (char*)&incremental, 1, 0);
+                    recvTracked(clientSocket, (char*)&x, 2, 0);
+                    recvTracked(clientSocket, (char*)&y, 2, 0);
+                    recvTracked(clientSocket, (char*)&w, 2, 0);
+                    recvTracked(clientSocket, (char*)&h, 2, 0);
                     
                     // Send framebuffer update if dirty or full update requested
                     if (!incremental || s_fbDirty.load()) {
@@ -343,7 +370,7 @@ void VncServer::HandleClient(int clientSocket) {
                         updateHeader.msgType = 0;
                         updateHeader.padding = 0;
                         updateHeader.numRects = htons(1);
-                        send(clientSocket, (const char*)&updateHeader, 4, 0);
+                        sendTracked(clientSocket, (const char*)&updateHeader, 4, 0);
                         
                         // Rectangle header
                         struct {
@@ -358,10 +385,10 @@ void VncServer::HandleClient(int clientSocket) {
                         rectHeader.w = htons(s_fbWidth);
                         rectHeader.h = htons(s_fbHeight);
                         rectHeader.encoding = 0; // Raw encoding
-                        send(clientSocket, (const char*)&rectHeader, 12, 0);
+                        sendTracked(clientSocket, (const char*)&rectHeader, 12, 0);
                         
                         // Send raw pixel data
-                        send(clientSocket, (const char*)s_framebuffer.data(), s_framebuffer.size(), 0);
+                        sendTracked(clientSocket, (const char*)s_framebuffer.data(), s_framebuffer.size(), 0);
                         
                         s_fbDirty.store(false);
                     }
@@ -372,9 +399,9 @@ void VncServer::HandleClient(int clientSocket) {
                     uint8_t downFlag;
                     uint16_t padding;
                     uint32_t key;
-                    recv(clientSocket, (char*)&downFlag, 1, 0);
-                    recv(clientSocket, (char*)&padding, 2, 0);
-                    recv(clientSocket, (char*)&key, 4, 0);
+                    recvTracked(clientSocket, (char*)&downFlag, 1, 0);
+                    recvTracked(clientSocket, (char*)&padding, 2, 0);
+                    recvTracked(clientSocket, (char*)&key, 4, 0);
                     key = ntohl(key);
                     InjectKeyEvent(downFlag != 0, key);
                     break;
@@ -383,9 +410,9 @@ void VncServer::HandleClient(int clientSocket) {
                 {
                     uint8_t buttonMask;
                     uint16_t x, y;
-                    recv(clientSocket, (char*)&buttonMask, 1, 0);
-                    recv(clientSocket, (char*)&x, 2, 0);
-                    recv(clientSocket, (char*)&y, 2, 0);
+                    recvTracked(clientSocket, (char*)&buttonMask, 1, 0);
+                    recvTracked(clientSocket, (char*)&x, 2, 0);
+                    recvTracked(clientSocket, (char*)&y, 2, 0);
                     x = ntohs(x);
                     y = ntohs(y);
                     InjectPointerEvent(buttonMask, x, y);

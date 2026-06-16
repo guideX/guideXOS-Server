@@ -69,7 +69,13 @@ $checks = @(
     @{ Name = "disk write rate field present"; Match = ($output -match "(?m)^\s*diskWriteKBps=(N/A|\d+)\s*$") },
     @{ Name = "disk active pct availability field present"; Match = ($output -match "(?m)^\s*diskActivePctAvailable=(true|false)\s*$") },
     @{ Name = "process disk availability field present"; Match = ($output -match "(?m)^\s*processDiskAvailable=(true|false)\s*$") },
-    @{ Name = "network unavailable"; Match = ($output -match "network=N/A") },
+    @{ Name = "network available field present"; Match = ($output -match "(?m)^\s*networkAvailable=(true|false)\s*$") },
+    @{ Name = "network utilization availability field present"; Match = ($output -match "(?m)^\s*networkUtilizationAvailable=(true|false)\s*$") },
+    @{ Name = "network source field present"; Match = ($output -match "(?m)^\s*networkSource=(N/A|[^\s\r\n]+)\s*$") },
+    @{ Name = "network sample window field present"; Match = ($output -match "(?m)^\s*networkSampleWindowMs=(N/A|\d+)\s*$") },
+    @{ Name = "network send rate field present"; Match = ($output -match "(?m)^\s*networkSendKBps=(N/A|\d+)\s*$") },
+    @{ Name = "network receive rate field present"; Match = ($output -match "(?m)^\s*networkReceiveKBps=(N/A|\d+)\s*$") },
+    @{ Name = "process network availability field present"; Match = ($output -match "(?m)^\s*processNetworkAvailable=(true|false)\s*$") },
     @{ Name = "unavailable graph label present"; Match = ($output -match "(?m)^\s*unavailableGraphLabel=N/A\s*$") },
     @{ Name = "synthetic counters disabled"; Match = ($output -match "syntheticCounters=false") },
     @{ Name = "deterministic tombstone smoke passed"; Match = ($output -match "(?m)^\s*tombstoneTest=passed\s*$") },
@@ -361,6 +367,99 @@ if ($diskAvailable) {
 
 if ($processDiskAvailable) {
     throw "processDiskAvailable must remain false until real per-process disk telemetry exists."
+}
+
+$networkAvailable = $output -match "(?m)^\s*networkAvailable=true\s*$"
+$networkUnavailable = $output -match "(?m)^\s*networkAvailable=false\s*$"
+$networkUtilizationAvailable = $output -match "(?m)^\s*networkUtilizationAvailable=true\s*$"
+$networkUtilizationUnavailable = $output -match "(?m)^\s*networkUtilizationAvailable=false\s*$"
+$networkValueMatch = [regex]::Match($output, "(?m)^\s*network=(?<value>N/A|\d+%)\s*$")
+$networkSourceMatch = [regex]::Match($output, "(?m)^\s*networkSource=(?<source>[^\s\r\n]+)\s*$")
+$networkSampleWindowMatch = [regex]::Match($output, "(?m)^\s*networkSampleWindowMs=(?<window>N/A|\d+)\s*$")
+$networkSendRateMatch = [regex]::Match($output, "(?m)^\s*networkSendKBps=(?<rate>N/A|\d+)\s*$")
+$networkReceiveRateMatch = [regex]::Match($output, "(?m)^\s*networkReceiveKBps=(?<rate>N/A|\d+)\s*$")
+$processNetworkAvailable = $output -match "(?m)^\s*processNetworkAvailable=true\s*$"
+$processNetworkUnavailable = $output -match "(?m)^\s*processNetworkAvailable=false\s*$"
+
+if ($networkAvailable) {
+    if (-not $networkSourceMatch.Success) {
+        throw "Network availability was reported but networkSource was missing."
+    }
+
+    $networkSource = $networkSourceMatch.Groups["source"].Value
+    if ($networkSource -match '(?i)(synthetic|modulo|wave|placeholder|fake|simulated)') {
+        throw "Network source looks synthetic: $networkSource"
+    }
+
+    if (-not $networkSampleWindowMatch.Success -or $networkSampleWindowMatch.Groups["window"].Value -eq "N/A") {
+        throw "Network availability was reported but networkSampleWindowMs was missing."
+    }
+
+    $networkSampleWindow = [int]$networkSampleWindowMatch.Groups["window"].Value
+    if ($networkSampleWindow -le 0) {
+        throw "Network sample window must be positive when available: $networkSampleWindow"
+    }
+
+    if (-not $networkSendRateMatch.Success -or $networkSendRateMatch.Groups["rate"].Value -eq "N/A") {
+        throw "Network availability was reported but networkSendKBps was missing."
+    }
+    if (-not $networkReceiveRateMatch.Success -or $networkReceiveRateMatch.Groups["rate"].Value -eq "N/A") {
+        throw "Network availability was reported but networkReceiveKBps was missing."
+    }
+
+    $networkSendRate = [int64]$networkSendRateMatch.Groups["rate"].Value
+    $networkReceiveRate = [int64]$networkReceiveRateMatch.Groups["rate"].Value
+    if ($networkSendRate -lt 0 -or $networkReceiveRate -lt 0) {
+        throw "Network KBps values must be non-negative."
+    }
+
+    if ($networkUtilizationAvailable) {
+        if (-not $networkValueMatch.Success -or $networkValueMatch.Groups["value"].Value -eq "N/A") {
+            throw "Network utilization was reported but network=<value>% was missing."
+        }
+
+        $networkValue = [int]($networkValueMatch.Groups["value"].Value.TrimEnd('%'))
+        if ($networkValue -lt 0 -or $networkValue -gt 100) {
+            throw "Network utilization out of range: $networkValue"
+        }
+    } elseif ($networkUtilizationUnavailable) {
+        if (-not $networkValueMatch.Success -or $networkValueMatch.Groups["value"].Value -ne "N/A") {
+            throw "Network utilization was unavailable but network=N/A was not reported."
+        }
+    } else {
+        throw "Network utilization availability flag was missing."
+    }
+} elseif ($networkUnavailable) {
+    if (-not $networkValueMatch.Success -or $networkValueMatch.Groups["value"].Value -ne "N/A") {
+        throw "Network was unavailable but network=N/A was not reported."
+    }
+    if (-not $networkSourceMatch.Success) {
+        throw "Network was unavailable but networkSource was missing."
+    }
+
+    $networkSource = $networkSourceMatch.Groups["source"].Value
+    if ($networkSource -ne "N/A") {
+        throw "Network was unavailable but networkSource was not N/A: $networkSource"
+    }
+
+    if ($networkSampleWindowMatch.Success -and $networkSampleWindowMatch.Groups["window"].Value -ne "N/A") {
+        throw "Network was unavailable but networkSampleWindowMs was not N/A."
+    }
+    if ($networkSendRateMatch.Success -and $networkSendRateMatch.Groups["rate"].Value -ne "N/A") {
+        throw "Network was unavailable but networkSendKBps was not N/A."
+    }
+    if ($networkReceiveRateMatch.Success -and $networkReceiveRateMatch.Groups["rate"].Value -ne "N/A") {
+        throw "Network was unavailable but networkReceiveKBps was not N/A."
+    }
+    if ($networkUtilizationAvailable) {
+        throw "Network was unavailable but networkUtilizationAvailable=true was reported."
+    }
+} else {
+    throw "Network availability flag was missing."
+}
+
+if ($processNetworkAvailable) {
+    throw "processNetworkAvailable must remain false until real per-process network telemetry exists."
 }
 
 Write-Host "Task Manager snapshot smoke PASS"

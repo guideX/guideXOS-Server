@@ -1,4 +1,5 @@
 #include "guide_web_http.h"
+#include "network_telemetry.h"
 
 #include <algorithm>
 #include <cctype>
@@ -267,14 +268,22 @@ static int winsockHttpByteStreamRead(void* context, uint8_t* buffer, int length)
 {
 	WinsockHttpByteStreamContext* tcp = static_cast<WinsockHttpByteStreamContext*>(context);
 	if (!tcp || tcp->socket == INVALID_SOCKET || !buffer || length <= 0) return -1;
-	return recv(tcp->socket, reinterpret_cast<char*>(buffer), length, 0);
+	const int received = recv(tcp->socket, reinterpret_cast<char*>(buffer), length, 0);
+	if (received > 0) {
+		gxos::net::recordNetworkBytesReceived(static_cast<uint64_t>(received));
+	}
+	return received;
 }
 
 static int winsockHttpByteStreamWrite(void* context, const uint8_t* buffer, int length)
 {
 	WinsockHttpByteStreamContext* tcp = static_cast<WinsockHttpByteStreamContext*>(context);
 	if (!tcp || tcp->socket == INVALID_SOCKET || !buffer || length <= 0) return -1;
-	return send(tcp->socket, reinterpret_cast<const char*>(buffer), length, 0);
+	const int sent = send(tcp->socket, reinterpret_cast<const char*>(buffer), length, 0);
+	if (sent > 0) {
+		gxos::net::recordNetworkBytesSent(static_cast<uint64_t>(sent));
+	}
+	return sent;
 }
 
 static void winsockHttpByteStreamClose(void* context)

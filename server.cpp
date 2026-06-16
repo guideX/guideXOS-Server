@@ -65,6 +65,7 @@
 #include "paint.h"
 #include "navigator.h"
 #include "guide_web_http.h"
+#include "network_telemetry.h"
 #include "navigator_file_io.h"
 #include "image_viewer.h"
 #include "onscreen_keyboard.h"
@@ -878,6 +879,7 @@ using namespace gxos;
         Logger::write(LogLevel::Warn, warning);
     }
     Lifecycle::bootstrap();
+    gxos::net::armNetworkTelemetry("hostedSocketCounters");
     Lifecycle::markInteractive();
     struct ShutdownGuard { ~ShutdownGuard(){ Lifecycle::shutdown(); } } guard;
 
