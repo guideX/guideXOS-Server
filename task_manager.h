@@ -72,6 +72,7 @@ namespace gxos { namespace apps {
         uint64_t networkBytesReceivedTotal = 0;
         uint64_t networkSendKBps = 0;
         uint64_t networkReceiveKBps = 0;
+        bool networkRatesAvailable = false;
         bool networkUtilizationAvailable = false;
         int networkPct = 0;
         uint64_t processCount = 0;

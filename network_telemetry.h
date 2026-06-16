@@ -11,6 +11,7 @@ namespace net {
 
 struct NetworkTelemetrySnapshot {
     bool available = false;
+    bool ratesAvailable = false;
     std::string source = "N/A";
     uint64_t sampleWindowMs = 0;
     uint64_t bytesSentTotal = 0;
@@ -27,12 +28,18 @@ namespace detail {
         bool active = false;
         std::string source = "N/A";
         uint64_t startMicros = 0;
-        uint64_t lastSampleMicros = 0;
         uint64_t totalSentBytes = 0;
         uint64_t totalReceivedBytes = 0;
-        uint64_t lastSampleSentBytes = 0;
-        uint64_t lastSampleReceivedBytes = 0;
+        uint64_t windowStartMicros = 0;
+        uint64_t windowStartSentBytes = 0;
+        uint64_t windowStartReceivedBytes = 0;
+        bool hasStableSample = false;
+        uint64_t stableWindowMs = 0;
+        uint64_t stableSendKBps = 0;
+        uint64_t stableReceiveKBps = 0;
     };
+
+    constexpr uint64_t kNetworkTelemetryDisplayWindowMicros = 750ULL * 1000ULL;
 
     inline uint64_t steadyClockMicros()
     {
@@ -56,6 +63,18 @@ namespace detail {
         if (elapsedMicros == 0) return 0;
         return (bytes * 1000000ULL) / (1024ULL * elapsedMicros);
     }
+
+    inline std::string warmupSourceName(const std::string& source)
+    {
+        return source.empty() ? std::string("hostedSocketCountersWarmup") : source + "Warmup";
+    }
+
+    inline void resetNetworkWindow(NetworkTelemetryState& st, uint64_t now)
+    {
+        st.windowStartMicros = now;
+        st.windowStartSentBytes = st.totalSentBytes;
+        st.windowStartReceivedBytes = st.totalReceivedBytes;
+    }
 }
 
 inline void armNetworkTelemetry(const std::string& source = "hostedSocketCounters")
@@ -67,11 +86,13 @@ inline void armNetworkTelemetry(const std::string& source = "hostedSocketCounter
         st.active = true;
         st.source = source.empty() ? "hostedSocketCounters" : source;
         st.startMicros = now;
-        st.lastSampleMicros = now;
         st.totalSentBytes = 0;
         st.totalReceivedBytes = 0;
-        st.lastSampleSentBytes = 0;
-        st.lastSampleReceivedBytes = 0;
+        st.hasStableSample = false;
+        st.stableWindowMs = 0;
+        st.stableSendKBps = 0;
+        st.stableReceiveKBps = 0;
+        detail::resetNetworkWindow(st, now);
         return;
     }
     if (!source.empty() && st.source == "N/A") {
@@ -89,7 +110,11 @@ inline void recordNetworkBytesSent(uint64_t bytes)
         st.active = true;
         st.source = "hostedSocketCounters";
         st.startMicros = now;
-        st.lastSampleMicros = now;
+        st.hasStableSample = false;
+        st.stableWindowMs = 0;
+        st.stableSendKBps = 0;
+        st.stableReceiveKBps = 0;
+        detail::resetNetworkWindow(st, now);
     }
     st.totalSentBytes += bytes;
 }
@@ -104,7 +129,11 @@ inline void recordNetworkBytesReceived(uint64_t bytes)
         st.active = true;
         st.source = "hostedSocketCounters";
         st.startMicros = now;
-        st.lastSampleMicros = now;
+        st.hasStableSample = false;
+        st.stableWindowMs = 0;
+        st.stableSendKBps = 0;
+        st.stableReceiveKBps = 0;
+        detail::resetNetworkWindow(st, now);
     }
     st.totalReceivedBytes += bytes;
 }
@@ -116,7 +145,6 @@ inline NetworkTelemetrySnapshot networkTelemetrySnapshot()
 
     NetworkTelemetrySnapshot snapshot;
     snapshot.available = st.active;
-    snapshot.source = st.active ? st.source : "N/A";
     snapshot.bytesSentTotal = st.totalSentBytes;
     snapshot.bytesReceivedTotal = st.totalReceivedBytes;
 
@@ -125,17 +153,26 @@ inline NetworkTelemetrySnapshot networkTelemetrySnapshot()
     }
 
     const uint64_t now = detail::steadyClockMicros();
-    const uint64_t elapsedMicros = now > st.lastSampleMicros ? now - st.lastSampleMicros : 0;
+    const uint64_t elapsedMicros = now > st.windowStartMicros ? now - st.windowStartMicros : 0;
     const uint64_t windowMs = detail::elapsedMicrosToWindowMs(elapsedMicros);
-    snapshot.sampleWindowMs = windowMs;
-    snapshot.sendKBps = detail::bytesPerSecondToKbps(st.totalSentBytes - st.lastSampleSentBytes, elapsedMicros);
-    snapshot.receiveKBps = detail::bytesPerSecondToKbps(st.totalReceivedBytes - st.lastSampleReceivedBytes, elapsedMicros);
+    const uint64_t windowSentBytes = st.totalSentBytes - st.windowStartSentBytes;
+    const uint64_t windowReceivedBytes = st.totalReceivedBytes - st.windowStartReceivedBytes;
+
+    if (elapsedMicros >= detail::kNetworkTelemetryDisplayWindowMicros) {
+        st.hasStableSample = true;
+        st.stableWindowMs = windowMs;
+        st.stableSendKBps = detail::bytesPerSecondToKbps(windowSentBytes, elapsedMicros);
+        st.stableReceiveKBps = detail::bytesPerSecondToKbps(windowReceivedBytes, elapsedMicros);
+        detail::resetNetworkWindow(st, now);
+    }
+
+    snapshot.source = st.hasStableSample ? st.source : detail::warmupSourceName(st.source);
+    snapshot.ratesAvailable = st.hasStableSample;
+    snapshot.sampleWindowMs = st.hasStableSample ? st.stableWindowMs : windowMs;
+    snapshot.sendKBps = st.hasStableSample ? st.stableSendKBps : 0;
+    snapshot.receiveKBps = st.hasStableSample ? st.stableReceiveKBps : 0;
     snapshot.utilizationPctAvailable = false;
     snapshot.utilizationPct = 0;
-
-    st.lastSampleMicros = now;
-    st.lastSampleSentBytes = st.totalSentBytes;
-    st.lastSampleReceivedBytes = st.totalReceivedBytes;
 
     return snapshot;
 }

@@ -106,12 +106,14 @@ namespace gxos { namespace apps {
 
         static std::string networkRateSummary(const gxos::apps::PerformanceSnapshot& perf) {
             if (!perf.networkAvailable) return "N/A";
+            if (!perf.networkRatesAvailable) return "warming up";
             if (perf.networkUtilizationAvailable) return std::to_string(perf.networkPct) + "%";
             return std::to_string(perf.networkSendKBps) + "/" + std::to_string(perf.networkReceiveKBps) + " KB/s";
         }
 
         static std::string networkRateDetail(const gxos::apps::PerformanceSnapshot& perf, bool sendRate) {
             if (!perf.networkAvailable) return "N/A";
+            if (!perf.networkRatesAvailable) return "warming up";
             const uint64_t kbps = sendRate ? perf.networkSendKBps : perf.networkReceiveKBps;
             return std::to_string(kbps) + " KB/s";
         }
@@ -461,6 +463,7 @@ namespace gxos { namespace apps {
         snapshot.performance.diskPct = diskTelemetry.activePct;
         const gxos::net::NetworkTelemetrySnapshot networkTelemetry = gxos::net::networkTelemetrySnapshot();
         snapshot.performance.networkAvailable = networkTelemetry.available;
+        snapshot.performance.networkRatesAvailable = networkTelemetry.ratesAvailable;
         snapshot.performance.networkSource = networkTelemetry.available ? networkTelemetry.source : "N/A";
         snapshot.performance.networkSampleWindowMs = networkTelemetry.available ? networkTelemetry.sampleWindowMs : 0;
         snapshot.performance.networkBytesSentTotal = networkTelemetry.bytesSentTotal;
@@ -721,13 +724,19 @@ namespace gxos { namespace apps {
         }
         oss << "processDiskAvailable=" << (snapshot.performance.processDiskAvailable ? "true" : "false") << "\n";
         oss << "networkAvailable=" << (snapshot.performance.networkAvailable ? "true" : "false") << "\n";
+        oss << "networkRatesAvailable=" << (snapshot.performance.networkRatesAvailable ? "true" : "false") << "\n";
         oss << "networkUtilizationAvailable=" << (snapshot.performance.networkUtilizationAvailable ? "true" : "false") << "\n";
         if (snapshot.performance.networkAvailable) {
             oss << "network=" << (snapshot.performance.networkUtilizationAvailable ? std::to_string(snapshot.performance.networkPct) + "%" : std::string("N/A")) << "\n";
             oss << "networkSource=" << snapshot.performance.networkSource << "\n";
             oss << "networkSampleWindowMs=" << snapshot.performance.networkSampleWindowMs << "\n";
-            oss << "networkSendKBps=" << snapshot.performance.networkSendKBps << "\n";
-            oss << "networkReceiveKBps=" << snapshot.performance.networkReceiveKBps << "\n";
+            if (snapshot.performance.networkRatesAvailable) {
+                oss << "networkSendKBps=" << snapshot.performance.networkSendKBps << "\n";
+                oss << "networkReceiveKBps=" << snapshot.performance.networkReceiveKBps << "\n";
+            } else {
+                oss << "networkSendKBps=N/A\n";
+                oss << "networkReceiveKBps=N/A\n";
+            }
         } else {
             oss << "network=N/A\n";
             oss << "networkSource=N/A\n";
