@@ -23,26 +23,33 @@ namespace gxos { namespace gui {
             return "/Desktop";
         }
 
-        static std::filesystem::path HostedRootPath() {
-            return std::filesystem::current_path();
-        }
-
-        static std::filesystem::path HostedPathForVirtual(const std::string& path) {
+        static std::string NormalizeVirtualPath(const std::string& path) {
             std::string normalized = path.empty() ? "/" : path;
             std::replace(normalized.begin(), normalized.end(), '\\', '/');
             std::filesystem::path virtualPath(normalized);
             if (virtualPath.is_relative()) virtualPath = std::filesystem::path("/") / virtualPath;
             std::string generic = virtualPath.lexically_normal().generic_string();
+            if (generic.empty()) return "/";
+            if (generic.front() != '/') generic.insert(generic.begin(), '/');
+            return generic;
+        }
+
+        static std::filesystem::path HostedRootPath() {
+            return std::filesystem::current_path();
+        }
+
+        static std::filesystem::path HostedPathForVirtual(const std::string& path) {
+            std::string generic = NormalizeVirtualPath(path);
             if (generic.empty() || generic == "/") return HostedRootPath();
             if (generic.front() == '/') generic.erase(generic.begin());
             return HostedRootPath() / std::filesystem::path(generic);
         }
 
-        static bool EnsureExists(std::string& error) {
+        static bool EnsureExists(const std::string& virtualPath, std::string& error, bool createIfMissing = true) {
             error.clear();
-            const std::string virtualPath = VirtualPath();
-            const std::filesystem::path hostedPath = HostedPathForVirtual(virtualPath);
-            Logger::write(LogLevel::Info, "Desktop folder resolver selected virtualPath=" + virtualPath + " hostedPath=" + hostedPath.generic_string());
+            const std::string normalized = NormalizeVirtualPath(virtualPath.empty() ? VirtualPath() : virtualPath);
+            const std::filesystem::path hostedPath = HostedPathForVirtual(normalized);
+            Logger::write(LogLevel::Info, "Desktop folder resolver selected virtualPath=" + normalized + " hostedPath=" + hostedPath.generic_string());
 
             std::error_code ec;
             if (std::filesystem::exists(hostedPath, ec)) {
@@ -51,6 +58,12 @@ namespace gxos { namespace gui {
                     return true;
                 }
                 error = ec ? ec.message() : "Desktop path exists but is not a directory";
+                Logger::write(LogLevel::Warn, "Desktop folder unavailable: " + error);
+                return false;
+            }
+
+            if (!createIfMissing) {
+                error = "Desktop path missing: " + normalized;
                 Logger::write(LogLevel::Warn, "Desktop folder unavailable: " + error);
                 return false;
             }
@@ -65,17 +78,17 @@ namespace gxos { namespace gui {
             return false;
         }
 
-        static std::vector<DesktopFolderEntry> Enumerate() {
+        static std::vector<DesktopFolderEntry> Enumerate(const std::string& virtualPath = VirtualPath()) {
             std::vector<DesktopFolderEntry> entries;
             std::string ensureError;
-            const bool available = EnsureExists(ensureError);
+            const std::string normalized = NormalizeVirtualPath(virtualPath.empty() ? VirtualPath() : virtualPath);
+            const bool available = EnsureExists(normalized, ensureError, normalized == VirtualPath());
             if (!available) {
                 Logger::write(LogLevel::Warn, "Desktop folder enumeration skipped: " + ensureError);
                 return entries;
             }
 
-            const std::string virtualRoot = VirtualPath();
-            const std::filesystem::path hostedRoot = HostedPathForVirtual(virtualRoot);
+            const std::filesystem::path hostedRoot = HostedPathForVirtual(normalized);
             Logger::write(LogLevel::Info, "Desktop folder enumeration started: " + hostedRoot.generic_string());
 
             std::error_code ec;
@@ -87,7 +100,7 @@ namespace gxos { namespace gui {
 
                 DesktopFolderEntry entry;
                 entry.name = item.path().filename().generic_string();
-                entry.virtualPath = virtualRoot + "/" + entry.name;
+                entry.virtualPath = normalized + "/" + entry.name;
                 entry.isDirectory = item.is_directory(ec);
                 entry.size = entry.isDirectory ? 0 : static_cast<uint64_t>(item.file_size(ec));
                 if (ec) {

@@ -57,8 +57,9 @@ Write-Host "repo: $repoRoot"
 Write-Host "branch: $(git -C $repoRoot branch --show-current)"
 Write-Host "head: $(git -C $repoRoot rev-parse HEAD)"
 
-$hostedDesktopLive = Find-FirstMatch -LiteralPath (Join-Path $Root "compositor.cpp") -Pattern "DesktopFolderResolver::Enumerate\("
-$hostedDesktopPathState = Find-FirstMatch -LiteralPath (Join-Path $Root "file_explorer.cpp") -Pattern "s_currentPath"
+$hostedDesktopLive = Find-FirstMatch -LiteralPath (Join-Path $Root "compositor.cpp") -Pattern "DesktopFolderResolver::Enumerate\(g_hostedDesktopDirectoryPath\)"
+$hostedDesktopPathState = Find-FirstMatch -LiteralPath (Join-Path $Root "compositor.cpp") -Pattern "g_hostedDesktopDirectoryPath"
+$hostedDesktopNav = Find-FirstMatch -LiteralPath (Join-Path $Root "compositor.cpp") -Pattern "DesktopBack|DesktopHome|desktop-nav:back|desktop-nav:home|hostedDesktopGoBack\(\)|hostedDesktopGoHome\(\)"
 $kernelDesktopLive = Find-FirstMatch -LiteralPath (Join-Path $Root "kernel\core\desktop.cpp") -Pattern "enumerate_desktop_folder_items\("
 $shellCdState = Find-FirstMatch -LiteralPath (Join-Path $Root "kernel\core\shell.cpp") -Pattern "cmd_cd\("
 $shellGetCwdState = Find-FirstMatch -LiteralPath (Join-Path $Root "kernel\core\shell.cpp") -Pattern "get_cwd\("
@@ -72,7 +73,8 @@ $displayOptionsIconSize = Find-FirstMatch -LiteralPath (Join-Path $Root "display
 
 Write-Host ""
 Emit-Check "hosted desktop folder enumeration" "present" $hostedDesktopLive
-Emit-Check "hosted File Explorer path state" "present" $hostedDesktopPathState
+Emit-Check "hosted desktop directory state" "present" $hostedDesktopPathState
+Emit-Check "hosted desktop navigation controls" "present" $hostedDesktopNav
 Emit-Check "bare-metal desktop folder enumeration" "present" $kernelDesktopLive
 Emit-Check "shell cd / cwd state" "present" $shellCdState
 Emit-Check "shell get_cwd exposure" "present" $shellGetCwdState
@@ -117,8 +119,8 @@ foreach ($scriptPath in $desktopSmokeScripts) {
 
 Write-Host ""
 Write-Host "status summary:"
-Write-Host "  desktop-directory-state=partial"
-Write-Host "  back-go-home-nav=present-in-file-explorer"
+Write-Host "  desktop-directory-state=hosted-live-navigation-present"
+Write-Host "  back-go-home-nav=present-in-hosted-desktop"
 Write-Host "  show-on-desktop-action=missing"
 Write-Host "  shell-cd-sync=missing"
 Write-Host "  icon-size-setting=missing-or-partial"

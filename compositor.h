@@ -72,7 +72,9 @@ namespace gxos { namespace gui {
         Trash,
         ThisSystem,
         FileManager,
-        SystemSettings
+        SystemSettings,
+        DesktopBack,
+        DesktopHome
     };
     struct DesktopItem {
         std::string label;
@@ -128,6 +130,8 @@ namespace gxos { namespace gui {
         // VNC reads from this regardless of which backend is active.
         static VideoBackend* g_videoBackend;
     private:
+        static std::string g_hostedDesktopDirectoryPath;
+        static std::vector<std::string> g_hostedDesktopBackHistory;
         static int main(int argc, char** argv);
         static void handleMessage(const ipc::Message& m);
         static void drawAll();
@@ -145,6 +149,10 @@ namespace gxos { namespace gui {
         static void openAppModelDemoViewerWindow();
         static void updateAppModelDemoViewerWindow(const std::string& status = "");
         static bool handleAppModelDemoKey(int key);
+        static bool hostedDesktopCanNavigateTo(const std::string& path);
+        static bool hostedDesktopGoBack();
+        static bool hostedDesktopGoHome();
+        static bool hostedDesktopSetCurrentPath(const std::string& path, bool pushHistory);
         static void pinAction(const std::string& act);
         static void unpinAction(const std::string& act);
         static void saveDesktopConfig();

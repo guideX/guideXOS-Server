@@ -187,6 +187,8 @@ namespace gxos {
 
         // Video backend (GDI on Windows, kernel FB on bare-metal)
         VideoBackend* Compositor::g_videoBackend = nullptr;
+        std::string Compositor::g_hostedDesktopDirectoryPath = DesktopFolderResolver::VirtualPath();
+        std::vector<std::string> Compositor::g_hostedDesktopBackHistory{};
 
         void Compositor::initVideoBackend( ) {
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)
@@ -687,6 +689,21 @@ namespace gxos {
             return normalized == "/Desktop" || startsWithText(normalized, "/Desktop/");
         }
 
+        static bool isDesktopFolderRootPath(const std::string& path) {
+            return normalizeHostedVirtualPath(path) == normalizeHostedVirtualPath(DesktopFolderResolver::VirtualPath());
+        }
+
+        static std::string hostedDesktopRootPath() {
+            return normalizeHostedVirtualPath(DesktopFolderResolver::VirtualPath());
+        }
+
+        static bool hostedDesktopIsWithinLiveRoot(const std::string& path) {
+            const std::string normalized = normalizeHostedVirtualPath(path);
+            const std::string root = hostedDesktopRootPath();
+            const std::string rootPrefix = root + "/";
+            return normalized == root || startsWithText(normalized, rootPrefix.c_str());
+        }
+
         static std::string basenameForVirtualPath(const std::string& path) {
             const std::string normalized = normalizeHostedVirtualPath(path);
             if (normalized == "/") return "Root";
@@ -945,12 +962,31 @@ namespace gxos {
             refreshStartMenuPinnedRecentFromConfig(g_cfg, g_startMenuPinnedRecent);
 
             g_items.clear( );
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
+            const std::string hostedRoot = hostedDesktopRootPath();
+            if (g_hostedDesktopDirectoryPath.empty()) g_hostedDesktopDirectoryPath = hostedRoot;
+            g_hostedDesktopDirectoryPath = normalizeHostedVirtualPath(g_hostedDesktopDirectoryPath);
+            if (!hostedDesktopIsWithinLiveRoot(g_hostedDesktopDirectoryPath)) {
+                Logger::write(LogLevel::Warn, "Hosted desktop current path escaped live root; resetting to root");
+                g_hostedDesktopDirectoryPath = hostedRoot;
+            }
+            if (!isDesktopFolderRootPath(g_hostedDesktopDirectoryPath)) {
+                g_items.push_back(makeSystemDesktopItem(DesktopSystemObjectKind::DesktopBack, "Back", "desktop-nav:back", ""));
+                g_items.push_back(makeSystemDesktopItem(DesktopSystemObjectKind::DesktopHome, "Go to Desktop", "desktop-nav:home", ""));
+            }
+            appendSystemDesktopItemIfEnabled(g_items, g_cfg.showDesktopTrash, DesktopSystemObjectKind::Trash, "Trash", "system:Trash", hostedTrashIconLogicalName().c_str());
+            appendSystemDesktopItemIfEnabled(g_items, g_cfg.showDesktopThisSystem, DesktopSystemObjectKind::ThisSystem, "This System", "system:ThisSystem", "place.computer");
+            appendSystemDesktopItemIfEnabled(g_items, g_cfg.showDesktopFileManager, DesktopSystemObjectKind::FileManager, "File Manager", "system:FileManager", "app.files");
+            appendSystemDesktopItemIfEnabled(g_items, g_cfg.showDesktopSystemSettings, DesktopSystemObjectKind::SystemSettings, "System Settings", "system:SystemSettings", "app.settings");
+            std::vector<DesktopFolderEntry> desktopEntries = DesktopFolderResolver::Enumerate(g_hostedDesktopDirectoryPath);
+#else
             appendSystemDesktopItemIfEnabled(g_items, g_cfg.showDesktopTrash, DesktopSystemObjectKind::Trash, "Trash", "system:Trash", hostedTrashIconLogicalName().c_str());
             appendSystemDesktopItemIfEnabled(g_items, g_cfg.showDesktopThisSystem, DesktopSystemObjectKind::ThisSystem, "This System", "system:ThisSystem", "place.computer");
             appendSystemDesktopItemIfEnabled(g_items, g_cfg.showDesktopFileManager, DesktopSystemObjectKind::FileManager, "File Manager", "system:FileManager", "app.files");
             appendSystemDesktopItemIfEnabled(g_items, g_cfg.showDesktopSystemSettings, DesktopSystemObjectKind::SystemSettings, "System Settings", "system:SystemSettings", "app.settings");
 
             std::vector<DesktopFolderEntry> desktopEntries = DesktopFolderResolver::Enumerate();
+#endif
             for (const auto& entry : desktopEntries) {
                 g_items.push_back(makeFilesystemDesktopItem(entry));
             }
@@ -1566,6 +1602,81 @@ namespace gxos {
             return true;
         }
 
+        bool Compositor::hostedDesktopCanNavigateTo(const std::string& path) {
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
+            const std::string normalized = normalizeHostedVirtualPath(path);
+            if (!hostedDesktopIsWithinLiveRoot(normalized)) {
+                Logger::write(LogLevel::Warn, "Hosted desktop navigation rejected outside live root: " + normalized);
+                return false;
+            }
+
+            std::string ensureError;
+            const bool createIfMissing = isDesktopFolderRootPath(normalized);
+            if (!DesktopFolderResolver::EnsureExists(normalized, ensureError, createIfMissing)) {
+                Logger::write(LogLevel::Warn, "Hosted desktop navigation target unavailable: " + ensureError);
+                return false;
+            }
+
+            return true;
+#else
+            (void)path;
+            return false;
+#endif
+        }
+
+        bool Compositor::hostedDesktopSetCurrentPath(const std::string& path, bool pushHistory) {
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
+            const std::string normalized = normalizeHostedVirtualPath(path);
+            if (!hostedDesktopCanNavigateTo(normalized)) return false;
+            const std::string current = normalizeHostedVirtualPath(g_hostedDesktopDirectoryPath);
+            if (normalized == current) {
+                Logger::write(LogLevel::Info, "Hosted desktop navigation already at path=" + normalized);
+                return true;
+            }
+
+            if (pushHistory && !current.empty() && current != normalized) {
+                g_hostedDesktopBackHistory.push_back(current);
+            }
+            g_hostedDesktopDirectoryPath = normalized;
+            Logger::write(LogLevel::Info, "Hosted desktop current path=" + g_hostedDesktopDirectoryPath);
+            refreshDesktopItems();
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
+            requestRepaint();
+#endif
+            return true;
+#else
+            (void)path;
+            (void)pushHistory;
+            return false;
+#endif
+        }
+
+        bool Compositor::hostedDesktopGoBack() {
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
+            if (g_hostedDesktopBackHistory.empty()) {
+                Logger::write(LogLevel::Info, "Hosted desktop back navigation ignored: no history");
+                return false;
+            }
+
+            const std::string target = g_hostedDesktopBackHistory.back();
+            g_hostedDesktopBackHistory.pop_back();
+            Logger::write(LogLevel::Info, "Hosted desktop navigating back to " + target);
+            return hostedDesktopSetCurrentPath(target, false);
+#else
+            return false;
+#endif
+        }
+
+        bool Compositor::hostedDesktopGoHome() {
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
+            const std::string root = hostedDesktopRootPath();
+            Logger::write(LogLevel::Info, "Hosted desktop navigating home to " + root);
+            return hostedDesktopSetCurrentPath(root, true);
+#else
+            return false;
+#endif
+        }
+
         void Compositor::openDesktopItem(int index) {
             if (index < 0 || index >= (int)g_items.size()) return;
             const DesktopItem& item = g_items[index];
@@ -1586,11 +1697,24 @@ namespace gxos {
                     case DesktopSystemObjectKind::SystemSettings:
                         launchAction("ControlPanel");
                         return;
+                    case DesktopSystemObjectKind::DesktopBack:
+                        if (hostedDesktopGoBack()) return;
+                        err = "No previous hosted desktop folder";
+                        break;
+                    case DesktopSystemObjectKind::DesktopHome:
+                        if (hostedDesktopGoHome()) return;
+                        err = "Unable to return to hosted desktop root";
+                        break;
                     default:
                         err = "Unknown system desktop object: " + item.label;
                         break;
                 }
             } else if (item.kind == DesktopItemKind::FilesystemEntry) {
+                if (item.isDirectory) {
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
+                    if (hostedDesktopSetCurrentPath(item.path, true)) return;
+#endif
+                }
                 if (DesktopService::OpenFilesystemEntry(item.path, item.isDirectory, err)) return;
             } else if (item.kind == DesktopItemKind::Shortcut && item.shortcutType == "App") {
                 const RegisteredDesktopApp* app = findDesktopAppByNameOrId(item.targetAppId);
