@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Navigator Forms Test</title>
+<style>
+body { background-color: #f8fafc; color: #293442; }
+h1 { color: #1f4f8c; margin-bottom: 10px; }
+h2 { color: #2a5a9f; margin-bottom: 8px; }
+p { margin-bottom: 8px; }
+a { color: #0f4fa8; text-decoration: underline; }
+</style>
+</head>
+<body>
+<h1>Navigator Forms Test</h1>
+<p>This page exercises Forms-lite POST v0.1 controls: text input, checkbox, radio, textarea, and select. Form 1 uses GET so the query string can be inspected in the address bar. Form 2 posts URL-encoded fields to the deterministic hosted smoke server.</p>
+
+<h2>Form 1 - GET (all controls)</h2>
+<form method="GET" action="forms-result.html">
+<input type="text" name="q" value="" placeholder="search terms">
+<input type="checkbox" name="subscribe" value="yes" checked>
+<input type="radio" name="color" value="blue" checked>
+<input type="radio" name="color" value="green">
+<textarea name="note" rows="4" cols="32">hello textarea</textarea>
+<select name="size">
+<option value="small">Small</option>
+<option value="medium" selected>Medium</option>
+<option value="large">Large</option>
+</select>
+<input type="submit" value="Search">
+</form>
+
+<h2>Form 2 - Hosted POST (all controls)</h2>
+<form method="POST" action="http://127.0.0.1:8080/navigator-smoke/post-echo">
+<input type="text" name="msg" value="" placeholder="message">
+<input type="checkbox" name="agree" value="yes">
+<input type="radio" name="priority" value="low" checked>
+<input type="radio" name="priority" value="high">
+<textarea name="body" rows="3" cols="32">body text</textarea>
+<select name="category">
+<option value="bug">Bug</option>
+<option value="feature" selected>Feature</option>
+<option value="question">Question</option>
+</select>
+<input type="submit" value="Hosted POST">
+</form>
+
+<p>Expected results:</p>
+<ul>
+<li>GET submit opens forms-result.html with q=..., subscribe=yes, color=blue, note=..., size=medium in the URL.</li>
+<li>Hosted POST sends an application/x-www-form-urlencoded body when the deterministic local smoke server is running.</li>
+<li>POST to file:// remains unsupported and is reported honestly.</li>
+<li>Tab and Shift+Tab move focus between controls without touching the address bar.</li>
+<li>Space toggles checkbox, selects radio, cycles the select dropdown.</li>
+<li>Textarea supports typing, backspace, and newline.</li>
+</ul>
+
+<a href="index.html">Back to Navigator Help</a>
+</body>
+</html>

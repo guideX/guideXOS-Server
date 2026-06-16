@@ -1,0 +1,20 @@
+guideXOS Navigator - Plain Text Test
+=====================================
+
+This file tests plain-text (.txt) rendering in Navigator.
+
+The entire file is rendered as a single Preformatted block so that:
+  - Line breaks are preserved exactly as written.
+  - Indentation and spacing are kept intact.
+  - No paragraph-per-line overhead is incurred.
+
+Columns and alignment:
+  Name            Value
+  --------------- -----
+  Version         1.0
+  Block type      Preformatted
+  Word wrap       Disabled (raw lines preserved)
+
+Special characters: & < > " '
+
+End of plain text test file.

@@ -1,0 +1,181 @@
+﻿ADD IBM S390X ARCHITECTURE SUPPORT TO guideXOS SERVER (C++)
+
+You are working inside the guideXOS Server codebase written in modern C++.
+
+GOAL:
+Add full, clean, and extensible support for the IBM s390x (IBM Z mainframe) architecture across the system, without breaking any existing architectures (amd64, x86, arm, arm64, riscv, powerpc, mips64, loongarch, sparc64, sparc8).
+
+This is NOT a full emulator implementation. It is a full architectural integration: detection, abstraction, endian safety, filesystem correctness, syscall compatibility, and test coverage.
+
+────────────────────────────────────────────────────────────
+1. ARCHITECTURE DETECTION & BUILD SYSTEM
+────────────────────────────────────────────────────────────
+
+- Detect s390x using compiler macro: __s390x__
+- Add ARCH_S390X to architecture enum
+- Ensure architecture name resolves to "s390x"
+- Update build system (CMake or equivalent):
+  - Add s390x as a supported target
+  - Define BUILD_S390X flag
+- Ensure no changes break other architectures
+
+────────────────────────────────────────────────────────────
+2. CORE ARCH ABSTRACTION LAYER
+────────────────────────────────────────────────────────────
+
+Extend architecture abstraction system:
+
+- Add ARCH_S390X enum entry
+- Map detection macro to ARCH_S390X
+- Define:
+  - word size: 64-bit
+  - pointer size: 64-bit
+  - alignment rules: strict alignment required
+  - endianness: BIG_ENDIAN
+- Update:
+  - getArchName() => "s390x"
+  - getArchEndianness() => BIG_ENDIAN
+- Ensure all switch statements handling architectures:
+  - include safe handling for ARCH_S390X
+  - no fallthrough bugs
+  - no unhandled enum warnings
+
+────────────────────────────────────────────────────────────
+3. ENDIANNESS + SERIALIZATION SAFETY (CRITICAL)
+────────────────────────────────────────────────────────────
+
+s390x is BIG-ENDIAN. This is critical.
+
+Update all serialization and binary I/O systems:
+
+- Replace any raw struct disk writes with explicit serialization
+- Ensure all filesystem structures are endian-safe:
+  - inode
+  - directory entries
+  - superblock
+  - journal/log entries (if present)
+
+Implement or extend:
+- to_big_endian()
+- to_little_endian()
+- read/write primitives for:
+  - uint16_t
+  - uint32_t
+  - uint64_t
+
+Rules:
+- On-disk format must be architecture-independent
+- Host memory layout must never directly define disk format
+- Avoid undefined struct padding assumptions
+
+Add compile-time or runtime assertions verifying:
+- correct endian mode for s390x builds
+
+────────────────────────────────────────────────────────────
+4. FILESYSTEM COMPATIBILITY LAYER
+────────────────────────────────────────────────────────────
+
+Ensure filesystem layer is fully portable:
+
+- All FS metadata must be serialized explicitly
+- Remove any dependency on:
+  - struct packing assumptions
+  - native pointer sizes in disk structures
+- Ensure cross-arch compatibility:
+  x86 ↔ arm64 ↔ riscv ↔ s390x
+
+Add:
+- test case for mount + read + write cycle on s390x
+- cross-architecture filesystem image validation
+- debug logging for FS parsing differences per architecture
+
+────────────────────────────────────────────────────────────
+5. SYSCALL + ABI ABSTRACTION LAYER
+────────────────────────────────────────────────────────────
+
+Integrate s390x into syscall dispatch system:
+
+- Ensure syscall interface is architecture-agnostic OR properly mapped
+- Add s390x ABI entry if ABI table exists
+- Ensure correct:
+  - stack alignment rules (strict alignment required on s390x)
+  - calling convention abstraction compatibility
+- Do NOT duplicate syscall logic per architecture
+- Prefer shared syscall core with minimal arch-specific adapters
+
+────────────────────────────────────────────────────────────
+6. ARCHITECTURE REGISTRY / FACTORY SYSTEM
+────────────────────────────────────────────────────────────
+
+Register s390x in architecture factory:
+
+- Add backend entry for ARCH_S390X
+- Provide stub execution backend (if full CPU emulation exists):
+  - do NOT implement full instruction set
+  - only provide safe stub handlers:
+    - "unsupported instruction"
+    - logging
+    - controlled failure modes
+- Ensure system can boot in degraded mode safely
+
+────────────────────────────────────────────────────────────
+7. SAFETY + FALLBACK BEHAVIOR
+────────────────────────────────────────────────────────────
+
+If a feature is not implemented for s390x:
+
+- Return structured error:
+  ERR_UNSUPPORTED_ARCH_FEATURE
+- Never crash or assert in production mode
+- Log:
+  - architecture = s390x
+  - feature requested
+  - subsystem name
+- Ensure server continues running safely
+
+────────────────────────────────────────────────────────────
+8. TESTING & VALIDATION SUITE
+────────────────────────────────────────────────────────────
+
+Add full test coverage for s390x:
+
+- Unit tests:
+  - architecture detection
+  - endian conversion correctness
+  - serialization round-trip correctness
+
+- Filesystem tests:
+  - create filesystem image
+  - mount on s390x build
+  - read/write integrity validation
+
+- Cross-architecture tests:
+  - x86 writes → s390x reads
+  - s390x writes → arm64 reads
+
+Add test file:
+- test_s390x.cpp (or project equivalent)
+
+────────────────────────────────────────────────────────────
+9. DESIGN GOAL / CONSTRAINTS
+────────────────────────────────────────────────────────────
+
+- Do NOT break existing architectures
+- Keep changes minimal and localized
+- Prefer shared abstraction layers over per-arch duplication
+- Ensure deterministic behavior across all architectures
+- Maintain filesystem format stability across all ISAs
+- Focus on portability, correctness, and safety over performance
+
+────────────────────────────────────────────────────────────
+FINAL OUTCOME
+────────────────────────────────────────────────────────────
+
+After implementation:
+
+- guideXOS Server should compile and run on s390x target
+- architecture should be selectable and recognized
+- filesystem should be fully portable and endian-safe
+- syscall layer should function via shared abstraction
+- system should pass all tests including cross-arch validation
+- unsupported features should degrade gracefully instead of crashing

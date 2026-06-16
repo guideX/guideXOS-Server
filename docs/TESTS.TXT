@@ -1,0 +1,53 @@
+Here’s a quick way to exercise both the CLI and the (headless) GUI we have in guideXOSServer.
+Build and run
+•	Build the C++ project guideXOSServer (C++14). In Visual Studio: set guideXOSServer as Startup Project, x64 Debug, Build, then Start Without Debugging. Or use your existing vcxproj.
+•	The binary is an interactive console app (server.cpp has main).
+CLI smoke test (at the guideXOSServer prompt)
+•	mem — shows allocator usage.
+•	alloc 1024 — allocates bytes and prints pointer.
+•	tasks — shows scheduler stats.
+•	log — prints logger snapshot.
+•	spawn worker 3 — starts a demo worker; then plist to list PIDs.
+•	send <pid> hello and recv <pid> — demo per-process IPC.
+•	bus.sub test 1 — subscribe PID 1 (or your pid) to a channel, bus.pub test hi fanout, then bus.pop test 200.
+•	pbytes — shows per-pid memory usage.
+•	help — lists commands.
+•	exit — quits the server.
+Console service test (IPC-based “console”)
+•	console.start — starts the console service process (returns pid).
+•	console.send hello world — sends a line into the console service.
+•	console.pop 500 — pops a reply from console.output (expect “[console] hello world”).
+•	console.send exit then console.pop — expect “bye,” and the service exits.
+GUI compositor test (headless) Note: The compositor is a stubbed GUI service; there’s no real window drawn. You test via the IPC bus and responses printed by gui.pop.
+•	gui.start — starts the compositor (pid logged).
+•	gui.win MyWin 320 200 — requests a window. Then:
+•	gui.pop — should print GUI: type=1 payload=<id>|MyWin (CreateWindow event).
+•	gui.text <id> Hello GUI — replace <id> with the id from the CreateWindow payload, then:
+•	gui.pop — should print GUI: type=3 payload=<id>|Hello GUI (DrawText echo).
+•	gui.close <id> — request close, then gui.pop — should print GUI: type=2 payload=<id>.
+App Model launch-shadow smoke
+•	Hosted build: .\build.bat
+•	Hosted smoke command at the guideXOSServer prompt: gui.smoke.launchshadow
+•	Recommended hosted smoke pass:
+	gui.start
+	gui.smoke.launchshadow
+	desktop.appmodel.summary
+	desktop.appmodel.coverage
+	desktop.appmodel.typed-dispatch-gate
+	exit
+•	The hosted smoke is diagnostic-only. It exercises the Start Menu and desktop shortcut LaunchTarget shadow helper, prints typedDispatchCandidate, typedDispatchCandidateMatchesActual, and typedDispatchCandidateComparison fields, and must report runtimeLaunchBehaviorChanged: false.
+•	Typed-dispatch flag smoke: .\scripts\smoke-appmodel-typed-dispatch-flags.ps1
+•	The flag smoke is diagnostic-only. It builds temporary hosted binaries under out\appmodel-typed-dispatch-flags for GXOS_APPMODEL_TYPED_DISPATCH_SHADOW_ONLY only, GXOS_APPMODEL_TYPED_DISPATCH_ENABLED only, and both flags together. All cases must report behavior=legacy-dispatch, enablesTypedDispatch=false, and feedsTypedDispatchIntoLaunch=false. The normal hosted binary must still report shadowOnly=OFF enabled=OFF.
+•	Bare-metal build: .\build.ps1 -Arch amd64
+•	QEMU launch-shadow smoke: .\scripts\smoke-appmodel-launchshadow.ps1 -TimeoutSeconds 35
+•	The QEMU smoke is diagnostic-only. It boots a temporary smoke kernel, captures serial output, asserts ImgViewer is expected-unsupported, asserts FakeLaunchShadowApp is the only unexpected-mismatch row, and restores a normal kernel build afterward.
+•	Do not make the QEMU smoke part of the normal quick hosted build loop; it is a bounded integration smoke for bare-metal/QEMU environments with QEMU, OVMF, and disks\test-fat32.img available.
+•	Quick Phase 2 status: .\scripts\smoke-appmodel-phase2-status.ps1
+•	Full Phase 2 status with QEMU: .\scripts\smoke-appmodel-phase2-status.ps1 -BuildHosted -IncludeQemu -TimeoutSeconds 35
+•	The Phase 2 status script is a compact reporter. QEMU is optional and is only run when -IncludeQemu is passed.
+Automating a quick pass
+•	You can pipe a script of commands into the exe (e.g., a .txt with lines: mem, console.start, console.send hi, console.pop, gui.start, gui.win Test 200 150, gui.pop, exit).
+What to expect
+•	All GUI actions are acknowledged via GUI events printed by gui.pop. No OS windows are created yet.
+•	The compositor runs until the main process exits (there’s no exposed “bye” for it yet).
+•	App Model launch-shadow smokes are non-fatal diagnostics. They must not feed typed dispatch into launchAction, DesktopService::LaunchApp(), or AppManager::launchApp().

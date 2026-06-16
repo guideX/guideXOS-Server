@@ -1,0 +1,1146 @@
+
+================================================================================
+guideXOS Server - Universal Binary System Implementation Specification
+================================================================================
+
+Version: 2.0
+Last Updated: 2025
+Language: C++ (C++14)
+Phase: 8 (Universal Binary System)
+
+This document provides detailed implementation specifications for the Universal
+Binary System components in guideXOS Server.
+
+--------------------------------------------------------------------------------
+TABLE OF CONTENTS
+--------------------------------------------------------------------------------
+1. Overview
+2. Initial Target Architectures
+3. Component 1: CpuArchitecture Enum
+4. Component 2: ArchitectureDetector
+5. Component 3: GXAPP Container Format
+6. Component 4: GXAppContainer Class
+7. Component 5: UniversalAppLoader
+8. Component 6: gxbuild CLI Tool
+9. Dependencies & Libraries
+10. Testing Strategy
+11. Future Expansion
+
+================================================================================
+1. OVERVIEW
+================================================================================
+
+The Universal Binary System enables guideXOS applications to be distributed as
+single packages containing native binaries for multiple CPU architectures. At
+runtime, the system automatically selects and executes the appropriate binary.
+
+Key Design Principles:
+- Native performance (no emulation in initial implementation)
+- ELF binary format (industry standard)
+- ZIP-based container (simple, well-understood)
+- Static linking preferred (self-contained applications)
+- Graceful degradation (clear errors for unsupported architectures)
+
+================================================================================
+2. INITIAL TARGET ARCHITECTURES
+================================================================================
+
+Phase 1 Targets (MVP):
+- x86      (32-bit Intel/AMD, Legacy BIOS systems)
+- amd64    (64-bit x86-64, UEFI systems)
+- riscv64  (64-bit RISC-V, emerging architecture)
+
+Future Targets (Phase 2+):
+- arm64    (64-bit ARM, AArch64)
+- ia64     (Intel Itanium)
+- sparc64  (64-bit SPARC v9)
+- sparc    (32-bit SPARC v8)
+- arm      (32-bit ARM, ARMv7)
+- ppc64    (64-bit PowerPC)
+- mips64   (64-bit MIPS)
+- loongarch64 (64-bit LoongArch)
+
+================================================================================
+3. COMPONENT 1: CpuArchitecture Enum
+================================================================================
+
+Location: kernel/core/include/kernel/cpu_arch.h
+
+Purpose:
+  Standardized enumeration of all supported CPU architectures with helper
+  functions for string conversion and architecture properties.
+
+--------------------------------------------------------------------------------
+HEADER FILE: kernel/core/include/kernel/cpu_arch.h
+--------------------------------------------------------------------------------
+
+#pragma once
+
+#include "types.h"
+
+namespace kernel {
+
+// Enumeration of all supported CPU architectures
+enum class CpuArchitecture : uint8_t {
+    Unknown = 0,
+    
+    // x86 family
+    X86,            // 32-bit Intel/AMD (i386, i486, i586, i686)
+    AMD64,          // 64-bit x86-64 (Intel 64, AMD64)
+    
+    // ARM family
+    ARM,            // 32-bit ARM (ARMv7-A)
+    ARM64,          // 64-bit ARM (AArch64, ARMv8+)
+    
+    // Other 64-bit architectures
+    IA64,           // Intel Itanium (IA-64)
+    SPARC,          // 32-bit SPARC (v8, Sun4m)
+    SPARC64,        // 64-bit SPARC (v9, UltraSPARC)
+    MIPS64,         // 64-bit MIPS (MIPS64)
+    PPC64,          // 64-bit PowerPC (POWER, PPC64)
+    RISCV64,        // 64-bit RISC-V (RV64GC)
+    LOONGARCH64,    // 64-bit LoongArch (LA64)
+    
+    // Sentinel for iteration
+    _Count
+};
+
+// String conversion functions
+const char* cpu_arch_to_string(CpuArchitecture arch);
+CpuArchitecture cpu_arch_from_string(const char* name);
+
+// Architecture properties
+bool cpu_arch_is_64bit(CpuArchitecture arch);
+size_t cpu_arch_pointer_size(CpuArchitecture arch);
+size_t cpu_arch_page_size(CpuArchitecture arch);
+const char* cpu_arch_elf_machine_name(CpuArchitecture arch);
+uint16_t cpu_arch_elf_machine_id(CpuArchitecture arch);
+
+// Endianness
+enum class Endianness : uint8_t {
+    Little,
+    Big
+};
+Endianness cpu_arch_endianness(CpuArchitecture arch);
+
+} // namespace kernel
+
+--------------------------------------------------------------------------------
+IMPLEMENTATION FILE: kernel/core/cpu_arch.cpp
+--------------------------------------------------------------------------------
+
+#include "include/kernel/cpu_arch.h"
+#include <cstring>
+
+namespace kernel {
+
+const char* cpu_arch_to_string(CpuArchitecture arch) {
+    switch (arch) {
+        case CpuArchitecture::X86:         return "x86";
+        case CpuArchitecture::AMD64:       return "amd64";
+        case CpuArchitecture::ARM:         return "arm";
+        case CpuArchitecture::ARM64:       return "arm64";
+        case CpuArchitecture::IA64:        return "ia64";
+        case CpuArchitecture::SPARC:       return "sparc";
+        case CpuArchitecture::SPARC64:     return "sparc64";
+        case CpuArchitecture::MIPS64:      return "mips64";
+        case CpuArchitecture::PPC64:       return "ppc64";
+        case CpuArchitecture::RISCV64:     return "riscv64";
+        case CpuArchitecture::LOONGARCH64: return "loongarch64";
+        default:                           return "unknown";
+    }
+}
+
+CpuArchitecture cpu_arch_from_string(const char* name) {
+    if (!name) return CpuArchitecture::Unknown;
+    
+    if (strcmp(name, "x86") == 0 || strcmp(name, "i386") == 0 ||
+        strcmp(name, "i686") == 0) {
+        return CpuArchitecture::X86;
+    }
+    if (strcmp(name, "amd64") == 0 || strcmp(name, "x86_64") == 0 ||
+        strcmp(name, "x64") == 0) {
+        return CpuArchitecture::AMD64;
+    }
+    if (strcmp(name, "arm") == 0 || strcmp(name, "armv7") == 0) {
+        return CpuArchitecture::ARM;
+    }
+    if (strcmp(name, "arm64") == 0 || strcmp(name, "aarch64") == 0) {
+        return CpuArchitecture::ARM64;
+    }
+    if (strcmp(name, "ia64") == 0 || strcmp(name, "itanium") == 0) {
+        return CpuArchitecture::IA64;
+    }
+    if (strcmp(name, "sparc") == 0 || strcmp(name, "sparc32") == 0) {
+        return CpuArchitecture::SPARC;
+    }
+    if (strcmp(name, "sparc64") == 0 || strcmp(name, "sparcv9") == 0) {
+        return CpuArchitecture::SPARC64;
+    }
+    if (strcmp(name, "mips64") == 0) {
+        return CpuArchitecture::MIPS64;
+    }
+    if (strcmp(name, "ppc64") == 0 || strcmp(name, "powerpc64") == 0) {
+        return CpuArchitecture::PPC64;
+    }
+    if (strcmp(name, "riscv64") == 0 || strcmp(name, "riscv") == 0) {
+        return CpuArchitecture::RISCV64;
+    }
+    if (strcmp(name, "loongarch64") == 0 || strcmp(name, "loongarch") == 0) {
+        return CpuArchitecture::LOONGARCH64;
+    }
+    
+    return CpuArchitecture::Unknown;
+}
+
+bool cpu_arch_is_64bit(CpuArchitecture arch) {
+    switch (arch) {
+        case CpuArchitecture::X86:
+        case CpuArchitecture::ARM:
+        case CpuArchitecture::SPARC:
+            return false;
+        default:
+            return true;
+    }
+}
+
+size_t cpu_arch_pointer_size(CpuArchitecture arch) {
+    return cpu_arch_is_64bit(arch) ? 8 : 4;
+}
+
+size_t cpu_arch_page_size(CpuArchitecture arch) {
+    switch (arch) {
+        case CpuArchitecture::IA64:
+            return 16384;  // 16 KB pages
+        case CpuArchitecture::SPARC64:
+            return 8192;   // 8 KB pages
+        default:
+            return 4096;   // 4 KB pages
+    }
+}
+
+// ELF e_machine values
+uint16_t cpu_arch_elf_machine_id(CpuArchitecture arch) {
+    switch (arch) {
+        case CpuArchitecture::X86:         return 3;    // EM_386
+        case CpuArchitecture::AMD64:       return 62;   // EM_X86_64
+        case CpuArchitecture::ARM:         return 40;   // EM_ARM
+        case CpuArchitecture::ARM64:       return 183;  // EM_AARCH64
+        case CpuArchitecture::IA64:        return 50;   // EM_IA_64
+        case CpuArchitecture::SPARC:       return 2;    // EM_SPARC
+        case CpuArchitecture::SPARC64:     return 43;   // EM_SPARCV9
+        case CpuArchitecture::MIPS64:      return 8;    // EM_MIPS
+        case CpuArchitecture::PPC64:       return 21;   // EM_PPC64
+        case CpuArchitecture::RISCV64:     return 243;  // EM_RISCV
+        case CpuArchitecture::LOONGARCH64: return 258;  // EM_LOONGARCH
+        default:                           return 0;    // EM_NONE
+    }
+}
+
+Endianness cpu_arch_endianness(CpuArchitecture arch) {
+    switch (arch) {
+        case CpuArchitecture::SPARC:
+        case CpuArchitecture::SPARC64:
+        case CpuArchitecture::PPC64:
+        case CpuArchitecture::MIPS64:  // Note: MIPS can be either, default big
+            return Endianness::Big;
+        default:
+            return Endianness::Little;
+    }
+}
+
+} // namespace kernel
+
+================================================================================
+4. COMPONENT 2: ArchitectureDetector
+================================================================================
+
+Location: kernel/core/include/kernel/arch_detector.h
+          kernel/core/arch_detector.cpp
+
+Purpose:
+  Runtime detection of the current CPU architecture and capabilities.
+  Uses compile-time detection primarily, with runtime CPUID for feature flags.
+
+--------------------------------------------------------------------------------
+HEADER FILE: kernel/core/include/kernel/arch_detector.h
+--------------------------------------------------------------------------------
+
+#pragma once
+
+#include "cpu_arch.h"
+
+namespace kernel {
+
+// CPU feature flags (bitmask)
+enum class CpuFeature : uint32_t {
+    None       = 0,
+    
+    // x86/amd64 features
+    SSE        = (1 << 0),
+    SSE2       = (1 << 1),
+    SSE3       = (1 << 2),
+    SSSE3      = (1 << 3),
+    SSE4_1     = (1 << 4),
+    SSE4_2     = (1 << 5),
+    AVX        = (1 << 6),
+    AVX2       = (1 << 7),
+    AVX512     = (1 << 8),
+    AES_NI     = (1 << 9),
+    
+    // ARM features
+    NEON       = (1 << 10),
+    SVE        = (1 << 11),
+    
+    // RISC-V extensions
+    RV_M       = (1 << 12),  // Multiply
+    RV_A       = (1 << 13),  // Atomic
+    RV_F       = (1 << 14),  // Float
+    RV_D       = (1 << 15),  // Double
+    RV_C       = (1 << 16),  // Compressed
+    RV_V       = (1 << 17),  // Vector
+};
+
+inline CpuFeature operator|(CpuFeature a, CpuFeature b) {
+    return static_cast<CpuFeature>(
+        static_cast<uint32_t>(a) | static_cast<uint32_t>(b));
+}
+
+inline bool has_feature(CpuFeature flags, CpuFeature test) {
+    return (static_cast<uint32_t>(flags) & static_cast<uint32_t>(test)) != 0;
+}
+
+// CPU information structure
+struct CpuInfo {
+    CpuArchitecture architecture;
+    char vendor[16];          // e.g., "GenuineIntel", "AuthenticAMD"
+    char model[64];           // e.g., "Intel Core i7-9700K"
+    uint32_t family;
+    uint32_t model_id;
+    uint32_t stepping;
+    uint32_t num_cores;
+    uint32_t num_threads;
+    CpuFeature features;
+};
+
+class ArchitectureDetector {
+public:
+    // Initialize the detector (call once at boot)
+    static void init();
+    
+    // Get the current CPU architecture
+    static CpuArchitecture get();
+    
+    // Get detailed CPU information
+    static const CpuInfo& info();
+    
+    // Check for specific features
+    static bool has_feature(CpuFeature feature);
+    
+    // Check if a specific architecture binary can run
+    // Currently only returns true for exact match
+    // Future: ABI translation support
+    static bool can_execute(CpuArchitecture arch);
+    
+    // Get human-readable description
+    static const char* description();
+    
+private:
+    static bool s_initialized;
+    static CpuInfo s_info;
+    static char s_description[128];
+    
+    // Architecture-specific initialization
+    static void detect_x86();
+    static void detect_arm();
+    static void detect_riscv();
+    static void detect_generic();
+};
+
+} // namespace kernel
+
+--------------------------------------------------------------------------------
+IMPLEMENTATION FILE: kernel/core/arch_detector.cpp
+--------------------------------------------------------------------------------
+
+#include "include/kernel/arch_detector.h"
+#include <cstring>
+
+#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
+#if defined(_MSC_VER)
+#include <intrin.h>
+#else
+#include <cpuid.h>
+#endif
+#endif
+
+namespace kernel {
+
+bool ArchitectureDetector::s_initialized = false;
+CpuInfo ArchitectureDetector::s_info = {};
+char ArchitectureDetector::s_description[128] = {};
+
+void ArchitectureDetector::init() {
+    if (s_initialized) return;
+    
+    // Zero-initialize
+    memset(&s_info, 0, sizeof(s_info));
+    memset(s_description, 0, sizeof(s_description));
+    
+    // Detect architecture at compile time
+#if defined(__x86_64__) || defined(_M_X64)
+    s_info.architecture = CpuArchitecture::AMD64;
+    detect_x86();
+#elif defined(__i386__) || defined(_M_IX86)
+    s_info.architecture = CpuArchitecture::X86;
+    detect_x86();
+#elif defined(__aarch64__)
+    s_info.architecture = CpuArchitecture::ARM64;
+    detect_arm();
+#elif defined(__arm__)
+    s_info.architecture = CpuArchitecture::ARM;
+    detect_arm();
+#elif defined(__riscv) && (__riscv_xlen == 64)
+    s_info.architecture = CpuArchitecture::RISCV64;
+    detect_riscv();
+#elif defined(__ia64__)
+    s_info.architecture = CpuArchitecture::IA64;
+    detect_generic();
+#elif defined(__sparc__) && defined(__arch64__)
+    s_info.architecture = CpuArchitecture::SPARC64;
+    detect_generic();
+#elif defined(__sparc__)
+    s_info.architecture = CpuArchitecture::SPARC;
+    detect_generic();
+#elif defined(__powerpc64__)
+    s_info.architecture = CpuArchitecture::PPC64;
+    detect_generic();
+#elif defined(__mips64)
+    s_info.architecture = CpuArchitecture::MIPS64;
+    detect_generic();
+#elif defined(__loongarch64)
+    s_info.architecture = CpuArchitecture::LOONGARCH64;
+    detect_generic();
+#else
+    s_info.architecture = CpuArchitecture::Unknown;
+    detect_generic();
+#endif
+    
+    s_initialized = true;
+}
+
+CpuArchitecture ArchitectureDetector::get() {
+    if (!s_initialized) init();
+    return s_info.architecture;
+}
+
+const CpuInfo& ArchitectureDetector::info() {
+    if (!s_initialized) init();
+    return s_info;
+}
+
+bool ArchitectureDetector::has_feature(CpuFeature feature) {
+    if (!s_initialized) init();
+    return kernel::has_feature(s_info.features, feature);
+}
+
+bool ArchitectureDetector::can_execute(CpuArchitecture arch) {
+    if (!s_initialized) init();
+    
+    // Exact match always works
+    if (arch == s_info.architecture) return true;
+    
+    // AMD64 can run X86 binaries (with proper support)
+    if (s_info.architecture == CpuArchitecture::AMD64 &&
+        arch == CpuArchitecture::X86) {
+        return true;  // TODO: Verify 32-bit support is enabled
+    }
+    
+    // ARM64 can run ARM binaries
+    if (s_info.architecture == CpuArchitecture::ARM64 &&
+        arch == CpuArchitecture::ARM) {
+        return true;  // TODO: Verify AArch32 support
+    }
+    
+    return false;
+}
+
+const char* ArchitectureDetector::description() {
+    if (!s_initialized) init();
+    return s_description;
+}
+
+#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
+
+static void cpuid(uint32_t leaf, uint32_t subleaf,
+                  uint32_t* eax, uint32_t* ebx, uint32_t* ecx, uint32_t* edx) {
+#if defined(_MSC_VER)
+    int regs[4];
+    __cpuidex(regs, static_cast<int>(leaf), static_cast<int>(subleaf));
+    *eax = regs[0]; *ebx = regs[1]; *ecx = regs[2]; *edx = regs[3];
+#else
+    __cpuid_count(leaf, subleaf, *eax, *ebx, *ecx, *edx);
+#endif
+}
+
+void ArchitectureDetector::detect_x86() {
+    uint32_t eax, ebx, ecx, edx;
+    
+    // Get vendor string (CPUID leaf 0)
+    cpuid(0, 0, &eax, &ebx, &ecx, &edx);
+    memcpy(&s_info.vendor[0], &ebx, 4);
+    memcpy(&s_info.vendor[4], &edx, 4);
+    memcpy(&s_info.vendor[8], &ecx, 4);
+    s_info.vendor[12] = '\0';
+    
+    // Get family/model/stepping (CPUID leaf 1)
+    cpuid(1, 0, &eax, &ebx, &ecx, &edx);
+    s_info.stepping = eax & 0xF;
+    s_info.model_id = ((eax >> 4) & 0xF) | ((eax >> 12) & 0xF0);
+    s_info.family = ((eax >> 8) & 0xF) + ((eax >> 20) & 0xFF);
+    
+    // Detect features
+    s_info.features = CpuFeature::None;
+    if (edx & (1 << 25)) s_info.features = s_info.features | CpuFeature::SSE;
+    if (edx & (1 << 26)) s_info.features = s_info.features | CpuFeature::SSE2;
+    if (ecx & (1 << 0))  s_info.features = s_info.features | CpuFeature::SSE3;
+    if (ecx & (1 << 9))  s_info.features = s_info.features | CpuFeature::SSSE3;
+    if (ecx & (1 << 19)) s_info.features = s_info.features | CpuFeature::SSE4_1;
+    if (ecx & (1 << 20)) s_info.features = s_info.features | CpuFeature::SSE4_2;
+    if (ecx & (1 << 28)) s_info.features = s_info.features | CpuFeature::AVX;
+    if (ecx & (1 << 25)) s_info.features = s_info.features | CpuFeature::AES_NI;
+    
+    // Check for AVX2 (CPUID leaf 7)
+    cpuid(7, 0, &eax, &ebx, &ecx, &edx);
+    if (ebx & (1 << 5)) s_info.features = s_info.features | CpuFeature::AVX2;
+    if (ebx & (1 << 16)) s_info.features = s_info.features | CpuFeature::AVX512;
+    
+    // Get brand string (CPUID leaves 0x80000002-0x80000004)
+    cpuid(0x80000000, 0, &eax, &ebx, &ecx, &edx);
+    if (eax >= 0x80000004) {
+        uint32_t* model = reinterpret_cast<uint32_t*>(s_info.model);
+        cpuid(0x80000002, 0, &model[0], &model[1], &model[2], &model[3]);
+        cpuid(0x80000003, 0, &model[4], &model[5], &model[6], &model[7]);
+        cpuid(0x80000004, 0, &model[8], &model[9], &model[10], &model[11]);
+        s_info.model[63] = '\0';
+    }
+    
+    // Build description
+    snprintf(s_description, sizeof(s_description),
+             "%s %s (%s)",
+             cpu_arch_to_string(s_info.architecture),
+             s_info.model[0] ? s_info.model : "Unknown",
+             s_info.vendor);
+}
+
+#else
+
+void ArchitectureDetector::detect_x86() {
+    // Not an x86 platform, this won't be called
+}
+
+#endif
+
+void ArchitectureDetector::detect_arm() {
+    // ARM detection via system registers or device tree
+    // Simplified for initial implementation
+    strcpy(s_info.vendor, "ARM");
+    strcpy(s_info.model, "ARM Processor");
+    
+#if defined(__ARM_NEON) || defined(__ARM_NEON__)
+    s_info.features = s_info.features | CpuFeature::NEON;
+#endif
+    
+    snprintf(s_description, sizeof(s_description),
+             "%s Processor", cpu_arch_to_string(s_info.architecture));
+}
+
+void ArchitectureDetector::detect_riscv() {
+    // RISC-V detection via CSRs or device tree
+    strcpy(s_info.vendor, "RISC-V");
+    strcpy(s_info.model, "RISC-V Processor");
+    
+    // Check ISA extensions from compile-time macros
+#if defined(__riscv_mul)
+    s_info.features = s_info.features | CpuFeature::RV_M;
+#endif
+#if defined(__riscv_atomic)
+    s_info.features = s_info.features | CpuFeature::RV_A;
+#endif
+#if defined(__riscv_flen) && (__riscv_flen >= 32)
+    s_info.features = s_info.features | CpuFeature::RV_F;
+#endif
+#if defined(__riscv_flen) && (__riscv_flen >= 64)
+    s_info.features = s_info.features | CpuFeature::RV_D;
+#endif
+#if defined(__riscv_compressed)
+    s_info.features = s_info.features | CpuFeature::RV_C;
+#endif
+#if defined(__riscv_vector)
+    s_info.features = s_info.features | CpuFeature::RV_V;
+#endif
+    
+    snprintf(s_description, sizeof(s_description),
+             "RISC-V 64-bit Processor");
+}
+
+void ArchitectureDetector::detect_generic() {
+    strcpy(s_info.vendor, "Unknown");
+    strcpy(s_info.model, "Unknown Processor");
+    
+    snprintf(s_description, sizeof(s_description),
+             "%s Processor", cpu_arch_to_string(s_info.architecture));
+}
+
+} // namespace kernel
+
+================================================================================
+5. COMPONENT 3: GXAPP Container Format Specification
+================================================================================
+
+File Extension: .gxapp
+Container Type: ZIP archive (DEFLATE compression)
+Magic Bytes: "PK" (standard ZIP) + "GXAPP\n" magic file
+
+--------------------------------------------------------------------------------
+DIRECTORY STRUCTURE
+--------------------------------------------------------------------------------
+
+myapp.gxapp (ZIP archive)
+|
++-- GXAPP                      # Magic identifier file
++-- metadata.json              # Application metadata (required)
++-- signature.sig              # Ed25519 signature (optional)
+|
++-- bin/                       # Architecture-specific binaries
+    +-- x86/
+    |   +-- app.elf            # 32-bit x86 ELF executable
+    +-- amd64/
+    |   +-- app.elf            # 64-bit x86-64 ELF executable
+    +-- riscv64/
+        +-- app.elf            # 64-bit RISC-V ELF executable
+
+--------------------------------------------------------------------------------
+MAGIC FILE: GXAPP
+--------------------------------------------------------------------------------
+
+Plain text file, must be first entry in ZIP:
+
+GXAPP
+VERSION: 1
+CREATED: 2025-01-15T10:30:00Z
+
+--------------------------------------------------------------------------------
+METADATA FILE: metadata.json
+--------------------------------------------------------------------------------
+
+{
+  "format_version": 1,
+  
+  "application": {
+    "name": "MyApplication",
+    "version": "1.2.3",
+    "description": "A sample guideXOS application",
+    "author": "Developer Name <dev@example.com>",
+    "license": "MIT",
+    "homepage": "https://example.com/myapp",
+    "icon": "icon.png"
+  },
+  
+  "compatibility": {
+    "guidexos_min": "1.0.0",
+    "guidexos_max": null
+  },
+  
+  "architectures": {
+    "x86": {
+      "entry": "bin/x86/app.elf",
+      "size": 45056,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "amd64": {
+      "entry": "bin/amd64/app.elf",
+      "size": 52224,
+      "sha256": "d7a8fbb307d7809469ca9abcb0082e4f8d5651e46d3cdb762d02d0bf37c9e592"
+    },
+    "riscv64": {
+      "entry": "bin/riscv64/app.elf",
+      "size": 48128,
+      "sha256": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
+    }
+  },
+  
+  "dependencies": [
+    {
+      "name": "libpng",
+      "version": ">=1.6.0"
+    }
+  ],
+  
+  "permissions": [
+    "filesystem.read",
+    "filesystem.write:/home",
+    "network.client",
+    "network.server:8080"
+  ],
+  
+  "resources": {
+    "min_memory_mb": 16,
+    "recommended_memory_mb": 64
+  }
+}
+
+================================================================================
+6. COMPONENT 4: GXAppContainer Class
+================================================================================
+
+Location: kernel/core/include/kernel/gxapp.h
+          kernel/core/gxapp.cpp
+
+Purpose:
+  Read and write .gxapp universal application packages.
+
+--------------------------------------------------------------------------------
+HEADER FILE: kernel/core/include/kernel/gxapp.h
+--------------------------------------------------------------------------------
+
+#pragma once
+
+#include "cpu_arch.h"
+#include "types.h"
+
+namespace kernel {
+
+// Maximum limits
+constexpr size_t GXAPP_MAX_NAME_LEN = 64;
+constexpr size_t GXAPP_MAX_VERSION_LEN = 16;
+constexpr size_t GXAPP_MAX_DESCRIPTION_LEN = 256;
+constexpr size_t GXAPP_MAX_AUTHOR_LEN = 64;
+constexpr size_t GXAPP_MAX_PATH_LEN = 256;
+constexpr size_t GXAPP_MAX_ARCHITECTURES = 16;
+constexpr size_t GXAPP_SHA256_LEN = 32;
+
+// Error codes
+enum class GXAppError : int {
+    Success = 0,
+    FileNotFound = -1,
+    InvalidFormat = -2,
+    UnsupportedVersion = -3,
+    MissingMetadata = -4,
+    InvalidMetadata = -5,
+    ArchitectureNotFound = -6,
+    IntegrityError = -7,
+    SignatureInvalid = -8,
+    OutOfMemory = -9,
+    IOError = -10,
+};
+
+const char* gxapp_error_string(GXAppError err);
+
+// Architecture entry metadata
+struct GXAppArchEntry {
+    CpuArchitecture architecture;
+    char entry_path[GXAPP_MAX_PATH_LEN];
+    size_t size;
+    uint8_t sha256[GXAPP_SHA256_LEN];
+};
+
+// Application metadata
+struct GXAppMetadata {
+    uint32_t format_version;
+    
+    // Application info
+    char name[GXAPP_MAX_NAME_LEN];
+    char version[GXAPP_MAX_VERSION_LEN];
+    char description[GXAPP_MAX_DESCRIPTION_LEN];
+    char author[GXAPP_MAX_AUTHOR_LEN];
+    
+    // Compatibility
+    char guidexos_min[GXAPP_MAX_VERSION_LEN];
+    char guidexos_max[GXAPP_MAX_VERSION_LEN];
+    
+    // Architectures
+    size_t arch_count;
+    GXAppArchEntry architectures[GXAPP_MAX_ARCHITECTURES];
+    
+    // Signature present?
+    bool has_signature;
+};
+
+// Result type for operations
+template<typename T>
+struct GXAppResult {
+    GXAppError error;
+    T value;
+    
+    bool ok() const { return error == GXAppError::Success; }
+    operator bool() const { return ok(); }
+};
+
+// Specialization for void
+template<>
+struct GXAppResult<void> {
+    GXAppError error;
+    
+    bool ok() const { return error == GXAppError::Success; }
+    operator bool() const { return ok(); }
+};
+
+// GXAPP Container Reader
+class GXAppContainer {
+public:
+    // Open a gxapp file
+    static GXAppResult<GXAppContainer*> open(const char* path);
+    
+    // Close and free resources
+    void close();
+    
+    // Get metadata
+    const GXAppMetadata& metadata() const;
+    
+    // Check if architecture is supported
+    bool supports_architecture(CpuArchitecture arch) const;
+    
+    // Get list of supported architectures
+    size_t get_supported_architectures(CpuArchitecture* out_archs,
+                                        size_t max_count) const;
+    
+    // Get the best architecture for the current CPU
+    // Returns Unknown if no compatible architecture found
+    CpuArchitecture get_best_architecture() const;
+    
+    // Extract binary for a specific architecture
+    // Caller must free the returned buffer using gxapp_free()
+    GXAppResult<uint8_t*> extract_binary(CpuArchitecture arch,
+                                          size_t* out_size);
+    
+    // Verify integrity (check SHA256 hashes)
+    GXAppResult<void> verify_integrity();
+    
+    // Verify signature (if present)
+    // public_key: 32-byte Ed25519 public key
+    GXAppResult<void> verify_signature(const uint8_t* public_key);
+    
+    // Destructor
+    ~GXAppContainer();
+    
+private:
+    GXAppContainer();
+    
+    struct Impl;
+    Impl* m_impl;
+};
+
+// Memory management for extracted binaries
+void gxapp_free(void* ptr);
+
+// GXAPP Builder (for gxbuild tool - userspace only)
+class GXAppBuilder {
+public:
+    GXAppBuilder();
+    ~GXAppBuilder();
+    
+    // Set application metadata
+    void set_name(const char* name);
+    void set_version(const char* version);
+    void set_description(const char* description);
+    void set_author(const char* author);
+    void set_min_guidexos_version(const char* version);
+    void set_max_guidexos_version(const char* version);
+    
+    // Add architecture binary
+    GXAppResult<void> add_binary(CpuArchitecture arch,
+                                  const uint8_t* elf_data,
+                                  size_t size);
+    GXAppResult<void> add_binary_from_file(CpuArchitecture arch,
+                                            const char* elf_path);
+    
+    // Build the gxapp file
+    GXAppResult<void> build(const char* output_path);
+    
+    // Sign the package with Ed25519 private key
+    // private_key: 64-byte Ed25519 private key (seed + public)
+    GXAppResult<void> sign(const uint8_t* private_key);
+    
+private:
+    struct Impl;
+    Impl* m_impl;
+};
+
+} // namespace kernel
+
+================================================================================
+7. COMPONENT 5: UniversalAppLoader
+================================================================================
+
+Location: kernel/core/include/kernel/universal_loader.h
+          kernel/core/universal_loader.cpp
+
+Purpose:
+  Load and execute applications from .gxapp packages, automatically selecting
+  the correct architecture binary.
+
+--------------------------------------------------------------------------------
+HEADER FILE: kernel/core/include/kernel/universal_loader.h
+--------------------------------------------------------------------------------
+
+#pragma once
+
+#include "gxapp.h"
+#include "process.h"
+
+namespace kernel {
+
+// Loader configuration
+struct LoaderConfig {
+    bool allow_unsigned;          // Allow unsigned packages (default: true)
+    bool verify_hashes;           // Verify SHA256 hashes (default: true)
+    bool strict_compatibility;    // Require exact guideXOS version match
+    const uint8_t* trusted_key;   // Ed25519 public key for signature verification
+};
+
+// Default configuration
+inline LoaderConfig default_loader_config() {
+    LoaderConfig cfg = {};
+    cfg.allow_unsigned = true;
+    cfg.verify_hashes = true;
+    cfg.strict_compatibility = false;
+    cfg.trusted_key = nullptr;
+    return cfg;
+}
+
+// Load result
+struct LoadResult {
+    GXAppError error;
+    process::pid_t pid;           // Process ID if successful (0 on failure)
+    CpuArchitecture loaded_arch;  // Which architecture was loaded
+    char error_message[128];      // Human-readable error message
+    
+    bool ok() const { return error == GXAppError::Success && pid != 0; }
+};
+
+class UniversalAppLoader {
+public:
+    // Initialize with default configuration
+    static void init();
+    
+    // Initialize with custom configuration
+    static void init(const LoaderConfig& config);
+    
+    // Load and execute a gxapp
+    // argv: null-terminated array of arguments (can be nullptr)
+    // envp: null-terminated array of environment variables (can be nullptr)
+    static LoadResult run(const char* gxapp_path,
+                          const char** argv = nullptr,
+                          const char** envp = nullptr);
+    
+    // Load but don't execute (for inspection)
+    static GXAppResult<GXAppContainer*> load(const char* gxapp_path);
+    
+    // Probe: check which architecture would be loaded
+    static GXAppResult<CpuArchitecture> probe(const char* gxapp_path);
+    
+    // Get current configuration
+    static const LoaderConfig& config();
+    
+private:
+    static LoaderConfig s_config;
+    static bool s_initialized;
+    
+    // Internal: load ELF into memory and create process
+    static LoadResult load_elf_and_execute(const uint8_t* elf_data,
+                                           size_t elf_size,
+                                           const char* name,
+                                           const char** argv,
+                                           const char** envp);
+};
+
+} // namespace kernel
+
+--------------------------------------------------------------------------------
+USAGE EXAMPLE
+--------------------------------------------------------------------------------
+
+#include <kernel/universal_loader.h>
+
+void run_application() {
+    using namespace kernel;
+    
+    // Initialize with default config
+    UniversalAppLoader::init();
+    
+    // Run an application
+    LoadResult result = UniversalAppLoader::run("/apps/calculator.gxapp");
+    
+    if (result.ok()) {
+        printf("Started process %llu on %s\n",
+               result.pid,
+               cpu_arch_to_string(result.loaded_arch));
+    } else {
+        printf("Failed to load: %s\n", result.error_message);
+    }
+}
+
+================================================================================
+8. COMPONENT 6: gxbuild CLI Tool
+================================================================================
+
+Location: tools/gxbuild/
+Purpose:  Developer tool for building and packaging universal applications
+
+--------------------------------------------------------------------------------
+DIRECTORY STRUCTURE
+--------------------------------------------------------------------------------
+
+tools/gxbuild/
++-- main.cpp                   # Entry point and command dispatch
++-- args.h                     # Argument parsing
++-- args.cpp
++-- builder.h                  # Build command implementation
++-- builder.cpp
++-- packager.h                 # Package command implementation
++-- packager.cpp
++-- signer.h                   # Sign command implementation
++-- signer.cpp
++-- runner.h                   # Run command (QEMU wrapper)
++-- runner.cpp
++-- project.h                  # Project file (.gxproj) parsing
++-- project.cpp
++-- Makefile
+
+--------------------------------------------------------------------------------
+COMMAND LINE INTERFACE
+--------------------------------------------------------------------------------
+
+gxbuild - guideXOS Universal Build Tool
+
+USAGE:
+    gxbuild <command> [options]
+
+COMMANDS:
+    build      Compile source code for target architectures
+    package    Create a .gxapp package from compiled binaries
+    sign       Sign a .gxapp package
+    info       Display information about a .gxapp package
+    run        Run a .gxapp (using QEMU for non-native architectures)
+    help       Show help for a command
+
+BUILD OPTIONS:
+    gxbuild build <source> [options]
+    
+    --targets <arch,arch,...>   Target architectures (default: native)
+                                 Valid: x86,amd64,riscv64,arm64,...
+    --output <dir>              Output directory (default: ./build)
+    --release                   Build with optimizations
+    --debug                     Build with debug symbols
+    --sdk <path>                Path to guideXOS SDK
+
+PACKAGE OPTIONS:
+    gxbuild package <name> [options]
+    
+    --binaries <dir>            Directory containing arch subdirectories
+    --output <file>             Output .gxapp filename
+    --version <ver>             Application version
+    --author <name>             Author name
+    --description <text>        Application description
+
+SIGN OPTIONS:
+    gxbuild sign <package.gxapp> --key <private.key>
+
+INFO OPTIONS:
+    gxbuild info <package.gxapp>
+    
+    --json                      Output in JSON format
+
+RUN OPTIONS:
+    gxbuild run <package.gxapp> [-- app_args...]
+    
+    --arch <arch>               Force specific architecture
+    --qemu <path>               Path to QEMU executable
+
+EXAMPLES:
+    # Build for multiple architectures
+    gxbuild build src/main.cpp --targets x86,amd64,riscv64
+    
+    # Build and package in one step
+    gxbuild build src/main.cpp --targets x86,amd64 && \
+    gxbuild package myapp --binaries build/ --output myapp.gxapp
+    
+    # Inspect a package
+    gxbuild info myapp.gxapp
+    
+    # Run locally
+    gxbuild run myapp.gxapp
+
+================================================================================
+9. DEPENDENCIES & LIBRARIES
+================================================================================
+
+Required Libraries (to be integrated):
+
+1. miniz (MIT License)
+   - Minimal ZIP/DEFLATE implementation
+   - Single-header library
+   - Source: https://github.com/richgel999/miniz
+   
+2. cJSON (MIT License)
+   - Lightweight JSON parser
+   - Source: https://github.com/DaveGamble/cJSON
+   
+3. TweetNaCl (Public Domain)
+   - Tiny crypto library for Ed25519 signatures
+   - Source: https://tweetnacl.cr.yp.to/
+
+Integration Plan:
+- Copy source files into kernel/lib/ or tools/lib/
+- Modify to work in freestanding environment (for kernel-side)
+- Keep separate userspace versions for tools
+
+================================================================================
+10. TESTING STRATEGY
+================================================================================
+
+Unit Tests:
+- cpu_arch.cpp: String conversion, properties
+- arch_detector.cpp: Architecture detection
+- gxapp.cpp: Container read/write
+- Test with hand-crafted .gxapp files
+
+Integration Tests:
+- End-to-end: gxbuild -> .gxapp -> UniversalAppLoader
+- Cross-architecture: build on amd64, verify x86/riscv64 binaries included
+- Signature verification
+
+Test Applications:
+1. hello_world - Minimal "Hello, guideXOS!" application
+2. arch_info - Prints detected architecture and features
+3. file_io - Tests filesystem syscalls
+
+QEMU Testing Matrix:
+| Build Host | Target   | QEMU Command                          |
+|------------|----------|---------------------------------------|
+| amd64      | x86      | qemu-system-i386                      |
+| amd64      | riscv64  | qemu-system-riscv64 -machine virt     |
+| amd64      | amd64    | Native or qemu-system-x86_64          |
+
+================================================================================
+11. FUTURE EXPANSION
+================================================================================
+
+Phase 2 Features (After MVP):
+- Additional architectures (arm64, sparc64, ia64)
+- Dynamic library support (.so files in .gxapp)
+- Resource files (icons, data files) in .gxapp
+- Delta updates for packages
+- Package repository system
+- Dependency resolution
+
+Phase 3 Features (Long-term):
+- ABI translation layer (run x86 on arm64)
+- JIT compilation support
+- Sandboxing and permission enforcement
+- Containerized execution environments
+
+================================================================================
+END OF SPECIFICATION
+================================================================================

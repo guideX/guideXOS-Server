@@ -1,0 +1,507 @@
+---------------------------------------------------------------------------------------------------------
+================================================================================
+guideXOS Server - Development Priorities & Roadmap
+================================================================================
+
+Version: 2.0
+Last Updated: 2025
+Status: Active Development
+
+This document outlines the prioritized development roadmap for guideXOS Server,
+reorganized with an SDK-first approach to enable developer adoption.
+
+================================================================================
+EXECUTIVE SUMMARY
+================================================================================
+
+guideXOS is a multi-architecture operating system with a "no architecture left
+behind" philosophy. The development priorities are organized to maximize
+developer adoption while building toward the vision of universal applications.
+
+PRIORITY ORDER:
+1. Developer SDK & Toolchain (CRITICAL - enables everything else)
+2. Universal Binary System (.gxapp format)
+3. System APIs & Libraries
+4. Package Management
+5. Networking & Services
+6. ABI Translation (future)
+
+================================================================================
+SUPPORTED ARCHITECTURES
+================================================================================
+
+Tier 1 (Initial Focus - MVP):
+  - x86      32-bit Intel/AMD, Legacy BIOS
+  - amd64    64-bit x86-64, UEFI
+  - riscv64  64-bit RISC-V (emerging, strategic importance)
+
+Tier 2 (Post-MVP Expansion):
+  - arm64    64-bit ARM (AArch64)
+  - ia64     Intel Itanium
+  - sparc64  64-bit SPARC v9
+
+Tier 3 (Full Support):
+  - arm      32-bit ARM (ARMv7)
+  - sparc    32-bit SPARC v8
+  - ppc64    64-bit PowerPC
+  - mips64   64-bit MIPS
+  - loongarch64  64-bit LoongArch
+
+================================================================================
+PRIORITY 1: DEVELOPER SDK & TOOLCHAIN
+================================================================================
+Status: HIGH PRIORITY
+Phase: 8b
+Dependencies: None
+Est. Duration: 6-8 weeks
+
+Without a developer SDK, no applications can be built for guideXOS. This is the
+single most critical piece of infrastructure.
+
+DELIVERABLES:
+-------------
+
+1.1 guideXOS SDK Structure
+    /opt/guidexos-sdk/
+    ??? bin/           # Developer tools (gxbuild, gxpackage, gxrun)
+    ??? include/       # Headers (guidexos/, posix/)
+    ??? lib/           # Per-architecture libraries
+    ?   ??? x86/       # libc.a, libguidexos.a, crt0.o
+    ?   ??? amd64/
+    ?   ??? riscv64/
+    ??? toolchain/     # Cross-compiler wrappers
+    ??? share/         # Templates, examples, docs
+
+1.2 musl libc Integration
+    - Port musl libc for each target architecture
+    - Modify syscall backend to call guideXOS native syscalls
+    - Static linking only (for self-contained universal binaries)
+    - Target: Full POSIX.1-2017 compatibility
+
+1.3 Cross-Compiler Toolchain
+    Primary: LLVM/Clang (single toolchain, multiple targets)
+    Fallback: GCC cross-compilers where needed
+    
+    Wrapper Scripts:
+    - x86-guidexos-clang
+    - amd64-guidexos-clang
+    - riscv64-guidexos-clang
+
+1.4 System Call Interface
+    Dual ABI approach:
+    
+    A) Native guideXOS Syscalls (preferred for new apps)
+       - gxos::sys_open(), gxos::sys_read(), etc.
+       - Clean, modern API
+       - Full access to guideXOS features
+    
+    B) POSIX Compatibility Layer (for porting existing software)
+       - open(), read(), write(), fork(), exec()
+       - Implemented via musl, wraps native syscalls
+       - Enables porting of Unix software
+
+1.5 Developer Workflow
+    Goal: Simple, one-command builds
+    
+    # Compile for single architecture
+    gxbuild build hello.cpp
+    
+    # Compile for multiple architectures
+    gxbuild build hello.cpp --targets x86,amd64,riscv64
+    
+    # Create universal package
+    gxbuild build hello.cpp --targets x86,amd64 --package -o hello.gxapp
+    
+    # Run locally (QEMU for non-native)
+    gxbuild run hello.gxapp
+
+MILESTONES:
+-----------
+[_] M1.1: Syscall ABI defined and documented
+[_] M1.2: Basic syscall dispatch working in kernel (x86, amd64)
+[_] M1.3: musl libc compiling for amd64 target
+[_] M1.4: "Hello World" compiles and runs on guideXOS
+[_] M1.5: musl libc for x86 and riscv64
+[_] M1.6: SDK directory structure created
+[_] M1.7: Cross-compiler wrappers working
+[_] M1.8: gxbuild basic functionality
+
+================================================================================
+PRIORITY 2: UNIVERSAL BINARY SYSTEM
+================================================================================
+Status: HIGH PRIORITY
+Phase: 8a, 8c, 8d
+Dependencies: Priority 1 (partial)
+Est. Duration: 8-10 weeks
+
+The signature feature of guideXOS: single application packages that run on any
+supported architecture.
+
+DELIVERABLES:
+-------------
+
+2.1 Architecture Detection (Phase 8a)
+    CpuArchitecture enum with all supported architectures
+    ArchitectureDetector class for runtime detection
+    CPU feature detection (SSE, AVX, NEON, etc.)
+    
+    API:
+    CpuArchitecture arch = ArchitectureDetector::get();
+    const CpuInfo& info = ArchitectureDetector::info();
+
+2.2 GXAPP Container Format (Phase 8c)
+    File Extension: .gxapp
+    Container: ZIP archive
+    
+    Structure:
+    myapp.gxapp
+    ??? GXAPP              # Magic identifier
+    ??? metadata.json      # Application metadata
+    ??? signature.sig      # Optional Ed25519 signature
+    ??? bin/
+        ??? x86/app.elf
+        ??? amd64/app.elf
+        ??? riscv64/app.elf
+    
+    API:
+    GXAppContainer* pkg = GXAppContainer::open("myapp.gxapp");
+    uint8_t* binary = pkg->extract_binary(CpuArchitecture::AMD64, &size);
+
+2.3 Universal Application Loader (Phase 8d)
+    Combines architecture detection with container loading
+    Automatic selection of correct binary
+    Graceful error handling for unsupported architectures
+    
+    API:
+    LoadResult result = UniversalAppLoader::run("calculator.gxapp");
+    if (!result.ok()) {
+        printf("Error: %s\n", result.error_message);
+    }
+
+2.4 ELF Loader Enhancement
+    - Extend bootloader ELF loader for userspace context
+    - Support dynamic relocations
+    - Handle argc/argv/envp setup
+    - Memory protection (RX for code, RW for data)
+
+MILESTONES:
+-----------
+[_] M2.1: CpuArchitecture enum and helpers implemented
+[_] M2.2: ArchitectureDetector working for x86/amd64
+[_] M2.3: metadata.json schema finalized
+[_] M2.4: ZIP reader working (miniz integration)
+[_] M2.5: GXAppContainer read functionality
+[_] M2.6: GXAppBuilder write functionality
+[_] M2.7: ELF loader for userspace
+[_] M2.8: UniversalAppLoader end-to-end working
+[_] M2.9: SHA256 integrity verification
+[_] M2.10: Ed25519 signature verification
+
+================================================================================
+PRIORITY 3: SYSTEM APIs & LIBRARIES
+================================================================================
+Status: MEDIUM PRIORITY
+Phase: 8b (continued)
+Dependencies: Priority 1
+Est. Duration: 4-6 weeks
+
+Stable APIs that applications can rely on across kernel updates.
+
+DELIVERABLES:
+-------------
+
+3.1 Core System Libraries
+    libguidexos_core.a    - Process, memory, IPC
+    libguidexos_fs.a      - Filesystem operations
+    libguidexos_net.a     - Networking (sockets)
+    libguidexos_gui.a     - GUI framework (optional)
+
+3.2 API Stability Policy
+    - Version APIs: v1, v2, etc.
+    - Maintain backward compatibility within major version
+    - Deprecation warnings before removal
+    - Document breaking changes
+
+3.3 Header Organization
+    /opt/guidexos-sdk/include/guidexos/
+    ??? types.h           # Basic types (pid_t, fd_t, etc.)
+    ??? syscall.h         # System call interface
+    ??? process.h         # Process management
+    ??? fs.h              # Filesystem
+    ??? net.h             # Networking
+    ??? ipc.h             # Inter-process communication
+    ??? gui.h             # GUI (optional)
+
+MILESTONES:
+-----------
+[_] M3.1: types.h finalized
+[_] M3.2: syscall.h with all syscall wrappers
+[_] M3.3: Filesystem API complete
+[_] M3.4: Networking API complete
+[_] M3.5: API documentation generated
+
+================================================================================
+PRIORITY 4: PACKAGE MANAGEMENT
+================================================================================
+Status: MEDIUM PRIORITY
+Phase: 8e (continued)
+Dependencies: Priority 2
+Est. Duration: 4-6 weeks
+
+System for distributing and installing guideXOS applications.
+
+DELIVERABLES:
+-------------
+
+4.1 Package Manager CLI (gxpkg)
+    gxpkg install myapp.gxapp       # Install from file
+    gxpkg install myapp             # Install from repository
+    gxpkg remove myapp              # Uninstall
+    gxpkg list                      # List installed
+    gxpkg search <query>            # Search repository
+    gxpkg update                    # Update package index
+
+4.2 Package Repository (Simple HTTP)
+    Static file server hosting:
+    - packages/index.json           # Package index
+    - packages/<name>/<version>.gxapp
+    
+    Index format:
+    {
+      "packages": [
+        {
+          "name": "calculator",
+          "version": "1.0.0",
+          "architectures": ["x86", "amd64", "riscv64"],
+          "sha256": "...",
+          "url": "packages/calculator/1.0.0.gxapp"
+        }
+      ]
+    }
+
+4.3 Installation Directory Structure
+    /apps/
+    ??? calculator/
+    ?   ??? calculator.gxapp        # Original package
+    ?   ??? metadata.json           # Extracted metadata
+    ?   ??? current/                # Extracted current-arch binary
+    ??? notepad/
+        ??? ...
+
+MILESTONES:
+-----------
+[_] M4.1: gxpkg install from local file
+[_] M4.2: gxpkg list and remove
+[_] M4.3: Repository index format defined
+[_] M4.4: gxpkg install from repository
+[_] M4.5: Basic repository server running
+
+================================================================================
+PRIORITY 5: NETWORKING & SERVICES
+================================================================================
+Status: MEDIUM-LOW PRIORITY (kernel networking exists)
+Dependencies: Priority 3
+Est. Duration: 3-4 weeks
+
+Note: Core networking (TCP/UDP/IPv4/IPv6) already exists in kernel.
+This priority focuses on userspace libraries and services.
+
+DELIVERABLES:
+-------------
+
+5.1 Userspace Socket Library
+    - Wrap kernel socket syscalls
+    - POSIX-compatible socket API
+    - DNS resolution
+
+5.2 Built-in Services
+    - SSH server (for remote management)
+    - HTTP server library (for web apps)
+    - Package repository server
+
+5.3 Network Configuration
+    - DHCP client
+    - Static IP configuration
+    - Firewall rules management
+
+MILESTONES:
+-----------
+[_] M5.1: Socket library working
+[_] M5.2: DNS resolution
+[_] M5.3: HTTP client library
+[_] M5.4: SSH server (maybe OpenSSH port)
+
+================================================================================
+PRIORITY 6: ABI TRANSLATION (FUTURE)
+================================================================================
+Status: LOW PRIORITY / FUTURE
+Dependencies: All above
+Est. Duration: TBD (research phase)
+
+Long-term goal: Run binaries on architectures they weren't compiled for.
+
+APPROACHES:
+-----------
+1. box86/box64 style - Translate x86/amd64 to other architectures
+2. QEMU user-mode - Full emulation with JIT
+3. Custom lightweight JIT - Architecture-specific translation
+
+CONSIDERATIONS:
+---------------
+- Performance overhead
+- Compatibility coverage
+- Maintenance burden
+- May not be worth it if native compilation is easy enough
+
+DECISION: Defer until Priorities 1-5 are complete. Revisit based on
+developer feedback and real-world usage patterns.
+
+================================================================================
+BUILD SYSTEM DECISIONS
+================================================================================
+
+CURRENT: Makefiles (working well for kernel)
+
+RECOMMENDATION:
+- Keep Makefiles for kernel builds (no change)
+- Use CMake for SDK and userspace tools (better cross-compilation)
+- gxbuild internally uses CMake or direct compiler invocation
+
+RATIONALE:
+- CMake has excellent multi-target support
+- Integrates well with IDEs
+- Good CI/CD integration
+- Can generate Makefiles, Ninja, etc.
+
+================================================================================
+CI/CD PIPELINE
+================================================================================
+
+Target Setup:
+- Build server with cross-compilers for all architectures
+- QEMU instances for testing
+
+Pipeline Stages:
+1. Build kernel for all architectures
+2. Build SDK libraries for all architectures
+3. Build test applications
+4. Run tests in QEMU
+5. Package releases
+
+Tools:
+- GitLab CI or GitHub Actions
+- Docker containers with cross-compilers
+- QEMU for emulated testing
+
+================================================================================
+DOCUMENTATION REQUIREMENTS
+================================================================================
+
+1. Getting Started Guide
+   - SDK installation
+   - First application tutorial
+   - Building universal apps
+
+2. API Reference
+   - All system calls documented
+   - Library function reference
+   - Generated from source comments
+
+3. Architecture Guide
+   - How universal binaries work
+   - How to add new architecture support
+   - Kernel internals
+
+4. Examples
+   - Hello World
+   - File I/O
+   - Networking
+   - GUI application
+
+================================================================================
+SUCCESS METRICS
+================================================================================
+
+Phase 8 Complete When:
+[_] Developer can install SDK in < 10 minutes
+[_] "Hello World" compiles in single command
+[_] Universal binary runs on x86, amd64, riscv64
+[_] Package manager can install from repository
+[_] Documentation covers all public APIs
+[_] 5+ example applications available
+
+================================================================================
+APPENDIX: REMOVED/DEFERRED ITEMS
+================================================================================
+
+The following items from the original document are deferred:
+
+1. Web Native Application Runtime
+   - Interesting concept (HTML/JS apps inside OS)
+   - Deferred until native app story is solid
+   - Would require embedding a JS runtime
+   - Low priority compared to native apps
+
+2. Full 11-architecture support from day 1
+   - Start with 3 (x86, amd64, riscv64)
+   - Expand after MVP proven
+
+3. Dynamic linking
+   - Static linking only for MVP
+   - Simpler, more portable
+   - Revisit if requested by developers
+
+================================================================================
+END OF DOCUMENT
+================================================================================
+
+   
+   Key Points:
+		- Run in a single runtime
+		- Or compile to WASM
+		- Or are just UI + API calls
+
+	In the end, it should be "write once, run everywhere, across all archtypes"
+
+2) Second App Ecosystem
+
+	A) With guideXOS Server Native Apps/Fat EXE's ...
+	  - Your fat exe format
+	  - Full system access
+	  - High performance
+	  - Capability Controlled
+
+	B) Web-style guideXOS Server Apps ...
+	  - HTTML/CSS/JS or custom UI DSL
+	  - Sandboxed
+	  - Portable across all architectures instantly
+
+	  Notes: It should be kind of like IOS native + webviews or Android native + webview apps or steamos native + electron style apps, but designed cleanly from scratch.
+3) Avoid Electron clone territory. Avoid embedding a full browser like chromium. Do not make "web apps in a browser", instead make "guideX App Runtime (GAR)", a first class os subsystem, instead of
+	browser rendering apps, we want, os owned rendering engine, with secure sandbox per app, system api exposed via js/wasm bridge
+
+	I want these apps to have more deep os integration, to be able to ...
+	- Spawn windows
+	- Request GPU surfaces
+	- Access file systems via capabilities
+	- Use system services directly
+
+	But only through controled api's
+
+4) Capability Based Security
+
+	Each web app gets a manifest like ...
+	{
+		"network": "api.only",
+		"fs": ["app/data"],
+		"gpu": true,
+		"devices": []
+	}
+
+	Stronger than file permissions
+
+5) Instead of using JS for logic, we will use WASM for the logic, and the UI will be the web layer, so the webapp becomes
+	Web UI + WASM backend + OS Capabilities Layer
+
+
+		

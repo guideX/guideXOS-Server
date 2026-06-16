@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>guideXOS Desktop Guide</title>
+<style>
+body { background-color: #f9fbfd; color: #32404d; }
+h1 { color: #24527c; margin-bottom: 10px; }
+h2 { color: #356891; margin-top: 10px; margin-bottom: 8px; }
+a { color: #0f4fa8; text-decoration: underline; }
+li { margin-left: 10px; margin-bottom: 4px; }
+pre { background-color: #e7edf4; padding: 4px; margin-left: 8px; }
+</style>
+</head>
+<body>
+<h1>guideXOS Desktop Guide</h1>
+
+<p>The guideXOS desktop is the graphical shell for guideXOS Server. It hosts windows, the taskbar, system tray, and built-in applications.</p>
+
+<h2>The Taskbar</h2>
+
+<p>The taskbar at the bottom of the screen shows running applications and the system tray.</p>
+<p>Click an application button to bring it to the foreground.</p>
+
+<h2>Windows</h2>
+
+<p>Each application runs in its own window. Windows can be moved, resized, minimized, and closed using the title-bar controls.</p>
+
+<h2>Built-in Applications</h2>
+
+<ul>
+<li>Navigator &ndash; document viewer and browser shell</li>
+<li>Notepad &ndash; plain text editor</li>
+<li>Calculator &ndash; basic arithmetic</li>
+<li>File Explorer &ndash; browse the filesystem</li>
+<li>Disk Manager &ndash; view storage devices</li>
+<li>More applications coming in future releases</li>
+</ul>
+
+<h2>Launching Apps</h2>
+
+<p>Applications can be launched from the desktop or taskbar. The guideXOS app model uses a JSON manifest and a native binary:</p>
+
+<pre>{
+  "name": "MyApp",
+  "entry": "myapp.elf",
+  "version": "1.0",
+  "icon": "myapp.png"
+}</pre>
+
+<h3>App Manifest Fields</h3>
+
+<ul>
+<li>name &ndash; display name shown in the taskbar and desktop</li>
+<li>entry &ndash; path to the ELF or GXAPP binary</li>
+<li>version &ndash; semantic version string</li>
+<li>icon &ndash; optional path to a PNG icon</li>
+</ul>
+
+<h2>See Also</h2>
+
+<a href="index.html">Back to Navigator Help</a>
+
+<p>guideXOS Desktop is designed for both bare-metal hardware and the Windows compositor test harness.</p>
+</body>
+</html>
