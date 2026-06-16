@@ -98,6 +98,35 @@ namespace gxos {
 static int echoProc(int argc, char** argv){ gxos::Logger::write(gxos::LogLevel::Info, "echoProc start"); for(int i=1;i<argc;i++){ gxos::Logger::write(gxos::LogLevel::Info, std::string("ARG ")+argv[i]); } return 0; }
 static int workerProc(int argc, char** argv){ int loops=5; if(argc>1) loops=std::atoi(argv[1]); for(int i=0;i<loops;i++){ gxos::Logger::write(gxos::LogLevel::Info, "worker tick "+std::to_string(i)); std::this_thread::sleep_for(std::chrono::milliseconds(100)); } return loops; }
 
+static std::string taskManagerNetworkSnapshotWaitDiagnostic(uint64_t timeoutMs = 2000, uint64_t pollMs = 100) {
+    const auto start = std::chrono::steady_clock::now();
+    gxos::apps::TaskManagerSnapshot snapshot = gxos::apps::TaskManager::BuildTaskManagerSnapshot();
+
+    while (!(snapshot.performance.networkAvailable && snapshot.performance.networkRatesAvailable)) {
+        const auto elapsedMs = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - start).count());
+        if (elapsedMs >= timeoutMs) {
+            break;
+        }
+
+        const uint64_t remainingMs = timeoutMs - elapsedMs;
+        const uint64_t sleepMs = std::min<uint64_t>(pollMs, remainingMs);
+        std::this_thread::sleep_for(std::chrono::milliseconds(sleepMs));
+        snapshot = gxos::apps::TaskManager::BuildTaskManagerSnapshot();
+    }
+
+    const auto totalWaitMs = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - start).count());
+    const bool stable = snapshot.performance.networkAvailable && snapshot.performance.networkRatesAvailable;
+
+    std::ostringstream oss;
+    oss << "networkStableSmoke=" << (stable ? "true" : "false") << "\n";
+    oss << "networkStableWaitMs=" << totalWaitMs << "\n";
+    oss << "networkStableRatesAvailable=" << (snapshot.performance.networkRatesAvailable ? "true" : "false") << "\n";
+    oss << gxos::apps::TaskManager::SnapshotDiagnostic();
+    return oss.str();
+}
+
 static std::string nativeAppProcessesDiagnostic() {
     std::ostringstream oss;
     std::vector<gxos::apps::NativeAppProcessInfo> processes = gxos::apps::NativeAppProcessTable::List();
@@ -838,7 +867,7 @@ static void help(){
                  " console | console.start | console.send <text> | console.pop [timeoutMs]\n"
                  " files | files <path>\n"
                  " clock\n"
-                 " taskmanager.snapshot | taskmanager.tombstone-test\n"
+                 " taskmanager.snapshot | taskmanager.network-snapshot-wait | taskmanager.tombstone-test\n"
                  " taskmgr\n"
                  " paint\n"
                  " navigator | navigator.smoke | navigator.goto <url>\n"
@@ -1229,6 +1258,9 @@ using namespace gxos;
         }
         else if (cmd=="taskmanager.snapshot"){
             std::cout << apps::TaskManager::SnapshotDiagnostic();
+        }
+        else if (cmd=="taskmanager.network-snapshot-wait"){
+            std::cout << taskManagerNetworkSnapshotWaitDiagnostic();
         }
         else if (cmd=="taskmanager.tombstone-test"){
             const uint32_t beforeCount = static_cast<uint32_t>(ProcessTable::tombstones().size());

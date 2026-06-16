@@ -18,12 +18,28 @@ if (-not (Test-Path $ServerExe)) {
 $commandInput = @"
 taskmgr
 taskmanager.snapshot
+taskmanager.network-snapshot-wait
 taskmanager.tombstone-test
 taskmanager.snapshot
 quit
 "@
 $output = $commandInput | & $ServerExe 2>&1
 $output = $output | Out-String
+
+function Get-FirstRegexValue {
+    param(
+        [string]$Text,
+        [string]$Pattern,
+        [string]$Group = "value"
+    )
+
+    $matches = [regex]::Matches($Text, $Pattern)
+    if ($matches.Count -eq 0) {
+        return $null
+    }
+
+    return $matches[0].Groups[$Group].Value
+}
 
 function Get-LastRegexValue {
     param(
@@ -385,116 +401,95 @@ if ($processDiskAvailable) {
     throw "processDiskAvailable must remain false until real per-process disk telemetry exists."
 }
 
-$networkAvailable = $output -match "(?m)^\s*networkAvailable=true\s*$"
-$networkUnavailable = $output -match "(?m)^\s*networkAvailable=false\s*$"
-$networkRatesAvailable = $output -match "(?m)^\s*networkRatesAvailable=true\s*$"
-$networkRatesUnavailable = $output -match "(?m)^\s*networkRatesAvailable=false\s*$"
-$networkUtilizationAvailable = $output -match "(?m)^\s*networkUtilizationAvailable=true\s*$"
-$networkUtilizationUnavailable = $output -match "(?m)^\s*networkUtilizationAvailable=false\s*$"
-$networkValue = Get-LastRegexValue -Text $output -Pattern "(?m)^\s*network=(?<value>N/A|\d+%)\s*$"
-$networkSource = Get-LastRegexValue -Text $output -Pattern "(?m)^\s*networkSource=(?<source>[^\s\r\n]+)\s*$" -Group "source"
-$networkSampleWindow = Get-LastRegexValue -Text $output -Pattern "(?m)^\s*networkSampleWindowMs=(?<window>N/A|\d+)\s*$" -Group "window"
-$networkSendRate = Get-LastRegexValue -Text $output -Pattern "(?m)^\s*networkSendKBps=(?<rate>N/A|\d+)\s*$" -Group "rate"
-$networkReceiveRate = Get-LastRegexValue -Text $output -Pattern "(?m)^\s*networkReceiveKBps=(?<rate>N/A|\d+)\s*$" -Group "rate"
-$processNetworkAvailable = $output -match "(?m)^\s*processNetworkAvailable=true\s*$"
-$processNetworkUnavailable = $output -match "(?m)^\s*processNetworkAvailable=false\s*$"
+$networkStableSmoke = Get-LastRegexValue -Text $output -Pattern "(?m)^\s*networkStableSmoke=(?<value>true|false)\s*$"
+$networkStableWaitMs = Get-LastRegexValue -Text $output -Pattern "(?m)^\s*networkStableWaitMs=(?<value>\d+)\s*$"
+$networkStableRatesAvailable = Get-LastRegexValue -Text $output -Pattern "(?m)^\s*networkStableRatesAvailable=(?<value>true|false)\s*$"
 
-if ($networkAvailable) {
-    if ($null -eq $networkSource) {
-        throw "Network availability was reported but networkSource was missing."
-    }
+$warmupNetworkAvailable = Get-FirstRegexValue -Text $output -Pattern "(?m)^\s*networkAvailable=(?<value>true|false)\s*$" -Group "value"
+$warmupNetworkRatesAvailable = Get-FirstRegexValue -Text $output -Pattern "(?m)^\s*networkRatesAvailable=(?<value>true|false)\s*$" -Group "value"
+$warmupNetworkSource = Get-FirstRegexValue -Text $output -Pattern "(?m)^\s*networkSource=(?<value>[^\s\r\n]+)\s*$" -Group "value"
+$warmupNetworkSampleWindow = Get-FirstRegexValue -Text $output -Pattern "(?m)^\s*networkSampleWindowMs=(?<value>N/A|\d+)\s*$" -Group "value"
+$warmupNetworkSendRate = Get-FirstRegexValue -Text $output -Pattern "(?m)^\s*networkSendKBps=(?<value>N/A|\d+)\s*$" -Group "value"
+$warmupNetworkReceiveRate = Get-FirstRegexValue -Text $output -Pattern "(?m)^\s*networkReceiveKBps=(?<value>N/A|\d+)\s*$" -Group "value"
 
-    if ($networkSource -match '(?i)(synthetic|modulo|wave|placeholder|fake|simulated)') {
-        throw "Network source looks synthetic: $networkSource"
-    }
+$stableNetworkAvailable = Get-LastRegexValue -Text $output -Pattern "(?m)^\s*networkAvailable=(?<value>true|false)\s*$" -Group "value"
+$stableNetworkRatesAvailable = Get-LastRegexValue -Text $output -Pattern "(?m)^\s*networkRatesAvailable=(?<value>true|false)\s*$" -Group "value"
+$stableNetworkUtilizationAvailable = Get-LastRegexValue -Text $output -Pattern "(?m)^\s*networkUtilizationAvailable=(?<value>true|false)\s*$" -Group "value"
+$stableNetworkValue = Get-LastRegexValue -Text $output -Pattern "(?m)^\s*network=(?<value>N/A|\d+%)\s*$"
+$stableNetworkSource = Get-LastRegexValue -Text $output -Pattern "(?m)^\s*networkSource=(?<value>[^\s\r\n]+)\s*$" -Group "value"
+$stableNetworkSampleWindow = Get-LastRegexValue -Text $output -Pattern "(?m)^\s*networkSampleWindowMs=(?<value>N/A|\d+)\s*$" -Group "value"
+$stableNetworkSendRate = Get-LastRegexValue -Text $output -Pattern "(?m)^\s*networkSendKBps=(?<value>N/A|\d+)\s*$" -Group "value"
+$stableNetworkReceiveRate = Get-LastRegexValue -Text $output -Pattern "(?m)^\s*networkReceiveKBps=(?<value>N/A|\d+)\s*$" -Group "value"
+$processNetworkAvailable = Get-LastRegexValue -Text $output -Pattern "(?m)^\s*processNetworkAvailable=(?<value>true|false)\s*$" -Group "value"
+$processNetworkUnavailable = $processNetworkAvailable -eq "false"
 
-    if ($null -eq $networkSampleWindow -or $networkSampleWindow -eq "N/A") {
-        throw "Network availability was reported but networkSampleWindowMs was missing."
-    }
-
-    $networkSampleWindowValue = [int]$networkSampleWindow
-    if ($networkSampleWindowValue -le 0) {
-        throw "Network sample window must be positive when available: $networkSampleWindow"
-    }
-
-    if ($networkRatesAvailable) {
-        if ($networkSource -match '(?i)warmup') {
-            throw "Network rates were available but source still indicated warmup: $networkSource"
-        }
-        if ($networkSampleWindowValue -lt 500) {
-            throw "Network sample window is too short for a stable display sample: $networkSampleWindowValue"
-        }
-        if ($networkSendRate -eq $null -or $networkSendRate -eq "N/A") {
-            throw "Network rates were available but networkSendKBps was missing."
-        }
-        if ($networkReceiveRate -eq $null -or $networkReceiveRate -eq "N/A") {
-            throw "Network rates were available but networkReceiveKBps was missing."
-        }
-
-        $networkSendRateValue = [int64]$networkSendRate
-        $networkReceiveRateValue = [int64]$networkReceiveRate
-        if ($networkSendRateValue -lt 0 -or $networkReceiveRateValue -lt 0) {
-            throw "Network KBps values must be non-negative."
-        }
-    } elseif ($networkRatesUnavailable) {
-        if ($networkSource -notmatch '(?i)warmup') {
-            throw "Network was warming up but networkSource did not indicate warmup: $networkSource"
-        }
-        if ($networkSendRate -ne $null -and $networkSendRate -ne "N/A") {
-            throw "Network was warming up but networkSendKBps was not N/A."
-        }
-        if ($networkReceiveRate -ne $null -and $networkReceiveRate -ne "N/A") {
-            throw "Network was warming up but networkReceiveKBps was not N/A."
-        }
-    } else {
-        throw "Network rates availability flag was missing."
-    }
-
-    if ($networkUtilizationAvailable) {
-        if ($networkValue -eq $null -or $networkValue -eq "N/A") {
-            throw "Network utilization was reported but network=<value>% was missing."
-        }
-
-        $networkValuePct = [int]($networkValue.TrimEnd('%'))
-        if ($networkValuePct -lt 0 -or $networkValuePct -gt 100) {
-            throw "Network utilization out of range: $networkValuePct"
-        }
-    } elseif ($networkUtilizationUnavailable) {
-        if ($networkValue -eq $null -or $networkValue -ne "N/A") {
-            throw "Network utilization was unavailable but network=N/A was not reported."
-        }
-    } else {
-        throw "Network utilization availability flag was missing."
-    }
-} elseif ($networkUnavailable) {
-    if ($networkValue -eq $null -or $networkValue -ne "N/A") {
-        throw "Network was unavailable but network=N/A was not reported."
-    }
-    if ($null -eq $networkSource) {
-        throw "Network was unavailable but networkSource was missing."
-    }
-
-    if ($networkSource -ne "N/A") {
-        throw "Network was unavailable but networkSource was not N/A: $networkSource"
-    }
-
-    if ($networkSampleWindow -ne $null -and $networkSampleWindow -ne "N/A") {
-        throw "Network was unavailable but networkSampleWindowMs was not N/A."
-    }
-    if ($networkSendRate -ne $null -and $networkSendRate -ne "N/A") {
-        throw "Network was unavailable but networkSendKBps was not N/A."
-    }
-    if ($networkReceiveRate -ne $null -and $networkReceiveRate -ne "N/A") {
-        throw "Network was unavailable but networkReceiveKBps was not N/A."
-    }
-    if ($networkUtilizationAvailable) {
-        throw "Network was unavailable but networkUtilizationAvailable=true was reported."
-    }
-} else {
-    throw "Network availability flag was missing."
+if ($networkStableSmoke -ne "true") {
+    throw "Stable network wait diagnostic did not report success."
+}
+if ($null -eq $networkStableWaitMs) {
+    throw "Stable network wait diagnostic did not report a wait duration."
+}
+if ([int64]$networkStableWaitMs -lt 0) {
+    throw "Stable network wait duration must not be negative."
+}
+if ($networkStableRatesAvailable -ne "true") {
+    throw "Stable network wait diagnostic did not report network rates as available."
 }
 
-if ($processNetworkAvailable) {
+if ($warmupNetworkAvailable -ne "true") {
+    throw "Warmup network availability was missing."
+}
+if ($warmupNetworkRatesAvailable -ne "false") {
+    throw "Warmup network rates should be unavailable."
+}
+if ($warmupNetworkSource -ne "hostedSocketCountersWarmup") {
+    throw "Warmup network source was not hostedSocketCountersWarmup: $warmupNetworkSource"
+}
+if ($null -eq $warmupNetworkSampleWindow -or $warmupNetworkSampleWindow -eq "N/A") {
+    throw "Warmup network sample window was missing."
+}
+if ([int64]$warmupNetworkSampleWindow -le 0 -or [int64]$warmupNetworkSampleWindow -ge 500) {
+    throw "Warmup network sample window should remain below the stable threshold: $warmupNetworkSampleWindow"
+}
+if ($warmupNetworkSendRate -ne "N/A") {
+    throw "Warmup network send KBps should be N/A."
+}
+if ($warmupNetworkReceiveRate -ne "N/A") {
+    throw "Warmup network receive KBps should be N/A."
+}
+
+if ($stableNetworkAvailable -ne "true") {
+    throw "Stable network availability was missing."
+}
+if ($stableNetworkRatesAvailable -ne "true") {
+    throw "Stable network rates should be available."
+}
+if ($stableNetworkSource -ne "hostedSocketCounters") {
+    throw "Stable network source was not hostedSocketCounters: $stableNetworkSource"
+}
+if ($null -eq $stableNetworkSampleWindow -or $stableNetworkSampleWindow -eq "N/A") {
+    throw "Stable network sample window was missing."
+}
+if ([int64]$stableNetworkSampleWindow -lt 500) {
+    throw "Stable network sample window is too short for a stable display sample: $stableNetworkSampleWindow"
+}
+if ($stableNetworkSendRate -eq $null -or $stableNetworkSendRate -eq "N/A") {
+    throw "Stable network send KBps was missing."
+}
+if ($stableNetworkReceiveRate -eq $null -or $stableNetworkReceiveRate -eq "N/A") {
+    throw "Stable network receive KBps was missing."
+}
+if ([int64]$stableNetworkSendRate -lt 0 -or [int64]$stableNetworkReceiveRate -lt 0) {
+    throw "Stable network KBps values must be non-negative."
+}
+if ($stableNetworkUtilizationAvailable -ne "false") {
+    throw "Stable network utilization must remain unavailable."
+}
+if ($stableNetworkValue -ne "N/A") {
+    throw "Stable network utilization should be reported as N/A."
+}
+
+if ($processNetworkAvailable -ne "false") {
     throw "processNetworkAvailable must remain false until real per-process network telemetry exists."
 }
 
