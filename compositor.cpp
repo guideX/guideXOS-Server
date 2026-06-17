@@ -1756,6 +1756,17 @@ namespace gxos {
 #endif
         }
 
+        bool Compositor::showFolderOnHostedDesktop(const std::string& path) {
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
+            const std::string normalized = normalizeHostedVirtualPath(path);
+            Logger::write(LogLevel::Info, "Hosted desktop show-on-desktop requested path=" + normalized);
+            return hostedDesktopSetCurrentPath(normalized, true);
+#else
+            (void)path;
+            return false;
+#endif
+        }
+
         void Compositor::ClearDesktopIconSelection( ) {
             bool hadSelection = !g_selectedDesktopIconIndices.empty( );
             for (int idx : g_selectedDesktopIconIndices) {

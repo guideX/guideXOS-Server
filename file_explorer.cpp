@@ -52,7 +52,25 @@ namespace gxos { namespace apps {
         constexpr int kMainModifiedTextX = kLeftPaneW + 570;
         constexpr int kContextMenuW = 170;
         constexpr int kContextMenuItemH = 24;
-        constexpr int kContextMenuItemCount = 4;
+
+        enum class ContextMenuAction {
+            Open = 0,
+            PinToDesktop = 1,
+            ShowOnDesktop = 2,
+            Rename = 3,
+            MoveToTrash = 4
+        };
+
+        static const char* contextMenuLabel(ContextMenuAction action) {
+            switch (action) {
+                case ContextMenuAction::Open: return "Open";
+                case ContextMenuAction::PinToDesktop: return "Pin to Desktop";
+                case ContextMenuAction::ShowOnDesktop: return "Show on Desktop";
+                case ContextMenuAction::Rename: return "Rename";
+                case ContextMenuAction::MoveToTrash: return "Move to Trash";
+                default: return "";
+            }
+        }
 
         int uiLineHeight() {
             return SystemFont::MeasureHeight(FontRole::Default);
@@ -380,6 +398,7 @@ namespace gxos { namespace apps {
     int FileExplorer::s_contextMenuX = 0;
     int FileExplorer::s_contextMenuY = 0;
     int FileExplorer::s_contextMenuHover = -1;
+    std::vector<int> FileExplorer::s_contextMenuActions;
 
     uint64_t FileExplorer::Launch(const std::string& startPath) {
         ProcessSpec spec{"file_explorer", FileExplorer::main};
@@ -411,6 +430,7 @@ namespace gxos { namespace apps {
         s_showDeleteConfirmation = false;
         s_contextMenuOpen = false;
         s_contextMenuHover = -1;
+        s_contextMenuActions.clear();
 
         refresh();
 
@@ -704,6 +724,22 @@ namespace gxos { namespace apps {
         updateDisplay();
     }
 
+    void FileExplorer::showFolderOnDesktop() {
+        if (s_selectedIndex < 0 || s_selectedIndex >= static_cast<int>(s_entries.size())) return;
+        const ExplorerFileEntry& entry = s_entries[s_selectedIndex];
+        if (!entry.isDirectory()) {
+            s_status = "Show on Desktop requires a folder";
+            updateDisplay();
+            return;
+        }
+
+        const std::string targetPath = s_fileSystem->normalizePath(entry.fullPath);
+        Logger::write(LogLevel::Info, "FileExplorer Show on Desktop selected path=" + targetPath);
+        const bool shown = Compositor::showFolderOnHostedDesktop(targetPath);
+        s_status = shown ? "Shown on Desktop: " + entry.name : "Show on Desktop skipped";
+        updateDisplay();
+    }
+
     void FileExplorer::createFolder() {
         beginPrompt(PromptNewFolder, "New folder name", "New Folder");
     }
@@ -814,6 +850,7 @@ namespace gxos { namespace apps {
             if (button == 1 && handleContextMenuClick(x, y)) return;
             s_contextMenuOpen = false;
             s_contextMenuHover = -1;
+            s_contextMenuActions.clear();
             updateDisplay();
             if (button != 2) return;
         }
@@ -998,8 +1035,10 @@ namespace gxos { namespace apps {
 
     int FileExplorer::hitTestContextMenu(int x, int y) {
         if (!s_contextMenuOpen) return -1;
+        const int itemCount = static_cast<int>(s_contextMenuActions.size());
+        if (itemCount <= 0) return -1;
         if (x < s_contextMenuX || x >= s_contextMenuX + kContextMenuW) return -1;
-        if (y < s_contextMenuY || y >= s_contextMenuY + kContextMenuItemH * kContextMenuItemCount) return -1;
+        if (y < s_contextMenuY || y >= s_contextMenuY + kContextMenuItemH * itemCount) return -1;
         return (y - s_contextMenuY) / kContextMenuItemH;
     }
 
@@ -1007,8 +1046,19 @@ namespace gxos { namespace apps {
         if (rowIndex < 0 || rowIndex >= static_cast<int>(s_entries.size())) return;
         s_selectedIndex = rowIndex;
         s_contextMenuOpen = true;
+        s_contextMenuActions.clear();
+        s_contextMenuActions.push_back(static_cast<int>(ContextMenuAction::Open));
+        s_contextMenuActions.push_back(static_cast<int>(ContextMenuAction::PinToDesktop));
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
+        if (s_entries[rowIndex].isDirectory()) {
+            s_contextMenuActions.push_back(static_cast<int>(ContextMenuAction::ShowOnDesktop));
+        }
+#endif
+        s_contextMenuActions.push_back(static_cast<int>(ContextMenuAction::Rename));
+        s_contextMenuActions.push_back(static_cast<int>(ContextMenuAction::MoveToTrash));
+        const int menuH = kContextMenuItemH * static_cast<int>(s_contextMenuActions.size());
         s_contextMenuX = std::min(x, kWindowW - kContextMenuW - 2);
-        s_contextMenuY = std::min(y, kWindowH - (kContextMenuItemH * kContextMenuItemCount) - 28);
+        s_contextMenuY = std::min(y, kWindowH - menuH - 28);
         if (s_contextMenuX < 0) s_contextMenuX = 0;
         if (s_contextMenuY < 0) s_contextMenuY = 0;
         s_contextMenuHover = -1;
@@ -1018,13 +1068,17 @@ namespace gxos { namespace apps {
     bool FileExplorer::handleContextMenuClick(int x, int y) {
         int item = hitTestContextMenu(x, y);
         if (item < 0) return false;
+        if (item >= static_cast<int>(s_contextMenuActions.size())) return false;
+        const ContextMenuAction action = static_cast<ContextMenuAction>(s_contextMenuActions[item]);
         s_contextMenuOpen = false;
         s_contextMenuHover = -1;
-        switch (item) {
-            case 0: openSelected(); break;
-            case 1: pinSelectedToDesktop(); break;
-            case 2: renameSelected(); break;
-            case 3: showDeleteConfirmation(); break;
+        s_contextMenuActions.clear();
+        switch (action) {
+            case ContextMenuAction::Open: openSelected(); break;
+            case ContextMenuAction::PinToDesktop: pinSelectedToDesktop(); break;
+            case ContextMenuAction::ShowOnDesktop: showFolderOnDesktop(); break;
+            case ContextMenuAction::Rename: renameSelected(); break;
+            case ContextMenuAction::MoveToTrash: showDeleteConfirmation(); break;
             default: break;
         }
         return true;
@@ -1264,25 +1318,21 @@ namespace gxos { namespace apps {
     }
 
     void FileExplorer::renderContextMenu() {
-        static const char* labels[kContextMenuItemCount] = {
-            "Open",
-            "Pin to Desktop",
-            "Rename",
-            "Move to Trash"
-        };
-        const int menuH = kContextMenuItemCount * kContextMenuItemH;
+        const int itemCount = static_cast<int>(s_contextMenuActions.size());
+        if (itemCount <= 0) return;
+        const int menuH = itemCount * kContextMenuItemH;
         drawRect(s_contextMenuX + 2, s_contextMenuY + 2, kContextMenuW, menuH, 30, 30, 35);
         drawRect(s_contextMenuX, s_contextMenuY, kContextMenuW, menuH, 245, 245, 248);
         drawRect(s_contextMenuX, s_contextMenuY, kContextMenuW, 1, 120, 120, 140);
         drawRect(s_contextMenuX, s_contextMenuY + menuH - 1, kContextMenuW, 1, 120, 120, 140);
         drawRect(s_contextMenuX, s_contextMenuY, 1, menuH, 120, 120, 140);
         drawRect(s_contextMenuX + kContextMenuW - 1, s_contextMenuY, 1, menuH, 120, 120, 140);
-        for (int i = 0; i < kContextMenuItemCount; ++i) {
+        for (int i = 0; i < itemCount; ++i) {
             const int itemY = s_contextMenuY + i * kContextMenuItemH;
             if (i == s_contextMenuHover) {
                 drawRect(s_contextMenuX + 1, itemY + 1, kContextMenuW - 2, kContextMenuItemH - 2, 65, 105, 170);
             }
-            drawTextAt(s_contextMenuX + 8, centeredTextY(itemY, kContextMenuItemH), labels[i]);
+            drawTextAt(s_contextMenuX + 8, centeredTextY(itemY, kContextMenuItemH), contextMenuLabel(static_cast<ContextMenuAction>(s_contextMenuActions[i])));
         }
     }
 

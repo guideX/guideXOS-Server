@@ -111,6 +111,7 @@ namespace gxos { namespace gui {
         static uint64_t start();
         static std::string RunLaunchShadowSmokeDiagnostic();
         static void requestDesktopRefresh();
+        static bool showFolderOnHostedDesktop(const std::string& path);
         static void openDesktopItem(int index);
         static void openStartMenuApp(const std::string& appName);
         static bool pinStartMenuAppToDesktop(const std::string& appName);

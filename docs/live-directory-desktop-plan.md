@@ -30,7 +30,7 @@ This note captures the current implementation anchors for the Phase 0 / Phase 1 
   - Navigation state lives in `s_currentPath`, `s_backHistory`, and `s_forwardHistory` around lines 358-376.
   - `navigate()`, `goBack()`, `goForward()`, `goUp()`, and `goHome()` are implemented around lines 510-558.
   - The toolbar already exposes `< Back`, `> Fwd`, `Up`, `Refresh`, `Address`, and create/rename/delete actions around lines 1111-1165.
-  - The context menu already exposes `Pin to Desktop` via `pinSelectedToDesktop()` around lines 1006-1033 and 1266-1276.
+  - The context menu now exposes `Pin to Desktop` and folder-only `Show on Desktop` actions around lines 1006-1033 and 1266-1276.
   - `renderToolbar()` draws the back/up controls and `renderNavigationPane()` provides root navigation around lines 1111-1190.
 
 - [file_explorer.h](../file_explorer.h)
@@ -81,6 +81,19 @@ There does not appear to be a dedicated desktop live-directory smoke yet. The ex
 - Bare-metal desktop already enumerates `/Desktop` from VFS and has file/folder open handling, but the desktop itself still behaves like a static icon board with persisted slots rather than a true live directory surface.
 - Shell `cd` updates only shell-local current-directory state at the moment.
 - Display Options currently controls desktop system icon visibility, not desktop directory mode or icon sizing.
+
+## Phase 1B Note
+
+- File Explorer now exposes a hosted-only `Show on Desktop` action for folder rows in the right-click menu.
+- The new action is wired through a small compositor bridge that reuses the hosted live desktop directory state from Phase 1A.
+- Source anchors changed:
+  - `file_explorer.cpp` now owns the folder-only context-menu entry and dispatch.
+  - `compositor.cpp` now exposes a hosted desktop folder navigation helper.
+- This slice stays hosted-only and intentionally does not add shell `cd` sync, smaller non-root icon mode / Display Options persistence, or bare-metal parity.
+- Remaining parity gaps:
+  - shell `cd` sync,
+  - smaller non-root icon mode / Display Options setting,
+  - bare-metal parity.
 
 ## Proposed Phased Plan
 

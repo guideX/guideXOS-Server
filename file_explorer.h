@@ -100,6 +100,7 @@ namespace gxos { namespace apps {
         static void confirmDelete();
         static void cancelDelete();
         static void pinSelectedToDesktop();
+        static void showFolderOnDesktop();
         
         // Keyboard handling
         static void handleKeyPress(int keyCode, const std::string& action);
@@ -166,6 +167,7 @@ namespace gxos { namespace apps {
         static int s_contextMenuX;
         static int s_contextMenuY;
         static int s_contextMenuHover;
+        static std::vector<int> s_contextMenuActions;
     };
     
 }} // namespace gxos::apps

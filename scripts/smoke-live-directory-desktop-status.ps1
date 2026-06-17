@@ -66,7 +66,7 @@ $shellGetCwdState = Find-FirstMatch -LiteralPath (Join-Path $Root "kernel\core\s
 $fileExplorerBack = Find-FirstMatch -LiteralPath (Join-Path $Root "file_explorer.cpp") -Pattern "goBack\(\)"
 $fileExplorerGoHome = Find-FirstMatch -LiteralPath (Join-Path $Root "file_explorer.cpp") -Pattern "goHome\(\)"
 $fileExplorerContextPin = Find-FirstMatch -LiteralPath (Join-Path $Root "file_explorer.cpp") -Pattern "Pin to Desktop"
-$showOnDesktop = Find-FirstMatch -LiteralPath (Join-Path $Root "compositor.cpp") -Pattern "Show on Desktop"
+$showOnDesktop = Find-FirstMatch -LiteralPath (Join-Path $Root "file_explorer.cpp") -Pattern "Show on Desktop|showFolderOnHostedDesktop"
 $kernelIconSize = Find-FirstMatch -LiteralPath (Join-Path $Root "kernel\core\desktop.cpp") -Pattern "s_desktopIconSize"
 $rightClickIconSize = Find-FirstMatch -LiteralPath (Join-Path $Root "right_click_menu.cpp") -Pattern "Icon Size"
 $displayOptionsIconSize = Find-FirstMatch -LiteralPath (Join-Path $Root "display_options.cpp") -Pattern "s_desktopIconSize|desktop icon size|icon-size|Icon Size Setting"
@@ -84,10 +84,10 @@ Emit-Check "File Explorer Pin to Desktop action" "present" $fileExplorerContextP
 Emit-Check "right-click Icon Size submenu placeholder" "present" $rightClickIconSize
 
 if ($null -eq $showOnDesktop) {
-    Write-Host "desktop Show on Desktop action: missing"
-    Write-Host "    evidence: no literal match for 'Show on Desktop' in compositor.cpp"
+    Write-Host "show-on-desktop-action=missing"
+    Write-Host "    evidence: no literal match for 'Show on Desktop' in file_explorer.cpp"
 } else {
-    Emit-Check "desktop Show on Desktop action" "present" $showOnDesktop
+    Emit-Check "show on desktop action" "present-in-file-explorer" $showOnDesktop
 }
 
 Emit-Check "kernel desktop icon size state" "present" $kernelIconSize
@@ -121,6 +121,11 @@ Write-Host ""
 Write-Host "status summary:"
 Write-Host "  desktop-directory-state=hosted-live-navigation-present"
 Write-Host "  back-go-home-nav=present-in-hosted-desktop"
-Write-Host "  show-on-desktop-action=missing"
+if ($null -eq $showOnDesktop) {
+    Write-Host "  show-on-desktop-action=missing"
+} else {
+    Write-Host "  show-on-desktop-action=present-in-file-explorer"
+}
 Write-Host "  shell-cd-sync=missing"
 Write-Host "  icon-size-setting=missing-or-partial"
+Write-Host "  bare-metal-parity=missing-or-partial"
