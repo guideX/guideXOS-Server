@@ -4,10 +4,12 @@
 #include "app_registry.h"
 #include "built_in_app_metadata.h"
 #include "desktop_config.h"
+#include "desktop_folder.h"
 #include "elf_validator.h"
 #include "fs.h"
 #include "logger.h"
 #include "lifecycle.h"
+#include "compositor.h"
 #include "process.h"
 #include "native_app_runtime.h"
 #include "native_elf_executor.h"
@@ -3585,6 +3587,29 @@ namespace gxos {
             Logger::write(LogLevel::Warn, "Desktop filesystem open failed: " + error);
             NotificationManager::Add(error, NotificationLevel::Error);
             return false;
+        }
+
+        bool DesktopService::ShowFolderOnHostedDesktop(const std::string& path, std::string& error) {
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
+            const std::string normalized = DesktopFolderResolver::NormalizeVirtualPath(path);
+            std::string ensureError;
+            const bool createIfMissing = normalized == DesktopFolderResolver::VirtualPath();
+            if (!DesktopFolderResolver::EnsureExists(normalized, ensureError, createIfMissing)) {
+                error = ensureError;
+                return false;
+            }
+
+            if (!Compositor::showFolderOnHostedDesktop(normalized)) {
+                error = std::string("Hosted desktop navigation failed for ") + normalized;
+                return false;
+            }
+
+            return true;
+#else
+            (void)path;
+            error = "Hosted desktop navigation is unavailable in this runtime";
+            return false;
+#endif
         }
 
         bool DesktopService::LaunchApp(const std::string& name, std::string& error) {

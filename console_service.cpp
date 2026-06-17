@@ -1,20 +1,55 @@
 #include "console_service.h"
 #include "desktop_service.h"
+#include "desktop_folder.h"
 #include "native_app_process_table.h"
 #include "process.h"
 #include "logger.h"
 #include "scheduler.h"
+#include <algorithm>
+#include <filesystem>
 #include <sstream>
 
 namespace gxos { namespace svc {
     using namespace gxos;
     static const char* kInputChan = "console.input";
     static const char* kOutputChan = "console.output";
+    static std::string s_cwd = gxos::gui::DesktopFolderResolver::VirtualPath();
 
     static std::string trim(const std::string& s){ size_t a = s.find_first_not_of(" \t\r\n"); if(a==std::string::npos) return {}; size_t b = s.find_last_not_of(" \t\r\n"); return s.substr(a, b-a+1); }
 
     static bool startsWith(const std::string& value, const std::string& prefix) {
         return value.size() >= prefix.size() && value.compare(0, prefix.size(), prefix) == 0;
+    }
+
+    static std::string resolveVirtualPath(const std::string& base, const std::string& raw) {
+        if (raw.empty()) return base;
+
+        std::string candidate = raw;
+        std::replace(candidate.begin(), candidate.end(), '\\', '/');
+        if (candidate == "~") return gxos::gui::DesktopFolderResolver::VirtualPath();
+
+        const bool isAbsolute = !candidate.empty() && candidate.front() == '/';
+        std::filesystem::path combined = isAbsolute ? std::filesystem::path(candidate) : (std::filesystem::path(base) / std::filesystem::path(candidate));
+        return gxos::gui::DesktopFolderResolver::NormalizeVirtualPath(combined.generic_string());
+    }
+
+    static bool changeDirectory(const std::string& rawPath, std::string& error) {
+        const std::string target = resolveVirtualPath(s_cwd, rawPath);
+        std::string ensureError;
+        const bool createIfMissing = target == gxos::gui::DesktopFolderResolver::VirtualPath();
+        if (!gxos::gui::DesktopFolderResolver::EnsureExists(target, ensureError, createIfMissing)) {
+            error = ensureError;
+            return false;
+        }
+
+        std::string syncError;
+        if (!gxos::gui::DesktopService::ShowFolderOnHostedDesktop(target, syncError)) {
+            error = syncError.empty() ? std::string("Hosted desktop navigation failed for ") + target : syncError;
+            return false;
+        }
+
+        s_cwd = target;
+        return true;
     }
 
     static void publishOutput(const std::string& text) {
@@ -78,6 +113,28 @@ namespace gxos { namespace svc {
             ipc::Message m; if(!ipc::Bus::pop(kInputChan, m, 1000)){ continue; }
             std::string line(m.data.begin(), m.data.end()); line = trim(line);
             if(line=="exit"||line=="quit"){ publishOutput("bye"); break; }
+            std::istringstream commandStream(line);
+            std::string command;
+            commandStream >> command;
+            std::string remainder;
+            std::getline(commandStream, remainder);
+            remainder = trim(remainder);
+            if(command=="cd") {
+                if (remainder.empty()) {
+                    publishOutput(s_cwd);
+                    continue;
+                }
+
+                std::string error;
+                if (!changeDirectory(remainder, error)) {
+                    publishOutput("cd: " + remainder + ": " + error);
+                }
+                continue;
+            }
+            if(command=="pwd") {
+                publishOutput(s_cwd);
+                continue;
+            }
             if(line=="desktop.apps") { publishOutput(gxos::gui::DesktopService::GetRegisteredAppsDiagnostic()); continue; }
             if(line=="desktop.apps.verbose") { publishOutput(gxos::gui::DesktopService::GetRegisteredAppsVerboseDiagnostic()); continue; }
             if(line=="desktop.launch.types") { publishOutput(gxos::gui::DesktopService::LaunchTargetTypeCoverageDiagnostic()); continue; }

@@ -79,7 +79,7 @@ There does not appear to be a dedicated desktop live-directory smoke yet. The ex
   - a live enumeration of the host-side desktop folder through `DesktopFolderResolver`.
 - Hosted File Explorer already supports directory navigation, history, and `Pin to Desktop`.
 - Bare-metal desktop already enumerates `/Desktop` from VFS and has file/folder open handling, but the desktop itself still behaves like a static icon board with persisted slots rather than a true live directory surface.
-- Shell `cd` updates only shell-local current-directory state at the moment.
+- Hosted GUI console `cd` now updates the live hosted desktop surface; the bare-metal kernel shell still keeps its own current-directory state.
 - Display Options currently controls desktop system icon visibility, not desktop directory mode or icon sizing.
 
 ## Phase 1B Note
@@ -94,6 +94,20 @@ There does not appear to be a dedicated desktop live-directory smoke yet. The ex
   - shell `cd` sync,
   - smaller non-root icon mode / Display Options setting,
   - bare-metal parity.
+
+## Phase 1C Note
+
+- Hosted shell/CLI `cd` sync is now wired through the GUI console path.
+- Source anchors changed:
+  - `console_service.cpp` now parses `cd` and `pwd`, resolves hosted virtual paths, and only updates the desktop after a successful directory change.
+  - `desktop_service.h` / `desktop_service.cpp` now expose a small hosted desktop folder bridge that calls the compositor live-navigation helper.
+  - `scripts/smoke-live-directory-desktop-status.ps1` now reports the hosted shell bridge instead of treating shell sync as missing.
+- This applies to hosted only.
+- Bare-metal parity remains deferred because the kernel shell path is still separate and has not been mirrored through the hosted desktop bridge.
+- Remaining parity gaps:
+  - smaller icon mode / Display Options setting,
+  - bare-metal parity,
+  - shell edge cases such as quoted paths and broader POSIX/Windows command compatibility.
 
 ## Proposed Phased Plan
 
@@ -150,4 +164,4 @@ There does not appear to be a dedicated desktop live-directory smoke yet. The ex
 - Should `Go to Desktop` mean the real root desktop folder, the user’s `Desktop` folder, or both depending on runtime?
 - Should non-desktop directory icon size be a view-local setting, a persisted display option, or a transient mode?
 - Should `Show on Desktop` mean “copy/pin the item to `/Desktop`” or “add a desktop reference/shortcut record”?
-- Should shell `cd` ever affect the desktop automatically, or should that remain a later opt-in bridge?
+- Should the bare-metal kernel shell eventually mirror the hosted `cd` bridge, or remain independent for parity reasons?

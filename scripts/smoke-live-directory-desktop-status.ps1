@@ -61,8 +61,10 @@ $hostedDesktopLive = Find-FirstMatch -LiteralPath (Join-Path $Root "compositor.c
 $hostedDesktopPathState = Find-FirstMatch -LiteralPath (Join-Path $Root "compositor.cpp") -Pattern "g_hostedDesktopDirectoryPath"
 $hostedDesktopNav = Find-FirstMatch -LiteralPath (Join-Path $Root "compositor.cpp") -Pattern "DesktopBack|DesktopHome|desktop-nav:back|desktop-nav:home|hostedDesktopGoBack\(\)|hostedDesktopGoHome\(\)"
 $kernelDesktopLive = Find-FirstMatch -LiteralPath (Join-Path $Root "kernel\core\desktop.cpp") -Pattern "enumerate_desktop_folder_items\("
-$shellCdState = Find-FirstMatch -LiteralPath (Join-Path $Root "kernel\core\shell.cpp") -Pattern "cmd_cd\("
-$shellGetCwdState = Find-FirstMatch -LiteralPath (Join-Path $Root "kernel\core\shell.cpp") -Pattern "get_cwd\("
+$hostedShellCdCommand = Find-FirstMatch -LiteralPath (Join-Path $Root "console_service.cpp") -Pattern 'if\(command=="cd"\)'
+$hostedShellDesktopBridge = Find-FirstMatch -LiteralPath (Join-Path $Root "desktop_service.cpp") -Pattern "ShowFolderOnHostedDesktop\(|showFolderOnHostedDesktop\("
+$bareMetalShellCdState = Find-FirstMatch -LiteralPath (Join-Path $Root "kernel\core\shell.cpp") -Pattern "cmd_cd\("
+$bareMetalShellGetCwdState = Find-FirstMatch -LiteralPath (Join-Path $Root "kernel\core\shell.cpp") -Pattern "get_cwd\("
 $fileExplorerBack = Find-FirstMatch -LiteralPath (Join-Path $Root "file_explorer.cpp") -Pattern "goBack\(\)"
 $fileExplorerGoHome = Find-FirstMatch -LiteralPath (Join-Path $Root "file_explorer.cpp") -Pattern "goHome\(\)"
 $fileExplorerContextPin = Find-FirstMatch -LiteralPath (Join-Path $Root "file_explorer.cpp") -Pattern "Pin to Desktop"
@@ -76,8 +78,10 @@ Emit-Check "hosted desktop folder enumeration" "present" $hostedDesktopLive
 Emit-Check "hosted desktop directory state" "present" $hostedDesktopPathState
 Emit-Check "hosted desktop navigation controls" "present" $hostedDesktopNav
 Emit-Check "bare-metal desktop folder enumeration" "present" $kernelDesktopLive
-Emit-Check "shell cd / cwd state" "present" $shellCdState
-Emit-Check "shell get_cwd exposure" "present" $shellGetCwdState
+Emit-Check "hosted shell cd command" "present" $hostedShellCdCommand
+Emit-Check "hosted shell desktop bridge" "present" $hostedShellDesktopBridge
+Emit-Check "bare-metal shell cd / cwd state" "present" $bareMetalShellCdState
+Emit-Check "bare-metal shell get_cwd exposure" "present" $bareMetalShellGetCwdState
 Emit-Check "File Explorer Back navigation" "present" $fileExplorerBack
 Emit-Check "File Explorer Go Home navigation" "present" $fileExplorerGoHome
 Emit-Check "File Explorer Pin to Desktop action" "present" $fileExplorerContextPin
@@ -126,6 +130,12 @@ if ($null -eq $showOnDesktop) {
 } else {
     Write-Host "  show-on-desktop-action=present-in-file-explorer"
 }
-Write-Host "  shell-cd-sync=missing"
+if ($null -ne $hostedShellCdCommand -and $null -ne $hostedShellDesktopBridge) {
+    Write-Host "  shell-cd-sync=hosted-present"
+} elseif ($null -ne $hostedShellDesktopBridge) {
+    Write-Host "  shell-cd-sync=hosted-bridge-present"
+} else {
+    Write-Host "  shell-cd-sync=missing"
+}
 Write-Host "  icon-size-setting=missing-or-partial"
 Write-Host "  bare-metal-parity=missing-or-partial"
