@@ -10,6 +10,9 @@
 #include "logger.h"
 #include "lifecycle.h"
 #include "compositor.h"
+#ifdef LoadImage
+#undef LoadImage
+#endif
 #include "process.h"
 #include "native_app_runtime.h"
 #include "native_elf_executor.h"
