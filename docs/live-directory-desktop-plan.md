@@ -116,11 +116,20 @@ There does not appear to be a dedicated desktop live-directory smoke yet. The ex
 - Hosted live desktop folder views now use a compact icon mode when the displayed folder is not the root desktop and the new Display Options preference is enabled.
 - The new preference is persisted in `desktop.json` as `smallLiveDesktopFolderIcons`.
 - Root desktop views keep the normal icon size and spacing.
-- Right-click `Icon Size` remains a placeholder submenu in this slice; it is intentionally not wired to the new preference yet.
 - Remaining parity gaps:
   - bare-metal parity,
-  - a real right-click icon-size implementation,
   - any future shell-path edge cases if the hosted `cd` bridge expands.
+
+## Phase 1E Note
+
+- The hosted desktop right-click `Folder View Icon Size` submenu is now wired to the same `smallLiveDesktopFolderIcons` setting that Display Options uses.
+- Choosing `Normal folder icons` or `Small folder icons` updates the live hosted desktop runtime and persists to `desktop.json`.
+- Root desktop views still remain normal-sized regardless of the preference.
+- The existing Display Options Desktop Icons tab remains the same shared source of truth for the setting when it opens or reloads config.
+- Remaining parity gaps:
+  - bare-metal parity,
+  - visual live run / eyeball verification if still needed,
+  - richer shell path parsing, if still relevant.
 
 ## Proposed Phased Plan
 

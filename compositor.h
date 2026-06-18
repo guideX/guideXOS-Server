@@ -113,6 +113,8 @@ namespace gxos { namespace gui {
         static void requestDesktopRefresh();
         static bool showFolderOnHostedDesktop(const std::string& path);
         static bool hostedDesktopUsesCompactIconLayout();
+        static bool hostedDesktopPrefersCompactFolderIcons();
+        static bool setHostedDesktopPrefersCompactFolderIcons(bool smallIcons);
         static void openDesktopItem(int index);
         static void openStartMenuApp(const std::string& appName);
         static bool pinStartMenuAppToDesktop(const std::string& appName);

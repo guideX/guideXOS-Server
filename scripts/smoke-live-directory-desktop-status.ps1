@@ -70,7 +70,7 @@ $fileExplorerGoHome = Find-FirstMatch -LiteralPath (Join-Path $Root "file_explor
 $fileExplorerContextPin = Find-FirstMatch -LiteralPath (Join-Path $Root "file_explorer.cpp") -Pattern "Pin to Desktop"
 $showOnDesktop = Find-FirstMatch -LiteralPath (Join-Path $Root "file_explorer.cpp") -Pattern "Show on Desktop|showFolderOnHostedDesktop"
 $kernelIconSize = Find-FirstMatch -LiteralPath (Join-Path $Root "kernel\core\desktop.cpp") -Pattern "s_desktopIconSize"
-$rightClickIconSize = Find-FirstMatch -LiteralPath (Join-Path $Root "right_click_menu.cpp") -Pattern "Icon Size"
+$rightClickIconSize = Find-FirstMatch -LiteralPath (Join-Path $Root "right_click_menu.cpp") -Pattern "setHostedDesktopPrefersCompactFolderIcons|hostedDesktopPrefersCompactFolderIcons|Folder View Icon Size|Normal folder icons|Small folder icons"
 $hostedNonRootCompactIcons = Find-FirstMatch -LiteralPath (Join-Path $Root "compositor.cpp") -Pattern "hostedDesktopUsesCompactIconLayout|desktopIconCellHeightForItem|desktopIconTopPadding"
 $displayOptionsIconSize = Find-FirstMatch -LiteralPath (Join-Path $Root "display_options.cpp") -Pattern "smallLiveDesktopFolderIcons|Use smaller folder icons|folder icon size"
 $desktopConfigIconSize = Find-FirstMatch -LiteralPath (Join-Path $Root "desktop_config.h") -Pattern "smallLiveDesktopFolderIcons"
@@ -87,7 +87,7 @@ Emit-Check "bare-metal shell get_cwd exposure" "present" $bareMetalShellGetCwdSt
 Emit-Check "File Explorer Back navigation" "present" $fileExplorerBack
 Emit-Check "File Explorer Go Home navigation" "present" $fileExplorerGoHome
 Emit-Check "File Explorer Pin to Desktop action" "present" $fileExplorerContextPin
-Emit-Check "right-click Icon Size submenu placeholder" "present" $rightClickIconSize
+Emit-Check "right-click Icon Size submenu wiring" "present" $rightClickIconSize
 Emit-Check "hosted non-root smaller icon layout" "present" $hostedNonRootCompactIcons
 Emit-Check "Display Options live folder icon size setting" "present" $displayOptionsIconSize
 Emit-Check "desktop config folder icon size persistence" "present" $desktopConfigIconSize
@@ -149,5 +149,5 @@ if ($null -ne $hostedNonRootCompactIcons -and $null -ne $displayOptionsIconSize 
 }
 Write-Host "  hosted-nonroot-smaller-icons=$(if ($null -ne $hostedNonRootCompactIcons) { 'present' } else { 'missing' })"
 Write-Host "  display-options-live-folder-icon-size=$(if ($null -ne $displayOptionsIconSize) { 'present' } else { 'missing' })"
-Write-Host "  right-click-icon-size=$(if ($null -ne $rightClickIconSize) { 'placeholder' } else { 'missing' })"
+Write-Host "  right-click-icon-size=$(if ($null -ne $rightClickIconSize) { 'live-folder-wired' } else { 'missing' })"
 Write-Host "  bare-metal-parity=missing-or-partial"

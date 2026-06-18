@@ -7,6 +7,18 @@
 
 namespace gxos { namespace gui {
 
+namespace {
+    constexpr int kFolderIconSizeOptionCount = 2;
+
+    const char* folderIconSizeLabel(int index) {
+        switch (index) {
+        case 0: return "Normal folder icons";
+        case 1: return "Small folder icons";
+        default: return "";
+        }
+    }
+}
+
 bool RightClickMenu::s_visible = false;
 int RightClickMenu::s_x = 0;
 int RightClickMenu::s_y = 0;
@@ -76,7 +88,7 @@ bool RightClickMenu::ContainsPoint(int mx, int my) {
     if (s_iconSubmenuVisible && s_iconSubmenuIndex >= 0) {
         int subX = s_x + kMenuW;
         int subY = s_y + s_iconSubmenuIndex * kItemH;
-        int subH = kItemH * 5;
+        int subH = kItemH * kFolderIconSizeOptionCount;
         if (mx >= subX && mx <= subX + kSubMenuW && my >= subY && my <= subY + subH) return true;
     }
     return false;
@@ -103,7 +115,7 @@ void RightClickMenu::buildItems() {
     }
     s_items.push_back({"Refresh", false, false});
     s_items.push_back({"Display Options", false, false});
-    s_items.push_back({"Icon Size", true, false});
+    s_items.push_back({"Folder View Icon Size", true, false});
     s_iconSubmenuIndex = 2;
 }
 
@@ -116,12 +128,14 @@ bool RightClickMenu::HandleClick(int mx, int my) {
     if (s_iconSubmenuVisible && s_iconSubmenuIndex >= 0) {
         int subX = s_x + kMenuW;
         int subY = s_y + s_iconSubmenuIndex * kItemH;
-        int subH = kItemH * 5;
+        int subH = kItemH * kFolderIconSizeOptionCount;
         if (mx >= subX && mx <= subX + kSubMenuW && my >= subY && my <= subY + subH) {
             int idx = (my - subY) / kItemH;
-            int sizes[] = {16, 24, 32, 48, 128};
-            if (idx >= 0 && idx < 5) {
-                Logger::write(LogLevel::Info, "Icon size selected: " + std::to_string(sizes[idx]));
+            if (idx >= 0 && idx < kFolderIconSizeOptionCount) {
+                const bool smallIcons = idx == 1;
+                Logger::write(LogLevel::Info,
+                    std::string("Folder view icon size selected: ") + (smallIcons ? "small" : "normal"));
+                Compositor::setHostedDesktopPrefersCompactFolderIcons(smallIcons);
             }
             Hide();
             return true;
@@ -229,7 +243,7 @@ void RightClickMenu::Draw(HDC dc) {
     if (s_iconSubmenuVisible && s_iconSubmenuIndex >= 0) {
         int subX = s_x + kMenuW;
         int subY = s_y + s_iconSubmenuIndex * kItemH;
-        int subH = kItemH * 5;
+        int subH = kItemH * kFolderIconSizeOptionCount;
 
         RECT subBg = {subX, subY, subX + kSubMenuW, subY + subH};
         HBRUSH subBgBrush = CreateSolidBrush(RGB(34, 34, 34));
@@ -244,8 +258,8 @@ void RightClickMenu::Draw(HDC dc) {
         SelectObject(dc, oldSubBrush2);
         DeleteObject(subBorderPen);
 
-        const char* sizeLabels[] = {"16", "24", "32", "48", "128"};
-        for (int i = 0; i < 5; i++) {
+        const bool smallIcons = Compositor::hostedDesktopPrefersCompactFolderIcons();
+        for (int i = 0; i < kFolderIconSizeOptionCount; i++) {
             int sy = subY + i * kItemH;
             RECT subItem = {subX, sy, subX + kSubMenuW, sy + kItemH};
 
@@ -257,8 +271,12 @@ void RightClickMenu::Draw(HDC dc) {
             }
 
             const int subTextY = sy + (kItemH > lineH ? (kItemH - lineH) / 2 : 0);
-            SystemFont::DrawText(dc, subX + kPadding, subTextY,
-                                 sizeLabels[i], (int)strlen(sizeLabels[i]),
+            if ((i == 0 && !smallIcons) || (i == 1 && smallIcons)) {
+                SystemFont::DrawText(dc, subX + kPadding, subTextY, "*", 1,
+                                     RGB(220, 220, 220), FontRole::Default);
+            }
+            SystemFont::DrawText(dc, subX + kPadding + 14, subTextY,
+                                 folderIconSizeLabel(i), (int)strlen(folderIconSizeLabel(i)),
                                  RGB(220, 220, 220), FontRole::Default);
         }
     }

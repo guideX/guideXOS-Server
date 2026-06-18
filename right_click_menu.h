@@ -15,7 +15,7 @@ namespace gxos { namespace gui {
     /// RightClickMenu - Desktop right-click context menu
     /// Ported from guideXOS.Legacy RightMenu.cs
     /// Shows context menu items: Display Options, Performance Widget toggle,
-    /// Save Settings, Up one level, Icon Size submenu.
+    /// Save Settings, Up one level, Folder View Icon Size submenu.
     class RightClickMenu {
     public:
         /// Show the right-click menu at the given screen coordinates

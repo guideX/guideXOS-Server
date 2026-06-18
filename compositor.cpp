@@ -1802,6 +1802,41 @@ namespace gxos {
 #endif
         }
 
+        bool Compositor::hostedDesktopPrefersCompactFolderIcons() {
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
+            return g_cfg.smallLiveDesktopFolderIcons;
+#else
+            return false;
+#endif
+        }
+
+        bool Compositor::setHostedDesktopPrefersCompactFolderIcons(bool smallIcons) {
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
+            if (g_cfg.smallLiveDesktopFolderIcons == smallIcons) {
+                Logger::write(LogLevel::Info,
+                    std::string("Hosted desktop folder icon preference unchanged: ") + (smallIcons ? "small" : "normal"));
+                return false;
+            }
+            g_cfg.smallLiveDesktopFolderIcons = smallIcons;
+            g_cfg.taskbarPosition = taskbarPositionName(g_taskbarPosition);
+            std::string err;
+            const bool saved = DesktopConfig::Save("desktop.json", g_cfg, err);
+            if (!saved) {
+                Logger::write(LogLevel::Error, "Hosted desktop folder icon preference save failed: " + err);
+            } else {
+                Logger::write(LogLevel::Info, "Hosted desktop folder icon preference persisted");
+            }
+            refreshDesktopItems();
+            invalidate(0);
+            Logger::write(LogLevel::Info,
+                std::string("Hosted desktop folder icon preference set: ") + (smallIcons ? "small" : "normal"));
+            return saved;
+#else
+            (void)smallIcons;
+            return false;
+#endif
+        }
+
         void Compositor::ClearDesktopIconSelection( ) {
             bool hadSelection = !g_selectedDesktopIconIndices.empty( );
             for (int idx : g_selectedDesktopIconIndices) {
