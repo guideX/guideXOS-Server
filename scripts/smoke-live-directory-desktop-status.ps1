@@ -71,7 +71,9 @@ $fileExplorerContextPin = Find-FirstMatch -LiteralPath (Join-Path $Root "file_ex
 $showOnDesktop = Find-FirstMatch -LiteralPath (Join-Path $Root "file_explorer.cpp") -Pattern "Show on Desktop|showFolderOnHostedDesktop"
 $kernelIconSize = Find-FirstMatch -LiteralPath (Join-Path $Root "kernel\core\desktop.cpp") -Pattern "s_desktopIconSize"
 $rightClickIconSize = Find-FirstMatch -LiteralPath (Join-Path $Root "right_click_menu.cpp") -Pattern "Icon Size"
-$displayOptionsIconSize = Find-FirstMatch -LiteralPath (Join-Path $Root "display_options.cpp") -Pattern "s_desktopIconSize|desktop icon size|icon-size|Icon Size Setting"
+$hostedNonRootCompactIcons = Find-FirstMatch -LiteralPath (Join-Path $Root "compositor.cpp") -Pattern "hostedDesktopUsesCompactIconLayout|desktopIconCellHeightForItem|desktopIconTopPadding"
+$displayOptionsIconSize = Find-FirstMatch -LiteralPath (Join-Path $Root "display_options.cpp") -Pattern "smallLiveDesktopFolderIcons|Use smaller folder icons|folder icon size"
+$desktopConfigIconSize = Find-FirstMatch -LiteralPath (Join-Path $Root "desktop_config.h") -Pattern "smallLiveDesktopFolderIcons"
 
 Write-Host ""
 Emit-Check "hosted desktop folder enumeration" "present" $hostedDesktopLive
@@ -86,6 +88,9 @@ Emit-Check "File Explorer Back navigation" "present" $fileExplorerBack
 Emit-Check "File Explorer Go Home navigation" "present" $fileExplorerGoHome
 Emit-Check "File Explorer Pin to Desktop action" "present" $fileExplorerContextPin
 Emit-Check "right-click Icon Size submenu placeholder" "present" $rightClickIconSize
+Emit-Check "hosted non-root smaller icon layout" "present" $hostedNonRootCompactIcons
+Emit-Check "Display Options live folder icon size setting" "present" $displayOptionsIconSize
+Emit-Check "desktop config folder icon size persistence" "present" $desktopConfigIconSize
 
 if ($null -eq $showOnDesktop) {
     Write-Host "show-on-desktop-action=missing"
@@ -98,7 +103,7 @@ Emit-Check "kernel desktop icon size state" "present" $kernelIconSize
 
 if ($null -eq $displayOptionsIconSize) {
     Write-Host "Display Options icon-size setting hook: missing or only partial"
-    Write-Host "    evidence: display_options.cpp currently exposes desktop icon visibility checkboxes, not a persisted icon-size setting"
+    Write-Host "    evidence: display_options.cpp currently exposes desktop icon visibility checkboxes, not a persisted folder-icon-size setting"
 } else {
     Emit-Check "Display Options icon-size setting hook" "present" $displayOptionsIconSize
 }
@@ -137,5 +142,12 @@ if ($null -ne $hostedShellCdCommand -and $null -ne $hostedShellDesktopBridge) {
 } else {
     Write-Host "  shell-cd-sync=missing"
 }
-Write-Host "  icon-size-setting=missing-or-partial"
+if ($null -ne $hostedNonRootCompactIcons -and $null -ne $displayOptionsIconSize -and $null -ne $desktopConfigIconSize) {
+    Write-Host "  icon-size-setting=hosted-nonroot-present"
+} else {
+    Write-Host "  icon-size-setting=missing-or-partial"
+}
+Write-Host "  hosted-nonroot-smaller-icons=$(if ($null -ne $hostedNonRootCompactIcons) { 'present' } else { 'missing' })"
+Write-Host "  display-options-live-folder-icon-size=$(if ($null -ne $displayOptionsIconSize) { 'present' } else { 'missing' })"
+Write-Host "  right-click-icon-size=$(if ($null -ne $rightClickIconSize) { 'placeholder' } else { 'missing' })"
 Write-Host "  bare-metal-parity=missing-or-partial"

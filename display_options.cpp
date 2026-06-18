@@ -29,6 +29,7 @@ bool DisplayOptions::s_showDesktopTrash = true;
 bool DisplayOptions::s_showDesktopThisSystem = true;
 bool DisplayOptions::s_showDesktopFileManager = true;
 bool DisplayOptions::s_showDesktopSystemSettings = false;
+bool DisplayOptions::s_smallLiveDesktopFolderIcons = true;
 
 namespace {
     const int kWindowW = 800;
@@ -111,14 +112,15 @@ namespace {
 
     const char* desktopIconSettingName(int index)
     {
-        switch (index) {
-        case 0: return "Trash";
-        case 1: return "This System";
-        case 2: return "File Manager";
-        case 3: return "System Settings";
-        default: return "";
-        }
+    switch (index) {
+    case 0: return "Trash";
+    case 1: return "This System";
+    case 2: return "File Manager";
+    case 3: return "System Settings";
+    case 4: return "Use smaller folder icons";
+    default: return "";
     }
+}
 }
 
 uint64_t DisplayOptions::Launch()
@@ -149,16 +151,19 @@ void DisplayOptions::loadSelection()
         s_showDesktopThisSystem = cfg.showDesktopThisSystem;
         s_showDesktopFileManager = cfg.showDesktopFileManager;
         s_showDesktopSystemSettings = cfg.showDesktopSystemSettings;
+        s_smallLiveDesktopFolderIcons = cfg.smallLiveDesktopFolderIcons;
         Logger::write(LogLevel::Info, std::string("DisplayOptions Desktop Icons loaded: Trash=") + (s_showDesktopTrash ? "true" : "false") +
             " ThisSystem=" + (s_showDesktopThisSystem ? "true" : "false") +
             " FileManager=" + (s_showDesktopFileManager ? "true" : "false") +
-            " SystemSettings=" + (s_showDesktopSystemSettings ? "true" : "false"));
+            " SystemSettings=" + (s_showDesktopSystemSettings ? "true" : "false") +
+            " FolderIconsSmall=" + (s_smallLiveDesktopFolderIcons ? "true" : "false"));
     } else {
         s_showDesktopTrash = true;
         s_showDesktopThisSystem = true;
         s_showDesktopFileManager = true;
         s_showDesktopSystemSettings = false;
-        Logger::write(LogLevel::Info, "DisplayOptions Desktop Icons defaulted: Trash=true ThisSystem=true FileManager=true SystemSettings=false");
+        s_smallLiveDesktopFolderIcons = true;
+        Logger::write(LogLevel::Info, "DisplayOptions Desktop Icons defaulted: Trash=true ThisSystem=true FileManager=true SystemSettings=false FolderIconsSmall=true");
     }
     for (size_t i = 0; i < backgrounds.size(); ++i) {
         if (backgrounds[i].id == selectedId) {
@@ -278,7 +283,7 @@ void DisplayOptions::render()
     drawButton(20, kTabY, kTabW, kTabH, "Backgrounds", s_activeTab == 0, true);
     drawButton(250, kTabY, kTabW, kTabH, "Desktop Icons", s_activeTab == 2, true);
     drawButton(480, kTabY, kTabW, kTabH, "Gradients", s_activeTab == 1, true);
-    drawText(s_windowId, 26, 72, s_activeTab == 2 ? "Choose which system icons appear on the desktop:" : (s_activeTab == 0 ? "Select a background from the gallery:" : "Select a gradient from the gallery:"));
+    drawText(s_windowId, 26, 72, s_activeTab == 2 ? "Choose desktop icons and folder icon size:" : (s_activeTab == 0 ? "Select a background from the gallery:" : "Select a gradient from the gallery:"));
     drawRect(s_windowId, 20, 92, 742, 456, 22, 22, 24);
 
     if (s_activeTab == 0) {
@@ -345,9 +350,10 @@ void DisplayOptions::drawDesktopIconsTab()
         s_showDesktopTrash,
         s_showDesktopThisSystem,
         s_showDesktopFileManager,
-        s_showDesktopSystemSettings
+        s_showDesktopSystemSettings,
+        s_smallLiveDesktopFolderIcons
     };
-    for (int i = 0; i < 4; ++i) {
+    for (int i = 0; i < 5; ++i) {
         int y = kDesktopIconsY + i * kDesktopIconRowH;
         bool hover = hit(s_mouseX, s_mouseY, kDesktopIconsX - 8, y - 8, 320, 34);
         drawCheckbox(kDesktopIconsX, y, desktopIconSettingName(i), states[i], hover);
@@ -542,6 +548,7 @@ bool DisplayOptions::toggleDesktopIconSetting(int index)
     case 1: setting = &s_showDesktopThisSystem; break;
     case 2: setting = &s_showDesktopFileManager; break;
     case 3: setting = &s_showDesktopSystemSettings; break;
+    case 4: setting = &s_smallLiveDesktopFolderIcons; break;
     default: return false;
     }
     *setting = !*setting;
@@ -560,6 +567,7 @@ void DisplayOptions::saveDesktopIconSettings()
     cfg.showDesktopThisSystem = s_showDesktopThisSystem;
     cfg.showDesktopFileManager = s_showDesktopFileManager;
     cfg.showDesktopSystemSettings = s_showDesktopSystemSettings;
+    cfg.smallLiveDesktopFolderIcons = s_smallLiveDesktopFolderIcons;
     if (DesktopConfig::Save("desktop.json", cfg, err)) {
         Logger::write(LogLevel::Info, "DisplayOptions Desktop Icons settings saved");
         publish(MsgType::MT_DesktopConfigReload, "");

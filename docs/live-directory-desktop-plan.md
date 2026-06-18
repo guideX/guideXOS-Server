@@ -57,6 +57,7 @@ This note captures the current implementation anchors for the Phase 0 / Phase 1 
   - The UI’s Desktop Icons tab is currently a checkbox list, not a directory-mode or icon-size control surface.
 
 - [right_click_menu.cpp](../right_click_menu.cpp)
+  - Phase 1D adds a persisted hosted live-folder compact icon preference without changing the existing checkbox-first layout.
   - Desktop context menus currently expose `Refresh`, `Display Options`, and a placeholder `Icon Size` submenu around lines 92-147.
   - The submenu logs a selected size but does not persist or apply it yet.
 
@@ -81,6 +82,7 @@ There does not appear to be a dedicated desktop live-directory smoke yet. The ex
 - Bare-metal desktop already enumerates `/Desktop` from VFS and has file/folder open handling, but the desktop itself still behaves like a static icon board with persisted slots rather than a true live directory surface.
 - Hosted GUI console `cd` now updates the live hosted desktop surface; the bare-metal kernel shell still keeps its own current-directory state.
 - Display Options currently controls desktop system icon visibility, not desktop directory mode or icon sizing.
+- Phase 1D extends that same Display Options path with a persisted hosted live-folder compact icon preference.
 
 ## Phase 1B Note
 
@@ -108,6 +110,17 @@ There does not appear to be a dedicated desktop live-directory smoke yet. The ex
   - smaller icon mode / Display Options setting,
   - bare-metal parity,
   - shell edge cases such as quoted paths and broader POSIX/Windows command compatibility.
+
+## Phase 1D Note
+
+- Hosted live desktop folder views now use a compact icon mode when the displayed folder is not the root desktop and the new Display Options preference is enabled.
+- The new preference is persisted in `desktop.json` as `smallLiveDesktopFolderIcons`.
+- Root desktop views keep the normal icon size and spacing.
+- Right-click `Icon Size` remains a placeholder submenu in this slice; it is intentionally not wired to the new preference yet.
+- Remaining parity gaps:
+  - bare-metal parity,
+  - a real right-click icon-size implementation,
+  - any future shell-path edge cases if the hosted `cd` bridge expands.
 
 ## Proposed Phased Plan
 

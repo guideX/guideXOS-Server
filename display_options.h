@@ -28,6 +28,7 @@ private:
     static bool s_showDesktopThisSystem;
     static bool s_showDesktopFileManager;
     static bool s_showDesktopSystemSettings;
+    static bool s_smallLiveDesktopFolderIcons;
 
     static void loadSelection();
     static void render();

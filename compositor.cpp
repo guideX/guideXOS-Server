@@ -483,10 +483,15 @@ namespace gxos {
             return std::string("shortcut:") + (shortcutType == "Folder" ? "folder:" : "file:") + targetPath;
         }
 
+        static bool isDesktopFolderRootPath(const std::string& path);
+
         struct DesktopGridMetrics {
             int margin{20};
+            int iconW{56};
+            int iconH{56};
             int cellW{84};
             int cellH{94};
+            int labelMaxLines{3};
             int workX{0};
             int workY{0};
             int workW{1024};
@@ -503,6 +508,13 @@ namespace gxos {
         static DesktopGridMetrics desktopGridMetrics() {
             DesktopGridMetrics metrics;
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)
+            if (Compositor::hostedDesktopUsesCompactIconLayout()) {
+                metrics.iconW = 40;
+                metrics.iconH = 40;
+                metrics.cellW = 72;
+                metrics.cellH = 82;
+                metrics.labelMaxLines = 2;
+            }
             RECT cr{0, 0, 1024, 768};
             if (Compositor::g_hwnd) GetClientRect(Compositor::g_hwnd, &cr);
             WorkRect work = desktopWorkAreaForBounds(static_cast<int>(cr.right - cr.left), static_cast<int>(cr.bottom - cr.top));
@@ -524,6 +536,21 @@ namespace gxos {
 
         static DesktopCellRect desktopCellRect(int x, int y, const DesktopGridMetrics& metrics) {
             return { x, y, x + metrics.cellW, y + metrics.cellH };
+        }
+
+        static int desktopIconTopPadding(const DesktopGridMetrics& metrics) {
+            return metrics.iconH <= 40 ? 4 : 6;
+        }
+
+        static int desktopIconLabelPadding(const DesktopGridMetrics& metrics) {
+            return metrics.iconH <= 40 ? 4 : 5;
+        }
+
+        static int desktopIconCellHeightForItem(const DesktopItem& item, const DesktopGridMetrics& metrics) {
+            const int labelMaxW = std::max(1, metrics.cellW - 8);
+            const auto labelLines = wrapUiTextToWidth(item.label, labelMaxW, FontRole::Small, static_cast<size_t>(std::max(1, metrics.labelMaxLines)));
+            const int labelH = std::max(uiTextHeight(FontRole::Small), wrappedUiTextHeight(labelLines, FontRole::Small));
+            return desktopIconTopPadding(metrics) + metrics.iconH + desktopIconLabelPadding(metrics) + labelH;
         }
 
         static bool desktopRectsOverlap(const DesktopCellRect& a, const DesktopCellRect& b) {
@@ -1767,6 +1794,14 @@ namespace gxos {
 #endif
         }
 
+        bool Compositor::hostedDesktopUsesCompactIconLayout() {
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
+            return !isDesktopFolderRootPath(g_hostedDesktopDirectoryPath) && g_cfg.smallLiveDesktopFolderIcons;
+#else
+            return false;
+#endif
+        }
+
         void Compositor::ClearDesktopIconSelection( ) {
             bool hadSelection = !g_selectedDesktopIconIndices.empty( );
             for (int idx : g_selectedDesktopIconIndices) {
@@ -1836,13 +1871,10 @@ namespace gxos {
         }
 
         RECT Compositor::GetDesktopIconBounds(int index) {
-            const int iconW = 56;
-            const int cellW = iconW + 28;
             if (index < 0 || index >= (int)g_items.size( )) return RECT{ 0,0,0,0 };
-            const int labelMaxW = cellW - 8;
-            const auto labelLines = wrapUiTextToWidth(g_items[index].label, labelMaxW, FontRole::Small, 3);
-            const int cellH = 56 + 18 + std::max(uiTextHeight(FontRole::Small), wrappedUiTextHeight(labelLines, FontRole::Small));
-            return RECT{ g_items[index].ix, g_items[index].iy, g_items[index].ix + cellW, g_items[index].iy + cellH };
+            const DesktopGridMetrics metrics = desktopGridMetrics();
+            const int cellH = desktopIconCellHeightForItem(g_items[index], metrics);
+            return RECT{ g_items[index].ix, g_items[index].iy, g_items[index].ix + metrics.cellW, g_items[index].iy + cellH };
         }
 
         int Compositor::HitTestDesktopIcon(int mouseX, int mouseY) {
@@ -1910,14 +1942,17 @@ namespace gxos {
         void Compositor::shutdownWindow( ) { if (g_hwnd) { DestroyWindow(g_hwnd); g_hwnd = nullptr; } }
         void Compositor::requestRepaint( ) { if (g_hwnd) InvalidateRect(g_hwnd, nullptr, FALSE); }
         void Compositor::drawDesktopIcons(HDC dc, RECT cr) {
-            const int iconW = 56; const int iconH = 56; const int cellW = iconW + 28; const int labelMaxW = cellW - 8; HFONT font = (HFONT)GetStockObject(ANSI_VAR_FONT); SelectObject(dc, font); SetBkMode(dc, TRANSPARENT); POINT cursor; GetCursorPos(&cursor); ScreenToClient(g_hwnd, &cursor); int idx = 0; for (auto& it : g_items) {
-                int x = it.ix; int y = it.iy; std::vector<std::string> labelLines = wrapUiTextToWidth(it.label, labelMaxW, FontRole::Small, 3); int cellH = iconH + 18 + std::max(uiTextHeight(FontRole::Small), wrappedUiTextHeight(labelLines, FontRole::Small)); RECT cell{ x, y, x + cellW, y + cellH }; bool hover = (cursor.x >= cell.left && cursor.x <= cell.right && cursor.y >= cell.top && cursor.y <= cell.bottom);
+            const DesktopGridMetrics metrics = desktopGridMetrics();
+            HFONT font = (HFONT)GetStockObject(ANSI_VAR_FONT); SelectObject(dc, font); SetBkMode(dc, TRANSPARENT); POINT cursor; GetCursorPos(&cursor); ScreenToClient(g_hwnd, &cursor); int idx = 0; for (auto& it : g_items) {
+                int x = it.ix; int y = it.iy; const int cellW = metrics.cellW; const int iconW = metrics.iconW; const int iconH = metrics.iconH; const int cellH = desktopIconCellHeightForItem(it, metrics); const int labelMaxW = cellW - 8; std::vector<std::string> labelLines = wrapUiTextToWidth(it.label, labelMaxW, FontRole::Small, static_cast<size_t>(std::max(1, metrics.labelMaxLines))); RECT cell{ x, y, x + cellW, y + cellH }; bool hover = (cursor.x >= cell.left && cursor.x <= cell.right && cursor.y >= cell.top && cursor.y <= cell.bottom);
                 if (it.selected) {
                     HBRUSH sel = CreateSolidBrush(RGB(50, 90, 160)); FillRect(dc, &cell, sel); DeleteObject(sel); 
                     // Draw focus indicator for selected icon
                     FocusIndicator::DrawFocusRect(dc, cell.left, cell.top, cellW, cellH, 4, 2, 3);
                 } else if (hover) { HBRUSH hov = CreateSolidBrush(RGB(50, 55, 65)); FillRect(dc, &cell, hov); DeleteObject(hov); HPEN hovP = CreatePen(PS_SOLID, 1, RGB(80, 100, 140)); HGDIOBJ oP = SelectObject(dc, hovP); HGDIOBJ oB = SelectObject(dc, GetStockObject(NULL_BRUSH)); Rectangle(dc, cell.left, cell.top, cell.right, cell.bottom); SelectObject(dc, oP); SelectObject(dc, oB); DeleteObject(hovP); }
-                RECT iconR{ x + (cellW - iconW) / 2, y + 6, x + (cellW - iconW) / 2 + iconW, y + 6 + iconH };
+                const int iconTopPad = desktopIconTopPadding(metrics);
+                const int labelTopPad = desktopIconLabelPadding(metrics);
+                RECT iconR{ x + (cellW - iconW) / 2, y + iconTopPad, x + (cellW - iconW) / 2 + iconW, y + iconTopPad + iconH };
                 std::string lbl = it.label;
                 if (!drawDesktopThemedIcon(dc, iconR, it)) {
                     if (!it.iconName.empty()) Logger::write(LogLevel::Warn, "Desktop icon fallback used for " + it.label + " logical=" + it.iconName);
@@ -1935,7 +1970,7 @@ namespace gxos {
                     HPEN iconFrame = CreatePen(PS_SOLID, 1, RGB(180, 180, 200)); HGDIOBJ oP2 = SelectObject(dc, iconFrame); HGDIOBJ oB2 = SelectObject(dc, GetStockObject(NULL_BRUSH)); Rectangle(dc, iconR.left, iconR.top, iconR.right, iconR.bottom); SelectObject(dc, oP2); SelectObject(dc, oB2); DeleteObject(iconFrame);
                 }
                 // Label with text shadow
-                int labelY = iconR.bottom + 5;
+                int labelY = iconR.bottom + labelTopPad;
                 int lineH = uiTextHeight(FontRole::Small);
                 for (const std::string& line : labelLines) {
                     int lineW = measureUiText(line.c_str(), static_cast<int>(line.size()), FontRole::Small);
@@ -2637,7 +2672,7 @@ namespace gxos {
                     }
                     
                     // Otherwise, handle desktop icon right-click or show desktop context menu
-                    const int iconW = 56; const int cellW = iconW + 28; const int cellH = 56 + 38; int hitIdx = -1; for (int i = 0; i < (int)g_items.size( ); ++i) { int ix = g_items[i].ix; int iy = g_items[i].iy; if (mx >= ix && mx < ix + cellW && my >= iy && my < iy + cellH) { hitIdx = i; break; } } if (hitIdx >= 0) { SelectDesktopIcon(hitIdx, false); Logger::write(LogLevel::Info, std::string("Desktop item context requested: ") + desktopLayoutKey(g_items[hitIdx])); RightClickMenu::ShowForDesktopItem(mx, my, hitIdx); requestRepaint( ); return 0; }
+                    int hitIdx = HitTestDesktopIcon(mx, my); if (hitIdx >= 0) { SelectDesktopIcon(hitIdx, false); Logger::write(LogLevel::Info, std::string("Desktop item context requested: ") + desktopLayoutKey(g_items[hitIdx])); RightClickMenu::ShowForDesktopItem(mx, my, hitIdx); requestRepaint( ); return 0; }
                     // Desktop right-click context menu (no icon hit)
                     RightClickMenu::Show(mx, my);
                     requestRepaint( );
@@ -3073,7 +3108,8 @@ namespace gxos {
                     Logger::write(LogLevel::Info, std::string("Desktop config reloaded for system icon visibility: Trash=") + (g_cfg.showDesktopTrash ? "true" : "false") +
                         " ThisSystem=" + (g_cfg.showDesktopThisSystem ? "true" : "false") +
                         " FileManager=" + (g_cfg.showDesktopFileManager ? "true" : "false") +
-                        " SystemSettings=" + (g_cfg.showDesktopSystemSettings ? "true" : "false"));
+                        " SystemSettings=" + (g_cfg.showDesktopSystemSettings ? "true" : "false") +
+                        " FolderIconsSmall=" + (g_cfg.smallLiveDesktopFolderIcons ? "true" : "false"));
                     refreshDesktopItems();
                     invalidate(0);
                 } else {
