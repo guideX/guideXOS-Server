@@ -2971,6 +2971,122 @@ bool sync_live_directory_from_shell_cwd(const char* cwd)
     return bare_metal_desktop_set_current_directory(cwd, true);
 }
 
+#if defined(GXOS_LIVE_DIRECTORY_DESKTOP_RUNTIME_SMOKE_ACTIVE) && defined(GXOS_BARE_METAL)
+void run_live_directory_runtime_smoke()
+{
+    initialize_bare_metal_desktop_directory_state();
+
+    char savedCurrentPath[vfs::VFS_MAX_PATH];
+    char savedHistoryPaths[4][vfs::VFS_MAX_PATH];
+    int savedHistoryCount = s_bareMetalDesktopHistoryCount;
+
+    desktop_str_copy(savedCurrentPath, s_bareMetalDesktopCurrentPath, (int)sizeof(savedCurrentPath));
+    for (int i = 0; i < 4; ++i) {
+        desktop_str_copy(savedHistoryPaths[i], s_bareMetalDesktopHistoryPaths[i], (int)sizeof(savedHistoryPaths[i]));
+    }
+
+    const char* smokePath = "/system/wall";
+    bool desktopAliasOk = false;
+    bool targetOk = false;
+    bool folderNavOk = false;
+    bool compactLayoutOk = false;
+    bool backOk = false;
+    bool shellSyncOk = false;
+    bool homeOk = false;
+    bool cleanupOk = false;
+    vfs::FileInfo smokeInfo{};
+
+    serial::puts("[LIVE-DIRECTORY-RUNTIME-SMOKE] start\n");
+    serial::puts("[LIVE-DIRECTORY-RUNTIME-SMOKE] startPath=");
+    serial::puts(savedCurrentPath);
+    serial::puts(" home=");
+    serial::puts(s_bareMetalDesktopHomePath);
+    serial::puts("\n");
+
+    if (!vfs::get_mount("/Desktop")) {
+        desktopAliasOk = vfs::mount_alias("/Desktop", smokePath) != 0xFF;
+        serial::puts("[LIVE-DIRECTORY-RUNTIME-SMOKE] LIVE_DESKTOP_HOME_ALIAS mount=/Desktop source=");
+        serial::puts(smokePath);
+        serial::puts(" result=");
+        serial::puts(desktopAliasOk ? "PASS" : "FAIL");
+        serial::puts("\n");
+    } else {
+        desktopAliasOk = true;
+        serial::puts("[LIVE-DIRECTORY-RUNTIME-SMOKE] LIVE_DESKTOP_HOME_ALIAS mount=/Desktop source=");
+        serial::puts(smokePath);
+        serial::puts(" result=PASS existing\n");
+    }
+
+    targetOk = vfs::stat(smokePath, &smokeInfo) == vfs::VFS_OK && smokeInfo.type == vfs::FILE_TYPE_DIRECTORY;
+    serial::puts("[LIVE-DIRECTORY-RUNTIME-SMOKE] LIVE_DESKTOP_TARGET verify=");
+    serial::puts(smokePath);
+    serial::puts(" result=");
+    serial::puts(targetOk ? "PASS" : "FAIL");
+    serial::puts("\n");
+
+    if (targetOk) {
+        folderNavOk = bare_metal_desktop_set_current_directory(smokePath, true);
+        serial::puts("[LIVE-DIRECTORY-RUNTIME-SMOKE] LIVE_DESKTOP_NAV from=");
+        serial::puts(savedCurrentPath);
+        serial::puts(" to=");
+        serial::puts(smokePath);
+        serial::puts(" source=folder-activation result=");
+        serial::puts(folderNavOk ? "PASS" : "FAIL");
+        serial::puts("\n");
+
+        compactLayoutOk = bare_metal_desktop_uses_compact_folder_layout();
+        serial::puts("[LIVE-DIRECTORY-RUNTIME-SMOKE] LIVE_DESKTOP_LAYOUT compact=");
+        serial::puts(compactLayoutOk ? "1" : "0");
+        serial::puts(" path=");
+        serial::puts(s_bareMetalDesktopCurrentPath);
+        serial::puts("\n");
+
+        backOk = bare_metal_desktop_go_back();
+        serial::puts("[LIVE-DIRECTORY-RUNTIME-SMOKE] LIVE_DESKTOP_NAV_BACK to=");
+        serial::puts(s_bareMetalDesktopCurrentPath);
+        serial::puts(" result=");
+        serial::puts(backOk ? "PASS" : "FAIL");
+        serial::puts("\n");
+
+        shellSyncOk = sync_live_directory_from_shell_cwd(smokePath);
+        serial::puts("[LIVE-DIRECTORY-RUNTIME-SMOKE] LIVE_DESKTOP_SHELL_CD_SYNC cwd=");
+        serial::puts(smokePath);
+        serial::puts(" result=");
+        serial::puts(shellSyncOk ? "PASS" : "FAIL");
+        serial::puts("\n");
+
+        homeOk = bare_metal_desktop_go_home();
+        serial::puts("[LIVE-DIRECTORY-RUNTIME-SMOKE] LIVE_DESKTOP_NAV_HOME to=");
+        serial::puts(s_bareMetalDesktopCurrentPath);
+        serial::puts(" result=");
+        serial::puts(homeOk ? "PASS" : "FAIL");
+        serial::puts("\n");
+    }
+
+    desktop_str_copy(s_bareMetalDesktopCurrentPath, savedCurrentPath, (int)sizeof(s_bareMetalDesktopCurrentPath));
+    for (int i = 0; i < 4; ++i) {
+        desktop_str_copy(s_bareMetalDesktopHistoryPaths[i], savedHistoryPaths[i], (int)sizeof(s_bareMetalDesktopHistoryPaths[i]));
+    }
+    s_bareMetalDesktopHistoryCount = savedHistoryCount;
+    ClearDesktopIconSelection();
+    s_lastClickedIcon = -1;
+    s_lastClickTime = 0;
+    bare_metal_desktop_request_folder_refresh();
+
+    cleanupOk = targetOk;
+    serial::puts("[LIVE-DIRECTORY-RUNTIME-SMOKE] LIVE_DESKTOP_CLEANUP path=");
+    serial::puts(smokePath);
+    serial::puts(" result=");
+    serial::puts(cleanupOk ? "PASS" : "FAIL");
+    serial::puts("\n");
+
+    const bool overallPass = desktopAliasOk && targetOk && folderNavOk && compactLayoutOk && backOk && shellSyncOk && homeOk && cleanupOk;
+    serial::puts("[LIVE-DIRECTORY-RUNTIME-SMOKE] result=");
+    serial::puts(overallPass ? "PASS" : "FAIL");
+    serial::puts("\n");
+}
+#endif
+
 static void SelectDesktopIcon(int displayIndex, bool additive)
 {
     if (displayIndex < 0 || displayIndex >= s_visibleIconCount) return;

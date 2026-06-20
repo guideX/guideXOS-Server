@@ -55,7 +55,25 @@ $repoRoot = (Resolve-Path -LiteralPath $Root).Path
 Write-Host "[LiveDirectoryDesktopStatus]"
 Write-Host "repo: $repoRoot"
 Write-Host "branch: $(git -C $repoRoot branch --show-current)"
-Write-Host "head: $(git -C $repoRoot rev-parse HEAD)"
+$currentHead = (git -C $repoRoot rev-parse HEAD).Trim()
+Write-Host "head: $currentHead"
+
+function Get-LatestWriteTime {
+    param(
+        [string[]]$Paths
+    )
+
+    $latest = [DateTime]::MinValue
+    foreach ($path in $Paths) {
+        if (Test-Path -LiteralPath $path) {
+            $item = Get-Item -LiteralPath $path
+            if ($item.LastWriteTimeUtc -gt $latest) {
+                $latest = $item.LastWriteTimeUtc
+            }
+        }
+    }
+    return $latest
+}
 
 $hostedDesktopLive = Find-FirstMatch -LiteralPath (Join-Path $Root "compositor.cpp") -Pattern "DesktopFolderResolver::Enumerate\(g_hostedDesktopDirectoryPath\)"
 $hostedDesktopPathState = Find-FirstMatch -LiteralPath (Join-Path $Root "compositor.cpp") -Pattern "g_hostedDesktopDirectoryPath"
@@ -85,6 +103,43 @@ $rightClickIconSize = Find-FirstMatch -LiteralPath (Join-Path $Root "right_click
 $hostedNonRootCompactIcons = Find-FirstMatch -LiteralPath (Join-Path $Root "compositor.cpp") -Pattern "hostedDesktopUsesCompactIconLayout|desktopIconCellHeightForItem|desktopIconTopPadding"
 $displayOptionsIconSize = Find-FirstMatch -LiteralPath (Join-Path $Root "display_options.cpp") -Pattern "smallLiveDesktopFolderIcons|Use smaller folder icons|folder icon size"
 $desktopConfigIconSize = Find-FirstMatch -LiteralPath (Join-Path $Root "desktop_config.h") -Pattern "smallLiveDesktopFolderIcons"
+$runtimeEvidencePath = Join-Path $Root "logs\live-directory-desktop-runtime.evidence.txt"
+$runtimeEvidenceText = if (Test-Path -LiteralPath $runtimeEvidencePath) { Get-Content -LiteralPath $runtimeEvidencePath -Raw } else { $null }
+$runtimeEvidenceHead = $null
+$runtimeEvidenceResult = $null
+$runtimeEvidenceCompact = $null
+$runtimeEvidenceBack = $null
+$runtimeEvidenceShell = $null
+$runtimeEvidenceHome = $null
+$runtimeEvidenceCleanup = $null
+if ($runtimeEvidenceText) {
+    if ($runtimeEvidenceText -match '(?m)^head=(.+)$') { $runtimeEvidenceHead = $Matches[1].Trim() }
+    if ($runtimeEvidenceText -match '(?m)^result=(.+)$') { $runtimeEvidenceResult = $Matches[1].Trim() }
+    if ($runtimeEvidenceText -match '(?m)^compactLayout=(.+)$') { $runtimeEvidenceCompact = $Matches[1].Trim() }
+    if ($runtimeEvidenceText -match '(?m)^backNavigation=(.+)$') { $runtimeEvidenceBack = $Matches[1].Trim() }
+    if ($runtimeEvidenceText -match '(?m)^shellCdSync=(.+)$') { $runtimeEvidenceShell = $Matches[1].Trim() }
+    if ($runtimeEvidenceText -match '(?m)^goHome=(.+)$') { $runtimeEvidenceHome = $Matches[1].Trim() }
+    if ($runtimeEvidenceText -match '(?m)^cleanup=(.+)$') { $runtimeEvidenceCleanup = $Matches[1].Trim() }
+}
+$runtimeEvidenceFresh = $false
+if ($runtimeEvidenceText) {
+    $relevantSourceWriteTime = Get-LatestWriteTime @(
+        (Join-Path $Root "kernel\core\desktop.cpp"),
+        (Join-Path $Root "kernel\core\main.cpp"),
+        (Join-Path $Root "kernel\core\include\kernel\desktop.h"),
+        (Join-Path $Root "scripts\smoke-live-directory-desktop-runtime.ps1")
+    )
+    $runtimeEvidenceFresh = (
+        $runtimeEvidenceHead -eq $currentHead -and
+        $runtimeEvidenceResult -eq "PASS" -and
+        $runtimeEvidenceCompact -eq "PASS" -and
+        $runtimeEvidenceBack -eq "PASS" -and
+        $runtimeEvidenceShell -eq "PASS" -and
+        $runtimeEvidenceHome -eq "PASS" -and
+        $runtimeEvidenceCleanup -eq "PASS" -and
+        (Get-Item -LiteralPath $runtimeEvidencePath).LastWriteTimeUtc -ge $relevantSourceWriteTime
+    )
+}
 
 Write-Host ""
 Emit-Check "hosted desktop folder enumeration" "present" $hostedDesktopLive
@@ -137,7 +192,8 @@ if ($null -eq $displayOptionsIconSize) {
 }
 
 $hostedParityPresent = $null -ne $hostedDesktopLive -and $null -ne $hostedDesktopPathState -and $null -ne $hostedDesktopNav -and $null -ne $hostedShellCdCommand -and $null -ne $hostedShellDesktopBridge -and $null -ne $showOnDesktop -and $null -ne $hostedNonRootCompactIcons -and $null -ne $displayOptionsIconSize -and $null -ne $rightClickIconSize
-$bareMetalParityPresent = $null -ne $bareMetalDesktopState -and $null -ne $bareMetalDesktopHomePath -and $null -ne $bareMetalDesktopHomeCheck -and $null -ne $bareMetalDesktopNavigation -and $null -ne $bareMetalDesktopBackHome -and $null -ne $bareMetalShellDesktopSync -and $null -ne $kernelBareMetalCompactIcons -and $null -eq $kernelBareMetalDesktopConfigLoad
+$bareMetalSourceParityPresent = $null -ne $bareMetalDesktopState -and $null -ne $bareMetalDesktopHomePath -and $null -ne $bareMetalDesktopHomeCheck -and $null -ne $bareMetalDesktopNavigation -and $null -ne $bareMetalDesktopBackHome -and $null -ne $bareMetalShellDesktopSync -and $null -ne $kernelBareMetalCompactIcons -and $null -eq $kernelBareMetalDesktopConfigLoad
+$bareMetalParityPresent = if ($runtimeEvidenceFresh) { $true } else { $bareMetalSourceParityPresent }
 
 $desktopSmokeScripts = @(
     "scripts\smoke-appmodel-launchshadow.ps1",
@@ -179,6 +235,7 @@ if ($null -ne $hostedNonRootCompactIcons -and $null -ne $displayOptionsIconSize 
     Write-Host "  icon-size-setting=missing-or-partial"
 }
 Write-Host "  hosted-parity=$(if ($hostedParityPresent) { 'live-directory-present' } else { 'missing' })"
+Write-Host "  live-directory-desktop-runtime-smoke=$(if ($runtimeEvidenceFresh) { 'present' } else { 'deferred' })"
 Write-Host "  hosted-nonroot-smaller-icons=$(if ($null -ne $hostedNonRootCompactIcons) { 'present' } else { 'missing' })"
 Write-Host "  display-options-right-click-icon-size=$(if ($null -ne $displayOptionsIconSize -and $null -ne $rightClickIconSize) { 'shared-setting' } else { 'missing' })"
 Write-Host "  display-options-live-folder-icon-size=$(if ($null -ne $displayOptionsIconSize) { 'present' } else { 'missing' })"
@@ -191,5 +248,5 @@ Write-Host "  bare-metal-go-desktop-target=$(if ($null -ne $bareMetalDesktopHome
 Write-Host "  bare-metal-shell-cd-sync=$(if ($null -ne $bareMetalShellDesktopSync) { 'present' } else { 'missing' })"
 Write-Host "  bare-metal-nonroot-smaller-icons=$(if ($null -ne $kernelBareMetalCompactIcons) { 'present' } else { 'missing' })"
 Write-Host "  bare-metal-nonroot-icon-config=$(if ($null -eq $kernelBareMetalDesktopConfigLoad) { 'default-on-no-host-config' } else { 'host-config-loaded' })"
-Write-Host "  bare-metal-parity=$(if ($bareMetalParityPresent) { 'feature-present-evidence-partial' } else { 'missing' })"
-Write-Host "  live-directory-desktop-parity=$(if ($hostedParityPresent -and $bareMetalParityPresent) { 'hosted-present-baremetal-present-source-only' } else { 'missing' })"
+Write-Host "  bare-metal-parity=$(if ($bareMetalParityPresent) { if ($runtimeEvidenceFresh) { 'feature-present-runtime-evidence-partial' } else { 'feature-present-evidence-partial' } } else { 'missing' })"
+Write-Host "  live-directory-desktop-parity=$(if ($hostedParityPresent -and $bareMetalParityPresent) { if ($runtimeEvidenceFresh) { 'hosted-present-baremetal-present-runtime-evidence' } else { 'hosted-present-baremetal-present-source-only' } } else { 'missing' })"

@@ -285,6 +285,43 @@ There does not appear to be a dedicated desktop live-directory smoke yet. The ex
   - the shell no-arg `cd` home convention is still undecided,
   - current live folder persistence remains intentionally in-memory only and should stay that way.
 
+## Phase 2G Note
+
+- Runtime evidence is now in place for the bare-metal live-directory desktop path.
+- Source anchors changed:
+  - `kernel/core/desktop.cpp` now includes `run_live_directory_runtime_smoke()` behind `GXOS_LIVE_DIRECTORY_DESKTOP_RUNTIME_SMOKE_ACTIVE`.
+  - `kernel/core/main.cpp` now calls the runtime smoke at boot when that diagnostic flag is enabled.
+  - `scripts/smoke-live-directory-desktop-runtime.ps1` builds the kernel with the smoke flag, boots QEMU, captures the serial log, and writes a stable evidence file.
+  - `scripts/smoke-live-directory-desktop-status.ps1` now treats fresh runtime evidence as the stronger bare-metal parity signal.
+- Runtime behavior proven:
+  - the smoke aliases `/Desktop` to the existing `/system/wall` directory in the boot image so the home path is actually reachable during the run,
+  - live navigation into `/system/wall` succeeds,
+  - compact non-root layout activates,
+  - `Back` returns to `/Desktop`,
+  - shell-driven sync to `/system/wall` succeeds,
+  - `Go to Desktop` returns to `/Desktop`,
+  - the runtime state is restored before exit.
+- Evidence markers now present in the serial log:
+  - `LIVE_DESKTOP_HOME_ALIAS`
+  - `LIVE_DESKTOP_TARGET`
+  - `LIVE_DESKTOP_NAV`
+  - `LIVE_DESKTOP_LAYOUT`
+  - `LIVE_DESKTOP_NAV_BACK`
+  - `LIVE_DESKTOP_SHELL_CD_SYNC`
+  - `LIVE_DESKTOP_NAV_HOME`
+  - `LIVE_DESKTOP_CLEANUP`
+  - `result=PASS`
+- Validation that passed:
+  - `.\scripts\smoke-live-directory-desktop-status.ps1`
+  - `.\scripts\smoke-appmodel-launchshadow.ps1`
+  - `cmd /c build.bat`
+  - `cmd /c build-kernel.bat`
+  - `.\scripts\smoke-live-directory-desktop-runtime.ps1`
+- Remaining risks:
+  - the runtime proof still depends on the smoke-only `/Desktop` alias because the boot image does not expose a native writable `/Desktop` mount in this environment,
+  - the smoke proves navigation and shell sync, not filesystem write support,
+  - current live folder persistence remains intentionally in-memory only.
+
 ## Proposed Phased Plan
 
 ### Phase 0

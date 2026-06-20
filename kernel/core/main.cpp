@@ -493,6 +493,11 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
 #endif
         kernel::serial::puts("[APPMODEL-LAUNCHSHADOW-SMOKE] done\n");
 #endif
+#ifdef GXOS_LIVE_DIRECTORY_DESKTOP_RUNTIME_SMOKE_ACTIVE
+        kernel::serial::puts("[LIVE-DIRECTORY-RUNTIME-SMOKE] issuing command=desktop.smoke.live-directory-runtime\n");
+        kernel::desktop::run_live_directory_runtime_smoke();
+        kernel::serial::puts("[LIVE-DIRECTORY-RUNTIME-SMOKE] done\n");
+#endif
         
         kernel::serial::puts("[KERNEL] Entering main loop (waiting for input)...\n");
         

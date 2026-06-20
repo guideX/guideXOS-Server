@@ -167,6 +167,11 @@ void run_launch_shadow_folder_fileopen_smoke();
 void run_launch_shadow_text_fileopen_smoke();
 #endif
 
+#if defined(GXOS_LIVE_DIRECTORY_DESKTOP_RUNTIME_SMOKE_ACTIVE) && defined(GXOS_BARE_METAL)
+// Diagnostic-only smoke hook for bare-metal live-directory transitions. Does not persist state.
+void run_live_directory_runtime_smoke();
+#endif
+
 } // namespace desktop
 } // namespace kernel
 
