@@ -105,9 +105,10 @@ The model deliberately keeps `launchName` because the current code still needs i
 | `AppModel` | `LegacyAlias` -> `BuiltInApp` `gxos.builtin.appmodeldemo` | Preserve alias for old pins and saved config. |
 | `ComputerFiles` | `ShellAction` | Shell/system label, not a built-in app identity. Can later route to File Manager with a path. |
 | `TaskManager` | `BuiltInApp` with `appId=gxos.builtin.taskmanager` | Safe typed-ready built-in app; hosted and bare-metal dispatch both resolve directly to `TaskManager`. |
+| `Trash` | `BuiltInApp` with `appId=gxos.builtin.trash` | Safe typed-ready built-in app; the Trash app is already launched as a normal built-in app on both targets. |
 | native app for another CPU | `CrossArchEmulatedApp` or `NativeElfApp` with `requiresEmulation=true` | Diagnostic-only until emulation exists. |
 
-App Model v1.2 treats `DisplayOptions` itself as the next typed-ready built-in target (`gxos.builtin.displayoptions`). App Model v1.3 adds `TaskManager` as another typed-ready built-in target (`gxos.builtin.taskmanager`). The shell labels `Settings`, `System Settings`, and `Control Panel` still remain separate shell/system affordances and continue to bridge to `DisplayOptions` as non-fatal drift.
+App Model v1.2 treats `DisplayOptions` itself as the next typed-ready built-in target (`gxos.builtin.displayoptions`). App Model v1.3 adds `TaskManager` as another typed-ready built-in target (`gxos.builtin.taskmanager`). App Model v1.4 adds `Trash` as another typed-ready built-in target (`gxos.builtin.trash`). The shell labels `Settings`, `System Settings`, and `Control Panel` still remain separate shell/system affordances and continue to bridge to `DisplayOptions` as non-fatal drift.
 
 ## Availability
 

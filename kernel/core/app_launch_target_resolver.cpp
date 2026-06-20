@@ -891,6 +891,7 @@ static const char* const kLaunchTargetComparisonLabels[] = {
     "Notepad",
     "Calculator",
     "TaskManager",
+    "Trash",
     "gxos.builtin.notepad",
     "FileExplorer",
     "Files",

@@ -104,7 +104,7 @@ The remaining alias warnings are expected Phase 1 residue, not launch failures:
 - `AppModel` is a legacy hosted UI alias for `App Model Demo` / `gxos.builtin.appmodeldemo`. Keep the alias until Phase 2 introduces a proper launch-resolution surface for old pins, shortcuts, and saved config.
 - `ComputerFiles` is a shell/system label for the File Manager entry. It is intentionally not a built-in app metadata identity yet because it represents a desktop shell affordance, not a separate app registration.
 
-App Model v1.2 adds `DisplayOptions` as the next typed-ready built-in target (`gxos.builtin.displayoptions`). App Model v1.3 adds `TaskManager` as an additional typed-ready built-in target (`gxos.builtin.taskmanager`). The shell labels `Settings`, `System Settings`, and `Control Panel` still intentionally bridge to `DisplayOptions` as non-fatal drift, so their user-visible launch behavior remains unchanged.
+App Model v1.2 adds `DisplayOptions` as the next typed-ready built-in target (`gxos.builtin.displayoptions`). App Model v1.3 adds `TaskManager` as an additional typed-ready built-in target (`gxos.builtin.taskmanager`). App Model v1.4 adds `Trash` as another typed-ready built-in target (`gxos.builtin.trash`). The shell labels `Settings`, `System Settings`, and `Control Panel` still intentionally bridge to `DisplayOptions` as non-fatal drift, so their user-visible launch behavior remains unchanged.
 
 Both should be revisited during Phase 2 launch-resolution cleanup. That pass should decide whether aliases become explicit app-model launch aliases, shell commands, or another typed launch target while preserving existing user-visible shortcuts.
 
