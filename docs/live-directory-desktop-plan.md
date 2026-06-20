@@ -256,6 +256,35 @@ There does not appear to be a dedicated desktop live-directory smoke yet. The ex
   - any dedicated shell or navigation smoke beyond the current status script,
   - current live folder persistence remains intentionally disabled.
 
+## Phase 2F Note
+
+- Evidence tightened in `scripts/smoke-live-directory-desktop-status.ps1`:
+  - hosted navigation evidence now points at the actual `Back` and `Go to Desktop` desktop items instead of a history-scaffold line,
+  - Display Options and the right-click `Folder View Icon Size` submenu now report as a shared setting,
+  - bare-metal compact mode now reports the absence of any kernel `desktop.json` load path, which matches the intended kernel-safe default-on behavior,
+  - the summary now includes `hosted-parity`, `bare-metal-parity`, and `live-directory-desktop-parity` keys so the current feature state is easier to read at a glance.
+- Validation that passed:
+  - `.\scripts\smoke-live-directory-desktop-status.ps1`
+  - `.\scripts\smoke-appmodel-launchshadow.ps1`
+  - `cmd /c build.bat`
+  - `cmd /c build-kernel.bat`
+- Runtime / QEMU evidence:
+  - deferred for this slice; the existing harnesses gave us reliable source-level smoke and a launch-shadow regression check, but not a practical interactive desktop navigation run.
+- Current hosted status:
+  - live directory desktop, shell `cd` bridge, `Show on Desktop`, and compact non-root icon handling remain present.
+  - hosted parity is treated as live-directory-present in the status script.
+- Current bare-metal status:
+  - `/Desktop` remains the home path,
+  - `Back` / `Go to Desktop` remain present,
+  - shell `cd` sync remains present,
+  - non-root compact layout remains present and kernel-safe,
+  - bare-metal parity is treated as feature-present-evidence-partial rather than full runtime proof.
+- Remaining risks:
+  - visual eyeball proof is still missing,
+  - a dedicated shell-navigation runtime smoke is still deferred,
+  - the shell no-arg `cd` home convention is still undecided,
+  - current live folder persistence remains intentionally in-memory only and should stay that way.
+
 ## Proposed Phased Plan
 
 ### Phase 0

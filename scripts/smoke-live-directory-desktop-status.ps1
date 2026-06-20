@@ -59,7 +59,7 @@ Write-Host "head: $(git -C $repoRoot rev-parse HEAD)"
 
 $hostedDesktopLive = Find-FirstMatch -LiteralPath (Join-Path $Root "compositor.cpp") -Pattern "DesktopFolderResolver::Enumerate\(g_hostedDesktopDirectoryPath\)"
 $hostedDesktopPathState = Find-FirstMatch -LiteralPath (Join-Path $Root "compositor.cpp") -Pattern "g_hostedDesktopDirectoryPath"
-$hostedDesktopNav = Find-FirstMatch -LiteralPath (Join-Path $Root "compositor.cpp") -Pattern "DesktopBack|DesktopHome|desktop-nav:back|desktop-nav:home|hostedDesktopGoBack\(\)|hostedDesktopGoHome\(\)"
+$hostedDesktopNav = Find-FirstMatch -LiteralPath (Join-Path $Root "compositor.cpp") -Pattern "makeSystemDesktopItem\(DesktopSystemObjectKind::DesktopBack|makeSystemDesktopItem\(DesktopSystemObjectKind::DesktopHome|hostedDesktopGoBack\(\)|hostedDesktopGoHome\(\)|desktop-nav:back|desktop-nav:home"
 $kernelDesktopLive = Find-FirstMatch -LiteralPath (Join-Path $Root "kernel\core\desktop.cpp") -Pattern "enumerate_desktop_folder_items\("
 $hostedShellCdCommand = Find-FirstMatch -LiteralPath (Join-Path $Root "console_service.cpp") -Pattern 'if\(command=="cd"\)'
 $hostedShellDesktopBridge = Find-FirstMatch -LiteralPath (Join-Path $Root "desktop_service.cpp") -Pattern "ShowFolderOnHostedDesktop\(|showFolderOnHostedDesktop\("
@@ -67,7 +67,7 @@ $bareMetalDesktopState = Find-FirstMatch -LiteralPath (Join-Path $Root "kernel\c
 $bareMetalDesktopHomePath = Find-FirstMatch -LiteralPath (Join-Path $Root "kernel\core\desktop.cpp") -Pattern 's_bareMetalDesktopHomePath\[vfs::VFS_MAX_PATH\] = "/Desktop"'
 $bareMetalDesktopHomeCheck = Find-FirstMatch -LiteralPath (Join-Path $Root "kernel\core\desktop.cpp") -Pattern "bare_metal_desktop_is_home_directory"
 $bareMetalDesktopRefresh = Find-FirstMatch -LiteralPath (Join-Path $Root "kernel\core\desktop.cpp") -Pattern "bare_metal_desktop_request_folder_refresh"
-$bareMetalDesktopNavigation = Find-FirstMatch -LiteralPath (Join-Path $Root "kernel\core\desktop.cpp") -Pattern "bare_metal_desktop_set_current_directory|bare_metal_desktop_go_back|bare_metal_desktop_go_home|s_bareMetalDesktopHistoryCount|s_bareMetalDesktopHistoryPaths"
+$bareMetalDesktopNavigation = Find-FirstMatch -LiteralPath (Join-Path $Root "kernel\core\desktop.cpp") -Pattern "bare_metal_desktop_set_current_directory|bare_metal_desktop_go_back|bare_metal_desktop_go_home|sync_live_directory_from_shell_cwd"
 $bareMetalDesktopBackHome = Find-FirstMatch -LiteralPath (Join-Path $Root "kernel\core\desktop.cpp") -Pattern "bare_metal_desktop_go_back|bare_metal_desktop_go_home"
 $bareMetalShellDesktopSyncApi = Find-FirstMatch -LiteralPath (Join-Path $Root "kernel\core\include\kernel\desktop.h") -Pattern "sync_live_directory_from_shell_cwd"
 $bareMetalShellDesktopSyncCall = Find-FirstMatch -LiteralPath (Join-Path $Root "kernel\core\shell.cpp") -Pattern "sync_live_directory_from_shell_cwd"
@@ -80,8 +80,8 @@ $fileExplorerContextPin = Find-FirstMatch -LiteralPath (Join-Path $Root "file_ex
 $showOnDesktop = Find-FirstMatch -LiteralPath (Join-Path $Root "file_explorer.cpp") -Pattern "Show on Desktop|showFolderOnHostedDesktop"
 $kernelIconSize = Find-FirstMatch -LiteralPath (Join-Path $Root "kernel\core\desktop.cpp") -Pattern "s_desktopIconSize"
 $kernelBareMetalCompactIcons = Find-FirstMatch -LiteralPath (Join-Path $Root "kernel\core\desktop.cpp") -Pattern "bare_metal_desktop_uses_compact_folder_layout|bare_metal_desktop_icon_metrics|bare_metal_desktop_icon_size"
-$kernelBareMetalSharedIconConfig = Find-FirstMatch -LiteralPath (Join-Path $Root "kernel\core\desktop.cpp") -Pattern "smallLiveDesktopFolderIcons"
-$rightClickIconSize = Find-FirstMatch -LiteralPath (Join-Path $Root "right_click_menu.cpp") -Pattern "setHostedDesktopPrefersCompactFolderIcons|hostedDesktopPrefersCompactFolderIcons|Folder View Icon Size|Normal folder icons|Small folder icons"
+$kernelBareMetalDesktopConfigLoad = Find-FirstMatch -LiteralPath (Join-Path $Root "kernel\core\desktop.cpp") -Pattern "DesktopConfig::Load\(|DesktopConfig::Save\(|smallLiveDesktopFolderIcons\s*=\s*cfg\.smallLiveDesktopFolderIcons"
+$rightClickIconSize = Find-FirstMatch -LiteralPath (Join-Path $Root "right_click_menu.cpp") -Pattern "Folder View Icon Size|setHostedDesktopPrefersCompactFolderIcons|hostedDesktopPrefersCompactFolderIcons"
 $hostedNonRootCompactIcons = Find-FirstMatch -LiteralPath (Join-Path $Root "compositor.cpp") -Pattern "hostedDesktopUsesCompactIconLayout|desktopIconCellHeightForItem|desktopIconTopPadding"
 $displayOptionsIconSize = Find-FirstMatch -LiteralPath (Join-Path $Root "display_options.cpp") -Pattern "smallLiveDesktopFolderIcons|Use smaller folder icons|folder icon size"
 $desktopConfigIconSize = Find-FirstMatch -LiteralPath (Join-Path $Root "desktop_config.h") -Pattern "smallLiveDesktopFolderIcons"
@@ -113,6 +113,13 @@ Emit-Check "Display Options live folder icon size setting" "present" $displayOpt
 Emit-Check "desktop config folder icon size persistence" "present" $desktopConfigIconSize
 Emit-Check "bare-metal compact icon hook" "present" $kernelBareMetalCompactIcons
 
+if ($null -eq $kernelBareMetalDesktopConfigLoad) {
+    Write-Host "bare-metal hosted desktop.json config load: absent"
+    Write-Host "    evidence: kernel\core\desktop.cpp has no DesktopConfig::Load/Save or smallLiveDesktopFolderIcons assignment"
+} else {
+    Emit-Check "bare-metal hosted desktop.json config load" "present" $kernelBareMetalDesktopConfigLoad
+}
+
 if ($null -eq $showOnDesktop) {
     Write-Host "show-on-desktop-action=missing"
     Write-Host "    evidence: no literal match for 'Show on Desktop' in file_explorer.cpp"
@@ -128,6 +135,9 @@ if ($null -eq $displayOptionsIconSize) {
 } else {
     Emit-Check "Display Options icon-size setting hook" "present" $displayOptionsIconSize
 }
+
+$hostedParityPresent = $null -ne $hostedDesktopLive -and $null -ne $hostedDesktopPathState -and $null -ne $hostedDesktopNav -and $null -ne $hostedShellCdCommand -and $null -ne $hostedShellDesktopBridge -and $null -ne $showOnDesktop -and $null -ne $hostedNonRootCompactIcons -and $null -ne $displayOptionsIconSize -and $null -ne $rightClickIconSize
+$bareMetalParityPresent = $null -ne $bareMetalDesktopState -and $null -ne $bareMetalDesktopHomePath -and $null -ne $bareMetalDesktopHomeCheck -and $null -ne $bareMetalDesktopNavigation -and $null -ne $bareMetalDesktopBackHome -and $null -ne $bareMetalShellDesktopSync -and $null -ne $kernelBareMetalCompactIcons -and $null -eq $kernelBareMetalDesktopConfigLoad
 
 $desktopSmokeScripts = @(
     "scripts\smoke-appmodel-launchshadow.ps1",
@@ -168,7 +178,9 @@ if ($null -ne $hostedNonRootCompactIcons -and $null -ne $displayOptionsIconSize 
 } else {
     Write-Host "  icon-size-setting=missing-or-partial"
 }
+Write-Host "  hosted-parity=$(if ($hostedParityPresent) { 'live-directory-present' } else { 'missing' })"
 Write-Host "  hosted-nonroot-smaller-icons=$(if ($null -ne $hostedNonRootCompactIcons) { 'present' } else { 'missing' })"
+Write-Host "  display-options-right-click-icon-size=$(if ($null -ne $displayOptionsIconSize -and $null -ne $rightClickIconSize) { 'shared-setting' } else { 'missing' })"
 Write-Host "  display-options-live-folder-icon-size=$(if ($null -ne $displayOptionsIconSize) { 'present' } else { 'missing' })"
 Write-Host "  right-click-icon-size=$(if ($null -ne $rightClickIconSize) { 'live-folder-wired' } else { 'missing' })"
 Write-Host "  bare-metal-desktop-directory-state=$(if ($null -ne $bareMetalDesktopState) { 'present' } else { 'missing' })"
@@ -178,5 +190,6 @@ Write-Host "  bare-metal-back-go-desktop=$(if ($null -ne $bareMetalDesktopBackHo
 Write-Host "  bare-metal-go-desktop-target=$(if ($null -ne $bareMetalDesktopHomePath) { '/Desktop' } else { 'missing' })"
 Write-Host "  bare-metal-shell-cd-sync=$(if ($null -ne $bareMetalShellDesktopSync) { 'present' } else { 'missing' })"
 Write-Host "  bare-metal-nonroot-smaller-icons=$(if ($null -ne $kernelBareMetalCompactIcons) { 'present' } else { 'missing' })"
-Write-Host "  bare-metal-nonroot-icon-config=$(if ($null -ne $kernelBareMetalSharedIconConfig) { 'uses-shared-setting' } else { 'default-on' })"
-Write-Host "  bare-metal-parity=$(if ($null -ne $bareMetalDesktopNavigation -and $null -ne $bareMetalDesktopHomeCheck) { 'partial' } else { 'missing' })"
+Write-Host "  bare-metal-nonroot-icon-config=$(if ($null -eq $kernelBareMetalDesktopConfigLoad) { 'default-on-no-host-config' } else { 'host-config-loaded' })"
+Write-Host "  bare-metal-parity=$(if ($bareMetalParityPresent) { 'feature-present-evidence-partial' } else { 'missing' })"
+Write-Host "  live-directory-desktop-parity=$(if ($hostedParityPresent -and $bareMetalParityPresent) { 'hosted-present-baremetal-present-source-only' } else { 'missing' })"
