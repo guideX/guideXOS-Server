@@ -866,6 +866,7 @@ namespace gxos { namespace apps {
         }
 
         if (button == 1 && action == "down") {
+            if (handleNavigationPaneClick(x, y)) return;
             int rowIndex = hitTestEntryRow(x, y);
             if (rowIndex >= 0 && rowIndex != s_selectedIndex) {
                 s_selectedIndex = rowIndex;
@@ -1023,6 +1024,64 @@ namespace gxos { namespace apps {
 #ifdef _WIN32
         gxos::gui::Compositor::requestDesktopRefresh();
 #endif
+    }
+
+    bool FileExplorer::handleNavigationPaneClick(int x, int y) {
+        if (x < 0 || x >= kLeftPaneW) return false;
+
+        const int rootShortcutY = kNavStartY + kRowH;
+        const int mountedDrivesY = rootShortcutY + kRowH;
+        const int rootsStartY = mountedDrivesY + kRowH;
+        const int commonFoldersY = rootsStartY + static_cast<int>(s_roots.size()) * kRowH;
+
+        auto isRowHit = [&](int rowY) {
+            return y >= rowY && y < rowY + kRowH;
+        };
+
+        if (isRowHit(rootShortcutY)) {
+            if (!s_roots.empty()) {
+                s_rootSelectedIndex = 0;
+                goHome();
+            } else {
+                goHome();
+            }
+            return true;
+        }
+
+        if (isRowHit(mountedDrivesY)) {
+            if (!s_roots.empty()) {
+                s_rootSelectedIndex = 0;
+                navigateToSelectedRoot();
+            } else {
+                goHome();
+            }
+            return true;
+        }
+
+        for (size_t i = 0; i < s_roots.size(); ++i) {
+            const int rowY = rootsStartY + static_cast<int>(i) * kRowH;
+            if (!isRowHit(rowY)) continue;
+            s_rootSelectedIndex = static_cast<int>(i);
+            navigateToSelectedRoot();
+            return true;
+        }
+
+        if (isRowHit(commonFoldersY)) {
+            if (!s_roots.empty()) {
+                const int commonIndex = static_cast<int>(s_roots.size()) - 1;
+                if (s_roots[commonIndex].kind == ExplorerEntryKind::CommonFolder) {
+                    s_rootSelectedIndex = commonIndex;
+                    navigateToSelectedRoot();
+                } else {
+                    goHome();
+                }
+            } else {
+                goHome();
+            }
+            return true;
+        }
+
+        return false;
     }
 
     int FileExplorer::hitTestEntryRow(int x, int y) {

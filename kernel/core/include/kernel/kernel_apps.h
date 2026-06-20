@@ -397,6 +397,7 @@ private:
     bool handleContextMenuClick(int x, int y);
     int hitTestEntryRow(int x, int y) const;
     void closeTransientUi();
+    bool handleNavigationPaneClick(int localX, int localY);
     bool launchApplicationLikeFile(const char* fullPath, const Entry& entry);
     bool openDiskImage(const char* fullPath, const Entry& entry);
     void setStatus(const char* status);

@@ -3753,6 +3753,13 @@ void FileExplorerApp::onMouseDown(int localX, int localY, uint8_t button) {
         return;
     }
 
+    if (localX < LEFT_W) {
+        if (handleNavigationPaneClick(localX, localY)) {
+            return;
+        }
+        return;
+    }
+
     if (localX < LEFT_W || localY < bodyY + 24) return;
 
     if (index >= 0 && index < m_entryCount) {
@@ -3768,6 +3775,44 @@ void FileExplorerApp::onMouseDown(int localX, int localY, uint8_t button) {
         }
         invalidate();
     }
+}
+
+bool FileExplorerApp::handleNavigationPaneClick(int localX, int localY) {
+    if (localX < 0 || localX >= LEFT_W) return false;
+
+    const int bodyY = TOOLBAR_H + ADDRESS_H;
+    const int rootTop = bodyY + 24;
+    const int mountsTop = bodyY + 40;
+    const int mountRowsTop = bodyY + 60;
+
+    auto hitBand = [&](int top, int height) {
+        return localY >= top && localY < top + height;
+    };
+
+    if (hitBand(rootTop, ROW_H)) {
+        navigate("/");
+        return true;
+    }
+
+    if (hitBand(mountsTop, ROW_H)) {
+        navigate("/");
+        return true;
+    }
+
+    int row = 0;
+    for (uint8_t i = 0; i < vfs::VFS_MAX_MOUNTS && row < 8; ++i) {
+        const vfs::MountPoint* mp = vfs::get_mount_by_index(i);
+        if (!mp || !mp->active) continue;
+
+        const int rowTop = mountRowsTop + row * ROW_H;
+        if (hitBand(rowTop, ROW_H)) {
+            navigate(mp->path);
+            return true;
+        }
+        ++row;
+    }
+
+    return false;
 }
 
 void FileExplorerApp::onWidgetClick(int widgetId) {

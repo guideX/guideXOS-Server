@@ -127,6 +127,7 @@ namespace gxos { namespace apps {
         static std::string trashInfoPathFor(const std::string& trashedPath);
         static std::string jsonEscape(const std::string& value);
         static void refreshTrashDesktopState();
+        static bool handleNavigationPaneClick(int x, int y);
         static int hitTestEntryRow(int x, int y);
         static int hitTestContextMenu(int x, int y);
         static void showContextMenuForRow(int rowIndex, int x, int y);
