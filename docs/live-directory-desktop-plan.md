@@ -204,6 +204,37 @@ There does not appear to be a dedicated desktop live-directory smoke yet. The ex
   - bare-metal non-root smaller icons.
   - persistence of the current live folder, which remains intentionally undesired.
 
+## Phase 2C.5 Note
+
+- There was no bare-metal home-path drift in the kernel code; the earlier `/` wording came from the report/smoke narrative and the root-folder probe names, not from the live desktop home state.
+- Confirmed bare-metal desktop home path: `/Desktop`.
+- Confirmed bare-metal `Go to Desktop` target: `/Desktop`.
+- Visibility rule: `Back` and `Go to Desktop` render only when the current bare-metal desktop folder is not `/Desktop`.
+- `scripts/smoke-live-directory-desktop-status.ps1` now reports explicit home-path evidence so this distinction stays visible in future status runs.
+- `scripts/smoke-appmodel-launchshadow.ps1` still uses `/` for the intentional real-root folder probe cases; that smoke is not the source of the bare-metal desktop home semantics.
+- Remaining parity gaps are unchanged:
+  - bare-metal non-root smaller icons,
+  - any cleanup needed for appmodel smoke.
+
+## Phase 2D Note
+
+- Bare-metal shell `cd` now syncs the live desktop folder after a successful directory change.
+- Source anchors changed:
+  - `kernel/core/include/kernel/desktop.h` exports `sync_live_directory_from_shell_cwd()`.
+  - `kernel/core/desktop.cpp` forwards that sync into the existing bare-metal live-directory setter.
+  - `kernel/core/shell.cpp` resolves and validates explicit `cd` targets, then calls the desktop sync helper after updating `s_cwd`.
+  - `scripts/smoke-live-directory-desktop-status.ps1` now reports `bare-metal-shell-cd-sync=present`.
+- Shell-driven desktop navigation pushes the same in-memory Back history used by folder activation because the desktop setter is reused with history enabled.
+- Path scope supported:
+  - Any valid VFS directory can drive the live desktop view if the bare-metal desktop can enumerate it safely.
+  - `/Desktop` remains the bare-metal desktop home.
+  - `/` is accepted when it is a valid VFS directory and the desktop can enumerate it.
+- Failed or no-op `cd` commands do not update the desktop.
+- Still deferred:
+  - bare-metal non-root smaller icons,
+  - current live folder persistence, which remains intentionally undesired,
+  - any extra shell parser edge cases beyond the current `cd` path resolution.
+
 ## Proposed Phased Plan
 
 ### Phase 0
@@ -256,7 +287,6 @@ There does not appear to be a dedicated desktop live-directory smoke yet. The ex
 ## Open Questions
 
 - Should the live desktop directory be a new desktop-only state, or should it mirror `File Explorer`’s current path?
-- Should `Go to Desktop` mean the real root desktop folder, the user’s `Desktop` folder, or both depending on runtime?
 - Should non-desktop directory icon size be a view-local setting, a persisted display option, or a transient mode?
 - Should `Show on Desktop` mean “copy/pin the item to `/Desktop`” or “add a desktop reference/shortcut record”?
 - Should the bare-metal kernel shell eventually mirror the hosted `cd` bridge, or remain independent for parity reasons?

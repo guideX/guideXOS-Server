@@ -64,13 +64,16 @@ $kernelDesktopLive = Find-FirstMatch -LiteralPath (Join-Path $Root "kernel\core\
 $hostedShellCdCommand = Find-FirstMatch -LiteralPath (Join-Path $Root "console_service.cpp") -Pattern 'if\(command=="cd"\)'
 $hostedShellDesktopBridge = Find-FirstMatch -LiteralPath (Join-Path $Root "desktop_service.cpp") -Pattern "ShowFolderOnHostedDesktop\(|showFolderOnHostedDesktop\("
 $bareMetalDesktopState = Find-FirstMatch -LiteralPath (Join-Path $Root "kernel\core\desktop.cpp") -Pattern "s_bareMetalDesktopCurrentPath|bare_metal_desktop_current_directory_path|bare_metal_desktop_home_directory_path"
+$bareMetalDesktopHomePath = Find-FirstMatch -LiteralPath (Join-Path $Root "kernel\core\desktop.cpp") -Pattern 's_bareMetalDesktopHomePath\[vfs::VFS_MAX_PATH\] = "/Desktop"'
 $bareMetalDesktopHomeCheck = Find-FirstMatch -LiteralPath (Join-Path $Root "kernel\core\desktop.cpp") -Pattern "bare_metal_desktop_is_home_directory"
 $bareMetalDesktopRefresh = Find-FirstMatch -LiteralPath (Join-Path $Root "kernel\core\desktop.cpp") -Pattern "bare_metal_desktop_request_folder_refresh"
 $bareMetalDesktopNavigation = Find-FirstMatch -LiteralPath (Join-Path $Root "kernel\core\desktop.cpp") -Pattern "bare_metal_desktop_set_current_directory|bare_metal_desktop_go_back|bare_metal_desktop_go_home|s_bareMetalDesktopHistoryCount|s_bareMetalDesktopHistoryPaths"
 $bareMetalDesktopBackHome = Find-FirstMatch -LiteralPath (Join-Path $Root "kernel\core\desktop.cpp") -Pattern "bare_metal_desktop_go_back|bare_metal_desktop_go_home"
+$bareMetalShellDesktopSyncApi = Find-FirstMatch -LiteralPath (Join-Path $Root "kernel\core\include\kernel\desktop.h") -Pattern "sync_live_directory_from_shell_cwd"
+$bareMetalShellDesktopSyncCall = Find-FirstMatch -LiteralPath (Join-Path $Root "kernel\core\shell.cpp") -Pattern "sync_live_directory_from_shell_cwd"
+$bareMetalShellDesktopSync = if ($null -ne $bareMetalShellDesktopSyncApi -and $null -ne $bareMetalShellDesktopSyncCall) { $bareMetalShellDesktopSyncCall } else { $null }
 $bareMetalShellCdState = Find-FirstMatch -LiteralPath (Join-Path $Root "kernel\core\shell.cpp") -Pattern "cmd_cd\("
 $bareMetalShellGetCwdState = Find-FirstMatch -LiteralPath (Join-Path $Root "kernel\core\shell.cpp") -Pattern "get_cwd\("
-$bareMetalShellDesktopSync = Find-FirstMatch -LiteralPath (Join-Path $Root "kernel\core\shell.cpp") -Pattern "bare_metal_desktop|desktop directory"
 $fileExplorerBack = Find-FirstMatch -LiteralPath (Join-Path $Root "file_explorer.cpp") -Pattern "goBack\(\)"
 $fileExplorerGoHome = Find-FirstMatch -LiteralPath (Join-Path $Root "file_explorer.cpp") -Pattern "goHome\(\)"
 $fileExplorerContextPin = Find-FirstMatch -LiteralPath (Join-Path $Root "file_explorer.cpp") -Pattern "Pin to Desktop"
@@ -92,11 +95,14 @@ Emit-Check "hosted shell desktop bridge" "present" $hostedShellDesktopBridge
 Emit-Check "bare-metal shell cd / cwd state" "present" $bareMetalShellCdState
 Emit-Check "bare-metal shell get_cwd exposure" "present" $bareMetalShellGetCwdState
 Emit-Check "bare-metal desktop directory scaffold" "present" $bareMetalDesktopState
+Emit-Check "bare-metal desktop home path" "present" $bareMetalDesktopHomePath
 Emit-Check "bare-metal desktop home check" "present" $bareMetalDesktopHomeCheck
 Emit-Check "bare-metal desktop refresh hook" "present" $bareMetalDesktopRefresh
 Emit-Check "bare-metal desktop navigation helpers" "present" $bareMetalDesktopNavigation
 Emit-Check "bare-metal desktop back/home helpers" "present" $bareMetalDesktopBackHome
-Emit-Check "bare-metal shell desktop sync hook" "missing" $bareMetalShellDesktopSync
+Emit-Check "bare-metal shell desktop sync API" "present" $bareMetalShellDesktopSyncApi
+Emit-Check "bare-metal shell desktop sync call" "present" $bareMetalShellDesktopSyncCall
+Emit-Check "bare-metal shell desktop sync hook" "present" $bareMetalShellDesktopSync
 Emit-Check "File Explorer Back navigation" "present" $fileExplorerBack
 Emit-Check "File Explorer Go Home navigation" "present" $fileExplorerGoHome
 Emit-Check "File Explorer Pin to Desktop action" "present" $fileExplorerContextPin
@@ -165,8 +171,10 @@ Write-Host "  hosted-nonroot-smaller-icons=$(if ($null -ne $hostedNonRootCompact
 Write-Host "  display-options-live-folder-icon-size=$(if ($null -ne $displayOptionsIconSize) { 'present' } else { 'missing' })"
 Write-Host "  right-click-icon-size=$(if ($null -ne $rightClickIconSize) { 'live-folder-wired' } else { 'missing' })"
 Write-Host "  bare-metal-desktop-directory-state=$(if ($null -ne $bareMetalDesktopState) { 'present' } else { 'missing' })"
+Write-Host "  bare-metal-home-path=$(if ($null -ne $bareMetalDesktopHomePath) { '/Desktop' } else { 'missing' })"
 Write-Host "  bare-metal-folder-navigation=$(if ($null -ne $bareMetalDesktopNavigation -and $null -ne $bareMetalDesktopHomeCheck) { 'present' } else { 'missing' })"
 Write-Host "  bare-metal-back-go-desktop=$(if ($null -ne $bareMetalDesktopBackHome) { 'present' } else { 'missing' })"
-Write-Host "  bare-metal-shell-cd-sync=$(if ($null -ne $bareMetalShellDesktopSync) { 'partial' } else { 'missing' })"
+Write-Host "  bare-metal-go-desktop-target=$(if ($null -ne $bareMetalDesktopHomePath) { '/Desktop' } else { 'missing' })"
+Write-Host "  bare-metal-shell-cd-sync=$(if ($null -ne $bareMetalShellDesktopSync) { 'present' } else { 'missing' })"
 Write-Host "  bare-metal-nonroot-smaller-icons=$(if ($null -ne $kernelBareMetalCompactIcons) { 'partial' } else { 'missing' })"
 Write-Host "  bare-metal-parity=$(if ($null -ne $bareMetalDesktopNavigation -and $null -ne $bareMetalDesktopHomeCheck) { 'partial' } else { 'missing' })"

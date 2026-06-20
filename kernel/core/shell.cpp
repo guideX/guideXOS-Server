@@ -590,27 +590,63 @@ static void cmd_ll(const char* path) {
     output_string("\n");
 }
 
-static void cmd_cd(const char* path) {
+static bool resolve_cd_target_path(const char* path, char* targetPath, size_t targetPathSize)
+{
+    if (!targetPath || targetPathSize == 0) return false;
+    targetPath[0] = '\0';
+
     if (!path || path[0] == '\0' || str_eq(path, "~")) {
-        str_copy(s_cwd, "/home/root", 256);
-    } else if (str_eq(path, "/")) {
-        str_copy(s_cwd, "/", 256);
-    } else if (str_eq(path, "..")) {
-        // Go up one level
-        int len = str_len(s_cwd);
-        while (len > 1 && s_cwd[len - 1] != '/') len--;
-        if (len > 1) len--;  // Remove trailing slash
-        s_cwd[len] = '\0';
-        if (s_cwd[0] == '\0') s_cwd[0] = '/';
-    } else if (path[0] == '/') {
-        str_copy(s_cwd, path, 256);
-    } else {
-        // Relative path
-        int cwdLen = str_len(s_cwd);
-        if (cwdLen > 1) {
-            s_cwd[cwdLen++] = '/';
+        str_copy(targetPath, "/home/root", (uint32_t)targetPathSize);
+        return true;
+    }
+
+    if (str_eq(path, "/")) {
+        str_copy(targetPath, "/", (uint32_t)targetPathSize);
+        return true;
+    }
+
+    if (path[0] == '/') {
+        vfs::normalize_path(path, targetPath, targetPathSize);
+        return targetPath[0] != '\0';
+    }
+
+    char joined[256];
+    vfs::join_path(s_cwd, path, joined, sizeof(joined));
+    vfs::normalize_path(joined, targetPath, targetPathSize);
+    return targetPath[0] != '\0';
+}
+
+static bool cd_target_is_directory(const char* targetPath)
+{
+    if (!targetPath || !targetPath[0]) return false;
+
+    vfs::FileInfo info{};
+    if (vfs::stat(targetPath, &info) != vfs::VFS_OK) {
+        return false;
+    }
+
+    return info.type == vfs::FILE_TYPE_DIRECTORY;
+}
+
+static void cmd_cd(const char* path) {
+    char targetPath[256];
+    if (!resolve_cd_target_path(path, targetPath, sizeof(targetPath))) {
+        output_string("cd: invalid path\n");
+        return;
+    }
+
+    if (path && path[0] != '\0' && !str_eq(path, "~")) {
+        if (!cd_target_is_directory(targetPath)) {
+            output_string("cd: ");
+            output_string(targetPath);
+            output_string(": No such file or directory\n");
+            return;
         }
-        str_copy(s_cwd + cwdLen, path, 256 - cwdLen);
+    }
+
+    str_copy(s_cwd, targetPath, 256);
+    if (kernel::desktop::is_bare_metal_mode()) {
+        kernel::desktop::sync_live_directory_from_shell_cwd(s_cwd);
     }
 }
 

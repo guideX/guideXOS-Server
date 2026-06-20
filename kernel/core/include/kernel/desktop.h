@@ -115,6 +115,10 @@ void open_terminal();
 // Returns true if app was launched or is already running
 bool launch_app(const char* appName);
 
+// Sync the bare-metal live desktop folder to a successful shell cwd change.
+// Returns true if the desktop accepted the new directory.
+bool sync_live_directory_from_shell_cwd(const char* cwd);
+
 // Create a persistent desktop shortcut/reference to an existing VFS file/folder.
 bool pin_filesystem_shortcut_to_desktop(const char* path, bool isDirectory);
 

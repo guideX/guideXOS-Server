@@ -2856,6 +2856,14 @@ static bool bare_metal_desktop_go_home()
     return bare_metal_desktop_set_current_directory(bare_metal_desktop_home_directory_path(), true);
 }
 
+bool sync_live_directory_from_shell_cwd(const char* cwd)
+{
+    initialize_bare_metal_desktop_directory_state();
+    if (!is_bare_metal_mode()) return false;
+    if (!cwd || !cwd[0]) return false;
+    return bare_metal_desktop_set_current_directory(cwd, true);
+}
+
 static void SelectDesktopIcon(int displayIndex, bool additive)
 {
     if (displayIndex < 0 || displayIndex >= s_visibleIconCount) return;
