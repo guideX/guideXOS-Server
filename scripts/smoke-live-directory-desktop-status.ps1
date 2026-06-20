@@ -79,7 +79,8 @@ $fileExplorerGoHome = Find-FirstMatch -LiteralPath (Join-Path $Root "file_explor
 $fileExplorerContextPin = Find-FirstMatch -LiteralPath (Join-Path $Root "file_explorer.cpp") -Pattern "Pin to Desktop"
 $showOnDesktop = Find-FirstMatch -LiteralPath (Join-Path $Root "file_explorer.cpp") -Pattern "Show on Desktop|showFolderOnHostedDesktop"
 $kernelIconSize = Find-FirstMatch -LiteralPath (Join-Path $Root "kernel\core\desktop.cpp") -Pattern "s_desktopIconSize"
-$kernelBareMetalCompactIcons = Find-FirstMatch -LiteralPath (Join-Path $Root "kernel\core\desktop.cpp") -Pattern "bare_metal_desktop_compact_icon_layout|bare_metal_desktop_small_icon_mode|smallLiveDesktopFolderIcons"
+$kernelBareMetalCompactIcons = Find-FirstMatch -LiteralPath (Join-Path $Root "kernel\core\desktop.cpp") -Pattern "bare_metal_desktop_uses_compact_folder_layout|bare_metal_desktop_icon_metrics|bare_metal_desktop_icon_size"
+$kernelBareMetalSharedIconConfig = Find-FirstMatch -LiteralPath (Join-Path $Root "kernel\core\desktop.cpp") -Pattern "smallLiveDesktopFolderIcons"
 $rightClickIconSize = Find-FirstMatch -LiteralPath (Join-Path $Root "right_click_menu.cpp") -Pattern "setHostedDesktopPrefersCompactFolderIcons|hostedDesktopPrefersCompactFolderIcons|Folder View Icon Size|Normal folder icons|Small folder icons"
 $hostedNonRootCompactIcons = Find-FirstMatch -LiteralPath (Join-Path $Root "compositor.cpp") -Pattern "hostedDesktopUsesCompactIconLayout|desktopIconCellHeightForItem|desktopIconTopPadding"
 $displayOptionsIconSize = Find-FirstMatch -LiteralPath (Join-Path $Root "display_options.cpp") -Pattern "smallLiveDesktopFolderIcons|Use smaller folder icons|folder icon size"
@@ -110,7 +111,7 @@ Emit-Check "right-click Icon Size submenu wiring" "present" $rightClickIconSize
 Emit-Check "hosted non-root smaller icon layout" "present" $hostedNonRootCompactIcons
 Emit-Check "Display Options live folder icon size setting" "present" $displayOptionsIconSize
 Emit-Check "desktop config folder icon size persistence" "present" $desktopConfigIconSize
-Emit-Check "bare-metal compact icon hook" "missing" $kernelBareMetalCompactIcons
+Emit-Check "bare-metal compact icon hook" "present" $kernelBareMetalCompactIcons
 
 if ($null -eq $showOnDesktop) {
     Write-Host "show-on-desktop-action=missing"
@@ -176,5 +177,6 @@ Write-Host "  bare-metal-folder-navigation=$(if ($null -ne $bareMetalDesktopNavi
 Write-Host "  bare-metal-back-go-desktop=$(if ($null -ne $bareMetalDesktopBackHome) { 'present' } else { 'missing' })"
 Write-Host "  bare-metal-go-desktop-target=$(if ($null -ne $bareMetalDesktopHomePath) { '/Desktop' } else { 'missing' })"
 Write-Host "  bare-metal-shell-cd-sync=$(if ($null -ne $bareMetalShellDesktopSync) { 'present' } else { 'missing' })"
-Write-Host "  bare-metal-nonroot-smaller-icons=$(if ($null -ne $kernelBareMetalCompactIcons) { 'partial' } else { 'missing' })"
+Write-Host "  bare-metal-nonroot-smaller-icons=$(if ($null -ne $kernelBareMetalCompactIcons) { 'present' } else { 'missing' })"
+Write-Host "  bare-metal-nonroot-icon-config=$(if ($null -ne $kernelBareMetalSharedIconConfig) { 'uses-shared-setting' } else { 'default-on' })"
 Write-Host "  bare-metal-parity=$(if ($null -ne $bareMetalDesktopNavigation -and $null -ne $bareMetalDesktopHomeCheck) { 'partial' } else { 'missing' })"

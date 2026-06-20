@@ -235,6 +235,27 @@ There does not appear to be a dedicated desktop live-directory smoke yet. The ex
   - current live folder persistence, which remains intentionally undesired,
   - any extra shell parser edge cases beyond the current `cd` path resolution.
 
+## Phase 2E Note
+
+- Bare-metal non-root live desktop folders now use a compact icon layout with smaller icons, tighter spacing, and narrower hitboxes than `/Desktop`.
+- Source anchors changed:
+  - `kernel/core/desktop.cpp` now carries the bare-metal layout metrics helper, compact-layout detection, and layout-sensitive icon placement / hit-testing updates.
+  - `scripts/smoke-live-directory-desktop-status.ps1` now reports the bare-metal compact-layout anchor as present and exposes the compact-mode config story explicitly.
+- Compact behavior is default-on for bare-metal non-root folder views.
+  - The shared hosted `smallLiveDesktopFolderIcons` setting is not loaded into kernel code here.
+  - That keeps the kernel path self-contained and avoids host-only config dependencies.
+- Root `/Desktop` layout remains unchanged.
+  - The kernel still uses the normal root desktop icon size, spacing, and hitboxes at `/Desktop`.
+  - Compact metrics only apply once the current live desktop folder is not `/Desktop`.
+- Slot persistence safeguards:
+  - root `/Desktop` still saves and reloads icon positions through `/.desktop_icons`,
+  - compact non-root views skip saving icon positions and reflow transiently,
+  - Back / Go to Desktop navigation icons stay out of persistence.
+- Remaining parity gaps:
+  - visual runtime proof / eyeball validation,
+  - any dedicated shell or navigation smoke beyond the current status script,
+  - current live folder persistence remains intentionally disabled.
+
 ## Proposed Phased Plan
 
 ### Phase 0

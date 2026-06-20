@@ -938,6 +938,102 @@ static bool bare_metal_desktop_is_home_directory()
     return desktop_str_eq(s_bareMetalDesktopCurrentPath, s_bareMetalDesktopHomePath);
 }
 
+#if defined(GXOS_BARE_METAL)
+static bool bare_metal_desktop_uses_compact_folder_layout()
+{
+    // Bare-metal currently uses compact folder layout for every non-root live
+    // desktop folder. The hosted preference is intentionally not loaded into
+    // kernel code here, so the kernel stays kernel-safe and default-on.
+    return !bare_metal_desktop_is_home_directory();
+}
+#else
+static bool bare_metal_desktop_uses_compact_folder_layout()
+{
+    return false;
+}
+#endif
+
+struct DesktopIconLayoutMetrics {
+    uint32_t iconSize;
+    uint32_t cellW;
+    uint32_t cellH;
+    uint32_t margin;
+    uint32_t iconTopPadding;
+    uint32_t labelGap;
+    uint32_t labelMaxLines;
+};
+
+static const DesktopIconLayoutMetrics& bare_metal_desktop_icon_metrics()
+{
+#if defined(GXOS_BARE_METAL)
+    static const DesktopIconLayoutMetrics kRootMetrics = {
+        kIconSize,
+        kIconCellW,
+        kIconCellH,
+        kIconMargin,
+        4,
+        4,
+        3
+    };
+    static const DesktopIconLayoutMetrics kCompactMetrics = {
+        40,
+        72,
+        84,
+        16,
+        2,
+        2,
+        2
+    };
+    return bare_metal_desktop_uses_compact_folder_layout() ? kCompactMetrics : kRootMetrics;
+#else
+    static const DesktopIconLayoutMetrics kRootMetrics = {
+        kIconSize,
+        kIconCellW,
+        kIconCellH,
+        kIconMargin,
+        4,
+        4,
+        3
+    };
+    return kRootMetrics;
+#endif
+}
+
+static inline uint32_t bare_metal_desktop_icon_size()
+{
+    return bare_metal_desktop_icon_metrics().iconSize;
+}
+
+static inline uint32_t bare_metal_desktop_icon_cell_width()
+{
+    return bare_metal_desktop_icon_metrics().cellW;
+}
+
+static inline uint32_t bare_metal_desktop_icon_cell_height()
+{
+    return bare_metal_desktop_icon_metrics().cellH;
+}
+
+static inline uint32_t bare_metal_desktop_icon_margin()
+{
+    return bare_metal_desktop_icon_metrics().margin;
+}
+
+static inline uint32_t bare_metal_desktop_icon_top_padding()
+{
+    return bare_metal_desktop_icon_metrics().iconTopPadding;
+}
+
+static inline uint32_t bare_metal_desktop_icon_label_gap()
+{
+    return bare_metal_desktop_icon_metrics().labelGap;
+}
+
+static inline uint32_t bare_metal_desktop_icon_label_max_lines()
+{
+    return bare_metal_desktop_icon_metrics().labelMaxLines;
+}
+
 static void refresh_desktop_icons();
 
 #if defined(__GNUC__) || defined(__clang__)
@@ -1499,6 +1595,7 @@ static void init_time()
 static int32_t s_iconPosX[kDesktopIconCount];
 static int32_t s_iconPosY[kDesktopIconCount];
 static bool    s_iconPositionsInitialized = false;
+static bool    s_desktopIconLayoutCompact = false;
 
 // Selected desktop icon (-1 = none)
 static int s_selectedIcon = -1;
@@ -2067,17 +2164,22 @@ static uint32_t color_for_start_menu_app(const char* appName)
 
 static bool desktop_cells_overlap(int32_t ax, int32_t ay, int32_t bx, int32_t by)
 {
-    return ax < bx + (int32_t)kIconCellW && ax + (int32_t)kIconCellW > bx &&
-           ay < by + (int32_t)kIconCellH && ay + (int32_t)kIconCellH > by;
+    const uint32_t cellW = bare_metal_desktop_icon_cell_width();
+    const uint32_t cellH = bare_metal_desktop_icon_cell_height();
+    return ax < bx + (int32_t)cellW && ax + (int32_t)cellW > bx &&
+           ay < by + (int32_t)cellH && ay + (int32_t)cellH > by;
 }
 
 static bool allocate_desktop_icon_slot(int ignoreIconId, int32_t& outX, int32_t& outY)
 {
     DesktopRect work = get_current_work_area();
-    uint32_t usableW = work.w > kIconMargin ? work.w - kIconMargin : work.w;
-    uint32_t usableH = work.h > kIconMargin ? work.h - kIconMargin : work.h;
-    int columns = (int)(usableW / kIconCellW);
-    int rows = (int)(usableH / kIconCellH);
+    uint32_t cellW = bare_metal_desktop_icon_cell_width();
+    uint32_t cellH = bare_metal_desktop_icon_cell_height();
+    uint32_t iconMargin = bare_metal_desktop_icon_margin();
+    uint32_t usableW = work.w > iconMargin ? work.w - iconMargin : work.w;
+    uint32_t usableH = work.h > iconMargin ? work.h - iconMargin : work.h;
+    int columns = (int)(usableW / cellW);
+    int rows = (int)(usableH / cellH);
     if (columns < 1) columns = 1;
     if (rows < 1) rows = 1;
 
@@ -2091,8 +2193,8 @@ static bool allocate_desktop_icon_slot(int ignoreIconId, int32_t& outX, int32_t&
 
     for (int row = 0; row < rows; ++row) {
         for (int col = 0; col < columns; ++col) {
-            int32_t x = (int32_t)work.x + (int32_t)kIconMargin + (int32_t)col * (int32_t)kIconCellW;
-            int32_t y = (int32_t)work.y + (int32_t)kIconMargin + (int32_t)row * (int32_t)kIconCellH;
+            int32_t x = (int32_t)work.x + (int32_t)iconMargin + (int32_t)col * (int32_t)cellW;
+            int32_t y = (int32_t)work.y + (int32_t)iconMargin + (int32_t)row * (int32_t)cellH;
             bool collides = false;
             for (int displayIdx = 0; displayIdx < s_visibleIconCount; ++displayIdx) {
                 int iconId = s_visibleIconIndices[displayIdx];
@@ -2116,8 +2218,8 @@ static bool allocate_desktop_icon_slot(int ignoreIconId, int32_t& outX, int32_t&
         }
     }
 
-    outX = (int32_t)work.x + (int32_t)kIconMargin;
-    outY = (int32_t)work.y + (int32_t)kIconMargin;
+    outX = (int32_t)work.x + (int32_t)iconMargin;
+    outY = (int32_t)work.y + (int32_t)iconMargin;
     serial::puts("[desktop] desktop icon slot fallback; no free slot\n");
     return false;
 }
@@ -2125,10 +2227,13 @@ static bool allocate_desktop_icon_slot(int ignoreIconId, int32_t& outX, int32_t&
 static bool clamp_icon_position_to_work_area(int32_t& x, int32_t& y)
 {
     DesktopRect work = get_current_work_area();
-    int32_t minX = (int32_t)work.x + (int32_t)kIconMargin;
-    int32_t minY = (int32_t)work.y + (int32_t)kIconMargin;
-    int32_t maxX = (int32_t)(work.x + work.w) - (int32_t)kIconCellW;
-    int32_t maxY = (int32_t)(work.y + work.h) - (int32_t)kIconCellH;
+    uint32_t cellW = bare_metal_desktop_icon_cell_width();
+    uint32_t cellH = bare_metal_desktop_icon_cell_height();
+    uint32_t iconMargin = bare_metal_desktop_icon_margin();
+    int32_t minX = (int32_t)work.x + (int32_t)iconMargin;
+    int32_t minY = (int32_t)work.y + (int32_t)iconMargin;
+    int32_t maxX = (int32_t)(work.x + work.w) - (int32_t)cellW;
+    int32_t maxY = (int32_t)(work.y + work.h) - (int32_t)cellH;
     if (maxX < minX) maxX = (int32_t)work.x;
     if (maxY < minY) maxY = (int32_t)work.y;
     int32_t oldX = x;
@@ -2514,6 +2619,29 @@ static void refresh_desktop_icons()
     enumerate_desktop_folder_items();
     apply_system_desktop_icon_visibility();
     apply_bare_metal_desktop_navigation_icon_visibility();
+    bool compactLayout = bare_metal_desktop_uses_compact_folder_layout();
+    bool layoutChanged = !s_iconPositionsInitialized || s_desktopIconLayoutCompact != compactLayout;
+
+    if (compactLayout) {
+        for (int i = 0; i < kDesktopIconCount; ++i) {
+            s_iconPosX[i] = -1;
+            s_iconPosY[i] = -1;
+        }
+        s_desktopIconLayoutCompact = true;
+        s_iconPositionsInitialized = true;
+    } else if (layoutChanged) {
+        for (int i = 0; i < kDesktopIconCount; ++i) {
+            s_iconPosX[i] = -1;
+            s_iconPosY[i] = -1;
+        }
+        s_desktopIconLayoutCompact = compactLayout;
+        s_iconPositionsInitialized = true;
+    }
+
+    if (layoutChanged && !compactLayout) {
+        load_icon_positions();
+    }
+
     s_visibleIconCount = 0;
     
     // First add all pinned icons
@@ -2555,17 +2683,25 @@ static void refresh_desktop_icons()
         }
     }
 
+    bool migratedSavedPositions = false;
     for (int displayIdx = 0; displayIdx < s_visibleIconCount; ++displayIdx) {
         if (s_iconPosX[displayIdx] >= 0 && s_iconPosY[displayIdx] >= 0) continue;
         int iconIdx = s_visibleIconIndices[displayIdx];
         if (iconIdx < 0 || iconIdx >= kDesktopIconCount) continue;
         int32_t x = 0;
         int32_t y = 0;
-        allocate_desktop_icon_slot(iconIdx, x, y);
+        if (!compactLayout && s_desktopIcons[iconIdx].savedX >= 0 && s_desktopIcons[iconIdx].savedY >= 0) {
+            x = s_desktopIcons[iconIdx].savedX;
+            y = s_desktopIcons[iconIdx].savedY;
+            if (clamp_icon_position_to_work_area(x, y)) migratedSavedPositions = true;
+        } else {
+            allocate_desktop_icon_slot(iconIdx, x, y);
+        }
         s_iconPosX[displayIdx] = x;
         s_iconPosY[displayIdx] = y;
     }
 
+    if (migratedSavedPositions) save_icon_positions();
     sync_selected_icon_after_layout();
 }
 
@@ -2616,43 +2752,14 @@ static void unpin_icon(const char* appName)
 // Initialize icon positions in grid layout
 static void initialize_icon_positions()
 {
-    if (s_iconPositionsInitialized) return;
-    
     refresh_desktop_icons();  // Build visible icon list first
-    load_icon_positions();
-    for (int i = 0; i < kDesktopIconCount; ++i) {
-        s_iconPosX[i] = -1;
-        s_iconPosY[i] = -1;
-    }
-    
-    bool migratedSavedPositions = false;
-    for (int i = 0; i < s_visibleIconCount; i++) {
-        int iconIdx = s_visibleIconIndices[i];
-        
-        // Check if icon has saved position
-        if (s_desktopIcons[iconIdx].savedX >= 0 && s_desktopIcons[iconIdx].savedY >= 0) {
-            int32_t x = s_desktopIcons[iconIdx].savedX;
-            int32_t y = s_desktopIcons[iconIdx].savedY;
-            if (clamp_icon_position_to_work_area(x, y)) migratedSavedPositions = true;
-            s_iconPosX[i] = x;
-            s_iconPosY[i] = y;
-        } else {
-            int32_t x = 0;
-            int32_t y = 0;
-            allocate_desktop_icon_slot(iconIdx, x, y);
-            s_iconPosX[i] = x;
-            s_iconPosY[i] = y;
-        }
-    }
-    
-    s_iconPositionsInitialized = true;
-    if (migratedSavedPositions) save_icon_positions();
 }
 
 // Save icon position after drag (store in icon structure)
 static void save_icon_position(int displayIndex)
 {
     if (displayIndex < 0 || displayIndex >= s_visibleIconCount) return;
+    if (bare_metal_desktop_uses_compact_folder_layout()) return;
     
     int iconIdx = s_visibleIconIndices[displayIndex];
     s_desktopIcons[iconIdx].savedX = s_iconPosX[displayIndex];
@@ -2968,8 +3075,8 @@ static bool icon_bounds_intersect_rect(int displayIndex, int32_t left, int32_t t
     if (displayIndex < 0 || displayIndex >= s_visibleIconCount) return false;
     int32_t iconLeft = s_iconPosX[displayIndex];
     int32_t iconTop = s_iconPosY[displayIndex];
-    int32_t iconRight = iconLeft + (int32_t)kIconCellW;
-    int32_t iconBottom = iconTop + (int32_t)kIconCellH;
+    int32_t iconRight = iconLeft + (int32_t)bare_metal_desktop_icon_cell_width();
+    int32_t iconBottom = iconTop + (int32_t)bare_metal_desktop_icon_cell_height();
     return iconLeft < right && iconRight > left && iconTop < bottom && iconBottom > top;
 }
 
@@ -4061,17 +4168,18 @@ static const char* GetStartMenuLogicalIconName(const char* label)
 
 static void draw_colored_desktop_icon(uint32_t ix, uint32_t iy, uint32_t color, const char* label, bool dragging)
 {
+    uint32_t iconSize = bare_metal_desktop_icon_size();
     if (dragging) {
         uint8_t dr = (uint8_t)(((color >> 16) & 0xFF) * 7 / 10);
         uint8_t dg = (uint8_t)(((color >> 8) & 0xFF) * 7 / 10);
         uint8_t db = (uint8_t)((color & 0xFF) * 7 / 10);
-        framebuffer::fill_rect(ix, iy, kIconSize, kIconSize, rgb(dr, dg, db));
-        draw_icon_symbol(ix, iy, kIconSize, label);
-        draw_rect(ix, iy, kIconSize, kIconSize, rgb(140, 140, 160));
+        framebuffer::fill_rect(ix, iy, iconSize, iconSize, rgb(dr, dg, db));
+        draw_icon_symbol(ix, iy, iconSize, label);
+        draw_rect(ix, iy, iconSize, iconSize, rgb(140, 140, 160));
         return;
     }
 
-    framebuffer::fill_rect(ix, iy, kIconSize, kIconSize, color);
+    framebuffer::fill_rect(ix, iy, iconSize, iconSize, color);
 
     uint8_t br = (uint8_t)(((color >> 16) & 0xFF));
     uint8_t bg = (uint8_t)(((color >> 8) & 0xFF));
@@ -4079,13 +4187,13 @@ static void draw_colored_desktop_icon(uint32_t ix, uint32_t iy, uint32_t color, 
     uint8_t lr = (uint8_t)(br + 30 > 255 ? 255 : br + 30);
     uint8_t lg = (uint8_t)(bg + 30 > 255 ? 255 : bg + 30);
     uint8_t lb = (uint8_t)(bb + 30 > 255 ? 255 : bb + 30);
-    hline(ix + 1, iy + 1, kIconSize - 2, rgb(lr, lg, lb));
-    hline(ix + 1, iy + 2, kIconSize - 2, rgb(lr, lg, lb));
+    hline(ix + 1, iy + 1, iconSize - 2, rgb(lr, lg, lb));
+    hline(ix + 1, iy + 2, iconSize - 2, rgb(lr, lg, lb));
 
-    draw_icon_symbol(ix, iy, kIconSize, label);
-    draw_rect(ix, iy, kIconSize, kIconSize, rgb(200, 200, 220));
-    hline(ix + 1, iy + kIconSize - 1, kIconSize - 1, rgb(80, 80, 100));
-    vline(ix + kIconSize - 1, iy + 1, kIconSize - 1, rgb(80, 80, 100));
+    draw_icon_symbol(ix, iy, iconSize, label);
+    draw_rect(ix, iy, iconSize, iconSize, rgb(200, 200, 220));
+    hline(ix + 1, iy + iconSize - 1, iconSize - 1, rgb(80, 80, 100));
+    vline(ix + iconSize - 1, iy + 1, iconSize - 1, rgb(80, 80, 100));
 }
 
 static bool draw_argb_icon_buffer(const uint32_t* pixels, uint32_t srcW, uint32_t srcH, uint32_t x, uint32_t y, uint32_t width, uint32_t height)
@@ -4206,8 +4314,9 @@ static bool draw_themed_desktop_icon(int iconIdx, uint32_t cx, uint32_t iy)
     const uint32_t* pixels = get_embedded_desktop_icon_pixels(logicalName);
     if (!pixels) return false;
 
-    uint32_t drawSize = s_desktopIconSize > 0 ? s_desktopIconSize : kIconSize;
-    uint32_t ix = cx + (kIconCellW > drawSize ? (kIconCellW - drawSize) / 2 : 0);
+    uint32_t drawSize = bare_metal_desktop_icon_size();
+    uint32_t cellW = bare_metal_desktop_icon_cell_width();
+    uint32_t ix = cx + (cellW > drawSize ? (cellW - drawSize) / 2 : 0);
     return draw_argb_icon_buffer(pixels, kDesktopThemeIconW, kDesktopThemeIconH, ix, iy, drawSize, drawSize);
 }
 #else
@@ -4278,8 +4387,9 @@ static bool draw_themed_desktop_icon(int iconIdx, uint32_t cx, uint32_t iy)
     gxos::gui::ImagePtr image = s_desktopIconImageCache[iconIdx];
     if (!image) return false;
 
-    uint32_t drawSize = s_desktopIconSize > 0 ? s_desktopIconSize : kIconSize;
-    uint32_t ix = cx + (kIconCellW > drawSize ? (kIconCellW - drawSize) / 2 : 0);
+    uint32_t drawSize = bare_metal_desktop_icon_size();
+    uint32_t cellW = bare_metal_desktop_icon_cell_width();
+    uint32_t ix = cx + (cellW > drawSize ? (cellW - drawSize) / 2 : 0);
     draw_scaled_rgba_icon(image, ix, iy, drawSize, drawSize);
     return true;
 }
@@ -4369,8 +4479,12 @@ static int wrap_icon_label(const char* label, uint32_t maxWidth, char lines[][64
 
 static void draw_desktop_icon_item(int iconIdx, uint32_t cx, uint32_t cy, bool dragging)
 {
-    uint32_t ix = cx + (kIconCellW - kIconSize) / 2;
-    uint32_t iy = cy + 4;
+    uint32_t cellW = bare_metal_desktop_icon_cell_width();
+    uint32_t iconSize = bare_metal_desktop_icon_size();
+    uint32_t topPadding = bare_metal_desktop_icon_top_padding();
+    uint32_t labelGap = bare_metal_desktop_icon_label_gap();
+    uint32_t ix = cx + (cellW > iconSize ? (cellW - iconSize) / 2 : 0);
+    uint32_t iy = cy + topPadding;
     const char* lbl = s_desktopIcons[iconIdx].label;
 
     if (!draw_themed_desktop_icon(iconIdx, cx, iy)) {
@@ -4379,13 +4493,13 @@ static void draw_desktop_icon_item(int iconIdx, uint32_t cx, uint32_t cy, bool d
 
     // TODO: draw shortcut/pin badges when DesktopItemKind::Shortcut is implemented.
 
-    uint32_t labelY = iy + kIconSize + 4;
+    uint32_t labelY = iy + iconSize + labelGap;
     char lines[3][64];
-    int lineCount = wrap_icon_label(lbl, kIconCellW - 8, lines, 3);
+    int lineCount = wrap_icon_label(lbl, cellW - 8, lines, (int)bare_metal_desktop_icon_label_max_lines());
     int lineH = gxos::gui::SystemFont::MeasureHeight(gxos::gui::FontRole::Default);
     for (int i = 0; i < lineCount; ++i) {
         int tw = measure_text(lines[i]);
-        uint32_t lx = cx + (kIconCellW > (uint32_t)tw ? (kIconCellW - tw) / 2 : 0);
+        uint32_t lx = cx + (cellW > (uint32_t)tw ? (cellW - (uint32_t)tw) / 2 : 0);
         uint32_t ly = labelY + (uint32_t)(i * lineH);
         draw_text(lx + 1, ly + 1, lines[i], rgb(0, 0, 0), 1);
         draw_text(lx, ly, lines[i], dragging ? rgb(200, 200, 210) : rgb(240, 240, 250), 1);
@@ -4407,12 +4521,14 @@ static void draw_desktop_icons()
         uint32_t cx = (uint32_t)s_iconPosX[displayIdx];
         uint32_t cy = (uint32_t)s_iconPosY[displayIdx];
 
-        if (cx < work.x || cy < work.y || cx + kIconCellW > work.x + work.w || cy + kIconCellH > work.y + work.h) continue;
+        uint32_t cellW = bare_metal_desktop_icon_cell_width();
+        uint32_t cellH = bare_metal_desktop_icon_cell_height();
+        if (cx < work.x || cy < work.y || cx + cellW > work.x + work.w || cy + cellH > work.y + work.h) continue;
 
         // Selection highlight background (matching compositor style)
         if (is_display_icon_selected(displayIdx)) {
-            framebuffer::fill_rect(cx, cy, kIconCellW, kIconCellH, rgb(50, 90, 160));
-            draw_rect(cx, cy, kIconCellW, kIconCellH, rgb(100, 160, 240));
+            framebuffer::fill_rect(cx, cy, cellW, cellH, rgb(50, 90, 160));
+            draw_rect(cx, cy, cellW, cellH, rgb(100, 160, 240));
         }
 
         draw_desktop_icon_item(iconIdx, cx, cy, false);
@@ -6116,6 +6232,10 @@ static ShellHitTest hit_test_shell(int32_t mx, int32_t my)
 // Save icon positions to VFS file
 static void save_icon_positions()
 {
+    if (bare_metal_desktop_uses_compact_folder_layout()) {
+        return;
+    }
+
     char buffer[4096];
     int pos = 0;
     
@@ -6153,6 +6273,10 @@ static void save_icon_positions()
 // Load icon positions from VFS file
 static bool load_icon_positions()
 {
+    if (bare_metal_desktop_uses_compact_folder_layout()) {
+        return false;
+    }
+
     uint8_t handle = vfs::open("/.desktop_icons", vfs::OPEN_READ);
     if (handle == 0xFF) return false;
     
@@ -8522,15 +8646,17 @@ static int hit_test_icon(int32_t mx, int32_t my)
 {
     DesktopRect work = get_current_work_area();
     if (!point_in_rect(mx, my, work)) return -1;
+    uint32_t cellW = bare_metal_desktop_icon_cell_width();
+    uint32_t cellH = bare_metal_desktop_icon_cell_height();
 
     for (int displayIdx = 0; displayIdx < s_visibleIconCount; displayIdx++) {
         uint32_t cx = (uint32_t)s_iconPosX[displayIdx];
         uint32_t cy = (uint32_t)s_iconPosY[displayIdx];
 
-        if (cx < work.x || cy < work.y || cx + kIconCellW > work.x + work.w || cy + kIconCellH > work.y + work.h) continue;
+        if (cx < work.x || cy < work.y || cx + cellW > work.x + work.w || cy + cellH > work.y + work.h) continue;
 
-        if ((uint32_t)mx >= cx && (uint32_t)mx < cx + kIconCellW &&
-            (uint32_t)my >= cy && (uint32_t)my < cy + kIconCellH) {
+        if ((uint32_t)mx >= cx && (uint32_t)mx < cx + cellW &&
+            (uint32_t)my >= cy && (uint32_t)my < cy + cellH) {
             return displayIdx;
         }
     }
@@ -8549,10 +8675,12 @@ static int find_nearest_icon_in_direction(int currentIcon, int direction)
 {
     if (currentIcon < 0 || currentIcon >= s_visibleIconCount) return -1;
     
+    uint32_t cellW = bare_metal_desktop_icon_cell_width();
+    uint32_t cellH = bare_metal_desktop_icon_cell_height();
     int32_t currX = s_iconPosX[currentIcon];
     int32_t currY = s_iconPosY[currentIcon];
-    int32_t currCenterX = currX + (int32_t)(kIconCellW / 2);
-    int32_t currCenterY = currY + (int32_t)(kIconCellH / 2);
+    int32_t currCenterX = currX + (int32_t)(cellW / 2);
+    int32_t currCenterY = currY + (int32_t)(cellH / 2);
     
     int bestIcon = -1;
     int32_t bestDistance = 0x7FFFFFFF; // Max int32
@@ -8562,8 +8690,8 @@ static int find_nearest_icon_in_direction(int currentIcon, int direction)
         
         int32_t iconX = s_iconPosX[i];
         int32_t iconY = s_iconPosY[i];
-        int32_t iconCenterX = iconX + (int32_t)(kIconCellW / 2);
-        int32_t iconCenterY = iconY + (int32_t)(kIconCellH / 2);
+        int32_t iconCenterX = iconX + (int32_t)(cellW / 2);
+        int32_t iconCenterY = iconY + (int32_t)(cellH / 2);
         
         int32_t dx = iconCenterX - currCenterX;
         int32_t dy = iconCenterY - currCenterY;
@@ -9463,8 +9591,8 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
                 if (!s_dragSelectedIcons[displayIdx]) continue;
                 int32_t left = s_dragOriginalIconX[displayIdx] + deltaX;
                 int32_t top = s_dragOriginalIconY[displayIdx] + deltaY;
-                int32_t right = left + (int32_t)kIconCellW;
-                int32_t bottom = top + (int32_t)kIconCellH;
+                int32_t right = left + (int32_t)bare_metal_desktop_icon_cell_width();
+                int32_t bottom = top + (int32_t)bare_metal_desktop_icon_cell_height();
                 if (!haveGroupBounds) {
                     groupLeft = left;
                     groupTop = top;
