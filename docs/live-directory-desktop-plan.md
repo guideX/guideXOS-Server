@@ -329,6 +329,30 @@ There does not appear to be a dedicated desktop live-directory smoke yet. The ex
 - The smoke still prefers the native path first, but it falls back to the alias route when `/Desktop` cannot be provisioned. The alias remains the documented blocker path for this boot layout.
 - The runtime evidence now records the blocker directly so future runs can tell whether the environment is still alias-only or has gained a writable root volume.
 
+## Phase 2I Closeout
+
+- Hosted parity is implemented and validated: live desktop navigation, Back / Go to Desktop affordances, folder-only `Show on Desktop`, shell `cd` sync, and compact non-root icon handling all remain present.
+- Bare-metal parity is implemented with runtime evidence: `/Desktop` home, folder activation, Back / Go to Desktop, shell `cd` sync, and default-on compact non-root icons are all present.
+- Runtime evidence remains alias-based in the current boot layout:
+  - `pathMode=alias-fallback`
+  - `nativePathAvailable=FAIL`
+  - `result=PASS`
+- Native writable `/Desktop` proof is still blocked in this environment, so alias fallback is the honest runtime evidence mode for now.
+- Current live folder persistence remains intentionally in-memory only, and root `/Desktop` layout remains normal.
+- `scripts/smoke-live-directory-desktop-status.ps1` and `scripts/smoke-live-directory-desktop-runtime.ps1` are the evidence scripts for this arc.
+- Validation already passed with:
+  - `.\scripts\smoke-live-directory-desktop-status.ps1`
+  - `.\scripts\smoke-live-directory-desktop-runtime.ps1`
+  - `.\scripts\smoke-appmodel-launchshadow.ps1`
+  - `cmd /c build.bat`
+  - `cmd /c build-kernel.bat`
+- Recommended future work:
+  - native writable `/Desktop` boot or VFS proof,
+  - optional visual / eyeball verification,
+  - optional shell no-arg `cd` home convention decision,
+  - broader Display Options cleanup and any Resolutions tab work as a separate arc,
+  - do not persist the current live folder unless that decision is intentionally revisited later.
+
 ## Proposed Phased Plan
 
 ### Phase 0
