@@ -131,6 +131,58 @@ There does not appear to be a dedicated desktop live-directory smoke yet. The ex
   - visual live run / eyeball verification if still needed,
   - richer shell path parsing, if still relevant.
 
+## Phase 2A Note
+
+- Bare-metal anchors inspected:
+  - `kernel/core/desktop.cpp` and `kernel/core/desktop.h`
+  - `kernel/core/shell.cpp` and `kernel/core/shell.h`
+  - `kernel/core/vfs.cpp`
+  - `desktop_folder.h`
+  - `desktop_service.cpp`
+  - `display_options.cpp`
+  - `right_click_menu.cpp`
+- What we found:
+  - Bare-metal desktop already enumerates `/Desktop` through VFS and already persists desktop icon slots and visibility state.
+  - The shell already owns local `cd` / `get_cwd()` state, but there is no desktop sync hook yet.
+  - Hosted live-directory helpers in `desktop_folder.h` and `compositor.cpp` are host-filesystem based, so they should not be moved into kernel code as-is.
+- Scaffold added:
+  - `kernel/core/desktop.cpp` now carries a small bare-metal desktop directory state scaffold with home/current path storage and a refresh hook.
+  - The scaffold is intentionally narrow and keeps the default path at `/Desktop`, so hosted behavior and existing bare-metal rendering stay unchanged.
+- Exact next bare-metal slice:
+  - Wire folder activation to update the bare-metal desktop current path.
+  - Add Back and Go to Desktop affordances once the path state can actually change.
+  - Decide whether shell `cd` should soft-sync the bare-metal desktop path or remain independent.
+  - Add non-root smaller-icon handling only after the navigation state is real.
+- Hosted parity status:
+  - Hosted live-directory desktop remains fully intact and still owns the richer navigation path, shell bridge, and smaller non-root icon mode.
+- Risks and blockers:
+  - Kernel desktop rendering still depends on fixed slot/grid assumptions, so navigation should be introduced one state transition at a time.
+  - Bare-metal shell sync is not safe to force yet because the kernel shell path is separate from the hosted bridge.
+  - Shared helper reuse should stay limited to path normalization ideas unless the helper is fully kernel-safe.
+- Historical blocker before Phase 2B:
+  - There was no actual bare-metal navigation action to exercise the new directory state, so the scaffold remained intentionally dormant until folder activation was wired up.
+
+## Phase 2B Note
+
+- Bare-metal folder activation now updates the desktop current path instead of launching `Files` for directory targets.
+- Source anchors changed:
+  - `kernel/core/desktop.cpp` now owns `bare_metal_desktop_resolve_directory_target()`, `bare_metal_desktop_set_current_directory()`, and the folder-activation branch in `show_icon_notification()`.
+  - `scripts/smoke-live-directory-desktop-status.ps1` now reports the bare-metal directory state and folder-navigation slice as present instead of scaffold-only.
+- Validation behavior:
+  - Folder targets are resolved against the current bare-metal desktop path when needed, normalized through VFS, and verified with `vfs::stat()`.
+  - The current path changes only after the target exists and is a directory.
+  - Successful folder activation refreshes the desktop through the existing `bare_metal_desktop_request_folder_refresh()` path, which re-enumerates the current folder and requests redraw.
+  - Root startup behavior remains unchanged: bare-metal still starts at `/Desktop`.
+  - Slot persistence remains untouched, and this pass does not persist the current live folder across restart.
+- What remains deferred:
+  - `Back` and `Go to Desktop` affordances.
+  - bare-metal shell `cd` sync.
+  - bare-metal non-root smaller icons.
+  - persistence of the current live folder, which is intentionally not desired in this slice.
+- Non-folder behavior preserved:
+  - App launches and file-open behavior still use the existing paths for non-folder targets.
+  - Existing desktop shortcut and built-in/system icon behavior is unchanged.
+
 ## Proposed Phased Plan
 
 ### Phase 0

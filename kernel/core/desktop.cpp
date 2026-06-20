@@ -882,6 +882,61 @@ struct DesktopIcon {
 };
 
 static const char* kDesktopFolderPath = "/Desktop";
+static char s_bareMetalDesktopHomePath[vfs::VFS_MAX_PATH] = "/Desktop";
+static char s_bareMetalDesktopCurrentPath[vfs::VFS_MAX_PATH] = "/Desktop";
+static char s_bareMetalDesktopHistoryPaths[4][vfs::VFS_MAX_PATH];
+static int s_bareMetalDesktopHistoryCount = 0;
+static bool s_bareMetalDesktopDirectoryStateInitialized = false;
+
+static void initialize_bare_metal_desktop_directory_state()
+{
+    if (s_bareMetalDesktopDirectoryStateInitialized) return;
+
+    desktop_str_copy(s_bareMetalDesktopHomePath, kDesktopFolderPath, (int)sizeof(s_bareMetalDesktopHomePath));
+    desktop_str_copy(s_bareMetalDesktopCurrentPath, s_bareMetalDesktopHomePath, (int)sizeof(s_bareMetalDesktopCurrentPath));
+    for (int i = 0; i < 4; ++i) {
+        s_bareMetalDesktopHistoryPaths[i][0] = '\0';
+    }
+    s_bareMetalDesktopHistoryCount = 0;
+    s_bareMetalDesktopDirectoryStateInitialized = true;
+}
+
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((unused))
+#endif
+static const char* bare_metal_desktop_home_directory_path()
+{
+    initialize_bare_metal_desktop_directory_state();
+    return s_bareMetalDesktopHomePath;
+}
+
+static const char* bare_metal_desktop_current_directory_path()
+{
+    initialize_bare_metal_desktop_directory_state();
+    return s_bareMetalDesktopCurrentPath;
+}
+
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((unused))
+#endif
+static bool bare_metal_desktop_is_home_directory()
+{
+    initialize_bare_metal_desktop_directory_state();
+    return desktop_str_eq(s_bareMetalDesktopCurrentPath, s_bareMetalDesktopHomePath);
+}
+
+static void refresh_desktop_icons();
+
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((unused))
+#endif
+static void bare_metal_desktop_request_folder_refresh()
+{
+    initialize_bare_metal_desktop_directory_state();
+    refresh_desktop_icons();
+    s_needsRedraw = true;
+}
+
 static const int kSystemDesktopIconCount = 4;
 static const int kMaxDesktopFilesystemEntries = 32;
 static const int kMaxDesktopAppShortcuts = 16;
@@ -1736,11 +1791,12 @@ static bool text_ends_with(const char* value, const char* suffix);
 static bool ensure_desktop_folder()
 {
     serial::puts("[desktop] Desktop folder path selected: ");
-    serial::puts(kDesktopFolderPath);
+    serial::puts(bare_metal_desktop_current_directory_path());
     serial::puts("\n");
 
     vfs::FileInfo info{};
-    if (vfs::stat(kDesktopFolderPath, &info) == vfs::VFS_OK) {
+    const char* desktopPath = bare_metal_desktop_current_directory_path();
+    if (vfs::stat(desktopPath, &info) == vfs::VFS_OK) {
         if (info.type == vfs::FILE_TYPE_DIRECTORY) {
             serial::puts("[desktop] Desktop folder already exists\n");
             return true;
@@ -1749,7 +1805,7 @@ static bool ensure_desktop_folder()
         return false;
     }
 
-    vfs::Status status = vfs::mkdir(kDesktopFolderPath);
+    vfs::Status status = vfs::mkdir(desktopPath);
     if (status == vfs::VFS_OK || status == vfs::VFS_ERR_EXISTS) {
         serial::puts("[desktop] Desktop folder created\n");
         return true;
@@ -1895,6 +1951,8 @@ static void apply_system_desktop_icon_visibility()
 
 static void enumerate_desktop_folder_items()
 {
+    initialize_bare_metal_desktop_directory_state();
+
     for (int i = 0; i < kMaxDesktopFilesystemEntries; ++i) {
         int iconIdx = kSystemDesktopIconCount + i;
         if (iconIdx >= kDesktopIconCount) break;
@@ -1911,7 +1969,8 @@ static void enumerate_desktop_folder_items()
     if (!ensure_desktop_folder()) return;
 
     serial::puts("[desktop] Desktop folder enumeration started\n");
-    uint8_t dir = vfs::opendir(kDesktopFolderPath);
+    const char* desktopPath = bare_metal_desktop_current_directory_path();
+    uint8_t dir = vfs::opendir(desktopPath);
     if (dir == 0xFF) {
         serial::puts("[desktop] Desktop folder enumeration failed\n");
         return;
@@ -1923,7 +1982,7 @@ static void enumerate_desktop_folder_items()
         if (entry.name[0] == '.' && (entry.name[1] == '\0' || (entry.name[1] == '.' && entry.name[2] == '\0'))) continue;
         int iconIdx = kSystemDesktopIconCount + slot;
         desktop_str_copy(s_desktopFileLabels[slot], entry.name, (int)sizeof(s_desktopFileLabels[slot]));
-        vfs::join_path(kDesktopFolderPath, entry.name, s_desktopFilePaths[slot], sizeof(s_desktopFilePaths[slot]));
+        vfs::join_path(desktopPath, entry.name, s_desktopFilePaths[slot], sizeof(s_desktopFilePaths[slot]));
         s_desktopIcons[iconIdx].label = s_desktopFileLabels[slot];
         desktop_str_copy(s_desktopIcons[iconIdx].path, s_desktopFilePaths[slot], (int)sizeof(s_desktopIcons[iconIdx].path));
         s_desktopIcons[iconIdx].pinned = true;
@@ -2588,6 +2647,72 @@ static void ClearDesktopIconSelection()
     s_focusedSelectedIconId = -1;
     s_lastSelectedIconId = -1;
     if (changed) log_selection_change("cleared");
+}
+
+static bool bare_metal_desktop_resolve_directory_target(const char* targetPath, char* resolvedPath, size_t resolvedPathSize)
+{
+    if (!resolvedPath || resolvedPathSize == 0) return false;
+    resolvedPath[0] = '\0';
+    if (!targetPath || !targetPath[0]) return false;
+
+    if (vfs::is_absolute(targetPath)) {
+        vfs::normalize_path(targetPath, resolvedPath, resolvedPathSize);
+    } else {
+        char joined[vfs::VFS_MAX_PATH];
+        vfs::join_path(bare_metal_desktop_current_directory_path(), targetPath, joined, sizeof(joined));
+        vfs::normalize_path(joined, resolvedPath, resolvedPathSize);
+    }
+
+    return resolvedPath[0] != '\0';
+}
+
+static bool bare_metal_desktop_set_current_directory(const char* targetPath)
+{
+    initialize_bare_metal_desktop_directory_state();
+
+    serial::puts("[desktop] Bare-metal desktop folder activation requested: ");
+    serial::puts(targetPath ? targetPath : "(null)");
+    serial::puts("\n");
+
+    char resolvedPath[vfs::VFS_MAX_PATH];
+    if (!bare_metal_desktop_resolve_directory_target(targetPath, resolvedPath, sizeof(resolvedPath))) {
+        serial::puts("[desktop] Bare-metal desktop folder activation rejected: invalid path\n");
+        s_notification.title = "Desktop";
+        s_notification.message = "Invalid folder path";
+        s_notification.visible = true;
+        s_notification.showTime = s_tickCounter;
+        return false;
+    }
+
+    vfs::FileInfo info{};
+    if (vfs::stat(resolvedPath, &info) != vfs::VFS_OK) {
+        serial::puts("[desktop] Bare-metal desktop folder activation rejected: target missing\n");
+        s_notification.title = "Desktop";
+        s_notification.message = "Folder target missing";
+        s_notification.visible = true;
+        s_notification.showTime = s_tickCounter;
+        return false;
+    }
+
+    if (info.type != vfs::FILE_TYPE_DIRECTORY) {
+        serial::puts("[desktop] Bare-metal desktop folder activation rejected: target is not a directory\n");
+        s_notification.title = "Desktop";
+        s_notification.message = "Not a folder";
+        s_notification.visible = true;
+        s_notification.showTime = s_tickCounter;
+        return false;
+    }
+
+    desktop_str_copy(s_bareMetalDesktopCurrentPath, resolvedPath, (int)sizeof(s_bareMetalDesktopCurrentPath));
+    ClearDesktopIconSelection();
+    s_lastClickedIcon = -1;
+    s_lastClickTime = 0;
+    bare_metal_desktop_request_folder_refresh();
+
+    serial::puts("[desktop] Bare-metal desktop current path set to ");
+    serial::puts(s_bareMetalDesktopCurrentPath);
+    serial::puts("\n");
+    return true;
 }
 
 static void SelectDesktopIcon(int displayIndex, bool additive)
@@ -5025,7 +5150,7 @@ static void handle_context_menu_command(int item)
             break;
         case 3: { // New Folder
             char newFolderPath[vfs::VFS_MAX_PATH]{};
-            vfs::join_path(kDesktopFolderPath, "New Folder", newFolderPath, sizeof(newFolderPath));
+            vfs::join_path(bare_metal_desktop_current_directory_path(), "New Folder", newFolderPath, sizeof(newFolderPath));
             vfs::Status status = vfs::mkdir(newFolderPath);
             s_notification.title = "New Folder";
             if (status == vfs::VFS_OK) {
@@ -8378,15 +8503,8 @@ static void show_icon_notification(int displayIndex)
             }
             bool targetIsDir = info.type == vfs::FILE_TYPE_DIRECTORY;
             if (targetIsDir) {
-#if defined(GXOS_APPMODEL_TYPED_DISPATCH_SHADOW_ONLY) && defined(GXOS_BARE_METAL)
-                log_bare_metal_fileopen_shadow_only_observation(bare_metal_active_fileopen_shadow_source("DesktopShortcutFolder"), "Files", target);
-                if (bare_metal_should_suppress_real_branch_launch()) return;
-#endif
-                // SHADOW_ONLY FileOpen observation above is diagnostic-only; "Files"
-                // remains the authoritative handler and target remains the unmodified path.
-                if (app::AppManager::launchAppWithParam("Files", target)) return;
-                s_notification.title = label;
-                s_notification.message = "Unable to open folder";
+                bare_metal_desktop_set_current_directory(target);
+                return;
             } else if (desktop_entry_is_text(label)) {
 #if defined(GXOS_APPMODEL_TYPED_DISPATCH_SHADOW_ONLY) && defined(GXOS_BARE_METAL)
                 log_bare_metal_fileopen_shadow_only_observation(bare_metal_active_fileopen_shadow_source("DesktopShortcutTextFile"), "Notepad", target);
@@ -8435,18 +8553,11 @@ static void show_icon_notification(int displayIndex)
 
     if (icon.kind == DesktopItemKind::FilesystemEntry) {
         if (icon.isDirectory) {
-            serial::puts("[desktop] Opening desktop folder in File Manager: ");
+            serial::puts("[desktop] Navigating desktop folder: ");
             serial::puts(icon.path);
             serial::puts("\n");
-#if defined(GXOS_APPMODEL_TYPED_DISPATCH_SHADOW_ONLY) && defined(GXOS_BARE_METAL)
-            log_bare_metal_fileopen_shadow_only_observation(bare_metal_active_fileopen_shadow_source("DesktopFilesystemFolder"), "Files", icon.path);
-            if (bare_metal_should_suppress_real_branch_launch()) return;
-#endif
-            // SHADOW_ONLY FileOpen observation above is diagnostic-only; "Files"
-            // remains the authoritative handler and icon.path remains unmodified.
-            if (app::AppManager::launchAppWithParam("Files", icon.path)) return;
-            s_notification.title = label;
-            s_notification.message = "Unable to open folder";
+            bare_metal_desktop_set_current_directory(icon.path);
+            return;
         } else if (desktop_entry_is_text(label)) {
             serial::puts("[desktop] Opening desktop text file: ");
             serial::puts(icon.path);
