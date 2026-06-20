@@ -449,11 +449,11 @@ try {
         $typedDispatchGateRestored = (Text-Contains -Output $typedDispatchGateForcedOffOutput -Needle "typedDispatchGateRestored=true") -and
             (Text-Contains -Output $typedDispatchGateRestoredOutput -Needle "typedDispatchRuntimePath=active")
         $typedDispatchGateDefaultMatrixOk =
-            Text-Contains -Output $hostedOutput -Needle "phase3TypedDispatchGateMatrix state=default total=10 typedDispatch=7 legacyOrCompatibilityDispatch=0 blockedUnknownFallback=1 specialCaseFallback=2 fallbackTotal=3"
+            Text-Contains -Output $hostedOutput -Needle "phase3TypedDispatchGateMatrix state=default total=11 typedDispatch=8 legacyOrCompatibilityDispatch=0 blockedUnknownFallback=1 specialCaseFallback=2 fallbackTotal=3"
         $typedDispatchGateForcedOffMatrixOk =
-            Text-Contains -Output $typedDispatchGateForcedOffOutput -Needle "phase3TypedDispatchGateMatrix state=forced-off total=10 typedDispatch=0 legacyOrCompatibilityDispatch=7 blockedUnknownFallback=1 specialCaseFallback=2 fallbackTotal=10"
+            Text-Contains -Output $typedDispatchGateForcedOffOutput -Needle "phase3TypedDispatchGateMatrix state=forced-off total=11 typedDispatch=0 legacyOrCompatibilityDispatch=8 blockedUnknownFallback=1 specialCaseFallback=2 fallbackTotal=11"
         $typedDispatchGateRestoredMatrixOk =
-            Text-Contains -Output $typedDispatchGateRestoredOutput -Needle "phase3TypedDispatchGateMatrix state=default total=10 typedDispatch=7 legacyOrCompatibilityDispatch=0 blockedUnknownFallback=1 specialCaseFallback=2 fallbackTotal=3"
+            Text-Contains -Output $typedDispatchGateRestoredOutput -Needle "phase3TypedDispatchGateMatrix state=default total=11 typedDispatch=8 legacyOrCompatibilityDispatch=0 blockedUnknownFallback=1 specialCaseFallback=2 fallbackTotal=3"
         $typedDispatchGateFeatureOk =
             $typedDispatchGateName -eq "appmodel.typed-dispatch-runtime-gate" -and
             $typedDispatchGateDefaultEnabled -and
@@ -520,16 +520,16 @@ try {
         }
         $phase3ReadinessOk =
             $phase3Readiness.phase3TypedDispatchReadiness -eq "active" -and
-            $phase3Readiness.totalObservedLaunchTargets -eq 10 -and
-            $phase3Readiness.typedDispatchReadyCount -eq 7 -and
+            $phase3Readiness.totalObservedLaunchTargets -eq 11 -and
+            $phase3Readiness.typedDispatchReadyCount -eq 8 -and
             $phase3Readiness.typedDispatchBlockedCount -eq 3 -and
             $phase3Readiness.specialCaseCount -eq 2 -and
             $phase3Readiness.legacyAliasCount -eq 2 -and
-            $phase3Readiness.builtInAppCount -eq 7 -and
+            $phase3Readiness.builtInAppCount -eq 8 -and
             $phase3Readiness.shellActionCount -eq 1 -and
             $phase3Readiness.fileOpenCount -eq 0 -and
             $phase3Readiness.unknownOrUnclassifiedCount -eq 2 -and
-            $phase3Readiness.actualTypedDispatchCount -eq 7 -and
+            $phase3Readiness.actualTypedDispatchCount -eq 8 -and
             $phase3Readiness.actualLegacyFallbackCount -eq 0 -and
             $phase3Readiness.actualBlockedUnknownFallbackCount -eq 1 -and
             $phase3Readiness.actualSpecialCaseFallbackCount -eq 2 -and
@@ -538,7 +538,7 @@ try {
             $phase3BlockedTargets -eq "AppModel,ComputerFiles,TotallyUnknownLaunchThing" -and
             $phase3UnknownTargets -eq "ComputerFiles,TotallyUnknownLaunchThing"
         if ($phase3ReadinessOk) {
-            Add-Check "phase3TypedDispatchReadiness" "PASS" "phase3TypedDispatchReadiness=active totalObservedLaunchTargets=10 typedDispatchReadyCount=7 typedDispatchBlockedCount=3 actualTypedDispatchCount=7 actualLegacyFallbackCount=0 actualBlockedUnknownFallbackCount=1 actualSpecialCaseFallbackCount=2 actualFallbackTotal=3 phase3TypedDispatchBlockedTargets=$phase3BlockedTargets"
+            Add-Check "phase3TypedDispatchReadiness" "PASS" "phase3TypedDispatchReadiness=active totalObservedLaunchTargets=11 typedDispatchReadyCount=8 typedDispatchBlockedCount=3 actualTypedDispatchCount=8 actualLegacyFallbackCount=0 actualBlockedUnknownFallbackCount=1 actualSpecialCaseFallbackCount=2 actualFallbackTotal=3 phase3TypedDispatchBlockedTargets=$phase3BlockedTargets"
         } else {
             Add-Check "phase3TypedDispatchReadiness" "FAIL" "missing or unexpected Phase 3A readiness summary in hosted appmodel output"
         }
@@ -716,7 +716,7 @@ try {
         $qemuCoverageEvidenceConfirmed -and
         $qemuKnownNonFatalDriftsConfirmed -and
         $phase3Readiness.legacyAliasCount -eq 2
-    Add-Check "appmodel.phase3.legacy-labels-preserved" $(if ($phase3LegacyLabelsPreserved) { "PASS" } elseif ($IncludeQemu) { "FAIL" } else { "INFO" }) "QEMU real-branch evidence covers built-ins, Files, Settings, Console, right-column shell actions, Control Panel, and AppModel"
+    Add-Check "appmodel.phase3.legacy-labels-preserved" $(if ($phase3LegacyLabelsPreserved) { "PASS" } elseif ($IncludeQemu) { "FAIL" } else { "INFO" }) "QEMU real-branch evidence covers built-ins, TaskManager, Files, Settings, Console, right-column shell actions, Control Panel, and AppModel"
 
     $phase3NoUnexpectedRuntimeRegression =
         $hostedLaunchShadowSafe -and
@@ -828,6 +828,16 @@ try {
         $displayOptionsRecord.actualDispatch -eq "DisplayOptions"
     Add-Check "appmodel.v1_2.additionalTypedTarget" $(if ($displayOptionsTypedDispatchReady) { "PASS" } else { "FAIL" }) "appmodel.v1_2.additionalTypedTarget=DisplayOptions DisplayOptionsTypedDispatchReady=$($displayOptionsTypedDispatchReady.ToString().ToLowerInvariant()) DisplayOptionsBehaviorPreserved=$($displayOptionsTypedDispatchReady.ToString().ToLowerInvariant()) target=DisplayOptions classification=BuiltInApp dispatchDecision=typed-dispatch appId=$($displayOptionsRecord.appId) actualDispatch=DisplayOptions expected=true safe=true reason=normal-built-in-app"
 
+    $taskManagerRecord = $phase3Readiness.records | Where-Object { $_.target -eq "TaskManager" } | Select-Object -First 1
+    $taskManagerTypedDispatchReady =
+        $null -ne $taskManagerRecord -and
+        $taskManagerRecord.readiness -eq "ready" -and
+        $taskManagerRecord.dispatchUsage -eq "typed-dispatch" -and
+        $taskManagerRecord.resolvedType -eq "BuiltInApp" -and
+        $taskManagerRecord.appId -eq "gxos.builtin.taskmanager" -and
+        $taskManagerRecord.actualDispatch -eq "TaskManager"
+    Add-Check "appmodel.v1_3.additionalTypedTarget" $(if ($taskManagerTypedDispatchReady) { "PASS" } else { "FAIL" }) "appmodel.v1_3.additionalTypedTarget=TaskManager TaskManagerTypedDispatchReady=$($taskManagerTypedDispatchReady.ToString().ToLowerInvariant()) TaskManagerBehaviorPreserved=$($taskManagerTypedDispatchReady.ToString().ToLowerInvariant()) target=TaskManager classification=BuiltInApp dispatchDecision=typed-dispatch appId=$($taskManagerRecord.appId) actualDispatch=TaskManager expected=true safe=true reason=normal-built-in-app"
+
     $reportLines = @(
         "[AppModelPhase2Status]",
         "mode=typed-ready-dispatch-validation",
@@ -932,6 +942,10 @@ try {
         "DisplayOptionsTypedDispatchReady=$($displayOptionsTypedDispatchReady.ToString().ToLowerInvariant())",
         "DisplayOptionsBehaviorPreserved=$($displayOptionsTypedDispatchReady.ToString().ToLowerInvariant())",
         "appmodel.v1_2.displayOptionsStatus=target=DisplayOptions classification=BuiltInApp dispatchDecision=typed-dispatch appId=$($displayOptionsRecord.appId) actualDispatch=DisplayOptions expected=true safe=true reason=normal-built-in-app",
+        "appmodel.v1_3.additionalTypedTarget=TaskManager",
+        "TaskManagerTypedDispatchReady=$($taskManagerTypedDispatchReady.ToString().ToLowerInvariant())",
+        "TaskManagerBehaviorPreserved=$($taskManagerTypedDispatchReady.ToString().ToLowerInvariant())",
+        "appmodel.v1_3.taskManagerStatus=target=TaskManager classification=BuiltInApp dispatchDecision=typed-dispatch appId=$($taskManagerRecord.appId) actualDispatch=TaskManager expected=true safe=true reason=normal-built-in-app",
         "appmodel.v1.coveredLaunchSurfaces=$appmodelV1CoveredLaunchSurfaces",
         "appmodel.v1.typedReadyTargets=$appmodelV1TypedReadyTargets",
         "appmodel.v1.legacyFallbackTargets=$appmodelV1LegacyFallbackTargets",

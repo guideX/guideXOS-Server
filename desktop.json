@@ -11,8 +11,8 @@
   "showDesktopThisSystem": true,
   "showDesktopFileManager": true,
   "showDesktopSystemSettings": false,
+  "smallLiveDesktopFolderIcons": true,
   "windows": [
-    {"id": 1000, "title": "Task Manager", "x": 300, "y": 300, "w": 760, "h": 520, "minimized": false, "maximized": false, "z": 0, "focused": true, "snap": 0}
   ],
   "iconPositions": [
     {"name": "shortcut:app:guidexos.navigator", "x": 272, "y": 20}

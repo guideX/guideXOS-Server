@@ -667,6 +667,7 @@ namespace gxos {
 
         static std::string canonicalAppName(const std::string& name) {
             if (name == "Files" || name == "ComputerFiles") return "FileExplorer";
+            if (name == "Image Viewer") return "ImageViewer";
             if (name == "Shutdown") return "ShutdownDialog";
             return name;
         }
@@ -1352,6 +1353,7 @@ namespace gxos {
         static const char* const kLaunchTargetComparisonLabels[] = {
             "Notepad",
             "Calculator",
+            "TaskManager",
             "DisplayOptions",
             "gxos.builtin.notepad",
             "FileExplorer",
@@ -1424,7 +1426,7 @@ namespace gxos {
                 target.type = apps::LaunchTargetType::LegacyAlias;
                 target.legacyAlias = "ImgViewer";
                 target.appId = "gxos.builtin.imageviewer";
-                target.displayName = "ImageViewer";
+                target.displayName = "Image Viewer";
                 target.dispatchLaunchName = "ImgViewer";
                 target.hostedAvailable = true;
                 target.bareMetalAvailable = false;
@@ -3089,9 +3091,9 @@ namespace gxos {
             }
             const bool forcedOffSupported = true;
             const bool forcedOffSafe =
-                gateMatrix.total == 10 &&
-                gateMatrix.typedDispatch == (runtimeGateEnabled ? 7 : 0) &&
-                gateMatrix.legacyOrCompatibilityDispatch == (runtimeGateEnabled ? 0 : 7) &&
+                gateMatrix.total == 11 &&
+                gateMatrix.typedDispatch == (runtimeGateEnabled ? 8 : 0) &&
+                gateMatrix.legacyOrCompatibilityDispatch == (runtimeGateEnabled ? 0 : 8) &&
                 gateMatrix.blockedUnknownFallback == 1 &&
                 gateMatrix.specialCaseFallback == 2;
             const bool gateRestored = apps::TypedDispatchRuntimeEnabled() == gateRestoreEnabled;
@@ -3582,6 +3584,9 @@ namespace gxos {
             }
             if ((lower.size() >= 4 && (lower.substr(lower.size() - 4) == ".png" || lower.substr(lower.size() - 4) == ".bmp" || lower.substr(lower.size() - 4) == ".jpg" || lower.substr(lower.size() - 4) == ".gif")) ||
                 (lower.size() >= 5 && lower.substr(lower.size() - 5) == ".jpeg")) {
+                // TODO: once AppModel launch arguments become first-class, route this
+                // through typed app launch with a file-path parameter instead of the
+                // direct helper call.
                 apps::ImageViewer::Launch(path);
                 return true;
             }

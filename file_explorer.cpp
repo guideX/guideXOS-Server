@@ -1,13 +1,14 @@
 #include "file_explorer.h"
 #include "file_icon_provider.h"
 #include "icon_theme_manager.h"
+#include "desktop_service.h"
 #include "logger.h"
 #include "compositor.h"
-#include "notepad.h"
 #include "kernel/core/include/kernel/system_font.h"
 #include <sstream>
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <ctime>
 #include <filesystem>
 #include <fstream>
@@ -52,6 +53,10 @@ namespace gxos { namespace apps {
         constexpr int kMainModifiedTextX = kLeftPaneW + 570;
         constexpr int kContextMenuW = 170;
         constexpr int kContextMenuItemH = 24;
+        constexpr uint64_t kDoubleClickThresholdMs = 450;
+
+        uint64_t s_lastEntryClickTick = 0;
+        int s_lastEntryClickRow = -1;
 
         enum class ContextMenuAction {
             Open = 0,
@@ -431,6 +436,8 @@ namespace gxos { namespace apps {
         s_contextMenuOpen = false;
         s_contextMenuHover = -1;
         s_contextMenuActions.clear();
+        s_lastEntryClickTick = 0;
+        s_lastEntryClickRow = -1;
 
         refresh();
 
@@ -548,6 +555,8 @@ namespace gxos { namespace apps {
         s_currentPath = normalized;
         s_selectedIndex = 0;
         s_scrollOffset = 0;
+        s_lastEntryClickRow = -1;
+        s_lastEntryClickTick = 0;
         refresh();
         updateDisplay();
         Logger::write(LogLevel::Info, std::string("FileExplorer: Navigated to ") + s_currentPath);
@@ -587,6 +596,8 @@ namespace gxos { namespace apps {
 
         if (s_selectedIndex >= static_cast<int>(s_entries.size())) s_selectedIndex = static_cast<int>(s_entries.size()) - 1;
         if (s_selectedIndex < 0) s_selectedIndex = 0;
+        s_lastEntryClickRow = -1;
+        s_lastEntryClickTick = 0;
         s_loading = false;
         s_status = s_hasMoreEntries ? "Showing first page; more items available" : "Ready";
     }
@@ -651,14 +662,11 @@ namespace gxos { namespace apps {
             return;
         }
 
-        std::string name = entry.name;
-        std::transform(name.begin(), name.end(), name.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-        if (name.size() >= 4 && name.substr(name.size() - 4) == ".txt") {
-            Notepad::LaunchWithFile(entry.fullPath);
-        } else {
-            s_status = "No file association registered for " + entry.name;
-            updateDisplay();
-        }
+        std::string error;
+        if (DesktopService::OpenFilesystemEntry(entry.fullPath, false, error)) return;
+
+        s_status = error.empty() ? ("No file association registered for " + entry.name) : error;
+        updateDisplay();
     }
 
     void FileExplorer::deleteSelected() {
@@ -866,11 +874,26 @@ namespace gxos { namespace apps {
         }
 
         if (button == 1 && action == "down") {
-            if (handleNavigationPaneClick(x, y)) return;
+            if (handleNavigationPaneClick(x, y)) {
+                s_lastEntryClickRow = -1;
+                s_lastEntryClickTick = 0;
+                return;
+            }
             int rowIndex = hitTestEntryRow(x, y);
-            if (rowIndex >= 0 && rowIndex != s_selectedIndex) {
-                s_selectedIndex = rowIndex;
-                updateDisplay();
+            if (rowIndex >= 0) {
+                uint64_t now = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::steady_clock::now().time_since_epoch()).count());
+                if (rowIndex == s_lastEntryClickRow && (now - s_lastEntryClickTick) < kDoubleClickThresholdMs) {
+                    s_selectedIndex = rowIndex;
+                    s_lastEntryClickRow = -1;
+                    s_lastEntryClickTick = 0;
+                    openSelected();
+                } else {
+                    s_selectedIndex = rowIndex;
+                    updateDisplay();
+                    s_lastEntryClickRow = rowIndex;
+                    s_lastEntryClickTick = now;
+                }
             }
         }
     }

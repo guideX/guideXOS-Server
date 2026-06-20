@@ -51,7 +51,7 @@ static const BuiltInAppMetadata kBuiltInAppMetadata[] = {
 	{ "gxos.builtin.trash", "Trash", "Trash", "Trash", nullptr, "trash.empty", "System", "Built-in guideXOS Trash placeholder.", BuiltInAvailabilityHosted | BuiltInAvailabilityBareMetal, 0xFF9098A4u, 0, 0, false },
 	{ "gxos.builtin.taskmanager", "TaskManager", "TaskManager", "TaskManager", nullptr, "app.taskmanager", "System", "Built-in guideXOS task manager.", BuiltInAvailabilityHosted | BuiltInAvailabilityBareMetal, 0xFFB44646u, 0, 0, false },
 	{ "gxos.builtin.paint", "Paint", "Paint", nullptr, nullptr, "app.paint", "Graphics", "Built-in guideXOS paint application.", BuiltInAvailabilityHosted, 0, 0, 0, false },
-	{ "gxos.builtin.imageviewer", "ImageViewer", "ImageViewer", nullptr, nullptr, "app.generic", "Graphics", "Built-in guideXOS image viewer.", BuiltInAvailabilityHosted, 0, 0, 0, false },
+	{ "gxos.builtin.imageviewer", "Image Viewer", "ImageViewer", nullptr, nullptr, "app.generic", "Graphics", "Built-in guideXOS image viewer.", BuiltInAvailabilityHosted, 0, 820, 620, true },
 	{ "gxos.builtin.onscreenkeyboard", "OnScreenKeyboard", "OnScreenKeyboard", nullptr, nullptr, "app.generic", "Accessibility", "Built-in guideXOS on-screen keyboard.", BuiltInAvailabilityHosted, 0, 0, 0, false },
 	{ "gxos.builtin.shutdowndialog", "ShutdownDialog", "ShutdownDialog", nullptr, nullptr, "app.generic", "System", "Built-in guideXOS shutdown dialog.", BuiltInAvailabilityHosted, 0, 0, 0, false },
 	{ "gxos.builtin.diskmanager", "DiskManager", "DiskManager", "DiskManager", nullptr, "app.diskmanager", "System", "Built-in guideXOS disk manager.", BuiltInAvailabilityHosted | BuiltInAvailabilityBareMetal, 0xFF7050C0u, 0, 0, false },

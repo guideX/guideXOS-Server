@@ -836,6 +836,7 @@ namespace gxos {
             if (label == "Notepad" || label == "Console") return RGB(120, 180, 80);
             if (label == "Trash") return RGB(150, 150, 160);
             if (label == "Paint") return RGB(200, 120, 60);
+            if (label == "ImageViewer" || label == "Image Viewer") return RGB(200, 120, 60);
             if (label == "guideXOS Navigator") return RGB(70, 120, 190);
             if (label == "TaskManager" || label == "Task Manager") return RGB(180, 70, 70);
             if (label == "DiskManager" || label == "ControlPanel" || label == "Control Panel" || label == "Settings") return RGB(140, 90, 180);
@@ -1992,7 +1993,7 @@ namespace gxos {
                 if (!drawDesktopThemedIcon(dc, iconR, it)) {
                     if (!it.iconName.empty()) Logger::write(LogLevel::Warn, "Desktop icon fallback used for " + it.label + " logical=" + it.iconName);
                     COLORREF iconColor = startMenuFallbackIconColor(lbl);
-                    if (lbl == "ImageViewer") iconColor = RGB(200, 120, 60);
+                    if (lbl == "ImageViewer" || lbl == "Image Viewer") iconColor = RGB(200, 120, 60);
                     else if (lbl == "System Settings") iconColor = RGB(140, 90, 180);
                     else if (lbl == "Files" || lbl == "ComputerFiles" || lbl == "File Manager" || lbl == "This System" || it.isDirectory) iconColor = RGB(200, 180, 60);
                     else if (it.pinned && iconColor == RGB(90, 100, 120)) iconColor = RGB(90, 140, 220);
