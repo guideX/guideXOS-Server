@@ -322,6 +322,13 @@ There does not appear to be a dedicated desktop live-directory smoke yet. The ex
   - the smoke proves navigation and shell sync, not filesystem write support,
   - current live folder persistence remains intentionally in-memory only.
 
+## Phase 2H Note
+
+- We inspected the boot path and confirmed the runtime smoke environment does not expose a writable mounted filesystem at the point where `/Desktop` would need to be created. The kernel auto-mount attempts fail, so the native path remains unavailable in this environment.
+- `scripts/smoke-live-directory-desktop-runtime.ps1` now logs whether the smoke ran in `native-desktop-live-smoke` mode or `alias-fallback` mode, and the status script reports that distinction explicitly.
+- The smoke still prefers the native path first, but it falls back to the alias route when `/Desktop` cannot be provisioned. The alias remains the documented blocker path for this boot layout.
+- The runtime evidence now records the blocker directly so future runs can tell whether the environment is still alias-only or has gained a writable root volume.
+
 ## Proposed Phased Plan
 
 ### Phase 0

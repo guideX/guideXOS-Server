@@ -93,6 +93,9 @@ function Test-SerialLogContains {
 function Write-EvidenceFile {
     param(
         [string]$Result,
+        [string]$PathMode,
+        [string]$TargetPath,
+        [bool]$NativePathAvailable,
         [bool]$StartMarker,
         [bool]$FolderActivation,
         [bool]$CompactLayout,
@@ -106,12 +109,15 @@ function Write-EvidenceFile {
     $head = (git -C $Root rev-parse HEAD).Trim()
     $lines = @(
         "[LiveDirectoryDesktopRuntimeSmoke]",
-        "evidenceVersion=1",
+        "evidenceVersion=2",
         "repo=$Root",
         "head=$head",
         "timestampUnixMs=$([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())",
         "timestampUtc=$((Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ'))",
         "result=$Result",
+        "pathMode=$PathMode",
+        "targetPath=$TargetPath",
+        "nativePathAvailable=$(if ($NativePathAvailable) { 'PASS' } else { 'FAIL' })",
         "startPathMarker=$(if ($StartMarker) { 'PASS' } else { 'FAIL' })",
         "folderActivation=$(if ($FolderActivation) { 'PASS' } else { 'FAIL' })",
         "compactLayout=$(if ($CompactLayout) { 'PASS' } else { 'FAIL' })",
@@ -177,18 +183,33 @@ try {
 $output = if (Test-Path $serialLog) { Get-Content $serialLog -Raw } else { "" }
 Write-Host $output
 
+$runtimePathMode = $null
+$runtimeTargetPath = $null
+$runtimeNativePathAvailable = $null
+if ($output -match '\[LIVE-DIRECTORY-RUNTIME-SMOKE\] startPath=/Desktop home=/Desktop pathMode=([^\s]+) target=([^\s]+)') {
+    $runtimePathMode = $Matches[1].Trim()
+    $runtimeTargetPath = $Matches[2].Trim()
+}
+if ($output -match '\[LIVE-DIRECTORY-RUNTIME-SMOKE\] LIVE_DESKTOP_NATIVE_HOME verify=/Desktop result=(PASS|FAIL)') {
+    $runtimeNativePathAvailable = $Matches[1].Trim()
+}
+
 $startMarker = $output.Contains("[LIVE-DIRECTORY-RUNTIME-SMOKE] startPath=/Desktop home=/Desktop")
-$folderActivation = $output -match '\[LIVE-DIRECTORY-RUNTIME-SMOKE\] LIVE_DESKTOP_NAV from=/Desktop to=/system/wall source=folder-activation result=PASS'
-$compactLayout = $output -match '\[LIVE-DIRECTORY-RUNTIME-SMOKE\] LIVE_DESKTOP_LAYOUT compact=1 path=/system/wall'
+$folderActivation = $runtimeTargetPath -and $output -match ('\[LIVE-DIRECTORY-RUNTIME-SMOKE\] LIVE_DESKTOP_NAV from=/Desktop to=' + [regex]::Escape($runtimeTargetPath) + ' source=folder-activation result=PASS')
+$compactLayout = $runtimeTargetPath -and $output -match ('\[LIVE-DIRECTORY-RUNTIME-SMOKE\] LIVE_DESKTOP_LAYOUT compact=1 path=' + [regex]::Escape($runtimeTargetPath))
 $backNavigation = $output -match '\[LIVE-DIRECTORY-RUNTIME-SMOKE\] LIVE_DESKTOP_NAV_BACK to=/Desktop result=PASS'
-$shellSync = $output -match '\[LIVE-DIRECTORY-RUNTIME-SMOKE\] LIVE_DESKTOP_SHELL_CD_SYNC cwd=/system/wall result=PASS'
+$shellSync = $runtimeTargetPath -and $output -match ('\[LIVE-DIRECTORY-RUNTIME-SMOKE\] LIVE_DESKTOP_SHELL_CD_SYNC cwd=' + [regex]::Escape($runtimeTargetPath) + ' result=PASS')
 $goHome = $output -match '\[LIVE-DIRECTORY-RUNTIME-SMOKE\] LIVE_DESKTOP_NAV_HOME to=/Desktop result=PASS'
-$cleanup = $output -match '\[LIVE-DIRECTORY-RUNTIME-SMOKE\] LIVE_DESKTOP_CLEANUP path=/system/wall result=PASS'
+$cleanup = $runtimeTargetPath -and $output -match ('\[LIVE-DIRECTORY-RUNTIME-SMOKE\] LIVE_DESKTOP_CLEANUP path=' + [regex]::Escape($runtimeTargetPath) + ' result=PASS')
 $resultPass = $output.Contains("[LIVE-DIRECTORY-RUNTIME-SMOKE] result=PASS")
+$nativePathAvailable = $runtimeNativePathAvailable -eq "PASS"
 $overallPass = $startMarker -and $folderActivation -and $compactLayout -and $backNavigation -and $shellSync -and $goHome -and $cleanup -and $resultPass
 
 Write-EvidenceFile `
     -Result $(if ($overallPass) { "PASS" } else { "FAIL" }) `
+    -PathMode $(if ($null -ne $runtimePathMode) { $runtimePathMode } else { "unknown" }) `
+    -TargetPath $(if ($null -ne $runtimeTargetPath) { $runtimeTargetPath } else { "" }) `
+    -NativePathAvailable $nativePathAvailable `
     -StartMarker $startMarker `
     -FolderActivation $folderActivation `
     -CompactLayout $compactLayout `

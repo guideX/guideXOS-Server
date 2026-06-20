@@ -107,6 +107,9 @@ $runtimeEvidencePath = Join-Path $Root "logs\live-directory-desktop-runtime.evid
 $runtimeEvidenceText = if (Test-Path -LiteralPath $runtimeEvidencePath) { Get-Content -LiteralPath $runtimeEvidencePath -Raw } else { $null }
 $runtimeEvidenceHead = $null
 $runtimeEvidenceResult = $null
+$runtimeEvidencePathMode = $null
+$runtimeEvidenceTargetPath = $null
+$runtimeEvidenceNativePathAvailable = $null
 $runtimeEvidenceCompact = $null
 $runtimeEvidenceBack = $null
 $runtimeEvidenceShell = $null
@@ -115,6 +118,9 @@ $runtimeEvidenceCleanup = $null
 if ($runtimeEvidenceText) {
     if ($runtimeEvidenceText -match '(?m)^head=(.+)$') { $runtimeEvidenceHead = $Matches[1].Trim() }
     if ($runtimeEvidenceText -match '(?m)^result=(.+)$') { $runtimeEvidenceResult = $Matches[1].Trim() }
+    if ($runtimeEvidenceText -match '(?m)^pathMode=(.+)$') { $runtimeEvidencePathMode = $Matches[1].Trim() }
+    if ($runtimeEvidenceText -match '(?m)^targetPath=(.+)$') { $runtimeEvidenceTargetPath = $Matches[1].Trim() }
+    if ($runtimeEvidenceText -match '(?m)^nativePathAvailable=(.+)$') { $runtimeEvidenceNativePathAvailable = $Matches[1].Trim() }
     if ($runtimeEvidenceText -match '(?m)^compactLayout=(.+)$') { $runtimeEvidenceCompact = $Matches[1].Trim() }
     if ($runtimeEvidenceText -match '(?m)^backNavigation=(.+)$') { $runtimeEvidenceBack = $Matches[1].Trim() }
     if ($runtimeEvidenceText -match '(?m)^shellCdSync=(.+)$') { $runtimeEvidenceShell = $Matches[1].Trim() }
@@ -132,6 +138,8 @@ if ($runtimeEvidenceText) {
     $runtimeEvidenceFresh = (
         $runtimeEvidenceHead -eq $currentHead -and
         $runtimeEvidenceResult -eq "PASS" -and
+        $runtimeEvidencePathMode -ne $null -and
+        $runtimeEvidenceTargetPath -ne $null -and
         $runtimeEvidenceCompact -eq "PASS" -and
         $runtimeEvidenceBack -eq "PASS" -and
         $runtimeEvidenceShell -eq "PASS" -and
@@ -250,3 +258,10 @@ Write-Host "  bare-metal-nonroot-smaller-icons=$(if ($null -ne $kernelBareMetalC
 Write-Host "  bare-metal-nonroot-icon-config=$(if ($null -eq $kernelBareMetalDesktopConfigLoad) { 'default-on-no-host-config' } else { 'host-config-loaded' })"
 Write-Host "  bare-metal-parity=$(if ($bareMetalParityPresent) { if ($runtimeEvidenceFresh) { 'feature-present-runtime-evidence-partial' } else { 'feature-present-evidence-partial' } } else { 'missing' })"
 Write-Host "  live-directory-desktop-parity=$(if ($hostedParityPresent -and $bareMetalParityPresent) { if ($runtimeEvidenceFresh) { 'hosted-present-baremetal-present-runtime-evidence' } else { 'hosted-present-baremetal-present-source-only' } } else { 'missing' })"
+if ($runtimeEvidenceFresh) {
+    Write-Host "  live-directory-desktop-runtime-path=$(if ($runtimeEvidencePathMode -eq 'native-desktop-live-smoke') { 'native-desktop-live-smoke' } elseif ($runtimeEvidencePathMode -eq 'alias-fallback') { 'alias-fallback' } else { $runtimeEvidencePathMode })"
+    Write-Host "  live-directory-desktop-native-path=$(if ($runtimeEvidenceNativePathAvailable -eq 'PASS') { 'present' } elseif ($runtimeEvidencePathMode -eq 'alias-fallback') { 'blocked' } else { 'missing' })"
+} else {
+    Write-Host "  live-directory-desktop-runtime-path=deferred"
+    Write-Host "  live-directory-desktop-native-path=deferred"
+}

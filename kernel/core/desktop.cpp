@@ -1931,33 +1931,6 @@ static int hit_test_app_model_dialog(int32_t mx, int32_t my)
 
 static bool text_ends_with(const char* value, const char* suffix);
 
-static bool ensure_desktop_folder()
-{
-    serial::puts("[desktop] Desktop folder path selected: ");
-    serial::puts(bare_metal_desktop_current_directory_path());
-    serial::puts("\n");
-
-    vfs::FileInfo info{};
-    const char* desktopPath = bare_metal_desktop_current_directory_path();
-    if (vfs::stat(desktopPath, &info) == vfs::VFS_OK) {
-        if (info.type == vfs::FILE_TYPE_DIRECTORY) {
-            serial::puts("[desktop] Desktop folder already exists\n");
-            return true;
-        }
-        serial::puts("[desktop] Desktop folder path exists but is not a directory\n");
-        return false;
-    }
-
-    vfs::Status status = vfs::mkdir(desktopPath);
-    if (status == vfs::VFS_OK || status == vfs::VFS_ERR_EXISTS) {
-        serial::puts("[desktop] Desktop folder created\n");
-        return true;
-    }
-
-    serial::puts("[desktop] Desktop folder creation failed; continuing with system icons\n");
-    return false;
-}
-
 static bool desktop_entry_is_known_image(const char* name)
 {
     return text_ends_with(name, ".png") || text_ends_with(name, ".bmp") ||
@@ -2108,8 +2081,6 @@ static void enumerate_desktop_folder_items()
         s_desktopIcons[iconIdx].isDirectory = false;
         s_desktopIcons[iconIdx].removable = true;
     }
-
-    if (!ensure_desktop_folder()) return;
 
     serial::puts("[desktop] Desktop folder enumeration started\n");
     const char* desktopPath = bare_metal_desktop_current_directory_path();
@@ -2985,8 +2956,15 @@ void run_live_directory_runtime_smoke()
         desktop_str_copy(savedHistoryPaths[i], s_bareMetalDesktopHistoryPaths[i], (int)sizeof(savedHistoryPaths[i]));
     }
 
-    const char* smokePath = "/system/wall";
-    bool desktopAliasOk = false;
+    const char* nativeDesktopPath = "/Desktop";
+    const char* nativeSmokePath = "/Desktop/LiveSmoke";
+    const char* aliasSmokePath = "/system/wall";
+    const char* smokePath = nativeSmokePath;
+    const char* pathMode = "native-desktop-live-smoke";
+
+    bool nativeDesktopOk = false;
+    bool nativeSmokeOk = false;
+    bool pathSetupOk = false;
     bool targetOk = false;
     bool folderNavOk = false;
     bool compactLayoutOk = false;
@@ -2994,28 +2972,62 @@ void run_live_directory_runtime_smoke()
     bool shellSyncOk = false;
     bool homeOk = false;
     bool cleanupOk = false;
+    vfs::Status nativeCreateStatus = vfs::VFS_ERR_INVALID;
+    vfs::FileInfo nativeDesktopInfo{};
     vfs::FileInfo smokeInfo{};
+
+    nativeDesktopOk = vfs::stat(nativeDesktopPath, &nativeDesktopInfo) == vfs::VFS_OK && nativeDesktopInfo.type == vfs::FILE_TYPE_DIRECTORY;
+    serial::puts("[LIVE-DIRECTORY-RUNTIME-SMOKE] LIVE_DESKTOP_NATIVE_HOME verify=");
+    serial::puts(nativeDesktopPath);
+    serial::puts(" result=");
+    serial::puts(nativeDesktopOk ? "PASS" : "FAIL");
+    serial::puts("\n");
+
+    if (nativeDesktopOk) {
+        nativeCreateStatus = vfs::mkdir(nativeSmokePath);
+        nativeSmokeOk = (nativeCreateStatus == vfs::VFS_OK || nativeCreateStatus == vfs::VFS_ERR_EXISTS) &&
+            vfs::stat(nativeSmokePath, &smokeInfo) == vfs::VFS_OK && smokeInfo.type == vfs::FILE_TYPE_DIRECTORY;
+        serial::puts("[LIVE-DIRECTORY-RUNTIME-SMOKE] LIVE_DESKTOP_NATIVE_PROOF path=");
+        serial::puts(nativeSmokePath);
+        serial::puts(" mkdir=");
+        serial::puts((nativeCreateStatus == vfs::VFS_OK || nativeCreateStatus == vfs::VFS_ERR_EXISTS) ? "PASS" : "FAIL");
+        serial::puts(" result=");
+        serial::puts(nativeSmokeOk ? "PASS" : "FAIL");
+        serial::puts("\n");
+    }
+
+    if (nativeSmokeOk) {
+        smokePath = nativeSmokePath;
+        pathMode = "native-desktop-live-smoke";
+        pathSetupOk = true;
+    } else {
+        smokePath = aliasSmokePath;
+        pathMode = "alias-fallback";
+        if (!vfs::get_mount("/Desktop")) {
+            pathSetupOk = vfs::mount_alias("/Desktop", aliasSmokePath) != 0xFF;
+            serial::puts("[LIVE-DIRECTORY-RUNTIME-SMOKE] LIVE_DESKTOP_HOME_ALIAS mount=/Desktop source=");
+            serial::puts(aliasSmokePath);
+            serial::puts(" result=");
+            serial::puts(pathSetupOk ? "PASS" : "FAIL");
+            serial::puts("\n");
+        } else {
+            pathSetupOk = true;
+            serial::puts("[LIVE-DIRECTORY-RUNTIME-SMOKE] LIVE_DESKTOP_HOME_ALIAS mount=/Desktop source=");
+            serial::puts(aliasSmokePath);
+            serial::puts(" result=PASS existing\n");
+        }
+    }
 
     serial::puts("[LIVE-DIRECTORY-RUNTIME-SMOKE] start\n");
     serial::puts("[LIVE-DIRECTORY-RUNTIME-SMOKE] startPath=");
     serial::puts(savedCurrentPath);
     serial::puts(" home=");
     serial::puts(s_bareMetalDesktopHomePath);
+    serial::puts(" pathMode=");
+    serial::puts(pathMode);
+    serial::puts(" target=");
+    serial::puts(smokePath);
     serial::puts("\n");
-
-    if (!vfs::get_mount("/Desktop")) {
-        desktopAliasOk = vfs::mount_alias("/Desktop", smokePath) != 0xFF;
-        serial::puts("[LIVE-DIRECTORY-RUNTIME-SMOKE] LIVE_DESKTOP_HOME_ALIAS mount=/Desktop source=");
-        serial::puts(smokePath);
-        serial::puts(" result=");
-        serial::puts(desktopAliasOk ? "PASS" : "FAIL");
-        serial::puts("\n");
-    } else {
-        desktopAliasOk = true;
-        serial::puts("[LIVE-DIRECTORY-RUNTIME-SMOKE] LIVE_DESKTOP_HOME_ALIAS mount=/Desktop source=");
-        serial::puts(smokePath);
-        serial::puts(" result=PASS existing\n");
-    }
 
     targetOk = vfs::stat(smokePath, &smokeInfo) == vfs::VFS_OK && smokeInfo.type == vfs::FILE_TYPE_DIRECTORY;
     serial::puts("[LIVE-DIRECTORY-RUNTIME-SMOKE] LIVE_DESKTOP_TARGET verify=");
@@ -3073,14 +3085,18 @@ void run_live_directory_runtime_smoke()
     s_lastClickTime = 0;
     bare_metal_desktop_request_folder_refresh();
 
-    cleanupOk = targetOk;
+    if (nativeSmokeOk) {
+        cleanupOk = vfs::rmdir(nativeSmokePath) == vfs::VFS_OK;
+    } else {
+        cleanupOk = targetOk;
+    }
     serial::puts("[LIVE-DIRECTORY-RUNTIME-SMOKE] LIVE_DESKTOP_CLEANUP path=");
     serial::puts(smokePath);
     serial::puts(" result=");
     serial::puts(cleanupOk ? "PASS" : "FAIL");
     serial::puts("\n");
 
-    const bool overallPass = desktopAliasOk && targetOk && folderNavOk && compactLayoutOk && backOk && shellSyncOk && homeOk && cleanupOk;
+    const bool overallPass = pathSetupOk && targetOk && folderNavOk && compactLayoutOk && backOk && shellSyncOk && homeOk && cleanupOk;
     serial::puts("[LIVE-DIRECTORY-RUNTIME-SMOKE] result=");
     serial::puts(overallPass ? "PASS" : "FAIL");
     serial::puts("\n");
