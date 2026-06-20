@@ -183,6 +183,27 @@ There does not appear to be a dedicated desktop live-directory smoke yet. The ex
   - App launches and file-open behavior still use the existing paths for non-folder targets.
   - Existing desktop shortcut and built-in/system icon behavior is unchanged.
 
+## Phase 2C Note
+
+- Bare-metal now has live desktop navigation affordances for `Back` and `Go to Desktop` when the current folder is not `/Desktop`.
+- History is kept only in memory in `kernel/core/desktop.cpp`:
+  - navigating into a folder pushes the previous current folder when the target actually changes,
+  - `Back` pops the most recent folder and returns there,
+  - `Go to Desktop` returns to `/Desktop`,
+  - the live folder path and history are not persisted across restart.
+- Source anchors changed:
+  - `kernel/core/desktop.cpp` now carries the bare-metal navigation history helpers, the `DesktopBack` / `DesktopHome` system objects, and the navigation-only activation branches.
+  - `scripts/smoke-live-directory-desktop-status.ps1` now reports `bare-metal-back-go-desktop=present`.
+  - `scripts/smoke-appmodel-launchshadow.ps1` now treats bare-metal folder activation as live desktop navigation evidence instead of the stale `Files` launch assumption for the desktop folder cases.
+- Rendering behavior:
+  - `Back` and `Go to Desktop` render only when the current bare-metal desktop folder is off-root.
+  - They use the existing desktop icon rendering path, with no new image assets.
+  - They are excluded from desktop slot / shortcut persistence by not participating in the normal desktop icon layout key path.
+- Still deferred:
+  - bare-metal shell `cd` sync.
+  - bare-metal non-root smaller icons.
+  - persistence of the current live folder, which remains intentionally undesired.
+
 ## Proposed Phased Plan
 
 ### Phase 0

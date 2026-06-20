@@ -95,7 +95,7 @@ Emit-Check "bare-metal desktop directory scaffold" "present" $bareMetalDesktopSt
 Emit-Check "bare-metal desktop home check" "present" $bareMetalDesktopHomeCheck
 Emit-Check "bare-metal desktop refresh hook" "present" $bareMetalDesktopRefresh
 Emit-Check "bare-metal desktop navigation helpers" "present" $bareMetalDesktopNavigation
-Emit-Check "bare-metal desktop back/home helpers" "missing" $bareMetalDesktopBackHome
+Emit-Check "bare-metal desktop back/home helpers" "present" $bareMetalDesktopBackHome
 Emit-Check "bare-metal shell desktop sync hook" "missing" $bareMetalShellDesktopSync
 Emit-Check "File Explorer Back navigation" "present" $fileExplorerBack
 Emit-Check "File Explorer Go Home navigation" "present" $fileExplorerGoHome

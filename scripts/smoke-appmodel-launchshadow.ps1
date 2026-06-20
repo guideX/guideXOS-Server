@@ -459,20 +459,8 @@ $checks = @(
     "adapterLegacyDispatch=Files",
     "comparison=match",
     "nonFatal=true shadowOnly=true",
-    "source=RealBranchDesktopShortcutFolder",
-    "handler=Files",
-    "path=/",
-    "resolvedType=FileOpen",
-    "adapterLegacyDispatch=Files",
-    "comparison=match",
-    "nonFatal=true shadowOnly=true",
-    "source=RealBranchDesktopFilesystemFolder",
-    "handler=Files",
-    "path=/",
-    "resolvedType=FileOpen",
-    "adapterLegacyDispatch=Files",
-    "comparison=match",
-    "nonFatal=true shadowOnly=true",
+    "[LaunchShadowBareMetalDesktopNavigation] source=RealBranchDesktopShortcutFolder target=/ current=",
+    "[LaunchShadowBareMetalDesktopNavigation] source=RealBranchDesktopFilesystemFolder target=/ current=",
     "source=RealBranchDesktopSystemObjectRootFolder",
     "handler=Files",
     "path=/",
@@ -967,21 +955,9 @@ $realBranchFileAssociationsConfirmed =
     [regex]::IsMatch($output, 'source=RealBranchDesktopShortcutIniFile handler=Notepad path=/apps/config\.ini resolvedType=FileOpen .* adapterLegacyDispatch=Notepad .* comparison=match .* nonFatal=true shadowOnly=true') -and
     [regex]::IsMatch($output, 'source=RealBranchDesktopFilesystemIniFile handler=Notepad path=/apps/config\.ini resolvedType=FileOpen .* adapterLegacyDispatch=Notepad .* comparison=match .* nonFatal=true shadowOnly=true')
 $realBranchDesktopShortcutFolderConfirmed =
-    $output.Contains("source=RealBranchDesktopShortcutFolder") -and
-    $output.Contains("handler=Files") -and
-    $output.Contains("path=/") -and
-    $output.Contains("resolvedType=FileOpen") -and
-    $output.Contains("adapterLegacyDispatch=Files") -and
-    $output.Contains("comparison=match") -and
-    $output.Contains("nonFatal=true shadowOnly=true")
+    [regex]::IsMatch($output, '\[LaunchShadowBareMetalDesktopNavigation\] source=RealBranchDesktopShortcutFolder target=/ current=.* persistentDesktopStorageWrites=false nonFatal=true')
 $realBranchDesktopFilesystemFolderConfirmed =
-    $output.Contains("source=RealBranchDesktopFilesystemFolder") -and
-    $output.Contains("handler=Files") -and
-    $output.Contains("path=/") -and
-    $output.Contains("resolvedType=FileOpen") -and
-    $output.Contains("adapterLegacyDispatch=Files") -and
-    $output.Contains("comparison=match") -and
-    $output.Contains("nonFatal=true shadowOnly=true")
+    [regex]::IsMatch($output, '\[LaunchShadowBareMetalDesktopNavigation\] source=RealBranchDesktopFilesystemFolder target=/ current=.* persistentDesktopStorageWrites=false nonFatal=true')
 $realBranchDesktopSystemObjectRootFolderConfirmed =
     $output.Contains("source=RealBranchDesktopSystemObjectRootFolder") -and
     $output.Contains("handler=Files") -and

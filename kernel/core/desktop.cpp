@@ -519,6 +519,17 @@ static const char* bare_metal_active_static_app_shadow_source(const char* fallba
     return fallback;
 }
 
+static void log_bare_metal_desktop_navigation_shadow_only_observation(const char* source, const char* targetPath, const char* currentPath)
+{
+    serial::puts("[LaunchShadowBareMetalDesktopNavigation] source=");
+    serial::puts(source ? source : "DesktopFolder");
+    serial::puts(" target=");
+    serial::puts(targetPath ? targetPath : "(null)");
+    serial::puts(" current=");
+    serial::puts(currentPath ? currentPath : "(null)");
+    serial::puts(" persistentDesktopStorageWrites=false nonFatal=true\n");
+}
+
 static bool bare_metal_should_suppress_real_branch_launch()
 {
     return s_launchShadowSuppressRealBranchLaunch;
@@ -864,7 +875,9 @@ enum class DesktopSystemObjectKind : uint8_t {
     Trash,
     ThisSystem,
     FileManager,
-    SystemSettings
+    SystemSettings,
+    DesktopBack,
+    DesktopHome
 };
 
 struct DesktopIcon {
@@ -1002,9 +1015,42 @@ static DesktopIcon s_desktopIcons[] = {
     {"", 0xFF4678BE, false, false, -1, -1, DesktopItemKind::Shortcut, DesktopSystemObjectKind::None, "", false, true},
     {"", 0xFF4678BE, false, false, -1, -1, DesktopItemKind::Shortcut, DesktopSystemObjectKind::None, "", false, true},
     {"", 0xFF4678BE, false, false, -1, -1, DesktopItemKind::Shortcut, DesktopSystemObjectKind::None, "", false, true},
+    {"Back",             0xFF7088B8, false, false, -1, -1, DesktopItemKind::SystemObject, DesktopSystemObjectKind::DesktopBack, "", false, false},
+    {"Go to Desktop",    0xFF4F88D0, false, false, -1, -1, DesktopItemKind::SystemObject, DesktopSystemObjectKind::DesktopHome, "", false, false},
 };
 static const int kDesktopIconCount = sizeof(s_desktopIcons) / sizeof(s_desktopIcons[0]);
 static const int kMaxRecentApps = 5;  // Max recent apps to show
+
+static int bare_metal_desktop_navigation_icon_index(DesktopSystemObjectKind kind)
+{
+    for (int i = kSystemDesktopIconCount; i < kDesktopIconCount; ++i) {
+        if (s_desktopIcons[i].kind == DesktopItemKind::SystemObject && s_desktopIcons[i].systemObject == kind) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+static bool bare_metal_desktop_navigation_icons_visible()
+{
+    return !bare_metal_desktop_is_home_directory();
+}
+
+static void apply_bare_metal_desktop_navigation_icon_visibility()
+{
+    const bool visible = bare_metal_desktop_navigation_icons_visible();
+    const int backIconIdx = bare_metal_desktop_navigation_icon_index(DesktopSystemObjectKind::DesktopBack);
+    const int homeIconIdx = bare_metal_desktop_navigation_icon_index(DesktopSystemObjectKind::DesktopHome);
+
+    if (backIconIdx >= 0) {
+        s_desktopIcons[backIconIdx].pinned = visible;
+        s_desktopIcons[backIconIdx].recent = false;
+    }
+    if (homeIconIdx >= 0) {
+        s_desktopIcons[homeIconIdx].pinned = visible;
+        s_desktopIcons[homeIconIdx].recent = false;
+    }
+}
 
 static void desktop_icon_layout_key(int iconIdx, char* out, int outSize)
 {
@@ -2467,10 +2513,16 @@ static void refresh_desktop_icons()
 {
     enumerate_desktop_folder_items();
     apply_system_desktop_icon_visibility();
+    apply_bare_metal_desktop_navigation_icon_visibility();
     s_visibleIconCount = 0;
     
     // First add all pinned icons
     for (int i = 0; i < kDesktopIconCount && s_visibleIconCount < kDesktopIconCount; i++) {
+        if (s_desktopIcons[i].kind == DesktopItemKind::SystemObject &&
+            (s_desktopIcons[i].systemObject == DesktopSystemObjectKind::DesktopBack ||
+             s_desktopIcons[i].systemObject == DesktopSystemObjectKind::DesktopHome)) {
+            continue;
+        }
         if (s_desktopIcons[i].pinned) {
             s_visibleIconIndices[s_visibleIconCount++] = i;
         }
@@ -2479,12 +2531,39 @@ static void refresh_desktop_icons()
     // Then add recent icons (up to limit)
     int recentCount = 0;
     for (int i = 0; i < kDesktopIconCount && s_visibleIconCount < kDesktopIconCount; i++) {
+        if (s_desktopIcons[i].kind == DesktopItemKind::SystemObject &&
+            (s_desktopIcons[i].systemObject == DesktopSystemObjectKind::DesktopBack ||
+             s_desktopIcons[i].systemObject == DesktopSystemObjectKind::DesktopHome)) {
+            continue;
+        }
         if (s_desktopIcons[i].recent && !s_desktopIcons[i].pinned) {
             if (recentCount < kMaxRecentApps) {
                 s_visibleIconIndices[s_visibleIconCount++] = i;
                 recentCount++;
             }
         }
+    }
+
+    if (bare_metal_desktop_navigation_icons_visible()) {
+        const int backIconIdx = bare_metal_desktop_navigation_icon_index(DesktopSystemObjectKind::DesktopBack);
+        const int homeIconIdx = bare_metal_desktop_navigation_icon_index(DesktopSystemObjectKind::DesktopHome);
+        if (backIconIdx >= 0 && s_desktopIcons[backIconIdx].pinned && s_visibleIconCount < kDesktopIconCount) {
+            s_visibleIconIndices[s_visibleIconCount++] = backIconIdx;
+        }
+        if (homeIconIdx >= 0 && s_desktopIcons[homeIconIdx].pinned && s_visibleIconCount < kDesktopIconCount) {
+            s_visibleIconIndices[s_visibleIconCount++] = homeIconIdx;
+        }
+    }
+
+    for (int displayIdx = 0; displayIdx < s_visibleIconCount; ++displayIdx) {
+        if (s_iconPosX[displayIdx] >= 0 && s_iconPosY[displayIdx] >= 0) continue;
+        int iconIdx = s_visibleIconIndices[displayIdx];
+        if (iconIdx < 0 || iconIdx >= kDesktopIconCount) continue;
+        int32_t x = 0;
+        int32_t y = 0;
+        allocate_desktop_icon_slot(iconIdx, x, y);
+        s_iconPosX[displayIdx] = x;
+        s_iconPosY[displayIdx] = y;
     }
 
     sync_selected_icon_after_layout();
@@ -2666,7 +2745,29 @@ static bool bare_metal_desktop_resolve_directory_target(const char* targetPath, 
     return resolvedPath[0] != '\0';
 }
 
-static bool bare_metal_desktop_set_current_directory(const char* targetPath)
+static void bare_metal_desktop_push_history_path(const char* currentPath)
+{
+    initialize_bare_metal_desktop_directory_state();
+
+    if (!currentPath || !currentPath[0]) return;
+    if (s_bareMetalDesktopHistoryCount > 0 &&
+        desktop_str_eq(s_bareMetalDesktopHistoryPaths[s_bareMetalDesktopHistoryCount - 1], currentPath)) {
+        return;
+    }
+
+    if (s_bareMetalDesktopHistoryCount < 4) {
+        desktop_str_copy(s_bareMetalDesktopHistoryPaths[s_bareMetalDesktopHistoryCount], currentPath, (int)sizeof(s_bareMetalDesktopHistoryPaths[0]));
+        ++s_bareMetalDesktopHistoryCount;
+        return;
+    }
+
+    for (int i = 1; i < 4; ++i) {
+        desktop_str_copy(s_bareMetalDesktopHistoryPaths[i - 1], s_bareMetalDesktopHistoryPaths[i], (int)sizeof(s_bareMetalDesktopHistoryPaths[0]));
+    }
+    desktop_str_copy(s_bareMetalDesktopHistoryPaths[3], currentPath, (int)sizeof(s_bareMetalDesktopHistoryPaths[0]));
+}
+
+static bool bare_metal_desktop_set_current_directory(const char* targetPath, bool pushHistory)
 {
     initialize_bare_metal_desktop_directory_state();
 
@@ -2703,6 +2804,15 @@ static bool bare_metal_desktop_set_current_directory(const char* targetPath)
         return false;
     }
 
+    if (desktop_str_eq(resolvedPath, s_bareMetalDesktopCurrentPath)) {
+        serial::puts("[desktop] Bare-metal desktop current path already active\n");
+        return true;
+    }
+
+    if (pushHistory) {
+        bare_metal_desktop_push_history_path(s_bareMetalDesktopCurrentPath);
+    }
+
     desktop_str_copy(s_bareMetalDesktopCurrentPath, resolvedPath, (int)sizeof(s_bareMetalDesktopCurrentPath));
     ClearDesktopIconSelection();
     s_lastClickedIcon = -1;
@@ -2713,6 +2823,37 @@ static bool bare_metal_desktop_set_current_directory(const char* targetPath)
     serial::puts(s_bareMetalDesktopCurrentPath);
     serial::puts("\n");
     return true;
+}
+
+static bool bare_metal_desktop_go_back()
+{
+    initialize_bare_metal_desktop_directory_state();
+
+    if (s_bareMetalDesktopHistoryCount <= 0) {
+        serial::puts("[desktop] Bare-metal desktop back navigation ignored: no history\n");
+        s_notification.title = "Desktop";
+        s_notification.message = "No previous folder";
+        s_notification.visible = true;
+        s_notification.showTime = s_tickCounter;
+        return false;
+    }
+
+    char targetPath[vfs::VFS_MAX_PATH];
+    desktop_str_copy(targetPath, s_bareMetalDesktopHistoryPaths[s_bareMetalDesktopHistoryCount - 1], (int)sizeof(targetPath));
+    if (!bare_metal_desktop_set_current_directory(targetPath, false)) {
+        return false;
+    }
+
+    s_bareMetalDesktopHistoryPaths[s_bareMetalDesktopHistoryCount - 1][0] = '\0';
+    --s_bareMetalDesktopHistoryCount;
+    serial::puts("[desktop] Bare-metal desktop back navigation completed\n");
+    return true;
+}
+
+static bool bare_metal_desktop_go_home()
+{
+    initialize_bare_metal_desktop_directory_state();
+    return bare_metal_desktop_set_current_directory(bare_metal_desktop_home_directory_path(), true);
 }
 
 static void SelectDesktopIcon(int displayIndex, bool additive)
@@ -3866,6 +4007,8 @@ static const char* GetDesktopIconLogicalName(const char* label)
     if (text_equals(label, "Control Panel")) return "app.controlpanel";
     if (text_equals(label, "Settings")) return "app.settings";
     if (text_equals(label, "This System")) return "place.computer";
+    if (text_equals(label, "Back")) return "desktop.nav.back";
+    if (text_equals(label, "Go to Desktop")) return "desktop.nav.home";
     if (text_equals(label, "File Manager")) return "app.files";
     if (text_equals(label, "System Settings")) return "app.settings";
     if (text_equals(label, "Computer")) return "place.computer";
@@ -8503,7 +8646,13 @@ static void show_icon_notification(int displayIndex)
             }
             bool targetIsDir = info.type == vfs::FILE_TYPE_DIRECTORY;
             if (targetIsDir) {
-                bare_metal_desktop_set_current_directory(target);
+#if defined(GXOS_APPMODEL_LAUNCHSHADOW_SMOKE_ACTIVE) && defined(GXOS_BARE_METAL)
+                log_bare_metal_desktop_navigation_shadow_only_observation(
+                    bare_metal_active_fileopen_shadow_source("DesktopShortcutFolder"),
+                    target,
+                    bare_metal_desktop_current_directory_path());
+#endif
+                bare_metal_desktop_set_current_directory(target, true);
                 return;
             } else if (desktop_entry_is_text(label)) {
 #if defined(GXOS_APPMODEL_TYPED_DISPATCH_SHADOW_ONLY) && defined(GXOS_BARE_METAL)
@@ -8556,7 +8705,13 @@ static void show_icon_notification(int displayIndex)
             serial::puts("[desktop] Navigating desktop folder: ");
             serial::puts(icon.path);
             serial::puts("\n");
-            bare_metal_desktop_set_current_directory(icon.path);
+#if defined(GXOS_APPMODEL_LAUNCHSHADOW_SMOKE_ACTIVE) && defined(GXOS_BARE_METAL)
+            log_bare_metal_desktop_navigation_shadow_only_observation(
+                bare_metal_active_fileopen_shadow_source("DesktopFilesystemFolder"),
+                icon.path,
+                bare_metal_desktop_current_directory_path());
+#endif
+            bare_metal_desktop_set_current_directory(icon.path, true);
             return;
         } else if (desktop_entry_is_text(label)) {
             serial::puts("[desktop] Opening desktop text file: ");
@@ -8622,6 +8777,20 @@ static void show_icon_notification(int displayIndex)
 #endif
                 if (try_launch_kernel_app("DisplayOptions")) return;
                 break;
+            case DesktopSystemObjectKind::DesktopBack:
+                if (bare_metal_desktop_go_back()) return;
+                s_notification.title = label;
+                s_notification.message = "No previous folder";
+                s_notification.visible = true;
+                s_notification.showTime = s_tickCounter;
+                return;
+            case DesktopSystemObjectKind::DesktopHome:
+                if (bare_metal_desktop_go_home()) return;
+                s_notification.title = label;
+                s_notification.message = "Unable to return to Desktop";
+                s_notification.visible = true;
+                s_notification.showTime = s_tickCounter;
+                return;
             default:
                 break;
         }
