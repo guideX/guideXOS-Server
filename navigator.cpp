@@ -1072,6 +1072,15 @@ namespace {
 		int currentBlockCount,
 		const std::string& inspectedUrl,
 		bool cssDetected,
+		bool cssEnabled,
+		int cssRuleCount,
+		int cssStyleBlockCount,
+		int cssInlineStyleCount,
+		int cssExternalStylesheetLoadedCount,
+		int cssUnsupportedRuleCount,
+		int cssParseErrorCount,
+		bool cssStyleBlockCapped,
+		size_t cssStyleBytesProcessed,
 		int formCount,
 		int formInputCount,
 		int checkboxCount,
@@ -1245,6 +1254,15 @@ namespace {
 			{"Current Document", "Block count", std::to_string(currentBlockCount)},
 			{"Current Document", "Inspected page", inspectedUrl.empty() ? "(none)" : inspectedUrl},
 			{"Current Document", "CSS diagnostics", cssDetected ? "css detected" : "no css detected"},
+			{"Current Document", "CSS enabled", yesNo(cssEnabled)},
+			{"Current Document", "CSS rules parsed", std::to_string(cssRuleCount)},
+			{"Current Document", "CSS style blocks", std::to_string(cssStyleBlockCount)},
+			{"Current Document", "CSS inline styles", std::to_string(cssInlineStyleCount)},
+			{"Current Document", "CSS external stylesheets loaded", std::to_string(cssExternalStylesheetLoadedCount)},
+			{"Current Document", "CSS unsupported rules", std::to_string(cssUnsupportedRuleCount)},
+			{"Current Document", "CSS parse errors", std::to_string(cssParseErrorCount)},
+			{"Current Document", "CSS style block capped", yesNo(cssStyleBlockCapped)},
+			{"Current Document", "CSS style bytes processed", std::to_string(cssStyleBytesProcessed)},
 			{"Current Document", "Forms", std::to_string(formCount)},
 			{"Current Document", "Text inputs", std::to_string(formInputCount)},
 			{"Current Document", "Checkboxes", std::to_string(checkboxCount)},
@@ -1573,6 +1591,15 @@ std::string Navigator::SmokeRuntimeReport()
 		static_cast<int>(s_currentDoc.blocks.size()),
 		inspected,
 		s_pageMetadata.cssDetected,
+		s_pageMetadata.cssEnabled,
+		s_pageMetadata.styleRuleCount,
+		s_pageMetadata.styleBlockCount,
+		s_pageMetadata.inlineStyleCount,
+		s_pageMetadata.externalStylesheetLoadedCount,
+		s_pageMetadata.unsupportedCssRuleCount,
+		s_pageMetadata.cssParseErrorCount,
+		s_pageMetadata.cssStyleBlockCapped,
+		s_pageMetadata.cssStyleBytesProcessed,
 		s_pageMetadata.formCount,
 		s_pageMetadata.formInputCount,
 		s_pageMetadata.formCheckboxCount,
@@ -3828,6 +3855,13 @@ WebDocument Navigator::buildPageInfoDocument()
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Failed images", m.failedImageCount), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Last image error", m.lastImageError), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("CSS detected", yesNo(m.cssDetected)), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("CSS enabled", yesNo(m.cssEnabled)), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("CSS rules parsed", m.styleRuleCount), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("CSS style blocks", m.styleBlockCount), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("CSS inline styles", m.inlineStyleCount), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("CSS external stylesheets loaded", m.externalStylesheetLoadedCount), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("CSS unsupported rules", m.unsupportedCssRuleCount), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("CSS parse errors", m.cssParseErrorCount), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Style rule count", m.styleRuleCount), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Unsupported external stylesheets", m.unsupportedExternalStylesheetCount), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Unsupported CSS declarations", m.unsupportedCssDeclarationCount), ""});
@@ -3937,6 +3971,15 @@ WebDocument Navigator::buildRuntimeDocument()
 		static_cast<int>(s_currentDoc.blocks.size()),
 		s_pageMetadata.finalUrl,
 		s_pageMetadata.cssDetected,
+		s_pageMetadata.cssEnabled,
+		s_pageMetadata.styleRuleCount,
+		s_pageMetadata.styleBlockCount,
+		s_pageMetadata.inlineStyleCount,
+		s_pageMetadata.externalStylesheetLoadedCount,
+		s_pageMetadata.unsupportedCssRuleCount,
+		s_pageMetadata.cssParseErrorCount,
+		s_pageMetadata.cssStyleBlockCapped,
+		s_pageMetadata.cssStyleBytesProcessed,
 		s_pageMetadata.formCount,
 		s_pageMetadata.formInputCount,
 		s_pageMetadata.formCheckboxCount,
@@ -4009,6 +4052,9 @@ static std::string extractDocumentText(const WebDocument& doc)
 {
 	std::ostringstream out;
 	for (const DocBlock& block : doc.blocks) {
+		if (!blockHasVisibleCss(block)) {
+			continue;
+		}
 		switch (block.type) {
 		case BlockType::Heading:
 			out << "=== " << block.text << " ===\n\n";

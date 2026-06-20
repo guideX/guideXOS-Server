@@ -361,6 +361,89 @@ static std::string navigatorHostedSmokeDiagnostic() {
     add("external stylesheets unsupported", contains(runtimeReport, "Capabilities.External stylesheets=unsupported"), "expected unsupported");
     add("bookmark persistence enabled", contains(runtimeReport, "Capabilities.Bookmark persistence=enabled"), "expected enabled");
 
+    auto hasPositiveCount = [&](const std::string& report, const std::string& prefix) {
+        const std::size_t pos = report.find(prefix);
+        if (pos == std::string::npos) return false;
+        const std::size_t valuePos = pos + prefix.size();
+        return valuePos < report.size() &&
+            std::isdigit(static_cast<unsigned char>(report[valuePos])) &&
+            report[valuePos] != '0';
+    };
+
+    bool cssInlineLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-inline.html");
+    std::string cssInlineText = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    std::string cssInlineReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    add("CSS inline styles load",
+        cssInlineLoaded &&
+        contains(cssInlineText, "Inline CSS Heading") &&
+        contains(cssInlineText, "Inline CSS paragraph") &&
+        contains(cssInlineText, "Inline CSS link"),
+        "currentUrl=" + gxos::apps::Navigator::SmokeCurrentUrl());
+    add("CSS inline runtime counters",
+        contains(cssInlineReport, "Current Document.CSS enabled=yes") &&
+        contains(cssInlineReport, "Current Document.CSS style blocks=0") &&
+        hasPositiveCount(cssInlineReport, "Current Document.CSS inline styles=") &&
+        contains(cssInlineReport, "Current Document.CSS external stylesheets loaded=0"),
+        "report=\"" + summarizeText(cssInlineReport, 260) + "\"");
+
+    bool cssStyleLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-style-block.html");
+    std::string cssStyleText = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    std::string cssStyleReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    add("CSS style block loads",
+        cssStyleLoaded &&
+        contains(cssStyleText, "Style Block Heading") &&
+        contains(cssStyleText, "Class and id selectors work.") &&
+        contains(cssStyleText, "Unsupported selector fallback stays readable."),
+        "currentUrl=" + gxos::apps::Navigator::SmokeCurrentUrl());
+    add("CSS class and id selectors render",
+        cssStyleLoaded &&
+        !contains(cssStyleText, "Hidden text") &&
+        gxos::apps::Navigator::SmokeCurrentBlockCount() >= 4,
+        "block_count=" + std::to_string(gxos::apps::Navigator::SmokeCurrentBlockCount()));
+    add("CSS style block runtime counters",
+        contains(cssStyleReport, "Current Document.CSS enabled=yes") &&
+        contains(cssStyleReport, "Current Document.CSS style blocks=1") &&
+        hasPositiveCount(cssStyleReport, "Current Document.CSS rules parsed=") &&
+        contains(cssStyleReport, "Current Document.CSS parse errors=0"),
+        "report=\"" + summarizeText(cssStyleReport, 260) + "\"");
+    add("CSS margin and padding stay stable",
+        cssStyleLoaded &&
+        contains(cssStyleReport, "Current Document.CSS style blocks=1") &&
+        contains(cssStyleReport, "Current Document.CSS enabled=yes"),
+        "layout remained readable");
+    add("CSS display:none hides content",
+        cssStyleLoaded && !contains(cssStyleText, "Hidden text"),
+        "hidden text omitted from visible document text");
+
+    bool cssUnsupportedLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-unsupported.html");
+    std::string cssUnsupportedText = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    std::string cssUnsupportedReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    add("CSS unsupported rules stay readable",
+        cssUnsupportedLoaded &&
+        contains(cssUnsupportedText, "Grid-like CSS should not break rendering.") &&
+        contains(cssUnsupportedText, "Nested selectors are optional.") &&
+        !contains(cssUnsupportedText, "This hidden text must stay hidden."),
+        "currentUrl=" + gxos::apps::Navigator::SmokeCurrentUrl());
+    add("CSS unsupported CSS is ignored gracefully",
+        contains(cssUnsupportedReport, "Current Document.CSS enabled=yes") &&
+        contains(cssUnsupportedReport, "Current Document.CSS style blocks=1") &&
+        contains(cssUnsupportedReport, "Current Document.CSS parse errors=0"),
+        "report=\"" + summarizeText(cssUnsupportedReport, 260) + "\"");
+
+    bool cssExternalLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-external.html");
+    std::string cssExternalText = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    std::string cssExternalReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    add("CSS external stylesheet loads",
+        cssExternalLoaded &&
+        contains(cssExternalText, "External CSS Heading") &&
+        contains(cssExternalText, "External CSS should load safely when supported."),
+        "currentUrl=" + gxos::apps::Navigator::SmokeCurrentUrl());
+    add("CSS external stylesheet diagnostic",
+        contains(cssExternalReport, "Current Document.CSS enabled=yes") &&
+        contains(cssExternalReport, "Current Document.CSS external stylesheets loaded=1") &&
+        hasPositiveCount(cssExternalReport, "Current Document.CSS rules parsed="),
+        "report=\"" + summarizeText(cssExternalReport, 260) + "\"");
+
     bool basicHttpLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/basic.html");
     std::string basicHttpText = gxos::apps::Navigator::SmokeCurrentDocumentText();
     add("plain HTTP GET still loads", basicHttpLoaded && contains(basicHttpText, "Kernel HTTP Basic"),

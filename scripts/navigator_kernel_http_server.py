@@ -81,6 +81,57 @@ class NavigatorSmokeHandler(BaseHTTPRequestHandler):
             self.write_bytes(200, "text/html; charset=utf-8",
                              b"<html><body><h1>Kernel HTTP Basic</h1><p>basic html body</p></body></html>")
             return
+        if path == "/navigator-smoke/css-inline.html":
+            self.write_bytes(200, "text/html; charset=utf-8",
+                             b"<html><body style=\"background:#f7f3e8;color:#1f2937;font-size:18px;line-height:1.5;\">"
+                             b"<h1 style=\"color:#9a3412;text-align:center;margin:12px 0;\">Inline CSS Heading</h1>"
+                             b"<p style=\"background:#dbeafe;padding:8px;margin:12px 0;\">Inline CSS paragraph</p>"
+                             b"<a href=\"#\" style=\"color:#1d4ed8;\">Inline CSS link</a>"
+                             b"</body></html>")
+            return
+        if path == "/navigator-smoke/css-style-block.html":
+            self.write_bytes(200, "text/html; charset=utf-8",
+                             b"<html><head><style>"
+                             b"body { background:#fcfaf6; margin:16px; }"
+                             b"h1 { color:#7c2d12; font-size:28px; text-align:center; margin:8px 0; }"
+                             b"p { margin-top:10px; margin-bottom:14px; line-height:1.6; }"
+                             b".hero { background:#fde68a; padding:8px; }"
+                             b"#callout { margin-left:24px; padding-left:8px; border-bottom:1px solid #d1d5db; }"
+                             b".hidden { display:none; }"
+                             b".unsupported .accent { color:#2563eb; }"
+                             b"</style></head><body>"
+                             b"<section class=\"hero\"><h1>Style Block Heading</h1>"
+                             b"<p id=\"callout\">Class and id selectors work.</p>"
+                             b"<p class=\"unsupported\"><span class=\"accent\">Unsupported selector fallback stays readable.</span></p>"
+                             b"<p class=\"hidden\">Hidden text</p>"
+                             b"</section></body></html>")
+            return
+        if path == "/navigator-smoke/css-external.html":
+            self.write_bytes(200, "text/html; charset=utf-8",
+                             b"<html><head><link rel=\"stylesheet\" href=\"/navigator-smoke/css-external.css\"></head><body>"
+                             b"<main class=\"panel\"><h1>External CSS Heading</h1>"
+                             b"<p>External CSS should load safely when supported.</p></main></body></html>")
+            return
+        if path == "/navigator-smoke/css-external.css":
+            self.write_bytes(200, "text/css; charset=utf-8",
+                             b"body { background:#eff6ff; margin:16px; }"
+                             b".panel { max-width:480px; margin:0 auto; padding:16px; background:#ffffff; }"
+                             b"h1 { color:#1d4ed8; text-align:center; font-size:26px; margin:8px 0 12px; }"
+                             b"p { line-height:1.6; }")
+            return
+        if path == "/navigator-smoke/css-unsupported.html":
+            self.write_bytes(200, "text/html; charset=utf-8",
+                             b"<html><head><style>"
+                             b"@media screen and (min-width: 500px) { h1 { color:#dc2626; } }"
+                             b".gridish { display:grid; grid-template-columns:1fr 1fr; gap:8px; }"
+                             b".nested .accent { color:#059669; }"
+                             b".hidden { display:none; }"
+                             b"</style></head><body>"
+                             b"<div class=\"gridish\"><h1>Unsupported CSS</h1><p>Grid-like CSS should not break rendering.</p></div>"
+                             b"<div class=\"nested\"><span class=\"accent\">Nested selectors are optional.</span></div>"
+                             b"<p class=\"hidden\">This hidden text must stay hidden.</p>"
+                             b"</body></html>")
+            return
         if path == "/navigator-smoke/forms-post.html":
             self.write_bytes(200, "text/html; charset=utf-8",
                              b"<html><body><h1>Hosted POST Form</h1>"
