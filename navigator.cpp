@@ -25,6 +25,7 @@ namespace gxos {
 namespace apps {
 
 using namespace gxos::gui;
+using gxos::web::TextAlign;
 
 uint64_t           Navigator::s_windowId        = 0;
 int                Navigator::s_scrollOffset    = 0;
@@ -101,6 +102,10 @@ namespace {
 	constexpr int kContentW = 920 - 48;
 	constexpr int kContentH = 640 - kToolbarH - kStatusBarH - 24;
 	constexpr int kHeadingY = 24;
+	constexpr int kDocumentIndent = 18;
+	constexpr int kDocumentListIndent = 28;
+	constexpr int kDocumentPreIndent = 18;
+	constexpr int kDocumentRightPad = 16;
 	constexpr size_t kNavigatorMaxSourcePreviewBytes = gxos::web::kHttpMaxBodyBytes;
 	constexpr uint32_t kRemoteImageMaxBytes = 256u * 1024u;
 	constexpr uint32_t kRemoteImageMaxWidth = 2048u;
@@ -257,14 +262,14 @@ namespace {
 
 	// Number of pixel rows occupied by a block (based on wrapped line count).
 	// wrapCols: max chars per line for the block type.
-	static int wrappedBlockHeight(const std::string& text, int wrapCols, bool isPre = false)
+	static int wrappedBlockHeight(const std::string& text, int wrapCols, bool isPre = false, int lineHeight = kLineH)
 	{
 		if (isPre) {
-			return static_cast<int>(splitPreLines(text).size()) * kLineH;
+			return static_cast<int>(splitPreLines(text).size()) * lineHeight;
 		}
 		int lines = static_cast<int>(wrapText(text, wrapCols).size());
 		if (lines == 0) lines = 1;
-		return lines * kLineH;
+		return lines * lineHeight;
 	}
 
 	struct ImageInfo {
@@ -284,6 +289,7 @@ namespace {
 	static std::unordered_map<std::string, ImageInfo> s_imageCache;
 	static std::vector<std::string> s_remoteImageTempFiles;
 	static const ImageInfo& imageInfoForBlock(const DocBlock& block);
+	static void imageDisplaySize(const DocBlock& block, int& outW, int& outH);
 	static std::string filePathFromUrl(const std::string& url);
 	static std::string pageInfoLine(const std::string& label, const std::string& value);
 	static std::string pageInfoLine(const std::string& label, int value);
@@ -291,6 +297,30 @@ namespace {
 	static int cssMarginOrDefault(const WebStyle& style, int fallbackValue);
 	static int cssPaddingOrDefault(const WebStyle& style, int fallbackValue);
 	static int cssFontSizeOrDefault(const WebStyle& style, int fallbackValue);
+	static int cssLineHeightOrDefault(const WebStyle& style, int fallbackValue);
+	static int cssPaddingTopPx(const WebStyle& style, int fallbackValue);
+	static int cssPaddingRightPx(const WebStyle& style, int fallbackValue);
+	static int cssPaddingBottomPx(const WebStyle& style, int fallbackValue);
+	static int cssPaddingLeftPx(const WebStyle& style, int fallbackValue);
+	static int cssMarginTopPx(const WebStyle& style, int fallbackValue);
+	static int cssMarginBottomPx(const WebStyle& style, int fallbackValue);
+	static int cssMarginLeftPx(const WebStyle& style, int fallbackValue);
+	static int cssMarginRightPx(const WebStyle& style, int fallbackValue);
+	static bool cssMarginLeftAuto(const WebStyle& style);
+	static bool cssMarginRightAuto(const WebStyle& style);
+	static int cssBorderTopPx(const WebStyle& style);
+	static int cssBorderBottomPx(const WebStyle& style);
+	static int blockIndentForType(BlockType type);
+	static int blockBodyMarginLeft(const WebDocument& doc);
+	static int blockBodyMarginRight(const WebDocument& doc);
+	static int blockAvailableWidth(const DocBlock& block, const WebDocument& doc);
+	static int blockOuterWidth(const DocBlock& block, int availableWidth);
+	static int blockOuterX(const DocBlock& block, const WebDocument& doc, int availableWidth, int outerWidth);
+	static int blockWrapWidth(const DocBlock& block, int outerWidth);
+	static int blockTextLineHeight(const DocBlock& block);
+	static int blockTextX(const DocBlock& block, int outerX, int innerWidth, int lineWidth);
+	static void drawBlockBox(uint64_t windowId, int x, int y, int w, int h, const WebStyle& style);
+	static bool blockHasVisibleCss(const DocBlock& block);
 	static bool colorChannels(uint32_t color, int& r, int& g, int& b);
 	static std::string encodeFormComponent(const std::string& value);
 	static bool tryWriteHostedClipboard(const std::string& text)
@@ -620,10 +650,16 @@ namespace {
 		metadata.remoteImageCount = 0;
 		metadata.localImageCount = 0;
 		metadata.lastImageError.clear();
+		metadata.cssEnabled = doc.cssDiagnostics.cssEnabled;
 		metadata.cssDetected = doc.cssDiagnostics.cssDetected;
 		metadata.styleRuleCount = doc.cssDiagnostics.styleRuleCount;
+		metadata.styleBlockCount = doc.cssDiagnostics.styleBlockCount;
+		metadata.inlineStyleCount = doc.cssDiagnostics.inlineStyleCount;
+		metadata.externalStylesheetLoadedCount = doc.cssDiagnostics.externalStylesheetLoadedCount;
 		metadata.unsupportedExternalStylesheetCount = doc.cssDiagnostics.unsupportedExternalStylesheetCount;
+		metadata.unsupportedCssRuleCount = doc.cssDiagnostics.unsupportedRuleCount;
 		metadata.unsupportedCssDeclarationCount = doc.cssDiagnostics.unsupportedDeclarationCount;
+		metadata.cssParseErrorCount = doc.cssDiagnostics.parseErrorCount;
 		metadata.cssStyleBlockCapped = doc.cssDiagnostics.styleBlockCapped;
 		metadata.cssStyleBytesProcessed = doc.cssDiagnostics.styleBytesProcessed;
 		metadata.formCount = doc.formsDiagnostics.formCount;
@@ -683,14 +719,300 @@ namespace {
 		return style.marginTop >= 0 ? style.marginTop : fallbackValue;
 	}
 
+	static int cssMarginSideOrDefault(int sideValue, int uniformValue, int fallbackValue)
+	{
+		if (sideValue != -1) return sideValue == -2 ? 0 : sideValue;
+		if (uniformValue != -1) return uniformValue;
+		return fallbackValue;
+	}
+
 	static int cssPaddingOrDefault(const WebStyle& style, int fallbackValue)
 	{
 		return style.padding >= 0 ? style.padding : fallbackValue;
 	}
 
+	static int cssPaddingSideOrDefault(int sideValue, int uniformValue, int fallbackValue)
+	{
+		if (sideValue != -1) return sideValue == -2 ? 0 : sideValue;
+		if (uniformValue != -1) return uniformValue;
+		return fallbackValue;
+	}
+
+	static int cssPaddingTopPx(const WebStyle& style, int fallbackValue)
+	{
+		return cssPaddingSideOrDefault(style.paddingTop, style.padding, fallbackValue);
+	}
+
+	static int cssPaddingRightPx(const WebStyle& style, int fallbackValue)
+	{
+		return cssPaddingSideOrDefault(style.paddingRight, style.padding, fallbackValue);
+	}
+
+	static int cssPaddingBottomPx(const WebStyle& style, int fallbackValue)
+	{
+		return cssPaddingSideOrDefault(style.paddingBottom, style.padding, fallbackValue);
+	}
+
+	static int cssPaddingLeftPx(const WebStyle& style, int fallbackValue)
+	{
+		return cssPaddingSideOrDefault(style.paddingLeft, style.padding, fallbackValue);
+	}
+
+	static int cssMarginTopPx(const WebStyle& style, int fallbackValue)
+	{
+		return style.marginTop != -1 ? (style.marginTop == -2 ? 0 : style.marginTop) : fallbackValue;
+	}
+
+	static int cssMarginBottomPx(const WebStyle& style, int fallbackValue)
+	{
+		return style.marginBottom != -1 ? (style.marginBottom == -2 ? 0 : style.marginBottom) : fallbackValue;
+	}
+
+	static int cssMarginLeftPx(const WebStyle& style, int fallbackValue)
+	{
+		return style.marginLeft != -1 ? (style.marginLeft == -2 ? 0 : style.marginLeft) : fallbackValue;
+	}
+
+	static int cssMarginRightPx(const WebStyle& style, int fallbackValue)
+	{
+		return style.marginRight != -1 ? (style.marginRight == -2 ? 0 : style.marginRight) : fallbackValue;
+	}
+
 	static int cssFontSizeOrDefault(const WebStyle& style, int fallbackValue)
 	{
 		return style.fontScaleOrSize > 0 ? style.fontScaleOrSize : fallbackValue;
+	}
+
+	static int cssLineHeightOrDefault(const WebStyle& style, int fallbackValue)
+	{
+		return style.lineHeight > 0 ? style.lineHeight : fallbackValue;
+	}
+
+	static int cssWidthPx(const WebStyle& style, int availableWidth, int fallbackValue)
+	{
+		if (style.widthPercent >= 0) {
+			return std::max(0, availableWidth * style.widthPercent / 100);
+		}
+		if (style.width > 0) return style.width;
+		return fallbackValue;
+	}
+
+	static int cssMaxWidthPx(const WebStyle& style, int availableWidth, int fallbackValue)
+	{
+		int value = fallbackValue;
+		if (style.maxWidthPercent >= 0) {
+			value = std::max(0, availableWidth * style.maxWidthPercent / 100);
+		} else if (style.maxWidth > 0) {
+			value = style.maxWidth;
+		}
+		return value;
+	}
+
+	static int blockIndentForType(BlockType type)
+	{
+		if (type == BlockType::ListItem) return kDocumentListIndent;
+		if (type == BlockType::Preformatted) return kDocumentPreIndent;
+		return kDocumentIndent;
+	}
+
+	static int cssBorderTopPx(const WebStyle& style)
+	{
+		return style.hasBorderTop ? std::max(1, style.borderTopWidth) : 0;
+	}
+
+	static int cssBorderBottomPx(const WebStyle& style)
+	{
+		return style.hasBorderBottom ? std::max(1, style.borderBottomWidth) : 0;
+	}
+
+	static bool cssMarginLeftAuto(const WebStyle& style)
+	{
+		return style.marginLeft == -2;
+	}
+
+	static bool cssMarginRightAuto(const WebStyle& style)
+	{
+		return style.marginRight == -2;
+	}
+
+	static int blockBodyMarginLeft(const WebDocument& doc)
+	{
+		return doc.bodyStyle.marginLeft >= 0 ? doc.bodyStyle.marginLeft : 0;
+	}
+
+	static int blockBodyMarginRight(const WebDocument& doc)
+	{
+		return doc.bodyStyle.marginRight >= 0 ? doc.bodyStyle.marginRight : 0;
+	}
+
+	static int blockAvailableWidth(const DocBlock& block, const WebDocument& doc)
+	{
+		const int baseWidth = kContentW - blockIndentForType(block.type) - kDocumentRightPad
+			- blockBodyMarginLeft(doc) - blockBodyMarginRight(doc)
+			- cssMarginLeftPx(block.style, 0) - cssMarginRightPx(block.style, 0);
+		return std::max(1, baseWidth);
+	}
+
+	static int blockOuterWidth(const DocBlock& block, int availableWidth)
+	{
+		int outerWidth = cssWidthPx(block.style, availableWidth, availableWidth);
+		outerWidth = std::min(outerWidth, cssMaxWidthPx(block.style, availableWidth, outerWidth));
+		return std::max(1, std::min(outerWidth, availableWidth));
+	}
+
+	static int blockOuterX(const DocBlock& block, const WebDocument& doc, int availableWidth, int outerWidth)
+	{
+		const int baseX = kContentX + blockIndentForType(block.type) + blockBodyMarginLeft(doc);
+		const int leftMargin = cssMarginLeftPx(block.style, 0);
+		const int rightMargin = cssMarginRightPx(block.style, 0);
+		const bool autoLeft = cssMarginLeftAuto(block.style);
+		const bool autoRight = cssMarginRightAuto(block.style);
+		if (autoLeft && autoRight) {
+			return baseX + std::max(0, (availableWidth - outerWidth) / 2);
+		}
+		if (autoLeft) {
+			return baseX + std::max(0, availableWidth - outerWidth - rightMargin);
+		}
+		if (autoRight) {
+			return baseX + leftMargin;
+		}
+		return baseX + leftMargin;
+	}
+
+	static int blockWrapWidth(const DocBlock& block, int outerWidth)
+	{
+		const int paddingLeft = cssPaddingLeftPx(block.style, cssPaddingOrDefault(block.style, block.type == BlockType::Preformatted ? 4 : 0));
+		const int paddingRight = cssPaddingRightPx(block.style, cssPaddingOrDefault(block.style, block.type == BlockType::Preformatted ? 4 : 0));
+		return std::max(1, outerWidth - paddingLeft - paddingRight);
+	}
+
+	static int blockTextLineHeight(const DocBlock& block)
+	{
+		const int fontSize = cssFontSizeOrDefault(block.style, kLineH);
+		const int lineHeight = cssLineHeightOrDefault(block.style, fontSize);
+		return std::max(kLineH, lineHeight);
+	}
+
+	static int blockTextX(const DocBlock& block, int outerX, int innerWidth, int lineWidth)
+	{
+		if (block.style.textAlign == TextAlign::Center) {
+			return outerX + std::max(0, (innerWidth - lineWidth) / 2);
+		}
+		if (block.style.textAlign == TextAlign::Right) {
+			return outerX + std::max(0, innerWidth - lineWidth);
+		}
+		return outerX;
+	}
+
+	static int blockFormControlHeight(const DocBlock& block)
+	{
+		if (block.type == BlockType::FormTextarea) {
+			int rows = block.visibleRows > 0 ? block.visibleRows : 4;
+			rows = std::max(kTextareaMinRows, std::min(kTextareaMaxRows, rows));
+			return std::max(kFormControlH, rows * kLineH + 10);
+		}
+		return kFormControlH;
+	}
+
+	static int blockTotalHeight(const DocBlock& block, const WebDocument& doc, bool nextIsHeading)
+	{
+		if (block.style.displayNone) return 0;
+		const int blockMarginTop = cssMarginTopPx(block.style, block.type == BlockType::Heading ? 10 : 4);
+		const int blockMarginBottom = cssMarginBottomPx(block.style, block.type == BlockType::ListItem ? 4 : 8);
+		const int blockMarginLeft = cssMarginLeftPx(block.style, 0);
+		const int blockMarginRight = cssMarginRightPx(block.style, 0);
+		const int paddingTop = cssPaddingTopPx(block.style, block.type == BlockType::Preformatted ? 4 : 0);
+		const int paddingRight = cssPaddingRightPx(block.style, block.type == BlockType::Preformatted ? 4 : 0);
+		const int paddingBottom = cssPaddingBottomPx(block.style, block.type == BlockType::Preformatted ? 4 : 0);
+		const int paddingLeft = cssPaddingLeftPx(block.style, block.type == BlockType::Preformatted ? 4 : 0);
+		const int borderTop = cssBorderTopPx(block.style);
+		const int borderBottom = cssBorderBottomPx(block.style);
+		const int bodyMarginLeft = blockBodyMarginLeft(doc);
+		const int bodyMarginRight = blockBodyMarginRight(doc);
+		const int availableWidth = std::max(1, kContentW - blockIndentForType(block.type) - kDocumentRightPad
+			- bodyMarginLeft - bodyMarginRight - blockMarginLeft - blockMarginRight);
+		const int outerWidth = blockOuterWidth(block, availableWidth);
+		const int innerWidth = std::max(1, outerWidth - paddingLeft - paddingRight);
+		const int wrapCols = std::max(1, innerWidth / kCharW);
+		const int lineHeight = blockTextLineHeight(block);
+		const int headingFontSize = cssFontSizeOrDefault(block.style, block.tagName == "h1" ? 24 : (block.tagName == "h2" ? 20 : (block.tagName == "h3" ? 18 : 20)));
+		const int headingHeight = std::max(lineHeight + 4, headingFontSize + 2);
+		constexpr int kPreGapIfNextHeading = 10;
+		int contentH = 0;
+		switch (block.type) {
+		case BlockType::Heading:
+			contentH = headingHeight;
+			break;
+		case BlockType::Paragraph:
+		case BlockType::Link:
+			contentH = wrappedBlockHeight(block.text, wrapCols, false, lineHeight);
+			break;
+		case BlockType::ListItem:
+			contentH = wrappedBlockHeight(block.text, wrapCols, false, lineHeight);
+			break;
+		case BlockType::Preformatted:
+			contentH = wrappedBlockHeight(block.text, wrapCols, true, lineHeight);
+			break;
+		case BlockType::FormTextInput:
+		case BlockType::FormCheckbox:
+		case BlockType::FormRadio:
+		case BlockType::FormTextarea:
+		case BlockType::FormSelect:
+		case BlockType::FormSubmit:
+			contentH = blockFormControlHeight(block);
+			break;
+		case BlockType::Image: {
+			int imageW = 0;
+			int imageH = 0;
+			imageDisplaySize(block, imageW, imageH);
+			contentH = imageH;
+			break;
+		}
+		}
+		int total = blockMarginTop + borderTop + paddingTop + contentH + paddingBottom + borderBottom + blockMarginBottom;
+		if (nextIsHeading) total += kPreGapIfNextHeading;
+		return total;
+	}
+
+	static void drawBlockBox(uint64_t windowId, int x, int y, int w, int h, const WebStyle& style)
+	{
+		if (w <= 0 || h <= 0) return;
+		if (style.hasBackgroundColor) {
+			int r = 245, g = 247, b = 250;
+			colorChannels(style.backgroundColor, r, g, b);
+			drawRect(windowId, x, y, w, h, r, g, b);
+		}
+		if (style.hasBorderTop && style.borderTopWidth > 0) {
+			int r = 24, g = 28, b = 36;
+			colorChannels(style.borderTopColor, r, g, b);
+			drawRect(windowId, x, y, w, std::max(1, style.borderTopWidth), r, g, b);
+		}
+		if (style.hasBorderBottom && style.borderBottomWidth > 0) {
+			int r = 24, g = 28, b = 36;
+			colorChannels(style.borderBottomColor, r, g, b);
+			drawRect(windowId, x, y + std::max(0, h - std::max(1, style.borderBottomWidth)), w,
+				std::max(1, style.borderBottomWidth), r, g, b);
+		}
+	}
+
+	static bool blockHasVisibleCss(const DocBlock& block)
+	{
+		return !block.style.displayNone;
+	}
+
+	static bool isCenteredText(const WebStyle& style)
+	{
+		return style.textAlign == TextAlign::Center;
+	}
+
+	static bool isRightAlignedText(const WebStyle& style)
+	{
+		return style.textAlign == TextAlign::Right;
+	}
+
+	static bool isHiddenByDisplay(const WebStyle& style)
+	{
+		return style.displayNone;
 	}
 
 	static bool colorChannels(uint32_t color, int& r, int& g, int& b)
@@ -1537,25 +1859,35 @@ void Navigator::renderDocument()
 	// Scroll-track slot
 	drawRect(s_windowId, kContentX + kContentW - 12, kToolbarH + 6, 8, kContentH, 229, 232, 238);
 
-	// Layout constants
-	// Wrap columns: content width minus indent, divided by character cell width.
-	constexpr int kIndent       = 18;
-	constexpr int kListIndent   = 28;
-	constexpr int kPreIndent    = 18;
-	constexpr int kWrapW        = kContentW - kIndent - 16; // 16px right margin
-	const     int kWrapCols     = kWrapW / kCharW;
-	const     int kListWrapCols = (kContentW - kListIndent - 16) / kCharW;
-	const     int kPreWrapCols  = (kContentW - kPreIndent - 16) / kCharW;
-
 	int blockIndex = 0;
 	for (const DocBlock& block : s_currentDoc.blocks) {
+		if (!blockHasVisibleCss(block)) {
+			++blockIndex;
+			continue;
+		}
 		int relY  = blockLayoutY(blockIndex);
 		int drawY = kContentY + relY - s_scrollOffset;
-		const int blockMarginTop = block.style.marginTop >= 0 ? block.style.marginTop : (block.type == BlockType::Heading ? 10 : 4);
-		const int blockMarginBottom = block.style.marginBottom >= 0 ? block.style.marginBottom : 8;
-		const int blockMarginLeft = block.style.marginLeft >= 0 ? block.style.marginLeft : 0;
-		const int blockPadding = cssPaddingOrDefault(block.style, block.type == BlockType::Preformatted ? 4 : 0);
-		const int bodyMarginLeft = s_currentDoc.bodyStyle.marginLeft >= 0 ? s_currentDoc.bodyStyle.marginLeft : 0;
+		const int blockMarginTop = cssMarginTopPx(block.style, block.type == BlockType::Heading ? 10 : 4);
+		const int blockMarginBottom = cssMarginBottomPx(block.style, block.type == BlockType::ListItem ? 4 : 8);
+		const int blockMarginLeft = cssMarginLeftPx(block.style, 0);
+		const int blockMarginRight = cssMarginRightPx(block.style, 0);
+		const int paddingTop = cssPaddingTopPx(block.style, block.type == BlockType::Preformatted ? 4 : 0);
+		const int paddingRight = cssPaddingRightPx(block.style, block.type == BlockType::Preformatted ? 4 : 0);
+		const int paddingBottom = cssPaddingBottomPx(block.style, block.type == BlockType::Preformatted ? 4 : 0);
+		const int paddingLeft = cssPaddingLeftPx(block.style, block.type == BlockType::Preformatted ? 4 : 0);
+		const int borderTop = cssBorderTopPx(block.style);
+		const int borderBottom = cssBorderBottomPx(block.style);
+		const int lineHeight = blockTextLineHeight(block);
+		const int bodyMarginLeft = blockBodyMarginLeft(s_currentDoc);
+		const int bodyMarginRight = blockBodyMarginRight(s_currentDoc);
+		const int availableWidth = std::max(1, kContentW - blockIndentForType(block.type) - kDocumentRightPad
+			- bodyMarginLeft - bodyMarginRight - blockMarginLeft - blockMarginRight);
+		const int outerWidth = blockOuterWidth(block, availableWidth);
+		const int outerX = blockOuterX(block, s_currentDoc, availableWidth, outerWidth);
+		const int innerWidth = std::max(1, outerWidth - paddingLeft - paddingRight);
+		const int wrapCols = std::max(1, innerWidth / kCharW);
+		const int listWrapCols = std::max(1, innerWidth / kCharW);
+		const int preWrapCols = std::max(1, innerWidth / kCharW);
 		const int headingFontSize = cssFontSizeOrDefault(block.style, block.tagName == "h1" ? 24 : (block.tagName == "h2" ? 20 : (block.tagName == "h3" ? 18 : 20)));
 
 		// Skip blocks fully above or below the visible viewport
@@ -1564,22 +1896,22 @@ void Navigator::renderDocument()
 			s_currentDoc.blocks[blockIndex + 1].type == BlockType::Heading);
 		constexpr int kPreGapIfNextHeading = 10;
 		switch (block.type) {
-		case BlockType::Heading:      blockH = blockMarginTop + std::max(kLineH + 4, headingFontSize + 2) + std::max(4, blockMarginBottom); break;
-		case BlockType::Paragraph:    blockH = blockMarginTop + wrappedBlockHeight(block.text, kWrapCols)        + std::max(4, blockMarginBottom) + (nextIsHeading ? kPreGapIfNextHeading : 0); break;
-		case BlockType::Link:         blockH = blockMarginTop + wrappedBlockHeight(block.text, kWrapCols)        + std::max(4, blockMarginBottom) + (nextIsHeading ? kPreGapIfNextHeading : 0); break;
-		case BlockType::ListItem:     blockH = blockMarginTop + wrappedBlockHeight(block.text, kListWrapCols)    + std::max(2, blockMarginBottom) + (nextIsHeading ? kPreGapIfNextHeading : 0); break;
-		case BlockType::Preformatted: blockH = blockMarginTop + wrappedBlockHeight(block.text, kPreWrapCols, true) + blockPadding * 2 + std::max(4, blockMarginBottom); break;
+		case BlockType::Heading:      blockH = blockMarginTop + borderTop + paddingTop + std::max(lineHeight + 4, headingFontSize + 2) + paddingBottom + borderBottom + std::max(4, blockMarginBottom); break;
+		case BlockType::Paragraph:    blockH = blockMarginTop + borderTop + paddingTop + wrappedBlockHeight(block.text, wrapCols, false, lineHeight) + paddingBottom + borderBottom + std::max(4, blockMarginBottom) + (nextIsHeading ? kPreGapIfNextHeading : 0); break;
+		case BlockType::Link:         blockH = blockMarginTop + borderTop + paddingTop + wrappedBlockHeight(block.text, wrapCols, false, lineHeight) + paddingBottom + borderBottom + std::max(4, blockMarginBottom) + (nextIsHeading ? kPreGapIfNextHeading : 0); break;
+		case BlockType::ListItem:     blockH = blockMarginTop + borderTop + paddingTop + wrappedBlockHeight(block.text, listWrapCols, false, lineHeight) + paddingBottom + borderBottom + std::max(2, blockMarginBottom) + (nextIsHeading ? kPreGapIfNextHeading : 0); break;
+		case BlockType::Preformatted: blockH = blockMarginTop + borderTop + paddingTop + wrappedBlockHeight(block.text, preWrapCols, true, lineHeight) + paddingBottom + borderBottom + std::max(4, blockMarginBottom) + (nextIsHeading ? kPreGapIfNextHeading : 0); break;
 		case BlockType::FormTextInput:
 		case BlockType::FormCheckbox:
 		case BlockType::FormRadio:
 		case BlockType::FormTextarea:
 		case BlockType::FormSelect:
-		case BlockType::FormSubmit:   blockH = blockMarginTop + formControlHeight(block) + std::max(6, blockMarginBottom); break;
+		case BlockType::FormSubmit:   blockH = blockMarginTop + borderTop + paddingTop + formControlHeight(block) + paddingBottom + borderBottom + std::max(6, blockMarginBottom); break;
 		case BlockType::Image: {
 			int imageW = 0;
 			int imageH = 0;
 			imageDisplaySize(block, imageW, imageH);
-			blockH = blockMarginTop + imageH + std::max(4, blockMarginBottom);
+			blockH = blockMarginTop + borderTop + paddingTop + imageH + paddingBottom + borderBottom + std::max(4, blockMarginBottom);
 			break;
 		}
 		}
@@ -1611,56 +1943,52 @@ void Navigator::renderDocument()
 			}
 		}
 
+		const int boxY = drawY + blockMarginTop;
+		const int boxH = std::max(1, blockH - blockMarginTop - std::max(4, blockMarginBottom));
+		drawBlockBox(s_windowId, outerX, boxY, outerWidth, boxH, block.style);
+
 		switch (block.type) {
 		case BlockType::Heading:
 			// Slightly larger heading: draw a subtle accent bar then the text
-			drawRect(s_windowId, kContentX + kIndent + bodyMarginLeft + blockMarginLeft, drawY + blockMarginTop + std::max(kLineH, headingFontSize - 4),
-				kContentW - kIndent - 16, 2, 80, 140, 220);
-			drawTextAtStyled(s_windowId, kContentX + kIndent + bodyMarginLeft + blockMarginLeft, drawY + blockMarginTop, block.text, block.style);
+			drawRect(s_windowId, outerX + paddingLeft, boxY + borderTop + paddingTop + std::max(lineHeight, headingFontSize - 4),
+				std::max(1, innerWidth), 2, 80, 140, 220);
+			drawTextAtStyled(s_windowId, blockTextX(block, outerX + paddingLeft, innerWidth, std::min(static_cast<int>(block.text.size()) * kCharW, innerWidth)), drawY + blockMarginTop + borderTop + paddingTop, block.text, block.style);
 			if (block.style.bold) {
-				drawTextAtStyled(s_windowId, kContentX + kIndent + bodyMarginLeft + blockMarginLeft + 1, drawY + blockMarginTop, block.text, block.style);
+				drawTextAtStyled(s_windowId, blockTextX(block, outerX + paddingLeft + 1, innerWidth, std::min(static_cast<int>(block.text.size()) * kCharW, innerWidth)), drawY + blockMarginTop + borderTop + paddingTop, block.text, block.style);
 			}
 			break;
 
 		case BlockType::Paragraph: {
-			auto lines = wrapText(block.text, kWrapCols);
-			int lineY = drawY + blockMarginTop;
+			auto lines = wrapText(block.text, wrapCols);
+			int lineY = drawY + blockMarginTop + borderTop + paddingTop;
 			for (const std::string& ln : lines) {
-				drawTextAtStyled(s_windowId, kContentX + kIndent + bodyMarginLeft + blockMarginLeft, lineY, ln, block.style);
-				lineY += kLineH;
+				const int lineW = static_cast<int>(ln.size()) * kCharW;
+				drawTextAtStyled(s_windowId, blockTextX(block, outerX + paddingLeft, innerWidth, lineW), lineY, ln, block.style);
+				lineY += lineHeight;
 			}
 			break;
 		}
 
 		case BlockType::ListItem: {
 			// Dash bullet + indented wrapped text
-			drawTextAtStyled(s_windowId, kContentX + kIndent + bodyMarginLeft + blockMarginLeft, drawY + blockMarginTop, "-", block.style);
-			auto lines = wrapText(block.text, kListWrapCols);
-			int lineY = drawY + blockMarginTop;
+			drawTextAtStyled(s_windowId, outerX + paddingLeft, drawY + blockMarginTop + borderTop + paddingTop, "-", block.style);
+			auto lines = wrapText(block.text, listWrapCols);
+			int lineY = drawY + blockMarginTop + borderTop + paddingTop;
 			for (const std::string& ln : lines) {
-				drawTextAtStyled(s_windowId, kContentX + kListIndent + bodyMarginLeft + blockMarginLeft, lineY, ln, block.style);
-				lineY += kLineH;
+				const int lineW = static_cast<int>(ln.size()) * kCharW;
+				drawTextAtStyled(s_windowId, blockTextX(block, outerX + paddingLeft, innerWidth, lineW), lineY, ln, block.style);
+				lineY += lineHeight;
 			}
 			break;
 		}
 
 		case BlockType::Preformatted: {
-			// Light background box for the pre block
-			int preH = wrappedBlockHeight(block.text, kPreWrapCols, true) + blockPadding * 2;
-			int preR = 230;
-			int preG = 232;
-			int preB = 238;
-			if (block.style.hasBackgroundColor) {
-				colorChannels(block.style.backgroundColor, preR, preG, preB);
-			}
-			drawRect(s_windowId, kContentX + kPreIndent + bodyMarginLeft + blockMarginLeft - 4, drawY + blockMarginTop - 2,
-				kContentW - kPreIndent - 8, preH + 4, preR, preG, preB);
 			// Draw each line preserving exact content
 			auto lines = splitPreLines(block.text);
-			int lineY = drawY + blockMarginTop + blockPadding;
+			int lineY = drawY + blockMarginTop + borderTop + paddingTop;
 			for (const std::string& ln : lines) {
-				drawTextAtStyled(s_windowId, kContentX + kPreIndent + bodyMarginLeft + blockMarginLeft, lineY, ln, block.style);
-				lineY += kLineH;
+				drawTextAtStyled(s_windowId, outerX + paddingLeft, lineY, ln, block.style);
+				lineY += lineHeight;
 			}
 			break;
 		}
@@ -1668,8 +1996,8 @@ void Navigator::renderDocument()
 		case BlockType::Link: {
 			// Full wrapped link block: underline + blue text
 			// The entire bounding rect is clickable (TODO: per-line hit testing).
-			auto lines = wrapText(block.text, kWrapCols);
-			int lineY = drawY + blockMarginTop;
+			auto lines = wrapText(block.text, wrapCols);
+			int lineY = drawY + blockMarginTop + borderTop + paddingTop;
 			int linkR = 55;
 			int linkG = 110;
 			int linkB = 210;
@@ -1680,11 +2008,11 @@ void Navigator::renderDocument()
 				// Underline under each line
 				int lineW = static_cast<int>(ln.size()) * kCharW;
 				if (block.style.underline) {
-					drawRect(s_windowId, kContentX + kIndent + bodyMarginLeft + blockMarginLeft, lineY + kLineH - 1,
+					drawRect(s_windowId, blockTextX(block, outerX + paddingLeft, innerWidth, lineW), lineY + lineHeight - 1,
 						lineW, 1, linkR, linkG, linkB);
 				}
-				drawTextAtColored(s_windowId, kContentX + kIndent + bodyMarginLeft + blockMarginLeft, lineY, ln, linkR, linkG, linkB);
-				lineY += kLineH;
+				drawTextAtColored(s_windowId, blockTextX(block, outerX + paddingLeft, innerWidth, lineW), lineY, ln, linkR, linkG, linkB);
+				lineY += lineHeight;
 			}
 			break;
 		}
@@ -1694,19 +2022,19 @@ void Navigator::renderDocument()
 			int imageH = 0;
 			imageDisplaySize(block, imageW, imageH);
 			const ImageInfo& info = imageInfoForBlock(block);
-			const int imageX = kContentX + kIndent + bodyMarginLeft + blockMarginLeft;
+			const int imageX = outerX + paddingLeft;
 			const int viewportTop = kContentY;
 			const int viewportBottom = kToolbarH + 6 + kContentH;
-			if (drawY + blockMarginTop >= viewportTop && drawY + blockMarginTop + imageH <= viewportBottom) {
+			if (boxY + borderTop + paddingTop >= viewportTop && boxY + borderTop + paddingTop + imageH <= viewportBottom) {
 				if (info.ok) {
-					drawImage(s_windowId, imageX, drawY + blockMarginTop, imageW, imageH, info.drawPath);
+					drawImage(s_windowId, imageX, boxY + borderTop + paddingTop, imageW, imageH, info.drawPath);
 				} else {
-					drawRect(s_windowId, imageX, drawY + blockMarginTop, imageW, imageH, 232, 236, 242);
-					drawRect(s_windowId, imageX, drawY + blockMarginTop, imageW, 1, 145, 153, 168);
-					drawRect(s_windowId, imageX, drawY + blockMarginTop + imageH - 1, imageW, 1, 145, 153, 168);
-					drawRect(s_windowId, imageX, drawY + blockMarginTop, 1, imageH, 145, 153, 168);
-					drawRect(s_windowId, imageX + imageW - 1, drawY + blockMarginTop, 1, imageH, 145, 153, 168);
-					drawTextAtStyled(s_windowId, imageX + 10, drawY + blockMarginTop + std::max(8, (imageH - kLineH) / 2),
+					drawRect(s_windowId, imageX, boxY + borderTop + paddingTop, imageW, imageH, 232, 236, 242);
+					drawRect(s_windowId, imageX, boxY + borderTop + paddingTop, imageW, 1, 145, 153, 168);
+					drawRect(s_windowId, imageX, boxY + borderTop + paddingTop + imageH - 1, imageW, 1, 145, 153, 168);
+					drawRect(s_windowId, imageX, boxY + borderTop + paddingTop, 1, imageH, 145, 153, 168);
+					drawRect(s_windowId, imageX + imageW - 1, boxY + borderTop + paddingTop, 1, imageH, 145, 153, 168);
+					drawTextAtStyled(s_windowId, imageX + 10, boxY + borderTop + paddingTop + std::max(8, (imageH - lineHeight) / 2),
 						imagePlaceholderText(block, info), block.style);
 				}
 			}
@@ -1714,8 +2042,8 @@ void Navigator::renderDocument()
 		}
 
 		case BlockType::FormTextInput: {
-			const int inputX = kContentX + kIndent + bodyMarginLeft + blockMarginLeft;
-			const int inputY = drawY + blockMarginTop;
+			const int inputX = outerX + paddingLeft;
+			const int inputY = boxY + borderTop + paddingTop;
 			const bool focused = (blockIndex == s_focusedInputBlockIndex);
 			drawRect(s_windowId, inputX, inputY, kFormInputW, kFormControlH, 250, 252, 255);
 			drawRect(s_windowId, inputX, inputY, kFormInputW, 1, focused ? 54 : 148, focused ? 118 : 156, focused ? 210 : 170);
@@ -1743,8 +2071,8 @@ void Navigator::renderDocument()
 		}
 
 		case BlockType::FormTextarea: {
-			const int inputX = kContentX + kIndent + bodyMarginLeft + blockMarginLeft;
-			const int inputY = drawY + blockMarginTop;
+			const int inputX = outerX + paddingLeft;
+			const int inputY = boxY + borderTop + paddingTop;
 			const int inputH = formControlHeight(block);
 			const bool focused = (blockIndex == s_focusedInputBlockIndex);
 			drawRect(s_windowId, inputX, inputY, kFormInputW, inputH, 250, 252, 255);
@@ -1773,7 +2101,7 @@ void Navigator::renderDocument()
 					placeholder ? 128 : 35,
 					placeholder ? 136 : 45,
 					placeholder ? 150 : 60);
-				lineY += kLineH;
+				lineY += lineHeight;
 			}
 			if (focused && !placeholder) {
 				int caretPos = std::max(0, std::min(s_inputCaret, static_cast<int>(block.inputValue.size())));
@@ -1789,8 +2117,8 @@ void Navigator::renderDocument()
 				}
 				if (caretLine >= firstVisibleLine && caretLine < firstVisibleLine + maxVisibleRows) {
 					int visibleColumn = std::min(caretColumn, maxChars);
-					int caretY = inputY + 5 + (caretLine - firstVisibleLine) * kLineH;
-					drawRect(s_windowId, inputX + 8 + visibleColumn * kCharW, caretY, 1, kLineH - 2, 35, 85, 170);
+					int caretY = inputY + 5 + (caretLine - firstVisibleLine) * lineHeight;
+					drawRect(s_windowId, inputX + 8 + visibleColumn * kCharW, caretY, 1, lineHeight - 2, 35, 85, 170);
 				}
 			}
 			break;
@@ -1798,8 +2126,8 @@ void Navigator::renderDocument()
 
 		case BlockType::FormCheckbox:
 		case BlockType::FormRadio: {
-			const int controlX = kContentX + kIndent + bodyMarginLeft + blockMarginLeft;
-			const int controlY = drawY + blockMarginTop;
+			const int controlX = outerX + paddingLeft;
+			const int controlY = boxY + borderTop + paddingTop;
 			const bool focused = (blockIndex == s_focusedInputBlockIndex);
 			const int box = 14;
 			const int boxY = controlY + (kFormControlH - box) / 2;
@@ -1821,8 +2149,8 @@ void Navigator::renderDocument()
 		}
 
 		case BlockType::FormSelect: {
-			const int selectX = kContentX + kIndent + bodyMarginLeft + blockMarginLeft;
-			const int selectY = drawY + blockMarginTop;
+			const int selectX = outerX + paddingLeft;
+			const int selectY = boxY + borderTop + paddingTop;
 			const bool focused = (blockIndex == s_focusedInputBlockIndex);
 			drawRect(s_windowId, selectX, selectY, kFormInputW, kFormControlH, 250, 252, 255);
 			drawRect(s_windowId, selectX, selectY, kFormInputW, 1, focused ? 54 : 148, focused ? 118 : 156, focused ? 210 : 170);
@@ -1836,8 +2164,8 @@ void Navigator::renderDocument()
 		}
 
 		case BlockType::FormSubmit: {
-			const int buttonX = kContentX + kIndent + bodyMarginLeft + blockMarginLeft;
-			const int buttonY = drawY + blockMarginTop;
+			const int buttonX = outerX + paddingLeft;
+			const int buttonY = boxY + borderTop + paddingTop;
 			const bool focused = (blockIndex == s_focusedInputBlockIndex);
 			const bool disabled = block.formUnsupported;
 			drawRect(s_windowId, buttonX, buttonY, kFormSubmitW, kFormControlH, disabled ? 184 : 65, disabled ? 188 : 112, disabled ? 196 : 190);
@@ -2319,38 +2647,48 @@ Navigator::Rect Navigator::selectableBlockRect(int blockIndex)
 		return Rect{ 0, 0, 0, 0 };
 	}
 	const DocBlock& block = s_currentDoc.blocks[blockIndex];
+	if (!blockHasVisibleCss(block)) return Rect{ 0, 0, 0, 0 };
 	if (!isSelectableBlock(block)) return Rect{ 0, 0, 0, 0 };
 	const int drawY = kContentY + blockLayoutY(blockIndex) - s_scrollOffset;
-	const int bodyMarginLeft = s_currentDoc.bodyStyle.marginLeft >= 0 ? s_currentDoc.bodyStyle.marginLeft : 0;
-	const int blockMarginTop = block.style.marginTop >= 0 ? block.style.marginTop : (block.type == BlockType::Heading ? 10 : 4);
-	const int blockMarginBottom = block.style.marginBottom >= 0 ? block.style.marginBottom : (block.type == BlockType::ListItem ? 4 : 8);
-	const int blockMarginLeft = block.style.marginLeft >= 0 ? block.style.marginLeft : 0;
-	const int blockPadding = cssPaddingOrDefault(block.style, block.type == BlockType::Preformatted ? 4 : 0);
-	const int textX = kContentX + 18 + bodyMarginLeft + blockMarginLeft;
+	const int bodyMarginLeft = blockBodyMarginLeft(s_currentDoc);
+	const int bodyMarginRight = blockBodyMarginRight(s_currentDoc);
+	const int blockMarginTop = cssMarginTopPx(block.style, block.type == BlockType::Heading ? 10 : 4);
+	const int blockMarginBottom = cssMarginBottomPx(block.style, block.type == BlockType::ListItem ? 4 : 8);
+	const int blockMarginLeft = cssMarginLeftPx(block.style, 0);
+	const int blockMarginRight = cssMarginRightPx(block.style, 0);
+	const int paddingTop = cssPaddingTopPx(block.style, block.type == BlockType::Preformatted ? 4 : 0);
+	const int paddingRight = cssPaddingRightPx(block.style, block.type == BlockType::Preformatted ? 4 : 0);
+	const int paddingBottom = cssPaddingBottomPx(block.style, block.type == BlockType::Preformatted ? 4 : 0);
+	const int paddingLeft = cssPaddingLeftPx(block.style, block.type == BlockType::Preformatted ? 4 : 0);
+	const int availableWidth = std::max(1, kContentW - blockIndentForType(block.type) - kDocumentRightPad
+		- bodyMarginLeft - bodyMarginRight - blockMarginLeft - blockMarginRight);
+	const int outerWidth = blockOuterWidth(block, availableWidth);
+	const int outerX = blockOuterX(block, s_currentDoc, availableWidth, outerWidth);
+	const int textX = outerX + paddingLeft;
 	int textW = 0;
 	int textH = 0;
 	switch (block.type) {
 	case BlockType::Heading:
-		textW = kContentW - 34;
-		textH = std::max(kLineH + 4, cssFontSizeOrDefault(block.style, 20) + 2);
+		textW = std::max(1, outerWidth - paddingLeft - paddingRight);
+		textH = std::max(blockTextLineHeight(block) + 4, cssFontSizeOrDefault(block.style, 20) + 2);
 		break;
 	case BlockType::Paragraph:
 	case BlockType::Link:
-		textW = kContentW - 34;
-		textH = wrappedBlockHeight(block.text, (kContentW - 34) / kCharW);
+		textW = std::max(1, outerWidth - paddingLeft - paddingRight);
+		textH = wrappedBlockHeight(block.text, std::max(1, textW / kCharW), false, blockTextLineHeight(block));
 		break;
 	case BlockType::ListItem:
-		textW = kContentW - 44;
-		textH = wrappedBlockHeight(block.text, (kContentW - 44) / kCharW);
+		textW = std::max(1, outerWidth - paddingLeft - paddingRight);
+		textH = wrappedBlockHeight(block.text, std::max(1, textW / kCharW), false, blockTextLineHeight(block));
 		break;
 	case BlockType::Preformatted:
-		textW = kContentW - 34;
-		textH = wrappedBlockHeight(block.text, (kContentW - 34) / kCharW, true) + blockPadding * 2;
+		textW = std::max(1, outerWidth - paddingLeft - paddingRight);
+		textH = wrappedBlockHeight(block.text, std::max(1, textW / kCharW), true, blockTextLineHeight(block)) + paddingTop + paddingBottom;
 		break;
 	default:
 		break;
 	}
-	return Rect{ textX, drawY + blockMarginTop, std::max(kCharW, textW), std::max(kLineH, textH + blockMarginBottom) };
+	return Rect{ textX, drawY + blockMarginTop + cssBorderTopPx(block.style) + paddingTop, std::max(kCharW, textW), std::max(kLineH, textH + blockMarginBottom) };
 }
 
 Navigator::SelectionPosition Navigator::textPositionFromPoint(int x, int y, bool clampToNearest)
@@ -4207,60 +4545,16 @@ WebDocument Navigator::loadHttpResponseDocument(const std::string& url, const gx
 int Navigator::blockLayoutY(int blockIndex)
 {
 	// Returns the Y coordinate of blockIndex relative to kContentY (pre-scroll).
-	// Spacing constants
-	constexpr int kHeadingPreGap = 10;  // extra space BEFORE a Heading (except the first)
-	constexpr int kPreWrapCols   = (kContentW - 34) / kCharW;
-	const     int kWrapCols      = (kContentW - 34) / kCharW;
-	const     int kListWrapCols  = (kContentW - 44) / kCharW;
-
-	int y = kHeadingY + (s_currentDoc.bodyStyle.marginTop >= 0 ? s_currentDoc.bodyStyle.marginTop : 0);
+	const int bodyTop = s_currentDoc.bodyStyle.marginTop >= 0 ? s_currentDoc.bodyStyle.marginTop : 0;
+	int y = kHeadingY + bodyTop;
 	for (int i = 0; i < blockIndex && i < static_cast<int>(s_currentDoc.blocks.size()); ++i) {
 		const DocBlock& b    = s_currentDoc.blocks[i];
-		const int marginTop = b.style.marginTop >= 0 ? b.style.marginTop : (b.type == BlockType::Heading ? 10 : 4);
-		const int marginBottom = b.style.marginBottom >= 0 ? b.style.marginBottom : (b.type == BlockType::ListItem ? 4 : 8);
-		const int padding = cssPaddingOrDefault(b.style, b.type == BlockType::Preformatted ? 4 : 0);
-		const int headingHeight = std::max(kLineH + 4, cssFontSizeOrDefault(b.style, 20) + 2);
-		// Apply pre-gap before the *next* block when the next block is a Heading
-		// and the current block is not the first block.
 		bool nextIsHeading = false;
 		if (i + 1 < blockIndex &&
 			i + 1 < static_cast<int>(s_currentDoc.blocks.size())) {
 			nextIsHeading = (s_currentDoc.blocks[i + 1].type == BlockType::Heading);
 		}
-		int h = 0;
-		switch (b.type) {
-		case BlockType::Heading:
-			h = marginTop + headingHeight + marginBottom;
-			break;
-		case BlockType::Paragraph:
-			h = marginTop + wrappedBlockHeight(b.text, kWrapCols) + marginBottom + (nextIsHeading ? kHeadingPreGap : 0);
-			break;
-		case BlockType::Link:
-			h = marginTop + wrappedBlockHeight(b.text, kWrapCols) + marginBottom + (nextIsHeading ? kHeadingPreGap : 0);
-			break;
-		case BlockType::ListItem:
-			h = marginTop + wrappedBlockHeight(b.text, kListWrapCols) + marginBottom + (nextIsHeading ? kHeadingPreGap : 0);
-			break;
-		case BlockType::Preformatted:
-			h = marginTop + wrappedBlockHeight(b.text, kPreWrapCols, true) + padding * 2 + marginBottom + (nextIsHeading ? kHeadingPreGap : 0);
-			break;
-		case BlockType::FormTextInput:
-		case BlockType::FormCheckbox:
-		case BlockType::FormRadio:
-		case BlockType::FormTextarea:
-		case BlockType::FormSelect:
-		case BlockType::FormSubmit:
-			h = marginTop + formControlHeight(b) + marginBottom + (nextIsHeading ? kHeadingPreGap : 0);
-			break;
-		case BlockType::Image: {
-			int imageW = 0;
-			int imageH = 0;
-			imageDisplaySize(b, imageW, imageH);
-			h = marginTop + imageH + marginBottom + (nextIsHeading ? kHeadingPreGap : 0);
-			break;
-		}
-		}
-		y += h;
+		y += blockTotalHeight(b, s_currentDoc, nextIsHeading);
 	}
 	return y;
 }
@@ -4269,16 +4563,25 @@ Navigator::Rect Navigator::linkBlockRect(int blockIndex)
 {
 	// The entire wrapped link height is clickable.
 	// TODO: per-line hit testing when proportional text measurement is available.
-	const int kWrapCols = (kContentW - 34) / kCharW;
 	const DocBlock& block = s_currentDoc.blocks[blockIndex];
-	const int bodyMarginLeft = s_currentDoc.bodyStyle.marginLeft >= 0 ? s_currentDoc.bodyStyle.marginLeft : 0;
-	const int blockMarginLeft = block.style.marginLeft >= 0 ? block.style.marginLeft : 0;
-	const int blockMarginTop = block.style.marginTop >= 0 ? block.style.marginTop : 4;
+	if (!blockHasVisibleCss(block)) return Rect{0, 0, 0, 0};
+	const int bodyMarginLeft = blockBodyMarginLeft(s_currentDoc);
+	const int bodyMarginRight = blockBodyMarginRight(s_currentDoc);
+	const int blockMarginTop = cssMarginTopPx(block.style, 4);
+	const int blockMarginLeft = cssMarginLeftPx(block.style, 0);
+	const int blockMarginRight = cssMarginRightPx(block.style, 0);
+	const int paddingLeft = cssPaddingLeftPx(block.style, 0);
+	const int paddingRight = cssPaddingRightPx(block.style, 0);
+	const int availableWidth = std::max(1, kContentW - blockIndentForType(block.type) - kDocumentRightPad
+		- bodyMarginLeft - bodyMarginRight - blockMarginLeft - blockMarginRight);
+	const int outerWidth = blockOuterWidth(block, availableWidth);
+	const int outerX = blockOuterX(block, s_currentDoc, availableWidth, outerWidth);
+	const int innerWidth = std::max(1, outerWidth - paddingLeft - paddingRight);
 	int relY  = blockLayoutY(blockIndex);
-	int drawY = kContentY + relY - s_scrollOffset + blockMarginTop;
-	int h     = wrappedBlockHeight(block.text, kWrapCols);
-	int w     = std::min(static_cast<int>(block.text.size()) * kCharW, kContentW - 34);
-	return Rect{ kContentX + 18 + bodyMarginLeft + blockMarginLeft, drawY, w, h };
+	int drawY = kContentY + relY - s_scrollOffset + blockMarginTop + cssBorderTopPx(block.style) + cssPaddingTopPx(block.style, 0);
+	int h     = wrappedBlockHeight(block.text, std::max(1, innerWidth / kCharW), false, blockTextLineHeight(block));
+	int w     = std::min(static_cast<int>(block.text.size()) * kCharW, innerWidth);
+	return Rect{ outerX + paddingLeft, drawY, w, h };
 }
 
 Navigator::Rect Navigator::formControlRect(int blockIndex)
@@ -4287,66 +4590,34 @@ Navigator::Rect Navigator::formControlRect(int blockIndex)
 		return Rect{0, 0, 0, 0};
 	}
 	const DocBlock& block = s_currentDoc.blocks[blockIndex];
-	const int bodyMarginLeft = s_currentDoc.bodyStyle.marginLeft >= 0 ? s_currentDoc.bodyStyle.marginLeft : 0;
-	const int blockMarginLeft = block.style.marginLeft >= 0 ? block.style.marginLeft : 0;
-	const int blockMarginTop = block.style.marginTop >= 0 ? block.style.marginTop : 4;
+	if (!blockHasVisibleCss(block)) return Rect{0, 0, 0, 0};
+	const int bodyMarginLeft = blockBodyMarginLeft(s_currentDoc);
+	const int bodyMarginRight = blockBodyMarginRight(s_currentDoc);
+	const int blockMarginLeft = cssMarginLeftPx(block.style, 0);
+	const int blockMarginRight = cssMarginRightPx(block.style, 0);
+	const int blockMarginTop = cssMarginTopPx(block.style, 4);
+	const int paddingLeft = cssPaddingLeftPx(block.style, 0);
+	const int paddingTop = cssPaddingTopPx(block.style, 0);
+	const int availableWidth = std::max(1, kContentW - blockIndentForType(block.type) - kDocumentRightPad
+		- bodyMarginLeft - bodyMarginRight - blockMarginLeft - blockMarginRight);
+	const int outerWidth = blockOuterWidth(block, availableWidth);
+	const int outerX = blockOuterX(block, s_currentDoc, availableWidth, outerWidth);
 	const int relY = blockLayoutY(blockIndex);
-	const int drawY = kContentY + relY - s_scrollOffset + blockMarginTop;
+	const int drawY = kContentY + relY - s_scrollOffset + blockMarginTop + cssBorderTopPx(block.style) + paddingTop;
 	int w = kFormInputW;
 	if (block.type == BlockType::FormSubmit) w = kFormSubmitW;
 	else if (block.type == BlockType::FormCheckbox || block.type == BlockType::FormRadio) w = 260;
-	return Rect{ kContentX + 18 + bodyMarginLeft + blockMarginLeft, drawY, w, formControlHeight(block) };
+	return Rect{ outerX + paddingLeft, drawY, w, formControlHeight(block) };
 }
 
 int Navigator::computeDocumentHeight()
 {
-	constexpr int kHeadingPreGap = 10;
-	constexpr int kPreWrapCols   = (kContentW - 34) / kCharW;
-	const     int kWrapCols      = (kContentW - 34) / kCharW;
-	const     int kListWrapCols  = (kContentW - 44) / kCharW;
-
 	int h = kHeadingY + (s_currentDoc.bodyStyle.marginTop >= 0 ? s_currentDoc.bodyStyle.marginTop : 0);
 	const int n = static_cast<int>(s_currentDoc.blocks.size());
 	for (int idx = 0; idx < n; ++idx) {
 		const DocBlock& block = s_currentDoc.blocks[idx];
-		const int marginTop = block.style.marginTop >= 0 ? block.style.marginTop : (block.type == BlockType::Heading ? 10 : 4);
-		const int marginBottom = block.style.marginBottom >= 0 ? block.style.marginBottom : (block.type == BlockType::ListItem ? 4 : 8);
-		const int padding = cssPaddingOrDefault(block.style, block.type == BlockType::Preformatted ? 4 : 0);
-		const int headingFontSize = cssFontSizeOrDefault(block.style, block.tagName == "h1" ? 24 : (block.tagName == "h2" ? 20 : (block.tagName == "h3" ? 18 : 20)));
-		const int headingHeight = std::max(kLineH + 4, headingFontSize + 2);
 		bool nextIsHeading = (idx + 1 < n && s_currentDoc.blocks[idx + 1].type == BlockType::Heading);
-		switch (block.type) {
-		case BlockType::Heading:
-			h += marginTop + headingHeight + marginBottom;
-			break;
-		case BlockType::Paragraph:
-			h += marginTop + wrappedBlockHeight(block.text, kWrapCols) + marginBottom + (nextIsHeading ? kHeadingPreGap : 0);
-			break;
-		case BlockType::Link:
-			h += marginTop + wrappedBlockHeight(block.text, kWrapCols) + marginBottom + (nextIsHeading ? kHeadingPreGap : 0);
-			break;
-		case BlockType::ListItem:
-			h += marginTop + wrappedBlockHeight(block.text, kListWrapCols) + marginBottom + (nextIsHeading ? kHeadingPreGap : 0);
-			break;
-		case BlockType::Preformatted:
-			h += marginTop + wrappedBlockHeight(block.text, kPreWrapCols, true) + padding * 2 + marginBottom + (nextIsHeading ? kHeadingPreGap : 0);
-			break;
-		case BlockType::FormTextInput:
-		case BlockType::FormCheckbox:
-		case BlockType::FormRadio:
-		case BlockType::FormTextarea:
-		case BlockType::FormSelect:
-		case BlockType::FormSubmit:
-			h += marginTop + formControlHeight(block) + marginBottom + (nextIsHeading ? kHeadingPreGap : 0);
-			break;
-		case BlockType::Image: {
-			int imageW = 0;
-			int imageH = 0;
-			imageDisplaySize(block, imageW, imageH);
-			h += marginTop + imageH + marginBottom + (nextIsHeading ? kHeadingPreGap : 0);
-			break;
-		}
-		}
+		h += blockTotalHeight(block, s_currentDoc, nextIsHeading);
 	}
 	return h + (s_currentDoc.bodyStyle.marginBottom >= 0 ? s_currentDoc.bodyStyle.marginBottom : 8);
 }

@@ -42,6 +42,26 @@ enum class StyleSelectorType : uint8_t {
 	Id      = 2,
 };
 
+enum class TextAlign : uint8_t {
+	Inherit = 0,
+	Left    = 1,
+	Center  = 2,
+	Right   = 3,
+};
+
+struct HtmlElementRef {
+	std::string tagName;
+	std::string className;
+	std::string id;
+	std::string inlineStyle;
+};
+
+struct CssSelectorPart {
+	std::string tagName;
+	std::vector<std::string> classNames;
+	std::string id;
+};
+
 struct WebStyle {
 	bool     hasColor = false;
 	uint32_t color = 0;
@@ -49,24 +69,50 @@ struct WebStyle {
 	uint32_t backgroundColor = 0;
 	bool     bold = false;
 	bool     underline = false;
+	bool     displayNone = false;
+	TextAlign textAlign = TextAlign::Inherit;
 	int      marginTop = -1;
+	int      marginRight = -1;
 	int      marginBottom = -1;
 	int      marginLeft = -1;
 	int      padding = -1;
+	int      paddingTop = -1;
+	int      paddingRight = -1;
+	int      paddingBottom = -1;
+	int      paddingLeft = -1;
 	int      fontScaleOrSize = -1;
+	int      lineHeight = -1;
+	int      width = -1;
+	int      widthPercent = -1;
+	int      maxWidth = -1;
+	int      maxWidthPercent = -1;
+	bool     hasBorderTop = false;
+	int      borderTopWidth = 0;
+	uint32_t borderTopColor = 0;
+	bool     hasBorderBottom = false;
+	int      borderBottomWidth = 0;
+	uint32_t borderBottomColor = 0;
 };
 
 struct WebStyleRule {
 	StyleSelectorType selectorType = StyleSelectorType::Element;
 	std::string       selector;
+	int               specificity = 0;
+	std::vector<CssSelectorPart> selectorParts;
 	WebStyle          style;
 };
 
 struct CssDiagnostics {
+	bool   cssEnabled = false;
 	bool   cssDetected = false;
 	int    styleRuleCount = 0;
+	int    styleBlockCount = 0;
+	int    inlineStyleCount = 0;
+	int    externalStylesheetLoadedCount = 0;
 	int    unsupportedExternalStylesheetCount = 0;
+	int    unsupportedRuleCount = 0;
 	int    unsupportedDeclarationCount = 0;
+	int    parseErrorCount = 0;
 	bool   styleBlockCapped = false;
 	size_t styleBytesProcessed = 0;
 };
@@ -101,6 +147,8 @@ struct DocBlock {
 	std::string tagName;
 	std::string className;
 	std::string id;
+	std::string inlineStyle;
+	std::vector<HtmlElementRef> ancestors;
 	WebStyle    style;
 	int         formIndex = -1;
 	std::string formAction;
@@ -123,6 +171,8 @@ struct WebDocument {
 	std::string           url;
 	std::string           title;
 	std::vector<DocBlock> blocks;
+	HtmlElementRef        bodyElement;
+	bool                  hasBodyElement = false;
 	WebStyle              bodyStyle;
 	std::vector<WebStyleRule> styleRules;
 	CssDiagnostics        cssDiagnostics;
