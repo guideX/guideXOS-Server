@@ -548,6 +548,56 @@ static std::string navigatorHostedSmokeDiagnostic() {
         hasPositiveCount(cssInlinePolishReport, "Current Document.CSS inline styles="),
         "report=\"" + summarizeText(cssInlinePolishReport, 260) + "\"");
 
+    bool cssInline1dLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-inline-1d.html");
+    std::string cssInline1dText = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    std::string cssInline1dReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    add("CSS inline 1D fixture loads",
+        cssInline1dLoaded &&
+        contains(cssInline1dText, "Span color") &&
+        contains(cssInline1dText, "Strong text") &&
+        contains(cssInline1dText, "Bold text") &&
+        contains(cssInline1dText, "Emphasis text") &&
+        contains(cssInline1dText, "Italic text") &&
+        contains(cssInline1dText, "Small text") &&
+        contains(cssInline1dText, "code sample") &&
+        contains(cssInline1dText, "Link text") &&
+        contains(cssInline1dText, "Line one") &&
+        contains(cssInline1dText, "Line two"),
+        "currentUrl=" + gxos::apps::Navigator::SmokeCurrentUrl());
+    add("CSS inline 1D diagnostics",
+        contains(cssInline1dReport, "Current Document.CSS enabled=yes") &&
+        hasPositiveCount(cssInline1dReport, "Current Document.CSS line breaks parsed="),
+        "report=\"" + summarizeText(cssInline1dReport, 260) + "\"");
+
+    bool cssInline1dVisitedTargetLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/basic.html");
+    bool cssInline1dReloaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-inline-1d.html");
+    std::string cssInline1dVisitedReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    add("CSS inline visited link styling",
+        cssInline1dVisitedTargetLoaded && cssInline1dReloaded &&
+        hasPositiveCount(cssInline1dVisitedReport, "Current Document.CSS visited links styled="),
+        "report=\"" + summarizeText(cssInline1dVisitedReport, 260) + "\"");
+
+    bool cssTable1dLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-table-1d.html");
+    std::string cssTable1dText = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    std::string cssTable1dReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    add("CSS table 1D fixture loads",
+        cssTable1dLoaded &&
+        contains(cssTable1dText, "Navigator Table Caption") &&
+        contains(cssTable1dText, "Name") &&
+        contains(cssTable1dText, "Value") &&
+        contains(cssTable1dText, "Notes") &&
+        contains(cssTable1dText, "linked cell") &&
+        contains(cssTable1dText, "code sample") &&
+        contains(cssTable1dText, "small note") &&
+        contains(cssTable1dText, "Wrapper spacing stays readable."),
+        "currentUrl=" + gxos::apps::Navigator::SmokeCurrentUrl());
+    add("CSS table 1D diagnostics",
+        contains(cssTable1dReport, "Current Document.CSS enabled=yes") &&
+        hasPositiveCount(cssTable1dReport, "Current Document.CSS table captions rendered=") &&
+        hasPositiveCount(cssTable1dReport, "Current Document.CSS table header cells rendered=") &&
+        hasPositiveCount(cssTable1dReport, "Current Document.CSS visited links styled="),
+        "report=\"" + summarizeText(cssTable1dReport, 260) + "\"");
+
     bool cssHrLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-hr.html");
     std::string cssHrText = gxos::apps::Navigator::SmokeCurrentDocumentText();
     std::string cssHrReport = gxos::apps::Navigator::SmokeRuntimeReport();

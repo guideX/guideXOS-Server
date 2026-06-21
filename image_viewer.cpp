@@ -1,12 +1,14 @@
 #include "image_viewer.h"
 
 #include "open_dialog.h"
+#include "save_dialog.h"
 #include "gui_protocol.h"
 #include "kernel/core/include/kernel/image_adapter.h"
 #include "logger.h"
 #include "vfs.h"
 
 #include <algorithm>
+#include <cstddef>
 #include <chrono>
 #include <cctype>
 #include <cstdlib>
@@ -21,6 +23,8 @@ uint64_t ImageViewer::s_windowId = 0;
 int ImageViewer::s_windowW = ImageViewer::kWinW;
 int ImageViewer::s_windowH = ImageViewer::kWinH;
 std::string ImageViewer::s_filePath;
+std::string ImageViewer::s_originalPath;
+std::string ImageViewer::s_displayPath;
 std::string ImageViewer::s_currentDirectory;
 std::string ImageViewer::s_fileName;
 std::string ImageViewer::s_windowTitle = "Image Viewer";
@@ -30,6 +34,7 @@ std::string ImageViewer::s_noticeText;
 gui::ImagePtr ImageViewer::s_image;
 int ImageViewer::s_originalW = 0;
 int ImageViewer::s_originalH = 0;
+bool ImageViewer::s_isDirty = false;
 float ImageViewer::s_zoomLevel = 1.0f;
 ImageViewer::ZoomMode ImageViewer::s_zoomMode = ImageViewer::ZoomMode::FitToWindow;
 int ImageViewer::s_panX = 0;
@@ -110,15 +115,254 @@ static std::string joinStatusText(const std::string& base, const std::string& ex
     return base + " | " + extra;
 }
 
+static void appendByte(std::vector<uint8_t>& out, uint8_t value) {
+    out.push_back(value);
+}
+
+static void appendUint16LE(std::vector<uint8_t>& out, uint16_t value) {
+    out.push_back(static_cast<uint8_t>(value & 0xFF));
+    out.push_back(static_cast<uint8_t>((value >> 8) & 0xFF));
+}
+
+static void appendUint32BE(std::vector<uint8_t>& out, uint32_t value) {
+    out.push_back(static_cast<uint8_t>((value >> 24) & 0xFF));
+    out.push_back(static_cast<uint8_t>((value >> 16) & 0xFF));
+    out.push_back(static_cast<uint8_t>((value >> 8) & 0xFF));
+    out.push_back(static_cast<uint8_t>(value & 0xFF));
+}
+
+static uint32_t crc32ForBytes(const uint8_t* data, size_t size) {
+    static uint32_t table[256];
+    static bool initialized = false;
+    if (!initialized) {
+        for (uint32_t i = 0; i < 256; ++i) {
+            uint32_t c = i;
+            for (int bit = 0; bit < 8; ++bit) {
+                if (c & 1u) {
+                    c = 0xEDB88320u ^ (c >> 1);
+                } else {
+                    c >>= 1;
+                }
+            }
+            table[i] = c;
+        }
+        initialized = true;
+    }
+
+    uint32_t crc = 0xFFFFFFFFu;
+    for (size_t i = 0; i < size; ++i) {
+        crc = table[(crc ^ data[i]) & 0xFFu] ^ (crc >> 8);
+    }
+    return crc ^ 0xFFFFFFFFu;
+}
+
+static uint32_t adler32ForBytes(const uint8_t* data, size_t size) {
+    const uint32_t kMod = 65521u;
+    uint32_t a = 1u;
+    uint32_t b = 0u;
+    for (size_t i = 0; i < size; ++i) {
+        a = (a + data[i]) % kMod;
+        b = (b + a) % kMod;
+    }
+    return (b << 16) | a;
+}
+
+static void appendPngChunk(std::vector<uint8_t>& out, const char type[4], const std::vector<uint8_t>& data) {
+    appendUint32BE(out, static_cast<uint32_t>(data.size()));
+    const size_t start = out.size();
+    out.push_back(static_cast<uint8_t>(type[0]));
+    out.push_back(static_cast<uint8_t>(type[1]));
+    out.push_back(static_cast<uint8_t>(type[2]));
+    out.push_back(static_cast<uint8_t>(type[3]));
+    out.insert(out.end(), data.begin(), data.end());
+    const uint32_t crc = crc32ForBytes(out.data() + start, 4u + data.size());
+    appendUint32BE(out, crc);
+}
+
+static std::string sanitizePathComponent(std::string value) {
+    for (char& ch : value) {
+        switch (ch) {
+        case '/':
+        case '\\':
+        case ':':
+        case '*':
+        case '?':
+        case '"':
+        case '<':
+        case '>':
+        case '|':
+            ch = '_';
+            break;
+        default:
+            break;
+        }
+    }
+    return value;
+}
+
+static std::string makeEditedPreviewPath(const std::string& originalPath, uint64_t windowId) {
+    std::filesystem::path source(originalPath.empty() ? "image.png" : originalPath);
+    std::string baseName = source.stem().string();
+    if (baseName.empty()) baseName = "image";
+    baseName = sanitizePathComponent(baseName);
+    std::filesystem::path preview = std::filesystem::path("tmp") / "imageviewer" / (baseName + "-" + std::to_string(windowId) + "-preview.png");
+    return preview.generic_string();
+}
+
+static gui::ImagePtr rotateImageLeft(const gui::ImagePtr& image) {
+    if (!image || !image->isValid() || image->Channels < 4) return nullptr;
+    gui::ImagePtr rotated = std::make_shared<gui::Image>(image->Height, image->Width, image->Channels);
+    if (!rotated || !rotated->isValid()) return nullptr;
+    const int channels = image->Channels;
+    for (int y = 0; y < image->Height; ++y) {
+        for (int x = 0; x < image->Width; ++x) {
+            const uint8_t* src = image->Pixels + (static_cast<size_t>(y) * image->Width + x) * channels;
+            const int dstX = y;
+            const int dstY = image->Width - 1 - x;
+            uint8_t* dst = rotated->Pixels + (static_cast<size_t>(dstY) * rotated->Width + dstX) * channels;
+            for (int c = 0; c < channels; ++c) dst[c] = src[c];
+        }
+    }
+    return rotated;
+}
+
+static gui::ImagePtr rotateImageRight(const gui::ImagePtr& image) {
+    if (!image || !image->isValid() || image->Channels < 4) return nullptr;
+    gui::ImagePtr rotated = std::make_shared<gui::Image>(image->Height, image->Width, image->Channels);
+    if (!rotated || !rotated->isValid()) return nullptr;
+    const int channels = image->Channels;
+    for (int y = 0; y < image->Height; ++y) {
+        for (int x = 0; x < image->Width; ++x) {
+            const uint8_t* src = image->Pixels + (static_cast<size_t>(y) * image->Width + x) * channels;
+            const int dstX = image->Height - 1 - y;
+            const int dstY = x;
+            uint8_t* dst = rotated->Pixels + (static_cast<size_t>(dstY) * rotated->Width + dstX) * channels;
+            for (int c = 0; c < channels; ++c) dst[c] = src[c];
+        }
+    }
+    return rotated;
+}
+
+static gui::ImagePtr flipImageHorizontal(const gui::ImagePtr& image) {
+    if (!image || !image->isValid() || image->Channels < 4) return nullptr;
+    gui::ImagePtr flipped = std::make_shared<gui::Image>(image->Width, image->Height, image->Channels);
+    if (!flipped || !flipped->isValid()) return nullptr;
+    const int channels = image->Channels;
+    for (int y = 0; y < image->Height; ++y) {
+        for (int x = 0; x < image->Width; ++x) {
+            const uint8_t* src = image->Pixels + (static_cast<size_t>(y) * image->Width + x) * channels;
+            const int dstX = image->Width - 1 - x;
+            const int dstY = y;
+            uint8_t* dst = flipped->Pixels + (static_cast<size_t>(dstY) * flipped->Width + dstX) * channels;
+            for (int c = 0; c < channels; ++c) dst[c] = src[c];
+        }
+    }
+    return flipped;
+}
+
+static gui::ImagePtr flipImageVertical(const gui::ImagePtr& image) {
+    if (!image || !image->isValid() || image->Channels < 4) return nullptr;
+    gui::ImagePtr flipped = std::make_shared<gui::Image>(image->Width, image->Height, image->Channels);
+    if (!flipped || !flipped->isValid()) return nullptr;
+    const int channels = image->Channels;
+    for (int y = 0; y < image->Height; ++y) {
+        for (int x = 0; x < image->Width; ++x) {
+            const uint8_t* src = image->Pixels + (static_cast<size_t>(y) * image->Width + x) * channels;
+            const int dstX = x;
+            const int dstY = image->Height - 1 - y;
+            uint8_t* dst = flipped->Pixels + (static_cast<size_t>(dstY) * flipped->Width + dstX) * channels;
+            for (int c = 0; c < channels; ++c) dst[c] = src[c];
+        }
+    }
+    return flipped;
+}
+
+static bool encodePng(const gui::ImagePtr& image, std::vector<uint8_t>& bytes, std::string& error) {
+    bytes.clear();
+    error.clear();
+
+    if (!image || !image->isValid() || image->Channels < 4) {
+        error = "Current image is not a valid RGBA image";
+        return false;
+    }
+    if (image->Width <= 0 || image->Height <= 0) {
+        error = "Current image has invalid dimensions";
+        return false;
+    }
+
+    bytes.insert(bytes.end(), { 0x89, 'P', 'N', 'G', '\r', '\n', 0x1A, '\n' });
+
+    std::vector<uint8_t> ihdr;
+    ihdr.reserve(13);
+    appendUint32BE(ihdr, static_cast<uint32_t>(image->Width));
+    appendUint32BE(ihdr, static_cast<uint32_t>(image->Height));
+    appendByte(ihdr, 8);  // bit depth
+    appendByte(ihdr, 6);  // color type RGBA
+    appendByte(ihdr, 0);  // compression
+    appendByte(ihdr, 0);  // filter
+    appendByte(ihdr, 0);  // interlace
+    appendPngChunk(bytes, "IHDR", ihdr);
+
+    std::vector<uint8_t> raw;
+    const size_t rowBytes = 1u + static_cast<size_t>(image->Width) * 4u;
+    raw.reserve(rowBytes * static_cast<size_t>(image->Height));
+    for (int y = 0; y < image->Height; ++y) {
+        raw.push_back(0);  // filter type 0
+        for (int x = 0; x < image->Width; ++x) {
+            const uint8_t* src = image->Pixels + (static_cast<size_t>(y) * image->Width + x) * image->Channels;
+            raw.push_back(src[0]);
+            raw.push_back(src[1]);
+            raw.push_back(src[2]);
+            raw.push_back(src[3]);
+        }
+    }
+
+    std::vector<uint8_t> zlibData;
+    zlibData.reserve(raw.size() + (raw.size() / 65535u + 2u) * 5u + 6u);
+    zlibData.push_back(0x78);
+    zlibData.push_back(0x01);
+
+    size_t offset = 0;
+    while (offset < raw.size()) {
+        const size_t blockLen = std::min<size_t>(65535u, raw.size() - offset);
+        const bool finalBlock = offset + blockLen >= raw.size();
+        zlibData.push_back(finalBlock ? 0x01 : 0x00);
+        appendUint16LE(zlibData, static_cast<uint16_t>(blockLen));
+        appendUint16LE(zlibData, static_cast<uint16_t>(~static_cast<uint16_t>(blockLen)));
+        zlibData.insert(zlibData.end(), raw.begin() + offset, raw.begin() + offset + blockLen);
+        offset += blockLen;
+    }
+
+    appendUint32BE(zlibData, adler32ForBytes(raw.data(), raw.size()));
+    appendPngChunk(bytes, "IDAT", zlibData);
+    appendPngChunk(bytes, "IEND", {});
+    return true;
+}
+
+static bool writePngToVfs(const std::string& path, const gui::ImagePtr& image, std::string& error) {
+    std::vector<uint8_t> bytes;
+    if (!encodePng(image, bytes, error)) {
+        return false;
+    }
+    if (!Vfs::instance().writeFile(path, bytes)) {
+        error = "Failed to write PNG preview to VFS path: " + path;
+        return false;
+    }
+    return true;
+}
+
 } // namespace
 
 uint64_t ImageViewer::Launch(const std::string& filePath) {
     s_filePath = filePath;
+    s_originalPath = filePath;
+    s_displayPath = filePath;
     s_currentDirectory = normalizeFolderPath(filePath);
     s_fileName = displayNameForPath(filePath);
     s_windowId = 0;
     s_windowW = kWinW;
     s_windowH = kWinH;
+    s_isDirty = false;
     s_zoomMode = ZoomMode::FitToWindow;
     s_zoomLevel = 1.0f;
     s_panX = 0;
@@ -250,8 +494,8 @@ void ImageViewer::clampPanForCurrentImage() {
 
 void ImageViewer::contentMetrics(int& contentLeft, int& contentTop, int& contentWidth, int& contentHeight) {
     const int titleBarH = 32;
-    const int statusBarH = 28;
-    const int buttonBarH = 44;
+    const int statusBarH = 22;
+    const int buttonBarH = 70;
     const int margin = 12;
 
     contentTop = titleBarH + margin;
@@ -386,6 +630,10 @@ std::string ImageViewer::statusText() {
         oss << " | " << position;
     }
 
+    if (s_isDirty) {
+        oss << " | Modified";
+    }
+
     if (!s_noticeText.empty()) {
         oss << " | " << s_noticeText;
     }
@@ -400,6 +648,9 @@ std::string ImageViewer::statusText() {
 void ImageViewer::refreshWindowTitle() {
     if (s_windowId == 0) return;
     s_windowTitle = s_fileName.empty() ? "Image Viewer" : "Image Viewer - " + s_fileName;
+    if (s_isDirty) {
+        s_windowTitle += " *";
+    }
     publishMessage(gui::MsgType::MT_SetTitle, std::to_string(s_windowId) + "|" + s_windowTitle);
 }
 
@@ -414,11 +665,14 @@ void ImageViewer::showUnsupportedFormat(const std::string& path) {
 
     if (!hadImage) {
         s_filePath = path;
+        s_originalPath = path;
+        s_displayPath.clear();
         s_currentDirectory = normalizeFolderPath(path);
         s_fileName = displayNameForPath(path);
         s_image.reset();
         s_originalW = 0;
         s_originalH = 0;
+        s_isDirty = false;
         s_zoomMode = ZoomMode::FitToWindow;
         s_zoomLevel = 1.0f;
         s_panX = 0;
@@ -500,10 +754,13 @@ bool ImageViewer::loadImagePath(const std::string& path, bool refreshFolderList,
         s_noticeText.clear();
         if (!hadImage || !preserveZoomMode) {
             s_filePath = path;
+            s_originalPath = path;
+            s_displayPath.clear();
             s_fileName = name;
             s_image.reset();
             s_originalW = 0;
             s_originalH = 0;
+            s_isDirty = false;
             s_zoomMode = ZoomMode::FitToWindow;
             s_zoomLevel = 1.0f;
             s_panX = 0;
@@ -527,12 +784,15 @@ bool ImageViewer::loadImagePath(const std::string& path, bool refreshFolderList,
     }
 
     s_filePath = path;
+    s_originalPath = path;
+    s_displayPath = path;
     s_fileName = displayNameForPath(path);
     s_image = loaded.image;
     s_originalW = s_image->Width;
     s_originalH = s_image->Height;
     s_hasTransparency = detectTransparency(s_image);
     s_backgroundMode = s_hasTransparency ? BackgroundMode::Checkerboard : BackgroundMode::Solid;
+    s_isDirty = false;
     s_errorText.clear();
     s_noticeText.clear();
 
@@ -599,7 +859,13 @@ bool ImageViewer::navigateRelative(int delta) {
     }
 
     const std::string nextPath = s_folderImages[static_cast<size_t>(nextIndex)];
-    return loadImagePath(nextPath, true, true);
+    const bool wasDirty = s_isDirty;
+    const bool loaded = loadImagePath(nextPath, true, true);
+    if (loaded && wasDirty) {
+        setNoticeText("Unsaved edits discarded");
+        updateDisplayImage();
+    }
+    return loaded;
 }
 
 void ImageViewer::previousImage() {
@@ -620,25 +886,29 @@ void ImageViewer::openImageFromDialog() {
             showUnsupportedFormat(path);
             return;
         }
-        (void)loadImagePath(path, true, false);
+        const bool wasDirty = s_isDirty;
+        if (loadImagePath(path, true, false) && wasDirty) {
+            setNoticeText("Unsaved edits discarded");
+            updateDisplayImage();
+        }
     });
 }
 
 bool ImageViewer::trySetCurrentImageAsWallpaper() {
-    if (!s_image || s_filePath.empty()) {
+    if (!s_image || s_originalPath.empty()) {
         setNoticeText("Load a PNG first");
         updateDisplayImage();
         return false;
     }
 
-    if (!isPngPath(s_filePath)) {
-        showUnsupportedFormat(s_filePath);
+    if (!isPngPath(s_originalPath)) {
+        showUnsupportedFormat(s_originalPath);
         return false;
     }
 
     ipc::Message msg;
     msg.type = static_cast<uint32_t>(gui::MsgType::MT_DesktopWallpaperSet);
-    msg.data.assign(s_filePath.begin(), s_filePath.end());
+    msg.data.assign(s_originalPath.begin(), s_originalPath.end());
     ipc::Bus::publish("gui.input", std::move(msg), false);
     setNoticeText("Wallpaper update requested");
     updateDisplayImage();
@@ -650,6 +920,8 @@ int ImageViewer::main(int argc, char** argv) {
 
     if (argc > 1 && argv[1]) {
         s_filePath = argv[1];
+        s_originalPath = s_filePath;
+        s_displayPath = s_filePath;
         s_currentDirectory = normalizeFolderPath(s_filePath);
         s_fileName = displayNameForPath(s_filePath);
     }
@@ -658,6 +930,7 @@ int ImageViewer::main(int argc, char** argv) {
     s_statusText = s_fileName.empty() ? "No image loaded" : "Loading " + s_fileName + "...";
     s_errorText.clear();
     s_noticeText.clear();
+    s_isDirty = false;
 
     {
         ipc::Message m;
@@ -755,7 +1028,12 @@ int ImageViewer::main(int argc, char** argv) {
                             case 5: zoomOut(); break;
                             case 6: fitToWindow(); break;
                             case 7: resetZoom(); break;
-                            case 8: (void)trySetCurrentImageAsWallpaper(); break;
+                            case 8: RotateCurrentImageLeft(); break;
+                            case 9: RotateCurrentImageRight(); break;
+                            case 10: FlipCurrentImageHorizontal(); break;
+                            case 11: FlipCurrentImageVertical(); break;
+                            case 12: SaveCurrentImageAsCopy(); break;
+                            case 13: (void)trySetCurrentImageAsWallpaper(); break;
                             default: break;
                             }
                         }
@@ -815,6 +1093,120 @@ void ImageViewer::resetZoom() {
     clampZoomForCurrentMode();
     clampPanForCurrentImage();
     updateDisplayImage();
+}
+
+bool ImageViewer::commitEditedImage(const gui::ImagePtr& image, const std::string& notice) {
+    if (!image || !image->isValid()) {
+        return false;
+    }
+
+    s_image = image;
+    s_originalW = s_image->Width;
+    s_originalH = s_image->Height;
+    s_hasTransparency = detectTransparency(s_image);
+    s_backgroundMode = s_hasTransparency ? BackgroundMode::Checkerboard : BackgroundMode::Solid;
+    s_panX = 0;
+    s_panY = 0;
+
+    const std::string previewPath = makeEditedPreviewPath(s_originalPath.empty() ? s_filePath : s_originalPath, s_windowId);
+    std::string error;
+    if (writePngToVfs(previewPath, s_image, error)) {
+        s_displayPath = previewPath;
+        s_errorText.clear();
+    } else {
+        s_displayPath = s_originalPath.empty() ? s_filePath : s_originalPath;
+        s_errorText = error;
+    }
+
+    s_noticeText = notice;
+    MarkModified();
+    clampZoomForCurrentMode();
+    clampPanForCurrentImage();
+    UpdateModifiedTitleStatus();
+    return true;
+}
+
+void ImageViewer::MarkModified() {
+    s_isDirty = true;
+    refreshWindowTitle();
+}
+
+void ImageViewer::UpdateModifiedTitleStatus() {
+    refreshWindowTitle();
+    if (s_image) {
+        updateDisplayImage();
+    } else {
+        updateDisplay();
+    }
+}
+
+void ImageViewer::RotateCurrentImageLeft() {
+    if (!s_image) return;
+    gui::ImagePtr rotated = rotateImageLeft(s_image);
+    if (!rotated) return;
+    (void)commitEditedImage(rotated, "Rotated left");
+}
+
+void ImageViewer::RotateCurrentImageRight() {
+    if (!s_image) return;
+    gui::ImagePtr rotated = rotateImageRight(s_image);
+    if (!rotated) return;
+    (void)commitEditedImage(rotated, "Rotated right");
+}
+
+void ImageViewer::FlipCurrentImageHorizontal() {
+    if (!s_image) return;
+    gui::ImagePtr flipped = flipImageHorizontal(s_image);
+    if (!flipped) return;
+    (void)commitEditedImage(flipped, "Flipped horizontally");
+}
+
+void ImageViewer::FlipCurrentImageVertical() {
+    if (!s_image) return;
+    gui::ImagePtr flipped = flipImageVertical(s_image);
+    if (!flipped) return;
+    (void)commitEditedImage(flipped, "Flipped vertically");
+}
+
+void ImageViewer::SaveCurrentImageAsCopy() {
+    if (!s_image) {
+        setNoticeText("Load a PNG first");
+        updateDisplayImage();
+        return;
+    }
+
+    const std::string startPath = s_currentDirectory.empty() ? std::string("/") : s_currentDirectory;
+    std::filesystem::path defaultNamePath(s_fileName.empty() ? "image.png" : s_fileName);
+    std::string defaultFileName = defaultNamePath.stem().string();
+    if (defaultFileName.empty()) {
+        defaultFileName = "image";
+    }
+    defaultFileName += "-copy.png";
+
+    dialogs::SaveDialog::Show(0, 0, startPath, defaultFileName, [](const std::string& path) {
+        if (path.empty()) {
+            return;
+        }
+
+        std::filesystem::path chosen(path);
+        chosen.replace_extension(".png");
+        const std::string finalPath = chosen.generic_string();
+        if (ImageViewer::safeEqualsPath(finalPath, ImageViewer::s_originalPath)) {
+            ImageViewer::setNoticeText("Save As Copy refused: cannot overwrite the original file");
+            ImageViewer::updateDisplayImage();
+            return;
+        }
+
+        std::string error;
+        if (!writePngToVfs(finalPath, ImageViewer::s_image, error)) {
+            ImageViewer::setNoticeText("Save As Copy failed: " + error);
+            ImageViewer::updateDisplayImage();
+            return;
+        }
+
+        ImageViewer::setNoticeText("Saved copy to " + finalPath);
+        ImageViewer::updateDisplayImage();
+    });
 }
 
 void ImageViewer::updateDisplayImage() {
@@ -903,7 +1295,7 @@ void ImageViewer::updateDisplay() {
             drawCheckerboardBackground(contentLeft, contentTop, contentWidth, contentHeight);
         }
         publishMessage(gui::MsgType::MT_DrawImage,
-            gui::packDrawImage(s_windowId, drawX, drawY, drawW, drawH, s_filePath));
+            gui::packDrawImage(s_windowId, drawX, drawY, drawW, drawH, s_displayPath.empty() ? s_filePath : s_displayPath));
         if (!s_errorText.empty()) {
             publishWindowTextColor(s_windowId, contentLeft + 8, contentTop + 8, 255, 96, 96, s_errorText);
         }
@@ -916,27 +1308,35 @@ void ImageViewer::updateDisplay() {
     }
 
     const std::string info = statusText();
-    publishWindowText(s_windowId, 12, s_windowH - 22, info, true);
+    publishWindowText(s_windowId, 12, s_windowH - 82, info, true);
 
-    int btnY = s_windowH - 40;
-    int btnH = 26;
-    int gap = 8;
-    int x = 12;
+    const int btnH = 24;
+    const int gap = 8;
+    const int row1Y = s_windowH - 54;
+    const int row2Y = s_windowH - 26;
 
-    auto addBtn = [&](int id, const std::string& label) {
+    auto addBtn = [&](int rowY, int id, const std::string& label, int& x) {
         const int btnW = std::max(44, static_cast<int>(label.size()) * 7 + 18);
-        publishMessage(gui::MsgType::MT_WidgetAdd, gui::packWidgetAdd(s_windowId, 1, id, x, btnY, btnW, btnH, label));
+        publishMessage(gui::MsgType::MT_WidgetAdd, gui::packWidgetAdd(s_windowId, 1, id, x, rowY, btnW, btnH, label));
         x += btnW + gap;
     };
 
-    addBtn(1, "Open");
-    addBtn(2, "Previous");
-    addBtn(3, "Next");
-    addBtn(4, "Zoom In");
-    addBtn(5, "Zoom Out");
-    addBtn(6, "Fit to Window");
-    addBtn(7, "100%");
-    addBtn(8, "Set as Wallpaper");
+    int row1X = 12;
+    addBtn(row1Y, 1, "Open", row1X);
+    addBtn(row1Y, 2, "Previous", row1X);
+    addBtn(row1Y, 3, "Next", row1X);
+    addBtn(row1Y, 4, "Zoom In", row1X);
+    addBtn(row1Y, 5, "Zoom Out", row1X);
+    addBtn(row1Y, 6, "Fit to Window", row1X);
+    addBtn(row1Y, 7, "100%", row1X);
+
+    int row2X = 12;
+    addBtn(row2Y, 8, "Rotate Left", row2X);
+    addBtn(row2Y, 9, "Rotate Right", row2X);
+    addBtn(row2Y, 10, "Flip Horizontal", row2X);
+    addBtn(row2Y, 11, "Flip Vertical", row2X);
+    addBtn(row2Y, 12, "Save As Copy", row2X);
+    addBtn(row2Y, 13, "Set as Wallpaper", row2X);
 }
 
 }} // namespace gxos::apps

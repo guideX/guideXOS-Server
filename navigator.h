@@ -120,6 +120,10 @@ struct NavigatorPageMetadata {
 		int         cssTableLayoutFallbackCount = 0;
 		int         cssListRenderCount = 0;
 		int         cssClampedValueCount = 0;
+		int         cssLineBreakCount = 0;
+		int         cssTableCaptionCount = 0;
+		int         cssTableHeaderCellCount = 0;
+		int         cssVisitedLinkCount = 0;
 	bool        downloaded = false;
 	std::string downloadSavedPath;
 	size_t      downloadByteCount = 0;

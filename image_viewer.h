@@ -41,6 +41,13 @@ namespace gxos { namespace apps {
         static void nextImage();
         static void openImageFromDialog();
         static bool trySetCurrentImageAsWallpaper();
+        static void RotateCurrentImageLeft();
+        static void RotateCurrentImageRight();
+        static void FlipCurrentImageHorizontal();
+        static void FlipCurrentImageVertical();
+        static void MarkModified();
+        static void UpdateModifiedTitleStatus();
+        static void SaveCurrentImageAsCopy();
         static void updateDisplayImage();
         static void updateDisplay();
         static void handleMouseInput(int x, int y, int button, const std::string& action);
@@ -61,6 +68,7 @@ namespace gxos { namespace apps {
         static void setNoticeText(const std::string& text);
         static bool refreshFolderImageList(const std::string& path);
         static bool detectTransparency(const gui::ImagePtr& image);
+        static bool commitEditedImage(const gui::ImagePtr& image, const std::string& notice);
         static void updateImageStatus();
         static void drawCheckerboardBackground(int x, int y, int w, int h);
         static void contentMetrics(int& contentLeft, int& contentTop, int& contentWidth, int& contentHeight);
@@ -78,6 +86,8 @@ namespace gxos { namespace apps {
         static int s_windowW;
         static int s_windowH;
         static std::string s_filePath;
+        static std::string s_originalPath;
+        static std::string s_displayPath;
         static std::string s_currentDirectory;
         static std::string s_fileName;
         static std::string s_windowTitle;
@@ -87,6 +97,7 @@ namespace gxos { namespace apps {
         static gui::ImagePtr s_image;
         static int s_originalW;
         static int s_originalH;
+        static bool s_isDirty;
         static float s_zoomLevel;
         static ZoomMode s_zoomMode;
         static int s_panX;

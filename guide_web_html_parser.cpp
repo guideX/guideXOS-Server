@@ -689,6 +689,19 @@ static bool parseInlineStyleDeclaration(WebStyle& style,
 		++diag.unsupportedDeclarationCount;
 		return false;
 	}
+	if (prop == "font-style") {
+		std::string lower = toLower(val);
+		if (lower == "italic" || lower == "oblique") {
+			style.italic = true;
+			return true;
+		}
+		if (lower == "normal") {
+			style.italic = false;
+			return true;
+		}
+		++diag.unsupportedDeclarationCount;
+		return false;
+	}
 	if (prop == "text-decoration") {
 		std::string lower = toLower(val);
 		style.underline = (lower.find("underline") != std::string::npos);
@@ -910,6 +923,7 @@ static WebStyle mergeStyles(const WebStyle& baseStyle, const WebStyle& overrideS
 		merged.backgroundColor = overrideStyle.backgroundColor;
 	}
 	merged.bold = overrideStyle.bold ? true : merged.bold;
+	merged.italic = overrideStyle.italic ? true : merged.italic;
 	merged.underline = overrideStyle.underline ? true : merged.underline;
 	merged.displayNone = overrideStyle.displayNone ? true : merged.displayNone;
 	merged.listStyleNone = overrideStyle.listStyleNone ? true : merged.listStyleNone;
@@ -992,6 +1006,10 @@ static WebStyle defaultStyleForTag(const std::string& tagName)
 	}
 	if (tagName == "caption") {
 		style.textAlign = TextAlign::Center;
+		style.hasColor = true;
+		style.color = 0xFF5B6472u;
+		style.italic = true;
+		style.fontScaleOrSize = 13;
 		style.marginTop = 4;
 		style.marginBottom = 6;
 		return style;
@@ -1009,7 +1027,10 @@ static WebStyle defaultStyleForTag(const std::string& tagName)
 		style.paddingRight = 6;
 		style.paddingBottom = 4;
 		style.paddingLeft = 6;
-		if (tagName == "th") style.bold = true;
+		if (tagName == "th") {
+			style.bold = true;
+			style.textAlign = TextAlign::Center;
+		}
 		return style;
 	}
 	if (tagName == "hr") {
@@ -1022,6 +1043,28 @@ static WebStyle defaultStyleForTag(const std::string& tagName)
 	}
 	if (tagName == "strong" || tagName == "b") {
 		style.bold = true;
+		return style;
+	}
+	if (tagName == "em" || tagName == "i") {
+		style.italic = true;
+		return style;
+	}
+	if (tagName == "small") {
+		style.hasColor = true;
+		style.color = 0xFF5B6472u;
+		style.fontScaleOrSize = 13;
+		return style;
+	}
+	if (tagName == "code" || tagName == "kbd" || tagName == "samp") {
+		style.hasBackgroundColor = true;
+		style.backgroundColor = 0xFFE6E8EEu;
+		style.marginTop = 4;
+		style.marginBottom = 4;
+		style.paddingTop = 2;
+		style.paddingRight = 4;
+		style.paddingBottom = 2;
+		style.paddingLeft = 4;
+		style.fontScaleOrSize = 14;
 		return style;
 	}
 	if (tagName == "a") {
@@ -1216,6 +1259,7 @@ struct ParserState {
 	std::string  currentTableCellText;
 	std::string  currentTableCaptionText;
 	bool         currentTableCellHeader = false;
+	std::string  currentTableCellHref;
 };
 
 static HtmlElementRef elementRefFromTagBody(const std::string& tagName, const std::string& tagBody)
@@ -1490,7 +1534,8 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 	// Void / structural tags with no direct content effect but meaningful CSS scope.
 	if (name == "html" || name == "head" || name == "ul" || name == "ol" ||
 		name == "div" || name == "span" || name == "strong" || name == "b" ||
-		name == "em" || name == "i" || name == "code" || name == "section" ||
+		name == "em" || name == "i" || name == "small" || name == "code" ||
+		name == "kbd" || name == "samp" || name == "section" ||
 		name == "article" || name == "header" || name == "footer" || name == "nav" ||
 		name == "main" || name == "table" || name == "thead" || name == "tbody" ||
 		name == "tfoot" || name == "tr" || name == "noscript" || name == "form") {
@@ -1531,6 +1576,7 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 		st.open = OpenTag::TableCell;
 		st.currentTableCellText.clear();
 		st.currentTableCellHeader = (name == "th");
+		st.currentTableCellHref.clear();
 		st.classBuf = extractAttr(tagBody, "class");
 		st.idBuf = extractAttr(tagBody, "id");
 		st.styleBuf = extractAttr(tagBody, "style");
@@ -1670,8 +1716,12 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 	// <br> – inside <pre> append a newline to the buffer; outside flush as a
 	// line break only if there is pending text (avoids empty Paragraph blocks).
 	if (name == "br") {
+		++st.doc.cssDiagnostics.lineBreakCount;
 		if (st.inPre) {
 			st.textBuf += '\n';
+		} else if (st.open == OpenTag::TableCell) {
+			flushText(st);
+			st.currentTableCellText += ' ';
 		} else if (!trim(collapseWs(st.textBuf)).empty()) {
 			flushText(st);
 		}
@@ -1731,7 +1781,7 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 	}
 	// <code>: if a <pre> is already open, stay in it; otherwise treat as plain text.
 	if (name == "code") {
-		if (!st.inPre) { /* leave current context; code text flows through */ }
+		pushElement(st, elementRef);
 		return;
 	}
 
@@ -1740,10 +1790,15 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 		if (!href.empty()) {
 			// Resolve relative URL against the document base.
 			st.hrefBuf = resolveRelativeUrl(st.doc.url, href);
+			if (st.open == OpenTag::TableCell) {
+				st.currentTableCellHref = st.hrefBuf;
+			}
 		} else {
 			st.hrefBuf.clear();
 		}
-		st.open = OpenTag::A;
+		if (st.open != OpenTag::TableCell) {
+			st.open = OpenTag::A;
+		}
 		pushElement(st, elementRef);
 		return;
 	}
@@ -1778,7 +1833,7 @@ static void handleCloseTag(ParserState& st, const std::string& tagName)
 
 	// Close block-level contexts.
 	if (name == "h1" || name == "h2" || name == "h3" ||
-		name == "p"  || name == "li" || name == "a"  || name == "title" ||
+		name == "p"  || name == "li" || name == "title" ||
 		name == "button" || name == "textarea" || name == "option") {
 		flushText(st);
 		popElementByName(st, name);
@@ -1795,6 +1850,21 @@ static void handleCloseTag(ParserState& st, const std::string& tagName)
 		if (name == "option") {
 			st.currentOptionValue.clear();
 			st.currentOptionSelected = false;
+		}
+	}
+	if (name == "a") {
+		if (st.open != OpenTag::TableCell) {
+			flushText(st);
+			popElementByName(st, name);
+			st.open = OpenTag::None;
+			st.hrefBuf.clear();
+			st.classBuf.clear();
+			st.idBuf.clear();
+			st.styleBuf.clear();
+		} else {
+			popElementByName(st, name);
+			st.currentTableCellHref = st.currentTableCellHref.empty() ? st.hrefBuf : st.currentTableCellHref;
+			st.hrefBuf.clear();
 		}
 	}
 	if (name == "caption") {
@@ -1815,9 +1885,13 @@ static void handleCloseTag(ParserState& st, const std::string& tagName)
 		flushText(st);
 		DocBlock block = makeTextBlock(BlockType::Paragraph, name, st.currentTableCellText, "",
 			st.classBuf, st.idBuf, captureBlockAncestors(st), st.styleBuf);
+		if (!st.currentTableCellHref.empty()) {
+			block.url = st.currentTableCellHref;
+		}
 		st.doc.blocks.push_back(std::move(block));
 		st.currentTableCellText.clear();
 		st.currentTableCellHeader = false;
+		st.currentTableCellHref.clear();
 		st.open = OpenTag::None;
 		popElementByName(st, name);
 		st.classBuf.clear();
@@ -1887,6 +1961,7 @@ static void handleCloseTag(ParserState& st, const std::string& tagName)
 		popElementByName(st, name);
 	}
 	if (name == "strong" || name == "b" || name == "em" || name == "i" || name == "code" ||
+		name == "small" || name == "kbd" || name == "samp" ||
 		name == "span" || name == "div" || name == "section" || name == "article" ||
 		name == "header" || name == "footer" || name == "nav" || name == "main" ||
 		name == "table" || name == "thead" || name == "tbody" || name == "tfoot" ||

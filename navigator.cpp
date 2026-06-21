@@ -17,6 +17,7 @@
 #include <fstream>
 #include <sstream>
 #include <unordered_map>
+#include <unordered_set>
 #if defined(_WIN32)
 #include <windows.h>
 #endif
@@ -81,6 +82,7 @@ Navigator::SelectionPosition Navigator::s_selectionFocus;
 std::string Navigator::s_navigatorClipboard;
 std::string Navigator::s_clipboardMode = "Navigator internal clipboard";
 std::vector<int> Navigator::s_registeredWidgetIds;
+static std::unordered_set<std::string> s_visitedUrls;
 
 static std::string extractDocumentText(const WebDocument& doc);
 
@@ -157,17 +159,31 @@ namespace {
 
 	void drawTextAtStyled(uint64_t windowId, int x, int y, const std::string& text, const WebStyle& style)
 	{
-		if (!style.hasColor) {
-			drawTextAt(windowId, x, y, text);
+		if (style.hasColor) {
+			int r = static_cast<int>((style.color >> 16) & 0xFFu);
+			int g = static_cast<int>((style.color >> 8) & 0xFFu);
+			int b = static_cast<int>(style.color & 0xFFu);
+			if (style.italic) {
+				r = std::max(0, r - 12);
+				g = std::max(0, g - 12);
+				b = std::max(0, b - 12);
+			}
+			if (style.bold) {
+				drawTextAtColored(windowId, x + 1, y, text, r, g, b);
+			}
+			if (style.italic) {
+				drawTextAtColored(windowId, x, y + 1, text, r, g, b);
+			}
+			drawTextAtColored(windowId, x, y, text, r, g, b);
 			return;
 		}
-		int r = 220;
-		int g = 220;
-		int b = 220;
-		r = static_cast<int>((style.color >> 16) & 0xFFu);
-		g = static_cast<int>((style.color >> 8) & 0xFFu);
-		b = static_cast<int>(style.color & 0xFFu);
-		drawTextAtColored(windowId, x, y, text, r, g, b);
+		if (style.bold) {
+			drawTextAt(windowId, x + 1, y, text);
+		}
+		if (style.italic) {
+			drawTextAt(windowId, x, y + 1, text);
+		}
+		drawTextAt(windowId, x, y, text);
 	}
 
 	void drawImage(uint64_t windowId, int x, int y, int w, int h, const std::string& path)
@@ -716,6 +732,10 @@ namespace {
 		metadata.cssTableLayoutFallbackCount = 0;
 		metadata.cssListRenderCount = 0;
 		metadata.cssClampedValueCount = doc.cssDiagnostics.clampedValueCount;
+		metadata.cssLineBreakCount = doc.cssDiagnostics.lineBreakCount;
+		metadata.cssTableCaptionCount = 0;
+		metadata.cssTableHeaderCellCount = 0;
+		metadata.cssVisitedLinkCount = 0;
 		metadata.formCount = doc.formsDiagnostics.formCount;
 		metadata.formInputCount = doc.formsDiagnostics.textInputCount;
 		metadata.formCheckboxCount = doc.formsDiagnostics.checkboxCount;
@@ -752,6 +772,15 @@ namespace {
 			}
 			if (block.type == BlockType::ListItem) {
 				++metadata.cssListRenderCount;
+			}
+			if (!block.url.empty() && s_visitedUrls.find(block.url) != s_visitedUrls.end()) {
+				++metadata.cssVisitedLinkCount;
+			}
+			if (toLowerAscii(block.tagName) == "caption") {
+				++metadata.cssTableCaptionCount;
+			}
+			if (toLowerAscii(block.tagName) == "th") {
+				++metadata.cssTableHeaderCellCount;
 			}
 			if (isTableCellLikeBlock(block)) {
 				++metadata.cssTableCellCount;
@@ -1559,6 +1588,10 @@ namespace {
 		int cssTableLayoutFallbackCount,
 		int cssListRenderCount,
 		int cssClampedValueCount,
+		int cssLineBreakCount,
+		int cssTableCaptionCount,
+		int cssTableHeaderCellCount,
+		int cssVisitedLinkCount,
 		int formCount,
 		int formInputCount,
 		int checkboxCount,
@@ -1754,6 +1787,10 @@ namespace {
 			{"Current Document", "CSS table layout fallbacks", std::to_string(cssTableLayoutFallbackCount)},
 			{"Current Document", "CSS lists rendered", std::to_string(cssListRenderCount)},
 			{"Current Document", "CSS clamped values", std::to_string(cssClampedValueCount)},
+			{"Current Document", "CSS line breaks parsed", std::to_string(cssLineBreakCount)},
+			{"Current Document", "CSS table captions rendered", std::to_string(cssTableCaptionCount)},
+			{"Current Document", "CSS table header cells rendered", std::to_string(cssTableHeaderCellCount)},
+			{"Current Document", "CSS visited links styled", std::to_string(cssVisitedLinkCount)},
 			{"Current Document", "Forms", std::to_string(formCount)},
 			{"Current Document", "Text inputs", std::to_string(formInputCount)},
 			{"Current Document", "Checkboxes", std::to_string(checkboxCount)},
@@ -2130,6 +2167,10 @@ std::string Navigator::SmokeRuntimeReport()
 		s_pageMetadata.cssTableLayoutFallbackCount,
 		s_pageMetadata.cssListRenderCount,
 		s_pageMetadata.cssClampedValueCount,
+		s_pageMetadata.cssLineBreakCount,
+		s_pageMetadata.cssTableCaptionCount,
+		s_pageMetadata.cssTableHeaderCellCount,
+		s_pageMetadata.cssVisitedLinkCount,
 		s_pageMetadata.formCount,
 		s_pageMetadata.formInputCount,
 		s_pageMetadata.formCheckboxCount,
@@ -2496,13 +2537,54 @@ void Navigator::renderDocument()
 			}
 			const int boxY = drawY + blockMarginTop;
 			drawBlockBox(s_windowId, layout.outerX, boxY, layout.outerWidth, row.heightPx, block.style);
-			WebStyle rowStyle = block.style;
-			if (row.headerRow) rowStyle.bold = true;
-			const std::vector<std::string> lines = tableRowTextLines(layout, row);
-			int lineY = drawY + blockMarginTop + cssBorderTopPx(block.style) + layout.paddingTop;
-			for (const std::string& ln : lines) {
-				drawTextAtStyled(s_windowId, layout.outerX + layout.paddingLeft, lineY, ln, rowStyle);
-				lineY += layout.lineHeight;
+			const size_t lastCol = layout.columnWidthsChars.empty() ? 0 : layout.columnWidthsChars.size() - 1;
+			const int rowTextY = drawY + blockMarginTop + cssBorderTopPx(block.style) + layout.paddingTop;
+			const int rowTextBottom = rowTextY + row.heightPx - layout.paddingTop - layout.paddingBottom;
+			int cellX = layout.outerX + layout.paddingLeft;
+			int separatorX = cellX;
+			for (size_t col = 0; col < row.cells.size(); ++col) {
+				const TableCellLayout& cell = row.cells[col];
+				const int colWidthChars = layout.columnWidthsChars[std::min(col, lastCol)];
+				const int cellW = std::max(1, colWidthChars * kCharW);
+				const int cellRight = cellX + cellW;
+				WebStyle cellStyle = cell.block->style;
+				if (row.headerRow) cellStyle.bold = true;
+				if (!cell.block->url.empty()) {
+					cellStyle.underline = true;
+					if (!cellStyle.hasColor) {
+						cellStyle.hasColor = true;
+						cellStyle.color = s_visitedUrls.find(cell.block->url) != s_visitedUrls.end()
+							? 0xFF6B46C1u
+							: 0xFF1E5CB8u;
+					}
+				}
+				if (cellStyle.hasBackgroundColor || cellStyle.hasBorderTop || cellStyle.hasBorderBottom) {
+					drawBlockBox(s_windowId, cellX, boxY, cellW, row.heightPx, cellStyle);
+				}
+				int lineY = rowTextY;
+				for (size_t lineIndex = 0; lineIndex < cell.lines.size(); ++lineIndex) {
+					const std::string& ln = cell.lines[lineIndex];
+					const int lineW = static_cast<int>(ln.size()) * kCharW;
+					const int paddingLeft = std::max(1, cell.padLeftChars * kCharW);
+					const int paddingRight = std::max(1, cell.padRightChars * kCharW);
+					const int innerWidth = std::max(1, cellW - paddingLeft - paddingRight);
+					int textX = cellX + paddingLeft;
+					if (cellStyle.textAlign == TextAlign::Center) {
+						textX = cellX + paddingLeft + std::max(0, (innerWidth - lineW) / 2);
+					} else if (cellStyle.textAlign == TextAlign::Right) {
+						textX = cellRight - paddingRight - std::min(innerWidth, lineW);
+					}
+					drawTextAtStyled(s_windowId, textX, lineY, ln, cellStyle);
+					lineY += layout.lineHeight;
+				}
+				if (col < row.cells.size() - 1) {
+					drawRect(s_windowId, cellRight - 1, boxY, 1, row.heightPx, 209, 214, 223);
+				}
+				cellX += cellW;
+				separatorX = cellRight;
+			}
+			if (!row.cells.empty()) {
+				drawRect(s_windowId, layout.outerX + layout.paddingLeft, rowTextBottom, std::max(1, separatorX - (layout.outerX + layout.paddingLeft)), 1, 209, 214, 223);
 			}
 			++blockIndex;
 			continue;
@@ -2638,7 +2720,15 @@ void Navigator::renderDocument()
 			int linkB = 210;
 			if (block.style.hasColor) {
 				colorChannels(block.style.color, linkR, linkG, linkB);
+			} else if (s_visitedUrls.find(block.url) != s_visitedUrls.end()) {
+				linkR = 107;
+				linkG = 70;
+				linkB = 193;
 			}
+			WebStyle linkStyle = block.style;
+			linkStyle.hasColor = true;
+			linkStyle.color = 0xFF000000u | (static_cast<uint32_t>(linkR) << 16) |
+				(static_cast<uint32_t>(linkG) << 8) | static_cast<uint32_t>(linkB);
 			for (const std::string& ln : lines) {
 				// Underline under each line
 				int lineW = static_cast<int>(ln.size()) * kCharW;
@@ -2646,7 +2736,7 @@ void Navigator::renderDocument()
 					drawRect(s_windowId, blockTextX(block, outerX + paddingLeft, innerWidth, lineW), lineY + lineHeight - 1,
 						lineW, 1, linkR, linkG, linkB);
 				}
-				drawTextAtColored(s_windowId, blockTextX(block, outerX + paddingLeft, innerWidth, lineW), lineY, ln, linkR, linkG, linkB);
+				drawTextAtStyled(s_windowId, blockTextX(block, outerX + paddingLeft, innerWidth, lineW), lineY, ln, linkStyle);
 				lineY += lineHeight;
 			}
 			break;
@@ -4281,6 +4371,9 @@ void Navigator::loadUrl(const std::string& url, bool updateDisplayAfterLoad)
 	}
 
 	s_currentDoc      = std::move(doc);
+	if (!s_currentDoc.url.empty()) {
+		s_visitedUrls.insert(s_currentDoc.url);
+	}
 	s_scrollOffset    = 0;
 	s_documentHeight  = computeDocumentHeight();
 	s_hoverStatusText.clear();
@@ -4630,6 +4723,10 @@ WebDocument Navigator::buildRuntimeDocument()
 		s_pageMetadata.cssTableLayoutFallbackCount,
 		s_pageMetadata.cssListRenderCount,
 		s_pageMetadata.cssClampedValueCount,
+		s_pageMetadata.cssLineBreakCount,
+		s_pageMetadata.cssTableCaptionCount,
+		s_pageMetadata.cssTableHeaderCellCount,
+		s_pageMetadata.cssVisitedLinkCount,
 		s_pageMetadata.formCount,
 		s_pageMetadata.formInputCount,
 		s_pageMetadata.formCheckboxCount,

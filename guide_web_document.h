@@ -69,6 +69,7 @@ struct WebStyle {
 	bool     hasBackgroundColor = false;
 	uint32_t backgroundColor = 0;
 	bool     bold = false;
+	bool     italic = false;
 	bool     underline = false;
 	bool     displayNone = false;
 	bool     listStyleNone = false;
@@ -119,6 +120,7 @@ struct CssDiagnostics {
 	bool   styleBlockCapped = false;
 	size_t styleBytesProcessed = 0;
 	int    clampedValueCount = 0;
+	int    lineBreakCount = 0;
 };
 
 struct FormsDiagnostics {

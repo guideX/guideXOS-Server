@@ -203,6 +203,42 @@ class NavigatorSmokeHandler(BaseHTTPRequestHandler):
                              b"<p>Below the separator.</p>"
                              b"</main></body></html>")
             return
+        if path == "/navigator-smoke/css-inline-1d.html":
+            self.write_bytes(200, "text/html; charset=utf-8",
+                             b"<html><body style=\"margin:16px;background:#f6f4ee;color:#243447;line-height:1.55;\">"
+                             b"<main style=\"max-width:540px;margin-left:auto;margin-right:auto;padding:14px 16px;background:#ffffff;\">"
+                             b"<h1 style=\"margin:8px 0;color:#8a3c1c;text-align:center;\">Phase 1D Inline Text</h1>"
+                             b"<p><span style=\"color:#b91c1c;\">Span color</span></p>"
+                             b"<p><strong>Strong text</strong></p>"
+                             b"<p><b>Bold text</b></p>"
+                             b"<p><em>Emphasis text</em></p>"
+                             b"<p><i>Italic text</i></p>"
+                             b"<p><small>Small text</small></p>"
+                             b"<p><code>code sample</code></p>"
+                             b"<p><a href=\"/navigator-smoke/basic.html\">Link text</a></p>"
+                             b"<p>Line one<br>Line two</p>"
+                             b"</main></body></html>")
+            return
+        if path == "/navigator-smoke/css-table-1d.html":
+            self.write_bytes(200, "text/html; charset=utf-8",
+                             b"<html><body style=\"margin:16px;background:#f4f6fb;color:#243447;line-height:1.5;\">"
+                             b"<main style=\"max-width:620px;margin-left:auto;margin-right:auto;padding:12px 14px;background:#ffffff;\">"
+                             b"<article style=\"background:#f8fafc;padding:12px 14px;border-top:1px solid #d6dce8;border-bottom:1px solid #d6dce8;\">"
+                             b"<h1 style=\"margin:8px 0 10px;color:#7c2d12;text-align:center;\">Phase 1D Table</h1>"
+                             b"<table style=\"max-width:520px;margin-left:auto;margin-right:auto;background:#ffffff;border-top:1px solid #94a3b8;border-bottom:1px solid #94a3b8;\">"
+                             b"<caption>Navigator Table Caption</caption>"
+                             b"<thead><tr><th style=\"background:#dbeafe;\">Name</th><th style=\"background:#dbeafe;\">Value</th><th style=\"background:#dbeafe;\">Notes</th></tr></thead>"
+                             b"<tbody>"
+                             b"<tr><td>Alpha</td><td>One</td><td><a href=\"/navigator-smoke/basic.html\">linked cell</a></td></tr>"
+                             b"<tr><td>Beta</td><td>Two</td><td><code>code sample</code></td></tr>"
+                             b"<tr><td>Gamma</td><td>Three</td><td><small>small note</small></td></tr>"
+                             b"</tbody></table>"
+                             b"<hr>"
+                             b"<section style=\"background:#fff7ed;padding:10px 12px;\">"
+                             b"<p>Wrapper spacing stays readable.</p>"
+                             b"</section>"
+                             b"</article></main></body></html>")
+            return
         if path == "/navigator-smoke/css-hr.html":
             self.write_bytes(200, "text/html; charset=utf-8",
                              b"<html><head><style>"

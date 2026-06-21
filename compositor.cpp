@@ -305,6 +305,191 @@ namespace gxos {
         }
 
         static uint64_t nowMs( ) { return (uint64_t)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now( ).time_since_epoch( )).count( ); }
+
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
+        namespace {
+            constexpr UINT_PTR kHostedFreezeDiagTimerId = 0x47585031u;
+            constexpr uint64_t kHostedFreezeDiagHeartbeatMs = 5000;
+            constexpr uint64_t kHostedFreezeDiagLongOpMs = 250;
+
+            struct HostedFreezeDiagnosticsState {
+                bool enabled{ false };
+                bool timerInstalled{ false };
+                uint64_t pumpCount{ 0 };
+                uint64_t messageCount{ 0 };
+                uint64_t repaintRequestCount{ 0 };
+                uint64_t paintCount{ 0 };
+                uint64_t timerCount{ 0 };
+                uint64_t lastPumpMs{ 0 };
+                uint64_t lastMessageMs{ 0 };
+                uint64_t lastRepaintRequestMs{ 0 };
+                uint64_t lastPaintBeginMs{ 0 };
+                uint64_t lastPaintEndMs{ 0 };
+                uint64_t lastTimerMs{ 0 };
+                uint64_t lastPaintDurationMs{ 0 };
+                uint64_t maxPaintDurationMs{ 0 };
+                uint64_t lastVncDurationMs{ 0 };
+                uint64_t maxVncDurationMs{ 0 };
+                uint64_t lastMessageDurationMs{ 0 };
+                uint64_t maxMessageDurationMs{ 0 };
+                uint64_t lastHeartbeatLogMs{ 0 };
+                uint32_t lastMessageType{ 0 };
+            };
+
+            static HostedFreezeDiagnosticsState g_hostedFreezeDiag;
+
+            static bool hostedFreezeDiagnosticsEnabled( ) {
+                static const bool enabled = [] ( ) {
+                    const char* value = std::getenv("GXOS_COMPOSITOR_FREEZE_DIAGNOSTICS");
+                    if (!value || !*value) return false;
+                    std::string lower;
+                    lower.reserve(std::strlen(value));
+                    for (const char* p = value; *p; ++p) {
+                        lower.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(*p))));
+                    }
+                    return !(lower == "0" || lower == "false" || lower == "off" || lower == "no");
+                }( );
+                return enabled;
+            }
+
+            static std::string hostedFreezeDiagnosticsResourceCounts( ) {
+                DWORD gdiObjects = GetGuiResources(GetCurrentProcess( ), GR_GDIOBJECTS);
+                DWORD userObjects = GetGuiResources(GetCurrentProcess( ), GR_USEROBJECTS);
+                return std::string("gdiObjects=") + std::to_string(gdiObjects) +
+                    " userObjects=" + std::to_string(userObjects);
+            }
+
+            static std::string hostedFreezeDiagnosticsCompactSummary( ) {
+                if (!g_hostedFreezeDiag.enabled) return "";
+                const uint64_t now = nowMs( );
+                std::ostringstream oss;
+                oss << "diag="
+                    << "pumps=" << g_hostedFreezeDiag.pumpCount
+                    << ",messages=" << g_hostedFreezeDiag.messageCount
+                    << ",paints=" << g_hostedFreezeDiag.paintCount
+                    << ",timers=" << g_hostedFreezeDiag.timerCount
+                    << ",repaints=" << g_hostedFreezeDiag.repaintRequestCount
+                    << ",lastPumpAgeMs=" << (g_hostedFreezeDiag.lastPumpMs ? (now - g_hostedFreezeDiag.lastPumpMs) : 0)
+                    << ",lastMessageAgeMs=" << (g_hostedFreezeDiag.lastMessageMs ? (now - g_hostedFreezeDiag.lastMessageMs) : 0)
+                    << ",lastRepaintAgeMs=" << (g_hostedFreezeDiag.lastRepaintRequestMs ? (now - g_hostedFreezeDiag.lastRepaintRequestMs) : 0)
+                    << ",lastPaintAgeMs=" << (g_hostedFreezeDiag.lastPaintEndMs ? (now - g_hostedFreezeDiag.lastPaintEndMs) : 0)
+                    << ",lastTimerAgeMs=" << (g_hostedFreezeDiag.lastTimerMs ? (now - g_hostedFreezeDiag.lastTimerMs) : 0)
+                    << ",lastPaintDurationMs=" << g_hostedFreezeDiag.lastPaintDurationMs
+                    << ",lastVncDurationMs=" << g_hostedFreezeDiag.lastVncDurationMs
+                    << ",lastMessageDurationMs=" << g_hostedFreezeDiag.lastMessageDurationMs
+                    << ",lastMessageType=" << g_hostedFreezeDiag.lastMessageType
+                    << ",vncClients=" << (vnc::VncServer::IsRunning( ) ? vnc::VncServer::GetClientCount( ) : 0)
+                    << "," << hostedFreezeDiagnosticsResourceCounts( );
+                return oss.str( );
+            }
+
+            static void hostedFreezeDiagnosticsLogHeartbeat(const char* reason, bool force = false) {
+                if (!g_hostedFreezeDiag.enabled) return;
+                const uint64_t now = nowMs( );
+                if (!force && g_hostedFreezeDiag.lastHeartbeatLogMs != 0 &&
+                    (now - g_hostedFreezeDiag.lastHeartbeatLogMs) < kHostedFreezeDiagHeartbeatMs) {
+                    return;
+                }
+
+                g_hostedFreezeDiag.lastHeartbeatLogMs = now;
+                std::ostringstream oss;
+                oss << "Hosted freeze diag: reason=" << reason
+                    << " pumps=" << g_hostedFreezeDiag.pumpCount
+                    << " messages=" << g_hostedFreezeDiag.messageCount
+                    << " paints=" << g_hostedFreezeDiag.paintCount
+                    << " timers=" << g_hostedFreezeDiag.timerCount
+                    << " repaints=" << g_hostedFreezeDiag.repaintRequestCount
+                    << " lastPumpAgeMs=" << (g_hostedFreezeDiag.lastPumpMs ? (now - g_hostedFreezeDiag.lastPumpMs) : 0)
+                    << " lastMessageAgeMs=" << (g_hostedFreezeDiag.lastMessageMs ? (now - g_hostedFreezeDiag.lastMessageMs) : 0)
+                    << " lastRepaintAgeMs=" << (g_hostedFreezeDiag.lastRepaintRequestMs ? (now - g_hostedFreezeDiag.lastRepaintRequestMs) : 0)
+                    << " lastPaintAgeMs=" << (g_hostedFreezeDiag.lastPaintEndMs ? (now - g_hostedFreezeDiag.lastPaintEndMs) : 0)
+                    << " lastTimerAgeMs=" << (g_hostedFreezeDiag.lastTimerMs ? (now - g_hostedFreezeDiag.lastTimerMs) : 0)
+                    << " lastPaintDurationMs=" << g_hostedFreezeDiag.lastPaintDurationMs
+                    << " maxPaintDurationMs=" << g_hostedFreezeDiag.maxPaintDurationMs
+                    << " lastVncDurationMs=" << g_hostedFreezeDiag.lastVncDurationMs
+                    << " maxVncDurationMs=" << g_hostedFreezeDiag.maxVncDurationMs
+                    << " lastMessageDurationMs=" << g_hostedFreezeDiag.lastMessageDurationMs
+                    << " maxMessageDurationMs=" << g_hostedFreezeDiag.maxMessageDurationMs
+                    << " lastMessageType=" << g_hostedFreezeDiag.lastMessageType
+                    << " vncClients=" << (vnc::VncServer::IsRunning( ) ? vnc::VncServer::GetClientCount( ) : 0)
+                    << " " << hostedFreezeDiagnosticsResourceCounts( );
+                Logger::write(LogLevel::Info, oss.str( ));
+            }
+
+            static void hostedFreezeDiagnosticsOnRequestRepaint( ) {
+                if (!g_hostedFreezeDiag.enabled) return;
+                ++g_hostedFreezeDiag.repaintRequestCount;
+                g_hostedFreezeDiag.lastRepaintRequestMs = nowMs( );
+            }
+
+            static void hostedFreezeDiagnosticsOnPump( ) {
+                if (!g_hostedFreezeDiag.enabled) return;
+                ++g_hostedFreezeDiag.pumpCount;
+                g_hostedFreezeDiag.lastPumpMs = nowMs( );
+            }
+
+            static void hostedFreezeDiagnosticsOnTimer( ) {
+                if (!g_hostedFreezeDiag.enabled) return;
+                ++g_hostedFreezeDiag.timerCount;
+                g_hostedFreezeDiag.lastTimerMs = nowMs( );
+                hostedFreezeDiagnosticsLogHeartbeat("WM_TIMER");
+            }
+
+            static void hostedFreezeDiagnosticsOnMessageBegin(uint32_t type) {
+                if (!g_hostedFreezeDiag.enabled) return;
+                ++g_hostedFreezeDiag.messageCount;
+                g_hostedFreezeDiag.lastMessageMs = nowMs( );
+                g_hostedFreezeDiag.lastMessageType = type;
+            }
+
+            static void hostedFreezeDiagnosticsOnMessageEnd(uint64_t durationMs) {
+                if (!g_hostedFreezeDiag.enabled) return;
+                g_hostedFreezeDiag.lastMessageDurationMs = durationMs;
+                if (durationMs > g_hostedFreezeDiag.maxMessageDurationMs) g_hostedFreezeDiag.maxMessageDurationMs = durationMs;
+                if (durationMs >= kHostedFreezeDiagLongOpMs) {
+                    std::ostringstream oss;
+                    oss << "Hosted freeze diag: slow IPC handler durationMs=" << durationMs
+                        << " messageType=" << g_hostedFreezeDiag.lastMessageType
+                        << " pumps=" << g_hostedFreezeDiag.pumpCount
+                        << " paints=" << g_hostedFreezeDiag.paintCount
+                        << " repaints=" << g_hostedFreezeDiag.repaintRequestCount
+                        << " " << hostedFreezeDiagnosticsResourceCounts( );
+                    Logger::write(LogLevel::Warn, oss.str( ));
+                }
+                hostedFreezeDiagnosticsLogHeartbeat("message");
+            }
+
+            static void hostedFreezeDiagnosticsOnPaintBegin( ) {
+                if (!g_hostedFreezeDiag.enabled) return;
+                ++g_hostedFreezeDiag.paintCount;
+                g_hostedFreezeDiag.lastPaintBeginMs = nowMs( );
+            }
+
+            static void hostedFreezeDiagnosticsOnPaintEnd(uint64_t durationMs, uint64_t vncDurationMs) {
+                if (!g_hostedFreezeDiag.enabled) return;
+                const uint64_t endMs = nowMs( );
+                g_hostedFreezeDiag.lastPaintEndMs = endMs;
+                g_hostedFreezeDiag.lastPaintDurationMs = durationMs;
+                g_hostedFreezeDiag.lastVncDurationMs = vncDurationMs;
+                if (durationMs > g_hostedFreezeDiag.maxPaintDurationMs) g_hostedFreezeDiag.maxPaintDurationMs = durationMs;
+                if (vncDurationMs > g_hostedFreezeDiag.maxVncDurationMs) g_hostedFreezeDiag.maxVncDurationMs = vncDurationMs;
+
+                if (durationMs >= kHostedFreezeDiagLongOpMs || vncDurationMs >= kHostedFreezeDiagLongOpMs) {
+                    std::ostringstream oss;
+                    oss << "Hosted freeze diag: slow WM_PAINT durationMs=" << durationMs
+                        << " vncDurationMs=" << vncDurationMs
+                        << " paints=" << g_hostedFreezeDiag.paintCount
+                        << " repaints=" << g_hostedFreezeDiag.repaintRequestCount
+                        << " pumps=" << g_hostedFreezeDiag.pumpCount
+                        << " " << hostedFreezeDiagnosticsResourceCounts( );
+                    Logger::write(LogLevel::Warn, oss.str( ));
+                }
+
+                hostedFreezeDiagnosticsLogHeartbeat("WM_PAINT");
+            }
+        }
+#endif
+
         static void publishOut(MsgType type, const std::string& payload, uint64_t dstPid = 0) { 
             if (type == MsgType::MT_Create) {
                 Logger::write(LogLevel::Info, std::string("publishOut MT_Create payload=") + payload + " dstPid=" + std::to_string(dstPid));
@@ -2056,9 +2241,36 @@ namespace gxos {
             }
             return 0;
         }
-        void Compositor::initWindow( ) { WNDCLASSA wc{}; wc.style = CS_OWNDC; wc.lpfnWndProc = Compositor::WndProc; wc.hInstance = GetModuleHandleA(nullptr); wc.lpszClassName = "GXOS_COMPOSITOR"; RegisterClassA(&wc); g_hwnd = CreateWindowExA(0, wc.lpszClassName, "guideXOSCpp Compositor", WS_OVERLAPPEDWINDOW | WS_VISIBLE, CW_USEDEFAULT, CW_USEDEFAULT, 1024, 768, nullptr, nullptr, wc.hInstance, nullptr); g_startBtnBmp = (HBITMAP)LoadImageA(nullptr, "assets/start_button.bmp", IMAGE_BITMAP, 0, 0, LR_LOADFROMFILE | LR_CREATEDIBSECTION); }
-        void Compositor::shutdownWindow( ) { releaseHostedPaintSurface(); if (g_hwnd) { DestroyWindow(g_hwnd); g_hwnd = nullptr; } }
-        void Compositor::requestRepaint( ) { if (g_hwnd) InvalidateRect(g_hwnd, nullptr, FALSE); }
+        void Compositor::initWindow( ) { WNDCLASSA wc{}; wc.style = CS_OWNDC; wc.lpfnWndProc = Compositor::WndProc; wc.hInstance = GetModuleHandleA(nullptr); wc.lpszClassName = "GXOS_COMPOSITOR"; RegisterClassA(&wc); g_hwnd = CreateWindowExA(0, wc.lpszClassName, "guideXOSCpp Compositor", WS_OVERLAPPEDWINDOW | WS_VISIBLE, CW_USEDEFAULT, CW_USEDEFAULT, 1024, 768, nullptr, nullptr, wc.hInstance, nullptr); g_startBtnBmp = (HBITMAP)LoadImageA(nullptr, "assets/start_button.bmp", IMAGE_BITMAP, 0, 0, LR_LOADFROMFILE | LR_CREATEDIBSECTION);
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
+            g_hostedFreezeDiag.enabled = hostedFreezeDiagnosticsEnabled( );
+            if (g_hostedFreezeDiag.enabled) {
+                UINT_PTR timerId = SetTimer(g_hwnd, kHostedFreezeDiagTimerId, 1000, nullptr);
+                g_hostedFreezeDiag.timerInstalled = (timerId != 0);
+                if (g_hostedFreezeDiag.timerInstalled) {
+                    Logger::write(LogLevel::Info, "Hosted freeze diagnostics enabled (GXOS_COMPOSITOR_FREEZE_DIAGNOSTICS=1, timer=1s)");
+                } else {
+                    Logger::write(LogLevel::Warn, "Hosted freeze diagnostics requested but SetTimer failed");
+                }
+            }
+#endif
+        }
+        void Compositor::shutdownWindow( ) {
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
+            if (g_hostedFreezeDiag.timerInstalled && g_hwnd) {
+                KillTimer(g_hwnd, kHostedFreezeDiagTimerId);
+                g_hostedFreezeDiag.timerInstalled = false;
+            }
+#endif
+            releaseHostedPaintSurface();
+            if (g_hwnd) { DestroyWindow(g_hwnd); g_hwnd = nullptr; }
+        }
+        void Compositor::requestRepaint( ) {
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
+            hostedFreezeDiagnosticsOnRequestRepaint( );
+#endif
+            if (g_hwnd) InvalidateRect(g_hwnd, nullptr, FALSE);
+        }
         void Compositor::drawDesktopIcons(HDC dc, RECT cr) {
             const DesktopGridMetrics metrics = desktopGridMetrics();
             HFONT font = (HFONT)GetStockObject(ANSI_VAR_FONT); SelectObject(dc, font); SetBkMode(dc, TRANSPARENT); POINT cursor; GetCursorPos(&cursor); ScreenToClient(g_hwnd, &cursor); int idx = 0; for (auto& it : g_items) {
@@ -2126,9 +2338,22 @@ namespace gxos {
             case WM_CLOSE: PostQuitMessage(0); return 0;
             case WM_SIZE: { RECT cr; GetClientRect(h, &cr); WorkRect work = desktopWorkAreaForBounds(cr.right - cr.left, cr.bottom - cr.top); std::lock_guard<std::mutex> lk(g_lock); for (auto& kv : g_windows) { WinInfo& wi = kv.second; if (wi.maximized) { wi.x = work.left; wi.y = work.top; wi.w = work.right - work.left; wi.h = work.bottom - work.top; wi.dirty = true; } } requestRepaint( ); return 0; }
             case WM_ERASEBKGND: return 1;
+            case WM_TIMER:
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
+                if (w == kHostedFreezeDiagTimerId) {
+                    hostedFreezeDiagnosticsOnTimer( );
+                    return 0;
+                }
+#endif
+                break;
             case WM_PAINT: {
                 PAINTSTRUCT ps;
+                const uint64_t paintStartMs = nowMs( );
+                uint64_t vncDurationMs = 0;
                 HDC visibleDc = BeginPaint(h, &ps);
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
+                hostedFreezeDiagnosticsOnPaintBegin( );
+#endif
                 RECT cr;
                 GetClientRect(h, &cr);
                 const int clientW = cr.right - cr.left;
@@ -2491,6 +2716,7 @@ namespace gxos {
                 // VideoBackend pixel buffer, feedVncFromBackend() will
                 // be the sole path and this block can be removed.
                 if (vnc::VncServer::IsRunning( )) {
+                    const uint64_t vncStartMs = nowMs( );
                     // Capture the completed hosted frame, not the visible DC, so VNC
                     // stays aligned with the atomic offscreen composition result.
                     if (hostedOffscreenReady && s_hostedPaintPixels) {
@@ -2548,6 +2774,7 @@ namespace gxos {
                         DeleteObject(memBitmap);
                         DeleteDC(memDC);
                     }
+                    vncDurationMs = nowMs( ) - vncStartMs;
                 }
 
 #undef dc
@@ -2556,7 +2783,11 @@ namespace gxos {
                     BitBlt(visibleDc, 0, 0, clientW, clientH, drawDc, 0, 0, SRCCOPY);
                 }
 
-                EndPaint(h, &ps); return 0;
+                EndPaint(h, &ps);
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
+                hostedFreezeDiagnosticsOnPaintEnd(nowMs( ) - paintStartMs, vncDurationMs);
+#endif
+                return 0;
             }
             case WM_LBUTTONDOWN: {
                 int mx = GET_X_LPARAM(l); int my = GET_Y_LPARAM(l); RECT cr; GetClientRect(h, &cr); int taskbarH = 40;
@@ -3245,7 +3476,7 @@ namespace gxos {
                 if (icon.status == ImageLoadStatus::Ok) { std::lock_guard<std::mutex> lk(g_lock); auto it = g_windows.find(winId); if (it != g_windows.end()) { auto widget = std::find_if(it->second.widgets.begin(), it->second.widgets.end(), [wid](const Widget& item) { return item.id == wid; }); if (widget != it->second.widgets.end()) { widget->iconPath = path; widget->icon = icon; it->second.dirty = true; ownerPid = it->second.ownerPid; } } }
                 publishOut(MsgType::MT_WidgetSetIcon, std::to_string(winId) + "|" + std::to_string(wid), ownerPid); invalidate(winId);
             } break;
-            case MsgType::MT_WindowList: { std::ostringstream oss; bool first = true; { std::lock_guard<std::mutex> lk(g_lock); for (uint64_t id : g_z) { auto it = g_windows.find(id); if (it == g_windows.end( )) continue; if (!first) oss << ";"; first = false; oss << it->first << "|" << it->second.title << "|" << (it->second.minimized ? 1 : 0); } } publishOut(MsgType::MT_WindowList, oss.str( ), m.srcPid); } break;
+            case MsgType::MT_WindowList: { std::ostringstream oss; bool first = true; { std::lock_guard<std::mutex> lk(g_lock); for (uint64_t id : g_z) { auto it = g_windows.find(id); if (it == g_windows.end( )) continue; if (!first) oss << ";"; first = false; oss << it->first << "|" << it->second.title << "|" << (it->second.minimized ? 1 : 0); } } const std::string diag = hostedFreezeDiagnosticsCompactSummary( ); if (!diag.empty()) { if (!first) oss << ";"; oss << diag; } publishOut(MsgType::MT_WindowList, oss.str( ), m.srcPid); } break;
             case MsgType::MT_Activate: { uint64_t id = 0; try { id = std::stoull(s); } catch (...) {} { std::lock_guard<std::mutex> lk(g_lock); if (g_modalWindow != 0 && id != g_modalWindow) id = g_modalWindow; for (auto it = g_z.begin( ); it != g_z.end( ); ++it) { if (*it == id) { g_z.erase(it); break; } } auto wit = g_windows.find(id); if (wit != g_windows.end( )) { wit->second.minimized = false; wit->second.tombstoned = false; } g_z.push_back(id); g_focus = id; } sendFocus(id); invalidate(id); } break;
             case MsgType::MT_Minimize: { uint64_t id = 0; try { id = std::stoull(s); } catch (...) {} { std::lock_guard<std::mutex> lk(g_lock); if (g_modalWindow != 0 && id != g_modalWindow) break; auto wit = g_windows.find(id); if (wit != g_windows.end( )) { wit->second.minimized = true; wit->second.tombstoned = true; if (g_modalWindow == id) g_modalWindow = 0; if (g_focus == id) g_focus = 0; } } invalidate(id); } break;
             case MsgType::MT_ShowDesktopToggle: { { std::lock_guard<std::mutex> lk(g_lock); if (g_modalWindow != 0) { for (auto it = g_z.begin( ); it != g_z.end( ); ++it) { if (*it == g_modalWindow) { g_z.erase(it); break; } } g_z.push_back(g_modalWindow); g_focus = g_modalWindow; invalidate(g_modalWindow); break; } } if (!g_showDesktopActive) { g_showDesktopMinimized.clear( ); for (uint64_t id : g_z) { auto it = g_windows.find(id); if (it != g_windows.end( ) && !it->second.minimized) { it->second.minimized = true; it->second.tombstoned = true; g_showDesktopMinimized.push_back(id); } } g_focus = 0; g_showDesktopActive = true; } else { for (uint64_t id : g_showDesktopMinimized) { auto it = g_windows.find(id); if (it != g_windows.end( )) { it->second.minimized = false; it->second.tombstoned = false; } } g_showDesktopMinimized.clear( ); g_showDesktopActive = false; } invalidate(0); } break;
@@ -3435,6 +3666,7 @@ namespace gxos {
         }
         void Compositor::pumpEvents( ) {
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)
+            hostedFreezeDiagnosticsOnPump( );
             MSG msg; while (PeekMessageA(&msg, nullptr, 0, 0, PM_REMOVE)) { TranslateMessage(&msg); DispatchMessageA(&msg); if (msg.message == WM_QUIT) break; }
 #else
             // On bare-metal, we don't have a native event pump
@@ -3458,6 +3690,9 @@ namespace gxos {
                 }
             }
             if (hasAnimatedImage) requestRepaint();
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
+            hostedFreezeDiagnosticsLogHeartbeat("pumpEvents");
+#endif
         }
 
         int Compositor::main(int argc, char** argv) {
@@ -3538,7 +3773,7 @@ namespace gxos {
             renderToFramebuffer();
 #endif
             
-            bool running = true; while (running) { pumpEvents( ); ipc::Message m; if (ipc::Bus::pop(kGuiChanIn, m, 30)) { if (m.type == (uint32_t)MsgType::MT_Ping && m.data.size( ) == 3 && std::string(m.data.begin( ), m.data.end( )) == "bye") running = false; else handleMessage(m); } }
+            bool running = true; while (running) { pumpEvents( ); ipc::Message m; if (ipc::Bus::pop(kGuiChanIn, m, 30)) { if (m.type == (uint32_t)MsgType::MT_Ping && m.data.size( ) == 3 && std::string(m.data.begin( ), m.data.end( )) == "bye") running = false; else { const uint64_t msgStartMs = nowMs( ); hostedFreezeDiagnosticsOnMessageBegin(m.type); handleMessage(m); hostedFreezeDiagnosticsOnMessageEnd(nowMs( ) - msgStartMs); } } }
             DesktopConfigData outCfg = g_cfg; { std::lock_guard<std::mutex> lk(g_lock); outCfg.windows.clear( ); for (size_t i = 0; i < g_z.size( ); ++i) { uint64_t id = g_z[i]; auto it = g_windows.find(id); if (it == g_windows.end( )) continue; const WinInfo& w = it->second; DesktopWindowRec rec; rec.id = w.id; rec.title = w.title; rec.x = w.x; rec.y = w.y; rec.w = w.w; rec.h = w.h; rec.minimized = w.minimized; rec.maximized = w.maximized; rec.z = (int)i; rec.focused = (g_focus == w.id); rec.snap = w.snapState; outCfg.windows.push_back(rec); } }
             std::string cerr; DesktopConfig::Save("desktop.json", outCfg, cerr); if (!legacyLoaded) { std::vector<SavedWindow> sw; { std::lock_guard<std::mutex> lk(g_lock); for (auto& kv : g_windows) { sw.push_back(SavedWindow{ kv.second.id, kv.second.title, kv.second.x, kv.second.y, kv.second.w, kv.second.h, kv.second.minimized, kv.second.maximized }); } } std::string err; DesktopState::Save("desktop.state", sw, err); }
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)
