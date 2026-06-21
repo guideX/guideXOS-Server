@@ -7,6 +7,7 @@
 //
 
 #include "ui_settings.h"
+#include "desktop_theme.h"
 #include "window_effects.h"
 
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)
@@ -78,22 +79,13 @@ public:
     /// Draw window title bar with optional transparency effect
     static void DrawTitleBar(HDC dc, int x, int y, int w, int h, bool focused, bool transparent = false) {
         if (!UISettings::EnableTitleBarBackground) return;
-        
-        COLORREF color;
-        if (focused) {
-            color = transparent ? 
-                RGB((UISettings::TitleBarFocusedColor >> 16) & 0xFF,
-                    (UISettings::TitleBarFocusedColor >> 8) & 0xFF,
-                    UISettings::TitleBarFocusedColor & 0xFF) :
-                RGB((UISettings::TitleBarFocusedColor >> 16) & 0xFF,
-                    (UISettings::TitleBarFocusedColor >> 8) & 0xFF,
-                    UISettings::TitleBarFocusedColor & 0xFF);
-        } else {
-            color = RGB((UISettings::TitleBarColor >> 16) & 0xFF,
-                        (UISettings::TitleBarColor >> 8) & 0xFF,
-                        UISettings::TitleBarColor & 0xFF);
-        }
-        
+
+        const DesktopTheme& theme = GetCurrentDesktopTheme();
+        const uint32_t themeColor = focused ? theme.titleBarBackground : theme.taskbarBackground;
+        const uint32_t sourceColor = transparent ? themeColor : themeColor;
+        const COLORREF color = RGB((sourceColor >> 16) & 0xFF,
+                                   (sourceColor >> 8) & 0xFF,
+                                   sourceColor & 0xFF);
         int cornerRadius = UISettings::EnableRoundedCorners ? UISettings::WindowCornerRadius : 0;
         DrawRoundedRect(dc, x, y, w, h, color, cornerRadius);
     }
@@ -246,8 +238,9 @@ public:
     /// Draw window border
     static void DrawWindowBorder(HDC dc, int x, int y, int w, int h, bool focused) {
         if (!UISettings::EnableWindowBorders) return;
-        
-        uint32_t borderColor = focused ? UISettings::WindowBorderFocusedColor : UISettings::WindowBorderColor;
+
+        const DesktopTheme& theme = GetCurrentDesktopTheme();
+        uint32_t borderColor = focused ? theme.accent : theme.windowBorder;
         HPEN pen = CreatePen(PS_SOLID, 1, RGB((borderColor >> 16) & 0xFF,
                                                (borderColor >> 8) & 0xFF,
                                                borderColor & 0xFF));

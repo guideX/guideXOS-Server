@@ -7,6 +7,7 @@
 #include "desktop_folder.h"
 #include "file_icon_provider.h"
 #include "file_explorer.h"
+#include "desktop_theme.h"
 #include "shutdown_dialog.h"
 #include "icons.h"
 #include "right_click_menu.h"
@@ -94,6 +95,15 @@ namespace gxos {
             if (lower == "left") return TaskbarPosition::Left;
             if (lower == "right") return TaskbarPosition::Right;
             return TaskbarPosition::Bottom;
+        }
+
+        static void syncDesktopThemeFromConfig(DesktopConfigData& cfg) {
+            DesktopThemeId themeId = DesktopThemeId::Classic;
+            if (!TryParseDesktopThemeId(cfg.desktopThemeId.c_str(), &themeId)) {
+                themeId = DesktopThemeId::Classic;
+            }
+            cfg.desktopThemeId = DesktopThemeIdToString(themeId);
+            SetCurrentDesktopTheme(themeId);
         }
 
         struct WorkRect {
@@ -1378,7 +1388,7 @@ namespace gxos {
             logCompositorList("start menu app", g_startMenuAllProgsSorted);
         }
 
-        void Compositor::saveDesktopConfig( ) { g_cfg.taskbarPosition = taskbarPositionName(g_taskbarPosition); std::string err; if (!DesktopConfig::Save("desktop.json", g_cfg, err)) Logger::write(LogLevel::Error, "Shortcut persistence failure: " + err); else Logger::write(LogLevel::Info, "Desktop config persisted"); }
+        void Compositor::saveDesktopConfig( ) { g_cfg.taskbarPosition = taskbarPositionName(g_taskbarPosition); g_cfg.desktopThemeId = DesktopThemeIdToString(GetCurrentDesktopThemeId()); std::string err; if (!DesktopConfig::Save("desktop.json", g_cfg, err)) Logger::write(LogLevel::Error, "Shortcut persistence failure: " + err); else Logger::write(LogLevel::Info, "Desktop config persisted"); }
         void Compositor::addRecent(const std::string& act) { auto it = std::find(g_cfg.recent.begin( ), g_cfg.recent.end( ), act); if (it != g_cfg.recent.end( )) g_cfg.recent.erase(it); g_cfg.recent.insert(g_cfg.recent.begin( ), act); if (g_cfg.recent.size( ) > 20) g_cfg.recent.pop_back( ); refreshDesktopItems( ); saveDesktopConfig( ); }
         void Compositor::pinAction(const std::string& act) { if (act.empty( )) return; if (std::find(g_cfg.pinned.begin( ), g_cfg.pinned.end( ), act) == g_cfg.pinned.end( )) { g_cfg.pinned.push_back(act); refreshDesktopItems( ); saveDesktopConfig( ); } }
         void Compositor::unpinAction(const std::string& act) { auto it = std::find(g_cfg.pinned.begin( ), g_cfg.pinned.end( ), act); if (it != g_cfg.pinned.end( )) { g_cfg.pinned.erase(it); refreshDesktopItems( ); saveDesktopConfig( ); } }
@@ -2365,7 +2375,12 @@ namespace gxos {
                 }
 #define dc drawDc
                 // Hosted paint lifecycle: begin WM_PAINT, ensure the offscreen frame, then compose into it.
-                DesktopWallpaper::DrawGradient(dc, cr, g_gradientTopColor, g_gradientBottomColor, g_gradientAccentColor, !g_wallpaperImage); if (g_wallpaperImage && g_wallpaperImage->isValid()) { drawBackgroundImageToHdc(dc, cr, g_wallpaperImage, WallpaperRegistry::ParseScaleMode(g_backgroundScaleMode)); } else { DesktopWallpaper::DrawBranding(dc, cr); } drawDesktopIcons(dc, cr);
+                const DesktopTheme& theme = GetCurrentDesktopTheme();
+                auto colorFromTheme = [](uint32_t value) -> COLORREF {
+                    return RGB((value >> 16) & 0xFF, (value >> 8) & 0xFF, value & 0xFF);
+                };
+                DesktopWallpaper::DrawGradient(dc, cr, g_gradientTopColor, g_gradientBottomColor, g_gradientAccentColor, !g_wallpaperImage);
+                if (g_wallpaperImage && g_wallpaperImage->isValid()) { drawBackgroundImageToHdc(dc, cr, g_wallpaperImage, WallpaperRegistry::ParseScaleMode(g_backgroundScaleMode)); } else { DesktopWallpaper::DrawBranding(dc, cr); } drawDesktopIcons(dc, cr);
 #if defined(GXOS_SYSTEM_FONT_DEMO)
                 drawSystemFontDemo(dc, cr);
 #endif
@@ -2388,11 +2403,9 @@ namespace gxos {
                     WindowRenderer::DrawWindowGlow(dc, winfo.x, winfo.y, winfo.w, winfo.h, titleBarH, isFocused);
                     
                     // Draw window content background
-                    WindowRenderer::DrawRoundedRect(dc, winfo.x, winfo.y, winfo.w, winfo.h, 
-                        RGB((UISettings::WindowContentColor >> 16) & 0xFF,
-                            (UISettings::WindowContentColor >> 8) & 0xFF,
-                            UISettings::WindowContentColor & 0xFF),
-                        UISettings::EnableRoundedCorners ? UISettings::WindowCornerRadius : 0);
+                    WindowRenderer::DrawRoundedRect(dc, winfo.x, winfo.y, winfo.w, winfo.h,
+                        colorFromTheme(theme.windowBackground),
+                        UISettings::EnableRoundedCorners ? theme.windowCornerRadius : 0);
                     
                     // Draw title bar
                     WindowRenderer::DrawTitleBar(dc, winfo.x, winfo.y, winfo.w, titleBarH, isFocused);
@@ -2402,7 +2415,7 @@ namespace gxos {
                     
                     // Draw window title text
                     if (UISettings::EnableWindowTitles) {
-                        SystemFont::DrawText(dc, winfo.x + 10, winfo.y + 4, winfo.title.c_str(), (int)winfo.title.size(), RGB(240, 240, 240), FontRole::Title);
+                    SystemFont::DrawText(dc, winfo.x + 10, winfo.y + 4, winfo.title.c_str(), (int)winfo.title.size(), colorFromTheme(theme.titleBarText), FontRole::Title);
                     }
 
                     // Titlebar buttons (matching Legacy: minimize, maximize, tombstone, close from left to right)
@@ -2471,23 +2484,49 @@ namespace gxos {
                     }
                 }
                 int taskbarH = kTaskbarSize; WorkRect tbWork = taskbarRectForBounds(cr.right - cr.left, cr.bottom - cr.top); RECT tb{ tbWork.left,tbWork.top,tbWork.right,tbWork.bottom }; bool taskbarVertical = (g_taskbarPosition == TaskbarPosition::Left || g_taskbarPosition == TaskbarPosition::Right);
-                // Taskbar background with subtle gradient
                 int taskbarSpan = taskbarVertical ? (tb.right - tb.left) : (tb.bottom - tb.top);
+                const uint32_t taskbarStartColor = theme.taskbarBackground;
+                const uint32_t taskbarEndColor = theme.mutedAccent;
+                auto mixChannel = [&](uint32_t start, uint32_t end, float t) -> uint32_t {
+                    return static_cast<uint32_t>(static_cast<int>(start) + ((static_cast<int>(end) - static_cast<int>(start)) * t));
+                };
                 for (int ty2 = 0; ty2 < taskbarSpan; ++ty2) {
                     float gt = (float)ty2 / (float)(taskbarSpan > 1 ? taskbarSpan - 1 : 1);
-                    int gr = (int)(30 + gt * 10), gg = (int)(30 + gt * 10), gb = (int)(38 + gt * 14);
-                    HBRUSH tbLine = CreateSolidBrush(RGB(gr, gg, gb)); RECT tbLn = taskbarVertical ? RECT{ tb.left + ty2, tb.top, tb.left + ty2 + 1, tb.bottom } : RECT{ tb.left, tb.top + ty2, tb.right, tb.top + ty2 + 1 }; FillRect(dc, &tbLn, tbLine); DeleteObject(tbLine);
+                    uint32_t mixedColor =
+                        (mixChannel((taskbarStartColor >> 16) & 0xFF, (taskbarEndColor >> 16) & 0xFF, gt) << 16) |
+                        (mixChannel((taskbarStartColor >> 8) & 0xFF, (taskbarEndColor >> 8) & 0xFF, gt) << 8) |
+                        mixChannel(taskbarStartColor & 0xFF, taskbarEndColor & 0xFF, gt);
+                    HBRUSH tbLine = CreateSolidBrush(colorFromTheme(mixedColor));
+                    RECT tbLn = taskbarVertical ? RECT{ tb.left + ty2, tb.top, tb.left + ty2 + 1, tb.bottom } : RECT{ tb.left, tb.top + ty2, tb.right, tb.top + ty2 + 1 };
+                    FillRect(dc, &tbLn, tbLine);
+                    DeleteObject(tbLine);
                 }
-                // Edge highlight
-                { HPEN tbEdge = CreatePen(PS_SOLID, 1, RGB(60, 65, 80)); HGDIOBJ oldP = SelectObject(dc, tbEdge); if (taskbarVertical) { int edgeX = (g_taskbarPosition == TaskbarPosition::Left) ? tb.right : tb.left; MoveToEx(dc, edgeX, tb.top, nullptr); LineTo(dc, edgeX, tb.bottom); } else { int edgeY = (g_taskbarPosition == TaskbarPosition::Top) ? tb.bottom : tb.top; MoveToEx(dc, tb.left, edgeY, nullptr); LineTo(dc, tb.right, edgeY); } SelectObject(dc, oldP); DeleteObject(tbEdge); }
-                RECT startBtn{ tb.left + 8,tb.top + 6,tb.left + 40,tb.top + 34 }; HBRUSH sbg = CreateSolidBrush(g_startMenuVisible ? RGB(80, 110, 160) : RGB(55, 75, 100)); FillRect(dc, &startBtn, sbg); DeleteObject(sbg); FrameRect(dc, &startBtn, (HBRUSH)GetStockObject(WHITE_BRUSH)); drawBitmapCentered(dc, g_startBtnBmp, startBtn);
+                HPEN tbEdge = CreatePen(PS_SOLID, 1, colorFromTheme(theme.taskbarBorder));
+                HGDIOBJ oldP = SelectObject(dc, tbEdge);
+                if (taskbarVertical) {
+                    int edgeX = (g_taskbarPosition == TaskbarPosition::Left) ? tb.right : tb.left;
+                    MoveToEx(dc, edgeX, tb.top, nullptr);
+                    LineTo(dc, edgeX, tb.bottom);
+                } else {
+                    int edgeY = (g_taskbarPosition == TaskbarPosition::Top) ? tb.bottom : tb.top;
+                    MoveToEx(dc, tb.left, edgeY, nullptr);
+                    LineTo(dc, tb.right, edgeY);
+                }
+                SelectObject(dc, oldP);
+                DeleteObject(tbEdge);
+                RECT startBtn{ tb.left + 8,tb.top + 6,tb.left + 40,tb.top + 34 };
+                HBRUSH sbg = CreateSolidBrush(g_startMenuVisible ? colorFromTheme(theme.accent) : colorFromTheme(theme.mutedAccent));
+                FillRect(dc, &startBtn, sbg);
+                DeleteObject(sbg);
+                FrameRect(dc, &startBtn, (HBRUSH)GetStockObject(WHITE_BRUSH));
+                drawBitmapCentered(dc, g_startBtnBmp, startBtn);
                 // Search box placeholder (after start button)
                 if (!taskbarVertical) drawTaskbarSearchBox(dc, tb.left + 48, tb.top + 8, 160, (tb.bottom - tb.top) - 16);
                 // Taskbar buttons (offset to right of search box)
                 POINT cursor; GetCursorPos(&cursor); ScreenToClient(h, &cursor); int btnX = taskbarVertical ? tb.left + 4 : tb.left + 216; int btnY = taskbarVertical ? tb.top + 48 : tb.top + 6; for (uint64_t id : g_z) {
-                    auto it = g_windows.find(id); if (it == g_windows.end( )) continue; std::string label = it->second.title; int bw = taskbarVertical ? (tb.right - tb.left - 8) : measureUiText(label.c_str(), (int)label.size(), FontRole::Small) + 30; if (!taskbarVertical && bw > 180) bw = 180; int bh = taskbarVertical ? 28 : (tb.bottom - tb.top - 12); RECT br{ btnX, btnY, btnX + bw, btnY + bh }; bool hover = (cursor.x >= br.left && cursor.x <= br.right && cursor.y >= br.top && cursor.y <= br.bottom); HBRUSH bbg = CreateSolidBrush(hover ? RGB(90, 130, 190) : (id == g_focus ? RGB(70, 100, 150) : (it->second.minimized ? RGB(40, 40, 50) : (it->second.tombstoned ? RGB(85, 65, 35) : RGB(55, 58, 70))))); FillRect(dc, &br, bbg); DeleteObject(bbg);
+                    auto it = g_windows.find(id); if (it == g_windows.end( )) continue; std::string label = it->second.title; int bw = taskbarVertical ? (tb.right - tb.left - 8) : measureUiText(label.c_str(), (int)label.size(), FontRole::Small) + 30; if (!taskbarVertical && bw > 180) bw = 180; int bh = taskbarVertical ? 28 : (tb.bottom - tb.top - 12); RECT br{ btnX, btnY, btnX + bw, btnY + bh }; bool hover = (cursor.x >= br.left && cursor.x <= br.right && cursor.y >= br.top && cursor.y <= br.bottom); HBRUSH bbg = CreateSolidBrush(hover ? colorFromTheme(theme.accent) : (id == g_focus ? colorFromTheme(theme.mutedAccent) : (it->second.minimized ? RGB(40, 40, 50) : (it->second.tombstoned ? RGB(85, 65, 35) : RGB(55, 58, 70))))); FillRect(dc, &br, bbg); DeleteObject(bbg);
                     // Active indicator line at bottom for focused window
-                    if (id == g_focus) { HBRUSH ind = CreateSolidBrush(RGB(100, 160, 240)); RECT indR{ br.left + 2,br.bottom - 3,br.right - 2,br.bottom - 1 }; FillRect(dc, &indR, ind); DeleteObject(ind); }
+                    if (id == g_focus) { HBRUSH ind = CreateSolidBrush(colorFromTheme(theme.accent)); RECT indR{ br.left + 2,br.bottom - 3,br.right - 2,br.bottom - 1 }; FillRect(dc, &indR, ind); DeleteObject(ind); }
                     RECT iconRect{ br.left + 4, br.top + 4, br.left + 20, br.top + 20 }; drawBitmapCentered(dc, it->second.taskbarIcon, iconRect); if (!taskbarVertical) drawUiText(dc, br.left + 24, br.top + 8, label, RGB(230, 230, 240), FontRole::Small); if (taskbarVertical) btnY += bh + 4; else btnX += bw + 4;
                 }
                 // System tray area (before clock)
@@ -3492,6 +3531,7 @@ namespace gxos {
                 std::string cfgErr;
                 if (DesktopConfig::Load("desktop.json", cfg, cfgErr)) {
                     g_cfg = cfg;
+                    syncDesktopThemeFromConfig(g_cfg);
                     g_taskbarPosition = parseTaskbarPosition(g_cfg.taskbarPosition);
                     g_cfg.taskbarPosition = taskbarPositionName(g_taskbarPosition);
                     g_backgroundScaleMode = WallpaperRegistry::NormalizeScaleModeOrDefault(g_cfg.backgroundScaleMode.empty() ? "fill" : g_cfg.backgroundScaleMode);
@@ -3706,6 +3746,7 @@ namespace gxos {
             DesktopConfigData cfg; std::string cfgErr; bool cfgOk = DesktopConfig::Load("desktop.json", cfg, cfgErr);
             g_cfg = cfg; // Store config
             Logger::write(LogLevel::Info, std::string("Compositor DesktopConfig loaded=") + (cfgOk ? "true" : "false") + " err=" + cfgErr);
+            syncDesktopThemeFromConfig(g_cfg);
             g_taskbarPosition = parseTaskbarPosition(g_cfg.taskbarPosition);
             g_cfg.taskbarPosition = taskbarPositionName(g_taskbarPosition);
             Logger::write(LogLevel::Info, std::string("Compositor taskbar position=") + g_cfg.taskbarPosition);

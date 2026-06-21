@@ -40,6 +40,7 @@ clock.cpp ^
 compositor.cpp ^
 console_service.cpp ^
 console_window.cpp ^
+desktop_theme.cpp ^
 desktop_service.cpp ^
 desktop_state.cpp ^
 disk_manager.cpp ^

@@ -4,6 +4,8 @@
 #include <string>
 #include <vector>
 
+#include "desktop_theme.h"
+
 namespace gxos {
 namespace apps {
 
@@ -20,6 +22,8 @@ private:
     static int s_appliedBackgroundIndex;
     static int s_selectedGradientIndex;
     static int s_appliedGradientIndex;
+    static DesktopThemeId s_selectedThemeId;
+    static DesktopThemeId s_appliedThemeId;
     static int s_activeTab;
     static int s_mouseX;
     static int s_mouseY;
@@ -37,6 +41,7 @@ private:
     static void drawBackgroundTile(int index, int x, int y, bool hover, bool selected, bool applied);
     static void drawWallpaperTile(int index, int x, int y, bool hover, bool selected, bool applied);
     static void drawGradientTile(int index, int x, int y, bool hover, bool selected, bool applied);
+    static void drawThemeTab();
     static void drawDesktopIconsTab();
     static void handleMouseDown(int mx, int my);
     static void handleMouseUp(int mx, int my);
@@ -45,6 +50,7 @@ private:
     static void applySelectedWallpaper();
     static void applySelectedGradient();
     static void applySelectedBackground();
+    static void applySelectedTheme();
     static bool toggleDesktopIconSetting(int index);
     static void saveDesktopIconSettings();
     static bool hit(int mx, int my, int x, int y, int w, int h);

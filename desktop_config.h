@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <limits>
 #include <sstream>
+#include <cctype>
 #include "fs.h"
 
 namespace gxos { namespace gui {
@@ -19,6 +20,7 @@ namespace gxos { namespace gui {
     struct DesktopConfigData {
         std::string wallpaperPath; // may be empty
         std::string wallpaperId; // stable built-in wallpaper id, e.g. desktop.wallpaper.id
+        std::string desktopThemeId; // stable theme id, e.g. classic or scifi
         std::string backgroundScaleMode; // fill, fit, stretch, center, or tile
         std::string taskbarPosition; // bottom, top, left, or right
         std::vector<std::string> pinned;
@@ -55,6 +57,8 @@ namespace gxos { namespace gui {
             auto parseShortcutArray=[&](const std::string& src, std::vector<DesktopShortcutRec>& outShortcuts){ outShortcuts.clear(); size_t i=0; skipWS(src,i); if(i>=src.size() || src[i]!='[') return false; ++i; skipWS(src,i); if(i<src.size() && src[i]==']'){ ++i; return true; } while(i<src.size()){ skipWS(src,i); if(i>=src.size()||src[i]!='{') return false; int depth=0; size_t start=i; size_t j=i; while(j<src.size()){ if(src[j]=='{') depth++; else if(src[j]=='}'){ depth--; if(depth==0){ ++j; break; } } ++j; } if(depth!=0) return false; std::string obj = src.substr(start, j-start); auto findStr=[&](const char* key, std::string& outStr){ auto p=obj.find(std::string("\"")+key+"\""); if(p==std::string::npos) return false; auto c=obj.find(':',p); if(c==std::string::npos) return false; size_t ii=c+1; skipWS(obj,ii); if(ii>=obj.size()||obj[ii]!='"') return false; return parseJSONString(obj, ii, outStr); }; DesktopShortcutRec rec; findStr("shortcutType", rec.shortcutType); findStr("targetAppId", rec.targetAppId); findStr("targetPath", rec.targetPath); findStr("label", rec.label); findStr("iconName", rec.iconName); if(rec.shortcutType.empty()) rec.shortcutType = rec.targetPath.empty() ? "App" : "File"; if((rec.shortcutType=="App" && !rec.targetAppId.empty()) || ((rec.shortcutType=="File" || rec.shortcutType=="Folder") && !rec.targetPath.empty())) outShortcuts.push_back(rec); i=j; skipWS(src,i); if(i<src.size() && src[i]==','){ ++i; continue; } if(i<src.size() && src[i]==']'){ ++i; return true; } return false; } return false; };
             std::string section; if(extractSection(txt, "wallpaper", section)){ if(!section.empty() && section[0]=='"'){ size_t i=0; parseJSONString(section, i, out.wallpaperPath); } }
             if(extractSection(txt, "desktop.wallpaper.id", section)){ if(!section.empty() && section[0]=='"'){ size_t i=0; parseJSONString(section, i, out.wallpaperId); } }
+            if(extractSection(txt, "desktop.theme.id", section)){ if(!section.empty() && section[0]=='"'){ size_t i=0; parseJSONString(section, i, out.desktopThemeId); } }
+            if(out.desktopThemeId.empty() && extractSection(txt, "desktop.theme", section)){ if(!section.empty() && section[0]=='"'){ size_t i=0; parseJSONString(section, i, out.desktopThemeId); } }
             if(extractSection(txt, "desktop.background.scale", section)){ if(!section.empty() && section[0]=='"'){ size_t i=0; parseJSONString(section, i, out.backgroundScaleMode); } }
             if(extractSection(txt, "desktop.taskbar.position", section)){ if(!section.empty() && section[0]=='"'){ size_t i=0; parseJSONString(section, i, out.taskbarPosition); } }
             if(extractSection(txt, "pinned", section)) parseStringArray(section, out.pinned);
@@ -67,6 +71,19 @@ namespace gxos { namespace gui {
             if(extractSection(txt, "showDesktopFileManager", section)){ size_t i=0; skipWS(section,i); parseJSONBool(section, i, out.showDesktopFileManager); }
             if(extractSection(txt, "showDesktopSystemSettings", section)){ size_t i=0; skipWS(section,i); parseJSONBool(section, i, out.showDesktopSystemSettings); }
             if(extractSection(txt, "smallLiveDesktopFolderIcons", section)){ size_t i=0; skipWS(section,i); parseJSONBool(section, i, out.smallLiveDesktopFolderIcons); }
+            {
+                std::string normalizedTheme;
+                normalizedTheme.reserve(out.desktopThemeId.size());
+                for (char c : out.desktopThemeId) {
+                    const unsigned char ch = static_cast<unsigned char>(c);
+                    if (ch == '-' || ch == '_' || ch == ' ' || ch == '\t' || ch == '\r' || ch == '\n') {
+                        continue;
+                    }
+                    normalizedTheme.push_back(static_cast<char>(std::tolower(ch)));
+                }
+                if (normalizedTheme == "scifi") out.desktopThemeId = "scifi";
+                else out.desktopThemeId = "classic";
+            }
             return true;
         }
         static inline bool Save(const std::string& path, const DesktopConfigData& data, std::string& err){
@@ -75,6 +92,7 @@ namespace gxos { namespace gui {
             f << "{\n";
             f << "  \"wallpaper\": " << jsonEscape(data.wallpaperPath) << ",\n";
             f << "  \"desktop.wallpaper.id\": " << jsonEscape(data.wallpaperId) << ",\n";
+            f << "  \"desktop.theme.id\": " << jsonEscape(data.desktopThemeId.empty() ? "classic" : data.desktopThemeId) << ",\n";
             f << "  \"desktop.background.scale\": " << jsonEscape(data.backgroundScaleMode.empty() ? "fill" : data.backgroundScaleMode) << ",\n";
             f << "  \"desktop.taskbar.position\": " << jsonEscape(data.taskbarPosition.empty() ? "bottom" : data.taskbarPosition) << ",\n";
             f << "  \"pinned\": ["; for(size_t i=0;i<data.pinned.size();++i){ if(i) f<<","; f<<jsonEscape(data.pinned[i]);} f << "],\n";

@@ -21,6 +21,8 @@ int DisplayOptions::s_selectedBackgroundIndex = 0;
 int DisplayOptions::s_appliedBackgroundIndex = 0;
 int DisplayOptions::s_selectedGradientIndex = 0;
 int DisplayOptions::s_appliedGradientIndex = 0;
+DesktopThemeId DisplayOptions::s_selectedThemeId = DesktopThemeId::Classic;
+DesktopThemeId DisplayOptions::s_appliedThemeId = DesktopThemeId::Classic;
 int DisplayOptions::s_activeTab = 0;
 int DisplayOptions::s_mouseX = 0;
 int DisplayOptions::s_mouseY = 0;
@@ -35,8 +37,12 @@ namespace {
     const int kWindowW = 800;
     const int kWindowH = 620;
     const int kTabY = 18;
-    const int kTabW = 220;
+    const int kTabW = 170;
     const int kTabH = 40;
+    const int kThemeTabX = 20;
+    const int kBackgroundTabX = 200;
+    const int kDesktopIconTabX = 380;
+    const int kGradientTabX = 560;
     const int kGalleryX = 26;
     const int kGalleryY = 100;
     const int kTileW = 130;
@@ -54,6 +60,11 @@ namespace {
     const int kDesktopIconsY = 132;
     const int kDesktopIconRowH = 42;
     const int kDesktopIconCheckboxSize = 18;
+    const int kThemeOptionX = 46;
+    const int kThemeOptionY = 132;
+    const int kThemeOptionW = 320;
+    const int kThemeOptionH = 54;
+    const int kThemeOptionGap = 16;
 
     void publish(MsgType type, const std::string& payload)
     {
@@ -90,6 +101,20 @@ namespace {
         if (!cfg.wallpaperId.empty()) return WallpaperRegistry::ResolveIdOrDefault(cfg.wallpaperId);
         std::string id = WallpaperRegistry::IdForAssetPath(cfg.wallpaperPath);
         return id.empty() ? WallpaperRegistry::DefaultBackground().id : id;
+    }
+
+    DesktopThemeId selectedThemeIdFromConfig()
+    {
+        DesktopConfigData cfg;
+        std::string err;
+        DesktopThemeId themeId = DesktopThemeId::Classic;
+        if (!DesktopConfig::Load("desktop.json", cfg, err)) {
+            return themeId;
+        }
+        if (!TryParseDesktopThemeId(cfg.desktopThemeId.c_str(), &themeId)) {
+            themeId = DesktopThemeId::Classic;
+        }
+        return themeId;
     }
 
     int backgroundIndexForId(const std::string& id)
@@ -165,6 +190,8 @@ void DisplayOptions::loadSelection()
         s_smallLiveDesktopFolderIcons = true;
         Logger::write(LogLevel::Info, "DisplayOptions Desktop Icons defaulted: Trash=true ThisSystem=true FileManager=true SystemSettings=false FolderIconsSmall=true");
     }
+    s_selectedThemeId = selectedThemeIdFromConfig();
+    s_appliedThemeId = s_selectedThemeId;
     for (size_t i = 0; i < backgrounds.size(); ++i) {
         if (backgrounds[i].id == selectedId) {
             s_selectedBackgroundIndex = static_cast<int>(i);
@@ -280,10 +307,15 @@ void DisplayOptions::render()
     publish(MsgType::MT_DrawText, std::to_string(s_windowId) + "|\f");
     drawRect(s_windowId, 0, 0, kWindowW, kWindowH, 27, 31, 40);
 
-    drawButton(20, kTabY, kTabW, kTabH, "Backgrounds", s_activeTab == 0, true);
-    drawButton(250, kTabY, kTabW, kTabH, "Desktop Icons", s_activeTab == 2, true);
-    drawButton(480, kTabY, kTabW, kTabH, "Gradients", s_activeTab == 1, true);
-    drawText(s_windowId, 26, 72, s_activeTab == 2 ? "Choose desktop icons and folder icon size:" : (s_activeTab == 0 ? "Select a background from the gallery:" : "Select a gradient from the gallery:"));
+    drawButton(kBackgroundTabX, kTabY, kTabW, kTabH, "Backgrounds", s_activeTab == 0, true);
+    drawButton(kDesktopIconTabX, kTabY, kTabW, kTabH, "Desktop Icons", s_activeTab == 2, true);
+    drawButton(kGradientTabX, kTabY, kTabW, kTabH, "Gradients", s_activeTab == 1, true);
+    drawButton(kThemeTabX, kTabY, kTabW, kTabH, "Theme", s_activeTab == 3, true);
+    drawText(s_windowId, 26, 72,
+        s_activeTab == 2 ? "Choose desktop icons and folder icon size:"
+        : (s_activeTab == 0 ? "Select a background from the gallery:"
+        : (s_activeTab == 1 ? "Select a gradient from the gallery:"
+        : "Choose a desktop theme (Classic is default):")));
     drawRect(s_windowId, 20, 92, 742, 456, 22, 22, 24);
 
     if (s_activeTab == 0) {
@@ -306,16 +338,20 @@ void DisplayOptions::render()
             bool hover = hit(s_mouseX, s_mouseY, x, y, kTileW, kTileH);
             drawGradientTile(static_cast<int>(i), x, y, hover, static_cast<int>(i) == s_selectedGradientIndex, static_cast<int>(i) == s_appliedGradientIndex);
         }
+    } else if (s_activeTab == 3) {
+        drawThemeTab();
     } else {
         drawDesktopIconsTab();
     }
 
-    if (s_activeTab != 2) {
+    if (s_activeTab != 2 && s_activeTab != 3) {
         drawButton(kSelectButtonX, kButtonY, kButtonW, kButtonH, s_activeTab == 0 ? "Select Background" : "Select Gradient", false, true);
         drawButton(kSelectButtonX + 200, kButtonY, kButtonW, kButtonH, "Choose Color", false, false);
         drawButton(kSelectButtonX + 400, kButtonY, kButtonW, kButtonH, "Visual Effects", false, false);
-    } else {
+    } else if (s_activeTab == 2) {
         drawText(s_windowId, 26, kButtonY + 10, "Changes are saved immediately.");
+    } else {
+        drawText(s_windowId, 26, kButtonY + 10, "Selecting a theme saves it and asks the compositor to reload.");
     }
 }
 
@@ -373,6 +409,27 @@ void DisplayOptions::drawWallpaperTile(int index, int x, int y, bool hover, bool
     drawText(s_windowId, x + 8, y + 78, entry.displayName + (applied ? " *" : ""));
 }
 
+void DisplayOptions::drawThemeTab()
+{
+    auto drawThemeOption = [&](int x, int y, DesktopThemeId id, const DesktopTheme& theme, const char* description) {
+        const bool selected = (s_selectedThemeId == id);
+        const bool applied = (s_appliedThemeId == id);
+        if (selected) drawRect(s_windowId, x - 4, y - 4, kThemeOptionW + 8, kThemeOptionH + 8, 72, 110, 180);
+        drawRect(s_windowId, x, y, kThemeOptionW, kThemeOptionH, 34, 36, 42);
+        drawRect(s_windowId, x, y, kThemeOptionW, 1, 84, 90, 105);
+        drawRect(s_windowId, x, y + kThemeOptionH - 1, kThemeOptionW, 1, 64, 68, 78);
+        drawRect(s_windowId, x, y, 1, kThemeOptionH, 84, 90, 105);
+        drawRect(s_windowId, x + kThemeOptionW - 1, y, 1, kThemeOptionH, 48, 52, 60);
+        drawRect(s_windowId, x + 12, y + 12, 18, 18, (theme.accent >> 16) & 0xFF, (theme.accent >> 8) & 0xFF, theme.accent & 0xFF);
+        if (selected) drawText(s_windowId, x + 16, y + 10, "x");
+        drawText(s_windowId, x + 42, y + 10, std::string(theme.displayName) + (applied ? " *" : ""));
+        drawText(s_windowId, x + 42, y + 28, description);
+    };
+
+    drawThemeOption(kThemeOptionX, kThemeOptionY, DesktopThemeId::Classic, GetDesktopTheme(DesktopThemeId::Classic), "Keeps the current guideXOS look basically unchanged.");
+    drawThemeOption(kThemeOptionX, kThemeOptionY + kThemeOptionH + kThemeOptionGap, DesktopThemeId::SciFi, GetDesktopTheme(DesktopThemeId::SciFi), "Opt-in preview of the darker sci-fi direction.");
+}
+
 void DisplayOptions::drawBackgroundTile(int index, int x, int y, bool hover, bool selected, bool applied)
 {
     const auto& entry = WallpaperRegistry::BuiltInBackgrounds()[static_cast<size_t>(index)];
@@ -425,19 +482,25 @@ void DisplayOptions::handleMouseMove(int, int)
 
 void DisplayOptions::handleMouseDown(int mx, int my)
 {
-    if (hit(mx, my, 20, kTabY, kTabW, kTabH)) {
+    if (hit(mx, my, kBackgroundTabX, kTabY, kTabW, kTabH)) {
         s_activeTab = 0;
         render();
         return;
     }
-    if (hit(mx, my, 250, kTabY, kTabW, kTabH)) {
+    if (hit(mx, my, kDesktopIconTabX, kTabY, kTabW, kTabH)) {
         s_activeTab = 2;
         Logger::write(LogLevel::Info, "DisplayOptions Desktop Icons tab selected");
         render();
         return;
     }
-    if (hit(mx, my, 480, kTabY, kTabW, kTabH)) {
+    if (hit(mx, my, kGradientTabX, kTabY, kTabW, kTabH)) {
         s_activeTab = 1;
+        render();
+        return;
+    }
+    if (hit(mx, my, kThemeTabX, kTabY, kTabW, kTabH)) {
+        s_activeTab = 3;
+        Logger::write(LogLevel::Info, "DisplayOptions Theme tab selected");
         render();
         return;
     }
@@ -452,6 +515,22 @@ void DisplayOptions::handleMouseDown(int mx, int my)
                 }
                 return;
             }
+        }
+        return;
+    }
+
+    if (s_activeTab == 3) {
+        if (hit(mx, my, kThemeOptionX, kThemeOptionY, kThemeOptionW, kThemeOptionH)) {
+            s_selectedThemeId = DesktopThemeId::Classic;
+            applySelectedTheme();
+            render();
+            return;
+        }
+        if (hit(mx, my, kThemeOptionX, kThemeOptionY + kThemeOptionH + kThemeOptionGap, kThemeOptionW, kThemeOptionH)) {
+            s_selectedThemeId = DesktopThemeId::SciFi;
+            applySelectedTheme();
+            render();
+            return;
         }
         return;
     }
@@ -506,7 +585,7 @@ void DisplayOptions::handleMouseUp(int, int)
 
 void DisplayOptions::handleDoubleClick(int mx, int my)
 {
-    if (s_activeTab == 2) return;
+    if (s_activeTab == 2 || s_activeTab == 3) return;
     if (s_activeTab == 1) {
         const auto& gradients = WallpaperRegistry::BuiltInGradients();
         for (size_t i = 0; i < gradients.size(); ++i) {
@@ -568,11 +647,30 @@ void DisplayOptions::saveDesktopIconSettings()
     cfg.showDesktopFileManager = s_showDesktopFileManager;
     cfg.showDesktopSystemSettings = s_showDesktopSystemSettings;
     cfg.smallLiveDesktopFolderIcons = s_smallLiveDesktopFolderIcons;
+    cfg.desktopThemeId = DesktopThemeIdToString(s_appliedThemeId);
     if (DesktopConfig::Save("desktop.json", cfg, err)) {
         Logger::write(LogLevel::Info, "DisplayOptions Desktop Icons settings saved");
         publish(MsgType::MT_DesktopConfigReload, "");
     } else {
         Logger::write(LogLevel::Warn, "DisplayOptions Desktop Icons settings save failed: " + err);
+    }
+}
+
+void DisplayOptions::applySelectedTheme()
+{
+    DesktopConfigData cfg;
+    std::string err;
+    if (!DesktopConfig::Load("desktop.json", cfg, err)) {
+        Logger::write(LogLevel::Info, "DisplayOptions theme save using default config because load failed: " + err);
+    }
+
+    cfg.desktopThemeId = DesktopThemeIdToString(s_selectedThemeId);
+    if (DesktopConfig::Save("desktop.json", cfg, err)) {
+        s_appliedThemeId = s_selectedThemeId;
+        Logger::write(LogLevel::Info, std::string("DisplayOptions applied theme id=") + DesktopThemeIdToString(s_appliedThemeId));
+        publish(MsgType::MT_DesktopConfigReload, "");
+    } else {
+        Logger::write(LogLevel::Warn, "DisplayOptions theme save failed: " + err);
     }
 }
 

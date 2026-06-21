@@ -66,6 +66,9 @@
     <ClInclude Include="desktop_config.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="desktop_theme.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="desktop_service.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -747,6 +750,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="compositor.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="desktop_theme.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="vfs.cpp">

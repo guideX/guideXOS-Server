@@ -146,6 +146,7 @@
     <ClInclude Include="console_window.h" />
     <ClInclude Include="cpu_architecture.h" />
     <ClInclude Include="desktop_config.h" />
+    <ClInclude Include="desktop_theme.h" />
     <ClInclude Include="desktop_service.h" />
     <ClInclude Include="desktop_state.h" />
     <ClInclude Include="desktop_wallpaper.h" />
@@ -380,6 +381,7 @@
     <ClCompile Include="compositor.cpp" />
     <ClCompile Include="console_service.cpp" />
     <ClCompile Include="console_window.cpp" />
+    <ClCompile Include="desktop_theme.cpp" />
     <ClCompile Include="desktop_service.cpp" />
     <ClCompile Include="desktop_state.cpp" />
     <ClCompile Include="display_options.cpp" />
