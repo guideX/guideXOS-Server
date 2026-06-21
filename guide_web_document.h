@@ -70,7 +70,9 @@ struct WebStyle {
 	bool     bold = false;
 	bool     underline = false;
 	bool     displayNone = false;
+	bool     listStyleNone = false;
 	TextAlign textAlign = TextAlign::Inherit;
+	bool     lineHeightNormal = false;
 	int      marginTop = -1;
 	int      marginRight = -1;
 	int      marginBottom = -1;
@@ -115,6 +117,7 @@ struct CssDiagnostics {
 	int    parseErrorCount = 0;
 	bool   styleBlockCapped = false;
 	size_t styleBytesProcessed = 0;
+	int    clampedValueCount = 0;
 };
 
 struct FormsDiagnostics {

@@ -662,6 +662,11 @@ namespace {
 		metadata.cssParseErrorCount = doc.cssDiagnostics.parseErrorCount;
 		metadata.cssStyleBlockCapped = doc.cssDiagnostics.styleBlockCapped;
 		metadata.cssStyleBytesProcessed = doc.cssDiagnostics.styleBytesProcessed;
+		metadata.cssLayoutMaxWidthAppliedCount = 0;
+		metadata.cssAutoMarginCenteredBlockCount = 0;
+		metadata.cssBackgroundBlockCount = doc.bodyStyle.hasBackgroundColor ? 1 : 0;
+		metadata.cssListRenderCount = 0;
+		metadata.cssClampedValueCount = doc.cssDiagnostics.clampedValueCount;
 		metadata.formCount = doc.formsDiagnostics.formCount;
 		metadata.formInputCount = doc.formsDiagnostics.textInputCount;
 		metadata.formCheckboxCount = doc.formsDiagnostics.checkboxCount;
@@ -675,6 +680,20 @@ namespace {
 		metadata.postSupportedBareMetal = false;
 
 		for (const DocBlock& block : doc.blocks) {
+			const bool hasWidthConstraint = block.style.width > 0 || block.style.widthPercent >= 0 ||
+				block.style.maxWidth > 0 || block.style.maxWidthPercent >= 0;
+			if (block.style.maxWidth > 0 || block.style.maxWidthPercent >= 0) {
+				++metadata.cssLayoutMaxWidthAppliedCount;
+			}
+			if (block.style.marginLeft == -2 && block.style.marginRight == -2 && hasWidthConstraint) {
+				++metadata.cssAutoMarginCenteredBlockCount;
+			}
+			if (block.style.hasBackgroundColor) {
+				++metadata.cssBackgroundBlockCount;
+			}
+			if (block.type == BlockType::ListItem) {
+				++metadata.cssListRenderCount;
+			}
 			if (block.type != BlockType::Image) continue;
 			++metadata.imageBlockCount;
 			if (isRemoteHttpUrl(block.url)) {
@@ -785,6 +804,7 @@ namespace {
 
 	static int cssLineHeightOrDefault(const WebStyle& style, int fallbackValue)
 	{
+		if (style.lineHeightNormal) return fallbackValue;
 		return style.lineHeight > 0 ? style.lineHeight : fallbackValue;
 	}
 
@@ -825,6 +845,11 @@ namespace {
 		return style.hasBorderBottom ? std::max(1, style.borderBottomWidth) : 0;
 	}
 
+	static bool cssListStyleNone(const WebStyle& style)
+	{
+		return style.listStyleNone;
+	}
+
 	static bool cssMarginLeftAuto(const WebStyle& style)
 	{
 		return style.marginLeft == -2;
@@ -833,6 +858,62 @@ namespace {
 	static bool cssMarginRightAuto(const WebStyle& style)
 	{
 		return style.marginRight == -2;
+	}
+
+	static bool blockIsOrderedListItem(const DocBlock& block)
+	{
+		for (auto it = block.ancestors.rbegin(); it != block.ancestors.rend(); ++it) {
+			const std::string tag = toLowerAscii(it->tagName);
+			if (tag == "ol") return true;
+			if (tag == "ul") return false;
+		}
+		return false;
+	}
+
+	static std::string blockListContainerSignature(const DocBlock& block)
+	{
+		std::ostringstream oss;
+		for (const gxos::web::HtmlElementRef& ancestor : block.ancestors) {
+			const std::string tag = toLowerAscii(ancestor.tagName);
+			oss << "|" << tag << "#" << toLowerAscii(ancestor.id) << "." << toLowerAscii(ancestor.className);
+			if (tag == "ol" || tag == "ul") {
+				break;
+			}
+		}
+		return oss.str();
+	}
+
+	static int blockListTextInsetPx(const DocBlock& block)
+	{
+		if (cssListStyleNone(block.style)) return 0;
+		return blockIsOrderedListItem(block) ? 4 * kCharW : 2 * kCharW;
+	}
+
+	static std::string blockListMarkerText(const DocBlock& block, int ordinal)
+	{
+		if (cssListStyleNone(block.style)) return "";
+		if (blockIsOrderedListItem(block)) {
+			return std::to_string(std::max(1, ordinal)) + ".";
+		}
+		return "-";
+	}
+
+	static int blockListOrdinal(const WebDocument& doc, int blockIndex)
+	{
+		if (blockIndex < 0 || blockIndex >= static_cast<int>(doc.blocks.size())) return 1;
+		const DocBlock& block = doc.blocks[static_cast<size_t>(blockIndex)];
+		if (!blockIsOrderedListItem(block)) return 1;
+		const std::string signature = blockListContainerSignature(block);
+		int ordinal = 0;
+		for (int i = 0; i <= blockIndex && i < static_cast<int>(doc.blocks.size()); ++i) {
+			const DocBlock& candidate = doc.blocks[static_cast<size_t>(i)];
+			if (candidate.type != BlockType::ListItem) continue;
+			if (!blockIsOrderedListItem(candidate)) continue;
+			if (blockListContainerSignature(candidate) == signature) {
+				++ordinal;
+			}
+		}
+		return std::max(1, ordinal);
 	}
 
 	static int blockBodyMarginLeft(const WebDocument& doc)
@@ -889,8 +970,8 @@ namespace {
 	static int blockTextLineHeight(const DocBlock& block)
 	{
 		const int fontSize = cssFontSizeOrDefault(block.style, kLineH);
-		const int lineHeight = cssLineHeightOrDefault(block.style, fontSize);
-		return std::max(kLineH, lineHeight);
+		const int lineHeight = cssLineHeightOrDefault(block.style, fontSize + 4);
+		return std::max(fontSize + 4, std::max(kLineH, lineHeight));
 	}
 
 	static int blockTextX(const DocBlock& block, int outerX, int innerWidth, int lineWidth)
@@ -933,7 +1014,8 @@ namespace {
 			- bodyMarginLeft - bodyMarginRight - blockMarginLeft - blockMarginRight);
 		const int outerWidth = blockOuterWidth(block, availableWidth);
 		const int innerWidth = std::max(1, outerWidth - paddingLeft - paddingRight);
-		const int wrapCols = std::max(1, innerWidth / kCharW);
+		const int listInset = block.type == BlockType::ListItem ? blockListTextInsetPx(block) : 0;
+		const int wrapCols = std::max(1, std::max(1, innerWidth - listInset) / kCharW);
 		const int lineHeight = blockTextLineHeight(block);
 		const int headingFontSize = cssFontSizeOrDefault(block.style, block.tagName == "h1" ? 24 : (block.tagName == "h2" ? 20 : (block.tagName == "h3" ? 18 : 20)));
 		const int headingHeight = std::max(lineHeight + 4, headingFontSize + 2);
@@ -1077,10 +1159,17 @@ namespace {
 		int cssStyleBlockCount,
 		int cssInlineStyleCount,
 		int cssExternalStylesheetLoadedCount,
+		int cssUnsupportedExternalStylesheetCount,
 		int cssUnsupportedRuleCount,
+		int cssUnsupportedDeclarationCount,
 		int cssParseErrorCount,
 		bool cssStyleBlockCapped,
 		size_t cssStyleBytesProcessed,
+		int cssLayoutMaxWidthAppliedCount,
+		int cssAutoMarginCenteredBlockCount,
+		int cssBackgroundBlockCount,
+		int cssListRenderCount,
+		int cssClampedValueCount,
 		int formCount,
 		int formInputCount,
 		int checkboxCount,
@@ -1259,10 +1348,17 @@ namespace {
 			{"Current Document", "CSS style blocks", std::to_string(cssStyleBlockCount)},
 			{"Current Document", "CSS inline styles", std::to_string(cssInlineStyleCount)},
 			{"Current Document", "CSS external stylesheets loaded", std::to_string(cssExternalStylesheetLoadedCount)},
+			{"Current Document", "CSS unsupported external stylesheets", std::to_string(cssUnsupportedExternalStylesheetCount)},
 			{"Current Document", "CSS unsupported rules", std::to_string(cssUnsupportedRuleCount)},
+			{"Current Document", "CSS unsupported declarations", std::to_string(cssUnsupportedDeclarationCount)},
 			{"Current Document", "CSS parse errors", std::to_string(cssParseErrorCount)},
 			{"Current Document", "CSS style block capped", yesNo(cssStyleBlockCapped)},
 			{"Current Document", "CSS style bytes processed", std::to_string(cssStyleBytesProcessed)},
+			{"Current Document", "CSS layout max-width applied", std::to_string(cssLayoutMaxWidthAppliedCount)},
+			{"Current Document", "CSS auto-margin centered blocks", std::to_string(cssAutoMarginCenteredBlockCount)},
+			{"Current Document", "CSS background blocks drawn", std::to_string(cssBackgroundBlockCount)},
+			{"Current Document", "CSS lists rendered", std::to_string(cssListRenderCount)},
+			{"Current Document", "CSS clamped values", std::to_string(cssClampedValueCount)},
 			{"Current Document", "Forms", std::to_string(formCount)},
 			{"Current Document", "Text inputs", std::to_string(formInputCount)},
 			{"Current Document", "Checkboxes", std::to_string(checkboxCount)},
@@ -1596,10 +1692,17 @@ std::string Navigator::SmokeRuntimeReport()
 		s_pageMetadata.styleBlockCount,
 		s_pageMetadata.inlineStyleCount,
 		s_pageMetadata.externalStylesheetLoadedCount,
+		s_pageMetadata.unsupportedExternalStylesheetCount,
 		s_pageMetadata.unsupportedCssRuleCount,
+		s_pageMetadata.unsupportedCssDeclarationCount,
 		s_pageMetadata.cssParseErrorCount,
 		s_pageMetadata.cssStyleBlockCapped,
 		s_pageMetadata.cssStyleBytesProcessed,
+		s_pageMetadata.cssLayoutMaxWidthAppliedCount,
+		s_pageMetadata.cssAutoMarginCenteredBlockCount,
+		s_pageMetadata.cssBackgroundBlockCount,
+		s_pageMetadata.cssListRenderCount,
+		s_pageMetadata.cssClampedValueCount,
 		s_pageMetadata.formCount,
 		s_pageMetadata.formInputCount,
 		s_pageMetadata.formCheckboxCount,
@@ -1912,8 +2015,9 @@ void Navigator::renderDocument()
 		const int outerWidth = blockOuterWidth(block, availableWidth);
 		const int outerX = blockOuterX(block, s_currentDoc, availableWidth, outerWidth);
 		const int innerWidth = std::max(1, outerWidth - paddingLeft - paddingRight);
-		const int wrapCols = std::max(1, innerWidth / kCharW);
-		const int listWrapCols = std::max(1, innerWidth / kCharW);
+		const int listInset = block.type == BlockType::ListItem ? blockListTextInsetPx(block) : 0;
+		const int wrapCols = std::max(1, std::max(1, innerWidth - listInset) / kCharW);
+		const int listWrapCols = wrapCols;
 		const int preWrapCols = std::max(1, innerWidth / kCharW);
 		const int headingFontSize = cssFontSizeOrDefault(block.style, block.tagName == "h1" ? 24 : (block.tagName == "h2" ? 20 : (block.tagName == "h3" ? 18 : 20)));
 
@@ -1926,7 +2030,7 @@ void Navigator::renderDocument()
 		case BlockType::Heading:      blockH = blockMarginTop + borderTop + paddingTop + std::max(lineHeight + 4, headingFontSize + 2) + paddingBottom + borderBottom + std::max(4, blockMarginBottom); break;
 		case BlockType::Paragraph:    blockH = blockMarginTop + borderTop + paddingTop + wrappedBlockHeight(block.text, wrapCols, false, lineHeight) + paddingBottom + borderBottom + std::max(4, blockMarginBottom) + (nextIsHeading ? kPreGapIfNextHeading : 0); break;
 		case BlockType::Link:         blockH = blockMarginTop + borderTop + paddingTop + wrappedBlockHeight(block.text, wrapCols, false, lineHeight) + paddingBottom + borderBottom + std::max(4, blockMarginBottom) + (nextIsHeading ? kPreGapIfNextHeading : 0); break;
-		case BlockType::ListItem:     blockH = blockMarginTop + borderTop + paddingTop + wrappedBlockHeight(block.text, listWrapCols, false, lineHeight) + paddingBottom + borderBottom + std::max(2, blockMarginBottom) + (nextIsHeading ? kPreGapIfNextHeading : 0); break;
+		case BlockType::ListItem:     blockH = blockMarginTop + borderTop + paddingTop + wrappedBlockHeight(block.text, listWrapCols, false, lineHeight) + paddingBottom + borderBottom + std::max(4, blockMarginBottom) + (nextIsHeading ? kPreGapIfNextHeading : 0); break;
 		case BlockType::Preformatted: blockH = blockMarginTop + borderTop + paddingTop + wrappedBlockHeight(block.text, preWrapCols, true, lineHeight) + paddingBottom + borderBottom + std::max(4, blockMarginBottom) + (nextIsHeading ? kPreGapIfNextHeading : 0); break;
 		case BlockType::FormTextInput:
 		case BlockType::FormCheckbox:
@@ -1997,13 +2101,19 @@ void Navigator::renderDocument()
 		}
 
 		case BlockType::ListItem: {
-			// Dash bullet + indented wrapped text
-			drawTextAtStyled(s_windowId, outerX + paddingLeft, drawY + blockMarginTop + borderTop + paddingTop, "-", block.style);
+			// Bullet or ordinal prefix with a fixed inset keeps the text from
+			// overlapping the marker and gives simple lists a readable rhythm.
+			const int ordinal = blockListOrdinal(s_currentDoc, blockIndex);
+			const std::string marker = blockListMarkerText(block, ordinal);
+			if (!marker.empty()) {
+				drawTextAtStyled(s_windowId, outerX + paddingLeft, drawY + blockMarginTop + borderTop + paddingTop, marker, block.style);
+			}
+			const int textInset = blockListTextInsetPx(block);
 			auto lines = wrapText(block.text, listWrapCols);
 			int lineY = drawY + blockMarginTop + borderTop + paddingTop;
 			for (const std::string& ln : lines) {
 				const int lineW = static_cast<int>(ln.size()) * kCharW;
-				drawTextAtStyled(s_windowId, blockTextX(block, outerX + paddingLeft, innerWidth, lineW), lineY, ln, block.style);
+				drawTextAtStyled(s_windowId, blockTextX(block, outerX + paddingLeft + textInset, std::max(1, innerWidth - textInset), lineW), lineY, ln, block.style);
 				lineY += lineHeight;
 			}
 			break;
@@ -3867,6 +3977,11 @@ WebDocument Navigator::buildPageInfoDocument()
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Unsupported CSS declarations", m.unsupportedCssDeclarationCount), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("CSS style block capped", yesNo(m.cssStyleBlockCapped)), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("CSS style bytes processed", static_cast<int>(m.cssStyleBytesProcessed)), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("CSS layout max-width applied", m.cssLayoutMaxWidthAppliedCount), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("CSS auto-margin centered blocks", m.cssAutoMarginCenteredBlockCount), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("CSS background blocks drawn", m.cssBackgroundBlockCount), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("CSS lists rendered", m.cssListRenderCount), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("CSS clamped values", m.cssClampedValueCount), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Downloaded", yesNo(m.downloaded)), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Download saved path", m.downloadSavedPath), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Download byte count", static_cast<int>(m.downloadByteCount)), ""});
@@ -3976,10 +4091,17 @@ WebDocument Navigator::buildRuntimeDocument()
 		s_pageMetadata.styleBlockCount,
 		s_pageMetadata.inlineStyleCount,
 		s_pageMetadata.externalStylesheetLoadedCount,
+		s_pageMetadata.unsupportedExternalStylesheetCount,
 		s_pageMetadata.unsupportedCssRuleCount,
+		s_pageMetadata.unsupportedCssDeclarationCount,
 		s_pageMetadata.cssParseErrorCount,
 		s_pageMetadata.cssStyleBlockCapped,
 		s_pageMetadata.cssStyleBytesProcessed,
+		s_pageMetadata.cssLayoutMaxWidthAppliedCount,
+		s_pageMetadata.cssAutoMarginCenteredBlockCount,
+		s_pageMetadata.cssBackgroundBlockCount,
+		s_pageMetadata.cssListRenderCount,
+		s_pageMetadata.cssClampedValueCount,
 		s_pageMetadata.formCount,
 		s_pageMetadata.formInputCount,
 		s_pageMetadata.formCheckboxCount,
@@ -4051,7 +4173,8 @@ static std::string saveNameStemFromUrl(const std::string& url)
 static std::string extractDocumentText(const WebDocument& doc)
 {
 	std::ostringstream out;
-	for (const DocBlock& block : doc.blocks) {
+	for (int i = 0; i < static_cast<int>(doc.blocks.size()); ++i) {
+		const DocBlock& block = doc.blocks[static_cast<size_t>(i)];
 		if (!blockHasVisibleCss(block)) {
 			continue;
 		}
@@ -4063,7 +4186,14 @@ static std::string extractDocumentText(const WebDocument& doc)
 			if (!block.text.empty()) out << block.text << "\n\n";
 			break;
 		case BlockType::ListItem:
-			if (!block.text.empty()) out << "- " << block.text << "\n";
+			if (!block.text.empty()) {
+				const int ordinal = blockListOrdinal(doc, i);
+				const std::string marker = blockListMarkerText(block, ordinal);
+				if (!marker.empty()) {
+					out << marker << ' ';
+				}
+				out << block.text << "\n";
+			}
 			break;
 		case BlockType::Preformatted:
 			if (!block.text.empty()) out << block.text << "\n\n";

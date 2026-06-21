@@ -38,6 +38,11 @@ namespace web {
 namespace {
 
 	constexpr size_t kCssLiteMaxStyleBytes = 16u * 1024u;
+	constexpr int kCssLiteMaxSpacingPx = 256;
+	constexpr int kCssLiteMaxFontSizePx = 72;
+	constexpr int kCssLiteMaxLineHeightPx = 96;
+	constexpr int kCssLiteMaxWidthPx = 2048;
+	constexpr int kCssLiteMaxBorderWidthPx = 12;
 
 // ASCII lower-case without locale dependency.
 static std::string toLower(const std::string& s)
@@ -276,6 +281,15 @@ static int roundCssNumber(double value)
 	return value <= 0.0 ? 0 : static_cast<int>(value + 0.5);
 }
 
+static int clampCssValue(CssDiagnostics& diag, int value, int minValue, int maxValue)
+{
+	const int clamped = std::max(minValue, std::min(maxValue, value));
+	if (clamped != value) {
+		++diag.clampedValueCount;
+	}
+	return clamped;
+}
+
 static bool parseCssLengthValue(const std::string& rawValue,
 	int basePx,
 	int& outPx,
@@ -431,11 +445,16 @@ static bool applyLengthList(WebStyle& style,
 	int parsed[4] = { -1, -1, -1, -1 };
 	bool autos[4] = { false, false, false, false };
 	for (size_t i = 0; i < values.size() && i < 4; ++i) {
-		if (!parseCssLengthValue(values[i], 320, parsed[i], autos[i], true)) {
+		const bool allowAuto = property == "margin";
+		if (!parseCssLengthValue(values[i], 320, parsed[i], autos[i], allowAuto)) {
 			++diag.unsupportedDeclarationCount;
 			return false;
 		}
-		if (autos[i]) parsed[i] = -2;
+		if (autos[i]) {
+			parsed[i] = -2;
+		} else {
+			parsed[i] = clampCssValue(diag, parsed[i], 0, kCssLiteMaxSpacingPx);
+		}
 	}
 	if (property == "margin") {
 		if (values.size() == 1) {
@@ -737,22 +756,38 @@ static bool parseInlineStyleDeclaration(WebStyle& style,
 			++diag.unsupportedDeclarationCount;
 			return false;
 		}
-		style.fontScaleOrSize = autoValue ? 16 : px;
+		if (autoValue) {
+			++diag.unsupportedDeclarationCount;
+			return false;
+		}
+		style.fontScaleOrSize = clampCssValue(diag, px, 8, kCssLiteMaxFontSizePx);
 		return true;
 	}
 	if (prop == "line-height") {
+		std::string lower = toLower(val);
+		if (lower == "normal") {
+			style.lineHeightNormal = true;
+			style.lineHeight = -1;
+			return true;
+		}
 		bool autoValue = false;
 		int px = 0;
-		if (!parseCssLengthValue(val, 16, px, autoValue, true)) {
+		const int lineHeightBase = style.fontScaleOrSize > 0 ? style.fontScaleOrSize : 16;
+		if (!parseCssLengthValue(val, lineHeightBase, px, autoValue, true)) {
 			double numeric = 0.0;
 			if (parseCssNumber(val, numeric)) {
-				px = roundCssNumber(numeric * 16.0);
+				px = roundCssNumber(numeric * static_cast<double>(lineHeightBase));
 			} else {
 				++diag.unsupportedDeclarationCount;
 				return false;
 			}
 		}
-		style.lineHeight = autoValue ? 16 : px;
+		if (autoValue) {
+			++diag.unsupportedDeclarationCount;
+			return false;
+		}
+		style.lineHeightNormal = false;
+		style.lineHeight = clampCssValue(diag, px, 8, kCssLiteMaxLineHeightPx);
 		return true;
 	}
 	if (prop == "width" || prop == "max-width") {
@@ -766,6 +801,7 @@ static bool parseInlineStyleDeclaration(WebStyle& style,
 				return false;
 			}
 			int percent = roundCssNumber(numeric);
+			percent = clampCssValue(diag, percent, 1, 100);
 			if (prop == "width") style.widthPercent = percent;
 			else style.maxWidthPercent = percent;
 			return true;
@@ -774,8 +810,19 @@ static bool parseInlineStyleDeclaration(WebStyle& style,
 			++diag.unsupportedDeclarationCount;
 			return false;
 		}
-		if (prop == "width") style.width = autoValue ? 0 : px;
-		else style.maxWidth = autoValue ? 0 : px;
+		if (autoValue) {
+			if (prop == "width") {
+				style.widthPercent = -1;
+				style.width = 0;
+			} else {
+				style.maxWidthPercent = -1;
+				style.maxWidth = 0;
+			}
+			return true;
+		}
+		px = clampCssValue(diag, px, 1, kCssLiteMaxWidthPx);
+		if (prop == "width") style.width = px;
+		else style.maxWidth = px;
 		return true;
 	}
 	if (prop == "border-top" || prop == "border-bottom") {
@@ -786,14 +833,26 @@ static bool parseInlineStyleDeclaration(WebStyle& style,
 		}
 		int width = 1;
 		uint32_t color = 0xFF000000u;
+		bool skipBorder = false;
 		for (const std::string& token : tokens) {
+			const std::string lower = toLower(token);
+			if (lower == "none" || lower == "hidden") {
+				skipBorder = true;
+				break;
+			}
+			if (lower == "solid") continue;
 			bool autoValue = false;
 			int px = 0;
 			if (parseCssLengthValue(token, 16, px, autoValue, false)) {
-				width = std::max(1, px);
+				width = clampCssValue(diag, std::max(1, px), 1, kCssLiteMaxBorderWidthPx);
 				continue;
 			}
 			if (parseCssColor(token, color)) continue;
+			++diag.unsupportedDeclarationCount;
+			return false;
+		}
+		if (skipBorder) {
+			return true;
 		}
 		if (prop == "border-top") {
 			style.hasBorderTop = true;
@@ -805,6 +864,19 @@ static bool parseInlineStyleDeclaration(WebStyle& style,
 			style.borderBottomColor = color;
 		}
 		return true;
+	}
+	if (prop == "list-style" || prop == "list-style-type") {
+		std::string lower = toLower(val);
+		if (lower == "none") {
+			style.listStyleNone = true;
+			return true;
+		}
+		if (lower == "disc" || lower == "circle" || lower == "square" || lower == "decimal" || lower == "decimal-leading-zero" || lower == "inherit") {
+			if (lower != "inherit") style.listStyleNone = false;
+			return true;
+		}
+		++diag.unsupportedDeclarationCount;
+		return false;
 	}
 	++diag.unsupportedDeclarationCount;
 	return false;
@@ -840,8 +912,16 @@ static WebStyle mergeStyles(const WebStyle& baseStyle, const WebStyle& overrideS
 	merged.bold = overrideStyle.bold ? true : merged.bold;
 	merged.underline = overrideStyle.underline ? true : merged.underline;
 	merged.displayNone = overrideStyle.displayNone ? true : merged.displayNone;
+	merged.listStyleNone = overrideStyle.listStyleNone ? true : merged.listStyleNone;
 	if (overrideStyle.textAlign != TextAlign::Inherit) {
 		merged.textAlign = overrideStyle.textAlign;
+	}
+	if (overrideStyle.lineHeightNormal) {
+		merged.lineHeightNormal = true;
+		merged.lineHeight = -1;
+	} else if (overrideStyle.lineHeight > 0) {
+		merged.lineHeightNormal = false;
+		merged.lineHeight = overrideStyle.lineHeight;
 	}
 	merged.marginTop = overrideStyle.marginTop != -1 ? overrideStyle.marginTop : merged.marginTop;
 	merged.marginRight = overrideStyle.marginRight != -1 ? overrideStyle.marginRight : merged.marginRight;
@@ -853,7 +933,6 @@ static WebStyle mergeStyles(const WebStyle& baseStyle, const WebStyle& overrideS
 	merged.paddingBottom = overrideStyle.paddingBottom != -1 ? overrideStyle.paddingBottom : merged.paddingBottom;
 	merged.paddingLeft = overrideStyle.paddingLeft != -1 ? overrideStyle.paddingLeft : merged.paddingLeft;
 	merged.fontScaleOrSize = overrideStyle.fontScaleOrSize > 0 ? overrideStyle.fontScaleOrSize : merged.fontScaleOrSize;
-	merged.lineHeight = overrideStyle.lineHeight > 0 ? overrideStyle.lineHeight : merged.lineHeight;
 	merged.width = overrideStyle.width != -1 ? overrideStyle.width : merged.width;
 	merged.widthPercent = overrideStyle.widthPercent != -1 ? overrideStyle.widthPercent : merged.widthPercent;
 	merged.maxWidth = overrideStyle.maxWidth != -1 ? overrideStyle.maxWidth : merged.maxWidth;
@@ -887,28 +966,28 @@ static WebStyle defaultStyleForTag(const std::string& tagName)
 	}
 	if (tagName == "h1") {
 		style.bold = true;
-		style.marginTop = 10;
+		style.marginTop = 14;
 		style.marginBottom = 10;
 		style.fontScaleOrSize = 24;
 		return style;
 	}
 	if (tagName == "h2") {
 		style.bold = true;
-		style.marginTop = 8;
+		style.marginTop = 12;
 		style.marginBottom = 8;
 		style.fontScaleOrSize = 20;
 		return style;
 	}
 	if (tagName == "h3") {
 		style.bold = true;
-		style.marginTop = 6;
+		style.marginTop = 10;
 		style.marginBottom = 6;
 		style.fontScaleOrSize = 18;
 		return style;
 	}
 	if (tagName == "p") {
-		style.marginTop = 4;
-		style.marginBottom = 8;
+		style.marginTop = 8;
+		style.marginBottom = 10;
 		return style;
 	}
 	if (tagName == "a") {
@@ -916,26 +995,32 @@ static WebStyle defaultStyleForTag(const std::string& tagName)
 		style.color = 0xFF1E5CB8u;
 		style.underline = true;
 		style.marginTop = 4;
-		style.marginBottom = 6;
+		style.marginBottom = 4;
 		return style;
 	}
 	if (tagName == "li") {
-		style.marginTop = 2;
+		style.marginTop = 4;
 		style.marginBottom = 4;
-		style.marginLeft = 12;
+		style.marginLeft = 8;
+		return style;
+	}
+	if (tagName == "ul" || tagName == "ol") {
+		style.marginTop = 6;
+		style.marginBottom = 8;
+		style.paddingLeft = 18;
 		return style;
 	}
 	if (tagName == "pre" || tagName == "code") {
 		style.hasBackgroundColor = true;
 		style.backgroundColor = 0xFFE6E8EEu;
-		style.marginTop = 6;
-		style.marginBottom = 8;
-		style.padding = 4;
+		style.marginTop = 8;
+		style.marginBottom = 10;
+		style.padding = 8;
 		return style;
 	}
 	if (tagName == "img") {
-		style.marginTop = 6;
-		style.marginBottom = 6;
+		style.marginTop = 8;
+		style.marginBottom = 8;
 		return style;
 	}
 	return style;
@@ -1155,7 +1240,11 @@ static void loadStylesheetForDocument(ParserState& st, const std::string& href)
 #if !defined(GXOS_BARE_METAL)
 	if (url.rfind("http://", 0) == 0 || url.rfind("https://", 0) == 0) {
 		HttpResponse response = fetchHttpUrl(url);
-		if (response.ok() && !response.body.empty()) {
+		const std::string contentType = toLower(trim(response.contentType));
+		const bool contentTypeLooksCss = contentType.empty() ||
+			contentType.find("text/css") != std::string::npos ||
+			contentType.find("application/css") != std::string::npos;
+		if (response.ok() && !response.body.empty() && contentTypeLooksCss) {
 			parseEmbeddedCss(st.doc, response.body);
 			loaded = true;
 		}

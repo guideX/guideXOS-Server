@@ -119,6 +119,56 @@ class NavigatorSmokeHandler(BaseHTTPRequestHandler):
                              b"h1 { color:#1d4ed8; text-align:center; font-size:26px; margin:8px 0 12px; }"
                              b"p { line-height:1.6; }")
             return
+        if path == "/navigator-smoke/css-layout.html":
+            self.write_bytes(200, "text/html; charset=utf-8",
+                             b"<html><head><style>"
+                             b"body { background:#f3ecdf; color:#243447; margin:16px; line-height:1.6; }"
+                             b"main { max-width:540px; margin-left:auto; margin-right:auto; }"
+                             b".panel { background:#ffffff; padding:16px 18px; margin:12px 0; border-bottom:1px solid #d7dde6; }"
+                             b"h1 { color:#8a3c1c; text-align:center; margin:12px 0 14px; }"
+                             b"h2 { margin:12px 0 8px; }"
+                             b"p { margin:10px 0; }"
+                             b"ul { margin:10px 0; padding-left:20px; }"
+                             b"li { margin:4px 0; }"
+                             b"li.nobullet { list-style:none; }"
+                             b".note { max-width:420px; margin-left:auto; margin-right:auto; background:#dbeafe; padding:10px 12px; }"
+                             b".tight { line-height:1.2; }"
+                             b".rule { border-top:1px solid #cbd5e1; padding-top:8px; }"
+                             b"</style></head><body>"
+                             b"<main>"
+                             b"<header class=\"panel\"><h1>Phase 1B Layout</h1><p class=\"note\">Centered content and readable rhythm.</p></header>"
+                             b"<section class=\"panel\"><h2>Section Backgrounds</h2><p>Padding should stay inside the colored block.</p>"
+                             b"<ul><li>Bullet item one</li><li>Bullet item two</li><li class=\"nobullet\">Bullet suppression works.</li></ul>"
+                             b"<p class=\"rule\">Separator line should stay visible.</p>"
+                             b"<p class=\"tight\">Line-height should keep the text easy to scan.</p></section>"
+                             b"<footer class=\"panel\"><p>Footer spacing should remain comfortable.</p></footer>"
+                             b"</main></body></html>")
+            return
+        if path == "/navigator-smoke/css-external-safety.html":
+            self.write_bytes(200, "text/html; charset=utf-8",
+                             b"<html><head>"
+                             b"<link rel=\"stylesheet\" href=\"/navigator-smoke/css-missing.css\">"
+                             b"<link rel=\"stylesheet\" href=\"/navigator-smoke/css-not-css.txt\">"
+                             b"<link rel=\"stylesheet\" href=\"/navigator-smoke/css-oversized.css\">"
+                             b"</head><body><main class=\"safety\">"
+                             b"<h1>External CSS Safety</h1>"
+                             b"<p>Missing and unsupported stylesheets should not crash rendering.</p>"
+                             b"</main></body></html>")
+            return
+        if path == "/navigator-smoke/css-not-css.txt":
+            self.write_bytes(200, "text/plain; charset=utf-8",
+                             b"body { background:#fef3c7; }")
+            return
+        if path == "/navigator-smoke/css-oversized.css":
+            filler = (b"/* oversized filler */\n" * 1200)
+            self.write_bytes(200, "text/css; charset=utf-8",
+                             b"body { background:#eff6ff; margin:16px; }"
+                             b".safety { max-width:480px; margin:0 auto; padding:16px; background:#ffffff; }"
+                             b"h1 { color:#1d4ed8; text-align:center; font-size:26px; margin:8px 0 12px; }"
+                             b"p { line-height:1.6; }"
+                             b".clamp-test { margin:9999px auto; padding:9999px; line-height:0.1; width:9999px; max-width:9999px; }"
+                             b".unsupported-thing { display:grid; grid-template-columns:1fr 1fr; }" + filler)
+            return
         if path == "/navigator-smoke/css-unsupported.html":
             self.write_bytes(200, "text/html; charset=utf-8",
                              b"<html><head><style>"

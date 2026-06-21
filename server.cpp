@@ -444,6 +444,40 @@ static std::string navigatorHostedSmokeDiagnostic() {
         hasPositiveCount(cssExternalReport, "Current Document.CSS rules parsed="),
         "report=\"" + summarizeText(cssExternalReport, 260) + "\"");
 
+    bool cssLayoutLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-layout.html");
+    std::string cssLayoutText = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    std::string cssLayoutReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    add("CSS layout fixture loads",
+        cssLayoutLoaded &&
+        contains(cssLayoutText, "Phase 1B Layout") &&
+        contains(cssLayoutText, "Bullet suppression works.") &&
+        contains(cssLayoutText, "Footer spacing should remain comfortable."),
+        "currentUrl=" + gxos::apps::Navigator::SmokeCurrentUrl());
+    add("CSS layout diagnostics",
+        contains(cssLayoutReport, "Current Document.CSS enabled=yes") &&
+        contains(cssLayoutReport, "Current Document.CSS style blocks=1") &&
+        hasPositiveCount(cssLayoutReport, "Current Document.CSS layout max-width applied=") &&
+        hasPositiveCount(cssLayoutReport, "Current Document.CSS auto-margin centered blocks=") &&
+        hasPositiveCount(cssLayoutReport, "Current Document.CSS background blocks drawn=") &&
+        hasPositiveCount(cssLayoutReport, "Current Document.CSS lists rendered="),
+        "report=\"" + summarizeText(cssLayoutReport, 260) + "\"");
+
+    bool cssExternalSafetyLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-external-safety.html");
+    std::string cssExternalSafetyText = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    std::string cssExternalSafetyReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    add("CSS external safety fixture loads",
+        cssExternalSafetyLoaded &&
+        contains(cssExternalSafetyText, "External CSS Safety") &&
+        contains(cssExternalSafetyText, "Missing and unsupported stylesheets should not crash rendering."),
+        "currentUrl=" + gxos::apps::Navigator::SmokeCurrentUrl());
+    add("CSS external safety diagnostics",
+        contains(cssExternalSafetyReport, "Current Document.CSS enabled=yes") &&
+        contains(cssExternalSafetyReport, "Current Document.CSS external stylesheets loaded=1") &&
+        contains(cssExternalSafetyReport, "Current Document.CSS unsupported external stylesheets=2") &&
+        contains(cssExternalSafetyReport, "Current Document.CSS style block capped=yes") &&
+        hasPositiveCount(cssExternalSafetyReport, "Current Document.CSS clamped values="),
+        "report=\"" + summarizeText(cssExternalSafetyReport, 260) + "\"");
+
     bool basicHttpLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/basic.html");
     std::string basicHttpText = gxos::apps::Navigator::SmokeCurrentDocumentText();
     add("plain HTTP GET still loads", basicHttpLoaded && contains(basicHttpText, "Kernel HTTP Basic"),

@@ -109,6 +109,11 @@ struct NavigatorPageMetadata {
 		int         cssParseErrorCount = 0;
 		bool        cssStyleBlockCapped = false;
 		size_t      cssStyleBytesProcessed = 0;
+		int         cssLayoutMaxWidthAppliedCount = 0;
+		int         cssAutoMarginCenteredBlockCount = 0;
+		int         cssBackgroundBlockCount = 0;
+		int         cssListRenderCount = 0;
+		int         cssClampedValueCount = 0;
 	bool        downloaded = false;
 	std::string downloadSavedPath;
 	size_t      downloadByteCount = 0;
