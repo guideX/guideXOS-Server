@@ -190,6 +190,88 @@ namespace gxos {
         std::string Compositor::g_hostedDesktopDirectoryPath = DesktopFolderResolver::VirtualPath();
         std::vector<std::string> Compositor::g_hostedDesktopBackHistory{};
 
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
+        static HDC s_hostedPaintDc = nullptr;
+        static HBITMAP s_hostedPaintBitmap = nullptr;
+        static HGDIOBJ s_hostedPaintOldBitmap = nullptr;
+        static uint32_t* s_hostedPaintPixels = nullptr;
+        static int s_hostedPaintWidth = 0;
+        static int s_hostedPaintHeight = 0;
+
+        static void releaseHostedPaintSurface() {
+            if (s_hostedPaintDc) {
+                if (s_hostedPaintOldBitmap) {
+                    SelectObject(s_hostedPaintDc, s_hostedPaintOldBitmap);
+                    s_hostedPaintOldBitmap = nullptr;
+                }
+                if (s_hostedPaintBitmap) {
+                    DeleteObject(s_hostedPaintBitmap);
+                    s_hostedPaintBitmap = nullptr;
+                }
+                DeleteDC(s_hostedPaintDc);
+                s_hostedPaintDc = nullptr;
+            }
+            s_hostedPaintPixels = nullptr;
+            s_hostedPaintWidth = 0;
+            s_hostedPaintHeight = 0;
+        }
+
+        static bool ensureHostedPaintSurface(HDC referenceDc, int width, int height) {
+            if (width <= 0 || height <= 0 || !referenceDc) return false;
+            if (s_hostedPaintDc && s_hostedPaintBitmap && s_hostedPaintPixels &&
+                s_hostedPaintWidth == width && s_hostedPaintHeight == height) {
+                return true;
+            }
+
+            if (!s_hostedPaintDc) {
+                s_hostedPaintDc = CreateCompatibleDC(referenceDc);
+                if (!s_hostedPaintDc) {
+                    Logger::write(LogLevel::Error, "Hosted compositor: CreateCompatibleDC failed");
+                    return false;
+                }
+            }
+
+            if (s_hostedPaintBitmap) {
+                if (s_hostedPaintOldBitmap) {
+                    SelectObject(s_hostedPaintDc, s_hostedPaintOldBitmap);
+                }
+                DeleteObject(s_hostedPaintBitmap);
+                s_hostedPaintBitmap = nullptr;
+                s_hostedPaintOldBitmap = nullptr;
+                s_hostedPaintPixels = nullptr;
+            }
+
+            BITMAPINFO bmi{};
+            bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+            bmi.bmiHeader.biWidth = width;
+            bmi.bmiHeader.biHeight = -height;
+            bmi.bmiHeader.biPlanes = 1;
+            bmi.bmiHeader.biBitCount = 32;
+            bmi.bmiHeader.biCompression = BI_RGB;
+
+            void* bits = nullptr;
+            HBITMAP bitmap = CreateDIBSection(s_hostedPaintDc, &bmi, DIB_RGB_COLORS, &bits, nullptr, 0);
+            if (!bitmap || !bits) {
+                Logger::write(LogLevel::Error, "Hosted compositor: CreateDIBSection failed");
+                if (bitmap) DeleteObject(bitmap);
+                return false;
+            }
+
+            HGDIOBJ oldBitmap = SelectObject(s_hostedPaintDc, bitmap);
+            if (!oldBitmap) {
+                DeleteObject(bitmap);
+                return false;
+            }
+
+            s_hostedPaintBitmap = bitmap;
+            s_hostedPaintOldBitmap = oldBitmap;
+            s_hostedPaintPixels = static_cast<uint32_t*>(bits);
+            s_hostedPaintWidth = width;
+            s_hostedPaintHeight = height;
+            return true;
+        }
+#endif
+
         void Compositor::initVideoBackend( ) {
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)
             // On Windows host, use GDI backend (current rendering path).
@@ -1975,7 +2057,7 @@ namespace gxos {
             return 0;
         }
         void Compositor::initWindow( ) { WNDCLASSA wc{}; wc.style = CS_OWNDC; wc.lpfnWndProc = Compositor::WndProc; wc.hInstance = GetModuleHandleA(nullptr); wc.lpszClassName = "GXOS_COMPOSITOR"; RegisterClassA(&wc); g_hwnd = CreateWindowExA(0, wc.lpszClassName, "guideXOSCpp Compositor", WS_OVERLAPPEDWINDOW | WS_VISIBLE, CW_USEDEFAULT, CW_USEDEFAULT, 1024, 768, nullptr, nullptr, wc.hInstance, nullptr); g_startBtnBmp = (HBITMAP)LoadImageA(nullptr, "assets/start_button.bmp", IMAGE_BITMAP, 0, 0, LR_LOADFROMFILE | LR_CREATEDIBSECTION); }
-        void Compositor::shutdownWindow( ) { if (g_hwnd) { DestroyWindow(g_hwnd); g_hwnd = nullptr; } }
+        void Compositor::shutdownWindow( ) { releaseHostedPaintSurface(); if (g_hwnd) { DestroyWindow(g_hwnd); g_hwnd = nullptr; } }
         void Compositor::requestRepaint( ) { if (g_hwnd) InvalidateRect(g_hwnd, nullptr, FALSE); }
         void Compositor::drawDesktopIcons(HDC dc, RECT cr) {
             const DesktopGridMetrics metrics = desktopGridMetrics();
@@ -2043,8 +2125,22 @@ namespace gxos {
             switch (msg) {
             case WM_CLOSE: PostQuitMessage(0); return 0;
             case WM_SIZE: { RECT cr; GetClientRect(h, &cr); WorkRect work = desktopWorkAreaForBounds(cr.right - cr.left, cr.bottom - cr.top); std::lock_guard<std::mutex> lk(g_lock); for (auto& kv : g_windows) { WinInfo& wi = kv.second; if (wi.maximized) { wi.x = work.left; wi.y = work.top; wi.w = work.right - work.left; wi.h = work.bottom - work.top; wi.dirty = true; } } requestRepaint( ); return 0; }
+            case WM_ERASEBKGND: return 1;
             case WM_PAINT: {
-                PAINTSTRUCT ps; HDC dc = BeginPaint(h, &ps); RECT cr; GetClientRect(h, &cr); DesktopWallpaper::DrawGradient(dc, cr, g_gradientTopColor, g_gradientBottomColor, g_gradientAccentColor, !g_wallpaperImage); if (g_wallpaperImage && g_wallpaperImage->isValid()) { drawBackgroundImageToHdc(dc, cr, g_wallpaperImage, WallpaperRegistry::ParseScaleMode(g_backgroundScaleMode)); } else { DesktopWallpaper::DrawBranding(dc, cr); } drawDesktopIcons(dc, cr);
+                PAINTSTRUCT ps;
+                HDC visibleDc = BeginPaint(h, &ps);
+                RECT cr;
+                GetClientRect(h, &cr);
+                const int clientW = cr.right - cr.left;
+                const int clientH = cr.bottom - cr.top;
+                HDC drawDc = visibleDc;
+                const bool hostedOffscreenReady = ensureHostedPaintSurface(visibleDc, clientW, clientH);
+                if (hostedOffscreenReady && s_hostedPaintDc) {
+                    drawDc = s_hostedPaintDc;
+                }
+#define dc drawDc
+                // Hosted paint lifecycle: begin WM_PAINT, ensure the offscreen frame, then compose into it.
+                DesktopWallpaper::DrawGradient(dc, cr, g_gradientTopColor, g_gradientBottomColor, g_gradientAccentColor, !g_wallpaperImage); if (g_wallpaperImage && g_wallpaperImage->isValid()) { drawBackgroundImageToHdc(dc, cr, g_wallpaperImage, WallpaperRegistry::ParseScaleMode(g_backgroundScaleMode)); } else { DesktopWallpaper::DrawBranding(dc, cr); } drawDesktopIcons(dc, cr);
 #if defined(GXOS_SYSTEM_FONT_DEMO)
                 drawSystemFontDemo(dc, cr);
 #endif
@@ -2395,41 +2491,69 @@ namespace gxos {
                 // VideoBackend pixel buffer, feedVncFromBackend() will
                 // be the sole path and this block can be removed.
                 if (vnc::VncServer::IsRunning( )) {
-                    HDC memDC = CreateCompatibleDC(dc);
-                    HBITMAP memBitmap = CreateCompatibleBitmap(dc, cr.right - cr.left, cr.bottom - cr.top);
-                    HGDIOBJ oldBitmap = SelectObject(memDC, memBitmap);
-                    BitBlt(memDC, 0, 0, cr.right - cr.left, cr.bottom - cr.top, dc, 0, 0, SRCCOPY);
+                    // Capture the completed hosted frame, not the visible DC, so VNC
+                    // stays aligned with the atomic offscreen composition result.
+                    if (hostedOffscreenReady && s_hostedPaintPixels) {
+                        vnc::VncServer::UpdateFramebuffer(
+                            reinterpret_cast<const uint8_t*>(s_hostedPaintPixels),
+                            clientW,
+                            clientH,
+                            clientW * 4);
 
-                    BITMAPINFO bmi{};
-                    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-                    bmi.bmiHeader.biWidth = cr.right - cr.left;
-                    bmi.bmiHeader.biHeight = -(cr.bottom - cr.top); // negative for top-down
-                    bmi.bmiHeader.biPlanes = 1;
-                    bmi.bmiHeader.biBitCount = 32;
-                    bmi.bmiHeader.biCompression = BI_RGB;
+                        // Keep the compatibility backend buffer in sync for callers
+                        // that still read from VideoBackend on the hosted path.
+                        if (g_videoBackend && g_videoBackend->getPixels( )) {
+                            uint32_t* dst = g_videoBackend->getPixels( );
+                            int bw = g_videoBackend->getWidth( );
+                            int bh = g_videoBackend->getHeight( );
+                            int copyW = clientW < bw ? clientW : bw;
+                            int copyH = clientH < bh ? clientH : bh;
+                            for (int y = 0; y < copyH; ++y) {
+                                std::memcpy(dst + y * bw, s_hostedPaintPixels + y * clientW, static_cast<size_t>(copyW) * 4);
+                            }
+                        }
+                    } else {
+                        HDC memDC = CreateCompatibleDC(drawDc);
+                        HBITMAP memBitmap = CreateCompatibleBitmap(drawDc, clientW, clientH);
+                        HGDIOBJ oldBitmap = SelectObject(memDC, memBitmap);
+                        BitBlt(memDC, 0, 0, clientW, clientH, drawDc, 0, 0, SRCCOPY);
 
-                    std::vector<uint8_t> pixels((cr.right - cr.left) * (cr.bottom - cr.top) * 4);
-                    GetDIBits(memDC, memBitmap, 0, cr.bottom - cr.top, pixels.data( ), &bmi, DIB_RGB_COLORS);
-                    vnc::VncServer::UpdateFramebuffer(pixels.data( ), cr.right - cr.left, cr.bottom - cr.top, (cr.right - cr.left) * 4);
+                        BITMAPINFO bmi{};
+                        bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+                        bmi.bmiHeader.biWidth = clientW;
+                        bmi.bmiHeader.biHeight = -clientH; // negative for top-down
+                        bmi.bmiHeader.biPlanes = 1;
+                        bmi.bmiHeader.biBitCount = 32;
+                        bmi.bmiHeader.biCompression = BI_RGB;
 
-                    // Also copy into the video backend buffer so
-                    // feedVncFromBackend() stays in sync for future use.
-                    if (g_videoBackend && g_videoBackend->getPixels( )) {
-                        uint32_t* dst = g_videoBackend->getPixels( );
-                        int bw = g_videoBackend->getWidth( );
-                        int bh = g_videoBackend->getHeight( );
-                        int cw = cr.right - cr.left;
-                        int ch = cr.bottom - cr.top;
-                        int copyW = cw < bw ? cw : bw;
-                        int copyH = ch < bh ? ch : bh;
-                        const uint32_t* src = reinterpret_cast<const uint32_t*>(pixels.data( ));
-                        for (int y = 0; y < copyH; ++y)
-                            std::memcpy(dst + y * bw, src + y * cw, static_cast<size_t>(copyW) * 4);
+                        std::vector<uint8_t> pixels(clientW * clientH * 4);
+                        GetDIBits(memDC, memBitmap, 0, clientH, pixels.data( ), &bmi, DIB_RGB_COLORS);
+                        vnc::VncServer::UpdateFramebuffer(pixels.data( ), clientW, clientH, clientW * 4);
+
+                        // Also copy into the video backend buffer so the legacy
+                        // compatibility path remains synchronized.
+                        if (g_videoBackend && g_videoBackend->getPixels( )) {
+                            uint32_t* dst = g_videoBackend->getPixels( );
+                            int bw = g_videoBackend->getWidth( );
+                            int bh = g_videoBackend->getHeight( );
+                            int copyW = clientW < bw ? clientW : bw;
+                            int copyH = clientH < bh ? clientH : bh;
+                            const uint32_t* src = reinterpret_cast<const uint32_t*>(pixels.data( ));
+                            for (int y = 0; y < copyH; ++y) {
+                                std::memcpy(dst + y * bw, src + y * clientW, static_cast<size_t>(copyW) * 4);
+                            }
+                        }
+
+                        SelectObject(memDC, oldBitmap);
+                        DeleteObject(memBitmap);
+                        DeleteDC(memDC);
                     }
+                }
 
-                    SelectObject(memDC, oldBitmap);
-                    DeleteObject(memBitmap);
-                    DeleteDC(memDC);
+#undef dc
+                // Present the fully composed hosted frame in one blit.
+                if (hostedOffscreenReady && drawDc != visibleDc) {
+                    BitBlt(visibleDc, 0, 0, clientW, clientH, drawDc, 0, 0, SRCCOPY);
                 }
 
                 EndPaint(h, &ps); return 0;

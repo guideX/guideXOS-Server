@@ -212,7 +212,7 @@ void RightClickMenu::Draw(HDC dc) {
 
     POINT cursor;
     GetCursorPos(&cursor);
-    HWND hwnd = WindowFromDC(dc);
+    HWND hwnd = Compositor::g_hwnd ? Compositor::g_hwnd : WindowFromDC(dc);
     if (hwnd) ScreenToClient(hwnd, &cursor);
 
     for (int i = 0; i < (int)s_items.size(); i++) {
