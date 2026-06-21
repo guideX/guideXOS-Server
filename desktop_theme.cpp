@@ -114,10 +114,10 @@ bool TryParseDesktopThemeId(const char* text, DesktopThemeId* out)
         return false;
     }
 
+    *out = DesktopThemeId::Classic;
     const std::string token = normalizeThemeToken(text);
     if (token.empty() || token == "classic") {
-        *out = DesktopThemeId::Classic;
-        return token.empty() || token == "classic";
+        return true;
     }
     if (token == "scifi") {
         *out = DesktopThemeId::SciFi;

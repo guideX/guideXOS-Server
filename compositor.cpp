@@ -99,9 +99,7 @@ namespace gxos {
 
         static void syncDesktopThemeFromConfig(DesktopConfigData& cfg) {
             DesktopThemeId themeId = DesktopThemeId::Classic;
-            if (!TryParseDesktopThemeId(cfg.desktopThemeId.c_str(), &themeId)) {
-                themeId = DesktopThemeId::Classic;
-            }
+            TryParseDesktopThemeId(cfg.desktopThemeId.c_str(), &themeId);
             cfg.desktopThemeId = DesktopThemeIdToString(themeId);
             SetCurrentDesktopTheme(themeId);
         }

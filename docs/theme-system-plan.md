@@ -3,6 +3,7 @@
 ## Phase 1 Status
 
 Phase 1 is now in place as a conservative foundation for the guideXOS Server theme system.
+This phase intentionally stops at wiring and safe color hooks; it does not attempt a visual redesign.
 
 This pass keeps the current guideXOS look as the default and adds an opt-in Sci Fi theme with a small set of safe visual hooks.
 
@@ -38,7 +39,7 @@ Sci Fi is opt-in and intentionally conservative in this phase.
 
 * Classic should continue to look basically unchanged.
 * Sci Fi is a first visible proof that the theme system exists, not a full futuristic redesign.
-* Rounded-window intent is stored in the theme data, but actual clipping can be revisited later if needed.
+* Rounded-window clipping remains deferred; this foundation is intentionally limited to IDs, persistence, selector wiring, and safe chrome colors.
 
 ## Future Work
 

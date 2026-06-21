@@ -6,6 +6,7 @@
 #include <sstream>
 #include <cctype>
 #include "fs.h"
+#include "desktop_theme.h"
 
 namespace gxos { namespace gui {
     struct DesktopWindowRec { uint64_t id; std::string title; int x; int y; int w; int h; bool minimized{false}; bool maximized{false}; int z{0}; bool focused{false}; int snap{0}; };
@@ -72,17 +73,9 @@ namespace gxos { namespace gui {
             if(extractSection(txt, "showDesktopSystemSettings", section)){ size_t i=0; skipWS(section,i); parseJSONBool(section, i, out.showDesktopSystemSettings); }
             if(extractSection(txt, "smallLiveDesktopFolderIcons", section)){ size_t i=0; skipWS(section,i); parseJSONBool(section, i, out.smallLiveDesktopFolderIcons); }
             {
-                std::string normalizedTheme;
-                normalizedTheme.reserve(out.desktopThemeId.size());
-                for (char c : out.desktopThemeId) {
-                    const unsigned char ch = static_cast<unsigned char>(c);
-                    if (ch == '-' || ch == '_' || ch == ' ' || ch == '\t' || ch == '\r' || ch == '\n') {
-                        continue;
-                    }
-                    normalizedTheme.push_back(static_cast<char>(std::tolower(ch)));
-                }
-                if (normalizedTheme == "scifi") out.desktopThemeId = "scifi";
-                else out.desktopThemeId = "classic";
+                DesktopThemeId themeId = DesktopThemeId::Classic;
+                TryParseDesktopThemeId(out.desktopThemeId.c_str(), &themeId);
+                out.desktopThemeId = DesktopThemeIdToString(themeId);
             }
             return true;
         }
@@ -92,7 +85,9 @@ namespace gxos { namespace gui {
             f << "{\n";
             f << "  \"wallpaper\": " << jsonEscape(data.wallpaperPath) << ",\n";
             f << "  \"desktop.wallpaper.id\": " << jsonEscape(data.wallpaperId) << ",\n";
-            f << "  \"desktop.theme.id\": " << jsonEscape(data.desktopThemeId.empty() ? "classic" : data.desktopThemeId) << ",\n";
+            DesktopThemeId themeId = DesktopThemeId::Classic;
+            TryParseDesktopThemeId(data.desktopThemeId.c_str(), &themeId);
+            f << "  \"desktop.theme.id\": " << jsonEscape(DesktopThemeIdToString(themeId)) << ",\n";
             f << "  \"desktop.background.scale\": " << jsonEscape(data.backgroundScaleMode.empty() ? "fill" : data.backgroundScaleMode) << ",\n";
             f << "  \"desktop.taskbar.position\": " << jsonEscape(data.taskbarPosition.empty() ? "bottom" : data.taskbarPosition) << ",\n";
             f << "  \"pinned\": ["; for(size_t i=0;i<data.pinned.size();++i){ if(i) f<<","; f<<jsonEscape(data.pinned[i]);} f << "],\n";

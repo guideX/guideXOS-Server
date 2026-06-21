@@ -1386,7 +1386,18 @@ using namespace gxos;
              std::string payload = gui::packPins(ops);
              ipc::Message m; m.type=(uint32_t)gui::MsgType::MT_DesktopPins; m.data.assign(payload.begin(), payload.end()); ipc::Bus::publish("gui.input", std::move(m), false); std::cout<<"Desktop pin/unpin request sent: "<<payload<<std::endl; }
         else if (cmd=="desktop.showconfig"){
-            gxos::gui::DesktopConfigData cfg; std::string err; if(!gxos::gui::DesktopConfig::Load("desktop.json", cfg, err)){ std::cout<<"Failed to load desktop.json: "<<err<<std::endl; } else { std::cout<<"Wallpaper: "<<cfg.wallpaperPath<<std::endl; std::cout<<"Theme: "<<(cfg.desktopThemeId.empty() ? "classic" : cfg.desktopThemeId)<<std::endl; std::cout<<"Pinned:\n"; for(auto &p: cfg.pinned) std::cout<<"  "<<p<<std::endl; std::cout<<"Recent:\n"; for(auto &r: cfg.recent) std::cout<<"  "<<r<<std::endl; }
+            gxos::gui::DesktopConfigData cfg; std::string err;
+            if(!gxos::gui::DesktopConfig::Load("desktop.json", cfg, err)){
+                std::cout<<"Failed to load desktop.json: "<<err<<std::endl;
+            } else {
+                ::DesktopThemeId themeId = ::DesktopThemeId::Classic;
+                ::TryParseDesktopThemeId(cfg.desktopThemeId.c_str(), &themeId);
+                const ::DesktopTheme& theme = ::GetDesktopTheme(themeId);
+                std::cout<<"Wallpaper: "<<cfg.wallpaperPath<<std::endl;
+                std::cout<<"Theme: "<<theme.displayName<<" ("<<::DesktopThemeIdToString(themeId)<<")"<<std::endl;
+                std::cout<<"Pinned:\n"; for(auto &p: cfg.pinned) std::cout<<"  "<<p<<std::endl;
+                std::cout<<"Recent:\n"; for(auto &r: cfg.recent) std::cout<<"  "<<r<<std::endl;
+            }
         }
         else if (cmd=="desktop.apps"){
             std::cout << gui::DesktopService::GetRegisteredAppsDiagnostic();

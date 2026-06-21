@@ -111,9 +111,7 @@ namespace {
         if (!DesktopConfig::Load("desktop.json", cfg, err)) {
             return themeId;
         }
-        if (!TryParseDesktopThemeId(cfg.desktopThemeId.c_str(), &themeId)) {
-            themeId = DesktopThemeId::Classic;
-        }
+        TryParseDesktopThemeId(cfg.desktopThemeId.c_str(), &themeId);
         return themeId;
     }
 
