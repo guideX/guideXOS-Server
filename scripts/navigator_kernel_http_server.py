@@ -219,6 +219,24 @@ class NavigatorSmokeHandler(BaseHTTPRequestHandler):
                              b"<p>Line one<br>Line two</p>"
                              b"</main></body></html>")
             return
+        if path == "/navigator-smoke/text-polish.html":
+            self.write_bytes(200, "text/html; charset=utf-8",
+                             b"<html><body style=\"margin:16px;background:#f5f1e8;color:#243447;line-height:1.55;\">"
+                             b"<main style=\"max-width:620px;margin-left:auto;margin-right:auto;padding:14px 16px;background:#ffffff;\">"
+                             b"<article style=\"background:#f8fafc;padding:12px 14px;border-top:1px solid #d6dce8;border-bottom:1px solid #d6dce8;\">"
+                             b"<h1 style=\"margin:8px 0 12px;color:#7c2d12;text-align:center;line-height:1.1;\">Text Polish g j p q y</h1>"
+                             b"<p>Descenders stay readable in this sentence: g j p q y.</p>"
+                             b"<p><a href=\"/navigator-smoke/basic.html\">Link g j p q y</a> and <code style=\"background:#e5e7eb;\">code g j p q y</code>.</p>"
+                             b"<p><strong>Bold g j p q y</strong> <em>Italic g j p q y</em> <small>Small g j p q y</small></p>"
+                             b"<table style=\"max-width:520px;margin-left:auto;margin-right:auto;background:#ffffff;border-top:1px solid #94a3b8;border-bottom:1px solid #94a3b8;\">"
+                             b"<thead><tr><th style=\"background:#dbeafe;padding:4px 6px;\">Name</th><th style=\"background:#dbeafe;padding:4px 6px;\">Value</th><th style=\"background:#dbeafe;padding:4px 6px;\">Notes</th></tr></thead>"
+                             b"<tbody><tr><td style=\"padding:4px 6px;\">Alpha g j p q y</td><td style=\"padding:4px 6px;\">One g j p q y</td><td style=\"padding:4px 6px;\">table cell g j p q y</td></tr>"
+                             b"<tr><td style=\"padding:4px 6px;\">Beta g j p q y</td><td style=\"padding:4px 6px;\">Two g j p q y</td><td style=\"padding:4px 6px;\">more descenders g j p q y</td></tr></tbody></table>"
+                             b"<ul><li>List item with descenders g j p q y.</li></ul>"
+                             b"<hr style=\"border-top:1px solid #cbd5e1;margin:12px 0;\">"
+                             b"<pre style=\"margin:0;line-height:1.4;\">pre line one g j p q y\npre line two g j p q y</pre>"
+                             b"</article></main></body></html>")
+            return
         if path == "/navigator-smoke/css-table-1d.html":
             self.write_bytes(200, "text/html; charset=utf-8",
                              b"<html><body style=\"margin:16px;background:#f4f6fb;color:#243447;line-height:1.5;\">"

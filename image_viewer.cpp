@@ -15,6 +15,7 @@
 #include <filesystem>
 #include <sstream>
 #include <system_error>
+#include <utility>
 #include <thread>
 
 namespace gxos { namespace apps {
@@ -52,6 +53,10 @@ int ImageViewer::s_dragStartPanX = 0;
 int ImageViewer::s_dragStartPanY = 0;
 int ImageViewer::s_lastKeyCode = 0;
 bool ImageViewer::s_keyDown = false;
+ImageViewer::HistorySnapshot ImageViewer::s_originalSnapshot{};
+bool ImageViewer::s_hasOriginalSnapshot = false;
+std::vector<ImageViewer::HistorySnapshot> ImageViewer::s_undoStack;
+std::vector<ImageViewer::HistorySnapshot> ImageViewer::s_redoStack;
 
 namespace {
 
@@ -351,6 +356,46 @@ static bool writePngToVfs(const std::string& path, const gui::ImagePtr& image, s
     return true;
 }
 
+static gxos::apps::ImageViewer::HistorySnapshot captureSnapshot(const gui::ImagePtr& image) {
+    gxos::apps::ImageViewer::HistorySnapshot snapshot;
+    if (!image || !image->isValid() || image->Width <= 0 || image->Height <= 0 || image->Channels <= 0 || !image->Pixels) {
+        return snapshot;
+    }
+
+    snapshot.width = image->Width;
+    snapshot.height = image->Height;
+    snapshot.channels = image->Channels;
+    const size_t byteCount = static_cast<size_t>(snapshot.width) * static_cast<size_t>(snapshot.height) * static_cast<size_t>(snapshot.channels);
+    snapshot.pixels.assign(image->Pixels, image->Pixels + byteCount);
+    return snapshot;
+}
+
+static bool snapshotEquals(const gxos::apps::ImageViewer::HistorySnapshot& a, const gxos::apps::ImageViewer::HistorySnapshot& b) {
+    return a.width == b.width &&
+        a.height == b.height &&
+        a.channels == b.channels &&
+        a.pixels == b.pixels;
+}
+
+static gui::ImagePtr imageFromSnapshot(const gxos::apps::ImageViewer::HistorySnapshot& snapshot) {
+    if (snapshot.width <= 0 || snapshot.height <= 0 || snapshot.channels <= 0 || snapshot.pixels.empty()) {
+        return nullptr;
+    }
+
+    gui::ImagePtr image = std::make_shared<gui::Image>(snapshot.width, snapshot.height, snapshot.channels);
+    if (!image || !image->isValid() || !image->Pixels) {
+        return nullptr;
+    }
+
+    const size_t byteCount = static_cast<size_t>(snapshot.width) * static_cast<size_t>(snapshot.height) * static_cast<size_t>(snapshot.channels);
+    if (snapshot.pixels.size() < byteCount) {
+        return nullptr;
+    }
+
+    std::copy(snapshot.pixels.begin(), snapshot.pixels.begin() + byteCount, image->Pixels);
+    return image;
+}
+
 } // namespace
 
 uint64_t ImageViewer::Launch(const std::string& filePath) {
@@ -369,6 +414,10 @@ uint64_t ImageViewer::Launch(const std::string& filePath) {
     s_panY = 0;
     s_hasTransparency = false;
     s_backgroundMode = BackgroundMode::Solid;
+    s_hasOriginalSnapshot = false;
+    s_originalSnapshot = {};
+    s_undoStack.clear();
+    s_redoStack.clear();
     s_folderImages.clear();
     s_currentImageIndex = -1;
     s_leftMouseDown = false;
@@ -673,6 +722,9 @@ void ImageViewer::showUnsupportedFormat(const std::string& path) {
         s_originalW = 0;
         s_originalH = 0;
         s_isDirty = false;
+        s_hasOriginalSnapshot = false;
+        s_originalSnapshot = {};
+        ClearEditHistory();
         s_zoomMode = ZoomMode::FitToWindow;
         s_zoomLevel = 1.0f;
         s_panX = 0;
@@ -761,6 +813,9 @@ bool ImageViewer::loadImagePath(const std::string& path, bool refreshFolderList,
             s_originalW = 0;
             s_originalH = 0;
             s_isDirty = false;
+            s_hasOriginalSnapshot = false;
+            s_originalSnapshot = {};
+            ClearEditHistory();
             s_zoomMode = ZoomMode::FitToWindow;
             s_zoomLevel = 1.0f;
             s_panX = 0;
@@ -792,6 +847,9 @@ bool ImageViewer::loadImagePath(const std::string& path, bool refreshFolderList,
     s_originalH = s_image->Height;
     s_hasTransparency = detectTransparency(s_image);
     s_backgroundMode = s_hasTransparency ? BackgroundMode::Checkerboard : BackgroundMode::Solid;
+    s_originalSnapshot = captureSnapshot(s_image);
+    s_hasOriginalSnapshot = true;
+    ClearEditHistory();
     s_isDirty = false;
     s_errorText.clear();
     s_noticeText.clear();
@@ -850,6 +908,10 @@ void ImageViewer::fitToWindow() {
 }
 
 bool ImageViewer::navigateRelative(int delta) {
+    if (delta == 0) return false;
+    if (!CanNavigateAwayFromDirtyDocument(delta < 0 ? "moving to the previous image" : "moving to the next image")) {
+        return false;
+    }
     if (s_folderImages.size() <= 1) return false;
     if (s_currentImageIndex < 0) return false;
 
@@ -859,13 +921,7 @@ bool ImageViewer::navigateRelative(int delta) {
     }
 
     const std::string nextPath = s_folderImages[static_cast<size_t>(nextIndex)];
-    const bool wasDirty = s_isDirty;
-    const bool loaded = loadImagePath(nextPath, true, true);
-    if (loaded && wasDirty) {
-        setNoticeText("Unsaved edits discarded");
-        updateDisplayImage();
-    }
-    return loaded;
+    return loadImagePath(nextPath, true, true);
 }
 
 void ImageViewer::previousImage() {
@@ -877,6 +933,10 @@ void ImageViewer::nextImage() {
 }
 
 void ImageViewer::openImageFromDialog() {
+    if (!CanNavigateAwayFromDirtyDocument("opening another image")) {
+        return;
+    }
+
     const std::string startPath = s_currentDirectory.empty() ? std::string("/") : s_currentDirectory;
     dialogs::OpenDialog::Show(0, 0, startPath, [](const std::string& path) {
         if (path.empty()) {
@@ -886,11 +946,7 @@ void ImageViewer::openImageFromDialog() {
             showUnsupportedFormat(path);
             return;
         }
-        const bool wasDirty = s_isDirty;
-        if (loadImagePath(path, true, false) && wasDirty) {
-            setNoticeText("Unsaved edits discarded");
-            updateDisplayImage();
-        }
+        (void)loadImagePath(path, true, false);
     });
 }
 
@@ -931,6 +987,10 @@ int ImageViewer::main(int argc, char** argv) {
     s_errorText.clear();
     s_noticeText.clear();
     s_isDirty = false;
+    s_hasOriginalSnapshot = false;
+    s_originalSnapshot = {};
+    s_undoStack.clear();
+    s_redoStack.clear();
 
     {
         ipc::Message m;
@@ -1034,6 +1094,9 @@ int ImageViewer::main(int argc, char** argv) {
                             case 11: FlipCurrentImageVertical(); break;
                             case 12: SaveCurrentImageAsCopy(); break;
                             case 13: (void)trySetCurrentImageAsWallpaper(); break;
+                            case 14: UndoEdit(); break;
+                            case 15: RedoEdit(); break;
+                            case 16: DiscardChanges(); break;
                             default: break;
                             }
                         }
@@ -1095,6 +1158,133 @@ void ImageViewer::resetZoom() {
     updateDisplayImage();
 }
 
+void ImageViewer::CaptureHistoryBeforeEdit() {
+    if (!s_image) {
+        return;
+    }
+
+    HistorySnapshot snapshot = captureSnapshot(s_image);
+    if (snapshot.width <= 0 || snapshot.height <= 0 || snapshot.channels <= 0 || snapshot.pixels.empty()) {
+        return;
+    }
+
+    if (s_undoStack.size() >= kHistoryLimit) {
+        s_undoStack.erase(s_undoStack.begin());
+    }
+    s_undoStack.push_back(std::move(snapshot));
+    s_redoStack.clear();
+}
+
+void ImageViewer::ClearEditHistory() {
+    s_undoStack.clear();
+    s_redoStack.clear();
+}
+
+bool ImageViewer::CanNavigateAwayFromDirtyDocument(const std::string& actionName) {
+    if (!s_isDirty) {
+        return true;
+    }
+
+    std::string message = "Unsaved changes: use Save As Copy, Undo, or discard before ";
+    message += actionName.empty() ? "continuing" : actionName;
+    setNoticeText(message);
+    updateDisplayImage();
+    return false;
+}
+
+bool ImageViewer::RestoreHistorySnapshot(const HistorySnapshot& snapshot) {
+    gui::ImagePtr restored = imageFromSnapshot(snapshot);
+    if (!restored) {
+        return false;
+    }
+
+    s_image = restored;
+    s_originalW = s_image->Width;
+    s_originalH = s_image->Height;
+    s_hasTransparency = detectTransparency(s_image);
+    s_backgroundMode = s_hasTransparency ? BackgroundMode::Checkerboard : BackgroundMode::Solid;
+    s_panX = 0;
+    s_panY = 0;
+    s_noticeText.clear();
+    s_errorText.clear();
+
+    const bool isOriginalState = s_hasOriginalSnapshot && snapshotEquals(snapshot, s_originalSnapshot);
+    if (isOriginalState) {
+        s_displayPath = s_originalPath.empty() ? s_filePath : s_originalPath;
+        s_isDirty = false;
+    } else {
+        const std::string previewPath = makeEditedPreviewPath(s_originalPath.empty() ? s_filePath : s_originalPath, s_windowId);
+        std::string error;
+        if (writePngToVfs(previewPath, s_image, error)) {
+            s_displayPath = previewPath;
+            s_isDirty = true;
+        } else {
+            s_displayPath = s_originalPath.empty() ? s_filePath : s_originalPath;
+            s_errorText = error;
+            s_isDirty = true;
+        }
+    }
+
+    clampZoomForCurrentMode();
+    clampPanForCurrentImage();
+    refreshWindowTitle();
+    updateDisplayImage();
+    return true;
+}
+
+void ImageViewer::UndoEdit() {
+    if (s_undoStack.empty()) {
+        return;
+    }
+
+    HistorySnapshot current = captureSnapshot(s_image);
+    if (current.width > 0 && current.height > 0 && current.channels > 0 && !current.pixels.empty()) {
+        if (s_redoStack.size() >= kHistoryLimit) {
+            s_redoStack.erase(s_redoStack.begin());
+        }
+        s_redoStack.push_back(std::move(current));
+    }
+
+    HistorySnapshot snapshot = s_undoStack.back();
+    s_undoStack.pop_back();
+    (void)RestoreHistorySnapshot(snapshot);
+}
+
+void ImageViewer::RedoEdit() {
+    if (s_redoStack.empty()) {
+        return;
+    }
+
+    HistorySnapshot current = captureSnapshot(s_image);
+    if (current.width > 0 && current.height > 0 && current.channels > 0 && !current.pixels.empty()) {
+        if (s_undoStack.size() >= kHistoryLimit) {
+            s_undoStack.erase(s_undoStack.begin());
+        }
+        s_undoStack.push_back(std::move(current));
+    }
+
+    HistorySnapshot snapshot = s_redoStack.back();
+    s_redoStack.pop_back();
+    (void)RestoreHistorySnapshot(snapshot);
+}
+
+void ImageViewer::DiscardChanges() {
+    if (s_originalPath.empty()) {
+        setNoticeText("Discard Changes unavailable: no original image is loaded");
+        updateDisplayImage();
+        return;
+    }
+
+    if (!loadImagePath(s_originalPath, true, true)) {
+        setNoticeText("Discard Changes failed: unable to reload the original image");
+        updateDisplayImage();
+        return;
+    }
+
+    setNoticeText("Changes discarded");
+    updateDisplayImage();
+}
+
 bool ImageViewer::commitEditedImage(const gui::ImagePtr& image, const std::string& notice) {
     if (!image || !image->isValid()) {
         return false;
@@ -1108,21 +1298,29 @@ bool ImageViewer::commitEditedImage(const gui::ImagePtr& image, const std::strin
     s_panX = 0;
     s_panY = 0;
 
-    const std::string previewPath = makeEditedPreviewPath(s_originalPath.empty() ? s_filePath : s_originalPath, s_windowId);
-    std::string error;
-    if (writePngToVfs(previewPath, s_image, error)) {
-        s_displayPath = previewPath;
+    const HistorySnapshot currentSnapshot = captureSnapshot(s_image);
+    const bool matchesOriginal = s_hasOriginalSnapshot && snapshotEquals(currentSnapshot, s_originalSnapshot);
+    if (matchesOriginal) {
+        s_displayPath = s_originalPath.empty() ? s_filePath : s_originalPath;
         s_errorText.clear();
     } else {
-        s_displayPath = s_originalPath.empty() ? s_filePath : s_originalPath;
-        s_errorText = error;
+        const std::string previewPath = makeEditedPreviewPath(s_originalPath.empty() ? s_filePath : s_originalPath, s_windowId);
+        std::string error;
+        if (writePngToVfs(previewPath, s_image, error)) {
+            s_displayPath = previewPath;
+            s_errorText.clear();
+        } else {
+            s_displayPath = s_originalPath.empty() ? s_filePath : s_originalPath;
+            s_errorText = error;
+        }
     }
 
     s_noticeText = notice;
-    MarkModified();
+    s_isDirty = !matchesOriginal;
     clampZoomForCurrentMode();
     clampPanForCurrentImage();
-    UpdateModifiedTitleStatus();
+    refreshWindowTitle();
+    updateDisplayImage();
     return true;
 }
 
@@ -1144,6 +1342,7 @@ void ImageViewer::RotateCurrentImageLeft() {
     if (!s_image) return;
     gui::ImagePtr rotated = rotateImageLeft(s_image);
     if (!rotated) return;
+    CaptureHistoryBeforeEdit();
     (void)commitEditedImage(rotated, "Rotated left");
 }
 
@@ -1151,6 +1350,7 @@ void ImageViewer::RotateCurrentImageRight() {
     if (!s_image) return;
     gui::ImagePtr rotated = rotateImageRight(s_image);
     if (!rotated) return;
+    CaptureHistoryBeforeEdit();
     (void)commitEditedImage(rotated, "Rotated right");
 }
 
@@ -1158,6 +1358,7 @@ void ImageViewer::FlipCurrentImageHorizontal() {
     if (!s_image) return;
     gui::ImagePtr flipped = flipImageHorizontal(s_image);
     if (!flipped) return;
+    CaptureHistoryBeforeEdit();
     (void)commitEditedImage(flipped, "Flipped horizontally");
 }
 
@@ -1165,6 +1366,7 @@ void ImageViewer::FlipCurrentImageVertical() {
     if (!s_image) return;
     gui::ImagePtr flipped = flipImageVertical(s_image);
     if (!flipped) return;
+    CaptureHistoryBeforeEdit();
     (void)commitEditedImage(flipped, "Flipped vertically");
 }
 
@@ -1204,6 +1406,8 @@ void ImageViewer::SaveCurrentImageAsCopy() {
             return;
         }
 
+        // Save As Copy writes a duplicate and intentionally leaves the working image dirty
+        // because the original source file was not overwritten.
         ImageViewer::setNoticeText("Saved copy to " + finalPath);
         ImageViewer::updateDisplayImage();
     });
@@ -1316,7 +1520,10 @@ void ImageViewer::updateDisplay() {
     const int row2Y = s_windowH - 26;
 
     auto addBtn = [&](int rowY, int id, const std::string& label, int& x) {
-        const int btnW = std::max(44, static_cast<int>(label.size()) * 7 + 18);
+        int btnW = std::max(44, static_cast<int>(label.size()) * 7 + 18);
+        if (rowY == row2Y && (label == "Save As Copy" || label == "Set as Wallpaper")) {
+            btnW = std::min(btnW, 90);
+        }
         publishMessage(gui::MsgType::MT_WidgetAdd, gui::packWidgetAdd(s_windowId, 1, id, x, rowY, btnW, btnH, label));
         x += btnW + gap;
     };
@@ -1329,6 +1536,8 @@ void ImageViewer::updateDisplay() {
     addBtn(row1Y, 5, "Zoom Out", row1X);
     addBtn(row1Y, 6, "Fit to Window", row1X);
     addBtn(row1Y, 7, "100%", row1X);
+    addBtn(row1Y, 14, "Undo", row1X);
+    addBtn(row1Y, 15, "Redo", row1X);
 
     int row2X = 12;
     addBtn(row2Y, 8, "Rotate Left", row2X);
@@ -1337,6 +1546,7 @@ void ImageViewer::updateDisplay() {
     addBtn(row2Y, 11, "Flip Vertical", row2X);
     addBtn(row2Y, 12, "Save As Copy", row2X);
     addBtn(row2Y, 13, "Set as Wallpaper", row2X);
+    addBtn(row2Y, 16, "Discard Changes", row2X);
 }
 
 }} // namespace gxos::apps

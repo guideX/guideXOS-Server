@@ -13,6 +13,13 @@ namespace gxos { namespace apps {
     /// transparent backgrounds, and basic status text.
     class ImageViewer {
     public:
+        struct HistorySnapshot {
+            int width = 0;
+            int height = 0;
+            int channels = 0;
+            std::vector<uint8_t> pixels;
+        };
+
         enum class ZoomMode {
             FitToWindow = 0,
             ActualSize,
@@ -45,6 +52,9 @@ namespace gxos { namespace apps {
         static void RotateCurrentImageRight();
         static void FlipCurrentImageHorizontal();
         static void FlipCurrentImageVertical();
+        static void UndoEdit();
+        static void RedoEdit();
+        static void DiscardChanges();
         static void MarkModified();
         static void UpdateModifiedTitleStatus();
         static void SaveCurrentImageAsCopy();
@@ -69,6 +79,10 @@ namespace gxos { namespace apps {
         static bool refreshFolderImageList(const std::string& path);
         static bool detectTransparency(const gui::ImagePtr& image);
         static bool commitEditedImage(const gui::ImagePtr& image, const std::string& notice);
+        static void CaptureHistoryBeforeEdit();
+        static bool RestoreHistorySnapshot(const struct HistorySnapshot& snapshot);
+        static void ClearEditHistory();
+        static bool CanNavigateAwayFromDirtyDocument(const std::string& actionName);
         static void updateImageStatus();
         static void drawCheckerboardBackground(int x, int y, int w, int h);
         static void contentMetrics(int& contentLeft, int& contentTop, int& contentWidth, int& contentHeight);
@@ -104,6 +118,10 @@ namespace gxos { namespace apps {
         static int s_panY;
         static bool s_hasTransparency;
         static BackgroundMode s_backgroundMode;
+        static HistorySnapshot s_originalSnapshot;
+        static bool s_hasOriginalSnapshot;
+        static std::vector<HistorySnapshot> s_undoStack;
+        static std::vector<HistorySnapshot> s_redoStack;
         static std::vector<std::string> s_folderImages;
         static int s_currentImageIndex;
         static bool s_leftMouseDown;
@@ -120,6 +138,7 @@ namespace gxos { namespace apps {
         static constexpr int kWinH = 620;
         static constexpr float kMaxZoom = 8.0f;
         static constexpr float kMinZoom = 0.1f;
+        static constexpr size_t kHistoryLimit = 10;
     };
 
 }} // namespace gxos::apps

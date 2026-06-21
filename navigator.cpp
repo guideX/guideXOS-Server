@@ -172,7 +172,7 @@ namespace {
 				drawTextAtColored(windowId, x + 1, y, text, r, g, b);
 			}
 			if (style.italic) {
-				drawTextAtColored(windowId, x, y + 1, text, r, g, b);
+				drawTextAtColored(windowId, x + 1, y + 1, text, r, g, b);
 			}
 			drawTextAtColored(windowId, x, y, text, r, g, b);
 			return;
@@ -181,7 +181,7 @@ namespace {
 			drawTextAt(windowId, x + 1, y, text);
 		}
 		if (style.italic) {
-			drawTextAt(windowId, x, y + 1, text);
+			drawTextAt(windowId, x + 1, y + 1, text);
 		}
 		drawTextAt(windowId, x, y, text);
 	}
@@ -226,6 +226,25 @@ namespace {
 	// -----------------------------------------------------------------------
 	constexpr int kCharW    = 8;   // approximate character cell width in pixels
 	constexpr int kLineH    = 18;  // matches current SystemFont default line box
+
+	static int defaultTextFontHeightPx()
+	{
+		static const int h = std::max(1, SystemFont::MeasureHeight(FontRole::Default));
+		return h;
+	}
+
+	static int textLineTopPaddingPx(int lineHeight)
+	{
+		const int fontHeight = defaultTextFontHeightPx();
+		const int slack = std::max(0, lineHeight - fontHeight);
+		// Keep a little extra room below descenders while avoiding a tall top gap.
+		return std::max(1, slack / 3);
+	}
+
+	static int textUnderlineYPx(int lineTop, int lineHeight)
+	{
+		return lineTop + std::max(1, lineHeight - 2);
+	}
 
 	// Wrap |text| into lines that fit within |maxChars| characters.
 	// Returns a vector of line strings (may be empty if text is empty).
@@ -1352,9 +1371,9 @@ namespace {
 
 	static int blockTextLineHeight(const DocBlock& block)
 	{
-		const int fontSize = cssFontSizeOrDefault(block.style, kLineH);
+		const int fontSize = cssFontSizeOrDefault(block.style, defaultTextFontHeightPx());
 		const int lineHeight = cssLineHeightOrDefault(block.style, fontSize + 4);
-		return std::max(fontSize + 4, std::max(kLineH, lineHeight));
+		return std::max(fontSize + 4, std::max(defaultTextFontHeightPx() + 4, lineHeight));
 	}
 
 	static int blockTextX(const DocBlock& block, int outerX, int innerWidth, int lineWidth)
@@ -1791,6 +1810,9 @@ namespace {
 			{"Current Document", "CSS table captions rendered", std::to_string(cssTableCaptionCount)},
 			{"Current Document", "CSS table header cells rendered", std::to_string(cssTableHeaderCellCount)},
 			{"Current Document", "CSS visited links styled", std::to_string(cssVisitedLinkCount)},
+			{"Current Document", "Text metrics model", "system font default face"},
+			{"Current Document", "Text top padding px", std::to_string(textLineTopPaddingPx(defaultTextFontHeightPx() + 4))},
+			{"Current Document", "Text underline gap px", std::to_string((defaultTextFontHeightPx() + 4) - textUnderlineYPx(0, defaultTextFontHeightPx() + 4) - 1)},
 			{"Current Document", "Forms", std::to_string(formCount)},
 			{"Current Document", "Text inputs", std::to_string(formInputCount)},
 			{"Current Document", "Checkboxes", std::to_string(checkboxCount)},
@@ -2539,6 +2561,7 @@ void Navigator::renderDocument()
 			drawBlockBox(s_windowId, layout.outerX, boxY, layout.outerWidth, row.heightPx, block.style);
 			const size_t lastCol = layout.columnWidthsChars.empty() ? 0 : layout.columnWidthsChars.size() - 1;
 			const int rowTextY = drawY + blockMarginTop + cssBorderTopPx(block.style) + layout.paddingTop;
+			const int rowTextTop = textLineTopPaddingPx(layout.lineHeight);
 			const int rowTextBottom = rowTextY + row.heightPx - layout.paddingTop - layout.paddingBottom;
 			int cellX = layout.outerX + layout.paddingLeft;
 			int separatorX = cellX;
@@ -2561,7 +2584,7 @@ void Navigator::renderDocument()
 				if (cellStyle.hasBackgroundColor || cellStyle.hasBorderTop || cellStyle.hasBorderBottom) {
 					drawBlockBox(s_windowId, cellX, boxY, cellW, row.heightPx, cellStyle);
 				}
-				int lineY = rowTextY;
+				int lineY = rowTextY + rowTextTop;
 				for (size_t lineIndex = 0; lineIndex < cell.lines.size(); ++lineIndex) {
 					const std::string& ln = cell.lines[lineIndex];
 					const int lineW = static_cast<int>(ln.size()) * kCharW;
@@ -2663,15 +2686,15 @@ void Navigator::renderDocument()
 			// Slightly larger heading: draw a subtle accent bar then the text
 			drawRect(s_windowId, outerX + paddingLeft, boxY + borderTop + paddingTop + std::max(lineHeight, headingFontSize - 4),
 				std::max(1, innerWidth), 2, 80, 140, 220);
-			drawTextAtStyled(s_windowId, blockTextX(block, outerX + paddingLeft, innerWidth, std::min(static_cast<int>(block.text.size()) * kCharW, innerWidth)), drawY + blockMarginTop + borderTop + paddingTop, block.text, block.style);
+			drawTextAtStyled(s_windowId, blockTextX(block, outerX + paddingLeft, innerWidth, std::min(static_cast<int>(block.text.size()) * kCharW, innerWidth)), drawY + blockMarginTop + borderTop + paddingTop + textLineTopPaddingPx(lineHeight), block.text, block.style);
 			if (block.style.bold) {
-				drawTextAtStyled(s_windowId, blockTextX(block, outerX + paddingLeft + 1, innerWidth, std::min(static_cast<int>(block.text.size()) * kCharW, innerWidth)), drawY + blockMarginTop + borderTop + paddingTop, block.text, block.style);
+				drawTextAtStyled(s_windowId, blockTextX(block, outerX + paddingLeft + 1, innerWidth, std::min(static_cast<int>(block.text.size()) * kCharW, innerWidth)), drawY + blockMarginTop + borderTop + paddingTop + textLineTopPaddingPx(lineHeight), block.text, block.style);
 			}
 			break;
 
 		case BlockType::Paragraph: {
 			auto lines = wrapText(block.text, wrapCols);
-			int lineY = drawY + blockMarginTop + borderTop + paddingTop;
+			int lineY = drawY + blockMarginTop + borderTop + paddingTop + textLineTopPaddingPx(lineHeight);
 			for (const std::string& ln : lines) {
 				const int lineW = static_cast<int>(ln.size()) * kCharW;
 				drawTextAtStyled(s_windowId, blockTextX(block, outerX + paddingLeft, innerWidth, lineW), lineY, ln, block.style);
@@ -2686,11 +2709,11 @@ void Navigator::renderDocument()
 			const int ordinal = blockListOrdinal(s_currentDoc, blockIndex);
 			const std::string marker = blockListMarkerText(block, ordinal);
 			if (!marker.empty()) {
-				drawTextAtStyled(s_windowId, outerX + paddingLeft, drawY + blockMarginTop + borderTop + paddingTop, marker, block.style);
+				drawTextAtStyled(s_windowId, outerX + paddingLeft, drawY + blockMarginTop + borderTop + paddingTop + textLineTopPaddingPx(lineHeight), marker, block.style);
 			}
 			const int textInset = blockListTextInsetPx(block);
 			auto lines = wrapText(block.text, listWrapCols);
-			int lineY = drawY + blockMarginTop + borderTop + paddingTop;
+			int lineY = drawY + blockMarginTop + borderTop + paddingTop + textLineTopPaddingPx(lineHeight);
 			for (const std::string& ln : lines) {
 				const int lineW = static_cast<int>(ln.size()) * kCharW;
 				drawTextAtStyled(s_windowId, blockTextX(block, outerX + paddingLeft + textInset, std::max(1, innerWidth - textInset), lineW), lineY, ln, block.style);
@@ -2702,7 +2725,7 @@ void Navigator::renderDocument()
 		case BlockType::Preformatted: {
 			// Draw each line preserving exact content
 			auto lines = splitPreLines(block.text);
-			int lineY = drawY + blockMarginTop + borderTop + paddingTop;
+			int lineY = drawY + blockMarginTop + borderTop + paddingTop + textLineTopPaddingPx(lineHeight);
 			for (const std::string& ln : lines) {
 				drawTextAtStyled(s_windowId, outerX + paddingLeft, lineY, ln, block.style);
 				lineY += lineHeight;
@@ -2714,7 +2737,7 @@ void Navigator::renderDocument()
 			// Full wrapped link block: underline + blue text
 			// The entire bounding rect is clickable (TODO: per-line hit testing).
 			auto lines = wrapText(block.text, wrapCols);
-			int lineY = drawY + blockMarginTop + borderTop + paddingTop;
+			int lineY = drawY + blockMarginTop + borderTop + paddingTop + textLineTopPaddingPx(lineHeight);
 			int linkR = 55;
 			int linkG = 110;
 			int linkB = 210;
@@ -2733,7 +2756,7 @@ void Navigator::renderDocument()
 				// Underline under each line
 				int lineW = static_cast<int>(ln.size()) * kCharW;
 				if (block.style.underline) {
-					drawRect(s_windowId, blockTextX(block, outerX + paddingLeft, innerWidth, lineW), lineY + lineHeight - 1,
+					drawRect(s_windowId, blockTextX(block, outerX + paddingLeft, innerWidth, lineW), textUnderlineYPx(lineY, lineHeight),
 						lineW, 1, linkR, linkG, linkB);
 				}
 				drawTextAtStyled(s_windowId, blockTextX(block, outerX + paddingLeft, innerWidth, lineW), lineY, ln, linkStyle);
@@ -3446,7 +3469,8 @@ Navigator::SelectionPosition Navigator::textPositionFromPoint(int x, int y, bool
 		const std::string text = searchableTextForBlock(block);
 		const int maxChars = (block.type == BlockType::ListItem) ? ((kContentW - 44) / kCharW) : ((kContentW - 34) / kCharW);
 		const std::vector<std::string> lines = (block.type == BlockType::Preformatted) ? splitPreLines(text) : wrapText(text, maxChars);
-		int lineIndex = std::max(0, std::min((y - rect.y) / kLineH, std::max(0, static_cast<int>(lines.size()) - 1)));
+		const int lineHeight = std::max(kLineH, blockTextLineHeight(block));
+		int lineIndex = std::max(0, std::min((y - rect.y) / lineHeight, std::max(0, static_cast<int>(lines.size()) - 1)));
 		size_t lineStart = 0;
 		for (int line = 0; line < lineIndex && line < static_cast<int>(lines.size()); ++line) {
 			lineStart += lines[line].size();

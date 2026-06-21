@@ -598,6 +598,32 @@ static std::string navigatorHostedSmokeDiagnostic() {
         hasPositiveCount(cssTable1dReport, "Current Document.CSS visited links styled="),
         "report=\"" + summarizeText(cssTable1dReport, 260) + "\"");
 
+    bool textPolishLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/text-polish.html");
+    std::string textPolishText = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    std::string textPolishReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    add("Text polish fixture loads",
+        textPolishLoaded &&
+        contains(textPolishText, "Text Polish g j p q y") &&
+        contains(textPolishText, "Descenders stay readable in this sentence: g j p q y.") &&
+        contains(textPolishText, "Link g j p q y") &&
+        contains(textPolishText, "code g j p q y") &&
+        contains(textPolishText, "Bold g j p q y") &&
+        contains(textPolishText, "Italic g j p q y") &&
+        contains(textPolishText, "Small g j p q y") &&
+        contains(textPolishText, "Alpha g j p q y") &&
+        contains(textPolishText, "pre line one g j p q y") &&
+        contains(textPolishText, "pre line two g j p q y"),
+        "currentUrl=" + gxos::apps::Navigator::SmokeCurrentUrl());
+    add("Text polish diagnostics",
+        contains(textPolishReport, "Current Document.CSS enabled=yes") &&
+        contains(textPolishReport, "Current Document.Text metrics model=system font default face") &&
+        hasPositiveCount(textPolishReport, "Current Document.Text top padding px=") &&
+        hasPositiveCount(textPolishReport, "Current Document.Text underline gap px=") &&
+        hasPositiveCount(textPolishReport, "Current Document.CSS tables rendered=") &&
+        hasPositiveCount(textPolishReport, "Current Document.CSS table cells rendered=") &&
+        hasPositiveCount(textPolishReport, "Current Document.CSS visited links styled="),
+        "report=\"" + summarizeText(textPolishReport, 260) + "\"");
+
     bool cssHrLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-hr.html");
     std::string cssHrText = gxos::apps::Navigator::SmokeCurrentDocumentText();
     std::string cssHrReport = gxos::apps::Navigator::SmokeRuntimeReport();
