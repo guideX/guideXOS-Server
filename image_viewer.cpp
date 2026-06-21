@@ -1,5 +1,6 @@
 #include "image_viewer.h"
 
+#include "open_dialog.h"
 #include "gui_protocol.h"
 #include "kernel/core/include/kernel/image_adapter.h"
 #include "logger.h"
@@ -25,6 +26,7 @@ std::string ImageViewer::s_fileName;
 std::string ImageViewer::s_windowTitle = "Image Viewer";
 std::string ImageViewer::s_statusText = "No image loaded";
 std::string ImageViewer::s_errorText;
+std::string ImageViewer::s_noticeText;
 gui::ImagePtr ImageViewer::s_image;
 int ImageViewer::s_originalW = 0;
 int ImageViewer::s_originalH = 0;
@@ -102,6 +104,12 @@ static std::string lowerCopy(std::string value) {
     return value;
 }
 
+static std::string joinStatusText(const std::string& base, const std::string& extra) {
+    if (base.empty()) return extra;
+    if (extra.empty()) return base;
+    return base + " | " + extra;
+}
+
 } // namespace
 
 uint64_t ImageViewer::Launch(const std::string& filePath) {
@@ -126,6 +134,7 @@ uint64_t ImageViewer::Launch(const std::string& filePath) {
     s_originalW = 0;
     s_originalH = 0;
     s_errorText.clear();
+    s_noticeText.clear();
     s_statusText = s_fileName.empty() ? "No image loaded" : "Loading " + s_fileName + "...";
     s_windowTitle = s_fileName.empty() ? "Image Viewer" : "Image Viewer - " + s_fileName;
 
@@ -359,7 +368,8 @@ std::string ImageViewer::modeText() {
 
 std::string ImageViewer::statusText() {
     if (!s_image) {
-        if (!s_errorText.empty()) return s_errorText;
+        if (!s_errorText.empty()) return joinStatusText(s_errorText, s_noticeText);
+        if (!s_noticeText.empty()) return s_noticeText;
         return s_statusText.empty() ? "No image loaded" : s_statusText;
     }
 
@@ -376,6 +386,10 @@ std::string ImageViewer::statusText() {
         oss << " | " << position;
     }
 
+    if (!s_noticeText.empty()) {
+        oss << " | " << s_noticeText;
+    }
+
     if (!s_errorText.empty()) {
         oss << " | error: " << s_errorText;
     }
@@ -387,6 +401,39 @@ void ImageViewer::refreshWindowTitle() {
     if (s_windowId == 0) return;
     s_windowTitle = s_fileName.empty() ? "Image Viewer" : "Image Viewer - " + s_fileName;
     publishMessage(gui::MsgType::MT_SetTitle, std::to_string(s_windowId) + "|" + s_windowTitle);
+}
+
+void ImageViewer::setNoticeText(const std::string& text) {
+    s_noticeText = text;
+}
+
+void ImageViewer::showUnsupportedFormat(const std::string& path) {
+    const bool hadImage = static_cast<bool>(s_image);
+    s_errorText = "Unsupported image format: only PNG is supported in this version";
+    s_noticeText.clear();
+
+    if (!hadImage) {
+        s_filePath = path;
+        s_currentDirectory = normalizeFolderPath(path);
+        s_fileName = displayNameForPath(path);
+        s_image.reset();
+        s_originalW = 0;
+        s_originalH = 0;
+        s_zoomMode = ZoomMode::FitToWindow;
+        s_zoomLevel = 1.0f;
+        s_panX = 0;
+        s_panY = 0;
+        s_hasTransparency = false;
+        s_backgroundMode = BackgroundMode::Solid;
+        refreshFolderImageList(path);
+        s_statusText = s_errorText;
+        refreshWindowTitle();
+        updateImageStatus();
+        updateDisplay();
+        return;
+    }
+
+    updateDisplayImage();
 }
 
 bool ImageViewer::refreshFolderImageList(const std::string& path) {
@@ -432,7 +479,9 @@ bool ImageViewer::refreshFolderImageList(const std::string& path) {
 void ImageViewer::updateImageStatus() {
     if (!s_image) {
         if (!s_errorText.empty()) {
-            s_statusText = s_errorText;
+            s_statusText = joinStatusText(s_errorText, s_noticeText);
+        } else if (!s_noticeText.empty()) {
+            s_statusText = s_noticeText;
         } else if (s_statusText.empty()) {
             s_statusText = "No image loaded";
         }
@@ -448,6 +497,7 @@ bool ImageViewer::loadImagePath(const std::string& path, bool refreshFolderList,
     if (!loaded.image) {
         const std::string name = displayNameForPath(path);
         s_errorText = "Failed to load " + (name.empty() ? path : name) + " (" + gui::ImageLoadStatusName(loaded.status) + ")";
+        s_noticeText.clear();
         if (!hadImage || !preserveZoomMode) {
             s_filePath = path;
             s_fileName = name;
@@ -484,6 +534,7 @@ bool ImageViewer::loadImagePath(const std::string& path, bool refreshFolderList,
     s_hasTransparency = detectTransparency(s_image);
     s_backgroundMode = s_hasTransparency ? BackgroundMode::Checkerboard : BackgroundMode::Solid;
     s_errorText.clear();
+    s_noticeText.clear();
 
     if (refreshFolderList) {
         refreshFolderImageList(path);
@@ -559,6 +610,41 @@ void ImageViewer::nextImage() {
     (void)navigateRelative(1);
 }
 
+void ImageViewer::openImageFromDialog() {
+    const std::string startPath = s_currentDirectory.empty() ? std::string("/") : s_currentDirectory;
+    dialogs::OpenDialog::Show(0, 0, startPath, [](const std::string& path) {
+        if (path.empty()) {
+            return;
+        }
+        if (!isPngPath(path)) {
+            showUnsupportedFormat(path);
+            return;
+        }
+        (void)loadImagePath(path, true, false);
+    });
+}
+
+bool ImageViewer::trySetCurrentImageAsWallpaper() {
+    if (!s_image || s_filePath.empty()) {
+        setNoticeText("Load a PNG first");
+        updateDisplayImage();
+        return false;
+    }
+
+    if (!isPngPath(s_filePath)) {
+        showUnsupportedFormat(s_filePath);
+        return false;
+    }
+
+    ipc::Message msg;
+    msg.type = static_cast<uint32_t>(gui::MsgType::MT_DesktopWallpaperSet);
+    msg.data.assign(s_filePath.begin(), s_filePath.end());
+    ipc::Bus::publish("gui.input", std::move(msg), false);
+    setNoticeText("Wallpaper update requested");
+    updateDisplayImage();
+    return true;
+}
+
 int ImageViewer::main(int argc, char** argv) {
     Logger::write(LogLevel::Info, "ImageViewer starting");
 
@@ -571,6 +657,7 @@ int ImageViewer::main(int argc, char** argv) {
     s_windowTitle = s_fileName.empty() ? "Image Viewer" : "Image Viewer - " + s_fileName;
     s_statusText = s_fileName.empty() ? "No image loaded" : "Loading " + s_fileName + "...";
     s_errorText.clear();
+    s_noticeText.clear();
 
     {
         ipc::Message m;
@@ -594,7 +681,11 @@ int ImageViewer::main(int argc, char** argv) {
     }
 
     if (!s_filePath.empty()) {
-        loadImagePath(s_filePath, true, false);
+        if (!isPngPath(s_filePath)) {
+            showUnsupportedFormat(s_filePath);
+        } else {
+            loadImagePath(s_filePath, true, false);
+        }
     } else {
         updateImageStatus();
         updateDisplay();
@@ -656,18 +747,16 @@ int ImageViewer::main(int argc, char** argv) {
                         uint64_t winId = std::stoull(winIdStr);
                         int widgetId = std::stoi(widgetIdStr);
                         if (winId == s_windowId && event == "click") {
-                            if (widgetId == 1) {
-                                previousImage();
-                            } else if (widgetId == 2) {
-                                nextImage();
-                            } else if (widgetId == 3) {
-                                zoomIn();
-                            } else if (widgetId == 4) {
-                                zoomOut();
-                            } else if (widgetId == 5) {
-                                fitToWindow();
-                            } else if (widgetId == 6) {
-                                resetZoom();
+                            switch (widgetId) {
+                            case 1: openImageFromDialog(); break;
+                            case 2: previousImage(); break;
+                            case 3: nextImage(); break;
+                            case 4: zoomIn(); break;
+                            case 5: zoomOut(); break;
+                            case 6: fitToWindow(); break;
+                            case 7: resetZoom(); break;
+                            case 8: (void)trySetCurrentImageAsWallpaper(); break;
+                            default: break;
                             }
                         }
                     } catch (...) {
@@ -830,22 +919,24 @@ void ImageViewer::updateDisplay() {
     publishWindowText(s_windowId, 12, s_windowH - 22, info, true);
 
     int btnY = s_windowH - 40;
-    int btnW = 104;
     int btnH = 26;
     int gap = 8;
     int x = 12;
 
     auto addBtn = [&](int id, const std::string& label) {
+        const int btnW = std::max(44, static_cast<int>(label.size()) * 7 + 18);
         publishMessage(gui::MsgType::MT_WidgetAdd, gui::packWidgetAdd(s_windowId, 1, id, x, btnY, btnW, btnH, label));
         x += btnW + gap;
     };
 
-    addBtn(1, "Previous");
-    addBtn(2, "Next");
-    addBtn(3, "Zoom In");
-    addBtn(4, "Zoom Out");
-    addBtn(5, "Fit to Window");
-    addBtn(6, "100%");
+    addBtn(1, "Open");
+    addBtn(2, "Previous");
+    addBtn(3, "Next");
+    addBtn(4, "Zoom In");
+    addBtn(5, "Zoom Out");
+    addBtn(6, "Fit to Window");
+    addBtn(7, "100%");
+    addBtn(8, "Set as Wallpaper");
 }
 
 }} // namespace gxos::apps

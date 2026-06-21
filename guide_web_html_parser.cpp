@@ -990,6 +990,40 @@ static WebStyle defaultStyleForTag(const std::string& tagName)
 		style.marginBottom = 10;
 		return style;
 	}
+	if (tagName == "caption") {
+		style.textAlign = TextAlign::Center;
+		style.marginTop = 4;
+		style.marginBottom = 6;
+		return style;
+	}
+	if (tagName == "table") {
+		style.marginTop = 8;
+		style.marginBottom = 10;
+		style.padding = 0;
+		return style;
+	}
+	if (tagName == "td" || tagName == "th") {
+		style.marginTop = 0;
+		style.marginBottom = 0;
+		style.paddingTop = 4;
+		style.paddingRight = 6;
+		style.paddingBottom = 4;
+		style.paddingLeft = 6;
+		if (tagName == "th") style.bold = true;
+		return style;
+	}
+	if (tagName == "hr") {
+		style.hasBorderTop = true;
+		style.borderTopWidth = 1;
+		style.borderTopColor = 0xFFB8C0CCu;
+		style.marginTop = 10;
+		style.marginBottom = 10;
+		return style;
+	}
+	if (tagName == "strong" || tagName == "b") {
+		style.bold = true;
+		return style;
+	}
 	if (tagName == "a") {
 		style.hasColor = true;
 		style.color = 0xFF1E5CB8u;
@@ -1140,6 +1174,8 @@ enum class OpenTag : uint8_t {
 	Li,
 	Title,
 	Pre,   // <pre> block — whitespace preserved
+	Caption,
+	TableCell,
 	ButtonSubmit,
 	Textarea,
 	Option,
@@ -1153,6 +1189,7 @@ struct ParserState {
 	std::string  idBuf;
 	std::string  styleBuf;
 	std::vector<HtmlElementRef> openElements;
+	uint64_t     nextElementSerial = 1;
 	OpenTag      open    = OpenTag::None;
 	bool         inScript = false;
 	bool         inStyle  = false;
@@ -1176,6 +1213,9 @@ struct ParserState {
 	std::vector<FormOption> currentSelectOptions;
 	std::string  currentOptionValue;
 	bool         currentOptionSelected = false;
+	std::string  currentTableCellText;
+	std::string  currentTableCaptionText;
+	bool         currentTableCellHeader = false;
 };
 
 static HtmlElementRef elementRefFromTagBody(const std::string& tagName, const std::string& tagBody)
@@ -1200,6 +1240,8 @@ static std::vector<HtmlElementRef> captureBlockAncestors(const ParserState& st)
 	case OpenTag::Li:
 	case OpenTag::Title:
 	case OpenTag::Pre:
+	case OpenTag::Caption:
+	case OpenTag::TableCell:
 	case OpenTag::ButtonSubmit:
 	case OpenTag::Textarea:
 	case OpenTag::Option:
@@ -1222,6 +1264,8 @@ static std::string openTagName(OpenTag tag)
 	case OpenTag::Li: return "li";
 	case OpenTag::Title: return "title";
 	case OpenTag::Pre: return "pre";
+	case OpenTag::Caption: return "caption";
+	case OpenTag::TableCell: return "td";
 	case OpenTag::ButtonSubmit: return "button";
 	case OpenTag::Textarea: return "textarea";
 	case OpenTag::Option: return "option";
@@ -1263,7 +1307,9 @@ static void pushElement(ParserState& st, const HtmlElementRef& element)
 		++st.doc.cssDiagnostics.inlineStyleCount;
 		st.doc.cssDiagnostics.cssDetected = true;
 	}
-	st.openElements.push_back(element);
+	HtmlElementRef pushed = element;
+	pushed.serial = st.nextElementSerial++;
+	st.openElements.push_back(std::move(pushed));
 }
 
 static void popElementByName(ParserState& st, const std::string& tagName)
@@ -1295,6 +1341,16 @@ static void flushText(ParserState& st)
 	}
 	st.textBuf.clear();
 	if (t.empty()) return;
+	if (st.open == OpenTag::TableCell) {
+		if (!st.currentTableCellText.empty()) st.currentTableCellText += ' ';
+		st.currentTableCellText += t;
+		return;
+	}
+	if (st.open == OpenTag::Caption) {
+		if (!st.currentTableCaptionText.empty()) st.currentTableCaptionText += ' ';
+		st.currentTableCaptionText += t;
+		return;
+	}
 	std::vector<HtmlElementRef> ancestors = captureBlockAncestors(st);
 
 	switch (st.open) {
@@ -1417,12 +1473,27 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 		return;
 	}
 
+	if (name == "hr") {
+		flushText(st);
+		if (!st.bodyReached) return;
+		DocBlock block;
+		block.type = BlockType::Paragraph;
+		block.tagName = "hr";
+		block.className = extractAttr(tagBody, "class");
+		block.id = extractAttr(tagBody, "id");
+		block.inlineStyle = extractAttr(tagBody, "style");
+		block.ancestors = captureBlockAncestors(st);
+		st.doc.blocks.push_back(std::move(block));
+		return;
+	}
+
 	// Void / structural tags with no direct content effect but meaningful CSS scope.
 	if (name == "html" || name == "head" || name == "ul" || name == "ol" ||
-		name == "div" || name == "span" || name == "section" || name == "article" ||
-		name == "header" || name == "footer" || name == "nav" || name == "main" ||
-		name == "table" || name == "tr" || name == "td" || name == "th" ||
-		name == "noscript" || name == "form") {
+		name == "div" || name == "span" || name == "strong" || name == "b" ||
+		name == "em" || name == "i" || name == "code" || name == "section" ||
+		name == "article" || name == "header" || name == "footer" || name == "nav" ||
+		name == "main" || name == "table" || name == "thead" || name == "tbody" ||
+		name == "tfoot" || name == "tr" || name == "noscript" || name == "form") {
 		if (name == "form") {
 			flushText(st);
 			st.inForm = true;
@@ -1444,10 +1515,34 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 		return;
 	}
 
+	if (name == "caption") {
+		flushText(st);
+		st.open = OpenTag::Caption;
+		st.currentTableCaptionText.clear();
+		st.classBuf = extractAttr(tagBody, "class");
+		st.idBuf = extractAttr(tagBody, "id");
+		st.styleBuf = extractAttr(tagBody, "style");
+		pushElement(st, elementRef);
+		return;
+	}
+
+	if (name == "td" || name == "th") {
+		flushText(st);
+		st.open = OpenTag::TableCell;
+		st.currentTableCellText.clear();
+		st.currentTableCellHeader = (name == "th");
+		st.classBuf = extractAttr(tagBody, "class");
+		st.idBuf = extractAttr(tagBody, "id");
+		st.styleBuf = extractAttr(tagBody, "style");
+		pushElement(st, elementRef);
+		return;
+	}
+
 	if (name == "div" || name == "span" || name == "section" || name == "article" ||
 		name == "header" || name == "footer" || name == "nav" || name == "main" ||
-		name == "table" || name == "tr" || name == "td" || name == "th" ||
-		name == "ul" || name == "ol" || name == "noscript" || name == "html" || name == "head") {
+		name == "table" || name == "thead" || name == "tbody" || name == "tfoot" ||
+		name == "tr" || name == "ul" || name == "ol" || name == "noscript" ||
+		name == "html" || name == "head") {
 		pushElement(st, elementRef);
 		return;
 	}
@@ -1702,6 +1797,33 @@ static void handleCloseTag(ParserState& st, const std::string& tagName)
 			st.currentOptionSelected = false;
 		}
 	}
+	if (name == "caption") {
+		flushText(st);
+		if (!st.currentTableCaptionText.empty()) {
+			DocBlock block = makeTextBlock(BlockType::Paragraph, "caption",
+				st.currentTableCaptionText, "", st.classBuf, st.idBuf, captureBlockAncestors(st), st.styleBuf);
+			st.doc.blocks.push_back(std::move(block));
+		}
+		st.currentTableCaptionText.clear();
+		st.open = OpenTag::None;
+		popElementByName(st, name);
+		st.classBuf.clear();
+		st.idBuf.clear();
+		st.styleBuf.clear();
+	}
+	if (name == "td" || name == "th") {
+		flushText(st);
+		DocBlock block = makeTextBlock(BlockType::Paragraph, name, st.currentTableCellText, "",
+			st.classBuf, st.idBuf, captureBlockAncestors(st), st.styleBuf);
+		st.doc.blocks.push_back(std::move(block));
+		st.currentTableCellText.clear();
+		st.currentTableCellHeader = false;
+		st.open = OpenTag::None;
+		popElementByName(st, name);
+		st.classBuf.clear();
+		st.idBuf.clear();
+		st.styleBuf.clear();
+	}
 	if (name == "select") {
 		flushText(st);
 		DocBlock block;
@@ -1764,10 +1886,11 @@ static void handleCloseTag(ParserState& st, const std::string& tagName)
 	if (name == "body") {
 		popElementByName(st, name);
 	}
-	if (name == "div" || name == "span" || name == "section" || name == "article" ||
+	if (name == "strong" || name == "b" || name == "em" || name == "i" || name == "code" ||
+		name == "span" || name == "div" || name == "section" || name == "article" ||
 		name == "header" || name == "footer" || name == "nav" || name == "main" ||
-		name == "table" || name == "tr" || name == "td" || name == "th" ||
-		name == "ul" || name == "ol" || name == "noscript" || name == "html" || name == "head") {
+		name == "table" || name == "thead" || name == "tbody" || name == "tfoot" ||
+		name == "tr" || name == "ul" || name == "ol" || name == "noscript" || name == "html" || name == "head") {
 		popElementByName(st, name);
 	}
 	// </code> inside <pre>: stay in pre context.

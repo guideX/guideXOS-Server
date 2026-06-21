@@ -8,7 +8,7 @@ $LogDir = Join-Path $Root "logs"
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 
 $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
-$SmokeLog = Join-Path $LogDir "imageviewer-phase1c-smoke-$stamp.log"
+$SmokeLog = Join-Path $LogDir "imageviewer-phase1d-smoke-$stamp.log"
 
 function Assert-Contains {
     param(
@@ -116,24 +116,23 @@ try {
     $folderNavigateMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "compositor.cpp") -Pattern 'hostedDesktopSetCurrentPath\(item\.path, true\)'
     $unknownAssociationMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "desktop_service.cpp") -Pattern 'No file association registered for '
 
+    $openControlMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.cpp") -Pattern 'addBtn\(1, "Open"\);'
     $previousMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.cpp") -Pattern 'addBtn\(2, "Previous"\);'
     $nextMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.cpp") -Pattern 'addBtn\(3, "Next"\);'
     $zoomInMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.cpp") -Pattern 'addBtn\(4, "Zoom In"\);'
     $zoomOutMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.cpp") -Pattern 'addBtn\(5, "Zoom Out"\);'
     $fitMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.cpp") -Pattern 'addBtn\(6, "Fit to Window"\);'
     $actualMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.cpp") -Pattern 'addBtn\(7, "100%"\);'
-    $navigateMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.cpp") -Pattern 'navigateRelative\(int delta\)'
-    $mouseMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.cpp") -Pattern 'handleMouseInput\(int x, int y, int button, const std::string& action\)'
+    $wallpaperControlMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.cpp") -Pattern 'addBtn\(8, "Set as Wallpaper"\);'
+    $openDialogMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.cpp") -Pattern 'dialogs::OpenDialog::Show\(0, 0, startPath'
+    $openHandlerMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.cpp") -Pattern 'openImageFromDialog\(\)'
+    $wallpaperHandlerMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.cpp") -Pattern 'trySetCurrentImageAsWallpaper\(\)'
+    $wallpaperMessageMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.cpp") -Pattern 'MT_DesktopWallpaperSet'
+    $unsupportedMessageMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.cpp") -Pattern 'Unsupported image format: only PNG is supported in this version'
+    $unsupportedHandlerMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.cpp") -Pattern 'showUnsupportedFormat\(const std::string& path\)'
     $checkerboardMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.cpp") -Pattern 'drawCheckerboardBackground\(contentLeft, contentTop, contentWidth, contentHeight\)'
     $transparentMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.cpp") -Pattern 's_backgroundMode = s_hasTransparency \? BackgroundMode::Checkerboard : BackgroundMode::Solid;'
-    $titleMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.cpp") -Pattern '"Image Viewer - " \+ s_fileName'
-    $statusFileMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.cpp") -Pattern 's_fileName\.empty\(\) \? s_filePath : s_fileName'
-    $statusDimensionsMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.cpp") -Pattern 's_originalW << "x" << s_originalH'
-    $statusZoomMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.cpp") -Pattern 'zoomPct << "%"'
-    $statusModeMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.cpp") -Pattern 'modeText\(\)'
-    $emptyStateMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.cpp") -Pattern '"No image loaded"'
-    $errorStateMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.cpp") -Pattern '"Failed to load "'
-    $panClampMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.cpp") -Pattern 'clampPanForCurrentImage\('
+    $noEditorMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.cpp") -Pattern 'No image loaded'
 
     $sourceText = Get-Content -LiteralPath (Join-Path $Root "image_viewer.cpp") -Raw
     Assert-NotContains $sourceText "Save" "viewer save feature"
@@ -144,28 +143,28 @@ try {
     Assert-NotContains $sourceText "Filter" "viewer filter feature"
 
     $report = @(
-        "[ImageViewerPhase1CSmoke]",
+        "[ImageViewerPhase1DSmoke]",
         "result=PASS",
         "desktop.apps.verbose contains Image Viewer and gxos.builtin.imageviewer",
         "desktop.launch.resolve ImageViewer => BuiltInApp / Image Viewer",
         "desktop.launch.resolve Image Viewer => BuiltInApp / ImageViewer",
         "desktop.launch.resolve C:\temp\sample.png => FileOpen",
         "desktop.launch.resolve C:\temp\sample.PNG => FileOpen",
+        "viewerOpenControl=$(Format-EvidenceLine $openControlMatch)",
+        "viewerPreviousNext=$(Format-EvidenceLine $previousMatch) | $(Format-EvidenceLine $nextMatch)",
+        "viewerZoomControls=$(Format-EvidenceLine $zoomInMatch) | $(Format-EvidenceLine $zoomOutMatch) | $(Format-EvidenceLine $fitMatch) | $(Format-EvidenceLine $actualMatch)",
+        "viewerWallpaperControl=$(Format-EvidenceLine $wallpaperControlMatch)",
+        "viewerOpenDialogIntegration=$(Format-EvidenceLine $openDialogMatch) | $(Format-EvidenceLine $openHandlerMatch)",
+        "viewerWallpaperIntegration=$(Format-EvidenceLine $wallpaperHandlerMatch) | $(Format-EvidenceLine $wallpaperMessageMatch)",
+        "viewerUnsupportedFormat=$(Format-EvidenceLine $unsupportedMessageMatch) | $(Format-EvidenceLine $unsupportedHandlerMatch)",
+        "viewerCheckerboardBackground=$(Format-EvidenceLine $checkerboardMatch)",
+        "viewerTransparencyDetection=$(Format-EvidenceLine $transparentMatch)",
+        "viewerEmptyState=$(Format-EvidenceLine $noEditorMatch)",
         "fileOpenRoutesToImageViewer=$(Format-EvidenceLine $openMatch)",
         "fileExplorerUsesOpenFilesystemEntry=$(Format-EvidenceLine $fileOpenMatch)",
         "desktopDoubleClickRoutesThroughOpenFilesystemEntry=$(Format-EvidenceLine $desktopDoubleClickMatch)",
         "folderDoubleClickPreserved=$(Format-EvidenceLine $folderNavigateMatch)",
         "unknownFileAssociationPreserved=$(Format-EvidenceLine $unknownAssociationMatch)",
-        "viewerControls=$(Format-EvidenceLine $previousMatch) | $(Format-EvidenceLine $nextMatch) | $(Format-EvidenceLine $zoomInMatch) | $(Format-EvidenceLine $zoomOutMatch) | $(Format-EvidenceLine $fitMatch) | $(Format-EvidenceLine $actualMatch)",
-        "viewerNavigation=$(Format-EvidenceLine $navigateMatch)",
-        "viewerMouseInput=$(Format-EvidenceLine $mouseMatch)",
-        "viewerCheckerboardBackground=$(Format-EvidenceLine $checkerboardMatch)",
-        "viewerTransparencyDetection=$(Format-EvidenceLine $transparentMatch)",
-        "viewerTitleText=$(Format-EvidenceLine $titleMatch)",
-        "viewerStatusText=$(Format-EvidenceLine $statusFileMatch) | $(Format-EvidenceLine $statusDimensionsMatch) | $(Format-EvidenceLine $statusZoomMatch) | $(Format-EvidenceLine $statusModeMatch)",
-        "viewerEmptyState=$(Format-EvidenceLine $emptyStateMatch)",
-        "viewerErrorState=$(Format-EvidenceLine $errorStateMatch)",
-        "viewerPanClamp=$(Format-EvidenceLine $panClampMatch)",
         "noEditorFeaturesDetected=true",
         "metadata=$(Format-EvidenceLine $metadataMatch)",
         "resolverAlias=$(Format-EvidenceLine $resolveMatch)"

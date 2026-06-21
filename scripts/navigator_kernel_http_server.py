@@ -144,6 +144,77 @@ class NavigatorSmokeHandler(BaseHTTPRequestHandler):
                              b"<footer class=\"panel\"><p>Footer spacing should remain comfortable.</p></footer>"
                              b"</main></body></html>")
             return
+        if path == "/navigator-smoke/css-wrappers.html":
+            self.write_bytes(200, "text/html; charset=utf-8",
+                             b"<html><head><style>"
+                             b"body { background:#f4efe6; color:#243447; margin:16px; }"
+                             b"main { max-width:560px; margin-left:auto; margin-right:auto; }"
+                             b"header, article, section, nav, aside, footer, div { background:#ffffff; padding:12px 14px; margin:12px 0; border-top:1px solid #d8dee9; border-bottom:1px solid #d8dee9; }"
+                             b".note { max-width:420px; margin-left:auto; margin-right:auto; background:#dbeafe; padding:10px 12px; }"
+                             b"</style></head><body><main>"
+                             b"<header><h1>Wrapper Layout</h1><p class=\"note\">Centered wrappers stay readable.</p></header>"
+                             b"<article><section><p>Article and section wrappers should behave like blocks.</p></section>"
+                             b"<nav><p>Navigation wrapper remains visible.</p></nav>"
+                             b"<aside><p>Aside wrapper remains visible.</p></aside></article>"
+                             b"<footer><p>Footer wrapper remains visible.</p></footer>"
+                             b"</main></body></html>")
+            return
+        if path == "/navigator-smoke/css-table.html":
+            self.write_bytes(200, "text/html; charset=utf-8",
+                             b"<html><head><style>"
+                             b"body { margin:16px; background:#f8fafc; }"
+                             b"table { max-width:520px; margin-left:auto; margin-right:auto; background:#ffffff; border-top:1px solid #94a3b8; border-bottom:1px solid #94a3b8; }"
+                             b"caption { text-align:center; margin:6px 0 8px; }"
+                             b"th { background:#dbeafe; padding:4px 6px; }"
+                             b"td { padding:4px 6px; }"
+                             b"</style></head><body><main><table>"
+                             b"<caption>Simple Table</caption>"
+                             b"<thead><tr><th>Name</th><th>Value</th></tr></thead>"
+                             b"<tbody><tr><td>Alpha</td><td>One</td></tr>"
+                             b"<tr><td>Beta</td><td>Two</td></tr></tbody>"
+                             b"</table></main></body></html>")
+            return
+        if path == "/navigator-smoke/css-table-wide.html":
+            self.write_bytes(200, "text/html; charset=utf-8",
+                             b"<html><head><style>"
+                             b"body { margin:16px; background:#f3f4f6; }"
+                             b"table { max-width:320px; margin-left:auto; margin-right:auto; background:#ffffff; border-top:1px solid #64748b; border-bottom:1px solid #64748b; }"
+                             b"th, td { padding:4px 6px; }"
+                             b"th { background:#e2e8f0; }"
+                             b"</style></head><body><main><table>"
+                             b"<thead><tr><th>Northwind</th><th>Southbound</th><th>Eastward</th><th>Westward</th></tr></thead>"
+                             b"<tbody><tr><td>Alpha Beta Gamma Delta</td><td>One Two Three Four</td><td>Long Long Long Cell</td><td>Wrap Safe</td></tr>"
+                             b"<tr><td>Secondary Row</td><td>More Width Pressure</td><td>Keep It Stable</td><td>Still Readable</td></tr></tbody>"
+                             b"</table></main></body></html>")
+            return
+        if path == "/navigator-smoke/css-inline-polish.html":
+            self.write_bytes(200, "text/html; charset=utf-8",
+                             b"<html><body style=\"margin:16px;background:#f8fafc;color:#1f2937;line-height:1.5;\">"
+                             b"<main style=\"max-width:520px;margin-left:auto;margin-right:auto;padding:12px 14px;background:#ffffff;\">"
+                             b"<h1 style=\"margin:8px 0;color:#9a3412;text-align:center;\">Inline Text Polish</h1>"
+                             b"<p><span style=\"color:#b91c1c;\">Span color</span> "
+                             b"<strong>Strong text</strong> "
+                             b"<b>Bold text</b> "
+                             b"<em>Emphasis text</em> "
+                             b"<i>Italic text</i> "
+                             b"<code style=\"background:#e5e7eb;\">code sample</code> "
+                             b"<a href=\"#\" style=\"color:#1d4ed8;\">Link text</a></p>"
+                             b"<hr>"
+                             b"<p>Below the separator.</p>"
+                             b"</main></body></html>")
+            return
+        if path == "/navigator-smoke/css-hr.html":
+            self.write_bytes(200, "text/html; charset=utf-8",
+                             b"<html><head><style>"
+                             b"body { margin:16px; background:#f8fafc; line-height:1.5; }"
+                             b"main { max-width:520px; margin-left:auto; margin-right:auto; padding:12px 14px; background:#ffffff; }"
+                             b"hr { border-top:1px solid #cbd5e1; margin:12px 0; }"
+                             b"</style></head><body><main>"
+                             b"<p>Above the horizontal rule.</p>"
+                             b"<hr>"
+                             b"<p>Below the horizontal rule.</p>"
+                             b"</main></body></html>")
+            return
         if path == "/navigator-smoke/css-external-safety.html":
             self.write_bytes(200, "text/html; charset=utf-8",
                              b"<html><head>"

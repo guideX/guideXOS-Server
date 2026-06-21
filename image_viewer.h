@@ -39,6 +39,8 @@ namespace gxos { namespace apps {
         static void fitToWindow();
         static void previousImage();
         static void nextImage();
+        static void openImageFromDialog();
+        static bool trySetCurrentImageAsWallpaper();
         static void updateDisplayImage();
         static void updateDisplay();
         static void handleMouseInput(int x, int y, int button, const std::string& action);
@@ -55,6 +57,8 @@ namespace gxos { namespace apps {
         static void clampZoomForCurrentMode();
         static void clampPanForCurrentImage();
         static bool loadImagePath(const std::string& path, bool refreshFolderList, bool preserveZoomMode);
+        static void showUnsupportedFormat(const std::string& path);
+        static void setNoticeText(const std::string& text);
         static bool refreshFolderImageList(const std::string& path);
         static bool detectTransparency(const gui::ImagePtr& image);
         static void updateImageStatus();
@@ -79,6 +83,7 @@ namespace gxos { namespace apps {
         static std::string s_windowTitle;
         static std::string s_statusText;
         static std::string s_errorText;
+        static std::string s_noticeText;
         static gui::ImagePtr s_image;
         static int s_originalW;
         static int s_originalH;

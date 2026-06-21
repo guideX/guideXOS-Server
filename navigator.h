@@ -112,6 +112,12 @@ struct NavigatorPageMetadata {
 		int         cssLayoutMaxWidthAppliedCount = 0;
 		int         cssAutoMarginCenteredBlockCount = 0;
 		int         cssBackgroundBlockCount = 0;
+		int         cssWrapperRenderCount = 0;
+		int         cssDisplayNoneBlockCount = 0;
+		int         cssTableRenderCount = 0;
+		int         cssTableRowCount = 0;
+		int         cssTableCellCount = 0;
+		int         cssTableLayoutFallbackCount = 0;
 		int         cssListRenderCount = 0;
 		int         cssClampedValueCount = 0;
 	bool        downloaded = false;

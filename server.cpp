@@ -478,6 +478,96 @@ static std::string navigatorHostedSmokeDiagnostic() {
         hasPositiveCount(cssExternalSafetyReport, "Current Document.CSS clamped values="),
         "report=\"" + summarizeText(cssExternalSafetyReport, 260) + "\"");
 
+    bool cssWrapperLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-wrappers.html");
+    std::string cssWrapperText = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    std::string cssWrapperReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    add("CSS wrapper fixture loads",
+        cssWrapperLoaded &&
+        contains(cssWrapperText, "Wrapper Layout") &&
+        contains(cssWrapperText, "Article and section wrappers should behave like blocks.") &&
+        contains(cssWrapperText, "Navigation wrapper remains visible.") &&
+        contains(cssWrapperText, "Aside wrapper remains visible.") &&
+        contains(cssWrapperText, "Footer wrapper remains visible."),
+        "currentUrl=" + gxos::apps::Navigator::SmokeCurrentUrl());
+    add("CSS wrapper diagnostics",
+        contains(cssWrapperReport, "Current Document.CSS enabled=yes") &&
+        hasPositiveCount(cssWrapperReport, "Current Document.CSS wrapper blocks rendered=") &&
+        hasPositiveCount(cssWrapperReport, "Current Document.CSS layout max-width applied=") &&
+        hasPositiveCount(cssWrapperReport, "Current Document.CSS auto-margin centered blocks=") &&
+        hasPositiveCount(cssWrapperReport, "Current Document.CSS background blocks drawn="),
+        "report=\"" + summarizeText(cssWrapperReport, 260) + "\"");
+
+    bool cssTableLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-table.html");
+    std::string cssTableText = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    std::string cssTableReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    add("CSS table fixture loads",
+        cssTableLoaded &&
+        contains(cssTableText, "Simple Table") &&
+        contains(cssTableText, "Name | Value") &&
+        contains(cssTableText, "Alpha | One") &&
+        contains(cssTableText, "Beta | Two"),
+        "currentUrl=" + gxos::apps::Navigator::SmokeCurrentUrl());
+    add("CSS table diagnostics",
+        contains(cssTableReport, "Current Document.CSS enabled=yes") &&
+        hasPositiveCount(cssTableReport, "Current Document.CSS tables rendered=") &&
+        hasPositiveCount(cssTableReport, "Current Document.CSS table rows rendered=") &&
+        hasPositiveCount(cssTableReport, "Current Document.CSS table cells rendered="),
+        "report=\"" + summarizeText(cssTableReport, 260) + "\"");
+
+    bool cssTableWideLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-table-wide.html");
+    std::string cssTableWideText = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    std::string cssTableWideReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    add("CSS wide table fixture loads",
+        cssTableWideLoaded &&
+        contains(cssTableWideText, "Northwind | Southbound | Eastward | Westward") &&
+        contains(cssTableWideText, "Alpha Beta Gamma Delta") &&
+        contains(cssTableWideText, "Still Readable"),
+        "currentUrl=" + gxos::apps::Navigator::SmokeCurrentUrl());
+    add("CSS wide table clamps safely",
+        contains(cssTableWideReport, "Current Document.CSS enabled=yes") &&
+        hasPositiveCount(cssTableWideReport, "Current Document.CSS table layout fallbacks=") &&
+        hasPositiveCount(cssTableWideReport, "Current Document.CSS tables rendered="),
+        "report=\"" + summarizeText(cssTableWideReport, 260) + "\"");
+
+    bool cssInlinePolishLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-inline-polish.html");
+    std::string cssInlinePolishText = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    std::string cssInlinePolishReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    add("CSS inline text fixture loads",
+        cssInlinePolishLoaded &&
+        contains(cssInlinePolishText, "Span color") &&
+        contains(cssInlinePolishText, "Strong text") &&
+        contains(cssInlinePolishText, "Bold text") &&
+        contains(cssInlinePolishText, "Emphasis text") &&
+        contains(cssInlinePolishText, "Italic text") &&
+        contains(cssInlinePolishText, "code sample") &&
+        contains(cssInlinePolishText, "Link text") &&
+        contains(cssInlinePolishText, "Below the separator."),
+        "currentUrl=" + gxos::apps::Navigator::SmokeCurrentUrl());
+    add("CSS inline styling diagnostics",
+        contains(cssInlinePolishReport, "Current Document.CSS enabled=yes") &&
+        hasPositiveCount(cssInlinePolishReport, "Current Document.CSS inline styles="),
+        "report=\"" + summarizeText(cssInlinePolishReport, 260) + "\"");
+
+    bool cssHrLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-hr.html");
+    std::string cssHrText = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    std::string cssHrReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    add("CSS horizontal rule fixture loads",
+        cssHrLoaded &&
+        contains(cssHrText, "Above the horizontal rule.") &&
+        contains(cssHrText, "Below the horizontal rule.") &&
+        gxos::apps::Navigator::SmokeCurrentBlockCount() >= 3,
+        "currentUrl=" + gxos::apps::Navigator::SmokeCurrentUrl());
+    add("CSS horizontal rule rendering diagnostics",
+        contains(cssHrReport, "Current Document.CSS enabled=yes"),
+        "report=\"" + summarizeText(cssHrReport, 260) + "\"");
+
+    bool cssDisplayNoneLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-unsupported.html");
+    std::string cssDisplayNoneText = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    add("CSS display:none remains hidden",
+        cssDisplayNoneLoaded &&
+        !contains(cssDisplayNoneText, "This hidden text must stay hidden."),
+        "currentUrl=" + gxos::apps::Navigator::SmokeCurrentUrl());
+
     bool basicHttpLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/basic.html");
     std::string basicHttpText = gxos::apps::Navigator::SmokeCurrentDocumentText();
     add("plain HTTP GET still loads", basicHttpLoaded && contains(basicHttpText, "Kernel HTTP Basic"),

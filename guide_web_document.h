@@ -54,6 +54,7 @@ struct HtmlElementRef {
 	std::string className;
 	std::string id;
 	std::string inlineStyle;
+	uint64_t    serial = 0;
 };
 
 struct CssSelectorPart {

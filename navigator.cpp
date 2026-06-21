@@ -641,6 +641,49 @@ namespace {
 		}
 	}
 
+	static bool isTableCellLikeBlock(const DocBlock& block);
+	static uint64_t tableSerialForBlock(const DocBlock& block);
+	static uint64_t tableRowSerialForBlock(const DocBlock& block);
+	static bool blockHasWrapperAncestor(const DocBlock& block);
+
+	struct TableCellLayout {
+		const DocBlock* block = nullptr;
+		std::vector<std::string> lines;
+		int padLeftChars = 1;
+		int padRightChars = 1;
+		int contentWidthChars = 1;
+	};
+
+	struct TableRowLayout {
+		uint64_t rowSerial = 0;
+		std::vector<TableCellLayout> cells;
+		bool headerRow = false;
+		int heightPx = 0;
+	};
+
+	struct TableGroupLayout {
+		uint64_t tableSerial = 0;
+		int startIndex = -1;
+		int endIndex = -1;
+		int availableWidth = 0;
+		int outerWidth = 0;
+		int outerX = 0;
+		int paddingTop = 0;
+		int paddingRight = 0;
+		int paddingBottom = 0;
+		int paddingLeft = 0;
+		int borderTop = 0;
+		int borderBottom = 0;
+		int lineHeight = 0;
+		std::vector<int> columnWidthsChars;
+		std::vector<TableRowLayout> rows;
+		bool fallbackUsed = false;
+	};
+
+	static bool isFirstTableCellInGroup(const WebDocument& doc, int index);
+	static int tableGroupStartIndex(const WebDocument& doc, int index);
+	static TableGroupLayout buildTableGroupLayout(const WebDocument& doc, int startIndex);
+
 	static void fillDocumentCounts(NavigatorPageMetadata& metadata, const WebDocument& doc)
 	{
 		metadata.documentBlockCount = static_cast<int>(doc.blocks.size());
@@ -665,6 +708,12 @@ namespace {
 		metadata.cssLayoutMaxWidthAppliedCount = 0;
 		metadata.cssAutoMarginCenteredBlockCount = 0;
 		metadata.cssBackgroundBlockCount = doc.bodyStyle.hasBackgroundColor ? 1 : 0;
+		metadata.cssWrapperRenderCount = 0;
+		metadata.cssDisplayNoneBlockCount = 0;
+		metadata.cssTableRenderCount = 0;
+		metadata.cssTableRowCount = 0;
+		metadata.cssTableCellCount = 0;
+		metadata.cssTableLayoutFallbackCount = 0;
 		metadata.cssListRenderCount = 0;
 		metadata.cssClampedValueCount = doc.cssDiagnostics.clampedValueCount;
 		metadata.formCount = doc.formsDiagnostics.formCount;
@@ -679,7 +728,17 @@ namespace {
 		metadata.postSupportedHosted = true;
 		metadata.postSupportedBareMetal = false;
 
-		for (const DocBlock& block : doc.blocks) {
+		std::vector<uint64_t> seenTableSerials;
+		std::vector<uint64_t> seenTableRowSerials;
+		for (size_t i = 0; i < doc.blocks.size(); ++i) {
+			const DocBlock& block = doc.blocks[i];
+			if (block.style.displayNone) {
+				++metadata.cssDisplayNoneBlockCount;
+				continue;
+			}
+			if (blockHasWrapperAncestor(block)) {
+				++metadata.cssWrapperRenderCount;
+			}
 			const bool hasWidthConstraint = block.style.width > 0 || block.style.widthPercent >= 0 ||
 				block.style.maxWidth > 0 || block.style.maxWidthPercent >= 0;
 			if (block.style.maxWidth > 0 || block.style.maxWidthPercent >= 0) {
@@ -693,6 +752,26 @@ namespace {
 			}
 			if (block.type == BlockType::ListItem) {
 				++metadata.cssListRenderCount;
+			}
+			if (isTableCellLikeBlock(block)) {
+				++metadata.cssTableCellCount;
+				const uint64_t tableSerial = tableSerialForBlock(block);
+				const uint64_t rowSerial = tableRowSerialForBlock(block);
+				if (tableSerial != 0 && std::find(seenTableSerials.begin(), seenTableSerials.end(), tableSerial) == seenTableSerials.end()) {
+					seenTableSerials.push_back(tableSerial);
+					++metadata.cssTableRenderCount;
+				}
+				if (rowSerial != 0 && std::find(seenTableRowSerials.begin(), seenTableRowSerials.end(), rowSerial) == seenTableRowSerials.end()) {
+					seenTableRowSerials.push_back(rowSerial);
+					++metadata.cssTableRowCount;
+				}
+				if (isFirstTableCellInGroup(doc, static_cast<int>(i))) {
+					const int groupStart = tableGroupStartIndex(doc, static_cast<int>(i));
+					const TableGroupLayout layout = buildTableGroupLayout(doc, groupStart);
+					if (layout.fallbackUsed) {
+						++metadata.cssTableLayoutFallbackCount;
+					}
+				}
 			}
 			if (block.type != BlockType::Image) continue;
 			++metadata.imageBlockCount;
@@ -916,6 +995,281 @@ namespace {
 		return std::max(1, ordinal);
 	}
 
+	static bool isWrapperTagName(const std::string& tagName)
+	{
+		const std::string tag = toLowerAscii(tagName);
+		return tag == "main" || tag == "article" || tag == "nav" || tag == "aside" ||
+			tag == "header" || tag == "footer" || tag == "section" || tag == "div";
+	}
+
+	static bool isTableCellLikeBlock(const DocBlock& block)
+	{
+		const std::string tag = toLowerAscii(block.tagName);
+		return tag == "td" || tag == "th";
+	}
+
+	static bool isTableCaptionLikeBlock(const DocBlock& block)
+	{
+		return toLowerAscii(block.tagName) == "caption";
+	}
+
+	static uint64_t ancestorSerialForTag(const DocBlock& block, const std::string& tagName)
+	{
+		const std::string tag = toLowerAscii(tagName);
+		for (auto it = block.ancestors.rbegin(); it != block.ancestors.rend(); ++it) {
+			if (toLowerAscii(it->tagName) == tag) return it->serial;
+		}
+		return 0;
+	}
+
+	static uint64_t tableSerialForBlock(const DocBlock& block)
+	{
+		return ancestorSerialForTag(block, "table");
+	}
+
+	static uint64_t tableRowSerialForBlock(const DocBlock& block)
+	{
+		return ancestorSerialForTag(block, "tr");
+	}
+
+	static std::string tableRowSignature(const DocBlock& block)
+	{
+		std::ostringstream oss;
+		oss << tableSerialForBlock(block) << ":" << tableRowSerialForBlock(block);
+		return oss.str();
+	}
+
+	static int textLineCountForTableCell(const std::string& text)
+	{
+		if (text.empty()) return 1;
+		int lines = 0;
+		size_t start = 0;
+		while (start <= text.size()) {
+			size_t end = text.find('\n', start);
+			if (end == std::string::npos) end = text.size();
+			++lines;
+			if (end == text.size()) break;
+			start = end + 1;
+		}
+		return std::max(1, lines);
+	}
+
+	static int textLongestLineChars(const std::string& text)
+	{
+		int longest = 0;
+		size_t start = 0;
+		while (start <= text.size()) {
+			size_t end = text.find('\n', start);
+			if (end == std::string::npos) end = text.size();
+			longest = std::max(longest, static_cast<int>(end - start));
+			if (end == text.size()) break;
+			start = end + 1;
+		}
+		return longest;
+	}
+
+	static bool blockHasWrapperAncestor(const DocBlock& block)
+	{
+		for (const gxos::web::HtmlElementRef& ancestor : block.ancestors) {
+			if (isWrapperTagName(ancestor.tagName)) return true;
+		}
+		return isWrapperTagName(block.tagName);
+	}
+
+	static bool isFirstTableCellInGroup(const WebDocument& doc, int index)
+	{
+		if (index < 0 || index >= static_cast<int>(doc.blocks.size())) return false;
+		const DocBlock& block = doc.blocks[static_cast<size_t>(index)];
+		if (!isTableCellLikeBlock(block)) return false;
+		const uint64_t tableSerial = tableSerialForBlock(block);
+		const uint64_t rowSerial = tableRowSerialForBlock(block);
+		if (tableSerial == 0) return false;
+		if (index == 0) return true;
+		for (int i = index - 1; i >= 0; --i) {
+			const DocBlock& candidate = doc.blocks[static_cast<size_t>(i)];
+			if (!isTableCellLikeBlock(candidate)) return true;
+			if (tableSerialForBlock(candidate) != tableSerial) return true;
+			if (tableRowSerialForBlock(candidate) == rowSerial) return false;
+			return true;
+		}
+		return true;
+	}
+
+	static int tableGroupStartIndex(const WebDocument& doc, int index)
+	{
+		if (index < 0 || index >= static_cast<int>(doc.blocks.size())) return -1;
+		const DocBlock& block = doc.blocks[static_cast<size_t>(index)];
+		if (!isTableCellLikeBlock(block)) return -1;
+		const uint64_t tableSerial = tableSerialForBlock(block);
+		int start = index;
+		while (start > 0) {
+			const DocBlock& prev = doc.blocks[static_cast<size_t>(start - 1)];
+			if (!isTableCellLikeBlock(prev)) break;
+			if (tableSerialForBlock(prev) != tableSerial) break;
+			--start;
+		}
+		return start;
+	}
+
+	static TableGroupLayout buildTableGroupLayout(const WebDocument& doc, int startIndex)
+	{
+		TableGroupLayout layout;
+		if (startIndex < 0 || startIndex >= static_cast<int>(doc.blocks.size())) return layout;
+		const DocBlock& first = doc.blocks[static_cast<size_t>(startIndex)];
+		if (!isTableCellLikeBlock(first)) return layout;
+		layout.tableSerial = tableSerialForBlock(first);
+		layout.startIndex = startIndex;
+
+		const int bodyMarginLeft = blockBodyMarginLeft(doc);
+		const int bodyMarginRight = blockBodyMarginRight(doc);
+		const int firstMarginLeft = cssMarginLeftPx(first.style, 0);
+		const int firstMarginRight = cssMarginRightPx(first.style, 0);
+		const int availableWidth = std::max(1, kContentW - blockIndentForType(first.type) - kDocumentRightPad
+			- bodyMarginLeft - bodyMarginRight - firstMarginLeft - firstMarginRight);
+		layout.availableWidth = availableWidth;
+		layout.outerWidth = blockOuterWidth(first, availableWidth);
+		layout.outerX = blockOuterX(first, doc, availableWidth, layout.outerWidth);
+		layout.paddingTop = cssPaddingTopPx(first.style, 4);
+		layout.paddingRight = cssPaddingRightPx(first.style, 4);
+		layout.paddingBottom = cssPaddingBottomPx(first.style, 4);
+		layout.paddingLeft = cssPaddingLeftPx(first.style, 4);
+		layout.borderTop = cssBorderTopPx(first.style);
+		layout.borderBottom = cssBorderBottomPx(first.style);
+		layout.lineHeight = blockTextLineHeight(first);
+
+		int i = startIndex;
+		while (i < static_cast<int>(doc.blocks.size())) {
+			const DocBlock& block = doc.blocks[static_cast<size_t>(i)];
+			if (!isTableCellLikeBlock(block) || tableSerialForBlock(block) != layout.tableSerial) break;
+			TableRowLayout row;
+			row.rowSerial = tableRowSerialForBlock(block);
+			row.headerRow = false;
+			int j = i;
+			while (j < static_cast<int>(doc.blocks.size())) {
+				const DocBlock& cell = doc.blocks[static_cast<size_t>(j)];
+				if (!isTableCellLikeBlock(cell) || tableSerialForBlock(cell) != layout.tableSerial ||
+					tableRowSerialForBlock(cell) != row.rowSerial) {
+					break;
+				}
+				TableCellLayout cellLayout;
+				cellLayout.block = &cell;
+				cellLayout.padLeftChars = std::max(1, cssPaddingLeftPx(cell.style, 4) / kCharW + 1);
+				cellLayout.padRightChars = std::max(1, cssPaddingRightPx(cell.style, 4) / kCharW + 1);
+				cellLayout.contentWidthChars = std::max(1, textLongestLineChars(cell.text));
+				cellLayout.lines = wrapText(cell.text, cellLayout.contentWidthChars);
+				row.headerRow = row.headerRow || toLowerAscii(cell.tagName) == "th" || cell.style.bold;
+				row.cells.push_back(std::move(cellLayout));
+				++j;
+			}
+			layout.rows.push_back(std::move(row));
+			i = j;
+		}
+		layout.endIndex = i;
+
+		int columnCount = 0;
+		for (const TableRowLayout& row : layout.rows) {
+			columnCount = std::max(columnCount, static_cast<int>(row.cells.size()));
+		}
+		layout.columnWidthsChars.assign(static_cast<size_t>(columnCount), 0);
+		for (const TableRowLayout& row : layout.rows) {
+			for (size_t col = 0; col < row.cells.size(); ++col) {
+				const TableCellLayout& cell = row.cells[col];
+				const int desired = std::max(4, cell.contentWidthChars + cell.padLeftChars + cell.padRightChars);
+				layout.columnWidthsChars[col] = std::max(layout.columnWidthsChars[col], desired);
+			}
+		}
+
+		const int separatorChars = columnCount > 0 ? (3 * (columnCount - 1)) : 0;
+		const int availableChars = std::max(8, (layout.outerWidth - layout.paddingLeft - layout.paddingRight) / kCharW);
+		int desiredChars = separatorChars;
+		for (int width : layout.columnWidthsChars) desiredChars += width;
+		if (columnCount > 0 && desiredChars > availableChars) {
+			layout.fallbackUsed = true;
+			int remaining = std::max(columnCount, availableChars - separatorChars);
+			int totalDesired = 0;
+			for (int width : layout.columnWidthsChars) totalDesired += std::max(1, width);
+			std::vector<int> newWidths(static_cast<size_t>(columnCount), 1);
+			int used = 0;
+			for (int col = 0; col < columnCount; ++col) {
+				int width = std::max(1, layout.columnWidthsChars[static_cast<size_t>(col)]);
+				int scaled = std::max(1, (width * remaining) / std::max(1, totalDesired));
+				newWidths[static_cast<size_t>(col)] = scaled;
+				used += scaled;
+			}
+			while (used < remaining) {
+				for (int col = 0; col < columnCount && used < remaining; ++col) {
+					++newWidths[static_cast<size_t>(col)];
+					++used;
+				}
+			}
+			layout.columnWidthsChars = std::move(newWidths);
+		}
+
+		for (TableRowLayout& row : layout.rows) {
+			int maxLines = 1;
+			const size_t lastCol = layout.columnWidthsChars.empty() ? 0 : layout.columnWidthsChars.size() - 1;
+			for (size_t col = 0; col < row.cells.size(); ++col) {
+				TableCellLayout& cell = row.cells[col];
+				const int colWidth = layout.columnWidthsChars[std::min(col, lastCol)];
+				const int contentWidth = std::max(1, colWidth - cell.padLeftChars - cell.padRightChars);
+				cell.contentWidthChars = contentWidth;
+				cell.lines = wrapText(cell.block->text, contentWidth);
+				maxLines = std::max(maxLines, static_cast<int>(cell.lines.size()));
+			}
+			row.heightPx = std::max(layout.lineHeight + 4, maxLines * layout.lineHeight + layout.paddingTop + layout.paddingBottom);
+		}
+
+		return layout;
+	}
+
+	static std::string padTableCellLine(const std::string& text, int widthChars, TextAlign align)
+	{
+		const int visible = std::max(0, static_cast<int>(text.size()));
+		const int pad = std::max(0, widthChars - visible);
+		int left = 0;
+		int right = 0;
+		if (align == TextAlign::Center) {
+			left = pad / 2;
+			right = pad - left;
+		} else if (align == TextAlign::Right) {
+			left = pad;
+		} else {
+			right = pad;
+		}
+		return std::string(static_cast<size_t>(left), ' ') + text + std::string(static_cast<size_t>(right), ' ');
+	}
+
+	static std::vector<std::string> tableRowTextLines(const TableGroupLayout& layout, const TableRowLayout& row)
+	{
+		std::vector<std::string> lines;
+		int maxLines = 1;
+		for (const TableCellLayout& cell : row.cells) {
+			maxLines = std::max(maxLines, static_cast<int>(cell.lines.size()));
+		}
+		const size_t lastCol = layout.columnWidthsChars.empty() ? 0 : layout.columnWidthsChars.size() - 1;
+		for (int lineIndex = 0; lineIndex < maxLines; ++lineIndex) {
+			std::string line;
+			for (size_t col = 0; col < row.cells.size(); ++col) {
+				const TableCellLayout& cell = row.cells[col];
+				const int colWidth = layout.columnWidthsChars[std::min(col, lastCol)];
+				const int contentWidth = std::max(1, colWidth - cell.padLeftChars - cell.padRightChars);
+				std::string cellLine;
+				if (lineIndex < static_cast<int>(cell.lines.size())) cellLine = cell.lines[static_cast<size_t>(lineIndex)];
+				if (static_cast<int>(cellLine.size()) > contentWidth) {
+					cellLine = cellLine.substr(0, static_cast<size_t>(contentWidth));
+				}
+				cellLine = padTableCellLine(cellLine, contentWidth, cell.block->style.textAlign);
+				if (!line.empty()) line += " | ";
+				line += std::string(static_cast<size_t>(cell.padLeftChars), ' ');
+				line += cellLine;
+				line += std::string(static_cast<size_t>(cell.padRightChars), ' ');
+			}
+			lines.push_back(std::move(line));
+		}
+		if (lines.empty()) lines.push_back("");
+		return lines;
+	}
+
 	static int blockBodyMarginLeft(const WebDocument& doc)
 	{
 		return doc.bodyStyle.marginLeft >= 0 ? doc.bodyStyle.marginLeft : 0;
@@ -998,6 +1352,35 @@ namespace {
 	static int blockTotalHeight(const DocBlock& block, const WebDocument& doc, bool nextIsHeading)
 	{
 		if (block.style.displayNone) return 0;
+		if (isTableCellLikeBlock(block)) {
+			if (!isFirstTableCellInGroup(doc, static_cast<int>(&block - &doc.blocks.front()))) {
+				return 0;
+			}
+			const int blockIndex = static_cast<int>(&block - &doc.blocks.front());
+			const int groupStart = tableGroupStartIndex(doc, blockIndex);
+			const TableGroupLayout layout = buildTableGroupLayout(doc, groupStart);
+			const uint64_t rowSerial = tableRowSerialForBlock(block);
+			int rowHeight = layout.lineHeight + 4;
+			for (const TableRowLayout& row : layout.rows) {
+				if (row.rowSerial == rowSerial) {
+					rowHeight = row.heightPx;
+					break;
+				}
+			}
+			const int blockMarginTop = cssMarginTopPx(block.style, 4);
+			const int blockMarginBottom = cssMarginBottomPx(block.style, 8);
+			int total = blockMarginTop + cssBorderTopPx(block.style) + rowHeight + cssBorderBottomPx(block.style) + blockMarginBottom;
+			if (nextIsHeading) total += 10;
+			return total;
+		}
+		if (toLowerAscii(block.tagName) == "hr") {
+			const int blockMarginTop = cssMarginTopPx(block.style, 10);
+			const int blockMarginBottom = cssMarginBottomPx(block.style, 10);
+			const int paddingTop = cssPaddingTopPx(block.style, 0);
+			const int paddingBottom = cssPaddingBottomPx(block.style, 0);
+			return blockMarginTop + cssBorderTopPx(block.style) + paddingTop + paddingBottom +
+				cssBorderBottomPx(block.style) + std::max(4, blockMarginBottom);
+		}
 		const int blockMarginTop = cssMarginTopPx(block.style, block.type == BlockType::Heading ? 10 : 4);
 		const int blockMarginBottom = cssMarginBottomPx(block.style, block.type == BlockType::ListItem ? 4 : 8);
 		const int blockMarginLeft = cssMarginLeftPx(block.style, 0);
@@ -1168,6 +1551,12 @@ namespace {
 		int cssLayoutMaxWidthAppliedCount,
 		int cssAutoMarginCenteredBlockCount,
 		int cssBackgroundBlockCount,
+		int cssWrapperRenderCount,
+		int cssDisplayNoneBlockCount,
+		int cssTableRenderCount,
+		int cssTableRowCount,
+		int cssTableCellCount,
+		int cssTableLayoutFallbackCount,
 		int cssListRenderCount,
 		int cssClampedValueCount,
 		int formCount,
@@ -1357,6 +1746,12 @@ namespace {
 			{"Current Document", "CSS layout max-width applied", std::to_string(cssLayoutMaxWidthAppliedCount)},
 			{"Current Document", "CSS auto-margin centered blocks", std::to_string(cssAutoMarginCenteredBlockCount)},
 			{"Current Document", "CSS background blocks drawn", std::to_string(cssBackgroundBlockCount)},
+			{"Current Document", "CSS wrapper blocks rendered", std::to_string(cssWrapperRenderCount)},
+			{"Current Document", "CSS display:none blocks", std::to_string(cssDisplayNoneBlockCount)},
+			{"Current Document", "CSS tables rendered", std::to_string(cssTableRenderCount)},
+			{"Current Document", "CSS table rows rendered", std::to_string(cssTableRowCount)},
+			{"Current Document", "CSS table cells rendered", std::to_string(cssTableCellCount)},
+			{"Current Document", "CSS table layout fallbacks", std::to_string(cssTableLayoutFallbackCount)},
 			{"Current Document", "CSS lists rendered", std::to_string(cssListRenderCount)},
 			{"Current Document", "CSS clamped values", std::to_string(cssClampedValueCount)},
 			{"Current Document", "Forms", std::to_string(formCount)},
@@ -1569,6 +1964,32 @@ namespace {
 		} else if (block.height > 0 && block.width <= 0) {
 			drawW = std::max(1, (drawH * naturalW) / naturalH);
 		}
+		if (block.style.width > 0) {
+			drawW = block.style.width;
+			if (block.height <= 0) {
+				drawH = std::max(1, (drawW * naturalH) / naturalW);
+			}
+		} else if (block.style.widthPercent >= 0) {
+			drawW = std::max(1, kImageMaxW * block.style.widthPercent / 100);
+			if (block.height <= 0) {
+				drawH = std::max(1, (drawW * naturalH) / naturalW);
+			}
+		}
+		if (block.style.maxWidth > 0 && drawW > block.style.maxWidth) {
+			drawW = block.style.maxWidth;
+			if (block.height <= 0) {
+				drawH = std::max(1, (drawW * naturalH) / naturalW);
+			}
+		}
+		if (block.style.maxWidthPercent >= 0) {
+			const int cssMaxW = std::max(1, kImageMaxW * block.style.maxWidthPercent / 100);
+			if (drawW > cssMaxW) {
+				drawW = cssMaxW;
+				if (block.height <= 0) {
+					drawH = std::max(1, (drawW * naturalH) / naturalW);
+				}
+			}
+		}
 
 		if (drawW > kImageMaxW) {
 			drawH = std::max(1, (drawH * kImageMaxW) / drawW);
@@ -1701,6 +2122,12 @@ std::string Navigator::SmokeRuntimeReport()
 		s_pageMetadata.cssLayoutMaxWidthAppliedCount,
 		s_pageMetadata.cssAutoMarginCenteredBlockCount,
 		s_pageMetadata.cssBackgroundBlockCount,
+		s_pageMetadata.cssWrapperRenderCount,
+		s_pageMetadata.cssDisplayNoneBlockCount,
+		s_pageMetadata.cssTableRenderCount,
+		s_pageMetadata.cssTableRowCount,
+		s_pageMetadata.cssTableCellCount,
+		s_pageMetadata.cssTableLayoutFallbackCount,
 		s_pageMetadata.cssListRenderCount,
 		s_pageMetadata.cssClampedValueCount,
 		s_pageMetadata.formCount,
@@ -2020,6 +2447,77 @@ void Navigator::renderDocument()
 		const int listWrapCols = wrapCols;
 		const int preWrapCols = std::max(1, innerWidth / kCharW);
 		const int headingFontSize = cssFontSizeOrDefault(block.style, block.tagName == "h1" ? 24 : (block.tagName == "h2" ? 20 : (block.tagName == "h3" ? 18 : 20)));
+
+		if (isTableCellLikeBlock(block)) {
+			if (!isFirstTableCellInGroup(s_currentDoc, blockIndex)) {
+				++blockIndex;
+				continue;
+			}
+			const int groupStart = tableGroupStartIndex(s_currentDoc, blockIndex);
+			const TableGroupLayout layout = buildTableGroupLayout(s_currentDoc, groupStart);
+			const uint64_t rowSerial = tableRowSerialForBlock(block);
+			int rowIndex = -1;
+			for (int ri = 0; ri < static_cast<int>(layout.rows.size()); ++ri) {
+				if (layout.rows[static_cast<size_t>(ri)].rowSerial == rowSerial) {
+					rowIndex = ri;
+					break;
+				}
+			}
+			if (rowIndex < 0) {
+				++blockIndex;
+				continue;
+			}
+			const TableRowLayout& row = layout.rows[static_cast<size_t>(rowIndex)];
+			const int rowBlockH = row.heightPx + cssBorderTopPx(block.style) + cssBorderBottomPx(block.style);
+			if (drawY + rowBlockH < kContentY || drawY > kContentY + kContentH) {
+				++blockIndex;
+				continue;
+			}
+			if (s_findActive &&
+				s_currentFindMatch >= 0 &&
+				s_currentFindMatch < static_cast<int>(s_findMatches.size()) &&
+				s_findMatches[s_currentFindMatch].blockIndex == blockIndex)
+			{
+				drawRect(s_windowId, kContentX + 10, drawY + std::max(0, blockMarginTop - 2),
+					kContentW - 28, std::max(kLineH + 4, rowBlockH - std::max(0, blockMarginTop)),
+					255, 244, 168);
+			}
+			SelectionRange selection = normalizedSelection();
+			if (selection.valid && blockIndex >= selection.start.blockIndex && blockIndex <= selection.end.blockIndex && isSelectableBlock(block)) {
+				Rect selectionRect = selectableBlockRect(blockIndex);
+				if (selectionRect.w > 0 && selectionRect.h > 0) {
+					drawRect(s_windowId,
+						selectionRect.x - 2,
+						selectionRect.y - 1,
+						std::min(selectionRect.w + 4, kContentX + kContentW - 18 - (selectionRect.x - 2)),
+						selectionRect.h,
+						96, 146, 224);
+				}
+			}
+			const int boxY = drawY + blockMarginTop;
+			drawBlockBox(s_windowId, layout.outerX, boxY, layout.outerWidth, row.heightPx, block.style);
+			WebStyle rowStyle = block.style;
+			if (row.headerRow) rowStyle.bold = true;
+			const std::vector<std::string> lines = tableRowTextLines(layout, row);
+			int lineY = drawY + blockMarginTop + cssBorderTopPx(block.style) + layout.paddingTop;
+			for (const std::string& ln : lines) {
+				drawTextAtStyled(s_windowId, layout.outerX + layout.paddingLeft, lineY, ln, rowStyle);
+				lineY += layout.lineHeight;
+			}
+			++blockIndex;
+			continue;
+		}
+		if (toLowerAscii(block.tagName) == "hr") {
+			const int hrH = blockMarginTop + borderTop + paddingTop + paddingBottom + borderBottom + std::max(4, blockMarginBottom);
+			if (drawY + hrH < kContentY || drawY > kContentY + kContentH) {
+				++blockIndex;
+				continue;
+			}
+			const int boxY = drawY + blockMarginTop;
+			drawBlockBox(s_windowId, outerX, boxY, outerWidth, std::max(1, hrH - blockMarginTop - std::max(4, blockMarginBottom)), block.style);
+			++blockIndex;
+			continue;
+		}
 
 		// Skip blocks fully above or below the visible viewport
 		int blockH = 0;
@@ -2786,6 +3284,24 @@ Navigator::Rect Navigator::selectableBlockRect(int blockIndex)
 	const DocBlock& block = s_currentDoc.blocks[blockIndex];
 	if (!blockHasVisibleCss(block)) return Rect{ 0, 0, 0, 0 };
 	if (!isSelectableBlock(block)) return Rect{ 0, 0, 0, 0 };
+	if (isTableCellLikeBlock(block)) {
+		if (!isFirstTableCellInGroup(s_currentDoc, blockIndex)) return Rect{ 0, 0, 0, 0 };
+		const int groupStart = tableGroupStartIndex(s_currentDoc, blockIndex);
+		const TableGroupLayout layout = buildTableGroupLayout(s_currentDoc, groupStart);
+		const uint64_t rowSerial = tableRowSerialForBlock(block);
+		for (const TableRowLayout& row : layout.rows) {
+			if (row.rowSerial != rowSerial) continue;
+			const int drawY = kContentY + blockLayoutY(blockIndex) - s_scrollOffset;
+			const int rowY = drawY + cssMarginTopPx(block.style, 4) + cssBorderTopPx(block.style);
+			return Rect{
+				layout.outerX + layout.paddingLeft,
+				rowY + layout.paddingTop,
+				std::max(kCharW, (layout.outerWidth - layout.paddingLeft - layout.paddingRight)),
+				std::max(kLineH, row.heightPx)
+			};
+		}
+		return Rect{ 0, 0, 0, 0 };
+	}
 	const int drawY = kContentY + blockLayoutY(blockIndex) - s_scrollOffset;
 	const int bodyMarginLeft = blockBodyMarginLeft(s_currentDoc);
 	const int bodyMarginRight = blockBodyMarginRight(s_currentDoc);
@@ -3980,6 +4496,12 @@ WebDocument Navigator::buildPageInfoDocument()
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("CSS layout max-width applied", m.cssLayoutMaxWidthAppliedCount), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("CSS auto-margin centered blocks", m.cssAutoMarginCenteredBlockCount), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("CSS background blocks drawn", m.cssBackgroundBlockCount), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("CSS wrapper blocks rendered", m.cssWrapperRenderCount), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("CSS display:none blocks", m.cssDisplayNoneBlockCount), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("CSS tables rendered", m.cssTableRenderCount), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("CSS table rows rendered", m.cssTableRowCount), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("CSS table cells rendered", m.cssTableCellCount), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("CSS table layout fallbacks", m.cssTableLayoutFallbackCount), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("CSS lists rendered", m.cssListRenderCount), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("CSS clamped values", m.cssClampedValueCount), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Downloaded", yesNo(m.downloaded)), ""});
@@ -4100,6 +4622,12 @@ WebDocument Navigator::buildRuntimeDocument()
 		s_pageMetadata.cssLayoutMaxWidthAppliedCount,
 		s_pageMetadata.cssAutoMarginCenteredBlockCount,
 		s_pageMetadata.cssBackgroundBlockCount,
+		s_pageMetadata.cssWrapperRenderCount,
+		s_pageMetadata.cssDisplayNoneBlockCount,
+		s_pageMetadata.cssTableRenderCount,
+		s_pageMetadata.cssTableRowCount,
+		s_pageMetadata.cssTableCellCount,
+		s_pageMetadata.cssTableLayoutFallbackCount,
 		s_pageMetadata.cssListRenderCount,
 		s_pageMetadata.cssClampedValueCount,
 		s_pageMetadata.formCount,
@@ -4176,6 +4704,26 @@ static std::string extractDocumentText(const WebDocument& doc)
 	for (int i = 0; i < static_cast<int>(doc.blocks.size()); ++i) {
 		const DocBlock& block = doc.blocks[static_cast<size_t>(i)];
 		if (!blockHasVisibleCss(block)) {
+			continue;
+		}
+		if (isTableCellLikeBlock(block)) {
+			if (!isFirstTableCellInGroup(doc, i)) continue;
+			const uint64_t tableSerial = tableSerialForBlock(block);
+			const uint64_t rowSerial = tableRowSerialForBlock(block);
+			std::ostringstream rowText;
+			bool firstCell = true;
+			for (int j = i; j < static_cast<int>(doc.blocks.size()); ++j) {
+				const DocBlock& cell = doc.blocks[static_cast<size_t>(j)];
+				if (!isTableCellLikeBlock(cell) ||
+					tableSerialForBlock(cell) != tableSerial ||
+					tableRowSerialForBlock(cell) != rowSerial) {
+					break;
+				}
+				if (!firstCell) rowText << " | ";
+				rowText << cell.text;
+				firstCell = false;
+			}
+			out << rowText.str() << "\n";
 			continue;
 		}
 		switch (block.type) {

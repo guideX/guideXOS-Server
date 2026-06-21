@@ -1354,6 +1354,7 @@ namespace gxos {
             "Notepad",
             "Calculator",
             "TaskManager",
+            "DiskManager",
             "Trash",
             "DisplayOptions",
             "gxos.builtin.notepad",
@@ -3092,9 +3093,9 @@ namespace gxos {
             }
             const bool forcedOffSupported = true;
             const bool forcedOffSafe =
-                gateMatrix.total == 12 &&
-                gateMatrix.typedDispatch == (runtimeGateEnabled ? 9 : 0) &&
-                gateMatrix.legacyOrCompatibilityDispatch == (runtimeGateEnabled ? 0 : 9) &&
+                gateMatrix.total == 13 &&
+                gateMatrix.typedDispatch == (runtimeGateEnabled ? 10 : 0) &&
+                gateMatrix.legacyOrCompatibilityDispatch == (runtimeGateEnabled ? 0 : 10) &&
                 gateMatrix.blockedUnknownFallback == 1 &&
                 gateMatrix.specialCaseFallback == 2;
             const bool gateRestored = apps::TypedDispatchRuntimeEnabled() == gateRestoreEnabled;
