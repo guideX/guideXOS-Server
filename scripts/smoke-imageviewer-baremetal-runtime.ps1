@@ -11,7 +11,8 @@ New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $serialLog = Join-Path $LogDir "imageviewer-baremetal-runtime-$stamp.serial.log"
 $evidencePath = Join-Path $LogDir "imageviewer-baremetal-runtime.evidence.txt"
-$assetPath = "/system/wall/blueflower.png"
+$assetPath = "/system/wall/ivsmoke.png"
+$fallbackPath = "/system/wall/imageviewer-runtime-smoke-placeholder.png"
 
 function Invoke-KernelBuildForSmoke {
     param([string]$ExtraCFlags)
@@ -268,13 +269,14 @@ $startMarker = Test-SerialLogContains -Path $serialLog -Pattern "[IMAGEVIEWER-RU
 $resultPass = Test-SerialLogContains -Path $serialLog -Pattern "[IMAGEVIEWER-RUNTIME-SMOKE] result=PASS"
 $resultFail = Test-SerialLogContains -Path $serialLog -Pattern "[IMAGEVIEWER-RUNTIME-SMOKE] result=FAIL"
 $launchPass = $launchLine -and $launchLine.Result -eq "PASS"
-$paintPass = $null -ne $paintLine -and ($paintLine.PaintMode -eq "png" -or $paintLine.PaintMode -eq "placeholder")
+$selectedModePass = $assetLine -and $assetLine.Exists -eq "PASS" -and $assetLine.SelectedMode -eq "png" -and $assetLine.LaunchPath -eq $assetLine.AssetPath
+$paintPass = $null -ne $paintLine -and $paintLine.PaintMode -eq "png" -and $paintLine.PaintStatus -eq "Loaded" -and $paintLine.PaintPath -eq $assetPath
 $selectedMode = if ($assetLine) { $assetLine.SelectedMode } else { "unknown" }
 $expectedLaunchPath = if ($assetLine) { $assetLine.LaunchPath } else { "" }
 $paintMode = if ($paintLine) { $paintLine.PaintMode } else { "missing" }
 $paintPath = if ($paintLine) { $paintLine.PaintPath } else { "" }
 $paintStatus = if ($paintLine) { $paintLine.PaintStatus } else { "" }
-$overallPass = $startMarker -and $launchPass -and $paintPass -and $resultPass -and (-not $resultFail)
+$overallPass = $startMarker -and $launchPass -and $selectedModePass -and $paintPass -and $resultPass -and (-not $resultFail)
 
 Write-EvidenceFile `
     -Result $(if ($overallPass) { "PASS" } else { "FAIL" }) `
@@ -295,9 +297,22 @@ if ($overallPass) {
 
 Write-Host "Image Viewer bare-metal runtime smoke FAIL. Serial log: $serialLog" -ForegroundColor Red
 Write-Host "Image Viewer bare-metal runtime evidence: $evidencePath" -ForegroundColor Red
+if ($assetLine) {
+    Write-Host "Expected PNG fixture: $assetPath; fallback placeholder: $fallbackPath"
+    Write-Host "Observed selectedMode=$($assetLine.SelectedMode) launchPath=$($assetLine.LaunchPath) exists=$($assetLine.Exists)"
+}
+if ($paintLine) {
+    Write-Host "Observed paintMode=$($paintLine.PaintMode) paintPath=$($paintLine.PaintPath) paintStatus=$($paintLine.PaintStatus)"
+}
 if ($resultFail) {
     Write-Host "The runtime smoke reported a failure result in the kernel log." -ForegroundColor Red
 } else {
-    Write-Host "The runtime smoke did not reach the expected launch/paint/result markers before timeout or shutdown." -ForegroundColor Red
+    if ($assetLine -and $assetLine.SelectedMode -ne "png") {
+        Write-Host "The runtime smoke fell back to the placeholder path instead of the guaranteed PNG fixture." -ForegroundColor Red
+    } elseif ($paintLine -and $paintLine.PaintStatus -ne "Loaded") {
+        Write-Host "The runtime smoke did not report a Loaded PNG paint result." -ForegroundColor Red
+    } else {
+        Write-Host "The runtime smoke did not reach the expected launch/paint/result markers before timeout or shutdown." -ForegroundColor Red
+    }
 }
 exit 1

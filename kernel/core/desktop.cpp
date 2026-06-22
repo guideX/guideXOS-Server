@@ -3111,7 +3111,7 @@ void run_live_directory_runtime_smoke()
 #if defined(GXOS_IMAGEVIEWER_BARE_METAL_RUNTIME_SMOKE_ACTIVE) && defined(GXOS_BARE_METAL)
 void run_imageviewer_runtime_smoke()
 {
-    const char* pngPath = "/system/wall/blueflower.png";
+    const char* pngPath = "/system/wall/ivsmoke.png";
     const char* fallbackPath = "/system/wall/imageviewer-runtime-smoke-placeholder.png";
     const char* launchPath = fallbackPath;
     const char* selectedMode = "placeholder";

@@ -5332,7 +5332,8 @@ void ImageViewerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
         serial::puts(" path=");
         serial::puts(m_imagePath[0] ? m_imagePath : "(none)");
         serial::puts(" status=");
-        serial::puts(gxos::gui::ImageLoadStatusName(m_image.status));
+        // Report a human-readable Loaded/NotFound signal in the smoke log.
+        serial::puts(m_image.status == gxos::gui::ImageLoadStatus::Ok ? "Loaded" : gxos::gui::ImageLoadStatusName(m_image.status));
         serial::puts("\n");
     }
 #endif

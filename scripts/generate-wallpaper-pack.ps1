@@ -1056,6 +1056,16 @@ foreach ($name in $WallpaperNames) {
     }
 }
 
+$imageViewerSmokeFixtureSource = Join-Path $RootDir "assets\Images\BlueVelvet\16\image.png"
+if (-not (Test-Path -LiteralPath $imageViewerSmokeFixtureSource -PathType Leaf)) {
+    throw "Missing expected Image Viewer smoke PNG fixture source: $imageViewerSmokeFixtureSource"
+}
+# Keep the runtime smoke on a short 8.3-style PNG path so the bare-metal VFS sees it consistently.
+$imageViewerSmokeFixtureTarget = Join-Path $wallpaperDir "ivsmoke.png"
+Copy-Item -LiteralPath $imageViewerSmokeFixtureSource -Destination $imageViewerSmokeFixtureTarget -Force
+$staged += Get-Item $imageViewerSmokeFixtureTarget
+Write-Host "      staged Image Viewer smoke PNG fixture at /system/wall/ivsmoke.png" -ForegroundColor Yellow
+
 $totalBytes = ($staged | Measure-Object -Property Length -Sum).Sum
 $minimumMB = [Math]::Ceiling(($totalBytes + (4MB)) / 1MB)
 if ($ImageSizeMB -lt $minimumMB) {
