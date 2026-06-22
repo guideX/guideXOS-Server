@@ -172,6 +172,11 @@ void run_launch_shadow_text_fileopen_smoke();
 void run_live_directory_runtime_smoke();
 #endif
 
+#if defined(GXOS_IMAGEVIEWER_BARE_METAL_RUNTIME_SMOKE_ACTIVE) && defined(GXOS_BARE_METAL)
+// Diagnostic-only smoke hook for bare-metal Image Viewer runtime paint verification.
+void run_imageviewer_runtime_smoke();
+#endif
+
 } // namespace desktop
 } // namespace kernel
 

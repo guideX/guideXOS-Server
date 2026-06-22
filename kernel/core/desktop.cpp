@@ -3108,6 +3108,51 @@ void run_live_directory_runtime_smoke()
 }
 #endif
 
+#if defined(GXOS_IMAGEVIEWER_BARE_METAL_RUNTIME_SMOKE_ACTIVE) && defined(GXOS_BARE_METAL)
+void run_imageviewer_runtime_smoke()
+{
+    const char* pngPath = "/system/wall/blueflower.png";
+    const char* fallbackPath = "/system/wall/imageviewer-runtime-smoke-placeholder.png";
+    const char* launchPath = fallbackPath;
+    const char* selectedMode = "placeholder";
+    vfs::FileInfo pngInfo{};
+    bool pngAvailable = vfs::stat(pngPath, &pngInfo) == vfs::VFS_OK && pngInfo.type == vfs::FILE_TYPE_REGULAR;
+    if (pngAvailable) {
+        launchPath = pngPath;
+        selectedMode = "png";
+    }
+
+    serial::puts("[IMAGEVIEWER-RUNTIME-SMOKE] start\n");
+    serial::puts("[IMAGEVIEWER-RUNTIME-SMOKE] asset path=");
+    serial::puts(pngPath);
+    serial::puts(" exists=");
+    serial::puts(pngAvailable ? "PASS" : "FAIL");
+    serial::puts(" selectedMode=");
+    serial::puts(selectedMode);
+    serial::puts(" launchPath=");
+    serial::puts(launchPath);
+    serial::puts("\n");
+
+    const bool launchOk = app::AppManager::launchAppWithParam("ImageViewer", launchPath);
+    serial::puts("[IMAGEVIEWER-RUNTIME-SMOKE] launch app=ImageViewer path=");
+    serial::puts(launchPath);
+    serial::puts(" result=");
+    serial::puts(launchOk ? "PASS" : "FAIL");
+    serial::puts("\n");
+
+    if (launchOk) {
+        draw();
+        serial::puts("[IMAGEVIEWER-RUNTIME-SMOKE] draw requested result=PASS\n");
+    } else {
+        serial::puts("[IMAGEVIEWER-RUNTIME-SMOKE] draw requested result=FAIL\n");
+    }
+
+    serial::puts("[IMAGEVIEWER-RUNTIME-SMOKE] result=");
+    serial::puts(launchOk ? "PASS" : "FAIL");
+    serial::puts("\n");
+}
+#endif
+
 static void SelectDesktopIcon(int displayIndex, bool additive)
 {
     if (displayIndex < 0 || displayIndex >= s_visibleIconCount) return;

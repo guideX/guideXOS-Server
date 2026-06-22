@@ -498,6 +498,11 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::desktop::run_live_directory_runtime_smoke();
         kernel::serial::puts("[LIVE-DIRECTORY-RUNTIME-SMOKE] done\n");
 #endif
+#ifdef GXOS_IMAGEVIEWER_BARE_METAL_RUNTIME_SMOKE_ACTIVE
+        kernel::serial::puts("[IMAGEVIEWER-RUNTIME-SMOKE] issuing command=desktop.smoke.imageviewer-runtime\n");
+        kernel::desktop::run_imageviewer_runtime_smoke();
+        kernel::serial::puts("[IMAGEVIEWER-RUNTIME-SMOKE] done\n");
+#endif
         
         kernel::serial::puts("[KERNEL] Entering main loop (waiting for input)...\n");
         

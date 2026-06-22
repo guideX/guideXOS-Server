@@ -5318,6 +5318,24 @@ void ImageViewerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
 
     framebuffer::fill_rect(x, y + h - statusH, w, statusH, rgb(42, 46, 58));
     appDrawText(x + 12, y + h - 15, m_status[0] ? m_status : "Bare-metal PNG preview ready", rgb(222, 226, 236));
+
+#if defined(GXOS_IMAGEVIEWER_BARE_METAL_RUNTIME_SMOKE_ACTIVE) && defined(GXOS_BARE_METAL)
+    static bool s_runtimeSmokePaintLogged = false;
+    if (!s_runtimeSmokePaintLogged) {
+        s_runtimeSmokePaintLogged = true;
+        serial::puts("[IMAGEVIEWER-RUNTIME-SMOKE] paint=");
+        if (m_hasImage && m_image.status == gxos::gui::ImageLoadStatus::Ok && m_image.pixels && m_image.width > 0 && m_image.height > 0) {
+            serial::puts("png");
+        } else {
+            serial::puts("placeholder");
+        }
+        serial::puts(" path=");
+        serial::puts(m_imagePath[0] ? m_imagePath : "(none)");
+        serial::puts(" status=");
+        serial::puts(gxos::gui::ImageLoadStatusName(m_image.status));
+        serial::puts("\n");
+    }
+#endif
 }
 
 // ============================================================
