@@ -1247,7 +1247,8 @@ namespace gxos {
                 std::lock_guard<std::mutex> lk(g_lock);
                 auto it = g_windows.find(windowId);
                 if (it != g_windows.end()) {
-                    constexpr int titleBarH = 28;
+                    const DesktopTheme& theme = GetCurrentDesktopTheme();
+                    const int titleBarH = theme.titleBarHeight;
                     appX = x - it->second.x;
                     appY = y - it->second.y - titleBarH;
                 }
@@ -2383,7 +2384,7 @@ namespace gxos {
                 drawSystemFontDemo(dc, cr);
 #endif
                 // Draw application windows in Z-order (bottom to top)
-                const int titleBarH = UISettings::DefaultBarHeight; 
+                const int titleBarH = theme.titleBarHeight;
                 HFONT font = (HFONT)GetStockObject(ANSI_VAR_FONT); 
                 SelectObject(dc, font); 
                 SetBkMode(dc, TRANSPARENT);
@@ -2403,7 +2404,7 @@ namespace gxos {
                     // Draw window content background
                     WindowRenderer::DrawRoundedRect(dc, winfo.x, winfo.y, winfo.w, winfo.h,
                         colorFromTheme(theme.windowBackground),
-                        UISettings::EnableRoundedCorners ? theme.windowCornerRadius : 0);
+                        theme.roundedWindows ? theme.windowCornerRadius : 0);
                     
                     // Draw title bar
                     WindowRenderer::DrawTitleBar(dc, winfo.x, winfo.y, winfo.w, titleBarH, isFocused);
@@ -2413,17 +2414,17 @@ namespace gxos {
                     
                     // Draw window title text
                     if (UISettings::EnableWindowTitles) {
-                    SystemFont::DrawText(dc, winfo.x + 10, winfo.y + 4, winfo.title.c_str(), (int)winfo.title.size(), colorFromTheme(theme.titleBarText), FontRole::Title);
+                    SystemFont::DrawText(dc, winfo.x + theme.titleTextInset, centeredUiTextY(winfo.y, titleBarH, FontRole::Title), winfo.title.c_str(), (int)winfo.title.size(), colorFromTheme(theme.titleBarText), FontRole::Title);
                     }
 
                     // Titlebar buttons (matching Legacy: minimize, maximize, tombstone, close from left to right)
                     // Button layout right-to-left: close, tombstone, maximize, minimize
-                    const int btnSize = titleBarH - UISettings::ButtonSizeOffset;
-                    const int btnGap = UISettings::ButtonSpacing;
-                    int btnY = winfo.y + (titleBarH - btnSize) / 2;
+                    const int btnSize = std::max(12, titleBarH - theme.controlPadding * 2);
+                    const int btnGap = theme.titleButtonGap;
+                    int btnY = winfo.y + theme.controlPadding;
                     
                     // Position buttons from right to left
-                    int closeLeft = winfo.x + winfo.w - btnGap - btnSize;
+                    int closeLeft = winfo.x + winfo.w - theme.controlPadding - btnSize;
                     int tombLeft = closeLeft - btnGap - btnSize;
                     int maxLeft = tombLeft - btnGap - btnSize;
                     int minLeft = maxLeft - btnGap - btnSize;
@@ -2445,19 +2446,21 @@ namespace gxos {
                     }
 
                     // Draw window content (rects, images, widgets, text)
+                    const int contentX = winfo.x + theme.windowPadding;
+                    const int contentY = winfo.y + titleBarH + theme.windowPadding;
                     for (const auto& ri : winfo.rects) { 
-                        RECT rr{ winfo.x + ri.x, winfo.y + titleBarH + ri.y, winfo.x + ri.x + ri.w, winfo.y + titleBarH + ri.h }; 
+                        RECT rr{ contentX + ri.x, contentY + ri.y, contentX + ri.x + ri.w, contentY + ri.h };
                         HBRUSH rb = CreateSolidBrush(RGB(ri.r, ri.g, ri.b)); 
                         FillRect(dc, &rr, rb); 
                         DeleteObject(rb); 
                     }
                     for (const auto& img : winfo.images) {
                         const ImageBitmap& shown = displayedImage(img);
-                        if (img.w > 0 && img.h > 0) ImageAdapter::DrawToHdc(dc, shown, winfo.x + img.x, winfo.y + titleBarH + img.y, img.w, img.h);
-                        else ImageAdapter::DrawToHdc(dc, shown, winfo.x + img.x, winfo.y + titleBarH + img.y);
+                        if (img.w > 0 && img.h > 0) ImageAdapter::DrawToHdc(dc, shown, contentX + img.x, contentY + img.y, img.w, img.h);
+                        else ImageAdapter::DrawToHdc(dc, shown, contentX + img.x, contentY + img.y);
                     }
                     for (const auto& wd : winfo.widgets) { 
-                        RECT wr{ winfo.x + wd.x, winfo.y + titleBarH + wd.y, winfo.x + wd.x + wd.w, winfo.y + titleBarH + wd.y + wd.h }; 
+                        RECT wr{ contentX + wd.x, contentY + wd.y, contentX + wd.x + wd.w, contentY + wd.y + wd.h };
                         HBRUSH wb = CreateSolidBrush(wd.pressed ? RGB(40, 80, 140) : (wd.hover ? RGB(70, 90, 120) : RGB(90, 90, 100))); 
                         FillRect(dc, &wr, wb); 
                         DeleteObject(wb); 
@@ -2467,12 +2470,12 @@ namespace gxos {
                         drawUiText(dc, textX, centeredUiTextY(wr.top, wd.h), wd.text, RGB(240, 240, 240), FontRole::Default);
                     }
                     for (const auto& tx : winfo.positionedTexts) {
-                        SystemFont::DrawText(dc, winfo.x + tx.x, winfo.y + titleBarH + tx.y, tx.text.c_str(), (int)tx.text.size(),
+                        SystemFont::DrawText(dc, contentX + tx.x, contentY + tx.y, tx.text.c_str(), (int)tx.text.size(),
                             tx.hasColor ? RGB(tx.r, tx.g, tx.b) : RGB(220, 220, 220), FontRole::Default);
                     }
-                    int ty = winfo.y + titleBarH + 8; 
+                    int ty = contentY;
                     for (const auto& tx : winfo.texts) { 
-                        drawUiText(dc, winfo.x + 8, ty, tx, RGB(220, 220, 220), FontRole::Default);
+                        drawUiText(dc, contentX, ty, tx, RGB(220, 220, 220), FontRole::Default);
                         ty += uiTextHeight(FontRole::Default);
                     }
                     
@@ -2512,7 +2515,7 @@ namespace gxos {
                 }
                 SelectObject(dc, oldP);
                 DeleteObject(tbEdge);
-                RECT startBtn{ tb.left + 8,tb.top + 6,tb.left + 40,tb.top + 34 };
+                RECT startBtn{ tb.left + theme.taskbarPadding, tb.top + 6, tb.left + theme.taskbarPadding + 32, tb.top + 34 };
                 HBRUSH sbg = CreateSolidBrush(g_startMenuVisible ? colorFromTheme(theme.accent) : colorFromTheme(theme.mutedAccent));
                 FillRect(dc, &startBtn, sbg);
                 DeleteObject(sbg);
@@ -2522,10 +2525,10 @@ namespace gxos {
                 if (!taskbarVertical) drawTaskbarSearchBox(dc, tb.left + 48, tb.top + 8, 160, (tb.bottom - tb.top) - 16);
                 // Taskbar buttons (offset to right of search box)
                 POINT cursor; GetCursorPos(&cursor); ScreenToClient(h, &cursor); int btnX = taskbarVertical ? tb.left + 4 : tb.left + 216; int btnY = taskbarVertical ? tb.top + 48 : tb.top + 6; for (uint64_t id : g_z) {
-                    auto it = g_windows.find(id); if (it == g_windows.end( )) continue; std::string label = it->second.title; int bw = taskbarVertical ? (tb.right - tb.left - 8) : measureUiText(label.c_str(), (int)label.size(), FontRole::Small) + 30; if (!taskbarVertical && bw > 180) bw = 180; int bh = taskbarVertical ? 28 : (tb.bottom - tb.top - 12); RECT br{ btnX, btnY, btnX + bw, btnY + bh }; bool hover = (cursor.x >= br.left && cursor.x <= br.right && cursor.y >= br.top && cursor.y <= br.bottom); HBRUSH bbg = CreateSolidBrush(hover ? colorFromTheme(theme.accent) : (id == g_focus ? colorFromTheme(theme.mutedAccent) : (it->second.minimized ? RGB(40, 40, 50) : (it->second.tombstoned ? RGB(85, 65, 35) : RGB(55, 58, 70))))); FillRect(dc, &br, bbg); DeleteObject(bbg);
+                    auto it = g_windows.find(id); if (it == g_windows.end( )) continue; std::string label = it->second.title; int bw = taskbarVertical ? (tb.right - tb.left - 8) : measureUiText(label.c_str(), (int)label.size(), FontRole::Small) + theme.taskbarItemPadding * 2 + 12; if (!taskbarVertical && bw > 180) bw = 180; int bh = taskbarVertical ? 28 : (tb.bottom - tb.top - 12); RECT br{ btnX, btnY, btnX + bw, btnY + bh }; bool hover = (cursor.x >= br.left && cursor.x <= br.right && cursor.y >= br.top && cursor.y <= br.bottom); HBRUSH bbg = CreateSolidBrush(hover ? colorFromTheme(theme.accent) : (id == g_focus ? colorFromTheme(theme.mutedAccent) : (it->second.minimized ? RGB(40, 40, 50) : (it->second.tombstoned ? RGB(85, 65, 35) : RGB(55, 58, 70))))); FillRect(dc, &br, bbg); DeleteObject(bbg);
                     // Active indicator line at bottom for focused window
                     if (id == g_focus) { HBRUSH ind = CreateSolidBrush(colorFromTheme(theme.accent)); RECT indR{ br.left + 2,br.bottom - 3,br.right - 2,br.bottom - 1 }; FillRect(dc, &indR, ind); DeleteObject(ind); }
-                    RECT iconRect{ br.left + 4, br.top + 4, br.left + 20, br.top + 20 }; drawBitmapCentered(dc, it->second.taskbarIcon, iconRect); if (!taskbarVertical) drawUiText(dc, br.left + 24, br.top + 8, label, RGB(230, 230, 240), FontRole::Small); if (taskbarVertical) btnY += bh + 4; else btnX += bw + 4;
+                    RECT iconRect{ br.left + 4, br.top + 4, br.left + 20, br.top + 20 }; drawBitmapCentered(dc, it->second.taskbarIcon, iconRect); if (!taskbarVertical) drawUiText(dc, br.left + theme.taskbarItemPadding + 12, br.top + 8, label, RGB(230, 230, 240), FontRole::Small); if (taskbarVertical) btnY += bh + 4; else btnX += bw + theme.taskbarItemPadding / 2;
                 }
                 // System tray area (before clock)
                 if (!taskbarVertical) drawSystemTray(dc, cr, taskbarH);
@@ -2546,7 +2549,7 @@ namespace gxos {
                     int dateW = measureUiText(dateBuf, (int)strlen(dateBuf), FontRole::Small);
                     int lineH = uiTextHeight(FontRole::Small);
                     int clockW = (timeW > dateW ? timeW : dateW) + 16;
-                    int clockX = tb.right - clockW - 12;
+                    int clockX = tb.right - clockW - theme.taskbarPadding;
                     int timeY = tb.top + 6;
                     int dateY = timeY + lineH - 1;
                     drawUiText(dc, clockX + (clockW - timeW) / 2, timeY, timeBuf, (int)strlen(timeBuf), RGB(200, 200, 210), FontRole::Small);
@@ -3342,7 +3345,7 @@ namespace gxos {
         void Compositor::emitWidgetEvt(uint64_t winId, int wid, const std::string& evt, const std::string& value) { uint64_t ownerPid = 0; { std::lock_guard<std::mutex> lk(g_lock); auto it = g_windows.find(winId); if (it != g_windows.end( )) ownerPid = it->second.ownerPid; } publishOut(MsgType::MT_WidgetEvt, std::to_string(winId) + "|" + std::to_string(wid) + "|" + evt + "|" + value, ownerPid); }
 
         void Compositor::handleMouse(int mx, int my, bool down, bool up) {
-            std::lock_guard<std::mutex> lk(g_lock); const int titleBarH = 24; const int gripSize = 12;
+            std::lock_guard<std::mutex> lk(g_lock); const DesktopTheme& theme = GetCurrentDesktopTheme(); const int titleBarH = theme.titleBarHeight; const int gripSize = 12;
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)
             RECT cr{ 0,0,1024,768 };
             if (g_hwnd) GetClientRect(g_hwnd, &cr);
@@ -3369,8 +3372,9 @@ namespace gxos {
             // Titlebar button handling (hover/press/click) - matching Legacy layout
             // Button layout right-to-left: close, tombstone, maximize, minimize
             if (topW) { // compute button rects for this window
-                const int btnSize = 16; const int btnGap = 6;
-                int closeLeft = topW->x + topW->w - btnGap - btnSize;
+                const int btnSize = std::max(12, titleBarH - theme.controlPadding * 2);
+                const int btnGap = theme.titleButtonGap;
+                int closeLeft = topW->x + topW->w - theme.controlPadding - btnSize;
                 int tombLeft = closeLeft - btnGap - btnSize;
                 int maxLeft = tombLeft - btnGap - btnSize;
                 int minLeft = maxLeft - btnGap - btnSize;
@@ -3959,6 +3963,17 @@ namespace gxos {
             }
         }
 
+        static void fbDrawRectThick(uint32_t* pixels, int pitch, int bufW, int bufH,
+                                    int x, int y, int w, int h, int thickness, uint32_t color) {
+            if (thickness <= 1) {
+                fbDrawRect(pixels, pitch, bufW, bufH, x, y, w, h, color);
+                return;
+            }
+            for (int i = 0; i < thickness; ++i) {
+                fbDrawRect(pixels, pitch, bufW, bufH, x + i, y + i, w - (i * 2), h - (i * 2), color);
+            }
+        }
+
         static int fbMeasureText(const char* text, int len = -1, FontRole role = FontRole::Default) {
             return SystemFont::MeasureWidth(role, text, len);
         }
@@ -4065,7 +4080,7 @@ namespace gxos {
             }
             
             const int taskbarH = 40;
-            const int titleBarH = 28;
+            const int titleBarH = theme.titleBarHeight;
             
             drawBackgroundGradientToPixels(pixels, fbW, fbH - taskbarH, pitch, g_gradientTopColor, g_gradientBottomColor);
             if (g_wallpaperImage && g_wallpaperImage->isValid()) {
@@ -4144,33 +4159,34 @@ namespace gxos {
                     
                     // Title text
                     fbDrawText(pixels, pitch, fbW, fbH,
-                        w.x + 10, w.y + (titleBarH - SystemFont::MeasureHeight(FontRole::Title)) / 2, w.title, 0x00F0F0F0, FontRole::Title);
+                        w.x + theme.titleTextInset, w.y + (titleBarH - SystemFont::MeasureHeight(FontRole::Title)) / 2, w.title, 0x00F0F0F0, FontRole::Title);
                     
                     // Close button (X)
-                    int btnSize = titleBarH - 8;
-                    int closeX = w.x + w.w - btnSize - 4;
-                    int closeY = w.y + 4;
+                    int btnSize = std::max(12, titleBarH - theme.controlPadding * 2);
+                    int closeX = w.x + w.w - theme.controlPadding - btnSize;
+                    int closeY = w.y + theme.controlPadding;
                     fbFillRect(pixels, pitch, fbW, fbH, closeX, closeY, btnSize, btnSize, 0x00C83232);
                     BitmapFont::DrawStringToBuffer(pixels, pitch, fbW, fbH,
                         closeX + (btnSize - 5) / 2, closeY + (btnSize - 7) / 2, "X", 1, 0x00FFFFFF);
                     
                     // Window border
                     uint32_t borderColor = isFocused ? 0x006496C8 : 0x00606068;
-                    fbDrawRect(pixels, pitch, fbW, fbH, w.x, w.y, w.w, w.h, borderColor);
+                    fbDrawRectThick(pixels, pitch, fbW, fbH, w.x, w.y, w.w, w.h, theme.windowBorderThickness, borderColor);
                     
                     // Draw window content (images, widgets, text)
-                    int contentY = w.y + titleBarH;
+                    int contentX = w.x + theme.windowPadding;
+                    int contentY = w.y + titleBarH + theme.windowPadding;
                     for (const auto& ri : w.rects) {
-                        fbFillRect(pixels, pitch, fbW, fbH, w.x + ri.x, contentY + ri.y, ri.w, ri.h,
+                        fbFillRect(pixels, pitch, fbW, fbH, contentX + ri.x, contentY + ri.y, ri.w, ri.h,
                                    (static_cast<uint32_t>(ri.r) << 16) | (static_cast<uint32_t>(ri.g) << 8) | ri.b);
                     }
                     for (const auto& img : w.images) {
                         const ImageBitmap& shown = displayedImage(img);
-                        if (img.w > 0 && img.h > 0) ImageAdapter::DrawToPixels(pixels, fbW, fbH, pitch, shown, w.x + img.x, contentY + img.y, img.w, img.h);
-                        else ImageAdapter::DrawToPixels(pixels, fbW, fbH, pitch, shown, w.x + img.x, contentY + img.y);
+                        if (img.w > 0 && img.h > 0) ImageAdapter::DrawToPixels(pixels, fbW, fbH, pitch, shown, contentX + img.x, contentY + img.y, img.w, img.h);
+                        else ImageAdapter::DrawToPixels(pixels, fbW, fbH, pitch, shown, contentX + img.x, contentY + img.y);
                     }
                     for (const auto& wd : w.widgets) {
-                        int wx = w.x + wd.x;
+                        int wx = contentX + wd.x;
                         int wy = contentY + wd.y;
                         uint32_t wColor = wd.pressed ? 0x00285090 : (wd.hover ? 0x00465A78 : 0x005A5A64);
                         fbFillRect(pixels, pitch, fbW, fbH, wx, wy, wd.w, wd.h, wColor);
@@ -4182,16 +4198,16 @@ namespace gxos {
                     }
                     for (const auto& tx : w.positionedTexts) {
                         fbDrawText(pixels, pitch, fbW, fbH,
-                            w.x + tx.x, contentY + tx.y, tx.text,
+                            contentX + tx.x, contentY + tx.y, tx.text,
                             tx.hasColor ? ((static_cast<uint32_t>(tx.r) << 16) | (static_cast<uint32_t>(tx.g) << 8) | tx.b) : 0x00DCDCDC,
                             FontRole::Default);
                     }
                     
                     // Draw text lines
-                    int ty = contentY + 8;
+                    int ty = contentY;
                     for (const auto& tx : w.texts) {
                         fbDrawText(pixels, pitch, fbW, fbH,
-                            w.x + 8, ty, tx, 0x00DCDCDC, FontRole::Default);
+                            contentX, ty, tx, 0x00DCDCDC, FontRole::Default);
                         ty += SystemFont::MeasureHeight(FontRole::Default);
                     }
                     
@@ -4222,9 +4238,9 @@ namespace gxos {
             }
             
             // Start button
-            fbFillRect(pixels, pitch, fbW, fbH, 8, fbH - taskbarH + 6, 32, taskbarH - 12, 0x00374B64);
-            fbDrawRect(pixels, pitch, fbW, fbH, 8, fbH - taskbarH + 6, 32, taskbarH - 12, 0x00FFFFFF);
-            fbDrawText(pixels, pitch, fbW, fbH, 12, fbH - taskbarH + 12, "S", 1, 0x00FFFFFF, FontRole::SmallBold);
+            fbFillRect(pixels, pitch, fbW, fbH, theme.taskbarPadding, fbH - taskbarH + 6, 32, taskbarH - 12, 0x00374B64);
+            fbDrawRect(pixels, pitch, fbW, fbH, theme.taskbarPadding, fbH - taskbarH + 6, 32, taskbarH - 12, 0x00FFFFFF);
+            fbDrawText(pixels, pitch, fbW, fbH, theme.taskbarPadding + 4, fbH - taskbarH + 12, "S", 1, 0x00FFFFFF, FontRole::SmallBold);
 
             if (g_startMenuVisible) {
                 const int smW = 440;
@@ -4312,7 +4328,7 @@ namespace gxos {
                     
                     int labelLen = (int)w.title.size();
                     if (labelLen > 15) labelLen = 15;
-                    int bw = fbMeasureText(w.title.c_str(), labelLen, FontRole::Small) + 20;
+                    int bw = fbMeasureText(w.title.c_str(), labelLen, FontRole::Small) + theme.taskbarItemPadding * 2 + 12;
                     if (bw > 150) bw = 150;
                     
                     uint32_t btnColor = (wid == g_focus) ? 0x00466496 : 
@@ -4326,9 +4342,9 @@ namespace gxos {
                     }
                     
                     fbDrawText(pixels, pitch, fbW, fbH,
-                        btnX + 8, fbH - taskbarH + 12, w.title.c_str(), labelLen, 0x00E6E6F0, FontRole::Small);
+                        btnX + theme.taskbarItemPadding + 12, fbH - taskbarH + 12, w.title.c_str(), labelLen, 0x00E6E6F0, FontRole::Small);
                     
-                    btnX += bw + 4;
+                    btnX += bw + theme.taskbarItemPadding / 2;
                 }
             }
             
@@ -4339,7 +4355,7 @@ namespace gxos {
             if (tmp) ltBuf = *tmp;
             char timeBuf[16];
             std::snprintf(timeBuf, sizeof(timeBuf), "%02d:%02d", ltBuf.tm_hour, ltBuf.tm_min);
-            int clockX = fbW - 60;
+            int clockX = fbW - (theme.taskbarPadding + 52);
             fbDrawText(pixels, pitch, fbW, fbH,
                 clockX, fbH - taskbarH + 8, timeBuf, -1, 0x00C8C8D2, FontRole::Small);
             char dateBuf[16];

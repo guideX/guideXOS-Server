@@ -424,8 +424,8 @@ void DisplayOptions::drawThemeTab()
         drawText(s_windowId, x + 42, y + 28, description);
     };
 
-    drawThemeOption(kThemeOptionX, kThemeOptionY, DesktopThemeId::Classic, GetDesktopTheme(DesktopThemeId::Classic), "Keeps the current guideXOS look basically unchanged.");
-    drawThemeOption(kThemeOptionX, kThemeOptionY + kThemeOptionH + kThemeOptionGap, DesktopThemeId::SciFi, GetDesktopTheme(DesktopThemeId::SciFi), "Opt-in preview of the darker sci-fi direction.");
+    drawThemeOption(kThemeOptionX, kThemeOptionY, DesktopThemeId::Classic, GetDesktopTheme(DesktopThemeId::Classic), "Preserves the current guideXOS look.");
+    drawThemeOption(kThemeOptionX, kThemeOptionY + kThemeOptionH + kThemeOptionGap, DesktopThemeId::SciFi, GetDesktopTheme(DesktopThemeId::SciFi), "Dark sci-fi surfaces with blue/purple accents.");
 }
 
 void DisplayOptions::drawBackgroundTile(int index, int x, int y, bool hover, bool selected, bool applied)

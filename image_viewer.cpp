@@ -98,6 +98,23 @@ static float clampFloat(float value, float minimum, float maximum) {
     return std::max(minimum, std::min(value, maximum));
 }
 
+static bool clampImageDimensions(int& width, int& height) {
+    if (width <= 0 || height <= 0) {
+        return false;
+    }
+
+    const gui::ImageSafetyLimits limits = gui::DefaultImageSafetyLimits();
+    if (width > static_cast<int>(limits.maxWidth)) {
+        width = static_cast<int>(limits.maxWidth);
+    }
+    if (height > static_cast<int>(limits.maxHeight)) {
+        height = static_cast<int>(limits.maxHeight);
+    }
+
+    const uint64_t pixelCount = static_cast<uint64_t>(width) * static_cast<uint64_t>(height);
+    return pixelCount > 0 && pixelCount <= static_cast<uint64_t>(limits.maxPixels);
+}
+
 static const char* zoomModeName(ImageViewer::ZoomMode mode) {
     switch (mode) {
     case ImageViewer::ZoomMode::FitToWindow: return "Fit";
@@ -280,6 +297,24 @@ static gui::ImagePtr flipImageVertical(const gui::ImagePtr& image) {
         }
     }
     return flipped;
+}
+
+static bool clampCropRectToImage(const gui::ImagePtr& image, int& x, int& y, int& width, int& height) {
+    if (!image || !image->isValid() || image->Width <= 0 || image->Height <= 0) {
+        return false;
+    }
+    if (width <= 0 || height <= 0) {
+        return false;
+    }
+
+    x = clampInt(x, 0, image->Width - 1);
+    y = clampInt(y, 0, image->Height - 1);
+
+    const int maxWidth = image->Width - x;
+    const int maxHeight = image->Height - y;
+    width = std::min(width, maxWidth);
+    height = std::min(height, maxHeight);
+    return width > 0 && height > 0;
 }
 
 static bool encodePng(const gui::ImagePtr& image, std::vector<uint8_t>& bytes, std::string& error) {
@@ -1097,6 +1132,54 @@ int ImageViewer::main(int argc, char** argv) {
                             case 14: UndoEdit(); break;
                             case 15: RedoEdit(); break;
                             case 16: DiscardChanges(); break;
+                            case 17: {
+                                if (!s_image) {
+                                    setNoticeText("Load a PNG first");
+                                    updateDisplayImage();
+                                    break;
+                                }
+                                const int targetW = std::max(1, (s_image->Width + 1) / 2);
+                                const int targetH = std::max(1, (s_image->Height + 1) / 2);
+                                if (targetW == s_image->Width && targetH == s_image->Height) {
+                                    setNoticeText("Resize made no change");
+                                    updateDisplayImage();
+                                    break;
+                                }
+                                gui::ImagePtr resized = ImageViewer::ResizeCurrentImageNearestNeighbor(targetW, targetH);
+                                if (!resized) {
+                                    setNoticeText("Resize failed: unable to generate resized image");
+                                    updateDisplayImage();
+                                    break;
+                                }
+                                CaptureHistoryBeforeEdit();
+                                (void)commitEditedImage(resized, "Resized to " + std::to_string(targetW) + "x" + std::to_string(targetH));
+                                break;
+                            }
+                            case 18: {
+                                if (!s_image) {
+                                    setNoticeText("Load a PNG first");
+                                    updateDisplayImage();
+                                    break;
+                                }
+                                const int cropW = std::max(1, (s_image->Width + 1) / 2);
+                                const int cropH = std::max(1, (s_image->Height + 1) / 2);
+                                if (cropW == s_image->Width && cropH == s_image->Height) {
+                                    setNoticeText("Crop made no change");
+                                    updateDisplayImage();
+                                    break;
+                                }
+                                const int cropX = std::max(0, (s_image->Width - cropW) / 2);
+                                const int cropY = std::max(0, (s_image->Height - cropH) / 2);
+                                gui::ImagePtr cropped = ImageViewer::CropCurrentImageRect(cropX, cropY, cropW, cropH);
+                                if (!cropped) {
+                                    setNoticeText("Crop failed: unable to generate cropped image");
+                                    updateDisplayImage();
+                                    break;
+                                }
+                                CaptureHistoryBeforeEdit();
+                                (void)commitEditedImage(cropped, "Cropped to " + std::to_string(cropW) + "x" + std::to_string(cropH));
+                                break;
+                            }
                             default: break;
                             }
                         }
@@ -1370,6 +1453,62 @@ void ImageViewer::FlipCurrentImageVertical() {
     (void)commitEditedImage(flipped, "Flipped vertically");
 }
 
+gui::ImagePtr ImageViewer::ResizeCurrentImageNearestNeighbor(int newWidth, int newHeight) {
+    if (!s_image || !s_image->isValid() || s_image->Channels < 4) {
+        return nullptr;
+    }
+    if (!clampImageDimensions(newWidth, newHeight)) {
+        return nullptr;
+    }
+
+    gui::ImagePtr resized = std::make_shared<gui::Image>(newWidth, newHeight, s_image->Channels);
+    if (!resized || !resized->isValid() || !resized->Pixels) {
+        return nullptr;
+    }
+
+    const int channels = s_image->Channels;
+    for (int y = 0; y < newHeight; ++y) {
+        const int srcY = static_cast<int>((static_cast<uint64_t>(y) * static_cast<uint64_t>(s_image->Height)) / static_cast<uint64_t>(newHeight));
+        const uint8_t* srcRow = s_image->Pixels + static_cast<size_t>(srcY) * static_cast<size_t>(s_image->Width) * static_cast<size_t>(channels);
+        uint8_t* dstRow = resized->Pixels + static_cast<size_t>(y) * static_cast<size_t>(newWidth) * static_cast<size_t>(channels);
+        for (int x = 0; x < newWidth; ++x) {
+            const int srcX = static_cast<int>((static_cast<uint64_t>(x) * static_cast<uint64_t>(s_image->Width)) / static_cast<uint64_t>(newWidth));
+            const uint8_t* src = srcRow + static_cast<size_t>(srcX) * static_cast<size_t>(channels);
+            uint8_t* dst = dstRow + static_cast<size_t>(x) * static_cast<size_t>(channels);
+            for (int c = 0; c < channels; ++c) {
+                dst[c] = src[c];
+            }
+        }
+    }
+
+    return resized;
+}
+
+gui::ImagePtr ImageViewer::CropCurrentImageRect(int x, int y, int width, int height) {
+    if (!s_image || !s_image->isValid() || s_image->Channels < 4) {
+        return nullptr;
+    }
+    if (!clampCropRectToImage(s_image, x, y, width, height)) {
+        return nullptr;
+    }
+
+    gui::ImagePtr cropped = std::make_shared<gui::Image>(width, height, s_image->Channels);
+    if (!cropped || !cropped->isValid() || !cropped->Pixels) {
+        return nullptr;
+    }
+
+    const int channels = s_image->Channels;
+    const size_t srcStride = static_cast<size_t>(s_image->Width) * static_cast<size_t>(channels);
+    const size_t dstStride = static_cast<size_t>(width) * static_cast<size_t>(channels);
+    for (int row = 0; row < height; ++row) {
+        const uint8_t* src = s_image->Pixels + (static_cast<size_t>(y + row) * srcStride) + (static_cast<size_t>(x) * static_cast<size_t>(channels));
+        uint8_t* dst = cropped->Pixels + static_cast<size_t>(row) * dstStride;
+        std::copy_n(src, static_cast<size_t>(width) * static_cast<size_t>(channels), dst);
+    }
+
+    return cropped;
+}
+
 void ImageViewer::SaveCurrentImageAsCopy() {
     if (!s_image) {
         setNoticeText("Load a PNG first");
@@ -1538,6 +1677,8 @@ void ImageViewer::updateDisplay() {
     addBtn(row1Y, 7, "100%", row1X);
     addBtn(row1Y, 14, "Undo", row1X);
     addBtn(row1Y, 15, "Redo", row1X);
+    addBtn(row1Y, 17, "Resize", row1X);
+    addBtn(row1Y, 18, "Crop", row1X);
 
     int row2X = 12;
     addBtn(row2Y, 8, "Rotate Left", row2X);

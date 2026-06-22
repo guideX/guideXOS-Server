@@ -25,8 +25,13 @@ struct DesktopTheme
 
     int windowCornerRadius;
     int windowPadding;
-    int titleBarHeight;
     int controlPadding;
+    int titleBarHeight;
+    int windowBorderThickness;
+    int titleTextInset;
+    int titleButtonGap;
+    int taskbarPadding;
+    int taskbarItemPadding;
 
     bool roundedWindows;
     bool softShadowIntent;

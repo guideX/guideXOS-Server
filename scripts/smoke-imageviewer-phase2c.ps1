@@ -8,7 +8,7 @@ $LogDir = Join-Path $Root "logs"
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 
 $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
-$SmokeLog = Join-Path $LogDir "imageviewer-phase2a-smoke-$stamp.log"
+$SmokeLog = Join-Path $LogDir "imageviewer-phase2c-smoke-$stamp.log"
 
 function Assert-Contains {
     param(
@@ -119,6 +119,10 @@ try {
     $openControlMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.cpp") -Pattern 'addBtn\(row1Y, 1, "Open"'
     $previousMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.cpp") -Pattern 'addBtn\(row1Y, 2, "Previous"'
     $nextMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.cpp") -Pattern 'addBtn\(row1Y, 3, "Next"'
+    $undoMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.cpp") -Pattern 'addBtn\(row1Y, 14, "Undo"'
+    $redoMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.cpp") -Pattern 'addBtn\(row1Y, 15, "Redo"'
+    $resizeControlMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.cpp") -Pattern 'addBtn\(row1Y, 17, "Resize"'
+    $cropControlMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.cpp") -Pattern 'addBtn\(row1Y, 18, "Crop"'
     $zoomInMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.cpp") -Pattern 'addBtn\(row1Y, 4, "Zoom In"'
     $zoomOutMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.cpp") -Pattern 'addBtn\(row1Y, 5, "Zoom Out"'
     $fitMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.cpp") -Pattern 'addBtn\(row1Y, 6, "Fit to Window"'
@@ -129,6 +133,7 @@ try {
     $flipVerticalMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.cpp") -Pattern 'addBtn\(row2Y, 11, "Flip Vertical"'
     $saveCopyControlMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.cpp") -Pattern 'addBtn\(row2Y, 12, "Save As Copy"'
     $wallpaperControlMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.cpp") -Pattern 'addBtn\(row2Y, 13, "Set as Wallpaper"'
+    $discardControlMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.cpp") -Pattern 'addBtn\(row2Y, 16, "Discard Changes"'
     $openDialogMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.cpp") -Pattern 'dialogs::OpenDialog::Show\(0, 0, startPath'
     $saveDialogMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.cpp") -Pattern 'dialogs::SaveDialog::Show\(0, 0, startPath, defaultFileName'
     $openHandlerMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.cpp") -Pattern 'openImageFromDialog\(\)'
@@ -144,25 +149,42 @@ try {
     $emptyStateMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.cpp") -Pattern 's_statusText = "No image loaded";'
     $modifiedTitleMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.cpp") -Pattern '" \*";'
     $modifiedStatusMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.cpp") -Pattern '" \| Modified"'
-    $rotateHelperMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.cpp") -Pattern 'void ImageViewer::RotateCurrentImageLeft\(\)'
-    $rotateHelperRightMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.cpp") -Pattern 'void ImageViewer::RotateCurrentImageRight\(\)'
-    $flipHelperMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.cpp") -Pattern 'void ImageViewer::FlipCurrentImageHorizontal\(\)'
-    $flipHelperVerticalMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.cpp") -Pattern 'void ImageViewer::FlipCurrentImageVertical\(\)'
-    $markModifiedMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.cpp") -Pattern 'void ImageViewer::MarkModified\(\)'
-    $updateModifiedTitleMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.cpp") -Pattern 'void ImageViewer::UpdateModifiedTitleStatus\(\)'
+    $undoHelperMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.cpp") -Pattern 'void ImageViewer::UndoEdit\(\)'
+    $redoHelperMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.cpp") -Pattern 'void ImageViewer::RedoEdit\(\)'
+    $resizeHelperMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.cpp") -Pattern 'gui::ImagePtr ImageViewer::ResizeCurrentImageNearestNeighbor\(int newWidth, int newHeight\)'
+    $cropHelperMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.cpp") -Pattern 'gui::ImagePtr ImageViewer::CropCurrentImageRect\(int x, int y, int width, int height\)'
+    $captureHelperMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.cpp") -Pattern 'void ImageViewer::CaptureHistoryBeforeEdit\(\)'
+    $restoreHelperMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.cpp") -Pattern 'bool ImageViewer::RestoreHistorySnapshot\(const HistorySnapshot& snapshot\)'
+    $clearHelperMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.cpp") -Pattern 'void ImageViewer::ClearEditHistory\(\)'
+    $guardHelperMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.cpp") -Pattern 'bool ImageViewer::CanNavigateAwayFromDirtyDocument\(const std::string& actionName\)'
+    $discardHelperMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.cpp") -Pattern 'void ImageViewer::DiscardChanges\(\)'
+    $historyLimitMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.h") -Pattern 'static constexpr size_t kHistoryLimit = 10;'
+    $boundedUndoMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.cpp") -Pattern 's_undoStack\.size\(\) >= kHistoryLimit'
+    $boundedRedoMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.cpp") -Pattern 's_redoStack\.size\(\) >= kHistoryLimit'
+    $redoClearMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.cpp") -Pattern 's_redoStack\.clear\(\);'
+    $dirtyGuardTextMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.cpp") -Pattern 'Unsaved changes: use Save As Copy, Undo, or discard before'
+    $discardReloadMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.cpp") -Pattern 'loadImagePath\(s_originalPath, true, true\)'
     $saveHelperMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.cpp") -Pattern 'void ImageViewer::SaveCurrentImageAsCopy\(\)'
     $saveEncoderMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.cpp") -Pattern 'writePngToVfs\(finalPath, ImageViewer::s_image, error\)'
     $saveSafeGuardMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.cpp") -Pattern 'safeEqualsPath\(finalPath, ImageViewer::s_originalPath\)'
     $saveNoOverwriteMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.cpp") -Pattern 'cannot overwrite the original file'
     $previewPathMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.cpp") -Pattern 'makeEditedPreviewPath\(s_originalPath.empty\(\) \? s_filePath : s_originalPath, s_windowId\)'
+    $plainSaveMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.cpp") -Pattern 'addBtn\(row2Y, [0-9]+, "Save"'
+    $resizeCaseMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.cpp") -Pattern 'case 17:'
+    $cropCaseMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.cpp") -Pattern 'case 18:'
+    $resizeCommitMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.cpp") -Pattern 'commitEditedImage\(resized, "Resized to '
+    $cropCommitMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.cpp") -Pattern 'commitEditedImage\(cropped, "Cropped to '
+    $historyCaptureMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.cpp") -Pattern 'CaptureHistoryBeforeEdit\(\);'
+    $dirtyCommitMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.cpp") -Pattern 's_isDirty = !matchesOriginal;'
 
     $sourceText = Get-Content -LiteralPath (Join-Path $Root "image_viewer.cpp") -Raw
     Assert-NotContains $sourceText "Paint" "viewer paint feature"
     Assert-NotContains $sourceText "Layer" "viewer layer feature"
     Assert-NotContains $sourceText "Filter" "viewer filter feature"
+    Assert-NotContains $sourceText "Text Tool" "viewer text tool feature"
 
     $report = @(
-        "[ImageViewerPhase2ASmoke]",
+        "[ImageViewerPhase2CSmoke]",
         "result=PASS",
         "desktop.apps.verbose contains Image Viewer and gxos.builtin.imageviewer",
         "desktop.launch.resolve ImageViewer => BuiltInApp / Image Viewer",
@@ -171,10 +193,13 @@ try {
         "desktop.launch.resolve C:\temp\sample.PNG => FileOpen",
         "viewerOpenControl=$(Format-EvidenceLine $openControlMatch)",
         "viewerPreviousNext=$(Format-EvidenceLine $previousMatch) | $(Format-EvidenceLine $nextMatch)",
+        "viewerUndoRedoControls=$(Format-EvidenceLine $undoMatch) | $(Format-EvidenceLine $redoMatch)",
+        "viewerResizeCropControls=$(Format-EvidenceLine $resizeControlMatch) | $(Format-EvidenceLine $cropControlMatch)",
         "viewerZoomControls=$(Format-EvidenceLine $zoomInMatch) | $(Format-EvidenceLine $zoomOutMatch) | $(Format-EvidenceLine $fitMatch) | $(Format-EvidenceLine $actualMatch)",
         "viewerEditControls=$(Format-EvidenceLine $rotateLeftMatch) | $(Format-EvidenceLine $rotateRightMatch) | $(Format-EvidenceLine $flipHorizontalMatch) | $(Format-EvidenceLine $flipVerticalMatch)",
         "viewerSaveCopyControl=$(Format-EvidenceLine $saveCopyControlMatch)",
         "viewerWallpaperControl=$(Format-EvidenceLine $wallpaperControlMatch)",
+        "viewerDiscardControl=$(Format-EvidenceLine $discardControlMatch)",
         "viewerOpenDialogIntegration=$(Format-EvidenceLine $openDialogMatch) | $(Format-EvidenceLine $openHandlerMatch)",
         "viewerSaveDialogIntegration=$(Format-EvidenceLine $saveDialogMatch) | $(Format-EvidenceLine $saveHelperMatch)",
         "viewerWallpaperIntegration=$(Format-EvidenceLine $wallpaperHandlerMatch) | $(Format-EvidenceLine $wallpaperMessageMatch)",
@@ -184,7 +209,10 @@ try {
         "viewerEmptyState=$(Format-EvidenceLine $emptyStateMatch)",
         "viewerDirtyState=$(Format-EvidenceLine $dirtyStateMatch) | $(Format-EvidenceLine $originalPathMatch) | $(Format-EvidenceLine $displayPathMatch)",
         "viewerModifiedIndicators=$(Format-EvidenceLine $modifiedTitleMatch) | $(Format-EvidenceLine $modifiedStatusMatch)",
-        "viewerEditHelpers=$(Format-EvidenceLine $rotateHelperMatch) | $(Format-EvidenceLine $rotateHelperRightMatch) | $(Format-EvidenceLine $flipHelperMatch) | $(Format-EvidenceLine $flipHelperVerticalMatch) | $(Format-EvidenceLine $markModifiedMatch) | $(Format-EvidenceLine $updateModifiedTitleMatch)",
+        "viewerHistoryHelpers=$(Format-EvidenceLine $undoHelperMatch) | $(Format-EvidenceLine $redoHelperMatch) | $(Format-EvidenceLine $resizeHelperMatch) | $(Format-EvidenceLine $cropHelperMatch) | $(Format-EvidenceLine $captureHelperMatch) | $(Format-EvidenceLine $restoreHelperMatch) | $(Format-EvidenceLine $clearHelperMatch) | $(Format-EvidenceLine $guardHelperMatch) | $(Format-EvidenceLine $discardHelperMatch)",
+        "viewerHistoryLimit=$(Format-EvidenceLine $historyLimitMatch) | $(Format-EvidenceLine $boundedUndoMatch) | $(Format-EvidenceLine $boundedRedoMatch) | $(Format-EvidenceLine $redoClearMatch)",
+        "viewerDirtyGuard=$(Format-EvidenceLine $dirtyGuardTextMatch) | $(Format-EvidenceLine $discardReloadMatch)",
+        "viewerResizeCropImplementation=$(Format-EvidenceLine $resizeCaseMatch) | $(Format-EvidenceLine $resizeCommitMatch) | $(Format-EvidenceLine $cropCaseMatch) | $(Format-EvidenceLine $cropCommitMatch) | $(Format-EvidenceLine $historyCaptureMatch) | $(Format-EvidenceLine $dirtyCommitMatch)",
         "viewerSaveAsCopyImplementation=$(Format-EvidenceLine $saveHelperMatch) | $(Format-EvidenceLine $saveEncoderMatch) | $(Format-EvidenceLine $saveSafeGuardMatch) | $(Format-EvidenceLine $saveNoOverwriteMatch)",
         "viewerPreviewPath=$(Format-EvidenceLine $previewPathMatch)",
         "fileOpenRoutesToImageViewer=$(Format-EvidenceLine $openMatch)",
@@ -192,7 +220,8 @@ try {
         "desktopDoubleClickRoutesThroughOpenFilesystemEntry=$(Format-EvidenceLine $desktopDoubleClickMatch)",
         "folderDoubleClickPreserved=$(Format-EvidenceLine $folderNavigateMatch)",
         "unknownFileAssociationPreserved=$(Format-EvidenceLine $unknownAssociationMatch)",
-        "noPaintLayerFilterFeaturesDetected=true",
+        "noPaintLayerFilterTextFeaturesDetected=true",
+        "noPlainDestructiveSaveControlDetected=$(if ($null -eq $plainSaveMatch) { 'true' } else { 'false' })",
         "metadata=$(Format-EvidenceLine $metadataMatch)",
         "resolverAlias=$(Format-EvidenceLine $resolveMatch)"
     ) -join [Environment]::NewLine

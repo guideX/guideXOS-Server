@@ -168,7 +168,6 @@ try {
     $plainSaveMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.cpp") -Pattern 'addBtn\(row2Y, [0-9]+, "Save"'
 
     $sourceText = Get-Content -LiteralPath (Join-Path $Root "image_viewer.cpp") -Raw
-    Assert-NotContains $sourceText "Crop" "viewer crop feature"
     Assert-NotContains $sourceText "Paint" "viewer paint feature"
     Assert-NotContains $sourceText "Layer" "viewer layer feature"
     Assert-NotContains $sourceText "Filter" "viewer filter feature"
@@ -208,7 +207,7 @@ try {
         "desktopDoubleClickRoutesThroughOpenFilesystemEntry=$(Format-EvidenceLine $desktopDoubleClickMatch)",
         "folderDoubleClickPreserved=$(Format-EvidenceLine $folderNavigateMatch)",
         "unknownFileAssociationPreserved=$(Format-EvidenceLine $unknownAssociationMatch)",
-        "noCropPaintLayerFilterFeaturesDetected=true",
+        "noPaintLayerFilterFeaturesDetected=true",
         "noPlainDestructiveSaveControlDetected=$(if ($null -eq $plainSaveMatch) { 'true' } else { 'false' })",
         "metadata=$(Format-EvidenceLine $metadataMatch)",
         "resolverAlias=$(Format-EvidenceLine $resolveMatch)"

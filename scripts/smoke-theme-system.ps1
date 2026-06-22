@@ -69,17 +69,21 @@ $classicMatch = Find-FirstMatch $themeSource 'DesktopThemeId::Classic'
 $sciFiMatch = Find-FirstMatch $themeSource 'DesktopThemeId::SciFi'
 $defaultMatch = Find-FirstMatch $themeSource 'g_currentDesktopThemeId = DesktopThemeId::Classic'
 $themeDataMatch = Find-FirstMatch $themeSource '"Sci Fi"'
+$themeMetricFieldsMatch = Find-FirstMatch $themeHeader 'windowCornerRadius|windowPadding|controlPadding|titleBarHeight|windowBorderThickness|titleTextInset|titleButtonGap|taskbarPadding|taskbarItemPadding'
 $configThemeMatch = Find-FirstMatch $desktopConfig 'TryParseDesktopThemeId\(out\.desktopThemeId\.c_str\(\), &themeId\)|DesktopThemeIdToString\(themeId\)'
 $showConfigThemeMatch = Find-FirstMatch $server 'Theme: .*DesktopThemeIdToString\(themeId\)'
 $classicOptionMatch = Find-FirstMatch $displayOptions 'DesktopThemeId::Classic, GetDesktopTheme\(DesktopThemeId::Classic\)'
 $sciFiOptionMatch = Find-FirstMatch $displayOptions 'DesktopThemeId::SciFi, GetDesktopTheme\(DesktopThemeId::SciFi\)'
 $displayThemeMatch = Find-FirstMatch $displayOptions 'desktopThemeId|applySelectedTheme|Theme tab selected|DesktopThemeId::SciFi'
 $compositorThemeMatch = Find-FirstMatch $compositor 'GetCurrentDesktopTheme|DesktopThemeIdToString|syncDesktopThemeFromConfig'
+$compositorMetricMatch = Find-FirstMatch $compositor 'titleBarHeight|windowPadding|controlPadding|titleTextInset|titleButtonGap|taskbarPadding|taskbarItemPadding|windowBorderThickness'
 $windowRendererThemeMatch = Find-FirstMatch $windowRenderer 'GetCurrentDesktopTheme'
+$windowRendererMetricMatch = Find-FirstMatch $windowRenderer 'roundedWindows|windowCornerRadius|windowBorderThickness'
 $chromeMatch = $compositorThemeMatch
 if ($null -eq $chromeMatch) {
     $chromeMatch = $windowRendererThemeMatch
 }
+$phase2aDocMatch = Find-FirstMatch $planDoc 'Phase 2A|theme-aware chrome metrics|Classic metrics preserve the current guideXOS look'
 
 $checks = @(
     [pscustomobject]@{ Name = "theme header exists"; Pass = (Test-Path -LiteralPath $themeHeader); Match = $null },
@@ -88,13 +92,16 @@ $checks = @(
     [pscustomobject]@{ Name = "sci fi identifier exists"; Pass = $null -ne $sciFiMatch; Match = $sciFiMatch },
     [pscustomobject]@{ Name = "classic default is represented"; Pass = $null -ne $defaultMatch; Match = $defaultMatch },
     [pscustomobject]@{ Name = "sci fi theme data exists"; Pass = $null -ne $themeDataMatch; Match = $themeDataMatch },
+    [pscustomobject]@{ Name = "theme metric fields exist"; Pass = $null -ne $themeMetricFieldsMatch; Match = $themeMetricFieldsMatch },
     [pscustomobject]@{ Name = "config theme normalization"; Pass = $null -ne $configThemeMatch; Match = $configThemeMatch },
     [pscustomobject]@{ Name = "desktop.showconfig theme reporting"; Pass = $null -ne $showConfigThemeMatch; Match = $showConfigThemeMatch },
     [pscustomobject]@{ Name = "classic theme option visible"; Pass = $null -ne $classicOptionMatch; Match = $classicOptionMatch },
     [pscustomobject]@{ Name = "sci fi theme option visible"; Pass = $null -ne $sciFiOptionMatch; Match = $sciFiOptionMatch },
     [pscustomobject]@{ Name = "display options theme wiring"; Pass = $null -ne $displayThemeMatch; Match = $displayThemeMatch },
     [pscustomobject]@{ Name = "compositor chrome theme accessor"; Pass = $null -ne $chromeMatch; Match = $chromeMatch },
-    [pscustomobject]@{ Name = "theme plan docs exist"; Pass = (Test-Path -LiteralPath $planDoc); Match = $null }
+    [pscustomobject]@{ Name = "compositor theme metrics wired"; Pass = $null -ne $compositorMetricMatch; Match = $compositorMetricMatch },
+    [pscustomobject]@{ Name = "window renderer theme metrics wired"; Pass = $null -ne $windowRendererMetricMatch; Match = $windowRendererMetricMatch },
+    [pscustomobject]@{ Name = "phase 2a docs mention"; Pass = $null -ne $phase2aDocMatch; Match = $phase2aDocMatch }
 )
 
 $failures = 0

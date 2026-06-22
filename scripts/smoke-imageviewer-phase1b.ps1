@@ -131,7 +131,6 @@ try {
     $viewerStateMatch = Find-FirstMatch -LiteralPath (Join-Path $Root "image_viewer.cpp") -Pattern 'ImageViewer mode='
 
     $sourceText = Get-Content -LiteralPath (Join-Path $Root "image_viewer.cpp") -Raw
-    Assert-NotContains $sourceText "Crop" "viewer crop feature"
     Assert-NotContains $sourceText "Paint" "viewer paint feature"
     Assert-NotContains $sourceText "Layer" "viewer layer feature"
     Assert-NotContains $sourceText "Filter" "viewer filter feature"

@@ -52,6 +52,8 @@ namespace gxos { namespace apps {
         static void RotateCurrentImageRight();
         static void FlipCurrentImageHorizontal();
         static void FlipCurrentImageVertical();
+        static gui::ImagePtr ResizeCurrentImageNearestNeighbor(int newWidth, int newHeight);
+        static gui::ImagePtr CropCurrentImageRect(int x, int y, int width, int height);
         static void UndoEdit();
         static void RedoEdit();
         static void DiscardChanges();

@@ -24,6 +24,16 @@ Sci Fi is opt-in and intentionally conservative in this phase.
 * Compositor reload-time theme application
 * Theme-aware title bar background, title bar text, window border, window background, and taskbar colors
 
+## Phase 2A
+
+Phase 2A adds theme-aware chrome metrics and conservative spacing polish.
+
+* Classic metrics preserve the current guideXOS look as closely as practical.
+* Sci Fi uses modestly larger spacing and padding for title bars, controls, and shared chrome.
+* Window corner radius remains a theme intent/metric, but full rounded-window clipping is still deferred.
+* Shadows, blur/glass simulation, animations, and high-DPI/scaling remain deferred.
+* The compositor and shared window renderer consume the same theme metrics for title bar height, button spacing, text inset, and border thickness.
+
 ## What Is Deferred
 
 * Rounded clipping for theme-specific window shapes
@@ -31,7 +41,6 @@ Sci Fi is opt-in and intentionally conservative in this phase.
 * Glass or blur simulation
 * Slide-in / slide-out animations
 * High-DPI and scaling polish
-* Per-theme metrics
 * More themes
 * Deeper app-specific polish
 

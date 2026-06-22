@@ -40,7 +40,7 @@ public:
     /// Draw a window glow/shadow effect
     static void DrawWindowGlow(HDC dc, int x, int y, int w, int h, int titleBarH, bool focused) {
         if (!UISettings::EnableWindowGlow) return;
-        
+        const DesktopTheme& theme = GetCurrentDesktopTheme();
         int glowRadius = UISettings::WindowGlowRadius;
         uint32_t glowColor = focused ? UISettings::WindowGlowFocusedColor : UISettings::WindowGlowColor;
         
@@ -63,7 +63,7 @@ public:
             HGDIOBJ oldPen = SelectObject(dc, pen);
             HGDIOBJ oldBrush = SelectObject(dc, GetStockObject(NULL_BRUSH));
             
-            int cornerRadius = UISettings::EnableRoundedCorners ? UISettings::WindowCornerRadius : 0;
+            int cornerRadius = theme.roundedWindows ? theme.windowCornerRadius : 0;
             if (cornerRadius > 0) {
                 RoundRect(dc, x - i, y - i, x + w + i, y + h + i, cornerRadius * 2, cornerRadius * 2);
             } else {
@@ -86,7 +86,7 @@ public:
         const COLORREF color = RGB((sourceColor >> 16) & 0xFF,
                                    (sourceColor >> 8) & 0xFF,
                                    sourceColor & 0xFF);
-        int cornerRadius = UISettings::EnableRoundedCorners ? UISettings::WindowCornerRadius : 0;
+        int cornerRadius = theme.roundedWindows ? theme.windowCornerRadius : 0;
         DrawRoundedRect(dc, x, y, w, h, color, cornerRadius);
     }
     
@@ -95,6 +95,7 @@ public:
     static void DrawTitleButton(HDC dc, int x, int y, int size, int buttonType, 
                                  bool hover, bool pressed, bool focused) {
         if (!UISettings::EnableTitleBarButtons) return;
+        const DesktopTheme& theme = GetCurrentDesktopTheme();
         
         // Legacy-style button colors: dark semi-transparent backgrounds
         // Based on guideXOS.Legacy Window.cs DrawTitleButton
@@ -140,13 +141,13 @@ public:
         if (hover && UISettings::EnableButtonHoverEffects) {
             int glowPad = 2;
             COLORREF glowColor = RGB(0x2E, 0x89, 0xFF);
-            int cornerRadius = UISettings::EnableRoundedCorners ? 6 : 0;
+            int cornerRadius = theme.roundedWindows ? theme.windowCornerRadius / 2 : 0;
             DrawRoundedRect(dc, x - glowPad, y - glowPad, size + glowPad * 2, size + glowPad * 2, glowColor, cornerRadius);
         }
         
         // Draw button background with rounded corners (matching Legacy)
         if (UISettings::EnableButtonBackgrounds) {
-            int cornerRadius = UISettings::EnableRoundedCorners ? 6 : 0;
+            int cornerRadius = theme.roundedWindows ? theme.windowCornerRadius / 2 : 0;
             DrawRoundedRect(dc, x, y, size, size, bgColor, cornerRadius);
         }
         
@@ -157,7 +158,7 @@ public:
             HGDIOBJ oldPen = SelectObject(dc, pen);
             HGDIOBJ oldBrush = SelectObject(dc, GetStockObject(NULL_BRUSH));
             
-            int cornerRadius = UISettings::EnableRoundedCorners ? 6 : 0;
+            int cornerRadius = theme.roundedWindows ? theme.windowCornerRadius / 2 : 0;
             if (cornerRadius > 0) {
                 RoundRect(dc, x, y, x + size, y + size, cornerRadius * 2, cornerRadius * 2);
             } else {
@@ -241,13 +242,14 @@ public:
 
         const DesktopTheme& theme = GetCurrentDesktopTheme();
         uint32_t borderColor = focused ? theme.accent : theme.windowBorder;
-        HPEN pen = CreatePen(PS_SOLID, 1, RGB((borderColor >> 16) & 0xFF,
-                                               (borderColor >> 8) & 0xFF,
-                                               borderColor & 0xFF));
+        int borderThickness = theme.windowBorderThickness > 0 ? theme.windowBorderThickness : 1;
+        HPEN pen = CreatePen(PS_SOLID, borderThickness, RGB((borderColor >> 16) & 0xFF,
+                                                            (borderColor >> 8) & 0xFF,
+                                                            borderColor & 0xFF));
         HGDIOBJ oldPen = SelectObject(dc, pen);
         HGDIOBJ oldBrush = SelectObject(dc, GetStockObject(NULL_BRUSH));
         
-        int cornerRadius = UISettings::EnableRoundedCorners ? UISettings::WindowCornerRadius : 0;
+        int cornerRadius = theme.roundedWindows ? theme.windowCornerRadius : 0;
         if (cornerRadius > 0) {
             RoundRect(dc, x, y, x + w, y + h, cornerRadius * 2, cornerRadius * 2);
         } else {
