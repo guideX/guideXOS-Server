@@ -173,22 +173,6 @@ gxos::apps::LaunchTarget resolveLaunchTarget(const char* label)
         return target;
     }
 
-    if (text_equals(label, "ImgViewer")) {
-        if (const gxos::apps::BuiltInAppMetadata* metadata = gxos::apps::FindBuiltInAppMetadataByAppId("gxos.builtin.imageviewer")) {
-            fill_from_metadata(target, *metadata);
-        }
-        target.type = gxos::apps::LaunchTargetType::LegacyAlias;
-        target.legacyAlias = "ImgViewer";
-        target.appId = "gxos.builtin.imageviewer";
-        target.displayName = "ImageViewer";
-        target.dispatchLaunchName = "ImgViewer";
-        target.hostedAvailable = true;
-        target.bareMetalAvailable = false;
-        target.diagnosticStatus = "unsupported-target";
-        target.diagnosticReason = "Bare-metal static Start Menu label for hosted ImageViewer; no current bare-metal AppManager registration";
-        return target;
-    }
-
     if (is_shell_label(label)) {
         fill_shell_label(target, label);
         return target;
@@ -218,6 +202,22 @@ gxos::apps::LaunchTarget resolveLaunchTarget(const char* label)
             target.diagnosticStatus = "unresolved-file-open";
             target.diagnosticReason = "Path-like label supplied, but VFS stat did not find a current target";
         }
+        return target;
+    }
+
+    if (text_equals(label, "ImgViewer")) {
+        if (const gxos::apps::BuiltInAppMetadata* metadata = gxos::apps::FindBuiltInAppMetadataByAppId("gxos.builtin.imageviewer")) {
+            fill_from_metadata(target, *metadata);
+        }
+        target.type = gxos::apps::LaunchTargetType::LegacyAlias;
+        target.legacyAlias = "ImgViewer";
+        target.appId = "gxos.builtin.imageviewer";
+        target.displayName = "Image Viewer";
+        target.dispatchLaunchName = "ImgViewer";
+        target.hostedAvailable = true;
+        target.bareMetalAvailable = true;
+        target.diagnosticStatus = "resolved-alias";
+        target.diagnosticReason = "Bare-metal legacy alias registered for the ImageViewer kernel app";
         return target;
     }
 
@@ -780,7 +780,9 @@ void printLaunchTargetShadowSmokeDiagnostic(LaunchTargetDiagnosticWriter write)
         { "StartMenuFilesAlias", "StartMenu", "Files", "Files" },
         { "FileExplorerCanonical", "DesktopFileManager", "FileExplorer", "Files" },
         { "NavigatorKernelApp", "StartMenu", "guideXOS Navigator", "guideXOS Navigator" },
-        { "ImageViewerStaticAlias", "StartMenu", "ImgViewer", "ImgViewer" },
+        { "ImageViewerCanonical", "StartMenu", "ImageViewer", "ImageViewer" },
+        { "ImageViewerDisplayName", "StartMenu", "Image Viewer", "ImageViewer" },
+        { "ImageViewerLegacyAlias", "StartMenu", "ImgViewer", "ImgViewer" },
         { "RootFolderFileOpen", "FileOpen", "/", "Files" },
         { "UnknownProbe", "SmokeProbe", "FakeLaunchShadowApp", "" }
     };
@@ -1276,7 +1278,7 @@ void printLaunchStoragePreviewComparisonDiagnostic(LaunchTargetDiagnosticWriter 
     write("  difference=start-menu-source note=hosted all-programs are registry-derived while bare-metal Start Menu arrays are static today\n");
     write("  difference=compatibility-bridge note=hosted ComputerFiles bridges to FileExplorer while bare-metal uses Computer/Documents/Pictures/Music/Network/Settings labels\n");
     write("  difference=dynamic-runtime-sites note=desktop icon/taskbar runtime labels are target-specific and are not migrated in this diagnostic\n");
-    write("  difference=bare-metal-imgviewer note=ImgViewer is a diagnostic-only legacy/static label for hosted ImageViewer and remains unsupported on bare-metal\n");
+    write("  difference=bare-metal-imgviewer note=hosted Image Viewer keeps the full editor/viewer path while bare-metal ImageViewer is a minimal PNG preview app with legacy ImgViewer alias\n");
     write("unexpectedDrift: ");
     write_uint(write, unexpectedDrift);
     write("\n");

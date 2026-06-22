@@ -1421,22 +1421,6 @@ namespace gxos {
                 return target;
             }
 
-            if (label == "ImgViewer") {
-                if (const apps::BuiltInAppMetadata* metadata = apps::FindBuiltInAppMetadataByAppId("gxos.builtin.imageviewer")) {
-                    fillLaunchTargetFromMetadata(target, *metadata);
-                }
-                target.type = apps::LaunchTargetType::LegacyAlias;
-                target.legacyAlias = "ImgViewer";
-                target.appId = "gxos.builtin.imageviewer";
-                target.displayName = "Image Viewer";
-                target.dispatchLaunchName = "ImgViewer";
-                target.hostedAvailable = true;
-                target.bareMetalAvailable = false;
-                target.diagnosticStatus = "unsupported-target";
-                target.diagnosticReason = "Bare-metal static Start Menu label for hosted ImageViewer; no current bare-metal AppManager registration";
-                return target;
-            }
-
             if (isBareMetalShellLabelForComparison(label)) {
                 target.type = apps::LaunchTargetType::ShellAction;
                 target.displayName = label;
@@ -1453,6 +1437,22 @@ namespace gxos {
                     target.dispatchLaunchName = "DisplayOptions";
                 }
                 target.diagnosticReason = "Bare-metal shell/system label mirror for comparison diagnostics";
+                return target;
+            }
+
+            if (label == "ImgViewer") {
+                if (const apps::BuiltInAppMetadata* metadata = apps::FindBuiltInAppMetadataByAppId("gxos.builtin.imageviewer")) {
+                    fillLaunchTargetFromMetadata(target, *metadata);
+                }
+                target.type = apps::LaunchTargetType::LegacyAlias;
+                target.legacyAlias = "ImgViewer";
+                target.appId = "gxos.builtin.imageviewer";
+                target.displayName = "Image Viewer";
+                target.dispatchLaunchName = "ImgViewer";
+                target.hostedAvailable = true;
+                target.bareMetalAvailable = true;
+                target.diagnosticStatus = "resolved-alias";
+                target.diagnosticReason = "Bare-metal legacy alias registered for the ImageViewer kernel app";
                 return target;
             }
 
@@ -2635,7 +2635,7 @@ namespace gxos {
             oss << "  difference=start-menu-source note=hosted all-programs are registry-derived while bare-metal Start Menu arrays are static today\n";
             oss << "  difference=compatibility-bridge note=hosted ComputerFiles bridges to FileExplorer while bare-metal uses Computer/Documents/Pictures/Music/Network/Settings labels\n";
             oss << "  difference=dynamic-runtime-sites note=desktop icon/taskbar runtime labels are target-specific and are not migrated in this diagnostic\n";
-            oss << "  difference=bare-metal-imgviewer note=ImgViewer is a diagnostic-only legacy/static label for hosted ImageViewer and remains unsupported on bare-metal\n";
+            oss << "  difference=bare-metal-imgviewer note=hosted Image Viewer keeps the full editor/viewer path while bare-metal ImageViewer is a minimal PNG preview app with legacy ImgViewer alias\n";
             oss << "unexpectedDrift: " << unexpectedDrift << "\n";
             if (bareMetalCounts.highRisk > 0) {
                 oss << "  drift=bareMetalHighRisk count=" << bareMetalCounts.highRisk

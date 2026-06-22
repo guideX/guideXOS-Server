@@ -1938,6 +1938,11 @@ static bool desktop_entry_is_known_image(const char* name)
            text_ends_with(name, ".gif");
 }
 
+static bool desktop_entry_is_png(const char* name)
+{
+    return text_ends_with(name, ".png");
+}
+
 static bool desktop_entry_is_text(const char* name)
 {
     return text_ends_with(name, ".txt") || text_ends_with(name, ".log") ||
@@ -4245,6 +4250,7 @@ static const char* GetDesktopIconLogicalName(const char* label)
     }
     if (text_equals(label, "TaskManager")) return "app.taskmanager";
     if (text_equals(label, "Files")) return "app.files";
+    if (text_equals(label, "ImageViewer") || text_equals(label, "Image Viewer") || text_equals(label, "ImgViewer")) return "app.generic";
     if (text_equals(label, "Paint")) return "app.paint";
     if (text_equals(label, "Clock")) return "app.clock";
     if (text_equals(label, "DiskManager")) return "app.diskmanager";
@@ -8932,6 +8938,16 @@ static void show_icon_notification(int displayIndex)
                 if (app::AppManager::launchAppWithParam("Notepad", target)) return;
                 s_notification.title = label;
                 s_notification.message = "Unable to open file";
+            } else if (desktop_entry_is_png(label)) {
+#if defined(GXOS_APPMODEL_TYPED_DISPATCH_SHADOW_ONLY) && defined(GXOS_BARE_METAL)
+                log_bare_metal_fileopen_shadow_only_observation(bare_metal_active_fileopen_shadow_source("DesktopShortcutImageFile"), "ImageViewer", target);
+                if (bare_metal_should_suppress_real_branch_launch()) return;
+#endif
+                // SHADOW_ONLY FileOpen observation above is diagnostic-only; "ImageViewer"
+                // is the canonical bare-metal PNG preview app and target remains the unmodified path.
+                if (app::AppManager::launchAppWithParam("ImageViewer", target)) return;
+                s_notification.title = label;
+                s_notification.message = "Unable to open image";
             } else {
                 serial::puts("[desktop] No file handler for shortcut target\n");
                 s_notification.title = label;
@@ -8994,6 +9010,19 @@ static void show_icon_notification(int displayIndex)
             if (app::AppManager::launchAppWithParam("Notepad", icon.path)) return;
             s_notification.title = label;
             s_notification.message = "Unable to open file";
+        } else if (desktop_entry_is_png(label)) {
+            serial::puts("[desktop] Opening desktop image file: ");
+            serial::puts(icon.path);
+            serial::puts("\n");
+#if defined(GXOS_APPMODEL_TYPED_DISPATCH_SHADOW_ONLY) && defined(GXOS_BARE_METAL)
+            log_bare_metal_fileopen_shadow_only_observation(bare_metal_active_fileopen_shadow_source("DesktopFilesystemImageFile"), "ImageViewer", icon.path);
+            if (bare_metal_should_suppress_real_branch_launch()) return;
+#endif
+            // SHADOW_ONLY FileOpen observation above is diagnostic-only; "ImageViewer"
+            // is the canonical bare-metal PNG preview app and icon.path remains unmodified.
+            if (app::AppManager::launchAppWithParam("ImageViewer", icon.path)) return;
+            s_notification.title = label;
+            s_notification.message = "Unable to open image";
         } else {
             serial::puts("[desktop] No file handler for desktop file: ");
             serial::puts(icon.path);

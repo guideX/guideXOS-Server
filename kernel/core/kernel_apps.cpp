@@ -3928,6 +3928,13 @@ void FileExplorerApp::openSelected() {
             setStatus("Unable to open text file in Notepad");
         }
         invalidate();
+    } else if (endsWithIgnoreCase(e.name, ".png")) {
+        if (app::AppManager::launchAppWithParam("ImageViewer", full)) {
+            setStatus("Opened PNG in Image Viewer");
+        } else {
+            setStatus("Unable to open PNG in Image Viewer");
+        }
+        invalidate();
     } else if (endsWithIgnoreCase(e.name, ".img")) {
         openDiskImage(full, e);
     } else if (endsWithIgnoreCase(e.name, ".gxq") || endsWithIgnoreCase(e.name, ".gxapp") || endsWithIgnoreCase(e.name, ".elf") || endsWithIgnoreCase(e.name, ".exe")) {
@@ -5192,6 +5199,125 @@ const char* TrashApp::typeForEntry(const TrashEntry& entry) const
     if (endsWithIgnoreCaseLocal(entry.name, ".elf") || endsWithIgnoreCaseLocal(entry.name, ".gxapp") || endsWithIgnoreCaseLocal(entry.name, ".gxq") || endsWithIgnoreCaseLocal(entry.name, ".exe")) return "App";
     if (endsWithIgnoreCaseLocal(entry.name, ".bin") || endsWithIgnoreCaseLocal(entry.name, ".dat") || endsWithIgnoreCaseLocal(entry.name, ".dll") || endsWithIgnoreCaseLocal(entry.name, ".so") || endsWithIgnoreCaseLocal(entry.name, ".o")) return "Binary";
     return "File";
+}
+
+// ============================================================
+// Image Viewer App Implementation
+// ============================================================
+
+ImageViewerApp::ImageViewerApp()
+    : m_hasImage(false)
+{
+    strcopy(m_name, "ImageViewer", app::MAX_APP_NAME);
+    m_imagePath[0] = '\0';
+    m_status[0] = '\0';
+    m_image.status = gxos::gui::ImageLoadStatus::NotFound;
+    m_image.pixels = nullptr;
+    m_image.width = 0;
+    m_image.height = 0;
+}
+
+ImageViewerApp::~ImageViewerApp() {
+}
+
+bool ImageViewerApp::init() {
+    return initWithParam(nullptr);
+}
+
+bool ImageViewerApp::initWithParam(const char* imagePath) {
+    m_window = new app::KernelWindow();
+    strcopy(m_window->title, "Image Viewer", app::MAX_TITLE_LEN);
+    m_window->x = 96;
+    m_window->y = 54;
+    m_window->w = 820;
+    m_window->h = 620;
+    m_window->flags = app::WF_VISIBLE | app::WF_TITLEBAR | app::WF_CLOSABLE | app::WF_RESIZABLE | app::WF_FOCUSED;
+    m_window->owner = this;
+
+    if (!compositor::KernelCompositor::registerWindow(m_window)) {
+        delete m_window;
+        m_window = nullptr;
+        return false;
+    }
+
+    loadImage(imagePath);
+    m_state = app::AppState::Running;
+    return true;
+}
+
+void ImageViewerApp::shutdown() {
+    m_state = app::AppState::Terminated;
+}
+
+void ImageViewerApp::loadImage(const char* path) {
+    m_hasImage = false;
+    m_image.status = gxos::gui::ImageLoadStatus::NotFound;
+    m_image.pixels = nullptr;
+    m_image.width = 0;
+    m_image.height = 0;
+    m_imagePath[0] = '\0';
+
+    if (!path || !path[0]) {
+        strcopy(m_status, "Open a PNG from File Explorer to preview it here.", sizeof(m_status));
+        return;
+    }
+
+    strcopy(m_imagePath, path, sizeof(m_imagePath));
+    m_image = gxos::gui::ImageAdapter::LoadFromFile(path);
+    if (m_image.status == gxos::gui::ImageLoadStatus::Ok && m_image.pixels && m_image.width > 0 && m_image.height > 0) {
+        m_hasImage = true;
+        strcopy(m_status, "Loaded PNG preview: ", sizeof(m_status));
+        strappend(m_status, path, sizeof(m_status));
+        return;
+    }
+
+    strcopy(m_status, "Unable to load PNG: ", sizeof(m_status));
+    strappend(m_status, gxos::gui::ImageLoadStatusName(m_image.status), sizeof(m_status));
+}
+
+void ImageViewerApp::drawPlaceholder(uint32_t x, uint32_t y, uint32_t w, uint32_t h) const {
+    framebuffer::fill_rect(x, y, w, h, rgb(34, 36, 44));
+    if (w > 16 && h > 16) {
+        framebuffer::fill_rect(x + 8, y + 8, w - 16, h - 16, rgb(22, 24, 30));
+    }
+    appDrawText(x + 18, y + 18, "Image Viewer", rgb(240, 242, 248));
+    appDrawText(x + 18, y + 36, "Bare-metal PNG preview", rgb(180, 190, 205));
+    appDrawText(x + 18, y + 58, m_status[0] ? m_status : "Open a PNG from File Explorer to preview it here.", rgb(210, 214, 226));
+    if (m_imagePath[0]) {
+        appDrawText(x + 18, y + 80, m_imagePath, rgb(165, 175, 192));
+    }
+}
+
+void ImageViewerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
+    framebuffer::fill_rect(x, y, w, h, rgb(30, 32, 40));
+
+    const uint32_t statusH = 22;
+    const uint32_t pad = 12;
+    uint32_t contentX = x + pad;
+    uint32_t contentY = y + pad;
+    uint32_t contentW = w > pad * 2 ? w - pad * 2 : w;
+    uint32_t contentH = h > pad * 2 + statusH ? h - pad * 2 - statusH : (h > statusH ? h - statusH : h);
+
+    if (m_hasImage && m_image.status == gxos::gui::ImageLoadStatus::Ok && m_image.width > 0 && m_image.height > 0 && contentW > 0 && contentH > 0) {
+        uint32_t drawW = contentW;
+        uint32_t drawH = (uint32_t)(((uint64_t)drawW * m_image.height) / m_image.width);
+        if (drawH > contentH) {
+            drawH = contentH;
+            drawW = (uint32_t)(((uint64_t)drawH * m_image.width) / m_image.height);
+        }
+        if (drawW == 0) drawW = 1;
+        if (drawH == 0) drawH = 1;
+        uint32_t drawX = contentX + (contentW > drawW ? (contentW - drawW) / 2 : 0);
+        uint32_t drawY = contentY + (contentH > drawH ? (contentH - drawH) / 2 : 0);
+        framebuffer::fill_rect(drawX, drawY, drawW, drawH, rgb(24, 26, 32));
+        framebuffer::fill_rect(drawX > 1 ? drawX - 1 : drawX, drawY > 1 ? drawY - 1 : drawY, drawW + 2, drawH + 2, rgb(74, 82, 98));
+        gxos::gui::ImageAdapter::DrawToFramebuffer(m_image, drawX, drawY, drawW, drawH);
+    } else {
+        drawPlaceholder(contentX, contentY, contentW, contentH);
+    }
+
+    framebuffer::fill_rect(x, y + h - statusH, w, statusH, rgb(42, 46, 58));
+    appDrawText(x + 12, y + h - 15, m_status[0] ? m_status : "Bare-metal PNG preview ready", rgb(222, 226, 236));
 }
 
 // ============================================================
@@ -10818,6 +10944,7 @@ void registerKernelApps() {
         else if (gxos::apps::detail::builtInTextEquals(metadata.kernelAppName, "DisplayOptions")) factory = DisplayOptionsApp::create;
         else if (gxos::apps::detail::builtInTextEquals(metadata.kernelAppName, "TaskManager")) factory = TaskManagerApp::create;
         else if (gxos::apps::detail::builtInTextEquals(metadata.kernelAppName, "FileExplorer")) factory = FileExplorerApp::create;
+        else if (gxos::apps::detail::builtInTextEquals(metadata.kernelAppName, "ImageViewer")) factory = ImageViewerApp::create;
         else if (gxos::apps::detail::builtInTextEquals(metadata.kernelAppName, "guideXOS Navigator")) factory = NavigatorApp::create;
         else if (gxos::apps::detail::builtInTextEquals(metadata.kernelAppName, "Trash")) factory = TrashApp::create;
         else if (gxos::apps::detail::builtInTextEquals(metadata.kernelAppName, "DiskManager")) factory = DiskManagerApp::create;

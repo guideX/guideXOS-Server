@@ -413,6 +413,34 @@ private:
     static bool drawArgbIconBuffer(const uint32_t* pixels, uint32_t srcW, uint32_t srcH, uint32_t x, uint32_t y, uint32_t width, uint32_t height);
 };
 
+// ============================================================
+// Image Viewer App
+// ============================================================
+
+class ImageViewerApp : public app::KernelApp {
+public:
+    ImageViewerApp();
+    virtual ~ImageViewerApp() override;
+
+    virtual bool init() override;
+    virtual bool initWithParam(const char* imagePath) override;
+    virtual void shutdown() override;
+    virtual void draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) override;
+
+    static app::KernelApp* create() { return new ImageViewerApp(); }
+
+private:
+    static const int MAX_PATH_LEN = 256;
+
+    char m_imagePath[MAX_PATH_LEN];
+    char m_status[96];
+    gxos::gui::ImageBitmap m_image;
+    bool m_hasImage;
+
+    void loadImage(const char* path);
+    void drawPlaceholder(uint32_t x, uint32_t y, uint32_t w, uint32_t h) const;
+};
+
 // Bare-metal Navigator adapter.
 //
 // The hosted/compositor Navigator in navigator.cpp is the authoritative full

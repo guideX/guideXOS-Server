@@ -900,7 +900,7 @@ static void cmd_apps() {
     output_string("  Clock        - Digital clock\n");
     output_string("  Console      - Command-line terminal\n");
     output_string("  Files        - File explorer\n");
-    output_string("  ImageViewer  - View images\n");
+    output_string("  ImageViewer  - Bare-metal PNG preview (hosted build has the full editor)\n");
     output_string("  Notepad      - Text editor\n");
     output_string("  Paint        - Drawing application\n");
     output_string("  TaskManager  - Process viewer\n");
@@ -921,6 +921,8 @@ static void cmd_desktop_apps(bool verbose) {
     output_string("  TaskManager [BuiltIn] launch=TaskManager source=KernelApp\n");
     output_string("  Files [BuiltIn] launch=Files source=KernelApp\n");
     output_string("  FileExplorer [BuiltIn] launch=FileExplorer source=KernelApp\n");
+    output_string("  ImageViewer [BuiltIn] launch=ImageViewer source=KernelApp (PNG preview; hosted has full editor)\n");
+    output_string("  ImgViewer [Alias] launch=ImgViewer source=KernelApp\n");
     output_string("  DiskManager [BuiltIn] launch=DiskManager source=KernelApp\n");
     output_string("  AppModel [Diagnostic] launch=AppModel source=DesktopShortcut\n");
     if (verbose) {
