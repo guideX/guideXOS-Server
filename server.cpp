@@ -605,20 +605,24 @@ static std::string navigatorHostedSmokeDiagnostic() {
         textPolishLoaded &&
         contains(textPolishText, "Text Polish g j p q y") &&
         contains(textPolishText, "Descenders stay readable in this sentence: g j p q y.") &&
-        contains(textPolishText, "Link g j p q y") &&
-        contains(textPolishText, "code g j p q y") &&
+        contains(textPolishText, "small text next to normal text g j p q y") &&
+        contains(textPolishText, "Underlined link smoke marker g j p q y") &&
+        contains(textPolishText, "inline code g j p q y") &&
         contains(textPolishText, "Bold g j p q y") &&
         contains(textPolishText, "Italic g j p q y") &&
-        contains(textPolishText, "Small g j p q y") &&
+        contains(textPolishText, "Faux bold italic g j p q y") &&
+        contains(textPolishText, "Caption descenders g j p q y") &&
         contains(textPolishText, "Alpha g j p q y") &&
+        contains(textPolishText, "Beta g j p q y") &&
         contains(textPolishText, "pre line one g j p q y") &&
         contains(textPolishText, "pre line two g j p q y"),
         "currentUrl=" + gxos::apps::Navigator::SmokeCurrentUrl());
     add("Text polish diagnostics",
         contains(textPolishReport, "Current Document.CSS enabled=yes") &&
-        contains(textPolishReport, "Current Document.Text metrics model=system font default face") &&
-        hasPositiveCount(textPolishReport, "Current Document.Text top padding px=") &&
-        hasPositiveCount(textPolishReport, "Current Document.Text underline gap px=") &&
+        contains(textPolishReport, "Current Document.text_metrics_model=baseline/descent aware system font") &&
+        contains(textPolishReport, "Current Document.text_backend=hosted-gdi") &&
+        hasPositiveCount(textPolishReport, "Current Document.text_top_padding_px=") &&
+        hasPositiveCount(textPolishReport, "Current Document.text_underline_gap_px=") &&
         hasPositiveCount(textPolishReport, "Current Document.CSS tables rendered=") &&
         hasPositiveCount(textPolishReport, "Current Document.CSS table cells rendered=") &&
         hasPositiveCount(textPolishReport, "Current Document.CSS visited links styled="),

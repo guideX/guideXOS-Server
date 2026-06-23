@@ -23,6 +23,11 @@ namespace {
 static constexpr int kPrintableGlyphCount = 95;
 static constexpr uint8_t kGlyphPadding = 1;
 
+static inline int max_int(int a, int b)
+{
+	return a > b ? a : b;
+}
+
 static BitmapFontFace s_faces[] = {
 	{{FontSize::Small9, FontWeight::Regular, FontSlant::Normal}, "Roboto 9 Regular", "/system/fonts/roboto/roboto_9pt_regular.png", nullptr, 260, 160, 20, 20, 13, 8, 32, kPrintableGlyphCount, 12, 8, 4, 16, 0, 0, {}},
 	{{FontSize::Small9, FontWeight::Bold, FontSlant::Normal}, "Roboto 9 Bold", "/system/fonts/roboto/roboto_9pt_bold.png", nullptr, 260, 160, 20, 20, 13, 8, 32, kPrintableGlyphCount, 12, 8, 4, 16, 0, 0, {}},
@@ -76,6 +81,26 @@ static uint8_t spaceAdvance(const BitmapFontFace& face)
 static uint8_t fallbackAdvance(const BitmapFontFace& face)
 {
 	return spaceAdvance(face);
+}
+
+static int fallbackAscent()
+{
+	return max_int(1, BitmapFont::kGlyphH - 2);
+}
+
+static int fallbackDescent()
+{
+	return max_int(1, BitmapFont::kGlyphH - fallbackAscent());
+}
+
+static int fallbackLineHeight()
+{
+	return BitmapFont::kGlyphH;
+}
+
+static int fallbackBaselineOffset()
+{
+	return fallbackAscent();
 }
 
 static uint8_t boundedAdvance(int width)
@@ -416,10 +441,55 @@ int SystemFont::MeasureWidth(FontRole role, const char* str, int len)
 	return MeasureWidth(GetFace(role), str, len);
 }
 
+int SystemFont::MeasureAscent(const BitmapFontFace* face)
+{
+	if (!face || face->fallback) return fallbackAscent();
+	return max_int(0, static_cast<int>(face->ascent));
+}
+
+int SystemFont::MeasureAscent(FontRole role)
+{
+	return MeasureAscent(GetFace(role));
+}
+
+int SystemFont::MeasureDescent(const BitmapFontFace* face)
+{
+	if (!face || face->fallback) return fallbackDescent();
+	return max_int(0, static_cast<int>(face->descent));
+}
+
+int SystemFont::MeasureDescent(FontRole role)
+{
+	return MeasureDescent(GetFace(role));
+}
+
+int SystemFont::MeasureLineHeight(const BitmapFontFace* face)
+{
+	if (!face || face->fallback) return fallbackLineHeight();
+	return max_int(1, static_cast<int>(face->lineHeight));
+}
+
+int SystemFont::MeasureLineHeight(FontRole role)
+{
+	return MeasureLineHeight(GetFace(role));
+}
+
+int SystemFont::BaselineOffset(const BitmapFontFace* face)
+{
+	if (!face || face->fallback) return fallbackBaselineOffset();
+	const int baseline = static_cast<int>(face->baseline);
+	if (baseline > 0) return baseline;
+	return MeasureAscent(face);
+}
+
+int SystemFont::BaselineOffset(FontRole role)
+{
+	return BaselineOffset(GetFace(role));
+}
+
 int SystemFont::MeasureHeight(const BitmapFontFace* face)
 {
-	if (!face || face->fallback) return BitmapFont::kGlyphH;
-	return face->lineHeight;
+	return MeasureLineHeight(face);
 }
 
 int SystemFont::MeasureHeight(FontRole role)

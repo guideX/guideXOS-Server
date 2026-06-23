@@ -91,6 +91,14 @@ public:
 	static const BitmapFontFace* GetFallbackFace();
 	static int MeasureWidth(const BitmapFontFace* face, const char* str, int len = -1);
 	static int MeasureWidth(FontRole role, const char* str, int len = -1);
+	static int MeasureAscent(const BitmapFontFace* face);
+	static int MeasureAscent(FontRole role);
+	static int MeasureDescent(const BitmapFontFace* face);
+	static int MeasureDescent(FontRole role);
+	static int MeasureLineHeight(const BitmapFontFace* face);
+	static int MeasureLineHeight(FontRole role);
+	static int BaselineOffset(const BitmapFontFace* face);
+	static int BaselineOffset(FontRole role);
 	static int MeasureHeight(const BitmapFontFace* face);
 	static int MeasureHeight(FontRole role);
 

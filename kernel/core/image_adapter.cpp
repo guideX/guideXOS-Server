@@ -57,7 +57,9 @@ namespace gxos {
 namespace gui {
 namespace {
 
-static const uint32_t kKernelImageFileScratchBytes = 512u * 1024u;
+// Keep the kernel-side preview path bounded, but large enough for wallpaper-sized PNGs.
+static const uint32_t kKernelImageDefaultMaxBytes = 8u * 1024u * 1024u;
+static const uint32_t kKernelImageFileScratchBytes = kKernelImageDefaultMaxBytes;
 static uint8_t s_kernelImageFileScratch[kKernelImageFileScratchBytes];
 
 static bool ends_with_png(const char* path)
@@ -102,6 +104,23 @@ static bool dimensions_within_limits(uint32_t width, uint32_t height, const Imag
     return pixels <= limits.maxPixels;
 }
 
+static bool is_default_limits(const ImageSafetyLimits& limits)
+{
+    ImageSafetyLimits defaultLimits = DefaultImageSafetyLimits();
+    return limits.maxBytes == defaultLimits.maxBytes &&
+           limits.maxWidth == defaultLimits.maxWidth &&
+           limits.maxHeight == defaultLimits.maxHeight &&
+           limits.maxPixels == defaultLimits.maxPixels;
+}
+
+static ImageSafetyLimits resolve_bare_metal_limits(const ImageSafetyLimits& limits)
+{
+    if (!is_default_limits(limits)) return limits;
+    ImageSafetyLimits resolved = limits;
+    resolved.maxBytes = kKernelImageDefaultMaxBytes;
+    return resolved;
+}
+
 } // namespace
 
 const char* ImageLoadStatusName(ImageLoadStatus status)
@@ -119,6 +138,7 @@ const char* ImageLoadStatusName(ImageLoadStatus status)
 
 ImageProbe ImageAdapter::ProbeBytes(const uint8_t* bytes, uint32_t byteCount, const ImageSafetyLimits& limits)
 {
+    ImageSafetyLimits effectiveLimits = resolve_bare_metal_limits(limits);
     ImageProbe probe{};
     probe.status = ImageLoadStatus::UnsupportedFormat;
     probe.width = 0;
@@ -128,7 +148,7 @@ ImageProbe ImageAdapter::ProbeBytes(const uint8_t* bytes, uint32_t byteCount, co
         probe.status = ImageLoadStatus::NotFound;
         return probe;
     }
-    if (byteCount > limits.maxBytes) {
+    if (byteCount > effectiveLimits.maxBytes) {
         probe.status = ImageLoadStatus::TooLarge;
         return probe;
     }
@@ -142,7 +162,7 @@ ImageProbe ImageAdapter::ProbeBytes(const uint8_t* bytes, uint32_t byteCount, co
 
     probe.width = width;
     probe.height = height;
-    if (!dimensions_within_limits(width, height, limits)) {
+    if (!dimensions_within_limits(width, height, effectiveLimits)) {
         probe.status = ImageLoadStatus::TooLarge;
         return probe;
     }
@@ -153,6 +173,7 @@ ImageProbe ImageAdapter::ProbeBytes(const uint8_t* bytes, uint32_t byteCount, co
 
 ImageProbe ImageAdapter::ProbeFile(const char* path, const ImageSafetyLimits& limits)
 {
+    ImageSafetyLimits effectiveLimits = resolve_bare_metal_limits(limits);
     ImageProbe probe{};
     probe.status = ImageLoadStatus::NotFound;
     probe.width = 0;
@@ -169,7 +190,7 @@ ImageProbe ImageAdapter::ProbeFile(const char* path, const ImageSafetyLimits& li
         probe.status = ImageLoadStatus::NotFound;
         return probe;
     }
-    if (info.size > limits.maxBytes) {
+    if (info.size > effectiveLimits.maxBytes) {
         probe.status = ImageLoadStatus::TooLarge;
         return probe;
     }
@@ -181,12 +202,13 @@ ImageProbe ImageAdapter::ProbeFile(const char* path, const ImageSafetyLimits& li
         return probe;
     }
 
-    return ProbeBytes(header, (uint32_t)read, limits);
+    return ProbeBytes(header, (uint32_t)read, effectiveLimits);
 }
 
 ImageBitmap ImageAdapter::LoadFromFile(const char* path, const ImageSafetyLimits& limits)
 {
-    ImageProbe probe = ProbeFile(path, limits);
+    ImageSafetyLimits effectiveLimits = resolve_bare_metal_limits(limits);
+    ImageProbe probe = ProbeFile(path, effectiveLimits);
     ImageBitmap bitmap{};
     bitmap.status = probe.status;
     bitmap.pixels = nullptr;
@@ -199,7 +221,7 @@ ImageBitmap ImageAdapter::LoadFromFile(const char* path, const ImageSafetyLimits
         bitmap.status = ImageLoadStatus::NotFound;
         return bitmap;
     }
-    if (info.size > limits.maxBytes || info.size > kKernelImageFileScratchBytes) {
+    if (info.size > effectiveLimits.maxBytes || info.size > kKernelImageFileScratchBytes) {
         bitmap.status = ImageLoadStatus::TooLarge;
         return bitmap;
     }
@@ -208,18 +230,23 @@ ImageBitmap ImageAdapter::LoadFromFile(const char* path, const ImageSafetyLimits
         bitmap.status = ImageLoadStatus::DecodeFailed;
         return bitmap;
     }
-    return LoadFromBytes(s_kernelImageFileScratch, (uint32_t)read, limits);
+    return LoadFromBytes(s_kernelImageFileScratch, (uint32_t)read, effectiveLimits);
 }
 
 ImageBitmap ImageAdapter::LoadFromBytes(const uint8_t* bytes, uint32_t byteCount, const ImageSafetyLimits& limits)
 {
-    ImageProbe probe = ProbeBytes(bytes, byteCount, limits);
+    ImageSafetyLimits effectiveLimits = resolve_bare_metal_limits(limits);
+    ImageProbe probe = ProbeBytes(bytes, byteCount, effectiveLimits);
     ImageBitmap bitmap{};
     bitmap.status = probe.status;
     bitmap.pixels = nullptr;
     bitmap.width = probe.width;
     bitmap.height = probe.height;
     if (probe.status != ImageLoadStatus::Ok) return bitmap;
+    if (byteCount > 0x7FFFFFFFu) {
+        bitmap.status = ImageLoadStatus::TooLarge;
+        return bitmap;
+    }
 
     int width = 0;
     int height = 0;
@@ -231,14 +258,20 @@ ImageBitmap ImageAdapter::LoadFromBytes(const uint8_t* bytes, uint32_t byteCount
         return bitmap;
     }
 
-    if (!dimensions_within_limits((uint32_t)width, (uint32_t)height, limits)) {
+    if (!dimensions_within_limits((uint32_t)width, (uint32_t)height, effectiveLimits)) {
         bitmap.status = ImageLoadStatus::TooLarge;
         stbi_image_free(decoded);
         return bitmap;
     }
 
     uint64_t pixelCount64 = (uint64_t)width * (uint64_t)height;
-    if (pixelCount64 > limits.maxPixels) {
+    if (pixelCount64 > effectiveLimits.maxPixels) {
+        bitmap.status = ImageLoadStatus::TooLarge;
+        stbi_image_free(decoded);
+        return bitmap;
+    }
+    uint64_t maxAllocPixels = (uint64_t)(static_cast<size_t>(-1) / sizeof(uint32_t));
+    if (pixelCount64 > maxAllocPixels) {
         bitmap.status = ImageLoadStatus::TooLarge;
         stbi_image_free(decoded);
         return bitmap;

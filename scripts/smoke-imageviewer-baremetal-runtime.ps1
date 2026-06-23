@@ -1,6 +1,10 @@
 param(
     [switch]$SkipBuild,
-    [int]$TimeoutSeconds = 240
+    [int]$TimeoutSeconds = 240,
+    [string]$AssetPath = "/system/wall/ivsmoke.png",
+    [string]$FallbackPath = "/system/wall/imageviewer-runtime-smoke-placeholder.png",
+    [string]$SmokeLabel = "runtime",
+    [switch]$StrictLargePng
 )
 
 $ErrorActionPreference = "Stop"
@@ -9,10 +13,12 @@ $LogDir = Join-Path $Root "logs"
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 
 $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
-$serialLog = Join-Path $LogDir "imageviewer-baremetal-runtime-$stamp.serial.log"
-$evidencePath = Join-Path $LogDir "imageviewer-baremetal-runtime.evidence.txt"
-$assetPath = "/system/wall/ivsmoke.png"
-$fallbackPath = "/system/wall/imageviewer-runtime-smoke-placeholder.png"
+$smokeLabel = if ([string]::IsNullOrWhiteSpace($SmokeLabel)) { "runtime" } else { $SmokeLabel.Trim() }
+$assetPath = if ([string]::IsNullOrWhiteSpace($AssetPath)) { "/system/wall/ivsmoke.png" } else { $AssetPath.Trim() }
+$fallbackPath = if ([string]::IsNullOrWhiteSpace($FallbackPath)) { "/system/wall/imageviewer-runtime-smoke-placeholder.png" } else { $FallbackPath.Trim() }
+$strictLargePng = $StrictLargePng.IsPresent
+$serialLog = Join-Path $LogDir "imageviewer-baremetal-$smokeLabel-$stamp.serial.log"
+$evidencePath = Join-Path $LogDir "imageviewer-baremetal-$smokeLabel.evidence.txt"
 
 function Invoke-KernelBuildForSmoke {
     param([string]$ExtraCFlags)
@@ -104,8 +110,12 @@ function Write-EvidenceFile {
         [string]$SelectedMode,
         [string]$LaunchPath,
         [bool]$LaunchOk,
+        [string]$LoadPath,
+        [string]$LoadStatus,
+        [string]$LoadDimensions,
         [string]$PaintMode,
         [string]$PaintPath,
+        [string]$PaintDimensions,
         [string]$PaintStatus,
         [string]$SerialLogPath
     )
@@ -123,8 +133,12 @@ function Write-EvidenceFile {
         "selectedMode=$SelectedMode",
         "launchPath=$LaunchPath",
         "launchResult=$(if ($LaunchOk) { 'PASS' } else { 'FAIL' })",
+        "loadPath=$LoadPath",
+        "loadStatus=$LoadStatus",
+        "loadDimensions=$LoadDimensions",
         "paintMode=$PaintMode",
         "paintPath=$PaintPath",
+        "paintDimensions=$PaintDimensions",
         "paintStatus=$PaintStatus",
         "serialLog=$SerialLogPath"
     )
@@ -157,7 +171,23 @@ function Invoke-ImageViewerSmokeBuild {
     }
 
     Write-Host "Building kernel with active imageviewer runtime smoke diagnostics..."
-    Invoke-KernelBuildForSmoke "-DGXOS_IMAGEVIEWER_BARE_METAL_RUNTIME_SMOKE_ACTIVE"
+    $oldSmokePath = $env:GXOS_IMAGEVIEWER_RUNTIME_SMOKE_PNG_PATH
+    if ($smokeLabel -eq "large-png") {
+        $env:GXOS_IMAGEVIEWER_RUNTIME_SMOKE_PNG_PATH = "/system/wall/arrowbgx.png"
+    } else {
+        Remove-Item Env:\GXOS_IMAGEVIEWER_RUNTIME_SMOKE_PNG_PATH -ErrorAction SilentlyContinue
+    }
+
+    try {
+        $kernelSmokeFlags = "-DGXOS_IMAGEVIEWER_BARE_METAL_RUNTIME_SMOKE_ACTIVE"
+        Invoke-KernelBuildForSmoke $kernelSmokeFlags
+    } finally {
+        if ($null -ne $oldSmokePath) {
+            $env:GXOS_IMAGEVIEWER_RUNTIME_SMOKE_PNG_PATH = $oldSmokePath
+        } else {
+            Remove-Item Env:\GXOS_IMAGEVIEWER_RUNTIME_SMOKE_PNG_PATH -ErrorAction SilentlyContinue
+        }
+    }
     $script:activeSmokeBuild = $true
 }
 
@@ -199,6 +229,7 @@ try {
     $proc = Start-Process -FilePath $qemu -ArgumentList $args -PassThru -WindowStyle Hidden
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     $launchOk = $false
+    $loadSeen = $false
     $paintSeen = $false
     $resultSeen = $false
     while (-not $proc.HasExited -and (Get-Date) -lt $deadline) {
@@ -208,7 +239,10 @@ try {
             if ($observedOutput -match '\[IMAGEVIEWER-RUNTIME-SMOKE\] launch app=ImageViewer path=.* result=PASS') {
                 $launchOk = $true
             }
-            if ($observedOutput -match '\[IMAGEVIEWER-RUNTIME-SMOKE\] paint=(png|placeholder) path=.* status=\S+') {
+            if ($observedOutput -match '\[IMAGEVIEWER-RUNTIME-SMOKE\] load path=.* sizeBytes=.* dims=\d+x\d+ status=\S+') {
+                $loadSeen = $true
+            }
+            if ($observedOutput -match '\[IMAGEVIEWER-RUNTIME-SMOKE\] paint=(png|placeholder) path=.* dims=\d+x\d+ status=\S+') {
                 $paintSeen = $true
             }
             if ($observedOutput -match '\[IMAGEVIEWER-RUNTIME-SMOKE\] result=PASS') {
@@ -217,7 +251,7 @@ try {
             if ($observedOutput -match '\[IMAGEVIEWER-RUNTIME-SMOKE\] result=FAIL') {
                 break
             }
-            if ($launchOk -and $paintSeen -and $resultSeen) {
+            if ($launchOk -and $loadSeen -and $paintSeen -and $resultSeen) {
                 break
             }
         }
@@ -237,10 +271,12 @@ Write-Host $output
 
 $lines = if (Test-Path $serialLog) { Get-Content -LiteralPath $serialLog } else { @() }
 $assetLineText = $lines | Where-Object { $_.StartsWith("[IMAGEVIEWER-RUNTIME-SMOKE] asset path=") } | Select-Object -First 1
+$loadLineText = $lines | Where-Object { $_.StartsWith("[IMAGEVIEWER-RUNTIME-SMOKE] load path=") } | Select-Object -First 1
 $launchLineText = $lines | Where-Object { $_.StartsWith("[IMAGEVIEWER-RUNTIME-SMOKE] launch app=ImageViewer ") } | Select-Object -First 1
 $paintLineText = $lines | Where-Object { $_.StartsWith("[IMAGEVIEWER-RUNTIME-SMOKE] paint=") } | Select-Object -First 1
 
 $assetLine = $null
+$loadLine = $null
 $launchLine = $null
 $paintLine = $null
 if ($assetLineText -and $assetLineText -match '^\[IMAGEVIEWER-RUNTIME-SMOKE\] asset path=(?<assetPath>.*?) exists=(?<exists>PASS|FAIL) selectedMode=(?<selectedMode>png|placeholder) launchPath=(?<launchPath>.*)$') {
@@ -251,16 +287,27 @@ if ($assetLineText -and $assetLineText -match '^\[IMAGEVIEWER-RUNTIME-SMOKE\] as
         LaunchPath = $Matches.launchPath.Trim()
     }
 }
+if ($loadLineText -and $loadLineText -match '^\[IMAGEVIEWER-RUNTIME-SMOKE\] load path=(?<loadPath>.*?) sizeBytes=(?<sizeBytes>.*?) dims=(?<loadWidth>\d+)x(?<loadHeight>\d+) status=(?<loadStatus>\S+)$') {
+    $loadLine = [pscustomobject]@{
+        LoadPath = $Matches.loadPath.Trim()
+        SizeBytes = $Matches.sizeBytes.Trim()
+        LoadWidth = [int]$Matches.loadWidth.Trim()
+        LoadHeight = [int]$Matches.loadHeight.Trim()
+        LoadStatus = $Matches.loadStatus.Trim()
+    }
+}
 if ($launchLineText -and $launchLineText -match '^\[IMAGEVIEWER-RUNTIME-SMOKE\] launch app=ImageViewer path=(?<launchPath>.*?) result=(?<result>PASS|FAIL)$') {
     $launchLine = [pscustomobject]@{
         LaunchPath = $Matches.launchPath.Trim()
         Result = $Matches.result.Trim()
     }
 }
-if ($paintLineText -and $paintLineText -match '^\[IMAGEVIEWER-RUNTIME-SMOKE\] paint=(?<paintMode>png|placeholder) path=(?<paintPath>.*?) status=(?<paintStatus>\S+)$') {
+if ($paintLineText -and $paintLineText -match '^\[IMAGEVIEWER-RUNTIME-SMOKE\] paint=(?<paintMode>png|placeholder) path=(?<paintPath>.*?) dims=(?<paintWidth>\d+)x(?<paintHeight>\d+) status=(?<paintStatus>\S+)$') {
     $paintLine = [pscustomobject]@{
         PaintMode = $Matches.paintMode.Trim()
         PaintPath = $Matches.paintPath.Trim()
+        PaintWidth = [int]$Matches.paintWidth.Trim()
+        PaintHeight = [int]$Matches.paintHeight.Trim()
         PaintStatus = $Matches.paintStatus.Trim()
     }
 }
@@ -270,13 +317,27 @@ $resultPass = Test-SerialLogContains -Path $serialLog -Pattern "[IMAGEVIEWER-RUN
 $resultFail = Test-SerialLogContains -Path $serialLog -Pattern "[IMAGEVIEWER-RUNTIME-SMOKE] result=FAIL"
 $launchPass = $launchLine -and $launchLine.Result -eq "PASS"
 $selectedModePass = $assetLine -and $assetLine.Exists -eq "PASS" -and $assetLine.SelectedMode -eq "png" -and $assetLine.LaunchPath -eq $assetLine.AssetPath
-$paintPass = $null -ne $paintLine -and $paintLine.PaintMode -eq "png" -and $paintLine.PaintStatus -eq "Loaded" -and $paintLine.PaintPath -eq $assetPath
+$loadPass = $null -ne $loadLine -and $loadLine.LoadPath -eq $assetPath -and $loadLine.LoadStatus -eq "Loaded" -and $loadLine.LoadWidth -gt 0 -and $loadLine.LoadHeight -gt 0
+$paintPass = $null -ne $paintLine -and $paintLine.PaintMode -eq "png" -and $paintLine.PaintStatus -eq "Loaded" -and $paintLine.PaintPath -eq $assetPath -and $paintLine.PaintWidth -gt 0 -and $paintLine.PaintHeight -gt 0
 $selectedMode = if ($assetLine) { $assetLine.SelectedMode } else { "unknown" }
 $expectedLaunchPath = if ($assetLine) { $assetLine.LaunchPath } else { "" }
+$loadStatus = if ($loadLine) { $loadLine.LoadStatus } else { "" }
+$loadDimensions = if ($loadLine) { "$($loadLine.LoadWidth)x$($loadLine.LoadHeight)" } else { "" }
 $paintMode = if ($paintLine) { $paintLine.PaintMode } else { "missing" }
 $paintPath = if ($paintLine) { $paintLine.PaintPath } else { "" }
+$paintDimensions = if ($paintLine) { "$($paintLine.PaintWidth)x$($paintLine.PaintHeight)" } else { "" }
 $paintStatus = if ($paintLine) { $paintLine.PaintStatus } else { "" }
-$overallPass = $startMarker -and $launchPass -and $selectedModePass -and $paintPass -and $resultPass -and (-not $resultFail)
+$strictFailureReason = $null
+if ($strictLargePng) {
+    if ($output.Contains("TooLarge")) {
+        $strictFailureReason = "The strict large-PNG smoke observed TooLarge in the runtime evidence."
+    } elseif ($output.Contains("paint=placeholder")) {
+        $strictFailureReason = "The strict large-PNG smoke observed a placeholder paint path in the runtime evidence."
+    } elseif ($output.Contains("status=NotFound")) {
+        $strictFailureReason = "The strict large-PNG smoke observed NotFound in the runtime evidence."
+    }
+}
+$overallPass = $startMarker -and $launchPass -and $selectedModePass -and $loadPass -and $paintPass -and $resultPass -and (-not $resultFail) -and ($null -eq $strictFailureReason)
 
 Write-EvidenceFile `
     -Result $(if ($overallPass) { "PASS" } else { "FAIL" }) `
@@ -284,31 +345,39 @@ Write-EvidenceFile `
     -SelectedMode $selectedMode `
     -LaunchPath $(if ($launchLine) { $launchLine.LaunchPath } else { $expectedLaunchPath }) `
     -LaunchOk $launchPass `
+    -LoadStatus $loadStatus `
+    -LoadDimensions $loadDimensions `
+    -LoadPath $(if ($loadLine) { $loadLine.LoadPath } else { "" }) `
     -PaintMode $paintMode `
     -PaintPath $paintPath `
+    -PaintDimensions $paintDimensions `
     -PaintStatus $paintStatus `
     -SerialLogPath $serialLog
 
 if ($overallPass) {
-    Write-Host "Image Viewer bare-metal runtime smoke PASS. Serial log: $serialLog"
-    Write-Host "Image Viewer bare-metal runtime evidence: $evidencePath"
+    Write-Host "Image Viewer bare-metal $smokeLabel smoke PASS. Serial log: $serialLog"
+    Write-Host "Image Viewer bare-metal $smokeLabel evidence: $evidencePath"
     exit 0
 }
 
-Write-Host "Image Viewer bare-metal runtime smoke FAIL. Serial log: $serialLog" -ForegroundColor Red
-Write-Host "Image Viewer bare-metal runtime evidence: $evidencePath" -ForegroundColor Red
+Write-Host "Image Viewer bare-metal $smokeLabel smoke FAIL. Serial log: $serialLog" -ForegroundColor Red
+Write-Host "Image Viewer bare-metal $smokeLabel evidence: $evidencePath" -ForegroundColor Red
 if ($assetLine) {
     Write-Host "Expected PNG fixture: $assetPath; fallback placeholder: $fallbackPath"
     Write-Host "Observed selectedMode=$($assetLine.SelectedMode) launchPath=$($assetLine.LaunchPath) exists=$($assetLine.Exists)"
 }
 if ($paintLine) {
-    Write-Host "Observed paintMode=$($paintLine.PaintMode) paintPath=$($paintLine.PaintPath) paintStatus=$($paintLine.PaintStatus)"
+    Write-Host "Observed paintMode=$($paintLine.PaintMode) paintPath=$($paintLine.PaintPath) paintDimensions=$paintDimensions paintStatus=$($paintLine.PaintStatus)"
 }
 if ($resultFail) {
     Write-Host "The runtime smoke reported a failure result in the kernel log." -ForegroundColor Red
 } else {
-    if ($assetLine -and $assetLine.SelectedMode -ne "png") {
+    if ($strictFailureReason) {
+        Write-Host $strictFailureReason -ForegroundColor Red
+    } elseif ($assetLine -and $assetLine.SelectedMode -ne "png") {
         Write-Host "The runtime smoke fell back to the placeholder path instead of the guaranteed PNG fixture." -ForegroundColor Red
+    } elseif ($loadLine -and $loadLine.LoadStatus -ne "Loaded") {
+        Write-Host "The runtime smoke did not report a Loaded PNG load result." -ForegroundColor Red
     } elseif ($paintLine -and $paintLine.PaintStatus -ne "Loaded") {
         Write-Host "The runtime smoke did not report a Loaded PNG paint result." -ForegroundColor Red
     } else {

@@ -2232,6 +2232,7 @@ namespace gxos {
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)
         uint64_t Compositor::hitTestTaskbarButton(int mx, int my, RECT cr, int taskbarH) {
             (void)taskbarH;
+            const DesktopTheme& theme = GetCurrentDesktopTheme();
             WorkRect tb = taskbarRectForBounds(cr.right - cr.left, cr.bottom - cr.top);
             if (mx < tb.left || mx >= tb.right || my < tb.top || my >= tb.bottom) return 0;
             bool vertical = g_taskbarPosition == TaskbarPosition::Left || g_taskbarPosition == TaskbarPosition::Right;
@@ -2241,12 +2242,12 @@ namespace gxos {
                 auto it = g_windows.find(id);
                 if (it == g_windows.end( )) continue;
                 std::string label = it->second.title;
-                int bw = vertical ? (tb.right - tb.left - 8) : measureUiText(label.c_str(), (int)label.size(), FontRole::Small) + 30;
+                int bw = vertical ? (tb.right - tb.left - 8) : measureUiText(label.c_str(), (int)label.size(), FontRole::Small) + theme.taskbarItemPadding * 2 + 12;
                 if (!vertical && bw > 180) bw = 180;
                 int bh = vertical ? 28 : (tb.bottom - tb.top - 12);
                 RECT br{ btnX, btnY, btnX + bw, btnY + bh };
                 if (mx >= br.left && mx <= br.right && my >= br.top && my <= br.bottom) return id;
-                if (vertical) btnY += bh + 4; else btnX += bw + 6;
+                if (vertical) btnY += bh + 4; else btnX += bw + theme.taskbarItemPadding / 2;
             }
             return 0;
         }
@@ -2568,11 +2569,11 @@ namespace gxos {
                     for (uint64_t id : g_z) {
                         auto it = g_windows.find(id); if (it == g_windows.end( )) continue;
                         std::string label = it->second.title;
-                        int bw = measureUiText(label.c_str(), (int)label.size(), FontRole::Small) + 30; if (bw > 180) bw = 180;
+                        int bw = measureUiText(label.c_str(), (int)label.size(), FontRole::Small) + theme.taskbarItemPadding * 2 + 12; if (bw > 180) bw = 180;
                         RECT br2{ tbtnX, tb.top + 6, tbtnX + bw, tb.bottom - 6 };
                         bool hov = (cursor.x >= br2.left && cursor.x <= br2.right && cursor.y >= br2.top && cursor.y <= br2.bottom);
                         if (hov) { drawTaskbarTooltip(dc, (br2.left + br2.right) / 2, tb.top, label.c_str( )); break; }
-                        tbtnX += bw + 4;
+                        tbtnX += bw + theme.taskbarItemPadding / 2;
                     }
                 }
                 // Notification toasts (top-right, matching Legacy NotificationManager.cs)
@@ -3374,14 +3375,16 @@ namespace gxos {
             if (topW) { // compute button rects for this window
                 const int btnSize = std::max(12, titleBarH - theme.controlPadding * 2);
                 const int btnGap = theme.titleButtonGap;
+                int btnY = topW->y + theme.controlPadding;
                 int closeLeft = topW->x + topW->w - theme.controlPadding - btnSize;
                 int tombLeft = closeLeft - btnGap - btnSize;
                 int maxLeft = tombLeft - btnGap - btnSize;
                 int minLeft = maxLeft - btnGap - btnSize;
-                bool overClose = (mx >= closeLeft && mx < closeLeft + btnSize && my >= topW->y && my < topW->y + titleBarH);
-                bool overTomb = (mx >= tombLeft && mx < tombLeft + btnSize && my >= topW->y && my < topW->y + titleBarH);
-                bool overMax = (mx >= maxLeft && mx < maxLeft + btnSize && my >= topW->y && my < topW->y + titleBarH);
-                bool overMin = (mx >= minLeft && mx < minLeft + btnSize && my >= topW->y && my < topW->y + titleBarH);
+                bool overClose = (mx >= closeLeft && mx < closeLeft + btnSize && my >= btnY && my < btnY + btnSize);
+                bool overTomb = (mx >= tombLeft && mx < tombLeft + btnSize && my >= btnY && my < btnY + btnSize);
+                bool overMax = (mx >= maxLeft && mx < maxLeft + btnSize && my >= btnY && my < btnY + btnSize);
+                bool overMin = (mx >= minLeft && mx < minLeft + btnSize && my >= btnY && my < btnY + btnSize);
+                bool overAnyButton = overClose || overTomb || overMax || overMin;
                 // mouse move -> update hover
                 if (!down && !up) { 
                     if (topW->titleBtnCloseHover != overClose) { topW->titleBtnCloseHover = overClose; invalidate(topW->id); } 
@@ -3395,6 +3398,10 @@ namespace gxos {
                     if (overTomb) { topW->titleBtnTombPressed = true; invalidate(topW->id); }
                     if (overMax) { topW->titleBtnMaxPressed = true; invalidate(topW->id); } 
                     if (overMin) { topW->titleBtnMinPressed = true; invalidate(topW->id); } 
+                }
+                if (down && overAnyButton) {
+                    g_dragPending = false;
+                    g_dragPendingWin = 0;
                 }
                 // mouse up -> perform action if pressed
                 if (up) {
@@ -3443,7 +3450,7 @@ namespace gxos {
                 }
             }
 
-            if (topW) { int wx = mx - topW->x; int wy = my - topW->y - titleBarH; for (auto& wd : topW->widgets) { bool over = (wx >= wd.x && wx < wd.x + wd.w && wy >= wd.y && wy < wd.y + wd.h); if (!down && !up) { if (wd.hover != over) { wd.hover = over; invalidate(topW->id); } } else if (down) { if (over) { wd.pressed = true; wd.hover = true; invalidate(topW->id); } } else if (up) { if (wd.pressed) { if (over) { emitWidgetEvt(topW->id, wd.id, "click", ""); Logger::write(LogLevel::Info, std::string("Widget clicked: ") + std::to_string(topW->id) + "/" + std::to_string(wd.id)); } wd.pressed = false; wd.hover = false; invalidate(topW->id); } } } }
+            if (topW) { int wx = mx - topW->x - theme.windowPadding; int wy = my - topW->y - titleBarH - theme.windowPadding; for (auto& wd : topW->widgets) { bool over = (wx >= wd.x && wx < wd.x + wd.w && wy >= wd.y && wy < wd.y + wd.h); if (!down && !up) { if (wd.hover != over) { wd.hover = over; invalidate(topW->id); } } else if (down) { if (over) { wd.pressed = true; wd.hover = true; invalidate(topW->id); } } else if (up) { if (wd.pressed) { if (over) { emitWidgetEvt(topW->id, wd.id, "click", ""); Logger::write(LogLevel::Info, std::string("Widget clicked: ") + std::to_string(topW->id) + "/" + std::to_string(wd.id)); } wd.pressed = false; wd.hover = false; invalidate(topW->id); } } } }
             // move while dragging
             if (g_dragActive && !up) { auto it = g_windows.find(g_dragWin); if (it != g_windows.end( )) { WinInfo& w = it->second; if (!w.maximized && !w.minimized && !w.tombstoned) { int nx = mx - g_dragOffX; int ny = my - g_dragOffY; if (nx < work.left) nx = work.left; if (ny < work.top) ny = work.top; if (nx + w.w > work.right) nx = work.right - w.w; if (ny + w.h > work.bottom) ny = work.bottom - w.h; if (nx != w.x || ny != w.y) { w.x = nx; w.y = ny; w.dirty = true; invalidate(w.id); } } } }
             if (down) { uint64_t t = nowMs( ); for (int idx = (int)g_z.size( ) - 1; idx >= 0; --idx) { uint64_t wid = g_z[idx]; WinInfo& w = g_windows[wid]; if (w.minimized || w.tombstoned) continue; if (mx >= w.x && mx < w.x + w.w && my >= w.y && my < w.y + titleBarH) { if (g_lastClickWin == w.id && (t - g_lastClickTicks) < 450) { if (!w.minimized) { if (!w.maximized) { w.prevX = w.x; w.prevY = w.y; w.prevW = w.w; w.prevH = w.h; w.x = work.left; w.y = work.top; w.w = work.right - work.left; w.h = work.bottom - work.top; w.maximized = true; } else { w.x = w.prevX; w.y = w.prevY; w.w = w.prevW; w.h = w.prevH; w.maximized = false; } } g_lastClickWin = 0; g_lastClickTicks = 0; invalidate(w.id); return; } g_lastClickWin = w.id; g_lastClickTicks = t; break; } } }

@@ -3109,9 +3109,51 @@ void run_live_directory_runtime_smoke()
 #endif
 
 #if defined(GXOS_IMAGEVIEWER_BARE_METAL_RUNTIME_SMOKE_ACTIVE) && defined(GXOS_BARE_METAL)
+static const char* resolve_imageviewer_runtime_smoke_path()
+{
+    static char s_smokePath[128];
+    s_smokePath[0] = '\0';
+
+    const char* configPath = "/system/config/navigator/imageviewer-runtime-smoke-path.txt";
+    vfs::FileInfo info{};
+    const vfs::Status configStatus = vfs::stat(configPath, &info);
+    serial::puts("[IMAGEVIEWER-RUNTIME-SMOKE] config probe path=");
+    serial::puts(configPath);
+    serial::puts(" status=");
+    serial::puts(configStatus == vfs::VFS_OK ? "PASS" : "FAIL");
+    serial::puts(" sizeBytes=");
+    if (configStatus == vfs::VFS_OK) {
+        serial::put_hex32(info.size);
+    } else {
+        serial::puts("0");
+    }
+    serial::puts("\n");
+
+    if (configStatus == vfs::VFS_OK && info.type == vfs::FILE_TYPE_REGULAR && info.size > 0) {
+        uint32_t bytesToRead = info.size < (sizeof(s_smokePath) - 1) ? info.size : (uint32_t)(sizeof(s_smokePath) - 1);
+        int32_t read = vfs::read_file(configPath, s_smokePath, bytesToRead);
+        if (read > 0) {
+            uint32_t len = (uint32_t)read;
+            while (len > 0) {
+                char c = s_smokePath[len - 1];
+                if (c == '\0' || c == '\n' || c == '\r' || c == ' ' || c == '\t') {
+                    s_smokePath[--len] = '\0';
+                } else {
+                    break;
+                }
+            }
+            if (s_smokePath[0]) {
+                return s_smokePath;
+            }
+        }
+    }
+
+    return "/system/wall/ivsmoke.png";
+}
+
 void run_imageviewer_runtime_smoke()
 {
-    const char* pngPath = "/system/wall/ivsmoke.png";
+    const char* pngPath = resolve_imageviewer_runtime_smoke_path();
     const char* fallbackPath = "/system/wall/imageviewer-runtime-smoke-placeholder.png";
     const char* launchPath = fallbackPath;
     const char* selectedMode = "placeholder";

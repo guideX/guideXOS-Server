@@ -208,7 +208,7 @@ namespace {
 
 	int chromeLineHeight()
 	{
-		return SystemFont::MeasureHeight(FontRole::Default);
+		return SystemFont::MeasureLineHeight(FontRole::Default);
 	}
 
 	int centeredChromeTextY(int top, int height)
@@ -227,9 +227,46 @@ namespace {
 	constexpr int kCharW    = 8;   // approximate character cell width in pixels
 	constexpr int kLineH    = 18;  // matches current SystemFont default line box
 
+	struct TextMetrics {
+		int ascent = 0;
+		int descent = 0;
+		int baseline = 0;
+		int lineHeight = 0;
+		int underlineOffset = 0;
+		bool descenderSafe = false;
+		const char* backend = "navigator-approx";
+	};
+
+	static TextMetrics defaultTextMetrics()
+	{
+		static const TextMetrics metrics = []() {
+			const BitmapFontFace* face = SystemFont::GetFace(FontRole::Default);
+			TextMetrics value;
+			value.ascent = std::max(1, SystemFont::MeasureAscent(face));
+			value.descent = std::max(1, SystemFont::MeasureDescent(face));
+			value.baseline = std::max(1, SystemFont::BaselineOffset(face));
+			value.lineHeight = std::max(1, SystemFont::MeasureLineHeight(face));
+			value.underlineOffset = std::max(1, value.descent / 2);
+			value.descenderSafe = value.lineHeight >= value.ascent + value.descent;
+			if (!face || face->fallback) {
+				value.backend = "navigator-approx";
+			} else {
+#if defined(GXOS_BARE_METAL)
+				value.backend = "kernel-system-font";
+#elif defined(_WIN32)
+				value.backend = "hosted-gdi";
+#else
+				value.backend = "navigator-approx";
+#endif
+			}
+			return value;
+		}();
+		return metrics;
+	}
+
 	static int defaultTextFontHeightPx()
 	{
-		static const int h = std::max(1, SystemFont::MeasureHeight(FontRole::Default));
+		static const int h = std::max(1, defaultTextMetrics().lineHeight);
 		return h;
 	}
 
@@ -237,13 +274,19 @@ namespace {
 	{
 		const int fontHeight = defaultTextFontHeightPx();
 		const int slack = std::max(0, lineHeight - fontHeight);
-		// Keep a little extra room below descenders while avoiding a tall top gap.
-		return std::max(1, slack / 3);
+		const TextMetrics metrics = defaultTextMetrics();
+		// Keep the box compact while biasing the spare room toward descenders.
+		return std::max(1, std::min(2, std::max(0, slack - metrics.descent) + 1));
 	}
 
 	static int textUnderlineYPx(int lineTop, int lineHeight)
 	{
-		return lineTop + std::max(1, lineHeight - 2);
+		const TextMetrics metrics = defaultTextMetrics();
+		const int topPadding = textLineTopPaddingPx(lineHeight);
+		const int baselineY = lineTop + topPadding + metrics.baseline;
+		const int underlineY = baselineY + std::max(1, metrics.underlineOffset);
+		const int safeBottom = lineTop + std::max(1, lineHeight - 2);
+		return std::min(underlineY, safeBottom);
 	}
 
 	// Wrap |text| into lines that fit within |maxChars| characters.
@@ -1373,7 +1416,7 @@ namespace {
 	{
 		const int fontSize = cssFontSizeOrDefault(block.style, defaultTextFontHeightPx());
 		const int lineHeight = cssLineHeightOrDefault(block.style, fontSize + 4);
-		return std::max(fontSize + 4, std::max(defaultTextFontHeightPx() + 4, lineHeight));
+		return std::max(fontSize + 2, std::max(defaultTextFontHeightPx() + 2, lineHeight));
 	}
 
 	static int blockTextX(const DocBlock& block, int outerX, int innerWidth, int lineWidth)
@@ -1649,6 +1692,7 @@ namespace {
 		const char* localSmokeTlsBlocker = gxos_tls_local_smoke_https_blocker_reason();
 		const bool tlsReady = gxos_tls_prerequisites_ready();
 		const char* tlsReadinessBlocker = gxos_tls_prerequisites_blocker_reason();
+		const TextMetrics textMetrics = defaultTextMetrics();
 		uint8_t rngSmokeByte = 0;
 		int64_t wallClockSeconds = 0;
 		char wallClockUtc[32] = {};
@@ -1810,9 +1854,16 @@ namespace {
 			{"Current Document", "CSS table captions rendered", std::to_string(cssTableCaptionCount)},
 			{"Current Document", "CSS table header cells rendered", std::to_string(cssTableHeaderCellCount)},
 			{"Current Document", "CSS visited links styled", std::to_string(cssVisitedLinkCount)},
-			{"Current Document", "Text metrics model", "system font default face"},
-			{"Current Document", "Text top padding px", std::to_string(textLineTopPaddingPx(defaultTextFontHeightPx() + 4))},
-			{"Current Document", "Text underline gap px", std::to_string((defaultTextFontHeightPx() + 4) - textUnderlineYPx(0, defaultTextFontHeightPx() + 4) - 1)},
+			{"Current Document", "text_metrics_model", "baseline/descent aware system font"},
+			{"Current Document", "text_backend", textMetrics.backend},
+			{"Current Document", "text_ascent_px", std::to_string(textMetrics.ascent)},
+			{"Current Document", "text_descent_px", std::to_string(textMetrics.descent)},
+			{"Current Document", "text_baseline_offset_px", std::to_string(textMetrics.baseline)},
+			{"Current Document", "text_line_height_default_px", std::to_string(textMetrics.lineHeight)},
+			{"Current Document", "text_underline_offset_px", std::to_string(textMetrics.underlineOffset)},
+			{"Current Document", "text_descender_safe", yesNo(textMetrics.descenderSafe)},
+			{"Current Document", "text_top_padding_px", std::to_string(textLineTopPaddingPx(defaultTextFontHeightPx() + 2))},
+			{"Current Document", "text_underline_gap_px", std::to_string((defaultTextFontHeightPx() + 2) - textUnderlineYPx(0, defaultTextFontHeightPx() + 2) - 1)},
 			{"Current Document", "Forms", std::to_string(formCount)},
 			{"Current Document", "Text inputs", std::to_string(formInputCount)},
 			{"Current Document", "Checkboxes", std::to_string(checkboxCount)},
@@ -4479,6 +4530,7 @@ WebDocument Navigator::buildAboutNavigatorDocument()
 	doc.blocks.push_back({BlockType::Heading,   "Features", ""});
 	doc.blocks.push_back({BlockType::ListItem,  "Headings, paragraphs, lists, and preformatted blocks", ""});
 	doc.blocks.push_back({BlockType::ListItem,  "Word-wrapped text for readable documents", ""});
+	doc.blocks.push_back({BlockType::ListItem,  "Baseline/descent-aware line boxes and underlines", ""});
 	doc.blocks.push_back({BlockType::ListItem,  "Relative link resolution for file:// and HTTP(S) pages", ""});
 	doc.blocks.push_back({BlockType::ListItem,  "HTTP(S) GET/POST with Schannel TLS on hosted Navigator", ""});
 	doc.blocks.push_back({BlockType::ListItem,  "Back / Forward / Reload / Home navigation", ""});

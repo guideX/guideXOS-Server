@@ -3,7 +3,8 @@ param(
     [string]$OutputDir = "out/wallpaper-pack",
     [string]$OutputImage = "ESP/ramdisk.img",
     [int]$ImageSizeMB = 64,
-    [switch]$SmokeCaFixture
+    [switch]$SmokeCaFixture,
+    [string]$ImageViewerRuntimeSmokePath
 )
 
 $ErrorActionPreference = "Stop"
@@ -17,6 +18,12 @@ $TrackedOutputRootCaBundlePath = Join-Path $OutputDir "certs\ca-bundle.pem"
 $TrackedOutputRootCaManifestCompatPath = Join-Path $OutputDir "certs\CABUNDLE.MAN"
 $NavigatorCaBundleManifestScript = Join-Path $ScriptDir "validate-navigator-ca-bundle.ps1"
 . (Join-Path $ScriptDir "navigator-public-https-reviewed-targets.ps1")
+$ImageViewerRuntimeSmokePath = if ([string]::IsNullOrWhiteSpace($ImageViewerRuntimeSmokePath)) {
+    $env:GXOS_IMAGEVIEWER_RUNTIME_SMOKE_PNG_PATH
+} else {
+    $ImageViewerRuntimeSmokePath
+}
+$ImageViewerRuntimeSmokePath = if ([string]::IsNullOrWhiteSpace($ImageViewerRuntimeSmokePath)) { "" } else { $ImageViewerRuntimeSmokePath.Trim() }
 $TrackedOutputRootCaBundleBytes = if (Test-Path -LiteralPath $TrackedOutputRootCaBundlePath -PathType Leaf) {
     [System.IO.File]::ReadAllBytes($TrackedOutputRootCaBundlePath)
 } else {
@@ -1029,6 +1036,15 @@ if ($realPublicProbeCaBundleInfo) {
 
     Write-Host "      staged real public CA metadata at /config/navigator/real-public-https-ca-bundle-*.txt" -ForegroundColor Yellow
 }
+if (-not [string]::IsNullOrWhiteSpace($ImageViewerRuntimeSmokePath)) {
+    $targetRuntimeSmokePath = Join-Path $configNavigatorDir "imageviewer-runtime-smoke-path.txt"
+    [System.IO.File]::WriteAllText($targetRuntimeSmokePath, $ImageViewerRuntimeSmokePath, [System.Text.Encoding]::ASCII)
+    $staged += Get-Item $targetRuntimeSmokePath
+    $targetRuntimeSmokePathCompat = Join-Path $configNavigatorDir "IMGRTPTH.TXT"
+    [System.IO.File]::WriteAllText($targetRuntimeSmokePathCompat, $ImageViewerRuntimeSmokePath, [System.Text.Encoding]::ASCII)
+    $staged += Get-Item $targetRuntimeSmokePathCompat
+    Write-Host "      staged Image Viewer runtime smoke path at /config/navigator/imageviewer-runtime-smoke-path.txt ($ImageViewerRuntimeSmokePath)" -ForegroundColor Yellow
+}
 
 foreach ($name in $WallpaperNames) {
     foreach ($suffix in @("", "_thumb")) {
@@ -1055,6 +1071,16 @@ foreach ($name in $WallpaperNames) {
         $staged += Get-Item $targetGximg
     }
 }
+
+# Deterministic large PNG fixture for the bare-metal Image Viewer smoke.
+$largeSmokeFixtureSource = Join-Path $InputDir "dinos.png"
+if (-not (Test-Path -LiteralPath $largeSmokeFixtureSource -PathType Leaf)) {
+    throw "Missing expected large Image Viewer smoke PNG fixture source: $largeSmokeFixtureSource"
+}
+$largeSmokeFixtureTarget = Join-Path $wallpaperDir "arrowbgx.png"
+Copy-Item -LiteralPath $largeSmokeFixtureSource -Destination $largeSmokeFixtureTarget -Force
+$staged += Get-Item $largeSmokeFixtureTarget
+Write-Host "      staged large Image Viewer smoke PNG fixture at /system/wall/arrowbgx.png" -ForegroundColor Yellow
 
 $imageViewerSmokeFixtureSource = Join-Path $RootDir "assets\Images\BlueVelvet\16\image.png"
 if (-not (Test-Path -LiteralPath $imageViewerSmokeFixtureSource -PathType Leaf)) {

@@ -5262,17 +5262,50 @@ void ImageViewerApp::loadImage(const char* path) {
         return;
     }
 
+    vfs::FileInfo info{};
+    const bool haveFileInfo = vfs::stat(path, &info) == vfs::VFS_OK;
     strcopy(m_imagePath, path, sizeof(m_imagePath));
     m_image = gxos::gui::ImageAdapter::LoadFromFile(path);
     if (m_image.status == gxos::gui::ImageLoadStatus::Ok && m_image.pixels && m_image.width > 0 && m_image.height > 0) {
         m_hasImage = true;
+        char widthText[16];
+        char heightText[16];
+        nav_int_to_text((int)m_image.width, widthText, sizeof(widthText));
+        nav_int_to_text((int)m_image.height, heightText, sizeof(heightText));
         strcopy(m_status, "Loaded PNG preview: ", sizeof(m_status));
-        strappend(m_status, path, sizeof(m_status));
-        return;
+        strappend(m_status, widthText, sizeof(m_status));
+        strappend(m_status, "x", sizeof(m_status));
+        strappend(m_status, heightText, sizeof(m_status));
+    } else {
+        strcopy(m_status, "Unable to load PNG: ", sizeof(m_status));
+        strappend(m_status, gxos::gui::ImageLoadStatusName(m_image.status), sizeof(m_status));
     }
 
-    strcopy(m_status, "Unable to load PNG: ", sizeof(m_status));
-    strappend(m_status, gxos::gui::ImageLoadStatusName(m_image.status), sizeof(m_status));
+#if defined(GXOS_IMAGEVIEWER_BARE_METAL_RUNTIME_SMOKE_ACTIVE) && defined(GXOS_BARE_METAL)
+    {
+        char widthText[16];
+        char heightText[16];
+        char sizeText[32];
+        nav_int_to_text((int)m_image.width, widthText, sizeof(widthText));
+        nav_int_to_text((int)m_image.height, heightText, sizeof(heightText));
+        if (haveFileInfo) {
+            nav_i64_to_text((int64_t)info.size, sizeText, sizeof(sizeText));
+        } else {
+            strcopy(sizeText, "unknown", sizeof(sizeText));
+        }
+        serial::puts("[IMAGEVIEWER-RUNTIME-SMOKE] load path=");
+        serial::puts(m_imagePath[0] ? m_imagePath : "(none)");
+        serial::puts(" sizeBytes=");
+        serial::puts(sizeText);
+        serial::puts(" dims=");
+        serial::puts(widthText);
+        serial::putc('x');
+        serial::puts(heightText);
+        serial::puts(" status=");
+        serial::puts(m_image.status == gxos::gui::ImageLoadStatus::Ok ? "Loaded" : gxos::gui::ImageLoadStatusName(m_image.status));
+        serial::puts("\n");
+    }
+#endif
 }
 
 void ImageViewerApp::drawPlaceholder(uint32_t x, uint32_t y, uint32_t w, uint32_t h) const {
@@ -5323,6 +5356,10 @@ void ImageViewerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
     static bool s_runtimeSmokePaintLogged = false;
     if (!s_runtimeSmokePaintLogged) {
         s_runtimeSmokePaintLogged = true;
+        char widthText[16];
+        char heightText[16];
+        nav_int_to_text((int)m_image.width, widthText, sizeof(widthText));
+        nav_int_to_text((int)m_image.height, heightText, sizeof(heightText));
         serial::puts("[IMAGEVIEWER-RUNTIME-SMOKE] paint=");
         if (m_hasImage && m_image.status == gxos::gui::ImageLoadStatus::Ok && m_image.pixels && m_image.width > 0 && m_image.height > 0) {
             serial::puts("png");
@@ -5331,6 +5368,10 @@ void ImageViewerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
         }
         serial::puts(" path=");
         serial::puts(m_imagePath[0] ? m_imagePath : "(none)");
+        serial::puts(" dims=");
+        serial::puts(widthText);
+        serial::putc('x');
+        serial::puts(heightText);
         serial::puts(" status=");
         // Report a human-readable Loaded/NotFound signal in the smoke log.
         serial::puts(m_image.status == gxos::gui::ImageLoadStatus::Ok ? "Loaded" : gxos::gui::ImageLoadStatusName(m_image.status));
@@ -14320,6 +14361,8 @@ static bool printNavigatorHttpSmokeCases()
         "http://10.0.2.2:8080/navigator-smoke/image-nonpng.html", true, true, false, 1, 0, 1) && httpOk;
     httpOk = printNavigatorHttpSmokeCase("hostname_image_relative", "http://guidexos.test:8080/navigator-smoke/hostname-image.html", 200,
         "http://guidexos.test:8080/navigator-smoke/hostname-image.html", true, true, false, 1, 1, 0, "10.0.2.2") && httpOk;
+    httpOk = printNavigatorHttpSmokeCase("text_polish", "http://10.0.2.2:8080/navigator-smoke/text-polish.html", 200,
+        "http://10.0.2.2:8080/navigator-smoke/text-polish.html", true, true, false, 0, 0, 0) && httpOk;
     httpOk = printNavigatorInteractiveFormsLitePostSmokeCase() && httpOk;
     httpOk = printNavigatorInteractiveFormsLiteGetSmokeCase() && httpOk;
     httpOk = printNavigatorFormsLitePostSmokeCase("forms_post_redirect_303", "http://10.0.2.2:8080/forms/post-redirect-303",

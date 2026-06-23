@@ -26,13 +26,24 @@ Sci Fi is opt-in and intentionally conservative in this phase.
 
 ## Phase 2A
 
-Phase 2A adds theme-aware chrome metrics and conservative spacing polish.
+Phase 2A added theme-aware chrome metrics and conservative spacing polish.
 
 * Classic metrics preserve the current guideXOS look as closely as practical.
 * Sci Fi uses modestly larger spacing and padding for title bars, controls, and shared chrome.
 * Window corner radius remains a theme intent/metric, but full rounded-window clipping is still deferred.
 * Shadows, blur/glass simulation, animations, and high-DPI/scaling remain deferred.
 * The compositor and shared window renderer consume the same theme metrics for title bar height, button spacing, text inset, and border thickness.
+
+## Phase 2A.1
+
+Phase 2A.1 is a stabilization-only pass.
+
+* It is limited to small alignment and metric-consistency fixes.
+* Rounded clipping remains deferred.
+* Shadows remain deferred.
+* Blur/glass remains deferred.
+* Animations remain deferred.
+* High-DPI and scaling remain deferred.
 
 ## What Is Deferred
 
@@ -48,7 +59,7 @@ Phase 2A adds theme-aware chrome metrics and conservative spacing polish.
 
 * Classic should continue to look basically unchanged.
 * Sci Fi is a first visible proof that the theme system exists, not a full futuristic redesign.
-* Rounded-window clipping remains deferred; this foundation is intentionally limited to IDs, persistence, selector wiring, and safe chrome colors.
+* Rounded-window clipping remains deferred; this foundation is intentionally limited to IDs, persistence, selector wiring, safe chrome colors, and the Phase 2A chrome metric pass.
 
 ## Future Work
 
