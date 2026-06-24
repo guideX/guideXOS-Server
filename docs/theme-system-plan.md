@@ -59,6 +59,17 @@ Phase 2B adds a guarded rounded-window drawing preview for the Sci Fi theme.
 * Animations remain deferred.
 * High-DPI and scaling remain deferred.
 
+## Phase 2B.1
+
+Phase 2B.1 validates and stabilizes the guarded rounded-window preview on the hosted GDI path.
+
+* The hosted compositor continues to repaint the full client background before drawing the rounded shell, which keeps stale square corners from lingering during move, resize, overlap, and repaint sequences.
+* Classic remains rectangular.
+* Bare-metal framebuffer rendering remains rectangular.
+* Rounded hit-testing remains rectangular.
+* Full rounded client clipping remains deferred.
+* Shadows, blur/glass simulation, animations, and high-DPI/scaling remain deferred.
+
 ## What Is Deferred
 
 * Rounded clipping for theme-specific window shapes
