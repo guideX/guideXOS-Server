@@ -170,12 +170,41 @@ function Invoke-ImageViewerSmokeBuild {
         }
     }
 
+    if ($smokeLabel -eq "large-png") {
+        $wallpaperPackScript = Join-Path $Root "scripts\generate-wallpaper-pack.ps1"
+        if (-not (Test-Path -LiteralPath $wallpaperPackScript)) {
+            throw "Wallpaper pack generator not found: $wallpaperPackScript"
+        }
+
+        # The large-PNG smoke needs the runtime config staged into ESP/ramdisk.img
+        # even when the caller requests -SkipBuild. Regenerate only the wallpaper
+        # pack here so we keep the boot image deterministic without rebuilding the
+        # whole project or touching hosted behavior.
+        Write-Host "Refreshing wallpaper pack for large-PNG runtime smoke..."
+        Push-Location $Root
+        try {
+            & powershell -ExecutionPolicy Bypass -File $wallpaperPackScript `
+                -InputDir (Join-Path $Root "assets\Backgrounds") `
+                -OutputDir (Join-Path $Root "out\wallpaper-pack") `
+                -OutputImage $ramdisk `
+                -ImageViewerRuntimeSmokePath "/system/wall/arrowbgx.png"
+            if ($LASTEXITCODE -ne 0) {
+                throw "Wallpaper pack regeneration failed with exit code $LASTEXITCODE"
+            }
+        } finally {
+            Pop-Location
+        }
+    }
+
     Write-Host "Building kernel with active imageviewer runtime smoke diagnostics..."
     $oldSmokePath = $env:GXOS_IMAGEVIEWER_RUNTIME_SMOKE_PNG_PATH
+    $oldSkipWallpaperBuild = $env:GXOS_SKIP_WALLPAPER_RUNTIME_IMAGE_BUILD
     if ($smokeLabel -eq "large-png") {
         $env:GXOS_IMAGEVIEWER_RUNTIME_SMOKE_PNG_PATH = "/system/wall/arrowbgx.png"
+        $env:GXOS_SKIP_WALLPAPER_RUNTIME_IMAGE_BUILD = "1"
     } else {
         Remove-Item Env:\GXOS_IMAGEVIEWER_RUNTIME_SMOKE_PNG_PATH -ErrorAction SilentlyContinue
+        Remove-Item Env:\GXOS_SKIP_WALLPAPER_RUNTIME_IMAGE_BUILD -ErrorAction SilentlyContinue
     }
 
     try {
@@ -186,6 +215,11 @@ function Invoke-ImageViewerSmokeBuild {
             $env:GXOS_IMAGEVIEWER_RUNTIME_SMOKE_PNG_PATH = $oldSmokePath
         } else {
             Remove-Item Env:\GXOS_IMAGEVIEWER_RUNTIME_SMOKE_PNG_PATH -ErrorAction SilentlyContinue
+        }
+        if ($null -ne $oldSkipWallpaperBuild) {
+            $env:GXOS_SKIP_WALLPAPER_RUNTIME_IMAGE_BUILD = $oldSkipWallpaperBuild
+        } else {
+            Remove-Item Env:\GXOS_SKIP_WALLPAPER_RUNTIME_IMAGE_BUILD -ErrorAction SilentlyContinue
         }
     }
     $script:activeSmokeBuild = $true
@@ -211,6 +245,13 @@ if (-not (Test-Path -LiteralPath $bootloader)) {
 }
 if (-not (Test-Path -LiteralPath $ramdisk)) {
     throw "ESP/ramdisk.img not found. Run .\build.bat first or omit -SkipBuild."
+}
+
+$nvVars = Join-Path $esp "NvVars"
+if (Test-Path -LiteralPath $nvVars) {
+    # Reset OVMF's persistent variable store so the smoke always boots the
+    # freshly staged BOOTX64.EFI instead of inheriting stale NVRAM state.
+    Remove-Item -LiteralPath $nvVars -Force
 }
 
 $proc = $null

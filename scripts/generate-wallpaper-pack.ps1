@@ -543,12 +543,27 @@ function Write-Fat32Image([string]$ImagePath, [string]$WallpaperDir, [array]$Fil
                 throw "Unexpected staged file path for ramdisk image: $relativePath"
             }
         }
+        $readDeadline = (Get-Date).AddSeconds(10)
+        do {
+            try {
+                $bytes = [System.IO.File]::ReadAllBytes($fullPath)
+                break
+            } catch [System.IO.IOException] {
+                if ((Get-Date) -ge $readDeadline) {
+                    throw
+                }
+                Start-Sleep -Milliseconds 200
+            }
+        } while ($true)
         $pendingFiles += [pscustomobject]@{
             Name = $file.Name
             FullName = $fullPath
             RelativePath = $relativePath
             Directory = $directory
-            Size = [uint32](Get-Item $fullPath).Length
+            # Keep the staged file metadata from the original enumeration so the
+            # generator does not depend on a second filesystem lookup during smoke.
+            Size = [uint32]$bytes.Length
+            Bytes = $bytes
         }
     }
 
@@ -587,6 +602,7 @@ function Write-Fat32Image([string]$ImagePath, [string]$WallpaperDir, [array]$Fil
             RelativePath = $pending.RelativePath
             Directory = $pending.Directory
             Size = $pending.Size
+            Bytes = $pending.Bytes
             Cluster = [uint32]$start
         }
     }
@@ -714,7 +730,7 @@ function Write-Fat32Image([string]$ImagePath, [string]$WallpaperDir, [array]$Fil
         }
 
         foreach ($record in $fileRecords) {
-            $data = [System.IO.File]::ReadAllBytes($record.FullName)
+            $data = $record.Bytes
             $stream.Position = ($dataStartSector + (($record.Cluster - 2) * $sectorsPerCluster)) * $bytesPerSector
             $stream.Write($data, 0, $data.Length)
             Write-Host "      added /$($record.RelativePath.Replace('\', '/')) ($([Math]::Round($record.Size / 1KB, 1)) KB)" -ForegroundColor Gray

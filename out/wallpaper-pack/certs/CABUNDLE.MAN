@@ -1,0 +1,15 @@
+{
+    "schema_version":  "guidexos.navigator.ca-bundle-manifest.v0.1",
+    "bundle_type":  "smoke-fixture",
+    "source":  "repo-fixture:scripts/fixtures/navigator-smoke-root-ca-bundle.pem",
+    "generated_utc":  "2026-06-23T05:28:10.8011146Z",
+    "root_count":  1,
+    "pem_bytes":  1235,
+    "sha256":  "861547a43966823d08c82f9f749c697ebae87bf482a8a76c68468eff8d434ef9",
+    "subject_summary":  "CN=guideXOS Navigator Smoke Root CA",
+    "not_before_min":  "2026-06-03T05:57:07.0000000Z",
+    "not_after_max":  "2036-06-01T05:57:07.0000000Z",
+    "production_ready":  "no",
+    "test_only":  "yes",
+    "rotation_id":  "sha256:861547a43966823d08c82f9f749c697ebae87bf482a8a76c68468eff8d434ef9"
+}

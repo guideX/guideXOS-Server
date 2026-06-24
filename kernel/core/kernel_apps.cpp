@@ -5265,7 +5265,27 @@ void ImageViewerApp::loadImage(const char* path) {
     vfs::FileInfo info{};
     const bool haveFileInfo = vfs::stat(path, &info) == vfs::VFS_OK;
     strcopy(m_imagePath, path, sizeof(m_imagePath));
+#if defined(GXOS_IMAGEVIEWER_BARE_METAL_RUNTIME_SMOKE_ACTIVE) && defined(GXOS_BARE_METAL)
+    serial::puts("[IMAGEVIEWER-RUNTIME-SMOKE] app load begin path=");
+    serial::puts(m_imagePath);
+    serial::puts("\n");
+#endif
     m_image = gxos::gui::ImageAdapter::LoadFromFile(path);
+#if defined(GXOS_IMAGEVIEWER_BARE_METAL_RUNTIME_SMOKE_ACTIVE) && defined(GXOS_BARE_METAL)
+    serial::puts("[IMAGEVIEWER-RUNTIME-SMOKE] app load end path=");
+    serial::puts(m_imagePath[0] ? m_imagePath : "(none)");
+    serial::puts(" status=");
+    serial::puts(m_image.status == gxos::gui::ImageLoadStatus::Ok ? "Loaded" : gxos::gui::ImageLoadStatusName(m_image.status));
+    serial::puts(" dims=");
+    char debugWidth[16];
+    char debugHeight[16];
+    nav_int_to_text((int)m_image.width, debugWidth, sizeof(debugWidth));
+    nav_int_to_text((int)m_image.height, debugHeight, sizeof(debugHeight));
+    serial::puts(debugWidth);
+    serial::putc('x');
+    serial::puts(debugHeight);
+    serial::puts("\n");
+#endif
     if (m_image.status == gxos::gui::ImageLoadStatus::Ok && m_image.pixels && m_image.width > 0 && m_image.height > 0) {
         m_hasImage = true;
         char widthText[16];

@@ -185,18 +185,36 @@ ImageProbe ImageAdapter::ProbeFile(const char* path, const ImageSafetyLimits& li
         return probe;
     }
 
+#if defined(GXOS_IMAGEVIEWER_BARE_METAL_RUNTIME_SMOKE_ACTIVE) && defined(GXOS_BARE_METAL)
+    serial::puts("[IMAGEVIEWER-RUNTIME-SMOKE] probe file start path=");
+    serial::puts(path);
+    serial::puts("\n");
+#endif
     kernel::vfs::FileInfo info{};
     if (kernel::vfs::stat(path, &info) != kernel::vfs::VFS_OK) {
         probe.status = ImageLoadStatus::NotFound;
         return probe;
     }
+#if defined(GXOS_IMAGEVIEWER_BARE_METAL_RUNTIME_SMOKE_ACTIVE) && defined(GXOS_BARE_METAL)
+    serial::puts("[IMAGEVIEWER-RUNTIME-SMOKE] probe file stat sizeBytes=");
+    serial::put_hex32(info.size);
+    serial::puts("\n");
+#endif
     if (info.size > effectiveLimits.maxBytes) {
         probe.status = ImageLoadStatus::TooLarge;
         return probe;
     }
 
     uint8_t header[32];
+#if defined(GXOS_IMAGEVIEWER_BARE_METAL_RUNTIME_SMOKE_ACTIVE) && defined(GXOS_BARE_METAL)
+    serial::puts("[IMAGEVIEWER-RUNTIME-SMOKE] probe file read header start\n");
+#endif
     int32_t read = kernel::vfs::read_file(path, header, sizeof(header));
+#if defined(GXOS_IMAGEVIEWER_BARE_METAL_RUNTIME_SMOKE_ACTIVE) && defined(GXOS_BARE_METAL)
+    serial::puts("[IMAGEVIEWER-RUNTIME-SMOKE] probe file read header done bytes=");
+    serial::put_hex32(read < 0 ? 0u : (uint32_t)read);
+    serial::puts("\n");
+#endif
     if (read < 24) {
         probe.status = read < 0 ? ImageLoadStatus::NotFound : ImageLoadStatus::DecodeFailed;
         return probe;
@@ -208,13 +226,24 @@ ImageProbe ImageAdapter::ProbeFile(const char* path, const ImageSafetyLimits& li
 ImageBitmap ImageAdapter::LoadFromFile(const char* path, const ImageSafetyLimits& limits)
 {
     ImageSafetyLimits effectiveLimits = resolve_bare_metal_limits(limits);
-    ImageProbe probe = ProbeFile(path, effectiveLimits);
+#if defined(GXOS_IMAGEVIEWER_BARE_METAL_RUNTIME_SMOKE_ACTIVE) && defined(GXOS_BARE_METAL)
+    serial::puts("[IMAGEVIEWER-RUNTIME-SMOKE] adapter load file entry path=");
+    serial::puts(path ? path : "(null)");
+    serial::puts("\n");
+#endif
     ImageBitmap bitmap{};
-    bitmap.status = probe.status;
+    bitmap.status = ImageLoadStatus::NotFound;
     bitmap.pixels = nullptr;
-    bitmap.width = probe.width;
-    bitmap.height = probe.height;
-    if (probe.status != ImageLoadStatus::Ok) return bitmap;
+    bitmap.width = 0;
+    bitmap.height = 0;
+
+    if (!path || !path[0]) {
+        return bitmap;
+    }
+    if (!ends_with_png(path)) {
+        bitmap.status = ImageLoadStatus::UnsupportedFormat;
+        return bitmap;
+    }
 
     kernel::vfs::FileInfo info{};
     if (kernel::vfs::stat(path, &info) != kernel::vfs::VFS_OK) {
@@ -225,11 +254,21 @@ ImageBitmap ImageAdapter::LoadFromFile(const char* path, const ImageSafetyLimits
         bitmap.status = ImageLoadStatus::TooLarge;
         return bitmap;
     }
+#if defined(GXOS_IMAGEVIEWER_BARE_METAL_RUNTIME_SMOKE_ACTIVE) && defined(GXOS_BARE_METAL)
+    serial::puts("[IMAGEVIEWER-RUNTIME-SMOKE] adapter file read start sizeBytes=");
+    serial::put_hex32(info.size);
+    serial::puts("\n");
+#endif
     int32_t read = kernel::vfs::read_file(path, s_kernelImageFileScratch, (uint32_t)info.size);
     if (read < 0 || (uint32_t)read != info.size) {
         bitmap.status = ImageLoadStatus::DecodeFailed;
         return bitmap;
     }
+#if defined(GXOS_IMAGEVIEWER_BARE_METAL_RUNTIME_SMOKE_ACTIVE) && defined(GXOS_BARE_METAL)
+    serial::puts("[IMAGEVIEWER-RUNTIME-SMOKE] adapter decode start byteCount=");
+    serial::put_hex32((uint32_t)read);
+    serial::puts("\n");
+#endif
     return LoadFromBytes(s_kernelImageFileScratch, (uint32_t)read, effectiveLimits);
 }
 
@@ -248,6 +287,15 @@ ImageBitmap ImageAdapter::LoadFromBytes(const uint8_t* bytes, uint32_t byteCount
         return bitmap;
     }
 
+#if defined(GXOS_IMAGEVIEWER_BARE_METAL_RUNTIME_SMOKE_ACTIVE) && defined(GXOS_BARE_METAL)
+    serial::puts("[IMAGEVIEWER-RUNTIME-SMOKE] adapter stbi begin byteCount=");
+    serial::put_hex32(byteCount);
+    serial::puts(" dims=");
+    serial::put_hex32(bitmap.width);
+    serial::putc('x');
+    serial::put_hex32(bitmap.height);
+    serial::puts("\n");
+#endif
     int width = 0;
     int height = 0;
     int sourceChannels = 0;
@@ -296,6 +344,9 @@ ImageBitmap ImageAdapter::LoadFromBytes(const uint8_t* bytes, uint32_t byteCount
     bitmap.pixels = pixels;
     bitmap.width = (uint32_t)width;
     bitmap.height = (uint32_t)height;
+#if defined(GXOS_IMAGEVIEWER_BARE_METAL_RUNTIME_SMOKE_ACTIVE) && defined(GXOS_BARE_METAL)
+    serial::puts("[IMAGEVIEWER-RUNTIME-SMOKE] adapter stbi end status=Loaded\n");
+#endif
     return bitmap;
 }
 

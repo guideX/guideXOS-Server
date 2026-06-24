@@ -32,6 +32,10 @@ function Invoke-KernelBuildForSmoke {
     } else {
         Remove-Item Env:\EXTRA_CFLAGS -ErrorAction SilentlyContinue
     }
+    # The Navigator text-metrics pass hit a stale desktop object once; keep the
+    # smoke build deterministic by forcing that object to rebuild here too.
+    Get-ChildItem -Path (Join-Path $Root "kernel\build") -Recurse -Filter "desktop.o" -ErrorAction SilentlyContinue |
+        Remove-Item -Force -ErrorAction SilentlyContinue
     Get-ChildItem -Path (Join-Path $Root "kernel\build") -Recurse -Filter "kernel_apps.o" -ErrorAction SilentlyContinue |
         Remove-Item -Force -ErrorAction SilentlyContinue
     Get-ChildItem -Path (Join-Path $Root "kernel\build") -Recurse -Filter "gxos_tls_foundation.o" -ErrorAction SilentlyContinue |
@@ -1671,8 +1675,8 @@ try {
     if ($createdStartup) {
         Remove-Item $startup -ErrorAction SilentlyContinue
     }
-    Restore-NormalKernelBuild
     Restore-NavigatorKernelSmokeEnvironment
+    Restore-NormalKernelBuild
     Restore-NavigatorSmokeDirectoryState -State $downloadsState
     Restore-NavigatorSmokeFileState -State $ramdiskState
     Restore-NavigatorSmokeDirectoryState -State $wallpaperPackState

@@ -2386,6 +2386,7 @@ namespace gxos {
 #endif
                 // Draw application windows in Z-order (bottom to top)
                 const int titleBarH = theme.titleBarHeight;
+                const int windowCornerRadius = WindowRenderer::GetWindowChromeCornerRadius(theme);
                 HFONT font = (HFONT)GetStockObject(ANSI_VAR_FONT); 
                 SelectObject(dc, font); 
                 SetBkMode(dc, TRANSPARENT);
@@ -2405,7 +2406,7 @@ namespace gxos {
                     // Draw window content background
                     WindowRenderer::DrawRoundedRect(dc, winfo.x, winfo.y, winfo.w, winfo.h,
                         colorFromTheme(theme.windowBackground),
-                        theme.roundedWindows ? theme.windowCornerRadius : 0);
+                        windowCornerRadius);
                     
                     // Draw title bar
                     WindowRenderer::DrawTitleBar(dc, winfo.x, winfo.y, winfo.w, titleBarH, isFocused);

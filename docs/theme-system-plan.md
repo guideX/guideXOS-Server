@@ -45,6 +45,20 @@ Phase 2A.1 is a stabilization-only pass.
 * Animations remain deferred.
 * High-DPI and scaling remain deferred.
 
+## Phase 2B
+
+Phase 2B adds a guarded rounded-window drawing preview for the Sci Fi theme.
+
+* Classic remains rectangular.
+* Sci Fi gets a conservative rounded chrome preview where the hosted GDI path can render it safely.
+* The preview uses the existing theme intent fields for rounded windows and corner radius.
+* Full clipping is still deferred unless it can be proven safe for the render path.
+* Rounded hit-testing is deferred and stays rectangular for now.
+* Shadows remain deferred.
+* Blur/glass simulation remains deferred.
+* Animations remain deferred.
+* High-DPI and scaling remain deferred.
+
 ## What Is Deferred
 
 * Rounded clipping for theme-specific window shapes
@@ -59,7 +73,7 @@ Phase 2A.1 is a stabilization-only pass.
 
 * Classic should continue to look basically unchanged.
 * Sci Fi is a first visible proof that the theme system exists, not a full futuristic redesign.
-* Rounded-window clipping remains deferred; this foundation is intentionally limited to IDs, persistence, selector wiring, safe chrome colors, and the Phase 2A chrome metric pass.
+* Rounded-window clipping remains deferred; this foundation is intentionally limited to IDs, persistence, selector wiring, safe chrome colors, the Phase 2A chrome metric pass, and the guarded Phase 2B rounded-shell preview.
 
 ## Future Work
 

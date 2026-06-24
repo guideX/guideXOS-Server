@@ -82,7 +82,7 @@
 #include <arch/graphics.h>
 #endif
 
-#if defined(GXOS_NAVIGATOR_HTTP_SMOKE_ACTIVE) || defined(GXOS_NAVIGATOR_BOOT_STAGED_CONFIG_ACTIVE)
+#if defined(GXOS_NAVIGATOR_HTTP_SMOKE_ACTIVE) || defined(GXOS_NAVIGATOR_BOOT_STAGED_CONFIG_ACTIVE) || defined(GXOS_IMAGEVIEWER_BARE_METAL_RUNTIME_SMOKE_ACTIVE)
 static bool navigator_smoke_mount_path_exists_exact(const char* path)
 {
     if (!path) return false;
@@ -353,7 +353,7 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         if (is_bootinfo && bootinfo && bootinfo->RamdiskBase != 0 && bootinfo->RamdiskSize != 0) {
             kernel::serial::puts("[KERNEL] Boot wallpaper pack found in ramdisk.img\n");
             kernel::desktop::set_wallpaper_image_pack(reinterpret_cast<const void*>(static_cast<uintptr_t>(bootinfo->RamdiskBase)), bootinfo->RamdiskSize);
-#if defined(GXOS_NAVIGATOR_HTTP_SMOKE_ACTIVE) || defined(GXOS_NAVIGATOR_BOOT_STAGED_CONFIG_ACTIVE)
+#if defined(GXOS_NAVIGATOR_HTTP_SMOKE_ACTIVE) || defined(GXOS_NAVIGATOR_BOOT_STAGED_CONFIG_ACTIVE) || defined(GXOS_IMAGEVIEWER_BARE_METAL_RUNTIME_SMOKE_ACTIVE)
             mount_navigator_smoke_ca_fixture_if_available();
             mount_navigator_smoke_config_if_available();
 #endif

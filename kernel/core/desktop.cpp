@@ -3114,36 +3114,43 @@ static const char* resolve_imageviewer_runtime_smoke_path()
     static char s_smokePath[128];
     s_smokePath[0] = '\0';
 
-    const char* configPath = "/system/config/navigator/imageviewer-runtime-smoke-path.txt";
-    vfs::FileInfo info{};
-    const vfs::Status configStatus = vfs::stat(configPath, &info);
-    serial::puts("[IMAGEVIEWER-RUNTIME-SMOKE] config probe path=");
-    serial::puts(configPath);
-    serial::puts(" status=");
-    serial::puts(configStatus == vfs::VFS_OK ? "PASS" : "FAIL");
-    serial::puts(" sizeBytes=");
-    if (configStatus == vfs::VFS_OK) {
-        serial::put_hex32(info.size);
-    } else {
-        serial::puts("0");
-    }
-    serial::puts("\n");
+    const char* sourcePath = "/system/config/navigator/imageviewer-runtime-smoke-path.txt";
+    const char* sourceCompatPath = "/system/config/navigator/IMGRTPTH.TXT";
+    const char* configPath = "/config/navigator/imageviewer-runtime-smoke-path.txt";
+    const char* compatPath = "/config/navigator/IMGRTPTH.TXT";
+    const char* candidates[] = {sourcePath, sourceCompatPath, configPath, compatPath};
+    for (uint32_t i = 0; i < sizeof(candidates) / sizeof(candidates[0]); ++i) {
+        const char* candidatePath = candidates[i];
+        vfs::FileInfo info{};
+        const vfs::Status configStatus = vfs::stat(candidatePath, &info);
+        serial::puts("[IMAGEVIEWER-RUNTIME-SMOKE] config probe path=");
+        serial::puts(candidatePath);
+        serial::puts(" status=");
+        serial::puts(configStatus == vfs::VFS_OK ? "PASS" : "FAIL");
+        serial::puts(" sizeBytes=");
+        if (configStatus == vfs::VFS_OK) {
+            serial::put_hex32(info.size);
+        } else {
+            serial::puts("0");
+        }
+        serial::puts("\n");
 
-    if (configStatus == vfs::VFS_OK && info.type == vfs::FILE_TYPE_REGULAR && info.size > 0) {
-        uint32_t bytesToRead = info.size < (sizeof(s_smokePath) - 1) ? info.size : (uint32_t)(sizeof(s_smokePath) - 1);
-        int32_t read = vfs::read_file(configPath, s_smokePath, bytesToRead);
-        if (read > 0) {
-            uint32_t len = (uint32_t)read;
-            while (len > 0) {
-                char c = s_smokePath[len - 1];
-                if (c == '\0' || c == '\n' || c == '\r' || c == ' ' || c == '\t') {
-                    s_smokePath[--len] = '\0';
-                } else {
-                    break;
+        if (configStatus == vfs::VFS_OK && info.type == vfs::FILE_TYPE_REGULAR && info.size > 0) {
+            uint32_t bytesToRead = info.size < (sizeof(s_smokePath) - 1) ? info.size : (uint32_t)(sizeof(s_smokePath) - 1);
+            int32_t read = vfs::read_file(candidatePath, s_smokePath, bytesToRead);
+            if (read > 0) {
+                uint32_t len = (uint32_t)read;
+                while (len > 0) {
+                    char c = s_smokePath[len - 1];
+                    if (c == '\0' || c == '\n' || c == '\r' || c == ' ' || c == '\t') {
+                        s_smokePath[--len] = '\0';
+                    } else {
+                        break;
+                    }
                 }
-            }
-            if (s_smokePath[0]) {
-                return s_smokePath;
+                if (s_smokePath[0]) {
+                    return s_smokePath;
+                }
             }
         }
     }

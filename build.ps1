@@ -37,10 +37,20 @@ $BootloaderDir = Join-Path $RootDir "guideXOSBootLoader"
 $DiskDir = Join-Path $RootDir "disks"
 $KernelBuildSkipped = $false
 $WallpaperRuntimeImageBuilt = $false
+$SkipWallpaperRuntimeImageBuild = $env:GXOS_SKIP_WALLPAPER_RUNTIME_IMAGE_BUILD -eq "1"
 
 function Build-WallpaperRuntimeImage {
     if ($script:WallpaperRuntimeImageBuilt) {
         return
+    }
+
+    if ($SkipWallpaperRuntimeImageBuild) {
+        $Ramdisk = Join-Path $ESPDir "ramdisk.img"
+        if (Test-Path $Ramdisk) {
+            Write-Host "      Reusing existing wallpaper runtime image..." -ForegroundColor DarkGray
+            $script:WallpaperRuntimeImageBuilt = $true
+            return
+        }
     }
 
     if (!(Test-Path $ESPDir)) {

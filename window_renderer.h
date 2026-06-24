@@ -23,6 +23,16 @@ namespace gui {
 /// Helper class for drawing windows with effects matching guideXOS.Legacy
 class WindowRenderer {
 public:
+    /// Phase 2B keeps rounded chrome conservative: only enable it when the
+    /// theme explicitly opts in and the theme radius is positive.
+    static bool ShouldUseRoundedWindowChrome(const DesktopTheme& theme) {
+        return theme.roundedWindows && theme.windowCornerRadius > 0;
+    }
+
+    static int GetWindowChromeCornerRadius(const DesktopTheme& theme) {
+        return ShouldUseRoundedWindowChrome(theme) ? theme.windowCornerRadius : 0;
+    }
+
     /// Draw a rounded rectangle (or regular rectangle if radius is 0)
     static void DrawRoundedRect(HDC dc, int x, int y, int w, int h, COLORREF color, int radius = 0) {
         HBRUSH brush = CreateSolidBrush(color);
@@ -63,7 +73,7 @@ public:
             HGDIOBJ oldPen = SelectObject(dc, pen);
             HGDIOBJ oldBrush = SelectObject(dc, GetStockObject(NULL_BRUSH));
             
-            int cornerRadius = theme.roundedWindows ? theme.windowCornerRadius : 0;
+            int cornerRadius = GetWindowChromeCornerRadius(theme);
             if (cornerRadius > 0) {
                 RoundRect(dc, x - i, y - i, x + w + i, y + h + i, cornerRadius * 2, cornerRadius * 2);
             } else {
@@ -86,7 +96,7 @@ public:
         const COLORREF color = RGB((sourceColor >> 16) & 0xFF,
                                    (sourceColor >> 8) & 0xFF,
                                    sourceColor & 0xFF);
-        int cornerRadius = theme.roundedWindows ? theme.windowCornerRadius : 0;
+        int cornerRadius = GetWindowChromeCornerRadius(theme);
         DrawRoundedRect(dc, x, y, w, h, color, cornerRadius);
     }
     
@@ -141,13 +151,13 @@ public:
         if (hover && UISettings::EnableButtonHoverEffects) {
             int glowPad = 2;
             COLORREF glowColor = RGB(0x2E, 0x89, 0xFF);
-            int cornerRadius = theme.roundedWindows ? theme.windowCornerRadius / 2 : 0;
+            int cornerRadius = GetWindowChromeCornerRadius(theme) / 2;
             DrawRoundedRect(dc, x - glowPad, y - glowPad, size + glowPad * 2, size + glowPad * 2, glowColor, cornerRadius);
         }
         
         // Draw button background with rounded corners (matching Legacy)
         if (UISettings::EnableButtonBackgrounds) {
-            int cornerRadius = theme.roundedWindows ? theme.windowCornerRadius / 2 : 0;
+            int cornerRadius = GetWindowChromeCornerRadius(theme) / 2;
             DrawRoundedRect(dc, x, y, size, size, bgColor, cornerRadius);
         }
         
@@ -158,7 +168,7 @@ public:
             HGDIOBJ oldPen = SelectObject(dc, pen);
             HGDIOBJ oldBrush = SelectObject(dc, GetStockObject(NULL_BRUSH));
             
-            int cornerRadius = theme.roundedWindows ? theme.windowCornerRadius / 2 : 0;
+            int cornerRadius = GetWindowChromeCornerRadius(theme) / 2;
             if (cornerRadius > 0) {
                 RoundRect(dc, x, y, x + size, y + size, cornerRadius * 2, cornerRadius * 2);
             } else {
@@ -249,7 +259,7 @@ public:
         HGDIOBJ oldPen = SelectObject(dc, pen);
         HGDIOBJ oldBrush = SelectObject(dc, GetStockObject(NULL_BRUSH));
         
-        int cornerRadius = theme.roundedWindows ? theme.windowCornerRadius : 0;
+        int cornerRadius = GetWindowChromeCornerRadius(theme);
         if (cornerRadius > 0) {
             RoundRect(dc, x, y, x + w, y + h, cornerRadius * 2, cornerRadius * 2);
         } else {
