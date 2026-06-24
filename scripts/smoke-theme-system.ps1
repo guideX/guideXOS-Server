@@ -119,11 +119,16 @@ $compositorWindowPaddingMatch = Find-FirstMatch $compositor 'theme\.windowPaddin
 $compositorWindowBorderMatch = Find-FirstMatch $compositor 'theme\.windowBorderThickness'
 $compositorTaskbarPaddingMatch = Find-FirstMatch $compositor 'theme\.taskbarPadding'
 $compositorTaskbarItemPaddingMatch = Find-FirstMatch $compositor 'theme\.taskbarItemPadding'
+$compositorTaskbarSciFiMatch = Find-FirstMatch $compositor 'theme\.id == DesktopThemeId::SciFi'
+$compositorTaskbarPolishMatch = Find-FirstMatch $compositor 'WindowRenderer::BlendThemeColor\(theme\.taskbarBackground, theme\.accent, 22\)|WindowRenderer::BlendThemeColor\(theme\.taskbarBorder, theme\.accent, 35\)'
 $compositorButtonHitMatch = Find-FirstMatch $compositor 'my >= btnY && my < btnY \+ btnSize'
 $compositorWidgetInsetMatch = Find-FirstMatch $compositor 'wx = mx - topW->x - theme\.windowPadding|wy = my - topW->y - titleBarH - theme\.windowPadding'
 $compositorTaskbarSpacingMatch = Find-FirstMatch $compositor 'taskbarItemPadding / 2'
 $windowRendererThemeMatch = Find-FirstMatch $windowRenderer 'GetCurrentDesktopTheme'
 $windowRendererMetricMatch = Find-FirstMatch $windowRenderer 'titleBarBackground|taskbarBackground|roundedWindows|windowCornerRadius|windowBorderThickness'
+$windowRendererBlendMatch = Find-FirstMatch $windowRenderer 'BlendThemeColor|ToColorRef'
+$windowRendererTitleBarPolishMatch = Find-FirstMatch $windowRenderer 'BlendThemeColor\(theme\.titleBarBackground, theme\.accent, 48\)|BlendThemeColor\(theme\.taskbarBackground, theme\.mutedAccent, 28\)'
+$windowRendererBorderPolishMatch = Find-FirstMatch $windowRenderer 'BlendThemeColor\(theme\.windowBorder, theme\.accent, 72\)|BlendThemeColor\(theme\.windowBorder, theme\.mutedAccent, 20\)'
 $chromeMatch = $compositorThemeMatch
 if ($null -eq $chromeMatch) {
     $chromeMatch = $windowRendererThemeMatch
@@ -131,6 +136,8 @@ if ($null -eq $chromeMatch) {
 $phase2aDocMatch = Find-FirstMatch $planDoc 'Phase 2A added theme-aware chrome metrics|Phase 2A\.1|stabilization-only|rounded clipping remains deferred|shadows remain deferred|blur/glass remains deferred|animations remain deferred|high-DPI and scaling remain deferred'
 $phase2bDocMatch = Find-FirstMatch $planDoc 'Phase 2B|guarded rounded-window drawing preview|rounded hit-testing is deferred|Shadows remain deferred|Blur/glass simulation remains deferred|Animations remain deferred|High-DPI and scaling remain deferred'
 $phase2b1DocMatch = Find-FirstMatch $planDoc 'Phase 2B\.1|validates and stabilizes|full client background|Classic remains rectangular|bare-metal framebuffer rendering remains rectangular|Rounded hit-testing remains rectangular'
+$phase2cHeadingMatch = Find-FirstMatch $planDoc '## Phase 2C'
+$phase2cBodyMatch = Find-FirstMatch $planDoc 'Phase 2C adds a conservative Sci Fi border and highlight polish layer without changing the core compositor model\.'
 
 $checks = @(
     [pscustomobject]@{ Name = "theme header exists"; Pass = (Test-Path -LiteralPath $themeHeader); Match = $null },
@@ -166,13 +173,18 @@ $checks = @(
     [pscustomobject]@{ Name = "compositor window border wired"; Pass = $null -ne $compositorWindowBorderMatch; Match = $compositorWindowBorderMatch },
     [pscustomobject]@{ Name = "compositor taskbar padding wired"; Pass = $null -ne $compositorTaskbarPaddingMatch; Match = $compositorTaskbarPaddingMatch },
     [pscustomobject]@{ Name = "compositor taskbar item padding wired"; Pass = $null -ne $compositorTaskbarItemPaddingMatch; Match = $compositorTaskbarItemPaddingMatch },
+    [pscustomobject]@{ Name = "compositor sci fi taskbar polish wired"; Pass = $null -ne $compositorTaskbarSciFiMatch -and $null -ne $compositorTaskbarPolishMatch; Match = $(if ($null -ne $compositorTaskbarPolishMatch) { $compositorTaskbarPolishMatch } else { $compositorTaskbarSciFiMatch }) },
     [pscustomobject]@{ Name = "compositor title button hit-test wired"; Pass = $null -ne $compositorButtonHitMatch; Match = $compositorButtonHitMatch },
     [pscustomobject]@{ Name = "compositor widget inset wired"; Pass = $null -ne $compositorWidgetInsetMatch; Match = $compositorWidgetInsetMatch },
     [pscustomobject]@{ Name = "compositor taskbar spacing wired"; Pass = $null -ne $compositorTaskbarSpacingMatch; Match = $compositorTaskbarSpacingMatch },
     [pscustomobject]@{ Name = "window renderer theme metrics wired"; Pass = $null -ne $windowRendererMetricMatch; Match = $windowRendererMetricMatch },
+    [pscustomobject]@{ Name = "window renderer color helper wired"; Pass = $null -ne $windowRendererBlendMatch; Match = $windowRendererBlendMatch },
+    [pscustomobject]@{ Name = "window renderer titlebar polish wired"; Pass = $null -ne $windowRendererTitleBarPolishMatch; Match = $windowRendererTitleBarPolishMatch },
+    [pscustomobject]@{ Name = "window renderer border polish wired"; Pass = $null -ne $windowRendererBorderPolishMatch; Match = $windowRendererBorderPolishMatch },
     [pscustomobject]@{ Name = "phase 2a docs mention"; Pass = $null -ne $phase2aDocMatch; Match = $phase2aDocMatch },
     [pscustomobject]@{ Name = "phase 2b docs mention"; Pass = $null -ne $phase2bDocMatch; Match = $phase2bDocMatch },
-    [pscustomobject]@{ Name = "phase 2b1 docs mention"; Pass = $null -ne $phase2b1DocMatch; Match = $phase2b1DocMatch }
+    [pscustomobject]@{ Name = "phase 2b1 docs mention"; Pass = $null -ne $phase2b1DocMatch; Match = $phase2b1DocMatch },
+    [pscustomobject]@{ Name = "phase 2c docs mention"; Pass = $null -ne $phase2cHeadingMatch -and $null -ne $phase2cBodyMatch; Match = $(if ($null -ne $phase2cBodyMatch) { $phase2cBodyMatch } else { $phase2cHeadingMatch }) }
 )
 
 $failures = 0

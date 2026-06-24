@@ -70,6 +70,22 @@ Phase 2B.1 validates and stabilizes the guarded rounded-window preview on the ho
 * Full rounded client clipping remains deferred.
 * Shadows, blur/glass simulation, animations, and high-DPI/scaling remain deferred.
 
+## Phase 2C
+
+Phase 2C adds a conservative Sci Fi border and highlight polish layer without changing the core compositor model.
+
+* Sci Fi now gets a more deliberate active-window edge treatment using the existing theme accent and muted accent colors.
+* A subtle top-edge titlebar highlight line is drawn for Sci Fi windows when the hosted chrome path renders them.
+* Sci Fi title buttons get slightly more polished hover and pressed fills and borders through the shared window renderer helpers.
+* Sci Fi taskbar items get small hover and active accent refinements in the hosted compositor taskbar painter.
+* Classic remains the default theme and keeps its existing rectangular look and behavior.
+* Rounded client clipping is still deferred.
+* Rounded hit-testing is still deferred.
+* Shadows remain deferred.
+* Blur/glass simulation remains deferred.
+* Slide-in / slide-out animations remain deferred.
+* High-DPI and scaling remain deferred.
+
 ## What Is Deferred
 
 * Rounded clipping for theme-specific window shapes
@@ -84,7 +100,7 @@ Phase 2B.1 validates and stabilizes the guarded rounded-window preview on the ho
 
 * Classic should continue to look basically unchanged.
 * Sci Fi is a first visible proof that the theme system exists, not a full futuristic redesign.
-* Rounded-window clipping remains deferred; this foundation is intentionally limited to IDs, persistence, selector wiring, safe chrome colors, the Phase 2A chrome metric pass, and the guarded Phase 2B rounded-shell preview.
+* Rounded-window clipping remains deferred; this foundation is intentionally limited to IDs, persistence, selector wiring, safe chrome colors, the Phase 2A chrome metric pass, the guarded Phase 2B rounded-shell preview, and the Phase 2C border/highlight polish pass.
 
 ## Future Work
 

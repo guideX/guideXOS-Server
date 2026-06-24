@@ -23,6 +23,34 @@ namespace gui {
 /// Helper class for drawing windows with effects matching guideXOS.Legacy
 class WindowRenderer {
 public:
+    static COLORREF ToColorRef(uint32_t value) {
+        return RGB((value >> 16) & 0xFF,
+                   (value >> 8) & 0xFF,
+                   value & 0xFF);
+    }
+
+    static uint32_t BlendThemeColor(uint32_t baseColor, uint32_t overlayColor, int overlayPercent) {
+        if (overlayPercent <= 0) {
+            return baseColor;
+        }
+        if (overlayPercent >= 100) {
+            return overlayColor;
+        }
+
+        const int baseR = static_cast<int>((baseColor >> 16) & 0xFF);
+        const int baseG = static_cast<int>((baseColor >> 8) & 0xFF);
+        const int baseB = static_cast<int>(baseColor & 0xFF);
+        const int overR = static_cast<int>((overlayColor >> 16) & 0xFF);
+        const int overG = static_cast<int>((overlayColor >> 8) & 0xFF);
+        const int overB = static_cast<int>(overlayColor & 0xFF);
+        const int keepPercent = 100 - overlayPercent;
+
+        return 0xFF000000u |
+            (static_cast<uint32_t>((baseR * keepPercent + overR * overlayPercent) / 100) << 16) |
+            (static_cast<uint32_t>((baseG * keepPercent + overG * overlayPercent) / 100) << 8) |
+            static_cast<uint32_t>((baseB * keepPercent + overB * overlayPercent) / 100);
+    }
+
     /// Phase 2B keeps rounded chrome conservative: only enable it when the
     /// theme explicitly opts in and the theme radius is positive.
     static bool ShouldUseRoundedWindowChrome(const DesktopTheme& theme) {
@@ -91,13 +119,22 @@ public:
         if (!UISettings::EnableTitleBarBackground) return;
 
         const DesktopTheme& theme = GetCurrentDesktopTheme();
+        const bool sciFiTheme = theme.id == DesktopThemeId::SciFi;
         const uint32_t themeColor = focused ? theme.titleBarBackground : theme.taskbarBackground;
         const uint32_t sourceColor = transparent ? themeColor : themeColor;
-        const COLORREF color = RGB((sourceColor >> 16) & 0xFF,
-                                   (sourceColor >> 8) & 0xFF,
-                                   sourceColor & 0xFF);
+        const COLORREF color = ToColorRef(sourceColor);
         int cornerRadius = GetWindowChromeCornerRadius(theme);
         DrawRoundedRect(dc, x, y, w, h, color, cornerRadius);
+
+        if (sciFiTheme && h > 1) {
+            const uint32_t highlightColor = focused
+                ? BlendThemeColor(theme.titleBarBackground, theme.accent, 48)
+                : BlendThemeColor(theme.taskbarBackground, theme.mutedAccent, 28);
+            HBRUSH highlight = CreateSolidBrush(ToColorRef(highlightColor));
+            RECT line{ x, y, x + w, y + 1 };
+            FillRect(dc, &line, highlight);
+            DeleteObject(highlight);
+        }
     }
     
     /// Draw a title bar button with Legacy-style appearance
@@ -106,51 +143,66 @@ public:
                                  bool hover, bool pressed, bool focused) {
         if (!UISettings::EnableTitleBarButtons) return;
         const DesktopTheme& theme = GetCurrentDesktopTheme();
+        const bool sciFiTheme = theme.id == DesktopThemeId::SciFi;
         
         // Legacy-style button colors: dark semi-transparent backgrounds
         // Based on guideXOS.Legacy Window.cs DrawTitleButton
         COLORREF bgColor;
         COLORREF fgColor = pressed ? RGB(238, 238, 238) : RGB(250, 250, 250);
-        
-        // Base fill colors matching Legacy: baseFill = pressed ? 0xFF2A2A2A : (hover ? 0xFF343434 : 0xFF2E2E2E)
-        if (buttonType == 0) { // Close button - red tinted
-            if (pressed) {
-                bgColor = RGB(0x2A, 0x2A, 0x2A);
-            } else if (hover) {
-                bgColor = RGB(0x44, 0x34, 0x34); // slight red tint on hover
+
+        if (sciFiTheme) {
+            const uint32_t chromeBase = focused ? theme.titleBarBackground : theme.taskbarBackground;
+            const uint32_t idleFill = BlendThemeColor(chromeBase, theme.windowBorder, 18);
+            const uint32_t hoverFill = BlendThemeColor(chromeBase, theme.mutedAccent, 26);
+            const uint32_t pressedFill = BlendThemeColor(chromeBase, theme.accent, 22);
+            const uint32_t closeHoverFill = BlendThemeColor(chromeBase, theme.accent, 14);
+
+            if (buttonType == 0) {
+                bgColor = pressed ? pressedFill : (hover ? closeHoverFill : idleFill);
             } else {
-                bgColor = RGB(0x2E, 0x2E, 0x2E);
+                bgColor = pressed ? pressedFill : (hover ? hoverFill : idleFill);
             }
-        } else if (buttonType == 1) { // Maximize - subtle blue
-            if (pressed) {
-                bgColor = RGB(0x2A, 0x2A, 0x2A);
-            } else if (hover) {
-                bgColor = RGB(0x34, 0x34, 0x3E); // slight blue tint
-            } else {
-                bgColor = RGB(0x2E, 0x2E, 0x2E);
-            }
-        } else if (buttonType == 2) { // Minimize - subtle green
-            if (pressed) {
-                bgColor = RGB(0x2A, 0x2A, 0x2A);
-            } else if (hover) {
-                bgColor = RGB(0x34, 0x3E, 0x34); // slight green tint
-            } else {
-                bgColor = RGB(0x2E, 0x2E, 0x2E);
-            }
-        } else { // Tombstone - amber tint
-            if (pressed) {
-                bgColor = RGB(0x2A, 0x2A, 0x2A);
-            } else if (hover) {
-                bgColor = RGB(0x3E, 0x38, 0x34); // amber tint
-            } else {
-                bgColor = RGB(0x2E, 0x2E, 0x2E);
+        } else {
+            // Base fill colors matching Legacy: baseFill = pressed ? 0xFF2A2A2A : (hover ? 0xFF343434 : 0xFF2E2E2E)
+            if (buttonType == 0) { // Close button - red tinted
+                if (pressed) {
+                    bgColor = RGB(0x2A, 0x2A, 0x2A);
+                } else if (hover) {
+                    bgColor = RGB(0x44, 0x34, 0x34); // slight red tint on hover
+                } else {
+                    bgColor = RGB(0x2E, 0x2E, 0x2E);
+                }
+            } else if (buttonType == 1) { // Maximize - subtle blue
+                if (pressed) {
+                    bgColor = RGB(0x2A, 0x2A, 0x2A);
+                } else if (hover) {
+                    bgColor = RGB(0x34, 0x34, 0x3E); // slight blue tint
+                } else {
+                    bgColor = RGB(0x2E, 0x2E, 0x2E);
+                }
+            } else if (buttonType == 2) { // Minimize - subtle green
+                if (pressed) {
+                    bgColor = RGB(0x2A, 0x2A, 0x2A);
+                } else if (hover) {
+                    bgColor = RGB(0x34, 0x3E, 0x34); // slight green tint
+                } else {
+                    bgColor = RGB(0x2E, 0x2E, 0x2E);
+                }
+            } else { // Tombstone - amber tint
+                if (pressed) {
+                    bgColor = RGB(0x2A, 0x2A, 0x2A);
+                } else if (hover) {
+                    bgColor = RGB(0x3E, 0x38, 0x34); // amber tint
+                } else {
+                    bgColor = RGB(0x2E, 0x2E, 0x2E);
+                }
             }
         }
         
         // Draw hover glow halo effect (matching Legacy: 0x332E89FF)
         if (hover && UISettings::EnableButtonHoverEffects) {
             int glowPad = 2;
-            COLORREF glowColor = RGB(0x2E, 0x89, 0xFF);
+            COLORREF glowColor = sciFiTheme ? ToColorRef(BlendThemeColor(theme.accent, theme.mutedAccent, 28)) : RGB(0x2E, 0x89, 0xFF);
             int cornerRadius = GetWindowChromeCornerRadius(theme) / 2;
             DrawRoundedRect(dc, x - glowPad, y - glowPad, size + glowPad * 2, size + glowPad * 2, glowColor, cornerRadius);
         }
@@ -163,7 +215,11 @@ public:
         
         // Draw button border (matching Legacy: 0xFF505050)
         if (UISettings::EnableButtonBorders) {
-            COLORREF borderColor = RGB(0x50, 0x50, 0x50);
+            COLORREF borderColor = sciFiTheme
+                ? ToColorRef(pressed ? BlendThemeColor(theme.windowBorder, theme.accent, 36)
+                                     : (hover ? BlendThemeColor(theme.windowBorder, theme.mutedAccent, 30)
+                                              : BlendThemeColor(theme.windowBorder, theme.titleBarBackground, 22)))
+                : RGB(0x50, 0x50, 0x50);
             HPEN pen = CreatePen(PS_SOLID, 1, borderColor);
             HGDIOBJ oldPen = SelectObject(dc, pen);
             HGDIOBJ oldBrush = SelectObject(dc, GetStockObject(NULL_BRUSH));
@@ -251,11 +307,15 @@ public:
         if (!UISettings::EnableWindowBorders) return;
 
         const DesktopTheme& theme = GetCurrentDesktopTheme();
+        const bool sciFiTheme = theme.id == DesktopThemeId::SciFi;
         uint32_t borderColor = focused ? theme.accent : theme.windowBorder;
+        if (sciFiTheme) {
+            borderColor = focused
+                ? BlendThemeColor(theme.windowBorder, theme.accent, 72)
+                : BlendThemeColor(theme.windowBorder, theme.mutedAccent, 20);
+        }
         int borderThickness = theme.windowBorderThickness > 0 ? theme.windowBorderThickness : 1;
-        HPEN pen = CreatePen(PS_SOLID, borderThickness, RGB((borderColor >> 16) & 0xFF,
-                                                            (borderColor >> 8) & 0xFF,
-                                                            borderColor & 0xFF));
+        HPEN pen = CreatePen(PS_SOLID, borderThickness, ToColorRef(borderColor));
         HGDIOBJ oldPen = SelectObject(dc, pen);
         HGDIOBJ oldBrush = SelectObject(dc, GetStockObject(NULL_BRUSH));
         
@@ -269,6 +329,23 @@ public:
         SelectObject(dc, oldPen);
         SelectObject(dc, oldBrush);
         DeleteObject(pen);
+
+        if (sciFiTheme && focused && w > 4 && h > 4) {
+            const uint32_t innerColor = BlendThemeColor(theme.windowBackground, theme.accent, 18);
+            HPEN innerPen = CreatePen(PS_SOLID, 1, ToColorRef(innerColor));
+            HGDIOBJ innerOldPen = SelectObject(dc, innerPen);
+            HGDIOBJ innerOldBrush = SelectObject(dc, GetStockObject(NULL_BRUSH));
+
+            if (cornerRadius > 0) {
+                RoundRect(dc, x + 1, y + 1, x + w - 1, y + h - 1, cornerRadius * 2, cornerRadius * 2);
+            } else {
+                Rectangle(dc, x + 1, y + 1, x + w - 1, y + h - 1);
+            }
+
+            SelectObject(dc, innerOldPen);
+            SelectObject(dc, innerOldBrush);
+            DeleteObject(innerPen);
+        }
     }
     
     /// Draw resize grip in bottom-right corner

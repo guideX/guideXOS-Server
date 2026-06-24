@@ -2526,10 +2526,36 @@ namespace gxos {
                 // Search box placeholder (after start button)
                 if (!taskbarVertical) drawTaskbarSearchBox(dc, tb.left + 48, tb.top + 8, 160, (tb.bottom - tb.top) - 16);
                 // Taskbar buttons (offset to right of search box)
-                POINT cursor; GetCursorPos(&cursor); ScreenToClient(h, &cursor); int btnX = taskbarVertical ? tb.left + 4 : tb.left + 216; int btnY = taskbarVertical ? tb.top + 48 : tb.top + 6; for (uint64_t id : g_z) {
-                    auto it = g_windows.find(id); if (it == g_windows.end( )) continue; std::string label = it->second.title; int bw = taskbarVertical ? (tb.right - tb.left - 8) : measureUiText(label.c_str(), (int)label.size(), FontRole::Small) + theme.taskbarItemPadding * 2 + 12; if (!taskbarVertical && bw > 180) bw = 180; int bh = taskbarVertical ? 28 : (tb.bottom - tb.top - 12); RECT br{ btnX, btnY, btnX + bw, btnY + bh }; bool hover = (cursor.x >= br.left && cursor.x <= br.right && cursor.y >= br.top && cursor.y <= br.bottom); HBRUSH bbg = CreateSolidBrush(hover ? colorFromTheme(theme.accent) : (id == g_focus ? colorFromTheme(theme.mutedAccent) : (it->second.minimized ? RGB(40, 40, 50) : (it->second.tombstoned ? RGB(85, 65, 35) : RGB(55, 58, 70))))); FillRect(dc, &br, bbg); DeleteObject(bbg);
+                POINT cursor; GetCursorPos(&cursor); ScreenToClient(h, &cursor); int btnX = taskbarVertical ? tb.left + 4 : tb.left + 216; int btnY = taskbarVertical ? tb.top + 48 : tb.top + 6; const bool sciFiTaskbarPolish = theme.id == DesktopThemeId::SciFi; for (uint64_t id : g_z) {
+                    auto it = g_windows.find(id); if (it == g_windows.end( )) continue; std::string label = it->second.title; int bw = taskbarVertical ? (tb.right - tb.left - 8) : measureUiText(label.c_str(), (int)label.size(), FontRole::Small) + theme.taskbarItemPadding * 2 + 12; if (!taskbarVertical && bw > 180) bw = 180; int bh = taskbarVertical ? 28 : (tb.bottom - tb.top - 12); RECT br{ btnX, btnY, btnX + bw, btnY + bh }; bool hover = (cursor.x >= br.left && cursor.x <= br.right && cursor.y >= br.top && cursor.y <= br.bottom);
+                    uint32_t fillColor = hover ? theme.accent : (id == g_focus ? theme.mutedAccent : (it->second.minimized ? 0xFF28303Bu : (it->second.tombstoned ? 0xFF533F2Cu : 0xFF373A46u)));
+                    if (sciFiTaskbarPolish) {
+                        const uint32_t idleColor = it->second.minimized
+                            ? WindowRenderer::BlendThemeColor(theme.taskbarBackground, theme.windowBorder, 26)
+                            : (it->second.tombstoned
+                                ? WindowRenderer::BlendThemeColor(theme.taskbarBackground, theme.accent, 12)
+                                : WindowRenderer::BlendThemeColor(theme.taskbarBackground, theme.windowBorder, 14));
+                        const uint32_t activeColor = WindowRenderer::BlendThemeColor(theme.taskbarBackground, theme.mutedAccent, 22);
+                        const uint32_t hoverColor = WindowRenderer::BlendThemeColor(theme.taskbarBackground, theme.accent, 22);
+                        fillColor = hover ? hoverColor : (id == g_focus ? activeColor : idleColor);
+                    }
+                    HBRUSH bbg = CreateSolidBrush(colorFromTheme(fillColor)); FillRect(dc, &br, bbg); DeleteObject(bbg);
+                    if (sciFiTaskbarPolish) {
+                        const uint32_t outlineColor = hover
+                            ? WindowRenderer::BlendThemeColor(theme.taskbarBorder, theme.mutedAccent, 30)
+                            : (id == g_focus
+                                ? WindowRenderer::BlendThemeColor(theme.taskbarBorder, theme.accent, 35)
+                                : theme.taskbarBorder);
+                        HPEN outlinePen = CreatePen(PS_SOLID, 1, colorFromTheme(outlineColor));
+                        HGDIOBJ oldOutlinePen = SelectObject(dc, outlinePen);
+                        HGDIOBJ oldOutlineBrush = SelectObject(dc, GetStockObject(NULL_BRUSH));
+                        Rectangle(dc, br.left, br.top, br.right, br.bottom);
+                        SelectObject(dc, oldOutlinePen);
+                        SelectObject(dc, oldOutlineBrush);
+                        DeleteObject(outlinePen);
+                    }
                     // Active indicator line at bottom for focused window
-                    if (id == g_focus) { HBRUSH ind = CreateSolidBrush(colorFromTheme(theme.accent)); RECT indR{ br.left + 2,br.bottom - 3,br.right - 2,br.bottom - 1 }; FillRect(dc, &indR, ind); DeleteObject(ind); }
+                    if (id == g_focus) { HBRUSH ind = CreateSolidBrush(colorFromTheme(sciFiTaskbarPolish ? WindowRenderer::BlendThemeColor(theme.accent, theme.mutedAccent, 14) : theme.accent)); RECT indR{ br.left + 2,br.bottom - 3,br.right - 2,br.bottom - 1 }; FillRect(dc, &indR, ind); DeleteObject(ind); }
                     RECT iconRect{ br.left + 4, br.top + 4, br.left + 20, br.top + 20 }; drawBitmapCentered(dc, it->second.taskbarIcon, iconRect); if (!taskbarVertical) drawUiText(dc, br.left + theme.taskbarItemPadding + 12, br.top + 8, label, RGB(230, 230, 240), FontRole::Small); if (taskbarVertical) btnY += bh + 4; else btnX += bw + theme.taskbarItemPadding / 2;
                 }
                 // System tray area (before clock)

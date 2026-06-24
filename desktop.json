@@ -1,9 +1,18 @@
 {
   "wallpaper": "/system/wallpapers/ameobagx.png",
   "desktop.wallpaper.id": "legacy_ameobagx",
+  "desktop.theme.id": "classic",
   "desktop.background.scale": "fill",
+  "desktop.taskbar.position": "bottom",
   "pinned": ["ComputerFiles","Trash","App Model Demo","Native App Debug Viewer","Hello World","Resource Viewer","Future GXApp Package","HelloWorld ELF"],
   "recent": ["ControlPanel","guideXOS Navigator","Calculator","Notepad","ComputerFiles","HelloWorld ELF","Native App Debug Viewer","Hello World","Resource Viewer","TaskManager","Future GXApp Package","Console","HDInstaller","App Model Demo"],
+  "desktopShortcuts": [
+  ],
+  "showDesktopTrash": true,
+  "showDesktopThisSystem": true,
+  "showDesktopFileManager": true,
+  "showDesktopSystemSettings": false,
+  "smallLiveDesktopFolderIcons": true,
   "windows": [
   ],
   "iconPositions": [
