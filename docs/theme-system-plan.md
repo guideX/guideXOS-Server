@@ -167,25 +167,79 @@ Phase 2F is a Display Options theme UX polish pass.
 * Sci Fi remains opt-in.
 * Theme selection, persistence, and reload behavior remain unchanged.
 
-## What Is Deferred
+## Phase 2G
 
-* Rounded clipping for theme-specific window shapes
-* Glass or blur simulation
-* Slide-in / slide-out animations
-* High-DPI and scaling polish
-* More themes
-* Deeper app-specific polish
+Phase 2G is a documentation and visual validation checkpoint for the current theme milestone.
+
+* Phase 1 foundation is complete and provides the stable theme ID, persistence, and selector wiring base.
+* Phase 2A chrome metrics are complete and keep the shared chrome layout theme-aware.
+* Phase 2A.1 paint/hit-test alignment stabilization is complete and kept the metric wiring consistent.
+* Phase 2B guarded rounded hosted preview is complete and remains limited to the safe hosted path.
+* Phase 2B.1 stale-corner validation is complete and confirmed the preview does not leave square artifacts behind.
+* Phase 2C border / highlight polish is complete and adds the conservative Sci Fi edge treatment.
+* Phase 2C.1 polish stabilization is complete and kept that polish centralized.
+* Phase 2D hosted shadow preview is complete and remains guarded to hosted Sci Fi only.
+* Phase 2D.1 shadow stabilization is complete and kept the shadow helper conservative.
+* Phase 2E desktop / taskbar surface polish is complete and keeps the shell surfaces cohesive.
+* Phase 2E.1 taskbar surface geometry stabilization is complete and keeps the click regions aligned.
+* Phase 2F Display Options theme UX polish is complete and improves theme selection clarity without adding per-effect controls.
+* The current milestone intentionally stops before new rendering effects, compositor behavior changes, or theme metric changes.
+
+## Manual Validation Checklist
+
+### Classic hosted checklist
+
+* Classic is the default theme on a fresh config.
+* Classic windows remain rectangular.
+* Classic taskbar, menu, and search styling remains familiar.
+* Classic has no Sci Fi shadow or highlight treatment.
+* Theme selection persists after restart.
+
+### Sci Fi hosted checklist
+
+* Sci Fi can be selected from Display Options.
+* Sci Fi selection persists after restart.
+* Sci Fi windows show roomier titlebar and chrome spacing.
+* Rounded hosted chrome preview appears.
+* Active and inactive borders are distinct.
+* Title button hover and pressed states are visible and aligned.
+* Soft shadow appears behind hosted windows.
+* Moving, resizing, and overlapping windows does not leave stale shadow or corner pixels.
+* Taskbar hover and active states align with click regions.
+* Start button paint and click region line up.
+* Search box, start menu, and context menu remain readable.
+* No-wallpaper desktop uses the dark Sci Fi surface.
+
+### Bare-metal checklist
+
+* Bare-metal still boots.
+* Bare-metal remains rectangular for now.
+* Bare-metal does not accidentally depend on hosted GDI theme helpers.
+* Display Options and the theme config path do not break bare-metal.
+
+## Deferred / Future Work Queue
+
+* Full rounded client clipping
+* Rounded hit-testing
+* Blur/glass simulation
+* Animations and slide-in/out transitions
+* High-DPI/scaling/resolution polish
+* Bare-metal theme parity
+* Taskbar shadows
+* Theme wallpaper/asset selection
+* Per-theme user-editable settings
+* Deeper app surface polish
+* Visual screenshot-based smoke tests
 
 ## Notes
 
 * Classic should continue to look basically unchanged.
 * Sci Fi is a first visible proof that the theme system exists, not a full futuristic redesign.
-* Rounded-window clipping remains deferred; this foundation is intentionally limited to IDs, persistence, selector wiring, safe chrome colors, the Phase 2A chrome metric pass, the guarded Phase 2B rounded-shell preview, the Phase 2C border/highlight polish pass, the Phase 2D hosted shadow preview, and the Phase 2E desktop/taskbar surface polish pass.
+* Rounded-window clipping remains deferred; this foundation is intentionally limited to IDs, persistence, selector wiring, safe chrome colors, the Phase 2A chrome metric pass, the guarded Phase 2B rounded-shell preview, the Phase 2C border/highlight polish pass, the Phase 2D hosted shadow preview, the Phase 2E desktop/taskbar surface polish pass, and the Phase 2G validation checkpoint.
 
-## Future Work
+## Recommended Next Pass
 
-1. Wire rounded clipping safely for supported render paths.
-2. Expand the conservative shadow preview behind clear feature gates, then add glass/blur experiments if the render path proves safe.
-3. Refine padding, spacing, and scaling using per-theme metrics.
-4. Add more themes once the infrastructure is proven stable.
-5. Apply deeper per-app polish after the compositor chrome is settled.
+1. Phase 2G.1 manual visual validation fixes, if screenshots or manual testing finds issues.
+2. Phase 2H theme screenshot / manual smoke harness, if feasible.
+3. Phase 3A small app-surface polish, only after shell visuals are stable.
+4. Future high-DPI and resolution work as a separate track.

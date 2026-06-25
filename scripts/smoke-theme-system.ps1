@@ -160,6 +160,13 @@ $phase2e1HeadingMatch = Find-FirstMatch $planDoc '## Phase 2E\.1'
 $phase2e1BodyMatch = Find-FirstMatch $planDoc 'Phase 2E\.1 is a stabilization and review pass for the Phase 2E Sci Fi desktop and taskbar surface polish|surface helper set was reviewed and kept centralized|start-button hit-geometry cleanup|Wallpaper and theme asset selection remain deferred|desktopBackground wiring for the hosted no-wallpaper path remains in place'
 $phase2fHeadingMatch = Find-FirstMatch $planDoc '## Phase 2F'
 $phase2fBodyMatch = Find-FirstMatch $planDoc 'Display Options theme UX polish|The Theme section now explains the Classic and Sci Fi choices more clearly|Classic keeps a concise description|Sci Fi keeps a concise description|read-only feature summary|No per-effect sliders, checkboxes, or theme customization controls were added|No new rendering effects or compositor changes were added|Theme selection, persistence, and reload behavior remain unchanged'
+$phase2gHeadingMatch = Find-FirstMatch $planDoc '## Phase 2G'
+$manualChecklistHeadingMatch = Find-FirstMatch $planDoc '## Manual Validation Checklist'
+$classicHostedChecklistMatch = Find-FirstMatch $planDoc '### Classic hosted checklist'
+$sciFiHostedChecklistMatch = Find-FirstMatch $planDoc '### Sci Fi hosted checklist'
+$bareMetalChecklistMatch = Find-FirstMatch $planDoc '### Bare-metal checklist'
+$deferredQueueHeadingMatch = Find-FirstMatch $planDoc '## Deferred / Future Work Queue'
+$recommendedNextPassHeadingMatch = Find-FirstMatch $planDoc '## Recommended Next Pass'
 $compositorStartButtonRectMatch = Find-FirstMatch $compositor 'hostedStartButtonRect\(theme, tb\)|hostedStartButtonRect\(theme, tbWork\)'
 $themeDescriptionClassicMatch = Find-FirstMatch $displayOptions 'Current guideXOS look\.'
 $themeDescriptionSciFiMatch = Find-FirstMatch $displayOptions 'Dark futuristic hosted UI\.'
@@ -233,6 +240,13 @@ $checks = @(
     [pscustomobject]@{ Name = "phase 2e docs mention"; Pass = $null -ne $phase2eHeadingMatch -and $null -ne $phase2eBodyMatch; Match = $(if ($null -ne $phase2eBodyMatch) { $phase2eBodyMatch } else { $phase2eHeadingMatch }) },
     [pscustomobject]@{ Name = "phase 2e1 docs mention"; Pass = $null -ne $phase2e1HeadingMatch -and $null -ne $phase2e1BodyMatch; Match = $(if ($null -ne $phase2e1BodyMatch) { $phase2e1BodyMatch } else { $phase2e1HeadingMatch }) },
     [pscustomobject]@{ Name = "phase 2f docs mention"; Pass = $null -ne $phase2fHeadingMatch -and $null -ne $phase2fBodyMatch; Match = $(if ($null -ne $phase2fBodyMatch) { $phase2fBodyMatch } else { $phase2fHeadingMatch }) },
+    [pscustomobject]@{ Name = "phase 2g docs mention"; Pass = $null -ne $phase2gHeadingMatch; Match = $phase2gHeadingMatch },
+    [pscustomobject]@{ Name = "manual validation checklist heading"; Pass = $null -ne $manualChecklistHeadingMatch; Match = $manualChecklistHeadingMatch },
+    [pscustomobject]@{ Name = "classic hosted checklist heading"; Pass = $null -ne $classicHostedChecklistMatch; Match = $classicHostedChecklistMatch },
+    [pscustomobject]@{ Name = "sci fi hosted checklist heading"; Pass = $null -ne $sciFiHostedChecklistMatch; Match = $sciFiHostedChecklistMatch },
+    [pscustomobject]@{ Name = "bare-metal checklist heading"; Pass = $null -ne $bareMetalChecklistMatch; Match = $bareMetalChecklistMatch },
+    [pscustomobject]@{ Name = "deferred future work queue heading"; Pass = $null -ne $deferredQueueHeadingMatch; Match = $deferredQueueHeadingMatch },
+    [pscustomobject]@{ Name = "recommended next pass heading"; Pass = $null -ne $recommendedNextPassHeadingMatch; Match = $recommendedNextPassHeadingMatch },
     [pscustomobject]@{ Name = "display options classic description"; Pass = $null -ne $themeDescriptionClassicMatch; Match = $themeDescriptionClassicMatch },
     [pscustomobject]@{ Name = "display options sci fi description"; Pass = $null -ne $themeDescriptionSciFiMatch; Match = $themeDescriptionSciFiMatch },
     [pscustomobject]@{ Name = "display options feature summary"; Pass = $null -ne $themeFeatureSummaryMatch; Match = $themeFeatureSummaryMatch },
