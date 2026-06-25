@@ -86,6 +86,16 @@ Phase 2C adds a conservative Sci Fi border and highlight polish layer without ch
 * Slide-in / slide-out animations remain deferred.
 * High-DPI and scaling remain deferred.
 
+## Phase 2C.1
+
+Phase 2C.1 is a stabilization-only review pass for the Sci Fi chrome polish.
+
+* The Phase 2C border and highlight treatment was reviewed and kept centralized.
+* Classic remains preserved as the default rectangular theme.
+* No new shadow, blur/glass, animation, or clipping work was added.
+* The hosted titlebar and taskbar polish paths remain guarded to Sci Fi.
+* One small cleanup was made to remove a dead transparency branch in the shared titlebar helper.
+
 ## What Is Deferred
 
 * Rounded clipping for theme-specific window shapes

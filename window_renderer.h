@@ -114,15 +114,14 @@ public:
         }
     }
     
-    /// Draw window title bar with optional transparency effect
-    static void DrawTitleBar(HDC dc, int x, int y, int w, int h, bool focused, bool transparent = false) {
+    /// Draw window title bar
+    static void DrawTitleBar(HDC dc, int x, int y, int w, int h, bool focused) {
         if (!UISettings::EnableTitleBarBackground) return;
 
         const DesktopTheme& theme = GetCurrentDesktopTheme();
         const bool sciFiTheme = theme.id == DesktopThemeId::SciFi;
         const uint32_t themeColor = focused ? theme.titleBarBackground : theme.taskbarBackground;
-        const uint32_t sourceColor = transparent ? themeColor : themeColor;
-        const COLORREF color = ToColorRef(sourceColor);
+        const COLORREF color = ToColorRef(themeColor);
         int cornerRadius = GetWindowChromeCornerRadius(theme);
         DrawRoundedRect(dc, x, y, w, h, color, cornerRadius);
 
