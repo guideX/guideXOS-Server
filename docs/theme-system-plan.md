@@ -141,6 +141,18 @@ Phase 2E adds conservative Sci Fi desktop and taskbar surface polish without exp
 * Animations remain deferred.
 * High-DPI and scaling remain deferred.
 
+## Phase 2E.1
+
+Phase 2E.1 is a stabilization and review pass for the Phase 2E Sci Fi desktop and taskbar surface polish.
+
+* The Phase 2E surface helper set was reviewed and kept centralized in the hosted compositor path.
+* A small start-button hit-geometry cleanup was applied so the hosted click bounds stay aligned with the painted taskbar padding.
+* Classic remains the default theme and preserves the existing taskbar and menu look as closely as practical.
+* Sci Fi remains opt-in and continues to use the conservative hosted surface helpers only.
+* No new blur, glass, animation, clipping, or scaling work was added.
+* Wallpaper and theme asset selection remain deferred.
+* The existing desktopBackground wiring for the hosted no-wallpaper path remains in place and was left unchanged in behavior.
+
 ## What Is Deferred
 
 * Rounded clipping for theme-specific window shapes

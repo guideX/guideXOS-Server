@@ -695,6 +695,14 @@ namespace gxos {
                     : theme.taskbarBorder);
         }
 
+        static RECT hostedStartButtonRect(const DesktopTheme& theme, const RECT& tb) {
+            return RECT{ tb.left + theme.taskbarPadding, tb.top + 6, tb.left + theme.taskbarPadding + 32, tb.top + 34 };
+        }
+
+        static RECT hostedStartButtonRect(const DesktopTheme& theme, const WorkRect& tb) {
+            return RECT{ tb.left + theme.taskbarPadding, tb.top + 6, tb.left + theme.taskbarPadding + 32, tb.top + 34 };
+        }
+
         static const bool kEnableStartMenuIcons = true;
         static const int kStartMenuIconSize = 16;
         static const int kStartMenuRowH = 22;
@@ -2665,7 +2673,7 @@ namespace gxos {
                     DeleteObject(tbEdge);
                 }
                 POINT cursor; GetCursorPos(&cursor); ScreenToClient(h, &cursor);
-                RECT startBtn{ tb.left + theme.taskbarPadding, tb.top + 6, tb.left + theme.taskbarPadding + 32, tb.top + 34 };
+                RECT startBtn = hostedStartButtonRect(theme, tb);
                 const bool startHover = (cursor.x >= startBtn.left && cursor.x <= startBtn.right && cursor.y >= startBtn.top && cursor.y <= startBtn.bottom);
                 HBRUSH sbg = CreateSolidBrush(colorFromTheme(hostedStartButtonFillColor(theme, startHover, g_startMenuVisible)));
                 FillRect(dc, &startBtn, sbg);
@@ -3079,8 +3087,9 @@ namespace gxos {
                 }
                 // Show Desktop button (thin sliver on far right of taskbar)
                 WorkRect tbWork = taskbarRectForBounds(cr.right - cr.left, cr.bottom - cr.top); bool taskbarVertical = (g_taskbarPosition == TaskbarPosition::Left || g_taskbarPosition == TaskbarPosition::Right);
+                const DesktopTheme& theme = GetCurrentDesktopTheme();
                 { int sdW = 6; RECT sdRect = taskbarVertical ? RECT{ tbWork.left, tbWork.bottom - sdW, tbWork.right, tbWork.bottom } : RECT{ tbWork.right - sdW, tbWork.top, tbWork.right, tbWork.bottom }; if (mx >= sdRect.left && my >= sdRect.top && mx <= sdRect.right && my <= sdRect.bottom) { ipc::Message sdm; sdm.type = static_cast<uint32_t>(gui::MsgType::MT_ShowDesktopToggle); handleMessage(sdm); requestRepaint( ); return 0; } }
-                RECT startBtn{ tbWork.left + 8,tbWork.top + 6,tbWork.left + 40,tbWork.top + 34 }; // Start button toggle
+                RECT startBtn = hostedStartButtonRect(theme, tbWork); // Start button toggle
                 if (mx >= startBtn.left && mx <= startBtn.right && my >= startBtn.top && my <= startBtn.bottom) {
                     g_startMenuVisible = !g_startMenuVisible;
                     if (g_startMenuVisible) {

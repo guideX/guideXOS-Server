@@ -156,6 +156,9 @@ $phase2d1HeadingMatch = Find-FirstMatch $planDoc '## Phase 2D\.1'
 $phase2d1BodyMatch = Find-FirstMatch $planDoc 'stabilization and review pass for the hosted Sci Fi shadow preview|full client frame before the window stack|Classic remains shadow-free|Bare-metal framebuffer rendering remains unchanged|rounded hit-testing and rounded client clipping remain rectangular and deferred|No blur, glass, animation, or high-DPI work was added|rounded chrome preview guard remains separate from the shadow guard'
 $phase2eHeadingMatch = Find-FirstMatch $planDoc '## Phase 2E'
 $phase2eBodyMatch = Find-FirstMatch $planDoc 'Phase 2E adds conservative Sci Fi desktop and taskbar surface polish|desktopBackground|taskbar surface|Classic remains the default theme|Classic remains rectangular and shadow-free|Bare-metal framebuffer rendering remains unchanged and rectangular|Rounded client clipping remains deferred|Rounded hit-testing remains deferred|Blur/glass remains deferred|Animations remain deferred|High-DPI and scaling remain deferred'
+$phase2e1HeadingMatch = Find-FirstMatch $planDoc '## Phase 2E\.1'
+$phase2e1BodyMatch = Find-FirstMatch $planDoc 'Phase 2E\.1 is a stabilization and review pass for the Phase 2E Sci Fi desktop and taskbar surface polish|surface helper set was reviewed and kept centralized|start-button hit-geometry cleanup|Wallpaper and theme asset selection remain deferred|desktopBackground wiring for the hosted no-wallpaper path remains in place'
+$compositorStartButtonRectMatch = Find-FirstMatch $compositor 'hostedStartButtonRect\(theme, tb\)|hostedStartButtonRect\(theme, tbWork\)'
 
 $checks = @(
     [pscustomobject]@{ Name = "theme header exists"; Pass = (Test-Path -LiteralPath $themeHeader); Match = $null },
@@ -217,7 +220,9 @@ $checks = @(
     [pscustomobject]@{ Name = "phase 2c1 docs mention"; Pass = $null -ne $phase2c1HeadingMatch -and $null -ne $phase2c1BodyMatch; Match = $(if ($null -ne $phase2c1BodyMatch) { $phase2c1BodyMatch } else { $phase2c1HeadingMatch }) },
     [pscustomobject]@{ Name = "phase 2d docs mention"; Pass = $null -ne $phase2dHeadingMatch -and $null -ne $phase2dBodyMatch; Match = $(if ($null -ne $phase2dBodyMatch) { $phase2dBodyMatch } else { $phase2dHeadingMatch }) },
     [pscustomobject]@{ Name = "phase 2d1 docs mention"; Pass = $null -ne $phase2d1HeadingMatch -and $null -ne $phase2d1BodyMatch; Match = $(if ($null -ne $phase2d1BodyMatch) { $phase2d1BodyMatch } else { $phase2d1HeadingMatch }) },
-    [pscustomobject]@{ Name = "phase 2e docs mention"; Pass = $null -ne $phase2eHeadingMatch -and $null -ne $phase2eBodyMatch; Match = $(if ($null -ne $phase2eBodyMatch) { $phase2eBodyMatch } else { $phase2eHeadingMatch }) }
+    [pscustomobject]@{ Name = "phase 2e docs mention"; Pass = $null -ne $phase2eHeadingMatch -and $null -ne $phase2eBodyMatch; Match = $(if ($null -ne $phase2eBodyMatch) { $phase2eBodyMatch } else { $phase2eHeadingMatch }) },
+    [pscustomobject]@{ Name = "phase 2e1 docs mention"; Pass = $null -ne $phase2e1HeadingMatch -and $null -ne $phase2e1BodyMatch; Match = $(if ($null -ne $phase2e1BodyMatch) { $phase2e1BodyMatch } else { $phase2e1HeadingMatch }) },
+    [pscustomobject]@{ Name = "compositor start button rect helper wired"; Pass = $null -ne $compositorStartButtonRectMatch; Match = $compositorStartButtonRectMatch }
 )
 
 $failures = 0
