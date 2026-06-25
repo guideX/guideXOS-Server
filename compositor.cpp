@@ -2374,7 +2374,8 @@ namespace gxos {
                     drawDc = s_hostedPaintDc;
                 }
 #define dc drawDc
-                // Hosted paint lifecycle: begin WM_PAINT, ensure the offscreen frame, then compose into it.
+                // Hosted paint lifecycle: redraw the full client frame into the
+                // offscreen buffer, then compose the window stack on top.
                 const DesktopTheme& theme = GetCurrentDesktopTheme();
                 auto colorFromTheme = [](uint32_t value) -> COLORREF {
                     return RGB((value >> 16) & 0xFF, (value >> 8) & 0xFF, value & 0xFF);

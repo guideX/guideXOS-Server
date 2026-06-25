@@ -112,6 +112,18 @@ Phase 2D adds the first guarded, hosted-only Sci Fi soft shadow preview.
 * No animation was added.
 * The hosted paint path redraws the full client frame before the window stack, so the shadow can extend slightly outside the shell without leaving stale pixels behind during move, resize, overlap, or repaint.
 
+## Phase 2D.1
+
+Phase 2D.1 is a stabilization and review pass for the hosted Sci Fi shadow preview.
+
+* The soft shadow preview was reviewed and kept conservative rather than expanded into a broader effects system.
+* No concrete repaint fix was required: the hosted WM_PAINT path already redraws the full client frame before the window stack, so there is no stale-pixel artifact risk from the shadow preview in the current hosted path.
+* Classic remains shadow-free.
+* Bare-metal framebuffer rendering remains unchanged.
+* Rounded hit-testing and rounded client clipping remain rectangular and deferred.
+* No blur, glass, animation, or high-DPI work was added.
+* The rounded chrome preview guard remains separate from the shadow guard, and the shadow helper stays centralized in the shared window renderer.
+
 ## What Is Deferred
 
 * Rounded clipping for theme-specific window shapes

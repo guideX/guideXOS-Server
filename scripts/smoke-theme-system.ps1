@@ -147,6 +147,8 @@ $phase2c1HeadingMatch = Find-FirstMatch $planDoc '## Phase 2C\.1'
 $phase2c1BodyMatch = Find-FirstMatch $planDoc 'Phase 2C\.1 is a stabilization-only review pass for the Sci Fi chrome polish\.'
 $phase2dHeadingMatch = Find-FirstMatch $planDoc '## Phase 2D'
 $phase2dBodyMatch = Find-FirstMatch $planDoc 'hosted-only Sci Fi soft shadow preview|softShadowIntent|No blur or glass simulation was added|No animation was added|The hosted paint path redraws the full client frame before the window stack'
+$phase2d1HeadingMatch = Find-FirstMatch $planDoc '## Phase 2D\.1'
+$phase2d1BodyMatch = Find-FirstMatch $planDoc 'stabilization and review pass for the hosted Sci Fi shadow preview|full client frame before the window stack|Classic remains shadow-free|Bare-metal framebuffer rendering remains unchanged|rounded hit-testing and rounded client clipping remain rectangular and deferred|No blur, glass, animation, or high-DPI work was added|rounded chrome preview guard remains separate from the shadow guard'
 
 $checks = @(
     [pscustomobject]@{ Name = "theme header exists"; Pass = (Test-Path -LiteralPath $themeHeader); Match = $null },
@@ -200,7 +202,8 @@ $checks = @(
     [pscustomobject]@{ Name = "phase 2b1 docs mention"; Pass = $null -ne $phase2b1DocMatch; Match = $phase2b1DocMatch },
     [pscustomobject]@{ Name = "phase 2c docs mention"; Pass = $null -ne $phase2cHeadingMatch -and $null -ne $phase2cBodyMatch; Match = $(if ($null -ne $phase2cBodyMatch) { $phase2cBodyMatch } else { $phase2cHeadingMatch }) },
     [pscustomobject]@{ Name = "phase 2c1 docs mention"; Pass = $null -ne $phase2c1HeadingMatch -and $null -ne $phase2c1BodyMatch; Match = $(if ($null -ne $phase2c1BodyMatch) { $phase2c1BodyMatch } else { $phase2c1HeadingMatch }) },
-    [pscustomobject]@{ Name = "phase 2d docs mention"; Pass = $null -ne $phase2dHeadingMatch -and $null -ne $phase2dBodyMatch; Match = $(if ($null -ne $phase2dBodyMatch) { $phase2dBodyMatch } else { $phase2dHeadingMatch }) }
+    [pscustomobject]@{ Name = "phase 2d docs mention"; Pass = $null -ne $phase2dHeadingMatch -and $null -ne $phase2dBodyMatch; Match = $(if ($null -ne $phase2dBodyMatch) { $phase2dBodyMatch } else { $phase2dHeadingMatch }) },
+    [pscustomobject]@{ Name = "phase 2d1 docs mention"; Pass = $null -ne $phase2d1HeadingMatch -and $null -ne $phase2d1BodyMatch; Match = $(if ($null -ne $phase2d1BodyMatch) { $phase2d1BodyMatch } else { $phase2d1HeadingMatch }) }
 )
 
 $failures = 0
