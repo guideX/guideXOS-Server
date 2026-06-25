@@ -185,6 +185,17 @@ Phase 2G is a documentation and visual validation checkpoint for the current the
 * Phase 2F Display Options theme UX polish is complete and improves theme selection clarity without adding per-effect controls.
 * The current milestone intentionally stops before new rendering effects, compositor behavior changes, or theme metric changes.
 
+## Phase 2G.1 Manual Validation Note
+
+* Classic validation: `DisplayOptions` launched as `DisplayOptions`, and the launch capture showed the theme tab area was readable without any clipping or overlap.
+* Sci Fi validation: the real Theme tab click path was too brittle to rely on fully in this pass, so Sci Fi was validated with the persisted `desktop.theme.id=scifi` token plus compositor restart, then visually confirmed on the hosted desktop.
+* Screenshots were captured.
+* Local validation artifacts kept in the repo root: `theme-phase2g1-displayoptions-launch.png`, `theme-phase2g1-scifi.png`, `theme-phase2g1-scifi-startmenu.png`, and `theme-phase2g1-scifi-taskbar-menu.png`.
+* Pre-existing Classic validation artifacts kept in the repo root: `theme-phase2g1-classic.png` and `theme-phase2g1-classic-printwindow.png`.
+* Tiny fixes made: none.
+* Issues deferred: click-driven Theme tab / Sci Fi selection was not fully click-reliable in this pass, so the persisted-config fallback was used for Sci Fi validation.
+* `DisplayOptions` launches under the registered app name `DisplayOptions`.
+
 ## Manual Validation Checklist
 
 ### Classic hosted checklist
