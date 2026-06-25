@@ -103,6 +103,7 @@ $themeFieldTitleButtonGapMatch = Find-FirstMatch $themeHeader 'titleButtonGap'
 $themeFieldTaskbarPaddingMatch = Find-FirstMatch $themeHeader 'taskbarPadding'
 $themeFieldTaskbarItemPaddingMatch = Find-FirstMatch $themeHeader 'taskbarItemPadding'
 $themeFieldSoftShadowIntentMatch = Find-FirstMatch $themeHeader 'softShadowIntent'
+$themeFieldDesktopBackgroundMatch = Find-FirstMatch $themeHeader 'desktopBackground'
 $configThemeMatch = Find-FirstMatch $desktopConfig 'TryParseDesktopThemeId\(out\.desktopThemeId\.c_str\(\), &themeId\)|DesktopThemeIdToString\(themeId\)'
 $showConfigThemeMatch = Find-FirstMatch $server 'Theme: .*DesktopThemeIdToString\(themeId\)'
 $classicOptionMatch = Find-FirstMatch $displayOptions 'DesktopThemeId::Classic, GetDesktopTheme\(DesktopThemeId::Classic\)'
@@ -125,7 +126,11 @@ $compositorWindowBorderMatch = Find-FirstMatch $compositor 'theme\.windowBorderT
 $compositorTaskbarPaddingMatch = Find-FirstMatch $compositor 'theme\.taskbarPadding'
 $compositorTaskbarItemPaddingMatch = Find-FirstMatch $compositor 'theme\.taskbarItemPadding'
 $compositorTaskbarSciFiMatch = Find-FirstMatch $compositor 'theme\.id == DesktopThemeId::SciFi'
-$compositorTaskbarPolishMatch = Find-FirstMatch $compositor 'WindowRenderer::BlendThemeColor\(theme\.taskbarBackground, theme\.accent, 22\)|WindowRenderer::BlendThemeColor\(theme\.taskbarBorder, theme\.accent, 35\)'
+$compositorDesktopBackgroundMatch = Find-FirstMatch $compositor 'hostedDesktopTopColor|theme\.desktopBackground'
+$compositorTaskbarSurfaceMatch = Find-FirstMatch $compositor 'hostedTaskbarSurfaceColor|hostedTaskbarHighlightColor|hostedTaskbarBorderColor'
+$compositorPanelSurfaceMatch = Find-FirstMatch $compositor 'hostedPanelSurfaceColor|hostedPanelBorderColor'
+$compositorTaskbarItemMatch = Find-FirstMatch $compositor 'hostedTaskbarItemFillColor|hostedTaskbarItemBorderColor'
+$compositorStartButtonMatch = Find-FirstMatch $compositor 'hostedStartButtonFillColor|hostedStartButtonBorderColor'
 $compositorButtonHitMatch = Find-FirstMatch $compositor 'my >= btnY && my < btnY \+ btnSize'
 $compositorWidgetInsetMatch = Find-FirstMatch $compositor 'wx = mx - topW->x - theme\.windowPadding|wy = my - topW->y - titleBarH - theme\.windowPadding'
 $compositorTaskbarSpacingMatch = Find-FirstMatch $compositor 'taskbarItemPadding / 2'
@@ -149,6 +154,8 @@ $phase2dHeadingMatch = Find-FirstMatch $planDoc '## Phase 2D'
 $phase2dBodyMatch = Find-FirstMatch $planDoc 'hosted-only Sci Fi soft shadow preview|softShadowIntent|No blur or glass simulation was added|No animation was added|The hosted paint path redraws the full client frame before the window stack'
 $phase2d1HeadingMatch = Find-FirstMatch $planDoc '## Phase 2D\.1'
 $phase2d1BodyMatch = Find-FirstMatch $planDoc 'stabilization and review pass for the hosted Sci Fi shadow preview|full client frame before the window stack|Classic remains shadow-free|Bare-metal framebuffer rendering remains unchanged|rounded hit-testing and rounded client clipping remain rectangular and deferred|No blur, glass, animation, or high-DPI work was added|rounded chrome preview guard remains separate from the shadow guard'
+$phase2eHeadingMatch = Find-FirstMatch $planDoc '## Phase 2E'
+$phase2eBodyMatch = Find-FirstMatch $planDoc 'Phase 2E adds conservative Sci Fi desktop and taskbar surface polish|desktopBackground|taskbar surface|Classic remains the default theme|Classic remains rectangular and shadow-free|Bare-metal framebuffer rendering remains unchanged and rectangular|Rounded client clipping remains deferred|Rounded hit-testing remains deferred|Blur/glass remains deferred|Animations remain deferred|High-DPI and scaling remain deferred'
 
 $checks = @(
     [pscustomobject]@{ Name = "theme header exists"; Pass = (Test-Path -LiteralPath $themeHeader); Match = $null },
@@ -168,6 +175,7 @@ $checks = @(
     [pscustomobject]@{ Name = "theme field taskbarPadding exists"; Pass = $null -ne $themeFieldTaskbarPaddingMatch; Match = $themeFieldTaskbarPaddingMatch },
     [pscustomobject]@{ Name = "theme field taskbarItemPadding exists"; Pass = $null -ne $themeFieldTaskbarItemPaddingMatch; Match = $themeFieldTaskbarItemPaddingMatch },
     [pscustomobject]@{ Name = "theme field softShadowIntent exists"; Pass = $null -ne $themeFieldSoftShadowIntentMatch; Match = $themeFieldSoftShadowIntentMatch },
+    [pscustomobject]@{ Name = "theme field desktopBackground exists"; Pass = $null -ne $themeFieldDesktopBackgroundMatch; Match = $themeFieldDesktopBackgroundMatch },
     [pscustomobject]@{ Name = "config theme normalization"; Pass = $null -ne $configThemeMatch; Match = $configThemeMatch },
     [pscustomobject]@{ Name = "desktop.showconfig theme reporting"; Pass = $null -ne $showConfigThemeMatch; Match = $showConfigThemeMatch },
     [pscustomobject]@{ Name = "classic theme option visible"; Pass = $null -ne $classicOptionMatch; Match = $classicOptionMatch },
@@ -182,6 +190,11 @@ $checks = @(
     [pscustomobject]@{ Name = "window renderer shadow helper wired"; Pass = $null -ne $windowRendererShadowGuardMatch; Match = $windowRendererShadowGuardMatch },
     [pscustomobject]@{ Name = "compositor rounded helper wired"; Pass = $null -ne $compositorRoundedGuardMatch; Match = $compositorRoundedGuardMatch },
     [pscustomobject]@{ Name = "compositor shadow call wired"; Pass = $null -ne $compositorShadowCallMatch; Match = $compositorShadowCallMatch },
+    [pscustomobject]@{ Name = "compositor desktop background wired"; Pass = $null -ne $compositorDesktopBackgroundMatch; Match = $compositorDesktopBackgroundMatch },
+    [pscustomobject]@{ Name = "compositor taskbar surface helpers wired"; Pass = $null -ne $compositorTaskbarSurfaceMatch; Match = $compositorTaskbarSurfaceMatch },
+    [pscustomobject]@{ Name = "compositor panel surface helpers wired"; Pass = $null -ne $compositorPanelSurfaceMatch; Match = $compositorPanelSurfaceMatch },
+    [pscustomobject]@{ Name = "compositor taskbar item helpers wired"; Pass = $null -ne $compositorTaskbarItemMatch; Match = $compositorTaskbarItemMatch },
+    [pscustomobject]@{ Name = "compositor start button helpers wired"; Pass = $null -ne $compositorStartButtonMatch; Match = $compositorStartButtonMatch },
     [pscustomobject]@{ Name = "compositor title bar metric wired"; Pass = $null -ne $compositorTitleBarMatch; Match = $compositorTitleBarMatch },
     [pscustomobject]@{ Name = "compositor title inset wired"; Pass = $null -ne $compositorTitleTextInsetMatch; Match = $compositorTitleTextInsetMatch },
     [pscustomobject]@{ Name = "compositor title button gap wired"; Pass = $null -ne $compositorTitleButtonGapMatch; Match = $compositorTitleButtonGapMatch },
@@ -189,7 +202,7 @@ $checks = @(
     [pscustomobject]@{ Name = "compositor window border wired"; Pass = $null -ne $compositorWindowBorderMatch; Match = $compositorWindowBorderMatch },
     [pscustomobject]@{ Name = "compositor taskbar padding wired"; Pass = $null -ne $compositorTaskbarPaddingMatch; Match = $compositorTaskbarPaddingMatch },
     [pscustomobject]@{ Name = "compositor taskbar item padding wired"; Pass = $null -ne $compositorTaskbarItemPaddingMatch; Match = $compositorTaskbarItemPaddingMatch },
-    [pscustomobject]@{ Name = "compositor sci fi taskbar polish wired"; Pass = $null -ne $compositorTaskbarSciFiMatch -and $null -ne $compositorTaskbarPolishMatch; Match = $(if ($null -ne $compositorTaskbarPolishMatch) { $compositorTaskbarPolishMatch } else { $compositorTaskbarSciFiMatch }) },
+    [pscustomobject]@{ Name = "compositor sci fi taskbar polish wired"; Pass = $null -ne $compositorTaskbarSciFiMatch -and $null -ne $compositorTaskbarSurfaceMatch -and $null -ne $compositorPanelSurfaceMatch -and $null -ne $compositorTaskbarItemMatch -and $null -ne $compositorStartButtonMatch; Match = $(if ($null -ne $compositorTaskbarSurfaceMatch) { $compositorTaskbarSurfaceMatch } else { $compositorTaskbarSciFiMatch }) },
     [pscustomobject]@{ Name = "compositor title button hit-test wired"; Pass = $null -ne $compositorButtonHitMatch; Match = $compositorButtonHitMatch },
     [pscustomobject]@{ Name = "compositor widget inset wired"; Pass = $null -ne $compositorWidgetInsetMatch; Match = $compositorWidgetInsetMatch },
     [pscustomobject]@{ Name = "compositor taskbar spacing wired"; Pass = $null -ne $compositorTaskbarSpacingMatch; Match = $compositorTaskbarSpacingMatch },
@@ -203,7 +216,8 @@ $checks = @(
     [pscustomobject]@{ Name = "phase 2c docs mention"; Pass = $null -ne $phase2cHeadingMatch -and $null -ne $phase2cBodyMatch; Match = $(if ($null -ne $phase2cBodyMatch) { $phase2cBodyMatch } else { $phase2cHeadingMatch }) },
     [pscustomobject]@{ Name = "phase 2c1 docs mention"; Pass = $null -ne $phase2c1HeadingMatch -and $null -ne $phase2c1BodyMatch; Match = $(if ($null -ne $phase2c1BodyMatch) { $phase2c1BodyMatch } else { $phase2c1HeadingMatch }) },
     [pscustomobject]@{ Name = "phase 2d docs mention"; Pass = $null -ne $phase2dHeadingMatch -and $null -ne $phase2dBodyMatch; Match = $(if ($null -ne $phase2dBodyMatch) { $phase2dBodyMatch } else { $phase2dHeadingMatch }) },
-    [pscustomobject]@{ Name = "phase 2d1 docs mention"; Pass = $null -ne $phase2d1HeadingMatch -and $null -ne $phase2d1BodyMatch; Match = $(if ($null -ne $phase2d1BodyMatch) { $phase2d1BodyMatch } else { $phase2d1HeadingMatch }) }
+    [pscustomobject]@{ Name = "phase 2d1 docs mention"; Pass = $null -ne $phase2d1HeadingMatch -and $null -ne $phase2d1BodyMatch; Match = $(if ($null -ne $phase2d1BodyMatch) { $phase2d1BodyMatch } else { $phase2d1HeadingMatch }) },
+    [pscustomobject]@{ Name = "phase 2e docs mention"; Pass = $null -ne $phase2eHeadingMatch -and $null -ne $phase2eBodyMatch; Match = $(if ($null -ne $phase2eBodyMatch) { $phase2eBodyMatch } else { $phase2eHeadingMatch }) }
 )
 
 $failures = 0

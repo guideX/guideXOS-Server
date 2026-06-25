@@ -124,6 +124,23 @@ Phase 2D.1 is a stabilization and review pass for the hosted Sci Fi shadow previ
 * No blur, glass, animation, or high-DPI work was added.
 * The rounded chrome preview guard remains separate from the shadow guard, and the shadow helper stays centralized in the shared window renderer.
 
+## Phase 2E
+
+Phase 2E adds conservative Sci Fi desktop and taskbar surface polish without expanding the theme system into blur, glass, animation, or clipping work.
+
+* Hosted Sci Fi desktop painting now wires the existing `desktopBackground` theme color into the no-wallpaper background path so the desktop base reads as a deliberate dark Sci Fi surface.
+* Hosted Sci Fi taskbar painting now uses theme-aware surface, border, and highlight helpers for a flatter and more cohesive chrome-adjacent look.
+* Hosted Sci Fi taskbar items use consistent idle, hover, and active surface blends derived from the existing taskbar, border, accent, and muted accent theme colors.
+* Hosted Sci Fi start button and taskbar-adjacent panel surfaces use the same conservative surface helpers so the desktop shell reads as one theme.
+* Classic remains the default theme and preserves the current look as closely as practical.
+* Classic remains rectangular and shadow-free.
+* Bare-metal framebuffer rendering remains unchanged and rectangular.
+* Rounded client clipping remains deferred.
+* Rounded hit-testing remains deferred.
+* Blur/glass remains deferred.
+* Animations remain deferred.
+* High-DPI and scaling remain deferred.
+
 ## What Is Deferred
 
 * Rounded clipping for theme-specific window shapes
@@ -137,7 +154,7 @@ Phase 2D.1 is a stabilization and review pass for the hosted Sci Fi shadow previ
 
 * Classic should continue to look basically unchanged.
 * Sci Fi is a first visible proof that the theme system exists, not a full futuristic redesign.
-* Rounded-window clipping remains deferred; this foundation is intentionally limited to IDs, persistence, selector wiring, safe chrome colors, the Phase 2A chrome metric pass, the guarded Phase 2B rounded-shell preview, the Phase 2C border/highlight polish pass, and the Phase 2D hosted shadow preview.
+* Rounded-window clipping remains deferred; this foundation is intentionally limited to IDs, persistence, selector wiring, safe chrome colors, the Phase 2A chrome metric pass, the guarded Phase 2B rounded-shell preview, the Phase 2C border/highlight polish pass, the Phase 2D hosted shadow preview, and the Phase 2E desktop/taskbar surface polish pass.
 
 ## Future Work
 

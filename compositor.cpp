@@ -590,6 +590,111 @@ namespace gxos {
         }
 #endif
 
+        static bool hostedSciFiTheme(const DesktopTheme& theme) {
+            return theme.id == DesktopThemeId::SciFi;
+        }
+
+        static uint32_t hostedDesktopTopColor(const DesktopTheme& theme) {
+            return hostedSciFiTheme(theme) ? theme.desktopBackground : 0xFF142850u;
+        }
+
+        static uint32_t hostedDesktopBottomColor(const DesktopTheme& theme) {
+            return hostedSciFiTheme(theme)
+                ? WindowRenderer::BlendThemeColor(theme.desktopBackground, theme.windowBackground, 12)
+                : 0xFF0F121Cu;
+        }
+
+        static uint32_t hostedDesktopAccentColor(const DesktopTheme& theme) {
+            return hostedSciFiTheme(theme)
+                ? WindowRenderer::BlendThemeColor(theme.desktopBackground, theme.accent, 10)
+                : 0xFF192337u;
+        }
+
+        static uint32_t hostedTaskbarSurfaceColor(const DesktopTheme& theme) {
+            return hostedSciFiTheme(theme)
+                ? WindowRenderer::BlendThemeColor(theme.taskbarBackground, theme.windowBackground, 8)
+                : theme.taskbarBackground;
+        }
+
+        static uint32_t hostedTaskbarHighlightColor(const DesktopTheme& theme) {
+            return hostedSciFiTheme(theme)
+                ? WindowRenderer::BlendThemeColor(theme.taskbarBorder, theme.accent, 52)
+                : theme.taskbarBorder;
+        }
+
+        static uint32_t hostedTaskbarBorderColor(const DesktopTheme& theme) {
+            return hostedSciFiTheme(theme)
+                ? WindowRenderer::BlendThemeColor(theme.taskbarBorder, theme.windowBackground, 16)
+                : theme.taskbarBorder;
+        }
+
+        static uint32_t hostedPanelSurfaceColor(const DesktopTheme& theme) {
+            return hostedSciFiTheme(theme)
+                ? WindowRenderer::BlendThemeColor(theme.taskbarBackground, theme.windowBackground, 12)
+                : RGB(45, 45, 55);
+        }
+
+        static uint32_t hostedPanelBorderColor(const DesktopTheme& theme) {
+            return hostedSciFiTheme(theme)
+                ? WindowRenderer::BlendThemeColor(theme.taskbarBorder, theme.accent, 40)
+                : RGB(255, 255, 255);
+        }
+
+        static uint32_t hostedTaskbarItemFillColor(const DesktopTheme& theme, bool focused, bool hover, bool minimized, bool tombstoned) {
+            if (!hostedSciFiTheme(theme)) {
+                return hover ? theme.accent : (focused ? theme.mutedAccent : (minimized ? 0xFF28303Bu : (tombstoned ? 0xFF533F2Cu : 0xFF373A46u)));
+            }
+
+            const uint32_t base = hostedTaskbarSurfaceColor(theme);
+            const uint32_t idleColor = minimized
+                ? WindowRenderer::BlendThemeColor(base, theme.windowBorder, 26)
+                : (tombstoned
+                    ? WindowRenderer::BlendThemeColor(base, theme.accent, 12)
+                    : WindowRenderer::BlendThemeColor(base, theme.windowBorder, 14));
+            const uint32_t activeColor = WindowRenderer::BlendThemeColor(base, theme.mutedAccent, 22);
+            const uint32_t hoverColor = WindowRenderer::BlendThemeColor(base, theme.accent, 22);
+            return hover ? hoverColor : (focused ? activeColor : idleColor);
+        }
+
+        static uint32_t hostedTaskbarItemBorderColor(const DesktopTheme& theme, bool focused, bool hover) {
+            if (!hostedSciFiTheme(theme)) {
+                return theme.taskbarBorder;
+            }
+
+            return hover
+                ? WindowRenderer::BlendThemeColor(theme.taskbarBorder, theme.mutedAccent, 30)
+                : (focused
+                    ? WindowRenderer::BlendThemeColor(theme.taskbarBorder, theme.accent, 35)
+                    : theme.taskbarBorder);
+        }
+
+        static uint32_t hostedStartButtonFillColor(const DesktopTheme& theme, bool hover, bool open) {
+            if (!hostedSciFiTheme(theme)) {
+                return open ? theme.accent : theme.mutedAccent;
+            }
+
+            const uint32_t base = hostedTaskbarSurfaceColor(theme);
+            if (open) {
+                return WindowRenderer::BlendThemeColor(base, theme.accent, 26);
+            }
+            if (hover) {
+                return WindowRenderer::BlendThemeColor(base, theme.mutedAccent, 22);
+            }
+            return WindowRenderer::BlendThemeColor(base, theme.windowBorder, 18);
+        }
+
+        static uint32_t hostedStartButtonBorderColor(const DesktopTheme& theme, bool hover, bool open) {
+            if (!hostedSciFiTheme(theme)) {
+                return RGB(255, 255, 255);
+            }
+
+            return open
+                ? WindowRenderer::BlendThemeColor(theme.taskbarBorder, theme.accent, 42)
+                : (hover
+                    ? WindowRenderer::BlendThemeColor(theme.taskbarBorder, theme.mutedAccent, 34)
+                    : theme.taskbarBorder);
+        }
+
         static const bool kEnableStartMenuIcons = true;
         static const int kStartMenuIconSize = 16;
         static const int kStartMenuRowH = 22;
@@ -2377,10 +2482,16 @@ namespace gxos {
                 // Hosted paint lifecycle: redraw the full client frame into the
                 // offscreen buffer, then compose the window stack on top.
                 const DesktopTheme& theme = GetCurrentDesktopTheme();
+                const bool sciFiTheme = hostedSciFiTheme(theme);
                 auto colorFromTheme = [](uint32_t value) -> COLORREF {
                     return RGB((value >> 16) & 0xFF, (value >> 8) & 0xFF, value & 0xFF);
                 };
-                DesktopWallpaper::DrawGradient(dc, cr, g_gradientTopColor, g_gradientBottomColor, g_gradientAccentColor, !g_wallpaperImage);
+                const bool themeDesktopSurface = sciFiTheme && (!g_wallpaperImage || !g_wallpaperImage->isValid());
+                DesktopWallpaper::DrawGradient(dc, cr,
+                    themeDesktopSurface ? hostedDesktopTopColor(theme) : g_gradientTopColor,
+                    themeDesktopSurface ? hostedDesktopBottomColor(theme) : g_gradientBottomColor,
+                    themeDesktopSurface ? hostedDesktopAccentColor(theme) : g_gradientAccentColor,
+                    !g_wallpaperImage);
                 if (g_wallpaperImage && g_wallpaperImage->isValid()) { drawBackgroundImageToHdc(dc, cr, g_wallpaperImage, WallpaperRegistry::ParseScaleMode(g_backgroundScaleMode)); } else { DesktopWallpaper::DrawBranding(dc, cr); } drawDesktopIcons(dc, cr);
 #if defined(GXOS_SYSTEM_FONT_DEMO)
                 drawSystemFontDemo(dc, cr);
@@ -2495,64 +2606,91 @@ namespace gxos {
                 }
                 int taskbarH = kTaskbarSize; WorkRect tbWork = taskbarRectForBounds(cr.right - cr.left, cr.bottom - cr.top); RECT tb{ tbWork.left,tbWork.top,tbWork.right,tbWork.bottom }; bool taskbarVertical = (g_taskbarPosition == TaskbarPosition::Left || g_taskbarPosition == TaskbarPosition::Right);
                 int taskbarSpan = taskbarVertical ? (tb.right - tb.left) : (tb.bottom - tb.top);
-                const uint32_t taskbarStartColor = theme.taskbarBackground;
-                const uint32_t taskbarEndColor = theme.mutedAccent;
-                auto mixChannel = [&](uint32_t start, uint32_t end, float t) -> uint32_t {
-                    return static_cast<uint32_t>(static_cast<int>(start) + ((static_cast<int>(end) - static_cast<int>(start)) * t));
-                };
-                for (int ty2 = 0; ty2 < taskbarSpan; ++ty2) {
-                    float gt = (float)ty2 / (float)(taskbarSpan > 1 ? taskbarSpan - 1 : 1);
-                    uint32_t mixedColor =
-                        (mixChannel((taskbarStartColor >> 16) & 0xFF, (taskbarEndColor >> 16) & 0xFF, gt) << 16) |
-                        (mixChannel((taskbarStartColor >> 8) & 0xFF, (taskbarEndColor >> 8) & 0xFF, gt) << 8) |
-                        mixChannel(taskbarStartColor & 0xFF, taskbarEndColor & 0xFF, gt);
-                    HBRUSH tbLine = CreateSolidBrush(colorFromTheme(mixedColor));
-                    RECT tbLn = taskbarVertical ? RECT{ tb.left + ty2, tb.top, tb.left + ty2 + 1, tb.bottom } : RECT{ tb.left, tb.top + ty2, tb.right, tb.top + ty2 + 1 };
-                    FillRect(dc, &tbLn, tbLine);
-                    DeleteObject(tbLine);
-                }
-                HPEN tbEdge = CreatePen(PS_SOLID, 1, colorFromTheme(theme.taskbarBorder));
-                HGDIOBJ oldP = SelectObject(dc, tbEdge);
-                if (taskbarVertical) {
-                    int edgeX = (g_taskbarPosition == TaskbarPosition::Left) ? tb.right : tb.left;
-                    MoveToEx(dc, edgeX, tb.top, nullptr);
-                    LineTo(dc, edgeX, tb.bottom);
+                const uint32_t taskbarSurface = hostedTaskbarSurfaceColor(theme);
+                if (sciFiTheme) {
+                    HBRUSH tbFill = CreateSolidBrush(colorFromTheme(taskbarSurface));
+                    FillRect(dc, &tb, tbFill);
+                    DeleteObject(tbFill);
+
+                    RECT accentLine = taskbarVertical
+                        ? ((g_taskbarPosition == TaskbarPosition::Left)
+                            ? RECT{ tb.right - 1, tb.top, tb.right, tb.bottom }
+                            : RECT{ tb.left, tb.top, tb.left + 1, tb.bottom })
+                        : ((g_taskbarPosition == TaskbarPosition::Top)
+                            ? RECT{ tb.left, tb.bottom - 1, tb.right, tb.bottom }
+                            : RECT{ tb.left, tb.top, tb.right, tb.top + 1 });
+                    HBRUSH accentBrush = CreateSolidBrush(colorFromTheme(hostedTaskbarHighlightColor(theme)));
+                    FillRect(dc, &accentLine, accentBrush);
+                    DeleteObject(accentBrush);
+
+                    RECT borderLine = taskbarVertical
+                        ? ((g_taskbarPosition == TaskbarPosition::Left)
+                            ? RECT{ tb.right - 2, tb.top, tb.right - 1, tb.bottom }
+                            : RECT{ tb.left + 1, tb.top, tb.left + 2, tb.bottom })
+                        : ((g_taskbarPosition == TaskbarPosition::Top)
+                            ? RECT{ tb.left, tb.bottom - 2, tb.right, tb.bottom - 1 }
+                            : RECT{ tb.left, tb.top + 1, tb.right, tb.top + 2 });
+                    HBRUSH borderBrush = CreateSolidBrush(colorFromTheme(hostedTaskbarBorderColor(theme)));
+                    FillRect(dc, &borderLine, borderBrush);
+                    DeleteObject(borderBrush);
                 } else {
-                    int edgeY = (g_taskbarPosition == TaskbarPosition::Top) ? tb.bottom : tb.top;
-                    MoveToEx(dc, tb.left, edgeY, nullptr);
-                    LineTo(dc, tb.right, edgeY);
+                    const uint32_t taskbarStartColor = theme.taskbarBackground;
+                    const uint32_t taskbarEndColor = theme.mutedAccent;
+                    auto mixChannel = [&](uint32_t start, uint32_t end, float t) -> uint32_t {
+                        return static_cast<uint32_t>(static_cast<int>(start) + ((static_cast<int>(end) - static_cast<int>(start)) * t));
+                    };
+                    for (int ty2 = 0; ty2 < taskbarSpan; ++ty2) {
+                        float gt = (float)ty2 / (float)(taskbarSpan > 1 ? taskbarSpan - 1 : 1);
+                        uint32_t mixedColor =
+                            (mixChannel((taskbarStartColor >> 16) & 0xFF, (taskbarEndColor >> 16) & 0xFF, gt) << 16) |
+                            (mixChannel((taskbarStartColor >> 8) & 0xFF, (taskbarEndColor >> 8) & 0xFF, gt) << 8) |
+                            mixChannel(taskbarStartColor & 0xFF, taskbarEndColor & 0xFF, gt);
+                        HBRUSH tbLine = CreateSolidBrush(colorFromTheme(mixedColor));
+                        RECT tbLn = taskbarVertical ? RECT{ tb.left + ty2, tb.top, tb.left + ty2 + 1, tb.bottom } : RECT{ tb.left, tb.top + ty2, tb.right, tb.top + ty2 + 1 };
+                        FillRect(dc, &tbLn, tbLine);
+                        DeleteObject(tbLine);
+                    }
+                    HPEN tbEdge = CreatePen(PS_SOLID, 1, colorFromTheme(theme.taskbarBorder));
+                    HGDIOBJ oldP = SelectObject(dc, tbEdge);
+                    if (taskbarVertical) {
+                        int edgeX = (g_taskbarPosition == TaskbarPosition::Left) ? tb.right : tb.left;
+                        MoveToEx(dc, edgeX, tb.top, nullptr);
+                        LineTo(dc, edgeX, tb.bottom);
+                    } else {
+                        int edgeY = (g_taskbarPosition == TaskbarPosition::Top) ? tb.bottom : tb.top;
+                        MoveToEx(dc, tb.left, edgeY, nullptr);
+                        LineTo(dc, tb.right, edgeY);
+                    }
+                    SelectObject(dc, oldP);
+                    DeleteObject(tbEdge);
                 }
-                SelectObject(dc, oldP);
-                DeleteObject(tbEdge);
+                POINT cursor; GetCursorPos(&cursor); ScreenToClient(h, &cursor);
                 RECT startBtn{ tb.left + theme.taskbarPadding, tb.top + 6, tb.left + theme.taskbarPadding + 32, tb.top + 34 };
-                HBRUSH sbg = CreateSolidBrush(g_startMenuVisible ? colorFromTheme(theme.accent) : colorFromTheme(theme.mutedAccent));
+                const bool startHover = (cursor.x >= startBtn.left && cursor.x <= startBtn.right && cursor.y >= startBtn.top && cursor.y <= startBtn.bottom);
+                HBRUSH sbg = CreateSolidBrush(colorFromTheme(hostedStartButtonFillColor(theme, startHover, g_startMenuVisible)));
                 FillRect(dc, &startBtn, sbg);
                 DeleteObject(sbg);
-                FrameRect(dc, &startBtn, (HBRUSH)GetStockObject(WHITE_BRUSH));
+                if (sciFiTheme) {
+                    HPEN startBorder = CreatePen(PS_SOLID, 1, colorFromTheme(hostedStartButtonBorderColor(theme, startHover, g_startMenuVisible)));
+                    HGDIOBJ oldStartPen = SelectObject(dc, startBorder);
+                    HGDIOBJ oldStartBr = SelectObject(dc, GetStockObject(NULL_BRUSH));
+                    Rectangle(dc, startBtn.left, startBtn.top, startBtn.right, startBtn.bottom);
+                    SelectObject(dc, oldStartPen);
+                    SelectObject(dc, oldStartBr);
+                    DeleteObject(startBorder);
+                } else {
+                    FrameRect(dc, &startBtn, (HBRUSH)GetStockObject(WHITE_BRUSH));
+                }
                 drawBitmapCentered(dc, g_startBtnBmp, startBtn);
                 // Search box placeholder (after start button)
                 if (!taskbarVertical) drawTaskbarSearchBox(dc, tb.left + 48, tb.top + 8, 160, (tb.bottom - tb.top) - 16);
                 // Taskbar buttons (offset to right of search box)
-                POINT cursor; GetCursorPos(&cursor); ScreenToClient(h, &cursor); int btnX = taskbarVertical ? tb.left + 4 : tb.left + 216; int btnY = taskbarVertical ? tb.top + 48 : tb.top + 6; const bool sciFiTaskbarPolish = theme.id == DesktopThemeId::SciFi; for (uint64_t id : g_z) {
+                int btnX = taskbarVertical ? tb.left + 4 : tb.left + 216; int btnY = taskbarVertical ? tb.top + 48 : tb.top + 6; for (uint64_t id : g_z) {
                     auto it = g_windows.find(id); if (it == g_windows.end( )) continue; std::string label = it->second.title; int bw = taskbarVertical ? (tb.right - tb.left - 8) : measureUiText(label.c_str(), (int)label.size(), FontRole::Small) + theme.taskbarItemPadding * 2 + 12; if (!taskbarVertical && bw > 180) bw = 180; int bh = taskbarVertical ? 28 : (tb.bottom - tb.top - 12); RECT br{ btnX, btnY, btnX + bw, btnY + bh }; bool hover = (cursor.x >= br.left && cursor.x <= br.right && cursor.y >= br.top && cursor.y <= br.bottom);
-                    uint32_t fillColor = hover ? theme.accent : (id == g_focus ? theme.mutedAccent : (it->second.minimized ? 0xFF28303Bu : (it->second.tombstoned ? 0xFF533F2Cu : 0xFF373A46u)));
-                    if (sciFiTaskbarPolish) {
-                        const uint32_t idleColor = it->second.minimized
-                            ? WindowRenderer::BlendThemeColor(theme.taskbarBackground, theme.windowBorder, 26)
-                            : (it->second.tombstoned
-                                ? WindowRenderer::BlendThemeColor(theme.taskbarBackground, theme.accent, 12)
-                                : WindowRenderer::BlendThemeColor(theme.taskbarBackground, theme.windowBorder, 14));
-                        const uint32_t activeColor = WindowRenderer::BlendThemeColor(theme.taskbarBackground, theme.mutedAccent, 22);
-                        const uint32_t hoverColor = WindowRenderer::BlendThemeColor(theme.taskbarBackground, theme.accent, 22);
-                        fillColor = hover ? hoverColor : (id == g_focus ? activeColor : idleColor);
-                    }
+                    uint32_t fillColor = hostedTaskbarItemFillColor(theme, id == g_focus, hover, it->second.minimized, it->second.tombstoned);
                     HBRUSH bbg = CreateSolidBrush(colorFromTheme(fillColor)); FillRect(dc, &br, bbg); DeleteObject(bbg);
-                    if (sciFiTaskbarPolish) {
-                        const uint32_t outlineColor = hover
-                            ? WindowRenderer::BlendThemeColor(theme.taskbarBorder, theme.mutedAccent, 30)
-                            : (id == g_focus
-                                ? WindowRenderer::BlendThemeColor(theme.taskbarBorder, theme.accent, 35)
-                                : theme.taskbarBorder);
+                    if (sciFiTheme) {
+                        const uint32_t outlineColor = hostedTaskbarItemBorderColor(theme, id == g_focus, hover);
                         HPEN outlinePen = CreatePen(PS_SOLID, 1, colorFromTheme(outlineColor));
                         HGDIOBJ oldOutlinePen = SelectObject(dc, outlinePen);
                         HGDIOBJ oldOutlineBrush = SelectObject(dc, GetStockObject(NULL_BRUSH));
@@ -2562,7 +2700,7 @@ namespace gxos {
                         DeleteObject(outlinePen);
                     }
                     // Active indicator line at bottom for focused window
-                    if (id == g_focus) { HBRUSH ind = CreateSolidBrush(colorFromTheme(sciFiTaskbarPolish ? WindowRenderer::BlendThemeColor(theme.accent, theme.mutedAccent, 14) : theme.accent)); RECT indR{ br.left + 2,br.bottom - 3,br.right - 2,br.bottom - 1 }; FillRect(dc, &indR, ind); DeleteObject(ind); }
+                    if (id == g_focus) { HBRUSH ind = CreateSolidBrush(colorFromTheme(sciFiTheme ? WindowRenderer::BlendThemeColor(theme.accent, theme.mutedAccent, 14) : theme.accent)); RECT indR{ br.left + 2,br.bottom - 3,br.right - 2,br.bottom - 1 }; FillRect(dc, &indR, ind); DeleteObject(ind); }
                     RECT iconRect{ br.left + 4, br.top + 4, br.left + 20, br.top + 20 }; drawBitmapCentered(dc, it->second.taskbarIcon, iconRect); if (!taskbarVertical) drawUiText(dc, br.left + theme.taskbarItemPadding + 12, br.top + 8, label, RGB(230, 230, 240), FontRole::Small); if (taskbarVertical) btnY += bh + 4; else btnX += bw + theme.taskbarItemPadding / 2;
                 }
                 // System tray area (before clock)
@@ -2639,9 +2777,15 @@ namespace gxos {
                     int tmH = tmItemH * tmItemCount + tmPad * 2;
                     g_taskbarMenuRect = { g_taskbarMenuRect.left, g_taskbarMenuRect.top,
                         g_taskbarMenuRect.left + tmMenuW, g_taskbarMenuRect.top + tmH };
-                    HBRUSH tmBg = CreateSolidBrush(RGB(42, 42, 42));
+                    HBRUSH tmBg = CreateSolidBrush(colorFromTheme(sciFiTheme ? hostedPanelSurfaceColor(theme) : RGB(42, 42, 42)));
                     FillRect(dc, &g_taskbarMenuRect, tmBg); DeleteObject(tmBg);
-                    HPEN tmBorder = CreatePen(PS_SOLID, 1, RGB(63, 63, 63));
+                    if (sciFiTheme) {
+                        HBRUSH accent = CreateSolidBrush(colorFromTheme(hostedTaskbarHighlightColor(theme)));
+                        RECT line{ g_taskbarMenuRect.left, g_taskbarMenuRect.top, g_taskbarMenuRect.right, g_taskbarMenuRect.top + 1 };
+                        FillRect(dc, &line, accent);
+                        DeleteObject(accent);
+                    }
+                    HPEN tmBorder = CreatePen(PS_SOLID, 1, colorFromTheme(sciFiTheme ? hostedPanelBorderColor(theme) : RGB(63, 63, 63)));
                     HGDIOBJ oldPen2 = SelectObject(dc, tmBorder);
                     HGDIOBJ oldBr2 = SelectObject(dc, GetStockObject(NULL_BRUSH));
                     Rectangle(dc, g_taskbarMenuRect.left, g_taskbarMenuRect.top, g_taskbarMenuRect.right, g_taskbarMenuRect.bottom);
@@ -2651,8 +2795,13 @@ namespace gxos {
                         int iy = g_taskbarMenuRect.top + tmPad + tmi * tmItemH;
                         RECT itemR{ g_taskbarMenuRect.left + 1, iy, g_taskbarMenuRect.right - 1, iy + tmItemH };
                         bool hov = (cursor.x >= itemR.left && cursor.x <= itemR.right && cursor.y >= itemR.top && cursor.y <= itemR.bottom);
-                        if (tmi == g_taskbarMenuSel || hov) { HBRUSH hb = CreateSolidBrush(RGB(60, 80, 120)); FillRect(dc, &itemR, hb); DeleteObject(hb); }
-                        drawUiText(dc, itemR.left + 8, iy + (tmItemH - uiTextHeight(FontRole::Default)) / 2, tmLabels[tmi], (int)strlen(tmLabels[tmi]), RGB(220, 220, 220), FontRole::Default);
+                        if (tmi == g_taskbarMenuSel || hov) {
+                            const uint32_t itemColor = sciFiTheme
+                                ? WindowRenderer::BlendThemeColor(hostedPanelSurfaceColor(theme), hov ? theme.accent : theme.mutedAccent, hov ? 22 : 16)
+                                : RGB(60, 80, 120);
+                            HBRUSH hb = CreateSolidBrush(colorFromTheme(itemColor)); FillRect(dc, &itemR, hb); DeleteObject(hb);
+                        }
+                        drawUiText(dc, itemR.left + 8, iy + (tmItemH - uiTextHeight(FontRole::Default)) / 2, tmLabels[tmi], (int)strlen(tmLabels[tmi]), sciFiTheme ? RGB(232, 236, 246) : RGB(220, 220, 220), FontRole::Default);
                     }
                 }
                 // Start menu popup (pinned + recent OR all programs)
@@ -2669,10 +2818,18 @@ namespace gxos {
                     if (sm.top < 0) { sm.top = 4; sm.bottom = sm.top + smH; }
                     if (sm.bottom > cr.bottom) { sm.bottom = cr.bottom - 4; sm.top = sm.bottom - smH; }
                     g_startMenuRect = sm;
-                    HBRUSH mBg = CreateSolidBrush(RGB(45, 45, 55));
+                    HBRUSH mBg = CreateSolidBrush(colorFromTheme(sciFiTheme ? hostedPanelSurfaceColor(theme) : RGB(45, 45, 55)));
                     FillRect(dc, &sm, mBg);
                     DeleteObject(mBg);
-                    FrameRect(dc, &sm, (HBRUSH)GetStockObject(WHITE_BRUSH));
+                    if (sciFiTheme) {
+                        HBRUSH accent = CreateSolidBrush(colorFromTheme(hostedTaskbarHighlightColor(theme)));
+                        RECT line{ sm.left, sm.top, sm.right, sm.top + 1 };
+                        FillRect(dc, &line, accent);
+                        DeleteObject(accent);
+                    }
+                    HBRUSH mBorder = CreateSolidBrush(colorFromTheme(sciFiTheme ? hostedPanelBorderColor(theme) : RGB(255, 255, 255)));
+                    FrameRect(dc, &sm, mBorder);
+                    DeleteObject(mBorder);
 
                     // Left column - Recent/All Programs list
                     int y = sm.top + 4;
@@ -2690,7 +2847,14 @@ namespace gxos {
                             RECT r{ sm.left + 4, y, sm.left + leftColW - 4, y + rowH };
                             bool isSel = ((int)i == g_startMenuSel);
                             bool isHover = !freezeStartMenuHover && (cursor.x >= r.left && cursor.x <= r.right && cursor.y >= r.top && cursor.y <= r.bottom);
-                            HBRUSH rb = CreateSolidBrush(isSel ? RGB(80, 100, 150) : (isHover ? RGB(70, 90, 130) : RGB(55, 55, 70)));
+                            const uint32_t rowColor = sciFiTheme
+                                ? (isSel
+                                    ? WindowRenderer::BlendThemeColor(hostedPanelSurfaceColor(theme), theme.accent, 22)
+                                    : (isHover
+                                        ? WindowRenderer::BlendThemeColor(hostedPanelSurfaceColor(theme), theme.mutedAccent, 16)
+                                        : WindowRenderer::BlendThemeColor(hostedPanelSurfaceColor(theme), theme.windowBorder, 8)))
+                                : (isSel ? RGB(80, 100, 150) : (isHover ? RGB(70, 90, 130) : RGB(55, 55, 70)));
+                            HBRUSH rb = CreateSolidBrush(colorFromTheme(rowColor));
                             FillRect(dc, &r, rb);
                             DeleteObject(rb);
                             
@@ -2702,7 +2866,7 @@ namespace gxos {
                             std::string txt = g_startMenuAllProgsSorted[i];
                             int textX = r.left + 4;
                             drawStartMenuIcon(dc, r, txt, textX);
-                            drawUiText(dc, textX, centeredUiTextY(r.top, rowH), txt, RGB(230, 230, 230), FontRole::Default);
+                            drawUiText(dc, textX, centeredUiTextY(r.top, rowH), txt, sciFiTheme ? RGB(232, 236, 246) : RGB(230, 230, 230), FontRole::Default);
                             y += rowH; row++;
                         }
                     } else {
@@ -2711,7 +2875,14 @@ namespace gxos {
                             RECT r{ sm.left + 4, y, sm.left + leftColW - 4, y + rowH };
                             bool isSel = ((int)i == g_startMenuSel);
                             bool isHover = !freezeStartMenuHover && (cursor.x >= r.left && cursor.x <= r.right && cursor.y >= r.top && cursor.y <= r.bottom);
-                            HBRUSH rb = CreateSolidBrush(isSel ? RGB(80, 100, 150) : (isHover ? RGB(70, 90, 130) : RGB(55, 55, 70)));
+                            const uint32_t rowColor = sciFiTheme
+                                ? (isSel
+                                    ? WindowRenderer::BlendThemeColor(hostedPanelSurfaceColor(theme), theme.accent, 22)
+                                    : (isHover
+                                        ? WindowRenderer::BlendThemeColor(hostedPanelSurfaceColor(theme), theme.mutedAccent, 16)
+                                        : WindowRenderer::BlendThemeColor(hostedPanelSurfaceColor(theme), theme.windowBorder, 8)))
+                                : (isSel ? RGB(80, 100, 150) : (isHover ? RGB(70, 90, 130) : RGB(55, 55, 70)));
+                            HBRUSH rb = CreateSolidBrush(colorFromTheme(rowColor));
                             FillRect(dc, &r, rb);
                             DeleteObject(rb);
                             
@@ -2724,7 +2895,7 @@ namespace gxos {
                             int textX = r.left + 4;
                             drawStartMenuIcon(dc, r, txt, textX);
                             std::string displayText = (hasEquivalentListItem(g_cfg.pinned, txt) ? "* " : "  ") + txt;
-                            drawUiText(dc, textX, centeredUiTextY(r.top, rowH), displayText, RGB(230, 230, 230), FontRole::Default);
+                            drawUiText(dc, textX, centeredUiTextY(r.top, rowH), displayText, sciFiTheme ? RGB(232, 236, 246) : RGB(230, 230, 230), FontRole::Default);
                             y += rowH; row++;
                         }
                     }
@@ -2737,48 +2908,68 @@ namespace gxos {
                     // Computer Files shortcut
                     RECT rcComputer{ rcX, rcY, sm.right - 6, rcY + rowH };
                     bool overComp = !freezeStartMenuHover && (cursor.x >= rcComputer.left && cursor.x <= rcComputer.right && cursor.y >= rcComputer.top && cursor.y <= rcComputer.bottom);
-                    if (overComp) { HBRUSH hb = CreateSolidBrush(RGB(70, 90, 130)); FillRect(dc, &rcComputer, hb); DeleteObject(hb); }
+                    if (overComp) { HBRUSH hb = CreateSolidBrush(colorFromTheme(sciFiTheme ? WindowRenderer::BlendThemeColor(hostedPanelSurfaceColor(theme), theme.accent, 18) : RGB(70, 90, 130))); FillRect(dc, &rcComputer, hb); DeleteObject(hb); }
                     int computerTextX = rcComputer.left + 6;
                     drawStartMenuIcon(dc, rcComputer, "Computer Files", computerTextX);
-                    drawUiText(dc, computerTextX, centeredUiTextY(rcComputer.top, rowH), "Computer Files", 14, RGB(200, 200, 200), FontRole::Default);
+                    drawUiText(dc, computerTextX, centeredUiTextY(rcComputer.top, rowH), "Computer Files", 14, sciFiTheme ? RGB(220, 228, 244) : RGB(200, 200, 200), FontRole::Default);
                     rcY += rowH + kStartMenuRowGap;
 
                     // Console shortcut
                     RECT rcConsole{ rcX, rcY, sm.right - 6, rcY + rowH };
                     bool overCon = !freezeStartMenuHover && (cursor.x >= rcConsole.left && cursor.x <= rcConsole.right && cursor.y >= rcConsole.top && cursor.y <= rcConsole.bottom);
-                    if (overCon) { HBRUSH hb = CreateSolidBrush(RGB(70, 90, 130)); FillRect(dc, &rcConsole, hb); DeleteObject(hb); }
+                    if (overCon) { HBRUSH hb = CreateSolidBrush(colorFromTheme(sciFiTheme ? WindowRenderer::BlendThemeColor(hostedPanelSurfaceColor(theme), theme.accent, 18) : RGB(70, 90, 130))); FillRect(dc, &rcConsole, hb); DeleteObject(hb); }
                     int consoleTextX = rcConsole.left + 6;
                     drawStartMenuIcon(dc, rcConsole, "Console", consoleTextX);
-                    drawUiText(dc, consoleTextX, centeredUiTextY(rcConsole.top, rowH), "Console", 7, RGB(200, 200, 200), FontRole::Default);
+                    drawUiText(dc, consoleTextX, centeredUiTextY(rcConsole.top, rowH), "Console", 7, sciFiTheme ? RGB(220, 228, 244) : RGB(200, 200, 200), FontRole::Default);
                     rcY += rowH + kStartMenuRowGap;
 
                     // Recent Documents shortcut
                     RECT rcDocs{ rcX, rcY, sm.right - 6, rcY + rowH };
                     bool overDocs = !freezeStartMenuHover && (cursor.x >= rcDocs.left && cursor.x <= rcDocs.right && cursor.y >= rcDocs.top && cursor.y <= rcDocs.bottom);
-                    if (overDocs) { HBRUSH hb = CreateSolidBrush(RGB(70, 90, 130)); FillRect(dc, &rcDocs, hb); DeleteObject(hb); }
+                    if (overDocs) { HBRUSH hb = CreateSolidBrush(colorFromTheme(sciFiTheme ? WindowRenderer::BlendThemeColor(hostedPanelSurfaceColor(theme), theme.accent, 18) : RGB(70, 90, 130))); FillRect(dc, &rcDocs, hb); DeleteObject(hb); }
                     int docsTextX = rcDocs.left + 6;
                     drawStartMenuIcon(dc, rcDocs, "Recent Docs", docsTextX);
-                    drawUiText(dc, docsTextX, centeredUiTextY(rcDocs.top, rowH), "Recent Docs", 11, RGB(200, 200, 200), FontRole::Default);
+                    drawUiText(dc, docsTextX, centeredUiTextY(rcDocs.top, rowH), "Recent Docs", 11, sciFiTheme ? RGB(220, 228, 244) : RGB(200, 200, 200), FontRole::Default);
 
                     // Bottom area - "All Programs" toggle button
                     int btnY = sm.bottom - 30;
                     RECT allProgBtn{ sm.left + 6, btnY, sm.left + leftColW - 6, btnY + 24 };
                     bool overAllProg = !freezeStartMenuHover && (cursor.x >= allProgBtn.left && cursor.x <= allProgBtn.right && cursor.y >= allProgBtn.top && cursor.y <= allProgBtn.bottom);
-                    HBRUSH apb = CreateSolidBrush(overAllProg ? RGB(70, 80, 100) : RGB(60, 60, 75));
+                    HBRUSH apb = CreateSolidBrush(colorFromTheme(sciFiTheme
+                        ? (overAllProg
+                            ? WindowRenderer::BlendThemeColor(hostedPanelSurfaceColor(theme), theme.mutedAccent, 20)
+                            : WindowRenderer::BlendThemeColor(hostedPanelSurfaceColor(theme), theme.windowBorder, 12))
+                        : (overAllProg ? RGB(70, 80, 100) : RGB(60, 60, 75))));
                     FillRect(dc, &allProgBtn, apb); DeleteObject(apb);
-                    FrameRect(dc, &allProgBtn, (HBRUSH)GetStockObject(WHITE_BRUSH));
+                    if (sciFiTheme) {
+                        HBRUSH apbBorder = CreateSolidBrush(colorFromTheme(hostedPanelBorderColor(theme)));
+                        FrameRect(dc, &allProgBtn, apbBorder);
+                        DeleteObject(apbBorder);
+                    } else {
+                        FrameRect(dc, &allProgBtn, (HBRUSH)GetStockObject(WHITE_BRUSH));
+                    }
                     const char* btnText = g_startMenuAllProgs ? "< Back" : "All Programs >";
-                    drawUiText(dc, allProgBtn.left + 8, centeredUiTextY(allProgBtn.top, allProgBtn.bottom - allProgBtn.top), btnText, (int)strlen(btnText), RGB(230, 230, 230), FontRole::Default);
+                    drawUiText(dc, allProgBtn.left + 8, centeredUiTextY(allProgBtn.top, allProgBtn.bottom - allProgBtn.top), btnText, sciFiTheme ? RGB(232, 236, 246) : RGB(230, 230, 230), FontRole::Default);
 
                     // Power menu area (bottom-right)
                     int shutdownBtnW = 80;
                     int shutdownBtnH = 24;
                     RECT shutdownBtn{ sm.right - shutdownBtnW - 30, btnY, sm.right - 30, btnY + shutdownBtnH };
                     bool overShutdown = !freezeStartMenuHover && (cursor.x >= shutdownBtn.left && cursor.x <= shutdownBtn.right && cursor.y >= shutdownBtn.top && cursor.y <= shutdownBtn.bottom);
-                    HBRUSH sdb = CreateSolidBrush(overShutdown ? RGB(80, 40, 40) : RGB(60, 60, 75));
+                    HBRUSH sdb = CreateSolidBrush(colorFromTheme(sciFiTheme
+                        ? (overShutdown
+                            ? WindowRenderer::BlendThemeColor(hostedPanelSurfaceColor(theme), theme.accent, 18)
+                            : WindowRenderer::BlendThemeColor(hostedPanelSurfaceColor(theme), theme.windowBorder, 12))
+                        : (overShutdown ? RGB(80, 40, 40) : RGB(60, 60, 75))));
                     FillRect(dc, &shutdownBtn, sdb); DeleteObject(sdb);
-                    FrameRect(dc, &shutdownBtn, (HBRUSH)GetStockObject(WHITE_BRUSH));
-                    drawUiText(dc, shutdownBtn.left + 10, centeredUiTextY(shutdownBtn.top, shutdownBtn.bottom - shutdownBtn.top), "Shutdown", 8, RGB(230, 230, 230), FontRole::Default);
+                    if (sciFiTheme) {
+                        HBRUSH sbBorder = CreateSolidBrush(colorFromTheme(hostedPanelBorderColor(theme)));
+                        FrameRect(dc, &shutdownBtn, sbBorder);
+                        DeleteObject(sbBorder);
+                    } else {
+                        FrameRect(dc, &shutdownBtn, (HBRUSH)GetStockObject(WHITE_BRUSH));
+                    }
+                    drawUiText(dc, shutdownBtn.left + 10, centeredUiTextY(shutdownBtn.top, shutdownBtn.bottom - shutdownBtn.top), "Shutdown", 8, sciFiTheme ? RGB(232, 236, 246) : RGB(230, 230, 230), FontRole::Default);
                 }
 
                 // Right-click context menus are top-level popups over Start and desktop surfaces.
@@ -3894,23 +4085,34 @@ namespace gxos {
 
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)
         void Compositor::drawTaskbarSearchBox(HDC dc, int x, int y, int w, int h) {
-            // Search box background
-            HBRUSH bg = CreateSolidBrush(RGB(50, 52, 62));
+            const DesktopTheme& theme = GetCurrentDesktopTheme();
+            const bool sciFiTheme = hostedSciFiTheme(theme);
+            const uint32_t bgColor = sciFiTheme ? hostedPanelSurfaceColor(theme) : 0xFF32343Eu;
+            const uint32_t borderColor = sciFiTheme ? hostedPanelBorderColor(theme) : 0xFF4B4E5Au;
+            const uint32_t iconColor = sciFiTheme ? WindowRenderer::BlendThemeColor(theme.accent, theme.mutedAccent, 34) : 0xFF8C91A0u;
+            const uint32_t textColor = sciFiTheme ? WindowRenderer::BlendThemeColor(theme.windowBorder, theme.taskbarBackground, 36) : 0xFF646976u;
+
+            HBRUSH bg = CreateSolidBrush(WindowRenderer::ToColorRef(bgColor));
             RECT r = { x, y, x + w, y + h };
             FillRect(dc, &r, bg);
             DeleteObject(bg);
-            // Border
-            HPEN border = CreatePen(PS_SOLID, 1, RGB(75, 78, 90));
+            HPEN border = CreatePen(PS_SOLID, 1, WindowRenderer::ToColorRef(borderColor));
             HGDIOBJ oldPen = SelectObject(dc, border);
             HGDIOBJ oldBr = SelectObject(dc, GetStockObject(NULL_BRUSH));
             Rectangle(dc, x, y, x + w, y + h);
             SelectObject(dc, oldPen);
             SelectObject(dc, oldBr);
             DeleteObject(border);
+            if (sciFiTheme && h > 1) {
+                HBRUSH accent = CreateSolidBrush(WindowRenderer::ToColorRef(hostedTaskbarHighlightColor(theme)));
+                RECT line{ x, y, x + w, y + 1 };
+                FillRect(dc, &line, accent);
+                DeleteObject(accent);
+            }
             // Magnifying glass icon (small circle + line)
             int iconX = x + 8;
             int iconY = y + (h / 2);
-            HPEN iconPen = CreatePen(PS_SOLID, 1, RGB(140, 145, 160));
+            HPEN iconPen = CreatePen(PS_SOLID, 1, WindowRenderer::ToColorRef(iconColor));
             HGDIOBJ oP = SelectObject(dc, iconPen);
             HGDIOBJ oB = SelectObject(dc, GetStockObject(NULL_BRUSH));
             Ellipse(dc, iconX - 4, iconY - 4, iconX + 4, iconY + 4);
@@ -3922,7 +4124,7 @@ namespace gxos {
             // Placeholder text
             SetBkMode(dc, TRANSPARENT);
             const char* placeholder = "Search apps...";
-            drawUiText(dc, x + 20, y + (h - uiTextHeight(FontRole::Small)) / 2, placeholder, (int)strlen(placeholder), RGB(100, 105, 120), FontRole::Small);
+            drawUiText(dc, x + 20, y + (h - uiTextHeight(FontRole::Small)) / 2, placeholder, (int)strlen(placeholder), WindowRenderer::ToColorRef(textColor), FontRole::Small);
         }
 
         void Compositor::drawSystemTray(HDC dc, RECT cr, int taskbarH) {

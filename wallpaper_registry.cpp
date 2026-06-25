@@ -18,6 +18,8 @@ const std::vector<BackgroundEntry>& backgroundRegistry()
         { "legacy_ameobagx", "Ameoba GX", BackgroundKind::Image, "/system/wallpapers/ameobagx.png", "/system/wallpapers/ameobagx_thumb.png", 0xFF3A1762, 0xFF10091D, 0xFFFF4FC4, 0xFF3A1762 },
         { "legacy_tron_porsche", "Tron Porsche", BackgroundKind::Image, "/system/wallpapers/tronporche.png", "/system/wallpapers/tronporche_thumb.png", 0xFF073645, 0xFF070B12, 0xFF18C7DF, 0xFF073645 },
         { "legacy_wallpaper2", "Wallpaper 2", BackgroundKind::Image, "/system/wallpapers/Wallpaper2.png", "/system/wallpapers/Wallpaper2_thumb.png", 0xFF100E35, 0xFF8C145F, 0xFFFF52B0, 0xFF100E35 },
+        { "legacy_merlin", "Merlin", BackgroundKind::Image, "/system/wallpapers/merlin.png", "/system/wallpapers/merlin_thumb.png", 0xFF243A57, 0xFF101826, 0xFF9CC9FF, 0xFF243A57 },
+        { "legacy_mountains", "Mountains", BackgroundKind::Image, "/system/wallpapers/mountains.png", "/system/wallpapers/mountains_thumb.png", 0xFF1E3850, 0xFF0A1118, 0xFFCBE6FF, 0xFF1E3850 },
         { "gradient_midnight", "Midnight", BackgroundKind::Gradient, "", "", 0xFF142850, 0xFF0F121C, 0xFF192337, 0xFF142850 },
         { "gradient_ocean", "Ocean", BackgroundKind::Gradient, "", "", 0xFF063B5C, 0xFF061522, 0xFF1496B8, 0xFF063B5C },
         { "gradient_aurora", "Aurora", BackgroundKind::Gradient, "", "", 0xFF0B2C35, 0xFF251046, 0xFF21C78A, 0xFF0B2C35 },
