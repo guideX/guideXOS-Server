@@ -158,7 +158,16 @@ $phase2eHeadingMatch = Find-FirstMatch $planDoc '## Phase 2E'
 $phase2eBodyMatch = Find-FirstMatch $planDoc 'Phase 2E adds conservative Sci Fi desktop and taskbar surface polish|desktopBackground|taskbar surface|Classic remains the default theme|Classic remains rectangular and shadow-free|Bare-metal framebuffer rendering remains unchanged and rectangular|Rounded client clipping remains deferred|Rounded hit-testing remains deferred|Blur/glass remains deferred|Animations remain deferred|High-DPI and scaling remain deferred'
 $phase2e1HeadingMatch = Find-FirstMatch $planDoc '## Phase 2E\.1'
 $phase2e1BodyMatch = Find-FirstMatch $planDoc 'Phase 2E\.1 is a stabilization and review pass for the Phase 2E Sci Fi desktop and taskbar surface polish|surface helper set was reviewed and kept centralized|start-button hit-geometry cleanup|Wallpaper and theme asset selection remain deferred|desktopBackground wiring for the hosted no-wallpaper path remains in place'
+$phase2fHeadingMatch = Find-FirstMatch $planDoc '## Phase 2F'
+$phase2fBodyMatch = Find-FirstMatch $planDoc 'Display Options theme UX polish|The Theme section now explains the Classic and Sci Fi choices more clearly|Classic keeps a concise description|Sci Fi keeps a concise description|read-only feature summary|No per-effect sliders, checkboxes, or theme customization controls were added|No new rendering effects or compositor changes were added|Theme selection, persistence, and reload behavior remain unchanged'
 $compositorStartButtonRectMatch = Find-FirstMatch $compositor 'hostedStartButtonRect\(theme, tb\)|hostedStartButtonRect\(theme, tbWork\)'
+$themeDescriptionClassicMatch = Find-FirstMatch $displayOptions 'Current guideXOS look\.'
+$themeDescriptionSciFiMatch = Find-FirstMatch $displayOptions 'Dark futuristic hosted UI\.'
+$themeFeatureSummaryMatch = Find-FirstMatch $displayOptions 'Legacy rectangular chrome|Classic taskbar styling|Minimal effects|Rounded hosted chrome|Accent highlights, shadows|Dark taskbar surfaces'
+$themeSaveReloadMatch = Find-FirstMatch $displayOptions 'Selecting a theme saves immediately and reloads the compositor\.'
+$themeIntroMatch = Find-FirstMatch $displayOptions 'Choose a desktop theme\. Classic is default; Sci Fi is opt-in\.'
+$classicOptionMatch = Find-RawMatch $displayOptions 'drawThemeOption\(\s*kThemeOptionX,\s*kThemeOptionY,\s*DesktopThemeId::Classic,.*?Current guideXOS look\.'
+$sciFiOptionMatch = Find-RawMatch $displayOptions 'drawThemeOption\(\s*kThemeOptionX,\s*kThemeOptionY \+ kThemeOptionH \+ kThemeOptionGap,\s*DesktopThemeId::SciFi,.*?Dark futuristic hosted UI\.'
 
 $checks = @(
     [pscustomobject]@{ Name = "theme header exists"; Pass = (Test-Path -LiteralPath $themeHeader); Match = $null },
@@ -184,6 +193,7 @@ $checks = @(
     [pscustomobject]@{ Name = "classic theme option visible"; Pass = $null -ne $classicOptionMatch; Match = $classicOptionMatch },
     [pscustomobject]@{ Name = "sci fi theme option visible"; Pass = $null -ne $sciFiOptionMatch; Match = $sciFiOptionMatch },
     [pscustomobject]@{ Name = "display options theme wiring"; Pass = $null -ne $displayThemeMatch; Match = $displayThemeMatch },
+    [pscustomobject]@{ Name = "display options theme intro"; Pass = $null -ne $themeIntroMatch; Match = $themeIntroMatch },
     [pscustomobject]@{ Name = "compositor chrome theme accessor"; Pass = $null -ne $chromeMatch; Match = $chromeMatch },
     [pscustomobject]@{ Name = "classic theme remains rectangular"; Pass = $null -ne $classicRoundedIntentMatch; Match = $classicRoundedIntentMatch },
     [pscustomobject]@{ Name = "sci fi theme intends rounded chrome"; Pass = $null -ne $sciFiRoundedIntentMatch; Match = $sciFiRoundedIntentMatch },
@@ -222,6 +232,11 @@ $checks = @(
     [pscustomobject]@{ Name = "phase 2d1 docs mention"; Pass = $null -ne $phase2d1HeadingMatch -and $null -ne $phase2d1BodyMatch; Match = $(if ($null -ne $phase2d1BodyMatch) { $phase2d1BodyMatch } else { $phase2d1HeadingMatch }) },
     [pscustomobject]@{ Name = "phase 2e docs mention"; Pass = $null -ne $phase2eHeadingMatch -and $null -ne $phase2eBodyMatch; Match = $(if ($null -ne $phase2eBodyMatch) { $phase2eBodyMatch } else { $phase2eHeadingMatch }) },
     [pscustomobject]@{ Name = "phase 2e1 docs mention"; Pass = $null -ne $phase2e1HeadingMatch -and $null -ne $phase2e1BodyMatch; Match = $(if ($null -ne $phase2e1BodyMatch) { $phase2e1BodyMatch } else { $phase2e1HeadingMatch }) },
+    [pscustomobject]@{ Name = "phase 2f docs mention"; Pass = $null -ne $phase2fHeadingMatch -and $null -ne $phase2fBodyMatch; Match = $(if ($null -ne $phase2fBodyMatch) { $phase2fBodyMatch } else { $phase2fHeadingMatch }) },
+    [pscustomobject]@{ Name = "display options classic description"; Pass = $null -ne $themeDescriptionClassicMatch; Match = $themeDescriptionClassicMatch },
+    [pscustomobject]@{ Name = "display options sci fi description"; Pass = $null -ne $themeDescriptionSciFiMatch; Match = $themeDescriptionSciFiMatch },
+    [pscustomobject]@{ Name = "display options feature summary"; Pass = $null -ne $themeFeatureSummaryMatch; Match = $themeFeatureSummaryMatch },
+    [pscustomobject]@{ Name = "display options save reload note"; Pass = $null -ne $themeSaveReloadMatch; Match = $themeSaveReloadMatch },
     [pscustomobject]@{ Name = "compositor start button rect helper wired"; Pass = $null -ne $compositorStartButtonRectMatch; Match = $compositorStartButtonRectMatch }
 )
 

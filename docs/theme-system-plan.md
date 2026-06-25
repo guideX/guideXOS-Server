@@ -153,6 +153,20 @@ Phase 2E.1 is a stabilization and review pass for the Phase 2E Sci Fi desktop an
 * Wallpaper and theme asset selection remain deferred.
 * The existing desktopBackground wiring for the hosted no-wallpaper path remains in place and was left unchanged in behavior.
 
+## Phase 2F
+
+Phase 2F is a Display Options theme UX polish pass.
+
+* The Theme section now explains the Classic and Sci Fi choices more clearly so users can tell what each option is for at a glance.
+* Classic keeps a concise description that preserves the current guideXOS look.
+* Sci Fi keeps a concise description that emphasizes the dark futuristic hosted UI.
+* A read-only feature summary is shown if the layout allows it, to help users understand the visible theme intent without exposing any per-effect controls.
+* No per-effect sliders, checkboxes, or theme customization controls were added.
+* No new rendering effects or compositor changes were added.
+* Classic remains the default theme.
+* Sci Fi remains opt-in.
+* Theme selection, persistence, and reload behavior remain unchanged.
+
 ## What Is Deferred
 
 * Rounded clipping for theme-specific window shapes

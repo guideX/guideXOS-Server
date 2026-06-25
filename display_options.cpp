@@ -63,8 +63,8 @@ namespace {
     const int kThemeOptionX = 46;
     const int kThemeOptionY = 132;
     const int kThemeOptionW = 320;
-    const int kThemeOptionH = 54;
-    const int kThemeOptionGap = 16;
+    const int kThemeOptionH = 98;
+    const int kThemeOptionGap = 14;
 
     void publish(MsgType type, const std::string& payload)
     {
@@ -313,7 +313,7 @@ void DisplayOptions::render()
         s_activeTab == 2 ? "Choose desktop icons and folder icon size:"
         : (s_activeTab == 0 ? "Select a background from the gallery:"
         : (s_activeTab == 1 ? "Select a gradient from the gallery:"
-        : "Choose a desktop theme (Classic is default):")));
+        : "Choose a desktop theme. Classic is default; Sci Fi is opt-in.")));
     drawRect(s_windowId, 20, 92, 742, 456, 22, 22, 24);
 
     if (s_activeTab == 0) {
@@ -349,7 +349,7 @@ void DisplayOptions::render()
     } else if (s_activeTab == 2) {
         drawText(s_windowId, 26, kButtonY + 10, "Changes are saved immediately.");
     } else {
-        drawText(s_windowId, 26, kButtonY + 10, "Selecting a theme saves it and asks the compositor to reload.");
+        drawText(s_windowId, 26, kButtonY + 10, "Selecting a theme saves immediately and reloads the compositor.");
     }
 }
 
@@ -409,7 +409,7 @@ void DisplayOptions::drawWallpaperTile(int index, int x, int y, bool hover, bool
 
 void DisplayOptions::drawThemeTab()
 {
-    auto drawThemeOption = [&](int x, int y, DesktopThemeId id, const DesktopTheme& theme, const char* description) {
+    auto drawThemeOption = [&](int x, int y, DesktopThemeId id, const DesktopTheme& theme, const char* description, const char* feature1, const char* feature2, const char* feature3) {
         const bool selected = (s_selectedThemeId == id);
         const bool applied = (s_appliedThemeId == id);
         if (selected) drawRect(s_windowId, x - 4, y - 4, kThemeOptionW + 8, kThemeOptionH + 8, 72, 110, 180);
@@ -422,10 +422,29 @@ void DisplayOptions::drawThemeTab()
         if (selected) drawText(s_windowId, x + 16, y + 10, "x");
         drawText(s_windowId, x + 42, y + 10, std::string(theme.displayName) + (applied ? " *" : ""));
         drawText(s_windowId, x + 42, y + 28, description);
+        drawText(s_windowId, x + 42, y + 46, feature1);
+        drawText(s_windowId, x + 42, y + 60, feature2);
+        drawText(s_windowId, x + 42, y + 74, feature3);
     };
 
-    drawThemeOption(kThemeOptionX, kThemeOptionY, DesktopThemeId::Classic, GetDesktopTheme(DesktopThemeId::Classic), "Preserves the current guideXOS look.");
-    drawThemeOption(kThemeOptionX, kThemeOptionY + kThemeOptionH + kThemeOptionGap, DesktopThemeId::SciFi, GetDesktopTheme(DesktopThemeId::SciFi), "Dark sci-fi surfaces with blue/purple accents.");
+    drawThemeOption(
+        kThemeOptionX,
+        kThemeOptionY,
+        DesktopThemeId::Classic,
+        GetDesktopTheme(DesktopThemeId::Classic),
+        "Current guideXOS look.",
+        "Legacy rectangular chrome",
+        "Classic taskbar styling",
+        "Minimal effects");
+    drawThemeOption(
+        kThemeOptionX,
+        kThemeOptionY + kThemeOptionH + kThemeOptionGap,
+        DesktopThemeId::SciFi,
+        GetDesktopTheme(DesktopThemeId::SciFi),
+        "Dark futuristic hosted UI.",
+        "Rounded hosted chrome",
+        "Accent highlights, shadows",
+        "Dark taskbar surfaces");
 }
 
 void DisplayOptions::drawBackgroundTile(int index, int x, int y, bool hover, bool selected, bool applied)
