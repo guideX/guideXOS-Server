@@ -96,10 +96,25 @@ Phase 2C.1 is a stabilization-only review pass for the Sci Fi chrome polish.
 * The hosted titlebar and taskbar polish paths remain guarded to Sci Fi.
 * One small cleanup was made to remove a dead transparency branch in the shared titlebar helper.
 
+## Phase 2D
+
+Phase 2D adds the first guarded, hosted-only Sci Fi soft shadow preview.
+
+* The preview is conservative and intentionally shallow: it uses two filled shadow layers rather than blur or glass simulation.
+* It is hosted GDI only and is wired through the shared window renderer helper used by the compositor.
+* Classic remains the default theme and stays shadow-free unless a future theme explicitly opts into `softShadowIntent`.
+* Sci Fi enables `softShadowIntent`, so the hosted compositor can draw the preview only for Sci Fi windows.
+* The shadow is rounded when the hosted rounded chrome preview is active; the implementation still falls back to a simple rectangular shadow if a render path cannot safely use the rounded shape.
+* Bare-metal framebuffer rendering remains unchanged and rectangular.
+* Rounded client clipping remains deferred.
+* Rounded hit-testing remains deferred.
+* No blur or glass simulation was added.
+* No animation was added.
+* The hosted paint path redraws the full client frame before the window stack, so the shadow can extend slightly outside the shell without leaving stale pixels behind during move, resize, overlap, or repaint.
+
 ## What Is Deferred
 
 * Rounded clipping for theme-specific window shapes
-* Soft shadows
 * Glass or blur simulation
 * Slide-in / slide-out animations
 * High-DPI and scaling polish
@@ -110,12 +125,12 @@ Phase 2C.1 is a stabilization-only review pass for the Sci Fi chrome polish.
 
 * Classic should continue to look basically unchanged.
 * Sci Fi is a first visible proof that the theme system exists, not a full futuristic redesign.
-* Rounded-window clipping remains deferred; this foundation is intentionally limited to IDs, persistence, selector wiring, safe chrome colors, the Phase 2A chrome metric pass, the guarded Phase 2B rounded-shell preview, and the Phase 2C border/highlight polish pass.
+* Rounded-window clipping remains deferred; this foundation is intentionally limited to IDs, persistence, selector wiring, safe chrome colors, the Phase 2A chrome metric pass, the guarded Phase 2B rounded-shell preview, the Phase 2C border/highlight polish pass, and the Phase 2D hosted shadow preview.
 
 ## Future Work
 
 1. Wire rounded clipping safely for supported render paths.
-2. Add soft shadow and glass/blur experiments behind clear feature gates.
+2. Expand the conservative shadow preview behind clear feature gates, then add glass/blur experiments if the render path proves safe.
 3. Refine padding, spacing, and scaling using per-theme metrics.
 4. Add more themes once the infrastructure is proven stable.
 5. Apply deeper per-app polish after the compositor chrome is settled.

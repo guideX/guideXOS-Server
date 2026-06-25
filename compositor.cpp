@@ -2400,6 +2400,12 @@ namespace gxos {
                     bool isFocused = (winfo.id == g_focus);
                     RECT wrect{ winfo.x, winfo.y, winfo.x + winfo.w, winfo.y + winfo.h };
                     
+                    // Phase 2D: hosted-only Sci Fi soft shadow preview. The
+                    // offscreen hosted paint path redraws the full client
+                    // frame before windows, so this conservative shadow can
+                    // extend slightly beyond the shell without stale pixels.
+                    WindowRenderer::DrawWindowShadow(dc, winfo.x, winfo.y, winfo.w, winfo.h, theme);
+
                     // Draw window glow/shadow (matching Legacy)
                     WindowRenderer::DrawWindowGlow(dc, winfo.x, winfo.y, winfo.w, winfo.h, titleBarH, isFocused);
                     

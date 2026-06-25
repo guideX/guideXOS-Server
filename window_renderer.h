@@ -61,6 +61,26 @@ public:
         return ShouldUseRoundedWindowChrome(theme) ? theme.windowCornerRadius : 0;
     }
 
+    /// Phase 2D keeps shadows conservative: only draw them when the theme
+    /// explicitly asks for the preview via softShadowIntent.
+    static bool ShouldDrawWindowShadow(const DesktopTheme& theme) {
+        return theme.softShadowIntent;
+    }
+
+    static int GetWindowShadowOffset(const DesktopTheme& theme) {
+        return ShouldDrawWindowShadow(theme) ? 4 : 0;
+    }
+
+    static COLORREF GetWindowShadowColor(const DesktopTheme& theme, int layerIndex) {
+        if (!ShouldDrawWindowShadow(theme)) {
+            return ToColorRef(theme.windowBackground);
+        }
+
+        const uint32_t tint = layerIndex <= 0 ? 0xFF000000u : 0xFF101010u;
+        const int strength = layerIndex <= 0 ? 78 : 66;
+        return ToColorRef(BlendThemeColor(theme.windowBorder, tint, strength));
+    }
+
     /// Draw a rounded rectangle (or regular rectangle if radius is 0)
     static void DrawRoundedRect(HDC dc, int x, int y, int w, int h, COLORREF color, int radius = 0) {
         HBRUSH brush = CreateSolidBrush(color);
@@ -73,6 +93,35 @@ public:
             FillRect(dc, &r, brush);
         }
         DeleteObject(brush);
+    }
+
+    /// Draw a conservative soft shadow preview behind a hosted Sci Fi window.
+    /// The shadow stays cheap and deterministic by using two filled shapes.
+    static void DrawWindowShadow(HDC dc, int x, int y, int w, int h, const DesktopTheme& theme) {
+        if (!ShouldDrawWindowShadow(theme) || w <= 0 || h <= 0) {
+            return;
+        }
+
+        const int shadowOffset = GetWindowShadowOffset(theme);
+        const int cornerRadius = GetWindowChromeCornerRadius(theme);
+        const int outerRadius = cornerRadius > 0 ? cornerRadius : 0;
+        const int innerRadius = cornerRadius > 1 ? cornerRadius - 1 : 0;
+
+        DrawRoundedRect(dc,
+            x + shadowOffset + 1,
+            y + shadowOffset + 1,
+            w + 5,
+            h + 5,
+            GetWindowShadowColor(theme, 0),
+            outerRadius);
+
+        DrawRoundedRect(dc,
+            x + shadowOffset,
+            y + shadowOffset,
+            w + 2,
+            h + 2,
+            GetWindowShadowColor(theme, 1),
+            innerRadius);
     }
     
     /// Draw a window glow/shadow effect
