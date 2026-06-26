@@ -204,7 +204,7 @@ namespace {
 
     uint32_t DisplayOptionsCardColor()
     {
-        if (!IsSciFiThemeActive()) return packRgb(42, 42, 42);
+        if (!IsSciFiThemeActive()) return packRgb(34, 36, 42);
         const auto& theme = DisplayOptionsTheme();
         return blendColor(theme.windowBackground, theme.taskbarBackground, 18);
     }

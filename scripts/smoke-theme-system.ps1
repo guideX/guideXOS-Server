@@ -168,6 +168,8 @@ $phase2fBodyMatch = Find-FirstMatch $planDoc 'Display Options theme UX polish|Th
 $phase2gHeadingMatch = Find-FirstMatch $planDoc '## Phase 2G'
 $phase3aHeadingMatch = Find-FirstMatch $planDoc '## Phase 3A'
 $phase3aBodyMatch = Find-FirstMatch $planDoc 'first app-surface pilot|first app surface to receive Sci Fi polish|conservative panel/card/accent treatment|Classic is preserved and stays visually close to the current Display Options look|No blur, glass, animation, rounded clipping, rounded hit-testing, or per-effect theme controls were added|Broad app redesign remains deferred|Future app polish should proceed one app at a time'
+$phase3a1HeadingMatch = Find-FirstMatch $planDoc '## Phase 3A\.1'
+$phase3a1BodyMatch = Find-FirstMatch $planDoc 'stabilization-only review pass for the Display Options app-surface pilot|Display Options surface helpers were reviewed and kept centralized|Classic preservation was verified|tiny fallback tweak to restore the prior neutral card feel|No new effects or controls were added|Future app polish should remain one app at a time'
 $manualRunbookHeadingMatch = Find-FirstMatch $planDoc '## Manual Validation Runbook'
 $manualRunbookClassicFirstMatch = Find-FirstMatch $planDoc 'Validate Classic first'
 $manualRunbookLauncherMatch = Find-FirstMatch $planDoc 'Launch Display Options with the registered app name `DisplayOptions`'
@@ -255,6 +257,8 @@ $checks = @(
     [pscustomobject]@{ Name = "phase 2g docs mention"; Pass = $null -ne $phase2gHeadingMatch; Match = $phase2gHeadingMatch },
     [pscustomobject]@{ Name = "phase 3a docs heading"; Pass = $null -ne $phase3aHeadingMatch; Match = $phase3aHeadingMatch },
     [pscustomobject]@{ Name = "phase 3a docs body"; Pass = $null -ne $phase3aBodyMatch; Match = $phase3aBodyMatch },
+    [pscustomobject]@{ Name = "phase 3a1 docs heading"; Pass = $null -ne $phase3a1HeadingMatch; Match = $phase3a1HeadingMatch },
+    [pscustomobject]@{ Name = "phase 3a1 docs body"; Pass = $null -ne $phase3a1BodyMatch; Match = $phase3a1BodyMatch },
     [pscustomobject]@{ Name = "manual validation runbook heading"; Pass = $null -ne $manualRunbookHeadingMatch; Match = $manualRunbookHeadingMatch },
     [pscustomobject]@{ Name = "manual validation classic-first note"; Pass = $null -ne $manualRunbookClassicFirstMatch; Match = $manualRunbookClassicFirstMatch },
     [pscustomobject]@{ Name = "manual validation displayoptions launcher"; Pass = $null -ne $manualRunbookLauncherMatch; Match = $manualRunbookLauncherMatch },

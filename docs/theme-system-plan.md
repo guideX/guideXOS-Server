@@ -208,6 +208,15 @@ Phase 3A is the first app-surface pilot for the guideXOS Server theme system.
 * Broad app redesign remains deferred.
 * Future app polish should proceed one app at a time.
 
+## Phase 3A.1
+
+Phase 3A.1 is a stabilization-only review pass for the Display Options app-surface pilot.
+
+* Display Options surface helpers were reviewed and kept centralized.
+* Classic preservation was verified, with only a tiny fallback tweak to restore the prior neutral card feel.
+* No new effects or controls were added.
+* Future app polish should remain one app at a time.
+
 ## Manual Validation Runbook
 
 * Start the hosted server executable.
