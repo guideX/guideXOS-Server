@@ -3114,6 +3114,10 @@ static const char* resolve_imageviewer_runtime_smoke_path()
     static char s_smokePath[128];
     s_smokePath[0] = '\0';
 
+#if defined(GXOS_IMAGEVIEWER_RUNTIME_SMOKE_FORCE_ARROWBGX)
+    serial::puts("[IMAGEVIEWER-RUNTIME-SMOKE] path override active path=/system/wall/arrowbgx.png source=compile-time\n");
+    return "/system/wall/arrowbgx.png";
+#else
     const char* sourcePath = "/system/config/navigator/imageviewer-runtime-smoke-path.txt";
     const char* sourceCompatPath = "/system/config/navigator/IMGRTPTH.TXT";
     const char* configPath = "/config/navigator/imageviewer-runtime-smoke-path.txt";
@@ -3156,6 +3160,7 @@ static const char* resolve_imageviewer_runtime_smoke_path()
     }
 
     return "/system/wall/ivsmoke.png";
+#endif
 }
 
 void run_imageviewer_runtime_smoke()

@@ -84,6 +84,7 @@ $themeSource = Join-Path $Root "desktop_theme.cpp"
 $desktopConfig = Join-Path $Root "desktop_config.h"
 $server = Join-Path $Root "server.cpp"
 $displayOptions = Join-Path $Root "display_options.cpp"
+$controlPanel = Join-Path $Root "control_panel.cpp"
 $compositor = Join-Path $Root "compositor.cpp"
 $windowRenderer = Join-Path $Root "window_renderer.h"
 $planDoc = Join-Path $Root "docs\theme-system-plan.md"
@@ -189,6 +190,10 @@ $themeSaveReloadMatch = Find-FirstMatch $displayOptions 'Selecting a theme saves
 $themeIntroMatch = Find-FirstMatch $displayOptions 'Choose a desktop theme\. Classic is default; Sci Fi is opt-in\.'
 $classicOptionMatch = Find-RawMatch $displayOptions 'drawThemeOption\(\s*kThemeOptionX,\s*kThemeOptionY,\s*DesktopThemeId::Classic,.*?Current guideXOS look\.'
 $sciFiOptionMatch = Find-RawMatch $displayOptions 'drawThemeOption\(\s*kThemeOptionX,\s*kThemeOptionY \+ kThemeOptionH \+ kThemeOptionGap,\s*DesktopThemeId::SciFi,.*?Dark futuristic hosted UI\.'
+$controlPanelThemeHelperMatch = Find-FirstMatch $controlPanel 'ControlPanelBodyColor|ControlPanelPanelColor|ControlPanelCardColor|ControlPanelCardHoverColor|ControlPanelCardSelectedColor|ControlPanelBorderColor|ControlPanelTextColor|ControlPanelMutedTextColor|ControlPanelAccentColor|GetCurrentDesktopThemeId|GetCurrentDesktopTheme|DesktopThemeId::SciFi'
+$controlPanelPerEffectMatch = Find-FirstMatch $controlPanel 'Visual Effects|per-effect'
+$phase3bHeadingMatch = Find-FirstMatch $planDoc '## Phase 3B'
+$phase3bBodyMatch = Find-FirstMatch $planDoc 'second app-surface pilot|Control Panel is the second app surface to receive Sci Fi polish|conservative panel/card/accent treatment|Classic is preserved and stays visually close to the current Control Panel look|No new effects were added|No new per-effect theme controls were introduced|Broad app redesign remains deferred|Future app polish should continue one app at a time'
 
 $checks = @(
     [pscustomobject]@{ Name = "theme header exists"; Pass = (Test-Path -LiteralPath $themeHeader); Match = $null },
@@ -278,6 +283,10 @@ $checks = @(
     [pscustomobject]@{ Name = "display options sci fi description"; Pass = $null -ne $themeDescriptionSciFiMatch; Match = $themeDescriptionSciFiMatch },
     [pscustomobject]@{ Name = "display options feature summary"; Pass = $null -ne $themeFeatureSummaryMatch; Match = $themeFeatureSummaryMatch },
     [pscustomobject]@{ Name = "display options save reload note"; Pass = $null -ne $themeSaveReloadMatch; Match = $themeSaveReloadMatch },
+    [pscustomobject]@{ Name = "control panel theme helpers wired"; Pass = $null -ne $controlPanelThemeHelperMatch; Match = $controlPanelThemeHelperMatch },
+    [pscustomobject]@{ Name = "control panel no per-effect controls"; Pass = $null -eq $controlPanelPerEffectMatch; Match = $controlPanelPerEffectMatch },
+    [pscustomobject]@{ Name = "phase 3b docs heading"; Pass = $null -ne $phase3bHeadingMatch; Match = $phase3bHeadingMatch },
+    [pscustomobject]@{ Name = "phase 3b docs body"; Pass = $null -ne $phase3bBodyMatch; Match = $phase3bBodyMatch },
     [pscustomobject]@{ Name = "compositor start button rect helper wired"; Pass = $null -ne $compositorStartButtonRectMatch; Match = $compositorStartButtonRectMatch }
 )
 

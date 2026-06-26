@@ -243,6 +243,140 @@ function Get-NavigatorCaBundleManifestProfile {
     }
 }
 
+if (-not ("GxosPngCrc32" -as [type])) {
+    Add-Type -TypeDefinition @"
+using System;
+
+public static class GxosPngCrc32
+{
+    private static readonly uint[] Table = CreateTable();
+
+    private static uint[] CreateTable()
+    {
+        uint[] table = new uint[256];
+        for (uint i = 0; i < table.Length; ++i)
+        {
+            uint c = i;
+            for (int j = 0; j < 8; ++j)
+            {
+                c = (c & 1u) != 0u ? (0xEDB88320u ^ (c >> 1)) : (c >> 1);
+            }
+            table[i] = c;
+        }
+        return table;
+    }
+
+    public static uint Compute(byte[] data, int offset, int count)
+    {
+        uint c = 0xFFFFFFFFu;
+        int end = offset + count;
+        for (int i = offset; i < end; ++i)
+        {
+            c = Table[(c ^ data[i]) & 0xFF] ^ (c >> 8);
+        }
+        return c ^ 0xFFFFFFFFu;
+    }
+}
+"@
+}
+
+function ConvertTo-PngUInt32Be {
+    param([Parameter(Mandatory = $true)][uint32]$Value)
+
+    $bytes = [System.BitConverter]::GetBytes($Value)
+    [Array]::Reverse($bytes)
+    return $bytes
+}
+
+function Read-PngUInt32Be {
+    param(
+        [Parameter(Mandatory = $true)][byte[]]$Bytes,
+        [Parameter(Mandatory = $true)][int]$Offset
+    )
+
+    return ([uint32]$Bytes[$Offset] -shl 24) -bor
+        ([uint32]$Bytes[$Offset + 1] -shl 16) -bor
+        ([uint32]$Bytes[$Offset + 2] -shl 8) -bor
+        [uint32]$Bytes[$Offset + 3]
+}
+
+function New-PngSmokeFixtureWithPadding {
+    param(
+        [Parameter(Mandatory = $true)][string]$SourcePath,
+        [Parameter(Mandatory = $true)][string]$TargetPath,
+        [Parameter(Mandatory = $true)][int]$PaddingBytes
+    )
+
+    if (-not (Test-Path -LiteralPath $SourcePath -PathType Leaf)) {
+        throw "PNG smoke source not found: $SourcePath"
+    }
+
+    $bytes = [System.IO.File]::ReadAllBytes((Resolve-Path $SourcePath))
+    if ($bytes.Length -lt 33) {
+        throw "PNG smoke source is too small to be valid: $SourcePath"
+    }
+
+    $signature = 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A
+    for ($i = 0; $i -lt $signature.Length; ++$i) {
+        if ($bytes[$i] -ne $signature[$i]) {
+            throw "PNG smoke source is not a valid PNG: $SourcePath"
+        }
+    }
+
+    $iendOffset = -1
+    for ($offset = 8; $offset + 12 -le $bytes.Length; ) {
+        $chunkLength = Read-PngUInt32Be -Bytes $bytes -Offset $offset
+        $chunkType = [System.Text.Encoding]::ASCII.GetString($bytes, $offset + 4, 4)
+        $chunkEnd = $offset + 12 + [int]$chunkLength
+        if ($chunkEnd -gt $bytes.Length) {
+            throw "PNG smoke source has a truncated chunk: $SourcePath"
+        }
+        if ($chunkType -eq "IEND") {
+            $iendOffset = $offset
+            break
+        }
+        $offset = $chunkEnd
+    }
+
+    if ($iendOffset -lt 0) {
+        throw "PNG smoke source does not contain an IEND chunk: $SourcePath"
+    }
+
+    $padding = New-Object byte[] $PaddingBytes
+    for ($i = 0; $i -lt $padding.Length; ++$i) {
+        $padding[$i] = [byte]0x41
+    }
+
+    $chunkTypeBytes = [System.Text.Encoding]::ASCII.GetBytes("tEXt")
+    $keywordBytes = [System.Text.Encoding]::ASCII.GetBytes("Comment")
+    $chunkData = New-Object byte[] ($keywordBytes.Length + 1 + $padding.Length)
+    [Array]::Copy($keywordBytes, 0, $chunkData, 0, $keywordBytes.Length)
+    $chunkData[$keywordBytes.Length] = 0
+    [Array]::Copy($padding, 0, $chunkData, $keywordBytes.Length + 1, $padding.Length)
+
+    $crcInput = New-Object byte[] ($chunkTypeBytes.Length + $chunkData.Length)
+    [Array]::Copy($chunkTypeBytes, 0, $crcInput, 0, $chunkTypeBytes.Length)
+    [Array]::Copy($chunkData, 0, $crcInput, $chunkTypeBytes.Length, $chunkData.Length)
+    $crc = [GxosPngCrc32]::Compute($crcInput, 0, $crcInput.Length)
+
+    $chunkBytes = New-Object byte[] (12 + $chunkData.Length)
+    [Array]::Copy((ConvertTo-PngUInt32Be -Value ([uint32]$chunkData.Length)), 0, $chunkBytes, 0, 4)
+    [Array]::Copy($chunkTypeBytes, 0, $chunkBytes, 4, 4)
+    [Array]::Copy($chunkData, 0, $chunkBytes, 8, $chunkData.Length)
+    [Array]::Copy((ConvertTo-PngUInt32Be -Value $crc), 0, $chunkBytes, 8 + $chunkData.Length, 4)
+
+    $outputBytes = New-Object byte[] ($iendOffset + $chunkBytes.Length + ($bytes.Length - $iendOffset))
+    [Array]::Copy($bytes, 0, $outputBytes, 0, $iendOffset)
+    [Array]::Copy($chunkBytes, 0, $outputBytes, $iendOffset, $chunkBytes.Length)
+    [Array]::Copy($bytes, $iendOffset, $outputBytes, $iendOffset + $chunkBytes.Length, $bytes.Length - $iendOffset)
+
+    $outputDir = Split-Path -Parent $TargetPath
+    if ($outputDir -and -not (Test-Path -LiteralPath $outputDir)) {
+        New-Item -ItemType Directory -Force -Path $outputDir | Out-Null
+    }
+    [System.IO.File]::WriteAllBytes($TargetPath, $outputBytes)
+}
+
 function Invoke-NavigatorCaBundleManifestValidation {
     param(
         [Parameter(Mandatory = $true)][string]$BundlePath,
@@ -1089,14 +1223,16 @@ foreach ($name in $WallpaperNames) {
 }
 
 # Deterministic large PNG fixture for the bare-metal Image Viewer smoke.
-$largeSmokeFixtureSource = Join-Path $InputDir "dinos.png"
+# Keep it above the old 512 KiB cap, but base it on a known-good PNG and pad it
+# with harmless metadata so the bare-metal decoder sees the same image content.
+$largeSmokeFixtureSource = Join-Path $RootDir "assets\Images\BlueVelvet\16\image.png"
 if (-not (Test-Path -LiteralPath $largeSmokeFixtureSource -PathType Leaf)) {
     throw "Missing expected large Image Viewer smoke PNG fixture source: $largeSmokeFixtureSource"
 }
 $largeSmokeFixtureTarget = Join-Path $wallpaperDir "arrowbgx.png"
-Copy-Item -LiteralPath $largeSmokeFixtureSource -Destination $largeSmokeFixtureTarget -Force
+New-PngSmokeFixtureWithPadding -SourcePath $largeSmokeFixtureSource -TargetPath $largeSmokeFixtureTarget -PaddingBytes 700KB
 $staged += Get-Item $largeSmokeFixtureTarget
-Write-Host "      staged large Image Viewer smoke PNG fixture at /system/wall/arrowbgx.png" -ForegroundColor Yellow
+Write-Host "      staged large Image Viewer smoke PNG fixture at /system/wall/arrowbgx.png (padded valid PNG)" -ForegroundColor Yellow
 
 $imageViewerSmokeFixtureSource = Join-Path $RootDir "assets\Images\BlueVelvet\16\image.png"
 if (-not (Test-Path -LiteralPath $imageViewerSmokeFixtureSource -PathType Leaf)) {

@@ -5,7 +5,7 @@
   "desktop.background.scale": "fill",
   "desktop.taskbar.position": "bottom",
   "pinned": ["ComputerFiles","Trash","App Model Demo","Native App Debug Viewer","Hello World","Resource Viewer","Future GXApp Package","HelloWorld ELF"],
-  "recent": ["DisplayOptions","Console","App Model Demo","Hello World","Resource Viewer","Notepad","ControlPanel","guideXOS Navigator","Calculator","ComputerFiles","HelloWorld ELF","Native App Debug Viewer","TaskManager","Future GXApp Package","HDInstaller"],
+  "recent": ["guideXOS Navigator","DisplayOptions","Console","App Model Demo","Hello World","Resource Viewer","Notepad","ControlPanel","Calculator","ComputerFiles","HelloWorld ELF","Native App Debug Viewer","TaskManager","Future GXApp Package","HDInstaller"],
   "desktopShortcuts": [
   ],
   "showDesktopTrash": true,
@@ -14,6 +14,7 @@
   "showDesktopSystemSettings": false,
   "smallLiveDesktopFolderIcons": true,
   "windows": [
+    {"id": 1000, "title": "View Source - guideXOS Navigator", "x": 300, "y": 300, "w": 920, "h": 640, "minimized": false, "maximized": false, "z": 0, "focused": true, "snap": 0}
   ],
   "iconPositions": [
     {"name": "shortcut:app:guidexos.navigator", "x": 272, "y": 20}

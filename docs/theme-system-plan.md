@@ -217,6 +217,18 @@ Phase 3A.1 is a stabilization-only review pass for the Display Options app-surfa
 * No new effects or controls were added.
 * Future app polish should remain one app at a time.
 
+## Phase 3B
+
+Phase 3B is the second app-surface pilot for the guideXOS Server theme system.
+
+* Control Panel is the second app surface to receive Sci Fi polish.
+* Sci Fi gets conservative panel/card/accent treatment so Control Panel feels a little more cohesive with the shell.
+* Classic is preserved and stays visually close to the current Control Panel look.
+* No new effects were added.
+* No new per-effect theme controls were introduced.
+* Broad app redesign remains deferred.
+* Future app polish should continue one app at a time.
+
 ## Manual Validation Runbook
 
 * Start the hosted server executable.
@@ -286,5 +298,5 @@ Phase 3A.1 is a stabilization-only review pass for the Display Options app-surfa
 
 1. Phase 2G.1 manual visual validation fixes, if screenshots or manual testing finds issues.
 2. Phase 2H theme screenshot / manual smoke harness, if feasible.
-3. Next app-surface pilot, one app at a time, after Display Options.
+3. Next app-surface pilot, one app at a time, after Control Panel.
 4. Future high-DPI and resolution work as a separate track.

@@ -5,6 +5,7 @@
 //
 
 #include "control_panel.h"
+#include "desktop_theme.h"
 #include "gui_protocol.h"
 #include "logger.h"
 #include "process.h"
@@ -13,6 +14,159 @@
 #include <chrono>
 #include <sstream>
 #include <algorithm>
+
+namespace {
+    constexpr int kWindowW = 640;
+    constexpr int kWindowH = 480;
+    constexpr int kHeaderX = 20;
+    constexpr int kHeaderY = 10;
+    constexpr int kPanelX = 12;
+    constexpr int kPanelY = 36;
+    constexpr int kPanelW = 616;
+    constexpr int kPanelH = 432;
+    constexpr int kGridTop = 50;
+
+    uint32_t packRgb(int r, int g, int b)
+    {
+        return 0xFF000000u |
+            (static_cast<uint32_t>(r & 0xFF) << 16) |
+            (static_cast<uint32_t>(g & 0xFF) << 8) |
+            static_cast<uint32_t>(b & 0xFF);
+    }
+
+    uint32_t blendColor(uint32_t baseColor, uint32_t overlayColor, int overlayPercent)
+    {
+        if (overlayPercent <= 0) {
+            return baseColor;
+        }
+        if (overlayPercent >= 100) {
+            return overlayColor;
+        }
+
+        const int baseR = static_cast<int>((baseColor >> 16) & 0xFF);
+        const int baseG = static_cast<int>((baseColor >> 8) & 0xFF);
+        const int baseB = static_cast<int>(baseColor & 0xFF);
+        const int overR = static_cast<int>((overlayColor >> 16) & 0xFF);
+        const int overG = static_cast<int>((overlayColor >> 8) & 0xFF);
+        const int overB = static_cast<int>(overlayColor & 0xFF);
+        const int keepPercent = 100 - overlayPercent;
+
+        return packRgb(
+            (baseR * keepPercent + overR * overlayPercent) / 100,
+            (baseG * keepPercent + overG * overlayPercent) / 100,
+            (baseB * keepPercent + overB * overlayPercent) / 100);
+    }
+
+    bool isSciFiThemeActive()
+    {
+        return GetCurrentDesktopThemeId() == DesktopThemeId::SciFi;
+    }
+
+    const DesktopTheme& controlPanelTheme()
+    {
+        return GetCurrentDesktopTheme();
+    }
+
+    uint32_t ControlPanelBodyColor()
+    {
+        if (!isSciFiThemeActive()) {
+            return packRgb(240, 240, 240);
+        }
+
+        const auto& theme = controlPanelTheme();
+        return blendColor(theme.taskbarBackground, theme.windowBackground, 18);
+    }
+
+    uint32_t ControlPanelPanelColor()
+    {
+        if (!isSciFiThemeActive()) {
+            return packRgb(246, 246, 246);
+        }
+
+        const auto& theme = controlPanelTheme();
+        return blendColor(theme.windowBackground, theme.taskbarBackground, 10);
+    }
+
+    uint32_t ControlPanelCardColor()
+    {
+        if (!isSciFiThemeActive()) {
+            return packRgb(255, 255, 255);
+        }
+
+        const auto& theme = controlPanelTheme();
+        return blendColor(theme.windowBackground, theme.taskbarBackground, 16);
+    }
+
+    uint32_t ControlPanelCardHoverColor()
+    {
+        if (!isSciFiThemeActive()) {
+            return packRgb(220, 220, 220);
+        }
+
+        const auto& theme = controlPanelTheme();
+        return blendColor(ControlPanelCardColor(), theme.mutedAccent, 8);
+    }
+
+    uint32_t ControlPanelCardSelectedColor()
+    {
+        if (!isSciFiThemeActive()) {
+            return packRgb(180, 180, 180);
+        }
+
+        const auto& theme = controlPanelTheme();
+        return blendColor(ControlPanelCardColor(), theme.accent, 10);
+    }
+
+    uint32_t ControlPanelBorderColor(bool selected, bool hover)
+    {
+        if (!isSciFiThemeActive()) {
+            if (selected) {
+                return packRgb(128, 128, 128);
+            }
+            if (hover) {
+                return packRgb(200, 200, 200);
+            }
+            return packRgb(160, 160, 160);
+        }
+
+        const auto& theme = controlPanelTheme();
+        if (selected) {
+            return blendColor(theme.windowBorder, theme.accent, 42);
+        }
+        if (hover) {
+            return blendColor(theme.windowBorder, theme.mutedAccent, 30);
+        }
+        return blendColor(theme.windowBorder, theme.taskbarBorder, 24);
+    }
+
+    uint32_t ControlPanelTextColor()
+    {
+        if (!isSciFiThemeActive()) {
+            return packRgb(0, 0, 0);
+        }
+
+        return controlPanelTheme().titleBarText;
+    }
+
+    uint32_t ControlPanelMutedTextColor()
+    {
+        if (!isSciFiThemeActive()) {
+            return packRgb(64, 64, 64);
+        }
+
+        const auto& theme = controlPanelTheme();
+        return blendColor(theme.titleBarText, theme.taskbarBackground, 58);
+    }
+
+    uint32_t ControlPanelAccentColor()
+    {
+        if (!isSciFiThemeActive()) {
+            return packRgb(76, 139, 245);
+        }
+
+        return controlPanelTheme().accent;
+    }
+}
 
 namespace gxos {
 namespace apps {
@@ -98,7 +252,7 @@ void ControlPanel::initItems() {
     ));
 }
 
-int ControlPanel::main(int argc, char** argv) {
+int ControlPanel::main(int, char**) {
     try {
         Logger::write(LogLevel::Info, "ControlPanel starting...");
         
@@ -121,7 +275,7 @@ int ControlPanel::main(int argc, char** argv) {
         ipc::Message createMsg;
         createMsg.type = (uint32_t)MsgType::MT_Create;
         std::ostringstream oss;
-        oss << "Control Panel|640|480";
+        oss << "Control Panel|" << kWindowW << "|" << kWindowH;
         std::string payload = oss.str();
         createMsg.data.assign(payload.begin(), payload.end());
         ipc::Bus::publish(kGuiChanIn, std::move(createMsg), false);
@@ -178,8 +332,8 @@ int ControlPanel::main(int argc, char** argv) {
                                 // Check for double-click
                                 uint64_t now = std::chrono::duration_cast<std::chrono::milliseconds>(
                                     std::chrono::steady_clock::now().time_since_epoch()).count();
-                                if (s_selectedIndex >= 0 && 
-                                    s_selectedIndex == lastClickIndex && 
+                                if (s_selectedIndex >= 0 &&
+                                    static_cast<uint64_t>(s_selectedIndex) == lastClickIndex &&
                                     (now - lastClickTime) < 500) {
                                     // Double-click!
                                     handleDoubleClick(x, y);
@@ -227,33 +381,49 @@ void ControlPanel::render() {
     msg.data.assign(payload.begin(), payload.end());
     ipc::Bus::publish("gui.input", std::move(msg), false);
 
-    // Light gray background
-    ipc::Message bgMsg;
-    bgMsg.type = (uint32_t)MsgType::MT_DrawRect;
-    std::string bgPayload = std::to_string(s_windowId) + "|0|0|640|480|240|240|240";
-    bgMsg.data.assign(bgPayload.begin(), bgPayload.end());
-    ipc::Bus::publish("gui.input", std::move(bgMsg), false);
+    auto drawRect = [&](int x, int y, int w, int h, uint32_t color) {
+        ipc::Message rectMsg;
+        rectMsg.type = (uint32_t)MsgType::MT_DrawRect;
+        std::ostringstream rectOss;
+        rectOss << s_windowId << "|" << x << "|" << y << "|" << w << "|" << h
+                << "|" << static_cast<int>((color >> 16) & 0xFF)
+                << "|" << static_cast<int>((color >> 8) & 0xFF)
+                << "|" << static_cast<int>(color & 0xFF);
+        std::string rectPayload = rectOss.str();
+        rectMsg.data.assign(rectPayload.begin(), rectPayload.end());
+        ipc::Bus::publish("gui.input", std::move(rectMsg), false);
+    };
+
+    // Theme-aware shell background and content panel
+    drawRect(0, 0, kWindowW, kWindowH, ControlPanelBodyColor());
+    drawRect(kPanelX, kPanelY, kPanelW, kPanelH, ControlPanelPanelColor());
+    drawRect(kPanelX, kPanelY, kPanelW, 1, ControlPanelBorderColor(false, false));
+    drawRect(kPanelX, kPanelY + kPanelH - 1, kPanelW, 1, ControlPanelBorderColor(false, false));
+    drawRect(kPanelX, kPanelY, 1, kPanelH, ControlPanelBorderColor(false, false));
+    drawRect(kPanelX + kPanelW - 1, kPanelY, 1, kPanelH, ControlPanelBorderColor(false, false));
     
     // Title
     ipc::Message titleMsg;
     titleMsg.type = (uint32_t)MsgType::MT_DrawText;
     std::ostringstream titleOss;
-    titleOss << s_windowId << "|20|10|Control Panel|0|0|0";
+    const uint32_t titleColor = ControlPanelTextColor();
+    titleOss << s_windowId << "|" << kHeaderX << "|" << kHeaderY << "|Control Panel|"
+             << static_cast<int>((titleColor >> 16) & 0xFF) << "|"
+             << static_cast<int>((titleColor >> 8) & 0xFF) << "|"
+             << static_cast<int>(titleColor & 0xFF);
     std::string titlePayload = titleOss.str();
     titleMsg.data.assign(titlePayload.begin(), titlePayload.end());
     ipc::Bus::publish("gui.input", std::move(titleMsg), false);
     
     // Draw items in grid
     int cols = 3;
-    int x = PAD;
-    int y = 50;
     
     for (size_t i = 0; i < s_items.size(); i++) {
         int col = i % cols;
         int row = i / cols;
         
         int itemX = PAD + col * (ITEM_W + GAP);
-        int itemY = 50 + row * (ITEM_H + GAP);
+        int itemY = kGridTop + row * (ITEM_H + GAP);
         
         bool hover = hit(s_mouseX, s_mouseY, itemX, itemY, ITEM_W, ITEM_H);
         bool selected = (static_cast<int>(i) == s_selectedIndex);
@@ -263,67 +433,70 @@ void ControlPanel::render() {
 }
 
 void ControlPanel::drawItem(int x, int y, const PanelItem& item, bool hover, bool selected) {
-    // Background
-    uint8_t r, g, b;
-    if (selected) {
-        r = g = b = 180;  // Selected: medium gray
-    } else if (hover) {
-        r = g = b = 220;  // Hover: light gray
-    } else {
-        r = g = b = 255;  // Normal: white
+    const uint32_t cardColor = selected ? ControlPanelCardSelectedColor() : (hover ? ControlPanelCardHoverColor() : ControlPanelCardColor());
+    const uint32_t borderColor = ControlPanelBorderColor(selected, hover);
+    const uint32_t textColor = ControlPanelTextColor();
+    const uint32_t mutedTextColor = ControlPanelMutedTextColor();
+    const uint32_t accentColor = ControlPanelAccentColor();
+    const uint32_t iconColor = isSciFiThemeActive()
+        ? (selected ? blendColor(accentColor, controlPanelTheme().windowBorder, 18)
+                    : (hover ? blendColor(accentColor, controlPanelTheme().mutedAccent, 20)
+                             : blendColor(accentColor, controlPanelTheme().windowBackground, 26)))
+        : accentColor;
+
+    auto drawRect = [&](int rx, int ry, int rw, int rh, uint32_t color) {
+        ipc::Message msg;
+        msg.type = (uint32_t)MsgType::MT_DrawRect;
+        std::ostringstream oss;
+        oss << s_windowId << "|" << rx << "|" << ry << "|" << rw << "|" << rh
+            << "|" << static_cast<int>((color >> 16) & 0xFF)
+            << "|" << static_cast<int>((color >> 8) & 0xFF)
+            << "|" << static_cast<int>(color & 0xFF);
+        std::string payload = oss.str();
+        msg.data.assign(payload.begin(), payload.end());
+        ipc::Bus::publish("gui.input", std::move(msg), false);
+    };
+
+    auto drawText = [&](int tx, int ty, const std::string& text, uint32_t color) {
+        ipc::Message msg;
+        msg.type = (uint32_t)MsgType::MT_DrawText;
+        std::ostringstream oss;
+        oss << s_windowId << "|" << tx << "|" << ty << "|" << text
+            << "|" << static_cast<int>((color >> 16) & 0xFF)
+            << "|" << static_cast<int>((color >> 8) & 0xFF)
+            << "|" << static_cast<int>(color & 0xFF);
+        std::string payload = oss.str();
+        msg.data.assign(payload.begin(), payload.end());
+        ipc::Bus::publish("gui.input", std::move(msg), false);
+    };
+
+    drawRect(x, y, ITEM_W, ITEM_H, cardColor);
+    drawRect(x, y, ITEM_W, 1, blendColor(borderColor, ControlPanelTextColor(), 10));
+    drawRect(x, y + ITEM_H - 1, ITEM_W, 1, blendColor(borderColor, ControlPanelPanelColor(), 18));
+    drawRect(x, y, 1, ITEM_H, blendColor(borderColor, ControlPanelTextColor(), 10));
+    drawRect(x + ITEM_W - 1, y, 1, ITEM_H, blendColor(borderColor, ControlPanelPanelColor(), 18));
+
+    if (selected && isSciFiThemeActive()) {
+        drawRect(x, y, 4, ITEM_H, accentColor);
+    } else if (hover && isSciFiThemeActive()) {
+        drawRect(x, y, ITEM_W, 2, blendColor(accentColor, controlPanelTheme().titleBarText, 12));
     }
-    
-    ipc::Message bgMsg;
-    bgMsg.type = (uint32_t)MsgType::MT_DrawRect;
-    std::ostringstream bgOss;
-    bgOss << s_windowId << "|" << x << "|" << y << "|" << ITEM_W << "|" << ITEM_H 
-          << "|" << static_cast<int>(r) << "|" << static_cast<int>(g) << "|" << static_cast<int>(b);
-    std::string bgPayload = bgOss.str();
-    bgMsg.data.assign(bgPayload.begin(), bgPayload.end());
-    ipc::Bus::publish("gui.input", std::move(bgMsg), false);
-    
-    // Border
-    ipc::Message borderMsg;
-    borderMsg.type = (uint32_t)MsgType::MT_DrawRect;
-    std::ostringstream borderOss;
-    borderOss << s_windowId << "|" << x << "|" << y << "|" << ITEM_W << "|1|128|128|128";  // Top
-    std::string borderPayload = borderOss.str();
-    borderMsg.data.assign(borderPayload.begin(), borderPayload.end());
-    ipc::Bus::publish("gui.input", std::move(borderMsg), false);
-    
+
     // Icon placeholder (centered)
     int iconX = x + (ITEM_W - ICON_SIZE) / 2;
     int iconY = y + 10;
-    ipc::Message iconMsg;
-    iconMsg.type = (uint32_t)MsgType::MT_DrawRect;
-    std::ostringstream iconOss;
-    iconOss << s_windowId << "|" << iconX << "|" << iconY << "|" << ICON_SIZE << "|" << ICON_SIZE << "|76|139|245";
-    std::string iconPayload = iconOss.str();
-    iconMsg.data.assign(iconPayload.begin(), iconPayload.end());
-    ipc::Bus::publish("gui.input", std::move(iconMsg), false);
+    drawRect(iconX, iconY, ICON_SIZE, ICON_SIZE, iconColor);
+    drawRect(iconX, iconY, ICON_SIZE, 1, blendColor(borderColor, iconColor, 18));
+    drawRect(iconX, iconY + ICON_SIZE - 1, ICON_SIZE, 1, blendColor(borderColor, ControlPanelPanelColor(), 22));
     
     // Name (centered)
-    ipc::Message nameMsg;
-    nameMsg.type = (uint32_t)MsgType::MT_DrawText;
-    std::ostringstream nameOss;
-    nameOss << s_windowId << "|" << (x + 10) << "|" << (iconY + ICON_SIZE + 6) 
-            << "|" << item.name << "|0|0|0";
-    std::string namePayload = nameOss.str();
-    nameMsg.data.assign(namePayload.begin(), namePayload.end());
-    ipc::Bus::publish("gui.input", std::move(nameMsg), false);
+    drawText(x + 10, iconY + ICON_SIZE + 6, item.name, (selected && isSciFiThemeActive()) ? accentColor : textColor);
     
     // Description
-    ipc::Message descMsg;
-    descMsg.type = (uint32_t)MsgType::MT_DrawText;
-    std::ostringstream descOss;
-    descOss << s_windowId << "|" << (x + 10) << "|" << (iconY + ICON_SIZE + 22) 
-            << "|" << item.description << "|64|64|64";
-    std::string descPayload = descOss.str();
-    descMsg.data.assign(descPayload.begin(), descPayload.end());
-    ipc::Bus::publish("gui.input", std::move(descMsg), false);
+    drawText(x + 10, iconY + ICON_SIZE + 22, item.description, mutedTextColor);
 }
 
-void ControlPanel::handleMouseMove(int mx, int my) {
+void ControlPanel::handleMouseMove(int, int) {
     render();  // Update hover states
 }
 
@@ -336,7 +509,7 @@ void ControlPanel::handleMouseDown(int mx, int my) {
         int row = i / cols;
         
         int itemX = PAD + col * (ITEM_W + GAP);
-        int itemY = 50 + row * (ITEM_H + GAP);
+        int itemY = kGridTop + row * (ITEM_H + GAP);
         
         if (hit(mx, my, itemX, itemY, ITEM_W, ITEM_H)) {
             s_selectedIndex = i;
@@ -349,7 +522,7 @@ void ControlPanel::handleMouseDown(int mx, int my) {
     render();
 }
 
-void ControlPanel::handleMouseUp(int mx, int my) {
+void ControlPanel::handleMouseUp(int, int) {
     // Nothing special needed
 }
 

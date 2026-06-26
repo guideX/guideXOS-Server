@@ -176,18 +176,16 @@ function Invoke-ImageViewerSmokeBuild {
             throw "Wallpaper pack generator not found: $wallpaperPackScript"
         }
 
-        # The large-PNG smoke needs the runtime config staged into ESP/ramdisk.img
-        # even when the caller requests -SkipBuild. Regenerate only the wallpaper
-        # pack here so we keep the boot image deterministic without rebuilding the
-        # whole project or touching hosted behavior.
+        # The large-PNG smoke still refreshes ESP/ramdisk.img when -SkipBuild is
+        # used so the boot image stays deterministic without rebuilding the whole
+        # project or touching hosted behavior.
         Write-Host "Refreshing wallpaper pack for large-PNG runtime smoke..."
         Push-Location $Root
         try {
             & powershell -ExecutionPolicy Bypass -File $wallpaperPackScript `
                 -InputDir (Join-Path $Root "assets\Backgrounds") `
                 -OutputDir (Join-Path $Root "out\wallpaper-pack") `
-                -OutputImage $ramdisk `
-                -ImageViewerRuntimeSmokePath "/system/wall/arrowbgx.png"
+                -OutputImage $ramdisk
             if ($LASTEXITCODE -ne 0) {
                 throw "Wallpaper pack regeneration failed with exit code $LASTEXITCODE"
             }
@@ -197,25 +195,20 @@ function Invoke-ImageViewerSmokeBuild {
     }
 
     Write-Host "Building kernel with active imageviewer runtime smoke diagnostics..."
-    $oldSmokePath = $env:GXOS_IMAGEVIEWER_RUNTIME_SMOKE_PNG_PATH
     $oldSkipWallpaperBuild = $env:GXOS_SKIP_WALLPAPER_RUNTIME_IMAGE_BUILD
     if ($smokeLabel -eq "large-png") {
-        $env:GXOS_IMAGEVIEWER_RUNTIME_SMOKE_PNG_PATH = "/system/wall/arrowbgx.png"
         $env:GXOS_SKIP_WALLPAPER_RUNTIME_IMAGE_BUILD = "1"
     } else {
-        Remove-Item Env:\GXOS_IMAGEVIEWER_RUNTIME_SMOKE_PNG_PATH -ErrorAction SilentlyContinue
         Remove-Item Env:\GXOS_SKIP_WALLPAPER_RUNTIME_IMAGE_BUILD -ErrorAction SilentlyContinue
     }
 
     try {
         $kernelSmokeFlags = "-DGXOS_IMAGEVIEWER_BARE_METAL_RUNTIME_SMOKE_ACTIVE"
+        if ($smokeLabel -eq "large-png") {
+            $kernelSmokeFlags += " -DGXOS_IMAGEVIEWER_RUNTIME_SMOKE_FORCE_ARROWBGX"
+        }
         Invoke-KernelBuildForSmoke $kernelSmokeFlags
     } finally {
-        if ($null -ne $oldSmokePath) {
-            $env:GXOS_IMAGEVIEWER_RUNTIME_SMOKE_PNG_PATH = $oldSmokePath
-        } else {
-            Remove-Item Env:\GXOS_IMAGEVIEWER_RUNTIME_SMOKE_PNG_PATH -ErrorAction SilentlyContinue
-        }
         if ($null -ne $oldSkipWallpaperBuild) {
             $env:GXOS_SKIP_WALLPAPER_RUNTIME_IMAGE_BUILD = $oldSkipWallpaperBuild
         } else {
