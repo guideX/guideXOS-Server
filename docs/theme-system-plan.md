@@ -187,14 +187,38 @@ Phase 2G is a documentation and visual validation checkpoint for the current the
 
 ## Phase 2G.1 Manual Validation Note
 
-* Classic validation: `DisplayOptions` launched as `DisplayOptions`, and the launch capture showed the theme tab area was readable without any clipping or overlap.
-* Sci Fi validation: the real Theme tab click path was too brittle to rely on fully in this pass, so Sci Fi was validated with the persisted `desktop.theme.id=scifi` token plus compositor restart, then visually confirmed on the hosted desktop.
-* Screenshots were captured.
-* Local validation artifacts kept in the repo root: `theme-phase2g1-displayoptions-launch.png`, `theme-phase2g1-scifi.png`, `theme-phase2g1-scifi-startmenu.png`, and `theme-phase2g1-scifi-taskbar-menu.png`.
-* Pre-existing Classic validation artifacts kept in the repo root: `theme-phase2g1-classic.png` and `theme-phase2g1-classic-printwindow.png`.
+* Classic validation passed: `DisplayOptions` launched as `DisplayOptions`, and the launch capture showed the theme tab area was readable without any clipping or overlap.
+* Sci Fi validation passed: the real Theme tab click path was too brittle to rely on fully in this pass, so Sci Fi was validated with the persisted `desktop.theme.id=scifi` token plus compositor restart, then visually confirmed on the hosted desktop.
+* Screenshots were captured as local validation artifacts in the repo root during the run.
+* No rendering/effects changes were made.
+* `theme-phase2g1-*.png` files are local validation artifacts unless they are intentionally moved into a documented artifact folder.
+* Persisted theme tokens are `classic` and `scifi`.
 * Tiny fixes made: none.
 * Issues deferred: click-driven Theme tab / Sci Fi selection was not fully click-reliable in this pass, so the persisted-config fallback was used for Sci Fi validation.
 * `DisplayOptions` launches under the registered app name `DisplayOptions`.
+
+## Phase 3A
+
+Phase 3A is the first app-surface pilot for the guideXOS Server theme system.
+
+* Display Options is the first app surface to receive Sci Fi polish.
+* Sci Fi gets conservative panel/card/accent treatment so the app feels a little more cohesive with the shell.
+* Classic is preserved and stays visually close to the current Display Options look.
+* No blur, glass, animation, rounded clipping, rounded hit-testing, or per-effect theme controls were added.
+* Broad app redesign remains deferred.
+* Future app polish should proceed one app at a time.
+
+## Manual Validation Runbook
+
+* Start the hosted server executable.
+* Use server command `gui.start` to open the hosted compositor.
+* Launch Display Options with the registered app name `DisplayOptions`.
+* Validate Classic first.
+* Capture hosted window screenshots with `PrintWindow` if needed.
+* If the Theme-tab click path is brittle, validate Sci Fi with the persisted `desktop.theme.id=scifi` token instead.
+* Persisted theme tokens are `classic` and `scifi`.
+* Restart or reload the compositor after changing persisted config if needed.
+* Screenshot PNGs named `theme-phase2g1-*.png` are local validation artifacts unless intentionally moved into a documented artifact folder.
 
 ## Manual Validation Checklist
 
@@ -239,18 +263,19 @@ Phase 2G is a documentation and visual validation checkpoint for the current the
 * Taskbar shadows
 * Theme wallpaper/asset selection
 * Per-theme user-editable settings
-* Deeper app surface polish
+* Deeper app surface polish, one app at a time
 * Visual screenshot-based smoke tests
+* Broad app redesign / multi-app restyling
 
 ## Notes
 
 * Classic should continue to look basically unchanged.
 * Sci Fi is a first visible proof that the theme system exists, not a full futuristic redesign.
-* Rounded-window clipping remains deferred; this foundation is intentionally limited to IDs, persistence, selector wiring, safe chrome colors, the Phase 2A chrome metric pass, the guarded Phase 2B rounded-shell preview, the Phase 2C border/highlight polish pass, the Phase 2D hosted shadow preview, the Phase 2E desktop/taskbar surface polish pass, and the Phase 2G validation checkpoint.
+* Rounded-window clipping remains deferred; this foundation is intentionally limited to IDs, persistence, selector wiring, safe chrome colors, the Phase 2A chrome metric pass, the guarded Phase 2B rounded-shell preview, the Phase 2C border/highlight polish pass, the Phase 2D hosted shadow preview, the Phase 2E desktop/taskbar surface polish pass, the Phase 2G validation checkpoint, and the Phase 3A Display Options app-surface pilot.
 
 ## Recommended Next Pass
 
 1. Phase 2G.1 manual visual validation fixes, if screenshots or manual testing finds issues.
 2. Phase 2H theme screenshot / manual smoke harness, if feasible.
-3. Phase 3A small app-surface polish, only after shell visuals are stable.
+3. Next app-surface pilot, one app at a time, after Display Options.
 4. Future high-DPI and resolution work as a separate track.

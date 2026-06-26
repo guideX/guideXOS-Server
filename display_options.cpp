@@ -81,11 +81,29 @@ namespace {
         publish(MsgType::MT_DrawRect, oss.str());
     }
 
-    void drawText(uint64_t windowId, int x, int y, const std::string& text)
+    void drawColorRect(uint64_t windowId, int x, int y, int w, int h, uint32_t color)
     {
+        drawRect(windowId, x, y, w, h,
+            static_cast<int>((color >> 16) & 0xFF),
+            static_cast<int>((color >> 8) & 0xFF),
+            static_cast<int>(color & 0xFF));
+    }
+
+    void drawText(uint64_t windowId, int x, int y, const std::string& text, uint32_t color = 0xFFDCDCDC)
+    {
+        if (color == 0xFFDCDCDCu) {
+            std::ostringstream oss;
+            oss << windowId << "|" << x << "|" << y << "|" << text;
+            publish(MsgType::MT_DrawTextAt, oss.str());
+            return;
+        }
+
         std::ostringstream oss;
-        oss << windowId << "|" << x << "|" << y << "|" << text;
-        publish(MsgType::MT_DrawTextAt, oss.str());
+        oss << windowId << "|" << x << "|" << y << "|"
+            << static_cast<int>((color >> 16) & 0xFF) << "|"
+            << static_cast<int>((color >> 8) & 0xFF) << "|"
+            << static_cast<int>(color & 0xFF) << "|" << text;
+        publish(MsgType::MT_DrawTextAtColor, oss.str());
     }
 
     void drawImage(uint64_t windowId, int x, int y, int w, int h, const std::string& path)
@@ -131,6 +149,132 @@ namespace {
             if (gradients[i].id == id) return static_cast<int>(i);
         }
         return 0;
+    }
+
+    uint32_t packRgb(int r, int g, int b)
+    {
+        return 0xFF000000u |
+            (static_cast<uint32_t>(r & 0xFF) << 16) |
+            (static_cast<uint32_t>(g & 0xFF) << 8) |
+            static_cast<uint32_t>(b & 0xFF);
+    }
+
+    uint32_t blendColor(uint32_t baseColor, uint32_t overlayColor, int overlayPercent)
+    {
+        if (overlayPercent <= 0) return baseColor;
+        if (overlayPercent >= 100) return overlayColor;
+
+        const int baseR = static_cast<int>((baseColor >> 16) & 0xFF);
+        const int baseG = static_cast<int>((baseColor >> 8) & 0xFF);
+        const int baseB = static_cast<int>(baseColor & 0xFF);
+        const int overR = static_cast<int>((overlayColor >> 16) & 0xFF);
+        const int overG = static_cast<int>((overlayColor >> 8) & 0xFF);
+        const int overB = static_cast<int>(overlayColor & 0xFF);
+        const int basePercent = 100 - overlayPercent;
+
+        return packRgb(
+            (baseR * basePercent + overR * overlayPercent) / 100,
+            (baseG * basePercent + overG * overlayPercent) / 100,
+            (baseB * basePercent + overB * overlayPercent) / 100);
+    }
+
+    bool IsSciFiThemeActive()
+    {
+        return GetCurrentDesktopThemeId() == DesktopThemeId::SciFi;
+    }
+
+    const DesktopTheme& DisplayOptionsTheme()
+    {
+        return GetCurrentDesktopTheme();
+    }
+
+    uint32_t DisplayOptionsBodyColor()
+    {
+        if (!IsSciFiThemeActive()) return packRgb(27, 31, 40);
+        const auto& theme = DisplayOptionsTheme();
+        return blendColor(theme.taskbarBackground, theme.windowBackground, 18);
+    }
+
+    uint32_t DisplayOptionsPanelColor()
+    {
+        if (!IsSciFiThemeActive()) return packRgb(22, 22, 24);
+        const auto& theme = DisplayOptionsTheme();
+        return blendColor(theme.windowBackground, theme.taskbarBackground, 10);
+    }
+
+    uint32_t DisplayOptionsCardColor()
+    {
+        if (!IsSciFiThemeActive()) return packRgb(42, 42, 42);
+        const auto& theme = DisplayOptionsTheme();
+        return blendColor(theme.windowBackground, theme.taskbarBackground, 18);
+    }
+
+    uint32_t DisplayOptionsSelectedBorderColor()
+    {
+        if (!IsSciFiThemeActive()) return packRgb(72, 110, 180);
+        const auto& theme = DisplayOptionsTheme();
+        return blendColor(theme.accent, theme.windowBorder, 28);
+    }
+
+    uint32_t DisplayOptionsHoverBorderColor()
+    {
+        if (!IsSciFiThemeActive()) return packRgb(55, 65, 85);
+        const auto& theme = DisplayOptionsTheme();
+        return blendColor(theme.mutedAccent, theme.windowBorder, 34);
+    }
+
+    uint32_t DisplayOptionsNeutralBorderColor()
+    {
+        if (!IsSciFiThemeActive()) return packRgb(84, 90, 105);
+        const auto& theme = DisplayOptionsTheme();
+        return blendColor(theme.taskbarBorder, theme.windowBorder, 22);
+    }
+
+    uint32_t DisplayOptionsButtonFillColor(bool active, bool enabled)
+    {
+        if (!IsSciFiThemeActive()) {
+            if (active) return packRgb(58, 58, 58);
+            if (enabled) return packRgb(48, 48, 52);
+            return packRgb(34, 34, 38);
+        }
+
+        const auto& theme = DisplayOptionsTheme();
+        if (active) return blendColor(theme.windowBorder, theme.accent, 18);
+        if (enabled) return blendColor(theme.taskbarBackground, theme.windowBackground, 18);
+        return blendColor(theme.taskbarBackground, theme.windowBackground, 8);
+    }
+
+    uint32_t DisplayOptionsButtonBorderColor(bool active, bool enabled)
+    {
+        if (!IsSciFiThemeActive()) {
+            if (active) return packRgb(90, 118, 175);
+            if (enabled) return packRgb(85, 85, 90);
+            return packRgb(58, 58, 62);
+        }
+
+        const auto& theme = DisplayOptionsTheme();
+        if (active) return blendColor(theme.accent, theme.windowBorder, 34);
+        if (enabled) return blendColor(theme.taskbarBorder, theme.windowBorder, 28);
+        return blendColor(theme.windowBorder, theme.taskbarBackground, 28);
+    }
+
+    uint32_t DisplayOptionsTextColor()
+    {
+        if (!IsSciFiThemeActive()) return packRgb(220, 220, 220);
+        return DisplayOptionsTheme().titleBarText;
+    }
+
+    uint32_t DisplayOptionsMutedTextColor()
+    {
+        if (!IsSciFiThemeActive()) return packRgb(186, 190, 196);
+        const auto& theme = DisplayOptionsTheme();
+        return blendColor(theme.titleBarText, theme.taskbarBackground, 54);
+    }
+
+    uint32_t DisplayOptionsAccentColor()
+    {
+        if (!IsSciFiThemeActive()) return packRgb(120, 168, 230);
+        return DisplayOptionsTheme().accent;
     }
 
     const char* desktopIconSettingName(int index)
@@ -303,7 +447,7 @@ void DisplayOptions::render()
     if (s_windowId == 0) return;
 
     publish(MsgType::MT_DrawText, std::to_string(s_windowId) + "|\f");
-    drawRect(s_windowId, 0, 0, kWindowW, kWindowH, 27, 31, 40);
+    drawColorRect(s_windowId, 0, 0, kWindowW, kWindowH, DisplayOptionsBodyColor());
 
     drawButton(kBackgroundTabX, kTabY, kTabW, kTabH, "Backgrounds", s_activeTab == 0, true);
     drawButton(kDesktopIconTabX, kTabY, kTabW, kTabH, "Desktop Icons", s_activeTab == 2, true);
@@ -313,8 +457,9 @@ void DisplayOptions::render()
         s_activeTab == 2 ? "Choose desktop icons and folder icon size:"
         : (s_activeTab == 0 ? "Select a background from the gallery:"
         : (s_activeTab == 1 ? "Select a gradient from the gallery:"
-        : "Choose a desktop theme. Classic is default; Sci Fi is opt-in.")));
-    drawRect(s_windowId, 20, 92, 742, 456, 22, 22, 24);
+        : "Choose a desktop theme. Classic is default; Sci Fi is opt-in.")),
+        DisplayOptionsTextColor());
+    drawColorRect(s_windowId, 20, 92, 742, 456, DisplayOptionsPanelColor());
 
     if (s_activeTab == 0) {
         const auto& backgrounds = WallpaperRegistry::BuiltInBackgrounds();
@@ -347,35 +492,46 @@ void DisplayOptions::render()
         drawButton(kSelectButtonX + 200, kButtonY, kButtonW, kButtonH, "Choose Color", false, false);
         drawButton(kSelectButtonX + 400, kButtonY, kButtonW, kButtonH, "Visual Effects", false, false);
     } else if (s_activeTab == 2) {
-        drawText(s_windowId, 26, kButtonY + 10, "Changes are saved immediately.");
+        drawText(s_windowId, 26, kButtonY + 10, "Changes are saved immediately.", DisplayOptionsMutedTextColor());
     } else {
-        drawText(s_windowId, 26, kButtonY + 10, "Selecting a theme saves immediately and reloads the compositor.");
+        drawText(s_windowId, 26, kButtonY + 10, "Selecting a theme saves immediately and reloads the compositor.", DisplayOptionsMutedTextColor());
     }
 }
 
 void DisplayOptions::drawButton(int x, int y, int w, int h, const std::string& text, bool active, bool enabled)
 {
-    if (active) drawRect(s_windowId, x, y, w, h, 58, 58, 58);
-    else if (enabled) drawRect(s_windowId, x, y, w, h, 48, 48, 52);
-    else drawRect(s_windowId, x, y, w, h, 34, 34, 38);
-    drawRect(s_windowId, x, y, w, 1, 90, 90, 95);
-    drawRect(s_windowId, x, y + h - 1, w, 1, 85, 85, 90);
-    drawRect(s_windowId, x, y, 1, h, 85, 85, 90);
-    drawRect(s_windowId, x + w - 1, y, 1, h, 55, 55, 60);
-    drawText(s_windowId, x + 16, y + 14, enabled ? text : text + " (soon)");
+    const uint32_t fill = DisplayOptionsButtonFillColor(active, enabled);
+    const uint32_t border = DisplayOptionsButtonBorderColor(active, enabled);
+    const uint32_t topBorder = blendColor(border, DisplayOptionsTextColor(), 8);
+    const uint32_t bottomBorder = blendColor(border, DisplayOptionsPanelColor(), 18);
+
+    drawColorRect(s_windowId, x, y, w, h, fill);
+    drawColorRect(s_windowId, x, y, w, 1, topBorder);
+    drawColorRect(s_windowId, x, y + h - 1, w, 1, bottomBorder);
+    drawColorRect(s_windowId, x, y, 1, h, topBorder);
+    drawColorRect(s_windowId, x + w - 1, y, 1, h, bottomBorder);
+    drawText(s_windowId, x + 16, y + 14, enabled ? text : text + " (soon)", enabled ? DisplayOptionsTextColor() : DisplayOptionsMutedTextColor());
 }
 
 void DisplayOptions::drawCheckbox(int x, int y, const std::string& text, bool checked, bool hover)
 {
     int box = kDesktopIconCheckboxSize;
-    if (hover) drawRect(s_windowId, x - 8, y - 8, 320, 34, 38, 46, 62);
-    drawRect(s_windowId, x, y, box, box, checked ? 70 : 30, checked ? 110 : 30, checked ? 180 : 34);
-    drawRect(s_windowId, x, y, box, 1, 130, 135, 150);
-    drawRect(s_windowId, x, y + box - 1, box, 1, 85, 90, 110);
-    drawRect(s_windowId, x, y, 1, box, 120, 125, 140);
-    drawRect(s_windowId, x + box - 1, y, 1, box, 65, 70, 82);
-    if (checked) drawText(s_windowId, x + 4, y + 3, "x");
-    drawText(s_windowId, x + box + 12, y + 4, text);
+    if (hover) {
+        const uint32_t hoverFill = IsSciFiThemeActive()
+            ? blendColor(DisplayOptionsCardColor(), DisplayOptionsAccentColor(), 10)
+            : packRgb(38, 46, 62);
+        drawColorRect(s_windowId, x - 8, y - 8, 320, 34, hoverFill);
+    }
+    const uint32_t boxFill = checked ? DisplayOptionsAccentColor() : (IsSciFiThemeActive() ? blendColor(DisplayOptionsCardColor(), DisplayOptionsNeutralBorderColor(), 24) : packRgb(30, 30, 34));
+    const uint32_t boxTop = IsSciFiThemeActive() ? blendColor(DisplayOptionsAccentColor(), DisplayOptionsTextColor(), 16) : packRgb(130, 135, 150);
+    const uint32_t boxBottom = IsSciFiThemeActive() ? blendColor(DisplayOptionsPanelColor(), DisplayOptionsNeutralBorderColor(), 30) : packRgb(85, 90, 110);
+    drawColorRect(s_windowId, x, y, box, box, boxFill);
+    drawColorRect(s_windowId, x, y, box, 1, boxTop);
+    drawColorRect(s_windowId, x, y + box - 1, box, 1, boxBottom);
+    drawColorRect(s_windowId, x, y, 1, box, boxTop);
+    drawColorRect(s_windowId, x + box - 1, y, 1, box, boxBottom);
+    if (checked) drawText(s_windowId, x + 4, y + 3, "x", DisplayOptionsTextColor());
+    drawText(s_windowId, x + box + 12, y + 4, text, DisplayOptionsTextColor());
 }
 
 void DisplayOptions::drawDesktopIconsTab()
@@ -397,14 +553,14 @@ void DisplayOptions::drawDesktopIconsTab()
 void DisplayOptions::drawWallpaperTile(int index, int x, int y, bool hover, bool selected, bool applied)
 {
     const auto& entry = WallpaperRegistry::BuiltInWallpapers()[static_cast<size_t>(index)];
-    if (selected) drawRect(s_windowId, x - 4, y - 4, kTileW + 8, kTileH + 8, 72, 110, 180);
-    else if (hover) drawRect(s_windowId, x - 4, y - 4, kTileW + 8, kTileH + 8, 55, 65, 85);
-    drawRect(s_windowId, x, y, kTileW, kTileH, 42, 42, 42);
-    drawRect(s_windowId, x + 6, y + 8, kThumbW, kThumbH, 18, 18, 20);
+    if (selected) drawColorRect(s_windowId, x - 4, y - 4, kTileW + 8, kTileH + 8, DisplayOptionsSelectedBorderColor());
+    else if (hover) drawColorRect(s_windowId, x - 4, y - 4, kTileW + 8, kTileH + 8, DisplayOptionsHoverBorderColor());
+    drawColorRect(s_windowId, x, y, kTileW, kTileH, DisplayOptionsCardColor());
+    drawColorRect(s_windowId, x + 6, y + 8, kThumbW, kThumbH, IsSciFiThemeActive() ? blendColor(DisplayOptionsCardColor(), DisplayOptionsPanelColor(), 20) : packRgb(18, 18, 20));
     std::string thumbnailPath = entry.thumbnailPath.empty() ? entry.fullImagePath : entry.thumbnailPath;
     Logger::write(LogLevel::Info, std::string("DisplayOptions thumbnail id=") + entry.id + " path=" + thumbnailPath);
     drawImage(s_windowId, x + 6, y + 8, kThumbW, kThumbH, thumbnailPath);
-    drawText(s_windowId, x + 8, y + 78, entry.displayName + (applied ? " *" : ""));
+    drawText(s_windowId, x + 8, y + 78, entry.displayName + (applied ? " *" : ""), (applied && IsSciFiThemeActive()) ? DisplayOptionsAccentColor() : DisplayOptionsTextColor());
 }
 
 void DisplayOptions::drawThemeTab()
@@ -412,19 +568,19 @@ void DisplayOptions::drawThemeTab()
     auto drawThemeOption = [&](int x, int y, DesktopThemeId id, const DesktopTheme& theme, const char* description, const char* feature1, const char* feature2, const char* feature3) {
         const bool selected = (s_selectedThemeId == id);
         const bool applied = (s_appliedThemeId == id);
-        if (selected) drawRect(s_windowId, x - 4, y - 4, kThemeOptionW + 8, kThemeOptionH + 8, 72, 110, 180);
-        drawRect(s_windowId, x, y, kThemeOptionW, kThemeOptionH, 34, 36, 42);
-        drawRect(s_windowId, x, y, kThemeOptionW, 1, 84, 90, 105);
-        drawRect(s_windowId, x, y + kThemeOptionH - 1, kThemeOptionW, 1, 64, 68, 78);
-        drawRect(s_windowId, x, y, 1, kThemeOptionH, 84, 90, 105);
-        drawRect(s_windowId, x + kThemeOptionW - 1, y, 1, kThemeOptionH, 48, 52, 60);
-        drawRect(s_windowId, x + 12, y + 12, 18, 18, (theme.accent >> 16) & 0xFF, (theme.accent >> 8) & 0xFF, theme.accent & 0xFF);
-        if (selected) drawText(s_windowId, x + 16, y + 10, "x");
-        drawText(s_windowId, x + 42, y + 10, std::string(theme.displayName) + (applied ? " *" : ""));
-        drawText(s_windowId, x + 42, y + 28, description);
-        drawText(s_windowId, x + 42, y + 46, feature1);
-        drawText(s_windowId, x + 42, y + 60, feature2);
-        drawText(s_windowId, x + 42, y + 74, feature3);
+        if (selected) drawColorRect(s_windowId, x - 4, y - 4, kThemeOptionW + 8, kThemeOptionH + 8, DisplayOptionsSelectedBorderColor());
+        drawColorRect(s_windowId, x, y, kThemeOptionW, kThemeOptionH, DisplayOptionsCardColor());
+        drawColorRect(s_windowId, x, y, kThemeOptionW, 1, IsSciFiThemeActive() ? blendColor(DisplayOptionsNeutralBorderColor(), DisplayOptionsTextColor(), 10) : packRgb(84, 90, 105));
+        drawColorRect(s_windowId, x, y + kThemeOptionH - 1, kThemeOptionW, 1, IsSciFiThemeActive() ? blendColor(DisplayOptionsNeutralBorderColor(), DisplayOptionsPanelColor(), 24) : packRgb(64, 68, 78));
+        drawColorRect(s_windowId, x, y, 1, kThemeOptionH, IsSciFiThemeActive() ? blendColor(DisplayOptionsNeutralBorderColor(), DisplayOptionsTextColor(), 8) : packRgb(84, 90, 105));
+        drawColorRect(s_windowId, x + kThemeOptionW - 1, y, 1, kThemeOptionH, IsSciFiThemeActive() ? blendColor(DisplayOptionsNeutralBorderColor(), DisplayOptionsPanelColor(), 32) : packRgb(48, 52, 60));
+        drawColorRect(s_windowId, x + 12, y + 12, 18, 18, theme.accent);
+        if (selected) drawText(s_windowId, x + 16, y + 10, "x", IsSciFiThemeActive() ? DisplayOptionsAccentColor() : DisplayOptionsTextColor());
+        drawText(s_windowId, x + 42, y + 10, std::string(theme.displayName) + (applied ? " *" : ""), (applied && IsSciFiThemeActive()) ? DisplayOptionsAccentColor() : DisplayOptionsTextColor());
+        drawText(s_windowId, x + 42, y + 28, description, DisplayOptionsMutedTextColor());
+        drawText(s_windowId, x + 42, y + 46, feature1, DisplayOptionsMutedTextColor());
+        drawText(s_windowId, x + 42, y + 60, feature2, DisplayOptionsMutedTextColor());
+        drawText(s_windowId, x + 42, y + 74, feature3, DisplayOptionsMutedTextColor());
     };
 
     drawThemeOption(
@@ -450,12 +606,12 @@ void DisplayOptions::drawThemeTab()
 void DisplayOptions::drawBackgroundTile(int index, int x, int y, bool hover, bool selected, bool applied)
 {
     const auto& entry = WallpaperRegistry::BuiltInBackgrounds()[static_cast<size_t>(index)];
-    if (selected) drawRect(s_windowId, x - 4, y - 4, kTileW + 8, kTileH + 8, 72, 110, 180);
-    else if (hover) drawRect(s_windowId, x - 4, y - 4, kTileW + 8, kTileH + 8, 55, 65, 85);
-    drawRect(s_windowId, x, y, kTileW, kTileH, 42, 42, 42);
+    if (selected) drawColorRect(s_windowId, x - 4, y - 4, kTileW + 8, kTileH + 8, DisplayOptionsSelectedBorderColor());
+    else if (hover) drawColorRect(s_windowId, x - 4, y - 4, kTileW + 8, kTileH + 8, DisplayOptionsHoverBorderColor());
+    drawColorRect(s_windowId, x, y, kTileW, kTileH, DisplayOptionsCardColor());
 
     if (entry.kind == BackgroundKind::Image) {
-        drawRect(s_windowId, x + 6, y + 8, kThumbW, kThumbH, 18, 18, 20);
+        drawColorRect(s_windowId, x + 6, y + 8, kThumbW, kThumbH, IsSciFiThemeActive() ? blendColor(DisplayOptionsCardColor(), DisplayOptionsPanelColor(), 20) : packRgb(18, 18, 20));
         std::string thumbnailPath = entry.thumbnailPath.empty() ? entry.fullImagePath : entry.thumbnailPath;
         Logger::write(LogLevel::Info, std::string("DisplayOptions thumbnail id=") + entry.id + " path=" + thumbnailPath);
         drawImage(s_windowId, x + 6, y + 8, kThumbW, kThumbH, thumbnailPath);
@@ -469,18 +625,18 @@ void DisplayOptions::drawBackgroundTile(int index, int x, int y, bool hover, boo
             int b = (((top & 0xFF) * (255 - t)) + ((bottom & 0xFF) * t)) / 255;
             drawRect(s_windowId, x + 6, y + 8 + py, kThumbW, 1, r, g, b);
         }
-        drawRect(s_windowId, x + 6, y + 8, kThumbW, 1, (entry.accentColor >> 16) & 0xFF, (entry.accentColor >> 8) & 0xFF, entry.accentColor & 0xFF);
+        drawColorRect(s_windowId, x + 6, y + 8, kThumbW, 1, entry.accentColor);
     }
 
-    drawText(s_windowId, x + 8, y + 78, entry.displayName + (applied ? " *" : ""));
+    drawText(s_windowId, x + 8, y + 78, entry.displayName + (applied ? " *" : ""), (applied && IsSciFiThemeActive()) ? DisplayOptionsAccentColor() : DisplayOptionsTextColor());
 }
 
 void DisplayOptions::drawGradientTile(int index, int x, int y, bool hover, bool selected, bool applied)
 {
     const auto& entry = WallpaperRegistry::BuiltInGradients()[static_cast<size_t>(index)];
-    if (selected) drawRect(s_windowId, x - 4, y - 4, kTileW + 8, kTileH + 8, 72, 110, 180);
-    else if (hover) drawRect(s_windowId, x - 4, y - 4, kTileW + 8, kTileH + 8, 55, 65, 85);
-    drawRect(s_windowId, x, y, kTileW, kTileH, 42, 42, 42);
+    if (selected) drawColorRect(s_windowId, x - 4, y - 4, kTileW + 8, kTileH + 8, DisplayOptionsSelectedBorderColor());
+    else if (hover) drawColorRect(s_windowId, x - 4, y - 4, kTileW + 8, kTileH + 8, DisplayOptionsHoverBorderColor());
+    drawColorRect(s_windowId, x, y, kTileW, kTileH, DisplayOptionsCardColor());
     for (int py = 0; py < kThumbH; ++py) {
         int t = (py * 255) / (kThumbH > 1 ? kThumbH - 1 : 1);
         int r = ((((entry.topColor >> 16) & 0xFF) * (255 - t)) + (((entry.bottomColor >> 16) & 0xFF) * t)) / 255;
@@ -488,8 +644,8 @@ void DisplayOptions::drawGradientTile(int index, int x, int y, bool hover, bool 
         int b = (((entry.topColor & 0xFF) * (255 - t)) + ((entry.bottomColor & 0xFF) * t)) / 255;
         drawRect(s_windowId, x + 6, y + 8 + py, kThumbW, 1, r, g, b);
     }
-    drawRect(s_windowId, x + 6, y + 8, kThumbW, 1, (entry.accentColor >> 16) & 0xFF, (entry.accentColor >> 8) & 0xFF, entry.accentColor & 0xFF);
-    drawText(s_windowId, x + 8, y + 78, entry.displayName + (applied ? " *" : ""));
+    drawColorRect(s_windowId, x + 6, y + 8, kThumbW, 1, entry.accentColor);
+    drawText(s_windowId, x + 8, y + 78, entry.displayName + (applied ? " *" : ""), (applied && IsSciFiThemeActive()) ? DisplayOptionsAccentColor() : DisplayOptionsTextColor());
 }
 
 void DisplayOptions::handleMouseMove(int, int)

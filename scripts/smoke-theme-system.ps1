@@ -87,6 +87,11 @@ $displayOptions = Join-Path $Root "display_options.cpp"
 $compositor = Join-Path $Root "compositor.cpp"
 $windowRenderer = Join-Path $Root "window_renderer.h"
 $planDoc = Join-Path $Root "docs\theme-system-plan.md"
+$displayOptionsThemeHelperMatch = Find-FirstMatch $displayOptions 'IsSciFiThemeActive|DisplayOptionsBodyColor|DisplayOptionsPanelColor|DisplayOptionsCardColor|DisplayOptionsButtonFillColor|DisplayOptionsButtonBorderColor|DisplayOptionsTextColor|DisplayOptionsMutedTextColor|DisplayOptionsAccentColor'
+$displayOptionsThemeFieldMatch = Find-FirstMatch $displayOptions 'windowBackground|windowBorder|accent|mutedAccent|taskbarBackground|taskbarBorder|titleBarText'
+$displayOptionsTextColorMatch = Find-FirstMatch $displayOptions 'MT_DrawTextAtColor|DisplayOptionsMutedTextColor\(\)|DisplayOptionsTextColor\(\)'
+$effectPlaceholderMatch = Find-FirstMatch $displayOptions 'Choose Color|Visual Effects'
+$phase3aNoEffectsMatch = Find-FirstMatch $planDoc 'No blur, glass, animation, rounded clipping, rounded hit-testing, or per-effect theme controls were added'
 
 $classicMatch = Find-FirstMatch $themeSource 'DesktopThemeId::Classic'
 $sciFiMatch = Find-FirstMatch $themeSource 'DesktopThemeId::SciFi'
@@ -161,6 +166,13 @@ $phase2e1BodyMatch = Find-FirstMatch $planDoc 'Phase 2E\.1 is a stabilization an
 $phase2fHeadingMatch = Find-FirstMatch $planDoc '## Phase 2F'
 $phase2fBodyMatch = Find-FirstMatch $planDoc 'Display Options theme UX polish|The Theme section now explains the Classic and Sci Fi choices more clearly|Classic keeps a concise description|Sci Fi keeps a concise description|read-only feature summary|No per-effect sliders, checkboxes, or theme customization controls were added|No new rendering effects or compositor changes were added|Theme selection, persistence, and reload behavior remain unchanged'
 $phase2gHeadingMatch = Find-FirstMatch $planDoc '## Phase 2G'
+$phase3aHeadingMatch = Find-FirstMatch $planDoc '## Phase 3A'
+$phase3aBodyMatch = Find-FirstMatch $planDoc 'first app-surface pilot|first app surface to receive Sci Fi polish|conservative panel/card/accent treatment|Classic is preserved and stays visually close to the current Display Options look|No blur, glass, animation, rounded clipping, rounded hit-testing, or per-effect theme controls were added|Broad app redesign remains deferred|Future app polish should proceed one app at a time'
+$manualRunbookHeadingMatch = Find-FirstMatch $planDoc '## Manual Validation Runbook'
+$manualRunbookClassicFirstMatch = Find-FirstMatch $planDoc 'Validate Classic first'
+$manualRunbookLauncherMatch = Find-FirstMatch $planDoc 'Launch Display Options with the registered app name `DisplayOptions`'
+$manualRunbookPersistedTokensMatch = Find-FirstMatch $planDoc 'Persisted theme tokens are `classic` and `scifi`'
+$manualRunbookArtifactMatch = Find-FirstMatch $planDoc 'theme-phase2g1-\*\.png.*local validation artifacts'
 $manualChecklistHeadingMatch = Find-FirstMatch $planDoc '## Manual Validation Checklist'
 $classicHostedChecklistMatch = Find-FirstMatch $planDoc '### Classic hosted checklist'
 $sciFiHostedChecklistMatch = Find-FirstMatch $planDoc '### Sci Fi hosted checklist'
@@ -241,6 +253,17 @@ $checks = @(
     [pscustomobject]@{ Name = "phase 2e1 docs mention"; Pass = $null -ne $phase2e1HeadingMatch -and $null -ne $phase2e1BodyMatch; Match = $(if ($null -ne $phase2e1BodyMatch) { $phase2e1BodyMatch } else { $phase2e1HeadingMatch }) },
     [pscustomobject]@{ Name = "phase 2f docs mention"; Pass = $null -ne $phase2fHeadingMatch -and $null -ne $phase2fBodyMatch; Match = $(if ($null -ne $phase2fBodyMatch) { $phase2fBodyMatch } else { $phase2fHeadingMatch }) },
     [pscustomobject]@{ Name = "phase 2g docs mention"; Pass = $null -ne $phase2gHeadingMatch; Match = $phase2gHeadingMatch },
+    [pscustomobject]@{ Name = "phase 3a docs heading"; Pass = $null -ne $phase3aHeadingMatch; Match = $phase3aHeadingMatch },
+    [pscustomobject]@{ Name = "phase 3a docs body"; Pass = $null -ne $phase3aBodyMatch; Match = $phase3aBodyMatch },
+    [pscustomobject]@{ Name = "manual validation runbook heading"; Pass = $null -ne $manualRunbookHeadingMatch; Match = $manualRunbookHeadingMatch },
+    [pscustomobject]@{ Name = "manual validation classic-first note"; Pass = $null -ne $manualRunbookClassicFirstMatch; Match = $manualRunbookClassicFirstMatch },
+    [pscustomobject]@{ Name = "manual validation displayoptions launcher"; Pass = $null -ne $manualRunbookLauncherMatch; Match = $manualRunbookLauncherMatch },
+    [pscustomobject]@{ Name = "manual validation persisted token note"; Pass = $null -ne $manualRunbookPersistedTokensMatch; Match = $manualRunbookPersistedTokensMatch },
+    [pscustomobject]@{ Name = "manual validation screenshot artifact note"; Pass = $null -ne $manualRunbookArtifactMatch; Match = $manualRunbookArtifactMatch },
+    [pscustomobject]@{ Name = "display options theme helpers wired"; Pass = $null -ne $displayOptionsThemeHelperMatch; Match = $displayOptionsThemeHelperMatch },
+    [pscustomobject]@{ Name = "display options theme fields wired"; Pass = $null -ne $displayOptionsThemeFieldMatch; Match = $displayOptionsThemeFieldMatch },
+    [pscustomobject]@{ Name = "display options text color support"; Pass = $null -ne $displayOptionsTextColorMatch; Match = $displayOptionsTextColorMatch },
+    [pscustomobject]@{ Name = "display options effect placeholders remain"; Pass = $null -ne $effectPlaceholderMatch -and $null -ne $phase3aNoEffectsMatch; Match = $(if ($null -ne $phase3aNoEffectsMatch) { $phase3aNoEffectsMatch } else { $effectPlaceholderMatch }) },
     [pscustomobject]@{ Name = "manual validation checklist heading"; Pass = $null -ne $manualChecklistHeadingMatch; Match = $manualChecklistHeadingMatch },
     [pscustomobject]@{ Name = "classic hosted checklist heading"; Pass = $null -ne $classicHostedChecklistMatch; Match = $classicHostedChecklistMatch },
     [pscustomobject]@{ Name = "sci fi hosted checklist heading"; Pass = $null -ne $sciFiHostedChecklistMatch; Match = $sciFiHostedChecklistMatch },
