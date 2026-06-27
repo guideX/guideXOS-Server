@@ -3165,6 +3165,125 @@ static const char* resolve_imageviewer_runtime_smoke_path()
 
 void run_imageviewer_runtime_smoke()
 {
+#if defined(GXOS_IMAGEVIEWER_RUNTIME_SMOKE_CLOSE_REOPEN_ACTIVE)
+    extern "C" size_t gxos_kernel_heap_total_bytes();
+    extern "C" size_t gxos_kernel_heap_free_bytes();
+    extern "C" size_t gxos_kernel_heap_largest_free_bytes();
+
+    auto same_string = [](const char* a, const char* b) -> bool {
+        if (!a || !b) return false;
+        while (*a && *b) {
+            if (*a != *b) return false;
+            ++a;
+            ++b;
+        }
+        return *a == '\0' && *b == '\0';
+    };
+
+    auto find_running_image_viewer = [&]() -> app::KernelApp* {
+        const int runningCount = app::AppManager::getRunningAppCount();
+        for (int i = 0; i < runningCount; ++i) {
+            app::KernelApp* candidate = app::AppManager::getRunningApp(i);
+            if (candidate && candidate->getState() != app::AppState::Terminated && same_string(candidate->getName(), "ImageViewer")) {
+                return candidate;
+            }
+        }
+        return nullptr;
+    };
+
+    auto log_heap_state = [](const char* phase) {
+        serial::puts("[IMAGEVIEWER-RUNTIME-SMOKE] heap ");
+        serial::puts(phase ? phase : "(unknown)");
+        serial::puts(" free=0x");
+        serial::put_hex64(gxos_kernel_heap_free_bytes());
+        serial::puts(" largestFree=0x");
+        serial::put_hex64(gxos_kernel_heap_largest_free_bytes());
+        serial::puts(" total=0x");
+        serial::put_hex64(gxos_kernel_heap_total_bytes());
+        serial::puts("\n");
+    };
+
+    const char* firstPngPath = resolve_imageviewer_runtime_smoke_path();
+    const char* secondPngPath = "/system/wall/arrowbgx.png";
+    const char* fallbackPath = "/system/wall/imageviewer-runtime-smoke-placeholder.png";
+    const char* firstLaunchPath = fallbackPath;
+    const char* secondLaunchPath = fallbackPath;
+    const char* selectedMode = "placeholder";
+    vfs::FileInfo firstPngInfo{};
+    bool firstPngAvailable = vfs::stat(firstPngPath, &firstPngInfo) == vfs::VFS_OK && firstPngInfo.type == vfs::FILE_TYPE_REGULAR;
+    if (firstPngAvailable) {
+        firstLaunchPath = firstPngPath;
+        selectedMode = "png";
+    }
+    vfs::FileInfo secondPngInfo{};
+    bool secondPngAvailable = vfs::stat(secondPngPath, &secondPngInfo) == vfs::VFS_OK && secondPngInfo.type == vfs::FILE_TYPE_REGULAR;
+    if (secondPngAvailable) {
+        secondLaunchPath = secondPngPath;
+    }
+
+    serial::puts("[IMAGEVIEWER-RUNTIME-SMOKE] start\n");
+    serial::puts("[IMAGEVIEWER-RUNTIME-SMOKE] asset path=");
+    serial::puts(firstPngPath);
+    serial::puts(" exists=");
+    serial::puts(firstPngAvailable ? "PASS" : "FAIL");
+    serial::puts(" selectedMode=");
+    serial::puts(selectedMode);
+    serial::puts(" launchPath=");
+    serial::puts(firstLaunchPath);
+    serial::puts("\n");
+
+    const bool firstLaunchOk = app::AppManager::launchAppWithParam("ImageViewer", firstLaunchPath);
+    serial::puts("[IMAGEVIEWER-RUNTIME-SMOKE] launch app=ImageViewer path=");
+    serial::puts(firstLaunchPath);
+    serial::puts(" result=");
+    serial::puts(firstLaunchOk ? "PASS" : "FAIL");
+    serial::puts("\n");
+
+    bool closeOk = false;
+    bool secondLaunchOk = false;
+    if (firstLaunchOk) {
+        draw();
+        serial::puts("[IMAGEVIEWER-RUNTIME-SMOKE] draw requested result=PASS\n");
+        log_heap_state("before-close");
+
+        app::KernelApp* imageViewer = find_running_image_viewer();
+        if (imageViewer) {
+            app::AppManager::closeApp(imageViewer);
+            closeOk = true;
+            serial::puts("[IMAGEVIEWER-RUNTIME-SMOKE] close first app=ImageViewer result=PASS\n");
+        } else {
+            serial::puts("[IMAGEVIEWER-RUNTIME-SMOKE] close first app=ImageViewer result=FAIL\n");
+        }
+
+        log_heap_state("after-close");
+        serial::puts("[IMAGEVIEWER-RUNTIME-SMOKE] reopen asset path=");
+        serial::puts(secondLaunchPath);
+        serial::puts(" exists=");
+        serial::puts(secondPngAvailable ? "PASS" : "FAIL");
+        serial::puts("\n");
+        secondLaunchOk = app::AppManager::launchAppWithParam("ImageViewer", secondLaunchPath);
+        serial::puts("[IMAGEVIEWER-RUNTIME-SMOKE] reopen launch app=ImageViewer path=");
+        serial::puts(secondLaunchPath);
+        serial::puts(" result=");
+        serial::puts(secondLaunchOk ? "PASS" : "FAIL");
+        serial::puts("\n");
+        if (secondLaunchOk) {
+            draw();
+            serial::puts("[IMAGEVIEWER-RUNTIME-SMOKE] reopen draw requested result=PASS\n");
+        } else {
+            serial::puts("[IMAGEVIEWER-RUNTIME-SMOKE] reopen draw requested result=FAIL\n");
+        }
+    } else {
+        serial::puts("[IMAGEVIEWER-RUNTIME-SMOKE] draw requested result=FAIL\n");
+    }
+
+    const bool overallPass = firstPngAvailable && secondPngAvailable && firstLaunchOk && closeOk && secondLaunchOk;
+    serial::puts("[IMAGEVIEWER-RUNTIME-SMOKE] result=");
+    serial::puts(overallPass ? "PASS" : "FAIL");
+    serial::puts("\n");
+    return;
+#endif
+
     const char* pngPath = resolve_imageviewer_runtime_smoke_path();
     const char* fallbackPath = "/system/wall/imageviewer-runtime-smoke-placeholder.png";
     const char* launchPath = fallbackPath;

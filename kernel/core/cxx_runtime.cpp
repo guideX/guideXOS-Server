@@ -200,9 +200,10 @@ char* strstr(const char* haystack, const char* needle)
 } // extern "C"
 
 // ============================================================================
-// Simple Kernel Heap Allocator (Bump Allocator)
-// This is a basic allocator that only allocates, never frees.
-// Sufficient for kernel GUI apps that have a fixed lifetime.
+// Simple Kernel Heap Allocator
+// This is a small free-list allocator backed by a fixed kernel arena.
+// It keeps bare-metal image/viewer allocations reclaimable without pulling in
+// a full general-purpose heap implementation.
 // ============================================================================
 
 namespace {
@@ -210,26 +211,117 @@ namespace {
     // A 1536x1024 RGBA image is about 6 MB, and the loader may briefly need
     // extra slack for STBI bookkeeping and app/window allocations.
     static constexpr size_t KERNEL_HEAP_SIZE = 32u * 1024u * 1024u;
-    static uint8_t g_kernelHeap[KERNEL_HEAP_SIZE];
-    static size_t g_heapOffset = 0;
-    
-    void* kernel_alloc(size_t size) {
-        // Align to 8 bytes for proper alignment
-        size_t alignedSize = (size + 7) & ~7;
-        
-        if (g_heapOffset + alignedSize > KERNEL_HEAP_SIZE) {
-            return nullptr;  // Out of memory
+    static constexpr size_t KERNEL_HEAP_ALIGNMENT = 8u;
+
+    struct KernelHeapBlock {
+        size_t size;
+        KernelHeapBlock* next;
+        KernelHeapBlock* prev;
+        uint32_t free;
+    };
+
+    static_assert(sizeof(KernelHeapBlock) % KERNEL_HEAP_ALIGNMENT == 0, "kernel heap header must stay aligned");
+
+    alignas(KERNEL_HEAP_ALIGNMENT) static uint8_t g_kernelHeap[KERNEL_HEAP_SIZE];
+    static KernelHeapBlock* g_heapHead = nullptr;
+    static bool g_heapInitialized = false;
+
+    static size_t align_size(size_t size) {
+        return (size + (KERNEL_HEAP_ALIGNMENT - 1)) & ~(KERNEL_HEAP_ALIGNMENT - 1);
+    }
+
+    static void kernel_heap_init() {
+        if (g_heapInitialized) return;
+        g_heapHead = reinterpret_cast<KernelHeapBlock*>(g_kernelHeap);
+        g_heapHead->size = KERNEL_HEAP_SIZE - sizeof(KernelHeapBlock);
+        g_heapHead->next = nullptr;
+        g_heapHead->prev = nullptr;
+        g_heapHead->free = 1;
+        g_heapInitialized = true;
+    }
+
+    static uint8_t* block_payload(KernelHeapBlock* block) {
+        return reinterpret_cast<uint8_t*>(block) + sizeof(KernelHeapBlock);
+    }
+
+    static KernelHeapBlock* payload_block(void* ptr) {
+        return reinterpret_cast<KernelHeapBlock*>(static_cast<uint8_t*>(ptr) - sizeof(KernelHeapBlock));
+    }
+
+    static bool blocks_touching(const KernelHeapBlock* left, const KernelHeapBlock* right) {
+        if (!left || !right) return false;
+        const uint8_t* leftEnd = reinterpret_cast<const uint8_t*>(left) + sizeof(KernelHeapBlock) + left->size;
+        return leftEnd == reinterpret_cast<const uint8_t*>(right);
+    }
+
+    static void merge_with_next(KernelHeapBlock* block) {
+        if (!block || !block->next || !block->next->free || !blocks_touching(block, block->next)) return;
+        KernelHeapBlock* next = block->next;
+        block->size += sizeof(KernelHeapBlock) + next->size;
+        block->next = next->next;
+        if (block->next) {
+            block->next->prev = block;
         }
-        
-        void* ptr = &g_kernelHeap[g_heapOffset];
-        g_heapOffset += alignedSize;
-        return ptr;
+    }
+
+    void* kernel_alloc(size_t size) {
+        kernel_heap_init();
+        size_t alignedSize = align_size(size ? size : 1u);
+        for (KernelHeapBlock* block = g_heapHead; block; block = block->next) {
+            if (!block->free || block->size < alignedSize) {
+                continue;
+            }
+
+            size_t remaining = block->size - alignedSize;
+            if (remaining >= sizeof(KernelHeapBlock) + KERNEL_HEAP_ALIGNMENT) {
+                KernelHeapBlock* split = reinterpret_cast<KernelHeapBlock*>(block_payload(block) + alignedSize);
+                split->size = remaining - sizeof(KernelHeapBlock);
+                split->next = block->next;
+                split->prev = block;
+                split->free = 1;
+                if (split->next) {
+                    split->next->prev = split;
+                }
+                block->next = split;
+                block->size = alignedSize;
+            }
+
+            block->free = 0;
+            return block_payload(block);
+        }
+
+        return nullptr;
+    }
+
+    void kernel_free(void* ptr) {
+        if (!ptr) return;
+        kernel_heap_init();
+
+        KernelHeapBlock* block = payload_block(ptr);
+        const uint8_t* heapBegin = g_kernelHeap;
+        const uint8_t* heapEnd = g_kernelHeap + KERNEL_HEAP_SIZE;
+        const uint8_t* blockBytes = reinterpret_cast<const uint8_t*>(block);
+        if (blockBytes < heapBegin || blockBytes >= heapEnd) {
+            return;
+        }
+
+        if (block->free) {
+            return;
+        }
+
+        block->free = 1;
+        merge_with_next(block);
+        if (block->prev && block->prev->free) {
+            block = block->prev;
+            merge_with_next(block);
+        }
     }
 }
 
 // ============================================================================
 // C++ operator new/delete
-// These use the kernel bump allocator
+// These use the fixed kernel free-list heap so large image buffers can be
+// released and reused after a preview closes or reloads.
 // ============================================================================
 
 void* operator new(size_t size) throw()
@@ -242,20 +334,24 @@ void* operator new[](size_t size) throw()
     return kernel_alloc(size);
 }
 
-void operator delete(void*) noexcept
+void operator delete(void* ptr) noexcept
 {
+    kernel_free(ptr);
 }
 
-void operator delete[](void*) noexcept
+void operator delete[](void* ptr) noexcept
 {
+    kernel_free(ptr);
 }
 
-void operator delete(void*, size_t) noexcept
+void operator delete(void* ptr, size_t) noexcept
 {
+    kernel_free(ptr);
 }
 
-void operator delete[](void*, size_t) noexcept
+void operator delete[](void* ptr, size_t) noexcept
 {
+    kernel_free(ptr);
 }
 
 extern "C" size_t gxos_kernel_heap_total_bytes()
@@ -265,12 +361,38 @@ extern "C" size_t gxos_kernel_heap_total_bytes()
 
 extern "C" size_t gxos_kernel_heap_used_bytes()
 {
-    return g_heapOffset;
+    kernel_heap_init();
+    size_t freeBytes = 0;
+    for (KernelHeapBlock* block = g_heapHead; block; block = block->next) {
+        if (block->free) {
+            freeBytes += block->size;
+        }
+    }
+    return KERNEL_HEAP_SIZE - freeBytes;
 }
 
 extern "C" size_t gxos_kernel_heap_free_bytes()
 {
-    return KERNEL_HEAP_SIZE - g_heapOffset;
+    kernel_heap_init();
+    size_t freeBytes = 0;
+    for (KernelHeapBlock* block = g_heapHead; block; block = block->next) {
+        if (block->free) {
+            freeBytes += block->size;
+        }
+    }
+    return freeBytes;
+}
+
+extern "C" size_t gxos_kernel_heap_largest_free_bytes()
+{
+    kernel_heap_init();
+    size_t largest = 0;
+    for (KernelHeapBlock* block = g_heapHead; block; block = block->next) {
+        if (block->free && block->size > largest) {
+            largest = block->size;
+        }
+    }
+    return largest;
 }
 
 // GCC emits references to __dso_handle for static object destruction

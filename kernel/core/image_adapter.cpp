@@ -21,13 +21,7 @@ static void* gxos_kernel_stbi_malloc(size_t size)
     return raw + sizeof(size_t);
 }
 
-static void gxos_kernel_stbi_free(void*)
-{
-    // The bare-metal image path keeps STBI's decoded buffer as the final
-    // persistent pixel storage, so this allocator does not recycle memory.
-    // The kernel heap is a bump allocator and the image viewer loads one image
-    // at a time, so we keep the model simple and deterministic here.
-}
+static void gxos_kernel_stbi_free(void* ptr);
 
 static void* gxos_kernel_stbi_realloc_sized(void* ptr, size_t oldSize, size_t newSize)
 {
@@ -38,6 +32,7 @@ static void* gxos_kernel_stbi_realloc_sized(void* ptr, size_t oldSize, size_t ne
     uint8_t* dst = static_cast<uint8_t*>(newPtr);
     const uint8_t* src = static_cast<const uint8_t*>(ptr);
     for (size_t i = 0; i < copyBytes; ++i) dst[i] = src[i];
+    gxos_kernel_stbi_free(ptr);
     return newPtr;
 }
 
@@ -47,6 +42,16 @@ static void* gxos_kernel_stbi_realloc(void* ptr, size_t newSize)
     uint8_t* raw = static_cast<uint8_t*>(ptr) - sizeof(size_t);
     size_t oldSize = *reinterpret_cast<size_t*>(raw);
     return gxos_kernel_stbi_realloc_sized(ptr, oldSize, newSize);
+}
+
+static void gxos_kernel_stbi_free(void* ptr)
+{
+    if (!ptr) return;
+    // STBI hands back the original pointer from gxos_kernel_stbi_malloc().
+    // Delete the array header pointer so the kernel free-list allocator can
+    // reclaim the decoded bitmap when the viewer closes or reloads.
+    uint8_t* raw = static_cast<uint8_t*>(ptr) - sizeof(size_t);
+    delete[] raw;
 }
 
 #define STBI_MALLOC(sz) gxos_kernel_stbi_malloc(sz)
@@ -69,6 +74,7 @@ static uint8_t s_kernelImageFileScratch[kKernelImageFileScratchBytes];
 
 #if defined(GXOS_BARE_METAL)
 extern "C" size_t gxos_kernel_heap_free_bytes();
+extern "C" size_t gxos_kernel_heap_largest_free_bytes();
 extern "C" size_t gxos_kernel_heap_total_bytes();
 #endif
 
@@ -134,7 +140,7 @@ static bool estimate_image_memory(uint32_t width, uint32_t height, uint64_t& dec
     return true;
 }
 
-static void log_image_rejection(const char* path, ImageLoadStatus status, uint64_t encodedBytes, uint32_t width, uint32_t height, uint64_t requiredBytes, uint64_t heapFreeBytes, uint64_t heapTotalBytes)
+static void log_image_rejection(const char* path, ImageLoadStatus status, uint64_t encodedBytes, uint32_t width, uint32_t height, uint64_t requiredBytes, uint64_t heapFreeBytes, uint64_t heapLargestFreeBytes, uint64_t heapTotalBytes)
 {
 #if defined(GXOS_BARE_METAL)
     serial::puts("[IMAGEVIEWER-RUNTIME-SMOKE] reject path=");
@@ -151,6 +157,8 @@ static void log_image_rejection(const char* path, ImageLoadStatus status, uint64
     serial::put_hex64(requiredBytes);
     serial::puts(" heapFree=0x");
     serial::put_hex64(heapFreeBytes);
+    serial::puts(" heapLargestFree=0x");
+    serial::put_hex64(heapLargestFreeBytes);
     serial::puts(" heapTotal=0x");
     serial::put_hex64(heapTotalBytes);
     serial::puts("\n");
@@ -162,6 +170,7 @@ static void log_image_rejection(const char* path, ImageLoadStatus status, uint64
     (void)height;
     (void)requiredBytes;
     (void)heapFreeBytes;
+    (void)heapLargestFreeBytes;
     (void)heapTotalBytes;
 #endif
 }
@@ -185,7 +194,7 @@ static ImageProbe probe_bytes_impl(const uint8_t* bytes, uint32_t byteCount, con
 
     if (byteCount > limits.maxBytes || byteCount > kKernelImageFileScratchBytes) {
 #if defined(GXOS_BARE_METAL)
-        log_image_rejection(path, ImageLoadStatus::TooLarge, byteCount, 0, 0, 0, gxos_kernel_heap_free_bytes(), gxos_kernel_heap_total_bytes());
+        log_image_rejection(path, ImageLoadStatus::TooLarge, byteCount, 0, 0, 0, gxos_kernel_heap_free_bytes(), gxos_kernel_heap_largest_free_bytes(), gxos_kernel_heap_total_bytes());
 #endif
         probe.status = ImageLoadStatus::TooLarge;
         return probe;
@@ -207,7 +216,7 @@ static ImageProbe probe_bytes_impl(const uint8_t* bytes, uint32_t byteCount, con
         if (!estimate_image_memory(width, height, decodedBytes, requiredBytes)) {
             requiredBytes = 0;
         }
-        log_image_rejection(path, ImageLoadStatus::TooLarge, byteCount, width, height, requiredBytes, gxos_kernel_heap_free_bytes(), gxos_kernel_heap_total_bytes());
+        log_image_rejection(path, ImageLoadStatus::TooLarge, byteCount, width, height, requiredBytes, gxos_kernel_heap_free_bytes(), gxos_kernel_heap_largest_free_bytes(), gxos_kernel_heap_total_bytes());
 #endif
         probe.status = ImageLoadStatus::TooLarge;
         return probe;
@@ -217,14 +226,15 @@ static ImageProbe probe_bytes_impl(const uint8_t* bytes, uint32_t byteCount, con
     uint64_t decodedBytes = 0;
     uint64_t requiredBytes = 0;
     if (!estimate_image_memory(width, height, decodedBytes, requiredBytes)) {
-        log_image_rejection(path, ImageLoadStatus::TooLarge, byteCount, width, height, 0, gxos_kernel_heap_free_bytes(), gxos_kernel_heap_total_bytes());
+        log_image_rejection(path, ImageLoadStatus::TooLarge, byteCount, width, height, 0, gxos_kernel_heap_free_bytes(), gxos_kernel_heap_largest_free_bytes(), gxos_kernel_heap_total_bytes());
         probe.status = ImageLoadStatus::TooLarge;
         return probe;
     }
 
     const uint64_t heapFree = gxos_kernel_heap_free_bytes();
-    if (requiredBytes > heapFree) {
-        log_image_rejection(path, ImageLoadStatus::TooLarge, byteCount, width, height, requiredBytes, heapFree, gxos_kernel_heap_total_bytes());
+    const uint64_t heapLargestFree = gxos_kernel_heap_largest_free_bytes();
+    if (requiredBytes > heapLargestFree) {
+        log_image_rejection(path, ImageLoadStatus::TooLarge, byteCount, width, height, requiredBytes, heapFree, heapLargestFree, gxos_kernel_heap_total_bytes());
         probe.status = ImageLoadStatus::TooLarge;
         return probe;
     }
@@ -270,7 +280,7 @@ static ImageBitmap load_bytes_impl(const uint8_t* bytes, uint32_t byteCount, con
         if (!estimate_image_memory(probe.width, probe.height, decodedBytes, requiredBytes)) {
             requiredBytes = 0;
         }
-        log_image_rejection(path, bitmap.status, byteCount, probe.width, probe.height, requiredBytes, gxos_kernel_heap_free_bytes(), gxos_kernel_heap_total_bytes());
+        log_image_rejection(path, bitmap.status, byteCount, probe.width, probe.height, requiredBytes, gxos_kernel_heap_free_bytes(), gxos_kernel_heap_largest_free_bytes(), gxos_kernel_heap_total_bytes());
 #endif
         return bitmap;
     }
@@ -282,7 +292,7 @@ static ImageBitmap load_bytes_impl(const uint8_t* bytes, uint32_t byteCount, con
         uint64_t decodedBytes = 0;
         uint64_t requiredBytes = 0;
         if (estimate_image_memory((uint32_t)width, (uint32_t)height, decodedBytes, requiredBytes)) {
-            log_image_rejection(path, bitmap.status, byteCount, (uint32_t)width, (uint32_t)height, requiredBytes, gxos_kernel_heap_free_bytes(), gxos_kernel_heap_total_bytes());
+            log_image_rejection(path, bitmap.status, byteCount, (uint32_t)width, (uint32_t)height, requiredBytes, gxos_kernel_heap_free_bytes(), gxos_kernel_heap_largest_free_bytes(), gxos_kernel_heap_total_bytes());
         }
 #endif
         return bitmap;
@@ -332,6 +342,25 @@ const char* ImageLoadStatusName(ImageLoadStatus status)
     return "Unknown";
 }
 
+void ImageAdapter::Release(ImageBitmap& bitmap)
+{
+#if defined(GXOS_BARE_METAL)
+    if (bitmap.status == ImageLoadStatus::Ok && bitmap.pixels) {
+        stbi_image_free(const_cast<uint32_t*>(bitmap.pixels));
+    }
+    bitmap.status = ImageLoadStatus::NotFound;
+    bitmap.pixels = nullptr;
+    bitmap.width = 0;
+    bitmap.height = 0;
+#else
+    bitmap.image.reset();
+    bitmap.status = ImageLoadStatus::NotFound;
+    bitmap.width = 0;
+    bitmap.height = 0;
+    bitmap.source.clear();
+#endif
+}
+
 ImageProbe ImageAdapter::ProbeBytes(const uint8_t* bytes, uint32_t byteCount, const ImageSafetyLimits& limits)
 {
     ImageSafetyLimits effectiveLimits = resolve_bare_metal_limits(limits);
@@ -368,7 +397,7 @@ ImageProbe ImageAdapter::ProbeFile(const char* path, const ImageSafetyLimits& li
     serial::puts("\n");
 #endif
     if (info.size > effectiveLimits.maxBytes) {
-        log_image_rejection(path, ImageLoadStatus::TooLarge, info.size, 0, 0, 0, gxos_kernel_heap_free_bytes(), gxos_kernel_heap_total_bytes());
+        log_image_rejection(path, ImageLoadStatus::TooLarge, info.size, 0, 0, 0, gxos_kernel_heap_free_bytes(), gxos_kernel_heap_largest_free_bytes(), gxos_kernel_heap_total_bytes());
         probe.status = ImageLoadStatus::TooLarge;
         return probe;
     }
@@ -419,7 +448,7 @@ ImageBitmap ImageAdapter::LoadFromFile(const char* path, const ImageSafetyLimits
         return bitmap;
     }
     if (info.size > effectiveLimits.maxBytes || info.size > kKernelImageFileScratchBytes) {
-        log_image_rejection(path, ImageLoadStatus::TooLarge, info.size, 0, 0, 0, gxos_kernel_heap_free_bytes(), gxos_kernel_heap_total_bytes());
+        log_image_rejection(path, ImageLoadStatus::TooLarge, info.size, 0, 0, 0, gxos_kernel_heap_free_bytes(), gxos_kernel_heap_largest_free_bytes(), gxos_kernel_heap_total_bytes());
         bitmap.status = ImageLoadStatus::TooLarge;
         return bitmap;
     }

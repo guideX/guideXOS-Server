@@ -5218,6 +5218,7 @@ ImageViewerApp::ImageViewerApp()
 }
 
 ImageViewerApp::~ImageViewerApp() {
+    shutdown();
 }
 
 bool ImageViewerApp::init() {
@@ -5246,10 +5247,15 @@ bool ImageViewerApp::initWithParam(const char* imagePath) {
 }
 
 void ImageViewerApp::shutdown() {
+    gxos::gui::ImageAdapter::Release(m_image);
+    m_hasImage = false;
+    m_imagePath[0] = '\0';
+    m_status[0] = '\0';
     m_state = app::AppState::Terminated;
 }
 
 void ImageViewerApp::loadImage(const char* path) {
+    gxos::gui::ImageAdapter::Release(m_image);
     m_hasImage = false;
     m_image.status = gxos::gui::ImageLoadStatus::NotFound;
     m_image.pixels = nullptr;

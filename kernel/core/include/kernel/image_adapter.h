@@ -71,6 +71,7 @@ public:
     static ImageProbe ProbeBytes(const uint8_t* bytes, uint32_t byteCount, const ImageSafetyLimits& limits = DefaultImageSafetyLimits());
     static ImageBitmap LoadFromBytes(const uint8_t* bytes, uint32_t byteCount, const ImageSafetyLimits& limits = DefaultImageSafetyLimits());
     static ImageBitmap LoadFromFile(const char* path, const ImageSafetyLimits& limits = DefaultImageSafetyLimits());
+    static void Release(ImageBitmap& bitmap);
     static bool DrawToFramebuffer(const ImageBitmap& image, uint32_t x, uint32_t y, uint32_t width, uint32_t height);
 };
 
@@ -91,6 +92,7 @@ public:
                                      const ImageSafetyLimits& limits = DefaultImageSafetyLimits());
     static ImageBitmap LoadFromBytes(const uint8_t* bytes, size_t byteCount, const std::string& sourceName = "<memory>",
                                      const ImageSafetyLimits& limits = DefaultImageSafetyLimits());
+    static void Release(ImageBitmap& bitmap);
 
     static void DrawToPixels(uint32_t* targetPixels, int targetWidth, int targetHeight, int targetPitchBytes,
                              const ImageBitmap& image, int x, int y);
