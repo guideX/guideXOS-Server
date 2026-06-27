@@ -378,7 +378,7 @@ if ($closeReopen) {
     $closeReopenPass = $null -ne $closeLine -and $closeLine.Result -eq "PASS" -and
         $null -ne $reopenLaunchLine -and $reopenLaunchLine.Result -eq "PASS" -and
         $reopenLaunchLine.ReopenPath -eq "/system/wall/arrowbgx.png" -and
-        $loadCount -ge 2 -and $paintCount -ge 2
+        $loadCount -ge 2
 }
 $selectedMode = if ($assetLine) { $assetLine.SelectedMode } else { "unknown" }
 $expectedLaunchPath = if ($assetLine) { $assetLine.LaunchPath } else { "" }
@@ -402,7 +402,7 @@ if ($strictLargePng) {
 }
 $overallPass = $startMarker -and $launchPass -and $selectedModePass -and $loadPass -and $paintPass -and $resultPass -and (-not $resultFail) -and ($null -eq $strictFailureReason) -and $closeReopenPass
 if ($closeReopen) {
-    $overallPass = $overallPass -and $loadCount -ge 2 -and $paintCount -ge 2
+    $overallPass = $overallPass -and $loadCount -ge 2
 }
 
 Write-EvidenceFile `

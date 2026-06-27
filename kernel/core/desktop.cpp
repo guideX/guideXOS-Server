@@ -3163,13 +3163,13 @@ static const char* resolve_imageviewer_runtime_smoke_path()
 #endif
 }
 
+extern "C" size_t gxos_kernel_heap_total_bytes();
+extern "C" size_t gxos_kernel_heap_free_bytes();
+extern "C" size_t gxos_kernel_heap_largest_free_bytes();
+
 void run_imageviewer_runtime_smoke()
 {
 #if defined(GXOS_IMAGEVIEWER_RUNTIME_SMOKE_CLOSE_REOPEN_ACTIVE)
-    extern "C" size_t gxos_kernel_heap_total_bytes();
-    extern "C" size_t gxos_kernel_heap_free_bytes();
-    extern "C" size_t gxos_kernel_heap_largest_free_bytes();
-
     auto same_string = [](const char* a, const char* b) -> bool {
         if (!a || !b) return false;
         while (*a && *b) {
@@ -3282,7 +3282,7 @@ void run_imageviewer_runtime_smoke()
     serial::puts(overallPass ? "PASS" : "FAIL");
     serial::puts("\n");
     return;
-#endif
+#else
 
     const char* pngPath = resolve_imageviewer_runtime_smoke_path();
     const char* fallbackPath = "/system/wall/imageviewer-runtime-smoke-placeholder.png";
@@ -3323,6 +3323,7 @@ void run_imageviewer_runtime_smoke()
     serial::puts("[IMAGEVIEWER-RUNTIME-SMOKE] result=");
     serial::puts(launchOk ? "PASS" : "FAIL");
     serial::puts("\n");
+#endif
 }
 #endif
 
