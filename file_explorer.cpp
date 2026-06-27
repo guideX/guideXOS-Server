@@ -919,22 +919,39 @@ namespace gxos { namespace apps {
             refresh();
             updateDisplay();
         } else if (keyCode == 33) {
+            if (s_entries.empty()) {
+                s_selectedIndex = 0;
+                s_scrollOffset = 0;
+                updateDisplay();
+                return;
+            }
             const int pageStep = fileListVisibleRowCount();
             s_selectedIndex = std::max(0, s_selectedIndex - pageStep);
             ensureSelectedFileVisible();
             resetFileListClickTracking();
             updateDisplay();
         } else if (keyCode == 34) {
+            if (s_entries.empty()) {
+                s_selectedIndex = 0;
+                s_scrollOffset = 0;
+                updateDisplay();
+                return;
+            }
             const int maxIndex = static_cast<int>(s_entries.size()) - 1;
             const int pageStep = fileListVisibleRowCount();
             s_selectedIndex = std::min(maxIndex, s_selectedIndex + pageStep);
             ensureSelectedFileVisible();
             resetFileListClickTracking();
             updateDisplay();
-        } else if (keyCode == 35 && !s_entries.empty()) {
-            s_selectedIndex = static_cast<int>(s_entries.size()) - 1;
-            ensureSelectedFileVisible();
-            resetFileListClickTracking();
+        } else if (keyCode == 35) {
+            if (s_entries.empty()) {
+                s_selectedIndex = 0;
+                s_scrollOffset = 0;
+            } else {
+                s_selectedIndex = static_cast<int>(s_entries.size()) - 1;
+                ensureSelectedFileVisible();
+                resetFileListClickTracking();
+            }
             updateDisplay();
         } else if (keyCode == 36) {
             goHome();
