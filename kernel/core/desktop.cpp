@@ -7718,10 +7718,11 @@ void run_launch_shadow_folder_fileopen_smoke()
     show_icon_notification(0);
     s_notification = savedNotification;
 
-    serial::puts("[APPMODEL-LAUNCHSHADOW-SMOKE] real-branch system-object File Explorer helper before temporary desktop state mutation\n");
+    serial::puts("[APPMODEL-LAUNCHSHADOW-SMOKE] real-branch system-object File Manager helper before temporary desktop state mutation\n");
     serial::puts("[LaunchShadowRealBranchSystemObjectFileManagerMutation] phase=before temporaryDesktopStateMutation=true persistentDesktopStorageWrites=false nonFatal=true\n");
     s_visibleIconCount = 1;
-    s_visibleIconIndices[0] = fileManagerSystemObjectIconIdx >= 0 ? fileManagerSystemObjectIconIdx : 2;
+    // The bridge icon is FileExplorer, so reuse it for the FileManager smoke row.
+    s_visibleIconIndices[0] = fileManagerSystemObjectIconIdx >= 0 ? fileManagerSystemObjectIconIdx : 1;
     s_launchShadowStaticAppSourceOverride = "RealBranchDesktopSystemObjectFileManager";
     show_icon_notification(0);
     s_notification = savedNotification;
@@ -7863,7 +7864,7 @@ void run_launch_shadow_folder_fileopen_smoke()
     serial::puts(selectedIconStateRestored ? "true" : "false");
     serial::puts(" persistentDesktopStorageWrites=false");
     serial::puts(" nonFatal=true\n");
-    serial::puts("[APPMODEL-LAUNCHSHADOW-SMOKE] real-branch system-object File Explorer helper after temporary desktop state restoration\n");
+    serial::puts("[APPMODEL-LAUNCHSHADOW-SMOKE] real-branch system-object File Manager helper after temporary desktop state restoration\n");
     serial::puts("[LaunchShadowRealBranchSystemObjectFileManagerRestore] realBranchSystemObjectFileManagerDesktopStateRestored=");
     serial::puts(systemObjectFileManagerDesktopStateRestored ? "true" : "false");
     serial::puts(" realBranchSystemObjectFileManagerVisibleIconStateRestored=");
@@ -8083,7 +8084,7 @@ static void run_launch_shadow_start_menu_files_smoke()
     const char* savedStaticAppSourceOverride = s_launchShadowStaticAppSourceOverride;
     const bool savedSuppressRealBranchLaunch = s_launchShadowSuppressRealBranchLaunch;
 
-    serial::puts("[APPMODEL-LAUNCHSHADOW-SMOKE] real-branch Start Menu File Explorer helper before temporary Start Menu state mutation\n");
+    serial::puts("[APPMODEL-LAUNCHSHADOW-SMOKE] real-branch Start Menu Files helper before temporary Start Menu state mutation\n");
     serial::puts("[LaunchShadowRealBranchStartMenuFilesMutation] phase=before temporaryStartMenuStateMutation=true persistentDesktopStorageWrites=false nonFatal=true\n");
     s_startMenuOpen = true;
     s_launchShadowStaticAppSourceOverride = "RealBranchStartMenuFiles";
@@ -8102,7 +8103,7 @@ static void run_launch_shadow_start_menu_files_smoke()
     const bool stateRestored = startMenuStateRestored && notificationStateRestored &&
         sourceOverrideStateRestored && suppressLaunchStateRestored;
 
-    serial::puts("[APPMODEL-LAUNCHSHADOW-SMOKE] real-branch Start Menu File Explorer helper after temporary Start Menu state restoration\n");
+    serial::puts("[APPMODEL-LAUNCHSHADOW-SMOKE] real-branch Start Menu Files helper after temporary Start Menu state restoration\n");
     serial::puts("[LaunchShadowRealBranchStartMenuFilesRestore] realBranchStartMenuFilesStateRestored=");
     serial::puts(stateRestored ? "true" : "false");
     serial::puts(" realBranchStartMenuFilesMenuOpenStateRestored=");
@@ -9464,6 +9465,20 @@ static void show_icon_notification(int displayIndex)
                 }
 #endif
                 if (try_launch_kernel_app("Files")) return;
+                break;
+            case DesktopSystemObjectKind::FileExplorer:
+#if defined(GXOS_APPMODEL_TYPED_DISPATCH_SHADOW_ONLY) && defined(GXOS_BARE_METAL)
+                // FileExplorer is the bridge icon used by the launch-shadow smoke
+                // for both the root-folder FileOpen row and the Files alias row.
+                if (bare_metal_should_suppress_real_branch_launch()) {
+                    if (s_launchShadowStaticAppSourceOverride && s_launchShadowStaticAppSourceOverride[0]) {
+                        log_bare_metal_static_app_shadow_only_observation("Files", bare_metal_active_static_app_shadow_source("DesktopSystemObjectFileManager"));
+                    } else {
+                        log_bare_metal_fileopen_shadow_only_observation(bare_metal_active_fileopen_shadow_source("DesktopSystemObjectRootFolder"), "Files", "/");
+                    }
+                    return;
+                }
+#endif
                 break;
             case DesktopSystemObjectKind::SystemSettings:
 #if defined(GXOS_APPMODEL_TYPED_DISPATCH_SHADOW_ONLY) && defined(GXOS_BARE_METAL)

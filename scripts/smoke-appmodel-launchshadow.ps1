@@ -443,13 +443,13 @@ $checks = @(
     "command: desktop.smoke.launchshadow",
     "mode: diagnostic-only",
     "launchesApps: false",
-    "case=ImageViewerStaticAlias",
+    "case=ImageViewerLegacyAlias",
     "inputLabel=`"ImgViewer`"",
-    "comparison=expected-unsupported",
+    "comparison=match",
     "case=UnknownProbe",
     "inputLabel=`"FakeLaunchShadowApp`"",
     "comparison=unexpected-mismatch",
-    "summary: observations=8 matches=5 acceptedMismatches=1 expectedUnsupported=1 unexpectedMismatches=1 typedDispatch=5 legacyFallback=1 blockedUnknownFallback=2 specialCaseFallback=0 nonFatal=true",
+    "summary: observations=10 matches=7 acceptedMismatches=0 expectedUnsupported=2 unexpectedMismatches=1 typedDispatch=6 legacyFallback=1 blockedUnknownFallback=3 specialCaseFallback=0 nonFatal=true",
     "runtimeLaunchBehaviorChanged: false",
     "[APPMODEL-LAUNCHSHADOW-SMOKE] issuing folder FileOpen SHADOW_ONLY probe",
     "source=SmokeFolderFileOpen",
@@ -890,9 +890,9 @@ $legacyFallbackUsageConfirmed = $output.Contains("dispatchUsage=legacy-fallback"
 $blockedUnknownFallbackUsageConfirmed = $output.Contains("dispatchUsage=blocked-unknown-fallback")
 $specialCaseFallbackUsageConfirmed = $output.Contains("dispatchUsage=special-case-fallback")
 $imgViewerExpectedUnsupportedConfirmed =
-    $output.Contains("case=ImageViewerStaticAlias") -and
+    $output.Contains("case=ImageViewerLegacyAlias") -and
     $output.Contains("inputLabel=`"ImgViewer`"") -and
-    $output.Contains("comparison=expected-unsupported")
+    $output.Contains("comparison=match")
 $fakeOnlyUnexpectedMismatchConfirmed =
     $unexpectedRows.Count -eq 1 -and
     $unexpectedRows[0].Value.Contains("case=UnknownProbe") -and
