@@ -34,6 +34,7 @@ namespace gxos { namespace gui {
         bool showDesktopFileManager{true};
         bool showDesktopSystemSettings{false};
         bool smallLiveDesktopFolderIcons{true};
+        bool autoArrangeDesktopIcons{false};
     };
     class DesktopConfig {
     public:
@@ -72,6 +73,7 @@ namespace gxos { namespace gui {
             if(extractSection(txt, "showDesktopFileManager", section)){ size_t i=0; skipWS(section,i); parseJSONBool(section, i, out.showDesktopFileManager); }
             if(extractSection(txt, "showDesktopSystemSettings", section)){ size_t i=0; skipWS(section,i); parseJSONBool(section, i, out.showDesktopSystemSettings); }
             if(extractSection(txt, "smallLiveDesktopFolderIcons", section)){ size_t i=0; skipWS(section,i); parseJSONBool(section, i, out.smallLiveDesktopFolderIcons); }
+            if(extractSection(txt, "autoArrangeDesktopIcons", section)){ size_t i=0; skipWS(section,i); parseJSONBool(section, i, out.autoArrangeDesktopIcons); }
             {
                 DesktopThemeId themeId = DesktopThemeId::Classic;
                 TryParseDesktopThemeId(out.desktopThemeId.c_str(), &themeId);
@@ -106,6 +108,7 @@ namespace gxos { namespace gui {
             f << "  \"showDesktopFileManager\": " << (data.showDesktopFileManager ? "true" : "false") << ",\n";
             f << "  \"showDesktopSystemSettings\": " << (data.showDesktopSystemSettings ? "true" : "false") << ",\n";
             f << "  \"smallLiveDesktopFolderIcons\": " << (data.smallLiveDesktopFolderIcons ? "true" : "false") << ",\n";
+            f << "  \"autoArrangeDesktopIcons\": " << (data.autoArrangeDesktopIcons ? "true" : "false") << ",\n";
             f << "  \"windows\": [\n";
             for(size_t i=0;i<data.windows.size();++i){ const auto& w=data.windows[i]; f << "    {";
             f << "\"id\": " << w.id << ", "; f << "\"title\": " << jsonEscape(w.title) << ", "; f << "\"x\": "<<w.x<<", \"y\": "<<w.y<<", \"w\": "<<w.w<<", \"h\": "<<w.h<<", ";

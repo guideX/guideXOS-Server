@@ -119,7 +119,7 @@ static void fill_shell_label(gxos::apps::LaunchTarget& target, const char* label
     } else if (text_equals(label, "This System")) {
         target.dispatchLaunchName = "Files";
         target.pathParameter = "/";
-        target.diagnosticReason = "Desktop system object opens File Manager at the root path";
+        target.diagnosticReason = "Desktop system object opens File Explorer at the root path";
     } else if (text_equals(label, "Control Panel") || text_equals(label, "Settings") || text_equals(label, "System Settings")) {
         // The bare-metal right-column Start Menu still dispatches "Settings"
         // literally, while "Control Panel" opens embedded panel state. Keep
@@ -189,7 +189,7 @@ gxos::apps::LaunchTarget resolveLaunchTarget(const char* label)
             if (info.type == vfs::FILE_TYPE_DIRECTORY) {
                 target.dispatchLaunchName = "Files";
                 target.diagnosticStatus = "resolved-file-open";
-                target.diagnosticReason = "Folder path resolves to existing File Manager parameter launch";
+                target.diagnosticReason = "Folder path resolves to existing File Explorer parameter launch";
             } else if (is_text_file_path(label)) {
                 target.dispatchLaunchName = "Notepad";
                 target.diagnosticStatus = "resolved-file-open";
@@ -538,14 +538,14 @@ static LaunchStoragePreviewCounters collect_bare_metal_preview_counts()
     const char* startMenuApps[] = {
         "Calculator", "Notepad", "Console", "Trash", "TaskManager", "DiskManager",
         "DisplayOptions", "guideXOS Navigator", "HDInstaller", "AppModel", "Paint",
-        "Clock", "Files", "ImgViewer"
+        "Clock", "File Explorer", "ImgViewer"
     };
     for (unsigned int i = 0; i < sizeof(startMenuApps) / sizeof(startMenuApps[0]); ++i) {
         count_preview_value(counters, startMenuApps[i], "medium");
     }
 
     const char* allPrograms[] = {
-        "Calculator", "Clock", "Console", "ControlPanel", "DiskManager", "Files",
+        "Calculator", "Clock", "Console", "ControlPanel", "DiskManager", "File Explorer",
         "guideXOS Navigator", "HDInstaller", "ImgViewer", "AppModel", "Notepad",
         "Paint", "TaskManager", "Trash"
     };
@@ -777,7 +777,7 @@ void printLaunchTargetShadowSmokeDiagnostic(LaunchTargetDiagnosticWriter write)
     static const LaunchTargetShadowSmokeCase kSmokeCases[] = {
         { "StartMenuNotepad", "StartMenu", "Notepad", "Notepad" },
         { "BuiltInAppIdNotepad", "ResolverAppId", "gxos.builtin.notepad", "Notepad" },
-        { "StartMenuFilesAlias", "StartMenu", "Files", "Files" },
+        { "StartMenuFileExplorerAlias", "StartMenu", "File Explorer", "Files" },
         { "FileExplorerCanonical", "DesktopFileManager", "FileExplorer", "Files" },
         { "NavigatorKernelApp", "StartMenu", "guideXOS Navigator", "guideXOS Navigator" },
         { "ImageViewerCanonical", "StartMenu", "ImageViewer", "ImageViewer" },
@@ -896,7 +896,7 @@ static const char* const kLaunchTargetComparisonLabels[] = {
     "Trash",
     "gxos.builtin.notepad",
     "FileExplorer",
-    "Files",
+    "File Explorer",
     "guideXOS Navigator",
     "ComputerFiles",
     "AppModel",

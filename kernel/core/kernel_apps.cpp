@@ -2413,9 +2413,8 @@ void DisplayOptionsApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
         }
     } else {
         drawCheckbox(x + kDesktopIconCheckboxX, y + kDesktopIconCheckboxY, "Trash", m_desktopIconVisibility.showTrash);
-        drawCheckbox(x + kDesktopIconCheckboxX, y + kDesktopIconCheckboxY + kDesktopIconCheckboxRowH, "This System", m_desktopIconVisibility.showThisSystem);
-        drawCheckbox(x + kDesktopIconCheckboxX, y + kDesktopIconCheckboxY + kDesktopIconCheckboxRowH * 2, "File Manager", m_desktopIconVisibility.showFileManager);
-        drawCheckbox(x + kDesktopIconCheckboxX, y + kDesktopIconCheckboxY + kDesktopIconCheckboxRowH * 3, "System Settings", m_desktopIconVisibility.showSystemSettings);
+        drawCheckbox(x + kDesktopIconCheckboxX, y + kDesktopIconCheckboxY + kDesktopIconCheckboxRowH, "File Explorer", m_desktopIconVisibility.showThisSystem || m_desktopIconVisibility.showFileManager);
+        drawCheckbox(x + kDesktopIconCheckboxX, y + kDesktopIconCheckboxY + kDesktopIconCheckboxRowH * 2, "System Settings", m_desktopIconVisibility.showSystemSettings);
         appDrawText(x + kDesktopIconCheckboxX, y + 292, "Changes are saved immediately.", rgb(190, 195, 205));
     }
 }
@@ -2453,7 +2452,7 @@ int DisplayOptionsApp::hitGradient(int mx, int my) const {
 }
 
 int DisplayOptionsApp::hitDesktopIconCheckbox(int mx, int my) const {
-    for (int i = 0; i < 4; ++i) {
+    for (int i = 0; i < 3; ++i) {
         int y = kDesktopIconCheckboxY + i * kDesktopIconCheckboxRowH;
         if (mx >= kDesktopIconCheckboxX - 8 && mx < kDesktopIconCheckboxX + 280 && my >= y - 8 && my < y + 26) return i;
     }
@@ -2470,9 +2469,13 @@ void DisplayOptionsApp::drawCheckbox(uint32_t x, uint32_t y, const char* label, 
 void DisplayOptionsApp::toggleDesktopIconCheckbox(int index) {
     switch (index) {
         case 0: m_desktopIconVisibility.showTrash = !m_desktopIconVisibility.showTrash; break;
-        case 1: m_desktopIconVisibility.showThisSystem = !m_desktopIconVisibility.showThisSystem; break;
-        case 2: m_desktopIconVisibility.showFileManager = !m_desktopIconVisibility.showFileManager; break;
-        case 3: m_desktopIconVisibility.showSystemSettings = !m_desktopIconVisibility.showSystemSettings; break;
+        case 1: {
+            const bool enabled = !(m_desktopIconVisibility.showThisSystem || m_desktopIconVisibility.showFileManager);
+            m_desktopIconVisibility.showThisSystem = enabled;
+            m_desktopIconVisibility.showFileManager = enabled;
+            break;
+        }
+        case 2: m_desktopIconVisibility.showSystemSettings = !m_desktopIconVisibility.showSystemSettings; break;
         default: return;
     }
     serial::puts("[display-options] Desktop Icons checkbox changed\n");

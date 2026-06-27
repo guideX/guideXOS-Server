@@ -1016,6 +1016,20 @@ namespace gxos {
             positions.push_back(pos);
         }
 
+        static void arrangeDesktopIconsInGrid(std::vector<DesktopItem>& items) {
+            for (auto& item : items) {
+                item.ix = -1;
+                item.iy = -1;
+            }
+            for (auto& item : items) {
+                int x = 20;
+                int y = 20;
+                findNextAvailableDesktopIconPosition(items, desktopLayoutKey(item), x, y);
+                item.ix = x;
+                item.iy = y;
+            }
+        }
+
         static const RegisteredDesktopApp* findDesktopAppByNameOrId(const std::string& value) {
             for (const auto& app : DesktopService::GetRegisteredApps()) {
                 if (app.id == value || app.displayName == value || app.launchName == value || namesEquivalent(app.displayName, value)) return &app;
@@ -1202,7 +1216,7 @@ namespace gxos {
             if (label == "Trash") return hostedTrashIconLogicalName();
             const std::string builtInIcon = hostedBuiltInIconKeyForLabel(label);
             if (!builtInIcon.empty()) return builtInIcon;
-            if (label == "Files" || label == "File Manager") return "app.files";
+            if (label == "Files" || label == "File Explorer" || label == "FileManager" || label == "File Manager") return "app.files";
             if (label == "Computer" || label == "This System" || label == "Computer Files" || label == "ComputerFiles") return "place.computer";
             if (label == "Documents" || label == "Recent Docs") return "place.documents";
             if (label == "Pictures") return "place.pictures";
@@ -1229,7 +1243,7 @@ namespace gxos {
             if (label == "TaskManager" || label == "Task Manager") return RGB(180, 70, 70);
             if (label == "DiskManager" || label == "ControlPanel" || label == "Control Panel" || label == "Settings") return RGB(140, 90, 180);
             if (isAppModelDemoAppLabel(label)) return RGB(85, 135, 210);
-            if (label == "Files" || label == "FileExplorer" || label == "Computer" || label == "Computer Files" || label == "ComputerFiles" || label == "Documents" || label == "Recent Docs") return RGB(200, 180, 60);
+            if (label == "Files" || label == "File Explorer" || label == "FileExplorer" || label == "Computer" || label == "Computer Files" || label == "ComputerFiles" || label == "Documents" || label == "Recent Docs") return RGB(200, 180, 60);
             if (label == "Network") return RGB(80, 150, 180);
             return RGB(90, 100, 120);
         }
@@ -1391,15 +1405,15 @@ namespace gxos {
                 g_items.push_back(makeSystemDesktopItem(DesktopSystemObjectKind::DesktopBack, "Back", "desktop-nav:back", ""));
                 g_items.push_back(makeSystemDesktopItem(DesktopSystemObjectKind::DesktopHome, "Go to Desktop", "desktop-nav:home", ""));
             }
+            const bool showFileExplorer = g_cfg.showDesktopThisSystem || g_cfg.showDesktopFileManager;
             appendSystemDesktopItemIfEnabled(g_items, g_cfg.showDesktopTrash, DesktopSystemObjectKind::Trash, "Trash", "system:Trash", hostedTrashIconLogicalName().c_str());
-            appendSystemDesktopItemIfEnabled(g_items, g_cfg.showDesktopThisSystem, DesktopSystemObjectKind::ThisSystem, "This System", "system:ThisSystem", "place.computer");
-            appendSystemDesktopItemIfEnabled(g_items, g_cfg.showDesktopFileManager, DesktopSystemObjectKind::FileManager, "File Manager", "system:FileManager", "app.files");
+            appendSystemDesktopItemIfEnabled(g_items, showFileExplorer, DesktopSystemObjectKind::FileExplorer, "File Explorer", "system:FileExplorer", "app.files");
             appendSystemDesktopItemIfEnabled(g_items, g_cfg.showDesktopSystemSettings, DesktopSystemObjectKind::SystemSettings, "System Settings", "system:SystemSettings", "app.settings");
             std::vector<DesktopFolderEntry> desktopEntries = DesktopFolderResolver::Enumerate(g_hostedDesktopDirectoryPath);
 #else
+            const bool showFileExplorer = g_cfg.showDesktopThisSystem || g_cfg.showDesktopFileManager;
             appendSystemDesktopItemIfEnabled(g_items, g_cfg.showDesktopTrash, DesktopSystemObjectKind::Trash, "Trash", "system:Trash", hostedTrashIconLogicalName().c_str());
-            appendSystemDesktopItemIfEnabled(g_items, g_cfg.showDesktopThisSystem, DesktopSystemObjectKind::ThisSystem, "This System", "system:ThisSystem", "place.computer");
-            appendSystemDesktopItemIfEnabled(g_items, g_cfg.showDesktopFileManager, DesktopSystemObjectKind::FileManager, "File Manager", "system:FileManager", "app.files");
+            appendSystemDesktopItemIfEnabled(g_items, showFileExplorer, DesktopSystemObjectKind::FileExplorer, "File Explorer", "system:FileExplorer", "app.files");
             appendSystemDesktopItemIfEnabled(g_items, g_cfg.showDesktopSystemSettings, DesktopSystemObjectKind::SystemSettings, "System Settings", "system:SystemSettings", "app.settings");
 
             std::vector<DesktopFolderEntry> desktopEntries = DesktopFolderResolver::Enumerate();
@@ -1442,6 +1456,9 @@ namespace gxos {
                     }
                 }
             }
+            if (g_cfg.autoArrangeDesktopIcons) {
+                arrangeDesktopIconsInGrid(g_items);
+            }
             // Assign collision-aware grid positions to any items that don't have saved positions.
             for (auto& item : g_items) {
                 if (item.ix >= 0 && item.iy >= 0) continue;
@@ -1453,7 +1470,7 @@ namespace gxos {
                 Logger::write(LogLevel::Info, "Desktop icon auto-positioned: " + desktopLayoutKey(item) +
                     " x=" + std::to_string(item.ix) + " y=" + std::to_string(item.iy));
             }
-            if (migratedIconPositions) {
+            if (!g_cfg.autoArrangeDesktopIcons && migratedIconPositions) {
                 g_cfg.iconPositions.clear();
                 for (const auto& di : g_items) {
                     DesktopIconPos ip;
@@ -2109,6 +2126,7 @@ namespace gxos {
                         apps::FileExplorer::Launch("/");
                         return;
                     case DesktopSystemObjectKind::FileManager:
+                    case DesktopSystemObjectKind::FileExplorer:
                         apps::FileExplorer::Launch();
                         return;
                     case DesktopSystemObjectKind::SystemSettings:
@@ -2224,6 +2242,58 @@ namespace gxos {
 #else
             (void)smallIcons;
             return false;
+#endif
+        }
+
+        bool Compositor::hostedDesktopAutoArrangeIcons() {
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
+            return g_cfg.autoArrangeDesktopIcons;
+#else
+            return false;
+#endif
+        }
+
+        bool Compositor::setHostedDesktopAutoArrangeIcons(bool enabled) {
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
+            if (g_cfg.autoArrangeDesktopIcons == enabled) {
+                Logger::write(LogLevel::Info,
+                    std::string("Hosted desktop auto-arrange preference unchanged: ") + (enabled ? "enabled" : "disabled"));
+                return false;
+            }
+            g_cfg.autoArrangeDesktopIcons = enabled;
+            g_cfg.taskbarPosition = taskbarPositionName(g_taskbarPosition);
+            std::string err;
+            const bool saved = DesktopConfig::Save("desktop.json", g_cfg, err);
+            if (!saved) {
+                Logger::write(LogLevel::Error, "Hosted desktop auto-arrange preference save failed: " + err);
+            } else {
+                Logger::write(LogLevel::Info, "Hosted desktop auto-arrange preference persisted");
+            }
+            refreshDesktopItems();
+            invalidate(0);
+            Logger::write(LogLevel::Info,
+                std::string("Hosted desktop auto-arrange preference set: ") + (enabled ? "enabled" : "disabled"));
+            return saved;
+#else
+            (void)enabled;
+            return false;
+#endif
+        }
+
+        void Compositor::arrangeHostedDesktopIcons() {
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
+            arrangeDesktopIconsInGrid(g_items);
+            g_cfg.iconPositions.clear();
+            for (const auto& item : g_items) {
+                DesktopIconPos pos;
+                pos.name = desktopLayoutKey(item);
+                pos.x = item.ix;
+                pos.y = item.iy;
+                g_cfg.iconPositions.push_back(pos);
+            }
+            saveDesktopConfig();
+            invalidate(0);
+            Logger::write(LogLevel::Info, "Hosted desktop icons arranged into grid");
 #endif
         }
 
@@ -3818,10 +3888,10 @@ namespace gxos {
                     g_backgroundScaleMode = WallpaperRegistry::NormalizeScaleModeOrDefault(g_cfg.backgroundScaleMode.empty() ? "fill" : g_cfg.backgroundScaleMode);
                     g_cfg.backgroundScaleMode = g_backgroundScaleMode;
                     Logger::write(LogLevel::Info, std::string("Desktop config reloaded for system icon visibility: Trash=") + (g_cfg.showDesktopTrash ? "true" : "false") +
-                        " ThisSystem=" + (g_cfg.showDesktopThisSystem ? "true" : "false") +
-                        " FileManager=" + (g_cfg.showDesktopFileManager ? "true" : "false") +
+                        " FileExplorer=" + ((g_cfg.showDesktopThisSystem || g_cfg.showDesktopFileManager) ? "true" : "false") +
                         " SystemSettings=" + (g_cfg.showDesktopSystemSettings ? "true" : "false") +
-                        " FolderIconsSmall=" + (g_cfg.smallLiveDesktopFolderIcons ? "true" : "false"));
+                        " FolderIconsSmall=" + (g_cfg.smallLiveDesktopFolderIcons ? "true" : "false") +
+                        " AutoArrange=" + (g_cfg.autoArrangeDesktopIcons ? "true" : "false"));
                     refreshDesktopItems();
                     invalidate(0);
                 } else {

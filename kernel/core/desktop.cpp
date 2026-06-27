@@ -338,7 +338,9 @@ static bool desktop_str_eq(const char* a, const char* b)
 #if defined(GXOS_APPMODEL_TYPED_DISPATCH_SHADOW_ONLY) && defined(GXOS_BARE_METAL)
 static bool bare_metal_shadow_file_explorer_alias_pair(const char* a, const char* b)
 {
-    return (desktop_str_eq(a, "Files") && desktop_str_eq(b, "FileExplorer")) ||
+    return (desktop_str_eq(a, "Files") && desktop_str_eq(b, "File Explorer")) ||
+           (desktop_str_eq(a, "File Explorer") && desktop_str_eq(b, "Files")) ||
+           (desktop_str_eq(a, "Files") && desktop_str_eq(b, "FileExplorer")) ||
            (desktop_str_eq(a, "FileExplorer") && desktop_str_eq(b, "Files"));
 }
 
@@ -875,6 +877,7 @@ enum class DesktopSystemObjectKind : uint8_t {
     Trash,
     ThisSystem,
     FileManager,
+    FileExplorer,
     SystemSettings,
     DesktopBack,
     DesktopHome
@@ -900,12 +903,14 @@ static char s_bareMetalDesktopCurrentPath[vfs::VFS_MAX_PATH] = "/Desktop";
 static char s_bareMetalDesktopHistoryPaths[4][vfs::VFS_MAX_PATH];
 static int s_bareMetalDesktopHistoryCount = 0;
 static bool s_bareMetalDesktopDirectoryStateInitialized = false;
+static bool s_desktopAutoArrangeEnabled = false; // TODO: persist with shell settings if/when desktop shell state gets its own store.
+static bool bare_metal_ensure_desktop_backing_directory(char* outPath, int outPathSize);
 
 static void initialize_bare_metal_desktop_directory_state()
 {
     if (s_bareMetalDesktopDirectoryStateInitialized) return;
 
-    desktop_str_copy(s_bareMetalDesktopHomePath, kDesktopFolderPath, (int)sizeof(s_bareMetalDesktopHomePath));
+    bare_metal_ensure_desktop_backing_directory(s_bareMetalDesktopHomePath, (int)sizeof(s_bareMetalDesktopHomePath));
     desktop_str_copy(s_bareMetalDesktopCurrentPath, s_bareMetalDesktopHomePath, (int)sizeof(s_bareMetalDesktopCurrentPath));
     for (int i = 0; i < 4; ++i) {
         s_bareMetalDesktopHistoryPaths[i][0] = '\0';
@@ -936,6 +941,80 @@ static bool bare_metal_desktop_is_home_directory()
 {
     initialize_bare_metal_desktop_directory_state();
     return desktop_str_eq(s_bareMetalDesktopCurrentPath, s_bareMetalDesktopHomePath);
+}
+
+static const char* kBareMetalDesktopFallbackPath = "/downloads/Desktop";
+
+static bool bare_metal_desktop_directory_exists(const char* path)
+{
+    if (!path || !path[0]) return false;
+    vfs::FileInfo info{};
+    return vfs::stat(path, &info) == vfs::VFS_OK && info.type == vfs::FILE_TYPE_DIRECTORY;
+}
+
+static bool bare_metal_desktop_directory_is_writable(const char* path)
+{
+    if (!bare_metal_desktop_directory_exists(path)) return false;
+
+    char probePath[vfs::VFS_MAX_PATH];
+    vfs::join_path(path, ".gxos_desktop_probe", probePath, sizeof(probePath));
+    vfs::Status probeStatus = vfs::mkdir(probePath);
+    if (probeStatus == vfs::VFS_OK) {
+        vfs::rmdir(probePath);
+        return true;
+    }
+    if (probeStatus == vfs::VFS_ERR_EXISTS) {
+        if (vfs::rmdir(probePath) == vfs::VFS_OK && vfs::mkdir(probePath) == vfs::VFS_OK) {
+            vfs::rmdir(probePath);
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool bare_metal_prepare_desktop_directory(const char* path)
+{
+    if (!path || !path[0]) return false;
+    vfs::FileInfo info{};
+    vfs::Status statStatus = vfs::stat(path, &info);
+    if (statStatus != vfs::VFS_OK) {
+        vfs::Status mkdirStatus = vfs::mkdir(path);
+        if (mkdirStatus != vfs::VFS_OK && mkdirStatus != vfs::VFS_ERR_EXISTS) return false;
+    } else if (info.type != vfs::FILE_TYPE_DIRECTORY) {
+        return false;
+    }
+    return bare_metal_desktop_directory_is_writable(path);
+}
+
+static bool bare_metal_ensure_desktop_backing_directory(char* outPath, int outPathSize)
+{
+    if (!outPath || outPathSize <= 0) return false;
+
+    if (bare_metal_prepare_desktop_directory(kDesktopFolderPath)) {
+        desktop_str_copy(outPath, kDesktopFolderPath, outPathSize);
+        return true;
+    }
+
+    if (vfs::mkdir("/downloads") != vfs::VFS_OK && !bare_metal_desktop_directory_exists("/downloads")) {
+        // Continue even if /downloads already exists as a non-directory; the fallback
+        // desktop path simply may not be available in this boot configuration.
+    }
+    if (!bare_metal_prepare_desktop_directory(kBareMetalDesktopFallbackPath)) {
+        desktop_str_copy(outPath, kDesktopFolderPath, outPathSize);
+        return false;
+    }
+
+    const vfs::MountPoint* desktopMount = vfs::get_mount(kDesktopFolderPath);
+    if (desktopMount && desktopMount->active && desktopMount->alias && desktopMount->path[0] == '/' && desktopMount->path[1] == 'D') {
+        vfs::unmount(kDesktopFolderPath);
+    }
+    if (vfs::mount_alias(kDesktopFolderPath, kBareMetalDesktopFallbackPath) == 0xFF) {
+        desktop_str_copy(outPath, kBareMetalDesktopFallbackPath, outPathSize);
+        return true;
+    }
+
+    desktop_str_copy(outPath, kDesktopFolderPath, outPathSize);
+    return true;
 }
 
 #if defined(GXOS_BARE_METAL)
@@ -1060,8 +1139,8 @@ static char s_desktopShortcutTargetAppIds[kMaxDesktopAppShortcuts][vfs::VFS_MAX_
 // Desktop icons: system objects plus fixed VFS-backed slots for /Desktop entries.
 static DesktopIcon s_desktopIcons[] = {
     {"Trash",           0xFF9098A4, true, false, -1, -1, DesktopItemKind::SystemObject, DesktopSystemObjectKind::Trash, "", false, false},
-    {"This System",     0xFFC8B43C, true, false, -1, -1, DesktopItemKind::SystemObject, DesktopSystemObjectKind::ThisSystem, "", false, false},
-    {"File Manager",    0xFFC8B43C, true, false, -1, -1, DesktopItemKind::SystemObject, DesktopSystemObjectKind::FileManager, "", false, false},
+    {"File Explorer",    0xFFC8B43C, true, false, -1, -1, DesktopItemKind::SystemObject, DesktopSystemObjectKind::FileExplorer, "", false, false},
+    {"",                0xFF000000, false, false, -1, -1, DesktopItemKind::SystemObject, DesktopSystemObjectKind::None, "", false, false},
     {"System Settings", 0xFF606878, true, false, -1, -1, DesktopItemKind::SystemObject, DesktopSystemObjectKind::SystemSettings, "", false, false},
     {"", 0xFF9098A4, false, false, -1, -1, DesktopItemKind::FilesystemEntry, DesktopSystemObjectKind::None, "", false, true},
     {"", 0xFF9098A4, false, false, -1, -1, DesktopItemKind::FilesystemEntry, DesktopSystemObjectKind::None, "", false, true},
@@ -1167,6 +1246,9 @@ static void desktop_icon_layout_key(int iconIdx, char* out, int outSize)
             case DesktopSystemObjectKind::FileManager:
                 desktop_append_text(out, &pos, outSize, "system:FileManager");
                 return;
+            case DesktopSystemObjectKind::FileExplorer:
+                desktop_append_text(out, &pos, outSize, "system:FileExplorer");
+                return;
             case DesktopSystemObjectKind::SystemSettings:
                 desktop_append_text(out, &pos, outSize, "system:SystemSettings");
                 return;
@@ -1201,7 +1283,13 @@ static bool desktop_layout_key_matches(int iconIdx, const char* key)
 {
     char current[192];
     desktop_icon_layout_key(iconIdx, current, sizeof(current));
-    return desktop_str_eq(current, key);
+    if (desktop_str_eq(current, key)) return true;
+    if (iconIdx >= 0 && iconIdx < kDesktopIconCount && s_desktopIcons[iconIdx].kind == DesktopItemKind::SystemObject) {
+        if (s_desktopIcons[iconIdx].systemObject == DesktopSystemObjectKind::FileExplorer) {
+            return desktop_str_eq(key, "system:ThisSystem") || desktop_str_eq(key, "system:FileManager") || desktop_str_eq(key, "File Explorer");
+        }
+    }
+    return false;
 }
 
 // Start menu entries structure for dynamic list
@@ -1226,7 +1314,7 @@ static StartMenuApp s_startMenuApps[] = {
     {"AppModel",    true,  false, 0xFF5587D2},  // pinned app model demo entry
     {"Paint",       false, true,  0xFFC87830},  // recent
     {"Clock",       false, true,  0xFF4690C8},  // recent
-    {"Files",       false, true,  0xFFC8B43C},  // recent
+    {"File Explorer", false, true, 0xFFC8B43C}, // recent
     {"ImgViewer",   false, false, 0xFFC87830},  // not shown by default
 };
 static const int kStartMenuAppCount = sizeof(s_startMenuApps) / sizeof(s_startMenuApps[0]);
@@ -1239,7 +1327,7 @@ static const char* s_allProgramsList[] = {
     "Console",
     "ControlPanel",
     "DiskManager",
-    "Files",
+    "File Explorer",
     "guideXOS Navigator",
     "HDInstaller",
     "ImgViewer",
@@ -1300,13 +1388,14 @@ static const int kTaskbarEntryCount = 0;
 // Right-click context menu entries
 static const char* s_contextMenuItems[] = {
     "Refresh",
-    "Display Settings",
-    "Personalize",
+    "Display Options",
+    "Arrange Icons",
+    "Auto Arrange",
     "New Folder",
     "Open Terminal",
     "TaskManager",
 };
-static const int kContextMenuCount = 6;
+static const int kContextMenuCount = 7;
 static const uint32_t kContextMenuW = 190;
 static const uint32_t kContextMenuItemH = 24;
 static const uint32_t kContextMenuPad = 2;
@@ -2018,6 +2107,7 @@ bool get_system_desktop_icon_visible(const char* key)
     if (desktop_str_eq(key, "Trash")) return s_systemDesktopIconVisibility.showTrash;
     if (desktop_str_eq(key, "ThisSystem")) return s_systemDesktopIconVisibility.showThisSystem;
     if (desktop_str_eq(key, "FileManager")) return s_systemDesktopIconVisibility.showFileManager;
+    if (desktop_str_eq(key, "FileExplorer")) return s_systemDesktopIconVisibility.showThisSystem || s_systemDesktopIconVisibility.showFileManager;
     if (desktop_str_eq(key, "SystemSettings")) return s_systemDesktopIconVisibility.showSystemSettings;
     return false;
 }
@@ -2038,6 +2128,10 @@ void set_system_desktop_icon_visible(const char* key, bool visible)
     if (desktop_str_eq(key, "Trash")) s_systemDesktopIconVisibility.showTrash = visible;
     else if (desktop_str_eq(key, "ThisSystem")) s_systemDesktopIconVisibility.showThisSystem = visible;
     else if (desktop_str_eq(key, "FileManager")) s_systemDesktopIconVisibility.showFileManager = visible;
+    else if (desktop_str_eq(key, "FileExplorer")) {
+        s_systemDesktopIconVisibility.showThisSystem = visible;
+        s_systemDesktopIconVisibility.showFileManager = visible;
+    }
     else if (desktop_str_eq(key, "SystemSettings")) s_systemDesktopIconVisibility.showSystemSettings = visible;
     else return;
     serial::puts("[desktop] system desktop icon setting changed: ");
@@ -2053,6 +2147,7 @@ static bool system_icon_visible_for_kind(DesktopSystemObjectKind kind)
         case DesktopSystemObjectKind::Trash: return s_systemDesktopIconVisibility.showTrash;
         case DesktopSystemObjectKind::ThisSystem: return s_systemDesktopIconVisibility.showThisSystem;
         case DesktopSystemObjectKind::FileManager: return s_systemDesktopIconVisibility.showFileManager;
+        case DesktopSystemObjectKind::FileExplorer: return s_systemDesktopIconVisibility.showThisSystem || s_systemDesktopIconVisibility.showFileManager;
         case DesktopSystemObjectKind::SystemSettings: return s_systemDesktopIconVisibility.showSystemSettings;
         default: return false;
     }
@@ -2061,6 +2156,7 @@ static bool system_icon_visible_for_kind(DesktopSystemObjectKind kind)
 static void apply_system_desktop_icon_visibility()
 {
     for (int i = 0; i < kSystemDesktopIconCount; ++i) {
+        if (s_desktopIcons[i].systemObject == DesktopSystemObjectKind::None || !s_desktopIcons[i].label[0]) continue;
         bool visible = system_icon_visible_for_kind(s_desktopIcons[i].systemObject);
         s_desktopIcons[i].pinned = visible;
         s_desktopIcons[i].recent = false;
@@ -2659,6 +2755,24 @@ static void refresh_desktop_icons()
         }
     }
 
+    if (s_desktopAutoArrangeEnabled && !compactLayout) {
+        for (int displayIdx = 0; displayIdx < s_visibleIconCount; ++displayIdx) {
+            s_iconPosX[displayIdx] = -1;
+            s_iconPosY[displayIdx] = -1;
+        }
+        for (int displayIdx = 0; displayIdx < s_visibleIconCount; ++displayIdx) {
+            int iconIdx = s_visibleIconIndices[displayIdx];
+            if (iconIdx < 0 || iconIdx >= kDesktopIconCount) continue;
+            int32_t x = 0;
+            int32_t y = 0;
+            allocate_desktop_icon_slot(iconIdx, x, y);
+            s_iconPosX[displayIdx] = x;
+            s_iconPosY[displayIdx] = y;
+        }
+        sync_selected_icon_after_layout();
+        return;
+    }
+
     bool migratedSavedPositions = false;
     for (int displayIdx = 0; displayIdx < s_visibleIconCount; ++displayIdx) {
         if (s_iconPosX[displayIdx] >= 0 && s_iconPosY[displayIdx] >= 0) continue;
@@ -2809,6 +2923,47 @@ static void ClearDesktopIconSelection()
     s_focusedSelectedIconId = -1;
     s_lastSelectedIconId = -1;
     if (changed) log_selection_change("cleared");
+}
+
+static void arrange_desktop_icons_into_grid(bool persistPositions)
+{
+    if (bare_metal_desktop_uses_compact_folder_layout()) return;
+
+    for (int displayIdx = 0; displayIdx < s_visibleIconCount; ++displayIdx) {
+        s_iconPosX[displayIdx] = -1;
+        s_iconPosY[displayIdx] = -1;
+    }
+
+    for (int displayIdx = 0; displayIdx < s_visibleIconCount; ++displayIdx) {
+        int iconIdx = s_visibleIconIndices[displayIdx];
+        if (iconIdx < 0 || iconIdx >= kDesktopIconCount) continue;
+
+        int32_t x = 0;
+        int32_t y = 0;
+        allocate_desktop_icon_slot(iconIdx, x, y);
+        s_iconPosX[displayIdx] = x;
+        s_iconPosY[displayIdx] = y;
+        if (persistPositions) {
+            s_desktopIcons[iconIdx].savedX = x;
+            s_desktopIcons[iconIdx].savedY = y;
+        }
+    }
+
+    if (persistPositions) save_icon_positions();
+    sync_selected_icon_after_layout();
+    s_needsRedraw = true;
+}
+
+static void build_unique_new_folder_name(int suffixIndex, char* out, int outSize)
+{
+    if (!out || outSize <= 0) return;
+    int pos = 0;
+    desktop_append_text(out, &pos, outSize, "New Folder");
+    if (suffixIndex > 1) {
+        desktop_append_text(out, &pos, outSize, " (");
+        desktop_append_int(out, &pos, outSize, suffixIndex);
+        desktop_append_text(out, &pos, outSize, ")");
+    }
 }
 
 static bool bare_metal_desktop_resolve_directory_target(const char* targetPath, char* resolvedPath, size_t resolvedPathSize)
@@ -2963,7 +3118,7 @@ void run_live_directory_runtime_smoke()
 
     const char* nativeDesktopPath = "/Desktop";
     const char* nativeSmokePath = "/Desktop/LiveSmoke";
-    const char* aliasSmokePath = "/system/wall";
+    const char* aliasSmokePath = "/downloads/Desktop";
     const char* smokePath = nativeSmokePath;
     const char* pathMode = "native-desktop-live-smoke";
 
@@ -3008,6 +3163,8 @@ void run_live_directory_runtime_smoke()
     } else {
         smokePath = aliasSmokePath;
         pathMode = "alias-fallback";
+        vfs::mkdir("/downloads");
+        vfs::mkdir(aliasSmokePath);
         if (!vfs::get_mount("/Desktop")) {
             pathSetupOk = vfs::mount_alias("/Desktop", aliasSmokePath) != 0xFF;
             serial::puts("[LIVE-DIRECTORY-RUNTIME-SMOKE] LIVE_DESKTOP_HOME_ALIAS mount=/Desktop source=");
@@ -4355,7 +4512,7 @@ static void draw_icon_symbol(uint32_t ix, uint32_t iy, uint32_t size, const char
         return;
     }
     
-    // Files - draw folder icon
+    // File Explorer - draw folder icon
     if (appName[0] == 'F' && appName[1] == 'i') {  // "Files"
         // Folder shape
         framebuffer::fill_rect(cx - 10, cy - 4, 8, 2, iconColor);  // Folder tab
@@ -4468,7 +4625,7 @@ static const char* GetDesktopIconLogicalName(const char* label)
         return count > 0 ? "trash.full" : "trash.empty";
     }
     if (text_equals(label, "TaskManager")) return "app.taskmanager";
-    if (text_equals(label, "Files")) return "app.files";
+    if (text_equals(label, "Files") || text_equals(label, "File Explorer")) return "app.files";
     if (text_equals(label, "ImageViewer") || text_equals(label, "Image Viewer") || text_equals(label, "ImgViewer")) return "app.generic";
     if (text_equals(label, "Paint")) return "app.paint";
     if (text_equals(label, "Clock")) return "app.clock";
@@ -5686,8 +5843,8 @@ static void draw_right_click_menu()
         draw_text(mx + 12, itemY + (kContextMenuItemH - kGlyphH) / 2,
                   label, i == hoveredItem ? rgb(255, 255, 255) : rgb(210, 210, 225), 1);
 
-        // Separator after "Personalize" (index 2)
-        if (s_contextMenuMode == ContextMenuMode::Desktop && i == 2) {
+        // Separator after "Auto Arrange" (index 3)
+        if (s_contextMenuMode == ContextMenuMode::Desktop && i == 3) {
             hline(mx + 4, itemY + kContextMenuItemH - 1, kContextMenuW - 8, rgb(60, 65, 80));
         }
     }
@@ -5766,20 +5923,43 @@ static void handle_context_menu_command(int item)
             s_notification.visible = true;
             s_notification.showTime = s_tickCounter;
             break;
-        case 1: // Display Settings
+        case 1: // Display Options
             launch_app("DisplayOptions");
             break;
-        case 2: // Personalize
-            launch_app("DisplayOptions");
+        case 2: // Arrange Icons
+            arrange_desktop_icons_into_grid(true);
+            s_notification.title = "Arrange Icons";
+            s_notification.message = "Icons arranged";
+            s_notification.visible = true;
+            s_notification.showTime = s_tickCounter;
             break;
-        case 3: { // New Folder
+        case 3: { // Auto Arrange
+            s_desktopAutoArrangeEnabled = !s_desktopAutoArrangeEnabled;
+            refresh_desktop_icons();
+            s_needsRedraw = true;
+            s_notification.title = "Auto Arrange";
+            s_notification.message = s_desktopAutoArrangeEnabled ? "Enabled" : "Disabled";
+            s_notification.visible = true;
+            s_notification.showTime = s_tickCounter;
+            break;
+        }
+        case 4: { // New Folder
             char newFolderPath[vfs::VFS_MAX_PATH]{};
-            vfs::join_path(bare_metal_desktop_current_directory_path(), "New Folder", newFolderPath, sizeof(newFolderPath));
-            vfs::Status status = vfs::mkdir(newFolderPath);
+            vfs::Status status = vfs::VFS_ERR_NOT_FOUND;
+            for (int suffixIndex = 1; suffixIndex < 1000; ++suffixIndex) {
+                char folderName[vfs::VFS_MAX_FILENAME];
+                build_unique_new_folder_name(suffixIndex, folderName, (int)sizeof(folderName));
+                if (!folderName[0]) continue;
+                vfs::join_path(bare_metal_desktop_current_directory_path(), folderName, newFolderPath, sizeof(newFolderPath));
+                status = vfs::mkdir(newFolderPath);
+                if (status == vfs::VFS_OK) break;
+                if (status != vfs::VFS_ERR_EXISTS) break;
+            }
             s_notification.title = "New Folder";
             if (status == vfs::VFS_OK) {
                 s_notification.message = "Created on desktop";
                 refresh_desktop_icons();
+                s_needsRedraw = true;
             } else if (status == vfs::VFS_ERR_EXISTS) {
                 s_notification.message = "Already exists";
             } else {
@@ -5789,10 +5969,10 @@ static void handle_context_menu_command(int item)
             s_notification.showTime = s_tickCounter;
             break;
         }
-        case 4: // Open Terminal
+        case 5: // Open Terminal
             open_terminal();
             break;
-        case 5: // TaskManager
+        case 6: // TaskManager
             launch_app("TaskManager");
             break;
         default:
@@ -7368,6 +7548,7 @@ void open_terminal()
 bool launch_app(const char* appName)
 {
     if (!appName) return false;
+    if (desktop_str_eq(appName, "File Explorer")) appName = "Files";
     
     // Check for Console/Terminal special case
     bool isConsole = false;
@@ -7537,7 +7718,7 @@ void run_launch_shadow_folder_fileopen_smoke()
     show_icon_notification(0);
     s_notification = savedNotification;
 
-    serial::puts("[APPMODEL-LAUNCHSHADOW-SMOKE] real-branch system-object File Manager helper before temporary desktop state mutation\n");
+    serial::puts("[APPMODEL-LAUNCHSHADOW-SMOKE] real-branch system-object File Explorer helper before temporary desktop state mutation\n");
     serial::puts("[LaunchShadowRealBranchSystemObjectFileManagerMutation] phase=before temporaryDesktopStateMutation=true persistentDesktopStorageWrites=false nonFatal=true\n");
     s_visibleIconCount = 1;
     s_visibleIconIndices[0] = fileManagerSystemObjectIconIdx >= 0 ? fileManagerSystemObjectIconIdx : 2;
@@ -7682,7 +7863,7 @@ void run_launch_shadow_folder_fileopen_smoke()
     serial::puts(selectedIconStateRestored ? "true" : "false");
     serial::puts(" persistentDesktopStorageWrites=false");
     serial::puts(" nonFatal=true\n");
-    serial::puts("[APPMODEL-LAUNCHSHADOW-SMOKE] real-branch system-object File Manager helper after temporary desktop state restoration\n");
+    serial::puts("[APPMODEL-LAUNCHSHADOW-SMOKE] real-branch system-object File Explorer helper after temporary desktop state restoration\n");
     serial::puts("[LaunchShadowRealBranchSystemObjectFileManagerRestore] realBranchSystemObjectFileManagerDesktopStateRestored=");
     serial::puts(systemObjectFileManagerDesktopStateRestored ? "true" : "false");
     serial::puts(" realBranchSystemObjectFileManagerVisibleIconStateRestored=");
@@ -7902,12 +8083,12 @@ static void run_launch_shadow_start_menu_files_smoke()
     const char* savedStaticAppSourceOverride = s_launchShadowStaticAppSourceOverride;
     const bool savedSuppressRealBranchLaunch = s_launchShadowSuppressRealBranchLaunch;
 
-    serial::puts("[APPMODEL-LAUNCHSHADOW-SMOKE] real-branch Start Menu Files helper before temporary Start Menu state mutation\n");
+    serial::puts("[APPMODEL-LAUNCHSHADOW-SMOKE] real-branch Start Menu File Explorer helper before temporary Start Menu state mutation\n");
     serial::puts("[LaunchShadowRealBranchStartMenuFilesMutation] phase=before temporaryStartMenuStateMutation=true persistentDesktopStorageWrites=false nonFatal=true\n");
     s_startMenuOpen = true;
     s_launchShadowStaticAppSourceOverride = "RealBranchStartMenuFiles";
     s_launchShadowSuppressRealBranchLaunch = true;
-    show_start_menu_notification("Files");
+    show_start_menu_notification("File Explorer");
 
     s_startMenuOpen = savedStartMenuOpen;
     s_notification = savedNotification;
@@ -7921,7 +8102,7 @@ static void run_launch_shadow_start_menu_files_smoke()
     const bool stateRestored = startMenuStateRestored && notificationStateRestored &&
         sourceOverrideStateRestored && suppressLaunchStateRestored;
 
-    serial::puts("[APPMODEL-LAUNCHSHADOW-SMOKE] real-branch Start Menu Files helper after temporary Start Menu state restoration\n");
+    serial::puts("[APPMODEL-LAUNCHSHADOW-SMOKE] real-branch Start Menu File Explorer helper after temporary Start Menu state restoration\n");
     serial::puts("[LaunchShadowRealBranchStartMenuFilesRestore] realBranchStartMenuFilesStateRestored=");
     serial::puts(stateRestored ? "true" : "false");
     serial::puts(" realBranchStartMenuFilesMenuOpenStateRestored=");
@@ -9571,16 +9752,17 @@ static void show_start_menu_notification(const char* label)
     
     // Close start menu before launching app
     s_startMenuOpen = false;
+    const char* launchLabel = desktop_str_eq(label, "File Explorer") ? "Files" : label;
 
 #if defined(GXOS_APPMODEL_LAUNCHSHADOW_SMOKE_ACTIVE) && defined(GXOS_APPMODEL_TYPED_DISPATCH_SHADOW_ONLY) && defined(GXOS_BARE_METAL)
     if (bare_metal_should_suppress_real_branch_launch()) {
-        log_bare_metal_static_app_shadow_only_observation(label, bare_metal_active_static_app_shadow_source("StartMenu"));
+        log_bare_metal_static_app_shadow_only_observation(launchLabel, bare_metal_active_static_app_shadow_source("StartMenu"));
         return;
     }
 #endif
 
     // Try to launch as a kernel GUI app
-    if (try_launch_kernel_app(label)) {
+    if (try_launch_kernel_app(launchLabel)) {
         // App launched successfully
         app::AppLogger::logLaunch(label, app::LaunchResult::Success);
         return;

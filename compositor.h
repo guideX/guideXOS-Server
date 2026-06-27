@@ -72,6 +72,7 @@ namespace gxos { namespace gui {
         Trash,
         ThisSystem,
         FileManager,
+        FileExplorer,
         SystemSettings,
         DesktopBack,
         DesktopHome
@@ -115,6 +116,9 @@ namespace gxos { namespace gui {
         static bool hostedDesktopUsesCompactIconLayout();
         static bool hostedDesktopPrefersCompactFolderIcons();
         static bool setHostedDesktopPrefersCompactFolderIcons(bool smallIcons);
+        static bool hostedDesktopAutoArrangeIcons();
+        static bool setHostedDesktopAutoArrangeIcons(bool enabled);
+        static void arrangeHostedDesktopIcons();
         static void openDesktopItem(int index);
         static void openStartMenuApp(const std::string& appName);
         static bool pinStartMenuAppToDesktop(const std::string& appName);

@@ -115,8 +115,10 @@ void RightClickMenu::buildItems() {
     }
     s_items.push_back({"Refresh", false, false});
     s_items.push_back({"Display Options", false, false});
+    s_items.push_back({"Arrange Icons", false, false});
+    s_items.push_back({"Auto Arrange", false, Compositor::hostedDesktopAutoArrangeIcons()});
     s_items.push_back({"Folder View Icon Size", true, false});
-    s_iconSubmenuIndex = 2;
+    s_iconSubmenuIndex = 4;
 }
 
 bool RightClickMenu::HandleClick(int mx, int my) {
@@ -175,6 +177,13 @@ bool RightClickMenu::HandleClick(int mx, int my) {
                 Logger::write(LogLevel::Info, "Display Options selected");
                 std::string err;
                 DesktopService::LaunchApp("DisplayOptions", err);
+            } else if (s_items[idx].label == "Arrange Icons") {
+                Logger::write(LogLevel::Info, "Arrange Icons selected");
+                Compositor::arrangeHostedDesktopIcons();
+            } else if (s_items[idx].label == "Auto Arrange") {
+                const bool enabled = !Compositor::hostedDesktopAutoArrangeIcons();
+                Logger::write(LogLevel::Info, std::string("Auto Arrange selected: ") + (enabled ? "enabled" : "disabled"));
+                Compositor::setHostedDesktopAutoArrangeIcons(enabled);
             }
             Hide();
             return true;
@@ -228,7 +237,11 @@ void RightClickMenu::Draw(HDC dc) {
         }
 
         const int textY = iy + (kItemH > lineH ? (kItemH - lineH) / 2 : 0);
-        SystemFont::DrawText(dc, s_x + kPadding, textY,
+        if (s_items[i].checked) {
+            SystemFont::DrawText(dc, s_x + kPadding, textY, "[x]", 3, RGB(220, 220, 220), FontRole::Default);
+        }
+
+        SystemFont::DrawText(dc, s_x + kPadding + 22, textY,
                              s_items[i].label.c_str(), (int)s_items[i].label.size(),
                              RGB(220, 220, 220), FontRole::Default);
 

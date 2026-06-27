@@ -281,10 +281,9 @@ namespace {
     {
     switch (index) {
     case 0: return "Trash";
-    case 1: return "This System";
-    case 2: return "File Manager";
-    case 3: return "System Settings";
-    case 4: return "Use smaller folder icons";
+    case 1: return "File Explorer";
+    case 2: return "System Settings";
+    case 3: return "Use smaller folder icons";
     default: return "";
     }
 }
@@ -320,8 +319,7 @@ void DisplayOptions::loadSelection()
         s_showDesktopSystemSettings = cfg.showDesktopSystemSettings;
         s_smallLiveDesktopFolderIcons = cfg.smallLiveDesktopFolderIcons;
         Logger::write(LogLevel::Info, std::string("DisplayOptions Desktop Icons loaded: Trash=") + (s_showDesktopTrash ? "true" : "false") +
-            " ThisSystem=" + (s_showDesktopThisSystem ? "true" : "false") +
-            " FileManager=" + (s_showDesktopFileManager ? "true" : "false") +
+            " File Explorer=" + ((s_showDesktopThisSystem || s_showDesktopFileManager) ? "true" : "false") +
             " SystemSettings=" + (s_showDesktopSystemSettings ? "true" : "false") +
             " FolderIconsSmall=" + (s_smallLiveDesktopFolderIcons ? "true" : "false"));
     } else {
@@ -538,12 +536,11 @@ void DisplayOptions::drawDesktopIconsTab()
 {
     const bool states[] = {
         s_showDesktopTrash,
-        s_showDesktopThisSystem,
-        s_showDesktopFileManager,
+        s_showDesktopThisSystem || s_showDesktopFileManager,
         s_showDesktopSystemSettings,
         s_smallLiveDesktopFolderIcons
     };
-    for (int i = 0; i < 5; ++i) {
+    for (int i = 0; i < 4; ++i) {
         int y = kDesktopIconsY + i * kDesktopIconRowH;
         bool hover = hit(s_mouseX, s_mouseY, kDesktopIconsX - 8, y - 8, 320, 34);
         drawCheckbox(kDesktopIconsX, y, desktopIconSettingName(i), states[i], hover);
@@ -797,10 +794,15 @@ bool DisplayOptions::toggleDesktopIconSetting(int index)
     bool* setting = nullptr;
     switch (index) {
     case 0: setting = &s_showDesktopTrash; break;
-    case 1: setting = &s_showDesktopThisSystem; break;
-    case 2: setting = &s_showDesktopFileManager; break;
-    case 3: setting = &s_showDesktopSystemSettings; break;
-    case 4: setting = &s_smallLiveDesktopFolderIcons; break;
+    case 1: {
+        const bool enabled = !(s_showDesktopThisSystem || s_showDesktopFileManager);
+        s_showDesktopThisSystem = enabled;
+        s_showDesktopFileManager = enabled;
+        Logger::write(LogLevel::Info, std::string("DisplayOptions Desktop Icons checkbox changed: ") + desktopIconSettingName(index) + "=" + (enabled ? "true" : "false"));
+        return true;
+    }
+    case 2: setting = &s_showDesktopSystemSettings; break;
+    case 3: setting = &s_smallLiveDesktopFolderIcons; break;
     default: return false;
     }
     *setting = !*setting;
@@ -816,8 +818,9 @@ void DisplayOptions::saveDesktopIconSettings()
         Logger::write(LogLevel::Info, "DisplayOptions Desktop Icons save using default config because load failed: " + err);
     }
     cfg.showDesktopTrash = s_showDesktopTrash;
-    cfg.showDesktopThisSystem = s_showDesktopThisSystem;
-    cfg.showDesktopFileManager = s_showDesktopFileManager;
+    const bool showFileExplorer = s_showDesktopThisSystem || s_showDesktopFileManager;
+    cfg.showDesktopThisSystem = showFileExplorer;
+    cfg.showDesktopFileManager = showFileExplorer;
     cfg.showDesktopSystemSettings = s_showDesktopSystemSettings;
     cfg.smallLiveDesktopFolderIcons = s_smallLiveDesktopFolderIcons;
     cfg.desktopThemeId = DesktopThemeIdToString(s_appliedThemeId);

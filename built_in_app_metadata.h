@@ -47,7 +47,7 @@ static const BuiltInAppMetadata kBuiltInAppMetadata[] = {
 	{ "gxos.builtin.calculator", "Calculator", "Calculator", "Calculator", nullptr, "app.calculator", "Utilities", "Built-in guideXOS calculator.", BuiltInAvailabilityHosted | BuiltInAvailabilityBareMetal, 0xFF4690C8u, 0, 0, false },
 	{ "gxos.builtin.clock", "Clock", "Clock", nullptr, nullptr, "app.clock", "Utilities", "Built-in guideXOS clock.", BuiltInAvailabilityHosted, 0, 0, 0, false },
 	{ "gxos.builtin.console", "Console", "Console", nullptr, nullptr, "app.console", "System", "Built-in guideXOS console window.", BuiltInAvailabilityHosted, 0, 0, 0, false },
-	{ "gxos.builtin.fileexplorer", "FileExplorer", "FileExplorer", "FileExplorer", "Files", "app.files", "System", "Built-in guideXOS file manager.", BuiltInAvailabilityHosted | BuiltInAvailabilityBareMetal, 0xFFC8B43Cu, 0, 0, false },
+	{ "gxos.builtin.fileexplorer", "File Explorer", "FileExplorer", "Files", "Files", "app.files", "System", "Built-in guideXOS file explorer.", BuiltInAvailabilityHosted | BuiltInAvailabilityBareMetal, 0xFFC8B43Cu, 0, 0, false },
 	{ "gxos.builtin.trash", "Trash", "Trash", "Trash", nullptr, "trash.empty", "System", "Built-in guideXOS Trash placeholder.", BuiltInAvailabilityHosted | BuiltInAvailabilityBareMetal, 0xFF9098A4u, 0, 0, false },
 	{ "gxos.builtin.taskmanager", "TaskManager", "TaskManager", "TaskManager", nullptr, "app.taskmanager", "System", "Built-in guideXOS task manager.", BuiltInAvailabilityHosted | BuiltInAvailabilityBareMetal, 0xFFB44646u, 0, 0, false },
 	{ "gxos.builtin.paint", "Paint", "Paint", nullptr, nullptr, "app.paint", "Graphics", "Built-in guideXOS paint application.", BuiltInAvailabilityHosted, 0, 0, 0, false },

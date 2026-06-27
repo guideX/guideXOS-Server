@@ -666,7 +666,7 @@ namespace gxos {
         }
 
         static std::string canonicalAppName(const std::string& name) {
-            if (name == "Files" || name == "ComputerFiles") return "FileExplorer";
+            if (name == "Files" || name == "File Explorer" || name == "FileExplorer" || name == "ComputerFiles") return "FileExplorer";
             if (name == "Image Viewer") return "ImageViewer";
             if (name == "Shutdown") return "ShutdownDialog";
             return name;
