@@ -205,6 +205,7 @@ bool parseMousePayload(const std::string& payload, int& x, int& y, int& packedBu
 
     int button = GX_MOUSE_BUTTON_NONE;
     int action = GX_MOUSE_ACTION_MOVE;
+    int wheelDelta = 0;
     if (!tryParseInt(xText, x) || !tryParseInt(yText, y)) return false;
     if (!tryParseInt(buttonText, button)) return false;
     if (button < GX_MOUSE_BUTTON_NONE || button > GX_MOUSE_BUTTON_MIDDLE) return false;
@@ -217,14 +218,26 @@ bool parseMousePayload(const std::string& payload, int& x, int& y, int& packedBu
         action = GX_MOUSE_ACTION_UP;
     } else if (actionText == "double" || actionText == "double_click") {
         action = GX_MOUSE_ACTION_DOUBLE_CLICK;
+    } else if (actionText.rfind("wheel", 0) == 0) {
+        action = GX_MOUSE_ACTION_WHEEL;
+        if (actionText == "wheel" || actionText == "wheelup") {
+            wheelDelta = 1;
+        } else if (actionText == "wheeldown") {
+            wheelDelta = -1;
+        } else {
+            size_t colon = actionText.find(':');
+            if (colon == std::string::npos || colon + 1 >= actionText.size()) return false;
+            if (!tryParseInt(actionText.substr(colon + 1), wheelDelta) || wheelDelta == 0) return false;
+        }
     } else if (tryParseInt(actionText, action)) {
-        if (action < GX_MOUSE_ACTION_MOVE || action > GX_MOUSE_ACTION_DOUBLE_CLICK) return false;
+        if (action < GX_MOUSE_ACTION_MOVE || action > GX_MOUSE_ACTION_WHEEL) return false;
     } else {
         return false;
     }
 
     modifiers = 0;
     if (!modifiersText.empty() && !tryParseInt(modifiersText, modifiers)) return false;
+    if (action == GX_MOUSE_ACTION_WHEEL) modifiers = wheelDelta;
 
     window = 0;
     if (!windowText.empty() && !tryParseUnsigned64(windowText, window)) return false;

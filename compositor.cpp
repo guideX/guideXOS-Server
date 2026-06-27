@@ -3399,6 +3399,44 @@ namespace gxos {
                 uint64_t ownerPid = 0; uint64_t targetWindow = 0; { std::lock_guard<std::mutex> lk(g_lock); WinInfo* hitWin = hitWindowAt(mx, my); if (hitWin) { ownerPid = hitWin->ownerPid; targetWindow = hitWin->id; } else { ownerPid = inputOwnerPid( ); targetWindow = g_modalWindow ? g_modalWindow : g_focus; } }
                 Compositor::handleMouse(mx, my, false, false); publishOut(MsgType::MT_InputMouse, Compositor::packMousePayloadForTarget(mx, my, 0, "move", ownerPid, targetWindow), ownerPid);
             } break;
+            case WM_MOUSEWHEEL: {
+                int mx = GET_X_LPARAM(l);
+                int my = GET_Y_LPARAM(l);
+                short wheelDelta = GET_WHEEL_DELTA_WPARAM(w);
+                if (wheelDelta == 0) return 0;
+                {
+                    std::lock_guard<std::mutex> lk(g_lock);
+                    if (blockInputBehindModal(mx, my)) {
+                        requestRepaint( );
+                        return 0;
+                    }
+                }
+
+                int wheelSteps = wheelDelta / WHEEL_DELTA;
+                if (wheelSteps == 0) wheelSteps = wheelDelta > 0 ? 1 : -1;
+
+                uint64_t ownerPid = 0;
+                uint64_t targetWindow = 0;
+                {
+                    std::lock_guard<std::mutex> lk(g_lock);
+                    WinInfo* hitWin = hitWindowAt(mx, my);
+                    if (hitWin) {
+                        ownerPid = hitWin->ownerPid;
+                        targetWindow = hitWin->id;
+                    } else {
+                        ownerPid = inputOwnerPid( );
+                        targetWindow = g_modalWindow ? g_modalWindow : g_focus;
+                    }
+                }
+
+                if (targetWindow != 0) {
+                    Compositor::handleMouse(mx, my, false, false);
+                    publishOut(MsgType::MT_InputMouse,
+                        Compositor::packMousePayloadForTarget(mx, my, 0, std::string("wheel:") + std::to_string(wheelSteps), ownerPid, targetWindow),
+                        ownerPid);
+                }
+                return 0;
+            }
             case WM_KEYDOWN: case WM_SYSKEYDOWN: {
                 int key = (int)w;
                 // Taskbar menu keyboard handling

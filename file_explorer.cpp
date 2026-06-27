@@ -29,7 +29,6 @@ namespace gxos { namespace apps {
         constexpr int kAddressH = 30;
         constexpr int kHeaderH = 24;
         constexpr int kRowH = 22;
-        constexpr int kVisibleRows = 20;
         constexpr size_t kLazyPageSize = 256;
         constexpr const char* kTrashRootPath = "/Trash";
         constexpr const char* kTrashInfoSuffix = ".trashinfo";
@@ -51,6 +50,10 @@ namespace gxos { namespace apps {
         constexpr int kMainSizeTextX = kLeftPaneW + 350;
         constexpr int kMainTypeTextX = kLeftPaneW + 440;
         constexpr int kMainModifiedTextX = kLeftPaneW + 570;
+        constexpr int kFileListScrollbarW = 8;
+        constexpr int kFileListScrollbarPad = 2;
+        constexpr int kFileListScrollbarMinThumbH = 18;
+        constexpr int kWheelScrollRowsPerNotch = 3;
         constexpr int kContextMenuW = 170;
         constexpr int kContextMenuItemH = 24;
         constexpr uint64_t kDoubleClickThresholdMs = 450;
@@ -92,6 +95,10 @@ namespace gxos { namespace apps {
 
         int rowIconY(int rowY, int iconSize) {
             return rowY + (kRowH > iconSize ? (kRowH - iconSize) / 2 : 0);
+        }
+
+        int fileListViewportHeight() {
+            return kStatusBarY - kMainRowsStartY;
         }
 
         enum PromptMode {
@@ -387,6 +394,9 @@ namespace gxos { namespace apps {
     std::vector<std::string> FileExplorer::s_forwardHistory;
     int FileExplorer::s_selectedIndex = 0;
     int FileExplorer::s_scrollOffset = 0;
+    bool FileExplorer::s_draggingFileListScrollbar = false;
+    int FileExplorer::s_fileListScrollbarDragStartY = 0;
+    int FileExplorer::s_fileListScrollbarDragStartOffsetRows = 0;
     int FileExplorer::s_rootSelectedIndex = 0;
     int FileExplorer::s_lastKeyCode = 0;
     bool FileExplorer::s_keyDown = false;
@@ -429,6 +439,9 @@ namespace gxos { namespace apps {
         s_forwardHistory.clear();
         s_selectedIndex = 0;
         s_scrollOffset = 0;
+        s_draggingFileListScrollbar = false;
+        s_fileListScrollbarDragStartY = 0;
+        s_fileListScrollbarDragStartOffsetRows = 0;
         s_rootSelectedIndex = 0;
         s_status = "Ready";
         s_promptMode = PromptNone;
@@ -555,8 +568,8 @@ namespace gxos { namespace apps {
         s_currentPath = normalized;
         s_selectedIndex = 0;
         s_scrollOffset = 0;
-        s_lastEntryClickRow = -1;
-        s_lastEntryClickTick = 0;
+        s_draggingFileListScrollbar = false;
+        resetFileListClickTracking();
         refresh();
         updateDisplay();
         Logger::write(LogLevel::Info, std::string("FileExplorer: Navigated to ") + s_currentPath);
@@ -593,13 +606,110 @@ namespace gxos { namespace apps {
         s_entries = s_fileSystem->listDirectory(s_currentPath, 0, kLazyPageSize, hasMore);
         s_hasMoreEntries = hasMore;
         s_roots = s_fileSystem->getRoots();
+        s_draggingFileListScrollbar = false;
 
-        if (s_selectedIndex >= static_cast<int>(s_entries.size())) s_selectedIndex = static_cast<int>(s_entries.size()) - 1;
-        if (s_selectedIndex < 0) s_selectedIndex = 0;
-        s_lastEntryClickRow = -1;
-        s_lastEntryClickTick = 0;
+        clampFileListState();
+        ensureSelectedFileVisible();
+        resetFileListClickTracking();
         s_loading = false;
         s_status = s_hasMoreEntries ? "Showing first page; more items available" : "Ready";
+    }
+
+    int FileExplorer::fileListVisibleRowCount() {
+        const int visibleRows = fileListViewportHeight() / kRowH;
+        return std::max(1, visibleRows);
+    }
+
+    int FileExplorer::fileListMaxScrollRows() {
+        const int count = static_cast<int>(s_entries.size());
+        return std::max(0, count - fileListVisibleRowCount());
+    }
+
+    bool FileExplorer::isFileListScrollbarVisible() {
+        return fileListMaxScrollRows() > 0;
+    }
+
+    int FileExplorer::fileListScrollbarLeft() {
+        return kWindowW - kFileListScrollbarPad - kFileListScrollbarW;
+    }
+
+    int FileExplorer::fileListScrollbarTrackTop() {
+        return kMainRowsStartY + kFileListScrollbarPad;
+    }
+
+    int FileExplorer::fileListScrollbarTrackHeight() {
+        return std::max(1, fileListViewportHeight() - (kFileListScrollbarPad * 2));
+    }
+
+    int FileExplorer::fileListScrollbarThumbHeight() {
+        if (!isFileListScrollbarVisible()) return 0;
+        const int visibleRows = fileListVisibleRowCount();
+        const int totalRows = static_cast<int>(s_entries.size());
+        const int trackH = fileListScrollbarTrackHeight();
+        int thumbH = (trackH * visibleRows) / std::max(1, totalRows);
+        if (thumbH < kFileListScrollbarMinThumbH) thumbH = kFileListScrollbarMinThumbH;
+        if (thumbH > trackH) thumbH = trackH;
+        return thumbH;
+    }
+
+    int FileExplorer::fileListScrollbarThumbTop() {
+        if (!isFileListScrollbarVisible()) return fileListScrollbarTrackTop();
+        const int maxScroll = fileListMaxScrollRows();
+        const int trackTop = fileListScrollbarTrackTop();
+        const int trackTravel = std::max(1, fileListScrollbarTrackHeight() - fileListScrollbarThumbHeight());
+        if (maxScroll <= 0) return trackTop;
+        const int offset = std::max(0, std::min(s_scrollOffset, maxScroll));
+        return trackTop + (trackTravel * offset) / maxScroll;
+    }
+
+    void FileExplorer::clampFileListState() {
+        const int count = static_cast<int>(s_entries.size());
+        if (count <= 0) {
+            s_selectedIndex = 0;
+            s_scrollOffset = 0;
+            return;
+        }
+
+        if (s_selectedIndex < 0) s_selectedIndex = 0;
+        if (s_selectedIndex >= count) s_selectedIndex = count - 1;
+
+        if (s_scrollOffset < 0) s_scrollOffset = 0;
+        const int maxScroll = fileListMaxScrollRows();
+        if (s_scrollOffset > maxScroll) s_scrollOffset = maxScroll;
+    }
+
+    void FileExplorer::ensureSelectedFileVisible() {
+        if (s_entries.empty()) {
+            s_scrollOffset = 0;
+            return;
+        }
+
+        const int visibleRows = fileListVisibleRowCount();
+        const int maxScroll = fileListMaxScrollRows();
+        if (s_selectedIndex < s_scrollOffset) {
+            s_scrollOffset = s_selectedIndex;
+        } else if (s_selectedIndex >= s_scrollOffset + visibleRows) {
+            s_scrollOffset = s_selectedIndex - visibleRows + 1;
+        }
+
+        if (s_scrollOffset < 0) s_scrollOffset = 0;
+        if (s_scrollOffset > maxScroll) s_scrollOffset = maxScroll;
+    }
+
+    void FileExplorer::scrollFileListByRows(int rows) {
+        if (rows == 0 || s_entries.empty()) return;
+        const int maxScroll = fileListMaxScrollRows();
+        if (maxScroll <= 0) return;
+        const int nextOffset = std::max(0, std::min(s_scrollOffset + rows, maxScroll));
+        if (nextOffset == s_scrollOffset) return;
+        s_scrollOffset = nextOffset;
+        resetFileListClickTracking();
+        updateDisplay();
+    }
+
+    void FileExplorer::resetFileListClickTracking() {
+        s_lastEntryClickRow = -1;
+        s_lastEntryClickTick = 0;
     }
 
     void FileExplorer::beginPrompt(int mode, const std::string& title, const std::string& initialValue) {
@@ -783,11 +893,13 @@ namespace gxos { namespace apps {
 
         if (keyCode == 38 && s_selectedIndex > 0) {
             --s_selectedIndex;
-            if (s_selectedIndex < s_scrollOffset) s_scrollOffset = s_selectedIndex;
+            ensureSelectedFileVisible();
+            resetFileListClickTracking();
             updateDisplay();
         } else if (keyCode == 40 && s_selectedIndex < static_cast<int>(s_entries.size()) - 1) {
             ++s_selectedIndex;
-            if (s_selectedIndex >= s_scrollOffset + kVisibleRows) s_scrollOffset = s_selectedIndex - kVisibleRows + 1;
+            ensureSelectedFileVisible();
+            resetFileListClickTracking();
             updateDisplay();
         } else if (keyCode == 37 && s_rootSelectedIndex > 0) {
             --s_rootSelectedIndex;
@@ -807,13 +919,22 @@ namespace gxos { namespace apps {
             refresh();
             updateDisplay();
         } else if (keyCode == 33) {
-            s_scrollOffset = std::max(0, s_scrollOffset - kVisibleRows);
-            s_selectedIndex = std::max(0, s_selectedIndex - kVisibleRows);
+            const int pageStep = fileListVisibleRowCount();
+            s_selectedIndex = std::max(0, s_selectedIndex - pageStep);
+            ensureSelectedFileVisible();
+            resetFileListClickTracking();
             updateDisplay();
         } else if (keyCode == 34) {
-            int maxIndex = static_cast<int>(s_entries.size()) - 1;
-            s_selectedIndex = std::min(maxIndex, s_selectedIndex + kVisibleRows);
-            s_scrollOffset = std::max(0, std::min(s_selectedIndex, maxIndex - kVisibleRows + 1));
+            const int maxIndex = static_cast<int>(s_entries.size()) - 1;
+            const int pageStep = fileListVisibleRowCount();
+            s_selectedIndex = std::min(maxIndex, s_selectedIndex + pageStep);
+            ensureSelectedFileVisible();
+            resetFileListClickTracking();
+            updateDisplay();
+        } else if (keyCode == 35 && !s_entries.empty()) {
+            s_selectedIndex = static_cast<int>(s_entries.size()) - 1;
+            ensureSelectedFileVisible();
+            resetFileListClickTracking();
             updateDisplay();
         } else if (keyCode == 36) {
             goHome();
@@ -845,6 +966,36 @@ namespace gxos { namespace apps {
             return;
         }
 
+        auto parseWheelSteps = [](const std::string& value, int& steps) {
+            if (value.rfind("wheel", 0) != 0) return false;
+            if (value == "wheel" || value == "wheelup") {
+                steps = 1;
+                return true;
+            }
+            if (value == "wheeldown") {
+                steps = -1;
+                return true;
+            }
+            const size_t colon = value.find(':');
+            if (colon == std::string::npos || colon + 1 >= value.size()) return false;
+            try {
+                steps = std::stoi(value.substr(colon + 1));
+                return steps != 0;
+            } catch (...) {
+                return false;
+            }
+        };
+
+        int wheelSteps = 0;
+        if (parseWheelSteps(action, wheelSteps)) {
+            if (s_promptMode == PromptNone && !s_showDeleteConfirmation &&
+                x >= kLeftPaneW && x < kWindowW && y >= kMainRowsStartY && y < kStatusBarY &&
+                isFileListScrollbarVisible()) {
+                scrollFileListByRows(-wheelSteps * kWheelScrollRowsPerNotch);
+            }
+            return;
+        }
+
         if (s_contextMenuOpen && action == "move") {
             int hover = hitTestContextMenu(x, y);
             if (hover != s_contextMenuHover) {
@@ -863,6 +1014,11 @@ namespace gxos { namespace apps {
             if (button != 2) return;
         }
 
+        if (action == "up" && button == 1) {
+            s_draggingFileListScrollbar = false;
+            return;
+        }
+
         if (button == 2 && action == "down") {
             int rowIndex = hitTestEntryRow(x, y);
             Logger::write(LogLevel::Info, "FileExplorer context menu creation requested row=" + std::to_string(rowIndex));
@@ -875,25 +1031,59 @@ namespace gxos { namespace apps {
 
         if (button == 1 && action == "down") {
             if (handleNavigationPaneClick(x, y)) {
-                s_lastEntryClickRow = -1;
-                s_lastEntryClickTick = 0;
+                resetFileListClickTracking();
+                s_draggingFileListScrollbar = false;
                 return;
             }
+
+            const int scrollbarHit = hitTestFileListScrollbar(x, y);
+            if (scrollbarHit == 1) {
+                s_draggingFileListScrollbar = true;
+                s_fileListScrollbarDragStartY = y;
+                s_fileListScrollbarDragStartOffsetRows = s_scrollOffset;
+                return;
+            }
+            if (scrollbarHit == 2) {
+                scrollFileListByRows(-fileListVisibleRowCount());
+                return;
+            }
+            if (scrollbarHit == 3) {
+                scrollFileListByRows(fileListVisibleRowCount());
+                return;
+            }
+
             int rowIndex = hitTestEntryRow(x, y);
             if (rowIndex >= 0) {
                 uint64_t now = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
                     std::chrono::steady_clock::now().time_since_epoch()).count());
                 if (rowIndex == s_lastEntryClickRow && (now - s_lastEntryClickTick) < kDoubleClickThresholdMs) {
                     s_selectedIndex = rowIndex;
-                    s_lastEntryClickRow = -1;
-                    s_lastEntryClickTick = 0;
+                    resetFileListClickTracking();
+                    ensureSelectedFileVisible();
                     openSelected();
                 } else {
                     s_selectedIndex = rowIndex;
+                    ensureSelectedFileVisible();
                     updateDisplay();
                     s_lastEntryClickRow = rowIndex;
                     s_lastEntryClickTick = now;
                 }
+            } else {
+                resetFileListClickTracking();
+            }
+            return;
+        }
+
+        if (button == 0 && action == "move" && s_draggingFileListScrollbar && isFileListScrollbarVisible()) {
+            const int trackTravel = std::max(1, fileListScrollbarTrackHeight() - fileListScrollbarThumbHeight());
+            const int maxScroll = fileListMaxScrollRows();
+            int nextOffset = s_fileListScrollbarDragStartOffsetRows +
+                ((y - s_fileListScrollbarDragStartY) * maxScroll) / trackTravel;
+            nextOffset = std::max(0, std::min(nextOffset, maxScroll));
+            if (nextOffset != s_scrollOffset) {
+                s_scrollOffset = nextOffset;
+                resetFileListClickTracking();
+                updateDisplay();
             }
         }
     }
@@ -1108,11 +1298,24 @@ namespace gxos { namespace apps {
     }
 
     int FileExplorer::hitTestEntryRow(int x, int y) {
-        if (x < kLeftPaneW || y < kMainRowsStartY) return -1;
-        int row = (y - kMainRowsStartY) / kRowH;
-        if (row < 0 || row >= kVisibleRows) return -1;
-        int index = s_scrollOffset + row;
+        if (x < kLeftPaneW || x >= fileListScrollbarLeft() || y < kMainRowsStartY || y >= kStatusBarY) return -1;
+        const int visibleRows = fileListVisibleRowCount();
+        const int row = (y - kMainRowsStartY) / kRowH;
+        if (row < 0 || row >= visibleRows) return -1;
+        const int index = s_scrollOffset + row;
         return (index >= 0 && index < static_cast<int>(s_entries.size())) ? index : -1;
+    }
+
+    int FileExplorer::hitTestFileListScrollbar(int x, int y) {
+        if (!isFileListScrollbarVisible()) return 0;
+        if (x < fileListScrollbarLeft() || x >= kWindowW) return 0;
+        if (y < fileListScrollbarTrackTop() || y >= fileListScrollbarTrackTop() + fileListScrollbarTrackHeight()) return 0;
+
+        const int thumbTop = fileListScrollbarThumbTop();
+        const int thumbBottom = thumbTop + fileListScrollbarThumbHeight();
+        if (y >= thumbTop && y < thumbBottom) return 1;
+        if (y < thumbTop) return 2;
+        return 3;
     }
 
     int FileExplorer::hitTestContextMenu(int x, int y) {
@@ -1343,10 +1546,12 @@ namespace gxos { namespace apps {
             return;
         }
 
-        int end = std::min(static_cast<int>(s_entries.size()), s_scrollOffset + kVisibleRows);
-        for (int i = s_scrollOffset; i < end; ++i) {
+        const int visibleRows = fileListVisibleRowCount();
+        const int start = std::max(0, std::min(s_scrollOffset, fileListMaxScrollRows()));
+        const int end = std::min(static_cast<int>(s_entries.size()), start + visibleRows);
+        for (int i = start; i < end; ++i) {
             const ExplorerFileEntry& entry = s_entries[i];
-            const int row = i - s_scrollOffset;
+            const int row = i - start;
             const int rowY = kMainRowsStartY + row * kRowH;
             const bool selected = i == s_selectedIndex;
 
@@ -1387,6 +1592,19 @@ namespace gxos { namespace apps {
             drawTextAt(kMainSizeTextX, rowTextY(rowY), entry.isDirectory() ? "" : formatSize(entry.size));
             drawTextAt(kMainTypeTextX, rowTextY(rowY), truncate(entry.type, 14));
             drawTextAt(kMainModifiedTextX, rowTextY(rowY), entry.modified);
+        }
+
+        if (isFileListScrollbarVisible()) {
+            const int trackLeft = fileListScrollbarLeft();
+            const int trackTop = fileListScrollbarTrackTop();
+            const int trackH = fileListScrollbarTrackHeight();
+            const int thumbTop = fileListScrollbarThumbTop();
+            const int thumbH = fileListScrollbarThumbHeight();
+
+            drawRect(trackLeft, trackTop, kFileListScrollbarW, trackH, 236, 238, 242);
+            drawRect(trackLeft, thumbTop, kFileListScrollbarW, thumbH, 150, 160, 176);
+            drawRect(trackLeft, trackTop, kFileListScrollbarW, 1, 208, 212, 220);
+            drawRect(trackLeft, trackTop + trackH - 1, kFileListScrollbarW, 1, 208, 212, 220);
         }
     }
 

@@ -129,9 +129,22 @@ namespace gxos { namespace apps {
         static void refreshTrashDesktopState();
         static bool handleNavigationPaneClick(int x, int y);
         static int hitTestEntryRow(int x, int y);
+        static int hitTestFileListScrollbar(int x, int y);
         static int hitTestContextMenu(int x, int y);
         static void showContextMenuForRow(int rowIndex, int x, int y);
         static bool handleContextMenuClick(int x, int y);
+        static int fileListVisibleRowCount();
+        static int fileListMaxScrollRows();
+        static bool isFileListScrollbarVisible();
+        static int fileListScrollbarLeft();
+        static int fileListScrollbarTrackTop();
+        static int fileListScrollbarTrackHeight();
+        static int fileListScrollbarThumbHeight();
+        static int fileListScrollbarThumbTop();
+        static void clampFileListState();
+        static void ensureSelectedFileVisible();
+        static void scrollFileListByRows(int rows);
+        static void resetFileListClickTracking();
         
         // UI update
         static void updateDisplay();
@@ -152,6 +165,9 @@ namespace gxos { namespace apps {
         static std::vector<std::string> s_forwardHistory;
         static int s_selectedIndex;
         static int s_scrollOffset;
+        static bool s_draggingFileListScrollbar;
+        static int s_fileListScrollbarDragStartY;
+        static int s_fileListScrollbarDragStartOffsetRows;
         static int s_rootSelectedIndex;
         static int s_lastKeyCode;
         static bool s_keyDown;
