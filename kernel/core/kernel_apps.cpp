@@ -3810,6 +3810,19 @@ void FileExplorerApp::onMouseDown(int localX, int localY, uint8_t button) {
     }
 }
 
+void FileExplorerApp::onMouseWheel(int localX, int localY, int wheelDelta) {
+    if (wheelDelta == 0) return;
+    if (m_renamePrompt || m_deleteConfirm || m_propertiesOpen) return;
+    if (localX < LEFT_W) return;
+
+    const int bodyY = TOOLBAR_H + ADDRESS_H;
+    const int listTop = bodyY + kFileExplorerListHeaderH;
+    const int listBottom = m_window ? m_window->h - kFileExplorerListStatusH : listTop;
+    if (localY < listTop || localY >= listBottom) return;
+
+    scrollByRows(-wheelDelta * 3);
+}
+
 bool FileExplorerApp::handleNavigationPaneClick(int localX, int localY) {
     if (localX < 0 || localX >= LEFT_W) return false;
 
@@ -4128,6 +4141,8 @@ void FileExplorerApp::scrollByRows(int rows) {
     if (next > maxScroll) next = maxScroll;
     if (next == m_scroll) return;
     m_scroll = next;
+    m_lastClickIndex = -1;
+    m_lastClickTick = 0;
     invalidate();
 }
 

@@ -207,6 +207,7 @@ public:
     virtual void onMouseMove(int x, int y) {}
     virtual void onMouseDown(int x, int y, uint8_t button) {}
     virtual void onMouseUp(int x, int y, uint8_t button) {}
+    virtual void onMouseWheel(int x, int y, int wheelDelta) {}
     virtual void onKeyDown(uint32_t key) {}
     virtual void onKeyUp(uint32_t key) {}
     virtual void onKeyChar(char c) {}

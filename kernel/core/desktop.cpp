@@ -10696,6 +10696,22 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
     draw_cursor(mx, my);
 }
 
+void handle_mouse_wheel(int32_t mx, int32_t my, int8_t wheelDelta)
+{
+    if (!s_initialized || wheelDelta == 0) return;
+
+    apply_taskbar_layout();
+
+    bool overStartMenu = is_point_in_start_menu(mx, my);
+    bool overModalDialog = is_point_in_modal_dialog(mx, my);
+    bool overUIOverlay = overStartMenu || overModalDialog || s_rightClickMenuOpen;
+    if (overUIOverlay) return;
+
+    if (compositor::KernelCompositor::isPointOverWindow(mx, my)) {
+        compositor::KernelCompositor::handleMouseWheel(mx, my, wheelDelta);
+    }
+}
+
 } // namespace desktop
 } // namespace kernel
 

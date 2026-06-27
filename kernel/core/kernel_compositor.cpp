@@ -648,6 +648,20 @@ void KernelCompositor::handleMouseUp(int32_t mx, int32_t my, uint8_t button) {
     }
 }
 
+void KernelCompositor::handleMouseWheel(int32_t mx, int32_t my, int8_t wheelDelta) {
+    if (!s_initialized || wheelDelta == 0) return;
+
+    app::KernelWindow* hitWin = nullptr;
+    HitTestResult hit = hitTest(mx, my, &hitWin);
+    if (hit != HitTestResult::Client || !hitWin || !hitWin->owner) {
+        return;
+    }
+
+    int localX = mx - hitWin->x;
+    int localY = my - hitWin->y - TITLEBAR_HEIGHT;
+    hitWin->owner->onMouseWheel(localX, localY, wheelDelta);
+}
+
 void KernelCompositor::handleKeyDown(uint32_t keyCode) {
     app::KernelWindow* focused = getFocusedWindow();
     if (focused && focused->owner) {

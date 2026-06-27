@@ -301,6 +301,7 @@ public:
     virtual void onKeyChar(char c) override;
     virtual void onMouseMove(int x, int y) override;
     virtual void onMouseDown(int x, int y, uint8_t button) override;
+    virtual void onMouseWheel(int x, int y, int wheelDelta) override;
     virtual void onWidgetClick(int widgetId) override;
 
     static app::KernelApp* create() { return new FileExplorerApp(); }

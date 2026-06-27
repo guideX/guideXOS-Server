@@ -75,6 +75,9 @@ bool needs_redraw();
 // Routes input to GUI apps, shell, or desktop as appropriate
 void handle_mouse(int32_t mx, int32_t my, uint8_t buttons);
 
+// Process mouse wheel input for the window under the pointer.
+void handle_mouse_wheel(int32_t mx, int32_t my, int8_t wheelDelta);
+
 // Process keyboard input: handle key presses
 // Routes to focused GUI app, shell, or desktop shortcuts
 // Special keys use codes from shell.h (KEY_UP, KEY_DOWN, etc.)

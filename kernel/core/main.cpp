@@ -516,6 +516,8 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
             
             // Poll network for received packets
             kernel::ipv4::poll_network();
+
+            int8_t wheelDelta = kernel::input::mouse_scroll_y();
             
             if (kernel::input::mouse_dirty()) {
                 kernel::input::mouse_clear_dirty();
@@ -523,6 +525,13 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
                     kernel::input::mouse_x(),
                     kernel::input::mouse_y(),
                     kernel::input::mouse_buttons());
+            }
+
+            if (wheelDelta != 0) {
+                kernel::desktop::handle_mouse_wheel(
+                    kernel::input::mouse_x(),
+                    kernel::input::mouse_y(),
+                    wheelDelta);
             }
             
             // Process buffered keyboard input from PS/2 IRQ handler
