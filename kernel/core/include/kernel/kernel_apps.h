@@ -380,6 +380,18 @@ private:
     void openSelected();
     void goUp();
     void updateActionButtons();
+    int visibleRowCount() const;
+    int maxScrollRows() const;
+    bool isScrollbarVisible() const;
+    int scrollbarLeft() const;
+    int scrollbarTrackTop() const;
+    int scrollbarTrackHeight() const;
+    int scrollbarThumbHeight() const;
+    int scrollbarThumbTop() const;
+    void clampSelectionAndScroll();
+    void ensureSelectedVisible();
+    void scrollByRows(int rows);
+    void scrollToPosition(int localY);
     void beginRenameSelected();
     void commitRename();
     void cancelRename();

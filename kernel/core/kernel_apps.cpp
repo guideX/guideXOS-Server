@@ -3289,6 +3289,12 @@ void TaskManagerApp::refreshList() {
 // FileExplorerApp Implementation
 // ============================================================
 
+static const int kFileExplorerListHeaderH = 24;
+static const int kFileExplorerListStatusH = 22;
+static const int kFileExplorerScrollbarW = 8;
+static const int kFileExplorerScrollbarPad = 2;
+static const int kFileExplorerScrollbarMinThumbH = 18;
+
 FileExplorerApp::FileExplorerApp()
     : m_entryCount(0), m_selected(0), m_scroll(0),
       m_lastClickIndex(-1), m_lastClickTick(0),
@@ -3407,13 +3413,6 @@ bool FileExplorerApp::drawArgbIconBuffer(const uint32_t* pixels, uint32_t srcW, 
 
 bool FileExplorerApp::drawThemedIcon(uint32_t x, uint32_t y, uint32_t size, const char* logicalName) {
     const uint32_t* pixels = getEmbeddedIconPixels(logicalName);
-    serial::puts("[fileexplorer-bm] draw icon logical=");
-    serial::puts(logicalName ? logicalName : "<null>");
-    serial::puts(" x="); serial_put_dec(x);
-    serial::puts(" y="); serial_put_dec(y);
-    serial::puts(" size="); serial_put_dec(size);
-    serial::puts(" pixels="); serial::puts(pixels ? "yes" : "no");
-    serial::puts("\n");
     if (!pixels) return false;
     return drawArgbIconBuffer(pixels, kDesktopThemeIconW, kDesktopThemeIconH, x, y, size, size);
 }
@@ -3528,11 +3527,18 @@ void FileExplorerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
         appDrawText(mainX + 8, bodyY + 34, "Empty directory or unavailable path", rgb(120, 120, 120));
     }
 
-    int visibleRows = bodyH > 30 ? (int)((bodyH - 30) / ROW_H) : 0;
-    for (int i = 0; i < visibleRows && m_scroll + i < m_entryCount; ++i) {
-        int entryIndex = m_scroll + i;
+    int visibleRows = visibleRowCount();
+    int start = m_scroll;
+    int maxScroll = maxScrollRows();
+    if (start < 0) start = 0;
+    if (start > maxScroll) start = maxScroll;
+    int end = start + visibleRows;
+    if (end > m_entryCount) end = m_entryCount;
+
+    for (int i = 0; i < end - start; ++i) {
+        int entryIndex = start + i;
         Entry& e = m_entries[entryIndex];
-        uint32_t rowY = bodyY + 24 + i * ROW_H;
+        uint32_t rowY = bodyY + kFileExplorerListHeaderH + i * ROW_H;
         if (entryIndex == m_selected) {
             framebuffer::fill_rect(mainX + 1, rowY - 2, mainW - 2, ROW_H, rgb(200, 220, 245));
         }
@@ -3540,18 +3546,23 @@ void FileExplorerApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
         char sizeText[24];
         formatSize(e.size, sizeText, sizeof(sizeText));
         const char* logicalIcon = fileLogicalIcon(e);
-        serial::puts("[fileexplorer-bm] row file=");
-        serial::puts(e.name);
-        serial::puts(" logical=");
-        serial::puts(logicalIcon);
-        serial::puts(" rowY=");
-        serial_put_dec(rowY);
-        serial::puts("\n");
         if (!drawThemedIcon(mainX + 8, rowY - 2, kIconSize, logicalIcon)) drawPlaceholderIcon(mainX + 8, rowY - 2, kIconSize);
         appDrawText(mainX + 30, rowY, e.name, rgb(20, 20, 20));
         appDrawText(mainX + 250, rowY, e.isDir ? "" : sizeText, rgb(70, 70, 70));
         appDrawText(mainX + 330, rowY, fileType(e), rgb(70, 70, 70));
         appDrawText(mainX + 430, rowY, "--", rgb(110, 110, 110));
+    }
+
+    if (isScrollbarVisible()) {
+        uint32_t sbX = x + (uint32_t)scrollbarLeft();
+        uint32_t sbY = y + (uint32_t)scrollbarTrackTop();
+        uint32_t sbH = (uint32_t)scrollbarTrackHeight();
+        uint32_t thumbY = y + (uint32_t)scrollbarThumbTop();
+        uint32_t thumbH = (uint32_t)scrollbarThumbHeight();
+        framebuffer::fill_rect(sbX, sbY, kFileExplorerScrollbarW, sbH, rgb(236, 238, 242));
+        framebuffer::fill_rect(sbX, thumbY, kFileExplorerScrollbarW, thumbH, rgb(150, 160, 176));
+        framebuffer::fill_rect(sbX, sbY, kFileExplorerScrollbarW, 1, rgb(208, 212, 220));
+        framebuffer::fill_rect(sbX, sbY + sbH - 1, kFileExplorerScrollbarW, 1, rgb(208, 212, 220));
     }
 
     framebuffer::fill_rect(x, y + h - statusH, w, statusH, rgb(235, 235, 235));
@@ -3653,14 +3664,14 @@ void FileExplorerApp::onKeyDown(uint32_t key) {
     if (key == shell::KEY_UP) {
         if (m_selected > 0) {
             m_selected--;
-            if (m_selected < m_scroll) m_scroll = m_selected;
+            ensureSelectedVisible();
             updateActionButtons();
             invalidate();
         }
     } else if (key == shell::KEY_DOWN) {
         if (m_selected < m_entryCount - 1) {
             m_selected++;
-            if (m_selected >= m_scroll + 20) m_scroll = m_selected - 19;
+            ensureSelectedVisible();
             updateActionButtons();
             invalidate();
         }
@@ -3671,17 +3682,29 @@ void FileExplorerApp::onKeyDown(uint32_t key) {
     } else if (key == shell::KEY_DELETE) {
         showDeleteConfirmation();
     } else if (key == shell::KEY_PGUP) {
-        m_selected -= 20;
+        if (m_entryCount <= 0) {
+            m_selected = 0;
+            m_scroll = 0;
+            invalidate();
+            return;
+        }
+        int step = visibleRowCount();
+        m_selected -= step;
         if (m_selected < 0) m_selected = 0;
-        m_scroll -= 20;
-        if (m_scroll < 0) m_scroll = 0;
+        ensureSelectedVisible();
         updateActionButtons();
         invalidate();
     } else if (key == shell::KEY_PGDN) {
-        m_selected += 20;
+        if (m_entryCount <= 0) {
+            m_selected = 0;
+            m_scroll = 0;
+            invalidate();
+            return;
+        }
+        int step = visibleRowCount();
+        m_selected += step;
         if (m_selected >= m_entryCount) m_selected = m_entryCount - 1;
-        m_scroll += 20;
-        if (m_scroll > m_selected) m_scroll = m_selected;
+        ensureSelectedVisible();
         updateActionButtons();
         invalidate();
     } else if (key == 'r' || key == 'R') {
@@ -3737,6 +3760,16 @@ void FileExplorerApp::onMouseDown(int localX, int localY, uint8_t button) {
     }
 
     int bodyY = TOOLBAR_H + ADDRESS_H;
+    if (button == 1 && isScrollbarVisible()) {
+        int sbLeft = scrollbarLeft();
+        int rowsTop = bodyY + kFileExplorerListHeaderH;
+        int rowsBottom = m_window ? m_window->h - kFileExplorerListStatusH : rowsTop;
+        if (localX >= sbLeft && localX < sbLeft + kFileExplorerScrollbarW && localY >= rowsTop && localY < rowsBottom) {
+            scrollToPosition(localY);
+            return;
+        }
+    }
+
     int index = hitTestEntryRow(localX, localY);
 
     if (button == 2) {
@@ -3760,7 +3793,7 @@ void FileExplorerApp::onMouseDown(int localX, int localY, uint8_t button) {
         return;
     }
 
-    if (localX < LEFT_W || localY < bodyY + 24) return;
+    if (localX < LEFT_W || localY < bodyY + kFileExplorerListHeaderH) return;
 
     if (index >= 0 && index < m_entryCount) {
         uint64_t now = pit::ticks();
@@ -3781,7 +3814,7 @@ bool FileExplorerApp::handleNavigationPaneClick(int localX, int localY) {
     if (localX < 0 || localX >= LEFT_W) return false;
 
     const int bodyY = TOOLBAR_H + ADDRESS_H;
-    const int rootTop = bodyY + 24;
+    const int rootTop = bodyY + kFileExplorerListHeaderH;
     const int mountsTop = bodyY + 40;
     const int mountRowsTop = bodyY + 60;
 
@@ -3838,6 +3871,11 @@ void FileExplorerApp::onWidgetClick(int widgetId) {
 
 void FileExplorerApp::refresh() {
     m_entryCount = 0;
+    m_selected = 0;
+    m_scroll = 0;
+    m_lastClickIndex = -1;
+    m_lastClickTick = 0;
+    closeTransientUi();
     uint8_t dir = vfs::opendir(m_currentPath);
     if (dir == 0xFF) {
         setStatus("Cannot open directory. Mount a filesystem with vfsmount if needed.");
@@ -3845,6 +3883,7 @@ void FileExplorerApp::refresh() {
     }
 
     vfs::DirEntry de{};
+    bool hasMore = false;
     while (m_entryCount < MAX_ENTRIES && vfs::readdir(dir, &de)) {
         if (de.name[0] == '.' && (de.name[1] == '\0' ||
             (de.name[1] == '.' && de.name[2] == '\0'))) {
@@ -3855,6 +3894,9 @@ void FileExplorerApp::refresh() {
         m_entries[m_entryCount].isDir = (de.type == vfs::FILE_TYPE_DIRECTORY);
         m_entries[m_entryCount].size = de.size;
         m_entryCount++;
+    }
+    if (m_entryCount >= MAX_ENTRIES && vfs::readdir(dir, &de)) {
+        hasMore = true;
     }
     vfs::closedir(dir);
 
@@ -3884,11 +3926,12 @@ void FileExplorerApp::refresh() {
         }
     }
 
-    if (m_selected >= m_entryCount) m_selected = m_entryCount - 1;
-    if (m_selected < 0) m_selected = 0;
-    if (m_scroll > m_selected) m_scroll = m_selected;
+    clampSelectionAndScroll();
+
     if (m_entryCount == 0) {
         setStatus("Directory is empty");
+    } else if (hasMore) {
+        setStatus("Showing first 128 entries; more items available");
     } else {
         setStatus("Ready");
     }
@@ -3976,6 +4019,137 @@ void FileExplorerApp::updateActionButtons() {
     if (deleteFolder) deleteFolder->visible = hasSelection && isDir && !m_renamePrompt && !m_deleteConfirm;
     if (confirmDelete) confirmDelete->visible = m_deleteConfirm;
     if (cancelDelete) cancelDelete->visible = m_deleteConfirm;
+}
+
+int FileExplorerApp::visibleRowCount() const {
+    if (!m_window) return 1;
+    int rowsTop = TOOLBAR_H + ADDRESS_H + kFileExplorerListHeaderH;
+    int rowsBottom = m_window->h - kFileExplorerListStatusH;
+    int rows = (rowsBottom > rowsTop) ? ((rowsBottom - rowsTop) / ROW_H) : 0;
+    return rows > 0 ? rows : 1;
+}
+
+int FileExplorerApp::maxScrollRows() const {
+    int visible = visibleRowCount();
+    return m_entryCount > visible ? (m_entryCount - visible) : 0;
+}
+
+bool FileExplorerApp::isScrollbarVisible() const {
+    return maxScrollRows() > 0;
+}
+
+int FileExplorerApp::scrollbarLeft() const {
+    if (!m_window) return 0;
+    return m_window->w - kFileExplorerScrollbarPad - kFileExplorerScrollbarW;
+}
+
+int FileExplorerApp::scrollbarTrackTop() const {
+    return TOOLBAR_H + ADDRESS_H + kFileExplorerListHeaderH + kFileExplorerScrollbarPad;
+}
+
+int FileExplorerApp::scrollbarTrackHeight() const {
+    if (!m_window) return 0;
+    int rowsTop = TOOLBAR_H + ADDRESS_H + kFileExplorerListHeaderH;
+    int rowsBottom = m_window->h - kFileExplorerListStatusH;
+    int trackH = rowsBottom - rowsTop - (kFileExplorerScrollbarPad * 2);
+    return trackH > 0 ? trackH : 1;
+}
+
+int FileExplorerApp::scrollbarThumbHeight() const {
+    if (!isScrollbarVisible()) return 0;
+    int visible = visibleRowCount();
+    int total = m_entryCount > 0 ? m_entryCount : 1;
+    int trackH = scrollbarTrackHeight();
+    int thumbH = (trackH * visible) / total;
+    if (thumbH < kFileExplorerScrollbarMinThumbH) thumbH = kFileExplorerScrollbarMinThumbH;
+    if (thumbH > trackH) thumbH = trackH;
+    return thumbH;
+}
+
+int FileExplorerApp::scrollbarThumbTop() const {
+    if (!isScrollbarVisible()) return scrollbarTrackTop();
+    int maxScroll = maxScrollRows();
+    int trackTop = scrollbarTrackTop();
+    int trackTravel = scrollbarTrackHeight() - scrollbarThumbHeight();
+    if (trackTravel <= 0 || maxScroll <= 0) return trackTop;
+    int offset = m_scroll;
+    if (offset < 0) offset = 0;
+    if (offset > maxScroll) offset = maxScroll;
+    return trackTop + (trackTravel * offset) / maxScroll;
+}
+
+void FileExplorerApp::ensureSelectedVisible() {
+    if (m_entryCount <= 0) {
+        m_selected = 0;
+        m_scroll = 0;
+        return;
+    }
+
+    int visible = visibleRowCount();
+    int maxScroll = maxScrollRows();
+
+    if (m_selected < 0) m_selected = 0;
+    if (m_selected >= m_entryCount) m_selected = m_entryCount - 1;
+
+    if (m_scroll < 0) m_scroll = 0;
+    if (m_scroll > maxScroll) m_scroll = maxScroll;
+
+    if (m_selected < m_scroll) {
+        m_scroll = m_selected;
+    } else if (m_selected >= m_scroll + visible) {
+        m_scroll = m_selected - visible + 1;
+    }
+
+    if (m_scroll < 0) m_scroll = 0;
+    if (m_scroll > maxScroll) m_scroll = maxScroll;
+}
+
+void FileExplorerApp::clampSelectionAndScroll() {
+    if (m_entryCount <= 0) {
+        m_selected = 0;
+        m_scroll = 0;
+        return;
+    }
+
+    if (m_selected < 0) m_selected = 0;
+    if (m_selected >= m_entryCount) m_selected = m_entryCount - 1;
+    if (m_scroll < 0) m_scroll = 0;
+    int maxScroll = maxScrollRows();
+    if (m_scroll > maxScroll) m_scroll = maxScroll;
+    ensureSelectedVisible();
+}
+
+void FileExplorerApp::scrollByRows(int rows) {
+    if (rows == 0 || m_entryCount <= 0) return;
+    int maxScroll = maxScrollRows();
+    if (maxScroll <= 0) return;
+    int next = m_scroll + rows;
+    if (next < 0) next = 0;
+    if (next > maxScroll) next = maxScroll;
+    if (next == m_scroll) return;
+    m_scroll = next;
+    invalidate();
+}
+
+void FileExplorerApp::scrollToPosition(int localY) {
+    if (!isScrollbarVisible()) return;
+    int maxScroll = maxScrollRows();
+    if (maxScroll <= 0) return;
+
+    int trackTop = scrollbarTrackTop();
+    int trackTravel = scrollbarTrackHeight() - scrollbarThumbHeight();
+    if (trackTravel <= 0) return;
+
+    int centered = localY - trackTop - (scrollbarThumbHeight() / 2);
+    if (centered < 0) centered = 0;
+    if (centered > trackTravel) centered = trackTravel;
+
+    int next = (centered * maxScroll + (trackTravel / 2)) / trackTravel;
+    if (next < 0) next = 0;
+    if (next > maxScroll) next = maxScroll;
+    if (next == m_scroll) return;
+    m_scroll = next;
+    invalidate();
 }
 
 void FileExplorerApp::beginRenameSelected() {
@@ -4206,8 +4380,9 @@ bool FileExplorerApp::handleContextMenuClick(int x, int y) {
 
 int FileExplorerApp::hitTestEntryRow(int x, int y) const {
     int bodyY = TOOLBAR_H + ADDRESS_H;
-    if (x < LEFT_W || y < bodyY + 24) return -1;
-    int row = (y - bodyY - 24) / ROW_H;
+    if (x < LEFT_W || y < bodyY + kFileExplorerListHeaderH) return -1;
+    if (isScrollbarVisible() && x >= scrollbarLeft()) return -1;
+    int row = (y - bodyY - kFileExplorerListHeaderH) / ROW_H;
     int index = m_scroll + row;
     return (index >= 0 && index < m_entryCount) ? index : -1;
 }

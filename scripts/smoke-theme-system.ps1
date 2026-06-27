@@ -191,9 +191,12 @@ $themeIntroMatch = Find-FirstMatch $displayOptions 'Choose a desktop theme\. Cla
 $classicOptionMatch = Find-RawMatch $displayOptions 'drawThemeOption\(\s*kThemeOptionX,\s*kThemeOptionY,\s*DesktopThemeId::Classic,.*?Current guideXOS look\.'
 $sciFiOptionMatch = Find-RawMatch $displayOptions 'drawThemeOption\(\s*kThemeOptionX,\s*kThemeOptionY \+ kThemeOptionH \+ kThemeOptionGap,\s*DesktopThemeId::SciFi,.*?Dark futuristic hosted UI\.'
 $controlPanelThemeHelperMatch = Find-FirstMatch $controlPanel 'ControlPanelBodyColor|ControlPanelPanelColor|ControlPanelCardColor|ControlPanelCardHoverColor|ControlPanelCardSelectedColor|ControlPanelBorderColor|ControlPanelTextColor|ControlPanelMutedTextColor|ControlPanelAccentColor|GetCurrentDesktopThemeId|GetCurrentDesktopTheme|DesktopThemeId::SciFi'
+$controlPanelGridTopMatch = Find-RawMatch $controlPanel 'void ControlPanel::render\(\).*?int itemY = kGridTop \+ row \* \(ITEM_H \+ GAP\);.*?void ControlPanel::handleMouseDown\(int mx, int my\).*?int itemY = kGridTop \+ row \* \(ITEM_H \+ GAP\);'
 $controlPanelPerEffectMatch = Find-FirstMatch $controlPanel 'Visual Effects|per-effect'
 $phase3bHeadingMatch = Find-FirstMatch $planDoc '## Phase 3B'
 $phase3bBodyMatch = Find-FirstMatch $planDoc 'second app-surface pilot|Control Panel is the second app surface to receive Sci Fi polish|conservative panel/card/accent treatment|Classic is preserved and stays visually close to the current Control Panel look|No new effects were added|No new per-effect theme controls were introduced|Broad app redesign remains deferred|Future app polish should continue one app at a time'
+$phase3b1HeadingMatch = Find-FirstMatch $planDoc '## Phase 3B\.1'
+$phase3b1BodyMatch = Find-FirstMatch $planDoc 'stabilization-only review pass for the Control Panel app-surface pilot|Control Panel surface helpers were reviewed and kept centralized|Classic preservation was confirmed|No new effects, controls, rounded behavior, or layout redesign were added|shared grid top offset remains in place|Future app polish should remain one app at a time'
 
 $checks = @(
     [pscustomobject]@{ Name = "theme header exists"; Pass = (Test-Path -LiteralPath $themeHeader); Match = $null },
@@ -284,9 +287,12 @@ $checks = @(
     [pscustomobject]@{ Name = "display options feature summary"; Pass = $null -ne $themeFeatureSummaryMatch; Match = $themeFeatureSummaryMatch },
     [pscustomobject]@{ Name = "display options save reload note"; Pass = $null -ne $themeSaveReloadMatch; Match = $themeSaveReloadMatch },
     [pscustomobject]@{ Name = "control panel theme helpers wired"; Pass = $null -ne $controlPanelThemeHelperMatch; Match = $controlPanelThemeHelperMatch },
+    [pscustomobject]@{ Name = "control panel grid top synchronized"; Pass = $null -ne $controlPanelGridTopMatch; Match = $controlPanelGridTopMatch },
     [pscustomobject]@{ Name = "control panel no per-effect controls"; Pass = $null -eq $controlPanelPerEffectMatch; Match = $controlPanelPerEffectMatch },
     [pscustomobject]@{ Name = "phase 3b docs heading"; Pass = $null -ne $phase3bHeadingMatch; Match = $phase3bHeadingMatch },
     [pscustomobject]@{ Name = "phase 3b docs body"; Pass = $null -ne $phase3bBodyMatch; Match = $phase3bBodyMatch },
+    [pscustomobject]@{ Name = "phase 3b1 docs heading"; Pass = $null -ne $phase3b1HeadingMatch; Match = $phase3b1HeadingMatch },
+    [pscustomobject]@{ Name = "phase 3b1 docs body"; Pass = $null -ne $phase3b1BodyMatch; Match = $phase3b1BodyMatch },
     [pscustomobject]@{ Name = "compositor start button rect helper wired"; Pass = $null -ne $compositorStartButtonRectMatch; Match = $compositorStartButtonRectMatch }
 )
 

@@ -229,6 +229,16 @@ Phase 3B is the second app-surface pilot for the guideXOS Server theme system.
 * Broad app redesign remains deferred.
 * Future app polish should continue one app at a time.
 
+## Phase 3B.1
+
+Phase 3B.1 is a stabilization-only review pass for the Control Panel app-surface pilot.
+
+* Control Panel surface helpers were reviewed and kept centralized.
+* Classic preservation was confirmed, with no visible fallback changes needed to restore the prior familiar look.
+* No new effects, controls, rounded behavior, or layout redesign were added.
+* The existing shared grid top offset remains in place for both drawing and hit-testing.
+* Future app polish should remain one app at a time.
+
 ## Manual Validation Runbook
 
 * Start the hosted server executable.

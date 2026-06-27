@@ -612,7 +612,9 @@ namespace gxos { namespace apps {
         ensureSelectedFileVisible();
         resetFileListClickTracking();
         s_loading = false;
-        s_status = s_hasMoreEntries ? "Showing first page; more items available" : "Ready";
+        s_status = s_hasMoreEntries
+            ? ("Showing first " + std::to_string(kLazyPageSize) + " entries; more items available")
+            : "Ready";
     }
 
     int FileExplorer::fileListVisibleRowCount() {
@@ -1145,12 +1147,6 @@ namespace gxos { namespace apps {
 
     void FileExplorer::drawIcon(const std::string& logicalIconName, int x, int y, int iconSize) {
         const std::string path = gui::IconThemeManager::Instance().ResolveIconPath(logicalIconName, iconSize);
-        Logger::write(LogLevel::Info,
-            std::string("FileExplorer::drawIcon logical=") + logicalIconName +
-            " path=" + (path.empty() ? "<empty>" : path) +
-            " x=" + std::to_string(x) +
-            " y=" + std::to_string(y) +
-            " size=" + std::to_string(iconSize));
 
         if (path.empty()) {
             drawDebugPlaceholder(x, y, iconSize);
@@ -1534,10 +1530,6 @@ namespace gxos { namespace apps {
             const char* iconName = FileIconProvider::logicalIconNameForEntry(root);
             drawIcon(iconName, kNavIconX, rowIconY(y, kNavIconSize), kNavIconSize);
             drawTextAt(kNavTextX, rowTextY(y), marker + truncate(root.name, 22));
-            Logger::write(LogLevel::Info,
-                std::string("FileExplorer nav icon root=") + root.name +
-                " logical=" + iconName +
-                " y=" + std::to_string(y));
             y += kRowH;
         }
 
@@ -1579,30 +1571,6 @@ namespace gxos { namespace apps {
             const FileIconType iconType = FileIconProvider::iconTypeForEntry(entry);
             const char* iconName = FileIconProvider::logicalIconName(iconType);
             drawIcon(iconName, kMainIconX, rowIconY(rowY, kIconSize), kIconSize);
-
-            auto iconTypeText = [&](FileIconType type) {
-                switch (type) {
-                    case FileIconType::Folder: return "Folder";
-                    case FileIconType::SystemFolder: return "SystemFolder";
-                    case FileIconType::Drive: return "Drive";
-                    case FileIconType::MountedDrive: return "MountedDrive";
-                    case FileIconType::TextFile: return "TextFile";
-                    case FileIconType::ImageFile: return "ImageFile";
-                    case FileIconType::BinaryFile: return "BinaryFile";
-                    case FileIconType::Application: return "Application";
-                    case FileIconType::UnknownFile: return "UnknownFile";
-                }
-                return "UnknownFile";
-            };
-
-            Logger::write(LogLevel::Info,
-                std::string("FileExplorer row file=") + entry.name +
-                " iconType=" + iconTypeText(iconType) +
-                " logical=" + iconName +
-                " resolved=" + gui::IconThemeManager::Instance().ResolveIconPath(iconName, kIconSize) +
-                " x=" + std::to_string(kMainIconX) +
-                " y=" + std::to_string(rowY) +
-                " size=" + std::to_string(kIconSize));
 
             const std::string prefix = selected ? "> " : "  ";
             drawTextAt(kMainNameTextX, rowTextY(rowY), prefix + truncate(entry.name, 26));
