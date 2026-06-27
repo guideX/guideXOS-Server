@@ -5,7 +5,7 @@
   "desktop.background.scale": "fill",
   "desktop.taskbar.position": "bottom",
   "pinned": ["ComputerFiles","Trash","App Model Demo","Native App Debug Viewer","Hello World","Resource Viewer","Future GXApp Package","HelloWorld ELF"],
-  "recent": ["guideXOS Navigator","DisplayOptions","Console","App Model Demo","Hello World","Resource Viewer","Notepad","ControlPanel","Calculator","ComputerFiles","HelloWorld ELF","Native App Debug Viewer","TaskManager","Future GXApp Package","HDInstaller"],
+  "recent": ["ComputerFiles","guideXOS Navigator","DisplayOptions","Console","App Model Demo","Hello World","Resource Viewer","Notepad","ControlPanel","Calculator","HelloWorld ELF","Native App Debug Viewer","TaskManager","Future GXApp Package","HDInstaller"],
   "desktopShortcuts": [
   ],
   "showDesktopTrash": true,
