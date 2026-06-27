@@ -4,6 +4,8 @@
 #include "include/kernel/serial_debug.h"
 #include "include/kernel/vfs.h"
 
+namespace serial = kernel::serial;
+
 #define STBI_ONLY_PNG
 #define STBI_NO_STDIO
 #define STBI_NO_HDR
@@ -21,9 +23,10 @@ static void* gxos_kernel_stbi_malloc(size_t size)
 
 static void gxos_kernel_stbi_free(void*)
 {
-    // Kernel delete/free is intentionally a no-op today. Navigator prepares a
-    // bounded number of per-page images, so this follows the existing kernel
-    // bump-allocation model without adding a second allocator.
+    // The bare-metal image path keeps STBI's decoded buffer as the final
+    // persistent pixel storage, so this allocator does not recycle memory.
+    // The kernel heap is a bump allocator and the image viewer loads one image
+    // at a time, so we keep the model simple and deterministic here.
 }
 
 static void* gxos_kernel_stbi_realloc_sized(void* ptr, size_t oldSize, size_t newSize)
@@ -57,13 +60,16 @@ namespace gxos {
 namespace gui {
 namespace {
 
-// Keep the kernel-side preview path bounded, but large enough for wallpaper-sized PNGs.
-static const uint32_t kKernelImageDefaultMaxBytes = 8u * 1024u * 1024u;
+// Keep the kernel-side preview path bounded, but large enough for the
+// wallpaper pack. All current background PNGs stay under 4 MB encoded.
+static const uint32_t kKernelImageDefaultMaxBytes = 4u * 1024u * 1024u;
 static const uint32_t kKernelImageFileScratchBytes = kKernelImageDefaultMaxBytes;
+static const uint64_t kKernelImageHeapSlackBytes = 64u * 1024u;
 static uint8_t s_kernelImageFileScratch[kKernelImageFileScratchBytes];
 
 #if defined(GXOS_BARE_METAL)
 extern "C" size_t gxos_kernel_heap_free_bytes();
+extern "C" size_t gxos_kernel_heap_total_bytes();
 #endif
 
 static bool ends_with_png(const char* path)
@@ -108,41 +114,207 @@ static bool dimensions_within_limits(uint32_t width, uint32_t height, const Imag
     return pixels <= limits.maxPixels;
 }
 
-static bool decoded_image_fits_kernel_heap(uint32_t width, uint32_t height)
+static bool estimate_image_memory(uint32_t width, uint32_t height, uint64_t& decodedBytes, uint64_t& requiredBytes)
 {
-#if defined(GXOS_BARE_METAL)
+    decodedBytes = 0;
+    requiredBytes = 0;
     if (width == 0 || height == 0) return false;
 
-    const uint64_t decodedBytes = (uint64_t)width * (uint64_t)height * sizeof(uint32_t);
-    const uint64_t heapFree = gxos_kernel_heap_free_bytes();
+    const uint64_t pixels = (uint64_t)width * (uint64_t)height;
+    if (pixels == 0 || pixels > (uint64_t)(~0ULL / sizeof(uint32_t))) {
+        return false;
+    }
 
-    // The bare-metal loader currently keeps one decoded ARGB buffer and a
-    // second converted pixel buffer alive during the load path, so we need to
-    // leave room for both plus a little allocator slack.
-    const uint64_t requiredBytes = decodedBytes * 2u + 64u * 1024u;
-    return requiredBytes <= heapFree;
-#else
-    (void)width;
-    (void)height;
+    decodedBytes = pixels * sizeof(uint32_t);
+    if (decodedBytes > (uint64_t)(~0ULL - kKernelImageHeapSlackBytes)) {
+        return false;
+    }
+
+    requiredBytes = decodedBytes + kKernelImageHeapSlackBytes;
     return true;
-#endif
 }
 
-static bool is_default_limits(const ImageSafetyLimits& limits)
+static void log_image_rejection(const char* path, ImageLoadStatus status, uint64_t encodedBytes, uint32_t width, uint32_t height, uint64_t requiredBytes, uint64_t heapFreeBytes, uint64_t heapTotalBytes)
 {
-    ImageSafetyLimits defaultLimits = DefaultImageSafetyLimits();
-    return limits.maxBytes == defaultLimits.maxBytes &&
-           limits.maxWidth == defaultLimits.maxWidth &&
-           limits.maxHeight == defaultLimits.maxHeight &&
-           limits.maxPixels == defaultLimits.maxPixels;
+#if defined(GXOS_BARE_METAL)
+    serial::puts("[IMAGEVIEWER-RUNTIME-SMOKE] reject path=");
+    serial::puts(path ? path : "(none)");
+    serial::puts(" status=");
+    serial::puts(ImageLoadStatusName(status));
+    serial::puts(" encodedBytes=0x");
+    serial::put_hex64(encodedBytes);
+    serial::puts(" dims=0x");
+    serial::put_hex32(width);
+    serial::putc('x');
+    serial::put_hex32(height);
+    serial::puts(" requiredBytes=0x");
+    serial::put_hex64(requiredBytes);
+    serial::puts(" heapFree=0x");
+    serial::put_hex64(heapFreeBytes);
+    serial::puts(" heapTotal=0x");
+    serial::put_hex64(heapTotalBytes);
+    serial::puts("\n");
+#else
+    (void)path;
+    (void)status;
+    (void)encodedBytes;
+    (void)width;
+    (void)height;
+    (void)requiredBytes;
+    (void)heapFreeBytes;
+    (void)heapTotalBytes;
+#endif
 }
 
 static ImageSafetyLimits resolve_bare_metal_limits(const ImageSafetyLimits& limits)
 {
-    if (!is_default_limits(limits)) return limits;
-    ImageSafetyLimits resolved = limits;
-    resolved.maxBytes = kKernelImageDefaultMaxBytes;
-    return resolved;
+    return limits;
+}
+
+static ImageProbe probe_bytes_impl(const uint8_t* bytes, uint32_t byteCount, const ImageSafetyLimits& limits, const char* path)
+{
+    ImageProbe probe{};
+    probe.status = ImageLoadStatus::UnsupportedFormat;
+    probe.width = 0;
+    probe.height = 0;
+
+    if (!bytes || byteCount == 0) {
+        probe.status = ImageLoadStatus::NotFound;
+        return probe;
+    }
+
+    if (byteCount > limits.maxBytes || byteCount > kKernelImageFileScratchBytes) {
+#if defined(GXOS_BARE_METAL)
+        log_image_rejection(path, ImageLoadStatus::TooLarge, byteCount, 0, 0, 0, gxos_kernel_heap_free_bytes(), gxos_kernel_heap_total_bytes());
+#endif
+        probe.status = ImageLoadStatus::TooLarge;
+        return probe;
+    }
+
+    uint32_t width = 0;
+    uint32_t height = 0;
+    if (!png_header_size(bytes, byteCount, width, height)) {
+        probe.status = ImageLoadStatus::UnsupportedFormat;
+        return probe;
+    }
+
+    probe.width = width;
+    probe.height = height;
+    if (!dimensions_within_limits(width, height, limits)) {
+#if defined(GXOS_BARE_METAL)
+        uint64_t decodedBytes = 0;
+        uint64_t requiredBytes = 0;
+        if (!estimate_image_memory(width, height, decodedBytes, requiredBytes)) {
+            requiredBytes = 0;
+        }
+        log_image_rejection(path, ImageLoadStatus::TooLarge, byteCount, width, height, requiredBytes, gxos_kernel_heap_free_bytes(), gxos_kernel_heap_total_bytes());
+#endif
+        probe.status = ImageLoadStatus::TooLarge;
+        return probe;
+    }
+
+#if defined(GXOS_BARE_METAL)
+    uint64_t decodedBytes = 0;
+    uint64_t requiredBytes = 0;
+    if (!estimate_image_memory(width, height, decodedBytes, requiredBytes)) {
+        log_image_rejection(path, ImageLoadStatus::TooLarge, byteCount, width, height, 0, gxos_kernel_heap_free_bytes(), gxos_kernel_heap_total_bytes());
+        probe.status = ImageLoadStatus::TooLarge;
+        return probe;
+    }
+
+    const uint64_t heapFree = gxos_kernel_heap_free_bytes();
+    if (requiredBytes > heapFree) {
+        log_image_rejection(path, ImageLoadStatus::TooLarge, byteCount, width, height, requiredBytes, heapFree, gxos_kernel_heap_total_bytes());
+        probe.status = ImageLoadStatus::TooLarge;
+        return probe;
+    }
+#endif
+
+    probe.status = ImageLoadStatus::Ok;
+    return probe;
+}
+
+static ImageBitmap load_bytes_impl(const uint8_t* bytes, uint32_t byteCount, const ImageSafetyLimits& limits, const char* path)
+{
+    ImageProbe probe = probe_bytes_impl(bytes, byteCount, limits, path);
+    ImageBitmap bitmap{};
+    bitmap.status = probe.status;
+    bitmap.pixels = nullptr;
+    bitmap.width = probe.width;
+    bitmap.height = probe.height;
+    if (probe.status != ImageLoadStatus::Ok) return bitmap;
+    if (byteCount > 0x7FFFFFFFu) {
+        bitmap.status = ImageLoadStatus::TooLarge;
+        return bitmap;
+    }
+
+#if defined(GXOS_IMAGEVIEWER_BARE_METAL_RUNTIME_SMOKE_ACTIVE) && defined(GXOS_BARE_METAL)
+    serial::puts("[IMAGEVIEWER-RUNTIME-SMOKE] adapter stbi begin byteCount=");
+    serial::put_hex32(byteCount);
+    serial::puts(" dims=");
+    serial::put_hex32(bitmap.width);
+    serial::putc('x');
+    serial::put_hex32(bitmap.height);
+    serial::puts("\n");
+#endif
+    int width = 0;
+    int height = 0;
+    int sourceChannels = 0;
+    stbi_uc* decoded = stbi_load_from_memory(bytes, (int)byteCount, &width, &height, &sourceChannels, 4);
+    if (!decoded || width <= 0 || height <= 0) {
+        bitmap.status = ImageLoadStatus::OutOfMemory;
+        if (decoded) stbi_image_free(decoded);
+#if defined(GXOS_BARE_METAL)
+        uint64_t decodedBytes = 0;
+        uint64_t requiredBytes = 0;
+        if (!estimate_image_memory(probe.width, probe.height, decodedBytes, requiredBytes)) {
+            requiredBytes = 0;
+        }
+        log_image_rejection(path, bitmap.status, byteCount, probe.width, probe.height, requiredBytes, gxos_kernel_heap_free_bytes(), gxos_kernel_heap_total_bytes());
+#endif
+        return bitmap;
+    }
+
+    if (!dimensions_within_limits((uint32_t)width, (uint32_t)height, limits)) {
+        bitmap.status = ImageLoadStatus::TooLarge;
+        stbi_image_free(decoded);
+#if defined(GXOS_BARE_METAL)
+        uint64_t decodedBytes = 0;
+        uint64_t requiredBytes = 0;
+        if (estimate_image_memory((uint32_t)width, (uint32_t)height, decodedBytes, requiredBytes)) {
+            log_image_rejection(path, bitmap.status, byteCount, (uint32_t)width, (uint32_t)height, requiredBytes, gxos_kernel_heap_free_bytes(), gxos_kernel_heap_total_bytes());
+        }
+#endif
+        return bitmap;
+    }
+
+    uint64_t pixelCount64 = (uint64_t)width * (uint64_t)height;
+    if (pixelCount64 > (uint64_t)(~0ULL / sizeof(uint32_t))) {
+        bitmap.status = ImageLoadStatus::TooLarge;
+        stbi_image_free(decoded);
+        return bitmap;
+    }
+
+    // Reuse STBI's decoded RGBA buffer as the final image storage. Swapping the
+    // red and blue bytes in place avoids allocating and copying a second full
+    // pixel buffer on bare metal.
+    uint8_t* pixelBytes = reinterpret_cast<uint8_t*>(decoded);
+    const uint64_t totalPixels = pixelCount64;
+    for (uint64_t i = 0; i < totalPixels; ++i) {
+        uint8_t* px = pixelBytes + i * 4u;
+        uint8_t tmp = px[0];
+        px[0] = px[2];
+        px[2] = tmp;
+    }
+
+    bitmap.status = ImageLoadStatus::Ok;
+    bitmap.pixels = reinterpret_cast<const uint32_t*>(decoded);
+    bitmap.width = (uint32_t)width;
+    bitmap.height = (uint32_t)height;
+#if defined(GXOS_IMAGEVIEWER_BARE_METAL_RUNTIME_SMOKE_ACTIVE) && defined(GXOS_BARE_METAL)
+    serial::puts("[IMAGEVIEWER-RUNTIME-SMOKE] adapter stbi end status=Loaded\n");
+#endif
+    return bitmap;
 }
 
 } // namespace
@@ -163,40 +335,7 @@ const char* ImageLoadStatusName(ImageLoadStatus status)
 ImageProbe ImageAdapter::ProbeBytes(const uint8_t* bytes, uint32_t byteCount, const ImageSafetyLimits& limits)
 {
     ImageSafetyLimits effectiveLimits = resolve_bare_metal_limits(limits);
-    ImageProbe probe{};
-    probe.status = ImageLoadStatus::UnsupportedFormat;
-    probe.width = 0;
-    probe.height = 0;
-
-    if (!bytes || byteCount == 0) {
-        probe.status = ImageLoadStatus::NotFound;
-        return probe;
-    }
-    if (byteCount > effectiveLimits.maxBytes) {
-        probe.status = ImageLoadStatus::TooLarge;
-        return probe;
-    }
-
-    uint32_t width = 0;
-    uint32_t height = 0;
-    if (!png_header_size(bytes, byteCount, width, height)) {
-        probe.status = ImageLoadStatus::UnsupportedFormat;
-        return probe;
-    }
-
-    probe.width = width;
-    probe.height = height;
-    if (!dimensions_within_limits(width, height, effectiveLimits)) {
-        probe.status = ImageLoadStatus::TooLarge;
-        return probe;
-    }
-    if (!decoded_image_fits_kernel_heap(width, height)) {
-        probe.status = ImageLoadStatus::TooLarge;
-        return probe;
-    }
-
-    probe.status = ImageLoadStatus::Ok;
-    return probe;
+    return probe_bytes_impl(bytes, byteCount, effectiveLimits, nullptr);
 }
 
 ImageProbe ImageAdapter::ProbeFile(const char* path, const ImageSafetyLimits& limits)
@@ -229,6 +368,7 @@ ImageProbe ImageAdapter::ProbeFile(const char* path, const ImageSafetyLimits& li
     serial::puts("\n");
 #endif
     if (info.size > effectiveLimits.maxBytes) {
+        log_image_rejection(path, ImageLoadStatus::TooLarge, info.size, 0, 0, 0, gxos_kernel_heap_free_bytes(), gxos_kernel_heap_total_bytes());
         probe.status = ImageLoadStatus::TooLarge;
         return probe;
     }
@@ -248,7 +388,7 @@ ImageProbe ImageAdapter::ProbeFile(const char* path, const ImageSafetyLimits& li
         return probe;
     }
 
-    return ProbeBytes(header, (uint32_t)read, effectiveLimits);
+    return probe_bytes_impl(header, (uint32_t)read, effectiveLimits, path);
 }
 
 ImageBitmap ImageAdapter::LoadFromFile(const char* path, const ImageSafetyLimits& limits)
@@ -279,6 +419,7 @@ ImageBitmap ImageAdapter::LoadFromFile(const char* path, const ImageSafetyLimits
         return bitmap;
     }
     if (info.size > effectiveLimits.maxBytes || info.size > kKernelImageFileScratchBytes) {
+        log_image_rejection(path, ImageLoadStatus::TooLarge, info.size, 0, 0, 0, gxos_kernel_heap_free_bytes(), gxos_kernel_heap_total_bytes());
         bitmap.status = ImageLoadStatus::TooLarge;
         return bitmap;
     }
@@ -297,85 +438,13 @@ ImageBitmap ImageAdapter::LoadFromFile(const char* path, const ImageSafetyLimits
     serial::put_hex32((uint32_t)read);
     serial::puts("\n");
 #endif
-    return LoadFromBytes(s_kernelImageFileScratch, (uint32_t)read, effectiveLimits);
+    return load_bytes_impl(s_kernelImageFileScratch, (uint32_t)read, effectiveLimits, path);
 }
 
 ImageBitmap ImageAdapter::LoadFromBytes(const uint8_t* bytes, uint32_t byteCount, const ImageSafetyLimits& limits)
 {
     ImageSafetyLimits effectiveLimits = resolve_bare_metal_limits(limits);
-    ImageProbe probe = ProbeBytes(bytes, byteCount, effectiveLimits);
-    ImageBitmap bitmap{};
-    bitmap.status = probe.status;
-    bitmap.pixels = nullptr;
-    bitmap.width = probe.width;
-    bitmap.height = probe.height;
-    if (probe.status != ImageLoadStatus::Ok) return bitmap;
-    if (byteCount > 0x7FFFFFFFu) {
-        bitmap.status = ImageLoadStatus::TooLarge;
-        return bitmap;
-    }
-
-#if defined(GXOS_IMAGEVIEWER_BARE_METAL_RUNTIME_SMOKE_ACTIVE) && defined(GXOS_BARE_METAL)
-    serial::puts("[IMAGEVIEWER-RUNTIME-SMOKE] adapter stbi begin byteCount=");
-    serial::put_hex32(byteCount);
-    serial::puts(" dims=");
-    serial::put_hex32(bitmap.width);
-    serial::putc('x');
-    serial::put_hex32(bitmap.height);
-    serial::puts("\n");
-#endif
-    int width = 0;
-    int height = 0;
-    int sourceChannels = 0;
-    stbi_uc* decoded = stbi_load_from_memory(bytes, (int)byteCount, &width, &height, &sourceChannels, 4);
-    if (!decoded || width <= 0 || height <= 0) {
-        bitmap.status = ImageLoadStatus::DecodeFailed;
-        if (decoded) stbi_image_free(decoded);
-        return bitmap;
-    }
-
-    if (!dimensions_within_limits((uint32_t)width, (uint32_t)height, effectiveLimits)) {
-        bitmap.status = ImageLoadStatus::TooLarge;
-        stbi_image_free(decoded);
-        return bitmap;
-    }
-
-    uint64_t pixelCount64 = (uint64_t)width * (uint64_t)height;
-    if (pixelCount64 > effectiveLimits.maxPixels) {
-        bitmap.status = ImageLoadStatus::TooLarge;
-        stbi_image_free(decoded);
-        return bitmap;
-    }
-    uint64_t maxAllocPixels = (uint64_t)(static_cast<size_t>(-1) / sizeof(uint32_t));
-    if (pixelCount64 > maxAllocPixels) {
-        bitmap.status = ImageLoadStatus::TooLarge;
-        stbi_image_free(decoded);
-        return bitmap;
-    }
-    uint32_t* pixels = new uint32_t[(uint32_t)pixelCount64];
-    if (!pixels) {
-        bitmap.status = ImageLoadStatus::OutOfMemory;
-        stbi_image_free(decoded);
-        return bitmap;
-    }
-
-    for (uint32_t i = 0; i < (uint32_t)pixelCount64; ++i) {
-        const uint8_t* src = decoded + i * 4u;
-        pixels[i] = ((uint32_t)src[3] << 24) |
-            ((uint32_t)src[0] << 16) |
-            ((uint32_t)src[1] << 8) |
-            (uint32_t)src[2];
-    }
-    stbi_image_free(decoded);
-
-    bitmap.status = ImageLoadStatus::Ok;
-    bitmap.pixels = pixels;
-    bitmap.width = (uint32_t)width;
-    bitmap.height = (uint32_t)height;
-#if defined(GXOS_IMAGEVIEWER_BARE_METAL_RUNTIME_SMOKE_ACTIVE) && defined(GXOS_BARE_METAL)
-    serial::puts("[IMAGEVIEWER-RUNTIME-SMOKE] adapter stbi end status=Loaded\n");
-#endif
-    return bitmap;
+    return load_bytes_impl(bytes, byteCount, effectiveLimits, nullptr);
 }
 
 bool ImageAdapter::DrawToFramebuffer(const ImageBitmap& image, uint32_t x, uint32_t y, uint32_t width, uint32_t height)

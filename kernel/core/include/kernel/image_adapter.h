@@ -58,6 +58,8 @@ struct ImageProbe {
 
 struct ImageBitmap {
     ImageLoadStatus status;
+    // Bare-metal keeps the decoder output as the final pixel storage so the
+    // image viewer can paint large PNGs without a second full-size copy.
     const uint32_t* pixels;
     uint32_t width;
     uint32_t height;

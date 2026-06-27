@@ -170,37 +170,35 @@ function Invoke-ImageViewerSmokeBuild {
         }
     }
 
-    if ($smokeLabel -eq "large-png") {
-        $wallpaperPackScript = Join-Path $Root "scripts\generate-wallpaper-pack.ps1"
-        if (-not (Test-Path -LiteralPath $wallpaperPackScript)) {
-            throw "Wallpaper pack generator not found: $wallpaperPackScript"
-        }
+    $wallpaperPackScript = Join-Path $Root "scripts\generate-wallpaper-pack.ps1"
+    if (-not (Test-Path -LiteralPath $wallpaperPackScript)) {
+        throw "Wallpaper pack generator not found: $wallpaperPackScript"
+    }
 
-        # The large-PNG smoke still refreshes ESP/ramdisk.img when -SkipBuild is
-        # used so the boot image stays deterministic without rebuilding the whole
-        # project or touching hosted behavior.
-        Write-Host "Refreshing wallpaper pack for large-PNG runtime smoke..."
-        Push-Location $Root
-        try {
-            & powershell -ExecutionPolicy Bypass -File $wallpaperPackScript `
-                -InputDir (Join-Path $Root "assets\Backgrounds") `
-                -OutputDir (Join-Path $Root "out\wallpaper-pack") `
-                -OutputImage $ramdisk
-            if ($LASTEXITCODE -ne 0) {
-                throw "Wallpaper pack regeneration failed with exit code $LASTEXITCODE"
-            }
-        } finally {
-            Pop-Location
+    # Always restage the runtime wallpaper pack for the selected smoke asset so
+    # the runtime config path cannot leak between smoke runs.
+    Write-Host "Refreshing wallpaper pack for Image Viewer runtime smoke..."
+    Push-Location $Root
+    try {
+        & powershell -ExecutionPolicy Bypass -File $wallpaperPackScript `
+            -InputDir (Join-Path $Root "assets\Backgrounds") `
+            -OutputDir (Join-Path $Root "out\wallpaper-pack") `
+            -OutputImage $ramdisk `
+            -ImageViewerRuntimeSmokePath $assetPath
+        if ($LASTEXITCODE -ne 0) {
+            throw "Wallpaper pack regeneration failed with exit code $LASTEXITCODE"
         }
+    } finally {
+        Pop-Location
     }
 
     Write-Host "Building kernel with active imageviewer runtime smoke diagnostics..."
     $oldSkipWallpaperBuild = $env:GXOS_SKIP_WALLPAPER_RUNTIME_IMAGE_BUILD
-    if ($smokeLabel -eq "large-png") {
-        $env:GXOS_SKIP_WALLPAPER_RUNTIME_IMAGE_BUILD = "1"
-    } else {
-        Remove-Item Env:\GXOS_SKIP_WALLPAPER_RUNTIME_IMAGE_BUILD -ErrorAction SilentlyContinue
-    }
+    # The smoke script already stages the wallpaper runtime image for the
+    # selected asset, including the runtime smoke config file. Reuse that
+    # staged image during build so build.ps1 does not regenerate a default
+    # wallpaper pack and overwrite the custom target path.
+    $env:GXOS_SKIP_WALLPAPER_RUNTIME_IMAGE_BUILD = "1"
 
     try {
         $kernelSmokeFlags = "-DGXOS_IMAGEVIEWER_BARE_METAL_RUNTIME_SMOKE_ACTIVE"
@@ -365,6 +363,8 @@ $strictFailureReason = $null
 if ($strictLargePng) {
     if ($output.Contains("TooLarge")) {
         $strictFailureReason = "The strict large-PNG smoke observed TooLarge in the runtime evidence."
+    } elseif ($output.Contains("OutOfMemory")) {
+        $strictFailureReason = "The strict large-PNG smoke observed OutOfMemory in the runtime evidence."
     } elseif ($output.Contains("paint=placeholder")) {
         $strictFailureReason = "The strict large-PNG smoke observed a placeholder paint path in the runtime evidence."
     } elseif ($output.Contains("status=NotFound")) {

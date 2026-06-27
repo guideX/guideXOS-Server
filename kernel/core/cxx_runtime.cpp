@@ -206,8 +206,10 @@ char* strstr(const char* haystack, const char* needle)
 // ============================================================================
 
 namespace {
-    // 1 MB kernel heap - required for Navigator and multiple concurrent app windows
-    static constexpr size_t KERNEL_HEAP_SIZE = 1024 * 1024;
+    // 32 MB kernel heap - large enough for wallpaper-sized decoded PNGs.
+    // A 1536x1024 RGBA image is about 6 MB, and the loader may briefly need
+    // extra slack for STBI bookkeeping and app/window allocations.
+    static constexpr size_t KERNEL_HEAP_SIZE = 32u * 1024u * 1024u;
     static uint8_t g_kernelHeap[KERNEL_HEAP_SIZE];
     static size_t g_heapOffset = 0;
     
