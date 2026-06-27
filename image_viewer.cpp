@@ -53,6 +53,9 @@ int ImageViewer::s_dragStartPanX = 0;
 int ImageViewer::s_dragStartPanY = 0;
 int ImageViewer::s_lastKeyCode = 0;
 bool ImageViewer::s_keyDown = false;
+bool ImageViewer::s_chromeWidgetsBuilt = false;
+int ImageViewer::s_chromeWidgetsW = 0;
+int ImageViewer::s_chromeWidgetsH = 0;
 ImageViewer::HistorySnapshot ImageViewer::s_originalSnapshot{};
 bool ImageViewer::s_hasOriginalSnapshot = false;
 std::vector<ImageViewer::HistorySnapshot> ImageViewer::s_undoStack;
@@ -461,6 +464,9 @@ uint64_t ImageViewer::Launch(const std::string& filePath) {
     s_image.reset();
     s_originalW = 0;
     s_originalH = 0;
+    s_chromeWidgetsBuilt = false;
+    s_chromeWidgetsW = 0;
+    s_chromeWidgetsH = 0;
     s_errorText.clear();
     s_noticeText.clear();
     s_statusText = s_fileName.empty() ? "No image loaded" : "Loading " + s_fileName + "...";
@@ -926,6 +932,9 @@ bool ImageViewer::loadImagePath(const std::string& path, bool refreshFolderList,
 void ImageViewer::handleWindowResize(int width, int height) {
     if (width > 0) s_windowW = width;
     if (height > 0) s_windowH = height;
+    if (s_chromeWidgetsW != s_windowW || s_chromeWidgetsH != s_windowH) {
+        s_chromeWidgetsBuilt = false;
+    }
     clampZoomForCurrentMode();
     clampPanForCurrentImage();
     updateDisplay();
@@ -1616,6 +1625,9 @@ void ImageViewer::handleKeyPress(int keyCode) {
 
 void ImageViewer::updateDisplay() {
     if (s_windowId == 0) return;
+    const bool rebuildChrome = !s_chromeWidgetsBuilt ||
+        s_chromeWidgetsW != s_windowW ||
+        s_chromeWidgetsH != s_windowH;
 
     int contentLeft = 0;
     int contentTop = 0;
@@ -1653,41 +1665,47 @@ void ImageViewer::updateDisplay() {
     const std::string info = statusText();
     publishWindowText(s_windowId, 12, s_windowH - 82, info, true);
 
-    const int btnH = 24;
-    const int gap = 8;
-    const int row1Y = s_windowH - 54;
-    const int row2Y = s_windowH - 26;
+    if (rebuildChrome) {
+        const int btnH = 24;
+        const int gap = 8;
+        const int row1Y = s_windowH - 54;
+        const int row2Y = s_windowH - 26;
 
-    auto addBtn = [&](int rowY, int id, const std::string& label, int& x) {
-        int btnW = std::max(44, static_cast<int>(label.size()) * 7 + 18);
-        if (rowY == row2Y && (label == "Save As Copy" || label == "Set as Wallpaper")) {
-            btnW = std::min(btnW, 90);
-        }
-        publishMessage(gui::MsgType::MT_WidgetAdd, gui::packWidgetAdd(s_windowId, 1, id, x, rowY, btnW, btnH, label));
-        x += btnW + gap;
-    };
+        auto addBtn = [&](int rowY, int id, const std::string& label, int& x) {
+            int btnW = std::max(44, static_cast<int>(label.size()) * 7 + 18);
+            if (rowY == row2Y && (label == "Save As Copy" || label == "Set as Wallpaper")) {
+                btnW = std::min(btnW, 90);
+            }
+            publishMessage(gui::MsgType::MT_WidgetAdd, gui::packWidgetAdd(s_windowId, 1, id, x, rowY, btnW, btnH, label));
+            x += btnW + gap;
+        };
 
-    int row1X = 12;
-    addBtn(row1Y, 1, "Open", row1X);
-    addBtn(row1Y, 2, "Previous", row1X);
-    addBtn(row1Y, 3, "Next", row1X);
-    addBtn(row1Y, 4, "Zoom In", row1X);
-    addBtn(row1Y, 5, "Zoom Out", row1X);
-    addBtn(row1Y, 6, "Fit to Window", row1X);
-    addBtn(row1Y, 7, "100%", row1X);
-    addBtn(row1Y, 14, "Undo", row1X);
-    addBtn(row1Y, 15, "Redo", row1X);
-    addBtn(row1Y, 17, "Resize", row1X);
-    addBtn(row1Y, 18, "Crop", row1X);
+        int row1X = 12;
+        addBtn(row1Y, 1, "Open", row1X);
+        addBtn(row1Y, 2, "Previous", row1X);
+        addBtn(row1Y, 3, "Next", row1X);
+        addBtn(row1Y, 4, "Zoom In", row1X);
+        addBtn(row1Y, 5, "Zoom Out", row1X);
+        addBtn(row1Y, 6, "Fit to Window", row1X);
+        addBtn(row1Y, 7, "100%", row1X);
+        addBtn(row1Y, 14, "Undo", row1X);
+        addBtn(row1Y, 15, "Redo", row1X);
+        addBtn(row1Y, 17, "Resize", row1X);
+        addBtn(row1Y, 18, "Crop", row1X);
 
-    int row2X = 12;
-    addBtn(row2Y, 8, "Rotate Left", row2X);
-    addBtn(row2Y, 9, "Rotate Right", row2X);
-    addBtn(row2Y, 10, "Flip Horizontal", row2X);
-    addBtn(row2Y, 11, "Flip Vertical", row2X);
-    addBtn(row2Y, 12, "Save As Copy", row2X);
-    addBtn(row2Y, 13, "Set as Wallpaper", row2X);
-    addBtn(row2Y, 16, "Discard Changes", row2X);
+        int row2X = 12;
+        addBtn(row2Y, 8, "Rotate Left", row2X);
+        addBtn(row2Y, 9, "Rotate Right", row2X);
+        addBtn(row2Y, 10, "Flip Horizontal", row2X);
+        addBtn(row2Y, 11, "Flip Vertical", row2X);
+        addBtn(row2Y, 12, "Save As Copy", row2X);
+        addBtn(row2Y, 13, "Set as Wallpaper", row2X);
+        addBtn(row2Y, 16, "Discard Changes", row2X);
+
+        s_chromeWidgetsBuilt = true;
+        s_chromeWidgetsW = s_windowW;
+        s_chromeWidgetsH = s_windowH;
+    }
 }
 
 }} // namespace gxos::apps

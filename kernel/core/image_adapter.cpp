@@ -62,6 +62,10 @@ static const uint32_t kKernelImageDefaultMaxBytes = 8u * 1024u * 1024u;
 static const uint32_t kKernelImageFileScratchBytes = kKernelImageDefaultMaxBytes;
 static uint8_t s_kernelImageFileScratch[kKernelImageFileScratchBytes];
 
+#if defined(GXOS_BARE_METAL)
+extern "C" size_t gxos_kernel_heap_free_bytes();
+#endif
+
 static bool ends_with_png(const char* path)
 {
     if (!path) return false;
@@ -102,6 +106,26 @@ static bool dimensions_within_limits(uint32_t width, uint32_t height, const Imag
     if (width > limits.maxWidth || height > limits.maxHeight) return false;
     uint64_t pixels = (uint64_t)width * (uint64_t)height;
     return pixels <= limits.maxPixels;
+}
+
+static bool decoded_image_fits_kernel_heap(uint32_t width, uint32_t height)
+{
+#if defined(GXOS_BARE_METAL)
+    if (width == 0 || height == 0) return false;
+
+    const uint64_t decodedBytes = (uint64_t)width * (uint64_t)height * sizeof(uint32_t);
+    const uint64_t heapFree = gxos_kernel_heap_free_bytes();
+
+    // The bare-metal loader currently keeps one decoded ARGB buffer and a
+    // second converted pixel buffer alive during the load path, so we need to
+    // leave room for both plus a little allocator slack.
+    const uint64_t requiredBytes = decodedBytes * 2u + 64u * 1024u;
+    return requiredBytes <= heapFree;
+#else
+    (void)width;
+    (void)height;
+    return true;
+#endif
 }
 
 static bool is_default_limits(const ImageSafetyLimits& limits)
@@ -163,6 +187,10 @@ ImageProbe ImageAdapter::ProbeBytes(const uint8_t* bytes, uint32_t byteCount, co
     probe.width = width;
     probe.height = height;
     if (!dimensions_within_limits(width, height, effectiveLimits)) {
+        probe.status = ImageLoadStatus::TooLarge;
+        return probe;
+    }
+    if (!decoded_image_fits_kernel_heap(width, height)) {
         probe.status = ImageLoadStatus::TooLarge;
         return probe;
     }
@@ -354,6 +382,61 @@ bool ImageAdapter::DrawToFramebuffer(const ImageBitmap& image, uint32_t x, uint3
 {
     if (image.status != ImageLoadStatus::Ok || !image.pixels || image.width == 0 || image.height == 0 || width == 0 || height == 0) {
         return false;
+    }
+
+    uint32_t screenW = kernel::framebuffer::get_width();
+    uint32_t screenH = kernel::framebuffer::get_height();
+    if (x >= screenW || y >= screenH) {
+        return false;
+    }
+    if (x + width > screenW) width = screenW - x;
+    if (y + height > screenH) height = screenH - y;
+
+    if (width == 0 || height == 0) {
+        return false;
+    }
+
+    if (kernel::framebuffer::get_bpp() == 32) {
+        uint32_t* target = kernel::framebuffer::is_double_buffered()
+            ? kernel::framebuffer::get_back_buffer()
+            : kernel::framebuffer::get_buffer();
+        if (!target) return false;
+
+        const uint32_t stride = kernel::framebuffer::is_double_buffered()
+            ? kernel::framebuffer::get_width()
+            : (kernel::framebuffer::get_pitch() / 4);
+
+        for (uint32_t dy = 0; dy < height; ++dy) {
+            uint32_t sy = static_cast<uint32_t>((static_cast<uint64_t>(dy) * image.height) / height);
+            uint32_t* dstRow = target + static_cast<uint64_t>(y + dy) * stride + x;
+            const uint32_t* srcRow = image.pixels + static_cast<uint64_t>(sy) * image.width;
+
+            for (uint32_t dx = 0; dx < width; ++dx) {
+                uint32_t sx = static_cast<uint32_t>((static_cast<uint64_t>(dx) * image.width) / width);
+                uint32_t src = srcRow[sx];
+                uint8_t a = static_cast<uint8_t>(src >> 24);
+                if (a == 0) continue;
+                if (a == 255) {
+                    dstRow[dx] = src;
+                } else {
+                    uint32_t dst = dstRow[dx];
+                    uint8_t sr = static_cast<uint8_t>((src >> 16) & 0xFF);
+                    uint8_t sg = static_cast<uint8_t>((src >> 8) & 0xFF);
+                    uint8_t sb = static_cast<uint8_t>(src & 0xFF);
+                    uint8_t dr = static_cast<uint8_t>((dst >> 16) & 0xFF);
+                    uint8_t dg = static_cast<uint8_t>((dst >> 8) & 0xFF);
+                    uint8_t db = static_cast<uint8_t>(dst & 0xFF);
+                    uint8_t or_ = static_cast<uint8_t>((sr * a + dr * (255 - a)) / 255);
+                    uint8_t og = static_cast<uint8_t>((sg * a + dg * (255 - a)) / 255);
+                    uint8_t ob = static_cast<uint8_t>((sb * a + db * (255 - a)) / 255);
+                    dstRow[dx] = 0xFF000000u |
+                        (static_cast<uint32_t>(or_) << 16) |
+                        (static_cast<uint32_t>(og) << 8) |
+                        static_cast<uint32_t>(ob);
+                }
+            }
+        }
+        return true;
     }
 
     // TODO: replace nearest-neighbor scaling with a higher-quality kernel-safe scaler.

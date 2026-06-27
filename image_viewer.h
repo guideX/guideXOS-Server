@@ -135,6 +135,9 @@ namespace gxos { namespace apps {
         static int s_dragStartPanY;
         static int s_lastKeyCode;
         static bool s_keyDown;
+        static bool s_chromeWidgetsBuilt;
+        static int s_chromeWidgetsW;
+        static int s_chromeWidgetsH;
 
         static constexpr int kWinW = 820;
         static constexpr int kWinH = 620;

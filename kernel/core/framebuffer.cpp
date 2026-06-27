@@ -9,6 +9,8 @@
 #include "include/kernel/framebuffer.h"
 #include "include/kernel/arch.h"
 
+#include <string.h>
+
 #if ARCH_HAS_PIC_8259
 #include "include/kernel/multiboot.h"
 // Include BootInfo for UEFI boot support
@@ -461,6 +463,19 @@ void fill_rect(uint32_t x, uint32_t y, uint32_t width, uint32_t height, uint32_t
     if (x + width > g_width) width = g_width - x;
     if (y + height > g_height) height = g_height - y;
 
+    if (g_bpp == 32) {
+        uint32_t* base = (g_doubleBuffered && g_backBuffer) ? g_backBuffer : g_buffer;
+        if (!base) return;
+        const uint32_t stride = (g_doubleBuffered && g_backBuffer) ? g_width : (g_pitch / 4);
+        for (uint32_t dy = 0; dy < height; dy++) {
+            uint32_t* row = base + static_cast<uint64_t>(y + dy) * stride + x;
+            for (uint32_t dx = 0; dx < width; dx++) {
+                row[dx] = color;
+            }
+        }
+        return;
+    }
+
     for (uint32_t dy = 0; dy < height; dy++) {
         for (uint32_t dx = 0; dx < width; dx++) {
             put_pixel(x + dx, y + dy, color);
@@ -499,6 +514,21 @@ void draw_line(uint32_t x1, uint32_t y1, uint32_t x2, uint32_t y2, uint32_t colo
 void blit(uint32_t* buffer, uint32_t x, uint32_t y, uint32_t width, uint32_t height)
 {
     if (!g_available || !buffer) return;
+
+    if (g_bpp == 32) {
+        uint32_t* base = (g_doubleBuffered && g_backBuffer) ? g_backBuffer : g_buffer;
+        if (!base) return;
+        const uint32_t stride = (g_doubleBuffered && g_backBuffer) ? g_width : (g_pitch / 4);
+        if (x >= g_width || y >= g_height) return;
+        if (x + width > g_width) width = g_width - x;
+        if (y + height > g_height) height = g_height - y;
+        for (uint32_t dy = 0; dy < height; dy++) {
+            uint32_t* dstRow = base + static_cast<uint64_t>(y + dy) * stride + x;
+            const uint32_t* srcRow = buffer + static_cast<uint64_t>(dy) * width;
+            memcpy(dstRow, srcRow, static_cast<size_t>(width) * sizeof(uint32_t));
+        }
+        return;
+    }
 
     for (uint32_t dy = 0; dy < height; dy++) {
         for (uint32_t dx = 0; dx < width; dx++) {
@@ -579,6 +609,21 @@ bool is_double_buffered()
 void present()
 {
     if (!g_available || !g_doubleBuffered || !g_backBuffer || !g_buffer) return;
+
+    if (g_bpp == 32) {
+        const uint32_t frontStride = g_pitch / 4;
+        if (frontStride == g_width) {
+            memcpy(g_buffer, g_backBuffer, static_cast<size_t>(g_width) * g_height * sizeof(uint32_t));
+            return;
+        }
+
+        for (uint32_t y = 0; y < g_height; y++) {
+            memcpy(g_buffer + static_cast<size_t>(y) * frontStride,
+                   g_backBuffer + static_cast<size_t>(y) * g_width,
+                   static_cast<size_t>(g_width) * sizeof(uint32_t));
+        }
+        return;
+    }
 
     for (uint32_t y = 0; y < g_height; y++) {
         for (uint32_t x = 0; x < g_width; x++) {
