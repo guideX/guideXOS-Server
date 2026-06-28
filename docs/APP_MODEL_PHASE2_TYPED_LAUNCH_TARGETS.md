@@ -111,6 +111,8 @@ The model deliberately keeps `launchName` because the current code still needs i
 
 App Model v1.2 treats `DisplayOptions` itself as the next typed-ready built-in target (`gxos.builtin.displayoptions`). App Model v1.3 adds `TaskManager` as another typed-ready built-in target (`gxos.builtin.taskmanager`). App Model v1.4 adds `Trash` as another typed-ready built-in target (`gxos.builtin.trash`). App Model v1.5 adds `DiskManager` as another typed-ready built-in target (`gxos.builtin.diskmanager`). The shell labels `Settings`, `System Settings`, and `Control Panel` still remain separate shell/system affordances and continue to bridge to `DisplayOptions` as non-fatal drift.
 
+App Model v1.6 target selection is deferred: no v1.6 typed target has been selected yet. `Clock` stays deferred because bare-metal launch-shadow evidence still reports unsupported-target drift. `Paint` stays deferred because it is hosted-only in built-in metadata and does not yet show hosted and bare-metal parity without changing runtime launch behavior. `DiskManager` remains the accepted v1.5 baseline.
+
 ## Availability
 
 Availability should be target-aware and non-fatal:
