@@ -108,6 +108,13 @@ App Model v1.2 adds `DisplayOptions` as the next typed-ready built-in target (`g
 
 App Model v1.6 target selection is deferred: no v1.6 typed target has been selected yet. `Clock` remains deferred because bare-metal launch-shadow evidence still reports unsupported-target drift. `Paint` remains deferred because it is hosted-only in built-in metadata and does not yet have hosted and bare-metal parity without changing runtime launch behavior. `DiskManager` remains the accepted v1.5 baseline.
 
+App Model v1.x closure:
+- No further safe typed-ready target remains without new bare-metal parity work.
+- v1.5 `DiskManager` is the current accepted baseline.
+- v1.6 is deferred.
+- `Clock` and `Paint` require bare-metal implementations before typed-ready promotion.
+- `ImageViewer` remains deferred until active Image Viewer stabilization is complete.
+
 Both should be revisited during Phase 2 launch-resolution cleanup. That pass should decide whether aliases become explicit app-model launch aliases, shell commands, or another typed launch target while preserving existing user-visible shortcuts.
 
 Phase 2 typed launch target planning now lives in `docs/APP_MODEL_PHASE2_TYPED_LAUNCH_TARGETS.md`. That document is design-only and does not change the current hosted or bare-metal dispatch paths.

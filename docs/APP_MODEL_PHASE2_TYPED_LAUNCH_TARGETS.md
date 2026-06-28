@@ -113,6 +113,13 @@ App Model v1.2 treats `DisplayOptions` itself as the next typed-ready built-in t
 
 App Model v1.6 target selection is deferred: no v1.6 typed target has been selected yet. `Clock` stays deferred because bare-metal launch-shadow evidence still reports unsupported-target drift. `Paint` stays deferred because it is hosted-only in built-in metadata and does not yet show hosted and bare-metal parity without changing runtime launch behavior. `DiskManager` remains the accepted v1.5 baseline.
 
+App Model v1.x closure:
+- No further safe typed-ready target remains without new bare-metal parity work.
+- v1.5 `DiskManager` is the current accepted baseline.
+- v1.6 is deferred.
+- `Clock` and `Paint` require bare-metal implementations before typed-ready promotion.
+- `ImageViewer` remains deferred until active Image Viewer stabilization is complete.
+
 ## Availability
 
 Availability should be target-aware and non-fatal:
