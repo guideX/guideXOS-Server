@@ -449,7 +449,7 @@ $checks = @(
     "case=UnknownProbe",
     "inputLabel=`"FakeLaunchShadowApp`"",
     "comparison=unexpected-mismatch",
-    "summary: observations=10 matches=7 acceptedMismatches=0 expectedUnsupported=2 unexpectedMismatches=1 typedDispatch=6 legacyFallback=1 blockedUnknownFallback=3 specialCaseFallback=0 nonFatal=true",
+    "summary: observations=10 matches=9 acceptedMismatches=0 expectedUnsupported=0 unexpectedMismatches=1 typedDispatch=8 legacyFallback=1 blockedUnknownFallback=1 specialCaseFallback=0 nonFatal=true",
     "runtimeLaunchBehaviorChanged: false",
     "[APPMODEL-LAUNCHSHADOW-SMOKE] issuing folder FileOpen SHADOW_ONLY probe",
     "source=SmokeFolderFileOpen",

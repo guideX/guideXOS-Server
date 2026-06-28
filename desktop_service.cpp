@@ -519,6 +519,8 @@ namespace gxos {
             for (size_t i = 0; i < apps::kBuiltInAppMetadataCount; ++i) {
                 const apps::BuiltInAppMetadata& metadata = apps::kBuiltInAppMetadata[i];
                 if (!apps::IsBuiltInAppAvailableInBareMetal(metadata)) continue;
+                // ImageViewer is intentionally mirrored as the legacy ImgViewer alias on bare metal.
+                if (metadata.appId && std::string(metadata.appId) == "gxos.builtin.imageviewer") continue;
                 if (currentBareMetalRegistrationExistsForMetadata(metadata)) continue;
                 ++count;
             }
@@ -1499,6 +1501,7 @@ namespace gxos {
 
         static std::string launchTargetComparisonStatus(const std::string& label, const apps::LaunchTarget& hosted, const apps::LaunchTarget& bareMetal) {
             if (sameLaunchTargetCore(hosted, bareMetal)) return "exact";
+            if (label == "FileExplorer") return "accepted-alias";
             if (label == "ComputerFiles") return "intentional-difference";
             if (label == "AppModel") return "intentional-difference";
             if (sameAppIdNonEmpty(hosted, bareMetal) &&
@@ -1511,6 +1514,7 @@ namespace gxos {
         static std::string launchTargetComparisonNote(const std::string& label, const std::string& status) {
             if (status == "exact") return "hosted and bare-metal diagnostic targets match";
             if (status == "accepted-alias") return "same app identity with an accepted legacy alias difference";
+            if (label == "FileExplorer") return "hosted FileExplorer matches the bare-metal Files alias as an accepted compatibility bridge";
             if (label == "ComputerFiles") return "hosted compatibility bridge to FileExplorer; bare-metal uses separate right-column labels and system objects";
             if (label == "AppModel") return "legacy app-model demo alias has target-specific dispatch names";
             return "investigate launch target drift before feeding typed targets into dispatch";
