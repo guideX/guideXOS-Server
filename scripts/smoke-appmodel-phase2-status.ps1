@@ -132,10 +132,24 @@ function Get-HostedBuildArtifactStatus {
     )
 
     $trackedFiles = @(& git -C $Root ls-files)
+    $hostedBuildDefinitionFiles = @(
+        'build.bat'
+        'Directory.Build.props'
+        'Directory.Build.targets'
+        'guideXOSServer.csproj'
+        'guideXOSServer.sln'
+        'guideXOSServer.vcxproj'
+        'guideXOSServer.vcxproj.filters'
+        'KernelBuild.vcxproj'
+    )
     $sourceFiles = @(
         $trackedFiles |
             Where-Object {
-                $_ -match '\.(cpp|c|cc|cxx|h|hpp|inl|rc|def)$' -or $_ -eq 'build.bat'
+                $path = $_.Replace('\', '/')
+                $hostedBuildDefinitionFiles -contains $_ -or
+                $path -match '^[^/]+\.(cpp|c|cc|cxx|h|hpp|inl|rc|def|idl|asm|s)$' -or
+                $path -match '^kernel/core/(architecture_detector\.cpp|system_font\.cpp|include/.+\.(cpp|c|cc|cxx|h|hpp|inl|rc|def|idl|asm|s))$' -or
+                $path -match '^third_party/mbedtls/.+\.(cpp|c|cc|cxx|h|hpp|inl|rc|def|idl|asm|s)$'
             } |
             Sort-Object -Unique
     )
