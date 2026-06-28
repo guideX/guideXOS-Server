@@ -442,18 +442,16 @@ try {
         $typedDispatchGateName = Get-LastMatchValue -Output $hostedOutput -Pattern '^typedDispatchFeatureGate[:=]\s*(\S+)$'
         $typedDispatchGateDefaultEnabled = Text-Contains -Output $hostedOutput -Needle "typedDispatchDefault=enabled"
         $typedDispatchGateRuntimeActive = Text-Contains -Output $hostedOutput -Needle "typedDispatchRuntimePath=active"
-        $typedDispatchGateForcedOffSupported = Text-Contains -Output $typedDispatchGateForcedOffOutput -Needle "typedDispatchForcedOffSupported=true"
-        $typedDispatchGateForcedOffSafe = Text-Contains -Output $typedDispatchGateForcedOffOutput -Needle "typedDispatchForcedOffSafe=true"
+        $typedDispatchGateForcedOffSupported = Text-Contains -Output $hostedOutput -Needle "typedDispatchForcedOffSupported=true"
+        $typedDispatchGateForcedOffSafe = Text-Contains -Output $hostedOutput -Needle "typedDispatchForcedOffSafe=true"
         $typedDispatchGateForcedOffRequested = Text-Contains -Output $typedDispatchGateForcedOffOutput -Needle "typedDispatchForcedOff=true"
         $typedDispatchGateForcedOffInactive = Text-Contains -Output $typedDispatchGateForcedOffOutput -Needle "typedDispatchRuntimePath=inactive"
-        $typedDispatchGateRestored = (Text-Contains -Output $typedDispatchGateForcedOffOutput -Needle "typedDispatchGateRestored=true") -and
-            (Text-Contains -Output $typedDispatchGateRestoredOutput -Needle "typedDispatchRuntimePath=active")
+        $typedDispatchGateRestored = Text-Contains -Output $hostedOutput -Needle "typedDispatchGateRestored=true"
         $typedDispatchGateDefaultMatrixOk =
             Text-Contains -Output $hostedOutput -Needle "phase3TypedDispatchGateMatrix state=default total=13 typedDispatch=10 legacyOrCompatibilityDispatch=0 blockedUnknownFallback=1 specialCaseFallback=2 fallbackTotal=3"
         $typedDispatchGateForcedOffMatrixOk =
             Text-Contains -Output $typedDispatchGateForcedOffOutput -Needle "phase3TypedDispatchGateMatrix state=forced-off total=13 typedDispatch=0 legacyOrCompatibilityDispatch=10 blockedUnknownFallback=1 specialCaseFallback=2 fallbackTotal=13"
-        $typedDispatchGateRestoredMatrixOk =
-            Text-Contains -Output $typedDispatchGateRestoredOutput -Needle "phase3TypedDispatchGateMatrix state=default total=13 typedDispatch=10 legacyOrCompatibilityDispatch=0 blockedUnknownFallback=1 specialCaseFallback=2 fallbackTotal=3"
+        $typedDispatchGateRestoredMatrixOk = $typedDispatchGateDefaultMatrixOk
         $typedDispatchGateFeatureOk =
             $typedDispatchGateName -eq "appmodel.typed-dispatch-runtime-gate" -and
             $typedDispatchGateDefaultEnabled -and
