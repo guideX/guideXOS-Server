@@ -7548,7 +7548,9 @@ void open_terminal()
 bool launch_app(const char* appName)
 {
     if (!appName) return false;
-    if (desktop_str_eq(appName, "File Explorer")) appName = "Files";
+    // Bare-metal File Explorer is the kernel-side "Files" app; hosted/compositor
+    // code keeps using the "FileExplorer" launch name through DesktopService.
+    if (desktop_str_eq(appName, "File Explorer") || desktop_str_eq(appName, "FileExplorer")) appName = "Files";
     
     // Check for Console/Terminal special case
     bool isConsole = false;
@@ -9293,6 +9295,9 @@ static void show_icon_notification(int displayIndex)
     int iconIdx = s_visibleIconIndices[displayIndex];
     const DesktopIcon& icon = s_desktopIcons[iconIdx];
     const char* label = s_desktopIcons[iconIdx].label;
+    // Desktop File Explorer routes to the kernel-side "Files" app in bare-metal
+    // mode; hosted/compositor launch plumbing keeps the "FileExplorer" name.
+    const char* launchLabel = (desktop_str_eq(label, "File Explorer") || desktop_str_eq(label, "FileExplorer")) ? "Files" : label;
     serial::puts("[desktop] Open desktop item: ");
     serial::puts(label);
     serial::puts("\n");
@@ -9479,7 +9484,14 @@ static void show_icon_notification(int displayIndex)
                     return;
                 }
 #endif
-                break;
+                if (try_launch_kernel_app("Files")) return;
+                s_notification.title = label;
+                s_notification.message = app::AppManager::isAppAvailable("Files")
+                    ? "Failed to launch app"
+                    : "Not available in bare-metal mode";
+                s_notification.visible = true;
+                s_notification.showTime = s_tickCounter;
+                return;
             case DesktopSystemObjectKind::SystemSettings:
 #if defined(GXOS_APPMODEL_TYPED_DISPATCH_SHADOW_ONLY) && defined(GXOS_BARE_METAL)
                 if (bare_metal_should_suppress_real_branch_launch()) {
@@ -9535,16 +9547,16 @@ static void show_icon_notification(int displayIndex)
     }
     
     // Try to launch as a kernel GUI app
-    if (app::AppManager::isAppAvailable(label)) {
+    if (app::AppManager::isAppAvailable(launchLabel)) {
 #if defined(GXOS_APPMODEL_TYPED_DISPATCH_SHADOW_ONLY) && defined(GXOS_BARE_METAL)
-        log_bare_metal_static_app_shadow_only_observation(label);
+        log_bare_metal_static_app_shadow_only_observation(launchLabel);
 #endif
-        // SHADOW_ONLY observation above is diagnostic-only; AppManager still receives
-        // the original legacy bare-metal app name.
-        if (app::AppManager::launchApp(label)) {
+        // SHADOW_ONLY observation above is diagnostic-only; AppManager receives
+        // the normalized launch label so File Explorer aliases stay wired.
+        if (app::AppManager::launchApp(launchLabel)) {
             // App launched successfully
-            app::AppLogger::logLaunch(label, app::LaunchResult::Success);
-            add_to_recent(label);  // Add to recent apps
+            app::AppLogger::logLaunch(launchLabel, app::LaunchResult::Success);
+            add_to_recent(launchLabel);  // Add to recent apps
             return;
         }
         // App available but failed to launch
@@ -9552,7 +9564,7 @@ static void show_icon_notification(int displayIndex)
         s_notification.message = "Failed to launch app";
         s_notification.visible = true;
         s_notification.showTime = s_tickCounter;
-        app::AppLogger::logLaunch(label, app::LaunchResult::FailedToInit);
+        app::AppLogger::logLaunch(launchLabel, app::LaunchResult::FailedToInit);
         return;
     }
     
@@ -9561,7 +9573,7 @@ static void show_icon_notification(int displayIndex)
     s_notification.message = "Not available in bare-metal mode";
     s_notification.visible = true;
     s_notification.showTime = s_tickCounter;
-    app::AppLogger::logLaunch(label, app::LaunchResult::NotAvailable);
+    app::AppLogger::logLaunch(launchLabel, app::LaunchResult::NotAvailable);
 }
 
 // Compute start menu geometry (shared between drawing and hit-testing)
@@ -9767,7 +9779,9 @@ static void show_start_menu_notification(const char* label)
     
     // Close start menu before launching app
     s_startMenuOpen = false;
-    const char* launchLabel = desktop_str_eq(label, "File Explorer") ? "Files" : label;
+    // Desktop File Explorer routes to the kernel-side "Files" app in bare-metal
+    // mode; hosted/compositor launch plumbing keeps the "FileExplorer" name.
+    const char* launchLabel = (desktop_str_eq(label, "File Explorer") || desktop_str_eq(label, "FileExplorer")) ? "Files" : label;
 
 #if defined(GXOS_APPMODEL_LAUNCHSHADOW_SMOKE_ACTIVE) && defined(GXOS_APPMODEL_TYPED_DISPATCH_SHADOW_ONLY) && defined(GXOS_BARE_METAL)
     if (bare_metal_should_suppress_real_branch_launch()) {
@@ -9779,18 +9793,18 @@ static void show_start_menu_notification(const char* label)
     // Try to launch as a kernel GUI app
     if (try_launch_kernel_app(launchLabel)) {
         // App launched successfully
-        app::AppLogger::logLaunch(label, app::LaunchResult::Success);
+        app::AppLogger::logLaunch(launchLabel, app::LaunchResult::Success);
         return;
     }
 
     // App not available in kernel mode - show notification
     s_notification.title = label;
-    s_notification.message = app::AppManager::isAppAvailable(label)
+    s_notification.message = app::AppManager::isAppAvailable(launchLabel)
         ? "Failed to launch app"
         : "Not available in bare-metal mode";
     s_notification.visible = true;
     s_notification.showTime = s_tickCounter;
-    app::AppLogger::logLaunch(label, app::LaunchResult::NotAvailable);
+    app::AppLogger::logLaunch(launchLabel, app::LaunchResult::NotAvailable);
 }
 
 

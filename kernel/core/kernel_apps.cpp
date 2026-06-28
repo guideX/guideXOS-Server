@@ -11222,7 +11222,13 @@ void registerKernelApps() {
         else if (gxos::apps::detail::builtInTextEquals(metadata.kernelAppName, "Calculator")) factory = CalculatorApp::create;
         else if (gxos::apps::detail::builtInTextEquals(metadata.kernelAppName, "DisplayOptions")) factory = DisplayOptionsApp::create;
         else if (gxos::apps::detail::builtInTextEquals(metadata.kernelAppName, "TaskManager")) factory = TaskManagerApp::create;
-        else if (gxos::apps::detail::builtInTextEquals(metadata.kernelAppName, "FileExplorer")) factory = FileExplorerApp::create;
+        // File Explorer is intentionally split across two launch names:
+        // hosted/compositor uses "FileExplorer", while bare-metal registers
+        // the kernel-side app as "Files". Accept either spelling so the
+        // kernel app stays reachable from the desktop icon and Start menu.
+        else if (gxos::apps::detail::builtInTextEquals(metadata.kernelAppName, "Files") ||
+                 gxos::apps::detail::builtInTextEquals(metadata.kernelAppName, "FileExplorer") ||
+                 gxos::apps::detail::builtInTextEquals(metadata.launchName, "FileExplorer")) factory = FileExplorerApp::create;
         else if (gxos::apps::detail::builtInTextEquals(metadata.kernelAppName, "ImageViewer")) factory = ImageViewerApp::create;
         else if (gxos::apps::detail::builtInTextEquals(metadata.kernelAppName, "guideXOS Navigator")) factory = NavigatorApp::create;
         else if (gxos::apps::detail::builtInTextEquals(metadata.kernelAppName, "Trash")) factory = TrashApp::create;
