@@ -125,6 +125,54 @@ function Read-KeyValueEvidence {
     return $values
 }
 
+function Get-HostedBuildArtifactStatus {
+    param(
+        [string]$Root,
+        [string]$ArtifactPath
+    )
+
+    $trackedFiles = @(& git -C $Root ls-files)
+    $sourceFiles = @(
+        $trackedFiles |
+            Where-Object {
+                $_ -match '\.(cpp|c|cc|cxx|h|hpp|inl|rc|def)$' -or $_ -eq 'build.bat'
+            } |
+            Sort-Object -Unique
+    )
+
+    $sourceLatestWriteTimeUtc = [DateTime]::MinValue
+    $sourceLatestPath = ""
+    foreach ($relativePath in $sourceFiles) {
+        $candidatePath = Join-Path $Root $relativePath
+        if (-not (Test-Path -LiteralPath $candidatePath)) {
+            continue
+        }
+
+        $candidateItem = Get-Item -LiteralPath $candidatePath
+        if ($candidateItem.LastWriteTimeUtc -gt $sourceLatestWriteTimeUtc) {
+            $sourceLatestWriteTimeUtc = $candidateItem.LastWriteTimeUtc
+            $sourceLatestPath = $candidateItem.FullName
+        }
+    }
+
+    $artifactExists = Test-Path -LiteralPath $ArtifactPath
+    $artifactWriteTimeUtc = if ($artifactExists) {
+        (Get-Item -LiteralPath $ArtifactPath).LastWriteTimeUtc
+    } else {
+        $null
+    }
+    $artifactFresh = $artifactExists -and $artifactWriteTimeUtc -ge $sourceLatestWriteTimeUtc
+
+    return [pscustomobject]@{
+        ArtifactExists = $artifactExists
+        ArtifactFresh = $artifactFresh
+        ArtifactWriteTimeUtc = $artifactWriteTimeUtc
+        SourceLatestPath = $sourceLatestPath
+        SourceLatestWriteTimeUtc = $sourceLatestWriteTimeUtc
+        SourceFileCount = $sourceFiles.Count
+    }
+}
+
 function Get-LaunchTargetComparisonReadinessSummary {
     param([object]$Output)
 
@@ -366,17 +414,47 @@ function Invoke-ProcessCommand {
 Push-Location $Root
 try {
     $hostedBuildCommand = ".\build.bat"
+    $aggregateHostedBuildStatus = "NOT-RUN"
+    $aggregateHostedBuildSource = "not-requested"
+    $aggregateHostedBuildArtifactFresh = $false
+    $aggregateHostedBuildArtifactWriteTimeUtc = $null
+    $aggregateHostedBuildSourceLatestWriteTimeUtc = $null
+    $aggregateHostedBuildSourceLatestPath = ""
+    $aggregateHostedBuildResumeSupported = $true
+    $aggregateHostedBuildResumeCommand = ".\scripts\smoke-appmodel-phase2-status.ps1 -BuildHosted"
     if ($BuildHosted) {
+        $hostedBuildStatus = Get-HostedBuildArtifactStatus -Root $Root -ArtifactPath (Join-Path $Root "guideXOSServer.exe")
+        $aggregateHostedBuildArtifactFresh = $hostedBuildStatus.ArtifactFresh
+        $aggregateHostedBuildArtifactWriteTimeUtc = $hostedBuildStatus.ArtifactWriteTimeUtc
+        $aggregateHostedBuildSourceLatestWriteTimeUtc = $hostedBuildStatus.SourceLatestWriteTimeUtc
+        $aggregateHostedBuildSourceLatestPath = $hostedBuildStatus.SourceLatestPath
         [void]$CommandsRun.Add($hostedBuildCommand)
-        $buildResult = Invoke-ProcessCommand -Name "hosted-build" -FilePath "cmd.exe" -ArgumentList @("/c", "`"$(Join-Path $Root "build.bat")`"") -TimeoutSeconds 600
-        Add-LogSection "hosted-build-output" $buildResult.Output
-        $hostedBuildOk = (-not $buildResult.TimedOut) -and
-            (($null -eq $buildResult.ExitCode) -or $buildResult.ExitCode -eq 0) -and
-            (Text-Contains -Output $buildResult.Output -Needle "Build successful: guideXOSServer.exe")
-        if ($hostedBuildOk) {
-            Add-Check "hostedBuild" "PASS" "command=$hostedBuildCommand"
+        if ($hostedBuildStatus.ArtifactFresh) {
+            $aggregateHostedBuildStatus = "PASS"
+            $aggregateHostedBuildSource = "reused-fresh-artifact"
+            Add-Check "hostedBuild" "PASS" "command=$hostedBuildCommand source=$aggregateHostedBuildSource artifactFresh=true artifact=$((Join-Path $Root "guideXOSServer.exe")) artifactWriteTimeUtc=$($aggregateHostedBuildArtifactWriteTimeUtc.ToString("yyyy-MM-ddTHH:mm:ssZ")) sourceLatestWriteTimeUtc=$($aggregateHostedBuildSourceLatestWriteTimeUtc.ToString("yyyy-MM-ddTHH:mm:ssZ")) sourceLatestPath=$aggregateHostedBuildSourceLatestPath"
         } else {
-            Add-Check "hostedBuild" "FAIL" "command=$hostedBuildCommand exitCode=$($buildResult.ExitCode) timedOut=$($buildResult.TimedOut.ToString().ToLowerInvariant())"
+            $buildResult = Invoke-ProcessCommand -Name "hosted-build" -FilePath "cmd.exe" -ArgumentList @("/c", "`"$(Join-Path $Root "build.bat")`"") -TimeoutSeconds 600
+            Add-LogSection "hosted-build-output" $buildResult.Output
+            $hostedBuildOk = (-not $buildResult.TimedOut) -and
+                (($null -eq $buildResult.ExitCode) -or $buildResult.ExitCode -eq 0) -and
+                (Text-Contains -Output $buildResult.Output -Needle "Build successful: guideXOSServer.exe")
+            if ($hostedBuildOk) {
+                $aggregateHostedBuildStatus = "PASS"
+                $aggregateHostedBuildSource = "fresh-build"
+                $aggregateHostedBuildArtifactFresh = $true
+                $aggregateHostedBuildArtifactWriteTimeUtc = (Get-Item -LiteralPath (Join-Path $Root "guideXOSServer.exe")).LastWriteTimeUtc
+                Add-Check "hostedBuild" "PASS" "command=$hostedBuildCommand source=$aggregateHostedBuildSource artifactFresh=true artifact=$((Join-Path $Root "guideXOSServer.exe")) artifactWriteTimeUtc=$($aggregateHostedBuildArtifactWriteTimeUtc.ToString("yyyy-MM-ddTHH:mm:ssZ")) sourceLatestWriteTimeUtc=$($aggregateHostedBuildSourceLatestWriteTimeUtc.ToString("yyyy-MM-ddTHH:mm:ssZ")) sourceLatestPath=$aggregateHostedBuildSourceLatestPath"
+            } else {
+                $aggregateHostedBuildSource = "stale-artifact"
+                $aggregateHostedBuildStatus = if ($buildResult.TimedOut) { "INCOMPLETE" } else { "FAIL" }
+                $aggregateHostedBuildIncompleteStage = "compile"
+                $aggregateHostedBuildFailureDetail = "command=$hostedBuildCommand exitCode=$($buildResult.ExitCode) timedOut=$($buildResult.TimedOut.ToString().ToLowerInvariant())"
+                Add-Check "hostedBuild" $(if ($buildResult.TimedOut) { "WARN" } else { "FAIL" }) "$aggregateHostedBuildFailureDetail source=$aggregateHostedBuildSource resumeSupported=$($aggregateHostedBuildResumeSupported.ToString().ToLowerInvariant())"
+                if ($buildResult.TimedOut) {
+                    throw "aggregateHostedBuild status=INCOMPLETE`naggregateHostedBuildIncompleteStage=$aggregateHostedBuildIncompleteStage`naggregateHostedBuildResumeSupported=$($aggregateHostedBuildResumeSupported.ToString().ToLowerInvariant())`naggregateHostedBuildResumeCommand=$aggregateHostedBuildResumeCommand`naggregateHostedBuildArtifactFresh=$($aggregateHostedBuildArtifactFresh.ToString().ToLowerInvariant())`naggregateHostedBuildSourceLatestWriteTimeUtc=$($aggregateHostedBuildSourceLatestWriteTimeUtc.ToString('yyyy-MM-ddTHH:mm:ssZ'))`naggregateHostedBuildSourceLatestPath=$aggregateHostedBuildSourceLatestPath`naggregateHostedBuildFailureDetail=$aggregateHostedBuildFailureDetail"
+                }
+            }
         }
     } else {
         [void]$CommandsListed.Add("$hostedBuildCommand (pass -BuildHosted to run)")
@@ -859,6 +937,13 @@ try {
     $reportLines = @(
         "[AppModelPhase2Status]",
         "mode=typed-ready-dispatch-validation",
+        "aggregateHostedBuild status=$aggregateHostedBuildStatus source=$aggregateHostedBuildSource artifactFresh=$($aggregateHostedBuildArtifactFresh.ToString().ToLowerInvariant())",
+        "aggregateHostedBuildArtifactFresh=$($aggregateHostedBuildArtifactFresh.ToString().ToLowerInvariant())",
+        "aggregateHostedBuildArtifactWriteTimeUtc=$(if ($aggregateHostedBuildArtifactWriteTimeUtc) { $aggregateHostedBuildArtifactWriteTimeUtc.ToString('yyyy-MM-ddTHH:mm:ssZ') } else { '' })",
+        "aggregateHostedBuildSourceLatestWriteTimeUtc=$(if ($aggregateHostedBuildSourceLatestWriteTimeUtc) { $aggregateHostedBuildSourceLatestWriteTimeUtc.ToString('yyyy-MM-ddTHH:mm:ssZ') } else { '' })",
+        "aggregateHostedBuildSourceLatestPath=$aggregateHostedBuildSourceLatestPath",
+        "aggregateHostedBuildResumeSupported=$($aggregateHostedBuildResumeSupported.ToString().ToLowerInvariant())",
+        "aggregateHostedBuildResumeCommand=$aggregateHostedBuildResumeCommand",
         "typedDispatchEnabled=true",
         "feedsTypedDispatchIntoLaunch=true",
         "runtimeLaunchBehaviorChanged=false",
