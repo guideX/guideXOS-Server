@@ -181,10 +181,12 @@ namespace gxos {
             static const std::vector<const char*> names = {
                 "Notepad",
                 "Calculator",
+                "Clock",
                 "DisplayOptions",
                 "TaskManager",
                 "FileExplorer",
                 "Files",
+                "ImageViewer",
                 "guideXOS Navigator",
                 "Trash",
                 "DiskManager"
