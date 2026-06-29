@@ -110,7 +110,10 @@ The model deliberately keeps `launchName` because the current code still needs i
 | `Clock` | `BuiltInApp` with `appId=gxos.builtin.clock` | Safe typed-ready built-in app; hosted and bare-metal dispatch both resolve directly to `Clock` with normal built-in-app behavior. |
 | native app for another CPU | `CrossArchEmulatedApp` or `NativeElfApp` with `requiresEmulation=true` | Diagnostic-only until emulation exists. |
 
-App Model v1.2 treats `DisplayOptions` itself as the next typed-ready built-in target (`gxos.builtin.displayoptions`). App Model v1.3 adds `TaskManager` as another typed-ready built-in target (`gxos.builtin.taskmanager`). App Model v1.4 adds `Trash` as another typed-ready built-in target (`gxos.builtin.trash`). App Model v1.5 adds `DiskManager` as another typed-ready built-in target (`gxos.builtin.diskmanager`). App Model v1.7 promotes `Clock` as another typed-ready built-in target (`gxos.builtin.clock`). The shell labels `Settings`, `System Settings`, and `Control Panel` still remain separate shell/system affordances and continue to bridge to `DisplayOptions` as non-fatal drift.
+`Console` remains a shell/system affordance and stays outside normal typed-ready built-in app promotion.
+`ControlPanel` is a hosted-only built-in metadata identity, while the visible `Control Panel`, `Settings`, and `System Settings` affordances remain separate shell/system paths that continue to bridge to `DisplayOptions` as non-fatal drift.
+
+App Model v1.2 treats `DisplayOptions` itself as the next typed-ready built-in target (`gxos.builtin.displayoptions`). App Model v1.3 adds `TaskManager` as another typed-ready built-in target (`gxos.builtin.taskmanager`). App Model v1.4 adds `Trash` as another typed-ready built-in target (`gxos.builtin.trash`). App Model v1.5 adds `DiskManager` as another typed-ready built-in target (`gxos.builtin.diskmanager`). App Model v1.7 promotes `Clock` as another typed-ready built-in target (`gxos.builtin.clock`).
 
 App Model v1.6 target selection was deferred: no v1.6 typed target had been selected yet. `Paint` stays deferred because it is hosted-only in built-in metadata and does not yet show hosted and bare-metal parity without changing runtime launch behavior. `DiskManager` remains the accepted v1.5 baseline. `Clock` is now the accepted v1.7 typed-ready promotion target.
 

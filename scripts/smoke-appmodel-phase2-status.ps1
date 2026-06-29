@@ -906,6 +906,19 @@ try {
         $phase3AppModelSpecialCaseObserved -and
         $phase3UnknownNegativeTestContained -and
         ($phase3Readiness.actualFallbackTotal -eq 3)
+    $appmodelV1ShellAffordanceBehaviorPreserved = if ($IncludeQemu) {
+        (
+            $realBranchStartMenuConsoleConfirmed -and
+            $realBranchStartMenuSettingsConfirmed -and
+            $realBranchStartMenuSettingsExpectedNonFatalDriftConfirmed -and
+            $realBranchStartMenuControlPanelConfirmed -and
+            $realBranchStartMenuControlPanelExpectedNonFatalDriftConfirmed -and
+            $realBranchDesktopSystemObjectSystemSettingsConfirmed -and
+            $realBranchSystemObjectSystemSettingsRestoreVerificationConfirmed
+        ).ToString().ToLowerInvariant()
+    } else {
+        "not-run"
+    }
     $calculatorRecord = $phase3Readiness.records | Where-Object { $_.target -eq "Calculator" } | Select-Object -First 1
     $calculatorTypedDispatchReady =
         $null -ne $calculatorRecord -and
@@ -1105,6 +1118,11 @@ try {
         "appmodel.v1.featureGateForcedOffSafe=$($typedDispatchGateForcedOffSafe.ToString().ToLowerInvariant())",
         "appmodel.v1.featureGateRestored=$($typedDispatchGateRestored.ToString().ToLowerInvariant())",
         "appmodel.v1.compatibilityFallbacksPreserved=$($appmodelV1CompatibilityFallbacksPreserved.ToString().ToLowerInvariant())",
+        "appmodel.shellAffordanceTargets=Console,ControlPanel,Settings,System Settings",
+        "appmodel.shellAffordanceVisibleLabels=Console,Control Panel,Settings,System Settings",
+        "appmodel.shellAffordanceBehaviorPreserved=$appmodelV1ShellAffordanceBehaviorPreserved",
+        "appmodel.shellAffordanceTypedReadyPromotionBlocked=true",
+        "appmodel.shellAffordanceReason=system-labels-or-bridges-not-normal-built-in-app-targets",
         "checks:"
     )
     foreach ($check in $Checks) {
