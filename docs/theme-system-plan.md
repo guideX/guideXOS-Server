@@ -239,6 +239,19 @@ Phase 3B.1 is a stabilization-only review pass for the Control Panel app-surface
 * The existing shared grid top offset remains in place for both drawing and hit-testing.
 * Future app polish should remain one app at a time.
 
+## Phase 3C
+
+Phase 3C is the third app-surface pilot for the guideXOS Server theme system.
+
+* Notepad is the third app surface to receive Sci Fi polish.
+* Sci Fi gets conservative editor/body/border/text polish so Notepad feels a little more cohesive with the shell.
+* Classic is preserved and stays visually close to the current Notepad look.
+* No editing behavior changed.
+* No new effects were added.
+* No new per-effect theme controls were introduced.
+* Broad app redesign remains deferred.
+* Future app polish should continue one app at a time.
+
 ## Manual Validation Runbook
 
 * Start the hosted server executable.
@@ -302,7 +315,7 @@ Phase 3B.1 is a stabilization-only review pass for the Control Panel app-surface
 
 * Classic should continue to look basically unchanged.
 * Sci Fi is a first visible proof that the theme system exists, not a full futuristic redesign.
-* Rounded-window clipping remains deferred; this foundation is intentionally limited to IDs, persistence, selector wiring, safe chrome colors, the Phase 2A chrome metric pass, the guarded Phase 2B rounded-shell preview, the Phase 2C border/highlight polish pass, the Phase 2D hosted shadow preview, the Phase 2E desktop/taskbar surface polish pass, the Phase 2G validation checkpoint, and the Phase 3A Display Options app-surface pilot.
+* Rounded-window clipping remains deferred; this foundation is intentionally limited to IDs, persistence, selector wiring, safe chrome colors, the Phase 2A chrome metric pass, the guarded Phase 2B rounded-shell preview, the Phase 2C border/highlight polish pass, the Phase 2D hosted shadow preview, the Phase 2E desktop/taskbar surface polish pass, the Phase 2G validation checkpoint, the Phase 3A Display Options app-surface pilot, the Phase 3B Control Panel app-surface pilot, and the Phase 3C Notepad app-surface pilot.
 
 ## Recommended Next Pass
 

@@ -3,6 +3,7 @@
 #include "logger.h"
 #include "vfs.h"
 #include "desktop_service.h"
+#include "desktop_theme.h"
 #include "save_dialog.h"
 #include "save_changes_dialog.h"
 #include "open_dialog.h"
@@ -30,11 +31,129 @@ namespace gxos { namespace apps {
         constexpr int kEditorMaxDisplayCols = 100;
         constexpr int kStatusY = kEditorY + kEditorHeight + 8;
 
+        uint32_t packRgb(uint8_t r, uint8_t g, uint8_t b) {
+            return (0xFFu << 24) | (static_cast<uint32_t>(r) << 16) | (static_cast<uint32_t>(g) << 8) | static_cast<uint32_t>(b);
+        }
+
+        uint32_t blendColor(uint32_t baseColor, uint32_t overlayColor, int overlayPercent) {
+            overlayPercent = std::clamp(overlayPercent, 0, 100);
+            const int basePercent = 100 - overlayPercent;
+            const uint8_t br = static_cast<uint8_t>((baseColor >> 16) & 0xFF);
+            const uint8_t bg = static_cast<uint8_t>((baseColor >> 8) & 0xFF);
+            const uint8_t bb = static_cast<uint8_t>(baseColor & 0xFF);
+            const uint8_t or_ = static_cast<uint8_t>((overlayColor >> 16) & 0xFF);
+            const uint8_t og = static_cast<uint8_t>((overlayColor >> 8) & 0xFF);
+            const uint8_t ob = static_cast<uint8_t>(overlayColor & 0xFF);
+            return packRgb(
+                static_cast<uint8_t>((br * basePercent + or_ * overlayPercent) / 100),
+                static_cast<uint8_t>((bg * basePercent + og * overlayPercent) / 100),
+                static_cast<uint8_t>((bb * basePercent + ob * overlayPercent) / 100));
+        }
+
+        bool isSciFiThemeActive() {
+            return GetCurrentDesktopThemeId() == DesktopThemeId::SciFi;
+        }
+
+        const DesktopTheme& notepadTheme() {
+            return GetCurrentDesktopTheme();
+        }
+
+        uint32_t NotepadBodyColor() {
+            if (!isSciFiThemeActive()) {
+                return packRgb(36, 38, 44);
+            }
+            const DesktopTheme& theme = notepadTheme();
+            return blendColor(theme.windowBackground, theme.taskbarBackground, 14);
+        }
+
+        uint32_t NotepadEditorColor() {
+            if (!isSciFiThemeActive()) {
+                return packRgb(18, 20, 24);
+            }
+            const DesktopTheme& theme = notepadTheme();
+            return blendColor(theme.windowBackground, theme.taskbarBackground, 8);
+        }
+
+        uint32_t NotepadBorderColor() {
+            if (!isSciFiThemeActive()) {
+                return packRgb(36, 38, 44);
+            }
+            const DesktopTheme& theme = notepadTheme();
+            return blendColor(theme.windowBorder, theme.taskbarBorder, 28);
+        }
+
+        uint32_t NotepadTextColor() {
+            if (!isSciFiThemeActive()) {
+                return packRgb(220, 220, 220);
+            }
+            return notepadTheme().titleBarText;
+        }
+
+        uint32_t NotepadMutedTextColor() {
+            if (!isSciFiThemeActive()) {
+                return packRgb(180, 180, 180);
+            }
+            const DesktopTheme& theme = notepadTheme();
+            return blendColor(theme.titleBarText, theme.taskbarBackground, 54);
+        }
+
+        uint32_t NotepadAccentColor() {
+            if (!isSciFiThemeActive()) {
+                return packRgb(42, 92, 160);
+            }
+            return notepadTheme().accent;
+        }
+
+        uint32_t NotepadSelectionColor() {
+            if (!isSciFiThemeActive()) {
+                return packRgb(42, 92, 160);
+            }
+            const DesktopTheme& theme = notepadTheme();
+            return blendColor(theme.accent, theme.windowBackground, 34);
+        }
+
+        uint32_t NotepadStatusColor() {
+            if (!isSciFiThemeActive()) {
+                return packRgb(48, 50, 58);
+            }
+            const DesktopTheme& theme = notepadTheme();
+            return blendColor(theme.taskbarBackground, theme.windowBackground, 14);
+        }
+
+        uint32_t NotepadMenuColor() {
+            if (!isSciFiThemeActive()) {
+                return packRgb(80, 80, 90);
+            }
+            const DesktopTheme& theme = notepadTheme();
+            return blendColor(theme.taskbarBackground, theme.windowBackground, 12);
+        }
+
+        uint32_t NotepadMenuHoverColor() {
+            if (!isSciFiThemeActive()) {
+                return packRgb(100, 120, 140);
+            }
+            const DesktopTheme& theme = notepadTheme();
+            return blendColor(theme.windowBorder, theme.accent, 16);
+        }
+
         void publishDrawTextAt(uint64_t windowId, int x, int y, const std::string& text) {
             ipc::Message msg;
             msg.type = (uint32_t)MsgType::MT_DrawTextAt;
             std::ostringstream oss;
             oss << windowId << "|" << x << "|" << y << "|" << text;
+            std::string payload = oss.str();
+            msg.data.assign(payload.begin(), payload.end());
+            ipc::Bus::publish("gui.input", std::move(msg), false);
+        }
+
+        void publishDrawTextAtColor(uint64_t windowId, int x, int y, const std::string& text, uint32_t color) {
+            ipc::Message msg;
+            msg.type = (uint32_t)MsgType::MT_DrawTextAtColor;
+            std::ostringstream oss;
+            oss << windowId << "|" << x << "|" << y << "|"
+                << static_cast<int>((color >> 16) & 0xFF) << "|"
+                << static_cast<int>((color >> 8) & 0xFF) << "|"
+                << static_cast<int>(color & 0xFF) << "|" << text;
             std::string payload = oss.str();
             msg.data.assign(payload.begin(), payload.end());
             ipc::Bus::publish("gui.input", std::move(msg), false);
@@ -1192,8 +1311,18 @@ namespace gxos { namespace apps {
         int startLine = s_scrollOffset;
         int endLine = std::min((int)s_lines.size(), startLine + visibleLines);
 
-        publishDrawRect(s_windowId, kEditorX - 2, kEditorY - 2, kEditorWidth + 4, kEditorHeight + 4, 36, 38, 44);
-        publishDrawRect(s_windowId, kEditorX - 1, kEditorY - 1, kEditorWidth + 2, kEditorHeight + 2, 18, 20, 24);
+        const uint32_t bodyColor = NotepadBodyColor();
+        const uint32_t editorColor = NotepadEditorColor();
+        const uint32_t textColor = NotepadTextColor();
+        const uint32_t accentColor = NotepadAccentColor();
+        const uint32_t selectionColor = NotepadSelectionColor();
+        const uint32_t statusColor = NotepadStatusColor();
+        const uint32_t mutedTextColor = NotepadMutedTextColor();
+
+        publishDrawRect(s_windowId, kEditorX - 2, kEditorY - 2, kEditorWidth + 4, kEditorHeight + 4,
+            static_cast<int>((bodyColor >> 16) & 0xFF), static_cast<int>((bodyColor >> 8) & 0xFF), static_cast<int>(bodyColor & 0xFF));
+        publishDrawRect(s_windowId, kEditorX - 1, kEditorY - 1, kEditorWidth + 2, kEditorHeight + 2,
+            static_cast<int>((editorColor >> 16) & 0xFF), static_cast<int>((editorColor >> 8) & 0xFF), static_cast<int>(editorColor & 0xFF));
 
         int selectionStart = getSelectionStart();
         int selectionEnd = getSelectionEnd();
@@ -1219,7 +1348,8 @@ namespace gxos { namespace apps {
                     int hx = kEditorX + startCol * kEditorCharWidth;
                     int hy = kEditorY + (i - startLine) * kEditorLineHeight;
                     int hw = std::max(kEditorCharWidth, (endCol - startCol) * kEditorCharWidth);
-                    publishDrawRect(s_windowId, hx, hy, hw, kEditorLineHeight, 42, 92, 160);
+                    publishDrawRect(s_windowId, hx, hy, hw, kEditorLineHeight,
+                        static_cast<int>((selectionColor >> 16) & 0xFF), static_cast<int>((selectionColor >> 8) & 0xFF), static_cast<int>(selectionColor & 0xFF));
                 }
             }
         }
@@ -1231,14 +1361,22 @@ namespace gxos { namespace apps {
                 displayLine = displayLine.substr(0, kEditorMaxDisplayCols);
             }
             int y = kEditorY + (i - startLine) * kEditorLineHeight + 3;
-            publishDrawTextAt(s_windowId, kEditorX, y, displayLine);
+            if (isSciFiThemeActive()) {
+                publishDrawTextAtColor(s_windowId, kEditorX, y, displayLine, textColor);
+            } else {
+                publishDrawTextAt(s_windowId, kEditorX, y, displayLine);
+            }
         }
 
         if (s_cursorLine >= startLine && s_cursorLine < endLine) {
             int caretCol = std::min(s_cursorCol, kEditorMaxDisplayCols);
             int caretX = kEditorX + caretCol * kEditorCharWidth;
             int caretY = kEditorY + (s_cursorLine - startLine) * kEditorLineHeight + 3;
-            publishDrawTextAt(s_windowId, caretX, caretY, "|");
+            if (isSciFiThemeActive()) {
+                publishDrawTextAtColor(s_windowId, caretX, caretY, "|", accentColor);
+            } else {
+                publishDrawTextAt(s_windowId, caretX, caretY, "|");
+            }
         }
 
         std::ostringstream status;
@@ -1248,8 +1386,13 @@ namespace gxos { namespace apps {
         if (s_capsLockOn) status << " [CAPS]";
         if (s_shiftPressed) status << " [SHIFT]";
         if (s_ctrlPressed) status << " [CTRL]";
-        publishDrawRect(s_windowId, kEditorX - 2, kStatusY - 2, kEditorWidth + 4, kEditorLineHeight + 4, 48, 50, 58);
-        publishDrawTextAt(s_windowId, kEditorX, kStatusY, status.str());
+        publishDrawRect(s_windowId, kEditorX - 2, kStatusY - 2, kEditorWidth + 4, kEditorLineHeight + 4,
+            static_cast<int>((statusColor >> 16) & 0xFF), static_cast<int>((statusColor >> 8) & 0xFF), static_cast<int>(statusColor & 0xFF));
+        if (isSciFiThemeActive()) {
+            publishDrawTextAtColor(s_windowId, kEditorX, kStatusY, status.str(), mutedTextColor);
+        } else {
+            publishDrawTextAt(s_windowId, kEditorX, kStatusY, status.str());
+        }
         
         // Draw menus if visible
         drawContextMenu();
@@ -1579,15 +1722,29 @@ namespace gxos { namespace apps {
         const int itemHeight = 24;
         const char* menuItems[] = { "Cut", "Copy", "Paste", "Undo", "Redo", "Select All" };
         const int itemCount = 6;
+        const uint32_t menuColor = NotepadMenuColor();
+        const uint32_t menuHoverColor = NotepadMenuHoverColor();
+        const uint32_t borderColor = NotepadBorderColor();
+        const uint32_t textColor = NotepadTextColor();
         
         // Draw menu background rectangle
         ipc::Message bgMsg;
         bgMsg.type = (uint32_t)MsgType::MT_DrawRect;
         std::ostringstream bgOss;
-        bgOss << s_windowId << "|" << s_contextMenuX << "|" << s_contextMenuY << "|" << menuWidth << "|" << (itemHeight * itemCount) << "|80|80|90";
+        bgOss << s_windowId << "|" << s_contextMenuX << "|" << s_contextMenuY << "|" << menuWidth << "|" << (itemHeight * itemCount) << "|"
+              << static_cast<int>((menuColor >> 16) & 0xFF) << "|" << static_cast<int>((menuColor >> 8) & 0xFF) << "|" << static_cast<int>(menuColor & 0xFF);
         std::string bgPayload = bgOss.str();
         bgMsg.data.assign(bgPayload.begin(), bgPayload.end());
         ipc::Bus::publish(kGuiChanIn, std::move(bgMsg), false);
+        if (isSciFiThemeActive()) {
+            const int borderR = static_cast<int>((borderColor >> 16) & 0xFF);
+            const int borderG = static_cast<int>((borderColor >> 8) & 0xFF);
+            const int borderB = static_cast<int>(borderColor & 0xFF);
+            publishDrawRect(s_windowId, s_contextMenuX, s_contextMenuY, menuWidth, 1, borderR, borderG, borderB);
+            publishDrawRect(s_windowId, s_contextMenuX, s_contextMenuY + itemHeight * itemCount - 1, menuWidth, 1, borderR, borderG, borderB);
+            publishDrawRect(s_windowId, s_contextMenuX, s_contextMenuY, 1, itemHeight * itemCount, borderR, borderG, borderB);
+            publishDrawRect(s_windowId, s_contextMenuX + menuWidth - 1, s_contextMenuY, 1, itemHeight * itemCount, borderR, borderG, borderB);
+        }
         
         // Draw menu items
         for (int i = 0; i < itemCount; i++) {
@@ -1598,13 +1755,18 @@ namespace gxos { namespace apps {
                 ipc::Message itemBgMsg;
                 itemBgMsg.type = (uint32_t)MsgType::MT_DrawRect;
                 std::ostringstream itemBgOss;
-                itemBgOss << s_windowId << "|" << s_contextMenuX << "|" << itemY << "|" << menuWidth << "|" << itemHeight << "|100|120|140";
+                itemBgOss << s_windowId << "|" << s_contextMenuX << "|" << itemY << "|" << menuWidth << "|" << itemHeight << "|"
+                          << static_cast<int>((menuHoverColor >> 16) & 0xFF) << "|" << static_cast<int>((menuHoverColor >> 8) & 0xFF) << "|" << static_cast<int>(menuHoverColor & 0xFF);
                 std::string itemBgPayload = itemBgOss.str();
                 itemBgMsg.data.assign(itemBgPayload.begin(), itemBgPayload.end());
                 ipc::Bus::publish(kGuiChanIn, std::move(itemBgMsg), false);
             }
             
-            publishDrawTextAt(s_windowId, s_contextMenuX + 8, itemY + 7, menuItems[i]);
+            if (isSciFiThemeActive()) {
+                publishDrawTextAtColor(s_windowId, s_contextMenuX + 8, itemY + 7, menuItems[i], textColor);
+            } else {
+                publishDrawTextAt(s_windowId, s_contextMenuX + 8, itemY + 7, menuItems[i]);
+            }
         }
     }
 
@@ -1616,14 +1778,28 @@ namespace gxos { namespace apps {
         const int itemHeight = 24;
         const char* menuItems[] = { "New", "Open", "Save", "Save As", "Exit" };
         const int itemCount = 5;
+        const uint32_t menuColor = NotepadMenuColor();
+        const uint32_t menuHoverColor = NotepadMenuHoverColor();
+        const uint32_t borderColor = NotepadBorderColor();
+        const uint32_t textColor = NotepadTextColor();
 
         ipc::Message bgMsg;
         bgMsg.type = (uint32_t)MsgType::MT_DrawRect;
         std::ostringstream bgOss;
-        bgOss << s_windowId << "|" << s_fileMenuX << "|" << s_fileMenuY << "|" << menuWidth << "|" << (itemHeight * itemCount) << "|80|80|90";
+        bgOss << s_windowId << "|" << s_fileMenuX << "|" << s_fileMenuY << "|" << menuWidth << "|" << (itemHeight * itemCount) << "|"
+              << static_cast<int>((menuColor >> 16) & 0xFF) << "|" << static_cast<int>((menuColor >> 8) & 0xFF) << "|" << static_cast<int>(menuColor & 0xFF);
         std::string bgPayload = bgOss.str();
         bgMsg.data.assign(bgPayload.begin(), bgPayload.end());
         ipc::Bus::publish(kGuiChanIn, std::move(bgMsg), false);
+        if (isSciFiThemeActive()) {
+            const int borderR = static_cast<int>((borderColor >> 16) & 0xFF);
+            const int borderG = static_cast<int>((borderColor >> 8) & 0xFF);
+            const int borderB = static_cast<int>(borderColor & 0xFF);
+            publishDrawRect(s_windowId, s_fileMenuX, s_fileMenuY, menuWidth, 1, borderR, borderG, borderB);
+            publishDrawRect(s_windowId, s_fileMenuX, s_fileMenuY + itemHeight * itemCount - 1, menuWidth, 1, borderR, borderG, borderB);
+            publishDrawRect(s_windowId, s_fileMenuX, s_fileMenuY, 1, itemHeight * itemCount, borderR, borderG, borderB);
+            publishDrawRect(s_windowId, s_fileMenuX + menuWidth - 1, s_fileMenuY, 1, itemHeight * itemCount, borderR, borderG, borderB);
+        }
 
         for (int i = 0; i < itemCount; i++) {
             int itemY = s_fileMenuY + (i * itemHeight);
@@ -1632,13 +1808,18 @@ namespace gxos { namespace apps {
                 ipc::Message itemBgMsg;
                 itemBgMsg.type = (uint32_t)MsgType::MT_DrawRect;
                 std::ostringstream itemBgOss;
-                itemBgOss << s_windowId << "|" << s_fileMenuX << "|" << itemY << "|" << menuWidth << "|" << itemHeight << "|100|120|140";
+                itemBgOss << s_windowId << "|" << s_fileMenuX << "|" << itemY << "|" << menuWidth << "|" << itemHeight << "|"
+                          << static_cast<int>((menuHoverColor >> 16) & 0xFF) << "|" << static_cast<int>((menuHoverColor >> 8) & 0xFF) << "|" << static_cast<int>(menuHoverColor & 0xFF);
                 std::string itemBgPayload = itemBgOss.str();
                 itemBgMsg.data.assign(itemBgPayload.begin(), itemBgPayload.end());
                 ipc::Bus::publish(kGuiChanIn, std::move(itemBgMsg), false);
             }
 
-            publishDrawTextAt(s_windowId, s_fileMenuX + 8, itemY + 7, menuItems[i]);
+            if (isSciFiThemeActive()) {
+                publishDrawTextAtColor(s_windowId, s_fileMenuX + 8, itemY + 7, menuItems[i], textColor);
+            } else {
+                publishDrawTextAt(s_windowId, s_fileMenuX + 8, itemY + 7, menuItems[i]);
+            }
         }
     }
 
@@ -1650,14 +1831,28 @@ namespace gxos { namespace apps {
         const int itemHeight = 24;
         const char* menuItems[] = { "Cut", "Copy", "Paste", "Undo", "Redo", "Select All" };
         const int itemCount = 6;
+        const uint32_t menuColor = NotepadMenuColor();
+        const uint32_t menuHoverColor = NotepadMenuHoverColor();
+        const uint32_t borderColor = NotepadBorderColor();
+        const uint32_t textColor = NotepadTextColor();
 
         ipc::Message bgMsg;
         bgMsg.type = (uint32_t)MsgType::MT_DrawRect;
         std::ostringstream bgOss;
-        bgOss << s_windowId << "|" << s_editMenuX << "|" << s_editMenuY << "|" << menuWidth << "|" << (itemHeight * itemCount) << "|80|80|90";
+        bgOss << s_windowId << "|" << s_editMenuX << "|" << s_editMenuY << "|" << menuWidth << "|" << (itemHeight * itemCount) << "|"
+              << static_cast<int>((menuColor >> 16) & 0xFF) << "|" << static_cast<int>((menuColor >> 8) & 0xFF) << "|" << static_cast<int>(menuColor & 0xFF);
         std::string bgPayload = bgOss.str();
         bgMsg.data.assign(bgPayload.begin(), bgPayload.end());
         ipc::Bus::publish(kGuiChanIn, std::move(bgMsg), false);
+        if (isSciFiThemeActive()) {
+            const int borderR = static_cast<int>((borderColor >> 16) & 0xFF);
+            const int borderG = static_cast<int>((borderColor >> 8) & 0xFF);
+            const int borderB = static_cast<int>(borderColor & 0xFF);
+            publishDrawRect(s_windowId, s_editMenuX, s_editMenuY, menuWidth, 1, borderR, borderG, borderB);
+            publishDrawRect(s_windowId, s_editMenuX, s_editMenuY + itemHeight * itemCount - 1, menuWidth, 1, borderR, borderG, borderB);
+            publishDrawRect(s_windowId, s_editMenuX, s_editMenuY, 1, itemHeight * itemCount, borderR, borderG, borderB);
+            publishDrawRect(s_windowId, s_editMenuX + menuWidth - 1, s_editMenuY, 1, itemHeight * itemCount, borderR, borderG, borderB);
+        }
 
         for (int i = 0; i < itemCount; i++) {
             int itemY = s_editMenuY + (i * itemHeight);
@@ -1666,13 +1861,18 @@ namespace gxos { namespace apps {
                 ipc::Message itemBgMsg;
                 itemBgMsg.type = (uint32_t)MsgType::MT_DrawRect;
                 std::ostringstream itemBgOss;
-                itemBgOss << s_windowId << "|" << s_editMenuX << "|" << itemY << "|" << menuWidth << "|" << itemHeight << "|100|120|140";
+                itemBgOss << s_windowId << "|" << s_editMenuX << "|" << itemY << "|" << menuWidth << "|" << itemHeight << "|"
+                          << static_cast<int>((menuHoverColor >> 16) & 0xFF) << "|" << static_cast<int>((menuHoverColor >> 8) & 0xFF) << "|" << static_cast<int>(menuHoverColor & 0xFF);
                 std::string itemBgPayload = itemBgOss.str();
                 itemBgMsg.data.assign(itemBgPayload.begin(), itemBgPayload.end());
                 ipc::Bus::publish(kGuiChanIn, std::move(itemBgMsg), false);
             }
 
-            publishDrawTextAt(s_windowId, s_editMenuX + 8, itemY + 7, menuItems[i]);
+            if (isSciFiThemeActive()) {
+                publishDrawTextAtColor(s_windowId, s_editMenuX + 8, itemY + 7, menuItems[i], textColor);
+            } else {
+                publishDrawTextAt(s_windowId, s_editMenuX + 8, itemY + 7, menuItems[i]);
+            }
         }
     }
     
