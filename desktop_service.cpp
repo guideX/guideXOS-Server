@@ -1357,6 +1357,7 @@ namespace gxos {
         static const char* const kLaunchTargetComparisonLabels[] = {
             "Notepad",
             "Calculator",
+            "Clock",
             "TaskManager",
             "DiskManager",
             "Trash",
@@ -3098,10 +3099,11 @@ namespace gxos {
                 gateMatrix = typedDispatchGateMatrixCounts();
             }
             const bool forcedOffSupported = true;
+            const uint64_t expectedTypedDispatchReadyCount =
+                gateMatrix.total - gateMatrix.blockedUnknownFallback - gateMatrix.specialCaseFallback;
             const bool forcedOffSafe =
-                gateMatrix.total == 13 &&
-                gateMatrix.typedDispatch == (runtimeGateEnabled ? 10 : 0) &&
-                gateMatrix.legacyOrCompatibilityDispatch == (runtimeGateEnabled ? 0 : 10) &&
+                gateMatrix.typedDispatch == (runtimeGateEnabled ? expectedTypedDispatchReadyCount : 0) &&
+                gateMatrix.legacyOrCompatibilityDispatch == (runtimeGateEnabled ? 0 : expectedTypedDispatchReadyCount) &&
                 gateMatrix.blockedUnknownFallback == 1 &&
                 gateMatrix.specialCaseFallback == 2;
             const bool gateRestored = apps::TypedDispatchRuntimeEnabled() == gateRestoreEnabled;

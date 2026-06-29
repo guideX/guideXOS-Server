@@ -540,9 +540,9 @@ try {
         $typedDispatchGateForcedOffInactive = Text-Contains -Output $typedDispatchGateForcedOffOutput -Needle "typedDispatchRuntimePath=inactive"
         $typedDispatchGateRestored = Text-Contains -Output $hostedOutput -Needle "typedDispatchGateRestored=true"
         $typedDispatchGateDefaultMatrixOk =
-            Text-Contains -Output $hostedOutput -Needle "phase3TypedDispatchGateMatrix state=default total=13 typedDispatch=10 legacyOrCompatibilityDispatch=0 blockedUnknownFallback=1 specialCaseFallback=2 fallbackTotal=3"
+            Text-Contains -Output $hostedOutput -Needle "phase3TypedDispatchGateMatrix state=default total=14 typedDispatch=11 legacyOrCompatibilityDispatch=0 blockedUnknownFallback=1 specialCaseFallback=2 fallbackTotal=3"
         $typedDispatchGateForcedOffMatrixOk =
-            Text-Contains -Output $typedDispatchGateForcedOffOutput -Needle "phase3TypedDispatchGateMatrix state=forced-off total=13 typedDispatch=0 legacyOrCompatibilityDispatch=10 blockedUnknownFallback=1 specialCaseFallback=2 fallbackTotal=13"
+            Text-Contains -Output $typedDispatchGateForcedOffOutput -Needle "phase3TypedDispatchGateMatrix state=forced-off total=14 typedDispatch=0 legacyOrCompatibilityDispatch=11 blockedUnknownFallback=1 specialCaseFallback=2 fallbackTotal=14"
         $typedDispatchGateRestoredMatrixOk = $typedDispatchGateDefaultMatrixOk
         $typedDispatchGateFeatureOk =
             $typedDispatchGateName -eq "appmodel.typed-dispatch-runtime-gate" -and
@@ -610,16 +610,16 @@ try {
         }
         $phase3ReadinessOk =
             $phase3Readiness.phase3TypedDispatchReadiness -eq "active" -and
-            $phase3Readiness.totalObservedLaunchTargets -eq 13 -and
-            $phase3Readiness.typedDispatchReadyCount -eq 10 -and
+            $phase3Readiness.totalObservedLaunchTargets -eq 14 -and
+            $phase3Readiness.typedDispatchReadyCount -eq 11 -and
             $phase3Readiness.typedDispatchBlockedCount -eq 3 -and
             $phase3Readiness.specialCaseCount -eq 2 -and
             $phase3Readiness.legacyAliasCount -eq 2 -and
-            $phase3Readiness.builtInAppCount -eq 10 -and
+            $phase3Readiness.builtInAppCount -eq 11 -and
             $phase3Readiness.shellActionCount -eq 1 -and
             $phase3Readiness.fileOpenCount -eq 0 -and
             $phase3Readiness.unknownOrUnclassifiedCount -eq 2 -and
-            $phase3Readiness.actualTypedDispatchCount -eq 10 -and
+            $phase3Readiness.actualTypedDispatchCount -eq 11 -and
             $phase3Readiness.actualLegacyFallbackCount -eq 0 -and
             $phase3Readiness.actualBlockedUnknownFallbackCount -eq 1 -and
             $phase3Readiness.actualSpecialCaseFallbackCount -eq 2 -and
@@ -628,7 +628,7 @@ try {
             $phase3BlockedTargets -eq "AppModel,ComputerFiles,TotallyUnknownLaunchThing" -and
             $phase3UnknownTargets -eq "ComputerFiles,TotallyUnknownLaunchThing"
         if ($phase3ReadinessOk) {
-            Add-Check "phase3TypedDispatchReadiness" "PASS" "phase3TypedDispatchReadiness=active totalObservedLaunchTargets=13 typedDispatchReadyCount=10 typedDispatchBlockedCount=3 actualTypedDispatchCount=10 actualLegacyFallbackCount=0 actualBlockedUnknownFallbackCount=1 actualSpecialCaseFallbackCount=2 actualFallbackTotal=3 phase3TypedDispatchBlockedTargets=$phase3BlockedTargets"
+            Add-Check "phase3TypedDispatchReadiness" "PASS" "phase3TypedDispatchReadiness=active totalObservedLaunchTargets=14 typedDispatchReadyCount=11 typedDispatchBlockedCount=3 actualTypedDispatchCount=11 actualLegacyFallbackCount=0 actualBlockedUnknownFallbackCount=1 actualSpecialCaseFallbackCount=2 actualFallbackTotal=3 phase3TypedDispatchBlockedTargets=$phase3BlockedTargets"
         } else {
             Add-Check "phase3TypedDispatchReadiness" "FAIL" "missing or unexpected Phase 3A readiness summary in hosted appmodel output"
         }
@@ -743,9 +743,10 @@ try {
                     clockBareMetalParity = "true"
                     clockBehaviorPreserved = "true"
                     clockLaunchShadowReady = "true"
-                    clockStillNotPromotedToTypedReady = "true"
+                    clockTypedDispatchReady = "true"
+                    clockStillNotPromotedToTypedReady = "false"
                     clockObservation = "target=Clock classification=BuiltInApp appId=gxos.builtin.clock actualDispatch=Clock typedDispatchCandidate=Clock typedDispatchCandidateComparison=match"
-                } "ClockBareMetalParity=true ClockBehaviorPreserved=true ClockLaunchShadowReady=true ClockStillNotPromotedToTypedReady=true target=Clock classification=BuiltInApp appId=gxos.builtin.clock actualDispatch=Clock typedDispatchCandidate=Clock typedDispatchCandidateComparison=match"
+                } "ClockBareMetalParity=true ClockBehaviorPreserved=true ClockLaunchShadowReady=true ClockTypedDispatchReady=true ClockStillNotPromotedToTypedReady=false target=Clock classification=BuiltInApp appId=gxos.builtin.clock actualDispatch=Clock typedDispatchCandidate=Clock typedDispatchCandidateComparison=match"
 
                 $qemuKnownNonFatalDriftsConfirmed = Add-QemuEvidenceCheck "qemuKnownNonFatalDrifts" @{
                     realBranchStartMenuSettingsExpectedNonFatalDriftConfirmed = "true"
@@ -1080,14 +1081,19 @@ try {
         "appmodel.v1_5.diskManagerStatus=target=DiskManager classification=BuiltInApp dispatchDecision=typed-dispatch appId=$($diskManagerRecord.appId) actualDispatch=DiskManager expected=true safe=true reason=normal-built-in-app",
         "[AppModelV1_6DeferredStatus]",
         "appmodel.v1_6.additionalTypedTarget=none",
-        "appmodel.v1_6.deferredTargets=Clock,Paint",
-        "appmodel.v1_6.clockBareMetalParity=true",
-        "appmodel.v1_6.clockBehaviorPreserved=true",
-        "appmodel.v1_6.clockLaunchShadowReady=true",
-        "appmodel.v1_6.clockStillNotPromotedToTypedReady=true",
-        "appmodel.v1_6.clockDeferredReason=bare-metal parity exists; typed-ready promotion remains deferred",
+        "appmodel.v1_6.deferredTargets=Paint",
         "appmodel.v1_6.paintDeferredReason=hosted-only metadata; no bare-metal parity",
         "appmodel.v1_6.baseline=DiskManager",
+        "[AppModelV1_7PromotedStatus]",
+        "appmodel.v1_7.additionalTypedTarget=Clock",
+        "appmodel.v1_7.deferredTargets=Paint",
+        "appmodel.v1_7.clockTypedDispatchReady=true",
+        "appmodel.v1_7.clockBehaviorPreserved=true",
+        "appmodel.v1_7.clockBareMetalParity=true",
+        "appmodel.v1_7.clockLaunchShadowReady=true",
+        "appmodel.v1_7.clockStatus=target=Clock classification=BuiltInApp dispatchDecision=typed-dispatch appId=gxos.builtin.clock actualDispatch=Clock expected=true safe=true reason=normal-built-in-app",
+        "appmodel.v1_7.paintDeferredReason=hosted-only metadata; no bare-metal parity",
+        "appmodel.v1_7.baseline=DiskManager",
         "appmodel.v1.coveredLaunchSurfaces=$appmodelV1CoveredLaunchSurfaces",
         "appmodel.v1.typedReadyTargets=$appmodelV1TypedReadyTargets",
         "appmodel.v1.legacyFallbackTargets=$appmodelV1LegacyFallbackTargets",

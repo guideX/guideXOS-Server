@@ -892,6 +892,7 @@ void printLaunchTargetShadowSmokeDiagnostic(LaunchTargetDiagnosticWriter write)
 static const char* const kLaunchTargetComparisonLabels[] = {
     "Notepad",
     "Calculator",
+    "Clock",
     "TaskManager",
     "Trash",
     "gxos.builtin.notepad",

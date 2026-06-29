@@ -104,15 +104,15 @@ The remaining alias warnings are expected Phase 1 residue, not launch failures:
 - `AppModel` is a legacy hosted UI alias for `App Model Demo` / `gxos.builtin.appmodeldemo`. Keep the alias until Phase 2 introduces a proper launch-resolution surface for old pins, shortcuts, and saved config.
 - `ComputerFiles` is a shell/system label for the File Manager entry. It is intentionally not a built-in app metadata identity yet because it represents a desktop shell affordance, not a separate app registration.
 
-App Model v1.2 adds `DisplayOptions` as the next typed-ready built-in target (`gxos.builtin.displayoptions`). App Model v1.3 adds `TaskManager` as an additional typed-ready built-in target (`gxos.builtin.taskmanager`). App Model v1.4 adds `Trash` as another typed-ready built-in target (`gxos.builtin.trash`). App Model v1.5 adds `DiskManager` as another typed-ready built-in target (`gxos.builtin.diskmanager`). The shell labels `Settings`, `System Settings`, and `Control Panel` still intentionally bridge to `DisplayOptions` as non-fatal drift, so their user-visible launch behavior remains unchanged.
+App Model v1.2 adds `DisplayOptions` as the next typed-ready built-in target (`gxos.builtin.displayoptions`). App Model v1.3 adds `TaskManager` as an additional typed-ready built-in target (`gxos.builtin.taskmanager`). App Model v1.4 adds `Trash` as another typed-ready built-in target (`gxos.builtin.trash`). App Model v1.5 adds `DiskManager` as another typed-ready built-in target (`gxos.builtin.diskmanager`). App Model v1.7 promotes `Clock` as another typed-ready built-in target (`gxos.builtin.clock`). The shell labels `Settings`, `System Settings`, and `Control Panel` still intentionally bridge to `DisplayOptions` as non-fatal drift, so their user-visible launch behavior remains unchanged.
 
-App Model v1.6 target selection is deferred: no v1.6 typed target has been selected yet. `Clock` now has a minimal bare-metal implementation and launch-shadow evidence, but typed-ready promotion remains deferred in this pass. `Paint` remains deferred because it is hosted-only in built-in metadata and does not yet have hosted and bare-metal parity without changing runtime launch behavior. `DiskManager` remains the accepted v1.5 baseline.
+App Model v1.6 target selection was deferred: no v1.6 typed target had been selected yet. `Paint` remains deferred because it is hosted-only in built-in metadata and does not yet have hosted and bare-metal parity without changing runtime launch behavior. `DiskManager` remains the accepted v1.5 baseline. `Clock` is now accepted as the v1.7 typed-ready promotion target.
 
 App Model v1.x closure:
 - No further safe typed-ready target remains without new bare-metal parity work.
 - v1.5 `DiskManager` is the current accepted baseline.
-- v1.6 is deferred.
-- `Clock` now has a minimal bare-metal implementation and launch-shadow evidence, but it remains deferred from typed-ready promotion in this pass.
+- v1.6 was deferred.
+- v1.7 promotes `Clock`.
 - `Paint` still requires bare-metal implementation before typed-ready promotion.
 - `ImageViewer` remains deferred until active Image Viewer stabilization is complete.
 
