@@ -200,7 +200,10 @@ $phase3b1HeadingMatch = Find-FirstMatch $planDoc '## Phase 3B\.1'
 $phase3b1BodyMatch = Find-FirstMatch $planDoc 'stabilization-only review pass for the Control Panel app-surface pilot|Control Panel surface helpers were reviewed and kept centralized|Classic preservation was confirmed|No new effects, controls, rounded behavior, or layout redesign were added|shared grid top offset remains in place|Future app polish should remain one app at a time'
 $phase3cHeadingMatch = Find-FirstMatch $planDoc '## Phase 3C'
 $phase3cBodyMatch = Find-FirstMatch $planDoc 'third app-surface pilot|Notepad is the third app surface to receive Sci Fi polish|conservative editor/body/border/text polish|Classic is preserved and stays visually close to the current Notepad look|No editing behavior changed|No new effects were added|No new per-effect theme controls were introduced|Broad app redesign remains deferred|Future app polish should continue one app at a time'
+$phase3c1HeadingMatch = Find-FirstMatch $planDoc '## Phase 3C\.1'
+$phase3c1BodyMatch = Find-FirstMatch $planDoc 'stabilization-only review pass for the Notepad app-surface pilot|Notepad surface helpers were reviewed and kept centralized|Classic preservation was confirmed|No editing behavior, file handling, keyboard input, persistence, layout geometry, hit-testing, or theme metrics changed|No new effects or controls were added|build\.bat wrapper behavior was classified by direct reruns as non-reproducible|Future app polish should remain one app at a time'
 $notepadThemeHelperMatch = Find-FirstMatch $notepad 'NotepadBodyColor|NotepadEditorColor|NotepadBorderColor|NotepadTextColor|NotepadMutedTextColor|NotepadAccentColor|NotepadSelectionColor|NotepadStatusColor|NotepadMenuColor|NotepadMenuHoverColor|GetCurrentDesktopThemeId|GetCurrentDesktopTheme|DesktopThemeId::SciFi'
+$notepadColorTextMatch = Find-FirstMatch $notepad 'publishDrawTextAtColor'
 $notepadThemeFieldMatch = Find-FirstMatch $notepad 'windowBackground|windowBorder|accent|mutedAccent|taskbarBackground|taskbarBorder|titleBarText'
 $notepadPerEffectMatch = Find-FirstMatch $notepad 'Visual Effects|per-effect'
 
@@ -296,6 +299,7 @@ $checks = @(
     [pscustomobject]@{ Name = "control panel grid top synchronized"; Pass = $null -ne $controlPanelGridTopMatch; Match = $controlPanelGridTopMatch },
     [pscustomobject]@{ Name = "control panel no per-effect controls"; Pass = $null -eq $controlPanelPerEffectMatch; Match = $controlPanelPerEffectMatch },
     [pscustomobject]@{ Name = "notepad theme helpers wired"; Pass = $null -ne $notepadThemeHelperMatch -or $null -ne $notepadThemeFieldMatch; Match = $(if ($null -ne $notepadThemeHelperMatch) { $notepadThemeHelperMatch } else { $notepadThemeFieldMatch }) },
+    [pscustomobject]@{ Name = "notepad colored text path present"; Pass = $null -ne $notepadColorTextMatch; Match = $notepadColorTextMatch },
     [pscustomobject]@{ Name = "notepad no per-effect controls"; Pass = $null -eq $notepadPerEffectMatch; Match = $notepadPerEffectMatch },
     [pscustomobject]@{ Name = "phase 3b docs heading"; Pass = $null -ne $phase3bHeadingMatch; Match = $phase3bHeadingMatch },
     [pscustomobject]@{ Name = "phase 3b docs body"; Pass = $null -ne $phase3bBodyMatch; Match = $phase3bBodyMatch },
@@ -303,6 +307,8 @@ $checks = @(
     [pscustomobject]@{ Name = "phase 3b1 docs body"; Pass = $null -ne $phase3b1BodyMatch; Match = $phase3b1BodyMatch },
     [pscustomobject]@{ Name = "phase 3c docs heading"; Pass = $null -ne $phase3cHeadingMatch; Match = $phase3cHeadingMatch },
     [pscustomobject]@{ Name = "phase 3c docs body"; Pass = $null -ne $phase3cBodyMatch; Match = $phase3cBodyMatch },
+    [pscustomobject]@{ Name = "phase 3c.1 docs heading"; Pass = $null -ne $phase3c1HeadingMatch; Match = $phase3c1HeadingMatch },
+    [pscustomobject]@{ Name = "phase 3c.1 docs body"; Pass = $null -ne $phase3c1BodyMatch; Match = $phase3c1BodyMatch },
     [pscustomobject]@{ Name = "compositor start button rect helper wired"; Pass = $null -ne $compositorStartButtonRectMatch; Match = $compositorStartButtonRectMatch }
 )
 

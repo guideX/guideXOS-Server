@@ -252,6 +252,17 @@ Phase 3C is the third app-surface pilot for the guideXOS Server theme system.
 * Broad app redesign remains deferred.
 * Future app polish should continue one app at a time.
 
+## Phase 3C.1
+
+Phase 3C.1 is a stabilization-only review pass for the Notepad app-surface pilot.
+
+* Notepad surface helpers were reviewed and kept centralized.
+* Classic preservation was confirmed, with no visible fallback changes needed to restore the prior familiar look.
+* No editing behavior, file handling, keyboard input, persistence, layout geometry, hit-testing, or theme metrics changed.
+* No new effects or controls were added.
+* `build.bat` wrapper behavior was classified by direct reruns as non-reproducible; `guideXOSServer.exe` was produced and the direct wrapper exit code returned 0.
+* Future app polish should remain one app at a time.
+
 ## Manual Validation Runbook
 
 * Start the hosted server executable.
@@ -315,11 +326,11 @@ Phase 3C is the third app-surface pilot for the guideXOS Server theme system.
 
 * Classic should continue to look basically unchanged.
 * Sci Fi is a first visible proof that the theme system exists, not a full futuristic redesign.
-* Rounded-window clipping remains deferred; this foundation is intentionally limited to IDs, persistence, selector wiring, safe chrome colors, the Phase 2A chrome metric pass, the guarded Phase 2B rounded-shell preview, the Phase 2C border/highlight polish pass, the Phase 2D hosted shadow preview, the Phase 2E desktop/taskbar surface polish pass, the Phase 2G validation checkpoint, the Phase 3A Display Options app-surface pilot, the Phase 3B Control Panel app-surface pilot, and the Phase 3C Notepad app-surface pilot.
+* Rounded-window clipping remains deferred; this foundation is intentionally limited to IDs, persistence, selector wiring, safe chrome colors, the Phase 2A chrome metric pass, the guarded Phase 2B rounded-shell preview, the Phase 2C border/highlight polish pass, the Phase 2D hosted shadow preview, the Phase 2E desktop/taskbar surface polish pass, the Phase 2G validation checkpoint, the Phase 3A Display Options app-surface pilot, the Phase 3B Control Panel app-surface pilot, the Phase 3C Notepad app-surface pilot, and the Phase 3C.1 stabilization review pass.
 
 ## Recommended Next Pass
 
 1. Phase 2G.1 manual visual validation fixes, if screenshots or manual testing finds issues.
 2. Phase 2H theme screenshot / manual smoke harness, if feasible.
-3. Next app-surface pilot, one app at a time, after Control Panel.
+3. Next app-surface pilot, one app at a time, after Notepad.
 4. Future high-DPI and resolution work as a separate track.
