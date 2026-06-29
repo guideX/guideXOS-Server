@@ -739,6 +739,13 @@ try {
                     realBranchPinnedDesktopNotepadConfirmed = "true"
                 } "RealBranchPinnedDesktopNotepad"
                 $qemuCoverageEvidenceConfirmed = $desktopFileFolder -and $desktopSystemObjects -and $startMenu -and $pinnedDesktop
+                $qemuClockParity = Add-QemuEvidenceCheck "qemuClockParity" @{
+                    clockBareMetalParity = "true"
+                    clockBehaviorPreserved = "true"
+                    clockLaunchShadowReady = "true"
+                    clockStillNotPromotedToTypedReady = "true"
+                    clockObservation = "target=Clock classification=BuiltInApp appId=gxos.builtin.clock actualDispatch=Clock typedDispatchCandidate=Clock typedDispatchCandidateComparison=match"
+                } "ClockBareMetalParity=true ClockBehaviorPreserved=true ClockLaunchShadowReady=true ClockStillNotPromotedToTypedReady=true target=Clock classification=BuiltInApp appId=gxos.builtin.clock actualDispatch=Clock typedDispatchCandidate=Clock typedDispatchCandidateComparison=match"
 
                 $qemuKnownNonFatalDriftsConfirmed = Add-QemuEvidenceCheck "qemuKnownNonFatalDrifts" @{
                     realBranchStartMenuSettingsExpectedNonFatalDriftConfirmed = "true"
@@ -754,7 +761,7 @@ try {
                     persistentDesktopStorageWrites = "false"
                     launchesApps = "false"
                 } "qemuSmokeStatus=PASS runtimeLaunchBehaviorChanged=false persistentDesktopStorageWrites=false launchesApps=false"
-                $qemuRestoreAndInvariantEvidenceConfirmed = $qemuRestoreAndInvariantEvidenceConfirmed -and $qemuTypedDispatchGateEvidence
+                $qemuRestoreAndInvariantEvidenceConfirmed = $qemuRestoreAndInvariantEvidenceConfirmed -and $qemuTypedDispatchGateEvidence -and $qemuClockParity
             } else {
                 Add-Check "qemuLaunchShadowEvidenceFresh" "FAIL" "QEMU smoke did not write fresh evidence at $QemuEvidencePath"
             }
@@ -1074,7 +1081,11 @@ try {
         "[AppModelV1_6DeferredStatus]",
         "appmodel.v1_6.additionalTypedTarget=none",
         "appmodel.v1_6.deferredTargets=Clock,Paint",
-        "appmodel.v1_6.clockDeferredReason=bare-metal unsupported-target drift",
+        "appmodel.v1_6.clockBareMetalParity=true",
+        "appmodel.v1_6.clockBehaviorPreserved=true",
+        "appmodel.v1_6.clockLaunchShadowReady=true",
+        "appmodel.v1_6.clockStillNotPromotedToTypedReady=true",
+        "appmodel.v1_6.clockDeferredReason=bare-metal parity exists; typed-ready promotion remains deferred",
         "appmodel.v1_6.paintDeferredReason=hosted-only metadata; no bare-metal parity",
         "appmodel.v1_6.baseline=DiskManager",
         "appmodel.v1.coveredLaunchSurfaces=$appmodelV1CoveredLaunchSurfaces",

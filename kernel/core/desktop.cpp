@@ -8025,6 +8025,10 @@ static void run_launch_shadow_start_menu_built_in_apps_smoke()
     show_start_menu_notification("Calculator");
 
     s_startMenuOpen = true;
+    s_launchShadowStaticAppSourceOverride = "RealBranchStartMenuClock";
+    show_start_menu_notification("Clock");
+
+    s_startMenuOpen = true;
     s_launchShadowStaticAppSourceOverride = "RealBranchStartMenuTaskManager";
     show_start_menu_notification("TaskManager");
 

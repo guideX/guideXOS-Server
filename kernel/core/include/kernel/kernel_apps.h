@@ -200,6 +200,32 @@ private:
 };
 
 // ============================================================
+// Clock App
+// ============================================================
+
+class ClockApp : public app::KernelApp {
+public:
+    ClockApp();
+    virtual ~ClockApp() override;
+
+    virtual bool init() override;
+    virtual void shutdown() override;
+    virtual void update() override;
+    virtual void draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) override;
+
+    static app::KernelApp* create() { return new ClockApp(); }
+
+private:
+    bool m_timeAvailable;
+    uint64_t m_lastRefreshTick;
+    char m_timeText[32];
+    char m_dateText[48];
+    char m_statusText[96];
+
+    void refreshSnapshot();
+};
+
+// ============================================================
 // Display Options App
 // ============================================================
 

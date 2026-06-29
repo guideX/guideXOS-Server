@@ -34,6 +34,7 @@ function Write-AppModelLaunchShadowEvidence {
         [bool]$RealBranchPinnedDesktopNotepadConfirmed,
         [bool]$RealBranchStartMenuNotepadConfirmed,
         [bool]$RealBranchStartMenuBuiltInAppsConfirmed,
+        [bool]$RealBranchStartMenuClockConfirmed,
         [bool]$RealBranchStartMenuFilesConfirmed,
         [bool]$RealBranchStartMenuConsoleConfirmed,
         [bool]$RealBranchStartMenuSettingsConfirmed,
@@ -99,6 +100,7 @@ function Write-AppModelLaunchShadowEvidence {
     $realBranchPinnedDesktopNotepadConfirmedFlag = if ($RealBranchPinnedDesktopNotepadConfirmed) { "true" } else { "false" }
     $realBranchStartMenuNotepadConfirmedFlag = if ($RealBranchStartMenuNotepadConfirmed) { "true" } else { "false" }
     $realBranchStartMenuBuiltInAppsConfirmedFlag = if ($RealBranchStartMenuBuiltInAppsConfirmed) { "true" } else { "false" }
+    $realBranchStartMenuClockConfirmedFlag = if ($RealBranchStartMenuClockConfirmed) { "true" } else { "false" }
     $realBranchStartMenuFilesConfirmedFlag = if ($RealBranchStartMenuFilesConfirmed) { "true" } else { "false" }
     $realBranchStartMenuConsoleConfirmedFlag = if ($RealBranchStartMenuConsoleConfirmed) { "true" } else { "false" }
     $realBranchStartMenuSettingsConfirmedFlag = if ($RealBranchStartMenuSettingsConfirmed) { "true" } else { "false" }
@@ -169,6 +171,7 @@ function Write-AppModelLaunchShadowEvidence {
         "realBranchPinnedDesktopNotepadConfirmed=$realBranchPinnedDesktopNotepadConfirmedFlag",
         "realBranchStartMenuNotepadConfirmed=$realBranchStartMenuNotepadConfirmedFlag",
         "realBranchStartMenuBuiltInAppsConfirmed=$realBranchStartMenuBuiltInAppsConfirmedFlag",
+        "realBranchStartMenuClockConfirmed=$realBranchStartMenuClockConfirmedFlag",
         "realBranchStartMenuFilesConfirmed=$realBranchStartMenuFilesConfirmedFlag",
         "realBranchStartMenuConsoleConfirmed=$realBranchStartMenuConsoleConfirmedFlag",
         "realBranchStartMenuSettingsConfirmed=$realBranchStartMenuSettingsConfirmedFlag",
@@ -198,6 +201,11 @@ function Write-AppModelLaunchShadowEvidence {
         "realBranchStartMenuNotepadRestoreVerificationConfirmed=$realBranchStartMenuNotepadRestoreVerificationConfirmedFlag",
         "realBranchStartMenuBuiltInAppsStateRestored=$realBranchStartMenuBuiltInAppsStateRestoredFlag",
         "realBranchStartMenuBuiltInAppsRestoreVerificationConfirmed=$realBranchStartMenuBuiltInAppsRestoreVerificationConfirmedFlag",
+        "clockBareMetalParity=$realBranchStartMenuClockConfirmedFlag",
+        "clockBehaviorPreserved=$realBranchStartMenuClockConfirmedFlag",
+        "clockLaunchShadowReady=$realBranchStartMenuClockConfirmedFlag",
+        "clockStillNotPromotedToTypedReady=true",
+        "clockObservation=target=Clock classification=BuiltInApp appId=gxos.builtin.clock actualDispatch=Clock typedDispatchCandidate=Clock typedDispatchCandidateComparison=match",
         "realBranchStartMenuFilesStateRestored=$realBranchStartMenuFilesStateRestoredFlag",
         "realBranchStartMenuFilesRestoreVerificationConfirmed=$realBranchStartMenuFilesRestoreVerificationConfirmedFlag",
         "realBranchStartMenuConsoleStateRestored=$realBranchStartMenuConsoleStateRestoredFlag",
@@ -608,6 +616,15 @@ $checks = @(
     "typedDispatchCandidate=Calculator",
     "typedDispatchCandidateMatchesActual=true",
     "typedDispatchCandidateComparison=match",
+    "source=RealBranchStartMenuClock",
+    "uiLabel=Clock",
+    "actualDispatch=Clock",
+    "resolvedType=BuiltInApp",
+    "appId=gxos.builtin.clock",
+    "resolvedDispatch=Clock",
+    "typedDispatchCandidate=Clock",
+    "typedDispatchCandidateMatchesActual=true",
+    "typedDispatchCandidateComparison=match",
     "source=RealBranchStartMenuTaskManager",
     "uiLabel=TaskManager",
     "actualDispatch=TaskManager",
@@ -1008,6 +1025,7 @@ $realBranchStartMenuNotepadConfirmed =
     $output.Contains("nonFatal=true shadowOnly=true")
 $realBranchStartMenuBuiltInAppsConfirmed =
     [regex]::IsMatch($output, 'source=RealBranchStartMenuCalculator uiLabel=Calculator actualDispatch=Calculator resolvedType=BuiltInApp appId=gxos\.builtin\.calculator resolvedDispatch=Calculator typedDispatchCandidate=Calculator typedDispatchCandidateMatchesActual=true typedDispatchCandidateComparison=match .* nonFatal=true shadowOnly=true') -and
+    [regex]::IsMatch($output, 'source=RealBranchStartMenuClock uiLabel=Clock actualDispatch=Clock resolvedType=BuiltInApp appId=gxos\.builtin\.clock resolvedDispatch=Clock typedDispatchCandidate=Clock typedDispatchCandidateMatchesActual=true typedDispatchCandidateComparison=match .* nonFatal=true shadowOnly=true') -and
     [regex]::IsMatch($output, 'source=RealBranchStartMenuTaskManager uiLabel=TaskManager actualDispatch=TaskManager resolvedType=BuiltInApp appId=gxos\.builtin\.taskmanager resolvedDispatch=TaskManager typedDispatchCandidate=TaskManager typedDispatchCandidateMatchesActual=true typedDispatchCandidateComparison=match .* nonFatal=true shadowOnly=true') -and
     [regex]::IsMatch($output, 'source=RealBranchStartMenuDiskManager uiLabel=DiskManager actualDispatch=DiskManager resolvedType=BuiltInApp appId=gxos\.builtin\.diskmanager resolvedDispatch=DiskManager typedDispatchCandidate=DiskManager typedDispatchCandidateMatchesActual=true typedDispatchCandidateComparison=match .* nonFatal=true shadowOnly=true') -and
     [regex]::IsMatch($output, 'source=RealBranchStartMenuTrash uiLabel=Trash actualDispatch=Trash resolvedType=BuiltInApp appId=gxos\.builtin\.trash resolvedDispatch=Trash typedDispatchCandidate=Trash typedDispatchCandidateMatchesActual=true typedDispatchCandidateComparison=match .* nonFatal=true shadowOnly=true') -and
@@ -1350,7 +1368,7 @@ if (-not $realBranchPinnedDesktopNotepadRestoreVerificationConfirmed) {
     $failed += "Pinned desktop Notepad post-restore verification evidence was incomplete"
 }
 if (-not $realBranchStartMenuBuiltInAppsConfirmed) {
-    $failed += "Start Menu BuiltInApp real-branch rows did not match the expected Calculator, TaskManager, DiskManager, Trash, and DisplayOptions dispatch evidence"
+    $failed += "Start Menu BuiltInApp real-branch rows did not match the expected Calculator, Clock, TaskManager, DiskManager, Trash, and DisplayOptions dispatch evidence"
 }
 if (-not $realBranchStartMenuBuiltInAppsStateRestored) {
     $failed += "Start Menu BuiltInApp grouped state restoration evidence was incomplete"
@@ -1446,6 +1464,7 @@ if ($failed.Count -eq 0) {
         -RealBranchPinnedDesktopNotepadConfirmed $realBranchPinnedDesktopNotepadConfirmed `
         -RealBranchStartMenuNotepadConfirmed $realBranchStartMenuNotepadConfirmed `
         -RealBranchStartMenuBuiltInAppsConfirmed $realBranchStartMenuBuiltInAppsConfirmed `
+        -RealBranchStartMenuClockConfirmed $realBranchStartMenuBuiltInAppsConfirmed `
         -RealBranchStartMenuFilesConfirmed $realBranchStartMenuFilesConfirmed `
         -RealBranchStartMenuConsoleConfirmed $realBranchStartMenuConsoleConfirmed `
         -RealBranchStartMenuSettingsConfirmed $realBranchStartMenuSettingsConfirmed `
@@ -1515,6 +1534,7 @@ Write-AppModelLaunchShadowEvidence -Status "FAIL" `
     -RealBranchPinnedDesktopNotepadConfirmed $realBranchPinnedDesktopNotepadConfirmed `
     -RealBranchStartMenuNotepadConfirmed $realBranchStartMenuNotepadConfirmed `
     -RealBranchStartMenuBuiltInAppsConfirmed $realBranchStartMenuBuiltInAppsConfirmed `
+    -RealBranchStartMenuClockConfirmed $realBranchStartMenuBuiltInAppsConfirmed `
     -RealBranchStartMenuFilesConfirmed $realBranchStartMenuFilesConfirmed `
     -RealBranchStartMenuConsoleConfirmed $realBranchStartMenuConsoleConfirmed `
     -RealBranchStartMenuSettingsConfirmed $realBranchStartMenuSettingsConfirmed `

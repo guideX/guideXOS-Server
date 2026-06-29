@@ -111,13 +111,14 @@ The model deliberately keeps `launchName` because the current code still needs i
 
 App Model v1.2 treats `DisplayOptions` itself as the next typed-ready built-in target (`gxos.builtin.displayoptions`). App Model v1.3 adds `TaskManager` as another typed-ready built-in target (`gxos.builtin.taskmanager`). App Model v1.4 adds `Trash` as another typed-ready built-in target (`gxos.builtin.trash`). App Model v1.5 adds `DiskManager` as another typed-ready built-in target (`gxos.builtin.diskmanager`). The shell labels `Settings`, `System Settings`, and `Control Panel` still remain separate shell/system affordances and continue to bridge to `DisplayOptions` as non-fatal drift.
 
-App Model v1.6 target selection is deferred: no v1.6 typed target has been selected yet. `Clock` stays deferred because bare-metal launch-shadow evidence still reports unsupported-target drift. `Paint` stays deferred because it is hosted-only in built-in metadata and does not yet show hosted and bare-metal parity without changing runtime launch behavior. `DiskManager` remains the accepted v1.5 baseline.
+App Model v1.6 target selection is deferred: no v1.6 typed target has been selected yet. `Clock` now has a minimal bare-metal implementation and launch-shadow evidence, but typed-ready promotion remains deferred in this pass. `Paint` stays deferred because it is hosted-only in built-in metadata and does not yet show hosted and bare-metal parity without changing runtime launch behavior. `DiskManager` remains the accepted v1.5 baseline.
 
 App Model v1.x closure:
 - No further safe typed-ready target remains without new bare-metal parity work.
 - v1.5 `DiskManager` is the current accepted baseline.
 - v1.6 is deferred.
-- `Clock` and `Paint` require bare-metal implementations before typed-ready promotion.
+- `Clock` now has a minimal bare-metal implementation and launch-shadow evidence, but it remains deferred from typed-ready promotion in this pass.
+- `Paint` still requires bare-metal implementation before typed-ready promotion.
 - `ImageViewer` remains deferred until active Image Viewer stabilization is complete.
 
 ## Availability

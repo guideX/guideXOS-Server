@@ -106,13 +106,14 @@ The remaining alias warnings are expected Phase 1 residue, not launch failures:
 
 App Model v1.2 adds `DisplayOptions` as the next typed-ready built-in target (`gxos.builtin.displayoptions`). App Model v1.3 adds `TaskManager` as an additional typed-ready built-in target (`gxos.builtin.taskmanager`). App Model v1.4 adds `Trash` as another typed-ready built-in target (`gxos.builtin.trash`). App Model v1.5 adds `DiskManager` as another typed-ready built-in target (`gxos.builtin.diskmanager`). The shell labels `Settings`, `System Settings`, and `Control Panel` still intentionally bridge to `DisplayOptions` as non-fatal drift, so their user-visible launch behavior remains unchanged.
 
-App Model v1.6 target selection is deferred: no v1.6 typed target has been selected yet. `Clock` remains deferred because bare-metal launch-shadow evidence still reports unsupported-target drift. `Paint` remains deferred because it is hosted-only in built-in metadata and does not yet have hosted and bare-metal parity without changing runtime launch behavior. `DiskManager` remains the accepted v1.5 baseline.
+App Model v1.6 target selection is deferred: no v1.6 typed target has been selected yet. `Clock` now has a minimal bare-metal implementation and launch-shadow evidence, but typed-ready promotion remains deferred in this pass. `Paint` remains deferred because it is hosted-only in built-in metadata and does not yet have hosted and bare-metal parity without changing runtime launch behavior. `DiskManager` remains the accepted v1.5 baseline.
 
 App Model v1.x closure:
 - No further safe typed-ready target remains without new bare-metal parity work.
 - v1.5 `DiskManager` is the current accepted baseline.
 - v1.6 is deferred.
-- `Clock` and `Paint` require bare-metal implementations before typed-ready promotion.
+- `Clock` now has a minimal bare-metal implementation and launch-shadow evidence, but it remains deferred from typed-ready promotion in this pass.
+- `Paint` still requires bare-metal implementation before typed-ready promotion.
 - `ImageViewer` remains deferred until active Image Viewer stabilization is complete.
 
 Both should be revisited during Phase 2 launch-resolution cleanup. That pass should decide whether aliases become explicit app-model launch aliases, shell commands, or another typed launch target while preserving existing user-visible shortcuts.

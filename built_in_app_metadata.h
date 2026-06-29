@@ -45,7 +45,7 @@ inline bool builtInTextEquals(const char* a, const char* b) {
 static const BuiltInAppMetadata kBuiltInAppMetadata[] = {
 	{ "gxos.builtin.notepad", "Notepad", "Notepad", "Notepad", nullptr, "app.notepad", "Accessories", "Built-in guideXOS text editor.", BuiltInAvailabilityHosted | BuiltInAvailabilityBareMetal, 0xFF78B450u, 0, 0, false },
 	{ "gxos.builtin.calculator", "Calculator", "Calculator", "Calculator", nullptr, "app.calculator", "Utilities", "Built-in guideXOS calculator.", BuiltInAvailabilityHosted | BuiltInAvailabilityBareMetal, 0xFF4690C8u, 0, 0, false },
-	{ "gxos.builtin.clock", "Clock", "Clock", nullptr, nullptr, "app.clock", "Utilities", "Built-in guideXOS clock.", BuiltInAvailabilityHosted, 0, 0, 0, false },
+	{ "gxos.builtin.clock", "Clock", "Clock", "Clock", nullptr, "app.clock", "Utilities", "Built-in guideXOS clock.", BuiltInAvailabilityHosted | BuiltInAvailabilityBareMetal, 0xFF4A88D8u, 0, 0, false },
 	{ "gxos.builtin.console", "Console", "Console", nullptr, nullptr, "app.console", "System", "Built-in guideXOS console window.", BuiltInAvailabilityHosted, 0, 0, 0, false },
 	{ "gxos.builtin.fileexplorer", "File Explorer", "FileExplorer", "Files", "Files", "app.files", "System", "Built-in guideXOS file explorer.", BuiltInAvailabilityHosted | BuiltInAvailabilityBareMetal, 0xFFC8B43Cu, 0, 0, false },
 	{ "gxos.builtin.trash", "Trash", "Trash", "Trash", nullptr, "trash.empty", "System", "Built-in guideXOS Trash placeholder.", BuiltInAvailabilityHosted | BuiltInAvailabilityBareMetal, 0xFF9098A4u, 0, 0, false },

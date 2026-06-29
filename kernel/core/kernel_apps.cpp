@@ -12,6 +12,7 @@
 #include "include/kernel/ps2keyboard.h"
 #include "include/kernel/vfs.h"
 #include "include/kernel/pit.h"
+#include "include/kernel/time.h"
 #include "include/kernel/serial_debug.h"
 #include "include/kernel/desktop_icon_theme_flat.h"
 #include "include/kernel/image_adapter.h"
@@ -2887,6 +2888,183 @@ void CalculatorApp::clearEntry() {
     m_display[0] = '0';
     m_display[1] = '\0';
     m_newNumber = true;
+}
+
+// ============================================================
+// ClockApp Implementation
+// ============================================================
+
+namespace {
+    static void append_two_digits(unsigned value, char* out, int outSize)
+    {
+        if (!out || outSize <= 0) return;
+        if (outSize < 3) {
+            out[0] = '\0';
+            return;
+        }
+        if (value > 99u) value %= 100u;
+        out[0] = static_cast<char>('0' + ((value / 10u) % 10u));
+        out[1] = static_cast<char>('0' + (value % 10u));
+        out[2] = '\0';
+    }
+
+    static void draw_scaled_char(uint32_t px, uint32_t py, char c, uint32_t color, int scale)
+    {
+        const uint8_t* glyph = getGlyph(c);
+        if (!glyph || scale <= 0) return;
+        for (int col = 0; col < kGlyphW; ++col) {
+            uint8_t bits = glyph[col];
+            for (int row = 0; row < kGlyphH; ++row) {
+                if ((bits & (1 << row)) == 0) continue;
+                framebuffer::fill_rect(
+                    px + static_cast<uint32_t>(col * scale),
+                    py + static_cast<uint32_t>(row * scale),
+                    static_cast<uint32_t>(scale),
+                    static_cast<uint32_t>(scale),
+                    color
+                );
+            }
+        }
+    }
+
+    static void draw_scaled_text(uint32_t x, uint32_t y, const char* text, uint32_t color, int scale)
+    {
+        if (!text || scale <= 0) return;
+        uint32_t cx = x;
+        while (*text) {
+            draw_scaled_char(cx, y, *text, color, scale);
+            cx += static_cast<uint32_t>((kGlyphW + kGlyphSpacing) * scale);
+            ++text;
+        }
+    }
+}
+
+ClockApp::ClockApp()
+    : m_timeAvailable(false), m_lastRefreshTick(0)
+{
+    strcopy(m_name, "Clock", app::MAX_APP_NAME);
+    m_timeText[0] = '\0';
+    m_dateText[0] = '\0';
+    m_statusText[0] = '\0';
+}
+
+ClockApp::~ClockApp()
+{
+}
+
+bool ClockApp::init()
+{
+    m_window = new app::KernelWindow();
+    if (!m_window) return false;
+
+    strcopy(m_window->title, "Clock", app::MAX_TITLE_LEN);
+    m_window->x = 180;
+    m_window->y = 72;
+    m_window->w = 360;
+    m_window->h = 190;
+    m_window->flags = app::WF_VISIBLE | app::WF_TITLEBAR | app::WF_CLOSABLE | app::WF_RESIZABLE | app::WF_FOCUSED;
+    m_window->owner = this;
+
+    if (!compositor::KernelCompositor::registerWindow(m_window)) {
+        delete m_window;
+        m_window = nullptr;
+        return false;
+    }
+
+    refreshSnapshot();
+    m_lastRefreshTick = kernel::pit::ticks();
+    m_state = app::AppState::Running;
+    return true;
+}
+
+void ClockApp::shutdown()
+{
+    m_state = app::AppState::Terminated;
+}
+
+void ClockApp::update()
+{
+    const uint64_t now = kernel::pit::ticks();
+    if (now == m_lastRefreshTick) return;
+    if (m_lastRefreshTick == 0 || (now - m_lastRefreshTick) >= 10ULL) {
+        m_lastRefreshTick = now;
+        refreshSnapshot();
+        invalidate();
+    }
+}
+
+void ClockApp::refreshSnapshot()
+{
+    kernel::time::DateTime now{};
+    m_timeAvailable = kernel::time::get_current_datetime(now);
+
+    if (m_timeAvailable) {
+        char hour[4];
+        char minute[4];
+        char second[4];
+        char month[4];
+        char day[4];
+        char year[8];
+
+        append_two_digits(now.hour, hour, sizeof(hour));
+        append_two_digits(now.minute, minute, sizeof(minute));
+        append_two_digits(now.second, second, sizeof(second));
+        append_two_digits(now.month, month, sizeof(month));
+        append_two_digits(now.day, day, sizeof(day));
+        int_to_text(now.year, year, sizeof(year));
+
+        strcopy(m_timeText, hour, sizeof(m_timeText));
+        strappend(m_timeText, ":", sizeof(m_timeText));
+        strappend(m_timeText, minute, sizeof(m_timeText));
+        strappend(m_timeText, ":", sizeof(m_timeText));
+        strappend(m_timeText, second, sizeof(m_timeText));
+
+        strcopy(m_dateText, year, sizeof(m_dateText));
+        strappend(m_dateText, "-", sizeof(m_dateText));
+        strappend(m_dateText, month, sizeof(m_dateText));
+        strappend(m_dateText, "-", sizeof(m_dateText));
+        strappend(m_dateText, day, sizeof(m_dateText));
+
+        strcopy(m_statusText, "RTC/CMOS time available", sizeof(m_statusText));
+    } else {
+        uint64_t totalSeconds = kernel::pit::ticks() / 100ULL;
+        uint64_t hours = totalSeconds / 3600ULL;
+        uint64_t minutes = (totalSeconds / 60ULL) % 60ULL;
+        uint64_t seconds = totalSeconds % 60ULL;
+        char hour[16];
+        char minute[4];
+        char second[4];
+
+        int_to_text(static_cast<int>(hours), hour, sizeof(hour));
+        append_two_digits(static_cast<unsigned>(minutes), minute, sizeof(minute));
+        append_two_digits(static_cast<unsigned>(seconds), second, sizeof(second));
+
+        strcopy(m_timeText, "UPTIME ", sizeof(m_timeText));
+        strappend(m_timeText, hour, sizeof(m_timeText));
+        strappend(m_timeText, ":", sizeof(m_timeText));
+        strappend(m_timeText, minute, sizeof(m_timeText));
+        strappend(m_timeText, ":", sizeof(m_timeText));
+        strappend(m_timeText, second, sizeof(m_timeText));
+
+        strcopy(m_dateText, "Date unavailable without RTC", sizeof(m_dateText));
+        strcopy(m_statusText, "RTC unavailable; using pit::ticks() fallback.", sizeof(m_statusText));
+    }
+}
+
+void ClockApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h)
+{
+    framebuffer::fill_rect(x, y, w, h, rgb(22, 26, 34));
+    const uint32_t innerW = w > 24 ? w - 24 : 0;
+    const uint32_t innerH = h > 24 ? h - 24 : 0;
+    if (innerW > 0 && innerH > 0) {
+        framebuffer::fill_rect(x + 12, y + 12, innerW, innerH, rgb(30, 36, 46));
+        framebuffer::fill_rect(x + 12, y + 12, innerW, 1, rgb(74, 104, 148));
+    }
+
+    appDrawText(x + 18, y + 16, "Clock", rgb(240, 244, 250));
+    draw_scaled_text(x + 18, y + 46, m_timeText, rgb(208, 222, 248), 3);
+    appDrawText(x + 20, y + 112, m_dateText, rgb(218, 224, 234));
+    appDrawText(x + 20, y + 136, m_statusText, rgb(158, 166, 180));
 }
 
 // ============================================================
@@ -11220,6 +11398,7 @@ void registerKernelApps() {
         app::KernelApp* (*factory)() = nullptr;
         if (gxos::apps::detail::builtInTextEquals(metadata.kernelAppName, "Notepad")) factory = NotepadApp::create;
         else if (gxos::apps::detail::builtInTextEquals(metadata.kernelAppName, "Calculator")) factory = CalculatorApp::create;
+        else if (gxos::apps::detail::builtInTextEquals(metadata.kernelAppName, "Clock")) factory = ClockApp::create;
         else if (gxos::apps::detail::builtInTextEquals(metadata.kernelAppName, "DisplayOptions")) factory = DisplayOptionsApp::create;
         else if (gxos::apps::detail::builtInTextEquals(metadata.kernelAppName, "TaskManager")) factory = TaskManagerApp::create;
         // File Explorer is intentionally split across two launch names:
