@@ -263,6 +263,19 @@ Phase 3C.1 is a stabilization-only review pass for the Notepad app-surface pilot
 * `build.bat` wrapper behavior was classified by direct reruns as non-reproducible; `guideXOSServer.exe` was produced and the direct wrapper exit code returned 0.
 * Future app polish should remain one app at a time.
 
+## Phase 3D
+
+Phase 3D is the fourth app-surface pilot for the guideXOS Server theme system.
+
+* Calculator is the fourth app surface to receive Sci Fi polish.
+* Sci Fi gets conservative body, display, button, and accent polish so Calculator feels a little more cohesive with the shell.
+* Classic is preserved and stays visually close to the current Calculator look.
+* No Calculator behavior changed.
+* No new effects were added.
+* No new per-effect theme controls were introduced.
+* Broad app redesign remains deferred.
+* Future app polish should continue one app at a time.
+
 ## Manual Validation Runbook
 
 * Start the hosted server executable.
@@ -326,11 +339,11 @@ Phase 3C.1 is a stabilization-only review pass for the Notepad app-surface pilot
 
 * Classic should continue to look basically unchanged.
 * Sci Fi is a first visible proof that the theme system exists, not a full futuristic redesign.
-* Rounded-window clipping remains deferred; this foundation is intentionally limited to IDs, persistence, selector wiring, safe chrome colors, the Phase 2A chrome metric pass, the guarded Phase 2B rounded-shell preview, the Phase 2C border/highlight polish pass, the Phase 2D hosted shadow preview, the Phase 2E desktop/taskbar surface polish pass, the Phase 2G validation checkpoint, the Phase 3A Display Options app-surface pilot, the Phase 3B Control Panel app-surface pilot, the Phase 3C Notepad app-surface pilot, and the Phase 3C.1 stabilization review pass.
+* Rounded-window clipping remains deferred; this foundation is intentionally limited to IDs, persistence, selector wiring, safe chrome colors, the Phase 2A chrome metric pass, the guarded Phase 2B rounded-shell preview, the Phase 2C border/highlight polish pass, the Phase 2D hosted shadow preview, the Phase 2E desktop/taskbar surface polish pass, the Phase 2G validation checkpoint, the Phase 3A Display Options app-surface pilot, the Phase 3B Control Panel app-surface pilot, the Phase 3C Notepad app-surface pilot, the Phase 3C.1 stabilization review pass, and the Phase 3D Calculator app-surface pilot.
 
 ## Recommended Next Pass
 
 1. Phase 2G.1 manual visual validation fixes, if screenshots or manual testing finds issues.
 2. Phase 2H theme screenshot / manual smoke harness, if feasible.
-3. Next app-surface pilot, one app at a time, after Notepad.
+3. Next app-surface pilot, one app at a time, after Calculator.
 4. Future high-DPI and resolution work as a separate track.

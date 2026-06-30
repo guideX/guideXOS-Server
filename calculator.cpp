@@ -1,4 +1,5 @@
 #include "calculator.h"
+#include "desktop_theme.h"
 #include "gui_protocol.h"
 #include "logger.h"
 #include <sstream>
@@ -8,6 +9,154 @@
 namespace gxos { namespace apps {
     
     using namespace gxos::gui;
+
+    namespace {
+        constexpr int kCalculatorWindowWidth = 320;
+        constexpr int kCalculatorWindowHeight = 420;
+        constexpr int kCalculatorDisplayTop = 6;
+        constexpr int kCalculatorDisplayHeight = 44;
+        constexpr int kCalculatorDisplaySeparatorTop = 54;
+        constexpr int kCalculatorDisplayTextX = 12;
+        constexpr int kCalculatorDisplayTextY = 14;
+
+        uint32_t packRgb(int r, int g, int b)
+        {
+            return 0xFF000000u |
+                (static_cast<uint32_t>(r & 0xFF) << 16) |
+                (static_cast<uint32_t>(g & 0xFF) << 8) |
+                static_cast<uint32_t>(b & 0xFF);
+        }
+
+        uint32_t blendColor(uint32_t baseColor, uint32_t overlayColor, int overlayPercent)
+        {
+            if (overlayPercent <= 0) {
+                return baseColor;
+            }
+            if (overlayPercent >= 100) {
+                return overlayColor;
+            }
+
+            const int baseR = static_cast<int>((baseColor >> 16) & 0xFF);
+            const int baseG = static_cast<int>((baseColor >> 8) & 0xFF);
+            const int baseB = static_cast<int>(baseColor & 0xFF);
+            const int overR = static_cast<int>((overlayColor >> 16) & 0xFF);
+            const int overG = static_cast<int>((overlayColor >> 8) & 0xFF);
+            const int overB = static_cast<int>(overlayColor & 0xFF);
+            const int keepPercent = 100 - overlayPercent;
+
+            return packRgb(
+                (baseR * keepPercent + overR * overlayPercent) / 100,
+                (baseG * keepPercent + overG * overlayPercent) / 100,
+                (baseB * keepPercent + overB * overlayPercent) / 100);
+        }
+
+        bool isSciFiThemeActive()
+        {
+            return GetCurrentDesktopThemeId() == DesktopThemeId::SciFi;
+        }
+
+        const DesktopTheme& calculatorTheme()
+        {
+            return GetCurrentDesktopTheme();
+        }
+
+        void publish(uint64_t windowId, MsgType type, const std::string& payload)
+        {
+            ipc::Message msg;
+            msg.type = static_cast<uint32_t>(type);
+            std::string packed = std::to_string(windowId);
+            if (!payload.empty()) {
+                packed.push_back('|');
+                packed += payload;
+            }
+            msg.data.assign(packed.begin(), packed.end());
+            ipc::Bus::publish("gui.input", std::move(msg), false);
+        }
+
+        void clearWindowSurface(uint64_t windowId)
+        {
+            publish(windowId, MsgType::MT_DrawText, "\f");
+        }
+
+        void drawRect(uint64_t windowId, int x, int y, int w, int h, uint32_t color)
+        {
+            std::ostringstream oss;
+            oss << x << "|" << y << "|" << w << "|" << h << "|"
+                << static_cast<int>((color >> 16) & 0xFF) << "|"
+                << static_cast<int>((color >> 8) & 0xFF) << "|"
+                << static_cast<int>(color & 0xFF);
+            publish(windowId, MsgType::MT_DrawRect, oss.str());
+        }
+
+        void drawTextAt(uint64_t windowId, int x, int y, const std::string& text, uint32_t color)
+        {
+            std::ostringstream oss;
+            oss << x << "|" << y << "|"
+                << static_cast<int>((color >> 16) & 0xFF) << "|"
+                << static_cast<int>((color >> 8) & 0xFF) << "|"
+                << static_cast<int>(color & 0xFF) << "|" << text;
+            publish(windowId, MsgType::MT_DrawTextAtColor, oss.str());
+        }
+
+        uint32_t CalculatorBodyColor()
+        {
+            if (!isSciFiThemeActive()) {
+                return packRgb(34, 34, 34);
+            }
+
+            const DesktopTheme& theme = calculatorTheme();
+            return blendColor(theme.taskbarBackground, theme.windowBackground, 18);
+        }
+
+        uint32_t CalculatorDisplayColor()
+        {
+            if (!isSciFiThemeActive()) {
+                return packRgb(24, 24, 24);
+            }
+
+            const DesktopTheme& theme = calculatorTheme();
+            return blendColor(theme.windowBackground, theme.taskbarBackground, 10);
+        }
+
+        uint32_t CalculatorDisplayBorderColor()
+        {
+            if (!isSciFiThemeActive()) {
+                return packRgb(58, 58, 58);
+            }
+
+            const DesktopTheme& theme = calculatorTheme();
+            return blendColor(theme.windowBorder, theme.accent, 18);
+        }
+
+        uint32_t CalculatorDisplayTextColor()
+        {
+            if (!isSciFiThemeActive()) {
+                return packRgb(220, 220, 220);
+            }
+
+            return calculatorTheme().titleBarText;
+        }
+
+        void paintCalculatorSurface(uint64_t windowId)
+        {
+            clearWindowSurface(windowId);
+
+            if (!isSciFiThemeActive()) {
+                return;
+            }
+
+            const DesktopTheme& theme = calculatorTheme();
+            const int bodyW = kCalculatorWindowWidth - theme.windowPadding * 2;
+            const int bodyH = kCalculatorWindowHeight - theme.titleBarHeight - theme.windowPadding;
+            const int displayInset = theme.windowPadding + 1;
+            const int displayW = bodyW - displayInset * 2;
+            const int displayH = kCalculatorDisplayHeight;
+
+            drawRect(windowId, 0, 0, bodyW, bodyH, CalculatorBodyColor());
+            drawRect(windowId, displayInset, kCalculatorDisplayTop, displayW, displayH, CalculatorDisplayColor());
+            drawRect(windowId, displayInset, kCalculatorDisplaySeparatorTop, displayW, 2, CalculatorDisplayBorderColor());
+        }
+    }
     
     // Static member initialization
     uint64_t Calculator::s_windowId = 0;
@@ -388,16 +537,8 @@ namespace gxos { namespace apps {
     }
     
     void Calculator::updateDisplay() {
-        const char* kGuiChanIn = "gui.input";
-        
-        ipc::Message msg;
-        msg.type = (uint32_t)MsgType::MT_DrawText;
-        
-        std::ostringstream oss;
-        oss << s_windowId << "|" << s_display;
-        std::string payload = oss.str();
-        msg.data.assign(payload.begin(), payload.end());
-        ipc::Bus::publish(kGuiChanIn, std::move(msg), false);
+        paintCalculatorSurface(s_windowId);
+        drawTextAt(s_windowId, kCalculatorDisplayTextX, kCalculatorDisplayTextY, s_display, CalculatorDisplayTextColor());
     }
     
     void Calculator::handleKeyPress(int keyCode) {

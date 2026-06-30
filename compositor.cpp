@@ -68,6 +68,95 @@ namespace gxos {
             return item.frames[static_cast<size_t>(tick) % item.frames.size()];
         }
 
+        static bool isCalculatorWindow(const WinInfo& winfo) {
+            return winfo.title == "Calculator";
+        }
+
+        static bool isCalculatorOperatorButton(const Widget& widget) {
+            return widget.text == "+" || widget.text == "-" || widget.text == "*" || widget.text == "/";
+        }
+
+        static bool isCalculatorFunctionButton(const Widget& widget) {
+            return widget.text == "C" || widget.text == "CE";
+        }
+
+        static bool isCalculatorEqualsButton(const Widget& widget) {
+            return widget.text == "=";
+        }
+
+        static uint32_t calculatorClassicWidgetFillColor(const Widget& widget) {
+            return widget.pressed ? 0x00285090u : (widget.hover ? 0x00465A78u : 0x005A5A64u);
+        }
+
+        static uint32_t calculatorClassicWidgetBorderColor(const Widget&) {
+            return 0x00FFFFFFu;
+        }
+
+        static uint32_t calculatorClassicWidgetTextColor(const Widget&) {
+            return 0x00F0F0F0u;
+        }
+
+        static uint32_t calculatorSciFiWidgetFillColor(const DesktopTheme& theme, const Widget& widget) {
+            uint32_t base = WindowRenderer::BlendThemeColor(theme.windowBackground, theme.taskbarBackground, 18);
+            if (isCalculatorOperatorButton(widget)) {
+                base = WindowRenderer::BlendThemeColor(theme.windowBorder, theme.accent, 18);
+            } else if (isCalculatorEqualsButton(widget)) {
+                base = WindowRenderer::BlendThemeColor(theme.accent, theme.windowBackground, 18);
+            } else if (isCalculatorFunctionButton(widget)) {
+                base = WindowRenderer::BlendThemeColor(theme.taskbarBackground, theme.windowBorder, 16);
+            }
+
+            if (widget.pressed) {
+                return WindowRenderer::BlendThemeColor(base, theme.accent, 22);
+            }
+            if (widget.hover) {
+                return WindowRenderer::BlendThemeColor(base, theme.mutedAccent, 14);
+            }
+            return base;
+        }
+
+        static uint32_t calculatorSciFiWidgetBorderColor(const DesktopTheme& theme, const Widget& widget) {
+            uint32_t border = WindowRenderer::BlendThemeColor(theme.windowBorder, theme.taskbarBorder, 20);
+            if (isCalculatorOperatorButton(widget) || isCalculatorEqualsButton(widget)) {
+                border = WindowRenderer::BlendThemeColor(theme.windowBorder, theme.accent, 34);
+            } else if (isCalculatorFunctionButton(widget)) {
+                border = WindowRenderer::BlendThemeColor(theme.windowBorder, theme.mutedAccent, 30);
+            }
+
+            if (widget.pressed) {
+                return WindowRenderer::BlendThemeColor(border, theme.accent, 18);
+            }
+            if (widget.hover) {
+                return WindowRenderer::BlendThemeColor(border, theme.titleBarText, 12);
+            }
+            return border;
+        }
+
+        static uint32_t calculatorSciFiWidgetTextColor(const DesktopTheme& theme, const Widget&) {
+            return theme.titleBarText;
+        }
+
+        static uint32_t calculatorWidgetFillColor(const WinInfo& winfo, const Widget& widget, const DesktopTheme& theme) {
+            if (!isCalculatorWindow(winfo) || theme.id != DesktopThemeId::SciFi) {
+                return calculatorClassicWidgetFillColor(widget);
+            }
+            return calculatorSciFiWidgetFillColor(theme, widget);
+        }
+
+        static uint32_t calculatorWidgetBorderColor(const WinInfo& winfo, const Widget& widget, const DesktopTheme& theme) {
+            if (!isCalculatorWindow(winfo) || theme.id != DesktopThemeId::SciFi) {
+                return calculatorClassicWidgetBorderColor(widget);
+            }
+            return calculatorSciFiWidgetBorderColor(theme, widget);
+        }
+
+        static uint32_t calculatorWidgetTextColor(const WinInfo& winfo, const Widget& widget, const DesktopTheme& theme) {
+            if (!isCalculatorWindow(winfo) || theme.id != DesktopThemeId::SciFi) {
+                return calculatorClassicWidgetTextColor(widget);
+            }
+            return calculatorSciFiWidgetTextColor(theme, widget);
+        }
+
         enum class TaskbarPosition {
             Bottom,
             Top,
@@ -2659,13 +2748,17 @@ namespace gxos {
                     }
                     for (const auto& wd : winfo.widgets) { 
                         RECT wr{ contentX + wd.x, contentY + wd.y, contentX + wd.x + wd.w, contentY + wd.y + wd.h };
-                        HBRUSH wb = CreateSolidBrush(wd.pressed ? RGB(40, 80, 140) : (wd.hover ? RGB(70, 90, 120) : RGB(90, 90, 100))); 
-                        FillRect(dc, &wr, wb); 
-                        DeleteObject(wb); 
-                        FrameRect(dc, &wr, (HBRUSH)GetStockObject(WHITE_BRUSH)); 
+                        const uint32_t fillColor = calculatorWidgetFillColor(winfo, wd, theme);
+                        HBRUSH wb = CreateSolidBrush(colorFromTheme(fillColor));
+                        FillRect(dc, &wr, wb);
+                        DeleteObject(wb);
+                        HBRUSH borderBrush = CreateSolidBrush(colorFromTheme(calculatorWidgetBorderColor(winfo, wd, theme)));
+                        FrameRect(dc, &wr, borderBrush);
+                        DeleteObject(borderBrush);
                         const int textX = wr.left + (wd.icon.status == ImageLoadStatus::Ok ? 24 : 6);
                         if (wd.icon.status == ImageLoadStatus::Ok) ImageAdapter::DrawToHdc(dc, wd.icon, wr.left + 4, wr.top + (wd.h - 16) / 2, 16, 16);
-                        drawUiText(dc, textX, centeredUiTextY(wr.top, wd.h), wd.text, RGB(240, 240, 240), FontRole::Default);
+                        const uint32_t textColor = calculatorWidgetTextColor(winfo, wd, theme);
+                        drawUiText(dc, textX, centeredUiTextY(wr.top, wd.h), wd.text, colorFromTheme(textColor), FontRole::Default);
                     }
                     for (const auto& tx : winfo.positionedTexts) {
                         SystemFont::DrawText(dc, contentX + tx.x, contentY + tx.y, tx.text.c_str(), (int)tx.text.size(),
@@ -4548,13 +4641,14 @@ namespace gxos {
                     for (const auto& wd : w.widgets) {
                         int wx = contentX + wd.x;
                         int wy = contentY + wd.y;
-                        uint32_t wColor = wd.pressed ? 0x00285090 : (wd.hover ? 0x00465A78 : 0x005A5A64);
+                        uint32_t wColor = calculatorWidgetFillColor(w, wd, theme);
                         fbFillRect(pixels, pitch, fbW, fbH, wx, wy, wd.w, wd.h, wColor);
-                        fbDrawRect(pixels, pitch, fbW, fbH, wx, wy, wd.w, wd.h, 0x00FFFFFF);
+                        fbDrawRect(pixels, pitch, fbW, fbH, wx, wy, wd.w, wd.h, calculatorWidgetBorderColor(w, wd, theme));
                         const int textX = wx + (wd.icon.status == ImageLoadStatus::Ok ? 24 : 6);
                         if (wd.icon.status == ImageLoadStatus::Ok) ImageAdapter::DrawToPixels(pixels, fbW, fbH, pitch, wd.icon, wx + 4, wy + (wd.h - 16) / 2, 16, 16);
+                        const uint32_t textColor = calculatorWidgetTextColor(w, wd, theme);
                         fbDrawText(pixels, pitch, fbW, fbH,
-                            textX, wy + (wd.h - SystemFont::MeasureHeight(FontRole::Default)) / 2, wd.text, 0x00F0F0F0, FontRole::Default);
+                            textX, wy + (wd.h - SystemFont::MeasureHeight(FontRole::Default)) / 2, wd.text, textColor, FontRole::Default);
                     }
                     for (const auto& tx : w.positionedTexts) {
                         fbDrawText(pixels, pitch, fbW, fbH,

@@ -86,6 +86,7 @@ $server = Join-Path $Root "server.cpp"
 $displayOptions = Join-Path $Root "display_options.cpp"
 $controlPanel = Join-Path $Root "control_panel.cpp"
 $notepad = Join-Path $Root "notepad.cpp"
+$calculator = Join-Path $Root "calculator.cpp"
 $compositor = Join-Path $Root "compositor.cpp"
 $windowRenderer = Join-Path $Root "window_renderer.h"
 $planDoc = Join-Path $Root "docs\theme-system-plan.md"
@@ -202,10 +203,15 @@ $phase3cHeadingMatch = Find-FirstMatch $planDoc '## Phase 3C'
 $phase3cBodyMatch = Find-FirstMatch $planDoc 'third app-surface pilot|Notepad is the third app surface to receive Sci Fi polish|conservative editor/body/border/text polish|Classic is preserved and stays visually close to the current Notepad look|No editing behavior changed|No new effects were added|No new per-effect theme controls were introduced|Broad app redesign remains deferred|Future app polish should continue one app at a time'
 $phase3c1HeadingMatch = Find-FirstMatch $planDoc '## Phase 3C\.1'
 $phase3c1BodyMatch = Find-FirstMatch $planDoc 'stabilization-only review pass for the Notepad app-surface pilot|Notepad surface helpers were reviewed and kept centralized|Classic preservation was confirmed|No editing behavior, file handling, keyboard input, persistence, layout geometry, hit-testing, or theme metrics changed|No new effects or controls were added|build\.bat wrapper behavior was classified by direct reruns as non-reproducible|Future app polish should remain one app at a time'
+$phase3dHeadingMatch = Find-FirstMatch $planDoc '## Phase 3D'
+$phase3dBodyMatch = Find-FirstMatch $planDoc 'fourth app-surface pilot|Calculator is the fourth app surface to receive Sci Fi polish|conservative body, display, button, and accent polish|Classic is preserved and stays visually close to the current Calculator look|No Calculator behavior changed|No new effects were added|No new per-effect theme controls were introduced|Broad app redesign remains deferred|Future app polish should continue one app at a time'
 $notepadThemeHelperMatch = Find-FirstMatch $notepad 'NotepadBodyColor|NotepadEditorColor|NotepadBorderColor|NotepadTextColor|NotepadMutedTextColor|NotepadAccentColor|NotepadSelectionColor|NotepadStatusColor|NotepadMenuColor|NotepadMenuHoverColor|GetCurrentDesktopThemeId|GetCurrentDesktopTheme|DesktopThemeId::SciFi'
 $notepadColorTextMatch = Find-FirstMatch $notepad 'publishDrawTextAtColor'
 $notepadThemeFieldMatch = Find-FirstMatch $notepad 'windowBackground|windowBorder|accent|mutedAccent|taskbarBackground|taskbarBorder|titleBarText'
 $notepadPerEffectMatch = Find-FirstMatch $notepad 'Visual Effects|per-effect'
+$calculatorThemeHelperMatch = Find-FirstMatch $calculator 'CalculatorBodyColor|CalculatorDisplayColor|CalculatorDisplayBorderColor|CalculatorDisplayTextColor|paintCalculatorSurface|calculatorWidgetFillColor|calculatorWidgetBorderColor|calculatorWidgetTextColor|GetCurrentDesktopThemeId|GetCurrentDesktopTheme|DesktopThemeId::SciFi'
+$calculatorThemeFieldMatch = Find-FirstMatch $calculator 'windowBackground|windowBorder|accent|mutedAccent|taskbarBackground|taskbarBorder|titleBarText|windowPadding|titleBarHeight'
+$calculatorPerEffectMatch = Find-FirstMatch $calculator 'Visual Effects|per-effect'
 
 $checks = @(
     [pscustomobject]@{ Name = "theme header exists"; Pass = (Test-Path -LiteralPath $themeHeader); Match = $null },
@@ -309,6 +315,10 @@ $checks = @(
     [pscustomobject]@{ Name = "phase 3c docs body"; Pass = $null -ne $phase3cBodyMatch; Match = $phase3cBodyMatch },
     [pscustomobject]@{ Name = "phase 3c.1 docs heading"; Pass = $null -ne $phase3c1HeadingMatch; Match = $phase3c1HeadingMatch },
     [pscustomobject]@{ Name = "phase 3c.1 docs body"; Pass = $null -ne $phase3c1BodyMatch; Match = $phase3c1BodyMatch },
+    [pscustomobject]@{ Name = "phase 3d docs heading"; Pass = $null -ne $phase3dHeadingMatch; Match = $phase3dHeadingMatch },
+    [pscustomobject]@{ Name = "phase 3d docs body"; Pass = $null -ne $phase3dBodyMatch; Match = $phase3dBodyMatch },
+    [pscustomobject]@{ Name = "calculator theme helpers wired"; Pass = $null -ne $calculatorThemeHelperMatch -or $null -ne $calculatorThemeFieldMatch; Match = $(if ($null -ne $calculatorThemeHelperMatch) { $calculatorThemeHelperMatch } else { $calculatorThemeFieldMatch }) },
+    [pscustomobject]@{ Name = "calculator no per-effect controls"; Pass = $null -eq $calculatorPerEffectMatch; Match = $calculatorPerEffectMatch },
     [pscustomobject]@{ Name = "compositor start button rect helper wired"; Pass = $null -ne $compositorStartButtonRectMatch; Match = $compositorStartButtonRectMatch }
 )
 
