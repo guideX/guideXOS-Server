@@ -283,6 +283,7 @@ Phase 3D.1 is a stabilization-only review pass for the Calculator app-surface pi
 * Calculator surface helpers were reviewed and kept centralized.
 * The shared compositor widget guard was reviewed and kept narrow to Calculator and Sci Fi.
 * Classic preservation was confirmed, with no visible fallback changes needed to restore the prior familiar look.
+* No readability/layout fix was needed.
 * No Calculator behavior, input handling, math evaluation, history, persistence, layout geometry, hit-testing, or theme metrics changed.
 * No new effects or controls were added.
 * No blur, glass, animation, rounded clipping, or rounded hit-testing was added.
