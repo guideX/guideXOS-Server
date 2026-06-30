@@ -87,6 +87,7 @@ $displayOptions = Join-Path $Root "display_options.cpp"
 $controlPanel = Join-Path $Root "control_panel.cpp"
 $notepad = Join-Path $Root "notepad.cpp"
 $calculator = Join-Path $Root "calculator.cpp"
+$clock = Join-Path $Root "clock.cpp"
 $fileExplorer = Join-Path $Root "file_explorer.cpp"
 $fileExplorerHeader = Join-Path $Root "file_explorer.h"
 $compositor = Join-Path $Root "compositor.cpp"
@@ -214,6 +215,11 @@ $phase3eHeadingMatch = Find-FirstMatch $planDoc '## Phase 3E'
 $phase3eBodyMatch = Find-RawMatch $planDoc '## Phase 3E.*?Phase 3E is the next app-surface pilot for the guideXOS Server theme system\..*?File Explorer is the next app surface to receive Sci Fi polish\..*?Sci Fi gets conservative body, list, toolbar, address, selection, hover, border, and status polish so File Explorer feels more cohesive with the shell\..*?Classic is preserved and stays visually close to the current File Explorer look\..*?No File Explorer file listing behavior changed\..*?No File Explorer navigation behavior changed\..*?No File Explorer open or launch behavior changed\..*?No App Model behavior changed\..*?No new effects were added\..*?Broad app redesign remains deferred\..*?Future app polish should continue one app at a time\.'
 $phase3e1HeadingMatch = Find-FirstMatch $planDoc '## Phase 3E\.1'
 $phase3e1BodyMatch = Find-RawMatch $planDoc '## Phase 3E\.1.*?Phase 3E\.1 is a stabilization-only review pass for the File Explorer app-surface pilot\..*?File Explorer surface helpers were reviewed and kept centralized\..*?Row hover and selection safety were reviewed.*?hover stays visual-only\..*?The shared File Explorer render path is app-level renderer surface code; no bare-metal-specific theme parity work was added in this pass\..*?Classic preservation was confirmed, with no visible fallback changes needed to restore the prior familiar look\..*?No File Explorer file listing behavior, directory navigation, file open or launch behavior, App Model behavior, persistence, layout geometry, hit-testing, or theme metrics changed\..*?No new effects or controls were added\..*?No blur, glass, animation, rounded clipping, or rounded hit-testing was added\..*?Future app polish should remain one app at a time\.'
+$phase3fHeadingMatch = Find-FirstMatch $planDoc '## Phase 3F'
+$phase3fBodyMatch = Find-RawMatch $planDoc '## Phase 3F.*?Phase 3F is the next app-surface pilot for the guideXOS Server theme system\..*?Clock is the next app surface to receive Sci Fi polish\..*?Sci Fi gets conservative body, readout, and accent polish; Clock does not have dedicated mode tabs or button chrome in this pass, so there is no control-surface redesign to apply\..*?Classic is preserved and stays visually close to the current Clock look\..*?No Clock behavior changed\..*?No new effects were added\..*?Broad app redesign remains deferred\..*?Future app polish should continue one app at a time\.'
+$clockThemeHelperMatch = Find-FirstMatch $clock 'ClockBodyColor|ClockFaceColor|ClockBorderColor|ClockReadoutColor|ClockMutedTextColor|ClockAccentColor|paintClockSurface|drawClockText|GetCurrentDesktopThemeId|GetCurrentDesktopTheme|DesktopThemeId::SciFi'
+$clockThemeFieldMatch = Find-FirstMatch $clock 'windowBackground|windowBorder|accent|mutedAccent|taskbarBackground|taskbarBorder|titleBarText'
+$clockPerEffectMatch = Find-FirstMatch $clock 'Visual Effects|per-effect'
 $fileExplorerThemeHelperMatch = Find-FirstMatch $fileExplorer 'FileExplorerBodyColor|FileExplorerToolbarColor|FileExplorerPathBoxColor|FileExplorerPanelColor|FileExplorerListColor|FileExplorerHeaderColor|FileExplorerStatusColor|FileExplorerBorderColor|FileExplorerTextColor|FileExplorerMutedTextColor|FileExplorerAccentColor|FileExplorerSelectedRowColor|FileExplorerHoveredRowColor|FileExplorerContextMenuColor|FileExplorerContextMenuHoverColor|drawSurfaceTextAt'
 $fileExplorerThemeFieldMatch = Find-FirstMatch $fileExplorer 'windowBackground|windowBorder|accent|mutedAccent|taskbarBackground|taskbarBorder|titleBarText'
 $fileExplorerHoverMatch = Find-RawMatch $fileExplorer 'action == "move" && !s_draggingFileListScrollbar && isSciFiThemeActive\(\).*?hitTestEntryRow\(x, y\)|scrollFileListByRows\(int rows\).*?s_hoveredIndex = -1;|ensureSelectedFileVisible\(\).*?s_hoveredIndex = -1;'
@@ -339,6 +345,10 @@ $checks = @(
     [pscustomobject]@{ Name = "phase 3e docs body"; Pass = $null -ne $phase3eBodyMatch; Match = $phase3eBodyMatch },
     [pscustomobject]@{ Name = "phase 3e.1 docs heading"; Pass = $null -ne $phase3e1HeadingMatch; Match = $phase3e1HeadingMatch },
     [pscustomobject]@{ Name = "phase 3e.1 docs body"; Pass = $null -ne $phase3e1BodyMatch; Match = $phase3e1BodyMatch },
+    [pscustomobject]@{ Name = "phase 3f docs heading"; Pass = $null -ne $phase3fHeadingMatch; Match = $phase3fHeadingMatch },
+    [pscustomobject]@{ Name = "phase 3f docs body"; Pass = $null -ne $phase3fBodyMatch; Match = $phase3fBodyMatch },
+    [pscustomobject]@{ Name = "clock theme helpers wired"; Pass = $null -ne $clockThemeHelperMatch -or $null -ne $clockThemeFieldMatch; Match = $(if ($null -ne $clockThemeHelperMatch) { $clockThemeHelperMatch } else { $clockThemeFieldMatch }) },
+    [pscustomobject]@{ Name = "clock no per-effect controls"; Pass = $null -eq $clockPerEffectMatch; Match = $clockPerEffectMatch },
     [pscustomobject]@{ Name = "file explorer theme helpers wired"; Pass = $null -ne $fileExplorerThemeHelperMatch -or $null -ne $fileExplorerThemeFieldMatch -or $null -ne $fileExplorerHoverMatch; Match = $(if ($null -ne $fileExplorerThemeHelperMatch) { $fileExplorerThemeHelperMatch } elseif ($null -ne $fileExplorerThemeFieldMatch) { $fileExplorerThemeFieldMatch } else { $fileExplorerHoverMatch }) },
     [pscustomobject]@{ Name = "file explorer sci fi hover guarded"; Pass = $null -ne $fileExplorerHoverMatch; Match = $fileExplorerHoverMatch },
     [pscustomobject]@{ Name = "file explorer no per-effect controls"; Pass = $null -eq $fileExplorerNoPerEffectMatch; Match = $fileExplorerNoPerEffectMatch },
