@@ -87,9 +87,12 @@ $displayOptions = Join-Path $Root "display_options.cpp"
 $controlPanel = Join-Path $Root "control_panel.cpp"
 $notepad = Join-Path $Root "notepad.cpp"
 $calculator = Join-Path $Root "calculator.cpp"
+$fileExplorer = Join-Path $Root "file_explorer.cpp"
+$fileExplorerHeader = Join-Path $Root "file_explorer.h"
 $compositor = Join-Path $Root "compositor.cpp"
 $windowRenderer = Join-Path $Root "window_renderer.h"
 $planDoc = Join-Path $Root "docs\theme-system-plan.md"
+$smokeScriptPath = $MyInvocation.MyCommand.Path
 $displayOptionsThemeHelperMatch = Find-FirstMatch $displayOptions 'IsSciFiThemeActive|DisplayOptionsBodyColor|DisplayOptionsPanelColor|DisplayOptionsCardColor|DisplayOptionsButtonFillColor|DisplayOptionsButtonBorderColor|DisplayOptionsTextColor|DisplayOptionsMutedTextColor|DisplayOptionsAccentColor'
 $displayOptionsThemeFieldMatch = Find-FirstMatch $displayOptions 'windowBackground|windowBorder|accent|mutedAccent|taskbarBackground|taskbarBorder|titleBarText'
 $displayOptionsTextColorMatch = Find-FirstMatch $displayOptions 'MT_DrawTextAtColor|DisplayOptionsMutedTextColor\(\)|DisplayOptionsTextColor\(\)'
@@ -207,6 +210,14 @@ $phase3dHeadingMatch = Find-FirstMatch $planDoc '## Phase 3D'
 $phase3dBodyMatch = Find-RawMatch $planDoc '## Phase 3D.*?Phase 3D is the fourth app-surface pilot for the guideXOS Server theme system\..*?Calculator is the fourth app surface to receive Sci Fi polish\..*?Sci Fi gets conservative body, display, button, and accent polish so Calculator feels a little more cohesive with the shell\..*?Classic is preserved and stays visually close to the current Calculator look\..*?No Calculator behavior changed\..*?No new effects were added\..*?No new per-effect theme controls were introduced\..*?Broad app redesign remains deferred\..*?Future app polish should continue one app at a time\.'
 $phase3d1HeadingMatch = Find-FirstMatch $planDoc '## Phase 3D\.1'
 $phase3d1BodyMatch = Find-RawMatch $planDoc '## Phase 3D\.1.*?Phase 3D\.1 is a stabilization-only review pass for the Calculator app-surface pilot\..*?Calculator surface helpers were reviewed and kept centralized\..*?The shared compositor widget guard was reviewed and kept narrow to Calculator and Sci Fi\..*?Classic preservation was confirmed, with no visible fallback changes needed to restore the prior familiar look\..*?No Calculator behavior, input handling, math evaluation, history, persistence, layout geometry, hit-testing, or theme metrics changed\..*?No new effects or controls were added\..*?No blur, glass, animation, rounded clipping, or rounded hit-testing was added\..*?Future app polish should remain one app at a time\.'
+$phase3eHeadingMatch = Find-FirstMatch $planDoc '## Phase 3E'
+$phase3eBodyMatch = Find-RawMatch $planDoc '## Phase 3E.*?Phase 3E is the next app-surface pilot for the guideXOS Server theme system\..*?File Explorer is the next app surface to receive Sci Fi polish\..*?Sci Fi gets conservative body, list, toolbar, address, selection, hover, border, and status polish so File Explorer feels more cohesive with the shell\..*?Classic is preserved and stays visually close to the current File Explorer look\..*?No File Explorer file listing behavior changed\..*?No File Explorer navigation behavior changed\..*?No File Explorer open or launch behavior changed\..*?No App Model behavior changed\..*?No new effects were added\..*?Broad app redesign remains deferred\..*?Future app polish should continue one app at a time\.'
+$fileExplorerThemeHelperMatch = Find-FirstMatch $fileExplorer 'FileExplorerBodyColor|FileExplorerToolbarColor|FileExplorerPathBoxColor|FileExplorerPanelColor|FileExplorerListColor|FileExplorerHeaderColor|FileExplorerStatusColor|FileExplorerBorderColor|FileExplorerTextColor|FileExplorerMutedTextColor|FileExplorerAccentColor|FileExplorerSelectedRowColor|FileExplorerHoveredRowColor|FileExplorerContextMenuColor|FileExplorerContextMenuHoverColor|drawSurfaceTextAt'
+$fileExplorerThemeFieldMatch = Find-FirstMatch $fileExplorer 'windowBackground|windowBorder|accent|mutedAccent|taskbarBackground|taskbarBorder|titleBarText'
+$fileExplorerHoverMatch = Find-FirstMatch $fileExplorer 's_hoveredIndex|action == "move" && !s_draggingFileListScrollbar'
+$fileExplorerNoPerEffectMatch = Find-FirstMatch $fileExplorer 'Visual Effects|per-effect'
+$appModelSmokePattern = ('smoke-' + 'appmodel' + '.*-(status|gate)')
+$smokeNoAppModelStatusMatch = Find-FirstMatch $smokeScriptPath $appModelSmokePattern
 $notepadThemeHelperMatch = Find-FirstMatch $notepad 'NotepadBodyColor|NotepadEditorColor|NotepadBorderColor|NotepadTextColor|NotepadMutedTextColor|NotepadAccentColor|NotepadSelectionColor|NotepadStatusColor|NotepadMenuColor|NotepadMenuHoverColor|GetCurrentDesktopThemeId|GetCurrentDesktopTheme|DesktopThemeId::SciFi'
 $notepadColorTextMatch = Find-FirstMatch $notepad 'publishDrawTextAtColor'
 $notepadThemeFieldMatch = Find-FirstMatch $notepad 'windowBackground|windowBorder|accent|mutedAccent|taskbarBackground|taskbarBorder|titleBarText'
@@ -322,6 +333,11 @@ $checks = @(
     [pscustomobject]@{ Name = "phase 3d docs body"; Pass = $null -ne $phase3dBodyMatch; Match = $phase3dBodyMatch },
     [pscustomobject]@{ Name = "phase 3d.1 docs heading"; Pass = $null -ne $phase3d1HeadingMatch; Match = $phase3d1HeadingMatch },
     [pscustomobject]@{ Name = "phase 3d.1 docs body"; Pass = $null -ne $phase3d1BodyMatch; Match = $phase3d1BodyMatch },
+    [pscustomobject]@{ Name = "phase 3e docs heading"; Pass = $null -ne $phase3eHeadingMatch; Match = $phase3eHeadingMatch },
+    [pscustomobject]@{ Name = "phase 3e docs body"; Pass = $null -ne $phase3eBodyMatch; Match = $phase3eBodyMatch },
+    [pscustomobject]@{ Name = "file explorer theme helpers wired"; Pass = $null -ne $fileExplorerThemeHelperMatch -or $null -ne $fileExplorerThemeFieldMatch -or $null -ne $fileExplorerHoverMatch; Match = $(if ($null -ne $fileExplorerThemeHelperMatch) { $fileExplorerThemeHelperMatch } elseif ($null -ne $fileExplorerThemeFieldMatch) { $fileExplorerThemeFieldMatch } else { $fileExplorerHoverMatch }) },
+    [pscustomobject]@{ Name = "file explorer no per-effect controls"; Pass = $null -eq $fileExplorerNoPerEffectMatch; Match = $fileExplorerNoPerEffectMatch },
+    [pscustomobject]@{ Name = "smoke script has no app model status gate dependency"; Pass = $null -eq $smokeNoAppModelStatusMatch; Match = $smokeNoAppModelStatusMatch },
     [pscustomobject]@{ Name = "calculator theme helpers wired"; Pass = $null -ne $calculatorThemeHelperMatch -or $null -ne $calculatorThemeFieldMatch; Match = $(if ($null -ne $calculatorThemeHelperMatch) { $calculatorThemeHelperMatch } else { $calculatorThemeFieldMatch }) },
     [pscustomobject]@{ Name = "calculator widget sci fi guard narrow"; Pass = $null -ne $calculatorWidgetGuardMatch; Match = $calculatorWidgetGuardMatch },
     [pscustomobject]@{ Name = "calculator no per-effect controls"; Pass = $null -eq $calculatorPerEffectMatch; Match = $calculatorPerEffectMatch },

@@ -112,6 +112,7 @@ namespace gxos { namespace apps {
         static void drawRect(int x, int y, int w, int h, int r, int g, int b);
         static void drawText(const std::string& text);
         static void drawTextAt(int x, int y, const std::string& text);
+        static void drawSurfaceTextAt(int x, int y, const std::string& text, uint32_t sciFiColor = 0);
         static void drawIcon(const std::string& logicalIconName, int x, int y, int iconSize = 16);
         static void drawDebugPlaceholder(int x, int y, int size);
         static void addButton(int id, int x, int y, int w, int h, const std::string& text);
@@ -165,6 +166,7 @@ namespace gxos { namespace apps {
         static std::vector<std::string> s_forwardHistory;
         static int s_selectedIndex;
         static int s_scrollOffset;
+        static int s_hoveredIndex;
         static bool s_draggingFileListScrollbar;
         static int s_fileListScrollbarDragStartY;
         static int s_fileListScrollbarDragStartOffsetRows;

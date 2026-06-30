@@ -1,4 +1,5 @@
 #include "file_explorer.h"
+#include "desktop_theme.h"
 #include "file_icon_provider.h"
 #include "icon_theme_manager.h"
 #include "desktop_service.h"
@@ -99,6 +100,127 @@ namespace gxos { namespace apps {
 
         int fileListViewportHeight() {
             return kStatusBarY - kMainRowsStartY;
+        }
+
+        uint32_t packRgb(int r, int g, int b) {
+            return 0xFF000000u |
+                (static_cast<uint32_t>(r & 0xFF) << 16) |
+                (static_cast<uint32_t>(g & 0xFF) << 8) |
+                static_cast<uint32_t>(b & 0xFF);
+        }
+
+        uint32_t blendColor(uint32_t baseColor, uint32_t overlayColor, int overlayPercent) {
+            if (overlayPercent <= 0) return baseColor;
+            if (overlayPercent >= 100) return overlayColor;
+
+            const int baseR = static_cast<int>((baseColor >> 16) & 0xFF);
+            const int baseG = static_cast<int>((baseColor >> 8) & 0xFF);
+            const int baseB = static_cast<int>(baseColor & 0xFF);
+            const int overR = static_cast<int>((overlayColor >> 16) & 0xFF);
+            const int overG = static_cast<int>((overlayColor >> 8) & 0xFF);
+            const int overB = static_cast<int>(overlayColor & 0xFF);
+            const int keepPercent = 100 - overlayPercent;
+
+            return packRgb(
+                (baseR * keepPercent + overR * overlayPercent) / 100,
+                (baseG * keepPercent + overG * overlayPercent) / 100,
+                (baseB * keepPercent + overB * overlayPercent) / 100);
+        }
+
+        bool isSciFiThemeActive() {
+            return GetCurrentDesktopThemeId() == DesktopThemeId::SciFi;
+        }
+
+        const DesktopTheme& fileExplorerTheme() {
+            return GetCurrentDesktopTheme();
+        }
+
+        uint32_t FileExplorerBodyColor() {
+            if (!isSciFiThemeActive()) return packRgb(244, 244, 244);
+            const DesktopTheme& theme = fileExplorerTheme();
+            return blendColor(theme.taskbarBackground, theme.windowBackground, 18);
+        }
+
+        uint32_t FileExplorerToolbarColor() {
+            if (!isSciFiThemeActive()) return packRgb(240, 240, 240);
+            const DesktopTheme& theme = fileExplorerTheme();
+            return blendColor(theme.titleBarBackground, theme.windowBackground, 14);
+        }
+
+        uint32_t FileExplorerPathBoxColor() {
+            if (!isSciFiThemeActive()) return packRgb(252, 252, 252);
+            const DesktopTheme& theme = fileExplorerTheme();
+            return blendColor(theme.windowBackground, theme.taskbarBackground, 10);
+        }
+
+        uint32_t FileExplorerPanelColor() {
+            if (!isSciFiThemeActive()) return packRgb(248, 248, 248);
+            const DesktopTheme& theme = fileExplorerTheme();
+            return blendColor(theme.windowBackground, theme.taskbarBackground, 16);
+        }
+
+        uint32_t FileExplorerListColor() {
+            if (!isSciFiThemeActive()) return packRgb(250, 250, 250);
+            const DesktopTheme& theme = fileExplorerTheme();
+            return blendColor(theme.windowBackground, theme.taskbarBackground, 12);
+        }
+
+        uint32_t FileExplorerHeaderColor() {
+            if (!isSciFiThemeActive()) return packRgb(235, 235, 235);
+            const DesktopTheme& theme = fileExplorerTheme();
+            return blendColor(theme.windowBackground, theme.taskbarBackground, 18);
+        }
+
+        uint32_t FileExplorerStatusColor() {
+            if (!isSciFiThemeActive()) return packRgb(238, 238, 238);
+            const DesktopTheme& theme = fileExplorerTheme();
+            return blendColor(theme.taskbarBackground, theme.windowBackground, 8);
+        }
+
+        uint32_t FileExplorerBorderColor() {
+            if (!isSciFiThemeActive()) return packRgb(208, 208, 208);
+            const DesktopTheme& theme = fileExplorerTheme();
+            return blendColor(theme.windowBorder, theme.taskbarBorder, 24);
+        }
+
+        uint32_t FileExplorerTextColor() {
+            if (!isSciFiThemeActive()) return packRgb(220, 220, 220);
+            return fileExplorerTheme().titleBarText;
+        }
+
+        uint32_t FileExplorerMutedTextColor() {
+            if (!isSciFiThemeActive()) return packRgb(182, 186, 194);
+            const DesktopTheme& theme = fileExplorerTheme();
+            return blendColor(theme.titleBarText, theme.taskbarBackground, 54);
+        }
+
+        uint32_t FileExplorerAccentColor() {
+            if (!isSciFiThemeActive()) return packRgb(92, 136, 198);
+            return fileExplorerTheme().accent;
+        }
+
+        uint32_t FileExplorerSelectedRowColor() {
+            if (!isSciFiThemeActive()) return packRgb(80, 100, 150);
+            const DesktopTheme& theme = fileExplorerTheme();
+            return blendColor(theme.windowBackground, theme.accent, 20);
+        }
+
+        uint32_t FileExplorerHoveredRowColor() {
+            if (!isSciFiThemeActive()) return packRgb(232, 232, 238);
+            const DesktopTheme& theme = fileExplorerTheme();
+            return blendColor(theme.windowBackground, theme.mutedAccent, 12);
+        }
+
+        uint32_t FileExplorerContextMenuColor() {
+            if (!isSciFiThemeActive()) return packRgb(245, 245, 248);
+            const DesktopTheme& theme = fileExplorerTheme();
+            return blendColor(theme.windowBackground, theme.taskbarBackground, 12);
+        }
+
+        uint32_t FileExplorerContextMenuHoverColor() {
+            if (!isSciFiThemeActive()) return packRgb(65, 105, 170);
+            const DesktopTheme& theme = fileExplorerTheme();
+            return blendColor(theme.accent, theme.windowBackground, 22);
         }
 
         enum PromptMode {
@@ -394,6 +516,7 @@ namespace gxos { namespace apps {
     std::vector<std::string> FileExplorer::s_forwardHistory;
     int FileExplorer::s_selectedIndex = 0;
     int FileExplorer::s_scrollOffset = 0;
+    int FileExplorer::s_hoveredIndex = -1;
     bool FileExplorer::s_draggingFileListScrollbar = false;
     int FileExplorer::s_fileListScrollbarDragStartY = 0;
     int FileExplorer::s_fileListScrollbarDragStartOffsetRows = 0;
@@ -439,6 +562,7 @@ namespace gxos { namespace apps {
         s_forwardHistory.clear();
         s_selectedIndex = 0;
         s_scrollOffset = 0;
+        s_hoveredIndex = -1;
         s_draggingFileListScrollbar = false;
         s_fileListScrollbarDragStartY = 0;
         s_fileListScrollbarDragStartOffsetRows = 0;
@@ -568,6 +692,7 @@ namespace gxos { namespace apps {
         s_currentPath = normalized;
         s_selectedIndex = 0;
         s_scrollOffset = 0;
+        s_hoveredIndex = -1;
         s_draggingFileListScrollbar = false;
         resetFileListClickTracking();
         refresh();
@@ -602,6 +727,7 @@ namespace gxos { namespace apps {
 
     void FileExplorer::refresh() {
         s_loading = true;
+        s_hoveredIndex = -1;
         bool hasMore = false;
         s_entries = s_fileSystem->listDirectory(s_currentPath, 0, kLazyPageSize, hasMore);
         s_hasMoreEntries = hasMore;
@@ -1105,6 +1231,14 @@ namespace gxos { namespace apps {
                 updateDisplay();
             }
         }
+
+        if (action == "move" && !s_draggingFileListScrollbar && isSciFiThemeActive()) {
+            const int hover = hitTestEntryRow(x, y);
+            if (hover != s_hoveredIndex) {
+                s_hoveredIndex = hover;
+                updateDisplay();
+            }
+        }
     }
 
     char FileExplorer::mapKeyToChar(int keyCode) {
@@ -1138,6 +1272,20 @@ namespace gxos { namespace apps {
 
     void FileExplorer::drawTextAt(int x, int y, const std::string& text) {
         publish(MsgType::MT_DrawTextAt, packDrawTextAt(s_windowId, x, y, text));
+    }
+
+    void FileExplorer::drawSurfaceTextAt(int x, int y, const std::string& text, uint32_t sciFiColor) {
+        if (!isSciFiThemeActive()) {
+            drawTextAt(x, y, text);
+            return;
+        }
+
+        const uint32_t color = sciFiColor == 0 ? FileExplorerTextColor() : sciFiColor;
+        publish(MsgType::MT_DrawTextAtColor, packDrawTextAtColor(s_windowId, x, y,
+            static_cast<uint8_t>((color >> 16) & 0xFF),
+            static_cast<uint8_t>((color >> 8) & 0xFF),
+            static_cast<uint8_t>(color & 0xFF),
+            text));
     }
 
     void FileExplorer::drawDebugPlaceholder(int x, int y, int size) {
@@ -1434,6 +1582,11 @@ namespace gxos { namespace apps {
         if (s_windowId == 0) return;
         publish(MsgType::MT_SetTitle, std::to_string(s_windowId) + "|File Explorer - " + s_currentPath);
         drawText("\f");
+        const uint32_t bodyColor = FileExplorerBodyColor();
+        drawRect(0, 0, kWindowW, kWindowH,
+            static_cast<int>((bodyColor >> 16) & 0xFF),
+            static_cast<int>((bodyColor >> 8) & 0xFF),
+            static_cast<int>(bodyColor & 0xFF));
         renderToolbar();
         renderAddressBar();
         renderNavigationPane();
@@ -1444,23 +1597,77 @@ namespace gxos { namespace apps {
         if (s_showDeleteConfirmation) {
             std::string itemName = s_deleteTargetPath.substr(s_deleteTargetPath.find_last_of('/') + 1);
             std::string itemType = s_deleteTargetIsDirectory ? "folder" : "file";
-            drawRect(230, 190, 420, 100, 45, 45, 55);
-            drawText("MOVE TO TRASH");
-            drawText("");
-            drawText("Move this " + itemType + " to Trash?");
-            drawText(itemName);
-            drawText("");
+            const uint32_t dialogColor = isSciFiThemeActive()
+                ? blendColor(fileExplorerTheme().windowBackground, fileExplorerTheme().taskbarBackground, 12)
+                : packRgb(45, 45, 55);
+            const uint32_t dialogBorder = isSciFiThemeActive() ? FileExplorerBorderColor() : packRgb(45, 45, 55);
+            drawRect(230, 190, 420, 100,
+                static_cast<int>((dialogColor >> 16) & 0xFF),
+                static_cast<int>((dialogColor >> 8) & 0xFF),
+                static_cast<int>(dialogColor & 0xFF));
+            drawRect(230, 190, 420, 1,
+                static_cast<int>((dialogBorder >> 16) & 0xFF),
+                static_cast<int>((dialogBorder >> 8) & 0xFF),
+                static_cast<int>(dialogBorder & 0xFF));
+            drawRect(230, 289, 420, 1,
+                static_cast<int>((dialogBorder >> 16) & 0xFF),
+                static_cast<int>((dialogBorder >> 8) & 0xFF),
+                static_cast<int>(dialogBorder & 0xFF));
+            drawRect(230, 190, 1, 100,
+                static_cast<int>((dialogBorder >> 16) & 0xFF),
+                static_cast<int>((dialogBorder >> 8) & 0xFF),
+                static_cast<int>(dialogBorder & 0xFF));
+            drawRect(649, 190, 1, 100,
+                static_cast<int>((dialogBorder >> 16) & 0xFF),
+                static_cast<int>((dialogBorder >> 8) & 0xFF),
+                static_cast<int>(dialogBorder & 0xFF));
+            drawSurfaceTextAt(242, 200, "MOVE TO TRASH", FileExplorerAccentColor());
+            drawSurfaceTextAt(242, 220, "Move this " + itemType + " to Trash?", FileExplorerTextColor());
+            drawSurfaceTextAt(242, 238, itemName, FileExplorerMutedTextColor());
             addButton(100, 270, 262, 80, 22, "Move to Trash");
             addButton(101, 370, 262, 80, 22, "Cancel");
         } else if (s_promptMode != PromptNone) {
-            drawRect(230, 190, 420, 84, 45, 45, 55);
-            drawText("INPUT: " + s_promptTitle);
-            drawText("> " + s_promptValue + "_");
-            drawText("Enter=OK  Esc=Cancel  Backspace=Delete");
+            const uint32_t dialogColor = isSciFiThemeActive()
+                ? blendColor(fileExplorerTheme().windowBackground, fileExplorerTheme().taskbarBackground, 12)
+                : packRgb(45, 45, 55);
+            const uint32_t dialogBorder = isSciFiThemeActive() ? FileExplorerBorderColor() : packRgb(45, 45, 55);
+            drawRect(230, 190, 420, 84,
+                static_cast<int>((dialogColor >> 16) & 0xFF),
+                static_cast<int>((dialogColor >> 8) & 0xFF),
+                static_cast<int>(dialogColor & 0xFF));
+            drawRect(230, 190, 420, 1,
+                static_cast<int>((dialogBorder >> 16) & 0xFF),
+                static_cast<int>((dialogBorder >> 8) & 0xFF),
+                static_cast<int>(dialogBorder & 0xFF));
+            drawRect(230, 273, 420, 1,
+                static_cast<int>((dialogBorder >> 16) & 0xFF),
+                static_cast<int>((dialogBorder >> 8) & 0xFF),
+                static_cast<int>(dialogBorder & 0xFF));
+            drawRect(230, 190, 1, 84,
+                static_cast<int>((dialogBorder >> 16) & 0xFF),
+                static_cast<int>((dialogBorder >> 8) & 0xFF),
+                static_cast<int>(dialogBorder & 0xFF));
+            drawRect(649, 190, 1, 84,
+                static_cast<int>((dialogBorder >> 16) & 0xFF),
+                static_cast<int>((dialogBorder >> 8) & 0xFF),
+                static_cast<int>(dialogBorder & 0xFF));
+            drawSurfaceTextAt(242, 200, "INPUT: " + s_promptTitle, FileExplorerAccentColor());
+            drawSurfaceTextAt(242, 220, "> " + s_promptValue + "_", FileExplorerTextColor());
+            drawSurfaceTextAt(242, 240, "Enter=OK  Esc=Cancel  Backspace=Delete", FileExplorerMutedTextColor());
         }
     }
 
     void FileExplorer::renderToolbar() {
+        const uint32_t toolbarColor = FileExplorerToolbarColor();
+        const uint32_t borderColor = FileExplorerBorderColor();
+        drawRect(0, 0, kWindowW, kToolbarH,
+            static_cast<int>((toolbarColor >> 16) & 0xFF),
+            static_cast<int>((toolbarColor >> 8) & 0xFF),
+            static_cast<int>(toolbarColor & 0xFF));
+        drawRect(0, kToolbarH - 1, kWindowW, 1,
+            static_cast<int>((borderColor >> 16) & 0xFF),
+            static_cast<int>((borderColor >> 8) & 0xFF),
+            static_cast<int>(borderColor & 0xFF));
         const int iconY = kToolbarButtonY + (kToolbarButtonH - kToolbarIconSize) / 2;
         auto tbIcon = [&](const std::string& iconName, int btnX) {
             drawIcon(iconName, btnX + 3, iconY, kToolbarIconSize);
@@ -1504,24 +1711,43 @@ namespace gxos { namespace apps {
     }
 
     void FileExplorer::renderAddressBar() {
-        drawRect(0, 0, kWindowW, kToolbarH, 240, 240, 240);
-        drawRect(0, kToolbarH, kWindowW, kAddressH, 252, 252, 252);
-        drawTextAt(8, centeredTextY(kToolbarH, kAddressH), "Address: " + s_currentPath);
+        const uint32_t pathColor = FileExplorerPathBoxColor();
+        const uint32_t borderColor = FileExplorerBorderColor();
+        drawRect(0, kToolbarH, kWindowW, kAddressH,
+            static_cast<int>((pathColor >> 16) & 0xFF),
+            static_cast<int>((pathColor >> 8) & 0xFF),
+            static_cast<int>(pathColor & 0xFF));
+        drawRect(0, kToolbarH + kAddressH - 1, kWindowW, 1,
+            static_cast<int>((borderColor >> 16) & 0xFF),
+            static_cast<int>((borderColor >> 8) & 0xFF),
+            static_cast<int>(borderColor & 0xFF));
+        drawSurfaceTextAt(8, centeredTextY(kToolbarH, kAddressH), "Address: " + s_currentPath, FileExplorerTextColor());
     }
 
     void FileExplorer::renderNavigationPane() {
-        drawRect(0, kToolbarH + kAddressH, kLeftPaneW, kWindowH - kToolbarH - kAddressH - 30, 248, 248, 248);
+        const int paneTop = kToolbarH + kAddressH;
+        const int paneHeight = kWindowH - kToolbarH - kAddressH - 30;
+        const uint32_t panelColor = FileExplorerPanelColor();
+        const uint32_t borderColor = FileExplorerBorderColor();
+        drawRect(0, paneTop, kLeftPaneW, paneHeight,
+            static_cast<int>((panelColor >> 16) & 0xFF),
+            static_cast<int>((panelColor >> 8) & 0xFF),
+            static_cast<int>(panelColor & 0xFF));
+        drawRect(kLeftPaneW - 1, paneTop, 1, paneHeight,
+            static_cast<int>((borderColor >> 16) & 0xFF),
+            static_cast<int>((borderColor >> 8) & 0xFF),
+            static_cast<int>(borderColor & 0xFF));
 
         int y = kNavStartY;
-        drawTextAt(8, y, "Navigation");
+        drawSurfaceTextAt(8, y, "Navigation", FileExplorerMutedTextColor());
         y += kRowH;
 
         drawIcon("place.computer", kNavIconX, rowIconY(y, kNavIconSize), kNavIconSize);
-        drawTextAt(kNavTextX, rowTextY(y), "Root");
+        drawSurfaceTextAt(kNavTextX, rowTextY(y), "Root", FileExplorerTextColor());
         y += kRowH;
 
         drawIcon("drive.fixed", kNavIconX, rowIconY(y, kNavIconSize), kNavIconSize);
-        drawTextAt(kNavTextX, rowTextY(y), "Mounted drives");
+        drawSurfaceTextAt(kNavTextX, rowTextY(y), "Mounted drives", FileExplorerTextColor());
         y += kRowH;
 
         for (size_t i = 0; i < s_roots.size(); ++i) {
@@ -1529,29 +1755,48 @@ namespace gxos { namespace apps {
             std::string marker = static_cast<int>(i) == s_rootSelectedIndex ? "> " : "  ";
             const char* iconName = FileIconProvider::logicalIconNameForEntry(root);
             drawIcon(iconName, kNavIconX, rowIconY(y, kNavIconSize), kNavIconSize);
-            drawTextAt(kNavTextX, rowTextY(y), marker + truncate(root.name, 22));
+            drawSurfaceTextAt(kNavTextX, rowTextY(y), marker + truncate(root.name, 22),
+                static_cast<int>(i) == s_rootSelectedIndex ? FileExplorerAccentColor() : FileExplorerTextColor());
             y += kRowH;
         }
 
         drawIcon("file.sysfolder", kNavIconX, rowIconY(y, kNavIconSize), kNavIconSize);
-        drawTextAt(kNavTextX, rowTextY(y), "Common folders");
+        drawSurfaceTextAt(kNavTextX, rowTextY(y), "Common folders", FileExplorerTextColor());
         y += kRowH;
-        drawTextAt(8, rowTextY(y), "Keys: L/R roots, O open");
+        drawSurfaceTextAt(8, rowTextY(y), "Keys: L/R roots, O open", FileExplorerMutedTextColor());
     }
 
     void FileExplorer::renderMainPane() {
-        drawRect(kLeftPaneW, kToolbarH + kAddressH, kWindowW - kLeftPaneW, kHeaderH, 235, 235, 235);
-        drawTextAt(kLeftPaneW + 8, kHeaderTextY, "Name");
-        drawTextAt(kMainSizeTextX, kHeaderTextY, "Size");
-        drawTextAt(kMainTypeTextX, kHeaderTextY, "Type");
-        drawTextAt(kMainModifiedTextX, kHeaderTextY, "Modified");
+        const int mainX = kLeftPaneW;
+        const int mainY = kToolbarH + kAddressH;
+        const int mainW = kWindowW - kLeftPaneW;
+        const int mainH = kWindowH - kToolbarH - kAddressH - 30;
+        const uint32_t listColor = FileExplorerListColor();
+        const uint32_t headerColor = FileExplorerHeaderColor();
+        const uint32_t borderColor = FileExplorerBorderColor();
+        drawRect(mainX, mainY, mainW, mainH,
+            static_cast<int>((listColor >> 16) & 0xFF),
+            static_cast<int>((listColor >> 8) & 0xFF),
+            static_cast<int>(listColor & 0xFF));
+        drawRect(mainX, mainY, mainW, kHeaderH,
+            static_cast<int>((headerColor >> 16) & 0xFF),
+            static_cast<int>((headerColor >> 8) & 0xFF),
+            static_cast<int>(headerColor & 0xFF));
+        drawRect(mainX, mainY + kHeaderH - 1, mainW, 1,
+            static_cast<int>((borderColor >> 16) & 0xFF),
+            static_cast<int>((borderColor >> 8) & 0xFF),
+            static_cast<int>(borderColor & 0xFF));
+        drawSurfaceTextAt(kLeftPaneW + 8, kHeaderTextY, "Name", FileExplorerMutedTextColor());
+        drawSurfaceTextAt(kMainSizeTextX, kHeaderTextY, "Size", FileExplorerMutedTextColor());
+        drawSurfaceTextAt(kMainTypeTextX, kHeaderTextY, "Type", FileExplorerMutedTextColor());
+        drawSurfaceTextAt(kMainModifiedTextX, kHeaderTextY, "Modified", FileExplorerMutedTextColor());
 
         if (s_loading) {
-            drawTextAt(kLeftPaneW + 8, rowTextY(kMainRowsStartY), "Loading...");
+            drawSurfaceTextAt(kLeftPaneW + 8, rowTextY(kMainRowsStartY), "Loading...", FileExplorerMutedTextColor());
             return;
         }
         if (s_entries.empty()) {
-            drawTextAt(kLeftPaneW + 8, rowTextY(kMainRowsStartY), "(Empty directory or unavailable path)");
+            drawSurfaceTextAt(kLeftPaneW + 8, rowTextY(kMainRowsStartY), "(Empty directory or unavailable path)", FileExplorerMutedTextColor());
             return;
         }
 
@@ -1563,9 +1808,20 @@ namespace gxos { namespace apps {
             const int row = i - start;
             const int rowY = kMainRowsStartY + row * kRowH;
             const bool selected = i == s_selectedIndex;
+            const bool hovered = i == s_hoveredIndex;
 
             if (selected) {
-                drawRect(kLeftPaneW, rowY, kWindowW - kLeftPaneW - 8, kRowH, 80, 100, 150);
+                const uint32_t selectedColor = FileExplorerSelectedRowColor();
+                drawRect(kLeftPaneW, rowY, kWindowW - kLeftPaneW - 8, kRowH,
+                    static_cast<int>((selectedColor >> 16) & 0xFF),
+                    static_cast<int>((selectedColor >> 8) & 0xFF),
+                    static_cast<int>(selectedColor & 0xFF));
+            } else if (hovered && isSciFiThemeActive()) {
+                const uint32_t hoverColor = FileExplorerHoveredRowColor();
+                drawRect(kLeftPaneW, rowY, kWindowW - kLeftPaneW - 8, kRowH,
+                    static_cast<int>((hoverColor >> 16) & 0xFF),
+                    static_cast<int>((hoverColor >> 8) & 0xFF),
+                    static_cast<int>(hoverColor & 0xFF));
             }
 
             const FileIconType iconType = FileIconProvider::iconTypeForEntry(entry);
@@ -1573,10 +1829,10 @@ namespace gxos { namespace apps {
             drawIcon(iconName, kMainIconX, rowIconY(rowY, kIconSize), kIconSize);
 
             const std::string prefix = selected ? "> " : "  ";
-            drawTextAt(kMainNameTextX, rowTextY(rowY), prefix + truncate(entry.name, 26));
-            drawTextAt(kMainSizeTextX, rowTextY(rowY), entry.isDirectory() ? "" : formatSize(entry.size));
-            drawTextAt(kMainTypeTextX, rowTextY(rowY), truncate(entry.type, 14));
-            drawTextAt(kMainModifiedTextX, rowTextY(rowY), entry.modified);
+            drawSurfaceTextAt(kMainNameTextX, rowTextY(rowY), prefix + truncate(entry.name, 26), FileExplorerTextColor());
+            drawSurfaceTextAt(kMainSizeTextX, rowTextY(rowY), entry.isDirectory() ? "" : formatSize(entry.size), FileExplorerMutedTextColor());
+            drawSurfaceTextAt(kMainTypeTextX, rowTextY(rowY), truncate(entry.type, 14), FileExplorerMutedTextColor());
+            drawSurfaceTextAt(kMainModifiedTextX, rowTextY(rowY), entry.modified, FileExplorerMutedTextColor());
         }
 
         if (isFileListScrollbarVisible()) {
@@ -1586,38 +1842,92 @@ namespace gxos { namespace apps {
             const int thumbTop = fileListScrollbarThumbTop();
             const int thumbH = fileListScrollbarThumbHeight();
 
-            drawRect(trackLeft, trackTop, kFileListScrollbarW, trackH, 236, 238, 242);
-            drawRect(trackLeft, thumbTop, kFileListScrollbarW, thumbH, 150, 160, 176);
-            drawRect(trackLeft, trackTop, kFileListScrollbarW, 1, 208, 212, 220);
-            drawRect(trackLeft, trackTop + trackH - 1, kFileListScrollbarW, 1, 208, 212, 220);
+            const uint32_t trackColor = isSciFiThemeActive()
+                ? blendColor(fileExplorerTheme().windowBackground, fileExplorerTheme().taskbarBackground, 16)
+                : packRgb(236, 238, 242);
+            const uint32_t thumbColor = isSciFiThemeActive()
+                ? blendColor(fileExplorerTheme().accent, fileExplorerTheme().windowBorder, 34)
+                : packRgb(150, 160, 176);
+            drawRect(trackLeft, trackTop, kFileListScrollbarW, trackH,
+                static_cast<int>((trackColor >> 16) & 0xFF),
+                static_cast<int>((trackColor >> 8) & 0xFF),
+                static_cast<int>(trackColor & 0xFF));
+            drawRect(trackLeft, thumbTop, kFileListScrollbarW, thumbH,
+                static_cast<int>((thumbColor >> 16) & 0xFF),
+                static_cast<int>((thumbColor >> 8) & 0xFF),
+                static_cast<int>(thumbColor & 0xFF));
+            drawRect(trackLeft, trackTop, kFileListScrollbarW, 1,
+                static_cast<int>((borderColor >> 16) & 0xFF),
+                static_cast<int>((borderColor >> 8) & 0xFF),
+                static_cast<int>(borderColor & 0xFF));
+            drawRect(trackLeft, trackTop + trackH - 1, kFileListScrollbarW, 1,
+                static_cast<int>((borderColor >> 16) & 0xFF),
+                static_cast<int>((borderColor >> 8) & 0xFF),
+                static_cast<int>(borderColor & 0xFF));
         }
     }
 
     void FileExplorer::renderStatusBar() {
+        const uint32_t statusColor = FileExplorerStatusColor();
+        const uint32_t borderColor = FileExplorerBorderColor();
+        drawRect(0, kStatusBarY, kWindowW, kWindowH - kStatusBarY,
+            static_cast<int>((statusColor >> 16) & 0xFF),
+            static_cast<int>((statusColor >> 8) & 0xFF),
+            static_cast<int>(statusColor & 0xFF));
+        drawRect(0, kStatusBarY, kWindowW, 1,
+            static_cast<int>((borderColor >> 16) & 0xFF),
+            static_cast<int>((borderColor >> 8) & 0xFF),
+            static_cast<int>(borderColor & 0xFF));
         std::ostringstream oss;
         oss << s_entries.size() << " item(s)";
         if (s_hasMoreEntries) oss << " | lazy page loaded";
         if (!s_status.empty()) oss << " | " << s_status;
         if (s_selectedIndex >= 0 && s_selectedIndex < static_cast<int>(s_entries.size())) oss << " | Selected: " << s_entries[s_selectedIndex].name;
-        drawTextAt(8, centeredTextY(kStatusBarY, kWindowH - kStatusBarY), oss.str());
+        drawSurfaceTextAt(8, centeredTextY(kStatusBarY, kWindowH - kStatusBarY), oss.str(), FileExplorerMutedTextColor());
     }
 
     void FileExplorer::renderContextMenu() {
         const int itemCount = static_cast<int>(s_contextMenuActions.size());
         if (itemCount <= 0) return;
         const int menuH = itemCount * kContextMenuItemH;
-        drawRect(s_contextMenuX + 2, s_contextMenuY + 2, kContextMenuW, menuH, 30, 30, 35);
-        drawRect(s_contextMenuX, s_contextMenuY, kContextMenuW, menuH, 245, 245, 248);
-        drawRect(s_contextMenuX, s_contextMenuY, kContextMenuW, 1, 120, 120, 140);
-        drawRect(s_contextMenuX, s_contextMenuY + menuH - 1, kContextMenuW, 1, 120, 120, 140);
-        drawRect(s_contextMenuX, s_contextMenuY, 1, menuH, 120, 120, 140);
-        drawRect(s_contextMenuX + kContextMenuW - 1, s_contextMenuY, 1, menuH, 120, 120, 140);
+        const uint32_t menuColor = FileExplorerContextMenuColor();
+        const uint32_t menuBorder = isSciFiThemeActive() ? FileExplorerBorderColor() : packRgb(120, 120, 140);
+        const uint32_t shadowColor = isSciFiThemeActive() ? blendColor(menuColor, packRgb(0, 0, 0), 18) : packRgb(30, 30, 35);
+        const uint32_t hoverColor = FileExplorerContextMenuHoverColor();
+        drawRect(s_contextMenuX + 2, s_contextMenuY + 2, kContextMenuW, menuH,
+            static_cast<int>((shadowColor >> 16) & 0xFF),
+            static_cast<int>((shadowColor >> 8) & 0xFF),
+            static_cast<int>(shadowColor & 0xFF));
+        drawRect(s_contextMenuX, s_contextMenuY, kContextMenuW, menuH,
+            static_cast<int>((menuColor >> 16) & 0xFF),
+            static_cast<int>((menuColor >> 8) & 0xFF),
+            static_cast<int>(menuColor & 0xFF));
+        drawRect(s_contextMenuX, s_contextMenuY, kContextMenuW, 1,
+            static_cast<int>((menuBorder >> 16) & 0xFF),
+            static_cast<int>((menuBorder >> 8) & 0xFF),
+            static_cast<int>(menuBorder & 0xFF));
+        drawRect(s_contextMenuX, s_contextMenuY + menuH - 1, kContextMenuW, 1,
+            static_cast<int>((menuBorder >> 16) & 0xFF),
+            static_cast<int>((menuBorder >> 8) & 0xFF),
+            static_cast<int>(menuBorder & 0xFF));
+        drawRect(s_contextMenuX, s_contextMenuY, 1, menuH,
+            static_cast<int>((menuBorder >> 16) & 0xFF),
+            static_cast<int>((menuBorder >> 8) & 0xFF),
+            static_cast<int>(menuBorder & 0xFF));
+        drawRect(s_contextMenuX + kContextMenuW - 1, s_contextMenuY, 1, menuH,
+            static_cast<int>((menuBorder >> 16) & 0xFF),
+            static_cast<int>((menuBorder >> 8) & 0xFF),
+            static_cast<int>(menuBorder & 0xFF));
         for (int i = 0; i < itemCount; ++i) {
             const int itemY = s_contextMenuY + i * kContextMenuItemH;
             if (i == s_contextMenuHover) {
-                drawRect(s_contextMenuX + 1, itemY + 1, kContextMenuW - 2, kContextMenuItemH - 2, 65, 105, 170);
+                drawRect(s_contextMenuX + 1, itemY + 1, kContextMenuW - 2, kContextMenuItemH - 2,
+                    static_cast<int>((hoverColor >> 16) & 0xFF),
+                    static_cast<int>((hoverColor >> 8) & 0xFF),
+                    static_cast<int>(hoverColor & 0xFF));
             }
-            drawTextAt(s_contextMenuX + 8, centeredTextY(itemY, kContextMenuItemH), contextMenuLabel(static_cast<ContextMenuAction>(s_contextMenuActions[i])));
+            drawSurfaceTextAt(s_contextMenuX + 8, centeredTextY(itemY, kContextMenuItemH), contextMenuLabel(static_cast<ContextMenuAction>(s_contextMenuActions[i])),
+                FileExplorerTextColor());
         }
     }
 
