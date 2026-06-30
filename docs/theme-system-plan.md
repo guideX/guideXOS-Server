@@ -304,6 +304,19 @@ Phase 3E is the next app-surface pilot for the guideXOS Server theme system.
 * Broad app redesign remains deferred.
 * Future app polish should continue one app at a time.
 
+## Phase 3E.1
+
+Phase 3E.1 is a stabilization-only review pass for the File Explorer app-surface pilot.
+
+* File Explorer surface helpers were reviewed and kept centralized.
+* Row hover and selection safety were reviewed, and the Sci Fi hover highlight now clears when the visible list offset changes so hover stays visual-only.
+* The shared File Explorer render path is app-level renderer surface code; no bare-metal-specific theme parity work was added in this pass.
+* Classic preservation was confirmed, with no visible fallback changes needed to restore the prior familiar look.
+* No File Explorer file listing behavior, directory navigation, file open or launch behavior, App Model behavior, persistence, layout geometry, hit-testing, or theme metrics changed.
+* No new effects or controls were added.
+* No blur, glass, animation, rounded clipping, or rounded hit-testing was added.
+* Future app polish should remain one app at a time.
+
 ## Manual Validation Runbook
 
 * Start the hosted server executable.
@@ -367,7 +380,7 @@ Phase 3E is the next app-surface pilot for the guideXOS Server theme system.
 
 * Classic should continue to look basically unchanged.
 * Sci Fi is a first visible proof that the theme system exists, not a full futuristic redesign.
-* Rounded-window clipping remains deferred; this foundation is intentionally limited to IDs, persistence, selector wiring, safe chrome colors, the Phase 2A chrome metric pass, the guarded Phase 2B rounded-shell preview, the Phase 2C border/highlight polish pass, the Phase 2D hosted shadow preview, the Phase 2E desktop/taskbar surface polish pass, the Phase 2G validation checkpoint, the Phase 3A Display Options app-surface pilot, the Phase 3B Control Panel app-surface pilot, the Phase 3C Notepad app-surface pilot, the Phase 3C.1 stabilization review pass, the Phase 3D Calculator app-surface pilot, the Phase 3D.1 stabilization review pass, and the Phase 3E File Explorer app-surface pilot.
+* Rounded-window clipping remains deferred; this foundation is intentionally limited to IDs, persistence, selector wiring, safe chrome colors, the Phase 2A chrome metric pass, the guarded Phase 2B rounded-shell preview, the Phase 2C border/highlight polish pass, the Phase 2D hosted shadow preview, the Phase 2E desktop/taskbar surface polish pass, the Phase 2G validation checkpoint, the Phase 3A Display Options app-surface pilot, the Phase 3B Control Panel app-surface pilot, the Phase 3C Notepad app-surface pilot, the Phase 3C.1 stabilization review pass, the Phase 3D Calculator app-surface pilot, the Phase 3D.1 stabilization review pass, the Phase 3E File Explorer app-surface pilot, and the Phase 3E.1 File Explorer stabilization review pass.
 
 ## Recommended Next Pass
 
