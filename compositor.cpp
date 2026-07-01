@@ -263,6 +263,7 @@ namespace gxos {
 
         DesktopConfigData Compositor::g_cfg{}; std::vector<DesktopItem> Compositor::g_items; uint64_t Compositor::g_lastItemClickTicks = 0; int Compositor::g_lastItemIndex = -1;
         AppModelDemoWindowState Compositor::g_appModelDemo{};
+        Compositor::DesktopRenameState Compositor::g_desktopRename{};
         std::set<int> Compositor::g_selectedDesktopIconIndices; int Compositor::g_lastSelectedDesktopIconIndex = -1;
         bool Compositor::g_iconDragActive = false; int Compositor::g_iconDragIndex = -1; int Compositor::g_iconDragOffX = 0; int Compositor::g_iconDragOffY = 0; int Compositor::g_iconDragStartX = 0; int Compositor::g_iconDragStartY = 0; bool Compositor::g_iconDragPending = false;
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)
@@ -958,6 +959,14 @@ namespace gxos {
 
         static std::string filesystemShortcutLayoutKey(const std::string& shortcutType, const std::string& targetPath) {
             return std::string("shortcut:") + (shortcutType == "Folder" ? "folder:" : "file:") + targetPath;
+        }
+
+        static bool desktopFolderRenameable(const DesktopItem& item) {
+            return item.kind == DesktopItemKind::FilesystemEntry && item.isDirectory && !item.path.empty();
+        }
+
+        static size_t desktopFolderRenameMaxLength() {
+            return 127;
         }
 
         static bool isDesktopFolderRootPath(const std::string& path);
@@ -2125,6 +2134,236 @@ namespace gxos {
             return true;
         }
 
+        bool Compositor::isDesktopFolderRenameActive() {
+            return g_desktopRename.active;
+        }
+
+        bool Compositor::desktopFolderRenameContainsPoint(int x, int y) {
+            if (!g_desktopRename.active) return false;
+            if (g_desktopRename.itemIndex < 0 || g_desktopRename.itemIndex >= (int)g_items.size()) return false;
+            RECT bounds = GetDesktopIconBounds(g_desktopRename.itemIndex);
+            return x >= bounds.left && x < bounds.right && y >= bounds.top && y < bounds.bottom;
+        }
+
+        void Compositor::cancelDesktopFolderRename() {
+            if (!g_desktopRename.active) return;
+            Logger::write(LogLevel::Info, std::string("Desktop rename cancelled: ") + g_desktopRename.originalLayoutKey);
+            g_desktopRename = DesktopRenameState{};
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
+            requestRepaint();
+#else
+            g_needsRedraw = true;
+#endif
+        }
+
+        bool Compositor::beginDesktopFolderRename(int index) {
+            if (index < 0 || index >= (int)g_items.size()) return false;
+            const DesktopItem& item = g_items[index];
+            if (!desktopFolderRenameable(item)) {
+                Logger::write(LogLevel::Warn, "Desktop rename ignored for non-folder item: " + desktopLayoutKey(item));
+                return false;
+            }
+
+            if (g_desktopRename.active && g_desktopRename.itemIndex == index) {
+                return true;
+            }
+
+            if (g_desktopRename.active) {
+                cancelDesktopFolderRename();
+            }
+
+            g_desktopRename.active = true;
+            g_desktopRename.itemIndex = index;
+            g_desktopRename.originalLayoutKey = desktopLayoutKey(item);
+            g_desktopRename.originalPath = item.path;
+            g_desktopRename.originalLabel = item.label;
+            g_desktopRename.buffer = DesktopFolderResolver::TrimAsciiWhitespace(item.label);
+            g_desktopRename.caretPos = g_desktopRename.buffer.size();
+            SelectDesktopIcon(index, false);
+            Logger::write(LogLevel::Info, "Desktop rename started: " + g_desktopRename.originalLayoutKey);
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
+            requestRepaint();
+#else
+            g_needsRedraw = true;
+#endif
+            return true;
+        }
+
+        bool Compositor::handleDesktopFolderRenameChar(char32_t ch) {
+            if (!g_desktopRename.active) return false;
+            if (ch < 32 || ch == 127) return true;
+            if (g_desktopRename.buffer.size() >= desktopFolderRenameMaxLength()) return true;
+            char c = static_cast<char>(ch & 0x7F);
+            if (c == '/' || c == '\\') return true;
+            if (g_desktopRename.caretPos > g_desktopRename.buffer.size()) g_desktopRename.caretPos = g_desktopRename.buffer.size();
+            g_desktopRename.buffer.insert(g_desktopRename.buffer.begin() + static_cast<std::ptrdiff_t>(g_desktopRename.caretPos), c);
+            ++g_desktopRename.caretPos;
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
+            requestRepaint();
+#else
+            g_needsRedraw = true;
+#endif
+            return true;
+        }
+
+        bool Compositor::handleDesktopFolderRenameKeyDown(uint32_t key) {
+            if (!g_desktopRename.active) return false;
+
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
+            const uint32_t kBack = VK_BACK;
+            const uint32_t kDelete = VK_DELETE;
+            const uint32_t kLeft = VK_LEFT;
+            const uint32_t kRight = VK_RIGHT;
+            const uint32_t kHome = VK_HOME;
+            const uint32_t kEnd = VK_END;
+            const uint32_t kEnter = VK_RETURN;
+            const uint32_t kEscape = VK_ESCAPE;
+#else
+            const uint32_t kBack = '\b';
+            const uint32_t kDelete = shell::KEY_DELETE;
+            const uint32_t kLeft = shell::KEY_LEFT;
+            const uint32_t kRight = shell::KEY_RIGHT;
+            const uint32_t kHome = shell::KEY_HOME;
+            const uint32_t kEnd = shell::KEY_END;
+            const uint32_t kEnter = '\n';
+            const uint32_t kEscape = 27;
+#endif
+
+            if (key == kEscape) {
+                cancelDesktopFolderRename();
+                return true;
+            }
+
+            if (key == kEnter) {
+                std::string trimmedName;
+                std::string validationError;
+                if (!DesktopFolderResolver::ValidateRenameName(g_desktopRename.buffer, trimmedName, validationError)) {
+                    Logger::write(LogLevel::Warn, std::string("Desktop rename validation failed: ") + validationError);
+                    NotificationManager::Add(validationError, NotificationLevel::Error);
+                    return true;
+                }
+
+                const DesktopItem item = g_items[g_desktopRename.itemIndex];
+                if (!desktopFolderRenameable(item)) {
+                    Logger::write(LogLevel::Warn, "Desktop rename commit aborted: item is no longer renameable");
+                    cancelDesktopFolderRename();
+                    return true;
+                }
+
+                const std::string parentPath = DesktopFolderResolver::ParentVirtualPath(item.path);
+                const std::string newVirtualPath = DesktopFolderResolver::JoinVirtualPath(parentPath, trimmedName);
+                const std::string normalizedOldPath = normalizeHostedVirtualPath(item.path);
+                const std::string normalizedNewPath = normalizeHostedVirtualPath(newVirtualPath);
+
+                if (normalizedNewPath == normalizedOldPath) {
+                    Logger::write(LogLevel::Info, "Desktop rename resolved to the existing name; no filesystem change required");
+                    cancelDesktopFolderRename();
+                    return true;
+                }
+
+                std::error_code ec;
+                const std::filesystem::path oldHostPath = hostedPathForVirtual(normalizedOldPath);
+                const std::filesystem::path newHostPath = hostedPathForVirtual(normalizedNewPath);
+                if (std::filesystem::exists(newHostPath, ec) && !ec) {
+                    const std::string error = "A folder named '" + trimmedName + "' already exists";
+                    Logger::write(LogLevel::Warn, "Desktop rename rejected: " + error);
+                    NotificationManager::Add(error, NotificationLevel::Error);
+                    return true;
+                }
+
+                ec.clear();
+                std::filesystem::rename(oldHostPath, newHostPath, ec);
+                if (ec) {
+                    const std::string error = std::string("Rename failed: ") + ec.message();
+                    Logger::write(LogLevel::Warn, "Desktop rename filesystem error: " + error);
+                    NotificationManager::Add(error, NotificationLevel::Error);
+                    return true;
+                }
+
+                const std::string newLayoutKey = std::string("desktop-folder:") + normalizedNewPath;
+                for (auto& pos : g_cfg.iconPositions) {
+                    if (pos.name == g_desktopRename.originalLayoutKey) {
+                        pos.name = newLayoutKey;
+                    }
+                }
+
+                refreshDesktopItems();
+                saveDesktopConfig();
+
+                for (int i = 0; i < (int)g_items.size(); ++i) {
+                    if (desktopLayoutKey(g_items[i]) == newLayoutKey) {
+                        ClearDesktopIconSelection();
+                        SelectDesktopIcon(i, false);
+                        break;
+                    }
+                }
+
+                Logger::write(LogLevel::Info, "Desktop rename committed: " + g_desktopRename.originalLayoutKey + " -> " + newLayoutKey);
+                g_desktopRename = DesktopRenameState{};
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
+                requestRepaint();
+#else
+                g_needsRedraw = true;
+#endif
+                return true;
+            }
+
+            if (key == kBack) {
+                if (g_desktopRename.caretPos > 0 && g_desktopRename.caretPos <= g_desktopRename.buffer.size()) {
+                    g_desktopRename.buffer.erase(g_desktopRename.buffer.begin() + static_cast<std::ptrdiff_t>(g_desktopRename.caretPos - 1));
+                    --g_desktopRename.caretPos;
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
+                    requestRepaint();
+#else
+                    g_needsRedraw = true;
+#endif
+                }
+                return true;
+            }
+
+            if (key == kDelete) {
+                if (g_desktopRename.caretPos < g_desktopRename.buffer.size()) {
+                    g_desktopRename.buffer.erase(g_desktopRename.buffer.begin() + static_cast<std::ptrdiff_t>(g_desktopRename.caretPos));
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
+                    requestRepaint();
+#else
+                    g_needsRedraw = true;
+#endif
+                }
+                return true;
+            }
+
+            if (key == kLeft) {
+                if (g_desktopRename.caretPos > 0) {
+                    --g_desktopRename.caretPos;
+                    requestRepaint();
+                }
+                return true;
+            }
+
+            if (key == kRight) {
+                if (g_desktopRename.caretPos < g_desktopRename.buffer.size()) {
+                    ++g_desktopRename.caretPos;
+                    requestRepaint();
+                }
+                return true;
+            }
+
+            if (key == kHome) {
+                g_desktopRename.caretPos = 0;
+                requestRepaint();
+                return true;
+            }
+
+            if (key == kEnd) {
+                g_desktopRename.caretPos = g_desktopRename.buffer.size();
+                requestRepaint();
+                return true;
+            }
+
+            return true;
+        }
+
         bool Compositor::hostedDesktopCanNavigateTo(const std::string& path) {
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)
             const std::string normalized = normalizeHostedVirtualPath(path);
@@ -2584,12 +2823,43 @@ namespace gxos {
                 // Label with text shadow
                 int labelY = iconR.bottom + labelTopPad;
                 int lineH = uiTextHeight(FontRole::Small);
-                for (const std::string& line : labelLines) {
-                    int lineW = measureUiText(line.c_str(), static_cast<int>(line.size()), FontRole::Small);
-                    int lx = x + (cellW - lineW) / 2;
-                    drawUiText(dc, lx + 1, labelY + 1, line, RGB(0, 0, 0), FontRole::Small);
-                    drawUiText(dc, lx, labelY, line, RGB(230, 230, 240), FontRole::Small);
-                    labelY += lineH;
+                const bool renameActive = g_desktopRename.active && g_desktopRename.itemIndex == idx;
+                if (renameActive) {
+                    RECT editRect{ x + 4, labelY - 1, x + cellW - 4, y + cellH - 4 };
+                    HBRUSH editFill = CreateSolidBrush(RGB(28, 34, 48));
+                    FillRect(dc, &editRect, editFill);
+                    DeleteObject(editFill);
+                    HPEN editPen = CreatePen(PS_SOLID, 1, RGB(120, 180, 245));
+                    HGDIOBJ oldPen = SelectObject(dc, editPen);
+                    HGDIOBJ oldBrush = SelectObject(dc, GetStockObject(NULL_BRUSH));
+                    Rectangle(dc, editRect.left, editRect.top, editRect.right, editRect.bottom);
+                    SelectObject(dc, oldPen);
+                    SelectObject(dc, oldBrush);
+                    DeleteObject(editPen);
+
+                    const std::string& text = g_desktopRename.buffer;
+                    int textW = measureUiText(text.c_str(), static_cast<int>(text.size()), FontRole::Small);
+                    int textX = editRect.left + 4;
+                    int textY = editRect.top + std::max(0, (editRect.bottom - editRect.top - lineH) / 2);
+                    drawUiText(dc, textX + 1, textY + 1, text, RGB(0, 0, 0), FontRole::Small);
+                    drawUiText(dc, textX, textY, text, RGB(235, 240, 250), FontRole::Small);
+                    int caretX = textX + textW + 1;
+                    if (caretX < editRect.right - 3) {
+                        HPEN caretPen = CreatePen(PS_SOLID, 1, RGB(235, 240, 250));
+                        HGDIOBJ oldCaretPen = SelectObject(dc, caretPen);
+                        MoveToEx(dc, caretX, textY + 1, nullptr);
+                        LineTo(dc, caretX, textY + lineH - 1);
+                        SelectObject(dc, oldCaretPen);
+                        DeleteObject(caretPen);
+                    }
+                } else {
+                    for (const std::string& line : labelLines) {
+                        int lineW = measureUiText(line.c_str(), static_cast<int>(line.size()), FontRole::Small);
+                        int lx = x + (cellW - lineW) / 2;
+                        drawUiText(dc, lx + 1, labelY + 1, line, RGB(0, 0, 0), FontRole::Small);
+                        drawUiText(dc, lx, labelY, line, RGB(230, 230, 240), FontRole::Small);
+                        labelY += lineH;
+                    }
                 }
                 // Pin indicator
                 if (it.pinned && it.kind == DesktopItemKind::Shortcut) { const char* pin = "*"; drawUiText(dc, iconR.right - 10, iconR.top + 2, pin, 1, RGB(255, 200, 60), FontRole::SmallBold); }
@@ -3228,6 +3498,14 @@ namespace gxos {
             }
             case WM_LBUTTONDOWN: {
                 int mx = GET_X_LPARAM(l); int my = GET_Y_LPARAM(l); RECT cr; GetClientRect(h, &cr); int taskbarH = 40;
+                if (Compositor::isDesktopFolderRenameActive()) {
+                    // Click-away is treated as cancel for safety; Enter commits the rename explicitly.
+                    if (!Compositor::desktopFolderRenameContainsPoint(mx, my)) {
+                        Compositor::cancelDesktopFolderRename();
+                    }
+                    requestRepaint();
+                    return 0;
+                }
                 { std::lock_guard<std::mutex> lk(g_lock); if (blockInputBehindModal(mx, my)) { requestRepaint( ); return 0; } }
                 // Dismiss right-click menu on any left click
                 if (RightClickMenu::IsVisible( )) { RightClickMenu::HandleClick(mx, my); requestRepaint( ); return 0; }
@@ -3433,7 +3711,16 @@ namespace gxos {
                 Compositor::handleMouse(mx, my, true, false); publishOut(MsgType::MT_InputMouse, Compositor::packMousePayloadForTarget(mx, my, 1, "down", ownerPid, targetWindow), ownerPid); return 0;
             }
             case WM_RBUTTONDOWN: {
-                int mx = GET_X_LPARAM(l); int my = GET_Y_LPARAM(l); { std::lock_guard<std::mutex> lk(g_lock); if (blockInputBehindModal(mx, my)) { requestRepaint( ); return 0; } } if (g_startMenuVisible && mx >= g_startMenuRect.left && mx <= g_startMenuRect.right && my >= g_startMenuRect.top && my <= g_startMenuRect.bottom) {
+                int mx = GET_X_LPARAM(l); int my = GET_Y_LPARAM(l);
+                if (Compositor::isDesktopFolderRenameActive()) {
+                    // Keep the editor exclusive while rename mode is active; cancel only if the click leaves the target.
+                    if (!Compositor::desktopFolderRenameContainsPoint(mx, my)) {
+                        Compositor::cancelDesktopFolderRename();
+                    }
+                    requestRepaint();
+                    return 0;
+                }
+                { std::lock_guard<std::mutex> lk(g_lock); if (blockInputBehindModal(mx, my)) { requestRepaint( ); return 0; } } if (g_startMenuVisible && mx >= g_startMenuRect.left && mx <= g_startMenuRect.right && my >= g_startMenuRect.top && my <= g_startMenuRect.bottom) {
                     const int leftColW = 260;
                     const int rowH = kStartMenuRowH;
                     const int listTop = g_startMenuRect.top + 4;
@@ -3510,6 +3797,10 @@ namespace gxos {
             } break;
             case WM_LBUTTONUP: {
                 int mx = GET_X_LPARAM(l); int my = GET_Y_LPARAM(l);
+                if (Compositor::isDesktopFolderRenameActive()) {
+                    requestRepaint();
+                    return 0;
+                }
                 if (g_iconSelectionDragActive || g_iconSelectionDragPending) {
                     if (g_iconSelectionDragActive) {
                         RECT selectionRect = normalizedRect(g_iconSelectionStartX, g_iconSelectionStartY, mx, my);
@@ -3534,6 +3825,10 @@ namespace gxos {
             } break;
             case WM_MOUSEMOVE: {
                 int mx = GET_X_LPARAM(l); int my = GET_Y_LPARAM(l);
+                if (Compositor::isDesktopFolderRenameActive()) {
+                    requestRepaint();
+                    return 0;
+                }
                 { std::lock_guard<std::mutex> lk(g_lock); if (blockInputBehindModal(mx, my)) { requestRepaint( ); return 0; } }
                 if (RightClickMenu::IsVisible()) {
                     if (RightClickMenu::ContainsPoint(mx, my) || RightClickMenu::IsStartMenuAppMenuVisible()) {
@@ -3600,8 +3895,21 @@ namespace gxos {
                 }
                 return 0;
             }
+            case WM_CHAR: {
+                if (Compositor::isDesktopFolderRenameActive()) {
+                    Compositor::handleDesktopFolderRenameChar(static_cast<char32_t>(w));
+                    requestRepaint();
+                    return 0;
+                }
+                break;
+            }
             case WM_KEYDOWN: case WM_SYSKEYDOWN: {
                 int key = (int)w;
+                if (Compositor::isDesktopFolderRenameActive()) {
+                    Compositor::handleDesktopFolderRenameKeyDown(static_cast<uint32_t>(key));
+                    requestRepaint();
+                    return 0;
+                }
                 // Taskbar menu keyboard handling
                 if (g_taskbarMenuVisible) {
                     if (key == VK_ESCAPE) { g_taskbarMenuVisible = false; requestRepaint( ); return 0; }
@@ -3668,6 +3976,17 @@ namespace gxos {
                 if (appModelDemoFocused && handleAppModelDemoKey(key)) {
                     requestRepaint();
                     return 0;
+                }
+
+                if (key == VK_F2 && g_focus == 0 && !g_startMenuVisible && !g_taskbarMenuVisible) {
+                    int selectedIndex = -1;
+                    if (g_selectedDesktopIconIndices.size() == 1) {
+                        selectedIndex = *g_selectedDesktopIconIndices.begin();
+                    }
+                    if (selectedIndex >= 0 && selectedIndex < (int)g_items.size() && desktopFolderRenameable(g_items[selectedIndex])) {
+                        Compositor::beginDesktopFolderRename(selectedIndex);
+                        return 0;
+                    }
                 }
 
                 uint64_t ownerPid = 0; { std::lock_guard<std::mutex> lk(g_lock); ownerPid = inputOwnerPid( ); }

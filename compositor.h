@@ -113,6 +113,12 @@ namespace gxos { namespace gui {
         static std::string RunLaunchShadowSmokeDiagnostic();
         static void requestDesktopRefresh();
         static bool showFolderOnHostedDesktop(const std::string& path);
+        static bool beginDesktopFolderRename(int index);
+        static void cancelDesktopFolderRename();
+        static bool isDesktopFolderRenameActive();
+        static bool desktopFolderRenameContainsPoint(int x, int y);
+        static bool handleDesktopFolderRenameKeyDown(uint32_t key);
+        static bool handleDesktopFolderRenameChar(char32_t ch);
         static bool hostedDesktopUsesCompactIconLayout();
         static bool hostedDesktopPrefersCompactFolderIcons();
         static bool setHostedDesktopPrefersCompactFolderIcons(bool smallIcons);
@@ -229,6 +235,16 @@ namespace gxos { namespace gui {
         static bool g_taskbarCycleActive; static int g_taskbarCycleIndex; static bool g_keyboardMoveActive; static bool g_keyboardSizeActive; static int g_kbOrigX; static int g_kbOrigY; static int g_kbOrigW; static int g_kbOrigH;
         static DesktopConfigData g_cfg; static uint64_t g_lastItemClickTicks; static int g_lastItemIndex;
         static AppModelDemoWindowState g_appModelDemo;
+        struct DesktopRenameState {
+            bool active{false};
+            int itemIndex{-1};
+            std::string originalLayoutKey;
+            std::string originalPath;
+            std::string originalLabel;
+            std::string buffer;
+            size_t caretPos{0};
+        };
+        static DesktopRenameState g_desktopRename;
         static std::set<int> g_selectedDesktopIconIndices; static int g_lastSelectedDesktopIconIndex;
         static bool g_iconDragActive; static int g_iconDragIndex; static int g_iconDragOffX; static int g_iconDragOffY; static int g_iconDragStartX; static int g_iconDragStartY; static bool g_iconDragPending;
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)

@@ -1403,6 +1403,7 @@ static const uint32_t kContextMenuPad = 2;
 enum class ContextMenuMode : uint8_t {
     Desktop,
     StartMenuApp,
+    DesktopFilesystemEntry,
     DesktopShortcut
 };
 
@@ -1702,6 +1703,15 @@ static int32_t s_selectionStartY = 0;
 static int32_t s_selectionCurrentX = 0;
 static int32_t s_selectionCurrentY = 0;
 
+struct DesktopRenameState {
+    bool active = false;
+    int displayIndex = -1;
+    int iconIndex = -1;
+    char buffer[128] = {0};
+    size_t caretPos = 0;
+};
+static DesktopRenameState s_desktopRename{};
+
 #if !defined(GXOS_BARE_METAL)
 static gxos::gui::ImagePtr s_desktopIconImageCache[kDesktopIconCount];
 static bool s_desktopIconLoadAttempted[kDesktopIconCount] = {false};
@@ -1761,6 +1771,49 @@ static void SelectDesktopIconRange(int startDisplayIndex, int endDisplayIndex);
 static int GetSelectedDesktopIconIndices(int* outIndices, int maxIndices);
 static int HitTestDesktopIcon(int32_t mx, int32_t my);
 static void SelectIconsInRectangle(int32_t left, int32_t top, int32_t right, int32_t bottom, bool additive);
+static bool is_desktop_folder_renameable_display_index(int displayIdx);
+static void begin_desktop_folder_rename(int displayIdx);
+static void cancel_desktop_folder_rename();
+static bool commit_desktop_folder_rename();
+static bool handle_desktop_folder_rename_key(uint32_t key);
+static const int kDesktopRenameBufferSize = 128;
+static void trim_ascii_whitespace(const char* value, char* out, int outSize)
+{
+    if (!out || outSize <= 0) return;
+    out[0] = '\0';
+    if (!value) return;
+    int len = desktop_strlen(value);
+    int begin = 0;
+    int end = len;
+    while (begin < end && (value[begin] == ' ' || value[begin] == '\t' || value[begin] == '\r' || value[begin] == '\n')) ++begin;
+    while (end > begin && (value[end - 1] == ' ' || value[end - 1] == '\t' || value[end - 1] == '\r' || value[end - 1] == '\n')) --end;
+    int copyLen = end - begin;
+    if (copyLen >= outSize) copyLen = outSize - 1;
+    for (int i = 0; i < copyLen; ++i) out[i] = value[begin + i];
+    out[copyLen] = '\0';
+}
+
+static bool validate_desktop_folder_rename_name(const char* rawName, char* trimmedName, int trimmedSize, char* error, int errorSize)
+{
+    trim_ascii_whitespace(rawName, trimmedName, trimmedSize);
+    if (!trimmedName[0]) {
+        desktop_str_copy(error, "Name cannot be empty", errorSize);
+        return false;
+    }
+    if ((trimmedName[0] == '.' && trimmedName[1] == '\0') ||
+        (trimmedName[0] == '.' && trimmedName[1] == '.' && trimmedName[2] == '\0')) {
+        desktop_str_copy(error, "Name cannot be '.' or '..'", errorSize);
+        return false;
+    }
+    for (int i = 0; trimmedName[i]; ++i) {
+        if (trimmedName[i] == '/' || trimmedName[i] == '\\') {
+            desktop_str_copy(error, "Name cannot contain path separators", errorSize);
+            return false;
+        }
+    }
+    return true;
+}
+
 static inline uint64_t ticks_to_ms(uint64_t tickCount)
 {
     return tickCount * kCpuTelemetryTickMs;
@@ -2651,6 +2704,233 @@ bool pin_filesystem_shortcut_to_desktop(const char* path, bool isDirectory)
     s_notification.visible = true;
     s_notification.showTime = s_tickCounter;
     serial::puts("[desktop] Shortcut created and persisted\n");
+    return true;
+}
+
+static bool is_desktop_folder_renameable_display_index(int displayIdx)
+{
+    if (displayIdx < 0 || displayIdx >= s_visibleIconCount) return false;
+    int iconIdx = s_visibleIconIndices[displayIdx];
+    if (iconIdx < 0 || iconIdx >= kDesktopIconCount) return false;
+    const DesktopIcon& icon = s_desktopIcons[iconIdx];
+    return icon.kind == DesktopItemKind::FilesystemEntry && icon.isDirectory && icon.path[0];
+}
+
+static void cancel_desktop_folder_rename()
+{
+    if (!s_desktopRename.active) return;
+    serial::puts("[desktop] Desktop rename cancelled\n");
+    s_desktopRename = DesktopRenameState{};
+    s_needsRedraw = true;
+}
+
+static void begin_desktop_folder_rename(int displayIdx)
+{
+    if (!is_desktop_folder_renameable_display_index(displayIdx)) {
+        serial::puts("[desktop] Desktop rename ignored for non-folder item\n");
+        return;
+    }
+
+    if (s_desktopRename.active && s_desktopRename.displayIndex == displayIdx) {
+        return;
+    }
+
+    if (s_desktopRename.active) {
+        cancel_desktop_folder_rename();
+    }
+
+    int iconIdx = s_visibleIconIndices[displayIdx];
+    const DesktopIcon& icon = s_desktopIcons[iconIdx];
+    s_desktopRename.active = true;
+    s_desktopRename.displayIndex = displayIdx;
+    s_desktopRename.iconIndex = iconIdx;
+    trim_ascii_whitespace(icon.label ? icon.label : "", s_desktopRename.buffer, sizeof(s_desktopRename.buffer));
+    s_desktopRename.caretPos = (size_t)desktop_strlen(s_desktopRename.buffer);
+    SelectDesktopIcon(displayIdx, false);
+    serial::puts("[desktop] Desktop rename started: ");
+    serial::puts(icon.path);
+    serial::puts("\n");
+    s_needsRedraw = true;
+}
+
+static bool commit_desktop_folder_rename()
+{
+    if (!s_desktopRename.active) return false;
+    if (s_desktopRename.displayIndex < 0 || s_desktopRename.displayIndex >= s_visibleIconCount) {
+        cancel_desktop_folder_rename();
+        return false;
+    }
+    if (!is_desktop_folder_renameable_display_index(s_desktopRename.displayIndex)) {
+        serial::puts("[desktop] Desktop rename commit aborted: item is no longer renameable\n");
+        cancel_desktop_folder_rename();
+        return false;
+    }
+
+    char trimmedName[kDesktopRenameBufferSize] = {0};
+    char validationError[96] = {0};
+    if (!validate_desktop_folder_rename_name(s_desktopRename.buffer, trimmedName, (int)sizeof(trimmedName), validationError, (int)sizeof(validationError))) {
+        serial::puts("[desktop] Desktop rename validation failed: ");
+        serial::puts(validationError);
+        serial::puts("\n");
+        s_notification.title = "Rename";
+        s_notification.message = "Invalid folder name";
+        s_notification.visible = true;
+        s_notification.showTime = s_tickCounter;
+        return true;
+    }
+
+    int iconIdx = s_visibleIconIndices[s_desktopRename.displayIndex];
+    DesktopIcon& icon = s_desktopIcons[iconIdx];
+    char oldPath[kernel::vfs::VFS_MAX_PATH] = {0};
+    char parentPath[kernel::vfs::VFS_MAX_PATH] = {0};
+    char newPath[kernel::vfs::VFS_MAX_PATH] = {0};
+    char normalizedNew[kernel::vfs::VFS_MAX_PATH] = {0};
+    kernel::vfs::normalize_path(icon.path, oldPath, sizeof(oldPath));
+    kernel::vfs::parent_path(oldPath, parentPath, sizeof(parentPath));
+    kernel::vfs::join_path(parentPath, trimmedName, newPath, sizeof(newPath));
+    kernel::vfs::normalize_path(newPath, normalizedNew, sizeof(normalizedNew));
+    if (desktop_str_eq(normalizedNew, oldPath)) {
+        serial::puts("[desktop] Desktop rename resolved to the existing name\n");
+        cancel_desktop_folder_rename();
+        return true;
+    }
+
+    if (vfs::exists(normalizedNew)) {
+        serial::puts("[desktop] Desktop rename rejected: ");
+        serial::puts("A folder already exists at the target name");
+        serial::puts("\n");
+        s_notification.title = "Rename";
+        s_notification.message = "Folder already exists";
+        s_notification.visible = true;
+        s_notification.showTime = s_tickCounter;
+        return true;
+    }
+
+    vfs::Status status = vfs::rename(oldPath, normalizedNew);
+    if (status != vfs::VFS_OK) {
+        serial::puts("[desktop] Desktop rename filesystem error: ");
+        serial::puts("filesystem rename failed");
+        serial::puts("\n");
+        s_notification.title = "Rename";
+        s_notification.message = "Rename failed";
+        s_notification.visible = true;
+        s_notification.showTime = s_tickCounter;
+        return true;
+    }
+
+    const int slot = iconIdx - kSystemDesktopIconCount;
+    if (slot >= 0 && slot < kMaxDesktopFilesystemEntries) {
+        desktop_str_copy(s_desktopFileLabels[slot], trimmedName, (int)sizeof(s_desktopFileLabels[slot]));
+        desktop_str_copy(s_desktopFilePaths[slot], normalizedNew, (int)sizeof(s_desktopFilePaths[slot]));
+    }
+    desktop_str_copy(icon.path, normalizedNew, (int)sizeof(icon.path));
+    icon.label = s_desktopFileLabels[slot];
+    save_icon_positions();
+    refresh_desktop_icons();
+
+    for (int displayIdx = 0; displayIdx < s_visibleIconCount; ++displayIdx) {
+        int currentIconIdx = s_visibleIconIndices[displayIdx];
+        if (currentIconIdx >= 0 && currentIconIdx < kDesktopIconCount &&
+            s_desktopIcons[currentIconIdx].kind == DesktopItemKind::FilesystemEntry &&
+            s_desktopIcons[currentIconIdx].isDirectory &&
+            desktop_str_eq(s_desktopIcons[currentIconIdx].path, normalizedNew)) {
+            SelectDesktopIcon(displayIdx, false);
+            break;
+        }
+    }
+
+    serial::puts("[desktop] Desktop rename committed\n");
+    s_notification.title = "Rename";
+    s_notification.message = "Folder renamed";
+    s_notification.visible = true;
+    s_notification.showTime = s_tickCounter;
+    s_desktopRename = DesktopRenameState{};
+    s_needsRedraw = true;
+    return true;
+}
+
+static bool handle_desktop_folder_rename_key(uint32_t key)
+{
+    if (!s_desktopRename.active) return false;
+    const uint32_t kF2 = 0x111;
+
+    if (key == shell::KEY_SUPER) {
+        return true;
+    }
+    if (key == 27) {
+        cancel_desktop_folder_rename();
+        return true;
+    }
+    if (key == '\n' || key == '\r') {
+        commit_desktop_folder_rename();
+        return true;
+    }
+    if (key == '\b') {
+        size_t len = (size_t)desktop_strlen(s_desktopRename.buffer);
+        if (s_desktopRename.caretPos > 0 && s_desktopRename.caretPos <= len) {
+            for (size_t i = s_desktopRename.caretPos - 1; i < len; ++i) {
+                s_desktopRename.buffer[i] = s_desktopRename.buffer[i + 1];
+            }
+            --s_desktopRename.caretPos;
+            s_needsRedraw = true;
+        }
+        return true;
+    }
+    if (key == shell::KEY_DELETE) {
+        size_t len = (size_t)desktop_strlen(s_desktopRename.buffer);
+        if (s_desktopRename.caretPos < len) {
+            for (size_t i = s_desktopRename.caretPos; i < len; ++i) {
+                s_desktopRename.buffer[i] = s_desktopRename.buffer[i + 1];
+            }
+            s_desktopRename.buffer[len] = '\0';
+            s_needsRedraw = true;
+        }
+        return true;
+    }
+    if (key == shell::KEY_LEFT) {
+        if (s_desktopRename.caretPos > 0) {
+            --s_desktopRename.caretPos;
+            s_needsRedraw = true;
+        }
+        return true;
+    }
+    if (key == shell::KEY_RIGHT) {
+        if (s_desktopRename.caretPos < (size_t)desktop_strlen(s_desktopRename.buffer)) {
+            ++s_desktopRename.caretPos;
+            s_needsRedraw = true;
+        }
+        return true;
+    }
+    if (key == shell::KEY_HOME) {
+        s_desktopRename.caretPos = 0;
+        s_needsRedraw = true;
+        return true;
+    }
+    if (key == shell::KEY_END) {
+        s_desktopRename.caretPos = (size_t)desktop_strlen(s_desktopRename.buffer);
+        s_needsRedraw = true;
+        return true;
+    }
+
+    if (!s_desktopRename.active || key == kF2) return true;
+
+    if (key >= 32 && key < 127) {
+        size_t len = (size_t)desktop_strlen(s_desktopRename.buffer);
+        if (len < sizeof(s_desktopRename.buffer) - 1) {
+            char c = static_cast<char>(key);
+            if (c != '/' && c != '\\') {
+                if (s_desktopRename.caretPos > len) s_desktopRename.caretPos = len;
+                for (size_t i = len + 1; i > s_desktopRename.caretPos; --i) {
+                    s_desktopRename.buffer[i] = s_desktopRename.buffer[i - 1];
+                }
+                s_desktopRename.buffer[s_desktopRename.caretPos] = c;
+                ++s_desktopRename.caretPos;
+                s_needsRedraw = true;
+            }
+        }
+        return true;
+    }
+
     return true;
 }
 
@@ -5018,6 +5298,8 @@ static void draw_desktop_icon_item(int iconIdx, uint32_t cx, uint32_t cy, bool d
     uint32_t ix = cx + (cellW > iconSize ? (cellW - iconSize) / 2 : 0);
     uint32_t iy = cy + topPadding;
     const char* lbl = s_desktopIcons[iconIdx].label;
+    int displayIdx = display_index_for_icon_id(iconIdx);
+    bool renameActive = s_desktopRename.active && displayIdx == s_desktopRename.displayIndex;
 
     if (!draw_themed_desktop_icon(iconIdx, cx, iy)) {
         draw_colored_desktop_icon(ix, iy, s_desktopIcons[iconIdx].color, lbl, dragging);
@@ -5026,15 +5308,34 @@ static void draw_desktop_icon_item(int iconIdx, uint32_t cx, uint32_t cy, bool d
     // TODO: draw shortcut/pin badges when DesktopItemKind::Shortcut is implemented.
 
     uint32_t labelY = iy + iconSize + labelGap;
-    char lines[3][64];
-    int lineCount = wrap_icon_label(lbl, cellW - 8, lines, (int)bare_metal_desktop_icon_label_max_lines());
     int lineH = gxos::gui::SystemFont::MeasureHeight(gxos::gui::FontRole::Default);
-    for (int i = 0; i < lineCount; ++i) {
-        int tw = measure_text(lines[i]);
-        uint32_t lx = cx + (cellW > (uint32_t)tw ? (cellW - (uint32_t)tw) / 2 : 0);
-        uint32_t ly = labelY + (uint32_t)(i * lineH);
-        draw_text(lx + 1, ly + 1, lines[i], rgb(0, 0, 0), 1);
-        draw_text(lx, ly, lines[i], dragging ? rgb(200, 200, 210) : rgb(240, 240, 250), 1);
+    if (renameActive) {
+        uint32_t fieldX = cx + 4;
+        uint32_t fieldY = labelY - 1;
+        uint32_t fieldW = cellW - 8;
+        uint32_t fieldH = (uint32_t)lineH + 6;
+        framebuffer::fill_rect(fieldX, fieldY, fieldW, fieldH, rgb(28, 34, 48));
+        draw_rect(fieldX, fieldY, fieldW, fieldH, rgb(120, 180, 245));
+        const char* text = s_desktopRename.buffer;
+        int textW = measure_text(text);
+        uint32_t textX = fieldX + 4;
+        uint32_t textY = fieldY + (fieldH > (uint32_t)lineH ? (fieldH - (uint32_t)lineH) / 2 : 0);
+        draw_text(textX + 1, textY + 1, text, rgb(0, 0, 0), 1);
+        draw_text(textX, textY, text, rgb(240, 245, 255), 1);
+        uint32_t caretX = textX + (uint32_t)textW + 1;
+        if (caretX + 1 < fieldX + fieldW - 2) {
+            vline(caretX, textY + 1, (uint32_t)lineH - 2, rgb(240, 245, 255));
+        }
+    } else {
+        char lines[3][64];
+        int lineCount = wrap_icon_label(lbl, cellW - 8, lines, (int)bare_metal_desktop_icon_label_max_lines());
+        for (int i = 0; i < lineCount; ++i) {
+            int tw = measure_text(lines[i]);
+            uint32_t lx = cx + (cellW > (uint32_t)tw ? (cellW - (uint32_t)tw) / 2 : 0);
+            uint32_t ly = labelY + (uint32_t)(i * lineH);
+            draw_text(lx + 1, ly + 1, lines[i], rgb(0, 0, 0), 1);
+            draw_text(lx, ly, lines[i], dragging ? rgb(200, 200, 210) : rgb(240, 240, 250), 1);
+        }
     }
 }
 
@@ -5824,6 +6125,24 @@ static void draw_start_menu()
 // Right-click context menu (matching Legacy RightMenu.cs)
 // ============================================================
 
+static int context_menu_item_count()
+{
+    if (s_contextMenuMode == ContextMenuMode::StartMenuApp) return 2;
+    if (s_contextMenuMode == ContextMenuMode::DesktopShortcut) return 2;
+    if (s_contextMenuMode == ContextMenuMode::DesktopFilesystemEntry) {
+        if (s_contextMenuIconDisplayIndex >= 0 && s_contextMenuIconDisplayIndex < s_visibleIconCount) {
+            int iconIdx = s_visibleIconIndices[s_contextMenuIconDisplayIndex];
+            if (iconIdx >= 0 && iconIdx < kDesktopIconCount &&
+                s_desktopIcons[iconIdx].kind == DesktopItemKind::FilesystemEntry &&
+                s_desktopIcons[iconIdx].isDirectory) {
+                return 2;
+            }
+        }
+        return 1;
+    }
+    return kContextMenuCount;
+}
+
 static void draw_right_click_menu()
 {
     if (!s_rightClickMenuOpen) return;
@@ -5839,9 +6158,7 @@ static void draw_right_click_menu()
     framebuffer::fill_rect(mx, my, kContextMenuW, menuH, rgb(45, 45, 55));
     draw_rect(mx, my, kContextMenuW, menuH, rgb(80, 90, 110));
 
-    int itemCount = kContextMenuCount;
-    if (s_contextMenuMode == ContextMenuMode::StartMenuApp) itemCount = 2;
-    if (s_contextMenuMode == ContextMenuMode::DesktopShortcut) itemCount = 2;
+    int itemCount = context_menu_item_count();
     for (int i = 0; i < itemCount; i++) {
         uint32_t itemY = my + kContextMenuPad + (uint32_t)i * kContextMenuItemH;
 
@@ -5857,7 +6174,17 @@ static void draw_right_click_menu()
             label = (i == 0) ? "Open" : (is_app_shortcut_pinned_to_desktop(s_contextMenuAppName) ? "Unpin from Desktop" : "Pin to Desktop");
         } else if (s_contextMenuMode == ContextMenuMode::DesktopShortcut) {
             label = (i == 0) ? "Open" : "Remove from Desktop";
+        } else if (s_contextMenuMode == ContextMenuMode::DesktopFilesystemEntry) {
+            bool renameable = false;
+            if (s_contextMenuIconDisplayIndex >= 0 && s_contextMenuIconDisplayIndex < s_visibleIconCount) {
+                int iconIdx = s_visibleIconIndices[s_contextMenuIconDisplayIndex];
+                if (iconIdx >= 0 && iconIdx < kDesktopIconCount) {
+                    renameable = s_desktopIcons[iconIdx].kind == DesktopItemKind::FilesystemEntry && s_desktopIcons[iconIdx].isDirectory;
+                }
+            }
+            label = (i == 0) ? "Open" : (renameable ? "Rename" : "");
         }
+        if (!label || !label[0]) continue;
         draw_text(mx + 12, itemY + (kContextMenuItemH - kGlyphH) / 2,
                   label, i == hoveredItem ? rgb(255, 255, 255) : rgb(210, 210, 225), 1);
 
@@ -5870,8 +6197,7 @@ static void draw_right_click_menu()
 
 static void get_context_menu_geometry(uint32_t& menuX, uint32_t& menuY, uint32_t& menuH)
 {
-    int itemCount = kContextMenuCount;
-    if (s_contextMenuMode == ContextMenuMode::StartMenuApp || s_contextMenuMode == ContextMenuMode::DesktopShortcut) itemCount = 2;
+    int itemCount = context_menu_item_count();
     menuH = (uint32_t)itemCount * kContextMenuItemH + kContextMenuPad * 2;
     menuX = s_rightClickX;
     menuY = s_rightClickY;
@@ -5895,8 +6221,7 @@ static int hit_test_context_menu(int32_t mx, int32_t my)
     }
 
     int idx = ((int32_t)my - (int32_t)menuY - (int32_t)kContextMenuPad) / (int32_t)kContextMenuItemH;
-    int itemCount = kContextMenuCount;
-    if (s_contextMenuMode == ContextMenuMode::StartMenuApp || s_contextMenuMode == ContextMenuMode::DesktopShortcut) itemCount = 2;
+    int itemCount = context_menu_item_count();
     return (idx >= 0 && idx < itemCount) ? idx : -1;
 }
 
@@ -5927,6 +6252,16 @@ static void handle_context_menu_command(int item)
                 }
                 remove_shortcut_from_desktop(shortcutType, s_desktopIcons[iconIdx].path);
             }
+        }
+        s_contextMenuMode = ContextMenuMode::Desktop;
+        return;
+    }
+
+    if (s_contextMenuMode == ContextMenuMode::DesktopFilesystemEntry) {
+        if (item == 0) {
+            show_icon_notification(s_contextMenuIconDisplayIndex);
+        } else if (item == 1) {
+            begin_desktop_folder_rename(s_contextMenuIconDisplayIndex);
         }
         s_contextMenuMode = ContextMenuMode::Desktop;
         return;
@@ -7518,6 +7853,18 @@ static void show_desktop_shortcut_context_menu(uint32_t x, uint32_t y, int displ
     serial::puts("[desktop] Desktop shortcut context menu creation\n");
 }
 
+static void show_desktop_filesystem_context_menu(uint32_t x, uint32_t y, int displayIndex)
+{
+    s_rightClickX = x;
+    s_rightClickY = y;
+    s_rightClickMenuOpen = true;
+    s_contextMenuMode = ContextMenuMode::DesktopFilesystemEntry;
+    s_contextMenuAppName[0] = '\0';
+    s_contextMenuIconDisplayIndex = displayIndex;
+    s_rightClickHover = hit_test_context_menu((int32_t)x, (int32_t)y);
+    serial::puts("[desktop] Desktop filesystem context menu creation\n");
+}
+
 void close_context_menu()
 {
     s_rightClickMenuOpen = false;
@@ -9039,6 +9386,12 @@ void handle_key(uint32_t key)
         return;
     }
 
+    if (s_desktopRename.active) {
+        handle_desktop_folder_rename_key(key);
+        draw();
+        return;
+    }
+
     // Route keyboard input to focused kernel compositor window first
     if (compositor::KernelCompositor::hasWindows()) {
         app::KernelWindow* focused = compositor::KernelCompositor::getFocusedWindow();
@@ -9093,6 +9446,14 @@ void handle_key(uint32_t key)
             draw();
         }
         return;
+    }
+
+    if (key == 0x111) {  // F2
+        if (s_selectedIcon >= 0 && s_selectedIcon < s_visibleIconCount && is_desktop_folder_renameable_display_index(s_selectedIcon)) {
+            begin_desktop_folder_rename(s_selectedIcon);
+            draw();
+            return;
+        }
     }
     
     // Desktop keyboard shortcuts
@@ -9962,6 +10323,27 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
     DesktopRect workArea = get_current_work_area();
     DesktopRect taskbarRect = get_current_taskbar_rect();
 
+    if (s_desktopRename.active) {
+        if ((pressed & 0x03) || (released & 0x03)) {
+            // Click-away cancels rename in the bare-metal shell; Enter is the only commit path.
+            bool insideRenameTarget = false;
+            if (s_desktopRename.displayIndex >= 0 && s_desktopRename.displayIndex < s_visibleIconCount) {
+                uint32_t cellW = bare_metal_desktop_icon_cell_width();
+                uint32_t cellH = bare_metal_desktop_icon_cell_height();
+                int32_t iconX = s_iconPosX[s_desktopRename.displayIndex];
+                int32_t iconY = s_iconPosY[s_desktopRename.displayIndex];
+                insideRenameTarget = mx >= iconX && mx < iconX + (int32_t)cellW &&
+                    my >= iconY && my < iconY + (int32_t)cellH;
+            }
+            if (!insideRenameTarget) {
+                cancel_desktop_folder_rename();
+            }
+        }
+        draw();
+        draw_cursor(mx, my);
+        return;
+    }
+
     if (s_taskbarDragging) {
         if (buttons & 0x01) {
             if (is_near_screen_edge(mx, my, s_screenW, s_screenH)) {
@@ -10818,6 +11200,13 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
             int hitIdx = HitTestDesktopIcon(mx, my);
             if (hitIdx >= 0 && hitIdx < s_visibleIconCount) {
                 int iconId = s_visibleIconIndices[hitIdx];
+                if (iconId >= 0 && iconId < kDesktopIconCount && s_desktopIcons[iconId].kind == DesktopItemKind::FilesystemEntry) {
+                    SelectDesktopIcon(hitIdx, false);
+                    show_desktop_filesystem_context_menu((uint32_t)mx, (uint32_t)my, hitIdx);
+                    draw();
+                    draw_cursor(mx, my);
+                    return;
+                }
                 if (iconId >= 0 && iconId < kDesktopIconCount && s_desktopIcons[iconId].kind == DesktopItemKind::Shortcut) {
                     SelectDesktopIcon(hitIdx, false);
                     show_desktop_shortcut_context_menu((uint32_t)mx, (uint32_t)my, hitIdx);

@@ -103,13 +103,17 @@ void RightClickMenu::buildItems() {
     }
     if (s_desktopItemIndex >= 0) {
         s_items.push_back({"Open", false, false});
-        if (s_desktopItemIndex < (int)Compositor::g_items.size() &&
-            Compositor::g_items[s_desktopItemIndex].kind == DesktopItemKind::Shortcut) {
+        if (s_desktopItemIndex < (int)Compositor::g_items.size()) {
             const DesktopItem& item = Compositor::g_items[s_desktopItemIndex];
-            if (item.shortcutType == "File" || item.shortcutType == "Folder") {
-                s_items.push_back({"Open Target Location", false, false});
+            if (item.kind == DesktopItemKind::FilesystemEntry && item.isDirectory) {
+                s_items.push_back({"Rename", false, false});
             }
-            s_items.push_back({"Remove from Desktop", false, false});
+            if (item.kind == DesktopItemKind::Shortcut) {
+                if (item.shortcutType == "File" || item.shortcutType == "Folder") {
+                    s_items.push_back({"Open Target Location", false, false});
+                }
+                s_items.push_back({"Remove from Desktop", false, false});
+            }
         }
         return;
     }
@@ -155,6 +159,9 @@ bool RightClickMenu::HandleClick(int mx, int my) {
             if (s_items[idx].label == "Open" && s_desktopItemIndex >= 0) {
                 Logger::write(LogLevel::Info, "Desktop item Open selected");
                 Compositor::openDesktopItem(s_desktopItemIndex);
+            } else if (s_items[idx].label == "Rename" && s_desktopItemIndex >= 0) {
+                Logger::write(LogLevel::Info, "Desktop folder Rename selected");
+                Compositor::beginDesktopFolderRename(s_desktopItemIndex);
             } else if (s_items[idx].label == "Open Target Location" && s_desktopItemIndex >= 0) {
                 Logger::write(LogLevel::Info, "Desktop shortcut Open Target Location selected");
                 Compositor::openDesktopShortcutTargetLocation(s_desktopItemIndex);

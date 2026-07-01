@@ -1,12 +1,14 @@
 #pragma once
 
-#include "logger.h"
-
 #include <algorithm>
 #include <cctype>
 #include <filesystem>
 #include <string>
 #include <vector>
+
+#if !defined(GXOS_BARE_METAL)
+#include "logger.h"
+#endif
 
 namespace gxos { namespace gui {
 
@@ -19,6 +21,14 @@ namespace gxos { namespace gui {
 
     class DesktopFolderResolver {
     public:
+        static std::string TrimAsciiWhitespace(const std::string& value) {
+            size_t begin = 0;
+            size_t end = value.size();
+            while (begin < end && std::isspace(static_cast<unsigned char>(value[begin]))) ++begin;
+            while (end > begin && std::isspace(static_cast<unsigned char>(value[end - 1]))) --end;
+            return value.substr(begin, end - begin);
+        }
+
         static std::string VirtualPath() {
             return "/Desktop";
         }
@@ -45,7 +55,45 @@ namespace gxos { namespace gui {
             return HostedRootPath() / std::filesystem::path(generic);
         }
 
+        static std::string ParentVirtualPath(const std::string& path) {
+            const std::string normalized = NormalizeVirtualPath(path);
+            std::filesystem::path virtualPath(normalized);
+            std::string parent = virtualPath.parent_path().generic_string();
+            if (parent.empty()) return "/";
+            if (parent.front() != '/') parent.insert(parent.begin(), '/');
+            return parent;
+        }
+
+        static std::string JoinVirtualPath(const std::string& parent, const std::string& childName) {
+            const std::string normalizedParent = NormalizeVirtualPath(parent.empty() ? "/" : parent);
+            if (normalizedParent == "/") return NormalizeVirtualPath("/" + childName);
+            return NormalizeVirtualPath(normalizedParent + "/" + childName);
+        }
+
+        static bool ValidateRenameName(const std::string& rawName, std::string& trimmedName, std::string& error) {
+            trimmedName = TrimAsciiWhitespace(rawName);
+            if (trimmedName.empty()) {
+                error = "Name cannot be empty";
+                return false;
+            }
+            if (trimmedName == "." || trimmedName == "..") {
+                error = "Name cannot be '.' or '..'";
+                return false;
+            }
+            if (trimmedName.find('/') != std::string::npos || trimmedName.find('\\') != std::string::npos) {
+                error = "Name cannot contain path separators";
+                return false;
+            }
+            return true;
+        }
+
         static bool EnsureExists(const std::string& virtualPath, std::string& error, bool createIfMissing = true) {
+#if defined(GXOS_BARE_METAL)
+            (void)virtualPath;
+            (void)error;
+            (void)createIfMissing;
+            return false;
+#else
             error.clear();
             const std::string normalized = NormalizeVirtualPath(virtualPath.empty() ? VirtualPath() : virtualPath);
             const std::filesystem::path hostedPath = HostedPathForVirtual(normalized);
@@ -76,10 +124,15 @@ namespace gxos { namespace gui {
             error = ec ? ec.message() : "Unable to create Desktop folder";
             Logger::write(LogLevel::Warn, "Desktop folder creation failed: " + error);
             return false;
+#endif
         }
 
         static std::vector<DesktopFolderEntry> Enumerate(const std::string& virtualPath = VirtualPath()) {
             std::vector<DesktopFolderEntry> entries;
+#if defined(GXOS_BARE_METAL)
+            (void)virtualPath;
+            return entries;
+#else
             std::string ensureError;
             const std::string normalized = NormalizeVirtualPath(virtualPath.empty() ? VirtualPath() : virtualPath);
             const bool available = EnsureExists(normalized, ensureError, normalized == VirtualPath());
@@ -122,6 +175,7 @@ namespace gxos { namespace gui {
 
             Logger::write(LogLevel::Info, "Desktop folder enumeration completed count=" + std::to_string(entries.size()));
             return entries;
+#endif
         }
     };
 
