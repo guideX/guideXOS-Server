@@ -2191,9 +2191,9 @@ namespace gxos {
 
         bool Compositor::handleDesktopFolderRenameChar(char32_t ch) {
             if (!g_desktopRename.active) return false;
-            if (ch < 32 || ch == 127) return true;
+            if (ch < 32 || ch > 126) return true;
             if (g_desktopRename.buffer.size() >= desktopFolderRenameMaxLength()) return true;
-            char c = static_cast<char>(ch & 0x7F);
+            char c = static_cast<char>(ch);
             if (c == '/' || c == '\\') return true;
             if (g_desktopRename.caretPos > g_desktopRename.buffer.size()) g_desktopRename.caretPos = g_desktopRename.buffer.size();
             g_desktopRename.buffer.insert(g_desktopRename.buffer.begin() + static_cast<std::ptrdiff_t>(g_desktopRename.caretPos), c);
@@ -2252,7 +2252,7 @@ namespace gxos {
 
                 const std::string parentPath = DesktopFolderResolver::ParentVirtualPath(item.path);
                 const std::string newVirtualPath = DesktopFolderResolver::JoinVirtualPath(parentPath, trimmedName);
-                const std::string normalizedOldPath = normalizeHostedVirtualPath(item.path);
+                const std::string normalizedOldPath = normalizeHostedVirtualPath(g_desktopRename.originalPath.empty() ? item.path : g_desktopRename.originalPath);
                 const std::string normalizedNewPath = normalizeHostedVirtualPath(newVirtualPath);
 
                 if (normalizedNewPath == normalizedOldPath) {
@@ -2264,7 +2264,13 @@ namespace gxos {
                 std::error_code ec;
                 const std::filesystem::path oldHostPath = hostedPathForVirtual(normalizedOldPath);
                 const std::filesystem::path newHostPath = hostedPathForVirtual(normalizedNewPath);
-                if (std::filesystem::exists(newHostPath, ec) && !ec) {
+                if (std::filesystem::exists(newHostPath, ec)) {
+                    if (ec) {
+                        const std::string error = std::string("Rename failed: ") + ec.message();
+                        Logger::write(LogLevel::Warn, "Desktop rename destination check failed: " + error);
+                        NotificationManager::Add(error, NotificationLevel::Error);
+                        return true;
+                    }
                     const std::string error = "A folder named '" + trimmedName + "' already exists";
                     Logger::write(LogLevel::Warn, "Desktop rename rejected: " + error);
                     NotificationManager::Add(error, NotificationLevel::Error);
@@ -3860,6 +3866,10 @@ namespace gxos {
             case WM_MOUSEWHEEL: {
                 int mx = GET_X_LPARAM(l);
                 int my = GET_Y_LPARAM(l);
+                if (Compositor::isDesktopFolderRenameActive()) {
+                    requestRepaint();
+                    return 0;
+                }
                 short wheelDelta = GET_WHEEL_DELTA_WPARAM(w);
                 if (wheelDelta == 0) return 0;
                 {

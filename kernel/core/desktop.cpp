@@ -1707,6 +1707,7 @@ struct DesktopRenameState {
     bool active = false;
     int displayIndex = -1;
     int iconIndex = -1;
+    char originalPath[vfs::VFS_MAX_PATH] = {0};
     char buffer[128] = {0};
     size_t caretPos = 0;
 };
@@ -2744,6 +2745,7 @@ static void begin_desktop_folder_rename(int displayIdx)
     s_desktopRename.active = true;
     s_desktopRename.displayIndex = displayIdx;
     s_desktopRename.iconIndex = iconIdx;
+    desktop_str_copy(s_desktopRename.originalPath, icon.path, (int)sizeof(s_desktopRename.originalPath));
     trim_ascii_whitespace(icon.label ? icon.label : "", s_desktopRename.buffer, sizeof(s_desktopRename.buffer));
     s_desktopRename.caretPos = (size_t)desktop_strlen(s_desktopRename.buffer);
     SelectDesktopIcon(displayIdx, false);
@@ -2785,7 +2787,7 @@ static bool commit_desktop_folder_rename()
     char parentPath[kernel::vfs::VFS_MAX_PATH] = {0};
     char newPath[kernel::vfs::VFS_MAX_PATH] = {0};
     char normalizedNew[kernel::vfs::VFS_MAX_PATH] = {0};
-    kernel::vfs::normalize_path(icon.path, oldPath, sizeof(oldPath));
+    kernel::vfs::normalize_path(s_desktopRename.originalPath[0] ? s_desktopRename.originalPath : icon.path, oldPath, sizeof(oldPath));
     kernel::vfs::parent_path(oldPath, parentPath, sizeof(parentPath));
     kernel::vfs::join_path(parentPath, trimmedName, newPath, sizeof(newPath));
     kernel::vfs::normalize_path(newPath, normalizedNew, sizeof(normalizedNew));
@@ -11321,6 +11323,7 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
 void handle_mouse_wheel(int32_t mx, int32_t my, int8_t wheelDelta)
 {
     if (!s_initialized || wheelDelta == 0) return;
+    if (s_desktopRename.active) return;
 
     apply_taskbar_layout();
 
