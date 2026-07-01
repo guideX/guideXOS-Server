@@ -2957,13 +2957,31 @@ static void arrange_desktop_icons_into_grid(bool persistPositions)
 static void build_unique_new_folder_name(int suffixIndex, char* out, int outSize)
 {
     if (!out || outSize <= 0) return;
+
+    const char* prefix = "NewFolder";
+    int prefixLen = 8;
+    int digits = 1;
+    for (int value = suffixIndex; value >= 10; value /= 10) ++digits;
+    prefixLen = 8 - digits;
+    if (prefixLen < 1) prefixLen = 1;
+
     int pos = 0;
-    desktop_append_text(out, &pos, outSize, "New Folder");
-    if (suffixIndex > 1) {
-        desktop_append_text(out, &pos, outSize, " (");
-        desktop_append_int(out, &pos, outSize, suffixIndex);
-        desktop_append_text(out, &pos, outSize, ")");
+    for (int i = 0; prefix[i] && i < prefixLen && pos + 1 < outSize; ++i) {
+        out[pos++] = prefix[i];
     }
+
+    char suffix[16];
+    int suffixPos = 0;
+    int value = suffixIndex;
+    do {
+        suffix[suffixPos++] = (char)('0' + (value % 10));
+        value /= 10;
+    } while (value > 0 && suffixPos < (int)sizeof(suffix));
+
+    while (suffixPos > 0 && pos + 1 < outSize) {
+        out[pos++] = suffix[--suffixPos];
+    }
+    out[pos] = '\0';
 }
 
 static bool bare_metal_desktop_resolve_directory_target(const char* targetPath, char* resolvedPath, size_t resolvedPathSize)
@@ -5569,7 +5587,7 @@ static void draw_start_menu()
     uint32_t headerH = 30;
     uint32_t footerH = 36;
     // Use kStartMenuAppCount (not visibleRows) so menuH/menuY stays consistent
-    // with get_start_menu_geometry() used by hit-testing — otherwise the menu
+    // with get_start_menu_geometry() used by hit-testing - otherwise the menu
     // renders at a different Y than the hover/click hit-test expects.
     uint32_t bodyH = (uint32_t)kStartMenuAppCount * kStartMenuRowH;
     uint32_t rightBodyH = (uint32_t)kStartMenuRightCount * kStartMenuRowH;

@@ -992,11 +992,11 @@ namespace gxos { namespace apps {
     }
 
     void FileExplorer::createFolder() {
-        beginPrompt(PromptNewFolder, "New folder name", "New Folder");
+        beginPrompt(PromptNewFolder, "New folder name", "NewFold1");
     }
 
     void FileExplorer::createFile() {
-        beginPrompt(PromptNewFile, "New file name", "New File.txt");
+        beginPrompt(PromptNewFile, "New file name", "NewFile.txt");
     }
 
     void FileExplorer::renameSelected() {
