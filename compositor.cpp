@@ -1170,13 +1170,21 @@ namespace gxos {
             return item;
         }
 
-        static void appendSystemDesktopItemIfEnabled(std::vector<DesktopItem>& items, bool enabled, DesktopSystemObjectKind kind, const char* label, const char* action, const char* iconName) {
+        static bool appendSystemDesktopItemIfEnabled(std::vector<DesktopItem>& items, std::vector<std::string>& seenLayoutKeys, bool enabled, DesktopSystemObjectKind kind, const char* label, const char* action, const char* iconName) {
             Logger::write(LogLevel::Info, std::string("Desktop system icon visibility: ") + action + " enabled=" + (enabled ? "true" : "false"));
             if (!enabled) {
                 Logger::write(LogLevel::Info, std::string("Desktop system icon skipped by setting: ") + action);
-                return;
+                return false;
             }
-            items.push_back(makeSystemDesktopItem(kind, label, action, iconName));
+            DesktopItem item = makeSystemDesktopItem(kind, label, action, iconName);
+            const std::string layoutKey = desktopLayoutKey(item);
+            if (hasListItem(seenLayoutKeys, layoutKey)) {
+                Logger::write(LogLevel::Info, std::string("Desktop system icon skipped duplicate layout key: ") + layoutKey);
+                return false;
+            }
+            seenLayoutKeys.push_back(layoutKey);
+            items.push_back(item);
+            return true;
         }
 
         static void refreshStartMenuPinnedRecentFromConfig(const DesktopConfigData& cfg, std::vector<std::string>& items) {
@@ -1490,7 +1498,40 @@ namespace gxos {
 
             refreshStartMenuPinnedRecentFromConfig(g_cfg, g_startMenuPinnedRecent);
 
-            g_items.clear( );
+            std::vector<DesktopItem> refreshedItems;
+            std::vector<std::string> seenLayoutKeys;
+            std::vector<std::string> seenFilesystemPaths;
+            auto appendDesktopItemIfUnique = [&] (const DesktopItem& item, const char* sourceLabel) {
+                const std::string layoutKey = desktopLayoutKey(item);
+                if (hasListItem(seenLayoutKeys, layoutKey)) {
+                    Logger::write(LogLevel::Info, std::string("Compositor desktop item skipped duplicate layout key from ") + sourceLabel + ": " + layoutKey);
+                    return false;
+                }
+                if (item.kind != DesktopItemKind::SystemObject && DesktopFolderResolver::IsReservedDesktopName(item.label)) {
+                    Logger::write(LogLevel::Info, std::string("Compositor desktop item skipped reserved desktop name from ") + sourceLabel + ": " + item.label);
+                    return false;
+                }
+                if (item.kind == DesktopItemKind::Shortcut && item.shortcutType == "App" && DesktopFolderResolver::IsReservedDesktopName(item.targetAppId)) {
+                    Logger::write(LogLevel::Info, std::string("Compositor desktop shortcut skipped reserved desktop target from ") + sourceLabel + ": " + item.targetAppId);
+                    return false;
+                }
+                if (item.kind == DesktopItemKind::FilesystemEntry) {
+                    if (hasListItem(seenFilesystemPaths, item.path)) {
+                        Logger::write(LogLevel::Info, std::string("Compositor desktop item skipped duplicate filesystem path from ") + sourceLabel + ": " + item.path);
+                        return false;
+                    }
+                    seenFilesystemPaths.push_back(item.path);
+                } else if (item.kind == DesktopItemKind::Shortcut && (item.shortcutType == "File" || item.shortcutType == "Folder")) {
+                    if (hasListItem(seenFilesystemPaths, item.path)) {
+                        Logger::write(LogLevel::Info, std::string("Compositor desktop shortcut skipped duplicate filesystem path from ") + sourceLabel + ": " + item.path);
+                        return false;
+                    }
+                    seenFilesystemPaths.push_back(item.path);
+                }
+                seenLayoutKeys.push_back(layoutKey);
+                refreshedItems.push_back(item);
+                return true;
+            };
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)
             const std::string hostedRoot = hostedDesktopRootPath();
             if (g_hostedDesktopDirectoryPath.empty()) g_hostedDesktopDirectoryPath = hostedRoot;
@@ -1500,24 +1541,24 @@ namespace gxos {
                 g_hostedDesktopDirectoryPath = hostedRoot;
             }
             if (!isDesktopFolderRootPath(g_hostedDesktopDirectoryPath)) {
-                g_items.push_back(makeSystemDesktopItem(DesktopSystemObjectKind::DesktopBack, "Back", "desktop-nav:back", ""));
-                g_items.push_back(makeSystemDesktopItem(DesktopSystemObjectKind::DesktopHome, "Go to Desktop", "desktop-nav:home", ""));
+                appendDesktopItemIfUnique(makeSystemDesktopItem(DesktopSystemObjectKind::DesktopBack, "Back", "desktop-nav:back", ""), "hosted-navigation");
+                appendDesktopItemIfUnique(makeSystemDesktopItem(DesktopSystemObjectKind::DesktopHome, "Go to Desktop", "desktop-nav:home", ""), "hosted-navigation");
             }
             const bool showFileExplorer = g_cfg.showDesktopThisSystem || g_cfg.showDesktopFileManager;
-            appendSystemDesktopItemIfEnabled(g_items, g_cfg.showDesktopTrash, DesktopSystemObjectKind::Trash, "Trash", "system:Trash", hostedTrashIconLogicalName().c_str());
-            appendSystemDesktopItemIfEnabled(g_items, showFileExplorer, DesktopSystemObjectKind::FileExplorer, "File Explorer", "system:FileExplorer", "app.files");
-            appendSystemDesktopItemIfEnabled(g_items, g_cfg.showDesktopSystemSettings, DesktopSystemObjectKind::SystemSettings, "System Settings", "system:SystemSettings", "app.settings");
+            appendSystemDesktopItemIfEnabled(refreshedItems, seenLayoutKeys, g_cfg.showDesktopTrash, DesktopSystemObjectKind::Trash, "Trash", "system:Trash", hostedTrashIconLogicalName().c_str());
+            appendSystemDesktopItemIfEnabled(refreshedItems, seenLayoutKeys, showFileExplorer, DesktopSystemObjectKind::FileExplorer, "File Explorer", "system:FileExplorer", "app.files");
+            appendSystemDesktopItemIfEnabled(refreshedItems, seenLayoutKeys, g_cfg.showDesktopSystemSettings, DesktopSystemObjectKind::SystemSettings, "System Settings", "system:SystemSettings", "app.settings");
             std::vector<DesktopFolderEntry> desktopEntries = DesktopFolderResolver::Enumerate(g_hostedDesktopDirectoryPath);
 #else
             const bool showFileExplorer = g_cfg.showDesktopThisSystem || g_cfg.showDesktopFileManager;
-            appendSystemDesktopItemIfEnabled(g_items, g_cfg.showDesktopTrash, DesktopSystemObjectKind::Trash, "Trash", "system:Trash", hostedTrashIconLogicalName().c_str());
-            appendSystemDesktopItemIfEnabled(g_items, showFileExplorer, DesktopSystemObjectKind::FileExplorer, "File Explorer", "system:FileExplorer", "app.files");
-            appendSystemDesktopItemIfEnabled(g_items, g_cfg.showDesktopSystemSettings, DesktopSystemObjectKind::SystemSettings, "System Settings", "system:SystemSettings", "app.settings");
+            appendSystemDesktopItemIfEnabled(refreshedItems, seenLayoutKeys, g_cfg.showDesktopTrash, DesktopSystemObjectKind::Trash, "Trash", "system:Trash", hostedTrashIconLogicalName().c_str());
+            appendSystemDesktopItemIfEnabled(refreshedItems, seenLayoutKeys, showFileExplorer, DesktopSystemObjectKind::FileExplorer, "File Explorer", "system:FileExplorer", "app.files");
+            appendSystemDesktopItemIfEnabled(refreshedItems, seenLayoutKeys, g_cfg.showDesktopSystemSettings, DesktopSystemObjectKind::SystemSettings, "System Settings", "system:SystemSettings", "app.settings");
 
             std::vector<DesktopFolderEntry> desktopEntries = DesktopFolderResolver::Enumerate();
 #endif
             for (const auto& entry : desktopEntries) {
-                g_items.push_back(makeFilesystemDesktopItem(entry));
+                appendDesktopItemIfUnique(makeFilesystemDesktopItem(entry), "filesystem-scan");
             }
 
             for (const auto& shortcut : g_cfg.desktopShortcuts) {
@@ -1533,9 +1574,12 @@ namespace gxos {
                 DesktopItem shortcutItem = shortcutType == "App"
                     ? makeAppShortcutDesktopItem(shortcut)
                     : makeFilesystemShortcutDesktopItem(shortcut);
-                g_items.push_back(shortcutItem);
-                Logger::write(LogLevel::Info, "Desktop shortcut rendered: " + desktopLayoutKey(shortcutItem));
+                if (appendDesktopItemIfUnique(shortcutItem, "desktop-shortcut")) {
+                    Logger::write(LogLevel::Info, "Desktop shortcut rendered: " + desktopLayoutKey(shortcutItem));
+                }
             }
+
+            g_items = std::move(refreshedItems);
 
             // Apply saved positions from config
             bool migratedIconPositions = false;
@@ -1577,6 +1621,18 @@ namespace gxos {
                     ip.y = di.iy;
                     g_cfg.iconPositions.push_back(ip);
                 }
+            }
+            if (!g_cfg.autoArrangeDesktopIcons) {
+                std::vector<DesktopIconPos> filteredPositions;
+                filteredPositions.reserve(g_cfg.iconPositions.size());
+                for (const auto& ip : g_cfg.iconPositions) {
+                    if (hasListItem(seenLayoutKeys, ip.name)) {
+                        filteredPositions.push_back(ip);
+                    } else {
+                        Logger::write(LogLevel::Info, "Pruned stale desktop icon position after refresh: " + ip.name);
+                    }
+                }
+                g_cfg.iconPositions.swap(filteredPositions);
             }
             g_selectedDesktopIconIndices.clear( );
             for (int i = 0; i < (int)g_items.size( ); ++i) {
@@ -2036,6 +2092,11 @@ namespace gxos {
             shortcut.targetPath = normalized;
             shortcut.label = label.empty() ? basenameForVirtualPath(normalized) : label;
             shortcut.iconName = iconName;
+            if (DesktopFolderResolver::IsReservedDesktopName(shortcut.label)) {
+                Logger::write(LogLevel::Info, "Desktop shortcut skipped: reserved desktop name " + shortcut.label);
+                NotificationManager::Add("Item name is reserved", NotificationLevel::Info);
+                return false;
+            }
             if (shortcut.iconName.empty()) {
                 apps::ExplorerFileEntry entry;
                 entry.name = shortcut.label;

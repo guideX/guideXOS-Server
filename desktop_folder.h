@@ -70,6 +70,40 @@ namespace gxos { namespace gui {
             return NormalizeVirtualPath(normalizedParent + "/" + childName);
         }
 
+        static bool EqualsAsciiIgnoreCase(const std::string& value, const char* other) {
+            if (!other) return false;
+            size_t i = 0;
+            for (; i < value.size() && other[i]; ++i) {
+                const unsigned char a = static_cast<unsigned char>(value[i]);
+                const unsigned char b = static_cast<unsigned char>(other[i]);
+                if (std::tolower(a) != std::tolower(b)) return false;
+            }
+            return i == value.size() && other[i] == '\0';
+        }
+
+        static bool IsReservedDesktopName(const std::string& name) {
+            return EqualsAsciiIgnoreCase(name, "Trash") ||
+                EqualsAsciiIgnoreCase(name, "File Explorer") ||
+                EqualsAsciiIgnoreCase(name, "FileExplorer") ||
+                EqualsAsciiIgnoreCase(name, "Files") ||
+                EqualsAsciiIgnoreCase(name, "FileManager") ||
+                EqualsAsciiIgnoreCase(name, "File Manager") ||
+                EqualsAsciiIgnoreCase(name, "Computer") ||
+                EqualsAsciiIgnoreCase(name, "This System") ||
+                EqualsAsciiIgnoreCase(name, "Computer Files") ||
+                EqualsAsciiIgnoreCase(name, "ComputerFiles") ||
+                EqualsAsciiIgnoreCase(name, "System Settings") ||
+                EqualsAsciiIgnoreCase(name, "SystemSettings") ||
+                EqualsAsciiIgnoreCase(name, "Settings") ||
+                EqualsAsciiIgnoreCase(name, "Display Options") ||
+                EqualsAsciiIgnoreCase(name, "DisplayOptions") ||
+                EqualsAsciiIgnoreCase(name, "Display Settings") ||
+                EqualsAsciiIgnoreCase(name, "Desktop Background") ||
+                EqualsAsciiIgnoreCase(name, "Wallpaper") ||
+                EqualsAsciiIgnoreCase(name, "Back") ||
+                EqualsAsciiIgnoreCase(name, "Go to Desktop");
+        }
+
         static bool ValidateRenameName(const std::string& rawName, std::string& trimmedName, std::string& error) {
             trimmedName = TrimAsciiWhitespace(rawName);
             if (trimmedName.empty()) {
@@ -154,6 +188,10 @@ namespace gxos { namespace gui {
                 DesktopFolderEntry entry;
                 entry.name = item.path().filename().generic_string();
                 entry.virtualPath = normalized + "/" + entry.name;
+                if (IsReservedDesktopName(entry.name)) {
+                    Logger::write(LogLevel::Info, "Desktop filesystem item skipped (reserved desktop name): " + entry.virtualPath);
+                    continue;
+                }
                 entry.isDirectory = item.is_directory(ec);
                 entry.size = entry.isDirectory ? 0 : static_cast<uint64_t>(item.file_size(ec));
                 if (ec) {

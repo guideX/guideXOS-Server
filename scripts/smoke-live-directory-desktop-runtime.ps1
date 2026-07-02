@@ -201,9 +201,17 @@ $backNavigation = $output -match '\[LIVE-DIRECTORY-RUNTIME-SMOKE\] LIVE_DESKTOP_
 $shellSync = $runtimeTargetPath -and $output -match ('\[LIVE-DIRECTORY-RUNTIME-SMOKE\] LIVE_DESKTOP_SHELL_CD_SYNC cwd=' + [regex]::Escape($runtimeTargetPath) + ' result=PASS')
 $goHome = $output -match '\[LIVE-DIRECTORY-RUNTIME-SMOKE\] LIVE_DESKTOP_NAV_HOME to=/Desktop result=PASS'
 $cleanup = $runtimeTargetPath -and $output -match ('\[LIVE-DIRECTORY-RUNTIME-SMOKE\] LIVE_DESKTOP_CLEANUP path=' + [regex]::Escape($runtimeTargetPath) + ' result=PASS')
+$folderDiscoveryCount = 0
+if ($runtimeTargetPath) {
+    $folderDiscoveryPattern = '\[desktop\] Desktop filesystem item discovered: ' + [regex]::Escape($runtimeTargetPath) + ' \[folder\]'
+    $folderDiscoveryCount = [regex]::Matches($output, $folderDiscoveryPattern).Count
+}
+$folderDiscovery = $runtimeTargetPath -and $folderDiscoveryCount -eq 2
 $resultPass = $output.Contains("[LIVE-DIRECTORY-RUNTIME-SMOKE] result=PASS")
 $nativePathAvailable = $runtimeNativePathAvailable -eq "PASS"
-$overallPass = $startMarker -and $folderActivation -and $compactLayout -and $backNavigation -and $shellSync -and $goHome -and $cleanup -and $resultPass
+$overallPass = $startMarker -and $folderActivation -and $compactLayout -and $backNavigation -and $shellSync -and $goHome -and $cleanup -and $folderDiscovery -and $resultPass
+
+Write-Host "folder discovery count: $folderDiscoveryCount"
 
 Write-EvidenceFile `
     -Result $(if ($overallPass) { "PASS" } else { "FAIL" }) `

@@ -2221,6 +2221,31 @@ static void apply_system_desktop_icon_visibility()
     }
 }
 
+static bool bare_metal_desktop_is_reserved_entry_name(const char* name)
+{
+    if (!name || !name[0]) return false;
+    return desktop_str_eq(name, "Trash") ||
+        desktop_str_eq(name, "File Explorer") ||
+        desktop_str_eq(name, "FileExplorer") ||
+        desktop_str_eq(name, "Files") ||
+        desktop_str_eq(name, "FileManager") ||
+        desktop_str_eq(name, "File Manager") ||
+        desktop_str_eq(name, "Computer") ||
+        desktop_str_eq(name, "This System") ||
+        desktop_str_eq(name, "Computer Files") ||
+        desktop_str_eq(name, "ComputerFiles") ||
+        desktop_str_eq(name, "System Settings") ||
+        desktop_str_eq(name, "SystemSettings") ||
+        desktop_str_eq(name, "Settings") ||
+        desktop_str_eq(name, "Display Options") ||
+        desktop_str_eq(name, "DisplayOptions") ||
+        desktop_str_eq(name, "Display Settings") ||
+        desktop_str_eq(name, "Desktop Background") ||
+        desktop_str_eq(name, "Wallpaper") ||
+        desktop_str_eq(name, "Back") ||
+        desktop_str_eq(name, "Go to Desktop");
+}
+
 static void enumerate_desktop_folder_items()
 {
     initialize_bare_metal_desktop_directory_state();
@@ -2250,9 +2275,30 @@ static void enumerate_desktop_folder_items()
     vfs::DirEntry entry{};
     while (slot < kMaxDesktopFilesystemEntries && vfs::readdir(dir, &entry)) {
         if (entry.name[0] == '.' && (entry.name[1] == '\0' || (entry.name[1] == '.' && entry.name[2] == '\0'))) continue;
+        if (bare_metal_desktop_is_reserved_entry_name(entry.name)) {
+            serial::puts("[desktop] Desktop filesystem item skipped (reserved desktop name): ");
+            serial::puts(entry.name);
+            serial::puts("\n");
+            continue;
+        }
         int iconIdx = kSystemDesktopIconCount + slot;
+        char resolvedPath[vfs::VFS_MAX_PATH];
+        vfs::join_path(desktopPath, entry.name, resolvedPath, sizeof(resolvedPath));
+        bool duplicatePath = false;
+        for (int existing = 0; existing < slot; ++existing) {
+            if (desktop_str_eq(s_desktopFilePaths[existing], resolvedPath)) {
+                duplicatePath = true;
+                break;
+            }
+        }
+        if (duplicatePath) {
+            serial::puts("[desktop] Desktop filesystem item skipped (duplicate path): ");
+            serial::puts(resolvedPath);
+            serial::puts("\n");
+            continue;
+        }
         desktop_str_copy(s_desktopFileLabels[slot], entry.name, (int)sizeof(s_desktopFileLabels[slot]));
-        vfs::join_path(desktopPath, entry.name, s_desktopFilePaths[slot], sizeof(s_desktopFilePaths[slot]));
+        desktop_str_copy(s_desktopFilePaths[slot], resolvedPath, (int)sizeof(s_desktopFilePaths[slot]));
         s_desktopIcons[iconIdx].label = s_desktopFileLabels[slot];
         desktop_str_copy(s_desktopIcons[iconIdx].path, s_desktopFilePaths[slot], (int)sizeof(s_desktopIcons[iconIdx].path));
         s_desktopIcons[iconIdx].pinned = true;
@@ -2395,6 +2441,19 @@ static void reset_app_shortcut_slots()
 static bool add_shortcut_slot(const char* shortcutType, const char* target, const char* label, bool isDirectory, uint32_t color)
 {
     if (!shortcutType || !shortcutType[0] || !target || !target[0]) return false;
+    const char* effectiveLabel = label && label[0] ? label : target;
+    if (desktop_str_eq(shortcutType, "App") && bare_metal_desktop_is_reserved_entry_name(target)) {
+        serial::puts("[desktop] Shortcut skipped (reserved desktop name): ");
+        serial::puts(target);
+        serial::puts("\n");
+        return false;
+    }
+    if (bare_metal_desktop_is_reserved_entry_name(effectiveLabel)) {
+        serial::puts("[desktop] Shortcut skipped (reserved desktop name): ");
+        serial::puts(effectiveLabel);
+        serial::puts("\n");
+        return false;
+    }
     for (int i = 0; i < kMaxDesktopAppShortcuts; ++i) {
         if (desktop_str_eq(s_desktopShortcutTypes[i], shortcutType) && desktop_str_eq(s_desktopShortcutTargetAppIds[i], target)) {
             serial::puts("[desktop] Shortcut already exists: ");
@@ -2409,7 +2468,7 @@ static bool add_shortcut_slot(const char* shortcutType, const char* target, cons
         if (iconIdx >= kDesktopIconCount) break;
         desktop_str_copy(s_desktopShortcutTypes[i], shortcutType, (int)sizeof(s_desktopShortcutTypes[i]));
         desktop_str_copy(s_desktopShortcutTargetAppIds[i], target, (int)sizeof(s_desktopShortcutTargetAppIds[i]));
-        desktop_str_copy(s_desktopShortcutLabels[i], label && label[0] ? label : target, (int)sizeof(s_desktopShortcutLabels[i]));
+        desktop_str_copy(s_desktopShortcutLabels[i], effectiveLabel, (int)sizeof(s_desktopShortcutLabels[i]));
         s_desktopIcons[iconIdx].label = s_desktopShortcutLabels[i];
         desktop_str_copy(s_desktopIcons[iconIdx].path, s_desktopShortcutTargetAppIds[i], (int)sizeof(s_desktopIcons[iconIdx].path));
         s_desktopIcons[iconIdx].pinned = true;

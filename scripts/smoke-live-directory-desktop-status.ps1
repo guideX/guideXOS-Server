@@ -76,9 +76,12 @@ function Get-LatestWriteTime {
 }
 
 $hostedDesktopLive = Find-FirstMatch -LiteralPath (Join-Path $Root "compositor.cpp") -Pattern "DesktopFolderResolver::Enumerate\(g_hostedDesktopDirectoryPath\)"
+$hostedDesktopReservedFilter = Find-FirstMatch -LiteralPath (Join-Path $Root "compositor.cpp") -Pattern "IsReservedDesktopName|skipped reserved desktop name|skipped reserved desktop target"
+$hostedDesktopStalePositionPrune = Find-FirstMatch -LiteralPath (Join-Path $Root "compositor.cpp") -Pattern "Pruned stale desktop icon position after refresh"
 $hostedDesktopPathState = Find-FirstMatch -LiteralPath (Join-Path $Root "compositor.cpp") -Pattern "g_hostedDesktopDirectoryPath"
 $hostedDesktopNav = Find-FirstMatch -LiteralPath (Join-Path $Root "compositor.cpp") -Pattern "makeSystemDesktopItem\(DesktopSystemObjectKind::DesktopBack|makeSystemDesktopItem\(DesktopSystemObjectKind::DesktopHome|hostedDesktopGoBack\(\)|hostedDesktopGoHome\(\)|desktop-nav:back|desktop-nav:home"
 $kernelDesktopLive = Find-FirstMatch -LiteralPath (Join-Path $Root "kernel\core\desktop.cpp") -Pattern "enumerate_desktop_folder_items\("
+$kernelDesktopReservedFilter = Find-FirstMatch -LiteralPath (Join-Path $Root "kernel\core\desktop.cpp") -Pattern "bare_metal_desktop_is_reserved_entry_name|skipped \(reserved desktop name\)|skipped \(duplicate path\)"
 $hostedShellCdCommand = Find-FirstMatch -LiteralPath (Join-Path $Root "console_service.cpp") -Pattern 'if\(command=="cd"\)'
 $hostedShellDesktopBridge = Find-FirstMatch -LiteralPath (Join-Path $Root "desktop_service.cpp") -Pattern "ShowFolderOnHostedDesktop\(|showFolderOnHostedDesktop\("
 $bareMetalDesktopState = Find-FirstMatch -LiteralPath (Join-Path $Root "kernel\core\desktop.cpp") -Pattern "s_bareMetalDesktopCurrentPath|bare_metal_desktop_current_directory_path|bare_metal_desktop_home_directory_path"
@@ -151,9 +154,12 @@ if ($runtimeEvidenceText) {
 
 Write-Host ""
 Emit-Check "hosted desktop folder enumeration" "present" $hostedDesktopLive
+Emit-Check "hosted desktop reserved-name filtering" "present" $hostedDesktopReservedFilter
+Emit-Check "hosted desktop stale-position pruning" "present" $hostedDesktopStalePositionPrune
 Emit-Check "hosted desktop directory state" "present" $hostedDesktopPathState
 Emit-Check "hosted desktop navigation controls" "present" $hostedDesktopNav
 Emit-Check "bare-metal desktop folder enumeration" "present" $kernelDesktopLive
+Emit-Check "bare-metal desktop reserved-name filtering" "present" $kernelDesktopReservedFilter
 Emit-Check "hosted shell cd command" "present" $hostedShellCdCommand
 Emit-Check "hosted shell desktop bridge" "present" $hostedShellDesktopBridge
 Emit-Check "bare-metal shell cd / cwd state" "present" $bareMetalShellCdState
