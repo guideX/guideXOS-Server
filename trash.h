@@ -9,7 +9,7 @@ namespace apps {
 
 class Trash {
 public:
-    static uint64_t Launch();
+    static uint64_t Launch(bool confirmEmpty = false);
     static int main(int argc, char** argv);
 
 private:

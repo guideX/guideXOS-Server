@@ -372,7 +372,11 @@ bool AppManager::launchAppWithParam(const char* name, const char* param) {
         return false;
     }
     
-    bool allowNewParameterizedInstance = param && streq(name, "Notepad");
+    // Parameterized launches are intentionally narrow: current callers use a
+    // single opt-in parameter for file-open style apps and the Trash
+    // confirmation flag. This is not a generic argv passthrough for arbitrary
+    // kernel apps.
+    bool allowNewParameterizedInstance = param && (streq(name, "Notepad") || streq(name, "Trash"));
     if (!allowNewParameterizedInstance) {
         // Check if already running
         for (int i = 0; i < s_runningAppCount; i++) {

@@ -982,6 +982,7 @@ public:
     virtual ~TrashApp() override;
 
     virtual bool init() override;
+    virtual bool initWithParam(const char* param) override;
     virtual void shutdown() override;
     virtual void draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) override;
     virtual void onWidgetClick(int widgetId) override;
@@ -1016,6 +1017,7 @@ private:
     int m_propertiesBtnId;
     bool m_confirmEmpty;
     bool m_showProperties;
+    bool m_startWithConfirmEmpty;
     char m_status[128];
 
     void refreshEntries();

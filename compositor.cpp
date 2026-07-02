@@ -2846,7 +2846,7 @@ namespace gxos {
                     const std::string& text = g_desktopRename.buffer;
                     int textW = measureUiText(text.c_str(), static_cast<int>(text.size()), FontRole::Small);
                     int textX = editRect.left + 4;
-                    int textY = editRect.top + std::max(0, (editRect.bottom - editRect.top - lineH) / 2);
+                    int textY = editRect.top + std::max(0, static_cast<int>((editRect.bottom - editRect.top - lineH) / 2));
                     drawUiText(dc, textX + 1, textY + 1, text, RGB(0, 0, 0), FontRole::Small);
                     drawUiText(dc, textX, textY, text, RGB(235, 240, 250), FontRole::Small);
                     int caretX = textX + textW + 1;
@@ -4414,8 +4414,15 @@ namespace gxos {
                                 publishOut(MsgType::MT_InputMouse, Compositor::packMousePayloadForTarget(mx, my, 2, "down", ownerPid, targetWindow), ownerPid);
                                 invalidate(0);
                             } else {
-                                // Desktop right-click - show desktop context menu
-                                RightClickMenu::Show(mx, my);
+                                int hitIdx = HitTestDesktopIcon(mx, my);
+                                if (hitIdx >= 0) {
+                                    SelectDesktopIcon(hitIdx, false);
+                                    Logger::write(LogLevel::Info, std::string("Desktop item context requested: ") + desktopLayoutKey(g_items[hitIdx]));
+                                    RightClickMenu::ShowForDesktopItem(mx, my, hitIdx);
+                                } else {
+                                    // Desktop right-click - show desktop context menu
+                                    RightClickMenu::Show(mx, my);
+                                }
                                 invalidate(0);
                             }
                         }

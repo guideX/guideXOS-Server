@@ -1404,7 +1404,8 @@ enum class ContextMenuMode : uint8_t {
     Desktop,
     StartMenuApp,
     DesktopFilesystemEntry,
-    DesktopShortcut
+    DesktopShortcut,
+    DesktopTrash
 };
 
 static ContextMenuMode s_contextMenuMode = ContextMenuMode::Desktop;
@@ -6131,6 +6132,7 @@ static int context_menu_item_count()
 {
     if (s_contextMenuMode == ContextMenuMode::StartMenuApp) return 2;
     if (s_contextMenuMode == ContextMenuMode::DesktopShortcut) return 2;
+    if (s_contextMenuMode == ContextMenuMode::DesktopTrash) return 2;
     if (s_contextMenuMode == ContextMenuMode::DesktopFilesystemEntry) {
         if (s_contextMenuIconDisplayIndex >= 0 && s_contextMenuIconDisplayIndex < s_visibleIconCount) {
             int iconIdx = s_visibleIconIndices[s_contextMenuIconDisplayIndex];
@@ -6176,6 +6178,8 @@ static void draw_right_click_menu()
             label = (i == 0) ? "Open" : (is_app_shortcut_pinned_to_desktop(s_contextMenuAppName) ? "Unpin from Desktop" : "Pin to Desktop");
         } else if (s_contextMenuMode == ContextMenuMode::DesktopShortcut) {
             label = (i == 0) ? "Open" : "Remove from Desktop";
+        } else if (s_contextMenuMode == ContextMenuMode::DesktopTrash) {
+            label = (i == 0) ? "Open" : "Empty Trash";
         } else if (s_contextMenuMode == ContextMenuMode::DesktopFilesystemEntry) {
             bool renameable = false;
             if (s_contextMenuIconDisplayIndex >= 0 && s_contextMenuIconDisplayIndex < s_visibleIconCount) {
@@ -6253,6 +6257,25 @@ static void handle_context_menu_command(int item)
                     if (s_desktopShortcutTypes[slot][0]) shortcutType = s_desktopShortcutTypes[slot];
                 }
                 remove_shortcut_from_desktop(shortcutType, s_desktopIcons[iconIdx].path);
+            }
+        }
+        s_contextMenuMode = ContextMenuMode::Desktop;
+        return;
+    }
+
+    if (s_contextMenuMode == ContextMenuMode::DesktopTrash) {
+        if (item == 0) {
+            show_icon_notification(s_contextMenuIconDisplayIndex);
+        } else if (item == 1) {
+            serial::puts("[desktop] Empty Trash requested from desktop context menu\n");
+            // This is the only parameterized desktop launch path here, and the
+            // flag is a single opt-in confirmation token consumed only by Trash.
+            bool launchOk = app::AppManager::launchAppWithParam("Trash", "--confirm-empty");
+            if (!launchOk) {
+                s_notification.title = "Trash";
+                s_notification.message = "Unable to open Trash confirmation";
+                s_notification.visible = true;
+                s_notification.showTime = s_tickCounter;
             }
         }
         s_contextMenuMode = ContextMenuMode::Desktop;
@@ -7853,6 +7876,18 @@ static void show_desktop_shortcut_context_menu(uint32_t x, uint32_t y, int displ
     s_contextMenuIconDisplayIndex = displayIndex;
     s_rightClickHover = hit_test_context_menu((int32_t)x, (int32_t)y);
     serial::puts("[desktop] Desktop shortcut context menu creation\n");
+}
+
+static void show_desktop_trash_context_menu(uint32_t x, uint32_t y, int displayIndex)
+{
+    s_rightClickX = x;
+    s_rightClickY = y;
+    s_rightClickMenuOpen = true;
+    s_contextMenuMode = ContextMenuMode::DesktopTrash;
+    s_contextMenuAppName[0] = '\0';
+    s_contextMenuIconDisplayIndex = displayIndex;
+    s_rightClickHover = hit_test_context_menu((int32_t)x, (int32_t)y);
+    serial::puts("[desktop] Desktop trash context menu creation\n");
 }
 
 static void show_desktop_filesystem_context_menu(uint32_t x, uint32_t y, int displayIndex)
@@ -11202,6 +11237,14 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
             int hitIdx = HitTestDesktopIcon(mx, my);
             if (hitIdx >= 0 && hitIdx < s_visibleIconCount) {
                 int iconId = s_visibleIconIndices[hitIdx];
+                if (iconId >= 0 && iconId < kDesktopIconCount && s_desktopIcons[iconId].kind == DesktopItemKind::SystemObject &&
+                    s_desktopIcons[iconId].systemObject == DesktopSystemObjectKind::Trash) {
+                    SelectDesktopIcon(hitIdx, false);
+                    show_desktop_trash_context_menu((uint32_t)mx, (uint32_t)my, hitIdx);
+                    draw();
+                    draw_cursor(mx, my);
+                    return;
+                }
                 if (iconId >= 0 && iconId < kDesktopIconCount && s_desktopIcons[iconId].kind == DesktopItemKind::FilesystemEntry) {
                     SelectDesktopIcon(hitIdx, false);
                     show_desktop_filesystem_context_menu((uint32_t)mx, (uint32_t)my, hitIdx);

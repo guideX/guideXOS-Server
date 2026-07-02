@@ -2,6 +2,7 @@
 #include "logger.h"
 #include "compositor.h"
 #include "desktop_service.h"
+#include "trash.h"
 #include "kernel/core/include/kernel/system_font.h"
 #include <cstring>
 
@@ -102,14 +103,23 @@ void RightClickMenu::buildItems() {
         return;
     }
     if (s_desktopItemIndex >= 0) {
-        s_items.push_back({"Open", false, false});
+        const DesktopItem* item = nullptr;
         if (s_desktopItemIndex < (int)Compositor::g_items.size()) {
-            const DesktopItem& item = Compositor::g_items[s_desktopItemIndex];
-            if (item.kind == DesktopItemKind::FilesystemEntry && item.isDirectory) {
+            item = &Compositor::g_items[s_desktopItemIndex];
+        }
+        if (item && item->kind == DesktopItemKind::SystemObject && item->systemObject == DesktopSystemObjectKind::Trash) {
+            s_items.push_back({"Open", false, false});
+            s_items.push_back({"Empty Trash", false, false});
+            return;
+        }
+
+        s_items.push_back({"Open", false, false});
+        if (item) {
+            if (item->kind == DesktopItemKind::FilesystemEntry && item->isDirectory) {
                 s_items.push_back({"Rename", false, false});
             }
-            if (item.kind == DesktopItemKind::Shortcut) {
-                if (item.shortcutType == "File" || item.shortcutType == "Folder") {
+            if (item->kind == DesktopItemKind::Shortcut) {
+                if (item->shortcutType == "File" || item->shortcutType == "Folder") {
                     s_items.push_back({"Open Target Location", false, false});
                 }
                 s_items.push_back({"Remove from Desktop", false, false});
@@ -157,8 +167,19 @@ bool RightClickMenu::HandleClick(int mx, int my) {
                 return true;
             }
             if (s_items[idx].label == "Open" && s_desktopItemIndex >= 0) {
-                Logger::write(LogLevel::Info, "Desktop item Open selected");
-                Compositor::openDesktopItem(s_desktopItemIndex);
+                if (s_desktopItemIndex < (int)Compositor::g_items.size()) {
+                    const DesktopItem& item = Compositor::g_items[s_desktopItemIndex];
+                    if (item.kind == DesktopItemKind::SystemObject && item.systemObject == DesktopSystemObjectKind::Trash) {
+                        Logger::write(LogLevel::Info, "Trash Open selected from context menu");
+                        Compositor::openDesktopItem(s_desktopItemIndex);
+                    } else {
+                        Logger::write(LogLevel::Info, "Desktop item Open selected");
+                        Compositor::openDesktopItem(s_desktopItemIndex);
+                    }
+                } else {
+                    Logger::write(LogLevel::Info, "Desktop item Open selected");
+                    Compositor::openDesktopItem(s_desktopItemIndex);
+                }
             } else if (s_items[idx].label == "Rename" && s_desktopItemIndex >= 0) {
                 Logger::write(LogLevel::Info, "Desktop folder Rename selected");
                 Compositor::beginDesktopFolderRename(s_desktopItemIndex);
@@ -168,6 +189,12 @@ bool RightClickMenu::HandleClick(int mx, int my) {
             } else if (s_items[idx].label == "Remove from Desktop" && s_desktopItemIndex >= 0) {
                 Logger::write(LogLevel::Info, "Desktop shortcut Remove from Desktop selected");
                 Compositor::removeDesktopShortcut(s_desktopItemIndex);
+            } else if (s_items[idx].label == "Empty Trash" && s_desktopItemIndex >= 0) {
+                Logger::write(LogLevel::Info, "Trash Empty selected from context menu");
+                uint64_t pid = gxos::apps::Trash::Launch(true);
+                if (pid == 0) {
+                    Logger::write(LogLevel::Error, "Trash empty confirmation launch failed");
+                }
             } else if (s_items[idx].label == "Open" && !s_startMenuAppName.empty()) {
                 Logger::write(LogLevel::Info, "Start Menu app Open selected from context menu: " + s_startMenuAppName);
                 Compositor::openStartMenuApp(s_startMenuAppName);

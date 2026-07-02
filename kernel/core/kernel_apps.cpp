@@ -26,6 +26,8 @@
 #include "../../gxos_tls_prerequisites.h"
 #include "../../guide_web_http_shared.h"
 
+#include <string.h>
+
 extern "C" void desktop_request_redraw();
 
 namespace kernel {
@@ -793,6 +795,30 @@ static void kernel_join_path(const char* base, const char* name, char* out, int 
 {
     if (!out || outSize <= 0) return;
     vfs::join_path(base, name, out, (size_t)outSize);
+}
+
+static bool kernel_join_path_within_base(const char* base, const char* name, char* out, int outSize)
+{
+    if (!base || !base[0] || !name || !name[0] || !out || outSize <= 0) return false;
+
+    char joined[256];
+    char normalizedJoined[256];
+    char normalizedBase[256];
+    kernel_join_path(base, name, joined, sizeof(joined));
+    vfs::normalize_path(joined, normalizedJoined, sizeof(normalizedJoined));
+    vfs::normalize_path(base, normalizedBase, sizeof(normalizedBase));
+
+    const int baseLen = strlen_local(normalizedBase);
+    if (baseLen <= 0) return false;
+    if (baseLen == 1 && normalizedBase[0] == '/') {
+        if (normalizedJoined[0] != '/' || normalizedJoined[1] == '\0') return false;
+    } else {
+        if (!startsWithText(normalizedJoined, normalizedBase)) return false;
+        if (normalizedJoined[baseLen] != '/' || normalizedJoined[baseLen + 1] == '\0') return false;
+    }
+
+    strcopy(out, normalizedJoined, outSize);
+    return true;
 }
 
 static void kernel_trash_info_path_for(const char* trashedPath, char* out, int outSize)
@@ -5043,7 +5069,7 @@ void DiskManagerApp::onWidgetClick(int widgetId) {
 TrashApp::TrashApp()
     : m_entryCount(0), m_selectedIndex(-1), m_emptyBtnId(-1), m_confirmEmptyBtnId(-1), m_cancelEmptyBtnId(-1),
       m_restoreBtnId(-1), m_restoreAllBtnId(-1), m_deletePermanentBtnId(-1), m_refreshBtnId(-1), m_propertiesBtnId(-1),
-      m_confirmEmpty(false), m_showProperties(false)
+      m_confirmEmpty(false), m_showProperties(false), m_startWithConfirmEmpty(false)
 {
     strcopy(m_name, "Trash", app::MAX_APP_NAME);
     m_status[0] = '\0';
@@ -5081,10 +5107,26 @@ bool TrashApp::init()
     m_confirmEmptyBtnId = addButton(92, 146, 104, 22, "Empty Trash");
     m_cancelEmptyBtnId = addButton(214, 146, 70, 22, "Cancel");
     refreshEntries();
+    if (m_startWithConfirmEmpty) {
+        if (m_entryCount == 0) {
+            strcopy(m_status, "Trash is already empty.", sizeof(m_status));
+            m_confirmEmpty = false;
+        } else {
+            m_status[0] = '\0';
+            m_confirmEmpty = true;
+        }
+        m_startWithConfirmEmpty = false;
+    }
     updateButtons();
     kernel_desktop_refresh_trash_state();
     m_state = app::AppState::Running;
     return true;
+}
+
+bool TrashApp::initWithParam(const char* param)
+{
+    m_startWithConfirmEmpty = param && strcmp(param, "--confirm-empty") == 0;
+    return init();
 }
 
 void TrashApp::shutdown()
@@ -5295,7 +5337,9 @@ void TrashApp::refreshEntries()
             if (!item.originalPath[0]) {
                 char restoreFolder[256];
                 parentPathOf(item.trashRoot, restoreFolder, sizeof(restoreFolder));
-                kernel_join_path(restoreFolder, entry.name, item.originalPath, sizeof(item.originalPath));
+                if (!kernel_join_path_within_base(restoreFolder, entry.name, item.originalPath, sizeof(item.originalPath))) {
+                    item.originalPath[0] = '\0';
+                }
             }
             parentPathOf(item.originalPath, item.originalFolder, sizeof(item.originalFolder));
             strcopy(item.type, typeForEntry(item), sizeof(item.type));
@@ -5323,7 +5367,11 @@ bool TrashApp::purgeContents(int* deletedCount)
     for (int i = 0; i < m_entryCount; ++i) {
         char itemPath[256];
         char infoPath[256];
-        kernel_join_path(m_entries[i].trashRoot, m_entries[i].name, itemPath, sizeof(itemPath));
+        if (!kernel_join_path_within_base(m_entries[i].trashRoot, m_entries[i].name, itemPath, sizeof(itemPath))) {
+            serial::puts("[trash] refusing unsafe purge path\n");
+            ok = false;
+            continue;
+        }
         kernel_trash_info_path_for(itemPath, infoPath, sizeof(infoPath));
 
         int rootLen = strlen_local(m_entries[i].trashRoot);
@@ -5462,7 +5510,10 @@ void TrashApp::deleteSelectedPermanently()
 bool TrashApp::restoreEntry(const TrashEntry& entry)
 {
     char sourcePath[256];
-    kernel_join_path(entry.trashRoot, entry.name, sourcePath, sizeof(sourcePath));
+    if (!kernel_join_path_within_base(entry.trashRoot, entry.name, sourcePath, sizeof(sourcePath))) {
+        serial::puts("[trash] refusing unsafe restore path\n");
+        return false;
+    }
     char targetPath[256];
     makeUniqueRestorePath(entry.originalPath, targetPath, sizeof(targetPath));
     vfs::Status status = vfs::rename(sourcePath, targetPath);
@@ -5481,7 +5532,7 @@ bool TrashApp::deleteEntryPermanently(const TrashEntry& entry)
 {
     char itemPath[256];
     char infoPath[256];
-    kernel_join_path(entry.trashRoot, entry.name, itemPath, sizeof(itemPath));
+    if (!kernel_join_path_within_base(entry.trashRoot, entry.name, itemPath, sizeof(itemPath))) return false;
     kernel_trash_info_path_for(itemPath, infoPath, sizeof(infoPath));
     if (!startsWithText(itemPath, entry.trashRoot) || itemPath[strlen_local(entry.trashRoot)] != '/') return false;
     vfs::Status status = entry.isDir ? vfs::rmdir(itemPath) : vfs::unlink(itemPath);

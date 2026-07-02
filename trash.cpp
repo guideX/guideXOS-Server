@@ -200,10 +200,14 @@ namespace {
     }
 }
 
-uint64_t Trash::Launch() {
+uint64_t Trash::Launch(bool confirmEmpty) {
     ProcessSpec spec{"trash", Trash::main};
     spec.appId = "gxos.builtin.trash";
-    return ProcessTable::spawn(spec, {"trash"});
+    std::vector<std::string> args = { "trash" };
+    if (confirmEmpty) {
+        args.push_back("--confirm-empty");
+    }
+    return ProcessTable::spawn(spec, args);
 }
 
 std::vector<Trash::TrashEntry> Trash::listEntries() {
@@ -418,11 +422,15 @@ void Trash::render(uint64_t windowId, bool confirmEmpty, bool showProperties, in
 }
 
 int Trash::main(int argc, char** argv) {
-    (void)argc;
-    (void)argv;
-
     try {
         Logger::write(LogLevel::Info, "Trash starting...");
+        bool confirmEmptyRequested = false;
+        for (int i = 1; i < argc && argv; ++i) {
+            if (argv[i] && std::string(argv[i]) == "--confirm-empty") {
+                confirmEmptyRequested = true;
+                break;
+            }
+        }
 
         const char* kGuiChanIn = "gui.input";
         const char* kGuiChanOut = "gui.output";
@@ -457,6 +465,13 @@ int Trash::main(int argc, char** argv) {
                     continue;
                 }
 
+                if (confirmEmptyRequested && listEntries().empty()) {
+                    confirmEmpty = false;
+                    status = "Trash is already empty.";
+                } else {
+                    confirmEmpty = confirmEmptyRequested;
+                    if (confirmEmpty) status.clear();
+                }
                 render(windowId, confirmEmpty, showProperties, selectedIndex, status);
             }
             else if (msgType == MsgType::MT_WidgetEvt) {
