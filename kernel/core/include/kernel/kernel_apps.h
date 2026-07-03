@@ -238,6 +238,7 @@ public:
     virtual void shutdown() override;
     virtual void draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) override;
     virtual void onMouseDown(int x, int y, uint8_t button) override;
+    virtual void onMouseWheel(int x, int y, int wheelDelta) override;
     virtual void onWidgetClick(int widgetId) override;
 
     static app::KernelApp* create() { return new DisplayOptionsApp(); }
@@ -250,10 +251,12 @@ private:
     int m_selectedGradientIndex;
     int m_appliedGradientIndex;
     int m_activeTab;
+    int m_galleryScrollOffset;
     int m_selectButtonId;
     kernel::desktop::SystemDesktopIconVisibility m_desktopIconVisibility;
 
     void loadSelection();
+    void setActiveTab(int tab);
     void applySelected();
     int hitBackground(int x, int y) const;
     int hitWallpaper(int x, int y) const;

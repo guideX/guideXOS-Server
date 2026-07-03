@@ -25,6 +25,7 @@ private:
     static DesktopThemeId s_selectedThemeId;
     static DesktopThemeId s_appliedThemeId;
     static int s_activeTab;
+    static int s_galleryScrollOffset;
     static int s_mouseX;
     static int s_mouseY;
     static bool s_mouseDown;

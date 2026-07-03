@@ -7,6 +7,7 @@
 #include "logger.h"
 #include "process.h"
 #include "wallpaper_registry.h"
+#include <algorithm>
 #include <chrono>
 #include <sstream>
 
@@ -25,6 +26,7 @@ int DisplayOptions::s_appliedGradientIndex = 0;
 DesktopThemeId DisplayOptions::s_selectedThemeId = DesktopThemeId::Classic;
 DesktopThemeId DisplayOptions::s_appliedThemeId = DesktopThemeId::Classic;
 int DisplayOptions::s_activeTab = 0;
+int DisplayOptions::s_galleryScrollOffset = 0;
 int DisplayOptions::s_mouseX = 0;
 int DisplayOptions::s_mouseY = 0;
 bool DisplayOptions::s_mouseDown = false;
@@ -47,6 +49,10 @@ namespace {
     const int kGradientTabX = 560;
     const int kGalleryX = 26;
     const int kGalleryY = 100;
+    const int kGalleryW = 722;
+    const int kGalleryH = 436;
+    const int kGalleryScrollBarX = 752;
+    const int kGalleryScrollBarW = 8;
     const int kTileW = 130;
     const int kTileH = 100;
     const int kThumbW = 116;
@@ -67,6 +73,34 @@ namespace {
     const int kThemeOptionW = 320;
     const int kThemeOptionH = 98;
     const int kThemeOptionGap = 14;
+    const int kGalleryRowPitch = kTileH + kGapY;
+
+    int galleryVisibleRows()
+    {
+        const int visible = (kGalleryH - kTileH) / kGalleryRowPitch + 1;
+        return visible > 0 ? visible : 1;
+    }
+
+    int galleryRowCount(int itemCount)
+    {
+        if (itemCount <= 0) return 0;
+        return (itemCount + kCols - 1) / kCols;
+    }
+
+    int galleryMaxScroll(int itemCount)
+    {
+        const int rows = galleryRowCount(itemCount);
+        const int visibleRows = galleryVisibleRows();
+        return std::max(0, rows - visibleRows);
+    }
+
+    int clampGalleryScrollOffset(int offset, int itemCount)
+    {
+        const int maxScroll = galleryMaxScroll(itemCount);
+        if (offset < 0) return 0;
+        if (offset > maxScroll) return maxScroll;
+        return offset;
+    }
 
     void publish(MsgType type, const std::string& payload)
     {
@@ -133,24 +167,6 @@ namespace {
             TryParseDesktopThemeId(store.desktopThemeId.c_str(), &themeId);
         }
         return themeId;
-    }
-
-    int backgroundIndexForId(const std::string& id)
-    {
-        const auto& backgrounds = WallpaperRegistry::BuiltInBackgrounds();
-        for (size_t i = 0; i < backgrounds.size(); ++i) {
-            if (backgrounds[i].id == id) return static_cast<int>(i);
-        }
-        return 0;
-    }
-
-    int gradientIndexForId(const std::string& id)
-    {
-        const auto& gradients = WallpaperRegistry::BuiltInGradients();
-        for (size_t i = 0; i < gradients.size(); ++i) {
-            if (gradients[i].id == id) return static_cast<int>(i);
-        }
-        return 0;
     }
 
     uint32_t packRgb(int r, int g, int b)
@@ -354,15 +370,15 @@ void DisplayOptions::loadSelection()
 {
     std::string selectedId = selectedWallpaperIdFromConfig();
     Logger::write(LogLevel::Info, std::string("DisplayOptions loaded saved background id=") + selectedId);
-    const auto& wallpapers = WallpaperRegistry::BuiltInWallpapers();
     const auto& gradients = WallpaperRegistry::BuiltInGradients();
-    const auto& backgrounds = WallpaperRegistry::BuiltInBackgrounds();
+    const auto& wallpapers = WallpaperRegistry::BuiltInWallpapers();
     s_selectedIndex = 0;
     s_appliedIndex = 0;
     s_selectedBackgroundIndex = 0;
     s_appliedBackgroundIndex = 0;
     s_selectedGradientIndex = 0;
     s_appliedGradientIndex = 0;
+    s_galleryScrollOffset = 0;
     s_activeTab = WallpaperRegistry::IsGradientId(selectedId) ? 1 : 0;
     DisplayOptionsStoreData store;
     std::string storeErr;
@@ -383,8 +399,8 @@ void DisplayOptions::loadSelection()
     }
     s_selectedThemeId = selectedThemeIdFromConfig();
     s_appliedThemeId = s_selectedThemeId;
-    for (size_t i = 0; i < backgrounds.size(); ++i) {
-        if (backgrounds[i].id == selectedId) {
+    for (size_t i = 0; i < wallpapers.size(); ++i) {
+        if (wallpapers[i].id == selectedId) {
             s_selectedBackgroundIndex = static_cast<int>(i);
             s_appliedBackgroundIndex = static_cast<int>(i);
             break;
@@ -448,13 +464,52 @@ int DisplayOptions::main(int, char**)
         case MsgType::MT_InputMouse: {
             std::istringstream iss(payload);
             std::string xs, ys, btns;
+            std::string action;
+            std::string modifiers;
+            std::string windowId;
             std::getline(iss, xs, '|');
             std::getline(iss, ys, '|');
             std::getline(iss, btns, '|');
+            std::getline(iss, action, '|');
+            std::getline(iss, modifiers, '|');
+            std::getline(iss, windowId, '|');
+            (void)modifiers;
+            (void)windowId;
             try {
                 int x = std::stoi(xs);
                 int y = std::stoi(ys);
                 int buttons = std::stoi(btns);
+
+                if (!action.empty() && action.rfind("wheel", 0) == 0) {
+                    int wheelDelta = 0;
+                    if (action == "wheel" || action == "wheelup") {
+                        wheelDelta = 1;
+                    } else if (action == "wheeldown") {
+                        wheelDelta = -1;
+                    } else {
+                        size_t colon = action.find(':');
+                        if (colon != std::string::npos && colon + 1 < action.size()) {
+                            wheelDelta = std::stoi(action.substr(colon + 1));
+                        }
+                    }
+
+                    if (wheelDelta != 0 && (s_activeTab == 0 || s_activeTab == 1)) {
+                        const bool inGallery = hit(x, y, kGalleryX, kGalleryY, kGalleryW, kGalleryH);
+                        const bool onScrollbar = hit(x, y, kGalleryScrollBarX, kGalleryY, kGalleryScrollBarW, kGalleryH);
+                        if (inGallery || onScrollbar) {
+                            const int itemCount = s_activeTab == 0
+                                ? static_cast<int>(WallpaperRegistry::BuiltInWallpapers().size())
+                                : static_cast<int>(WallpaperRegistry::BuiltInGradients().size());
+                            const int previousOffset = s_galleryScrollOffset;
+                            s_galleryScrollOffset = clampGalleryScrollOffset(s_galleryScrollOffset - wheelDelta, itemCount);
+                            if (s_galleryScrollOffset != previousOffset) {
+                                render();
+                            }
+                        }
+                    }
+                    break;
+                }
+
                 bool wasDown = s_mouseDown;
                 s_mouseX = x;
                 s_mouseY = y;
@@ -510,25 +565,52 @@ void DisplayOptions::render()
         DisplayOptionsTextColor());
     drawColorRect(s_windowId, 20, 92, 742, 456, DisplayOptionsPanelColor());
 
-    if (s_activeTab == 0) {
-        const auto& backgrounds = WallpaperRegistry::BuiltInBackgrounds();
-        for (size_t i = 0; i < backgrounds.size(); ++i) {
-            int col = static_cast<int>(i) % kCols;
-            int row = static_cast<int>(i) / kCols;
-            int x = kGalleryX + col * (kTileW + kGapX);
-            int y = kGalleryY + row * (kTileH + kGapY);
-            bool hover = hit(s_mouseX, s_mouseY, x, y, kTileW, kTileH);
-            drawBackgroundTile(static_cast<int>(i), x, y, hover, static_cast<int>(i) == s_selectedBackgroundIndex, static_cast<int>(i) == s_appliedBackgroundIndex);
-        }
-    } else if (s_activeTab == 1) {
+    if (s_activeTab == 0 || s_activeTab == 1) {
+        const bool showWallpapers = s_activeTab == 0;
+        const auto& wallpapers = WallpaperRegistry::BuiltInWallpapers();
         const auto& gradients = WallpaperRegistry::BuiltInGradients();
-        for (size_t i = 0; i < gradients.size(); ++i) {
-            int col = static_cast<int>(i) % kCols;
-            int row = static_cast<int>(i) / kCols;
-            int x = kGalleryX + col * (kTileW + kGapX);
-            int y = kGalleryY + row * (kTileH + kGapY);
-            bool hover = hit(s_mouseX, s_mouseY, x, y, kTileW, kTileH);
-            drawGradientTile(static_cast<int>(i), x, y, hover, static_cast<int>(i) == s_selectedGradientIndex, static_cast<int>(i) == s_appliedGradientIndex);
+        const int itemCount = showWallpapers ? static_cast<int>(wallpapers.size()) : static_cast<int>(gradients.size());
+        const int maxScroll = galleryMaxScroll(itemCount);
+        s_galleryScrollOffset = clampGalleryScrollOffset(s_galleryScrollOffset, itemCount);
+        const int visibleRows = galleryVisibleRows();
+        const int startRow = s_galleryScrollOffset;
+        const int endRow = startRow + visibleRows;
+
+        for (int i = 0; i < itemCount; ++i) {
+            const int row = i / kCols;
+            if (row < startRow || row >= endRow) continue;
+            const int col = i % kCols;
+            const int x = kGalleryX + col * (kTileW + kGapX);
+            const int y = kGalleryY + (row - startRow) * kGalleryRowPitch;
+            const bool hover = hit(s_mouseX, s_mouseY, x, y, kTileW, kTileH);
+            if (showWallpapers) {
+                drawWallpaperTile(
+                    i,
+                    x,
+                    y,
+                    hover,
+                    i == s_selectedBackgroundIndex,
+                    i == s_appliedBackgroundIndex);
+            } else {
+                drawGradientTile(
+                    i,
+                    x,
+                    y,
+                    hover,
+                    i == s_selectedGradientIndex,
+                    i == s_appliedGradientIndex);
+            }
+        }
+
+        if (maxScroll > 0) {
+            const uint32_t trackX = kGalleryScrollBarX;
+            const uint32_t trackY = kGalleryY;
+            const uint32_t trackH = kGalleryH;
+            drawColorRect(s_windowId, static_cast<int>(trackX), static_cast<int>(trackY), kGalleryScrollBarW, static_cast<int>(trackH), DisplayOptionsPanelColor());
+            const int thumbH = std::max(18, (galleryVisibleRows() * static_cast<int>(trackH)) / (galleryRowCount(itemCount) > 0 ? galleryRowCount(itemCount) : 1));
+            const int thumbTravel = static_cast<int>(trackH) - thumbH;
+            const int thumbY = static_cast<int>(trackY) + ((thumbTravel * s_galleryScrollOffset) / maxScroll);
+            drawColorRect(s_windowId, static_cast<int>(trackX), thumbY, kGalleryScrollBarW, thumbH, DisplayOptionsAccentColor());
         }
     } else if (s_activeTab == 3) {
         drawThemeTab();
@@ -536,8 +618,8 @@ void DisplayOptions::render()
         drawDesktopIconsTab();
     }
 
-    if (s_activeTab != 2 && s_activeTab != 3) {
-        drawButton(kSelectButtonX, kButtonY, kButtonW, kButtonH, s_activeTab == 0 ? "Select Background" : "Select Gradient", false, true);
+    if (s_activeTab == 0 || s_activeTab == 1) {
+        drawButton(kSelectButtonX, kButtonY, kButtonW, kButtonH, s_activeTab == 0 ? "Select Background" : "Apply Gradient", false, true);
         drawButton(kSelectButtonX + 200, kButtonY, kButtonW, kButtonH, "Choose Color", false, false);
         drawButton(kSelectButtonX + 400, kButtonY, kButtonW, kButtonH, "Visual Effects", false, false);
     } else if (s_activeTab == 2) {
@@ -705,22 +787,26 @@ void DisplayOptions::handleMouseDown(int mx, int my)
 {
     if (hit(mx, my, kBackgroundTabX, kTabY, kTabW, kTabH)) {
         s_activeTab = 0;
+        s_galleryScrollOffset = 0;
         render();
         return;
     }
     if (hit(mx, my, kDesktopIconTabX, kTabY, kTabW, kTabH)) {
         s_activeTab = 2;
+        s_galleryScrollOffset = 0;
         Logger::write(LogLevel::Info, "DisplayOptions Desktop Icons tab selected");
         render();
         return;
     }
     if (hit(mx, my, kGradientTabX, kTabY, kTabW, kTabH)) {
         s_activeTab = 1;
+        s_galleryScrollOffset = 0;
         render();
         return;
     }
     if (hit(mx, my, kThemeTabX, kTabY, kTabW, kTabH)) {
         s_activeTab = 3;
+        s_galleryScrollOffset = 0;
         Logger::write(LogLevel::Info, "DisplayOptions Theme tab selected");
         render();
         return;
@@ -758,14 +844,18 @@ void DisplayOptions::handleMouseDown(int mx, int my)
 
     if (s_activeTab == 1) {
         const auto& gradients = WallpaperRegistry::BuiltInGradients();
+        s_galleryScrollOffset = clampGalleryScrollOffset(s_galleryScrollOffset, static_cast<int>(gradients.size()));
+        const int visibleRows = galleryVisibleRows();
+        const int startRow = s_galleryScrollOffset;
+        const int endRow = startRow + visibleRows;
         for (size_t i = 0; i < gradients.size(); ++i) {
-            int col = static_cast<int>(i) % kCols;
             int row = static_cast<int>(i) / kCols;
+            if (row < startRow || row >= endRow) continue;
+            int col = static_cast<int>(i) % kCols;
             int x = kGalleryX + col * (kTileW + kGapX);
-            int y = kGalleryY + row * (kTileH + kGapY);
+            int y = kGalleryY + (row - startRow) * kGalleryRowPitch;
             if (hit(mx, my, x, y, kTileW, kTileH)) {
                 s_selectedGradientIndex = static_cast<int>(i);
-                s_selectedBackgroundIndex = backgroundIndexForId(gradients[i].id);
                 render();
                 return;
             }
@@ -778,17 +868,19 @@ void DisplayOptions::handleMouseDown(int mx, int my)
         return;
     }
 
-    const auto& backgrounds = WallpaperRegistry::BuiltInBackgrounds();
-    for (size_t i = 0; i < backgrounds.size(); ++i) {
-        int col = static_cast<int>(i) % kCols;
+    const auto& wallpapers = WallpaperRegistry::BuiltInWallpapers();
+    s_galleryScrollOffset = clampGalleryScrollOffset(s_galleryScrollOffset, static_cast<int>(wallpapers.size()));
+    const int visibleRows = galleryVisibleRows();
+    const int startRow = s_galleryScrollOffset;
+    const int endRow = startRow + visibleRows;
+    for (size_t i = 0; i < wallpapers.size(); ++i) {
         int row = static_cast<int>(i) / kCols;
+        if (row < startRow || row >= endRow) continue;
+        int col = static_cast<int>(i) % kCols;
         int x = kGalleryX + col * (kTileW + kGapX);
-        int y = kGalleryY + row * (kTileH + kGapY);
+        int y = kGalleryY + (row - startRow) * kGalleryRowPitch;
         if (hit(mx, my, x, y, kTileW, kTileH)) {
             s_selectedBackgroundIndex = static_cast<int>(i);
-            if (backgrounds[i].kind == BackgroundKind::Gradient) {
-                s_selectedGradientIndex = gradientIndexForId(backgrounds[i].id);
-            }
             render();
             return;
         }
@@ -809,14 +901,18 @@ void DisplayOptions::handleDoubleClick(int mx, int my)
     if (s_activeTab == 2 || s_activeTab == 3) return;
     if (s_activeTab == 1) {
         const auto& gradients = WallpaperRegistry::BuiltInGradients();
+        s_galleryScrollOffset = clampGalleryScrollOffset(s_galleryScrollOffset, static_cast<int>(gradients.size()));
+        const int visibleRows = galleryVisibleRows();
+        const int startRow = s_galleryScrollOffset;
+        const int endRow = startRow + visibleRows;
         for (size_t i = 0; i < gradients.size(); ++i) {
-            int col = static_cast<int>(i) % kCols;
             int row = static_cast<int>(i) / kCols;
+            if (row < startRow || row >= endRow) continue;
+            int col = static_cast<int>(i) % kCols;
             int x = kGalleryX + col * (kTileW + kGapX);
-            int y = kGalleryY + row * (kTileH + kGapY);
+            int y = kGalleryY + (row - startRow) * kGalleryRowPitch;
             if (hit(mx, my, x, y, kTileW, kTileH)) {
                 s_selectedGradientIndex = static_cast<int>(i);
-                s_selectedBackgroundIndex = backgroundIndexForId(gradients[i].id);
                 applySelectedGradient();
                 render();
                 return;
@@ -825,14 +921,20 @@ void DisplayOptions::handleDoubleClick(int mx, int my)
         return;
     }
 
-    const auto& backgrounds = WallpaperRegistry::BuiltInBackgrounds();
-    for (size_t i = 0; i < backgrounds.size(); ++i) {
-        int col = static_cast<int>(i) % kCols;
+    const auto& wallpapers = WallpaperRegistry::BuiltInWallpapers();
+    s_galleryScrollOffset = clampGalleryScrollOffset(s_galleryScrollOffset, static_cast<int>(wallpapers.size()));
+    const int visibleRows = galleryVisibleRows();
+    const int startRow = s_galleryScrollOffset;
+    const int endRow = startRow + visibleRows;
+    for (size_t i = 0; i < wallpapers.size(); ++i) {
         int row = static_cast<int>(i) / kCols;
+        if (row < startRow || row >= endRow) continue;
+        int col = static_cast<int>(i) % kCols;
         int x = kGalleryX + col * (kTileW + kGapX);
-        int y = kGalleryY + row * (kTileH + kGapY);
+        int y = kGalleryY + (row - startRow) * kGalleryRowPitch;
         if (hit(mx, my, x, y, kTileW, kTileH)) {
             s_selectedBackgroundIndex = static_cast<int>(i);
+            s_selectedIndex = s_selectedBackgroundIndex;
             applySelectedBackground();
             render();
             return;
@@ -944,7 +1046,6 @@ void DisplayOptions::applySelectedGradient()
     msg.data.assign(selected.id.begin(), selected.id.end());
     ipc::Bus::publish("gui.input", std::move(msg), false);
     s_appliedGradientIndex = s_selectedGradientIndex;
-    s_appliedBackgroundIndex = backgroundIndexForId(selected.id);
     Logger::write(LogLevel::Info, std::string("DisplayOptions applied gradient id=") + selected.id);
 }
 
@@ -963,20 +1064,15 @@ void DisplayOptions::applySelectedWallpaper()
 
 void DisplayOptions::applySelectedBackground()
 {
-    const auto& backgrounds = WallpaperRegistry::BuiltInBackgrounds();
-    if (s_selectedBackgroundIndex < 0 || s_selectedBackgroundIndex >= static_cast<int>(backgrounds.size())) return;
-    const BackgroundEntry& selected = backgrounds[static_cast<size_t>(s_selectedBackgroundIndex)];
+    const auto& wallpapers = WallpaperRegistry::BuiltInWallpapers();
+    if (s_selectedBackgroundIndex < 0 || s_selectedBackgroundIndex >= static_cast<int>(wallpapers.size())) return;
+    const WallpaperEntry& selected = wallpapers[static_cast<size_t>(s_selectedBackgroundIndex)];
     ipc::Message msg;
     msg.type = static_cast<uint32_t>(MsgType::MT_DesktopWallpaperSet);
     msg.data.assign(selected.id.begin(), selected.id.end());
     ipc::Bus::publish("gui.input", std::move(msg), false);
     s_appliedBackgroundIndex = s_selectedBackgroundIndex;
-    if (selected.kind == BackgroundKind::Gradient) {
-        s_selectedGradientIndex = gradientIndexForId(selected.id);
-        s_appliedGradientIndex = s_selectedGradientIndex;
-    }
-    Logger::write(LogLevel::Info, std::string("DisplayOptions applied background id=") + selected.id +
-        " kind=" + WallpaperRegistry::KindName(selected.kind) +
+    Logger::write(LogLevel::Info, std::string("DisplayOptions applied wallpaper id=") + selected.id +
         " full=" + selected.fullImagePath + " thumb=" + selected.thumbnailPath);
 }
 

@@ -1773,6 +1773,11 @@ static const BuiltInWallpaperPalette s_builtInWallpapers[] = {
     {"legacy_ameobagx", "Ameoba GX", "/system/wall/ameobagx.gxi", "/system/wall/amebgx_t.gxi", 0xFF13051F, 0xFF68289A, 0xFFD04DF0},
     {"legacy_tron_porsche", "Tron Porsche", "/system/wall/tronpor.gxi", "/system/wall/tronp_t.gxi", 0xFF031820, 0xFF0B7485, 0xFF20E0F0},
     {"legacy_wallpaper2", "Wallpaper 2", "/system/wall/wallp2.gxi", "/system/wall/wallp2_t.gxi", 0xFF100E35, 0xFF8C145F, 0xFFFF52B0},
+    {"legacy_merlin", "Merlin", "/system/wall/merlin.gxi", "/system/wall/merlin_t.gxi", 0xFF17253B, 0xFF101826, 0xFF9CC9FF},
+    {"legacy_merlin2", "Merlin 2", "/system/wall/merlin2.gxi", "/system/wall/merlin2_t.gxi", 0xFF1F2A47, 0xFF0F1422, 0xFF8FA8E8},
+    {"legacy_green_meadow", "Green Meadow", "/system/wall/greenmedow.gxi", "/system/wall/greenmedow_t.gxi", 0xFF18491B, 0xFF102210, 0xFF77C96A},
+    {"legacy_cpu", "CPU", "/system/wall/cpu.gxi", "/system/wall/cpu_t.gxi", 0xFF18202B, 0xFF0D1117, 0xFF6FA8FF},
+    {"legacy_mountains", "Mountains", "/system/wall/mountains.gxi", "/system/wall/mountains_t.gxi", 0xFF1E3850, 0xFF0A1118, 0xFFCBE6FF},
 };
 static const int kBuiltInWallpaperCount = sizeof(s_builtInWallpapers) / sizeof(s_builtInWallpapers[0]);
 

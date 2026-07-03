@@ -469,7 +469,12 @@ $WallpaperNames = @(
     "ameoba",
     "ameobagx",
     "tronporche",
-    "Wallpaper2"
+    "Wallpaper2",
+    "merlin",
+    "merlin2",
+    "greenmedow",
+    "cpu",
+    "mountains"
 )
 
 $BareMetalAliases = @{
@@ -483,6 +488,11 @@ $BareMetalAliases = @{
     "ameobagx"      = @{ Full = "ameobagx.gxi"; Thumb = "amebgx_t.gxi" }
     "tronporche"    = @{ Full = "tronpor.gxi";  Thumb = "tronp_t.gxi" }
     "Wallpaper2"    = @{ Full = "wallp2.gxi";   Thumb = "wallp2_t.gxi" }
+    "merlin"        = @{ Full = "merlin.gxi";   Thumb = "merlin_t.gxi" }
+    "merlin2"       = @{ Full = "merlin2.gxi";  Thumb = "merlin2_t.gxi" }
+    "greenmedow"    = @{ Full = "greenmedow.gxi"; Thumb = "greenmedow_t.gxi" }
+    "cpu"           = @{ Full = "cpu.gxi";      Thumb = "cpu_t.gxi" }
+    "mountains"     = @{ Full = "mountains.gxi"; Thumb = "mountains_t.gxi" }
 }
 
 Add-Type -AssemblyName System.Drawing
@@ -620,6 +630,34 @@ function Write-GximgFile([string]$SourcePath, [string]$TargetPath, [int]$MaxWidt
     }
 }
 
+function Write-ResizedPngFile([string]$SourcePath, [string]$TargetPath, [int]$MaxWidth = 0, [int]$MaxHeight = 0) {
+    $sourceBitmap = [System.Drawing.Bitmap]::FromFile($SourcePath)
+    $bitmap = $sourceBitmap
+    if ($MaxWidth -gt 0 -and $MaxHeight -gt 0 -and ($sourceBitmap.Width -gt $MaxWidth -or $sourceBitmap.Height -gt $MaxHeight)) {
+        $scaleX = [double]$MaxWidth / [double]$sourceBitmap.Width
+        $scaleY = [double]$MaxHeight / [double]$sourceBitmap.Height
+        $scale = [Math]::Min($scaleX, $scaleY)
+        $targetWidth = [Math]::Max(1, [int][Math]::Round($sourceBitmap.Width * $scale))
+        $targetHeight = [Math]::Max(1, [int][Math]::Round($sourceBitmap.Height * $scale))
+        $resized = New-Object System.Drawing.Bitmap $targetWidth, $targetHeight
+        $graphics = [System.Drawing.Graphics]::FromImage($resized)
+        try {
+            $graphics.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+            $graphics.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
+            $graphics.DrawImage($sourceBitmap, 0, 0, $targetWidth, $targetHeight)
+        } finally {
+            $graphics.Dispose()
+        }
+        $bitmap = $resized
+    }
+    try {
+        $bitmap.Save($TargetPath, [System.Drawing.Imaging.ImageFormat]::Png)
+    } finally {
+        if ($bitmap -ne $sourceBitmap) { $bitmap.Dispose() }
+        $sourceBitmap.Dispose()
+    }
+}
+
 function Add-DirectoryRecord([System.Collections.Generic.List[byte[]]]$Entries, [string]$LongName, [string]$ShortRaw, [byte]$Attr, [uint32]$Cluster, [uint32]$Size) {
     foreach ($lfn in (New-LfnEntries $LongName $ShortRaw)) { $Entries.Add($lfn) }
     $Entries.Add((New-DirectoryEntry $ShortRaw $Attr $Cluster $Size))
@@ -627,7 +665,10 @@ function Add-DirectoryRecord([System.Collections.Generic.List[byte[]]]$Entries, 
 
 function Write-Fat32Image([string]$ImagePath, [string]$WallpaperDir, [array]$Files, [int]$SizeMB, [switch]$SmokeCaFixture) {
     $bytesPerSector = 512
-    $sectorsPerCluster = 8
+    # The wallpaper pack stages a fairly large number of image + thumbnail
+    # files, so use a slightly larger cluster here to keep the fixed directory
+    # block from overflowing as the asset list grows.
+    $sectorsPerCluster = 16
     $reservedSectors = 32
     $fatCount = 2
     $totalSectors = [int](($SizeMB * 1024 * 1024) / $bytesPerSector)
@@ -1197,14 +1238,25 @@ if (-not [string]::IsNullOrWhiteSpace($ImageViewerRuntimeSmokePath)) {
 }
 
 foreach ($name in $WallpaperNames) {
+    $fullSource = Join-Path $InputDir "$name.png"
+    if (-not (Test-Path $fullSource)) {
+        throw "Missing expected wallpaper asset: $fullSource"
+    }
+    $thumbSource = Join-Path $InputDir "${name}_thumb.png"
+    $hasDedicatedThumb = Test-Path $thumbSource
+    if (-not $hasDedicatedThumb) {
+        $thumbSource = $fullSource
+    }
+
     foreach ($suffix in @("", "_thumb")) {
         $pngName = "$name$suffix.png"
-        $source = Join-Path $InputDir $pngName
-        if (-not (Test-Path $source)) {
-            throw "Missing expected wallpaper asset: $source"
-        }
+        $source = if ($suffix -eq "_thumb") { $thumbSource } else { $fullSource }
         $targetPng = Join-Path $wallpaperDir $pngName
-        Copy-Item $source $targetPng -Force
+        if ($suffix -eq "_thumb" -and -not $hasDedicatedThumb) {
+            Write-ResizedPngFile $source $targetPng -MaxWidth 160 -MaxHeight 120
+        } else {
+            Copy-Item $source $targetPng -Force
+        }
         $staged += Get-Item $targetPng
 
         $aliases = $BareMetalAliases[$name]
@@ -1214,7 +1266,11 @@ foreach ($name in $WallpaperNames) {
         $gximgName = if ($suffix -eq "_thumb") { $aliases.Thumb } else { $aliases.Full }
         $targetGximg = Join-Path $wallpaperDir $gximgName
         if ($suffix -eq "_thumb") {
-            Write-GximgFile $source $targetGximg
+            if ($hasDedicatedThumb) {
+                Write-GximgFile $source $targetGximg
+            } else {
+                Write-GximgFile $source $targetGximg -MaxWidth 160 -MaxHeight 120
+            }
         } else {
             Write-GximgFile $source $targetGximg -MaxWidth 800 -MaxHeight 600
         }
