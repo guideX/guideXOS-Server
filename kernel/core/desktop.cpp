@@ -832,22 +832,269 @@ static TaskbarDockPosition parse_taskbar_position(const char* value)
     return TaskbarDockPosition::Bottom;
 }
 
+static const char* kBareMetalDisplayOptionsStorePath = "/display-options.cfg";
+static const int kBareMetalWallpaperIdMax = 96;
+static const int kBareMetalScaleModeMax = 16;
+static const int kBareMetalThemeIdMax = 32;
+static const int kBareMetalTaskbarPositionMax = 16;
+
+static bool parse_system_icon_setting(const char* buffer, int count, const char* key, bool currentValue);
+
+struct BareMetalDisplayOptionsData {
+    char wallpaperId[kBareMetalWallpaperIdMax];
+    char backgroundScaleMode[kBareMetalScaleModeMax];
+    char desktopThemeId[kBareMetalThemeIdMax];
+    char taskbarPosition[kBareMetalTaskbarPositionMax];
+    bool showDesktopTrash;
+    bool showDesktopThisSystem;
+    bool showDesktopFileManager;
+    bool showDesktopSystemSettings;
+    bool smallLiveDesktopFolderIcons;
+    bool autoArrangeDesktopIcons;
+};
+
+static void bare_metal_display_options_defaults(BareMetalDisplayOptionsData& store)
+{
+    store.wallpaperId[0] = '\0';
+    desktop_str_copy(store.backgroundScaleMode, "fill", (int)sizeof(store.backgroundScaleMode));
+    desktop_str_copy(store.desktopThemeId, "classic", (int)sizeof(store.desktopThemeId));
+    desktop_str_copy(store.taskbarPosition, "bottom", (int)sizeof(store.taskbarPosition));
+    store.showDesktopTrash = true;
+    store.showDesktopThisSystem = true;
+    store.showDesktopFileManager = true;
+    store.showDesktopSystemSettings = false;
+    store.smallLiveDesktopFolderIcons = true;
+    store.autoArrangeDesktopIcons = false;
+}
+
+static bool bare_metal_parse_bool_value(const char* value, bool fallback)
+{
+    if (!value) return fallback;
+    if (desktop_str_eq(value, "1") || desktop_str_eq(value, "true") || desktop_str_eq(value, "yes") || desktop_str_eq(value, "on")) return true;
+    if (desktop_str_eq(value, "0") || desktop_str_eq(value, "false") || desktop_str_eq(value, "no") || desktop_str_eq(value, "off")) return false;
+    return fallback;
+}
+
+static void bare_metal_trim_in_place(char* value)
+{
+    if (!value) return;
+    int len = desktop_strlen(value);
+    while (len > 0 && (value[len - 1] == '\n' || value[len - 1] == '\r' || value[len - 1] == ' ' || value[len - 1] == '\t')) {
+        value[--len] = '\0';
+    }
+    int begin = 0;
+    while (value[begin] == ' ' || value[begin] == '\t' || value[begin] == '\r' || value[begin] == '\n') {
+        ++begin;
+    }
+    if (begin > 0) {
+        int i = 0;
+        while (value[begin + i]) {
+            value[i] = value[begin + i];
+            ++i;
+        }
+        value[i] = '\0';
+    }
+}
+
+static const char* bare_metal_normalize_scale_mode(const char* value)
+{
+    if (desktop_str_eq(value, "fill") || desktop_str_eq(value, "fit") || desktop_str_eq(value, "stretch") || desktop_str_eq(value, "center") || desktop_str_eq(value, "tile")) {
+        return value;
+    }
+    return "fill";
+}
+
+static const char* bare_metal_normalize_taskbar_position(const char* value)
+{
+    if (desktop_str_eq(value, "bottom")) return "bottom";
+    if (desktop_str_eq(value, "top")) return "top";
+    if (desktop_str_eq(value, "left")) return "left";
+    if (desktop_str_eq(value, "right")) return "right";
+    return "bottom";
+}
+
+static bool bare_metal_load_display_options_legacy(BareMetalDisplayOptionsData& store)
+{
+    bare_metal_display_options_defaults(store);
+
+    char value[16];
+    int32_t count = vfs::read_file("/desktop.taskbar.position", value, sizeof(value) - 1);
+    if (count > 0) {
+        value[count] = '\0';
+        bare_metal_trim_in_place(value);
+        desktop_str_copy(store.taskbarPosition, taskbar_position_name(parse_taskbar_position(value)), (int)sizeof(store.taskbarPosition));
+    }
+
+    char modeBuf[32];
+    count = vfs::read_file("/desktop.background.scale", modeBuf, sizeof(modeBuf) - 1);
+    if (count > 0) {
+        modeBuf[count] = '\0';
+        bare_metal_trim_in_place(modeBuf);
+        desktop_str_copy(store.backgroundScaleMode, bare_metal_normalize_scale_mode(modeBuf), (int)sizeof(store.backgroundScaleMode));
+    }
+
+    char idBuf[96];
+    count = vfs::read_file("/desktop.wallpaper.id", idBuf, sizeof(idBuf) - 1);
+    if (count > 0) {
+        idBuf[count] = '\0';
+        bare_metal_trim_in_place(idBuf);
+        desktop_str_copy(store.wallpaperId, idBuf, (int)sizeof(store.wallpaperId));
+    }
+
+    char buffer[192];
+    count = vfs::read_file("/desktop.system.icons", buffer, sizeof(buffer) - 1);
+    if (count > 0) {
+        buffer[count] = '\0';
+        store.showDesktopTrash = parse_system_icon_setting(buffer, count, "Trash", true);
+        store.showDesktopThisSystem = parse_system_icon_setting(buffer, count, "ThisSystem", true);
+        store.showDesktopFileManager = parse_system_icon_setting(buffer, count, "FileManager", true);
+        store.showDesktopSystemSettings = parse_system_icon_setting(buffer, count, "SystemSettings", false);
+    }
+
+    return true;
+}
+
+static bool bare_metal_load_display_options(BareMetalDisplayOptionsData& out)
+{
+    bare_metal_display_options_defaults(out);
+
+    vfs::FileInfo info{};
+    if (vfs::stat(kBareMetalDisplayOptionsStorePath, &info) == vfs::VFS_OK && info.type == vfs::FILE_TYPE_REGULAR && info.size > 0) {
+        char text[512];
+        int32_t count = vfs::read_file(kBareMetalDisplayOptionsStorePath, text, sizeof(text) - 1);
+        if (count > 0) {
+            text[count] = '\0';
+            bool parsedAny = false;
+            char* cursor = text;
+            while (*cursor) {
+                char* line = cursor;
+                while (*cursor && *cursor != '\n' && *cursor != '\r') {
+                    ++cursor;
+                }
+                if (*cursor) {
+                    *cursor++ = '\0';
+                    while (*cursor == '\n' || *cursor == '\r') {
+                        ++cursor;
+                    }
+                }
+                bare_metal_trim_in_place(line);
+                if (!line[0] || line[0] == '#' || line[0] == ';') continue;
+                char* sep = line;
+                while (*sep && *sep != '=') ++sep;
+                if (*sep != '=') continue;
+                *sep++ = '\0';
+                bare_metal_trim_in_place(line);
+                bare_metal_trim_in_place(sep);
+                if (desktop_str_eq(line, "version") || desktop_str_eq(line, "displayOptionsVersion")) {
+                    parsedAny = true;
+                    continue;
+                }
+                if (desktop_str_eq(line, "wallpaperId")) {
+                    desktop_str_copy(out.wallpaperId, sep, (int)sizeof(out.wallpaperId));
+                    parsedAny = true;
+                } else if (desktop_str_eq(line, "backgroundScaleMode")) {
+                    desktop_str_copy(out.backgroundScaleMode, bare_metal_normalize_scale_mode(sep), (int)sizeof(out.backgroundScaleMode));
+                    parsedAny = true;
+                } else if (desktop_str_eq(line, "desktopThemeId")) {
+                    desktop_str_copy(out.desktopThemeId, sep, (int)sizeof(out.desktopThemeId));
+                    parsedAny = true;
+                } else if (desktop_str_eq(line, "taskbarPosition")) {
+                    desktop_str_copy(out.taskbarPosition, bare_metal_normalize_taskbar_position(sep), (int)sizeof(out.taskbarPosition));
+                    parsedAny = true;
+                } else if (desktop_str_eq(line, "showDesktopTrash")) {
+                    out.showDesktopTrash = bare_metal_parse_bool_value(sep, out.showDesktopTrash);
+                    parsedAny = true;
+                } else if (desktop_str_eq(line, "showDesktopThisSystem")) {
+                    out.showDesktopThisSystem = bare_metal_parse_bool_value(sep, out.showDesktopThisSystem);
+                    parsedAny = true;
+                } else if (desktop_str_eq(line, "showDesktopFileManager")) {
+                    out.showDesktopFileManager = bare_metal_parse_bool_value(sep, out.showDesktopFileManager);
+                    parsedAny = true;
+                } else if (desktop_str_eq(line, "showDesktopSystemSettings")) {
+                    out.showDesktopSystemSettings = bare_metal_parse_bool_value(sep, out.showDesktopSystemSettings);
+                    parsedAny = true;
+                } else if (desktop_str_eq(line, "smallLiveDesktopFolderIcons")) {
+                    out.smallLiveDesktopFolderIcons = bare_metal_parse_bool_value(sep, out.smallLiveDesktopFolderIcons);
+                    parsedAny = true;
+                } else if (desktop_str_eq(line, "autoArrangeDesktopIcons")) {
+                    out.autoArrangeDesktopIcons = bare_metal_parse_bool_value(sep, out.autoArrangeDesktopIcons);
+                    parsedAny = true;
+                }
+            }
+
+            if (parsedAny) {
+                return true;
+            }
+        }
+    }
+
+    bare_metal_load_display_options_legacy(out);
+    return true;
+}
+
+static void bare_metal_save_display_options(const BareMetalDisplayOptionsData& store)
+{
+    char text[512];
+    int pos = 0;
+    desktop_append_text(text, &pos, sizeof(text), "version=1\n");
+    desktop_append_text(text, &pos, sizeof(text), "wallpaperId=");
+    desktop_append_text(text, &pos, sizeof(text), store.wallpaperId[0] ? store.wallpaperId : "");
+    desktop_append_text(text, &pos, sizeof(text), "\nbackgroundScaleMode=");
+    desktop_append_text(text, &pos, sizeof(text), store.backgroundScaleMode[0] ? store.backgroundScaleMode : "fill");
+    desktop_append_text(text, &pos, sizeof(text), "\ndesktopThemeId=");
+    desktop_append_text(text, &pos, sizeof(text), store.desktopThemeId[0] ? store.desktopThemeId : "classic");
+    desktop_append_text(text, &pos, sizeof(text), "\ntaskbarPosition=");
+    desktop_append_text(text, &pos, sizeof(text), store.taskbarPosition[0] ? store.taskbarPosition : "bottom");
+    desktop_append_text(text, &pos, sizeof(text), "\nshowDesktopTrash=");
+    desktop_append_text(text, &pos, sizeof(text), store.showDesktopTrash ? "1" : "0");
+    desktop_append_text(text, &pos, sizeof(text), "\nshowDesktopThisSystem=");
+    desktop_append_text(text, &pos, sizeof(text), store.showDesktopThisSystem ? "1" : "0");
+    desktop_append_text(text, &pos, sizeof(text), "\nshowDesktopFileManager=");
+    desktop_append_text(text, &pos, sizeof(text), store.showDesktopFileManager ? "1" : "0");
+    desktop_append_text(text, &pos, sizeof(text), "\nshowDesktopSystemSettings=");
+    desktop_append_text(text, &pos, sizeof(text), store.showDesktopSystemSettings ? "1" : "0");
+    desktop_append_text(text, &pos, sizeof(text), "\nsmallLiveDesktopFolderIcons=");
+    desktop_append_text(text, &pos, sizeof(text), store.smallLiveDesktopFolderIcons ? "1" : "0");
+    desktop_append_text(text, &pos, sizeof(text), "\nautoArrangeDesktopIcons=");
+    desktop_append_text(text, &pos, sizeof(text), store.autoArrangeDesktopIcons ? "1" : "0");
+    desktop_append_text(text, &pos, sizeof(text), "\n");
+    vfs::write_file(kBareMetalDisplayOptionsStorePath, text, (uint32_t)pos);
+
+    const char* taskbar = store.taskbarPosition[0] ? store.taskbarPosition : "bottom";
+    vfs::write_file("/desktop.taskbar.position", taskbar, (uint32_t)desktop_strlen(taskbar));
+
+    char buffer[160];
+    pos = 0;
+    desktop_append_text(buffer, &pos, sizeof(buffer), "Trash=");
+    desktop_append_text(buffer, &pos, sizeof(buffer), store.showDesktopTrash ? "1\n" : "0\n");
+    desktop_append_text(buffer, &pos, sizeof(buffer), "ThisSystem=");
+    desktop_append_text(buffer, &pos, sizeof(buffer), store.showDesktopThisSystem ? "1\n" : "0\n");
+    desktop_append_text(buffer, &pos, sizeof(buffer), "FileManager=");
+    desktop_append_text(buffer, &pos, sizeof(buffer), store.showDesktopFileManager ? "1\n" : "0\n");
+    desktop_append_text(buffer, &pos, sizeof(buffer), "SystemSettings=");
+    desktop_append_text(buffer, &pos, sizeof(buffer), store.showDesktopSystemSettings ? "1\n" : "0\n");
+    vfs::write_file("/desktop.system.icons", buffer, (uint32_t)pos);
+
+    if (store.wallpaperId[0]) {
+        vfs::write_file("/desktop.wallpaper.id", store.wallpaperId, (uint32_t)desktop_strlen(store.wallpaperId));
+    }
+    const char* mode = store.backgroundScaleMode[0] ? store.backgroundScaleMode : "fill";
+    vfs::write_file("/desktop.background.scale", mode, (uint32_t)desktop_strlen(mode));
+}
+
 static void persist_taskbar_position()
 {
-    const char* value = taskbar_position_name(s_taskbarDockPosition);
-    vfs::write_file("/desktop.taskbar.position", value, (uint32_t)desktop_strlen(value));
+    BareMetalDisplayOptionsData store;
+    bare_metal_load_display_options(store);
+    desktop_str_copy(store.taskbarPosition, taskbar_position_name(s_taskbarDockPosition), (int)sizeof(store.taskbarPosition));
+    bare_metal_save_display_options(store);
 }
 
 static void load_persisted_taskbar_position()
 {
-    char value[16];
-    int32_t count = vfs::read_file("/desktop.taskbar.position", value, sizeof(value) - 1);
-    if (count <= 0) return;
-    value[count] = '\0';
-    while (count > 0 && (value[count - 1] == '\n' || value[count - 1] == '\r' || value[count - 1] == ' ' || value[count - 1] == '\t')) {
-        value[--count] = '\0';
-    }
-    s_taskbarDockPosition = parse_taskbar_position(value);
+    BareMetalDisplayOptionsData store;
+    if (!bare_metal_load_display_options(store)) return;
+    s_taskbarDockPosition = parse_taskbar_position(store.taskbarPosition);
     serial::puts("[desktop] loaded taskbar position=");
     serial::puts(taskbar_position_name(s_taskbarDockPosition));
     serial::puts("\n");
@@ -2146,35 +2393,24 @@ static bool parse_system_icon_setting(const char* buffer, int count, const char*
 
 static void persist_system_desktop_icons()
 {
-    char buffer[160];
-    int pos = 0;
-    desktop_append_text(buffer, &pos, sizeof(buffer), "Trash=");
-    desktop_append_text(buffer, &pos, sizeof(buffer), s_systemDesktopIconVisibility.showTrash ? "1\n" : "0\n");
-    desktop_append_text(buffer, &pos, sizeof(buffer), "ThisSystem=");
-    desktop_append_text(buffer, &pos, sizeof(buffer), s_systemDesktopIconVisibility.showThisSystem ? "1\n" : "0\n");
-    desktop_append_text(buffer, &pos, sizeof(buffer), "FileManager=");
-    desktop_append_text(buffer, &pos, sizeof(buffer), s_systemDesktopIconVisibility.showFileManager ? "1\n" : "0\n");
-    desktop_append_text(buffer, &pos, sizeof(buffer), "SystemSettings=");
-    desktop_append_text(buffer, &pos, sizeof(buffer), s_systemDesktopIconVisibility.showSystemSettings ? "1\n" : "0\n");
-    int32_t written = vfs::write_file("/desktop.system.icons", buffer, (uint32_t)pos);
-    serial::puts(written == pos ? "[desktop] system desktop icon settings saved\n" : "[desktop] system desktop icon settings save failed\n");
+    BareMetalDisplayOptionsData store;
+    bare_metal_load_display_options(store);
+    store.showDesktopTrash = s_systemDesktopIconVisibility.showTrash;
+    store.showDesktopThisSystem = s_systemDesktopIconVisibility.showThisSystem;
+    store.showDesktopFileManager = s_systemDesktopIconVisibility.showFileManager;
+    store.showDesktopSystemSettings = s_systemDesktopIconVisibility.showSystemSettings;
+    bare_metal_save_display_options(store);
+    serial::puts("[desktop] system desktop icon settings saved\n");
 }
 
 void reload_persisted_system_desktop_icons()
 {
-    char buffer[192];
-    int32_t count = vfs::read_file("/desktop.system.icons", buffer, sizeof(buffer) - 1);
-    if (count <= 0) {
-        s_systemDesktopIconVisibility = {true, true, true, false};
-        s_systemDesktopIconVisibilityLoaded = true;
-        serial::puts("[desktop] system desktop icon settings defaulted: Trash=1 ThisSystem=1 FileManager=1 SystemSettings=0\n");
-        return;
-    }
-    buffer[count] = '\0';
-    s_systemDesktopIconVisibility.showTrash = parse_system_icon_setting(buffer, count, "Trash", true);
-    s_systemDesktopIconVisibility.showThisSystem = parse_system_icon_setting(buffer, count, "ThisSystem", true);
-    s_systemDesktopIconVisibility.showFileManager = parse_system_icon_setting(buffer, count, "FileManager", true);
-    s_systemDesktopIconVisibility.showSystemSettings = parse_system_icon_setting(buffer, count, "SystemSettings", false);
+    BareMetalDisplayOptionsData store;
+    bare_metal_load_display_options(store);
+    s_systemDesktopIconVisibility.showTrash = store.showDesktopTrash;
+    s_systemDesktopIconVisibility.showThisSystem = store.showDesktopThisSystem;
+    s_systemDesktopIconVisibility.showFileManager = store.showDesktopFileManager;
+    s_systemDesktopIconVisibility.showSystemSettings = store.showDesktopSystemSettings;
     s_systemDesktopIconVisibilityLoaded = true;
     serial::puts("[desktop] system desktop icon settings loaded\n");
 }
@@ -4507,33 +4743,12 @@ bool draw_wallpaper_thumbnail_by_id(const char* wallpaperId, uint32_t x, uint32_
     return true;
 }
 
-static void persist_wallpaper_id(const char* id)
-{
-    if (!id || !id[0]) return;
-    vfs::write_file("/desktop.wallpaper.id", id, (uint32_t)desktop_strlen(id));
-}
-
-static void persist_wallpaper_scale_mode()
-{
-    const char* mode = wallpaper_scale_mode_name(s_wallpaperConfig.scaleMode);
-    vfs::write_file("/desktop.background.scale", mode, (uint32_t)desktop_strlen(mode));
-}
-
 static void load_persisted_wallpaper_scale_mode()
 {
-    char modeBuf[32];
-    int32_t count = vfs::read_file("/desktop.background.scale", modeBuf, sizeof(modeBuf) - 1);
-    if (count <= 0) {
-        serial::puts("[desktop] background scale mode default=fill\n");
-        s_wallpaperConfig.scaleMode = WallpaperScaleMode::Fill;
-        return;
-    }
-    modeBuf[count] = '\0';
-    while (count > 0 && (modeBuf[count - 1] == '\n' || modeBuf[count - 1] == '\r' || modeBuf[count - 1] == ' ' || modeBuf[count - 1] == '\t')) {
-        modeBuf[--count] = '\0';
-    }
+    BareMetalDisplayOptionsData store;
+    bare_metal_load_display_options(store);
     bool supported = true;
-    s_wallpaperConfig.scaleMode = parse_wallpaper_scale_mode(modeBuf, &supported);
+    s_wallpaperConfig.scaleMode = parse_wallpaper_scale_mode(store.backgroundScaleMode, &supported);
     serial::puts("[desktop] loaded background scale mode=");
     serial::puts(wallpaper_scale_mode_name(s_wallpaperConfig.scaleMode));
     serial::puts("\n");
@@ -4542,17 +4757,14 @@ static void load_persisted_wallpaper_scale_mode()
 
 static void load_persisted_wallpaper_id()
 {
-    char idBuf[96];
-    int32_t count = vfs::read_file("/desktop.wallpaper.id", idBuf, sizeof(idBuf) - 1);
-    if (count <= 0) return;
-    idBuf[count] = '\0';
-    while (count > 0 && (idBuf[count - 1] == '\n' || idBuf[count - 1] == '\r' || idBuf[count - 1] == ' ' || idBuf[count - 1] == '\t')) {
-        idBuf[--count] = '\0';
-    }
+    BareMetalDisplayOptionsData store;
+    bare_metal_load_display_options(store);
+    const char* wallpaperId = store.wallpaperId;
+    if (!wallpaperId[0]) return;
     serial::puts("[desktop] loaded saved background id=");
-    serial::puts(idBuf);
+    serial::puts(wallpaperId);
     serial::puts("\n");
-    const BuiltInGradientPalette* gradient = find_builtin_gradient(idBuf);
+    const BuiltInGradientPalette* gradient = find_builtin_gradient(wallpaperId);
     if (gradient) {
         s_wallpaperConfig.type = WallpaperType::Gradient;
         s_wallpaperConfig.topColor = gradient->topColor;
@@ -4565,7 +4777,7 @@ static void load_persisted_wallpaper_id()
         return;
     }
 
-    const BuiltInWallpaperPalette* entry = find_builtin_wallpaper(idBuf);
+    const BuiltInWallpaperPalette* entry = find_builtin_wallpaper(wallpaperId);
     if (entry) {
         s_wallpaperConfig.type = WallpaperType::BuiltIn;
         s_wallpaperConfig.topColor = entry->topColor;
@@ -4598,8 +4810,11 @@ void set_wallpaper_by_id(const char* wallpaperId)
         s_wallpaperConfig.wallpaperId = gradient->id;
         s_wallpaperConfig.showBranding = true;
         s_wallpaperConfig.showGrid = true;
-        persist_wallpaper_id(gradient->id);
-        persist_wallpaper_scale_mode();
+        BareMetalDisplayOptionsData store;
+        bare_metal_load_display_options(store);
+        desktop_str_copy(store.wallpaperId, gradient->id, (int)sizeof(store.wallpaperId));
+        desktop_str_copy(store.backgroundScaleMode, wallpaper_scale_mode_name(s_wallpaperConfig.scaleMode), (int)sizeof(store.backgroundScaleMode));
+        bare_metal_save_display_options(store);
         s_needsRedraw = true;
         return;
     }
@@ -4623,8 +4838,11 @@ void set_wallpaper_by_id(const char* wallpaperId)
     s_wallpaperConfig.showBranding = false;
     s_wallpaperConfig.showGrid = false;
     if (shouldPersist) {
-        persist_wallpaper_id(entry->id);
-        persist_wallpaper_scale_mode();
+        BareMetalDisplayOptionsData store;
+        bare_metal_load_display_options(store);
+        desktop_str_copy(store.wallpaperId, entry->id, (int)sizeof(store.wallpaperId));
+        desktop_str_copy(store.backgroundScaleMode, wallpaper_scale_mode_name(s_wallpaperConfig.scaleMode), (int)sizeof(store.backgroundScaleMode));
+        bare_metal_save_display_options(store);
     }
     s_needsRedraw = true;
 }

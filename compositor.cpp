@@ -9,6 +9,7 @@
 #include "file_explorer.h"
 #include "desktop_theme.h"
 #include "shutdown_dialog.h"
+#include "display_options_store.h"
 #include "icons.h"
 #include "right_click_menu.h"
 #include "notification_manager.h"
@@ -184,6 +185,51 @@ namespace gxos {
             if (lower == "left") return TaskbarPosition::Left;
             if (lower == "right") return TaskbarPosition::Right;
             return TaskbarPosition::Bottom;
+        }
+
+        static DisplayOptionsStoreData displayOptionsFromDesktopConfig(const DesktopConfigData& cfg) {
+            DisplayOptionsStoreData out;
+            out.wallpaperId = !cfg.wallpaperId.empty()
+                ? cfg.wallpaperId
+                : WallpaperRegistry::IdForAssetPath(cfg.wallpaperPath);
+            out.backgroundScaleMode = cfg.backgroundScaleMode.empty() ? "fill" : cfg.backgroundScaleMode;
+            out.desktopThemeId = cfg.desktopThemeId.empty() ? "classic" : cfg.desktopThemeId;
+            out.taskbarPosition = cfg.taskbarPosition.empty() ? "bottom" : cfg.taskbarPosition;
+            out.showDesktopTrash = cfg.showDesktopTrash;
+            out.showDesktopThisSystem = cfg.showDesktopThisSystem;
+            out.showDesktopFileManager = cfg.showDesktopFileManager;
+            out.showDesktopSystemSettings = cfg.showDesktopSystemSettings;
+            out.smallLiveDesktopFolderIcons = cfg.smallLiveDesktopFolderIcons;
+            out.autoArrangeDesktopIcons = cfg.autoArrangeDesktopIcons;
+            return out;
+        }
+
+        static void applyDisplayOptionsToDesktopConfig(const DisplayOptionsStoreData& store, DesktopConfigData& cfg) {
+            cfg.wallpaperId = store.wallpaperId;
+            cfg.backgroundScaleMode = store.backgroundScaleMode.empty() ? "fill" : store.backgroundScaleMode;
+            cfg.desktopThemeId = store.desktopThemeId.empty() ? "classic" : store.desktopThemeId;
+            cfg.taskbarPosition = store.taskbarPosition.empty() ? "bottom" : store.taskbarPosition;
+            cfg.showDesktopTrash = store.showDesktopTrash;
+            cfg.showDesktopThisSystem = store.showDesktopThisSystem;
+            cfg.showDesktopFileManager = store.showDesktopFileManager;
+            cfg.showDesktopSystemSettings = store.showDesktopSystemSettings;
+            cfg.smallLiveDesktopFolderIcons = store.smallLiveDesktopFolderIcons;
+            cfg.autoArrangeDesktopIcons = store.autoArrangeDesktopIcons;
+        }
+
+        static bool loadDisplayOptionsStore(DisplayOptionsStoreData& out, std::string& err) {
+            if (DisplayOptionsStore::Load("display-options.cfg", out, err)) {
+                return true;
+            }
+            DesktopConfigData legacyCfg;
+            std::string legacyErr;
+            if (DesktopConfig::Load("desktop.json", legacyCfg, legacyErr)) {
+                out = displayOptionsFromDesktopConfig(legacyCfg);
+                err.clear();
+                return true;
+            }
+            err = legacyErr;
+            return false;
         }
 
         static void syncDesktopThemeFromConfig(DesktopConfigData& cfg) {
@@ -1685,7 +1731,24 @@ namespace gxos {
             logCompositorList("start menu app", g_startMenuAllProgsSorted);
         }
 
-        void Compositor::saveDesktopConfig( ) { g_cfg.taskbarPosition = taskbarPositionName(g_taskbarPosition); g_cfg.desktopThemeId = DesktopThemeIdToString(GetCurrentDesktopThemeId()); std::string err; if (!DesktopConfig::Save("desktop.json", g_cfg, err)) Logger::write(LogLevel::Error, "Shortcut persistence failure: " + err); else Logger::write(LogLevel::Info, "Desktop config persisted"); }
+        void Compositor::saveDesktopConfig( ) {
+            g_cfg.taskbarPosition = taskbarPositionName(g_taskbarPosition);
+            g_cfg.desktopThemeId = DesktopThemeIdToString(GetCurrentDesktopThemeId());
+            g_cfg.backgroundScaleMode = g_backgroundScaleMode;
+
+            std::string legacyErr;
+            if (!DesktopConfig::Save("desktop.json", g_cfg, legacyErr)) {
+                Logger::write(LogLevel::Error, "Shortcut persistence failure: " + legacyErr);
+            } else {
+                Logger::write(LogLevel::Info, "Desktop config persisted");
+            }
+
+            DisplayOptionsStoreData displayStore = displayOptionsFromDesktopConfig(g_cfg);
+            std::string displayErr;
+            if (!DisplayOptionsStore::Save("display-options.cfg", displayStore, displayErr)) {
+                Logger::write(LogLevel::Warn, "Display options store save failed: " + displayErr);
+            }
+        }
         void Compositor::addRecent(const std::string& act) { auto it = std::find(g_cfg.recent.begin( ), g_cfg.recent.end( ), act); if (it != g_cfg.recent.end( )) g_cfg.recent.erase(it); g_cfg.recent.insert(g_cfg.recent.begin( ), act); if (g_cfg.recent.size( ) > 20) g_cfg.recent.pop_back( ); refreshDesktopItems( ); saveDesktopConfig( ); }
         void Compositor::pinAction(const std::string& act) { if (act.empty( )) return; if (std::find(g_cfg.pinned.begin( ), g_cfg.pinned.end( ), act) == g_cfg.pinned.end( )) { g_cfg.pinned.push_back(act); refreshDesktopItems( ); saveDesktopConfig( ); } }
         void Compositor::unpinAction(const std::string& act) { auto it = std::find(g_cfg.pinned.begin( ), g_cfg.pinned.end( ), act); if (it != g_cfg.pinned.end( )) { g_cfg.pinned.erase(it); refreshDesktopItems( ); saveDesktopConfig( ); } }
@@ -2636,18 +2699,12 @@ namespace gxos {
             }
             g_cfg.smallLiveDesktopFolderIcons = smallIcons;
             g_cfg.taskbarPosition = taskbarPositionName(g_taskbarPosition);
-            std::string err;
-            const bool saved = DesktopConfig::Save("desktop.json", g_cfg, err);
-            if (!saved) {
-                Logger::write(LogLevel::Error, "Hosted desktop folder icon preference save failed: " + err);
-            } else {
-                Logger::write(LogLevel::Info, "Hosted desktop folder icon preference persisted");
-            }
+            saveDesktopConfig();
             refreshDesktopItems();
             invalidate(0);
             Logger::write(LogLevel::Info,
                 std::string("Hosted desktop folder icon preference set: ") + (smallIcons ? "small" : "normal"));
-            return saved;
+            return true;
 #else
             (void)smallIcons;
             return false;
@@ -2671,18 +2728,12 @@ namespace gxos {
             }
             g_cfg.autoArrangeDesktopIcons = enabled;
             g_cfg.taskbarPosition = taskbarPositionName(g_taskbarPosition);
-            std::string err;
-            const bool saved = DesktopConfig::Save("desktop.json", g_cfg, err);
-            if (!saved) {
-                Logger::write(LogLevel::Error, "Hosted desktop auto-arrange preference save failed: " + err);
-            } else {
-                Logger::write(LogLevel::Info, "Hosted desktop auto-arrange preference persisted");
-            }
+            saveDesktopConfig();
             refreshDesktopItems();
             invalidate(0);
             Logger::write(LogLevel::Info,
                 std::string("Hosted desktop auto-arrange preference set: ") + (enabled ? "enabled" : "disabled"));
-            return saved;
+            return true;
 #else
             (void)enabled;
             return false;
@@ -4408,7 +4459,14 @@ namespace gxos {
             case MsgType::MT_DesktopConfigReload: {
                 DesktopConfigData cfg;
                 std::string cfgErr;
-                if (DesktopConfig::Load("desktop.json", cfg, cfgErr)) {
+                bool cfgOk = DesktopConfig::Load("desktop.json", cfg, cfgErr);
+                DisplayOptionsStoreData displayStore;
+                std::string displayErr;
+                bool displayOk = loadDisplayOptionsStore(displayStore, displayErr);
+                if (displayOk) {
+                    applyDisplayOptionsToDesktopConfig(displayStore, cfg);
+                }
+                if (cfgOk || displayOk) {
                     g_cfg = cfg;
                     syncDesktopThemeFromConfig(g_cfg);
                     g_taskbarPosition = parseTaskbarPosition(g_cfg.taskbarPosition);
@@ -4629,14 +4687,23 @@ namespace gxos {
             initWindow( );
 #endif
             initVideoBackend( );
-            DesktopConfigData cfg; std::string cfgErr; bool cfgOk = DesktopConfig::Load("desktop.json", cfg, cfgErr);
-            g_cfg = cfg; // Store config
+            DesktopConfigData cfg;
+            std::string cfgErr;
+            bool cfgOk = DesktopConfig::Load("desktop.json", cfg, cfgErr);
+            DisplayOptionsStoreData displayStore;
+            std::string displayErr;
+            const bool displayOk = loadDisplayOptionsStore(displayStore, displayErr);
+            if (displayOk) {
+                applyDisplayOptionsToDesktopConfig(displayStore, cfg);
+            }
+            g_cfg = cfg;
             Logger::write(LogLevel::Info, std::string("Compositor DesktopConfig loaded=") + (cfgOk ? "true" : "false") + " err=" + cfgErr);
+            Logger::write(LogLevel::Info, std::string("Compositor display options store loaded=") + (displayOk ? "true" : "false") + " err=" + displayErr);
             syncDesktopThemeFromConfig(g_cfg);
             g_taskbarPosition = parseTaskbarPosition(g_cfg.taskbarPosition);
             g_cfg.taskbarPosition = taskbarPositionName(g_taskbarPosition);
             Logger::write(LogLevel::Info, std::string("Compositor taskbar position=") + g_cfg.taskbarPosition);
-            std::string configuredScale = cfg.backgroundScaleMode.empty() ? "fill" : cfg.backgroundScaleMode;
+            std::string configuredScale = g_cfg.backgroundScaleMode.empty() ? "fill" : g_cfg.backgroundScaleMode;
             g_backgroundScaleMode = WallpaperRegistry::NormalizeScaleModeOrDefault(configuredScale);
             if (configuredScale != g_backgroundScaleMode) {
                 Logger::write(LogLevel::Warn, std::string("Compositor unsupported background scale mode '") + configuredScale + "', falling back to fill");
@@ -4703,7 +4770,7 @@ namespace gxos {
             
             bool running = true; while (running) { pumpEvents( ); ipc::Message m; if (ipc::Bus::pop(kGuiChanIn, m, 30)) { if (m.type == (uint32_t)MsgType::MT_Ping && m.data.size( ) == 3 && std::string(m.data.begin( ), m.data.end( )) == "bye") running = false; else { const uint64_t msgStartMs = nowMs( ); hostedFreezeDiagnosticsOnMessageBegin(m.type); handleMessage(m); hostedFreezeDiagnosticsOnMessageEnd(nowMs( ) - msgStartMs); } } }
             DesktopConfigData outCfg = g_cfg; { std::lock_guard<std::mutex> lk(g_lock); outCfg.windows.clear( ); for (size_t i = 0; i < g_z.size( ); ++i) { uint64_t id = g_z[i]; auto it = g_windows.find(id); if (it == g_windows.end( )) continue; const WinInfo& w = it->second; DesktopWindowRec rec; rec.id = w.id; rec.title = w.title; rec.x = w.x; rec.y = w.y; rec.w = w.w; rec.h = w.h; rec.minimized = w.minimized; rec.maximized = w.maximized; rec.z = (int)i; rec.focused = (g_focus == w.id); rec.snap = w.snapState; outCfg.windows.push_back(rec); } }
-            std::string cerr; DesktopConfig::Save("desktop.json", outCfg, cerr); if (!legacyLoaded) { std::vector<SavedWindow> sw; { std::lock_guard<std::mutex> lk(g_lock); for (auto& kv : g_windows) { sw.push_back(SavedWindow{ kv.second.id, kv.second.title, kv.second.x, kv.second.y, kv.second.w, kv.second.h, kv.second.minimized, kv.second.maximized }); } } std::string err; DesktopState::Save("desktop.state", sw, err); }
+            std::string cerr; DesktopConfig::Save("desktop.json", outCfg, cerr); DisplayOptionsStoreData shutdownDisplayStore = displayOptionsFromDesktopConfig(outCfg); std::string shutdownDisplayErr; DisplayOptionsStore::Save("display-options.cfg", shutdownDisplayStore, shutdownDisplayErr); if (!legacyLoaded) { std::vector<SavedWindow> sw; { std::lock_guard<std::mutex> lk(g_lock); for (auto& kv : g_windows) { sw.push_back(SavedWindow{ kv.second.id, kv.second.title, kv.second.x, kv.second.y, kv.second.w, kv.second.h, kv.second.minimized, kv.second.maximized }); } } std::string err; DesktopState::Save("desktop.state", sw, err); }
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)
             shutdownWindow( );
 #endif

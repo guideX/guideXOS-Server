@@ -1,6 +1,7 @@
 #include "display_options.h"
 
 #include "desktop_config.h"
+#include "display_options_store.h"
 #include "gui_protocol.h"
 #include "ipc_bus.h"
 #include "logger.h"
@@ -34,6 +35,7 @@ bool DisplayOptions::s_showDesktopSystemSettings = false;
 bool DisplayOptions::s_smallLiveDesktopFolderIcons = true;
 
 namespace {
+    const char* kDisplayOptionsStorePath = "display-options.cfg";
     const int kWindowW = 800;
     const int kWindowH = 620;
     const int kTabY = 18;
@@ -111,25 +113,25 @@ namespace {
         publish(MsgType::MT_DrawImage, packDrawImage(windowId, x, y, w, h, path));
     }
 
+    bool loadPersistedDisplayOptions(DisplayOptionsStoreData& out, std::string& err);
+
     std::string selectedWallpaperIdFromConfig()
     {
-        DesktopConfigData cfg;
         std::string err;
-        if (!DesktopConfig::Load("desktop.json", cfg, err)) return WallpaperRegistry::DefaultWallpaper().id;
-        if (!cfg.wallpaperId.empty()) return WallpaperRegistry::ResolveIdOrDefault(cfg.wallpaperId);
-        std::string id = WallpaperRegistry::IdForAssetPath(cfg.wallpaperPath);
-        return id.empty() ? WallpaperRegistry::DefaultBackground().id : id;
+        DisplayOptionsStoreData store;
+        if (!loadPersistedDisplayOptions(store, err)) return WallpaperRegistry::DefaultWallpaper().id;
+        if (!store.wallpaperId.empty()) return WallpaperRegistry::ResolveIdOrDefault(store.wallpaperId);
+        return WallpaperRegistry::DefaultWallpaper().id;
     }
 
     DesktopThemeId selectedThemeIdFromConfig()
     {
-        DesktopConfigData cfg;
         std::string err;
         DesktopThemeId themeId = DesktopThemeId::Classic;
-        if (!DesktopConfig::Load("desktop.json", cfg, err)) {
-            return themeId;
+        DisplayOptionsStoreData store;
+        if (loadPersistedDisplayOptions(store, err)) {
+            TryParseDesktopThemeId(store.desktopThemeId.c_str(), &themeId);
         }
-        TryParseDesktopThemeId(cfg.desktopThemeId.c_str(), &themeId);
         return themeId;
     }
 
@@ -287,6 +289,58 @@ namespace {
     default: return "";
     }
 }
+
+    bool loadPersistedDisplayOptions(DisplayOptionsStoreData& out, std::string& err);
+
+    DisplayOptionsStoreData displayOptionsFromDesktopConfig(const DesktopConfigData& cfg)
+    {
+        DisplayOptionsStoreData out;
+        out.wallpaperId = !cfg.wallpaperId.empty()
+            ? cfg.wallpaperId
+            : WallpaperRegistry::IdForAssetPath(cfg.wallpaperPath);
+        out.backgroundScaleMode = cfg.backgroundScaleMode.empty() ? "fill" : cfg.backgroundScaleMode;
+        out.desktopThemeId = cfg.desktopThemeId.empty() ? "classic" : cfg.desktopThemeId;
+        out.taskbarPosition = cfg.taskbarPosition.empty() ? "bottom" : cfg.taskbarPosition;
+        out.showDesktopTrash = cfg.showDesktopTrash;
+        out.showDesktopThisSystem = cfg.showDesktopThisSystem;
+        out.showDesktopFileManager = cfg.showDesktopFileManager;
+        out.showDesktopSystemSettings = cfg.showDesktopSystemSettings;
+        out.smallLiveDesktopFolderIcons = cfg.smallLiveDesktopFolderIcons;
+        out.autoArrangeDesktopIcons = cfg.autoArrangeDesktopIcons;
+        return out;
+    }
+
+    void applyDisplayOptionsToDesktopConfig(const DisplayOptionsStoreData& store, DesktopConfigData& cfg)
+    {
+        cfg.wallpaperId = store.wallpaperId;
+        cfg.backgroundScaleMode = store.backgroundScaleMode.empty() ? "fill" : store.backgroundScaleMode;
+        cfg.desktopThemeId = store.desktopThemeId.empty() ? "classic" : store.desktopThemeId;
+        cfg.taskbarPosition = store.taskbarPosition.empty() ? "bottom" : store.taskbarPosition;
+        cfg.showDesktopTrash = store.showDesktopTrash;
+        cfg.showDesktopThisSystem = store.showDesktopThisSystem;
+        cfg.showDesktopFileManager = store.showDesktopFileManager;
+        cfg.showDesktopSystemSettings = store.showDesktopSystemSettings;
+        cfg.smallLiveDesktopFolderIcons = store.smallLiveDesktopFolderIcons;
+        cfg.autoArrangeDesktopIcons = store.autoArrangeDesktopIcons;
+    }
+
+    bool loadPersistedDisplayOptions(DisplayOptionsStoreData& out, std::string& err)
+    {
+        if (DisplayOptionsStore::Load(kDisplayOptionsStorePath, out, err)) {
+            return true;
+        }
+
+        DesktopConfigData cfg;
+        std::string legacyErr;
+        if (DesktopConfig::Load("desktop.json", cfg, legacyErr)) {
+            out = displayOptionsFromDesktopConfig(cfg);
+            err.clear();
+            return true;
+        }
+
+        err = legacyErr;
+        return false;
+    }
 }
 
 uint64_t DisplayOptions::Launch()
@@ -310,25 +364,22 @@ void DisplayOptions::loadSelection()
     s_selectedGradientIndex = 0;
     s_appliedGradientIndex = 0;
     s_activeTab = WallpaperRegistry::IsGradientId(selectedId) ? 1 : 0;
-    DesktopConfigData cfg;
-    std::string cfgErr;
-    if (DesktopConfig::Load("desktop.json", cfg, cfgErr)) {
-        s_showDesktopTrash = cfg.showDesktopTrash;
-        s_showDesktopThisSystem = cfg.showDesktopThisSystem;
-        s_showDesktopFileManager = cfg.showDesktopFileManager;
-        s_showDesktopSystemSettings = cfg.showDesktopSystemSettings;
-        s_smallLiveDesktopFolderIcons = cfg.smallLiveDesktopFolderIcons;
-        Logger::write(LogLevel::Info, std::string("DisplayOptions Desktop Icons loaded: Trash=") + (s_showDesktopTrash ? "true" : "false") +
-            " File Explorer=" + ((s_showDesktopThisSystem || s_showDesktopFileManager) ? "true" : "false") +
-            " SystemSettings=" + (s_showDesktopSystemSettings ? "true" : "false") +
-            " FolderIconsSmall=" + (s_smallLiveDesktopFolderIcons ? "true" : "false"));
+    DisplayOptionsStoreData store;
+    std::string storeErr;
+    if (loadPersistedDisplayOptions(store, storeErr)) {
+        s_showDesktopTrash = store.showDesktopTrash;
+        s_showDesktopThisSystem = store.showDesktopThisSystem;
+        s_showDesktopFileManager = store.showDesktopFileManager;
+        s_showDesktopSystemSettings = store.showDesktopSystemSettings;
+        s_smallLiveDesktopFolderIcons = store.smallLiveDesktopFolderIcons;
+        Logger::write(LogLevel::Info, "DisplayOptions loaded display settings");
     } else {
         s_showDesktopTrash = true;
         s_showDesktopThisSystem = true;
         s_showDesktopFileManager = true;
         s_showDesktopSystemSettings = false;
         s_smallLiveDesktopFolderIcons = true;
-        Logger::write(LogLevel::Info, "DisplayOptions Desktop Icons defaulted: Trash=true ThisSystem=true FileManager=true SystemSettings=false FolderIconsSmall=true");
+        Logger::write(LogLevel::Info, "DisplayOptions display settings defaulted");
     }
     s_selectedThemeId = selectedThemeIdFromConfig();
     s_appliedThemeId = s_selectedThemeId;
@@ -812,41 +863,74 @@ bool DisplayOptions::toggleDesktopIconSetting(int index)
 
 void DisplayOptions::saveDesktopIconSettings()
 {
-    DesktopConfigData cfg;
+    DisplayOptionsStoreData store;
     std::string err;
-    if (!DesktopConfig::Load("desktop.json", cfg, err)) {
-        Logger::write(LogLevel::Info, "DisplayOptions Desktop Icons save using default config because load failed: " + err);
+    if (!loadPersistedDisplayOptions(store, err)) {
+        Logger::write(LogLevel::Info, "DisplayOptions Desktop Icons save using default display settings because load failed: " + err);
     }
-    cfg.showDesktopTrash = s_showDesktopTrash;
+
+    store.showDesktopTrash = s_showDesktopTrash;
     const bool showFileExplorer = s_showDesktopThisSystem || s_showDesktopFileManager;
-    cfg.showDesktopThisSystem = showFileExplorer;
-    cfg.showDesktopFileManager = showFileExplorer;
-    cfg.showDesktopSystemSettings = s_showDesktopSystemSettings;
-    cfg.smallLiveDesktopFolderIcons = s_smallLiveDesktopFolderIcons;
-    cfg.desktopThemeId = DesktopThemeIdToString(s_appliedThemeId);
-    if (DesktopConfig::Save("desktop.json", cfg, err)) {
+    store.showDesktopThisSystem = showFileExplorer;
+    store.showDesktopFileManager = showFileExplorer;
+    store.showDesktopSystemSettings = s_showDesktopSystemSettings;
+    store.smallLiveDesktopFolderIcons = s_smallLiveDesktopFolderIcons;
+    store.desktopThemeId = DesktopThemeIdToString(s_appliedThemeId);
+
+    const bool storeSaved = DisplayOptionsStore::Save(kDisplayOptionsStorePath, store, err);
+    if (!storeSaved) {
+        Logger::write(LogLevel::Warn, "DisplayOptions display settings save failed: " + err);
+    }
+
+    DesktopConfigData cfg;
+    std::string legacyErr;
+    bool legacySaved = false;
+    if (DesktopConfig::Load("desktop.json", cfg, legacyErr)) {
+        applyDisplayOptionsToDesktopConfig(store, cfg);
+        if (!DesktopConfig::Save("desktop.json", cfg, legacyErr)) {
+            Logger::write(LogLevel::Warn, "DisplayOptions legacy desktop.json save failed: " + legacyErr);
+        } else {
+            legacySaved = true;
+        }
+    }
+
+    if (storeSaved || legacySaved) {
         Logger::write(LogLevel::Info, "DisplayOptions Desktop Icons settings saved");
         publish(MsgType::MT_DesktopConfigReload, "");
-    } else {
-        Logger::write(LogLevel::Warn, "DisplayOptions Desktop Icons settings save failed: " + err);
     }
 }
 
 void DisplayOptions::applySelectedTheme()
 {
-    DesktopConfigData cfg;
+    DisplayOptionsStoreData store;
     std::string err;
-    if (!DesktopConfig::Load("desktop.json", cfg, err)) {
-        Logger::write(LogLevel::Info, "DisplayOptions theme save using default config because load failed: " + err);
+    if (!loadPersistedDisplayOptions(store, err)) {
+        Logger::write(LogLevel::Info, "DisplayOptions theme save using default display settings because load failed: " + err);
     }
 
-    cfg.desktopThemeId = DesktopThemeIdToString(s_selectedThemeId);
-    if (DesktopConfig::Save("desktop.json", cfg, err)) {
+    store.desktopThemeId = DesktopThemeIdToString(s_selectedThemeId);
+
+    const bool storeSaved = DisplayOptionsStore::Save(kDisplayOptionsStorePath, store, err);
+    if (!storeSaved) {
+        Logger::write(LogLevel::Warn, "DisplayOptions theme save failed: " + err);
+    }
+
+    DesktopConfigData cfg;
+    std::string legacyErr;
+    bool legacySaved = false;
+    if (DesktopConfig::Load("desktop.json", cfg, legacyErr)) {
+        applyDisplayOptionsToDesktopConfig(store, cfg);
+        if (!DesktopConfig::Save("desktop.json", cfg, legacyErr)) {
+            Logger::write(LogLevel::Warn, "DisplayOptions legacy desktop.json theme save failed: " + legacyErr);
+        } else {
+            legacySaved = true;
+        }
+    }
+
+    if (storeSaved || legacySaved) {
         s_appliedThemeId = s_selectedThemeId;
         Logger::write(LogLevel::Info, std::string("DisplayOptions applied theme id=") + DesktopThemeIdToString(s_appliedThemeId));
         publish(MsgType::MT_DesktopConfigReload, "");
-    } else {
-        Logger::write(LogLevel::Warn, "DisplayOptions theme save failed: " + err);
     }
 }
 
