@@ -105,6 +105,85 @@ namespace gxos {
         static std::mutex s_launchDispatchUsageCountersMutex;
         static LaunchDispatchUsageCounters s_launchDispatchUsageCounters;
 
+        namespace {
+            enum class FilesystemEntryLaunchTarget {
+                FileExplorer = 0,
+                Notepad,
+                ImageViewer,
+                Unsupported
+            };
+
+            static std::string lowerCopy(std::string value) {
+                std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+                return value;
+            }
+
+            static std::string filesystemEntryExtension(const std::string& path) {
+                size_t dot = path.find_last_of('.');
+                if (dot == std::string::npos || dot + 1 >= path.size()) return std::string();
+                return lowerCopy(path.substr(dot));
+            }
+
+            static FilesystemEntryLaunchTarget resolveFilesystemEntryLaunchTarget(const std::string& path, bool isDirectory) {
+                if (isDirectory) return FilesystemEntryLaunchTarget::FileExplorer;
+
+                const std::string ext = filesystemEntryExtension(path);
+                if (ext == ".txt" || ext == ".log" || ext == ".cfg" || ext == ".ini") {
+                    return FilesystemEntryLaunchTarget::Notepad;
+                }
+                if (ext == ".png" || ext == ".bmp" || ext == ".jpg" || ext == ".gif" || ext == ".jpeg") {
+                    return FilesystemEntryLaunchTarget::ImageViewer;
+                }
+                return FilesystemEntryLaunchTarget::Unsupported;
+            }
+
+            static const char* filesystemEntryLaunchTargetName(FilesystemEntryLaunchTarget target) {
+                switch (target) {
+                case FilesystemEntryLaunchTarget::FileExplorer: return "FileExplorer";
+                case FilesystemEntryLaunchTarget::Notepad: return "Notepad";
+                case FilesystemEntryLaunchTarget::ImageViewer: return "ImageViewer";
+                case FilesystemEntryLaunchTarget::Unsupported:
+                default: return "Unsupported";
+                }
+            }
+
+            static const char* filesystemEntryLaunchStatus(FilesystemEntryLaunchTarget target) {
+                switch (target) {
+                case FilesystemEntryLaunchTarget::FileExplorer:
+                case FilesystemEntryLaunchTarget::Notepad:
+                case FilesystemEntryLaunchTarget::ImageViewer:
+                    return "supported";
+                case FilesystemEntryLaunchTarget::Unsupported:
+                default:
+                    return "unsupported";
+                }
+            }
+
+            static const char* filesystemEntryLaunchReason(FilesystemEntryLaunchTarget target) {
+                switch (target) {
+                case FilesystemEntryLaunchTarget::FileExplorer: return "Directory target routes to FileExplorer";
+                case FilesystemEntryLaunchTarget::Notepad: return "Text extension matched case-insensitively and routes to Notepad::LaunchWithFile";
+                case FilesystemEntryLaunchTarget::ImageViewer: return "Image extension matched case-insensitively and routes to ImageViewer::Launch";
+                case FilesystemEntryLaunchTarget::Unsupported:
+                default: return "No file association registered";
+                }
+            }
+
+            static std::string filesystemEntryDiagnostic(const std::string& path, bool isDirectory) {
+                const FilesystemEntryLaunchTarget target = resolveFilesystemEntryLaunchTarget(path, isDirectory);
+                const std::string normalized = isDirectory ? path : lowerCopy(path);
+                std::ostringstream oss;
+                oss << "[FilesystemEntryLaunchTarget]\n";
+                oss << "path: " << path << "\n";
+                oss << "normalizedPath: " << normalized << "\n";
+                oss << "isDirectory: " << (isDirectory ? "true" : "false") << "\n";
+                oss << "launchTarget: " << filesystemEntryLaunchTargetName(target) << "\n";
+                oss << "status: " << filesystemEntryLaunchStatus(target) << "\n";
+                oss << "reason: " << filesystemEntryLaunchReason(target) << "\n";
+                return oss.str();
+            }
+        }
+
         static std::string launchTargetTypeCoverageSummaryLine();
 
         static void logScanIssues(const char* label, const std::vector<apps::AppScanIssue>& issues) {
@@ -3573,6 +3652,10 @@ namespace gxos {
             return oss.str();
         }
 
+        std::string DesktopService::ResolveFilesystemEntryDiagnostic(const std::string& path, bool isDirectory) {
+            return filesystemEntryDiagnostic(path, isDirectory);
+        }
+
         bool DesktopService::OpenFilesystemEntry(const std::string& path, bool isDirectory, std::string& error) {
             error.clear();
             Logger::write(LogLevel::Info, std::string("Desktop filesystem open requested path=") + path + " directory=" + (isDirectory ? "true" : "false"));
@@ -3581,24 +3664,22 @@ namespace gxos {
                 return false;
             }
 
-            if (isDirectory) {
+            switch (resolveFilesystemEntryLaunchTarget(path, isDirectory)) {
+            case FilesystemEntryLaunchTarget::FileExplorer:
                 apps::FileExplorer::Launch(path);
                 return true;
-            }
-
-            std::string lower = path;
-            std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-            if (lower.size() >= 4 && (lower.substr(lower.size() - 4) == ".txt" || lower.substr(lower.size() - 4) == ".log" || lower.substr(lower.size() - 4) == ".cfg" || lower.substr(lower.size() - 4) == ".ini")) {
+            case FilesystemEntryLaunchTarget::Notepad:
                 apps::Notepad::LaunchWithFile(path);
                 return true;
-            }
-            if ((lower.size() >= 4 && (lower.substr(lower.size() - 4) == ".png" || lower.substr(lower.size() - 4) == ".bmp" || lower.substr(lower.size() - 4) == ".jpg" || lower.substr(lower.size() - 4) == ".gif")) ||
-                (lower.size() >= 5 && lower.substr(lower.size() - 5) == ".jpeg")) {
+            case FilesystemEntryLaunchTarget::ImageViewer:
                 // TODO: once AppModel launch arguments become first-class, route this
                 // through typed app launch with a file-path parameter instead of the
                 // direct helper call.
                 apps::ImageViewer::Launch(path);
                 return true;
+            case FilesystemEntryLaunchTarget::Unsupported:
+            default:
+                break;
             }
 
             error = "No file association registered for " + path;
