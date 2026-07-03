@@ -199,6 +199,7 @@ namespace gxos { namespace gui {
         static void initWindow();
         static void shutdownWindow();
         static void requestRepaint();
+        static bool hostedHasDirtyWindows();
         // Windows UI state (start menu, wallpaper, etc.)
         static HBITMAP g_startBtnBmp;
         static HBITMAP g_wallpaperBmp;

@@ -88,6 +88,12 @@ $bareMetalDesktopState = Find-FirstMatch -LiteralPath (Join-Path $Root "kernel\c
 $bareMetalDesktopHomePath = Find-FirstMatch -LiteralPath (Join-Path $Root "kernel\core\desktop.cpp") -Pattern 's_bareMetalDesktopHomePath\[vfs::VFS_MAX_PATH\] = "/Desktop"'
 $bareMetalDesktopHomeCheck = Find-FirstMatch -LiteralPath (Join-Path $Root "kernel\core\desktop.cpp") -Pattern "bare_metal_desktop_is_home_directory"
 $bareMetalDesktopRefresh = Find-FirstMatch -LiteralPath (Join-Path $Root "kernel\core\desktop.cpp") -Pattern "bare_metal_desktop_request_folder_refresh"
+$bareMetalDesktopManualRefresh = Find-FirstMatch -LiteralPath (Join-Path $Root "kernel\core\desktop.cpp") -Pattern 'bare_metal_desktop_request_folder_refresh\("right-click refresh"\)'
+$bareMetalDesktopStartupSyncApi = Find-FirstMatch -LiteralPath (Join-Path $Root "kernel\core\include\kernel\desktop.h") -Pattern "refresh_bare_metal_desktop_folders_after_vfs_ready"
+$bareMetalDesktopStartupSyncCall = Find-FirstMatch -LiteralPath (Join-Path $Root "kernel\core\main.cpp") -Pattern "refresh_bare_metal_desktop_folders_after_vfs_ready\("
+$bareMetalDesktopStartupSync = if ($null -ne $bareMetalDesktopStartupSyncApi -and $null -ne $bareMetalDesktopStartupSyncCall) { $bareMetalDesktopStartupSyncCall } else { $null }
+$bareMetalDesktopIconInitMarkers = Find-FirstMatch -LiteralPath (Join-Path $Root "kernel\core\desktop.cpp") -Pattern "bare-metal desktop icon init starting|bare-metal desktop icon init completed"
+$bareMetalDesktopBackingPathMarker = Find-FirstMatch -LiteralPath (Join-Path $Root "kernel\core\desktop.cpp") -Pattern "bare-metal desktop backing path chosen"
 $bareMetalDesktopNavigation = Find-FirstMatch -LiteralPath (Join-Path $Root "kernel\core\desktop.cpp") -Pattern "bare_metal_desktop_set_current_directory|bare_metal_desktop_go_back|bare_metal_desktop_go_home|sync_live_directory_from_shell_cwd"
 $bareMetalDesktopBackHome = Find-FirstMatch -LiteralPath (Join-Path $Root "kernel\core\desktop.cpp") -Pattern "bare_metal_desktop_go_back|bare_metal_desktop_go_home"
 $bareMetalShellDesktopSyncApi = Find-FirstMatch -LiteralPath (Join-Path $Root "kernel\core\include\kernel\desktop.h") -Pattern "sync_live_directory_from_shell_cwd"
@@ -167,7 +173,12 @@ Emit-Check "bare-metal shell get_cwd exposure" "present" $bareMetalShellGetCwdSt
 Emit-Check "bare-metal desktop directory scaffold" "present" $bareMetalDesktopState
 Emit-Check "bare-metal desktop home path" "present" $bareMetalDesktopHomePath
 Emit-Check "bare-metal desktop home check" "present" $bareMetalDesktopHomeCheck
+Emit-Check "bare-metal desktop backing-path marker" "present" $bareMetalDesktopBackingPathMarker
+Emit-Check "bare-metal desktop icon-init markers" "present" $bareMetalDesktopIconInitMarkers
 Emit-Check "bare-metal desktop refresh hook" "present" $bareMetalDesktopRefresh
+Emit-Check "bare-metal desktop manual refresh hook" "present" $bareMetalDesktopManualRefresh
+Emit-Check "bare-metal desktop startup sync API" "present" $bareMetalDesktopStartupSyncApi
+Emit-Check "bare-metal desktop startup sync call" "present" $bareMetalDesktopStartupSyncCall
 Emit-Check "bare-metal desktop navigation helpers" "present" $bareMetalDesktopNavigation
 Emit-Check "bare-metal desktop back/home helpers" "present" $bareMetalDesktopBackHome
 Emit-Check "bare-metal shell desktop sync API" "present" $bareMetalShellDesktopSyncApi
@@ -206,10 +217,11 @@ if ($null -eq $displayOptionsIconSize) {
 }
 
 $hostedParityPresent = $null -ne $hostedDesktopLive -and $null -ne $hostedDesktopPathState -and $null -ne $hostedDesktopNav -and $null -ne $hostedShellCdCommand -and $null -ne $hostedShellDesktopBridge -and $null -ne $showOnDesktop -and $null -ne $hostedNonRootCompactIcons -and $null -ne $displayOptionsIconSize -and $null -ne $rightClickIconSize
-$bareMetalSourceParityPresent = $null -ne $bareMetalDesktopState -and $null -ne $bareMetalDesktopHomePath -and $null -ne $bareMetalDesktopHomeCheck -and $null -ne $bareMetalDesktopNavigation -and $null -ne $bareMetalDesktopBackHome -and $null -ne $bareMetalShellDesktopSync -and $null -ne $kernelBareMetalCompactIcons -and $null -eq $kernelBareMetalDesktopConfigLoad
+$bareMetalSourceParityPresent = $null -ne $bareMetalDesktopState -and $null -ne $bareMetalDesktopHomePath -and $null -ne $bareMetalDesktopHomeCheck -and $null -ne $bareMetalDesktopBackingPathMarker -and $null -ne $bareMetalDesktopIconInitMarkers -and $null -ne $bareMetalDesktopManualRefresh -and $null -ne $bareMetalDesktopStartupSync -and $null -ne $bareMetalDesktopNavigation -and $null -ne $bareMetalDesktopBackHome -and $null -ne $bareMetalShellDesktopSync -and $null -ne $kernelBareMetalCompactIcons -and $null -eq $kernelBareMetalDesktopConfigLoad
 $bareMetalParityPresent = if ($runtimeEvidenceFresh) { $true } else { $bareMetalSourceParityPresent }
 
 $desktopSmokeScripts = @(
+    "scripts\smoke-desktop-startup-sync.ps1",
     "scripts\smoke-appmodel-launchshadow.ps1",
     "scripts\smoke-appmodel-phase2-status.ps1",
     "scripts\smoke-appmodel-typed-dispatch-flags.ps1",

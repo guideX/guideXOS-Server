@@ -122,6 +122,11 @@ bool launch_app(const char* appName);
 // Returns true if the desktop accepted the new directory.
 bool sync_live_directory_from_shell_cwd(const char* cwd);
 
+#if defined(GXOS_BARE_METAL)
+// Re-run the bare-metal desktop folder scan once VFS and the desktop backing path are ready.
+void refresh_bare_metal_desktop_folders_after_vfs_ready();
+#endif
+
 // Create a persistent desktop shortcut/reference to an existing VFS file/folder.
 bool pin_filesystem_shortcut_to_desktop(const char* path, bool isDirectory);
 

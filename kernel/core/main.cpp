@@ -360,6 +360,9 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         }
 
         kernel::desktop::reload_persisted_wallpaper();
+#if defined(GXOS_BARE_METAL)
+        kernel::desktop::refresh_bare_metal_desktop_folders_after_vfs_ready();
+#endif
         // The first desktop draw happens before VFS and the boot ramdisk are ready.
         // Redraw now so bare-metal thumbnails and the selected wallpaper use /system/wallpapers.
         kernel::desktop::draw();

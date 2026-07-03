@@ -8,6 +8,8 @@
 #include "include/kernel/kernel_compositor.h"
 #include "include/kernel/kernel_ipc.h"
 
+extern "C" void desktop_request_redraw();
+
 namespace kernel {
 namespace app {
 
@@ -68,6 +70,7 @@ void KernelApp::setTitle(const char* title) {
     if (m_window && title) {
         strcopy(m_window->title, title, MAX_TITLE_LEN);
         m_window->dirty = true;
+        desktop_request_redraw();
     }
 }
 
@@ -76,6 +79,7 @@ void KernelApp::setSize(int w, int h) {
         m_window->w = w;
         m_window->h = h;
         m_window->dirty = true;
+        desktop_request_redraw();
     }
 }
 
@@ -84,6 +88,7 @@ void KernelApp::setPosition(int x, int y) {
         m_window->x = x;
         m_window->y = y;
         m_window->dirty = true;
+        desktop_request_redraw();
     }
 }
 
@@ -94,12 +99,14 @@ void KernelApp::requestClose() {
         delete m_window;
         m_window = nullptr;
         m_state = AppState::Terminated;
+        desktop_request_redraw();
     }
 }
 
 void KernelApp::invalidate() {
     if (m_window) {
         m_window->dirty = true;
+        desktop_request_redraw();
     }
 }
 
@@ -427,6 +434,7 @@ void AppManager::closeApp(KernelApp* app) {
         if (s_runningApps[i] == app) {
             app->shutdown();
             delete app;
+            desktop_request_redraw();
             
             // Shift remaining apps
             for (int j = i; j < s_runningAppCount - 1; j++) {

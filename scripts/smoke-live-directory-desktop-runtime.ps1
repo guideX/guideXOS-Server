@@ -194,6 +194,14 @@ if ($output -match '\[LIVE-DIRECTORY-RUNTIME-SMOKE\] LIVE_DESKTOP_NATIVE_HOME ve
     $runtimeNativePathAvailable = $Matches[1].Trim()
 }
 
+$desktopIconInitStarted = $output.Contains("[desktop] bare-metal desktop icon init starting")
+$desktopIconInitCompleted = $output.Contains("[desktop] bare-metal desktop icon init completed")
+$desktopBackingPathChosen = $output.Contains("[desktop] bare-metal desktop backing path chosen:")
+$startupScanRequestedCount = [regex]::Matches($output, '\[desktop\] bare-metal startup desktop folder scan requested').Count
+$startupScanCompletedCount = [regex]::Matches($output, '\[desktop\] bare-metal startup desktop folder scan completed').Count
+$startupScanRequested = $startupScanRequestedCount -eq 1
+$startupScanCompleted = $startupScanCompletedCount -eq 1
+
 $startMarker = $output.Contains("[LIVE-DIRECTORY-RUNTIME-SMOKE] startPath=/Desktop home=/Desktop")
 $folderActivation = $runtimeTargetPath -and $output -match ('\[LIVE-DIRECTORY-RUNTIME-SMOKE\] LIVE_DESKTOP_NAV from=/Desktop to=' + [regex]::Escape($runtimeTargetPath) + ' source=folder-activation result=PASS')
 $compactLayout = $runtimeTargetPath -and $output -match ('\[LIVE-DIRECTORY-RUNTIME-SMOKE\] LIVE_DESKTOP_LAYOUT compact=1 path=' + [regex]::Escape($runtimeTargetPath))
@@ -209,8 +217,10 @@ if ($runtimeTargetPath) {
 $folderDiscovery = $runtimeTargetPath -and $folderDiscoveryCount -eq 2
 $resultPass = $output.Contains("[LIVE-DIRECTORY-RUNTIME-SMOKE] result=PASS")
 $nativePathAvailable = $runtimeNativePathAvailable -eq "PASS"
-$overallPass = $startMarker -and $folderActivation -and $compactLayout -and $backNavigation -and $shellSync -and $goHome -and $cleanup -and $folderDiscovery -and $resultPass
+$overallPass = $desktopIconInitStarted -and $desktopIconInitCompleted -and $desktopBackingPathChosen -and $startupScanRequested -and $startupScanCompleted -and $startMarker -and $folderActivation -and $compactLayout -and $backNavigation -and $shellSync -and $goHome -and $cleanup -and $folderDiscovery -and $resultPass
 
+Write-Host "startup scan requested count: $startupScanRequestedCount"
+Write-Host "startup scan completed count: $startupScanCompletedCount"
 Write-Host "folder discovery count: $folderDiscoveryCount"
 
 Write-EvidenceFile `

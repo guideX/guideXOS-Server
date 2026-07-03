@@ -418,6 +418,8 @@ namespace gxos {
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)
         namespace {
             constexpr UINT_PTR kHostedFreezeDiagTimerId = 0x47585031u;
+            constexpr UINT_PTR kHostedUiRefreshTimerId = 0x47585032u;
+            constexpr UINT kHostedUiRefreshIntervalMs = 1000u;
             constexpr uint64_t kHostedFreezeDiagHeartbeatMs = 5000;
             constexpr uint64_t kHostedFreezeDiagLongOpMs = 250;
 
@@ -596,6 +598,7 @@ namespace gxos {
 
                 hostedFreezeDiagnosticsLogHeartbeat("WM_PAINT");
             }
+
         }
 #endif
 
@@ -2852,6 +2855,12 @@ namespace gxos {
                     Logger::write(LogLevel::Warn, "Hosted freeze diagnostics requested but SetTimer failed");
                 }
             }
+            if (g_hwnd) {
+                UINT_PTR timerId = SetTimer(g_hwnd, kHostedUiRefreshTimerId, kHostedUiRefreshIntervalMs, nullptr);
+                if (timerId == 0) {
+                    Logger::write(LogLevel::Warn, "Hosted compositor UI refresh timer failed");
+                }
+            }
 #endif
         }
         void Compositor::shutdownWindow( ) {
@@ -2859,6 +2868,9 @@ namespace gxos {
             if (g_hostedFreezeDiag.timerInstalled && g_hwnd) {
                 KillTimer(g_hwnd, kHostedFreezeDiagTimerId);
                 g_hostedFreezeDiag.timerInstalled = false;
+            }
+            if (g_hwnd) {
+                KillTimer(g_hwnd, kHostedUiRefreshTimerId);
             }
 #endif
             releaseHostedPaintSurface();
@@ -2869,6 +2881,15 @@ namespace gxos {
             hostedFreezeDiagnosticsOnRequestRepaint( );
 #endif
             if (g_hwnd) InvalidateRect(g_hwnd, nullptr, FALSE);
+        }
+        bool Compositor::hostedHasDirtyWindows() {
+            std::lock_guard<std::mutex> lk(g_lock);
+            for (const auto& kv : g_windows) {
+                if (kv.second.dirty && kv.second.visible && !kv.second.minimized) {
+                    return true;
+                }
+            }
+            return false;
         }
         void Compositor::drawDesktopIcons(HDC dc, RECT cr) {
             const DesktopGridMetrics metrics = desktopGridMetrics();
@@ -2972,6 +2993,13 @@ namespace gxos {
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)
                 if (w == kHostedFreezeDiagTimerId) {
                     hostedFreezeDiagnosticsOnTimer( );
+                    return 0;
+                }
+                if (w == kHostedUiRefreshTimerId) {
+                    if (hostedHasDirtyWindows()) {
+                        requestRepaint( );
+                        UpdateWindow(h);
+                    }
                     return 0;
                 }
 #endif

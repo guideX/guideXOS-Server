@@ -912,6 +912,9 @@ static void initialize_bare_metal_desktop_directory_state()
 
     bare_metal_ensure_desktop_backing_directory(s_bareMetalDesktopHomePath, (int)sizeof(s_bareMetalDesktopHomePath));
     desktop_str_copy(s_bareMetalDesktopCurrentPath, s_bareMetalDesktopHomePath, (int)sizeof(s_bareMetalDesktopCurrentPath));
+    serial::puts("[desktop] bare-metal desktop backing path chosen: ");
+    serial::puts(s_bareMetalDesktopHomePath);
+    serial::puts("\n");
     for (int i = 0; i < 4; ++i) {
         s_bareMetalDesktopHistoryPaths[i][0] = '\0';
     }
@@ -1017,6 +1020,23 @@ static bool bare_metal_ensure_desktop_backing_directory(char* outPath, int outPa
     return true;
 }
 
+static void log_desktop_folder_scan_summary(int discoveredCount, int addedCount, int duplicateCount)
+{
+#if defined(GXOS_BARE_METAL)
+    serial::puts("[desktop] Desktop folder enumeration completed discovered=");
+    serial::put_hex32((uint32_t)discoveredCount);
+    serial::puts(" added=");
+    serial::put_hex32((uint32_t)addedCount);
+    serial::puts(" skippedDuplicates=");
+    serial::put_hex32((uint32_t)duplicateCount);
+    serial::puts("\n");
+#else
+    (void)discoveredCount;
+    (void)addedCount;
+    (void)duplicateCount;
+#endif
+}
+
 #if defined(GXOS_BARE_METAL)
 static bool bare_metal_desktop_uses_compact_folder_layout()
 {
@@ -1118,10 +1138,17 @@ static void refresh_desktop_icons();
 #if defined(__GNUC__) || defined(__clang__)
 __attribute__((unused))
 #endif
-static void bare_metal_desktop_request_folder_refresh()
+static void bare_metal_desktop_request_folder_refresh(const char* reason)
 {
     initialize_bare_metal_desktop_directory_state();
+    if (!reason || !reason[0]) reason = "desktop";
+    serial::puts("[desktop] bare-metal ");
+    serial::puts(reason);
+    serial::puts(" desktop folder scan requested\n");
     refresh_desktop_icons();
+    serial::puts("[desktop] bare-metal ");
+    serial::puts(reason);
+    serial::puts(" desktop folder scan completed\n");
     s_needsRedraw = true;
 }
 
@@ -1751,7 +1778,8 @@ static bool s_cpuTelemetryHasStableSample = false;
 static CpuTelemetrySnapshot s_cpuTelemetryLastStableSample{};
 
 // Icon management function prototypes
-static void refresh_desktop_icons();      // Rebuild visible icon list
+static void rebuild_desktop_icon_layout(bool allowBareMetalDirectoryState); // Rebuild visible icon list from the current icon model
+static void refresh_desktop_icons();      // Rescan filesystem-backed desktop entries, then rebuild layout
 static void add_to_recent(const char* appName);  // Add app to recent list
 static void pin_icon(const char* appName);       // Pin app to desktop
 static void unpin_icon(const char* appName);     // Unpin app from desktop
@@ -2269,13 +2297,18 @@ static void enumerate_desktop_folder_items()
     uint8_t dir = vfs::opendir(desktopPath);
     if (dir == 0xFF) {
         serial::puts("[desktop] Desktop folder enumeration failed\n");
+        log_desktop_folder_scan_summary(0, 0, 0);
         return;
     }
 
     int slot = 0;
+    int discoveredCount = 0;
+    int addedCount = 0;
+    int duplicateCount = 0;
     vfs::DirEntry entry{};
     while (slot < kMaxDesktopFilesystemEntries && vfs::readdir(dir, &entry)) {
         if (entry.name[0] == '.' && (entry.name[1] == '\0' || (entry.name[1] == '.' && entry.name[2] == '\0'))) continue;
+        ++discoveredCount;
         if (bare_metal_desktop_is_reserved_entry_name(entry.name)) {
             serial::puts("[desktop] Desktop filesystem item skipped (reserved desktop name): ");
             serial::puts(entry.name);
@@ -2296,6 +2329,7 @@ static void enumerate_desktop_folder_items()
             serial::puts("[desktop] Desktop filesystem item skipped (duplicate path): ");
             serial::puts(resolvedPath);
             serial::puts("\n");
+            ++duplicateCount;
             continue;
         }
         desktop_str_copy(s_desktopFileLabels[slot], entry.name, (int)sizeof(s_desktopFileLabels[slot]));
@@ -2310,10 +2344,11 @@ static void enumerate_desktop_folder_items()
         serial::puts("[desktop] Desktop filesystem item discovered: ");
         serial::puts(s_desktopIcons[iconIdx].path);
         serial::puts(s_desktopIcons[iconIdx].isDirectory ? " [folder]\n" : " [file]\n");
+        ++addedCount;
         ++slot;
     }
     vfs::closedir(dir);
-    serial::puts("[desktop] Desktop folder enumeration completed\n");
+    log_desktop_folder_scan_summary(discoveredCount, addedCount, duplicateCount);
 }
 
 static const StartMenuApp* find_start_menu_app(const char* appName)
@@ -3032,9 +3067,16 @@ static bool remove_app_shortcut_from_desktop(const char* appName)
 static void refresh_desktop_icons()
 {
     enumerate_desktop_folder_items();
+    rebuild_desktop_icon_layout(true);
+}
+
+static void rebuild_desktop_icon_layout(bool allowBareMetalDirectoryState)
+{
     apply_system_desktop_icon_visibility();
-    apply_bare_metal_desktop_navigation_icon_visibility();
-    bool compactLayout = bare_metal_desktop_uses_compact_folder_layout();
+    if (allowBareMetalDirectoryState) {
+        apply_bare_metal_desktop_navigation_icon_visibility();
+    }
+    bool compactLayout = allowBareMetalDirectoryState ? bare_metal_desktop_uses_compact_folder_layout() : false;
     bool layoutChanged = !s_iconPositionsInitialized || s_desktopIconLayoutCompact != compactLayout;
 
     if (compactLayout) {
@@ -3087,7 +3129,7 @@ static void refresh_desktop_icons()
         }
     }
 
-    if (bare_metal_desktop_navigation_icons_visible()) {
+    if (allowBareMetalDirectoryState && bare_metal_desktop_navigation_icons_visible()) {
         const int backIconIdx = bare_metal_desktop_navigation_icon_index(DesktopSystemObjectKind::DesktopBack);
         const int homeIconIdx = bare_metal_desktop_navigation_icon_index(DesktopSystemObjectKind::DesktopHome);
         if (backIconIdx >= 0 && s_desktopIcons[backIconIdx].pinned && s_visibleIconCount < kDesktopIconCount) {
@@ -3185,7 +3227,10 @@ static void unpin_icon(const char* appName)
 // Initialize icon positions in grid layout
 static void initialize_icon_positions()
 {
-    refresh_desktop_icons();  // Build visible icon list first
+    rebuild_desktop_icon_layout(false);  // Build visible icon list from the already loaded icon model
+    // Keep layout marked uninitialized so the first post-VFS refresh reapplies
+    // the full desktop arrangement with filesystem-backed entries.
+    s_iconPositionsInitialized = false;
 }
 
 // Save icon position after drag (store in icon structure)
@@ -3416,7 +3461,7 @@ static bool bare_metal_desktop_set_current_directory(const char* targetPath, boo
     ClearDesktopIconSelection();
     s_lastClickedIcon = -1;
     s_lastClickTime = 0;
-    bare_metal_desktop_request_folder_refresh();
+    bare_metal_desktop_request_folder_refresh("navigation");
 
     serial::puts("[desktop] Bare-metal desktop current path set to ");
     serial::puts(s_bareMetalDesktopCurrentPath);
@@ -3462,6 +3507,13 @@ bool sync_live_directory_from_shell_cwd(const char* cwd)
     if (!cwd || !cwd[0]) return false;
     return bare_metal_desktop_set_current_directory(cwd, true);
 }
+
+#if defined(GXOS_BARE_METAL)
+void refresh_bare_metal_desktop_folders_after_vfs_ready()
+{
+    bare_metal_desktop_request_folder_refresh("startup");
+}
+#endif
 
 #if defined(GXOS_LIVE_DIRECTORY_DESKTOP_RUNTIME_SMOKE_ACTIVE) && defined(GXOS_BARE_METAL)
 void run_live_directory_runtime_smoke()
@@ -3606,7 +3658,7 @@ void run_live_directory_runtime_smoke()
     ClearDesktopIconSelection();
     s_lastClickedIcon = -1;
     s_lastClickTime = 0;
-    bare_metal_desktop_request_folder_refresh();
+    bare_metal_desktop_request_folder_refresh("runtime smoke cleanup");
 
     if (nativeSmokeOk) {
         cleanupOk = vfs::rmdir(nativeSmokePath) == vfs::VFS_OK;
@@ -6377,7 +6429,7 @@ static void handle_context_menu_command(int item)
 
     switch (item) {
         case 0: // Refresh
-            refresh_desktop_icons();
+            bare_metal_desktop_request_folder_refresh("right-click refresh");
             refresh_start_menu_list();
             s_notification.title = "Desktop";
             s_notification.message = "Refreshed";
@@ -7611,7 +7663,13 @@ void init()
     apply_taskbar_layout();
     reload_persisted_system_desktop_icons();
     load_persisted_app_shortcuts();
+#if defined(GXOS_BARE_METAL)
+    serial::puts("[desktop] bare-metal desktop icon init starting\n");
+#endif
     initialize_icon_positions();  // Use new icon management system
+#if defined(GXOS_BARE_METAL)
+    serial::puts("[desktop] bare-metal desktop icon init completed\n");
+#endif
     init_time();  // Initialize time only if a real clock source is available
     shell::init();
 
