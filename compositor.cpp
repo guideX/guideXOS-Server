@@ -193,6 +193,17 @@ namespace gxos {
             SetCurrentDesktopTheme(themeId);
         }
 
+        static const BackgroundEntry* resolveConfiguredBackground(const std::string& idOrPath) {
+            const BackgroundEntry* entry = WallpaperRegistry::FindBackgroundById(idOrPath);
+            if (!entry && !idOrPath.empty()) {
+                const std::string mappedId = WallpaperRegistry::IdForAssetPath(idOrPath);
+                if (!mappedId.empty()) {
+                    entry = WallpaperRegistry::FindBackgroundById(mappedId);
+                }
+            }
+            return entry;
+        }
+
         struct WorkRect {
             int left{0};
             int top{0};
@@ -4071,13 +4082,7 @@ namespace gxos {
 
         void Compositor::sendFocus(uint64_t winId) { uint64_t ownerPid = 0; { std::lock_guard<std::mutex> lk(g_lock); auto it = g_windows.find(winId); if (it != g_windows.end( )) ownerPid = it->second.ownerPid; } publishOut(MsgType::MT_SetFocus, std::to_string(winId), ownerPid); }
         void Compositor::loadWallpaper(const std::string& idOrPath) {
-            const BackgroundEntry* entry = WallpaperRegistry::FindBackgroundById(idOrPath);
-            if (!entry && !idOrPath.empty()) {
-                std::string mappedId = WallpaperRegistry::IdForAssetPath(idOrPath);
-                if (!mappedId.empty()) {
-                    entry = WallpaperRegistry::FindBackgroundById(mappedId);
-                }
-            }
+            const BackgroundEntry* entry = resolveConfiguredBackground(idOrPath);
             if (!entry) {
                 Logger::write(LogLevel::Warn, std::string("Compositor background fallback: invalid id/path '") + idOrPath + "'");
                 entry = &WallpaperRegistry::DefaultBackground();
@@ -4359,7 +4364,19 @@ namespace gxos {
             case MsgType::MT_Ping: { publishOut(MsgType::MT_Ping, s); } break;
             case MsgType::MT_DesktopLaunch: { launchAction(s); } break;
             case MsgType::MT_DesktopPins: { std::istringstream iss(s); std::string tok; while (std::getline(iss, tok, ';')) { if (tok.size( ) < 2) continue; if (tok[0] == '+') pinAction(tok.substr(1)); else if (tok[0] == '-') unpinAction(tok.substr(1)); } } break;
-            case MsgType::MT_DesktopWallpaperSet: { loadWallpaper(s); g_cfg.wallpaperId = g_wallpaperId; g_cfg.wallpaperPath = g_wallpaperPath; g_cfg.backgroundScaleMode = g_backgroundScaleMode; saveDesktopConfig( ); invalidate(0); } break;
+            case MsgType::MT_DesktopWallpaperSet: {
+                const BackgroundEntry* selected = resolveConfiguredBackground(s);
+                if (selected) {
+                    g_cfg.wallpaperId = selected->id;
+                    g_cfg.wallpaperPath = selected->kind == BackgroundKind::Image ? selected->fullImagePath : "";
+                }
+                g_cfg.backgroundScaleMode = g_backgroundScaleMode;
+                // Persist the requested background selection, even if the renderer
+                // later has to fall back to the default flower image.
+                saveDesktopConfig( );
+                loadWallpaper(s);
+                invalidate(0);
+            } break;
             case MsgType::MT_DesktopConfigReload: {
                 DesktopConfigData cfg;
                 std::string cfgErr;
@@ -4617,18 +4634,19 @@ namespace gxos {
             logCompositorList("config recent after merge", g_cfg.recent);
             refreshDesktopItems( ); // Populate g_items from pinned/recent
             refreshAllProgramsList( ); // Populate sorted all programs list
-            saveDesktopConfig( );
             if (cfgOk) {
-                if (!cfg.wallpaperId.empty()) loadWallpaper(cfg.wallpaperId);
-                else if (!cfg.wallpaperPath.empty()) loadWallpaper(cfg.wallpaperPath);
+                const std::string savedWallpaperId = cfg.wallpaperId;
+                const std::string savedWallpaperPath = cfg.wallpaperPath;
+                if (!savedWallpaperId.empty()) loadWallpaper(savedWallpaperId);
+                else if (!savedWallpaperPath.empty()) loadWallpaper(savedWallpaperPath);
                 else loadWallpaper(WallpaperRegistry::DefaultBackground().id);
-                g_cfg.wallpaperId = g_wallpaperId;
-                g_cfg.wallpaperPath = g_wallpaperPath;
+                // Keep the persisted selection intact instead of writing back any
+                // fallback image that may have been used for rendering.
+                g_cfg.wallpaperId = savedWallpaperId;
+                g_cfg.wallpaperPath = savedWallpaperPath;
                 g_cfg.backgroundScaleMode = g_backgroundScaleMode;
             } else {
                 loadWallpaper(WallpaperRegistry::DefaultBackground().id);
-                g_cfg.wallpaperId = g_wallpaperId;
-                g_cfg.wallpaperPath = g_wallpaperPath;
                 g_cfg.backgroundScaleMode = g_backgroundScaleMode;
             }
 

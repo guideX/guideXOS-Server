@@ -4532,6 +4532,7 @@ void set_wallpaper_by_id(const char* wallpaperId)
     serial::puts("[desktop] set wallpaper request id=");
     serial::puts(wallpaperId ? wallpaperId : "(null)");
     serial::puts("\n");
+    bool shouldPersist = true;
     const BuiltInGradientPalette* gradient = find_builtin_gradient(wallpaperId);
     if (gradient) {
         serial::puts("[desktop] selected gradient id=");
@@ -4554,6 +4555,7 @@ void set_wallpaper_by_id(const char* wallpaperId)
     if (!entry) {
         serial::puts("[desktop] Wallpaper id not found, falling back to default\n");
         entry = &s_builtInWallpapers[0];
+        shouldPersist = false;
     }
     serial::puts("[desktop] selected wallpaper full=");
     serial::puts(entry->fullImagePath);
@@ -4567,8 +4569,10 @@ void set_wallpaper_by_id(const char* wallpaperId)
     s_wallpaperConfig.wallpaperId = entry->id;
     s_wallpaperConfig.showBranding = false;
     s_wallpaperConfig.showGrid = false;
-    persist_wallpaper_id(entry->id);
-    persist_wallpaper_scale_mode();
+    if (shouldPersist) {
+        persist_wallpaper_id(entry->id);
+        persist_wallpaper_scale_mode();
+    }
     s_needsRedraw = true;
 }
 
