@@ -2074,24 +2074,25 @@ static int hit_test_app_model_dialog(int32_t mx, int32_t my)
 }
 
 static bool text_ends_with(const char* value, const char* suffix);
+static bool text_ends_with_ignore_case(const char* value, const char* suffix);
 
 static bool desktop_entry_is_known_image(const char* name)
 {
-    return text_ends_with(name, ".png") || text_ends_with(name, ".bmp") ||
-           text_ends_with(name, ".jpg") || text_ends_with(name, ".jpeg") ||
-           text_ends_with(name, ".gif");
+    return text_ends_with_ignore_case(name, ".png") || text_ends_with_ignore_case(name, ".bmp") ||
+           text_ends_with_ignore_case(name, ".jpg") || text_ends_with_ignore_case(name, ".jpeg") ||
+           text_ends_with_ignore_case(name, ".gif");
 }
 
 static bool desktop_entry_is_png(const char* name)
 {
-    return text_ends_with(name, ".png");
+    return text_ends_with_ignore_case(name, ".png");
 }
 
 static bool desktop_entry_is_text(const char* name)
 {
-    return text_ends_with(name, ".txt") || text_ends_with(name, ".log") ||
-           text_ends_with(name, ".cfg") || text_ends_with(name, ".ini") ||
-           text_ends_with(name, ".md");
+    return text_ends_with_ignore_case(name, ".txt") || text_ends_with_ignore_case(name, ".log") ||
+           text_ends_with_ignore_case(name, ".cfg") || text_ends_with_ignore_case(name, ".ini") ||
+           text_ends_with_ignore_case(name, ".md");
 }
 
 static bool parse_system_icon_setting(const char* buffer, int count, const char* key, bool currentValue)
@@ -4923,6 +4924,24 @@ static bool text_ends_with(const char* value, const char* suffix)
     return true;
 }
 
+static bool text_ends_with_ignore_case(const char* value, const char* suffix)
+{
+    if (!value || !suffix) return false;
+    int valueLen = 0;
+    int suffixLen = 0;
+    while (value[valueLen]) ++valueLen;
+    while (suffix[suffixLen]) ++suffixLen;
+    if (suffixLen > valueLen) return false;
+    for (int i = 0; i < suffixLen; ++i) {
+        char a = value[valueLen - suffixLen + i];
+        char b = suffix[i];
+        if (a >= 'A' && a <= 'Z') a = (char)(a - 'A' + 'a');
+        if (b >= 'A' && b <= 'Z') b = (char)(b - 'A' + 'a');
+        if (a != b) return false;
+    }
+    return true;
+}
+
 static void desktop_trash_root_for_mount(const char* mountPath, char* out, int outSize)
 {
     if (!out || outSize <= 0) return;
@@ -5016,11 +5035,12 @@ static const char* GetDesktopIconLogicalNameForIcon(int iconIdx)
 {
     if (iconIdx < 0 || iconIdx >= kDesktopIconCount) return "file.generic";
     const DesktopIcon& icon = s_desktopIcons[iconIdx];
+    const char* fileNameSource = icon.path[0] ? icon.path : icon.label;
     if (icon.kind == DesktopItemKind::FilesystemEntry) {
         if (icon.isDirectory) return "file.folder";
-        if (desktop_entry_is_text(icon.label)) return "file.text";
-        if (desktop_entry_is_known_image(icon.label)) return "file.image";
-        if (text_ends_with(icon.label, ".elf") || text_ends_with(icon.label, ".gxapp")) return "app.generic";
+        if (desktop_entry_is_text(fileNameSource)) return "file.text";
+        if (desktop_entry_is_known_image(fileNameSource)) return "file.image";
+        if (text_ends_with_ignore_case(fileNameSource, ".elf") || text_ends_with_ignore_case(fileNameSource, ".gxapp")) return "app.generic";
         return "file.unknown";
     }
     if (icon.kind == DesktopItemKind::Shortcut) {
@@ -5031,8 +5051,8 @@ static const char* GetDesktopIconLogicalNameForIcon(int iconIdx)
         }
         if (desktop_str_eq(shortcutType, "Folder")) return "file.folder";
         if (desktop_str_eq(shortcutType, "File")) {
-            if (desktop_entry_is_text(icon.label)) return "file.text";
-            if (desktop_entry_is_known_image(icon.label)) return "file.image";
+            if (desktop_entry_is_text(fileNameSource)) return "file.text";
+            if (desktop_entry_is_known_image(fileNameSource)) return "file.image";
             return "file.unknown";
         }
     }
@@ -9817,7 +9837,7 @@ static void show_icon_notification(int displayIndex)
 #endif
                 bare_metal_desktop_set_current_directory(target, true);
                 return;
-            } else if (desktop_entry_is_text(label)) {
+            } else if (desktop_entry_is_text(target)) {
 #if defined(GXOS_APPMODEL_TYPED_DISPATCH_SHADOW_ONLY) && defined(GXOS_BARE_METAL)
                 log_bare_metal_fileopen_shadow_only_observation(bare_metal_active_fileopen_shadow_source("DesktopShortcutTextFile"), "Notepad", target);
                 if (bare_metal_should_suppress_real_branch_launch()) return;
@@ -9827,7 +9847,7 @@ static void show_icon_notification(int displayIndex)
                 if (app::AppManager::launchAppWithParam("Notepad", target)) return;
                 s_notification.title = label;
                 s_notification.message = "Unable to open file";
-            } else if (desktop_entry_is_png(label)) {
+            } else if (desktop_entry_is_png(target)) {
 #if defined(GXOS_APPMODEL_TYPED_DISPATCH_SHADOW_ONLY) && defined(GXOS_BARE_METAL)
                 log_bare_metal_fileopen_shadow_only_observation(bare_metal_active_fileopen_shadow_source("DesktopShortcutImageFile"), "ImageViewer", target);
                 if (bare_metal_should_suppress_real_branch_launch()) return;
@@ -9886,7 +9906,7 @@ static void show_icon_notification(int displayIndex)
 #endif
             bare_metal_desktop_set_current_directory(icon.path, true);
             return;
-        } else if (desktop_entry_is_text(label)) {
+        } else if (desktop_entry_is_text(icon.path)) {
             serial::puts("[desktop] Opening desktop text file: ");
             serial::puts(icon.path);
             serial::puts("\n");
@@ -9899,7 +9919,7 @@ static void show_icon_notification(int displayIndex)
             if (app::AppManager::launchAppWithParam("Notepad", icon.path)) return;
             s_notification.title = label;
             s_notification.message = "Unable to open file";
-        } else if (desktop_entry_is_png(label)) {
+        } else if (desktop_entry_is_png(icon.path)) {
             serial::puts("[desktop] Opening desktop image file: ");
             serial::puts(icon.path);
             serial::puts("\n");

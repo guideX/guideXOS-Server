@@ -53,6 +53,24 @@ static bool text_ends_with(const char* text, const char* suffix)
     return text_equals(text + textLen - suffixLen, suffix);
 }
 
+static bool text_ends_with_ignore_case(const char* text, const char* suffix)
+{
+    if (!text || !suffix) return false;
+    int textLen = 0;
+    int suffixLen = 0;
+    while (text[textLen]) ++textLen;
+    while (suffix[suffixLen]) ++suffixLen;
+    if (suffixLen > textLen) return false;
+    for (int i = 0; i < suffixLen; ++i) {
+        char a = text[textLen - suffixLen + i];
+        char b = suffix[i];
+        if (a >= 'A' && a <= 'Z') a = (char)(a - 'A' + 'a');
+        if (b >= 'A' && b <= 'Z') b = (char)(b - 'A' + 'a');
+        if (a != b) return false;
+    }
+    return true;
+}
+
 static bool is_path_like(const char* label)
 {
     if (!label || !label[0]) return false;
@@ -66,10 +84,10 @@ static bool is_path_like(const char* label)
 
 static bool is_text_file_path(const char* path)
 {
-    return text_ends_with(path, ".txt") ||
-           text_ends_with(path, ".log") ||
-           text_ends_with(path, ".cfg") ||
-           text_ends_with(path, ".ini");
+    return text_ends_with_ignore_case(path, ".txt") ||
+           text_ends_with_ignore_case(path, ".log") ||
+           text_ends_with_ignore_case(path, ".cfg") ||
+           text_ends_with_ignore_case(path, ".ini");
 }
 
 static void fill_from_metadata(gxos::apps::LaunchTarget& target, const gxos::apps::BuiltInAppMetadata& metadata)
