@@ -3191,14 +3191,14 @@ void TaskManagerApp::shutdown() {
 }
 
 void TaskManagerApp::update() {
-    // Auto-refresh every 100 ticks
+    // Performance gets a faster cadence; the other tabs keep the older slower
+    // refresh so we avoid unnecessary idle redraws.
     m_lastUpdate++;
     bool shouldInvalidate = false;
-    if (m_lastUpdate >= 100) {
+    const uint32_t refreshInterval = m_activeTab == 1 ? 100U : 200U;
+    if (m_lastUpdate >= refreshInterval) {
         refreshList();
         m_lastUpdate = 0;
-        shouldInvalidate = true;
-    } else if ((m_lastUpdate % 10) == 0) {
         shouldInvalidate = true;
     }
 

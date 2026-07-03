@@ -28,6 +28,7 @@ namespace gxos { namespace apps {
     int TaskManager::s_selectedIndex = 0;
     int TaskManager::s_scrollOffset = 0;
     uint64_t TaskManager::s_lastRefreshTicks = 0;
+    uint64_t TaskManager::s_lastPerformanceRefreshTicks = 0;
     int TaskManager::s_lastKeyCode = 0;
     bool TaskManager::s_keyDown = false;
     
@@ -63,6 +64,8 @@ namespace gxos { namespace apps {
 
     namespace {
         constexpr uint64_t kProcessCpuTelemetryDisplayWindowMicros = 1000ULL * 1000ULL;
+        constexpr uint64_t kTaskManagerRefreshIntervalMs = 2000ULL;
+        constexpr uint64_t kTaskManagerPerformanceRefreshIntervalMs = 1000ULL;
 
         struct ProcessCpuSampleState {
             uint64_t lastWallMicros = 0;
@@ -791,6 +794,7 @@ namespace gxos { namespace apps {
             s_selectedIndex = 0;
             s_scrollOffset = 0;
             s_lastRefreshTicks = 0;
+            s_lastPerformanceRefreshTicks = 0;
             s_lastKeyCode = 0;
             s_keyDown = false;
             s_currentTab = 0;
@@ -843,6 +847,8 @@ namespace gxos { namespace apps {
             // Main event loop
             bool running = true;
             while (running) {
+                uint64_t nowTicks = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::steady_clock::now().time_since_epoch()).count();
                 ipc::Message msg;
                 if (ipc::Bus::pop(kGuiChanOut, msg, 50)) {  // 50ms timeout
                     MsgType msgType = (MsgType)msg.type;
@@ -887,6 +893,8 @@ namespace gxos { namespace apps {
                                     updateHeader();
                                     updateDisplay();
                                     updateStatusBar();
+                                    s_lastRefreshTicks = nowTicks;
+                                    s_lastPerformanceRefreshTicks = nowTicks;
                                 } catch (const std::exception& e) {
                                     Logger::write(LogLevel::Error, std::string("TaskManager: Failed to parse window ID: ") + e.what());
                                 }
@@ -960,6 +968,10 @@ namespace gxos { namespace apps {
                                                 refreshProcessList();
                                                 updateDisplay();
                                                 updateStatusBar();
+                                                s_lastRefreshTicks = nowTicks;
+                                                if (s_currentTab == 1) {
+                                                    s_lastPerformanceRefreshTicks = nowTicks;
+                                                }
                                                 break;
                                             case 2: // End Process
                                                 endSelectedProcess();
@@ -967,18 +979,25 @@ namespace gxos { namespace apps {
                                             case 10: // Processes tab
                                                 s_currentTab = 0;
                                                 updateDisplay();
+                                                s_lastRefreshTicks = nowTicks;
                                                 break;
                                             case 11: // Performance tab
                                                 s_currentTab = 1;
+                                                refreshProcessList();
                                                 updateDisplay();
+                                                updateStatusBar();
+                                                s_lastRefreshTicks = nowTicks;
+                                                s_lastPerformanceRefreshTicks = nowTicks;
                                                 break;
                                             case 12: // Tombstoned tab
                                                 s_currentTab = 2;
                                                 updateDisplay();
+                                                s_lastRefreshTicks = nowTicks;
                                                 break;
                                             case 13: // Memory Details tab
                                                 s_currentTab = 3;
                                                 updateDisplay();
+                                                s_lastRefreshTicks = nowTicks;
                                                 break;
                                             case 20: // Restore tombstoned
                                                 restoreTombstoned();
@@ -1000,11 +1019,15 @@ namespace gxos { namespace apps {
                     }
                 }
                 
-                // Auto-refresh every 2 seconds
-                auto now = std::chrono::steady_clock::now();
-                uint64_t nowTicks = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
-                
-                if (s_windowId != 0 && (nowTicks - s_lastRefreshTicks >= 2000)) {
+                // Performance tab gets a faster cadence so the graph and values keep moving
+                // even when the desktop is otherwise idle.
+                if (s_windowId != 0 && s_currentTab == 1 && (s_lastPerformanceRefreshTicks == 0 || nowTicks - s_lastPerformanceRefreshTicks >= kTaskManagerPerformanceRefreshIntervalMs)) {
+                    refreshProcessList();
+                    updateDisplay();
+                    updateStatusBar();
+                    s_lastRefreshTicks = nowTicks;
+                    s_lastPerformanceRefreshTicks = nowTicks;
+                } else if (s_windowId != 0 && s_currentTab == 0 && (s_lastRefreshTicks == 0 || nowTicks - s_lastRefreshTicks >= kTaskManagerRefreshIntervalMs)) {
                     refreshProcessList();
                     updateDisplay();
                     updateStatusBar();
@@ -1098,10 +1121,22 @@ namespace gxos { namespace apps {
     }
     
     void TaskManager::handleKeyPress(int keyCode) {
+        uint64_t nowTicks = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count();
+
         // Tab key - cycle tabs
         if (keyCode == 9) {
             s_currentTab = (s_currentTab + 1) % kTabCount;
+            if (s_currentTab == 1) {
+                refreshProcessList();
+                updateDisplay();
+                updateStatusBar();
+                s_lastRefreshTicks = nowTicks;
+                s_lastPerformanceRefreshTicks = nowTicks;
+                return;
+            }
             updateDisplay();
+            s_lastRefreshTicks = nowTicks;
             return;
         }
         
@@ -1118,7 +1153,13 @@ namespace gxos { namespace apps {
                 updateDisplay();
                 return;
             }
-            if (keyCode == 116) { refreshProcessList(); updateDisplay(); updateStatusBar(); }
+            if (keyCode == 116) {
+                refreshProcessList();
+                updateDisplay();
+                updateStatusBar();
+                s_lastRefreshTicks = nowTicks;
+                s_lastPerformanceRefreshTicks = nowTicks;
+            }
             return;
         }
         
@@ -1143,13 +1184,23 @@ namespace gxos { namespace apps {
                 endTombstoned();
                 return;
             }
-            if (keyCode == 116) { refreshProcessList(); updateDisplay(); updateStatusBar(); }
+            if (keyCode == 116) {
+                refreshProcessList();
+                updateDisplay();
+                updateStatusBar();
+                s_lastRefreshTicks = nowTicks;
+            }
             return;
         }
         
         if (s_currentTab == 3) {
             // Memory Details tab: F5 refreshes
-            if (keyCode == 116) { refreshProcessList(); updateDisplay(); updateStatusBar(); }
+            if (keyCode == 116) {
+                refreshProcessList();
+                updateDisplay();
+                updateStatusBar();
+                s_lastRefreshTicks = nowTicks;
+            }
             return;
         }
         
@@ -1179,6 +1230,7 @@ namespace gxos { namespace apps {
             refreshProcessList();
             updateDisplay();
             updateStatusBar();
+            s_lastRefreshTicks = nowTicks;
         }
         else if (keyCode == 33) { // Page Up
             if (s_scrollOffset > 0) {

@@ -165,6 +165,7 @@ namespace gxos { namespace apps {
         static int s_selectedIndex;
         static int s_scrollOffset;
         static uint64_t s_lastRefreshTicks;
+        static uint64_t s_lastPerformanceRefreshTicks;
         static int s_lastKeyCode;
         static bool s_keyDown;
         
