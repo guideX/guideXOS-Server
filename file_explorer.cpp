@@ -757,6 +757,14 @@ namespace gxos { namespace apps {
         return fileListMaxScrollRows() > 0;
     }
 
+    bool FileExplorer::isFileListWheelTarget(int x, int y) {
+        if (!isFileListScrollbarVisible()) return false;
+        if (s_promptMode != PromptNone || s_showDeleteConfirmation || s_contextMenuOpen || s_draggingFileListScrollbar) return false;
+        if (x < kLeftPaneW || x >= kWindowW) return false;
+        if (y < kMainRowsStartY || y >= kStatusBarY) return false;
+        return true;
+    }
+
     int FileExplorer::fileListScrollbarLeft() {
         return kWindowW - kFileListScrollbarPad - kFileListScrollbarW;
     }
@@ -1138,9 +1146,7 @@ namespace gxos { namespace apps {
 
         int wheelSteps = 0;
         if (parseWheelSteps(action, wheelSteps)) {
-            if (s_promptMode == PromptNone && !s_showDeleteConfirmation &&
-                x >= kLeftPaneW && x < kWindowW && y >= kMainRowsStartY && y < kStatusBarY &&
-                isFileListScrollbarVisible()) {
+            if (isFileListWheelTarget(x, y)) {
                 scrollFileListByRows(-wheelSteps * kWheelScrollRowsPerNotch);
             }
             return;

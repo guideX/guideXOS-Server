@@ -144,6 +144,7 @@ namespace gxos { namespace apps {
         static int fileListScrollbarThumbTop();
         static void clampFileListState();
         static void ensureSelectedFileVisible();
+        static bool isFileListWheelTarget(int x, int y);
         static void scrollFileListByRows(int rows);
         static void resetFileListClickTracking();
         

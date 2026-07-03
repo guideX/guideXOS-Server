@@ -4019,14 +4019,7 @@ void FileExplorerApp::onMouseDown(int localX, int localY, uint8_t button) {
 
 void FileExplorerApp::onMouseWheel(int localX, int localY, int wheelDelta) {
     if (wheelDelta == 0) return;
-    if (m_renamePrompt || m_deleteConfirm || m_propertiesOpen) return;
-    if (localX < LEFT_W) return;
-
-    const int bodyY = TOOLBAR_H + ADDRESS_H;
-    const int listTop = bodyY + kFileExplorerListHeaderH;
-    const int listBottom = m_window ? m_window->h - kFileExplorerListStatusH : listTop;
-    if (localY < listTop || localY >= listBottom) return;
-
+    if (!isWheelTarget(localX, localY)) return;
     scrollByRows(-wheelDelta * 3);
 }
 
@@ -4372,6 +4365,17 @@ void FileExplorerApp::scrollToPosition(int localY) {
     if (next == m_scroll) return;
     m_scroll = next;
     invalidate();
+}
+
+bool FileExplorerApp::isWheelTarget(int localX, int localY) const {
+    if (!isScrollbarVisible()) return false;
+    if (m_renamePrompt || m_deleteConfirm || m_propertiesOpen || m_contextMenuOpen) return false;
+    if (localX < LEFT_W) return false;
+
+    const int bodyY = TOOLBAR_H + ADDRESS_H;
+    const int listTop = bodyY + kFileExplorerListHeaderH;
+    const int listBottom = m_window ? m_window->h - kFileExplorerListStatusH : listTop;
+    return localY >= listTop && localY < listBottom;
 }
 
 void FileExplorerApp::beginRenameSelected() {

@@ -419,6 +419,7 @@ private:
     void ensureSelectedVisible();
     void scrollByRows(int rows);
     void scrollToPosition(int localY);
+    bool isWheelTarget(int localX, int localY) const;
     void beginRenameSelected();
     void commitRename();
     void cancelRename();
