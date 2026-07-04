@@ -8,6 +8,7 @@
 #include "fs.h"
 #include "clock_time_settings.h"
 #include "desktop_theme.h"
+#include "display_model.h"
 
 namespace gxos { namespace gui {
     struct DesktopWindowRec { uint64_t id; std::string title; int x; int y; int w; int h; bool minimized{false}; bool maximized{false}; int z{0}; bool focused{false}; int snap{0}; };
@@ -25,6 +26,10 @@ namespace gxos { namespace gui {
         std::string desktopThemeId; // stable theme id, e.g. classic or scifi
         std::string backgroundScaleMode; // fill, fit, stretch, center, or tile
         std::string taskbarPosition; // bottom, top, left, or right
+        std::string displayMode; // mirror or extend
+        std::string displayPrimaryDisplayId; // stable monitor id if known
+        std::string displayArrangement; // serialized monitor layout, if known
+        std::string displayResolution; // virtual desktop resolution if known
         std::string timeZoneId; // pacific, mountain, central, eastern, or utc
         bool use24HourTime{false};
         std::vector<std::string> pinned;
@@ -67,6 +72,10 @@ namespace gxos { namespace gui {
             if(out.desktopThemeId.empty() && extractSection(txt, "desktop.theme", section)){ if(!section.empty() && section[0]=='"'){ size_t i=0; parseJSONString(section, i, out.desktopThemeId); } }
             if(extractSection(txt, "desktop.background.scale", section)){ if(!section.empty() && section[0]=='"'){ size_t i=0; parseJSONString(section, i, out.backgroundScaleMode); } }
             if(extractSection(txt, "desktop.taskbar.position", section)){ if(!section.empty() && section[0]=='"'){ size_t i=0; parseJSONString(section, i, out.taskbarPosition); } }
+            if(extractSection(txt, "desktop.display.mode", section)){ if(!section.empty() && section[0]=='"'){ size_t i=0; parseJSONString(section, i, out.displayMode); } }
+            if(extractSection(txt, "desktop.display.primaryId", section)){ if(!section.empty() && section[0]=='"'){ size_t i=0; parseJSONString(section, i, out.displayPrimaryDisplayId); } }
+            if(extractSection(txt, "desktop.display.arrangement", section)){ if(!section.empty() && section[0]=='"'){ size_t i=0; parseJSONString(section, i, out.displayArrangement); } }
+            if(extractSection(txt, "desktop.display.resolution", section)){ if(!section.empty() && section[0]=='"'){ size_t i=0; parseJSONString(section, i, out.displayResolution); } }
             if(extractSection(txt, "desktop.clock.timeZoneId", section)){ if(!section.empty() && section[0]=='"'){ size_t i=0; parseJSONString(section, i, out.timeZoneId); } }
             if(out.timeZoneId.empty() && extractSection(txt, "desktop.clock.timeZone", section)){ if(!section.empty() && section[0]=='"'){ size_t i=0; parseJSONString(section, i, out.timeZoneId); } }
             if(extractSection(txt, "desktop.clock.use24HourTime", section)){ size_t i=0; skipWS(section,i); parseJSONBool(section, i, out.use24HourTime); }
@@ -87,6 +96,8 @@ namespace gxos { namespace gui {
                 TryParseDesktopThemeId(out.desktopThemeId.c_str(), &themeId);
                 out.desktopThemeId = DesktopThemeIdToString(themeId);
             }
+            out.displayMode = normalizeDisplayModeName(out.displayMode);
+            if (out.displayPrimaryDisplayId.empty()) out.displayPrimaryDisplayId = "display-1";
             out.timeZoneId = gxos::clocktime::NormalizeTimeZoneId(out.timeZoneId);
             return true;
         }
@@ -101,6 +112,10 @@ namespace gxos { namespace gui {
             f << "  \"desktop.theme.id\": " << jsonEscape(DesktopThemeIdToString(themeId)) << ",\n";
             f << "  \"desktop.background.scale\": " << jsonEscape(data.backgroundScaleMode.empty() ? "fill" : data.backgroundScaleMode) << ",\n";
             f << "  \"desktop.taskbar.position\": " << jsonEscape(data.taskbarPosition.empty() ? "bottom" : data.taskbarPosition) << ",\n";
+            f << "  \"desktop.display.mode\": " << jsonEscape(normalizeDisplayModeName(data.displayMode)) << ",\n";
+            f << "  \"desktop.display.primaryId\": " << jsonEscape(data.displayPrimaryDisplayId.empty() ? "display-1" : data.displayPrimaryDisplayId) << ",\n";
+            f << "  \"desktop.display.arrangement\": " << jsonEscape(data.displayArrangement) << ",\n";
+            f << "  \"desktop.display.resolution\": " << jsonEscape(data.displayResolution) << ",\n";
             f << "  \"desktop.clock.timeZoneId\": " << jsonEscape(gxos::clocktime::NormalizeTimeZoneId(data.timeZoneId)) << ",\n";
             f << "  \"desktop.clock.use24HourTime\": " << (data.use24HourTime ? "true" : "false") << ",\n";
             f << "  \"pinned\": ["; for(size_t i=0;i<data.pinned.size();++i){ if(i) f<<","; f<<jsonEscape(data.pinned[i]);} f << "],\n";

@@ -28,6 +28,7 @@
 #include "kernel/core/include/kernel/image_adapter.h"
 #include "icon_theme_manager.h"
 #include "wallpaper_registry.h"
+#include "display_model.h"
 #include <sstream>
 #include <array>
 #include <algorithm>
@@ -205,6 +206,10 @@ namespace gxos {
             out.backgroundScaleMode = cfg.backgroundScaleMode.empty() ? "fill" : cfg.backgroundScaleMode;
             out.desktopThemeId = cfg.desktopThemeId.empty() ? "classic" : cfg.desktopThemeId;
             out.taskbarPosition = cfg.taskbarPosition.empty() ? "bottom" : cfg.taskbarPosition;
+            out.displayMode = normalizeDisplayModeName(cfg.displayMode);
+            out.displayPrimaryDisplayId = cfg.displayPrimaryDisplayId.empty() ? "display-1" : cfg.displayPrimaryDisplayId;
+            out.displayArrangement = cfg.displayArrangement;
+            out.displayResolution = cfg.displayResolution;
             out.timeZoneId = clocktime::NormalizeTimeZoneId(cfg.timeZoneId);
             out.use24HourTime = cfg.use24HourTime;
             out.showDesktopTrash = cfg.showDesktopTrash;
@@ -221,6 +226,10 @@ namespace gxos {
             cfg.backgroundScaleMode = store.backgroundScaleMode.empty() ? "fill" : store.backgroundScaleMode;
             cfg.desktopThemeId = store.desktopThemeId.empty() ? "classic" : store.desktopThemeId;
             cfg.taskbarPosition = store.taskbarPosition.empty() ? "bottom" : store.taskbarPosition;
+            cfg.displayMode = normalizeDisplayModeName(store.displayMode);
+            cfg.displayPrimaryDisplayId = store.displayPrimaryDisplayId.empty() ? "display-1" : store.displayPrimaryDisplayId;
+            cfg.displayArrangement = store.displayArrangement;
+            cfg.displayResolution = store.displayResolution;
             cfg.timeZoneId = clocktime::NormalizeTimeZoneId(store.timeZoneId);
             cfg.use24HourTime = store.use24HourTime;
             cfg.showDesktopTrash = store.showDesktopTrash;
@@ -229,6 +238,91 @@ namespace gxos {
             cfg.showDesktopSystemSettings = store.showDesktopSystemSettings;
             cfg.smallLiveDesktopFolderIcons = store.smallLiveDesktopFolderIcons;
             cfg.autoArrangeDesktopIcons = store.autoArrangeDesktopIcons;
+        }
+
+        static std::string currentFramebufferResolutionText() {
+            if (Compositor::g_videoBackend) {
+                return std::to_string(Compositor::g_videoBackend->getWidth()) + "x" + std::to_string(Compositor::g_videoBackend->getHeight());
+            }
+            return "1024x768";
+        }
+
+        static DisplayVirtualDesktop buildDisplayVirtualDesktop(const DesktopConfigData& cfg) {
+            DisplayVirtualDesktop desktop;
+            desktop.mode = parseDisplayModeKind(cfg.displayMode);
+            desktop.monitors = parseDisplayArrangement(cfg.displayArrangement);
+
+            bool hasPrimary = false;
+            for (auto& monitor : desktop.monitors) {
+                if (!cfg.displayPrimaryDisplayId.empty() && monitor.id == cfg.displayPrimaryDisplayId) {
+                    monitor.primary = true;
+                    hasPrimary = true;
+                } else if (monitor.primary) {
+                    hasPrimary = true;
+                }
+            }
+            if (!hasPrimary) {
+                for (auto& monitor : desktop.monitors) {
+                    if (monitor.isActive()) {
+                        monitor.primary = true;
+                        break;
+                    }
+                }
+            }
+            desktop.recomputeBounds();
+            return desktop;
+        }
+
+        static void ensureDisplayConfigDefaults(DesktopConfigData& cfg) {
+            cfg.displayMode = normalizeDisplayModeName(cfg.displayMode);
+            if (cfg.displayPrimaryDisplayId.empty()) {
+                cfg.displayPrimaryDisplayId = "display-1";
+            }
+            if (cfg.displayResolution.empty()) {
+                cfg.displayResolution = currentFramebufferResolutionText();
+            }
+            if (cfg.displayArrangement.empty()) {
+                int displayW = 1024;
+                int displayH = 768;
+                const size_t sep = cfg.displayResolution.find('x');
+                if (sep != std::string::npos) {
+                    try {
+                        displayW = std::max(1, std::stoi(cfg.displayResolution.substr(0, sep)));
+                        displayH = std::max(1, std::stoi(cfg.displayResolution.substr(sep + 1)));
+                    } catch (...) {
+                        displayW = 1024;
+                        displayH = 768;
+                    }
+                }
+                std::vector<DisplayMonitorDescriptor> monitors;
+                monitors.push_back(makeDisplayMonitor(
+                    cfg.displayPrimaryDisplayId.empty() ? "display-1" : cfg.displayPrimaryDisplayId,
+                    "Display 1",
+                    0,
+                    0,
+                    displayW,
+                    displayH,
+                    nullptr,
+                    0,
+                    true,
+                    true));
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
+                if (parseDisplayModeKind(cfg.displayMode) == DisplayModeKind::Extend) {
+                    monitors.push_back(makeDisplayMonitor(
+                        "display-2",
+                        "Display 2",
+                        displayW,
+                        0,
+                        displayW,
+                        displayH,
+                        nullptr,
+                        0,
+                        true,
+                        false));
+                }
+#endif
+                cfg.displayArrangement = serializeDisplayArrangement(monitors);
+            }
         }
 
         static bool loadDisplayOptionsStore(DisplayOptionsStoreData& out, std::string& err) {
@@ -1851,6 +1945,7 @@ namespace gxos {
             g_cfg.taskbarPosition = taskbarPositionName(g_taskbarPosition);
             g_cfg.desktopThemeId = DesktopThemeIdToString(GetCurrentDesktopThemeId());
             g_cfg.backgroundScaleMode = g_backgroundScaleMode;
+            ensureDisplayConfigDefaults(g_cfg);
 
             std::string legacyErr;
             if (!DesktopConfig::Save("desktop.json", g_cfg, legacyErr)) {
@@ -4533,6 +4628,7 @@ namespace gxos {
                 }
                 if (cfgOk || displayOk) {
                     g_cfg = cfg;
+                    ensureDisplayConfigDefaults(g_cfg);
                     g_clockDisplaySettings = clockDisplaySettingsFromConfig(g_cfg);
                     syncDesktopThemeFromConfig(g_cfg);
                     g_taskbarPosition = parseTaskbarPosition(g_cfg.taskbarPosition);
@@ -4544,6 +4640,10 @@ namespace gxos {
                         " SystemSettings=" + (g_cfg.showDesktopSystemSettings ? "true" : "false") +
                         " FolderIconsSmall=" + (g_cfg.smallLiveDesktopFolderIcons ? "true" : "false") +
                         " AutoArrange=" + (g_cfg.autoArrangeDesktopIcons ? "true" : "false"));
+                    const DisplayVirtualDesktop desktop = buildDisplayVirtualDesktop(g_cfg);
+                    Logger::write(LogLevel::Info, std::string("Desktop display layout summary: ") + desktop.summary() +
+                        " persistedResolution=" + g_cfg.displayResolution +
+                        " arrangement=" + (g_cfg.displayArrangement.empty() ? "(empty)" : g_cfg.displayArrangement));
                     refreshDesktopItems();
                     invalidate(0);
                 } else {
@@ -4766,6 +4866,7 @@ namespace gxos {
                 applyDisplayOptionsToDesktopConfig(displayStore, cfg);
             }
             g_cfg = cfg;
+            ensureDisplayConfigDefaults(g_cfg);
             g_clockDisplaySettings = clockDisplaySettingsFromConfig(g_cfg);
             Logger::write(LogLevel::Info, std::string("Compositor DesktopConfig loaded=") + (cfgOk ? "true" : "false") + " err=" + cfgErr);
             Logger::write(LogLevel::Info, std::string("Compositor display options store loaded=") + (displayOk ? "true" : "false") + " err=" + displayErr);
@@ -4780,6 +4881,10 @@ namespace gxos {
             }
             g_cfg.backgroundScaleMode = g_backgroundScaleMode;
             Logger::write(LogLevel::Info, std::string("Compositor background scale mode=") + g_backgroundScaleMode);
+            const DisplayVirtualDesktop desktop = buildDisplayVirtualDesktop(g_cfg);
+            Logger::write(LogLevel::Info, std::string("Compositor display layout summary: ") + desktop.summary() +
+                " persistedResolution=" + g_cfg.displayResolution +
+                " arrangement=" + (g_cfg.displayArrangement.empty() ? "(empty)" : g_cfg.displayArrangement));
             logCompositorList("config pinned before merge", g_cfg.pinned);
             logCompositorList("config recent before merge", g_cfg.recent);
             for (const auto& pinned : DesktopService::GetPinned()) {
@@ -4839,6 +4944,7 @@ namespace gxos {
             
             bool running = true; while (running) { pumpEvents( ); ipc::Message m; if (ipc::Bus::pop(kGuiChanIn, m, 30)) { if (m.type == (uint32_t)MsgType::MT_Ping && m.data.size( ) == 3 && std::string(m.data.begin( ), m.data.end( )) == "bye") running = false; else { const uint64_t msgStartMs = nowMs( ); hostedFreezeDiagnosticsOnMessageBegin(m.type); handleMessage(m); hostedFreezeDiagnosticsOnMessageEnd(nowMs( ) - msgStartMs); } } }
             DesktopConfigData outCfg = g_cfg; { std::lock_guard<std::mutex> lk(g_lock); outCfg.windows.clear( ); for (size_t i = 0; i < g_z.size( ); ++i) { uint64_t id = g_z[i]; auto it = g_windows.find(id); if (it == g_windows.end( )) continue; const WinInfo& w = it->second; DesktopWindowRec rec; rec.id = w.id; rec.title = w.title; rec.x = w.x; rec.y = w.y; rec.w = w.w; rec.h = w.h; rec.minimized = w.minimized; rec.maximized = w.maximized; rec.z = (int)i; rec.focused = (g_focus == w.id); rec.snap = w.snapState; outCfg.windows.push_back(rec); } }
+            ensureDisplayConfigDefaults(outCfg);
             std::string cerr; DesktopConfig::Save("desktop.json", outCfg, cerr); DisplayOptionsStoreData shutdownDisplayStore = displayOptionsFromDesktopConfig(outCfg); std::string shutdownDisplayErr; DisplayOptionsStore::Save("display-options.cfg", shutdownDisplayStore, shutdownDisplayErr); if (!legacyLoaded) { std::vector<SavedWindow> sw; { std::lock_guard<std::mutex> lk(g_lock); for (auto& kv : g_windows) { sw.push_back(SavedWindow{ kv.second.id, kv.second.title, kv.second.x, kv.second.y, kv.second.w, kv.second.h, kv.second.minimized, kv.second.maximized }); } } std::string err; DesktopState::Save("desktop.state", sw, err); }
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)
             shutdownWindow( );

@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 
+#include "display_model.h"
 #include "desktop_theme.h"
 
 namespace gxos {
@@ -44,6 +45,11 @@ public:
     static bool s_showDesktopFileManager;
     static bool s_showDesktopSystemSettings;
     static bool s_smallLiveDesktopFolderIcons;
+    static std::string s_selectedDisplayMode;
+    static std::string s_appliedDisplayMode;
+    static std::string s_displayPrimaryDisplayId;
+    static std::string s_displayArrangement;
+    static std::string s_displayResolution;
 
     static void loadSelection();
     static void render();
@@ -55,6 +61,7 @@ public:
     static void drawThemeTab();
     static void drawDesktopIconsTab();
     static void drawRegionTimeTab();
+    static void drawDisplayTab();
     static void handleMouseDown(int mx, int my);
     static void handleMouseUp(int mx, int my);
     static void handleMouseMove(int mx, int my);
@@ -64,6 +71,8 @@ public:
     static void applySelectedBackground();
     static void applySelectedTheme();
     static void applySelectedRegionTime();
+    static void applySelectedDisplayMode();
+    static void saveDisplaySettings();
     static bool toggleDesktopIconSetting(int index);
     static void saveDesktopIconSettings();
     static void saveClockSettings();

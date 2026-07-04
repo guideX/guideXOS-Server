@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 
+#include "display_model.h"
 #include "clock_time_settings.h"
 #include "desktop_theme.h"
 
@@ -26,6 +27,10 @@ struct DisplayOptionsStoreData {
     std::string backgroundScaleMode{"fill"};
     std::string desktopThemeId{"classic"};
     std::string taskbarPosition{"bottom"};
+    std::string displayMode{"mirror"};
+    std::string displayPrimaryDisplayId{"display-1"};
+    std::string displayArrangement;
+    std::string displayResolution;
     std::string timeZoneId{"pacific"};
     bool use24HourTime{false};
     bool showDesktopTrash{true};
@@ -177,6 +182,18 @@ public:
             } else if (key == "taskbarPosition") {
                 out.taskbarPosition = value;
                 parsedAny = true;
+            } else if (key == "displayMode") {
+                out.displayMode = value;
+                parsedAny = true;
+            } else if (key == "displayPrimaryDisplayId") {
+                out.displayPrimaryDisplayId = value;
+                parsedAny = true;
+            } else if (key == "displayArrangement") {
+                out.displayArrangement = value;
+                parsedAny = true;
+            } else if (key == "displayResolution") {
+                out.displayResolution = value;
+                parsedAny = true;
             } else if (key == "timeZoneId" || key == "clockTimeZoneId" || key == "timeZone") {
                 out.timeZoneId = value;
                 parsedAny = true;
@@ -209,6 +226,10 @@ public:
         out.desktopThemeId = DesktopThemeIdToString(themeId);
         out.backgroundScaleMode = normalizeScaleMode(out.backgroundScaleMode);
         out.taskbarPosition = normalizeTaskbarPosition(out.taskbarPosition);
+        out.displayMode = normalizeDisplayModeName(out.displayMode);
+        if (out.displayPrimaryDisplayId.empty()) {
+            out.displayPrimaryDisplayId = "display-1";
+        }
         out.timeZoneId = gxos::clocktime::NormalizeTimeZoneId(out.timeZoneId);
 
         if (!parsedAny) {
@@ -277,6 +298,10 @@ public:
         out << "backgroundScaleMode=" << escape(normalized.backgroundScaleMode) << "\n";
         out << "desktopThemeId=" << escape(normalized.desktopThemeId) << "\n";
         out << "taskbarPosition=" << escape(normalized.taskbarPosition) << "\n";
+        out << "displayMode=" << escape(normalized.displayMode) << "\n";
+        out << "displayPrimaryDisplayId=" << escape(normalized.displayPrimaryDisplayId.empty() ? "display-1" : normalized.displayPrimaryDisplayId) << "\n";
+        out << "displayArrangement=" << escape(normalized.displayArrangement) << "\n";
+        out << "displayResolution=" << escape(normalized.displayResolution) << "\n";
         out << "timeZoneId=" << escape(normalized.timeZoneId) << "\n";
         out << "use24HourTime=" << (normalized.use24HourTime ? "1" : "0") << "\n";
         out << "showDesktopTrash=" << (normalized.showDesktopTrash ? "1" : "0") << "\n";
