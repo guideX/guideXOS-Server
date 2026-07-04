@@ -4,8 +4,10 @@
   "desktop.theme.id": "classic",
   "desktop.background.scale": "fill",
   "desktop.taskbar.position": "bottom",
+  "desktop.clock.timeZoneId": "pacific",
+  "desktop.clock.use24HourTime": false,
   "pinned": ["ComputerFiles","Trash","App Model Demo","Native App Debug Viewer","Hello World","Resource Viewer","Future GXApp Package","HelloWorld ELF"],
-  "recent": ["ComputerFiles","guideXOS Navigator","DisplayOptions","Console","App Model Demo","Hello World","Resource Viewer","Notepad","ControlPanel","Calculator","HelloWorld ELF","Native App Debug Viewer","TaskManager","Future GXApp Package","HDInstaller"],
+  "recent": ["Control Panel","File Explorer","Notepad","DisplayOptions","ComputerFiles","guideXOS Navigator","Console","App Model Demo","Hello World","Resource Viewer"],
   "desktopShortcuts": [
   ],
   "showDesktopTrash": true,
@@ -15,7 +17,13 @@
   "smallLiveDesktopFolderIcons": true,
   "autoArrangeDesktopIcons": false,
   "windows": [
-    {"id": 1000, "title": "Task Manager", "x": 300, "y": 300, "w": 760, "h": 520, "minimized": false, "maximized": false, "z": 0, "focused": true, "snap": 0}
+    {"id": 1000, "title": "Untitled - Notepad", "x": 300, "y": 300, "w": 640, "h": 480, "minimized": false, "maximized": false, "z": 0, "focused": false, "snap": 0},
+    {"id": 1001, "title": "Untitled - Notepad", "x": 60, "y": 60, "w": 640, "h": 480, "minimized": false, "maximized": false, "z": 1, "focused": false, "snap": 0},
+    {"id": 1002, "title": "Control Panel", "x": 100, "y": 100, "w": 640, "h": 480, "minimized": false, "maximized": false, "z": 2, "focused": false, "snap": 0},
+    {"id": 1003, "title": "File Explorer - /", "x": 140, "y": 140, "w": 900, "h": 560, "minimized": false, "maximized": false, "z": 3, "focused": false, "snap": 0},
+    {"id": 1004, "title": "Display Options", "x": 180, "y": 180, "w": 800, "h": 620, "minimized": false, "maximized": false, "z": 4, "focused": false, "snap": 0},
+    {"id": 1005, "title": "File Explorer - /D:/dev/guideXOSServer/tmp/appmodel-phase3a-active-typed-dispatch/phase3a-safe-folder", "x": 220, "y": 220, "w": 900, "h": 560, "minimized": false, "maximized": false, "z": 5, "focused": false, "snap": 0},
+    {"id": 1006, "title": "D:\\dev\\guideXOSServer\\tmp\\appmodel-phase3a-active-typed-dispatch\\phase3a-safe-open.txt - Notepad", "x": 260, "y": 260, "w": 640, "h": 480, "minimized": false, "maximized": false, "z": 6, "focused": true, "snap": 0}
   ],
   "iconPositions": [
   ]

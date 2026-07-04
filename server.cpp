@@ -1144,7 +1144,7 @@ static void help(){
                  " gui.rect <id> <x> <y> <w> <h> <r> <g> <b> | gui.move <id> <x> <y> | gui.resize <id> <w> <h> | gui.title <id> <title>\n"
                  " gui.btn <win> <id> <x> <y> <w> <h> <text> | gui.pop | gui.wlist | gui.activate <id> | gui.min <id>\n"
                  " gxm.load <path> | gxm.sample | gui.save <path> | gui.load <path>\n"
-                 " desktop.wallpaper <path> | desktop.launch <action> | desktop.launch.resolve <label> | desktop.launch.adapt <label> | desktop.launch.compare | desktop.launch.storage | desktop.launch.storage.preview | desktop.launch.storage.preview.compare | desktop.launch.types | desktop.open.resolve <path> [dir] | desktop.pin <action> | desktop.unpin <action> | desktop.showconfig\n"
+                 " desktop.wallpaper <path> | desktop.launch <action> | desktop.open <path> [dir] | desktop.launch.resolve <label> | desktop.launch.adapt <label> | desktop.launch.compare | desktop.launch.storage | desktop.launch.storage.preview | desktop.launch.storage.preview.compare | desktop.launch.types | desktop.open.resolve <path> [dir] | desktop.appmodel.active-typed-dispatch-gate [force-on|force-off] | desktop.pin <action> | desktop.unpin <action> | desktop.showconfig\n"
                  " desktop.apps | desktop.apps.verbose | desktop.appmodel.summary | desktop.appmodel.coverage | desktop.appmodel.typed-dispatch-gate [force-off] | desktop.pinned | desktop.recent | desktop.pinapp <name> | desktop.pinfile <name> <path>\n"
                  " nativeapp.capabilities | nativeapp.inspect <app> | nativeapp.smoketest <app> | nativeapp.processes\n"
                  " taskbar.list | taskbar.activate <id> | taskbar.min <id> | taskbar.close <id>\n"
@@ -1393,12 +1393,64 @@ using namespace gxos;
                  std::cout<<"Desktop launch failed: "<<err<<std::endl;
              }
          }
+         else if (cmd=="desktop.open"){
+            if(!requireCompositor()) continue;
+             std::string pathAndMode; std::getline(iss, pathAndMode); if(pathAndMode.size()>0 && pathAndMode[0]==' ') pathAndMode.erase(0,1);
+             if(pathAndMode.empty()){ std::cout<<"desktop.open <path> [dir]"<<std::endl; continue; }
+             std::string mode;
+             if (pathAndMode.size() >= 4 && pathAndMode.rfind(" dir") == pathAndMode.size() - 4) {
+                 mode = "dir";
+                 pathAndMode.erase(pathAndMode.size() - 4);
+             } else if (pathAndMode.size() >= 10 && pathAndMode.rfind(" directory") == pathAndMode.size() - 10) {
+                 mode = "directory";
+                 pathAndMode.erase(pathAndMode.size() - 10);
+             }
+             if (pathAndMode.size() >= 2 && pathAndMode.front() == '"' && pathAndMode.back() == '"') {
+                 pathAndMode = pathAndMode.substr(1, pathAndMode.size() - 2);
+             }
+             std::string err;
+             const bool isDirectory = mode == "dir" || mode == "directory";
+             if (gui::DesktopService::OpenFilesystemEntry(pathAndMode, isDirectory, err)) {
+                 std::cout<<"Desktop open successful: "<<pathAndMode<<std::endl;
+             } else {
+                 std::cout<<"Desktop open failed: "<<err<<std::endl;
+             }
+         }
          else if (cmd=="desktop.pin" || cmd=="desktop.unpin"){
             if(!requireCompositor()) continue;
              std::string action; std::getline(iss, action); if(action.size()>0 && action[0]==' ') action.erase(0,1); if(action.empty()){ std::cout<< (cmd=="desktop.pin"?"desktop.pin <action>":"desktop.unpin <action>") << std::endl; continue; }
              std::vector<std::pair<bool,std::string>> ops; ops.emplace_back(cmd=="desktop.pin", action);
              std::string payload = gui::packPins(ops);
              ipc::Message m; m.type=(uint32_t)gui::MsgType::MT_DesktopPins; m.data.assign(payload.begin(), payload.end()); ipc::Bus::publish("gui.input", std::move(m), false); std::cout<<"Desktop pin/unpin request sent: "<<payload<<std::endl; }
+        else if (cmd=="desktop.appmodel.active-typed-dispatch-gate"){
+            std::string mode; std::getline(iss, mode); if(mode.size()>0 && mode[0]==' ') mode.erase(0,1);
+            const bool restoreEnabled = gxos::apps::AppModelActiveTypedDispatchEnabled();
+            const bool forceOffRequested = mode == "force-off" || mode == "off" || mode == "disabled";
+            const bool forceOnRequested = mode == "force-on" || mode == "on" || mode == "enabled";
+            if (forceOffRequested) {
+                gxos::apps::SetAppModelActiveTypedDispatchEnabledForDiagnostics(false);
+            } else if (forceOnRequested) {
+                gxos::apps::SetAppModelActiveTypedDispatchEnabledForDiagnostics(true);
+            }
+
+            const bool runtimeEnabled = gxos::apps::AppModelActiveTypedDispatchEnabled();
+            std::cout << "[AppModelActiveTypedDispatchGate]\n";
+            std::cout << "command: desktop.appmodel.active-typed-dispatch-gate\n";
+            std::cout << "mode: " << (forceOffRequested ? "force-off" : (forceOnRequested ? "force-on" : "status")) << "\n";
+            std::cout << "appModelActiveDispatchFeatureGate=" << gxos::apps::AppModelActiveTypedDispatchFeatureGateName() << "\n";
+            std::cout << "appModelActiveDispatchEnabled=" << (runtimeEnabled ? "true" : "false") << "\n";
+            std::cout << "appModelActiveDispatchRuntimePath=" << (runtimeEnabled ? "active" : "inactive") << "\n";
+            std::cout << "runtimeLaunchBehaviorChanged=false\n";
+            std::cout << "persistentDesktopStorageWrites=false\n";
+            std::cout << "appModelActiveDispatchPreviousState=" << (restoreEnabled ? "true" : "false") << "\n";
+            std::cout << "appModelActiveDispatchCurrentState=" << (runtimeEnabled ? "true" : "false") << "\n";
+            if (forceOffRequested || forceOnRequested) {
+                std::cout << "appModelActiveDispatchToggleApplied=true\n";
+            } else {
+                std::cout << "appModelActiveDispatchToggleApplied=false\n";
+            }
+            std::cout << "nonFatal=true\n";
+        }
         else if (cmd=="desktop.showconfig"){
             gxos::gui::DesktopConfigData cfg; std::string err;
             if(!gxos::gui::DesktopConfig::Load("desktop.json", cfg, err)){

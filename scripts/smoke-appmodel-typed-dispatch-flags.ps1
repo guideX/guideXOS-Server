@@ -157,6 +157,9 @@ try {
         Assert-Contains $normalOutput "appModelPhase3PilotFeedsTypedDispatchIntoLaunch=true" "Phase 3 ready-only dispatch feeds launch"
         Assert-Contains $normalOutput "appModelPhase3PilotRuntimeLaunchBehaviorChanged=false" "Phase 3 pilot does not change runtime launch behavior"
         Assert-Contains $normalOutput "appModelPhase3PilotDefaultBuildSafe=true" "Phase 3 pilot default-build-safe"
+        Assert-Contains $normalOutput "appModelActiveDispatchFeatureGate=appmodel.active-typed-dispatch" "Phase 3A active dispatch feature gate name"
+        Assert-Contains $normalOutput "appModelActiveDispatchEnabled=false" "Phase 3A active dispatch default-off"
+        Assert-Contains $normalOutput "appModelActiveDispatchRuntimePath=inactive" "Phase 3A active dispatch inactive by default"
     }
 
     $reportLines = @(
@@ -180,6 +183,9 @@ try {
     $reportLines += "appModelPhase3PilotRuntimeLaunchBehaviorChanged=false"
     $reportLines += "appModelPhase3PilotScopedToStartMenuNotepad=false"
     $reportLines += "appModelPhase3PilotDefaultBuildSafe=true"
+    $reportLines += "appModelActiveDispatchFeatureGate=appmodel.active-typed-dispatch"
+    $reportLines += "appModelActiveDispatchEnabled=false"
+    $reportLines += "appModelActiveDispatchRuntimePath=inactive"
     $reportLines += "result=PASS"
     $report = $reportLines -join [Environment]::NewLine
 

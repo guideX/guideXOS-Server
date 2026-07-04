@@ -56,6 +56,8 @@ namespace gxos {
         namespace {
             static std::mutex s_typedDispatchRuntimeEnabledMutex;
             static bool s_typedDispatchRuntimeEnabled = true;
+            static std::mutex s_appModelActiveTypedDispatchEnabledMutex;
+            static bool s_appModelActiveTypedDispatchEnabled = false;
         }
 
         const char* TypedDispatchFeatureGateName() {
@@ -72,6 +74,20 @@ namespace gxos {
             s_typedDispatchRuntimeEnabled = enabled;
         }
 
+        const char* AppModelActiveTypedDispatchFeatureGateName() {
+            return "appmodel.active-typed-dispatch";
+        }
+
+        bool AppModelActiveTypedDispatchEnabled() {
+            std::lock_guard<std::mutex> lock(s_appModelActiveTypedDispatchEnabledMutex);
+            return s_appModelActiveTypedDispatchEnabled;
+        }
+
+        void SetAppModelActiveTypedDispatchEnabledForDiagnostics(bool enabled) {
+            std::lock_guard<std::mutex> lock(s_appModelActiveTypedDispatchEnabledMutex);
+            s_appModelActiveTypedDispatchEnabled = enabled;
+        }
+
         class TypedDispatchRuntimeGateOverride {
         public:
             explicit TypedDispatchRuntimeGateOverride(bool enabled)
@@ -81,6 +97,21 @@ namespace gxos {
 
             ~TypedDispatchRuntimeGateOverride() {
                 SetTypedDispatchRuntimeEnabledForDiagnostics(m_restoreEnabled);
+            }
+
+        private:
+            bool m_restoreEnabled;
+        };
+
+        class AppModelActiveTypedDispatchGateOverride {
+        public:
+            explicit AppModelActiveTypedDispatchGateOverride(bool enabled)
+                : m_restoreEnabled(AppModelActiveTypedDispatchEnabled()) {
+                SetAppModelActiveTypedDispatchEnabledForDiagnostics(enabled);
+            }
+
+            ~AppModelActiveTypedDispatchGateOverride() {
+                SetAppModelActiveTypedDispatchEnabledForDiagnostics(m_restoreEnabled);
             }
 
         private:
@@ -904,6 +935,41 @@ namespace gxos {
             return oss.str();
         }
 
+        static std::string appModelActiveTypedDispatchSummaryLine() {
+            std::ostringstream oss;
+            oss << "appModelActiveDispatchFeatureGate=" << apps::AppModelActiveTypedDispatchFeatureGateName()
+                << " appModelActiveDispatchEnabled=" << diagnosticBool(apps::AppModelActiveTypedDispatchEnabled())
+                << " appModelActiveDispatchRuntimePath=" << (apps::AppModelActiveTypedDispatchEnabled() ? "active" : "inactive")
+                << " appModelActiveDispatchRuntimeLaunchBehaviorChanged=false"
+                << " appModelActiveDispatchPersistentDesktopStorageWrites=false\n";
+            return oss.str();
+        }
+
+        static std::string buildAppModelActiveTypedDispatchEvidenceLine(
+            const std::string& source,
+            const std::string& request,
+            const std::string& classification,
+            const std::string& shadowDecision,
+            const std::string& shadowUsage,
+            const std::string& selectedHandler,
+            bool activeHandled,
+            bool legacyFallbackUsed,
+            const std::string& reason) {
+            std::ostringstream oss;
+            oss << "[AppModelActiveTypedDispatch] source=" << source
+                << " request=" << request
+                << " classification=" << classification
+                << " shadowDecision=" << shadowDecision
+                << " shadowUsage=" << shadowUsage
+                << " selectedHandler=" << selectedHandler
+                << " appModelActiveDispatchEnabled=" << diagnosticBool(apps::AppModelActiveTypedDispatchEnabled())
+                << " activeTypedDispatchHandled=" << diagnosticBool(activeHandled)
+                << " legacyFallbackUsed=" << diagnosticBool(legacyFallbackUsed)
+                << " visibleBehaviorChanged=false"
+                << " reason=" << reason;
+            return oss.str();
+        }
+
         static const char* kTypedDispatchGateHostedEvidencePath = "logs/appmodel-typed-dispatch-gate-hosted.evidence.txt";
         static const char* kTypedDispatchGateQemuEvidencePath = "logs/appmodel-typed-dispatch-gate-qemu.evidence.txt";
         static const int64_t kTypedDispatchGateEvidenceStaleAfterMs = 7LL * 24LL * 60LL * 60LL * 1000LL;
@@ -1099,6 +1165,24 @@ namespace gxos {
             if (target.dispatchLaunchName.empty()) return false;
             return target.type == apps::LaunchTargetType::BuiltInApp ||
                 target.type == apps::LaunchTargetType::LegacyAlias;
+        }
+
+        static bool isActiveTypedDispatchFilesystemEntryTarget(bool isDirectory, const std::string& path, std::string& routeName) {
+            switch (resolveFilesystemEntryLaunchTarget(path, isDirectory)) {
+            case FilesystemEntryLaunchTarget::FileExplorer:
+                routeName = "FileExplorer";
+                return true;
+            case FilesystemEntryLaunchTarget::Notepad:
+                routeName = "Notepad";
+                return true;
+            case FilesystemEntryLaunchTarget::ImageViewer:
+                routeName = "ImageViewer";
+                return false;
+            case FilesystemEntryLaunchTarget::Unsupported:
+            default:
+                routeName = "Unsupported";
+                return false;
+            }
         }
 
         static void countLaunchTargetShadowAdapterComparison(uint64_t& matches, uint64_t& acceptedMismatches, uint64_t& unexpectedMismatches, const std::string& comparisonStatus) {
@@ -2028,6 +2112,7 @@ namespace gxos {
             oss << launchTargetTypeCoverageSummaryLine();
             oss << typedDispatchCompileFlagsSummaryLine();
             oss << phase3PilotSummaryLine();
+            oss << appModelActiveTypedDispatchSummaryLine();
             oss << "overall: " << statusText(overallOk) << "\n";
             oss << "detailCommands: desktop.appmodel.coverage, desktop.apps.verbose, desktop.launch.compare, desktop.launch.storage, desktop.launch.storage.preview, desktop.launch.storage.preview.compare, desktop.launch.types\n";
             return oss.str();
@@ -3402,6 +3487,7 @@ namespace gxos {
             oss << "appModelPhase3PilotScopedToStartMenuNotepad=false\n";
             oss << "appModelPhase3PilotDefaultBuildSafe=true\n";
             oss << "note: historical pilot flags remain default-off; ready-only typed dispatch is active with compatibility fallbacks\n";
+            oss << appModelActiveTypedDispatchSummaryLine();
             return oss.str();
         }
 
@@ -3764,6 +3850,177 @@ namespace gxos {
             return filesystemEntryDiagnostic(path, isDirectory);
         }
 
+        static bool tryExecuteActiveTypedDispatchLaunch(const LaunchDispatchDecision& dispatchDecision, std::string& error, std::string& selectedHandler, std::string& reason) {
+            error.clear();
+            selectedHandler.clear();
+            reason.clear();
+
+            if (!apps::AppModelActiveTypedDispatchEnabled()) {
+                reason = "Active typed dispatch gate is disabled";
+                return false;
+            }
+
+            const auto failUnsupported = [&](const std::string& detail) {
+                reason = detail;
+                return false;
+            };
+
+            if (dispatchDecision.target.type == apps::LaunchTargetType::ShellAction) {
+                const std::string shellAction = dispatchDecision.target.shellAction.empty()
+                    ? dispatchDecision.originalDispatch
+                    : dispatchDecision.target.shellAction;
+
+                if (shellAction == "Control Panel") {
+                    const uint64_t pid = apps::ControlPanel::Launch();
+                    if (pid == 0) {
+                        error = "Could not open Control Panel";
+                        reason = "Active typed dispatch attempted Control Panel but the launcher returned pid=0";
+                        return false;
+                    }
+
+                    DesktopService::AddRecentProgram("Control Panel");
+                    selectedHandler = "Control Panel";
+                    reason = "Active typed dispatch handled the Control Panel shell action";
+                    return true;
+                }
+
+                if (shellAction == "Settings" || shellAction == "System Settings") {
+                    uint64_t settingsPid = apps::DisplayOptions::Launch();
+                    if (settingsPid == 0) {
+                        settingsPid = apps::ControlPanel::Launch();
+                        if (settingsPid == 0) {
+                            error = "Could not open Settings";
+                            reason = "Active typed dispatch attempted Settings and Control Panel fallback but both failed";
+                            return false;
+                        }
+
+                        DesktopService::AddRecentProgram("Control Panel");
+                        selectedHandler = "Control Panel";
+                        reason = "Active typed dispatch handled Settings through the existing Control Panel fallback";
+                        return true;
+                    }
+
+                    DesktopService::AddRecentProgram("DisplayOptions");
+                    selectedHandler = "DisplayOptions";
+                    reason = "Active typed dispatch handled Settings through DisplayOptions";
+                    return true;
+                }
+
+                return failUnsupported("Active typed dispatch is not enabled for this shell action");
+            }
+
+            const std::string dispatchName = !dispatchDecision.target.dispatchLaunchName.empty()
+                ? dispatchDecision.target.dispatchLaunchName
+                : dispatchDecision.selectedDispatch;
+
+            if (dispatchName == "Notepad") {
+                const uint64_t pid = apps::Notepad::Launch();
+                if (pid == 0) {
+                    error = "Failed to launch Notepad";
+                    reason = "Active typed dispatch attempted Notepad but the launcher returned pid=0";
+                    return false;
+                }
+
+                DesktopService::AddRecentProgram("Notepad");
+                selectedHandler = "Notepad";
+                reason = "Active typed dispatch handled the Notepad launch";
+                return true;
+            }
+
+            if (dispatchName == "FileExplorer") {
+                const uint64_t pid = apps::FileExplorer::Launch();
+                if (pid == 0) {
+                    error = "Failed to launch File Explorer";
+                    reason = "Active typed dispatch attempted File Explorer but the launcher returned pid=0";
+                    return false;
+                }
+
+                DesktopService::AddRecentProgram("File Explorer");
+                selectedHandler = "File Explorer";
+                reason = "Active typed dispatch handled the File Explorer launch";
+                return true;
+            }
+
+            if (dispatchName == "ControlPanel") {
+                const uint64_t pid = apps::ControlPanel::Launch();
+                if (pid == 0) {
+                    error = "Failed to launch Control Panel";
+                    reason = "Active typed dispatch attempted Control Panel but the launcher returned pid=0";
+                    return false;
+                }
+
+                DesktopService::AddRecentProgram("Control Panel");
+                selectedHandler = "Control Panel";
+                reason = "Active typed dispatch handled the Control Panel launch";
+                return true;
+            }
+
+            if (dispatchName == "DisplayOptions") {
+                const uint64_t pid = apps::DisplayOptions::Launch();
+                if (pid == 0) {
+                    error = "Failed to launch Settings";
+                    reason = "Active typed dispatch attempted DisplayOptions but the launcher returned pid=0";
+                    return false;
+                }
+
+                DesktopService::AddRecentProgram("DisplayOptions");
+                selectedHandler = "DisplayOptions";
+                reason = "Active typed dispatch handled the Settings launch";
+                return true;
+            }
+
+            return failUnsupported("Active typed dispatch is not enabled for this app target");
+        }
+
+        static bool tryExecuteActiveTypedDispatchFilesystemEntry(const std::string& path, bool isDirectory, std::string& error, std::string& selectedHandler, std::string& reason) {
+            error.clear();
+            selectedHandler.clear();
+            reason.clear();
+
+            if (!apps::AppModelActiveTypedDispatchEnabled()) {
+                reason = "Active typed dispatch gate is disabled";
+                return false;
+            }
+
+            std::string routeName;
+            if (!isActiveTypedDispatchFilesystemEntryTarget(isDirectory, path, routeName)) {
+                reason = "Active typed dispatch is not enabled for this filesystem entry";
+                return false;
+            }
+
+            if (routeName == "FileExplorer") {
+                const uint64_t pid = apps::FileExplorer::Launch(path);
+                if (pid == 0) {
+                    error = "Failed to open path in File Explorer";
+                    reason = "Active typed dispatch attempted File Explorer but the launcher returned pid=0";
+                    return false;
+                }
+
+                DesktopService::AddRecentProgram("File Explorer");
+                selectedHandler = "File Explorer";
+                reason = isDirectory
+                    ? "Active typed dispatch handled the folder open in File Explorer"
+                    : "Active typed dispatch handled the file open in File Explorer";
+                return true;
+            }
+
+            if (routeName == "Notepad") {
+                const uint64_t pid = apps::Notepad::LaunchWithFile(path);
+                if (pid == 0) {
+                    error = "Failed to open file in Notepad";
+                    reason = "Active typed dispatch attempted Notepad but the launcher returned pid=0";
+                    return false;
+                }
+
+                DesktopService::AddRecentProgram("Notepad");
+                selectedHandler = "Notepad";
+                reason = "Active typed dispatch handled the text-file open in Notepad";
+                return true;
+            }
+
+            return false;
+        }
+
         bool DesktopService::OpenFilesystemEntry(const std::string& path, bool isDirectory, std::string& error) {
             error.clear();
             Logger::write(LogLevel::Info, std::string("Desktop filesystem open requested path=") + path + " directory=" + (isDirectory ? "true" : "false"));
@@ -3771,6 +4028,22 @@ namespace gxos {
                 error = "No filesystem path supplied";
                 return false;
             }
+
+            const FilesystemEntryLaunchTarget shadowRoute = resolveFilesystemEntryLaunchTarget(path, isDirectory);
+            std::string activeSelectedHandler;
+            std::string activeReason;
+            const bool activeHandled = tryExecuteActiveTypedDispatchFilesystemEntry(path, isDirectory, error, activeSelectedHandler, activeReason);
+            Logger::write(LogLevel::Info, buildAppModelActiveTypedDispatchEvidenceLine(
+                "HostedFilesystemEntry",
+                path,
+                "FileOpen",
+                filesystemEntryLaunchTargetName(shadowRoute),
+                filesystemEntryLaunchStatus(shadowRoute),
+                activeSelectedHandler.empty() ? filesystemEntryLaunchTargetName(shadowRoute) : activeSelectedHandler,
+                activeHandled,
+                !activeHandled,
+                activeReason));
+            if (activeHandled) return true;
 
             switch (resolveFilesystemEntryLaunchTarget(path, isDirectory)) {
             case FilesystemEntryLaunchTarget::FileExplorer:
@@ -3812,32 +4085,46 @@ namespace gxos {
         }
 
         bool DesktopService::ShowFolderOnHostedDesktop(const std::string& path, std::string& error) {
-#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
-            const std::string normalized = DesktopFolderResolver::NormalizeVirtualPath(path);
-            std::string ensureError;
-            const bool createIfMissing = normalized == DesktopFolderResolver::VirtualPath();
-            if (!DesktopFolderResolver::EnsureExists(normalized, ensureError, createIfMissing)) {
-                error = ensureError;
+            error.clear();
+            Logger::write(LogLevel::Info, std::string("Desktop show-folder requested path=") + path);
+            if (path.empty()) {
+                error = "No folder path supplied";
                 return false;
             }
 
-            if (!Compositor::showFolderOnHostedDesktop(normalized)) {
-                error = std::string("Hosted desktop navigation failed for ") + normalized;
+            if (!Compositor::showFolderOnHostedDesktop(path)) {
+                error = "Hosted desktop navigation failed for " + path;
+                Logger::write(LogLevel::Warn, error);
                 return false;
             }
 
             return true;
-#else
-            (void)path;
-            error = "Hosted desktop navigation is unavailable in this runtime";
-            return false;
-#endif
         }
 
         bool DesktopService::LaunchApp(const std::string& name, std::string& error) {
             ensureDefaultAppsRegistered();
             const LaunchDispatchDecision dispatchDecision = SelectLaunchDispatch(name);
             RecordLaunchDispatchDecision("HostedDesktopService", dispatchDecision);
+
+            std::string activeSelectedHandler;
+            std::string activeReason;
+            const bool activeHandled = tryExecuteActiveTypedDispatchLaunch(dispatchDecision, error, activeSelectedHandler, activeReason);
+            Logger::write(LogLevel::Info, buildAppModelActiveTypedDispatchEvidenceLine(
+                "HostedDesktopService",
+                name,
+                apps::ToString(dispatchDecision.target.type),
+                dispatchDecision.selectedDispatch,
+                apps::ToString(dispatchDecision.usage),
+                activeSelectedHandler.empty()
+                    ? (dispatchDecision.target.dispatchLaunchName.empty() ? dispatchDecision.selectedDispatch : dispatchDecision.target.dispatchLaunchName)
+                    : activeSelectedHandler,
+                activeHandled,
+                !activeHandled,
+                activeReason));
+            if (activeHandled) {
+                return true;
+            }
+
             if (dispatchDecision.target.type == apps::LaunchTargetType::ShellAction) {
                 const std::string shellAction = dispatchDecision.target.shellAction.empty() ? name : dispatchDecision.target.shellAction;
 

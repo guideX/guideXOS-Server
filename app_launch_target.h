@@ -98,6 +98,9 @@ inline const char* ToString(LaunchDispatchUsage usage) {
 const char* TypedDispatchFeatureGateName();
 bool TypedDispatchRuntimeEnabled();
 void SetTypedDispatchRuntimeEnabledForDiagnostics(bool enabled);
+const char* AppModelActiveTypedDispatchFeatureGateName();
+bool AppModelActiveTypedDispatchEnabled();
+void SetAppModelActiveTypedDispatchEnabledForDiagnostics(bool enabled);
 
 } // namespace apps
 } // namespace gxos

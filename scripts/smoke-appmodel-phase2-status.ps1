@@ -578,7 +578,10 @@ try {
             (Text-Contains -Output $hostedOutput -Needle "appModelPhase3PilotEnabled=true") -and
             (Text-Contains -Output $hostedOutput -Needle "appModelPhase3PilotFeedsTypedDispatchIntoLaunch=true") -and
             (Text-Contains -Output $hostedOutput -Needle "appModelPhase3PilotRuntimeLaunchBehaviorChanged=false") -and
-            (Text-Contains -Output $hostedOutput -Needle "appModelPhase3PilotDefaultBuildSafe=true")
+            (Text-Contains -Output $hostedOutput -Needle "appModelPhase3PilotDefaultBuildSafe=true") -and
+            (Text-Contains -Output $hostedOutput -Needle "appModelActiveDispatchFeatureGate=appmodel.active-typed-dispatch") -and
+            (Text-Contains -Output $hostedOutput -Needle "appModelActiveDispatchEnabled=false") -and
+            (Text-Contains -Output $hostedOutput -Needle "appModelActiveDispatchRuntimePath=inactive")
         if ($phase3PilotMarkersOk) {
             Add-Check "phase3TypedDispatchActive" "PASS" "ready-only typed dispatch active; historical pilot flags remain OFF; user-visible launch behavior unchanged"
         } else {

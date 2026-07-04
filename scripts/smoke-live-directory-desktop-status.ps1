@@ -225,6 +225,7 @@ $desktopSmokeScripts = @(
     "scripts\smoke-appmodel-launchshadow.ps1",
     "scripts\smoke-appmodel-phase2-status.ps1",
     "scripts\smoke-appmodel-typed-dispatch-flags.ps1",
+    "scripts\smoke-appmodel-phase3a-active-typed-dispatch.ps1",
     "scripts\smoke-navigator-hosted.ps1",
     "scripts\smoke-navigator-kernel.ps1",
     "scripts\smoke-taskmanager-snapshot.ps1"
