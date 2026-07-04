@@ -719,6 +719,10 @@ void DisplayOptions::loadSelection()
 {
     std::string selectedId = selectedWallpaperIdFromConfig();
     Logger::write(LogLevel::Info, std::string("DisplayOptions loaded saved background id=") + selectedId);
+    const bool syntheticDualMonitor = hostedSyntheticDualMonitorEnabled();
+    if (syntheticDualMonitor) {
+        Logger::write(LogLevel::Info, "DisplayOptions synthetic dual-monitor preview active via GXOS_SYNTHETIC_DUAL_MONITOR=1");
+    }
     const auto& gradients = WallpaperRegistry::BuiltInGradients();
     const auto& wallpapers = WallpaperRegistry::BuiltInWallpapers();
     s_selectedIndex = 0;
@@ -757,7 +761,7 @@ void DisplayOptions::loadSelection()
         s_showDesktopFileManager = true;
         s_showDesktopSystemSettings = false;
         s_smallLiveDesktopFolderIcons = true;
-        s_selectedDisplayMode = "mirror";
+        s_selectedDisplayMode = syntheticDualMonitor ? "extend" : "mirror";
         s_appliedDisplayMode = s_selectedDisplayMode;
         s_displayPrimaryDisplayId = "display-1";
         s_displayArrangement.clear();
@@ -769,7 +773,13 @@ void DisplayOptions::loadSelection()
         Logger::write(LogLevel::Info, "DisplayOptions display settings defaulted");
     }
     if (s_displayResolution.empty()) {
-        s_displayResolution = "1024x768";
+        s_displayResolution = syntheticDualMonitor
+            ? std::to_string(kSyntheticTestMonitorWidth) + "x" + std::to_string(kSyntheticTestMonitorHeight)
+            : "1024x768";
+    }
+    if (syntheticDualMonitor && normalizeDisplayModeName(s_selectedDisplayMode) != "extend" && s_displayArrangement.empty()) {
+        s_selectedDisplayMode = "extend";
+        s_appliedDisplayMode = s_selectedDisplayMode;
     }
     if (s_displayArrangement.empty()) {
         int displayW = 1024;
@@ -787,7 +797,7 @@ void DisplayOptions::loadSelection()
         std::vector<DisplayMonitorDescriptor> monitors;
         monitors.push_back(makeDisplayMonitor(
             s_displayPrimaryDisplayId.empty() ? "display-1" : s_displayPrimaryDisplayId,
-            "Display 1",
+            syntheticDualMonitor ? "Synthetic Display 1" : "Display 1",
             0,
             0,
             displayW,
@@ -799,7 +809,7 @@ void DisplayOptions::loadSelection()
         if (normalizeDisplayModeName(s_selectedDisplayMode) == "extend") {
             monitors.push_back(makeDisplayMonitor(
                 "display-2",
-                "Display 2",
+                syntheticDualMonitor ? "Synthetic Display 2" : "Display 2",
                 displayW,
                 0,
                 displayW,
@@ -1252,6 +1262,27 @@ namespace {
 
     std::vector<DisplayMonitorDescriptor> displayPreviewMonitors()
     {
+        const bool syntheticDualMonitor = hostedSyntheticDualMonitorEnabled();
+        const bool extendSelected = normalizeDisplayModeName(DisplayOptions::s_selectedDisplayMode) == "extend";
+
+        if (syntheticDualMonitor && extendSelected) {
+            DisplayVirtualDesktop desktop = makeSyntheticDualMonitorDesktop(nullptr, kSyntheticTestMonitorWidth, kSyntheticTestMonitorHeight, 0);
+            if (!DisplayOptions::s_displayPrimaryDisplayId.empty()) {
+                bool primaryMatched = false;
+                for (auto& monitor : desktop.monitors) {
+                    monitor.primary = false;
+                    if (monitor.id == DisplayOptions::s_displayPrimaryDisplayId) {
+                        monitor.primary = true;
+                        primaryMatched = true;
+                    }
+                }
+                if (!primaryMatched && !desktop.monitors.empty()) {
+                    desktop.monitors.front().primary = true;
+                }
+            }
+            return desktop.monitors;
+        }
+
         std::vector<DisplayMonitorDescriptor> monitors = parseDisplayArrangement(DisplayOptions::s_displayArrangement);
         monitors.erase(
             std::remove_if(monitors.begin(), monitors.end(), [](const DisplayMonitorDescriptor& monitor) {
@@ -1274,13 +1305,13 @@ namespace {
             return monitors;
         }
 
-        int monitorW = 1024;
-        int monitorH = 768;
+        int monitorW = syntheticDualMonitor ? kSyntheticTestMonitorWidth : 1024;
+        int monitorH = syntheticDualMonitor ? kSyntheticTestMonitorHeight : 768;
         parseResolutionText(DisplayOptions::s_displayResolution, monitorW, monitorH);
 
         DisplayMonitorDescriptor primary = makeDisplayMonitor(
             DisplayOptions::s_displayPrimaryDisplayId.empty() ? "display-1" : DisplayOptions::s_displayPrimaryDisplayId,
-            "Display 1",
+            syntheticDualMonitor ? "Synthetic Display 1" : "Display 1",
             0,
             0,
             monitorW,
@@ -1291,10 +1322,10 @@ namespace {
             true);
         monitors.push_back(primary);
 
-        if (normalizeDisplayModeName(DisplayOptions::s_selectedDisplayMode) == "extend") {
+        if (extendSelected) {
             DisplayMonitorDescriptor secondary = makeDisplayMonitor(
                 "display-2",
-                "Display 2",
+                syntheticDualMonitor ? "Synthetic Display 2" : "Display 2",
                 monitorW,
                 0,
                 monitorW,
@@ -1333,6 +1364,9 @@ void DisplayOptions::drawDisplayTab()
 {
     drawText(s_windowId, 46, 116, "Display mode and monitor layout:", DisplayOptionsTextColor());
     drawText(s_windowId, 46, 140, "The compositor still runs as a single framebuffer today. This tab stores the layout model and will drive the multi-output path later.", DisplayOptionsMutedTextColor());
+    if (hostedSyntheticDualMonitorEnabled()) {
+        drawText(s_windowId, 46, 158, "Synthetic dual-monitor test mode is active in hosted builds; extend mode uses a virtual 3840x1080 desktop with a primary viewport only.", DisplayOptionsMutedTextColor());
+    }
 
     const bool mirrorSelected = normalizeDisplayModeName(s_selectedDisplayMode) == "mirror";
     const bool extendSelected = normalizeDisplayModeName(s_selectedDisplayMode) == "extend";
@@ -1340,15 +1374,20 @@ void DisplayOptions::drawDisplayTab()
     drawButton(kDisplaySectionX + kDisplayModeButtonW + 12, 176, kDisplayModeButtonW, kDisplayModeButtonH, "Extend Displays", extendSelected, true);
 
     const std::vector<DisplayMonitorDescriptor> monitors = displayPreviewMonitors();
-    const std::string summary = std::string("Mode: ") + normalizeDisplayModeName(s_selectedDisplayMode) +
-        "  Primary: " + (s_displayPrimaryDisplayId.empty() ? "display-1" : s_displayPrimaryDisplayId) +
-        "  Virtual desktop: " + (s_displayResolution.empty() ? std::to_string(kDefaultWindowW) + "x" + std::to_string(kDefaultWindowH) : s_displayResolution);
+    DisplayVirtualDesktop desktop;
+    desktop.mode = parseDisplayModeKind(s_selectedDisplayMode);
+    desktop.monitors = monitors;
+    desktop.recomputeBounds();
+    const std::string summary = std::string("Mode: ") + displayModeName(desktop.mode) +
+        "  Primary: " + (desktop.primaryMonitor() ? desktop.primaryMonitor()->id : (s_displayPrimaryDisplayId.empty() ? "display-1" : s_displayPrimaryDisplayId)) +
+        "  Virtual desktop: " + desktop.resolutionString();
     drawText(s_windowId, 46, 224, summary, DisplayOptionsMutedTextColor());
+    drawText(s_windowId, 46, 244, desktop.detailedSummary(), DisplayOptionsMutedTextColor());
     if (!s_displayArrangement.empty()) {
-        drawText(s_windowId, 46, 244, std::string("Arrangement: ") + s_displayArrangement, DisplayOptionsMutedTextColor());
+        drawText(s_windowId, 46, 264, std::string("Arrangement: ") + s_displayArrangement, DisplayOptionsMutedTextColor());
     }
 
-    const int cardY = 276;
+    const int cardY = 296;
     const int cardGapX = kDisplayCardGapX;
     const int cardGapY = kDisplayCardGapY;
     const int maxColumns = 2;

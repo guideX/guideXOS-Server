@@ -40,6 +40,7 @@
 #include <iostream>
 #include <cstdlib>
 #include <iomanip>
+#include <utility>
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)
 #define WIN32_LEAN_AND_MEAN
 #ifndef NOMINMAX
@@ -240,16 +241,45 @@ namespace gxos {
             cfg.autoArrangeDesktopIcons = store.autoArrangeDesktopIcons;
         }
 
+        static int hostedSurfaceWidth() {
+            return hostedSyntheticDualMonitorEnabled() ? kSyntheticTestMonitorWidth : 1024;
+        }
+
+        static int hostedSurfaceHeight() {
+            return hostedSyntheticDualMonitorEnabled() ? kSyntheticTestMonitorHeight : 768;
+        }
+
         static std::string currentFramebufferResolutionText() {
             if (Compositor::g_videoBackend) {
                 return std::to_string(Compositor::g_videoBackend->getWidth()) + "x" + std::to_string(Compositor::g_videoBackend->getHeight());
             }
-            return "1024x768";
+            return std::to_string(hostedSurfaceWidth()) + "x" + std::to_string(hostedSurfaceHeight());
         }
 
         static DisplayVirtualDesktop buildDisplayVirtualDesktop(const DesktopConfigData& cfg) {
             DisplayVirtualDesktop desktop;
             desktop.mode = parseDisplayModeKind(cfg.displayMode);
+            const bool syntheticDualMonitor = hostedSyntheticDualMonitorEnabled();
+
+            if (syntheticDualMonitor && desktop.mode == DisplayModeKind::Extend) {
+                desktop = makeSyntheticDualMonitorDesktop(nullptr, kSyntheticTestMonitorWidth, kSyntheticTestMonitorHeight, Compositor::g_videoBackend ? Compositor::g_videoBackend->getPitch() : 0);
+                if (!cfg.displayPrimaryDisplayId.empty()) {
+                    bool primaryMatched = false;
+                    for (auto& monitor : desktop.monitors) {
+                        monitor.primary = false;
+                        if (monitor.id == cfg.displayPrimaryDisplayId) {
+                            monitor.primary = true;
+                            primaryMatched = true;
+                        }
+                    }
+                    if (!primaryMatched && !desktop.monitors.empty()) {
+                        desktop.monitors.front().primary = true;
+                    }
+                }
+                desktop.recomputeBounds();
+                return desktop;
+            }
+
             desktop.monitors = parseDisplayArrangement(cfg.displayArrangement);
 
             bool hasPrimary = false;
@@ -269,6 +299,51 @@ namespace gxos {
                     }
                 }
             }
+            if (!desktop.monitors.empty()) {
+                desktop.recomputeBounds();
+                return desktop;
+            }
+
+            int displayW = syntheticDualMonitor ? kSyntheticTestMonitorWidth : hostedSurfaceWidth();
+            int displayH = syntheticDualMonitor ? kSyntheticTestMonitorHeight : hostedSurfaceHeight();
+            if (!syntheticDualMonitor && !cfg.displayResolution.empty()) {
+                const size_t sep = cfg.displayResolution.find('x');
+                if (sep != std::string::npos) {
+                    try {
+                        displayW = std::max(1, std::stoi(cfg.displayResolution.substr(0, sep)));
+                        displayH = std::max(1, std::stoi(cfg.displayResolution.substr(sep + 1)));
+                    } catch (...) {
+                        displayW = hostedSurfaceWidth();
+                        displayH = hostedSurfaceHeight();
+                    }
+                }
+            }
+            std::vector<DisplayMonitorDescriptor> monitors;
+            monitors.push_back(makeDisplayMonitor(
+                cfg.displayPrimaryDisplayId.empty() ? "display-1" : cfg.displayPrimaryDisplayId,
+                syntheticDualMonitor ? "Synthetic Display 1" : "Display 1",
+                0,
+                0,
+                displayW,
+                displayH,
+                nullptr,
+                0,
+                true,
+                true));
+            if (desktop.mode == DisplayModeKind::Extend) {
+                monitors.push_back(makeDisplayMonitor(
+                    "display-2",
+                    syntheticDualMonitor ? "Synthetic Display 2" : "Display 2",
+                    displayW,
+                    0,
+                    displayW,
+                    displayH,
+                    nullptr,
+                    0,
+                    true,
+                    false));
+            }
+            desktop.monitors = std::move(monitors);
             desktop.recomputeBounds();
             return desktop;
         }
@@ -278,8 +353,16 @@ namespace gxos {
             if (cfg.displayPrimaryDisplayId.empty()) {
                 cfg.displayPrimaryDisplayId = "display-1";
             }
+            const bool syntheticDualMonitor = hostedSyntheticDualMonitorEnabled();
             if (cfg.displayResolution.empty()) {
-                cfg.displayResolution = currentFramebufferResolutionText();
+                cfg.displayResolution = syntheticDualMonitor
+                    ? std::to_string(kSyntheticTestMonitorWidth) + "x" + std::to_string(kSyntheticTestMonitorHeight)
+                    : currentFramebufferResolutionText();
+            }
+            if (syntheticDualMonitor && cfg.displayArrangement.empty()) {
+                cfg.displayMode = "extend";
+                cfg.displayArrangement = serializeDisplayArrangement(makeSyntheticDualMonitorDesktop(nullptr, kSyntheticTestMonitorWidth, kSyntheticTestMonitorHeight, 0).monitors);
+                return;
             }
             if (cfg.displayArrangement.empty()) {
                 int displayW = 1024;
@@ -306,7 +389,6 @@ namespace gxos {
                     0,
                     true,
                     true));
-#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
                 if (parseDisplayModeKind(cfg.displayMode) == DisplayModeKind::Extend) {
                     monitors.push_back(makeDisplayMonitor(
                         "display-2",
@@ -320,8 +402,32 @@ namespace gxos {
                         true,
                         false));
                 }
-#endif
                 cfg.displayArrangement = serializeDisplayArrangement(monitors);
+            }
+        }
+
+        static void logWindowPlacementIfOutsidePrimary(const DisplayVirtualDesktop& desktop, const WinInfo& window, const char* reason)
+        {
+            const DisplayMonitorDescriptor* primary = desktop.primaryMonitor();
+            if (!primary) {
+                return;
+            }
+
+            const bool outsidePrimary =
+                window.x < primary->virtualX ||
+                window.y < primary->virtualY ||
+                window.x >= (primary->virtualX + primary->width) ||
+                window.y >= (primary->virtualY + primary->height);
+            const bool insideVirtual = desktop.containsPoint(window.x, window.y);
+            if (outsidePrimary && insideVirtual) {
+                Logger::write(LogLevel::Info,
+                    std::string("Compositor window placement virtual-desktop aware reason=") + reason +
+                    " id=" + std::to_string(window.id) +
+                    " title=" + window.title +
+                    " position=" + std::to_string(window.x) + "," + std::to_string(window.y) +
+                    " primaryViewport=" + std::to_string(primary->virtualX) + "," + std::to_string(primary->virtualY) +
+                    " " + std::to_string(primary->width) + "x" + std::to_string(primary->height) +
+                    " virtualDesktop=" + desktop.resolutionString());
             }
         }
 
@@ -542,9 +648,11 @@ namespace gxos {
             // through GDI calls directly.  This is the first step towards
             // migrating to a pixel-buffer renderer.
             static GdiVideoBackend s_gdiBackend;
-            if (s_gdiBackend.init(1024, 768)) {
+            const int surfaceW = hostedSurfaceWidth();
+            const int surfaceH = hostedSurfaceHeight();
+            if (s_gdiBackend.init(surfaceW, surfaceH)) {
                 g_videoBackend = &s_gdiBackend;
-                Logger::write(LogLevel::Info, "VideoBackend: GDI backend active");
+                Logger::write(LogLevel::Info, std::string("VideoBackend: GDI backend active size=") + std::to_string(surfaceW) + "x" + std::to_string(surfaceH));
             }
 #else
             // On bare-metal, use kernel framebuffer backend
@@ -3170,7 +3278,7 @@ namespace gxos {
             }
             return 0;
         }
-        void Compositor::initWindow( ) { WNDCLASSA wc{}; wc.style = CS_OWNDC; wc.lpfnWndProc = Compositor::WndProc; wc.hInstance = GetModuleHandleA(nullptr); wc.lpszClassName = "GXOS_COMPOSITOR"; RegisterClassA(&wc); g_hwnd = CreateWindowExA(0, wc.lpszClassName, "guideXOSCpp Compositor", WS_OVERLAPPEDWINDOW | WS_VISIBLE, CW_USEDEFAULT, CW_USEDEFAULT, 1024, 768, nullptr, nullptr, wc.hInstance, nullptr); g_startBtnBmp = (HBITMAP)LoadImageA(nullptr, "assets/start_button.bmp", IMAGE_BITMAP, 0, 0, LR_LOADFROMFILE | LR_CREATEDIBSECTION);
+        void Compositor::initWindow( ) { WNDCLASSA wc{}; wc.style = CS_OWNDC; wc.lpfnWndProc = Compositor::WndProc; wc.hInstance = GetModuleHandleA(nullptr); wc.lpszClassName = "GXOS_COMPOSITOR"; RegisterClassA(&wc); const int surfaceW = hostedSurfaceWidth(); const int surfaceH = hostedSurfaceHeight(); g_hwnd = CreateWindowExA(0, wc.lpszClassName, "guideXOSCpp Compositor", WS_OVERLAPPEDWINDOW | WS_VISIBLE, CW_USEDEFAULT, CW_USEDEFAULT, surfaceW, surfaceH, nullptr, nullptr, wc.hInstance, nullptr); g_startBtnBmp = (HBITMAP)LoadImageA(nullptr, "assets/start_button.bmp", IMAGE_BITMAP, 0, 0, LR_LOADFROMFILE | LR_CREATEDIBSECTION);
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)
             g_hostedFreezeDiag.enabled = hostedFreezeDiagnosticsEnabled( );
             if (g_hostedFreezeDiag.enabled) {
@@ -3357,6 +3465,8 @@ namespace gxos {
                     return RGB((value >> 16) & 0xFF, (value >> 8) & 0xFF, value & 0xFF);
                 };
                 const bool themeDesktopSurface = sciFiTheme && (!g_wallpaperImage || !g_wallpaperImage->isValid());
+                // TODO(v0.2): keep wallpaper and taskbar on the primary viewport only
+                // until the compositor can paint each monitor into its own framebuffer.
                 DesktopWallpaper::DrawGradient(dc, cr,
                     themeDesktopSurface ? hostedDesktopTopColor(theme) : g_gradientTopColor,
                     themeDesktopSurface ? hostedDesktopBottomColor(theme) : g_gradientBottomColor,
@@ -4416,18 +4526,44 @@ namespace gxos {
 
         void Compositor::handleMouse(int mx, int my, bool down, bool up) {
             std::lock_guard<std::mutex> lk(g_lock); const DesktopTheme& theme = GetCurrentDesktopTheme(); const int titleBarH = theme.titleBarHeight; const int gripSize = 12;
+            const DisplayVirtualDesktop desktop = buildDisplayVirtualDesktop(g_cfg);
+            int virtualMouseX = mx + desktop.primaryViewportLeft();
+            int virtualMouseY = my + desktop.primaryViewportTop();
+            desktop.clampPointToBounds(virtualMouseX, virtualMouseY);
+            const bool virtualExtendMode = desktop.mode == DisplayModeKind::Extend && desktop.activeMonitorCount() > 1;
+#define mx virtualMouseX
+#define my virtualMouseY
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)
-            RECT cr{ 0,0,1024,768 };
+            RECT cr{ desktop.left, desktop.top, virtualExtendMode ? desktop.right : (desktop.primaryViewportLeft() + desktop.primaryViewportWidth()), virtualExtendMode ? desktop.bottom : (desktop.primaryViewportTop() + desktop.primaryViewportHeight()) };
             if (g_hwnd) GetClientRect(g_hwnd, &cr);
+            if (virtualExtendMode) {
+                cr.left = desktop.left;
+                cr.top = desktop.top;
+                cr.right = desktop.right;
+                cr.bottom = desktop.bottom;
+            } else {
+                cr.left = desktop.primaryViewportLeft();
+                cr.top = desktop.primaryViewportTop();
+                cr.right = cr.left + desktop.primaryViewportWidth();
+                cr.bottom = cr.top + desktop.primaryViewportHeight();
+            }
 #else
             // On bare-metal, use video backend dimensions
-            struct { int left; int top; int right; int bottom; } cr{ 0, 0, 1024, 768 };
+            struct { int left; int top; int right; int bottom; } cr{ virtualExtendMode ? desktop.left : desktop.primaryViewportLeft(), virtualExtendMode ? desktop.top : desktop.primaryViewportTop(), virtualExtendMode ? desktop.right : (desktop.primaryViewportLeft() + desktop.primaryViewportWidth()), virtualExtendMode ? desktop.bottom : (desktop.primaryViewportTop() + desktop.primaryViewportHeight()) };
             if (g_videoBackend) {
-                cr.right = g_videoBackend->getWidth();
-                cr.bottom = g_videoBackend->getHeight();
+                cr.right = cr.left + g_videoBackend->getWidth();
+                cr.bottom = cr.top + g_videoBackend->getHeight();
             }
 #endif
-            WorkRect work = desktopWorkAreaForBounds(cr.right - cr.left, cr.bottom - cr.top);
+            WorkRect work = virtualExtendMode
+                ? WorkRect{ desktop.left, desktop.top, desktop.right, desktop.bottom }
+                : desktopWorkAreaForBounds(desktop.primaryViewportWidth(), desktop.primaryViewportHeight());
+            if (!virtualExtendMode) {
+                work.left += desktop.primaryViewportLeft();
+                work.right += desktop.primaryViewportLeft();
+                work.top += desktop.primaryViewportTop();
+                work.bottom += desktop.primaryViewportTop();
+            }
             // On mouse down, record start position and check if we're in a title bar (pending drag)
             if (down) {
                 g_dragStartX = mx; g_dragStartY = my; g_dragPending = false; g_dragPendingWin = 0;
@@ -4528,6 +4664,8 @@ namespace gxos {
             if (g_resizeActive && !up) { auto it = g_windows.find(g_resizeWin); if (it != g_windows.end( )) { int dw = mx - g_resizeStartMX; int dh = my - g_resizeStartMY; int newW = g_resizeStartW + dw; if (newW < 160) newW = 160; int newH = g_resizeStartH + dh; if (newH < 120) newH = 120; g_resizePreviewActive = true; g_resizePreviewW = newW; g_resizePreviewH = newH; } }
             if (g_resizeActive && up) { auto it = g_windows.find(g_resizeWin); if (it != g_windows.end( )) { int dw = mx - g_resizeStartMX; int dh = my - g_resizeStartMY; int newW = g_resizeStartW + dw; if (newW < 160) newW = 160; int newH = g_resizeStartH + dh; if (newH < 120) newH = 120; it->second.w = newW; it->second.h = newH; it->second.dirty = true; } g_resizeActive = false; g_resizeWin = 0; g_resizePreviewActive = false; }
             if (down) { for (int idx = (int)g_z.size( ) - 1; idx >= 0; --idx) { WinInfo& w = g_windows[g_z[idx]]; if (w.minimized || w.tombstoned) continue; if (g_modalWindow != 0 && w.id != g_modalWindow) continue; if (mx >= w.x && mx < w.x + w.w && my >= w.y && my < w.y + w.h) { g_focus = w.id; for (auto itZ = g_z.begin( ); itZ != g_z.end( ); ++itZ) { if (*itZ == w.id) { g_z.erase(itZ); break; } } g_z.push_back(w.id); sendFocus(w.id); break; } } }
+            #undef my
+            #undef mx
         }
 
         void Compositor::handleMessage(const ipc::Message& m) {
@@ -4563,6 +4701,7 @@ namespace gxos {
                     // Start fade-in animation
                     WindowAnimator::BeginFadeIn(wi.animState, winY);
                     g_windows[id] = wi;
+                    logWindowPlacementIfOutsidePrimary(buildDisplayVirtualDesktop(g_cfg), wi, "create");
                     g_z.push_back(id); 
                     g_focus = id; 
                     if (wi.modal) g_modalWindow = id;
@@ -4578,7 +4717,7 @@ namespace gxos {
             case MsgType::MT_DrawImage:
             case MsgType::MT_DrawImageAnimated: { DrawImageSpec spec{}; uint64_t ownerPid = 0; if (!unpackDrawImage(s, spec)) break; ImageBitmap image{}; std::vector<ImageBitmap> frames; if ((MsgType)m.type == MsgType::MT_DrawImageAnimated) { const size_t marker = spec.path.find("{frame}"); if (marker != std::string::npos) { for (int frame = 0; frame < 100; ++frame) { std::ostringstream frameName; frameName << std::setw(2) << std::setfill('0') << frame; std::string path = spec.path; path.replace(marker, 7, frameName.str()); ImageBitmap candidate = loadCachedUiImage(path); if (candidate.status != ImageLoadStatus::Ok) break; frames.push_back(candidate); } } if (!frames.empty()) image = frames.front(); } else { image = ImageAdapter::LoadFromFile(spec.path); } if (image.status != ImageLoadStatus::Ok) { Logger::write(LogLevel::Warn, std::string("Compositor: DrawImage skipped, image load failed: ") + spec.path + " status=" + ImageLoadStatusName(image.status)); break; } DrawImageItem item{ spec.x, spec.y, spec.w, spec.h, spec.path, image, std::move(frames) }; { std::lock_guard<std::mutex> lk(g_lock); auto it = g_windows.find(spec.winId); if (it != g_windows.end( )) { it->second.images.push_back(std::move(item)); it->second.dirty = true; ownerPid = it->second.ownerPid; } } publishOut((MsgType)m.type, std::to_string(spec.winId), ownerPid); invalidate(spec.winId); } break;
             case MsgType::MT_SetTitle: { std::istringstream iss(s); std::string idS; std::getline(iss, idS, '|'); std::string title; std::getline(iss, title); uint64_t id = 0; uint64_t ownerPid = 0; try { id = std::stoull(idS); } catch (...) {} { std::lock_guard<std::mutex> lk(g_lock); auto it = g_windows.find(id); if (it != g_windows.end( )) { it->second.title = title; it->second.dirty = true; ownerPid = it->second.ownerPid; } } publishOut(MsgType::MT_SetTitle, std::to_string(id) + "|" + title, ownerPid); invalidate(id); } break;
-            case MsgType::MT_Move: { std::istringstream iss(s); std::string idS, xs, ys; std::getline(iss, idS, '|'); std::getline(iss, xs, '|'); std::getline(iss, ys, '|'); uint64_t id = 0; uint64_t ownerPid = 0; try { id = std::stoull(idS); } catch (...) {} int nx = std::stoi(xs), ny = std::stoi(ys); { std::lock_guard<std::mutex> lk(g_lock); auto it = g_windows.find(id); if (it != g_windows.end( ) && !it->second.maximized) { it->second.x = nx; it->second.y = ny; it->second.dirty = true; ownerPid = it->second.ownerPid; } } publishOut(MsgType::MT_Move, std::to_string(id) + "|" + xs + "|" + ys, ownerPid); invalidate(id); } break;
+            case MsgType::MT_Move: { std::istringstream iss(s); std::string idS, xs, ys; std::getline(iss, idS, '|'); std::getline(iss, xs, '|'); std::getline(iss, ys, '|'); uint64_t id = 0; uint64_t ownerPid = 0; try { id = std::stoull(idS); } catch (...) {} int nx = std::stoi(xs), ny = std::stoi(ys); { std::lock_guard<std::mutex> lk(g_lock); auto it = g_windows.find(id); if (it != g_windows.end( ) && !it->second.maximized) { it->second.x = nx; it->second.y = ny; it->second.dirty = true; ownerPid = it->second.ownerPid; logWindowPlacementIfOutsidePrimary(buildDisplayVirtualDesktop(g_cfg), it->second, "move"); } } publishOut(MsgType::MT_Move, std::to_string(id) + "|" + xs + "|" + ys, ownerPid); invalidate(id); } break;
             case MsgType::MT_Resize: { std::istringstream iss(s); std::string idS, ws, hs; std::getline(iss, idS, '|'); std::getline(iss, ws, '|'); std::getline(iss, hs, '|'); uint64_t id = 0; uint64_t ownerPid = 0; try { id = std::stoull(idS); } catch (...) {} int nw = std::stoi(ws), nh = std::stoi(hs); { std::lock_guard<std::mutex> lk(g_lock); auto it = g_windows.find(id); if (it != g_windows.end( ) && !it->second.maximized) { it->second.w = nw; it->second.h = nh; it->second.dirty = true; ownerPid = it->second.ownerPid; } } publishOut(MsgType::MT_Resize, std::to_string(id) + "|" + ws + "|" + hs, ownerPid); invalidate(id); } break;
             case MsgType::MT_WidgetAdd: { // format: <winId>|<type>|<id>|<x>|<y>|<w>|<h>|<text>
                 std::istringstream iss(s); std::string winS, typeS, idS, xs, ys, ws2, hs2; std::getline(iss, winS, '|'); std::getline(iss, typeS, '|'); std::getline(iss, idS, '|'); std::getline(iss, xs, '|'); std::getline(iss, ys, '|'); std::getline(iss, ws2, '|'); std::getline(iss, hs2, '|'); std::string rest; std::getline(iss, rest); uint64_t winId = 0; try { winId = std::stoull(winS); } catch (...) {} int wtype = 0; try { wtype = std::stoi(typeS); } catch (...) {} int wid = 0; try { wid = std::stoi(idS); } catch (...) {} int wx = 0, wy = 0, ww = 0, wh = 0; try { wx = std::stoi(xs); wy = std::stoi(ys); ww = std::stoi(ws2); wh = std::stoi(hs2); } catch (...) {}
@@ -4598,7 +4737,7 @@ namespace gxos {
             case MsgType::MT_Minimize: { uint64_t id = 0; try { id = std::stoull(s); } catch (...) {} { std::lock_guard<std::mutex> lk(g_lock); if (g_modalWindow != 0 && id != g_modalWindow) break; auto wit = g_windows.find(id); if (wit != g_windows.end( )) { wit->second.minimized = true; wit->second.tombstoned = true; if (g_modalWindow == id) g_modalWindow = 0; if (g_focus == id) g_focus = 0; } } invalidate(id); } break;
             case MsgType::MT_ShowDesktopToggle: { { std::lock_guard<std::mutex> lk(g_lock); if (g_modalWindow != 0) { for (auto it = g_z.begin( ); it != g_z.end( ); ++it) { if (*it == g_modalWindow) { g_z.erase(it); break; } } g_z.push_back(g_modalWindow); g_focus = g_modalWindow; invalidate(g_modalWindow); break; } } if (!g_showDesktopActive) { g_showDesktopMinimized.clear( ); for (uint64_t id : g_z) { auto it = g_windows.find(id); if (it != g_windows.end( ) && !it->second.minimized) { it->second.minimized = true; it->second.tombstoned = true; g_showDesktopMinimized.push_back(id); } } g_focus = 0; g_showDesktopActive = true; } else { for (uint64_t id : g_showDesktopMinimized) { auto it = g_windows.find(id); if (it != g_windows.end( )) { it->second.minimized = false; it->second.tombstoned = false; } } g_showDesktopMinimized.clear( ); g_showDesktopActive = false; } invalidate(0); } break;
             case MsgType::MT_StateSave: { std::string path = s; std::vector<SavedWindow> sw; { std::lock_guard<std::mutex> lk(g_lock); for (size_t i = 0; i < g_z.size( ); ++i) { uint64_t id = g_z[i]; auto it = g_windows.find(id); if (it == g_windows.end( )) continue; const WinInfo& w = it->second; SavedWindow rec; rec.id = w.id; rec.title = w.title; rec.x = w.x; rec.y = w.y; rec.w = w.w; rec.h = w.h; rec.minimized = w.minimized; rec.maximized = w.maximized; rec.z = (int)i; rec.focused = (g_focus == w.id); rec.snap = w.snapState; sw.push_back(rec); } } std::string err; if (!DesktopState::Save(path, sw, err)) publishOut(MsgType::MT_WidgetEvt, std::string("STATE_SAVE_ERR|") + err); else publishOut(MsgType::MT_WidgetEvt, std::string("STATE_SAVE_OK|") + path); } break;
-            case MsgType::MT_StateLoad: { std::string path = s; std::vector<SavedWindow> sw; std::string err; if (!DesktopState::Load(path, sw, err)) { publishOut(MsgType::MT_WidgetEvt, std::string("STATE_LOAD_ERR|") + err); } else { { std::lock_guard<std::mutex> lk(g_lock); g_windows.clear( ); g_z.clear( ); g_focus = 0; std::sort(sw.begin( ), sw.end( ), [] (const SavedWindow& a, const SavedWindow& b) { return a.z < b.z; }); for (auto& w : sw) { uint64_t id = s_nextWinId.fetch_add(1); WinInfo wi{}; wi.id = id; wi.title = w.title; wi.x = w.x; wi.y = w.y; wi.w = w.w; wi.h = w.h; wi.minimized = w.minimized; wi.maximized = w.maximized; wi.dirty = true; wi.snapState = w.snap; if (wi.maximized) { RECT crL{ 0,0,1024,768 }; if (g_hwnd) GetClientRect(g_hwnd, &crL); int taskbarY = crL.bottom - 40; wi.x = crL.left; wi.y = crL.top; wi.w = crL.right - crL.left; wi.h = taskbarY - crL.top; } g_windows[id] = wi; g_z.push_back(id); if (w.focused && !wi.minimized) g_focus = id; } } publishOut(MsgType::MT_WidgetEvt, std::string("STATE_LOAD_OK|") + path); invalidate(0); } } break;
+            case MsgType::MT_StateLoad: { std::string path = s; std::vector<SavedWindow> sw; std::string err; if (!DesktopState::Load(path, sw, err)) { publishOut(MsgType::MT_WidgetEvt, std::string("STATE_LOAD_ERR|") + err); } else { { std::lock_guard<std::mutex> lk(g_lock); g_windows.clear( ); g_z.clear( ); g_focus = 0; std::sort(sw.begin( ), sw.end( ), [] (const SavedWindow& a, const SavedWindow& b) { return a.z < b.z; }); for (auto& w : sw) { uint64_t id = s_nextWinId.fetch_add(1); WinInfo wi{}; wi.id = id; wi.title = w.title; wi.x = w.x; wi.y = w.y; wi.w = w.w; wi.h = w.h; wi.minimized = w.minimized; wi.maximized = w.maximized; wi.dirty = true; wi.snapState = w.snap; if (wi.maximized) { RECT crL{ 0,0,1024,768 }; if (g_hwnd) GetClientRect(g_hwnd, &crL); int taskbarY = crL.bottom - 40; wi.x = crL.left; wi.y = crL.top; wi.w = crL.right - crL.left; wi.h = taskbarY - crL.top; } g_windows[id] = wi; logWindowPlacementIfOutsidePrimary(buildDisplayVirtualDesktop(g_cfg), wi, "state-load"); g_z.push_back(id); if (w.focused && !wi.minimized) g_focus = id; } } publishOut(MsgType::MT_WidgetEvt, std::string("STATE_LOAD_OK|") + path); invalidate(0); } } break;
             case MsgType::MT_Invalidate: { invalidate(0); } break;
             case MsgType::MT_Ping: { publishOut(MsgType::MT_Ping, s); } break;
             case MsgType::MT_DesktopLaunch: { launchAction(s); } break;
@@ -4852,6 +4991,9 @@ namespace gxos {
             Logger::write(LogLevel::Info, "Compositor service started (native window)");
             ipc::Bus::ensure(kGuiChanIn);
             ipc::Bus::ensure(kGuiChanOut);
+            if (hostedSyntheticDualMonitorEnabled()) {
+                Logger::write(LogLevel::Info, std::string("Compositor synthetic dual-monitor mode enabled via GXOS_SYNTHETIC_DUAL_MONITOR=1; hosted viewport remains a single framebuffer/window"));
+            }
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)
             initWindow( );
 #endif
@@ -4882,7 +5024,7 @@ namespace gxos {
             g_cfg.backgroundScaleMode = g_backgroundScaleMode;
             Logger::write(LogLevel::Info, std::string("Compositor background scale mode=") + g_backgroundScaleMode);
             const DisplayVirtualDesktop desktop = buildDisplayVirtualDesktop(g_cfg);
-            Logger::write(LogLevel::Info, std::string("Compositor display layout summary: ") + desktop.summary() +
+            Logger::write(LogLevel::Info, std::string("Compositor display layout summary: ") + desktop.detailedSummary() +
                 " persistedResolution=" + g_cfg.displayResolution +
                 " arrangement=" + (g_cfg.displayArrangement.empty() ? "(empty)" : g_cfg.displayArrangement));
             logCompositorList("config pinned before merge", g_cfg.pinned);
@@ -4931,7 +5073,7 @@ namespace gxos {
                             if (g_videoBackend) { crL.right = g_videoBackend->getWidth(); crL.bottom = g_videoBackend->getHeight(); }
 #endif
                             int taskbarY = crL.bottom - 40; wi.x = crL.left; wi.y = crL.top; wi.w = crL.right - crL.left; wi.h = taskbarY - crL.top;
-                        } g_windows[id] = wi; g_z.push_back(id); if (w.focused && !wi.minimized) g_focus = id;
+                        } g_windows[id] = wi; logWindowPlacementIfOutsidePrimary(buildDisplayVirtualDesktop(g_cfg), wi, "legacy-state-load"); g_z.push_back(id); if (w.focused && !wi.minimized) g_focus = id;
                     } legacyLoaded = true;
                 }
             }
@@ -4974,6 +5116,17 @@ namespace gxos {
                 out.push_back(info);
             }
             return out;
+        }
+
+        std::string Compositor::displayLayoutDiagnostic()
+        {
+            std::lock_guard<std::mutex> lk(g_lock);
+            const DisplayVirtualDesktop desktop = buildDisplayVirtualDesktop(g_cfg);
+            std::ostringstream oss;
+            oss << "syntheticDualMonitor=" << (hostedSyntheticDualMonitorEnabled() ? "true" : "false")
+                << " framebuffer=" << (g_videoBackend ? (std::to_string(g_videoBackend->getWidth()) + "x" + std::to_string(g_videoBackend->getHeight())) : std::string("unavailable"))
+                << " " << desktop.detailedSummary();
+            return oss.str();
         }
 
         uint64_t Compositor::start( ) { ProcessSpec spec{ "compositor", Compositor::main }; spec.appId = "gxos.system.compositor"; return ProcessTable::spawn(spec, { "compositor" }); }

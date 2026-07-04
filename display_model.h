@@ -4,12 +4,31 @@
 #include <cctype>
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <sstream>
 #include <string>
 #include <vector>
 
 namespace gxos {
 namespace gui {
+
+inline constexpr int kSyntheticTestMonitorWidth = 1920;
+inline constexpr int kSyntheticTestMonitorHeight = 1080;
+
+inline bool hostedSyntheticDualMonitorEnabled()
+{
+    const char* value = std::getenv("GXOS_SYNTHETIC_DUAL_MONITOR");
+    if (!value || !*value) {
+        return false;
+    }
+
+    std::string lower;
+    lower.reserve(std::strlen(value));
+    for (const char* p = value; *p; ++p) {
+        lower.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(*p))));
+    }
+    return !(lower == "0" || lower == "false" || lower == "off" || lower == "no");
+}
 
 enum class DisplayModeKind {
     Mirror,
@@ -56,6 +75,11 @@ struct DisplayMonitorDescriptor {
     bool isActive() const
     {
         return enabled && width > 0 && height > 0;
+    }
+
+    bool containsVirtualPoint(int x, int y) const
+    {
+        return isActive() && x >= virtualX && x < (virtualX + width) && y >= virtualY && y < (virtualY + height);
     }
 };
 
@@ -152,6 +176,11 @@ struct DisplayVirtualDesktop {
     int width() const { return std::max(0, right - left); }
     int height() const { return std::max(0, bottom - top); }
 
+    bool containsPoint(int x, int y) const
+    {
+        return x >= left && x < right && y >= top && y < bottom;
+    }
+
     int activeMonitorCount() const
     {
         int count = 0;
@@ -190,6 +219,90 @@ struct DisplayVirtualDesktop {
             left = top = 0;
             right = bottom = 0;
         }
+    }
+
+    const DisplayMonitorDescriptor* monitorAt(int x, int y) const
+    {
+        for (const auto& monitor : monitors) {
+            if (monitor.containsVirtualPoint(x, y)) {
+                return &monitor;
+            }
+        }
+        return nullptr;
+    }
+
+    DisplayMonitorDescriptor* monitorAt(int x, int y)
+    {
+        for (auto& monitor : monitors) {
+            if (monitor.containsVirtualPoint(x, y)) {
+                return &monitor;
+            }
+        }
+        return nullptr;
+    }
+
+    void clampPointToBounds(int& x, int& y) const
+    {
+        if (activeMonitorCount() == 0) {
+            return;
+        }
+
+        const int maxX = std::max(left, right - 1);
+        const int maxY = std::max(top, bottom - 1);
+        x = std::max(left, std::min(x, maxX));
+        y = std::max(top, std::min(y, maxY));
+    }
+
+    int primaryViewportLeft() const
+    {
+        const DisplayMonitorDescriptor* primary = primaryMonitor();
+        return primary ? primary->virtualX : left;
+    }
+
+    int primaryViewportTop() const
+    {
+        const DisplayMonitorDescriptor* primary = primaryMonitor();
+        return primary ? primary->virtualY : top;
+    }
+
+    int primaryViewportWidth() const
+    {
+        const DisplayMonitorDescriptor* primary = primaryMonitor();
+        return primary ? std::max(0, primary->width) : width();
+    }
+
+    int primaryViewportHeight() const
+    {
+        const DisplayMonitorDescriptor* primary = primaryMonitor();
+        return primary ? std::max(0, primary->height) : height();
+    }
+
+    std::string monitorRectString() const
+    {
+        std::ostringstream out;
+        bool first = true;
+        for (const auto& monitor : monitors) {
+            if (!monitor.isActive()) {
+                continue;
+            }
+            if (!first) {
+                out << "; ";
+            }
+            first = false;
+            out << monitor.id;
+            if (!monitor.name.empty()) {
+                out << "(" << monitor.name << ")";
+            }
+            out << "@" << monitor.virtualX << "," << monitor.virtualY
+                << " " << monitor.width << "x" << monitor.height;
+            if (monitor.primary) {
+                out << " primary";
+            }
+        }
+        if (first) {
+            out << "(none)";
+        }
+        return out.str();
     }
 
     DisplayMonitorDescriptor* primaryMonitor()
@@ -244,6 +357,25 @@ struct DisplayVirtualDesktop {
         return out.str();
     }
 
+    std::string detailedSummary() const
+    {
+        std::ostringstream out;
+        out << "mode=" << displayModeName(mode)
+            << " monitorCount=" << activeMonitorCount()
+            << " virtualDesktop=" << width() << 'x' << height()
+            << " bounds=" << left << "," << top << "-" << right << "," << bottom;
+        if (const DisplayMonitorDescriptor* primary = primaryMonitor()) {
+            out << " primary=" << primary->id;
+            if (!primary->name.empty()) {
+                out << "(" << primary->name << ")";
+            }
+            out << " primaryViewport=" << primaryViewportLeft() << "," << primaryViewportTop()
+                << " " << primaryViewportWidth() << "x" << primaryViewportHeight();
+        }
+        out << " monitors=[" << monitorRectString() << "]";
+        return out.str();
+    }
+
     std::string arrangementString() const
     {
         return serializeDisplayArrangement(monitors);
@@ -293,16 +425,16 @@ inline DisplayVirtualDesktop makeSingleMonitorDesktop(
 
 inline DisplayVirtualDesktop makeSyntheticDualMonitorDesktop(
     uint32_t* framebufferBase,
-    int width,
-    int height,
-    int pitch)
+    int monitorWidth = kSyntheticTestMonitorWidth,
+    int monitorHeight = kSyntheticTestMonitorHeight,
+    int pitch = 0)
 {
     DisplayVirtualDesktop desktop;
     desktop.mode = DisplayModeKind::Extend;
-    const int firstWidth = std::max(1, width / 2);
-    const int secondWidth = std::max(1, width - firstWidth);
-    desktop.monitors.push_back(makeDisplayMonitor("display-1", "Synthetic Display 1", 0, 0, firstWidth, height, framebufferBase, pitch, true, true));
-    desktop.monitors.push_back(makeDisplayMonitor("display-2", "Synthetic Display 2", firstWidth, 0, secondWidth, height, framebufferBase, pitch, true, false));
+    monitorWidth = std::max(1, monitorWidth);
+    monitorHeight = std::max(1, monitorHeight);
+    desktop.monitors.push_back(makeDisplayMonitor("display-1", "Synthetic Display 1", 0, 0, monitorWidth, monitorHeight, framebufferBase, pitch, true, true));
+    desktop.monitors.push_back(makeDisplayMonitor("display-2", "Synthetic Display 2", monitorWidth, 0, monitorWidth, monitorHeight, framebufferBase, pitch, true, false));
     desktop.recomputeBounds();
     return desktop;
 }

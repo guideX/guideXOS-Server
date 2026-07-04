@@ -137,6 +137,7 @@ namespace gxos { namespace gui {
         static bool removeDesktopShortcut(int index);
         static bool openDesktopShortcutTargetLocation(int index);
         static std::vector<WindowDebugInfo> debugWindowsSnapshot();
+        static std::string displayLayoutDiagnostic();
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)
         static HWND g_hwnd; // expose for helper drawing
 #endif
