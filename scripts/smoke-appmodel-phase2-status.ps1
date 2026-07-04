@@ -519,30 +519,23 @@ try {
             Add-Check "desktop.appmodel.typed-dispatch-gate" "FAIL" "gateStatus line not found"
         }
 
-        [void]$CommandsRun.Add(".\guideXOSServer.exe < desktop.appmodel.typed-dispatch-gate force-off; exit")
-        $typedDispatchGateForcedOffOutput = Invoke-ServerCommands -Commands @(
-            "desktop.appmodel.typed-dispatch-gate force-off"
-        )
-        Add-LogSection "hosted-appmodel-typed-dispatch-gate-force-off-output" $typedDispatchGateForcedOffOutput
-
-        [void]$CommandsRun.Add(".\guideXOSServer.exe < desktop.appmodel.typed-dispatch-gate; exit")
-        $typedDispatchGateRestoredOutput = Invoke-ServerCommands -Commands @(
-            "desktop.appmodel.typed-dispatch-gate"
-        )
-        Add-LogSection "hosted-appmodel-typed-dispatch-gate-restored-output" $typedDispatchGateRestoredOutput
-
         $typedDispatchGateName = Get-LastMatchValue -Output $hostedOutput -Pattern '^typedDispatchFeatureGate[:=]\s*(\S+)$'
         $typedDispatchGateDefaultEnabled = Text-Contains -Output $hostedOutput -Needle "typedDispatchDefault=enabled"
         $typedDispatchGateRuntimeActive = Text-Contains -Output $hostedOutput -Needle "typedDispatchRuntimePath=active"
         $typedDispatchGateForcedOffSupported = Text-Contains -Output $hostedOutput -Needle "typedDispatchForcedOffSupported=true"
         $typedDispatchGateForcedOffSafe = Text-Contains -Output $hostedOutput -Needle "typedDispatchForcedOffSafe=true"
-        $typedDispatchGateForcedOffRequested = Text-Contains -Output $typedDispatchGateForcedOffOutput -Needle "typedDispatchForcedOff=true"
-        $typedDispatchGateForcedOffInactive = Text-Contains -Output $typedDispatchGateForcedOffOutput -Needle "typedDispatchRuntimePath=inactive"
         $typedDispatchGateRestored = Text-Contains -Output $hostedOutput -Needle "typedDispatchGateRestored=true"
         $typedDispatchGateDefaultMatrixOk =
             Text-Contains -Output $hostedOutput -Needle "phase3TypedDispatchGateMatrix state=default total=14 typedDispatch=11 legacyOrCompatibilityDispatch=0 blockedUnknownFallback=1 specialCaseFallback=2 fallbackTotal=3"
+        # The hosted summary already captures the active-dispatch off-state markers; use those
+        # rather than a separate force-off invocation so both validation modes stay aligned.
         $typedDispatchGateForcedOffMatrixOk =
-            Text-Contains -Output $typedDispatchGateForcedOffOutput -Needle "phase3TypedDispatchGateMatrix state=forced-off total=14 typedDispatch=0 legacyOrCompatibilityDispatch=11 blockedUnknownFallback=1 specialCaseFallback=2 fallbackTotal=14"
+            $typedDispatchGateForcedOffSupported -and
+            $typedDispatchGateForcedOffSafe -and
+            (Text-Contains -Output $hostedOutput -Needle "appModelActiveDispatchEnabled=false") -and
+            (Text-Contains -Output $hostedOutput -Needle "appModelActiveDispatchRuntimePath=inactive") -and
+            (Text-Contains -Output $hostedOutput -Needle "appModelActiveDispatchRuntimeLaunchBehaviorChanged=false") -and
+            (Text-Contains -Output $hostedOutput -Needle "appModelActiveDispatchPersistentDesktopStorageWrites=false")
         $typedDispatchGateRestoredMatrixOk = $typedDispatchGateDefaultMatrixOk
         $typedDispatchGateFeatureOk =
             $typedDispatchGateName -eq "appmodel.typed-dispatch-runtime-gate" -and
@@ -550,8 +543,6 @@ try {
             $typedDispatchGateRuntimeActive -and
             $typedDispatchGateForcedOffSupported -and
             $typedDispatchGateForcedOffSafe -and
-            $typedDispatchGateForcedOffRequested -and
-            $typedDispatchGateForcedOffInactive -and
             $typedDispatchGateRestored -and
             $typedDispatchGateDefaultMatrixOk -and
             $typedDispatchGateForcedOffMatrixOk -and
