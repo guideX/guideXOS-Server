@@ -356,6 +356,29 @@ function New-AppModelFileAssociationFixtureDisk {
             return -1
         }
 
+        function Clear-LfnChainBeforeOffset([byte[]]$Bytes, [int]$ShortEntryOffset) {
+            for ($offset = $ShortEntryOffset - 32; $offset -ge 0; $offset -= 32) {
+                if ($Bytes[$offset] -eq 0x00 -or $Bytes[$offset + 11] -ne 0x0F) { break }
+                $Bytes[$offset] = 0xE5
+                for ($i = 1; $i -lt 32; $i++) { $Bytes[$offset + $i] = 0x00 }
+            }
+        }
+
+        function Get-FixtureEntryPlacement([byte[]]$Bytes, [string]$ShortName, [string[]]$FallbackShortNames) {
+            $existingOffset = Find-ShortEntryOffset $Bytes $ShortName
+            if ($existingOffset -ge 0) { return @{ Offset = $existingOffset; ReusedFallback = $false } }
+
+            $freeOffset = Find-FreeEntryOffset $Bytes
+            if ($freeOffset -ge 0) { return @{ Offset = $freeOffset; ReusedFallback = $false } }
+
+            foreach ($fallbackShortName in $FallbackShortNames) {
+                $fallbackOffset = Find-ShortEntryOffset $Bytes $fallbackShortName
+                if ($fallbackOffset -ge 0) { return @{ Offset = $fallbackOffset; ReusedFallback = $true } }
+            }
+
+            return @{ Offset = -1; ReusedFallback = $false }
+        }
+
         $script:stream = $stream
         $script:bytesPerSector = $bytesPerSector
         $script:sectorsPerCluster = $sectorsPerCluster
@@ -378,11 +401,15 @@ function New-AppModelFileAssociationFixtureDisk {
             @{ Bytes = $appsBytes; Cluster = $appsCluster; ShortName = "CONFIG  CFG" },
             @{ Bytes = $appsBytes; Cluster = $appsCluster; ShortName = "CONFIG  INI" }
         )) {
-            $freeOffset = Find-FreeEntryOffset $fixture.Bytes
-            if ($freeOffset -lt 0) { throw "No FAT32 directory slot available for $($fixture.ShortName)." }
-            [Array]::Copy($template, 0, $fixture.Bytes, $freeOffset, 32)
+            $placement = Get-FixtureEntryPlacement $fixture.Bytes $fixture.ShortName @("MUSIC      ", "TRASH      ", "DESKTOP    ", "SPECIAL TXT")
+            $targetOffset = [int]$placement.Offset
+            if ($targetOffset -lt 0) { throw "No FAT32 directory slot available for $($fixture.ShortName)." }
+            if ($placement.ReusedFallback) {
+                Clear-LfnChainBeforeOffset $fixture.Bytes $targetOffset
+            }
+            [Array]::Copy($template, 0, $fixture.Bytes, $targetOffset, 32)
             $shortNameBytes = [Text.Encoding]::ASCII.GetBytes($fixture.ShortName)
-            [Array]::Copy($shortNameBytes, 0, $fixture.Bytes, $freeOffset, 11)
+            [Array]::Copy($shortNameBytes, 0, $fixture.Bytes, $targetOffset, 11)
             Write-DirectoryCluster $fixture.Cluster $fixture.Bytes
         }
     } catch {

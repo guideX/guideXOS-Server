@@ -130,6 +130,8 @@ namespace gxos { namespace gui {
         static bool pinStartMenuAppToDesktop(const std::string& appName);
         static bool unpinStartMenuAppFromDesktop(const std::string& appName);
         static bool isStartMenuAppPinnedToDesktop(const std::string& appName);
+        static bool isStartMenuAllProgramsView();
+        static bool removeRecentProgramFromStartMenu(const std::string& act);
         static bool pinFilesystemEntryToDesktop(const std::string& path, bool isDirectory, const std::string& label = "", const std::string& iconName = "");
         static bool isFilesystemEntryPinnedToDesktop(const std::string& path, bool isDirectory);
         static bool removeDesktopShortcut(int index);
@@ -172,7 +174,6 @@ namespace gxos { namespace gui {
         static void unpinAction(const std::string& act);
         static void saveDesktopConfig();
         static void addRecent(const std::string& act);
-        static bool removeRecentProgramFromStartMenu(const std::string& act);
         static void refreshDesktopItems();
         static void refreshAllProgramsList();
         static void ClearDesktopIconSelection();

@@ -100,7 +100,7 @@ void RightClickMenu::buildItems() {
     if (!s_startMenuAppName.empty()) {
         s_items.push_back({"Open", false, false, false});
         s_items.push_back({Compositor::isStartMenuAppPinnedToDesktop(s_startMenuAppName) ? "Unpin from Desktop" : "Pin to Desktop", false, false, false});
-        if (!Compositor::g_startMenuAllProgs) {
+        if (!Compositor::isStartMenuAllProgramsView()) {
             s_items.push_back({"", false, false, true});
             s_items.push_back({"Remove from This List", false, false, false});
         }

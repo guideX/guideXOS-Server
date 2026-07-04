@@ -1866,13 +1866,13 @@ namespace gxos {
             }
         }
         static bool isRightColumnStartMenuShortcut(const std::string& act);
-        static void syncRecentProgramsFromService() {
-            g_cfg.recent.clear();
+        static void syncRecentProgramsFromService(DesktopConfigData& cfg) {
+            cfg.recent.clear();
             for (const auto& entry : DesktopService::GetRecentPrograms()) {
                 if (entry.name.empty()) continue;
-                if (!hasEquivalentListItem(g_cfg.recent, entry.name)) {
-                    g_cfg.recent.push_back(entry.name);
-                    if (g_cfg.recent.size() >= 10) break;
+                if (!hasEquivalentListItem(cfg.recent, entry.name)) {
+                    cfg.recent.push_back(entry.name);
+                    if (cfg.recent.size() >= 10) break;
                 }
             }
         }
@@ -1880,7 +1880,7 @@ namespace gxos {
         void Compositor::addRecent(const std::string& act) {
             if (act.empty() || isRightColumnStartMenuShortcut(act)) return;
             DesktopService::AddRecentProgram(act);
-            syncRecentProgramsFromService();
+            syncRecentProgramsFromService(g_cfg);
             refreshDesktopItems();
         }
 
@@ -1892,7 +1892,7 @@ namespace gxos {
                 Logger::write(LogLevel::Info, "Start Menu recent removal skipped; item not found: " + act);
                 return false;
             }
-            syncRecentProgramsFromService();
+            syncRecentProgramsFromService(g_cfg);
             refreshDesktopItems();
             if (!g_startMenuAllProgs) {
                 const int recentCount = (int)g_startMenuPinnedRecent.size();
@@ -2249,6 +2249,10 @@ namespace gxos {
                 if ((shortcut.shortcutType.empty() || shortcut.shortcutType == "App") && shortcut.targetAppId == targetId) return true;
             }
             return false;
+        }
+
+        bool Compositor::isStartMenuAllProgramsView() {
+            return g_startMenuAllProgs;
         }
 
         bool Compositor::isFilesystemEntryPinnedToDesktop(const std::string& path, bool isDirectory) {
