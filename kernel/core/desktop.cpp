@@ -1695,8 +1695,13 @@ static const char* s_contextMenuItems[] = {
 };
 static const int kContextMenuCount = 7;
 static const uint32_t kContextMenuW = 190;
-static const uint32_t kContextMenuItemH = 24;
+static const uint32_t kContextMenuTextTopPadding = 5;
+static const uint32_t kContextMenuTextBottomPadding = 16;
+// Extra bottom breathing room is intentional to make the bare-metal menu feel
+// less cramped and keep the label visually lifted within each row.
+static const uint32_t kContextMenuItemH = kContextMenuTextTopPadding + kGlyphH + kContextMenuTextBottomPadding;
 static const uint32_t kContextMenuPad = 2;
+static const uint32_t kContextMenuSeparatorHeight = 1;
 
 enum class ContextMenuMode : uint8_t {
     Desktop,
@@ -6632,12 +6637,12 @@ static void draw_right_click_menu()
             label = (i == 0) ? "Open" : (renameable ? "Rename" : "");
         }
         if (!label || !label[0]) continue;
-        draw_text(mx + 12, itemY + (kContextMenuItemH - kGlyphH) / 2,
+        draw_text(mx + 12, itemY + kContextMenuTextTopPadding,
                   label, i == hoveredItem ? rgb(255, 255, 255) : rgb(210, 210, 225), 1);
 
         // Separator after "Auto Arrange" (index 3)
         if (s_contextMenuMode == ContextMenuMode::Desktop && i == 3) {
-            hline(mx + 4, itemY + kContextMenuItemH - 1, kContextMenuW - 8, rgb(60, 65, 80));
+            hline(mx + 4, itemY + kContextMenuItemH - kContextMenuSeparatorHeight, kContextMenuW - 8, rgb(60, 65, 80));
         }
     }
 }
