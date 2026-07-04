@@ -1261,16 +1261,26 @@ namespace gxos {
             return true;
         }
 
+        static std::string hostedRecentProgramDisplayName(const std::string& value) {
+            if (value.empty()) return std::string();
+            if (value == "AppModel") return "App Model Demo";
+            const RegisteredDesktopApp* app = findDesktopAppByNameOrId(value);
+            if (app && !app->displayName.empty()) return app->displayName;
+            return std::string();
+        }
+
         static void refreshStartMenuPinnedRecentFromConfig(const DesktopConfigData& cfg, std::vector<std::string>& items) {
             items.clear();
-            for (const auto& pinned : cfg.pinned) {
-                if (!pinned.empty() && !hasEquivalentListItem(items, pinned)) items.push_back(pinned);
-            }
             for (const auto& recent : cfg.recent) {
-                if (!recent.empty() && !hasEquivalentListItem(items, recent)) items.push_back(recent);
+                const std::string displayName = hostedRecentProgramDisplayName(recent);
+                if (displayName.empty()) {
+                    Logger::write(LogLevel::Info, "Compositor start menu skipped missing recent program: " + recent);
+                    continue;
+                }
+                if (!hasEquivalentListItem(items, displayName)) items.push_back(displayName);
             }
-            if (items.size() > 20) items.resize(20);
-            logCompositorList("start menu pinned/recent", items);
+            if (items.size() > 10) items.resize(10);
+            logCompositorList("start menu recent", items);
         }
 
         static const char* kHostedTrashPath = "/Trash";
@@ -1855,7 +1865,24 @@ namespace gxos {
                 Logger::write(LogLevel::Warn, "Display options store save failed: " + displayErr);
             }
         }
-        void Compositor::addRecent(const std::string& act) { auto it = std::find(g_cfg.recent.begin( ), g_cfg.recent.end( ), act); if (it != g_cfg.recent.end( )) g_cfg.recent.erase(it); g_cfg.recent.insert(g_cfg.recent.begin( ), act); if (g_cfg.recent.size( ) > 20) g_cfg.recent.pop_back( ); refreshDesktopItems( ); saveDesktopConfig( ); }
+        static bool isRightColumnStartMenuShortcut(const std::string& act);
+        static void syncHostedRecentProgramsFromDesktopService() {
+            g_cfg.recent.clear();
+            for (const auto& entry : DesktopService::GetRecentPrograms()) {
+                if (entry.name.empty()) continue;
+                if (!hasEquivalentListItem(g_cfg.recent, entry.name)) {
+                    g_cfg.recent.push_back(entry.name);
+                    if (g_cfg.recent.size() >= 10) break;
+                }
+            }
+            refreshDesktopItems();
+        }
+
+        void Compositor::addRecent(const std::string& act) {
+            if (act.empty() || isRightColumnStartMenuShortcut(act)) return;
+            DesktopService::AddRecentProgram(act);
+            syncHostedRecentProgramsFromDesktopService();
+        }
         static bool isRightColumnStartMenuShortcut(const std::string& act) {
             return act == "Computer" ||
                 act == "Documents" ||
@@ -2151,13 +2178,11 @@ namespace gxos {
             s_lastLaunchAction = act;
             s_lastLaunchTicks = now;
             Logger::write(LogLevel::Info, std::string("Desktop launch: ") + act);
-            if (!isRightColumnStartMenuShortcut(act)) {
-                addRecent(act);
-            }
             if (act == "App Model Demo" || act == "AppModel") {
                 const LaunchDispatchDecision dispatchDecision = DesktopService::SelectLaunchDispatch(act);
                 DesktopService::RecordLaunchDispatchDecision("HostedCompositorEmbeddedAction", dispatchDecision);
                 openAppModelDemoViewerWindow();
+                addRecent(act);
                 return;
             }
             // Actually launch the application
@@ -2165,7 +2190,9 @@ namespace gxos {
             if (!DesktopService::LaunchApp(act, err)) {
                 Logger::write(LogLevel::Error, std::string("Failed to launch app: ") + act + " - " + err);
                 NotificationManager::Add(err.empty() ? std::string("Failed to launch app: ") + act : err, NotificationLevel::Error);
+                return;
             }
+            syncHostedRecentProgramsFromDesktopService();
         }
 
         void Compositor::openStartMenuApp(const std::string& appName) {
@@ -3511,7 +3538,7 @@ namespace gxos {
                         drawUiText(dc, itemR.left + 8, iy + (tmItemH - uiTextHeight(FontRole::Default)) / 2, tmLabels[tmi], (int)strlen(tmLabels[tmi]), sciFiTheme ? RGB(232, 236, 246) : RGB(220, 220, 220), FontRole::Default);
                     }
                 }
-                // Start menu popup (pinned + recent OR all programs)
+                // Start menu popup (recent programs OR all programs)
                 if (g_startMenuVisible) {
                     int smW = 440; // wider to accommodate two columns
                     int maxRows = 14;
@@ -3538,7 +3565,7 @@ namespace gxos {
                     FrameRect(dc, &sm, mBorder);
                     DeleteObject(mBorder);
 
-                    // Left column - Recent/All Programs list
+                    // Left column - Recent Programs / All Programs list
                     int y = sm.top + 4;
                     HFONT f = (HFONT)GetStockObject(ANSI_VAR_FONT);
                     SelectObject(dc, f);
@@ -3577,7 +3604,7 @@ namespace gxos {
                             y += rowH; row++;
                         }
                     } else {
-                        // Show pinned + recent
+                        // Show recent programs
                         for (size_t i = startIndex; i < g_startMenuPinnedRecent.size( ) && row < maxRows; ++i) {
                             RECT r{ sm.left + 4, y, sm.left + leftColW - 4, y + rowH };
                             bool isSel = ((int)i == g_startMenuSel);
@@ -3601,8 +3628,7 @@ namespace gxos {
                             std::string txt = g_startMenuPinnedRecent[i];
                             int textX = r.left + 4;
                             drawStartMenuIcon(dc, r, txt, textX);
-                            std::string displayText = (hasEquivalentListItem(g_cfg.pinned, txt) ? "* " : "  ") + txt;
-                            drawUiText(dc, textX, centeredUiTextY(r.top, rowH), displayText, sciFiTheme ? RGB(232, 236, 246) : RGB(230, 230, 230), FontRole::Default);
+                            drawUiText(dc, textX, centeredUiTextY(r.top, rowH), txt, sciFiTheme ? RGB(232, 236, 246) : RGB(230, 230, 230), FontRole::Default);
                             y += rowH; row++;
                         }
                     }
@@ -3642,7 +3668,7 @@ namespace gxos {
                     } else {
                         FrameRect(dc, &allProgBtn, (HBRUSH)GetStockObject(WHITE_BRUSH));
                     }
-                    const char* btnText = g_startMenuAllProgs ? "< Back" : "All Programs >";
+                    const char* btnText = g_startMenuAllProgs ? "Recent Programs" : "All Programs";
                     drawUiText(dc, allProgBtn.left + 8, centeredUiTextY(allProgBtn.top, allProgBtn.bottom - allProgBtn.top), btnText, sciFiTheme ? RGB(232, 236, 246) : RGB(230, 230, 230), FontRole::Default);
 
                     // Power menu area (bottom-right)
@@ -4726,7 +4752,6 @@ namespace gxos {
             for (const auto& app : DesktopService::GetAppModelDemoApps()) {
                 Logger::write(LogLevel::Info, std::string("Compositor app-model app considered: ") + app.displayName + " id=" + app.id + " source=" + app.source);
                 mergeVisibleAppEntry(g_cfg.pinned, app.displayName, "AppModel registry", true);
-                mergeVisibleAppEntry(g_cfg.recent, app.displayName, "AppModel registry", false);
             }
             if (hasListItem(g_cfg.pinned, "AppModel") && !hasEquivalentListItem(g_cfg.pinned, "App Model Demo")) {
                 Logger::write(LogLevel::Info, "Compositor replacing legacy AppModel pin with App Model Demo alias");
@@ -4734,7 +4759,7 @@ namespace gxos {
             }
             logCompositorList("config pinned after merge", g_cfg.pinned);
             logCompositorList("config recent after merge", g_cfg.recent);
-            refreshDesktopItems( ); // Populate g_items from pinned/recent
+            refreshDesktopItems( ); // Populate g_items from desktop config and launch metadata
             refreshAllProgramsList( ); // Populate sorted all programs list
             if (cfgOk) {
                 const std::string savedWallpaperId = cfg.wallpaperId;
@@ -5250,8 +5275,7 @@ namespace gxos {
                         std::string txt = g_startMenuPinnedRecent[i];
                         int textX = rowX + 4;
                         fbDrawStartMenuIcon(pixels, pitch, fbW, fbH, rowX, y, rowH, txt, textX);
-                        std::string displayText = (hasEquivalentListItem(g_cfg.pinned, txt) ? "* " : "  ") + txt;
-                        fbDrawText(pixels, pitch, fbW, fbH, textX, y + (rowH - SystemFont::MeasureHeight(FontRole::Default)) / 2, displayText, 0x00E6E6E6, FontRole::Default);
+                        fbDrawText(pixels, pitch, fbW, fbH, textX, y + (rowH - SystemFont::MeasureHeight(FontRole::Default)) / 2, txt, 0x00E6E6E6, FontRole::Default);
                         y += rowH;
                         row++;
                     }
@@ -5269,7 +5293,7 @@ namespace gxos {
                 int btnY = smBottom - 30;
                 fbFillRect(pixels, pitch, fbW, fbH, smLeft + 6, btnY, leftColW - 12, 24, 0x003C3C4B);
                 fbDrawRect(pixels, pitch, fbW, fbH, smLeft + 6, btnY, leftColW - 12, 24, 0x00FFFFFF);
-                const char* btnText = g_startMenuAllProgs ? "< Back" : "All Programs >";
+                const char* btnText = g_startMenuAllProgs ? "Recent Programs" : "All Programs";
                 fbDrawText(pixels, pitch, fbW, fbH, smLeft + 14, btnY + (24 - SystemFont::MeasureHeight(FontRole::Default)) / 2, btnText, -1, 0x00E6E6E6, FontRole::Default);
 
                 int shutdownBtnW = 80;

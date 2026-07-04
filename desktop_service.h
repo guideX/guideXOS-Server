@@ -165,7 +165,7 @@ namespace gxos { namespace gui {
         static void SaveState();
 
     private:
-        static const int kMaxRecentPrograms = 32;
+        static const int kMaxRecentPrograms = 10;
         static const int kMaxRecentDocuments = 64;
 
         static std::vector<PinnedItem> s_pinned;

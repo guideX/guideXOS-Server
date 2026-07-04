@@ -6,6 +6,7 @@
 
 #include "include/kernel/kernel_app.h"
 #include "include/kernel/kernel_compositor.h"
+#include "include/kernel/desktop.h"
 #include "include/kernel/kernel_ipc.h"
 
 extern "C" void desktop_request_redraw();
@@ -334,6 +335,7 @@ bool AppManager::launchApp(const char* name) {
                 compositor::KernelCompositor::setFocus(s_runningApps[i]->getWindow()->id);
             }
             AppLogger::logLaunch(name, LaunchResult::AlreadyRunning);
+            kernel::desktop::record_recent_program(name);
             return true;
         }
     }
@@ -362,6 +364,7 @@ bool AppManager::launchApp(const char* name) {
     s_runningApps[s_runningAppCount++] = app;
     
     AppLogger::logLaunch(name, LaunchResult::Success);
+    kernel::desktop::record_recent_program(name);
     return true;
 }
 
@@ -393,6 +396,7 @@ bool AppManager::launchAppWithParam(const char* name, const char* param) {
                     compositor::KernelCompositor::setFocus(s_runningApps[i]->getWindow()->id);
                 }
                 AppLogger::logLaunch(name, LaunchResult::AlreadyRunning);
+                kernel::desktop::record_recent_program(name);
                 return true;
             }
         }
@@ -423,6 +427,7 @@ bool AppManager::launchAppWithParam(const char* name, const char* param) {
     s_runningApps[s_runningAppCount++] = app;
     
     AppLogger::logLaunch(name, LaunchResult::Success);
+    kernel::desktop::record_recent_program(name);
     return true;
 }
 

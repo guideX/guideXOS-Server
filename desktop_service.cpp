@@ -210,6 +210,16 @@ namespace gxos {
             return nullptr;
         }
 
+        static std::string canonicalRecentProgramName(const std::string& name) {
+            if (name.empty()) return std::string();
+            if (name == "AppModel" || name == "App Model Demo") return "App Model Demo";
+            if (name == "Files" || name == "FileExplorer" || name == "File Explorer") return "File Explorer";
+            if (name == "ControlPanel" || name == "Control Panel") return "Control Panel";
+            const RegisteredDesktopApp* app = findRegisteredApp(name);
+            if (app && !app->displayName.empty()) return app->displayName;
+            return name;
+        }
+
         static const apps::RegisteredApp* findRegistryApp(const RegisteredDesktopApp& app) {
             const apps::RegisteredApp* registryApp = s_appRegistry.FindById(app.id);
             if (registryApp) return registryApp;
@@ -1763,11 +1773,13 @@ namespace gxos {
         }
 
         void DesktopService::AddRecentProgram(const std::string& name) {
-            if (name.empty()) return;
+            ensureDefaultAppsRegistered();
+            const std::string canonicalName = canonicalRecentProgramName(name);
+            if (canonicalName.empty()) return;
 
             // Remove existing entry if present
             for (auto it = s_recentPrograms.begin(); it != s_recentPrograms.end(); ++it) {
-                if (it->name == name) {
+                if (it->name == canonicalName) {
                     s_recentPrograms.erase(it);
                     break;
                 }
@@ -1775,7 +1787,7 @@ namespace gxos {
 
             // Add to front
             RecentProgramEntry entry;
-            entry.name = name;
+            entry.name = canonicalName;
             entry.lastUsedTicks = currentTicks();
             entry.iconName = "document";
             s_recentPrograms.insert(s_recentPrograms.begin(), entry);
@@ -3744,16 +3756,31 @@ namespace gxos {
 
             switch (resolveFilesystemEntryLaunchTarget(path, isDirectory)) {
             case FilesystemEntryLaunchTarget::FileExplorer:
-                apps::FileExplorer::Launch(path);
+                if (apps::FileExplorer::Launch(path) == 0) {
+                    error = "Failed to open path in File Explorer";
+                    NotificationManager::Add(error, NotificationLevel::Error);
+                    return false;
+                }
+                AddRecentProgram("File Explorer");
                 return true;
             case FilesystemEntryLaunchTarget::Notepad:
-                apps::Notepad::LaunchWithFile(path);
+                if (apps::Notepad::LaunchWithFile(path) == 0) {
+                    error = "Failed to open file in Notepad";
+                    NotificationManager::Add(error, NotificationLevel::Error);
+                    return false;
+                }
+                AddRecentProgram("Notepad");
                 return true;
             case FilesystemEntryLaunchTarget::ImageViewer:
                 // TODO: once AppModel launch arguments become first-class, route this
                 // through typed app launch with a file-path parameter instead of the
                 // direct helper call.
-                apps::ImageViewer::Launch(path);
+                if (apps::ImageViewer::Launch(path) == 0) {
+                    error = "Failed to open image in Image Viewer";
+                    NotificationManager::Add(error, NotificationLevel::Error);
+                    return false;
+                }
+                AddRecentProgram("Image Viewer");
                 return true;
             case FilesystemEntryLaunchTarget::Unsupported:
             default:
@@ -3827,6 +3854,7 @@ namespace gxos {
                     }
 
                     Logger::write(LogLevel::Info, std::string("Launched folder shortcut: ") + shellAction + " path=" + folderPath + " pid=" + std::to_string(explorerPid));
+                    AddRecentProgram("File Explorer");
                     return true;
                 }
 
@@ -3840,11 +3868,13 @@ namespace gxos {
                     }
 
                     Logger::write(LogLevel::Info, std::string("Launched Control Panel shell shortcut pid=") + std::to_string(controlPanelPid));
+                    AddRecentProgram("Control Panel");
                     return true;
                 }
 
                 if (isStartMenuSettingsFallbackLabel(shellAction)) {
                     // Temporary Start Menu mapping until a dedicated unified Settings app exists.
+                    std::string recentName;
                     uint64_t settingsPid = apps::DisplayOptions::Launch();
                     if (settingsPid == 0) {
                         Logger::write(LogLevel::Warn, "DisplayOptions launch failed for Settings; falling back to Control Panel");
@@ -3855,9 +3885,13 @@ namespace gxos {
                             NotificationManager::Add(error, NotificationLevel::Error);
                             return false;
                         }
+                        recentName = "Control Panel";
+                    } else {
+                        recentName = "DisplayOptions";
                     }
 
                     Logger::write(LogLevel::Info, std::string("Launched Settings via settings panel pid=") + std::to_string(settingsPid));
+                    if (!recentName.empty()) AddRecentProgram(recentName);
                     return true;
                 }
             }
@@ -3918,6 +3952,7 @@ namespace gxos {
                 }
 
                 Logger::write(LogLevel::Info, std::string("Launched native app process: ") + manifestApp->displayName + " pid=" + std::to_string(nativePid));
+                AddRecentProgram(manifestApp->displayName);
                 return true;
             }
 
@@ -3950,56 +3985,127 @@ namespace gxos {
                 Logger::write(LogLevel::Info, "LaunchApp: Waited for compositor to initialize");
             }
 
-            // Add to recent
-            AddRecentProgram(name);
-
             // Launch the actual application
             if (appName == "Notepad") {
-                apps::Notepad::Launch();
+                if (apps::Notepad::Launch() == 0) {
+                    error = "Failed to launch Notepad";
+                    NotificationManager::Add(error, NotificationLevel::Error);
+                    return false;
+                }
+                AddRecentProgram("Notepad");
             }
             else if (appName == "Calculator") {
-                apps::Calculator::Launch();
+                if (apps::Calculator::Launch() == 0) {
+                    error = "Failed to launch Calculator";
+                    NotificationManager::Add(error, NotificationLevel::Error);
+                    return false;
+                }
+                AddRecentProgram("Calculator");
             }
             else if (appName == "Console") {
-                apps::ConsoleWindow::Launch();
+                if (apps::ConsoleWindow::Launch() == 0) {
+                    error = "Failed to launch Console";
+                    NotificationManager::Add(error, NotificationLevel::Error);
+                    return false;
+                }
+                AddRecentProgram("Console");
             }
             else if (appName == "FileExplorer") {
-                apps::FileExplorer::Launch();
+                if (apps::FileExplorer::Launch() == 0) {
+                    error = "Failed to launch File Explorer";
+                    NotificationManager::Add(error, NotificationLevel::Error);
+                    return false;
+                }
+                AddRecentProgram("File Explorer");
             }
             else if (appName == "Clock") {
-                apps::Clock::Launch();
+                if (apps::Clock::Launch() == 0) {
+                    error = "Failed to launch Clock";
+                    NotificationManager::Add(error, NotificationLevel::Error);
+                    return false;
+                }
+                AddRecentProgram("Clock");
             }
             else if (appName == "TaskManager") {
-                apps::TaskManager::Launch();
+                if (apps::TaskManager::Launch() == 0) {
+                    error = "Failed to launch Task Manager";
+                    NotificationManager::Add(error, NotificationLevel::Error);
+                    return false;
+                }
+                AddRecentProgram("TaskManager");
             }
             else if (appName == "Paint") {
-                apps::Paint::Launch();
+                if (apps::Paint::Launch() == 0) {
+                    error = "Failed to launch Paint";
+                    NotificationManager::Add(error, NotificationLevel::Error);
+                    return false;
+                }
+                AddRecentProgram("Paint");
             }
             else if (appName == "ImageViewer") {
-                apps::ImageViewer::Launch();
+                if (apps::ImageViewer::Launch() == 0) {
+                    error = "Failed to launch Image Viewer";
+                    NotificationManager::Add(error, NotificationLevel::Error);
+                    return false;
+                }
+                AddRecentProgram("Image Viewer");
             }
             else if (appName == "OnScreenKeyboard") {
-                apps::OnScreenKeyboard::Launch();
+                if (apps::OnScreenKeyboard::Launch() == 0) {
+                    error = "Failed to launch On Screen Keyboard";
+                    NotificationManager::Add(error, NotificationLevel::Error);
+                    return false;
+                }
+                AddRecentProgram("OnScreenKeyboard");
             }
             else if (appName == "ShutdownDialog") {
-                apps::ShutdownDialog::Launch();
+                if (apps::ShutdownDialog::Launch() == 0) {
+                    error = "Failed to launch Shutdown Dialog";
+                    NotificationManager::Add(error, NotificationLevel::Error);
+                    return false;
+                }
             }
             else if (appName == "DiskManager") {
-                apps::DiskManager::Launch();
+                if (apps::DiskManager::Launch() == 0) {
+                    error = "Failed to launch Disk Manager";
+                    NotificationManager::Add(error, NotificationLevel::Error);
+                    return false;
+                }
+                AddRecentProgram("DiskManager");
             }
             else if (appName == "ControlPanel") {
-                apps::ControlPanel::Launch();
+                if (apps::ControlPanel::Launch() == 0) {
+                    error = "Failed to launch Control Panel";
+                    NotificationManager::Add(error, NotificationLevel::Error);
+                    return false;
+                }
+                AddRecentProgram("Control Panel");
             }
             else if (appName == "DisplayOptions" || appName == "Display Settings" || appName == "Desktop Background" || appName == "Wallpaper") {
-                apps::DisplayOptions::Launch();
+                if (apps::DisplayOptions::Launch() == 0) {
+                    error = "Failed to launch Display Options";
+                    NotificationManager::Add(error, NotificationLevel::Error);
+                    return false;
+                }
+                AddRecentProgram("DisplayOptions");
             }
             else if (appName == "guideXOS Navigator") {
                 // Hosted/compositor Navigator launch path: app-model registration
                 // resolves here, then starts the authoritative Navigator process.
-                apps::Navigator::Launch();
+                if (apps::Navigator::Launch() == 0) {
+                    error = "Failed to launch guideXOS Navigator";
+                    NotificationManager::Add(error, NotificationLevel::Error);
+                    return false;
+                }
+                AddRecentProgram("guideXOS Navigator");
             }
             else if (appName == "Trash") {
-                apps::Trash::Launch();
+                if (apps::Trash::Launch() == 0) {
+                    error = "Failed to launch Trash";
+                    NotificationManager::Add(error, NotificationLevel::Error);
+                    return false;
+                }
+                AddRecentProgram("Trash");
             }
             else if (appName == "HDInstaller") {
                 error = "HD Installer is not available in this runtime target";
@@ -4007,8 +4113,13 @@ namespace gxos {
                 return false;
             }
             else if (appName == "Native App Debug Viewer") {
-                apps::ConsoleWindow::Launch();
+                if (apps::ConsoleWindow::Launch() == 0) {
+                    error = "Failed to launch Native App Debug Viewer";
+                    NotificationManager::Add(error, NotificationLevel::Error);
+                    return false;
+                }
                 NotificationManager::Add("Native App Debug Viewer opened. Try: nativeapp.inspect Hello World", NotificationLevel::Info);
+                AddRecentProgram("Native App Debug Viewer");
             }
             else {
                 error = "Application launcher not implemented: " + name;
@@ -4035,6 +4146,8 @@ namespace gxos {
                 return;
             }
 
+            ensureDefaultAppsRegistered();
+
             // Load pinned from cfg.pinned
             s_pinned.clear();
             for (const auto& p : cfg.pinned) {
@@ -4049,13 +4162,21 @@ namespace gxos {
             s_recentPrograms.clear();
             for (const auto& r : cfg.recent) {
                 RecentProgramEntry entry;
-                entry.name = r;
+                entry.name = canonicalRecentProgramName(r);
+                if (entry.name.empty()) continue;
+                bool alreadyPresent = false;
+                for (const auto& existing : s_recentPrograms) {
+                    if (existing.name == entry.name) {
+                        alreadyPresent = true;
+                        break;
+                    }
+                }
+                if (alreadyPresent) continue;
                 entry.lastUsedTicks = currentTicks();
                 entry.iconName = "document";
                 s_recentPrograms.push_back(entry);
+                if (s_recentPrograms.size() >= (size_t)kMaxRecentPrograms) break;
             }
-
-            ensureDefaultAppsRegistered();
             std::string folderError;
             if (!DesktopFolderResolver::EnsureStandardUserFolders(folderError)) {
                 Logger::write(LogLevel::Warn, std::string("Default user folder initialization failed: ") + folderError);

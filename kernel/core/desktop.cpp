@@ -1607,6 +1607,7 @@ static StartMenuApp s_startMenuApps[] = {
     {"TaskManager", true,  false, 0xFFB44646},  // pinned
     {"DiskManager", true,  false, 0xFFB48C46},  // pinned (orange-brown for disk)
     {"DisplayOptions", true, false, 0xFF606878}, // display options
+    {"ControlPanel",   false, false, 0xFF808890}, // control surface
     {"guideXOS Navigator", true, false, 0xFF4678BE}, // pinned navigator
     {"HDInstaller", true,  false, 0xFFB48C46},  // pinned (orange-brown for installer)
     {"AppModel",    true,  false, 0xFF5587D2},  // pinned app model demo entry
@@ -1616,7 +1617,7 @@ static StartMenuApp s_startMenuApps[] = {
     {"ImgViewer",   false, false, 0xFFC87830},  // not shown by default
 };
 static const int kStartMenuAppCount = sizeof(s_startMenuApps) / sizeof(s_startMenuApps[0]);
-static const int kMaxStartMenuRecent = 5;  // Max recent apps in start menu
+static const int kMaxStartMenuRecent = 10;  // Max recent apps in start menu
 
 // All Programs alphabetically sorted list (for "All Programs" view)
 static const char* s_allProgramsList[] = {
@@ -1636,6 +1637,7 @@ static const char* s_allProgramsList[] = {
     "Trash",
 };
 static const int kAllProgramsCount = sizeof(s_allProgramsList) / sizeof(s_allProgramsList[0]);
+static const char* kStartMenuRecentProgramsPath = "/.startmenu_recent";
 
 struct AppModelDemoRow {
     const char* displayName;
@@ -2139,7 +2141,8 @@ static int s_clickedMenuRight = -1; // clicked right-column item index
 // Enhanced start menu state (matching compositor.cpp)
 static int s_startMenuSelection = 0;    // Currently selected item (keyboard nav)
 static int s_startMenuScroll = 0;       // Scroll offset for long lists
-static bool s_startMenuAllProgs = false; // Toggle between Recent/Pinned vs All Programs
+static bool s_startMenuAllProgs = false; // Toggle between Recent Programs vs All Programs
+static std::vector<std::string> s_startMenuRecentPrograms; // Persisted recent programs for Start Menu
 static const int kStartMenuMaxRows = 14; // Max visible rows before scrolling
 static const int kStartMenuRowH = 22;    // Height of each menu row
 
@@ -2344,6 +2347,7 @@ static void open_app_model_viewer()
     s_appModelDialogHover = -1;
     s_appModelSelectedIndex = 0;
     s_notification.visible = false;
+    add_to_start_menu_recent("AppModel");
 }
 
 static void draw_app_model_dialog()
@@ -2680,6 +2684,11 @@ static void enumerate_desktop_folder_items()
 static const StartMenuApp* find_start_menu_app(const char* appName)
 {
     if (!appName || !appName[0]) return nullptr;
+    if (desktop_str_eq(appName, "Files") || desktop_str_eq(appName, "FileExplorer")) {
+        appName = "File Explorer";
+    } else if (desktop_str_eq(appName, "Control Panel")) {
+        appName = "ControlPanel";
+    }
     for (int i = 0; i < kStartMenuAppCount; ++i) {
         if (desktop_str_eq(s_startMenuApps[i].name, appName)) return &s_startMenuApps[i];
     }
@@ -4383,50 +4392,78 @@ static void refresh_start_menu_list()
     serial::puts("[desktop] Start Menu app list refresh preserves app pins independent of desktop icons\n");
 }
 
+static std::string canonical_start_menu_recent_program(const char* appName)
+{
+    const StartMenuApp* app = find_start_menu_app(appName);
+    if (!app || !app->name) return std::string();
+    return app->name;
+}
+
+static void persist_start_menu_recent_programs()
+{
+    char buffer[4096];
+    int pos = 0;
+    desktop_append_text(buffer, &pos, sizeof(buffer), "# guideXOS Start Menu Recent Programs v1\n");
+    for (const auto& name : s_startMenuRecentPrograms) {
+        desktop_append_text(buffer, &pos, sizeof(buffer), name.c_str());
+        desktop_append_text(buffer, &pos, sizeof(buffer), "\n");
+    }
+    int32_t written = vfs::write_file(kStartMenuRecentProgramsPath, buffer, (uint32_t)pos);
+    serial::puts(written == pos ? "[desktop] Start menu recent programs persisted\n" : "[desktop] Start menu recent programs persistence failure\n");
+}
+
+static void load_persisted_start_menu_recent_programs()
+{
+    s_startMenuRecentPrograms.clear();
+    char buffer[4096];
+    int32_t count = vfs::read_file(kStartMenuRecentProgramsPath, buffer, sizeof(buffer) - 1);
+    if (count <= 0) {
+        serial::puts("[desktop] Start menu recent programs loaded: none persisted\n");
+        return;
+    }
+    buffer[count] = '\0';
+    int pos = 0;
+    while (pos < count) {
+        while (pos < count && (buffer[pos] == '\n' || buffer[pos] == '\r')) ++pos;
+        int lineStart = pos;
+        while (pos < count && buffer[pos] != '\n' && buffer[pos] != '\r') ++pos;
+        int lineEnd = pos;
+        if (lineEnd <= lineStart) continue;
+        std::string raw(buffer + lineStart, (size_t)(lineEnd - lineStart));
+        const std::string canonical = canonical_start_menu_recent_program(raw.c_str());
+        if (canonical.empty()) continue;
+        if (std::find(s_startMenuRecentPrograms.begin(), s_startMenuRecentPrograms.end(), canonical) != s_startMenuRecentPrograms.end()) continue;
+        s_startMenuRecentPrograms.push_back(canonical);
+        if (s_startMenuRecentPrograms.size() >= (size_t)kMaxStartMenuRecent) break;
+    }
+    serial::puts("[desktop] Start menu recent programs loaded from persistence\n");
+}
+
 // Add app to start menu recent list
 static void add_to_start_menu_recent(const char* appName)
 {
-    // Find the app in the start menu list
-    for (int i = 0; i < kStartMenuAppCount; i++) {
-        if (s_startMenuApps[i].name == appName ||
-            (s_startMenuApps[i].name[0] == appName[0] && 
-             s_startMenuApps[i].name[1] == appName[1])) {
-            
-            // Don't add if already pinned
-            if (s_startMenuApps[i].pinned) return;
-            
-            // Mark as recent
-            s_startMenuApps[i].recent = true;
-            return;
-        }
+    const std::string canonical = canonical_start_menu_recent_program(appName);
+    if (canonical.empty()) return;
+
+    auto it = std::find(s_startMenuRecentPrograms.begin(), s_startMenuRecentPrograms.end(), canonical);
+    if (it != s_startMenuRecentPrograms.end()) {
+        s_startMenuRecentPrograms.erase(it);
     }
+
+    s_startMenuRecentPrograms.insert(s_startMenuRecentPrograms.begin(), canonical);
+    if (s_startMenuRecentPrograms.size() > (size_t)kMaxStartMenuRecent) {
+        s_startMenuRecentPrograms.resize(kMaxStartMenuRecent);
+    }
+    serial::puts("[desktop] Start menu recent recorded: ");
+    serial::puts(canonical.c_str());
+    serial::puts("\n");
+    persist_start_menu_recent_programs();
 }
 
 // Get current start menu item count based on mode
 static int get_start_menu_item_count()
 {
-    if (s_startMenuAllProgs) {
-        return kAllProgramsCount;
-    } else {
-        // Count pinned + recent items
-        int count = 0;
-        int recentCount = 0;
-        
-        // First count pinned
-        for (int i = 0; i < kStartMenuAppCount; i++) {
-            if (s_startMenuApps[i].pinned) count++;
-        }
-        
-        // Then count recent (up to limit)
-        for (int i = 0; i < kStartMenuAppCount && recentCount < kMaxStartMenuRecent; i++) {
-            if (s_startMenuApps[i].recent && !s_startMenuApps[i].pinned) {
-                count++;
-                recentCount++;
-            }
-        }
-        
-        return count;
-    }
+    return s_startMenuAllProgs ? kAllProgramsCount : (int)s_startMenuRecentPrograms.size();
 }
 
 static const char* start_menu_left_item_label_for_row(int row)
@@ -4436,23 +4473,7 @@ static const char* start_menu_left_item_label_for_row(int row)
     if (s_startMenuAllProgs) {
         return (itemIndex >= 0 && itemIndex < kAllProgramsCount) ? s_allProgramsList[itemIndex] : "";
     }
-
-    int currentIdx = 0;
-    for (int i = 0; i < kStartMenuAppCount; ++i) {
-        if (!s_startMenuApps[i].pinned) continue;
-        if (currentIdx == itemIndex) return s_startMenuApps[i].name;
-        ++currentIdx;
-    }
-
-    int recentCount = 0;
-    for (int i = 0; i < kStartMenuAppCount && recentCount < kMaxStartMenuRecent; ++i) {
-        if (!s_startMenuApps[i].recent || s_startMenuApps[i].pinned) continue;
-        if (currentIdx == itemIndex) return s_startMenuApps[i].name;
-        ++currentIdx;
-        ++recentCount;
-    }
-
-    return "";
+    return (itemIndex >= 0 && itemIndex < (int)s_startMenuRecentPrograms.size()) ? s_startMenuRecentPrograms[itemIndex].c_str() : "";
 }
 
 // ============================================================
@@ -6371,7 +6392,7 @@ static void draw_start_menu()
     draw_text(menuX + 32, menuY + 10, "User", rgb(230, 230, 250), 1);
     hline(menuX + 1, menuY + headerH, kStartMenuW - 2, rgb(60, 70, 90));
 
-    // === Left column: App list (pinned/recent or all programs) ===
+    // === Left column: Recent Programs or All Programs ===
     uint32_t leftX = menuX;
     uint32_t contentY = menuY + headerH + 1;
 
@@ -6404,43 +6425,13 @@ static void draw_start_menu()
                 }
             }
         } else {
-            // Pinned/Recent mode - build from app list
-            int currentIdx = 0;
-            bool found = false;
-            
-            // First iterate through pinned
-            for (int j = 0; j < kStartMenuAppCount && currentIdx <= itemIndex; j++) {
-                if (s_startMenuApps[j].pinned) {
-                    if (currentIdx == itemIndex) {
-                        appName = s_startMenuApps[j].name;
-                        appColor = s_startMenuApps[j].color;
-                        isPinned = true;
-                        found = true;
-                        break;
-                    }
-                    currentIdx++;
-                }
-            }
-            
-            // Then recent if not found
-            if (!found) {
-                int recentCount = 0;
-                for (int j = 0; j < kStartMenuAppCount && recentCount < kMaxStartMenuRecent; j++) {
-                    if (s_startMenuApps[j].recent && !s_startMenuApps[j].pinned) {
-                        if (currentIdx == itemIndex) {
-                            appName = s_startMenuApps[j].name;
-                            appColor = s_startMenuApps[j].color;
-                            isPinned = false;
-                            found = true;
-                            break;
-                        }
-                        currentIdx++;
-                        recentCount++;
-                    }
-                }
-            }
-            
-            if (!found) continue;
+            // Recent Programs mode - build from persisted recent list
+            if (itemIndex < 0 || itemIndex >= (int)s_startMenuRecentPrograms.size()) continue;
+            appName = s_startMenuRecentPrograms[itemIndex].c_str();
+            const StartMenuApp* app = find_start_menu_app(appName);
+            if (!app) continue;
+            appColor = app->color;
+            isPinned = false;
         }
 
         // Keyboard selection highlight (yellow/gold)
@@ -6534,8 +6525,8 @@ static void draw_start_menu()
     // Footer background
     framebuffer::fill_rect(menuX + 1, footerY + 1, kStartMenuW - 2, footerH - 2, rgb(38, 38, 46));
 
-    // "All Programs" toggle button (highlighted if active)
-    uint32_t allBtnW = 110;
+    // "All Programs" toggle button (label changes when Recent Programs is shown)
+    uint32_t allBtnW = 132;
     uint32_t allBtnH = 24;
     uint32_t allBtnX = menuX + 10;
     uint32_t allBtnY = footerY + (footerH - allBtnH) / 2;
@@ -6543,7 +6534,7 @@ static void draw_start_menu()
     uint32_t allBtnBorder = s_startMenuAllProgs ? rgb(90, 120, 180) : rgb(70, 80, 100);
     framebuffer::fill_rect(allBtnX, allBtnY, allBtnW, allBtnH, allBtnBg);
     draw_rect(allBtnX, allBtnY, allBtnW, allBtnH, allBtnBorder);
-    const char* allBtnText = s_startMenuAllProgs ? "< Back" : "All Programs";
+    const char* allBtnText = s_startMenuAllProgs ? "Recent Programs" : "All Programs";
     draw_text_centered(allBtnX, allBtnY, allBtnW, allBtnH, allBtnText, rgb(190, 195, 210), 1);
 
     // Power buttons (right side of footer)
@@ -7974,6 +7965,7 @@ void init()
     apply_taskbar_layout();
     reload_persisted_system_desktop_icons();
     load_persisted_app_shortcuts();
+    load_persisted_start_menu_recent_programs();
 #if defined(GXOS_BARE_METAL)
     serial::puts("[desktop] bare-metal desktop icon init starting\n");
 #endif
@@ -8371,7 +8363,7 @@ void toggle_start_menu()
         // Initialize start menu state when opening
         s_startMenuSelection = 0;
         s_startMenuScroll = 0;
-        s_startMenuAllProgs = false;  // Start with pinned/recent view
+        s_startMenuAllProgs = false;  // Start with Recent Programs view
         refresh_start_menu_list();     // Sync with desktop icon states
         s_hoverMenuLeft = -1;
         s_hoverMenuRight = -1;
@@ -8423,11 +8415,21 @@ bool launch_app(const char* appName)
     
     if (isConsole) {
         open_terminal();
+        record_recent_program("Console");
         return true;
     }
     
     // Try to launch as kernel GUI app
     return try_launch_kernel_app(appName);
+}
+
+void record_recent_program(const char* appName)
+{
+#if defined(GXOS_BARE_METAL)
+    add_to_start_menu_recent(appName);
+#else
+    (void)appName;
+#endif
 }
 
 #if defined(GXOS_APPMODEL_LAUNCHSHADOW_SMOKE_ACTIVE) && defined(GXOS_APPMODEL_TYPED_DISPATCH_SHADOW_ONLY) && defined(GXOS_BARE_METAL)
@@ -10670,6 +10672,7 @@ static void show_start_menu_notification(const char* label)
         shell::open();
         s_shellActive = true;
         s_shellMinimized = false;
+        record_recent_program("Console");
         return;
     }
 
@@ -10769,6 +10772,15 @@ static FooterButton hit_test_start_menu_footer(int32_t mx, int32_t my)
     }
 
     // Button dimensions (must match draw_start_menu)
+    uint32_t allBtnW = 132, allBtnH = 24;
+    uint32_t allBtnX = g.menuX + 10;
+    uint32_t allBtnY = footerY + (g.footerH - allBtnH) / 2;
+
+    if ((uint32_t)mx >= allBtnX && (uint32_t)mx < allBtnX + allBtnW &&
+        (uint32_t)my >= allBtnY && (uint32_t)my < allBtnY + allBtnH) {
+        return FOOTER_ALL_PROGRAMS;
+    }
+
     uint32_t shutW = 80, shutH = 24;
     uint32_t shutX = g.menuX + kStartMenuW - shutW - 12;
     uint32_t shutY = footerY + (g.footerH - shutH) / 2;
@@ -11560,16 +11572,26 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
             // Check footer buttons (Shutdown, Restart, Sleep)
             FooterButton footerBtn = hit_test_start_menu_footer(mx, my);
             if (footerBtn != FOOTER_NONE) {
-                s_startMenuOpen = false;
-                s_hoverMenuLeft = -1;
-                s_hoverMenuRight = -1;
                 switch (footerBtn) {
+                    case FOOTER_ALL_PROGRAMS:
+                        s_startMenuAllProgs = !s_startMenuAllProgs;
+                        s_startMenuSelection = 0;
+                        s_startMenuScroll = 0;
+                        draw();
+                        draw_cursor(mx, my);
+                        return;
                     case FOOTER_SHUTDOWN:
+                        s_startMenuOpen = false;
+                        s_hoverMenuLeft = -1;
+                        s_hoverMenuRight = -1;
                         // Show shutdown confirmation dialog
                         s_shutdownDialogOpen = true;
                         s_shutdownDialogHover = -1;
                         break;
                     case FOOTER_RESTART:
+                        s_startMenuOpen = false;
+                        s_hoverMenuLeft = -1;
+                        s_hoverMenuRight = -1;
                         s_notification.title = "Restart";
                         s_notification.message = "System is restarting...";
                         s_notification.visible = true;
@@ -11580,6 +11602,9 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
                         // If we return here, restart failed
                         return;
                     case FOOTER_SLEEP:
+                        s_startMenuOpen = false;
+                        s_hoverMenuLeft = -1;
+                        s_hoverMenuRight = -1;
                         s_notification.title = "Sleep";
                         s_notification.message = "System entering sleep mode...";
                         s_notification.visible = true;
