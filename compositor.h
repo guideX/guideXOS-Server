@@ -44,6 +44,8 @@ namespace gxos { namespace gui {
         std::vector<Widget> widgets; 
         bool minimized{false}; 
         bool maximized{false}; 
+        // Restore bounds remain in virtual desktop coordinates so synthetic viewport switching
+        // does not move windows between monitors.
         int prevX{0}; int prevY{0}; int prevW{0}; int prevH{0}; 
         bool dirty{true}; 
         int snapState{0}; 
@@ -202,7 +204,7 @@ namespace gxos { namespace gui {
         static bool IsShiftDown();
 #endif
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)
-        static uint64_t hitTestTaskbarButton(int mx, int my, RECT cr, int taskbarH);
+        static uint64_t hitTestTaskbarButton(int mx, int my, const DisplayVirtualDesktop& desktop, const DisplayViewport& viewport, int fallbackWidth, int fallbackHeight);
         static void initWindow();
         static void shutdownWindow();
         static void requestRepaint();

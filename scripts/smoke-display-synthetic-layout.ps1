@@ -83,6 +83,10 @@ $checks = @(
         Match = Find-FirstMatch (Join-Path $Root 'compositor.cpp') 'primaryTaskbarDisplayRect';
     },
     [pscustomobject]@{
+        Name = 'compositor taskbar visibility helper';
+        Match = Find-FirstMatch (Join-Path $Root 'compositor.cpp') 'hostedPrimaryTaskbarVisibleInViewport';
+    },
+    [pscustomobject]@{
         Name = 'compositor monitor work area for window';
         Match = Find-FirstMatch (Join-Path $Root 'compositor.cpp') 'monitorWorkAreaForWindow';
     },
@@ -104,7 +108,19 @@ $checks = @(
     },
     [pscustomobject]@{
         Name = 'compositor viewport diagnostic active monitor';
-        Match = Find-FirstMatch (Join-Path $Root 'compositor.cpp') 'activeMonitor=';
+        Match = Find-FirstMatch (Join-Path $Root 'compositor.cpp') 'activeMonitorId=';
+    },
+    [pscustomobject]@{
+        Name = 'compositor viewport diagnostic active viewport index';
+        Match = Find-FirstMatch (Join-Path $Root 'compositor.cpp') 'activeViewportIndex=';
+    },
+    [pscustomobject]@{
+        Name = 'compositor viewport diagnostic active viewport origin';
+        Match = Find-FirstMatch (Join-Path $Root 'compositor.cpp') 'activeViewportOrigin=';
+    },
+    [pscustomobject]@{
+        Name = 'compositor viewport diagnostic primary monitor';
+        Match = Find-FirstMatch (Join-Path $Root 'compositor.cpp') 'primaryMonitorId=';
     },
     [pscustomobject]@{
         Name = 'compositor viewport diagnostic active work area';
@@ -119,6 +135,10 @@ $checks = @(
         Match = Find-FirstMatch (Join-Path $Root 'compositor.cpp') 'taskbarPrimaryOnly=';
     },
     [pscustomobject]@{
+        Name = 'compositor viewport diagnostic taskbar visible';
+        Match = Find-FirstMatch (Join-Path $Root 'compositor.cpp') 'taskbarVisible=';
+    },
+    [pscustomobject]@{
         Name = 'compositor viewport switch state';
         Match = Find-FirstMatch (Join-Path $Root 'compositor.cpp') 'g_hostedViewportIndex';
     },
@@ -131,12 +151,32 @@ $checks = @(
         Match = Find-FirstMatch (Join-Path $Root 'server.cpp') 'desktop.display.summary';
     },
     [pscustomobject]@{
-        Name = 'compositor state load monitor work area';
-        Match = Find-FirstMatch (Join-Path $Root 'compositor.cpp') 'monitorWorkAreaForWindow(desktop, viewport, savedRect)';
+        Name = 'compositor state load restore geometry helper';
+        Match = Find-FirstMatch (Join-Path $Root 'compositor.cpp') 'applyLoadedWindowGeometry';
+    },
+    [pscustomobject]@{
+        Name = 'compositor state load restore clamp helper';
+        Match = Find-FirstMatch (Join-Path $Root 'compositor.cpp') 'sanitizeWindowRestoreRect';
+    },
+    [pscustomobject]@{
+        Name = 'desktop state restore fields';
+        Match = Find-FirstMatch (Join-Path $Root 'desktop_state.h') 'restoreX';
+    },
+    [pscustomobject]@{
+        Name = 'desktop config restore fields';
+        Match = Find-FirstMatch (Join-Path $Root 'desktop_config.h') 'restoreX';
+    },
+    [pscustomobject]@{
+        Name = 'desktop config restore serialization';
+        Match = Find-FirstMatch (Join-Path $Root 'desktop_config.h') '"restoreH"';
     },
     [pscustomobject]@{
         Name = 'display options synthetic note';
         Match = Find-FirstMatch (Join-Path $Root 'display_options.cpp') 'Synthetic dual-monitor test mode is active';
+    },
+    [pscustomobject]@{
+        Name = 'display options viewport 2 hidden taskbar note';
+        Match = Find-FirstMatch (Join-Path $Root 'display_options.cpp') 'viewport 2 hides the taskbar for now';
     },
     [pscustomobject]@{
         Name = 'display options synthetic preview gate';

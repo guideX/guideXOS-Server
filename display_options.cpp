@@ -1374,7 +1374,7 @@ void DisplayOptions::drawDisplayTab()
     if (hostedSyntheticDualMonitorEnabled()) {
         const DisplayViewport viewport = makeHostedDisplayViewport(desktop, Compositor::hostedDisplayViewportIndex(), kSyntheticTestMonitorWidth, kSyntheticTestMonitorHeight);
         drawText(s_windowId, 46, 158, "Synthetic dual-monitor test mode is active in hosted builds; desktop.display.viewport 1/2 selects the visible viewport.", DisplayOptionsMutedTextColor());
-        drawText(s_windowId, 46, 176, std::string("Viewing ") + viewport.summary() + "  (wallpaper/taskbar remain primary-view based)", DisplayOptionsMutedTextColor());
+        drawText(s_windowId, 46, 176, std::string("Viewing ") + viewport.summary() + "  (wallpaper/taskbar remain primary-view based; viewport 2 hides the taskbar for now)", DisplayOptionsMutedTextColor());
     }
 
     const bool mirrorSelected = normalizeDisplayModeName(s_selectedDisplayMode) == "mirror";
