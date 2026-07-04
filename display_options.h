@@ -14,7 +14,7 @@ public:
     static uint64_t Launch();
     static int main(int argc, char** argv);
 
-private:
+public:
     static uint64_t s_windowId;
     static int s_selectedIndex;
     static int s_appliedIndex;
@@ -25,10 +25,16 @@ private:
     static DesktopThemeId s_selectedThemeId;
     static DesktopThemeId s_appliedThemeId;
     static int s_activeTab;
-    static int s_galleryScrollOffset;
+    static int s_windowW;
+    static int s_windowH;
+    static int s_backgroundGalleryScrollOffset;
+    static int s_gradientGalleryScrollOffset;
     static int s_mouseX;
     static int s_mouseY;
     static bool s_mouseDown;
+    static bool s_galleryScrollbarDragging;
+    static int s_galleryScrollbarDragStartY;
+    static int s_galleryScrollbarDragStartOffset;
     static int s_selectedTimeZoneIndex;
     static int s_appliedTimeZoneIndex;
     static bool s_use24HourTime;

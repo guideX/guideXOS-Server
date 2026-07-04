@@ -237,7 +237,11 @@ public:
     virtual bool init() override;
     virtual void shutdown() override;
     virtual void draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) override;
+    virtual void onKeyDown(uint32_t key) override;
+    virtual void onKeyChar(char c) override;
     virtual void onMouseDown(int x, int y, uint8_t button) override;
+    virtual void onMouseMove(int x, int y) override;
+    virtual void onMouseUp(int x, int y, uint8_t button) override;
     virtual void onMouseWheel(int x, int y, int wheelDelta) override;
     virtual void onWidgetClick(int widgetId) override;
 
@@ -251,16 +255,33 @@ private:
     int m_selectedGradientIndex;
     int m_appliedGradientIndex;
     int m_activeTab;
-    int m_galleryScrollOffset;
+    int m_windowW;
+    int m_windowH;
+    int m_backgroundGalleryScrollOffset;
+    int m_gradientGalleryScrollOffset;
+    bool m_galleryScrollbarDragging;
+    int m_galleryScrollbarDragStartY;
+    int m_galleryScrollbarDragStartOffset;
     int m_selectButtonId;
     kernel::desktop::SystemDesktopIconVisibility m_desktopIconVisibility;
 
     void loadSelection();
     void setActiveTab(int tab);
+    int& activeGalleryScrollOffset();
+    int activeGalleryItemCount() const;
+    int activeSelectionIndex() const;
+    void syncActiveSelectionMirror();
+    void clampSelectionToCurrentTab();
+    void clampActiveScrollOffset();
+    void ensureActiveSelectionVisible();
+    void setActiveSelectionIndex(int index);
+    void setActiveTabAndClamp(int tab);
+    bool handleGalleryKey(uint32_t key);
     void applySelected();
     int hitBackground(int x, int y) const;
     int hitWallpaper(int x, int y) const;
     int hitGradient(int x, int y) const;
+    int hitGalleryScrollbar(int x, int y) const;
     int hitDesktopIconCheckbox(int x, int y) const;
     void drawCheckbox(uint32_t x, uint32_t y, const char* label, bool checked);
     void toggleDesktopIconCheckbox(int index);

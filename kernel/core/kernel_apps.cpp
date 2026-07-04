@@ -1042,45 +1042,90 @@ static const int kKernelGradientCount = sizeof(s_kernelGradients) / sizeof(s_ker
 static const int kTileW = 92;
 static const int kTileH = 76;
 static const int kTileGap = 12;
-static const int kTileCols = 4;
 static const int kGalleryX = 18;
 static const int kGalleryY = 82;
-static const int kGalleryViewportW = 404;
-static const int kGalleryViewportH = 232;
-static const int kGalleryScrollBarX = 432;
 static const int kGalleryScrollBarW = 8;
+static const int kGalleryRightMargin = 26;
+static const int kGalleryFooterReserve = 84;
+static const int kGalleryMinHeight = 120;
+static const int kGalleryScrollbarGap = 6;
+static const int kMinScrollbarThumbH = 18;
 static const int kDesktopIconCheckboxX = 34;
 static const int kDesktopIconCheckboxY = 104;
 static const int kDesktopIconCheckboxRowH = 34;
 static const int kDesktopIconCheckboxSize = 14;
 
-static int galleryVisibleRows()
+static int maxInt(int a, int b) { return a > b ? a : b; }
+static int minInt(int a, int b) { return a < b ? a : b; }
+
+struct GalleryLayout
+{
+    int itemCount{0};
+    int rowCount{0};
+    int columns{1};
+    int visibleRows{1};
+    int maxScroll{0};
+    int galleryX{kGalleryX};
+    int galleryY{kGalleryY};
+    int galleryW{1};
+    int galleryH{1};
+    int scrollbarX{0};
+    bool showScrollbar{false};
+    int buttonY{0};
+};
+
+static int rowCountForItemCount(int itemCount, int columns)
+{
+    if (itemCount <= 0 || columns <= 0) return 0;
+    return (itemCount + columns - 1) / columns;
+}
+
+static int visibleRowsForHeight(int galleryH)
 {
     const int rowPitch = kTileH + kTileGap;
-    const int visible = (kGalleryViewportH - kTileH) / rowPitch + 1;
+    const int visible = (galleryH - kTileH) / rowPitch + 1;
     return visible > 0 ? visible : 1;
 }
 
-static int galleryRowCount(int itemCount)
+static int galleryColumnsForWidth(int galleryW)
 {
-    if (itemCount <= 0) return 0;
-    return (itemCount + kTileCols - 1) / kTileCols;
+    const int stride = kTileW + kTileGap;
+    if (galleryW <= kTileW) return 1;
+    int columns = (galleryW + kTileGap) / stride;
+    if (columns < 1) columns = 1;
+    while (columns > 1) {
+        const int contentW = columns * kTileW + (columns - 1) * kTileGap;
+        if (contentW <= galleryW) break;
+        --columns;
+    }
+    return columns;
 }
 
-static int galleryMaxScroll(int itemCount)
+static GalleryLayout makeGalleryLayout(int windowW, int windowH, int itemCount)
 {
-    const int rows = galleryRowCount(itemCount);
-    const int visibleRows = galleryVisibleRows();
-    const int maxScroll = rows - visibleRows;
-    return (maxScroll > 0) ? maxScroll : 0;
-}
-
-static int clampGalleryScroll(int offset, int itemCount)
-{
-    const int maxScroll = galleryMaxScroll(itemCount);
-    if (offset < 0) return 0;
-    if (offset > maxScroll) return maxScroll;
-    return offset;
+    GalleryLayout layout;
+    layout.itemCount = itemCount < 0 ? 0 : itemCount;
+    layout.galleryX = kGalleryX;
+    layout.galleryY = kGalleryY;
+    layout.galleryW = windowW - kGalleryX - kGalleryRightMargin;
+    if (layout.galleryW < 1) layout.galleryW = 1;
+    layout.galleryH = windowH - kGalleryY - kGalleryFooterReserve;
+    if (layout.galleryH < kGalleryMinHeight) layout.galleryH = kGalleryMinHeight;
+    layout.visibleRows = visibleRowsForHeight(layout.galleryH);
+    layout.columns = galleryColumnsForWidth(layout.galleryW);
+    layout.rowCount = rowCountForItemCount(layout.itemCount, layout.columns);
+    layout.showScrollbar = layout.rowCount > layout.visibleRows;
+    if (layout.showScrollbar) {
+        layout.galleryW -= (kGalleryScrollBarW + kGalleryScrollbarGap);
+        if (layout.galleryW < 1) layout.galleryW = 1;
+        layout.columns = galleryColumnsForWidth(layout.galleryW);
+        layout.rowCount = rowCountForItemCount(layout.itemCount, layout.columns);
+        layout.showScrollbar = layout.rowCount > layout.visibleRows;
+    }
+    layout.maxScroll = layout.rowCount > layout.visibleRows ? layout.rowCount - layout.visibleRows : 0;
+    layout.scrollbarX = windowW - kGalleryRightMargin - kGalleryScrollBarW;
+    layout.buttonY = layout.galleryY + layout.galleryH + 12;
+    return layout;
 }
 }
 
@@ -2275,7 +2320,7 @@ bool NotepadApp::updateMenuHover(int x, int y) {
 // ============================================================
 
 DisplayOptionsApp::DisplayOptionsApp()
-    : m_selectedIndex(0), m_appliedIndex(0), m_selectedBackgroundIndex(0), m_appliedBackgroundIndex(0), m_selectedGradientIndex(0), m_appliedGradientIndex(0), m_activeTab(0), m_galleryScrollOffset(0), m_selectButtonId(-1), m_desktopIconVisibility{true, true, true, false} {
+    : m_selectedIndex(0), m_appliedIndex(0), m_selectedBackgroundIndex(0), m_appliedBackgroundIndex(0), m_selectedGradientIndex(0), m_appliedGradientIndex(0), m_activeTab(0), m_windowW(520), m_windowH(390), m_backgroundGalleryScrollOffset(0), m_gradientGalleryScrollOffset(0), m_galleryScrollbarDragging(false), m_galleryScrollbarDragStartY(0), m_galleryScrollbarDragStartOffset(0), m_selectButtonId(-1), m_desktopIconVisibility{true, true, true, false} {
     strcopy(m_name, "DisplayOptions", app::MAX_APP_NAME);
 }
 
@@ -2290,7 +2335,11 @@ void DisplayOptionsApp::loadSelection() {
     m_appliedBackgroundIndex = 0;
     m_selectedGradientIndex = 0;
     m_appliedGradientIndex = 0;
-    m_galleryScrollOffset = 0;
+    m_backgroundGalleryScrollOffset = 0;
+    m_gradientGalleryScrollOffset = 0;
+    m_galleryScrollbarDragging = false;
+    m_galleryScrollbarDragStartY = 0;
+    m_galleryScrollbarDragStartOffset = 0;
     m_activeTab = 0;
     m_desktopIconVisibility = kernel::desktop::get_system_desktop_icon_visibility();
     serial::puts("[display-options] Desktop Icons checkbox state loaded\n");
@@ -2326,6 +2375,8 @@ bool DisplayOptionsApp::init() {
     m_window->h = 390;
     m_window->flags = app::WF_VISIBLE | app::WF_TITLEBAR | app::WF_CLOSABLE | app::WF_FOCUSED;
     strcopy(m_window->title, "Display Options", app::MAX_TITLE_LEN);
+    m_windowW = static_cast<int>(m_window->w);
+    m_windowH = static_cast<int>(m_window->h);
 
     if (!compositor::KernelCompositor::registerWindow(m_window)) {
         delete m_window;
@@ -2346,9 +2397,110 @@ void DisplayOptionsApp::shutdown() {
 
 void DisplayOptionsApp::setActiveTab(int tab)
 {
-    if (tab < 0 || tab > 3) return;
+    setActiveTabAndClamp(tab);
+}
+
+int& DisplayOptionsApp::activeGalleryScrollOffset() {
+    return m_activeTab == 0 ? m_backgroundGalleryScrollOffset : m_gradientGalleryScrollOffset;
+}
+
+int DisplayOptionsApp::activeGalleryItemCount() const {
+    return m_activeTab == 0
+        ? static_cast<int>(kKernelWallpaperCount)
+        : static_cast<int>(kKernelGradientCount);
+}
+
+int DisplayOptionsApp::activeSelectionIndex() const {
+    return m_activeTab == 0 ? m_selectedBackgroundIndex : m_selectedGradientIndex;
+}
+
+void DisplayOptionsApp::syncActiveSelectionMirror() {
+    if (m_activeTab == 0 || m_activeTab == 1) {
+        m_selectedIndex = activeSelectionIndex();
+    }
+}
+
+void DisplayOptionsApp::clampSelectionToCurrentTab() {
+    if (m_activeTab == 0) {
+        if (kKernelWallpaperCount <= 0) {
+            m_selectedBackgroundIndex = 0;
+            m_appliedBackgroundIndex = 0;
+        } else {
+            if (m_selectedBackgroundIndex < 0) m_selectedBackgroundIndex = 0;
+            if (m_selectedBackgroundIndex >= kKernelWallpaperCount) m_selectedBackgroundIndex = kKernelWallpaperCount - 1;
+            if (m_appliedBackgroundIndex < 0) m_appliedBackgroundIndex = 0;
+            if (m_appliedBackgroundIndex >= kKernelWallpaperCount) m_appliedBackgroundIndex = kKernelWallpaperCount - 1;
+        }
+        m_selectedIndex = m_selectedBackgroundIndex;
+        m_appliedIndex = m_appliedBackgroundIndex;
+    } else if (m_activeTab == 1) {
+        if (kKernelGradientCount <= 0) {
+            m_selectedGradientIndex = 0;
+            m_appliedGradientIndex = 0;
+        } else {
+            if (m_selectedGradientIndex < 0) m_selectedGradientIndex = 0;
+            if (m_selectedGradientIndex >= kKernelGradientCount) m_selectedGradientIndex = kKernelGradientCount - 1;
+            if (m_appliedGradientIndex < 0) m_appliedGradientIndex = 0;
+            if (m_appliedGradientIndex >= kKernelGradientCount) m_appliedGradientIndex = kKernelGradientCount - 1;
+        }
+        m_selectedIndex = m_selectedGradientIndex;
+        m_appliedIndex = m_appliedGradientIndex;
+    }
+}
+
+void DisplayOptionsApp::clampActiveScrollOffset() {
+    GalleryLayout layout = makeGalleryLayout(m_windowW, m_windowH, activeGalleryItemCount());
+    int& scroll = activeGalleryScrollOffset();
+    if (scroll < 0) scroll = 0;
+    if (scroll > layout.maxScroll) scroll = layout.maxScroll;
+}
+
+void DisplayOptionsApp::ensureActiveSelectionVisible() {
+    const int itemCount = activeGalleryItemCount();
+    if (itemCount <= 0) {
+        activeGalleryScrollOffset() = 0;
+        return;
+    }
+
+    GalleryLayout layout = makeGalleryLayout(m_windowW, m_windowH, itemCount);
+    int& scroll = activeGalleryScrollOffset();
+    const int selected = activeSelectionIndex();
+    const int clampedSelected = selected < 0 ? 0 : (selected >= itemCount ? itemCount - 1 : selected);
+    const int row = layout.columns > 0 ? (clampedSelected / layout.columns) : 0;
+    if (row < scroll) {
+        scroll = row;
+    } else if (row >= scroll + layout.visibleRows) {
+        scroll = row - layout.visibleRows + 1;
+    }
+    if (scroll < 0) scroll = 0;
+    if (scroll > layout.maxScroll) scroll = layout.maxScroll;
+}
+
+void DisplayOptionsApp::setActiveSelectionIndex(int index) {
+    if (m_activeTab == 0) {
+        if (index < 0) index = 0;
+        if (index >= kKernelWallpaperCount) index = kKernelWallpaperCount - 1;
+        m_selectedBackgroundIndex = index;
+        m_selectedIndex = index;
+        m_appliedIndex = m_appliedBackgroundIndex;
+    } else if (m_activeTab == 1) {
+        if (index < 0) index = 0;
+        if (index >= kKernelGradientCount) index = kKernelGradientCount - 1;
+        m_selectedGradientIndex = index;
+        m_selectedIndex = index;
+        m_appliedIndex = m_appliedGradientIndex;
+    }
+}
+
+void DisplayOptionsApp::setActiveTabAndClamp(int tab) {
+    if (tab < 0 || tab > 4) return;
     m_activeTab = tab;
-    m_galleryScrollOffset = 0;
+    clampSelectionToCurrentTab();
+    if (tab == 0 || tab == 1) {
+        clampActiveScrollOffset();
+        ensureActiveSelectionVisible();
+    }
+    m_galleryScrollbarDragging = false;
     if (m_selectButtonId >= 0) {
         app::Widget* button = getWidget(m_selectButtonId);
         if (button) {
@@ -2363,6 +2515,8 @@ void DisplayOptionsApp::setActiveTab(int tab)
 }
 
 void DisplayOptionsApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
+    m_windowW = static_cast<int>(w);
+    m_windowH = static_cast<int>(h);
     framebuffer::fill_rect(x, y, w, h, rgb(28, 30, 38));
 
     framebuffer::fill_rect(x + 16, y + 16, 140, 30, m_activeTab == 0 ? rgb(58, 58, 58) : rgb(34, 34, 38));
@@ -2378,24 +2532,26 @@ void DisplayOptionsApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
     appDrawText(x + 328, y + 27, "Gradients", m_activeTab == 1 ? rgb(235, 235, 240) : rgb(160, 160, 168));
 
     appDrawText(x + 18, y + 58, m_activeTab == 2 ? "Choose system icons shown on the desktop:" : (m_activeTab == 0 ? "Select a background from the gallery:" : "Select a gradient from the gallery:"), rgb(230, 230, 238));
-    framebuffer::fill_rect(x + 14, y + 74, w - 28, 240, rgb(22, 22, 24));
+    const int panelW = maxInt(1, static_cast<int>(w) - 28);
+    const int panelH = maxInt(1, static_cast<int>(h) - 92);
+    framebuffer::fill_rect(x + 14, y + 74, static_cast<uint32_t>(panelW), static_cast<uint32_t>(panelH), rgb(22, 22, 24));
 
     if (m_activeTab == 0 || m_activeTab == 1) {
         const bool showWallpapers = m_activeTab == 0;
-        const int itemCount = showWallpapers ? kKernelWallpaperCount : kKernelGradientCount;
-        const int maxScroll = galleryMaxScroll(itemCount);
-        const int rowPitch = kTileH + kTileGap;
-        m_galleryScrollOffset = clampGalleryScroll(m_galleryScrollOffset, itemCount);
-        const int visibleRows = galleryVisibleRows();
-        const int startRow = m_galleryScrollOffset;
-        const int endRow = startRow + visibleRows;
+        const int itemCount = showWallpapers ? static_cast<int>(kKernelWallpaperCount) : static_cast<int>(kKernelGradientCount);
+        GalleryLayout layout = makeGalleryLayout(m_windowW, m_windowH, itemCount);
+        int& scrollOffset = activeGalleryScrollOffset();
+        if (scrollOffset < 0) scrollOffset = 0;
+        if (scrollOffset > layout.maxScroll) scrollOffset = layout.maxScroll;
+        const int startRow = scrollOffset;
+        const int endRow = startRow + layout.visibleRows;
 
         for (int i = 0; i < itemCount; ++i) {
-            const int row = i / kTileCols;
+            const int row = layout.columns > 0 ? i / layout.columns : 0;
             if (row < startRow || row >= endRow) continue;
-            const int col = i % kTileCols;
-            const uint32_t tx = x + kGalleryX + col * (kTileW + kTileGap);
-            const uint32_t ty = y + kGalleryY + (row - startRow) * rowPitch;
+            const int col = layout.columns > 0 ? i % layout.columns : 0;
+            const uint32_t tx = x + layout.galleryX + col * (kTileW + kTileGap);
+            const uint32_t ty = y + layout.galleryY + (row - startRow) * (kTileH + kTileGap);
             const bool selected = showWallpapers ? (i == m_selectedBackgroundIndex) : (i == m_selectedGradientIndex);
             const bool applied = showWallpapers ? (i == m_appliedBackgroundIndex) : (i == m_appliedGradientIndex);
 
@@ -2438,24 +2594,35 @@ void DisplayOptionsApp::draw(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
             }
         }
 
-        if (maxScroll > 0) {
-            const uint32_t trackX = x + kGalleryScrollBarX;
-            const uint32_t trackY = y + kGalleryY;
-            const uint32_t trackH = kGalleryViewportH;
-            framebuffer::fill_rect(trackX, trackY, kGalleryScrollBarW, trackH, rgb(36, 36, 40));
-            int rows = galleryRowCount(itemCount);
-            int thumbH = (galleryVisibleRows() * (int)trackH) / (rows > 0 ? rows : 1);
-            if (thumbH < 18) thumbH = 18;
-            if (thumbH > (int)trackH) thumbH = (int)trackH;
-            const int thumbTravel = (int)trackH - thumbH;
-            const int thumbY = (int)trackY + ((thumbTravel * m_galleryScrollOffset) / maxScroll);
-            framebuffer::fill_rect(trackX, (uint32_t)thumbY, kGalleryScrollBarW, (uint32_t)thumbH, rgb(150, 160, 176));
+        if (layout.showScrollbar) {
+            framebuffer::fill_rect(x + layout.scrollbarX, y + layout.galleryY, kGalleryScrollBarW, static_cast<uint32_t>(layout.galleryH), rgb(36, 36, 40));
+            int thumbH = (layout.visibleRows * layout.galleryH) / (layout.rowCount > 0 ? layout.rowCount : 1);
+            if (thumbH < kMinScrollbarThumbH) thumbH = kMinScrollbarThumbH;
+            if (thumbH > layout.galleryH) thumbH = layout.galleryH;
+            const int thumbTravel = layout.galleryH - thumbH;
+            const int thumbY = layout.galleryY + ((thumbTravel * scrollOffset) / (layout.maxScroll > 0 ? layout.maxScroll : 1));
+            framebuffer::fill_rect(x + layout.scrollbarX, y + thumbY, kGalleryScrollBarW, static_cast<uint32_t>(thumbH), rgb(150, 160, 176));
+        }
+
+        if (m_selectButtonId >= 0) {
+            if (app::Widget* button = getWidget(m_selectButtonId)) {
+                button->x = 18;
+                button->y = layout.buttonY;
+                button->w = 142;
+                button->h = 28;
+            }
         }
     } else {
+        if (m_selectButtonId >= 0) {
+            if (app::Widget* button = getWidget(m_selectButtonId)) {
+                button->visible = false;
+                button->enabled = false;
+            }
+        }
         drawCheckbox(x + kDesktopIconCheckboxX, y + kDesktopIconCheckboxY, "Trash", m_desktopIconVisibility.showTrash);
         drawCheckbox(x + kDesktopIconCheckboxX, y + kDesktopIconCheckboxY + kDesktopIconCheckboxRowH, "File Explorer", m_desktopIconVisibility.showThisSystem || m_desktopIconVisibility.showFileManager);
         drawCheckbox(x + kDesktopIconCheckboxX, y + kDesktopIconCheckboxY + kDesktopIconCheckboxRowH * 2, "System Settings", m_desktopIconVisibility.showSystemSettings);
-        appDrawText(x + kDesktopIconCheckboxX, y + 292, "Changes are saved immediately.", rgb(190, 195, 205));
+        appDrawText(x + kDesktopIconCheckboxX, y + maxInt(292, static_cast<int>(h) - 28), "Changes are saved immediately.", rgb(190, 195, 205));
     }
 }
 
@@ -2463,33 +2630,60 @@ int DisplayOptionsApp::hitBackground(int mx, int my) const {
     return hitWallpaper(mx, my);
 }
 int DisplayOptionsApp::hitWallpaper(int mx, int my) const {
-    const int visibleRows = galleryVisibleRows();
-    const int startRow = m_galleryScrollOffset;
-    const int endRow = startRow + visibleRows;
-    for (int i = 0; i < kKernelWallpaperCount; ++i) {
-        int row = i / kTileCols;
-        if (row < startRow || row >= endRow) continue;
-        int col = i % kTileCols;
-        int tx = kGalleryX + col * (kTileW + kTileGap);
-        int ty = kGalleryY + (row - startRow) * (kTileH + kTileGap);
-        if (mx >= tx && mx < tx + kTileW && my >= ty && my < ty + kTileH) return i;
+    const GalleryLayout layout = makeGalleryLayout(m_windowW, m_windowH, static_cast<int>(kKernelWallpaperCount));
+    const int scroll = m_backgroundGalleryScrollOffset < 0 ? 0 : (m_backgroundGalleryScrollOffset > layout.maxScroll ? layout.maxScroll : m_backgroundGalleryScrollOffset);
+    if (mx < layout.galleryX || mx >= layout.galleryX + layout.galleryW || my < layout.galleryY || my >= layout.galleryY + layout.galleryH) return -1;
+    const int relX = mx - layout.galleryX;
+    const int relY = my - layout.galleryY;
+    const int colStride = kTileW + kTileGap;
+    const int rowStride = kTileH + kTileGap;
+    const int col = relX / colStride;
+    const int row = relY / rowStride + scroll;
+    if (col < 0 || col >= layout.columns || row < 0 || row >= layout.rowCount) return -1;
+    const int index = row * layout.columns + col;
+    if (index < 0 || index >= static_cast<int>(kKernelWallpaperCount)) return -1;
+    const int tx = layout.galleryX + col * colStride;
+    const int ty = layout.galleryY + (row - scroll) * rowStride;
+    if (mx >= tx && mx < tx + kTileW && my >= ty && my < ty + kTileH) {
+        return index;
     }
     return -1;
 }
 
 int DisplayOptionsApp::hitGradient(int mx, int my) const {
-    const int visibleRows = galleryVisibleRows();
-    const int startRow = m_galleryScrollOffset;
-    const int endRow = startRow + visibleRows;
-    for (int i = 0; i < kKernelGradientCount; ++i) {
-        int row = i / kTileCols;
-        if (row < startRow || row >= endRow) continue;
-        int col = i % kTileCols;
-        int tx = kGalleryX + col * (kTileW + kTileGap);
-        int ty = kGalleryY + (row - startRow) * (kTileH + kTileGap);
-        if (mx >= tx && mx < tx + kTileW && my >= ty && my < ty + kTileH) return i;
+    const GalleryLayout layout = makeGalleryLayout(m_windowW, m_windowH, static_cast<int>(kKernelGradientCount));
+    const int scroll = m_gradientGalleryScrollOffset < 0 ? 0 : (m_gradientGalleryScrollOffset > layout.maxScroll ? layout.maxScroll : m_gradientGalleryScrollOffset);
+    if (mx < layout.galleryX || mx >= layout.galleryX + layout.galleryW || my < layout.galleryY || my >= layout.galleryY + layout.galleryH) return -1;
+    const int relX = mx - layout.galleryX;
+    const int relY = my - layout.galleryY;
+    const int colStride = kTileW + kTileGap;
+    const int rowStride = kTileH + kTileGap;
+    const int col = relX / colStride;
+    const int row = relY / rowStride + scroll;
+    if (col < 0 || col >= layout.columns || row < 0 || row >= layout.rowCount) return -1;
+    const int index = row * layout.columns + col;
+    if (index < 0 || index >= static_cast<int>(kKernelGradientCount)) return -1;
+    const int tx = layout.galleryX + col * colStride;
+    const int ty = layout.galleryY + (row - scroll) * rowStride;
+    if (mx >= tx && mx < tx + kTileW && my >= ty && my < ty + kTileH) {
+        return index;
     }
     return -1;
+}
+
+int DisplayOptionsApp::hitGalleryScrollbar(int mx, int my) const {
+    if (m_activeTab != 0 && m_activeTab != 1) return 0;
+    const GalleryLayout layout = makeGalleryLayout(m_windowW, m_windowH, activeGalleryItemCount());
+    if (!layout.showScrollbar) return 0;
+    if (mx < layout.scrollbarX || mx >= layout.scrollbarX + kGalleryScrollBarW || my < layout.galleryY || my >= layout.galleryY + layout.galleryH) return 0;
+
+    const int scroll = m_activeTab == 0 ? m_backgroundGalleryScrollOffset : m_gradientGalleryScrollOffset;
+    const int thumbH = maxInt(kMinScrollbarThumbH, (layout.visibleRows * layout.galleryH) / (layout.rowCount > 0 ? layout.rowCount : 1));
+    const int thumbTravel = maxInt(1, layout.galleryH - thumbH);
+    const int thumbY = layout.galleryY + ((thumbTravel * (scroll < 0 ? 0 : (scroll > layout.maxScroll ? layout.maxScroll : scroll))) / (layout.maxScroll > 0 ? layout.maxScroll : 1));
+    if (my >= thumbY && my < thumbY + thumbH) return 1;
+    if (my < thumbY) return 2;
+    return 3;
 }
 
 int DisplayOptionsApp::hitDesktopIconCheckbox(int mx, int my) const {
@@ -2524,6 +2718,90 @@ void DisplayOptionsApp::toggleDesktopIconCheckbox(int index) {
     invalidate();
 }
 
+bool DisplayOptionsApp::handleGalleryKey(uint32_t key) {
+    if (m_activeTab != 0 && m_activeTab != 1) return false;
+
+    const int itemCount = activeGalleryItemCount();
+    if (itemCount <= 0) return false;
+
+    const GalleryLayout layout = makeGalleryLayout(m_windowW, m_windowH, itemCount);
+    int selected = activeSelectionIndex();
+    if (selected < 0) selected = 0;
+    if (selected >= itemCount) selected = itemCount - 1;
+
+    auto moveSelection = [&](int nextIndex) {
+        if (nextIndex < 0) nextIndex = 0;
+        if (nextIndex >= itemCount) nextIndex = itemCount - 1;
+        setActiveSelectionIndex(nextIndex);
+        ensureActiveSelectionVisible();
+        invalidate();
+        return true;
+    };
+
+    auto scrollByRows = [&](int rows) {
+        if (rows == 0) return false;
+        int& scroll = activeGalleryScrollOffset();
+        int nextOffset = scroll + rows;
+        if (nextOffset < 0) nextOffset = 0;
+        if (nextOffset > layout.maxScroll) nextOffset = layout.maxScroll;
+        if (nextOffset == scroll) return false;
+        scroll = nextOffset;
+        invalidate();
+        return true;
+    };
+
+    const int row = layout.columns > 0 ? (selected / layout.columns) : 0;
+    const int col = layout.columns > 0 ? (selected % layout.columns) : 0;
+
+    if (key == shell::KEY_LEFT) {
+        const int rowStart = row * layout.columns;
+        return moveSelection(selected > rowStart ? selected - 1 : rowStart);
+    }
+    if (key == shell::KEY_RIGHT) {
+        const int rowEnd = minInt(row * layout.columns + layout.columns - 1, itemCount - 1);
+        return moveSelection(selected < rowEnd ? selected + 1 : rowEnd);
+    }
+    if (key == shell::KEY_UP) {
+        if (row <= 0) return moveSelection(selected);
+        const int nextIndex = minInt((row - 1) * layout.columns + col, itemCount - 1);
+        return moveSelection(nextIndex);
+    }
+    if (key == shell::KEY_DOWN) {
+        if (row + 1 >= layout.rowCount) return moveSelection(selected);
+        const int nextIndex = minInt((row + 1) * layout.columns + col, itemCount - 1);
+        return moveSelection(nextIndex);
+    }
+    if (key == shell::KEY_HOME) {
+        return moveSelection(0);
+    }
+    if (key == shell::KEY_END) {
+        return moveSelection(itemCount - 1);
+    }
+    if (key == shell::KEY_PGUP) {
+        return scrollByRows(-layout.visibleRows);
+    }
+    if (key == shell::KEY_PGDN) {
+        return scrollByRows(layout.visibleRows);
+    }
+    if (key == '\r' || key == '\n' || key == ' ') {
+        applySelected();
+        return true;
+    }
+    return false;
+}
+
+void DisplayOptionsApp::onKeyDown(uint32_t key) {
+    if (handleGalleryKey(key)) return;
+}
+
+void DisplayOptionsApp::onKeyChar(char c) {
+    if (c == ' ' || c == '\r' || c == '\n') {
+        if (m_activeTab == 0 || m_activeTab == 1) {
+            applySelected();
+        }
+    }
+}
+
 void DisplayOptionsApp::onMouseDown(int x, int y, uint8_t) {
     if (x >= 16 && x < 156 && y >= 16 && y < 46) {
         setActiveTab(0);
@@ -2544,38 +2822,76 @@ void DisplayOptionsApp::onMouseDown(int x, int y, uint8_t) {
 
     if (m_activeTab == 2) {
         int hit = hitDesktopIconCheckbox(x, y);
-        if (hit >= 0) toggleDesktopIconCheckbox(hit);
-        return;
-    }
-
-    if (m_activeTab == 1) {
-        int hit = hitGradient(x, y);
         if (hit >= 0) {
-            m_selectedGradientIndex = hit;
+            toggleDesktopIconCheckbox(hit);
             invalidate();
         }
         return;
     }
 
-    int hit = hitWallpaper(x, y);
-    if (hit >= 0) {
-        m_selectedBackgroundIndex = hit;
-        m_selectedIndex = hit;
+    if (m_activeTab == 0 || m_activeTab == 1) {
+        const int scrollbarHit = hitGalleryScrollbar(x, y);
+        if (scrollbarHit == 1) {
+            m_galleryScrollbarDragging = true;
+            m_galleryScrollbarDragStartY = y;
+            m_galleryScrollbarDragStartOffset = activeGalleryScrollOffset();
+            return;
+        }
+        if (scrollbarHit == 2 || scrollbarHit == 3) {
+            GalleryLayout layout = makeGalleryLayout(m_windowW, m_windowH, activeGalleryItemCount());
+            int& scroll = activeGalleryScrollOffset();
+            int nextOffset = scroll + (scrollbarHit == 2 ? -layout.visibleRows : layout.visibleRows);
+            if (nextOffset < 0) nextOffset = 0;
+            if (nextOffset > layout.maxScroll) nextOffset = layout.maxScroll;
+            if (nextOffset != scroll) {
+                scroll = nextOffset;
+                invalidate();
+            }
+            return;
+        }
+
+        int hit = m_activeTab == 1 ? hitGradient(x, y) : hitWallpaper(x, y);
+        if (hit >= 0) {
+            setActiveSelectionIndex(hit);
+            invalidate();
+        }
+        return;
+    }
+}
+
+void DisplayOptionsApp::onMouseMove(int x, int y) {
+    if (!m_galleryScrollbarDragging || (m_activeTab != 0 && m_activeTab != 1)) return;
+    const GalleryLayout layout = makeGalleryLayout(m_windowW, m_windowH, activeGalleryItemCount());
+    if (!layout.showScrollbar) return;
+    const int thumbH = maxInt(kMinScrollbarThumbH, (layout.visibleRows * layout.galleryH) / (layout.rowCount > 0 ? layout.rowCount : 1));
+    const int trackTravel = maxInt(1, layout.galleryH - thumbH);
+    const int nextOffset = m_galleryScrollbarDragStartOffset + ((y - m_galleryScrollbarDragStartY) * layout.maxScroll) / trackTravel;
+    int& scroll = activeGalleryScrollOffset();
+    const int clamped = nextOffset < 0 ? 0 : (nextOffset > layout.maxScroll ? layout.maxScroll : nextOffset);
+    if (clamped != scroll) {
+        scroll = clamped;
         invalidate();
     }
+}
+
+void DisplayOptionsApp::onMouseUp(int, int, uint8_t) {
+    m_galleryScrollbarDragging = false;
 }
 
 void DisplayOptionsApp::onMouseWheel(int x, int y, int wheelDelta)
 {
     if (wheelDelta == 0 || (m_activeTab != 0 && m_activeTab != 1)) return;
-    const bool inGallery = x >= kGalleryX && x < kGalleryX + kGalleryViewportW && y >= kGalleryY && y < kGalleryY + kGalleryViewportH;
-    const bool onScrollbar = x >= kGalleryScrollBarX && x < kGalleryScrollBarX + kGalleryScrollBarW && y >= kGalleryY && y < kGalleryY + kGalleryViewportH;
+    const GalleryLayout layout = makeGalleryLayout(m_windowW, m_windowH, activeGalleryItemCount());
+    const bool inGallery = x >= layout.galleryX && x < layout.galleryX + layout.galleryW && y >= layout.galleryY && y < layout.galleryY + layout.galleryH;
+    const bool onScrollbar = layout.showScrollbar && x >= layout.scrollbarX && x < layout.scrollbarX + kGalleryScrollBarW && y >= layout.galleryY && y < layout.galleryY + layout.galleryH;
     if (!inGallery && !onScrollbar) return;
 
-    const int itemCount = m_activeTab == 0 ? kKernelWallpaperCount : kKernelGradientCount;
-    const int previousOffset = m_galleryScrollOffset;
-    m_galleryScrollOffset = clampGalleryScroll(m_galleryScrollOffset - wheelDelta, itemCount);
-    if (m_galleryScrollOffset != previousOffset) {
+    int& scroll = activeGalleryScrollOffset();
+    const int previousOffset = scroll;
+    scroll -= wheelDelta;
+    if (scroll < 0) scroll = 0;
+    if (scroll > layout.maxScroll) scroll = layout.maxScroll;
+    if (scroll != previousOffset) {
         invalidate();
     }
 }
@@ -2591,6 +2907,8 @@ void DisplayOptionsApp::applySelected() {
         if (m_selectedGradientIndex < 0 || m_selectedGradientIndex >= kKernelGradientCount) return;
         kernel::desktop::set_wallpaper_by_id(s_kernelGradients[m_selectedGradientIndex].id);
         m_appliedGradientIndex = m_selectedGradientIndex;
+        m_appliedIndex = m_appliedGradientIndex;
+        m_selectedIndex = m_selectedGradientIndex;
         invalidate();
         return;
     }
