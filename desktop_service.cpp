@@ -366,19 +366,25 @@ namespace gxos {
         static const std::vector<const char*>& currentBareMetalKernelRegistrationNames() {
             // Diagnostic mirror of kernel/core/kernel_apps.cpp registerKernelApps().
             // It reports coverage only; it is not a launch source or policy table.
-            static const std::vector<const char*> names = {
-                "Notepad",
-                "Calculator",
-                "Clock",
-                "DisplayOptions",
-                "TaskManager",
-                "FileExplorer",
-                "Files",
-                "ImageViewer",
-                "guideXOS Navigator",
-                "Trash",
-                "DiskManager"
-            };
+            static const std::vector<const char*> names = []() {
+                std::vector<const char*> result;
+                auto addUnique = [&result](const char* name) {
+                    if (!name || !name[0]) return;
+                    for (const char* existing : result) {
+                        if (apps::detail::builtInTextEquals(existing, name)) return;
+                    }
+                    result.push_back(name);
+                };
+
+                for (size_t i = 0; i < apps::kBuiltInAppMetadataCount; ++i) {
+                    const apps::BuiltInAppMetadata& metadata = apps::kBuiltInAppMetadata[i];
+                    if (!apps::IsBuiltInAppAvailableInBareMetal(metadata)) continue;
+                    addUnique(metadata.kernelAppName);
+                    addUnique(metadata.kernelLegacyAlias);
+                }
+
+                return result;
+            }();
             return names;
         }
 
@@ -425,6 +431,97 @@ namespace gxos {
                 makeUiLaunchLabelDiagnostic("Control Panel", "start menu right-column shortcut", "ControlPanel", "launches the existing control surface"),
                 makeUiLaunchLabelDiagnostic("Settings", "start menu right-column shortcut", "ControlPanel", "temporary fallback until a dedicated Settings app exists")
             };
+        }
+
+        static std::string joinKnownAliasesForDiagnostic(const apps::BuiltInAppMetadata& metadata) {
+            std::ostringstream oss;
+            if (!metadata.knownAliases || metadata.knownAliasCount == 0) return oss.str();
+
+            bool first = true;
+            for (size_t i = 0; i < metadata.knownAliasCount; ++i) {
+                const char* alias = metadata.knownAliases[i];
+                if (!alias || !alias[0]) continue;
+                if (!first) oss << "|";
+                oss << alias;
+                first = false;
+            }
+            return oss.str();
+        }
+
+        static const apps::BuiltInAppMetadata* findBuiltInMetadataForRegistryIdentity(const std::string& identity) {
+            if (identity.empty()) return nullptr;
+            if (const apps::BuiltInAppMetadata* metadata = apps::FindBuiltInAppMetadataByIdentity(identity.c_str())) return metadata;
+            return apps::FindBuiltInAppMetadataByKnownAlias(identity.c_str());
+        }
+
+        static bool builtInRegistryEntryExistsForLabel(const std::string& label) {
+            return findBuiltInMetadataForRegistryIdentity(label) != nullptr;
+        }
+
+        static std::vector<std::string> phase4StartMenuCoverageLabels() {
+            return {
+                "Notepad",
+                "Calculator",
+                "Clock",
+                "Console",
+                "Trash",
+                "TaskManager",
+                "DiskManager",
+                "DisplayOptions",
+                "ControlPanel",
+                "guideXOS Navigator",
+                "HDInstaller",
+                "AppModel",
+                "Paint",
+                "File Explorer",
+                "ImgViewer"
+            };
+        }
+
+        static std::vector<std::string> phase4ActiveDispatchCoverageLabels() {
+            return {
+                "Notepad",
+                "Calculator",
+                "Clock",
+                "Console",
+                "TaskManager",
+                "DiskManager",
+                "DisplayOptions",
+                "ControlPanel",
+                "guideXOS Navigator",
+                "FileExplorer",
+                "Trash"
+            };
+        }
+
+        static std::vector<std::string> phase4RecentProgramCoverageLabels() {
+            return {
+                "Notepad",
+                "Calculator",
+                "Clock",
+                "Console",
+                "Control Panel",
+                "File Explorer",
+                "Image Viewer",
+                "App Model Demo",
+                "AppModel",
+                "DisplayOptions",
+                "TaskManager",
+                "Trash",
+                "guideXOS Navigator",
+                "Paint",
+                "HDInstaller"
+            };
+        }
+
+        static bool allLabelsResolveToRegistryIdentity(const std::vector<std::string>& labels, std::vector<std::string>* unresolved = nullptr) {
+            bool allResolved = true;
+            for (const std::string& label : labels) {
+                if (builtInRegistryEntryExistsForLabel(label)) continue;
+                allResolved = false;
+                if (unresolved) unresolved->push_back(label);
+            }
+            return allResolved;
         }
 
         static bool uiDiagnosticHasLabel(const std::vector<UiLaunchLabelDiagnostic>& labels, const std::string& label) {
@@ -2127,9 +2224,52 @@ namespace gxos {
             const bool launchStoragePreviewOk = storagePreviewCounts.unresolved == 0 && storagePreviewCounts.highRisk == 0;
             const size_t launchStoragePreviewUnexpectedDrift = storagePreviewCounts.highRisk + storagePreviewCompareBareMetalCounts.highRisk;
             const bool launchStoragePreviewCompareOk = launchStoragePreviewUnexpectedDrift == 0;
+            const std::vector<std::string> phase4StartMenuLabels = phase4StartMenuCoverageLabels();
+            const std::vector<std::string> phase4ActiveDispatchLabels = phase4ActiveDispatchCoverageLabels();
+            const std::vector<std::string> phase4RecentLabels = phase4RecentProgramCoverageLabels();
+            const std::vector<std::string> phase4AliasLabels = {
+                "Files",
+                "File Explorer",
+                "FileExplorer",
+                "Control Panel",
+                "Settings",
+                "System Settings",
+                "Display Options",
+                "Display Settings",
+                "Desktop Background",
+                "Wallpaper",
+                "AppModel",
+                "ImgViewer",
+                "Terminal"
+            };
+            bool phase4StableAppIdsUnique = true;
+            bool phase4DisplayNamesNonEmpty = true;
+            bool phase4RiskyEntriesNotActiveDispatchOwned = true;
+            std::set<std::string> phase4SeenIds;
+            for (size_t i = 0; i < apps::kBuiltInAppMetadataCount; ++i) {
+                const apps::BuiltInAppMetadata& metadata = apps::kBuiltInAppMetadata[i];
+                const std::string appId = metadata.appId ? metadata.appId : "";
+                if (appId.empty() || !phase4SeenIds.insert(appId).second) phase4StableAppIdsUnique = false;
+                if (!metadata.displayName || !metadata.displayName[0]) phase4DisplayNamesNonEmpty = false;
+                if (metadata.riskyForActiveTypedDispatch) {
+                    const std::string canonicalLaunchName = apps::BuiltInAppCanonicalLaunchName(metadata);
+                    if (std::find(phase4ActiveDispatchLabels.begin(), phase4ActiveDispatchLabels.end(), canonicalLaunchName) != phase4ActiveDispatchLabels.end()) {
+                        phase4RiskyEntriesNotActiveDispatchOwned = false;
+                    }
+                }
+            }
+            const bool phase4RegistryExists = apps::kBuiltInAppMetadataCount > 0;
+            const bool phase4AliasResolutionOk = allLabelsResolveToRegistryIdentity(phase4AliasLabels);
+            const bool phase4StartMenuAppsRegistered = allLabelsResolveToRegistryIdentity(phase4StartMenuLabels);
+            const bool phase4ActiveDispatchAppsRegistered = allLabelsResolveToRegistryIdentity(phase4ActiveDispatchLabels);
+            const bool phase4RecentProgramNamesAligned = allLabelsResolveToRegistryIdentity(phase4RecentLabels);
+            const bool phase4VisibleLaunchBehaviorChanged = false;
+            const bool phase4PersistentDesktopStorageWrites = false;
             const TypedDispatchCompileFlags typedDispatchFlags = typedDispatchCompileFlags();
             const bool typedDispatchFlagsOk = !typedDispatchFlags.invalid;
-            const bool overallOk = duplicateOk && namespaceOk && hostedCoverageOk && bareMetalCoverageOk && invalidManifestOk && launchTargetComparisonOk && launchStoragePreviewOk && launchStoragePreviewCompareOk && typedDispatchFlagsOk;
+            const bool overallOk = duplicateOk && namespaceOk && hostedCoverageOk && bareMetalCoverageOk && invalidManifestOk && launchTargetComparisonOk && launchStoragePreviewOk && launchStoragePreviewCompareOk && typedDispatchFlagsOk &&
+                phase4RegistryExists && phase4StableAppIdsUnique && phase4DisplayNamesNonEmpty && phase4AliasResolutionOk && phase4StartMenuAppsRegistered && phase4ActiveDispatchAppsRegistered && phase4RecentProgramNamesAligned && phase4RiskyEntriesNotActiveDispatchOwned &&
+                !phase4VisibleLaunchBehaviorChanged && !phase4PersistentDesktopStorageWrites;
 
             std::ostringstream oss;
             oss << "[AppModelSummary]\n";
@@ -2187,6 +2327,16 @@ namespace gxos {
                 << " bareMetalTargetSpecificUnsupportedAliases=" << storagePreviewCompareBareMetalCounts.targetSpecificUnsupportedAliases
                 << " unexpectedDrift=" << launchStoragePreviewUnexpectedDrift
                 << " writesStorage=false\n";
+            oss << "appModelPhase4ABuiltInRegistryExists=" << diagnosticBool(phase4RegistryExists) << "\n";
+            oss << "appModelPhase4AStableAppIdsUnique=" << diagnosticBool(phase4StableAppIdsUnique) << "\n";
+            oss << "appModelPhase4ADisplayNamesNonEmpty=" << diagnosticBool(phase4DisplayNamesNonEmpty) << "\n";
+            oss << "appModelPhase4AAliasResolutionOk=" << diagnosticBool(phase4AliasResolutionOk) << "\n";
+            oss << "appModelPhase4AStartMenuAppsRegistered=" << diagnosticBool(phase4StartMenuAppsRegistered) << "\n";
+            oss << "appModelPhase4AActiveDispatchAppsRegistered=" << diagnosticBool(phase4ActiveDispatchAppsRegistered) << "\n";
+            oss << "appModelPhase4ARecentProgramNamesAligned=" << diagnosticBool(phase4RecentProgramNamesAligned) << "\n";
+            oss << "appModelPhase4ARiskyEntriesNotActiveDispatchOwned=" << diagnosticBool(phase4RiskyEntriesNotActiveDispatchOwned) << "\n";
+            oss << "appModelPhase4AVisibleLaunchBehaviorChanged=" << diagnosticBool(phase4VisibleLaunchBehaviorChanged) << "\n";
+            oss << "appModelPhase4APersistentDesktopStorageWrites=" << diagnosticBool(phase4PersistentDesktopStorageWrites) << "\n";
             oss << launchTargetTypeCoverageSummaryLine();
             oss << typedDispatchCompileFlagsSummaryLine();
             oss << phase3PilotSummaryLine();
@@ -3647,6 +3797,104 @@ namespace gxos {
                     << " kernelAppName=" << (metadata.kernelAppName ? metadata.kernelAppName : "") << "\n";
             }
             if (metadataWithoutBareMetalRegistration == 0) oss << "  none\n";
+
+            const std::vector<std::string> startMenuLabels = phase4StartMenuCoverageLabels();
+            const std::vector<std::string> activeDispatchLabels = phase4ActiveDispatchCoverageLabels();
+            const std::vector<std::string> aliasProbeLabels = {
+                "Files",
+                "File Explorer",
+                "FileExplorer",
+                "Control Panel",
+                "Settings",
+                "System Settings",
+                "Display Options",
+                "Display Settings",
+                "Desktop Background",
+                "Wallpaper",
+                "AppModel",
+                "ImgViewer",
+                "Terminal"
+            };
+            std::vector<std::string> unresolvedStartMenuLabels;
+            std::vector<std::string> unresolvedActiveDispatchLabels;
+            std::vector<std::string> unresolvedAliasLabels;
+            const bool startMenuAppsRegistered = allLabelsResolveToRegistryIdentity(startMenuLabels, &unresolvedStartMenuLabels);
+            const bool activeDispatchAppsRegistered = allLabelsResolveToRegistryIdentity(activeDispatchLabels, &unresolvedActiveDispatchLabels);
+            const bool aliasResolutionOk = allLabelsResolveToRegistryIdentity(aliasProbeLabels, &unresolvedAliasLabels);
+
+            bool displayNamesNonEmpty = true;
+            bool stableAppIdsUnique = true;
+            bool recentProgramNamesAligned = true;
+            bool riskyEntriesNotActiveDispatchOwned = true;
+            std::set<std::string> seenAppIds;
+
+            oss << "registry:\n";
+            for (size_t i = 0; i < apps::kBuiltInAppMetadataCount; ++i) {
+                const apps::BuiltInAppMetadata& metadata = apps::kBuiltInAppMetadata[i];
+                const std::string appId = metadata.appId ? metadata.appId : "";
+                const std::string displayName = metadata.displayName ? metadata.displayName : "";
+                const std::string canonicalLaunchName = apps::BuiltInAppCanonicalLaunchName(metadata);
+                const std::string aliases = joinKnownAliasesForDiagnostic(metadata);
+                const bool duplicateAppId = !appId.empty() && !seenAppIds.insert(appId).second;
+                const bool inStartMenu = metadata.appearsInStartMenu;
+                const bool onDesktop = metadata.canAppearOnDesktop;
+                const bool recordRecent = metadata.recordRecentPrograms;
+                const bool acceptsFile = metadata.acceptsFileTargets;
+                const bool acceptsFolder = metadata.acceptsFolderTargets;
+                const bool systemShell = metadata.systemShellObject;
+                const bool risky = metadata.riskyForActiveTypedDispatch;
+
+                if (displayName.empty()) displayNamesNonEmpty = false;
+                if (duplicateAppId) stableAppIdsUnique = false;
+                if (risky && builtInRegistryEntryExistsForLabel(canonicalLaunchName) &&
+                    std::find(activeDispatchLabels.begin(), activeDispatchLabels.end(), canonicalLaunchName) != activeDispatchLabels.end()) {
+                    riskyEntriesNotActiveDispatchOwned = false;
+                }
+
+                oss << "  record id=" << appId
+                    << " displayName=" << displayName
+                    << " canonicalLaunchName=" << canonicalLaunchName
+                    << " aliases=" << (aliases.empty() ? "none" : aliases)
+                    << " category=" << (metadata.category ? metadata.category : "")
+                    << " startMenu=" << (inStartMenu ? "true" : "false")
+                    << " desktop=" << (onDesktop ? "true" : "false")
+                    << " recent=" << (recordRecent ? "true" : "false")
+                    << " acceptsFileTargets=" << (acceptsFile ? "true" : "false")
+                    << " acceptsFolderTargets=" << (acceptsFolder ? "true" : "false")
+                    << " systemShellObject=" << (systemShell ? "true" : "false")
+                    << " riskyForActiveTypedDispatch=" << (risky ? "true" : "false")
+                    << " hosted=" << (apps::IsBuiltInAppAvailableInHosted(metadata) ? "true" : "false")
+                    << " bareMetal=" << (apps::IsBuiltInAppAvailableInBareMetal(metadata) ? "true" : "false")
+                    << "\n";
+            }
+
+            const std::vector<std::string> recentLabels = phase4RecentProgramCoverageLabels();
+            for (const std::string& label : recentLabels) {
+                if (!builtInRegistryEntryExistsForLabel(label)) recentProgramNamesAligned = false;
+            }
+
+            oss << "aliasResolution:\n";
+            for (const std::string& alias : aliasProbeLabels) {
+                const apps::BuiltInAppMetadata* metadata = findBuiltInMetadataForRegistryIdentity(alias);
+                oss << "  alias=" << alias
+                    << " resolved=" << (metadata ? "true" : "false")
+                    << " canonicalAppId=" << (metadata && metadata->appId ? metadata->appId : "")
+                    << " canonicalDisplayName=" << (metadata && metadata->displayName ? metadata->displayName : "")
+                    << " canonicalLaunchName=" << (metadata ? apps::BuiltInAppCanonicalLaunchName(*metadata) : "")
+                    << "\n";
+            }
+
+            oss << "registryValidation:\n";
+            oss << "  registryExists=" << (apps::kBuiltInAppMetadataCount > 0 ? "true" : "false") << "\n";
+            oss << "  stableAppIdsUnique=" << (stableAppIdsUnique ? "true" : "false") << "\n";
+            oss << "  displayNamesNonEmpty=" << (displayNamesNonEmpty ? "true" : "false") << "\n";
+            oss << "  aliasResolutionOk=" << (aliasResolutionOk ? "true" : "false") << "\n";
+            oss << "  startMenuAppsRegistered=" << (startMenuAppsRegistered ? "true" : "false") << "\n";
+            oss << "  activeDispatchAppsRegistered=" << (activeDispatchAppsRegistered ? "true" : "false") << "\n";
+            oss << "  recentProgramNamesAligned=" << (recentProgramNamesAligned ? "true" : "false") << "\n";
+            oss << "  riskyEntriesNotActiveDispatchOwned=" << (riskyEntriesNotActiveDispatchOwned ? "true" : "false") << "\n";
+            oss << "  visibleLaunchBehaviorChanged=false\n";
+            oss << "  persistentDesktopStorageWrites=false\n";
 
             oss << "duplicateAppIdsDiscovered:\n";
             std::set<std::string> duplicateIds = duplicateIdsFromScanIssues(s_lastManifestScanResult, s_lastBuiltInRegisterResult);

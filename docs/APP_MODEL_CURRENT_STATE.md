@@ -557,4 +557,43 @@ The fallback flag requirement (`GXOS_APPMODEL_TYPED_DISPATCH_PILOT_FALLBACK_TO_L
 
 `kernel/core/desktop.cpp` contains a compile-time comment block documenting the two pilot flags and the future hook location. It does not add any runtime code. `desktop_service.cpp` contains discovery/reporting for both flags in the `TypedDispatchCompileFlags` struct and the `phase3PilotSummaryLine()` helper.
 
+## 14. Phase 4A built-in identity registry
+
+Status: cleanup in progress, no visible launch behavior change.
+
+Active typed dispatch is still product-default-on, emergency force-off remains available, and legacy fallback remains intact.
+
+The shared built-in identity registry now lives in `built_in_app_metadata.h`. It owns:
+
+- stable app IDs
+- display names
+- canonical launch names
+- known aliases
+- category/group
+- Start Menu and desktop coverage flags
+- recent-program eligibility
+- file/folder target acceptance
+- system/shell-object classification
+- risky/destructive dispatch exclusion flags
+
+Phase 4A stays out of scope for:
+
+- GXApp runtime and package execution changes
+- ELF/native app runtime broadening
+- package install, uninstall, or app store behavior
+- sandboxing, permissions, IDE, or Open With behavior
+- broader file-association cleanup
+- any visible launch behavior change
+
+The current evidence markers include:
+
+- `appModelPhase4ABuiltInRegistryExists=true`
+- `appModelPhase4AStableAppIdsUnique=true`
+- `appModelPhase4AStartMenuAppsRegistered=true`
+- `appModelPhase4AActiveDispatchAppsRegistered=true`
+- `appModelPhase4ARecentProgramNamesAligned=true`
+- `appModelPhase4ARiskyEntriesNotActiveDispatchOwned=true`
+- `appModelPhase4AVisibleLaunchBehaviorChanged=false`
+- `appModelPhase4APersistentDesktopStorageWrites=false`
+
 

@@ -228,6 +228,8 @@ $desktopSmokeScripts = @(
     "scripts\smoke-appmodel-phase3a-active-typed-dispatch.ps1",
     "scripts\smoke-appmodel-phase3b-active-typed-dispatch.ps1",
     "scripts\smoke-appmodel-phase3c-active-typed-dispatch.ps1",
+    "scripts\smoke-appmodel-phase3d-active-typed-dispatch.ps1",
+    "scripts\smoke-appmodel-phase3e-active-typed-dispatch.ps1",
     "scripts\smoke-navigator-hosted.ps1",
     "scripts\smoke-navigator-kernel.ps1",
     "scripts\smoke-taskmanager-snapshot.ps1"

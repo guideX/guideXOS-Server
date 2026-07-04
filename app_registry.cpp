@@ -7,6 +7,19 @@ namespace gxos {
 namespace apps {
 namespace {
 
+std::string joinKnownAliases(const BuiltInAppMetadata& metadata) {
+    std::string result;
+    if (!metadata.knownAliases || metadata.knownAliasCount == 0) return result;
+
+    for (size_t i = 0; i < metadata.knownAliasCount; ++i) {
+        const char* alias = metadata.knownAliases[i];
+        if (!alias || !alias[0]) continue;
+        if (!result.empty()) result += "|";
+        result += alias;
+    }
+    return result;
+}
+
 bool architectureMatches(const std::string& entryArchitecture, const std::string& currentArchitecture) {
     return entryArchitecture == currentArchitecture || entryArchitecture == "any" || entryArchitecture == "*";
 }
@@ -31,13 +44,22 @@ RegisteredApp makeBuiltInApp(const BuiltInAppMetadata& metadata) {
     AppEntry entry;
     entry.architecture = "any";
     entry.path = std::string("builtin/") + app.manifest.displayName;
-    entry.entryPoint = metadata.launchName ? metadata.launchName : app.manifest.displayName;
+    entry.entryPoint = BuiltInAppCanonicalLaunchName(metadata);
     entry.abi = "guidexos-desktop-service-v1";
     entry.runtime = "builtin-hosted";
     app.manifest.entries.push_back(entry);
 
     app.manifest.permissions.push_back("desktop.window");
     app.manifest.desktopRegistryHints["registeredName"] = entry.entryPoint;
+    app.manifest.desktopRegistryHints["canonicalLaunchName"] = entry.entryPoint;
+    app.manifest.desktopRegistryHints["knownAliases"] = joinKnownAliases(metadata);
+    app.manifest.desktopRegistryHints["appearsInStartMenu"] = metadata.appearsInStartMenu ? "true" : "false";
+    app.manifest.desktopRegistryHints["canAppearOnDesktop"] = metadata.canAppearOnDesktop ? "true" : "false";
+    app.manifest.desktopRegistryHints["recordRecentPrograms"] = metadata.recordRecentPrograms ? "true" : "false";
+    app.manifest.desktopRegistryHints["acceptsFileTargets"] = metadata.acceptsFileTargets ? "true" : "false";
+    app.manifest.desktopRegistryHints["acceptsFolderTargets"] = metadata.acceptsFolderTargets ? "true" : "false";
+    app.manifest.desktopRegistryHints["systemShellObject"] = metadata.systemShellObject ? "true" : "false";
+    app.manifest.desktopRegistryHints["riskyForActiveTypedDispatch"] = metadata.riskyForActiveTypedDispatch ? "true" : "false";
     return app;
 }
 
