@@ -172,6 +172,7 @@ namespace gxos { namespace gui {
         static void unpinAction(const std::string& act);
         static void saveDesktopConfig();
         static void addRecent(const std::string& act);
+        static bool removeRecentProgramFromStartMenu(const std::string& act);
         static void refreshDesktopItems();
         static void refreshAllProgramsList();
         static void ClearDesktopIconSelection();

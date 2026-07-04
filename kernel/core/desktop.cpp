@@ -4489,6 +4489,45 @@ static void add_to_start_menu_recent(const char* appName)
     persist_start_menu_recent_programs();
 }
 
+static bool remove_from_start_menu_recent(const char* appName)
+{
+    const char* canonical = canonical_start_menu_recent_program(appName);
+    if (!canonical[0]) return false;
+
+    for (int i = 0; i < s_startMenuRecentProgramCount; ++i) {
+        if (!desktop_str_eq(s_startMenuRecentPrograms[i], canonical)) continue;
+
+        for (int j = i; j < s_startMenuRecentProgramCount - 1; ++j) {
+            desktop_str_copy(s_startMenuRecentPrograms[j], s_startMenuRecentPrograms[j + 1], sizeof(s_startMenuRecentPrograms[j]));
+        }
+        if (s_startMenuRecentProgramCount > 0) {
+            s_startMenuRecentPrograms[s_startMenuRecentProgramCount - 1][0] = '\0';
+            --s_startMenuRecentProgramCount;
+        }
+        if (!s_startMenuAllProgs) {
+            if (s_startMenuRecentProgramCount <= 0) {
+                s_startMenuSelection = 0;
+                s_startMenuScroll = 0;
+            } else {
+                if (s_startMenuSelection >= s_startMenuRecentProgramCount) s_startMenuSelection = s_startMenuRecentProgramCount - 1;
+                if (s_startMenuSelection < 0) s_startMenuSelection = 0;
+                if (s_startMenuScroll > s_startMenuSelection) s_startMenuScroll = s_startMenuSelection;
+                if (s_startMenuScroll >= s_startMenuRecentProgramCount) s_startMenuScroll = s_startMenuRecentProgramCount - 1;
+            }
+        }
+        serial::puts("[desktop] Start menu recent removed: ");
+        serial::puts(canonical);
+        serial::puts("\n");
+        persist_start_menu_recent_programs();
+        return true;
+    }
+
+    serial::puts("[desktop] Start menu recent remove skipped: not found ");
+    serial::puts(canonical);
+    serial::puts("\n");
+    return false;
+}
+
 // Get current start menu item count based on mode
 static int get_start_menu_item_count()
 {
@@ -6596,7 +6635,7 @@ static void draw_start_menu()
 
 static int context_menu_item_count()
 {
-    if (s_contextMenuMode == ContextMenuMode::StartMenuApp) return 2;
+    if (s_contextMenuMode == ContextMenuMode::StartMenuApp) return s_startMenuAllProgs ? 2 : 4;
     if (s_contextMenuMode == ContextMenuMode::DesktopShortcut) return 2;
     if (s_contextMenuMode == ContextMenuMode::DesktopTrash) return 2;
     if (s_contextMenuMode == ContextMenuMode::DesktopFilesystemEntry) {
@@ -6631,6 +6670,13 @@ static void draw_right_click_menu()
     int itemCount = context_menu_item_count();
     for (int i = 0; i < itemCount; i++) {
         uint32_t itemY = my + kContextMenuPad + (uint32_t)i * kContextMenuItemH;
+        const bool isStartMenuSeparator = s_contextMenuMode == ContextMenuMode::StartMenuApp && !s_startMenuAllProgs && i == 2;
+
+        if (isStartMenuSeparator) {
+            framebuffer::fill_rect(mx + 1, itemY, kContextMenuW - 2, kContextMenuItemH, rgb(45, 45, 55));
+            hline(mx + 8, itemY + kContextMenuItemH / 2, kContextMenuW - 16, rgb(70, 70, 78));
+            continue;
+        }
 
         if (i == hoveredItem) {
             framebuffer::fill_rect(mx + 1, itemY, kContextMenuW - 2, kContextMenuItemH, rgb(45, 95, 180));
@@ -6706,6 +6752,9 @@ static void handle_context_menu_command(int item)
         } else if (item == 1) {
             if (is_app_shortcut_pinned_to_desktop(s_contextMenuAppName)) remove_app_shortcut_from_desktop(s_contextMenuAppName);
             else pin_app_shortcut_to_desktop(s_contextMenuAppName);
+        } else if (item == 3 && !s_startMenuAllProgs) {
+            serial::puts("[desktop] Start Menu context Remove from This List selected\n");
+            remove_recent_program(s_contextMenuAppName);
         }
         s_contextMenuMode = ContextMenuMode::Desktop;
         return;
@@ -8456,6 +8505,15 @@ void record_recent_program(const char* appName)
 {
 #if defined(GXOS_BARE_METAL)
     add_to_start_menu_recent(appName);
+#else
+    (void)appName;
+#endif
+}
+
+void remove_recent_program(const char* appName)
+{
+#if defined(GXOS_BARE_METAL)
+    remove_from_start_menu_recent(appName);
 #else
     (void)appName;
 #endif

@@ -98,8 +98,12 @@ bool RightClickMenu::ContainsPoint(int mx, int my) {
 void RightClickMenu::buildItems() {
     s_items.clear();
     if (!s_startMenuAppName.empty()) {
-        s_items.push_back({"Open", false, false});
-        s_items.push_back({Compositor::isStartMenuAppPinnedToDesktop(s_startMenuAppName) ? "Unpin from Desktop" : "Pin to Desktop", false, false});
+        s_items.push_back({"Open", false, false, false});
+        s_items.push_back({Compositor::isStartMenuAppPinnedToDesktop(s_startMenuAppName) ? "Unpin from Desktop" : "Pin to Desktop", false, false, false});
+        if (!Compositor::g_startMenuAllProgs) {
+            s_items.push_back({"", false, false, true});
+            s_items.push_back({"Remove from This List", false, false, false});
+        }
         return;
     }
     if (s_desktopItemIndex >= 0) {
@@ -108,30 +112,30 @@ void RightClickMenu::buildItems() {
             item = &Compositor::g_items[s_desktopItemIndex];
         }
         if (item && item->kind == DesktopItemKind::SystemObject && item->systemObject == DesktopSystemObjectKind::Trash) {
-            s_items.push_back({"Open", false, false});
-            s_items.push_back({"Empty Trash", false, false});
+            s_items.push_back({"Open", false, false, false});
+            s_items.push_back({"Empty Trash", false, false, false});
             return;
         }
 
-        s_items.push_back({"Open", false, false});
+        s_items.push_back({"Open", false, false, false});
         if (item) {
             if (item->kind == DesktopItemKind::FilesystemEntry && item->isDirectory) {
-                s_items.push_back({"Rename", false, false});
+                s_items.push_back({"Rename", false, false, false});
             }
             if (item->kind == DesktopItemKind::Shortcut) {
                 if (item->shortcutType == "File" || item->shortcutType == "Folder") {
-                    s_items.push_back({"Open Target Location", false, false});
+                    s_items.push_back({"Open Target Location", false, false, false});
                 }
-                s_items.push_back({"Remove from Desktop", false, false});
+                s_items.push_back({"Remove from Desktop", false, false, false});
             }
         }
         return;
     }
-    s_items.push_back({"Refresh", false, false});
-    s_items.push_back({"Display Options", false, false});
-    s_items.push_back({"Arrange Icons", false, false});
-    s_items.push_back({"Auto Arrange", false, Compositor::hostedDesktopAutoArrangeIcons()});
-    s_items.push_back({"Folder View Icon Size", true, false});
+    s_items.push_back({"Refresh", false, false, false});
+    s_items.push_back({"Display Options", false, false, false});
+    s_items.push_back({"Arrange Icons", false, false, false});
+    s_items.push_back({"Auto Arrange", false, Compositor::hostedDesktopAutoArrangeIcons(), false});
+    s_items.push_back({"Folder View Icon Size", true, false, false});
     s_iconSubmenuIndex = 4;
 }
 
@@ -162,6 +166,10 @@ bool RightClickMenu::HandleClick(int mx, int my) {
     if (mx >= s_x && mx <= s_x + kMenuW && my >= s_y && my <= s_y + menuH) {
         int idx = (my - s_y) / kItemH;
         if (idx >= 0 && idx < (int)s_items.size()) {
+            if (s_items[idx].separator) {
+                Hide();
+                return true;
+            }
             if (s_items[idx].hasSubmenu) {
                 s_iconSubmenuVisible = !s_iconSubmenuVisible;
                 return true;
@@ -204,6 +212,9 @@ bool RightClickMenu::HandleClick(int mx, int my) {
             } else if (s_items[idx].label == "Unpin from Desktop" && !s_startMenuAppName.empty()) {
                 Logger::write(LogLevel::Info, "Start Menu app Unpin from Desktop selected: " + s_startMenuAppName);
                 Compositor::unpinStartMenuAppFromDesktop(s_startMenuAppName);
+            } else if (s_items[idx].label == "Remove from This List" && !s_startMenuAppName.empty()) {
+                Logger::write(LogLevel::Info, "Start Menu app Remove from This List selected: " + s_startMenuAppName);
+                Compositor::removeRecentProgramFromStartMenu(s_startMenuAppName);
             } else if (s_items[idx].label == "Refresh") {
                 Logger::write(LogLevel::Info, "Desktop Refresh selected");
                 Compositor::requestDesktopRefresh();
@@ -265,9 +276,34 @@ void RightClickMenu::Draw(HDC dc) {
         // Hover highlight
         if (cursor.x >= itemRect.left && cursor.x <= itemRect.right &&
             cursor.y >= itemRect.top && cursor.y <= itemRect.bottom) {
+            if (s_items[i].separator) {
+                HBRUSH sepBg = CreateSolidBrush(RGB(34, 34, 34));
+                FillRect(dc, &itemRect, sepBg);
+                DeleteObject(sepBg);
+                HPEN sepPen = CreatePen(PS_SOLID, 1, RGB(74, 74, 74));
+                HGDIOBJ oldSepPen = SelectObject(dc, sepPen);
+                MoveToEx(dc, itemRect.left + 10, itemRect.top + kItemH / 2, nullptr);
+                LineTo(dc, itemRect.right - 10, itemRect.top + kItemH / 2);
+                SelectObject(dc, oldSepPen);
+                DeleteObject(sepPen);
+                continue;
+            }
             HBRUSH hov = CreateSolidBrush(RGB(49, 49, 49));
             FillRect(dc, &itemRect, hov);
             DeleteObject(hov);
+        }
+
+        if (s_items[i].separator) {
+            HBRUSH sepBg = CreateSolidBrush(RGB(34, 34, 34));
+            FillRect(dc, &itemRect, sepBg);
+            DeleteObject(sepBg);
+            HPEN sepPen = CreatePen(PS_SOLID, 1, RGB(74, 74, 74));
+            HGDIOBJ oldSepPen = SelectObject(dc, sepPen);
+            MoveToEx(dc, itemRect.left + 10, itemRect.top + kItemH / 2, nullptr);
+            LineTo(dc, itemRect.right - 10, itemRect.top + kItemH / 2);
+            SelectObject(dc, oldSepPen);
+            DeleteObject(sepPen);
+            continue;
         }
 
         const int textY = iy + (kItemH > lineH ? (kItemH - lineH) / 2 : 0);

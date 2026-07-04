@@ -48,6 +48,7 @@ namespace gxos { namespace gui {
             std::string label;
             bool hasSubmenu;
             bool checked;
+            bool separator;
         };
 
         static void buildItems();

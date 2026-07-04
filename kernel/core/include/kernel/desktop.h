@@ -122,6 +122,10 @@ bool launch_app(const char* appName);
 // In hosted builds this is a no-op; bare-metal persists to a small VFS file.
 void record_recent_program(const char* appName);
 
+// Remove a program from the bare-metal Start Menu recent history.
+// In hosted builds this is a no-op; bare-metal persists the updated list immediately.
+void remove_recent_program(const char* appName);
+
 // Sync the bare-metal live desktop folder to a successful shell cwd change.
 // Returns true if the desktop accepted the new directory.
 bool sync_live_directory_from_shell_cwd(const char* cwd);

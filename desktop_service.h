@@ -119,6 +119,7 @@ namespace gxos { namespace gui {
 
         // Recent tracking
         static void AddRecentProgram(const std::string& name);
+        static bool RemoveRecentProgram(const std::string& name);
         static void AddRecentDocument(const std::string& path);
         static const std::vector<RecentProgramEntry>& GetRecentPrograms() { return s_recentPrograms; }
         static const std::vector<RecentDocumentEntry>& GetRecentDocuments() { return s_recentDocuments; }

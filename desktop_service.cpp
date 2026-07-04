@@ -1800,6 +1800,24 @@ namespace gxos {
             SaveState();
         }
 
+        bool DesktopService::RemoveRecentProgram(const std::string& name) {
+            ensureDefaultAppsRegistered();
+            const std::string canonicalName = canonicalRecentProgramName(name);
+            if (canonicalName.empty()) return false;
+
+            for (auto it = s_recentPrograms.begin(); it != s_recentPrograms.end(); ++it) {
+                if (it->name == canonicalName) {
+                    s_recentPrograms.erase(it);
+                    SaveState();
+                    Logger::write(LogLevel::Info, std::string("Removed recent program: ") + canonicalName);
+                    return true;
+                }
+            }
+
+            Logger::write(LogLevel::Info, std::string("Remove recent program skipped; not found: ") + canonicalName);
+            return false;
+        }
+
         void DesktopService::AddRecentDocument(const std::string& path) {
             if (path.empty()) return;
 

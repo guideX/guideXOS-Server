@@ -1866,10 +1866,7 @@ namespace gxos {
             }
         }
         static bool isRightColumnStartMenuShortcut(const std::string& act);
-
-        void Compositor::addRecent(const std::string& act) {
-            if (act.empty() || isRightColumnStartMenuShortcut(act)) return;
-            DesktopService::AddRecentProgram(act);
+        static void syncRecentProgramsFromService() {
             g_cfg.recent.clear();
             for (const auto& entry : DesktopService::GetRecentPrograms()) {
                 if (entry.name.empty()) continue;
@@ -1878,7 +1875,38 @@ namespace gxos {
                     if (g_cfg.recent.size() >= 10) break;
                 }
             }
+        }
+
+        void Compositor::addRecent(const std::string& act) {
+            if (act.empty() || isRightColumnStartMenuShortcut(act)) return;
+            DesktopService::AddRecentProgram(act);
+            syncRecentProgramsFromService();
             refreshDesktopItems();
+        }
+
+        bool Compositor::removeRecentProgramFromStartMenu(const std::string& act) {
+            if (act.empty()) return false;
+            Logger::write(LogLevel::Info, "Start Menu recent removal requested: " + act);
+            const bool removed = DesktopService::RemoveRecentProgram(act);
+            if (!removed) {
+                Logger::write(LogLevel::Info, "Start Menu recent removal skipped; item not found: " + act);
+                return false;
+            }
+            syncRecentProgramsFromService();
+            refreshDesktopItems();
+            if (!g_startMenuAllProgs) {
+                const int recentCount = (int)g_startMenuPinnedRecent.size();
+                if (recentCount <= 0) {
+                    g_startMenuSel = 0;
+                    g_startMenuScroll = 0;
+                } else {
+                    if (g_startMenuSel >= recentCount) g_startMenuSel = recentCount - 1;
+                    if (g_startMenuSel < 0) g_startMenuSel = 0;
+                    if (g_startMenuScroll > g_startMenuSel) g_startMenuScroll = g_startMenuSel;
+                    if (g_startMenuScroll >= recentCount) g_startMenuScroll = recentCount - 1;
+                }
+            }
+            return true;
         }
         static bool isRightColumnStartMenuShortcut(const std::string& act) {
             return act == "Computer" ||
