@@ -206,9 +206,39 @@ namespace gxos {
             return index <= 1 ? 1 : 2;
         }
 
+        static std::vector<DisplayRenderTarget> hostedRenderTargetsForDesktop(const DisplayVirtualDesktop& desktop, int fallbackWidth, int fallbackHeight)
+        {
+            const DisplayViewport viewport = makeHostedDisplayViewport(desktop, hostedDisplayViewportIndexValue(), fallbackWidth, fallbackHeight);
+            return buildDisplayRenderTargets(desktop, viewport, fallbackWidth, fallbackHeight);
+        }
+
+        static DisplayRenderTarget hostedRenderTargetForDesktop(const DisplayVirtualDesktop& desktop, int fallbackWidth, int fallbackHeight)
+        {
+            std::vector<DisplayRenderTarget> targets = hostedRenderTargetsForDesktop(desktop, fallbackWidth, fallbackHeight);
+            if (const DisplayRenderTarget* target = activeDisplayRenderTarget(targets)) {
+                return *target;
+            }
+            const DisplayViewport viewport = makeHostedDisplayViewport(desktop, hostedDisplayViewportIndexValue(), fallbackWidth, fallbackHeight);
+            DisplayRenderTarget fallback;
+            fallback.targetIndex = viewport.index <= 0 ? 1 : viewport.index;
+            fallback.targetId = std::string("display-target-") + std::to_string(fallback.targetIndex);
+            fallback.monitorId = viewport.monitorId;
+            fallback.monitorName = viewport.monitorName;
+            fallback.viewportOriginX = viewport.originX;
+            fallback.viewportOriginY = viewport.originY;
+            fallback.width = std::max(1, viewport.width);
+            fallback.height = std::max(1, viewport.height);
+            fallback.framebufferRect = DisplayRect{ 0, 0, fallback.width, fallback.height };
+            fallback.active = true;
+            fallback.backedByHostedFramebuffer = true;
+            fallback.syntheticHosted = viewport.syntheticHosted;
+            return fallback;
+        }
+
         static DisplayViewport hostedViewportForDesktop(const DisplayVirtualDesktop& desktop, int fallbackWidth, int fallbackHeight)
         {
-            return makeHostedDisplayViewport(desktop, hostedDisplayViewportIndexValue(), fallbackWidth, fallbackHeight);
+            const DisplayRenderTarget target = hostedRenderTargetForDesktop(desktop, fallbackWidth, fallbackHeight);
+            return target.viewportDescriptor();
         }
 
         static DisplayOptionsStoreData displayOptionsFromDesktopConfig(const DesktopConfigData& cfg) {
@@ -3688,7 +3718,8 @@ namespace gxos {
                 const int clientW = cr.right - cr.left;
                 const int clientH = cr.bottom - cr.top;
                 const DisplayVirtualDesktop desktop = buildDisplayVirtualDesktop(g_cfg);
-                const DisplayViewport viewport = hostedViewportForDesktop(desktop, clientW, clientH);
+                const DisplayRenderTarget renderTarget = hostedRenderTargetForDesktop(desktop, clientW, clientH);
+                const DisplayViewport viewport = renderTarget.viewportDescriptor();
                 HDC drawDc = visibleDc;
                 const bool hostedOffscreenReady = ensureHostedPaintSurface(visibleDc, clientW, clientH);
                 if (hostedOffscreenReady && s_hostedPaintDc) {
@@ -4279,7 +4310,8 @@ namespace gxos {
             case WM_LBUTTONDOWN: {
                 int mx = GET_X_LPARAM(l); int my = GET_Y_LPARAM(l); RECT cr; GetClientRect(h, &cr);
                 const DisplayVirtualDesktop desktop = buildDisplayVirtualDesktop(g_cfg);
-                const DisplayViewport viewport = hostedViewportForDesktop(desktop, cr.right - cr.left, cr.bottom - cr.top);
+                const DisplayRenderTarget renderTarget = hostedRenderTargetForDesktop(desktop, cr.right - cr.left, cr.bottom - cr.top);
+                const DisplayViewport viewport = renderTarget.viewportDescriptor();
                 const bool syntheticExtend = syntheticExtendModeActive(desktop);
                 mx = viewport.virtualXFromLocal(mx);
                 my = viewport.virtualYFromLocal(my);
@@ -5468,7 +5500,9 @@ namespace gxos {
         {
             std::lock_guard<std::mutex> lk(g_lock);
             const DisplayVirtualDesktop desktop = buildDisplayVirtualDesktop(g_cfg);
-            const DisplayViewport viewport = hostedViewportForDesktop(desktop, hostedSurfaceWidth(), hostedSurfaceHeight());
+            const DisplayRenderTarget activeTarget = hostedRenderTargetForDesktop(desktop, hostedSurfaceWidth(), hostedSurfaceHeight());
+            const DisplayViewport viewport = activeTarget.viewportDescriptor();
+            const std::vector<DisplayRenderTarget> renderTargets = hostedRenderTargetsForDesktop(desktop, hostedSurfaceWidth(), hostedSurfaceHeight());
             const bool syntheticExtend = syntheticExtendModeActive(desktop);
             const bool taskbarPrimaryOnly = true;
             const bool taskbarVisible = hostedPrimaryTaskbarVisibleInViewport(desktop, viewport);
@@ -5495,6 +5529,7 @@ namespace gxos {
                 << " primaryWork=" << primaryMonitorWorkArea.summary()
                 << " taskbarPrimaryOnly=" << (taskbarPrimaryOnly ? "true" : "false")
                 << " taskbarVisible=" << (taskbarVisible ? "true" : "false")
+                << " " << displayRenderTargetsSummary(renderTargets)
                 << " virtualDesktop=" << desktop.width() << 'x' << desktop.height()
                 << " bounds=" << desktop.left << "," << desktop.top << "-" << desktop.right << "," << desktop.bottom
                 << " monitors=[" << desktop.monitorRectString() << "]";
@@ -5505,7 +5540,9 @@ namespace gxos {
         {
             std::lock_guard<std::mutex> lk(g_lock);
             const DisplayVirtualDesktop desktop = buildDisplayVirtualDesktop(g_cfg);
-            const DisplayViewport viewport = hostedViewportForDesktop(desktop, hostedSurfaceWidth(), hostedSurfaceHeight());
+            const DisplayRenderTarget activeTarget = hostedRenderTargetForDesktop(desktop, hostedSurfaceWidth(), hostedSurfaceHeight());
+            const DisplayViewport viewport = activeTarget.viewportDescriptor();
+            const std::vector<DisplayRenderTarget> renderTargets = hostedRenderTargetsForDesktop(desktop, hostedSurfaceWidth(), hostedSurfaceHeight());
             const bool syntheticExtend = syntheticExtendModeActive(desktop);
             const bool taskbarPrimaryOnly = true;
             const bool taskbarVisible = hostedPrimaryTaskbarVisibleInViewport(desktop, viewport);
@@ -5531,6 +5568,7 @@ namespace gxos {
                 << " primaryWork=" << primaryMonitorWorkArea.summary()
                 << " taskbarPrimaryOnly=" << (taskbarPrimaryOnly ? "true" : "false")
                 << " taskbarVisible=" << (taskbarVisible ? "true" : "false")
+                << " " << displayRenderTargetsSummary(renderTargets)
                 << " virtualDesktop=" << desktop.width() << 'x' << desktop.height()
                 << " bounds=" << desktop.left << "," << desktop.top << "-" << desktop.right << "," << desktop.bottom
                 << " monitors=[" << desktop.monitorRectString() << "]";

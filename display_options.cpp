@@ -1343,20 +1343,21 @@ namespace {
 
     void drawDisplayMonitorCard(int index, const DisplayMonitorDescriptor& monitor, int x, int y, bool primary, bool selected)
     {
+        const uint64_t windowId = DisplayOptions::s_windowId;
         const bool enabled = monitor.enabled;
         const uint32_t cardFill = enabled ? DisplayOptionsCardColor() : blendColor(DisplayOptionsCardColor(), DisplayOptionsPanelColor(), 42);
         const uint32_t borderColor = primary ? DisplayOptionsSelectedBorderColor()
             : selected ? DisplayOptionsHoverBorderColor()
             : DisplayOptionsNeutralBorderColor();
-        drawColorRect(s_windowId, x - 3, y - 3, kDisplayCardW + 6, kDisplayCardH + 6, borderColor);
-        drawColorRect(s_windowId, x, y, kDisplayCardW, kDisplayCardH, cardFill);
-        drawText(s_windowId, x + 12, y + 12, std::string("[") + std::to_string(index + 1) + "] " + (monitor.name.empty() ? monitor.id : monitor.name), DisplayOptionsTextColor());
-        drawText(s_windowId, x + 12, y + 40, std::string("Resolution: ") + std::to_string(monitor.width) + "x" + std::to_string(monitor.height), DisplayOptionsMutedTextColor());
-        drawText(s_windowId, x + 12, y + 58, std::string("Refresh: ") + (monitor.refreshRateHz > 0 ? std::to_string(monitor.refreshRateHz) + " Hz" : "n/a"), DisplayOptionsMutedTextColor());
-        drawText(s_windowId, x + 12, y + 76, std::string("Rotation: ") + std::to_string(monitor.rotation) + " deg", DisplayOptionsMutedTextColor());
-        drawText(s_windowId, x + 12, y + 94, primary ? "Primary display" : "Secondary display", primary ? DisplayOptionsAccentColor() : DisplayOptionsMutedTextColor());
+        drawColorRect(windowId, x - 3, y - 3, kDisplayCardW + 6, kDisplayCardH + 6, borderColor);
+        drawColorRect(windowId, x, y, kDisplayCardW, kDisplayCardH, cardFill);
+        drawText(windowId, x + 12, y + 12, std::string("[") + std::to_string(index + 1) + "] " + (monitor.name.empty() ? monitor.id : monitor.name), DisplayOptionsTextColor());
+        drawText(windowId, x + 12, y + 40, std::string("Resolution: ") + std::to_string(monitor.width) + "x" + std::to_string(monitor.height), DisplayOptionsMutedTextColor());
+        drawText(windowId, x + 12, y + 58, std::string("Refresh: ") + (monitor.refreshRateHz > 0 ? std::to_string(monitor.refreshRateHz) + " Hz" : "n/a"), DisplayOptionsMutedTextColor());
+        drawText(windowId, x + 12, y + 76, std::string("Rotation: ") + std::to_string(monitor.rotation) + " deg", DisplayOptionsMutedTextColor());
+        drawText(windowId, x + 12, y + 94, primary ? "Primary display" : "Secondary display", primary ? DisplayOptionsAccentColor() : DisplayOptionsMutedTextColor());
         if (!enabled) {
-            drawText(s_windowId, x + 12, y + 112, "Not active yet", DisplayOptionsMutedTextColor());
+            drawText(windowId, x + 12, y + 112, "Not active yet", DisplayOptionsMutedTextColor());
         }
     }
 }

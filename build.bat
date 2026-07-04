@@ -24,6 +24,14 @@ if not defined CXX (
 )
 
 echo Using compiler: %CXX%
+
+if not exist "third_party\stb\stb_image.h" (
+    echo ERROR: Missing required third-party header: third_party\stb\stb_image.h
+    echo        The PNG loader includes this vendored file, but it is absent from the checkout.
+    echo        Restore the file or update the include path before building.
+    exit /b 1
+)
+
 set CXXFLAGS=-std=c++17 -Wall -O2 -iquote . -Ithird_party/mbedtls/include -Ithird_party/mbedtls/tf-psa-crypto/include -Ithird_party/mbedtls/tf-psa-crypto/drivers/builtin/include -Ithird_party/mbedtls/tf-psa-crypto/drivers/builtin/src -Ithird_party/mbedtls/tf-psa-crypto/dispatch -Ithird_party/mbedtls/tf-psa-crypto/extras -Ithird_party/mbedtls/tf-psa-crypto/platform -Ithird_party/mbedtls/tf-psa-crypto/utilities -DMBEDTLS_CONFIG_FILE=\"third_party/mbedtls/guidexos/mbedtls_config.h\" -DTF_PSA_CRYPTO_CONFIG_FILE=\"third_party/mbedtls/guidexos/crypto_config.h\"
 set LDFLAGS=-lws2_32 -lsecur32 -lcrypt32 -lbcrypt -lgdi32 -luser32 -lmsimg32
 

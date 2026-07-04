@@ -626,6 +626,221 @@ struct DisplayViewport {
     }
 };
 
+struct DisplayRenderTarget {
+    int targetIndex{1};
+    std::string targetId;
+    std::string monitorId;
+    std::string monitorName;
+    int viewportOriginX{0};
+    int viewportOriginY{0};
+    int width{0};
+    int height{0};
+    DisplayRect framebufferRect{ 0, 0, 0, 0 };
+    bool primary{false};
+    bool active{false};
+    bool backedByHostedFramebuffer{false};
+    bool syntheticHosted{false};
+
+    bool isValid() const
+    {
+        return width > 0 && height > 0;
+    }
+
+    DisplayRect virtualBounds() const
+    {
+        return DisplayRect{
+            viewportOriginX,
+            viewportOriginY,
+            viewportOriginX + width,
+            viewportOriginY + height
+        };
+    }
+
+    DisplayViewport viewportDescriptor() const
+    {
+        DisplayViewport viewport;
+        viewport.index = targetIndex;
+        viewport.originX = viewportOriginX;
+        viewport.originY = viewportOriginY;
+        viewport.width = width;
+        viewport.height = height;
+        viewport.syntheticHosted = syntheticHosted;
+        viewport.monitorId = monitorId;
+        viewport.monitorName = monitorName;
+        return viewport;
+    }
+
+    std::string summary() const
+    {
+        std::ostringstream out;
+        out << targetId
+            << " monitor=" << (monitorId.empty() ? "(none)" : monitorId);
+        if (!monitorName.empty()) {
+            out << "(" << monitorName << ")";
+        }
+        out << " origin=" << viewportOriginX << ',' << viewportOriginY
+            << " size=" << width << 'x' << height
+            << " framebuffer=" << framebufferRect.left << ',' << framebufferRect.top << '-' << framebufferRect.right << ',' << framebufferRect.bottom
+            << " primary=" << (primary ? "true" : "false")
+            << " active=" << (active ? "true" : "false")
+            << " backed=" << (backedByHostedFramebuffer ? "true" : "false");
+        return out.str();
+    }
+};
+
+inline DisplayRenderTarget makeDisplayRenderTarget(
+    int targetIndex,
+    const DisplayMonitorDescriptor& monitor,
+    bool active,
+    bool backedByHostedFramebuffer,
+    bool syntheticHosted)
+{
+    const int width = std::max(1, monitor.width);
+    const int height = std::max(1, monitor.height);
+    DisplayRenderTarget target;
+    target.targetIndex = std::max(1, targetIndex);
+    target.targetId = std::string("display-target-") + std::to_string(target.targetIndex);
+    target.monitorId = monitor.id;
+    target.monitorName = monitor.name;
+    target.viewportOriginX = monitor.virtualX;
+    target.viewportOriginY = monitor.virtualY;
+    target.width = width;
+    target.height = height;
+    target.framebufferRect = DisplayRect{ 0, 0, width, height };
+    target.primary = monitor.primary;
+    target.active = active;
+    target.backedByHostedFramebuffer = backedByHostedFramebuffer;
+    target.syntheticHosted = syntheticHosted;
+    return target;
+}
+
+inline DisplayRenderTarget makeHostedFallbackRenderTarget(
+    int fallbackWidth,
+    int fallbackHeight,
+    const DisplayMonitorDescriptor* monitor,
+    bool syntheticHosted)
+{
+    const int width = std::max(1, fallbackWidth);
+    const int height = std::max(1, fallbackHeight);
+    DisplayRenderTarget target;
+    target.targetIndex = 1;
+    target.targetId = "display-target-1";
+    if (monitor) {
+        target.monitorId = monitor->id;
+        target.monitorName = monitor->name;
+        target.primary = monitor->primary;
+    }
+    target.viewportOriginX = 0;
+    target.viewportOriginY = 0;
+    target.width = width;
+    target.height = height;
+    target.framebufferRect = DisplayRect{ 0, 0, width, height };
+    target.active = true;
+    target.backedByHostedFramebuffer = true;
+    target.syntheticHosted = syntheticHosted;
+    return target;
+}
+
+inline std::vector<DisplayRenderTarget> buildDisplayRenderTargets(
+    const DisplayVirtualDesktop& desktop,
+    const DisplayViewport& viewport,
+    int fallbackWidth,
+    int fallbackHeight)
+{
+    std::vector<DisplayRenderTarget> targets;
+    const bool syntheticHosted = viewport.syntheticHosted
+        && hostedSyntheticDualMonitorEnabled()
+        && desktop.mode == DisplayModeKind::Extend
+        && desktop.activeMonitorCount() > 1;
+
+    if (!syntheticHosted) {
+        const DisplayMonitorDescriptor* activeMonitor = desktop.activeViewportMonitor(viewport);
+        if (!activeMonitor) {
+            activeMonitor = desktop.primaryMonitor();
+        }
+        if (activeMonitor) {
+            DisplayRenderTarget target;
+            target.targetIndex = 1;
+            target.targetId = "display-target-1";
+            target.monitorId = activeMonitor->id;
+            target.monitorName = activeMonitor->name;
+            target.viewportOriginX = viewport.originX;
+            target.viewportOriginY = viewport.originY;
+            target.width = std::max(1, viewport.width);
+            target.height = std::max(1, viewport.height);
+            target.framebufferRect = DisplayRect{ 0, 0, target.width, target.height };
+            target.primary = true;
+            target.active = true;
+            target.backedByHostedFramebuffer = true;
+            target.syntheticHosted = false;
+            targets.push_back(target);
+            return targets;
+        }
+
+        targets.push_back(makeHostedFallbackRenderTarget(fallbackWidth, fallbackHeight, nullptr, false));
+        return targets;
+    }
+
+    std::vector<const DisplayMonitorDescriptor*> activeMonitors;
+    activeMonitors.reserve(desktop.monitors.size());
+    for (const auto& monitor : desktop.monitors) {
+        if (monitor.isActive()) {
+            activeMonitors.push_back(&monitor);
+        }
+    }
+
+    if (activeMonitors.empty()) {
+        targets.push_back(makeHostedFallbackRenderTarget(fallbackWidth, fallbackHeight, desktop.primaryMonitor(), true));
+        return targets;
+    }
+
+    const DisplayMonitorDescriptor* activeMonitor = desktop.activeViewportMonitor(viewport);
+    if (!activeMonitor) {
+        activeMonitor = desktop.primaryMonitor();
+    }
+
+    int targetIndex = 1;
+    for (const DisplayMonitorDescriptor* monitor : activeMonitors) {
+        const bool isActive = activeMonitor && monitor->id == activeMonitor->id;
+        targets.push_back(makeDisplayRenderTarget(targetIndex++, *monitor, isActive, isActive, true));
+    }
+    return targets;
+}
+
+inline const DisplayRenderTarget* activeDisplayRenderTarget(const std::vector<DisplayRenderTarget>& targets)
+{
+    for (const auto& target : targets) {
+        if (target.active) {
+            return &target;
+        }
+    }
+    for (const auto& target : targets) {
+        if (target.backedByHostedFramebuffer) {
+            return &target;
+        }
+    }
+    return targets.empty() ? nullptr : &targets.front();
+}
+
+inline std::string displayRenderTargetsSummary(const std::vector<DisplayRenderTarget>& targets)
+{
+    std::ostringstream out;
+    out << "renderTargetCount=" << targets.size();
+    if (!targets.empty()) {
+        const DisplayRenderTarget* active = activeDisplayRenderTarget(targets);
+        out << " activeHostedTarget=" << (active ? active->targetId : std::string("(none)"))
+            << " targets=[";
+        for (size_t i = 0; i < targets.size(); ++i) {
+            if (i != 0) {
+                out << "; ";
+            }
+            out << targets[i].summary();
+        }
+        out << "]";
+    }
+    return out.str();
+}
+
 inline DisplayMonitorDescriptor makeDisplayMonitor(
     const std::string& id,
     const std::string& name,

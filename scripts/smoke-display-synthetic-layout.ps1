@@ -67,6 +67,34 @@ $checks = @(
         Match = Find-FirstMatch (Join-Path $Root 'display_model.h') 'viewport.originX = selected->virtualX';
     },
     [pscustomobject]@{
+        Name = 'display model render target struct';
+        Match = Find-FirstMatch (Join-Path $Root 'display_model.h') 'struct DisplayRenderTarget';
+    },
+    [pscustomobject]@{
+        Name = 'display model render target builder';
+        Match = Find-FirstMatch (Join-Path $Root 'display_model.h') 'buildDisplayRenderTargets(';
+    },
+    [pscustomobject]@{
+        Name = 'display model hosted fallback render target';
+        Match = Find-FirstMatch (Join-Path $Root 'display_model.h') 'makeHostedFallbackRenderTarget(';
+    },
+    [pscustomobject]@{
+        Name = 'display model single target fallback path';
+        Match = Find-FirstMatch (Join-Path $Root 'display_model.h') 'targets.push_back(makeHostedFallbackRenderTarget(fallbackWidth, fallbackHeight, nullptr, false))';
+    },
+    [pscustomobject]@{
+        Name = 'display model synthetic target backing gate';
+        Match = Find-FirstMatch (Join-Path $Root 'display_model.h') 'makeDisplayRenderTarget(targetIndex++, *monitor, isActive, isActive, true)';
+    },
+    [pscustomobject]@{
+        Name = 'display model active render target helper';
+        Match = Find-FirstMatch (Join-Path $Root 'display_model.h') 'activeDisplayRenderTarget(';
+    },
+    [pscustomobject]@{
+        Name = 'display model render target summary';
+        Match = Find-FirstMatch (Join-Path $Root 'display_model.h') 'displayRenderTargetsSummary(';
+    },
+    [pscustomobject]@{
         Name = 'display model viewport local rect conversion';
         Match = Find-FirstMatch (Join-Path $Root 'display_model.h') 'localRectFromVirtual';
     },
@@ -99,6 +127,14 @@ $checks = @(
         Match = Find-FirstMatch (Join-Path $Root 'compositor.cpp') 'synthetic dual-monitor mode enabled via GXOS_SYNTHETIC_DUAL_MONITOR=1';
     },
     [pscustomobject]@{
+        Name = 'compositor hosted render target helper';
+        Match = Find-FirstMatch (Join-Path $Root 'compositor.cpp') 'hostedRenderTargetForDesktop';
+    },
+    [pscustomobject]@{
+        Name = 'compositor hosted render targets helper';
+        Match = Find-FirstMatch (Join-Path $Root 'compositor.cpp') 'hostedRenderTargetsForDesktop';
+    },
+    [pscustomobject]@{
         Name = 'compositor viewport switch command';
         Match = Find-FirstMatch (Join-Path $Root 'server.cpp') 'desktop.display.viewport';
     },
@@ -107,12 +143,16 @@ $checks = @(
         Match = Find-FirstMatch (Join-Path $Root 'compositor.cpp') 'displayViewportDiagnostic()';
     },
     [pscustomobject]@{
-        Name = 'compositor viewport diagnostic active monitor';
-        Match = Find-FirstMatch (Join-Path $Root 'compositor.cpp') 'activeMonitorId=';
+        Name = 'compositor display summary render targets';
+        Match = Find-FirstMatch (Join-Path $Root 'compositor.cpp') 'displayRenderTargetsSummary(renderTargets)';
     },
     [pscustomobject]@{
-        Name = 'compositor viewport diagnostic active viewport index';
-        Match = Find-FirstMatch (Join-Path $Root 'compositor.cpp') 'activeViewportIndex=';
+        Name = 'compositor viewport diagnostic active target';
+        Match = Find-FirstMatch (Join-Path $Root 'display_model.h') 'activeHostedTarget=';
+    },
+    [pscustomobject]@{
+        Name = 'compositor viewport diagnostic render target count';
+        Match = Find-FirstMatch (Join-Path $Root 'display_model.h') 'renderTargetCount=';
     },
     [pscustomobject]@{
         Name = 'compositor viewport diagnostic active viewport origin';
@@ -143,8 +183,8 @@ $checks = @(
         Match = Find-FirstMatch (Join-Path $Root 'compositor.cpp') 'g_hostedViewportIndex';
     },
     [pscustomobject]@{
-        Name = 'compositor render viewport translation';
-        Match = Find-FirstMatch (Join-Path $Root 'compositor.cpp') 'SetViewportOrgEx';
+        Name = 'compositor render target viewport translation';
+        Match = Find-FirstMatch (Join-Path $Root 'compositor.cpp') 'renderTarget.viewportDescriptor()';
     },
     [pscustomobject]@{
         Name = 'compositor display summary command';
