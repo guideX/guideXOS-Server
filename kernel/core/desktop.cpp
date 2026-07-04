@@ -1236,6 +1236,30 @@ static bool bare_metal_prepare_desktop_directory(const char* path)
     return bare_metal_desktop_directory_is_writable(path);
 }
 
+static bool bare_metal_ensure_standard_user_folders()
+{
+    static const char* kFolders[] = {
+        "/Documents",
+        "/Pictures",
+        "/Music",
+        "/Network",
+    };
+
+    bool allOk = true;
+    for (const char* folder : kFolders) {
+        vfs::FileInfo info{};
+        if (vfs::stat(folder, &info) == vfs::VFS_OK) {
+            if (info.type == vfs::FILE_TYPE_DIRECTORY) continue;
+            allOk = false;
+            continue;
+        }
+        if (vfs::mkdir(folder) != vfs::VFS_OK && vfs::stat(folder, &info) != vfs::VFS_OK) {
+            allOk = false;
+        }
+    }
+    return allOk;
+}
+
 static bool bare_metal_ensure_desktop_backing_directory(char* outPath, int outPathSize)
 {
     if (!outPath || outPathSize <= 0) return false;
@@ -2114,9 +2138,9 @@ static bool s_startMenuAllProgs = false; // Toggle between Recent/Pinned vs All 
 static const int kStartMenuMaxRows = 14; // Max visible rows before scrolling
 static const int kStartMenuRowH = 22;    // Height of each menu row
 
-static void activate_start_menu_control_panel()
+static void activate_start_menu_control_panel(int rightIndex = 5)
 {
-    s_clickedMenuRight = 5;
+    s_clickedMenuRight = rightIndex;
     s_clickedMenuLeft = -1;
     s_startMenuOpen = false;
 #if defined(GXOS_APPMODEL_LAUNCHSHADOW_SMOKE_ACTIVE) && defined(GXOS_APPMODEL_TYPED_DISPATCH_SHADOW_ONLY) && defined(GXOS_BARE_METAL)
@@ -2130,6 +2154,62 @@ static void activate_start_menu_control_panel()
     }
 #endif
     s_controlPanelOpen = true;
+}
+
+static const char* bare_metal_start_menu_folder_path_for_label(const char* label)
+{
+    if (desktop_str_eq(label, "Computer") || desktop_str_eq(label, "This System")) return "/";
+    if (desktop_str_eq(label, "Documents")) return "/Documents";
+    if (desktop_str_eq(label, "Pictures")) return "/Pictures";
+    if (desktop_str_eq(label, "Music")) return "/Music";
+    if (desktop_str_eq(label, "Network")) return "/Network";
+    return nullptr;
+}
+
+static const char* bare_metal_start_menu_folder_error_message_for_label(const char* label)
+{
+    if (desktop_str_eq(label, "Computer") || desktop_str_eq(label, "This System")) return "Could not open Computer";
+    if (desktop_str_eq(label, "Documents")) return "Could not open Documents";
+    if (desktop_str_eq(label, "Pictures")) return "Could not open Pictures";
+    if (desktop_str_eq(label, "Music")) return "Could not open Music";
+    if (desktop_str_eq(label, "Network")) return "Could not open Network";
+    return "Could not open folder";
+}
+
+static bool bare_metal_open_start_menu_folder(const char* label)
+{
+    const char* requestedPath = bare_metal_start_menu_folder_path_for_label(label);
+    if (!requestedPath) return false;
+
+    char normalizedPath[vfs::VFS_MAX_PATH];
+    vfs::normalize_path(requestedPath, normalizedPath, sizeof(normalizedPath));
+    if (!normalizedPath[0]) {
+        return false;
+    }
+
+    vfs::FileInfo info{};
+    if (vfs::stat(normalizedPath, &info) != vfs::VFS_OK) {
+        if (vfs::mkdir(normalizedPath) != vfs::VFS_OK && vfs::stat(normalizedPath, &info) != vfs::VFS_OK) {
+            return false;
+        }
+    }
+    if (vfs::stat(normalizedPath, &info) != vfs::VFS_OK || info.type != vfs::FILE_TYPE_DIRECTORY) {
+        return false;
+    }
+
+#if defined(GXOS_APPMODEL_LAUNCHSHADOW_SMOKE_ACTIVE) && defined(GXOS_APPMODEL_TYPED_DISPATCH_SHADOW_ONLY) && defined(GXOS_BARE_METAL)
+    log_bare_metal_fileopen_shadow_only_observation(
+        bare_metal_active_fileopen_shadow_source("StartMenuFolder"),
+        "Files",
+        normalizedPath);
+    if (bare_metal_should_suppress_real_branch_launch()) return true;
+#endif
+
+    if (app::AppManager::launchAppWithParam("Files", normalizedPath)) {
+        return true;
+    }
+
+    return false;
 }
 
 static uint32_t start_menu_text_y(uint32_t rowY, uint32_t rowH = kStartMenuRowH)
@@ -3752,6 +3832,9 @@ bool sync_live_directory_from_shell_cwd(const char* cwd)
 #if defined(GXOS_BARE_METAL)
 void refresh_bare_metal_desktop_folders_after_vfs_ready()
 {
+    if (!bare_metal_ensure_standard_user_folders()) {
+        serial::puts("[desktop] warning: one or more standard user folders could not be created\n");
+    }
     bare_metal_desktop_request_folder_refresh("startup");
 }
 #endif
@@ -8974,6 +9057,13 @@ static void run_launch_shadow_start_menu_settings_smoke()
     const bool savedShellActive = s_shellActive;
     const bool savedShellMinimized = s_shellMinimized;
     const bool savedControlPanelOpen = s_controlPanelOpen;
+    const int savedClickedMenuLeft = s_clickedMenuLeft;
+    const int savedClickedMenuRight = s_clickedMenuRight;
+    const int savedHoverMenuLeft = s_hoverMenuLeft;
+    const int savedHoverMenuRight = s_hoverMenuRight;
+    const int savedStartMenuSelection = s_startMenuSelection;
+    const int savedStartMenuScroll = s_startMenuScroll;
+    const bool savedStartMenuAllProgs = s_startMenuAllProgs;
 
     serial::puts("[APPMODEL-LAUNCHSHADOW-SMOKE] real-branch Start Menu Settings helper before temporary Start Menu state mutation\n");
     serial::puts("[LaunchShadowRealBranchStartMenuSettingsMutation] phase=before temporaryStartMenuStateMutation=true persistentDesktopStorageWrites=false nonFatal=true\n");
@@ -8986,16 +9076,29 @@ static void run_launch_shadow_start_menu_settings_smoke()
     s_notification = savedNotification;
     s_launchShadowStaticAppSourceOverride = savedStaticAppSourceOverride;
     s_launchShadowSuppressRealBranchLaunch = savedSuppressRealBranchLaunch;
+    s_controlPanelOpen = savedControlPanelOpen;
+    s_clickedMenuLeft = savedClickedMenuLeft;
+    s_clickedMenuRight = savedClickedMenuRight;
+    s_hoverMenuLeft = savedHoverMenuLeft;
+    s_hoverMenuRight = savedHoverMenuRight;
+    s_startMenuSelection = savedStartMenuSelection;
+    s_startMenuScroll = savedStartMenuScroll;
+    s_startMenuAllProgs = savedStartMenuAllProgs;
 
     const bool startMenuStateRestored = s_startMenuOpen == savedStartMenuOpen;
     const bool notificationStateRestored = notification_toast_matches(s_notification, savedNotification);
     const bool sourceOverrideStateRestored = s_launchShadowStaticAppSourceOverride == savedStaticAppSourceOverride;
     const bool suppressLaunchStateRestored = s_launchShadowSuppressRealBranchLaunch == savedSuppressRealBranchLaunch;
+    const bool selectionStateRestored = s_clickedMenuLeft == savedClickedMenuLeft &&
+        s_clickedMenuRight == savedClickedMenuRight && s_hoverMenuLeft == savedHoverMenuLeft &&
+        s_hoverMenuRight == savedHoverMenuRight && s_startMenuSelection == savedStartMenuSelection &&
+        s_startMenuScroll == savedStartMenuScroll && s_startMenuAllProgs == savedStartMenuAllProgs;
     const bool shellActionStateRestored = shell::get_state() == savedShellState &&
         s_shellActive == savedShellActive && s_shellMinimized == savedShellMinimized &&
         s_controlPanelOpen == savedControlPanelOpen;
     const bool stateRestored = startMenuStateRestored && notificationStateRestored &&
-        sourceOverrideStateRestored && suppressLaunchStateRestored && shellActionStateRestored;
+        sourceOverrideStateRestored && suppressLaunchStateRestored && selectionStateRestored &&
+        shellActionStateRestored;
 
     serial::puts("[APPMODEL-LAUNCHSHADOW-SMOKE] real-branch Start Menu Settings helper after temporary Start Menu state restoration\n");
     serial::puts("[LaunchShadowRealBranchStartMenuSettingsRestore] realBranchStartMenuSettingsStateRestored=");
@@ -9008,6 +9111,8 @@ static void run_launch_shadow_start_menu_settings_smoke()
     serial::puts(sourceOverrideStateRestored ? "true" : "false");
     serial::puts(" realBranchStartMenuSettingsSuppressLaunchStateRestored=");
     serial::puts(suppressLaunchStateRestored ? "true" : "false");
+    serial::puts(" realBranchStartMenuSettingsSelectionStateRestored=");
+    serial::puts(selectionStateRestored ? "true" : "false");
     serial::puts(" realBranchStartMenuSettingsShellActionStateRestored=");
     serial::puts(shellActionStateRestored ? "true" : "false");
     serial::puts(" persistentDesktopStorageWrites=false");
@@ -9022,6 +9127,8 @@ static void run_launch_shadow_start_menu_settings_smoke()
     serial::puts(sourceOverrideStateRestored ? "true" : "false");
     serial::puts(" realBranchStartMenuSettingsSuppressLaunchStateRestored=");
     serial::puts(suppressLaunchStateRestored ? "true" : "false");
+    serial::puts(" realBranchStartMenuSettingsSelectionStateRestored=");
+    serial::puts(selectionStateRestored ? "true" : "false");
     serial::puts(" realBranchStartMenuSettingsShellActionStateRestored=");
     serial::puts(shellActionStateRestored ? "true" : "false");
     serial::puts(" persistentDesktopStorageWrites=false");
@@ -10560,6 +10667,42 @@ static void show_start_menu_notification(const char* label)
         s_shellMinimized = false;
         return;
     }
+
+    if (bare_metal_start_menu_folder_path_for_label(label)) {
+        s_startMenuOpen = false;
+        if (bare_metal_open_start_menu_folder(label)) {
+            app::AppLogger::logLaunch("Files", app::LaunchResult::Success);
+            return;
+        }
+        s_notification.title = label;
+        s_notification.message = bare_metal_start_menu_folder_error_message_for_label(label);
+        s_notification.visible = true;
+        s_notification.showTime = s_tickCounter;
+        app::AppLogger::logLaunch("Files", app::LaunchResult::FailedToInit);
+        return;
+    }
+
+    if (desktop_str_eq(label, "Control Panel")) {
+        activate_start_menu_control_panel(5);
+        return;
+    }
+
+    if (desktop_str_eq(label, "Settings")) {
+        // Temporary fallback: reuse the existing control area until a dedicated
+        // Settings app exists in bare-metal mode.
+#if defined(GXOS_APPMODEL_LAUNCHSHADOW_SMOKE_ACTIVE) && defined(GXOS_APPMODEL_TYPED_DISPATCH_SHADOW_ONLY) && defined(GXOS_BARE_METAL)
+        if (s_launchShadowSuppressRealBranchLaunch) {
+            log_bare_metal_static_app_shadow_only_observation(
+                "Control Panel",
+                bare_metal_active_static_app_shadow_source("StartMenuSettings"),
+                "Settings",
+                "embedded-control-panel-state");
+            return;
+        }
+#endif
+        activate_start_menu_control_panel(6);
+        return;
+    }
     
     // Close start menu before launching app
     s_startMenuOpen = false;
@@ -11403,15 +11546,6 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
                 // Clicked a right-column item
                 s_clickedMenuRight = rightHit;
                 s_clickedMenuLeft = -1;
-                
-                // Handle Control Panel specially (index 5)
-                if (rightHit == 5) {
-                    activate_start_menu_control_panel();
-                    draw();
-                    draw_cursor(mx, my);
-                    return;
-                }
-                
                 show_start_menu_notification(s_startMenuRight[rightHit].label);
                 draw();
                 draw_cursor(mx, my);

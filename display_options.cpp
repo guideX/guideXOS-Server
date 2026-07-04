@@ -1,5 +1,6 @@
 #include "display_options.h"
 
+#include "clock_time_settings.h"
 #include "desktop_config.h"
 #include "display_options_store.h"
 #include "gui_protocol.h"
@@ -30,6 +31,10 @@ int DisplayOptions::s_galleryScrollOffset = 0;
 int DisplayOptions::s_mouseX = 0;
 int DisplayOptions::s_mouseY = 0;
 bool DisplayOptions::s_mouseDown = false;
+int DisplayOptions::s_selectedTimeZoneIndex = 0;
+int DisplayOptions::s_appliedTimeZoneIndex = 0;
+bool DisplayOptions::s_use24HourTime = false;
+bool DisplayOptions::s_appliedUse24HourTime = false;
 bool DisplayOptions::s_showDesktopTrash = true;
 bool DisplayOptions::s_showDesktopThisSystem = true;
 bool DisplayOptions::s_showDesktopFileManager = true;
@@ -41,12 +46,13 @@ namespace {
     const int kWindowW = 800;
     const int kWindowH = 620;
     const int kTabY = 18;
-    const int kTabW = 170;
+    const int kTabW = 150;
     const int kTabH = 40;
     const int kThemeTabX = 20;
-    const int kBackgroundTabX = 200;
-    const int kDesktopIconTabX = 380;
-    const int kGradientTabX = 560;
+    const int kBackgroundTabX = 174;
+    const int kDesktopIconTabX = 328;
+    const int kGradientTabX = 482;
+    const int kRegionTimeTabX = 636;
     const int kGalleryX = 26;
     const int kGalleryY = 100;
     const int kGalleryW = 722;
@@ -73,6 +79,12 @@ namespace {
     const int kThemeOptionW = 320;
     const int kThemeOptionH = 98;
     const int kThemeOptionGap = 14;
+    const int kRegionTimeZoneX = 46;
+    const int kRegionTimeZoneY = 132;
+    const int kRegionTimeZoneW = 360;
+    const int kRegionTimeZoneH = 36;
+    const int kRegionTimeUse24X = 46;
+    const int kRegionTimeUse24Y = 194;
     const int kGalleryRowPitch = kTileH + kGapY;
 
     int galleryVisibleRows()
@@ -100,6 +112,16 @@ namespace {
         if (offset < 0) return 0;
         if (offset > maxScroll) return maxScroll;
         return offset;
+    }
+
+    int clockTimeZoneIndexFromId(const std::string& id)
+    {
+        return static_cast<int>(gxos::clocktime::TimeZoneIndexFromId(id));
+    }
+
+    std::string clockTimeZoneLabelAt(int index)
+    {
+        return gxos::clocktime::TimeZoneOptionAt(static_cast<size_t>(std::max(0, index))).displayName;
     }
 
     void publish(MsgType type, const std::string& payload)
@@ -310,16 +332,18 @@ namespace {
 
     DisplayOptionsStoreData displayOptionsFromDesktopConfig(const DesktopConfigData& cfg)
     {
-        DisplayOptionsStoreData out;
-        out.wallpaperId = !cfg.wallpaperId.empty()
-            ? cfg.wallpaperId
-            : WallpaperRegistry::IdForAssetPath(cfg.wallpaperPath);
-        out.backgroundScaleMode = cfg.backgroundScaleMode.empty() ? "fill" : cfg.backgroundScaleMode;
-        out.desktopThemeId = cfg.desktopThemeId.empty() ? "classic" : cfg.desktopThemeId;
-        out.taskbarPosition = cfg.taskbarPosition.empty() ? "bottom" : cfg.taskbarPosition;
-        out.showDesktopTrash = cfg.showDesktopTrash;
-        out.showDesktopThisSystem = cfg.showDesktopThisSystem;
-        out.showDesktopFileManager = cfg.showDesktopFileManager;
+    DisplayOptionsStoreData out;
+    out.wallpaperId = !cfg.wallpaperId.empty()
+        ? cfg.wallpaperId
+        : WallpaperRegistry::IdForAssetPath(cfg.wallpaperPath);
+    out.backgroundScaleMode = cfg.backgroundScaleMode.empty() ? "fill" : cfg.backgroundScaleMode;
+    out.desktopThemeId = cfg.desktopThemeId.empty() ? "classic" : cfg.desktopThemeId;
+    out.taskbarPosition = cfg.taskbarPosition.empty() ? "bottom" : cfg.taskbarPosition;
+    out.timeZoneId = gxos::clocktime::NormalizeTimeZoneId(cfg.timeZoneId);
+    out.use24HourTime = cfg.use24HourTime;
+    out.showDesktopTrash = cfg.showDesktopTrash;
+    out.showDesktopThisSystem = cfg.showDesktopThisSystem;
+    out.showDesktopFileManager = cfg.showDesktopFileManager;
         out.showDesktopSystemSettings = cfg.showDesktopSystemSettings;
         out.smallLiveDesktopFolderIcons = cfg.smallLiveDesktopFolderIcons;
         out.autoArrangeDesktopIcons = cfg.autoArrangeDesktopIcons;
@@ -329,12 +353,14 @@ namespace {
     void applyDisplayOptionsToDesktopConfig(const DisplayOptionsStoreData& store, DesktopConfigData& cfg)
     {
         cfg.wallpaperId = store.wallpaperId;
-        cfg.backgroundScaleMode = store.backgroundScaleMode.empty() ? "fill" : store.backgroundScaleMode;
-        cfg.desktopThemeId = store.desktopThemeId.empty() ? "classic" : store.desktopThemeId;
-        cfg.taskbarPosition = store.taskbarPosition.empty() ? "bottom" : store.taskbarPosition;
-        cfg.showDesktopTrash = store.showDesktopTrash;
-        cfg.showDesktopThisSystem = store.showDesktopThisSystem;
-        cfg.showDesktopFileManager = store.showDesktopFileManager;
+    cfg.backgroundScaleMode = store.backgroundScaleMode.empty() ? "fill" : store.backgroundScaleMode;
+    cfg.desktopThemeId = store.desktopThemeId.empty() ? "classic" : store.desktopThemeId;
+    cfg.taskbarPosition = store.taskbarPosition.empty() ? "bottom" : store.taskbarPosition;
+    cfg.timeZoneId = gxos::clocktime::NormalizeTimeZoneId(store.timeZoneId);
+    cfg.use24HourTime = store.use24HourTime;
+    cfg.showDesktopTrash = store.showDesktopTrash;
+    cfg.showDesktopThisSystem = store.showDesktopThisSystem;
+    cfg.showDesktopFileManager = store.showDesktopFileManager;
         cfg.showDesktopSystemSettings = store.showDesktopSystemSettings;
         cfg.smallLiveDesktopFolderIcons = store.smallLiveDesktopFolderIcons;
         cfg.autoArrangeDesktopIcons = store.autoArrangeDesktopIcons;
@@ -388,6 +414,10 @@ void DisplayOptions::loadSelection()
         s_showDesktopFileManager = store.showDesktopFileManager;
         s_showDesktopSystemSettings = store.showDesktopSystemSettings;
         s_smallLiveDesktopFolderIcons = store.smallLiveDesktopFolderIcons;
+        s_selectedTimeZoneIndex = clockTimeZoneIndexFromId(store.timeZoneId);
+        s_appliedTimeZoneIndex = s_selectedTimeZoneIndex;
+        s_use24HourTime = store.use24HourTime;
+        s_appliedUse24HourTime = s_use24HourTime;
         Logger::write(LogLevel::Info, "DisplayOptions loaded display settings");
     } else {
         s_showDesktopTrash = true;
@@ -395,6 +425,10 @@ void DisplayOptions::loadSelection()
         s_showDesktopFileManager = true;
         s_showDesktopSystemSettings = false;
         s_smallLiveDesktopFolderIcons = true;
+        s_selectedTimeZoneIndex = 0;
+        s_appliedTimeZoneIndex = 0;
+        s_use24HourTime = false;
+        s_appliedUse24HourTime = false;
         Logger::write(LogLevel::Info, "DisplayOptions display settings defaulted");
     }
     s_selectedThemeId = selectedThemeIdFromConfig();
@@ -557,11 +591,13 @@ void DisplayOptions::render()
     drawButton(kDesktopIconTabX, kTabY, kTabW, kTabH, "Desktop Icons", s_activeTab == 2, true);
     drawButton(kGradientTabX, kTabY, kTabW, kTabH, "Gradients", s_activeTab == 1, true);
     drawButton(kThemeTabX, kTabY, kTabW, kTabH, "Theme", s_activeTab == 3, true);
+    drawButton(kRegionTimeTabX, kTabY, kTabW, kTabH, "Region/Time", s_activeTab == 4, true);
     drawText(s_windowId, 26, 72,
         s_activeTab == 2 ? "Choose desktop icons and folder icon size:"
         : (s_activeTab == 0 ? "Select a background from the gallery:"
         : (s_activeTab == 1 ? "Select a gradient from the gallery:"
-        : "Choose a desktop theme. Classic is default; Sci Fi is opt-in.")),
+        : (s_activeTab == 3 ? "Choose a desktop theme. Classic is default; Sci Fi is opt-in."
+        : "Choose your region and clock format."))),
         DisplayOptionsTextColor());
     drawColorRect(s_windowId, 20, 92, 742, 456, DisplayOptionsPanelColor());
 
@@ -614,6 +650,8 @@ void DisplayOptions::render()
         }
     } else if (s_activeTab == 3) {
         drawThemeTab();
+    } else if (s_activeTab == 4) {
+        drawRegionTimeTab();
     } else {
         drawDesktopIconsTab();
     }
@@ -624,8 +662,10 @@ void DisplayOptions::render()
         drawButton(kSelectButtonX + 400, kButtonY, kButtonW, kButtonH, "Visual Effects", false, false);
     } else if (s_activeTab == 2) {
         drawText(s_windowId, 26, kButtonY + 10, "Changes are saved immediately.", DisplayOptionsMutedTextColor());
-    } else {
+    } else if (s_activeTab == 3) {
         drawText(s_windowId, 26, kButtonY + 10, "Selecting a theme saves immediately and reloads the compositor.", DisplayOptionsMutedTextColor());
+    } else if (s_activeTab == 4) {
+        drawText(s_windowId, 26, kButtonY + 10, "Changes save immediately and apply to the clock display.", DisplayOptionsMutedTextColor());
     }
 }
 
@@ -733,6 +773,20 @@ void DisplayOptions::drawThemeTab()
         "Dark taskbar surfaces");
 }
 
+void DisplayOptions::drawRegionTimeTab()
+{
+    const std::string timeZoneLabel = clockTimeZoneLabelAt(s_selectedTimeZoneIndex);
+    drawText(s_windowId, 46, 116, "Region and clock format:", DisplayOptionsTextColor());
+    drawButton(kRegionTimeZoneX, kRegionTimeZoneY, kRegionTimeZoneW, kRegionTimeZoneH,
+        std::string("Time Zone: ") + timeZoneLabel, false, true);
+    drawText(s_windowId, 46, 174, "Click the time zone button to cycle supported zones.", DisplayOptionsMutedTextColor());
+    drawCheckbox(kRegionTimeUse24X, kRegionTimeUse24Y, "Use 24-hour time", s_use24HourTime, hit(s_mouseX, s_mouseY, kRegionTimeUse24X - 8, kRegionTimeUse24Y - 8, 320, 34));
+    drawText(s_windowId, 46, 238,
+        s_use24HourTime ? "Current format: 24-hour clock, for example 14:44." : "Current format: 12-hour clock, for example 2:44 PM.",
+        DisplayOptionsMutedTextColor());
+    drawText(s_windowId, 46, 266, "Pacific Time is the safe fallback if the setting is missing or invalid.", DisplayOptionsMutedTextColor());
+}
+
 void DisplayOptions::drawBackgroundTile(int index, int x, int y, bool hover, bool selected, bool applied)
 {
     const auto& entry = WallpaperRegistry::BuiltInBackgrounds()[static_cast<size_t>(index)];
@@ -811,6 +865,13 @@ void DisplayOptions::handleMouseDown(int mx, int my)
         render();
         return;
     }
+    if (hit(mx, my, kRegionTimeTabX, kTabY, kTabW, kTabH)) {
+        s_activeTab = 4;
+        s_galleryScrollOffset = 0;
+        Logger::write(LogLevel::Info, "DisplayOptions Region/Time tab selected");
+        render();
+        return;
+    }
 
     if (s_activeTab == 2) {
         for (int i = 0; i < 4; ++i) {
@@ -822,6 +883,22 @@ void DisplayOptions::handleMouseDown(int mx, int my)
                 }
                 return;
             }
+        }
+        return;
+    }
+
+    if (s_activeTab == 4) {
+        if (hit(mx, my, kRegionTimeZoneX, kRegionTimeZoneY, kRegionTimeZoneW, kRegionTimeZoneH)) {
+            s_selectedTimeZoneIndex = (s_selectedTimeZoneIndex + 1) % static_cast<int>(gxos::clocktime::kTimeZoneOptionCount);
+            applySelectedRegionTime();
+            render();
+            return;
+        }
+        if (hit(mx, my, kRegionTimeUse24X, kRegionTimeUse24Y, 320, 34)) {
+            s_use24HourTime = !s_use24HourTime;
+            applySelectedRegionTime();
+            render();
+            return;
         }
         return;
     }
@@ -1000,6 +1077,49 @@ void DisplayOptions::saveDesktopIconSettings()
         Logger::write(LogLevel::Info, "DisplayOptions Desktop Icons settings saved");
         publish(MsgType::MT_DesktopConfigReload, "");
     }
+}
+
+void DisplayOptions::saveClockSettings()
+{
+    DisplayOptionsStoreData store;
+    std::string err;
+    if (!loadPersistedDisplayOptions(store, err)) {
+        Logger::write(LogLevel::Info, "DisplayOptions clock save using default display settings because load failed: " + err);
+    }
+
+    store.timeZoneId = gxos::clocktime::TimeZoneIdAt(static_cast<size_t>(s_selectedTimeZoneIndex));
+    store.use24HourTime = s_use24HourTime;
+
+    const bool storeSaved = DisplayOptionsStore::Save(kDisplayOptionsStorePath, store, err);
+    if (!storeSaved) {
+        Logger::write(LogLevel::Warn, "DisplayOptions clock settings save failed: " + err);
+    }
+
+    DesktopConfigData cfg;
+    std::string legacyErr;
+    bool legacySaved = false;
+    if (DesktopConfig::Load("desktop.json", cfg, legacyErr)) {
+        applyDisplayOptionsToDesktopConfig(store, cfg);
+        if (!DesktopConfig::Save("desktop.json", cfg, legacyErr)) {
+            Logger::write(LogLevel::Warn, "DisplayOptions legacy desktop.json clock save failed: " + legacyErr);
+        } else {
+            legacySaved = true;
+        }
+    }
+
+    if (storeSaved || legacySaved) {
+        s_appliedTimeZoneIndex = s_selectedTimeZoneIndex;
+        s_appliedUse24HourTime = s_use24HourTime;
+        Logger::write(LogLevel::Info, std::string("DisplayOptions applied clock settings timeZoneId=") +
+            gxos::clocktime::TimeZoneIdAt(static_cast<size_t>(s_appliedTimeZoneIndex)) +
+            " use24HourTime=" + (s_appliedUse24HourTime ? "true" : "false"));
+        publish(MsgType::MT_DesktopConfigReload, "");
+    }
+}
+
+void DisplayOptions::applySelectedRegionTime()
+{
+    saveClockSettings();
 }
 
 void DisplayOptions::applySelectedTheme()

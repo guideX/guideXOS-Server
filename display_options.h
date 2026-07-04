@@ -29,6 +29,10 @@ private:
     static int s_mouseX;
     static int s_mouseY;
     static bool s_mouseDown;
+    static int s_selectedTimeZoneIndex;
+    static int s_appliedTimeZoneIndex;
+    static bool s_use24HourTime;
+    static bool s_appliedUse24HourTime;
     static bool s_showDesktopTrash;
     static bool s_showDesktopThisSystem;
     static bool s_showDesktopFileManager;
@@ -44,6 +48,7 @@ private:
     static void drawGradientTile(int index, int x, int y, bool hover, bool selected, bool applied);
     static void drawThemeTab();
     static void drawDesktopIconsTab();
+    static void drawRegionTimeTab();
     static void handleMouseDown(int mx, int my);
     static void handleMouseUp(int mx, int my);
     static void handleMouseMove(int mx, int my);
@@ -52,8 +57,10 @@ private:
     static void applySelectedGradient();
     static void applySelectedBackground();
     static void applySelectedTheme();
+    static void applySelectedRegionTime();
     static bool toggleDesktopIconSetting(int index);
     static void saveDesktopIconSettings();
+    static void saveClockSettings();
     static bool hit(int mx, int my, int x, int y, int w, int h);
 };
 

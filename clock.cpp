@@ -1,5 +1,8 @@
 #include "clock.h"
+#include "clock_time_settings.h"
+#include "desktop_config.h"
 #include "desktop_theme.h"
+#include "display_options_store.h"
 #include "gui_protocol.h"
 #include "logger.h"
 #include <sstream>
@@ -16,6 +19,10 @@ namespace gxos { namespace apps {
         constexpr int kClockWindowHeight = 120;
         constexpr int kClockTimeY = 0;
         constexpr int kClockDateY = 18;
+        constexpr uint64_t kClockSettingsRefreshMs = 5000;
+
+        clocktime::ClockDisplaySettings g_clockSettings{};
+        uint64_t g_lastClockSettingsRefreshTicks = 0;
 
         uint32_t packRgb(int r, int g, int b)
         {
@@ -199,6 +206,29 @@ namespace gxos { namespace apps {
 
             drawTextAt(windowId, x, y, text);
         }
+
+        void loadClockSettings()
+        {
+            DisplayOptionsStoreData store;
+            std::string err;
+            if (DisplayOptionsStore::Load("display-options.cfg", store, err)) {
+                g_clockSettings.timeZoneId = store.timeZoneId;
+                g_clockSettings.use24HourTime = store.use24HourTime;
+                g_clockSettings = clocktime::NormalizeClockDisplaySettings(g_clockSettings);
+                return;
+            }
+
+            DesktopConfigData cfg;
+            std::string cfgErr;
+            if (DesktopConfig::Load("desktop.json", cfg, cfgErr)) {
+                g_clockSettings.timeZoneId = cfg.timeZoneId;
+                g_clockSettings.use24HourTime = cfg.use24HourTime;
+            } else {
+                g_clockSettings.timeZoneId = clocktime::kDefaultTimeZoneId;
+                g_clockSettings.use24HourTime = false;
+            }
+            g_clockSettings = clocktime::NormalizeClockDisplaySettings(g_clockSettings);
+        }
     }
     
     // Static member initialization
@@ -218,6 +248,8 @@ namespace gxos { namespace apps {
             // Initialize state
             s_windowId = 0;
             s_lastUpdateTicks = 0;
+            g_lastClockSettingsRefreshTicks = 0;
+            loadClockSettings();
             
             // Subscribe to IPC channels
             const char* kGuiChanIn = "gui.input";
@@ -286,6 +318,10 @@ namespace gxos { namespace apps {
                 // Update display every second
                 auto now = std::chrono::steady_clock::now();
                 uint64_t nowTicks = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
+                if (g_lastClockSettingsRefreshTicks == 0 || (nowTicks - g_lastClockSettingsRefreshTicks) >= kClockSettingsRefreshMs) {
+                    loadClockSettings();
+                    g_lastClockSettingsRefreshTicks = nowTicks;
+                }
                 
                 if (s_windowId != 0 && (nowTicks - s_lastUpdateTicks >= 1000)) {
                     updateDisplay();
@@ -330,51 +366,16 @@ namespace gxos { namespace apps {
     
     std::string Clock::getCurrentTime() {
         // Get current time
-        auto now = std::chrono::system_clock::now();
-        std::time_t now_c = std::chrono::system_clock::to_time_t(now);
-        std::tm local_tm{};
-        
-#ifdef _WIN32
-        localtime_s(&local_tm, &now_c);
-#else
-        std::tm* tmp = std::localtime(&now_c);
-        if (tmp) local_tm = *tmp;
-#endif
-        
-        // Format as HH:MM:SS
-        std::ostringstream oss;
-        oss << std::setfill('0') << std::setw(2) << local_tm.tm_hour << ":"
-            << std::setfill('0') << std::setw(2) << local_tm.tm_min << ":"
-            << std::setfill('0') << std::setw(2) << local_tm.tm_sec;
-        
-        return oss.str();
+        const auto now = std::chrono::system_clock::now();
+        const std::time_t now_c = std::chrono::system_clock::to_time_t(now);
+        return clocktime::formatTimeOfDay(now_c, g_clockSettings, true);
     }
     
     std::string Clock::getCurrentDate() {
         // Get current date
-        auto now = std::chrono::system_clock::now();
-        std::time_t now_c = std::chrono::system_clock::to_time_t(now);
-        std::tm local_tm{};
-        
-#ifdef _WIN32
-        localtime_s(&local_tm, &now_c);
-#else
-        std::tm* tmp = std::localtime(&now_c);
-        if (tmp) local_tm = *tmp;
-#endif
-        
-        // Format as Day, Month DD, YYYY
-        const char* weekdays[] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
-        const char* months[] = {"January", "February", "March", "April", "May", "June", 
-                               "July", "August", "September", "October", "November", "December"};
-        
-        std::ostringstream oss;
-        oss << weekdays[local_tm.tm_wday] << ", " 
-            << months[local_tm.tm_mon] << " " 
-            << local_tm.tm_mday << ", " 
-            << (1900 + local_tm.tm_year);
-        
-        return oss.str();
+        const auto now = std::chrono::system_clock::now();
+        const std::time_t now_c = std::chrono::system_clock::to_time_t(now);
+        return clocktime::formatLongDate(now_c, g_clockSettings);
     }
     
 }} // namespace gxos::apps

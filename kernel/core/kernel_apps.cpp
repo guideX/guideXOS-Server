@@ -3519,6 +3519,41 @@ static const int kFileExplorerScrollbarW = 8;
 static const int kFileExplorerScrollbarPad = 2;
 static const int kFileExplorerScrollbarMinThumbH = 18;
 
+static bool fileExplorerPrepareStartPath(const char* startPath, char* resolvedPath, int resolvedPathSize, const char* contextLabel)
+{
+    if (!resolvedPath || resolvedPathSize <= 0) return false;
+
+    const char* requestedPath = (startPath && startPath[0]) ? startPath : "/";
+    char normalized[vfs::VFS_MAX_PATH];
+    vfs::normalize_path(requestedPath, normalized, sizeof(normalized));
+    if (!normalized[0]) {
+        serial::puts("[fileexplorer-bm] ");
+        serial::puts(contextLabel ? contextLabel : "launch");
+        serial::puts(" rejected: invalid path\n");
+        return false;
+    }
+
+    vfs::FileInfo info{};
+    if (vfs::stat(normalized, &info) != vfs::VFS_OK) {
+        if (vfs::mkdir(normalized) != vfs::VFS_OK && vfs::stat(normalized, &info) != vfs::VFS_OK) {
+            serial::puts("[fileexplorer-bm] ");
+            serial::puts(contextLabel ? contextLabel : "launch");
+            serial::puts(" rejected: folder missing and could not be created\n");
+            return false;
+        }
+    }
+
+    if (vfs::stat(normalized, &info) != vfs::VFS_OK || info.type != vfs::FILE_TYPE_DIRECTORY) {
+        serial::puts("[fileexplorer-bm] ");
+        serial::puts(contextLabel ? contextLabel : "launch");
+        serial::puts(" rejected: target is not a directory\n");
+        return false;
+    }
+
+    strcopy(resolvedPath, normalized, resolvedPathSize);
+    return true;
+}
+
 FileExplorerApp::FileExplorerApp()
     : m_entryCount(0), m_selected(0), m_scroll(0),
       m_lastClickIndex(-1), m_lastClickTick(0),
@@ -3661,6 +3696,11 @@ bool FileExplorerApp::init() {
 }
 
 bool FileExplorerApp::initWithParam(const char* startPath) {
+    char resolvedStartPath[MAX_PATH_LEN];
+    if (!fileExplorerPrepareStartPath(startPath, resolvedStartPath, sizeof(resolvedStartPath), "launch")) {
+        return false;
+    }
+
     m_window = new app::KernelWindow();
     strcopy(m_window->title, "File Explorer", app::MAX_TITLE_LEN);
     m_window->x = 80;
@@ -3687,7 +3727,7 @@ bool FileExplorerApp::initWithParam(const char* startPath) {
     m_confirmDeleteBtnId = addButton(260, 205, 92, 20, "Move");
     m_cancelDeleteBtnId = addButton(344, 205, 70, 20, "Cancel");
 
-    strcopy(m_currentPath, startPath && startPath[0] ? startPath : "/", MAX_PATH_LEN);
+    strcopy(m_currentPath, resolvedStartPath, MAX_PATH_LEN);
     refresh();
     updateActionButtons();
     m_state = app::AppState::Running;

@@ -134,17 +134,40 @@ static void fill_shell_label(gxos::apps::LaunchTarget& target, const char* label
     if (text_equals(label, "Console") || text_equals(label, "Terminal")) {
         target.dispatchLaunchName = "Console";
         target.diagnosticReason = "Bare-metal shell label opens the kernel terminal; it is not a kernel AppManager app";
+    } else if (text_equals(label, "Computer")) {
+        target.dispatchLaunchName = "Files";
+        target.pathParameter = "/";
+        target.diagnosticReason = "Bare-metal computer/root label opens File Explorer at the filesystem root";
+    } else if (text_equals(label, "Documents")) {
+        target.dispatchLaunchName = "Files";
+        target.pathParameter = "/Documents";
+        target.diagnosticReason = "Bare-metal Documents label opens File Explorer at the Documents folder";
+    } else if (text_equals(label, "Pictures")) {
+        target.dispatchLaunchName = "Files";
+        target.pathParameter = "/Pictures";
+        target.diagnosticReason = "Bare-metal Pictures label opens File Explorer at the Pictures folder";
+    } else if (text_equals(label, "Music")) {
+        target.dispatchLaunchName = "Files";
+        target.pathParameter = "/Music";
+        target.diagnosticReason = "Bare-metal Music label opens File Explorer at the Music folder";
+    } else if (text_equals(label, "Network")) {
+        target.dispatchLaunchName = "Files";
+        target.pathParameter = "/Network";
+        target.diagnosticReason = "Bare-metal Network label opens File Explorer at the Network folder";
+    } else if (text_equals(label, "Control Panel")) {
+        target.dispatchLaunchName = "Control Panel";
+        target.diagnosticReason = "Bare-metal Control Panel opens the existing embedded control area";
+    } else if (text_equals(label, "Settings")) {
+        // Temporary fallback until a dedicated Settings app exists in bare metal.
+        target.dispatchLaunchName = "Control Panel";
+        target.diagnosticReason = "Bare-metal Settings falls back to the existing control area until a dedicated Settings app exists";
+    } else if (text_equals(label, "System Settings")) {
+        target.dispatchLaunchName = "DisplayOptions";
+        target.diagnosticReason = "Bare-metal System Settings opens the existing display/settings panel";
     } else if (text_equals(label, "This System")) {
         target.dispatchLaunchName = "Files";
         target.pathParameter = "/";
         target.diagnosticReason = "Desktop system object opens File Explorer at the root path";
-    } else if (text_equals(label, "Control Panel") || text_equals(label, "Settings") || text_equals(label, "System Settings")) {
-        // The bare-metal right-column Start Menu still dispatches "Settings"
-        // literally, while "Control Panel" opens embedded panel state. Keep
-        // this DisplayOptions candidate diagnostic-only until those legacy
-        // paths are intentionally migrated.
-        target.dispatchLaunchName = "DisplayOptions";
-        target.diagnosticReason = "Bare-metal settings/control labels are shell/system affordances, not app metadata identities";
     } else {
         target.diagnosticReason = "Bare-metal Start Menu right-column shell/system label; current runtime behavior remains unchanged";
     }
@@ -1295,7 +1318,7 @@ void printLaunchStoragePreviewComparisonDiagnostic(LaunchTargetDiagnosticWriter 
     write("  difference=hosted-desktop-json note=hosted owns live desktop.json pinned/recent/desktopShortcuts/iconPositions storage\n");
     write("  difference=bare-metal-vfs note=bare-metal owns VFS /desktop.shortcuts, /.desktop_icons, and /desktop.system.icons storage\n");
     write("  difference=start-menu-source note=hosted all-programs are registry-derived while bare-metal Start Menu arrays are static today\n");
-    write("  difference=compatibility-bridge note=hosted ComputerFiles bridges to FileExplorer while bare-metal uses Computer/Documents/Pictures/Music/Network/Settings labels\n");
+    write("  difference=compatibility-bridge note=hosted ComputerFiles bridges to FileExplorer while bare-metal uses Computer/Documents/Pictures/Music/Network with Files path launches and ControlPanel fallback for Settings\n");
     write("  difference=dynamic-runtime-sites note=desktop icon/taskbar runtime labels are target-specific and are not migrated in this diagnostic\n");
     write("  difference=bare-metal-imgviewer note=hosted Image Viewer keeps the full editor/viewer path while bare-metal ImageViewer is a minimal PNG preview app with legacy ImgViewer alias\n");
     write("unexpectedDrift: ");

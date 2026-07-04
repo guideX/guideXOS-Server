@@ -707,13 +707,15 @@ $checks = @(
     "[LaunchShadowRealBranchStartMenuSettingsMutation] phase=before temporaryStartMenuStateMutation=true persistentDesktopStorageWrites=false nonFatal=true",
     "source=RealBranchStartMenuSettings",
     "uiLabel=Settings",
-    "actualDispatch=Settings",
+    "actualDispatch=Control Panel",
     "resolvedType=ShellAction",
     "appId=",
-    "resolvedDispatch=DisplayOptions",
-    "typedDispatchCandidate=DisplayOptions",
-    "typedDispatchCandidateMatchesActual=false",
-    "typedDispatchCandidateComparison=unexpected-mismatch",
+    "resolvedDispatch=Control Panel",
+    "typedDispatchCandidate=Control Panel",
+    "typedDispatchCandidateMatchesActual=true",
+    "typedDispatchCandidateComparison=match",
+    "typedDispatchCandidateStatus=ok",
+    "actualBehavior=embedded-control-panel-state",
     "nonFatal=true shadowOnly=true",
     "[APPMODEL-LAUNCHSHADOW-SMOKE] real-branch Start Menu Settings helper after temporary Start Menu state restoration",
     "[LaunchShadowRealBranchStartMenuSettingsRestore] realBranchStartMenuSettingsStateRestored=true",
@@ -727,25 +729,22 @@ $checks = @(
     "nonFatal=true",
     "[APPMODEL-LAUNCHSHADOW-SMOKE] real-branch Start Menu right-column ShellAction helper before temporary Start Menu state mutation",
     "[LaunchShadowRealBranchStartMenuRightColumnShellActionsMutation] phase=before temporaryStartMenuStateMutation=true persistentDesktopStorageWrites=false nonFatal=true",
-    "source=RealBranchStartMenuComputer",
-    "uiLabel=Computer",
-    "actualDispatch=Computer",
-    "source=RealBranchStartMenuDocuments",
-    "uiLabel=Documents",
-    "actualDispatch=Documents",
-    "source=RealBranchStartMenuPictures",
-    "uiLabel=Pictures",
-    "actualDispatch=Pictures",
-    "source=RealBranchStartMenuMusic",
-    "uiLabel=Music",
-    "actualDispatch=Music",
-    "source=RealBranchStartMenuNetwork",
-    "uiLabel=Network",
-    "actualDispatch=Network",
-    "resolvedType=ShellAction",
-    "typedDispatchCandidateMatchesActual=false",
-    "typedDispatchCandidateComparison=unexpected-mismatch",
-    "typedDispatchCandidateStatus=unsupported",
+    "source=StartMenuFolder",
+    "handler=Files",
+    "path=/",
+    "resolvedType=FileOpen",
+    "appId=",
+    "resolvedDispatch=Files",
+    "adapterLegacyDispatch=Files",
+    "candidateMatchesHandler=true",
+    "comparison=match",
+    "adapterStatus=ok",
+    "adapterReason=File-open target carries the current handler app name; path remains a separate parameter",
+    "dispatchUsage=legacy-fallback",
+    "selectedDispatch=Files",
+    "behaviorPreserved=true",
+    "status=resolved-file-open",
+    "reason=Folder path resolves to existing File Explorer parameter launch",
     "[APPMODEL-LAUNCHSHADOW-SMOKE] real-branch Start Menu right-column ShellAction helper after temporary Start Menu state restoration",
     "[LaunchShadowRealBranchStartMenuRightColumnShellActionsRestore] realBranchStartMenuRightColumnShellActionsStateRestored=true",
     "realBranchStartMenuRightColumnShellActionsMenuOpenStateRestored=true",
@@ -763,10 +762,10 @@ $checks = @(
     "actualDispatch=Control Panel",
     "resolvedType=ShellAction",
     "appId=",
-    "resolvedDispatch=DisplayOptions",
-    "typedDispatchCandidate=DisplayOptions",
-    "typedDispatchCandidateMatchesActual=false",
-    "typedDispatchCandidateComparison=unexpected-mismatch",
+    "resolvedDispatch=Control Panel",
+    "typedDispatchCandidate=Control Panel",
+    "typedDispatchCandidateMatchesActual=true",
+    "typedDispatchCandidateComparison=match",
     "typedDispatchCandidateStatus=ok",
     "actualBehavior=embedded-control-panel-state",
     "[APPMODEL-LAUNCHSHADOW-SMOKE] real-branch Start Menu Control Panel helper after temporary embedded-action state restoration",
@@ -1036,25 +1035,20 @@ $realBranchStartMenuFilesConfirmed =
 $realBranchStartMenuConsoleConfirmed =
     [regex]::IsMatch($output, 'source=RealBranchStartMenuConsole uiLabel=Console actualDispatch=Console resolvedType=ShellAction appId= resolvedDispatch=Console typedDispatchCandidate=Console typedDispatchCandidateMatchesActual=true typedDispatchCandidateComparison=match .* nonFatal=true shadowOnly=true')
 $realBranchStartMenuSettingsConfirmed =
-    [regex]::IsMatch($output, 'source=RealBranchStartMenuSettings uiLabel=Settings actualDispatch=Settings resolvedType=ShellAction appId= resolvedDispatch=DisplayOptions typedDispatchCandidate=DisplayOptions typedDispatchCandidateMatchesActual=false typedDispatchCandidateComparison=unexpected-mismatch .* nonFatal=true shadowOnly=true')
-# The right-column Settings affordance still dispatches literal "Settings".
-# DisplayOptions is a diagnostic-only typed candidate until that path is migrated.
+    [regex]::IsMatch($output, 'source=RealBranchStartMenuSettings uiLabel=Settings actualDispatch=Control Panel resolvedType=ShellAction appId= resolvedDispatch=Control Panel typedDispatchCandidate=Control Panel typedDispatchCandidateMatchesActual=true typedDispatchCandidateComparison=match typedDispatchCandidateStatus=ok .* actualBehavior=embedded-control-panel-state nonFatal=true shadowOnly=true')
+# Temporary bare-metal fallback: Settings currently routes to the existing control area.
+# Keep this until a dedicated Settings app exists.
 $realBranchStartMenuSettingsExpectedNonFatalDriftConfirmed =
     $realBranchStartMenuSettingsConfirmed
 $realBranchStartMenuRightColumnShellActionsConfirmed =
-    [regex]::IsMatch($output, 'source=RealBranchStartMenuComputer uiLabel=Computer actualDispatch=Computer resolvedType=ShellAction appId= resolvedDispatch= typedDispatchCandidate= typedDispatchCandidateMatchesActual=false typedDispatchCandidateComparison=unexpected-mismatch typedDispatchCandidateStatus=unsupported .* nonFatal=true shadowOnly=true') -and
-    [regex]::IsMatch($output, 'source=RealBranchStartMenuDocuments uiLabel=Documents actualDispatch=Documents resolvedType=ShellAction appId= resolvedDispatch= typedDispatchCandidate= typedDispatchCandidateMatchesActual=false typedDispatchCandidateComparison=unexpected-mismatch typedDispatchCandidateStatus=unsupported .* nonFatal=true shadowOnly=true') -and
-    [regex]::IsMatch($output, 'source=RealBranchStartMenuPictures uiLabel=Pictures actualDispatch=Pictures resolvedType=ShellAction appId= resolvedDispatch= typedDispatchCandidate= typedDispatchCandidateMatchesActual=false typedDispatchCandidateComparison=unexpected-mismatch typedDispatchCandidateStatus=unsupported .* nonFatal=true shadowOnly=true') -and
-    [regex]::IsMatch($output, 'source=RealBranchStartMenuMusic uiLabel=Music actualDispatch=Music resolvedType=ShellAction appId= resolvedDispatch= typedDispatchCandidate= typedDispatchCandidateMatchesActual=false typedDispatchCandidateComparison=unexpected-mismatch typedDispatchCandidateStatus=unsupported .* nonFatal=true shadowOnly=true') -and
-    [regex]::IsMatch($output, 'source=RealBranchStartMenuNetwork uiLabel=Network actualDispatch=Network resolvedType=ShellAction appId= resolvedDispatch= typedDispatchCandidate= typedDispatchCandidateMatchesActual=false typedDispatchCandidateComparison=unexpected-mismatch typedDispatchCandidateStatus=unsupported .* nonFatal=true shadowOnly=true')
-# These right-column location affordances remain literal legacy dispatches.
-# Keep their empty typed candidates as explicit nonfatal drift until contracts exist.
+    [regex]::IsMatch($output, 'source=StartMenuFolder handler=Files path=/ resolvedType=FileOpen appId= resolvedDispatch=Files adapterLegacyDispatch=Files candidateMatchesHandler=true comparison=match adapterStatus=ok adapterReason=File-open target carries the current handler app name; path remains a separate parameter dispatchUsage=legacy-fallback selectedDispatch=Files behaviorPreserved=true status=resolved-file-open reason=Folder path resolves to existing File Explorer parameter launch nonFatal=true shadowOnly=true')
+# The right-column folder-backed affordances now open File Explorer at the filesystem root.
+# Keep this narrow and explicit so the smoke validates the real folder-launch path.
 $realBranchStartMenuRightColumnShellActionsExpectedNonFatalDriftConfirmed =
     $realBranchStartMenuRightColumnShellActionsConfirmed
 $realBranchStartMenuControlPanelConfirmed =
-    [regex]::IsMatch($output, 'source=RealBranchStartMenuControlPanel uiLabel=Control Panel actualDispatch=Control Panel resolvedType=ShellAction appId= resolvedDispatch=DisplayOptions typedDispatchCandidate=DisplayOptions typedDispatchCandidateMatchesActual=false typedDispatchCandidateComparison=unexpected-mismatch typedDispatchCandidateStatus=ok .* actualBehavior=embedded-control-panel-state nonFatal=true shadowOnly=true')
-# Bare metal opens embedded Control Panel state instead of dispatching DisplayOptions.
-# Keep the resolver candidate as explicit nonfatal drift until that contract changes.
+    [regex]::IsMatch($output, 'source=RealBranchStartMenuControlPanel uiLabel=Control Panel actualDispatch=Control Panel resolvedType=ShellAction appId= resolvedDispatch=Control Panel typedDispatchCandidate=Control Panel typedDispatchCandidateMatchesActual=true typedDispatchCandidateComparison=match typedDispatchCandidateStatus=ok .* actualBehavior=embedded-control-panel-state nonFatal=true shadowOnly=true')
+# Control Panel keeps the existing embedded control area behavior.
 $realBranchStartMenuControlPanelExpectedNonFatalDriftConfirmed =
     $realBranchStartMenuControlPanelConfirmed
 $realBranchStartMenuAppModelConfirmed =

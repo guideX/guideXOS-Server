@@ -9,6 +9,7 @@
 #include "file_explorer.h"
 #include "desktop_theme.h"
 #include "shutdown_dialog.h"
+#include "clock_time_settings.h"
 #include "display_options_store.h"
 #include "icons.h"
 #include "right_click_menu.h"
@@ -167,6 +168,7 @@ namespace gxos {
         };
 
         static TaskbarPosition g_taskbarPosition = TaskbarPosition::Bottom;
+        static clocktime::ClockDisplaySettings g_clockDisplaySettings{};
 
         static std::string taskbarPositionName(TaskbarPosition position) {
             switch (position) {
@@ -188,6 +190,13 @@ namespace gxos {
             return TaskbarPosition::Bottom;
         }
 
+        static clocktime::ClockDisplaySettings clockDisplaySettingsFromConfig(const DesktopConfigData& cfg) {
+            clocktime::ClockDisplaySettings settings;
+            settings.timeZoneId = cfg.timeZoneId.empty() ? clocktime::kDefaultTimeZoneId : cfg.timeZoneId;
+            settings.use24HourTime = cfg.use24HourTime;
+            return clocktime::NormalizeClockDisplaySettings(settings);
+        }
+
         static DisplayOptionsStoreData displayOptionsFromDesktopConfig(const DesktopConfigData& cfg) {
             DisplayOptionsStoreData out;
             out.wallpaperId = !cfg.wallpaperId.empty()
@@ -196,6 +205,8 @@ namespace gxos {
             out.backgroundScaleMode = cfg.backgroundScaleMode.empty() ? "fill" : cfg.backgroundScaleMode;
             out.desktopThemeId = cfg.desktopThemeId.empty() ? "classic" : cfg.desktopThemeId;
             out.taskbarPosition = cfg.taskbarPosition.empty() ? "bottom" : cfg.taskbarPosition;
+            out.timeZoneId = clocktime::NormalizeTimeZoneId(cfg.timeZoneId);
+            out.use24HourTime = cfg.use24HourTime;
             out.showDesktopTrash = cfg.showDesktopTrash;
             out.showDesktopThisSystem = cfg.showDesktopThisSystem;
             out.showDesktopFileManager = cfg.showDesktopFileManager;
@@ -210,6 +221,8 @@ namespace gxos {
             cfg.backgroundScaleMode = store.backgroundScaleMode.empty() ? "fill" : store.backgroundScaleMode;
             cfg.desktopThemeId = store.desktopThemeId.empty() ? "classic" : store.desktopThemeId;
             cfg.taskbarPosition = store.taskbarPosition.empty() ? "bottom" : store.taskbarPosition;
+            cfg.timeZoneId = clocktime::NormalizeTimeZoneId(store.timeZoneId);
+            cfg.use24HourTime = store.use24HourTime;
             cfg.showDesktopTrash = store.showDesktopTrash;
             cfg.showDesktopThisSystem = store.showDesktopThisSystem;
             cfg.showDesktopFileManager = store.showDesktopFileManager;
@@ -3409,26 +3422,18 @@ namespace gxos {
                 if (!taskbarVertical) drawSystemTray(dc, cr, taskbarH);
                 // Taskbar clock/date display (right side, matching Legacy Taskbar.cs)
                 if (!taskbarVertical) {
-                    std::time_t now = std::time(nullptr);
-                    std::tm ltBuf{};
-#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
-                    localtime_s(&ltBuf, &now);
-#else
-                    std::tm* tmp = std::localtime(&now);
-                    if (tmp) ltBuf = *tmp;
-#endif
-                    char timeBuf[16]; char dateBuf[16];
-                    std::snprintf(timeBuf, sizeof(timeBuf), "%02d:%02d", ltBuf.tm_hour, ltBuf.tm_min);
-                    std::snprintf(dateBuf, sizeof(dateBuf), "%d/%d/%d", ltBuf.tm_mon + 1, ltBuf.tm_mday, ltBuf.tm_year + 1900);
-                    int timeW = measureUiText(timeBuf, (int)strlen(timeBuf), FontRole::Small);
-                    int dateW = measureUiText(dateBuf, (int)strlen(dateBuf), FontRole::Small);
+                    const std::time_t now = std::time(nullptr);
+                    const std::string timeText = clocktime::formatTimeOfDay(now, g_clockDisplaySettings, false);
+                    const std::string dateText = clocktime::formatShortDate(now, g_clockDisplaySettings);
+                    int timeW = measureUiText(timeText.c_str(), (int)timeText.size(), FontRole::Small);
+                    int dateW = measureUiText(dateText.c_str(), (int)dateText.size(), FontRole::Small);
                     int lineH = uiTextHeight(FontRole::Small);
                     int clockW = (timeW > dateW ? timeW : dateW) + 16;
                     int clockX = tb.right - clockW - theme.taskbarPadding;
                     int timeY = tb.top + 6;
                     int dateY = timeY + lineH - 1;
-                    drawUiText(dc, clockX + (clockW - timeW) / 2, timeY, timeBuf, (int)strlen(timeBuf), RGB(200, 200, 210), FontRole::Small);
-                    drawUiText(dc, clockX + (clockW - dateW) / 2, dateY, dateBuf, (int)strlen(dateBuf), RGB(150, 150, 165), FontRole::Small);
+                    drawUiText(dc, clockX + (clockW - timeW) / 2, timeY, timeText.c_str(), (int)timeText.size(), RGB(200, 200, 210), FontRole::Small);
+                    drawUiText(dc, clockX + (clockW - dateW) / 2, dateY, dateText.c_str(), (int)dateText.size(), RGB(150, 150, 165), FontRole::Small);
                 }
                 // Show Desktop button (thin sliver on far right, matching Legacy)
                 {
@@ -4465,6 +4470,7 @@ namespace gxos {
                 }
                 if (cfgOk || displayOk) {
                     g_cfg = cfg;
+                    g_clockDisplaySettings = clockDisplaySettingsFromConfig(g_cfg);
                     syncDesktopThemeFromConfig(g_cfg);
                     g_taskbarPosition = parseTaskbarPosition(g_cfg.taskbarPosition);
                     g_cfg.taskbarPosition = taskbarPositionName(g_taskbarPosition);
@@ -4697,6 +4703,7 @@ namespace gxos {
                 applyDisplayOptionsToDesktopConfig(displayStore, cfg);
             }
             g_cfg = cfg;
+            g_clockDisplaySettings = clockDisplaySettingsFromConfig(g_cfg);
             Logger::write(LogLevel::Info, std::string("Compositor DesktopConfig loaded=") + (cfgOk ? "true" : "false") + " err=" + cfgErr);
             Logger::write(LogLevel::Info, std::string("Compositor display options store loaded=") + (displayOk ? "true" : "false") + " err=" + displayErr);
             syncDesktopThemeFromConfig(g_cfg);
@@ -4850,12 +4857,9 @@ namespace gxos {
         void Compositor::drawSystemTray(HDC dc, RECT cr, int taskbarH) {
             // System tray is drawn to the left of the clock area
             // Calculate clock width first to position tray
-            std::time_t now = std::time(nullptr);
-            std::tm ltBuf{};
-            localtime_s(&ltBuf, &now);
-            char timeBuf[16];
-            std::snprintf(timeBuf, sizeof(timeBuf), "%02d:%02d", ltBuf.tm_hour, ltBuf.tm_min);
-            int clockW = measureUiText(timeBuf, (int)strlen(timeBuf), FontRole::Small) + 32; // approximate clock area width
+            const std::time_t now = std::time(nullptr);
+            const std::string timeText = clocktime::formatTimeOfDay(now, g_clockDisplaySettings, false);
+            int clockW = measureUiText(timeText.c_str(), (int)timeText.size(), FontRole::Small) + 32; // approximate clock area width
             int trayX = cr.right - clockW - SystemTray::Width( ) - 16;
             WorkRect tb = taskbarRectForBounds(cr.right - cr.left, cr.bottom - cr.top);
             int trayY = tb.top;
@@ -5306,19 +5310,17 @@ namespace gxos {
             }
             
             // Clock
-            std::time_t now = std::time(nullptr);
-            std::tm ltBuf{};
-            std::tm* tmp = std::localtime(&now);
-            if (tmp) ltBuf = *tmp;
-            char timeBuf[16];
-            std::snprintf(timeBuf, sizeof(timeBuf), "%02d:%02d", ltBuf.tm_hour, ltBuf.tm_min);
-            int clockX = fbW - (theme.taskbarPadding + 52);
+            const std::time_t now = std::time(nullptr);
+            const std::string timeText = clocktime::formatTimeOfDay(now, g_clockDisplaySettings, false);
+            const std::string dateText = clocktime::formatShortDate(now, g_clockDisplaySettings);
+            int timeW = fbMeasureText(timeText.c_str(), (int)timeText.size(), FontRole::Small);
+            int dateW = fbMeasureText(dateText.c_str(), (int)dateText.size(), FontRole::Small);
+            int clockW = std::max(timeW, dateW) + 16;
+            int clockX = fbW - clockW - theme.taskbarPadding;
             fbDrawText(pixels, pitch, fbW, fbH,
-                clockX, fbH - taskbarH + 8, timeBuf, -1, 0x00C8C8D2, FontRole::Small);
-            char dateBuf[16];
-            std::snprintf(dateBuf, sizeof(dateBuf), "%d/%d", ltBuf.tm_mon + 1, ltBuf.tm_mday);
+                clockX + (clockW - timeW) / 2, fbH - taskbarH + 8, timeText.c_str(), -1, 0x00C8C8D2, FontRole::Small);
             fbDrawText(pixels, pitch, fbW, fbH,
-                clockX, fbH - taskbarH + 22, dateBuf, -1, 0x009696A5, FontRole::Small);
+                clockX + (clockW - dateW) / 2, fbH - taskbarH + 22, dateText.c_str(), -1, 0x009696A5, FontRole::Small);
             
             // Present to hardware framebuffer
             g_videoBackend->present();

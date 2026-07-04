@@ -6,6 +6,7 @@
 #include <sstream>
 #include <cctype>
 #include "fs.h"
+#include "clock_time_settings.h"
 #include "desktop_theme.h"
 
 namespace gxos { namespace gui {
@@ -24,6 +25,8 @@ namespace gxos { namespace gui {
         std::string desktopThemeId; // stable theme id, e.g. classic or scifi
         std::string backgroundScaleMode; // fill, fit, stretch, center, or tile
         std::string taskbarPosition; // bottom, top, left, or right
+        std::string timeZoneId; // pacific, mountain, central, eastern, or utc
+        bool use24HourTime{false};
         std::vector<std::string> pinned;
         std::vector<std::string> recent;
         std::vector<DesktopShortcutRec> desktopShortcuts;
@@ -41,6 +44,7 @@ namespace gxos { namespace gui {
         // Load JSON from path. Extremely small permissive parser; expects correct schema.
         static inline bool Load(const std::string& path, DesktopConfigData& out, std::string& err){
             err.clear();
+            out = DesktopConfigData{};
             std::vector<uint8_t> bytes;
             FSResult readResult = FS::readAll(path, bytes, std::numeric_limits<uint64_t>::max());
             if (!readResult.success) { err = readResult.message.empty() ? "open fail" : readResult.message; return false; }
@@ -63,6 +67,10 @@ namespace gxos { namespace gui {
             if(out.desktopThemeId.empty() && extractSection(txt, "desktop.theme", section)){ if(!section.empty() && section[0]=='"'){ size_t i=0; parseJSONString(section, i, out.desktopThemeId); } }
             if(extractSection(txt, "desktop.background.scale", section)){ if(!section.empty() && section[0]=='"'){ size_t i=0; parseJSONString(section, i, out.backgroundScaleMode); } }
             if(extractSection(txt, "desktop.taskbar.position", section)){ if(!section.empty() && section[0]=='"'){ size_t i=0; parseJSONString(section, i, out.taskbarPosition); } }
+            if(extractSection(txt, "desktop.clock.timeZoneId", section)){ if(!section.empty() && section[0]=='"'){ size_t i=0; parseJSONString(section, i, out.timeZoneId); } }
+            if(out.timeZoneId.empty() && extractSection(txt, "desktop.clock.timeZone", section)){ if(!section.empty() && section[0]=='"'){ size_t i=0; parseJSONString(section, i, out.timeZoneId); } }
+            if(extractSection(txt, "desktop.clock.use24HourTime", section)){ size_t i=0; skipWS(section,i); parseJSONBool(section, i, out.use24HourTime); }
+            if(!out.use24HourTime && extractSection(txt, "desktop.clock.use24Hour", section)){ size_t i=0; skipWS(section,i); parseJSONBool(section, i, out.use24HourTime); }
             if(extractSection(txt, "pinned", section)) parseStringArray(section, out.pinned);
             if(extractSection(txt, "recent", section)) parseStringArray(section, out.recent);
             if(extractSection(txt, "desktopShortcuts", section)) parseShortcutArray(section, out.desktopShortcuts);
@@ -79,6 +87,7 @@ namespace gxos { namespace gui {
                 TryParseDesktopThemeId(out.desktopThemeId.c_str(), &themeId);
                 out.desktopThemeId = DesktopThemeIdToString(themeId);
             }
+            out.timeZoneId = gxos::clocktime::NormalizeTimeZoneId(out.timeZoneId);
             return true;
         }
         static inline bool Save(const std::string& path, const DesktopConfigData& data, std::string& err){
@@ -92,6 +101,8 @@ namespace gxos { namespace gui {
             f << "  \"desktop.theme.id\": " << jsonEscape(DesktopThemeIdToString(themeId)) << ",\n";
             f << "  \"desktop.background.scale\": " << jsonEscape(data.backgroundScaleMode.empty() ? "fill" : data.backgroundScaleMode) << ",\n";
             f << "  \"desktop.taskbar.position\": " << jsonEscape(data.taskbarPosition.empty() ? "bottom" : data.taskbarPosition) << ",\n";
+            f << "  \"desktop.clock.timeZoneId\": " << jsonEscape(gxos::clocktime::NormalizeTimeZoneId(data.timeZoneId)) << ",\n";
+            f << "  \"desktop.clock.use24HourTime\": " << (data.use24HourTime ? "true" : "false") << ",\n";
             f << "  \"pinned\": ["; for(size_t i=0;i<data.pinned.size();++i){ if(i) f<<","; f<<jsonEscape(data.pinned[i]);} f << "],\n";
             f << "  \"recent\": ["; for(size_t i=0;i<data.recent.size();++i){ if(i) f<<","; f<<jsonEscape(data.recent[i]);} f << "],\n";
             f << "  \"desktopShortcuts\": [\n";
