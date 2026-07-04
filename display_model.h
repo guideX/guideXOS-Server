@@ -15,6 +15,75 @@ namespace gui {
 inline constexpr int kSyntheticTestMonitorWidth = 1920;
 inline constexpr int kSyntheticTestMonitorHeight = 1080;
 
+struct DisplayViewport;
+
+struct DisplayRect {
+    int left{0};
+    int top{0};
+    int right{0};
+    int bottom{0};
+
+    int width() const { return std::max(0, right - left); }
+    int height() const { return std::max(0, bottom - top); }
+    bool isValid() const { return width() > 0 && height() > 0; }
+
+    std::string summary() const
+    {
+        std::ostringstream out;
+        out << left << ',' << top << '-' << right << ',' << bottom;
+        return out.str();
+    }
+};
+
+inline DisplayRect makeDisplayRect(int left, int top, int right, int bottom)
+{
+    return DisplayRect{ left, top, right, bottom };
+}
+
+inline DisplayRect offsetDisplayRect(const DisplayRect& rect, int dx, int dy)
+{
+    return DisplayRect{ rect.left + dx, rect.top + dy, rect.right + dx, rect.bottom + dy };
+}
+
+inline int displayRectIntersectionArea(const DisplayRect& a, const DisplayRect& b)
+{
+    const int left = std::max(a.left, b.left);
+    const int top = std::max(a.top, b.top);
+    const int right = std::min(a.right, b.right);
+    const int bottom = std::min(a.bottom, b.bottom);
+    if (right <= left || bottom <= top) {
+        return 0;
+    }
+    return (right - left) * (bottom - top);
+}
+
+inline DisplayRect insetDisplayRectForTaskbar(const DisplayRect& bounds, const DisplayRect& taskbarRect)
+{
+    if (!bounds.isValid() || !taskbarRect.isValid()) {
+        return bounds;
+    }
+
+    const int overlapLeft = std::max(bounds.left, taskbarRect.left);
+    const int overlapTop = std::max(bounds.top, taskbarRect.top);
+    const int overlapRight = std::min(bounds.right, taskbarRect.right);
+    const int overlapBottom = std::min(bounds.bottom, taskbarRect.bottom);
+    if (overlapRight <= overlapLeft || overlapBottom <= overlapTop) {
+        return bounds;
+    }
+
+    DisplayRect work = bounds;
+    if (taskbarRect.top <= bounds.top && taskbarRect.bottom < bounds.bottom) {
+        work.top = std::min(bounds.bottom, taskbarRect.bottom);
+    } else if (taskbarRect.bottom >= bounds.bottom && taskbarRect.top > bounds.top) {
+        work.bottom = std::max(bounds.top, taskbarRect.top);
+    } else if (taskbarRect.left <= bounds.left && taskbarRect.right < bounds.right) {
+        work.left = std::min(bounds.right, taskbarRect.right);
+    } else if (taskbarRect.right >= bounds.right && taskbarRect.left > bounds.left) {
+        work.right = std::max(bounds.left, taskbarRect.left);
+    }
+    return work;
+}
+
 inline bool hostedSyntheticDualMonitorEnabled()
 {
     const char* value = std::getenv("GXOS_SYNTHETIC_DUAL_MONITOR");
@@ -80,6 +149,11 @@ struct DisplayMonitorDescriptor {
     bool containsVirtualPoint(int x, int y) const
     {
         return isActive() && x >= virtualX && x < (virtualX + width) && y >= virtualY && y < (virtualY + height);
+    }
+
+    DisplayRect virtualBounds() const
+    {
+        return DisplayRect{ virtualX, virtualY, virtualX + width, virtualY + height };
     }
 };
 
@@ -241,6 +315,92 @@ struct DisplayVirtualDesktop {
         return nullptr;
     }
 
+    const DisplayMonitorDescriptor* findMonitorByVirtualPoint(int x, int y) const
+    {
+        return monitorAt(x, y);
+    }
+
+    DisplayMonitorDescriptor* findMonitorByVirtualPoint(int x, int y)
+    {
+        return monitorAt(x, y);
+    }
+
+    const DisplayMonitorDescriptor* findMonitorByVirtualRectLargestIntersection(const DisplayRect& rect) const
+    {
+        const DisplayMonitorDescriptor* bestMonitor = nullptr;
+        int bestArea = 0;
+        for (const auto& monitor : monitors) {
+            if (!monitor.isActive()) {
+                continue;
+            }
+            const int area = displayRectIntersectionArea(rect, monitor.virtualBounds());
+            if (area > bestArea) {
+                bestArea = area;
+                bestMonitor = &monitor;
+            }
+        }
+
+        if (bestMonitor && bestArea > 0) {
+            return bestMonitor;
+        }
+
+        if (rect.isValid()) {
+            const int centerX = rect.left + rect.width() / 2;
+            const int centerY = rect.top + rect.height() / 2;
+            if (const DisplayMonitorDescriptor* centerMonitor = monitorAt(centerX, centerY)) {
+                return centerMonitor;
+            }
+        }
+
+        return primaryMonitor();
+    }
+
+    DisplayRect monitorBounds(const DisplayMonitorDescriptor& monitor) const
+    {
+        return monitor.virtualBounds();
+    }
+
+    DisplayRect monitorWorkArea(
+        const DisplayMonitorDescriptor& monitor,
+        const DisplayRect& primaryTaskbarRect,
+        bool syntheticExtendMode,
+        bool taskbarPrimaryOnly) const
+    {
+        const DisplayRect bounds = monitorBounds(monitor);
+        if (!taskbarPrimaryOnly) {
+            return insetDisplayRectForTaskbar(bounds, primaryTaskbarRect);
+        }
+
+        if (syntheticExtendMode) {
+            if (monitor.primary) {
+                return insetDisplayRectForTaskbar(bounds, primaryTaskbarRect);
+            }
+            // TODO(v0.2): per-monitor taskbars should shrink secondary work areas too.
+            return bounds;
+        }
+
+        return insetDisplayRectForTaskbar(bounds, primaryTaskbarRect);
+    }
+
+    DisplayRect primaryMonitorBounds() const
+    {
+        if (const DisplayMonitorDescriptor* primary = primaryMonitor()) {
+            return monitorBounds(*primary);
+        }
+        return DisplayRect{ left, top, right, bottom };
+    }
+
+    DisplayRect primaryMonitorWorkArea(
+        const DisplayRect& primaryTaskbarRect,
+        bool syntheticExtendMode,
+        bool taskbarPrimaryOnly) const
+    {
+        if (const DisplayMonitorDescriptor* primary = primaryMonitor()) {
+            return monitorWorkArea(*primary, primaryTaskbarRect, syntheticExtendMode, taskbarPrimaryOnly);
+        }
+        return DisplayRect{ left, top, right, bottom };
+    }
+
     void clampPointToBounds(int& x, int& y) const
     {
         if (activeMonitorCount() == 0) {
@@ -380,6 +540,8 @@ struct DisplayVirtualDesktop {
     {
         return serializeDisplayArrangement(monitors);
     }
+
+    const DisplayMonitorDescriptor* activeViewportMonitor(const DisplayViewport& viewport) const;
 };
 
 struct DisplayViewport {
@@ -425,6 +587,26 @@ struct DisplayViewport {
     int virtualYFromLocal(int y) const
     {
         return originY + y;
+    }
+
+    DisplayRect localRectFromVirtual(const DisplayRect& rect) const
+    {
+        return DisplayRect{
+            rect.left - originX,
+            rect.top - originY,
+            rect.right - originX,
+            rect.bottom - originY
+        };
+    }
+
+    DisplayRect virtualRectFromLocal(const DisplayRect& rect) const
+    {
+        return DisplayRect{
+            originX + rect.left,
+            originY + rect.top,
+            originX + rect.right,
+            originY + rect.bottom
+        };
     }
 
     std::string summary() const
@@ -557,6 +739,33 @@ inline DisplayViewport makeHostedDisplayViewport(
     viewport.monitorId = selected->id;
     viewport.monitorName = selected->name;
     return viewport;
+}
+
+inline const DisplayMonitorDescriptor* DisplayVirtualDesktop::activeViewportMonitor(const DisplayViewport& viewport) const
+{
+    if (!viewport.monitorId.empty()) {
+        for (const auto& monitor : monitors) {
+            if (monitor.isActive() && monitor.id == viewport.monitorId) {
+                return &monitor;
+            }
+        }
+    }
+
+    if (viewport.index > 0) {
+        size_t activeIndex = 0;
+        const size_t targetIndex = static_cast<size_t>(viewport.index - 1);
+        for (const auto& monitor : monitors) {
+            if (!monitor.isActive()) {
+                continue;
+            }
+            if (activeIndex == targetIndex) {
+                return &monitor;
+            }
+            ++activeIndex;
+        }
+    }
+
+    return primaryMonitor();
 }
 
 } // namespace gui

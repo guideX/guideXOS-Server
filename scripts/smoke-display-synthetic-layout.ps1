@@ -31,6 +31,26 @@ $checks = @(
         Match = Find-FirstMatch (Join-Path $Root 'display_model.h') 'struct DisplayViewport';
     },
     [pscustomobject]@{
+        Name = 'display model monitor lookup by point';
+        Match = Find-FirstMatch (Join-Path $Root 'display_model.h') 'findMonitorByVirtualPoint';
+    },
+    [pscustomobject]@{
+        Name = 'display model monitor lookup by rect';
+        Match = Find-FirstMatch (Join-Path $Root 'display_model.h') 'findMonitorByVirtualRectLargestIntersection';
+    },
+    [pscustomobject]@{
+        Name = 'display model monitor bounds helper';
+        Match = Find-FirstMatch (Join-Path $Root 'display_model.h') 'monitorBounds(';
+    },
+    [pscustomobject]@{
+        Name = 'display model monitor work area helper';
+        Match = Find-FirstMatch (Join-Path $Root 'display_model.h') 'monitorWorkArea(';
+    },
+    [pscustomobject]@{
+        Name = 'display model primary monitor work area helper';
+        Match = Find-FirstMatch (Join-Path $Root 'display_model.h') 'primaryMonitorWorkArea(';
+    },
+    [pscustomobject]@{
         Name = 'display model viewport index 1';
         Match = Find-FirstMatch (Join-Path $Root 'display_model.h') 'viewport.index = 1';
     },
@@ -47,8 +67,28 @@ $checks = @(
         Match = Find-FirstMatch (Join-Path $Root 'display_model.h') 'viewport.originX = selected->virtualX';
     },
     [pscustomobject]@{
+        Name = 'display model viewport local rect conversion';
+        Match = Find-FirstMatch (Join-Path $Root 'display_model.h') 'localRectFromVirtual';
+    },
+    [pscustomobject]@{
         Name = 'display model detailed summary';
         Match = Find-FirstMatch (Join-Path $Root 'display_model.h') 'detailedSummary() const';
+    },
+    [pscustomobject]@{
+        Name = 'compositor synthetic extend mode helper';
+        Match = Find-FirstMatch (Join-Path $Root 'compositor.cpp') 'syntheticExtendModeActive';
+    },
+    [pscustomobject]@{
+        Name = 'compositor primary taskbar rect helper';
+        Match = Find-FirstMatch (Join-Path $Root 'compositor.cpp') 'primaryTaskbarDisplayRect';
+    },
+    [pscustomobject]@{
+        Name = 'compositor monitor work area for window';
+        Match = Find-FirstMatch (Join-Path $Root 'compositor.cpp') 'monitorWorkAreaForWindow';
+    },
+    [pscustomobject]@{
+        Name = 'compositor monitor work area for point';
+        Match = Find-FirstMatch (Join-Path $Root 'compositor.cpp') 'monitorWorkAreaForPoint';
     },
     [pscustomobject]@{
         Name = 'compositor synthetic layout log';
@@ -63,6 +103,22 @@ $checks = @(
         Match = Find-FirstMatch (Join-Path $Root 'compositor.cpp') 'displayViewportDiagnostic()';
     },
     [pscustomobject]@{
+        Name = 'compositor viewport diagnostic active monitor';
+        Match = Find-FirstMatch (Join-Path $Root 'compositor.cpp') 'activeMonitor=';
+    },
+    [pscustomobject]@{
+        Name = 'compositor viewport diagnostic active work area';
+        Match = Find-FirstMatch (Join-Path $Root 'compositor.cpp') 'activeWork=';
+    },
+    [pscustomobject]@{
+        Name = 'compositor viewport diagnostic primary work area';
+        Match = Find-FirstMatch (Join-Path $Root 'compositor.cpp') 'primaryWork=';
+    },
+    [pscustomobject]@{
+        Name = 'compositor viewport diagnostic taskbar ownership';
+        Match = Find-FirstMatch (Join-Path $Root 'compositor.cpp') 'taskbarPrimaryOnly=';
+    },
+    [pscustomobject]@{
         Name = 'compositor viewport switch state';
         Match = Find-FirstMatch (Join-Path $Root 'compositor.cpp') 'g_hostedViewportIndex';
     },
@@ -73,6 +129,10 @@ $checks = @(
     [pscustomobject]@{
         Name = 'compositor display summary command';
         Match = Find-FirstMatch (Join-Path $Root 'server.cpp') 'desktop.display.summary';
+    },
+    [pscustomobject]@{
+        Name = 'compositor state load monitor work area';
+        Match = Find-FirstMatch (Join-Path $Root 'compositor.cpp') 'monitorWorkAreaForWindow(desktop, viewport, savedRect)';
     },
     [pscustomobject]@{
         Name = 'display options synthetic note';

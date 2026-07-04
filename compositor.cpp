@@ -483,6 +483,14 @@ namespace gxos {
             int bottom{0};
         };
 
+        static DisplayRect workRectToDisplayRect(const WorkRect& rect) {
+            return DisplayRect{ rect.left, rect.top, rect.right, rect.bottom };
+        }
+
+        static WorkRect displayRectToWorkRect(const DisplayRect& rect) {
+            return WorkRect{ rect.left, rect.top, rect.right, rect.bottom };
+        }
+
         static WorkRect taskbarRectForBounds(int width, int height) {
             switch (g_taskbarPosition) {
             case TaskbarPosition::Top:
@@ -497,6 +505,12 @@ namespace gxos {
             }
         }
 
+        static DisplayRect taskbarDisplayRectForBounds(int width, int height)
+        {
+            const WorkRect rect = taskbarRectForBounds(width, height);
+            return workRectToDisplayRect(rect);
+        }
+
         static WorkRect desktopWorkAreaForBounds(int width, int height) {
             switch (g_taskbarPosition) {
             case TaskbarPosition::Top:
@@ -509,6 +523,67 @@ namespace gxos {
             default:
                 return {0, 0, width, std::max(0, height - kTaskbarSize)};
             }
+        }
+
+        static bool syntheticExtendModeActive(const DisplayVirtualDesktop& desktop)
+        {
+            return hostedSyntheticDualMonitorEnabled()
+                && desktop.mode == DisplayModeKind::Extend
+                && desktop.activeMonitorCount() > 1;
+        }
+
+        static DisplayRect primaryTaskbarDisplayRect(const DisplayVirtualDesktop& desktop)
+        {
+            const DisplayMonitorDescriptor* primary = desktop.primaryMonitor();
+            if (!primary) {
+                return taskbarDisplayRectForBounds(desktop.width(), desktop.height());
+            }
+
+            const DisplayRect taskbarLocal = taskbarDisplayRectForBounds(primary->width, primary->height);
+            return offsetDisplayRect(taskbarLocal, primary->virtualX, primary->virtualY);
+        }
+
+        static DisplayRect monitorWorkAreaForWindow(
+            const DisplayVirtualDesktop& desktop,
+            const DisplayViewport& viewport,
+            const DisplayRect& windowRect)
+        {
+            const DisplayMonitorDescriptor* monitor = desktop.findMonitorByVirtualRectLargestIntersection(windowRect);
+            if (!monitor) {
+                monitor = desktop.activeViewportMonitor(viewport);
+            }
+            if (!monitor) {
+                monitor = desktop.primaryMonitor();
+            }
+            if (!monitor) {
+                return DisplayRect{ desktop.left, desktop.top, desktop.right, desktop.bottom };
+            }
+
+            const bool syntheticExtend = syntheticExtendModeActive(desktop);
+            const DisplayRect taskbarRect = primaryTaskbarDisplayRect(desktop);
+            return desktop.monitorWorkArea(*monitor, taskbarRect, syntheticExtend, true);
+        }
+
+        static DisplayRect monitorWorkAreaForPoint(
+            const DisplayVirtualDesktop& desktop,
+            const DisplayViewport& viewport,
+            int x,
+            int y)
+        {
+            const DisplayMonitorDescriptor* monitor = desktop.findMonitorByVirtualPoint(x, y);
+            if (!monitor) {
+                monitor = desktop.activeViewportMonitor(viewport);
+            }
+            if (!monitor) {
+                monitor = desktop.primaryMonitor();
+            }
+            if (!monitor) {
+                return DisplayRect{ desktop.left, desktop.top, desktop.right, desktop.bottom };
+            }
+
+            const bool syntheticExtend = syntheticExtendModeActive(desktop);
+            const DisplayRect taskbarRect = primaryTaskbarDisplayRect(desktop);
+            return desktop.monitorWorkArea(*monitor, taskbarRect, syntheticExtend, true);
         }
 
         // Static member definitions
@@ -3445,7 +3520,7 @@ namespace gxos {
         LRESULT CALLBACK Compositor::WndProc(HWND h, UINT msg, WPARAM w, LPARAM l) {
             switch (msg) {
             case WM_CLOSE: PostQuitMessage(0); return 0;
-            case WM_SIZE: { RECT cr; GetClientRect(h, &cr); WorkRect work = desktopWorkAreaForBounds(cr.right - cr.left, cr.bottom - cr.top); std::lock_guard<std::mutex> lk(g_lock); for (auto& kv : g_windows) { WinInfo& wi = kv.second; if (wi.maximized) { wi.x = work.left; wi.y = work.top; wi.w = work.right - work.left; wi.h = work.bottom - work.top; wi.dirty = true; } } requestRepaint( ); return 0; }
+            case WM_SIZE: { const DisplayVirtualDesktop desktop = buildDisplayVirtualDesktop(g_cfg); const DisplayViewport viewport = hostedViewportForDesktop(desktop, hostedSurfaceWidth(), hostedSurfaceHeight()); std::lock_guard<std::mutex> lk(g_lock); for (auto& kv : g_windows) { WinInfo& wi = kv.second; if (wi.maximized) { const DisplayRect windowRect{ wi.x, wi.y, wi.x + wi.w, wi.y + wi.h }; const DisplayRect work = monitorWorkAreaForWindow(desktop, viewport, windowRect); wi.x = work.left; wi.y = work.top; wi.w = work.width(); wi.h = work.height(); wi.dirty = true; } } requestRepaint( ); return 0; }
             case WM_ERASEBKGND: return 1;
             case WM_TIMER:
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)
@@ -4593,6 +4668,7 @@ namespace gxos {
             const DisplayViewport viewport = hostedViewportForDesktop(desktop, hostedSurfaceWidth(), hostedSurfaceHeight());
             desktop.clampPointToBounds(mx, my);
             const bool virtualExtendMode = desktop.mode == DisplayModeKind::Extend && desktop.activeMonitorCount() > 1;
+            const DisplayRect desktopBoundsRect{ desktop.left, desktop.top, desktop.right, desktop.bottom };
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)
             RECT cr{ desktop.left, desktop.top, virtualExtendMode ? desktop.right : viewport.width, virtualExtendMode ? desktop.bottom : viewport.height };
             if (g_hwnd) GetClientRect(g_hwnd, &cr);
@@ -4615,9 +4691,10 @@ namespace gxos {
                 cr.bottom = cr.top + g_videoBackend->getHeight();
             }
 #endif
-            WorkRect work = virtualExtendMode
-                ? WorkRect{ desktop.left, desktop.top, desktop.right, desktop.bottom }
+            const WorkRect moveClamp = virtualExtendMode
+                ? displayRectToWorkRect(desktopBoundsRect)
                 : desktopWorkAreaForBounds(viewport.width, viewport.height);
+            const DisplayRect primaryTaskbarRect = primaryTaskbarDisplayRect(desktop);
             // On mouse down, record start position and check if we're in a title bar (pending drag)
             if (down) {
                 g_dragStartX = mx; g_dragStartY = my; g_dragPending = false; g_dragPendingWin = 0;
@@ -4694,13 +4771,9 @@ namespace gxos {
                         // toggle maximize state
                         if (!topW->maximized) { // maximize
                             topW->prevX = topW->x; topW->prevY = topW->y; topW->prevW = topW->w; topW->prevH = topW->h;
-#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
-                            RECT crL{ 0,0,1024,768 }; if (g_hwnd) GetClientRect(g_hwnd, &crL);
-#else
-                            RECT crL{ 0,0,1024,768 };
-#endif
-                            WorkRect maxWork = desktopWorkAreaForBounds(crL.right - crL.left, crL.bottom - crL.top);
-                            topW->x = maxWork.left; topW->y = maxWork.top; topW->w = maxWork.right - maxWork.left; topW->h = maxWork.bottom - maxWork.top; topW->maximized = true; topW->snapState = 0; topW->dirty = true;
+                            const DisplayRect windowRect{ topW->x, topW->y, topW->x + topW->w, topW->y + topW->h };
+                            const DisplayRect maxWork = monitorWorkAreaForWindow(desktop, viewport, windowRect);
+                            topW->x = maxWork.left; topW->y = maxWork.top; topW->w = maxWork.width(); topW->h = maxWork.height(); topW->maximized = true; topW->snapState = 0; topW->dirty = true;
                         } else { // restore
                             topW->x = topW->prevX; topW->y = topW->prevY; topW->w = topW->prevW; topW->h = topW->prevH; topW->maximized = false; topW->dirty = true;
                         }
@@ -4711,10 +4784,10 @@ namespace gxos {
 
             if (topW) { int wx = mx - topW->x - theme.windowPadding; int wy = my - topW->y - titleBarH - theme.windowPadding; for (auto& wd : topW->widgets) { bool over = (wx >= wd.x && wx < wd.x + wd.w && wy >= wd.y && wy < wd.y + wd.h); if (!down && !up) { if (wd.hover != over) { wd.hover = over; invalidate(topW->id); } } else if (down) { if (over) { wd.pressed = true; wd.hover = true; invalidate(topW->id); } } else if (up) { if (wd.pressed) { if (over) { emitWidgetEvt(topW->id, wd.id, "click", ""); Logger::write(LogLevel::Info, std::string("Widget clicked: ") + std::to_string(topW->id) + "/" + std::to_string(wd.id)); } wd.pressed = false; wd.hover = false; invalidate(topW->id); } } } }
             // move while dragging
-            if (g_dragActive && !up) { auto it = g_windows.find(g_dragWin); if (it != g_windows.end( )) { WinInfo& w = it->second; if (!w.maximized && !w.minimized && !w.tombstoned) { int nx = mx - g_dragOffX; int ny = my - g_dragOffY; if (nx < work.left) nx = work.left; if (ny < work.top) ny = work.top; if (nx + w.w > work.right) nx = work.right - w.w; if (ny + w.h > work.bottom) ny = work.bottom - w.h; if (nx != w.x || ny != w.y) { w.x = nx; w.y = ny; w.dirty = true; invalidate(w.id); } } } }
-            if (down) { uint64_t t = nowMs( ); for (int idx = (int)g_z.size( ) - 1; idx >= 0; --idx) { uint64_t wid = g_z[idx]; WinInfo& w = g_windows[wid]; if (w.minimized || w.tombstoned) continue; if (mx >= w.x && mx < w.x + w.w && my >= w.y && my < w.y + titleBarH) { if (g_lastClickWin == w.id && (t - g_lastClickTicks) < 450) { if (!w.minimized) { if (!w.maximized) { w.prevX = w.x; w.prevY = w.y; w.prevW = w.w; w.prevH = w.h; w.x = work.left; w.y = work.top; w.w = work.right - work.left; w.h = work.bottom - work.top; w.maximized = true; } else { w.x = w.prevX; w.y = w.prevY; w.w = w.prevW; w.h = w.prevH; w.maximized = false; } } g_lastClickWin = 0; g_lastClickTicks = 0; invalidate(w.id); return; } g_lastClickWin = w.id; g_lastClickTicks = t; break; } } }
+            if (g_dragActive && !up) { auto it = g_windows.find(g_dragWin); if (it != g_windows.end( )) { WinInfo& w = it->second; if (!w.maximized && !w.minimized && !w.tombstoned) { int nx = mx - g_dragOffX; int ny = my - g_dragOffY; if (nx < moveClamp.left) nx = moveClamp.left; if (ny < moveClamp.top) ny = moveClamp.top; if (nx + w.w > moveClamp.right) nx = moveClamp.right - w.w; if (ny + w.h > moveClamp.bottom) ny = moveClamp.bottom - w.h; if (nx != w.x || ny != w.y) { w.x = nx; w.y = ny; w.dirty = true; invalidate(w.id); } } } }
+            if (down) { uint64_t t = nowMs( ); for (int idx = (int)g_z.size( ) - 1; idx >= 0; --idx) { uint64_t wid = g_z[idx]; WinInfo& w = g_windows[wid]; if (w.minimized || w.tombstoned) continue; if (mx >= w.x && mx < w.x + w.w && my >= w.y && my < w.y + titleBarH) { if (g_lastClickWin == w.id && (t - g_lastClickTicks) < 450) { if (!w.minimized) { if (!w.maximized) { w.prevX = w.x; w.prevY = w.y; w.prevW = w.w; w.prevH = w.h; const DisplayRect snapWork = monitorWorkAreaForPoint(desktop, viewport, mx, my); w.x = snapWork.left; w.y = snapWork.top; w.w = snapWork.width(); w.h = snapWork.height(); w.maximized = true; } else { w.x = w.prevX; w.y = w.prevY; w.w = w.prevW; w.h = w.prevH; w.maximized = false; } } g_lastClickWin = 0; g_lastClickTicks = 0; invalidate(w.id); return; } g_lastClickWin = w.id; g_lastClickTicks = t; break; } } }
             if (down) { for (int idx = (int)g_z.size( ) - 1; idx >= 0; --idx) { WinInfo& w = g_windows[g_z[idx]]; if (w.minimized || w.maximized || w.tombstoned) continue; if (mx >= w.x + w.w - gripSize && mx < w.x + w.w && my >= w.y + w.h - gripSize && my < w.y + w.h) { g_resizeActive = true; g_resizeWin = w.id; g_resizeStartW = w.w; g_resizeStartH = w.h; g_resizeStartMX = mx; g_resizeStartMY = my; break; } } }
-            if (g_dragActive && up) { auto it = g_windows.find(g_dragWin); if (it != g_windows.end( )) { WinInfo& w = it->second; const int snap = 16; bool nearLeft = mx <= snap, nearRight = mx >= cr.right - snap, nearTop = my <= snap; if (nearTop && !(nearLeft || nearRight)) { w.prevX = w.x; w.prevY = w.y; w.prevW = w.w; w.prevH = w.h; w.x = work.left; w.y = work.top; w.w = work.right - work.left; w.h = work.bottom - work.top; w.maximized = true; w.snapState = 0; } else if (nearLeft) { w.maximized = false; w.x = work.left; w.y = work.top; w.w = (work.right - work.left) / 2; w.h = work.bottom - work.top; w.snapState = 1; } else if (nearRight) { w.maximized = false; w.x = work.left + (work.right - work.left) / 2; w.y = work.top; w.w = (work.right - work.left) / 2; w.h = work.bottom - work.top; w.snapState = 2; } w.dirty = true; } g_dragActive = false; g_dragWin = 0; g_snapPreviewActive = false; invalidate(0); }
+            if (g_dragActive && up) { auto it = g_windows.find(g_dragWin); if (it != g_windows.end( )) { WinInfo& w = it->second; const int snap = 16; const DisplayRect snapWork = monitorWorkAreaForPoint(desktop, viewport, mx, my); const bool nearLeft = mx <= snapWork.left + snap; const bool nearRight = mx >= snapWork.right - snap; const bool nearTop = my <= snapWork.top + snap; if (nearTop && !(nearLeft || nearRight)) { w.prevX = w.x; w.prevY = w.y; w.prevW = w.w; w.prevH = w.h; w.x = snapWork.left; w.y = snapWork.top; w.w = snapWork.width(); w.h = snapWork.height(); w.maximized = true; w.snapState = 0; } else if (nearLeft) { w.maximized = false; w.x = snapWork.left; w.y = snapWork.top; w.w = snapWork.width() / 2; w.h = snapWork.height(); w.snapState = 1; } else if (nearRight) { w.maximized = false; w.x = snapWork.left + snapWork.width() / 2; w.y = snapWork.top; w.w = snapWork.width() / 2; w.h = snapWork.height(); w.snapState = 2; } w.dirty = true; } g_dragActive = false; g_dragWin = 0; g_snapPreviewActive = false; invalidate(0); }
             if (g_resizeActive && !up) { auto it = g_windows.find(g_resizeWin); if (it != g_windows.end( )) { int dw = mx - g_resizeStartMX; int dh = my - g_resizeStartMY; int newW = g_resizeStartW + dw; if (newW < 160) newW = 160; int newH = g_resizeStartH + dh; if (newH < 120) newH = 120; g_resizePreviewActive = true; g_resizePreviewW = newW; g_resizePreviewH = newH; } }
             if (g_resizeActive && up) { auto it = g_windows.find(g_resizeWin); if (it != g_windows.end( )) { int dw = mx - g_resizeStartMX; int dh = my - g_resizeStartMY; int newW = g_resizeStartW + dw; if (newW < 160) newW = 160; int newH = g_resizeStartH + dh; if (newH < 120) newH = 120; it->second.w = newW; it->second.h = newH; it->second.dirty = true; } g_resizeActive = false; g_resizeWin = 0; g_resizePreviewActive = false; }
             if (down) { for (int idx = (int)g_z.size( ) - 1; idx >= 0; --idx) { WinInfo& w = g_windows[g_z[idx]]; if (w.minimized || w.tombstoned) continue; if (g_modalWindow != 0 && w.id != g_modalWindow) continue; if (mx >= w.x && mx < w.x + w.w && my >= w.y && my < w.y + w.h) { g_focus = w.id; for (auto itZ = g_z.begin( ); itZ != g_z.end( ); ++itZ) { if (*itZ == w.id) { g_z.erase(itZ); break; } } g_z.push_back(w.id); sendFocus(w.id); break; } } }
@@ -4791,7 +4864,50 @@ namespace gxos {
             case MsgType::MT_Minimize: { uint64_t id = 0; try { id = std::stoull(s); } catch (...) {} { std::lock_guard<std::mutex> lk(g_lock); if (g_modalWindow != 0 && id != g_modalWindow) break; auto wit = g_windows.find(id); if (wit != g_windows.end( )) { wit->second.minimized = true; wit->second.tombstoned = true; if (g_modalWindow == id) g_modalWindow = 0; if (g_focus == id) g_focus = 0; } } invalidate(id); } break;
             case MsgType::MT_ShowDesktopToggle: { { std::lock_guard<std::mutex> lk(g_lock); if (g_modalWindow != 0) { for (auto it = g_z.begin( ); it != g_z.end( ); ++it) { if (*it == g_modalWindow) { g_z.erase(it); break; } } g_z.push_back(g_modalWindow); g_focus = g_modalWindow; invalidate(g_modalWindow); break; } } if (!g_showDesktopActive) { g_showDesktopMinimized.clear( ); for (uint64_t id : g_z) { auto it = g_windows.find(id); if (it != g_windows.end( ) && !it->second.minimized) { it->second.minimized = true; it->second.tombstoned = true; g_showDesktopMinimized.push_back(id); } } g_focus = 0; g_showDesktopActive = true; } else { for (uint64_t id : g_showDesktopMinimized) { auto it = g_windows.find(id); if (it != g_windows.end( )) { it->second.minimized = false; it->second.tombstoned = false; } } g_showDesktopMinimized.clear( ); g_showDesktopActive = false; } invalidate(0); } break;
             case MsgType::MT_StateSave: { std::string path = s; std::vector<SavedWindow> sw; { std::lock_guard<std::mutex> lk(g_lock); for (size_t i = 0; i < g_z.size( ); ++i) { uint64_t id = g_z[i]; auto it = g_windows.find(id); if (it == g_windows.end( )) continue; const WinInfo& w = it->second; SavedWindow rec; rec.id = w.id; rec.title = w.title; rec.x = w.x; rec.y = w.y; rec.w = w.w; rec.h = w.h; rec.minimized = w.minimized; rec.maximized = w.maximized; rec.z = (int)i; rec.focused = (g_focus == w.id); rec.snap = w.snapState; sw.push_back(rec); } } std::string err; if (!DesktopState::Save(path, sw, err)) publishOut(MsgType::MT_WidgetEvt, std::string("STATE_SAVE_ERR|") + err); else publishOut(MsgType::MT_WidgetEvt, std::string("STATE_SAVE_OK|") + path); } break;
-            case MsgType::MT_StateLoad: { std::string path = s; std::vector<SavedWindow> sw; std::string err; if (!DesktopState::Load(path, sw, err)) { publishOut(MsgType::MT_WidgetEvt, std::string("STATE_LOAD_ERR|") + err); } else { { std::lock_guard<std::mutex> lk(g_lock); g_windows.clear( ); g_z.clear( ); g_focus = 0; std::sort(sw.begin( ), sw.end( ), [] (const SavedWindow& a, const SavedWindow& b) { return a.z < b.z; }); for (auto& w : sw) { uint64_t id = s_nextWinId.fetch_add(1); WinInfo wi{}; wi.id = id; wi.title = w.title; wi.x = w.x; wi.y = w.y; wi.w = w.w; wi.h = w.h; wi.minimized = w.minimized; wi.maximized = w.maximized; wi.dirty = true; wi.snapState = w.snap; if (wi.maximized) { RECT crL{ 0,0,1024,768 }; if (g_hwnd) GetClientRect(g_hwnd, &crL); int taskbarY = crL.bottom - 40; wi.x = crL.left; wi.y = crL.top; wi.w = crL.right - crL.left; wi.h = taskbarY - crL.top; } g_windows[id] = wi; logWindowPlacementIfOutsidePrimary(buildDisplayVirtualDesktop(g_cfg), wi, "state-load"); g_z.push_back(id); if (w.focused && !wi.minimized) g_focus = id; } } publishOut(MsgType::MT_WidgetEvt, std::string("STATE_LOAD_OK|") + path); invalidate(0); } } break;
+            case MsgType::MT_StateLoad: {
+                std::string path = s;
+                std::vector<SavedWindow> sw;
+                std::string err;
+                if (!DesktopState::Load(path, sw, err)) {
+                    publishOut(MsgType::MT_WidgetEvt, std::string("STATE_LOAD_ERR|") + err);
+                } else {
+                    const DisplayVirtualDesktop desktop = buildDisplayVirtualDesktop(g_cfg);
+                    const DisplayViewport viewport = hostedViewportForDesktop(desktop, hostedSurfaceWidth(), hostedSurfaceHeight());
+                    std::lock_guard<std::mutex> lk(g_lock);
+                    g_windows.clear();
+                    g_z.clear();
+                    g_focus = 0;
+                    std::sort(sw.begin(), sw.end(), [] (const SavedWindow& a, const SavedWindow& b) { return a.z < b.z; });
+                    for (auto& w : sw) {
+                        uint64_t id = s_nextWinId.fetch_add(1);
+                        WinInfo wi{};
+                        wi.id = id;
+                        wi.title = w.title;
+                        wi.x = w.x;
+                        wi.y = w.y;
+                        wi.w = w.w;
+                        wi.h = w.h;
+                        wi.minimized = w.minimized;
+                        wi.maximized = w.maximized;
+                        wi.dirty = true;
+                        wi.snapState = w.snap;
+                        if (wi.maximized) {
+                            const DisplayRect savedRect{ wi.x, wi.y, wi.x + wi.w, wi.y + wi.h };
+                            const DisplayRect work = monitorWorkAreaForWindow(desktop, viewport, savedRect);
+                            wi.x = work.left;
+                            wi.y = work.top;
+                            wi.w = work.width();
+                            wi.h = work.height();
+                        }
+                        g_windows[id] = wi;
+                        logWindowPlacementIfOutsidePrimary(desktop, wi, "state-load");
+                        g_z.push_back(id);
+                        if (w.focused && !wi.minimized) g_focus = id;
+                    }
+                }
+                publishOut(MsgType::MT_WidgetEvt, std::string("STATE_LOAD_OK|") + path);
+                invalidate(0);
+            } break;
             case MsgType::MT_Invalidate: { invalidate(0); } break;
             case MsgType::MT_Ping: { publishOut(MsgType::MT_Ping, s); } break;
             case MsgType::MT_DesktopLaunch: { launchAction(s); } break;
@@ -5121,18 +5237,40 @@ namespace gxos {
 
             bool legacyLoaded = false; if (!cfgOk || cfg.windows.empty( )) {
                 std::vector<SavedWindow> sw; std::string err; if (DesktopState::Load("desktop.state", sw, err)) {
-                    std::lock_guard<std::mutex> lk(g_lock); g_windows.clear( ); g_z.clear( ); g_focus = 0; std::sort(sw.begin( ), sw.end( ), [] (const SavedWindow& a, const SavedWindow& b) { return a.z < b.z; }); for (auto& w : sw) {
-                        uint64_t id = s_nextWinId.fetch_add(1); WinInfo wi{}; wi.id = id; wi.title = w.title; wi.x = w.x; wi.y = w.y; wi.w = w.w; wi.h = w.h; wi.minimized = w.minimized; wi.maximized = w.maximized; wi.dirty = true; wi.snapState = w.snap; if (wi.maximized) {
-#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
-                            RECT crL{ 0,0,1024,768 };
-                            if (g_hwnd) GetClientRect(g_hwnd, &crL);
-#else
-                            struct { int left; int top; int right; int bottom; } crL{ 0, 0, 1024, 768 };
-                            if (g_videoBackend) { crL.right = g_videoBackend->getWidth(); crL.bottom = g_videoBackend->getHeight(); }
-#endif
-                            int taskbarY = crL.bottom - 40; wi.x = crL.left; wi.y = crL.top; wi.w = crL.right - crL.left; wi.h = taskbarY - crL.top;
-                        } g_windows[id] = wi; logWindowPlacementIfOutsidePrimary(buildDisplayVirtualDesktop(g_cfg), wi, "legacy-state-load"); g_z.push_back(id); if (w.focused && !wi.minimized) g_focus = id;
-                    } legacyLoaded = true;
+                    const DisplayVirtualDesktop desktop = buildDisplayVirtualDesktop(g_cfg);
+                    const DisplayViewport viewport = hostedViewportForDesktop(desktop, hostedSurfaceWidth(), hostedSurfaceHeight());
+                    std::lock_guard<std::mutex> lk(g_lock);
+                    g_windows.clear( );
+                    g_z.clear( );
+                    g_focus = 0;
+                    std::sort(sw.begin( ), sw.end( ), [] (const SavedWindow& a, const SavedWindow& b) { return a.z < b.z; });
+                    for (auto& w : sw) {
+                        uint64_t id = s_nextWinId.fetch_add(1);
+                        WinInfo wi{};
+                        wi.id = id;
+                        wi.title = w.title;
+                        wi.x = w.x;
+                        wi.y = w.y;
+                        wi.w = w.w;
+                        wi.h = w.h;
+                        wi.minimized = w.minimized;
+                        wi.maximized = w.maximized;
+                        wi.dirty = true;
+                        wi.snapState = w.snap;
+                        if (wi.maximized) {
+                            const DisplayRect savedRect{ wi.x, wi.y, wi.x + wi.w, wi.y + wi.h };
+                            const DisplayRect work = monitorWorkAreaForWindow(desktop, viewport, savedRect);
+                            wi.x = work.left;
+                            wi.y = work.top;
+                            wi.w = work.width();
+                            wi.h = work.height();
+                        }
+                        g_windows[id] = wi;
+                        logWindowPlacementIfOutsidePrimary(desktop, wi, "legacy-state-load");
+                        g_z.push_back(id);
+                        if (w.focused && !wi.minimized) g_focus = id;
+                    }
+                    legacyLoaded = true;
                 }
             }
             
@@ -5180,11 +5318,25 @@ namespace gxos {
         {
             std::lock_guard<std::mutex> lk(g_lock);
             const DisplayVirtualDesktop desktop = buildDisplayVirtualDesktop(g_cfg);
-            std::ostringstream oss;
             const DisplayViewport viewport = hostedViewportForDesktop(desktop, hostedSurfaceWidth(), hostedSurfaceHeight());
+            const bool syntheticExtend = syntheticExtendModeActive(desktop);
+            const bool taskbarPrimaryOnly = true;
+            const DisplayRect taskbarRect = primaryTaskbarDisplayRect(desktop);
+            const DisplayMonitorDescriptor* activeMonitor = desktop.activeViewportMonitor(viewport);
+            const DisplayRect activeMonitorBounds = activeMonitor ? desktop.monitorBounds(*activeMonitor) : DisplayRect{ desktop.left, desktop.top, desktop.right, desktop.bottom };
+            const DisplayRect activeMonitorWorkArea = activeMonitor
+                ? desktop.monitorWorkArea(*activeMonitor, taskbarRect, syntheticExtend, taskbarPrimaryOnly)
+                : activeMonitorBounds;
+            const DisplayRect primaryMonitorWorkArea = desktop.primaryMonitorWorkArea(taskbarRect, syntheticExtend, taskbarPrimaryOnly);
+            std::ostringstream oss;
             oss << "syntheticDualMonitor=" << (hostedSyntheticDualMonitorEnabled() ? "true" : "false")
                 << " framebuffer=" << (g_videoBackend ? (std::to_string(g_videoBackend->getWidth()) + "x" + std::to_string(g_videoBackend->getHeight())) : std::string("unavailable"))
                 << " " << viewport.summary()
+                << " activeMonitor=" << (activeMonitor ? (activeMonitor->id + (activeMonitor->name.empty() ? std::string() : "(" + activeMonitor->name + ")")) : std::string("(none)"))
+                << " activeBounds=" << activeMonitorBounds.summary()
+                << " activeWork=" << activeMonitorWorkArea.summary()
+                << " primaryWork=" << primaryMonitorWorkArea.summary()
+                << " taskbarPrimaryOnly=" << (taskbarPrimaryOnly ? "true" : "false")
                 << " virtualDesktop=" << desktop.width() << 'x' << desktop.height()
                 << " bounds=" << desktop.left << "," << desktop.top << "-" << desktop.right << "," << desktop.bottom
                 << " monitors=[" << desktop.monitorRectString() << "]";
@@ -5196,10 +5348,23 @@ namespace gxos {
             std::lock_guard<std::mutex> lk(g_lock);
             const DisplayVirtualDesktop desktop = buildDisplayVirtualDesktop(g_cfg);
             const DisplayViewport viewport = hostedViewportForDesktop(desktop, hostedSurfaceWidth(), hostedSurfaceHeight());
+            const bool syntheticExtend = syntheticExtendModeActive(desktop);
+            const bool taskbarPrimaryOnly = true;
+            const DisplayRect taskbarRect = primaryTaskbarDisplayRect(desktop);
+            const DisplayMonitorDescriptor* activeMonitor = desktop.activeViewportMonitor(viewport);
+            const DisplayRect activeMonitorBounds = activeMonitor ? desktop.monitorBounds(*activeMonitor) : DisplayRect{ desktop.left, desktop.top, desktop.right, desktop.bottom };
+            const DisplayRect activeMonitorWorkArea = activeMonitor
+                ? desktop.monitorWorkArea(*activeMonitor, taskbarRect, syntheticExtend, taskbarPrimaryOnly)
+                : activeMonitorBounds;
+            const DisplayRect primaryMonitorWorkArea = desktop.primaryMonitorWorkArea(taskbarRect, syntheticExtend, taskbarPrimaryOnly);
             std::ostringstream oss;
             oss << "syntheticDualMonitor=" << (hostedSyntheticDualMonitorEnabled() ? "true" : "false")
                 << " viewportSwitch=" << (hostedSyntheticDualMonitorEnabled() ? "available" : "unavailable")
                 << " " << viewport.summary()
+                << " activeMonitor=" << (activeMonitor ? (activeMonitor->id + (activeMonitor->name.empty() ? std::string() : "(" + activeMonitor->name + ")")) : std::string("(none)"))
+                << " activeWork=" << activeMonitorWorkArea.summary()
+                << " primaryWork=" << primaryMonitorWorkArea.summary()
+                << " taskbarPrimaryOnly=" << (taskbarPrimaryOnly ? "true" : "false")
                 << " virtualDesktop=" << desktop.width() << 'x' << desktop.height()
                 << " bounds=" << desktop.left << "," << desktop.top << "-" << desktop.right << "," << desktop.bottom
                 << " monitors=[" << desktop.monitorRectString() << "]";
