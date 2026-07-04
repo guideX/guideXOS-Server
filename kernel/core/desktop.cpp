@@ -2142,9 +2142,19 @@ static int s_clickedMenuRight = -1; // clicked right-column item index
 static int s_startMenuSelection = 0;    // Currently selected item (keyboard nav)
 static int s_startMenuScroll = 0;       // Scroll offset for long lists
 static bool s_startMenuAllProgs = false; // Toggle between Recent Programs vs All Programs
-static std::vector<std::string> s_startMenuRecentPrograms; // Persisted recent programs for Start Menu
+static char s_startMenuRecentPrograms[kMaxStartMenuRecent][64]; // Persisted recent programs for Start Menu
+static int s_startMenuRecentProgramCount = 0;
 static const int kStartMenuMaxRows = 14; // Max visible rows before scrolling
 static const int kStartMenuRowH = 22;    // Height of each menu row
+
+static bool start_menu_recent_contains(const char* value)
+{
+    if (!value || !value[0]) return false;
+    for (int i = 0; i < s_startMenuRecentProgramCount; ++i) {
+        if (desktop_str_eq(s_startMenuRecentPrograms[i], value)) return true;
+    }
+    return false;
+}
 
 static void activate_start_menu_control_panel(int rightIndex = 5)
 {
@@ -4392,10 +4402,10 @@ static void refresh_start_menu_list()
     serial::puts("[desktop] Start Menu app list refresh preserves app pins independent of desktop icons\n");
 }
 
-static std::string canonical_start_menu_recent_program(const char* appName)
+static const char* canonical_start_menu_recent_program(const char* appName)
 {
     const StartMenuApp* app = find_start_menu_app(appName);
-    if (!app || !app->name) return std::string();
+    if (!app || !app->name) return "";
     return app->name;
 }
 
@@ -4404,8 +4414,8 @@ static void persist_start_menu_recent_programs()
     char buffer[4096];
     int pos = 0;
     desktop_append_text(buffer, &pos, sizeof(buffer), "# guideXOS Start Menu Recent Programs v1\n");
-    for (const auto& name : s_startMenuRecentPrograms) {
-        desktop_append_text(buffer, &pos, sizeof(buffer), name.c_str());
+    for (int i = 0; i < s_startMenuRecentProgramCount; ++i) {
+        desktop_append_text(buffer, &pos, sizeof(buffer), s_startMenuRecentPrograms[i]);
         desktop_append_text(buffer, &pos, sizeof(buffer), "\n");
     }
     int32_t written = vfs::write_file(kStartMenuRecentProgramsPath, buffer, (uint32_t)pos);
@@ -4414,7 +4424,7 @@ static void persist_start_menu_recent_programs()
 
 static void load_persisted_start_menu_recent_programs()
 {
-    s_startMenuRecentPrograms.clear();
+    s_startMenuRecentProgramCount = 0;
     char buffer[4096];
     int32_t count = vfs::read_file(kStartMenuRecentProgramsPath, buffer, sizeof(buffer) - 1);
     if (count <= 0) {
@@ -4429,12 +4439,17 @@ static void load_persisted_start_menu_recent_programs()
         while (pos < count && buffer[pos] != '\n' && buffer[pos] != '\r') ++pos;
         int lineEnd = pos;
         if (lineEnd <= lineStart) continue;
-        std::string raw(buffer + lineStart, (size_t)(lineEnd - lineStart));
-        const std::string canonical = canonical_start_menu_recent_program(raw.c_str());
-        if (canonical.empty()) continue;
-        if (std::find(s_startMenuRecentPrograms.begin(), s_startMenuRecentPrograms.end(), canonical) != s_startMenuRecentPrograms.end()) continue;
-        s_startMenuRecentPrograms.push_back(canonical);
-        if (s_startMenuRecentPrograms.size() >= (size_t)kMaxStartMenuRecent) break;
+        char raw[64];
+        int rawLen = lineEnd - lineStart;
+        if (rawLen >= (int)sizeof(raw)) rawLen = (int)sizeof(raw) - 1;
+        for (int i = 0; i < rawLen; ++i) raw[i] = buffer[lineStart + i];
+        raw[rawLen] = '\0';
+        const char* canonical = canonical_start_menu_recent_program(raw);
+        if (!canonical[0]) continue;
+        if (start_menu_recent_contains(canonical)) continue;
+        desktop_str_copy(s_startMenuRecentPrograms[s_startMenuRecentProgramCount], canonical, sizeof(s_startMenuRecentPrograms[s_startMenuRecentProgramCount]));
+        ++s_startMenuRecentProgramCount;
+        if (s_startMenuRecentProgramCount >= kMaxStartMenuRecent) break;
     }
     serial::puts("[desktop] Start menu recent programs loaded from persistence\n");
 }
@@ -4442,20 +4457,34 @@ static void load_persisted_start_menu_recent_programs()
 // Add app to start menu recent list
 static void add_to_start_menu_recent(const char* appName)
 {
-    const std::string canonical = canonical_start_menu_recent_program(appName);
-    if (canonical.empty()) return;
+    const char* canonical = canonical_start_menu_recent_program(appName);
+    if (!canonical[0]) return;
 
-    auto it = std::find(s_startMenuRecentPrograms.begin(), s_startMenuRecentPrograms.end(), canonical);
-    if (it != s_startMenuRecentPrograms.end()) {
-        s_startMenuRecentPrograms.erase(it);
+    int existingIndex = -1;
+    for (int i = 0; i < s_startMenuRecentProgramCount; ++i) {
+        if (desktop_str_eq(s_startMenuRecentPrograms[i], canonical)) {
+            existingIndex = i;
+            break;
+        }
     }
-
-    s_startMenuRecentPrograms.insert(s_startMenuRecentPrograms.begin(), canonical);
-    if (s_startMenuRecentPrograms.size() > (size_t)kMaxStartMenuRecent) {
-        s_startMenuRecentPrograms.resize(kMaxStartMenuRecent);
+    if (existingIndex >= 0) {
+        for (int i = existingIndex; i > 0; --i) {
+            desktop_str_copy(s_startMenuRecentPrograms[i], s_startMenuRecentPrograms[i - 1], sizeof(s_startMenuRecentPrograms[i]));
+        }
+        desktop_str_copy(s_startMenuRecentPrograms[0], canonical, sizeof(s_startMenuRecentPrograms[0]));
+    } else {
+        int insertCount = s_startMenuRecentProgramCount;
+        if (insertCount >= kMaxStartMenuRecent) insertCount = kMaxStartMenuRecent - 1;
+        for (int i = insertCount; i > 0; --i) {
+            desktop_str_copy(s_startMenuRecentPrograms[i], s_startMenuRecentPrograms[i - 1], sizeof(s_startMenuRecentPrograms[i]));
+        }
+        desktop_str_copy(s_startMenuRecentPrograms[0], canonical, sizeof(s_startMenuRecentPrograms[0]));
+        if (s_startMenuRecentProgramCount < kMaxStartMenuRecent) {
+            ++s_startMenuRecentProgramCount;
+        }
     }
     serial::puts("[desktop] Start menu recent recorded: ");
-    serial::puts(canonical.c_str());
+    serial::puts(canonical);
     serial::puts("\n");
     persist_start_menu_recent_programs();
 }
@@ -4463,7 +4492,7 @@ static void add_to_start_menu_recent(const char* appName)
 // Get current start menu item count based on mode
 static int get_start_menu_item_count()
 {
-    return s_startMenuAllProgs ? kAllProgramsCount : (int)s_startMenuRecentPrograms.size();
+    return s_startMenuAllProgs ? kAllProgramsCount : s_startMenuRecentProgramCount;
 }
 
 static const char* start_menu_left_item_label_for_row(int row)
@@ -4473,7 +4502,7 @@ static const char* start_menu_left_item_label_for_row(int row)
     if (s_startMenuAllProgs) {
         return (itemIndex >= 0 && itemIndex < kAllProgramsCount) ? s_allProgramsList[itemIndex] : "";
     }
-    return (itemIndex >= 0 && itemIndex < (int)s_startMenuRecentPrograms.size()) ? s_startMenuRecentPrograms[itemIndex].c_str() : "";
+    return (itemIndex >= 0 && itemIndex < s_startMenuRecentProgramCount) ? s_startMenuRecentPrograms[itemIndex] : "";
 }
 
 // ============================================================
@@ -6426,8 +6455,8 @@ static void draw_start_menu()
             }
         } else {
             // Recent Programs mode - build from persisted recent list
-            if (itemIndex < 0 || itemIndex >= (int)s_startMenuRecentPrograms.size()) continue;
-            appName = s_startMenuRecentPrograms[itemIndex].c_str();
+            if (itemIndex < 0 || itemIndex >= s_startMenuRecentProgramCount) continue;
+            appName = s_startMenuRecentPrograms[itemIndex];
             const StartMenuApp* app = find_start_menu_app(appName);
             if (!app) continue;
             appColor = app->color;

@@ -1866,7 +1866,10 @@ namespace gxos {
             }
         }
         static bool isRightColumnStartMenuShortcut(const std::string& act);
-        static void syncHostedRecentProgramsFromDesktopService() {
+
+        void Compositor::addRecent(const std::string& act) {
+            if (act.empty() || isRightColumnStartMenuShortcut(act)) return;
+            DesktopService::AddRecentProgram(act);
             g_cfg.recent.clear();
             for (const auto& entry : DesktopService::GetRecentPrograms()) {
                 if (entry.name.empty()) continue;
@@ -1876,12 +1879,6 @@ namespace gxos {
                 }
             }
             refreshDesktopItems();
-        }
-
-        void Compositor::addRecent(const std::string& act) {
-            if (act.empty() || isRightColumnStartMenuShortcut(act)) return;
-            DesktopService::AddRecentProgram(act);
-            syncHostedRecentProgramsFromDesktopService();
         }
         static bool isRightColumnStartMenuShortcut(const std::string& act) {
             return act == "Computer" ||
@@ -2192,7 +2189,15 @@ namespace gxos {
                 NotificationManager::Add(err.empty() ? std::string("Failed to launch app: ") + act : err, NotificationLevel::Error);
                 return;
             }
-            syncHostedRecentProgramsFromDesktopService();
+            g_cfg.recent.clear();
+            for (const auto& entry : DesktopService::GetRecentPrograms()) {
+                if (entry.name.empty()) continue;
+                if (!hasEquivalentListItem(g_cfg.recent, entry.name)) {
+                    g_cfg.recent.push_back(entry.name);
+                    if (g_cfg.recent.size() >= 10) break;
+                }
+            }
+            refreshDesktopItems();
         }
 
         void Compositor::openStartMenuApp(const std::string& appName) {
