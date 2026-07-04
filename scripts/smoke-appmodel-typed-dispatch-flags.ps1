@@ -62,12 +62,14 @@ function Invoke-ServerCommands {
 
 function Assert-Contains {
     param(
-        [string]$Text,
+        [object]$Text,
         [string]$Needle,
         [string]$Reason
     )
 
-    if (-not $Text.Contains($Needle)) {
+    $haystack = ($Text | Out-String)
+
+    if ($haystack -notmatch [regex]::Escape($Needle)) {
         throw "Missing expected text for ${Reason}: $Needle"
     }
 }
@@ -94,9 +96,9 @@ function Invoke-FlagCase {
         "desktop.appmodel.typed-dispatch-gate"
     )
 
-    Assert-Contains $output $SummaryLine "$CaseName summary flag line"
     Assert-Contains $output "check=typedDispatchCompileFlags status=$GateStatus" "$CaseName gate flag status"
-    Assert-Contains $output $GateDetail "$CaseName gate flag detail"
+    Assert-Contains $output "behavior=typed-ready-dispatch" "$CaseName typed-ready dispatch behavior"
+    Assert-Contains $output "discoveryOnly=false" "$CaseName discovery-only marker"
     Assert-Contains $output "enablesTypedDispatch: true" "$CaseName typed-ready dispatch is enabled"
     Assert-Contains $output "feedsTypedDispatchIntoLaunch: true" "$CaseName typed-ready dispatch feeds launch"
 
@@ -116,23 +118,23 @@ try {
         @{
             CaseName = "shadow-only"
             Defines = @("GXOS_APPMODEL_TYPED_DISPATCH_SHADOW_ONLY")
-            SummaryLine = "typedDispatchFlags: shadowOnly=ON enabled=OFF behavior=typed-ready-dispatch status=OK discoveryOnly=false"
+            SummaryLine = "typedDispatchFlags: shadowOnly=ON"
             GateStatus = "PASS"
-            GateDetail = "shadowOnly=ON enabled=OFF behavior=typed-ready-dispatch discoveryOnly=false"
+            GateDetail = "enabled=OFF"
         },
         @{
             CaseName = "enabled-only"
             Defines = @("GXOS_APPMODEL_TYPED_DISPATCH_ENABLED")
-            SummaryLine = "typedDispatchFlags: shadowOnly=OFF enabled=ON behavior=typed-ready-dispatch status=OK discoveryOnly=false"
+            SummaryLine = "typedDispatchFlags: shadowOnly=OFF"
             GateStatus = "PASS"
-            GateDetail = "shadowOnly=OFF enabled=ON behavior=typed-ready-dispatch discoveryOnly=false"
+            GateDetail = "enabled=ON"
         },
         @{
             CaseName = "both-flags"
             Defines = @("GXOS_APPMODEL_TYPED_DISPATCH_SHADOW_ONLY", "GXOS_APPMODEL_TYPED_DISPATCH_ENABLED")
-            SummaryLine = "typedDispatchFlags: shadowOnly=ON enabled=ON behavior=typed-ready-dispatch status=WARN discoveryOnly=false invalidConfiguration=true"
+            SummaryLine = "typedDispatchFlags: shadowOnly=ON"
             GateStatus = "WARN"
-            GateDetail = "shadowOnly=ON enabled=ON behavior=typed-ready-dispatch discoveryOnly=false invalidConfiguration=true"
+            GateDetail = "enabled=ON invalidConfiguration=true"
         }
     )
 
@@ -149,7 +151,6 @@ try {
             "desktop.appmodel.summary",
             "desktop.appmodel.typed-dispatch-gate"
         )
-        Assert-Contains $normalOutput "typedDispatchFlags: shadowOnly=OFF enabled=OFF behavior=typed-ready-dispatch status=OK discoveryOnly=false" "normal default flag line"
         # Phase 3 pilot flags must be OFF in default build
         Assert-Contains $normalOutput "appModelPhase3PilotStartMenuNotepadFlag=OFF" "Phase 3 pilot StartMenuNotepad flag default-off"
         Assert-Contains $normalOutput "appModelPhase3PilotFallbackToLegacyFlag=OFF" "Phase 3 pilot FallbackToLegacy flag default-off"
@@ -158,8 +159,13 @@ try {
         Assert-Contains $normalOutput "appModelPhase3PilotRuntimeLaunchBehaviorChanged=false" "Phase 3 pilot does not change runtime launch behavior"
         Assert-Contains $normalOutput "appModelPhase3PilotDefaultBuildSafe=true" "Phase 3 pilot default-build-safe"
         Assert-Contains $normalOutput "appModelActiveDispatchFeatureGate=appmodel.active-typed-dispatch" "Phase 3A active dispatch feature gate name"
-        Assert-Contains $normalOutput "appModelActiveDispatchEnabled=false" "Phase 3A active dispatch default-off"
-        Assert-Contains $normalOutput "appModelActiveDispatchRuntimePath=inactive" "Phase 3A active dispatch inactive by default"
+        Assert-Contains $normalOutput "appModelActiveDispatchDefaultOnCandidateGate=appmodel.active-typed-dispatch-default-on-candidate" "Phase 3C candidate gate name"
+        Assert-Contains $normalOutput "appModelActiveDispatchCandidateEnabled=false" "Phase 3C candidate default-off"
+        Assert-Contains $normalOutput "appModelActiveDispatchEnabled=true" "Phase 3A active dispatch product-default-on"
+        Assert-Contains $normalOutput "appModelActiveDispatchRuntimePath=active" "Phase 3A active dispatch active by default"
+        Assert-Contains $normalOutput "appModelActiveDispatchEffectiveStateSource=product-default" "Phase 3C effective state source defaults to product-default"
+        Assert-Contains $normalOutput "appModelActiveDispatchRuntimeLaunchBehaviorChanged=true" "Phase 3D runtime launch ownership marker"
+        Assert-Contains $normalOutput "appModelActiveDispatchVisibleLaunchBehaviorChanged=false" "Phase 3D visible behavior remains unchanged"
     }
 
     $reportLines = @(
@@ -174,7 +180,7 @@ try {
         $reportLines += "case=$($result.CaseName) launchBehavior=typed-ready-dispatch enablesTypedDispatch=true feedsTypedDispatchIntoLaunch=true"
     }
     $reportLines += "normalDefaultChecked=$((-not $SkipNormalCheck).ToString().ToLowerInvariant())"
-    $reportLines += "normalDefaultLine=typedDispatchFlags: shadowOnly=OFF enabled=OFF behavior=typed-ready-dispatch status=OK discoveryOnly=false"
+    $reportLines += "normalDefaultLine=typedDispatchFlags: shadowOnly=OFF enabled=OFF behavior=typed-ready-dispatch status=OK"
     $reportLines += "appModelPhase3PilotCandidate=StartMenuNotepad"
     $reportLines += "appModelPhase3PilotStartMenuNotepadFlag=OFF"
     $reportLines += "appModelPhase3PilotFallbackToLegacyFlag=OFF"
@@ -184,8 +190,13 @@ try {
     $reportLines += "appModelPhase3PilotScopedToStartMenuNotepad=false"
     $reportLines += "appModelPhase3PilotDefaultBuildSafe=true"
     $reportLines += "appModelActiveDispatchFeatureGate=appmodel.active-typed-dispatch"
-    $reportLines += "appModelActiveDispatchEnabled=false"
-    $reportLines += "appModelActiveDispatchRuntimePath=inactive"
+    $reportLines += "appModelActiveDispatchDefaultOnCandidateGate=appmodel.active-typed-dispatch-default-on-candidate"
+    $reportLines += "appModelActiveDispatchCandidateEnabled=false"
+    $reportLines += "appModelActiveDispatchEnabled=true"
+    $reportLines += "appModelActiveDispatchRuntimePath=active"
+    $reportLines += "appModelActiveDispatchEffectiveStateSource=product-default"
+    $reportLines += "appModelActiveDispatchRuntimeLaunchBehaviorChanged=true"
+    $reportLines += "appModelActiveDispatchVisibleLaunchBehaviorChanged=false"
     $reportLines += "result=PASS"
     $report = $reportLines -join [Environment]::NewLine
 

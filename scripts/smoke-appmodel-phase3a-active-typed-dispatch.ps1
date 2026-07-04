@@ -28,20 +28,24 @@ function Invoke-ServerCommands {
     return (($inputText | & $Exe 2>&1) -join [Environment]::NewLine)
 }
 
-function Assert-Contains {
+function Test-Case {
     param(
-        [string]$Text,
-        [string]$Needle,
-        [string]$Reason
+        [string]$Name,
+        [bool]$Pass,
+        [string]$Detail
     )
 
-    if (-not $Text.Contains($Needle)) {
-        throw "Missing expected text for ${Reason}: $Needle"
+    [pscustomobject]@{
+        Name = $Name
+        Pass = $Pass
+        Detail = $Detail
     }
 }
 
 $output = Invoke-ServerCommands -Commands @(
     "gui.start",
+    "desktop.appmodel.active-typed-dispatch-gate reset",
+    "desktop.appmodel.active-typed-dispatch-gate",
     "desktop.appmodel.active-typed-dispatch-gate force-off",
     "desktop.launch Notepad",
     "desktop.launch AppModel",
@@ -54,32 +58,62 @@ $output = Invoke-ServerCommands -Commands @(
     "desktop.open `"$textFile`"",
     "desktop.launch AppModel",
     "desktop.launch TotallyUnknownLaunchThing",
-    "desktop.appmodel.active-typed-dispatch-gate force-off",
+    "desktop.appmodel.active-typed-dispatch-gate reset",
     "desktop.appmodel.active-typed-dispatch-gate"
 )
+
+$defaultGateConfirmed =
+    $output.Contains("command: desktop.appmodel.active-typed-dispatch-gate") -and
+    $output.Contains("mode: status") -and
+    $output.Contains("appModelActiveDispatchDefaultOnCandidateGate=appmodel.active-typed-dispatch-default-on-candidate") -and
+    $output.Contains("appModelActiveDispatchCandidateEnabled=false") -and
+    $output.Contains("appModelActiveDispatchEnabled=true") -and
+    $output.Contains("appModelActiveDispatchCurrentState=true") -and
+    $output.Contains("appModelActiveDispatchRuntimePath=active") -and
+    $output.Contains("appModelActiveDispatchEffectiveStateSource=product-default") -and
+    $output.Contains("runtimeLaunchBehaviorChanged=true") -and
+    $output.Contains("visibleLaunchBehaviorChanged=false") -and
+    $output.Contains("persistentDesktopStorageWrites=false") -and
+    $output.Contains("appModelActiveDispatchToggleApplied=false")
 
 $offGateConfirmed =
     $output.Contains("command: desktop.appmodel.active-typed-dispatch-gate") -and
     $output.Contains("mode: force-off") -and
+    $output.Contains("appModelActiveDispatchDefaultOnCandidateGate=appmodel.active-typed-dispatch-default-on-candidate") -and
+    $output.Contains("appModelActiveDispatchCandidateEnabled=false") -and
     $output.Contains("appModelActiveDispatchEnabled=false") -and
     $output.Contains("appModelActiveDispatchCurrentState=false") -and
-    $output.Contains("runtimeLaunchBehaviorChanged=false") -and
+    $output.Contains("appModelActiveDispatchEffectiveStateSource=force-off") -and
+    $output.Contains("runtimeLaunchBehaviorChanged=true") -and
+    $output.Contains("visibleLaunchBehaviorChanged=false") -and
     $output.Contains("persistentDesktopStorageWrites=false") -and
     $output.Contains("appModelActiveDispatchToggleApplied=true")
 
 $onGateConfirmed =
     $output.Contains("mode: force-on") -and
+    $output.Contains("appModelActiveDispatchDefaultOnCandidateGate=appmodel.active-typed-dispatch-default-on-candidate") -and
+    $output.Contains("appModelActiveDispatchCandidateEnabled=false") -and
     $output.Contains("appModelActiveDispatchEnabled=true") -and
     $output.Contains("appModelActiveDispatchCurrentState=true") -and
-    $output.Contains("runtimeLaunchBehaviorChanged=false") -and
+    $output.Contains("appModelActiveDispatchEffectiveStateSource=force-on") -and
+    $output.Contains("runtimeLaunchBehaviorChanged=true") -and
+    $output.Contains("visibleLaunchBehaviorChanged=false") -and
     $output.Contains("persistentDesktopStorageWrites=false") -and
     $output.Contains("appModelActiveDispatchToggleApplied=true")
+
+$restoreDefaultConfirmed =
+    $output.Contains("mode: reset") -and
+    $output.Contains("appModelActiveDispatchPreviousState=true") -and
+    $output.Contains("appModelActiveDispatchCurrentState=true") -and
+    $output.Contains("appModelActiveDispatchEffectiveStateSource=product-default") -and
+    $output.Contains("nonFatal=true")
 
 $offNotepadFallbackConfirmed =
     $output.Contains("[AppModelActiveTypedDispatch] source=HostedDesktopService request=Notepad classification=BuiltInApp") -and
     $output.Contains("activeTypedDispatchHandled=false") -and
     $output.Contains("legacyFallbackUsed=true") -and
     $output.Contains("visibleBehaviorChanged=false") -and
+    $output.Contains("visibleLaunchBehaviorChanged=false") -and
     $output.Contains("reason=Active typed dispatch gate is disabled")
 
 $onNotepadConfirmed =
@@ -142,25 +176,20 @@ $unknownFallbackConfirmed =
     $output.Contains("selectedHandler=TotallyUnknownLaunchThing") -and
     $output.Contains("reason=Active typed dispatch is not enabled for this app target")
 
-$restoreOffConfirmed =
-    $output.Contains("mode: force-off") -and
-    $output.Contains("appModelActiveDispatchPreviousState=true") -and
-    $output.Contains("appModelActiveDispatchCurrentState=false") -and
-    $output.Contains("nonFatal=true")
-
 $checks = @(
-    @{ Name = "gate.off"; Pass = $offGateConfirmed; Detail = "default flag off is preserved and the gate reports runtimeLaunchBehaviorChanged=false persistentDesktopStorageWrites=false" },
-    @{ Name = "gate.on"; Pass = $onGateConfirmed; Detail = "smoke-only switch turns guarded active typed dispatch on and still reports runtimeLaunchBehaviorChanged=false persistentDesktopStorageWrites=false" },
-    @{ Name = "safe.off.fallback"; Pass = $offNotepadFallbackConfirmed; Detail = "flag-off Notepad launch falls back to the legacy path" },
-    @{ Name = "safe.on.notepad"; Pass = $onNotepadConfirmed; Detail = "Notepad is handled by guarded active typed dispatch" },
-    @{ Name = "safe.on.fileexplorer"; Pass = $onFileExplorerConfirmed; Detail = "File Explorer is handled by guarded active typed dispatch" },
-    @{ Name = "safe.on.controlpanel"; Pass = $onControlPanelConfirmed; Detail = "Control Panel is handled by guarded active typed dispatch" },
-    @{ Name = "safe.on.settings"; Pass = $onSettingsConfirmed; Detail = "System Settings is handled by guarded active typed dispatch" },
-    @{ Name = "safe.on.folder"; Pass = $folderOpenConfirmed; Detail = "Folder open is handled by guarded active typed dispatch through FileExplorer" },
-    @{ Name = "safe.on.text"; Pass = $textOpenConfirmed; Detail = "Text file open is handled by guarded active typed dispatch through Notepad" },
-    @{ Name = "fallback.on.appmodel"; Pass = $onAppModelFallbackConfirmed; Detail = "AppModel remains a fallback case" },
-    @{ Name = "fallback.on.unknown"; Pass = $unknownFallbackConfirmed; Detail = "Unknown launches remain a fallback case" },
-    @{ Name = "restore.off"; Pass = $restoreOffConfirmed; Detail = "the gate is restored to force-off before exit" }
+    Test-Case "gate.default" $defaultGateConfirmed "product-default-on is reported as enabled with runtimeLaunchBehaviorChanged=true and visibleLaunchBehaviorChanged=false"
+    Test-Case "gate.off" $offGateConfirmed "force-off disables active typed dispatch and preserves legacy fallback"
+    Test-Case "gate.on" $onGateConfirmed "force-on re-enables active typed dispatch without changing visible behavior"
+    Test-Case "restore.default" $restoreDefaultConfirmed "reset returns to product-default-on before exit"
+    Test-Case "safe.off.fallback" $offNotepadFallbackConfirmed "Notepad falls back when the gate is off"
+    Test-Case "safe.on.notepad" $onNotepadConfirmed "Notepad is handled by active typed dispatch"
+    Test-Case "safe.on.fileexplorer" $onFileExplorerConfirmed "File Explorer is handled by active typed dispatch"
+    Test-Case "safe.on.controlpanel" $onControlPanelConfirmed "Control Panel is handled by active typed dispatch"
+    Test-Case "safe.on.settings" $onSettingsConfirmed "System Settings is handled by active typed dispatch"
+    Test-Case "safe.on.folder" $folderOpenConfirmed "Folder open is handled by active typed dispatch through File Explorer"
+    Test-Case "safe.on.text" $textOpenConfirmed "Text file open is handled by active typed dispatch through Notepad"
+    Test-Case "fallback.on.appmodel" $onAppModelFallbackConfirmed "AppModel remains a fallback case"
+    Test-Case "fallback.on.unknown" $unknownFallbackConfirmed "Unknown launches remain a fallback case"
 )
 
 $failed = @($checks | Where-Object { -not $_.Pass })
@@ -180,9 +209,14 @@ Write-Host ""
 Write-Host "[AppModelPhase3AActiveTypedDispatchSmoke]"
 Write-Host "result=PASS"
 Write-Host "flagName=appmodel.active-typed-dispatch"
-Write-Host "controlledBy=desktop.appmodel.active-typed-dispatch-gate force-on|force-off"
+Write-Host "candidateGateName=appmodel.active-typed-dispatch-default-on-candidate"
+Write-Host "controlledBy=desktop.appmodel.active-typed-dispatch-gate force-on|force-off|reset"
 Write-Host "safeCases=Notepad,FileExplorer,Control Panel,System Settings,FolderOpen,TextFileOpen"
 Write-Host "fallbackCases=AppModel,TotallyUnknownLaunchThing"
-Write-Host "runtimeLaunchBehaviorChanged=false"
+Write-Host "candidateModeEnabled=false"
+Write-Host "effectiveStateSource=product-default"
+Write-Host "runtimeLaunchBehaviorChanged=true"
+Write-Host "visibleLaunchBehaviorChanged=false"
 Write-Host "persistentDesktopStorageWrites=false"
-Write-Host "restoredOff=true"
+Write-Host "restoredDefault=true"
+

@@ -519,7 +519,7 @@ Two new compile flags are defined for the future pilot. Both are **default-off**
 
 Neither flag is defined in `build.bat`, `build.ps1`, or any normal build configuration.
 
-### 13.3 Default-off status markers
+### 13.3 Product-default-on status markers
 
 The following markers are emitted by `desktop.appmodel.summary` and `desktop.appmodel.typed-dispatch-gate` in every normal build:
 
@@ -532,9 +532,18 @@ appModelPhase3PilotFeedsTypedDispatchIntoLaunch=false
 appModelPhase3PilotRuntimeLaunchBehaviorChanged=false
 appModelPhase3PilotScopedToStartMenuNotepad=true
 appModelPhase3PilotDefaultBuildSafe=true
+appModelActiveDispatchFeatureGate=appmodel.active-typed-dispatch
+appModelActiveDispatchDefaultOnCandidateGate=appmodel.active-typed-dispatch-default-on-candidate
+appModelActiveDispatchCandidateEnabled=false
+appModelActiveDispatchEnabled=true
+appModelActiveDispatchEffectiveStateSource=product-default
+appModelActiveDispatchRuntimePath=active
+appModelActiveDispatchRuntimeLaunchBehaviorChanged=true
+appModelActiveDispatchVisibleLaunchBehaviorChanged=false
+appModelActiveDispatchPersistentDesktopStorageWrites=false
 ```
 
-These markers are asserted by `scripts/smoke-appmodel-typed-dispatch-flags.ps1` and `scripts/smoke-appmodel-phase2-status.ps1`.
+The candidate gate is now a compatibility/testing marker only. `desktop.appmodel.active-typed-dispatch-gate reset` returns to the product default, which is enabled, and emergency `force-off` / `force-on` overrides are still preserved. These markers are asserted by `scripts/smoke-appmodel-typed-dispatch-flags.ps1` and `scripts/smoke-appmodel-phase2-status.ps1`.
 
 ### 13.4 What is not implemented yet
 
@@ -547,4 +556,5 @@ The fallback flag requirement (`GXOS_APPMODEL_TYPED_DISPATCH_PILOT_FALLBACK_TO_L
 ### 13.5 Compile-flag discovery location
 
 `kernel/core/desktop.cpp` contains a compile-time comment block documenting the two pilot flags and the future hook location. It does not add any runtime code. `desktop_service.cpp` contains discovery/reporting for both flags in the `TypedDispatchCompileFlags` struct and the `phase3PilotSummaryLine()` helper.
+
 

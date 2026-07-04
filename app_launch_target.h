@@ -99,8 +99,13 @@ const char* TypedDispatchFeatureGateName();
 bool TypedDispatchRuntimeEnabled();
 void SetTypedDispatchRuntimeEnabledForDiagnostics(bool enabled);
 const char* AppModelActiveTypedDispatchFeatureGateName();
+const char* AppModelActiveTypedDispatchDefaultOnCandidateGateName();
+bool AppModelActiveTypedDispatchDefaultOnCandidateEnabled();
 bool AppModelActiveTypedDispatchEnabled();
+const char* AppModelActiveTypedDispatchEffectiveStateSourceName();
+void SetAppModelActiveTypedDispatchDefaultOnCandidateEnabledForDiagnostics(bool enabled);
 void SetAppModelActiveTypedDispatchEnabledForDiagnostics(bool enabled);
+void ResetAppModelActiveTypedDispatchEnabledForDiagnostics();
 
 } // namespace apps
 } // namespace gxos

@@ -108,6 +108,7 @@ This file should open through Notepad when guarded active typed dispatch is enab
 
     $output = Invoke-ServerCommands -Commands @(
         "gui.start",
+        "desktop.appmodel.active-typed-dispatch-gate reset",
         "desktop.appmodel.active-typed-dispatch-gate",
         "desktop.appmodel.active-typed-dispatch-gate force-off",
         "desktop.launch Notepad",
@@ -135,48 +136,62 @@ This file should open through Notepad when guarded active typed dispatch is enab
         "desktop.launch Network",
         "desktop.open `"$FixtureFolder`" dir",
         "desktop.open `"$FixtureText`"",
-        "desktop.appmodel.active-typed-dispatch-gate force-off",
+        "desktop.appmodel.active-typed-dispatch-gate reset",
         "desktop.launch AppModel",
         "desktop.launch TotallyUnknownLaunchThing",
         "desktop.appmodel.active-typed-dispatch-gate"
     )
 
     $defaultGateConfirmed =
-        $output.Contains("command: desktop.appmodel.active-typed-dispatch-gate") -and
-        $output.Contains("mode: status") -and
-        $output.Contains("appModelActiveDispatchEnabled=false") -and
-        $output.Contains("appModelActiveDispatchRuntimePath=inactive") -and
-        $output.Contains("runtimeLaunchBehaviorChanged=false") -and
-        $output.Contains("persistentDesktopStorageWrites=false") -and
-        $output.Contains("appModelActiveDispatchToggleApplied=false")
+    $output.Contains("command: desktop.appmodel.active-typed-dispatch-gate") -and
+    $output.Contains("mode: status") -and
+    $output.Contains("appModelActiveDispatchDefaultOnCandidateGate=appmodel.active-typed-dispatch-default-on-candidate") -and
+    $output.Contains("appModelActiveDispatchCandidateEnabled=false") -and
+    $output.Contains("appModelActiveDispatchEnabled=true") -and
+    $output.Contains("appModelActiveDispatchRuntimePath=active") -and
+    $output.Contains("appModelActiveDispatchEffectiveStateSource=product-default") -and
+    $output.Contains("runtimeLaunchBehaviorChanged=true") -and
+    $output.Contains("visibleLaunchBehaviorChanged=false") -and
+    $output.Contains("persistentDesktopStorageWrites=false") -and
+    $output.Contains("appModelActiveDispatchToggleApplied=false")
 
-    $forceOffGateConfirmed =
-        $output.Contains("mode: force-off") -and
-        $output.Contains("appModelActiveDispatchEnabled=false") -and
-        $output.Contains("appModelActiveDispatchCurrentState=false") -and
-        $output.Contains("runtimeLaunchBehaviorChanged=false") -and
-        $output.Contains("persistentDesktopStorageWrites=false") -and
-        $output.Contains("appModelActiveDispatchToggleApplied=true")
+$forceOffGateConfirmed =
+    $output.Contains("mode: force-off") -and
+    $output.Contains("appModelActiveDispatchDefaultOnCandidateGate=appmodel.active-typed-dispatch-default-on-candidate") -and
+    $output.Contains("appModelActiveDispatchCandidateEnabled=false") -and
+    $output.Contains("appModelActiveDispatchEnabled=false") -and
+    $output.Contains("appModelActiveDispatchCurrentState=false") -and
+    $output.Contains("appModelActiveDispatchEffectiveStateSource=force-off") -and
+    $output.Contains("runtimeLaunchBehaviorChanged=true") -and
+    $output.Contains("visibleLaunchBehaviorChanged=false") -and
+    $output.Contains("persistentDesktopStorageWrites=false") -and
+    $output.Contains("appModelActiveDispatchToggleApplied=true")
 
-    $forceOnGateConfirmed =
-        $output.Contains("mode: force-on") -and
-        $output.Contains("appModelActiveDispatchEnabled=true") -and
-        $output.Contains("appModelActiveDispatchCurrentState=true") -and
-        $output.Contains("runtimeLaunchBehaviorChanged=false") -and
-        $output.Contains("persistentDesktopStorageWrites=false") -and
-        $output.Contains("appModelActiveDispatchToggleApplied=true")
+$forceOnGateConfirmed =
+    $output.Contains("mode: force-on") -and
+    $output.Contains("appModelActiveDispatchDefaultOnCandidateGate=appmodel.active-typed-dispatch-default-on-candidate") -and
+    $output.Contains("appModelActiveDispatchCandidateEnabled=false") -and
+    $output.Contains("appModelActiveDispatchEnabled=true") -and
+    $output.Contains("appModelActiveDispatchCurrentState=true") -and
+    $output.Contains("appModelActiveDispatchEffectiveStateSource=force-on") -and
+    $output.Contains("runtimeLaunchBehaviorChanged=true") -and
+    $output.Contains("visibleLaunchBehaviorChanged=false") -and
+    $output.Contains("persistentDesktopStorageWrites=false") -and
+    $output.Contains("appModelActiveDispatchToggleApplied=true")
 
-    $restoreGateConfirmed =
-        $output.Contains("mode: force-off") -and
-        $output.Contains("appModelActiveDispatchEnabled=false") -and
-        $output.Contains("appModelActiveDispatchCurrentState=false") -and
-        $output.Contains("nonFatal=true")
+$restoreGateConfirmed =
+    $output.Contains("mode: reset") -and
+    $output.Contains("appModelActiveDispatchEnabled=true") -and
+    $output.Contains("appModelActiveDispatchCurrentState=true") -and
+    $output.Contains("appModelActiveDispatchEffectiveStateSource=product-default") -and
+    $output.Contains("nonFatal=true")
 
     $offNotepadFallbackConfirmed =
         $output.Contains("[AppModelActiveTypedDispatch] source=HostedDesktopService request=Notepad classification=BuiltInApp") -and
         $output.Contains("activeTypedDispatchHandled=false") -and
         $output.Contains("legacyFallbackUsed=true") -and
         $output.Contains("visibleBehaviorChanged=false") -and
+        $output.Contains("visibleLaunchBehaviorChanged=false") -and
         $output.Contains("reason=Active typed dispatch gate is disabled")
 
     $offFolderOpenFallbackConfirmed =
@@ -185,6 +200,7 @@ This file should open through Notepad when guarded active typed dispatch is enab
         $output.Contains("activeTypedDispatchHandled=false") -and
         $output.Contains("legacyFallbackUsed=true") -and
         $output.Contains("visibleBehaviorChanged=false") -and
+        $output.Contains("visibleLaunchBehaviorChanged=false") -and
         $output.Contains("reason=Active typed dispatch gate is disabled")
 
     $offTextOpenFallbackConfirmed =
@@ -193,6 +209,7 @@ This file should open through Notepad when guarded active typed dispatch is enab
         $output.Contains("activeTypedDispatchHandled=false") -and
         $output.Contains("legacyFallbackUsed=true") -and
         $output.Contains("visibleBehaviorChanged=false") -and
+        $output.Contains("visibleLaunchBehaviorChanged=false") -and
         $output.Contains("reason=Active typed dispatch gate is disabled")
 
     $onNotepadConfirmed =
@@ -355,10 +372,10 @@ This file should open through Notepad when guarded active typed dispatch is enab
         $output.Contains("selectedHandler=TotallyUnknownLaunchThing")
 
     $checks = @(
-        Test-Case "gate.default.off" $defaultGateConfirmed "default gate reports enabled=false runtimeLaunchBehaviorChanged=false persistentDesktopStorageWrites=false"
-        Test-Case "gate.force.off" $forceOffGateConfirmed "force-off keeps the gate inactive and the runtime behavior unchanged"
+        Test-Case "gate.default" $defaultGateConfirmed "default gate reports enabled=true runtimeLaunchBehaviorChanged=true persistentDesktopStorageWrites=false"
+        Test-Case "gate.force.off" $forceOffGateConfirmed "force-off keeps the gate inactive and the runtime route ownership marker set"
         Test-Case "gate.force.on" $forceOnGateConfirmed "force-on enables the guarded runtime path without changing visible behavior"
-        Test-Case "gate.restore.off" $restoreGateConfirmed "the smoke restores the gate to force-off before exit"
+        Test-Case "gate.restore.default" $restoreGateConfirmed "the smoke restores the gate to product-default-on before exit"
         Test-Case "off.notepad" $offNotepadFallbackConfirmed "Notepad falls back when the gate is off"
         Test-Case "off.folder" $offFolderOpenFallbackConfirmed "folder desktop icon / file-open path falls back when the gate is off"
         Test-Case "off.text" $offTextOpenFallbackConfirmed "text-file desktop icon / file-open path falls back when the gate is off"
@@ -405,26 +422,31 @@ This file should open through Notepad when guarded active typed dispatch is enab
     $phase3BRightColumnActiveDispatchCovered = $onComputerConfirmed -and $onThisSystemConfirmed -and $onDocumentsConfirmed -and $onPicturesConfirmed -and $onMusicConfirmed -and $onNetworkConfirmed -and $onSettingsConfirmed -and $onControlPanelConfirmed
     $phase3BSystemObjectActiveDispatchCovered = $onFileExplorerConfirmed -and $onComputerConfirmed -and $onThisSystemConfirmed -and $onSystemSettingsConfirmed -and $onTrashConfirmed
     $phase3BUnsupportedTargetsFallback = $fallbackAppModelConfirmed -and $fallbackUnknownConfirmed
-    $phase3BRuntimeLaunchBehaviorChanged = -not ($defaultGateConfirmed -and $forceOffGateConfirmed -and $forceOnGateConfirmed -and $restoreGateConfirmed)
+    $phase3BRuntimeLaunchBehaviorChanged = $defaultGateConfirmed -and $forceOffGateConfirmed -and $forceOnGateConfirmed -and $restoreGateConfirmed
     $phase3BPersistentDesktopStorageWrites = -not ($defaultGateConfirmed -and $forceOffGateConfirmed -and $forceOnGateConfirmed -and $restoreGateConfirmed)
-    $phase3BRestoredOff = $restoreGateConfirmed -and ($output.Contains("appModelActiveDispatchCurrentState=false"))
-    $phase3BTemporarySmokeStateRestored = $true
+    $phase3BRestoredDefault = $restoreGateConfirmed -and ($output.Contains("appModelActiveDispatchCurrentState=true"))
+    $phase3BTemporarySmokeStateRestored = $phase3BRestoredDefault
 
     $reportLines = @(
         "[AppModelPhase3BActiveTypedDispatchSmoke]",
         "mode=hosted",
         "flagName=appmodel.active-typed-dispatch",
-        "controlledBy=desktop.appmodel.active-typed-dispatch-gate force-on|force-off",
+        "candidateGateName=appmodel.active-typed-dispatch-default-on-candidate",
+        "controlledBy=desktop.appmodel.active-typed-dispatch-gate force-on|force-off|reset",
+        "candidateModeEnabled=false",
+        "effectiveStateSource=product-default",
         "appModelPhase3BDesktopIconActiveDispatchCovered=$($phase3BDesktopIconActiveDispatchCovered.ToString().ToLowerInvariant())",
         "appModelPhase3BStartMenuActiveDispatchCovered=$($phase3BStartMenuActiveDispatchCovered.ToString().ToLowerInvariant())",
         "appModelPhase3BRightColumnActiveDispatchCovered=$($phase3BRightColumnActiveDispatchCovered.ToString().ToLowerInvariant())",
         "appModelPhase3BSystemObjectActiveDispatchCovered=$($phase3BSystemObjectActiveDispatchCovered.ToString().ToLowerInvariant())",
         "appModelPhase3BUnsupportedTargetsFallback=$($phase3BUnsupportedTargetsFallback.ToString().ToLowerInvariant())",
         "appModelPhase3BRuntimeLaunchBehaviorChanged=$($phase3BRuntimeLaunchBehaviorChanged.ToString().ToLowerInvariant())",
+        "appModelPhase3BVisibleLaunchBehaviorChanged=false",
         "appModelPhase3BPersistentDesktopStorageWrites=$($phase3BPersistentDesktopStorageWrites.ToString().ToLowerInvariant())",
-        "runtimeLaunchBehaviorChanged=false",
+        "runtimeLaunchBehaviorChanged=true",
+        "visibleLaunchBehaviorChanged=false",
         "persistentDesktopStorageWrites=false",
-        "restoredOff=$($phase3BRestoredOff.ToString().ToLowerInvariant())",
+        "restoredDefault=$($phase3BRestoredDefault.ToString().ToLowerInvariant())",
         "appModelPhase3BTemporarySmokeStateRestored=$($phase3BTemporarySmokeStateRestored.ToString().ToLowerInvariant())",
         "result=PASS"
     )
@@ -445,3 +467,4 @@ finally {
     Restore-TrackedArtifacts -State $artifactState
     Remove-Item -LiteralPath $TempRoot -Recurse -Force -ErrorAction SilentlyContinue
 }
+

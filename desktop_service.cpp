@@ -56,8 +56,25 @@ namespace gxos {
         namespace {
             static std::mutex s_typedDispatchRuntimeEnabledMutex;
             static bool s_typedDispatchRuntimeEnabled = true;
-            static std::mutex s_appModelActiveTypedDispatchEnabledMutex;
-            static bool s_appModelActiveTypedDispatchEnabled = false;
+            enum class AppModelActiveTypedDispatchStateSource {
+                ProductDefault,
+                CompatibilityCandidate,
+                ForceOn,
+                ForceOff,
+            };
+            static std::mutex s_appModelActiveTypedDispatchStateMutex;
+            static bool s_appModelActiveTypedDispatchCandidateEnabled = false;
+            static AppModelActiveTypedDispatchStateSource s_appModelActiveTypedDispatchStateSource =
+                AppModelActiveTypedDispatchStateSource::ProductDefault;
+
+            static bool appModelActiveTypedDispatchStateUsesForceOverride(AppModelActiveTypedDispatchStateSource source) {
+                return source == AppModelActiveTypedDispatchStateSource::ForceOn ||
+                    source == AppModelActiveTypedDispatchStateSource::ForceOff;
+            }
+
+            static void setAppModelActiveTypedDispatchStateSourceLocked(AppModelActiveTypedDispatchStateSource source) {
+                s_appModelActiveTypedDispatchStateSource = source;
+            }
         }
 
         const char* TypedDispatchFeatureGateName() {
@@ -78,14 +95,57 @@ namespace gxos {
             return "appmodel.active-typed-dispatch";
         }
 
+        const char* AppModelActiveTypedDispatchDefaultOnCandidateGateName() {
+            return "appmodel.active-typed-dispatch-default-on-candidate";
+        }
+
+        bool AppModelActiveTypedDispatchDefaultOnCandidateEnabled() {
+            std::lock_guard<std::mutex> lock(s_appModelActiveTypedDispatchStateMutex);
+            return s_appModelActiveTypedDispatchCandidateEnabled;
+        }
+
         bool AppModelActiveTypedDispatchEnabled() {
-            std::lock_guard<std::mutex> lock(s_appModelActiveTypedDispatchEnabledMutex);
-            return s_appModelActiveTypedDispatchEnabled;
+            std::lock_guard<std::mutex> lock(s_appModelActiveTypedDispatchStateMutex);
+            return s_appModelActiveTypedDispatchStateSource != AppModelActiveTypedDispatchStateSource::ForceOff;
+        }
+
+        const char* AppModelActiveTypedDispatchEffectiveStateSourceName() {
+            std::lock_guard<std::mutex> lock(s_appModelActiveTypedDispatchStateMutex);
+            switch (s_appModelActiveTypedDispatchStateSource) {
+            case AppModelActiveTypedDispatchStateSource::ProductDefault:
+                return "product-default";
+            case AppModelActiveTypedDispatchStateSource::CompatibilityCandidate:
+                return "compatibility/candidate";
+            case AppModelActiveTypedDispatchStateSource::ForceOn:
+                return "force-on";
+            case AppModelActiveTypedDispatchStateSource::ForceOff:
+                return "force-off";
+            default:
+                return "product-default";
+            }
+        }
+
+        void SetAppModelActiveTypedDispatchDefaultOnCandidateEnabledForDiagnostics(bool enabled) {
+            std::lock_guard<std::mutex> lock(s_appModelActiveTypedDispatchStateMutex);
+            s_appModelActiveTypedDispatchCandidateEnabled = enabled;
+            if (!appModelActiveTypedDispatchStateUsesForceOverride(s_appModelActiveTypedDispatchStateSource)) {
+                setAppModelActiveTypedDispatchStateSourceLocked(
+                    enabled ? AppModelActiveTypedDispatchStateSource::CompatibilityCandidate
+                            : AppModelActiveTypedDispatchStateSource::ProductDefault);
+            }
         }
 
         void SetAppModelActiveTypedDispatchEnabledForDiagnostics(bool enabled) {
-            std::lock_guard<std::mutex> lock(s_appModelActiveTypedDispatchEnabledMutex);
-            s_appModelActiveTypedDispatchEnabled = enabled;
+            std::lock_guard<std::mutex> lock(s_appModelActiveTypedDispatchStateMutex);
+            setAppModelActiveTypedDispatchStateSourceLocked(
+                enabled ? AppModelActiveTypedDispatchStateSource::ForceOn : AppModelActiveTypedDispatchStateSource::ForceOff);
+        }
+
+        void ResetAppModelActiveTypedDispatchEnabledForDiagnostics() {
+            std::lock_guard<std::mutex> lock(s_appModelActiveTypedDispatchStateMutex);
+            s_appModelActiveTypedDispatchCandidateEnabled = false;
+            setAppModelActiveTypedDispatchStateSourceLocked(
+                AppModelActiveTypedDispatchStateSource::ProductDefault);
         }
 
         class TypedDispatchRuntimeGateOverride {
@@ -106,16 +166,24 @@ namespace gxos {
         class AppModelActiveTypedDispatchGateOverride {
         public:
             explicit AppModelActiveTypedDispatchGateOverride(bool enabled)
-                : m_restoreEnabled(AppModelActiveTypedDispatchEnabled()) {
+                : m_restoreStateSource(AppModelActiveTypedDispatchEffectiveStateSourceName()) {
                 SetAppModelActiveTypedDispatchEnabledForDiagnostics(enabled);
             }
 
             ~AppModelActiveTypedDispatchGateOverride() {
-                SetAppModelActiveTypedDispatchEnabledForDiagnostics(m_restoreEnabled);
+                if (m_restoreStateSource == "force-on") {
+                    SetAppModelActiveTypedDispatchEnabledForDiagnostics(true);
+                } else if (m_restoreStateSource == "force-off") {
+                    SetAppModelActiveTypedDispatchEnabledForDiagnostics(false);
+                } else if (m_restoreStateSource == "compatibility/candidate") {
+                    SetAppModelActiveTypedDispatchDefaultOnCandidateEnabledForDiagnostics(true);
+                } else {
+                    ResetAppModelActiveTypedDispatchEnabledForDiagnostics();
+                }
             }
 
         private:
-            bool m_restoreEnabled;
+            std::string m_restoreStateSource;
         };
     }
 
@@ -938,9 +1006,13 @@ namespace gxos {
         static std::string appModelActiveTypedDispatchSummaryLine() {
             std::ostringstream oss;
             oss << "appModelActiveDispatchFeatureGate=" << apps::AppModelActiveTypedDispatchFeatureGateName()
+                << " appModelActiveDispatchDefaultOnCandidateGate=" << apps::AppModelActiveTypedDispatchDefaultOnCandidateGateName()
+                << " appModelActiveDispatchCandidateEnabled=" << diagnosticBool(apps::AppModelActiveTypedDispatchDefaultOnCandidateEnabled())
                 << " appModelActiveDispatchEnabled=" << diagnosticBool(apps::AppModelActiveTypedDispatchEnabled())
+                << " appModelActiveDispatchEffectiveStateSource=" << apps::AppModelActiveTypedDispatchEffectiveStateSourceName()
                 << " appModelActiveDispatchRuntimePath=" << (apps::AppModelActiveTypedDispatchEnabled() ? "active" : "inactive")
-                << " appModelActiveDispatchRuntimeLaunchBehaviorChanged=false"
+                << " appModelActiveDispatchRuntimeLaunchBehaviorChanged=true"
+                << " appModelActiveDispatchVisibleLaunchBehaviorChanged=false"
                 << " appModelActiveDispatchPersistentDesktopStorageWrites=false\n";
             return oss.str();
         }
@@ -962,10 +1034,16 @@ namespace gxos {
                 << " shadowDecision=" << shadowDecision
                 << " shadowUsage=" << shadowUsage
                 << " selectedHandler=" << selectedHandler
+                << " appModelActiveDispatchDefaultOnCandidateGate=" << apps::AppModelActiveTypedDispatchDefaultOnCandidateGateName()
+                << " appModelActiveDispatchCandidateEnabled=" << diagnosticBool(apps::AppModelActiveTypedDispatchDefaultOnCandidateEnabled())
                 << " appModelActiveDispatchEnabled=" << diagnosticBool(apps::AppModelActiveTypedDispatchEnabled())
+                << " appModelActiveDispatchEffectiveStateSource=" << apps::AppModelActiveTypedDispatchEffectiveStateSourceName()
+                << " appModelActiveDispatchRuntimeLaunchBehaviorChanged=true"
+                << " appModelActiveDispatchVisibleLaunchBehaviorChanged=false"
                 << " activeTypedDispatchHandled=" << diagnosticBool(activeHandled)
                 << " legacyFallbackUsed=" << diagnosticBool(legacyFallbackUsed)
                 << " visibleBehaviorChanged=false"
+                << " visibleLaunchBehaviorChanged=false"
                 << " reason=" << reason;
             return oss.str();
         }

@@ -527,14 +527,14 @@ try {
         $typedDispatchGateRestored = Text-Contains -Output $hostedOutput -Needle "typedDispatchGateRestored=true"
         $typedDispatchGateDefaultMatrixOk =
             Text-Contains -Output $hostedOutput -Needle "phase3TypedDispatchGateMatrix state=default total=14 typedDispatch=11 legacyOrCompatibilityDispatch=0 blockedUnknownFallback=1 specialCaseFallback=2 fallbackTotal=3"
-        # The hosted summary already captures the active-dispatch off-state markers; use those
+        # The hosted summary now captures the product-default active-dispatch markers; use those
         # rather than a separate force-off invocation so both validation modes stay aligned.
         $typedDispatchGateForcedOffMatrixOk =
             $typedDispatchGateForcedOffSupported -and
             $typedDispatchGateForcedOffSafe -and
-            (Text-Contains -Output $hostedOutput -Needle "appModelActiveDispatchEnabled=false") -and
-            (Text-Contains -Output $hostedOutput -Needle "appModelActiveDispatchRuntimePath=inactive") -and
-            (Text-Contains -Output $hostedOutput -Needle "appModelActiveDispatchRuntimeLaunchBehaviorChanged=false") -and
+            (Text-Contains -Output $hostedOutput -Needle "appModelActiveDispatchEnabled=true") -and
+            (Text-Contains -Output $hostedOutput -Needle "appModelActiveDispatchRuntimePath=active") -and
+            (Text-Contains -Output $hostedOutput -Needle "appModelActiveDispatchRuntimeLaunchBehaviorChanged=true") -and
             (Text-Contains -Output $hostedOutput -Needle "appModelActiveDispatchPersistentDesktopStorageWrites=false")
         $typedDispatchGateRestoredMatrixOk = $typedDispatchGateDefaultMatrixOk
         $typedDispatchGateFeatureOk =
@@ -571,10 +571,13 @@ try {
             (Text-Contains -Output $hostedOutput -Needle "appModelPhase3PilotRuntimeLaunchBehaviorChanged=false") -and
             (Text-Contains -Output $hostedOutput -Needle "appModelPhase3PilotDefaultBuildSafe=true") -and
             (Text-Contains -Output $hostedOutput -Needle "appModelActiveDispatchFeatureGate=appmodel.active-typed-dispatch") -and
-            (Text-Contains -Output $hostedOutput -Needle "appModelActiveDispatchEnabled=false") -and
-            (Text-Contains -Output $hostedOutput -Needle "appModelActiveDispatchRuntimePath=inactive")
+            (Text-Contains -Output $hostedOutput -Needle "appModelActiveDispatchDefaultOnCandidateGate=appmodel.active-typed-dispatch-default-on-candidate") -and
+            (Text-Contains -Output $hostedOutput -Needle "appModelActiveDispatchCandidateEnabled=false") -and
+            (Text-Contains -Output $hostedOutput -Needle "appModelActiveDispatchEnabled=true") -and
+            (Text-Contains -Output $hostedOutput -Needle "appModelActiveDispatchRuntimePath=active") -and
+            (Text-Contains -Output $hostedOutput -Needle "appModelActiveDispatchEffectiveStateSource=product-default")
         if ($phase3PilotMarkersOk) {
-            Add-Check "phase3TypedDispatchActive" "PASS" "ready-only typed dispatch active; historical pilot flags remain OFF; user-visible launch behavior unchanged"
+            Add-Check "phase3TypedDispatchActive" "PASS" "ready-only typed dispatch active; historical pilot flags remain OFF; active dispatch is product-default-on and user-visible launch behavior remains unchanged"
         } else {
             Add-Check "phase3TypedDispatchActive" "FAIL" "one or more Phase 3 active dispatch markers missing from hosted output"
         }
@@ -1010,7 +1013,17 @@ try {
         "aggregateHostedBuildResumeCommand=$aggregateHostedBuildResumeCommand",
         "typedDispatchEnabled=true",
         "feedsTypedDispatchIntoLaunch=true",
-        "runtimeLaunchBehaviorChanged=false",
+        "appModelActiveDispatchFeatureGate=appmodel.active-typed-dispatch",
+        "appModelActiveDispatchDefaultOnCandidateGate=appmodel.active-typed-dispatch-default-on-candidate",
+        "appModelActiveDispatchCandidateEnabled=false",
+        "appModelActiveDispatchEnabled=true",
+        "appModelActiveDispatchRuntimePath=active",
+        "appModelActiveDispatchEffectiveStateSource=product-default",
+        "appModelActiveDispatchRuntimeLaunchBehaviorChanged=true",
+        "appModelActiveDispatchVisibleLaunchBehaviorChanged=false",
+        "appModelActiveDispatchPersistentDesktopStorageWrites=false",
+        "runtimeLaunchBehaviorChanged=true",
+        "visibleLaunchBehaviorChanged=false",
         "persistentDesktopStorageWrites=false",
         "launchesApps=false",
         "qemuOptional=true",

@@ -1144,7 +1144,7 @@ static void help(){
                  " gui.rect <id> <x> <y> <w> <h> <r> <g> <b> | gui.move <id> <x> <y> | gui.resize <id> <w> <h> | gui.title <id> <title>\n"
                  " gui.btn <win> <id> <x> <y> <w> <h> <text> | gui.pop | gui.wlist | gui.activate <id> | gui.min <id>\n"
                  " gxm.load <path> | gxm.sample | gui.save <path> | gui.load <path>\n"
-                 " desktop.wallpaper <path> | desktop.launch <action> | desktop.open <path> [dir] | desktop.launch.resolve <label> | desktop.launch.adapt <label> | desktop.launch.compare | desktop.launch.storage | desktop.launch.storage.preview | desktop.launch.storage.preview.compare | desktop.launch.types | desktop.open.resolve <path> [dir] | desktop.appmodel.active-typed-dispatch-gate [force-on|force-off] | desktop.pin <action> | desktop.unpin <action> | desktop.showconfig\n"
+                 " desktop.wallpaper <path> | desktop.launch <action> | desktop.open <path> [dir] | desktop.launch.resolve <label> | desktop.launch.adapt <label> | desktop.launch.compare | desktop.launch.storage | desktop.launch.storage.preview | desktop.launch.storage.preview.compare | desktop.launch.types | desktop.open.resolve <path> [dir] | desktop.appmodel.active-typed-dispatch-gate [force-on|force-off|reset] | desktop.appmodel.active-typed-dispatch-default-on-candidate [on|off|reset] | desktop.pin <action> | desktop.unpin <action> | desktop.showconfig\n"
                  " desktop.apps | desktop.apps.verbose | desktop.appmodel.summary | desktop.appmodel.coverage | desktop.appmodel.typed-dispatch-gate [force-off] | desktop.pinned | desktop.recent | desktop.pinapp <name> | desktop.pinfile <name> <path>\n"
                  " nativeapp.capabilities | nativeapp.inspect <app> | nativeapp.smoketest <app> | nativeapp.processes\n"
                  " taskbar.list | taskbar.activate <id> | taskbar.min <id> | taskbar.close <id>\n"
@@ -1427,28 +1427,72 @@ using namespace gxos;
             const bool restoreEnabled = gxos::apps::AppModelActiveTypedDispatchEnabled();
             const bool forceOffRequested = mode == "force-off" || mode == "off" || mode == "disabled";
             const bool forceOnRequested = mode == "force-on" || mode == "on" || mode == "enabled";
+            const bool resetRequested = mode == "reset" || mode == "restore" || mode == "default";
             if (forceOffRequested) {
                 gxos::apps::SetAppModelActiveTypedDispatchEnabledForDiagnostics(false);
             } else if (forceOnRequested) {
                 gxos::apps::SetAppModelActiveTypedDispatchEnabledForDiagnostics(true);
+            } else if (resetRequested) {
+                gxos::apps::ResetAppModelActiveTypedDispatchEnabledForDiagnostics();
             }
 
             const bool runtimeEnabled = gxos::apps::AppModelActiveTypedDispatchEnabled();
             std::cout << "[AppModelActiveTypedDispatchGate]\n";
             std::cout << "command: desktop.appmodel.active-typed-dispatch-gate\n";
-            std::cout << "mode: " << (forceOffRequested ? "force-off" : (forceOnRequested ? "force-on" : "status")) << "\n";
+            std::cout << "mode: " << (forceOffRequested ? "force-off" : (forceOnRequested ? "force-on" : (resetRequested ? "reset" : "status"))) << "\n";
             std::cout << "appModelActiveDispatchFeatureGate=" << gxos::apps::AppModelActiveTypedDispatchFeatureGateName() << "\n";
+            std::cout << "appModelActiveDispatchDefaultOnCandidateGate=" << gxos::apps::AppModelActiveTypedDispatchDefaultOnCandidateGateName() << "\n";
+            std::cout << "appModelActiveDispatchCandidateEnabled=" << (gxos::apps::AppModelActiveTypedDispatchDefaultOnCandidateEnabled() ? "true" : "false") << "\n";
             std::cout << "appModelActiveDispatchEnabled=" << (runtimeEnabled ? "true" : "false") << "\n";
             std::cout << "appModelActiveDispatchRuntimePath=" << (runtimeEnabled ? "active" : "inactive") << "\n";
-            std::cout << "runtimeLaunchBehaviorChanged=false\n";
+            std::cout << "appModelActiveDispatchEffectiveStateSource=" << gxos::apps::AppModelActiveTypedDispatchEffectiveStateSourceName() << "\n";
+            std::cout << "runtimeLaunchBehaviorChanged=true\n";
+            std::cout << "visibleLaunchBehaviorChanged=false\n";
+            std::cout << "appModelActiveDispatchRuntimeLaunchBehaviorChanged=true\n";
+            std::cout << "appModelActiveDispatchVisibleLaunchBehaviorChanged=false\n";
             std::cout << "persistentDesktopStorageWrites=false\n";
             std::cout << "appModelActiveDispatchPreviousState=" << (restoreEnabled ? "true" : "false") << "\n";
             std::cout << "appModelActiveDispatchCurrentState=" << (runtimeEnabled ? "true" : "false") << "\n";
-            if (forceOffRequested || forceOnRequested) {
+            if (forceOffRequested || forceOnRequested || resetRequested) {
                 std::cout << "appModelActiveDispatchToggleApplied=true\n";
             } else {
                 std::cout << "appModelActiveDispatchToggleApplied=false\n";
             }
+            std::cout << "nonFatal=true\n";
+        }
+        else if (cmd=="desktop.appmodel.active-typed-dispatch-default-on-candidate"){
+            std::string mode; std::getline(iss, mode); if(mode.size()>0 && mode[0]==' ') mode.erase(0,1);
+            const bool candidateBefore = gxos::apps::AppModelActiveTypedDispatchDefaultOnCandidateEnabled();
+            const bool enableRequested = mode == "on" || mode == "enable" || mode == "enabled" || mode == "candidate-on";
+            const bool disableRequested = mode == "off" || mode == "disable" || mode == "disabled" || mode == "candidate-off";
+            const bool resetRequested = mode == "reset" || mode == "restore" || mode == "default";
+            if (enableRequested) {
+                gxos::apps::SetAppModelActiveTypedDispatchDefaultOnCandidateEnabledForDiagnostics(true);
+            } else if (disableRequested) {
+                gxos::apps::SetAppModelActiveTypedDispatchDefaultOnCandidateEnabledForDiagnostics(false);
+            } else if (resetRequested) {
+                gxos::apps::ResetAppModelActiveTypedDispatchEnabledForDiagnostics();
+            }
+
+            const bool candidateAfter = gxos::apps::AppModelActiveTypedDispatchDefaultOnCandidateEnabled();
+            const bool runtimeEnabled = gxos::apps::AppModelActiveTypedDispatchEnabled();
+            std::cout << "[AppModelActiveTypedDispatchCandidateGate]\n";
+            std::cout << "command: desktop.appmodel.active-typed-dispatch-default-on-candidate\n";
+            std::cout << "mode: " << (enableRequested ? "candidate-on" : (disableRequested ? "candidate-off" : (resetRequested ? "reset" : "status"))) << "\n";
+            std::cout << "appModelActiveDispatchFeatureGate=" << gxos::apps::AppModelActiveTypedDispatchFeatureGateName() << "\n";
+            std::cout << "appModelActiveDispatchDefaultOnCandidateGate=" << gxos::apps::AppModelActiveTypedDispatchDefaultOnCandidateGateName() << "\n";
+            std::cout << "appModelActiveDispatchCandidateEnabled=" << (candidateAfter ? "true" : "false") << "\n";
+            std::cout << "appModelActiveDispatchEnabled=" << (runtimeEnabled ? "true" : "false") << "\n";
+            std::cout << "appModelActiveDispatchRuntimePath=" << (runtimeEnabled ? "active" : "inactive") << "\n";
+            std::cout << "appModelActiveDispatchEffectiveStateSource=" << gxos::apps::AppModelActiveTypedDispatchEffectiveStateSourceName() << "\n";
+            std::cout << "runtimeLaunchBehaviorChanged=true\n";
+            std::cout << "visibleLaunchBehaviorChanged=false\n";
+            std::cout << "appModelActiveDispatchRuntimeLaunchBehaviorChanged=true\n";
+            std::cout << "appModelActiveDispatchVisibleLaunchBehaviorChanged=false\n";
+            std::cout << "persistentDesktopStorageWrites=false\n";
+            std::cout << "appModelActiveDispatchCandidatePreviousState=" << (candidateBefore ? "true" : "false") << "\n";
+            std::cout << "appModelActiveDispatchCandidateCurrentState=" << (candidateAfter ? "true" : "false") << "\n";
+            std::cout << "appModelActiveDispatchToggleApplied=" << ((enableRequested || disableRequested || resetRequested) ? "true" : "false") << "\n";
             std::cout << "nonFatal=true\n";
         }
         else if (cmd=="desktop.showconfig"){
