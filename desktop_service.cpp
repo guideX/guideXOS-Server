@@ -299,17 +299,22 @@ namespace gxos {
         static std::vector<UiLaunchLabelDiagnostic> currentCompositorUiLaunchLabelsForDiagnostic() {
             // Diagnostic mirror of compositor UI labels only. This is not launch policy
             // and must stay read-only until the app launch rewrite phase.
-            // AppModel and ComputerFiles are intentionally preserved compatibility
-            // bridge labels: document them here so later phases can replace ad hoc UI
-            // labels with a real launch-resolution surface without breaking config.
+            // Legacy bridge labels such as ComputerFiles are tracked separately in
+            // the launch-target compatibility tables; this list reflects the actual
+            // visible Start Menu and desktop affordances.
             return {
                 makeUiLaunchLabelDiagnostic("App Model Demo", "compositor launchAction special-case"),
                 makeUiLaunchLabelDiagnostic("AppModel", "compositor legacy AppModel alias", "App Model Demo", "legacy alias retained for old pins/config"),
                 makeUiLaunchLabelDiagnostic("Trash", "desktop system icon"),
-                makeUiLaunchLabelDiagnostic("ControlPanel", "desktop system/settings entry"),
-                makeUiLaunchLabelDiagnostic("TaskManager", "taskbar/system menu"),
                 makeUiLaunchLabelDiagnostic("Console", "taskbar/start menu shortcut"),
-                makeUiLaunchLabelDiagnostic("ComputerFiles", "desktop/start compatibility bridge to FileExplorer", "", "shell/system label; compatibility bridge, not a built-in metadata identity")
+                makeUiLaunchLabelDiagnostic("TaskManager", "taskbar/system menu"),
+                makeUiLaunchLabelDiagnostic("Computer", "start menu right-column shortcut", "/", "opens FileExplorer at the filesystem root"),
+                makeUiLaunchLabelDiagnostic("Documents", "start menu right-column shortcut", "/Documents", "opens FileExplorer and creates the shared folder if needed"),
+                makeUiLaunchLabelDiagnostic("Pictures", "start menu right-column shortcut", "/Pictures", "opens FileExplorer and creates the shared folder if needed"),
+                makeUiLaunchLabelDiagnostic("Music", "start menu right-column shortcut", "/Music", "opens FileExplorer and creates the shared folder if needed"),
+                makeUiLaunchLabelDiagnostic("Network", "start menu right-column shortcut", "/Network", "opens FileExplorer and creates the shared folder if needed"),
+                makeUiLaunchLabelDiagnostic("Control Panel", "start menu right-column shortcut", "ControlPanel", "launches the existing control surface"),
+                makeUiLaunchLabelDiagnostic("Settings", "start menu right-column shortcut", "ControlPanel", "temporary fallback until a dedicated Settings app exists")
             };
         }
 
@@ -753,6 +758,27 @@ namespace gxos {
             if (name == "Image Viewer") return "ImageViewer";
             if (name == "Shutdown") return "ShutdownDialog";
             return name;
+        }
+
+        static bool isStartMenuFolderShortcutLabel(const std::string& label) {
+            return label == "Computer" ||
+                label == "This System" ||
+                label == "Documents" ||
+                label == "Pictures" ||
+                label == "Music" ||
+                label == "Network";
+        }
+
+        static bool isStartMenuSettingsFallbackLabel(const std::string& label) {
+            return label == "Settings" || label == "System Settings";
+        }
+
+        static std::string startMenuFolderPathForLabel(const std::string& label) {
+            if (label == "Computer" || label == "This System") return "/";
+            if (label == "Documents" || label == "Pictures" || label == "Music" || label == "Network") {
+                return DesktopFolderResolver::StandardUserFolderVirtualPath(label);
+            }
+            return std::string();
         }
 
         static apps::LaunchTargetType launchTargetTypeForAppKind(apps::AppKind kind) {
@@ -1347,7 +1373,15 @@ namespace gxos {
             for (const RegisteredDesktopApp& app : registeredApps) allProgramLabels.push_back(app.displayName);
             appendLaunchStoragePreviewLabels(out, counts, "Compositor:g_startMenuAllProgsSorted", allProgramLabels, "display name", "low", maxRows);
 
-            std::vector<std::string> shellLabels = { "ComputerFiles", "Console", "Trash", "ControlPanel", "TaskManager" };
+            std::vector<std::string> shellLabels = {
+                "Computer",
+                "Documents",
+                "Pictures",
+                "Music",
+                "Network",
+                "Control Panel",
+                "Settings"
+            };
             appendLaunchStoragePreviewLabels(out, counts, "Compositor:rightColumnAndSystemObjects", shellLabels, "", "medium", maxRows);
 
             return counts;
@@ -1514,10 +1548,15 @@ namespace gxos {
                 target.diagnosticStatus = "resolved-shell";
                 if (label == "Console" || label == "Terminal") {
                     target.dispatchLaunchName = "Console";
-                } else if (label == "This System") {
-                    target.dispatchLaunchName = "Files";
+                } else if (label == "Computer" || label == "This System") {
+                    target.dispatchLaunchName = "FileExplorer";
                     target.pathParameter = "/";
-                } else if (label == "Control Panel" || label == "Settings" || label == "System Settings") {
+                } else if (label == "Documents" || label == "Pictures" || label == "Music" || label == "Network") {
+                    target.dispatchLaunchName = "FileExplorer";
+                    target.pathParameter = "/" + label;
+                } else if (label == "Control Panel") {
+                    target.dispatchLaunchName = "ControlPanel";
+                } else if (label == "Settings" || label == "System Settings") {
                     target.dispatchLaunchName = "DisplayOptions";
                 }
                 target.diagnosticReason = "Bare-metal shell/system label mirror for comparison diagnostics";
@@ -2003,6 +2042,45 @@ namespace gxos {
                 target.bareMetalAvailable = false;
                 target.diagnosticStatus = "resolved-shell";
                 target.diagnosticReason = "Compatibility bridge canonicalizes to FileExplorer in hosted dispatch; not a built-in app identity";
+                return target;
+            }
+
+            if (label == "Computer" || label == "This System" || label == "Documents" || label == "Pictures" || label == "Music" || label == "Network") {
+                target.type = apps::LaunchTargetType::ShellAction;
+                target.displayName = label;
+                target.shellAction = label;
+                target.dispatchLaunchName = (label == "Computer" || label == "This System") ? "FileExplorer" : "FileExplorer";
+                target.pathParameter = startMenuFolderPathForLabel(label);
+                target.hostedAvailable = true;
+                target.bareMetalAvailable = true;
+                target.diagnosticStatus = "resolved-shell";
+                target.diagnosticReason = (label == "Computer" || label == "This System")
+                    ? "Right-column Computer opens FileExplorer at the filesystem root"
+                    : "Right-column folder opens FileExplorer after ensuring the shared folder exists";
+                return target;
+            }
+
+            if (label == "Control Panel") {
+                target.type = apps::LaunchTargetType::ShellAction;
+                target.displayName = label;
+                target.shellAction = label;
+                target.dispatchLaunchName = "ControlPanel";
+                target.hostedAvailable = true;
+                target.bareMetalAvailable = true;
+                target.diagnosticStatus = "resolved-shell";
+                target.diagnosticReason = "Right-column Control Panel launches the existing control surface";
+                return target;
+            }
+
+            if (isStartMenuSettingsFallbackLabel(label)) {
+                target.type = apps::LaunchTargetType::ShellAction;
+                target.displayName = label;
+                target.shellAction = label;
+                target.dispatchLaunchName = "DisplayOptions";
+                target.hostedAvailable = true;
+                target.bareMetalAvailable = true;
+                target.diagnosticStatus = "resolved-shell";
+                target.diagnosticReason = "Temporary Start Menu Settings mapping routes to the existing DisplayOptions settings panel until a dedicated unified Settings app exists";
                 return target;
             }
 
@@ -3715,6 +3793,75 @@ namespace gxos {
             ensureDefaultAppsRegistered();
             const LaunchDispatchDecision dispatchDecision = SelectLaunchDispatch(name);
             RecordLaunchDispatchDecision("HostedDesktopService", dispatchDecision);
+            if (dispatchDecision.target.type == apps::LaunchTargetType::ShellAction) {
+                const std::string shellAction = dispatchDecision.target.shellAction.empty() ? name : dispatchDecision.target.shellAction;
+
+                if (isStartMenuFolderShortcutLabel(shellAction)) {
+                    const std::string folderPath = dispatchDecision.target.pathParameter.empty()
+                        ? startMenuFolderPathForLabel(shellAction)
+                        : dispatchDecision.target.pathParameter;
+                    if (folderPath.empty()) {
+                        error = "Could not open " + shellAction;
+                        Logger::write(LogLevel::Warn, error);
+                        NotificationManager::Add(error, NotificationLevel::Error);
+                        return false;
+                    }
+
+                    if (folderPath != "/") {
+                        std::string ensureError;
+                        if (!DesktopFolderResolver::EnsureExists(folderPath, ensureError, true)) {
+                            error = "Could not open " + shellAction;
+                            if (!ensureError.empty()) error += ": " + ensureError;
+                            Logger::write(LogLevel::Warn, error);
+                            NotificationManager::Add(error, NotificationLevel::Error);
+                            return false;
+                        }
+                    }
+
+                    uint64_t explorerPid = apps::FileExplorer::Launch(folderPath);
+                    if (explorerPid == 0) {
+                        error = "Could not open " + shellAction;
+                        Logger::write(LogLevel::Warn, error);
+                        NotificationManager::Add(error, NotificationLevel::Error);
+                        return false;
+                    }
+
+                    Logger::write(LogLevel::Info, std::string("Launched folder shortcut: ") + shellAction + " path=" + folderPath + " pid=" + std::to_string(explorerPid));
+                    return true;
+                }
+
+                if (shellAction == "Control Panel") {
+                    uint64_t controlPanelPid = apps::ControlPanel::Launch();
+                    if (controlPanelPid == 0) {
+                        error = "Could not open Control Panel";
+                        Logger::write(LogLevel::Warn, error);
+                        NotificationManager::Add(error, NotificationLevel::Error);
+                        return false;
+                    }
+
+                    Logger::write(LogLevel::Info, std::string("Launched Control Panel shell shortcut pid=") + std::to_string(controlPanelPid));
+                    return true;
+                }
+
+                if (isStartMenuSettingsFallbackLabel(shellAction)) {
+                    // Temporary Start Menu mapping until a dedicated unified Settings app exists.
+                    uint64_t settingsPid = apps::DisplayOptions::Launch();
+                    if (settingsPid == 0) {
+                        Logger::write(LogLevel::Warn, "DisplayOptions launch failed for Settings; falling back to Control Panel");
+                        settingsPid = apps::ControlPanel::Launch();
+                        if (settingsPid == 0) {
+                            error = "Could not open Settings";
+                            Logger::write(LogLevel::Warn, error);
+                            NotificationManager::Add(error, NotificationLevel::Error);
+                            return false;
+                        }
+                    }
+
+                    Logger::write(LogLevel::Info, std::string("Launched Settings via settings panel pid=") + std::to_string(settingsPid));
+                    return true;
+                }
+            }
+
             std::string appName = canonicalAppName(dispatchDecision.selectedDispatch);
             const RegisteredDesktopApp* manifestApp = findRegisteredApp(appName);
 
@@ -3880,6 +4027,10 @@ namespace gxos {
             if (!DesktopConfig::Load("desktop.json", cfg, err)) {
                 Logger::write(LogLevel::Info, std::string("Desktop config not found (first run): ") + err);
                 ensureDefaultAppsRegistered();
+                std::string folderError;
+                if (!DesktopFolderResolver::EnsureStandardUserFolders(folderError)) {
+                    Logger::write(LogLevel::Warn, std::string("Default user folder initialization failed: ") + folderError);
+                }
                 SaveState();
                 return;
             }
@@ -3905,6 +4056,10 @@ namespace gxos {
             }
 
             ensureDefaultAppsRegistered();
+            std::string folderError;
+            if (!DesktopFolderResolver::EnsureStandardUserFolders(folderError)) {
+                Logger::write(LogLevel::Warn, std::string("Default user folder initialization failed: ") + folderError);
+            }
             SaveState();
 
             Logger::write(LogLevel::Info, "Desktop state loaded");

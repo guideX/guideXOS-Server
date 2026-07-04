@@ -28,6 +28,7 @@
 #include "icon_theme_manager.h"
 #include "wallpaper_registry.h"
 #include <sstream>
+#include <array>
 #include <algorithm>
 #include <chrono>
 #include <cstring>
@@ -1455,6 +1456,98 @@ namespace gxos {
             return true;
         }
 
+        struct StartMenuRightColumnShortcut {
+            const char* label;
+            const char* action;
+        };
+
+        static const std::array<StartMenuRightColumnShortcut, 7> kStartMenuRightColumnShortcuts = {{
+            { "Computer", "Computer" },
+            { "Documents", "Documents" },
+            { "Pictures", "Pictures" },
+            { "Music", "Music" },
+            { "Network", "Network" },
+            { "Control Panel", "Control Panel" },
+            { "Settings", "Settings" }
+        }};
+
+        static void logStartMenuLaunchTargetShadowDiagnostic(const std::string& originalLegacyDispatch);
+
+        bool Compositor::handleStartMenuLeftClick(int mx, int my) {
+            if (!Compositor::g_startMenuVisible) return false;
+
+            const int leftColW = 260;
+            const int rowH = kStartMenuRowH;
+            const int btnY = Compositor::g_startMenuRect.bottom - 30;
+
+            if (mx < Compositor::g_startMenuRect.left || mx > Compositor::g_startMenuRect.right || my < Compositor::g_startMenuRect.top || my > Compositor::g_startMenuRect.bottom) {
+                Compositor::g_startMenuVisible = false;
+                Compositor::requestRepaint();
+                return false;
+            }
+
+            RECT allProgBtn{ Compositor::g_startMenuRect.left + 6, btnY, Compositor::g_startMenuRect.left + leftColW - 6, btnY + 24 };
+            if (mx >= allProgBtn.left && mx <= allProgBtn.right && my >= allProgBtn.top && my <= allProgBtn.bottom) {
+                Compositor::g_startMenuAllProgs = !Compositor::g_startMenuAllProgs;
+                Compositor::g_startMenuSel = 0;
+                Compositor::g_startMenuScroll = 0;
+                Compositor::requestRepaint();
+                return true;
+            }
+
+            const int shutdownBtnW = 80;
+            const int shutdownBtnH = 24;
+            RECT shutdownBtn{ Compositor::g_startMenuRect.right - shutdownBtnW - 30, btnY, Compositor::g_startMenuRect.right - 30, btnY + shutdownBtnH };
+            if (mx >= shutdownBtn.left && mx <= shutdownBtn.right && my >= shutdownBtn.top && my <= shutdownBtn.bottom) {
+                std::cout << "[Compositor] Shutdown button clicked!" << std::endl;
+                Logger::write(LogLevel::Info, "Shutdown requested from Start Menu");
+                apps::ShutdownDialog::Launch();
+                Compositor::g_startMenuVisible = false;
+                Compositor::requestRepaint();
+                return true;
+            }
+
+            int rcX = Compositor::g_startMenuRect.left + leftColW + 4;
+            int rcY = Compositor::g_startMenuRect.top + 6;
+            for (const auto& shortcut : kStartMenuRightColumnShortcuts) {
+                RECT rc{ rcX, rcY, Compositor::g_startMenuRect.right - 6, rcY + rowH };
+                if (mx >= rc.left && mx <= rc.right && my >= rc.top && my <= rc.bottom) {
+                    logStartMenuLaunchTargetShadowDiagnostic(shortcut.action);
+                    Compositor::launchAction(shortcut.action);
+                    Compositor::g_startMenuVisible = false;
+                    Compositor::requestRepaint();
+                    return true;
+                }
+                rcY += rowH + kStartMenuRowGap;
+            }
+
+            int listTop = Compositor::g_startMenuRect.top + 4;
+            int listBottom = btnY - 4;
+            if (mx >= Compositor::g_startMenuRect.left && mx <= Compositor::g_startMenuRect.left + leftColW && my >= listTop && my <= listBottom) {
+                int idx = (my - listTop) / rowH + Compositor::g_startMenuScroll;
+                int itemCount = Compositor::g_startMenuAllProgs ? (int)Compositor::g_startMenuAllProgsSorted.size() : (int)Compositor::g_startMenuPinnedRecent.size();
+                if (idx >= 0 && idx < itemCount) {
+                    uint64_t now = nowMs();
+                    if (Compositor::g_lastItemIndex == idx && (now - Compositor::g_lastItemClickTicks) < 450) {
+                        std::string action = Compositor::g_startMenuAllProgs ? Compositor::g_startMenuAllProgsSorted[idx] : Compositor::g_startMenuPinnedRecent[idx];
+                        logStartMenuLaunchTargetShadowDiagnostic(action);
+                        Compositor::launchAction(action);
+                        Compositor::g_startMenuVisible = false;
+                    } else {
+                        Compositor::g_lastItemIndex = idx;
+                        Compositor::g_lastItemClickTicks = now;
+                        Compositor::g_startMenuSel = idx;
+                    }
+                    Compositor::requestRepaint();
+                    return true;
+                }
+            }
+
+            Compositor::g_startMenuVisible = false;
+            Compositor::requestRepaint();
+            return false;
+        }
+
         static bool drawDesktopThemedIcon(HDC dc, const RECT& iconRect, const DesktopItem& item) {
             try {
                 const std::string logicalIcon = item.iconName.empty() ? startMenuLogicalIconName(item.label) : item.iconName;
@@ -1750,6 +1843,15 @@ namespace gxos {
             }
         }
         void Compositor::addRecent(const std::string& act) { auto it = std::find(g_cfg.recent.begin( ), g_cfg.recent.end( ), act); if (it != g_cfg.recent.end( )) g_cfg.recent.erase(it); g_cfg.recent.insert(g_cfg.recent.begin( ), act); if (g_cfg.recent.size( ) > 20) g_cfg.recent.pop_back( ); refreshDesktopItems( ); saveDesktopConfig( ); }
+        static bool isRightColumnStartMenuShortcut(const std::string& act) {
+            return act == "Computer" ||
+                act == "Documents" ||
+                act == "Pictures" ||
+                act == "Music" ||
+                act == "Network" ||
+                act == "Control Panel" ||
+                act == "Settings";
+        }
         void Compositor::pinAction(const std::string& act) { if (act.empty( )) return; if (std::find(g_cfg.pinned.begin( ), g_cfg.pinned.end( ), act) == g_cfg.pinned.end( )) { g_cfg.pinned.push_back(act); refreshDesktopItems( ); saveDesktopConfig( ); } }
         void Compositor::unpinAction(const std::string& act) { auto it = std::find(g_cfg.pinned.begin( ), g_cfg.pinned.end( ), act); if (it != g_cfg.pinned.end( )) { g_cfg.pinned.erase(it); refreshDesktopItems( ); saveDesktopConfig( ); } }
         static std::string hostedLaunchStatus(const RegisteredDesktopApp& app) {
@@ -2036,7 +2138,9 @@ namespace gxos {
             s_lastLaunchAction = act;
             s_lastLaunchTicks = now;
             Logger::write(LogLevel::Info, std::string("Desktop launch: ") + act);
-            addRecent(act);
+            if (!isRightColumnStartMenuShortcut(act)) {
+                addRecent(act);
+            }
             if (act == "App Model Demo" || act == "AppModel") {
                 const LaunchDispatchDecision dispatchDecision = DesktopService::SelectLaunchDispatch(act);
                 DesktopService::RecordLaunchDispatchDecision("HostedCompositorEmbeddedAction", dispatchDecision);
@@ -3502,32 +3606,19 @@ namespace gxos {
                     int rcX = sm.left + leftColW + 4;
                     int rcY = sm.top + 6;
                     SetTextColor(dc, RGB(200, 200, 200));
-
-                    // Computer Files shortcut
-                    RECT rcComputer{ rcX, rcY, sm.right - 6, rcY + rowH };
-                    bool overComp = !freezeStartMenuHover && (cursor.x >= rcComputer.left && cursor.x <= rcComputer.right && cursor.y >= rcComputer.top && cursor.y <= rcComputer.bottom);
-                    if (overComp) { HBRUSH hb = CreateSolidBrush(colorFromTheme(sciFiTheme ? WindowRenderer::BlendThemeColor(hostedPanelSurfaceColor(theme), theme.accent, 18) : RGB(70, 90, 130))); FillRect(dc, &rcComputer, hb); DeleteObject(hb); }
-                    int computerTextX = rcComputer.left + 6;
-                    drawStartMenuIcon(dc, rcComputer, "Computer Files", computerTextX);
-                    drawUiText(dc, computerTextX, centeredUiTextY(rcComputer.top, rowH), "Computer Files", 14, sciFiTheme ? RGB(220, 228, 244) : RGB(200, 200, 200), FontRole::Default);
-                    rcY += rowH + kStartMenuRowGap;
-
-                    // Console shortcut
-                    RECT rcConsole{ rcX, rcY, sm.right - 6, rcY + rowH };
-                    bool overCon = !freezeStartMenuHover && (cursor.x >= rcConsole.left && cursor.x <= rcConsole.right && cursor.y >= rcConsole.top && cursor.y <= rcConsole.bottom);
-                    if (overCon) { HBRUSH hb = CreateSolidBrush(colorFromTheme(sciFiTheme ? WindowRenderer::BlendThemeColor(hostedPanelSurfaceColor(theme), theme.accent, 18) : RGB(70, 90, 130))); FillRect(dc, &rcConsole, hb); DeleteObject(hb); }
-                    int consoleTextX = rcConsole.left + 6;
-                    drawStartMenuIcon(dc, rcConsole, "Console", consoleTextX);
-                    drawUiText(dc, consoleTextX, centeredUiTextY(rcConsole.top, rowH), "Console", 7, sciFiTheme ? RGB(220, 228, 244) : RGB(200, 200, 200), FontRole::Default);
-                    rcY += rowH + kStartMenuRowGap;
-
-                    // Recent Documents shortcut
-                    RECT rcDocs{ rcX, rcY, sm.right - 6, rcY + rowH };
-                    bool overDocs = !freezeStartMenuHover && (cursor.x >= rcDocs.left && cursor.x <= rcDocs.right && cursor.y >= rcDocs.top && cursor.y <= rcDocs.bottom);
-                    if (overDocs) { HBRUSH hb = CreateSolidBrush(colorFromTheme(sciFiTheme ? WindowRenderer::BlendThemeColor(hostedPanelSurfaceColor(theme), theme.accent, 18) : RGB(70, 90, 130))); FillRect(dc, &rcDocs, hb); DeleteObject(hb); }
-                    int docsTextX = rcDocs.left + 6;
-                    drawStartMenuIcon(dc, rcDocs, "Recent Docs", docsTextX);
-                    drawUiText(dc, docsTextX, centeredUiTextY(rcDocs.top, rowH), "Recent Docs", 11, sciFiTheme ? RGB(220, 228, 244) : RGB(200, 200, 200), FontRole::Default);
+                    for (const auto& shortcut : kStartMenuRightColumnShortcuts) {
+                        RECT rc{ rcX, rcY, sm.right - 6, rcY + rowH };
+                        bool isHover = !freezeStartMenuHover && (cursor.x >= rc.left && cursor.x <= rc.right && cursor.y >= rc.top && cursor.y <= rc.bottom);
+                        if (isHover) {
+                            HBRUSH hb = CreateSolidBrush(colorFromTheme(sciFiTheme ? WindowRenderer::BlendThemeColor(hostedPanelSurfaceColor(theme), theme.accent, 18) : RGB(70, 90, 130)));
+                            FillRect(dc, &rc, hb);
+                            DeleteObject(hb);
+                        }
+                        int textX = rc.left + 6;
+                        drawStartMenuIcon(dc, rc, shortcut.label, textX);
+                        drawUiText(dc, textX, centeredUiTextY(rc.top, rowH), shortcut.label, static_cast<int>(std::strlen(shortcut.label)), sciFiTheme ? RGB(220, 228, 244) : RGB(200, 200, 200), FontRole::Default);
+                        rcY += rowH + kStartMenuRowGap;
+                    }
 
                     // Bottom area - "All Programs" toggle button
                     int btnY = sm.bottom - 30;
@@ -3700,102 +3791,8 @@ namespace gxos {
                     return 0;
                 }
                 // Start menu click
-                if (g_startMenuVisible) {
-                    // Check "All Programs" toggle button
-                    int smW = 440;
-                    int leftColW = 260;
-                    int btnY = g_startMenuRect.bottom - 30;
-                    RECT allProgBtn{ g_startMenuRect.left + 6, btnY, g_startMenuRect.left + leftColW - 6, btnY + 24 };
-                    if (mx >= allProgBtn.left && mx <= allProgBtn.right && my >= allProgBtn.top && my <= allProgBtn.bottom) {
-                        g_startMenuAllProgs = !g_startMenuAllProgs;
-                        g_startMenuSel = 0;
-                        g_startMenuScroll = 0;
-                        requestRepaint( );
-                        return 0;
-                    }
-
-                    // Check Shutdown button
-                    int shutdownBtnW = 80;
-                    int shutdownBtnH = 24;
-                    RECT shutdownBtn{ g_startMenuRect.right - shutdownBtnW - 30, btnY, g_startMenuRect.right - 30, btnY + shutdownBtnH };
-                    if (mx >= shutdownBtn.left && mx <= shutdownBtn.right && my >= shutdownBtn.top && my <= shutdownBtn.bottom) {
-                        // Launch shutdown confirmation dialog
-                        std::cout << "[Compositor] Shutdown button clicked!" << std::endl;
-                        Logger::write(LogLevel::Info, "Shutdown requested from Start Menu");
-                        apps::ShutdownDialog::Launch( );
-                        g_startMenuVisible = false;
-                        requestRepaint( );
-                        return 0;
-                    }
-
-                    // Check right column shortcuts
-                    int rcX = g_startMenuRect.left + leftColW + 4;
-                    int rcY = g_startMenuRect.top + 6;
-                    int rowH = kStartMenuRowH;
-
-                    // Computer Files
-                    RECT rcComputer{ rcX, rcY, g_startMenuRect.right - 6, rcY + rowH };
-                    if (mx >= rcComputer.left && mx <= rcComputer.right && my >= rcComputer.top && my <= rcComputer.bottom) {
-                        logStartMenuLaunchTargetShadowDiagnostic("ComputerFiles");
-                        // SHADOW_ONLY observation above is diagnostic-only; launchAction still receives
-                        // the original legacy Start Menu dispatch string.
-                        launchAction("ComputerFiles");
-                        g_startMenuVisible = false;
-                        requestRepaint( );
-                        return 0;
-                    }
-                    rcY += rowH + kStartMenuRowGap;
-
-                    // Console
-                    RECT rcConsole{ rcX, rcY, g_startMenuRect.right - 6, rcY + rowH };
-                    if (mx >= rcConsole.left && mx <= rcConsole.right && my >= rcConsole.top && my <= rcConsole.bottom) {
-                        logStartMenuLaunchTargetShadowDiagnostic("Console");
-                        // SHADOW_ONLY observation above is diagnostic-only; launchAction still receives
-                        // the original legacy Start Menu dispatch string.
-                        launchAction("Console");
-                        g_startMenuVisible = false;
-                        requestRepaint( );
-                        return 0;
-                    }
-                    rcY += rowH + kStartMenuRowGap;
-
-                    // Recent Documents - just close menu for now
-                    RECT rcDocs{ rcX, rcY, g_startMenuRect.right - 6, rcY + rowH };
-                    if (mx >= rcDocs.left && mx <= rcDocs.right && my >= rcDocs.top && my <= rcDocs.bottom) {
-                        Logger::write(LogLevel::Info, "Recent Documents clicked (not implemented)");
-                        // Future: show popout with recent documents
-                        requestRepaint( );
-                        return 0;
-                    }
-
-                    // List item click
-                    int listTop = g_startMenuRect.top + 4;
-                    int listBottom = btnY - 4; // above buttons
-                    if (mx >= g_startMenuRect.left && mx <= g_startMenuRect.left + leftColW && my >= listTop && my <= listBottom) {
-                        int idx = (my - listTop) / rowH + g_startMenuScroll;
-                        int itemCount = g_startMenuAllProgs ? (int)g_startMenuAllProgsSorted.size( ) : (int)g_startMenuPinnedRecent.size( );
-                        if (idx >= 0 && idx < itemCount) {
-                            uint64_t now = nowMs( );
-                            if (g_lastItemIndex == idx && (now - g_lastItemClickTicks) < 450) {
-                                // Double-click: launch
-                                std::string action = g_startMenuAllProgs ? g_startMenuAllProgsSorted[idx] : g_startMenuPinnedRecent[idx];
-                                logStartMenuLaunchTargetShadowDiagnostic(action);
-                                // SHADOW_ONLY observation above is diagnostic-only; launchAction still receives
-                                // the original legacy Start Menu dispatch string.
-                                launchAction(action);
-                                g_startMenuVisible = false;
-                            } else {
-                                // Single click: select
-                                g_lastItemIndex = idx;
-                                g_lastItemClickTicks = now;
-                                g_startMenuSel = idx;
-                            }
-                            requestRepaint( );
-                            return 0;
-                        }
-                    } else {
-                        g_startMenuVisible = false;
-                    }
+                if (handleStartMenuLeftClick(mx, my)) {
+                    return 0;
                 }
                 // Desktop icon click (selection / double / drag initiation)
                 // Skip if a visible window is at the click position (windows are above desktop icons)
@@ -4511,6 +4508,9 @@ namespace gxos {
                     // Handle based on button and action
                     if (button == 1) { // Left button
                         if (action == "down") {
+                            if (handleStartMenuLeftClick(mx, my)) {
+                                break;
+                            }
                             uint64_t ownerPid = 0;
                             uint64_t targetWindow = 0;
                             {
@@ -5255,19 +5255,12 @@ namespace gxos {
 
                 int rcX = smLeft + leftColW + 4;
                 int rcY = smTop + 6;
-                int computerTextX = rcX + 4;
-                fbDrawStartMenuIcon(pixels, pitch, fbW, fbH, rcX, rcY, rowH, "Computer Files", computerTextX);
-                fbDrawText(pixels, pitch, fbW, fbH, computerTextX, rcY + (rowH - SystemFont::MeasureHeight(FontRole::Default)) / 2, "Computer Files", -1, 0x00C8C8C8, FontRole::Default);
-                rcY += rowH + kStartMenuRowGap;
-
-                int consoleTextX = rcX + 4;
-                fbDrawStartMenuIcon(pixels, pitch, fbW, fbH, rcX, rcY, rowH, "Console", consoleTextX);
-                fbDrawText(pixels, pitch, fbW, fbH, consoleTextX, rcY + (rowH - SystemFont::MeasureHeight(FontRole::Default)) / 2, "Console", -1, 0x00C8C8C8, FontRole::Default);
-                rcY += rowH + kStartMenuRowGap;
-
-                int docsTextX = rcX + 4;
-                fbDrawStartMenuIcon(pixels, pitch, fbW, fbH, rcX, rcY, rowH, "Recent Docs", docsTextX);
-                fbDrawText(pixels, pitch, fbW, fbH, docsTextX, rcY + (rowH - SystemFont::MeasureHeight(FontRole::Default)) / 2, "Recent Docs", -1, 0x00C8C8C8, FontRole::Default);
+                for (const auto& shortcut : kStartMenuRightColumnShortcuts) {
+                    int textX = rcX + 4;
+                    fbDrawStartMenuIcon(pixels, pitch, fbW, fbH, rcX, rcY, rowH, shortcut.label, textX);
+                    fbDrawText(pixels, pitch, fbW, fbH, textX, rcY + (rowH - SystemFont::MeasureHeight(FontRole::Default)) / 2, shortcut.label, -1, 0x00C8C8C8, FontRole::Default);
+                    rcY += rowH + kStartMenuRowGap;
+                }
 
                 int btnY = smBottom - 30;
                 fbFillRect(pixels, pitch, fbW, fbH, smLeft + 6, btnY, leftColW - 12, 24, 0x003C3C4B);

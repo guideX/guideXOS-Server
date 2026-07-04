@@ -160,6 +160,7 @@ namespace gxos { namespace gui {
         static bool blockInputBehindModal(int mx, int my);
         static uint64_t inputOwnerPid();
         static void launchAction(const std::string& act);
+        static bool handleStartMenuLeftClick(int mx, int my);
         static void openAppModelDemoViewerWindow();
         static void updateAppModelDemoViewerWindow(const std::string& status = "");
         static bool handleAppModelDemoKey(int key);

@@ -8,6 +8,8 @@
 
 #if !defined(GXOS_BARE_METAL)
 #include "logger.h"
+#else
+#include "kernel/core/include/kernel/vfs.h"
 #endif
 
 namespace gxos { namespace gui {
@@ -31,6 +33,27 @@ namespace gxos { namespace gui {
 
         static std::string VirtualPath() {
             return "/Desktop";
+        }
+
+        static std::string StandardUserFolderVirtualPath(const std::string& name) {
+            if (name.empty()) return "/";
+            if (name.front() == '/') return NormalizeVirtualPath(name);
+            return NormalizeVirtualPath("/" + name);
+        }
+
+        static bool IsStandardUserFolderName(const std::string& name) {
+            return EqualsAsciiIgnoreCase(name, "Documents") ||
+                EqualsAsciiIgnoreCase(name, "Pictures") ||
+                EqualsAsciiIgnoreCase(name, "Music") ||
+                EqualsAsciiIgnoreCase(name, "Network");
+        }
+
+        static bool EnsureStandardUserFolders(std::string& error) {
+            static const char* kFolders[] = { "Documents", "Pictures", "Music", "Network" };
+            for (const char* folder : kFolders) {
+                if (!EnsureExists(StandardUserFolderVirtualPath(folder), error, true)) return false;
+            }
+            return true;
         }
 
         static std::string NormalizeVirtualPath(const std::string& path) {
@@ -122,14 +145,35 @@ namespace gxos { namespace gui {
         }
 
         static bool EnsureExists(const std::string& virtualPath, std::string& error, bool createIfMissing = true) {
-#if defined(GXOS_BARE_METAL)
-            (void)virtualPath;
-            (void)error;
-            (void)createIfMissing;
-            return false;
-#else
             error.clear();
             const std::string normalized = NormalizeVirtualPath(virtualPath.empty() ? VirtualPath() : virtualPath);
+
+#if defined(GXOS_BARE_METAL)
+            char kernelPath[kernel::vfs::VFS_MAX_PATH]{};
+            kernel::vfs::normalize_path(normalized.c_str(), kernelPath, sizeof(kernelPath));
+            if (!kernelPath[0]) {
+                error = "Invalid path";
+                return false;
+            }
+
+            kernel::vfs::FileInfo info{};
+            if (kernel::vfs::stat(kernelPath, &info) == kernel::vfs::VFS_OK) {
+                if (info.type == kernel::vfs::FILE_TYPE_DIRECTORY) return true;
+                error = "Path exists but is not a directory";
+                return false;
+            }
+
+            if (!createIfMissing) {
+                error = "Path missing: " + normalized;
+                return false;
+            }
+
+            const kernel::vfs::Status status = kernel::vfs::mkdir(kernelPath);
+            if (status == kernel::vfs::VFS_OK) return true;
+            if (kernel::vfs::stat(kernelPath, &info) == kernel::vfs::VFS_OK && info.type == kernel::vfs::FILE_TYPE_DIRECTORY) return true;
+            error = "Unable to create directory";
+            return false;
+#else
             const std::filesystem::path hostedPath = HostedPathForVirtual(normalized);
             Logger::write(LogLevel::Info, "Desktop folder resolver selected virtualPath=" + normalized + " hostedPath=" + hostedPath.generic_string());
 
