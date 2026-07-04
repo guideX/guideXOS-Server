@@ -2776,11 +2776,11 @@ namespace gxos {
                         launchAction("Trash");
                         return;
                     case DesktopSystemObjectKind::ThisSystem:
-                        apps::FileExplorer::Launch("/");
+                        if (DesktopService::OpenFilesystemEntry("/", true, err, false)) return;
                         return;
                     case DesktopSystemObjectKind::FileManager:
                     case DesktopSystemObjectKind::FileExplorer:
-                        apps::FileExplorer::Launch();
+                        if (DesktopService::LaunchApp("Files", err, false)) return;
                         return;
                     case DesktopSystemObjectKind::SystemSettings:
                         launchAction("ControlPanel");

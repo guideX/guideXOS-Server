@@ -128,8 +128,8 @@ namespace gxos { namespace gui {
         static void RegisterApp(const std::string& name, const std::string& iconName = "");
         static void RegisterApp(const std::string& id, const std::string& displayName, const std::string& icon, apps::AppKind kind, const std::string& launchName);
         static void RegisterApp(const std::string& id, const std::string& displayName, const std::string& icon, apps::AppKind kind, const std::string& launchName, const std::string& source);
-        static bool LaunchApp(const std::string& name, std::string& error);
-        static bool OpenFilesystemEntry(const std::string& path, bool isDirectory, std::string& error);
+        static bool LaunchApp(const std::string& name, std::string& error, bool recordRecent = true);
+        static bool OpenFilesystemEntry(const std::string& path, bool isDirectory, std::string& error, bool recordRecent = true);
         static std::string ResolveFilesystemEntryDiagnostic(const std::string& path, bool isDirectory);
         static bool ShowFolderOnHostedDesktop(const std::string& path, std::string& error);
         static const std::vector<RegisteredDesktopApp>& GetRegisteredApps() { return s_apps; }

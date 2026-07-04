@@ -3850,7 +3850,7 @@ namespace gxos {
             return filesystemEntryDiagnostic(path, isDirectory);
         }
 
-        static bool tryExecuteActiveTypedDispatchLaunch(const LaunchDispatchDecision& dispatchDecision, std::string& error, std::string& selectedHandler, std::string& reason) {
+        static bool tryExecuteActiveTypedDispatchLaunch(const LaunchDispatchDecision& dispatchDecision, bool recordRecent, std::string& error, std::string& selectedHandler, std::string& reason) {
             error.clear();
             selectedHandler.clear();
             reason.clear();
@@ -3859,6 +3859,12 @@ namespace gxos {
                 reason = "Active typed dispatch gate is disabled";
                 return false;
             }
+
+            const auto addRecentIfRequested = [&](const char* recentName) {
+                if (recordRecent && recentName && recentName[0]) {
+                    DesktopService::AddRecentProgram(recentName);
+                }
+            };
 
             const auto failUnsupported = [&](const std::string& detail) {
                 reason = detail;
@@ -3870,6 +3876,56 @@ namespace gxos {
                     ? dispatchDecision.originalDispatch
                     : dispatchDecision.target.shellAction;
 
+                if (shellAction == "Computer" || shellAction == "This System") {
+                    const std::string folderPath = dispatchDecision.target.pathParameter.empty()
+                        ? "/"
+                        : dispatchDecision.target.pathParameter;
+                    if (!folderPath.empty() && folderPath != "/") {
+                        std::string ensureError;
+                        if (!DesktopFolderResolver::EnsureExists(folderPath, ensureError, true)) {
+                            error = "Could not open " + shellAction;
+                            if (!ensureError.empty()) error += ": " + ensureError;
+                            reason = "Active typed dispatch attempted a root shell object but the folder target could not be prepared";
+                            return false;
+                        }
+                    }
+
+                    const uint64_t explorerPid = apps::FileExplorer::Launch(folderPath);
+                    if (explorerPid == 0) {
+                        error = "Could not open " + shellAction;
+                        reason = "Active typed dispatch attempted the root shell object but File Explorer returned pid=0";
+                        return false;
+                    }
+
+                    addRecentIfRequested("File Explorer");
+                    selectedHandler = "File Explorer";
+                    reason = "Active typed dispatch handled the root shell object in File Explorer";
+                    return true;
+                }
+
+                if (shellAction == "Documents" || shellAction == "Pictures" || shellAction == "Music" || shellAction == "Network") {
+                    const std::string folderPath = dispatchDecision.target.pathParameter;
+                    std::string ensureError;
+                    if (!DesktopFolderResolver::EnsureExists(folderPath, ensureError, true)) {
+                        error = "Could not open " + shellAction;
+                        if (!ensureError.empty()) error += ": " + ensureError;
+                        reason = "Active typed dispatch attempted a folder shell action but the folder target could not be prepared";
+                        return false;
+                    }
+
+                    const uint64_t explorerPid = apps::FileExplorer::Launch(folderPath);
+                    if (explorerPid == 0) {
+                        error = "Could not open " + shellAction;
+                        reason = "Active typed dispatch attempted the folder shell action but File Explorer returned pid=0";
+                        return false;
+                    }
+
+                    addRecentIfRequested("File Explorer");
+                    selectedHandler = "File Explorer";
+                    reason = "Active typed dispatch handled the folder shell action in File Explorer";
+                    return true;
+                }
+
                 if (shellAction == "Control Panel") {
                     const uint64_t pid = apps::ControlPanel::Launch();
                     if (pid == 0) {
@@ -3878,7 +3934,7 @@ namespace gxos {
                         return false;
                     }
 
-                    DesktopService::AddRecentProgram("Control Panel");
+                    addRecentIfRequested("Control Panel");
                     selectedHandler = "Control Panel";
                     reason = "Active typed dispatch handled the Control Panel shell action";
                     return true;
@@ -3894,13 +3950,13 @@ namespace gxos {
                             return false;
                         }
 
-                        DesktopService::AddRecentProgram("Control Panel");
+                        addRecentIfRequested("Control Panel");
                         selectedHandler = "Control Panel";
                         reason = "Active typed dispatch handled Settings through the existing Control Panel fallback";
                         return true;
                     }
 
-                    DesktopService::AddRecentProgram("DisplayOptions");
+                    addRecentIfRequested("DisplayOptions");
                     selectedHandler = "DisplayOptions";
                     reason = "Active typed dispatch handled Settings through DisplayOptions";
                     return true;
@@ -3921,7 +3977,7 @@ namespace gxos {
                     return false;
                 }
 
-                DesktopService::AddRecentProgram("Notepad");
+                addRecentIfRequested("Notepad");
                 selectedHandler = "Notepad";
                 reason = "Active typed dispatch handled the Notepad launch";
                 return true;
@@ -3935,9 +3991,107 @@ namespace gxos {
                     return false;
                 }
 
-                DesktopService::AddRecentProgram("File Explorer");
+                addRecentIfRequested("File Explorer");
                 selectedHandler = "File Explorer";
                 reason = "Active typed dispatch handled the File Explorer launch";
+                return true;
+            }
+
+            if (dispatchName == "Console") {
+                const uint64_t pid = apps::ConsoleWindow::Launch();
+                if (pid == 0) {
+                    error = "Failed to launch Console";
+                    reason = "Active typed dispatch attempted Console but the launcher returned pid=0";
+                    return false;
+                }
+
+                addRecentIfRequested("Console");
+                selectedHandler = "Console";
+                reason = "Active typed dispatch handled the Console launch";
+                return true;
+            }
+
+            if (dispatchName == "Calculator") {
+                const uint64_t pid = apps::Calculator::Launch();
+                if (pid == 0) {
+                    error = "Failed to launch Calculator";
+                    reason = "Active typed dispatch attempted Calculator but the launcher returned pid=0";
+                    return false;
+                }
+
+                addRecentIfRequested("Calculator");
+                selectedHandler = "Calculator";
+                reason = "Active typed dispatch handled the Calculator launch";
+                return true;
+            }
+
+            if (dispatchName == "Clock") {
+                const uint64_t pid = apps::Clock::Launch();
+                if (pid == 0) {
+                    error = "Failed to launch Clock";
+                    reason = "Active typed dispatch attempted Clock but the launcher returned pid=0";
+                    return false;
+                }
+
+                addRecentIfRequested("Clock");
+                selectedHandler = "Clock";
+                reason = "Active typed dispatch handled the Clock launch";
+                return true;
+            }
+
+            if (dispatchName == "TaskManager") {
+                const uint64_t pid = apps::TaskManager::Launch();
+                if (pid == 0) {
+                    error = "Failed to launch Task Manager";
+                    reason = "Active typed dispatch attempted Task Manager but the launcher returned pid=0";
+                    return false;
+                }
+
+                addRecentIfRequested("TaskManager");
+                selectedHandler = "TaskManager";
+                reason = "Active typed dispatch handled the Task Manager launch";
+                return true;
+            }
+
+            if (dispatchName == "DiskManager") {
+                const uint64_t pid = apps::DiskManager::Launch();
+                if (pid == 0) {
+                    error = "Failed to launch Disk Manager";
+                    reason = "Active typed dispatch attempted Disk Manager but the launcher returned pid=0";
+                    return false;
+                }
+
+                addRecentIfRequested("DiskManager");
+                selectedHandler = "DiskManager";
+                reason = "Active typed dispatch handled the Disk Manager launch";
+                return true;
+            }
+
+            if (dispatchName == "Paint") {
+                const uint64_t pid = apps::Paint::Launch();
+                if (pid == 0) {
+                    error = "Failed to launch Paint";
+                    reason = "Active typed dispatch attempted Paint but the launcher returned pid=0";
+                    return false;
+                }
+
+                addRecentIfRequested("Paint");
+                selectedHandler = "Paint";
+                reason = "Active typed dispatch handled the Paint launch";
+                return true;
+            }
+
+            if (dispatchName == "guideXOS Navigator") {
+                const uint64_t pid = apps::Navigator::Launch();
+                if (pid == 0) {
+                    error = "Failed to launch guideXOS Navigator";
+                    reason = "Active typed dispatch attempted guideXOS Navigator but the launcher returned pid=0";
+                    return false;
+                }
+
+                addRecentIfRequested("guideXOS Navigator");
+                selectedHandler = "guideXOS Navigator";
+                reason = "Active typed dispatch handled the guideXOS Navigator launch";
                 return true;
             }
 
@@ -3949,7 +4103,7 @@ namespace gxos {
                     return false;
                 }
 
-                DesktopService::AddRecentProgram("Control Panel");
+                addRecentIfRequested("Control Panel");
                 selectedHandler = "Control Panel";
                 reason = "Active typed dispatch handled the Control Panel launch";
                 return true;
@@ -3963,16 +4117,30 @@ namespace gxos {
                     return false;
                 }
 
-                DesktopService::AddRecentProgram("DisplayOptions");
+                addRecentIfRequested("DisplayOptions");
                 selectedHandler = "DisplayOptions";
                 reason = "Active typed dispatch handled the Settings launch";
+                return true;
+            }
+
+            if (dispatchName == "Trash") {
+                const uint64_t pid = apps::Trash::Launch();
+                if (pid == 0) {
+                    error = "Failed to launch Trash";
+                    reason = "Active typed dispatch attempted Trash but the launcher returned pid=0";
+                    return false;
+                }
+
+                addRecentIfRequested("Trash");
+                selectedHandler = "Trash";
+                reason = "Active typed dispatch handled the Trash launch";
                 return true;
             }
 
             return failUnsupported("Active typed dispatch is not enabled for this app target");
         }
 
-        static bool tryExecuteActiveTypedDispatchFilesystemEntry(const std::string& path, bool isDirectory, std::string& error, std::string& selectedHandler, std::string& reason) {
+        static bool tryExecuteActiveTypedDispatchFilesystemEntry(const std::string& path, bool isDirectory, bool recordRecent, std::string& error, std::string& selectedHandler, std::string& reason) {
             error.clear();
             selectedHandler.clear();
             reason.clear();
@@ -3981,6 +4149,12 @@ namespace gxos {
                 reason = "Active typed dispatch gate is disabled";
                 return false;
             }
+
+            const auto addRecentIfRequested = [&](const char* recentName) {
+                if (recordRecent && recentName && recentName[0]) {
+                    DesktopService::AddRecentProgram(recentName);
+                }
+            };
 
             std::string routeName;
             if (!isActiveTypedDispatchFilesystemEntryTarget(isDirectory, path, routeName)) {
@@ -3996,7 +4170,7 @@ namespace gxos {
                     return false;
                 }
 
-                DesktopService::AddRecentProgram("File Explorer");
+                addRecentIfRequested("File Explorer");
                 selectedHandler = "File Explorer";
                 reason = isDirectory
                     ? "Active typed dispatch handled the folder open in File Explorer"
@@ -4012,7 +4186,7 @@ namespace gxos {
                     return false;
                 }
 
-                DesktopService::AddRecentProgram("Notepad");
+                addRecentIfRequested("Notepad");
                 selectedHandler = "Notepad";
                 reason = "Active typed dispatch handled the text-file open in Notepad";
                 return true;
@@ -4021,7 +4195,7 @@ namespace gxos {
             return false;
         }
 
-        bool DesktopService::OpenFilesystemEntry(const std::string& path, bool isDirectory, std::string& error) {
+        bool DesktopService::OpenFilesystemEntry(const std::string& path, bool isDirectory, std::string& error, bool recordRecent) {
             error.clear();
             Logger::write(LogLevel::Info, std::string("Desktop filesystem open requested path=") + path + " directory=" + (isDirectory ? "true" : "false"));
             if (path.empty()) {
@@ -4032,7 +4206,7 @@ namespace gxos {
             const FilesystemEntryLaunchTarget shadowRoute = resolveFilesystemEntryLaunchTarget(path, isDirectory);
             std::string activeSelectedHandler;
             std::string activeReason;
-            const bool activeHandled = tryExecuteActiveTypedDispatchFilesystemEntry(path, isDirectory, error, activeSelectedHandler, activeReason);
+            const bool activeHandled = tryExecuteActiveTypedDispatchFilesystemEntry(path, isDirectory, recordRecent, error, activeSelectedHandler, activeReason);
             Logger::write(LogLevel::Info, buildAppModelActiveTypedDispatchEvidenceLine(
                 "HostedFilesystemEntry",
                 path,
@@ -4052,7 +4226,7 @@ namespace gxos {
                     NotificationManager::Add(error, NotificationLevel::Error);
                     return false;
                 }
-                AddRecentProgram("File Explorer");
+                if (recordRecent) AddRecentProgram("File Explorer");
                 return true;
             case FilesystemEntryLaunchTarget::Notepad:
                 if (apps::Notepad::LaunchWithFile(path) == 0) {
@@ -4060,7 +4234,7 @@ namespace gxos {
                     NotificationManager::Add(error, NotificationLevel::Error);
                     return false;
                 }
-                AddRecentProgram("Notepad");
+                if (recordRecent) AddRecentProgram("Notepad");
                 return true;
             case FilesystemEntryLaunchTarget::ImageViewer:
                 // TODO: once AppModel launch arguments become first-class, route this
@@ -4071,7 +4245,7 @@ namespace gxos {
                     NotificationManager::Add(error, NotificationLevel::Error);
                     return false;
                 }
-                AddRecentProgram("Image Viewer");
+                if (recordRecent) AddRecentProgram("Image Viewer");
                 return true;
             case FilesystemEntryLaunchTarget::Unsupported:
             default:
@@ -4101,14 +4275,14 @@ namespace gxos {
             return true;
         }
 
-        bool DesktopService::LaunchApp(const std::string& name, std::string& error) {
+        bool DesktopService::LaunchApp(const std::string& name, std::string& error, bool recordRecent) {
             ensureDefaultAppsRegistered();
             const LaunchDispatchDecision dispatchDecision = SelectLaunchDispatch(name);
             RecordLaunchDispatchDecision("HostedDesktopService", dispatchDecision);
 
             std::string activeSelectedHandler;
             std::string activeReason;
-            const bool activeHandled = tryExecuteActiveTypedDispatchLaunch(dispatchDecision, error, activeSelectedHandler, activeReason);
+            const bool activeHandled = tryExecuteActiveTypedDispatchLaunch(dispatchDecision, recordRecent, error, activeSelectedHandler, activeReason);
             Logger::write(LogLevel::Info, buildAppModelActiveTypedDispatchEvidenceLine(
                 "HostedDesktopService",
                 name,
@@ -4159,7 +4333,7 @@ namespace gxos {
                     }
 
                     Logger::write(LogLevel::Info, std::string("Launched folder shortcut: ") + shellAction + " path=" + folderPath + " pid=" + std::to_string(explorerPid));
-                    AddRecentProgram("File Explorer");
+                    if (recordRecent) AddRecentProgram("File Explorer");
                     return true;
                 }
 
@@ -4173,7 +4347,7 @@ namespace gxos {
                     }
 
                     Logger::write(LogLevel::Info, std::string("Launched Control Panel shell shortcut pid=") + std::to_string(controlPanelPid));
-                    AddRecentProgram("Control Panel");
+                    if (recordRecent) AddRecentProgram("Control Panel");
                     return true;
                 }
 
@@ -4196,7 +4370,7 @@ namespace gxos {
                     }
 
                     Logger::write(LogLevel::Info, std::string("Launched Settings via settings panel pid=") + std::to_string(settingsPid));
-                    if (!recentName.empty()) AddRecentProgram(recentName);
+                    if (recordRecent && !recentName.empty()) AddRecentProgram(recentName);
                     return true;
                 }
             }
@@ -4207,7 +4381,7 @@ namespace gxos {
             // Installed universal applications are launched through the package manager.
             if (!manifestApp) {
                 if (PackageManager::LaunchGXApp(appName, error)) {
-                    AddRecentProgram(appName);
+                    if (recordRecent) AddRecentProgram(appName);
                     return true;
                 }
                 error = "Application not registered: " + name;
@@ -4227,7 +4401,7 @@ namespace gxos {
                 return false;
             }
 
-            if (launchDecision.strategy == apps::AppLaunchStrategy::NativeElf) {
+                if (launchDecision.strategy == apps::AppLaunchStrategy::NativeElf) {
                 const apps::AppEntry* nativeEntry = registryApp->FindCompatibleEntry(launchDecision.architecture);
                 std::string resolvedNativeElfPath;
                 if (nativeEntry && !nativeEntry->path.empty() && !registryApp->appDirectory.empty()) {
@@ -4257,7 +4431,7 @@ namespace gxos {
                 }
 
                 Logger::write(LogLevel::Info, std::string("Launched native app process: ") + manifestApp->displayName + " pid=" + std::to_string(nativePid));
-                AddRecentProgram(manifestApp->displayName);
+                if (recordRecent) AddRecentProgram(manifestApp->displayName);
                 return true;
             }
 
@@ -4297,7 +4471,7 @@ namespace gxos {
                     NotificationManager::Add(error, NotificationLevel::Error);
                     return false;
                 }
-                AddRecentProgram("Notepad");
+                if (recordRecent) AddRecentProgram("Notepad");
             }
             else if (appName == "Calculator") {
                 if (apps::Calculator::Launch() == 0) {
@@ -4305,7 +4479,7 @@ namespace gxos {
                     NotificationManager::Add(error, NotificationLevel::Error);
                     return false;
                 }
-                AddRecentProgram("Calculator");
+                if (recordRecent) AddRecentProgram("Calculator");
             }
             else if (appName == "Console") {
                 if (apps::ConsoleWindow::Launch() == 0) {
@@ -4313,7 +4487,7 @@ namespace gxos {
                     NotificationManager::Add(error, NotificationLevel::Error);
                     return false;
                 }
-                AddRecentProgram("Console");
+                if (recordRecent) AddRecentProgram("Console");
             }
             else if (appName == "FileExplorer") {
                 if (apps::FileExplorer::Launch() == 0) {
@@ -4321,7 +4495,7 @@ namespace gxos {
                     NotificationManager::Add(error, NotificationLevel::Error);
                     return false;
                 }
-                AddRecentProgram("File Explorer");
+                if (recordRecent) AddRecentProgram("File Explorer");
             }
             else if (appName == "Clock") {
                 if (apps::Clock::Launch() == 0) {
@@ -4329,7 +4503,7 @@ namespace gxos {
                     NotificationManager::Add(error, NotificationLevel::Error);
                     return false;
                 }
-                AddRecentProgram("Clock");
+                if (recordRecent) AddRecentProgram("Clock");
             }
             else if (appName == "TaskManager") {
                 if (apps::TaskManager::Launch() == 0) {
@@ -4337,7 +4511,7 @@ namespace gxos {
                     NotificationManager::Add(error, NotificationLevel::Error);
                     return false;
                 }
-                AddRecentProgram("TaskManager");
+                if (recordRecent) AddRecentProgram("TaskManager");
             }
             else if (appName == "Paint") {
                 if (apps::Paint::Launch() == 0) {
@@ -4345,7 +4519,7 @@ namespace gxos {
                     NotificationManager::Add(error, NotificationLevel::Error);
                     return false;
                 }
-                AddRecentProgram("Paint");
+                if (recordRecent) AddRecentProgram("Paint");
             }
             else if (appName == "ImageViewer") {
                 if (apps::ImageViewer::Launch() == 0) {
@@ -4353,7 +4527,7 @@ namespace gxos {
                     NotificationManager::Add(error, NotificationLevel::Error);
                     return false;
                 }
-                AddRecentProgram("Image Viewer");
+                if (recordRecent) AddRecentProgram("Image Viewer");
             }
             else if (appName == "OnScreenKeyboard") {
                 if (apps::OnScreenKeyboard::Launch() == 0) {
@@ -4361,7 +4535,7 @@ namespace gxos {
                     NotificationManager::Add(error, NotificationLevel::Error);
                     return false;
                 }
-                AddRecentProgram("OnScreenKeyboard");
+                if (recordRecent) AddRecentProgram("OnScreenKeyboard");
             }
             else if (appName == "ShutdownDialog") {
                 if (apps::ShutdownDialog::Launch() == 0) {
@@ -4376,7 +4550,7 @@ namespace gxos {
                     NotificationManager::Add(error, NotificationLevel::Error);
                     return false;
                 }
-                AddRecentProgram("DiskManager");
+                if (recordRecent) AddRecentProgram("DiskManager");
             }
             else if (appName == "ControlPanel") {
                 if (apps::ControlPanel::Launch() == 0) {
@@ -4384,7 +4558,7 @@ namespace gxos {
                     NotificationManager::Add(error, NotificationLevel::Error);
                     return false;
                 }
-                AddRecentProgram("Control Panel");
+                if (recordRecent) AddRecentProgram("Control Panel");
             }
             else if (appName == "DisplayOptions" || appName == "Display Settings" || appName == "Desktop Background" || appName == "Wallpaper") {
                 if (apps::DisplayOptions::Launch() == 0) {
@@ -4392,7 +4566,7 @@ namespace gxos {
                     NotificationManager::Add(error, NotificationLevel::Error);
                     return false;
                 }
-                AddRecentProgram("DisplayOptions");
+                if (recordRecent) AddRecentProgram("DisplayOptions");
             }
             else if (appName == "guideXOS Navigator") {
                 // Hosted/compositor Navigator launch path: app-model registration
@@ -4402,7 +4576,7 @@ namespace gxos {
                     NotificationManager::Add(error, NotificationLevel::Error);
                     return false;
                 }
-                AddRecentProgram("guideXOS Navigator");
+                if (recordRecent) AddRecentProgram("guideXOS Navigator");
             }
             else if (appName == "Trash") {
                 if (apps::Trash::Launch() == 0) {
@@ -4410,7 +4584,7 @@ namespace gxos {
                     NotificationManager::Add(error, NotificationLevel::Error);
                     return false;
                 }
-                AddRecentProgram("Trash");
+                if (recordRecent) AddRecentProgram("Trash");
             }
             else if (appName == "HDInstaller") {
                 error = "HD Installer is not available in this runtime target";
@@ -4424,7 +4598,7 @@ namespace gxos {
                     return false;
                 }
                 NotificationManager::Add("Native App Debug Viewer opened. Try: nativeapp.inspect Hello World", NotificationLevel::Info);
-                AddRecentProgram("Native App Debug Viewer");
+                if (recordRecent) AddRecentProgram("Native App Debug Viewer");
             }
             else {
                 error = "Application launcher not implemented: " + name;
