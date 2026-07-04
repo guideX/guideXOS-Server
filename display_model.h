@@ -382,6 +382,68 @@ struct DisplayVirtualDesktop {
     }
 };
 
+struct DisplayViewport {
+    int index{1};
+    int originX{0};
+    int originY{0};
+    int width{0};
+    int height{0};
+    bool syntheticHosted{false};
+    std::string monitorId;
+    std::string monitorName;
+
+    bool isValid() const
+    {
+        return width > 0 && height > 0;
+    }
+
+    bool containsLocalPoint(int x, int y) const
+    {
+        return x >= 0 && x < width && y >= 0 && y < height;
+    }
+
+    bool containsVirtualPoint(int x, int y) const
+    {
+        return x >= originX && x < (originX + width) && y >= originY && y < (originY + height);
+    }
+
+    int localXFromVirtual(int x) const
+    {
+        return x - originX;
+    }
+
+    int localYFromVirtual(int y) const
+    {
+        return y - originY;
+    }
+
+    int virtualXFromLocal(int x) const
+    {
+        return originX + x;
+    }
+
+    int virtualYFromLocal(int y) const
+    {
+        return originY + y;
+    }
+
+    std::string summary() const
+    {
+        std::ostringstream out;
+        out << "activeViewport=" << index
+            << " origin=" << originX << ',' << originY
+            << " size=" << width << 'x' << height
+            << " synthetic=" << (syntheticHosted ? "true" : "false");
+        if (!monitorId.empty()) {
+            out << " monitor=" << monitorId;
+            if (!monitorName.empty()) {
+                out << "(" << monitorName << ")";
+            }
+        }
+        return out.str();
+    }
+};
+
 inline DisplayMonitorDescriptor makeDisplayMonitor(
     const std::string& id,
     const std::string& name,
@@ -437,6 +499,64 @@ inline DisplayVirtualDesktop makeSyntheticDualMonitorDesktop(
     desktop.monitors.push_back(makeDisplayMonitor("display-2", "Synthetic Display 2", monitorWidth, 0, monitorWidth, monitorHeight, framebufferBase, pitch, true, false));
     desktop.recomputeBounds();
     return desktop;
+}
+
+inline DisplayViewport makeHostedDisplayViewport(
+    const DisplayVirtualDesktop& desktop,
+    int requestedIndex,
+    int fallbackWidth,
+    int fallbackHeight)
+{
+    DisplayViewport viewport;
+    viewport.syntheticHosted = hostedSyntheticDualMonitorEnabled()
+        && desktop.mode == DisplayModeKind::Extend
+        && desktop.activeMonitorCount() > 1;
+
+    if (!viewport.syntheticHosted) {
+        viewport.index = 1;
+        viewport.originX = 0;
+        viewport.originY = 0;
+        viewport.width = std::max(1, fallbackWidth);
+        viewport.height = std::max(1, fallbackHeight);
+        if (const DisplayMonitorDescriptor* primary = desktop.primaryMonitor()) {
+            viewport.monitorId = primary->id;
+            viewport.monitorName = primary->name;
+        }
+        return viewport;
+    }
+
+    std::vector<const DisplayMonitorDescriptor*> activeMonitors;
+    activeMonitors.reserve(desktop.monitors.size());
+    for (const auto& monitor : desktop.monitors) {
+        if (monitor.isActive()) {
+            activeMonitors.push_back(&monitor);
+        }
+    }
+
+    if (activeMonitors.empty()) {
+        viewport.index = 1;
+        viewport.originX = 0;
+        viewport.originY = 0;
+        viewport.width = std::max(1, fallbackWidth);
+        viewport.height = std::max(1, fallbackHeight);
+        return viewport;
+    }
+
+    const int clampedIndex = requestedIndex <= 1 ? 1 : 2;
+    size_t activeIndex = static_cast<size_t>(clampedIndex - 1);
+    if (activeIndex >= activeMonitors.size()) {
+        activeIndex = activeMonitors.size() - 1;
+    }
+
+    const DisplayMonitorDescriptor* selected = activeMonitors[activeIndex];
+    viewport.index = static_cast<int>(activeIndex) + 1;
+    viewport.originX = selected->virtualX;
+    viewport.originY = selected->virtualY;
+    viewport.width = std::max(1, selected->width);
+    viewport.height = std::max(1, selected->height);
+    viewport.monitorId = selected->id;
+    viewport.monitorName = selected->name;
+    return viewport;
 }
 
 } // namespace gui

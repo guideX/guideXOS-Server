@@ -27,12 +27,48 @@ $checks = @(
         Match = Find-FirstMatch (Join-Path $Root 'display_model.h') 'makeSyntheticDualMonitorDesktop';
     },
     [pscustomobject]@{
+        Name = 'display model viewport helper';
+        Match = Find-FirstMatch (Join-Path $Root 'display_model.h') 'struct DisplayViewport';
+    },
+    [pscustomobject]@{
+        Name = 'display model viewport index 1';
+        Match = Find-FirstMatch (Join-Path $Root 'display_model.h') 'viewport.index = 1';
+    },
+    [pscustomobject]@{
+        Name = 'display model viewport origin zero';
+        Match = Find-FirstMatch (Join-Path $Root 'display_model.h') 'viewport.originX = 0';
+    },
+    [pscustomobject]@{
+        Name = 'display model local to virtual helper';
+        Match = Find-FirstMatch (Join-Path $Root 'display_model.h') 'virtualXFromLocal';
+    },
+    [pscustomobject]@{
+        Name = 'display model viewport from monitor rect';
+        Match = Find-FirstMatch (Join-Path $Root 'display_model.h') 'viewport.originX = selected->virtualX';
+    },
+    [pscustomobject]@{
         Name = 'display model detailed summary';
         Match = Find-FirstMatch (Join-Path $Root 'display_model.h') 'detailedSummary() const';
     },
     [pscustomobject]@{
         Name = 'compositor synthetic layout log';
         Match = Find-FirstMatch (Join-Path $Root 'compositor.cpp') 'synthetic dual-monitor mode enabled via GXOS_SYNTHETIC_DUAL_MONITOR=1';
+    },
+    [pscustomobject]@{
+        Name = 'compositor viewport switch command';
+        Match = Find-FirstMatch (Join-Path $Root 'server.cpp') 'desktop.display.viewport';
+    },
+    [pscustomobject]@{
+        Name = 'compositor display viewport diagnostic';
+        Match = Find-FirstMatch (Join-Path $Root 'compositor.cpp') 'displayViewportDiagnostic()';
+    },
+    [pscustomobject]@{
+        Name = 'compositor viewport switch state';
+        Match = Find-FirstMatch (Join-Path $Root 'compositor.cpp') 'g_hostedViewportIndex';
+    },
+    [pscustomobject]@{
+        Name = 'compositor render viewport translation';
+        Match = Find-FirstMatch (Join-Path $Root 'compositor.cpp') 'SetViewportOrgEx';
     },
     [pscustomobject]@{
         Name = 'compositor display summary command';
@@ -45,6 +81,10 @@ $checks = @(
     [pscustomobject]@{
         Name = 'display options synthetic preview gate';
         Match = Find-FirstMatch (Join-Path $Root 'display_options.cpp') 'hostedSyntheticDualMonitorEnabled()';
+    },
+    [pscustomobject]@{
+        Name = 'display options viewport indicator';
+        Match = Find-FirstMatch (Join-Path $Root 'display_options.cpp') 'viewport.summary()';
     }
 )
 

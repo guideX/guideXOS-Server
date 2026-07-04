@@ -1,6 +1,7 @@
 #include "display_options.h"
 
 #include "clock_time_settings.h"
+#include "compositor.h"
 #include "desktop_config.h"
 #include "display_options_store.h"
 #include "gui_protocol.h"
@@ -1362,22 +1363,25 @@ namespace {
 
 void DisplayOptions::drawDisplayTab()
 {
-    drawText(s_windowId, 46, 116, "Display mode and monitor layout:", DisplayOptionsTextColor());
-    drawText(s_windowId, 46, 140, "The compositor still runs as a single framebuffer today. This tab stores the layout model and will drive the multi-output path later.", DisplayOptionsMutedTextColor());
-    if (hostedSyntheticDualMonitorEnabled()) {
-        drawText(s_windowId, 46, 158, "Synthetic dual-monitor test mode is active in hosted builds; extend mode uses a virtual 3840x1080 desktop with a primary viewport only.", DisplayOptionsMutedTextColor());
-    }
-
-    const bool mirrorSelected = normalizeDisplayModeName(s_selectedDisplayMode) == "mirror";
-    const bool extendSelected = normalizeDisplayModeName(s_selectedDisplayMode) == "extend";
-    drawButton(kDisplaySectionX, 176, kDisplayModeButtonW, kDisplayModeButtonH, "Mirror Displays", mirrorSelected, true);
-    drawButton(kDisplaySectionX + kDisplayModeButtonW + 12, 176, kDisplayModeButtonW, kDisplayModeButtonH, "Extend Displays", extendSelected, true);
-
     const std::vector<DisplayMonitorDescriptor> monitors = displayPreviewMonitors();
     DisplayVirtualDesktop desktop;
     desktop.mode = parseDisplayModeKind(s_selectedDisplayMode);
     desktop.monitors = monitors;
     desktop.recomputeBounds();
+
+    drawText(s_windowId, 46, 116, "Display mode and monitor layout:", DisplayOptionsTextColor());
+    drawText(s_windowId, 46, 140, "The compositor still runs as a single framebuffer today. This tab stores the layout model and will drive the multi-output path later.", DisplayOptionsMutedTextColor());
+    if (hostedSyntheticDualMonitorEnabled()) {
+        const DisplayViewport viewport = makeHostedDisplayViewport(desktop, Compositor::hostedDisplayViewportIndex(), kSyntheticTestMonitorWidth, kSyntheticTestMonitorHeight);
+        drawText(s_windowId, 46, 158, "Synthetic dual-monitor test mode is active in hosted builds; desktop.display.viewport 1/2 selects the visible viewport.", DisplayOptionsMutedTextColor());
+        drawText(s_windowId, 46, 176, std::string("Viewing ") + viewport.summary() + "  (wallpaper/taskbar remain primary-view based)", DisplayOptionsMutedTextColor());
+    }
+
+    const bool mirrorSelected = normalizeDisplayModeName(s_selectedDisplayMode) == "mirror";
+    const bool extendSelected = normalizeDisplayModeName(s_selectedDisplayMode) == "extend";
+    drawButton(kDisplaySectionX, 200, kDisplayModeButtonW, kDisplayModeButtonH, "Mirror Displays", mirrorSelected, true);
+    drawButton(kDisplaySectionX + kDisplayModeButtonW + 12, 200, kDisplayModeButtonW, kDisplayModeButtonH, "Extend Displays", extendSelected, true);
+
     const std::string summary = std::string("Mode: ") + displayModeName(desktop.mode) +
         "  Primary: " + (desktop.primaryMonitor() ? desktop.primaryMonitor()->id : (s_displayPrimaryDisplayId.empty() ? "display-1" : s_displayPrimaryDisplayId)) +
         "  Virtual desktop: " + desktop.resolutionString();
@@ -1387,7 +1391,7 @@ void DisplayOptions::drawDisplayTab()
         drawText(s_windowId, 46, 264, std::string("Arrangement: ") + s_displayArrangement, DisplayOptionsMutedTextColor());
     }
 
-    const int cardY = 296;
+    const int cardY = 320;
     const int cardGapX = kDisplayCardGapX;
     const int cardGapY = kDisplayCardGapY;
     const int maxColumns = 2;
