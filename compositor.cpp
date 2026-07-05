@@ -1263,7 +1263,12 @@ namespace gxos {
 
         static std::string hostedRecentProgramDisplayName(const std::string& value) {
             if (value.empty()) return std::string();
-            if (value == "AppModel") return "App Model Demo";
+            if (const apps::BuiltInAppMetadata* metadata = apps::FindBuiltInAppMetadataByIdentity(value.c_str())) {
+                if (metadata->displayName && metadata->displayName[0]) return metadata->displayName;
+            }
+            if (const apps::BuiltInAppMetadata* metadata = apps::FindBuiltInAppMetadataByKnownAlias(value.c_str())) {
+                if (metadata->displayName && metadata->displayName[0]) return metadata->displayName;
+            }
             const RegisteredDesktopApp* app = findDesktopAppByNameOrId(value);
             if (app && !app->displayName.empty()) return app->displayName;
             return std::string();

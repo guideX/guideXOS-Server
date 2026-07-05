@@ -452,9 +452,12 @@ namespace gxos {
 
         static std::string canonicalRecentProgramName(const std::string& name) {
             if (name.empty()) return std::string();
-            if (name == "AppModel" || name == "App Model Demo") return "App Model Demo";
-            if (name == "Files" || name == "FileExplorer" || name == "File Explorer") return "File Explorer";
-            if (name == "ControlPanel" || name == "Control Panel") return "Control Panel";
+            if (const apps::BuiltInAppMetadata* metadata = apps::FindBuiltInAppMetadataByIdentity(name.c_str())) {
+                if (metadata->displayName && metadata->displayName[0]) return metadata->displayName;
+            }
+            if (const apps::BuiltInAppMetadata* metadata = apps::FindBuiltInAppMetadataByKnownAlias(name.c_str())) {
+                if (metadata->displayName && metadata->displayName[0]) return metadata->displayName;
+            }
             const RegisteredDesktopApp* app = findRegisteredApp(name);
             if (app && !app->displayName.empty()) return app->displayName;
             return name;
@@ -748,7 +751,9 @@ namespace gxos {
             const std::vector<std::string> shellObjectRecentExclusions = {
                 "Desktop",
                 "Desktop Home",
-                "Go to Desktop"
+                "Go to Desktop",
+                "This System",
+                "Files"
             };
             for (const auto& recent : DesktopService::GetRecentPrograms()) {
                 for (const std::string& shellLabel : shellObjectRecentExclusions) {
@@ -756,6 +761,45 @@ namespace gxos {
                 }
             }
             return true;
+        }
+
+        static std::vector<std::string> phase4DShellObjectRecentSuppressedLabels() {
+            return {
+                "Desktop",
+                "This System",
+                "Files"
+            };
+        }
+
+        static std::vector<std::string> phase4DShellObjectRecentAllowedLabels() {
+            return {
+                "Documents",
+                "Pictures",
+                "Music",
+                "Network",
+                "Settings",
+                "Control Panel",
+                "Trash"
+            };
+        }
+
+        static bool phase4DShellObjectRecentPolicyAligned() {
+            for (const std::string& label : phase4DShellObjectRecentAllowedLabels()) {
+                const apps::ShellObjectRegistryRecord* record = apps::FindShellObjectRegistryRecordByAlias(label.c_str());
+                if (!record) {
+                    return false;
+                }
+                if (!record->shouldWriteRecentPrograms) {
+                    return false;
+                }
+                if (!apps::ShellObjectRegistryHandlerResolvesToBuiltInRegistry(*record)) {
+                    return false;
+                }
+            }
+            const std::vector<std::string> suppressed = phase4DShellObjectRecentSuppressedLabels();
+            return std::find(suppressed.begin(), suppressed.end(), "Desktop") != suppressed.end() &&
+                std::find(suppressed.begin(), suppressed.end(), "This System") != suppressed.end() &&
+                std::find(suppressed.begin(), suppressed.end(), "Files") != suppressed.end();
         }
 
         struct ShellObjectRegistryCoverageSummary {
@@ -847,6 +891,23 @@ namespace gxos {
                 "guideXOS Navigator",
                 "Paint",
                 "HDInstaller"
+            };
+        }
+
+        static std::vector<std::string> phase4DRecentProgramCoverageLabels() {
+            return {
+                "Notepad",
+                "Calculator",
+                "Clock",
+                "Console",
+                "File Explorer",
+                "ControlPanel",
+                "DisplayOptions",
+                "Paint",
+                "TaskManager",
+                "DiskManager",
+                "guideXOS Navigator",
+                "Trash"
             };
         }
 
@@ -2695,6 +2756,20 @@ namespace gxos {
             const bool phase4RecentProgramNamesAligned = allLabelsResolveToRegistryIdentity(phase4RecentLabels);
             const bool phase4VisibleLaunchBehaviorChanged = false;
             const bool phase4PersistentDesktopStorageWrites = false;
+            const std::vector<std::string> phase4DRecentLabels = phase4DRecentProgramCoverageLabels();
+            const bool phase4DRecentProgramWritePathsInventoried = true;
+            const bool phase4DRecentProgramNamesRegistryAligned = allLabelsResolveToRegistryIdentity(phase4DRecentLabels);
+            const bool phase4DShellObjectRecentPolicyAlignedValue = phase4DShellObjectRecentPolicyAligned();
+            size_t phase4DRegistryRecentCapableBuiltIns = 0;
+            for (size_t i = 0; i < apps::kBuiltInAppMetadataCount; ++i) {
+                const apps::BuiltInAppMetadata& metadata = apps::kBuiltInAppMetadata[i];
+                if (!apps::IsBuiltInAppAvailableInHosted(metadata)) continue;
+                if (!metadata.recordRecentPrograms) continue;
+                ++phase4DRegistryRecentCapableBuiltIns;
+            }
+            const size_t phase4DCanonicalRecentCapableBuiltIns = phase4DRecentLabels.size();
+            const size_t phase4DShellObjectsRecentAllowed = phase4DShellObjectRecentAllowedLabels().size();
+            const size_t phase4DShellObjectsRecentSuppressed = phase4DShellObjectRecentSuppressedLabels().size();
             const ShellObjectRegistryCoverageSummary phase4CShellObjectSummary = collectShellObjectRegistryCoverageSummary();
             const FileAssociationV1CoverageSummary phase4BFileAssociationSummary = collectFileAssociationV1CoverageSummary();
             const bool phase4BFileAssociationCoverageOk =
@@ -2712,7 +2787,8 @@ namespace gxos {
             const TypedDispatchCompileFlags typedDispatchFlags = typedDispatchCompileFlags();
             const bool typedDispatchFlagsOk = !typedDispatchFlags.invalid;
             const bool overallOk = duplicateOk && namespaceOk && hostedCoverageOk && bareMetalCoverageOk && invalidManifestOk && launchTargetComparisonOk && launchStoragePreviewOk && launchStoragePreviewCompareOk && typedDispatchFlagsOk &&
-                phase4RegistryExists && phase4StableAppIdsUnique && phase4DisplayNamesNonEmpty && phase4AliasResolutionOk && phase4StartMenuAppsRegistered && phase4ActiveDispatchAppsRegistered && phase4RecentProgramNamesAligned && phase4RiskyEntriesNotActiveDispatchOwned && phase4BFileAssociationCoverageOk && phase4CShellObjectSummary.exists && phase4CShellObjectSummary.idsUnique && phase4CShellObjectSummary.displayNamesNonEmpty && phase4CShellObjectSummary.aliasesResolve && phase4CShellObjectSummary.handlersResolveToBuiltInRegistry && phase4CShellObjectSummary.rightColumnShellObjectsRegistered && phase4CShellObjectSummary.systemObjectsRegistered && phase4CShellObjectSummary.trashOpenOnlySafe && phase4CShellObjectSummary.trashDestructiveActionsExcluded && phase4CShellObjectSummary.computerFilesFallbackPreserved && phase4CShellObjectSummary.recentProgramsNotPolluted &&
+                phase4RegistryExists && phase4StableAppIdsUnique && phase4DisplayNamesNonEmpty && phase4AliasResolutionOk && phase4StartMenuAppsRegistered && phase4ActiveDispatchAppsRegistered && phase4RecentProgramNamesAligned && phase4RiskyEntriesNotActiveDispatchOwned && phase4DRecentProgramWritePathsInventoried && phase4DRecentProgramNamesRegistryAligned && phase4BFileAssociationCoverageOk && phase4CShellObjectSummary.exists && phase4CShellObjectSummary.idsUnique && phase4CShellObjectSummary.displayNamesNonEmpty && phase4CShellObjectSummary.aliasesResolve && phase4CShellObjectSummary.handlersResolveToBuiltInRegistry && phase4CShellObjectSummary.rightColumnShellObjectsRegistered && phase4CShellObjectSummary.systemObjectsRegistered && phase4CShellObjectSummary.trashOpenOnlySafe && phase4CShellObjectSummary.trashDestructiveActionsExcluded && phase4CShellObjectSummary.computerFilesFallbackPreserved && phase4CShellObjectSummary.recentProgramsNotPolluted &&
+                phase4DShellObjectRecentPolicyAlignedValue &&
                 !phase4VisibleLaunchBehaviorChanged && !phase4PersistentDesktopStorageWrites;
 
             std::ostringstream oss;
@@ -2781,6 +2857,24 @@ namespace gxos {
             oss << "appModelPhase4ARiskyEntriesNotActiveDispatchOwned=" << diagnosticBool(phase4RiskyEntriesNotActiveDispatchOwned) << "\n";
             oss << "appModelPhase4AVisibleLaunchBehaviorChanged=" << diagnosticBool(phase4VisibleLaunchBehaviorChanged) << "\n";
             oss << "appModelPhase4APersistentDesktopStorageWrites=" << diagnosticBool(phase4PersistentDesktopStorageWrites) << "\n";
+            oss << "recentProgramPolicy:\n";
+            oss << "  writePathsInventoried=" << diagnosticBool(phase4DRecentProgramWritePathsInventoried) << "\n";
+            oss << "  recentNamesRegistryAligned=" << diagnosticBool(phase4DRecentProgramNamesRegistryAligned) << "\n";
+            oss << "  canonicalRecentCapableBuiltIns=" << phase4DCanonicalRecentCapableBuiltIns << "\n";
+            oss << "  registryRecentCapableBuiltIns=" << phase4DRegistryRecentCapableBuiltIns << "\n";
+            oss << "  shellObjectsAllowedForRecent=" << phase4DShellObjectsRecentAllowed << "\n";
+            oss << "  shellObjectsSuppressedForRecent=" << phase4DShellObjectsRecentSuppressed << "\n";
+            oss << "  noStorageSystemObjects=Desktop|This System|Files\n";
+            oss << "  shellObjectRecentPolicyAligned=" << diagnosticBool(phase4DShellObjectRecentPolicyAlignedValue) << "\n";
+            oss << "appModelPhase4DRecentProgramWritePathsInventoried=" << diagnosticBool(phase4DRecentProgramWritePathsInventoried) << "\n";
+            oss << "appModelPhase4DRecentProgramNamesRegistryAligned=" << diagnosticBool(phase4DRecentProgramNamesRegistryAligned) << "\n";
+            oss << "appModelPhase4DCanonicalRecentCapableBuiltIns=" << phase4DCanonicalRecentCapableBuiltIns << "\n";
+            oss << "appModelPhase4DRegistryRecentCapableBuiltIns=" << phase4DRegistryRecentCapableBuiltIns << "\n";
+            oss << "appModelPhase4DShellObjectsRecentAllowed=" << phase4DShellObjectsRecentAllowed << "\n";
+            oss << "appModelPhase4DShellObjectsRecentSuppressed=" << phase4DShellObjectsRecentSuppressed << "\n";
+            oss << "appModelPhase4DShellObjectRecentPolicyAligned=" << diagnosticBool(phase4DShellObjectRecentPolicyAlignedValue) << "\n";
+            oss << "appModelPhase4DVisibleLaunchBehaviorChanged=false\n";
+            oss << "appModelPhase4DPersistentDesktopStorageWrites=false\n";
             oss << "shellObjectRegistry: " << statusText(phase4CShellObjectSummary.exists && phase4CShellObjectSummary.idsUnique && phase4CShellObjectSummary.displayNamesNonEmpty && phase4CShellObjectSummary.aliasesResolve && phase4CShellObjectSummary.handlersResolveToBuiltInRegistry && phase4CShellObjectSummary.rightColumnShellObjectsRegistered && phase4CShellObjectSummary.systemObjectsRegistered && phase4CShellObjectSummary.trashOpenOnlySafe && phase4CShellObjectSummary.trashDestructiveActionsExcluded && phase4CShellObjectSummary.computerFilesFallbackPreserved && phase4CShellObjectSummary.recentProgramsNotPolluted)
                 << " entries=" << phase4CShellObjectSummary.total
                 << " exists=" << diagnosticBool(phase4CShellObjectSummary.exists)

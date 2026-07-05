@@ -282,7 +282,7 @@ This file intentionally uses an unsupported extension.
         "Paint",
         "Clock",
         "Calculator",
-        "Control Panel",
+        "ControlPanel",
         "guideXOS Navigator",
         "Trash"
     )
