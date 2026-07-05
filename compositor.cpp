@@ -3660,8 +3660,8 @@ namespace gxos {
                 Logger::write(LogLevel::Warn, "Hosted dual-window output requested but second window creation failed; staying in single-window mode");
                 return false;
             }
-            if (g_hwnd) {
-                SetWindowTextA(g_hwnd, "guideXOSCpp Compositor - Monitor 1");
+            if (Compositor::g_hwnd) {
+                SetWindowTextA(Compositor::g_hwnd, "guideXOSCpp Compositor - Monitor 1");
             }
             return true;
         }
