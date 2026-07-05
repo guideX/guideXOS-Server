@@ -644,4 +644,77 @@ Current Phase 4B evidence markers:
 
 `desktop.appmodel.active-typed-dispatch-gate` still reports product-default active dispatch as enabled, and `force-off` / `reset` continue to work. `desktop.appmodel.file-associations` is the detailed read-only table dump for smoke and troubleshooting.
 
+## 16. Phase 4C shell object registry cleanup
+
+Status: cleanup/stabilization in progress, no visible launch behavior change.
+
+The canonical shell object registry now lives in `shell_object_registry.h` and is surfaced through `desktop.appmodel.shell-objects` plus a compact `shellObjectRegistry:` block in `desktop.appmodel.summary`.
+
+The registry is intentionally narrow and only covers safe, existing shell/system targets:
+
+- `gxos.shell.desktop` -> `Desktop`
+- `gxos.shell.this-system` -> `This System`
+- `gxos.shell.files` -> `Files`
+- `gxos.shell.documents` -> `Documents`
+- `gxos.shell.pictures` -> `Pictures`
+- `gxos.shell.music` -> `Music`
+- `gxos.shell.network` -> `Network`
+- `gxos.shell.settings` -> `Settings`
+- `gxos.shell.control-panel` -> `Control Panel`
+- `gxos.shell.trash-open` -> `Trash`
+
+Normalized aliases tracked by the registry include:
+
+- `Desktop`, `Desktop Home`, `Go to Desktop`
+- `This System`, `Computer`
+- `Files`, `File Manager`, `File Explorer`, `FileExplorer`
+- `Documents`
+- `Pictures`
+- `Music`
+- `Network`
+- `Settings`, `System Settings`, `Display Options`, `Display Settings`, `Desktop Background`, `Wallpaper`
+- `Control Panel`
+- `Trash`
+
+Default handler app identities are reused from the built-in app registry where applicable:
+
+- `gxos.builtin.fileexplorer` for `This System`, `Files`, and the folder objects
+- `gxos.builtin.displayoptions` for `Settings`
+- `gxos.builtin.controlpanel` for `Control Panel`
+- `gxos.builtin.trash` for `Trash`
+- `Desktop` is a virtual object and intentionally has no built-in handler app identity
+
+Mapped object kinds are intentionally limited to:
+
+- filesystem folder
+- virtual object
+- app/system panel
+
+Current boundaries:
+
+- `Trash` is open-only and non-destructive
+- empty/delete/restore/purge-style trash actions remain out of the registry
+- `ComputerFiles` remains the preserved compatibility fallback and is not added as a canonical shell object
+- arbitrary shell commands remain out of scope
+- GXApp, ELF, package install, sandboxing, permissions, IDE, Open With, app store, and lifecycle behavior remain out of scope
+
+Current Phase 4C evidence markers:
+
+- `appModelPhase4CShellObjectRegistryExists=true`
+- `appModelPhase4CShellObjectIdsUnique=true`
+- `appModelPhase4CShellObjectDisplayNamesNonEmpty=true`
+- `appModelPhase4CShellAliasesResolve=true`
+- `appModelPhase4CShellHandlersResolveToRegistry=true`
+- `appModelPhase4CRightColumnShellObjectsRegistered=true`
+- `appModelPhase4CSystemObjectsRegistered=true`
+- `appModelPhase4CTrashOpenOnlySafe=true`
+- `appModelPhase4CTrashDestructiveActionsExcluded=true`
+- `appModelPhase4CComputerFilesFallbackPreserved=true`
+- `appModelPhase4CRecentProgramsNotPolluted=true`
+- `appModelPhase4CVisibleLaunchBehaviorChanged=false`
+- `appModelPhase4CPersistentDesktopStorageWrites=false`
+- `appModelPhase4CTemporarySmokeStateRestored=true`
+
+`desktop.appmodel.shell-objects` is the deterministic read-only dump for smoke and troubleshooting. It shows the registry records, alias resolution, handler resolution, and the current validation snapshot without changing launch behavior or persistent storage.
+
 

@@ -3,6 +3,7 @@
 #include "app_manifest_loader.h"
 #include "app_registry.h"
 #include "built_in_app_metadata.h"
+#include "shell_object_registry.h"
 #include "desktop_config.h"
 #include "desktop_folder.h"
 #include "elf_validator.h"
@@ -596,6 +597,201 @@ namespace gxos {
 
         static bool builtInRegistryEntryExistsForLabel(const std::string& label) {
             return findBuiltInMetadataForRegistryIdentity(label) != nullptr;
+        }
+
+        static std::vector<std::string> phase4CShellObjectProbeLabels() {
+            return {
+                "Desktop",
+                "This System",
+                "Computer",
+                "Files",
+                "File Manager",
+                "File Explorer",
+                "Documents",
+                "Pictures",
+                "Music",
+                "Network",
+                "Settings",
+                "System Settings",
+                "Display Options",
+                "Display Settings",
+                "Control Panel",
+                "Trash"
+            };
+        }
+
+        static std::vector<std::string> phase4CRightColumnShellObjectLabels() {
+            return {
+                "This System",
+                "Computer",
+                "Documents",
+                "Pictures",
+                "Music",
+                "Network",
+                "Settings",
+                "System Settings",
+                "Display Options",
+                "Control Panel"
+            };
+        }
+
+        static std::vector<std::string> phase4CSystemShellObjectLabels() {
+            return {
+                "Desktop",
+                "This System",
+                "Computer",
+                "Files",
+                "File Manager",
+                "File Explorer",
+                "Documents",
+                "Pictures",
+                "Music",
+                "Network",
+                "Settings",
+                "System Settings",
+                "Display Options",
+                "Display Settings",
+                "Control Panel",
+                "Trash"
+            };
+        }
+
+        static bool shellObjectRegistryIdsUnique() {
+            std::set<std::string> ids;
+            for (size_t i = 0; i < apps::kShellObjectRegistryCount; ++i) {
+                const char* id = apps::kShellObjectRegistry[i].shellObjectId;
+                if (!id || !id[0]) return false;
+                if (!ids.insert(id).second) return false;
+            }
+            return true;
+        }
+
+        static bool shellObjectRegistryDisplayNamesNonEmpty() {
+            for (size_t i = 0; i < apps::kShellObjectRegistryCount; ++i) {
+                const char* displayName = apps::kShellObjectRegistry[i].displayName;
+                if (!displayName || !displayName[0]) return false;
+            }
+            return true;
+        }
+
+        static bool shellObjectRegistryAliasesResolve(std::vector<std::string>* unresolved = nullptr) {
+            bool allResolved = true;
+            for (size_t i = 0; i < apps::kShellObjectRegistryCount; ++i) {
+                const apps::ShellObjectRegistryRecord& record = apps::kShellObjectRegistry[i];
+                if (!apps::ShellObjectRegistryAliasResolves(record.shellObjectId)) {
+                    allResolved = false;
+                    if (unresolved) unresolved->push_back(record.shellObjectId ? record.shellObjectId : "");
+                }
+                if (!apps::ShellObjectRegistryAliasResolves(record.displayName)) {
+                    allResolved = false;
+                    if (unresolved) unresolved->push_back(record.displayName ? record.displayName : "");
+                }
+                if (!apps::ShellObjectRegistryAliasResolves(record.canonicalLaunchTargetName)) {
+                    allResolved = false;
+                    if (unresolved) unresolved->push_back(record.canonicalLaunchTargetName ? record.canonicalLaunchTargetName : "");
+                }
+                for (size_t j = 0; j < record.aliasCount; ++j) {
+                    const char* alias = record.aliases[j];
+                    if (!alias || !alias[0]) continue;
+                    if (apps::ShellObjectRegistryAliasResolves(alias)) continue;
+                    allResolved = false;
+                    if (unresolved) unresolved->push_back(alias);
+                }
+            }
+            return allResolved;
+        }
+
+        static bool shellObjectRegistryHandlersResolveToBuiltInRegistry(std::vector<std::string>* unresolved = nullptr) {
+            bool allResolved = true;
+            for (size_t i = 0; i < apps::kShellObjectRegistryCount; ++i) {
+                const apps::ShellObjectRegistryRecord& record = apps::kShellObjectRegistry[i];
+                if (apps::ShellObjectRegistryHandlerResolvesToBuiltInRegistry(record)) continue;
+                allResolved = false;
+                if (unresolved) unresolved->push_back(record.shellObjectId ? record.shellObjectId : "");
+            }
+            return allResolved;
+        }
+
+        static bool shellObjectRegistryRightColumnShellObjectsRegistered() {
+            for (const std::string& alias : phase4CRightColumnShellObjectLabels()) {
+                if (!apps::ShellObjectRegistryAliasResolves(alias.c_str())) return false;
+            }
+            return true;
+        }
+
+        static bool shellObjectRegistrySystemObjectsRegistered() {
+            for (const std::string& alias : phase4CSystemShellObjectLabels()) {
+                if (!apps::ShellObjectRegistryAliasResolves(alias.c_str())) return false;
+            }
+            return true;
+        }
+
+        static bool shellObjectRegistryTrashOpenOnlySafe() {
+            const apps::ShellObjectRegistryRecord* trash = apps::FindShellObjectRegistryRecordByAlias("Trash");
+            if (!trash) return false;
+            if (trash->riskyDestructive) return false;
+            if (!trash->shouldWriteRecentPrograms) return false;
+            return apps::FindShellObjectRegistryRecordByAlias("Empty Trash") == nullptr &&
+                apps::FindShellObjectRegistryRecordByAlias("delete") == nullptr &&
+                apps::FindShellObjectRegistryRecordByAlias("restore") == nullptr &&
+                apps::FindShellObjectRegistryRecordByAlias("purge") == nullptr;
+        }
+
+        static bool shellObjectRegistryComputerFilesFallbackPreserved() {
+            const apps::LaunchTarget target = DesktopService::ResolveLaunchTarget("ComputerFiles");
+            return target.type == apps::LaunchTargetType::ShellAction &&
+                target.dispatchLaunchName == "FileExplorer" &&
+                target.shellAction == "ComputerFiles";
+        }
+
+        static bool shellObjectRegistryRecentProgramsNotPolluted() {
+            const std::vector<std::string> shellObjectRecentExclusions = {
+                "Desktop",
+                "Desktop Home",
+                "Go to Desktop"
+            };
+            for (const auto& recent : DesktopService::GetRecentPrograms()) {
+                for (const std::string& shellLabel : shellObjectRecentExclusions) {
+                    if (recent.name == shellLabel) return false;
+                }
+            }
+            return true;
+        }
+
+        struct ShellObjectRegistryCoverageSummary {
+            size_t total = 0;
+            bool exists = false;
+            bool idsUnique = false;
+            bool displayNamesNonEmpty = false;
+            bool aliasesResolve = false;
+            bool handlersResolveToBuiltInRegistry = false;
+            bool rightColumnShellObjectsRegistered = false;
+            bool systemObjectsRegistered = false;
+            bool trashOpenOnlySafe = false;
+            bool trashDestructiveActionsExcluded = false;
+            bool computerFilesFallbackPreserved = false;
+            bool recentProgramsNotPolluted = false;
+            bool visibleLaunchBehaviorChanged = false;
+            bool persistentDesktopStorageWrites = false;
+        };
+
+        static ShellObjectRegistryCoverageSummary collectShellObjectRegistryCoverageSummary() {
+            ShellObjectRegistryCoverageSummary summary;
+            summary.total = apps::kShellObjectRegistryCount;
+            summary.exists = apps::kShellObjectRegistryCount > 0;
+            summary.idsUnique = shellObjectRegistryIdsUnique();
+            summary.displayNamesNonEmpty = shellObjectRegistryDisplayNamesNonEmpty();
+            summary.aliasesResolve = shellObjectRegistryAliasesResolve();
+            summary.handlersResolveToBuiltInRegistry = shellObjectRegistryHandlersResolveToBuiltInRegistry();
+            summary.rightColumnShellObjectsRegistered = shellObjectRegistryRightColumnShellObjectsRegistered();
+            summary.systemObjectsRegistered = shellObjectRegistrySystemObjectsRegistered();
+            summary.trashOpenOnlySafe = shellObjectRegistryTrashOpenOnlySafe();
+            summary.trashDestructiveActionsExcluded = summary.trashOpenOnlySafe;
+            summary.computerFilesFallbackPreserved = shellObjectRegistryComputerFilesFallbackPreserved();
+            summary.recentProgramsNotPolluted = shellObjectRegistryRecentProgramsNotPolluted();
+            summary.visibleLaunchBehaviorChanged = false;
+            summary.persistentDesktopStorageWrites = false;
+            return summary;
         }
 
         static std::vector<std::string> phase4StartMenuCoverageLabels() {
@@ -2499,6 +2695,7 @@ namespace gxos {
             const bool phase4RecentProgramNamesAligned = allLabelsResolveToRegistryIdentity(phase4RecentLabels);
             const bool phase4VisibleLaunchBehaviorChanged = false;
             const bool phase4PersistentDesktopStorageWrites = false;
+            const ShellObjectRegistryCoverageSummary phase4CShellObjectSummary = collectShellObjectRegistryCoverageSummary();
             const FileAssociationV1CoverageSummary phase4BFileAssociationSummary = collectFileAssociationV1CoverageSummary();
             const bool phase4BFileAssociationCoverageOk =
                 phase4BFileAssociationSummary.tableExists &&
@@ -2515,7 +2712,7 @@ namespace gxos {
             const TypedDispatchCompileFlags typedDispatchFlags = typedDispatchCompileFlags();
             const bool typedDispatchFlagsOk = !typedDispatchFlags.invalid;
             const bool overallOk = duplicateOk && namespaceOk && hostedCoverageOk && bareMetalCoverageOk && invalidManifestOk && launchTargetComparisonOk && launchStoragePreviewOk && launchStoragePreviewCompareOk && typedDispatchFlagsOk &&
-                phase4RegistryExists && phase4StableAppIdsUnique && phase4DisplayNamesNonEmpty && phase4AliasResolutionOk && phase4StartMenuAppsRegistered && phase4ActiveDispatchAppsRegistered && phase4RecentProgramNamesAligned && phase4RiskyEntriesNotActiveDispatchOwned && phase4BFileAssociationCoverageOk &&
+                phase4RegistryExists && phase4StableAppIdsUnique && phase4DisplayNamesNonEmpty && phase4AliasResolutionOk && phase4StartMenuAppsRegistered && phase4ActiveDispatchAppsRegistered && phase4RecentProgramNamesAligned && phase4RiskyEntriesNotActiveDispatchOwned && phase4BFileAssociationCoverageOk && phase4CShellObjectSummary.exists && phase4CShellObjectSummary.idsUnique && phase4CShellObjectSummary.displayNamesNonEmpty && phase4CShellObjectSummary.aliasesResolve && phase4CShellObjectSummary.handlersResolveToBuiltInRegistry && phase4CShellObjectSummary.rightColumnShellObjectsRegistered && phase4CShellObjectSummary.systemObjectsRegistered && phase4CShellObjectSummary.trashOpenOnlySafe && phase4CShellObjectSummary.trashDestructiveActionsExcluded && phase4CShellObjectSummary.computerFilesFallbackPreserved && phase4CShellObjectSummary.recentProgramsNotPolluted &&
                 !phase4VisibleLaunchBehaviorChanged && !phase4PersistentDesktopStorageWrites;
 
             std::ostringstream oss;
@@ -2584,6 +2781,35 @@ namespace gxos {
             oss << "appModelPhase4ARiskyEntriesNotActiveDispatchOwned=" << diagnosticBool(phase4RiskyEntriesNotActiveDispatchOwned) << "\n";
             oss << "appModelPhase4AVisibleLaunchBehaviorChanged=" << diagnosticBool(phase4VisibleLaunchBehaviorChanged) << "\n";
             oss << "appModelPhase4APersistentDesktopStorageWrites=" << diagnosticBool(phase4PersistentDesktopStorageWrites) << "\n";
+            oss << "shellObjectRegistry: " << statusText(phase4CShellObjectSummary.exists && phase4CShellObjectSummary.idsUnique && phase4CShellObjectSummary.displayNamesNonEmpty && phase4CShellObjectSummary.aliasesResolve && phase4CShellObjectSummary.handlersResolveToBuiltInRegistry && phase4CShellObjectSummary.rightColumnShellObjectsRegistered && phase4CShellObjectSummary.systemObjectsRegistered && phase4CShellObjectSummary.trashOpenOnlySafe && phase4CShellObjectSummary.trashDestructiveActionsExcluded && phase4CShellObjectSummary.computerFilesFallbackPreserved && phase4CShellObjectSummary.recentProgramsNotPolluted)
+                << " entries=" << phase4CShellObjectSummary.total
+                << " exists=" << diagnosticBool(phase4CShellObjectSummary.exists)
+                << " idsUnique=" << diagnosticBool(phase4CShellObjectSummary.idsUnique)
+                << " displayNamesNonEmpty=" << diagnosticBool(phase4CShellObjectSummary.displayNamesNonEmpty)
+                << " aliasesResolve=" << diagnosticBool(phase4CShellObjectSummary.aliasesResolve)
+                << " handlersResolveToRegistry=" << diagnosticBool(phase4CShellObjectSummary.handlersResolveToBuiltInRegistry)
+                << " rightColumnRegistered=" << diagnosticBool(phase4CShellObjectSummary.rightColumnShellObjectsRegistered)
+                << " systemObjectsRegistered=" << diagnosticBool(phase4CShellObjectSummary.systemObjectsRegistered)
+                << " trashOpenOnlySafe=" << diagnosticBool(phase4CShellObjectSummary.trashOpenOnlySafe)
+                << " trashDestructiveActionsExcluded=" << diagnosticBool(phase4CShellObjectSummary.trashDestructiveActionsExcluded)
+                << " computerFilesFallbackPreserved=" << diagnosticBool(phase4CShellObjectSummary.computerFilesFallbackPreserved)
+                << " recentProgramsNotPolluted=" << diagnosticBool(phase4CShellObjectSummary.recentProgramsNotPolluted)
+                << " visibleLaunchBehaviorChanged=" << diagnosticBool(phase4CShellObjectSummary.visibleLaunchBehaviorChanged)
+                << " persistentDesktopStorageWrites=" << diagnosticBool(phase4CShellObjectSummary.persistentDesktopStorageWrites)
+                << "\n";
+            oss << "appModelPhase4CShellObjectRegistryExists=" << diagnosticBool(phase4CShellObjectSummary.exists) << "\n";
+            oss << "appModelPhase4CShellObjectIdsUnique=" << diagnosticBool(phase4CShellObjectSummary.idsUnique) << "\n";
+            oss << "appModelPhase4CShellObjectDisplayNamesNonEmpty=" << diagnosticBool(phase4CShellObjectSummary.displayNamesNonEmpty) << "\n";
+            oss << "appModelPhase4CShellAliasesResolve=" << diagnosticBool(phase4CShellObjectSummary.aliasesResolve) << "\n";
+            oss << "appModelPhase4CShellHandlersResolveToRegistry=" << diagnosticBool(phase4CShellObjectSummary.handlersResolveToBuiltInRegistry) << "\n";
+            oss << "appModelPhase4CRightColumnShellObjectsRegistered=" << diagnosticBool(phase4CShellObjectSummary.rightColumnShellObjectsRegistered) << "\n";
+            oss << "appModelPhase4CSystemObjectsRegistered=" << diagnosticBool(phase4CShellObjectSummary.systemObjectsRegistered) << "\n";
+            oss << "appModelPhase4CTrashOpenOnlySafe=" << diagnosticBool(phase4CShellObjectSummary.trashOpenOnlySafe) << "\n";
+            oss << "appModelPhase4CTrashDestructiveActionsExcluded=" << diagnosticBool(phase4CShellObjectSummary.trashDestructiveActionsExcluded) << "\n";
+            oss << "appModelPhase4CComputerFilesFallbackPreserved=" << diagnosticBool(phase4CShellObjectSummary.computerFilesFallbackPreserved) << "\n";
+            oss << "appModelPhase4CRecentProgramsNotPolluted=" << diagnosticBool(phase4CShellObjectSummary.recentProgramsNotPolluted) << "\n";
+            oss << "appModelPhase4CVisibleLaunchBehaviorChanged=" << diagnosticBool(phase4CShellObjectSummary.visibleLaunchBehaviorChanged) << "\n";
+            oss << "appModelPhase4CPersistentDesktopStorageWrites=" << diagnosticBool(phase4CShellObjectSummary.persistentDesktopStorageWrites) << "\n";
             oss << fileAssociationV1CompactSummaryLine(phase4BFileAssociationSummary);
             oss << fileAssociationV1KeyMappingsLine();
             oss << fileAssociationV1MarkersLine(phase4BFileAssociationSummary);
@@ -2592,7 +2818,7 @@ namespace gxos {
             oss << phase3PilotSummaryLine();
             oss << appModelActiveTypedDispatchSummaryLine();
             oss << "overall: " << statusText(overallOk) << "\n";
-            oss << "detailCommands: desktop.appmodel.coverage, desktop.appmodel.file-associations, desktop.apps.verbose, desktop.launch.compare, desktop.launch.storage, desktop.launch.storage.preview, desktop.launch.storage.preview.compare, desktop.launch.types\n";
+            oss << "detailCommands: desktop.appmodel.coverage, desktop.appmodel.file-associations, desktop.appmodel.shell-objects, desktop.apps.verbose, desktop.launch.compare, desktop.launch.storage, desktop.launch.storage.preview, desktop.launch.storage.preview.compare, desktop.launch.types\n";
             return oss.str();
         }
 
@@ -4232,6 +4458,86 @@ namespace gxos {
             appendUiLaunchAliasMetadataDiagnostic(oss);
             oss << "\n" << LaunchTargetShadowDiagnostic();
 
+            return oss.str();
+        }
+
+        std::string DesktopService::ShellObjectRegistryDiagnostic() {
+            ensureDefaultAppsRegistered();
+
+            const ShellObjectRegistryCoverageSummary summary = collectShellObjectRegistryCoverageSummary();
+            std::ostringstream oss;
+            oss << "[ShellObjectRegistryV1]\n";
+            oss << "registryExists: " << diagnosticBool(summary.exists) << "\n";
+            oss << "registryCount: " << summary.total << "\n";
+            oss << "shellObjectRegistryIdsUnique: " << diagnosticBool(summary.idsUnique) << "\n";
+            oss << "shellObjectRegistryDisplayNamesNonEmpty: " << diagnosticBool(summary.displayNamesNonEmpty) << "\n";
+            oss << "shellObjectRegistryAliasesResolve: " << diagnosticBool(summary.aliasesResolve) << "\n";
+            oss << "shellObjectRegistryHandlersResolveToRegistry: " << diagnosticBool(summary.handlersResolveToBuiltInRegistry) << "\n";
+            oss << "rightColumnShellObjectsRegistered: " << diagnosticBool(summary.rightColumnShellObjectsRegistered) << "\n";
+            oss << "systemObjectsRegistered: " << diagnosticBool(summary.systemObjectsRegistered) << "\n";
+            oss << "trashOpenOnlySafe: " << diagnosticBool(summary.trashOpenOnlySafe) << "\n";
+            oss << "trashDestructiveActionsExcluded: " << diagnosticBool(summary.trashDestructiveActionsExcluded) << "\n";
+            oss << "computerFilesFallbackPreserved: " << diagnosticBool(summary.computerFilesFallbackPreserved) << "\n";
+            oss << "recentProgramsNotPolluted: " << diagnosticBool(summary.recentProgramsNotPolluted) << "\n";
+            oss << "visibleLaunchBehaviorChanged: " << diagnosticBool(summary.visibleLaunchBehaviorChanged) << "\n";
+            oss << "persistentDesktopStorageWrites: " << diagnosticBool(summary.persistentDesktopStorageWrites) << "\n";
+            oss << "records:\n";
+            for (size_t i = 0; i < apps::kShellObjectRegistryCount; ++i) {
+                const apps::ShellObjectRegistryRecord& record = apps::kShellObjectRegistry[i];
+                std::ostringstream aliases;
+                bool first = true;
+                for (size_t j = 0; j < record.aliasCount; ++j) {
+                    const char* alias = record.aliases[j];
+                    if (!alias || !alias[0]) continue;
+                    if (!first) aliases << "|";
+                    aliases << alias;
+                    first = false;
+                }
+
+                oss << "  record id=" << (record.shellObjectId ? record.shellObjectId : "")
+                    << " displayName=" << (record.displayName ? record.displayName : "")
+                    << " canonicalLaunchTargetName=" << (record.canonicalLaunchTargetName ? record.canonicalLaunchTargetName : "")
+                    << " aliases=" << (aliases.str().empty() ? "none" : aliases.str())
+                    << " kind=" << apps::ShellObjectKindToString(record.kind)
+                    << " defaultHandlerAppIdentity=" << (record.defaultHandlerAppIdentity ? record.defaultHandlerAppIdentity : "")
+                    << " activeTypedDispatchMayOwn=" << diagnosticBool(record.activeTypedDispatchMayOwn)
+                    << " systemOnly=" << diagnosticBool(record.systemOnly)
+                    << " riskyDestructive=" << diagnosticBool(record.riskyDestructive)
+                    << " shouldWriteRecentPrograms=" << diagnosticBool(record.shouldWriteRecentPrograms)
+                    << " targetKind=" << apps::ShellObjectTargetKindToString(record.targetKind)
+                    << " canonicalTargetValue=" << (record.canonicalTargetValue ? record.canonicalTargetValue : "")
+                    << " handlerResolved=" << diagnosticBool(apps::ShellObjectRegistryHandlerResolvesToBuiltInRegistry(record))
+                    << "\n";
+            }
+
+            const std::vector<std::string> probeAliases = phase4CShellObjectProbeLabels();
+            oss << "aliasResolution:\n";
+            for (const std::string& alias : probeAliases) {
+                const apps::ShellObjectRegistryRecord* record = apps::FindShellObjectRegistryRecordByAlias(alias.c_str());
+                oss << "  alias=" << alias
+                    << " resolved=" << diagnosticBool(record != nullptr)
+                    << " shellObjectId=" << (record && record->shellObjectId ? record->shellObjectId : "")
+                    << " canonicalDisplayName=" << (record && record->displayName ? record->displayName : "")
+                    << " canonicalLaunchTargetName=" << (record && record->canonicalLaunchTargetName ? record->canonicalLaunchTargetName : "")
+                    << " targetKind=" << (record ? apps::ShellObjectTargetKindToString(record->targetKind) : "unknown")
+                    << "\n";
+            }
+
+            oss << "registryValidation:\n";
+            oss << "  registryExists=" << diagnosticBool(summary.exists) << "\n";
+            oss << "  idsUnique=" << diagnosticBool(summary.idsUnique) << "\n";
+            oss << "  displayNamesNonEmpty=" << diagnosticBool(summary.displayNamesNonEmpty) << "\n";
+            oss << "  aliasesResolve=" << diagnosticBool(summary.aliasesResolve) << "\n";
+            oss << "  handlersResolveToRegistry=" << diagnosticBool(summary.handlersResolveToBuiltInRegistry) << "\n";
+            oss << "  rightColumnShellObjectsRegistered=" << diagnosticBool(summary.rightColumnShellObjectsRegistered) << "\n";
+            oss << "  systemObjectsRegistered=" << diagnosticBool(summary.systemObjectsRegistered) << "\n";
+            oss << "  trashOpenOnlySafe=" << diagnosticBool(summary.trashOpenOnlySafe) << "\n";
+            oss << "  trashDestructiveActionsExcluded=" << diagnosticBool(summary.trashDestructiveActionsExcluded) << "\n";
+            oss << "  computerFilesFallbackPreserved=" << diagnosticBool(summary.computerFilesFallbackPreserved) << "\n";
+            oss << "  recentProgramsNotPolluted=" << diagnosticBool(summary.recentProgramsNotPolluted) << "\n";
+            oss << "  visibleLaunchBehaviorChanged=" << diagnosticBool(summary.visibleLaunchBehaviorChanged) << "\n";
+            oss << "  persistentDesktopStorageWrites=" << diagnosticBool(summary.persistentDesktopStorageWrites) << "\n";
+            oss << "nonFatal: true\n";
             return oss.str();
         }
 
