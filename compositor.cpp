@@ -40,6 +40,7 @@
 #include <iostream>
 #include <cstdlib>
 #include <iomanip>
+#include <cstdint>
 #include <utility>
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)
 #define WIN32_LEAN_AND_MEAN
@@ -72,6 +73,70 @@ namespace gxos {
             const auto tick = std::chrono::duration_cast<std::chrono::milliseconds>(now).count() / 100;
             return item.frames[static_cast<size_t>(tick) % item.frames.size()];
         }
+
+        static std::string hostedBoolText(bool value)
+        {
+            return value ? "true" : "false";
+        }
+
+        static std::string hostedDualWindowEnvValue(const char* name)
+        {
+            const char* value = std::getenv(name);
+            return value ? value : "(unset)";
+        }
+
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
+        static std::string hostedWindowHandleString(HWND hwnd)
+        {
+            if (!hwnd) {
+                return "(null)";
+            }
+            std::ostringstream oss;
+            oss << "0x" << std::hex << std::uppercase << reinterpret_cast<uintptr_t>(hwnd);
+            return oss.str();
+        }
+
+        static std::string hostedWindowRectString(HWND hwnd)
+        {
+            if (!hwnd) {
+                return "(null)";
+            }
+            RECT rc{};
+            if (!GetWindowRect(hwnd, &rc)) {
+                return "(unavailable)";
+            }
+            std::ostringstream oss;
+            oss << rc.left << ',' << rc.top << '-' << rc.right << ',' << rc.bottom;
+            return oss.str();
+        }
+
+        static std::string hostedWin32ErrorString(DWORD error)
+        {
+            LPSTR message = nullptr;
+            const DWORD flags = FORMAT_MESSAGE_ALLOCATE_BUFFER
+                | FORMAT_MESSAGE_FROM_SYSTEM
+                | FORMAT_MESSAGE_IGNORE_INSERTS;
+            const DWORD length = FormatMessageA(
+                flags,
+                nullptr,
+                error,
+                MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+                reinterpret_cast<LPSTR>(&message),
+                0,
+                nullptr);
+            std::string text;
+            if (length != 0 && message) {
+                text.assign(message, message + length);
+                while (!text.empty() && (text.back() == '\r' || text.back() == '\n' || text.back() == ' ' || text.back() == '\t')) {
+                    text.pop_back();
+                }
+            }
+            if (message) {
+                LocalFree(message);
+            }
+            return text.empty() ? std::string("unknown error") : text;
+        }
+#endif
 
         static bool isCalculatorWindow(const WinInfo& winfo) {
             return winfo.title == "Calculator";
@@ -3635,10 +3700,44 @@ namespace gxos {
 
         static bool ensureHostedSecondaryWindow(const DisplayVirtualDesktop& desktop)
         {
+            const bool syntheticDualMonitor = hostedSyntheticDualMonitorEnabled();
+            const bool dualWindowOutput = hostedSyntheticDualWindowOutputEnabled();
+            const bool syntheticExtend = syntheticExtendModeActive(desktop);
+
             if (g_hwndSecondary) {
+                if (syntheticDualMonitor || dualWindowOutput) {
+                    Logger::write(
+                        LogLevel::Info,
+                        std::string("[hosted-dual-window] ensureHostedSecondaryWindow already-present hwnd=")
+                            + hostedWindowHandleString(g_hwndSecondary)
+                            + " primary=" + hostedWindowHandleString(Compositor::g_hwnd)
+                            + " syntheticExtend=" + hostedBoolText(syntheticExtend));
+                }
                 return true;
             }
-            if (!syntheticExtendModeActive(desktop) || !hostedSyntheticDualWindowOutputEnabled()) {
+
+            if (syntheticDualMonitor || dualWindowOutput) {
+                Logger::write(
+                    LogLevel::Info,
+                    std::string("[hosted-dual-window] ensureHostedSecondaryWindow enter primary=")
+                        + hostedWindowHandleString(Compositor::g_hwnd)
+                        + " secondary=(null)"
+                        + " syntheticDualMonitor=" + hostedBoolText(syntheticDualMonitor)
+                        + " dualWindowOutput=" + hostedBoolText(dualWindowOutput)
+                        + " syntheticExtend=" + hostedBoolText(syntheticExtend)
+                        + " activeMonitors=" + std::to_string(desktop.activeMonitorCount())
+                        + " desktop=" + desktop.summary());
+            }
+
+            if (!syntheticExtend || !dualWindowOutput) {
+                if (syntheticDualMonitor || dualWindowOutput) {
+                    Logger::write(
+                        LogLevel::Info,
+                        std::string("[hosted-dual-window] ensureHostedSecondaryWindow skipped syntheticExtend=")
+                            + hostedBoolText(syntheticExtend)
+                            + " dualWindowOutput=" + hostedBoolText(dualWindowOutput)
+                            + " activeMonitors=" + std::to_string(desktop.activeMonitorCount()));
+                }
                 return false;
             }
 
@@ -3657,12 +3756,57 @@ namespace gxos {
                 GetModuleHandleA(nullptr),
                 &secondaryCreateInfo);
             if (!g_hwndSecondary) {
-                Logger::write(LogLevel::Warn, "Hosted dual-window output requested but second window creation failed; staying in single-window mode");
+                const DWORD err = GetLastError();
+                Logger::write(
+                    LogLevel::Warn,
+                    std::string("[hosted-dual-window] secondary CreateWindowExA failed err=")
+                        + std::to_string(err)
+                        + " msg=" + hostedWin32ErrorString(err)
+                        + " primary=" + hostedWindowHandleString(Compositor::g_hwnd));
                 return false;
             }
+
+            const BOOL secondaryShown = ShowWindow(g_hwndSecondary, SW_SHOW);
+            RECT primaryRect{};
+            const int cascadeOffset = 48;
+            const int secondaryX = (Compositor::g_hwnd && GetWindowRect(Compositor::g_hwnd, &primaryRect))
+                ? (primaryRect.left + cascadeOffset)
+                : cascadeOffset;
+            const int secondaryY = (Compositor::g_hwnd && primaryRect.bottom > primaryRect.top)
+                ? (primaryRect.top + cascadeOffset)
+                : cascadeOffset;
+            const BOOL secondaryMoved = SetWindowPos(
+                g_hwndSecondary,
+                HWND_TOP,
+                secondaryX,
+                secondaryY,
+                0,
+                0,
+                SWP_NOSIZE | SWP_SHOWWINDOW);
+            const BOOL secondaryUpdated = UpdateWindow(g_hwndSecondary);
             if (Compositor::g_hwnd) {
                 SetWindowTextA(Compositor::g_hwnd, "guideXOSCpp Compositor - Monitor 1");
             }
+            if (Compositor::g_hwnd) {
+                InvalidateRect(Compositor::g_hwnd, nullptr, FALSE);
+            }
+            if (g_hwndSecondary) {
+                InvalidateRect(g_hwndSecondary, nullptr, FALSE);
+            }
+            if (Compositor::g_hwnd) {
+                UpdateWindow(Compositor::g_hwnd);
+            }
+            Logger::write(
+                LogLevel::Info,
+                std::string("[hosted-dual-window] secondary hwnd=")
+                    + hostedWindowHandleString(g_hwndSecondary)
+                    + " rect=" + hostedWindowRectString(g_hwndSecondary)
+                    + " shown=" + hostedBoolText(secondaryShown != FALSE)
+                    + " moved=" + hostedBoolText(secondaryMoved != FALSE)
+                    + " updated=" + hostedBoolText(secondaryUpdated != FALSE)
+                    + " primary=" + hostedWindowHandleString(Compositor::g_hwnd)
+                    + " title1=guideXOSCpp Compositor - Monitor 1"
+                    + " title2=guideXOSCpp Compositor - Monitor 2");
             return true;
         }
 
@@ -3690,6 +3834,27 @@ namespace gxos {
                 nullptr,
                 wc.hInstance,
                 &primaryCreateInfo);
+            if (!g_hwnd) {
+                const DWORD err = GetLastError();
+                Logger::write(
+                    LogLevel::Warn,
+                    std::string("[hosted-dual-window] primary CreateWindowExA failed err=")
+                        + std::to_string(err)
+                        + " msg=" + hostedWin32ErrorString(err));
+                return;
+            }
+            const BOOL primaryShown = ShowWindow(g_hwnd, SW_SHOW);
+            const BOOL primaryUpdated = UpdateWindow(g_hwnd);
+            if (hostedSyntheticDualMonitorEnabled()) {
+                Logger::write(
+                    LogLevel::Info,
+                    std::string("[hosted-dual-window] primary hwnd=")
+                        + hostedWindowHandleString(g_hwnd)
+                        + " rect=" + hostedWindowRectString(g_hwnd)
+                        + " shown=" + hostedBoolText(primaryShown != FALSE)
+                        + " updated=" + hostedBoolText(primaryUpdated != FALSE)
+                        + " title=guideXOSCpp Compositor");
+            }
 
             g_startBtnBmp = (HBITMAP)LoadImageA(nullptr, "assets/start_button.bmp", IMAGE_BITMAP, 0, 0, LR_LOADFROMFILE | LR_CREATEDIBSECTION);
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)
@@ -3848,9 +4013,25 @@ namespace gxos {
                 if (cs && cs->lpCreateParams) {
                     const HostedWindowCreateInfo* info = static_cast<const HostedWindowCreateInfo*>(cs->lpCreateParams);
                     SetWindowLongPtrA(h, GWLP_USERDATA, static_cast<LONG_PTR>(info->targetIndex));
+                    if (hostedSyntheticDualMonitorEnabled()) {
+                        Logger::write(
+                            LogLevel::Info,
+                            std::string("[hosted-dual-window] WM_NCCREATE hwnd=")
+                                + hostedWindowHandleString(h)
+                                + " targetIndex=" + std::to_string(info->targetIndex));
+                    }
                 }
                 return TRUE;
             }
+            case WM_NCDESTROY:
+                if (hostedSyntheticDualMonitorEnabled()) {
+                    Logger::write(
+                        LogLevel::Info,
+                        std::string("[hosted-dual-window] WM_NCDESTROY hwnd=")
+                            + hostedWindowHandleString(h)
+                            + " targetIndex=" + std::to_string(hostedOutputIndexForWindow(h)));
+                }
+                return 0;
             case WM_CLOSE: PostQuitMessage(0); return 0;
             case WM_SIZE: { const DisplayVirtualDesktop desktop = buildDisplayVirtualDesktop(g_cfg); const DisplayViewport viewport = hostedViewportForWindow(h, desktop, hostedSurfaceWidth(), hostedSurfaceHeight()); std::lock_guard<std::mutex> lk(g_lock); for (auto& kv : g_windows) { WinInfo& wi = kv.second; if (wi.maximized) { const DisplayRect windowRect{ wi.x, wi.y, wi.x + wi.w, wi.y + wi.h }; const DisplayRect work = monitorWorkAreaForWindow(desktop, viewport, windowRect); wi.x = work.left; wi.y = work.top; wi.w = work.width(); wi.h = work.height(); wi.dirty = true; } } requestRepaint( ); return 0; }
             case WM_ERASEBKGND: return 1;
@@ -5518,6 +5699,12 @@ namespace gxos {
             ipc::Bus::ensure(kGuiChanIn);
             ipc::Bus::ensure(kGuiChanOut);
             if (hostedSyntheticDualMonitorEnabled()) {
+                Logger::write(
+                    LogLevel::Info,
+                    std::string("[hosted-dual-window] env GXOS_SYNTHETIC_DUAL_MONITOR=")
+                        + hostedDualWindowEnvValue("GXOS_SYNTHETIC_DUAL_MONITOR")
+                        + " GXOS_SYNTHETIC_DUAL_WINDOW_OUTPUT=" + hostedDualWindowEnvValue("GXOS_SYNTHETIC_DUAL_WINDOW_OUTPUT")
+                        + " parsedDualWindowOutput=" + hostedBoolText(hostedSyntheticDualWindowOutputEnabled()));
                 Logger::write(LogLevel::Info, std::string("Compositor synthetic dual-monitor mode enabled via GXOS_SYNTHETIC_DUAL_MONITOR=1; dualWindowOutput=") + (hostedSyntheticDualWindowOutputEnabled() ? "true" : "false"));
                 if (hostedSyntheticDualWindowOutputEnabled()) {
                     Logger::write(LogLevel::Info, "Compositor dual-window output enabled via GXOS_SYNTHETIC_DUAL_WINDOW_OUTPUT=1");
@@ -5556,6 +5743,9 @@ namespace gxos {
             Logger::write(LogLevel::Info, std::string("Compositor display layout summary: ") + desktop.detailedSummary() +
                 " persistedResolution=" + g_cfg.displayResolution +
                 " arrangement=" + (g_cfg.displayArrangement.empty() ? "(empty)" : g_cfg.displayArrangement));
+            if (hostedSyntheticDualMonitorEnabled()) {
+                Logger::write(LogLevel::Info, std::string("[hosted-dual-window] layout ") + displayLayoutDiagnostic());
+            }
             ensureHostedSecondaryWindow(desktop);
             logCompositorList("config pinned before merge", g_cfg.pinned);
             logCompositorList("config recent before merge", g_cfg.recent);
