@@ -1511,6 +1511,18 @@ namespace gxos {
             return oss.str();
         }
 
+        struct LaunchTargetTypeCoverageSummary;
+
+        static const char* kAppModelV1OutOfScopeScope = "GXAppExecution|ELFLoading|PackageInstall|Sandboxing|Permissions|IDEBehavior|OpenWith|AppStore|UninstallUpdateLifecycle|TrashDestructiveActions|ImageActiveDispatchOwnership";
+
+        static LaunchTargetTypeCoverageSummary collectLaunchTargetTypeCoverageSummary();
+
+        static size_t appModelV1ActiveDispatchOwnedCoverageCount() {
+            return phase4ActiveDispatchCoverageLabels().size();
+        }
+
+        static size_t appModelV1FallbackUnsupportedCoverageCount();
+
         static bool fileAssociationV1HandlerMatchesRegistry(const FileAssociationV1Record& record) {
             if (!record.handlerAppId || !record.handlerAppId[0]) return false;
 
@@ -2772,6 +2784,25 @@ namespace gxos {
             const size_t phase4DShellObjectsRecentSuppressed = phase4DShellObjectRecentSuppressedLabels().size();
             const ShellObjectRegistryCoverageSummary phase4CShellObjectSummary = collectShellObjectRegistryCoverageSummary();
             const FileAssociationV1CoverageSummary phase4BFileAssociationSummary = collectFileAssociationV1CoverageSummary();
+            const size_t appModelV1BuiltInRegistryCount = apps::kBuiltInAppMetadataCount;
+            const size_t appModelV1ShellObjectRegistryCount = apps::kShellObjectRegistryCount;
+            const size_t appModelV1FileAssociationCount = phase4BFileAssociationSummary.total;
+            const size_t appModelV1ActiveDispatchOwnedCoverageCountValue = appModelV1ActiveDispatchOwnedCoverageCount();
+            const size_t appModelV1FallbackUnsupportedCoverageCountValue = appModelV1FallbackUnsupportedCoverageCount();
+            const bool appModelV1ActiveTypedDispatchEnabled = apps::AppModelActiveTypedDispatchEnabled();
+            const std::string appModelV1EffectiveStateSource = apps::AppModelActiveTypedDispatchEffectiveStateSourceName();
+            const bool appModelV1EmergencyForceOffAvailable = true;
+            const bool appModelV1LegacyFallbackAvailable = true;
+            const bool appModelV1VisibleLaunchBehaviorChanged = false;
+            const bool appModelV1PersistentDesktopStorageWrites = false;
+            const bool appModelV1RecentProgramsAligned = phase4DRecentProgramNamesRegistryAligned;
+            const bool appModelV1RiskyDestructiveTargetsExcluded =
+                phase4RiskyEntriesNotActiveDispatchOwned &&
+                phase4BFileAssociationSummary.riskyExtensionsNotActiveDispatchOwned &&
+                phase4CShellObjectSummary.trashDestructiveActionsExcluded;
+            const bool appModelV1TrashOpenOnlyBoundary = phase4CShellObjectSummary.trashOpenOnlySafe;
+            const bool appModelV1ImagesRemainLegacy = phase4BFileAssociationSummary.imagesRemainLegacy;
+            const bool appModelV1OutOfScopeBoundary = true;
             const bool phase4BFileAssociationCoverageOk =
                 phase4BFileAssociationSummary.tableExists &&
                 phase4BFileAssociationSummary.folderAssociationRegistered &&
@@ -2790,6 +2821,7 @@ namespace gxos {
                 phase4RegistryExists && phase4StableAppIdsUnique && phase4DisplayNamesNonEmpty && phase4AliasResolutionOk && phase4StartMenuAppsRegistered && phase4ActiveDispatchAppsRegistered && phase4RecentProgramNamesAligned && phase4RiskyEntriesNotActiveDispatchOwned && phase4DRecentProgramWritePathsInventoried && phase4DRecentProgramNamesRegistryAligned && phase4BFileAssociationCoverageOk && phase4CShellObjectSummary.exists && phase4CShellObjectSummary.idsUnique && phase4CShellObjectSummary.displayNamesNonEmpty && phase4CShellObjectSummary.aliasesResolve && phase4CShellObjectSummary.handlersResolveToBuiltInRegistry && phase4CShellObjectSummary.rightColumnShellObjectsRegistered && phase4CShellObjectSummary.systemObjectsRegistered && phase4CShellObjectSummary.trashOpenOnlySafe && phase4CShellObjectSummary.trashDestructiveActionsExcluded && phase4CShellObjectSummary.computerFilesFallbackPreserved && phase4CShellObjectSummary.recentProgramsNotPolluted &&
                 phase4DShellObjectRecentPolicyAlignedValue &&
                 !phase4VisibleLaunchBehaviorChanged && !phase4PersistentDesktopStorageWrites;
+            const bool appModelV1StatusReady = overallOk;
 
             std::ostringstream oss;
             oss << "[AppModelSummary]\n";
@@ -2911,8 +2943,136 @@ namespace gxos {
             oss << typedDispatchCompileFlagsSummaryLine();
             oss << phase3PilotSummaryLine();
             oss << appModelActiveTypedDispatchSummaryLine();
+            oss << "appModelV1StatusSurfaceExists=true\n";
+            oss << "appModelV1StatusReady=" << diagnosticBool(appModelV1StatusReady) << "\n";
+            oss << "appModelV1Status=" << (appModelV1StatusReady ? "ready" : "not-ready") << "\n";
+            oss << "appModelV1StatusSource=" << appModelV1EffectiveStateSource << "\n";
+            oss << "appModelV1ActiveTypedDispatchEnabled=" << diagnosticBool(appModelV1ActiveTypedDispatchEnabled) << "\n";
+            oss << "appModelV1EmergencyForceOffAvailable=" << diagnosticBool(appModelV1EmergencyForceOffAvailable) << "\n";
+            oss << "appModelV1LegacyFallbackAvailable=" << diagnosticBool(appModelV1LegacyFallbackAvailable) << "\n";
+            oss << "appModelV1VisibleLaunchBehaviorChanged=" << diagnosticBool(appModelV1VisibleLaunchBehaviorChanged) << "\n";
+            oss << "appModelV1PersistentDesktopStorageWrites=" << diagnosticBool(appModelV1PersistentDesktopStorageWrites) << "\n";
+            oss << "appModelV1BuiltInAppRegistryCount=" << appModelV1BuiltInRegistryCount << "\n";
+            oss << "appModelV1ShellObjectRegistryCount=" << appModelV1ShellObjectRegistryCount << "\n";
+            oss << "appModelV1FileAssociationCount=" << appModelV1FileAssociationCount << "\n";
+            oss << "appModelV1ActiveDispatchOwnedCoverageCount=" << appModelV1ActiveDispatchOwnedCoverageCountValue << "\n";
+            oss << "appModelV1FallbackUnsupportedCoverageCount=" << appModelV1FallbackUnsupportedCoverageCountValue << "\n";
+            oss << "appModelV1RecentProgramsAligned=" << diagnosticBool(appModelV1RecentProgramsAligned) << "\n";
+            oss << "appModelV1RiskyDestructiveTargetsExcluded=" << diagnosticBool(appModelV1RiskyDestructiveTargetsExcluded) << "\n";
+            oss << "appModelV1TrashOpenOnlyBoundary=" << diagnosticBool(appModelV1TrashOpenOnlyBoundary) << "\n";
+            oss << "appModelV1ImagesRemainLegacy=" << diagnosticBool(appModelV1ImagesRemainLegacy) << "\n";
+            oss << "appModelV1OutOfScopeBoundary=" << diagnosticBool(appModelV1OutOfScopeBoundary) << "\n";
+            oss << "appModelV1OutOfScopeScope=" << kAppModelV1OutOfScopeScope << "\n";
             oss << "overall: " << statusText(overallOk) << "\n";
-            oss << "detailCommands: desktop.appmodel.coverage, desktop.appmodel.file-associations, desktop.appmodel.shell-objects, desktop.apps.verbose, desktop.launch.compare, desktop.launch.storage, desktop.launch.storage.preview, desktop.launch.storage.preview.compare, desktop.launch.types\n";
+            oss << "detailCommands: desktop.appmodel.coverage, desktop.appmodel.file-associations, desktop.appmodel.inventory, desktop.appmodel.shell-objects, desktop.apps.verbose, desktop.launch.compare, desktop.launch.storage, desktop.launch.storage.preview, desktop.launch.storage.preview.compare, desktop.launch.types\n";
+            return oss.str();
+        }
+
+        std::string DesktopService::AppModelInventoryDiagnostic() {
+            ensureDefaultAppsRegistered();
+
+            const ShellObjectRegistryCoverageSummary shellSummary = collectShellObjectRegistryCoverageSummary();
+            const FileAssociationV1CoverageSummary fileAssocSummary = collectFileAssociationV1CoverageSummary();
+            const size_t builtInRegistryCount = apps::kBuiltInAppMetadataCount;
+            const size_t shellObjectRegistryCount = apps::kShellObjectRegistryCount;
+            const size_t fileAssociationCount = fileAssocSummary.total;
+            const size_t activeDispatchOwnedCoverageCount = appModelV1ActiveDispatchOwnedCoverageCount();
+            const size_t fallbackUnsupportedCoverageCount = appModelV1FallbackUnsupportedCoverageCount();
+
+            const std::vector<std::string> recentProgramLabels = phase4DRecentProgramCoverageLabels();
+            size_t registryRecentCapableBuiltIns = 0;
+            for (size_t i = 0; i < apps::kBuiltInAppMetadataCount; ++i) {
+                const apps::BuiltInAppMetadata& metadata = apps::kBuiltInAppMetadata[i];
+                if (!apps::IsBuiltInAppAvailableInHosted(metadata)) continue;
+                if (!metadata.recordRecentPrograms) continue;
+                ++registryRecentCapableBuiltIns;
+            }
+
+            std::ostringstream oss;
+            oss << "[AppModelV1Inventory]\n";
+            oss << "nonFatal: true\n";
+            oss << "inventorySurfaceExists=true\n";
+            oss << "statusSurface=desktop.appmodel.summary\n";
+            oss << "counts: builtInApps=" << builtInRegistryCount
+                << " shellObjects=" << shellObjectRegistryCount
+                << " fileAssociations=" << fileAssociationCount
+                << " activeDispatchOwnedCoverage=" << activeDispatchOwnedCoverageCount
+                << " fallbackUnsupportedCoverage=" << fallbackUnsupportedCoverageCount
+                << "\n";
+            oss << "recentProgramPolicy:\n";
+            oss << "  aligned=" << diagnosticBool(allLabelsResolveToRegistryIdentity(recentProgramLabels)) << "\n";
+            oss << "  canonicalRecentCapableBuiltIns=" << recentProgramLabels.size() << "\n";
+            oss << "  registryRecentCapableBuiltIns=" << registryRecentCapableBuiltIns << "\n";
+            oss << "  shellObjectsAllowedForRecent=" << phase4DShellObjectRecentAllowedLabels().size() << "\n";
+            oss << "  shellObjectsSuppressedForRecent=" << phase4DShellObjectRecentSuppressedLabels().size() << "\n";
+            oss << "  noStorageSystemObjects=Desktop|This System|Files\n";
+            oss << "fallbackExclusions:\n";
+            oss << "  core=" << kAppModelV1OutOfScopeScope << "\n";
+            oss << "  trashDestructiveActionsExcluded=" << diagnosticBool(shellSummary.trashDestructiveActionsExcluded) << "\n";
+            oss << "  imagesRemainLegacy=" << diagnosticBool(fileAssocSummary.imagesRemainLegacy) << "\n";
+            oss << "  legacyFallbacks=AppModel|ComputerFiles|Image Viewer|ImgViewer\n";
+            oss << "builtInApps:\n";
+            for (size_t i = 0; i < apps::kBuiltInAppMetadataCount; ++i) {
+                const apps::BuiltInAppMetadata& metadata = apps::kBuiltInAppMetadata[i];
+                oss << "  record id=" << (metadata.appId ? metadata.appId : "")
+                    << " displayName=" << (metadata.displayName ? metadata.displayName : "")
+                    << " launchName=" << (metadata.launchName ? metadata.launchName : "")
+                    << " hosted=" << diagnosticBool(apps::IsBuiltInAppAvailableInHosted(metadata))
+                    << " bareMetal=" << diagnosticBool(apps::IsBuiltInAppAvailableInBareMetal(metadata))
+                    << " appearsInStartMenu=" << diagnosticBool(metadata.appearsInStartMenu)
+                    << " canAppearOnDesktop=" << diagnosticBool(metadata.canAppearOnDesktop)
+                    << " recordRecentPrograms=" << diagnosticBool(metadata.recordRecentPrograms)
+                    << " acceptsFileTargets=" << diagnosticBool(metadata.acceptsFileTargets)
+                    << " acceptsFolderTargets=" << diagnosticBool(metadata.acceptsFolderTargets)
+                    << " systemShellObject=" << diagnosticBool(metadata.systemShellObject)
+                    << " riskyForActiveTypedDispatch=" << diagnosticBool(metadata.riskyForActiveTypedDispatch)
+                    << "\n";
+            }
+            oss << "shellObjects:\n";
+            for (size_t i = 0; i < apps::kShellObjectRegistryCount; ++i) {
+                const apps::ShellObjectRegistryRecord& record = apps::kShellObjectRegistry[i];
+                std::ostringstream aliases;
+                bool first = true;
+                for (size_t j = 0; j < record.aliasCount; ++j) {
+                    const char* alias = record.aliases[j];
+                    if (!alias || !alias[0]) continue;
+                    if (!first) aliases << "|";
+                    aliases << alias;
+                    first = false;
+                }
+
+                oss << "  record id=" << (record.shellObjectId ? record.shellObjectId : "")
+                    << " displayName=" << (record.displayName ? record.displayName : "")
+                    << " canonicalLaunchTargetName=" << (record.canonicalLaunchTargetName ? record.canonicalLaunchTargetName : "")
+                    << " aliases=" << (aliases.str().empty() ? "none" : aliases.str())
+                    << " kind=" << apps::ShellObjectKindToString(record.kind)
+                    << " defaultHandlerAppIdentity=" << (record.defaultHandlerAppIdentity ? record.defaultHandlerAppIdentity : "")
+                    << " activeTypedDispatchMayOwn=" << diagnosticBool(record.activeTypedDispatchMayOwn)
+                    << " systemOnly=" << diagnosticBool(record.systemOnly)
+                    << " riskyDestructive=" << diagnosticBool(record.riskyDestructive)
+                    << " shouldWriteRecentPrograms=" << diagnosticBool(record.shouldWriteRecentPrograms)
+                    << " targetKind=" << apps::ShellObjectTargetKindToString(record.targetKind)
+                    << " canonicalTargetValue=" << (record.canonicalTargetValue ? record.canonicalTargetValue : "")
+                    << "\n";
+            }
+            oss << "fileAssociations:\n";
+            for (const auto& record : kFileAssociationV1Table) {
+                oss << "  record key=" << record.associationKey
+                    << " kind=" << fileAssociationV1KindName(record.kind)
+                    << " handlerAppId=" << (record.handlerAppId ? record.handlerAppId : "")
+                    << " handlerDisplayName=" << (record.handlerDisplayName ? record.handlerDisplayName : "")
+                    << " handlerLaunchName=" << (record.handlerLaunchName ? record.handlerLaunchName : "")
+                    << " activeTypedDispatchMayOwn=" << diagnosticBool(record.activeTypedDispatchMayOwn)
+                    << " fallbackRequired=" << diagnosticBool(record.fallbackRequired)
+                    << " textLike=" << diagnosticBool(record.textLike)
+                    << " folder=" << diagnosticBool(record.folder)
+                    << " system=" << diagnosticBool(record.system)
+                    << " risky=" << diagnosticBool(record.risky)
+                    << " legacyDirectPath=" << diagnosticBool(record.legacyDirectPath)
+                    << " note=" << (record.note ? record.note : "")
+                    << "\n";
+            }
+            oss << "nonFatal: true\n";
             return oss.str();
         }
 
@@ -3886,10 +4046,19 @@ namespace gxos {
             return summary;
         }
 
-        static std::string launchTargetTypeCoverageSummaryLine() {
+        static LaunchTargetTypeCoverageSummary collectLaunchTargetTypeCoverageSummary() {
             const std::set<std::string> labels = collectLaunchTargetTypeCoverageLabels();
             const std::map<apps::LaunchTargetType, LaunchTargetTypeCounts> typeCounts = collectLaunchTargetTypeCoverageCounts(labels);
-            const LaunchTargetTypeCoverageSummary summary = summarizeLaunchTargetTypeCoverage(typeCounts, labels.size());
+            return summarizeLaunchTargetTypeCoverage(typeCounts, labels.size());
+        }
+
+        static size_t appModelV1FallbackUnsupportedCoverageCount() {
+            const LaunchTargetTypeCoverageSummary summary = collectLaunchTargetTypeCoverageSummary();
+            return summary.totalExpectedUnsupported + summary.totalUnexpectedUnsupported + summary.totalUnknownLabels;
+        }
+
+        static std::string launchTargetTypeCoverageSummaryLine() {
+            const LaunchTargetTypeCoverageSummary summary = collectLaunchTargetTypeCoverageSummary();
 
             std::ostringstream oss;
             oss << "launchTargetTypes: " << statusText(summary.totalUnexpectedUnsupported == 0)

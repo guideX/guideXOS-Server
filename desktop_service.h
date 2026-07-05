@@ -136,6 +136,7 @@ namespace gxos { namespace gui {
         static std::string GetRegisteredAppsVerboseDiagnostic();
         static std::string GetRegisteredAppsDiagnostic();
         static std::string AppModelSummaryDiagnostic();
+        static std::string AppModelInventoryDiagnostic();
         static std::string BuiltInAppMetadataCoverageDiagnostic();
         static std::string ShellObjectRegistryDiagnostic();
         static apps::LaunchTarget ResolveLaunchTarget(const std::string& label);

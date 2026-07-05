@@ -1,6 +1,6 @@
 # guideXOS App Model Current-State Map
 
-Status: inspection pass only
+Status: Phase 5A final App Model v1 snapshot
 
 This document maps the app model as it exists in the repository today. It is intended to ground future GXApp runtime work without rewriting or destabilizing current launch behavior.
 
@@ -801,5 +801,109 @@ Current Phase 4D evidence markers:
 - the count of shell objects allowed and suppressed for recents
 
 The phase 4D smoke restores its temporary fixture state after running and leaves the tracked desktop runtime files unchanged outside the smoke-only temporary fixtures.
+
+## 18. Phase 5A final App Model v1 snapshot
+
+This is the final App Model v1 closeout state.
+
+`desktop.appmodel.summary` is the authoritative status surface. It now reports:
+
+- `appModelV1StatusSurfaceExists=true`
+- `appModelV1StatusReady=true`
+- `appModelV1StatusSource=product-default`, `force-on`, or `force-off` depending on the current diagnostic gate state
+- `appModelV1ActiveTypedDispatchEnabled=true` when the product default is active
+- `appModelV1EmergencyForceOffAvailable=true`
+- `appModelV1LegacyFallbackAvailable=true`
+- `appModelV1VisibleLaunchBehaviorChanged=false`
+- `appModelV1PersistentDesktopStorageWrites=false`
+- `appModelV1BuiltInAppRegistryCount=18`
+- `appModelV1ShellObjectRegistryCount=10`
+- `appModelV1FileAssociationCount=14`
+- `appModelV1ActiveDispatchOwnedCoverageCount=11`
+- `appModelV1FallbackUnsupportedCoverageCount` as the compact unsupported/legacy-coverage total
+- `appModelV1RecentProgramsAligned=true`
+- `appModelV1RiskyDestructiveTargetsExcluded=true`
+- `appModelV1TrashOpenOnlyBoundary=true`
+- `appModelV1ImagesRemainLegacy=true`
+- `appModelV1OutOfScopeBoundary=true`
+- `appModelV1OutOfScopeScope=GXAppExecution|ELFLoading|PackageInstall|Sandboxing|Permissions|IDEBehavior|OpenWith|AppStore|UninstallUpdateLifecycle|TrashDestructiveActions|ImageActiveDispatchOwnership`
+
+`desktop.appmodel.inventory` is the compact read-only inventory dump. It lists:
+
+- registered built-in apps
+- registered shell objects
+- file association v1 rows
+- recent-program policy summary
+- fallback exclusions and the v1 out-of-scope boundary
+
+App Model v1 owns:
+
+- the shared built-in app registry for the current hosted and bare-metal coverage set
+- the shell object registry for `Desktop`, `This System`, `Files`, `Documents`, `Pictures`, `Music`, `Network`, `Settings`, `Control Panel`, and `Trash`
+- the file association v1 table for folders, text-like files, legacy images, and risky/unsupported fallbacks
+- recent-program identity alignment with the built-in app registry
+- the emergency force-off and reset diagnostics for active typed dispatch
+
+Active typed dispatch owns by default:
+
+- safe built-in app launches
+- safe shell objects that already map to registry-backed handlers
+- folder opens through File Explorer
+- text-like file opens through Notepad
+
+What still falls back to legacy:
+
+- `AppModel` legacy compatibility
+- `ComputerFiles` compatibility bridge behavior
+- image opens on the legacy direct path
+- unsupported, unknown, risky, GXApp, ELF, and package-style cases
+
+Built-in app registry scope:
+
+- hosted and bare-metal built-in metadata identities
+- canonical launch names and aliases already present in `built_in_app_metadata.h`
+- no new built-in identities were added in Phase 5A
+
+File association v1 scope:
+
+- folders -> File Explorer
+- `.txt`, `.log`, `.ini`, `.cfg` -> Notepad
+- `.png`, `.bmp`, `.jpg`, `.gif`, `.jpeg` -> legacy Image Viewer path
+- unknown/risky -> unsupported fallback
+
+Shell object registry scope:
+
+- virtual desktop and filesystem shell objects already present in `shell_object_registry.h`
+- open-only Trash behavior
+- no destructive Trash actions
+- `ComputerFiles` remains a compatibility bridge, not a canonical shell object
+
+Recent Programs integration:
+
+- canonical names are aligned to the built-in app registry
+- shell-object recent writes are intentionally limited
+- `Desktop`, `This System`, and `Files` remain no-storage system objects
+
+Emergency force-off behavior:
+
+- `desktop.appmodel.active-typed-dispatch-gate force-off` temporarily disables active typed dispatch for diagnostics
+- `desktop.appmodel.active-typed-dispatch-gate reset` returns to product-default enabled state
+- visible launch behavior stays unchanged in all cases
+
+Known non-goals for v1:
+
+- GXApp execution
+- ELF loading
+- package install
+- sandboxing
+- permissions
+- IDE behavior
+- Open With
+- app store
+- uninstall/update lifecycle
+- Trash destructive actions
+- image active-dispatch ownership
+
+Phase 5A smoke coverage is captured by `scripts\smoke-appmodel-phase5a-status.ps1`, which verifies the status summary, the inventory dump, the force-off/reset gate behavior, and cleanup of temporary smoke artifacts.
 
 
