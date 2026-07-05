@@ -343,6 +343,44 @@ Phase 3F.1 is a stabilization-only review pass for the Clock app-surface pilot.
 * No additional readability or layout fix was needed in this pass.
 * Future app polish should remain one app at a time.
 
+## Phase 3G
+
+Phase 3G closes out the Sci Fi app-surface milestone through Phase 3F.1. It is a documentation, inventory, and smoke-hardening pass only. It does not add new rendering effects, app behavior, theme IDs, persistence keys, or chrome metrics.
+
+Classic remains the default theme. Sci Fi remains opt-in. No per-effect controls were introduced.
+
+### App-Surface Inventory
+
+* Display Options: Phase 3A / 3A.1; Sci Fi changes: conservative panel/card/accent polish plus clearer theme copy; Classic preservation: default look stays intact and the neutral card feel remains; Behavior changes: No; Stabilization: complete in 3A.1; Safety fix: tiny fallback tweak restored the neutral card feel.
+* Control Panel: Phase 3B / 3B.1; Sci Fi changes: conservative panel/card/accent polish that matches the hosted shell; Classic preservation: look stays close to the prior Control Panel surface; Behavior changes: No; Stabilization: complete in 3B.1; Safety fix: shared grid top offset stayed synchronized for drawing and hit-testing.
+* Notepad: Phase 3C / 3C.1; Sci Fi changes: conservative editor/body/border/text polish; Classic preservation: look stays close to the prior Notepad surface; Behavior changes: No; Stabilization: complete in 3C.1; Safety fix: surface helpers stayed centralized and no visible fallback tweak was needed.
+* Calculator: Phase 3D / 3D.1; Sci Fi changes: conservative body/display/button/accent polish; Classic preservation: look stays close to the prior Calculator surface; Behavior changes: No; Stabilization: complete in 3D.1; Safety fix: shared compositor widget guard stayed narrow to Calculator and Sci Fi.
+* File Explorer: Phase 3E / 3E.1; Sci Fi changes: conservative body/list/toolbar/address/selection/hover/border/status polish; Classic preservation: look stays close to the prior File Explorer surface; Behavior changes: No; Stabilization: complete in 3E.1; Safety fix: Sci Fi hover clears on scroll and offset changes so hover stays visual-only.
+* Clock: Phase 3F / 3F.1; Sci Fi changes: conservative body/readout/accent polish plus clear repaint handling; Classic preservation: look stays close to the prior Clock surface; Behavior changes: No; Stabilization: complete in 3F.1; Safety fix: clear-then-redraw removes stale stacked text without changing timekeeping cadence.
+
+### Deferred Boundaries
+
+* Rounded client clipping remains deferred.
+* Rounded hit-testing remains deferred.
+* Blur/glass remains deferred.
+* Animations remain deferred.
+* High-DPI/scaling polish remains deferred.
+* Taskbar shadows remain deferred.
+* Theme wallpaper selection remains deferred.
+* Broad app redesign remains deferred.
+* Bare-metal theme parity remains deferred.
+* Per-effect controls remain deferred.
+* Navigator, Image Viewer, Task Manager, and other future app-surface polish remain deferred.
+
+### Validation Checklist
+
+* `.\build.bat`
+* `.\scripts\smoke-theme-system.ps1 -SkipBuild`
+* `.\scripts\smoke-live-directory-desktop-status.ps1 -SkipBuild`
+* `git diff --check`
+* Skip the optional appmodel smoke unless there is a specific reason to run it.
+* Treat `guideXOSServer.exe`, `desktop.json`, screenshots, generated EXEs, and disk images as validation artifacts unless intentionally changed.
+
 ## Manual Validation Runbook
 
 * Start the hosted server executable.
@@ -406,7 +444,7 @@ Phase 3F.1 is a stabilization-only review pass for the Clock app-surface pilot.
 
 * Classic should continue to look basically unchanged.
 * Sci Fi is a first visible proof that the theme system exists, not a full futuristic redesign.
-* Rounded-window clipping remains deferred; this foundation is intentionally limited to IDs, persistence, selector wiring, safe chrome colors, the Phase 2A chrome metric pass, the guarded Phase 2B rounded-shell preview, the Phase 2C border/highlight polish pass, the Phase 2D hosted shadow preview, the Phase 2E desktop/taskbar surface polish pass, the Phase 2G validation checkpoint, the Phase 3A Display Options app-surface pilot, the Phase 3B Control Panel app-surface pilot, the Phase 3C Notepad app-surface pilot, the Phase 3C.1 stabilization review pass, the Phase 3D Calculator app-surface pilot, the Phase 3D.1 stabilization review pass, the Phase 3E File Explorer app-surface pilot, the Phase 3E.1 File Explorer stabilization review pass, the Phase 3F Clock app-surface pilot, and the Phase 3F.1 Clock stabilization review pass.
+* Rounded-window clipping remains deferred; this foundation is intentionally limited to IDs, persistence, selector wiring, safe chrome colors, the Phase 2A chrome metric pass, the guarded Phase 2B rounded-shell preview, the Phase 2C border/highlight polish pass, the Phase 2D hosted shadow preview, the Phase 2E desktop/taskbar surface polish pass, the Phase 2G validation checkpoint, the Phase 3A Display Options app-surface pilot, the Phase 3B Control Panel app-surface pilot, the Phase 3C Notepad app-surface pilot, the Phase 3C.1 stabilization review pass, the Phase 3D Calculator app-surface pilot, the Phase 3D.1 stabilization review pass, the Phase 3E File Explorer app-surface pilot, the Phase 3E.1 File Explorer stabilization review pass, the Phase 3F Clock app-surface pilot, the Phase 3F.1 Clock stabilization review pass, and the Phase 3G app-surface closeout.
 
 ## Recommended Next Pass
 
