@@ -381,6 +381,19 @@ Classic remains the default theme. Sci Fi remains opt-in. No per-effect controls
 * Skip the optional appmodel smoke unless there is a specific reason to run it.
 * Treat `guideXOSServer.exe`, `desktop.json`, screenshots, generated EXEs, and disk images as validation artifacts unless intentionally changed.
 
+## Phase 3H
+
+Phase 3H is a hosted visual validation pass for the Sci Fi app-surface milestone. It is a documentation and screenshot-checklist pass only. It does not add new rendering effects, app behavior, theme IDs, persistence keys, or chrome metrics.
+
+* Hosted compositor validation was performed for Classic and Sci Fi.
+* Classic preservation held: the default theme stayed familiar, and no accidental Sci Fi colors, layout drift, or missing fills or borders were observed on the inspected surfaces.
+* Sci Fi readability and cohesion held on the shell and app pilots: titlebars, menus, taskbar, desktop surfaces, and app chrome remained readable and cohesive without looking overdone.
+* Inspected surfaces: desktop background, taskbar, Start menu, taskbar context menu, Display Options, Control Panel, Notepad, Calculator, File Explorer, and Clock.
+* Tiny fixes made: none in repo source; the pass stayed documentation-only, with only temporary local validation harness retries to stabilize screenshot capture.
+* Screenshots and artifacts captured: local PNGs were captured in temporary validation artifact folders and were not added to git.
+* Deferred boundaries remain unchanged: rounded client clipping, rounded hit-testing, blur/glass, animations, taskbar shadows, high-DPI/scaling, bare-metal theme parity, per-effect controls, and broad app redesign remain deferred.
+* Readiness: the Sci Fi app-surface milestone is ready for the next layer of theme work.
+
 ## Manual Validation Runbook
 
 * Start the hosted server executable.
@@ -444,7 +457,7 @@ Classic remains the default theme. Sci Fi remains opt-in. No per-effect controls
 
 * Classic should continue to look basically unchanged.
 * Sci Fi is a first visible proof that the theme system exists, not a full futuristic redesign.
-* Rounded-window clipping remains deferred; this foundation is intentionally limited to IDs, persistence, selector wiring, safe chrome colors, the Phase 2A chrome metric pass, the guarded Phase 2B rounded-shell preview, the Phase 2C border/highlight polish pass, the Phase 2D hosted shadow preview, the Phase 2E desktop/taskbar surface polish pass, the Phase 2G validation checkpoint, the Phase 3A Display Options app-surface pilot, the Phase 3B Control Panel app-surface pilot, the Phase 3C Notepad app-surface pilot, the Phase 3C.1 stabilization review pass, the Phase 3D Calculator app-surface pilot, the Phase 3D.1 stabilization review pass, the Phase 3E File Explorer app-surface pilot, the Phase 3E.1 File Explorer stabilization review pass, the Phase 3F Clock app-surface pilot, the Phase 3F.1 Clock stabilization review pass, and the Phase 3G app-surface closeout.
+* Rounded-window clipping remains deferred; this foundation is intentionally limited to IDs, persistence, selector wiring, safe chrome colors, the Phase 2A chrome metric pass, the guarded Phase 2B rounded-shell preview, the Phase 2C border/highlight polish pass, the Phase 2D hosted shadow preview, the Phase 2E desktop/taskbar surface polish pass, the Phase 2G validation checkpoint, the Phase 3A Display Options app-surface pilot, the Phase 3B Control Panel app-surface pilot, the Phase 3C Notepad app-surface pilot, the Phase 3C.1 stabilization review pass, the Phase 3D Calculator app-surface pilot, the Phase 3D.1 stabilization review pass, the Phase 3E File Explorer app-surface pilot, the Phase 3E.1 File Explorer stabilization review pass, the Phase 3F Clock app-surface pilot, the Phase 3F.1 Clock stabilization review pass, the Phase 3G app-surface closeout, and the Phase 3H hosted visual validation pass.
 
 ## Recommended Next Pass
 
