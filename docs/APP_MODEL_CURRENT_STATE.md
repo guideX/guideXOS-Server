@@ -717,4 +717,89 @@ Current Phase 4C evidence markers:
 
 `desktop.appmodel.shell-objects` is the deterministic read-only dump for smoke and troubleshooting. It shows the registry records, alias resolution, handler resolution, and the current validation snapshot without changing launch behavior or persistent storage.
 
+## 17. Phase 4D recent programs integration review
+
+Status: complete, compatibility-only, no visible launch behavior change.
+
+Phase 4D hardens the connection between Recent Programs and the App Model registries without expanding launch scope or adding new UI.
+
+Recent-program identity is now aligned with the built-in app registry:
+
+- `AddRecentProgram()` and `RemoveRecentProgram()` canonicalize through built-in app metadata first, then known aliases, then hosted registered apps.
+- Recent entries are stored and rehydrated using the canonical registry-backed identity when one exists.
+- The recent-program smoke and summary surfaces validate canonical names rather than display-only aliases.
+
+The intended recent-capable built-ins are:
+
+- `Notepad`
+- `Calculator`
+- `Clock`
+- `Console`
+- `File Explorer`
+- `ControlPanel`
+- `DisplayOptions`
+- `Paint`
+- `TaskManager`
+- `DiskManager`
+- `guideXOS Navigator`
+- `Trash` open only
+
+Paths that can write to Recent Programs were inventoried and reviewed:
+
+- Start Menu left-column app launches
+- desktop icon app launches
+- active typed dispatch app launches
+- legacy fallback app launches
+- shell object opens
+- file and folder opens
+- direct server-command launch paths used by smokes
+- no-storage and system-object launch paths that intentionally suppress recent writes
+
+Shell-object recent behavior is now explicit:
+
+- `Desktop`, `Desktop Home`, `Go to Desktop`, `This System`, and `Files` suppress recent writes.
+- `Documents`, `Pictures`, `Music`, `Network`, `Settings`, `Control Panel`, and `Trash` use canonical registry-backed identities when they do record a recent entry.
+- `Trash` remains open-only and non-destructive; no destructive trash actions were added.
+
+File and folder handling remains stable:
+
+- folders record `File Explorer` when routed through the existing folder-open path
+- text-like files record `Notepad` when routed through the existing text-file path
+- image files remain on the legacy image-viewer path and are not reclassified by App Model
+- unsupported, unknown, risky, executable-style, package-style, and ELF-style targets do not pollute Recent Programs
+
+Phase 4D deliberately does not add:
+
+- Open With
+- GXApp execution
+- ELF loading
+- package install, sandboxing, permissions, IDE, uninstall, update, or app store behavior
+- destructive Trash actions
+- broader parameterized launches
+- display/options UI changes, File Explorer scrolling, theme polish, or compositor refactors
+
+Current Phase 4D evidence markers:
+
+- `appModelPhase4DRecentProgramWritePathsInventoried=true`
+- `appModelPhase4DRecentProgramNamesRegistryAligned=true`
+- `appModelPhase4DNormalAppLaunchesRecordCanonicalRecents=true`
+- `appModelPhase4DShellObjectsNoUnexpectedRecents=true`
+- `appModelPhase4DFileFolderRecentsStable=true`
+- `appModelPhase4DUnsupportedTargetsDoNotPolluteRecents=true`
+- `appModelPhase4DRemoveRecentStillWorks=true`
+- `appModelPhase4DForceOffRecentsStable=true`
+- `appModelPhase4DResetProductDefaultRecentsStable=true`
+- `appModelPhase4DVisibleLaunchBehaviorChanged=false`
+- `appModelPhase4DPersistentDesktopStorageWrites=false`
+- `appModelPhase4DTemporarySmokeStateRestored=true`
+
+`desktop.appmodel.summary` now includes compact read-only evidence for:
+
+- recent-program registry alignment
+- recent write suppression state
+- the count of canonical recent-capable built-ins
+- the count of shell objects allowed and suppressed for recents
+
+The phase 4D smoke restores its temporary fixture state after running and leaves the tracked desktop runtime files unchanged outside the smoke-only temporary fixtures.
+
 
