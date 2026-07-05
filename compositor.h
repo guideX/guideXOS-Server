@@ -160,7 +160,7 @@ namespace gxos { namespace gui {
         static void pumpEvents();
         static void invalidate(uint64_t winId);
         static void sendFocus(uint64_t winId);
-        static void handleMouse(int mx, int my, bool down, bool up);
+        static void handleMouse(int mx, int my, bool down, bool up, const DisplayViewport* viewportOverride = nullptr);
         static std::string packMousePayloadForTarget(int x, int y, int button, const std::string& action, uint64_t ownerPid, uint64_t windowId = 0);
         static void emitWidgetEvt(uint64_t winId, int wid, const std::string& evt, const std::string& value);
         static WinInfo* hitWindowAt(int mx, int my);
@@ -217,7 +217,7 @@ namespace gxos { namespace gui {
         static bool g_startMenuVisible;
         static RECT g_startMenuRect;
         // Functions implemented in compositor.cpp
-        static void drawDesktopIcons(HDC dc, RECT cr);
+        static void drawDesktopIcons(HDC dc, RECT cr, HWND hwnd, const DisplayViewport& viewport);
         static void drawTaskbarSearchBox(HDC dc, int x, int y, int w, int h);
         static void drawSystemTray(HDC dc, RECT cr, int taskbarH);
         static void drawTaskbarTooltip(HDC dc, int x, int y, const char* text);

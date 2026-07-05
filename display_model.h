@@ -84,9 +84,8 @@ inline DisplayRect insetDisplayRectForTaskbar(const DisplayRect& bounds, const D
     return work;
 }
 
-inline bool hostedSyntheticDualMonitorEnabled()
+inline bool parseEnvironmentFlagValue(const char* value)
 {
-    const char* value = std::getenv("GXOS_SYNTHETIC_DUAL_MONITOR");
     if (!value || !*value) {
         return false;
     }
@@ -97,6 +96,21 @@ inline bool hostedSyntheticDualMonitorEnabled()
         lower.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(*p))));
     }
     return !(lower == "0" || lower == "false" || lower == "off" || lower == "no");
+}
+
+inline bool hostedSyntheticDualMonitorEnabled()
+{
+    return parseEnvironmentFlagValue(std::getenv("GXOS_SYNTHETIC_DUAL_MONITOR"));
+}
+
+inline bool hostedSyntheticDualWindowOutputEnabled()
+{
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
+    return hostedSyntheticDualMonitorEnabled()
+        && parseEnvironmentFlagValue(std::getenv("GXOS_SYNTHETIC_DUAL_WINDOW_OUTPUT"));
+#else
+    return false;
+#endif
 }
 
 enum class DisplayModeKind {
@@ -748,6 +762,7 @@ inline std::vector<DisplayRenderTarget> buildDisplayRenderTargets(
     int fallbackHeight)
 {
     std::vector<DisplayRenderTarget> targets;
+    const bool dualWindowOutput = hostedSyntheticDualWindowOutputEnabled();
     const bool syntheticHosted = viewport.syntheticHosted
         && hostedSyntheticDualMonitorEnabled()
         && desktop.mode == DisplayModeKind::Extend
@@ -802,9 +817,24 @@ inline std::vector<DisplayRenderTarget> buildDisplayRenderTargets(
     int targetIndex = 1;
     for (const DisplayMonitorDescriptor* monitor : activeMonitors) {
         const bool isActive = activeMonitor && monitor->id == activeMonitor->id;
-        targets.push_back(makeDisplayRenderTarget(targetIndex++, *monitor, isActive, isActive, true));
+        const bool backedByHostedFramebuffer = dualWindowOutput ? true : isActive;
+        targets.push_back(makeDisplayRenderTarget(targetIndex++, *monitor, isActive, backedByHostedFramebuffer, true));
     }
     return targets;
+}
+
+inline const DisplayRenderTarget* displayRenderTargetForIndex(
+    const std::vector<DisplayRenderTarget>& targets,
+    int targetIndex)
+{
+    if (targetIndex > 0) {
+        for (const auto& target : targets) {
+            if (target.targetIndex == targetIndex) {
+                return &target;
+            }
+        }
+    }
+    return nullptr;
 }
 
 inline const DisplayRenderTarget* activeDisplayRenderTarget(const std::vector<DisplayRenderTarget>& targets)
@@ -825,7 +855,14 @@ inline const DisplayRenderTarget* activeDisplayRenderTarget(const std::vector<Di
 inline std::string displayRenderTargetsSummary(const std::vector<DisplayRenderTarget>& targets)
 {
     std::ostringstream out;
-    out << "renderTargetCount=" << targets.size();
+    size_t backedCount = 0;
+    for (const auto& target : targets) {
+        if (target.backedByHostedFramebuffer) {
+            ++backedCount;
+        }
+    }
+    out << "renderTargetCount=" << targets.size()
+        << " backedTargetCount=" << backedCount;
     if (!targets.empty()) {
         const DisplayRenderTarget* active = activeDisplayRenderTarget(targets);
         out << " activeHostedTarget=" << (active ? active->targetId : std::string("(none)"))

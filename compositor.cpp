@@ -172,6 +172,9 @@ namespace gxos {
         static TaskbarPosition g_taskbarPosition = TaskbarPosition::Bottom;
         static clocktime::ClockDisplaySettings g_clockDisplaySettings{};
         static std::atomic<int> g_hostedViewportIndex{1};
+#if defined(_WIN32) && !defined(GXOS_BARE_METAL)
+        static HWND g_hwndSecondary = nullptr;
+#endif
 
         static std::string taskbarPositionName(TaskbarPosition position) {
             switch (position) {
@@ -206,6 +209,17 @@ namespace gxos {
             return index <= 1 ? 1 : 2;
         }
 
+        static const char* hostedPresentationModeName(const DisplayVirtualDesktop& desktop)
+        {
+            if (!hostedSyntheticDualMonitorEnabled() || desktop.mode != DisplayModeKind::Extend || desktop.activeMonitorCount() <= 1) {
+                return "normal-single-output";
+            }
+            if (hostedSyntheticDualWindowOutputEnabled()) {
+                return "synthetic-two-window-output";
+            }
+            return "synthetic-camera";
+        }
+
         static std::vector<DisplayRenderTarget> hostedRenderTargetsForDesktop(const DisplayVirtualDesktop& desktop, int fallbackWidth, int fallbackHeight)
         {
             const DisplayViewport viewport = makeHostedDisplayViewport(desktop, hostedDisplayViewportIndexValue(), fallbackWidth, fallbackHeight);
@@ -233,6 +247,49 @@ namespace gxos {
             fallback.backedByHostedFramebuffer = true;
             fallback.syntheticHosted = viewport.syntheticHosted;
             return fallback;
+        }
+
+        static DisplayRenderTarget hostedRenderTargetForDesktop(
+            const DisplayVirtualDesktop& desktop,
+            int fallbackWidth,
+            int fallbackHeight,
+            int requestedIndex)
+        {
+            std::vector<DisplayRenderTarget> targets = hostedRenderTargetsForDesktop(desktop, fallbackWidth, fallbackHeight);
+            if (const DisplayRenderTarget* requested = displayRenderTargetForIndex(targets, requestedIndex)) {
+                return *requested;
+            }
+            return hostedRenderTargetForDesktop(desktop, fallbackWidth, fallbackHeight);
+        }
+
+        static int hostedOutputIndexForWindow(HWND h)
+        {
+            if (!h) {
+                return 1;
+            }
+            const LONG_PTR value = GetWindowLongPtrA(h, GWLP_USERDATA);
+            return value <= 1 ? 1 : 2;
+        }
+
+        static DisplayRenderTarget hostedRenderTargetForWindow(
+            HWND h,
+            const DisplayVirtualDesktop& desktop,
+            int fallbackWidth,
+            int fallbackHeight)
+        {
+            const int requestedIndex = hostedSyntheticDualWindowOutputEnabled()
+                ? hostedOutputIndexForWindow(h)
+                : hostedDisplayViewportIndexValue();
+            return hostedRenderTargetForDesktop(desktop, fallbackWidth, fallbackHeight, requestedIndex);
+        }
+
+        static DisplayViewport hostedViewportForWindow(
+            HWND h,
+            const DisplayVirtualDesktop& desktop,
+            int fallbackWidth,
+            int fallbackHeight)
+        {
+            return hostedRenderTargetForWindow(h, desktop, fallbackWidth, fallbackHeight).viewportDescriptor();
         }
 
         static DisplayViewport hostedViewportForDesktop(const DisplayVirtualDesktop& desktop, int fallbackWidth, int fallbackHeight)
@@ -3572,7 +3629,69 @@ namespace gxos {
             }
             return 0;
         }
-        void Compositor::initWindow( ) { WNDCLASSA wc{}; wc.style = CS_OWNDC; wc.lpfnWndProc = Compositor::WndProc; wc.hInstance = GetModuleHandleA(nullptr); wc.lpszClassName = "GXOS_COMPOSITOR"; RegisterClassA(&wc); const int surfaceW = hostedSurfaceWidth(); const int surfaceH = hostedSurfaceHeight(); g_hwnd = CreateWindowExA(0, wc.lpszClassName, "guideXOSCpp Compositor", WS_OVERLAPPEDWINDOW | WS_VISIBLE, CW_USEDEFAULT, CW_USEDEFAULT, surfaceW, surfaceH, nullptr, nullptr, wc.hInstance, nullptr); g_startBtnBmp = (HBITMAP)LoadImageA(nullptr, "assets/start_button.bmp", IMAGE_BITMAP, 0, 0, LR_LOADFROMFILE | LR_CREATEDIBSECTION);
+        struct HostedWindowCreateInfo {
+            int targetIndex{1};
+        };
+
+        static bool ensureHostedSecondaryWindow(const DisplayVirtualDesktop& desktop)
+        {
+            if (g_hwndSecondary) {
+                return true;
+            }
+            if (!syntheticExtendModeActive(desktop) || !hostedSyntheticDualWindowOutputEnabled()) {
+                return false;
+            }
+
+            HostedWindowCreateInfo secondaryCreateInfo{ 2 };
+            g_hwndSecondary = CreateWindowExA(
+                0,
+                "GXOS_COMPOSITOR",
+                "guideXOSCpp Compositor - Monitor 2",
+                WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+                CW_USEDEFAULT,
+                CW_USEDEFAULT,
+                hostedSurfaceWidth(),
+                hostedSurfaceHeight(),
+                nullptr,
+                nullptr,
+                GetModuleHandleA(nullptr),
+                &secondaryCreateInfo);
+            if (!g_hwndSecondary) {
+                Logger::write(LogLevel::Warn, "Hosted dual-window output requested but second window creation failed; staying in single-window mode");
+                return false;
+            }
+            if (g_hwnd) {
+                SetWindowTextA(g_hwnd, "guideXOSCpp Compositor - Monitor 1");
+            }
+            return true;
+        }
+
+        void Compositor::initWindow( ) {
+            WNDCLASSA wc{};
+            wc.style = CS_OWNDC;
+            wc.lpfnWndProc = Compositor::WndProc;
+            wc.hInstance = GetModuleHandleA(nullptr);
+            wc.lpszClassName = "GXOS_COMPOSITOR";
+            RegisterClassA(&wc);
+
+            const int surfaceW = hostedSurfaceWidth();
+            const int surfaceH = hostedSurfaceHeight();
+            HostedWindowCreateInfo primaryCreateInfo{ 1 };
+            g_hwnd = CreateWindowExA(
+                0,
+                wc.lpszClassName,
+                "guideXOSCpp Compositor",
+                WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+                CW_USEDEFAULT,
+                CW_USEDEFAULT,
+                surfaceW,
+                surfaceH,
+                nullptr,
+                nullptr,
+                wc.hInstance,
+                &primaryCreateInfo);
+
+            g_startBtnBmp = (HBITMAP)LoadImageA(nullptr, "assets/start_button.bmp", IMAGE_BITMAP, 0, 0, LR_LOADFROMFILE | LR_CREATEDIBSECTION);
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)
             g_hostedFreezeDiag.enabled = hostedFreezeDiagnosticsEnabled( );
             if (g_hostedFreezeDiag.enabled) {
@@ -3603,13 +3722,21 @@ namespace gxos {
             }
 #endif
             releaseHostedPaintSurface();
-            if (g_hwnd) { DestroyWindow(g_hwnd); g_hwnd = nullptr; }
+            if (g_hwndSecondary) {
+                DestroyWindow(g_hwndSecondary);
+                g_hwndSecondary = nullptr;
+            }
+            if (g_hwnd) {
+                DestroyWindow(g_hwnd);
+                g_hwnd = nullptr;
+            }
         }
         void Compositor::requestRepaint( ) {
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)
             hostedFreezeDiagnosticsOnRequestRepaint( );
 #endif
             if (g_hwnd) InvalidateRect(g_hwnd, nullptr, FALSE);
+            if (g_hwndSecondary) InvalidateRect(g_hwndSecondary, nullptr, FALSE);
         }
         bool Compositor::hostedHasDirtyWindows() {
             std::lock_guard<std::mutex> lk(g_lock);
@@ -3620,11 +3747,10 @@ namespace gxos {
             }
             return false;
         }
-        void Compositor::drawDesktopIcons(HDC dc, RECT cr) {
+        void Compositor::drawDesktopIcons(HDC dc, RECT cr, HWND hwnd, const DisplayViewport& viewport) {
             const DesktopGridMetrics metrics = desktopGridMetrics();
-            const DisplayVirtualDesktop desktop = buildDisplayVirtualDesktop(Compositor::g_cfg);
-            const DisplayViewport viewport = hostedViewportForDesktop(desktop, static_cast<int>(cr.right - cr.left), static_cast<int>(cr.bottom - cr.top));
-            HFONT font = (HFONT)GetStockObject(ANSI_VAR_FONT); SelectObject(dc, font); SetBkMode(dc, TRANSPARENT); POINT cursor; GetCursorPos(&cursor); ScreenToClient(g_hwnd, &cursor); cursor.x = viewport.virtualXFromLocal(cursor.x); cursor.y = viewport.virtualYFromLocal(cursor.y); int idx = 0; for (auto& it : g_items) {
+            (void)cr;
+            HFONT font = (HFONT)GetStockObject(ANSI_VAR_FONT); SelectObject(dc, font); SetBkMode(dc, TRANSPARENT); POINT cursor; GetCursorPos(&cursor); ScreenToClient(hwnd, &cursor); cursor.x = viewport.virtualXFromLocal(cursor.x); cursor.y = viewport.virtualYFromLocal(cursor.y); int idx = 0; for (auto& it : g_items) {
                 int x = it.ix; int y = it.iy; const int cellW = metrics.cellW; const int iconW = metrics.iconW; const int iconH = metrics.iconH; const int cellH = desktopIconCellHeightForItem(it, metrics); const int labelMaxW = cellW - 8; std::vector<std::string> labelLines = wrapUiTextToWidth(it.label, labelMaxW, FontRole::Small, static_cast<size_t>(std::max(1, metrics.labelMaxLines))); RECT cell{ x, y, x + cellW, y + cellH }; bool hover = (cursor.x >= cell.left && cursor.x <= cell.right && cursor.y >= cell.top && cursor.y <= cell.bottom);
                 if (it.selected) {
                     HBRUSH sel = CreateSolidBrush(RGB(50, 90, 160)); FillRect(dc, &cell, sel); DeleteObject(sel); 
@@ -3717,8 +3843,16 @@ namespace gxos {
 
         LRESULT CALLBACK Compositor::WndProc(HWND h, UINT msg, WPARAM w, LPARAM l) {
             switch (msg) {
+            case WM_NCCREATE: {
+                const CREATESTRUCTA* cs = reinterpret_cast<const CREATESTRUCTA*>(l);
+                if (cs && cs->lpCreateParams) {
+                    const HostedWindowCreateInfo* info = static_cast<const HostedWindowCreateInfo*>(cs->lpCreateParams);
+                    SetWindowLongPtrA(h, GWLP_USERDATA, static_cast<LONG_PTR>(info->targetIndex));
+                }
+                return TRUE;
+            }
             case WM_CLOSE: PostQuitMessage(0); return 0;
-            case WM_SIZE: { const DisplayVirtualDesktop desktop = buildDisplayVirtualDesktop(g_cfg); const DisplayViewport viewport = hostedViewportForDesktop(desktop, hostedSurfaceWidth(), hostedSurfaceHeight()); std::lock_guard<std::mutex> lk(g_lock); for (auto& kv : g_windows) { WinInfo& wi = kv.second; if (wi.maximized) { const DisplayRect windowRect{ wi.x, wi.y, wi.x + wi.w, wi.y + wi.h }; const DisplayRect work = monitorWorkAreaForWindow(desktop, viewport, windowRect); wi.x = work.left; wi.y = work.top; wi.w = work.width(); wi.h = work.height(); wi.dirty = true; } } requestRepaint( ); return 0; }
+            case WM_SIZE: { const DisplayVirtualDesktop desktop = buildDisplayVirtualDesktop(g_cfg); const DisplayViewport viewport = hostedViewportForWindow(h, desktop, hostedSurfaceWidth(), hostedSurfaceHeight()); std::lock_guard<std::mutex> lk(g_lock); for (auto& kv : g_windows) { WinInfo& wi = kv.second; if (wi.maximized) { const DisplayRect windowRect{ wi.x, wi.y, wi.x + wi.w, wi.y + wi.h }; const DisplayRect work = monitorWorkAreaForWindow(desktop, viewport, windowRect); wi.x = work.left; wi.y = work.top; wi.w = work.width(); wi.h = work.height(); wi.dirty = true; } } requestRepaint( ); return 0; }
             case WM_ERASEBKGND: return 1;
             case WM_TIMER:
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)
@@ -3748,7 +3882,7 @@ namespace gxos {
                 const int clientW = cr.right - cr.left;
                 const int clientH = cr.bottom - cr.top;
                 const DisplayVirtualDesktop desktop = buildDisplayVirtualDesktop(g_cfg);
-                const DisplayRenderTarget renderTarget = hostedRenderTargetForDesktop(desktop, clientW, clientH);
+                const DisplayRenderTarget renderTarget = hostedRenderTargetForWindow(h, desktop, clientW, clientH);
                 const DisplayViewport viewport = renderTarget.viewportDescriptor();
                 HDC drawDc = visibleDc;
                 const bool hostedOffscreenReady = ensureHostedPaintSurface(visibleDc, clientW, clientH);
@@ -3779,7 +3913,7 @@ namespace gxos {
                 if (g_wallpaperImage && g_wallpaperImage->isValid()) { drawBackgroundImageToHdc(dc, cr, g_wallpaperImage, WallpaperRegistry::ParseScaleMode(g_backgroundScaleMode)); } else { DesktopWallpaper::DrawBranding(dc, cr); }
                 POINT oldViewportOrigin{ 0, 0 };
                 const bool viewportTranslated = SetViewportOrgEx(dc, -viewport.originX, -viewport.originY, &oldViewportOrigin) != 0;
-                drawDesktopIcons(dc, cr);
+                drawDesktopIcons(dc, cr, h, viewport);
 #if defined(GXOS_SYSTEM_FONT_DEMO)
                 drawSystemFontDemo(dc, cr);
 #endif
@@ -4259,7 +4393,7 @@ namespace gxos {
                 // Once the compositor migrates to painting into the
                 // VideoBackend pixel buffer, feedVncFromBackend() will
                 // be the sole path and this block can be removed.
-                if (vnc::VncServer::IsRunning( )) {
+                if (h == g_hwnd && vnc::VncServer::IsRunning( )) {
                     const uint64_t vncStartMs = nowMs( );
                     // Capture the completed hosted frame, not the visible DC, so VNC
                     // stays aligned with the atomic offscreen composition result.
@@ -4340,7 +4474,7 @@ namespace gxos {
             case WM_LBUTTONDOWN: {
                 int mx = GET_X_LPARAM(l); int my = GET_Y_LPARAM(l); RECT cr; GetClientRect(h, &cr);
                 const DisplayVirtualDesktop desktop = buildDisplayVirtualDesktop(g_cfg);
-                const DisplayRenderTarget renderTarget = hostedRenderTargetForDesktop(desktop, cr.right - cr.left, cr.bottom - cr.top);
+                const DisplayRenderTarget renderTarget = hostedRenderTargetForWindow(h, desktop, cr.right - cr.left, cr.bottom - cr.top);
                 const DisplayViewport viewport = renderTarget.viewportDescriptor();
                 const bool syntheticExtend = syntheticExtendModeActive(desktop);
                 mx = viewport.virtualXFromLocal(mx);
@@ -4467,13 +4601,13 @@ namespace gxos {
                 } } requestRepaint( ); return 0; }
                 // pass to widget handling and general mouse handling
                 uint64_t ownerPid = 0; uint64_t targetWindow = 0; { std::lock_guard<std::mutex> lk(g_lock); WinInfo* hitWin = hitWindowAt(mx, my); if (hitWin) { ownerPid = hitWin->ownerPid; targetWindow = hitWin->id; } else { ownerPid = inputOwnerPid( ); targetWindow = g_modalWindow ? g_modalWindow : g_focus; } }
-                Compositor::handleMouse(mx, my, true, false); publishOut(MsgType::MT_InputMouse, Compositor::packMousePayloadForTarget(mx, my, 1, "down", ownerPid, targetWindow), ownerPid); return 0;
+                Compositor::handleMouse(mx, my, true, false, &viewport); publishOut(MsgType::MT_InputMouse, Compositor::packMousePayloadForTarget(mx, my, 1, "down", ownerPid, targetWindow), ownerPid); return 0;
             }
             case WM_RBUTTONDOWN: {
                 int mx = GET_X_LPARAM(l); int my = GET_Y_LPARAM(l);
                 RECT cr; GetClientRect(h, &cr);
                 const DisplayVirtualDesktop desktop = buildDisplayVirtualDesktop(g_cfg);
-                const DisplayViewport viewport = hostedViewportForDesktop(desktop, cr.right - cr.left, cr.bottom - cr.top);
+                const DisplayViewport viewport = hostedViewportForWindow(h, desktop, cr.right - cr.left, cr.bottom - cr.top);
                 const bool syntheticExtend = syntheticExtendModeActive(desktop);
                 mx = viewport.virtualXFromLocal(mx);
                 my = viewport.virtualYFromLocal(my);
@@ -4571,7 +4705,7 @@ namespace gxos {
                 }
                 RECT cr; GetClientRect(h, &cr);
                 const DisplayVirtualDesktop desktop = buildDisplayVirtualDesktop(g_cfg);
-                const DisplayViewport viewport = hostedViewportForDesktop(desktop, cr.right - cr.left, cr.bottom - cr.top);
+                const DisplayViewport viewport = hostedViewportForWindow(h, desktop, cr.right - cr.left, cr.bottom - cr.top);
                 mx = viewport.virtualXFromLocal(mx);
                 my = viewport.virtualYFromLocal(my);
                 if (g_iconSelectionDragActive || g_iconSelectionDragPending) {
@@ -4594,7 +4728,7 @@ namespace gxos {
                     g_iconDragActive = false; g_iconDragPending = false; requestRepaint( ); break;
                 }
                 uint64_t ownerPid = 0; uint64_t targetWindow = 0; { std::lock_guard<std::mutex> lk(g_lock); ownerPid = inputOwnerPid( ); targetWindow = g_modalWindow ? g_modalWindow : g_focus; }
-                Compositor::handleMouse(mx, my, false, true); publishOut(MsgType::MT_InputMouse, Compositor::packMousePayloadForTarget(mx, my, 1, "up", ownerPid, targetWindow), ownerPid);
+                Compositor::handleMouse(mx, my, false, true, &viewport); publishOut(MsgType::MT_InputMouse, Compositor::packMousePayloadForTarget(mx, my, 1, "up", ownerPid, targetWindow), ownerPid);
             } break;
             case WM_MOUSEMOVE: {
                 int mx = GET_X_LPARAM(l); int my = GET_Y_LPARAM(l);
@@ -4604,7 +4738,7 @@ namespace gxos {
                 }
                 RECT cr; GetClientRect(h, &cr);
                 const DisplayVirtualDesktop desktop = buildDisplayVirtualDesktop(g_cfg);
-                const DisplayViewport viewport = hostedViewportForDesktop(desktop, cr.right - cr.left, cr.bottom - cr.top);
+                const DisplayViewport viewport = hostedViewportForWindow(h, desktop, cr.right - cr.left, cr.bottom - cr.top);
                 mx = viewport.virtualXFromLocal(mx);
                 my = viewport.virtualYFromLocal(my);
                 { std::lock_guard<std::mutex> lk(g_lock); if (blockInputBehindModal(mx, my)) { requestRepaint( ); return 0; } }
@@ -4633,7 +4767,7 @@ namespace gxos {
                 if (g_iconDragActive && g_iconDragIndex >= 0 && g_iconDragIndex < (int)g_items.size( )) { int nx = mx - g_iconDragOffX; int ny = my - g_iconDragOffY; clampDesktopIconPosition(nx, ny); g_items[g_iconDragIndex].ix = nx; g_items[g_iconDragIndex].iy = ny; requestRepaint( ); break; }
                 if (g_iconDragPending) { break; } // Skip handleMouse while drag is pending
                 uint64_t ownerPid = 0; uint64_t targetWindow = 0; { std::lock_guard<std::mutex> lk(g_lock); WinInfo* hitWin = hitWindowAt(mx, my); if (hitWin) { ownerPid = hitWin->ownerPid; targetWindow = hitWin->id; } else { ownerPid = inputOwnerPid( ); targetWindow = g_modalWindow ? g_modalWindow : g_focus; } }
-                Compositor::handleMouse(mx, my, false, false); publishOut(MsgType::MT_InputMouse, Compositor::packMousePayloadForTarget(mx, my, 0, "move", ownerPid, targetWindow), ownerPid);
+                Compositor::handleMouse(mx, my, false, false, &viewport); publishOut(MsgType::MT_InputMouse, Compositor::packMousePayloadForTarget(mx, my, 0, "move", ownerPid, targetWindow), ownerPid);
             } break;
             case WM_MOUSEWHEEL: {
                 int mx = GET_X_LPARAM(l);
@@ -4646,7 +4780,7 @@ namespace gxos {
                 if (wheelDelta == 0) return 0;
                 RECT cr; GetClientRect(h, &cr);
                 const DisplayVirtualDesktop desktop = buildDisplayVirtualDesktop(g_cfg);
-                const DisplayViewport viewport = hostedViewportForDesktop(desktop, cr.right - cr.left, cr.bottom - cr.top);
+                const DisplayViewport viewport = hostedViewportForWindow(h, desktop, cr.right - cr.left, cr.bottom - cr.top);
                 mx = viewport.virtualXFromLocal(mx);
                 my = viewport.virtualYFromLocal(my);
                 {
@@ -4675,7 +4809,7 @@ namespace gxos {
                 }
 
                 if (targetWindow != 0) {
-                    Compositor::handleMouse(mx, my, false, false);
+                    Compositor::handleMouse(mx, my, false, false, &viewport);
                     publishOut(MsgType::MT_InputMouse,
                         Compositor::packMousePayloadForTarget(mx, my, 0, std::string("wheel:") + std::to_string(wheelSteps), ownerPid, targetWindow),
                         ownerPid);
@@ -4880,13 +5014,15 @@ namespace gxos {
         }
         void Compositor::emitWidgetEvt(uint64_t winId, int wid, const std::string& evt, const std::string& value) { uint64_t ownerPid = 0; { std::lock_guard<std::mutex> lk(g_lock); auto it = g_windows.find(winId); if (it != g_windows.end( )) ownerPid = it->second.ownerPid; } publishOut(MsgType::MT_WidgetEvt, std::to_string(winId) + "|" + std::to_string(wid) + "|" + evt + "|" + value, ownerPid); }
 
-        void Compositor::handleMouse(int mx, int my, bool down, bool up) {
+        void Compositor::handleMouse(int mx, int my, bool down, bool up, const DisplayViewport* viewportOverride) {
             std::lock_guard<std::mutex> lk(g_lock);
             const DesktopTheme& theme = GetCurrentDesktopTheme();
             const int titleBarH = theme.titleBarHeight;
             const int gripSize = 12;
             const DisplayVirtualDesktop desktop = buildDisplayVirtualDesktop(g_cfg);
-            const DisplayViewport viewport = hostedViewportForDesktop(desktop, hostedSurfaceWidth(), hostedSurfaceHeight());
+            const DisplayViewport viewport = viewportOverride
+                ? *viewportOverride
+                : hostedViewportForDesktop(desktop, hostedSurfaceWidth(), hostedSurfaceHeight());
             desktop.clampPointToBounds(mx, my);
             const bool virtualExtendMode = desktop.mode == DisplayModeKind::Extend && desktop.activeMonitorCount() > 1;
             const DisplayRect desktopBoundsRect{ desktop.left, desktop.top, desktop.right, desktop.bottom };
@@ -5382,7 +5518,10 @@ namespace gxos {
             ipc::Bus::ensure(kGuiChanIn);
             ipc::Bus::ensure(kGuiChanOut);
             if (hostedSyntheticDualMonitorEnabled()) {
-                Logger::write(LogLevel::Info, std::string("Compositor synthetic dual-monitor mode enabled via GXOS_SYNTHETIC_DUAL_MONITOR=1; hosted viewport remains a single framebuffer/window"));
+                Logger::write(LogLevel::Info, std::string("Compositor synthetic dual-monitor mode enabled via GXOS_SYNTHETIC_DUAL_MONITOR=1; dualWindowOutput=") + (hostedSyntheticDualWindowOutputEnabled() ? "true" : "false"));
+                if (hostedSyntheticDualWindowOutputEnabled()) {
+                    Logger::write(LogLevel::Info, "Compositor dual-window output enabled via GXOS_SYNTHETIC_DUAL_WINDOW_OUTPUT=1");
+                }
             }
 #if defined(_WIN32) && !defined(GXOS_BARE_METAL)
             initWindow( );
@@ -5417,6 +5556,7 @@ namespace gxos {
             Logger::write(LogLevel::Info, std::string("Compositor display layout summary: ") + desktop.detailedSummary() +
                 " persistedResolution=" + g_cfg.displayResolution +
                 " arrangement=" + (g_cfg.displayArrangement.empty() ? "(empty)" : g_cfg.displayArrangement));
+            ensureHostedSecondaryWindow(desktop);
             logCompositorList("config pinned before merge", g_cfg.pinned);
             logCompositorList("config recent before merge", g_cfg.recent);
             for (const auto& pinned : DesktopService::GetPinned()) {
@@ -5533,6 +5673,7 @@ namespace gxos {
             const DisplayRenderTarget activeTarget = hostedRenderTargetForDesktop(desktop, hostedSurfaceWidth(), hostedSurfaceHeight());
             const DisplayViewport viewport = activeTarget.viewportDescriptor();
             const std::vector<DisplayRenderTarget> renderTargets = hostedRenderTargetsForDesktop(desktop, hostedSurfaceWidth(), hostedSurfaceHeight());
+            const bool dualWindowOutput = syntheticExtendModeActive(desktop) && hostedSyntheticDualWindowOutputEnabled();
             const bool syntheticExtend = syntheticExtendModeActive(desktop);
             const bool taskbarPrimaryOnly = true;
             const bool taskbarVisible = hostedPrimaryTaskbarVisibleInViewport(desktop, viewport);
@@ -5546,6 +5687,8 @@ namespace gxos {
             const DisplayRect primaryMonitorWorkArea = desktop.primaryMonitorWorkArea(taskbarRect, syntheticExtend, taskbarPrimaryOnly);
             std::ostringstream oss;
             oss << "syntheticDualMonitor=" << (hostedSyntheticDualMonitorEnabled() ? "true" : "false")
+                << " dualWindowOutput=" << (dualWindowOutput ? "true" : "false")
+                << " presentationMode=" << hostedPresentationModeName(desktop)
                 << " framebuffer=" << (g_videoBackend ? (std::to_string(g_videoBackend->getWidth()) + "x" + std::to_string(g_videoBackend->getHeight())) : std::string("unavailable"))
                 << " activeViewportIndex=" << viewport.index
                 << " activeViewportOrigin=" << viewport.originX << "," << viewport.originY
@@ -5573,6 +5716,7 @@ namespace gxos {
             const DisplayRenderTarget activeTarget = hostedRenderTargetForDesktop(desktop, hostedSurfaceWidth(), hostedSurfaceHeight());
             const DisplayViewport viewport = activeTarget.viewportDescriptor();
             const std::vector<DisplayRenderTarget> renderTargets = hostedRenderTargetsForDesktop(desktop, hostedSurfaceWidth(), hostedSurfaceHeight());
+            const bool dualWindowOutput = syntheticExtendModeActive(desktop) && hostedSyntheticDualWindowOutputEnabled();
             const bool syntheticExtend = syntheticExtendModeActive(desktop);
             const bool taskbarPrimaryOnly = true;
             const bool taskbarVisible = hostedPrimaryTaskbarVisibleInViewport(desktop, viewport);
@@ -5586,7 +5730,8 @@ namespace gxos {
             const DisplayRect primaryMonitorWorkArea = desktop.primaryMonitorWorkArea(taskbarRect, syntheticExtend, taskbarPrimaryOnly);
             std::ostringstream oss;
             oss << "syntheticDualMonitor=" << (hostedSyntheticDualMonitorEnabled() ? "true" : "false")
-                << " viewportSwitch=" << (hostedSyntheticDualMonitorEnabled() ? "available" : "unavailable")
+                << " dualWindowOutput=" << (dualWindowOutput ? "true" : "false")
+                << " viewportSwitch=" << (dualWindowOutput ? "unnecessary" : (hostedSyntheticDualMonitorEnabled() ? "available" : "unavailable"))
                 << " activeViewportIndex=" << viewport.index
                 << " activeViewportOrigin=" << viewport.originX << "," << viewport.originY
                 << " activeViewportSize=" << viewport.width << "x" << viewport.height
@@ -5610,6 +5755,12 @@ namespace gxos {
             if (!hostedSyntheticDualMonitorEnabled()) {
                 Logger::write(LogLevel::Info, "Hosted display viewport switch ignored: synthetic dual-monitor mode is disabled");
                 return false;
+            }
+
+            const DisplayVirtualDesktop desktop = buildDisplayVirtualDesktop(g_cfg);
+            if (syntheticExtendModeActive(desktop) && hostedSyntheticDualWindowOutputEnabled()) {
+                Logger::write(LogLevel::Info, "Hosted display viewport switch ignored: dual-window output is active and both synthetic monitors are already visible");
+                return true;
             }
 
             const int normalized = index <= 1 ? 1 : 2;

@@ -23,6 +23,14 @@ $checks = @(
         Match = Find-FirstMatch (Join-Path $Root 'display_model.h') 'GXOS_SYNTHETIC_DUAL_MONITOR';
     },
     [pscustomobject]@{
+        Name = 'display model dual-window gate';
+        Match = Find-FirstMatch (Join-Path $Root 'display_model.h') 'GXOS_SYNTHETIC_DUAL_WINDOW_OUTPUT';
+    },
+    [pscustomobject]@{
+        Name = 'display model dual-window helper';
+        Match = Find-FirstMatch (Join-Path $Root 'display_model.h') 'hostedSyntheticDualWindowOutputEnabled';
+    },
+    [pscustomobject]@{
         Name = 'display model dual desktop helper';
         Match = Find-FirstMatch (Join-Path $Root 'display_model.h') 'makeSyntheticDualMonitorDesktop';
     },
@@ -75,6 +83,10 @@ $checks = @(
         Match = Find-FirstMatch (Join-Path $Root 'display_model.h') 'buildDisplayRenderTargets(';
     },
     [pscustomobject]@{
+        Name = 'display model render target lookup';
+        Match = Find-FirstMatch (Join-Path $Root 'display_model.h') 'displayRenderTargetForIndex(';
+    },
+    [pscustomobject]@{
         Name = 'display model hosted fallback render target';
         Match = Find-FirstMatch (Join-Path $Root 'display_model.h') 'makeHostedFallbackRenderTarget(';
     },
@@ -83,8 +95,8 @@ $checks = @(
         Match = Find-FirstMatch (Join-Path $Root 'display_model.h') 'targets.push_back(makeHostedFallbackRenderTarget(fallbackWidth, fallbackHeight, nullptr, false))';
     },
     [pscustomobject]@{
-        Name = 'display model synthetic target backing gate';
-        Match = Find-FirstMatch (Join-Path $Root 'display_model.h') 'makeDisplayRenderTarget(targetIndex++, *monitor, isActive, isActive, true)';
+        Name = 'display model dual-window backing gate';
+        Match = Find-FirstMatch (Join-Path $Root 'display_model.h') 'backedByHostedFramebuffer = dualWindowOutput ? true : isActive';
     },
     [pscustomobject]@{
         Name = 'display model active render target helper';
@@ -124,7 +136,11 @@ $checks = @(
     },
     [pscustomobject]@{
         Name = 'compositor synthetic layout log';
-        Match = Find-FirstMatch (Join-Path $Root 'compositor.cpp') 'synthetic dual-monitor mode enabled via GXOS_SYNTHETIC_DUAL_MONITOR=1';
+        Match = Find-FirstMatch (Join-Path $Root 'compositor.cpp') 'dualWindowOutput=';
+    },
+    [pscustomobject]@{
+        Name = 'compositor dual-window log';
+        Match = Find-FirstMatch (Join-Path $Root 'compositor.cpp') 'dual-window output enabled via GXOS_SYNTHETIC_DUAL_WINDOW_OUTPUT=1';
     },
     [pscustomobject]@{
         Name = 'compositor hosted render target helper';
@@ -133,6 +149,14 @@ $checks = @(
     [pscustomobject]@{
         Name = 'compositor hosted render targets helper';
         Match = Find-FirstMatch (Join-Path $Root 'compositor.cpp') 'hostedRenderTargetsForDesktop';
+    },
+    [pscustomobject]@{
+        Name = 'compositor hosted render target for window helper';
+        Match = Find-FirstMatch (Join-Path $Root 'compositor.cpp') 'hostedRenderTargetForWindow';
+    },
+    [pscustomobject]@{
+        Name = 'compositor hosted viewport for window helper';
+        Match = Find-FirstMatch (Join-Path $Root 'compositor.cpp') 'hostedViewportForWindow';
     },
     [pscustomobject]@{
         Name = 'compositor bare-metal render target helper';
@@ -171,12 +195,20 @@ $checks = @(
         Match = Find-FirstMatch (Join-Path $Root 'compositor.cpp') 'displayRenderTargetsSummary(renderTargets)';
     },
     [pscustomobject]@{
+        Name = 'compositor display summary dual-window output';
+        Match = Find-FirstMatch (Join-Path $Root 'compositor.cpp') 'presentationMode=';
+    },
+    [pscustomobject]@{
         Name = 'compositor viewport diagnostic active target';
         Match = Find-FirstMatch (Join-Path $Root 'display_model.h') 'activeHostedTarget=';
     },
     [pscustomobject]@{
         Name = 'compositor viewport diagnostic render target count';
         Match = Find-FirstMatch (Join-Path $Root 'display_model.h') 'renderTargetCount=';
+    },
+    [pscustomobject]@{
+        Name = 'compositor viewport diagnostic backed target count';
+        Match = Find-FirstMatch (Join-Path $Root 'display_model.h') 'backedTargetCount=';
     },
     [pscustomobject]@{
         Name = 'compositor viewport diagnostic active viewport origin';
@@ -207,12 +239,28 @@ $checks = @(
         Match = Find-FirstMatch (Join-Path $Root 'compositor.cpp') 'g_hostedViewportIndex';
     },
     [pscustomobject]@{
+        Name = 'compositor viewport switch safe dual-window';
+        Match = Find-FirstMatch (Join-Path $Root 'compositor.cpp') 'dual-window output is active and both synthetic monitors are already visible';
+    },
+    [pscustomobject]@{
         Name = 'compositor render target viewport translation';
         Match = Find-FirstMatch (Join-Path $Root 'compositor.cpp') 'renderTarget.viewportDescriptor()';
     },
     [pscustomobject]@{
         Name = 'compositor display summary command';
         Match = Find-FirstMatch (Join-Path $Root 'server.cpp') 'desktop.display.summary';
+    },
+    [pscustomobject]@{
+        Name = 'compositor summary mode label';
+        Match = Find-FirstMatch (Join-Path $Root 'compositor.cpp') 'normal-single-output';
+    },
+    [pscustomobject]@{
+        Name = 'compositor summary synthetic camera label';
+        Match = Find-FirstMatch (Join-Path $Root 'compositor.cpp') 'synthetic-camera';
+    },
+    [pscustomobject]@{
+        Name = 'compositor summary synthetic two-window label';
+        Match = Find-FirstMatch (Join-Path $Root 'compositor.cpp') 'synthetic-two-window-output';
     },
     [pscustomobject]@{
         Name = 'compositor state load restore geometry helper';
