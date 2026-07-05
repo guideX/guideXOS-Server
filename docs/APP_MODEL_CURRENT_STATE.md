@@ -447,7 +447,7 @@ At minimum:
 5. A shared built-in app registry table
    - hosted synthetic manifests and bare-metal kernel registration should derive from the same metadata where possible
 6. Association resolution
-   - file associations should become a queryable service instead of hardcoded extension branches
+   - file associations now have a narrow v1 service for folders and safe text-like files; broader Open With / editable associations remain out of scope
 7. Clear unsupported-path diagnostics
    - especially where hosted or bare-metal cannot yet execute a given runtime
 
@@ -595,5 +595,53 @@ The current evidence markers include:
 - `appModelPhase4ARiskyEntriesNotActiveDispatchOwned=true`
 - `appModelPhase4AVisibleLaunchBehaviorChanged=false`
 - `appModelPhase4APersistentDesktopStorageWrites=false`
+
+## 15. Phase 4B file association v1 cleanup
+
+Status: complete, still narrow, no visible launch behavior change.
+
+Phase 4B adds a small explicit file association table in `desktop_service.cpp`. The table is intentionally limited to safe routing only:
+
+- folders -> `File Explorer`
+- text-like files -> `Notepad`
+  - `.txt`
+  - `.log`
+  - `.ini`
+  - `.cfg`
+- images -> remain on the legacy direct path for now
+  - `.png`
+  - `.bmp`
+  - `.jpg`
+  - `.gif`
+  - `.jpeg`
+- unknown extensions -> unsupported / fallback
+- executable, package-style, and ELF-style targets -> unsupported / fallback
+
+The table is diagnostic and routing-only. It does not add:
+
+- Open With UI
+- editable user associations
+- GXApp execution
+- ELF loading
+- package install/update/uninstall behavior
+- destructive shell actions
+
+The new file-association diagnostics and markers live in `desktop_service.cpp` and are surfaced through `desktop.appmodel.summary` and `desktop.appmodel.file-associations`.
+
+Current Phase 4B evidence markers:
+
+- `appModelPhase4BFileAssociationTableExists=true`
+- `appModelPhase4BFolderAssociationRegistered=true`
+- `appModelPhase4BTextAssociationsRegistered=true`
+- `appModelPhase4BHandlersResolveToRegistry=true`
+- `appModelPhase4BTextFilesOpenWithNotepad=true`
+- `appModelPhase4BFoldersOpenWithFileExplorer=true`
+- `appModelPhase4BImagesRemainLegacy=true`
+- `appModelPhase4BUnknownExtensionsFallback=true`
+- `appModelPhase4BRiskyExtensionsNotActiveDispatchOwned=true`
+- `appModelPhase4BVisibleLaunchBehaviorChanged=false`
+- `appModelPhase4BPersistentDesktopStorageWrites=false`
+
+`desktop.appmodel.active-typed-dispatch-gate` still reports product-default active dispatch as enabled, and `force-off` / `reset` continue to work. `desktop.appmodel.file-associations` is the detailed read-only table dump for smoke and troubleshooting.
 
 

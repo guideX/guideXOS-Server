@@ -154,6 +154,7 @@ namespace gxos { namespace gui {
         static std::string LaunchStorageDiagnostic();
         static std::string LaunchStoragePreviewDiagnostic();
         static std::string LaunchStoragePreviewComparisonDiagnostic();
+        static std::string FileAssociationV1Diagnostic();
         static std::string LaunchTargetTypeCoverageDiagnostic();
         static std::string TypedDispatchGateDiagnostic(const std::string& mode = "");
         static std::string NativeAppCapabilitiesDiagnostic();

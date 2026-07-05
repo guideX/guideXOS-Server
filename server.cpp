@@ -1518,6 +1518,9 @@ using namespace gxos;
         else if (cmd=="desktop.appmodel.summary"){
             std::cout << gui::DesktopService::AppModelSummaryDiagnostic();
         }
+        else if (cmd=="desktop.appmodel.file-associations"){
+            std::cout << gui::DesktopService::FileAssociationV1Diagnostic();
+        }
         else if (cmd=="desktop.appmodel.coverage"){
             std::cout << gui::DesktopService::BuiltInAppMetadataCoverageDiagnostic();
         }

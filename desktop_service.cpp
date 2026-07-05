@@ -205,12 +205,130 @@ namespace gxos {
         static LaunchDispatchUsageCounters s_launchDispatchUsageCounters;
 
         namespace {
+            static std::string lowerCopy(std::string value);
+            static std::string filesystemEntryExtension(const std::string& path);
+
+            enum class FileAssociationV1Kind {
+                Folder = 0,
+                Extension,
+                UnknownFallback,
+                RiskyFallback,
+            };
+
             enum class FilesystemEntryLaunchTarget {
                 FileExplorer = 0,
                 Notepad,
                 ImageViewer,
                 Unsupported
             };
+
+            struct FileAssociationV1Record {
+                const char* associationKey;
+                FileAssociationV1Kind kind;
+                const char* handlerAppId;
+                const char* handlerDisplayName;
+                const char* handlerLaunchName;
+                bool activeTypedDispatchMayOwn;
+                bool fallbackRequired;
+                bool textLike;
+                bool folder;
+                bool system;
+                bool risky;
+                bool legacyDirectPath;
+                const char* note;
+            };
+
+            struct FileAssociationV1CoverageSummary {
+                size_t total = 0;
+                size_t folderAssociations = 0;
+                size_t textAssociations = 0;
+                size_t imageLegacyAssociations = 0;
+                size_t unknownFallbackAssociations = 0;
+                size_t riskyFallbackAssociations = 0;
+                size_t activeTypedDispatchOwned = 0;
+                size_t fallbackRequired = 0;
+                size_t registryResolved = 0;
+                size_t registryMismatch = 0;
+                bool tableExists = false;
+                bool folderAssociationRegistered = false;
+                bool textAssociationsRegistered = false;
+                bool handlersResolveToRegistry = false;
+                bool textFilesOpenWithNotepad = false;
+                bool foldersOpenWithFileExplorer = false;
+                bool imagesRemainLegacy = false;
+                bool unknownExtensionsFallback = false;
+                bool riskyExtensionsNotActiveDispatchOwned = false;
+                bool visibleLaunchBehaviorChanged = false;
+                bool persistentDesktopStorageWrites = false;
+            };
+
+            static const FileAssociationV1Record kFileAssociationV1Table[] = {
+                { "<folder>", FileAssociationV1Kind::Folder, "gxos.builtin.fileexplorer", "File Explorer", "FileExplorer", true, true, false, true, true, false, false, "Folders open through File Explorer" },
+                { ".txt", FileAssociationV1Kind::Extension, "gxos.builtin.notepad", "Notepad", "Notepad", true, true, true, false, false, false, false, "Plain text file" },
+                { ".log", FileAssociationV1Kind::Extension, "gxos.builtin.notepad", "Notepad", "Notepad", true, true, true, false, false, false, false, "Log file" },
+                { ".ini", FileAssociationV1Kind::Extension, "gxos.builtin.notepad", "Notepad", "Notepad", true, true, true, false, false, false, false, "INI configuration file" },
+                { ".cfg", FileAssociationV1Kind::Extension, "gxos.builtin.notepad", "Notepad", "Notepad", true, true, true, false, false, false, false, "CFG configuration file" },
+                { ".png", FileAssociationV1Kind::Extension, "gxos.builtin.imageviewer", "Image Viewer", "ImageViewer", false, true, false, false, false, false, true, "Image extensions remain on the legacy direct path for now" },
+                { ".bmp", FileAssociationV1Kind::Extension, "gxos.builtin.imageviewer", "Image Viewer", "ImageViewer", false, true, false, false, false, false, true, "Image extensions remain on the legacy direct path for now" },
+                { ".jpg", FileAssociationV1Kind::Extension, "gxos.builtin.imageviewer", "Image Viewer", "ImageViewer", false, true, false, false, false, false, true, "Image extensions remain on the legacy direct path for now" },
+                { ".gif", FileAssociationV1Kind::Extension, "gxos.builtin.imageviewer", "Image Viewer", "ImageViewer", false, true, false, false, false, false, true, "Image extensions remain on the legacy direct path for now" },
+                { ".jpeg", FileAssociationV1Kind::Extension, "gxos.builtin.imageviewer", "Image Viewer", "ImageViewer", false, true, false, false, false, false, true, "Image extensions remain on the legacy direct path for now" },
+                { "<unknown>", FileAssociationV1Kind::UnknownFallback, nullptr, "Unsupported", nullptr, false, true, false, false, false, false, false, "Unknown extensions remain fallback-only" },
+                { ".exe", FileAssociationV1Kind::RiskyFallback, nullptr, "Unsupported", nullptr, false, true, false, false, false, true, false, "Executable-style extensions remain unsupported" },
+                { ".gxapp", FileAssociationV1Kind::RiskyFallback, nullptr, "Unsupported", nullptr, false, true, false, false, false, true, false, "Package-style extensions remain unsupported" },
+                { ".elf", FileAssociationV1Kind::RiskyFallback, nullptr, "Unsupported", nullptr, false, true, false, false, false, true, false, "ELF-style extensions remain unsupported" }
+            };
+
+            static const FileAssociationV1Record* findFileAssociationV1RecordByKey(const std::string& key) {
+                const std::string normalizedKey = lowerCopy(key);
+                for (const auto& record : kFileAssociationV1Table) {
+                    if (normalizedKey == record.associationKey) return &record;
+                }
+                return nullptr;
+            }
+
+            static const FileAssociationV1Record* lookupFileAssociationV1Record(const std::string& path, bool isDirectory) {
+                if (isDirectory) {
+                    return findFileAssociationV1RecordByKey("<folder>");
+                }
+
+                const std::string ext = filesystemEntryExtension(path);
+                if (!ext.empty()) {
+                    if (const FileAssociationV1Record* record = findFileAssociationV1RecordByKey(ext)) {
+                        return record;
+                    }
+                }
+
+                return findFileAssociationV1RecordByKey("<unknown>");
+            }
+
+            static const char* fileAssociationV1KindName(FileAssociationV1Kind kind) {
+                switch (kind) {
+                case FileAssociationV1Kind::Folder: return "folder";
+                case FileAssociationV1Kind::Extension: return "extension";
+                case FileAssociationV1Kind::UnknownFallback: return "unknown-fallback";
+                case FileAssociationV1Kind::RiskyFallback: return "risky-fallback";
+                default: return "unknown-fallback";
+                }
+            }
+
+            static const char* fileAssociationV1TargetName(const FileAssociationV1Record* record) {
+                if (!record) return "Unsupported";
+                if (record->folder) return "FileExplorer";
+                if (record->textLike) return "Notepad";
+                if (record->legacyDirectPath) return "ImageViewer";
+                return "Unsupported";
+            }
+
+            static FilesystemEntryLaunchTarget resolveFilesystemEntryLaunchTarget(const std::string& path, bool isDirectory) {
+                const FileAssociationV1Record* record = lookupFileAssociationV1Record(path, isDirectory);
+                if (!record) return FilesystemEntryLaunchTarget::Unsupported;
+
+                if (record->folder) return FilesystemEntryLaunchTarget::FileExplorer;
+                if (record->textLike) return FilesystemEntryLaunchTarget::Notepad;
+                if (record->legacyDirectPath) return FilesystemEntryLaunchTarget::ImageViewer;
+                return FilesystemEntryLaunchTarget::Unsupported;
+            }
 
             static std::string lowerCopy(std::string value) {
                 std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
@@ -221,19 +339,6 @@ namespace gxos {
                 size_t dot = path.find_last_of('.');
                 if (dot == std::string::npos || dot + 1 >= path.size()) return std::string();
                 return lowerCopy(path.substr(dot));
-            }
-
-            static FilesystemEntryLaunchTarget resolveFilesystemEntryLaunchTarget(const std::string& path, bool isDirectory) {
-                if (isDirectory) return FilesystemEntryLaunchTarget::FileExplorer;
-
-                const std::string ext = filesystemEntryExtension(path);
-                if (ext == ".txt" || ext == ".log" || ext == ".cfg" || ext == ".ini") {
-                    return FilesystemEntryLaunchTarget::Notepad;
-                }
-                if (ext == ".png" || ext == ".bmp" || ext == ".jpg" || ext == ".gif" || ext == ".jpeg") {
-                    return FilesystemEntryLaunchTarget::ImageViewer;
-                }
-                return FilesystemEntryLaunchTarget::Unsupported;
             }
 
             static const char* filesystemEntryLaunchTargetName(FilesystemEntryLaunchTarget target) {
@@ -260,22 +365,57 @@ namespace gxos {
 
             static const char* filesystemEntryLaunchReason(FilesystemEntryLaunchTarget target) {
                 switch (target) {
-                case FilesystemEntryLaunchTarget::FileExplorer: return "Directory target routes to FileExplorer";
-                case FilesystemEntryLaunchTarget::Notepad: return "Text extension matched case-insensitively and routes to Notepad::LaunchWithFile";
-                case FilesystemEntryLaunchTarget::ImageViewer: return "Image extension matched case-insensitively and routes to ImageViewer::Launch";
+                case FilesystemEntryLaunchTarget::FileExplorer: return "Folder association routes to File Explorer";
+                case FilesystemEntryLaunchTarget::Notepad: return "Text-like extension matched case-insensitively and routes to Notepad::LaunchWithFile";
+                case FilesystemEntryLaunchTarget::ImageViewer: return "Image extension remains on the legacy direct path to ImageViewer";
                 case FilesystemEntryLaunchTarget::Unsupported:
                 default: return "No file association registered";
                 }
             }
 
             static std::string filesystemEntryDiagnostic(const std::string& path, bool isDirectory) {
+                const FileAssociationV1Record* association = lookupFileAssociationV1Record(path, isDirectory);
                 const FilesystemEntryLaunchTarget target = resolveFilesystemEntryLaunchTarget(path, isDirectory);
                 const std::string normalized = isDirectory ? path : lowerCopy(path);
+                const apps::BuiltInAppMetadata* registryMetadata = nullptr;
+                bool registryResolved = false;
+                bool registryMismatch = false;
+                if (association && association->handlerAppId && association->handlerAppId[0]) {
+                    registryMetadata = apps::FindBuiltInAppMetadataByAppId(association->handlerAppId);
+                    registryResolved = registryMetadata != nullptr;
+                    if (registryMetadata) {
+                        const std::string metadataDisplayName = registryMetadata->displayName ? registryMetadata->displayName : "";
+                        const std::string metadataLaunchName = registryMetadata->launchName ? registryMetadata->launchName : "";
+                        if ((association->handlerDisplayName && metadataDisplayName != association->handlerDisplayName) ||
+                            (association->handlerLaunchName && metadataLaunchName != association->handlerLaunchName)) {
+                            registryMismatch = true;
+                        }
+                    }
+                }
                 std::ostringstream oss;
                 oss << "[FilesystemEntryLaunchTarget]\n";
                 oss << "path: " << path << "\n";
                 oss << "normalizedPath: " << normalized << "\n";
                 oss << "isDirectory: " << (isDirectory ? "true" : "false") << "\n";
+                oss << "associationKey: " << (association ? association->associationKey : "") << "\n";
+                oss << "associationKind: " << fileAssociationV1KindName(association ? association->kind : FileAssociationV1Kind::UnknownFallback) << "\n";
+                oss << "associationTargetName: " << fileAssociationV1TargetName(association) << "\n";
+                oss << "handlerAppId: " << (association && association->handlerAppId ? association->handlerAppId : "") << "\n";
+                oss << "handlerDisplayName: " << (association && association->handlerDisplayName ? association->handlerDisplayName : "") << "\n";
+                oss << "handlerLaunchName: " << (association && association->handlerLaunchName ? association->handlerLaunchName : "") << "\n";
+                oss << "activeTypedDispatchMayOwn: " << (association && association->activeTypedDispatchMayOwn ? "true" : "false") << "\n";
+                oss << "fallbackRequired: " << (association ? (association->fallbackRequired ? "true" : "false") : "true") << "\n";
+                oss << "textLike: " << (association && association->textLike ? "true" : "false") << "\n";
+                oss << "folder: " << (association && association->folder ? "true" : "false") << "\n";
+                oss << "system: " << (association && association->system ? "true" : "false") << "\n";
+                oss << "risky: " << (association && association->risky ? "true" : "false") << "\n";
+                oss << "legacyDirectPath: " << (association && association->legacyDirectPath ? "true" : "false") << "\n";
+                oss << "handlerRegistryResolved: " << (registryResolved ? "true" : "false") << "\n";
+                if (registryMetadata) {
+                    oss << "handlerRegistryDisplayName: " << (registryMetadata->displayName ? registryMetadata->displayName : "") << "\n";
+                    oss << "handlerRegistryLaunchName: " << (registryMetadata->launchName ? registryMetadata->launchName : "") << "\n";
+                }
+                oss << "handlerRegistryMismatch: " << (registryMismatch ? "true" : "false") << "\n";
                 oss << "launchTarget: " << filesystemEntryLaunchTargetName(target) << "\n";
                 oss << "status: " << filesystemEntryLaunchStatus(target) << "\n";
                 oss << "reason: " << filesystemEntryLaunchReason(target) << "\n";
@@ -1111,6 +1251,100 @@ namespace gxos {
                 << " appModelActiveDispatchRuntimeLaunchBehaviorChanged=true"
                 << " appModelActiveDispatchVisibleLaunchBehaviorChanged=false"
                 << " appModelActiveDispatchPersistentDesktopStorageWrites=false\n";
+            return oss.str();
+        }
+
+        static bool fileAssociationV1HandlerMatchesRegistry(const FileAssociationV1Record& record) {
+            if (!record.handlerAppId || !record.handlerAppId[0]) return false;
+
+            const apps::BuiltInAppMetadata* metadata = apps::FindBuiltInAppMetadataByAppId(record.handlerAppId);
+            if (!metadata) return false;
+
+            const std::string metadataDisplayName = metadata->displayName ? metadata->displayName : "";
+            const std::string metadataLaunchName = metadata->launchName ? metadata->launchName : "";
+            const std::string expectedDisplayName = record.handlerDisplayName ? record.handlerDisplayName : "";
+            const std::string expectedLaunchName = record.handlerLaunchName ? record.handlerLaunchName : "";
+
+            if (!expectedDisplayName.empty() && metadataDisplayName != expectedDisplayName) return false;
+            if (!expectedLaunchName.empty() && metadataLaunchName != expectedLaunchName) return false;
+            return true;
+        }
+
+        static FileAssociationV1CoverageSummary collectFileAssociationV1CoverageSummary() {
+            FileAssociationV1CoverageSummary summary;
+            summary.tableExists = sizeof(kFileAssociationV1Table) / sizeof(kFileAssociationV1Table[0]) > 0;
+            summary.visibleLaunchBehaviorChanged = false;
+            summary.persistentDesktopStorageWrites = false;
+
+            for (const auto& record : kFileAssociationV1Table) {
+                ++summary.total;
+                if (record.fallbackRequired) ++summary.fallbackRequired;
+                if (record.activeTypedDispatchMayOwn) ++summary.activeTypedDispatchOwned;
+
+                if (record.folder) {
+                    ++summary.folderAssociations;
+                } else if (record.textLike) {
+                    ++summary.textAssociations;
+                } else if (record.legacyDirectPath) {
+                    ++summary.imageLegacyAssociations;
+                } else if (record.kind == FileAssociationV1Kind::UnknownFallback) {
+                    ++summary.unknownFallbackAssociations;
+                } else if (record.kind == FileAssociationV1Kind::RiskyFallback) {
+                    ++summary.riskyFallbackAssociations;
+                }
+
+                if (record.handlerAppId && record.handlerAppId[0]) {
+                    const bool registryMatch = fileAssociationV1HandlerMatchesRegistry(record);
+                    if (registryMatch) ++summary.registryResolved;
+                    else ++summary.registryMismatch;
+                }
+            }
+
+            const size_t supportedRegistryAssociations = summary.folderAssociations + summary.textAssociations + summary.imageLegacyAssociations;
+            summary.handlersResolveToRegistry = summary.registryMismatch == 0;
+            summary.textFilesOpenWithNotepad = summary.textAssociations == 4 && summary.registryMismatch == 0 && summary.registryResolved == supportedRegistryAssociations;
+            summary.foldersOpenWithFileExplorer = summary.folderAssociations == 1 && summary.registryMismatch == 0 && summary.registryResolved == supportedRegistryAssociations;
+            summary.imagesRemainLegacy = summary.imageLegacyAssociations == 5;
+            summary.unknownExtensionsFallback = summary.unknownFallbackAssociations == 1;
+            summary.riskyExtensionsNotActiveDispatchOwned = summary.riskyFallbackAssociations == 3;
+            summary.folderAssociationRegistered = summary.folderAssociations == 1 && summary.handlersResolveToRegistry;
+            summary.textAssociationsRegistered = summary.textAssociations == 4 && summary.handlersResolveToRegistry;
+            return summary;
+        }
+
+        static std::string fileAssociationV1CompactSummaryLine(const FileAssociationV1CoverageSummary& summary) {
+            std::ostringstream oss;
+            oss << "fileAssociationV1: " << statusText(summary.tableExists && summary.registryMismatch == 0 && summary.textAssociations == 4 && summary.folderAssociations == 1 && summary.imageLegacyAssociations == 5 && summary.unknownFallbackAssociations == 1 && summary.riskyFallbackAssociations == 3)
+                << " entries=" << summary.total
+                << " folders=" << summary.folderAssociations
+                << " text=" << summary.textAssociations
+                << " imagesLegacy=" << summary.imageLegacyAssociations
+                << " unknownFallback=" << summary.unknownFallbackAssociations
+                << " riskyFallback=" << summary.riskyFallbackAssociations
+                << " activeOwned=" << summary.activeTypedDispatchOwned
+                << " registryMismatches=" << summary.registryMismatch
+                << " handlersResolveToRegistry=" << diagnosticBool(summary.handlersResolveToRegistry)
+                << "\n";
+            return oss.str();
+        }
+
+        static std::string fileAssociationV1KeyMappingsLine() {
+            return "fileAssociationV1KeyMappings: folder->File Explorer; .txt/.log/.ini/.cfg->Notepad; .png/.bmp/.jpg/.gif/.jpeg->Image Viewer (legacy direct path); unknown/risky->Unsupported\n";
+        }
+
+        static std::string fileAssociationV1MarkersLine(const FileAssociationV1CoverageSummary& summary) {
+            std::ostringstream oss;
+            oss << "appModelPhase4BFileAssociationTableExists=" << diagnosticBool(summary.tableExists) << "\n";
+            oss << "appModelPhase4BFolderAssociationRegistered=" << diagnosticBool(summary.folderAssociationRegistered) << "\n";
+            oss << "appModelPhase4BTextAssociationsRegistered=" << diagnosticBool(summary.textAssociationsRegistered) << "\n";
+            oss << "appModelPhase4BHandlersResolveToRegistry=" << diagnosticBool(summary.handlersResolveToRegistry) << "\n";
+            oss << "appModelPhase4BTextFilesOpenWithNotepad=" << diagnosticBool(summary.textFilesOpenWithNotepad) << "\n";
+            oss << "appModelPhase4BFoldersOpenWithFileExplorer=" << diagnosticBool(summary.foldersOpenWithFileExplorer) << "\n";
+            oss << "appModelPhase4BImagesRemainLegacy=" << diagnosticBool(summary.imagesRemainLegacy) << "\n";
+            oss << "appModelPhase4BUnknownExtensionsFallback=" << diagnosticBool(summary.unknownExtensionsFallback) << "\n";
+            oss << "appModelPhase4BRiskyExtensionsNotActiveDispatchOwned=" << diagnosticBool(summary.riskyExtensionsNotActiveDispatchOwned) << "\n";
+            oss << "appModelPhase4BVisibleLaunchBehaviorChanged=" << diagnosticBool(summary.visibleLaunchBehaviorChanged) << "\n";
+            oss << "appModelPhase4BPersistentDesktopStorageWrites=" << diagnosticBool(summary.persistentDesktopStorageWrites) << "\n";
             return oss.str();
         }
 
@@ -2265,10 +2499,23 @@ namespace gxos {
             const bool phase4RecentProgramNamesAligned = allLabelsResolveToRegistryIdentity(phase4RecentLabels);
             const bool phase4VisibleLaunchBehaviorChanged = false;
             const bool phase4PersistentDesktopStorageWrites = false;
+            const FileAssociationV1CoverageSummary phase4BFileAssociationSummary = collectFileAssociationV1CoverageSummary();
+            const bool phase4BFileAssociationCoverageOk =
+                phase4BFileAssociationSummary.tableExists &&
+                phase4BFileAssociationSummary.folderAssociationRegistered &&
+                phase4BFileAssociationSummary.textAssociationsRegistered &&
+                phase4BFileAssociationSummary.handlersResolveToRegistry &&
+                phase4BFileAssociationSummary.textFilesOpenWithNotepad &&
+                phase4BFileAssociationSummary.foldersOpenWithFileExplorer &&
+                phase4BFileAssociationSummary.imagesRemainLegacy &&
+                phase4BFileAssociationSummary.unknownExtensionsFallback &&
+                phase4BFileAssociationSummary.riskyExtensionsNotActiveDispatchOwned &&
+                !phase4BFileAssociationSummary.visibleLaunchBehaviorChanged &&
+                !phase4BFileAssociationSummary.persistentDesktopStorageWrites;
             const TypedDispatchCompileFlags typedDispatchFlags = typedDispatchCompileFlags();
             const bool typedDispatchFlagsOk = !typedDispatchFlags.invalid;
             const bool overallOk = duplicateOk && namespaceOk && hostedCoverageOk && bareMetalCoverageOk && invalidManifestOk && launchTargetComparisonOk && launchStoragePreviewOk && launchStoragePreviewCompareOk && typedDispatchFlagsOk &&
-                phase4RegistryExists && phase4StableAppIdsUnique && phase4DisplayNamesNonEmpty && phase4AliasResolutionOk && phase4StartMenuAppsRegistered && phase4ActiveDispatchAppsRegistered && phase4RecentProgramNamesAligned && phase4RiskyEntriesNotActiveDispatchOwned &&
+                phase4RegistryExists && phase4StableAppIdsUnique && phase4DisplayNamesNonEmpty && phase4AliasResolutionOk && phase4StartMenuAppsRegistered && phase4ActiveDispatchAppsRegistered && phase4RecentProgramNamesAligned && phase4RiskyEntriesNotActiveDispatchOwned && phase4BFileAssociationCoverageOk &&
                 !phase4VisibleLaunchBehaviorChanged && !phase4PersistentDesktopStorageWrites;
 
             std::ostringstream oss;
@@ -2337,12 +2584,64 @@ namespace gxos {
             oss << "appModelPhase4ARiskyEntriesNotActiveDispatchOwned=" << diagnosticBool(phase4RiskyEntriesNotActiveDispatchOwned) << "\n";
             oss << "appModelPhase4AVisibleLaunchBehaviorChanged=" << diagnosticBool(phase4VisibleLaunchBehaviorChanged) << "\n";
             oss << "appModelPhase4APersistentDesktopStorageWrites=" << diagnosticBool(phase4PersistentDesktopStorageWrites) << "\n";
+            oss << fileAssociationV1CompactSummaryLine(phase4BFileAssociationSummary);
+            oss << fileAssociationV1KeyMappingsLine();
+            oss << fileAssociationV1MarkersLine(phase4BFileAssociationSummary);
             oss << launchTargetTypeCoverageSummaryLine();
             oss << typedDispatchCompileFlagsSummaryLine();
             oss << phase3PilotSummaryLine();
             oss << appModelActiveTypedDispatchSummaryLine();
             oss << "overall: " << statusText(overallOk) << "\n";
-            oss << "detailCommands: desktop.appmodel.coverage, desktop.apps.verbose, desktop.launch.compare, desktop.launch.storage, desktop.launch.storage.preview, desktop.launch.storage.preview.compare, desktop.launch.types\n";
+            oss << "detailCommands: desktop.appmodel.coverage, desktop.appmodel.file-associations, desktop.apps.verbose, desktop.launch.compare, desktop.launch.storage, desktop.launch.storage.preview, desktop.launch.storage.preview.compare, desktop.launch.types\n";
+            return oss.str();
+        }
+
+        std::string DesktopService::FileAssociationV1Diagnostic() {
+            ensureDefaultAppsRegistered();
+
+            const FileAssociationV1CoverageSummary summary = collectFileAssociationV1CoverageSummary();
+            std::ostringstream oss;
+            oss << "[FileAssociationV1]\n";
+            oss << fileAssociationV1CompactSummaryLine(summary);
+            oss << fileAssociationV1KeyMappingsLine();
+            oss << fileAssociationV1MarkersLine(summary);
+            oss << "table:\n";
+            for (const auto& record : kFileAssociationV1Table) {
+                const bool registryMatch = fileAssociationV1HandlerMatchesRegistry(record);
+                const apps::BuiltInAppMetadata* registryMetadata = nullptr;
+                if (record.handlerAppId && record.handlerAppId[0]) {
+                    registryMetadata = apps::FindBuiltInAppMetadataByAppId(record.handlerAppId);
+                }
+
+                oss << "  key=" << record.associationKey
+                    << " kind=" << fileAssociationV1KindName(record.kind)
+                    << " handlerAppId=" << (record.handlerAppId ? record.handlerAppId : "")
+                    << " handlerDisplayName=" << (record.handlerDisplayName ? record.handlerDisplayName : "")
+                    << " handlerLaunchName=" << (record.handlerLaunchName ? record.handlerLaunchName : "")
+                    << " activeTypedDispatchMayOwn=" << diagnosticBool(record.activeTypedDispatchMayOwn)
+                    << " fallbackRequired=" << diagnosticBool(record.fallbackRequired)
+                    << " textLike=" << diagnosticBool(record.textLike)
+                    << " folder=" << diagnosticBool(record.folder)
+                    << " system=" << diagnosticBool(record.system)
+                    << " risky=" << diagnosticBool(record.risky)
+                    << " legacyDirectPath=" << diagnosticBool(record.legacyDirectPath)
+                    << " registryResolved=" << diagnosticBool(registryMetadata != nullptr)
+                    << " registryMatch=" << diagnosticBool(registryMatch);
+                if (registryMetadata) {
+                    oss << " registryDisplayName=" << (registryMetadata->displayName ? registryMetadata->displayName : "")
+                        << " registryLaunchName=" << (registryMetadata->launchName ? registryMetadata->launchName : "");
+                }
+                if (record.note && record.note[0]) {
+                    oss << " note=" << record.note;
+                }
+                oss << "\n";
+            }
+            oss << "summary: tableExists=" << diagnosticBool(summary.tableExists)
+                << " handlersResolveToRegistry=" << diagnosticBool(summary.handlersResolveToRegistry)
+                << " visibleLaunchBehaviorChanged=" << diagnosticBool(summary.visibleLaunchBehaviorChanged)
+                << " persistentDesktopStorageWrites=" << diagnosticBool(summary.persistentDesktopStorageWrites)
+                << "\n";
+            oss << "nonFatal: true\n";
             return oss.str();
         }
 
