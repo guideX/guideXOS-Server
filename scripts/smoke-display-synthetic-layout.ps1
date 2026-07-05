@@ -135,6 +135,30 @@ $checks = @(
         Match = Find-FirstMatch (Join-Path $Root 'compositor.cpp') 'hostedRenderTargetsForDesktop';
     },
     [pscustomobject]@{
+        Name = 'compositor bare-metal render target helper';
+        Match = Find-FirstMatch (Join-Path $Root 'compositor.cpp') 'bareMetalRenderTargetForFramebuffer';
+    },
+    [pscustomobject]@{
+        Name = 'compositor bare-metal render target bridge';
+        Match = Find-FirstMatch (Join-Path $Root 'compositor.cpp') 'target.backedByHostedFramebuffer = true;';
+    },
+    [pscustomobject]@{
+        Name = 'compositor bare-metal render target viewport';
+        Match = Find-FirstMatch (Join-Path $Root 'compositor.cpp') 'const int fbW = std::max(1, viewport.width);';
+    },
+    [pscustomobject]@{
+        Name = 'compositor bare-metal render target overload';
+        Match = Find-FirstMatch (Join-Path $Root 'compositor.cpp') 'renderToFramebuffer(const DisplayRenderTarget& renderTarget)';
+    },
+    [pscustomobject]@{
+        Name = 'compositor bare-metal render target call site';
+        Match = Find-FirstMatch (Join-Path $Root 'compositor.cpp') 'renderToFramebuffer(renderTarget);';
+    },
+    [pscustomobject]@{
+        Name = 'compositor bare-metal render target diagnostics';
+        Match = Find-FirstMatch (Join-Path $Root 'compositor.cpp') 'renderTarget.summary()';
+    },
+    [pscustomobject]@{
         Name = 'compositor viewport switch command';
         Match = Find-FirstMatch (Join-Path $Root 'server.cpp') 'desktop.display.viewport';
     },

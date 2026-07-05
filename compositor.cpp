@@ -241,6 +241,36 @@ namespace gxos {
             return target.viewportDescriptor();
         }
 
+#if !defined(_WIN32)
+        static DisplayRenderTarget bareMetalRenderTargetForFramebuffer(
+            const DisplayVirtualDesktop& desktop,
+            int framebufferWidth,
+            int framebufferHeight)
+        {
+            const int width = std::max(1, framebufferWidth);
+            const int height = std::max(1, framebufferHeight);
+            const DisplayMonitorDescriptor* monitor = desktop.primaryMonitor();
+
+            DisplayRenderTarget target;
+            target.targetIndex = 1;
+            target.targetId = "display-target-1";
+            target.monitorId = (monitor && !monitor->id.empty()) ? monitor->id : "display-1";
+            target.monitorName = (monitor && !monitor->name.empty()) ? monitor->name : "Display 1";
+            target.viewportOriginX = 0;
+            target.viewportOriginY = 0;
+            target.width = width;
+            target.height = height;
+            target.framebufferRect = DisplayRect{ 0, 0, width, height };
+            target.primary = monitor ? (monitor->primary || desktop.activeMonitorCount() <= 1) : true;
+            target.active = true;
+            target.backedByHostedFramebuffer = true;
+            target.syntheticHosted = false;
+            // Bare-metal remains a single backed target for now; future multi-output
+            // rendering can iterate every backed render target here.
+            return target;
+        }
+#endif
+
         static DisplayOptionsStoreData displayOptionsFromDesktopConfig(const DesktopConfigData& cfg) {
             DisplayOptionsStoreData out;
             out.wallpaperId = !cfg.wallpaperId.empty()
@@ -5818,28 +5848,46 @@ namespace gxos {
                 Logger::write(LogLevel::Error, "renderToFramebuffer: no video backend!");
                 return;
             }
-            
+            const DisplayVirtualDesktop desktop = buildDisplayVirtualDesktop(g_cfg);
+            const DisplayRenderTarget renderTarget = bareMetalRenderTargetForFramebuffer(desktop, g_videoBackend->getWidth(), g_videoBackend->getHeight());
+            // TODO(v0.2): a future bare-metal multi-output path would build and
+            // iterate every backed DisplayRenderTarget here before presenting.
+            renderToFramebuffer(renderTarget);
+        }
+
+        void Compositor::renderToFramebuffer(const DisplayRenderTarget& renderTarget) {
+            if (!g_videoBackend) {
+                Logger::write(LogLevel::Error, "renderToFramebuffer: no video backend!");
+                return;
+            }
+
             uint32_t* pixels = g_videoBackend->getPixels();
             if (!pixels) {
                 Logger::write(LogLevel::Error, "renderToFramebuffer: no pixel buffer!");
                 return;
             }
-            
-            int fbW = g_videoBackend->getWidth();
-            int fbH = g_videoBackend->getHeight();
-            int pitch = g_videoBackend->getPitch();
-            
-            // Log window count for debugging
+
+            const DisplayViewport viewport = renderTarget.viewportDescriptor();
+            const int fbW = std::max(1, viewport.width);
+            const int fbH = std::max(1, viewport.height);
+            const int pitch = g_videoBackend->getPitch();
+            const DesktopTheme& theme = GetCurrentDesktopTheme();
+
             {
                 std::lock_guard<std::mutex> lk(g_lock);
-                Logger::write(LogLevel::Info, std::string("renderToFramebuffer: ") + 
-                    std::to_string(g_windows.size()) + " windows, " +
-                    std::to_string(fbW) + "x" + std::to_string(fbH));
+                static bool s_loggedBareMetalRenderTarget = false;
+                if (!s_loggedBareMetalRenderTarget) {
+                    Logger::write(LogLevel::Info, std::string("renderToFramebuffer: ")
+                        + std::to_string(g_windows.size()) + " windows, "
+                        + std::to_string(fbW) + "x" + std::to_string(fbH)
+                        + " " + renderTarget.summary());
+                    s_loggedBareMetalRenderTarget = true;
+                }
             }
-            
+
             const int taskbarH = 40;
             const int titleBarH = theme.titleBarHeight;
-            
+
             drawBackgroundGradientToPixels(pixels, fbW, fbH - taskbarH, pitch, g_gradientTopColor, g_gradientBottomColor);
             if (g_wallpaperImage && g_wallpaperImage->isValid()) {
                 drawBackgroundImageToPixels(pixels, fbW, fbH - taskbarH, pitch, g_wallpaperImage, WallpaperRegistry::ParseScaleMode(g_backgroundScaleMode));
@@ -5854,7 +5902,7 @@ namespace gxos {
                     fbW / 2 - BitmapFont::MeasureWidth(brand) * 2 / 2 - 1,
                     fbH / 2 - 51, brand, -1, 0x00808090, 2);
             }
-            
+
             // Draw desktop icons
             const int iconW = 56;
             const int iconH = 56;
@@ -5864,16 +5912,16 @@ namespace gxos {
             for (const auto& item : g_items) {
                 int ix = item.ix >= 0 ? item.ix : 20 + (iconIdx % 8) * cellW;
                 int iy = item.iy >= 0 ? item.iy : 20 + (iconIdx / 8) * cellH;
-                
+
                 // Icon background follows the hosted Start Menu fallback,
                 // which now consults shared built-in identity metadata first.
                 uint32_t iconColor = startMenuFallbackIconColor32(item.label);
-                
+
                 int iconX = ix + (cellW - iconW) / 2;
                 int iconY = iy + 6;
                 fbFillRect(pixels, pitch, fbW, fbH, iconX, iconY, iconW, iconH, iconColor);
                 fbDrawRect(pixels, pitch, fbW, fbH, iconX, iconY, iconW, iconH, 0x00B4B4C8);
-                
+
                 // Icon label
                 const char* label = item.label.c_str();
                 std::vector<std::string> labelLines = fbWrapTextToWidth(label, cellW - 8, FontRole::Small, 3);
@@ -5885,15 +5933,15 @@ namespace gxos {
                         ix + (cellW - labelW) / 2, lineY, line, 0x00E6E6F0, FontRole::Small);
                     lineY += lineH;
                 }
-                
+
                 if (item.pinned) {
                     fbDrawText(pixels, pitch, fbW, fbH,
                         iconX + iconW - 6, iconY + 2, "*", 1, 0x00FFC83C, FontRole::SmallBold);
                 }
-                
+
                 iconIdx++;
             }
-            
+
             // Draw windows in Z-order
             {
                 std::lock_guard<std::mutex> lk(g_lock);
@@ -5902,23 +5950,23 @@ namespace gxos {
                     if (it == g_windows.end()) continue;
                     const WinInfo& w = it->second;
                     if (w.minimized || !w.visible) continue;
-                    
+
                     bool isFocused = (w.id == g_focus);
-                    
+
                     // Window shadow
                     fbFillRect(pixels, pitch, fbW, fbH, w.x + 4, w.y + 4, w.w, w.h, 0x00202020);
-                    
+
                     // Window background
                     fbFillRect(pixels, pitch, fbW, fbH, w.x, w.y, w.w, w.h, 0x00303840);
-                    
+
                     // Title bar
                     uint32_t titleColor = isFocused ? 0x00466496 : 0x00505058;
                     fbFillRect(pixels, pitch, fbW, fbH, w.x, w.y, w.w, titleBarH, titleColor);
-                    
+
                     // Title text
                     fbDrawText(pixels, pitch, fbW, fbH,
                         w.x + theme.titleTextInset, w.y + (titleBarH - SystemFont::MeasureHeight(FontRole::Title)) / 2, w.title, 0x00F0F0F0, FontRole::Title);
-                    
+
                     // Close button (X)
                     int btnSize = std::max(12, titleBarH - theme.controlPadding * 2);
                     int closeX = w.x + w.w - theme.controlPadding - btnSize;
@@ -5926,11 +5974,11 @@ namespace gxos {
                     fbFillRect(pixels, pitch, fbW, fbH, closeX, closeY, btnSize, btnSize, 0x00C83232);
                     BitmapFont::DrawStringToBuffer(pixels, pitch, fbW, fbH,
                         closeX + (btnSize - 5) / 2, closeY + (btnSize - 7) / 2, "X", 1, 0x00FFFFFF);
-                    
+
                     // Window border
                     uint32_t borderColor = isFocused ? 0x006496C8 : 0x00606068;
                     fbDrawRectThick(pixels, pitch, fbW, fbH, w.x, w.y, w.w, w.h, theme.windowBorderThickness, borderColor);
-                    
+
                     // Draw window content (images, widgets, text)
                     int contentX = w.x + theme.windowPadding;
                     int contentY = w.y + titleBarH + theme.windowPadding;
@@ -5961,7 +6009,7 @@ namespace gxos {
                             tx.hasColor ? ((static_cast<uint32_t>(tx.r) << 16) | (static_cast<uint32_t>(tx.g) << 8) | tx.b) : 0x00DCDCDC,
                             FontRole::Default);
                     }
-                    
+
                     // Draw text lines
                     int ty = contentY;
                     for (const auto& tx : w.texts) {
@@ -5969,7 +6017,7 @@ namespace gxos {
                             contentX, ty, tx, 0x00DCDCDC, FontRole::Default);
                         ty += SystemFont::MeasureHeight(FontRole::Default);
                     }
-                    
+
                     // Tombstone overlay
                     if (w.tombstoned) {
                         fbFillRect(pixels, pitch, fbW, fbH, w.x, w.y, w.w, w.h, 0x40202020);
@@ -5980,7 +6028,7 @@ namespace gxos {
                     }
                 }
             }
-            
+
             // Draw taskbar
             for (int y = fbH - taskbarH; y < fbH; ++y) {
                 float t = (float)(y - (fbH - taskbarH)) / (float)taskbarH;
@@ -5990,12 +6038,12 @@ namespace gxos {
                     pixels[y * (pitch/4) + x] = color;
                 }
             }
-            
+
             // Taskbar top edge
             for (int x = 0; x < fbW; ++x) {
                 pixels[(fbH - taskbarH) * (pitch/4) + x] = 0x003C4150;
             }
-            
+
             // Start button
             fbFillRect(pixels, pitch, fbW, fbH, theme.taskbarPadding, fbH - taskbarH + 6, 32, taskbarH - 12, 0x00374B64);
             fbDrawRect(pixels, pitch, fbW, fbH, theme.taskbarPadding, fbH - taskbarH + 6, 32, taskbarH - 12, 0x00FFFFFF);
@@ -6067,7 +6115,7 @@ namespace gxos {
                 fbDrawRect(pixels, pitch, fbW, fbH, smRight - shutdownBtnW - 30, btnY, shutdownBtnW, 24, 0x00FFFFFF);
                 fbDrawText(pixels, pitch, fbW, fbH, smRight - shutdownBtnW - 20, btnY + (24 - SystemFont::MeasureHeight(FontRole::Default)) / 2, "Shutdown", -1, 0x00E6E6E6, FontRole::Default);
             }
-            
+
             // Taskbar window buttons
             int btnX = 50;
             {
@@ -6076,29 +6124,29 @@ namespace gxos {
                     auto it = g_windows.find(wid);
                     if (it == g_windows.end()) continue;
                     const WinInfo& w = it->second;
-                    
+
                     int labelLen = (int)w.title.size();
                     if (labelLen > 15) labelLen = 15;
                     int bw = fbMeasureText(w.title.c_str(), labelLen, FontRole::Small) + theme.taskbarItemPadding * 2 + 12;
                     if (bw > 150) bw = 150;
-                    
-                    uint32_t btnColor = (wid == g_focus) ? 0x00466496 : 
-                                        (w.minimized ? 0x00282832 : 
+
+                    uint32_t btnColor = (wid == g_focus) ? 0x00466496 :
+                                        (w.minimized ? 0x00282832 :
                                         (w.tombstoned ? 0x00554123 : 0x00373A46));
                     fbFillRect(pixels, pitch, fbW, fbH, btnX, fbH - taskbarH + 6, bw, taskbarH - 12, btnColor);
-                    
+
                     // Focus indicator
                     if (wid == g_focus) {
                         fbFillRect(pixels, pitch, fbW, fbH, btnX + 2, fbH - 9, bw - 4, 2, 0x0064A0F0);
                     }
-                    
+
                     fbDrawText(pixels, pitch, fbW, fbH,
                         btnX + theme.taskbarItemPadding + 12, fbH - taskbarH + 12, w.title.c_str(), labelLen, 0x00E6E6F0, FontRole::Small);
-                    
+
                     btnX += bw + theme.taskbarItemPadding / 2;
                 }
             }
-            
+
             // Clock
             const std::time_t now = std::time(nullptr);
             const std::string timeText = clocktime::formatTimeOfDay(now, g_clockDisplaySettings, false);
@@ -6111,7 +6159,7 @@ namespace gxos {
                 clockX + (clockW - timeW) / 2, fbH - taskbarH + 8, timeText.c_str(), -1, 0x00C8C8D2, FontRole::Small);
             fbDrawText(pixels, pitch, fbW, fbH,
                 clockX + (clockW - dateW) / 2, fbH - taskbarH + 22, dateText.c_str(), -1, 0x009696A5, FontRole::Small);
-            
+
             // Present to hardware framebuffer
             g_videoBackend->present();
             g_needsRedraw = false;

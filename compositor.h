@@ -225,6 +225,7 @@ namespace gxos { namespace gui {
 #else
         // Bare-metal rendering functions
         static void renderToFramebuffer();
+        static void renderToFramebuffer(const DisplayRenderTarget& renderTarget);
         static bool g_needsRedraw;
 #endif
         static std::atomic<uint64_t> s_nextWinId;
