@@ -193,6 +193,13 @@ This file intentionally uses an unsupported extension.
     $desktopStateBefore = Get-FileText (Join-Path $Root "desktop.state")
     $displayOptionsBefore = Get-FileText (Join-Path $Root "display-options.cfg")
 
+    if (Test-Path -LiteralPath (Join-Path $Root "desktop.json")) {
+        $desktopConfigFixture = Get-Content -LiteralPath (Join-Path $Root "desktop.json") -Raw | ConvertFrom-Json
+        $desktopConfigFixture.recent = @()
+        ($desktopConfigFixture | ConvertTo-Json -Depth 64) | Set-Content -LiteralPath (Join-Path $Root "desktop.json") -Encoding ASCII
+    }
+    Assert-True (@(Get-DesktopRecentNames).Count -eq 0) "Phase 3E smoke should start from an empty recent-program fixture"
+
     $preflightOutput = Invoke-ServerCommands -Commands @(
         "desktop.appmodel.active-typed-dispatch-gate reset",
         "desktop.launch.compare",
@@ -274,17 +281,19 @@ This file intentionally uses an unsupported extension.
     }
 
     $recentAfterRepeated = Get-DesktopRecentNames
+    # Phase 4D and Phase 5B cover the full recent-program matrix; here we keep
+    # the canonical set that this repeated batch should persist.
     $recentExpected = @(
         "Notepad",
         "File Explorer",
+        "Trash",
+        "guideXOS Navigator",
         "DiskManager",
         "TaskManager",
         "Paint",
         "Clock",
         "Calculator",
-        "ControlPanel",
-        "guideXOS Navigator",
-        "Trash"
+        "ControlPanel"
     )
     Assert-True (Test-RecentContainsAll -RecentNames $recentAfterRepeated -ExpectedNames $recentExpected) "Normal app launches should update recents for the expected canonical entries"
     Assert-True (Test-RecentExcludesAny -RecentNames $recentAfterRepeated -ExcludedNames @("TotallyUnknownLaunchThing", "ComputerFiles", "Unsupported")) "Fallback-only and unsupported labels should not pollute recents"

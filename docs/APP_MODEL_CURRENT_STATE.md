@@ -906,4 +906,12 @@ Known non-goals for v1:
 
 Phase 5A smoke coverage is captured by `scripts\smoke-appmodel-phase5a-status.ps1`, which verifies the status summary, the inventory dump, the force-off/reset gate behavior, and cleanup of temporary smoke artifacts.
 
+## 19. Phase 5B regression closeout
+
+Status: passed on 2026-07-05.
+
+Phase 5B is the final read-only App Model v1 regression closeout. It uses `scripts\smoke-appmodel-phase5b-regression-closeout.ps1` to verify summary/inventory agreement, the product-default active-dispatch rollback path, representative launch equivalence, recent-program canonicalization, trash open-only safety, legacy image retention, out-of-scope boundaries, and cleanup of temporary smoke artifacts.
+
+App Model v1 is complete.
+
 
