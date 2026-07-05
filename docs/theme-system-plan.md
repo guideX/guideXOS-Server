@@ -329,6 +329,20 @@ Phase 3F is the next app-surface pilot for the guideXOS Server theme system.
 * Broad app redesign remains deferred.
 * Future app polish should continue one app at a time.
 
+## Phase 3F.1
+
+Phase 3F.1 is a stabilization-only review pass for the Clock app-surface pilot.
+
+* The Clock theme-aware repaint path was reviewed and kept local to Clock surfaces.
+* Repaint safety was reviewed: the clear-then-redraw path removes stale stacked text without changing timekeeping cadence or layout, and it still runs on the existing one-second update cadence.
+* Classic preservation was confirmed; the fallback remains visually close to the prior Clock look and no visible fallback tweak was needed.
+* Sci Fi readability was reviewed; the time/date readout stays readable on the darker body/face surfaces, and the muted date text remains legible.
+* No Clock timekeeping, timer, alarm, stopwatch, scheduling, persistence, layout geometry, hit-testing, or theme metric behavior changed.
+* No new effects or controls were added.
+* No blur, glass, animation, rounded clipping, or rounded hit-testing was added.
+* No additional readability or layout fix was needed in this pass.
+* Future app polish should remain one app at a time.
+
 ## Manual Validation Runbook
 
 * Start the hosted server executable.
@@ -392,7 +406,7 @@ Phase 3F is the next app-surface pilot for the guideXOS Server theme system.
 
 * Classic should continue to look basically unchanged.
 * Sci Fi is a first visible proof that the theme system exists, not a full futuristic redesign.
-* Rounded-window clipping remains deferred; this foundation is intentionally limited to IDs, persistence, selector wiring, safe chrome colors, the Phase 2A chrome metric pass, the guarded Phase 2B rounded-shell preview, the Phase 2C border/highlight polish pass, the Phase 2D hosted shadow preview, the Phase 2E desktop/taskbar surface polish pass, the Phase 2G validation checkpoint, the Phase 3A Display Options app-surface pilot, the Phase 3B Control Panel app-surface pilot, the Phase 3C Notepad app-surface pilot, the Phase 3C.1 stabilization review pass, the Phase 3D Calculator app-surface pilot, the Phase 3D.1 stabilization review pass, the Phase 3E File Explorer app-surface pilot, the Phase 3E.1 File Explorer stabilization review pass, and the Phase 3F Clock app-surface pilot.
+* Rounded-window clipping remains deferred; this foundation is intentionally limited to IDs, persistence, selector wiring, safe chrome colors, the Phase 2A chrome metric pass, the guarded Phase 2B rounded-shell preview, the Phase 2C border/highlight polish pass, the Phase 2D hosted shadow preview, the Phase 2E desktop/taskbar surface polish pass, the Phase 2G validation checkpoint, the Phase 3A Display Options app-surface pilot, the Phase 3B Control Panel app-surface pilot, the Phase 3C Notepad app-surface pilot, the Phase 3C.1 stabilization review pass, the Phase 3D Calculator app-surface pilot, the Phase 3D.1 stabilization review pass, the Phase 3E File Explorer app-surface pilot, the Phase 3E.1 File Explorer stabilization review pass, the Phase 3F Clock app-surface pilot, and the Phase 3F.1 Clock stabilization review pass.
 
 ## Recommended Next Pass
 
