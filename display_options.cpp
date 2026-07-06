@@ -82,6 +82,9 @@ namespace {
     const int kThemeOptionW = 320;
     const int kThemeOptionH = 98;
     const int kThemeOptionGap = 14;
+    const int kThemeRecommendationX = 46;
+    const int kThemeRecommendationY = 358;
+    const int kThemeRecommendationLineGap = 18;
     const int kRegionTimeZoneX = 46;
     const int kRegionTimeZoneY = 132;
     const int kRegionTimeZoneW = 360;
@@ -1128,6 +1131,14 @@ void DisplayOptions::drawThemeTab()
         "Rounded hosted chrome",
         "Accent highlights, shadows",
         "Dark taskbar surfaces");
+    if (s_selectedThemeId == DesktopThemeId::SciFi) {
+        drawText(s_windowId, kThemeRecommendationX, kThemeRecommendationY,
+            "Recommended backgrounds for Sci Fi: guideXOS Space, guideXOS Space 2, Tron Porsche, CPU.",
+            DisplayOptionsMutedTextColor());
+        drawText(s_windowId, kThemeRecommendationX, kThemeRecommendationY + kThemeRecommendationLineGap,
+            "Change this on the Background tab.",
+            DisplayOptionsMutedTextColor());
+    }
 }
 
 void DisplayOptions::drawRegionTimeTab()

@@ -466,6 +466,19 @@ Phase 4B is a wallpaper/background inventory and design-readiness pass. It docum
 * No per-effect controls were introduced.
 * Wallpaper selection remains deferred until an implementation phase.
 
+## Phase 4C
+
+Phase 4C adds a small opt-in Sci Fi wallpaper recommendation note in Display Options. It is read-only and does not change the wallpaper automatically, the default wallpaper, the default theme, or the global wallpaper model.
+
+* The Theme tab now shows a read-only recommendation when Sci Fi is selected.
+* The recommendation points to existing bundled backgrounds only, and the user still has to choose a wallpaper through the existing Background tab controls.
+* No theme-scoped wallpaper persistence was added.
+* Classic remains the default theme.
+* Sci Fi remains opt-in.
+* No default wallpaper changed.
+* No assets were added, removed, moved, or renamed.
+* Bare-metal wallpaper parity remains deferred.
+
 ## Manual Validation Runbook
 
 * Start the hosted server executable.
