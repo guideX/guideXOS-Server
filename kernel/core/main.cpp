@@ -177,6 +177,90 @@ static void mount_navigator_smoke_config_if_available()
 }
 #endif
 
+#if ARCH_HAS_PIC_8259
+namespace {
+
+static void serial_put_u32_decimal(uint32_t value)
+{
+    char buffer[11];
+    int index = 10;
+    buffer[index] = '\0';
+
+    do {
+        buffer[--index] = static_cast<char>('0' + (value % 10u));
+        value /= 10u;
+    } while (value != 0u && index > 0);
+
+    kernel::serial::puts(&buffer[index]);
+}
+
+static const char* framebuffer_format_name(guideXOS::FramebufferFormat format)
+{
+    switch (format) {
+    case guideXOS::FramebufferFormat::R8G8B8A8: return "R8G8B8A8";
+    case guideXOS::FramebufferFormat::B8G8R8A8: return "B8G8R8A8";
+    default: return "Unknown";
+    }
+}
+
+static const char* multiboot_framebuffer_format_name(const kernel::multiboot::Info* info)
+{
+    if (!info) {
+        return "Unknown";
+    }
+
+    switch (info->framebuffer_type) {
+    case kernel::multiboot::FRAMEBUFFER_TYPE_RGB:
+        switch (info->framebuffer_bpp) {
+        case 32: return "RGB32";
+        case 24: return "RGB24";
+        case 16: return "RGB565";
+        default: return "RGB-direct";
+        }
+    case kernel::multiboot::FRAMEBUFFER_TYPE_INDEXED:
+        return "Indexed";
+    case kernel::multiboot::FRAMEBUFFER_TYPE_EGA_TEXT:
+        return "Text";
+    default:
+        return "Unknown";
+    }
+}
+
+static void log_framebuffer_inventory(
+    const char* source,
+    uint32_t framebufferCount,
+    uint64_t base,
+    uint64_t size,
+    uint32_t width,
+    uint32_t height,
+    uint32_t pitch,
+    uint32_t bpp,
+    const char* format)
+{
+    kernel::serial::puts("[KERNEL] Framebuffer source=");
+    kernel::serial::puts(source ? source : "(unknown)");
+    kernel::serial::puts(" framebufferCount=");
+    serial_put_u32_decimal(framebufferCount);
+    kernel::serial::puts(" base=");
+    kernel::serial::put_hex64(base);
+    kernel::serial::puts(" size=");
+    kernel::serial::put_hex64(size);
+    kernel::serial::puts(" geometry=");
+    serial_put_u32_decimal(width);
+    kernel::serial::putc('x');
+    serial_put_u32_decimal(height);
+    kernel::serial::puts(" pitch=");
+    serial_put_u32_decimal(pitch);
+    kernel::serial::puts(" bpp=");
+    serial_put_u32_decimal(bpp);
+    kernel::serial::puts(" format=");
+    kernel::serial::puts(format ? format : "(unknown)");
+    kernel::serial::puts("\n");
+}
+
+} // namespace
+#endif
+
 extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
 {
 #if ARCH_HAS_PIC_8259
@@ -193,10 +277,10 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
     bool is_bootinfo = false;
     
     guideXOS::BootInfo* bootinfo = nullptr;
-    void* multiboot_info = nullptr;
+    kernel::multiboot::Info* multiboot_info = nullptr;
     
     if (is_multiboot) {
-        multiboot_info = boot_environment;
+        multiboot_info = static_cast<kernel::multiboot::Info*>(boot_environment);
         kernel::serial::puts("[KERNEL] Boot method: Multiboot\n");
     } else {
         bootinfo = static_cast<guideXOS::BootInfo*>(boot_environment);
@@ -224,12 +308,29 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
     }
     
     if (has_fb) {
+        const uint32_t framebufferCount = 1u;
+        const uint64_t framebufferBase = reinterpret_cast<uint64_t>(kernel::framebuffer::get_buffer());
+        const uint64_t framebufferSize = is_bootinfo && bootinfo
+            ? bootinfo->FramebufferSize
+            : static_cast<uint64_t>(kernel::framebuffer::get_pitch()) * static_cast<uint64_t>(kernel::framebuffer::get_height());
+        const char* framebufferSource = is_bootinfo ? "UEFI BootInfo" : "Multiboot";
+        const char* framebufferFormat = is_bootinfo
+            ? framebuffer_format_name(bootinfo->FramebufferFormat)
+            : multiboot_framebuffer_format_name(multiboot_info);
+
+        log_framebuffer_inventory(
+            framebufferSource,
+            framebufferCount,
+            framebufferBase,
+            framebufferSize,
+            kernel::framebuffer::get_width(),
+            kernel::framebuffer::get_height(),
+            kernel::framebuffer::get_pitch(),
+            kernel::framebuffer::get_bpp(),
+            framebufferFormat);
+
         // === GRAPHICS MODE BOOT ===
-        kernel::serial::puts("[KERNEL] Framebuffer initialized: ");
-        kernel::serial::put_hex32(kernel::framebuffer::get_width());
-        kernel::serial::putc('x');
-        kernel::serial::put_hex32(kernel::framebuffer::get_height());
-        kernel::serial::putc('\n');
+        kernel::serial::puts("[KERNEL] Framebuffer ready\n");
         
         // Clear screen to dark color
         kernel::framebuffer::clear(0xFF101828);
@@ -580,6 +681,16 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::vga::init();
         kernel::vga::print_colored("guideXOS Kernel\n", kernel::vga::Color::LightCyan, kernel::vga::Color::Black);
         kernel::vga::print("Framebuffer not available - text mode only\n");
+        log_framebuffer_inventory(
+            is_bootinfo ? "UEFI BootInfo" : "Multiboot",
+            0u,
+            0u,
+            0u,
+            kernel::framebuffer::get_width(),
+            kernel::framebuffer::get_height(),
+            kernel::framebuffer::get_pitch(),
+            kernel::framebuffer::get_bpp(),
+            "Unknown");
         
         while (1) { }
     }

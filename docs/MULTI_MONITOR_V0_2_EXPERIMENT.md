@@ -82,6 +82,43 @@ The hosted runtime smoke restores `desktop.json` and `desktop.state` and removes
 - The second hosted window is still synthetic, not a hardware-backed second display.
 - Default hosted mode stays single-output unless the gates are enabled.
 
+## QEMU / Bare-Metal Output Investigation
+
+This phase is diagnostic-only. It records what the current boot path can safely see before any real multi-output rendering work begins.
+
+### What guideXOS currently detects
+
+- UEFI x86_64 boots through the bootloader's `LocateProtocol` lookup for GOP, then copies one selected framebuffer into `BootInfo`.
+- The bootloader now logs how many GOP handles UEFI exposes, but `BootInfo` still carries only one selected framebuffer descriptor.
+- BIOS / Multiboot x86 and amd64 boots carry a single framebuffer via the Multiboot info block.
+- The kernel's bare-metal compositor bridge still binds one framebuffer to one `DisplayRenderTarget`.
+- The hosted display model can already represent multiple monitors, but that is currently a hosted synthetic construct, not a real hardware handoff.
+
+### What QEMU can be asked to expose
+
+| Backend | Diagnostic expectation | Guest-side implication |
+| --- | --- | --- |
+| `-vga std` | Legacy VGA / Bochs-style linear framebuffer | One framebuffer, no real multi-output. This is the current stable probe path. |
+| `-device virtio-gpu-pci,max_outputs=2` | Multi-output-capable virtual GPU | QEMU can expose multiple outputs, but guideXOS still needs a multi-framebuffer handoff and a guest driver or GOP-aware bridge. |
+| `-device virtio-vga` | VGA-compatible virtio GPU variant | Similar driver requirements to virtio-gpu; still not usable for real multi-output rendering without guest support. |
+| `-device qxl-vga` with SPICE | Remote-display-oriented virtual GPU | Useful for SPICE/QXL experiments, but it still requires guest support that guideXOS does not have yet. |
+
+The new probe launchers are:
+
+- `scripts\run-qemu-display-probe.bat`
+- `scripts\run-qemu-multimonitor-probe.bat`
+
+### What guideXOS cannot use yet
+
+- Multiple framebuffer descriptors are not part of the current boot handoff contract.
+- The kernel does not yet consume an array of framebuffer targets from the boot path.
+- The compositor does not yet render to more than one real framebuffer in bare-metal mode.
+- There is no virtio-gpu or QXL guest driver in this pass.
+
+### Next required implementation step
+
+Extend the boot handoff so the kernel can receive a list of framebuffer descriptors, then teach the bare-metal compositor path to log and hold disabled diagnostic targets before enabling any real multi-output rendering.
+
 ## Next Recommended Steps
 
 - Keep the synthetic path isolated and continue using the existing smoke tests as the regression fence.

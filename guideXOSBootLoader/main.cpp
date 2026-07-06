@@ -57,6 +57,106 @@ EFI_FILE_PROTOCOL* KernelFile;
 BootInfo bootInfo;      // legacy struct instance (still used elsewhere)
 // v1BootInfo is now allocated dynamically in EfiLoaderData pages to survive ExitBootServices
 
+namespace {
+
+enum EFI_LOCATE_SEARCH_TYPE
+{
+    AllHandles = 0,
+    ByRegisterNotify = 1,
+    ByProtocol = 2
+};
+
+typedef EFI_STATUS (EFIAPI *EFI_LOCATE_HANDLE_BUFFER)(
+    EFI_LOCATE_SEARCH_TYPE SearchType,
+    EFI_GUID* Protocol,
+    VOID* SearchKey,
+    UINTN* NoHandles,
+    EFI_HANDLE** Buffer);
+
+static const CHAR16* GopPixelFormatName(EFI_GRAPHICS_PIXEL_FORMAT format)
+{
+    switch (format) {
+    case PixelRedGreenBlueReserved8BitPerColor: return (CONST CHAR16*)L"PixelRedGreenBlueReserved8BitPerColor";
+    case PixelBlueGreenRedReserved8BitPerColor: return (CONST CHAR16*)L"PixelBlueGreenRedReserved8BitPerColor";
+    case PixelBitMask: return (CONST CHAR16*)L"PixelBitMask";
+    case PixelBltOnly: return (CONST CHAR16*)L"PixelBltOnly";
+    default: return (CONST CHAR16*)L"PixelFormatMax";
+    }
+}
+
+static guideXOS::FramebufferFormat MapGopPixelFormat(EFI_GRAPHICS_PIXEL_FORMAT format)
+{
+    switch (format) {
+    case PixelRedGreenBlueReserved8BitPerColor:
+        return guideXOS::FramebufferFormat::R8G8B8A8;
+    case PixelBlueGreenRedReserved8BitPerColor:
+        return guideXOS::FramebufferFormat::B8G8R8A8;
+    default:
+        return guideXOS::FramebufferFormat::Unknown;
+    }
+}
+
+static const CHAR16* BootInfoFramebufferFormatName(guideXOS::FramebufferFormat format)
+{
+    switch (format) {
+    case guideXOS::FramebufferFormat::R8G8B8A8: return (CONST CHAR16*)L"R8G8B8A8";
+    case guideXOS::FramebufferFormat::B8G8R8A8: return (CONST CHAR16*)L"B8G8R8A8";
+    default: return (CONST CHAR16*)L"Unknown";
+    }
+}
+
+static UINTN CountGopHandles(EFI_SYSTEM_TABLE* SystemTable, EFI_GUID* gopGuid)
+{
+    if (!SystemTable || !SystemTable->BootServices || !gopGuid) {
+        return 0;
+    }
+
+    auto locateHandleBuffer = reinterpret_cast<EFI_LOCATE_HANDLE_BUFFER>(SystemTable->BootServices->LocateHandleBuffer);
+    if (!locateHandleBuffer) {
+        return 0;
+    }
+
+    EFI_HANDLE* handles = NULL;
+    UINTN handleCount = 0;
+    EFI_STATUS status = locateHandleBuffer(ByProtocol, gopGuid, NULL, &handleCount, &handles);
+    if (EFI_ERROR(status)) {
+        return 0;
+    }
+
+    if (handles != NULL) {
+        SystemTable->BootServices->FreePool(handles);
+    }
+    return handleCount;
+}
+
+static void LogGopSummary(EFI_SYSTEM_TABLE* SystemTable, EFI_GRAPHICS_OUTPUT_PROTOCOL* gop)
+{
+    if (!gop || !gop->Mode || !gop->Mode->Info) {
+        Print((CONST CHAR16*)L"[BOOT] GOP mode info unavailable\n");
+        return;
+    }
+
+    EFI_GUID gopGuid = EFI_GRAPHICS_OUTPUT_PROTOCOL_GUID;
+    UINTN gopHandleCount = CountGopHandles(SystemTable, &gopGuid);
+
+    Print((CONST CHAR16*)L"[BOOT] GOP handles discovered: %u\n", (UINT32)gopHandleCount);
+    Print((CONST CHAR16*)L"[BOOT] GOP selected mode: %u/%u framebuffer=%p size=%Lu geometry=%ux%u pitch=%u pixelFormat=%s\n",
+        (UINT32)gop->Mode->Mode,
+        (UINT32)gop->Mode->MaxMode,
+        (VOID*)(UINTN)gop->Mode->FrameBufferBase,
+        (UINT64)gop->Mode->FrameBufferSize,
+        (UINT32)gop->Mode->Info->HorizontalResolution,
+        (UINT32)gop->Mode->Info->VerticalResolution,
+        (UINT32)(gop->Mode->Info->PixelsPerScanLine * 4u),
+        GopPixelFormatName(gop->Mode->Info->PixelFormat));
+
+    if (gopHandleCount > 1) {
+        Print((CONST CHAR16*)L"[BOOT] Note: BootInfo exports one selected framebuffer only; additional GOP handles are not exported yet\n");
+    }
+}
+
+} // namespace
+
 EFI_STATUS LoadFile(EFI_FILE_PROTOCOL** file, CHAR16* path, EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
     EFI_LOADED_IMAGE_PROTOCOL* LoadedImage;
     EFI_SIMPLE_FILE_SYSTEM_PROTOCOL* FileSystem;
@@ -364,6 +464,7 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
         Print(L"Failed to locate GOP\n");
         return status;
     }
+    LogGopSummary(SystemTable, GOP);
 
     // --- Load Kernel (your existing loader) ---
     status = LoadFile(&KernelFile, (CHAR16*)L"kernel.elf", ImageHandle, SystemTable);
@@ -470,7 +571,9 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
     v1BootInfo->FramebufferPitch  = GOP->Mode->Info->PixelsPerScanLine * 4u; // 32 bpp
     v1BootInfo->FramebufferSize   = (uint64_t)v1BootInfo->FramebufferPitch *
                                    (uint64_t)v1BootInfo->FramebufferHeight;
-    v1BootInfo->FramebufferFormat = guideXOS::FramebufferFormat::B8G8R8A8; // typical GOP
+    v1BootInfo->FramebufferFormat = MapGopPixelFormat(GOP->Mode->Info->PixelFormat);
+    Print((CONST CHAR16*)L"[BOOT] BootInfo framebuffer format: %s\n",
+        BootInfoFramebufferFormatName(v1BootInfo->FramebufferFormat));
 
     if (v1BootInfo->FramebufferBase != 0 && v1BootInfo->FramebufferSize != 0)
         v1BootInfo->Flags |= (1u << 1); // framebuffer valid
