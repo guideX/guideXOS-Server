@@ -394,6 +394,37 @@ Phase 3H is a hosted visual validation pass for the Sci Fi app-surface milestone
 * Deferred boundaries remain unchanged: rounded client clipping, rounded hit-testing, blur/glass, animations, taskbar shadows, high-DPI/scaling, bare-metal theme parity, per-effect controls, and broad app redesign remain deferred.
 * Readiness: the Sci Fi app-surface milestone is ready for the next layer of theme work.
 
+## Phase 4A
+
+Phase 4A is a readiness/defaults boundary checkpoint for the Sci Fi theme. It is a documentation-only pass that marks the hosted Sci Fi milestone as validated and safely opt-in while Classic remains the default. It does not add new styling, rendering effects, app behavior, theme IDs, persistence keys, or chrome metrics.
+
+* Sci Fi is now a validated hosted opt-in theme milestone.
+* Classic remains the default and fallback-safe theme.
+* Hosted shell and app-surface coverage are broad enough to continue from a stable checkpoint.
+* Bare-metal parity remains deferred.
+* Sci Fi is not yet declared a universal/default OS theme.
+* Future work should continue behind opt-in gates unless explicitly promoted.
+* No per-effect controls were introduced.
+
+### Default Safety Boundary
+
+* Classic remains default.
+* Sci Fi remains opt-in.
+* Missing or invalid theme config falls back to Classic.
+* Theme switching should not create tracked config changes that imply a default change.
+* Validation artifacts like `guideXOSServer.exe`, `desktop.json`, `desktop.state`, screenshots, temp harness files, and disk images are local-only and should not be committed unless a task explicitly changes defaults.
+
+### Ready for Next Layer
+
+* Theme wallpaper selection.
+* Navigator, Image Viewer, and Task Manager app-surface pilots.
+* Higher-quality manual screenshot harness.
+* High-DPI/scaling review.
+* Hosted shadow and taskbar polish.
+* Bare-metal parity inventory.
+* Rounded clipping and hit-testing research, still not implementation.
+* Theme asset and icon polish.
+
 ## Manual Validation Runbook
 
 * Start the hosted server executable.
@@ -457,7 +488,7 @@ Phase 3H is a hosted visual validation pass for the Sci Fi app-surface milestone
 
 * Classic should continue to look basically unchanged.
 * Sci Fi is a first visible proof that the theme system exists, not a full futuristic redesign.
-* Rounded-window clipping remains deferred; this foundation is intentionally limited to IDs, persistence, selector wiring, safe chrome colors, the Phase 2A chrome metric pass, the guarded Phase 2B rounded-shell preview, the Phase 2C border/highlight polish pass, the Phase 2D hosted shadow preview, the Phase 2E desktop/taskbar surface polish pass, the Phase 2G validation checkpoint, the Phase 3A Display Options app-surface pilot, the Phase 3B Control Panel app-surface pilot, the Phase 3C Notepad app-surface pilot, the Phase 3C.1 stabilization review pass, the Phase 3D Calculator app-surface pilot, the Phase 3D.1 stabilization review pass, the Phase 3E File Explorer app-surface pilot, the Phase 3E.1 File Explorer stabilization review pass, the Phase 3F Clock app-surface pilot, the Phase 3F.1 Clock stabilization review pass, the Phase 3G app-surface closeout, and the Phase 3H hosted visual validation pass.
+* Rounded-window clipping remains deferred; this foundation is intentionally limited to IDs, persistence, selector wiring, safe chrome colors, the Phase 2A chrome metric pass, the guarded Phase 2B rounded-shell preview, the Phase 2C border/highlight polish pass, the Phase 2D hosted shadow preview, the Phase 2E desktop/taskbar surface polish pass, the Phase 2G validation checkpoint, the Phase 3A Display Options app-surface pilot, the Phase 3B Control Panel app-surface pilot, the Phase 3C Notepad app-surface pilot, the Phase 3C.1 stabilization review pass, the Phase 3D Calculator app-surface pilot, the Phase 3D.1 stabilization review pass, the Phase 3E File Explorer app-surface pilot, the Phase 3E.1 File Explorer stabilization review pass, the Phase 3F Clock app-surface pilot, the Phase 3F.1 Clock stabilization review pass, the Phase 3G app-surface closeout, the Phase 3H hosted visual validation pass, and the Phase 4A readiness/defaults boundary checkpoint.
 
 ## Recommended Next Pass
 
