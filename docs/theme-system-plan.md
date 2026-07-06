@@ -425,6 +425,47 @@ Phase 4A is a readiness/defaults boundary checkpoint for the Sci Fi theme. It is
 * Rounded clipping and hit-testing research, still not implementation.
 * Theme asset and icon polish.
 
+## Phase 4B
+
+Phase 4B is a wallpaper/background inventory and design-readiness pass. It documents the current global background path before any theme-scoped wallpaper work begins. It does not change defaults, assets, rendering behavior, or persistence keys. Classic remains the default theme and Sci Fi remains opt-in for this inventory pass.
+
+### Inventory Summary
+
+* The current background selection is global, not theme-scoped.
+* DisplayOptionsStore persists one wallpaperId and one backgroundScaleMode; desktop.json also keeps the legacy wallpaper path and desktop.wallpaper.id for compatibility.
+* Compositor save/load keeps the same selection in both display-options.cfg and desktop.json, and DesktopService::SaveState preserves existing wallpaper fields when it refreshes pinned and recent entries.
+* DesktopTheme.desktopBackground is a color fallback, not a wallpaper asset binding.
+* On a fresh config, the default background is still the built-in image wallpaper, so Sci Fi does not currently own a separate wallpaper.
+* The dedicated background asset folder is assets/Backgrounds.
+* It currently contains 15 image wallpapers with matching thumbnails: ameoba, ameobagx, blueflower, cpu, dinos, flower, greenmedow, guidexosspace, guidexosspace3, merlin, merlin2, mountains, redflower, tronporche, and Wallpaper2.
+* wallpaper_registry.cpp also defines 8 built-in gradient backgrounds: midnight, ocean, aurora, violet, sunset, forest, ember, and graphite.
+* The registry and UI support BackgroundKind::SolidColor, but there are no built-in solid-color backgrounds today.
+
+### Render Paths
+
+* The hosted compositor uses DesktopWallpaper::DrawGradient and drawBackgroundImageToHdc for its desktop backdrop.
+* The bare-metal framebuffer path uses drawBackgroundGradientToPixels and drawBackgroundImageToPixels.
+* The hosted Sci Fi no-image fallback uses the theme desktopBackground color.
+* Bare-metal does not consult the Sci Fi desktopBackground field and stays on the procedural background state.
+* The current Sci Fi desktop therefore is not a separate wallpaper track; it is the shared global background selection plus hosted Sci Fi color fallback behavior when no image is present.
+
+### Safe Future Options
+
+* Keep Classic and Sci Fi color-only for now.
+* Allow Sci Fi to suggest a bundled wallpaper while Classic remains unchanged.
+* Add a theme-specific default wallpaper later, still opt-in only, with explicit override rules for user wallpaper.
+* Keep user-selected wallpaper independent of theme; that is already the current global model.
+* Add a Display Options wallpaper UI later. The current Background tab is global, so any theme-linked selector would still need new semantics.
+* Keep bare-metal wallpaper parity deferred.
+
+### Non-Changes
+
+* This pass does not promote a new default wallpaper.
+* No defaults changed.
+* No assets were added, removed, moved, or renamed.
+* No per-effect controls were introduced.
+* Wallpaper selection remains deferred until an implementation phase.
+
 ## Manual Validation Runbook
 
 * Start the hosted server executable.
@@ -488,7 +529,7 @@ Phase 4A is a readiness/defaults boundary checkpoint for the Sci Fi theme. It is
 
 * Classic should continue to look basically unchanged.
 * Sci Fi is a first visible proof that the theme system exists, not a full futuristic redesign.
-* Rounded-window clipping remains deferred; this foundation is intentionally limited to IDs, persistence, selector wiring, safe chrome colors, the Phase 2A chrome metric pass, the guarded Phase 2B rounded-shell preview, the Phase 2C border/highlight polish pass, the Phase 2D hosted shadow preview, the Phase 2E desktop/taskbar surface polish pass, the Phase 2G validation checkpoint, the Phase 3A Display Options app-surface pilot, the Phase 3B Control Panel app-surface pilot, the Phase 3C Notepad app-surface pilot, the Phase 3C.1 stabilization review pass, the Phase 3D Calculator app-surface pilot, the Phase 3D.1 stabilization review pass, the Phase 3E File Explorer app-surface pilot, the Phase 3E.1 File Explorer stabilization review pass, the Phase 3F Clock app-surface pilot, the Phase 3F.1 Clock stabilization review pass, the Phase 3G app-surface closeout, the Phase 3H hosted visual validation pass, and the Phase 4A readiness/defaults boundary checkpoint.
+* Rounded-window clipping remains deferred; this foundation is intentionally limited to IDs, persistence, selector wiring, safe chrome colors, the Phase 2A chrome metric pass, the guarded Phase 2B rounded-shell preview, the Phase 2C border/highlight polish pass, the Phase 2D hosted shadow preview, the Phase 2E desktop/taskbar surface polish pass, the Phase 2G validation checkpoint, the Phase 3A Display Options app-surface pilot, the Phase 3B Control Panel app-surface pilot, the Phase 3C Notepad app-surface pilot, the Phase 3C.1 stabilization review pass, the Phase 3D Calculator app-surface pilot, the Phase 3D.1 stabilization review pass, the Phase 3E File Explorer app-surface pilot, the Phase 3E.1 File Explorer stabilization review pass, the Phase 3F Clock app-surface pilot, the Phase 3F.1 Clock stabilization review pass, the Phase 3G app-surface closeout, the Phase 3H hosted visual validation pass, the Phase 4A readiness/defaults boundary checkpoint, and the Phase 4B wallpaper/background inventory and design-readiness pass.
 
 ## Recommended Next Pass
 
