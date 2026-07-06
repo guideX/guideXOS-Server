@@ -226,9 +226,12 @@ static const char* multiboot_framebuffer_format_name(const kernel::multiboot::In
     }
 }
 
-static void log_framebuffer_inventory(
+static void log_framebuffer_descriptor(
     const char* source,
     uint32_t framebufferCount,
+    uint32_t index,
+    bool primary,
+    bool selected,
     uint64_t base,
     uint64_t size,
     uint32_t width,
@@ -241,6 +244,14 @@ static void log_framebuffer_inventory(
     kernel::serial::puts(source ? source : "(unknown)");
     kernel::serial::puts(" framebufferCount=");
     serial_put_u32_decimal(framebufferCount);
+    kernel::serial::puts(" index=");
+    serial_put_u32_decimal(index);
+    if (primary) {
+        kernel::serial::puts(" primary");
+    }
+    if (selected) {
+        kernel::serial::puts(" selected");
+    }
     kernel::serial::puts(" base=");
     kernel::serial::put_hex64(base);
     kernel::serial::puts(" size=");
@@ -308,26 +319,65 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
     }
     
     if (has_fb) {
-        const uint32_t framebufferCount = 1u;
-        const uint64_t framebufferBase = reinterpret_cast<uint64_t>(kernel::framebuffer::get_buffer());
-        const uint64_t framebufferSize = is_bootinfo && bootinfo
-            ? bootinfo->FramebufferSize
-            : static_cast<uint64_t>(kernel::framebuffer::get_pitch()) * static_cast<uint64_t>(kernel::framebuffer::get_height());
-        const char* framebufferSource = is_bootinfo ? "UEFI BootInfo" : "Multiboot";
-        const char* framebufferFormat = is_bootinfo
-            ? framebuffer_format_name(bootinfo->FramebufferFormat)
-            : multiboot_framebuffer_format_name(multiboot_info);
+        if (is_bootinfo && bootinfo) {
+            uint32_t framebufferCount = bootinfo->FramebufferCount;
+            if (framebufferCount > guideXOS::GUIDEXOS_MAX_FRAMEBUFFERS) {
+                kernel::serial::puts("[KERNEL] WARNING: BootInfo framebufferCount exceeds array bound; truncating log\n");
+                framebufferCount = guideXOS::GUIDEXOS_MAX_FRAMEBUFFERS;
+            }
 
-        log_framebuffer_inventory(
-            framebufferSource,
-            framebufferCount,
-            framebufferBase,
-            framebufferSize,
-            kernel::framebuffer::get_width(),
-            kernel::framebuffer::get_height(),
-            kernel::framebuffer::get_pitch(),
-            kernel::framebuffer::get_bpp(),
-            framebufferFormat);
+            if (framebufferCount == 0u) {
+                kernel::serial::puts("[KERNEL] WARNING: BootInfo framebufferCount=0; logging primary framebuffer fields only\n");
+                log_framebuffer_descriptor(
+                    "UEFI BootInfo",
+                    0u,
+                    0u,
+                    true,
+                    true,
+                    bootinfo->FramebufferBase,
+                    bootinfo->FramebufferSize,
+                    bootinfo->FramebufferWidth,
+                    bootinfo->FramebufferHeight,
+                    bootinfo->FramebufferPitch,
+                    kernel::framebuffer::get_bpp(),
+                    framebuffer_format_name(bootinfo->FramebufferFormat));
+            } else {
+                for (uint32_t i = 0; i < framebufferCount; ++i) {
+                    const guideXOS::FramebufferDescriptor& descriptor = bootinfo->FramebufferDescriptors[i];
+                    log_framebuffer_descriptor(
+                        "UEFI BootInfo",
+                        framebufferCount,
+                        i,
+                        (descriptor.Flags & guideXOS::FRAMEBUFFER_DESCRIPTOR_FLAG_PRIMARY) != 0u,
+                        (descriptor.Flags & guideXOS::FRAMEBUFFER_DESCRIPTOR_FLAG_SELECTED) != 0u,
+                        descriptor.Base,
+                        descriptor.Size,
+                        descriptor.Width,
+                        descriptor.Height,
+                        descriptor.Pitch,
+                        descriptor.BitsPerPixel,
+                        framebuffer_format_name(descriptor.Format));
+                }
+            }
+
+            // TODO: once bare-metal multi-target rendering is enabled, feed this
+            // diagnostic descriptor list into the compositor's multi-framebuffer
+            // render/present path; primary remains render target for now.
+        } else {
+            log_framebuffer_descriptor(
+                "Multiboot",
+                1u,
+                0u,
+                true,
+                true,
+                reinterpret_cast<uint64_t>(kernel::framebuffer::get_buffer()),
+                static_cast<uint64_t>(kernel::framebuffer::get_pitch()) * static_cast<uint64_t>(kernel::framebuffer::get_height()),
+                kernel::framebuffer::get_width(),
+                kernel::framebuffer::get_height(),
+                kernel::framebuffer::get_pitch(),
+                kernel::framebuffer::get_bpp(),
+                multiboot_framebuffer_format_name(multiboot_info));
+        }
 
         // === GRAPHICS MODE BOOT ===
         kernel::serial::puts("[KERNEL] Framebuffer ready\n");
@@ -681,15 +731,18 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::vga::init();
         kernel::vga::print_colored("guideXOS Kernel\n", kernel::vga::Color::LightCyan, kernel::vga::Color::Black);
         kernel::vga::print("Framebuffer not available - text mode only\n");
-        log_framebuffer_inventory(
+        log_framebuffer_descriptor(
             is_bootinfo ? "UEFI BootInfo" : "Multiboot",
             0u,
             0u,
+            false,
+            false,
             0u,
-            kernel::framebuffer::get_width(),
-            kernel::framebuffer::get_height(),
-            kernel::framebuffer::get_pitch(),
-            kernel::framebuffer::get_bpp(),
+            0u,
+            0u,
+            0u,
+            0u,
+            0u,
             "Unknown");
         
         while (1) { }

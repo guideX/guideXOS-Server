@@ -88,8 +88,8 @@ This phase is diagnostic-only. It records what the current boot path can safely 
 
 ### What guideXOS currently detects
 
-- UEFI x86_64 boots through the bootloader's `LocateProtocol` lookup for GOP, then copies one selected framebuffer into `BootInfo`.
-- The bootloader now logs how many GOP handles UEFI exposes, but `BootInfo` still carries only one selected framebuffer descriptor.
+- UEFI x86_64 boots through the bootloader's `LocateProtocol` lookup for GOP, then copies the selected framebuffer into the primary `BootInfo` fields and preserves a bounded diagnostic framebuffer array.
+- The bootloader now logs how many GOP handles UEFI exposes; `FramebufferCount` and `FramebufferDescriptors[]` are diagnostic/preparatory, while the legacy primary framebuffer fields still drive rendering.
 - BIOS / Multiboot x86 and amd64 boots carry a single framebuffer via the Multiboot info block.
 - The kernel's bare-metal compositor bridge still binds one framebuffer to one `DisplayRenderTarget`.
 - The hosted display model can already represent multiple monitors, but that is currently a hosted synthetic construct, not a real hardware handoff.
@@ -117,7 +117,17 @@ The new probe launchers are:
 
 ### Next required implementation step
 
-Extend the boot handoff so the kernel can receive a list of framebuffer descriptors, then teach the bare-metal compositor path to log and hold disabled diagnostic targets before enabling any real multi-output rendering.
+Keep the diagnostic framebuffer array flowing through the boot path, then teach the bare-metal compositor bridge to materialize disabled secondary targets for inspection before any real multi-output rendering is enabled.
+
+## Framebuffer Array Handoff
+
+The bootloader and kernel now preserve a bounded diagnostic framebuffer array in `BootInfo`, but the legacy single-framebuffer fields remain the authoritative rendering contract.
+
+- `FramebufferBase`, `FramebufferSize`, `FramebufferWidth`, `FramebufferHeight`, `FramebufferPitch`, and `FramebufferFormat` still describe the primary framebuffer that the renderer uses today.
+- `FramebufferCount` and `FramebufferDescriptors[]` are preparatory diagnostics. They let the boot path preserve additional GOP descriptors when firmware exposes them, but they do not enable multi-output rendering yet.
+- UEFI GOP can populate more than one descriptor if firmware or QEMU exposes multiple usable handles.
+- BIOS / Multiboot remains a single-descriptor handoff with `FramebufferCount = 1`.
+- Secondary framebuffer rendering stays deferred until the bare-metal compositor grows explicit multi-target present support.
 
 ## Next Recommended Steps
 

@@ -33,7 +33,7 @@ Forbidden:
 #include <Guid/FileInfo.h>
 #include "bootinfo.h"          // legacy, gradually being phased out
 #include "elf.h"
-#include "guidexOSBootInfo.h"   // canonical BootInfo v1
+#include "guidexOSBootInfo.h"   // canonical BootInfo v2
 #include "uefi_shim.h"         // UEFI shims for freestanding environment
 #include "debug_helpers.h"     // Post-ExitBootServices debugging
 #include "paging.h"            // minimal identity page tables
@@ -73,17 +73,6 @@ typedef EFI_STATUS (EFIAPI *EFI_LOCATE_HANDLE_BUFFER)(
     UINTN* NoHandles,
     EFI_HANDLE** Buffer);
 
-static const CHAR16* GopPixelFormatName(EFI_GRAPHICS_PIXEL_FORMAT format)
-{
-    switch (format) {
-    case PixelRedGreenBlueReserved8BitPerColor: return (CONST CHAR16*)L"PixelRedGreenBlueReserved8BitPerColor";
-    case PixelBlueGreenRedReserved8BitPerColor: return (CONST CHAR16*)L"PixelBlueGreenRedReserved8BitPerColor";
-    case PixelBitMask: return (CONST CHAR16*)L"PixelBitMask";
-    case PixelBltOnly: return (CONST CHAR16*)L"PixelBltOnly";
-    default: return (CONST CHAR16*)L"PixelFormatMax";
-    }
-}
-
 static guideXOS::FramebufferFormat MapGopPixelFormat(EFI_GRAPHICS_PIXEL_FORMAT format)
 {
     switch (format) {
@@ -96,6 +85,18 @@ static guideXOS::FramebufferFormat MapGopPixelFormat(EFI_GRAPHICS_PIXEL_FORMAT f
     }
 }
 
+static uint32_t GopBytesPerPixel(EFI_GRAPHICS_PIXEL_FORMAT format)
+{
+    switch (format) {
+    case PixelRedGreenBlueReserved8BitPerColor:
+    case PixelBlueGreenRedReserved8BitPerColor:
+    case PixelBitMask:
+        return 4u;
+    default:
+        return 0u;
+    }
+}
+
 static const CHAR16* BootInfoFramebufferFormatName(guideXOS::FramebufferFormat format)
 {
     switch (format) {
@@ -105,54 +106,181 @@ static const CHAR16* BootInfoFramebufferFormatName(guideXOS::FramebufferFormat f
     }
 }
 
-static UINTN CountGopHandles(EFI_SYSTEM_TABLE* SystemTable, EFI_GUID* gopGuid)
+static const CHAR16* FramebufferSourceName(guideXOS::FramebufferSource source)
 {
-    if (!SystemTable || !SystemTable->BootServices || !gopGuid) {
-        return 0;
+    switch (source) {
+    case guideXOS::FramebufferSource::Multiboot: return (CONST CHAR16*)L"Multiboot";
+    case guideXOS::FramebufferSource::UefiGop: return (CONST CHAR16*)L"UEFI GOP";
+    default: return (CONST CHAR16*)L"Unknown";
+    }
+}
+
+static bool CaptureGopFramebuffer(
+    EFI_GRAPHICS_OUTPUT_PROTOCOL* gop,
+    guideXOS::FramebufferSource source,
+    uint32_t flags,
+    guideXOS::FramebufferDescriptor* outDescriptor)
+{
+    if (!gop || !gop->Mode || !gop->Mode->Info || !outDescriptor) {
+        return false;
     }
 
+    SetMem(outDescriptor, sizeof(*outDescriptor), 0);
+    outDescriptor->Base = (uint64_t)(UINTN)gop->Mode->FrameBufferBase;
+    outDescriptor->Width = (uint32_t)gop->Mode->Info->HorizontalResolution;
+    outDescriptor->Height = (uint32_t)gop->Mode->Info->VerticalResolution;
+
+    const uint32_t bytesPerPixel = GopBytesPerPixel(gop->Mode->Info->PixelFormat);
+    outDescriptor->Pitch = (uint32_t)gop->Mode->Info->PixelsPerScanLine * bytesPerPixel;
+    outDescriptor->Size = (uint64_t)outDescriptor->Pitch * (uint64_t)outDescriptor->Height;
+    outDescriptor->Format = MapGopPixelFormat(gop->Mode->Info->PixelFormat);
+    outDescriptor->BitsPerPixel = bytesPerPixel * 8u;
+    outDescriptor->Source = source;
+    outDescriptor->Flags = flags | guideXOS::FRAMEBUFFER_DESCRIPTOR_FLAG_VALID;
+
+    return outDescriptor->Base != 0u &&
+           outDescriptor->Size != 0u &&
+           outDescriptor->Width != 0u &&
+           outDescriptor->Height != 0u &&
+           outDescriptor->Pitch != 0u;
+}
+
+static bool IsSelectedGopFramebuffer(
+    EFI_GRAPHICS_OUTPUT_PROTOCOL* candidate,
+    EFI_GRAPHICS_OUTPUT_PROTOCOL* selected)
+{
+    if (!candidate || !selected || !candidate->Mode || !selected->Mode ||
+        !candidate->Mode->Info || !selected->Mode->Info) {
+        return false;
+    }
+
+    return candidate == selected;
+}
+
+static void LogFramebufferDescriptor(UINT32 index, const guideXOS::FramebufferDescriptor& descriptor)
+{
+    const CHAR16* primaryTag = (descriptor.Flags & guideXOS::FRAMEBUFFER_DESCRIPTOR_FLAG_PRIMARY) ? (CONST CHAR16*)L" primary" : (CONST CHAR16*)L"";
+    const CHAR16* selectedTag = (descriptor.Flags & guideXOS::FRAMEBUFFER_DESCRIPTOR_FLAG_SELECTED) ? (CONST CHAR16*)L" selected" : (CONST CHAR16*)L"";
+
+    Print((CONST CHAR16*)L"[BOOT] FB[%u]%s%s src=%s base=%p size=%Lu geometry=%ux%u pitch=%u bpp=%u format=%s\n",
+        (UINT32)index,
+        primaryTag,
+        selectedTag,
+        FramebufferSourceName(descriptor.Source),
+        (VOID*)(UINTN)descriptor.Base,
+        (UINT64)descriptor.Size,
+        (UINT32)descriptor.Width,
+        (UINT32)descriptor.Height,
+        (UINT32)descriptor.Pitch,
+        (UINT32)descriptor.BitsPerPixel,
+        BootInfoFramebufferFormatName(descriptor.Format));
+}
+
+static UINT32 PopulateGopFramebufferDiagnostics(
+    EFI_SYSTEM_TABLE* SystemTable,
+    EFI_GRAPHICS_OUTPUT_PROTOCOL* selectedGop,
+    guideXOS::BootInfo* bootInfo)
+{
+    if (!SystemTable || !SystemTable->BootServices || !selectedGop || !bootInfo) {
+        return 0u;
+    }
+
+    if (!selectedGop->Mode || !selectedGop->Mode->Info) {
+        Print((CONST CHAR16*)L"[BOOT] GOP mode info unavailable\n");
+        bootInfo->FramebufferCount = 0u;
+        return 0u;
+    }
+
+    guideXOS::FramebufferDescriptor primaryDescriptor{};
+    if (!CaptureGopFramebuffer(
+            selectedGop,
+            guideXOS::FramebufferSource::UefiGop,
+            guideXOS::FRAMEBUFFER_DESCRIPTOR_FLAG_PRIMARY | guideXOS::FRAMEBUFFER_DESCRIPTOR_FLAG_SELECTED,
+            &primaryDescriptor)) {
+        Print((CONST CHAR16*)L"[BOOT] GOP selected framebuffer invalid; BootInfo array disabled\n");
+        bootInfo->FramebufferCount = 0u;
+        return 0u;
+    }
+
+    bootInfo->FramebufferCount = 1u;
+    bootInfo->FramebufferDescriptors[0] = primaryDescriptor;
+    bootInfo->FramebufferBase = primaryDescriptor.Base;
+    bootInfo->FramebufferSize = primaryDescriptor.Size;
+    bootInfo->FramebufferWidth = primaryDescriptor.Width;
+    bootInfo->FramebufferHeight = primaryDescriptor.Height;
+    bootInfo->FramebufferPitch = primaryDescriptor.Pitch;
+    bootInfo->FramebufferFormat = primaryDescriptor.Format;
+    if (bootInfo->FramebufferBase != 0u && bootInfo->FramebufferSize != 0u) {
+        bootInfo->Flags |= (1u << 1);
+    }
+
+    EFI_GUID gopGuid = EFI_GRAPHICS_OUTPUT_PROTOCOL_GUID;
     auto locateHandleBuffer = reinterpret_cast<EFI_LOCATE_HANDLE_BUFFER>(SystemTable->BootServices->LocateHandleBuffer);
     if (!locateHandleBuffer) {
-        return 0;
+        Print((CONST CHAR16*)L"[BOOT] GOP handle enumeration unavailable; exporting primary framebuffer only\n");
+        LogFramebufferDescriptor(0u, bootInfo->FramebufferDescriptors[0]);
+        return bootInfo->FramebufferCount;
     }
 
     EFI_HANDLE* handles = NULL;
     UINTN handleCount = 0;
-    EFI_STATUS status = locateHandleBuffer(ByProtocol, gopGuid, NULL, &handleCount, &handles);
+    EFI_STATUS status = locateHandleBuffer(ByProtocol, &gopGuid, NULL, &handleCount, &handles);
     if (EFI_ERROR(status)) {
-        return 0;
+        Print((CONST CHAR16*)L"[BOOT] GOP handle enumeration failed; exporting primary framebuffer only\n");
+        LogFramebufferDescriptor(0u, bootInfo->FramebufferDescriptors[0]);
+        return bootInfo->FramebufferCount;
+    }
+
+    Print((CONST CHAR16*)L"[BOOT] GOP handles discovered: %u\n", (UINT32)handleCount);
+    LogFramebufferDescriptor(0u, bootInfo->FramebufferDescriptors[0]);
+
+    UINT32 discoveredIndex = 1u;
+    bool truncated = false;
+    for (UINTN handleIndex = 0; handleIndex < handleCount; ++handleIndex) {
+        EFI_GRAPHICS_OUTPUT_PROTOCOL* candidate = NULL;
+        status = SystemTable->BootServices->HandleProtocol(handles[handleIndex], &gopGuid, (void**)&candidate);
+        if (EFI_ERROR(status) || !candidate || !candidate->Mode || !candidate->Mode->Info) {
+            continue;
+        }
+
+        if (IsSelectedGopFramebuffer(candidate, selectedGop)) {
+            continue;
+        }
+
+        guideXOS::FramebufferDescriptor descriptor{};
+        if (!CaptureGopFramebuffer(candidate, guideXOS::FramebufferSource::UefiGop, 0u, &descriptor)) {
+            continue;
+        }
+
+        if (discoveredIndex >= guideXOS::GUIDEXOS_MAX_FRAMEBUFFERS) {
+            truncated = true;
+            continue;
+        }
+
+        bootInfo->FramebufferDescriptors[discoveredIndex] = descriptor;
+        LogFramebufferDescriptor(discoveredIndex, bootInfo->FramebufferDescriptors[discoveredIndex]);
+        ++discoveredIndex;
     }
 
     if (handles != NULL) {
         SystemTable->BootServices->FreePool(handles);
     }
-    return handleCount;
-}
 
-static void LogGopSummary(EFI_SYSTEM_TABLE* SystemTable, EFI_GRAPHICS_OUTPUT_PROTOCOL* gop)
-{
-    if (!gop || !gop->Mode || !gop->Mode->Info) {
-        Print((CONST CHAR16*)L"[BOOT] GOP mode info unavailable\n");
-        return;
+    bootInfo->FramebufferCount = discoveredIndex;
+
+    if (handleCount > 1u) {
+        Print((CONST CHAR16*)L"[BOOT] Diagnostic framebuffer array exported %u GOP framebuffer(s); primary remains render target\n",
+            (UINT32)bootInfo->FramebufferCount);
+    } else {
+        Print((CONST CHAR16*)L"[BOOT] Diagnostic framebuffer array exported a single primary GOP framebuffer\n");
     }
 
-    EFI_GUID gopGuid = EFI_GRAPHICS_OUTPUT_PROTOCOL_GUID;
-    UINTN gopHandleCount = CountGopHandles(SystemTable, &gopGuid);
-
-    Print((CONST CHAR16*)L"[BOOT] GOP handles discovered: %u\n", (UINT32)gopHandleCount);
-    Print((CONST CHAR16*)L"[BOOT] GOP selected mode: %u/%u framebuffer=%p size=%Lu geometry=%ux%u pitch=%u pixelFormat=%s\n",
-        (UINT32)gop->Mode->Mode,
-        (UINT32)gop->Mode->MaxMode,
-        (VOID*)(UINTN)gop->Mode->FrameBufferBase,
-        (UINT64)gop->Mode->FrameBufferSize,
-        (UINT32)gop->Mode->Info->HorizontalResolution,
-        (UINT32)gop->Mode->Info->VerticalResolution,
-        (UINT32)(gop->Mode->Info->PixelsPerScanLine * 4u),
-        GopPixelFormatName(gop->Mode->Info->PixelFormat));
-
-    if (gopHandleCount > 1) {
-        Print((CONST CHAR16*)L"[BOOT] Note: BootInfo exports one selected framebuffer only; additional GOP handles are not exported yet\n");
+    if (truncated) {
+        Print((CONST CHAR16*)L"[BOOT] Note: framebuffer array truncated to %u entries\n",
+            (UINT32)guideXOS::GUIDEXOS_MAX_FRAMEBUFFERS);
     }
+
+    return bootInfo->FramebufferCount;
 }
 
 } // namespace
@@ -464,7 +592,6 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
         Print(L"Failed to locate GOP\n");
         return status;
     }
-    LogGopSummary(SystemTable, GOP);
 
     // --- Load Kernel (your existing loader) ---
     status = LoadFile(&KernelFile, (CHAR16*)L"kernel.elf", ImageHandle, SystemTable);
@@ -553,7 +680,7 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
         }
     }
 
-    // --- Populate BootInfo v1 BEFORE ExitBootServices ---
+    // --- Populate BootInfo v2 BEFORE ExitBootServices ---
     v1BootInfo->Magic   = guideXOS::GUIDEXOS_BOOTINFO_MAGIC;
     v1BootInfo->Version = guideXOS::GUIDEXOS_BOOTINFO_VERSION;
     v1BootInfo->Size    = (uint16_t)sizeof(guideXOS::BootInfo);
@@ -564,19 +691,8 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
     // ACPI RSDP pointer (64-bit physical)
     v1BootInfo->AcpiRsdp = rsdp ? (uint64_t)(UINTN)rsdp : 0ull;
 
-    // Framebuffer from GOP
-    v1BootInfo->FramebufferBase   = (uint64_t)GOP->Mode->FrameBufferBase;
-    v1BootInfo->FramebufferWidth  = GOP->Mode->Info->HorizontalResolution;
-    v1BootInfo->FramebufferHeight = GOP->Mode->Info->VerticalResolution;
-    v1BootInfo->FramebufferPitch  = GOP->Mode->Info->PixelsPerScanLine * 4u; // 32 bpp
-    v1BootInfo->FramebufferSize   = (uint64_t)v1BootInfo->FramebufferPitch *
-                                   (uint64_t)v1BootInfo->FramebufferHeight;
-    v1BootInfo->FramebufferFormat = MapGopPixelFormat(GOP->Mode->Info->PixelFormat);
-    Print((CONST CHAR16*)L"[BOOT] BootInfo framebuffer format: %s\n",
-        BootInfoFramebufferFormatName(v1BootInfo->FramebufferFormat));
-
-    if (v1BootInfo->FramebufferBase != 0 && v1BootInfo->FramebufferSize != 0)
-        v1BootInfo->Flags |= (1u << 1); // framebuffer valid
+    // Framebuffer from GOP (diagnostic array + legacy primary fields)
+    PopulateGopFramebufferDiagnostics(SystemTable, GOP, v1BootInfo);
 
     // Allocate a simple stack that survives ExitBootServices
     // (Some kernels assume a larger / aligned stack than what UEFI leaves us.)
@@ -1012,7 +1128,7 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE* SystemTable) {
         }
     }
 
-    // Fill memory map section in BootInfo v1
+    // Fill memory map section in BootInfo v2
     v1BootInfo->MemoryMap               = (uint64_t)(UINTN)memoryMap;
     v1BootInfo->MemoryMapEntryCount     = (uint64_t)memoryMapCount;
     v1BootInfo->MemoryMapDescriptorSize = (uint64_t)memoryMapDescSize;

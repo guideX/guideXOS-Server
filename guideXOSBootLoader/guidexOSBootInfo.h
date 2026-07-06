@@ -21,6 +21,35 @@ namespace guideXOS
         B8G8R8A8,   // 32‑bit, little‑endian, BGRA
     };
 
+    // Diagnostic framebuffer origin for the boot handoff array.
+    enum class FramebufferSource : uint32_t
+    {
+        Unknown = 0,
+        Multiboot = 1,
+        UefiGop = 2,
+    };
+
+    // Framebuffer descriptor flags.
+    static const uint32_t FRAMEBUFFER_DESCRIPTOR_FLAG_VALID    = (1u << 0);
+    static const uint32_t FRAMEBUFFER_DESCRIPTOR_FLAG_PRIMARY  = (1u << 1);
+    static const uint32_t FRAMEBUFFER_DESCRIPTOR_FLAG_SELECTED = (1u << 2);
+
+    // Bounded diagnostic list size for framebuffer descriptors in BootInfo.
+    static const uint32_t GUIDEXOS_MAX_FRAMEBUFFERS = 8u;
+
+    struct FramebufferDescriptor
+    {
+        uint64_t Base;
+        uint64_t Size;
+        uint32_t Width;
+        uint32_t Height;
+        uint32_t Pitch;
+        enum FramebufferFormat Format;
+        uint32_t BitsPerPixel;
+        enum FramebufferSource Source;
+        uint32_t Flags;
+    };
+
     // NIC device information (passed from bootloader to kernel)
     struct NicInfo
     {
@@ -63,6 +92,8 @@ namespace guideXOS
         uint32_t FramebufferHeight;
         uint32_t FramebufferPitch;
         enum FramebufferFormat FramebufferFormat;
+        uint32_t FramebufferCount;
+        FramebufferDescriptor FramebufferDescriptors[GUIDEXOS_MAX_FRAMEBUFFERS];
         uint32_t Reserved2;
         uint64_t AcpiRsdp;
         uint64_t CommandLine;
@@ -78,9 +109,9 @@ namespace guideXOS
 
 namespace guideXOS
 {
-    // Magic and version constants for BootInfo v1
+    // Magic and version constants for BootInfo v2
     static const uint32_t GUIDEXOS_BOOTINFO_MAGIC   = 0x49425847; // 'GXBI'
-    static const uint16_t GUIDEXOS_BOOTINFO_VERSION = 1;
+    static const uint16_t GUIDEXOS_BOOTINFO_VERSION = 2;
 
     // Early panic: implemented in a .cpp file, infinite loop and/or framebuffer error.
     [[noreturn]] void guidexos_early_panic(const BootInfo* bi);
@@ -101,7 +132,7 @@ namespace guideXOS
         return (sum == 0u);
     }
 
-    // Very early, heap-less validation of BootInfo v1
+    // Very early, heap-less validation of BootInfo v2
     static inline void guidexos_validate_bootinfo_or_panic(const BootInfo* bi)
     {
         if (!bi) {
@@ -121,6 +152,10 @@ namespace guideXOS
             guidexos_early_panic(bi);
         }
         if (bi->Size != sizeof(BootInfo)) {
+            guidexos_early_panic(bi);
+        }
+
+        if (bi->FramebufferCount > GUIDEXOS_MAX_FRAMEBUFFERS) {
             guidexos_early_panic(bi);
         }
 
