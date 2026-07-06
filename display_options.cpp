@@ -1133,10 +1133,10 @@ void DisplayOptions::drawThemeTab()
         "Dark taskbar surfaces");
     if (s_selectedThemeId == DesktopThemeId::SciFi) {
         drawText(s_windowId, kThemeRecommendationX, kThemeRecommendationY,
-            "Recommended backgrounds for Sci Fi: guideXOS Space, guideXOS Space 2, Tron Porsche, CPU.",
+            "Optional recommendation for Sci Fi: guideXOS Space, guideXOS Space 2, Tron Porsche, CPU.",
             DisplayOptionsMutedTextColor());
         drawText(s_windowId, kThemeRecommendationX, kThemeRecommendationY + kThemeRecommendationLineGap,
-            "Change this on the Background tab.",
+            "Choose any wallpaper on the Background tab.",
             DisplayOptionsMutedTextColor());
     }
 }

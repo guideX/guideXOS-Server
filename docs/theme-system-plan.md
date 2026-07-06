@@ -479,6 +479,20 @@ Phase 4C adds a small opt-in Sci Fi wallpaper recommendation note in Display Opt
 * No assets were added, removed, moved, or renamed.
 * Bare-metal wallpaper parity remains deferred.
 
+## Phase 4C.1
+
+Phase 4C.1 is a stabilization-only review pass for the Phase 4C Sci Fi wallpaper recommendation note. The note was reviewed in Display Options and remains read-only and opt-in. No wallpaper/default/persistence/assets changed, and no automatic wallpaper switching was added.
+
+* The Theme tab recommendation stays gated to Sci Fi selection and remains read-only.
+* Tiny copy fix: the note now says the recommendation is optional and tells users to pick any wallpaper on the Background tab.
+* Placement was reviewed and kept below the theme cards and above the footer action text.
+* No theme-scoped wallpaper persistence was added.
+* Classic remains the default theme.
+* Sci Fi remains opt-in.
+* No default wallpaper changed.
+* No assets were added, removed, moved, or renamed.
+* No per-effect controls were introduced.
+
 ## Manual Validation Runbook
 
 * Start the hosted server executable.
