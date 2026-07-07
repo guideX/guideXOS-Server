@@ -161,7 +161,12 @@ namespace gxos {
         }
 
         static bool isNavigatorWindow(const WinInfo& winfo) {
-            return winfo.title.find("guideXOS Navigator") != std::string::npos;
+            static const std::string kNavigatorTitle = "guideXOS Navigator";
+            static const std::string kNavigatorTitleSuffix = " - guideXOS Navigator";
+            return winfo.title == kNavigatorTitle ||
+                (winfo.title.size() >= kNavigatorTitleSuffix.size() &&
+                 winfo.title.compare(winfo.title.size() - kNavigatorTitleSuffix.size(),
+                     kNavigatorTitleSuffix.size(), kNavigatorTitleSuffix) == 0);
         }
 
         static uint32_t navigatorClassicWidgetFillColor(const Widget& widget) {

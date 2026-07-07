@@ -506,6 +506,20 @@ Phase 4D is the next app-surface pilot for the guideXOS Server theme system. It 
 * Broad app redesign remains deferred.
 * Future app polish should continue one app at a time.
 
+## Phase 4D.1
+
+Phase 4D.1 is a stabilization-only review pass for the Navigator app-surface pilot. Navigator was reviewed conservatively and kept within the existing theme-surface scope.
+
+* The Navigator pilot was reviewed and stabilized.
+* The shared compositor widget guard was reviewed and tightened to match Navigator windows only.
+* Classic preservation was confirmed; the previous Navigator feel remains close to the current look.
+* Authored page background colors remain respected when present.
+* No Navigator behavior, navigation logic, page loading, URL/path handling, history, bookmarks, persistence, or App Model behavior changed.
+* No new effects, blur, glass, animation, rounded clipping, rounded hit-testing, or per-effect controls were added.
+* Tiny cleanup made: the shared compositor Navigator widget guard now uses a tighter title match to avoid accidental spillover.
+* Tiny readability fix made: Navigator's default page-body text now tracks the content surface in Sci Fi so dark content stays legible while authored colors still win.
+* No layout or hit-test change was needed in this pass.
+
 ## Manual Validation Runbook
 
 * Start the hosted server executable.
@@ -569,7 +583,7 @@ Phase 4D is the next app-surface pilot for the guideXOS Server theme system. It 
 
 * Classic should continue to look basically unchanged.
 * Sci Fi is a first visible proof that the theme system exists, not a full futuristic redesign.
-* Rounded-window clipping remains deferred; this foundation is intentionally limited to IDs, persistence, selector wiring, safe chrome colors, the Phase 2A chrome metric pass, the guarded Phase 2B rounded-shell preview, the Phase 2C border/highlight polish pass, the Phase 2D hosted shadow preview, the Phase 2E desktop/taskbar surface polish pass, the Phase 2G validation checkpoint, the Phase 3A Display Options app-surface pilot, the Phase 3B Control Panel app-surface pilot, the Phase 3C Notepad app-surface pilot, the Phase 3C.1 stabilization review pass, the Phase 3D Calculator app-surface pilot, the Phase 3D.1 stabilization review pass, the Phase 3E File Explorer app-surface pilot, the Phase 3E.1 File Explorer stabilization review pass, the Phase 3F Clock app-surface pilot, the Phase 3F.1 Clock stabilization review pass, the Phase 3G app-surface closeout, the Phase 3H hosted visual validation pass, the Phase 4A readiness/defaults boundary checkpoint, the Phase 4B wallpaper/background inventory and design-readiness pass, the Phase 4C wallpaper recommendation note, the Phase 4C.1 stabilization review pass, and the Phase 4D Navigator app-surface pilot.
+* Rounded-window clipping remains deferred; this foundation is intentionally limited to IDs, persistence, selector wiring, safe chrome colors, the Phase 2A chrome metric pass, the guarded Phase 2B rounded-shell preview, the Phase 2C border/highlight polish pass, the Phase 2D hosted shadow preview, the Phase 2E desktop/taskbar surface polish pass, the Phase 2G validation checkpoint, the Phase 3A Display Options app-surface pilot, the Phase 3B Control Panel app-surface pilot, the Phase 3C Notepad app-surface pilot, the Phase 3C.1 stabilization review pass, the Phase 3D Calculator app-surface pilot, the Phase 3D.1 stabilization review pass, the Phase 3E File Explorer app-surface pilot, the Phase 3E.1 File Explorer stabilization review pass, the Phase 3F Clock app-surface pilot, the Phase 3F.1 Clock stabilization review pass, the Phase 3G app-surface closeout, the Phase 3H hosted visual validation pass, the Phase 4A readiness/defaults boundary checkpoint, the Phase 4B wallpaper/background inventory and design-readiness pass, the Phase 4C wallpaper recommendation note, the Phase 4C.1 stabilization review pass, the Phase 4D Navigator app-surface pilot, and the Phase 4D.1 Navigator stabilization review pass.
 
 ## Recommended Next Pass
 

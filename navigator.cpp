@@ -159,12 +159,16 @@ namespace {
 			text));
 	}
 
-	void drawTextAtStyled(uint64_t windowId, int x, int y, const std::string& text, const WebStyle& style)
+	void drawTextAtStyled(uint64_t windowId, int x, int y, const std::string& text, const WebStyle& style, uint32_t fallbackColor = 0xFF303846u)
 	{
 		if (style.hasColor) {
-			int r = static_cast<int>((style.color >> 16) & 0xFFu);
-			int g = static_cast<int>((style.color >> 8) & 0xFFu);
-			int b = static_cast<int>(style.color & 0xFFu);
+			uint32_t color = style.color;
+			if (color == 0xFF303846u) {
+				color = fallbackColor;
+			}
+			int r = static_cast<int>((color >> 16) & 0xFFu);
+			int g = static_cast<int>((color >> 8) & 0xFFu);
+			int b = static_cast<int>(color & 0xFFu);
 			if (style.italic) {
 				r = std::max(0, r - 12);
 				g = std::max(0, g - 12);
@@ -180,12 +184,21 @@ namespace {
 			return;
 		}
 		if (style.bold) {
-			drawTextAt(windowId, x + 1, y, text);
+			drawTextAtColored(windowId, x + 1, y, text,
+				static_cast<int>((fallbackColor >> 16) & 0xFFu),
+				static_cast<int>((fallbackColor >> 8) & 0xFFu),
+				static_cast<int>(fallbackColor & 0xFFu));
 		}
 		if (style.italic) {
-			drawTextAt(windowId, x + 1, y + 1, text);
+			drawTextAtColored(windowId, x + 1, y + 1, text,
+				static_cast<int>((fallbackColor >> 16) & 0xFFu),
+				static_cast<int>((fallbackColor >> 8) & 0xFFu),
+				static_cast<int>(fallbackColor & 0xFFu));
 		}
-		drawTextAt(windowId, x, y, text);
+		drawTextAtColored(windowId, x, y, text,
+			static_cast<int>((fallbackColor >> 16) & 0xFFu),
+			static_cast<int>((fallbackColor >> 8) & 0xFFu),
+			static_cast<int>(fallbackColor & 0xFFu));
 	}
 
 	void drawImage(uint64_t windowId, int x, int y, int w, int h, const std::string& path)
@@ -233,6 +246,14 @@ namespace {
 			(baseR * keepPercent + overR * overlayPercent) / 100,
 			(baseG * keepPercent + overG * overlayPercent) / 100,
 			(baseB * keepPercent + overB * overlayPercent) / 100);
+	}
+
+	bool isDarkColor(uint32_t color)
+	{
+		const int r = static_cast<int>((color >> 16) & 0xFFu);
+		const int g = static_cast<int>((color >> 8) & 0xFFu);
+		const int b = static_cast<int>(color & 0xFFu);
+		return ((r * 30) + (g * 59) + (b * 11)) < (128 * 100);
 	}
 
 	void drawThemeRect(uint64_t windowId, int x, int y, int w, int h, uint32_t color)
@@ -305,6 +326,12 @@ namespace {
 		if (!isSciFiThemeActive()) return packRgb(245, 247, 250);
 		const DesktopTheme& theme = navigatorTheme();
 		return blendColor(theme.windowBackground, theme.taskbarBackground, 18);
+	}
+
+	uint32_t NavigatorContentTextColor(uint32_t contentColor)
+	{
+		if (!isSciFiThemeActive()) return 0xFF303846u;
+		return isDarkColor(contentColor) ? navigatorTheme().titleBarText : 0xFF303846u;
 	}
 
 	uint32_t NavigatorContentBorderColor()
@@ -2754,6 +2781,7 @@ void Navigator::renderDocument()
 	if (s_currentDoc.bodyStyle.hasBackgroundColor) {
 		contentColor = s_currentDoc.bodyStyle.backgroundColor;
 	}
+	const uint32_t contentTextColor = NavigatorContentTextColor(contentColor);
 	drawThemeRect(s_windowId, kContentX, kToolbarH + 6, kContentW, kContentH, contentColor);
 	drawThemeRect(s_windowId, kContentX, kToolbarH + 6, kContentW, 1, NavigatorContentBorderColor());
 	// Scroll-track slot
@@ -2877,7 +2905,7 @@ void Navigator::renderDocument()
 					} else if (cellStyle.textAlign == TextAlign::Right) {
 						textX = cellRight - paddingRight - std::min(innerWidth, lineW);
 					}
-					drawTextAtStyled(s_windowId, textX, lineY, ln, cellStyle);
+					drawTextAtStyled(s_windowId, textX, lineY, ln, cellStyle, contentTextColor);
 					lineY += layout.lineHeight;
 				}
 				if (col < row.cells.size() - 1) {
@@ -2966,9 +2994,9 @@ void Navigator::renderDocument()
 			// Slightly larger heading: draw a subtle accent bar then the text
 			drawThemeRect(s_windowId, outerX + paddingLeft, boxY + borderTop + paddingTop + std::max(lineHeight, headingFontSize - 4),
 				std::max(1, innerWidth), 2, NavigatorAccentColor());
-			drawTextAtStyled(s_windowId, blockTextX(block, outerX + paddingLeft, innerWidth, std::min(static_cast<int>(block.text.size()) * kCharW, innerWidth)), drawY + blockMarginTop + borderTop + paddingTop + textLineTopPaddingPx(lineHeight), block.text, block.style);
+			drawTextAtStyled(s_windowId, blockTextX(block, outerX + paddingLeft, innerWidth, std::min(static_cast<int>(block.text.size()) * kCharW, innerWidth)), drawY + blockMarginTop + borderTop + paddingTop + textLineTopPaddingPx(lineHeight), block.text, block.style, contentTextColor);
 			if (block.style.bold) {
-				drawTextAtStyled(s_windowId, blockTextX(block, outerX + paddingLeft + 1, innerWidth, std::min(static_cast<int>(block.text.size()) * kCharW, innerWidth)), drawY + blockMarginTop + borderTop + paddingTop + textLineTopPaddingPx(lineHeight), block.text, block.style);
+				drawTextAtStyled(s_windowId, blockTextX(block, outerX + paddingLeft + 1, innerWidth, std::min(static_cast<int>(block.text.size()) * kCharW, innerWidth)), drawY + blockMarginTop + borderTop + paddingTop + textLineTopPaddingPx(lineHeight), block.text, block.style, contentTextColor);
 			}
 			break;
 
@@ -2977,7 +3005,7 @@ void Navigator::renderDocument()
 			int lineY = drawY + blockMarginTop + borderTop + paddingTop + textLineTopPaddingPx(lineHeight);
 			for (const std::string& ln : lines) {
 				const int lineW = static_cast<int>(ln.size()) * kCharW;
-				drawTextAtStyled(s_windowId, blockTextX(block, outerX + paddingLeft, innerWidth, lineW), lineY, ln, block.style);
+				drawTextAtStyled(s_windowId, blockTextX(block, outerX + paddingLeft, innerWidth, lineW), lineY, ln, block.style, contentTextColor);
 				lineY += lineHeight;
 			}
 			break;
@@ -2989,14 +3017,14 @@ void Navigator::renderDocument()
 			const int ordinal = blockListOrdinal(s_currentDoc, blockIndex);
 			const std::string marker = blockListMarkerText(block, ordinal);
 			if (!marker.empty()) {
-				drawTextAtStyled(s_windowId, outerX + paddingLeft, drawY + blockMarginTop + borderTop + paddingTop + textLineTopPaddingPx(lineHeight), marker, block.style);
+				drawTextAtStyled(s_windowId, outerX + paddingLeft, drawY + blockMarginTop + borderTop + paddingTop + textLineTopPaddingPx(lineHeight), marker, block.style, contentTextColor);
 			}
 			const int textInset = blockListTextInsetPx(block);
 			auto lines = wrapText(block.text, listWrapCols);
 			int lineY = drawY + blockMarginTop + borderTop + paddingTop + textLineTopPaddingPx(lineHeight);
 			for (const std::string& ln : lines) {
 				const int lineW = static_cast<int>(ln.size()) * kCharW;
-				drawTextAtStyled(s_windowId, blockTextX(block, outerX + paddingLeft + textInset, std::max(1, innerWidth - textInset), lineW), lineY, ln, block.style);
+				drawTextAtStyled(s_windowId, blockTextX(block, outerX + paddingLeft + textInset, std::max(1, innerWidth - textInset), lineW), lineY, ln, block.style, contentTextColor);
 				lineY += lineHeight;
 			}
 			break;
@@ -3007,7 +3035,7 @@ void Navigator::renderDocument()
 			auto lines = splitPreLines(block.text);
 			int lineY = drawY + blockMarginTop + borderTop + paddingTop + textLineTopPaddingPx(lineHeight);
 			for (const std::string& ln : lines) {
-				drawTextAtStyled(s_windowId, outerX + paddingLeft, lineY, ln, block.style);
+				drawTextAtStyled(s_windowId, outerX + paddingLeft, lineY, ln, block.style, contentTextColor);
 				lineY += lineHeight;
 			}
 			break;
@@ -3039,7 +3067,7 @@ void Navigator::renderDocument()
 					drawRect(s_windowId, blockTextX(block, outerX + paddingLeft, innerWidth, lineW), textUnderlineYPx(lineY, lineHeight),
 						lineW, 1, linkR, linkG, linkB);
 				}
-				drawTextAtStyled(s_windowId, blockTextX(block, outerX + paddingLeft, innerWidth, lineW), lineY, ln, linkStyle);
+				drawTextAtStyled(s_windowId, blockTextX(block, outerX + paddingLeft, innerWidth, lineW), lineY, ln, linkStyle, contentTextColor);
 				lineY += lineHeight;
 			}
 			break;
@@ -3063,7 +3091,7 @@ void Navigator::renderDocument()
 					drawThemeRect(s_windowId, imageX, boxY + borderTop + paddingTop, 1, imageH, NavigatorContentBorderColor());
 					drawThemeRect(s_windowId, imageX + imageW - 1, boxY + borderTop + paddingTop, 1, imageH, NavigatorContentBorderColor());
 					drawTextAtStyled(s_windowId, imageX + 10, boxY + borderTop + paddingTop + std::max(8, (imageH - lineHeight) / 2),
-						imagePlaceholderText(block, info), block.style);
+						imagePlaceholderText(block, info), block.style, contentTextColor);
 				}
 			}
 			break;
