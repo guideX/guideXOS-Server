@@ -64,13 +64,21 @@ MBEDTLS_GUIDEXOS_LINK_ENABLED := 1
 endif
 endif
 
+# Treat the vendored Mbed TLS tree as optional in this branch. When the import
+# is present, these wildcard prerequisites help the compiler objects rebuild if
+# the import state changes. When it is absent, they collapse to nothing so the
+# kernel still builds in SourceMissing mode.
 MBEDTLS_GUIDEXOS_IMPORT_STATE_DEPS := \
-	../third_party/mbedtls \
-	../third_party/mbedtls/guidexos \
-	../third_party/mbedtls/include \
-	../third_party/mbedtls/include/mbedtls \
-	../third_party/mbedtls/library \
-	../third_party/mbedtls/tf-psa-crypto
+	$(wildcard ../third_party/mbedtls) \
+	$(wildcard ../third_party/mbedtls/guidexos) \
+	$(wildcard ../third_party/mbedtls/include) \
+	$(wildcard ../third_party/mbedtls/include/mbedtls) \
+	$(wildcard ../third_party/mbedtls/library) \
+	$(wildcard ../third_party/mbedtls/tf-psa-crypto) \
+	$(wildcard ../third_party/mbedtls/guidexos/mbedtls_sources.mk) \
+	$(wildcard ../third_party/mbedtls/guidexos/mbedtls_config.h) \
+	$(wildcard ../third_party/mbedtls/guidexos/crypto_config.h) \
+	$(wildcard ../third_party/mbedtls/include/mbedtls/version.h)
 
 # Common compiler flags
 CFLAGS := -std=c++14 -ffreestanding -O2 -Wall -Wextra -fno-exceptions -fno-rtti

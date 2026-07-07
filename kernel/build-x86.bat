@@ -80,11 +80,20 @@ set "CFLAGS=-std=c++14 -ffreestanding -O2 -Wall -Wextra -fno-exceptions -fno-rtt
 set "CFLAGS=%CFLAGS% -nostdlib -nostdinc++ -fno-builtin -DGXOS_BARE_METAL"
 set "CFLAGS=%CFLAGS% -m32 -march=i686"
 set "CFLAGS=%CFLAGS% -I. -I.. -Icore/include -Iarch/%ARCH%/include"
-set "CFLAGS=%CFLAGS% -I..\third_party\mbedtls\include -I..\third_party\mbedtls\library"
-set "CFLAGS=%CFLAGS% -I..\third_party\mbedtls\tf-psa-crypto -I..\third_party\mbedtls\tf-psa-crypto\core -I..\third_party\mbedtls\tf-psa-crypto\include"
-set "CFLAGS=%CFLAGS% -I..\third_party\mbedtls\tf-psa-crypto\drivers\builtin\include -I..\third_party\mbedtls\tf-psa-crypto\drivers\p256-m\p256-m\include -I..\third_party\mbedtls\tf-psa-crypto\drivers\p256-m\p256-m\include\p256-m"
-set "CFLAGS=%CFLAGS% -I..\third_party\mbedtls\tf-psa-crypto\drivers\p256-m\p256-m_driver_interface -I..\third_party\mbedtls\tf-psa-crypto\dispatch -I..\third_party\mbedtls\tf-psa-crypto\extras -I..\third_party\mbedtls\tf-psa-crypto\platform -I..\third_party\mbedtls\tf-psa-crypto\utilities"
-set "CFLAGS=%CFLAGS% -imacros mbedtls-guidexos-defines.h"
+set "MBEDTLS_ROOT=..\third_party\mbedtls"
+if exist "%MBEDTLS_ROOT%\include\mbedtls\version.h" (
+    set "CFLAGS=%CFLAGS% -I%MBEDTLS_ROOT%\include -I%MBEDTLS_ROOT%\library"
+    set "CFLAGS=%CFLAGS% -I%MBEDTLS_ROOT%\tf-psa-crypto -I%MBEDTLS_ROOT%\tf-psa-crypto\core -I%MBEDTLS_ROOT%\tf-psa-crypto\include"
+    set "CFLAGS=%CFLAGS% -I%MBEDTLS_ROOT%\tf-psa-crypto\drivers\builtin\include -I%MBEDTLS_ROOT%\tf-psa-crypto\drivers\p256-m\p256-m\include -I%MBEDTLS_ROOT%\tf-psa-crypto\drivers\p256-m\p256-m\include\p256-m"
+    set "CFLAGS=%CFLAGS% -I%MBEDTLS_ROOT%\tf-psa-crypto\drivers\p256-m\p256-m_driver_interface -I%MBEDTLS_ROOT%\tf-psa-crypto\dispatch -I%MBEDTLS_ROOT%\tf-psa-crypto\extras -I%MBEDTLS_ROOT%\tf-psa-crypto\platform -I%MBEDTLS_ROOT%\tf-psa-crypto\utilities"
+    if exist "mbedtls-guidexos-defines.h" (
+        set "CFLAGS=%CFLAGS% -imacros mbedtls-guidexos-defines.h"
+    ) else (
+        echo [INFO] mbedtls-guidexos-defines.h not found; continuing without optional import macros.
+    )
+) else (
+    echo [INFO] Vendored Mbed TLS tree not found; building without optional TLS import headers.
+)
 
 REM Assembler flags
 set "ASFLAGS=-f elf32"

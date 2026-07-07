@@ -119,6 +119,16 @@ The new probe launchers are:
 
 Keep the diagnostic framebuffer array flowing through the boot path, then teach the bare-metal compositor bridge to materialize disabled secondary targets for inspection before any real multi-output rendering is enabled.
 
+### Probe Results as of `2026-07-06`
+
+- The standard `-vga std` QEMU probe booted successfully.
+- UEFI reported `GOP handles discovered: 2`.
+- The bootloader exported `FramebufferCount=2` and logged two framebuffer descriptors.
+- The selected primary framebuffer is `1280x800` with `pitch=5120` and `format=B8G8R8A8`.
+- Both exported descriptors currently point at the same base address and the same geometry, so the extra descriptor is diagnostic-only rather than a distinct render target.
+- The kernel mirrored `FramebufferCount=2` in its BootInfo diagnostics and still renders from descriptor `0` only.
+- The existing `virtio-gpu-pci,max_outputs=2` comparison probe launched, but it did not produce guest serial output within the capture window, so it did not add any stronger framebuffer evidence.
+
 ## Framebuffer Array Handoff
 
 The bootloader and kernel now preserve a bounded diagnostic framebuffer array in `BootInfo`, but the legacy single-framebuffer fields remain the authoritative rendering contract.

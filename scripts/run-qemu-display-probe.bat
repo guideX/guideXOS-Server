@@ -102,14 +102,29 @@ if not exist "%ROOT_DIR%\ESP\" (
 )
 
 if not exist "%ROOT_DIR%\ESP\kernel.elf" (
-    echo WARNING: kernel.elf not found in ESP!
+    echo ERROR: kernel.elf not found in ESP!
     echo.
-    echo The bootloader will run but needs a kernel to boot.
-    echo To build the kernel, install MinGW and run:
-    echo   powershell -ExecutionPolicy Bypass -File build.ps1
+    echo The probe needs a staged kernel image before QEMU can boot.
+    echo Run the canonical staging build first:
+    echo   powershell -ExecutionPolicy Bypass -File build-uefi.ps1
+    echo   or
+    echo   build-kernel.bat
     echo.
-    echo Press any key to continue anyway...
-    pause >nul
+    pause
+    exit /b 1
+)
+
+if not exist "%ROOT_DIR%\ESP\ramdisk.img" (
+    echo ERROR: ramdisk.img not found in ESP!
+    echo.
+    echo The probe needs the boot-time wallpaper/runtime image in ESP.
+    echo Run the canonical staging build first:
+    echo   powershell -ExecutionPolicy Bypass -File build-uefi.ps1
+    echo   or
+    echo   build-kernel.bat
+    echo.
+    pause
+    exit /b 1
 )
 
 set QEMU_EXE=qemu-system-x86_64
