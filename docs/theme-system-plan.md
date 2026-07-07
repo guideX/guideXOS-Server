@@ -493,6 +493,19 @@ Phase 4C.1 is a stabilization-only review pass for the Phase 4C Sci Fi wallpaper
 * No assets were added, removed, moved, or renamed.
 * No per-effect controls were introduced.
 
+## Phase 4D
+
+Phase 4D is the next app-surface pilot for the guideXOS Server theme system. It applies conservative Sci Fi toolbar, address, content, border, and text polish to Navigator while keeping Classic visually close to the current look. It does not change Navigator behavior, navigation logic, page loading, URL/path handling, history, bookmarks, persistence, App Model behavior, theme IDs, persistence keys, or theme metrics. It does not add new effects, blur, glass, animations, rounded clipping, rounded hit-testing, or per-effect controls.
+
+* Navigator is the next app-surface pilot.
+* Sci Fi gets conservative toolbar, address, content, border, and text polish so Navigator fits the shell more cleanly.
+* Classic is preserved and stays visually close to the current Navigator look.
+* No Navigator behavior changed: navigation logic, page loading, URL/path handling, history, bookmarks, and persistence all remain the same.
+* No App Model behavior changed.
+* No new effects were added.
+* Broad app redesign remains deferred.
+* Future app polish should continue one app at a time.
+
 ## Manual Validation Runbook
 
 * Start the hosted server executable.
@@ -556,11 +569,11 @@ Phase 4C.1 is a stabilization-only review pass for the Phase 4C Sci Fi wallpaper
 
 * Classic should continue to look basically unchanged.
 * Sci Fi is a first visible proof that the theme system exists, not a full futuristic redesign.
-* Rounded-window clipping remains deferred; this foundation is intentionally limited to IDs, persistence, selector wiring, safe chrome colors, the Phase 2A chrome metric pass, the guarded Phase 2B rounded-shell preview, the Phase 2C border/highlight polish pass, the Phase 2D hosted shadow preview, the Phase 2E desktop/taskbar surface polish pass, the Phase 2G validation checkpoint, the Phase 3A Display Options app-surface pilot, the Phase 3B Control Panel app-surface pilot, the Phase 3C Notepad app-surface pilot, the Phase 3C.1 stabilization review pass, the Phase 3D Calculator app-surface pilot, the Phase 3D.1 stabilization review pass, the Phase 3E File Explorer app-surface pilot, the Phase 3E.1 File Explorer stabilization review pass, the Phase 3F Clock app-surface pilot, the Phase 3F.1 Clock stabilization review pass, the Phase 3G app-surface closeout, the Phase 3H hosted visual validation pass, the Phase 4A readiness/defaults boundary checkpoint, and the Phase 4B wallpaper/background inventory and design-readiness pass.
+* Rounded-window clipping remains deferred; this foundation is intentionally limited to IDs, persistence, selector wiring, safe chrome colors, the Phase 2A chrome metric pass, the guarded Phase 2B rounded-shell preview, the Phase 2C border/highlight polish pass, the Phase 2D hosted shadow preview, the Phase 2E desktop/taskbar surface polish pass, the Phase 2G validation checkpoint, the Phase 3A Display Options app-surface pilot, the Phase 3B Control Panel app-surface pilot, the Phase 3C Notepad app-surface pilot, the Phase 3C.1 stabilization review pass, the Phase 3D Calculator app-surface pilot, the Phase 3D.1 stabilization review pass, the Phase 3E File Explorer app-surface pilot, the Phase 3E.1 File Explorer stabilization review pass, the Phase 3F Clock app-surface pilot, the Phase 3F.1 Clock stabilization review pass, the Phase 3G app-surface closeout, the Phase 3H hosted visual validation pass, the Phase 4A readiness/defaults boundary checkpoint, the Phase 4B wallpaper/background inventory and design-readiness pass, the Phase 4C wallpaper recommendation note, the Phase 4C.1 stabilization review pass, and the Phase 4D Navigator app-surface pilot.
 
 ## Recommended Next Pass
 
 1. Phase 2G.1 manual visual validation fixes, if screenshots or manual testing finds issues.
 2. Phase 2H theme screenshot / manual smoke harness, if feasible.
-3. Next app-surface pilot, one app at a time, after Calculator.
+3. Future app-surface pilots, one app at a time.
 4. Future high-DPI and resolution work as a separate track.

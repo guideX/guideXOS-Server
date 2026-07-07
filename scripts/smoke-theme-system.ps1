@@ -87,6 +87,7 @@ $displayOptions = Join-Path $Root "display_options.cpp"
 $controlPanel = Join-Path $Root "control_panel.cpp"
 $notepad = Join-Path $Root "notepad.cpp"
 $calculator = Join-Path $Root "calculator.cpp"
+$navigator = Join-Path $Root "navigator.cpp"
 $clock = Join-Path $Root "clock.cpp"
 $fileExplorer = Join-Path $Root "file_explorer.cpp"
 $fileExplorerHeader = Join-Path $Root "file_explorer.h"
@@ -236,6 +237,12 @@ $phase4cHeadingMatch = Find-FirstMatch $planDoc '## Phase 4C'
 $phase4cBodyMatch = Find-RawMatch $planDoc '## Phase 4C.*?Phase 4C adds a small opt-in Sci Fi wallpaper recommendation note in Display Options\..*?It is read-only and does not change the wallpaper automatically, the default wallpaper, the default theme, or the global wallpaper model\..*?The Theme tab now shows a read-only recommendation when Sci Fi is selected\..*?The recommendation points to existing bundled backgrounds only, and the user still has to choose a wallpaper through the existing Background tab controls\..*?No theme-scoped wallpaper persistence was added\..*?Classic remains the default theme\..*?Sci Fi remains opt-in\..*?No default wallpaper changed\..*?No assets were added, removed, moved, or renamed\..*?Bare-metal wallpaper parity remains deferred\.'
 $phase4c1HeadingMatch = Find-FirstMatch $planDoc '## Phase 4C\.1'
 $phase4c1BodyMatch = Find-RawMatch $planDoc '## Phase 4C\.1.*?stabilization-only review pass for the Phase 4C Sci Fi wallpaper recommendation note\..*?read-only and opt-in\..*?No wallpaper/default/persistence/assets changed, and no automatic wallpaper switching was added\..*?Theme tab recommendation stays gated to Sci Fi selection and remains read-only\..*?Tiny copy fix: the note now says the recommendation is optional and tells users to pick any wallpaper on the Background tab\..*?Placement was reviewed and kept below the theme cards and above the footer action text\..*?No theme-scoped wallpaper persistence was added\..*?Classic remains the default theme\..*?Sci Fi remains opt-in\..*?No default wallpaper changed\..*?No assets were added, removed, moved, or renamed\..*?No per-effect controls were introduced\.'
+$phase4dHeadingMatch = Find-FirstMatch $planDoc '## Phase 4D'
+$phase4dBodyMatch = Find-RawMatch $planDoc '## Phase 4D.*?Phase 4D is the next app-surface pilot for the guideXOS Server theme system\..*?It applies conservative Sci Fi toolbar, address, content, border, and text polish to Navigator while keeping Classic visually close to the current look\..*?It does not change Navigator behavior, navigation logic, page loading, URL/path handling, history, bookmarks, persistence, App Model behavior, theme IDs, persistence keys, or theme metrics\..*?It does not add new effects, blur, glass, animations, rounded clipping, rounded hit-testing, or per-effect controls\..*?\* Navigator is the next app-surface pilot\..*?\* Sci Fi gets conservative toolbar, address, content, border, and text polish so Navigator fits the shell more cleanly\..*?\* Classic is preserved and stays visually close to the current Navigator look\..*?\* No Navigator behavior changed: navigation logic, page loading, URL/path handling, history, bookmarks, and persistence all remain the same\..*?\* No App Model behavior changed\..*?\* No new effects were added\..*?\* Broad app redesign remains deferred\..*?\* Future app polish should continue one app at a time\.'
+$navigatorThemeHelperMatch = Find-FirstMatch $navigator 'NavigatorBodyColor|NavigatorToolbarColor|NavigatorAddressFillColor|NavigatorAddressFocusedBorderColor|NavigatorContentColor|NavigatorContentBorderColor|NavigatorScrollTrackColor|NavigatorScrollThumbColor|NavigatorStatusBarColor|NavigatorStatusBarBorderColor|NavigatorTextColor|NavigatorMutedTextColor|NavigatorAccentColor|NavigatorSelectionColor|NavigatorFindHighlightColor|NavigatorFieldFillColor|NavigatorFieldBorderColor|NavigatorFieldTextColor|NavigatorFieldMutedTextColor|NavigatorButtonFillColor|NavigatorButtonBorderColor|NavigatorButtonTextColor'
+$navigatorThemeFieldMatch = Find-FirstMatch $navigator 'windowBackground|windowBorder|accent|mutedAccent|taskbarBackground|taskbarBorder|titleBarText'
+$navigatorNoPerEffectMatch = Find-FirstMatch $navigator 'Visual Effects|per-effect'
+$navigatorCompositorWidgetMatch = Find-FirstMatch $compositor 'isNavigatorWindow|navigatorSciFiWidgetFillColor|navigatorSciFiWidgetBorderColor|navigatorSciFiWidgetTextColor'
 $themeRecommendationGateMatch = Find-FirstMatch $displayOptions 's_selectedThemeId == DesktopThemeId::SciFi'
 $themeRecommendationTextMatch = Find-RawMatch $displayOptions 'Optional recommendation for Sci Fi: guideXOS Space, guideXOS Space 2, Tron Porsche, CPU\..*?Choose any wallpaper on the Background tab\.'
 $clockThemeHelperMatch = Find-FirstMatch $clock 'ClockBodyColor|ClockFaceColor|ClockBorderColor|ClockReadoutColor|ClockMutedTextColor|ClockAccentColor|paintClockSurface|drawClockText|GetCurrentDesktopThemeId|GetCurrentDesktopTheme|DesktopThemeId::SciFi'
@@ -264,6 +271,7 @@ $checks = @(
     [pscustomobject]@{ Name = "classic identifier exists"; Pass = $null -ne $classicMatch; Match = $classicMatch },
     [pscustomobject]@{ Name = "sci fi identifier exists"; Pass = $null -ne $sciFiMatch; Match = $sciFiMatch },
     [pscustomobject]@{ Name = "classic default is represented"; Pass = $null -ne $defaultMatch; Match = $defaultMatch },
+    [pscustomobject]@{ Name = "classic remains default"; Pass = $null -ne $defaultMatch; Match = $defaultMatch },
     [pscustomobject]@{ Name = "sci fi theme data exists"; Pass = $null -ne $themeDataMatch; Match = $themeDataMatch },
     [pscustomobject]@{ Name = "theme field windowPadding exists"; Pass = $null -ne $themeFieldWindowPaddingMatch; Match = $themeFieldWindowPaddingMatch },
     [pscustomobject]@{ Name = "theme field roundedWindows exists"; Pass = $null -ne $themeFieldRoundedWindowsMatch; Match = $themeFieldRoundedWindowsMatch },
@@ -281,6 +289,7 @@ $checks = @(
     [pscustomobject]@{ Name = "desktop.showconfig theme reporting"; Pass = $null -ne $showConfigThemeMatch; Match = $showConfigThemeMatch },
     [pscustomobject]@{ Name = "classic theme option visible"; Pass = $null -ne $classicOptionMatch; Match = $classicOptionMatch },
     [pscustomobject]@{ Name = "sci fi theme option visible"; Pass = $null -ne $sciFiOptionMatch; Match = $sciFiOptionMatch },
+    [pscustomobject]@{ Name = "sci fi remains opt-in"; Pass = $null -ne $sciFiOptionMatch; Match = $sciFiOptionMatch },
     [pscustomobject]@{ Name = "display options theme wiring"; Pass = $null -ne $displayThemeMatch; Match = $displayThemeMatch },
     [pscustomobject]@{ Name = "display options theme intro"; Pass = $null -ne $themeIntroMatch; Match = $themeIntroMatch },
     [pscustomobject]@{ Name = "compositor chrome theme accessor"; Pass = $null -ne $chromeMatch; Match = $chromeMatch },
@@ -344,6 +353,8 @@ $checks = @(
     [pscustomobject]@{ Name = "phase 4c docs body"; Pass = $null -ne $phase4cBodyMatch; Match = $phase4cBodyMatch },
     [pscustomobject]@{ Name = "phase 4c.1 docs heading"; Pass = $null -ne $phase4c1HeadingMatch; Match = $phase4c1HeadingMatch },
     [pscustomobject]@{ Name = "phase 4c.1 docs body"; Pass = $null -ne $phase4c1BodyMatch; Match = $phase4c1BodyMatch },
+    [pscustomobject]@{ Name = "phase 4d docs heading"; Pass = $null -ne $phase4dHeadingMatch; Match = $phase4dHeadingMatch },
+    [pscustomobject]@{ Name = "phase 4d docs body"; Pass = $null -ne $phase4dBodyMatch; Match = $phase4dBodyMatch },
     [pscustomobject]@{ Name = "manual validation runbook heading"; Pass = $null -ne $manualRunbookHeadingMatch; Match = $manualRunbookHeadingMatch },
     [pscustomobject]@{ Name = "manual validation classic-first note"; Pass = $null -ne $manualRunbookClassicFirstMatch; Match = $manualRunbookClassicFirstMatch },
     [pscustomobject]@{ Name = "manual validation displayoptions launcher"; Pass = $null -ne $manualRunbookLauncherMatch; Match = $manualRunbookLauncherMatch },
@@ -355,6 +366,9 @@ $checks = @(
     [pscustomobject]@{ Name = "display options sci fi wallpaper recommendation gate"; Pass = $null -ne $themeRecommendationGateMatch; Match = $themeRecommendationGateMatch },
     [pscustomobject]@{ Name = "display options sci fi wallpaper recommendation text"; Pass = $null -ne $themeRecommendationTextMatch; Match = $themeRecommendationTextMatch },
     [pscustomobject]@{ Name = "display options effect placeholders remain"; Pass = $null -ne $effectPlaceholderMatch -and $null -ne $phase3aNoEffectsMatch; Match = $(if ($null -ne $phase3aNoEffectsMatch) { $phase3aNoEffectsMatch } else { $effectPlaceholderMatch }) },
+    [pscustomobject]@{ Name = "navigator theme helpers wired"; Pass = $null -ne $navigatorThemeHelperMatch -or $null -ne $navigatorThemeFieldMatch; Match = $(if ($null -ne $navigatorThemeHelperMatch) { $navigatorThemeHelperMatch } else { $navigatorThemeFieldMatch }) },
+    [pscustomobject]@{ Name = "navigator compositor widget theming wired"; Pass = $null -ne $navigatorCompositorWidgetMatch; Match = $navigatorCompositorWidgetMatch },
+    [pscustomobject]@{ Name = "navigator no per-effect controls"; Pass = $null -eq $navigatorNoPerEffectMatch; Match = $navigatorNoPerEffectMatch },
     [pscustomobject]@{ Name = "manual validation checklist heading"; Pass = $null -ne $manualChecklistHeadingMatch; Match = $manualChecklistHeadingMatch },
     [pscustomobject]@{ Name = "classic hosted checklist heading"; Pass = $null -ne $classicHostedChecklistMatch; Match = $classicHostedChecklistMatch },
     [pscustomobject]@{ Name = "sci fi hosted checklist heading"; Pass = $null -ne $sciFiHostedChecklistMatch; Match = $sciFiHostedChecklistMatch },

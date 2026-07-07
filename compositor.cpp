@@ -160,6 +160,67 @@ namespace gxos {
             return calculatorSciFiWidgetTextColor(theme, widget);
         }
 
+        static bool isNavigatorWindow(const WinInfo& winfo) {
+            return winfo.title.find("guideXOS Navigator") != std::string::npos;
+        }
+
+        static uint32_t navigatorClassicWidgetFillColor(const Widget& widget) {
+            return calculatorClassicWidgetFillColor(widget);
+        }
+
+        static uint32_t navigatorClassicWidgetBorderColor(const Widget& widget) {
+            return calculatorClassicWidgetBorderColor(widget);
+        }
+
+        static uint32_t navigatorClassicWidgetTextColor(const Widget& widget) {
+            return calculatorClassicWidgetTextColor(widget);
+        }
+
+        static uint32_t navigatorSciFiWidgetFillColor(const DesktopTheme& theme, const Widget& widget) {
+            const uint32_t base = WindowRenderer::BlendThemeColor(theme.windowBackground, theme.taskbarBackground, 16);
+            const uint32_t hoverFill = WindowRenderer::BlendThemeColor(base, theme.mutedAccent, 14);
+            const uint32_t pressedFill = WindowRenderer::BlendThemeColor(base, theme.accent, 22);
+            return widget.pressed ? pressedFill : (widget.hover ? hoverFill : base);
+        }
+
+        static uint32_t navigatorSciFiWidgetBorderColor(const DesktopTheme& theme, const Widget& widget) {
+            const uint32_t base = WindowRenderer::BlendThemeColor(theme.windowBorder, theme.taskbarBorder, 18);
+            const uint32_t hoverBorder = WindowRenderer::BlendThemeColor(base, theme.mutedAccent, 24);
+            const uint32_t pressedBorder = WindowRenderer::BlendThemeColor(base, theme.accent, 30);
+            return widget.pressed ? pressedBorder : (widget.hover ? hoverBorder : base);
+        }
+
+        static uint32_t navigatorSciFiWidgetTextColor(const DesktopTheme& theme, const Widget&) {
+            return theme.titleBarText;
+        }
+
+        static uint32_t widgetFillColor(const WinInfo& winfo, const Widget& widget, const DesktopTheme& theme) {
+            if (isNavigatorWindow(winfo)) {
+                return theme.id == DesktopThemeId::SciFi
+                    ? navigatorSciFiWidgetFillColor(theme, widget)
+                    : navigatorClassicWidgetFillColor(widget);
+            }
+            return calculatorWidgetFillColor(winfo, widget, theme);
+        }
+
+        static uint32_t widgetBorderColor(const WinInfo& winfo, const Widget& widget, const DesktopTheme& theme) {
+            if (isNavigatorWindow(winfo)) {
+                return theme.id == DesktopThemeId::SciFi
+                    ? navigatorSciFiWidgetBorderColor(theme, widget)
+                    : navigatorClassicWidgetBorderColor(widget);
+            }
+            return calculatorWidgetBorderColor(winfo, widget, theme);
+        }
+
+        static uint32_t widgetTextColor(const WinInfo& winfo, const Widget& widget, const DesktopTheme& theme) {
+            if (isNavigatorWindow(winfo)) {
+                return theme.id == DesktopThemeId::SciFi
+                    ? navigatorSciFiWidgetTextColor(theme, widget)
+                    : navigatorClassicWidgetTextColor(widget);
+            }
+            return calculatorWidgetTextColor(winfo, widget, theme);
+        }
+
         enum class TaskbarPosition {
             Bottom,
             Top,
@@ -3361,16 +3422,16 @@ namespace gxos {
                     }
                     for (const auto& wd : winfo.widgets) { 
                         RECT wr{ contentX + wd.x, contentY + wd.y, contentX + wd.x + wd.w, contentY + wd.y + wd.h };
-                        const uint32_t fillColor = calculatorWidgetFillColor(winfo, wd, theme);
+                        const uint32_t fillColor = widgetFillColor(winfo, wd, theme);
                         HBRUSH wb = CreateSolidBrush(colorFromTheme(fillColor));
                         FillRect(dc, &wr, wb);
                         DeleteObject(wb);
-                        HBRUSH borderBrush = CreateSolidBrush(colorFromTheme(calculatorWidgetBorderColor(winfo, wd, theme)));
+                        HBRUSH borderBrush = CreateSolidBrush(colorFromTheme(widgetBorderColor(winfo, wd, theme)));
                         FrameRect(dc, &wr, borderBrush);
                         DeleteObject(borderBrush);
                         const int textX = wr.left + (wd.icon.status == ImageLoadStatus::Ok ? 24 : 6);
                         if (wd.icon.status == ImageLoadStatus::Ok) ImageAdapter::DrawToHdc(dc, wd.icon, wr.left + 4, wr.top + (wd.h - 16) / 2, 16, 16);
-                        const uint32_t textColor = calculatorWidgetTextColor(winfo, wd, theme);
+                        const uint32_t textColor = widgetTextColor(winfo, wd, theme);
                         drawUiText(dc, textX, centeredUiTextY(wr.top, wd.h), wd.text, colorFromTheme(textColor), FontRole::Default);
                     }
                     for (const auto& tx : winfo.positionedTexts) {
@@ -5222,12 +5283,12 @@ namespace gxos {
                     for (const auto& wd : w.widgets) {
                         int wx = contentX + wd.x;
                         int wy = contentY + wd.y;
-                        uint32_t wColor = calculatorWidgetFillColor(w, wd, theme);
+                        uint32_t wColor = widgetFillColor(w, wd, theme);
                         fbFillRect(pixels, pitch, fbW, fbH, wx, wy, wd.w, wd.h, wColor);
-                        fbDrawRect(pixels, pitch, fbW, fbH, wx, wy, wd.w, wd.h, calculatorWidgetBorderColor(w, wd, theme));
+                        fbDrawRect(pixels, pitch, fbW, fbH, wx, wy, wd.w, wd.h, widgetBorderColor(w, wd, theme));
                         const int textX = wx + (wd.icon.status == ImageLoadStatus::Ok ? 24 : 6);
                         if (wd.icon.status == ImageLoadStatus::Ok) ImageAdapter::DrawToPixels(pixels, fbW, fbH, pitch, wd.icon, wx + 4, wy + (wd.h - 16) / 2, 16, 16);
-                        const uint32_t textColor = calculatorWidgetTextColor(w, wd, theme);
+                        const uint32_t textColor = widgetTextColor(w, wd, theme);
                         fbDrawText(pixels, pitch, fbW, fbH,
                             textX, wy + (wd.h - SystemFont::MeasureHeight(FontRole::Default)) / 2, wd.text, textColor, FontRole::Default);
                     }

@@ -1,5 +1,7 @@
 #include "navigator.h"
 
+#include "desktop_theme.h"
+
 #include "gui_protocol.h"
 #include "gxos_tls_foundation.h"
 #include "gxos_tls_prerequisites.h"
@@ -194,6 +196,235 @@ namespace {
 	void drawAnimatedImage(uint64_t windowId, int x, int y, int w, int h, const std::string& pathPattern)
 	{
 		publish(MsgType::MT_DrawImageAnimated, packDrawImage(windowId, x, y, w, h, pathPattern));
+	}
+
+	bool isSciFiThemeActive()
+	{
+		return GetCurrentDesktopThemeId() == DesktopThemeId::SciFi;
+	}
+
+	const DesktopTheme& navigatorTheme()
+	{
+		return GetCurrentDesktopTheme();
+	}
+
+	uint32_t packRgb(int r, int g, int b)
+	{
+		return 0xFF000000u |
+			(static_cast<uint32_t>(r & 0xFF) << 16) |
+			(static_cast<uint32_t>(g & 0xFF) << 8) |
+			static_cast<uint32_t>(b & 0xFF);
+	}
+
+	uint32_t blendColor(uint32_t baseColor, uint32_t overlayColor, int overlayPercent)
+	{
+		if (overlayPercent <= 0) return baseColor;
+		if (overlayPercent >= 100) return overlayColor;
+
+		const int baseR = static_cast<int>((baseColor >> 16) & 0xFF);
+		const int baseG = static_cast<int>((baseColor >> 8) & 0xFF);
+		const int baseB = static_cast<int>(baseColor & 0xFF);
+		const int overR = static_cast<int>((overlayColor >> 16) & 0xFF);
+		const int overG = static_cast<int>((overlayColor >> 8) & 0xFF);
+		const int overB = static_cast<int>(overlayColor & 0xFF);
+		const int keepPercent = 100 - overlayPercent;
+
+		return packRgb(
+			(baseR * keepPercent + overR * overlayPercent) / 100,
+			(baseG * keepPercent + overG * overlayPercent) / 100,
+			(baseB * keepPercent + overB * overlayPercent) / 100);
+	}
+
+	void drawThemeRect(uint64_t windowId, int x, int y, int w, int h, uint32_t color)
+	{
+		drawRect(windowId, x, y, w, h,
+			static_cast<int>((color >> 16) & 0xFFu),
+			static_cast<int>((color >> 8) & 0xFFu),
+			static_cast<int>(color & 0xFFu));
+	}
+
+	void drawThemeText(uint64_t windowId, int x, int y, const std::string& text, uint32_t color)
+	{
+		drawTextAtColored(windowId, x, y, text,
+			static_cast<int>((color >> 16) & 0xFFu),
+			static_cast<int>((color >> 8) & 0xFFu),
+			static_cast<int>(color & 0xFFu));
+	}
+
+	uint32_t NavigatorBodyColor()
+	{
+		if (!isSciFiThemeActive()) return packRgb(25, 29, 38);
+		const DesktopTheme& theme = navigatorTheme();
+		return blendColor(theme.taskbarBackground, theme.windowBackground, 14);
+	}
+
+	uint32_t NavigatorToolbarColor()
+	{
+		if (!isSciFiThemeActive()) return packRgb(42, 46, 58);
+		const DesktopTheme& theme = navigatorTheme();
+		return blendColor(theme.titleBarBackground, theme.windowBackground, 12);
+	}
+
+	uint32_t NavigatorToolbarBorderColor()
+	{
+		if (!isSciFiThemeActive()) return packRgb(78, 86, 108);
+		const DesktopTheme& theme = navigatorTheme();
+		return blendColor(theme.windowBorder, theme.mutedAccent, 24);
+	}
+
+	uint32_t NavigatorAddressFillColor()
+	{
+		if (!isSciFiThemeActive()) return packRgb(18, 22, 30);
+		const DesktopTheme& theme = navigatorTheme();
+		return blendColor(theme.windowBackground, theme.taskbarBackground, 12);
+	}
+
+	uint32_t NavigatorAddressFocusedBorderColor()
+	{
+		if (!isSciFiThemeActive()) return packRgb(80, 140, 220);
+		const DesktopTheme& theme = navigatorTheme();
+		return blendColor(theme.accent, theme.windowBackground, 28);
+	}
+
+	uint32_t NavigatorAddressIdleTopBorderColor()
+	{
+		if (!isSciFiThemeActive()) return packRgb(110, 120, 142);
+		const DesktopTheme& theme = navigatorTheme();
+		return blendColor(theme.windowBorder, theme.mutedAccent, 18);
+	}
+
+	uint32_t NavigatorAddressIdleBottomBorderColor()
+	{
+		if (!isSciFiThemeActive()) return packRgb(70, 78, 96);
+		const DesktopTheme& theme = navigatorTheme();
+		return blendColor(theme.taskbarBorder, theme.windowBackground, 18);
+	}
+
+	uint32_t NavigatorContentColor()
+	{
+		if (!isSciFiThemeActive()) return packRgb(245, 247, 250);
+		const DesktopTheme& theme = navigatorTheme();
+		return blendColor(theme.windowBackground, theme.taskbarBackground, 18);
+	}
+
+	uint32_t NavigatorContentBorderColor()
+	{
+		if (!isSciFiThemeActive()) return packRgb(186, 192, 204);
+		const DesktopTheme& theme = navigatorTheme();
+		return blendColor(theme.windowBorder, theme.mutedAccent, 18);
+	}
+
+	uint32_t NavigatorScrollTrackColor()
+	{
+		if (!isSciFiThemeActive()) return packRgb(229, 232, 238);
+		const DesktopTheme& theme = navigatorTheme();
+		return blendColor(theme.taskbarBackground, theme.windowBackground, 16);
+	}
+
+	uint32_t NavigatorScrollThumbColor()
+	{
+		if (!isSciFiThemeActive()) return packRgb(130, 138, 156);
+		const DesktopTheme& theme = navigatorTheme();
+		return blendColor(theme.accent, theme.windowBorder, 34);
+	}
+
+	uint32_t NavigatorStatusBarColor()
+	{
+		if (!isSciFiThemeActive()) return packRgb(36, 40, 50);
+		const DesktopTheme& theme = navigatorTheme();
+		return blendColor(theme.taskbarBackground, theme.windowBackground, 8);
+	}
+
+	uint32_t NavigatorStatusBarBorderColor()
+	{
+		if (!isSciFiThemeActive()) return packRgb(78, 86, 108);
+		const DesktopTheme& theme = navigatorTheme();
+		return blendColor(theme.windowBorder, theme.mutedAccent, 24);
+	}
+
+	uint32_t NavigatorTextColor()
+	{
+		if (!isSciFiThemeActive()) return packRgb(220, 220, 220);
+		return navigatorTheme().titleBarText;
+	}
+
+	uint32_t NavigatorMutedTextColor()
+	{
+		if (!isSciFiThemeActive()) return packRgb(186, 190, 196);
+		const DesktopTheme& theme = navigatorTheme();
+		return blendColor(theme.titleBarText, theme.taskbarBackground, 54);
+	}
+
+	uint32_t NavigatorAccentColor()
+	{
+		if (!isSciFiThemeActive()) return packRgb(80, 140, 220);
+		return navigatorTheme().accent;
+	}
+
+	uint32_t NavigatorSelectionColor()
+	{
+		if (!isSciFiThemeActive()) return packRgb(96, 146, 224);
+		const DesktopTheme& theme = navigatorTheme();
+		return blendColor(theme.accent, theme.windowBackground, 34);
+	}
+
+	uint32_t NavigatorFindHighlightColor()
+	{
+		if (!isSciFiThemeActive()) return packRgb(255, 244, 168);
+		const DesktopTheme& theme = navigatorTheme();
+		return blendColor(theme.accent, theme.mutedAccent, 20);
+	}
+
+	uint32_t NavigatorFieldFillColor(bool focused)
+	{
+		if (!isSciFiThemeActive()) return packRgb(250, 252, 255);
+		const DesktopTheme& theme = navigatorTheme();
+		return blendColor(theme.windowBackground, theme.taskbarBackground, focused ? 10 : 16);
+	}
+
+	uint32_t NavigatorFieldBorderColor(bool focused)
+	{
+		if (!isSciFiThemeActive()) return focused ? packRgb(54, 118, 210) : packRgb(148, 156, 170);
+		const DesktopTheme& theme = navigatorTheme();
+		return focused ? blendColor(theme.accent, theme.windowBackground, 30) : blendColor(theme.windowBorder, theme.mutedAccent, 24);
+	}
+
+	uint32_t NavigatorFieldTextColor()
+	{
+		if (!isSciFiThemeActive()) return packRgb(35, 45, 60);
+		return navigatorTheme().titleBarText;
+	}
+
+	uint32_t NavigatorFieldMutedTextColor()
+	{
+		if (!isSciFiThemeActive()) return packRgb(128, 136, 150);
+		const DesktopTheme& theme = navigatorTheme();
+		return blendColor(theme.titleBarText, theme.taskbarBackground, 50);
+	}
+
+	uint32_t NavigatorButtonFillColor(bool focused, bool disabled)
+	{
+		if (!isSciFiThemeActive()) return disabled ? packRgb(184, 188, 196) : packRgb(65, 112, 190);
+		const DesktopTheme& theme = navigatorTheme();
+		const uint32_t base = blendColor(theme.windowBackground, theme.taskbarBackground, 16);
+		if (disabled) return blendColor(base, theme.windowBorder, 12);
+		return focused ? blendColor(base, theme.accent, 22) : base;
+	}
+
+	uint32_t NavigatorButtonBorderColor(bool focused, bool disabled)
+	{
+		if (!isSciFiThemeActive()) return disabled ? packRgb(128, 132, 140) : (focused ? packRgb(54, 118, 210) : packRgb(38, 78, 150));
+		const DesktopTheme& theme = navigatorTheme();
+		const uint32_t base = blendColor(theme.windowBorder, theme.taskbarBorder, 18);
+		if (disabled) return blendColor(base, theme.taskbarBackground, 22);
+		return focused ? blendColor(theme.accent, theme.titleBarText, 12) : blendColor(base, theme.mutedAccent, 10);
+	}
+
+	uint32_t NavigatorButtonTextColor(bool disabled)
+	{
+		if (!isSciFiThemeActive()) return disabled ? packRgb(76, 80, 88) : packRgb(255, 255, 255);
+		const DesktopTheme& theme = navigatorTheme();
+		return disabled ? blendColor(theme.titleBarText, theme.taskbarBackground, 58) : theme.titleBarText;
 	}
 
 	void addButton(uint64_t windowId, int id, int x, int y, int w, int h, const std::string& text, const std::string& iconPath = {})
@@ -2455,38 +2686,38 @@ void Navigator::updateDisplay()
 	publish(MsgType::MT_SetTitle, std::to_string(s_windowId) + "|" + winTitle);
 	publish(MsgType::MT_DrawText, std::to_string(s_windowId) + "|\f");
 
-	drawRect(s_windowId, 0, 0, kWindowW, kWindowH, 25, 29, 38);
+	drawThemeRect(s_windowId, 0, 0, kWindowW, kWindowH, NavigatorBodyColor());
 	renderToolbar();
 	renderDocument();
 	renderStatusBar();
 }
 
-void Navigator::renderToolbar()
-{
-	static const char* kIconRoot = "assets/Images/NuoveXT/PNG/32/";
-	drawRect(s_windowId, 0, 0, kWindowW, kToolbarH, 42, 46, 58);
-	drawRect(s_windowId, 0, kToolbarH - 1, kWindowW, 1, 78, 86, 108);
+	void Navigator::renderToolbar()
+	{
+		static const char* kIconRoot = "assets/Images/NuoveXT/PNG/32/";
+		drawThemeRect(s_windowId, 0, 0, kWindowW, kToolbarH, NavigatorToolbarColor());
+		drawThemeRect(s_windowId, 0, kToolbarH - 1, kWindowW, 1, NavigatorToolbarBorderColor());
 
-	addButton(s_windowId, kWidgetIdBack, 20, kButtonY, kButtonW, kButtonH, "Back", std::string(kIconRoot) + "above_thearrow_10194.png");
-	addButton(s_windowId, kWidgetIdForward, 20 + (kButtonW + kButtonGap), kButtonY, kButtonW, kButtonH, "Next", std::string(kIconRoot) + "Next_arrow_10211.png");
-	addButton(s_windowId, kWidgetIdReload, 20 + 2 * (kButtonW + kButtonGap), kButtonY, kButtonW, kButtonH, "Reload", std::string(kIconRoot) + "refresh_arrow_10190.png");
+		addButton(s_windowId, kWidgetIdBack, 20, kButtonY, kButtonW, kButtonH, "Back", std::string(kIconRoot) + "above_thearrow_10194.png");
+		addButton(s_windowId, kWidgetIdForward, 20 + (kButtonW + kButtonGap), kButtonY, kButtonW, kButtonH, "Next", std::string(kIconRoot) + "Next_arrow_10211.png");
+		addButton(s_windowId, kWidgetIdReload, 20 + 2 * (kButtonW + kButtonGap), kButtonY, kButtonW, kButtonH, "Reload", std::string(kIconRoot) + "refresh_arrow_10190.png");
 	addButton(s_windowId, kWidgetIdHome, 20 + 3 * (kButtonW + kButtonGap), kButtonY, kButtonW, kButtonH, "Home", std::string(kIconRoot) + "gohome_action_ir_10235.png");
 	addButton(s_windowId, kWidgetIdBookmarks, 20 + 4 * (kButtonW + kButtonGap), kButtonY, kButtonW, kButtonH, "Marks", std::string(kIconRoot) + "markers_list_add_favorites_10275.png");
 	addButton(s_windowId, kWidgetIdAddBookmark, 20 + 5 * (kButtonW + kButtonGap), kButtonY, kButtonW, kButtonH, "Add", std::string(kIconRoot) + "edit_add_10261.png");
 	addButton(s_windowId, kWidgetIdFind, 20 + 6 * (kButtonW + kButtonGap), kButtonY, kButtonW, kButtonH, "Find");
 
-	drawRect(s_windowId, kAddressX, kAddressY, kAddressW, kAddressH, 18, 22, 30);
-	if (s_addressFocused) {
-		// Focused: bright blue border on all four sides
-		drawRect(s_windowId, kAddressX,                 kAddressY,                 kAddressW, 1, 80, 140, 220);
-		drawRect(s_windowId, kAddressX,                 kAddressY + kAddressH - 1, kAddressW, 1, 80, 140, 220);
-		drawRect(s_windowId, kAddressX,                 kAddressY,                 1, kAddressH, 80, 140, 220);
-		drawRect(s_windowId, kAddressX + kAddressW - 1, kAddressY,                 1, kAddressH, 80, 140, 220);
+		drawThemeRect(s_windowId, kAddressX, kAddressY, kAddressW, kAddressH, NavigatorAddressFillColor());
+		if (s_addressFocused) {
+			// Focused: bright blue border on all four sides
+			drawThemeRect(s_windowId, kAddressX,                 kAddressY,                 kAddressW, 1, NavigatorAddressFocusedBorderColor());
+			drawThemeRect(s_windowId, kAddressX,                 kAddressY + kAddressH - 1, kAddressW, 1, NavigatorAddressFocusedBorderColor());
+			drawThemeRect(s_windowId, kAddressX,                 kAddressY,                 1, kAddressH, NavigatorAddressFocusedBorderColor());
+			drawThemeRect(s_windowId, kAddressX + kAddressW - 1, kAddressY,                 1, kAddressH, NavigatorAddressFocusedBorderColor());
 
-		// Caret placement is still approximate until Navigator has proportional
-		// document/chrome text measurement exposed through the GUI protocol.
-		constexpr int kTextX = kAddressX + 10;
-		const int kTextY = centeredChromeTextY(kAddressY, kAddressH);
+			// Caret placement is still approximate until Navigator has proportional
+			// document/chrome text measurement exposed through the GUI protocol.
+			constexpr int kTextX = kAddressX + 10;
+			const int kTextY = centeredChromeTextY(kAddressY, kAddressH);
 
 		// Clamp caret defensively (should already be in range, but guard rendering).
 		int caretPos = std::max(0, std::min(s_addressCaret,
@@ -2498,20 +2729,20 @@ void Navigator::renderToolbar()
 		int caretX = kTextX + caretPos * kCharW;
 
 		// Draw the full text (simpler for renderers that don't do sub-string positioning).
-		drawTextAt(s_windowId, kTextX, kTextY, s_addressBuffer);
-		// Draw a 1-px wide caret bar on top.
-		drawRect(s_windowId, caretX, kAddressY + 4, 1, kAddressH - 8, 200, 220, 255);
-		(void)before; (void)after; // reserved for future proportional split-draw
-	} else {
-		// Normal: subtle top/bottom border
-		drawRect(s_windowId, kAddressX, kAddressY,                 kAddressW, 1, 110, 120, 142);
-		drawRect(s_windowId, kAddressX, kAddressY + kAddressH - 1, kAddressW, 1,  70,  78,  96);
-		drawTextAt(s_windowId, kAddressX + 10, centeredChromeTextY(kAddressY, kAddressH), s_currentDoc.url);
-	}
-	if (s_loading) {
-		drawAnimatedImage(s_windowId, kAddressX + kAddressW - 24, kAddressY + 2, 22, 22,
-			"assets/Images/SurfThrobber/PNG/surfer_{frame}.png");
-	}
+			drawThemeText(s_windowId, kTextX, kTextY, s_addressBuffer, NavigatorTextColor());
+			// Draw a 1-px wide caret bar on top.
+			drawThemeRect(s_windowId, caretX, kAddressY + 4, 1, kAddressH - 8, NavigatorAccentColor());
+			(void)before; (void)after; // reserved for future proportional split-draw
+		} else {
+			// Normal: subtle top/bottom border
+			drawThemeRect(s_windowId, kAddressX, kAddressY,                 kAddressW, 1, NavigatorAddressIdleTopBorderColor());
+			drawThemeRect(s_windowId, kAddressX, kAddressY + kAddressH - 1, kAddressW, 1, NavigatorAddressIdleBottomBorderColor());
+			drawThemeText(s_windowId, kAddressX + 10, centeredChromeTextY(kAddressY, kAddressH), s_currentDoc.url, NavigatorTextColor());
+		}
+		if (s_loading) {
+			drawAnimatedImage(s_windowId, kAddressX + kAddressW - 24, kAddressY + 2, 22, 22,
+				"assets/Images/SurfThrobber/PNG/surfer_{frame}.png");
+		}
 }
 
 void Navigator::renderDocument()
@@ -2519,16 +2750,14 @@ void Navigator::renderDocument()
 	clampScrollOffset();
 
 	// Content area background
-	int pageBgR = 245;
-	int pageBgG = 247;
-	int pageBgB = 250;
+	uint32_t contentColor = NavigatorContentColor();
 	if (s_currentDoc.bodyStyle.hasBackgroundColor) {
-		colorChannels(s_currentDoc.bodyStyle.backgroundColor, pageBgR, pageBgG, pageBgB);
+		contentColor = s_currentDoc.bodyStyle.backgroundColor;
 	}
-	drawRect(s_windowId, kContentX, kToolbarH + 6, kContentW, kContentH, pageBgR, pageBgG, pageBgB);
-	drawRect(s_windowId, kContentX, kToolbarH + 6, kContentW, 1, 186, 192, 204);
+	drawThemeRect(s_windowId, kContentX, kToolbarH + 6, kContentW, kContentH, contentColor);
+	drawThemeRect(s_windowId, kContentX, kToolbarH + 6, kContentW, 1, NavigatorContentBorderColor());
 	// Scroll-track slot
-	drawRect(s_windowId, kContentX + kContentW - 12, kToolbarH + 6, 8, kContentH, 229, 232, 238);
+	drawThemeRect(s_windowId, kContentX + kContentW - 12, kToolbarH + 6, 8, kContentH, NavigatorScrollTrackColor());
 
 	int blockIndex = 0;
 	for (const DocBlock& block : s_currentDoc.blocks) {
@@ -2592,20 +2821,20 @@ void Navigator::renderDocument()
 				s_currentFindMatch < static_cast<int>(s_findMatches.size()) &&
 				s_findMatches[s_currentFindMatch].blockIndex == blockIndex)
 			{
-				drawRect(s_windowId, kContentX + 10, drawY + std::max(0, blockMarginTop - 2),
+				drawThemeRect(s_windowId, kContentX + 10, drawY + std::max(0, blockMarginTop - 2),
 					kContentW - 28, std::max(kLineH + 4, rowBlockH - std::max(0, blockMarginTop)),
-					255, 244, 168);
+					NavigatorFindHighlightColor());
 			}
 			SelectionRange selection = normalizedSelection();
 			if (selection.valid && blockIndex >= selection.start.blockIndex && blockIndex <= selection.end.blockIndex && isSelectableBlock(block)) {
 				Rect selectionRect = selectableBlockRect(blockIndex);
 				if (selectionRect.w > 0 && selectionRect.h > 0) {
-					drawRect(s_windowId,
+					drawThemeRect(s_windowId,
 						selectionRect.x - 2,
 						selectionRect.y - 1,
 						std::min(selectionRect.w + 4, kContentX + kContentW - 18 - (selectionRect.x - 2)),
 						selectionRect.h,
-						96, 146, 224);
+						NavigatorSelectionColor());
 				}
 			}
 			const int boxY = drawY + blockMarginTop;
@@ -2710,23 +2939,23 @@ void Navigator::renderDocument()
 			s_currentFindMatch < static_cast<int>(s_findMatches.size()) &&
 			s_findMatches[s_currentFindMatch].blockIndex == blockIndex)
 		{
-			drawRect(s_windowId, kContentX + 10, drawY + std::max(0, blockMarginTop - 2),
-				kContentW - 28, std::max(kLineH + 4, blockH - std::max(0, blockMarginTop)),
-				255, 244, 168);
-		}
+				drawThemeRect(s_windowId, kContentX + 10, drawY + std::max(0, blockMarginTop - 2),
+					kContentW - 28, std::max(kLineH + 4, blockH - std::max(0, blockMarginTop)),
+					NavigatorFindHighlightColor());
+			}
 
 		SelectionRange selection = normalizedSelection();
 		if (selection.valid && blockIndex >= selection.start.blockIndex && blockIndex <= selection.end.blockIndex && isSelectableBlock(block)) {
 			Rect selectionRect = selectableBlockRect(blockIndex);
 			if (selectionRect.w > 0 && selectionRect.h > 0) {
-				drawRect(s_windowId,
-					selectionRect.x - 2,
-					selectionRect.y - 1,
-					std::min(selectionRect.w + 4, kContentX + kContentW - 18 - (selectionRect.x - 2)),
-					selectionRect.h,
-					96, 146, 224);
+					drawThemeRect(s_windowId,
+						selectionRect.x - 2,
+						selectionRect.y - 1,
+						std::min(selectionRect.w + 4, kContentX + kContentW - 18 - (selectionRect.x - 2)),
+						selectionRect.h,
+						NavigatorSelectionColor());
+				}
 			}
-		}
 
 		const int boxY = drawY + blockMarginTop;
 		const int boxH = std::max(1, blockH - blockMarginTop - std::max(4, blockMarginBottom));
@@ -2735,8 +2964,8 @@ void Navigator::renderDocument()
 		switch (block.type) {
 		case BlockType::Heading:
 			// Slightly larger heading: draw a subtle accent bar then the text
-			drawRect(s_windowId, outerX + paddingLeft, boxY + borderTop + paddingTop + std::max(lineHeight, headingFontSize - 4),
-				std::max(1, innerWidth), 2, 80, 140, 220);
+			drawThemeRect(s_windowId, outerX + paddingLeft, boxY + borderTop + paddingTop + std::max(lineHeight, headingFontSize - 4),
+				std::max(1, innerWidth), 2, NavigatorAccentColor());
 			drawTextAtStyled(s_windowId, blockTextX(block, outerX + paddingLeft, innerWidth, std::min(static_cast<int>(block.text.size()) * kCharW, innerWidth)), drawY + blockMarginTop + borderTop + paddingTop + textLineTopPaddingPx(lineHeight), block.text, block.style);
 			if (block.style.bold) {
 				drawTextAtStyled(s_windowId, blockTextX(block, outerX + paddingLeft + 1, innerWidth, std::min(static_cast<int>(block.text.size()) * kCharW, innerWidth)), drawY + blockMarginTop + borderTop + paddingTop + textLineTopPaddingPx(lineHeight), block.text, block.style);
@@ -2828,11 +3057,11 @@ void Navigator::renderDocument()
 				if (info.ok) {
 					drawImage(s_windowId, imageX, boxY + borderTop + paddingTop, imageW, imageH, info.drawPath);
 				} else {
-					drawRect(s_windowId, imageX, boxY + borderTop + paddingTop, imageW, imageH, 232, 236, 242);
-					drawRect(s_windowId, imageX, boxY + borderTop + paddingTop, imageW, 1, 145, 153, 168);
-					drawRect(s_windowId, imageX, boxY + borderTop + paddingTop + imageH - 1, imageW, 1, 145, 153, 168);
-					drawRect(s_windowId, imageX, boxY + borderTop + paddingTop, 1, imageH, 145, 153, 168);
-					drawRect(s_windowId, imageX + imageW - 1, boxY + borderTop + paddingTop, 1, imageH, 145, 153, 168);
+					drawThemeRect(s_windowId, imageX, boxY + borderTop + paddingTop, imageW, imageH, NavigatorContentColor());
+					drawThemeRect(s_windowId, imageX, boxY + borderTop + paddingTop, imageW, 1, NavigatorContentBorderColor());
+					drawThemeRect(s_windowId, imageX, boxY + borderTop + paddingTop + imageH - 1, imageW, 1, NavigatorContentBorderColor());
+					drawThemeRect(s_windowId, imageX, boxY + borderTop + paddingTop, 1, imageH, NavigatorContentBorderColor());
+					drawThemeRect(s_windowId, imageX + imageW - 1, boxY + borderTop + paddingTop, 1, imageH, NavigatorContentBorderColor());
 					drawTextAtStyled(s_windowId, imageX + 10, boxY + borderTop + paddingTop + std::max(8, (imageH - lineHeight) / 2),
 						imagePlaceholderText(block, info), block.style);
 				}
@@ -2844,11 +3073,11 @@ void Navigator::renderDocument()
 			const int inputX = outerX + paddingLeft;
 			const int inputY = boxY + borderTop + paddingTop;
 			const bool focused = (blockIndex == s_focusedInputBlockIndex);
-			drawRect(s_windowId, inputX, inputY, kFormInputW, kFormControlH, 250, 252, 255);
-			drawRect(s_windowId, inputX, inputY, kFormInputW, 1, focused ? 54 : 148, focused ? 118 : 156, focused ? 210 : 170);
-			drawRect(s_windowId, inputX, inputY + kFormControlH - 1, kFormInputW, 1, focused ? 54 : 148, focused ? 118 : 156, focused ? 210 : 170);
-			drawRect(s_windowId, inputX, inputY, 1, kFormControlH, focused ? 54 : 148, focused ? 118 : 156, focused ? 210 : 170);
-			drawRect(s_windowId, inputX + kFormInputW - 1, inputY, 1, kFormControlH, focused ? 54 : 148, focused ? 118 : 156, focused ? 210 : 170);
+			drawThemeRect(s_windowId, inputX, inputY, kFormInputW, kFormControlH, NavigatorFieldFillColor(focused));
+			drawThemeRect(s_windowId, inputX, inputY, kFormInputW, 1, NavigatorFieldBorderColor(focused));
+			drawThemeRect(s_windowId, inputX, inputY + kFormControlH - 1, kFormInputW, 1, NavigatorFieldBorderColor(focused));
+			drawThemeRect(s_windowId, inputX, inputY, 1, kFormControlH, NavigatorFieldBorderColor(focused));
+			drawThemeRect(s_windowId, inputX + kFormInputW - 1, inputY, 1, kFormControlH, NavigatorFieldBorderColor(focused));
 			std::string text = block.inputValue;
 			bool placeholder = text.empty() && !block.placeholder.empty();
 			if (placeholder) text = block.placeholder;
@@ -2857,14 +3086,14 @@ void Navigator::renderDocument()
 				text = text.substr(text.size() - static_cast<size_t>(maxChars));
 			}
 			if (placeholder) {
-				drawTextAtColored(s_windowId, inputX + 8, centeredChromeTextY(inputY, kFormControlH), text, 128, 136, 150);
+				drawThemeText(s_windowId, inputX + 8, centeredChromeTextY(inputY, kFormControlH), text, NavigatorFieldMutedTextColor());
 			} else {
-				drawTextAtColored(s_windowId, inputX + 8, centeredChromeTextY(inputY, kFormControlH), text, 35, 45, 60);
+				drawThemeText(s_windowId, inputX + 8, centeredChromeTextY(inputY, kFormControlH), text, NavigatorFieldTextColor());
 			}
 			if (focused) {
 				int caretPos = std::max(0, std::min(s_inputCaret, static_cast<int>(block.inputValue.size())));
 				int visibleCaret = std::min(caretPos, maxChars);
-				drawRect(s_windowId, inputX + 8 + visibleCaret * kCharW, inputY + 5, 1, kFormControlH - 10, 35, 85, 170);
+				drawThemeRect(s_windowId, inputX + 8 + visibleCaret * kCharW, inputY + 5, 1, kFormControlH - 10, NavigatorAccentColor());
 			}
 			break;
 		}
@@ -2874,11 +3103,11 @@ void Navigator::renderDocument()
 			const int inputY = boxY + borderTop + paddingTop;
 			const int inputH = formControlHeight(block);
 			const bool focused = (blockIndex == s_focusedInputBlockIndex);
-			drawRect(s_windowId, inputX, inputY, kFormInputW, inputH, 250, 252, 255);
-			drawRect(s_windowId, inputX, inputY, kFormInputW, 1, focused ? 54 : 148, focused ? 118 : 156, focused ? 210 : 170);
-			drawRect(s_windowId, inputX, inputY + inputH - 1, kFormInputW, 1, focused ? 54 : 148, focused ? 118 : 156, focused ? 210 : 170);
-			drawRect(s_windowId, inputX, inputY, 1, inputH, focused ? 54 : 148, focused ? 118 : 156, focused ? 210 : 170);
-			drawRect(s_windowId, inputX + kFormInputW - 1, inputY, 1, inputH, focused ? 54 : 148, focused ? 118 : 156, focused ? 210 : 170);
+			drawThemeRect(s_windowId, inputX, inputY, kFormInputW, inputH, NavigatorFieldFillColor(focused));
+			drawThemeRect(s_windowId, inputX, inputY, kFormInputW, 1, NavigatorFieldBorderColor(focused));
+			drawThemeRect(s_windowId, inputX, inputY + inputH - 1, kFormInputW, 1, NavigatorFieldBorderColor(focused));
+			drawThemeRect(s_windowId, inputX, inputY, 1, inputH, NavigatorFieldBorderColor(focused));
+			drawThemeRect(s_windowId, inputX + kFormInputW - 1, inputY, 1, inputH, NavigatorFieldBorderColor(focused));
 			const bool placeholder = block.inputValue.empty() && !block.placeholder.empty();
 			const std::string rawText = placeholder ? block.placeholder : block.inputValue;
 			const int maxChars = (kFormInputW - 16) / kCharW;
@@ -2896,10 +3125,8 @@ void Navigator::renderDocument()
 				if (static_cast<int>(lineText.size()) > maxChars) {
 					lineText = lineText.substr(static_cast<size_t>(std::max(0, static_cast<int>(lineText.size()) - maxChars)));
 				}
-				drawTextAtColored(s_windowId, inputX + 8, lineY, lineText,
-					placeholder ? 128 : 35,
-					placeholder ? 136 : 45,
-					placeholder ? 150 : 60);
+				drawThemeText(s_windowId, inputX + 8, lineY, lineText,
+					placeholder ? NavigatorFieldMutedTextColor() : NavigatorFieldTextColor());
 				lineY += lineHeight;
 			}
 			if (focused && !placeholder) {
@@ -2917,7 +3144,7 @@ void Navigator::renderDocument()
 				if (caretLine >= firstVisibleLine && caretLine < firstVisibleLine + maxVisibleRows) {
 					int visibleColumn = std::min(caretColumn, maxChars);
 					int caretY = inputY + 5 + (caretLine - firstVisibleLine) * lineHeight;
-					drawRect(s_windowId, inputX + 8 + visibleColumn * kCharW, caretY, 1, lineHeight - 2, 35, 85, 170);
+					drawThemeRect(s_windowId, inputX + 8 + visibleColumn * kCharW, caretY, 1, lineHeight - 2, NavigatorAccentColor());
 				}
 			}
 			break;
@@ -2930,20 +3157,20 @@ void Navigator::renderDocument()
 			const bool focused = (blockIndex == s_focusedInputBlockIndex);
 			const int box = 14;
 			const int boxY = controlY + (kFormControlH - box) / 2;
-			drawRect(s_windowId, controlX, boxY, box, box, 248, 250, 254);
-			drawRect(s_windowId, controlX, boxY, box, 1, focused ? 54 : 110, focused ? 118 : 118, focused ? 210 : 132);
-			drawRect(s_windowId, controlX, boxY + box - 1, box, 1, focused ? 54 : 110, focused ? 118 : 118, focused ? 210 : 132);
-			drawRect(s_windowId, controlX, boxY, 1, box, focused ? 54 : 110, focused ? 118 : 118, focused ? 210 : 132);
-			drawRect(s_windowId, controlX + box - 1, boxY, 1, box, focused ? 54 : 110, focused ? 118 : 118, focused ? 210 : 132);
+			drawThemeRect(s_windowId, controlX, boxY, box, box, NavigatorFieldFillColor(focused));
+			drawThemeRect(s_windowId, controlX, boxY, box, 1, NavigatorFieldBorderColor(focused));
+			drawThemeRect(s_windowId, controlX, boxY + box - 1, box, 1, NavigatorFieldBorderColor(focused));
+			drawThemeRect(s_windowId, controlX, boxY, 1, box, NavigatorFieldBorderColor(focused));
+			drawThemeRect(s_windowId, controlX + box - 1, boxY, 1, box, NavigatorFieldBorderColor(focused));
 			if (block.checked) {
 				if (block.type == BlockType::FormRadio) {
-					drawRect(s_windowId, controlX + 4, boxY + 4, box - 8, box - 8, 45, 94, 170);
+					drawThemeRect(s_windowId, controlX + 4, boxY + 4, box - 8, box - 8, NavigatorAccentColor());
 				} else {
-					drawTextAtColored(s_windowId, controlX + 3, boxY - 2, "x", 35, 85, 170);
+					drawThemeText(s_windowId, controlX + 3, boxY - 2, "x", NavigatorAccentColor());
 				}
 			}
 			std::string label = block.text.empty() ? block.inputName : block.text;
-			drawTextAtColored(s_windowId, controlX + box + 8, centeredChromeTextY(controlY, kFormControlH), label, 35, 45, 60);
+			drawThemeText(s_windowId, controlX + box + 8, centeredChromeTextY(controlY, kFormControlH), label, NavigatorFieldTextColor());
 			break;
 		}
 
@@ -2951,14 +3178,14 @@ void Navigator::renderDocument()
 			const int selectX = outerX + paddingLeft;
 			const int selectY = boxY + borderTop + paddingTop;
 			const bool focused = (blockIndex == s_focusedInputBlockIndex);
-			drawRect(s_windowId, selectX, selectY, kFormInputW, kFormControlH, 250, 252, 255);
-			drawRect(s_windowId, selectX, selectY, kFormInputW, 1, focused ? 54 : 148, focused ? 118 : 156, focused ? 210 : 170);
-			drawRect(s_windowId, selectX, selectY + kFormControlH - 1, kFormInputW, 1, focused ? 54 : 148, focused ? 118 : 156, focused ? 210 : 170);
-			drawRect(s_windowId, selectX, selectY, 1, kFormControlH, focused ? 54 : 148, focused ? 118 : 156, focused ? 210 : 170);
-			drawRect(s_windowId, selectX + kFormInputW - 1, selectY, 1, kFormControlH, focused ? 54 : 148, focused ? 118 : 156, focused ? 210 : 170);
+			drawThemeRect(s_windowId, selectX, selectY, kFormInputW, kFormControlH, NavigatorFieldFillColor(focused));
+			drawThemeRect(s_windowId, selectX, selectY, kFormInputW, 1, NavigatorFieldBorderColor(focused));
+			drawThemeRect(s_windowId, selectX, selectY + kFormControlH - 1, kFormInputW, 1, NavigatorFieldBorderColor(focused));
+			drawThemeRect(s_windowId, selectX, selectY, 1, kFormControlH, NavigatorFieldBorderColor(focused));
+			drawThemeRect(s_windowId, selectX + kFormInputW - 1, selectY, 1, kFormControlH, NavigatorFieldBorderColor(focused));
 			std::string label = block.text.empty() ? "(select)" : block.text;
-			drawTextAtColored(s_windowId, selectX + 8, centeredChromeTextY(selectY, kFormControlH), label, 35, 45, 60);
-			drawTextAtColored(s_windowId, selectX + kFormInputW - 20, centeredChromeTextY(selectY, kFormControlH), "v", 70, 78, 96);
+			drawThemeText(s_windowId, selectX + 8, centeredChromeTextY(selectY, kFormControlH), label, NavigatorFieldTextColor());
+			drawThemeText(s_windowId, selectX + kFormInputW - 20, centeredChromeTextY(selectY, kFormControlH), "v", NavigatorFieldMutedTextColor());
 			break;
 		}
 
@@ -2967,15 +3194,15 @@ void Navigator::renderDocument()
 			const int buttonY = boxY + borderTop + paddingTop;
 			const bool focused = (blockIndex == s_focusedInputBlockIndex);
 			const bool disabled = block.formUnsupported;
-			drawRect(s_windowId, buttonX, buttonY, kFormSubmitW, kFormControlH, disabled ? 184 : 65, disabled ? 188 : 112, disabled ? 196 : 190);
-			drawRect(s_windowId, buttonX, buttonY, kFormSubmitW, 1, focused ? 54 : (disabled ? 128 : 38), focused ? 118 : (disabled ? 132 : 78), focused ? 210 : (disabled ? 142 : 150));
-			drawRect(s_windowId, buttonX, buttonY + kFormControlH - 1, kFormSubmitW, 1, focused ? 54 : (disabled ? 128 : 38), focused ? 118 : (disabled ? 132 : 78), focused ? 210 : (disabled ? 142 : 150));
-			drawRect(s_windowId, buttonX, buttonY, 1, kFormControlH, focused ? 54 : (disabled ? 128 : 38), focused ? 118 : (disabled ? 132 : 78), focused ? 210 : (disabled ? 142 : 150));
-			drawRect(s_windowId, buttonX + kFormSubmitW - 1, buttonY, 1, kFormControlH, focused ? 54 : (disabled ? 128 : 38), focused ? 118 : (disabled ? 132 : 78), focused ? 210 : (disabled ? 142 : 150));
+			drawThemeRect(s_windowId, buttonX, buttonY, kFormSubmitW, kFormControlH, NavigatorButtonFillColor(focused, disabled));
+			drawThemeRect(s_windowId, buttonX, buttonY, kFormSubmitW, 1, NavigatorButtonBorderColor(focused, disabled));
+			drawThemeRect(s_windowId, buttonX, buttonY + kFormControlH - 1, kFormSubmitW, 1, NavigatorButtonBorderColor(focused, disabled));
+			drawThemeRect(s_windowId, buttonX, buttonY, 1, kFormControlH, NavigatorButtonBorderColor(focused, disabled));
+			drawThemeRect(s_windowId, buttonX + kFormSubmitW - 1, buttonY, 1, kFormControlH, NavigatorButtonBorderColor(focused, disabled));
 			std::string label = block.submitLabel.empty() ? "Submit" : block.submitLabel;
 			int labelMax = (kFormSubmitW - 14) / kCharW;
 			if (static_cast<int>(label.size()) > labelMax) label = label.substr(0, static_cast<size_t>(labelMax));
-			drawTextAtColored(s_windowId, buttonX + 10, centeredChromeTextY(buttonY, kFormControlH), label, disabled ? 76 : 255, disabled ? 80 : 255, disabled ? 88 : 255);
+			drawThemeText(s_windowId, buttonX + 10, centeredChromeTextY(buttonY, kFormControlH), label, NavigatorButtonTextColor(disabled));
 			break;
 		}
 		}
@@ -2989,30 +3216,31 @@ void Navigator::renderDocument()
 		int trackH = kContentH - 8;
 		int thumbH = std::max(22, (trackH * kContentH) / s_documentHeight);
 		int thumbY = trackY + ((trackH - thumbH) * s_scrollOffset) / maxScroll;
-		drawRect(s_windowId, kContentX + kContentW - 10, trackY, 6, trackH, 216, 220, 228);
-		drawRect(s_windowId, kContentX + kContentW - 10, thumbY, 6, thumbH, 130, 138, 156);
+		drawThemeRect(s_windowId, kContentX + kContentW - 10, trackY, 6, trackH, NavigatorScrollTrackColor());
+		drawThemeRect(s_windowId, kContentX + kContentW - 10, thumbY, 6, thumbH, NavigatorScrollThumbColor());
 	}
 }
 
 void Navigator::renderStatusBar()
 {
-	drawRect(s_windowId, 0, kWindowH - kStatusBarH, kWindowW, kStatusBarH, 36, 40, 50);
-	drawRect(s_windowId, 0, kWindowH - kStatusBarH, kWindowW, 1, 78, 86, 108);
+	drawThemeRect(s_windowId, 0, kWindowH - kStatusBarH, kWindowW, kStatusBarH, NavigatorStatusBarColor());
+	drawThemeRect(s_windowId, 0, kWindowH - kStatusBarH, kWindowW, 1, NavigatorStatusBarBorderColor());
 
 	if (s_findActive) {
-		drawRect(s_windowId, 8, kWindowH - kStatusBarH + 4, 420, kStatusBarH - 8, 18, 22, 30);
-		drawRect(s_windowId, 8, kWindowH - kStatusBarH + 4, 420, 1, 80, 140, 220);
-		drawRect(s_windowId, 8, kWindowH - kStatusBarH + kStatusBarH - 5, 420, 1, 80, 140, 220);
+		drawThemeRect(s_windowId, 8, kWindowH - kStatusBarH + 4, 420, kStatusBarH - 8, NavigatorAddressFillColor());
+		drawThemeRect(s_windowId, 8, kWindowH - kStatusBarH + 4, 420, 1, NavigatorAddressFocusedBorderColor());
+		drawThemeRect(s_windowId, 8, kWindowH - kStatusBarH + kStatusBarH - 5, 420, 1, NavigatorAddressFocusedBorderColor());
 		const int findTextY = centeredChromeTextY(kWindowH - kStatusBarH + 4, kStatusBarH - 8);
 		std::string shown = s_findBuffer;
 		const int maxChars = 28;
 		if (static_cast<int>(shown.size()) > maxChars) {
 			shown = shown.substr(shown.size() - static_cast<size_t>(maxChars));
 		}
-		drawTextAt(s_windowId, 16, findTextY, "Find: " + shown);
+		drawThemeText(s_windowId, 16, findTextY, "Find: " + shown, NavigatorTextColor());
 		int caretPos = std::min(s_findCaret, maxChars);
-		drawRect(s_windowId, 64 + caretPos * kCharW, kWindowH - kStatusBarH + 6, 1, kStatusBarH - 12, 200, 220, 255);
-		drawTextAt(s_windowId, 440, centeredChromeTextY(kWindowH - kStatusBarH, kStatusBarH), findMatchStatusText() + "   Enter/Down: next   Up: prev   Esc: close");
+		drawThemeRect(s_windowId, 64 + caretPos * kCharW, kWindowH - kStatusBarH + 6, 1, kStatusBarH - 12, NavigatorAccentColor());
+		drawThemeText(s_windowId, 440, centeredChromeTextY(kWindowH - kStatusBarH, kStatusBarH), findMatchStatusText() + "   Enter/Down: next   Up: prev   Esc: close",
+			isSciFiThemeActive() ? NavigatorMutedTextColor() : NavigatorTextColor());
 		return;
 	}
 
@@ -3022,7 +3250,7 @@ void Navigator::renderStatusBar()
 		const std::string text = selectedText();
 		shown += (shown.empty() ? "" : "   ") + std::string("Selection: ") + std::to_string(text.size()) + " chars";
 	}
-	drawTextAt(s_windowId, 12, centeredChromeTextY(kWindowH - kStatusBarH, kStatusBarH), shown);
+	drawThemeText(s_windowId, 12, centeredChromeTextY(kWindowH - kStatusBarH, kStatusBarH), shown, NavigatorTextColor());
 }
 
 void Navigator::updateStatus(const std::string& status)
