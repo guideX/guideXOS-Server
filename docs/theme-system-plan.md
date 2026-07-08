@@ -533,6 +533,18 @@ Phase 4E is the next app-surface pilot for the guideXOS Server theme system. It 
 * Broad app redesign remains deferred.
 * Future app polish should continue one app at a time.
 
+## Phase 4E.1
+
+Phase 4E.1 is a stabilization-only review pass for the Task Manager app-surface pilot.
+
+* The Task Manager pilot was reviewed and stabilized.
+* Readability and graph/status safety were reviewed.
+* Row/selection/End Task safety were reviewed.
+* Classic preservation stayed close to the prior Task Manager look.
+* No monitoring, enumeration, End Task, or App Model behavior changed.
+* No new effects were added.
+* Tiny readability/layout fix made: none.
+
 ## Manual Validation Runbook
 
 * Start the hosted server executable.
@@ -596,7 +608,7 @@ Phase 4E is the next app-surface pilot for the guideXOS Server theme system. It 
 
 * Classic should continue to look basically unchanged.
 * Sci Fi is a first visible proof that the theme system exists, not a full futuristic redesign.
-* Rounded-window clipping remains deferred; this foundation is intentionally limited to IDs, persistence, selector wiring, safe chrome colors, the Phase 2A chrome metric pass, the guarded Phase 2B rounded-shell preview, the Phase 2C border/highlight polish pass, the Phase 2D hosted shadow preview, the Phase 2E desktop/taskbar surface polish pass, the Phase 2G validation checkpoint, the Phase 3A Display Options app-surface pilot, the Phase 3B Control Panel app-surface pilot, the Phase 3C Notepad app-surface pilot, the Phase 3C.1 stabilization review pass, the Phase 3D Calculator app-surface pilot, the Phase 3D.1 stabilization review pass, the Phase 3E File Explorer app-surface pilot, the Phase 3E.1 File Explorer stabilization review pass, the Phase 3F Clock app-surface pilot, the Phase 3F.1 Clock stabilization review pass, the Phase 3G app-surface closeout, the Phase 3H hosted visual validation pass, the Phase 4A readiness/defaults boundary checkpoint, the Phase 4B wallpaper/background inventory and design-readiness pass, the Phase 4C wallpaper recommendation note, the Phase 4C.1 stabilization review pass, the Phase 4D Navigator app-surface pilot, the Phase 4D.1 Navigator stabilization review pass, and the Phase 4E Task Manager app-surface pilot.
+* Rounded-window clipping remains deferred; this foundation is intentionally limited to IDs, persistence, selector wiring, safe chrome colors, the Phase 2A chrome metric pass, the guarded Phase 2B rounded-shell preview, the Phase 2C border/highlight polish pass, the Phase 2D hosted shadow preview, the Phase 2E desktop/taskbar surface polish pass, the Phase 2G validation checkpoint, the Phase 3A Display Options app-surface pilot, the Phase 3B Control Panel app-surface pilot, the Phase 3C Notepad app-surface pilot, the Phase 3C.1 stabilization review pass, the Phase 3D Calculator app-surface pilot, the Phase 3D.1 stabilization review pass, the Phase 3E File Explorer app-surface pilot, the Phase 3E.1 File Explorer stabilization review pass, the Phase 3F Clock app-surface pilot, the Phase 3F.1 Clock stabilization review pass, the Phase 3G app-surface closeout, the Phase 3H hosted visual validation pass, the Phase 4A readiness/defaults boundary checkpoint, the Phase 4B wallpaper/background inventory and design-readiness pass, the Phase 4C wallpaper recommendation note, the Phase 4C.1 stabilization review pass, the Phase 4D Navigator app-surface pilot, the Phase 4D.1 Navigator stabilization review pass, the Phase 4E Task Manager app-surface pilot, and the Phase 4E.1 Task Manager stabilization review pass.
 
 ## Recommended Next Pass
 
