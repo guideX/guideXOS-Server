@@ -29,6 +29,15 @@ if /I not "%DISPLAY_BACKEND%"=="std" if /I not "%DISPLAY_BACKEND%"=="virtio-gpu"
     set "DISPLAY_BACKEND=std"
 )
 
+set "QEMU_HEADLESS=0"
+if /I "%GXOS_QEMU_DISPLAY_PROBE_HEADLESS%"=="1" set "QEMU_HEADLESS=1"
+
+set "QEMU_NO_PAUSE=0"
+if /I "%GXOS_QEMU_DISPLAY_PROBE_NO_PAUSE%"=="1" set "QEMU_NO_PAUSE=1"
+
+set "QEMU_SERIAL_LOG="
+if defined GXOS_QEMU_DISPLAY_PROBE_SERIAL_LOG set "QEMU_SERIAL_LOG=%GXOS_QEMU_DISPLAY_PROBE_SERIAL_LOG%"
+
 echo ====================================
 echo   guideXOS Experimental Display Probe
 echo ====================================
@@ -36,6 +45,9 @@ echo.
 echo Probe backend: %DISPLAY_BACKEND%
 echo Diagnostic scope: firmware and QEMU display exposure only
 echo Guest note: guideXOS still consumes one selected framebuffer
+if "%QEMU_HEADLESS%"=="1" echo Headless capture mode: enabled
+if not "%QEMU_SERIAL_LOG%"=="" echo Serial log capture: %QEMU_SERIAL_LOG%
+if "%QEMU_NO_PAUSE%"=="1" echo Pause after exit: disabled
 echo.
 
 REM Check if OVMF.fd exists (try local first, then QEMU's built-in)
@@ -149,12 +161,24 @@ if errorlevel 1 (
 
 set "QEMU_VIDEO_ARGS=-vga std"
 set "QEMU_DISPLAY_ARGS=-display gtk"
+set "QEMU_VNC_ARGS=-vnc :0"
 set "QEMU_PROBE_NOTE=legacy VGA/Bochs-style framebuffer"
+set "QEMU_SERIAL_ARGS=-serial stdio"
 
 if /I "%DISPLAY_BACKEND%"=="virtio-gpu" (
     set "QEMU_VIDEO_ARGS=-vga none -device virtio-gpu-pci,max_outputs=2"
     set "QEMU_DISPLAY_ARGS=-display gtk,show-tabs=on,zoom-to-fit=on"
+    set "QEMU_VNC_ARGS=-vnc :0"
     set "QEMU_PROBE_NOTE=virtio-gpu-pci multi-output probe"
+)
+
+if "%QEMU_HEADLESS%"=="1" (
+    set "QEMU_DISPLAY_ARGS=-display none"
+    set "QEMU_VNC_ARGS="
+)
+
+if not "%QEMU_SERIAL_LOG%"=="" (
+    set "QEMU_SERIAL_ARGS=-serial file:%QEMU_SERIAL_LOG%"
 )
 
 echo Launching QEMU display probe...
@@ -180,8 +204,8 @@ if "%SPLIT_PFLASH%"=="1" (
         -m 1024M ^
         %QEMU_VIDEO_ARGS% ^
         %QEMU_DISPLAY_ARGS% ^
-        -vnc :0 ^
-        -serial stdio ^
+        %QEMU_VNC_ARGS% ^
+        %QEMU_SERIAL_ARGS% ^
         -rtc base=utc,clock=host ^
         -no-reboot
 ) else (
@@ -195,12 +219,15 @@ if "%SPLIT_PFLASH%"=="1" (
         -m 1024M ^
         %QEMU_VIDEO_ARGS% ^
         %QEMU_DISPLAY_ARGS% ^
-        -vnc :0 ^
-        -serial stdio ^
+        %QEMU_VNC_ARGS% ^
+        %QEMU_SERIAL_ARGS% ^
         -rtc base=utc,clock=host ^
         -no-reboot
 )
 
+set "QEMU_EXIT_CODE=%ERRORLEVEL%"
 echo.
 echo QEMU exited
+if "%QEMU_NO_PAUSE%"=="1" exit /b %QEMU_EXIT_CODE%
 pause
+exit /b %QEMU_EXIT_CODE%
