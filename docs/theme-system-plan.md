@@ -545,6 +545,61 @@ Phase 4E.1 is a stabilization-only review pass for the Task Manager app-surface 
 * No new effects were added.
 * Tiny readability/layout fix made: none.
 
+## Phase 4F
+
+Phase 4F closes out the extended Sci Fi app-surface milestone as a documentation, inventory, and smoke-hardening pass. It does not add new styling, rendering effects, app behavior, theme IDs, persistence keys, theme metrics, or App Model behavior. No per-effect controls were introduced.
+
+* Classic remains the default theme.
+* Sci Fi remains opt-in.
+* Missing or invalid theme config falls back to Classic.
+* Wallpaper selection remains global, not theme-scoped.
+* The Sci Fi wallpaper recommendation in Display Options remains read-only and optional.
+* No automatic wallpaper switching exists.
+* No theme-scoped wallpaper persistence exists.
+* No App Model gate/status dependency was introduced.
+* No new effects were added.
+
+### App-Surface Inventory
+
+* Display Options: Phase 3A / 3A.1, plus Phase 4C / 4C.1; stabilization status: complete in 3A.1 and 4C.1; Sci Fi polish covers theme selection copy, the optional read-only wallpaper recommendation note, and conservative panel/card/accent treatment; Classic preservation: default look stays intact and the neutral card feel remains; Behavior changes: No; Safety fix / guard: the Sci Fi recommendation stays gated and read-only, and the earlier fallback tweak preserved the neutral card feel.
+* Control Panel: Phase 3B / 3B.1; stabilization status: complete in 3B.1; Sci Fi polish covers conservative panel/card/accent treatment; Classic preservation: look stays close to the prior Control Panel surface; Behavior changes: No; Safety fix / guard: shared grid top offset stays synchronized for drawing and hit-testing.
+* Notepad: Phase 3C / 3C.1; stabilization status: complete in 3C.1; Sci Fi polish covers conservative editor/body/border/text treatment; Classic preservation: look stays close to the prior Notepad surface; Behavior changes: No; Safety fix / guard: surface helpers stayed centralized and no visible fallback tweak was needed.
+* Calculator: Phase 3D / 3D.1; stabilization status: complete in 3D.1; Sci Fi polish covers conservative body/display/button/accent treatment; Classic preservation: look stays close to the prior Calculator surface; Behavior changes: No; Safety fix / guard: shared compositor widget guard stayed narrow to Calculator and Sci Fi.
+* File Explorer: Phase 3E / 3E.1; stabilization status: complete in 3E.1; Sci Fi polish covers conservative body/list/toolbar/address/selection/hover/border/status treatment; Classic preservation: look stays close to the prior File Explorer surface; Behavior changes: No; Safety fix / guard: Sci Fi hover clears on scroll and offset changes so hover stays visual-only.
+* Clock: Phase 3F / 3F.1; stabilization status: complete in 3F.1; Sci Fi polish covers conservative body/readout/accent treatment and clear repaint handling; Classic preservation: look stays close to the prior Clock surface; Behavior changes: No; Safety fix / guard: clear-then-redraw removes stale stacked text without changing timekeeping cadence.
+* Navigator: Phase 4D / 4D.1; stabilization status: complete in 4D.1; Sci Fi polish covers conservative toolbar/address/content/border/text treatment; Classic preservation: previous Navigator feel remains close to the current look; Behavior changes: No; Safety fix / guard: the shared compositor widget guard now matches Navigator windows only, and authored page colors still win when present.
+* Task Manager: Phase 4E / 4E.1; stabilization status: complete in 4E.1; Sci Fi polish covers conservative body/header/list/selection/border/text treatment; Classic preservation: stays close to the prior Task Manager look; Behavior changes: No; Safety fix / guard: readability and graph/status safety were reviewed, and row/selection/End Task safety stayed intact.
+
+### Wallpaper / Default Boundaries
+
+* Classic remains the default theme.
+* Sci Fi remains opt-in.
+* Missing or invalid theme config falls back to Classic.
+* Wallpaper selection remains global and not theme-scoped.
+* The Sci Fi wallpaper recommendation in Display Options is read-only and optional.
+* No automatic wallpaper switching exists.
+* No theme-scoped wallpaper persistence exists.
+
+### Deferred Boundaries
+
+* Image Viewer app-surface polish.
+* Other future app-surface polish.
+* Bare-metal theme parity.
+* High-DPI/scaling.
+* Hosted shadow/taskbar polish.
+* Rounded client clipping.
+* Rounded hit-testing.
+* Blur/glass.
+* Animations.
+* Per-effect controls.
+* Theme-scoped wallpaper persistence.
+* Broader app redesign.
+
+### Image Viewer Caution
+
+* Image Viewer may be a future theme target, but it should be approached carefully because prior large-image, memory, and repaint concerns make it a higher-risk surface for theme changes.
+* This pass does not inspect or modify Image Viewer.
+
 ## Manual Validation Runbook
 
 * Start the hosted server executable.
@@ -608,7 +663,7 @@ Phase 4E.1 is a stabilization-only review pass for the Task Manager app-surface 
 
 * Classic should continue to look basically unchanged.
 * Sci Fi is a first visible proof that the theme system exists, not a full futuristic redesign.
-* Rounded-window clipping remains deferred; this foundation is intentionally limited to IDs, persistence, selector wiring, safe chrome colors, the Phase 2A chrome metric pass, the guarded Phase 2B rounded-shell preview, the Phase 2C border/highlight polish pass, the Phase 2D hosted shadow preview, the Phase 2E desktop/taskbar surface polish pass, the Phase 2G validation checkpoint, the Phase 3A Display Options app-surface pilot, the Phase 3B Control Panel app-surface pilot, the Phase 3C Notepad app-surface pilot, the Phase 3C.1 stabilization review pass, the Phase 3D Calculator app-surface pilot, the Phase 3D.1 stabilization review pass, the Phase 3E File Explorer app-surface pilot, the Phase 3E.1 File Explorer stabilization review pass, the Phase 3F Clock app-surface pilot, the Phase 3F.1 Clock stabilization review pass, the Phase 3G app-surface closeout, the Phase 3H hosted visual validation pass, the Phase 4A readiness/defaults boundary checkpoint, the Phase 4B wallpaper/background inventory and design-readiness pass, the Phase 4C wallpaper recommendation note, the Phase 4C.1 stabilization review pass, the Phase 4D Navigator app-surface pilot, the Phase 4D.1 Navigator stabilization review pass, the Phase 4E Task Manager app-surface pilot, and the Phase 4E.1 Task Manager stabilization review pass.
+* Rounded-window clipping remains deferred; this foundation is intentionally limited to IDs, persistence, selector wiring, safe chrome colors, the Phase 2A chrome metric pass, the guarded Phase 2B rounded-shell preview, the Phase 2C border/highlight polish pass, the Phase 2D hosted shadow preview, the Phase 2E desktop/taskbar surface polish pass, the Phase 2G validation checkpoint, the Phase 3A Display Options app-surface pilot, the Phase 3B Control Panel app-surface pilot, the Phase 3C Notepad app-surface pilot, the Phase 3C.1 stabilization review pass, the Phase 3D Calculator app-surface pilot, the Phase 3D.1 stabilization review pass, the Phase 3E File Explorer app-surface pilot, the Phase 3E.1 File Explorer stabilization review pass, the Phase 3F Clock app-surface pilot, the Phase 3F.1 Clock stabilization review pass, the Phase 3G app-surface closeout, the Phase 3H hosted visual validation pass, the Phase 4A readiness/defaults boundary checkpoint, the Phase 4B wallpaper/background inventory and design-readiness pass, the Phase 4C wallpaper recommendation note, the Phase 4C.1 stabilization review pass, the Phase 4D Navigator app-surface pilot, the Phase 4D.1 Navigator stabilization review pass, the Phase 4E Task Manager app-surface pilot, the Phase 4E.1 Task Manager stabilization review pass, and the Phase 4F extended app-surface closeout.
 
 ## Recommended Next Pass
 
