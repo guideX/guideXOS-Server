@@ -230,8 +230,7 @@ static void log_framebuffer_descriptor(
     const char* source,
     uint32_t framebufferCount,
     uint32_t index,
-    bool primary,
-    bool selected,
+    uint32_t descriptorFlags,
     uint64_t base,
     uint64_t size,
     uint32_t width,
@@ -246,10 +245,26 @@ static void log_framebuffer_descriptor(
     serial_put_u32_decimal(framebufferCount);
     kernel::serial::puts(" index=");
     serial_put_u32_decimal(index);
-    if (primary) {
+
+    kernel::serial::puts(" status=");
+    if (descriptorFlags & guideXOS::FRAMEBUFFER_DESCRIPTOR_FLAG_DUPLICATE) {
+        kernel::serial::puts("duplicate");
+    } else {
+        kernel::serial::puts("canonical");
+    }
+    if (descriptorFlags & guideXOS::FRAMEBUFFER_DESCRIPTOR_FLAG_ALIAS) {
+        kernel::serial::puts(" alias");
+    }
+    if (descriptorFlags & guideXOS::FRAMEBUFFER_DESCRIPTOR_FLAG_SAME_AS_PRIMARY) {
+        kernel::serial::puts(" same-as-primary");
+    }
+    if (descriptorFlags & guideXOS::FRAMEBUFFER_DESCRIPTOR_FLAG_SUSPICIOUS) {
+        kernel::serial::puts(" suspicious");
+    }
+    if (descriptorFlags & guideXOS::FRAMEBUFFER_DESCRIPTOR_FLAG_PRIMARY) {
         kernel::serial::puts(" primary");
     }
-    if (selected) {
+    if (descriptorFlags & guideXOS::FRAMEBUFFER_DESCRIPTOR_FLAG_SELECTED) {
         kernel::serial::puts(" selected");
     }
     kernel::serial::puts(" base=");
@@ -266,6 +281,23 @@ static void log_framebuffer_descriptor(
     serial_put_u32_decimal(bpp);
     kernel::serial::puts(" format=");
     kernel::serial::puts(format ? format : "(unknown)");
+    kernel::serial::puts("\n");
+}
+
+static void log_framebuffer_summary(
+    uint32_t framebufferCount,
+    uint32_t uniqueFramebufferCount,
+    uint32_t duplicateFramebufferCount,
+    uint32_t suspiciousFramebufferCount)
+{
+    kernel::serial::puts("[KERNEL] FramebufferCount=");
+    serial_put_u32_decimal(framebufferCount);
+    kernel::serial::puts(" UniqueFramebufferCount=");
+    serial_put_u32_decimal(uniqueFramebufferCount);
+    kernel::serial::puts(" DuplicateFramebufferCount=");
+    serial_put_u32_decimal(duplicateFramebufferCount);
+    kernel::serial::puts(" SuspiciousFramebufferCount=");
+    serial_put_u32_decimal(suspiciousFramebufferCount);
     kernel::serial::puts("\n");
 }
 
@@ -326,14 +358,19 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
                 framebufferCount = guideXOS::GUIDEXOS_MAX_FRAMEBUFFERS;
             }
 
+            log_framebuffer_summary(
+                bootinfo->FramebufferCount,
+                bootinfo->FramebufferUniqueCount,
+                bootinfo->FramebufferDuplicateCount,
+                bootinfo->FramebufferSuspiciousCount);
+
             if (framebufferCount == 0u) {
                 kernel::serial::puts("[KERNEL] WARNING: BootInfo framebufferCount=0; logging primary framebuffer fields only\n");
                 log_framebuffer_descriptor(
                     "UEFI BootInfo",
                     0u,
                     0u,
-                    true,
-                    true,
+                    guideXOS::FRAMEBUFFER_DESCRIPTOR_FLAG_PRIMARY | guideXOS::FRAMEBUFFER_DESCRIPTOR_FLAG_SELECTED,
                     bootinfo->FramebufferBase,
                     bootinfo->FramebufferSize,
                     bootinfo->FramebufferWidth,
@@ -348,8 +385,7 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
                         "UEFI BootInfo",
                         framebufferCount,
                         i,
-                        (descriptor.Flags & guideXOS::FRAMEBUFFER_DESCRIPTOR_FLAG_PRIMARY) != 0u,
-                        (descriptor.Flags & guideXOS::FRAMEBUFFER_DESCRIPTOR_FLAG_SELECTED) != 0u,
+                        descriptor.Flags,
                         descriptor.Base,
                         descriptor.Size,
                         descriptor.Width,
@@ -368,8 +404,7 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
                 "Multiboot",
                 1u,
                 0u,
-                true,
-                true,
+                guideXOS::FRAMEBUFFER_DESCRIPTOR_FLAG_PRIMARY | guideXOS::FRAMEBUFFER_DESCRIPTOR_FLAG_SELECTED,
                 reinterpret_cast<uint64_t>(kernel::framebuffer::get_buffer()),
                 static_cast<uint64_t>(kernel::framebuffer::get_pitch()) * static_cast<uint64_t>(kernel::framebuffer::get_height()),
                 kernel::framebuffer::get_width(),
@@ -731,12 +766,18 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::vga::init();
         kernel::vga::print_colored("guideXOS Kernel\n", kernel::vga::Color::LightCyan, kernel::vga::Color::Black);
         kernel::vga::print("Framebuffer not available - text mode only\n");
+        if (is_bootinfo && bootinfo) {
+            log_framebuffer_summary(
+                bootinfo->FramebufferCount,
+                bootinfo->FramebufferUniqueCount,
+                bootinfo->FramebufferDuplicateCount,
+                bootinfo->FramebufferSuspiciousCount);
+        }
         log_framebuffer_descriptor(
             is_bootinfo ? "UEFI BootInfo" : "Multiboot",
             0u,
             0u,
-            false,
-            false,
+            0u,
             0u,
             0u,
             0u,

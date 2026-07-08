@@ -89,7 +89,7 @@ This phase is diagnostic-only. It records what the current boot path can safely 
 ### What guideXOS currently detects
 
 - UEFI x86_64 boots through the bootloader's `LocateProtocol` lookup for GOP, then copies the selected framebuffer into the primary `BootInfo` fields and preserves a bounded diagnostic framebuffer array.
-- The bootloader now logs how many GOP handles UEFI exposes; `FramebufferCount` and `FramebufferDescriptors[]` are diagnostic/preparatory, while the legacy primary framebuffer fields still drive rendering.
+- The bootloader now logs how many GOP handles UEFI exposes; `FramebufferCount` is the raw descriptor count, `FramebufferUniqueCount` is the deduplicated physical framebuffer count, `FramebufferDuplicateCount` tracks exact aliases, and `FramebufferSuspiciousCount` records base/size collisions with mismatched geometry. The legacy primary framebuffer fields still drive rendering.
 - BIOS / Multiboot x86 and amd64 boots carry a single framebuffer via the Multiboot info block.
 - The kernel's bare-metal compositor bridge still binds one framebuffer to one `DisplayRenderTarget`.
 - The hosted display model can already represent multiple monitors, but that is currently a hosted synthetic construct, not a real hardware handoff.
@@ -119,25 +119,28 @@ The new probe launchers are:
 
 Keep the diagnostic framebuffer array flowing through the boot path, then teach the bare-metal compositor bridge to materialize disabled secondary targets for inspection before any real multi-output rendering is enabled.
 
-### Probe Results as of `2026-07-06`
+### Probe Results as of `2026-07-07`
 
 - The standard `-vga std` QEMU probe booted successfully.
 - UEFI reported `GOP handles discovered: 2`.
-- The bootloader exported `FramebufferCount=2` and logged two framebuffer descriptors.
-- The selected primary framebuffer is `1280x800` with `pitch=5120` and `format=B8G8R8A8`.
-- Both exported descriptors currently point at the same base address and the same geometry, so the extra descriptor is diagnostic-only rather than a distinct render target.
-- The kernel mirrored `FramebufferCount=2` in its BootInfo diagnostics and still renders from descriptor `0` only.
+- The bootloader exported `FramebufferCount=2`, `FramebufferUniqueCount=1`, `FramebufferDuplicateCount=1`, and `FramebufferSuspiciousCount=0`.
+- Descriptor `0` is the canonical primary framebuffer: `1280x800`, `pitch=5120`, `format=B8G8R8A8`.
+- Descriptor `1` matches descriptor `0` exactly, so it is classified as `duplicate alias same-as-primary` rather than a second monitor.
+- The kernel mirrors the same raw/unique/duplicate counts in its BootInfo diagnostics and still renders from descriptor `0` only.
 - The existing `virtio-gpu-pci,max_outputs=2` comparison probe launched, but it did not produce guest serial output within the capture window, so it did not add any stronger framebuffer evidence.
+- This confirms that QEMU `-vga std` exposes two GOP handles but both handles map to the same framebuffer memory and geometry, so the guest must not treat descriptor `1` as a separate physical display.
 
 ## Framebuffer Array Handoff
 
 The bootloader and kernel now preserve a bounded diagnostic framebuffer array in `BootInfo`, but the legacy single-framebuffer fields remain the authoritative rendering contract.
 
 - `FramebufferBase`, `FramebufferSize`, `FramebufferWidth`, `FramebufferHeight`, `FramebufferPitch`, and `FramebufferFormat` still describe the primary framebuffer that the renderer uses today.
-- `FramebufferCount` and `FramebufferDescriptors[]` are preparatory diagnostics. They let the boot path preserve additional GOP descriptors when firmware exposes them, but they do not enable multi-output rendering yet.
+- `FramebufferCount` is the raw GOP descriptor count, `FramebufferUniqueCount` is the deduplicated physical framebuffer count, `FramebufferDuplicateCount` counts exact aliases, and `FramebufferSuspiciousCount` records same-base/same-size collisions with mismatched geometry or format.
+- `FramebufferDescriptors[]` preserve the raw GOP descriptors so the boot path can classify aliases without changing rendering behavior.
 - UEFI GOP can populate more than one descriptor if firmware or QEMU exposes multiple usable handles.
 - BIOS / Multiboot remains a single-descriptor handoff with `FramebufferCount = 1`.
 - Secondary framebuffer rendering stays deferred until the bare-metal compositor grows explicit multi-target present support.
+- Deduplication prevents guideXOS from treating aliased GOP handles as separate monitors.
 
 ## Next Recommended Steps
 

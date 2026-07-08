@@ -33,6 +33,10 @@ namespace guideXOS
     static const uint32_t FRAMEBUFFER_DESCRIPTOR_FLAG_VALID    = (1u << 0);
     static const uint32_t FRAMEBUFFER_DESCRIPTOR_FLAG_PRIMARY  = (1u << 1);
     static const uint32_t FRAMEBUFFER_DESCRIPTOR_FLAG_SELECTED = (1u << 2);
+    static const uint32_t FRAMEBUFFER_DESCRIPTOR_FLAG_DUPLICATE = (1u << 3);
+    static const uint32_t FRAMEBUFFER_DESCRIPTOR_FLAG_ALIAS    = (1u << 4);
+    static const uint32_t FRAMEBUFFER_DESCRIPTOR_FLAG_SAME_AS_PRIMARY = (1u << 5);
+    static const uint32_t FRAMEBUFFER_DESCRIPTOR_FLAG_SUSPICIOUS = (1u << 6);
 
     // Bounded diagnostic list size for framebuffer descriptors in BootInfo.
     static const uint32_t GUIDEXOS_MAX_FRAMEBUFFERS = 8u;
@@ -80,9 +84,9 @@ namespace guideXOS
         uint16_t Size;
         uint32_t Flags;
         uint32_t HeaderChecksum;
-        uint32_t Reserved0;
+        uint32_t FramebufferUniqueCount;   // Unique physical framebuffer outputs after exact-identity dedupe.
         enum BootMode BootMode;
-        uint32_t Reserved1;
+        uint32_t FramebufferDuplicateCount; // Exact duplicate / alias descriptor count.
         uint64_t MemoryMap;
         uint64_t MemoryMapEntryCount;
         uint64_t MemoryMapDescriptorSize;
@@ -92,9 +96,9 @@ namespace guideXOS
         uint32_t FramebufferHeight;
         uint32_t FramebufferPitch;
         enum FramebufferFormat FramebufferFormat;
-        uint32_t FramebufferCount;
+        uint32_t FramebufferCount;          // Raw GOP descriptor count exported by the bootloader.
+        uint32_t FramebufferSuspiciousCount; // Base/size collisions with mismatched geometry/format.
         FramebufferDescriptor FramebufferDescriptors[GUIDEXOS_MAX_FRAMEBUFFERS];
-        uint32_t Reserved2;
         uint64_t AcpiRsdp;
         uint64_t CommandLine;
         uint64_t RamdiskBase;
@@ -103,6 +107,100 @@ namespace guideXOS
         NicInfo  Nic;
         uint64_t KernelPhysicalBase;
     };
+
+    static inline bool guidexos_framebuffer_descriptor_identity_matches(
+        const FramebufferDescriptor* a,
+        const FramebufferDescriptor* b)
+    {
+        if (!a || !b) return false;
+        return a->Base == b->Base &&
+               a->Size == b->Size &&
+               a->Width == b->Width &&
+               a->Height == b->Height &&
+               a->Pitch == b->Pitch &&
+               a->Format == b->Format;
+    }
+
+    static inline bool guidexos_framebuffer_descriptor_base_size_matches(
+        const FramebufferDescriptor* a,
+        const FramebufferDescriptor* b)
+    {
+        if (!a || !b) return false;
+        return a->Base == b->Base &&
+               a->Size == b->Size;
+    }
+
+    struct FramebufferClassificationSummary
+    {
+        uint32_t RawCount;
+        uint32_t UniqueCount;
+        uint32_t DuplicateCount;
+        uint32_t SuspiciousCount;
+    };
+
+    static inline FramebufferClassificationSummary guidexos_classify_framebuffer_descriptors(
+        FramebufferDescriptor* descriptors,
+        uint32_t count)
+    {
+        FramebufferClassificationSummary summary{};
+        summary.RawCount = count;
+
+        if (!descriptors || count == 0u) {
+            return summary;
+        }
+
+        for (uint32_t i = 0u; i < count; ++i) {
+            FramebufferDescriptor& current = descriptors[i];
+            current.Flags &= ~(
+                FRAMEBUFFER_DESCRIPTOR_FLAG_DUPLICATE |
+                FRAMEBUFFER_DESCRIPTOR_FLAG_ALIAS |
+                FRAMEBUFFER_DESCRIPTOR_FLAG_SAME_AS_PRIMARY |
+                FRAMEBUFFER_DESCRIPTOR_FLAG_SUSPICIOUS);
+
+            if (!(current.Flags & FRAMEBUFFER_DESCRIPTOR_FLAG_VALID)) {
+                continue;
+            }
+
+            bool isDuplicate = false;
+            bool isSameAsPrimary = false;
+            bool isSuspicious = false;
+
+            for (uint32_t j = 0u; j < i; ++j) {
+                const FramebufferDescriptor& prior = descriptors[j];
+                if (!(prior.Flags & FRAMEBUFFER_DESCRIPTOR_FLAG_VALID)) {
+                    continue;
+                }
+
+                if (guidexos_framebuffer_descriptor_identity_matches(&current, &prior)) {
+                    isDuplicate = true;
+                    if (prior.Flags & FRAMEBUFFER_DESCRIPTOR_FLAG_PRIMARY) {
+                        isSameAsPrimary = true;
+                    }
+                    break;
+                }
+
+                if (!isSuspicious && guidexos_framebuffer_descriptor_base_size_matches(&current, &prior)) {
+                    isSuspicious = true;
+                }
+            }
+
+            if (isDuplicate) {
+                current.Flags |= FRAMEBUFFER_DESCRIPTOR_FLAG_DUPLICATE | FRAMEBUFFER_DESCRIPTOR_FLAG_ALIAS;
+                if (isSameAsPrimary) {
+                    current.Flags |= FRAMEBUFFER_DESCRIPTOR_FLAG_SAME_AS_PRIMARY;
+                }
+                ++summary.DuplicateCount;
+            } else {
+                ++summary.UniqueCount;
+                if (isSuspicious) {
+                    current.Flags |= FRAMEBUFFER_DESCRIPTOR_FLAG_SUSPICIOUS;
+                    ++summary.SuspiciousCount;
+                }
+            }
+        }
+
+        return summary;
+    }
 }
 
 #pragma pack(pop)
@@ -156,6 +254,14 @@ namespace guideXOS
         }
 
         if (bi->FramebufferCount > GUIDEXOS_MAX_FRAMEBUFFERS) {
+            guidexos_early_panic(bi);
+        }
+        if (bi->FramebufferUniqueCount > bi->FramebufferCount ||
+            bi->FramebufferDuplicateCount > bi->FramebufferCount ||
+            bi->FramebufferSuspiciousCount > bi->FramebufferUniqueCount) {
+            guidexos_early_panic(bi);
+        }
+        if ((bi->FramebufferUniqueCount + bi->FramebufferDuplicateCount) != bi->FramebufferCount) {
             guidexos_early_panic(bi);
         }
 

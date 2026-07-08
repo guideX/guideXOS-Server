@@ -115,6 +115,33 @@ static const CHAR16* FramebufferSourceName(guideXOS::FramebufferSource source)
     }
 }
 
+static void LogFramebufferDescriptorStatus(const guideXOS::FramebufferDescriptor& descriptor)
+{
+    Print((CONST CHAR16*)L" status=");
+
+    if (descriptor.Flags & guideXOS::FRAMEBUFFER_DESCRIPTOR_FLAG_DUPLICATE) {
+        Print((CONST CHAR16*)L"duplicate");
+    } else {
+        Print((CONST CHAR16*)L"canonical");
+    }
+
+    if (descriptor.Flags & guideXOS::FRAMEBUFFER_DESCRIPTOR_FLAG_ALIAS) {
+        Print((CONST CHAR16*)L" alias");
+    }
+    if (descriptor.Flags & guideXOS::FRAMEBUFFER_DESCRIPTOR_FLAG_SAME_AS_PRIMARY) {
+        Print((CONST CHAR16*)L" same-as-primary");
+    }
+    if (descriptor.Flags & guideXOS::FRAMEBUFFER_DESCRIPTOR_FLAG_SUSPICIOUS) {
+        Print((CONST CHAR16*)L" suspicious");
+    }
+    if (descriptor.Flags & guideXOS::FRAMEBUFFER_DESCRIPTOR_FLAG_PRIMARY) {
+        Print((CONST CHAR16*)L" primary");
+    }
+    if (descriptor.Flags & guideXOS::FRAMEBUFFER_DESCRIPTOR_FLAG_SELECTED) {
+        Print((CONST CHAR16*)L" selected");
+    }
+}
+
 static bool CaptureGopFramebuffer(
     EFI_GRAPHICS_OUTPUT_PROTOCOL* gop,
     guideXOS::FramebufferSource source,
@@ -159,13 +186,9 @@ static bool IsSelectedGopFramebuffer(
 
 static void LogFramebufferDescriptor(UINT32 index, const guideXOS::FramebufferDescriptor& descriptor)
 {
-    const CHAR16* primaryTag = (descriptor.Flags & guideXOS::FRAMEBUFFER_DESCRIPTOR_FLAG_PRIMARY) ? (CONST CHAR16*)L" primary" : (CONST CHAR16*)L"";
-    const CHAR16* selectedTag = (descriptor.Flags & guideXOS::FRAMEBUFFER_DESCRIPTOR_FLAG_SELECTED) ? (CONST CHAR16*)L" selected" : (CONST CHAR16*)L"";
-
-    Print((CONST CHAR16*)L"[BOOT] FB[%u]%s%s src=%s base=%p size=%Lu geometry=%ux%u pitch=%u bpp=%u format=%s\n",
-        (UINT32)index,
-        primaryTag,
-        selectedTag,
+    Print((CONST CHAR16*)L"[BOOT] FB[%u]", (UINT32)index);
+    LogFramebufferDescriptorStatus(descriptor);
+    Print((CONST CHAR16*)L" src=%s base=%p size=%Lu geometry=%ux%u pitch=%u bpp=%u format=%s\n",
         FramebufferSourceName(descriptor.Source),
         (VOID*)(UINTN)descriptor.Base,
         (UINT64)descriptor.Size,
@@ -174,6 +197,19 @@ static void LogFramebufferDescriptor(UINT32 index, const guideXOS::FramebufferDe
         (UINT32)descriptor.Pitch,
         (UINT32)descriptor.BitsPerPixel,
         BootInfoFramebufferFormatName(descriptor.Format));
+}
+
+static void LogFramebufferDiagnosticsSummary(const guideXOS::BootInfo* bootInfo)
+{
+    if (!bootInfo) {
+        return;
+    }
+
+    Print((CONST CHAR16*)L"[BOOT] GOP FramebufferCount=%u UniqueFramebufferCount=%u DuplicateFramebufferCount=%u SuspiciousFramebufferCount=%u\n",
+        (UINT32)bootInfo->FramebufferCount,
+        (UINT32)bootInfo->FramebufferUniqueCount,
+        (UINT32)bootInfo->FramebufferDuplicateCount,
+        (UINT32)bootInfo->FramebufferSuspiciousCount);
 }
 
 static UINT32 PopulateGopFramebufferDiagnostics(
@@ -216,68 +252,77 @@ static UINT32 PopulateGopFramebufferDiagnostics(
 
     EFI_GUID gopGuid = EFI_GRAPHICS_OUTPUT_PROTOCOL_GUID;
     auto locateHandleBuffer = reinterpret_cast<EFI_LOCATE_HANDLE_BUFFER>(SystemTable->BootServices->LocateHandleBuffer);
+    UINT32 rawCount = 1u;
     if (!locateHandleBuffer) {
         Print((CONST CHAR16*)L"[BOOT] GOP handle enumeration unavailable; exporting primary framebuffer only\n");
-        LogFramebufferDescriptor(0u, bootInfo->FramebufferDescriptors[0]);
-        return bootInfo->FramebufferCount;
-    }
+    } else {
+        EFI_HANDLE* handles = NULL;
+        UINTN handleCount = 0;
+        EFI_STATUS status = locateHandleBuffer(ByProtocol, &gopGuid, NULL, &handleCount, &handles);
+        if (EFI_ERROR(status)) {
+            Print((CONST CHAR16*)L"[BOOT] GOP handle enumeration failed; exporting primary framebuffer only\n");
+        } else {
+            Print((CONST CHAR16*)L"[BOOT] GOP handles discovered: %u\n", (UINT32)handleCount);
 
-    EFI_HANDLE* handles = NULL;
-    UINTN handleCount = 0;
-    EFI_STATUS status = locateHandleBuffer(ByProtocol, &gopGuid, NULL, &handleCount, &handles);
-    if (EFI_ERROR(status)) {
-        Print((CONST CHAR16*)L"[BOOT] GOP handle enumeration failed; exporting primary framebuffer only\n");
-        LogFramebufferDescriptor(0u, bootInfo->FramebufferDescriptors[0]);
-        return bootInfo->FramebufferCount;
-    }
+            UINT32 discoveredIndex = 1u;
+            bool truncated = false;
+            for (UINTN handleIndex = 0; handleIndex < handleCount; ++handleIndex) {
+                EFI_GRAPHICS_OUTPUT_PROTOCOL* candidate = NULL;
+                status = SystemTable->BootServices->HandleProtocol(handles[handleIndex], &gopGuid, (void**)&candidate);
+                if (EFI_ERROR(status) || !candidate || !candidate->Mode || !candidate->Mode->Info) {
+                    continue;
+                }
 
-    Print((CONST CHAR16*)L"[BOOT] GOP handles discovered: %u\n", (UINT32)handleCount);
-    LogFramebufferDescriptor(0u, bootInfo->FramebufferDescriptors[0]);
+                if (IsSelectedGopFramebuffer(candidate, selectedGop)) {
+                    continue;
+                }
 
-    UINT32 discoveredIndex = 1u;
-    bool truncated = false;
-    for (UINTN handleIndex = 0; handleIndex < handleCount; ++handleIndex) {
-        EFI_GRAPHICS_OUTPUT_PROTOCOL* candidate = NULL;
-        status = SystemTable->BootServices->HandleProtocol(handles[handleIndex], &gopGuid, (void**)&candidate);
-        if (EFI_ERROR(status) || !candidate || !candidate->Mode || !candidate->Mode->Info) {
-            continue;
+                guideXOS::FramebufferDescriptor descriptor{};
+                if (!CaptureGopFramebuffer(candidate, guideXOS::FramebufferSource::UefiGop, 0u, &descriptor)) {
+                    continue;
+                }
+
+                if (discoveredIndex >= guideXOS::GUIDEXOS_MAX_FRAMEBUFFERS) {
+                    truncated = true;
+                    continue;
+                }
+
+                bootInfo->FramebufferDescriptors[discoveredIndex] = descriptor;
+                ++discoveredIndex;
+            }
+
+            rawCount = discoveredIndex;
+
+            if (truncated) {
+                Print((CONST CHAR16*)L"[BOOT] Note: framebuffer array truncated to %u entries\n",
+                    (UINT32)guideXOS::GUIDEXOS_MAX_FRAMEBUFFERS);
+            }
         }
 
-        if (IsSelectedGopFramebuffer(candidate, selectedGop)) {
-            continue;
+        if (handles != NULL) {
+            SystemTable->BootServices->FreePool(handles);
         }
-
-        guideXOS::FramebufferDescriptor descriptor{};
-        if (!CaptureGopFramebuffer(candidate, guideXOS::FramebufferSource::UefiGop, 0u, &descriptor)) {
-            continue;
-        }
-
-        if (discoveredIndex >= guideXOS::GUIDEXOS_MAX_FRAMEBUFFERS) {
-            truncated = true;
-            continue;
-        }
-
-        bootInfo->FramebufferDescriptors[discoveredIndex] = descriptor;
-        LogFramebufferDescriptor(discoveredIndex, bootInfo->FramebufferDescriptors[discoveredIndex]);
-        ++discoveredIndex;
     }
 
-    if (handles != NULL) {
-        SystemTable->BootServices->FreePool(handles);
+    bootInfo->FramebufferCount = rawCount;
+    guideXOS::FramebufferClassificationSummary classification =
+        guideXOS::guidexos_classify_framebuffer_descriptors(
+            bootInfo->FramebufferDescriptors,
+            bootInfo->FramebufferCount);
+    bootInfo->FramebufferUniqueCount = classification.UniqueCount;
+    bootInfo->FramebufferDuplicateCount = classification.DuplicateCount;
+    bootInfo->FramebufferSuspiciousCount = classification.SuspiciousCount;
+
+    LogFramebufferDiagnosticsSummary(bootInfo);
+    for (UINT32 i = 0u; i < bootInfo->FramebufferCount; ++i) {
+        LogFramebufferDescriptor(i, bootInfo->FramebufferDescriptors[i]);
     }
 
-    bootInfo->FramebufferCount = discoveredIndex;
-
-    if (handleCount > 1u) {
-        Print((CONST CHAR16*)L"[BOOT] Diagnostic framebuffer array exported %u GOP framebuffer(s); primary remains render target\n",
+    if (bootInfo->FramebufferCount > 1u) {
+        Print((CONST CHAR16*)L"[BOOT] Diagnostic framebuffer array exported %u raw GOP framebuffer descriptor(s); primary remains render target\n",
             (UINT32)bootInfo->FramebufferCount);
     } else {
-        Print((CONST CHAR16*)L"[BOOT] Diagnostic framebuffer array exported a single primary GOP framebuffer\n");
-    }
-
-    if (truncated) {
-        Print((CONST CHAR16*)L"[BOOT] Note: framebuffer array truncated to %u entries\n",
-            (UINT32)guideXOS::GUIDEXOS_MAX_FRAMEBUFFERS);
+        Print((CONST CHAR16*)L"[BOOT] Diagnostic framebuffer array exported a single primary GOP framebuffer descriptor\n");
     }
 
     return bootInfo->FramebufferCount;
