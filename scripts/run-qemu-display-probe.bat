@@ -12,6 +12,11 @@ REM
 REM - std         : legacy VGA / Bochs-style framebuffer probe
 REM - virtio-gpu   : multi-output-capable virtio-gpu-pci probe
 REM
+REM Capture / smoke mode environment:
+REM   GXOS_QEMU_DISPLAY_PROBE_HEADLESS=1
+REM   GXOS_QEMU_DISPLAY_PROBE_NO_PAUSE=1
+REM   GXOS_QEMU_DISPLAY_PROBE_SERIAL_LOG=path\to\serial.log
+REM
 REM Copyright (c) 2024 guideX
 REM
 

@@ -1,6 +1,6 @@
 # guideXOS Server v0.2 Hosted Synthetic Multi-Monitor Experiment
 
-Validated milestone closeout for `2026-07-05`. This note records what the hosted synthetic multi-monitor experiment proves today. It does not add new display behavior.
+Validated milestone closeout for `2026-07-07`. This note records what the hosted synthetic multi-monitor experiment proves today. It does not add new display behavior.
 
 ## Purpose
 
@@ -52,6 +52,7 @@ If both gates are unset, `.\run-server.bat` stays in normal single-output mode.
 | `build.bat` | The hosted runtime and display code compile successfully. |
 | `powershell -ExecutionPolicy Bypass -File scripts\smoke-display-synthetic-layout.ps1` | The synthetic gate plumbing, display-model helpers, render-target wiring, and summary diagnostics are present and consistent. |
 | `powershell -ExecutionPolicy Bypass -File scripts\smoke-hosted-display-runtime.ps1` | All three validated runtime modes behave as expected, including summary logs, paint routing, input mapping, and cleanup. |
+| `powershell -ExecutionPolicy Bypass -File scripts\smoke-qemu-display-probe.ps1` | The QEMU probe boots headlessly, captures serial output to a deterministic log, and asserts the framebuffer-array and deduplication evidence for the standard `-vga std` path. |
 | `git diff --check` | The working tree is free of whitespace and patch-format issues. |
 
 The hosted runtime smoke restores `desktop.json` and `desktop.state` and removes `display-options.cfg` as part of its cleanup, so validation does not leave those runtime state files dirty.
@@ -108,6 +109,33 @@ The new probe launchers are:
 - `scripts\run-qemu-display-probe.bat`
 - `scripts\run-qemu-multimonitor-probe.bat`
 
+The new smoke harness is:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\smoke-qemu-display-probe.ps1
+```
+
+It boots QEMU headlessly, captures the probe's serial output into `logs\qemu-display-probe-<timestamp>\`, and stops QEMU automatically once the framebuffer diagnostics have been observed.
+
+What it validates in the standard `std` mode:
+
+- `GOP handles discovered`
+- `BootInfo FramebufferCount`
+- `UniqueFramebufferCount`
+- `DuplicateFramebufferCount`
+- descriptor `0` as `primary selected`
+- descriptor `1` as `duplicate alias same-as-primary` when present
+- the kernel's mirror of the same counts
+- the kernel's `Framebuffer ready` marker, which shows the primary framebuffer is still the render target
+
+Optional comparison mode:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\smoke-qemu-display-probe.ps1 -Backends virtio-gpu
+```
+
+That comparison is diagnostic only. The current capture shows `selected framebuffer invalid; BootInfo array disabled` and a kernel `FramebufferCount=0` path, so it remains useful for investigation but does not imply a new multi-output render path. `qxl` / SPICE is still not wired into this smoke harness.
+
 ### What guideXOS cannot use yet
 
 - Multiple framebuffer descriptors are not part of the current boot handoff contract.
@@ -121,13 +149,14 @@ Keep the diagnostic framebuffer array flowing through the boot path, then teach 
 
 ### Probe Results as of `2026-07-07`
 
-- The standard `-vga std` QEMU probe booted successfully.
+- Fresh standard-path evidence is captured in `logs\qemu-display-probe-20260707-194820\qemu-display-probe.evidence.txt`.
+- The standard `-vga std` QEMU probe booted successfully in headless capture mode.
 - UEFI reported `GOP handles discovered: 2`.
 - The bootloader exported `FramebufferCount=2`, `FramebufferUniqueCount=1`, `FramebufferDuplicateCount=1`, and `FramebufferSuspiciousCount=0`.
 - Descriptor `0` is the canonical primary framebuffer: `1280x800`, `pitch=5120`, `format=B8G8R8A8`.
 - Descriptor `1` matches descriptor `0` exactly, so it is classified as `duplicate alias same-as-primary` rather than a second monitor.
-- The kernel mirrors the same raw/unique/duplicate counts in its BootInfo diagnostics and still renders from descriptor `0` only.
-- The existing `virtio-gpu-pci,max_outputs=2` comparison probe launched, but it did not produce guest serial output within the capture window, so it did not add any stronger framebuffer evidence.
+- The kernel mirrors the same raw/unique/duplicate counts in its BootInfo diagnostics, reaches `Framebuffer ready`, and still renders from descriptor `0` only.
+- The optional `virtio-gpu-pci,max_outputs=2` comparison now captures a partial diagnostic trace in `logs\qemu-display-probe-20260707-195354\qemu-display-probe.evidence.txt`. The current result is `selected framebuffer invalid; BootInfo array disabled` and `FramebufferCount=0` in the kernel, which is useful for investigation but still not a supported multi-output render path.
 - This confirms that QEMU `-vga std` exposes two GOP handles but both handles map to the same framebuffer memory and geometry, so the guest must not treat descriptor `1` as a separate physical display.
 
 ## Framebuffer Array Handoff
@@ -141,6 +170,7 @@ The bootloader and kernel now preserve a bounded diagnostic framebuffer array in
 - BIOS / Multiboot remains a single-descriptor handoff with `FramebufferCount = 1`.
 - Secondary framebuffer rendering stays deferred until the bare-metal compositor grows explicit multi-target present support.
 - Deduplication prevents guideXOS from treating aliased GOP handles as separate monitors.
+- The optional `virtio-gpu` comparison path is still diagnostic-only; it currently reports `selected framebuffer invalid; BootInfo array disabled` and does not add a supported multi-output render path.
 
 ## Next Recommended Steps
 
