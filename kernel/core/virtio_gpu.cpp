@@ -461,7 +461,17 @@ static bool parse_virtio_regions(ModernTransport* transport)
             if (region != nullptr) {
                 uint64_t base = 0;
                 if (!read_bar_base(bus, device, function, cap.bar, &base)) {
-                    kernel::serial::puts("[VIRTIO-GPU] Failed to resolve BAR for virtio capability\n");
+                    const uint32_t rawBar = msi::pci_config_read32(bus, device, function,
+                                                                    static_cast<uint8_t>(kPciBar0Offset + (cap.bar * 4u)));
+                    kernel::serial::puts("[VIRTIO-GPU] Failed to resolve BAR for virtio capability capPtr=0x");
+                    kernel::serial::put_hex8(capPtr);
+                    kernel::serial::puts(" cfgType=0x");
+                    kernel::serial::put_hex8(cap.cfgType);
+                    kernel::serial::puts(" bar=");
+                    kernel::serial::put_hex8(cap.bar);
+                    kernel::serial::puts(" rawBar=0x");
+                    kernel::serial::put_hex32(rawBar);
+                    kernel::serial::putc('\n');
                     return false;
                 }
 

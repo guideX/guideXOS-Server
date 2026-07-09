@@ -96,7 +96,7 @@ This phase is diagnostic-only. It records what the current boot path can safely 
 | `virtio-vga` | `-vga virtio` | yes | 2 | 2 | 1 | `FramebufferCount=2`, `DuplicateFramebufferCount=1` | Same alias pattern as `-vga std`; no additional unique framebuffer candidate. |
 | `qxl-vga` | `-vga qxl -spice addr=127.0.0.1,port=5930,disable-ticketing=on` | yes | 2 | 2 | 1 | `FramebufferCount=2`, `DuplicateFramebufferCount=1` | QXL/SPICE is usable as a diagnostic probe, but it still collapses to one unique framebuffer candidate through GOP. |
 
-Fresh backend evidence is captured in `logs\qemu-display-probe-20260709-055854\qemu-display-probe.evidence.txt`.
+Fresh backend evidence is captured in `logs\qemu-display-probe-20260709-141723\qemu-display-probe.evidence.txt`.
 
 Current takeaways:
 
@@ -134,11 +134,29 @@ The standard `std` mode still validates:
 - Multiple framebuffer descriptors are not part of the current boot handoff contract.
 - The kernel does not yet consume an array of framebuffer targets from the boot path.
 - The compositor does not yet render to more than one real framebuffer in bare-metal mode.
-- There is no virtio-gpu or QXL guest driver in this pass.
+- There is a diagnostic-only virtio-gpu discovery probe, but there is no rendering-capable virtio-gpu or QXL guest driver in this pass.
 
 ### Next required implementation step
 
 Keep the diagnostic framebuffer array flowing through the boot path, then teach the bare-metal compositor bridge to materialize disabled secondary targets for inspection before any real multi-output rendering is enabled.
+
+## Virtio-GPU Driver Investigation
+
+Diagnostic-only probe results from `logs\qemu-display-probe-20260709-141723\virtio-gpu\serial.log`:
+
+| Item | Result |
+| --- | --- |
+| PCI discovery | Success. The probe found a virtio-gpu PCI function at `00:02.00` with `vendor=0x1AF4`, `device=0x1050`, `subsystem=0x1AF4:1100`, `class=0x03`, `subclass=0x80`. |
+| Modern transport / queue setup | Not yet safe on this QEMU device. Capability parsing reached `capPtr=0x84`, `cfgType=0x05`, `bar=0`, but BAR resolution returned `rawBar=0x00000000`, so the probe stopped before any queue writes. |
+| Display info query | Not queryable yet. No control queue was laid out and no `GET_DISPLAY_INFO` request was issued. |
+| Scanouts reported | `n/a` for this run, because the safe queue/query path did not complete. |
+| Current interpretation | QEMU exposes a virtio-gpu PCI candidate, but this configuration does not yet present a safe modern VirtIO transport path for read-only display discovery in guideXOS. |
+
+What remains before rendering can happen:
+
+- Resolve the exact QEMU virtio-gpu transport that exposes a usable modern VirtIO PCI capability set.
+- Complete the minimal control-queue path for `GET_DISPLAY_INFO` only.
+- Keep resource creation, backing attachment, scanout selection, transfers, and flushes disabled until the read-only probe is fully understood.
 
 ## Framebuffer Array Handoff
 
