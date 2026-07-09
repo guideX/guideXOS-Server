@@ -35,6 +35,10 @@ $checks = @(
         Match = Find-FirstMatch (Join-Path $Root 'display_model.h') 'makeSyntheticDualMonitorDesktop';
     },
     [pscustomobject]@{
+        Name = 'display model diagnostic framebuffer helper';
+        Match = Find-FirstMatch (Join-Path $Root 'display_model.h') 'makeDiagnosticFramebufferMonitor';
+    },
+    [pscustomobject]@{
         Name = 'display model viewport helper';
         Match = Find-FirstMatch (Join-Path $Root 'display_model.h') 'struct DisplayViewport';
     },

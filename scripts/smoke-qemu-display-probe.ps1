@@ -243,6 +243,8 @@ function Parse-FramebufferSummary {
         UniqueCount = [int]$match.Groups[2].Value
         DuplicateCount = [int]$match.Groups[3].Value
         SuspiciousCount = [int]$match.Groups[4].Value
+        ActiveRenderTargetCount = if ($match.Groups.Count -gt 5) { [int]$match.Groups[5].Value } else { 0 }
+        DisabledCandidateCount = if ($match.Groups.Count -gt 6) { [int]$match.Groups[6].Value } else { 0 }
         Line = $match.Value
     }
 }
@@ -357,10 +359,12 @@ function Invoke-QemuDisplayProbeBackend {
     $bootSecondaryLine = [regex]::Match($serialText, '\[BOOT\] FB\[1\].*status=.*duplicate.*alias.*same-as-primary')
     $bootRenderTargetLine = [regex]::Match($serialText, 'Diagnostic framebuffer array exported .*primary remains render target')
     $bootInvalidFramebufferLine = [regex]::Match($serialText, '\[BOOT\] GOP selected framebuffer invalid; BootInfo array disabled')
-    $kernelSummary = Parse-FramebufferSummary -Text $serialText -Pattern '\[KERNEL\] FramebufferCount=(\d+) UniqueFramebufferCount=(\d+) DuplicateFramebufferCount=(\d+) SuspiciousFramebufferCount=(\d+)'
+    $kernelSummary = Parse-FramebufferSummary -Text $serialText -Pattern '\[KERNEL\] FramebufferCount=(\d+) UniqueFramebufferCount=(\d+) DuplicateFramebufferCount=(\d+) SuspiciousFramebufferCount=(\d+) ActiveFramebufferTargetCount=(\d+) DisabledDiagnosticFramebufferCandidateCount=(\d+)'
     $kernelPrimaryLine = [regex]::Match($serialText, '\[KERNEL\] Framebuffer source=UEFI BootInfo framebufferCount=\d+ index=0 status=.*primary.*selected')
     $kernelSecondaryLine = [regex]::Match($serialText, '\[KERNEL\] Framebuffer source=UEFI BootInfo framebufferCount=\d+ index=1 status=.*duplicate.*alias.*same-as-primary')
     $kernelFramebufferReady = [regex]::Match($serialText, '\[KERNEL\] Framebuffer ready')
+    $desktopInventoryLine = [regex]::Match($serialText, '\[desktop\] Framebuffer candidate\[0\] enabled=true primary=true source=UEFI GOP')
+    $desktopSecondaryInventoryLine = [regex]::Match($serialText, '\[desktop\] Framebuffer candidate\[1\]')
 
     if ($Backend -eq 'std') {
         Assert-Condition -Backend $Backend -Name 'bootloader GOP handles line' -Condition $bootGopLine.Success -Detail 'expected a GOP handle discovery line in bootloader serial output'
@@ -374,6 +378,10 @@ function Invoke-QemuDisplayProbeBackend {
         Assert-Condition -Backend $Backend -Name 'bootloader suspicious framebuffer count' -Condition ($bootSummary.SuspiciousCount -eq 0) -Detail ("line={0}" -f $bootSummary.Line)
         Assert-Condition -Backend $Backend -Name 'kernel unique framebuffer count' -Condition ($kernelSummary.UniqueCount -eq 1) -Detail ("line={0}" -f $kernelSummary.Line)
         Assert-Condition -Backend $Backend -Name 'kernel suspicious framebuffer count' -Condition ($kernelSummary.SuspiciousCount -eq 0) -Detail ("line={0}" -f $kernelSummary.Line)
+        Assert-Condition -Backend $Backend -Name 'kernel active framebuffer target count' -Condition ($kernelSummary.ActiveRenderTargetCount -eq 1) -Detail ("line={0}" -f $kernelSummary.Line)
+        Assert-Condition -Backend $Backend -Name 'kernel disabled diagnostic candidate count' -Condition ($kernelSummary.DisabledCandidateCount -eq 0) -Detail ("line={0}" -f $kernelSummary.Line)
+        Assert-Condition -Backend $Backend -Name 'desktop unique candidate inventory' -Condition $desktopInventoryLine.Success -Detail 'desktop should log one enabled primary framebuffer candidate from the unique inventory'
+        Assert-Condition -Backend $Backend -Name 'desktop duplicate handle not promoted' -Condition (-not $desktopSecondaryInventoryLine.Success) -Detail 'duplicate GOP handles must not become extra display candidates'
         Assert-Condition -Backend $Backend -Name 'summary counts mirror' -Condition (
             $bootSummary.RawCount -eq $kernelSummary.RawCount -and
             $bootSummary.UniqueCount -eq $kernelSummary.UniqueCount -and
@@ -420,6 +428,9 @@ function Invoke-QemuDisplayProbeBackend {
         if ($kernelPrimaryLine.Success) {
             Write-Host ("[{0}] kernel descriptor 0: primary selected" -f $Backend)
         }
+        if ($desktopInventoryLine.Success) {
+            Write-Host ("[{0}] desktop inventory candidate 0: enabled primary" -f $Backend)
+        }
         if ($bootRenderTargetLine.Success) {
             Write-Host ("[{0}] bootloader render-target note: primary remains render target" -f $Backend)
         }
@@ -450,12 +461,16 @@ function Invoke-QemuDisplayProbeBackend {
         "bootGopHandles=$($bootGopLine.Groups[1].Value)",
         "bootSummary=$($bootSummary.Line)",
         "kernelSummary=$($kernelSummary.Line)",
+        "kernelActiveRenderTargetCount=$($kernelSummary.ActiveRenderTargetCount)",
+        "kernelDisabledCandidateCount=$($kernelSummary.DisabledCandidateCount)",
         "bootPrimaryLine=$($bootPrimaryLine.Value)",
         "bootSecondaryLine=$($bootSecondaryLine.Value)",
         "bootRenderTargetLine=$($bootRenderTargetLine.Value)",
         "kernelPrimaryLine=$($kernelPrimaryLine.Value)",
         "kernelSecondaryLine=$($kernelSecondaryLine.Value)",
         "kernelFramebufferReady=$($kernelFramebufferReady.Value)",
+        "desktopInventoryLine=$($desktopInventoryLine.Value)",
+        "desktopSecondaryInventoryLine=$($desktopSecondaryInventoryLine.Value)",
         "launcherStdOutTail=$launcherStdOutTail",
         "launcherStdErrTail=$launcherStdErrTail",
         "serialTail=$serialTail"
@@ -471,6 +486,8 @@ function Invoke-QemuDisplayProbeBackend {
         SummaryPath = $summaryPath
         BootSummary = $bootSummary
         KernelSummary = $kernelSummary
+        KernelActiveRenderTargetCount = $kernelSummary.ActiveRenderTargetCount
+        KernelDisabledCandidateCount = $kernelSummary.DisabledCandidateCount
         BootGopHandles = $bootGopLine.Groups[1].Value
         BootPrimaryLine = $bootPrimaryLine.Value
         BootSecondaryLine = $bootSecondaryLine.Value
@@ -478,6 +495,8 @@ function Invoke-QemuDisplayProbeBackend {
         KernelPrimaryLine = $kernelPrimaryLine.Value
         KernelSecondaryLine = $kernelSecondaryLine.Value
         KernelFramebufferReady = $kernelFramebufferReady.Value
+        DesktopInventoryLine = $desktopInventoryLine.Value
+        DesktopSecondaryInventoryLine = $desktopSecondaryInventoryLine.Value
         DiagnosticStatus = if ($Backend -eq 'std') { 'validated' } else { $diagnosticStatus }
         LauncherStdOutText = $launcherStdOutText
         LauncherStdErrText = $launcherStdErrText
@@ -509,12 +528,16 @@ foreach ($result in $results) {
     $evidenceLines += "bootGopHandles=$($result.BootGopHandles)"
     $evidenceLines += "bootSummary=$($result.BootSummary.Line)"
     $evidenceLines += "kernelSummary=$($result.KernelSummary.Line)"
+    $evidenceLines += "kernelActiveRenderTargetCount=$($result.KernelActiveRenderTargetCount)"
+    $evidenceLines += "kernelDisabledCandidateCount=$($result.KernelDisabledCandidateCount)"
     $evidenceLines += "bootPrimaryLine=$($result.BootPrimaryLine)"
     $evidenceLines += "bootSecondaryLine=$($result.BootSecondaryLine)"
     $evidenceLines += "bootInvalidFramebufferLine=$($result.BootInvalidFramebufferLine)"
     $evidenceLines += "kernelPrimaryLine=$($result.KernelPrimaryLine)"
     $evidenceLines += "kernelSecondaryLine=$($result.KernelSecondaryLine)"
     $evidenceLines += "kernelFramebufferReady=$($result.KernelFramebufferReady)"
+    $evidenceLines += "desktopInventoryLine=$($result.DesktopInventoryLine)"
+    $evidenceLines += "desktopSecondaryInventoryLine=$($result.DesktopSecondaryInventoryLine)"
     $evidenceLines += "launcherStdOut=$($result.LauncherStdOut)"
     $evidenceLines += "launcherStdErr=$($result.LauncherStdErr)"
     $evidenceLines += "serialLog=$($result.SerialLog)"

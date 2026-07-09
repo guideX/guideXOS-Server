@@ -288,7 +288,9 @@ static void log_framebuffer_summary(
     uint32_t framebufferCount,
     uint32_t uniqueFramebufferCount,
     uint32_t duplicateFramebufferCount,
-    uint32_t suspiciousFramebufferCount)
+    uint32_t suspiciousFramebufferCount,
+    uint32_t activeFramebufferTargetCount,
+    uint32_t disabledFramebufferCandidateCount)
 {
     kernel::serial::puts("[KERNEL] FramebufferCount=");
     serial_put_u32_decimal(framebufferCount);
@@ -298,6 +300,10 @@ static void log_framebuffer_summary(
     serial_put_u32_decimal(duplicateFramebufferCount);
     kernel::serial::puts(" SuspiciousFramebufferCount=");
     serial_put_u32_decimal(suspiciousFramebufferCount);
+    kernel::serial::puts(" ActiveFramebufferTargetCount=");
+    serial_put_u32_decimal(activeFramebufferTargetCount);
+    kernel::serial::puts(" DisabledDiagnosticFramebufferCandidateCount=");
+    serial_put_u32_decimal(disabledFramebufferCandidateCount);
     kernel::serial::puts("\n");
 }
 
@@ -308,7 +314,7 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
 {
 #if ARCH_HAS_PIC_8259
     // ============================================================
-    // x86 / amd64 boot path  —  Multiboot (BIOS) or BootInfo (UEFI)
+    // x86 / amd64 boot path  â€”  Multiboot (BIOS) or BootInfo (UEFI)
     // ============================================================
 
     // Initialize serial debug output early
@@ -358,11 +364,15 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
                 framebufferCount = guideXOS::GUIDEXOS_MAX_FRAMEBUFFERS;
             }
 
+            const kernel::framebuffer::DiagnosticFramebufferInventorySummary& framebufferInventory =
+                kernel::framebuffer::diagnostic_framebuffer_inventory_summary();
             log_framebuffer_summary(
-                bootinfo->FramebufferCount,
-                bootinfo->FramebufferUniqueCount,
-                bootinfo->FramebufferDuplicateCount,
-                bootinfo->FramebufferSuspiciousCount);
+                framebufferInventory.RawCount,
+                framebufferInventory.UniqueCount,
+                framebufferInventory.DuplicateCount,
+                framebufferInventory.SuspiciousCount,
+                framebufferInventory.ActiveRenderTargetCount,
+                framebufferInventory.DisabledCandidateCount);
 
             if (framebufferCount == 0u) {
                 kernel::serial::puts("[KERNEL] WARNING: BootInfo framebufferCount=0; logging primary framebuffer fields only\n");
@@ -696,7 +706,7 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::serial::puts("[KERNEL] Entering main loop (waiting for input)...\n");
         
         
-        // Main kernel loop — poll input and redraw cursor
+        // Main kernel loop â€” poll input and redraw cursor
         while (1) {
             uint64_t workStartTicks = kernel::pit::ticks();
 
@@ -767,11 +777,15 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::vga::print_colored("guideXOS Kernel\n", kernel::vga::Color::LightCyan, kernel::vga::Color::Black);
         kernel::vga::print("Framebuffer not available - text mode only\n");
         if (is_bootinfo && bootinfo) {
+            const kernel::framebuffer::DiagnosticFramebufferInventorySummary& framebufferInventory =
+                kernel::framebuffer::diagnostic_framebuffer_inventory_summary();
             log_framebuffer_summary(
-                bootinfo->FramebufferCount,
-                bootinfo->FramebufferUniqueCount,
-                bootinfo->FramebufferDuplicateCount,
-                bootinfo->FramebufferSuspiciousCount);
+                framebufferInventory.RawCount,
+                framebufferInventory.UniqueCount,
+                framebufferInventory.DuplicateCount,
+                framebufferInventory.SuspiciousCount,
+                framebufferInventory.ActiveRenderTargetCount,
+                framebufferInventory.DisabledCandidateCount);
         }
         log_framebuffer_descriptor(
             is_bootinfo ? "UEFI BootInfo" : "Multiboot",
@@ -829,7 +843,7 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::desktop_capabilities::log_current(true, true);
         kernel::apps::printNavigatorRuntimeSmokeReport();
 
-        // Main kernel loop — poll mouse state and redraw cursor
+        // Main kernel loop â€” poll mouse state and redraw cursor
         while (1) {
             if (kernel::arch::sparc::zs::mouse_dirty()) {
                 kernel::arch::sparc::zs::mouse_clear_dirty();

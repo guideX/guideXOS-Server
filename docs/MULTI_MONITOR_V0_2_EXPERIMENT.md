@@ -172,6 +172,16 @@ The bootloader and kernel now preserve a bounded diagnostic framebuffer array in
 - Deduplication prevents guideXOS from treating aliased GOP handles as separate monitors.
 - The optional `virtio-gpu` comparison path is still diagnostic-only; it currently reports `selected framebuffer invalid; BootInfo array disabled` and does not add a supported multi-output render path.
 
+## Bare-Metal Display Target Inventory
+
+The kernel now derives a read-only inventory of unique framebuffer-backed display candidates from the preserved BootInfo descriptors.
+
+- Raw BootInfo descriptors stay intact for diagnostics, while duplicate and alias entries are excluded from the candidate list.
+- The inventory bridges into the display model using disabled `DisplayMonitorDescriptor` candidates for anything that is not the preserved primary/selected framebuffer.
+- Current QEMU `-vga std` still exposes `FramebufferCount=2`, but the deduplicated inventory reports `UniqueCount=1`, `ActiveRenderTargetCount=1`, and `DisabledCandidateCount=0`.
+- Rendering remains primary-only in bare-metal mode.
+- If later hardware proof finds additional distinct framebuffers, those extra candidates should remain disabled until a future risky phase explicitly promotes them into active render targets.
+
 ## Next Recommended Steps
 
 - Keep the synthetic path isolated and continue using the existing smoke tests as the regression fence.

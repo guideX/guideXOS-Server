@@ -36,6 +36,9 @@
 #include "include/kernel/time.h"
 #include "include/kernel/ramdisk.h"
 #include "include/kernel/block_device.h"
+#if ARCH_HAS_PIC_8259
+#include "../../guideXOSBootLoader/guidexOSBootInfo.h"
+#endif
 #if defined(GXOS_BARE_METAL)
 #include "include/kernel/app_launch_target_resolver.h"
 #endif
@@ -120,6 +123,92 @@ static bool desktop_starts_with(const char* value, const char* prefix)
     }
     return true;
 }
+
+static void serial_put_u32_decimal(uint32_t value)
+{
+    char buffer[11];
+    int index = 10;
+    buffer[index] = '\0';
+
+    do {
+        buffer[--index] = static_cast<char>('0' + (value % 10u));
+        value /= 10u;
+    } while (value != 0u && index > 0);
+
+    kernel::serial::puts(&buffer[index]);
+}
+
+#if ARCH_HAS_PIC_8259
+static const char* framebuffer_format_name(uint32_t format)
+{
+    switch (format) {
+        case static_cast<uint32_t>(guideXOS::FramebufferFormat::R8G8B8A8):
+            return "R8G8B8A8";
+        case static_cast<uint32_t>(guideXOS::FramebufferFormat::B8G8R8A8):
+            return "B8G8R8A8";
+        default:
+            return "Unknown";
+    }
+}
+
+static const char* framebuffer_source_name(uint32_t source)
+{
+    switch (source) {
+        case static_cast<uint32_t>(guideXOS::FramebufferSource::Multiboot):
+            return "Multiboot";
+        case static_cast<uint32_t>(guideXOS::FramebufferSource::UefiGop):
+            return "UEFI GOP";
+        default:
+            return "Unknown";
+    }
+}
+
+static void log_diagnostic_framebuffer_inventory()
+{
+    const uint32_t candidateCount = kernel::framebuffer::diagnostic_framebuffer_candidate_count();
+    if (!kernel::framebuffer::has_diagnostic_framebuffer_inventory() || candidateCount == 0u) {
+        return;
+    }
+
+    // TODO(v0.2): after hardware proof, these disabled diagnostic candidates
+    // can be promoted into explicit bare-metal multi-framebuffer render targets.
+    for (uint32_t index = 0; index < candidateCount; ++index) {
+        kernel::framebuffer::DiagnosticFramebufferCandidate candidate{};
+        if (!kernel::framebuffer::diagnostic_framebuffer_candidate(index, candidate)) {
+            continue;
+        }
+
+        const bool active = (candidate.Flags & kernel::framebuffer::DIAGNOSTIC_FRAMEBUFFER_CANDIDATE_FLAG_ACTIVE) != 0u;
+        const bool disabled = (candidate.Flags & kernel::framebuffer::DIAGNOSTIC_FRAMEBUFFER_CANDIDATE_FLAG_DISABLED) != 0u;
+        const bool enabled = active && !disabled;
+        const bool primary = active && !disabled;
+
+        kernel::serial::puts("[desktop] Framebuffer candidate[");
+        serial_put_u32_decimal(index);
+        kernel::serial::puts("] enabled=");
+        kernel::serial::puts(enabled ? "true" : "false");
+        kernel::serial::puts(" primary=");
+        kernel::serial::puts(primary ? "true" : "false");
+        kernel::serial::puts(" source=");
+        kernel::serial::puts(framebuffer_source_name(candidate.Source));
+        kernel::serial::puts(" base=");
+        kernel::serial::put_hex64(candidate.Base);
+        kernel::serial::puts(" size=");
+        kernel::serial::put_hex64(candidate.Size);
+        kernel::serial::puts(" geometry=");
+        serial_put_u32_decimal(candidate.Width);
+        kernel::serial::putc('x');
+        serial_put_u32_decimal(candidate.Height);
+        kernel::serial::puts(" pitch=");
+        serial_put_u32_decimal(candidate.Pitch);
+        kernel::serial::puts(" bpp=");
+        serial_put_u32_decimal(candidate.BitsPerPixel);
+        kernel::serial::puts(" format=");
+        kernel::serial::puts(framebuffer_format_name(candidate.Format));
+        kernel::serial::puts("\n");
+    }
+}
+#endif
 
 static inline void outb_power(uint16_t port, uint8_t value)
 {
@@ -8073,6 +8162,9 @@ void init()
     ipc::IpcManager::init();
     apps::registerKernelApps();
     compositor::KernelCompositor::init(s_screenW, s_screenH, kTaskbarH);
+#if ARCH_HAS_PIC_8259
+    log_diagnostic_framebuffer_inventory();
+#endif
     compositor::TaskbarManager::init(s_screenW, s_screenH, kTaskbarH, 
                                      4 + kStartBtnW + 8);
     init_taskbar_widgets();

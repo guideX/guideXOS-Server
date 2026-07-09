@@ -59,6 +59,40 @@ uint32_t* get_buffer();
 // Check if framebuffer is available
 bool is_available();
 
+// Diagnostic-only inventory of unique framebuffer-backed display candidates
+// preserved from BootInfo. The active render target remains primary-only.
+static const uint32_t DIAGNOSTIC_FRAMEBUFFER_CANDIDATE_FLAG_ACTIVE = (1u << 0);
+static const uint32_t DIAGNOSTIC_FRAMEBUFFER_CANDIDATE_FLAG_DISABLED = (1u << 1);
+
+struct DiagnosticFramebufferInventorySummary
+{
+    uint32_t RawCount{0};
+    uint32_t UniqueCount{0};
+    uint32_t DuplicateCount{0};
+    uint32_t SuspiciousCount{0};
+    uint32_t ActiveRenderTargetCount{0};
+    uint32_t DisabledCandidateCount{0};
+};
+
+struct DiagnosticFramebufferCandidate
+{
+    uint64_t Base{0};
+    uint64_t Size{0};
+    uint32_t Width{0};
+    uint32_t Height{0};
+    uint32_t Pitch{0};
+    uint32_t BitsPerPixel{0};
+    uint32_t Format{0};
+    uint32_t Source{0};
+    uint32_t DescriptorFlags{0};
+    uint32_t Flags{0};
+};
+
+bool has_diagnostic_framebuffer_inventory();
+const DiagnosticFramebufferInventorySummary& diagnostic_framebuffer_inventory_summary();
+uint32_t diagnostic_framebuffer_candidate_count();
+bool diagnostic_framebuffer_candidate(uint32_t index, DiagnosticFramebufferCandidate& outCandidate);
+
 // Clear screen to color
 void clear(uint32_t color);
 

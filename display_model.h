@@ -904,6 +904,38 @@ inline DisplayMonitorDescriptor makeDisplayMonitor(
     return monitor;
 }
 
+inline DisplayMonitorDescriptor makeDiagnosticFramebufferMonitor(
+    const std::string& id,
+    const std::string& name,
+    int x,
+    int y,
+    int width,
+    int height,
+    uint32_t* framebufferBase = nullptr,
+    int pitch = 0,
+    bool active = true,
+    bool diagnosticDisabled = false)
+{
+    DisplayMonitorDescriptor monitor = makeDisplayMonitor(
+        id,
+        name,
+        x,
+        y,
+        width,
+        height,
+        framebufferBase,
+        pitch,
+        active && !diagnosticDisabled,
+        active && !diagnosticDisabled);
+
+    if (diagnosticDisabled) {
+        monitor.enabled = false;
+        monitor.primary = false;
+    }
+
+    return monitor;
+}
+
 inline DisplayVirtualDesktop makeSingleMonitorDesktop(
     uint32_t* framebufferBase,
     int width,

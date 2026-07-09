@@ -29,6 +29,10 @@ static uint32_t g_pitch = 0;
 static uint8_t g_bpp = 0;
 static bool g_available = false;
 static bool g_doubleBuffered = false;
+static kernel::framebuffer::DiagnosticFramebufferInventorySummary g_diagnosticInventorySummary{};
+static kernel::framebuffer::DiagnosticFramebufferCandidate g_diagnosticInventoryCandidates[guideXOS::GUIDEXOS_MAX_FRAMEBUFFERS]{};
+static uint32_t g_diagnosticInventoryCandidateCount = 0;
+static bool g_hasDiagnosticInventory = false;
 
 // Static back buffer storage (allocated in BSS segment)
 // Max resolution support: 1920x1080 = 2,073,600 pixels * 4 bytes = ~8MB
@@ -39,6 +43,93 @@ static uint32_t g_backBufferStorage[MAX_BACKBUFFER_PIXELS];
 static uint32_t bytes_per_pixel()
 {
     return g_bpp / 8;
+}
+
+static void reset_diagnostic_framebuffer_inventory()
+{
+    g_diagnosticInventorySummary = {};
+    g_diagnosticInventoryCandidateCount = 0;
+    g_hasDiagnosticInventory = false;
+    for (uint32_t i = 0; i < guideXOS::GUIDEXOS_MAX_FRAMEBUFFERS; ++i) {
+        g_diagnosticInventoryCandidates[i] = {};
+    }
+}
+
+static void cache_diagnostic_framebuffer_inventory(const guideXOS::BootInfo* bootinfo)
+{
+    reset_diagnostic_framebuffer_inventory();
+
+    if (!bootinfo) {
+        return;
+    }
+
+    g_hasDiagnosticInventory = true;
+    g_diagnosticInventorySummary.RawCount = bootinfo->FramebufferCount;
+    g_diagnosticInventorySummary.DuplicateCount = bootinfo->FramebufferDuplicateCount;
+    g_diagnosticInventorySummary.SuspiciousCount = bootinfo->FramebufferSuspiciousCount;
+
+    const uint32_t rawCount = bootinfo->FramebufferCount > guideXOS::GUIDEXOS_MAX_FRAMEBUFFERS
+        ? guideXOS::GUIDEXOS_MAX_FRAMEBUFFERS
+        : bootinfo->FramebufferCount;
+
+    for (uint32_t i = 0; i < rawCount; ++i) {
+        const guideXOS::FramebufferDescriptor& descriptor = bootinfo->FramebufferDescriptors[i];
+        if (!(descriptor.Flags & guideXOS::FRAMEBUFFER_DESCRIPTOR_FLAG_VALID)) {
+            continue;
+        }
+
+        if (descriptor.Flags & (guideXOS::FRAMEBUFFER_DESCRIPTOR_FLAG_DUPLICATE | guideXOS::FRAMEBUFFER_DESCRIPTOR_FLAG_ALIAS)) {
+            continue;
+        }
+
+        if (g_diagnosticInventoryCandidateCount >= guideXOS::GUIDEXOS_MAX_FRAMEBUFFERS) {
+            break;
+        }
+
+        kernel::framebuffer::DiagnosticFramebufferCandidate& candidate =
+            g_diagnosticInventoryCandidates[g_diagnosticInventoryCandidateCount++];
+        candidate.Base = descriptor.Base;
+        candidate.Size = descriptor.Size;
+        candidate.Width = descriptor.Width;
+        candidate.Height = descriptor.Height;
+        candidate.Pitch = descriptor.Pitch;
+        candidate.BitsPerPixel = descriptor.BitsPerPixel;
+        candidate.Format = static_cast<uint32_t>(descriptor.Format);
+        candidate.Source = static_cast<uint32_t>(descriptor.Source);
+        candidate.DescriptorFlags = descriptor.Flags;
+        candidate.Flags = 0u;
+    }
+
+    if (g_diagnosticInventoryCandidateCount > 0u) {
+        uint32_t activeIndex = 0u;
+        for (uint32_t i = 0; i < g_diagnosticInventoryCandidateCount; ++i) {
+            const uint32_t descriptorFlags = g_diagnosticInventoryCandidates[i].DescriptorFlags;
+            if (descriptorFlags & (guideXOS::FRAMEBUFFER_DESCRIPTOR_FLAG_PRIMARY | guideXOS::FRAMEBUFFER_DESCRIPTOR_FLAG_SELECTED)) {
+                activeIndex = i;
+                break;
+            }
+        }
+
+        for (uint32_t i = 0; i < g_diagnosticInventoryCandidateCount; ++i) {
+            kernel::framebuffer::DiagnosticFramebufferCandidate& candidate =
+                g_diagnosticInventoryCandidates[i];
+            if (i == activeIndex) {
+                candidate.Flags |= kernel::framebuffer::DIAGNOSTIC_FRAMEBUFFER_CANDIDATE_FLAG_ACTIVE;
+            } else {
+                candidate.Flags |= kernel::framebuffer::DIAGNOSTIC_FRAMEBUFFER_CANDIDATE_FLAG_DISABLED;
+            }
+        }
+    }
+
+    g_diagnosticInventorySummary.UniqueCount = g_diagnosticInventoryCandidateCount;
+    g_diagnosticInventorySummary.ActiveRenderTargetCount = g_diagnosticInventoryCandidateCount > 0u ? 1u : 0u;
+    g_diagnosticInventorySummary.DisabledCandidateCount =
+        g_diagnosticInventoryCandidateCount > 0u ? (g_diagnosticInventoryCandidateCount - 1u) : 0u;
+}
+
+static bool diagnostic_framebuffer_candidate_valid(uint32_t index)
+{
+    return g_hasDiagnosticInventory && index < g_diagnosticInventoryCandidateCount;
 }
 
 static bool supports_direct_color_bpp()
@@ -124,6 +215,8 @@ static uint32_t read_front_pixel(uint32_t x, uint32_t y)
 
 bool init(void* multiboot_info_ptr)
 {
+    reset_diagnostic_framebuffer_inventory();
+
     auto* info = reinterpret_cast<multiboot::Info*>(multiboot_info_ptr);
     
     // Check if framebuffer info is available
@@ -155,6 +248,8 @@ bool init(void* multiboot_info_ptr)
 
 bool init_from_bootinfo(const guideXOS::BootInfo* bootinfo)
 {
+    cache_diagnostic_framebuffer_inventory(bootinfo);
+
     if (!bootinfo) {
         return false;
     }
@@ -187,7 +282,11 @@ bool init_from_bootinfo(const guideXOS::BootInfo* bootinfo)
 
 #else // !ARCH_HAS_PIC_8259
 
-bool init(void*) { return false; }
+bool init(void*)
+{
+    reset_diagnostic_framebuffer_inventory();
+    return false;
+}
 
 #if defined(ARCH_SPARC)
 
@@ -196,6 +295,7 @@ bool init(void*) { return false; }
 // Resolution defaults to 1024x768, 32-bit XRGB pixels.
 bool init_sun4m()
 {
+    reset_diagnostic_framebuffer_inventory();
     g_buffer = reinterpret_cast<uint32_t*>(0x50800000u);
     g_width  = 1024;
     g_height = 768;
@@ -217,6 +317,7 @@ bool init_sun4m() { return false; }
 
 bool init_sun4u()
 {
+    reset_diagnostic_framebuffer_inventory();
     g_buffer = reinterpret_cast<uint32_t*>(0x80000000ULL);
     g_width  = 1024;
     g_height = 768;
@@ -256,6 +357,7 @@ bool init_riscv_ramfb(uint64_t, uint32_t, uint32_t, uint32_t, uint8_t) { return 
 
 bool init_vesa(uint16_t width, uint16_t height, uint8_t bpp)
 {
+    reset_diagnostic_framebuffer_inventory();
 #if ARCH_HAS_PORT_IO
     // Use the VESA core driver to set a BGA mode and read back
     // the LFB address.  If BGA is unavailable we still try to use
@@ -268,7 +370,7 @@ bool init_vesa(uint16_t width, uint16_t height, uint8_t bpp)
 
     // Try port-I/O BGA mode setting
     // (inline BGA register programming so we don't pull in vesa.h
-    //  — keeps the dependency tree flat)
+    //  â€” keeps the dependency tree flat)
     const uint16_t BGA_INDEX = 0x01CE;
     const uint16_t BGA_DATA  = 0x01CF;
 
@@ -341,6 +443,7 @@ bool init_vesa(uint16_t width, uint16_t height, uint8_t bpp)
 bool init_efi_gop(uint64_t lfbBase, uint32_t width, uint32_t height,
                   uint32_t pitch, uint8_t bpp)
 {
+    reset_diagnostic_framebuffer_inventory();
     if (lfbBase == 0 || width == 0 || height == 0) return false;
 
     g_buffer = reinterpret_cast<uint32_t*>(static_cast<uintptr_t>(lfbBase));
@@ -360,6 +463,7 @@ bool init_efi_gop(uint64_t lfbBase, uint32_t width, uint32_t height,
 bool init_manual(uint64_t lfbBase, uint32_t width, uint32_t height,
                  uint32_t pitch, uint8_t bpp)
 {
+    reset_diagnostic_framebuffer_inventory();
     if (lfbBase == 0 || width == 0 || height == 0) return false;
 
     g_buffer = reinterpret_cast<uint32_t*>(static_cast<uintptr_t>(lfbBase));
@@ -400,6 +504,31 @@ uint32_t* get_buffer()
 bool is_available()
 {
     return g_available;
+}
+
+bool has_diagnostic_framebuffer_inventory()
+{
+    return g_hasDiagnosticInventory;
+}
+
+const DiagnosticFramebufferInventorySummary& diagnostic_framebuffer_inventory_summary()
+{
+    return g_diagnosticInventorySummary;
+}
+
+uint32_t diagnostic_framebuffer_candidate_count()
+{
+    return g_diagnosticInventoryCandidateCount;
+}
+
+bool diagnostic_framebuffer_candidate(uint32_t index, DiagnosticFramebufferCandidate& outCandidate)
+{
+    if (!diagnostic_framebuffer_candidate_valid(index)) {
+        return false;
+    }
+
+    outCandidate = g_diagnosticInventoryCandidates[index];
+    return true;
 }
 
 void clear(uint32_t color)
