@@ -600,6 +600,74 @@ Phase 4F closes out the extended Sci Fi app-surface milestone as a documentation
 * Image Viewer may be a future theme target, but it should be approached carefully because prior large-image, memory, and repaint concerns make it a higher-risk surface for theme changes.
 * This pass does not inspect or modify Image Viewer.
 
+## Phase 4G
+
+Phase 4G is a diagnostic, read-only readiness inventory for Image Viewer. It reviews drawing, repaint, and memory ownership paths before any styling decision is made. It does not change Image Viewer runtime behavior, image loading, image decoding, memory ownership, large-image handling, preview/window close behavior, file open behavior, theme IDs, persistence keys, theme metrics, App Model behavior, or bare-metal code. No Image Viewer styling was implemented in this pass, and no new effects were added.
+
+* Classic remains the default theme.
+* Sci Fi remains opt-in.
+* Missing or invalid theme config falls back to Classic.
+* No per-effect controls were introduced.
+* No Image Viewer runtime behavior changed in this pass.
+* No Image Viewer styling was implemented in this pass.
+
+### Readiness Inventory
+
+* Image Viewer readiness inventory was performed before deciding whether to style the surface.
+* The inventory is hosted-app focused and is meant to guide a later Phase 4H styling pass, not replace it.
+
+### Drawing / Repaint Path
+
+* Hosted Image Viewer paints through its own app-local publish helpers: `MT_DrawText`, `MT_DrawTextAt`, `MT_DrawTextAtColor`, `MT_DrawRect`, `MT_DrawImage`, and `MT_WidgetAdd`.
+* `updateDisplay()` starts each repaint by clearing the compositor's text, positioned text, rect, and image layers with a form-feed `MT_DrawText` payload, then repaints the window body and content.
+* The body/background outside the image area is drawn with app-local rectangle publishes, not with shared theme widgets.
+* The image preview itself is drawn through `MT_DrawImage`.
+* The bottom button rows and status text are compositor widgets and positioned text, not a custom Image Viewer skin system.
+* `updateDisplayImage()` and `updateDisplay()` are the repaint entry points for image changes, zoom/pan changes, resize, edits, notice text, and error text.
+* The hosted and bare-metal image viewer paths are separate: hosted Image Viewer uses the compositor IPC path and `gui::ImagePtr`, while bare-metal `ImageViewerApp` uses framebuffer drawing and kernel-side image loading.
+* Stale image/text artifacts are less likely because the repaint path clears the compositor's draw layers before republishing, but the widget rows persist until rebuilt on resize or initial layout.
+
+### Image Loading / Memory Ownership
+
+* `gui::ImageAdapter::LoadFromFile` handles the hosted app load path and only accepts PNG input in this version.
+* `ImageAdapter` decodes through `PngLoader::LoadFromMemory`, and `PngLoader` allocates a `gui::Image` then copies decoded RGBA pixels into `Image::Pixels`.
+* `Image::~Image` frees the heap pixel buffer with `delete[]`.
+* `s_image` is a `std::shared_ptr<gui::Image>`, so replacing it on open or reload releases the previous decoded image once no other references remain.
+* Successful loads also snapshot full pixel data into `HistorySnapshot::pixels`, which means undo/redo and original-state tracking can temporarily duplicate large images.
+* Edit helpers such as rotate, flip, resize, crop, and restore paths allocate more full-image buffers, and edited previews may be written to the VFS under `tmp/imageviewer/...`.
+* On close, the app exits after sending `MT_Close`; there is no special close-time image cleanup beyond normal shared_ptr/vector destruction.
+* Opening a second image after the first one loads replaces the active image and refreshes snapshot/history state; prior large-image buffers are released when those owners are overwritten or cleared.
+* The large-image/freezing concern remains visible in code because the app still keeps full decoded images, full-pixel snapshots, and compositor-side image loads.
+
+### Safe Future Styling Targets
+
+* Window body/background outside the image area.
+* Bottom status strip and separator bands.
+* Empty-state, error, and notice text colors.
+* Border and separator colors around the preview area.
+* Existing compositor widget button fill, border, and text colors, if they are only restyled through the shared widget theme path and do not change widget behavior.
+* Small chrome-color tweaks around the image area, so long as they stay outside the decode, scaling, and buffer lifecycle paths.
+
+### Risky / Deferred Areas
+
+* Image decode/render path.
+* Large-image scaling path.
+* Cached bitmap ownership and preview-buffer ownership.
+* Close/reopen lifecycle.
+* Bare-metal framebuffer and kernel ImageAdapter paths.
+* Any new effects over the image area.
+* Blur/glass, animations, rounded client clipping, rounded hit-testing, and per-pixel image filters.
+* New retained buffers or theme-side image caches.
+
+### Blockers / Precautions Before Styling
+
+* Run a manual large-image open/close/reopen check before approving styling.
+* Verify the app releases its preview and snapshot state when switching images and on close.
+* Keep theme helpers outside image buffer ownership and decode paths.
+* Avoid new effects, retained buffers, and per-pixel processing over the image area.
+* Keep bare-metal validation separate; the kernel ImageViewer is a different app and remains out of scope for this pass.
+* Do not alter image loading, image decoding, memory ownership, large-image handling, file open behavior, or preview/window close behavior.
+
 ## Manual Validation Runbook
 
 * Start the hosted server executable.
