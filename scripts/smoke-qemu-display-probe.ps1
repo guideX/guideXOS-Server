@@ -1,5 +1,5 @@
 param(
-    [string[]]$Backends = @('std'),
+    [string[]]$Backends = @('std', 'virtio-gpu', 'virtio-vga', 'qxl-vga'),
     [int]$TimeoutSeconds = 120
 )
 
@@ -13,7 +13,7 @@ $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 $RunRoot = Join-Path $LogRoot ("qemu-display-probe-" + $stamp)
 New-Item -ItemType Directory -Force -Path $RunRoot | Out-Null
 
-$AllowedBackends = @('std', 'virtio-gpu')
+$AllowedBackends = @('std', 'virtio-gpu', 'multimonitor', 'virtio-vga', 'virtio', 'qxl-vga', 'qxl')
 foreach ($backend in $Backends) {
     if ($AllowedBackends -notcontains $backend) {
         throw "Unsupported backend '$backend'. Supported backends: $($AllowedBackends -join ', ')"
@@ -93,6 +93,49 @@ function Restore-EnvironmentState {
         } else {
             Set-Item -Path "Env:$($entry.Key)" -Value $entry.Value
         }
+    }
+}
+
+function Invoke-KernelBuildForSmoke {
+    param(
+        [string]$ExtraCFlags
+    )
+
+    $oldExtra = $env:EXTRA_CFLAGS
+    $buildCode = 1
+    try {
+        if ([string]::IsNullOrWhiteSpace($ExtraCFlags)) {
+            Remove-Item Env:\EXTRA_CFLAGS -ErrorAction SilentlyContinue
+        } else {
+            $env:EXTRA_CFLAGS = $ExtraCFlags
+        }
+
+        Push-Location $Root
+        try {
+            & (Join-Path $Root 'build-kernel.bat')
+            $buildCode = $LASTEXITCODE
+        } finally {
+            Pop-Location
+        }
+    } finally {
+        if ($null -ne $oldExtra -and $oldExtra -ne '') {
+            $env:EXTRA_CFLAGS = $oldExtra
+        } else {
+            Remove-Item Env:\EXTRA_CFLAGS -ErrorAction SilentlyContinue
+        }
+    }
+
+    if ($buildCode -ne 0) {
+        throw "Kernel build failed with exit code $buildCode."
+    }
+}
+
+$script:activeSmokeBuild = $false
+function Restore-NormalKernelBuild {
+    if ($script:activeSmokeBuild) {
+        Write-Host 'Restoring normal kernel build after virtio-gpu probe smoke...'
+        Invoke-KernelBuildForSmoke -ExtraCFlags ''
+        $script:activeSmokeBuild = $false
     }
 }
 
@@ -249,6 +292,35 @@ function Parse-FramebufferSummary {
     }
 }
 
+function Get-MatchGroupValue {
+    param(
+        [Parameter(Mandatory = $true)]
+        [System.Text.RegularExpressions.Match]$Match,
+        [Parameter(Mandatory = $true)]
+        [int]$GroupIndex,
+        [string]$Fallback = ''
+    )
+
+    if ($Match -and $Match.Success -and $Match.Groups.Count -gt $GroupIndex) {
+        return $Match.Groups[$GroupIndex].Value
+    }
+
+    return $Fallback
+}
+
+function Format-OptionalValue {
+    param(
+        [AllowNull()]
+        [object]$Value
+    )
+
+    if ($null -eq $Value -or $Value -eq '') {
+        return 'n/a'
+    }
+
+    return [string]$Value
+}
+
 function Assert-Condition {
     param(
         [Parameter(Mandatory = $true)]
@@ -269,6 +341,72 @@ function Assert-Condition {
     }
 }
 
+function Get-BackendSpec {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Backend
+    )
+
+    switch ($Backend.ToLowerInvariant()) {
+        'std' {
+            return [pscustomobject]@{
+                Backend = 'std'
+                Required = $true
+                LauncherBackend = 'std'
+                QemuArgs = '-vga std'
+                ProbeNote = 'legacy VGA/Bochs-style framebuffer'
+                SerialPattern = 'guideXOS UEFI Bootloader'
+                WaitPattern = '\[KERNEL\] Framebuffer ready'
+            }
+        }
+        'virtio-gpu' {
+            return [pscustomobject]@{
+                Backend = 'virtio-gpu'
+                Required = $false
+                LauncherBackend = 'virtio-gpu'
+                QemuArgs = '-vga none -device virtio-gpu-pci,max_outputs=2'
+                ProbeNote = 'virtio-gpu-pci diagnostic discovery probe'
+                SerialPattern = 'guideXOS UEFI Bootloader'
+                WaitPattern = '\[VIRTIO-GPU\] Probe complete, devices='
+            }
+        }
+        'multimonitor' {
+            return Get-BackendSpec -Backend 'virtio-gpu'
+        }
+        'virtio-vga' {
+            return [pscustomobject]@{
+                Backend = 'virtio-vga'
+                Required = $false
+                LauncherBackend = 'virtio-vga'
+                QemuArgs = '-vga virtio'
+                ProbeNote = 'virtio-vga diagnostic probe'
+                SerialPattern = 'guideXOS UEFI Bootloader'
+                WaitPattern = '\[KERNEL\] FramebufferCount='
+            }
+        }
+        'virtio' {
+            return Get-BackendSpec -Backend 'virtio-vga'
+        }
+        'qxl-vga' {
+            return [pscustomobject]@{
+                Backend = 'qxl-vga'
+                Required = $false
+                LauncherBackend = 'qxl-vga'
+                QemuArgs = '-vga qxl -spice addr=127.0.0.1,port=5930,disable-ticketing=on'
+                ProbeNote = 'qxl-vga diagnostic probe with SPICE server'
+                SerialPattern = 'guideXOS UEFI Bootloader'
+                WaitPattern = '\[KERNEL\] FramebufferCount='
+            }
+        }
+        'qxl' {
+            return Get-BackendSpec -Backend 'qxl-vga'
+        }
+        default {
+            throw "Unsupported backend '$Backend'."
+        }
+    }
+}
+
 function Invoke-QemuDisplayProbeBackend {
     param(
         [Parameter(Mandatory = $true)]
@@ -277,7 +415,9 @@ function Invoke-QemuDisplayProbeBackend {
         [int]$TimeoutSeconds
     )
 
-    $backendRoot = Join-Path $RunRoot $Backend
+    $spec = Get-BackendSpec -Backend $Backend
+    $backendName = $spec.Backend
+    $backendRoot = Join-Path $RunRoot $backendName
     New-Item -ItemType Directory -Force -Path $backendRoot | Out-Null
 
     $launcherStdOut = Join-Path $backendRoot 'launcher.stdout.log'
@@ -285,13 +425,11 @@ function Invoke-QemuDisplayProbeBackend {
     $serialLog = Join-Path $backendRoot 'serial.log'
     $summaryPath = Join-Path $backendRoot 'summary.txt'
 
-    $qemu = Find-Qemu
-    if (-not $qemu) {
+    if (-not (Find-Qemu)) {
         throw 'qemu-system-x86_64 not found.'
     }
 
-    $ovmf = Find-Ovmf
-    if (-not $ovmf) {
+    if (-not (Find-Ovmf)) {
         throw 'OVMF image not found.'
     }
 
@@ -311,11 +449,10 @@ function Invoke-QemuDisplayProbeBackend {
     $launcherState = $null
     $sentinelSeen = $false
     try {
-        $launcherState = Start-ProbeLauncher -Backend $Backend -SerialLog $serialLog -LauncherStdOut $launcherStdOut -LauncherStdErr $launcherStdErr
+        $launcherState = Start-ProbeLauncher -Backend $spec.LauncherBackend -SerialLog $serialLog -LauncherStdOut $launcherStdOut -LauncherStdErr $launcherStdErr
         $proc = $launcherState.Process
 
-        $sentinelPattern = if ($Backend -eq 'std') { '\[KERNEL\] Framebuffer ready' } else { '\[KERNEL\] FramebufferCount=' }
-        $sentinelSeen = Wait-ForGuestEvidence -Process $proc -SerialLog $serialLog -Pattern $sentinelPattern -TimeoutSeconds $TimeoutSeconds
+        $sentinelSeen = Wait-ForGuestEvidence -Process $proc -SerialLog $serialLog -Pattern $spec.WaitPattern -TimeoutSeconds $TimeoutSeconds
 
         if (-not $sentinelSeen) {
             if (-not $proc.HasExited) {
@@ -342,16 +479,21 @@ function Invoke-QemuDisplayProbeBackend {
         }
     }
 
+    $launcherExitCode = $null
+    if ($proc) {
+        try {
+            $launcherExitCode = $proc.ExitCode
+        } catch {
+            $launcherExitCode = $null
+        }
+    }
+
     $serialText = Read-LogText -Path $serialLog
     $launcherStdOutText = Read-LogText -Path $launcherStdOut
     $launcherStdErrText = Read-LogText -Path $launcherStdErr
 
-    if ([string]::IsNullOrWhiteSpace($serialText)) {
-        $detail = "No guest serial output was captured within $TimeoutSeconds seconds. launcherStdOut=$launcherStdOut launcherStdErr=$launcherStdErr"
-        Write-Host ("[{0}] no guest serial output - FAIL" -f $Backend)
-        Write-Host ("       {0}" -f $detail)
-        throw $detail
-    }
+    $launchRecorded = (-not [string]::IsNullOrWhiteSpace($launcherStdOutText)) -and ($launcherStdOutText -match 'QEMU launch:')
+    $bootloaderSerialAppeared = (-not [string]::IsNullOrWhiteSpace($serialText)) -and ($serialText -match $spec.SerialPattern)
 
     $bootGopLine = [regex]::Match($serialText, '\[BOOT\] GOP handles discovered: (\d+)')
     $bootSummary = Parse-FramebufferSummary -Text $serialText -Pattern '\[BOOT\] GOP FramebufferCount=(\d+) UniqueFramebufferCount=(\d+) DuplicateFramebufferCount=(\d+) SuspiciousFramebufferCount=(\d+)'
@@ -359,30 +501,60 @@ function Invoke-QemuDisplayProbeBackend {
     $bootSecondaryLine = [regex]::Match($serialText, '\[BOOT\] FB\[1\].*status=.*duplicate.*alias.*same-as-primary')
     $bootRenderTargetLine = [regex]::Match($serialText, 'Diagnostic framebuffer array exported .*primary remains render target')
     $bootInvalidFramebufferLine = [regex]::Match($serialText, '\[BOOT\] GOP selected framebuffer invalid; BootInfo array disabled')
+    $bootInvalidReasonLine = [regex]::Match($serialText, '\[BOOT\] GOP selected framebuffer failure reason=([^\r\n]+)')
     $kernelSummary = Parse-FramebufferSummary -Text $serialText -Pattern '\[KERNEL\] FramebufferCount=(\d+) UniqueFramebufferCount=(\d+) DuplicateFramebufferCount=(\d+) SuspiciousFramebufferCount=(\d+) ActiveFramebufferTargetCount=(\d+) DisabledDiagnosticFramebufferCandidateCount=(\d+)'
     $kernelPrimaryLine = [regex]::Match($serialText, '\[KERNEL\] Framebuffer source=UEFI BootInfo framebufferCount=\d+ index=0 status=.*primary.*selected')
     $kernelSecondaryLine = [regex]::Match($serialText, '\[KERNEL\] Framebuffer source=UEFI BootInfo framebufferCount=\d+ index=1 status=.*duplicate.*alias.*same-as-primary')
     $kernelFramebufferReady = [regex]::Match($serialText, '\[KERNEL\] Framebuffer ready')
     $desktopInventoryLine = [regex]::Match($serialText, '\[desktop\] Framebuffer candidate\[0\] enabled=true primary=true source=UEFI GOP')
     $desktopSecondaryInventoryLine = [regex]::Match($serialText, '\[desktop\] Framebuffer candidate\[1\]')
+    $gpuProbeEnabledLine = [regex]::Match($serialText, '\[VIRTIO-GPU\] Diagnostic probe enabled for QEMU virtio-gpu discovery')
+    $gpuProbeStartLine = [regex]::Match($serialText, '\[VIRTIO-GPU\] Probing PCI bus for virtio-gpu devices')
+    $gpuCandidateLine = [regex]::Match($serialText, '\[VIRTIO-GPU\] PCI candidate [^\r\n]+')
+    $gpuCapabilityLine = [regex]::Match($serialText, '\[VIRTIO-GPU\] Modern virtio-gpu capability discovery failed; candidate appears legacy or lacks modern VirtIO PCI caps')
+    $gpuQueueLine = [regex]::Match($serialText, '\[VIRTIO-GPU\] Control queue ready size=[^\r\n]+')
+    $gpuDisplayInfoLine = [regex]::Match($serialText, '\[VIRTIO-GPU\] Display info scanouts=\d+')
+    $gpuScanoutLine = [regex]::Match($serialText, '\[VIRTIO-GPU\]\s+scanout\[\d+\].*')
+    $gpuProbeCompleteLine = [regex]::Match($serialText, '\[VIRTIO-GPU\] Probe complete, devices=\d+')
 
-    if ($Backend -eq 'std') {
-        Assert-Condition -Backend $Backend -Name 'bootloader GOP handles line' -Condition $bootGopLine.Success -Detail 'expected a GOP handle discovery line in bootloader serial output'
-        Assert-Condition -Backend $Backend -Name 'bootloader framebuffer summary' -Condition ($null -ne $bootSummary) -Detail 'expected bootloader framebuffer summary line'
-        Assert-Condition -Backend $Backend -Name 'bootloader primary descriptor' -Condition $bootPrimaryLine.Success -Detail 'descriptor 0 should be primary and selected'
-        Assert-Condition -Backend $Backend -Name 'bootloader primary-render-target note' -Condition $bootRenderTargetLine.Success -Detail 'bootloader should say the primary remains the render target'
-        Assert-Condition -Backend $Backend -Name 'kernel framebuffer summary' -Condition ($null -ne $kernelSummary) -Detail 'expected kernel framebuffer summary line'
-        Assert-Condition -Backend $Backend -Name 'kernel primary descriptor' -Condition $kernelPrimaryLine.Success -Detail 'kernel should log descriptor 0 as primary and selected'
-        Assert-Condition -Backend $Backend -Name 'kernel framebuffer ready' -Condition $kernelFramebufferReady.Success -Detail 'kernel should reach framebuffer-ready initialization'
-        Assert-Condition -Backend $Backend -Name 'bootloader unique framebuffer count' -Condition ($bootSummary.UniqueCount -eq 1) -Detail ("line={0}" -f $bootSummary.Line)
-        Assert-Condition -Backend $Backend -Name 'bootloader suspicious framebuffer count' -Condition ($bootSummary.SuspiciousCount -eq 0) -Detail ("line={0}" -f $bootSummary.Line)
-        Assert-Condition -Backend $Backend -Name 'kernel unique framebuffer count' -Condition ($kernelSummary.UniqueCount -eq 1) -Detail ("line={0}" -f $kernelSummary.Line)
-        Assert-Condition -Backend $Backend -Name 'kernel suspicious framebuffer count' -Condition ($kernelSummary.SuspiciousCount -eq 0) -Detail ("line={0}" -f $kernelSummary.Line)
-        Assert-Condition -Backend $Backend -Name 'kernel active framebuffer target count' -Condition ($kernelSummary.ActiveRenderTargetCount -eq 1) -Detail ("line={0}" -f $kernelSummary.Line)
-        Assert-Condition -Backend $Backend -Name 'kernel disabled diagnostic candidate count' -Condition ($kernelSummary.DisabledCandidateCount -eq 0) -Detail ("line={0}" -f $kernelSummary.Line)
-        Assert-Condition -Backend $Backend -Name 'desktop unique candidate inventory' -Condition $desktopInventoryLine.Success -Detail 'desktop should log one enabled primary framebuffer candidate from the unique inventory'
-        Assert-Condition -Backend $Backend -Name 'desktop duplicate handle not promoted' -Condition (-not $desktopSecondaryInventoryLine.Success) -Detail 'duplicate GOP handles must not become extra display candidates'
-        Assert-Condition -Backend $Backend -Name 'summary counts mirror' -Condition (
+    $bootGopHandles = Format-OptionalValue -Value (Get-MatchGroupValue -Match $bootGopLine -GroupIndex 1)
+    $bootFramebufferCount = if ($bootSummary) { $bootSummary.RawCount } else { $null }
+    $bootUniqueFramebufferCount = if ($bootSummary) { $bootSummary.UniqueCount } else { $null }
+    $bootDuplicateFramebufferCount = if ($bootSummary) { $bootSummary.DuplicateCount } else { $null }
+    $bootSuspiciousFramebufferCount = if ($bootSummary) { $bootSummary.SuspiciousCount } else { $null }
+    $kernelFramebufferCount = if ($kernelSummary) { $kernelSummary.RawCount } else { $null }
+    $kernelUniqueFramebufferCount = if ($kernelSummary) { $kernelSummary.UniqueCount } else { $null }
+    $kernelDuplicateFramebufferCount = if ($kernelSummary) { $kernelSummary.DuplicateCount } else { $null }
+    $kernelSuspiciousFramebufferCount = if ($kernelSummary) { $kernelSummary.SuspiciousCount } else { $null }
+    $kernelActiveRenderTargetCount = if ($kernelSummary) { $kernelSummary.ActiveRenderTargetCount } else { $null }
+    $kernelDisabledCandidateCount = if ($kernelSummary) { $kernelSummary.DisabledCandidateCount } else { $null }
+    $bootInvalidReason = Format-OptionalValue -Value (Get-MatchGroupValue -Match $bootInvalidReasonLine -GroupIndex 1)
+    $gpuDiagnosticsCaptured = $gpuProbeEnabledLine.Success -or $gpuProbeStartLine.Success -or $gpuCandidateLine.Success -or $gpuCapabilityLine.Success -or $gpuQueueLine.Success -or $gpuDisplayInfoLine.Success -or $gpuScanoutLine.Success -or $gpuProbeCompleteLine.Success
+
+    if ($spec.Required) {
+        if ([string]::IsNullOrWhiteSpace($serialText)) {
+            $detail = "No guest serial output was captured within $TimeoutSeconds seconds. launcherStdOut=$launcherStdOut launcherStdErr=$launcherStdErr"
+            Write-Host ("[{0}] no guest serial output - FAIL" -f $backendName)
+            Write-Host ("       {0}" -f $detail)
+            throw $detail
+        }
+
+        Assert-Condition -Backend $backendName -Name 'bootloader GOP handles line' -Condition $bootGopLine.Success -Detail 'expected a GOP handle discovery line in bootloader serial output'
+        Assert-Condition -Backend $backendName -Name 'bootloader framebuffer summary' -Condition ($null -ne $bootSummary) -Detail 'expected bootloader framebuffer summary line'
+        Assert-Condition -Backend $backendName -Name 'bootloader primary descriptor' -Condition $bootPrimaryLine.Success -Detail 'descriptor 0 should be primary and selected'
+        Assert-Condition -Backend $backendName -Name 'bootloader primary-render-target note' -Condition $bootRenderTargetLine.Success -Detail 'bootloader should say the primary remains the render target'
+        Assert-Condition -Backend $backendName -Name 'kernel framebuffer summary' -Condition ($null -ne $kernelSummary) -Detail 'expected kernel framebuffer summary line'
+        Assert-Condition -Backend $backendName -Name 'kernel primary descriptor' -Condition $kernelPrimaryLine.Success -Detail 'kernel should log descriptor 0 as primary and selected'
+        Assert-Condition -Backend $backendName -Name 'kernel framebuffer ready' -Condition $kernelFramebufferReady.Success -Detail 'kernel should reach framebuffer-ready initialization'
+        Assert-Condition -Backend $backendName -Name 'bootloader unique framebuffer count' -Condition ($bootSummary.UniqueCount -eq 1) -Detail ("line={0}" -f $bootSummary.Line)
+        Assert-Condition -Backend $backendName -Name 'bootloader suspicious framebuffer count' -Condition ($bootSummary.SuspiciousCount -eq 0) -Detail ("line={0}" -f $bootSummary.Line)
+        Assert-Condition -Backend $backendName -Name 'kernel unique framebuffer count' -Condition ($kernelSummary.UniqueCount -eq 1) -Detail ("line={0}" -f $kernelSummary.Line)
+        Assert-Condition -Backend $backendName -Name 'kernel suspicious framebuffer count' -Condition ($kernelSummary.SuspiciousCount -eq 0) -Detail ("line={0}" -f $kernelSummary.Line)
+        Assert-Condition -Backend $backendName -Name 'kernel active framebuffer target count' -Condition ($kernelSummary.ActiveRenderTargetCount -eq 1) -Detail ("line={0}" -f $kernelSummary.Line)
+        Assert-Condition -Backend $backendName -Name 'kernel disabled diagnostic candidate count' -Condition ($kernelSummary.DisabledCandidateCount -eq 0) -Detail ("line={0}" -f $kernelSummary.Line)
+        Assert-Condition -Backend $backendName -Name 'desktop unique candidate inventory' -Condition $desktopInventoryLine.Success -Detail 'desktop should log one enabled primary framebuffer candidate from the unique inventory'
+        Assert-Condition -Backend $backendName -Name 'desktop duplicate handle not promoted' -Condition (-not $desktopSecondaryInventoryLine.Success) -Detail 'duplicate GOP handles must not become extra display candidates'
+        Assert-Condition -Backend $backendName -Name 'summary counts mirror' -Condition (
             $bootSummary.RawCount -eq $kernelSummary.RawCount -and
             $bootSummary.UniqueCount -eq $kernelSummary.UniqueCount -and
             $bootSummary.DuplicateCount -eq $kernelSummary.DuplicateCount -and
@@ -390,165 +562,264 @@ function Invoke-QemuDisplayProbeBackend {
         ) -Detail ("boot={0} kernel={1}" -f $bootSummary.Line, $kernelSummary.Line)
 
         if ($bootSummary.RawCount -eq 1) {
-            Assert-Condition -Backend $Backend -Name 'single framebuffer duplicate count' -Condition ($bootSummary.DuplicateCount -eq 0) -Detail ("line={0}" -f $bootSummary.Line)
+            Assert-Condition -Backend $backendName -Name 'single framebuffer duplicate count' -Condition ($bootSummary.DuplicateCount -eq 0) -Detail ("line={0}" -f $bootSummary.Line)
         } else {
-            Assert-Condition -Backend $Backend -Name 'duplicate framebuffer count' -Condition ($bootSummary.DuplicateCount -ge 1) -Detail ("line={0}" -f $bootSummary.Line)
-            Assert-Condition -Backend $Backend -Name 'kernel duplicate framebuffer count' -Condition ($kernelSummary.DuplicateCount -ge 1) -Detail ("line={0}" -f $kernelSummary.Line)
-            Assert-Condition -Backend $Backend -Name 'bootloader duplicate descriptor 1' -Condition $bootSecondaryLine.Success -Detail 'descriptor 1 should be logged as duplicate alias same-as-primary'
-            Assert-Condition -Backend $Backend -Name 'kernel duplicate descriptor 1' -Condition $kernelSecondaryLine.Success -Detail 'kernel should mirror descriptor 1 as duplicate alias same-as-primary'
-            Assert-Condition -Backend $Backend -Name 'raw equals unique plus duplicate' -Condition (
+            Assert-Condition -Backend $backendName -Name 'duplicate framebuffer count' -Condition ($bootSummary.DuplicateCount -ge 1) -Detail ("line={0}" -f $bootSummary.Line)
+            Assert-Condition -Backend $backendName -Name 'kernel duplicate framebuffer count' -Condition ($kernelSummary.DuplicateCount -ge 1) -Detail ("line={0}" -f $kernelSummary.Line)
+            Assert-Condition -Backend $backendName -Name 'bootloader duplicate descriptor 1' -Condition $bootSecondaryLine.Success -Detail 'descriptor 1 should be logged as duplicate alias same-as-primary'
+            Assert-Condition -Backend $backendName -Name 'kernel duplicate descriptor 1' -Condition $kernelSecondaryLine.Success -Detail 'kernel should mirror descriptor 1 as duplicate alias same-as-primary'
+            Assert-Condition -Backend $backendName -Name 'raw equals unique plus duplicate' -Condition (
                 $bootSummary.RawCount -eq ($bootSummary.UniqueCount + $bootSummary.DuplicateCount) -and
                 $kernelSummary.RawCount -eq ($kernelSummary.UniqueCount + $kernelSummary.DuplicateCount)
             ) -Detail ("boot={0} kernel={1}" -f $bootSummary.Line, $kernelSummary.Line)
         }
-    } else {
-        $bootSummaryLine = if ($bootSummary) { $bootSummary.Line } else { '(missing)' }
-        $kernelSummaryLine = if ($kernelSummary) { $kernelSummary.Line } else { '(missing)' }
-        $diagnosticStatus = 'partial'
-        if ($bootGopLine.Success -and $bootSummary -and $kernelSummary) {
-            $diagnosticStatus = 'complete'
-        } elseif ($bootGopLine.Success -or $bootSummary -or $kernelSummary) {
-            $diagnosticStatus = 'partial'
+    }
+
+    $launched = $launchRecorded
+    $bootloaderSerialCaptured = $bootloaderSerialAppeared
+    $framebufferReady = $kernelFramebufferReady.Success
+
+    $backendStatus = 'unsupported'
+    if ($spec.Required) {
+        $backendStatus = 'validated'
+    } elseif ($bootloaderSerialCaptured) {
+        if ($bootSummary -and $kernelSummary) {
+            $backendStatus = if ($framebufferReady) { 'complete' } else { 'partial' }
+        } elseif ($bootSummary -or $kernelSummary) {
+            $backendStatus = 'partial'
         } else {
-            $diagnosticStatus = 'no-framebuffer-evidence'
-        }
-        Write-Host ("[{0}] diagnostic capture status: {1}" -f $Backend, $diagnosticStatus)
-        if ($bootGopLine.Success) {
-            Write-Host ("[{0}] bootloader GOP handles: {1}" -f $Backend, $bootGopLine.Groups[1].Value)
-        }
-        if ($bootSummary) {
-            Write-Host ("[{0}] bootloader summary: {1}" -f $Backend, $bootSummaryLine)
-        }
-        if ($kernelSummary) {
-            Write-Host ("[{0}] kernel summary: {1}" -f $Backend, $kernelSummaryLine)
-        }
-        if ($bootPrimaryLine.Success) {
-            Write-Host ("[{0}] bootloader descriptor 0: primary selected" -f $Backend)
-        }
-        if ($kernelPrimaryLine.Success) {
-            Write-Host ("[{0}] kernel descriptor 0: primary selected" -f $Backend)
-        }
-        if ($desktopInventoryLine.Success) {
-            Write-Host ("[{0}] desktop inventory candidate 0: enabled primary" -f $Backend)
-        }
-        if ($bootRenderTargetLine.Success) {
-            Write-Host ("[{0}] bootloader render-target note: primary remains render target" -f $Backend)
-        }
-        if ($bootInvalidFramebufferLine.Success) {
-            Write-Host ("[{0}] bootloader framebuffer note: selected framebuffer invalid; BootInfo array disabled" -f $Backend)
-        }
-        if ($kernelFramebufferReady.Success) {
-            Write-Host ("[{0}] kernel framebuffer-ready marker observed" -f $Backend)
+            $backendStatus = 'partial'
         }
     }
 
-    $launcherStdOutTail = (Get-LogTail -Path $launcherStdOut -LineCount 10) -replace "`r", ''
-    $launcherStdErrTail = (Get-LogTail -Path $launcherStdErr -LineCount 10) -replace "`r", ''
-    $serialTail = (Get-LogTail -Path $serialLog -LineCount 30) -replace "`r", ''
+    $interpretation = 'no framebuffer evidence captured'
+    if ($bootSummary) {
+        if ($bootSummary.UniqueCount -gt 1) {
+            $interpretation = 'more than one unique framebuffer candidate exposed through current GOP handoff'
+        } elseif ($bootSummary.UniqueCount -eq 1 -and $bootSummary.DuplicateCount -ge 1) {
+            $interpretation = 'single unique framebuffer candidate with duplicate aliases'
+        } elseif ($bootSummary.UniqueCount -eq 1) {
+            $interpretation = 'single unique framebuffer candidate and no duplicates'
+        } elseif ($bootSummary.RawCount -eq 0) {
+            $interpretation = 'GOP framebuffer export disabled'
+        }
+    } elseif ($bootInvalidReason -ne 'n/a') {
+        $interpretation = "selected GOP framebuffer rejected: $bootInvalidReason"
+    } elseif ($bootloaderSerialCaptured) {
+        $interpretation = 'bootloader reached serial output but no framebuffer summary was captured'
+    }
+
+    $launcherStdOutTail = (Get-LogTail -Path $launcherStdOut -LineCount 12) -replace "`r", ''
+    $launcherStdErrTail = (Get-LogTail -Path $launcherStdErr -LineCount 12) -replace "`r", ''
+    $serialTail = (Get-LogTail -Path $serialLog -LineCount 40) -replace "`r", ''
 
     $summaryLines = @(
-        "[QemuDisplayProbeSmoke]",
-        'evidenceVersion=1',
-        "backend=$Backend",
-        "timeoutSeconds=$TimeoutSeconds",
-        "timestampUtc=$((Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ'))",
-        "root=$Root",
-        "runRoot=$RunRoot",
-        "backendRoot=$backendRoot",
-        "launcherStdOut=$launcherStdOut",
-        "launcherStdErr=$launcherStdErr",
-        "serialLog=$serialLog",
-        "bootGopHandles=$($bootGopLine.Groups[1].Value)",
-        "bootSummary=$($bootSummary.Line)",
-        "kernelSummary=$($kernelSummary.Line)",
-        "kernelActiveRenderTargetCount=$($kernelSummary.ActiveRenderTargetCount)",
-        "kernelDisabledCandidateCount=$($kernelSummary.DisabledCandidateCount)",
-        "bootPrimaryLine=$($bootPrimaryLine.Value)",
-        "bootSecondaryLine=$($bootSecondaryLine.Value)",
-        "bootRenderTargetLine=$($bootRenderTargetLine.Value)",
-        "kernelPrimaryLine=$($kernelPrimaryLine.Value)",
-        "kernelSecondaryLine=$($kernelSecondaryLine.Value)",
-        "kernelFramebufferReady=$($kernelFramebufferReady.Value)",
-        "desktopInventoryLine=$($desktopInventoryLine.Value)",
-        "desktopSecondaryInventoryLine=$($desktopSecondaryInventoryLine.Value)",
-        "launcherStdOutTail=$launcherStdOutTail",
-        "launcherStdErrTail=$launcherStdErrTail",
+        '[QemuDisplayProbeBackend]'
+        'evidenceVersion=2'
+        "backend=$backendName"
+        "required=$($spec.Required.ToString().ToLowerInvariant())"
+        "launched=$($launched.ToString().ToLowerInvariant())"
+        "bootloaderSerialAppeared=$($bootloaderSerialCaptured.ToString().ToLowerInvariant())"
+        "launcherExitCode=$(Format-OptionalValue -Value $launcherExitCode)"
+        "timeoutSeconds=$TimeoutSeconds"
+        "timestampUtc=$((Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ'))"
+        "qemuArgs=$($spec.QemuArgs)"
+        "probeNote=$($spec.ProbeNote)"
+        "bootGopHandles=$bootGopHandles"
+        "bootFramebufferCount=$(Format-OptionalValue -Value $bootFramebufferCount)"
+        "bootUniqueFramebufferCount=$(Format-OptionalValue -Value $bootUniqueFramebufferCount)"
+        "bootDuplicateFramebufferCount=$(Format-OptionalValue -Value $bootDuplicateFramebufferCount)"
+        "bootSuspiciousFramebufferCount=$(Format-OptionalValue -Value $bootSuspiciousFramebufferCount)"
+        "kernelFramebufferCount=$(Format-OptionalValue -Value $kernelFramebufferCount)"
+        "kernelUniqueFramebufferCount=$(Format-OptionalValue -Value $kernelUniqueFramebufferCount)"
+        "kernelDuplicateFramebufferCount=$(Format-OptionalValue -Value $kernelDuplicateFramebufferCount)"
+        "kernelSuspiciousFramebufferCount=$(Format-OptionalValue -Value $kernelSuspiciousFramebufferCount)"
+        "kernelActiveRenderTargetCount=$(Format-OptionalValue -Value $kernelActiveRenderTargetCount)"
+        "kernelDisabledCandidateCount=$(Format-OptionalValue -Value $kernelDisabledCandidateCount)"
+        "framebufferReady=$($framebufferReady.ToString().ToLowerInvariant())"
+        "status=$backendStatus"
+        "interpretation=$interpretation"
+        "bootInvalidReason=$bootInvalidReason"
+        "bootPrimaryLine=$($bootPrimaryLine.Value)"
+        "bootSecondaryLine=$($bootSecondaryLine.Value)"
+        "bootRenderTargetLine=$($bootRenderTargetLine.Value)"
+        "bootInvalidFramebufferLine=$($bootInvalidFramebufferLine.Value)"
+        "kernelPrimaryLine=$($kernelPrimaryLine.Value)"
+        "kernelSecondaryLine=$($kernelSecondaryLine.Value)"
+        "desktopInventoryLine=$($desktopInventoryLine.Value)"
+        "desktopSecondaryInventoryLine=$($desktopSecondaryInventoryLine.Value)"
+        "gpuDiagnosticsCaptured=$($gpuDiagnosticsCaptured.ToString().ToLowerInvariant())"
+        "gpuProbeEnabledLine=$($gpuProbeEnabledLine.Value)"
+        "gpuProbeStartLine=$($gpuProbeStartLine.Value)"
+        "gpuCandidateLine=$($gpuCandidateLine.Value)"
+        "gpuCapabilityLine=$($gpuCapabilityLine.Value)"
+        "gpuQueueLine=$($gpuQueueLine.Value)"
+        "gpuDisplayInfoLine=$($gpuDisplayInfoLine.Value)"
+        "gpuScanoutLine=$($gpuScanoutLine.Value)"
+        "gpuProbeCompleteLine=$($gpuProbeCompleteLine.Value)"
+        "launcherStdOut=$launcherStdOut"
+        "launcherStdErr=$launcherStdErr"
+        "serialLog=$serialLog"
+        "launcherStdOutTail=$launcherStdOutTail"
+        "launcherStdErrTail=$launcherStdErrTail"
         "serialTail=$serialTail"
     )
     Set-Content -LiteralPath $summaryPath -Value $summaryLines -Encoding UTF8
 
+    Write-Host ("[{0}] launched={1} serial={2} status={3}" -f $backendName, $launched, $bootloaderSerialCaptured, $backendStatus)
+    if ($bootSummary) {
+        Write-Host ("[{0}] boot summary: {1}" -f $backendName, $bootSummary.Line)
+    }
+    if ($kernelSummary) {
+        Write-Host ("[{0}] kernel summary: {1}" -f $backendName, $kernelSummary.Line)
+    }
+    if ($bootInvalidReason -ne 'n/a') {
+        Write-Host ("[{0}] bootloader framebuffer rejection: {1}" -f $backendName, $bootInvalidReason)
+    }
+    if ($framebufferReady) {
+        Write-Host ("[{0}] kernel framebuffer-ready marker observed" -f $backendName)
+    }
+    if ($backendName -eq 'virtio-gpu' -and $gpuDiagnosticsCaptured) {
+        Write-Host ("[{0}] virtio-gpu diagnostics observed in serial log" -f $backendName)
+    }
+    if ($interpretation) {
+        Write-Host ("[{0}] interpretation: {1}" -f $backendName, $interpretation)
+    }
+
     return [pscustomobject]@{
-        Backend = $Backend
+        Backend = $backendName
         BackendRoot = $backendRoot
         LauncherStdOut = $launcherStdOut
         LauncherStdErr = $launcherStdErr
         SerialLog = $serialLog
         SummaryPath = $summaryPath
+        QemuArgs = $spec.QemuArgs
+        ProbeNote = $spec.ProbeNote
+        Required = $spec.Required
+        Launched = $launched
+        BootloaderSerialAppeared = $bootloaderSerialCaptured
+        LauncherExitCode = $launcherExitCode
         BootSummary = $bootSummary
         KernelSummary = $kernelSummary
-        KernelActiveRenderTargetCount = $kernelSummary.ActiveRenderTargetCount
-        KernelDisabledCandidateCount = $kernelSummary.DisabledCandidateCount
-        BootGopHandles = $bootGopLine.Groups[1].Value
+        KernelActiveRenderTargetCount = $kernelActiveRenderTargetCount
+        KernelDisabledCandidateCount = $kernelDisabledCandidateCount
+        BootGopHandles = $bootGopHandles
+        BootFramebufferCount = $bootFramebufferCount
+        BootUniqueFramebufferCount = $bootUniqueFramebufferCount
+        BootDuplicateFramebufferCount = $bootDuplicateFramebufferCount
+        BootSuspiciousFramebufferCount = $bootSuspiciousFramebufferCount
+        KernelFramebufferCount = $kernelFramebufferCount
+        KernelUniqueFramebufferCount = $kernelUniqueFramebufferCount
+        KernelDuplicateFramebufferCount = $kernelDuplicateFramebufferCount
+        KernelSuspiciousFramebufferCount = $kernelSuspiciousFramebufferCount
         BootPrimaryLine = $bootPrimaryLine.Value
         BootSecondaryLine = $bootSecondaryLine.Value
+        BootRenderTargetLine = $bootRenderTargetLine.Value
         BootInvalidFramebufferLine = $bootInvalidFramebufferLine.Value
+        BootInvalidReason = $bootInvalidReason
         KernelPrimaryLine = $kernelPrimaryLine.Value
         KernelSecondaryLine = $kernelSecondaryLine.Value
         KernelFramebufferReady = $kernelFramebufferReady.Value
+        FramebufferReady = $framebufferReady
         DesktopInventoryLine = $desktopInventoryLine.Value
         DesktopSecondaryInventoryLine = $desktopSecondaryInventoryLine.Value
-        DiagnosticStatus = if ($Backend -eq 'std') { 'validated' } else { $diagnosticStatus }
+        GpuDiagnosticsCaptured = $gpuDiagnosticsCaptured
+        GpuProbeEnabledLine = $gpuProbeEnabledLine.Value
+        GpuProbeStartLine = $gpuProbeStartLine.Value
+        GpuCandidateLine = $gpuCandidateLine.Value
+        GpuCapabilityLine = $gpuCapabilityLine.Value
+        GpuQueueLine = $gpuQueueLine.Value
+        GpuDisplayInfoLine = $gpuDisplayInfoLine.Value
+        GpuScanoutLine = $gpuScanoutLine.Value
+        GpuProbeCompleteLine = $gpuProbeCompleteLine.Value
+        DiagnosticStatus = $backendStatus
+        Interpretation = $interpretation
         LauncherStdOutText = $launcherStdOutText
         LauncherStdErrText = $launcherStdErrText
         SerialText = $serialText
     }
 }
 
-$results = @()
-foreach ($backend in $Backends) {
-    Write-Host ("[{0}] launching display probe smoke" -f $backend)
-    $result = Invoke-QemuDisplayProbeBackend -Backend $backend -TimeoutSeconds $TimeoutSeconds
-    $results += $result
-    Write-Host ("[{0}] completed. serial={1}" -f $backend, $result.SerialLog)
-}
+try {
+    Write-Host '[build] rebuilding kernel with virtio-gpu diagnostic probe enabled'
+    Invoke-KernelBuildForSmoke -ExtraCFlags '-DGXOS_QEMU_VIRTIO_GPU_PROBE_ACTIVE'
+    $script:activeSmokeBuild = $true
 
-$evidencePath = Join-Path $RunRoot 'qemu-display-probe.evidence.txt'
-$evidenceLines = @(
-    '[QemuDisplayProbeSmoke]',
-    'evidenceVersion=1',
-    "timestampUtc=$((Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ'))",
-    "repoRoot=$Root",
-    "runRoot=$RunRoot",
-    "backends=$($Backends -join ',')"
-)
+    $results = @()
+    foreach ($backend in $Backends) {
+        Write-Host ("[{0}] launching display probe smoke" -f $backend)
+        $result = Invoke-QemuDisplayProbeBackend -Backend $backend -TimeoutSeconds $TimeoutSeconds
+        $results += $result
+        Write-Host ("[{0}] completed. serial={1}" -f $backend, $result.SerialLog)
+    }
 
-foreach ($result in $results) {
-    $evidenceLines += "backend=$($result.Backend)"
-    $evidenceLines += "diagnosticStatus=$($result.DiagnosticStatus)"
-    $evidenceLines += "bootGopHandles=$($result.BootGopHandles)"
-    $evidenceLines += "bootSummary=$($result.BootSummary.Line)"
-    $evidenceLines += "kernelSummary=$($result.KernelSummary.Line)"
-    $evidenceLines += "kernelActiveRenderTargetCount=$($result.KernelActiveRenderTargetCount)"
-    $evidenceLines += "kernelDisabledCandidateCount=$($result.KernelDisabledCandidateCount)"
-    $evidenceLines += "bootPrimaryLine=$($result.BootPrimaryLine)"
-    $evidenceLines += "bootSecondaryLine=$($result.BootSecondaryLine)"
-    $evidenceLines += "bootInvalidFramebufferLine=$($result.BootInvalidFramebufferLine)"
-    $evidenceLines += "kernelPrimaryLine=$($result.KernelPrimaryLine)"
-    $evidenceLines += "kernelSecondaryLine=$($result.KernelSecondaryLine)"
-    $evidenceLines += "kernelFramebufferReady=$($result.KernelFramebufferReady)"
-    $evidenceLines += "desktopInventoryLine=$($result.DesktopInventoryLine)"
-    $evidenceLines += "desktopSecondaryInventoryLine=$($result.DesktopSecondaryInventoryLine)"
-    $evidenceLines += "launcherStdOut=$($result.LauncherStdOut)"
-    $evidenceLines += "launcherStdErr=$($result.LauncherStdErr)"
-    $evidenceLines += "serialLog=$($result.SerialLog)"
-    $evidenceLines += "summaryPath=$($result.SummaryPath)"
-}
+    $evidencePath = Join-Path $RunRoot 'qemu-display-probe.evidence.txt'
+    $evidenceLines = @(
+        '[QemuDisplayProbeSmoke]',
+        'evidenceVersion=1',
+        "timestampUtc=$((Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ'))",
+        "repoRoot=$Root",
+        "runRoot=$RunRoot",
+        "backends=$($Backends -join ',')"
+    )
 
-Set-Content -LiteralPath $evidencePath -Value $evidenceLines -Encoding UTF8
+    foreach ($result in $results) {
+        $evidenceLines += ''
+        $evidenceLines += "[backend $($result.Backend)]"
+        $evidenceLines += "required=$($result.Required.ToString().ToLowerInvariant())"
+        $evidenceLines += "qemuArgs=$($result.QemuArgs)"
+        $evidenceLines += "probeNote=$($result.ProbeNote)"
+        $evidenceLines += "launched=$($result.Launched.ToString().ToLowerInvariant())"
+        $evidenceLines += "bootloaderSerialAppeared=$($result.BootloaderSerialAppeared.ToString().ToLowerInvariant())"
+        $evidenceLines += "launcherExitCode=$(Format-OptionalValue -Value $result.LauncherExitCode)"
+        $evidenceLines += "diagnosticStatus=$($result.DiagnosticStatus)"
+        $evidenceLines += "interpretation=$($result.Interpretation)"
+        $evidenceLines += "bootGopHandles=$($result.BootGopHandles)"
+        $evidenceLines += "bootFramebufferCount=$(Format-OptionalValue -Value $result.BootFramebufferCount)"
+        $evidenceLines += "bootUniqueFramebufferCount=$(Format-OptionalValue -Value $result.BootUniqueFramebufferCount)"
+        $evidenceLines += "bootDuplicateFramebufferCount=$(Format-OptionalValue -Value $result.BootDuplicateFramebufferCount)"
+        $evidenceLines += "bootSuspiciousFramebufferCount=$(Format-OptionalValue -Value $result.BootSuspiciousFramebufferCount)"
+        $evidenceLines += "kernelFramebufferCount=$(Format-OptionalValue -Value $result.KernelFramebufferCount)"
+        $evidenceLines += "kernelUniqueFramebufferCount=$(Format-OptionalValue -Value $result.KernelUniqueFramebufferCount)"
+        $evidenceLines += "kernelDuplicateFramebufferCount=$(Format-OptionalValue -Value $result.KernelDuplicateFramebufferCount)"
+        $evidenceLines += "kernelSuspiciousFramebufferCount=$(Format-OptionalValue -Value $result.KernelSuspiciousFramebufferCount)"
+        $evidenceLines += "kernelActiveRenderTargetCount=$(Format-OptionalValue -Value $result.KernelActiveRenderTargetCount)"
+        $evidenceLines += "kernelDisabledCandidateCount=$(Format-OptionalValue -Value $result.KernelDisabledCandidateCount)"
+        $evidenceLines += "framebufferReady=$($result.FramebufferReady.ToString().ToLowerInvariant())"
+        $evidenceLines += "bootInvalidReason=$($result.BootInvalidReason)"
+        $evidenceLines += "bootSummaryLine=$(Format-OptionalValue -Value ($result.BootSummary.Line))"
+        $evidenceLines += "kernelSummaryLine=$(Format-OptionalValue -Value ($result.KernelSummary.Line))"
+        $evidenceLines += "bootPrimaryLine=$($result.BootPrimaryLine)"
+        $evidenceLines += "bootSecondaryLine=$($result.BootSecondaryLine)"
+        $evidenceLines += "bootRenderTargetLine=$($result.BootRenderTargetLine)"
+        $evidenceLines += "bootInvalidFramebufferLine=$($result.BootInvalidFramebufferLine)"
+        $evidenceLines += "kernelPrimaryLine=$($result.KernelPrimaryLine)"
+        $evidenceLines += "kernelSecondaryLine=$($result.KernelSecondaryLine)"
+        $evidenceLines += "desktopInventoryLine=$($result.DesktopInventoryLine)"
+        $evidenceLines += "desktopSecondaryInventoryLine=$($result.DesktopSecondaryInventoryLine)"
+        $evidenceLines += "gpuDiagnosticsCaptured=$($result.GpuDiagnosticsCaptured.ToString().ToLowerInvariant())"
+        $evidenceLines += "gpuProbeEnabledLine=$($result.GpuProbeEnabledLine)"
+        $evidenceLines += "gpuProbeStartLine=$($result.GpuProbeStartLine)"
+        $evidenceLines += "gpuCandidateLine=$($result.GpuCandidateLine)"
+        $evidenceLines += "gpuCapabilityLine=$($result.GpuCapabilityLine)"
+        $evidenceLines += "gpuQueueLine=$($result.GpuQueueLine)"
+        $evidenceLines += "gpuDisplayInfoLine=$($result.GpuDisplayInfoLine)"
+        $evidenceLines += "gpuScanoutLine=$($result.GpuScanoutLine)"
+        $evidenceLines += "gpuProbeCompleteLine=$($result.GpuProbeCompleteLine)"
+        $evidenceLines += "launcherStdOut=$($result.LauncherStdOut)"
+        $evidenceLines += "launcherStdErr=$($result.LauncherStdErr)"
+        $evidenceLines += "serialLog=$($result.SerialLog)"
+        $evidenceLines += "summaryPath=$($result.SummaryPath)"
+    }
 
-Write-Host 'QEMU display probe smoke passed.'
-Write-Host ("Evidence: {0}" -f $evidencePath)
-foreach ($result in $results) {
-    Write-Host ("[{0}] serial={1}" -f $result.Backend, $result.SerialLog)
-    Write-Host ("[{0}] summary={1}" -f $result.Backend, $result.SummaryPath)
+    Set-Content -LiteralPath $evidencePath -Value $evidenceLines -Encoding UTF8
+
+    Write-Host 'QEMU display probe smoke passed.'
+    Write-Host ("Evidence: {0}" -f $evidencePath)
+    foreach ($result in $results) {
+        Write-Host ("[{0}] status={1} launched={2} serial={3}" -f $result.Backend, $result.DiagnosticStatus, $result.Launched, $result.BootloaderSerialAppeared)
+        Write-Host ("[{0}] summary={1}" -f $result.Backend, $result.SummaryPath)
+    }
+} finally {
+    Restore-NormalKernelBuild
 }

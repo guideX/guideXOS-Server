@@ -87,29 +87,30 @@ The hosted runtime smoke restores `desktop.json` and `desktop.state` and removes
 
 This phase is diagnostic-only. It records what the current boot path can safely see before any real multi-output rendering work begins.
 
-### What guideXOS currently detects
+### Observed Backend Matrix
 
-- UEFI x86_64 boots through the bootloader's `LocateProtocol` lookup for GOP, then copies the selected framebuffer into the primary `BootInfo` fields and preserves a bounded diagnostic framebuffer array.
-- The bootloader now logs how many GOP handles UEFI exposes; `FramebufferCount` is the raw descriptor count, `FramebufferUniqueCount` is the deduplicated physical framebuffer count, `FramebufferDuplicateCount` tracks exact aliases, and `FramebufferSuspiciousCount` records base/size collisions with mismatched geometry. The legacy primary framebuffer fields still drive rendering.
-- BIOS / Multiboot x86 and amd64 boots carry a single framebuffer via the Multiboot info block.
-- The kernel's bare-metal compositor bridge still binds one framebuffer to one `DisplayRenderTarget`.
-- The hosted display model can already represent multiple monitors, but that is currently a hosted synthetic construct, not a real hardware handoff.
+| Backend | QEMU args | Booted? | GOP handles | Raw descriptors | Unique candidates | Result | Interpretation |
+| --- | --- | --- | ---: | ---: | ---: | --- | --- |
+| `std` | `-vga std` | yes | 2 | 2 | 1 | `FramebufferCount=2`, `DuplicateFramebufferCount=1` | Two GOP handles alias the same framebuffer memory. Descriptor `1` is not a second monitor. |
+| `virtio-gpu` | `-vga none -device virtio-gpu-pci,max_outputs=2` | yes | 2 | 0 | 0 | `BootInfo array disabled`, kernel `FramebufferCount=0` | The bootloader rejects the selected GOP framebuffer with `unsupported-pixel-format` after a `1280x800` snapshot with `base=0`, `pitch=0`, `bpp=0`, `format=Unknown`. |
+| `virtio-vga` | `-vga virtio` | yes | 2 | 2 | 1 | `FramebufferCount=2`, `DuplicateFramebufferCount=1` | Same alias pattern as `-vga std`; no additional unique framebuffer candidate. |
+| `qxl-vga` | `-vga qxl -spice addr=127.0.0.1,port=5930,disable-ticketing=on` | yes | 2 | 2 | 1 | `FramebufferCount=2`, `DuplicateFramebufferCount=1` | QXL/SPICE is usable as a diagnostic probe, but it still collapses to one unique framebuffer candidate through GOP. |
 
-### What QEMU can be asked to expose
+Fresh backend evidence is captured in `logs\qemu-display-probe-20260709-055854\qemu-display-probe.evidence.txt`.
 
-| Backend | Diagnostic expectation | Guest-side implication |
-| --- | --- | --- |
-| `-vga std` | Legacy VGA / Bochs-style linear framebuffer | One framebuffer, no real multi-output. This is the current stable probe path. |
-| `-device virtio-gpu-pci,max_outputs=2` | Multi-output-capable virtual GPU | QEMU can expose multiple outputs, but guideXOS still needs a multi-framebuffer handoff and a guest driver or GOP-aware bridge. |
-| `-device virtio-vga` | VGA-compatible virtio GPU variant | Similar driver requirements to virtio-gpu; still not usable for real multi-output rendering without guest support. |
-| `-device qxl-vga` with SPICE | Remote-display-oriented virtual GPU | Useful for SPICE/QXL experiments, but it still requires guest support that guideXOS does not have yet. |
+Current takeaways:
+
+- `std`, `virtio-vga`, and `qxl-vga` all expose two GOP handles, but only one unique framebuffer candidate. The second handle is a duplicate alias, not a second monitor.
+- `virtio-gpu-pci,max_outputs=2` still does not produce a usable multi-framebuffer handoff through the current UEFI/GOP path.
+- The bootloader reaches the kernel on the virtio-gpu path, so this is not a serial-capture timing problem and not a boot-failed-before-handoff problem. It is a firmware/GOP selection issue on the current boot path.
+- Hardware multi-output remains unimplemented in guideXOS. Rendering is still primary-only.
 
 The new probe launchers are:
 
 - `scripts\run-qemu-display-probe.bat`
 - `scripts\run-qemu-multimonitor-probe.bat`
 
-The new smoke harness is:
+The smoke harness is:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\smoke-qemu-display-probe.ps1
@@ -117,7 +118,7 @@ powershell -ExecutionPolicy Bypass -File scripts\smoke-qemu-display-probe.ps1
 
 It boots QEMU headlessly, captures the probe's serial output into `logs\qemu-display-probe-<timestamp>\`, and stops QEMU automatically once the framebuffer diagnostics have been observed.
 
-What it validates in the standard `std` mode:
+The standard `std` mode still validates:
 
 - `GOP handles discovered`
 - `BootInfo FramebufferCount`
@@ -127,14 +128,6 @@ What it validates in the standard `std` mode:
 - descriptor `1` as `duplicate alias same-as-primary` when present
 - the kernel's mirror of the same counts
 - the kernel's `Framebuffer ready` marker, which shows the primary framebuffer is still the render target
-
-Optional comparison mode:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts\smoke-qemu-display-probe.ps1 -Backends virtio-gpu
-```
-
-That comparison is diagnostic only. The current capture shows `selected framebuffer invalid; BootInfo array disabled` and a kernel `FramebufferCount=0` path, so it remains useful for investigation but does not imply a new multi-output render path. `qxl` / SPICE is still not wired into this smoke harness.
 
 ### What guideXOS cannot use yet
 
@@ -147,18 +140,6 @@ That comparison is diagnostic only. The current capture shows `selected framebuf
 
 Keep the diagnostic framebuffer array flowing through the boot path, then teach the bare-metal compositor bridge to materialize disabled secondary targets for inspection before any real multi-output rendering is enabled.
 
-### Probe Results as of `2026-07-07`
-
-- Fresh standard-path evidence is captured in `logs\qemu-display-probe-20260707-194820\qemu-display-probe.evidence.txt`.
-- The standard `-vga std` QEMU probe booted successfully in headless capture mode.
-- UEFI reported `GOP handles discovered: 2`.
-- The bootloader exported `FramebufferCount=2`, `FramebufferUniqueCount=1`, `FramebufferDuplicateCount=1`, and `FramebufferSuspiciousCount=0`.
-- Descriptor `0` is the canonical primary framebuffer: `1280x800`, `pitch=5120`, `format=B8G8R8A8`.
-- Descriptor `1` matches descriptor `0` exactly, so it is classified as `duplicate alias same-as-primary` rather than a second monitor.
-- The kernel mirrors the same raw/unique/duplicate counts in its BootInfo diagnostics, reaches `Framebuffer ready`, and still renders from descriptor `0` only.
-- The optional `virtio-gpu-pci,max_outputs=2` comparison now captures a partial diagnostic trace in `logs\qemu-display-probe-20260707-195354\qemu-display-probe.evidence.txt`. The current result is `selected framebuffer invalid; BootInfo array disabled` and `FramebufferCount=0` in the kernel, which is useful for investigation but still not a supported multi-output render path.
-- This confirms that QEMU `-vga std` exposes two GOP handles but both handles map to the same framebuffer memory and geometry, so the guest must not treat descriptor `1` as a separate physical display.
-
 ## Framebuffer Array Handoff
 
 The bootloader and kernel now preserve a bounded diagnostic framebuffer array in `BootInfo`, but the legacy single-framebuffer fields remain the authoritative rendering contract.
@@ -170,7 +151,7 @@ The bootloader and kernel now preserve a bounded diagnostic framebuffer array in
 - BIOS / Multiboot remains a single-descriptor handoff with `FramebufferCount = 1`.
 - Secondary framebuffer rendering stays deferred until the bare-metal compositor grows explicit multi-target present support.
 - Deduplication prevents guideXOS from treating aliased GOP handles as separate monitors.
-- The optional `virtio-gpu` comparison path is still diagnostic-only; it currently reports `selected framebuffer invalid; BootInfo array disabled` and does not add a supported multi-output render path.
+- The optional `virtio-gpu` comparison path is still diagnostic-only; it currently reports `unsupported-pixel-format`, `BootInfo array disabled`, and a kernel `FramebufferCount=0` path. It does not add a supported multi-output render path.
 
 ## Bare-Metal Display Target Inventory
 
@@ -178,7 +159,7 @@ The kernel now derives a read-only inventory of unique framebuffer-backed displa
 
 - Raw BootInfo descriptors stay intact for diagnostics, while duplicate and alias entries are excluded from the candidate list.
 - The inventory bridges into the display model using disabled `DisplayMonitorDescriptor` candidates for anything that is not the preserved primary/selected framebuffer.
-- Current QEMU `-vga std` still exposes `FramebufferCount=2`, but the deduplicated inventory reports `UniqueCount=1`, `ActiveRenderTargetCount=1`, and `DisabledCandidateCount=0`.
+- Current QEMU `-vga std`, `-vga virtio`, and `-vga qxl` all expose `FramebufferCount=2`, but the deduplicated inventory reports `UniqueCount=1`, `ActiveRenderTargetCount=1`, and `DisabledCandidateCount=0`.
 - Rendering remains primary-only in bare-metal mode.
 - If later hardware proof finds additional distinct framebuffers, those extra candidates should remain disabled until a future risky phase explicitly promotes them into active render targets.
 

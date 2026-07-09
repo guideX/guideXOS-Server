@@ -115,6 +115,35 @@ static const CHAR16* FramebufferSourceName(guideXOS::FramebufferSource source)
     }
 }
 
+enum class GopFramebufferCaptureFailure : UINT32
+{
+    None = 0,
+    NullGop,
+    NullMode,
+    NullModeInfo,
+    UnsupportedPixelFormat,
+    ZeroBase,
+    ZeroDimensions,
+    ZeroPitch,
+    ZeroSize
+};
+
+static const CHAR16* GopFramebufferCaptureFailureName(GopFramebufferCaptureFailure failure)
+{
+    switch (failure) {
+    case GopFramebufferCaptureFailure::None: return (CONST CHAR16*)L"none";
+    case GopFramebufferCaptureFailure::NullGop: return (CONST CHAR16*)L"gop-null";
+    case GopFramebufferCaptureFailure::NullMode: return (CONST CHAR16*)L"mode-null";
+    case GopFramebufferCaptureFailure::NullModeInfo: return (CONST CHAR16*)L"mode-info-null";
+    case GopFramebufferCaptureFailure::UnsupportedPixelFormat: return (CONST CHAR16*)L"unsupported-pixel-format";
+    case GopFramebufferCaptureFailure::ZeroBase: return (CONST CHAR16*)L"framebuffer-base-zero";
+    case GopFramebufferCaptureFailure::ZeroDimensions: return (CONST CHAR16*)L"zero-dimensions";
+    case GopFramebufferCaptureFailure::ZeroPitch: return (CONST CHAR16*)L"zero-pitch";
+    case GopFramebufferCaptureFailure::ZeroSize: return (CONST CHAR16*)L"zero-size";
+    default: return (CONST CHAR16*)L"unknown";
+    }
+}
+
 static void LogFramebufferDescriptorStatus(const guideXOS::FramebufferDescriptor& descriptor)
 {
     Print((CONST CHAR16*)L" status=");
@@ -146,9 +175,15 @@ static bool CaptureGopFramebuffer(
     EFI_GRAPHICS_OUTPUT_PROTOCOL* gop,
     guideXOS::FramebufferSource source,
     uint32_t flags,
-    guideXOS::FramebufferDescriptor* outDescriptor)
+    guideXOS::FramebufferDescriptor* outDescriptor,
+    GopFramebufferCaptureFailure* outFailure = NULL)
 {
     if (!gop || !gop->Mode || !gop->Mode->Info || !outDescriptor) {
+        if (outFailure) {
+            *outFailure = !gop ? GopFramebufferCaptureFailure::NullGop :
+                (!gop->Mode ? GopFramebufferCaptureFailure::NullMode :
+                    (!gop->Mode->Info ? GopFramebufferCaptureFailure::NullModeInfo : GopFramebufferCaptureFailure::None));
+        }
         return false;
     }
 
@@ -158,6 +193,19 @@ static bool CaptureGopFramebuffer(
     outDescriptor->Height = (uint32_t)gop->Mode->Info->VerticalResolution;
 
     const uint32_t bytesPerPixel = GopBytesPerPixel(gop->Mode->Info->PixelFormat);
+    if (bytesPerPixel == 0u) {
+        outDescriptor->Pitch = 0u;
+        outDescriptor->Size = 0u;
+        outDescriptor->Format = guideXOS::FramebufferFormat::Unknown;
+        outDescriptor->BitsPerPixel = 0u;
+        outDescriptor->Source = source;
+        outDescriptor->Flags = flags | guideXOS::FRAMEBUFFER_DESCRIPTOR_FLAG_VALID;
+        if (outFailure) {
+            *outFailure = GopFramebufferCaptureFailure::UnsupportedPixelFormat;
+        }
+        return false;
+    }
+
     outDescriptor->Pitch = (uint32_t)gop->Mode->Info->PixelsPerScanLine * bytesPerPixel;
     outDescriptor->Size = (uint64_t)outDescriptor->Pitch * (uint64_t)outDescriptor->Height;
     outDescriptor->Format = MapGopPixelFormat(gop->Mode->Info->PixelFormat);
@@ -165,11 +213,22 @@ static bool CaptureGopFramebuffer(
     outDescriptor->Source = source;
     outDescriptor->Flags = flags | guideXOS::FRAMEBUFFER_DESCRIPTOR_FLAG_VALID;
 
-    return outDescriptor->Base != 0u &&
-           outDescriptor->Size != 0u &&
-           outDescriptor->Width != 0u &&
-           outDescriptor->Height != 0u &&
-           outDescriptor->Pitch != 0u;
+    GopFramebufferCaptureFailure failure = GopFramebufferCaptureFailure::None;
+    if (outDescriptor->Base == 0u) {
+        failure = GopFramebufferCaptureFailure::ZeroBase;
+    } else if (outDescriptor->Width == 0u || outDescriptor->Height == 0u) {
+        failure = GopFramebufferCaptureFailure::ZeroDimensions;
+    } else if (outDescriptor->Pitch == 0u) {
+        failure = GopFramebufferCaptureFailure::ZeroPitch;
+    } else if (outDescriptor->Size == 0u) {
+        failure = GopFramebufferCaptureFailure::ZeroSize;
+    }
+
+    if (outFailure) {
+        *outFailure = failure;
+    }
+
+    return failure == GopFramebufferCaptureFailure::None;
 }
 
 static bool IsSelectedGopFramebuffer(
@@ -212,6 +271,26 @@ static void LogFramebufferDiagnosticsSummary(const guideXOS::BootInfo* bootInfo)
         (UINT32)bootInfo->FramebufferSuspiciousCount);
 }
 
+static void LogGopFramebufferCaptureFailure(
+    const CHAR16* label,
+    const guideXOS::FramebufferDescriptor& descriptor,
+    GopFramebufferCaptureFailure failure)
+{
+    const CHAR16* effectiveLabel = label ? label : (CONST CHAR16*)L"unknown";
+    Print((CONST CHAR16*)L"[BOOT] GOP %s framebuffer failure reason=%s\n",
+        effectiveLabel,
+        GopFramebufferCaptureFailureName(failure));
+    Print((CONST CHAR16*)L"[BOOT] GOP %s snapshot base=%p size=%Lu geometry=%ux%u pitch=%u bpp=%u format=%s\n",
+        effectiveLabel,
+        (VOID*)(UINTN)descriptor.Base,
+        (UINT64)descriptor.Size,
+        (UINT32)descriptor.Width,
+        (UINT32)descriptor.Height,
+        (UINT32)descriptor.Pitch,
+        (UINT32)descriptor.BitsPerPixel,
+        BootInfoFramebufferFormatName(descriptor.Format));
+}
+
 static UINT32 PopulateGopFramebufferDiagnostics(
     EFI_SYSTEM_TABLE* SystemTable,
     EFI_GRAPHICS_OUTPUT_PROTOCOL* selectedGop,
@@ -221,19 +300,29 @@ static UINT32 PopulateGopFramebufferDiagnostics(
         return 0u;
     }
 
-    if (!selectedGop->Mode || !selectedGop->Mode->Info) {
-        Print((CONST CHAR16*)L"[BOOT] GOP mode info unavailable\n");
-        bootInfo->FramebufferCount = 0u;
-        return 0u;
-    }
-
     guideXOS::FramebufferDescriptor primaryDescriptor{};
+    GopFramebufferCaptureFailure primaryFailure = GopFramebufferCaptureFailure::None;
     if (!CaptureGopFramebuffer(
             selectedGop,
             guideXOS::FramebufferSource::UefiGop,
             guideXOS::FRAMEBUFFER_DESCRIPTOR_FLAG_PRIMARY | guideXOS::FRAMEBUFFER_DESCRIPTOR_FLAG_SELECTED,
-            &primaryDescriptor)) {
+            &primaryDescriptor,
+            &primaryFailure)) {
         Print((CONST CHAR16*)L"[BOOT] GOP selected framebuffer invalid; BootInfo array disabled\n");
+        LogGopFramebufferCaptureFailure((CONST CHAR16*)L"selected", primaryDescriptor, primaryFailure);
+        EFI_GUID gopGuid = EFI_GRAPHICS_OUTPUT_PROTOCOL_GUID;
+        auto locateHandleBuffer = reinterpret_cast<EFI_LOCATE_HANDLE_BUFFER>(SystemTable->BootServices->LocateHandleBuffer);
+        if (locateHandleBuffer) {
+            EFI_HANDLE* handles = NULL;
+            UINTN handleCount = 0;
+            EFI_STATUS status = locateHandleBuffer(ByProtocol, &gopGuid, NULL, &handleCount, &handles);
+            if (!EFI_ERROR(status)) {
+                Print((CONST CHAR16*)L"[BOOT] GOP handles discovered: %u\n", (UINT32)handleCount);
+            }
+            if (handles != NULL) {
+                SystemTable->BootServices->FreePool(handles);
+            }
+        }
         bootInfo->FramebufferCount = 0u;
         return 0u;
     }

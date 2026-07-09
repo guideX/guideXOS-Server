@@ -355,6 +355,11 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
     } else {
         has_fb = kernel::framebuffer::init(multiboot_info);
     }
+
+    // Diagnostic-only virtio-gpu probe runs regardless of framebuffer
+    // handoff success so QEMU display discovery logs are still captured
+    // on GOP/BootInfo paths that do not expose a usable framebuffer array.
+    kernel::virtio::gpu::init();
     
     if (has_fb) {
         if (is_bootinfo && bootinfo) {
@@ -482,7 +487,6 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         
         // Initialize VirtIO subsystem
         kernel::virtio::block::init();
-        kernel::virtio::gpu::init();
         kernel::virtio::rng::init();
         kernel::serial::puts("[KERNEL] VirtIO subsystem initialized\n");
         
