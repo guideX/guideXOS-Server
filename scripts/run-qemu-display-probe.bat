@@ -7,10 +7,11 @@ REM It is diagnostic-only and does not imply that guideXOS can render
 REM to more than one real framebuffer yet.
 REM
 REM Usage:
-REM   scripts\run-qemu-display-probe.bat [std|virtio-gpu|virtio-vga|qxl-vga]
+REM   scripts\run-qemu-display-probe.bat [std|virtio-gpu|virtio-gpu-modern-only|virtio-vga|qxl-vga]
 REM
 REM - std         : legacy VGA / Bochs-style framebuffer probe
 REM - virtio-gpu  : diagnostic virtio-gpu-pci probe (no rendering)
+REM - virtio-gpu-modern-only : diagnostic modern-only virtio-gpu-pci probe (no rendering)
 REM - virtio-vga   : VGA-compatible virtio probe
 REM - qxl-vga      : QXL/SPICE diagnostic probe (no viewer required)
 REM
@@ -33,7 +34,7 @@ if /I "%DISPLAY_BACKEND%"=="multimonitor" set "DISPLAY_BACKEND=virtio-gpu"
 if /I "%DISPLAY_BACKEND%"=="virtio" set "DISPLAY_BACKEND=virtio-vga"
 if /I "%DISPLAY_BACKEND%"=="qxl" set "DISPLAY_BACKEND=qxl-vga"
 
-if /I not "%DISPLAY_BACKEND%"=="std" if /I not "%DISPLAY_BACKEND%"=="virtio-gpu" if /I not "%DISPLAY_BACKEND%"=="virtio-vga" if /I not "%DISPLAY_BACKEND%"=="qxl-vga" (
+if /I not "%DISPLAY_BACKEND%"=="std" if /I not "%DISPLAY_BACKEND%"=="virtio-gpu" if /I not "%DISPLAY_BACKEND%"=="virtio-gpu-modern-only" if /I not "%DISPLAY_BACKEND%"=="virtio-vga" if /I not "%DISPLAY_BACKEND%"=="qxl-vga" (
     echo WARNING: Unknown display backend "%DISPLAY_BACKEND%"; defaulting to std.
     set "DISPLAY_BACKEND=std"
 )
@@ -185,6 +186,13 @@ if /I "%DISPLAY_BACKEND%"=="virtio-gpu" (
     set "QEMU_DISPLAY_ARGS=-display gtk,show-tabs=on,zoom-to-fit=on"
     set "QEMU_VNC_ARGS=-vnc :0"
     set "QEMU_PROBE_NOTE=virtio-gpu-pci diagnostic probe"
+)
+
+if /I "%DISPLAY_BACKEND%"=="virtio-gpu-modern-only" (
+    set "QEMU_VIDEO_ARGS=-vga none -device virtio-gpu-pci,max_outputs=2,disable-legacy=on"
+    set "QEMU_DISPLAY_ARGS=-display gtk,show-tabs=on,zoom-to-fit=on"
+    set "QEMU_VNC_ARGS=-vnc :0"
+    set "QEMU_PROBE_NOTE=virtio-gpu-pci modern-only diagnostic probe (no rendering)"
 )
 
 if /I "%DISPLAY_BACKEND%"=="virtio-vga" (

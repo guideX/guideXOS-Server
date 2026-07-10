@@ -53,6 +53,7 @@ If both gates are unset, `.\run-server.bat` stays in normal single-output mode.
 | `powershell -ExecutionPolicy Bypass -File scripts\smoke-display-synthetic-layout.ps1` | The synthetic gate plumbing, display-model helpers, render-target wiring, and summary diagnostics are present and consistent. |
 | `powershell -ExecutionPolicy Bypass -File scripts\smoke-hosted-display-runtime.ps1` | All three validated runtime modes behave as expected, including summary logs, paint routing, input mapping, and cleanup. |
 | `powershell -ExecutionPolicy Bypass -File scripts\smoke-qemu-display-probe.ps1` | The QEMU probe boots headlessly, captures serial output to a deterministic log, and asserts the framebuffer-array and deduplication evidence for the standard `-vga std` path. |
+| `powershell -ExecutionPolicy Bypass -File scripts\smoke-virtio-gpu-diagnostic-source.ps1` | The virtio-gpu probe source keeps the full capability walk, the `cfg_type=0x05` diagnostic-only treatment, the modern-only QEMU gate, the safe-MMIO stop, and the no-rendering constraint. |
 | `git diff --check` | The working tree is free of whitespace and patch-format issues. |
 
 The hosted runtime smoke restores `desktop.json` and `desktop.state` and removes `display-options.cfg` as part of its cleanup, so validation does not leave those runtime state files dirty.
@@ -96,14 +97,16 @@ This phase is diagnostic-only. It records what the current boot path can safely 
 | `virtio-vga` | `-vga virtio` | yes | 2 | 2 | 1 | `FramebufferCount=2`, `DuplicateFramebufferCount=1` | Same alias pattern as `-vga std`; no additional unique framebuffer candidate. |
 | `qxl-vga` | `-vga qxl -spice addr=127.0.0.1,port=5930,disable-ticketing=on` | yes | 2 | 2 | 1 | `FramebufferCount=2`, `DuplicateFramebufferCount=1` | QXL/SPICE is usable as a diagnostic probe, but it still collapses to one unique framebuffer candidate through GOP. |
 
-Fresh backend evidence is captured in `logs\qemu-display-probe-20260709-141723\qemu-display-probe.evidence.txt`.
+Fresh backend evidence is captured in `logs\qemu-display-probe-20260709-211742\qemu-display-probe.evidence.txt`.
 
 Current takeaways:
 
 - `std`, `virtio-vga`, and `qxl-vga` all expose two GOP handles, but only one unique framebuffer candidate. The second handle is a duplicate alias, not a second monitor.
-- `virtio-gpu-pci,max_outputs=2` still does not produce a usable multi-framebuffer handoff through the current UEFI/GOP path.
-- The bootloader reaches the kernel on the virtio-gpu path, so this is not a serial-capture timing problem and not a boot-failed-before-handoff problem. It is a firmware/GOP selection issue on the current boot path.
-- Hardware multi-output remains unimplemented in guideXOS. Rendering is still primary-only.
+- `virtio-gpu-pci,max_outputs=2` and the optional modern-only `disable-legacy=on` variant now both expose the modern VirtIO PCI capability set, but the probe stops before any reset/status write because the common config BAR resolves outside the safe direct-mapped MMIO range.
+- `virtio-vga` reaches the same safe-MMIO blocker after resolving the capability set, so this is a transport-mapping limit rather than a single command-line variant quirk.
+- The full capability walk now logs every vendor-specific VirtIO capability, including `cfg_type=0x05`, and it keeps scanning for common, notify, ISR, and device config capabilities even when the PCI config capability is malformed.
+- The bootloader still reaches the kernel on the virtio-gpu path, so this is not a boot-before-handoff problem. The blocker is now the first safe MMIO access, not GOP discovery.
+- Hardware multi-output remains unimplemented in guideXOS. Rendering is still primary-only and remains disabled in this probe pass.
 
 The new probe launchers are:
 
@@ -134,7 +137,7 @@ The standard `std` mode still validates:
 - Multiple framebuffer descriptors are not part of the current boot handoff contract.
 - The kernel does not yet consume an array of framebuffer targets from the boot path.
 - The compositor does not yet render to more than one real framebuffer in bare-metal mode.
-- There is a diagnostic-only virtio-gpu discovery probe, but there is no rendering-capable virtio-gpu or QXL guest driver in this pass.
+- There is a diagnostic-only virtio-gpu discovery probe, but there is no rendering-capable virtio-gpu or QXL guest driver in this pass. The modern VirtIO probe now stops before the first reset/status MMIO write when the common config BAR is not safely direct-mapped.
 
 ### Next required implementation step
 
@@ -142,21 +145,25 @@ Keep the diagnostic framebuffer array flowing through the boot path, then teach 
 
 ## Virtio-GPU Driver Investigation
 
-Diagnostic-only probe results from `logs\qemu-display-probe-20260709-141723\virtio-gpu\serial.log`:
+Diagnostic-only probe results from `logs\qemu-display-probe-20260709-211742\virtio-gpu\serial.log` and `logs\qemu-display-probe-20260709-211742\virtio-gpu-modern-only\serial.log`:
 
 | Item | Result |
 | --- | --- |
 | PCI discovery | Success. The probe found a virtio-gpu PCI function at `00:02.00` with `vendor=0x1AF4`, `device=0x1050`, `subsystem=0x1AF4:1100`, `class=0x03`, `subclass=0x80`. |
-| Modern transport / queue setup | Not yet safe on this QEMU device. Capability parsing reached `capPtr=0x84`, `cfgType=0x05`, `bar=0`, but BAR resolution returned `rawBar=0x00000000`, so the probe stopped before any queue writes. |
-| Display info query | Not queryable yet. No control queue was laid out and no `GET_DISPLAY_INFO` request was issued. |
-| Scanouts reported | `n/a` for this run, because the safe queue/query path did not complete. |
-| Current interpretation | QEMU exposes a virtio-gpu PCI candidate, but this configuration does not yet present a safe modern VirtIO transport path for read-only display discovery in guideXOS. |
+| Capability walk | Success. The full PCI capability list walk logs 6 caps, 5 vendor-specific caps, and every vendor-specific VirtIO capability. `cfg_type=0x01` common, `0x02` notify, `0x03` ISR, and `0x04` device are resolved. `cfg_type=0x05` is diagnostic evidence only and is not treated as success by itself. On `virtio-gpu` and `virtio-gpu-modern-only`, the PCI config capability is malformed because BAR0 is unassigned. |
+| Modern transport | Detected, but not safely initializable in this pass. The common config BAR resolves to `0x000000C000000000`, which is outside the probe's safe direct-mapped MMIO range. The probe logs `Safe MMIO check failed` and stops before `reset_device`. |
+| Feature negotiation | Not reached. |
+| Control queue | Not reached. |
+| GET_DISPLAY_INFO | Not queried. No control queue was laid out and no `GET_DISPLAY_INFO` request was issued. |
+| Scanouts reported | `n/a` for this run, because the safe MMIO gate stopped the probe before any queue writes. |
+| Modern-only QEMU mode | Supported locally. The smoke successfully launches `-device virtio-gpu-pci,max_outputs=2,disable-legacy=on`. |
+| Current interpretation | QEMU exposes a modern virtio-gpu PCI candidate and the full modern capability set, but guideXOS cannot safely direct-map the common config BAR in this pass, so the probe stops before the first MMIO write. Rendering remains disabled. |
 
 What remains before rendering can happen:
 
-- Resolve the exact QEMU virtio-gpu transport that exposes a usable modern VirtIO PCI capability set.
-- Complete the minimal control-queue path for `GET_DISPLAY_INFO` only.
-- Keep resource creation, backing attachment, scanout selection, transfers, and flushes disabled until the read-only probe is fully understood.
+- Keep the modern probe read-only until the MMIO mapping story is understood.
+- Do not enable resource creation, backing attachment, scanout selection, transfers, flushes, or rendering in this branch.
+- Continue using the diagnostic-safe stop as the boundary until a later pass can prove a safe mapped path.
 
 ## Framebuffer Array Handoff
 
@@ -169,7 +176,7 @@ The bootloader and kernel now preserve a bounded diagnostic framebuffer array in
 - BIOS / Multiboot remains a single-descriptor handoff with `FramebufferCount = 1`.
 - Secondary framebuffer rendering stays deferred until the bare-metal compositor grows explicit multi-target present support.
 - Deduplication prevents guideXOS from treating aliased GOP handles as separate monitors.
-- The optional `virtio-gpu` comparison path is still diagnostic-only; it currently reports `unsupported-pixel-format`, `BootInfo array disabled`, and a kernel `FramebufferCount=0` path. It does not add a supported multi-output render path.
+- The optional `virtio-gpu` comparison path is still diagnostic-only; boot handoff still reports `unsupported-pixel-format`, and the kernel-side probe now stops before the first modern VirtIO reset write because the common config BAR resolves outside the safe direct-mapped MMIO range. It does not add a supported multi-output render path.
 
 ## Bare-Metal Display Target Inventory
 

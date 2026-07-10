@@ -1,5 +1,5 @@
 param(
-    [string[]]$Backends = @('std', 'virtio-gpu', 'virtio-vga', 'qxl-vga'),
+    [string[]]$Backends = @('std', 'virtio-gpu', 'virtio-gpu-modern-only', 'virtio-vga', 'qxl-vga'),
     [int]$TimeoutSeconds = 120
 )
 
@@ -13,7 +13,7 @@ $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 $RunRoot = Join-Path $LogRoot ("qemu-display-probe-" + $stamp)
 New-Item -ItemType Directory -Force -Path $RunRoot | Out-Null
 
-$AllowedBackends = @('std', 'virtio-gpu', 'multimonitor', 'virtio-vga', 'virtio', 'qxl-vga', 'qxl')
+$AllowedBackends = @('std', 'virtio-gpu', 'virtio-gpu-modern-only', 'multimonitor', 'virtio-vga', 'virtio', 'qxl-vga', 'qxl')
 foreach ($backend in $Backends) {
     if ($AllowedBackends -notcontains $backend) {
         throw "Unsupported backend '$backend'. Supported backends: $($AllowedBackends -join ', ')"
@@ -52,6 +52,31 @@ function Find-Qemu {
     }
 
     return $null
+}
+
+$script:qemuVirtioGpuHelpText = $null
+
+function Get-QemuVirtioGpuHelpText {
+    if ($null -ne $script:qemuVirtioGpuHelpText) {
+        return $script:qemuVirtioGpuHelpText
+    }
+
+    $qemu = Find-Qemu
+    if (-not $qemu) {
+        return $null
+    }
+
+    $script:qemuVirtioGpuHelpText = & $qemu -device virtio-gpu-pci,help 2>&1 | Out-String
+    return $script:qemuVirtioGpuHelpText
+}
+
+function Test-QemuVirtioGpuModernOnlySupport {
+    $helpText = Get-QemuVirtioGpuHelpText
+    if ([string]::IsNullOrWhiteSpace($helpText)) {
+        return $false
+    }
+
+    return $helpText -match 'disable-legacy=<OnOffAuto>'
 }
 
 function Find-Ovmf {
@@ -109,6 +134,14 @@ function Invoke-KernelBuildForSmoke {
         } else {
             $env:EXTRA_CFLAGS = $ExtraCFlags
         }
+
+        $probeObjectCandidates = @(
+            (Join-Path $Root 'build\amd64\obj\core\virtio_gpu.o'),
+            (Join-Path $Root 'build\amd64\obj\core\virtio_gpu.d'),
+            (Join-Path $Root 'kernel\build\amd64\obj\core\virtio_gpu.o'),
+            (Join-Path $Root 'kernel\build\amd64\obj\core\virtio_gpu.d')
+        )
+        Remove-Item -LiteralPath $probeObjectCandidates -ErrorAction SilentlyContinue
 
         Push-Location $Root
         try {
@@ -352,6 +385,7 @@ function Get-BackendSpec {
             return [pscustomobject]@{
                 Backend = 'std'
                 Required = $true
+                Supported = $true
                 LauncherBackend = 'std'
                 QemuArgs = '-vga std'
                 ProbeNote = 'legacy VGA/Bochs-style framebuffer'
@@ -363,11 +397,24 @@ function Get-BackendSpec {
             return [pscustomobject]@{
                 Backend = 'virtio-gpu'
                 Required = $false
+                Supported = $true
                 LauncherBackend = 'virtio-gpu'
                 QemuArgs = '-vga none -device virtio-gpu-pci,max_outputs=2'
                 ProbeNote = 'virtio-gpu-pci diagnostic discovery probe'
                 SerialPattern = 'guideXOS UEFI Bootloader'
-                WaitPattern = '\[VIRTIO-GPU\] Probe complete, devices='
+                WaitPattern = '\[VIRTIO-GPU\] Probe complete: devices='
+            }
+        }
+        'virtio-gpu-modern-only' {
+            return [pscustomobject]@{
+                Backend = 'virtio-gpu-modern-only'
+                Required = $false
+                Supported = (Test-QemuVirtioGpuModernOnlySupport)
+                LauncherBackend = 'virtio-gpu-modern-only'
+                QemuArgs = '-vga none -device virtio-gpu-pci,max_outputs=2,disable-legacy=on'
+                ProbeNote = 'virtio-gpu-pci modern-only diagnostic probe (no rendering)'
+                SerialPattern = 'guideXOS UEFI Bootloader'
+                WaitPattern = '\[VIRTIO-GPU\] Probe complete: devices='
             }
         }
         'multimonitor' {
@@ -377,6 +424,7 @@ function Get-BackendSpec {
             return [pscustomobject]@{
                 Backend = 'virtio-vga'
                 Required = $false
+                Supported = $true
                 LauncherBackend = 'virtio-vga'
                 QemuArgs = '-vga virtio'
                 ProbeNote = 'virtio-vga diagnostic probe'
@@ -391,6 +439,7 @@ function Get-BackendSpec {
             return [pscustomobject]@{
                 Backend = 'qxl-vga'
                 Required = $false
+                Supported = $true
                 LauncherBackend = 'qxl-vga'
                 QemuArgs = '-vga qxl -spice addr=127.0.0.1,port=5930,disable-ticketing=on'
                 ProbeNote = 'qxl-vga diagnostic probe with SPICE server'
@@ -427,6 +476,87 @@ function Invoke-QemuDisplayProbeBackend {
 
     if (-not (Find-Qemu)) {
         throw 'qemu-system-x86_64 not found.'
+    }
+
+    if ($spec.PSObject.Properties.Name -contains 'Supported' -and -not $spec.Supported) {
+        $supportReason = 'QEMU does not advertise disable-legacy=on for virtio-gpu-pci'
+        $summaryLines = @(
+            '[QemuDisplayProbeBackend]'
+            'evidenceVersion=2'
+            "backend=$backendName"
+            "required=$($spec.Required.ToString().ToLowerInvariant())"
+            "supported=false"
+            "launched=false"
+            "bootloaderSerialAppeared=false"
+            "launcherExitCode=n/a"
+            "timeoutSeconds=$TimeoutSeconds"
+            "timestampUtc=$((Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ'))"
+            "qemuArgs=$($spec.QemuArgs)"
+            "probeNote=$($spec.ProbeNote)"
+            "backendStatus=unsupported"
+            "interpretation=$supportReason"
+        )
+        Set-Content -LiteralPath $summaryPath -Value $summaryLines -Encoding UTF8
+
+        Write-Host ("[{0}] unsupported - {1}" -f $backendName, $supportReason)
+        return [pscustomobject]@{
+            Backend = $backendName
+            BackendRoot = $backendRoot
+            LauncherStdOut = $launcherStdOut
+            LauncherStdErr = $launcherStdErr
+            SerialLog = $serialLog
+            SummaryPath = $summaryPath
+            QemuArgs = $spec.QemuArgs
+            ProbeNote = $spec.ProbeNote
+            Required = $spec.Required
+            Supported = $false
+            Launched = $false
+            BootloaderSerialAppeared = $false
+            LauncherExitCode = $null
+            BootSummary = $null
+            KernelSummary = $null
+            KernelActiveRenderTargetCount = $null
+            KernelDisabledCandidateCount = $null
+            BootGopHandles = 'n/a'
+            BootFramebufferCount = $null
+            BootUniqueFramebufferCount = $null
+            BootDuplicateFramebufferCount = $null
+            BootSuspiciousFramebufferCount = $null
+            KernelFramebufferCount = $null
+            KernelUniqueFramebufferCount = $null
+            KernelDuplicateFramebufferCount = $null
+            KernelSuspiciousFramebufferCount = $null
+            BootPrimaryLine = ''
+            BootSecondaryLine = ''
+            BootRenderTargetLine = ''
+            BootInvalidFramebufferLine = ''
+            BootInvalidReason = 'n/a'
+            KernelPrimaryLine = ''
+            KernelSecondaryLine = ''
+            KernelFramebufferReady = ''
+            FramebufferReady = $false
+            DesktopInventoryLine = ''
+            DesktopSecondaryInventoryLine = ''
+            GpuDiagnosticsCaptured = $false
+            GpuProbeEnabledLine = ''
+            GpuProbeStartLine = ''
+            GpuCandidateLine = ''
+            GpuCapabilityLine = ''
+            GpuInventoryLine = ''
+            GpuQueueLine = ''
+            GpuDisplayInfoLine = ''
+            GpuScanoutLine = ''
+            GpuProbeCompleteLine = ''
+            GpuTransportLine = ''
+            GpuFeatureNegotiationLine = ''
+            GpuQueueCountLine = ''
+            GpuCapabilityWalkLine = ''
+            DiagnosticStatus = 'unsupported'
+            Interpretation = $supportReason
+            LauncherStdOutText = ''
+            LauncherStdErrText = ''
+            SerialText = ''
+        }
     }
 
     if (-not (Find-Ovmf)) {
@@ -511,11 +641,16 @@ function Invoke-QemuDisplayProbeBackend {
     $gpuProbeEnabledLine = [regex]::Match($serialText, '\[VIRTIO-GPU\] Diagnostic probe enabled for QEMU virtio-gpu discovery')
     $gpuProbeStartLine = [regex]::Match($serialText, '\[VIRTIO-GPU\] Probing PCI bus for virtio-gpu devices')
     $gpuCandidateLine = [regex]::Match($serialText, '\[VIRTIO-GPU\] PCI candidate [^\r\n]+')
-    $gpuCapabilityLine = [regex]::Match($serialText, '\[VIRTIO-GPU\] Modern virtio-gpu capability discovery failed; candidate appears legacy or lacks modern VirtIO PCI caps')
+    $gpuCapabilityWalkLine = [regex]::Match($serialText, '\[VIRTIO-GPU\] PCI capability walk complete caps=\d+ vendorSpecific=\d+')
+    $gpuInventoryLine = [regex]::Match($serialText, '\[VIRTIO-GPU\] Capability inventory common=[^\r\n]+')
+    $gpuTransportLine = [regex]::Match($serialText, '\[VIRTIO-GPU\] Transport type detected: [^\r\n]+')
+    $gpuMmioSafetyLine = [regex]::Match($serialText, '\[VIRTIO-GPU\] Safe MMIO check failed: [^\r\n]+')
+    $gpuFeatureNegotiationLine = [regex]::Match($serialText, '\[VIRTIO-GPU\] Feature negotiation status=(ok|failed) negotiated=0x[0-9A-Fa-f]+ deviceFeatures=0x[0-9A-Fa-f]+')
+    $gpuQueueCountLine = [regex]::Match($serialText, '\[VIRTIO-GPU\] Common config queueCount=\d+ controlQueueAvailable=(yes|no)')
     $gpuQueueLine = [regex]::Match($serialText, '\[VIRTIO-GPU\] Control queue ready size=[^\r\n]+')
     $gpuDisplayInfoLine = [regex]::Match($serialText, '\[VIRTIO-GPU\] Display info scanouts=\d+')
     $gpuScanoutLine = [regex]::Match($serialText, '\[VIRTIO-GPU\]\s+scanout\[\d+\].*')
-    $gpuProbeCompleteLine = [regex]::Match($serialText, '\[VIRTIO-GPU\] Probe complete, devices=\d+')
+    $gpuProbeCompleteLine = [regex]::Match($serialText, '\[VIRTIO-GPU\] Probe complete: devices=\d+ initialized=\d+ transport=[^\r\n]+')
 
     $bootGopHandles = Format-OptionalValue -Value (Get-MatchGroupValue -Match $bootGopLine -GroupIndex 1)
     $bootFramebufferCount = if ($bootSummary) { $bootSummary.RawCount } else { $null }
@@ -529,7 +664,7 @@ function Invoke-QemuDisplayProbeBackend {
     $kernelActiveRenderTargetCount = if ($kernelSummary) { $kernelSummary.ActiveRenderTargetCount } else { $null }
     $kernelDisabledCandidateCount = if ($kernelSummary) { $kernelSummary.DisabledCandidateCount } else { $null }
     $bootInvalidReason = Format-OptionalValue -Value (Get-MatchGroupValue -Match $bootInvalidReasonLine -GroupIndex 1)
-    $gpuDiagnosticsCaptured = $gpuProbeEnabledLine.Success -or $gpuProbeStartLine.Success -or $gpuCandidateLine.Success -or $gpuCapabilityLine.Success -or $gpuQueueLine.Success -or $gpuDisplayInfoLine.Success -or $gpuScanoutLine.Success -or $gpuProbeCompleteLine.Success
+    $gpuDiagnosticsCaptured = $gpuProbeEnabledLine.Success -or $gpuProbeStartLine.Success -or $gpuCandidateLine.Success -or $gpuCapabilityWalkLine.Success -or $gpuInventoryLine.Success -or $gpuTransportLine.Success -or $gpuMmioSafetyLine.Success -or $gpuFeatureNegotiationLine.Success -or $gpuQueueCountLine.Success -or $gpuQueueLine.Success -or $gpuDisplayInfoLine.Success -or $gpuScanoutLine.Success -or $gpuProbeCompleteLine.Success
 
     if ($spec.Required) {
         if ([string]::IsNullOrWhiteSpace($serialText)) {
@@ -618,6 +753,7 @@ function Invoke-QemuDisplayProbeBackend {
         'evidenceVersion=2'
         "backend=$backendName"
         "required=$($spec.Required.ToString().ToLowerInvariant())"
+        "supported=$($spec.Supported.ToString().ToLowerInvariant())"
         "launched=$($launched.ToString().ToLowerInvariant())"
         "bootloaderSerialAppeared=$($bootloaderSerialCaptured.ToString().ToLowerInvariant())"
         "launcherExitCode=$(Format-OptionalValue -Value $launcherExitCode)"
@@ -652,7 +788,12 @@ function Invoke-QemuDisplayProbeBackend {
         "gpuProbeEnabledLine=$($gpuProbeEnabledLine.Value)"
         "gpuProbeStartLine=$($gpuProbeStartLine.Value)"
         "gpuCandidateLine=$($gpuCandidateLine.Value)"
-        "gpuCapabilityLine=$($gpuCapabilityLine.Value)"
+        "gpuCapabilityWalkLine=$($gpuCapabilityWalkLine.Value)"
+        "gpuInventoryLine=$($gpuInventoryLine.Value)"
+        "gpuTransportLine=$($gpuTransportLine.Value)"
+        "gpuMmioSafetyLine=$($gpuMmioSafetyLine.Value)"
+        "gpuFeatureNegotiationLine=$($gpuFeatureNegotiationLine.Value)"
+        "gpuQueueCountLine=$($gpuQueueCountLine.Value)"
         "gpuQueueLine=$($gpuQueueLine.Value)"
         "gpuDisplayInfoLine=$($gpuDisplayInfoLine.Value)"
         "gpuScanoutLine=$($gpuScanoutLine.Value)"
@@ -679,7 +820,7 @@ function Invoke-QemuDisplayProbeBackend {
     if ($framebufferReady) {
         Write-Host ("[{0}] kernel framebuffer-ready marker observed" -f $backendName)
     }
-    if ($backendName -eq 'virtio-gpu' -and $gpuDiagnosticsCaptured) {
+    if ($backendName -like 'virtio-gpu*' -and $gpuDiagnosticsCaptured) {
         Write-Host ("[{0}] virtio-gpu diagnostics observed in serial log" -f $backendName)
     }
     if ($interpretation) {
@@ -727,11 +868,17 @@ function Invoke-QemuDisplayProbeBackend {
         GpuProbeEnabledLine = $gpuProbeEnabledLine.Value
         GpuProbeStartLine = $gpuProbeStartLine.Value
         GpuCandidateLine = $gpuCandidateLine.Value
-        GpuCapabilityLine = $gpuCapabilityLine.Value
+        GpuCapabilityWalkLine = $gpuCapabilityWalkLine.Value
+        GpuInventoryLine = $gpuInventoryLine.Value
+        GpuTransportLine = $gpuTransportLine.Value
+        GpuMmioSafetyLine = $gpuMmioSafetyLine.Value
+        GpuFeatureNegotiationLine = $gpuFeatureNegotiationLine.Value
+        GpuQueueCountLine = $gpuQueueCountLine.Value
         GpuQueueLine = $gpuQueueLine.Value
         GpuDisplayInfoLine = $gpuDisplayInfoLine.Value
         GpuScanoutLine = $gpuScanoutLine.Value
         GpuProbeCompleteLine = $gpuProbeCompleteLine.Value
+        Supported = $spec.Supported
         DiagnosticStatus = $backendStatus
         Interpretation = $interpretation
         LauncherStdOutText = $launcherStdOutText
@@ -767,6 +914,7 @@ try {
         $evidenceLines += ''
         $evidenceLines += "[backend $($result.Backend)]"
         $evidenceLines += "required=$($result.Required.ToString().ToLowerInvariant())"
+        $evidenceLines += "supported=$($result.Supported.ToString().ToLowerInvariant())"
         $evidenceLines += "qemuArgs=$($result.QemuArgs)"
         $evidenceLines += "probeNote=$($result.ProbeNote)"
         $evidenceLines += "launched=$($result.Launched.ToString().ToLowerInvariant())"
@@ -801,7 +949,12 @@ try {
         $evidenceLines += "gpuProbeEnabledLine=$($result.GpuProbeEnabledLine)"
         $evidenceLines += "gpuProbeStartLine=$($result.GpuProbeStartLine)"
         $evidenceLines += "gpuCandidateLine=$($result.GpuCandidateLine)"
-        $evidenceLines += "gpuCapabilityLine=$($result.GpuCapabilityLine)"
+        $evidenceLines += "gpuCapabilityWalkLine=$($result.GpuCapabilityWalkLine)"
+        $evidenceLines += "gpuInventoryLine=$($result.GpuInventoryLine)"
+        $evidenceLines += "gpuTransportLine=$($result.GpuTransportLine)"
+        $evidenceLines += "gpuMmioSafetyLine=$($result.GpuMmioSafetyLine)"
+        $evidenceLines += "gpuFeatureNegotiationLine=$($result.GpuFeatureNegotiationLine)"
+        $evidenceLines += "gpuQueueCountLine=$($result.GpuQueueCountLine)"
         $evidenceLines += "gpuQueueLine=$($result.GpuQueueLine)"
         $evidenceLines += "gpuDisplayInfoLine=$($result.GpuDisplayInfoLine)"
         $evidenceLines += "gpuScanoutLine=$($result.GpuScanoutLine)"

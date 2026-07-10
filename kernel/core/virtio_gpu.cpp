@@ -65,11 +65,19 @@ struct PciCapability {
 } __attribute__((packed));
 
 struct PciRegion {
+    bool found;
     bool present;
     uint8_t bar;
     uint64_t base;
     uint32_t offset;
     uint32_t length;
+    uint32_t rawBar;
+};
+
+enum class DisplayInfoOutcome : uint8_t {
+    NotQueried = 0,
+    Ok = 1,
+    Failed = 2,
 };
 
 struct ModernTransport {
@@ -109,9 +117,20 @@ struct DeviceState {
     ModernTransport transport;
 };
 
+struct ProbeOutcome {
+    bool valid;
+    uint32_t candidateCount;
+    bool initialized;
+    DisplayInfoOutcome displayInfoOutcome;
+    uint32_t scanoutCount;
+    const char* reason;
+    const DeviceState* state;
+};
+
 static bool s_initialized = false;
 static DeviceState s_devices[4];
 static int s_deviceCount = 0;
+static ProbeOutcome s_probeOutcome{};
 
 #if defined(_MSC_VER)
 __declspec(align(4096)) static uint8_t s_queueStorage[16384];
@@ -243,6 +262,240 @@ static inline uint64_t mmio_read64(uint64_t addr)
     return low | (high << 32);
 }
 
+static const char* capability_name(uint8_t cfgType)
+{
+    switch (cfgType) {
+    case pci::CAP_COMMON_CFG:
+        return "common";
+    case pci::CAP_NOTIFY_CFG:
+        return "notify";
+    case pci::CAP_ISR_CFG:
+        return "isr";
+    case pci::CAP_DEVICE_CFG:
+        return "device";
+    case pci::CAP_PCI_CFG:
+        return "pci";
+    default:
+        return "unknown";
+    }
+}
+
+static const char* region_status_name(const PciRegion& region)
+{
+    if (region.present) {
+        return "resolved";
+    }
+
+    if (region.found) {
+        return "malformed";
+    }
+
+    return "absent";
+}
+
+static const char* bar_kind_name(uint8_t barIndex, uint32_t rawBar)
+{
+    if (barIndex > 5) {
+        return "invalid-index";
+    }
+
+    if (rawBar == 0u || rawBar == 0xFFFFFFFFu) {
+        return "unassigned";
+    }
+
+    if ((rawBar & 0x1u) != 0u) {
+        return "io";
+    }
+
+    switch ((rawBar >> 1) & 0x3u) {
+    case 0:
+        return "mmio32";
+    case 2:
+        return "mmio64";
+    default:
+        return "mmio-reserved";
+    }
+}
+
+static const char* transport_kind_name(const ModernTransport& transport)
+{
+    if (transport.vendorId != kVirtioPciVendorId) {
+        return "unknown";
+    }
+
+    if (transport.deviceId < PCI_DEVICE_BASE_MODERN) {
+        return "legacy";
+    }
+
+    if (transport.commonCfg.present &&
+        transport.notifyCfg.present &&
+        transport.isrCfg.present &&
+        transport.deviceCfg.present) {
+        return "modern";
+    }
+
+    return "transitional";
+}
+
+static const char* transport_blocker_reason(const ModernTransport& transport)
+{
+    if (transport.commonCfg.present &&
+        transport.notifyCfg.present &&
+        transport.isrCfg.present &&
+        transport.deviceCfg.present) {
+        return nullptr;
+    }
+
+    if (transport.pciCfg.found &&
+        !transport.commonCfg.found &&
+        !transport.notifyCfg.found &&
+        !transport.isrCfg.found &&
+        !transport.deviceCfg.found) {
+        return "only cfg_type=0x05 pci capability observed";
+    }
+
+    if (!transport.commonCfg.present) {
+        if (transport.commonCfg.found) {
+            return "common config capability malformed";
+        }
+        return "common config capability absent";
+    }
+
+    if (!transport.notifyCfg.present) {
+        if (transport.notifyCfg.found) {
+            return "notify config capability malformed";
+        }
+        return "notify config capability absent";
+    }
+
+    if (!transport.isrCfg.present) {
+        if (transport.isrCfg.found) {
+            return "isr config capability malformed";
+        }
+        return "isr config capability absent";
+    }
+
+    if (!transport.deviceCfg.present) {
+        if (transport.deviceCfg.found) {
+            return "device config capability malformed";
+        }
+        return "device config capability absent";
+    }
+
+    return "required modern transport capabilities unresolved";
+}
+
+static bool is_safe_direct_mmio_base(uint64_t base)
+{
+    return base != 0 && base < 0x100000000ull;
+}
+
+static const char* transport_mmio_blocker_reason(const ModernTransport& transport)
+{
+    if (transport.commonCfg.present && !is_safe_direct_mmio_base(transport.commonCfg.base)) {
+        return "common config MMIO base outside safe direct-mapped range";
+    }
+
+    if (transport.notifyCfg.present && !is_safe_direct_mmio_base(transport.notifyCfg.base)) {
+        return "notify config MMIO base outside safe direct-mapped range";
+    }
+
+    if (transport.isrCfg.present && !is_safe_direct_mmio_base(transport.isrCfg.base)) {
+        return "isr config MMIO base outside safe direct-mapped range";
+    }
+
+    if (transport.deviceCfg.present && !is_safe_direct_mmio_base(transport.deviceCfg.base)) {
+        return "device config MMIO base outside safe direct-mapped range";
+    }
+
+    if (transport.pciCfg.present && !is_safe_direct_mmio_base(transport.pciCfg.base)) {
+        return "pci config MMIO base outside safe direct-mapped range";
+    }
+
+    return nullptr;
+}
+
+static void print_capability_inventory(const ModernTransport& transport)
+{
+    kernel::serial::puts("common=");
+    kernel::serial::puts(region_status_name(transport.commonCfg));
+    kernel::serial::puts(" notify=");
+    kernel::serial::puts(region_status_name(transport.notifyCfg));
+    kernel::serial::puts(" isr=");
+    kernel::serial::puts(region_status_name(transport.isrCfg));
+    kernel::serial::puts(" device=");
+    kernel::serial::puts(region_status_name(transport.deviceCfg));
+    kernel::serial::puts(" pci=");
+    kernel::serial::puts(region_status_name(transport.pciCfg));
+}
+
+static void log_capability_inventory_line(const ModernTransport& transport)
+{
+    kernel::serial::puts("[VIRTIO-GPU] Capability inventory ");
+    print_capability_inventory(transport);
+    kernel::serial::putc('\n');
+}
+
+static void log_init_step(const char* step)
+{
+    kernel::serial::puts("[VIRTIO-GPU] Init step: ");
+    kernel::serial::puts(step);
+    kernel::serial::putc('\n');
+}
+
+static void record_probe_outcome(const DeviceState& state, bool initialized,
+                                 DisplayInfoOutcome displayInfoOutcome,
+                                 uint32_t scanoutCount, const char* reason)
+{
+    s_probeOutcome.valid = true;
+    s_probeOutcome.candidateCount = 1;
+    s_probeOutcome.initialized = initialized;
+    s_probeOutcome.displayInfoOutcome = displayInfoOutcome;
+    s_probeOutcome.scanoutCount = scanoutCount;
+    s_probeOutcome.reason = reason;
+    s_probeOutcome.state = &state;
+}
+
+static void print_probe_outcome()
+{
+    kernel::serial::puts("[VIRTIO-GPU] Probe complete: devices=");
+    serial_put_u32_decimal(s_probeOutcome.valid ? s_probeOutcome.candidateCount : 0u);
+    kernel::serial::puts(" initialized=");
+    kernel::serial::puts((s_probeOutcome.valid && s_probeOutcome.initialized) ? "1" : "0");
+    kernel::serial::puts(" transport=");
+    if (s_probeOutcome.valid && s_probeOutcome.state != nullptr) {
+        kernel::serial::puts(transport_kind_name(s_probeOutcome.state->transport));
+    } else {
+        kernel::serial::puts("unknown");
+    }
+    kernel::serial::puts(" caps=");
+    if (s_probeOutcome.valid && s_probeOutcome.state != nullptr) {
+        print_capability_inventory(s_probeOutcome.state->transport);
+    } else {
+        kernel::serial::puts("common=absent notify=absent isr=absent device=absent pci=absent");
+    }
+    kernel::serial::puts(" displayInfo=");
+    switch (s_probeOutcome.displayInfoOutcome) {
+    case DisplayInfoOutcome::Ok:
+        kernel::serial::puts("ok");
+        kernel::serial::puts(" scanouts=");
+        serial_put_u32_decimal(s_probeOutcome.scanoutCount);
+        break;
+    case DisplayInfoOutcome::Failed:
+        kernel::serial::puts("failed");
+        break;
+    case DisplayInfoOutcome::NotQueried:
+    default:
+        kernel::serial::puts("not-queried");
+        break;
+    }
+    if (s_probeOutcome.reason != nullptr && s_probeOutcome.reason[0] != '\0') {
+        kernel::serial::puts(" reason=");
+        kernel::serial::puts(s_probeOutcome.reason);
+    }
+    kernel::serial::putc('\n');
+}
+
 static DeviceState* find_state(GpuDevice* device)
 {
     if (device == nullptr) {
@@ -318,14 +571,19 @@ static bool layout_control_queue(Virtqueue* queue, uint16_t queueSize)
     return true;
 }
 
-static bool read_bar_base(uint8_t bus, uint8_t device, uint8_t function, uint8_t barIndex, uint64_t* baseOut)
+static bool read_bar_base(uint8_t bus, uint8_t device, uint8_t function, uint8_t barIndex,
+                          uint32_t* rawBarOut, uint64_t* baseOut)
 {
-    if (baseOut == nullptr || barIndex > 5) {
+    if (baseOut == nullptr || rawBarOut == nullptr || barIndex > 5) {
+        if (rawBarOut != nullptr) {
+            *rawBarOut = 0xFFFFFFFFu;
+        }
         return false;
     }
 
     const uint8_t offset = static_cast<uint8_t>(kPciBar0Offset + (barIndex * 4));
     const uint32_t barLow = msi::pci_config_read32(bus, device, function, offset);
+    *rawBarOut = barLow;
     if (barLow == 0 || barLow == 0xFFFFFFFFu) {
         return false;
     }
@@ -342,7 +600,37 @@ static bool read_bar_base(uint8_t bus, uint8_t device, uint8_t function, uint8_t
     }
 
     *baseOut = base;
-    return true;
+    return base != 0;
+}
+
+static void log_capability_entry(uint8_t capPtr, const PciCapability& cap, uint32_t rawBar,
+                                 uint64_t base, const char* status)
+{
+    kernel::serial::puts("[VIRTIO-GPU] PCI cap capPtr=0x");
+    kernel::serial::put_hex8(capPtr);
+    kernel::serial::puts(" capId=0x");
+    kernel::serial::put_hex8(cap.capId);
+    kernel::serial::puts(" next=0x");
+    kernel::serial::put_hex8(cap.nextPtr);
+    kernel::serial::puts(" cfgType=0x");
+    kernel::serial::put_hex8(cap.cfgType);
+    kernel::serial::puts(" type=");
+    kernel::serial::puts(capability_name(cap.cfgType));
+    kernel::serial::puts(" bar=");
+    kernel::serial::put_hex8(cap.bar);
+    kernel::serial::puts(" offset=0x");
+    kernel::serial::put_hex32(cap.offset);
+    kernel::serial::puts(" length=0x");
+    kernel::serial::put_hex32(cap.length);
+    kernel::serial::puts(" rawBar=0x");
+    kernel::serial::put_hex32(rawBar);
+    kernel::serial::puts(" base=0x");
+    kernel::serial::put_hex64(base);
+    kernel::serial::puts(" barKind=");
+    kernel::serial::puts(bar_kind_name(cap.bar, rawBar));
+    kernel::serial::puts(" status=");
+    kernel::serial::puts(status);
+    kernel::serial::putc('\n');
 }
 
 static void log_pci_candidate(uint8_t bus, uint8_t device, uint8_t function,
@@ -384,21 +672,6 @@ static void log_pci_candidate(uint8_t bus, uint8_t device, uint8_t function,
     kernel::serial::putc('\n');
 }
 
-static void log_region(const char* label, const PciRegion& region)
-{
-    kernel::serial::puts("[VIRTIO-GPU] ");
-    kernel::serial::puts(label);
-    kernel::serial::puts(" bar=");
-    kernel::serial::put_hex8(region.bar);
-    kernel::serial::puts(" base=0x");
-    kernel::serial::put_hex64(region.base);
-    kernel::serial::puts(" offset=0x");
-    kernel::serial::put_hex32(region.offset);
-    kernel::serial::puts(" length=0x");
-    kernel::serial::put_hex32(region.length);
-    kernel::serial::putc('\n');
-}
-
 static bool parse_virtio_regions(ModernTransport* transport)
 {
     if (transport == nullptr) {
@@ -410,11 +683,14 @@ static bool parse_virtio_regions(ModernTransport* transport)
     const uint8_t function = transport->function;
 
     if (!(msi::pci_config_read16(bus, device, function, 0x06) & 0x10)) {
+        kernel::serial::puts("[VIRTIO-GPU] PCI capability list absent\n");
         return false;
     }
 
     uint8_t capPtr = static_cast<uint8_t>(msi::pci_config_read8(bus, device, function, 0x34) & 0xFCu);
     int guard = 64;
+    uint32_t capabilityCount = 0;
+    uint32_t vendorSpecificCount = 0;
 
     while (capPtr != 0 && guard-- > 0) {
         PciCapability cap{};
@@ -428,71 +704,85 @@ static bool parse_virtio_regions(ModernTransport* transport)
         cap.padding[2] = msi::pci_config_read8(bus, device, function, static_cast<uint8_t>(capPtr + 7));
         cap.offset = msi::pci_config_read32(bus, device, function, static_cast<uint8_t>(capPtr + 8));
         cap.length = msi::pci_config_read32(bus, device, function, static_cast<uint8_t>(capPtr + 12));
+        ++capabilityCount;
 
-        if (cap.capId == kPciCapabilityVendorSpecific) {
-            PciRegion* region = nullptr;
-            const char* label = nullptr;
+        if (cap.capId != kPciCapabilityVendorSpecific) {
+            kernel::serial::puts("[VIRTIO-GPU] PCI cap capPtr=0x");
+            kernel::serial::put_hex8(capPtr);
+            kernel::serial::puts(" capId=0x");
+            kernel::serial::put_hex8(cap.capId);
+            kernel::serial::puts(" next=0x");
+            kernel::serial::put_hex8(cap.nextPtr);
+            kernel::serial::puts(" status=ignored\n");
+            capPtr = cap.nextPtr;
+            continue;
+        }
 
-            switch (cap.cfgType) {
-            case pci::CAP_COMMON_CFG:
-                region = &transport->commonCfg;
-                label = "common";
-                break;
-            case pci::CAP_NOTIFY_CFG:
-                region = &transport->notifyCfg;
-                label = "notify";
-                break;
-            case pci::CAP_ISR_CFG:
-                region = &transport->isrCfg;
-                label = "isr";
-                break;
-            case pci::CAP_DEVICE_CFG:
-                region = &transport->deviceCfg;
-                label = "device";
-                break;
-            case pci::CAP_PCI_CFG:
-                region = &transport->pciCfg;
-                label = "pci-cfg";
-                break;
-            default:
-                break;
-            }
+        ++vendorSpecificCount;
 
-            if (region != nullptr) {
-                uint64_t base = 0;
-                if (!read_bar_base(bus, device, function, cap.bar, &base)) {
-                    const uint32_t rawBar = msi::pci_config_read32(bus, device, function,
-                                                                    static_cast<uint8_t>(kPciBar0Offset + (cap.bar * 4u)));
-                    kernel::serial::puts("[VIRTIO-GPU] Failed to resolve BAR for virtio capability capPtr=0x");
-                    kernel::serial::put_hex8(capPtr);
-                    kernel::serial::puts(" cfgType=0x");
-                    kernel::serial::put_hex8(cap.cfgType);
-                    kernel::serial::puts(" bar=");
-                    kernel::serial::put_hex8(cap.bar);
-                    kernel::serial::puts(" rawBar=0x");
-                    kernel::serial::put_hex32(rawBar);
-                    kernel::serial::putc('\n');
-                    return false;
-                }
+        PciRegion* region = nullptr;
+        switch (cap.cfgType) {
+        case pci::CAP_COMMON_CFG:
+            region = &transport->commonCfg;
+            break;
+        case pci::CAP_NOTIFY_CFG:
+            region = &transport->notifyCfg;
+            break;
+        case pci::CAP_ISR_CFG:
+            region = &transport->isrCfg;
+            break;
+        case pci::CAP_DEVICE_CFG:
+            region = &transport->deviceCfg;
+            break;
+        case pci::CAP_PCI_CFG:
+            region = &transport->pciCfg;
+            break;
+        default:
+            break;
+        }
 
+        uint32_t rawBar = 0xFFFFFFFFu;
+        uint64_t base = 0;
+        const bool resolved = read_bar_base(bus, device, function, cap.bar, &rawBar, &base);
+
+        if (region != nullptr) {
+            region->found = true;
+            region->bar = cap.bar;
+            region->offset = cap.offset;
+            region->length = cap.length;
+            region->rawBar = rawBar;
+            if (resolved && !region->present) {
                 region->present = true;
-                region->bar = cap.bar;
                 region->base = base;
-                region->offset = cap.offset;
-                region->length = cap.length;
-                log_region(label, *region);
-
-                if (cap.cfgType == pci::CAP_NOTIFY_CFG) {
-                    transport->notifyOffMultiplier = msi::pci_config_read32(bus, device, function, static_cast<uint8_t>(capPtr + 16));
-                    kernel::serial::puts("[VIRTIO-GPU] notify multiplier=0x");
-                    kernel::serial::put_hex32(transport->notifyOffMultiplier);
-                    kernel::serial::putc('\n');
-                }
             }
         }
 
+        if (cap.cfgType == pci::CAP_NOTIFY_CFG) {
+            transport->notifyOffMultiplier = msi::pci_config_read32(bus, device, function, static_cast<uint8_t>(capPtr + 16));
+            kernel::serial::puts("[VIRTIO-GPU] notify multiplier=0x");
+            kernel::serial::put_hex32(transport->notifyOffMultiplier);
+            kernel::serial::putc('\n');
+        }
+
+        const char* status = "skipped";
+        if (region != nullptr) {
+            status = resolved ? "resolved" : "malformed";
+        }
+
+        log_capability_entry(capPtr, cap, rawBar, base, status);
         capPtr = cap.nextPtr;
     }
+
+    if (guard <= 0 && capPtr != 0) {
+        kernel::serial::puts("[VIRTIO-GPU] PCI capability walk stopped at guard limit\n");
+    }
+
+    log_capability_inventory_line(*transport);
+    kernel::serial::puts("[VIRTIO-GPU] PCI capability walk complete caps=");
+    serial_put_u32_decimal(capabilityCount);
+    kernel::serial::puts(" vendorSpecific=");
+    serial_put_u32_decimal(vendorSpecificCount);
+    kernel::serial::putc('\n');
 
     return transport->commonCfg.present &&
            transport->notifyCfg.present &&
@@ -787,13 +1077,15 @@ static bool probe_device(DeviceState& state, uint8_t bus, uint8_t device, uint8_
     }
 
     transport.present = true;
-    transport.modern = true;
 
     if (!parse_virtio_regions(&transport)) {
-        kernel::serial::puts("[VIRTIO-GPU] Modern virtio-gpu capability discovery failed; candidate appears legacy or lacks modern VirtIO PCI caps\n");
         transport.modern = false;
+        record_probe_outcome(state, false, DisplayInfoOutcome::NotQueried, 0,
+                             transport_blocker_reason(transport));
         return false;
     }
+
+    transport.modern = true;
 
     return true;
 }
@@ -811,13 +1103,35 @@ static bool initialize_device(DeviceState& state)
     device.irqLine = 0xFF;
 
     kernel::serial::puts("[VIRTIO-GPU] Initializing diagnostic-only virtio-gpu device\n");
+    kernel::serial::puts("[VIRTIO-GPU] Transport type detected: ");
+    kernel::serial::puts(transport_kind_name(transport));
+    kernel::serial::putc('\n');
 
+    const char* mmioBlocker = transport_mmio_blocker_reason(transport);
+    if (mmioBlocker != nullptr) {
+        kernel::serial::puts("[VIRTIO-GPU] Safe MMIO check failed: ");
+        kernel::serial::puts(mmioBlocker);
+        kernel::serial::putc('\n');
+        record_probe_outcome(state, false, DisplayInfoOutcome::NotQueried, 0, mmioBlocker);
+        return false;
+    }
+
+    log_init_step("reset_device begin");
     reset_device(transport);
-    write_status(transport, STATUS_ACKNOWLEDGE);
-    write_status(transport, static_cast<uint8_t>(read_status(transport) | STATUS_DRIVER));
+    log_init_step("reset_device complete");
 
+    log_init_step("status acknowledge begin");
+    write_status(transport, STATUS_ACKNOWLEDGE);
+    log_init_step("status acknowledge complete");
+
+    log_init_step("status driver begin");
+    write_status(transport, static_cast<uint8_t>(read_status(transport) | STATUS_DRIVER));
+    log_init_step("status driver complete");
+
+    log_init_step("read device features begin");
     transport.deviceFeaturesLow = read_device_features(transport) & 0xFFFFFFFFu;
     transport.deviceFeaturesHigh = static_cast<uint32_t>(read_device_features(transport) >> 32);
+    log_init_step("read device features complete");
     transport.negotiatedFeatures = 0;
 
     kernel::serial::puts("[VIRTIO-GPU] Device features low=0x");
@@ -832,31 +1146,71 @@ static bool initialize_device(DeviceState& state)
     }
 
     transport.negotiatedFeatures = negotiated;
+    log_init_step("write driver features begin");
     write_driver_features(transport, negotiated);
+    log_init_step("write driver features complete");
+    log_init_step("status features-ok begin");
     write_status(transport, static_cast<uint8_t>(read_status(transport) | STATUS_FEATURES_OK));
+    log_init_step("status features-ok complete");
     if ((read_status(transport) & STATUS_FEATURES_OK) == 0) {
+        kernel::serial::puts("[VIRTIO-GPU] Feature negotiation status=failed negotiated=0x");
+        kernel::serial::put_hex64(transport.negotiatedFeatures);
+        kernel::serial::puts(" deviceFeatures=0x");
+        kernel::serial::put_hex32(transport.deviceFeaturesHigh);
+        kernel::serial::put_hex32(transport.deviceFeaturesLow);
+        kernel::serial::putc('\n');
         kernel::serial::puts("[VIRTIO-GPU] Device rejected negotiated features\n");
+        record_probe_outcome(state, false, DisplayInfoOutcome::NotQueried, 0,
+                             "device rejected negotiated features");
         return false;
     }
 
+    kernel::serial::puts("[VIRTIO-GPU] Feature negotiation status=ok negotiated=0x");
+    kernel::serial::put_hex64(transport.negotiatedFeatures);
+    kernel::serial::puts(" deviceFeatures=0x");
+    kernel::serial::put_hex32(transport.deviceFeaturesHigh);
+    kernel::serial::put_hex32(transport.deviceFeaturesLow);
+    kernel::serial::putc('\n');
+
+    log_init_step("read common config begin");
+    const uint16_t commonQueueCount = mmio_read16(common_cfg_addr(transport, pci::COMMON_NUM_QUEUES));
+    log_init_step("read common config complete");
+    kernel::serial::puts("[VIRTIO-GPU] Common config queueCount=");
+    serial_put_u32_decimal(commonQueueCount);
+    kernel::serial::puts(" controlQueueAvailable=");
+    kernel::serial::puts(commonQueueCount > 0 ? "yes" : "no");
+    kernel::serial::putc('\n');
+
+    log_init_step("control queue setup begin");
     if (!setup_control_queue(transport)) {
         kernel::serial::puts("[VIRTIO-GPU] Control queue setup failed\n");
+        record_probe_outcome(state, false, DisplayInfoOutcome::NotQueried, 0,
+                             "control queue setup failed");
         return false;
     }
+    log_init_step("control queue setup complete");
 
+    log_init_step("read queue notify offset begin");
     transport.queueNotifyOff = mmio_read16(common_cfg_addr(transport, pci::COMMON_Q_NOTIFY_OFF));
+    log_init_step("read queue notify offset complete");
     kernel::serial::puts("[VIRTIO-GPU] queue notify offset=0x");
     kernel::serial::put_hex16(transport.queueNotifyOff);
     kernel::serial::puts(" multiplier=0x");
     kernel::serial::put_hex32(transport.notifyOffMultiplier);
     kernel::serial::putc('\n');
 
+    log_init_step("status driver-ok begin");
     write_status(transport, static_cast<uint8_t>(read_status(transport) | STATUS_DRIVER_OK));
+    log_init_step("status driver-ok complete");
 
+    log_init_step("GET_DISPLAY_INFO begin");
     if (!submit_display_info_request(state)) {
         kernel::serial::puts("[VIRTIO-GPU] GET_DISPLAY_INFO query failed\n");
+        record_probe_outcome(state, false, DisplayInfoOutcome::Failed, 0,
+                             "GET_DISPLAY_INFO query failed");
         return false;
     }
+    log_init_step("GET_DISPLAY_INFO complete");
 
     device.nextResourceId = 1;
     device.fbResourceId = 0;
@@ -875,6 +1229,7 @@ static bool initialize_device(DeviceState& state)
     transport.probeComplete = true;
 
     kernel::serial::puts("[VIRTIO-GPU] Diagnostic probe complete\n");
+    record_probe_outcome(state, true, DisplayInfoOutcome::Ok, device.numScanouts, nullptr);
     return true;
 }
 
@@ -965,6 +1320,10 @@ int probe()
         init();
     }
 
+    s_probeOutcome = ProbeOutcome{};
+    s_probeOutcome.valid = false;
+    s_probeOutcome.reason = "no compatible virtio-gpu PCI function found";
+
     kernel::serial::puts("[VIRTIO-GPU] Probing PCI bus for virtio-gpu devices\n");
 
     for (uint8_t bus = 0; bus < kProbeBusLimit; ++bus) {
@@ -1003,7 +1362,7 @@ int probe()
                 state->transport.deviceId = deviceId;
 
                 if (!probe_device(*state, bus, device, function)) {
-                    kernel::serial::puts("[VIRTIO-GPU] Candidate matched but could not be safely queried\n");
+                    kernel::serial::puts("[VIRTIO-GPU] Candidate matched but transport remained unresolved\n");
                     continue;
                 }
 
@@ -1018,9 +1377,10 @@ int probe()
         }
     }
 
-    kernel::serial::puts("[VIRTIO-GPU] Probe complete, devices=");
+    kernel::serial::puts("[VIRTIO-GPU] Probe summary: initialized devices=");
     serial_put_u32_decimal(static_cast<uint32_t>(s_deviceCount));
     kernel::serial::putc('\n');
+    print_probe_outcome();
 
     return s_deviceCount;
 #endif
