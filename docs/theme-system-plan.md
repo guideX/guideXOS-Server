@@ -569,6 +569,7 @@ Phase 4F closes out the extended Sci Fi app-surface milestone as a documentation
 * Clock: Phase 3F / 3F.1; stabilization status: complete in 3F.1; Sci Fi polish covers conservative body/readout/accent treatment and clear repaint handling; Classic preservation: look stays close to the prior Clock surface; Behavior changes: No; Safety fix / guard: clear-then-redraw removes stale stacked text without changing timekeeping cadence.
 * Navigator: Phase 4D / 4D.1; stabilization status: complete in 4D.1; Sci Fi polish covers conservative toolbar/address/content/border/text treatment; Classic preservation: previous Navigator feel remains close to the current look; Behavior changes: No; Safety fix / guard: the shared compositor widget guard now matches Navigator windows only, and authored page colors still win when present.
 * Task Manager: Phase 4E / 4E.1; stabilization status: complete in 4E.1; Sci Fi polish covers conservative body/header/list/selection/border/text treatment; Classic preservation: stays close to the prior Task Manager look; Behavior changes: No; Safety fix / guard: readability and graph/status safety were reviewed, and row/selection/End Task safety stayed intact.
+* Image Viewer: Phase 4H; stabilization status: chrome-only hosted pilot complete; Sci Fi polish covers body/background, preview border/separators, status strip, and widget chrome outside the image area; Classic preservation: stays close to the current Image Viewer look; Behavior changes: No; Safety fix / guard: styling stayed outside decode/render/scaling/ownership/lifecycle paths, no bare-metal `ImageViewerApp` changes were made, and the shared compositor widget guard is narrow to Image Viewer and Sci Fi.
 
 ### Wallpaper / Default Boundaries
 
@@ -582,7 +583,7 @@ Phase 4F closes out the extended Sci Fi app-surface milestone as a documentation
 
 ### Deferred Boundaries
 
-* Image Viewer app-surface polish.
+* Image Viewer stabilization/readability re-check.
 * Other future app-surface polish.
 * Bare-metal theme parity.
 * High-DPI/scaling.
@@ -668,6 +669,35 @@ Phase 4G is a diagnostic, read-only readiness inventory for Image Viewer. It rev
 * Keep bare-metal validation separate; the kernel ImageViewer is a different app and remains out of scope for this pass.
 * Do not alter image loading, image decoding, memory ownership, large-image handling, file open behavior, or preview/window close behavior.
 
+## Phase 4G.1
+
+Phase 4G.1 is the hosted large-image lifecycle safety check for Image Viewer. It is diagnostic and read-only, and it does not change decode, scaling, ownership, close behavior, or any styling/runtime code.
+
+* Hosted lifecycle validation was performed with `desktop.open` and `gui.close`; `gui.start` was unreliable in this environment, so the hosted compositor was bootstrapped through the open path.
+* Images used: `assets/Backgrounds/redflower_thumb.png`, `assets/Backgrounds/ameoba.png`, and `assets/Backgrounds/blueflower.png`.
+* Open, close, reopen, and alternate-image cycles succeeded in one hosted session.
+* The large `ameoba.png` image opened twice in the same session without an obvious stale surface or repaint artifact.
+* No stale image surfaces, stale text, or stale button chrome were observed in the open/close screenshots.
+* No freeze or crash was observed.
+* Built-in `mem` output stayed at `0 KB peak=0 KB` throughout the run, so no obvious runaway was visible in the harness output.
+* Memory and lifecycle risk still remains in the implementation because the app continues to use full decoded images and snapshot buffers, so Image Viewer styling is conditionally ready next but only for surrounding chrome, status text, widget fills/borders, and other non-image chrome outside decode, scaling, ownership, and close/reopen lifecycle paths.
+
+## Phase 4H
+
+Phase 4H implements a conservative hosted Image Viewer app-surface pilot for Sci Fi. It is chrome-only: the body/background outside the image area, the preview border and separators, the bottom status strip, and the existing widget/button chrome were styled, while image decode/render/scaling/ownership/lifecycle paths stayed untouched. Classic remains the default theme, Sci Fi remains opt-in, and no theme IDs, persistence keys, theme metrics, or App Model behavior changed.
+
+* Sci Fi gets conservative chrome/status/widget/border polish for hosted Image Viewer.
+* Classic is preserved and stays visually close to the current Image Viewer look.
+* Styling stays outside image decode, render, scaling, ownership, preview-buffer, snapshot/history, and close/reopen lifecycle code.
+* No Image Viewer runtime behavior changed.
+* No large-image lifecycle code changed.
+* No bare-metal `ImageViewerApp` changes were made.
+* No App Model gate/status dependency was introduced.
+* No per-effect controls were introduced.
+* The shared compositor widget guard is narrow to Image Viewer and Sci Fi only.
+* The conditional styling boundary remains in force.
+* A future stabilization pass should re-check lifecycle and readability.
+
 ## Manual Validation Runbook
 
 * Start the hosted server executable.
@@ -731,7 +761,7 @@ Phase 4G is a diagnostic, read-only readiness inventory for Image Viewer. It rev
 
 * Classic should continue to look basically unchanged.
 * Sci Fi is a first visible proof that the theme system exists, not a full futuristic redesign.
-* Rounded-window clipping remains deferred; this foundation is intentionally limited to IDs, persistence, selector wiring, safe chrome colors, the Phase 2A chrome metric pass, the guarded Phase 2B rounded-shell preview, the Phase 2C border/highlight polish pass, the Phase 2D hosted shadow preview, the Phase 2E desktop/taskbar surface polish pass, the Phase 2G validation checkpoint, the Phase 3A Display Options app-surface pilot, the Phase 3B Control Panel app-surface pilot, the Phase 3C Notepad app-surface pilot, the Phase 3C.1 stabilization review pass, the Phase 3D Calculator app-surface pilot, the Phase 3D.1 stabilization review pass, the Phase 3E File Explorer app-surface pilot, the Phase 3E.1 File Explorer stabilization review pass, the Phase 3F Clock app-surface pilot, the Phase 3F.1 Clock stabilization review pass, the Phase 3G app-surface closeout, the Phase 3H hosted visual validation pass, the Phase 4A readiness/defaults boundary checkpoint, the Phase 4B wallpaper/background inventory and design-readiness pass, the Phase 4C wallpaper recommendation note, the Phase 4C.1 stabilization review pass, the Phase 4D Navigator app-surface pilot, the Phase 4D.1 Navigator stabilization review pass, the Phase 4E Task Manager app-surface pilot, the Phase 4E.1 Task Manager stabilization review pass, and the Phase 4F extended app-surface closeout.
+* Rounded-window clipping remains deferred; this foundation is intentionally limited to IDs, persistence, selector wiring, safe chrome colors, the Phase 2A chrome metric pass, the guarded Phase 2B rounded-shell preview, the Phase 2C border/highlight polish pass, the Phase 2D hosted shadow preview, the Phase 2E desktop/taskbar surface polish pass, the Phase 2G validation checkpoint, the Phase 3A Display Options app-surface pilot, the Phase 3B Control Panel app-surface pilot, the Phase 3C Notepad app-surface pilot, the Phase 3C.1 stabilization review pass, the Phase 3D Calculator app-surface pilot, the Phase 3D.1 stabilization review pass, the Phase 3E File Explorer app-surface pilot, the Phase 3E.1 File Explorer stabilization review pass, the Phase 3F Clock app-surface pilot, the Phase 3F.1 Clock stabilization review pass, the Phase 3G app-surface closeout, the Phase 3H hosted visual validation pass, the Phase 4A readiness/defaults boundary checkpoint, the Phase 4B wallpaper/background inventory and design-readiness pass, the Phase 4C wallpaper recommendation note, the Phase 4C.1 stabilization review pass, the Phase 4D Navigator app-surface pilot, the Phase 4D.1 Navigator stabilization review pass, the Phase 4E Task Manager app-surface pilot, the Phase 4E.1 Task Manager stabilization review pass, the Phase 4F extended app-surface closeout, the Phase 4G Image Viewer readiness inventory, the Phase 4G.1 hosted large-image lifecycle safety check, and the Phase 4H hosted Image Viewer chrome-only app-surface pilot.
 
 ## Recommended Next Pass
 

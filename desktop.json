@@ -17,7 +17,6 @@
   "smallLiveDesktopFolderIcons": true,
   "autoArrangeDesktopIcons": false,
   "windows": [
-    {"id": 1000, "title": "Image Viewer - redflower_thumb.png", "x": 300, "y": 300, "w": 820, "h": 620, "minimized": false, "maximized": false, "z": 0, "focused": true, "snap": 0}
   ],
   "iconPositions": [
   ]

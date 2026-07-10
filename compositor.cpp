@@ -71,6 +71,14 @@ namespace gxos {
             return item.frames[static_cast<size_t>(tick) % item.frames.size()];
         }
 
+        static bool isImageViewerWindow(const WinInfo& winfo) {
+            static const std::string kImageViewerTitle = "Image Viewer";
+            static const std::string kImageViewerTitlePrefix = "Image Viewer - ";
+            return winfo.title == kImageViewerTitle ||
+                (winfo.title.size() >= kImageViewerTitlePrefix.size() &&
+                 winfo.title.compare(0, kImageViewerTitlePrefix.size(), kImageViewerTitlePrefix) == 0);
+        }
+
         static bool isCalculatorWindow(const WinInfo& winfo) {
             return winfo.title == "Calculator";
         }
@@ -139,6 +147,36 @@ namespace gxos {
             return theme.titleBarText;
         }
 
+        static uint32_t imageViewerClassicWidgetFillColor(const Widget& widget) {
+            return calculatorClassicWidgetFillColor(widget);
+        }
+
+        static uint32_t imageViewerClassicWidgetBorderColor(const Widget& widget) {
+            return calculatorClassicWidgetBorderColor(widget);
+        }
+
+        static uint32_t imageViewerClassicWidgetTextColor(const Widget& widget) {
+            return calculatorClassicWidgetTextColor(widget);
+        }
+
+        static uint32_t imageViewerSciFiWidgetFillColor(const DesktopTheme& theme, const Widget& widget) {
+            const uint32_t base = WindowRenderer::BlendThemeColor(theme.windowBackground, theme.taskbarBackground, 18);
+            const uint32_t hoverFill = WindowRenderer::BlendThemeColor(base, theme.mutedAccent, 12);
+            const uint32_t pressedFill = WindowRenderer::BlendThemeColor(base, theme.accent, 18);
+            return widget.pressed ? pressedFill : (widget.hover ? hoverFill : base);
+        }
+
+        static uint32_t imageViewerSciFiWidgetBorderColor(const DesktopTheme& theme, const Widget& widget) {
+            const uint32_t base = WindowRenderer::BlendThemeColor(theme.windowBorder, theme.taskbarBorder, 18);
+            const uint32_t hoverBorder = WindowRenderer::BlendThemeColor(base, theme.mutedAccent, 18);
+            const uint32_t pressedBorder = WindowRenderer::BlendThemeColor(base, theme.accent, 26);
+            return widget.pressed ? pressedBorder : (widget.hover ? hoverBorder : base);
+        }
+
+        static uint32_t imageViewerSciFiWidgetTextColor(const DesktopTheme& theme, const Widget&) {
+            return theme.titleBarText;
+        }
+
         static uint32_t calculatorWidgetFillColor(const WinInfo& winfo, const Widget& widget, const DesktopTheme& theme) {
             if (!isCalculatorWindow(winfo) || theme.id != DesktopThemeId::SciFi) {
                 return calculatorClassicWidgetFillColor(widget);
@@ -200,6 +238,11 @@ namespace gxos {
         }
 
         static uint32_t widgetFillColor(const WinInfo& winfo, const Widget& widget, const DesktopTheme& theme) {
+            if (isImageViewerWindow(winfo)) {
+                return theme.id == DesktopThemeId::SciFi
+                    ? imageViewerSciFiWidgetFillColor(theme, widget)
+                    : imageViewerClassicWidgetFillColor(widget);
+            }
             if (isNavigatorWindow(winfo)) {
                 return theme.id == DesktopThemeId::SciFi
                     ? navigatorSciFiWidgetFillColor(theme, widget)
@@ -209,6 +252,11 @@ namespace gxos {
         }
 
         static uint32_t widgetBorderColor(const WinInfo& winfo, const Widget& widget, const DesktopTheme& theme) {
+            if (isImageViewerWindow(winfo)) {
+                return theme.id == DesktopThemeId::SciFi
+                    ? imageViewerSciFiWidgetBorderColor(theme, widget)
+                    : imageViewerClassicWidgetBorderColor(widget);
+            }
             if (isNavigatorWindow(winfo)) {
                 return theme.id == DesktopThemeId::SciFi
                     ? navigatorSciFiWidgetBorderColor(theme, widget)
@@ -218,6 +266,11 @@ namespace gxos {
         }
 
         static uint32_t widgetTextColor(const WinInfo& winfo, const Widget& widget, const DesktopTheme& theme) {
+            if (isImageViewerWindow(winfo)) {
+                return theme.id == DesktopThemeId::SciFi
+                    ? imageViewerSciFiWidgetTextColor(theme, widget)
+                    : imageViewerClassicWidgetTextColor(widget);
+            }
             if (isNavigatorWindow(winfo)) {
                 return theme.id == DesktopThemeId::SciFi
                     ? navigatorSciFiWidgetTextColor(theme, widget)

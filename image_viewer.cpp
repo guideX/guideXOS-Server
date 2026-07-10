@@ -2,6 +2,7 @@
 
 #include "open_dialog.h"
 #include "save_dialog.h"
+#include "desktop_theme.h"
 #include "gui_protocol.h"
 #include "kernel/core/include/kernel/image_adapter.h"
 #include "logger.h"
@@ -89,6 +90,115 @@ static void publishWindowRect(uint64_t windowId, int x, int y, int w, int h, int
     std::ostringstream oss;
     oss << windowId << "|" << x << "|" << y << "|" << w << "|" << h << "|" << r << "|" << g << "|" << b;
     publishMessage(gui::MsgType::MT_DrawRect, oss.str());
+}
+
+static uint8_t colorR(uint32_t color) {
+    return static_cast<uint8_t>((color >> 16) & 0xFFu);
+}
+
+static uint8_t colorG(uint32_t color) {
+    return static_cast<uint8_t>((color >> 8) & 0xFFu);
+}
+
+static uint8_t colorB(uint32_t color) {
+    return static_cast<uint8_t>(color & 0xFFu);
+}
+
+static void publishWindowRectColor(uint64_t windowId, int x, int y, int w, int h, uint32_t color) {
+    publishWindowRect(windowId, x, y, w, h, colorR(color), colorG(color), colorB(color));
+}
+
+static void publishWindowFrameColor(uint64_t windowId, int x, int y, int w, int h, uint32_t color) {
+    if (windowId == 0 || w <= 0 || h <= 0) {
+        return;
+    }
+
+    publishWindowRectColor(windowId, x, y, w, 1, color);
+    if (h > 1) {
+        publishWindowRectColor(windowId, x, y + h - 1, w, 1, color);
+    }
+    if (w > 1 && h > 2) {
+        publishWindowRectColor(windowId, x, y + 1, 1, h - 2, color);
+        publishWindowRectColor(windowId, x + w - 1, y + 1, 1, h - 2, color);
+    }
+}
+
+static uint32_t blendThemeColor(uint32_t baseColor, uint32_t overlayColor, int overlayPercent) {
+    if (overlayPercent <= 0) {
+        return baseColor;
+    }
+    if (overlayPercent >= 100) {
+        return overlayColor;
+    }
+
+    const int baseR = static_cast<int>(colorR(baseColor));
+    const int baseG = static_cast<int>(colorG(baseColor));
+    const int baseB = static_cast<int>(colorB(baseColor));
+    const int overR = static_cast<int>(colorR(overlayColor));
+    const int overG = static_cast<int>(colorG(overlayColor));
+    const int overB = static_cast<int>(colorB(overlayColor));
+    const int keepPercent = 100 - overlayPercent;
+
+    return 0xFF000000u |
+        (static_cast<uint32_t>((baseR * keepPercent + overR * overlayPercent) / 100) << 16) |
+        (static_cast<uint32_t>((baseG * keepPercent + overG * overlayPercent) / 100) << 8) |
+        static_cast<uint32_t>((baseB * keepPercent + overB * overlayPercent) / 100);
+}
+
+static uint32_t ImageViewerBodyColor(const DesktopTheme& theme) {
+    if (theme.id != DesktopThemeId::SciFi) {
+        return 0xFF1E1E1Eu;
+    }
+    return blendThemeColor(theme.windowBackground, theme.taskbarBackground, 22);
+}
+
+static uint32_t ImageViewerPanelColor(const DesktopTheme& theme) {
+    if (theme.id != DesktopThemeId::SciFi) {
+        return 0xFF1E1E1Eu;
+    }
+    return blendThemeColor(theme.windowBackground, theme.taskbarBackground, 12);
+}
+
+static uint32_t ImageViewerStatusColor(const DesktopTheme& theme) {
+    if (theme.id != DesktopThemeId::SciFi) {
+        return 0xFF1E1E1Eu;
+    }
+    return blendThemeColor(theme.taskbarBackground, theme.windowBorder, 16);
+}
+
+static uint32_t ImageViewerPreviewBorderColor(const DesktopTheme& theme) {
+    if (theme.id != DesktopThemeId::SciFi) {
+        return 0xFF2D2D2Du;
+    }
+    return blendThemeColor(theme.windowBorder, theme.taskbarBorder, 22);
+}
+
+static uint32_t ImageViewerSeparatorColor(const DesktopTheme& theme) {
+    if (theme.id != DesktopThemeId::SciFi) {
+        return 0xFF2A2A2Au;
+    }
+    return blendThemeColor(theme.windowBorder, theme.taskbarBackground, 26);
+}
+
+static uint32_t ImageViewerTextColor(const DesktopTheme& theme) {
+    if (theme.id != DesktopThemeId::SciFi) {
+        return 0xFFEAEAEAu;
+    }
+    return theme.titleBarText;
+}
+
+static uint32_t ImageViewerMutedTextColor(const DesktopTheme& theme) {
+    if (theme.id != DesktopThemeId::SciFi) {
+        return 0xFFC7C7C7u;
+    }
+    return blendThemeColor(theme.titleBarText, theme.mutedAccent, 30);
+}
+
+static uint32_t ImageViewerAccentColor(const DesktopTheme& theme) {
+    if (theme.id != DesktopThemeId::SciFi) {
+        return 0xFFF06060u;
+    }
+    return theme.accent;
 }
 
 static int clampInt(int value, int minimum, int maximum) {
@@ -1625,6 +1735,15 @@ void ImageViewer::handleKeyPress(int keyCode) {
 
 void ImageViewer::updateDisplay() {
     if (s_windowId == 0) return;
+    const DesktopTheme& theme = GetCurrentDesktopTheme();
+    const uint32_t bodyColor = ImageViewerBodyColor(theme);
+    const uint32_t statusColor = ImageViewerStatusColor(theme);
+    const uint32_t panelColor = ImageViewerPanelColor(theme);
+    const uint32_t borderColor = ImageViewerPreviewBorderColor(theme);
+    const uint32_t separatorColor = ImageViewerSeparatorColor(theme);
+    const uint32_t textColor = ImageViewerTextColor(theme);
+    const uint32_t mutedTextColor = ImageViewerMutedTextColor(theme);
+    const uint32_t accentColor = ImageViewerAccentColor(theme);
     const bool rebuildChrome = !s_chromeWidgetsBuilt ||
         s_chromeWidgetsW != s_windowW ||
         s_chromeWidgetsH != s_windowH;
@@ -1642,8 +1761,8 @@ void ImageViewer::updateDisplay() {
     imageMetrics(drawX, drawY, drawW, drawH, contentLeft, contentTop, contentWidth, contentHeight);
 
     publishMessage(gui::MsgType::MT_DrawText, std::to_string(s_windowId) + "|\f");
-    publishWindowRect(s_windowId, 0, 0, s_windowW, s_windowH, 30, 30, 30);
-    publishWindowRect(s_windowId, 0, 31, s_windowW, 1, 45, 45, 45);
+    publishWindowRectColor(s_windowId, 0, 0, s_windowW, s_windowH, bodyColor);
+    publishWindowRectColor(s_windowId, 0, 31, s_windowW, 1, separatorColor);
 
     if (s_image) {
         if (s_backgroundMode == BackgroundMode::Checkerboard) {
@@ -1651,19 +1770,32 @@ void ImageViewer::updateDisplay() {
         }
         publishMessage(gui::MsgType::MT_DrawImage,
             gui::packDrawImage(s_windowId, drawX, drawY, drawW, drawH, s_displayPath.empty() ? s_filePath : s_displayPath));
-        if (!s_errorText.empty()) {
-            publishWindowTextColor(s_windowId, contentLeft + 8, contentTop + 8, 255, 96, 96, s_errorText);
-        }
     } else {
         const std::string message = s_statusText.empty() ? "No image loaded" : s_statusText;
         const int approxTextWidth = static_cast<int>(message.size()) * 7;
         const int centeredX = contentLeft + std::max(0, (contentWidth - approxTextWidth) / 2);
         const int centeredY = contentTop + std::max(0, contentHeight / 2);
-        publishWindowTextColor(s_windowId, centeredX, centeredY, 235, 235, 235, message);
+        const uint32_t emptyColor = s_errorText.empty() ? mutedTextColor : accentColor;
+        publishWindowTextColor(s_windowId, centeredX, centeredY, colorR(emptyColor), colorG(emptyColor), colorB(emptyColor), message);
     }
 
+    const int footerTop = std::min(s_windowH, contentTop + contentHeight);
+    const int statusStripHeight = 22;
+    const int statusStripBottom = std::min(s_windowH, footerTop + statusStripHeight);
+    if (statusStripBottom > footerTop) {
+        publishWindowRectColor(s_windowId, 0, footerTop, s_windowW, statusStripBottom - footerTop, statusColor);
+    }
+    if (statusStripBottom < s_windowH) {
+        publishWindowRectColor(s_windowId, 0, statusStripBottom, s_windowW, s_windowH - statusStripBottom, panelColor);
+        publishWindowRectColor(s_windowId, 0, statusStripBottom, s_windowW, 1, separatorColor);
+    }
+    publishWindowFrameColor(s_windowId, std::max(0, contentLeft - 1), std::max(0, contentTop - 1), contentWidth + 2, contentHeight + 2, borderColor);
+
     const std::string info = statusText();
-    publishWindowText(s_windowId, 12, s_windowH - 82, info, true);
+    const bool hasError = !s_errorText.empty();
+    const bool hasNotice = !s_noticeText.empty();
+    const uint32_t infoColor = hasError ? accentColor : ((hasNotice || s_image) ? textColor : mutedTextColor);
+    publishWindowTextColor(s_windowId, 12, footerTop + 4, colorR(infoColor), colorG(infoColor), colorB(infoColor), info);
 
     if (rebuildChrome) {
         const int btnH = 24;
