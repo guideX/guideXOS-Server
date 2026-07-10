@@ -165,6 +165,19 @@ What remains before rendering can happen:
 - Do not enable resource creation, backing attachment, scanout selection, transfers, flushes, or rendering in this branch.
 - Continue using the diagnostic-safe stop as the boundary until a later pass can prove a safe mapped path.
 
+## Virtio-GPU MMIO Mapping Blocker
+
+The virtio-gpu discovery path is now working up to the point where guideXOS needs a safe PCI MMIO mapping layer.
+
+- PCI discovery finds the QEMU virtio-gpu function at `00:02.00`.
+- The modern VirtIO capability walk resolves `common`, `notify`, `isr`, and `device` capabilities.
+- The `pci` capability remains malformed in the current QEMU setup because BAR0 is unassigned.
+- The probe now reports MMIO feasibility through `kernel::mmio::describeRange`, `kernel::mmio::canMap`, and the generic `MappingReport` structure instead of a hand-written direct-map check.
+- The common config MMIO base is outside the current safe direct-mapped ceiling, so the probe stops before any transport reset, feature negotiation, queue setup, or MMIO writes.
+- `GET_DISPLAY_INFO` stays blocked until guideXOS can map PCI MMIO regions safely at runtime.
+- Rendering, resource creation, backing attachment, scanout changes, transfers, and flushes remain disabled in this branch.
+- The next kernel memory feature needed here is a runtime MMIO page-table mapping path, with cache-attribute plumbing still called out as a future TODO.
+
 ## Framebuffer Array Handoff
 
 The bootloader and kernel now preserve a bounded diagnostic framebuffer array in `BootInfo`, but the legacy single-framebuffer fields remain the authoritative rendering contract.

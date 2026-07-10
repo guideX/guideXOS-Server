@@ -16,6 +16,7 @@
 
 #include "include/kernel/virtio_gpu.h"
 
+#include "include/kernel/mmio.h"
 #include "include/kernel/msi.h"
 #include "include/kernel/serial_debug.h"
 
@@ -385,34 +386,226 @@ static const char* transport_blocker_reason(const ModernTransport& transport)
     return "required modern transport capabilities unresolved";
 }
 
-static bool is_safe_direct_mmio_base(uint64_t base)
+enum class MmioRegionKind : uint8_t {
+    Common = 0,
+    Notify = 1,
+    Isr = 2,
+    Device = 3,
+    Pci = 4,
+};
+
+static const char* mmio_region_label(MmioRegionKind kind)
 {
-    return base != 0 && base < 0x100000000ull;
+    switch (kind) {
+    case MmioRegionKind::Common:
+        return "common";
+    case MmioRegionKind::Notify:
+        return "notify";
+    case MmioRegionKind::Isr:
+        return "isr";
+    case MmioRegionKind::Device:
+        return "device";
+    case MmioRegionKind::Pci:
+        return "pci";
+    default:
+        return "unknown";
+    }
 }
 
-static const char* transport_mmio_blocker_reason(const ModernTransport& transport)
+static const char* mmio_region_blocker_reason(MmioRegionKind kind,
+                                              const kernel::mmio::MappingReport& report)
 {
-    if (transport.commonCfg.present && !is_safe_direct_mmio_base(transport.commonCfg.base)) {
-        return "common config MMIO base outside safe direct-mapped range";
+    if (report.length == 0) {
+        switch (kind) {
+        case MmioRegionKind::Common:
+            return "common config MMIO length is zero";
+        case MmioRegionKind::Notify:
+            return "notify config MMIO length is zero";
+        case MmioRegionKind::Isr:
+            return "isr config MMIO length is zero";
+        case MmioRegionKind::Device:
+            return "device config MMIO length is zero";
+        case MmioRegionKind::Pci:
+            return "pci config MMIO length is zero";
+        default:
+            return "MMIO length is zero";
+        }
     }
 
-    if (transport.notifyCfg.present && !is_safe_direct_mmio_base(transport.notifyCfg.base)) {
-        return "notify config MMIO base outside safe direct-mapped range";
+    if (!report.withinSafeDirectMap) {
+        switch (kind) {
+        case MmioRegionKind::Common:
+            return "common config MMIO base outside safe direct-mapped range";
+        case MmioRegionKind::Notify:
+            return "notify config MMIO base outside safe direct-mapped range";
+        case MmioRegionKind::Isr:
+            return "isr config MMIO base outside safe direct-mapped range";
+        case MmioRegionKind::Device:
+            return "device config MMIO base outside safe direct-mapped range";
+        case MmioRegionKind::Pci:
+            return "pci config MMIO base outside safe direct-mapped range";
+        default:
+            return "MMIO base outside safe direct-mapped range";
+        }
     }
 
-    if (transport.isrCfg.present && !is_safe_direct_mmio_base(transport.isrCfg.base)) {
-        return "isr config MMIO base outside safe direct-mapped range";
-    }
-
-    if (transport.deviceCfg.present && !is_safe_direct_mmio_base(transport.deviceCfg.base)) {
-        return "device config MMIO base outside safe direct-mapped range";
-    }
-
-    if (transport.pciCfg.present && !is_safe_direct_mmio_base(transport.pciCfg.base)) {
-        return "pci config MMIO base outside safe direct-mapped range";
+    if (report.cacheAttributesRequested && !report.cacheAttributesSupported) {
+        switch (kind) {
+        case MmioRegionKind::Common:
+            return "common config MMIO cache attributes are not supported yet";
+        case MmioRegionKind::Notify:
+            return "notify config MMIO cache attributes are not supported yet";
+        case MmioRegionKind::Isr:
+            return "isr config MMIO cache attributes are not supported yet";
+        case MmioRegionKind::Device:
+            return "device config MMIO cache attributes are not supported yet";
+        case MmioRegionKind::Pci:
+            return "pci config MMIO cache attributes are not supported yet";
+        default:
+            return "MMIO cache attributes are not supported yet";
+        }
     }
 
     return nullptr;
+}
+
+static bool region_physical_base(const PciRegion& region, uint64_t* physicalBaseOut)
+{
+    if (physicalBaseOut == nullptr) {
+        return false;
+    }
+
+    if (region.base > (~0ULL - region.offset)) {
+        *physicalBaseOut = 0;
+        return false;
+    }
+
+    *physicalBaseOut = region.base + region.offset;
+    return true;
+}
+
+static void log_mmio_mapping_report(MmioRegionKind kind, const PciRegion& region,
+                                    const kernel::mmio::MappingReport& report)
+{
+    kernel::serial::puts("[VIRTIO-GPU] MMIO mapping report ");
+    kernel::serial::puts(mmio_region_label(kind));
+    kernel::serial::puts(" barBase=0x");
+    kernel::serial::put_hex64(region.base);
+    kernel::serial::puts(" cfgOffset=0x");
+    kernel::serial::put_hex32(region.offset);
+    kernel::serial::puts(" cfgLength=0x");
+    kernel::serial::put_hex32(region.length);
+    kernel::serial::puts(" cfgBase=0x");
+    kernel::serial::put_hex64(report.physicalBase);
+    kernel::serial::puts(" alignedBase=0x");
+    kernel::serial::put_hex64(report.alignedBase);
+    kernel::serial::puts(" alignedLength=0x");
+    kernel::serial::put_hex64(report.alignedLength);
+    kernel::serial::puts(" pageAligned=");
+    kernel::serial::puts(report.pageAligned ? "yes" : "no");
+    kernel::serial::puts(" directMapped=");
+    kernel::serial::puts(report.withinSafeDirectMap ? "yes" : "no");
+    kernel::serial::puts(" requiresNewPageTableEntries=");
+    kernel::serial::puts(report.requiresNewPageTableEntries ? "yes" : "no");
+    kernel::serial::puts(" cacheAttrsRequested=");
+    kernel::serial::puts(report.cacheAttributesRequested ? "yes" : "no");
+    kernel::serial::puts(" cacheAttrsSupported=");
+    kernel::serial::puts(report.cacheAttributesSupported ? "yes" : "no");
+    kernel::serial::puts(" reason=");
+    kernel::serial::puts(report.reason != nullptr ? report.reason : "n/a");
+    kernel::serial::puts(" nextFeature=");
+    kernel::serial::puts(report.nextKernelFeature != nullptr ? report.nextKernelFeature : "n/a");
+    kernel::serial::putc('\n');
+}
+
+static const char* transport_mmio_blocker_reason(const ModernTransport& transport,
+                                                 kernel::mmio::MappingReport* blockerReportOut = nullptr)
+{
+    struct RegionDescriptor {
+        MmioRegionKind kind;
+        const PciRegion* region;
+    };
+
+    const RegionDescriptor regions[] = {
+        { MmioRegionKind::Common, &transport.commonCfg },
+        { MmioRegionKind::Notify, &transport.notifyCfg },
+        { MmioRegionKind::Isr, &transport.isrCfg },
+        { MmioRegionKind::Device, &transport.deviceCfg },
+        { MmioRegionKind::Pci, &transport.pciCfg },
+    };
+
+    const char* blockerReason = nullptr;
+    if (blockerReportOut != nullptr) {
+        *blockerReportOut = kernel::mmio::MappingReport{};
+    }
+
+    for (const RegionDescriptor& entry : regions) {
+        const PciRegion& region = *entry.region;
+        if (!region.present) {
+            continue;
+        }
+
+        kernel::mmio::MappingReport report{};
+        uint64_t physicalBase = 0;
+        const bool baseValid = region_physical_base(region, &physicalBase);
+        const uint32_t mappingFlags = kernel::mmio::MAP_FLAG_NON_USER | kernel::mmio::MAP_FLAG_NO_EXEC;
+        bool canMap = false;
+
+        if (baseValid) {
+            canMap = kernel::mmio::canMap(physicalBase, region.length, &report, mappingFlags);
+        } else {
+            report.physicalBase = 0;
+            report.length = region.length;
+            report.alignedBase = 0;
+            report.alignedLength = 0;
+            report.safeDirectMapCeiling = kernel::mmio::SAFE_DIRECT_MAP_CEILING;
+            report.flags = mappingFlags;
+            report.pageAligned = false;
+            report.withinSafeDirectMap = false;
+            report.requiresPageRounding = true;
+            report.requiresNewPageTableEntries = true;
+            report.cacheAttributesRequested = false;
+            report.cacheAttributesSupported = false;
+            report.reason = "MMIO base overflows address space";
+            report.nextKernelFeature = "overflow-safe MMIO range validation";
+        }
+        log_mmio_mapping_report(entry.kind, region, report);
+
+        if (blockerReason == nullptr) {
+            if (!baseValid) {
+                switch (entry.kind) {
+                case MmioRegionKind::Common:
+                    blockerReason = "common config MMIO base overflows address space";
+                    break;
+                case MmioRegionKind::Notify:
+                    blockerReason = "notify config MMIO base overflows address space";
+                    break;
+                case MmioRegionKind::Isr:
+                    blockerReason = "isr config MMIO base overflows address space";
+                    break;
+                case MmioRegionKind::Device:
+                    blockerReason = "device config MMIO base overflows address space";
+                    break;
+                case MmioRegionKind::Pci:
+                    blockerReason = "pci config MMIO base overflows address space";
+                    break;
+                default:
+                    blockerReason = "MMIO base overflows address space";
+                    break;
+                }
+                if (blockerReportOut != nullptr) {
+                    *blockerReportOut = report;
+                }
+            } else if (!canMap) {
+                blockerReason = mmio_region_blocker_reason(entry.kind, report);
+                if (blockerReason != nullptr && blockerReportOut != nullptr) {
+                    *blockerReportOut = report;
+                }
+            }
+        }
+    }
+
+    return blockerReason;
 }
 
 static void print_capability_inventory(const ModernTransport& transport)
@@ -1107,130 +1300,23 @@ static bool initialize_device(DeviceState& state)
     kernel::serial::puts(transport_kind_name(transport));
     kernel::serial::putc('\n');
 
-    const char* mmioBlocker = transport_mmio_blocker_reason(transport);
+    kernel::mmio::MappingReport mmioBlockerReport{};
+    const char* mmioBlocker = transport_mmio_blocker_reason(transport, &mmioBlockerReport);
     if (mmioBlocker != nullptr) {
-        kernel::serial::puts("[VIRTIO-GPU] Safe MMIO check failed: ");
+        kernel::serial::puts("[VIRTIO-GPU] MMIO mapping blocked: ");
         kernel::serial::puts(mmioBlocker);
+        kernel::serial::putc('\n');
+        kernel::serial::puts("[VIRTIO-GPU] Required next kernel memory feature: ");
+        kernel::serial::puts(mmioBlockerReport.nextKernelFeature != nullptr ? mmioBlockerReport.nextKernelFeature : "n/a");
         kernel::serial::putc('\n');
         record_probe_outcome(state, false, DisplayInfoOutcome::NotQueried, 0, mmioBlocker);
         return false;
     }
 
-    log_init_step("reset_device begin");
-    reset_device(transport);
-    log_init_step("reset_device complete");
-
-    log_init_step("status acknowledge begin");
-    write_status(transport, STATUS_ACKNOWLEDGE);
-    log_init_step("status acknowledge complete");
-
-    log_init_step("status driver begin");
-    write_status(transport, static_cast<uint8_t>(read_status(transport) | STATUS_DRIVER));
-    log_init_step("status driver complete");
-
-    log_init_step("read device features begin");
-    transport.deviceFeaturesLow = read_device_features(transport) & 0xFFFFFFFFu;
-    transport.deviceFeaturesHigh = static_cast<uint32_t>(read_device_features(transport) >> 32);
-    log_init_step("read device features complete");
-    transport.negotiatedFeatures = 0;
-
-    kernel::serial::puts("[VIRTIO-GPU] Device features low=0x");
-    kernel::serial::put_hex32(transport.deviceFeaturesLow);
-    kernel::serial::puts(" high=0x");
-    kernel::serial::put_hex32(transport.deviceFeaturesHigh);
-    kernel::serial::putc('\n');
-
-    uint64_t negotiated = 0;
-    if ((read_device_features(transport) & kCommonCfgRequiredFeatureBits) != 0) {
-        negotiated |= FEATURE_VERSION_1;
-    }
-
-    transport.negotiatedFeatures = negotiated;
-    log_init_step("write driver features begin");
-    write_driver_features(transport, negotiated);
-    log_init_step("write driver features complete");
-    log_init_step("status features-ok begin");
-    write_status(transport, static_cast<uint8_t>(read_status(transport) | STATUS_FEATURES_OK));
-    log_init_step("status features-ok complete");
-    if ((read_status(transport) & STATUS_FEATURES_OK) == 0) {
-        kernel::serial::puts("[VIRTIO-GPU] Feature negotiation status=failed negotiated=0x");
-        kernel::serial::put_hex64(transport.negotiatedFeatures);
-        kernel::serial::puts(" deviceFeatures=0x");
-        kernel::serial::put_hex32(transport.deviceFeaturesHigh);
-        kernel::serial::put_hex32(transport.deviceFeaturesLow);
-        kernel::serial::putc('\n');
-        kernel::serial::puts("[VIRTIO-GPU] Device rejected negotiated features\n");
-        record_probe_outcome(state, false, DisplayInfoOutcome::NotQueried, 0,
-                             "device rejected negotiated features");
-        return false;
-    }
-
-    kernel::serial::puts("[VIRTIO-GPU] Feature negotiation status=ok negotiated=0x");
-    kernel::serial::put_hex64(transport.negotiatedFeatures);
-    kernel::serial::puts(" deviceFeatures=0x");
-    kernel::serial::put_hex32(transport.deviceFeaturesHigh);
-    kernel::serial::put_hex32(transport.deviceFeaturesLow);
-    kernel::serial::putc('\n');
-
-    log_init_step("read common config begin");
-    const uint16_t commonQueueCount = mmio_read16(common_cfg_addr(transport, pci::COMMON_NUM_QUEUES));
-    log_init_step("read common config complete");
-    kernel::serial::puts("[VIRTIO-GPU] Common config queueCount=");
-    serial_put_u32_decimal(commonQueueCount);
-    kernel::serial::puts(" controlQueueAvailable=");
-    kernel::serial::puts(commonQueueCount > 0 ? "yes" : "no");
-    kernel::serial::putc('\n');
-
-    log_init_step("control queue setup begin");
-    if (!setup_control_queue(transport)) {
-        kernel::serial::puts("[VIRTIO-GPU] Control queue setup failed\n");
-        record_probe_outcome(state, false, DisplayInfoOutcome::NotQueried, 0,
-                             "control queue setup failed");
-        return false;
-    }
-    log_init_step("control queue setup complete");
-
-    log_init_step("read queue notify offset begin");
-    transport.queueNotifyOff = mmio_read16(common_cfg_addr(transport, pci::COMMON_Q_NOTIFY_OFF));
-    log_init_step("read queue notify offset complete");
-    kernel::serial::puts("[VIRTIO-GPU] queue notify offset=0x");
-    kernel::serial::put_hex16(transport.queueNotifyOff);
-    kernel::serial::puts(" multiplier=0x");
-    kernel::serial::put_hex32(transport.notifyOffMultiplier);
-    kernel::serial::putc('\n');
-
-    log_init_step("status driver-ok begin");
-    write_status(transport, static_cast<uint8_t>(read_status(transport) | STATUS_DRIVER_OK));
-    log_init_step("status driver-ok complete");
-
-    log_init_step("GET_DISPLAY_INFO begin");
-    if (!submit_display_info_request(state)) {
-        kernel::serial::puts("[VIRTIO-GPU] GET_DISPLAY_INFO query failed\n");
-        record_probe_outcome(state, false, DisplayInfoOutcome::Failed, 0,
-                             "GET_DISPLAY_INFO query failed");
-        return false;
-    }
-    log_init_step("GET_DISPLAY_INFO complete");
-
-    device.nextResourceId = 1;
-    device.fbResourceId = 0;
-    device.fbWidth = 0;
-    device.fbHeight = 0;
-    device.fbFormat = 0;
-    device.fbBuffer = nullptr;
-    device.fbBufferPhys = 0;
-    device.fbBufferSize = 0;
-    device.framesDisplayed = 0;
-    device.flushCount = 0;
-    device.has3D = false;
-    device.initialized = true;
-
-    transport.modern = true;
-    transport.probeComplete = true;
-
-    kernel::serial::puts("[VIRTIO-GPU] Diagnostic probe complete\n");
-    record_probe_outcome(state, true, DisplayInfoOutcome::Ok, device.numScanouts, nullptr);
-    return true;
+    kernel::serial::puts("[VIRTIO-GPU] MMIO mapping feasible; GET_DISPLAY_INFO remains disabled in this diagnostic pass\n");
+    record_probe_outcome(state, false, DisplayInfoOutcome::NotQueried, 0,
+                         "MMIO mapping feasibility accepted; GET_DISPLAY_INFO remains disabled in this diagnostic pass");
+    return false;
 }
 
 static void print_device_summary(const DeviceState& state)
@@ -1427,11 +1513,9 @@ GpuStatus reset_device(GpuDevice* dev)
     }
 
 #if defined(GXOS_QEMU_VIRTIO_GPU_PROBE_ACTIVE)
-    if (state->transport.present && state->transport.commonCfg.present) {
-        reset_device(state->transport);
-        state->device.initialized = false;
-        return GPU_OK;
-    }
+    (void)state;
+    kernel::serial::puts("[VIRTIO-GPU] reset_device blocked: transport reset is disabled in diagnostic-only probe\n");
+    return GPU_ERR_UNSUPPORTED;
 #endif
 
     if (!state->device.isPci && state->device.baseAddr != 0) {
@@ -1454,7 +1538,8 @@ GpuStatus get_display_info(GpuDevice* dev)
         return GPU_ERR_INVALID;
     }
 
-    return submit_display_info_request(*state) ? GPU_OK : GPU_ERR_IO;
+    kernel::serial::puts("[VIRTIO-GPU] GET_DISPLAY_INFO blocked: MMIO mapping layer is not enabled yet\n");
+    return GPU_ERR_UNSUPPORTED;
 #endif
 }
 

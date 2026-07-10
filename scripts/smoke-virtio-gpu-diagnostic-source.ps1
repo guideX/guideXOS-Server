@@ -48,23 +48,97 @@ function Assert-Regex {
     Assert-True ([regex]::IsMatch($Text, $Pattern, [System.Text.RegularExpressions.RegexOptions]::Singleline)) $Message
 }
 
+function Get-FunctionBody {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Text,
+        [Parameter(Mandatory = $true)]
+        [string]$SignaturePattern
+    )
+
+    $match = [regex]::Match($Text, $SignaturePattern, [System.Text.RegularExpressions.RegexOptions]::Singleline)
+    if (-not $match.Success) {
+        return $null
+    }
+
+    $start = $Text.IndexOf('{', $match.Index + $match.Length - 1)
+    if ($start -lt 0) {
+        return $null
+    }
+
+    $depth = 0
+    for ($index = $start; $index -lt $Text.Length; ++$index) {
+        $ch = $Text[$index]
+        if ($ch -eq '{') {
+            ++$depth
+        } elseif ($ch -eq '}') {
+            --$depth
+            if ($depth -eq 0) {
+                return $Text.Substring($start, $index - $start + 1)
+            }
+        }
+    }
+
+    return $null
+}
+
+$mmioHeader = Read-Text -Path (Join-Path $Root 'kernel\core\include\kernel\mmio.h')
 $virtioGpuCpp = Read-Text -Path (Join-Path $Root 'kernel\core\virtio_gpu.cpp')
 $mainCpp = Read-Text -Path (Join-Path $Root 'kernel\core\main.cpp')
 $probeSmoke = Read-Text -Path (Join-Path $Root 'scripts\smoke-qemu-display-probe.ps1')
 $launcher = Read-Text -Path (Join-Path $Root 'scripts\run-qemu-display-probe.bat')
 
+Assert-True ($mmioHeader.Contains('SAFE_DIRECT_MAP_CEILING')) 'mmio.h should define the conservative direct-map ceiling'
+Assert-True ($mmioHeader.Contains('MappingReport')) 'mmio.h should expose a mapping report structure'
+Assert-True ($mmioHeader.Contains('canMap')) 'mmio.h should expose a feasibility check helper'
+Assert-True ($mmioHeader.Contains('mapForDevice')) 'mmio.h should expose a stubbed device-mapping helper'
+Assert-True ($mmioHeader.Contains('unmap')) 'mmio.h should expose an unmap helper'
+Assert-True ($mmioHeader.Contains('MAP_FLAG_NON_USER')) 'mmio.h should carry a non-user page flag'
+Assert-True ($mmioHeader.Contains('MAP_FLAG_NO_EXEC')) 'mmio.h should carry a no-execute page flag'
+Assert-True ($mmioHeader.Contains('PAT/MTRR')) 'mmio.h should note the cache-attribute TODO'
+Assert-True ($mmioHeader.Contains('runtime MMIO page-table mapping')) 'mmio.h should name the next kernel feature for blocked ranges'
+
 Assert-True ($virtioGpuCpp.Contains('GXOS_QEMU_VIRTIO_GPU_PROBE_ACTIVE')) 'virtio_gpu.cpp should gate diagnostics behind GXOS_QEMU_VIRTIO_GPU_PROBE_ACTIVE'
-Assert-True ($virtioGpuCpp.Contains('CMD_GET_DISPLAY_INFO')) 'virtio_gpu.cpp should issue GET_DISPLAY_INFO for diagnostics'
+Assert-True ($virtioGpuCpp.Contains('#include "include/kernel/mmio.h"')) 'virtio_gpu.cpp should include the generic MMIO diagnostics header'
+Assert-True ($virtioGpuCpp.Contains('kernel::mmio::canMap')) 'virtio_gpu.cpp should use the MMIO feasibility check helper'
+Assert-True ($virtioGpuCpp.Contains('kernel::mmio::MappingReport mmioBlockerReport{};')) 'virtio_gpu.cpp should capture the detailed MMIO mapping report'
+Assert-True ($virtioGpuCpp.Contains('transport_mmio_blocker_reason(transport, &mmioBlockerReport)')) 'virtio_gpu.cpp should route the probe through the MMIO feasibility helper'
+Assert-True ($virtioGpuCpp.Contains('[VIRTIO-GPU] MMIO mapping report ')) 'virtio_gpu.cpp should log a compact MMIO mapping report'
+Assert-True ($virtioGpuCpp.Contains('MMIO mapping blocked:')) 'virtio_gpu.cpp should log an explicit MMIO blocker reason'
+Assert-True ($virtioGpuCpp.Contains('Required next kernel memory feature:')) 'virtio_gpu.cpp should name the next kernel memory feature when blocked'
+Assert-True ($virtioGpuCpp.Contains('MMIO mapping feasible; GET_DISPLAY_INFO remains disabled in this diagnostic pass')) 'virtio_gpu.cpp should stop before GET_DISPLAY_INFO even when mapping is feasible'
+Assert-True ($virtioGpuCpp.Contains('GET_DISPLAY_INFO blocked: MMIO mapping layer is not enabled yet')) 'virtio_gpu.cpp should block the public GET_DISPLAY_INFO entry point'
+Assert-True ($virtioGpuCpp.Contains('reset_device blocked: transport reset is disabled in diagnostic-only probe')) 'virtio_gpu.cpp should block diagnostic transport resets'
 Assert-True ($virtioGpuCpp.Contains('[VIRTIO-GPU] Capability inventory ')) 'virtio_gpu.cpp should log a capability inventory summary'
 Assert-True ($virtioGpuCpp.Contains('PCI capability walk complete caps=')) 'virtio_gpu.cpp should log full PCI capability-walk completion'
 Assert-True ($virtioGpuCpp.Contains('Transport type detected:')) 'virtio_gpu.cpp should log the detected transport type before initialization'
-Assert-True ($virtioGpuCpp.Contains('Feature negotiation status=')) 'virtio_gpu.cpp should log feature negotiation status when it is reached'
-Assert-True ($virtioGpuCpp.Contains('Common config queueCount=')) 'virtio_gpu.cpp should log the common config queue count when it is reached'
-Assert-True ($virtioGpuCpp.Contains('log_init_step("reset_device begin")')) 'virtio_gpu.cpp should mark the start of risky modern-transport init'
-Assert-True ($virtioGpuCpp.Contains('log_init_step("GET_DISPLAY_INFO begin")')) 'virtio_gpu.cpp should mark the GET_DISPLAY_INFO request boundary'
-Assert-True ($virtioGpuCpp.Contains('Safe MMIO check failed')) 'virtio_gpu.cpp should refuse unsafe direct-mapped MMIO bases before reset'
 Assert-True ($virtioGpuCpp.Contains('Probe complete: devices=')) 'virtio_gpu.cpp should end with a clear probe result line'
 Assert-True ($virtioGpuCpp.Contains('only cfg_type=0x05 pci capability observed')) 'virtio_gpu.cpp should report a cfg_type=0x05-only transport blocker explicitly'
+
+$initializeBody = Get-FunctionBody -Text $virtioGpuCpp -SignaturePattern 'static bool initialize_device\(DeviceState& state\)'
+Assert-True ($null -ne $initializeBody) 'initialize_device should be parsable as a standalone function body'
+Assert-True ($initializeBody.Contains('transport_mmio_blocker_reason(transport, &mmioBlockerReport)')) 'initialize_device should consult the MMIO blocker helper'
+Assert-True ($initializeBody.Contains('MMIO mapping blocked:')) 'initialize_device should log a blocked MMIO report when the common config is unsafe'
+Assert-True ($initializeBody.Contains('Required next kernel memory feature:')) 'initialize_device should report the next required kernel feature'
+Assert-True ($initializeBody.Contains('MMIO mapping feasible; GET_DISPLAY_INFO remains disabled in this diagnostic pass')) 'initialize_device should stop after the feasibility check'
+Assert-True (-not $initializeBody.Contains('log_init_step("reset_device begin")')) 'initialize_device must not reset the transport in this pass'
+Assert-True (-not $initializeBody.Contains('Feature negotiation status=')) 'initialize_device must not negotiate device features in this pass'
+Assert-True (-not $initializeBody.Contains('Common config queueCount=')) 'initialize_device must not reach common config queue setup in this pass'
+Assert-True (-not $initializeBody.Contains('Control queue ready size=')) 'initialize_device must not lay out a control queue in this pass'
+Assert-True (-not $initializeBody.Contains('GET_DISPLAY_INFO begin')) 'initialize_device must not issue GET_DISPLAY_INFO in this pass'
+Assert-True (-not $initializeBody.Contains('submit_display_info_request(')) 'initialize_device must not submit the display-info command in this pass'
+
+$getDisplayBody = Get-FunctionBody -Text $virtioGpuCpp -SignaturePattern 'GpuStatus get_display_info\(GpuDevice\* dev\)'
+Assert-True ($null -ne $getDisplayBody) 'get_display_info should be parsable as a standalone function body'
+Assert-True ($getDisplayBody.Contains('return GPU_ERR_UNSUPPORTED;')) 'get_display_info should remain blocked in the diagnostic-only probe'
+Assert-True (-not $getDisplayBody.Contains('submit_display_info_request(')) 'get_display_info must not reach the request submission path in this pass'
+
+$resetBody = Get-FunctionBody -Text $virtioGpuCpp -SignaturePattern 'GpuStatus reset_device\(GpuDevice\* dev\)'
+Assert-True ($null -ne $resetBody) 'reset_device should be parsable as a standalone function body'
+Assert-True ($resetBody.Contains('reset_device blocked: transport reset is disabled in diagnostic-only probe')) 'reset_device should block probe-only transport resets'
+Assert-True ($resetBody.Contains('return GPU_ERR_UNSUPPORTED;')) 'reset_device should refuse to write the transport in this pass'
+Assert-True (-not $resetBody.Contains('reset_device(state->transport);')) 'reset_device must not touch the transport MMIO reset register in this pass'
+
 Assert-Regex -Text $virtioGpuCpp -Pattern '(?s)GpuStatus setup_framebuffer\(GpuDevice\* dev, uint32_t width, uint32_t height,\s*uint32_t scanoutId\)\s*\{.*?return GPU_ERR_UNSUPPORTED;' -Message 'setup_framebuffer must stay unsupported in this probe-only branch'
 Assert-Regex -Text $virtioGpuCpp -Pattern '(?s)GpuStatus flush_framebuffer\(GpuDevice\* dev, uint32_t x, uint32_t y,\s*uint32_t width, uint32_t height\)\s*\{.*?return GPU_ERR_UNSUPPORTED;' -Message 'flush_framebuffer must stay unsupported in this probe-only branch'
 Assert-Regex -Text $virtioGpuCpp -Pattern '(?s)GpuStatus create_resource_2d\(GpuDevice\* dev, uint32_t\* resourceIdOut,\s*uint32_t width, uint32_t height, GpuFormat format\)\s*\{.*?return GPU_ERR_UNSUPPORTED;' -Message 'create_resource_2d must stay unsupported in this probe-only branch'
@@ -84,6 +158,11 @@ Assert-Regex -Text $probeSmoke -Pattern '(?s)Backend = ''virtio-gpu''.*?Required
 Assert-Regex -Text $probeSmoke -Pattern '(?s)Backend = ''virtio-gpu-modern-only''.*?Required = \$false.*?Supported = \(Test-QemuVirtioGpuModernOnlySupport\).*?WaitPattern = ''\\\[VIRTIO-GPU\\\] Probe complete: devices=''' -Message 'modern-only virtio-gpu backend must be optional and gated by QEMU help'
 Assert-True ($probeSmoke.Contains('disable-legacy=<OnOffAuto>')) 'runtime smoke should inspect QEMU help for virtio-gpu-pci modern-only support'
 Assert-True ($probeSmoke.Contains('disable-legacy=on')) 'launcher should use disable-legacy=on for the modern-only virtio-gpu mode'
+Assert-True ($probeSmoke.Contains('gpuMmioReportLine')) 'runtime smoke should capture the MMIO mapping report line'
+Assert-True ($probeSmoke.Contains('gpuMmioBlockedLine')) 'runtime smoke should capture the MMIO blocker line'
+Assert-True ($probeSmoke.Contains('gpuFeatureNegotiationLine')) 'runtime smoke should still track feature negotiation as a negative check'
+Assert-True ($probeSmoke.Contains('gpuQueueCountLine')) 'runtime smoke should still track queue setup as a negative check'
+Assert-True ($probeSmoke.Contains('gpuDisplayInfoLine')) 'runtime smoke should still track GET_DISPLAY_INFO as a negative check'
 
 Assert-True ($launcher.Contains('diagnostic virtio-gpu-pci probe (no rendering)')) 'launcher should advertise diagnostic-only virtio-gpu probing'
 Assert-True ($launcher.Contains('modern-only diagnostic probe (no rendering)')) 'launcher should advertise the modern-only diagnostic virtio-gpu probe'
