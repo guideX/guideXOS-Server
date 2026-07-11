@@ -117,6 +117,7 @@ The runtime MMIO work is starting from the existing huge-page / page-table scaff
 - `kernel/core/hugepages.cpp` already contains the huge-page-oriented helpers: `map2M`, `map1G`, `unmap2M`, `unmap1G`, `make_pde_2m`, `make_pdpe_1g`, `split_2m_to_4k`, and `split_1g_to_2m`.
 - Those helpers establish the shape of the eventual mapping path, and the current QEMU-only runtime MMIO window now layers on top of that scaffolding.
 - The active x86_64 probe build uses a reserved high-half MMIO window with UC-style `PCD|PWT` leaf mappings, `NX`, supervisor-only permissions, and a bounded bump allocator.
+- The page-table writer stores physical child-table addresses in hardware entries, and the probe enables `EFER.NXE` before it emits NX-marked MMIO leaves; if NXE is unavailable, the probe stops before touching the BAR.
 - PAT/MTRR cache-attribute plumbing is still unresolved globally, so the safe current phase uses the UC-compatible `PCD|PWT` path instead of mapping PCI MMIO as ordinary cacheable RAM.
 - `kernel::mmio::mapForDevice` now installs the QEMU-only transport mappings and stops before any transport write path if it cannot prove a safe MMIO window.
 
@@ -212,6 +213,7 @@ The virtio-gpu discovery path now maps the modern transport MMIO regions into a 
 - `kernel::mmio::mapForDevice` now installs the common, notify, ISR, and device config regions into the reserved kernel MMIO window using supervisor-only, non-executable, UC-style `PCD|PWT` leaf mappings.
 - The current cache policy avoids ordinary write-back RAM semantics and does not touch global MTRRs.
 - Read-only sanity reads are limited to observational modern VirtIO fields only: `num_queues`, `device_status`, `config_generation`, `numScanouts`, and `numCapsets`.
+- In the current runtime pass, the probe only performs the harmless common-config reads (`num_queues`, `device_status`, `config_generation`) and deliberately leaves feature negotiation and transport writes disabled.
 - The probe stops before any transport reset, feature negotiation, queue setup, or MMIO writes.
 - `GET_DISPLAY_INFO`, resource creation, backing attachment, scanout changes, transfers, and flushes remain disabled in this branch.
 - Unmap currently clears only MMIO-owned leaf entries and retains the intermediate page-table pages for now.
@@ -224,6 +226,7 @@ The virtio-gpu discovery path now maps the modern transport MMIO regions into a 
 - Architecture gate: x86_64 QEMU probe builds only.
 - Build gate: `GXOS_QEMU_VIRTIO_GPU_PROBE_ACTIVE`
 - Page-table flags: present, supervisor-only, writable leaf, `NX`, `PCD`, and `PWT`
+- `NX` is only used after the probe confirms `EFER.NXE` can be enabled on the QEMU-only build.
 - Cache strategy: UC-compatible `PCD|PWT`, not write-back
 - Unmap limitation: only MMIO-owned PTEs are cleared; shared higher-level paging structures are retained
 

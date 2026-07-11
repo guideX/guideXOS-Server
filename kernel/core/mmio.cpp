@@ -13,6 +13,10 @@
 #include "include/kernel/serial_debug.h"
 
 #if defined(_MSC_VER)
+#include <intrin.h>
+#endif
+
+#if defined(_MSC_VER)
 #define GXOS_ALIGN_4096 __declspec(align(4096))
 #else
 #define GXOS_ALIGN_4096 __attribute__((aligned(4096)))
@@ -35,11 +39,15 @@ static const uint64_t PTE_PWT = (1ULL << 3);
 static const uint64_t PTE_PCD = (1ULL << 4);
 static const uint64_t PTE_PS = (1ULL << 7);
 static const uint64_t PTE_NX = (1ULL << 63);
+static const uint32_t IA32_EFER = 0xC0000080U;
+static const uint64_t EFER_NXE = (1ULL << 11);
 static const uint64_t PTE_ADDR_MASK = 0x000FFFFFFFFFF000ULL;
 static const uint64_t SUPPORTED_FLAG_MASK =
     MAP_FLAG_NON_USER | MAP_FLAG_NO_EXEC | MAP_FLAG_UNCACHED |
     MAP_FLAG_WRITE_THROUGH | MAP_FLAG_WRITE_COMBINING;
 static uint64_t s_kernelPhysicalBase = KERNEL_VIRTUAL_BASE;
+static bool s_nxEnabled = false;
+static bool s_nxStateKnown = false;
 
 struct PageRecord {
     bool active;
@@ -81,6 +89,68 @@ static uint64_t kernel_virtual_to_physical(uint64_t virtualAddress)
 static uint64_t* current_cr3_root()
 {
     return reinterpret_cast<uint64_t*>(kernel::arch::read_cr3() & ~0xFFFULL);
+}
+
+static bool cpu_supports_nx()
+{
+#if defined(_MSC_VER)
+    int regs[4] = {};
+    __cpuid(regs, 0x80000000);
+    if (static_cast<uint32_t>(regs[0]) < 0x80000001u) {
+        return false;
+    }
+
+    __cpuid(regs, 0x80000001);
+    return (static_cast<uint32_t>(regs[3]) & (1u << 20)) != 0u;
+#elif defined(__GNUC__) || defined(__clang__)
+    uint32_t eax = 0;
+    uint32_t ebx = 0;
+    uint32_t ecx = 0;
+    uint32_t edx = 0;
+
+    __asm__ volatile(
+        "cpuid"
+        : "=a"(eax), "=b"(ebx), "=c"(ecx), "=d"(edx)
+        : "a"(0x80000000u), "c"(0u));
+    if (eax < 0x80000001u) {
+        return false;
+    }
+
+    __asm__ volatile(
+        "cpuid"
+        : "=a"(eax), "=b"(ebx), "=c"(ecx), "=d"(edx)
+        : "a"(0x80000001u), "c"(0u));
+    return (edx & (1u << 20)) != 0u;
+#else
+    return false;
+#endif
+}
+
+static bool ensure_nx_enabled(const char** reasonOut)
+{
+    if (s_nxStateKnown) {
+        return s_nxEnabled;
+    }
+
+    s_nxStateKnown = true;
+
+    const uint64_t efer = kernel::arch::read_msr(IA32_EFER);
+    if ((efer & EFER_NXE) != 0u) {
+        s_nxEnabled = true;
+        return true;
+    }
+
+    if (!cpu_supports_nx()) {
+        if (reasonOut != nullptr) {
+            *reasonOut = "CPU lacks NXE support for non-executable MMIO mappings";
+        }
+        s_nxEnabled = false;
+        return false;
+    }
+
+    kernel::arch::write_msr(IA32_EFER, efer | EFER_NXE);
+    s_nxEnabled = true;
+    return true;
 }
 
 static uint64_t* allocate_page_table_page()
@@ -182,7 +252,9 @@ static bool ensure_table_entry(uint64_t* table, uint64_t index, uint64_t** child
         return false;
     }
 
-    const uint64_t childPhys = reinterpret_cast<uint64_t>(child);
+    // Page-table entries must carry the physical address of the child page,
+    // not the kernel virtual address used to access the page in C++.
+    const uint64_t childPhys = kernel_virtual_to_physical(reinterpret_cast<uint64_t>(child));
     entry = (childPhys & PTE_ADDR_MASK) | PTE_PRESENT | PTE_WRITABLE;
     *childOut = child;
     return true;
@@ -235,7 +307,7 @@ static uint64_t make_mmio_leaf(uint64_t physicalPage)
            PTE_WRITABLE |
            PTE_PCD |
            PTE_PWT |
-           PTE_NX;
+           (s_nxEnabled ? PTE_NX : 0ULL);
 }
 
 static bool map_single_page(uint64_t physicalPage, uint64_t* mappedVirtualPageOut,
@@ -456,6 +528,16 @@ bool mapForDevice(uint64_t physicalBase, uint64_t length,
         return false;
     }
 
+    const char* nxReason = nullptr;
+    if (!ensure_nx_enabled(&nxReason)) {
+        report.reason = nxReason != nullptr ? nxReason : "non-executable MMIO mappings require NXE support";
+        report.nextKernelFeature = "EFER.NXE support";
+        if (reportOut != nullptr) {
+            *reportOut = report;
+        }
+        return false;
+    }
+
     const uint64_t pageCount = report.pageCount;
     const uint64_t offset = report.pageOffset;
     uint64_t virtualBase = 0;
@@ -491,6 +573,7 @@ bool mapForDevice(uint64_t physicalBase, uint64_t length,
     if (reportOut != nullptr) {
         *reportOut = report;
     }
+    kernel::arch::write_cr3(kernel::arch::read_cr3());
     return true;
 #else
     (void)physicalBase;
