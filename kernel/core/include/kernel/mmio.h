@@ -1,10 +1,11 @@
-// Kernel MMIO Mapping Diagnostics
+// Kernel MMIO Mapping Diagnostics and Runtime Front Door
 //
-// Diagnostic-only helpers for reasoning about whether a physical MMIO range
-// fits inside guideXOS's current safe direct-map assumptions.
+// Conservative helpers for reasoning about whether a physical MMIO range can
+// be mapped safely at runtime.
 //
-// This header does not install page tables or touch device registers.  It is a
-// conservative feasibility layer only.
+// The current branch still does not install page tables or touch device
+// registers.  The helpers here centralize the safety checks and the precise
+// blocker text used by the QEMU-only virtio-gpu probe.
 //
 // Copyright (c) 2026 guideXOS Server
 //
@@ -35,6 +36,7 @@ struct MappingReport {
     uint64_t length;
     uint64_t alignedBase;
     uint64_t alignedLength;
+    uint64_t pageCount; // Number of 4K pages covered after alignment
     uint64_t safeDirectMapCeiling;
     uint32_t flags;
     bool pageAligned;
@@ -57,12 +59,19 @@ inline uint64_t align_up(uint64_t value)
     return (value + PAGE_SIZE_BYTES - 1ULL) & ~(PAGE_SIZE_BYTES - 1ULL);
 }
 
+inline bool range_overflows(uint64_t physicalBase, uint64_t length)
+{
+    return (length != 0ULL) && (physicalBase > (~0ULL - length));
+}
+
 inline MappingReport describeRange(uint64_t physicalBase, uint64_t length, uint32_t flags = MAP_FLAG_NONE)
 {
     MappingReport report{};
     report.physicalBase = physicalBase;
     report.length = length;
     report.alignedBase = align_down(physicalBase);
+    report.alignedLength = 0;
+    report.pageCount = 0;
     report.safeDirectMapCeiling = SAFE_DIRECT_MAP_CEILING;
     report.flags = flags;
     report.pageAligned = ((physicalBase & (PAGE_SIZE_BYTES - 1ULL)) == 0) &&
@@ -72,14 +81,14 @@ inline MappingReport describeRange(uint64_t physicalBase, uint64_t length, uint3
         (flags & (MAP_FLAG_UNCACHED | MAP_FLAG_WRITE_THROUGH | MAP_FLAG_WRITE_COMBINING)) != 0u;
     report.cacheAttributesSupported = false; // TODO: PAT/MTRR plumbing
 
-    const bool rangeOverflow = (length != 0) && (physicalBase > (~0ULL - length));
+    const bool rangeOverflow = range_overflows(physicalBase, length);
     if (!rangeOverflow && length != 0) {
         const uint64_t alignedEnd = align_up(physicalBase + length);
         report.alignedLength = alignedEnd - report.alignedBase;
+        report.pageCount = report.alignedLength / PAGE_SIZE_BYTES;
         report.withinSafeDirectMap = (report.alignedBase <= SAFE_DIRECT_MAP_CEILING) &&
                                      (report.alignedLength <= SAFE_DIRECT_MAP_CEILING - report.alignedBase);
     } else {
-        report.alignedLength = 0;
         report.withinSafeDirectMap = false;
     }
     report.requiresNewPageTableEntries = !report.withinSafeDirectMap;
@@ -90,6 +99,9 @@ inline MappingReport describeRange(uint64_t physicalBase, uint64_t length, uint3
     } else if (rangeOverflow) {
         report.reason = "MMIO range overflows address space";
         report.nextKernelFeature = "overflow-safe MMIO range validation";
+    } else if ((flags & MAP_FLAG_NON_USER) == 0u || (flags & MAP_FLAG_NO_EXEC) == 0u) {
+        report.reason = "MMIO mappings must be kernel-only and no-executable";
+        report.nextKernelFeature = "kernel-only MMIO page-table flags";
     } else if (!report.withinSafeDirectMap) {
         report.reason = "outside current safe direct-map ceiling";
         report.nextKernelFeature = "runtime MMIO page-table mapping";
@@ -116,9 +128,12 @@ inline bool canMap(uint64_t physicalBase, uint64_t length,
     }
 
     // The current branch can only claim feasibility when the range is inside
-    // the conservative ceiling and no unsupported cache attributes were asked
-    // for.  Page rounding is still considered feasible.
-    return report.withinSafeDirectMap && !report.cacheAttributesRequested;
+    // the conservative ceiling, the mapping stays kernel-only/no-exec, and no
+    // unsupported cache attributes were asked for.  Page rounding is still
+    // considered feasible.
+    const bool hasRequiredSafetyFlags =
+        (flags & (MAP_FLAG_NON_USER | MAP_FLAG_NO_EXEC)) == (MAP_FLAG_NON_USER | MAP_FLAG_NO_EXEC);
+    return report.withinSafeDirectMap && hasRequiredSafetyFlags && !report.cacheAttributesRequested;
 }
 
 inline bool mapForDevice(uint64_t physicalBase, uint64_t length,
@@ -126,24 +141,62 @@ inline bool mapForDevice(uint64_t physicalBase, uint64_t length,
                          MappingReport* reportOut = nullptr,
                          uint32_t flags = MAP_FLAG_NONE)
 {
-    const MappingReport report = describeRange(physicalBase, length, flags);
-    if (reportOut != nullptr) {
-        *reportOut = report;
-    }
+    MappingReport report = describeRange(physicalBase, length, flags);
 
     if (mappedVirtualOut != nullptr) {
         *mappedVirtualOut = 0;
     }
 
-    // TODO: install a guarded MMIO mapping with explicit cache attributes and
-    // unmap support once runtime page-table updates are proven safe.
+    if (length == 0) {
+        if (reportOut != nullptr) {
+            *reportOut = report;
+        }
+        return false;
+    }
+
+    if (range_overflows(physicalBase, length)) {
+        if (reportOut != nullptr) {
+            *reportOut = report;
+        }
+        return false;
+    }
+
+    if ((flags & (MAP_FLAG_NON_USER | MAP_FLAG_NO_EXEC)) != (MAP_FLAG_NON_USER | MAP_FLAG_NO_EXEC)) {
+        report.reason = "MMIO mappings must be kernel-only and no-executable";
+        report.nextKernelFeature = "kernel-only MMIO page-table flags";
+        if (reportOut != nullptr) {
+            *reportOut = report;
+        }
+        return false;
+    }
+
+    if (report.cacheAttributesRequested && !report.cacheAttributesSupported) {
+        report.reason = "requested MMIO cache attributes are not supported yet";
+        report.nextKernelFeature = "PAT/MTRR cache attribute plumbing";
+        if (reportOut != nullptr) {
+            *reportOut = report;
+        }
+        return false;
+    }
+
+    if (report.requiresNewPageTableEntries) {
+        report.reason = "runtime MMIO page-table mapping is not implemented yet";
+        report.nextKernelFeature = "runtime MMIO page-table mapping";
+    } else {
+        report.reason = "runtime MMIO mapping helper is still stubbed";
+        report.nextKernelFeature = "runtime MMIO mapping helper";
+    }
+
+    if (reportOut != nullptr) {
+        *reportOut = report;
+    }
     return false;
 }
 
 inline bool unmap(uint64_t /*mappedVirtual*/, uint64_t /*length*/, const char** reasonOut = nullptr)
 {
     if (reasonOut != nullptr) {
-        *reasonOut = "MMIO unmap is not implemented yet";
+        *reasonOut = "MMIO unmap is not implemented yet; runtime page-table tracking is absent";
     }
     return false;
 }

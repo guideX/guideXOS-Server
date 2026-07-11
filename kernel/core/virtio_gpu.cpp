@@ -165,6 +165,20 @@ static void serial_put_u32_decimal(uint32_t value)
     kernel::serial::puts(&buffer[index]);
 }
 
+static void serial_put_u64_decimal(uint64_t value)
+{
+    char buffer[21];
+    int index = 20;
+    buffer[index] = '\0';
+
+    do {
+        buffer[--index] = static_cast<char>('0' + (value % 10u));
+        value /= 10u;
+    } while (value != 0u && index > 0);
+
+    kernel::serial::puts(&buffer[index]);
+}
+
 static uint64_t align_up(uint64_t value, uint64_t alignment)
 {
     return (value + alignment - 1) & ~(alignment - 1);
@@ -432,20 +446,21 @@ static const char* mmio_region_blocker_reason(MmioRegionKind kind,
         }
     }
 
-    if (!report.withinSafeDirectMap) {
+    if ((report.flags & (kernel::mmio::MAP_FLAG_NON_USER | kernel::mmio::MAP_FLAG_NO_EXEC)) !=
+        (kernel::mmio::MAP_FLAG_NON_USER | kernel::mmio::MAP_FLAG_NO_EXEC)) {
         switch (kind) {
         case MmioRegionKind::Common:
-            return "common config MMIO base outside safe direct-mapped range";
+            return "common config MMIO mappings must be kernel-only and no-executable";
         case MmioRegionKind::Notify:
-            return "notify config MMIO base outside safe direct-mapped range";
+            return "notify config MMIO mappings must be kernel-only and no-executable";
         case MmioRegionKind::Isr:
-            return "isr config MMIO base outside safe direct-mapped range";
+            return "isr config MMIO mappings must be kernel-only and no-executable";
         case MmioRegionKind::Device:
-            return "device config MMIO base outside safe direct-mapped range";
+            return "device config MMIO mappings must be kernel-only and no-executable";
         case MmioRegionKind::Pci:
-            return "pci config MMIO base outside safe direct-mapped range";
+            return "pci config MMIO mappings must be kernel-only and no-executable";
         default:
-            return "MMIO base outside safe direct-mapped range";
+            return "MMIO mappings must be kernel-only and no-executable";
         }
     }
 
@@ -466,7 +481,37 @@ static const char* mmio_region_blocker_reason(MmioRegionKind kind,
         }
     }
 
-    return nullptr;
+    if (!report.withinSafeDirectMap) {
+        switch (kind) {
+        case MmioRegionKind::Common:
+            return "common config runtime MMIO page-table mapping is not implemented yet";
+        case MmioRegionKind::Notify:
+            return "notify config runtime MMIO page-table mapping is not implemented yet";
+        case MmioRegionKind::Isr:
+            return "isr config runtime MMIO page-table mapping is not implemented yet";
+        case MmioRegionKind::Device:
+            return "device config runtime MMIO page-table mapping is not implemented yet";
+        case MmioRegionKind::Pci:
+            return "pci config runtime MMIO page-table mapping is not implemented yet";
+        default:
+            return "runtime MMIO page-table mapping is not implemented yet";
+        }
+    }
+
+    switch (kind) {
+    case MmioRegionKind::Common:
+        return "common config runtime MMIO mapping helper is still stubbed";
+    case MmioRegionKind::Notify:
+        return "notify config runtime MMIO mapping helper is still stubbed";
+    case MmioRegionKind::Isr:
+        return "isr config runtime MMIO mapping helper is still stubbed";
+    case MmioRegionKind::Device:
+        return "device config runtime MMIO mapping helper is still stubbed";
+    case MmioRegionKind::Pci:
+        return "pci config runtime MMIO mapping helper is still stubbed";
+    default:
+        return "runtime MMIO mapping helper is still stubbed";
+    }
 }
 
 static bool region_physical_base(const PciRegion& region, uint64_t* physicalBaseOut)
@@ -484,33 +529,51 @@ static bool region_physical_base(const PciRegion& region, uint64_t* physicalBase
     return true;
 }
 
-static void log_mmio_mapping_report(MmioRegionKind kind, const PciRegion& region,
-                                    const kernel::mmio::MappingReport& report)
+static void log_mmio_mapping_report(MmioRegionKind kind,
+                                    const kernel::mmio::MappingReport& report,
+                                    bool mappingSucceeded,
+                                    uint64_t mappedVirtual,
+                                    bool qemuProbeOnly)
 {
     kernel::serial::puts("[VIRTIO-GPU] MMIO mapping report ");
     kernel::serial::puts(mmio_region_label(kind));
-    kernel::serial::puts(" barBase=0x");
-    kernel::serial::put_hex64(region.base);
-    kernel::serial::puts(" cfgOffset=0x");
-    kernel::serial::put_hex32(region.offset);
-    kernel::serial::puts(" cfgLength=0x");
-    kernel::serial::put_hex32(region.length);
-    kernel::serial::puts(" cfgBase=0x");
+    kernel::serial::puts(" requestBase=0x");
     kernel::serial::put_hex64(report.physicalBase);
+    kernel::serial::puts(" requestLength=0x");
+    kernel::serial::put_hex64(report.length);
     kernel::serial::puts(" alignedBase=0x");
     kernel::serial::put_hex64(report.alignedBase);
     kernel::serial::puts(" alignedLength=0x");
     kernel::serial::put_hex64(report.alignedLength);
+    kernel::serial::puts(" pages=");
+    serial_put_u64_decimal(report.pageCount);
+    kernel::serial::puts(" mappedVirtual=");
+    if (mappingSucceeded) {
+        kernel::serial::puts("0x");
+        kernel::serial::put_hex64(mappedVirtual);
+    } else {
+        kernel::serial::puts("n/a");
+    }
+    kernel::serial::puts(" flags=0x");
+    kernel::serial::put_hex32(report.flags);
+    kernel::serial::puts(" nonUser=");
+    kernel::serial::puts((report.flags & kernel::mmio::MAP_FLAG_NON_USER) != 0u ? "yes" : "no");
+    kernel::serial::puts(" noExec=");
+    kernel::serial::puts((report.flags & kernel::mmio::MAP_FLAG_NO_EXEC) != 0u ? "yes" : "no");
+    kernel::serial::puts(" cacheAttrs=");
+    if (report.cacheAttributesRequested) {
+        kernel::serial::puts(report.cacheAttributesSupported ? "ok" : "todo(PAT/MTRR)");
+    } else {
+        kernel::serial::puts("off todo(PAT/MTRR)");
+    }
+    kernel::serial::puts(" qemuProbeOnly=");
+    kernel::serial::puts(qemuProbeOnly ? "yes" : "no");
     kernel::serial::puts(" pageAligned=");
     kernel::serial::puts(report.pageAligned ? "yes" : "no");
     kernel::serial::puts(" directMapped=");
     kernel::serial::puts(report.withinSafeDirectMap ? "yes" : "no");
     kernel::serial::puts(" requiresNewPageTableEntries=");
     kernel::serial::puts(report.requiresNewPageTableEntries ? "yes" : "no");
-    kernel::serial::puts(" cacheAttrsRequested=");
-    kernel::serial::puts(report.cacheAttributesRequested ? "yes" : "no");
-    kernel::serial::puts(" cacheAttrsSupported=");
-    kernel::serial::puts(report.cacheAttributesSupported ? "yes" : "no");
     kernel::serial::puts(" reason=");
     kernel::serial::puts(report.reason != nullptr ? report.reason : "n/a");
     kernel::serial::puts(" nextFeature=");
@@ -549,15 +612,17 @@ static const char* transport_mmio_blocker_reason(const ModernTransport& transpor
         uint64_t physicalBase = 0;
         const bool baseValid = region_physical_base(region, &physicalBase);
         const uint32_t mappingFlags = kernel::mmio::MAP_FLAG_NON_USER | kernel::mmio::MAP_FLAG_NO_EXEC;
-        bool canMap = false;
+        bool mapped = false;
+        uint64_t mappedVirtual = 0;
 
         if (baseValid) {
-            canMap = kernel::mmio::canMap(physicalBase, region.length, &report, mappingFlags);
+            mapped = kernel::mmio::mapForDevice(physicalBase, region.length, &mappedVirtual, &report, mappingFlags);
         } else {
             report.physicalBase = 0;
             report.length = region.length;
             report.alignedBase = 0;
             report.alignedLength = 0;
+            report.pageCount = 0;
             report.safeDirectMapCeiling = kernel::mmio::SAFE_DIRECT_MAP_CEILING;
             report.flags = mappingFlags;
             report.pageAligned = false;
@@ -569,7 +634,7 @@ static const char* transport_mmio_blocker_reason(const ModernTransport& transpor
             report.reason = "MMIO base overflows address space";
             report.nextKernelFeature = "overflow-safe MMIO range validation";
         }
-        log_mmio_mapping_report(entry.kind, region, report);
+        log_mmio_mapping_report(entry.kind, report, mapped, mappedVirtual, true);
 
         if (blockerReason == nullptr) {
             if (!baseValid) {
@@ -596,7 +661,7 @@ static const char* transport_mmio_blocker_reason(const ModernTransport& transpor
                 if (blockerReportOut != nullptr) {
                     *blockerReportOut = report;
                 }
-            } else if (!canMap) {
+            } else if (!mapped) {
                 blockerReason = mmio_region_blocker_reason(entry.kind, report);
                 if (blockerReason != nullptr && blockerReportOut != nullptr) {
                     *blockerReportOut = report;

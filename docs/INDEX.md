@@ -103,7 +103,7 @@ Original kernel documentation (existing file).
 - Architecture abstraction
 - Roadmap
 
-### 7. [MULTI_MONITOR_V0_2_EXPERIMENT.md](MULTI_MONITOR_V0_2_EXPERIMENT.md) - Multi-monitor display experiment notes and validation steps.
+### 7. [MULTI_MONITOR_V0_2_EXPERIMENT.md](MULTI_MONITOR_V0_2_EXPERIMENT.md) - Dual-monitor v0.2 implementation track, roadmap, and validation steps.
 
 ---
 

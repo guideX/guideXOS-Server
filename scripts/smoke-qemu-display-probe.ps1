@@ -730,19 +730,24 @@ function Invoke-QemuDisplayProbeBackend {
         Assert-Condition -Backend $backendName -Name 'virtio-gpu MMIO blocker line' -Condition $gpuMmioBlockedLine.Success -Detail 'expected an explicit MMIO blocker line in the serial log'
         Assert-Condition -Backend $backendName -Name 'virtio-gpu MMIO report fields' -Condition (
             $gpuMmioReportLine.Success -and
-            $gpuMmioReportLine.Value -match 'barBase=0x[0-9A-Fa-f]+' -and
-            $gpuMmioReportLine.Value -match 'cfgOffset=0x[0-9A-Fa-f]+' -and
-            $gpuMmioReportLine.Value -match 'cfgLength=0x[0-9A-Fa-f]+' -and
-            $gpuMmioReportLine.Value -match 'cfgBase=0x[0-9A-Fa-f]+' -and
+            $gpuMmioReportLine.Value -match 'requestBase=0x[0-9A-Fa-f]+' -and
+            $gpuMmioReportLine.Value -match 'requestLength=0x[0-9A-Fa-f]+' -and
             $gpuMmioReportLine.Value -match 'alignedBase=0x[0-9A-Fa-f]+' -and
             $gpuMmioReportLine.Value -match 'alignedLength=0x[0-9A-Fa-f]+' -and
+            $gpuMmioReportLine.Value -match 'pages=\d+' -and
+            $gpuMmioReportLine.Value -match 'mappedVirtual=(n/a|0x[0-9A-Fa-f]+)' -and
+            $gpuMmioReportLine.Value -match 'flags=0x[0-9A-Fa-f]+' -and
+            $gpuMmioReportLine.Value -match 'nonUser=yes' -and
+            $gpuMmioReportLine.Value -match 'noExec=yes' -and
+            $gpuMmioReportLine.Value -match 'cacheAttrs=off todo\(PAT/MTRR\)' -and
+            $gpuMmioReportLine.Value -match 'qemuProbeOnly=yes' -and
             $gpuMmioReportLine.Value -match 'pageAligned=(yes|no)' -and
             $gpuMmioReportLine.Value -match 'directMapped=no' -and
             $gpuMmioReportLine.Value -match 'requiresNewPageTableEntries=yes' -and
-            $gpuMmioReportLine.Value -match 'reason=outside current safe direct-map ceiling' -and
+            $gpuMmioReportLine.Value -match 'reason=runtime MMIO page-table mapping is not implemented yet' -and
             $gpuMmioReportLine.Value -match 'nextFeature=runtime MMIO page-table mapping'
         ) -Detail ($gpuMmioReportLine.Value)
-        Assert-Condition -Backend $backendName -Name 'virtio-gpu blocker reason propagated' -Condition ($serialText -match 'reason=common config MMIO base outside safe direct-mapped range') -Detail 'probe summary should carry the MMIO blocker reason'
+        Assert-Condition -Backend $backendName -Name 'virtio-gpu blocker reason propagated' -Condition ($serialText -match 'reason=common config runtime MMIO page-table mapping is not implemented yet') -Detail 'probe summary should carry the MMIO blocker reason'
         Assert-Condition -Backend $backendName -Name 'virtio-gpu transport reset suppressed' -Condition (-not $gpuResetStepLine.Success) -Detail 'probe should not write the transport reset register'
         Assert-Condition -Backend $backendName -Name 'virtio-gpu feature negotiation suppressed' -Condition (-not $gpuFeatureNegotiationLine.Success) -Detail 'probe must stop before feature negotiation'
         Assert-Condition -Backend $backendName -Name 'virtio-gpu queue setup suppressed' -Condition (-not $gpuQueueCountLine.Success -and -not $gpuQueueLine.Success) -Detail 'probe must stop before control-queue layout'
