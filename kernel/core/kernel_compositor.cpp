@@ -8,6 +8,7 @@
 #include "include/kernel/kernel_ipc.h"
 #include "include/kernel/framebuffer.h"
 #include "include/kernel/image_adapter.h"
+#include "include/kernel/serial_debug.h"
 
 namespace kernel {
 namespace compositor {
@@ -262,6 +263,26 @@ app::KernelWindow* KernelCompositor::getFocusedWindow() {
     return getWindow(s_focusedWindowId);
 }
 
+#if defined(GXOS_DESKTOP_CLEANUP_RUNTIME_PASS)
+static void log_close_target(const char* prefix, const app::KernelWindow* win)
+{
+    serial::puts(prefix);
+    serial::puts(" window=");
+    if (win) {
+        serial::put_hex32(win->id);
+        serial::puts(" title=");
+        serial::puts(win->title);
+        serial::puts(" app=");
+        serial::puts(win->owner ? win->owner->getName() : "(no-owner)");
+        serial::puts(" flags=0x");
+        serial::put_hex32(win->flags);
+    } else {
+        serial::puts("(null)");
+    }
+    serial::putc('\n');
+}
+#endif
+
 void KernelCompositor::setFocus(uint32_t windowId) {
     // Clear focus flag on old window
     if (s_focusedWindowId != 0 && s_focusedWindowId != windowId) {
@@ -376,11 +397,39 @@ void KernelCompositor::restoreWindowsFromShowDesktop() {
 
 bool KernelCompositor::requestCloseWindow(uint32_t windowId) {
     app::KernelWindow* win = getWindow(windowId);
-    if (!win || !win->owner) return false;
-    if (!(win->flags & app::WF_VISIBLE)) return false;
-    if (win->flags & app::WF_MINIMIZED) return false;
-    if (!(win->flags & app::WF_CLOSABLE)) return false;
+    #if defined(GXOS_DESKTOP_CLEANUP_RUNTIME_PASS)
+    log_close_target("[compositor] requestCloseWindow", win);
+    #endif
+    if (!win || !win->owner) {
+        #if defined(GXOS_DESKTOP_CLEANUP_RUNTIME_PASS)
+        serial::puts("[compositor] close-result=rejected reason=no-owner\n");
+        #endif
+        return false;
+    }
+    if (!(win->flags & app::WF_VISIBLE)) {
+        #if defined(GXOS_DESKTOP_CLEANUP_RUNTIME_PASS)
+        serial::puts("[compositor] close-result=rejected reason=not-visible\n");
+        #endif
+        return false;
+    }
+    if (win->flags & app::WF_MINIMIZED) {
+        #if defined(GXOS_DESKTOP_CLEANUP_RUNTIME_PASS)
+        serial::puts("[compositor] close-result=rejected reason=minimized\n");
+        #endif
+        return false;
+    }
+    if (!(win->flags & app::WF_CLOSABLE)) {
+        #if defined(GXOS_DESKTOP_CLEANUP_RUNTIME_PASS)
+        serial::puts("[compositor] close-result=rejected reason=not-closable\n");
+        #endif
+        return false;
+    }
 
+    #if defined(GXOS_DESKTOP_CLEANUP_RUNTIME_PASS)
+    serial::puts("[compositor] close-result=accepted window=");
+    serial::put_hex32(win->id);
+    serial::putc('\n');
+    #endif
     win->owner->requestClose();
     return true;
 }
@@ -611,6 +660,9 @@ void KernelCompositor::handleMouseUp(int32_t mx, int32_t my, uint8_t button) {
             win->closeBtnPressed = false;
             win->dirty = true;
             if (hitWin == win && hit == HitTestResult::CloseButton) {
+                #if defined(GXOS_DESKTOP_CLEANUP_RUNTIME_PASS)
+                log_close_target("[compositor] titlebar close-request", win);
+                #endif
                 closeWindow(win->id);
                 return;  // Window was closed, stop processing
             }

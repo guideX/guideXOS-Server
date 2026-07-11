@@ -266,15 +266,16 @@ static FSType detect_fs_type(uint8_t blockDevIndex)
         serial::puts("\n");
 #endif
         
-        if (partType == 0x0B || partType == 0x0C) {
-            // FAT32 partition - get start LBA
+        if (partType == 0x01 || partType == 0x04 || partType == 0x06 ||
+            partType == 0x0B || partType == 0x0C || partType == 0x0E) {
+            // FAT-family partition - let the FAT driver probe the partition start.
             uint32_t startLBA = *reinterpret_cast<uint32_t*>(&buffer[446 + 8]);
 #if defined(__GNUC__) || defined(__clang__)
-            serial::puts("[VFS]   FAT32 partition at LBA 0x");
+            serial::puts("[VFS]   FAT partition at LBA 0x");
             serial::put_hex32(startLBA);
-            serial::puts(" - partitions not supported\n");
+            serial::puts(" - deferring to partition-aware FAT mount\n");
 #endif
-            return FS_TYPE_NONE;
+            return FS_TYPE_FAT32;
         }
     }
     

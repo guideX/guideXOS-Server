@@ -1,4 +1,4 @@
-// FAT32 / exFAT Filesystem Driver — Implementation
+ï»¿// FAT32 / exFAT Filesystem Driver â€” Implementation
 //
 // Reads the BPB / boot sector to determine FAT type, caches the
 // FAT table for cluster chain traversal, and provides directory
@@ -9,6 +9,7 @@
 
 #include "include/kernel/fs_fat.h"
 #include "include/kernel/block_device.h"
+#include "include/kernel/serial_debug.h"
 
 namespace kernel {
 namespace fs_fat {
@@ -64,8 +65,24 @@ static bool str_equal(const char* a, const char* b, uint32_t len)
     return true;
 }
 
+static bool is_fat_partition_type(uint8_t partType)
+{
+    return partType == 0x01 || partType == 0x04 || partType == 0x06 ||
+           partType == 0x0B || partType == 0x0C || partType == 0x0E;
+}
+
+static block::Status read_volume_sector(const FATVolume& vol, uint64_t lba, void* buffer)
+{
+    return block::read_sectors(vol.blockDevIndex, vol.partitionOffset + lba, 1, buffer);
+}
+
+static block::Status write_volume_sector(const FATVolume& vol, uint64_t lba, const void* buffer)
+{
+    return block::write_sectors(vol.blockDevIndex, vol.partitionOffset + lba, 1, buffer);
+}
+
 // ================================================================
-// FAT32 cluster ? sector translation
+// FAT cluster ? sector translation
 // ================================================================
 
 static uint32_t cluster_to_sector(const FATVolume& vol, uint32_t cluster)
@@ -74,23 +91,43 @@ static uint32_t cluster_to_sector(const FATVolume& vol, uint32_t cluster)
            (cluster - 2) * vol.sectorsPerCluster;
 }
 
-// ================================================================
-// FAT32: read next cluster from the FAT table
-// ================================================================
-
-static uint32_t fat32_next_cluster(const FATVolume& vol, uint32_t cluster)
+static uint32_t fat_entry_size(const FATVolume& vol)
 {
-    // Each FAT entry is 4 bytes.  Determine which sector of the
-    // FAT contains the entry.
-    uint32_t fatOffset   = cluster * 4;
+    return vol.type == FAT_TYPE_FAT16 ? 2u : 4u;
+}
+
+static uint32_t fat_free_value(const FATVolume& vol)
+{
+    return vol.type == FAT_TYPE_FAT16 ? FAT16_CLUSTER_FREE : FAT32_CLUSTER_FREE;
+}
+
+static uint32_t fat_end_value(const FATVolume& vol)
+{
+    return vol.type == FAT_TYPE_FAT16 ? FAT16_CLUSTER_END : FAT32_CLUSTER_END;
+}
+
+static uint32_t fat_cluster_mask(const FATVolume& vol)
+{
+    return vol.type == FAT_TYPE_FAT16 ? FAT16_CLUSTER_MASK : FAT32_CLUSTER_MASK;
+}
+
+static uint32_t fat_next_cluster(const FATVolume& vol, uint32_t cluster)
+{
+    uint32_t entrySize = fat_entry_size(vol);
+    uint32_t fatOffset   = cluster * entrySize;
     uint32_t fatSector   = vol.reservedSectors + (fatOffset / vol.bytesPerSector);
     uint32_t entryOffset = fatOffset % vol.bytesPerSector;
 
-    block::Status st = block::read_sectors(vol.blockDevIndex, fatSector, 1, s_secBuf);
-    if (st != block::BLOCK_OK) return FAT32_CLUSTER_END;
+    block::Status st = read_volume_sector(vol, fatSector, s_secBuf);
+    if (st != block::BLOCK_OK) return fat_end_value(vol);
+
+    if (entrySize == 2) {
+        uint32_t val = *reinterpret_cast<uint16_t*>(&s_secBuf[entryOffset]);
+        return val & fat_cluster_mask(vol);
+    }
 
     uint32_t val = *reinterpret_cast<uint32_t*>(&s_secBuf[entryOffset]);
-    return val & FAT32_CLUSTER_MASK;
+    return val & fat_cluster_mask(vol);
 }
 
 // ================================================================
@@ -104,7 +141,7 @@ static uint32_t exfat_next_cluster(const FATVolume& vol, uint32_t cluster)
     uint32_t fatSector   = vol.exfatFatOffset + (fatOffset / sectorSize);
     uint32_t entryOffset = fatOffset % sectorSize;
 
-    block::Status st = block::read_sectors(vol.blockDevIndex, fatSector, 1, s_secBuf);
+    block::Status st = read_volume_sector(vol, fatSector, s_secBuf);
     if (st != block::BLOCK_OK) return 0xFFFFFFFF;
 
     return *reinterpret_cast<uint32_t*>(&s_secBuf[entryOffset]);
@@ -116,50 +153,83 @@ static uint32_t exfat_next_cluster(const FATVolume& vol, uint32_t cluster)
 
 static uint32_t next_cluster(const FATVolume& vol, uint32_t cluster)
 {
-    if (vol.type == FAT_TYPE_FAT32) return fat32_next_cluster(vol, cluster);
+    if (vol.type == FAT_TYPE_FAT16 || vol.type == FAT_TYPE_FAT32) return fat_next_cluster(vol, cluster);
     if (vol.type == FAT_TYPE_EXFAT) return exfat_next_cluster(vol, cluster);
     return 0xFFFFFFFF;
 }
 
 static bool is_end_of_chain(const FATVolume& vol, uint32_t cluster)
 {
+    if (vol.type == FAT_TYPE_FAT16) return cluster >= FAT16_CLUSTER_END;
     if (vol.type == FAT_TYPE_FAT32) return cluster >= FAT32_CLUSTER_END;
     if (vol.type == FAT_TYPE_EXFAT) return cluster >= 0xFFFFFFF8;
     return true;
 }
 
 // ================================================================
-// Mount — detect FAT32 or exFAT and fill volume descriptor
+// Mount â€” detect FAT32 or exFAT and fill volume descriptor
 // ================================================================
 
-static bool try_mount_fat32(uint8_t blockDevIdx, FATVolume& vol)
+static bool try_mount_fat32_boot_sector(uint8_t blockDevIdx, uint64_t partitionOffset, FATVolume& vol, const uint8_t* bootSector)
 {
-    block::Status st = block::read_sectors(blockDevIdx, 0, 1, s_secBuf);
-    if (st != block::BLOCK_OK) return false;
+    if (!bootSector) return false;
 
-    const FAT32_BPB* bpb = reinterpret_cast<const FAT32_BPB*>(s_secBuf);
+    const FAT32_BPB* bpb = reinterpret_cast<const FAT32_BPB*>(bootSector);
+
+#if defined(GXOS_DESKTOP_CLEANUP_RUNTIME_PASS)
+    kernel::serial::puts("[FAT] boot-sector probe lba=");
+    kernel::serial::put_hex32(static_cast<uint32_t>(partitionOffset));
+    kernel::serial::puts(" bps=");
+    kernel::serial::put_hex16(bpb->bytesPerSector);
+    kernel::serial::puts(" spc=");
+    kernel::serial::put_hex8(bpb->sectorsPerCluster);
+    kernel::serial::puts(" fat16=");
+    kernel::serial::put_hex16(bpb->fatSize16);
+    kernel::serial::puts(" fat32=");
+    kernel::serial::put_hex32(bpb->fatSize32);
+    kernel::serial::puts(" rootEntries=");
+    kernel::serial::put_hex16(bpb->rootEntryCount);
+    kernel::serial::puts(" fsType=");
+    kernel::serial::puts(bpb->fsType);
+    kernel::serial::putc('\n');
+#endif
 
     // Basic sanity checks
     if (bpb->bytesPerSector < 512 || bpb->bytesPerSector > 4096) return false;
     if (bpb->sectorsPerCluster == 0) return false;
     if (bpb->numFATs == 0) return false;
-    if (bpb->fatSize32 == 0) return false;
+    if (bpb->fatSize32 == 0) {
+#if defined(GXOS_DESKTOP_CLEANUP_RUNTIME_PASS)
+        kernel::serial::puts("[FAT] boot-sector reject reason=fat32-size-zero\n");
+#endif
+        return false;
+    }
 
     // Check for "FAT32   " signature
-    if (!str_equal(bpb->fsType, "FAT32   ", 8)) return false;
+    if (!str_equal(bpb->fsType, "FAT32   ", 8)) {
+#if defined(GXOS_DESKTOP_CLEANUP_RUNTIME_PASS)
+        kernel::serial::puts("[FAT] boot-sector reject reason=fat32-signature-mismatch\n");
+#endif
+        return false;
+    }
 
     vol.type              = FAT_TYPE_FAT32;
     vol.blockDevIndex     = blockDevIdx;
+    vol.partitionOffset   = partitionOffset;
     vol.bytesPerSector    = bpb->bytesPerSector;
     vol.sectorsPerCluster = bpb->sectorsPerCluster;
     vol.reservedSectors   = bpb->reservedSectors;
     vol.numFATs           = bpb->numFATs;
     vol.fatSizeSectors    = bpb->fatSize32;
     vol.rootCluster       = bpb->rootCluster;
+    vol.rootDirFirstSector = 0;
+    vol.rootDirSectors     = 0;
 
     vol.totalSectors = (bpb->totalSectors32 != 0)
                        ? bpb->totalSectors32
                        : bpb->totalSectors16;
+
+    if (vol.totalSectors == 0) return false;
 
     vol.firstDataSector = vol.reservedSectors +
                           (vol.numFATs * vol.fatSizeSectors);
@@ -173,6 +243,110 @@ static bool try_mount_fat32(uint8_t blockDevIdx, FATVolume& vol)
 
     vol.mounted = true;
     return true;
+}
+
+static bool try_mount_fat16_boot_sector(uint8_t blockDevIdx, uint64_t partitionOffset, FATVolume& vol, const uint8_t* bootSector)
+{
+    if (!bootSector) return false;
+
+    const FAT12_16_BPB* bpb = reinterpret_cast<const FAT12_16_BPB*>(bootSector);
+
+#if defined(GXOS_DESKTOP_CLEANUP_RUNTIME_PASS)
+    kernel::serial::puts("[FAT] boot-sector probe lba=");
+    kernel::serial::put_hex32(static_cast<uint32_t>(partitionOffset));
+    kernel::serial::puts(" bps=");
+    kernel::serial::put_hex16(bpb->bytesPerSector);
+    kernel::serial::puts(" spc=");
+    kernel::serial::put_hex8(bpb->sectorsPerCluster);
+    kernel::serial::puts(" rootEntries=");
+    kernel::serial::put_hex16(bpb->rootEntryCount);
+    kernel::serial::puts(" fat16=");
+    kernel::serial::put_hex16(bpb->fatSize16);
+    kernel::serial::puts(" fsType=");
+    kernel::serial::puts(bpb->fsType);
+    kernel::serial::putc('\n');
+#endif
+
+    if (bpb->bytesPerSector < 512 || bpb->bytesPerSector > 4096) return false;
+    if (bpb->sectorsPerCluster == 0) return false;
+    if (bpb->numFATs == 0) return false;
+    if (bpb->rootEntryCount == 0) return false;
+    if (bpb->fatSize16 == 0) {
+#if defined(GXOS_DESKTOP_CLEANUP_RUNTIME_PASS)
+        kernel::serial::puts("[FAT] boot-sector reject reason=fat16-size-zero\n");
+#endif
+        return false;
+    }
+
+    vol.type              = FAT_TYPE_FAT16;
+    vol.blockDevIndex     = blockDevIdx;
+    vol.partitionOffset   = partitionOffset;
+    vol.bytesPerSector    = bpb->bytesPerSector;
+    vol.sectorsPerCluster = bpb->sectorsPerCluster;
+    vol.reservedSectors   = bpb->reservedSectors;
+    vol.numFATs           = bpb->numFATs;
+    vol.fatSizeSectors    = bpb->fatSize16;
+    vol.rootCluster       = 0;
+    vol.rootDirFirstSector = vol.reservedSectors + (vol.numFATs * vol.fatSizeSectors);
+    vol.rootDirSectors     = ((static_cast<uint32_t>(bpb->rootEntryCount) * 32) + (vol.bytesPerSector - 1)) / vol.bytesPerSector;
+
+    vol.totalSectors = (bpb->totalSectors32 != 0)
+                       ? bpb->totalSectors32
+                       : bpb->totalSectors16;
+    if (vol.totalSectors == 0) return false;
+
+    vol.firstDataSector = vol.rootDirFirstSector + vol.rootDirSectors;
+    if (vol.totalSectors <= vol.firstDataSector) return false;
+
+    uint32_t dataSectors = vol.totalSectors - vol.firstDataSector;
+    vol.totalDataClusters = dataSectors / vol.sectorsPerCluster;
+
+    memcopy(vol.volumeLabel, bpb->volumeLabel, 11);
+    vol.volumeLabel[11] = '\0';
+
+    vol.mounted = true;
+    return true;
+}
+
+static bool try_mount_fat_boot_sector(uint8_t blockDevIdx, uint64_t partitionOffset, FATVolume& vol, const uint8_t* bootSector)
+{
+    if (try_mount_fat32_boot_sector(blockDevIdx, partitionOffset, vol, bootSector)) {
+        return true;
+    }
+    return try_mount_fat16_boot_sector(blockDevIdx, partitionOffset, vol, bootSector);
+}
+
+static bool try_mount_fat(uint8_t blockDevIdx, FATVolume& vol)
+{
+    block::Status st = block::read_sectors(blockDevIdx, 0, 1, s_secBuf);
+    if (st != block::BLOCK_OK) return false;
+
+    if (try_mount_fat_boot_sector(blockDevIdx, 0, vol, s_secBuf)) {
+        return true;
+    }
+
+    // Could be an MBR with a FAT partition. Probe the primary partition table
+    // and let the boot sector at the partition start decide the actual format.
+    if (s_secBuf[510] == 0x55 && s_secBuf[511] == 0xAA) {
+        for (uint32_t partIndex = 0; partIndex < 4; ++partIndex) {
+            uint32_t entry = 446 + partIndex * 16;
+            uint8_t partType = s_secBuf[entry + 4];
+            if (!is_fat_partition_type(partType)) continue;
+
+            uint32_t startLBA = *reinterpret_cast<uint32_t*>(&s_secBuf[entry + 8]);
+            if (startLBA == 0) continue;
+
+            if (block::read_sectors(blockDevIdx, startLBA, 1, s_secBuf) != block::BLOCK_OK) {
+                continue;
+            }
+
+            if (try_mount_fat_boot_sector(blockDevIdx, startLBA, vol, s_secBuf)) {
+                return true;
+            }
+        }
+    }
+
+    return false;
 }
 
 static bool try_mount_exfat(uint8_t blockDevIdx, FATVolume& vol)
@@ -197,6 +371,9 @@ static bool try_mount_exfat(uint8_t blockDevIdx, FATVolume& vol)
     vol.exfatSectorsPerClusterShift = bs->sectorsPerClusterShift;
     vol.numFATs                    = bs->numFATs;
     vol.rootCluster                = bs->rootDirCluster;
+    vol.partitionOffset            = bs->partitionOffset;
+    vol.rootDirFirstSector         = 0;
+    vol.rootDirSectors             = 0;
 
     vol.bytesPerSector    = 1u << bs->bytesPerSectorShift;
     vol.sectorsPerCluster = 1u << bs->sectorsPerClusterShift;
@@ -217,14 +394,14 @@ static block::Status read_cluster_sector(const FATVolume& vol,
                                          void* buffer)
 {
     uint32_t lba;
-    if (vol.type == FAT_TYPE_FAT32) {
+    if (vol.type == FAT_TYPE_FAT16 || vol.type == FAT_TYPE_FAT32) {
         lba = cluster_to_sector(vol, cluster) + sectorOffset;
     } else {
         // exFAT
         lba = vol.exfatClusterHeapOffset +
               (cluster - 2) * vol.sectorsPerCluster + sectorOffset;
     }
-    return block::read_sectors(vol.blockDevIndex, lba, 1, buffer);
+    return read_volume_sector(vol, lba, buffer);
 }
 
 static block::Status write_cluster_sector(const FATVolume& vol,
@@ -233,43 +410,49 @@ static block::Status write_cluster_sector(const FATVolume& vol,
                                           const void* buffer)
 {
     uint32_t lba;
-    if (vol.type == FAT_TYPE_FAT32) {
+    if (vol.type == FAT_TYPE_FAT16 || vol.type == FAT_TYPE_FAT32) {
         lba = cluster_to_sector(vol, cluster) + sectorOffset;
     } else {
         lba = vol.exfatClusterHeapOffset +
               (cluster - 2) * vol.sectorsPerCluster + sectorOffset;
     }
-    return block::write_sectors(vol.blockDevIndex, lba, 1, buffer);
+    return write_volume_sector(vol, lba, buffer);
 }
 
-static block::Status write_fat32_entry(const FATVolume& vol, uint32_t cluster, uint32_t value)
+static block::Status write_fat_entry(const FATVolume& vol, uint32_t cluster, uint32_t value)
 {
-    uint32_t fatOffset = cluster * 4;
+    uint32_t entrySize = fat_entry_size(vol);
+    uint32_t fatOffset = cluster * entrySize;
     uint32_t fatSector = vol.reservedSectors + (fatOffset / vol.bytesPerSector);
     uint32_t entryOffset = fatOffset % vol.bytesPerSector;
 
-    block::Status st = block::read_sectors(vol.blockDevIndex, fatSector, 1, s_secBuf);
+    block::Status st = read_volume_sector(vol, fatSector, s_secBuf);
     if (st != block::BLOCK_OK) return st;
 
-    *reinterpret_cast<uint32_t*>(&s_secBuf[entryOffset]) = value & FAT32_CLUSTER_MASK;
-    st = block::write_sectors(vol.blockDevIndex, fatSector, 1, s_secBuf);
+    if (entrySize == 2) {
+        *reinterpret_cast<uint16_t*>(&s_secBuf[entryOffset]) = static_cast<uint16_t>(value & FAT16_CLUSTER_MASK);
+    } else {
+        *reinterpret_cast<uint32_t*>(&s_secBuf[entryOffset]) = value & FAT32_CLUSTER_MASK;
+    }
+    st = write_volume_sector(vol, fatSector, s_secBuf);
     if (st != block::BLOCK_OK) return st;
 
     for (uint32_t fatIndex = 1; fatIndex < vol.numFATs; ++fatIndex) {
         uint32_t mirrorSector = fatSector + fatIndex * vol.fatSizeSectors;
-        st = block::write_sectors(vol.blockDevIndex, mirrorSector, 1, s_secBuf);
+        st = write_volume_sector(vol, mirrorSector, s_secBuf);
         if (st != block::BLOCK_OK) return st;
     }
 
     return block::BLOCK_OK;
 }
 
-static uint32_t allocate_fat32_cluster(FATVolume& vol)
+static uint32_t allocate_cluster(FATVolume& vol)
 {
-    uint32_t entriesPerSector = vol.bytesPerSector / 4;
+    uint32_t entrySize = fat_entry_size(vol);
+    uint32_t entriesPerSector = vol.bytesPerSector / entrySize;
     for (uint32_t fatSectorOffset = 0; fatSectorOffset < vol.fatSizeSectors; ++fatSectorOffset) {
         uint32_t fatSector = vol.reservedSectors + fatSectorOffset;
-        if (block::read_sectors(vol.blockDevIndex, fatSector, 1, s_secBuf) != block::BLOCK_OK) {
+        if (read_volume_sector(vol, fatSector, s_secBuf) != block::BLOCK_OK) {
             return 0;
         }
 
@@ -277,10 +460,15 @@ static uint32_t allocate_fat32_cluster(FATVolume& vol)
             uint32_t cluster = fatSectorOffset * entriesPerSector + entryIndex;
             if (cluster < 2 || cluster >= vol.totalDataClusters + 2) continue;
 
-            uint32_t value = *reinterpret_cast<uint32_t*>(&s_secBuf[entryIndex * 4]) & FAT32_CLUSTER_MASK;
-            if (value != FAT32_CLUSTER_FREE) continue;
+            uint32_t value;
+            if (entrySize == 2) {
+                value = *reinterpret_cast<uint16_t*>(&s_secBuf[entryIndex * 2]) & FAT16_CLUSTER_MASK;
+            } else {
+                value = *reinterpret_cast<uint32_t*>(&s_secBuf[entryIndex * 4]) & FAT32_CLUSTER_MASK;
+            }
+            if (value != fat_free_value(vol)) continue;
 
-            if (write_fat32_entry(vol, cluster, FAT32_CLUSTER_END) != block::BLOCK_OK) {
+            if (write_fat_entry(vol, cluster, fat_end_value(vol)) != block::BLOCK_OK) {
                 return 0;
             }
 
@@ -369,6 +557,23 @@ static void fill_dir_entry_from_fat(const FAT32_DirEntry* de, const char* displa
     out->isDir        = (de->attr & ATTR_DIRECTORY) != 0;
 }
 
+static bool is_fat16_root_dir(const FATVolume& vol, uint32_t dirCluster)
+{
+    return vol.type == FAT_TYPE_FAT16 && dirCluster == 0;
+}
+
+static block::Status read_root_dir_sector(const FATVolume& vol, uint32_t sectorIndex, void* buffer)
+{
+    if (sectorIndex >= vol.rootDirSectors) return block::BLOCK_ERR_INVALID;
+    return read_volume_sector(vol, vol.rootDirFirstSector + sectorIndex, buffer);
+}
+
+static block::Status write_root_dir_sector(const FATVolume& vol, uint32_t sectorIndex, const void* buffer)
+{
+    if (sectorIndex >= vol.rootDirSectors) return block::BLOCK_ERR_INVALID;
+    return write_volume_sector(vol, vol.rootDirFirstSector + sectorIndex, buffer);
+}
+
 // ================================================================
 // Public API
 // ================================================================
@@ -395,8 +600,8 @@ uint8_t mount(uint8_t blockDevIndex)
     FATVolume& vol = s_volumes[idx];
     memzero(&vol, sizeof(vol));
 
-    // Try FAT32 first, then exFAT
-    if (try_mount_fat32(blockDevIndex, vol)) {
+    // Try FAT first, then exFAT
+    if (try_mount_fat(blockDevIndex, vol)) {
         ++s_volumeCount;
         return idx;
     }
@@ -446,17 +651,27 @@ bool read_dir(uint8_t volumeIndex, DirEntry* out)
     clear_lfn_name(lfnName, sizeof(lfnName));
 
     while (true) {
-        if (is_end_of_chain(vol, s_dirIter.cluster)) {
-            s_dirIter.active = false;
-            return false;
-        }
+        if (is_fat16_root_dir(vol, s_dirIter.cluster)) {
+            if (s_dirIter.sectorInCluster >= vol.rootDirSectors) {
+                s_dirIter.active = false;
+                return false;
+            }
 
-        // Read current sector
-        block::Status st = read_cluster_sector(vol,
-            s_dirIter.cluster, s_dirIter.sectorInCluster, s_secBuf);
-        if (st != block::BLOCK_OK) {
+            if (read_root_dir_sector(vol, s_dirIter.sectorInCluster, s_secBuf) != block::BLOCK_OK) {
+                s_dirIter.active = false;
+                return false;
+            }
+        } else if (is_end_of_chain(vol, s_dirIter.cluster)) {
             s_dirIter.active = false;
             return false;
+        } else {
+            // Read current sector
+            block::Status st = read_cluster_sector(vol,
+                s_dirIter.cluster, s_dirIter.sectorInCluster, s_secBuf);
+            if (st != block::BLOCK_OK) {
+                s_dirIter.active = false;
+                return false;
+            }
         }
 
         while (s_dirIter.entryInSector < entriesPerSector) {
@@ -498,6 +713,10 @@ bool read_dir(uint8_t volumeIndex, DirEntry* out)
         // Advance to next sector in cluster
         s_dirIter.entryInSector = 0;
         ++s_dirIter.sectorInCluster;
+        if (is_fat16_root_dir(vol, s_dirIter.cluster)) {
+            continue;
+        }
+
         if (s_dirIter.sectorInCluster >= vol.sectorsPerCluster) {
             s_dirIter.sectorInCluster = 0;
             s_dirIter.cluster = next_cluster(vol, s_dirIter.cluster);
@@ -578,7 +797,7 @@ uint32_t write_file(uint8_t fileHandle, const void* buffer, uint32_t len)
     if (f.attr & ATTR_READ_ONLY) return 0;
 
     FATVolume& vol = s_volumes[f.volumeIndex];
-    if (vol.type != FAT_TYPE_FAT32) return 0;
+    if (vol.type != FAT_TYPE_FAT16 && vol.type != FAT_TYPE_FAT32) return 0;
 
     uint32_t bytesWritten = 0;
     const uint8_t* src = static_cast<const uint8_t*>(buffer);
@@ -751,16 +970,37 @@ static bool split_parent_and_name(uint8_t volumeIndex, const char* path, uint32_
 static bool find_free_dir_entry(uint8_t volumeIndex, uint32_t dirCluster, uint32_t* outSector, uint32_t* outOffset)
 {
     FATVolume& vol = s_volumes[volumeIndex];
+    uint32_t entriesPerSector = vol.bytesPerSector / 32;
+
+    if (is_fat16_root_dir(vol, dirCluster)) {
+        for (uint32_t sectorIndex = 0; sectorIndex < vol.rootDirSectors; ++sectorIndex) {
+            uint32_t sector = vol.rootDirFirstSector + sectorIndex;
+            if (read_volume_sector(vol, sector, s_secBuf) != block::BLOCK_OK) {
+                return false;
+            }
+
+            for (uint32_t entryIndex = 0; entryIndex < entriesPerSector; ++entryIndex) {
+                uint32_t offset = entryIndex * 32;
+                const FAT32_DirEntry* de = reinterpret_cast<const FAT32_DirEntry*>(&s_secBuf[offset]);
+                if (de->name[0] == 0x00 || static_cast<uint8_t>(de->name[0]) == 0xE5) {
+                    *outSector = sector;
+                    *outOffset = offset;
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
     uint32_t cluster = dirCluster;
 
     while (!is_end_of_chain(vol, cluster)) {
         for (uint32_t sectorInCluster = 0; sectorInCluster < vol.sectorsPerCluster; ++sectorInCluster) {
             uint32_t sector = cluster_to_sector(vol, cluster) + sectorInCluster;
-            if (block::read_sectors(vol.blockDevIndex, sector, 1, s_secBuf) != block::BLOCK_OK) {
+            if (read_volume_sector(vol, sector, s_secBuf) != block::BLOCK_OK) {
                 return false;
             }
 
-            uint32_t entriesPerSector = vol.bytesPerSector / 32;
             for (uint32_t entryIndex = 0; entryIndex < entriesPerSector; ++entryIndex) {
                 uint32_t offset = entryIndex * 32;
                 const FAT32_DirEntry* de = reinterpret_cast<const FAT32_DirEntry*>(&s_secBuf[offset]);
@@ -802,10 +1042,10 @@ static bool write_file_clusters(FATVolume& vol, uint32_t firstCluster, const voi
         if (written < len) {
             uint32_t next = next_cluster(vol, cluster);
             if (is_end_of_chain(vol, next)) {
-                uint32_t newCluster = allocate_fat32_cluster(vol);
+                uint32_t newCluster = allocate_cluster(vol);
                 if (newCluster == 0) return false;
-                if (write_fat32_entry(vol, cluster, newCluster) != block::BLOCK_OK) return false;
-                if (write_fat32_entry(vol, newCluster, FAT32_CLUSTER_END) != block::BLOCK_OK) return false;
+                if (write_fat_entry(vol, cluster, newCluster) != block::BLOCK_OK) return false;
+                if (write_fat_entry(vol, newCluster, fat_end_value(vol)) != block::BLOCK_OK) return false;
                 next = newCluster;
             }
             cluster = next;
@@ -822,18 +1062,63 @@ static bool find_in_directory_at(uint8_t volumeIndex, uint32_t dirCluster, const
     if (!name || !out || !outSector || !outOffset) return false;
 
     FATVolume& vol = s_volumes[volumeIndex];
-    uint32_t cluster = dirCluster;
     char lfnName[256];
     clear_lfn_name(lfnName, sizeof(lfnName));
+
+    uint32_t entriesPerSector = vol.bytesPerSector / 32;
+
+    if (is_fat16_root_dir(vol, dirCluster)) {
+        for (uint32_t sectorIndex = 0; sectorIndex < vol.rootDirSectors; ++sectorIndex) {
+            uint32_t sector = vol.rootDirFirstSector + sectorIndex;
+            if (read_volume_sector(vol, sector, s_secBuf) != block::BLOCK_OK) {
+                return false;
+            }
+
+            for (uint32_t entryIndex = 0; entryIndex < entriesPerSector; ++entryIndex) {
+                uint32_t offset = entryIndex * 32;
+                const FAT32_DirEntry* de = reinterpret_cast<const FAT32_DirEntry*>(&s_secBuf[offset]);
+
+                if (de->name[0] == 0x00) return false;
+                if (static_cast<uint8_t>(de->name[0]) == 0xE5) {
+                    clear_lfn_name(lfnName, sizeof(lfnName));
+                    continue;
+                }
+                if (de->attr == ATTR_LFN) {
+                    collect_lfn_entry(reinterpret_cast<const FAT32_LFNEntry*>(de), lfnName, sizeof(lfnName));
+                    continue;
+                }
+                if (de->attr & ATTR_VOLUME_ID) {
+                    clear_lfn_name(lfnName, sizeof(lfnName));
+                    continue;
+                }
+
+                char shortName[32];
+                short_name_to_string(de->name, shortName);
+                const char* displayName = lfnName[0] ? lfnName : shortName;
+                if (!name_matches(displayName, name) && !name_matches(shortName, name)) {
+                    clear_lfn_name(lfnName, sizeof(lfnName));
+                    continue;
+                }
+
+                fill_dir_entry_from_fat(de, displayName, out);
+                *outSector = sector;
+                *outOffset = offset;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    uint32_t cluster = dirCluster;
 
     while (!is_end_of_chain(vol, cluster)) {
         for (uint32_t sectorInCluster = 0; sectorInCluster < vol.sectorsPerCluster; ++sectorInCluster) {
             uint32_t sector = cluster_to_sector(vol, cluster) + sectorInCluster;
-            if (block::read_sectors(vol.blockDevIndex, sector, 1, s_secBuf) != block::BLOCK_OK) {
+            if (read_volume_sector(vol, sector, s_secBuf) != block::BLOCK_OK) {
                 return false;
             }
 
-            uint32_t entriesPerSector = vol.bytesPerSector / 32;
             for (uint32_t entryIndex = 0; entryIndex < entriesPerSector; ++entryIndex) {
                 uint32_t offset = entryIndex * 32;
                 const FAT32_DirEntry* de = reinterpret_cast<const FAT32_DirEntry*>(&s_secBuf[offset]);
@@ -1037,7 +1322,7 @@ bool overwrite_path(uint8_t volumeIndex, const char* path, const void* buffer, u
     if (!path || (!buffer && len != 0)) return false;
 
     FATVolume& vol = s_volumes[volumeIndex];
-    if (vol.type != FAT_TYPE_FAT32) return false;
+    if (vol.type != FAT_TYPE_FAT16 && vol.type != FAT_TYPE_FAT32) return false;
 
     DirEntry entry;
     uint32_t sector = 0;
@@ -1051,14 +1336,14 @@ bool overwrite_path(uint8_t volumeIndex, const char* path, const void* buffer, u
     if (len > capacity) return false;
     if (!write_file_clusters(vol, entry.firstCluster, buffer, len)) return false;
 
-    if (block::read_sectors(vol.blockDevIndex, sector, 1, s_secBuf) != block::BLOCK_OK) {
+    if (read_volume_sector(vol, sector, s_secBuf) != block::BLOCK_OK) {
         return false;
     }
 
     FAT32_DirEntry* de = reinterpret_cast<FAT32_DirEntry*>(&s_secBuf[offset]);
     de->fileSize = len;
 
-    return block::write_sectors(vol.blockDevIndex, sector, 1, s_secBuf) == block::BLOCK_OK;
+    return write_volume_sector(vol, sector, s_secBuf) == block::BLOCK_OK;
 }
 
 bool create_file_path(uint8_t volumeIndex, const char* path, const void* buffer, uint32_t len)
@@ -1068,7 +1353,7 @@ bool create_file_path(uint8_t volumeIndex, const char* path, const void* buffer,
     if (!path || (!buffer && len != 0)) return false;
 
     FATVolume& vol = s_volumes[volumeIndex];
-    if (vol.type != FAT_TYPE_FAT32) return false;
+    if (vol.type != FAT_TYPE_FAT16 && vol.type != FAT_TYPE_FAT32) return false;
 
     DirEntry existing;
     if (lookup_path(volumeIndex, path, &existing)) return false;
@@ -1082,7 +1367,7 @@ bool create_file_path(uint8_t volumeIndex, const char* path, const void* buffer,
     char shortName[11];
     if (!make_short_name(fileName, shortName)) return false;
 
-    uint32_t firstCluster = allocate_fat32_cluster(vol);
+    uint32_t firstCluster = allocate_cluster(vol);
     if (firstCluster == 0) return false;
 
     if (!write_file_clusters(vol, firstCluster, buffer, len)) return false;
@@ -1093,7 +1378,7 @@ bool create_file_path(uint8_t volumeIndex, const char* path, const void* buffer,
         return false;
     }
 
-    if (block::read_sectors(vol.blockDevIndex, sector, 1, s_secBuf) != block::BLOCK_OK) {
+    if (read_volume_sector(vol, sector, s_secBuf) != block::BLOCK_OK) {
         return false;
     }
 
@@ -1105,7 +1390,7 @@ bool create_file_path(uint8_t volumeIndex, const char* path, const void* buffer,
     de->firstClusterLo = static_cast<uint16_t>(firstCluster & 0xFFFF);
     de->fileSize = len;
 
-    return block::write_sectors(vol.blockDevIndex, sector, 1, s_secBuf) == block::BLOCK_OK;
+    return write_volume_sector(vol, sector, s_secBuf) == block::BLOCK_OK;
 }
 
 bool create_directory_path(uint8_t volumeIndex, const char* path)
@@ -1115,7 +1400,7 @@ bool create_directory_path(uint8_t volumeIndex, const char* path)
     if (!path) return false;
 
     FATVolume& vol = s_volumes[volumeIndex];
-    if (vol.type != FAT_TYPE_FAT32) return false;
+    if (vol.type != FAT_TYPE_FAT16 && vol.type != FAT_TYPE_FAT32) return false;
 
     DirEntry existing;
     if (lookup_path(volumeIndex, path, &existing)) return false;
@@ -1129,7 +1414,7 @@ bool create_directory_path(uint8_t volumeIndex, const char* path)
     char shortName[11];
     if (!make_short_name(dirName, shortName)) return false;
 
-    uint32_t firstCluster = allocate_fat32_cluster(vol);
+    uint32_t firstCluster = allocate_cluster(vol);
     if (firstCluster == 0) return false;
 
     for (uint32_t sectorInCluster = 0; sectorInCluster < vol.sectorsPerCluster; ++sectorInCluster) {
@@ -1145,7 +1430,7 @@ bool create_directory_path(uint8_t volumeIndex, const char* path)
         return false;
     }
 
-    if (block::read_sectors(vol.blockDevIndex, sector, 1, s_secBuf) != block::BLOCK_OK) {
+    if (read_volume_sector(vol, sector, s_secBuf) != block::BLOCK_OK) {
         return false;
     }
 
@@ -1157,7 +1442,7 @@ bool create_directory_path(uint8_t volumeIndex, const char* path)
     de->firstClusterLo = static_cast<uint16_t>(firstCluster & 0xFFFF);
     de->fileSize = 0;
 
-    return block::write_sectors(vol.blockDevIndex, sector, 1, s_secBuf) == block::BLOCK_OK;
+    return write_volume_sector(vol, sector, s_secBuf) == block::BLOCK_OK;
 }
 
 bool delete_path(uint8_t volumeIndex, const char* path, bool directory)
@@ -1167,7 +1452,7 @@ bool delete_path(uint8_t volumeIndex, const char* path, bool directory)
     if (!path) return false;
 
     FATVolume& vol = s_volumes[volumeIndex];
-    if (vol.type != FAT_TYPE_FAT32) return false;
+    if (vol.type != FAT_TYPE_FAT16 && vol.type != FAT_TYPE_FAT32) return false;
 
     DirEntry entry;
     uint32_t sector = 0;
@@ -1178,14 +1463,14 @@ bool delete_path(uint8_t volumeIndex, const char* path, bool directory)
     if (entry.isDir != directory) return false;
     if (entry.attr & ATTR_READ_ONLY) return false;
 
-    if (block::read_sectors(vol.blockDevIndex, sector, 1, s_secBuf) != block::BLOCK_OK) {
+    if (read_volume_sector(vol, sector, s_secBuf) != block::BLOCK_OK) {
         return false;
     }
 
     FAT32_DirEntry* de = reinterpret_cast<FAT32_DirEntry*>(&s_secBuf[offset]);
     de->name[0] = static_cast<char>(0xE5);
 
-    return block::write_sectors(vol.blockDevIndex, sector, 1, s_secBuf) == block::BLOCK_OK;
+    return write_volume_sector(vol, sector, s_secBuf) == block::BLOCK_OK;
 }
 
 bool rename_path(uint8_t volumeIndex, const char* oldPath, const char* newPath)
@@ -1195,7 +1480,7 @@ bool rename_path(uint8_t volumeIndex, const char* oldPath, const char* newPath)
     if (!oldPath || !newPath) return false;
 
     FATVolume& vol = s_volumes[volumeIndex];
-    if (vol.type != FAT_TYPE_FAT32) return false;
+    if (vol.type != FAT_TYPE_FAT16 && vol.type != FAT_TYPE_FAT32) return false;
 
     DirEntry existing;
     if (lookup_path(volumeIndex, newPath, &existing)) return false;
@@ -1219,17 +1504,17 @@ bool rename_path(uint8_t volumeIndex, const char* oldPath, const char* newPath)
     if (entry.attr & ATTR_READ_ONLY) return false;
 
     if (oldParent == newParent) {
-        if (block::read_sectors(vol.blockDevIndex, oldSector, 1, s_secBuf) != block::BLOCK_OK) {
+        if (read_volume_sector(vol, oldSector, s_secBuf) != block::BLOCK_OK) {
             return false;
         }
 
         FAT32_DirEntry* de = reinterpret_cast<FAT32_DirEntry*>(&s_secBuf[oldOffset]);
         memcopy(de->name, shortName, 11);
 
-        return block::write_sectors(vol.blockDevIndex, oldSector, 1, s_secBuf) == block::BLOCK_OK;
+        return write_volume_sector(vol, oldSector, s_secBuf) == block::BLOCK_OK;
     }
 
-    if (block::read_sectors(vol.blockDevIndex, oldSector, 1, s_secBuf) != block::BLOCK_OK) return false;
+    if (read_volume_sector(vol, oldSector, s_secBuf) != block::BLOCK_OK) return false;
     FAT32_DirEntry movedEntry;
     memcopy(&movedEntry, &s_secBuf[oldOffset], sizeof(FAT32_DirEntry));
     memcopy(movedEntry.name, shortName, 11);
@@ -1238,16 +1523,17 @@ bool rename_path(uint8_t volumeIndex, const char* oldPath, const char* newPath)
     uint32_t newOffset = 0;
     if (!find_free_dir_entry(volumeIndex, newParent, &newSector, &newOffset)) return false;
 
-    if (block::read_sectors(vol.blockDevIndex, newSector, 1, s_secBuf) != block::BLOCK_OK) return false;
+    if (read_volume_sector(vol, newSector, s_secBuf) != block::BLOCK_OK) return false;
     memcopy(&s_secBuf[newOffset], &movedEntry, sizeof(FAT32_DirEntry));
-    if (block::write_sectors(vol.blockDevIndex, newSector, 1, s_secBuf) != block::BLOCK_OK) return false;
+    if (write_volume_sector(vol, newSector, s_secBuf) != block::BLOCK_OK) return false;
 
-    if (block::read_sectors(vol.blockDevIndex, oldSector, 1, s_secBuf) != block::BLOCK_OK) return false;
+    if (read_volume_sector(vol, oldSector, s_secBuf) != block::BLOCK_OK) return false;
     FAT32_DirEntry* oldDe = reinterpret_cast<FAT32_DirEntry*>(&s_secBuf[oldOffset]);
     oldDe->name[0] = static_cast<char>(0xE5);
 
-    return block::write_sectors(vol.blockDevIndex, oldSector, 1, s_secBuf) == block::BLOCK_OK;
+    return write_volume_sector(vol, oldSector, s_secBuf) == block::BLOCK_OK;
 }
 
 } // namespace fs_fat
 } // namespace kernel
+

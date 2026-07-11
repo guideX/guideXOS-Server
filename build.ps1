@@ -105,6 +105,12 @@ if ($Clean) {
         Remove-Item -Recurse -Force $RootKernelBuildDir
         Write-Host "      Removed kernel/build/$Arch/" -ForegroundColor Gray
     }
+
+    $LegacyRootBuildDir = Join-Path $RootDir "build\$Arch"
+    if (Test-Path $LegacyRootBuildDir) {
+        Remove-Item -Recurse -Force $LegacyRootBuildDir
+        Write-Host "      Removed legacy build/$Arch/" -ForegroundColor Gray
+    }
     
     Write-Host "      Clean complete" -ForegroundColor Green
     Write-Host ""
@@ -289,7 +295,7 @@ if (!$SkipKernel) {
         # directory, so push into kernel/ first (mirrors what the root Makefile
         # does: cd kernel && $(MAKE) ARCH=...).
         Push-Location $KernelDir
-        & $Make ARCH=$Arch
+        & $Make "ARCH=$Arch" "EXTRA_CFLAGS=-DGXOS_DESKTOP_CLEANUP_RUNTIME_PASS=2"
 
         if ($LASTEXITCODE -ne 0) {
             Write-Host "      ERROR: Kernel build failed" -ForegroundColor Red

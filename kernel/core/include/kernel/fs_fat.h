@@ -1,4 +1,4 @@
-// FAT32 / exFAT Filesystem Driver
+ï»¿// FAT32 / exFAT Filesystem Driver
 //
 // Supports:
 //   - FAT32: mount, read directory, open/read/write files
@@ -7,7 +7,7 @@
 //   - Cluster chain traversal
 //
 // Operates on top of the block device abstraction layer.
-// Architecture-independent — works on all platforms.
+// Architecture-independent â€” works on all platforms.
 //
 // Reference: Microsoft FAT32 File System Specification (Dec 2000),
 //            Microsoft exFAT Revision 1.00
@@ -30,12 +30,14 @@ namespace fs_fat {
 
 enum FATType : uint8_t {
     FAT_TYPE_NONE  = 0,
-    FAT_TYPE_FAT32 = 1,
-    FAT_TYPE_EXFAT = 2,
+    FAT_TYPE_FAT16 = 1,
+    FAT_TYPE_FAT32 = 2,
+    FAT_TYPE_EXFAT = 3,
 };
 
 // ================================================================
-// FAT32 BIOS Parameter Block (BPB) — first 90 bytes of sector 0
+// FAT12/16 BIOS Parameter Block (BPB) â€” first 62 bytes of sector 0
+// FAT32 reuses the common prefix and adds its own extension below.
 // ================================================================
 
 #if defined(__GNUC__) || defined(__clang__)
@@ -76,8 +78,31 @@ struct FAT32_BPB {
     char     fsType[8];
 } FAT_PACKED;
 
+struct FAT12_16_BPB {
+    uint8_t  jmpBoot[3];
+    char     oemName[8];
+    uint16_t bytesPerSector;
+    uint8_t  sectorsPerCluster;
+    uint16_t reservedSectors;
+    uint8_t  numFATs;
+    uint16_t rootEntryCount;
+    uint16_t totalSectors16;
+    uint8_t  mediaType;
+    uint16_t fatSize16;
+    uint16_t sectorsPerTrack;
+    uint16_t numHeads;
+    uint32_t hiddenSectors;
+    uint32_t totalSectors32;
+    uint8_t  driveNumber;
+    uint8_t  reserved1;
+    uint8_t  bootSig;
+    uint32_t volumeID;
+    char     volumeLabel[11];
+    char     fsType[8];
+} FAT_PACKED;
+
 // ================================================================
-// exFAT Boot Sector — first 120 bytes of sector 0
+// exFAT Boot Sector â€” first 120 bytes of sector 0
 // ================================================================
 
 struct ExFAT_BootSector {
@@ -159,6 +184,12 @@ static const uint32_t FAT32_CLUSTER_BAD  = 0x0FFFFFF7;
 static const uint32_t FAT32_CLUSTER_END  = 0x0FFFFFF8;
 static const uint32_t FAT32_CLUSTER_MASK = 0x0FFFFFFF;
 
+// Special cluster values (FAT12/16)
+static const uint16_t FAT16_CLUSTER_FREE = 0x0000;
+static const uint16_t FAT16_CLUSTER_BAD   = 0xFFF7;
+static const uint16_t FAT16_CLUSTER_END   = 0xFFF8;
+static const uint16_t FAT16_CLUSTER_MASK  = 0xFFFF;
+
 // ================================================================
 // Mounted volume descriptor
 // ================================================================
@@ -167,14 +198,17 @@ struct FATVolume {
     bool     mounted;
     FATType  type;
     uint8_t  blockDevIndex;       // index in block::get_device()
+    uint64_t partitionOffset;     // start LBA of the mounted volume within the block device
 
-    // FAT32 geometry
+    // FAT12/16 + FAT32 shared geometry
     uint32_t bytesPerSector;
     uint32_t sectorsPerCluster;
     uint32_t reservedSectors;
     uint32_t numFATs;
     uint32_t fatSizeSectors;
     uint32_t rootCluster;
+    uint32_t rootDirFirstSector;
+    uint32_t rootDirSectors;
     uint32_t totalSectors;
     uint32_t firstDataSector;
     uint32_t totalDataClusters;
@@ -303,3 +337,4 @@ bool lookup_path(uint8_t volumeIndex, const char* path, DirEntry* out);
 } // namespace kernel
 
 #endif // KERNEL_FS_FAT_H
+

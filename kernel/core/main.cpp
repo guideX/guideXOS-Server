@@ -187,6 +187,9 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
     // Initialize serial debug output early
     kernel::serial::init();
     kernel::serial::puts("[KERNEL] guideXOS kernel_main entered\n");
+#if defined(GXOS_DESKTOP_CLEANUP_RUNTIME_PASS)
+    kernel::serial::puts("[KERNEL] desktopCleanupRuntimePass=2\n");
+#endif
 
     // Support both Multiboot (legacy) and BootInfo (UEFI) boot
     bool is_multiboot = (boot_magic == 0x2BADB002);
@@ -487,6 +490,22 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
                                      kernel::input::mouse_y());
         kernel::desktop_capabilities::log_current(true, true);
         kernel::apps::printNavigatorRuntimeSmokeReport();
+#ifdef GXOS_DESKTOP_CLEANUP_RUNTIME_PASS
+        kernel::serial::puts("[KERNEL] desktopCleanupRuntimePass=2 launch-smoke begin\n");
+        const bool cleanupDisplayOptionsLaunched = kernel::desktop::launch_app("DisplayOptions");
+        kernel::serial::puts("[KERNEL] desktopCleanupRuntimePass=2 launch app=DisplayOptions result=");
+        kernel::serial::puts(cleanupDisplayOptionsLaunched ? "PASS" : "FAIL");
+        kernel::serial::puts("\n");
+        const bool cleanupNotepadLaunched = kernel::desktop::launch_app("Notepad");
+        kernel::serial::puts("[KERNEL] desktopCleanupRuntimePass=2 launch app=Notepad result=");
+        kernel::serial::puts(cleanupNotepadLaunched ? "PASS" : "FAIL");
+        kernel::serial::puts("\n");
+        const bool cleanupCalculatorLaunched = kernel::desktop::launch_app("Calculator");
+        kernel::serial::puts("[KERNEL] desktopCleanupRuntimePass=2 launch app=Calculator result=");
+        kernel::serial::puts(cleanupCalculatorLaunched ? "PASS" : "FAIL");
+        kernel::serial::puts("\n");
+        kernel::serial::puts("[KERNEL] desktopCleanupRuntimePass=2 launch-smoke end\n");
+#endif
 #ifdef GXOS_APPMODEL_LAUNCHSHADOW_SMOKE_ACTIVE
         kernel::serial::puts("[APPMODEL-LAUNCHSHADOW-SMOKE] issuing command=desktop.smoke.launchshadow\n");
         kernel::appmodel::printLaunchTargetShadowSmokeDiagnostic(kernel::serial::puts);

@@ -8,6 +8,7 @@
 #include "include/kernel/kernel_compositor.h"
 #include "include/kernel/desktop.h"
 #include "include/kernel/kernel_ipc.h"
+#include "include/kernel/serial_debug.h"
 
 extern "C" void desktop_request_redraw();
 
@@ -95,12 +96,26 @@ void KernelApp::setPosition(int x, int y) {
 
 void KernelApp::requestClose() {
     if (m_window) {
+        #if defined(GXOS_DESKTOP_CLEANUP_RUNTIME_PASS)
+        serial::puts("[app] close-request app=");
+        serial::puts(m_name);
+        serial::puts(" window=");
+        serial::put_hex32(m_window->id);
+        serial::puts(" title=");
+        serial::puts(m_window->title);
+        serial::putc('\n');
+        #endif
         onWindowClose();
         shutdown();
         compositor::KernelCompositor::unregisterWindow(m_window);
         delete m_window;
         m_window = nullptr;
         m_state = AppState::Terminated;
+        #if defined(GXOS_DESKTOP_CLEANUP_RUNTIME_PASS)
+        serial::puts("[app] close-result=accepted app=");
+        serial::puts(m_name);
+        serial::putc('\n');
+        #endif
         desktop_request_redraw();
     }
 }

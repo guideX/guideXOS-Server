@@ -832,7 +832,8 @@ static TaskbarDockPosition parse_taskbar_position(const char* value)
     return TaskbarDockPosition::Bottom;
 }
 
-static const char* kBareMetalDisplayOptionsStorePath = "/display-options.cfg";
+static const char* kBareMetalDisplayOptionsStorePath = "/desktop.cfg";
+static const char* kBareMetalDisplayOptionsLegacyStorePath = "/display-options.cfg";
 static const int kBareMetalWallpaperIdMax = 96;
 static const int kBareMetalScaleModeMax = 16;
 static const int kBareMetalThemeIdMax = 32;
@@ -865,6 +866,136 @@ static void bare_metal_display_options_defaults(BareMetalDisplayOptionsData& sto
     store.showDesktopSystemSettings = false;
     store.smallLiveDesktopFolderIcons = true;
     store.autoArrangeDesktopIcons = false;
+}
+
+enum class BareMetalDisplayOptionsLoadSource : uint8_t;
+static bool bare_metal_parse_bool_value(const char* value, bool fallback);
+static void bare_metal_trim_in_place(char* value);
+static const char* bare_metal_normalize_scale_mode(const char* value);
+static const char* bare_metal_normalize_taskbar_position(const char* value);
+
+static bool bare_metal_load_display_options_from_ini_path(const char* path, BareMetalDisplayOptionsData& out, BareMetalDisplayOptionsLoadSource source, BareMetalDisplayOptionsLoadSource* outSource = nullptr)
+{
+    if (!path || !path[0]) return false;
+
+    vfs::FileInfo info{};
+    if (vfs::stat(path, &info) != vfs::VFS_OK || info.type != vfs::FILE_TYPE_REGULAR || info.size == 0) {
+        return false;
+    }
+
+    char text[512];
+    int32_t count = vfs::read_file(path, text, sizeof(text) - 1);
+    if (count <= 0) {
+        return false;
+    }
+
+    text[count] = '\0';
+    bool parsedAny = false;
+    char* cursor = text;
+    while (*cursor) {
+        char* line = cursor;
+        while (*cursor && *cursor != '\n' && *cursor != '\r') {
+            ++cursor;
+        }
+        if (*cursor) {
+            *cursor++ = '\0';
+            while (*cursor == '\n' || *cursor == '\r') {
+                ++cursor;
+            }
+        }
+        bare_metal_trim_in_place(line);
+        if (!line[0] || line[0] == '#' || line[0] == ';') continue;
+        char* sep = line;
+        while (*sep && *sep != '=') ++sep;
+        if (*sep != '=') continue;
+        *sep++ = '\0';
+        bare_metal_trim_in_place(line);
+        bare_metal_trim_in_place(sep);
+        if (desktop_str_eq(line, "version") || desktop_str_eq(line, "displayOptionsVersion")) {
+            parsedAny = true;
+            continue;
+        }
+        if (desktop_str_eq(line, "wallpaperId")) {
+            desktop_str_copy(out.wallpaperId, sep, (int)sizeof(out.wallpaperId));
+            parsedAny = true;
+        } else if (desktop_str_eq(line, "backgroundScaleMode")) {
+            desktop_str_copy(out.backgroundScaleMode, bare_metal_normalize_scale_mode(sep), (int)sizeof(out.backgroundScaleMode));
+            parsedAny = true;
+        } else if (desktop_str_eq(line, "desktopThemeId")) {
+            desktop_str_copy(out.desktopThemeId, sep, (int)sizeof(out.desktopThemeId));
+            parsedAny = true;
+        } else if (desktop_str_eq(line, "taskbarPosition")) {
+            desktop_str_copy(out.taskbarPosition, bare_metal_normalize_taskbar_position(sep), (int)sizeof(out.taskbarPosition));
+            parsedAny = true;
+        } else if (desktop_str_eq(line, "showDesktopTrash")) {
+            out.showDesktopTrash = bare_metal_parse_bool_value(sep, out.showDesktopTrash);
+            parsedAny = true;
+        } else if (desktop_str_eq(line, "showDesktopThisSystem")) {
+            out.showDesktopThisSystem = bare_metal_parse_bool_value(sep, out.showDesktopThisSystem);
+            parsedAny = true;
+        } else if (desktop_str_eq(line, "showDesktopFileManager")) {
+            out.showDesktopFileManager = bare_metal_parse_bool_value(sep, out.showDesktopFileManager);
+            parsedAny = true;
+        } else if (desktop_str_eq(line, "showDesktopSystemSettings")) {
+            out.showDesktopSystemSettings = bare_metal_parse_bool_value(sep, out.showDesktopSystemSettings);
+            parsedAny = true;
+        } else if (desktop_str_eq(line, "smallLiveDesktopFolderIcons")) {
+            out.smallLiveDesktopFolderIcons = bare_metal_parse_bool_value(sep, out.smallLiveDesktopFolderIcons);
+            parsedAny = true;
+        } else if (desktop_str_eq(line, "autoArrangeDesktopIcons")) {
+            out.autoArrangeDesktopIcons = bare_metal_parse_bool_value(sep, out.autoArrangeDesktopIcons);
+            parsedAny = true;
+        }
+    }
+
+    if (parsedAny) {
+        if (outSource) {
+            *outSource = source;
+        }
+        return true;
+    }
+
+    return false;
+}
+
+enum class BareMetalDisplayOptionsLoadSource : uint8_t {
+    None = 0,
+    Primary = 1,
+    Legacy = 2,
+};
+
+static const char* bare_metal_display_options_load_source_name(BareMetalDisplayOptionsLoadSource source)
+{
+    switch (source) {
+        case BareMetalDisplayOptionsLoadSource::Primary: return "primary";
+        case BareMetalDisplayOptionsLoadSource::Legacy: return "legacy";
+        case BareMetalDisplayOptionsLoadSource::None:
+        default:
+            return "none";
+    }
+}
+
+static void bare_metal_log_display_options_backend(const char* prefix)
+{
+    serial::puts(prefix);
+    serial::puts(" path=");
+    serial::puts(kBareMetalDisplayOptionsStorePath);
+    serial::puts(" backend=");
+    const vfs::MountPoint* mount = vfs::get_mount(kBareMetalDisplayOptionsStorePath);
+    if (mount) {
+        serial::puts(vfs::fs_type_name(mount->fsType));
+        serial::puts(" mount=");
+        serial::puts(mount->path);
+        serial::puts(" device=");
+        serial::put_hex8(mount->blockDevIndex);
+        serial::puts(" readonly=");
+        serial::puts(mount->readOnly ? "1" : "0");
+        serial::puts(" alias=");
+        serial::puts(mount->alias ? "1" : "0");
+    } else {
+        serial::puts("unmounted");
+    }
+    serial::putc('\n');
 }
 
 static bool bare_metal_parse_bool_value(const char* value, bool fallback)
@@ -913,9 +1044,10 @@ static const char* bare_metal_normalize_taskbar_position(const char* value)
     return "bottom";
 }
 
-static bool bare_metal_load_display_options_legacy(BareMetalDisplayOptionsData& store)
+static bool bare_metal_load_display_options_legacy(BareMetalDisplayOptionsData& store, BareMetalDisplayOptionsLoadSource* outSource = nullptr)
 {
     bare_metal_display_options_defaults(store);
+    bool foundAny = false;
 
     char value[16];
     int32_t count = vfs::read_file("/desktop.taskbar.position", value, sizeof(value) - 1);
@@ -923,6 +1055,7 @@ static bool bare_metal_load_display_options_legacy(BareMetalDisplayOptionsData& 
         value[count] = '\0';
         bare_metal_trim_in_place(value);
         desktop_str_copy(store.taskbarPosition, taskbar_position_name(parse_taskbar_position(value)), (int)sizeof(store.taskbarPosition));
+        foundAny = true;
     }
 
     char modeBuf[32];
@@ -931,6 +1064,7 @@ static bool bare_metal_load_display_options_legacy(BareMetalDisplayOptionsData& 
         modeBuf[count] = '\0';
         bare_metal_trim_in_place(modeBuf);
         desktop_str_copy(store.backgroundScaleMode, bare_metal_normalize_scale_mode(modeBuf), (int)sizeof(store.backgroundScaleMode));
+        foundAny = true;
     }
 
     char idBuf[96];
@@ -939,6 +1073,7 @@ static bool bare_metal_load_display_options_legacy(BareMetalDisplayOptionsData& 
         idBuf[count] = '\0';
         bare_metal_trim_in_place(idBuf);
         desktop_str_copy(store.wallpaperId, idBuf, (int)sizeof(store.wallpaperId));
+        foundAny = true;
     }
 
     char buffer[192];
@@ -949,90 +1084,48 @@ static bool bare_metal_load_display_options_legacy(BareMetalDisplayOptionsData& 
         store.showDesktopThisSystem = parse_system_icon_setting(buffer, count, "ThisSystem", true);
         store.showDesktopFileManager = parse_system_icon_setting(buffer, count, "FileManager", true);
         store.showDesktopSystemSettings = parse_system_icon_setting(buffer, count, "SystemSettings", false);
+        foundAny = true;
     }
 
-    return true;
+    if (outSource && foundAny) {
+        *outSource = BareMetalDisplayOptionsLoadSource::Legacy;
+    }
+
+    return foundAny;
 }
 
-static bool bare_metal_load_display_options(BareMetalDisplayOptionsData& out)
+static bool bare_metal_load_display_options(BareMetalDisplayOptionsData& out, BareMetalDisplayOptionsLoadSource* outSource = nullptr)
 {
     bare_metal_display_options_defaults(out);
-
-    vfs::FileInfo info{};
-    if (vfs::stat(kBareMetalDisplayOptionsStorePath, &info) == vfs::VFS_OK && info.type == vfs::FILE_TYPE_REGULAR && info.size > 0) {
-        char text[512];
-        int32_t count = vfs::read_file(kBareMetalDisplayOptionsStorePath, text, sizeof(text) - 1);
-        if (count > 0) {
-            text[count] = '\0';
-            bool parsedAny = false;
-            char* cursor = text;
-            while (*cursor) {
-                char* line = cursor;
-                while (*cursor && *cursor != '\n' && *cursor != '\r') {
-                    ++cursor;
-                }
-                if (*cursor) {
-                    *cursor++ = '\0';
-                    while (*cursor == '\n' || *cursor == '\r') {
-                        ++cursor;
-                    }
-                }
-                bare_metal_trim_in_place(line);
-                if (!line[0] || line[0] == '#' || line[0] == ';') continue;
-                char* sep = line;
-                while (*sep && *sep != '=') ++sep;
-                if (*sep != '=') continue;
-                *sep++ = '\0';
-                bare_metal_trim_in_place(line);
-                bare_metal_trim_in_place(sep);
-                if (desktop_str_eq(line, "version") || desktop_str_eq(line, "displayOptionsVersion")) {
-                    parsedAny = true;
-                    continue;
-                }
-                if (desktop_str_eq(line, "wallpaperId")) {
-                    desktop_str_copy(out.wallpaperId, sep, (int)sizeof(out.wallpaperId));
-                    parsedAny = true;
-                } else if (desktop_str_eq(line, "backgroundScaleMode")) {
-                    desktop_str_copy(out.backgroundScaleMode, bare_metal_normalize_scale_mode(sep), (int)sizeof(out.backgroundScaleMode));
-                    parsedAny = true;
-                } else if (desktop_str_eq(line, "desktopThemeId")) {
-                    desktop_str_copy(out.desktopThemeId, sep, (int)sizeof(out.desktopThemeId));
-                    parsedAny = true;
-                } else if (desktop_str_eq(line, "taskbarPosition")) {
-                    desktop_str_copy(out.taskbarPosition, bare_metal_normalize_taskbar_position(sep), (int)sizeof(out.taskbarPosition));
-                    parsedAny = true;
-                } else if (desktop_str_eq(line, "showDesktopTrash")) {
-                    out.showDesktopTrash = bare_metal_parse_bool_value(sep, out.showDesktopTrash);
-                    parsedAny = true;
-                } else if (desktop_str_eq(line, "showDesktopThisSystem")) {
-                    out.showDesktopThisSystem = bare_metal_parse_bool_value(sep, out.showDesktopThisSystem);
-                    parsedAny = true;
-                } else if (desktop_str_eq(line, "showDesktopFileManager")) {
-                    out.showDesktopFileManager = bare_metal_parse_bool_value(sep, out.showDesktopFileManager);
-                    parsedAny = true;
-                } else if (desktop_str_eq(line, "showDesktopSystemSettings")) {
-                    out.showDesktopSystemSettings = bare_metal_parse_bool_value(sep, out.showDesktopSystemSettings);
-                    parsedAny = true;
-                } else if (desktop_str_eq(line, "smallLiveDesktopFolderIcons")) {
-                    out.smallLiveDesktopFolderIcons = bare_metal_parse_bool_value(sep, out.smallLiveDesktopFolderIcons);
-                    parsedAny = true;
-                } else if (desktop_str_eq(line, "autoArrangeDesktopIcons")) {
-                    out.autoArrangeDesktopIcons = bare_metal_parse_bool_value(sep, out.autoArrangeDesktopIcons);
-                    parsedAny = true;
-                }
-            }
-
-            if (parsedAny) {
-                return true;
-            }
-        }
+    if (outSource) {
+        *outSource = BareMetalDisplayOptionsLoadSource::None;
     }
 
-    bare_metal_load_display_options_legacy(out);
-    return true;
+    const vfs::MountPoint* mount = vfs::get_mount(kBareMetalDisplayOptionsStorePath);
+    if (!mount) {
+        return false;
+    }
+
+    if (bare_metal_load_display_options_from_ini_path(kBareMetalDisplayOptionsStorePath, out, BareMetalDisplayOptionsLoadSource::Primary, outSource)) {
+        return true;
+    }
+
+    if (bare_metal_load_display_options_from_ini_path(kBareMetalDisplayOptionsLegacyStorePath, out, BareMetalDisplayOptionsLoadSource::Legacy, outSource)) {
+        return true;
+    }
+
+    BareMetalDisplayOptionsLoadSource legacySource = BareMetalDisplayOptionsLoadSource::None;
+    if (bare_metal_load_display_options_legacy(out, &legacySource)) {
+        if (outSource) {
+            *outSource = legacySource;
+        }
+        return true;
+    }
+
+    return false;
 }
 
-static bool bare_metal_save_display_options(const BareMetalDisplayOptionsData& store)
+static bool bare_metal_save_display_options(const BareMetalDisplayOptionsData& store, int32_t* outPrimaryWrite = nullptr)
 {
     char text[512];
     int pos = 0;
@@ -1060,6 +1153,11 @@ static bool bare_metal_save_display_options(const BareMetalDisplayOptionsData& s
     desktop_append_text(text, &pos, sizeof(text), "\n");
     const int32_t primaryWrite = vfs::write_file(kBareMetalDisplayOptionsStorePath, text, (uint32_t)pos);
     const bool primaryWriteOk = primaryWrite == pos;
+    if (outPrimaryWrite) {
+        *outPrimaryWrite = primaryWrite;
+    }
+
+    vfs::write_file(kBareMetalDisplayOptionsLegacyStorePath, text, (uint32_t)pos);
 
     const char* taskbar = store.taskbarPosition[0] ? store.taskbarPosition : "bottom";
     vfs::write_file("/desktop.taskbar.position", taskbar, (uint32_t)desktop_strlen(taskbar));
@@ -1085,6 +1183,27 @@ static bool bare_metal_save_display_options(const BareMetalDisplayOptionsData& s
     return primaryWriteOk;
 }
 
+static void bare_metal_serial_put_uint32_dec(uint32_t value)
+{
+    char buf[11];
+    int pos = 0;
+    if (value == 0) {
+        buf[pos++] = '0';
+    } else {
+        char tmp[10];
+        int tmpPos = 0;
+        while (value > 0 && tmpPos < 10) {
+            tmp[tmpPos++] = static_cast<char>('0' + (value % 10));
+            value /= 10;
+        }
+        while (tmpPos > 0) {
+            buf[pos++] = tmp[--tmpPos];
+        }
+    }
+    buf[pos] = '\0';
+    serial::puts(buf);
+}
+
 static void persist_taskbar_position()
 {
     BareMetalDisplayOptionsData store;
@@ -1096,10 +1215,13 @@ static void persist_taskbar_position()
 static void load_persisted_taskbar_position()
 {
     BareMetalDisplayOptionsData store;
-    if (!bare_metal_load_display_options(store)) return;
+    BareMetalDisplayOptionsLoadSource source = BareMetalDisplayOptionsLoadSource::None;
+    if (!bare_metal_load_display_options(store, &source)) return;
     s_taskbarDockPosition = parse_taskbar_position(store.taskbarPosition);
     serial::puts("[desktop] loaded taskbar position=");
     serial::puts(taskbar_position_name(s_taskbarDockPosition));
+    serial::puts(" source=");
+    serial::puts(bare_metal_display_options_load_source_name(source));
     serial::puts("\n");
 }
 
@@ -4939,11 +5061,22 @@ bool draw_wallpaper_thumbnail_by_id(const char* wallpaperId, uint32_t x, uint32_
 static void load_persisted_wallpaper_scale_mode()
 {
     BareMetalDisplayOptionsData store;
-    bare_metal_load_display_options(store);
+    bare_metal_log_display_options_backend("[desktop] wallpaper load");
+    if (!vfs::get_mount(kBareMetalDisplayOptionsStorePath)) {
+        serial::puts("[desktop] wallpaper load deferred reason=settings-volume-not-mounted\n");
+        return;
+    }
+    BareMetalDisplayOptionsLoadSource source = BareMetalDisplayOptionsLoadSource::None;
+    if (!bare_metal_load_display_options(store, &source)) {
+        serial::puts("[desktop] wallpaper fallback reason=read-or-parse-failed\n");
+        return;
+    }
     bool supported = true;
     s_wallpaperConfig.scaleMode = parse_wallpaper_scale_mode(store.backgroundScaleMode, &supported);
     serial::puts("[desktop] loaded background scale mode=");
     serial::puts(wallpaper_scale_mode_name(s_wallpaperConfig.scaleMode));
+    serial::puts(" source=");
+    serial::puts(bare_metal_display_options_load_source_name(source));
     serial::puts("\n");
     if (!supported) serial::puts("[desktop] unsupported background scale mode, falling back to fill\n");
 }
@@ -4975,29 +5108,79 @@ static void apply_wallpaper_builtin_selection(const BuiltInWallpaperPalette* ent
 static bool persist_wallpaper_selection(const char* wallpaperId)
 {
     BareMetalDisplayOptionsData store;
-    bare_metal_load_display_options(store);
+    BareMetalDisplayOptionsLoadSource source = BareMetalDisplayOptionsLoadSource::None;
+    bare_metal_load_display_options(store, &source);
     desktop_str_copy(store.wallpaperId, wallpaperId ? wallpaperId : "", (int)sizeof(store.wallpaperId));
     desktop_str_copy(store.backgroundScaleMode, wallpaper_scale_mode_name(s_wallpaperConfig.scaleMode), (int)sizeof(store.backgroundScaleMode));
-    const bool saved = bare_metal_save_display_options(store);
-    serial::puts(saved ? "[desktop] background persistence write success id=" : "[desktop] background persistence write failure id=");
+    serial::puts("[desktop] wallpaper persist target id=");
     serial::puts(wallpaperId ? wallpaperId : "(null)");
     serial::puts("\n");
+    bare_metal_log_display_options_backend("[desktop] wallpaper persist");
+    int32_t primaryWrite = 0;
+    const bool saved = bare_metal_save_display_options(store, &primaryWrite);
+    serial::puts("[desktop] wallpaper persist path=");
+    serial::puts(kBareMetalDisplayOptionsStorePath);
+    serial::puts(" result=");
+    serial::puts(saved ? "ok" : "fail");
+    if (primaryWrite >= 0) {
+        serial::puts(" bytes=");
+        bare_metal_serial_put_uint32_dec(static_cast<uint32_t>(primaryWrite));
+    } else {
+        serial::puts(" error=0x");
+        serial::put_hex32(static_cast<uint32_t>(primaryWrite));
+    }
+    serial::puts(" source=");
+    serial::puts(bare_metal_display_options_load_source_name(source));
+    serial::putc('\n');
+
+    BareMetalDisplayOptionsData readback;
+    BareMetalDisplayOptionsLoadSource readbackSource = BareMetalDisplayOptionsLoadSource::None;
+    const bool readbackOk = bare_metal_load_display_options(readback, &readbackSource);
+    serial::puts("[desktop] wallpaper persist readback source=");
+    serial::puts(bare_metal_display_options_load_source_name(readbackSource));
+    serial::puts(" id=");
+    serial::puts(readbackOk ? (readback.wallpaperId[0] ? readback.wallpaperId : "(empty)") : "(unavailable)");
+    serial::puts(" match=");
+    serial::puts(readbackOk && desktop_str_eq(readback.wallpaperId, wallpaperId ? wallpaperId : "") ? "1" : "0");
+    serial::putc('\n');
     return saved;
 }
 
 static void load_persisted_wallpaper_id()
 {
     BareMetalDisplayOptionsData store;
-    bare_metal_load_display_options(store);
+    bare_metal_log_display_options_backend("[desktop] wallpaper load");
+    if (!vfs::get_mount(kBareMetalDisplayOptionsStorePath)) {
+        serial::puts("[desktop] wallpaper load deferred reason=settings-volume-not-mounted\n");
+        return;
+    }
+    BareMetalDisplayOptionsLoadSource source = BareMetalDisplayOptionsLoadSource::None;
+    if (!bare_metal_load_display_options(store, &source)) {
+        serial::puts("[desktop] wallpaper fallback reason=read-or-parse-failed\n");
+        return;
+    }
     const char* wallpaperId = store.wallpaperId;
-    if (!wallpaperId[0]) return;
-    serial::puts("[desktop] loaded saved background id=");
+    serial::puts("[desktop] wallpaper load id=");
     serial::puts(wallpaperId);
-    serial::puts("\n");
+    serial::puts(" source=");
+    serial::puts(bare_metal_display_options_load_source_name(source));
+    serial::putc('\n');
+    if (!wallpaperId[0]) {
+        serial::puts("[desktop] wallpaper fallback reason=missing-or-empty\n");
+        apply_wallpaper_builtin_selection(&s_builtInWallpapers[0]);
+        serial::puts("[desktop] wallpaper apply source=default id=");
+        serial::puts(s_builtInWallpapers[0].id);
+        serial::puts("\n");
+        return;
+    }
+
     const BuiltInGradientPalette* gradient = find_builtin_gradient(wallpaperId);
     if (gradient) {
         apply_wallpaper_gradient_selection(gradient);
-        serial::puts("[desktop] background persistence load success id=");
+        serial::puts("[desktop] wallpaper resolve result=ok id=");
+        serial::puts(gradient->id);
+        serial::puts("\n");
+        serial::puts("[desktop] wallpaper apply source=persisted id=");
         serial::puts(gradient->id);
         serial::puts("\n");
         return;
@@ -5008,31 +5191,43 @@ static void load_persisted_wallpaper_id()
         if (s_wallpaperPackMounted) {
             WallpaperImageCache* image = load_wallpaper_full_cache(entry->id);
             if (!image) {
-                serial::puts("[desktop] invalid persisted background fallback id=");
+                serial::puts("[desktop] wallpaper fallback reason=resource-missing id=");
                 serial::puts(wallpaperId);
                 serial::puts("\n");
                 apply_wallpaper_builtin_selection(&s_builtInWallpapers[0]);
-                persist_wallpaper_selection(s_builtInWallpapers[0].id);
+                serial::puts("[desktop] wallpaper apply source=default id=");
+                serial::puts(s_builtInWallpapers[0].id);
+                serial::puts("\n");
                 return;
             }
+        } else {
+            serial::puts("[desktop] wallpaper load deferred reason=wallpaper-pack-not-mounted id=");
+            serial::puts(wallpaperId);
+            serial::puts("\n");
+            return;
         }
 
         apply_wallpaper_builtin_selection(entry);
-        serial::puts("[desktop] background persistence load success id=");
+        serial::puts("[desktop] wallpaper resolve result=ok id=");
+        serial::puts(entry->id);
+        serial::puts("\n");
+        serial::puts("[desktop] wallpaper apply source=persisted id=");
         serial::puts(entry->id);
         serial::puts("\n");
     } else {
-        serial::puts("[desktop] invalid persisted background fallback id=");
+        serial::puts("[desktop] wallpaper fallback reason=invalid-id id=");
         serial::puts(wallpaperId);
         serial::puts("\n");
         apply_wallpaper_builtin_selection(&s_builtInWallpapers[0]);
-        persist_wallpaper_selection(s_builtInWallpapers[0].id);
+        serial::puts("[desktop] wallpaper apply source=default id=");
+        serial::puts(s_builtInWallpapers[0].id);
+        serial::puts("\n");
     }
 }
 
 void set_wallpaper_by_id(const char* wallpaperId)
 {
-    serial::puts("[desktop] set wallpaper request id=");
+    serial::puts("[desktop] wallpaper select id=");
     serial::puts(wallpaperId ? wallpaperId : "(null)");
     serial::puts("\n");
     const BuiltInGradientPalette* gradient = find_builtin_gradient(wallpaperId);
@@ -10045,55 +10240,99 @@ static bool close_shell_surface_if_open()
 static bool close_topmost_modal_dialog()
 {
     if (s_networkConfigOpen) {
+        serial::puts("[desktop] shortcut alt-f4 close-request modal=network-config\n");
         s_networkConfigOpen = false;
+        serial::puts("[desktop] shortcut alt-f4 close-result=accepted target=modal:network-config\n");
         return true;
     }
     if (s_networkAdaptersOpen) {
+        serial::puts("[desktop] shortcut alt-f4 close-request modal=network-adapters\n");
         s_networkAdaptersOpen = false;
+        serial::puts("[desktop] shortcut alt-f4 close-result=accepted target=modal:network-adapters\n");
         return true;
     }
     if (s_deviceManagerOpen) {
+        serial::puts("[desktop] shortcut alt-f4 close-request modal=device-manager\n");
         s_deviceManagerOpen = false;
+        serial::puts("[desktop] shortcut alt-f4 close-result=accepted target=modal:device-manager\n");
         return true;
     }
     if (s_controlPanelOpen) {
+        serial::puts("[desktop] shortcut alt-f4 close-request modal=control-panel\n");
         s_controlPanelOpen = false;
+        serial::puts("[desktop] shortcut alt-f4 close-result=accepted target=modal:control-panel\n");
         return true;
     }
     if (s_appModelDialogOpen) {
+        serial::puts("[desktop] shortcut alt-f4 close-request modal=app-model\n");
         s_appModelDialogOpen = false;
+        serial::puts("[desktop] shortcut alt-f4 close-result=accepted target=modal:app-model\n");
         return true;
     }
     if (s_shutdownDialogOpen) {
+        serial::puts("[desktop] shortcut alt-f4 close-request modal=shutdown-dialog\n");
         s_shutdownDialogOpen = false;
+        serial::puts("[desktop] shortcut alt-f4 close-result=accepted target=modal:shutdown-dialog\n");
         return true;
     }
     return false;
 }
 
-static bool handle_alt_f4_shortcut()
+static bool handle_alt_f4_shortcut(bool leftAltPressed, bool rightAltPressed)
 {
     if (s_altF4ShortcutConsumed) return false;
     s_altF4ShortcutConsumed = true;
+
+    serial::puts("[desktop] shortcut alt-f4 recognized consumed=1 leftAlt=");
+    serial::puts(leftAltPressed ? "1" : "0");
+    serial::puts(" rightAlt=");
+    serial::puts(rightAltPressed ? "1" : "0");
+    serial::puts(" f4=");
+    serial::puts("1");
+    serial::putc('\n');
 
     if (close_topmost_modal_dialog()) {
         return true;
     }
 
     if (s_startMenuOpen || s_rightClickMenuOpen) {
-        return false;
+        serial::puts("[desktop] shortcut alt-f4 ignored reason=menu-open leftAlt=");
+        serial::puts(leftAltPressed ? "1" : "0");
+        serial::puts(" rightAlt=");
+        serial::puts(rightAltPressed ? "1" : "0");
+        serial::puts(" f4=");
+        serial::puts("1");
+        serial::putc('\n');
+        return true;
     }
 
     app::KernelWindow* focused = compositor::KernelCompositor::getFocusedWindow();
-    if (focused) {
-        return compositor::KernelCompositor::requestCloseWindow(focused->id);
+    if (!focused) {
+        serial::puts("[desktop] shortcut alt-f4 ignored reason=no-active-window leftAlt=");
+        serial::puts(leftAltPressed ? "1" : "0");
+        serial::puts(" rightAlt=");
+        serial::puts(rightAltPressed ? "1" : "0");
+        serial::puts(" f4=");
+        serial::puts("1");
+        serial::putc('\n');
+        return true;
     }
 
-    if (shell::is_open() && s_shellActive && !s_shellMinimized) {
-        return close_shell_surface_if_open();
-    }
+    serial::puts("[desktop] shortcut alt-f4 close-request window=");
+    serial::put_hex32(focused->id);
+    serial::puts(" title=");
+    serial::puts(focused->title);
+    serial::puts(" app=");
+    serial::puts(focused->owner ? focused->owner->getName() : "(no-owner)");
+    serial::putc('\n');
 
-    return false;
+    const bool closed = compositor::KernelCompositor::requestCloseWindow(focused->id);
+    serial::puts("[desktop] shortcut alt-f4 close-result=");
+    serial::puts(closed ? "accepted" : "rejected");
+    serial::puts(" window=");
+    serial::put_hex32(focused->id);
+    serial::putc('\n');
+    return true;
 }
 
 int get_running_app_count()
@@ -10105,6 +10344,24 @@ void handle_key(uint32_t key)
 {
     reset_alt_f4_shortcut_state();
 
+#if defined(GXOS_DESKTOP_CLEANUP_RUNTIME_PASS)
+    if (key == kAltF4KeyCode) {
+        serial::puts("[desktop] key f4 candidate=");
+        serial::puts(ps2keyboard::was_alt_f4_shortcut_candidate() ? "1" : "0");
+        serial::puts(" leftAlt=");
+        serial::puts(ps2keyboard::last_key_alt_left_down() ? "1" : "0");
+        serial::puts(" rightAlt=");
+        serial::puts(ps2keyboard::last_key_alt_right_down() ? "1" : "0");
+        serial::puts(" currentLeftAlt=");
+        serial::puts(ps2keyboard::is_left_alt_down() ? "1" : "0");
+        serial::puts(" currentRightAlt=");
+        serial::puts(ps2keyboard::is_right_alt_down() ? "1" : "0");
+        serial::puts(" f4=");
+        serial::puts(ps2keyboard::is_f4_down() ? "1" : "0");
+        serial::putc('\n');
+    }
+#endif
+
     if (key == shell::KEY_SUPER) {
         serial::puts("[desktop] Super key pressed, toggling Start Menu\n");
         toggle_start_menu();
@@ -10112,11 +10369,42 @@ void handle_key(uint32_t key)
         return;
     }
 
-    if (key == kAltF4KeyCode && ps2keyboard::is_alt_down()) {
-        if (handle_alt_f4_shortcut()) {
-            draw();
+    if (key == kAltF4KeyCode) {
+        if (ps2keyboard::was_alt_f4_shortcut_candidate()) {
+            if (handle_alt_f4_shortcut(ps2keyboard::last_key_alt_left_down(), ps2keyboard::last_key_alt_right_down())) {
+                draw();
+            }
+            return;
         }
-        return;
+        if (s_altF4ShortcutConsumed) {
+#if defined(GXOS_DESKTOP_CLEANUP_RUNTIME_PASS)
+            serial::puts("[desktop] shortcut alt-f4 ignored reason=repeat-while-consumed leftAlt=");
+            serial::puts(ps2keyboard::last_key_alt_left_down() ? "1" : "0");
+            serial::puts(" rightAlt=");
+            serial::puts(ps2keyboard::last_key_alt_right_down() ? "1" : "0");
+            serial::puts(" currentLeftAlt=");
+            serial::puts(ps2keyboard::is_left_alt_down() ? "1" : "0");
+            serial::puts(" currentRightAlt=");
+            serial::puts(ps2keyboard::is_right_alt_down() ? "1" : "0");
+            serial::puts(" f4=");
+            serial::puts(ps2keyboard::is_f4_down() ? "1" : "0");
+            serial::putc('\n');
+#endif
+            return;
+        }
+#if defined(GXOS_DESKTOP_CLEANUP_RUNTIME_PASS)
+        serial::puts("[desktop] shortcut alt-f4 ignored reason=no-alt-on-make leftAlt=");
+        serial::puts(ps2keyboard::last_key_alt_left_down() ? "1" : "0");
+        serial::puts(" rightAlt=");
+        serial::puts(ps2keyboard::last_key_alt_right_down() ? "1" : "0");
+        serial::puts(" currentLeftAlt=");
+        serial::puts(ps2keyboard::is_left_alt_down() ? "1" : "0");
+        serial::puts(" currentRightAlt=");
+        serial::puts(ps2keyboard::is_right_alt_down() ? "1" : "0");
+        serial::puts(" f4=");
+        serial::puts(ps2keyboard::is_f4_down() ? "1" : "0");
+        serial::putc('\n');
+#endif
     }
 
     if (s_desktopRename.active) {
