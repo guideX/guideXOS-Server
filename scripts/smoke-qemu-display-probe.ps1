@@ -138,8 +138,12 @@ function Invoke-KernelBuildForSmoke {
         $probeObjectCandidates = @(
             (Join-Path $Root 'build\amd64\obj\core\virtio_gpu.o'),
             (Join-Path $Root 'build\amd64\obj\core\virtio_gpu.d'),
+            (Join-Path $Root 'build\amd64\obj\core\mmio.o'),
+            (Join-Path $Root 'build\amd64\obj\core\mmio.d'),
             (Join-Path $Root 'kernel\build\amd64\obj\core\virtio_gpu.o'),
-            (Join-Path $Root 'kernel\build\amd64\obj\core\virtio_gpu.d')
+            (Join-Path $Root 'kernel\build\amd64\obj\core\virtio_gpu.d'),
+            (Join-Path $Root 'kernel\build\amd64\obj\core\mmio.o'),
+            (Join-Path $Root 'kernel\build\amd64\obj\core\mmio.d')
         )
         Remove-Item -LiteralPath $probeObjectCandidates -ErrorAction SilentlyContinue
 

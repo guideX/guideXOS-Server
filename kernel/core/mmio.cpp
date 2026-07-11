@@ -10,6 +10,7 @@
 
 #include "include/kernel/mmio.h"
 #include "include/kernel/arch.h"
+#include "include/kernel/serial_debug.h"
 
 #if defined(_MSC_VER)
 #define GXOS_ALIGN_4096 __declspec(align(4096))
@@ -24,6 +25,7 @@ namespace {
 
 #if defined(ARCH_AMD64) && defined(GXOS_QEMU_VIRTIO_GPU_PROBE_ACTIVE)
 
+static const uint64_t KERNEL_VIRTUAL_BASE = 0x100000ULL;
 static const uint64_t PAGE_SHIFT = 12ULL;
 static const uint64_t PAGE_MASK = PAGE_SIZE_BYTES - 1ULL;
 static const uint64_t PTE_PRESENT = (1ULL << 0);
@@ -37,6 +39,7 @@ static const uint64_t PTE_ADDR_MASK = 0x000FFFFFFFFFF000ULL;
 static const uint64_t SUPPORTED_FLAG_MASK =
     MAP_FLAG_NON_USER | MAP_FLAG_NO_EXEC | MAP_FLAG_UNCACHED |
     MAP_FLAG_WRITE_THROUGH | MAP_FLAG_WRITE_COMBINING;
+static uint64_t s_kernelPhysicalBase = KERNEL_VIRTUAL_BASE;
 
 struct PageRecord {
     bool active;
@@ -51,6 +54,12 @@ static uint64_t s_nextWindowPage = 0;
 static const uint64_t kPageTablePoolPages = 64;
 GXOS_ALIGN_4096 static uint8_t s_pageTablePool[kPageTablePoolPages][PAGE_SIZE_BYTES];
 static bool s_pageTablePoolUsed[kPageTablePoolPages];
+struct PageTableRecord {
+    bool active;
+    uint64_t physicalPage;
+    uint64_t virtualPage;
+};
+static PageTableRecord s_pageTableRecords[kPageTablePoolPages];
 
 static void memzero(void* dst, size_t len)
 {
@@ -58,6 +67,15 @@ static void memzero(void* dst, size_t len)
     for (size_t i = 0; i < len; ++i) {
         bytes[i] = 0;
     }
+}
+
+static uint64_t kernel_virtual_to_physical(uint64_t virtualAddress)
+{
+    if (virtualAddress >= KERNEL_VIRTUAL_BASE) {
+        return s_kernelPhysicalBase + (virtualAddress - KERNEL_VIRTUAL_BASE);
+    }
+
+    return virtualAddress;
 }
 
 static uint64_t* current_cr3_root()
@@ -75,10 +93,34 @@ static uint64_t* allocate_page_table_page()
         s_pageTablePoolUsed[i] = true;
         uint8_t* page = &s_pageTablePool[i][0];
         memzero(page, PAGE_SIZE_BYTES);
+        const uint64_t virtualPage = reinterpret_cast<uint64_t>(page);
+        const uint64_t physicalPage = kernel_virtual_to_physical(virtualPage);
+        s_pageTableRecords[i].active = true;
+        s_pageTableRecords[i].physicalPage = physicalPage;
+        s_pageTableRecords[i].virtualPage = virtualPage;
+        kernel::serial::puts("[MMIO] page-table page slot=0x");
+        kernel::serial::put_hex64(i);
+        kernel::serial::puts(" virt=0x");
+        kernel::serial::put_hex64(virtualPage);
+        kernel::serial::puts(" phys=0x");
+        kernel::serial::put_hex64(physicalPage);
+        kernel::serial::putc('\n');
         return reinterpret_cast<uint64_t*>(page);
     }
 
     return nullptr;
+}
+
+static uint64_t* lookup_page_table_virtual(uint64_t physicalPage)
+{
+    for (uint64_t i = 0; i < kPageTablePoolPages; ++i) {
+        const PageTableRecord& record = s_pageTableRecords[i];
+        if (record.active && record.physicalPage == physicalPage) {
+            return reinterpret_cast<uint64_t*>(record.virtualPage);
+        }
+    }
+
+    return reinterpret_cast<uint64_t*>(physicalPage);
 }
 
 static uint64_t page_base(uint64_t addr)
@@ -128,7 +170,7 @@ static bool ensure_table_entry(uint64_t* table, uint64_t index, uint64_t** child
         }
 
         const uint64_t childPhys = entry & PTE_ADDR_MASK;
-        *childOut = reinterpret_cast<uint64_t*>(childPhys);
+        *childOut = lookup_page_table_virtual(childPhys);
         return true;
     }
 
@@ -332,6 +374,17 @@ static bool map_page_range(uint64_t alignedBase, uint64_t pageCount,
 #endif // ARCH_AMD64 && GXOS_QEMU_VIRTIO_GPU_PROBE_ACTIVE
 
 } // namespace
+
+void set_kernel_physical_base(uint64_t physicalBase)
+{
+#if defined(ARCH_AMD64) && defined(GXOS_QEMU_VIRTIO_GPU_PROBE_ACTIVE)
+    if (physicalBase != 0) {
+        s_kernelPhysicalBase = physicalBase;
+    }
+#else
+    (void)physicalBase;
+#endif
+}
 
 bool mapForDevice(uint64_t physicalBase, uint64_t length,
                   uint64_t* mappedVirtualOut,

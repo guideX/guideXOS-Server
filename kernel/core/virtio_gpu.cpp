@@ -773,15 +773,13 @@ static const char* transport_mmio_blocker_reason(ModernTransport& transport,
     }
 
     if (mappingOut != nullptr && summarySuccess) {
+        kernel::serial::puts("[VIRTIO-GPU] MMIO sanity reads begin\n");
         if (transport.commonCfg.mapped) {
             numQueues = mmio_read16(region_mmio_addr(transport.commonCfg, pci::COMMON_NUM_QUEUES));
             deviceStatus = mmio_read8(region_mmio_addr(transport.commonCfg, pci::COMMON_STATUS));
             configGeneration = mmio_read8(region_mmio_addr(transport.commonCfg, pci::COMMON_CFG_GEN));
         }
-        if (transport.deviceCfg.mapped) {
-            deviceScanouts = mmio_read32(region_mmio_addr(transport.deviceCfg, 0x08));
-            deviceCapsets = mmio_read32(region_mmio_addr(transport.deviceCfg, 0x0C));
-        }
+        kernel::serial::puts("[VIRTIO-GPU] MMIO sanity reads done\n");
         allSanityReadsOk = transport.commonCfg.mapped;
         mappingOut->mmioMapped = true;
         mappingOut->sanityReadsOk = allSanityReadsOk;
@@ -808,32 +806,6 @@ static const char* transport_mmio_blocker_reason(ModernTransport& transport,
     transport.mmioCacheMode = summarySuccess ? (cacheMode != nullptr ? cacheMode : "uc(pcd+pwt)") : "n/a";
     if (summarySuccess) {
         transport.mmioStopReason = "transport writes intentionally disabled";
-    }
-
-    if (summarySuccess && mappingOut != nullptr) {
-        kernel::serial::puts("[VIRTIO-GPU] MMIO transport summary mmioMapped=yes mappingVirtual=0x");
-        kernel::serial::put_hex64(commonVirtual);
-        kernel::serial::puts(" pageCount=");
-        serial_put_u64_decimal(totalUniquePages);
-        kernel::serial::puts(" cacheMode=");
-        kernel::serial::puts(transport.mmioCacheMode != nullptr ? transport.mmioCacheMode : "n/a");
-        kernel::serial::puts(" sanityReads=");
-        kernel::serial::puts(allSanityReadsOk ? "ok" : "failed");
-        kernel::serial::puts(" stopReason=");
-        kernel::serial::puts(transport.mmioStopReason != nullptr ? transport.mmioStopReason : "n/a");
-        kernel::serial::putc('\n');
-
-        kernel::serial::puts("[VIRTIO-GPU] MMIO sanity reads numQueues=");
-        serial_put_u32_decimal(numQueues);
-        kernel::serial::puts(" deviceStatus=0x");
-        kernel::serial::put_hex8(deviceStatus);
-        kernel::serial::puts(" configGeneration=0x");
-        kernel::serial::put_hex8(configGeneration);
-        kernel::serial::puts(" deviceScanouts=");
-        serial_put_u32_decimal(deviceScanouts);
-        kernel::serial::puts(" deviceCapsets=");
-        serial_put_u32_decimal(deviceCapsets);
-        kernel::serial::putc('\n');
     }
 
     return blockerReason;
@@ -1600,6 +1572,7 @@ static bool initialize_device(DeviceState& state)
         return false;
     }
 
+    kernel::serial::puts("[VIRTIO-GPU] MMIO probe helper returned to initialize_device\n");
     transport.mmioMapped = mmioProbe.mmioMapped;
     transport.mmioSanityReadsOk = mmioProbe.sanityReadsOk;
     transport.mmioMappedVirtual = mmioProbe.mappedVirtual;
@@ -1611,6 +1584,20 @@ static bool initialize_device(DeviceState& state)
     transport.mmioDeviceCapsets = mmioProbe.deviceCapsets;
     transport.mmioCacheMode = mmioProbe.cacheMode;
     transport.mmioStopReason = mmioProbe.stopReason != nullptr ? mmioProbe.stopReason : "transport writes intentionally disabled";
+
+    kernel::serial::puts("[VIRTIO-GPU] MMIO transport summary mmioMapped=");
+    kernel::serial::puts(mmioProbe.mmioMapped ? "yes" : "no");
+    kernel::serial::puts(" mappingVirtual=0x");
+    kernel::serial::put_hex64(mmioProbe.mappedVirtual);
+    kernel::serial::puts(" pageCount=");
+    serial_put_u64_decimal(mmioProbe.pageCount);
+    kernel::serial::puts(" cacheMode=");
+    kernel::serial::puts(mmioProbe.cacheMode != nullptr ? mmioProbe.cacheMode : "n/a");
+    kernel::serial::puts(" sanityReads=");
+    kernel::serial::puts(mmioProbe.sanityReadsOk ? "ok" : "failed");
+    kernel::serial::puts(" stopReason=");
+    kernel::serial::puts(mmioProbe.stopReason != nullptr ? mmioProbe.stopReason : "n/a");
+    kernel::serial::putc('\n');
 
     kernel::serial::puts("[VIRTIO-GPU] MMIO transport mapped; read-only sanity reads complete; GET_DISPLAY_INFO remains disabled in this diagnostic pass\n");
     record_probe_outcome(state, false, DisplayInfoOutcome::NotQueried, 0,

@@ -180,6 +180,8 @@ inline bool canMap(uint64_t physicalBase, uint64_t length,
     return report.withinSafeDirectMap && hasRequiredSafetyFlags && report.cacheAttributesSupported;
 }
 
+void set_kernel_physical_base(uint64_t physicalBase);
+
 bool mapForDevice(uint64_t physicalBase, uint64_t length,
                   uint64_t* mappedVirtualOut = nullptr,
                   MappingReport* reportOut = nullptr,

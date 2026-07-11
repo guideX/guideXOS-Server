@@ -21,6 +21,7 @@
 #include "include/kernel/serial_debug.h"
 #include "include/kernel/desktop_capabilities.h"
 #include "include/kernel/app_launch_target_resolver.h"
+#include "include/kernel/mmio.h"
 
 // Storage subsystem
 #include "include/kernel/block_device.h"
@@ -336,6 +337,7 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         if (bootinfo && bootinfo->Magic == guideXOS::GUIDEXOS_BOOTINFO_MAGIC) {
             is_bootinfo = true;
             kernel::serial::puts("[KERNEL] Boot method: UEFI BootInfo\n");
+            kernel::mmio::set_kernel_physical_base(bootinfo->KernelPhysicalBase);
             kernel::nic::set_kernel_physical_base(bootinfo->KernelPhysicalBase);
             kernel::virtio::rng::set_kernel_physical_base(bootinfo->KernelPhysicalBase);
         }
