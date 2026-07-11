@@ -257,6 +257,7 @@
     <ClInclude Include="kernel\core\include\kernel\fs_ufs.h" />
     <ClInclude Include="kernel\core\include\kernel\fs_xfs.h" />
     <ClInclude Include="kernel\core\include\kernel\hugepages.h" />
+    <ClInclude Include="kernel\core\include\kernel\mmio.h" />
     <ClInclude Include="kernel\core\include\kernel\icmp.h" />
     <ClInclude Include="kernel\core\include\kernel\icmpv6.h" />
     <ClInclude Include="kernel\core\include\kernel\input_manager.h" />
@@ -511,6 +512,7 @@
     <ClCompile Include="kernel\core\fs_ufs.cpp" />
     <ClCompile Include="kernel\core\fs_xfs.cpp" />
     <ClCompile Include="kernel\core\hugepages.cpp" />
+    <ClCompile Include="kernel\core\mmio.cpp" />
     <ClCompile Include="kernel\core\icmp.cpp" />
     <ClCompile Include="kernel\core\icmpv6.cpp" />
     <ClCompile Include="kernel\core\input_manager.cpp" />

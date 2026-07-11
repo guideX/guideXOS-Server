@@ -4,8 +4,14 @@
   "desktop.theme.id": "classic",
   "desktop.background.scale": "fill",
   "desktop.taskbar.position": "bottom",
+  "desktop.display.mode": "mirror",
+  "desktop.display.primaryId": "display-1",
+  "desktop.display.arrangement": "",
+  "desktop.display.resolution": "",
+  "desktop.clock.timeZoneId": "pacific",
+  "desktop.clock.use24HourTime": false,
   "pinned": ["ComputerFiles","Trash","App Model Demo","Native App Debug Viewer","Hello World","Resource Viewer","Future GXApp Package","HelloWorld ELF"],
-  "recent": ["ComputerFiles","guideXOS Navigator","DisplayOptions","Console","App Model Demo","Hello World","Resource Viewer","Notepad","ControlPanel","Calculator","HelloWorld ELF","Native App Debug Viewer","TaskManager","Future GXApp Package","HDInstaller"],
+  "recent": ["ComputerFiles","guideXOS Navigator","DisplayOptions","Console","App Model Demo","Hello World","Resource Viewer","Notepad","Control Panel","Calculator"],
   "desktopShortcuts": [
   ],
   "showDesktopTrash": true,
@@ -15,7 +21,7 @@
   "smallLiveDesktopFolderIcons": true,
   "autoArrangeDesktopIcons": false,
   "windows": [
-    {"id": 1000, "title": "Task Manager", "x": 300, "y": 300, "w": 760, "h": 520, "minimized": false, "maximized": false, "z": 0, "focused": true, "snap": 0}
+    {"id": 1000, "title": "Task Manager", "x": 300, "y": 300, "w": 760, "h": 520, "minimized": false, "maximized": false, "z": 0, "focused": true, "snap": 0, "restoreX": 300, "restoreY": 300, "restoreW": 760, "restoreH": 520}
   ],
   "iconPositions": [
   ]

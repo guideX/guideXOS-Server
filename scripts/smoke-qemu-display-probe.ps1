@@ -545,7 +545,8 @@ function Invoke-QemuDisplayProbeBackend {
             GpuInventoryLine = ''
             GpuMmioReportLine = ''
             GpuMmioBlockedLine = ''
-            GpuMmioFeasibleLine = ''
+            GpuMmioSummaryLine = ''
+            GpuMmioMappedLine = ''
             GpuResetStepLine = ''
             GpuGetDisplayInfoStepLine = ''
             GpuQueueLine = ''
@@ -650,8 +651,9 @@ function Invoke-QemuDisplayProbeBackend {
     $gpuInventoryLine = [regex]::Match($serialText, '\[VIRTIO-GPU\] Capability inventory common=[^\r\n]+')
     $gpuTransportLine = [regex]::Match($serialText, '\[VIRTIO-GPU\] Transport type detected: [^\r\n]+')
     $gpuMmioReportLine = [regex]::Match($serialText, '\[VIRTIO-GPU\] MMIO mapping report common [^\r\n]+')
+    $gpuMmioSummaryLine = [regex]::Match($serialText, '\[VIRTIO-GPU\] MMIO transport summary mmioMapped=yes mappingVirtual=0x[0-9A-Fa-f]+ pageCount=\d+ cacheMode=uc\(pcd\+pwt\) sanityReads=ok stopReason=transport writes intentionally disabled')
+    $gpuMmioMappedLine = [regex]::Match($serialText, '\[VIRTIO-GPU\] MMIO transport mapped; read-only sanity reads complete; GET_DISPLAY_INFO remains disabled in this diagnostic pass')
     $gpuMmioBlockedLine = [regex]::Match($serialText, '\[VIRTIO-GPU\] MMIO mapping blocked: [^\r\n]+')
-    $gpuMmioFeasibleLine = [regex]::Match($serialText, '\[VIRTIO-GPU\] MMIO mapping feasible; GET_DISPLAY_INFO remains disabled in this diagnostic pass')
     $gpuResetStepLine = [regex]::Match($serialText, '\[VIRTIO-GPU\] Init step: reset_device begin')
     $gpuGetDisplayInfoStepLine = [regex]::Match($serialText, '\[VIRTIO-GPU\] Init step: GET_DISPLAY_INFO begin')
     $gpuFeatureNegotiationLine = [regex]::Match($serialText, '\[VIRTIO-GPU\] Feature negotiation status=(ok|failed) negotiated=0x[0-9A-Fa-f]+ deviceFeatures=0x[0-9A-Fa-f]+')
@@ -659,7 +661,7 @@ function Invoke-QemuDisplayProbeBackend {
     $gpuQueueLine = [regex]::Match($serialText, '\[VIRTIO-GPU\] Control queue ready size=[^\r\n]+')
     $gpuDisplayInfoLine = [regex]::Match($serialText, '\[VIRTIO-GPU\] Display info scanouts=\d+')
     $gpuScanoutLine = [regex]::Match($serialText, '\[VIRTIO-GPU\]\s+scanout\[\d+\].*')
-    $gpuProbeCompleteLine = [regex]::Match($serialText, '\[VIRTIO-GPU\] Probe complete: devices=\d+ initialized=\d+ transport=[^\r\n]+')
+    $gpuProbeCompleteLine = [regex]::Match($serialText, '\[VIRTIO-GPU\] Probe complete: devices=\d+ initialized=\d+ transport=[^\r\n]+ mmioMapped=yes mappingVirtual=0x[0-9A-Fa-f]+ pageCount=\d+ cacheMode=uc\(pcd\+pwt\) sanityReads=ok caps=[^\r\n]+ displayInfo=not-queried reason=transport writes intentionally disabled')
 
     $bootGopHandles = Format-OptionalValue -Value (Get-MatchGroupValue -Match $bootGopLine -GroupIndex 1)
     $bootFramebufferCount = if ($bootSummary) { $bootSummary.RawCount } else { $null }
@@ -673,7 +675,7 @@ function Invoke-QemuDisplayProbeBackend {
     $kernelActiveRenderTargetCount = if ($kernelSummary) { $kernelSummary.ActiveRenderTargetCount } else { $null }
     $kernelDisabledCandidateCount = if ($kernelSummary) { $kernelSummary.DisabledCandidateCount } else { $null }
     $bootInvalidReason = Format-OptionalValue -Value (Get-MatchGroupValue -Match $bootInvalidReasonLine -GroupIndex 1)
-    $gpuDiagnosticsCaptured = $gpuProbeEnabledLine.Success -or $gpuProbeStartLine.Success -or $gpuCandidateLine.Success -or $gpuCapabilityWalkLine.Success -or $gpuInventoryLine.Success -or $gpuTransportLine.Success -or $gpuMmioReportLine.Success -or $gpuMmioBlockedLine.Success -or $gpuMmioFeasibleLine.Success -or $gpuResetStepLine.Success -or $gpuGetDisplayInfoStepLine.Success -or $gpuFeatureNegotiationLine.Success -or $gpuQueueCountLine.Success -or $gpuQueueLine.Success -or $gpuDisplayInfoLine.Success -or $gpuScanoutLine.Success -or $gpuProbeCompleteLine.Success
+    $gpuDiagnosticsCaptured = $gpuProbeEnabledLine.Success -or $gpuProbeStartLine.Success -or $gpuCandidateLine.Success -or $gpuCapabilityWalkLine.Success -or $gpuInventoryLine.Success -or $gpuTransportLine.Success -or $gpuMmioReportLine.Success -or $gpuMmioSummaryLine.Success -or $gpuMmioMappedLine.Success -or $gpuMmioBlockedLine.Success -or $gpuResetStepLine.Success -or $gpuGetDisplayInfoStepLine.Success -or $gpuFeatureNegotiationLine.Success -or $gpuQueueCountLine.Success -or $gpuQueueLine.Success -or $gpuDisplayInfoLine.Success -or $gpuScanoutLine.Success -or $gpuProbeCompleteLine.Success
 
     if ($spec.Required) {
         if ([string]::IsNullOrWhiteSpace($serialText)) {
@@ -725,35 +727,52 @@ function Invoke-QemuDisplayProbeBackend {
         Assert-Condition -Backend $backendName -Name 'virtio-gpu PCI candidate line' -Condition $gpuCandidateLine.Success -Detail 'expected the QEMU virtio-gpu PCI function to be detected'
         Assert-Condition -Backend $backendName -Name 'virtio-gpu capability walk line' -Condition $gpuCapabilityWalkLine.Success -Detail 'expected the full PCI capability walk to complete'
         Assert-Condition -Backend $backendName -Name 'virtio-gpu inventory line' -Condition $gpuInventoryLine.Success -Detail 'expected the modern capability inventory summary'
-        Assert-Condition -Backend $backendName -Name 'virtio-gpu transport line' -Condition $gpuTransportLine.Success -Detail 'expected the transport type to be logged before MMIO feasibility checks'
+        Assert-Condition -Backend $backendName -Name 'virtio-gpu transport line' -Condition $gpuTransportLine.Success -Detail 'expected the transport type to be logged before MMIO mapping'
         Assert-Condition -Backend $backendName -Name 'virtio-gpu MMIO report line' -Condition $gpuMmioReportLine.Success -Detail 'expected a compact MMIO mapping report for the common config region'
-        Assert-Condition -Backend $backendName -Name 'virtio-gpu MMIO blocker line' -Condition $gpuMmioBlockedLine.Success -Detail 'expected an explicit MMIO blocker line in the serial log'
+        Assert-Condition -Backend $backendName -Name 'virtio-gpu MMIO summary line' -Condition $gpuMmioSummaryLine.Success -Detail 'expected the mapped MMIO transport summary in the serial log'
+        Assert-Condition -Backend $backendName -Name 'virtio-gpu MMIO mapped milestone line' -Condition $gpuMmioMappedLine.Success -Detail 'expected the read-only MMIO milestone line in the serial log'
         Assert-Condition -Backend $backendName -Name 'virtio-gpu MMIO report fields' -Condition (
             $gpuMmioReportLine.Success -and
             $gpuMmioReportLine.Value -match 'requestBase=0x[0-9A-Fa-f]+' -and
             $gpuMmioReportLine.Value -match 'requestLength=0x[0-9A-Fa-f]+' -and
             $gpuMmioReportLine.Value -match 'alignedBase=0x[0-9A-Fa-f]+' -and
             $gpuMmioReportLine.Value -match 'alignedLength=0x[0-9A-Fa-f]+' -and
+            $gpuMmioReportLine.Value -match 'mappedLength=0x[0-9A-Fa-f]+' -and
             $gpuMmioReportLine.Value -match 'pages=\d+' -and
+            $gpuMmioReportLine.Value -match 'kernelVirtualBase=(n/a|0x[0-9A-Fa-f]+)' -and
             $gpuMmioReportLine.Value -match 'mappedVirtual=(n/a|0x[0-9A-Fa-f]+)' -and
             $gpuMmioReportLine.Value -match 'flags=0x[0-9A-Fa-f]+' -and
             $gpuMmioReportLine.Value -match 'nonUser=yes' -and
             $gpuMmioReportLine.Value -match 'noExec=yes' -and
-            $gpuMmioReportLine.Value -match 'cacheAttrs=off todo\(PAT/MTRR\)' -and
+            $gpuMmioReportLine.Value -match 'uncached=yes' -and
+            $gpuMmioReportLine.Value -match 'cacheAttrs=ok' -and
+            $gpuMmioReportLine.Value -match 'cacheMode=uc\(pcd\+pwt\)' -and
             $gpuMmioReportLine.Value -match 'qemuProbeOnly=yes' -and
             $gpuMmioReportLine.Value -match 'pageAligned=(yes|no)' -and
-            $gpuMmioReportLine.Value -match 'directMapped=no' -and
-            $gpuMmioReportLine.Value -match 'requiresNewPageTableEntries=yes' -and
-            $gpuMmioReportLine.Value -match 'reason=runtime MMIO page-table mapping is not implemented yet' -and
-            $gpuMmioReportLine.Value -match 'nextFeature=runtime MMIO page-table mapping'
+            $gpuMmioReportLine.Value -match 'windowEligible=yes' -and
+            $gpuMmioReportLine.Value -match 'requiresNewPageTableEntries=(yes|no)' -and
+            $gpuMmioReportLine.Value -match 'success=yes' -and
+            $gpuMmioReportLine.Value -match 'reason=mapped into reserved kernel MMIO window' -and
+            $gpuMmioReportLine.Value -match 'nextFeature=controlled feature negotiation'
         ) -Detail ($gpuMmioReportLine.Value)
-        Assert-Condition -Backend $backendName -Name 'virtio-gpu blocker reason propagated' -Condition ($serialText -match 'reason=common config runtime MMIO page-table mapping is not implemented yet') -Detail 'probe summary should carry the MMIO blocker reason'
+        Assert-Condition -Backend $backendName -Name 'virtio-gpu blocker absent' -Condition (-not $gpuMmioBlockedLine.Success) -Detail 'probe should not emit a blocker line once the transport mapping succeeds'
         Assert-Condition -Backend $backendName -Name 'virtio-gpu transport reset suppressed' -Condition (-not $gpuResetStepLine.Success) -Detail 'probe should not write the transport reset register'
         Assert-Condition -Backend $backendName -Name 'virtio-gpu feature negotiation suppressed' -Condition (-not $gpuFeatureNegotiationLine.Success) -Detail 'probe must stop before feature negotiation'
         Assert-Condition -Backend $backendName -Name 'virtio-gpu queue setup suppressed' -Condition (-not $gpuQueueCountLine.Success -and -not $gpuQueueLine.Success) -Detail 'probe must stop before control-queue layout'
         Assert-Condition -Backend $backendName -Name 'virtio-gpu GET_DISPLAY_INFO suppressed' -Condition (-not $gpuGetDisplayInfoStepLine.Success -and -not $gpuDisplayInfoLine.Success -and -not $gpuScanoutLine.Success) -Detail 'probe must stop before display-info and scanout activity'
-        Assert-Condition -Backend $backendName -Name 'virtio-gpu mapping feasibility stop' -Condition ($gpuMmioBlockedLine.Success -or $gpuMmioFeasibleLine.Success) -Detail 'probe should end at the MMIO feasibility boundary'
+        Assert-Condition -Backend $backendName -Name 'virtio-gpu mapping milestone stop' -Condition ($gpuMmioSummaryLine.Success -and $gpuMmioMappedLine.Success) -Detail 'probe should end at the mapped MMIO transport milestone'
         Assert-Condition -Backend $backendName -Name 'virtio-gpu probe completion line' -Condition $gpuProbeCompleteLine.Success -Detail 'expected the final probe summary line'
+        Assert-Condition -Backend $backendName -Name 'virtio-gpu probe completion fields' -Condition (
+            $gpuProbeCompleteLine.Value -match 'mmioMapped=yes' -and
+            $gpuProbeCompleteLine.Value -match 'mappingVirtual=0x[0-9A-Fa-f]+' -and
+            $gpuProbeCompleteLine.Value -match 'pageCount=\d+' -and
+            $gpuProbeCompleteLine.Value -match 'cacheMode=uc\(pcd\+pwt\)' -and
+            $gpuProbeCompleteLine.Value -match 'sanityReads=ok' -and
+            $gpuProbeCompleteLine.Value -match 'displayInfo=not-queried' -and
+            $gpuProbeCompleteLine.Value -match 'reason=transport writes intentionally disabled'
+        ) -Detail $gpuProbeCompleteLine.Value
+        $backendStatus = 'complete'
+        $interpretation = 'QEMU virtio-gpu MMIO transport mapped and read-only sanity reads completed'
     }
 
     $launched = $launchRecorded
@@ -838,8 +857,9 @@ function Invoke-QemuDisplayProbeBackend {
         "gpuInventoryLine=$($gpuInventoryLine.Value)"
         "gpuTransportLine=$($gpuTransportLine.Value)"
         "gpuMmioReportLine=$($gpuMmioReportLine.Value)"
+        "gpuMmioSummaryLine=$($gpuMmioSummaryLine.Value)"
+        "gpuMmioMappedLine=$($gpuMmioMappedLine.Value)"
         "gpuMmioBlockedLine=$($gpuMmioBlockedLine.Value)"
-        "gpuMmioFeasibleLine=$($gpuMmioFeasibleLine.Value)"
         "gpuResetStepLine=$($gpuResetStepLine.Value)"
         "gpuGetDisplayInfoStepLine=$($gpuGetDisplayInfoStepLine.Value)"
         "gpuFeatureNegotiationLine=$($gpuFeatureNegotiationLine.Value)"
@@ -922,8 +942,9 @@ function Invoke-QemuDisplayProbeBackend {
         GpuInventoryLine = $gpuInventoryLine.Value
         GpuTransportLine = $gpuTransportLine.Value
         GpuMmioReportLine = $gpuMmioReportLine.Value
+        GpuMmioSummaryLine = $gpuMmioSummaryLine.Value
+        GpuMmioMappedLine = $gpuMmioMappedLine.Value
         GpuMmioBlockedLine = $gpuMmioBlockedLine.Value
-        GpuMmioFeasibleLine = $gpuMmioFeasibleLine.Value
         GpuResetStepLine = $gpuResetStepLine.Value
         GpuGetDisplayInfoStepLine = $gpuGetDisplayInfoStepLine.Value
         GpuFeatureNegotiationLine = $gpuFeatureNegotiationLine.Value
@@ -1007,8 +1028,9 @@ try {
         $evidenceLines += "gpuInventoryLine=$($result.GpuInventoryLine)"
         $evidenceLines += "gpuTransportLine=$($result.GpuTransportLine)"
         $evidenceLines += "gpuMmioReportLine=$($result.GpuMmioReportLine)"
+        $evidenceLines += "gpuMmioSummaryLine=$($result.GpuMmioSummaryLine)"
+        $evidenceLines += "gpuMmioMappedLine=$($result.GpuMmioMappedLine)"
         $evidenceLines += "gpuMmioBlockedLine=$($result.GpuMmioBlockedLine)"
-        $evidenceLines += "gpuMmioFeasibleLine=$($result.GpuMmioFeasibleLine)"
         $evidenceLines += "gpuResetStepLine=$($result.GpuResetStepLine)"
         $evidenceLines += "gpuGetDisplayInfoStepLine=$($result.GpuGetDisplayInfoStepLine)"
         $evidenceLines += "gpuFeatureNegotiationLine=$($result.GpuFeatureNegotiationLine)"

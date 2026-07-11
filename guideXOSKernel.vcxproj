@@ -183,6 +183,7 @@
     <ClInclude Include="kernel\core\include\kernel\framebuffer.h" />
     <ClInclude Include="kernel\core\include\kernel\interrupts.h" />
     <ClInclude Include="kernel\core\include\kernel\multiboot.h" />
+    <ClInclude Include="kernel\core\include\kernel\mmio.h" />
     <ClInclude Include="kernel\core\include\kernel\process.h" />
     <ClInclude Include="kernel\core\include\kernel\ps2mouse.h" />
     <ClInclude Include="kernel\core\include\kernel\types.h" />
@@ -263,6 +264,7 @@
     <ClCompile Include="kernel\core\shell.cpp" />
     <ClCompile Include="kernel\core\interrupts.cpp" />
     <ClCompile Include="kernel\core\ps2mouse.cpp" />
+    <ClCompile Include="kernel\core\mmio.cpp" />
     <ClCompile Include="kernel\arch\x86\arch.cpp" />
     <ClCompile Include="kernel\core\arch.cpp" />
     <ClCompile Include="kernel\core\architecture_detector.cpp" />

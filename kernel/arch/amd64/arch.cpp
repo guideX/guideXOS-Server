@@ -195,6 +195,15 @@ void write_cr4(uint64_t value)
 #endif
 }
 
+void invalidate_tlb_entry(uint64_t virtualAddress)
+{
+#if defined(_MSC_VER)
+    __invlpg(reinterpret_cast<void*>(virtualAddress));
+#else
+    asm volatile ("invlpg (%0)" : : "r"(virtualAddress) : "memory");
+#endif
+}
+
 void init()
 {
     // TODO: Initialize AMD64-specific features

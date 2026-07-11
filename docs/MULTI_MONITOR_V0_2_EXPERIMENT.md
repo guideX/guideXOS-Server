@@ -10,9 +10,10 @@ Validated milestone closeout for `2026-07-10`. This note now tracks the implemen
 
 ## Safety Boundary
 
-- QEMU virtio-gpu work is allowed in this branch.
+- QEMU virtio-gpu work is allowed in this branch, but only through the x86_64 diagnostic probe gate.
 - Real bare-metal Intel/onboard GPU work is not allowed yet.
-- Real hardware GPU mode-setting, MMIO probing, scanout enabling, and display register programming are Mule Territory and must stop before continuing.
+- REAL HARDWARE GPU/MMIO ENABLEMENT IS MULE TERRITORY AND REQUIRES A SEPARATE SAFETY CHECKPOINT.
+- Real hardware GPU mode-setting, MMIO probing, scanout enabling, and display register programming remain out of scope for this pass.
 
 ## Implementation Roadmap
 
@@ -20,11 +21,11 @@ Validated milestone closeout for `2026-07-10`. This note now tracks the implemen
 1. Hosted two-window synthetic output complete.
 1. QEMU GOP/backend diagnostics complete.
 1. virtio-gpu discovery/capability walk complete.
-1. Runtime MMIO mapping next.
-1. VirtIO common config access.
-1. Feature negotiation.
-1. Virtqueue setup.
-1. GET_DISPLAY_INFO.
+1. Runtime MMIO mapping complete in the QEMU-only x86_64 probe build.
+1. VirtIO common config access next.
+1. Controlled feature negotiation next.
+1. Virtqueue setup next.
+1. GET_DISPLAY_INFO next.
 1. Resource, backing, scanout, transfer, and flush support.
 1. Single virtio-gpu output.
 1. Dual virtio-gpu scanouts.
@@ -114,8 +115,10 @@ The runtime MMIO work is starting from the existing huge-page / page-table scaff
 
 - `kernel/core/include/kernel/hugepages.h` defines the current x86-64 and ARM64 page-table flag vocabulary, including writable, user, cache-disable, write-through, write-combining, and no-execute bits.
 - `kernel/core/hugepages.cpp` already contains the huge-page-oriented helpers: `map2M`, `map1G`, `unmap2M`, `unmap1G`, `make_pde_2m`, `make_pdpe_1g`, `split_2m_to_4k`, and `split_1g_to_2m`.
-- Those helpers establish the shape of the eventual mapping path, but they are not yet a generic runtime MMIO mapper for arbitrary high PCI BARs.
-- PAT/MTRR cache-attribute plumbing is still unresolved, so the safe current QEMU-only fallback is to keep the virtio-gpu probe diagnostic-only, require kernel-only/no-exec MMIO flags, and stop before any transport write path when `kernel::mmio::mapForDevice` reports a blocker.
+- Those helpers establish the shape of the eventual mapping path, and the current QEMU-only runtime MMIO window now layers on top of that scaffolding.
+- The active x86_64 probe build uses a reserved high-half MMIO window with UC-style `PCD|PWT` leaf mappings, `NX`, supervisor-only permissions, and a bounded bump allocator.
+- PAT/MTRR cache-attribute plumbing is still unresolved globally, so the safe current phase uses the UC-compatible `PCD|PWT` path instead of mapping PCI MMIO as ordinary cacheable RAM.
+- `kernel::mmio::mapForDevice` now installs the QEMU-only transport mappings and stops before any transport write path if it cannot prove a safe MMIO window.
 
 ## QEMU / Bare-Metal Output Investigation
 
@@ -135,10 +138,10 @@ Fresh backend evidence is captured in `logs\qemu-display-probe-20260709-211742\q
 Current takeaways:
 
 - `std`, `virtio-vga`, and `qxl-vga` all expose two GOP handles, but only one unique framebuffer candidate. The second handle is a duplicate alias, not a second monitor.
-- `virtio-gpu-pci,max_outputs=2` and the optional modern-only `disable-legacy=on` variant now both expose the modern VirtIO PCI capability set, but the probe stops before any reset/status write because the runtime MMIO mapping layer is still stubbed for the common config BAR.
-- `virtio-vga` reaches the same safe-MMIO blocker after resolving the capability set, so this is a transport-mapping limit rather than a single command-line variant quirk.
+- `virtio-gpu-pci,max_outputs=2` and the optional modern-only `disable-legacy=on` variant now both expose the modern VirtIO PCI capability set, and the probe now maps the transport window read-only before stopping at the transport-mapping milestone.
+- `virtio-vga` still resolves the same capability set, so the transport mapping is now the first diagnostic boundary rather than a one-off command-line quirk.
 - The full capability walk now logs every vendor-specific VirtIO capability, including `cfg_type=0x05`, and it keeps scanning for common, notify, ISR, and device config capabilities even when the PCI config capability is malformed.
-- The bootloader still reaches the kernel on the virtio-gpu path, so this is not a boot-before-handoff problem. The blocker is now the first safe runtime MMIO mapping step, not GOP discovery.
+- The bootloader still reaches the kernel on the virtio-gpu path, so this is not a boot-before-handoff problem. The current boundary is the read-only transport probe, not GOP discovery.
 - Hardware multi-output remains unimplemented in guideXOS. Rendering is still primary-only and remains disabled in this probe pass.
 
 The new probe launchers are:
@@ -170,7 +173,7 @@ The standard `std` mode still validates:
 - Multiple framebuffer descriptors are not part of the current boot handoff contract.
 - The kernel does not yet consume an array of framebuffer targets from the boot path.
 - The compositor does not yet render to more than one real framebuffer in bare-metal mode.
-- There is a diagnostic-only virtio-gpu discovery probe, but there is no rendering-capable virtio-gpu or QXL guest driver in this pass. The modern VirtIO probe now stops before the first reset/status MMIO write when the common config BAR requires runtime MMIO page-table mapping that is not implemented yet.
+- There is now a diagnostic-only virtio-gpu transport probe with a mapped MMIO window, but there is still no rendering-capable virtio-gpu or QXL guest driver in this pass.
 
 ### Next required implementation step
 
@@ -184,13 +187,13 @@ Diagnostic-only probe results from `logs\qemu-display-probe-20260709-211742\virt
 | --- | --- |
 | PCI discovery | Success. The probe found a virtio-gpu PCI function at `00:02.00` with `vendor=0x1AF4`, `device=0x1050`, `subsystem=0x1AF4:1100`, `class=0x03`, `subclass=0x80`. |
 | Capability walk | Success. The full PCI capability list walk logs 6 caps, 5 vendor-specific caps, and every vendor-specific VirtIO capability. `cfg_type=0x01` common, `0x02` notify, `0x03` ISR, and `0x04` device are resolved. `cfg_type=0x05` is diagnostic evidence only and is not treated as success by itself. On `virtio-gpu` and `virtio-gpu-modern-only`, the PCI config capability is malformed because BAR0 is unassigned. |
-| Modern transport | Detected, but not safely initializable in this pass. The common config BAR resolves to `0x000000C000000000`, the mapping attempt is QEMU-probe-only, and the runtime MMIO page-table mapping layer is still stubbed. The probe stops before `reset_device`. |
+| Modern transport | Detected and mapped in the QEMU-only probe build. The common config BAR resolves to `0x000000C000000000`, the transport MMIO window is mapped into the reserved kernel range, and the probe stops after read-only sanity reads. |
 | Feature negotiation | Not reached. |
 | Control queue | Not reached. |
 | GET_DISPLAY_INFO | Not queried. No control queue was laid out and no `GET_DISPLAY_INFO` request was issued. |
 | Scanouts reported | `n/a` for this run, because the safe MMIO gate stopped the probe before any queue writes. |
 | Modern-only QEMU mode | Supported locally. The smoke successfully launches `-device virtio-gpu-pci,max_outputs=2,disable-legacy=on`. |
-| Current interpretation | QEMU exposes a modern virtio-gpu PCI candidate and the full modern capability set, but guideXOS still needs a runtime MMIO page-table mapping layer before the common config BAR can be used. Rendering remains disabled. |
+| Current interpretation | QEMU exposes a modern virtio-gpu PCI candidate and the full modern capability set, and guideXOS now proves a safe read-only runtime MMIO transport mapping before any reset or feature negotiation. Rendering remains disabled. |
 
 What remains before rendering can happen:
 
@@ -198,18 +201,37 @@ What remains before rendering can happen:
 - Do not enable resource creation, backing attachment, scanout selection, transfers, flushes, or rendering in this branch.
 - Continue using the diagnostic-safe stop as the boundary until a later pass can prove a safe mapped path.
 
-## Virtio-GPU MMIO Mapping Blocker
+## Virtio-GPU MMIO Mapping Milestone
 
-The virtio-gpu discovery path is now working up to the point where guideXOS needs a safe PCI MMIO mapping layer.
+The virtio-gpu discovery path now maps the modern transport MMIO regions into a reserved kernel window and stops at a read-only sanity milestone.
 
-- PCI discovery finds the QEMU virtio-gpu function at `00:02.00`.
-- The modern VirtIO capability walk resolves `common`, `notify`, `isr`, and `device` capabilities.
-- The `pci` capability remains malformed in the current QEMU setup because BAR0 is unassigned.
-- The probe now reports MMIO feasibility through `kernel::mmio::mapForDevice` and the generic `MappingReport` structure instead of a hand-written direct-map check.
-- The common config MMIO base is outside the current safe direct-mapped ceiling, but the more precise runtime blocker is the missing MMIO page-table mapping layer, so the probe stops before any transport reset, feature negotiation, queue setup, or MMIO writes.
-- `GET_DISPLAY_INFO` stays blocked until guideXOS can map PCI MMIO regions safely at runtime.
-- Rendering, resource creation, backing attachment, scanout changes, transfers, and flushes remain disabled in this branch.
-- The next kernel memory feature needed here is a runtime MMIO page-table mapping path, with cache-attribute plumbing still called out as a future TODO.
+- PCI discovery still finds the QEMU virtio-gpu function at `00:02.00`.
+- The modern VirtIO capability walk still resolves `common`, `notify`, `isr`, and `device` capabilities.
+- The `pci` capability remains malformed in the current QEMU setup because BAR0 is unassigned, and it is still not treated as a transport region.
+- The active x86_64 probe build gates runtime mapping behind `GXOS_QEMU_VIRTIO_GPU_PROBE_ACTIVE`.
+- `kernel::mmio::mapForDevice` now installs the common, notify, ISR, and device config regions into the reserved kernel MMIO window using supervisor-only, non-executable, UC-style `PCD|PWT` leaf mappings.
+- The current cache policy avoids ordinary write-back RAM semantics and does not touch global MTRRs.
+- Read-only sanity reads are limited to observational modern VirtIO fields only: `num_queues`, `device_status`, `config_generation`, `numScanouts`, and `numCapsets`.
+- The probe stops before any transport reset, feature negotiation, queue setup, or MMIO writes.
+- `GET_DISPLAY_INFO`, resource creation, backing attachment, scanout changes, transfers, and flushes remain disabled in this branch.
+- Unmap currently clears only MMIO-owned leaf entries and retains the intermediate page-table pages for now.
+
+## Runtime MMIO Window
+
+- Base: `0xFFFFC00000000000`
+- Size: `16 MiB`
+- Allocation strategy: a bounded bump allocator over the reserved high-half window, with per-page conflict checks and no automatic recycling yet.
+- Architecture gate: x86_64 QEMU probe builds only.
+- Build gate: `GXOS_QEMU_VIRTIO_GPU_PROBE_ACTIVE`
+- Page-table flags: present, supervisor-only, writable leaf, `NX`, `PCD`, and `PWT`
+- Cache strategy: UC-compatible `PCD|PWT`, not write-back
+- Unmap limitation: only MMIO-owned PTEs are cleared; shared higher-level paging structures are retained
+
+### Next Intended Phase
+
+- Controlled feature negotiation.
+- Controlled virtqueue setup.
+- Read-only transport validation stays in place until the next checkpoint proves the command path is still safe.
 
 ## Framebuffer Array Handoff
 
@@ -222,7 +244,7 @@ The bootloader and kernel now preserve a bounded diagnostic framebuffer array in
 - BIOS / Multiboot remains a single-descriptor handoff with `FramebufferCount = 1`.
 - Secondary framebuffer rendering stays deferred until the bare-metal compositor grows explicit multi-target present support.
 - Deduplication prevents guideXOS from treating aliased GOP handles as separate monitors.
-- The optional `virtio-gpu` comparison path is still diagnostic-only; boot handoff still reports `unsupported-pixel-format`, and the kernel-side probe now stops before the first modern VirtIO reset write because the common config BAR still needs runtime MMIO page-table mapping. It does not add a supported multi-output render path.
+- The optional `virtio-gpu` comparison path is still diagnostic-only; boot handoff still reports `unsupported-pixel-format`, and the kernel-side probe now proves the reserved MMIO transport window without enabling rendering. It does not add a supported multi-output render path.
 
 ## Bare-Metal Display Target Inventory
 

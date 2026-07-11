@@ -38,6 +38,9 @@ void write_cr3(uint64_t value);
 uint64_t read_cr4();
 void write_cr4(uint64_t value);
 
+// TLB invalidation
+void invalidate_tlb_entry(uint64_t virtualAddress);
+
 // Initialize architecture-specific features
 void init();
 
