@@ -1032,7 +1032,7 @@ static bool bare_metal_load_display_options(BareMetalDisplayOptionsData& out)
     return true;
 }
 
-static void bare_metal_save_display_options(const BareMetalDisplayOptionsData& store)
+static bool bare_metal_save_display_options(const BareMetalDisplayOptionsData& store)
 {
     char text[512];
     int pos = 0;
@@ -1058,7 +1058,8 @@ static void bare_metal_save_display_options(const BareMetalDisplayOptionsData& s
     desktop_append_text(text, &pos, sizeof(text), "\nautoArrangeDesktopIcons=");
     desktop_append_text(text, &pos, sizeof(text), store.autoArrangeDesktopIcons ? "1" : "0");
     desktop_append_text(text, &pos, sizeof(text), "\n");
-    vfs::write_file(kBareMetalDisplayOptionsStorePath, text, (uint32_t)pos);
+    const int32_t primaryWrite = vfs::write_file(kBareMetalDisplayOptionsStorePath, text, (uint32_t)pos);
+    const bool primaryWriteOk = primaryWrite == pos;
 
     const char* taskbar = store.taskbarPosition[0] ? store.taskbarPosition : "bottom";
     vfs::write_file("/desktop.taskbar.position", taskbar, (uint32_t)desktop_strlen(taskbar));
@@ -1080,6 +1081,8 @@ static void bare_metal_save_display_options(const BareMetalDisplayOptionsData& s
     }
     const char* mode = store.backgroundScaleMode[0] ? store.backgroundScaleMode : "fill";
     vfs::write_file("/desktop.background.scale", mode, (uint32_t)desktop_strlen(mode));
+
+    return primaryWriteOk;
 }
 
 static void persist_taskbar_position()
@@ -1855,7 +1858,11 @@ struct WallpaperImageCache {
 
 static WallpaperPackEntry s_wallpaperPackEntries[kBuiltInWallpaperCount * 2];
 static int s_wallpaperPackEntryCount = 0;
+#if defined(GXOS_BARE_METAL)
 static bool s_wallpaperPackMounted = false;
+#else
+static bool s_wallpaperPackMounted = true;
+#endif
 static WallpaperImageCache s_wallpaperThumbCache[kBuiltInWallpaperCount];
 static WallpaperImageCache s_wallpaperFullCache{};
 static const char* s_wallpaperFullCacheId = nullptr;
@@ -2278,6 +2285,9 @@ static int32_t s_shellResizeStartY = 0;
 static int32_t s_shellResizeStartW = 0;
 static int32_t s_shellResizeStartH = 0;
 
+static const uint32_t kAltF4KeyCode = 0x113;
+static bool s_altF4ShortcutConsumed = false;
+
 // Forward declarations
 static void draw_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t color);
 static void draw_shell_window();
@@ -2287,6 +2297,7 @@ static int find_nearest_icon_in_direction(int currentIcon, int direction);
 static void show_icon_notification(int iconIndex);
 static void show_start_menu_notification(const char* label);
 static void toggle_show_desktop();
+static void reset_alt_f4_shortcut_state();
 static bool try_launch_kernel_app(const char* appName);
 
 // ============================================================
@@ -4937,6 +4948,43 @@ static void load_persisted_wallpaper_scale_mode()
     if (!supported) serial::puts("[desktop] unsupported background scale mode, falling back to fill\n");
 }
 
+static void apply_wallpaper_gradient_selection(const BuiltInGradientPalette* gradient)
+{
+    if (!gradient) return;
+    s_wallpaperConfig.type = WallpaperType::Gradient;
+    s_wallpaperConfig.topColor = gradient->topColor;
+    s_wallpaperConfig.bottomColor = gradient->bottomColor;
+    s_wallpaperConfig.gridColor = gradient->accentColor;
+    s_wallpaperConfig.wallpaperId = gradient->id;
+    s_wallpaperConfig.showBranding = true;
+    s_wallpaperConfig.showGrid = true;
+}
+
+static void apply_wallpaper_builtin_selection(const BuiltInWallpaperPalette* entry)
+{
+    if (!entry) return;
+    s_wallpaperConfig.type = WallpaperType::BuiltIn;
+    s_wallpaperConfig.topColor = entry->topColor;
+    s_wallpaperConfig.bottomColor = entry->bottomColor;
+    s_wallpaperConfig.gridColor = entry->accentColor;
+    s_wallpaperConfig.wallpaperId = entry->id;
+    s_wallpaperConfig.showBranding = false;
+    s_wallpaperConfig.showGrid = false;
+}
+
+static bool persist_wallpaper_selection(const char* wallpaperId)
+{
+    BareMetalDisplayOptionsData store;
+    bare_metal_load_display_options(store);
+    desktop_str_copy(store.wallpaperId, wallpaperId ? wallpaperId : "", (int)sizeof(store.wallpaperId));
+    desktop_str_copy(store.backgroundScaleMode, wallpaper_scale_mode_name(s_wallpaperConfig.scaleMode), (int)sizeof(store.backgroundScaleMode));
+    const bool saved = bare_metal_save_display_options(store);
+    serial::puts(saved ? "[desktop] background persistence write success id=" : "[desktop] background persistence write failure id=");
+    serial::puts(wallpaperId ? wallpaperId : "(null)");
+    serial::puts("\n");
+    return saved;
+}
+
 static void load_persisted_wallpaper_id()
 {
     BareMetalDisplayOptionsData store;
@@ -4948,29 +4996,37 @@ static void load_persisted_wallpaper_id()
     serial::puts("\n");
     const BuiltInGradientPalette* gradient = find_builtin_gradient(wallpaperId);
     if (gradient) {
-        s_wallpaperConfig.type = WallpaperType::Gradient;
-        s_wallpaperConfig.topColor = gradient->topColor;
-        s_wallpaperConfig.bottomColor = gradient->bottomColor;
-        s_wallpaperConfig.gridColor = gradient->accentColor;
-        s_wallpaperConfig.wallpaperId = gradient->id;
-        s_wallpaperConfig.showBranding = true;
-        s_wallpaperConfig.showGrid = true;
-        serial::puts("[desktop] loaded background kind=gradient\n");
+        apply_wallpaper_gradient_selection(gradient);
+        serial::puts("[desktop] background persistence load success id=");
+        serial::puts(gradient->id);
+        serial::puts("\n");
         return;
     }
 
     const BuiltInWallpaperPalette* entry = find_builtin_wallpaper(wallpaperId);
     if (entry) {
-        s_wallpaperConfig.type = WallpaperType::BuiltIn;
-        s_wallpaperConfig.topColor = entry->topColor;
-        s_wallpaperConfig.bottomColor = entry->bottomColor;
-        s_wallpaperConfig.gridColor = entry->accentColor;
-        s_wallpaperConfig.wallpaperId = entry->id;
-        s_wallpaperConfig.showBranding = false;
-        s_wallpaperConfig.showGrid = false;
-        serial::puts("[desktop] loaded background kind=image\n");
+        if (s_wallpaperPackMounted) {
+            WallpaperImageCache* image = load_wallpaper_full_cache(entry->id);
+            if (!image) {
+                serial::puts("[desktop] invalid persisted background fallback id=");
+                serial::puts(wallpaperId);
+                serial::puts("\n");
+                apply_wallpaper_builtin_selection(&s_builtInWallpapers[0]);
+                persist_wallpaper_selection(s_builtInWallpapers[0].id);
+                return;
+            }
+        }
+
+        apply_wallpaper_builtin_selection(entry);
+        serial::puts("[desktop] background persistence load success id=");
+        serial::puts(entry->id);
+        serial::puts("\n");
     } else {
-        serial::puts("[desktop] Invalid persisted wallpaper id, using default\n");
+        serial::puts("[desktop] invalid persisted background fallback id=");
+        serial::puts(wallpaperId);
+        serial::puts("\n");
+        apply_wallpaper_builtin_selection(&s_builtInWallpapers[0]);
+        persist_wallpaper_selection(s_builtInWallpapers[0].id);
     }
 }
 
@@ -4979,24 +5035,16 @@ void set_wallpaper_by_id(const char* wallpaperId)
     serial::puts("[desktop] set wallpaper request id=");
     serial::puts(wallpaperId ? wallpaperId : "(null)");
     serial::puts("\n");
-    bool shouldPersist = true;
     const BuiltInGradientPalette* gradient = find_builtin_gradient(wallpaperId);
     if (gradient) {
+        if (s_wallpaperConfig.type == WallpaperType::Gradient && desktop_str_eq(s_wallpaperConfig.wallpaperId, gradient->id)) {
+            return;
+        }
         serial::puts("[desktop] selected gradient id=");
         serial::puts(gradient->id);
         serial::puts("\n");
-        s_wallpaperConfig.type = WallpaperType::Gradient;
-        s_wallpaperConfig.topColor = gradient->topColor;
-        s_wallpaperConfig.bottomColor = gradient->bottomColor;
-        s_wallpaperConfig.gridColor = gradient->accentColor;
-        s_wallpaperConfig.wallpaperId = gradient->id;
-        s_wallpaperConfig.showBranding = true;
-        s_wallpaperConfig.showGrid = true;
-        BareMetalDisplayOptionsData store;
-        bare_metal_load_display_options(store);
-        desktop_str_copy(store.wallpaperId, gradient->id, (int)sizeof(store.wallpaperId));
-        desktop_str_copy(store.backgroundScaleMode, wallpaper_scale_mode_name(s_wallpaperConfig.scaleMode), (int)sizeof(store.backgroundScaleMode));
-        bare_metal_save_display_options(store);
+        apply_wallpaper_gradient_selection(gradient);
+        persist_wallpaper_selection(gradient->id);
         s_needsRedraw = true;
         return;
     }
@@ -5005,27 +5053,17 @@ void set_wallpaper_by_id(const char* wallpaperId)
     if (!entry) {
         serial::puts("[desktop] Wallpaper id not found, falling back to default\n");
         entry = &s_builtInWallpapers[0];
-        shouldPersist = false;
+    }
+    if (s_wallpaperConfig.type == WallpaperType::BuiltIn && desktop_str_eq(s_wallpaperConfig.wallpaperId, entry->id)) {
+        return;
     }
     serial::puts("[desktop] selected wallpaper full=");
     serial::puts(entry->fullImagePath);
     serial::puts(" thumb=");
     serial::puts(entry->thumbnailPath);
     serial::puts("\n");
-    s_wallpaperConfig.type = WallpaperType::BuiltIn;
-    s_wallpaperConfig.topColor = entry->topColor;
-    s_wallpaperConfig.bottomColor = entry->bottomColor;
-    s_wallpaperConfig.gridColor = entry->accentColor;
-    s_wallpaperConfig.wallpaperId = entry->id;
-    s_wallpaperConfig.showBranding = false;
-    s_wallpaperConfig.showGrid = false;
-    if (shouldPersist) {
-        BareMetalDisplayOptionsData store;
-        bare_metal_load_display_options(store);
-        desktop_str_copy(store.wallpaperId, entry->id, (int)sizeof(store.wallpaperId));
-        desktop_str_copy(store.backgroundScaleMode, wallpaper_scale_mode_name(s_wallpaperConfig.scaleMode), (int)sizeof(store.backgroundScaleMode));
-        bare_metal_save_display_options(store);
-    }
+    apply_wallpaper_builtin_selection(entry);
+    persist_wallpaper_selection(entry->id);
     s_needsRedraw = true;
 }
 
@@ -8085,6 +8123,7 @@ void init()
 void tick()
 {
     s_tickCounter++;
+    reset_alt_f4_shortcut_state();
     
     // Update time every ~100 ticks (roughly 1 second if tick is called every 10ms)
     if (s_tickCounter % 100 == 0) {
@@ -8188,6 +8227,7 @@ void cooperative_yield()
     static bool pumping = false;
     static bool logged = false;
     static uint32_t lastPresentTick = 0;
+    reset_alt_f4_shortcut_state();
     if (pumping || !s_initialized) return;
     pumping = true;
 
@@ -9974,6 +10014,88 @@ static void toggle_show_desktop()
     s_rightClickMenuOpen = false;
 }
 
+static void reset_alt_f4_shortcut_state()
+{
+    if (!ps2keyboard::is_alt_down() || !ps2keyboard::is_f4_down()) {
+        s_altF4ShortcutConsumed = false;
+    }
+}
+
+static void close_shell_surface()
+{
+    shell::close();
+    s_shellPosX = -1;
+    s_shellPosY = -1;
+    s_shellW = -1;
+    s_shellH = -1;
+    s_shellMinimized = false;
+    s_shellMaximized = false;
+    s_shellDragging = false;
+    s_shellResizing = false;
+    s_shellActive = true;
+}
+
+static bool close_shell_surface_if_open()
+{
+    if (!shell::is_open()) return false;
+    close_shell_surface();
+    return true;
+}
+
+static bool close_topmost_modal_dialog()
+{
+    if (s_networkConfigOpen) {
+        s_networkConfigOpen = false;
+        return true;
+    }
+    if (s_networkAdaptersOpen) {
+        s_networkAdaptersOpen = false;
+        return true;
+    }
+    if (s_deviceManagerOpen) {
+        s_deviceManagerOpen = false;
+        return true;
+    }
+    if (s_controlPanelOpen) {
+        s_controlPanelOpen = false;
+        return true;
+    }
+    if (s_appModelDialogOpen) {
+        s_appModelDialogOpen = false;
+        return true;
+    }
+    if (s_shutdownDialogOpen) {
+        s_shutdownDialogOpen = false;
+        return true;
+    }
+    return false;
+}
+
+static bool handle_alt_f4_shortcut()
+{
+    if (s_altF4ShortcutConsumed) return false;
+    s_altF4ShortcutConsumed = true;
+
+    if (close_topmost_modal_dialog()) {
+        return true;
+    }
+
+    if (s_startMenuOpen || s_rightClickMenuOpen) {
+        return false;
+    }
+
+    app::KernelWindow* focused = compositor::KernelCompositor::getFocusedWindow();
+    if (focused) {
+        return compositor::KernelCompositor::requestCloseWindow(focused->id);
+    }
+
+    if (shell::is_open() && s_shellActive && !s_shellMinimized) {
+        return close_shell_surface_if_open();
+    }
+
+    return false;
+}
+
 int get_running_app_count()
 {
     return app::AppManager::getRunningAppCount();
@@ -9981,10 +10103,19 @@ int get_running_app_count()
 
 void handle_key(uint32_t key)
 {
+    reset_alt_f4_shortcut_state();
+
     if (key == shell::KEY_SUPER) {
         serial::puts("[desktop] Super key pressed, toggling Start Menu\n");
         toggle_start_menu();
         draw();
+        return;
+    }
+
+    if (key == kAltF4KeyCode && ps2keyboard::is_alt_down()) {
+        if (handle_alt_f4_shortcut()) {
+            draw();
+        }
         return;
     }
 
@@ -10025,14 +10156,7 @@ void handle_key(uint32_t key)
     if (shell::is_open()) {
         // Escape closes shell
         if (key == 27) {  // ESC
-            shell::close();
-            s_shellPosX = -1;  // Reset position for next open
-            s_shellPosY = -1;
-            s_shellW = -1;
-            s_shellH = -1;
-            s_shellMinimized = false;
-            s_shellMaximized = false;
-            s_shellActive = true;
+            close_shell_surface_if_open();
             draw();
             return;
         }
@@ -11344,14 +11468,7 @@ void handle_mouse(int32_t mx, int32_t my, uint8_t buttons)
             
             if (hit == SHELL_HIT_CLOSE_BTN) {
                 // Close button clicked
-                shell::close();
-                s_shellPosX = -1;  // Reset position for next open
-                s_shellPosY = -1;
-                s_shellW = -1;
-                s_shellH = -1;
-                s_shellMinimized = false;
-                s_shellMaximized = false;
-                s_shellActive = true;
+                close_shell_surface_if_open();
                 draw();
                 draw_cursor(mx, my);
                 return;

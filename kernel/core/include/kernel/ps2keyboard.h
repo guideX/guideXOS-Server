@@ -30,6 +30,7 @@ uint32_t get_key();
 bool is_ctrl_down();
 bool is_shift_down();
 bool is_alt_down();
+bool is_f4_down();
 
 // Clear the key buffer
 void clear();

@@ -111,6 +111,7 @@ public:
     static void minimizeWindow(uint32_t windowId);
     static void maximizeWindow(uint32_t windowId);
     static void restoreWindow(uint32_t windowId);
+    static bool requestCloseWindow(uint32_t windowId);
     static void closeWindow(uint32_t windowId);
     static void minimizeWindowsForShowDesktop();
     static void restoreWindowsFromShowDesktop();

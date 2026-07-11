@@ -374,14 +374,19 @@ void KernelCompositor::restoreWindowsFromShowDesktop() {
     s_showDesktopMinimizedCount = 0;
 }
 
-void KernelCompositor::closeWindow(uint32_t windowId) {
+bool KernelCompositor::requestCloseWindow(uint32_t windowId) {
     app::KernelWindow* win = getWindow(windowId);
-    if (win && win->owner) {
-        // Close the owning app, not just the window.  This removes it from
-        // AppManager immediately so launching the same app again creates a
-        // fresh instance instead of focusing a now-hidden/closed window.
-        app::AppManager::closeApp(win->owner);
-    }
+    if (!win || !win->owner) return false;
+    if (!(win->flags & app::WF_VISIBLE)) return false;
+    if (win->flags & app::WF_MINIMIZED) return false;
+    if (!(win->flags & app::WF_CLOSABLE)) return false;
+
+    win->owner->requestClose();
+    return true;
+}
+
+void KernelCompositor::closeWindow(uint32_t windowId) {
+    requestCloseWindow(windowId);
 }
 
 int KernelCompositor::findWindowIndex(uint32_t windowId) {

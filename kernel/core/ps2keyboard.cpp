@@ -25,6 +25,8 @@ static bool s_hasKey = false;
 static bool s_shiftDown = false;
 static bool s_ctrlDown = false;
 static bool s_altDown = false;
+static bool s_rightAltDown = false;
+static bool s_f4Down = false;
 static bool s_capsLock = false;
 
 // Scancode set 2 to ASCII mapping (US QWERTY keyboard layout)
@@ -111,6 +113,8 @@ void init()
     s_shiftDown = false;
     s_ctrlDown = false;
     s_altDown = false;
+    s_rightAltDown = false;
+    s_f4Down = false;
     s_capsLock = false;
     s_extendedKey = false;
     s_breakCode = false;
@@ -155,12 +159,21 @@ void irq_handler()
         return;
     }
     if (scancode == SC2_LALT) {
-        s_altDown = !keyUp;
+        if (s_extendedKey) {
+            s_rightAltDown = !keyUp;
+        } else {
+            s_altDown = !keyUp;
+        }
         s_extendedKey = false;
         return;
     }
     if (scancode == SC2_CAPS && !keyUp) {  // Caps Lock (toggle on press)
         s_capsLock = !s_capsLock;
+        s_extendedKey = false;
+        return;
+    }
+    if (scancode == 0x0C) {  // F4
+        s_f4Down = !keyUp;
         s_extendedKey = false;
         return;
     }
@@ -256,7 +269,12 @@ bool is_shift_down()
 
 bool is_alt_down()
 {
-    return s_altDown;
+    return s_altDown || s_rightAltDown;
+}
+
+bool is_f4_down()
+{
+    return s_f4Down;
 }
 
 #else

@@ -96,6 +96,7 @@ void KernelApp::setPosition(int x, int y) {
 void KernelApp::requestClose() {
     if (m_window) {
         onWindowClose();
+        shutdown();
         compositor::KernelCompositor::unregisterWindow(m_window);
         delete m_window;
         m_window = nullptr;
