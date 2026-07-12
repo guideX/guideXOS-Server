@@ -12,7 +12,22 @@ public static unsafe class Program
     [UnmanagedCallersOnly(EntryPoint = "ManagedMain")]
     public static int ManagedMain(NativeGxAppContext* ctx)
     {
-        if (ctx == null || ctx->host == null || ctx->host->log == null)
+        if (ctx == null)
+        {
+            return GxAbi.ErrorInvalidArgument;
+        }
+
+        if (ctx->size < (uint)sizeof(NativeGxAppContext))
+        {
+            return GxAbi.ErrorInvalidArgument;
+        }
+
+        if (ctx->apiVersion != GxAbi.ApiVersion)
+        {
+            return GxAbi.ErrorUnsupported;
+        }
+
+        if (ctx->host == null || ctx->host->log == null)
         {
             return GxAbi.ErrorInvalidArgument;
         }

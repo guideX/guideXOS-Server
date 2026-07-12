@@ -53,6 +53,54 @@ function Find-VcVars64 {
     return $null
 }
 
+function Get-ImportTable([string]$Path) {
+    $imports = [ordered]@{}
+    $currentDll = $null
+
+    foreach ($line in Get-Content -LiteralPath $Path) {
+        if ($line -match '^\s*DLL Name:\s+(.+)$') {
+            $currentDll = $Matches[1].Trim()
+            if (-not $imports.Contains($currentDll)) {
+                $imports[$currentDll] = New-Object System.Collections.Generic.List[string]
+            }
+            continue
+        }
+
+        if ($null -ne $currentDll -and $line -match '^\s*[0-9A-Fa-f]+\s+<none>\s+[0-9A-Fa-f]+\s+([^\s]+)\s*$') {
+            [void]$imports[$currentDll].Add($Matches[1].Trim())
+        }
+    }
+
+    return $imports
+}
+
+function Assert-SetEquals([string[]]$Actual, [string[]]$Expected, [string]$Label) {
+    $actualSet = @($Actual | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Sort-Object -Unique)
+    $expectedSet = @($Expected | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Sort-Object -Unique)
+    $diff = Compare-Object -ReferenceObject $expectedSet -DifferenceObject $actualSet
+    if ($diff) {
+        throw "$Label mismatch.`nExpected: $($expectedSet -join ', ')`nActual: $($actualSet -join ', ')"
+    }
+}
+
+function Assert-FileContains([string]$Path, [string[]]$Patterns, [string]$Label) {
+    $text = Get-Content -LiteralPath $Path -Raw
+    foreach ($pattern in $Patterns) {
+        if ($text -notmatch $pattern) {
+            throw "$Label missing pattern: $pattern"
+        }
+    }
+}
+
+function Assert-FileNotContains([string]$Path, [string[]]$Patterns, [string]$Label) {
+    $text = Get-Content -LiteralPath $Path -Raw
+    foreach ($pattern in $Patterns) {
+        if ($text -match $pattern) {
+            throw "$Label unexpectedly contained pattern: $pattern"
+        }
+    }
+}
+
 $projectDir = Join-Path $RepoRoot "samples\managed\HostLogProof"
 $projectFile = Join-Path $projectDir "HostLogProof.csproj"
 $defaultOutputRoot = Join-Path $RepoRoot "out\dotnet\managed-hostlog"
@@ -124,6 +172,9 @@ $objRoot = Join-Path $OutputRoot "obj"
 $artifactRoot = Join-Path $OutputRoot "artifacts"
 $publishExe = $null
 $publishMap = $null
+$publishIlcRsp = $null
+$publishLinkRsp = $null
+$nativeHostLogObj = $null
 $artifactExe = Join-Path $artifactRoot "HostLogProof.exe"
 $artifactMap = Join-Path $artifactRoot "HostLogProof.map"
 $artifactElf = Join-Path $artifactRoot "HostLogProof.elf"
@@ -131,6 +182,10 @@ $artifactPeDump = Join-Path $artifactRoot "HostLogProof.pe.objdump.txt"
 $artifactElfDump = Join-Path $artifactRoot "HostLogProof.elf.objdump.txt"
 $artifactElfReadelf = Join-Path $artifactRoot "HostLogProof.elf.readelf.txt"
 $artifactElfDisasm = Join-Path $artifactRoot "HostLogProof.elf.disasm.txt"
+$artifactNativeObjDump = Join-Path $artifactRoot "HostLogProof.native.objdump.txt"
+$artifactNativeObjReloc = Join-Path $artifactRoot "HostLogProof.native.reloc.txt"
+$artifactIlcRsp = Join-Path $artifactRoot "HostLogProof.ilc.rsp"
+$artifactLinkRsp = Join-Path $artifactRoot "HostLogProof.link.rsp"
 $artifactToolchain = Join-Path $artifactRoot "toolchain.txt"
 $artifactDotNetInfo = Join-Path $artifactRoot "dotnet-info.txt"
 $artifactPythonInfo = Join-Path $artifactRoot "python-info.txt"
@@ -246,10 +301,148 @@ if (-not (Test-Path -LiteralPath $artifactElf)) {
     throw "ELF output not found: $artifactElf"
 }
 
+if ([string]::IsNullOrWhiteSpace($nativeHostLogObj)) {
+    $nativeHostLogObj = Get-ChildItem -Path $objRoot -Recurse -Filter HostLogProof.obj -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.FullName -match '\\native\\HostLogProof\.obj$' } |
+        Select-Object -First 1 -ExpandProperty FullName
+}
+if ([string]::IsNullOrWhiteSpace($nativeHostLogObj) -or -not (Test-Path -LiteralPath $nativeHostLogObj)) {
+    throw "Native HostLogProof object not found under: $objRoot"
+}
+
+if ([string]::IsNullOrWhiteSpace($publishIlcRsp)) {
+    $publishIlcRsp = Get-ChildItem -Path $objRoot -Recurse -Filter HostLogProof.ilc.rsp -File -ErrorAction SilentlyContinue |
+        Select-Object -First 1 -ExpandProperty FullName
+}
+if (-not [string]::IsNullOrWhiteSpace($publishIlcRsp) -and (Test-Path -LiteralPath $publishIlcRsp)) {
+    Copy-Item -LiteralPath $publishIlcRsp -Destination $artifactIlcRsp -Force
+}
+
+if ([string]::IsNullOrWhiteSpace($publishLinkRsp)) {
+    $publishLinkRsp = Get-ChildItem -Path $objRoot -Recurse -Filter link.rsp -File -ErrorAction SilentlyContinue |
+        Select-Object -First 1 -ExpandProperty FullName
+}
+if (-not [string]::IsNullOrWhiteSpace($publishLinkRsp) -and (Test-Path -LiteralPath $publishLinkRsp)) {
+    Copy-Item -LiteralPath $publishLinkRsp -Destination $artifactLinkRsp -Force
+}
+
 & $objdumpExe -p $artifactExe | Set-Content -LiteralPath $artifactPeDump -Encoding ASCII
+& $objdumpExe -d $nativeHostLogObj | Set-Content -LiteralPath $artifactNativeObjDump -Encoding ASCII
+& $objdumpExe -r $nativeHostLogObj | Set-Content -LiteralPath $artifactNativeObjReloc -Encoding ASCII
 & $objdumpExe -p -d $artifactElf | Set-Content -LiteralPath $artifactElfDump -Encoding ASCII
 & $readelfExe -h -l -S -r -s -d $artifactElf | Set-Content -LiteralPath $artifactElfReadelf -Encoding ASCII
 & $objdumpExe -d $artifactElf | Set-Content -LiteralPath $artifactElfDisasm -Encoding ASCII
+
+$expectedPeImports = [ordered]@{
+    "ADVAPI32.dll" = @(
+        "RegisterEventSourceW",
+        "ReportEventW",
+        "DeregisterEventSource"
+    )
+    "bcrypt.dll" = @(
+        "BCryptGenRandom"
+    )
+    "KERNEL32.dll" = @(
+        "CloseHandle",
+        "CreateEventExW",
+        "DuplicateHandle",
+        "FormatMessageW",
+        "GetConsoleOutputCP",
+        "GetCurrentProcess",
+        "GetCurrentProcessorNumberEx",
+        "GetCurrentThread",
+        "GetEnvironmentVariableW",
+        "GetLastError",
+        "GetModuleFileNameW",
+        "GetStdHandle",
+        "GetThreadPriority",
+        "GetTickCount64",
+        "IsDebuggerPresent",
+        "LocalFree",
+        "MultiByteToWideChar",
+        "QueryPerformanceCounter",
+        "QueryPerformanceFrequency",
+        "RaiseFailFastException",
+        "SetEvent",
+        "SetLastError",
+        "Sleep",
+        "VirtualAlloc",
+        "VirtualFree",
+        "WaitForMultipleObjectsEx",
+        "WideCharToMultiByte",
+        "WriteFile",
+        "RtlCaptureContext",
+        "FlsGetValue",
+        "FlsSetValue",
+        "SwitchToThread",
+        "GetCurrentThreadId",
+        "VirtualQuery",
+        "EnterCriticalSection",
+        "LeaveCriticalSection"
+    )
+    "ole32.dll" = @(
+        "CoGetApartmentType",
+        "CoInitializeEx",
+        "CoUninitialize",
+        "CoWaitForMultipleHandles"
+    )
+    "api-ms-win-crt-heap-l1-1-0.dll" = @(
+        "free",
+        "_callnewh",
+        "malloc"
+    )
+}
+
+$actualImports = Get-ImportTable $artifactPeDump
+Assert-SetEquals -Actual @($actualImports.Keys) -Expected @($expectedPeImports.Keys) -Label "PE import DLL set"
+foreach ($dll in $expectedPeImports.Keys) {
+    Assert-SetEquals -Actual @($actualImports[$dll]) -Expected @($expectedPeImports[$dll]) -Label "PE imports for $dll"
+}
+
+Assert-FileContains -Path $artifactNativeObjDump -Patterns @(
+    'HostLogProof_HostLogProof_Program__ManagedMain>',
+    'mov\s+0x8\(%rbx\),%rcx',
+    'mov\s+0x8\(%rcx\),%rsi',
+    'call\s+\*%rsi'
+) -Label "Native object ManagedMain disassembly"
+
+Assert-FileContains -Path $artifactMap -Patterns @(
+    'ManagedMain\s+0000000010001900',
+    'HostLogProof__Module___MainMethodWrapper',
+    'HostLogProof__Module___StartupCodeMain'
+) -Label "Link map"
+
+Assert-FileContains -Path $artifactElfReadelf -Patterns @(
+    'ELF64',
+    'Type:\s+EXEC',
+    'Machine:\s+Advanced Micro Devices X86-64',
+    'Entry point address:\s+0x10001900',
+    'Number of program headers:\s+6',
+    'There is no dynamic section in this file\.',
+    'There are no relocations in this file\.',
+    'There are no sections in this file\.'
+) -Label "Final ELF"
+
+Assert-FileContains -Path $artifactElfDump -Patterns @(
+    'flags r-x',
+    'flags rw-'
+) -Label "Final ELF segment flags"
+
+Assert-FileNotContains -Path $artifactElfReadelf -Patterns @(
+    'PT_INTERP',
+    'NEEDED',
+    'libc',
+    'libpthread',
+    'libdl',
+    'libm',
+    'rwx'
+) -Label "Final ELF dependency scan"
+
+Assert-FileNotContains -Path $artifactPeDump -Patterns @(
+    'ucrtbase\.dll',
+    'msvcrt\.dll',
+    'ntdll\.dll'
+) -Label "Intermediate PE forbidden imports"
 
 Write-Host "Managed host-log proof built successfully." -ForegroundColor Green
 Write-Host "Output root: $OutputRoot" -ForegroundColor Cyan

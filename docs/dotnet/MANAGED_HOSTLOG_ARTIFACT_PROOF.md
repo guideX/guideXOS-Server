@@ -111,6 +111,7 @@ Roles:
 The managed body is deliberately narrow:
 
 - `ManagedMain` checks `ctx`, `ctx->host`, and `ctx->host->log`
+- it also checks the context size and API version before touching the host table
 - it encodes `"Hello from managed guideXOS code"` as UTF-8
 - it uses `stackalloc` and `fixed` so no managed string crosses the boundary
 - it calls the existing host log ABI through the context table
@@ -120,13 +121,15 @@ The managed body is deliberately narrow:
 
 What was actually needed:
 
-- Native entry stub: yes
-- Runtime initialization: yes
+- Native entry stub: yes, but the selected PE entry is the direct `ManagedMain` export
+- Runtime initialization: present in the module, but not on the chosen direct-entry path
 - Module table initialization: yes
 - Static constructor initialization: not required by this sample
 - Managed entry selection: yes
 - Runtime exports: not required for this proof
 - Shutdown or return path: yes
+
+The NativeAOT object still contains `HostLogProof__Module___MainMethodWrapper` and `HostLogProof__Module___StartupCodeMain`, but the proof build selects `ManagedMain` directly and verifies the managed body by disassembly. Those startup helpers are packaging/runtime baggage for this proof, not the live path.
 
 Evidence:
 
@@ -205,7 +208,8 @@ Observed consequence:
 
 - the converted artifact is structurally simple and static
 - it is not yet a fully packaged user-process ELF
-- the code body is traceable through the map file, but the ELF itself does not preserve rich linker metadata
+- the code body is traceable through the map file and native object dump, but the ELF itself does not preserve rich linker metadata
+- the selected `ManagedMain` path does not rely on any live Windows import thunk in the final ELF
 
 ## 10. ELF Inspection Results
 
@@ -256,7 +260,7 @@ Disassembly note:
 | Segment permissions | `R E`, `R`, `RW`, then `R` segments | sane loadable permissions | Compatible |
 | Address assumptions | fixed base `0x10000000`; exact preferred-base mapping used | exact preferred-base mapping is expected | Compatible |
 | Dynamic linking | no ELF dynamic section; PE side still imports Windows DLLs | no dynamic linker support | Requires adaptation |
-| Unresolved host import | host logging is through `ctx->host->log`, not an ELF unresolved symbol | future packaging may want an explicit unresolved guideXOS import | Requires adaptation |
+| Unresolved host import | host logging is through `ctx->host->log`, not an ELF unresolved symbol | the current proof keeps the ABI inside the managed context table | Compatible for the proof, but the wider ABI still needs documentation |
 | Exit behavior | `ManagedMain` returns `int` and has a normal tail return | exit code should be capturable | Compatible |
 
 Overall:
@@ -283,6 +287,8 @@ Runtime/link dependencies observed in the NativeAOT PE:
 - `KERNEL32.dll`
 - `ole32.dll`
 - `api-ms-win-crt-heap-l1-1-0.dll`
+
+These imports are intermediate PE baggage from the Windows-targeted NativeAOT runtime pack. They remain present in the PE, but the final ELF candidate does not require them on the direct `ManagedMain` path.
 
 Link-time libraries in `link.rsp` also include:
 
