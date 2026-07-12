@@ -340,6 +340,7 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
             kernel::mmio::set_kernel_physical_base(bootinfo->KernelPhysicalBase);
             kernel::nic::set_kernel_physical_base(bootinfo->KernelPhysicalBase);
             kernel::virtio::rng::set_kernel_physical_base(bootinfo->KernelPhysicalBase);
+            kernel::virtio::gpu::set_kernel_physical_base(bootinfo->KernelPhysicalBase);
         }
     }
     

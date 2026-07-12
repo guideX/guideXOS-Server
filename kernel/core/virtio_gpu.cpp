@@ -51,7 +51,9 @@ static const uint32_t kProbeDeviceLimit = 32;
 static const uint32_t kProbeFunctionLimit = 8;
 static const uint16_t kMaxControlQueueSize = 128;
 static const uint16_t kMinControlQueueSize = 2;
+static const uint32_t kStatusPollLimit = 100000;
 static const uint32_t kResponseSpinLimit = 1000000;
+// VIRTIO_F_VERSION_1 is required for the modern split-queue control path.
 static const uint64_t kCommonCfgRequiredFeatureBits = FEATURE_VERSION_1;
 
 struct PciCapability {
@@ -89,6 +91,8 @@ struct ModernTransport {
     bool probeComplete;
     bool mmioMapped;
     bool mmioSanityReadsOk;
+    bool featuresOk;
+    bool controlQueueReady;
     uint8_t bus;
     uint8_t device;
     uint8_t function;
@@ -116,6 +120,9 @@ struct ModernTransport {
     uint8_t mmioConfigGeneration;
     uint32_t mmioDeviceScanouts;
     uint32_t mmioDeviceCapsets;
+    uint32_t displayInfoSlots;
+    uint32_t enabledScanouts;
+    uint32_t disabledScanouts;
     const char* mmioCacheMode;
     const char* mmioStopReason;
     PciRegion commonCfg;
@@ -149,8 +156,12 @@ struct ProbeOutcome {
     bool valid;
     uint32_t candidateCount;
     bool initialized;
+    bool featuresOk;
+    bool controlQueueReady;
     DisplayInfoOutcome displayInfoOutcome;
-    uint32_t scanoutCount;
+    uint32_t scanoutSlots;
+    uint32_t enabledScanoutCount;
+    uint32_t disabledScanoutCount;
     const char* reason;
     const DeviceState* state;
 };
@@ -159,6 +170,7 @@ static bool s_initialized = false;
 static DeviceState s_devices[4];
 static int s_deviceCount = 0;
 static ProbeOutcome s_probeOutcome{};
+static uint64_t s_kernelPhysicalBase = 0x100000ULL;
 
 #if defined(_MSC_VER)
 __declspec(align(4096)) static uint8_t s_queueStorage[16384];
@@ -211,9 +223,14 @@ static uint64_t align_up(uint64_t value, uint64_t alignment)
     return (value + alignment - 1) & ~(alignment - 1);
 }
 
-static uint64_t virt_to_phys(void* ptr)
+static uint64_t dma_address(const void* ptr)
 {
-    return reinterpret_cast<uint64_t>(ptr);
+    const uint64_t virt = reinterpret_cast<uint64_t>(ptr);
+    if (virt >= 0x100000ULL) {
+        return s_kernelPhysicalBase + (virt - 0x100000ULL);
+    }
+
+    return virt;
 }
 
 static inline void mmio_write8(uint64_t addr, uint8_t value)
@@ -841,13 +858,20 @@ static void log_init_step(const char* step)
 
 static void record_probe_outcome(const DeviceState& state, bool initialized,
                                  DisplayInfoOutcome displayInfoOutcome,
-                                 uint32_t scanoutCount, const char* reason)
+                                 uint32_t enabledScanoutCount,
+                                 uint32_t disabledScanoutCount,
+                                 uint32_t scanoutSlots,
+                                 const char* reason)
 {
     s_probeOutcome.valid = true;
     s_probeOutcome.candidateCount = 1;
     s_probeOutcome.initialized = initialized;
+    s_probeOutcome.featuresOk = state.transport.featuresOk;
+    s_probeOutcome.controlQueueReady = state.transport.controlQueueReady;
     s_probeOutcome.displayInfoOutcome = displayInfoOutcome;
-    s_probeOutcome.scanoutCount = scanoutCount;
+    s_probeOutcome.scanoutSlots = scanoutSlots;
+    s_probeOutcome.enabledScanoutCount = enabledScanoutCount;
+    s_probeOutcome.disabledScanoutCount = disabledScanoutCount;
     s_probeOutcome.reason = reason;
     s_probeOutcome.state = &state;
 }
@@ -900,6 +924,18 @@ static void print_probe_outcome()
     } else {
         kernel::serial::puts("blocked");
     }
+    kernel::serial::puts(" featuresOk=");
+    if (transport != nullptr) {
+        kernel::serial::puts(s_probeOutcome.featuresOk ? "yes" : "no");
+    } else {
+        kernel::serial::puts("no");
+    }
+    kernel::serial::puts(" controlq=");
+    if (transport != nullptr) {
+        kernel::serial::puts(s_probeOutcome.controlQueueReady ? "ready" : "blocked");
+    } else {
+        kernel::serial::puts("blocked");
+    }
     kernel::serial::puts(" caps=");
     if (transport != nullptr) {
         print_capability_inventory(*transport);
@@ -910,8 +946,6 @@ static void print_probe_outcome()
     switch (s_probeOutcome.displayInfoOutcome) {
     case DisplayInfoOutcome::Ok:
         kernel::serial::puts("ok");
-        kernel::serial::puts(" scanouts=");
-        serial_put_u32_decimal(s_probeOutcome.scanoutCount);
         break;
     case DisplayInfoOutcome::Failed:
         kernel::serial::puts("failed");
@@ -921,6 +955,13 @@ static void print_probe_outcome()
         kernel::serial::puts("not-queried");
         break;
     }
+    kernel::serial::puts(" scanoutSlots=");
+    serial_put_u32_decimal(s_probeOutcome.scanoutSlots);
+    kernel::serial::puts(" enabledScanouts=");
+    serial_put_u32_decimal(s_probeOutcome.enabledScanoutCount);
+    kernel::serial::puts(" disabledScanouts=");
+    serial_put_u32_decimal(s_probeOutcome.disabledScanoutCount);
+    kernel::serial::puts(" rendering=disabled");
     if (s_probeOutcome.reason != nullptr && s_probeOutcome.reason[0] != '\0') {
         kernel::serial::puts(" reason=");
         kernel::serial::puts(s_probeOutcome.reason);
@@ -996,9 +1037,10 @@ static bool layout_control_queue(Virtqueue* queue, uint16_t queueSize)
     queue->lastUsedIdx = 0;
     queue->freeHead = 0;
     queue->numFree = queueSize;
-    queue->descPhys = virt_to_phys(reinterpret_cast<void*>(desc));
-    queue->availPhys = virt_to_phys(reinterpret_cast<void*>(avail));
-    queue->usedPhys = virt_to_phys(reinterpret_cast<void*>(used));
+    queue->notifyOffset = 0;
+    queue->descPhys = dma_address(reinterpret_cast<void*>(desc));
+    queue->availPhys = dma_address(reinterpret_cast<void*>(avail));
+    queue->usedPhys = dma_address(reinterpret_cast<void*>(used));
 
     return true;
 }
@@ -1232,22 +1274,48 @@ static uint64_t notify_cfg_addr(const ModernTransport& transport, uint32_t field
     return region_mmio_addr(transport.notifyCfg, fieldOffset);
 }
 
-static bool device_wait_for_reset(ModernTransport& transport)
+static uint64_t device_cfg_addr(const ModernTransport& transport, uint32_t fieldOffset)
 {
-    const uint64_t statusAddr = common_cfg_addr(transport, pci::COMMON_STATUS);
-    for (uint32_t i = 0; i < 100000; ++i) {
-        if (mmio_read8(statusAddr) == 0) {
-            return true;
-        }
-    }
-    return mmio_read8(statusAddr) == 0;
+    return region_mmio_addr(transport.deviceCfg, fieldOffset);
 }
 
-static void reset_device(ModernTransport& transport)
+static void log_status_transition(const char* label, uint8_t writtenStatus, uint8_t readbackStatus)
 {
+    kernel::serial::puts("[VIRTIO-GPU] Status ");
+    kernel::serial::puts(label);
+    kernel::serial::puts(" write=0x");
+    kernel::serial::put_hex8(writtenStatus);
+    kernel::serial::puts(" readback=0x");
+    kernel::serial::put_hex8(readbackStatus);
+    kernel::serial::putc('\n');
+}
+
+static bool reset_transport(ModernTransport& transport)
+{
+    log_init_step("reset_device begin");
     const uint64_t statusAddr = common_cfg_addr(transport, pci::COMMON_STATUS);
     mmio_write8(statusAddr, 0);
-    (void)device_wait_for_reset(transport);
+    uint8_t readback = 0xFFu;
+    uint32_t spins = 0;
+    for (; spins < kStatusPollLimit; ++spins) {
+        readback = mmio_read8(statusAddr);
+        if (readback == 0) {
+            break;
+        }
+    }
+
+    log_status_transition("reset", 0, readback);
+    kernel::serial::puts("[VIRTIO-GPU] Reset poll spins=");
+    serial_put_u32_decimal(spins);
+    kernel::serial::puts(" timeout=");
+    kernel::serial::puts(readback == 0 ? "no" : "yes");
+    kernel::serial::putc('\n');
+
+    transport.mmioDeviceStatus = readback;
+    if (readback != 0) {
+        transport.mmioStopReason = "device status did not clear after reset";
+    }
+    return readback == 0;
 }
 
 static uint64_t read_device_features(ModernTransport& transport)
@@ -1261,6 +1329,8 @@ static uint64_t read_device_features(ModernTransport& transport)
     mmio_write32(featureSelectAddr, 1);
     const uint64_t high = mmio_read32(featureAddr);
 
+    transport.deviceFeaturesLow = static_cast<uint32_t>(low);
+    transport.deviceFeaturesHigh = static_cast<uint32_t>(high);
     return low | (high << 32);
 }
 
@@ -1286,6 +1356,167 @@ static void write_status(ModernTransport& transport, uint8_t status)
     mmio_write8(common_cfg_addr(transport, pci::COMMON_STATUS), status);
 }
 
+static bool set_status_and_verify(ModernTransport& transport, uint8_t bits, const char* label)
+{
+    const uint8_t current = read_status(transport);
+    const uint8_t updated = static_cast<uint8_t>(current | bits);
+    write_status(transport, updated);
+    const uint8_t readback = read_status(transport);
+    log_status_transition(label, updated, readback);
+    transport.mmioDeviceStatus = readback;
+    return (readback & bits) == bits;
+}
+
+static void mark_device_failed(ModernTransport& transport, const char* reason)
+{
+    transport.mmioStopReason = reason;
+    const uint8_t current = read_status(transport);
+    const uint8_t updated = static_cast<uint8_t>(current | STATUS_FAILED);
+    write_status(transport, updated);
+    const uint8_t readback = read_status(transport);
+    log_status_transition("FAILED", updated, readback);
+    transport.mmioDeviceStatus = readback;
+}
+
+static bool negotiate_features(ModernTransport& transport)
+{
+    log_init_step("feature negotiation begin");
+
+    const uint64_t deviceFeatures = read_device_features(transport);
+    const uint64_t requestedFeatures = kCommonCfgRequiredFeatureBits;
+    const uint64_t recognizedFeatures = deviceFeatures & requestedFeatures;
+    const uint64_t rejectedFeatures = deviceFeatures & ~requestedFeatures;
+
+    kernel::serial::puts("[VIRTIO-GPU] Feature bitmap rawLow=0x");
+    kernel::serial::put_hex32(transport.deviceFeaturesLow);
+    kernel::serial::puts(" rawHigh=0x");
+    kernel::serial::put_hex32(transport.deviceFeaturesHigh);
+    kernel::serial::puts(" raw=0x");
+    kernel::serial::put_hex64(deviceFeatures);
+    kernel::serial::putc('\n');
+
+    kernel::serial::puts("[VIRTIO-GPU] Feature bitmap recognized=0x");
+    kernel::serial::put_hex64(recognizedFeatures);
+    kernel::serial::puts(" requested=0x");
+    kernel::serial::put_hex64(requestedFeatures);
+    kernel::serial::puts(" rejected=0x");
+    kernel::serial::put_hex64(rejectedFeatures);
+    kernel::serial::putc('\n');
+
+    kernel::serial::puts("[VIRTIO-GPU] VIRTIO_F_VERSION_1 required=yes\n");
+
+    if ((deviceFeatures & FEATURE_VERSION_1) == 0u) {
+        mark_device_failed(transport, "VIRTIO_F_VERSION_1 missing from device feature bitmap");
+        return false;
+    }
+
+    write_driver_features(transport, requestedFeatures);
+    transport.negotiatedFeatures = requestedFeatures;
+
+    if (!set_status_and_verify(transport, static_cast<uint8_t>(read_status(transport) | STATUS_FEATURES_OK),
+                               "FEATURES_OK")) {
+        mark_device_failed(transport, "device rejected FEATURES_OK after feature negotiation");
+        return false;
+    }
+
+    const uint8_t negotiatedStatus = read_status(transport);
+    if ((negotiatedStatus & STATUS_FEATURES_OK) == 0u) {
+        kernel::serial::puts("[VIRTIO-GPU] FEATURES_OK readback cleared by device status=0x");
+        kernel::serial::put_hex8(negotiatedStatus);
+        kernel::serial::putc('\n');
+        mark_device_failed(transport, "device cleared FEATURES_OK after feature negotiation");
+        return false;
+    }
+
+    transport.featuresOk = true;
+    kernel::serial::puts("[VIRTIO-GPU] Feature negotiation status=ok negotiated=0x");
+    kernel::serial::put_hex64(requestedFeatures);
+    kernel::serial::puts(" deviceFeatures=0x");
+    kernel::serial::put_hex64(deviceFeatures);
+    kernel::serial::puts(" rejected=0x");
+    kernel::serial::put_hex64(rejectedFeatures);
+    kernel::serial::putc('\n');
+    return true;
+}
+
+static bool resolve_queue_notify_address(const ModernTransport& transport,
+                                         uint64_t* notifyAddrOut,
+                                         uint64_t* notifyOffsetBytesOut,
+                                         const char** reasonOut)
+{
+    if (notifyAddrOut == nullptr || notifyOffsetBytesOut == nullptr) {
+        if (reasonOut != nullptr) {
+            *reasonOut = "notify address resolver received a null output pointer";
+        }
+        return false;
+    }
+
+    if (!transport.notifyCfg.present) {
+        if (reasonOut != nullptr) {
+            *reasonOut = "notify config capability is unavailable";
+        }
+        return false;
+    }
+
+    if (transport.notifyOffMultiplier == 0u) {
+        if (reasonOut != nullptr) {
+            *reasonOut = "notify_off_multiplier is zero";
+        }
+        return false;
+    }
+
+    const uint64_t notifyOffsetBytes =
+        static_cast<uint64_t>(transport.queueNotifyOff) *
+        static_cast<uint64_t>(transport.notifyOffMultiplier);
+    if (transport.queueNotifyOff != 0u &&
+        (notifyOffsetBytes / static_cast<uint64_t>(transport.queueNotifyOff)) !=
+            static_cast<uint64_t>(transport.notifyOffMultiplier)) {
+        if (reasonOut != nullptr) {
+            *reasonOut = "queue notify offset overflows address space";
+        }
+        return false;
+    }
+
+    uint64_t notifyBase = 0;
+    if (transport.notifyCfg.mapped) {
+        notifyBase = transport.notifyCfg.mappedVirtual;
+    } else {
+        if (transport.notifyCfg.base > (~0ULL - static_cast<uint64_t>(transport.notifyCfg.offset))) {
+            if (reasonOut != nullptr) {
+                *reasonOut = "notify config base overflows address space";
+            }
+            return false;
+        }
+        notifyBase = transport.notifyCfg.base + static_cast<uint64_t>(transport.notifyCfg.offset);
+    }
+
+    if (notifyBase > (~0ULL - notifyOffsetBytes)) {
+        if (reasonOut != nullptr) {
+            *reasonOut = "notify register address overflows address space";
+        }
+        return false;
+    }
+
+    if (notifyOffsetBytes > (~0ULL - static_cast<uint64_t>(sizeof(uint16_t)))) {
+        if (reasonOut != nullptr) {
+            *reasonOut = "notify register size overflows address space";
+        }
+        return false;
+    }
+
+    if (transport.notifyCfg.length != 0u &&
+        notifyOffsetBytes + static_cast<uint64_t>(sizeof(uint16_t)) > transport.notifyCfg.length) {
+        if (reasonOut != nullptr) {
+            *reasonOut = "notify register address exceeds mapped BAR range";
+        }
+        return false;
+    }
+
+    *notifyOffsetBytesOut = notifyOffsetBytes;
+    *notifyAddrOut = notifyBase + notifyOffsetBytes;
+    return true;
+}
+
 static bool setup_control_queue(ModernTransport& transport)
 {
     const uint64_t queueSelectAddr = common_cfg_addr(transport, pci::COMMON_Q_SELECT);
@@ -1294,55 +1525,125 @@ static bool setup_control_queue(ModernTransport& transport)
     const uint64_t queueAvailAddr = common_cfg_addr(transport, pci::COMMON_Q_AVAIL);
     const uint64_t queueUsedAddr = common_cfg_addr(transport, pci::COMMON_Q_USED);
     const uint64_t queueEnableAddr = common_cfg_addr(transport, pci::COMMON_Q_ENABLE);
+    const uint64_t queueNotifyOffAddr = common_cfg_addr(transport, pci::COMMON_Q_NOTIFY_OFF);
 
+    log_init_step("control queue begin");
     mmio_write16(queueSelectAddr, 0);
 
+    const uint16_t queueEnableBefore = mmio_read16(queueEnableAddr);
+    if (queueEnableBefore != 0u) {
+        kernel::serial::puts("[VIRTIO-GPU] Control queue already enabled before guest configuration\n");
+        transport.mmioStopReason = "control queue already enabled before guest configuration";
+        return false;
+    }
+
+    const uint16_t queueCount = mmio_read16(common_cfg_addr(transport, pci::COMMON_NUM_QUEUES));
     const uint16_t queueMax = mmio_read16(queueSizeAddr);
+    transport.mmioNumQueues = queueCount;
+    kernel::serial::puts("[VIRTIO-GPU] Common config queueCount=");
+    serial_put_u32_decimal(queueCount);
+    kernel::serial::puts(" queueMax=");
+    serial_put_u32_decimal(queueMax);
+    kernel::serial::putc('\n');
+
     if (queueMax < kMinControlQueueSize) {
         kernel::serial::puts("[VIRTIO-GPU] Control queue unavailable\n");
+        transport.mmioStopReason = "control queue unavailable";
         return false;
     }
 
     const uint16_t queueSize = choose_queue_size(queueMax);
     if (queueSize < kMinControlQueueSize) {
         kernel::serial::puts("[VIRTIO-GPU] Control queue size too small\n");
+        transport.mmioStopReason = "control queue size too small";
         return false;
     }
 
     if (!layout_control_queue(&transport.controlQueue, queueSize)) {
         kernel::serial::puts("[VIRTIO-GPU] Failed to lay out control queue\n");
+        transport.mmioStopReason = "failed to lay out control queue";
         return false;
     }
 
     transport.queueSize = queueSize;
     transport.controlQueue.index = 0;
+    transport.controlQueue.notifyOffset = 0;
 
     mmio_write16(queueSizeAddr, queueSize);
     mmio_write64(queueDescAddr, transport.controlQueue.descPhys);
     mmio_write64(queueAvailAddr, transport.controlQueue.availPhys);
     mmio_write64(queueUsedAddr, transport.controlQueue.usedPhys);
+    const uint16_t queueNotifyOff = mmio_read16(queueNotifyOffAddr);
+    transport.queueNotifyOff = queueNotifyOff;
+    transport.controlQueue.notifyOffset = queueNotifyOff;
+
+    uint64_t notifyAddr = 0;
+    uint64_t notifyOffsetBytes = 0;
+    const char* notifyReason = nullptr;
+    if (!resolve_queue_notify_address(transport, &notifyAddr, &notifyOffsetBytes, &notifyReason)) {
+        kernel::serial::puts("[VIRTIO-GPU] Control queue notify validation blocked: ");
+        kernel::serial::puts(notifyReason != nullptr ? notifyReason : "n/a");
+        kernel::serial::putc('\n');
+        transport.mmioStopReason = notifyReason != nullptr ? notifyReason : "control queue notify validation blocked";
+        return false;
+    }
+
     mmio_write16(queueEnableAddr, 1);
+
+    const uint16_t queueEnableAfter = mmio_read16(queueEnableAddr);
+
+    if (queueEnableAfter == 0u) {
+        kernel::serial::puts("[VIRTIO-GPU] Control queue enable readback is still 0\n");
+        transport.mmioStopReason = "control queue enable readback is still 0";
+        return false;
+    }
 
     kernel::serial::puts("[VIRTIO-GPU] Control queue ready size=");
     serial_put_u32_decimal(queueSize);
+    kernel::serial::puts(" queueEnable=");
+    kernel::serial::puts(queueEnableAfter != 0u ? "yes" : "no");
+    kernel::serial::puts(" queueNotifyOff=");
+    serial_put_u32_decimal(queueNotifyOff);
+    kernel::serial::puts(" notifyOffMultiplier=");
+    serial_put_u32_decimal(transport.notifyOffMultiplier);
+    kernel::serial::puts(" notifyOffsetBytes=");
+    serial_put_u64_decimal(notifyOffsetBytes);
+    kernel::serial::puts(" notifyAddr=0x");
+    kernel::serial::put_hex64(notifyAddr);
+    kernel::serial::puts(" descVirt=0x");
+    kernel::serial::put_hex64(reinterpret_cast<uint64_t>(transport.controlQueue.desc));
     kernel::serial::puts(" desc=0x");
     kernel::serial::put_hex64(transport.controlQueue.descPhys);
+    kernel::serial::puts(" availVirt=0x");
+    kernel::serial::put_hex64(reinterpret_cast<uint64_t>(transport.controlQueue.avail));
     kernel::serial::puts(" avail=0x");
     kernel::serial::put_hex64(transport.controlQueue.availPhys);
+    kernel::serial::puts(" usedVirt=0x");
+    kernel::serial::put_hex64(reinterpret_cast<uint64_t>(transport.controlQueue.used));
     kernel::serial::puts(" used=0x");
     kernel::serial::put_hex64(transport.controlQueue.usedPhys);
+    kernel::serial::puts(" alignment=4096");
     kernel::serial::putc('\n');
 
+    transport.controlQueueReady = queueEnableAfter != 0u;
     return true;
 }
 
-static void queue_notify(ModernTransport& transport, uint16_t queueIndex)
+static bool queue_notify(ModernTransport& transport, uint16_t queueIndex)
 {
-    const uint64_t notifyAddr = notify_cfg_addr(transport,
-                                static_cast<uint32_t>(static_cast<uint64_t>(transport.queueNotifyOff) *
-                                                      static_cast<uint64_t>(transport.notifyOffMultiplier)));
+    uint64_t notifyAddr = 0;
+    uint64_t notifyOffsetBytes = 0;
+    const char* reason = nullptr;
+    if (!resolve_queue_notify_address(transport, &notifyAddr, &notifyOffsetBytes, &reason)) {
+        kernel::serial::puts("[VIRTIO-GPU] Notify address blocked: ");
+        kernel::serial::puts(reason != nullptr ? reason : "n/a");
+        kernel::serial::putc('\n');
+        return false;
+    }
 
+    (void)notifyOffsetBytes;
     mmio_write16(notifyAddr, queueIndex);
+    return true;
 }
 
 static bool submit_display_info_request(DeviceState& state)
@@ -1351,9 +1652,12 @@ static bool submit_display_info_request(DeviceState& state)
     Virtqueue& queue = transport.controlQueue;
 
     if (queue.desc == nullptr || queue.avail == nullptr || queue.used == nullptr || queue.size < kMinControlQueueSize) {
+        kernel::serial::puts("[VIRTIO-GPU] GET_DISPLAY_INFO blocked: control queue is not ready\n");
+        transport.mmioStopReason = "control queue is not ready";
         return false;
     }
 
+    log_init_step("GET_DISPLAY_INFO begin");
     memzero(&s_commandBuffer[0], sizeof(s_commandBuffer));
     memzero(&s_responseBuffer[0], sizeof(s_responseBuffer));
 
@@ -1364,12 +1668,12 @@ static bool submit_display_info_request(DeviceState& state)
     request->ctxId = 0;
     request->padding = 0;
 
-    queue.desc[0].addr = virt_to_phys(request);
+    queue.desc[0].addr = dma_address(request);
     queue.desc[0].len = sizeof(CtrlHeader);
-    queue.desc[0].flags = 0;
+    queue.desc[0].flags = VRING_DESC_F_NEXT;
     queue.desc[0].next = 1;
 
-    queue.desc[1].addr = virt_to_phys(&s_responseBuffer[0]);
+    queue.desc[1].addr = dma_address(&s_responseBuffer[0]);
     queue.desc[1].len = sizeof(RespDisplayInfo);
     queue.desc[1].flags = VRING_DESC_F_WRITE;
     queue.desc[1].next = 0;
@@ -1380,7 +1684,11 @@ static bool submit_display_info_request(DeviceState& state)
     MEMORY_BARRIER();
     queue.avail->idx = static_cast<uint16_t>(queue.avail->idx + 1);
     MEMORY_BARRIER();
-    queue_notify(transport, 0);
+
+    if (!queue_notify(transport, 0)) {
+        transport.mmioStopReason = "notify address validation failed";
+        return false;
+    }
 
     uint32_t spin = 0;
     while (queue.used->idx == usedBefore && spin < kResponseSpinLimit) {
@@ -1389,7 +1697,19 @@ static bool submit_display_info_request(DeviceState& state)
     }
 
     if (queue.used->idx == usedBefore) {
-        kernel::serial::puts("[VIRTIO-GPU] GET_DISPLAY_INFO timed out\n");
+        kernel::serial::puts("[VIRTIO-GPU] GET_DISPLAY_INFO timed out");
+        kernel::serial::puts(" availIdx=");
+        serial_put_u32_decimal(queue.avail->idx);
+        kernel::serial::puts(" usedIdx=");
+        serial_put_u32_decimal(queue.used->idx);
+        kernel::serial::puts(" lastUsedIdx=");
+        serial_put_u32_decimal(queue.lastUsedIdx);
+        kernel::serial::puts(" descriptorHead=");
+        serial_put_u32_decimal(0);
+        kernel::serial::puts(" descPhys=0x");
+        kernel::serial::put_hex64(queue.descPhys);
+        kernel::serial::putc('\n');
+        transport.mmioStopReason = "GET_DISPLAY_INFO timed out";
         return false;
     }
 
@@ -1398,66 +1718,69 @@ static bool submit_display_info_request(DeviceState& state)
 
     if (usedElem.id != 0) {
         kernel::serial::puts("[VIRTIO-GPU] GET_DISPLAY_INFO completed on unexpected descriptor\n");
+        transport.mmioStopReason = "GET_DISPLAY_INFO completed on unexpected descriptor";
         return false;
     }
 
-    const RespDisplayInfo* response = reinterpret_cast<const RespDisplayInfo*>(&s_responseBuffer[0]);
-    if (response->header.type != RESP_OK_DISPLAY_INFO) {
-        kernel::serial::puts("[VIRTIO-GPU] GET_DISPLAY_INFO returned type=0x");
-        kernel::serial::put_hex32(response->header.type);
+    if (usedElem.len < sizeof(RespDisplayInfo)) {
+        kernel::serial::puts("[VIRTIO-GPU] GET_DISPLAY_INFO returned a short response len=0x");
+        kernel::serial::put_hex32(usedElem.len);
         kernel::serial::putc('\n');
+        transport.mmioStopReason = "GET_DISPLAY_INFO returned a short response";
         return false;
     }
 
-    state.device.numScanouts = 0;
-    if (transport.deviceCfg.present) {
-        const GpuConfig* config = reinterpret_cast<const GpuConfig*>(transport.deviceCfg.base + transport.deviceCfg.offset);
-        state.device.numScanouts = config->numScanouts;
-        state.device.features = 0;
-
-        kernel::serial::puts("[VIRTIO-GPU] device config scanouts=");
-        serial_put_u32_decimal(config->numScanouts);
-        kernel::serial::puts(" capsets=");
-        serial_put_u32_decimal(config->numCapsets);
-        kernel::serial::putc('\n');
-    }
-
-    if (state.device.numScanouts > MAX_SCANOUTS) {
-        state.device.numScanouts = MAX_SCANOUTS;
-    }
-
-    const uint32_t reportedCount = state.device.numScanouts;
-    kernel::serial::puts("[VIRTIO-GPU] Display info scanouts=");
-    serial_put_u32_decimal(reportedCount);
+    kernel::serial::puts("[VIRTIO-GPU] GET_DISPLAY_INFO completion usedIdx=");
+    serial_put_u32_decimal(queue.lastUsedIdx);
+    kernel::serial::puts(" usedLen=");
+    serial_put_u32_decimal(usedElem.len);
+    kernel::serial::puts(" headDescriptor=");
+    serial_put_u32_decimal(usedElem.id);
     kernel::serial::putc('\n');
 
-    uint32_t discovered = 0;
+    const RespDisplayInfo* response = reinterpret_cast<const RespDisplayInfo*>(&s_responseBuffer[0]);
+    kernel::serial::puts("[VIRTIO-GPU] GET_DISPLAY_INFO response type=0x");
+    kernel::serial::put_hex32(response->header.type);
+    kernel::serial::putc('\n');
+    if (response->header.type != RESP_OK_DISPLAY_INFO) {
+        kernel::serial::puts("[VIRTIO-GPU] GET_DISPLAY_INFO returned unexpected response type\n");
+        transport.mmioStopReason = "GET_DISPLAY_INFO returned unexpected response type";
+        return false;
+    }
+
+    transport.displayInfoSlots = MAX_SCANOUTS;
+    transport.enabledScanouts = 0;
+    transport.disabledScanouts = 0;
+
+    uint32_t deviceConfigScanouts = 0;
+    uint32_t deviceConfigCapsets = 0;
+    if (transport.deviceCfg.present) {
+        deviceConfigScanouts = mmio_read32(device_cfg_addr(transport, 0x08));
+        deviceConfigCapsets = mmio_read32(device_cfg_addr(transport, 0x0C));
+        transport.mmioDeviceScanouts = deviceConfigScanouts;
+        transport.mmioDeviceCapsets = deviceConfigCapsets;
+        kernel::serial::puts("[VIRTIO-GPU] Device config numScanouts=");
+        serial_put_u32_decimal(deviceConfigScanouts);
+        kernel::serial::puts(" numCapsets=");
+        serial_put_u32_decimal(deviceConfigCapsets);
+        kernel::serial::putc('\n');
+    }
+
     for (uint32_t i = 0; i < MAX_SCANOUTS; ++i) {
         const DisplayOne& mode = response->pmodes[i];
-        const bool withinReportedCount = (i < reportedCount);
-        const bool hasData = withinReportedCount ||
-                             mode.enabled != 0 ||
-                             mode.flags != 0 ||
-                             mode.rect.x != 0 ||
-                             mode.rect.y != 0 ||
-                             mode.rect.width != 0 ||
-                             mode.rect.height != 0;
-        if (!hasData) {
-            continue;
-        }
-
-        if (withinReportedCount) {
-            ++discovered;
-        }
-
         state.device.displays[i].width = mode.rect.width;
         state.device.displays[i].height = mode.rect.height;
         state.device.displays[i].enabled = mode.enabled != 0;
+        if (mode.enabled != 0) {
+            ++transport.enabledScanouts;
+        } else {
+            ++transport.disabledScanouts;
+        }
 
         kernel::serial::puts("[VIRTIO-GPU]   scanout[");
         serial_put_u32_decimal(i);
         kernel::serial::puts("] enabled=");
-        kernel::serial::puts(mode.enabled != 0 ? "1" : "0");
+        kernel::serial::puts(mode.enabled != 0 ? "yes" : "no");
         kernel::serial::puts(" x=");
         serial_put_u32_decimal(mode.rect.x);
         kernel::serial::puts(" y=");
@@ -1471,9 +1794,22 @@ static bool submit_display_info_request(DeviceState& state)
         kernel::serial::putc('\n');
     }
 
-    state.device.numScanouts = discovered;
-    state.device.initialized = true;
-    state.transport.probeComplete = true;
+    state.device.numScanouts = transport.enabledScanouts;
+    state.device.features = transport.negotiatedFeatures;
+    kernel::serial::puts("[VIRTIO-GPU] Display info summary slots=");
+    serial_put_u32_decimal(transport.displayInfoSlots);
+    kernel::serial::puts(" enabled=");
+    serial_put_u32_decimal(transport.enabledScanouts);
+    kernel::serial::puts(" disabled=");
+    serial_put_u32_decimal(transport.disabledScanouts);
+    kernel::serial::puts(" deviceConfigScanouts=");
+    serial_put_u32_decimal(deviceConfigScanouts);
+    kernel::serial::puts(" qemuTwoUsableScanouts=");
+    kernel::serial::puts(transport.enabledScanouts >= 2u ? "yes" : "no");
+    kernel::serial::putc('\n');
+
+    transport.displayInfoSlots = MAX_SCANOUTS;
+    transport.probeComplete = true;
     return true;
 }
 
@@ -1516,7 +1852,7 @@ static bool probe_device(DeviceState& state, uint8_t bus, uint8_t device, uint8_
 
     if (!parse_virtio_regions(&transport)) {
         transport.modern = false;
-        record_probe_outcome(state, false, DisplayInfoOutcome::NotQueried, 0,
+        record_probe_outcome(state, false, DisplayInfoOutcome::NotQueried, 0u, 0u, 0u,
                              transport_blocker_reason(transport));
         return false;
     }
@@ -1530,6 +1866,14 @@ static bool initialize_device(DeviceState& state)
 {
     ModernTransport& transport = state.transport;
     GpuDevice& device = state.device;
+    auto fail_and_record = [&](const char* reason, DisplayInfoOutcome displayInfoOutcome) -> bool {
+        const char* finalReason = (reason != nullptr && reason[0] != '\0')
+            ? reason
+            : "virtio-gpu initialization failed";
+        mark_device_failed(transport, finalReason);
+        record_probe_outcome(state, false, displayInfoOutcome, 0u, 0u, 0u, finalReason);
+        return false;
+    };
 
     memzero(&device, sizeof(device));
     device.initialized = false;
@@ -1538,8 +1882,14 @@ static bool initialize_device(DeviceState& state)
     device.pciDevice = transport.device;
     device.pciFunction = transport.function;
     device.irqLine = 0xFF;
+    device.nextResourceId = 1;
+
     transport.mmioMapped = false;
     transport.mmioSanityReadsOk = false;
+    transport.featuresOk = false;
+    transport.controlQueueReady = false;
+    transport.probeComplete = false;
+    transport.negotiatedFeatures = 0;
     transport.mmioMappedVirtual = 0;
     transport.mmioMappedPageCount = 0;
     transport.mmioNumQueues = 0;
@@ -1547,8 +1897,15 @@ static bool initialize_device(DeviceState& state)
     transport.mmioConfigGeneration = 0;
     transport.mmioDeviceScanouts = 0;
     transport.mmioDeviceCapsets = 0;
+    transport.displayInfoSlots = 0;
+    transport.enabledScanouts = 0;
+    transport.disabledScanouts = 0;
     transport.mmioCacheMode = "n/a";
     transport.mmioStopReason = "transport writes intentionally disabled";
+    transport.queueSize = 0;
+    transport.queueNotifyOff = 0;
+    transport.deviceFeaturesLow = 0;
+    transport.deviceFeaturesHigh = 0;
 
     kernel::serial::puts("[VIRTIO-GPU] Initializing diagnostic-only virtio-gpu device\n");
     kernel::serial::puts("[VIRTIO-GPU] Transport type detected: ");
@@ -1568,11 +1925,10 @@ static bool initialize_device(DeviceState& state)
         kernel::serial::puts(mmioBlockerReport.nextKernelFeature != nullptr ? mmioBlockerReport.nextKernelFeature : "n/a");
         kernel::serial::putc('\n');
         transport.mmioStopReason = mmioBlocker;
-        record_probe_outcome(state, false, DisplayInfoOutcome::NotQueried, 0, mmioBlocker);
+        record_probe_outcome(state, false, DisplayInfoOutcome::NotQueried, 0u, 0u, 0u, mmioBlocker);
         return false;
     }
 
-    kernel::serial::puts("[VIRTIO-GPU] MMIO probe helper returned to initialize_device\n");
     transport.mmioMapped = mmioProbe.mmioMapped;
     transport.mmioSanityReadsOk = mmioProbe.sanityReadsOk;
     transport.mmioMappedVirtual = mmioProbe.mappedVirtual;
@@ -1597,10 +1953,82 @@ static bool initialize_device(DeviceState& state)
     kernel::serial::puts(mmioProbe.sanityReadsOk ? "ok" : "failed");
     kernel::serial::puts(" stopReason=");
     kernel::serial::puts(mmioProbe.stopReason != nullptr ? mmioProbe.stopReason : "n/a");
+    kernel::serial::puts(" numQueues=");
+    serial_put_u32_decimal(mmioProbe.numQueues);
+    kernel::serial::puts(" deviceStatus=0x");
+    kernel::serial::put_hex8(mmioProbe.deviceStatus);
+    kernel::serial::puts(" configGeneration=0x");
+    kernel::serial::put_hex8(mmioProbe.configGeneration);
     kernel::serial::putc('\n');
 
-    kernel::serial::puts("[VIRTIO-GPU] MMIO transport mapped; read-only sanity reads complete; GET_DISPLAY_INFO remains disabled in this diagnostic pass\n");
-    record_probe_outcome(state, false, DisplayInfoOutcome::NotQueried, 0,
+    kernel::serial::puts("[VIRTIO-GPU] MMIO transport mapped; read-only sanity reads complete; controlled transport initialization begins\n");
+    kernel::serial::puts("[VIRTIO-GPU] Common config sanity num_queues=");
+    serial_put_u32_decimal(mmioProbe.numQueues);
+    kernel::serial::puts(" device_status=0x");
+    kernel::serial::put_hex8(mmioProbe.deviceStatus);
+    kernel::serial::puts(" config_generation=0x");
+    kernel::serial::put_hex8(mmioProbe.configGeneration);
+    kernel::serial::putc('\n');
+
+    if (!reset_transport(transport)) {
+        return fail_and_record(transport.mmioStopReason, DisplayInfoOutcome::NotQueried);
+    }
+
+    if (!set_status_and_verify(transport, STATUS_ACKNOWLEDGE, "ACKNOWLEDGE")) {
+        return fail_and_record("device did not accept ACKNOWLEDGE status", DisplayInfoOutcome::NotQueried);
+    }
+
+    if (!set_status_and_verify(transport, static_cast<uint8_t>(read_status(transport) | STATUS_DRIVER), "DRIVER")) {
+        return fail_and_record("device did not accept DRIVER status", DisplayInfoOutcome::NotQueried);
+    }
+
+    if (!negotiate_features(transport)) {
+        record_probe_outcome(state, false, DisplayInfoOutcome::NotQueried, 0u, 0u, 0u,
+                             transport.mmioStopReason);
+        return false;
+    }
+
+    if (!setup_control_queue(transport)) {
+        return fail_and_record(transport.mmioStopReason, DisplayInfoOutcome::NotQueried);
+    }
+
+    if (!set_status_and_verify(transport, static_cast<uint8_t>(read_status(transport) | STATUS_DRIVER_OK), "DRIVER_OK")) {
+        return fail_and_record("device did not accept DRIVER_OK status", DisplayInfoOutcome::NotQueried);
+    }
+
+    const uint8_t finalStatus = read_status(transport);
+    const uint8_t requiredStatus = static_cast<uint8_t>(STATUS_ACKNOWLEDGE | STATUS_DRIVER | STATUS_FEATURES_OK | STATUS_DRIVER_OK);
+    kernel::serial::puts("[VIRTIO-GPU] Status verification ack=");
+    kernel::serial::puts((finalStatus & STATUS_ACKNOWLEDGE) != 0u ? "yes" : "no");
+    kernel::serial::puts(" driver=");
+    kernel::serial::puts((finalStatus & STATUS_DRIVER) != 0u ? "yes" : "no");
+    kernel::serial::puts(" featuresOk=");
+    kernel::serial::puts((finalStatus & STATUS_FEATURES_OK) != 0u ? "yes" : "no");
+    kernel::serial::puts(" driverOk=");
+    kernel::serial::puts((finalStatus & STATUS_DRIVER_OK) != 0u ? "yes" : "no");
+    kernel::serial::puts(" readback=0x");
+    kernel::serial::put_hex8(finalStatus);
+    kernel::serial::putc('\n');
+
+    if ((finalStatus & requiredStatus) != requiredStatus) {
+        transport.mmioStopReason = "device status verification failed after DRIVER_OK";
+        return fail_and_record(transport.mmioStopReason, DisplayInfoOutcome::NotQueried);
+    }
+
+    transport.mmioDeviceStatus = finalStatus;
+
+    if (!submit_display_info_request(state)) {
+        return fail_and_record(transport.mmioStopReason, DisplayInfoOutcome::Failed);
+    }
+
+    transport.mmioStopReason = "GET_DISPLAY_INFO milestone complete";
+    device.initialized = true;
+    transport.probeComplete = true;
+    kernel::serial::puts("[VIRTIO-GPU] GET_DISPLAY_INFO milestone complete; rendering remains disabled\n");
+    record_probe_outcome(state, true, DisplayInfoOutcome::Ok,
+                         transport.enabledScanouts,
+                         transport.disabledScanouts,
+                         transport.displayInfoSlots,
                          transport.mmioStopReason);
     return true;
 }
@@ -1687,6 +2115,13 @@ static DeviceState* active_state(GpuDevice* device)
 }
 
 } // namespace
+
+void set_kernel_physical_base(uint64_t physicalBase)
+{
+    if (physicalBase != 0) {
+        s_kernelPhysicalBase = physicalBase;
+    }
+}
 
 void init()
 {

@@ -310,6 +310,11 @@ struct GpuDevice {
 // Call once at kernel boot
 void init();
 
+// Provide the loaded physical base of the kernel image so the diagnostic
+// probe can translate static command/queue buffers into DMA-visible
+// physical addresses.
+void set_kernel_physical_base(uint64_t physicalBase);
+
 // Probe for VirtIO GPU devices
 // Returns number of devices found
 int probe();

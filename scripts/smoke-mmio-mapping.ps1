@@ -69,7 +69,7 @@ Assert-Match -Path $virtioGpuCpp -Pattern 'cacheAttrs=' -Message 'virtio_gpu.cpp
 Assert-Match -Path $virtioGpuCpp -Pattern 'uc\(pcd\+pwt\)' -Message 'virtio_gpu.cpp should report the UC cache mode.'
 Assert-Match -Path $virtioGpuCpp -Pattern 'qemuProbeOnly=' -Message 'virtio_gpu.cpp should note that this path is QEMU-probe-only.'
 Assert-Match -Path $virtioGpuCpp -Pattern 'MMIO transport summary mmioMapped=' -Message 'virtio_gpu.cpp should report the mapped transport summary.'
-Assert-Match -Path $virtioGpuCpp -Pattern 'MMIO transport mapped; read-only sanity reads complete; GET_DISPLAY_INFO remains disabled in this diagnostic pass' -Message 'virtio_gpu.cpp should stop after the read-only MMIO milestone.'
+Assert-Match -Path $virtioGpuCpp -Pattern 'MMIO transport mapped; read-only sanity reads complete; controlled transport initialization begins' -Message 'virtio_gpu.cpp should enter the controlled transport-init milestone.'
 Assert-Match -Path $virtioGpuCpp -Pattern 'GET_DISPLAY_INFO blocked: read-only transport probe stops before command submission' -Message 'virtio_gpu.cpp should leave GET_DISPLAY_INFO blocked in this pass.'
 Assert-Match -Path $virtioGpuCpp -Pattern 'reset_device blocked: transport reset is disabled in diagnostic-only probe' -Message 'virtio_gpu.cpp should keep transport reset disabled.'
 Assert-Match -Path $virtioGpuCpp -Pattern 'REAL HARDWARE GPU/MMIO ENABLEMENT IS MULE TERRITORY' -Message 'virtio_gpu.cpp should keep the real-hardware warning prominent.'

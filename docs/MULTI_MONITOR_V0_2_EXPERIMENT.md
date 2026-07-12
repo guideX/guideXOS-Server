@@ -22,11 +22,9 @@ Validated milestone closeout for `2026-07-10`. This note now tracks the implemen
 1. QEMU GOP/backend diagnostics complete.
 1. virtio-gpu discovery/capability walk complete.
 1. Runtime MMIO mapping complete in the QEMU-only x86_64 probe build.
-1. VirtIO common config access next.
-1. Controlled feature negotiation next.
-1. Virtqueue setup next.
-1. GET_DISPLAY_INFO next.
-1. Resource, backing, scanout, transfer, and flush support.
+1. Controlled modern VirtIO transport initialization complete.
+1. GET_DISPLAY_INFO complete.
+1. Resource creation, backing attachment, scanout selection, transfer, and flush next.
 1. Single virtio-gpu output.
 1. Dual virtio-gpu scanouts.
 1. DisplayRenderTarget integration.
@@ -76,9 +74,9 @@ If both gates are unset, `.\run-server.bat` stays in normal single-output mode.
 | `build.bat` | The hosted runtime and display code compile successfully. |
 | `powershell -ExecutionPolicy Bypass -File scripts\smoke-display-synthetic-layout.ps1` | The synthetic gate plumbing, display-model helpers, render-target wiring, and summary diagnostics are present and consistent. |
 | `powershell -ExecutionPolicy Bypass -File scripts\smoke-hosted-display-runtime.ps1` | All three validated runtime modes behave as expected, including summary logs, paint routing, input mapping, and cleanup. |
-| `powershell -ExecutionPolicy Bypass -File scripts\smoke-qemu-display-probe.ps1` | The QEMU probe boots headlessly, captures serial output to a deterministic log, and asserts the framebuffer-array and deduplication evidence for the standard `-vga std` path. |
+| `powershell -ExecutionPolicy Bypass -File scripts\smoke-qemu-display-probe.ps1` | The QEMU probe boots headlessly, captures serial output to a deterministic log, and asserts the modern transport reset/status progression, control queue setup, GET_DISPLAY_INFO result, and scanout inventory. |
 | `powershell -ExecutionPolicy Bypass -File scripts\smoke-mmio-mapping.ps1` | The generic MMIO mapping API contract, safety flags, and virtio-gpu probe wiring stay aligned with the runtime mapping prerequisite. |
-| `powershell -ExecutionPolicy Bypass -File scripts\smoke-virtio-gpu-diagnostic-source.ps1` | The virtio-gpu probe source keeps the full capability walk, the `cfg_type=0x05` diagnostic-only treatment, the modern-only QEMU gate, the safe-MMIO stop, and the no-rendering constraint. |
+| `powershell -ExecutionPolicy Bypass -File scripts\smoke-virtio-gpu-diagnostic-source.ps1` | The virtio-gpu probe source keeps the full capability walk, the `cfg_type=0x05` diagnostic-only treatment, the QEMU-only gate, the controlled transport milestone, and the no-rendering constraint. |
 | `git diff --check` | The working tree is free of whitespace and patch-format issues. |
 
 The hosted runtime smoke restores `desktop.json` and `desktop.state` and removes `display-options.cfg` as part of its cleanup, so validation does not leave those runtime state files dirty.
@@ -120,6 +118,7 @@ The runtime MMIO work is starting from the existing huge-page / page-table scaff
 - The page-table writer stores physical child-table addresses in hardware entries, and the probe enables `EFER.NXE` before it emits NX-marked MMIO leaves; if NXE is unavailable, the probe stops before touching the BAR.
 - PAT/MTRR cache-attribute plumbing is still unresolved globally, so the safe current phase uses the UC-compatible `PCD|PWT` path instead of mapping PCI MMIO as ordinary cacheable RAM.
 - `kernel::mmio::mapForDevice` now installs the QEMU-only transport mappings and stops before any transport write path if it cannot prove a safe MMIO window.
+- The same mapping path now feeds the controlled virtio-gpu transport init milestone, but only behind the diagnostic QEMU gate.
 
 ## QEMU / Bare-Metal Output Investigation
 
@@ -174,7 +173,7 @@ The standard `std` mode still validates:
 - Multiple framebuffer descriptors are not part of the current boot handoff contract.
 - The kernel does not yet consume an array of framebuffer targets from the boot path.
 - The compositor does not yet render to more than one real framebuffer in bare-metal mode.
-- There is now a diagnostic-only virtio-gpu transport probe with a mapped MMIO window, but there is still no rendering-capable virtio-gpu or QXL guest driver in this pass.
+- There is now a diagnostic-only virtio-gpu transport probe with a mapped MMIO window and controlled transport init, but there is still no rendering-capable virtio-gpu or QXL guest driver in this pass.
 
 ### Next required implementation step
 
@@ -188,34 +187,35 @@ Diagnostic-only probe results from `logs\qemu-display-probe-20260709-211742\virt
 | --- | --- |
 | PCI discovery | Success. The probe found a virtio-gpu PCI function at `00:02.00` with `vendor=0x1AF4`, `device=0x1050`, `subsystem=0x1AF4:1100`, `class=0x03`, `subclass=0x80`. |
 | Capability walk | Success. The full PCI capability list walk logs 6 caps, 5 vendor-specific caps, and every vendor-specific VirtIO capability. `cfg_type=0x01` common, `0x02` notify, `0x03` ISR, and `0x04` device are resolved. `cfg_type=0x05` is diagnostic evidence only and is not treated as success by itself. On `virtio-gpu` and `virtio-gpu-modern-only`, the PCI config capability is malformed because BAR0 is unassigned. |
-| Modern transport | Detected and mapped in the QEMU-only probe build. The common config BAR resolves to `0x000000C000000000`, the transport MMIO window is mapped into the reserved kernel range, and the probe stops after read-only sanity reads. |
-| Feature negotiation | Not reached. |
-| Control queue | Not reached. |
-| GET_DISPLAY_INFO | Not queried. No control queue was laid out and no `GET_DISPLAY_INFO` request was issued. |
-| Scanouts reported | `n/a` for this run, because the safe MMIO gate stopped the probe before any queue writes. |
+| Modern transport | Detected and mapped in the QEMU-only probe build. The common config BAR resolves to `0x000000C000000000`, the transport MMIO window is mapped into the reserved kernel range, and the probe now continues into bounded status progression. |
+| Feature negotiation | Complete for `VIRTIO_F_VERSION_1` and the minimal modern transport feature set. |
+| Control queue | Ready. Queue 0 is configured and enabled; the cursor queue stays disabled. |
+| GET_DISPLAY_INFO | Success. One diagnostic control command is issued and the response is parsed. |
+| Scanouts reported | `slots=16`, `enabled=1`, `disabled=15`, `deviceConfigScanouts=2`, `qemuTwoUsableScanouts=no` in the current QEMU run. |
 | Modern-only QEMU mode | Supported locally. The smoke successfully launches `-device virtio-gpu-pci,max_outputs=2,disable-legacy=on`. |
-| Current interpretation | QEMU exposes a modern virtio-gpu PCI candidate and the full modern capability set, and guideXOS now proves a safe read-only runtime MMIO transport mapping before any reset or feature negotiation. Rendering remains disabled. |
+| Current interpretation | QEMU exposes a modern virtio-gpu PCI candidate, guideXOS now proves the safe QEMU-only transport initialization milestone, and the probe logs a completed `GET_DISPLAY_INFO` with one enabled scanout in this run. Rendering remains disabled. |
 
 What remains before rendering can happen:
 
-- Keep the modern probe read-only until the MMIO mapping story is understood.
-- Do not enable resource creation, backing attachment, scanout selection, transfers, flushes, or rendering in this branch.
-- Continue using the diagnostic-safe stop as the boundary until a later pass can prove a safe mapped path.
+- Resource creation is still not enabled.
+- Backing attachment is still not enabled.
+- Scanout selection is still not enabled.
+- Transfers and flushes are still not enabled.
+- Rendering stays disabled until a later pass proves the full path is safe.
 
-## Virtio-GPU MMIO Mapping Milestone
+## Virtio-GPU Transport Milestone
 
-The virtio-gpu discovery path now maps the modern transport MMIO regions into a reserved kernel window and stops at a read-only sanity milestone.
+The virtio-gpu discovery path now maps the modern transport MMIO regions into a reserved kernel window, performs bounded modern status progression, negotiates the minimal feature set, configures controlq 0, and completes one diagnostic `GET_DISPLAY_INFO` request.
 
 - PCI discovery still finds the QEMU virtio-gpu function at `00:02.00`.
 - The modern VirtIO capability walk still resolves `common`, `notify`, `isr`, and `device` capabilities.
 - The `pci` capability remains malformed in the current QEMU setup because BAR0 is unassigned, and it is still not treated as a transport region.
 - The active x86_64 probe build gates runtime mapping behind `GXOS_QEMU_VIRTIO_GPU_PROBE_ACTIVE`.
-- `kernel::mmio::mapForDevice` now installs the common, notify, ISR, and device config regions into the reserved kernel MMIO window using supervisor-only, non-executable, UC-style `PCD|PWT` leaf mappings.
+- `kernel::mmio::mapForDevice` installs the common, notify, ISR, and device config regions into the reserved kernel MMIO window using supervisor-only, non-executable, UC-style `PCD|PWT` leaf mappings.
 - The current cache policy avoids ordinary write-back RAM semantics and does not touch global MTRRs.
-- Read-only sanity reads are limited to observational modern VirtIO fields only: `num_queues`, `device_status`, `config_generation`, `numScanouts`, and `numCapsets`.
-- In the current runtime pass, the probe only performs the harmless common-config reads (`num_queues`, `device_status`, `config_generation`) and deliberately leaves feature negotiation and transport writes disabled.
-- The probe stops before any transport reset, feature negotiation, queue setup, or MMIO writes.
-- `GET_DISPLAY_INFO`, resource creation, backing attachment, scanout changes, transfers, and flushes remain disabled in this branch.
+- The probe now performs bounded reset/status progression, requires `VIRTIO_F_VERSION_1`, writes the minimal driver feature set, verifies `FEATURES_OK`, and configures only control queue 0.
+- `GET_DISPLAY_INFO` now runs once as a diagnostic command, and the response is parsed without enabling rendering.
+- The current QEMU run reported `slots=16`, `enabled=1`, `disabled=15`, `deviceConfigScanouts=2`, and `qemuTwoUsableScanouts=no`.
 - Unmap currently clears only MMIO-owned leaf entries and retains the intermediate page-table pages for now.
 
 ## Runtime MMIO Window
@@ -232,9 +232,11 @@ The virtio-gpu discovery path now maps the modern transport MMIO regions into a 
 
 ### Next Intended Phase
 
-- Controlled feature negotiation.
-- Controlled virtqueue setup.
-- Read-only transport validation stays in place until the next checkpoint proves the command path is still safe.
+- Create a single 2D resource.
+- Attach backing memory.
+- Assign one scanout.
+- Transfer and flush a small test pattern.
+- Keep rendering disabled until that path is proven safe end to end.
 
 ## Framebuffer Array Handoff
 
