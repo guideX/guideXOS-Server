@@ -173,16 +173,28 @@ static bool supportedFormEncoding(const std::string& encoding)
 	return encoding.empty() || encoding == "application/x-www-form-urlencoded";
 }
 
-static int parsePositiveIntAttr(const std::string& tagBody, const std::string& attr)
+static int parsePositiveIntAttr(const std::string& tagBody, const std::string& attr, bool* wasClamped = nullptr)
 {
 	std::string value = trim(extractAttr(tagBody, attr));
+	if (wasClamped) *wasClamped = false;
 	if (value.empty()) return 0;
 	int result = 0;
+	bool sawDigit = false;
 	for (char c : value) {
 		if (c < '0' || c > '9') break;
-		result = result * 10 + (c - '0');
-		if (result > 4096) return 4096;
+		sawDigit = true;
+		const int digit = c - '0';
+		if (result > 409) {
+			if (wasClamped) *wasClamped = true;
+			return 4096;
+		}
+		result = result * 10 + digit;
+		if (result > 4096) {
+			if (wasClamped) *wasClamped = true;
+			return 4096;
+		}
 	}
+	if (!sawDigit) return 0;
 	return result > 0 ? result : 0;
 }
 
@@ -803,7 +815,7 @@ static bool parseInlineStyleDeclaration(WebStyle& style,
 		style.lineHeight = clampCssValue(diag, px, 8, kCssLiteMaxLineHeightPx);
 		return true;
 	}
-	if (prop == "width" || prop == "max-width") {
+	if (prop == "width" || prop == "max-width" || prop == "height" || prop == "max-height") {
 		std::string lower = toLower(val);
 		bool autoValue = false;
 		int px = 0;
@@ -816,7 +828,9 @@ static bool parseInlineStyleDeclaration(WebStyle& style,
 			int percent = roundCssNumber(numeric);
 			percent = clampCssValue(diag, percent, 1, 100);
 			if (prop == "width") style.widthPercent = percent;
-			else style.maxWidthPercent = percent;
+			else if (prop == "max-width") style.maxWidthPercent = percent;
+			else if (prop == "height") style.heightPercent = percent;
+			else style.maxHeightPercent = percent;
 			return true;
 		}
 		if (!parseCssLengthValue(val, 320, px, autoValue, false)) {
@@ -827,16 +841,79 @@ static bool parseInlineStyleDeclaration(WebStyle& style,
 			if (prop == "width") {
 				style.widthPercent = -1;
 				style.width = 0;
-			} else {
+			} else if (prop == "max-width") {
 				style.maxWidthPercent = -1;
 				style.maxWidth = 0;
+			} else if (prop == "height") {
+				style.heightPercent = -1;
+				style.height = 0;
+			} else {
+				style.maxHeightPercent = -1;
+				style.maxHeight = 0;
 			}
 			return true;
 		}
 		px = clampCssValue(diag, px, 1, kCssLiteMaxWidthPx);
 		if (prop == "width") style.width = px;
-		else style.maxWidth = px;
+		else if (prop == "max-width") style.maxWidth = px;
+		else if (prop == "height") style.height = px;
+		else style.maxHeight = px;
 		return true;
+	}
+	if (prop == "white-space") {
+		std::string lower = toLower(val);
+		if (lower == "inherit") {
+			style.whiteSpace = WhiteSpaceMode::Inherit;
+			return true;
+		}
+		if (lower == "normal") {
+			style.whiteSpace = WhiteSpaceMode::Normal;
+			return true;
+		}
+		if (lower == "pre") {
+			style.whiteSpace = WhiteSpaceMode::Pre;
+			return true;
+		}
+		if (lower == "pre-wrap") {
+			style.whiteSpace = WhiteSpaceMode::PreWrap;
+			return true;
+		}
+		++diag.unsupportedDeclarationCount;
+		return false;
+	}
+	if (prop == "overflow-wrap" || prop == "word-wrap") {
+		std::string lower = toLower(val);
+		if (lower == "inherit") {
+			style.overflowWrap = OverflowWrapMode::Inherit;
+			return true;
+		}
+		if (lower == "normal") {
+			style.overflowWrap = OverflowWrapMode::Normal;
+			return true;
+		}
+		if (lower == "break-word") {
+			style.overflowWrap = OverflowWrapMode::BreakWord;
+			return true;
+		}
+		++diag.unsupportedDeclarationCount;
+		return false;
+	}
+	if (prop == "word-break") {
+		std::string lower = toLower(val);
+		if (lower == "inherit") {
+			style.wordBreak = WordBreakMode::Inherit;
+			return true;
+		}
+		if (lower == "normal") {
+			style.wordBreak = WordBreakMode::Normal;
+			return true;
+		}
+		if (lower == "break-all") {
+			style.wordBreak = WordBreakMode::BreakAll;
+			return true;
+		}
+		++diag.unsupportedDeclarationCount;
+		return false;
 	}
 	if (prop == "border-top" || prop == "border-bottom") {
 		std::vector<std::string> tokens = splitCssTokens(val);
@@ -949,8 +1026,21 @@ static WebStyle mergeStyles(const WebStyle& baseStyle, const WebStyle& overrideS
 	merged.fontScaleOrSize = overrideStyle.fontScaleOrSize > 0 ? overrideStyle.fontScaleOrSize : merged.fontScaleOrSize;
 	merged.width = overrideStyle.width != -1 ? overrideStyle.width : merged.width;
 	merged.widthPercent = overrideStyle.widthPercent != -1 ? overrideStyle.widthPercent : merged.widthPercent;
+	merged.height = overrideStyle.height != -1 ? overrideStyle.height : merged.height;
+	merged.heightPercent = overrideStyle.heightPercent != -1 ? overrideStyle.heightPercent : merged.heightPercent;
 	merged.maxWidth = overrideStyle.maxWidth != -1 ? overrideStyle.maxWidth : merged.maxWidth;
 	merged.maxWidthPercent = overrideStyle.maxWidthPercent != -1 ? overrideStyle.maxWidthPercent : merged.maxWidthPercent;
+	merged.maxHeight = overrideStyle.maxHeight != -1 ? overrideStyle.maxHeight : merged.maxHeight;
+	merged.maxHeightPercent = overrideStyle.maxHeightPercent != -1 ? overrideStyle.maxHeightPercent : merged.maxHeightPercent;
+	if (overrideStyle.whiteSpace != WhiteSpaceMode::Inherit) {
+		merged.whiteSpace = overrideStyle.whiteSpace;
+	}
+	if (overrideStyle.overflowWrap != OverflowWrapMode::Inherit) {
+		merged.overflowWrap = overrideStyle.overflowWrap;
+	}
+	if (overrideStyle.wordBreak != WordBreakMode::Inherit) {
+		merged.wordBreak = overrideStyle.wordBreak;
+	}
 	merged.hasBorderTop = overrideStyle.hasBorderTop ? true : merged.hasBorderTop;
 	if (overrideStyle.hasBorderTop) {
 		merged.borderTopWidth = overrideStyle.borderTopWidth;
@@ -1004,6 +1094,50 @@ static WebStyle defaultStyleForTag(const std::string& tagName)
 		style.marginBottom = 10;
 		return style;
 	}
+	if (tagName == "blockquote") {
+		style.marginTop = 8;
+		style.marginBottom = 10;
+		style.marginLeft = 18;
+		style.paddingLeft = 12;
+		style.paddingRight = 8;
+		style.paddingTop = 4;
+		style.paddingBottom = 4;
+		style.hasBackgroundColor = true;
+		style.backgroundColor = 0xFFF1F5F9u;
+		return style;
+	}
+	if (tagName == "figure") {
+		style.marginTop = 10;
+		style.marginBottom = 10;
+		return style;
+	}
+	if (tagName == "figcaption") {
+		style.textAlign = TextAlign::Center;
+		style.hasColor = true;
+		style.color = 0xFF5B6472u;
+		style.italic = true;
+		style.fontScaleOrSize = 13;
+		style.marginTop = 4;
+		style.marginBottom = 6;
+		return style;
+	}
+	if (tagName == "dl") {
+		style.marginTop = 8;
+		style.marginBottom = 10;
+		return style;
+	}
+	if (tagName == "dt") {
+		style.bold = true;
+		style.marginTop = 6;
+		style.marginBottom = 2;
+		return style;
+	}
+	if (tagName == "dd") {
+		style.marginTop = 2;
+		style.marginBottom = 6;
+		style.marginLeft = 18;
+		return style;
+	}
 	if (tagName == "caption") {
 		style.textAlign = TextAlign::Center;
 		style.hasColor = true;
@@ -1055,6 +1189,16 @@ static WebStyle defaultStyleForTag(const std::string& tagName)
 		style.fontScaleOrSize = 13;
 		return style;
 	}
+	if (tagName == "cite") {
+		style.italic = true;
+		style.hasColor = true;
+		style.color = 0xFF5B6472u;
+		return style;
+	}
+	if (tagName == "q") {
+		style.italic = true;
+		return style;
+	}
 	if (tagName == "code" || tagName == "kbd" || tagName == "samp") {
 		style.hasBackgroundColor = true;
 		style.backgroundColor = 0xFFE6E8EEu;
@@ -1093,6 +1237,7 @@ static WebStyle defaultStyleForTag(const std::string& tagName)
 		style.marginTop = 8;
 		style.marginBottom = 10;
 		style.padding = 8;
+		style.whiteSpace = WhiteSpaceMode::Pre;
 		return style;
 	}
 	if (tagName == "img") {
@@ -1215,6 +1360,9 @@ enum class OpenTag : uint8_t {
 	P,
 	A,
 	Li,
+	Dt,
+	Dd,
+	Figcaption,
 	Title,
 	Pre,   // <pre> block — whitespace preserved
 	Caption,
@@ -1282,6 +1430,9 @@ static std::vector<HtmlElementRef> captureBlockAncestors(const ParserState& st)
 	case OpenTag::P:
 	case OpenTag::A:
 	case OpenTag::Li:
+	case OpenTag::Dt:
+	case OpenTag::Dd:
+	case OpenTag::Figcaption:
 	case OpenTag::Title:
 	case OpenTag::Pre:
 	case OpenTag::Caption:
@@ -1306,6 +1457,9 @@ static std::string openTagName(OpenTag tag)
 	case OpenTag::P: return "p";
 	case OpenTag::A: return "a";
 	case OpenTag::Li: return "li";
+	case OpenTag::Dt: return "dt";
+	case OpenTag::Dd: return "dd";
+	case OpenTag::Figcaption: return "figcaption";
 	case OpenTag::Title: return "title";
 	case OpenTag::Pre: return "pre";
 	case OpenTag::Caption: return "caption";
@@ -1416,6 +1570,15 @@ static void flushText(ParserState& st)
 	case OpenTag::Li:
 		st.doc.blocks.push_back(makeTextBlock(BlockType::ListItem, "li", t, "", st.classBuf, st.idBuf, ancestors, st.styleBuf));
 		break;
+	case OpenTag::Dt:
+		st.doc.blocks.push_back(makeTextBlock(BlockType::Paragraph, "dt", t, "", st.classBuf, st.idBuf, ancestors, st.styleBuf));
+		break;
+	case OpenTag::Dd:
+		st.doc.blocks.push_back(makeTextBlock(BlockType::Paragraph, "dd", t, "", st.classBuf, st.idBuf, ancestors, st.styleBuf));
+		break;
+	case OpenTag::Figcaption:
+		st.doc.blocks.push_back(makeTextBlock(BlockType::Paragraph, "figcaption", t, "", st.classBuf, st.idBuf, ancestors, st.styleBuf));
+		break;
 	case OpenTag::Pre:
 		st.doc.blocks.push_back(makeTextBlock(BlockType::Preformatted, "pre", t, "", st.classBuf, st.idBuf, ancestors, st.styleBuf));
 		break;
@@ -1517,6 +1680,24 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 		return;
 	}
 
+	if (name == "blockquote" || name == "figure" || name == "dl") {
+		flushText(st);
+		if (!st.bodyReached) return;
+		pushElement(st, elementRef);
+		return;
+	}
+
+	if (name == "dt" || name == "dd" || name == "figcaption") {
+		flushText(st);
+		if (!st.bodyReached) return;
+		st.classBuf = extractAttr(tagBody, "class");
+		st.idBuf = extractAttr(tagBody, "id");
+		st.styleBuf = extractAttr(tagBody, "style");
+		st.open = name == "dt" ? OpenTag::Dt : (name == "dd" ? OpenTag::Dd : OpenTag::Figcaption);
+		pushElement(st, elementRef);
+		return;
+	}
+
 	if (name == "hr") {
 		flushText(st);
 		if (!st.bodyReached) return;
@@ -1535,6 +1716,7 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 	if (name == "html" || name == "head" || name == "ul" || name == "ol" ||
 		name == "div" || name == "span" || name == "strong" || name == "b" ||
 		name == "em" || name == "i" || name == "small" || name == "code" ||
+		name == "cite" || name == "q" ||
 		name == "kbd" || name == "samp" || name == "section" ||
 		name == "article" || name == "header" || name == "footer" || name == "nav" ||
 		name == "main" || name == "table" || name == "thead" || name == "tbody" ||
@@ -1747,8 +1929,11 @@ static void handleOpenTag(ParserState& st, const std::string& tagBody)
 			++st.doc.cssDiagnostics.inlineStyleCount;
 			st.doc.cssDiagnostics.cssDetected = true;
 		}
-		block.width = parsePositiveIntAttr(tagBody, "width");
-		block.height = parsePositiveIntAttr(tagBody, "height");
+		bool widthAttrClamped = false;
+		bool heightAttrClamped = false;
+		block.width = parsePositiveIntAttr(tagBody, "width", &widthAttrClamped);
+		block.height = parsePositiveIntAttr(tagBody, "height", &heightAttrClamped);
+		block.imageSizeAttrClamped = widthAttrClamped || heightAttrClamped;
 		block.ancestors = captureBlockAncestors(st);
 		st.doc.blocks.push_back(std::move(block));
 		st.open = OpenTag::None;
@@ -1833,7 +2018,7 @@ static void handleCloseTag(ParserState& st, const std::string& tagName)
 
 	// Close block-level contexts.
 	if (name == "h1" || name == "h2" || name == "h3" ||
-		name == "p"  || name == "li" || name == "title" ||
+		name == "p"  || name == "li" || name == "dt" || name == "dd" || name == "figcaption" || name == "title" ||
 		name == "button" || name == "textarea" || name == "option") {
 		flushText(st);
 		popElementByName(st, name);
@@ -1866,6 +2051,10 @@ static void handleCloseTag(ParserState& st, const std::string& tagName)
 			st.currentTableCellHref = st.currentTableCellHref.empty() ? st.hrefBuf : st.currentTableCellHref;
 			st.hrefBuf.clear();
 		}
+	}
+	if (name == "blockquote" || name == "figure" || name == "dl") {
+		flushText(st);
+		popElementByName(st, name);
 	}
 	if (name == "caption") {
 		flushText(st);
@@ -1962,6 +2151,7 @@ static void handleCloseTag(ParserState& st, const std::string& tagName)
 	}
 	if (name == "strong" || name == "b" || name == "em" || name == "i" || name == "code" ||
 		name == "small" || name == "kbd" || name == "samp" ||
+		name == "cite" || name == "q" ||
 		name == "span" || name == "div" || name == "section" || name == "article" ||
 		name == "header" || name == "footer" || name == "nav" || name == "main" ||
 		name == "table" || name == "thead" || name == "tbody" || name == "tfoot" ||

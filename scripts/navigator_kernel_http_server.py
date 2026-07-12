@@ -15,17 +15,26 @@ def png_chunk(kind, data):
     return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", binascii.crc32(kind + data) & 0xFFFFFFFF)
 
 
-def make_smoke_png():
-    width = 2
-    height = 2
+def make_smoke_png(width, height):
     ihdr = struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0)
-    row_a = b"\x00" + bytes([220, 40, 40, 255, 40, 160, 80, 255])
-    row_b = b"\x00" + bytes([40, 100, 220, 255, 245, 210, 70, 255])
-    data = zlib.compress(row_a + row_b)
+    rows = []
+    for y in range(height):
+        row = bytearray([0])
+        for x in range(width):
+            row.extend([
+                (40 + (x * 29) + (y * 13)) % 256,
+                (90 + (x * 11) + (y * 31)) % 256,
+                (170 + (x * 17) + (y * 19)) % 256,
+                255,
+            ])
+        rows.append(bytes(row))
+    data = zlib.compress(b"".join(rows))
     return b"\x89PNG\r\n\x1a\n" + png_chunk(b"IHDR", ihdr) + png_chunk(b"IDAT", data) + png_chunk(b"IEND", b"")
 
 
-SMOKE_PNG = make_smoke_png()
+SMOKE_PNG = make_smoke_png(2, 2)
+SMOKE_WIDE_PNG = make_smoke_png(640, 160)
+SMOKE_TALL_PNG = make_smoke_png(160, 640)
 INTERACTIVE_FORM_CONTROLS = (
     b"<input type=\"text\" name=\"q\" value=\"\">"
     b"<input type=\"text\" value=\"unnamed control omitted\">"
@@ -269,6 +278,47 @@ class NavigatorSmokeHandler(BaseHTTPRequestHandler):
                              b"<p>Above the horizontal rule.</p>"
                              b"<hr>"
                              b"<p>Below the horizontal rule.</p>"
+                             b"</main></body></html>")
+            return
+        if path == "/navigator-smoke/css-phase1e.html":
+            self.write_bytes(200, "text/html; charset=utf-8",
+                             b"<html><head><style>"
+                             b"body { margin:16px; background:#f4efe6; color:#243447; line-height:1.55; }"
+                             b"main { max-width:560px; margin-left:auto; margin-right:auto; padding:12px 14px; background:#ffffff; }"
+                             b"figure, blockquote, dl, section, article, div { background:#f8fafc; padding:10px 12px; margin:12px 0; border-top:1px solid #d6dce8; border-bottom:1px solid #d6dce8; }"
+                             b"figure { max-width:100%; margin-left:auto; margin-right:auto; text-align:center; }"
+                             b"figcaption { color:#5b6472; font-style:italic; font-size:13px; margin:4px 0 6px; }"
+                             b"blockquote { margin-left:18px; padding-left:12px; background:#f1f5f9; }"
+                             b"dl { margin:8px 0 10px; }"
+                             b"dt { font-weight:bold; margin-top:6px; margin-bottom:2px; }"
+                             b"dd { margin-left:18px; margin-bottom:6px; }"
+                             b".fit { max-width:100%; margin-left:auto; margin-right:auto; }"
+                             b".width-only { margin-left:auto; margin-right:auto; }"
+                             b".height-only { margin-left:auto; margin-right:auto; }"
+                             b".clamped { margin-left:auto; margin-right:auto; }"
+                             b".missing { margin-left:auto; margin-right:auto; }"
+                             b".wrapsafe { overflow-wrap:break-word; word-wrap:break-word; white-space:normal; }"
+                             b".breakall { word-break:break-all; }"
+                             b".prewrap { white-space:pre-wrap; }"
+                             b".narrow { max-width:60px; margin-left:auto; margin-right:auto; background:#fff7ed; padding:8px 10px; }"
+                             b".narrow .clamp { max-width:48px; margin-left:auto; margin-right:auto; background:#eef2ff; padding:6px; }"
+                             b".unsupported { display:grid; grid-template-columns:1fr 1fr; position:absolute; transform:translateX(10px); transition:all 1s; }"
+                             b"</style></head><body><main>"
+                             b"<h1>Phase 1E Media and Text</h1>"
+                             b"<p class=\"wrapsafe\">Long URL marker https://example.com/really/long/path/that/should/wrap/safely/because/it/is/way/too/long/for/the/content/box.</p>"
+                             b"<p class=\"breakall\">Break-all marker: abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789</p>"
+                             b"<p class=\"prewrap\">Pre-wrap marker line one\nline two with long token supercalifragilisticexpialidocioussupercalifragilisticexpialidocious</p>"
+                             b"<figure><figcaption>Max-width 100 percent figure marker</figcaption><img class=\"fit\" src=\"/navigator-smoke/wide.png\" alt=\"Max-width 100 percent figure marker\"></figure>"
+                             b"<figure><figcaption>Width-only aspect ratio marker</figcaption><img class=\"width-only\" src=\"/navigator-smoke/wide.png\" width=\"180\" alt=\"Width-only aspect ratio marker\"></figure>"
+                             b"<figure><figcaption>Height-only aspect ratio marker</figcaption><img class=\"height-only\" src=\"/navigator-smoke/tall.png\" height=\"180\" alt=\"Height-only aspect ratio marker\"></figure>"
+                             b"<figure><figcaption>Max-height aspect marker</figcaption><img class=\"height-only\" src=\"/navigator-smoke/tall.png\" style=\"max-height:180px;\" alt=\"Max-height aspect marker\"></figure>"
+                             b"<figure><figcaption>Oversized image clamped to content width marker</figcaption><img class=\"clamped\" src=\"/navigator-smoke/wide.png\" width=\"4096\" height=\"1024\" alt=\"Oversized image clamped to content width marker\"></figure>"
+                             b"<figure><figcaption>Malformed or huge dimensions are clamped marker</figcaption><img class=\"clamped\" src=\"/navigator-smoke/wide.png\" width=\"99999\" height=\"99999\" alt=\"Malformed or huge dimensions are clamped marker\"></figure>"
+                             b"<figure><figcaption>Missing image alt fallback marker</figcaption><img class=\"missing\" src=\"/navigator-smoke/missing.png\" width=\"360\" height=\"120\" alt=\"Missing image alt fallback marker\"></figure>"
+                             b"<blockquote><p>Blockquote marker line.</p><blockquote><p>Nested blockquote marker line.</p></blockquote><cite><p>Citation marker.</p></cite><q><p>q marker.</p></q></blockquote>"
+                             b"<dl><dt>Definition term alpha</dt><dd>Definition detail one with <a href=\"/navigator-smoke/basic.html\">a link</a>.</dd><dt>Definition term beta</dt><dd>Definition detail two.</dd></dl>"
+                             b"<section class=\"narrow\"><div class=\"narrow\"><article class=\"narrow\"><div class=\"clamp\">Nested wrapper backgrounds and padding marker.</div></article></div></section>"
+                             b"<p class=\"unsupported\">Unsupported properties remain nonfatal.</p>"
                              b"</main></body></html>")
             return
         if path == "/navigator-smoke/css-external-safety.html":
@@ -537,6 +587,15 @@ class NavigatorSmokeHandler(BaseHTTPRequestHandler):
             return
         if path == "/navigator-smoke/logo.png":
             self.write_bytes(200, "image/png", SMOKE_PNG)
+            return
+        if path == "/navigator-smoke/wide.png":
+            self.write_bytes(200, "image/png", SMOKE_WIDE_PNG)
+            return
+        if path == "/navigator-smoke/tall.png":
+            self.write_bytes(200, "image/png", SMOKE_TALL_PNG)
+            return
+        if path == "/navigator-smoke/missing.png":
+            self.write_bytes(404, "text/plain; charset=utf-8", b"missing png")
             return
         if path == "/navigator-smoke/redirect-png":
             self.write_redirect(302, "/navigator-smoke/logo.png")

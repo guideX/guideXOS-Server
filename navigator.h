@@ -124,6 +124,16 @@ struct NavigatorPageMetadata {
 		int         cssTableCaptionCount = 0;
 		int         cssTableHeaderCellCount = 0;
 		int         cssVisitedLinkCount = 0;
+		int         cssFiguresRendered = 0;
+		int         cssFigcaptionsRendered = 0;
+		int         cssBlockquotesRendered = 0;
+		int         cssDefinitionListsRendered = 0;
+		int         cssImagesConstrained = 0;
+		int         cssImagesAspectPreserved = 0;
+		int         cssImageAltFallbacks = 0;
+		int         cssImageSizeClamps = 0;
+		int         cssNestedLayoutClamps = 0;
+		int         cssMaxWrapperAncestorDepth = 0;
 	bool        downloaded = false;
 	std::string downloadSavedPath;
 	size_t      downloadByteCount = 0;

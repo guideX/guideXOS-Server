@@ -1,0 +1,62 @@
+=== guideXOS Navigator Help ===
+
+Welcome to guideXOS Navigator - the built-in document viewer and browser shell for guideXOS Server.
+
+Navigator renders local guideWeb documents from the filesystem without requiring CSS, JavaScript, or a network connection.
+
+[Image: guideXOS image]
+=== Getting Started ===
+
+Use the toolbar buttons to navigate:
+
+- Back & Forward - navigate page history
+- Reload - re-read the current page from disk
+- Home - return to the about:navigator page
+- Bookmarks - view saved bookmarks
+- Add - bookmark the current page
+=== Address Bar ===
+
+Click the address bar to edit the URL. Type a new address and press Enter to navigate.
+
+CSS-lite v0.1 lets simple pages influence headings, links, list spacing, and preformatted blocks without requiring a full browser engine.
+
+Examples:
+  file:///docs/index.html
+  file:///docs/desktop.html
+  about:navigator
+  about:bookmarks
+
+=== Keyboard Shortcuts ===
+
+- Page Up / Page Down - scroll the document
+- Home - scroll to the top (when address bar is not focused)
+- Enter - navigate to typed URL (address bar focused)
+- Escape - cancel address editing
+- Left / Right arrow - move address-bar caret
+=== Supported HTML Elements ===
+
+The guideWeb parser understands these tags:
+
+- <h1> <h2> <h3> - headings
+- <p> - paragraph
+- <a href> - clickable link
+- <img src> - local PNG image
+- <li> - list item with bullet
+- <pre> - preformatted / code block
+- <br> - line break
+=== Code Example ===
+
+{
+  "name": "MyApp",
+  "entry": "myapp.elf",
+  "version": "1.0"
+}
+
+=== Topics ===
+
+Learn more about the guideXOS desktop environment:
+
+guideXOS Desktop Guide [file:///docs/desktop.html]
+Forms Test [file:///docs/forms.html]
+guideXOS Navigator is a first-class OS application, not a plugin or external browser.
+

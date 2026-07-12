@@ -29,6 +29,9 @@ namespace apps {
 
 using namespace gxos::gui;
 using gxos::web::TextAlign;
+using gxos::web::OverflowWrapMode;
+using gxos::web::WhiteSpaceMode;
+using gxos::web::WordBreakMode;
 
 uint64_t           Navigator::s_windowId        = 0;
 int                Navigator::s_scrollOffset    = 0;
@@ -484,6 +487,7 @@ namespace {
 	// -----------------------------------------------------------------------
 	constexpr int kCharW    = 8;   // approximate character cell width in pixels
 	constexpr int kLineH    = 18;  // matches current SystemFont default line box
+	constexpr int kMinReadableBlockWidth = 96;
 
 	struct TextMetrics {
 		int ascent = 0;
@@ -580,6 +584,21 @@ namespace {
 		return lines;
 	}
 
+	static std::vector<std::string> wrapTextBreakAll(const std::string& text, int maxChars)
+	{
+		std::vector<std::string> lines;
+		if (maxChars <= 0 || text.empty()) {
+			if (!text.empty()) lines.push_back(text);
+			return lines;
+		}
+		for (size_t start = 0; start < text.size();) {
+			const size_t count = std::min(static_cast<size_t>(maxChars), text.size() - start);
+			lines.push_back(text.substr(start, count));
+			start += count;
+		}
+		return lines;
+	}
+
 	// Like wrapText but splits on embedded newlines first (for Preformatted blocks).
 	static std::vector<std::string> splitPreLines(const std::string& text)
 	{
@@ -596,14 +615,36 @@ namespace {
 		return lines;
 	}
 
+	static std::vector<std::string> wrapTextForBlock(const DocBlock& block, int maxChars)
+	{
+		const bool breakAll = block.style.wordBreak == WordBreakMode::BreakAll;
+		const bool preserveBreaks = block.type == BlockType::Preformatted ||
+			block.style.whiteSpace == WhiteSpaceMode::Pre ||
+			block.style.whiteSpace == WhiteSpaceMode::PreWrap;
+		auto wrapSingleLine = [&](const std::string& line) {
+			return breakAll ? wrapTextBreakAll(line, maxChars) : wrapText(line, maxChars);
+		};
+		if (preserveBreaks) {
+			std::vector<std::string> lines;
+			for (const std::string& rawLine : splitPreLines(block.text)) {
+				std::vector<std::string> wrapped = wrapSingleLine(rawLine);
+				if (wrapped.empty()) {
+					lines.push_back("");
+				} else {
+					lines.insert(lines.end(), wrapped.begin(), wrapped.end());
+				}
+			}
+			if (lines.empty()) lines.push_back("");
+			return lines;
+		}
+		return breakAll ? wrapTextBreakAll(block.text, maxChars) : wrapText(block.text, maxChars);
+	}
+
 	// Number of pixel rows occupied by a block (based on wrapped line count).
 	// wrapCols: max chars per line for the block type.
-	static int wrappedBlockHeight(const std::string& text, int wrapCols, bool isPre = false, int lineHeight = kLineH)
+	static int wrappedBlockHeight(const DocBlock& block, int wrapCols, int lineHeight = kLineH)
 	{
-		if (isPre) {
-			return static_cast<int>(splitPreLines(text).size()) * lineHeight;
-		}
-		int lines = static_cast<int>(wrapText(text, wrapCols).size());
+		int lines = static_cast<int>(wrapTextForBlock(block, wrapCols).size());
 		if (lines == 0) lines = 1;
 		return lines * lineHeight;
 	}
@@ -625,7 +666,12 @@ namespace {
 	static std::unordered_map<std::string, ImageInfo> s_imageCache;
 	static std::vector<std::string> s_remoteImageTempFiles;
 	static const ImageInfo& imageInfoForBlock(const DocBlock& block);
-	static void imageDisplaySize(const DocBlock& block, int& outW, int& outH);
+	static void imageDisplaySize(const DocBlock& block, int availableWidth, int& outW, int& outH,
+		bool* outConstrained = nullptr, bool* outAspectPreserved = nullptr, bool* outClamped = nullptr);
+	static int cssWidthPx(const WebStyle& style, int availableWidth, int fallbackValue);
+	static int cssMaxWidthPx(const WebStyle& style, int availableWidth, int fallbackValue);
+	static int cssHeightPx(const WebStyle& style, int availableHeight, int fallbackValue);
+	static int cssMaxHeightPx(const WebStyle& style, int availableHeight, int fallbackValue);
 	static std::string filePathFromUrl(const std::string& url);
 	static std::string pageInfoLine(const std::string& label, const std::string& value);
 	static std::string pageInfoLine(const std::string& label, int value);
@@ -650,7 +696,7 @@ namespace {
 	static int blockBodyMarginLeft(const WebDocument& doc);
 	static int blockBodyMarginRight(const WebDocument& doc);
 	static int blockAvailableWidth(const DocBlock& block, const WebDocument& doc);
-	static int blockOuterWidth(const DocBlock& block, int availableWidth);
+	static int blockOuterWidth(const DocBlock& block, int availableWidth, bool* outClamped = nullptr);
 	static int blockOuterX(const DocBlock& block, const WebDocument& doc, int availableWidth, int outerWidth);
 	static int blockWrapWidth(const DocBlock& block, int outerWidth);
 	static int blockTextLineHeight(const DocBlock& block);
@@ -981,6 +1027,8 @@ namespace {
 	static uint64_t tableSerialForBlock(const DocBlock& block);
 	static uint64_t tableRowSerialForBlock(const DocBlock& block);
 	static bool blockHasWrapperAncestor(const DocBlock& block);
+	static int wrapperAncestorDepth(const DocBlock& block);
+	static int nestedWrapperInsetPx(const DocBlock& block);
 
 	struct TableCellLayout {
 		const DocBlock* block = nullptr;
@@ -1056,6 +1104,16 @@ namespace {
 		metadata.cssTableCaptionCount = 0;
 		metadata.cssTableHeaderCellCount = 0;
 		metadata.cssVisitedLinkCount = 0;
+		metadata.cssFiguresRendered = 0;
+		metadata.cssFigcaptionsRendered = 0;
+		metadata.cssBlockquotesRendered = 0;
+		metadata.cssDefinitionListsRendered = 0;
+		metadata.cssImagesConstrained = 0;
+		metadata.cssImagesAspectPreserved = 0;
+		metadata.cssImageAltFallbacks = 0;
+		metadata.cssImageSizeClamps = 0;
+		metadata.cssNestedLayoutClamps = 0;
+		metadata.cssMaxWrapperAncestorDepth = 0;
 		metadata.formCount = doc.formsDiagnostics.formCount;
 		metadata.formInputCount = doc.formsDiagnostics.textInputCount;
 		metadata.formCheckboxCount = doc.formsDiagnostics.checkboxCount;
@@ -1070,6 +1128,20 @@ namespace {
 
 		std::vector<uint64_t> seenTableSerials;
 		std::vector<uint64_t> seenTableRowSerials;
+		std::vector<uint64_t> seenFigureSerials;
+		std::vector<uint64_t> seenBlockquoteSerials;
+		std::vector<uint64_t> seenDlSerials;
+		auto countUniqueAncestorTag = [&](const DocBlock& block, const std::string& tagName, std::vector<uint64_t>& seen) -> bool {
+			const std::string tag = toLowerAscii(tagName);
+			for (const gxos::web::HtmlElementRef& ancestor : block.ancestors) {
+				if (toLowerAscii(ancestor.tagName) != tag) continue;
+				if (ancestor.serial != 0 && std::find(seen.begin(), seen.end(), ancestor.serial) == seen.end()) {
+					seen.push_back(ancestor.serial);
+					return true;
+				}
+			}
+			return false;
+		};
 		for (size_t i = 0; i < doc.blocks.size(); ++i) {
 			const DocBlock& block = doc.blocks[i];
 			if (block.style.displayNone) {
@@ -1078,6 +1150,23 @@ namespace {
 			}
 			if (blockHasWrapperAncestor(block)) {
 				++metadata.cssWrapperRenderCount;
+			}
+			const int wrapperDepth = wrapperAncestorDepth(block);
+			const int wrapperInset = nestedWrapperInsetPx(block);
+			metadata.cssMaxWrapperAncestorDepth = std::max(metadata.cssMaxWrapperAncestorDepth, wrapperDepth);
+			const int availableWidth = blockAvailableWidth(block, doc);
+			if (block.type != BlockType::Image) {
+				const int outerWidth = blockOuterWidth(block, availableWidth);
+				(void)outerWidth;
+				const int requestedWidth = std::min(
+					cssWidthPx(block.style, availableWidth, availableWidth),
+					cssMaxWidthPx(block.style, availableWidth, availableWidth));
+				const bool nestedClamp = wrapperInset > 0;
+				const bool widthClamp = availableWidth < kMinReadableBlockWidth ||
+					requestedWidth < std::min(availableWidth, kMinReadableBlockWidth);
+				if (nestedClamp || widthClamp) {
+					++metadata.cssNestedLayoutClamps;
+				}
 			}
 			const bool hasWidthConstraint = block.style.width > 0 || block.style.widthPercent >= 0 ||
 				block.style.maxWidth > 0 || block.style.maxWidthPercent >= 0;
@@ -1101,6 +1190,18 @@ namespace {
 			}
 			if (toLowerAscii(block.tagName) == "th") {
 				++metadata.cssTableHeaderCellCount;
+			}
+			if (toLowerAscii(block.tagName) == "figcaption") {
+				++metadata.cssFigcaptionsRendered;
+			}
+			if (countUniqueAncestorTag(block, "figure", seenFigureSerials)) {
+				++metadata.cssFiguresRendered;
+			}
+			if (countUniqueAncestorTag(block, "blockquote", seenBlockquoteSerials)) {
+				++metadata.cssBlockquotesRendered;
+			}
+			if (countUniqueAncestorTag(block, "dl", seenDlSerials)) {
+				++metadata.cssDefinitionListsRendered;
 			}
 			if (isTableCellLikeBlock(block)) {
 				++metadata.cssTableCellCount;
@@ -1129,14 +1230,33 @@ namespace {
 			} else if (block.url.rfind("file://", 0) == 0) {
 				++metadata.localImageCount;
 			}
+			int imageW = 0;
+			int imageH = 0;
+			bool imageConstrained = false;
+			bool imageAspectPreserved = false;
+			bool imageSizeClamped = false;
+			const int imageAvailableWidth = blockAvailableWidth(block, doc);
+			imageDisplaySize(block, imageAvailableWidth, imageW, imageH, &imageConstrained, &imageAspectPreserved, &imageSizeClamped);
 			const ImageInfo& info = imageInfoForBlock(block);
 			if (info.ok) {
 				++metadata.loadedImageCount;
 			} else {
 				++metadata.failedImageCount;
+				if (!block.alt.empty()) {
+					++metadata.cssImageAltFallbacks;
+				}
 				if (metadata.lastImageError.empty()) {
 					metadata.lastImageError = info.errorDetail.empty() ? info.message : info.errorDetail;
 				}
+			}
+			if (imageConstrained) {
+				++metadata.cssImagesConstrained;
+			}
+			if (imageAspectPreserved) {
+				++metadata.cssImagesAspectPreserved;
+			}
+			if (imageSizeClamped) {
+				++metadata.cssImageSizeClamps;
 			}
 		}
 	}
@@ -1256,6 +1376,26 @@ namespace {
 		return value;
 	}
 
+	static int cssHeightPx(const WebStyle& style, int availableHeight, int fallbackValue)
+	{
+		if (style.heightPercent >= 0) {
+			return std::max(0, availableHeight * style.heightPercent / 100);
+		}
+		if (style.height > 0) return style.height;
+		return fallbackValue;
+	}
+
+	static int cssMaxHeightPx(const WebStyle& style, int availableHeight, int fallbackValue)
+	{
+		int value = fallbackValue;
+		if (style.maxHeightPercent >= 0) {
+			value = std::max(0, availableHeight * style.maxHeightPercent / 100);
+		} else if (style.maxHeight > 0) {
+			value = style.maxHeight;
+		}
+		return value;
+	}
+
 	static int blockIndentForType(BlockType type)
 	{
 		if (type == BlockType::ListItem) return kDocumentListIndent;
@@ -1348,7 +1488,8 @@ namespace {
 	{
 		const std::string tag = toLowerAscii(tagName);
 		return tag == "main" || tag == "article" || tag == "nav" || tag == "aside" ||
-			tag == "header" || tag == "footer" || tag == "section" || tag == "div";
+			tag == "header" || tag == "footer" || tag == "section" || tag == "div" ||
+			tag == "figure" || tag == "blockquote" || tag == "dl";
 	}
 
 	static bool isTableCellLikeBlock(const DocBlock& block)
@@ -1423,6 +1564,29 @@ namespace {
 			if (isWrapperTagName(ancestor.tagName)) return true;
 		}
 		return isWrapperTagName(block.tagName);
+	}
+
+	static int wrapperAncestorDepth(const DocBlock& block)
+	{
+		int depth = 0;
+		for (const gxos::web::HtmlElementRef& ancestor : block.ancestors) {
+			if (isWrapperTagName(ancestor.tagName)) {
+				++depth;
+			}
+		}
+		if (isWrapperTagName(block.tagName)) {
+			++depth;
+		}
+		return depth;
+	}
+
+	static int nestedWrapperInsetPx(const DocBlock& block)
+	{
+		const int depth = wrapperAncestorDepth(block);
+		// Treat shallow shells like body -> main as normal layout, and only start
+		// shrinking content once wrappers are meaningfully nested.
+		if (depth <= 2) return 0;
+		return std::min(40, (depth - 2) * 10);
 	}
 
 	static bool isFirstTableCellInGroup(const WebDocument& doc, int index)
@@ -1505,7 +1669,7 @@ namespace {
 				cellLayout.padLeftChars = std::max(1, cssPaddingLeftPx(cell.style, 4) / kCharW + 1);
 				cellLayout.padRightChars = std::max(1, cssPaddingRightPx(cell.style, 4) / kCharW + 1);
 				cellLayout.contentWidthChars = std::max(1, textLongestLineChars(cell.text));
-				cellLayout.lines = wrapText(cell.text, cellLayout.contentWidthChars);
+				cellLayout.lines = wrapTextForBlock(*cellLayout.block, cellLayout.contentWidthChars);
 				row.headerRow = row.headerRow || toLowerAscii(cell.tagName) == "th" || cell.style.bold;
 				row.cells.push_back(std::move(cellLayout));
 				++j;
@@ -1562,7 +1726,7 @@ namespace {
 				const int colWidth = layout.columnWidthsChars[std::min(col, lastCol)];
 				const int contentWidth = std::max(1, colWidth - cell.padLeftChars - cell.padRightChars);
 				cell.contentWidthChars = contentWidth;
-				cell.lines = wrapText(cell.block->text, contentWidth);
+				cell.lines = wrapTextForBlock(*cell.block, contentWidth);
 				maxLines = std::max(maxLines, static_cast<int>(cell.lines.size()));
 			}
 			row.heightPx = std::max(layout.lineHeight + 4, maxLines * layout.lineHeight + layout.paddingTop + layout.paddingBottom);
@@ -1633,14 +1797,31 @@ namespace {
 	{
 		const int baseWidth = kContentW - blockIndentForType(block.type) - kDocumentRightPad
 			- blockBodyMarginLeft(doc) - blockBodyMarginRight(doc)
-			- cssMarginLeftPx(block.style, 0) - cssMarginRightPx(block.style, 0);
+			- cssMarginLeftPx(block.style, 0) - cssMarginRightPx(block.style, 0)
+			- nestedWrapperInsetPx(block);
 		return std::max(1, baseWidth);
 	}
 
-	static int blockOuterWidth(const DocBlock& block, int availableWidth)
+	static int blockOuterWidth(const DocBlock& block, int availableWidth, bool* outClamped)
 	{
+		if (outClamped) *outClamped = false;
+		if (block.type == BlockType::Image) {
+			int imageW = 0;
+			int imageH = 0;
+			imageDisplaySize(block, availableWidth, imageW, imageH);
+			const int paddingFallback = cssPaddingOrDefault(block.style, 0);
+			const int paddingLeft = cssPaddingLeftPx(block.style, paddingFallback);
+			const int paddingRight = cssPaddingRightPx(block.style, paddingFallback);
+			const int outerWidth = imageW + paddingLeft + paddingRight;
+			return std::max(1, std::min(outerWidth, availableWidth));
+		}
 		int outerWidth = cssWidthPx(block.style, availableWidth, availableWidth);
 		outerWidth = std::min(outerWidth, cssMaxWidthPx(block.style, availableWidth, outerWidth));
+		const int safeMinWidth = std::min(availableWidth, kMinReadableBlockWidth);
+		if (outerWidth < safeMinWidth) {
+			outerWidth = safeMinWidth;
+			if (outClamped) *outClamped = true;
+		}
 		return std::max(1, std::min(outerWidth, availableWidth));
 	}
 
@@ -1759,13 +1940,13 @@ namespace {
 			break;
 		case BlockType::Paragraph:
 		case BlockType::Link:
-			contentH = wrappedBlockHeight(block.text, wrapCols, false, lineHeight);
+			contentH = wrappedBlockHeight(block, wrapCols, lineHeight);
 			break;
 		case BlockType::ListItem:
-			contentH = wrappedBlockHeight(block.text, wrapCols, false, lineHeight);
+			contentH = wrappedBlockHeight(block, wrapCols, lineHeight);
 			break;
 		case BlockType::Preformatted:
-			contentH = wrappedBlockHeight(block.text, wrapCols, true, lineHeight);
+			contentH = wrappedBlockHeight(block, wrapCols, lineHeight);
 			break;
 		case BlockType::FormTextInput:
 		case BlockType::FormCheckbox:
@@ -1778,7 +1959,7 @@ namespace {
 		case BlockType::Image: {
 			int imageW = 0;
 			int imageH = 0;
-			imageDisplaySize(block, imageW, imageH);
+			imageDisplaySize(block, availableWidth, imageW, imageH);
 			contentH = imageH;
 			break;
 		}
@@ -1912,6 +2093,16 @@ namespace {
 		int cssTableCaptionCount,
 		int cssTableHeaderCellCount,
 		int cssVisitedLinkCount,
+		int cssFiguresRendered,
+		int cssFigcaptionsRendered,
+		int cssBlockquotesRendered,
+		int cssDefinitionListsRendered,
+		int cssImagesConstrained,
+		int cssImagesAspectPreserved,
+		int cssImageAltFallbacks,
+		int cssImageSizeClamps,
+		int cssNestedLayoutClamps,
+		int cssMaxWrapperAncestorDepth,
 		int formCount,
 		int formInputCount,
 		int checkboxCount,
@@ -2112,6 +2303,16 @@ namespace {
 			{"Current Document", "CSS table captions rendered", std::to_string(cssTableCaptionCount)},
 			{"Current Document", "CSS table header cells rendered", std::to_string(cssTableHeaderCellCount)},
 			{"Current Document", "CSS visited links styled", std::to_string(cssVisitedLinkCount)},
+			{"Current Document", "CSS figures rendered", std::to_string(cssFiguresRendered)},
+			{"Current Document", "CSS figcaptions rendered", std::to_string(cssFigcaptionsRendered)},
+			{"Current Document", "CSS blockquotes rendered", std::to_string(cssBlockquotesRendered)},
+			{"Current Document", "CSS definition lists rendered", std::to_string(cssDefinitionListsRendered)},
+			{"Current Document", "CSS images constrained", std::to_string(cssImagesConstrained)},
+			{"Current Document", "CSS images aspect preserved", std::to_string(cssImagesAspectPreserved)},
+			{"Current Document", "CSS image alt fallbacks", std::to_string(cssImageAltFallbacks)},
+			{"Current Document", "CSS image size clamps", std::to_string(cssImageSizeClamps)},
+			{"Current Document", "CSS nested layout clamps", std::to_string(cssNestedLayoutClamps)},
+			{"Current Document", "CSS max wrapper ancestor depth", std::to_string(cssMaxWrapperAncestorDepth)},
 			{"Current Document", "text_metrics_model", "baseline/descent aware system font"},
 			{"Current Document", "text_backend", textMetrics.backend},
 			{"Current Document", "text_ascent_px", std::to_string(textMetrics.ascent)},
@@ -2315,61 +2516,111 @@ namespace {
 		return inserted.first->second;
 	}
 
-	static void imageDisplaySize(const DocBlock& block, int& outW, int& outH)
+	static void imageDisplaySize(const DocBlock& block, int availableWidth, int& outW, int& outH,
+		bool* outConstrained, bool* outAspectPreserved, bool* outClamped)
 	{
-		constexpr int kImageMaxW = kContentW - 36;
-		constexpr int kImageMaxH = kContentH - 20;
+		const int paddingFallback = cssPaddingOrDefault(block.style, 0);
+		const int paddingLeft = cssPaddingLeftPx(block.style, paddingFallback);
+		const int paddingRight = cssPaddingRightPx(block.style, paddingFallback);
+		const int paddingTop = cssPaddingTopPx(block.style, paddingFallback);
+		const int paddingBottom = cssPaddingBottomPx(block.style, paddingFallback);
+		const int contentLimitW = std::max(1, std::min(kContentW - 36, availableWidth - paddingLeft - paddingRight));
+		const int contentLimitH = std::max(1, kContentH - 20 - paddingTop - paddingBottom);
 		const ImageInfo& info = imageInfoForBlock(block);
 		int naturalW = info.ok ? info.naturalW : 220;
 		int naturalH = info.ok ? info.naturalH : 64;
 		if (naturalW <= 0) naturalW = 220;
 		if (naturalH <= 0) naturalH = 64;
+		const int cssWidth = cssWidthPx(block.style, contentLimitW, -1);
+		const int cssHeight = cssHeightPx(block.style, contentLimitH, -1);
+		const int cssMaxWidth = cssMaxWidthPx(block.style, contentLimitW, -1);
+		const int cssMaxHeight = cssMaxHeightPx(block.style, contentLimitH, -1);
 
-		int drawW = block.width > 0 ? block.width : naturalW;
-		int drawH = block.height > 0 ? block.height : naturalH;
-		if (block.width > 0 && block.height <= 0) {
+		int drawW = naturalW;
+		int drawH = naturalH;
+		bool widthSpecified = false;
+		bool heightSpecified = false;
+
+		if (block.width > 0) {
+			drawW = block.width;
+			widthSpecified = true;
+		}
+		if (block.height > 0) {
+			drawH = block.height;
+			heightSpecified = true;
+		}
+
+		if (cssWidth >= 0) {
+			drawW = cssWidth;
+			widthSpecified = true;
+		}
+		if (cssHeight >= 0) {
+			drawH = cssHeight;
+			heightSpecified = true;
+		}
+
+		bool aspectPreserved = false;
+		if (widthSpecified && !heightSpecified) {
 			drawH = std::max(1, (drawW * naturalH) / naturalW);
-		} else if (block.height > 0 && block.width <= 0) {
+			aspectPreserved = true;
+		} else if (heightSpecified && !widthSpecified) {
 			drawW = std::max(1, (drawH * naturalW) / naturalH);
+			aspectPreserved = true;
 		}
-		if (block.style.width > 0) {
-			drawW = block.style.width;
-			if (block.height <= 0) {
-				drawH = std::max(1, (drawW * naturalH) / naturalW);
-			}
-		} else if (block.style.widthPercent >= 0) {
-			drawW = std::max(1, kImageMaxW * block.style.widthPercent / 100);
-			if (block.height <= 0) {
-				drawH = std::max(1, (drawW * naturalH) / naturalW);
-			}
+
+		int limitW = contentLimitW;
+		if (cssMaxWidth >= 0) {
+			limitW = std::min(limitW, cssMaxWidth);
 		}
-		if (block.style.maxWidth > 0 && drawW > block.style.maxWidth) {
-			drawW = block.style.maxWidth;
-			if (block.height <= 0) {
-				drawH = std::max(1, (drawW * naturalH) / naturalW);
-			}
+		int limitH = contentLimitH;
+		if (cssMaxHeight >= 0) {
+			limitH = std::min(limitH, cssMaxHeight);
 		}
-		if (block.style.maxWidthPercent >= 0) {
-			const int cssMaxW = std::max(1, kImageMaxW * block.style.maxWidthPercent / 100);
-			if (drawW > cssMaxW) {
-				drawW = cssMaxW;
-				if (block.height <= 0) {
-					drawH = std::max(1, (drawW * naturalH) / naturalW);
+
+		bool constrained = false;
+		bool sizeClamped = block.imageSizeAttrClamped;
+		if (drawW > limitW || drawH > limitH) {
+			const double scaleW = static_cast<double>(limitW) / static_cast<double>(drawW);
+			const double scaleH = static_cast<double>(limitH) / static_cast<double>(drawH);
+			const double scale = std::min(scaleW, scaleH);
+			if (scale < 1.0) {
+				const int scaledW = std::max(1, static_cast<int>(drawW * scale));
+				const int scaledH = std::max(1, static_cast<int>(drawH * scale));
+				if (scaledW != drawW || scaledH != drawH) {
+					constrained = true;
+					sizeClamped = true;
 				}
+				drawW = scaledW;
+				drawH = scaledH;
+				aspectPreserved = true;
+			}
+		}
+		if (drawW > limitW) {
+			drawW = limitW;
+			constrained = true;
+			sizeClamped = true;
+		}
+		if (drawH > limitH) {
+			drawH = limitH;
+			constrained = true;
+			sizeClamped = true;
+		}
+
+		if (!info.ok && !block.alt.empty()) {
+			const int placeholderMaxChars = std::max(1, (drawW - 20) / kCharW);
+			const std::vector<std::string> altLines = wrapText(block.alt, std::max(1, placeholderMaxChars));
+			const int placeholderLineCount = std::max(1, std::min(3, static_cast<int>(altLines.size())));
+			const int placeholderH = placeholderLineCount * blockTextLineHeight(block) + 16;
+			if (drawH < placeholderH) {
+				drawH = placeholderH;
 			}
 		}
 
-		if (drawW > kImageMaxW) {
-			drawH = std::max(1, (drawH * kImageMaxW) / drawW);
-			drawW = kImageMaxW;
-		}
-		if (drawH > kImageMaxH) {
-			// TODO: replace nearest-neighbor compositor scaling with higher-quality scaling.
-			drawW = std::max(1, (drawW * kImageMaxH) / drawH);
-			drawH = kImageMaxH;
-		}
 		outW = std::max(1, drawW);
 		outH = std::max(1, drawH);
+		if (outConstrained) *outConstrained = constrained;
+		if (outAspectPreserved) *outAspectPreserved = aspectPreserved;
+		if (outClamped) *outClamped = sizeClamped;
 	}
 
 	static std::string imagePlaceholderText(const DocBlock& block, const ImageInfo& info)
@@ -2502,6 +2753,16 @@ std::string Navigator::SmokeRuntimeReport()
 		s_pageMetadata.cssTableCaptionCount,
 		s_pageMetadata.cssTableHeaderCellCount,
 		s_pageMetadata.cssVisitedLinkCount,
+		s_pageMetadata.cssFiguresRendered,
+		s_pageMetadata.cssFigcaptionsRendered,
+		s_pageMetadata.cssBlockquotesRendered,
+		s_pageMetadata.cssDefinitionListsRendered,
+		s_pageMetadata.cssImagesConstrained,
+		s_pageMetadata.cssImagesAspectPreserved,
+		s_pageMetadata.cssImageAltFallbacks,
+		s_pageMetadata.cssImageSizeClamps,
+		s_pageMetadata.cssNestedLayoutClamps,
+		s_pageMetadata.cssMaxWrapperAncestorDepth,
 		s_pageMetadata.formCount,
 		s_pageMetadata.formInputCount,
 		s_pageMetadata.formCheckboxCount,
@@ -2939,10 +3200,10 @@ void Navigator::renderDocument()
 		constexpr int kPreGapIfNextHeading = 10;
 		switch (block.type) {
 		case BlockType::Heading:      blockH = blockMarginTop + borderTop + paddingTop + std::max(lineHeight + 4, headingFontSize + 2) + paddingBottom + borderBottom + std::max(4, blockMarginBottom); break;
-		case BlockType::Paragraph:    blockH = blockMarginTop + borderTop + paddingTop + wrappedBlockHeight(block.text, wrapCols, false, lineHeight) + paddingBottom + borderBottom + std::max(4, blockMarginBottom) + (nextIsHeading ? kPreGapIfNextHeading : 0); break;
-		case BlockType::Link:         blockH = blockMarginTop + borderTop + paddingTop + wrappedBlockHeight(block.text, wrapCols, false, lineHeight) + paddingBottom + borderBottom + std::max(4, blockMarginBottom) + (nextIsHeading ? kPreGapIfNextHeading : 0); break;
-		case BlockType::ListItem:     blockH = blockMarginTop + borderTop + paddingTop + wrappedBlockHeight(block.text, listWrapCols, false, lineHeight) + paddingBottom + borderBottom + std::max(4, blockMarginBottom) + (nextIsHeading ? kPreGapIfNextHeading : 0); break;
-		case BlockType::Preformatted: blockH = blockMarginTop + borderTop + paddingTop + wrappedBlockHeight(block.text, preWrapCols, true, lineHeight) + paddingBottom + borderBottom + std::max(4, blockMarginBottom) + (nextIsHeading ? kPreGapIfNextHeading : 0); break;
+		case BlockType::Paragraph:    blockH = blockMarginTop + borderTop + paddingTop + wrappedBlockHeight(block, wrapCols, lineHeight) + paddingBottom + borderBottom + std::max(4, blockMarginBottom) + (nextIsHeading ? kPreGapIfNextHeading : 0); break;
+		case BlockType::Link:         blockH = blockMarginTop + borderTop + paddingTop + wrappedBlockHeight(block, wrapCols, lineHeight) + paddingBottom + borderBottom + std::max(4, blockMarginBottom) + (nextIsHeading ? kPreGapIfNextHeading : 0); break;
+		case BlockType::ListItem:     blockH = blockMarginTop + borderTop + paddingTop + wrappedBlockHeight(block, listWrapCols, lineHeight) + paddingBottom + borderBottom + std::max(4, blockMarginBottom) + (nextIsHeading ? kPreGapIfNextHeading : 0); break;
+		case BlockType::Preformatted: blockH = blockMarginTop + borderTop + paddingTop + wrappedBlockHeight(block, preWrapCols, lineHeight) + paddingBottom + borderBottom + std::max(4, blockMarginBottom) + (nextIsHeading ? kPreGapIfNextHeading : 0); break;
 		case BlockType::FormTextInput:
 		case BlockType::FormCheckbox:
 		case BlockType::FormRadio:
@@ -2952,7 +3213,7 @@ void Navigator::renderDocument()
 		case BlockType::Image: {
 			int imageW = 0;
 			int imageH = 0;
-			imageDisplaySize(block, imageW, imageH);
+			imageDisplaySize(block, availableWidth, imageW, imageH);
 			blockH = blockMarginTop + borderTop + paddingTop + imageH + paddingBottom + borderBottom + std::max(4, blockMarginBottom);
 			break;
 		}
@@ -3001,7 +3262,7 @@ void Navigator::renderDocument()
 			break;
 
 		case BlockType::Paragraph: {
-			auto lines = wrapText(block.text, wrapCols);
+			auto lines = wrapTextForBlock(block, wrapCols);
 			int lineY = drawY + blockMarginTop + borderTop + paddingTop + textLineTopPaddingPx(lineHeight);
 			for (const std::string& ln : lines) {
 				const int lineW = static_cast<int>(ln.size()) * kCharW;
@@ -3020,7 +3281,7 @@ void Navigator::renderDocument()
 				drawTextAtStyled(s_windowId, outerX + paddingLeft, drawY + blockMarginTop + borderTop + paddingTop + textLineTopPaddingPx(lineHeight), marker, block.style, contentTextColor);
 			}
 			const int textInset = blockListTextInsetPx(block);
-			auto lines = wrapText(block.text, listWrapCols);
+			auto lines = wrapTextForBlock(block, listWrapCols);
 			int lineY = drawY + blockMarginTop + borderTop + paddingTop + textLineTopPaddingPx(lineHeight);
 			for (const std::string& ln : lines) {
 				const int lineW = static_cast<int>(ln.size()) * kCharW;
@@ -3032,7 +3293,7 @@ void Navigator::renderDocument()
 
 		case BlockType::Preformatted: {
 			// Draw each line preserving exact content
-			auto lines = splitPreLines(block.text);
+			auto lines = wrapTextForBlock(block, preWrapCols);
 			int lineY = drawY + blockMarginTop + borderTop + paddingTop + textLineTopPaddingPx(lineHeight);
 			for (const std::string& ln : lines) {
 				drawTextAtStyled(s_windowId, outerX + paddingLeft, lineY, ln, block.style, contentTextColor);
@@ -3044,7 +3305,7 @@ void Navigator::renderDocument()
 		case BlockType::Link: {
 			// Full wrapped link block: underline + blue text
 			// The entire bounding rect is clickable (TODO: per-line hit testing).
-			auto lines = wrapText(block.text, wrapCols);
+			auto lines = wrapTextForBlock(block, wrapCols);
 			int lineY = drawY + blockMarginTop + borderTop + paddingTop + textLineTopPaddingPx(lineHeight);
 			int linkR = 55;
 			int linkG = 110;
@@ -3076,7 +3337,7 @@ void Navigator::renderDocument()
 		case BlockType::Image: {
 			int imageW = 0;
 			int imageH = 0;
-			imageDisplaySize(block, imageW, imageH);
+			imageDisplaySize(block, availableWidth, imageW, imageH);
 			const ImageInfo& info = imageInfoForBlock(block);
 			const int imageX = outerX + paddingLeft;
 			const int viewportTop = kContentY;
@@ -3090,8 +3351,18 @@ void Navigator::renderDocument()
 					drawThemeRect(s_windowId, imageX, boxY + borderTop + paddingTop + imageH - 1, imageW, 1, NavigatorContentBorderColor());
 					drawThemeRect(s_windowId, imageX, boxY + borderTop + paddingTop, 1, imageH, NavigatorContentBorderColor());
 					drawThemeRect(s_windowId, imageX + imageW - 1, boxY + borderTop + paddingTop, 1, imageH, NavigatorContentBorderColor());
-					drawTextAtStyled(s_windowId, imageX + 10, boxY + borderTop + paddingTop + std::max(8, (imageH - lineHeight) / 2),
-						imagePlaceholderText(block, info), block.style, contentTextColor);
+					const std::string placeholder = imagePlaceholderText(block, info);
+					const int placeholderMaxChars = std::max(1, (imageW - 20) / kCharW);
+					std::vector<std::string> placeholderLines = wrapText(placeholder, placeholderMaxChars);
+					if (placeholderLines.empty()) placeholderLines.push_back(placeholder);
+					const int maxLines = std::max(1, std::min(3, static_cast<int>(placeholderLines.size())));
+					const int textHeight = maxLines * lineHeight;
+					int textY = boxY + borderTop + paddingTop + std::max(8, (imageH - textHeight) / 2);
+					for (int lineIndex = 0; lineIndex < maxLines; ++lineIndex) {
+						const std::string& line = placeholderLines[static_cast<size_t>(lineIndex)];
+						drawTextAtStyled(s_windowId, imageX + 10, textY, line, block.style, contentTextColor);
+						textY += lineHeight;
+					}
 				}
 			}
 			break;
@@ -3748,15 +4019,15 @@ Navigator::Rect Navigator::selectableBlockRect(int blockIndex)
 	case BlockType::Paragraph:
 	case BlockType::Link:
 		textW = std::max(1, outerWidth - paddingLeft - paddingRight);
-		textH = wrappedBlockHeight(block.text, std::max(1, textW / kCharW), false, blockTextLineHeight(block));
+		textH = wrappedBlockHeight(block, std::max(1, textW / kCharW), blockTextLineHeight(block));
 		break;
 	case BlockType::ListItem:
 		textW = std::max(1, outerWidth - paddingLeft - paddingRight);
-		textH = wrappedBlockHeight(block.text, std::max(1, textW / kCharW), false, blockTextLineHeight(block));
+		textH = wrappedBlockHeight(block, std::max(1, textW / kCharW), blockTextLineHeight(block));
 		break;
 	case BlockType::Preformatted:
 		textW = std::max(1, outerWidth - paddingLeft - paddingRight);
-		textH = wrappedBlockHeight(block.text, std::max(1, textW / kCharW), true, blockTextLineHeight(block)) + paddingTop + paddingBottom;
+		textH = wrappedBlockHeight(block, std::max(1, textW / kCharW), blockTextLineHeight(block)) + paddingTop + paddingBottom;
 		break;
 	default:
 		break;
@@ -3775,13 +4046,13 @@ Navigator::SelectionPosition Navigator::textPositionFromPoint(int x, int y, bool
 		if (rect.w <= 0 || rect.h <= 0) continue;
 		const std::string text = searchableTextForBlock(block);
 		const int maxChars = (block.type == BlockType::ListItem) ? ((kContentW - 44) / kCharW) : ((kContentW - 34) / kCharW);
-		const std::vector<std::string> lines = (block.type == BlockType::Preformatted) ? splitPreLines(text) : wrapText(text, maxChars);
+		const std::vector<std::string> lines = wrapTextForBlock(block, maxChars);
 		const int lineHeight = std::max(kLineH, blockTextLineHeight(block));
 		int lineIndex = std::max(0, std::min((y - rect.y) / lineHeight, std::max(0, static_cast<int>(lines.size()) - 1)));
 		size_t lineStart = 0;
 		for (int line = 0; line < lineIndex && line < static_cast<int>(lines.size()); ++line) {
 			lineStart += lines[line].size();
-			if (block.type != BlockType::Preformatted) {
+			if (block.type != BlockType::Preformatted && block.style.whiteSpace != WhiteSpaceMode::Pre && block.style.whiteSpace != WhiteSpaceMode::PreWrap) {
 				while (lineStart < text.size() && text[lineStart] == ' ') ++lineStart;
 				if (lineStart < text.size() && text[lineStart] == '\n') ++lineStart;
 			} else if (lineStart < text.size()) {
@@ -4929,6 +5200,15 @@ WebDocument Navigator::buildPageInfoDocument()
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("CSS table layout fallbacks", m.cssTableLayoutFallbackCount), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("CSS lists rendered", m.cssListRenderCount), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("CSS clamped values", m.cssClampedValueCount), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("CSS figures rendered", m.cssFiguresRendered), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("CSS figcaptions rendered", m.cssFigcaptionsRendered), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("CSS blockquotes rendered", m.cssBlockquotesRendered), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("CSS definition lists rendered", m.cssDefinitionListsRendered), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("CSS images constrained", m.cssImagesConstrained), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("CSS images aspect preserved", m.cssImagesAspectPreserved), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("CSS image alt fallbacks", m.cssImageAltFallbacks), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("CSS image size clamps", m.cssImageSizeClamps), ""});
+	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("CSS nested layout clamps", m.cssNestedLayoutClamps), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Downloaded", yesNo(m.downloaded)), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Download saved path", m.downloadSavedPath), ""});
 	doc.blocks.push_back({BlockType::ListItem, pageInfoLine("Download byte count", static_cast<int>(m.downloadByteCount)), ""});
@@ -5059,6 +5339,16 @@ WebDocument Navigator::buildRuntimeDocument()
 		s_pageMetadata.cssTableCaptionCount,
 		s_pageMetadata.cssTableHeaderCellCount,
 		s_pageMetadata.cssVisitedLinkCount,
+		s_pageMetadata.cssFiguresRendered,
+		s_pageMetadata.cssFigcaptionsRendered,
+		s_pageMetadata.cssBlockquotesRendered,
+		s_pageMetadata.cssDefinitionListsRendered,
+		s_pageMetadata.cssImagesConstrained,
+		s_pageMetadata.cssImagesAspectPreserved,
+		s_pageMetadata.cssImageAltFallbacks,
+		s_pageMetadata.cssImageSizeClamps,
+		s_pageMetadata.cssNestedLayoutClamps,
+		s_pageMetadata.cssMaxWrapperAncestorDepth,
 		s_pageMetadata.formCount,
 		s_pageMetadata.formInputCount,
 		s_pageMetadata.formCheckboxCount,
@@ -5732,7 +6022,7 @@ Navigator::Rect Navigator::linkBlockRect(int blockIndex)
 	const int innerWidth = std::max(1, outerWidth - paddingLeft - paddingRight);
 	int relY  = blockLayoutY(blockIndex);
 	int drawY = kContentY + relY - s_scrollOffset + blockMarginTop + cssBorderTopPx(block.style) + cssPaddingTopPx(block.style, 0);
-	int h     = wrappedBlockHeight(block.text, std::max(1, innerWidth / kCharW), false, blockTextLineHeight(block));
+	int h     = wrappedBlockHeight(block, std::max(1, innerWidth / kCharW), blockTextLineHeight(block));
 	int w     = std::min(static_cast<int>(block.text.size()) * kCharW, innerWidth);
 	return Rect{ outerX + paddingLeft, drawY, w, h };
 }

@@ -648,6 +648,48 @@ static std::string navigatorHostedSmokeDiagnostic() {
         !contains(cssDisplayNoneText, "This hidden text must stay hidden."),
         "currentUrl=" + gxos::apps::Navigator::SmokeCurrentUrl());
 
+    bool cssPhase1eLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-phase1e.html");
+    std::string cssPhase1eText = gxos::apps::Navigator::SmokeCurrentDocumentText();
+    std::string cssPhase1eReport = gxos::apps::Navigator::SmokeRuntimeReport();
+    add("CSS phase 1E fixture loads",
+        cssPhase1eLoaded &&
+        contains(cssPhase1eText, "Phase 1E Media and Text") &&
+        contains(cssPhase1eText, "Long URL marker") &&
+        contains(cssPhase1eText, "Break-all marker") &&
+        contains(cssPhase1eText, "Pre-wrap marker line one") &&
+        contains(cssPhase1eText, "Nested wrapper backgrounds and padding marker.") &&
+        contains(cssPhase1eText, "Unsupported properties remain nonfatal."),
+        "currentUrl=" + gxos::apps::Navigator::SmokeCurrentUrl());
+    add("CSS phase 1E media markers",
+        cssPhase1eLoaded &&
+        contains(cssPhase1eText, "Max-width 100 percent figure marker") &&
+        contains(cssPhase1eText, "Width-only aspect ratio marker") &&
+        contains(cssPhase1eText, "Height-only aspect ratio marker") &&
+        contains(cssPhase1eText, "Max-height aspect marker") &&
+        contains(cssPhase1eText, "Oversized image clamped to content width marker") &&
+        contains(cssPhase1eText, "Malformed or huge dimensions are clamped marker") &&
+        contains(cssPhase1eText, "Missing image alt fallback marker"),
+        "text=\"" + summarizeText(cssPhase1eText, 260) + "\"");
+    add("CSS phase 1E structural markers",
+        cssPhase1eLoaded &&
+        contains(cssPhase1eText, "Blockquote marker line.") &&
+        contains(cssPhase1eText, "Nested blockquote marker line.") &&
+        contains(cssPhase1eText, "Citation marker.") &&
+        contains(cssPhase1eText, "Definition term alpha") &&
+        contains(cssPhase1eText, "Definition detail two."),
+        "text=\"" + summarizeText(cssPhase1eText, 260) + "\"");
+    add("CSS phase 1E diagnostics",
+        hasPositiveCount(cssPhase1eReport, "Current Document.CSS figures rendered=") &&
+        hasPositiveCount(cssPhase1eReport, "Current Document.CSS figcaptions rendered=") &&
+        hasPositiveCount(cssPhase1eReport, "Current Document.CSS blockquotes rendered=") &&
+        hasPositiveCount(cssPhase1eReport, "Current Document.CSS definition lists rendered=") &&
+        hasPositiveCount(cssPhase1eReport, "Current Document.CSS images constrained=") &&
+        hasPositiveCount(cssPhase1eReport, "Current Document.CSS images aspect preserved=") &&
+        hasPositiveCount(cssPhase1eReport, "Current Document.CSS image alt fallbacks=") &&
+        hasPositiveCount(cssPhase1eReport, "Current Document.CSS image size clamps=") &&
+        hasPositiveCount(cssPhase1eReport, "Current Document.CSS nested layout clamps="),
+        "report=\"" + summarizeText(cssPhase1eReport, 260) + "\"");
+
     bool basicHttpLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/basic.html");
     std::string basicHttpText = gxos::apps::Navigator::SmokeCurrentDocumentText();
     add("plain HTTP GET still loads", basicHttpLoaded && contains(basicHttpText, "Kernel HTTP Basic"),

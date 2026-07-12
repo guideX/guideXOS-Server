@@ -49,6 +49,25 @@ enum class TextAlign : uint8_t {
 	Right   = 3,
 };
 
+enum class WhiteSpaceMode : uint8_t {
+	Inherit = 0,
+	Normal  = 1,
+	Pre     = 2,
+	PreWrap = 3,
+};
+
+enum class OverflowWrapMode : uint8_t {
+	Inherit   = 0,
+	Normal    = 1,
+	BreakWord = 2,
+};
+
+enum class WordBreakMode : uint8_t {
+	Inherit  = 0,
+	Normal   = 1,
+	BreakAll = 2,
+};
+
 struct HtmlElementRef {
 	std::string tagName;
 	std::string className;
@@ -88,8 +107,15 @@ struct WebStyle {
 	int      lineHeight = -1;
 	int      width = -1;
 	int      widthPercent = -1;
+	int      height = -1;
+	int      heightPercent = -1;
 	int      maxWidth = -1;
 	int      maxWidthPercent = -1;
+	int      maxHeight = -1;
+	int      maxHeightPercent = -1;
+	WhiteSpaceMode   whiteSpace = WhiteSpaceMode::Inherit;
+	OverflowWrapMode overflowWrap = OverflowWrapMode::Inherit;
+	WordBreakMode    wordBreak = WordBreakMode::Inherit;
 	bool     hasBorderTop = false;
 	int      borderTopWidth = 0;
 	uint32_t borderTopColor = 0;
@@ -150,6 +176,7 @@ struct DocBlock {
 	std::string alt;   // Image alt text, if any
 	int         width  = 0; // optional Image width attribute in CSS pixels
 	int         height = 0; // optional Image height attribute in CSS pixels
+	bool        imageSizeAttrClamped = false; // width/height attributes normalized or clamped
 	std::string tagName;
 	std::string className;
 	std::string id;
