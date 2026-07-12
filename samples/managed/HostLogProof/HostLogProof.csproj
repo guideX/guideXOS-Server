@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <PlatformTarget>x64</PlatformTarget>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <PublishAot>true</PublishAot>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <IlcOptimizationPreference>Size</IlcOptimizationPreference>
+    <IlcGenerateStackTraceData>false</IlcGenerateStackTraceData>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <GenerateTargetFrameworkAttribute>false</GenerateTargetFrameworkAttribute>
+    <LinkerSubsystem>NATIVE</LinkerSubsystem>
+    <EntryPointSymbol>ManagedMain</EntryPointSymbol>
+    <LangVersion>latest</LangVersion>
+    <SelfContained>true</SelfContained>
+    <BaseOutputPath>..\..\..\out\dotnet\managed-hostlog\bin\</BaseOutputPath>
+    <BaseIntermediateOutputPath>..\..\..\out\dotnet\managed-hostlog\obj\</BaseIntermediateOutputPath>
+    <HostLogProofMapPath Condition="'$(HostLogProofMapPath)' == ''">$(MSBuildProjectDirectory)\..\..\..\out\dotnet\managed-hostlog\artifacts\HostLogProof.map</HostLogProofMapPath>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.DotNet.ILCompiler" Version="9.0.0" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <LinkerArg Include="/fixed /base:0x10000000 /map:&quot;$(HostLogProofMapPath)&quot;" />
+    <LinkerArg Include="/INCLUDE:ManagedMain" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <NativeLibrary Include="$(HostLogProofRuntimeSupportObj)" Condition="'$(HostLogProofRuntimeSupportObj)' != '' and Exists('$(HostLogProofRuntimeSupportObj)')" />
+  </ItemGroup>
+</Project>

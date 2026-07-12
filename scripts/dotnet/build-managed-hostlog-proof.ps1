@@ -1,0 +1,256 @@
+param(
+    [string]$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path,
+    [string]$LegacyRoot = $env:GUIDEXOS_LEGACY_ROOT,
+    [string]$DotNetExe = "dotnet",
+    [string]$PythonExe = "",
+    [string]$PeToElfScript = "",
+    [string]$OutputRoot = "",
+    [switch]$Clean
+)
+
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+
+function Resolve-AbsolutePath([string]$Path) {
+    return (Resolve-Path -LiteralPath $Path).Path
+}
+
+function Assert-WithinRoot([string]$Path, [string]$Root, [string]$Label) {
+    $resolvedPath = [System.IO.Path]::GetFullPath($Path)
+    $resolvedRoot = [System.IO.Path]::GetFullPath($Root.TrimEnd('\', '/'))
+    if (-not $resolvedRoot.EndsWith([System.IO.Path]::DirectorySeparatorChar)) {
+        $resolvedRoot += [System.IO.Path]::DirectorySeparatorChar
+    }
+    if (-not $resolvedPath.StartsWith($resolvedRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "$Label path escapes the repository root: $resolvedPath"
+    }
+}
+
+function Get-CommandPath([string]$Name) {
+    $cmd = Get-Command -Name $Name -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($null -ne $cmd) {
+        return $cmd.Source
+    }
+    return $null
+}
+
+function Find-VcVars64 {
+    $candidateVcVars = @(
+        "C:\Program Files\Microsoft Visual Studio\18\Community\VC\Auxiliary\Build\vcvars64.bat",
+        "C:\Program Files\Microsoft Visual Studio\18\Professional\VC\Auxiliary\Build\vcvars64.bat",
+        "C:\Program Files\Microsoft Visual Studio\18\Enterprise\VC\Auxiliary\Build\vcvars64.bat",
+        "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat",
+        "C:\Program Files\Microsoft Visual Studio\2022\Professional\VC\Auxiliary\Build\vcvars64.bat",
+        "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+    )
+
+    foreach ($path in $candidateVcVars) {
+        if (Test-Path -LiteralPath $path) {
+            return $path
+        }
+    }
+
+    return $null
+}
+
+$projectDir = Join-Path $RepoRoot "samples\managed\HostLogProof"
+$projectFile = Join-Path $projectDir "HostLogProof.csproj"
+$defaultOutputRoot = Join-Path $RepoRoot "out\dotnet\managed-hostlog"
+if ([string]::IsNullOrWhiteSpace($OutputRoot)) {
+    $OutputRoot = $defaultOutputRoot
+}
+
+$OutputRoot = [System.IO.Path]::GetFullPath($OutputRoot)
+$RepoRoot = [System.IO.Path]::GetFullPath($RepoRoot)
+
+Assert-WithinRoot $OutputRoot $RepoRoot "Output"
+
+if (-not (Test-Path -LiteralPath $projectFile)) {
+    throw "Sample project not found: $projectFile"
+}
+
+if ([string]::IsNullOrWhiteSpace($LegacyRoot)) {
+    $LegacyRoot = "D:\dev\guideXOSUEFI"
+}
+
+$LegacyRoot = [System.IO.Path]::GetFullPath($LegacyRoot)
+$peToElfDefault = Join-Path $LegacyRoot "tools\pe_to_elf_v2.py"
+if ([string]::IsNullOrWhiteSpace($PeToElfScript)) {
+    $PeToElfScript = $peToElfDefault
+}
+
+if (-not (Test-Path -LiteralPath $PeToElfScript)) {
+    throw "PE-to-ELF converter not found: $PeToElfScript"
+}
+
+$bundledPython = Join-Path $env:USERPROFILE ".cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe"
+if ([string]::IsNullOrWhiteSpace($PythonExe)) {
+    if (Test-Path -LiteralPath $bundledPython) {
+        $PythonExe = $bundledPython
+    } elseif (Get-CommandPath "py") {
+        $PythonExe = "py"
+    } elseif (Get-CommandPath "python") {
+        $PythonExe = "python"
+    }
+}
+
+if ([string]::IsNullOrWhiteSpace($PythonExe)) {
+    throw "Python was not found. Set -PythonExe or install the bundled runtime Python."
+}
+
+$readelfExe = Get-CommandPath "readelf"
+if ([string]::IsNullOrWhiteSpace($readelfExe)) {
+    $readelfExe = Get-CommandPath "llvm-readelf"
+}
+if ([string]::IsNullOrWhiteSpace($readelfExe)) {
+    throw "Neither readelf nor llvm-readelf was found."
+}
+
+$objdumpExe = Get-CommandPath "objdump"
+if ([string]::IsNullOrWhiteSpace($objdumpExe)) {
+    $objdumpExe = Get-CommandPath "llvm-objdump"
+}
+if ([string]::IsNullOrWhiteSpace($objdumpExe)) {
+    throw "Neither objdump nor llvm-objdump was found."
+}
+
+$vcvars64 = Find-VcVars64
+if ([string]::IsNullOrWhiteSpace($vcvars64)) {
+    throw "Visual C++ build environment not found. Install the Desktop Development with C++ workload and vcvars64.bat."
+}
+
+$binRoot = Join-Path $OutputRoot "bin"
+$objRoot = Join-Path $OutputRoot "obj"
+$artifactRoot = Join-Path $OutputRoot "artifacts"
+$publishExe = $null
+$publishMap = $null
+$artifactExe = Join-Path $artifactRoot "HostLogProof.exe"
+$artifactMap = Join-Path $artifactRoot "HostLogProof.map"
+$artifactElf = Join-Path $artifactRoot "HostLogProof.elf"
+$artifactPeDump = Join-Path $artifactRoot "HostLogProof.pe.objdump.txt"
+$artifactElfDump = Join-Path $artifactRoot "HostLogProof.elf.objdump.txt"
+$artifactElfReadelf = Join-Path $artifactRoot "HostLogProof.elf.readelf.txt"
+$artifactElfDisasm = Join-Path $artifactRoot "HostLogProof.elf.disasm.txt"
+$artifactToolchain = Join-Path $artifactRoot "toolchain.txt"
+$artifactDotNetInfo = Join-Path $artifactRoot "dotnet-info.txt"
+$artifactPythonInfo = Join-Path $artifactRoot "python-info.txt"
+$buildBatch = Join-Path $artifactRoot "build-native-hostlog.bat"
+$runtimeSupportSource = Join-Path $projectDir "runtime_support.c"
+$runtimeSupportObj = Join-Path $artifactRoot "runtime_support.obj"
+
+if ($Clean) {
+    Assert-WithinRoot $OutputRoot $RepoRoot "Output"
+    if (Test-Path -LiteralPath $OutputRoot) {
+        Remove-Item -LiteralPath $OutputRoot -Recurse -Force
+    }
+}
+
+New-Item -ItemType Directory -Force -Path $artifactRoot | Out-Null
+New-Item -ItemType Directory -Force -Path $binRoot | Out-Null
+New-Item -ItemType Directory -Force -Path $objRoot | Out-Null
+
+$dotnetVersion = & $DotNetExe --version
+if ($LASTEXITCODE -ne 0) {
+    throw "dotnet --version failed."
+}
+
+$dotnetInfo = & $DotNetExe --info
+if ($LASTEXITCODE -ne 0) {
+    throw "dotnet --info failed."
+}
+
+$pythonVersion = & $PythonExe --version
+if ($LASTEXITCODE -ne 0) {
+    throw "python --version failed."
+}
+
+$toolchainLines = @(
+    "RepoRoot=$RepoRoot"
+    "LegacyRoot=$LegacyRoot"
+    "OutputRoot=$OutputRoot"
+    "ArtifactRoot=$artifactRoot"
+    "ArtifactExe=$artifactExe"
+    "ArtifactMap=$artifactMap"
+    "PeToElfScript=$PeToElfScript"
+    "PythonExe=$PythonExe"
+    "ReadelfExe=$readelfExe"
+    "ObjdumpExe=$objdumpExe"
+    "VcVars64=$vcvars64"
+    "RuntimeSupportSource=$runtimeSupportSource"
+    "RuntimeSupportObj=$runtimeSupportObj"
+    "DotNetVersion=$dotnetVersion"
+    "PythonVersion=$pythonVersion"
+)
+$toolchainLines | Set-Content -LiteralPath $artifactToolchain -Encoding ASCII
+$dotnetInfo | Set-Content -LiteralPath $artifactDotNetInfo -Encoding ASCII
+$pythonVersion | Set-Content -LiteralPath $artifactPythonInfo -Encoding ASCII
+
+Push-Location $projectDir
+try {
+    $dotnetExePath = $DotNetExe
+    if ($DotNetExe -eq "dotnet") {
+        $dotnetExePath = Get-CommandPath "dotnet"
+    }
+    if ([string]::IsNullOrWhiteSpace($dotnetExePath)) {
+        throw "dotnet executable not found."
+    }
+
+    $publishBatch = @(
+        "@echo off"
+        "setlocal"
+        "call `"$vcvars64`" >nul"
+        "if errorlevel 1 exit /b %errorlevel%"
+        "where link.exe"
+        "where cl.exe"
+        "cl.exe /nologo /TC /c /GS- /Zl /Fo:`"$runtimeSupportObj`" `"$runtimeSupportSource`""
+        "if errorlevel 1 exit /b %errorlevel%"
+        "`"$dotnetExePath`" publish `"$projectFile`" -c Release -r win-x64 --self-contained true -p:PublishAot=true -p:InvariantGlobalization=true -p:IlcGenerateStackTraceData=false -p:IlcUseEnvironmentalTools=true -p:HostLogProofRuntimeSupportObj=$runtimeSupportObj -p:BaseOutputPath=$binRoot\ -p:BaseIntermediateOutputPath=$objRoot\"
+        "exit /b %errorlevel%"
+    )
+    $publishBatch | Set-Content -LiteralPath $buildBatch -Encoding ASCII
+    & $buildBatch
+    if ($LASTEXITCODE -ne 0) {
+        throw "dotnet publish failed with exit code $LASTEXITCODE"
+    }
+}
+finally {
+    Pop-Location
+}
+
+if ([string]::IsNullOrWhiteSpace($publishExe)) {
+    $publishExe = Get-ChildItem -Path $binRoot -Recurse -Filter HostLogProof.exe -File -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName
+}
+if ([string]::IsNullOrWhiteSpace($publishExe) -or -not (Test-Path -LiteralPath $publishExe)) {
+    throw "Published native executable not found under: $binRoot"
+}
+
+Copy-Item -LiteralPath $publishExe -Destination $artifactExe -Force
+if ([string]::IsNullOrWhiteSpace($publishMap)) {
+    $publishMap = Get-ChildItem -Path $binRoot -Recurse -Filter HostLogProof.map -File -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName
+}
+if (-not [string]::IsNullOrWhiteSpace($publishMap) -and (Test-Path -LiteralPath $publishMap)) {
+    Copy-Item -LiteralPath $publishMap -Destination $artifactMap -Force
+}
+
+$mapArg = @()
+if (Test-Path -LiteralPath $artifactMap) {
+    $mapArg = @("--map", $artifactMap, "--symbol", "ManagedMain")
+}
+
+& $PythonExe $PeToElfScript $artifactExe $artifactElf @mapArg
+if ($LASTEXITCODE -ne 0) {
+    throw "PE-to-ELF conversion failed with exit code $LASTEXITCODE"
+}
+
+if (-not (Test-Path -LiteralPath $artifactElf)) {
+    throw "ELF output not found: $artifactElf"
+}
+
+& $objdumpExe -p $artifactExe | Set-Content -LiteralPath $artifactPeDump -Encoding ASCII
+& $objdumpExe -p -d $artifactElf | Set-Content -LiteralPath $artifactElfDump -Encoding ASCII
+& $readelfExe -h -l -S -r -s -d $artifactElf | Set-Content -LiteralPath $artifactElfReadelf -Encoding ASCII
+& $objdumpExe -d $artifactElf | Set-Content -LiteralPath $artifactElfDisasm -Encoding ASCII
+
+Write-Host "Managed host-log proof built successfully." -ForegroundColor Green
+Write-Host "Output root: $OutputRoot" -ForegroundColor Cyan
+Write-Host "ELF artifact: $artifactElf" -ForegroundColor Cyan
