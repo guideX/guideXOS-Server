@@ -3,6 +3,9 @@
 #include "app_manifest_loader.h"
 #include "built_in_app_metadata.h"
 
+#include <cctype>
+#include <cstdlib>
+
 namespace gxos {
 namespace apps {
 namespace {
@@ -22,6 +25,42 @@ std::string joinKnownAliases(const BuiltInAppMetadata& metadata) {
 
 bool architectureMatches(const std::string& entryArchitecture, const std::string& currentArchitecture) {
     return entryArchitecture == currentArchitecture || entryArchitecture == "any" || entryArchitecture == "*";
+}
+
+std::string trimCopy(const std::string& value) {
+    size_t begin = 0;
+    while (begin < value.size() && std::isspace(static_cast<unsigned char>(value[begin]))) ++begin;
+
+    size_t end = value.size();
+    while (end > begin && std::isspace(static_cast<unsigned char>(value[end - 1]))) --end;
+
+    return value.substr(begin, end - begin);
+}
+
+std::vector<AppRegistrySource> experimentalSourcesFromEnvironment() {
+    std::vector<AppRegistrySource> sources;
+
+    // Opt-in staging hook for isolated experimental app registries.
+    const char* stageRootEnv = std::getenv("GXOS_NATIVE_ELF_STAGE_ROOT");
+    if (!stageRootEnv || !stageRootEnv[0]) return sources;
+
+    std::string raw(stageRootEnv);
+    size_t start = 0;
+    while (start <= raw.size()) {
+        size_t end = raw.find(';', start);
+        std::string token = trimCopy(raw.substr(start, end == std::string::npos ? std::string::npos : end - start));
+        if (!token.empty()) {
+            AppRegistrySource source;
+            source.kind = AppSourceKind::Package;
+            source.path = std::filesystem::path(token);
+            sources.push_back(source);
+        }
+
+        if (end == std::string::npos) break;
+        start = end + 1;
+    }
+
+    return sources;
 }
 
 RegisteredApp makeBuiltInApp(const BuiltInAppMetadata& metadata) {
@@ -229,13 +268,17 @@ const AppEntry* AppRegistry::FindCompatibleEntry(const std::string& appId, const
 }
 
 std::vector<AppRegistrySource> AppRegistry::DefaultSources() {
-    return {
+    std::vector<AppRegistrySource> sources = {
         { AppSourceKind::SystemApps, "/system/apps" },
         { AppSourceKind::SystemApps, "sdk/samples" },
         { AppSourceKind::SystemApps, "examples/apps" },
         { AppSourceKind::Package, "/Apps" },
         { AppSourceKind::UserApps, "/users/default/apps" }
     };
+
+    const std::vector<AppRegistrySource> stagedSources = experimentalSourcesFromEnvironment();
+    sources.insert(sources.end(), stagedSources.begin(), stagedSources.end());
+    return sources;
 }
 
 const char* AppRegistry::ToString(AppSourceKind kind) {
