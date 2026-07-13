@@ -369,6 +369,20 @@ static std::string navigatorHostedSmokeDiagnostic() {
             std::isdigit(static_cast<unsigned char>(report[valuePos])) &&
             report[valuePos] != '0';
     };
+    auto countValue = [&](const std::string& report, const std::string& prefix) {
+        const std::size_t pos = report.find(prefix);
+        if (pos == std::string::npos) return -1;
+        std::size_t valuePos = pos + prefix.size();
+        std::size_t endPos = valuePos;
+        while (endPos < report.size() && std::isdigit(static_cast<unsigned char>(report[endPos]))) {
+            ++endPos;
+        }
+        try {
+            return std::stoi(report.substr(valuePos, endPos - valuePos));
+        } catch (...) {
+            return -1;
+        }
+    };
 
     bool cssInlineLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/css-inline.html");
     std::string cssInlineText = gxos::apps::Navigator::SmokeCurrentDocumentText();
@@ -703,6 +717,22 @@ static std::string navigatorHostedSmokeDiagnostic() {
         contains(cssPhase1fText, "Sans-serif font family marker.") &&
         contains(cssPhase1fText, "Serif fallback marker."),
         "currentUrl=" + gxos::apps::Navigator::SmokeCurrentUrl());
+    std::string cssPhase1fDetail =
+        "report=\"" + summarizeText(cssPhase1fReport, 260) + "\"" +
+        " bordered=" + std::to_string(countValue(cssPhase1fReport, "Current Document.CSS bordered blocks rendered=")) +
+        " dashed=" + std::to_string(countValue(cssPhase1fReport, "Current Document.CSS dashed borders rendered=")) +
+        " dotted=" + std::to_string(countValue(cssPhase1fReport, "Current Document.CSS dotted borders rendered=")) +
+        " border_width_clamps=" + std::to_string(countValue(cssPhase1fReport, "Current Document.CSS border width clamps=")) +
+        " collapsed_tables=" + std::to_string(countValue(cssPhase1fReport, "Current Document.CSS collapsed tables rendered=")) +
+        " separate_tables=" + std::to_string(countValue(cssPhase1fReport, "Current Document.CSS separate tables rendered=")) +
+        " border_spacing_clamps=" + std::to_string(countValue(cssPhase1fReport, "Current Document.CSS table border spacing clamps=")) +
+        " list_markers=" + std::to_string(countValue(cssPhase1fReport, "Current Document.CSS list style markers rendered=")) +
+        " list_none=" + std::to_string(countValue(cssPhase1fReport, "Current Document.CSS list style none applied=")) +
+        " text_decorations=" + std::to_string(countValue(cssPhase1fReport, "Current Document.CSS text decorations rendered=")) +
+        " generic_fonts=" + std::to_string(countValue(cssPhase1fReport, "Current Document.CSS generic font family applied=")) +
+        " generic_font_fallbacks=" + std::to_string(countValue(cssPhase1fReport, "Current Document.CSS generic font family fallbacks=")) +
+        " table_layout_fallbacks=" + std::to_string(countValue(cssPhase1fReport, "Current Document.CSS table layout fallbacks=")) +
+        " table_captions=" + std::to_string(countValue(cssPhase1fReport, "Current Document.CSS table captions rendered="));
     add("CSS phase 1F diagnostics",
         contains(cssPhase1fReport, "Current Document.CSS enabled=yes") &&
         hasPositiveCount(cssPhase1fReport, "Current Document.CSS bordered blocks rendered=") &&
@@ -719,7 +749,7 @@ static std::string navigatorHostedSmokeDiagnostic() {
         hasPositiveCount(cssPhase1fReport, "Current Document.CSS generic font family fallbacks=") &&
         hasPositiveCount(cssPhase1fReport, "Current Document.CSS table layout fallbacks=") &&
         hasPositiveCount(cssPhase1fReport, "Current Document.CSS table captions rendered="),
-        "report=\"" + summarizeText(cssPhase1fReport, 260) + "\"");
+        cssPhase1fDetail);
 
     bool basicHttpLoaded = gxos::apps::Navigator::SmokeNavigateToQuiet("http://127.0.0.1:8080/navigator-smoke/basic.html");
     std::string basicHttpText = gxos::apps::Navigator::SmokeCurrentDocumentText();

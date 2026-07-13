@@ -1,1 +1,1 @@
-.\build.ps1 -Clean -RunQemu -FsTest
+.\build.ps1 -RunQemu -FsTest

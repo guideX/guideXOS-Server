@@ -177,6 +177,43 @@ static void mount_navigator_smoke_config_if_available()
 }
 #endif
 
+static bool is_transient_block_device(const kernel::block::BlockDevice* device)
+{
+    if (!device || !device->name[0]) return true;
+    if (device->name[0] == 'r' && device->name[1] == 'a' && device->name[2] == 'm') return true;
+    if (device->name[0] == 'w' && device->name[1] == 'a' && device->name[2] == 'l' &&
+        device->name[3] == 'l' && device->name[4] == 'i' && device->name[5] == 'm' &&
+        device->name[6] == 'g' && device->name[7] == '\0') return true;
+    return false;
+}
+
+static bool mount_persistent_storage()
+{
+    if (kernel::vfs::get_mount("/")) {
+        kernel::serial::puts("[KERNEL] Persistent storage already mounted at /\n");
+        return true;
+    }
+
+    for (uint8_t index = 0; index < kernel::block::MAX_BLOCK_DEVICES; ++index) {
+        const kernel::block::BlockDevice* device = kernel::block::get_device(index);
+        if (!device || is_transient_block_device(device) || !device->readFn || !device->writeFn) continue;
+
+        kernel::serial::puts("[KERNEL] Trying persistent storage device ");
+        kernel::serial::puts(device->name);
+        kernel::serial::puts(" at /\n");
+        const uint8_t mountResult = kernel::vfs::mount("/", index);
+        if (mountResult != 0xFF) {
+            kernel::serial::puts("[KERNEL] Successfully mounted persistent storage from ");
+            kernel::serial::puts(device->name);
+            kernel::serial::puts("\n");
+            return true;
+        }
+    }
+
+    kernel::serial::puts("[KERNEL] WARNING: No writable persistent storage filesystem found\n");
+    return false;
+}
+
 extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
 {
 #if ARCH_HAS_PIC_8259
@@ -323,35 +360,7 @@ extern "C" void kernel_main(void* boot_environment, uint32_t boot_magic)
         kernel::serial::put_hex32(kernel::block::device_count());
         kernel::serial::putc('\n');
         
-        // Auto-mount first available block device to /
-        // Try device 0 first, then device 1 if that fails
-        bool mounted = false;
-        if (kernel::block::device_count() > 0) {
-            kernel::serial::puts("[KERNEL] Auto-mounting block device 0 to /\n");
-            uint8_t mountResult = kernel::vfs::mount("/", 0);
-            if (mountResult == 0) {
-                kernel::serial::puts("[KERNEL] Successfully mounted / from device 0\n");
-                mounted = true;
-            } else {
-                kernel::serial::puts("[KERNEL] WARNING: Failed to auto-mount device 0\n");
-                
-                // Try device 1 if available
-                if (kernel::block::device_count() > 1) {
-                    kernel::serial::puts("[KERNEL] Attempting to mount block device 1 to /\n");
-                    mountResult = kernel::vfs::mount("/", 1);
-                    if (mountResult == 0) {
-                        kernel::serial::puts("[KERNEL] Successfully mounted / from device 1\n");
-                        mounted = true;
-                    } else {
-                        kernel::serial::puts("[KERNEL] WARNING: Failed to auto-mount device 1\n");
-                    }
-                }
-            }
-        }
-        
-        if (!mounted && kernel::block::device_count() > 0) {
-            kernel::serial::puts("[KERNEL] WARNING: No filesystem could be mounted automatically\n");
-        }
+        mount_persistent_storage();
 
         if (is_bootinfo && bootinfo && bootinfo->RamdiskBase != 0 && bootinfo->RamdiskSize != 0) {
             kernel::serial::puts("[KERNEL] Boot wallpaper pack found in ramdisk.img\n");

@@ -143,8 +143,8 @@ REM
 REM The kernel currently uses PS/2 mouse input (IRQ12).  USB HID is not
 REM yet implemented, so we pass usb=off to ensure QEMU routes mouse
 REM events to the PS/2 controller instead of a USB tablet.
-REM The Q35 machine type includes HPET, LPC (for i8042 PS/2), and a
-REM modern chipset that OVMF expects.
+REM The pc machine type exposes the ESP as a legacy IDE disk, which the
+REM current bare-metal ATA driver can enumerate for persistent settings.
 REM
 REM Mouse: Click inside window (or Ctrl+Alt+G) to grab mouse.
 REM
@@ -156,7 +156,7 @@ REM trying to access unmapped flash regions.
 if "%SPLIT_PFLASH%"=="1" (
     echo Using split pflash: CODE + VARS
     "%QEMU_EXE%" ^
-        -machine q35,usb=off ^
+        -machine pc,usb=off ^
         -drive if=pflash,format=raw,unit=0,readonly=on,file="%OVMF_CODE%" ^
         -drive if=pflash,format=raw,unit=1,file="%OVMF_VARS%" ^
         -drive file=fat:rw:ESP,format=raw ^
@@ -172,7 +172,7 @@ if "%SPLIT_PFLASH%"=="1" (
 ) else (
     echo Using combined pflash: OVMF.fd
     "%QEMU_EXE%" ^
-        -machine q35,usb=off ^
+        -machine pc,usb=off ^
         -drive if=pflash,format=raw,readonly=on,file="%OVMF_CODE%" ^
         -drive file=fat:rw:ESP,format=raw ^
         -netdev user,id=net0 ^

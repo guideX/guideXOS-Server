@@ -834,6 +834,8 @@ static TaskbarDockPosition parse_taskbar_position(const char* value)
 
 static const char* kBareMetalDisplayOptionsStorePath = "/desktop.cfg";
 static const char* kBareMetalDisplayOptionsLegacyStorePath = "/display-options.cfg";
+static const char* kBareMetalWallpaperIdStorePath = "/wallpaper.id";
+static const char* kBareMetalWallpaperIdLegacyStorePath = "/desktop.wallpaper.id";
 static const int kBareMetalWallpaperIdMax = 96;
 static const int kBareMetalScaleModeMax = 16;
 static const int kBareMetalThemeIdMax = 32;
@@ -1125,6 +1127,39 @@ static bool bare_metal_load_display_options(BareMetalDisplayOptionsData& out, Ba
     return false;
 }
 
+static bool bare_metal_load_wallpaper_id_file_at_path(const char* path, char* outWallpaperId, int outWallpaperIdSize)
+{
+    if (!path || !path[0] || !outWallpaperId || outWallpaperIdSize <= 0) return false;
+    outWallpaperId[0] = '\0';
+
+    if (!vfs::get_mount(path)) {
+        return false;
+    }
+
+    char idBuf[kBareMetalWallpaperIdMax];
+    const int32_t count = vfs::read_file(path, idBuf, sizeof(idBuf) - 1);
+    if (count <= 0) {
+        return false;
+    }
+
+    idBuf[count] = '\0';
+    bare_metal_trim_in_place(idBuf);
+    if (!idBuf[0]) {
+        return false;
+    }
+
+    desktop_str_copy(outWallpaperId, idBuf, outWallpaperIdSize);
+    return true;
+}
+
+static bool bare_metal_load_wallpaper_id_file(char* outWallpaperId, int outWallpaperIdSize)
+{
+    if (bare_metal_load_wallpaper_id_file_at_path(kBareMetalWallpaperIdStorePath, outWallpaperId, outWallpaperIdSize)) {
+        return true;
+    }
+    return bare_metal_load_wallpaper_id_file_at_path(kBareMetalWallpaperIdLegacyStorePath, outWallpaperId, outWallpaperIdSize);
+}
+
 static bool bare_metal_save_display_options(const BareMetalDisplayOptionsData& store, int32_t* outPrimaryWrite = nullptr)
 {
     char text[512];
@@ -1175,7 +1210,8 @@ static bool bare_metal_save_display_options(const BareMetalDisplayOptionsData& s
     vfs::write_file("/desktop.system.icons", buffer, (uint32_t)pos);
 
     if (store.wallpaperId[0]) {
-        vfs::write_file("/desktop.wallpaper.id", store.wallpaperId, (uint32_t)desktop_strlen(store.wallpaperId));
+        vfs::write_file(kBareMetalWallpaperIdStorePath, store.wallpaperId, (uint32_t)desktop_strlen(store.wallpaperId));
+        vfs::write_file(kBareMetalWallpaperIdLegacyStorePath, store.wallpaperId, (uint32_t)desktop_strlen(store.wallpaperId));
     }
     const char* mode = store.backgroundScaleMode[0] ? store.backgroundScaleMode : "fill";
     vfs::write_file("/desktop.background.scale", mode, (uint32_t)desktop_strlen(mode));
@@ -5148,6 +5184,10 @@ static bool persist_wallpaper_selection(const char* wallpaperId)
 
 static void load_persisted_wallpaper_id()
 {
+    const char* defaultWallpaperId = s_builtInWallpapers[0].id;
+    char wallpaperFileId[kBareMetalWallpaperIdMax];
+    const bool haveWallpaperFileId = bare_metal_load_wallpaper_id_file(wallpaperFileId, sizeof(wallpaperFileId));
+
     BareMetalDisplayOptionsData store;
     bare_metal_log_display_options_backend("[desktop] wallpaper load");
     if (!vfs::get_mount(kBareMetalDisplayOptionsStorePath)) {
@@ -5155,17 +5195,25 @@ static void load_persisted_wallpaper_id()
         return;
     }
     BareMetalDisplayOptionsLoadSource source = BareMetalDisplayOptionsLoadSource::None;
-    if (!bare_metal_load_display_options(store, &source)) {
-        serial::puts("[desktop] wallpaper fallback reason=read-or-parse-failed\n");
-        return;
+    const bool haveConfig = bare_metal_load_display_options(store, &source);
+    const char* configWallpaperId = haveConfig ? store.wallpaperId : "";
+    const char* wallpaperId = nullptr;
+    const char* wallpaperSource = nullptr;
+
+    if (haveWallpaperFileId) {
+        if (configWallpaperId[0] && desktop_str_eq(wallpaperFileId, defaultWallpaperId) && !desktop_str_eq(configWallpaperId, defaultWallpaperId)) {
+            wallpaperId = configWallpaperId;
+            wallpaperSource = "config-overrode-default-wallpaper-file";
+        } else {
+            wallpaperId = wallpaperFileId;
+            wallpaperSource = "wallpaper-file";
+        }
+    } else if (haveConfig) {
+        wallpaperId = configWallpaperId;
+        wallpaperSource = bare_metal_display_options_load_source_name(source);
     }
-    const char* wallpaperId = store.wallpaperId;
-    serial::puts("[desktop] wallpaper load id=");
-    serial::puts(wallpaperId);
-    serial::puts(" source=");
-    serial::puts(bare_metal_display_options_load_source_name(source));
-    serial::putc('\n');
-    if (!wallpaperId[0]) {
+
+    if (!wallpaperId || !wallpaperId[0]) {
         serial::puts("[desktop] wallpaper fallback reason=missing-or-empty\n");
         apply_wallpaper_builtin_selection(&s_builtInWallpapers[0]);
         serial::puts("[desktop] wallpaper apply source=default id=");
@@ -5173,6 +5221,12 @@ static void load_persisted_wallpaper_id()
         serial::puts("\n");
         return;
     }
+
+    serial::puts("[desktop] wallpaper load id=");
+    serial::puts(wallpaperId);
+    serial::puts(" source=");
+    serial::puts(wallpaperSource ? wallpaperSource : "unknown");
+    serial::putc('\n');
 
     const BuiltInGradientPalette* gradient = find_builtin_gradient(wallpaperId);
     if (gradient) {
@@ -5188,29 +5242,23 @@ static void load_persisted_wallpaper_id()
 
     const BuiltInWallpaperPalette* entry = find_builtin_wallpaper(wallpaperId);
     if (entry) {
+        apply_wallpaper_builtin_selection(entry);
         if (s_wallpaperPackMounted) {
             WallpaperImageCache* image = load_wallpaper_full_cache(entry->id);
             if (!image) {
-                serial::puts("[desktop] wallpaper fallback reason=resource-missing id=");
+                serial::puts("[desktop] wallpaper image unavailable, keeping persisted selection id=");
                 serial::puts(wallpaperId);
                 serial::puts("\n");
-                apply_wallpaper_builtin_selection(&s_builtInWallpapers[0]);
-                serial::puts("[desktop] wallpaper apply source=default id=");
-                serial::puts(s_builtInWallpapers[0].id);
+            } else {
+                serial::puts("[desktop] wallpaper resolve result=ok id=");
+                serial::puts(entry->id);
                 serial::puts("\n");
-                return;
             }
         } else {
             serial::puts("[desktop] wallpaper load deferred reason=wallpaper-pack-not-mounted id=");
             serial::puts(wallpaperId);
             serial::puts("\n");
-            return;
         }
-
-        apply_wallpaper_builtin_selection(entry);
-        serial::puts("[desktop] wallpaper resolve result=ok id=");
-        serial::puts(entry->id);
-        serial::puts("\n");
         serial::puts("[desktop] wallpaper apply source=persisted id=");
         serial::puts(entry->id);
         serial::puts("\n");
@@ -5233,6 +5281,7 @@ void set_wallpaper_by_id(const char* wallpaperId)
     const BuiltInGradientPalette* gradient = find_builtin_gradient(wallpaperId);
     if (gradient) {
         if (s_wallpaperConfig.type == WallpaperType::Gradient && desktop_str_eq(s_wallpaperConfig.wallpaperId, gradient->id)) {
+            persist_wallpaper_selection(gradient->id);
             return;
         }
         serial::puts("[desktop] selected gradient id=");
@@ -5250,6 +5299,7 @@ void set_wallpaper_by_id(const char* wallpaperId)
         entry = &s_builtInWallpapers[0];
     }
     if (s_wallpaperConfig.type == WallpaperType::BuiltIn && desktop_str_eq(s_wallpaperConfig.wallpaperId, entry->id)) {
+        persist_wallpaper_selection(entry->id);
         return;
     }
     serial::puts("[desktop] selected wallpaper full=");

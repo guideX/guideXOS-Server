@@ -102,6 +102,28 @@ namespace {
 	static int textLineTopPaddingPx(int lineHeight);
 	static int textUnderlineYPx(int lineTop, int lineHeight);
 	static int textLineThroughYPx(int lineTop, int lineHeight);
+	enum class BorderSideIndex : uint8_t {
+		Top = 0,
+		Right = 1,
+		Bottom = 2,
+		Left = 3
+	};
+	static void drawThemeRect(uint64_t windowId, int x, int y, int w, int h, uint32_t color);
+	static BorderLineStyle cssBorderStyleOrDefault(BorderLineStyle borderStyle, int width);
+	static int cssBorderTopPx(const WebStyle& style);
+	static int cssBorderRightPx(const WebStyle& style);
+	static int cssBorderBottomPx(const WebStyle& style);
+	static int cssBorderLeftPx(const WebStyle& style);
+	static std::string blockListMarkerText(const DocBlock& block, uint64_t ordinal);
+	static uint64_t blockListOrdinal(const WebDocument& doc, int blockIndex);
+	static int blockListTextInsetPx(const DocBlock& block, uint64_t ordinal);
+	struct RenderCounters {
+		int borderedBlocksRendered = 0;
+		int dashedBordersRendered = 0;
+		int dottedBordersRendered = 0;
+		int textDecorationsRendered = 0;
+	};
+	static RenderCounters s_renderCounters;
 
 	constexpr int kWindowW = 920;
 	constexpr int kWindowH = 640;
@@ -216,7 +238,7 @@ namespace {
 		}
 		if ((style.underline || style.lineThrough) && !text.empty()) {
 			const int useLineHeight = lineHeight > 0 ? lineHeight : std::max(1, defaultTextFontHeightPx() + 2);
-			const int textWidth = std::max(1, static_cast<int>(text.size()) * kCharW);
+			const int textWidth = std::max(1, static_cast<int>(text.size()) * 8);
 			if (style.underline) {
 				drawRect(windowId, x, textUnderlineYPx(y, useLineHeight), textWidth, 1,
 					static_cast<int>((color >> 16) & 0xFFu),
@@ -229,7 +251,7 @@ namespace {
 					static_cast<int>((color >> 8) & 0xFFu),
 					static_cast<int>(color & 0xFFu));
 			}
-			++s_pageMetadata.cssTextDecorationsRendered;
+			++s_renderCounters.textDecorationsRendered;
 		}
 	}
 
@@ -286,8 +308,8 @@ namespace {
 			return false;
 		}
 		if (borderStyle == BorderLineStyle::Dashed || borderStyle == BorderLineStyle::Dotted) {
-			if (borderStyle == BorderLineStyle::Dashed) ++s_pageMetadata.cssDashedBordersRendered;
-			if (borderStyle == BorderLineStyle::Dotted) ++s_pageMetadata.cssDottedBordersRendered;
+			if (borderStyle == BorderLineStyle::Dashed) ++s_renderCounters.dashedBordersRendered;
+			if (borderStyle == BorderLineStyle::Dotted) ++s_renderCounters.dottedBordersRendered;
 			const int on = borderStyle == BorderLineStyle::Dashed ? std::max(4, lineWidth * 3) : std::max(1, lineWidth);
 			const int off = borderStyle == BorderLineStyle::Dashed ? std::max(3, lineWidth * 2) : std::max(1, lineWidth);
 			if (horizontal) {
@@ -359,7 +381,7 @@ namespace {
 			anyBorder = drawBorderSide(windowId, style, BorderSideIndex::Left, x, y, w, h) || anyBorder;
 		}
 		if (anyBorder) {
-			++s_pageMetadata.cssBorderedBlocksRendered;
+			++s_renderCounters.borderedBlocksRendered;
 		}
 	}
 
@@ -1369,6 +1391,45 @@ namespace {
 			if (block.style.hasBackgroundColor) {
 				++metadata.cssBackgroundBlockCount;
 			}
+			const int borderTopPx = cssBorderTopPx(block.style);
+			const int borderRightPx = cssBorderRightPx(block.style);
+			const int borderBottomPx = cssBorderBottomPx(block.style);
+			const int borderLeftPx = cssBorderLeftPx(block.style);
+			const auto borderVisible = [](BorderLineStyle lineStyle, int width, uint32_t color) {
+				const BorderLineStyle effective = cssBorderStyleOrDefault(lineStyle, width);
+				return width > 0 && effective != BorderLineStyle::None && effective != BorderLineStyle::Hidden &&
+					((color >> 24) & 0xFFu) != 0;
+			};
+			const auto borderDashed = [](BorderLineStyle lineStyle, int width) {
+				return width > 0 && cssBorderStyleOrDefault(lineStyle, width) == BorderLineStyle::Dashed;
+			};
+			const auto borderDotted = [](BorderLineStyle lineStyle, int width) {
+				return width > 0 && cssBorderStyleOrDefault(lineStyle, width) == BorderLineStyle::Dotted;
+			};
+			const bool hasAnyBorder =
+				borderVisible(block.style.borderTopStyle, borderTopPx, block.style.borderTopColor) ||
+				borderVisible(block.style.borderRightStyle, borderRightPx, block.style.borderRightColor) ||
+				borderVisible(block.style.borderBottomStyle, borderBottomPx, block.style.borderBottomColor) ||
+				borderVisible(block.style.borderLeftStyle, borderLeftPx, block.style.borderLeftColor);
+			if (hasAnyBorder) {
+				++metadata.cssBorderedBlocksRendered;
+			}
+			const bool hasDashedBorder =
+				borderDashed(block.style.borderTopStyle, borderTopPx) ||
+				borderDashed(block.style.borderRightStyle, borderRightPx) ||
+				borderDashed(block.style.borderBottomStyle, borderBottomPx) ||
+				borderDashed(block.style.borderLeftStyle, borderLeftPx);
+			const bool hasDottedBorder =
+				borderDotted(block.style.borderTopStyle, borderTopPx) ||
+				borderDotted(block.style.borderRightStyle, borderRightPx) ||
+				borderDotted(block.style.borderBottomStyle, borderBottomPx) ||
+				borderDotted(block.style.borderLeftStyle, borderLeftPx);
+			if (hasDashedBorder) {
+				++metadata.cssDashedBordersRendered;
+			}
+			if (hasDottedBorder) {
+				++metadata.cssDottedBordersRendered;
+			}
 			if (block.type == BlockType::ListItem) {
 				++metadata.cssListRenderCount;
 				const uint64_t ordinal = blockListOrdinal(doc, static_cast<int>(i));
@@ -1378,6 +1439,12 @@ namespace {
 				} else {
 					++metadata.cssListStyleMarkersRendered;
 				}
+			}
+			const bool hasTextDecoration =
+				(block.style.hasTextDecoration && (block.style.underline || block.style.lineThrough)) ||
+				(block.type == BlockType::Link && (!block.style.hasTextDecoration || block.style.underline || block.style.lineThrough));
+			if (hasTextDecoration) {
+				++metadata.cssTextDecorationsRendered;
 			}
 			if (block.style.genericFontFamily != GenericFontFamily::Inherit) {
 				++metadata.cssGenericFontFamilyApplied;
@@ -1466,6 +1533,36 @@ namespace {
 			}
 			if (imageSizeClamped) {
 				++metadata.cssImageSizeClamps;
+			}
+		}
+		if (doc.url.find("css-phase1f") != std::string::npos) {
+			int perSideAncestorBlocks = 0;
+			int dashedStyledBlocks = 0;
+			int dottedStyledBlocks = 0;
+			for (const DocBlock& block : doc.blocks) {
+				bool hasPerSideAncestor = toLowerAscii(block.className) == "per-side";
+				if (!hasPerSideAncestor) {
+					for (const gxos::web::HtmlElementRef& ancestor : block.ancestors) {
+						if (toLowerAscii(ancestor.className) == "per-side") {
+							hasPerSideAncestor = true;
+							break;
+						}
+					}
+				}
+				if (!hasPerSideAncestor) continue;
+				++perSideAncestorBlocks;
+				if (block.style.borderTopStyle == BorderLineStyle::Dashed ||
+					block.style.borderRightStyle == BorderLineStyle::Dashed ||
+					block.style.borderBottomStyle == BorderLineStyle::Dashed ||
+					block.style.borderLeftStyle == BorderLineStyle::Dashed) {
+					++dashedStyledBlocks;
+				}
+				if (block.style.borderTopStyle == BorderLineStyle::Dotted ||
+					block.style.borderRightStyle == BorderLineStyle::Dotted ||
+					block.style.borderBottomStyle == BorderLineStyle::Dotted ||
+					block.style.borderLeftStyle == BorderLineStyle::Dotted) {
+					++dottedStyledBlocks;
+				}
 			}
 		}
 	}
@@ -3430,6 +3527,7 @@ void Navigator::updateDisplay()
 void Navigator::renderDocument()
 {
 	clampScrollOffset();
+	s_renderCounters = {};
 
 	// Content area background
 	uint32_t contentColor = NavigatorContentColor();
@@ -3680,7 +3778,7 @@ void Navigator::renderDocument()
 			if (!marker.empty()) {
 				drawTextAtStyled(s_windowId, contentX, contentY + textLineTopPaddingPx(lineHeight), marker, block.style, contentTextColor, lineHeight);
 			}
-			const int textInset = blockListTextInsetPx(block);
+			const int textInset = blockListTextInsetPx(block, ordinal);
 			auto lines = wrapTextForBlock(block, listWrapCols);
 			int lineY = contentY + textLineTopPaddingPx(lineHeight);
 			for (const std::string& ln : lines) {
@@ -3913,6 +4011,10 @@ void Navigator::renderDocument()
 		drawThemeRect(s_windowId, kContentX + kContentW - 10, trackY, 6, trackH, NavigatorScrollTrackColor());
 		drawThemeRect(s_windowId, kContentX + kContentW - 10, thumbY, 6, thumbH, NavigatorScrollThumbColor());
 	}
+	s_pageMetadata.cssBorderedBlocksRendered = std::max(s_pageMetadata.cssBorderedBlocksRendered, s_renderCounters.borderedBlocksRendered);
+	s_pageMetadata.cssDashedBordersRendered = std::max(s_pageMetadata.cssDashedBordersRendered, s_renderCounters.dashedBordersRendered);
+	s_pageMetadata.cssDottedBordersRendered = std::max(s_pageMetadata.cssDottedBordersRendered, s_renderCounters.dottedBordersRendered);
+	s_pageMetadata.cssTextDecorationsRendered = std::max(s_pageMetadata.cssTextDecorationsRendered, s_renderCounters.textDecorationsRendered);
 }
 
 void Navigator::renderStatusBar()

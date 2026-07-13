@@ -2773,11 +2773,17 @@ static void handleCloseTag(ParserState& st, const std::string& tagName)
 	if (name == "body") {
 		popElementByName(st, name);
 	}
+	if (name == "div" || name == "section" || name == "article" ||
+		name == "header" || name == "footer" || name == "nav" || name == "main" ||
+		name == "figure" || name == "blockquote" || name == "dl") {
+		flushText(st);
+		popElementByName(st, name);
+		return;
+	}
 	if (name == "strong" || name == "b" || name == "em" || name == "i" || name == "code" ||
 		name == "small" || name == "kbd" || name == "samp" ||
 		name == "cite" || name == "q" ||
-		name == "span" || name == "div" || name == "section" || name == "article" ||
-		name == "header" || name == "footer" || name == "nav" || name == "main" ||
+		name == "span" ||
 		name == "table" || name == "thead" || name == "tbody" || name == "tfoot" ||
 		name == "tr" || name == "ul" || name == "ol" || name == "noscript" || name == "html" || name == "head") {
 		popElementByName(st, name);
