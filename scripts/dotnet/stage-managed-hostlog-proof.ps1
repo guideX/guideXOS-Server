@@ -1,4 +1,4 @@
-param(
+﻿param(
     [string]$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path,
     [string]$OutputRoot = "",
     [string]$StageRoot = "",
@@ -40,6 +40,17 @@ function Assert-FileNotContains([string]$Path, [string[]]$Patterns, [string]$Lab
             throw "$Label unexpectedly contained pattern: $pattern"
         }
     }
+}
+
+function Get-MapSymbolAddress([string]$Path, [string]$Symbol, [string]$Label) {
+    $symbolPattern = '^\s+[0-9A-Fa-f]{4}:[0-9A-Fa-f]{8}\s+' + [regex]::Escape($Symbol) + '\s+([0-9A-Fa-f]{16})\s+'
+    foreach ($line in Get-Content -LiteralPath $Path) {
+        if ($line -match $symbolPattern) {
+            return [Convert]::ToUInt64($Matches[1], 16)
+        }
+    }
+
+    throw "$Label symbol not found in map: $Symbol"
 }
 
 function Get-ImportTable([string]$Path) {
@@ -123,6 +134,14 @@ foreach ($path in @($sourceElf, $sourceMap, $sourcePeDump, $sourceElfDump, $sour
         throw "Expected proof artifact missing: $path"
     }
 }
+
+$tlsIndexAddress = Get-MapSymbolAddress -Path $sourceMap -Symbol "_tls_index" -Label "TLS index"
+$tlsStartAddress = Get-MapSymbolAddress -Path $sourceMap -Symbol "_tls_start" -Label "TLS start"
+$tlsEndAddress = Get-MapSymbolAddress -Path $sourceMap -Symbol "_tls_end" -Label "TLS end"
+if ($tlsEndAddress -le $tlsStartAddress) {
+    throw ([string]::Format("TLS template bounds are invalid: start=0x{0:X} end=0x{1:X}", $tlsStartAddress, $tlsEndAddress))
+}
+$tlsBlockSize = $tlsEndAddress - $tlsStartAddress
 
 $expectedPeImports = [ordered]@{
     "ADVAPI32.dll" = @(
@@ -208,7 +227,7 @@ Assert-FileContains -Path $sourceElfReadelf -Patterns @(
     'Type:\s+EXEC',
     'Machine:\s+Advanced Micro Devices X86-64',
     'Entry point address:\s+0x10001900',
-    'Number of program headers:\s+6',
+    'Number of program headers:\s+7',
     'There is no dynamic section in this file\.',
     'There are no relocations in this file\.',
     'There are no sections in this file\.'
@@ -266,6 +285,10 @@ $manifest = [ordered]@{
     icon = ""
     minGuideXOSVersion = "0.1.0"
     supportedArchitectures = @("amd64")
+    desktopRegistryHints = [ordered]@{
+        "gxos.nativeaot.tlsIndexAddress" = ("0x{0:X}" -f $tlsIndexAddress)
+        "gxos.nativeaot.tlsBlockSize" = ("0x{0:X}" -f $tlsBlockSize)
+    }
     entries = @(
         [ordered]@{
             architecture = "amd64"
@@ -292,6 +315,10 @@ $envelope = [ordered]@{
     manifestId = $manifest.id
     manifestDisplayName = $manifest.displayName
     manifestEntryPoint = $manifest.entries[0].entryPoint
+    tlsIndexAddress = ("0x{0:X}" -f $tlsIndexAddress)
+    tlsStartAddress = ("0x{0:X}" -f $tlsStartAddress)
+    tlsEndAddress = ("0x{0:X}" -f $tlsEndAddress)
+    tlsBlockSize = ("0x{0:X}" -f $tlsBlockSize)
     stagedElf = $stagedElf
     sourceElf = $sourceElf
     sourceElfSha256 = $sourceHash
@@ -317,3 +344,4 @@ Write-Host "[dotnet-proof] entry=0x10001900"
 Write-Host "[dotnet-proof] envelope=$stageEnvelope"
 
 Write-Output $stageEnvelope
+

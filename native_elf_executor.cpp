@@ -135,6 +135,136 @@ using gx_entry_fn = gx_result (*)(NativeGxAppContext* ctx);
 #endif
 #endif
 
+#if defined(_WIN32) && defined(__x86_64__)
+constexpr unsigned long kTlsOutOfIndexes = 0xFFFFFFFFul;
+
+extern "C" {
+__declspec(dllimport) unsigned long __stdcall TlsAlloc(void);
+__declspec(dllimport) int __stdcall TlsFree(unsigned long tlsIndex);
+__declspec(dllimport) int __stdcall TlsSetValue(unsigned long tlsIndex, void* tlsValue);
+}
+
+struct NativeAotTlsBootstrap {
+    unsigned long slot = kTlsOutOfIndexes;
+    uint64_t tlsIndexAddress = 0;
+    size_t tlsBlockSize = 0;
+    std::vector<uint8_t> block;
+
+    void reset() {
+        if (slot != kTlsOutOfIndexes) {
+            (void)TlsSetValue(slot, nullptr);
+            (void)TlsFree(slot);
+            slot = kTlsOutOfIndexes;
+        }
+        tlsIndexAddress = 0;
+        tlsBlockSize = 0;
+        block.clear();
+    }
+
+    ~NativeAotTlsBootstrap() {
+        reset();
+    }
+};
+
+bool tryGetEnvironmentValue(const NativeAppRuntimeContext& runtimeContext, const char* key, std::string& value) {
+    auto it = runtimeContext.environment.find(key);
+    if (it == runtimeContext.environment.end() || it->second.empty()) return false;
+    value = it->second;
+    return true;
+}
+
+bool tryParseUnsigned64(const std::string& text, uint64_t& value) {
+    if (text.empty()) return false;
+    try {
+        size_t consumed = 0;
+        uint64_t parsed = std::stoull(text, &consumed, 0);
+        if (consumed != text.size()) return false;
+        value = parsed;
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
+bool prepareNativeAotTlsBootstrap(
+    const NativeAppRuntimeContext& runtimeContext,
+    uint64_t minVirtualAddress,
+    uint64_t maxVirtualAddress,
+    ExecutableMemoryBlock& mapping,
+    NativeElfExecutionResult& result,
+    NativeAotTlsBootstrap& bootstrap) {
+    std::string tlsIndexAddressText;
+    std::string tlsBlockSizeText;
+    bool hasIndexHint = tryGetEnvironmentValue(runtimeContext, "GX_NATIVE_AOT_TLS_INDEX_ADDRESS", tlsIndexAddressText);
+    bool hasBlockHint = tryGetEnvironmentValue(runtimeContext, "GX_NATIVE_AOT_TLS_BLOCK_SIZE", tlsBlockSizeText);
+    if (!hasIndexHint && !hasBlockHint) return true;
+    if (!hasIndexHint || !hasBlockHint) {
+        addDiagnostic(result, "Native AOT TLS bootstrap hints are incomplete");
+        return false;
+    }
+
+    uint64_t tlsIndexAddress = 0;
+    uint64_t tlsBlockSize64 = 0;
+    if (!tryParseUnsigned64(tlsIndexAddressText, tlsIndexAddress)) {
+        addDiagnostic(result, "Native AOT TLS bootstrap index address is invalid: " + tlsIndexAddressText);
+        return false;
+    }
+    if (!tryParseUnsigned64(tlsBlockSizeText, tlsBlockSize64) || tlsBlockSize64 == 0) {
+        addDiagnostic(result, "Native AOT TLS bootstrap block size is invalid: " + tlsBlockSizeText);
+        return false;
+    }
+    if (tlsBlockSize64 > static_cast<uint64_t>(std::numeric_limits<size_t>::max())) {
+        addDiagnostic(result, "Native AOT TLS bootstrap block size is too large");
+        return false;
+    }
+
+    uint64_t tlsIndexEndAddress = 0;
+    if (tlsIndexAddress < minVirtualAddress || !checkedAdd(tlsIndexAddress, sizeof(uint32_t), tlsIndexEndAddress) || tlsIndexEndAddress > maxVirtualAddress) {
+        addDiagnostic(result, "Native AOT TLS bootstrap index address is outside the mapped image");
+        return false;
+    }
+
+    bootstrap.slot = TlsAlloc();
+    if (bootstrap.slot == kTlsOutOfIndexes) {
+        addDiagnostic(result, "Native AOT TLS bootstrap failed: TlsAlloc returned TLS_OUT_OF_INDEXES");
+        return false;
+    }
+
+    try {
+        bootstrap.block.assign(static_cast<size_t>(tlsBlockSize64), 0u);
+    } catch (const std::exception& ex) {
+        addDiagnostic(result, std::string("Native AOT TLS bootstrap failed to allocate the per-thread block: ") + ex.what());
+        bootstrap.reset();
+        return false;
+    } catch (...) {
+        addDiagnostic(result, "Native AOT TLS bootstrap failed to allocate the per-thread block");
+        bootstrap.reset();
+        return false;
+    }
+
+    if (!TlsSetValue(bootstrap.slot, bootstrap.block.data())) {
+        addDiagnostic(result, "Native AOT TLS bootstrap failed: TlsSetValue rejected the per-thread block");
+        bootstrap.reset();
+        return false;
+    }
+
+    size_t tlsIndexOffset = static_cast<size_t>(tlsIndexAddress - minVirtualAddress);
+    if (tlsIndexOffset > mapping.size || sizeof(uint32_t) > mapping.size - tlsIndexOffset) {
+        addDiagnostic(result, "Native AOT TLS bootstrap index address is out of bounds for the mapped image");
+        bootstrap.reset();
+        return false;
+    }
+    uint32_t slotValue = static_cast<uint32_t>(bootstrap.slot);
+    std::memcpy(static_cast<char*>(mapping.base) + tlsIndexOffset, &slotValue, sizeof(slotValue));
+    bootstrap.tlsIndexAddress = tlsIndexAddress;
+    bootstrap.tlsBlockSize = static_cast<size_t>(tlsBlockSize64);
+    addDiagnostic(result, "Native AOT TLS bootstrap installed");
+    addDiagnostic(result, "TLS slot index: " + std::to_string(bootstrap.slot));
+    addDiagnostic(result, "TLS block size: " + std::to_string(bootstrap.tlsBlockSize));
+    return true;
+}
+#endif
+
 } // namespace
 
 bool NativeElfExecutor::CanExecute(
@@ -299,6 +429,15 @@ NativeElfExecutionResult NativeElfExecutor::Execute(
         }
         if (!segment.data.empty()) std::memcpy(static_cast<char*>(mapping.base) + offset, segment.data.data(), segment.data.size());
     }
+
+#if defined(_WIN32) && defined(__x86_64__)
+    NativeAotTlsBootstrap tlsBootstrap;
+    if (!prepareNativeAotTlsBootstrap(runtimeContext, minVirtualAddress, maxVirtualAddress, mapping, result, tlsBootstrap)) {
+        ExecutableMemory::Free(mapping);
+        LogDecision(result.appId, result.architecture, false, result.message, "failure");
+        return result;
+    }
+#endif
 
     for (const NativeElfSegment& segment : image.loadedSegments) {
         size_t offset = static_cast<size_t>(segment.virtualAddress - minVirtualAddress);

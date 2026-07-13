@@ -1,4 +1,4 @@
-# NativeAOT managed-code execution proof
+﻿# NativeAOT managed-code execution proof
 
 ## 1. Objective
 
@@ -17,7 +17,7 @@ This milestone does not prove:
 
 - Full .NET runtime initialization.
 - Garbage collection.
-- Managed allocation beyond the generated proof method’s stack use.
+- Managed allocation beyond the generated proof methodâ€™s stack use.
 - Exceptions, threads, thread pool, reflection, `System.IO`, `System.Console`, or general CoreLib compatibility.
 - General portable `.dll` execution.
 
@@ -125,7 +125,7 @@ No new adapter was added.
 Reason:
 
 - The managed entry is already Microsoft x64 compatible.
-- Server’s existing `CallNativeElfWin64Entry` trampoline already supplies the required calling convention and shadow space.
+- Serverâ€™s existing `CallNativeElfWin64Entry` trampoline already supplies the required calling convention and shadow space.
 - The proof entry and host table share the same ABI contract.
 
 ## 8. Artifact staging
@@ -291,7 +291,7 @@ If the Server build succeeds, the next expected live trace is:
 This milestone proves that:
 
 - The managed `ManagedMain` body is real NativeAOT-generated AMD64 code.
-- The direct proof path is ABI-compatible with Server’s native context and host table.
+- The direct proof path is ABI-compatible with Serverâ€™s native context and host table.
 - The proof ELF is a fixed-address `ET_EXEC` image at `0x10001900`.
 - The staged artifact can be isolated outside the default app inventory.
 - Server-side runtime preparation and host-call wiring are already aligned for the proof.
@@ -308,4 +308,165 @@ This milestone does not prove:
 - General .NET application compatibility.
 - Windows import runtime initialization.
 - QEMU or bare-metal runtime success.
+
+
+## 22. Execution attempt update
+
+### 22.1 Dependency source and restoration method
+
+The missing third-party dependencies were restored from canonical sibling trees, not from current package-manager releases:
+
+- `third_party/stb/stb_image.h` was copied from `D:\dev\guideXOSServerV0.2\third_party\stb\stb_image.h`.
+- `third_party/mbedtls/**` was copied from `D:\dev\guideXOSServer\third_party\mbedtls` at commit `545d1b77a29ac33b219a6681489d5e63b63c3b3a`.
+
+The restoration method was direct vendor-tree copying because this workspace has no root `.gitmodules` entry for those dependencies and the exact branch revision is not using submodule checkout for them.
+
+### 22.2 Exact dependency revisions
+
+- `stb_image.h` identifies `stb_image v2.30` and the source hash was `1F8C1B6B408F26E3B20CBFBBD4758AFB3DC9B837FF1E17C258928F406148A87C`.
+- `mbedtls` reports `4.1.0` in `include/mbedtls/build_info.h`.
+- The sibling tree was described as `v4.1.0-84-g545d1b77a2-dirty`, which is the closest recorded revision metadata available in this workspace.
+
+### 22.3 Registry-hook review and simplification
+
+`app_registry.cpp` was reviewed but not changed in this pass.
+
+The opt-in hook remains narrow and inert by default:
+
+- It only activates when `GXOS_NATIVE_ELF_STAGE_ROOT` is present.
+- It trims whitespace and accepts semicolon-delimited roots.
+- It returns no extra sources when the environment variable is absent.
+- It does not alter the default built-in application inventory.
+- It stays confined to the experimental staged-source discovery path.
+
+No further simplification was necessary.
+
+### 22.4 Hosted Server build results
+
+Both server builds were rerun earlier in the pass and completed successfully:
+
+- `build-native-experimental.bat` passed.
+- `build.bat` passed.
+
+### 22.5 Managed artifact rebuild and staging results
+
+The proof artifact was rebuilt and staged successfully after the converter fix.
+
+Key evidence from the latest successful run:
+
+- `build-managed-hostlog-proof.ps1 -Clean` passed.
+- `stage-managed-hostlog-proof.ps1` passed.
+- Source and staged ELF hashes matched: `CDE78AD872795394D212E3AE0FCC9863B643C5D0B9414DAC4302D3A1A3AE0BF5`.
+- `readelf` reports `ELF64`, `ET_EXEC`, AMD64, entry `0x10001900`, and `Number of program headers: 7`.
+- The first `LOAD` segment now starts at `0x10000000`, which restores the preferred-base mapping envelope required by the hosted loader.
+
+### 22.6 Default-isolation result
+
+Default isolation held.
+
+- With no stage root set, `nativeapp.inspect com.guidexos.experimental.nativeaot.hostlogproof` reported `Result: app not found`.
+- With `GXOS_NATIVE_ELF_STAGE_ROOT` pointed at a non-existent directory, the same result occurred.
+- The normal inventory remained unchanged apart from the expected omission of the staged proof app when the stage root was absent or invalid.
+
+### 22.7 First launch trace
+
+The first hosted launch succeeded in the same Server process.
+
+Observed evidence:
+
+- `NativeElfLaunchPipeline::PrepareLaunch` accepted the artifact.
+- `NativeElfImageLoader::LoadImage` loaded the ELF.
+- The image loader reported `EntryVA: 0x10001900` and `preferredBase: 0x10000000`.
+- `NativeElfExecutor::CanExecute` returned true.
+- `NativeAppRuntime` entered host-call dispatch for runtimeId `1`.
+- The host callback logged `Hello from managed guideXOS code`.
+- The executor diagnostics reported `Preferred-base mapping: success` and `Native ELF gx_main returned 0`.
+
+### 22.8 First return result
+
+The first run returned `0`.
+
+### 22.9 Second launch trace
+
+The second hosted launch also succeeded in the same Server process.
+
+Observed evidence:
+
+- `runtimeId` advanced to `2`.
+- The loader again reported `EntryVA: 0x10001900` and `preferredBase: 0x10000000`.
+- The host callback again logged `Hello from managed guideXOS code`.
+- The executor diagnostics again reported `Preferred-base mapping: success` and `Native ELF gx_main returned 0`.
+
+### 22.10 Second return result
+
+The second run returned `0`.
+
+### 22.11 Rejection-test results
+
+Safe rejection cases supported by the current harness were exercised:
+
+- Stage root absent: PASS. The preflight run reported `Result: app not found`.
+- Stage root invalid: PASS. A deliberately invalid stage root also reported `Result: app not found`.
+- Proof artifact absent: PASS. A disposable temp copy with `HostLogProof.elf` removed reported `validationSuccess: false`, `imageLoaderSuccess: false`, `executionSuccess: false`, and `Result: inspection complete; no ELF code executed`.
+- Metadata absent or invalid: PASS. A disposable temp copy with `app.json` removed reported `Result: app not found`, and a malformed JSON manifest produced a manifest parse failure before lookup.
+- Artifact hash mismatch: BLOCKED. The current harness does not expose a safe hash-injection path for this branch without altering the loader or staging contract.
+- Unsupported API version: BLOCKED. This would require rebuilding broader Server code to inject a mismatched API version.
+- Null logging callback: BLOCKED. The existing proof harness does not safely expose that injection point.
+
+### 22.12 Managed-message integrity evidence
+
+The message originated in managed code and was delivered through the host callback:
+
+- The server log shows `NativeAppHost ... log: Hello from managed guideXOS code`.
+- The executor diagnostics record `Host log call count: 1` and `Last host log message: Hello from managed guideXOS code` for each launch.
+- The message is the exact UTF-8 text built by `Program.ManagedMain`.
+
+### 22.13 Any crash or failure diagnosis
+
+The earlier hosted failure was a preferred-base mapping problem, not a managed ABI problem.
+
+Root cause and fix:
+
+- The regenerated ELF had started its first `PT_LOAD` at `0x10001000`, which prevented exact preferred-base mapping.
+- The PE-to-ELF converter was restored to emit an initial reserved `PT_LOAD` page at `0x10000000`.
+- After that change, hosted `VirtualAlloc` mapping succeeded at the preferred base and the managed payload executed.
+
+A secondary harness issue also surfaced during validation:
+
+- The smoke script originally anchored regexes against CRLF text and expected camelCase host-log labels that the executor did not emit.
+- The harness was adjusted to normalize carriage returns and to match the actual host-log wording.
+
+### 22.14 QEMU status
+
+Not attempted.
+
+Hosted execution is now the proven target, but QEMU/bare-metal was not exercised in this pass.
+
+### 22.15 Updated decision outcome
+
+Outcome A.
+
+The actual NativeAOT-generated `ManagedMain` executed, the host callback emitted the expected message, the real return value reached Server, and both launches succeeded in one Server process.
+
+### 22.16 What is now proven
+
+- The canonical staged proof path can be restored from the recorded vendor sources.
+- The hosted Server build remains healthy.
+- The staged NativeAOT ELF loads at the expected fixed base.
+- The managed entry executes through the existing native ELF trampoline.
+- The host log callback receives the managed UTF-8 message.
+- The integer return code is captured correctly.
+- Repeat launch works in the same Server process.
+
+### 22.17 What remains unproven
+
+- A general .NET runtime layer.
+- Managed allocation beyond the stack-only proof.
+- GC integration.
+- Threading, exceptions, reflection, and general CoreLib support.
+- QEMU/bare-metal execution for this proof.
+
+### 22.18 Exact next experiment
+
+Build a minimal guideXOS NativeAOT runtime/platform layer that supports one managed allocation while retaining the proven entry ABI, host callback, and opt-in packaging path.
 

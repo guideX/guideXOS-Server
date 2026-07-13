@@ -1,4 +1,4 @@
-param(
+﻿param(
     [string]$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path,
     [string]$LegacyRoot = $env:GUIDEXOS_LEGACY_ROOT,
     [string]$DotNetExe = "dotnet",
@@ -417,7 +417,7 @@ Assert-FileContains -Path $artifactElfReadelf -Patterns @(
     'Type:\s+EXEC',
     'Machine:\s+Advanced Micro Devices X86-64',
     'Entry point address:\s+0x10001900',
-    'Number of program headers:\s+6',
+    'Number of program headers:\s+7',
     'There is no dynamic section in this file\.',
     'There are no relocations in this file\.',
     'There are no sections in this file\.'
@@ -447,3 +447,4 @@ Assert-FileNotContains -Path $artifactPeDump -Patterns @(
 Write-Host "Managed host-log proof built successfully." -ForegroundColor Green
 Write-Host "Output root: $OutputRoot" -ForegroundColor Cyan
 Write-Host "ELF artifact: $artifactElf" -ForegroundColor Cyan
+

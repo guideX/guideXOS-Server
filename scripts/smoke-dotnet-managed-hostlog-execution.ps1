@@ -37,7 +37,8 @@ function Assert-Contains {
         [string]$Reason
     )
 
-    if ($Text -notmatch [regex]::Escape($Needle)) {
+    $normalizedText = $Text -replace "`r", ""
+    if ($normalizedText -notmatch [regex]::Escape($Needle)) {
         throw "Missing expected text for ${Reason}: $Needle"
     }
 }
@@ -50,14 +51,16 @@ function Assert-RegexCountAtLeast {
         [string]$Reason
     )
 
-    $count = [regex]::Matches($Text, $Pattern, [System.Text.RegularExpressions.RegexOptions]::Multiline).Count
+    $normalizedText = $Text -replace "`r", ""
+    $count = [regex]::Matches($normalizedText, $Pattern, [System.Text.RegularExpressions.RegexOptions]::Multiline).Count
     if ($count -lt $Minimum) {
         throw "Expected at least $Minimum matches for ${Reason}, but saw $count. Pattern: $Pattern"
     }
 }
 
 function Get-RegexValue([string]$Text, [string]$Pattern, [string]$Reason) {
-    $match = [regex]::Match($Text, $Pattern, [System.Text.RegularExpressions.RegexOptions]::Multiline)
+    $normalizedText = $Text -replace "`r", ""
+    $match = [regex]::Match($normalizedText, $Pattern, [System.Text.RegularExpressions.RegexOptions]::Multiline)
     if (-not $match.Success) {
         throw "Missing expected capture for $Reason. Pattern: $Pattern"
     }
@@ -79,6 +82,9 @@ function Wait-ForProcessExit {
         try { Stop-Process -Id $Process.Id -Force } catch { }
         throw "Process timed out after $TimeoutSeconds seconds."
     }
+
+    $null = $Process.WaitForExit()
+    $Process.Refresh()
 }
 
 function Invoke-ServerCommands {
@@ -97,13 +103,18 @@ function Invoke-ServerCommands {
     ($Commands + @("exit")) -join [Environment]::NewLine | Set-Content -LiteralPath $input -Encoding ASCII
 
     try {
-        $proc = Start-Process -FilePath $ExePath -PassThru -WindowStyle Hidden -WorkingDirectory $WorkingDirectory `
-            -RedirectStandardInput $input -RedirectStandardOutput $stdoutLog -RedirectStandardError $stderrLog
-        Wait-ForProcessExit -Process $proc -TimeoutSeconds $TimeoutSeconds
+        Push-Location -LiteralPath $WorkingDirectory
+        try {
+            $cmdLine = "`"$ExePath`" < `"$input`" > `"$stdoutLog`" 2> `"$stderrLog`""
+            & cmd.exe /c $cmdLine
+            $exitCode = $LASTEXITCODE
+        } finally {
+            Pop-Location
+        }
         $stdout = if (Test-Path -LiteralPath $stdoutLog) { Get-Content -LiteralPath $stdoutLog -Raw } else { "" }
         $stderr = if (Test-Path -LiteralPath $stderrLog) { Get-Content -LiteralPath $stderrLog -Raw } else { "" }
         return [pscustomobject]@{
-            ExitCode = $proc.ExitCode
+            ExitCode = $exitCode
             StdOut = $stdout
             StdErr = $stderr
             StdOutLog = $stdoutLog
@@ -188,10 +199,19 @@ try {
         throw "Stage hash mismatch: source=$sourceHash staged=$stagedHash"
     }
 
-    $stageManifestText = Get-Content -LiteralPath $stageManifest -Raw
-    Assert-Contains -Text $stageManifestText -Needle '"kind": "NativeElf"' -Reason "stage manifest kind"
-    Assert-Contains -Text $stageManifestText -Needle '"entryPoint": "ManagedMain"' -Reason "stage manifest entry point"
-    Assert-Contains -Text $stageManifestText -Needle '"abi": "guidexos-c-abi-v1"' -Reason "stage manifest ABI"
+    $stageManifestObject = Get-Content -LiteralPath $stageManifest -Raw | ConvertFrom-Json
+    if ($stageManifestObject.kind -ne "NativeElf") {
+        throw "Missing expected value for stage manifest kind: NativeElf"
+    }
+    if ($stageManifestObject.entries.Count -lt 1) {
+        throw "Stage manifest does not contain any entries."
+    }
+    if ($stageManifestObject.entries[0].entryPoint -ne "ManagedMain") {
+        throw "Missing expected value for stage manifest entry point: ManagedMain"
+    }
+    if ($stageManifestObject.entries[0].abi -ne "guidexos-c-abi-v1") {
+        throw "Missing expected value for stage manifest ABI: guidexos-c-abi-v1"
+    }
 
     $preflightCommands = @(
         "nativeapp.inspect $appId"
@@ -232,8 +252,8 @@ try {
     Assert-Contains -Text $output -Needle "supported ABI: guidexos-c-abi-v1" -Reason "supported ABI"
     Assert-RegexCountAtLeast -Text $output -Pattern '(?m)^executionSuccess:\s+true$' -Minimum 2 -Reason "successful executions"
     Assert-RegexCountAtLeast -Text $output -Pattern '(?m)^executionAttempted:\s+true$' -Minimum 2 -Reason "attempted executions"
-    Assert-RegexCountAtLeast -Text $output -Pattern '(?m)^hostLogCallCount:\s+1$' -Minimum 2 -Reason "host log count"
-    Assert-RegexCountAtLeast -Text $output -Pattern '(?m)^lastHostLogMessage:\s+Hello from managed guideXOS code$' -Minimum 2 -Reason "managed message"
+    Assert-RegexCountAtLeast -Text $output -Pattern 'Host log call count:\s+1' -Minimum 2 -Reason "host log count"
+    Assert-RegexCountAtLeast -Text $output -Pattern 'Last host log message:\s+Hello from managed guideXOS code' -Minimum 2 -Reason "managed message"
     Assert-RegexCountAtLeast -Text $output -Pattern '(?m)^returnCode:\s+0$' -Minimum 2 -Reason "return code"
     Assert-RegexCountAtLeast -Text $output -Pattern '(?m)^gxMainReturnCode:\s+0$' -Minimum 2 -Reason "managed return code"
     Assert-RegexCountAtLeast -Text $output -Pattern '(?m)^trampolineUsed:\s+true$' -Minimum 2 -Reason "trampoline use"
@@ -273,3 +293,5 @@ try {
     $env:PATH = $oldPath
     Set-EnvValue -Name "GXOS_NATIVE_ELF_STAGE_ROOT" -Value $null
 }
+
+

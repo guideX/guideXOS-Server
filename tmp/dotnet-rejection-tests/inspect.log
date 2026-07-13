@@ -1,0 +1,136 @@
+guideXOSServer server starting...
+WARNING: Experimental Native ELF execution is enabled.
+Only trusted Native ELF apps should be run.
+WARNING: Experimental Native ELF execution is enabled.
+Only trusted Native ELF apps should be run.
+[lifecycle] phase -> PlatformDiscovery
+[lifecycle] phase -> MemoryReady
+[lifecycle] phase -> SchedulerReady
+[lifecycle] phase -> IpcReady
+[lifecycle] phase -> DesktopStateReady
+AppRegistry initializing, count=1
+AppRegistry manifest scan succeeded: scanned=7, registered=7
+AppModel registry candidate:  displayName=Hello World id=com.guidexos.samples.helloworld kind=NativeElf source=SystemApps
+Registered app: Hello World
+AppModel registry candidate:  displayName=Resource Viewer id=com.guidexos.samples.resourceviewer kind=NativeElf source=SystemApps
+Registered app: Resource Viewer
+AppModel registry candidate:  displayName=Future GXApp Package id=com.guidexos.examples.futuregxapp kind=GXAppPackage source=SystemApps
+Registered app: Future GXApp Package
+AppModel registry candidate:  displayName=HelloWorld ELF id=com.guidexos.examples.helloworld kind=NativeElf source=SystemApps
+Registered app: HelloWorld ELF
+AppModel registry candidate:  displayName=Notepad id=com.guidexos.examples.notepad kind=BuiltIn source=SystemApps
+Registered app: Notepad
+AppModel registry candidate:  displayName=Hello World id=com.guidexos.helloworld kind=NativeElf source=Package
+Registered app: Hello World
+AppModel registry candidate:  displayName=Resource Viewer id=com.guidexos.resourceviewer kind=NativeElf source=Package
+Registered app: Resource Viewer
+AppModel registry candidate:  displayName=Notepad id=gxos.builtin.notepad kind=BuiltIn source=BuiltIn
+Registered app: Notepad
+AppModel registry candidate:  displayName=Calculator id=gxos.builtin.calculator kind=BuiltIn source=BuiltIn
+Registered app: Calculator
+AppModel registry candidate:  displayName=Clock id=gxos.builtin.clock kind=BuiltIn source=BuiltIn
+Registered app: Clock
+AppModel registry candidate:  displayName=Console id=gxos.builtin.console kind=BuiltIn source=BuiltIn
+Registered app: Console
+AppModel registry candidate:  displayName=File Explorer id=gxos.builtin.fileexplorer kind=BuiltIn source=BuiltIn
+Registered app: File Explorer
+AppModel registry candidate:  displayName=Trash id=gxos.builtin.trash kind=BuiltIn source=BuiltIn
+Registered app: Trash
+AppModel registry candidate:  displayName=TaskManager id=gxos.builtin.taskmanager kind=BuiltIn source=BuiltIn
+Registered app: TaskManager
+AppModel registry candidate:  displayName=Paint id=gxos.builtin.paint kind=BuiltIn source=BuiltIn
+Registered app: Paint
+AppModel registry candidate:  displayName=Image Viewer id=gxos.builtin.imageviewer kind=BuiltIn source=BuiltIn
+Registered app: Image Viewer
+AppModel registry candidate:  displayName=OnScreenKeyboard id=gxos.builtin.onscreenkeyboard kind=BuiltIn source=BuiltIn
+Registered app: OnScreenKeyboard
+AppModel registry candidate:  displayName=ShutdownDialog id=gxos.builtin.shutdowndialog kind=BuiltIn source=BuiltIn
+Registered app: ShutdownDialog
+AppModel registry candidate:  displayName=DiskManager id=gxos.builtin.diskmanager kind=BuiltIn source=BuiltIn
+Registered app: DiskManager
+AppModel registry candidate:  displayName=ControlPanel id=gxos.builtin.controlpanel kind=BuiltIn source=BuiltIn
+Registered app: ControlPanel
+AppModel registry candidate:  displayName=DisplayOptions id=gxos.builtin.displayoptions kind=BuiltIn source=BuiltIn
+Registered app: DisplayOptions
+AppModel registry candidate:  displayName=guideXOS Navigator id=guidexos.navigator kind=BuiltIn source=BuiltIn
+Registered app: guideXOS Navigator
+AppModel registry candidate:  displayName=App Model Demo id=gxos.builtin.appmodeldemo kind=BuiltIn source=BuiltIn
+Registered app: App Model Demo
+AppModel registry candidate:  displayName=Native App Debug Viewer id=gxos.builtin.nativeappdebugviewer kind=BuiltIn source=BuiltIn
+Registered app: Native App Debug Viewer
+AppModel registry candidate:  displayName=HDInstaller id=gxos.builtin.hdinstaller kind=BuiltIn source=BuiltIn
+Registered app: HDInstaller
+Pinned app: App Model Demo
+Pinned app-model demo app: App Model Demo
+Pinned app: Native App Debug Viewer
+Pinned app-model demo app: Native App Debug Viewer
+Pinned app: Hello World
+Pinned app-model demo app: Hello World
+Pinned app: Resource Viewer
+Pinned app-model demo app: Resource Viewer
+AppRegistry initialized, desktop apps=25
+Desktop folder resolver selected virtualPath=/Documents hostedPath=D:/dev/guideXOSServerV1.1_DOTNET_SUPPORT/Documents
+Desktop folder already exists: D:/dev/guideXOSServerV1.1_DOTNET_SUPPORT/Documents
+Desktop folder resolver selected virtualPath=/Pictures hostedPath=D:/dev/guideXOSServerV1.1_DOTNET_SUPPORT/Pictures
+Desktop folder already exists: D:/dev/guideXOSServerV1.1_DOTNET_SUPPORT/Pictures
+Desktop folder resolver selected virtualPath=/Music hostedPath=D:/dev/guideXOSServerV1.1_DOTNET_SUPPORT/Music
+Desktop folder already exists: D:/dev/guideXOSServerV1.1_DOTNET_SUPPORT/Music
+Desktop folder resolver selected virtualPath=/Network hostedPath=D:/dev/guideXOSServerV1.1_DOTNET_SUPPORT/Network
+Desktop folder already exists: D:/dev/guideXOSServerV1.1_DOTNET_SUPPORT/Network
+Desktop state loaded
+NotificationManager initialized
+Firewall initialized (Normal mode)
+Module registered: Notepad
+Module registered: Calculator
+Module registered: Paint
+Module registered: ImageViewer
+Module registered: Clock
+Module registered: TaskManager
+Module registered: FileExplorer
+Module registered: Console
+Module registered: OnScreenKeyboard
+Module registered: ShutdownDialog
+Built-in modules registered (10)
+[lifecycle] phase -> ServicesReady
+[lifecycle] phase -> Interactive
+Commands:
+ mem | alloc <n> | tasks | log
+ spawn <echo|worker> [args...] | plist
+ send <pid> <text> | recv <pid>
+ bus.sub <chan> <pid> | bus.unsub <chan> <pid>
+ bus.pub <chan> <text> [fanout] | bus.pop <chan> [timeoutMs]
+ bus.cap <chan> <cap> | bus.stats <chan>
+ console.start | console.send <text> | console.pop [timeoutMs]
+ gui.start | gui.open.appmodeldemo | gui.smoke.launchshadow | gui.win <title> [w h] | gui.text <id> <text> | gui.close <id>
+ gui.rect <id> <x> <y> <w> <h> <r> <g> <b> | gui.move <id> <x> <y> | gui.resize <id> <w> <h> | gui.title <id> <title>
+ gui.btn <win> <id> <x> <y> <w> <h> <text> | gui.pop | gui.wlist | gui.activate <id> | gui.min <id>
+ gxm.load <path> | gxm.sample | gui.save <path> | gui.load <path>
+ desktop.wallpaper <path> | desktop.launch <action> | desktop.open <path> [dir] | desktop.launch.resolve <label> | desktop.launch.adapt <label> | desktop.launch.compare | desktop.launch.storage | desktop.launch.storage.preview | desktop.launch.storage.preview.compare | desktop.launch.types | desktop.open.resolve <path> [dir] | desktop.appmodel.active-typed-dispatch-gate [force-on|force-off|reset] | desktop.appmodel.active-typed-dispatch-default-on-candidate [on|off|reset] | desktop.pin <action> | desktop.unpin <action> | desktop.showconfig
+ desktop.apps | desktop.apps.verbose | desktop.appmodel.summary | desktop.appmodel.inventory | desktop.appmodel.coverage | desktop.appmodel.file-associations | desktop.appmodel.shell-objects | desktop.appmodel.typed-dispatch-gate [force-off] | desktop.pinned | desktop.recent | desktop.recent.remove <name> | desktop.pinapp <name> | desktop.pinfile <name> <path>
+ nativeapp.capabilities | nativeapp.inspect <app> | nativeapp.smoketest <app> | nativeapp.processes
+ taskbar.list | taskbar.activate <id> | taskbar.min <id> | taskbar.close <id>
+ workspace.switch <n> | workspace.next | workspace.prev | workspace.current
+ notepad | notepad <file>
+ calculator
+ console | console.start | console.send <text> | console.pop [timeoutMs]
+ files | files <path>
+ clock
+ taskmanager.snapshot | taskmanager.network-snapshot-wait | taskmanager.tombstone-test
+ taskmgr
+ paint
+ navigator | navigator.smoke | navigator.goto <url>
+ imgview [file] | osk
+ shutdown | msgbox <text> | welcome
+ notify <text> | notify.clear
+ fw.mode <normal|block|disabled|auto> | fw.allow <name> | fw.list | fw.alerts
+ modules | module.launch <name>
+ pkg.install <path.gxapp> | pkg.launch <app> | pkg.list | pkg.validate <path.gxapp>
+ proc.wait <pid> [timeoutMs] | proc.status <pid>
+ vfs.mkdir <path> | vfs.write <path> <text> | vfs.read <path> | vfs.ls <path>
+ vnc.start [port] | vnc.stop | vnc.status
+ pbytes | help | quit/exit
+nativeapp.inspect com.guidexos.experimental.nativeaot.hostlogproof
+Result: app not found
+[lifecycle] phase -> ShuttingDown
+[lifecycle] phase -> Stopped
+guideXOSServer server exiting.
