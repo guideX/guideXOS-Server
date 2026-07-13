@@ -295,7 +295,12 @@ if (!$SkipKernel) {
         # directory, so push into kernel/ first (mirrors what the root Makefile
         # does: cd kernel && $(MAKE) ARCH=...).
         Push-Location $KernelDir
-        & $Make "ARCH=$Arch" "EXTRA_CFLAGS=-DGXOS_DESKTOP_CLEANUP_RUNTIME_PASS=2"
+        $KernelExtraCFlags = @()
+        if (-not [string]::IsNullOrWhiteSpace($env:EXTRA_CFLAGS)) {
+            $KernelExtraCFlags += $env:EXTRA_CFLAGS.Trim()
+        }
+        $KernelExtraCFlags += "-DGXOS_DESKTOP_CLEANUP_RUNTIME_PASS=2"
+        & $Make "ARCH=$Arch" "EXTRA_CFLAGS=$($KernelExtraCFlags -join ' ')"
 
         if ($LASTEXITCODE -ne 0) {
             Write-Host "      ERROR: Kernel build failed" -ForegroundColor Red
